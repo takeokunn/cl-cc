@@ -10,7 +10,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Roswell
         run: curl -L https://raw.githubusercontent.com/roswell/roswell/master/scripts/install-for-ci.sh | sh
-      # - name: Update QuickLisp
-      #   run: ros -e "(ql:update-all-dists :prompt nil)"
+      - name: Update QuickLisp
+        run: ros -e "(ql:update-all-dists :prompt nil)"
       - name: Run Test
         run: ./test.ros
