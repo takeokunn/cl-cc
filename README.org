@@ -5,3 +5,5 @@
 #+begin_src shell
   ln -snf $(pwd) $HOME/.roswell/local-projects/cl-cc
 #+end_src
+** LICENSE
+GPL v3
