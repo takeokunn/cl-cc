@@ -1,0 +1,7 @@
+#+STARTUP: content
+#+STARTUP: fold
+* cl-cc
+** Installation
+#+begin_src shell
+  ln -snf $(pwd) $HOME/.roswell/local-projects/cl-cc
+#+end_src
