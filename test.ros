@@ -5,7 +5,7 @@ exec ros -Q -- $0 "$@"
 |#
 (progn
   (ros:ensure-asdf)
-  #+quicklisp(ql:quickload '() :silent t))
+  #+quicklisp (ql:quickload '(:fiveam) :silent t))
 
 (defpackage :ros.script.test.3907943249
   (:use :cl))
