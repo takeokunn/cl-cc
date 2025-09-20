@@ -651,4 +651,4 @@
 
 ---
 
-> "The best compiler is not just correct, but provably correct." - CL-CC Philosophy
+> "A well-designed compiler is not just correct, but provably correct." - CL-CC Philosophy

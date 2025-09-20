@@ -2,7 +2,7 @@
 
 ## エグゼクティブサマリー
 
-CL-CC（Common Lisp Compiler Collection）は、コンパイラコレクションを目指すプロジェクトです。Pure Common Lisp実装、CLOS駆動設計、マクロメタプログラミング、S式Prolog統合、Property-Based Testingを核とし、高性能と拡張性を実現します。
+CL-CC（Common Lisp Compiler Collection）は、コンパイラコレクションを目指すプロジェクトです。Pure Common Lisp実装、CLOS駆動設計、マクロメタプログラミング、S式Prolog統合、Property-Based Testingを核とし、効率性と拡張性を実現します。
 
 ## ビジョンと設計哲学
 
@@ -557,7 +557,7 @@ graph TD
 
 ## まとめ
 
-CL-CCは、Common Lispの力を活用し、コンパイラコレクションを実現します。Pure Lisp実装、CLOS駆動設計、マクロメタプログラミング、S式Prolog統合、Property-Based Testingという5つの柱により、高性能と拡張性を実現します。このアーキテクチャは、コンパイラ技術の新たなアプローチを示す設計です。
+CL-CCは、Common Lispの力を活用し、コンパイラコレクションを実現します。Pure Lisp実装、CLOS駆動設計、マクロメタプログラミング、S式Prolog統合、Property-Based Testingという5つの柱により、効率性と拡張性を実現します。このアーキテクチャは、コンパイラ技術の新たなアプローチを示す設計です。
 
 ## 関連ドキュメント
 

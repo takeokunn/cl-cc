@@ -378,7 +378,7 @@ CL-CCは単なるコンパイラコレクションではありません。それ
 
 私たちは、コンパイラが単なる翻訳機ではなく、**知的パートナー**となる未来を創造しています。
 
-> "In the end, the perfect compiler doesn't just translate code—it understands intention, proves correctness, and creates beauty."
+> "In the end, a well-designed compiler doesn't just translate code—it understands intention, proves correctness, and creates beauty."
 
 ---
 

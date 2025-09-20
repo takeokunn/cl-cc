@@ -379,12 +379,12 @@
 ### 統合コンパイラの実装
 
 ```lisp
-;; src/ultimate-compiler.lisp
-(in-package :cl-cc.ultimate)
+;; src/advanced-compiler.lisp
+(in-package :cl-cc.advanced)
 
 ;;; 高いコンパイラクラス
-(defclass ultimate-compiler (self-optimizing-compiler)
-  ((name :initform "CL-CC Ultimate Compiler"
+(defclass advanced-compiler (self-optimizing-compiler)
+  ((name :initform "CL-CC Advanced Compiler"
          :reader compiler-name)
    (version :initform "1.0.0"
             :reader compiler-version)
@@ -394,7 +394,7 @@
   (:documentation "コンパイラ実装"))
 
 ;;; 初期化メソッド
-(defmethod initialize-instance :after ((compiler ultimate-compiler) &key)
+(defmethod initialize-instance :after ((compiler advanced-compiler) &key)
   ;; アスペクトの織り込み
   (weave-aspect (make-instance 'logging-aspect) compiler)
   (weave-aspect (make-instance 'caching-aspect) compiler)
@@ -408,7 +408,7 @@
   (setf (profiling-enabled-p compiler) t))
 
 ;;; 統合コンパイルメソッド
-(defmethod compile-ultimate ((compiler ultimate-compiler) source &key
+(defmethod compile-advanced ((compiler advanced-compiler) source &key
                              (language :lisp)
                              (target :native)
                              (optimization 2))
@@ -446,7 +446,7 @@
 
 ;;; メタクラステスト
 (deftest test-compiler-metaclass
-  (let ((class (find-class 'ultimate-compiler)))
+  (let ((class (find-class 'advanced-compiler)))
     ;; メタクラスの確認
     (is (typep class 'compiler-component-class))
 
@@ -474,7 +474,7 @@
 
 ;;; アスペクトテスト
 (deftest test-aspects
-  (let ((compiler (make-instance 'ultimate-compiler))
+  (let ((compiler (make-instance 'advanced-compiler))
         (aspect (make-instance 'logging-aspect)))
 
     ;; アスペクトの織り込み
@@ -482,14 +482,14 @@
 
     ;; ログが記録されることを確認
     (with-output-to-string (*standard-output*)
-      (compile-ultimate compiler "(+ 1 2)"))
+      (compile-advanced compiler "(+ 1 2)"))
 
     (is (> (length (get-output-stream-string *standard-output*)) 0))))
 
 ;;; パフォーマンステスト
 (defbenchmark benchmark-clos-dispatch
   "CLOSディスパッチのベンチマーク"
-  (let ((compiler (make-instance 'ultimate-compiler))
+  (let ((compiler (make-instance 'advanced-compiler))
         (ast (make-test-ast :size 1000)))
     (time-it
       (dotimes (i 10000)
