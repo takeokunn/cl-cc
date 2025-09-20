@@ -2,7 +2,7 @@
 
 ## 🎯 概要
 
-CL-CCにおけるCLOS（Common Lisp Object System）の戦略的活用方法を解説します。メタオブジェクトプロトコル（MOP）を含む、オブジェクト指向設計の究極の表現力を示します。
+CL-CCにおけるCLOS（Common Lisp Object System）の戦略的活用方法を解説します。メタオブジェクトプロトコル（MOP）を含む、オブジェクト指向設計の高い表現力を示します。
 
 ## 🧬 CLOSの基本原理
 
@@ -209,7 +209,7 @@ CL-CCにおけるCLOS（Common Lisp Object System）の戦略的活用方法を�
                                '(constant-analysis value-range-analysis))
 ```
 
-## 🎨 高度なCLOSパターン
+## 🎨 専門的なCLOSパターン
 
 ### ミックスイン設計
 
@@ -529,7 +529,7 @@ CL-CCにおけるCLOS（Common Lisp Object System）の戦略的活用方法を�
 
 CLOSの活用により、CL-CCは以下を実現：
 
-1. **究極の柔軟性**: 多重ディスパッチによる表現力
+1. **高い柔軟性**: 多重ディスパッチによる表現力
 2. **動的拡張性**: 実行時のコンポーネント追加・変更
 3. **保守性**: ミックスインによる横断的関心事の分離
 4. **再利用性**: プロトコル指向設計による汎用性

@@ -2,7 +2,7 @@
 
 ## 🎯 学習目標
 
-この章では、Common Lispの最も強力な機能であるマクロシステムを駆使して、コンパイラ自体を拡張可能にする技術を習得します。
+この章では、Common Lispの最も機能であるマクロシステムを駆使して、コンパイラ自体を拡張可能にする技術を習得します。
 
 ### 習得する革新技術
 - **コンパイル時計算** - 実行時オーバーヘッドゼロの最適化
@@ -274,7 +274,7 @@ graph TB
                  `(compile-arithmetic-expression ',expr))
                expressions)))
 
-;; より高度なDSL例: 最適化ルールDSL
+;; より専門的なDSL例: 最適化ルールDSL
 (define-dsl optimization-rules
   :syntax ((rule := "(" "rule" rule-name pattern "=>" replacement guards ")")
            (pattern := variable | literal | compound-pattern)
@@ -544,7 +544,7 @@ graph TB
      ,@body))
 ```
 
-## 🔬 ステップ5: 高度なメタプログラミング技法
+## 🔬 ステップ5: 専門的なメタプログラミング技法
 
 メタプログラミングによる動的コード生成とコンパイラ自己改善を実装します。
 
@@ -925,7 +925,7 @@ graph TB
 
 この章で構築したマクロシステムは、次章以降の基盤となります：
 
-- **第3章**: CLOSとマクロの融合による究極の拡張性
+- **第3章**: CLOSとマクロの融合による高い拡張性
 - **第4章**: マクロで記述されたS式Prologルール
 - **第5章**: マクロによる最適化パス自動生成
 - **第6章**: マクロベースのテストフレームワーク
@@ -956,9 +956,9 @@ graph TB
 
 ### 参考文献
 - [On Lisp](http://www.paulgraham.com/onlisp.html) - マクロプログラミングの古典
-- [Let Over Lambda](https://letoverlambda.com/) - 高度なマクロ技法
+- [Let Over Lambda](https://letoverlambda.com/) - 専門的なマクロ技法
 - [Common Lisp: The Language](https://www.cs.cmu.edu/Groups/AI/html/cltl/clm/node1.html) - 仕様書
 
 ---
 
-*このチュートリアルで習得したマクロシステムにより、CL-CCは単なるコンパイラから、自己進化する言語創造システムへと変貌します。次章では、この基盤の上にCLOSの無限の拡張性を積み重ねていきます。*
+*このチュートリアルで習得したマクロシステムにより、CL-CCは単なるコンパイラから、自己進化する言語創造システムへと変貌します。次章では、この基盤の上にCLOSの柔軟な拡張性を積み重ねていきます。*

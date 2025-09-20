@@ -543,7 +543,7 @@ CL-CC統合のS式Prologシステムの完全な技術仕様。コンパイラ�
 ### インデックス戦略
 
 ```lisp
-;; 高度なインデックス
+;; 専門的なインデックス
 (defclass advanced-indexing ()
   ((hash-index :initform (make-hash-table :test 'equal))
    (trie-index :initform (make-instance 'prolog-trie))
@@ -736,7 +736,7 @@ CL-CC統合のS式Prologシステムの完全な技術仕様。コンパイラ�
 (defgeneric solve-constraints (system variables constraints)
   (:documentation "制約の解決"))
 
-;; 高度な機能
+;; 専門的な機能
 (defgeneric compile-predicate (system predicate)
   (:documentation "述語のコンパイル"))
 
@@ -847,7 +847,7 @@ CL-CC統合のS式Prologシステムの完全な技術仕様。コンパイラ�
 5. **デバッグ支援**: 包括的なトレースとプロファイリング
 6. **コンパイラ統合**: CL-CCとのシームレスな統合
 
-これにより、CL-CCに強力な論理推論能力が統合され、世界最高峰のコンパイラシステムが実現されます。
+これにより、CL-CCに論理推論能力が統合され、コンパイラシステムが実現されます。
 
 ---
 

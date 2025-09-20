@@ -152,7 +152,7 @@ S式ベースのPrologインタープリタをコンパイラに統合し、論�
                (t nil))))
     (occurs-in term)))
 
-;; 高度なユニフィケーション機能
+;; 専門的なユニフィケーション機能
 (defclass unification-context ()
   ((environment :initarg :env
                 :initform (make-instance 'binding-environment)
@@ -598,7 +598,7 @@ S式ベースのPrologインタープリタをコンパイラに統合し、論�
   :condition (last-call-p ?name ?recursive-args))
 ```
 
-## 🧮 ステップ4: 高度な推論機能
+## 🧮 ステップ4: 専門的な推論機能
 
 ### 4.1 メタ推論とリフレクション
 

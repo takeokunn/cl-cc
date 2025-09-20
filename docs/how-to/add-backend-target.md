@@ -371,7 +371,7 @@ graph TD
 
 (defmethod allocate-registers ((allocator wasm-register-allocator) func)
   "WebAssemblyのローカル変数割り当て"
-  ;; WebAssemblyは無限のローカル変数を持つ
+  ;; WebAssemblyは柔軟なローカル変数を持つ
   (let ((local-count 0)
         (allocation (make-hash-table :test #'eq)))
 

@@ -72,10 +72,10 @@
    (error-handler :initarg :error-handler
                   :initform #'default-error-handler
                   :accessor lexer-error-handler))
-  (:documentation "高度な字句解析器"))
+  (:documentation "専門的な字句解析器"))
 
 (defmethod tokenize-advanced ((lexer advanced-lexer))
-  "高度なトークン化処理"
+  "専門的なトークン化処理"
   (with-slots (source position line column tokens) lexer
     (loop while (< position (length source))
           do (skip-whitespace-and-comments lexer)

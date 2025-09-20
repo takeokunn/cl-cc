@@ -5,7 +5,7 @@
 コンパイラの品質保証は単なるテストを超えた数学的厳密性が要求されます。このチュートリアルでは、CL-CCでProperty-Based Testing（PBT）とTest-Driven Development（TDD）を実践し、証明可能な品質を実現する方法を学びます。
 
 ### コア技術
-1. **Property-Based Testing** - 無限のテストケース生成
+1. **Property-Based Testing** - 柔軟なテストケース生成
 2. **Generative Testing** - 自動的な反例発見
 3. **Shrinking** - 最小の失敗例を発見
 4. **Test-Driven Development** - 仕様駆動の開発プロセス
@@ -555,7 +555,7 @@
         (format t "~&  ~A:~D~%" (location-file location) (location-line location))))))
 ```
 
-## 🔬 高度なテスト技法
+## 🔬 専門的なテスト技法
 
 ### ファズテスト
 ```lisp

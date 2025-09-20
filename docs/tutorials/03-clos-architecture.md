@@ -2,10 +2,10 @@
 
 ## 学習目標
 
-このチュートリアルでは、CLOSの真の力を解き放ち、世界最高峰のコンパイラアーキテクチャを構築します：
+このチュートリアルでは、CLOSの真の力を解き放ち、コンパイラアーキテクチャを構築します：
 
 1. メタオブジェクトプロトコル（MOP）の完全理解
-2. 多重ディスパッチによる無限の拡張性
+2. 多重ディスパッチによる柔軟な拡張性
 3. ミックスインとアスペクト指向プログラミング
 4. 動的コンパイラ最適化の実現
 
@@ -202,7 +202,7 @@
 ;; src/advanced-compiler.lisp
 (in-package :cl-cc.compiler)
 
-;;; 高度なコンパイラクラス
+;;; 専門的なコンパイラクラス
 (defclass advanced-compiler (compiler-component
                              optimizable-mixin
                              profilable-mixin
@@ -214,7 +214,7 @@
    (backend :initarg :backend
             :accessor compiler-backend))
   (:metaclass compiler-component-class)
-  (:documentation "すべての機能を持つ高度なコンパイラ"))
+  (:documentation "すべての機能を持つ専門的なコンパイラ"))
 
 ;;; メソッドコンビネーション
 (defgeneric compile-with-features (compiler source &key)
@@ -382,7 +382,7 @@
 ;; src/ultimate-compiler.lisp
 (in-package :cl-cc.ultimate)
 
-;;; 究極のコンパイラクラス
+;;; 高いコンパイラクラス
 (defclass ultimate-compiler (self-optimizing-compiler)
   ((name :initform "CL-CC Ultimate Compiler"
          :reader compiler-name)
@@ -391,7 +391,7 @@
    (supported-languages :initform '(:lisp :scheme :ml :python)
                         :reader supported-languages))
   (:metaclass compiler-component-class)
-  (:documentation "世界最高峰のコンパイラ実装"))
+  (:documentation "コンパイラ実装"))
 
 ;;; 初期化メソッド
 (defmethod initialize-instance :after ((compiler ultimate-compiler) &key)
@@ -412,7 +412,7 @@
                              (language :lisp)
                              (target :native)
                              (optimization 2))
-  "究極のコンパイル処理"
+  "高いコンパイル処理"
   (with-compilation-context (compiler)
     (with-profiling (compiler)
       (let* ((ast (parse-language source language))

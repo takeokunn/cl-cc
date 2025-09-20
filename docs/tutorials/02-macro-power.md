@@ -266,7 +266,7 @@
 
 ## ステップ5: コンパイル時最適化マクロ
 
-### 高度な最適化技術
+### 専門的な最適化技術
 
 ```lisp
 ;; src/optimization-macros.lisp
@@ -453,7 +453,7 @@
 ;; src/advanced-compiler.lisp
 (in-package :cl-cc-tutorial)
 
-;;; 高度なコンパイラの定義
+;;; 専門的なコンパイラの定義
 (defmacro define-advanced-compiler (name &body specs)
   "完全なコンパイラを宣言的に定義"
   `(progn

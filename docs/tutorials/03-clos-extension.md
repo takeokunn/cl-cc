@@ -1,13 +1,13 @@
-# チュートリアル第3章: CLOS無限拡張 - メタオブジェクトプロトコルによる究極の拡張性
+# チュートリアル第3章: CLOS無限拡張 - メタオブジェクトプロトコルによる高い拡張性
 
 ## 🎯 学習目標
 
-この章では、Common Lisp Object System (CLOS) の究極の拡張性を活用し、コンパイラアーキテクチャに革新的な柔軟性をもたらす技術を習得します。
+この章では、Common Lisp Object System (CLOS) の高い拡張性を活用し、コンパイラアーキテクチャに柔軟性をもたらす技術を習得します。
 
-### 習得する究極技術
+### 習得する技術
 - **メタオブジェクトプロトコル (MOP)** - オブジェクトシステム自体の制御
 - **多重ディスパッチ** - 複数引数による動的振る舞い決定
-- **Mix-inアーキテクチャ** - 機能の合成による無限の組み合わせ
+- **Mix-inアーキテクチャ** - 機能の合成による柔軟な組み合わせ
 - **動的クラス生成** - 実行時オブジェクトシステム拡張
 - **プラグインシステム** - 完全な動的拡張フレームワーク
 
@@ -366,7 +366,7 @@ COSの内部動作を制御するMOPシステムを構築します。
    (optimization-level :initarg :optimization-level
                        :accessor lexer-optimization-level
                        :initform 2))
-  (:documentation "高度な字句解析器"))
+  (:documentation "専門的な字句解析器"))
 
 (define-component-class adaptive-optimizer
     optimizer
@@ -394,7 +394,7 @@ COSの内部動作を制御するMOPシステムを構築します。
   ;; 拡張機能初期化
   (initialize-extensions component))
 
-;; 高度なメソッド結合例
+;; 専門的なメソッド結合例
 (defmethod compile-node :around ((node ast-node) (compiler advanced-lexer))
   "拡張字句解析器でのコンパイル（ログ・キャッシュ付き）"
   (log-message compiler :debug "Compiling node: ~A" (type-of node))
@@ -409,7 +409,7 @@ COSの内部動作を制御するMOPシステムを構築します。
 
 ## 🧠 ステップ3: 多重ディスパッチシステム
 
-複数引数による高度な振る舞い制御を実装します。
+複数引数による専門的な振る舞い制御を実装します。
 
 ```lisp
 ;;;; src/multiple-dispatch.lisp
@@ -1092,7 +1092,7 @@ COSの内部動作を制御するMOPシステムを構築します。
 
   (format t "=== CL-CC CLOS拡張システムデモ ===~%")
 
-  ;; 1. 高度なコンパイラクラス作成
+  ;; 1. 専門的なコンパイラクラス作成
   (define-component-class demo-compiler
       compiler
       (full-featured-component-mixin)
@@ -1144,7 +1144,7 @@ COSの内部動作を制御するMOPシステムを構築します。
 
 おめでとうございます！CLOS拡張システムの極致を習得しました。
 
-### 🌟 習得した究極技術
+### 🌟 習得した技術
 
 1. **メタオブジェクトプロトコル制御**
    - オブジェクトシステムのメタレベル制御
@@ -1227,4 +1227,4 @@ graph TB
 
 ---
 
-*このチュートリアルで習得したCLOS拡張システムにより、CL-CCは動的に進化し続ける生きたコンパイラへと変貌しました。次章では、この無限の拡張性の上に論理推論の力を統合していきます。*
+*このチュートリアルで習得したCLOS拡張システムにより、CL-CCは動的に進化し続ける生きたコンパイラへと変貌しました。次章では、この柔軟な拡張性の上に論理推論の力を統合していきます。*

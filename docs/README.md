@@ -1,30 +1,30 @@
-# CL-CC ドキュメント: 世界最高峰のコンパイラコレクション
+# CL-CC ドキュメント: Common Lisp コンパイラコレクション
 
 ## 🌟 プロジェクトビジョン
 
-**CL-CC (Common Lisp Compiler Collection)** は、Common Lispを駆使して構築される世界最高峰のコンパイラコレクションです。マクロ駆動開発、CLOS の究極的活用、S式Prolog統合により、従来のコンパイラ技術の限界を超越した革新的なシステムを実現します。
+**CL-CC (Common Lisp Compiler Collection)** は、Common Lispを使用して構築されるコンパイラコレクションです。マクロ駆動開発、CLOS の活用、S式Prolog統合により、柔軟なコンパイラシステムを実現します。
 
 ### 🎯 核心的特徴
 
 - **🧠 マクロ駆動開発**: コンパイル時計算により言語の境界を超越
-- **🏗️ CLOS 究極活用**: 多重ディスパッチによる無限の拡張性
-- **⚡ 圧倒的パフォーマンス**: 理論と実装の完璧な融合
+- **🏗️ CLOS 活用**: 多重ディスパッチによる柔軟な拡張性
+- **⚡ 高性能**: 理論と実装の融合
 - **🔬 S式Prolog統合**: 論理推論による最適化の自動発見
 - **🛡️ 数学的品質保証**: Property-Based Testing による証明レベルの信頼性
-- **🌐 究極の拡張性**: プラグインアーキテクチャによる無限の可能性
+- **🌐 高い拡張性**: プラグインアーキテクチャによる柔軟な拡張
 
 ## 📚 ドキュメント構成（Diátaxis Framework）
 
 このドキュメントは [Diátaxis Framework](https://diataxis.fr/) に基づいて体系化されており、学習者のニーズに応じて最適な情報を提供します。
 
 ### 🎓 [チュートリアル](tutorials/README.md) - 学習指向
-**「基礎から世界最高峰の技術習得まで」**
+**「基礎から実用技術習得まで」**
 
-段階的な学習プロセスにより、CL-CCの革新的技術を確実に習得できます。
+段階的な学習プロセスにより、CL-CCの技術を確実に習得できます。
 
 - **第1章**: [最小コンパイラの実装](tutorials/01-first-compiler.md) - S式とCLOSの威力を体験
 - **第2章**: [マクロシステムの理解](tutorials/02-macro-system.md) - コンパイル時計算の極致
-- **第3章**: [CLOSによるアーキテクチャ設計](tutorials/03-clos-extension.md) - 究極の拡張性実現
+- **第3章**: [CLOSによるアーキテクチャ設計](tutorials/03-clos-extension.md) - 高い拡張性の実現
 - **第4章**: [S式Prologの統合](tutorials/04-prolog-integration.md) - 論理推論の活用
 - **第5章**: [最適化パイプライン](tutorials/05-advanced-compiler.md) - プロダクション品質の実現
 - **第6章**: [テスト駆動開発](tutorials/06-test-driven-development.md) - 数学的品質保証
@@ -70,7 +70,7 @@
 - [型システム](reference/data-structures/type-system.md)
 - [シンボルテーブル](reference/data-structures/symbol-table.md)
 
-#### 高度なシステム
+#### 専門システム
 - [マクロシステム](reference/macro-system/)
 - [CLOSクラス階層](reference/clos-hierarchy/)
 - [S式Prologシステム](reference/prolog-system/)
@@ -78,7 +78,7 @@
 ### 💡 [説明](explanation/README.md) - 理解指向
 **「設計思想と理論的背景の深層理解」**
 
-CL-CCの革新的アプローチの「なぜ」を深く理解するための解説集です。
+CL-CCのアプローチの「なぜ」を深く理解するための解説集です。
 
 #### 設計哲学
 - [なぜCommon Lispか](explanation/philosophy/why-common-lisp.md) - 言語選択の必然性
@@ -110,9 +110,9 @@ CL-CCの革新的アプローチの「なぜ」を深く理解するための解
 
 ## 🎯 プロジェクトの特徴
 
-- **📦 マクロ駆動**: Common Lispの強力なマクロシステムを最大限活用
+- **📦 マクロ駆動**: Common Lispのマクロシステムを活用
 - **🏗️ CLOS基盤**: 完全なオブジェクト指向による拡張可能設計
-- **⚡ 高性能**: 圧倒的なコンパイル速度と実行効率
+- **⚡ 高性能**: 効率的なコンパイル速度と実行効率
 - **🔬 厳密なテスト**: Property-Based TestingとTDDの徹底
 - **🧩 S式Prolog**: 論理型プログラミングによる最適化推論
 - **🛠️ モジュラー設計**: フロントエンド/バックエンドの完全な分離
