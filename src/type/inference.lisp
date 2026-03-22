@@ -8,9 +8,7 @@
 
 (in-package :cl-cc/type)
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Inference State
-;;; ----------------------------------------------------------------------------
 
 (defvar *class-type-registry* (make-hash-table :test #'eq)
   "Maps class names to class type descriptors.
@@ -54,18 +52,14 @@
   "Reset type variable counter."
   (setf *type-var-counter* 0))
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Environment
-;;; ----------------------------------------------------------------------------
 
-(defclass type-env ()
-  ((bindings :initarg :bindings :initform nil
-              :reader type-env-bindings))
-  (:documentation "Type environment mapping variable names to type schemes."))
+(defstruct type-env
+  (bindings nil :type list))
 
 (defun type-env-empty ()
   "Create empty type environment."
-  (make-instance 'type-env))
+  (make-type-env))
 
 (defun type-env-lookup (name env)
   "Look up type scheme in environment."
@@ -73,8 +67,7 @@
 
 (defun type-env-extend (name scheme env)
   "Extend environment with new binding."
-  (make-instance 'type-env
-                 :bindings (cons (cons name scheme)
+  (make-type-env :bindings (cons (cons name scheme)
                                (type-env-bindings env))))
 
 (defun type-env-extend* (bindings env)
@@ -92,9 +85,7 @@
   "Get all free type variables in environment."
   (environment-free-vars (type-env-bindings env)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Inference (Algorithm W)
-;;; ----------------------------------------------------------------------------
 
 (defun infer (ast env)
   "Infer type of AST in environment.
@@ -218,7 +209,7 @@
                                        params param-types))
                 (fn-env (type-env-extend* param-bindings env)))
            (multiple-value-bind (body-type subst) (infer-body body fn-env)
-             (let* ((fn-type (make-instance 'type-function
+             (let* ((fn-type (make-type-function-raw
                                             :params (mapcar (lambda (p)
                                                               (type-substitute p subst))
                                                             param-types)
@@ -250,7 +241,7 @@
                                        params param-types))
                 (fn-env (type-env-extend* param-bindings new-env)))
            (multiple-value-bind (body-type subst) (infer-body body fn-env)
-             (let* ((fn-type (make-instance 'type-function
+             (let* ((fn-type (make-type-function-raw
                                             :params (mapcar (lambda (p)
                                                               (type-substitute p subst))
                                                             param-types)
@@ -286,7 +277,7 @@
      (let ((class-expr (cl-cc:ast-make-instance-class ast)))
        (if (and (typep class-expr 'cl-cc:ast-quote)
                 (symbolp (cl-cc:ast-quote-value class-expr)))
-           (values (make-instance 'type-primitive
+           (values (make-type-primitive
                                   :name (cl-cc:ast-quote-value class-expr))
                    nil)
            (values +type-unknown+ nil))))
@@ -313,11 +304,11 @@
                (apply-subst-env env subst1))
       (let* ((subst (compose-subst subst2 subst1))
              (result-type (fresh-type-var))
-             (op-type (make-instance 'type-function
+             (op-type (make-type-function-raw
                                      :params (list lhs-type rhs-type)
                                      :return result-type))
              ;; Primitive op expects (int, int) -> int
-             (expected (make-instance 'type-function
+             (expected (make-type-function-raw
                                       :params (list type-int type-int)
                                       :return type-int)))
         (multiple-value-bind (unified ok) (type-unify op-type expected subst)
@@ -336,8 +327,8 @@
     ((symbolp) type-symbol)
     ((consp) type-cons)
     ((null) type-null)
-    ((characterp) (make-instance 'type-primitive :name 'character))
-    ((functionp) (make-instance 'type-primitive :name 'function))
+    ((characterp) (make-type-primitive :name 'character))
+    ((functionp) (make-type-primitive :name 'function))
     (otherwise nil)))
 
 (defun extract-type-guard (cond-ast)
@@ -432,7 +423,7 @@
          (body-env (type-env-extend* param-bindings env)))
     (multiple-value-bind (body-type subst)
         (infer-body (cl-cc:ast-lambda-body ast) body-env)
-      (values (make-instance 'type-function
+      (values (make-type-function-raw
                              :params (mapcar (lambda (p)
                                                (type-substitute p subst))
                                              param-types)
@@ -454,7 +445,7 @@
     (let* ((result-type (fresh-type-var))
            (arg-types (infer-args (cl-cc:ast-call-args ast)
                                   (apply-subst-env env subst1)))
-           (expected-fn (make-instance 'type-function
+           (expected-fn (make-type-function-raw
                                        :params arg-types
                                        :return result-type))
            )
@@ -506,9 +497,7 @@
   "Infer type of AST in empty environment (convenience function)."
   (infer ast (type-env-empty)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Annotation
-;;; ----------------------------------------------------------------------------
 
 (defun annotate-type (ast env)
   "Annotate AST with inferred types (for debugging).
@@ -517,9 +506,7 @@
     (declare (ignore subst))
     (values type ast)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Condition Classes
-;;; ----------------------------------------------------------------------------
 
 (define-condition type-inference-error (error)
   ((message :initarg :message :reader type-inference-error-message))
@@ -541,18 +528,15 @@
                      (type-to-string (type-mismatch-error-expected condition))
                      (type-to-string (type-mismatch-error-actual condition))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Constraint Solving (for future extension)
-;;; ----------------------------------------------------------------------------
 
-(defclass type-constraint ()
-  ((left :initarg :left :reader type-constraint-left)
-   (right :initarg :right :reader type-constraint-right))
-  (:documentation "Equality constraint between two types."))
+(defstruct type-constraint
+  (left nil)
+  (right nil))
 
 (defun make-constraint (left right)
   "Create a constraint (left = right)."
-  (make-instance 'type-constraint :left left :right right))
+  (make-type-constraint :left left :right right))
 
 (defun collect-constraints (ast env)
   "Collect type constraints from AST without solving.
@@ -573,9 +557,7 @@
           (when ok
             (solve-constraints (cdr constraints) new-subst))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Generalization/Instantiation Helpers
-;;; ----------------------------------------------------------------------------
 
 (defun generalize-in-env (env type)
   "Generalize TYPE in environment ENV.
@@ -587,9 +569,7 @@
    Ensures fresh variables don't clash."
   (instantiate scheme))
 
-;;; ----------------------------------------------------------------------------
 ;;; Exports
-;;; ----------------------------------------------------------------------------
 
 (export '(infer
           infer-binop

@@ -1,282 +1,250 @@
 (in-package :cl-cc)
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Primitive Instructions
-;;; ----------------------------------------------------------------------------
 ;;;
 ;;; This file extends the VM with primitive type predicates, comparisons,
 ;;; arithmetic extensions, and boolean operations.
 ;;;
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Predicates
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-eq (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (lhs :initarg :lhs :reader vm-lhs)
-   (rhs :initarg :rhs :reader vm-rhs))
-  (:documentation "EQL comparison. Returns 1 if LHS equals RHS, 0 otherwise."))
+(define-vm-instruction vm-eq (vm-instruction)
+  "EQL comparison. Returns 1 if LHS equals RHS, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (lhs nil :reader vm-lhs)
+  (rhs nil :reader vm-rhs)
+  (:sexp-tag :eq)
+  (:sexp-slots dst lhs rhs))
 
-(defclass vm-cons-p (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Type predicate for cons cells. Returns 1 if SRC is a cons cell, 0 otherwise."))
+(define-vm-instruction vm-cons-p (vm-instruction)
+  "Type predicate for cons cells. Returns 1 if SRC is a cons cell, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :cons-p)
+  (:sexp-slots dst src))
 
-(defclass vm-null-p (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Type predicate for nil. Returns 1 if SRC is nil, 0 otherwise."))
+(define-vm-instruction vm-null-p (vm-instruction)
+  "Type predicate for nil. Returns 1 if SRC is nil, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :null-p)
+  (:sexp-slots dst src))
 
-(defclass vm-symbol-p (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Type predicate for symbols. Returns 1 if SRC is a symbol, 0 otherwise."))
+(define-vm-instruction vm-symbol-p (vm-instruction)
+  "Type predicate for symbols. Returns 1 if SRC is a symbol, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :symbol-p)
+  (:sexp-slots dst src))
 
-(defclass vm-number-p (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Type predicate for numbers. Returns 1 if SRC is a number, 0 otherwise."))
+(define-vm-instruction vm-number-p (vm-instruction)
+  "Type predicate for numbers. Returns 1 if SRC is a number, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :number-p)
+  (:sexp-slots dst src))
 
-(defclass vm-integer-p (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Type predicate for integers. Returns 1 if SRC is an integer, 0 otherwise."))
+(define-vm-instruction vm-integer-p (vm-instruction)
+  "Type predicate for integers. Returns 1 if SRC is an integer, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :integer-p)
+  (:sexp-slots dst src))
 
-(defclass vm-function-p (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Type predicate for functions/closures. Returns 1 if SRC is a function, 0 otherwise."))
+(define-vm-instruction vm-function-p (vm-instruction)
+  "Type predicate for functions/closures. Returns 1 if SRC is a function, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :function-p)
+  (:sexp-slots dst src))
 
-;;; ----------------------------------------------------------------------------
 ;;; Comparison Operations
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-lt (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (lhs :initarg :lhs :reader vm-lhs)
-   (rhs :initarg :rhs :reader vm-rhs))
-  (:documentation "Less than comparison. Returns 1 if LHS < RHS, 0 otherwise."))
+(define-vm-instruction vm-lt (vm-instruction)
+  "Less than comparison. Returns 1 if LHS < RHS, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (lhs nil :reader vm-lhs)
+  (rhs nil :reader vm-rhs)
+  (:sexp-tag :lt)
+  (:sexp-slots dst lhs rhs))
 
-(defclass vm-gt (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (lhs :initarg :lhs :reader vm-lhs)
-   (rhs :initarg :rhs :reader vm-rhs))
-  (:documentation "Greater than comparison. Returns 1 if LHS > RHS, 0 otherwise."))
+(define-vm-instruction vm-gt (vm-instruction)
+  "Greater than comparison. Returns 1 if LHS > RHS, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (lhs nil :reader vm-lhs)
+  (rhs nil :reader vm-rhs)
+  (:sexp-tag :gt)
+  (:sexp-slots dst lhs rhs))
 
-(defclass vm-le (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (lhs :initarg :lhs :reader vm-lhs)
-   (rhs :initarg :rhs :reader vm-rhs))
-  (:documentation "Less than or equal comparison. Returns 1 if LHS <= RHS, 0 otherwise."))
+(define-vm-instruction vm-le (vm-instruction)
+  "Less than or equal comparison. Returns 1 if LHS <= RHS, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (lhs nil :reader vm-lhs)
+  (rhs nil :reader vm-rhs)
+  (:sexp-tag :le)
+  (:sexp-slots dst lhs rhs))
 
-(defclass vm-ge (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (lhs :initarg :lhs :reader vm-lhs)
-   (rhs :initarg :rhs :reader vm-rhs))
-  (:documentation "Greater than or equal comparison. Returns 1 if LHS >= RHS, 0 otherwise."))
+(define-vm-instruction vm-ge (vm-instruction)
+  "Greater than or equal comparison. Returns 1 if LHS >= RHS, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (lhs nil :reader vm-lhs)
+  (rhs nil :reader vm-rhs)
+  (:sexp-tag :ge)
+  (:sexp-slots dst lhs rhs))
 
-(defclass vm-num-eq (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (lhs :initarg :lhs :reader vm-lhs)
-   (rhs :initarg :rhs :reader vm-rhs))
-  (:documentation "Numeric equality comparison. Returns 1 if LHS = RHS, 0 otherwise."))
+(define-vm-instruction vm-num-eq (vm-instruction)
+  "Numeric equality comparison. Returns 1 if LHS = RHS, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (lhs nil :reader vm-lhs)
+  (rhs nil :reader vm-rhs)
+  (:sexp-tag :num-eq)
+  (:sexp-slots dst lhs rhs))
 
-;;; ----------------------------------------------------------------------------
 ;;; Arithmetic Extensions
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-div (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (lhs :initarg :lhs :reader vm-lhs)
-   (rhs :initarg :rhs :reader vm-rhs))
-  (:documentation "Integer division. DST = floor(LHS / RHS)."))
+(define-vm-instruction vm-div (vm-instruction)
+  "Integer division. DST = floor(LHS / RHS)."
+  (dst nil :reader vm-dst)
+  (lhs nil :reader vm-lhs)
+  (rhs nil :reader vm-rhs)
+  (:sexp-tag :div)
+  (:sexp-slots dst lhs rhs))
 
-(defclass vm-mod (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (lhs :initarg :lhs :reader vm-lhs)
-   (rhs :initarg :rhs :reader vm-rhs))
-  (:documentation "Modulo operation. DST = LHS mod RHS."))
+(define-vm-instruction vm-mod (vm-instruction)
+  "Modulo operation. DST = LHS mod RHS."
+  (dst nil :reader vm-dst)
+  (lhs nil :reader vm-lhs)
+  (rhs nil :reader vm-rhs)
+  (:sexp-tag :mod)
+  (:sexp-slots dst lhs rhs))
 
-(defclass vm-neg (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Negation. DST = -SRC."))
+(define-vm-instruction vm-neg (vm-instruction)
+  "Negation. DST = -SRC."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :neg)
+  (:sexp-slots dst src))
 
-(defclass vm-abs (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Absolute value. DST = |SRC|."))
+(define-vm-instruction vm-abs (vm-instruction)
+  "Absolute value. DST = |SRC|."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :abs)
+  (:sexp-slots dst src))
 
-(defclass vm-inc (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Increment. DST = SRC + 1."))
+(define-vm-instruction vm-inc (vm-instruction)
+  "Increment. DST = SRC + 1."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :inc)
+  (:sexp-slots dst src))
 
-(defclass vm-dec (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Decrement. DST = SRC - 1."))
+(define-vm-instruction vm-dec (vm-instruction)
+  "Decrement. DST = SRC - 1."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :dec)
+  (:sexp-slots dst src))
 
-(defclass vm-min (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (lhs :initarg :lhs :reader vm-lhs)
-   (rhs :initarg :rhs :reader vm-rhs))
-  (:documentation "Minimum. DST = min(LHS, RHS)."))
+(define-vm-instruction vm-min (vm-instruction)
+  "Minimum. DST = min(LHS, RHS)."
+  (dst nil :reader vm-dst)
+  (lhs nil :reader vm-lhs)
+  (rhs nil :reader vm-rhs)
+  (:sexp-tag :min)
+  (:sexp-slots dst lhs rhs))
 
-(defclass vm-max (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (lhs :initarg :lhs :reader vm-lhs)
-   (rhs :initarg :rhs :reader vm-rhs))
-  (:documentation "Maximum. DST = max(LHS, RHS)."))
+(define-vm-instruction vm-max (vm-instruction)
+  "Maximum. DST = max(LHS, RHS)."
+  (dst nil :reader vm-dst)
+  (lhs nil :reader vm-lhs)
+  (rhs nil :reader vm-rhs)
+  (:sexp-tag :max)
+  (:sexp-slots dst lhs rhs))
 
-(defclass vm-truncate (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (lhs :initarg :lhs :reader vm-lhs)
-   (rhs :initarg :rhs :reader vm-rhs))
-  (:documentation "Truncate division. DST = truncate(LHS / RHS)."))
+(define-vm-instruction vm-truncate (vm-instruction)
+  "Truncate division. DST = truncate(LHS / RHS)."
+  (dst nil :reader vm-dst)
+  (lhs nil :reader vm-lhs)
+  (rhs nil :reader vm-rhs)
+  (:sexp-tag :truncate)
+  (:sexp-slots dst lhs rhs))
 
-(defclass vm-floor-inst (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (lhs :initarg :lhs :reader vm-lhs)
-   (rhs :initarg :rhs :reader vm-rhs))
-  (:documentation "Floor division. DST = floor(LHS / RHS)."))
+(define-vm-instruction vm-floor-inst (vm-instruction)
+  "Floor division. DST = floor(LHS / RHS)."
+  (dst nil :reader vm-dst)
+  (lhs nil :reader vm-lhs)
+  (rhs nil :reader vm-rhs)
+  (:sexp-tag :floor)
+  (:sexp-slots dst lhs rhs))
 
-(defclass vm-ceiling-inst (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (lhs :initarg :lhs :reader vm-lhs)
-   (rhs :initarg :rhs :reader vm-rhs))
-  (:documentation "Ceiling division. DST = ceiling(LHS / RHS)."))
+(define-vm-instruction vm-ceiling-inst (vm-instruction)
+  "Ceiling division. DST = ceiling(LHS / RHS)."
+  (dst nil :reader vm-dst)
+  (lhs nil :reader vm-lhs)
+  (rhs nil :reader vm-rhs)
+  (:sexp-tag :ceiling)
+  (:sexp-slots dst lhs rhs))
 
-(defclass vm-rem (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (lhs :initarg :lhs :reader vm-lhs)
-   (rhs :initarg :rhs :reader vm-rhs))
-  (:documentation "Remainder. DST = rem(LHS, RHS)."))
+(define-vm-instruction vm-rem (vm-instruction)
+  "Remainder. DST = rem(LHS, RHS)."
+  (dst nil :reader vm-dst)
+  (lhs nil :reader vm-lhs)
+  (rhs nil :reader vm-rhs)
+  (:sexp-tag :rem)
+  (:sexp-slots dst lhs rhs))
 
-(defclass vm-evenp (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Even predicate. Returns 1 if SRC is even, 0 otherwise."))
+(define-vm-instruction vm-evenp (vm-instruction)
+  "Even predicate. Returns 1 if SRC is even, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :evenp)
+  (:sexp-slots dst src))
 
-(defclass vm-oddp (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Odd predicate. Returns 1 if SRC is odd, 0 otherwise."))
+(define-vm-instruction vm-oddp (vm-instruction)
+  "Odd predicate. Returns 1 if SRC is odd, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :oddp)
+  (:sexp-slots dst src))
 
-;;; ----------------------------------------------------------------------------
 ;;; Boolean Operations
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-not (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Logical not. Returns 1 if SRC is 0, 0 otherwise."))
+(define-vm-instruction vm-not (vm-instruction)
+  "Logical not. Returns 1 if SRC is 0, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :not)
+  (:sexp-slots dst src))
 
-(defclass vm-and (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (lhs :initarg :lhs :reader vm-lhs)
-   (rhs :initarg :rhs :reader vm-rhs))
-  (:documentation "Logical and. Returns 1 if both LHS and RHS are non-zero, 0 otherwise."))
+(define-vm-instruction vm-and (vm-instruction)
+  "Logical and. Returns 1 if both LHS and RHS are non-zero, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (lhs nil :reader vm-lhs)
+  (rhs nil :reader vm-rhs)
+  (:sexp-tag :and)
+  (:sexp-slots dst lhs rhs))
 
-(defclass vm-or (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (lhs :initarg :lhs :reader vm-lhs)
-   (rhs :initarg :rhs :reader vm-rhs))
-  (:documentation "Logical or. Returns 1 if either LHS or RHS is non-zero, 0 otherwise."))
+(define-vm-instruction vm-or (vm-instruction)
+  "Logical or. Returns 1 if either LHS or RHS is non-zero, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (lhs nil :reader vm-lhs)
+  (rhs nil :reader vm-rhs)
+  (:sexp-tag :or)
+  (:sexp-slots dst lhs rhs))
 
-;;; ----------------------------------------------------------------------------
 ;;; General Type Predicate
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-typep (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src)
-   (type-name :initarg :type-name :reader vm-type-name))
-  (:documentation "General type check. Returns 1 if SRC is of TYPE-NAME, 0 otherwise.
-TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."))
+(define-vm-instruction vm-typep (vm-instruction)
+  "General type check. Returns 1 if SRC is of TYPE-NAME, 0 otherwise.
+TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (type-name nil :reader vm-type-name)
+  (:sexp-tag :typep)
+  (:sexp-slots dst src type-name))
 
-;;; ----------------------------------------------------------------------------
-;;; Instruction -> S-expression Conversion
-;;; ----------------------------------------------------------------------------
-
-;; Type predicates
-(defmethod instruction->sexp ((inst vm-typep))
-  (list :typep (vm-dst inst) (vm-src inst) (vm-type-name inst)))
-
-(defmethod instruction->sexp ((inst vm-eq))
-  (list :eq (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-
-(defmethod instruction->sexp ((inst vm-cons-p))
-  (list :cons-p (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-null-p))
-  (list :null-p (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-symbol-p))
-  (list :symbol-p (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-number-p))
-  (list :number-p (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-integer-p))
-  (list :integer-p (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-function-p))
-  (list :function-p (vm-dst inst) (vm-src inst)))
-
-;; Comparison operations
-(defmethod instruction->sexp ((inst vm-lt))
-  (list :lt (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-
-(defmethod instruction->sexp ((inst vm-gt))
-  (list :gt (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-
-(defmethod instruction->sexp ((inst vm-le))
-  (list :le (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-
-(defmethod instruction->sexp ((inst vm-ge))
-  (list :ge (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-
-(defmethod instruction->sexp ((inst vm-num-eq))
-  (list :num-eq (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-
-;; Arithmetic extensions
-(defmethod instruction->sexp ((inst vm-div))
-  (list :div (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-
-(defmethod instruction->sexp ((inst vm-mod))
-  (list :mod (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-
-(defmethod instruction->sexp ((inst vm-neg))
-  (list :neg (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-abs))
-  (list :abs (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-inc))
-  (list :inc (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-dec))
-  (list :dec (vm-dst inst) (vm-src inst)))
-
-;; Boolean operations
-(defmethod instruction->sexp ((inst vm-not))
-  (list :not (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-and))
-  (list :and (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-
-(defmethod instruction->sexp ((inst vm-or))
-  (list :or (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-
-;;; ----------------------------------------------------------------------------
-;;; S-expression -> Instruction Conversion (Extended)
-;;; ----------------------------------------------------------------------------
-
-;;; ----------------------------------------------------------------------------
 ;;; Instruction Execution - General Type Predicate
-;;; ----------------------------------------------------------------------------
 
 (defun vm-typep-check (value type-sym)
   "Check if VALUE is of TYPE-SYM. Handles both host CL types and VM CLOS types."
@@ -312,48 +280,19 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Instruction Execution - Type Predicates
-;;; ----------------------------------------------------------------------------
 
-(defmethod execute-instruction ((inst vm-eq) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (eql (vm-reg-get state (vm-lhs inst))
-                         (vm-reg-get state (vm-rhs inst)))
-                    1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-simple-instruction vm-eq :pred2 eql)
 
-(defmethod execute-instruction ((inst vm-cons-p) state pc labels)
-  (declare (ignore labels))
-  (let* ((value (vm-reg-get state (vm-src inst)))
-         (result (if (consp value) 1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-simple-instruction vm-cons-p :pred1 consp)
 
-(defmethod execute-instruction ((inst vm-null-p) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (null (vm-reg-get state (vm-src inst))) 1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-simple-instruction vm-null-p :pred1 null)
 
-(defmethod execute-instruction ((inst vm-symbol-p) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (symbolp (vm-reg-get state (vm-src inst))) 1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-simple-instruction vm-symbol-p :pred1 symbolp)
 
-(defmethod execute-instruction ((inst vm-number-p) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (numberp (vm-reg-get state (vm-src inst))) 1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-simple-instruction vm-number-p :pred1 numberp)
 
-(defmethod execute-instruction ((inst vm-integer-p) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (integerp (vm-reg-get state (vm-src inst))) 1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-simple-instruction vm-integer-p :pred1 integerp)
 
 (defmethod execute-instruction ((inst vm-function-p) state pc labels)
   (declare (ignore labels))
@@ -362,53 +301,19 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Instruction Execution - Comparison Operations
-;;; ----------------------------------------------------------------------------
 
-(defmethod execute-instruction ((inst vm-lt) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (< (vm-reg-get state (vm-lhs inst))
-                       (vm-reg-get state (vm-rhs inst)))
-                    1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-simple-instruction vm-lt :pred2 <)
 
-(defmethod execute-instruction ((inst vm-gt) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (> (vm-reg-get state (vm-lhs inst))
-                       (vm-reg-get state (vm-rhs inst)))
-                    1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-simple-instruction vm-gt :pred2 >)
 
-(defmethod execute-instruction ((inst vm-le) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (<= (vm-reg-get state (vm-lhs inst))
-                        (vm-reg-get state (vm-rhs inst)))
-                    1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-simple-instruction vm-le :pred2 <=)
 
-(defmethod execute-instruction ((inst vm-ge) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (>= (vm-reg-get state (vm-lhs inst))
-                        (vm-reg-get state (vm-rhs inst)))
-                    1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-simple-instruction vm-ge :pred2 >=)
 
-(defmethod execute-instruction ((inst vm-num-eq) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (= (vm-reg-get state (vm-lhs inst))
-                       (vm-reg-get state (vm-rhs inst)))
-                    1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-simple-instruction vm-num-eq :pred2 =)
 
-;;; ----------------------------------------------------------------------------
 ;;; Instruction Execution - Arithmetic Extensions
-;;; ----------------------------------------------------------------------------
 
 (defmethod execute-instruction ((inst vm-div) state pc labels)
   (declare (ignore labels))
@@ -428,60 +333,17 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."))
           (vm-reg-set state (vm-dst inst) result)
           (values (1+ pc) nil nil)))))
 
-(defmethod execute-instruction ((inst vm-neg) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (- (vm-reg-get state (vm-src inst))))
-  (values (1+ pc) nil nil))
+(define-simple-instruction vm-neg :unary -)
 
-(defmethod execute-instruction ((inst vm-abs) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (abs (vm-reg-get state (vm-src inst))))
-  (values (1+ pc) nil nil))
+(define-simple-instruction vm-abs :unary abs)
 
-(defmethod execute-instruction ((inst vm-inc) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (1+ (vm-reg-get state (vm-src inst))))
-  (values (1+ pc) nil nil))
+(define-simple-instruction vm-inc :unary 1+)
 
-(defmethod execute-instruction ((inst vm-dec) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (1- (vm-reg-get state (vm-src inst))))
-  (values (1+ pc) nil nil))
+(define-simple-instruction vm-dec :unary 1-)
 
-;;; ----------------------------------------------------------------------------
-;;; Instruction Execution - Extended Arithmetic
-;;; ----------------------------------------------------------------------------
+(define-simple-instruction vm-min :binary min)
 
-(defmethod instruction->sexp ((inst vm-min))
-  (list :min (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-(defmethod instruction->sexp ((inst vm-max))
-  (list :max (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-(defmethod instruction->sexp ((inst vm-truncate))
-  (list :truncate (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-(defmethod instruction->sexp ((inst vm-floor-inst))
-  (list :floor (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-(defmethod instruction->sexp ((inst vm-ceiling-inst))
-  (list :ceiling (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-(defmethod instruction->sexp ((inst vm-rem))
-  (list :rem (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-(defmethod instruction->sexp ((inst vm-evenp))
-  (list :evenp (vm-dst inst) (vm-src inst)))
-(defmethod instruction->sexp ((inst vm-oddp))
-  (list :oddp (vm-dst inst) (vm-src inst)))
-
-(defmethod execute-instruction ((inst vm-min) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst)
-              (min (vm-reg-get state (vm-lhs inst))
-                   (vm-reg-get state (vm-rhs inst))))
-  (values (1+ pc) nil nil))
-
-(defmethod execute-instruction ((inst vm-max) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst)
-              (max (vm-reg-get state (vm-lhs inst))
-                   (vm-reg-get state (vm-rhs inst))))
-  (values (1+ pc) nil nil))
+(define-simple-instruction vm-max :binary max)
 
 (defmethod execute-instruction ((inst vm-truncate) state pc labels)
   (declare (ignore labels))
@@ -510,28 +372,13 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."))
     (setf (vm-values-list state) (list q r)))
   (values (1+ pc) nil nil))
 
-(defmethod execute-instruction ((inst vm-rem) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst)
-              (rem (vm-reg-get state (vm-lhs inst))
-                   (vm-reg-get state (vm-rhs inst))))
-  (values (1+ pc) nil nil))
+(define-simple-instruction vm-rem :binary rem)
 
-(defmethod execute-instruction ((inst vm-evenp) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst)
-              (if (evenp (vm-reg-get state (vm-src inst))) 1 0))
-  (values (1+ pc) nil nil))
+(define-simple-instruction vm-evenp :pred1 evenp)
 
-(defmethod execute-instruction ((inst vm-oddp) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst)
-              (if (oddp (vm-reg-get state (vm-src inst))) 1 0))
-  (values (1+ pc) nil nil))
+(define-simple-instruction vm-oddp :pred1 oddp)
 
-;;; ----------------------------------------------------------------------------
 ;;; Instruction Execution - Boolean Operations
-;;; ----------------------------------------------------------------------------
 
 (defmethod execute-instruction ((inst vm-not) state pc labels)
   (declare (ignore labels))
@@ -555,17 +402,14 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Type-Of Instruction
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-type-of (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Get the type of an object."))
-
-(defmethod instruction->sexp ((inst vm-type-of))
-  (list :type-of (vm-dst inst) (vm-src inst)))
+(define-vm-instruction vm-type-of (vm-instruction)
+  "Get the type of an object."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :type-of)
+  (:sexp-slots dst src))
 
 (defmethod execute-instruction ((inst vm-type-of) state pc labels)
   (declare (ignore labels))
@@ -583,20 +427,15 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Runtime Eval — Meta-circular evaluation
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-eval (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst
-        :documentation "Register to store the evaluation result")
-   (src :initarg :src :reader vm-src
-        :documentation "Register containing the form to evaluate"))
-  (:documentation "Evaluate a form at runtime by compiling and running it in a fresh VM.
-This enables meta-circular self-hosting: compiled code can call eval."))
-
-(defmethod instruction->sexp ((inst vm-eval))
-  (list :eval (vm-dst inst) (vm-src inst)))
+(define-vm-instruction vm-eval (vm-instruction)
+  "Evaluate a form at runtime by compiling and running it in a fresh VM.
+This enables meta-circular self-hosting: compiled code can call eval."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :eval)
+  (:sexp-slots dst src))
 
 (defmethod execute-instruction ((inst vm-eval) state pc labels)
   (declare (ignore labels))
@@ -604,4 +443,3 @@ This enables meta-circular self-hosting: compiled code can call eval."))
          (result (our-eval form)))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
-

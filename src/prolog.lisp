@@ -1,12 +1,8 @@
 (in-package :cl-cc)
 
-;;;----------------------------------------------------------------------------
 ;;; CL-CC Prolog Implementation with Full Backtracking
-;;;----------------------------------------------------------------------------
 
-;;;----------------------------------------------------------------------------
 ;;; Logic Variables
-;;;----------------------------------------------------------------------------
 
 (defun logic-var-p (x)
   "Check if X is a logic variable (symbols starting with ?)."
@@ -14,9 +10,7 @@
        (> (length (symbol-name x)) 0)
        (char= (char (symbol-name x) 0) #\?)))
 
-;;;----------------------------------------------------------------------------
 ;;; Enhanced Unification with Occurs Check
-;;;----------------------------------------------------------------------------
 
 (defun occurs-check (var term env)
   "Check if VAR occurs in TERM (prevents infinite structures like ?X = f(?X))."
@@ -62,9 +56,7 @@
     ;; Unification failure
     (t nil)))
 
-;;;----------------------------------------------------------------------------
 ;;; Variable Substitution
-;;;----------------------------------------------------------------------------
 
 (defun logic-substitute (template env)
   "Substitute logic variables in TEMPLATE using bindings from ENV."
@@ -83,9 +75,7 @@
   "Substitute all bound logic variables in TERM (alias for logic-substitute)."
   (logic-substitute term env))
 
-;;;----------------------------------------------------------------------------
 ;;; Goal and Rule Representation (CLOS)
-;;;----------------------------------------------------------------------------
 
 (defclass prolog-goal ()
   ((predicate :initarg :predicate :reader goal-predicate
@@ -101,9 +91,7 @@
          :documentation "Body of the rule (list of goals), nil for facts"))
   (:documentation "Represents a Prolog rule or fact."))
 
-;;;----------------------------------------------------------------------------
 ;;; Prolog Database
-;;;----------------------------------------------------------------------------
 
 (defvar *prolog-rules* (make-hash-table :test 'eq)
   "Hash table mapping predicate symbols to lists of rules.")
@@ -129,9 +117,7 @@
          (cons (make-instance 'prolog-rule :head ',head :body ',body)
                (gethash ',(car head) *prolog-rules*))))
 
-;;;----------------------------------------------------------------------------
 ;;; Variable Renaming for Recursion
-;;;----------------------------------------------------------------------------
 
 (defun rename-variables (rule)
   "Rename all logic variables in RULE to fresh ones (for recursive calls)."
@@ -148,9 +134,7 @@
                      :head (rename-term (rule-head rule))
                      :body (mapcar #'rename-term (rule-body rule))))))
 
-;;;----------------------------------------------------------------------------
 ;;; Cut Operator Support
-;;;----------------------------------------------------------------------------
 
 (defvar *cut-occurred* nil
   "Flag to signal cut across the call stack.")
@@ -159,9 +143,7 @@
   ()
   (:documentation "Condition signaled when cut (!) is encountered."))
 
-;;;----------------------------------------------------------------------------
 ;;; Backtracking Solver using Continuations
-;;;----------------------------------------------------------------------------
 
 (defun solve-goal (goal env k)
   "Solve GOAL in environment ENV, call continuation K with each solution.
@@ -240,9 +222,7 @@
           (t substituted)))
     (error () nil)))
 
-;;;----------------------------------------------------------------------------
 ;;; Query Interface
-;;;----------------------------------------------------------------------------
 
 (defun query-all (goal)
   "Return all solutions for GOAL as a list of substituted goals.
@@ -280,9 +260,7 @@
       (prolog-cut ()))
     (nreverse solutions)))
 
-;;;----------------------------------------------------------------------------
 ;;; Built-in Predicates
-;;;----------------------------------------------------------------------------
 
 ;; Member predicate: (member ?x (list 1 2 3))
 (def-rule ((member ?x (cons ?x ?rest))))
@@ -305,9 +283,7 @@
 (def-rule ((length (cons ?x ?rest) (+ 1 ?n))
            (length ?rest ?n)))
 
-;;;----------------------------------------------------------------------------
 ;;; Type Inference Rules for the Compiler
-;;;----------------------------------------------------------------------------
 
 ;; Integer constant
 (def-rule ((type-of (const ?val) ?env (integer-type))
@@ -340,9 +316,7 @@
 (def-rule ((env-lookup (cons ?binding ?rest) ?name ?type)
            (env-lookup ?rest ?name ?type)))
 
-;;;----------------------------------------------------------------------------
 ;;; Peephole Optimizer (Original Implementation Preserved)
-;;;----------------------------------------------------------------------------
 
 (defparameter *peephole-rules*
   '(((:add ?dst ?a ?z)

@@ -10,9 +10,7 @@
 
 (in-suite cl-cc-suite)
 
-;;; ----------------------------------------------------------------------------
 ;;; Heap Allocation Tests
-;;; ----------------------------------------------------------------------------
 
 (test vm-alloc-basic
   "Test basic heap allocation."
@@ -38,14 +36,12 @@
     (vm-heap-set state addr :test-value)
     (is (eq (vm-heap-get state addr) :test-value))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Cons Cell Tests
-;;; ----------------------------------------------------------------------------
 
 (test vm-cons-creates-cell
   "Test that vm-cons creates a cons cell."
   (let* ((state (make-instance 'vm-state))
-         (inst (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2)))
+         (inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2)))
     (vm-reg-set state :r1 10)
     (vm-reg-set state :r2 20)
     (execute-instruction inst state 0 (make-hash-table))
@@ -57,7 +53,7 @@
 (test vm-cons-with-nil-cdr
   "Test that vm-cons works with nil cdr."
   (let* ((state (make-instance 'vm-state))
-         (inst (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2)))
+         (inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2)))
     (vm-reg-set state :r1 42)
     (vm-reg-set state :r2 nil)
     (execute-instruction inst state 0 (make-hash-table))
@@ -70,9 +66,9 @@
   "Test that nested cons cells work correctly."
   (let* ((state (make-instance 'vm-state))
          ;; Create first cons: (2 . nil)
-         (inst1 (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (inst1 (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          ;; Create second cons: (1 . <addr of first cons>)
-         (inst2 (make-instance 'vm-cons :dst :r3 :car-src :r4 :cdr-src :r0)))
+         (inst2 (make-vm-cons :dst :r3 :car-src :r4 :cdr-src :r0)))
     (vm-reg-set state :r1 2)
     (vm-reg-set state :r2 nil)
     (execute-instruction inst1 state 0 (make-hash-table))
@@ -85,15 +81,13 @@
       (is (= (car inner-cell) 2))
       (is (null (cdr inner-cell))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Car/Cdr Tests
-;;; ----------------------------------------------------------------------------
 
 (test vm-car-extracts-value
   "Test that vm-car extracts the car of a cons cell."
   (let* ((state (make-instance 'vm-state))
-         (cons-inst (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
-         (car-inst (make-instance 'vm-car :dst :r3 :src :r0)))
+         (cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (car-inst (make-vm-car :dst :r3 :src :r0)))
     (vm-reg-set state :r1 123)
     (vm-reg-set state :r2 456)
     (execute-instruction cons-inst state 0 (make-hash-table))
@@ -103,8 +97,8 @@
 (test vm-cdr-extracts-value
   "Test that vm-cdr extracts the cdr of a cons cell."
   (let* ((state (make-instance 'vm-state))
-         (cons-inst (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
-         (cdr-inst (make-instance 'vm-cdr :dst :r3 :src :r0)))
+         (cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (cdr-inst (make-vm-cdr :dst :r3 :src :r0)))
     (vm-reg-set state :r1 123)
     (vm-reg-set state :r2 456)
     (execute-instruction cons-inst state 0 (make-hash-table))
@@ -115,13 +109,13 @@
   "Test car on nested cons cells."
   (let* ((state (make-instance 'vm-state))
          ;; Create (2 . 3)
-         (inst1 (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (inst1 (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          ;; Create ((2 . 3) . 4)
-         (inst2 (make-instance 'vm-cons :dst :r3 :car-src :r0 :cdr-src :r4))
+         (inst2 (make-vm-cons :dst :r3 :car-src :r0 :cdr-src :r4))
          ;; Get car of outer cons (should be address of inner cons)
-         (car-inst (make-instance 'vm-car :dst :r5 :src :r3))
+         (car-inst (make-vm-car :dst :r5 :src :r3))
          ;; Get car of inner cons (should be 2)
-         (car-inst2 (make-instance 'vm-car :dst :r6 :src :r5)))
+         (car-inst2 (make-vm-car :dst :r6 :src :r5)))
     (vm-reg-set state :r1 2)
     (vm-reg-set state :r2 3)
     (vm-reg-set state :r4 4)
@@ -131,15 +125,13 @@
     (execute-instruction car-inst2 state 3 (make-hash-table))
     (is (= (vm-reg-get state :r6) 2))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Rplaca/Rplacd Tests
-;;; ----------------------------------------------------------------------------
 
 (test vm-rplaca-modifies-car
   "Test that vm-rplaca modifies the car of a cons cell."
   (let* ((state (make-instance 'vm-state))
-         (cons-inst (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
-         (rplaca-inst (make-instance 'vm-rplaca :cons :r0 :val :r3)))
+         (cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (rplaca-inst (make-vm-rplaca :cons :r0 :val :r3)))
     (vm-reg-set state :r1 10)
     (vm-reg-set state :r2 20)
     (execute-instruction cons-inst state 0 (make-hash-table))
@@ -157,8 +149,8 @@
 (test vm-rplacd-modifies-cdr
   "Test that vm-rplacd modifies the cdr of a cons cell."
   (let* ((state (make-instance 'vm-state))
-         (cons-inst (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
-         (rplacd-inst (make-instance 'vm-rplacd :cons :r0 :val :r3)))
+         (cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (rplacd-inst (make-vm-rplacd :cons :r0 :val :r3)))
     (vm-reg-set state :r1 10)
     (vm-reg-set state :r2 20)
     (execute-instruction cons-inst state 0 (make-hash-table))
@@ -176,9 +168,9 @@
 (test vm-rplaca-and-rplacd-together
   "Test that rplaca and rplacd can both be used on the same cons."
   (let* ((state (make-instance 'vm-state))
-         (cons-inst (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
-         (rplaca-inst (make-instance 'vm-rplaca :cons :r0 :val :r3))
-         (rplacd-inst (make-instance 'vm-rplacd :cons :r0 :val :r4)))
+         (cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (rplaca-inst (make-vm-rplaca :cons :r0 :val :r3))
+         (rplacd-inst (make-vm-rplacd :cons :r0 :val :r4)))
     (vm-reg-set state :r1 1)
     (vm-reg-set state :r2 2)
     (execute-instruction cons-inst state 0 (make-hash-table))
@@ -190,15 +182,13 @@
       (is (= (car cell) 100))
       (is (= (cdr cell) 200)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Closure Heap Operations Tests
-;;; ----------------------------------------------------------------------------
 
 (test vm-make-closure-heap-alloc
   "Test that vm-make-closure allocates on heap."
   (let* ((state (make-instance 'vm-state))
          (labels (make-hash-table))
-         (inst (make-instance 'vm-make-closure
+         (inst (make-vm-make-closure
                               :dst :r0
                               :label :func
                               :params '(:x)
@@ -217,20 +207,20 @@
   "Test that vm-closure-ref-idx accesses captured values."
   (let* ((state (make-instance 'vm-state))
          (labels (make-hash-table))
-         (make-inst (make-instance 'vm-make-closure
+         (make-inst (make-vm-make-closure
                                    :dst :r0
                                    :label :func
                                    :params nil
                                    :env-regs '(:r1 :r2 :r3)))
-         (ref-inst-0 (make-instance 'vm-closure-ref-idx
+         (ref-inst-0 (make-vm-closure-ref-idx
                                     :dst :r4
                                     :closure :r0
                                     :index 0))
-         (ref-inst-1 (make-instance 'vm-closure-ref-idx
+         (ref-inst-1 (make-vm-closure-ref-idx
                                     :dst :r5
                                     :closure :r0
                                     :index 1))
-         (ref-inst-2 (make-instance 'vm-closure-ref-idx
+         (ref-inst-2 (make-vm-closure-ref-idx
                                     :dst :r6
                                     :closure :r0
                                     :index 2)))
@@ -249,12 +239,12 @@
   "Test that vm-closure-ref-idx signals error for invalid index."
   (let* ((state (make-instance 'vm-state))
          (labels (make-hash-table))
-         (make-inst (make-instance 'vm-make-closure
+         (make-inst (make-vm-make-closure
                                    :dst :r0
                                    :label :func
                                    :params nil
                                    :env-regs '(:r1)))
-         (ref-inst (make-instance 'vm-closure-ref-idx
+         (ref-inst (make-vm-closure-ref-idx
                                   :dst :r2
                                   :closure :r0
                                   :index 99)))
@@ -266,38 +256,36 @@
           (fail "Should have signaled an error"))
       (error () (pass)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Instruction <-> S-exp Conversion Tests
-;;; ----------------------------------------------------------------------------
 
 (test instruction->sexp-vm-cons
   "Test instruction->sexp for vm-cons."
-  (let ((inst (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2)))
+  (let ((inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2)))
     (is (equal (instruction->sexp inst) '(:cons :r0 :r1 :r2)))))
 
 (test instruction->sexp-vm-car
   "Test instruction->sexp for vm-car."
-  (let ((inst (make-instance 'vm-car :dst :r0 :src :r1)))
+  (let ((inst (make-vm-car :dst :r0 :src :r1)))
     (is (equal (instruction->sexp inst) '(:car :r0 :r1)))))
 
 (test instruction->sexp-vm-cdr
   "Test instruction->sexp for vm-cdr."
-  (let ((inst (make-instance 'vm-cdr :dst :r0 :src :r1)))
+  (let ((inst (make-vm-cdr :dst :r0 :src :r1)))
     (is (equal (instruction->sexp inst) '(:cdr :r0 :r1)))))
 
 (test instruction->sexp-vm-rplaca
   "Test instruction->sexp for vm-rplaca."
-  (let ((inst (make-instance 'vm-rplaca :cons :r0 :val :r1)))
+  (let ((inst (make-vm-rplaca :cons :r0 :val :r1)))
     (is (equal (instruction->sexp inst) '(:rplaca :r0 :r1)))))
 
 (test instruction->sexp-vm-rplacd
   "Test instruction->sexp for vm-rplacd."
-  (let ((inst (make-instance 'vm-rplacd :cons :r0 :val :r1)))
+  (let ((inst (make-vm-rplacd :cons :r0 :val :r1)))
     (is (equal (instruction->sexp inst) '(:rplacd :r0 :r1)))))
 
 (test instruction->sexp-vm-make-closure
   "Test instruction->sexp for vm-make-closure."
-  (let ((inst (make-instance 'vm-make-closure
+  (let ((inst (make-vm-make-closure
                              :dst :r0
                              :label :func
                              :params '(:x :y)
@@ -306,7 +294,7 @@
 
 (test instruction->sexp-vm-closure-ref-idx
   "Test instruction->sexp for vm-closure-ref-idx."
-  (let ((inst (make-instance 'vm-closure-ref-idx
+  (let ((inst (make-vm-closure-ref-idx
                              :dst :r0
                              :closure :r1
                              :index 2)))
@@ -365,48 +353,46 @@
     (is (eq (vm-closure-reg inst) :r1))
     (is (= (vm-closure-index inst) 3))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Round-trip Tests
-;;; ----------------------------------------------------------------------------
 
 (test roundtrip-vm-cons
   "Test roundtrip conversion for vm-cons."
-  (let* ((original (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+  (let* ((original (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (sexp (instruction->sexp original))
          (restored (sexp->instruction sexp)))
     (is (equal (instruction->sexp restored) sexp))))
 
 (test roundtrip-vm-car
   "Test roundtrip conversion for vm-car."
-  (let* ((original (make-instance 'vm-car :dst :r0 :src :r1))
+  (let* ((original (make-vm-car :dst :r0 :src :r1))
          (sexp (instruction->sexp original))
          (restored (sexp->instruction sexp)))
     (is (equal (instruction->sexp restored) sexp))))
 
 (test roundtrip-vm-cdr
   "Test roundtrip conversion for vm-cdr."
-  (let* ((original (make-instance 'vm-cdr :dst :r0 :src :r1))
+  (let* ((original (make-vm-cdr :dst :r0 :src :r1))
          (sexp (instruction->sexp original))
          (restored (sexp->instruction sexp)))
     (is (equal (instruction->sexp restored) sexp))))
 
 (test roundtrip-vm-rplaca
   "Test roundtrip conversion for vm-rplaca."
-  (let* ((original (make-instance 'vm-rplaca :cons :r0 :val :r1))
+  (let* ((original (make-vm-rplaca :cons :r0 :val :r1))
          (sexp (instruction->sexp original))
          (restored (sexp->instruction sexp)))
     (is (equal (instruction->sexp restored) sexp))))
 
 (test roundtrip-vm-rplacd
   "Test roundtrip conversion for vm-rplacd."
-  (let* ((original (make-instance 'vm-rplacd :cons :r0 :val :r1))
+  (let* ((original (make-vm-rplacd :cons :r0 :val :r1))
          (sexp (instruction->sexp original))
          (restored (sexp->instruction sexp)))
     (is (equal (instruction->sexp restored) sexp))))
 
 (test roundtrip-vm-make-closure
   "Test roundtrip conversion for vm-make-closure."
-  (let* ((original (make-instance 'vm-make-closure
+  (let* ((original (make-vm-make-closure
                                   :dst :r0
                                   :label :func
                                   :params '(:x :y)
@@ -417,7 +403,7 @@
 
 (test roundtrip-vm-closure-ref-idx
   "Test roundtrip conversion for vm-closure-ref-idx."
-  (let* ((original (make-instance 'vm-closure-ref-idx
+  (let* ((original (make-vm-closure-ref-idx
                                   :dst :r0
                                   :closure :r1
                                   :index 5))
@@ -425,19 +411,17 @@
          (restored (sexp->instruction sexp)))
     (is (equal (instruction->sexp restored) sexp))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Integration: Building Lists
-;;; ----------------------------------------------------------------------------
 
 (test build-list-of-three-elements
   "Test building a list of three elements using cons."
   (let* ((state (make-instance 'vm-state))
          ;; Create (3 . nil)
-         (inst1 (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (inst1 (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          ;; Create (2 . <addr1>)
-         (inst2 (make-instance 'vm-cons :dst :r3 :car-src :r4 :cdr-src :r0))
+         (inst2 (make-vm-cons :dst :r3 :car-src :r4 :cdr-src :r0))
          ;; Create (1 . <addr2>)
-         (inst3 (make-instance 'vm-cons :dst :r5 :car-src :r6 :cdr-src :r3)))
+         (inst3 (make-vm-cons :dst :r5 :car-src :r6 :cdr-src :r3)))
     (vm-reg-set state :r1 3)
     (vm-reg-set state :r2 nil)
     (execute-instruction inst1 state 0 (make-hash-table))
@@ -458,9 +442,9 @@
   "Test traversing a list using car and cdr."
   (let* ((state (make-instance 'vm-state))
          ;; Build list (10 20 30)
-         (inst1 (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
-         (inst2 (make-instance 'vm-cons :dst :r3 :car-src :r4 :cdr-src :r0))
-         (inst3 (make-instance 'vm-cons :dst :r5 :car-src :r6 :cdr-src :r3)))
+         (inst1 (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (inst2 (make-vm-cons :dst :r3 :car-src :r4 :cdr-src :r0))
+         (inst3 (make-vm-cons :dst :r5 :car-src :r6 :cdr-src :r3)))
     (vm-reg-set state :r1 30)
     (vm-reg-set state :r2 nil)
     (execute-instruction inst1 state 0 (make-hash-table))
@@ -472,13 +456,13 @@
     (let ((list-cell (vm-reg-get state :r5)))
       ;; Get first element (car list)
       (vm-reg-set state :r10 list-cell)
-      (execute-instruction (make-instance 'vm-car :dst :r11 :src :r10) state 3 (make-hash-table))
+      (execute-instruction (make-vm-car :dst :r11 :src :r10) state 3 (make-hash-table))
       (is (= (vm-reg-get state :r11) 10))
       ;; Move to second element (car (cdr list))
-      (execute-instruction (make-instance 'vm-cdr :dst :r12 :src :r10) state 4 (make-hash-table))
-      (execute-instruction (make-instance 'vm-car :dst :r13 :src :r12) state 5 (make-hash-table))
+      (execute-instruction (make-vm-cdr :dst :r12 :src :r10) state 4 (make-hash-table))
+      (execute-instruction (make-vm-car :dst :r13 :src :r12) state 5 (make-hash-table))
       (is (= (vm-reg-get state :r13) 20))
       ;; Move to third element (car (cdr (cdr list)))
-      (execute-instruction (make-instance 'vm-cdr :dst :r14 :src :r12) state 6 (make-hash-table))
-      (execute-instruction (make-instance 'vm-car :dst :r15 :src :r14) state 7 (make-hash-table))
+      (execute-instruction (make-vm-cdr :dst :r14 :src :r12) state 6 (make-hash-table))
+      (execute-instruction (make-vm-car :dst :r15 :src :r14) state 7 (make-hash-table))
       (is (= (vm-reg-get state :r15) 30)))))

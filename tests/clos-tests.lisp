@@ -8,9 +8,7 @@
 
 (in-suite cl-cc-suite)
 
-;;; ----------------------------------------------------------------------------
 ;;; AST Parsing Tests
-;;; ----------------------------------------------------------------------------
 
 (test clos-parse-defclass
   "Test parsing a defclass form into AST."
@@ -70,9 +68,7 @@
     (is (eq 'x (ast-slot-value-slot ast)))
     (is (typep (ast-slot-value-object ast) 'ast-var))))
 
-;;; ----------------------------------------------------------------------------
 ;;; AST Roundtrip Tests
-;;; ----------------------------------------------------------------------------
 
 (test clos-defclass-roundtrip
   "Test defclass AST to sexp roundtrip."
@@ -101,9 +97,7 @@
     ;; The slot name is quoted in roundtrip: (slot-value obj 'x)
     (is (equal '(quote x) (third result)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Compilation and Execution Tests
-;;; ----------------------------------------------------------------------------
 
 (test clos-compile-defclass-slot-value
   "Test compiling defclass + make-instance + slot-value."
@@ -222,9 +216,7 @@
                    (+ (slot-value c 'g)
                       (slot-value c 'b))))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Slot Specification Parsing Tests
-;;; ----------------------------------------------------------------------------
 
 (test clos-parse-slot-spec-symbol
   "Test parsing a bare symbol slot spec."
@@ -251,9 +243,7 @@
     (is (member :initarg sexp))
     (is (member :reader sexp))))
 
-;;; ----------------------------------------------------------------------------
 ;;; CLOS Inheritance Tests
-;;; ----------------------------------------------------------------------------
 
 (test clos-inherit-slot-from-superclass
   "Subclass inherits slots from its superclass."
@@ -365,9 +355,7 @@
              (let ((e (make-instance 'ext :val 5 :extra 10)))
                (slot-value e 'val))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Setf Slot-Value Tests
-;;; ----------------------------------------------------------------------------
 
 (test clos-setf-slot-value-basic
   "Basic setf slot-value sets the slot."

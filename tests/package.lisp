@@ -50,6 +50,28 @@
                  :ast-call
                  :ast-quote
                  :ast-the
+                 ;; AST constructors (defstruct BOA)
+                 :make-ast-int
+                 :make-ast-var
+                 :make-ast-binop
+                 :make-ast-if
+                 :make-ast-progn
+                 :make-ast-print
+                 :make-ast-let
+                 :make-ast-lambda
+                 :make-ast-function
+                 :make-ast-flet
+                 :make-ast-labels
+                 :make-ast-block
+                 :make-ast-return-from
+                 :make-ast-tagbody
+                 :make-ast-go
+                 :make-ast-setq
+                 :make-ast-call
+                 :make-ast-quote
+                 :make-ast-catch
+                 :make-ast-throw
+                 :make-ast-unwind-protect
                  ;; AST accessors
                  :ast-lambda-params
                  :ast-lambda-body
@@ -89,9 +111,15 @@
                  :vm-func-ref
                  :vm-push
                  :vm-pop
-                 :vm-frame
-                 :vm-restore-frame
                  :vm-env-ref
+                 ;; VM Instruction constructors (defstruct)
+                 :make-vm-add :make-vm-call :make-vm-car :make-vm-cdr
+                 :make-vm-closure-ref-idx :make-vm-cons :make-vm-const
+                 :make-vm-halt :make-vm-jump-zero :make-vm-label
+                 :make-vm-make-closure :make-vm-move :make-vm-mul
+                 :make-vm-rplaca :make-vm-rplacd :make-vm-sub
+                 :make-vm-closure :make-vm-jump :make-vm-ret :make-vm-func-ref
+                 :make-vm-print :make-vm-spill-load :make-vm-spill-store
                  ;; VM Heap operations
                  :vm-alloc
                  :vm-cons
@@ -130,7 +158,6 @@
                  :vm-val-reg
                  :vm-closure-reg
                  :vm-closure-index
-                 :vm-alloc-size
                  :execute-instruction
                 :instruction->sexp
                  :sexp->instruction
@@ -179,6 +206,7 @@
                  :*x86-64-calling-convention*
                  :*aarch64-calling-convention*
                  :live-interval
+                 :make-live-interval
                  :interval-vreg
                  :interval-start
                  :interval-end
@@ -193,7 +221,15 @@
                  :allocate-registers
                  :vm-spill-store
                  :vm-spill-load
-                 :our-eval)
+                 :our-eval
+                 ;; Compilation Result
+                 :compilation-result
+                 :make-compilation-result
+                 :compilation-result-program
+                 :compilation-result-assembly
+                 :compilation-result-globals
+                 :compilation-result-type
+                 :compilation-result-cps)
   (:import-from :cl-cc/type
                  ;; Type classes
                  :type-node
@@ -219,7 +255,9 @@
                  :type-any
                  :+type-unknown+
                  ;; Type constructors
+                 :make-type-primitive
                  :make-type-variable
+                 :make-type-function-raw
                  :make-type-scheme
                  :type-to-scheme
                  ;; Type predicates and equality

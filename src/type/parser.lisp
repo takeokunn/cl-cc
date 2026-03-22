@@ -19,9 +19,7 @@
 
 (in-package :cl-cc/type)
 
-;;; ----------------------------------------------------------------------------
 ;;; Conditions
-;;; ----------------------------------------------------------------------------
 
 (define-condition type-parse-error (error)
   ((message :initarg :message :reader type-parse-error-message)
@@ -36,9 +34,7 @@
   (error 'type-parse-error
          :message (apply #'format nil message args)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Specifier Parser
-;;; ----------------------------------------------------------------------------
 
 (defun parse-type-specifier (spec)
   "Parse a type specifier into a type-node.
@@ -97,7 +93,7 @@
        (if alias
            (parse-type-specifier alias)
            ;; Create a primitive type for any other symbol
-           (make-instance 'type-primitive :name name))))))
+           (make-type-primitive :name name))))))
 
 (defun parse-compound-type (spec)
   "Parse a compound type specifier (list form)."
@@ -156,7 +152,7 @@
       (otherwise
        (if (and (symbolp head) args)
            (make-type-constructor head (mapcar #'parse-type-specifier args))
-           (make-instance 'type-primitive :name spec))))))
+           (make-type-primitive :name spec))))))
 
 (defun parse-function-type (args)
   "Parse function type arguments: ((PARAM-TYPES...) RETURN-TYPE) or (PARAM-TYPES... -> RETURN-TYPE)."
@@ -183,9 +179,7 @@
     (t
      (type-parse-error "Invalid function type specifier: ~S" args))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Lambda List Parser with Types
-;;; ----------------------------------------------------------------------------
 
 (defvar *lambda-list-keywords*
   '(&optional &rest &key &allow-other-keys &aux &body &whole)
@@ -328,9 +322,7 @@
   ;; as aux parameters have similar structure
   (parse-typed-optional-parameter item))
 
-;;; ----------------------------------------------------------------------------
 ;;; Return Type Extraction
-;;; ----------------------------------------------------------------------------
 
 (defun extract-return-type (decl)
   "Extract return type from function declarations.
@@ -361,25 +353,15 @@
     (t
      +type-unknown+)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Typed Defun Parser
-;;; ----------------------------------------------------------------------------
 
-(defclass ast-defun-typed ()
-  ((name :initarg :name :reader ast-defun-typed-name
-         :documentation "Function name (symbol)")
-   (params :initarg :params :reader ast-defun-typed-params
-           :documentation "List of (name :type type) or just name")
-   (param-types :initarg :param-types :reader ast-defun-typed-param-types
-                :documentation "List of type-nodes for parameters")
-   (return-type :initarg :return-type :reader ast-defun-typed-return-type
-                :documentation "Return type as type-node")
-   (body :initarg :body :reader ast-defun-typed-body
-         :documentation "Body forms as list of AST nodes")
-   (source-location :initarg :source-location :initform nil
-                    :reader ast-defun-typed-source-location
-                    :documentation "Optional source location"))
-  (:documentation "Typed function definition AST node."))
+(defstruct ast-defun-typed
+  (name nil :type symbol)
+  (params nil :type list)
+  (param-types nil :type list)
+  (return-type nil)
+  (body nil :type list)
+  (source-location nil))
 
 (defun parse-typed-defun (sexp)
   "Parse a defun with type annotations.
@@ -426,7 +408,7 @@
         (let ((return-type (extract-return-type return-type-spec)))
 
           ;; Create typed defun AST
-          (make-instance 'ast-defun-typed
+          (make-ast-defun-typed
                          :name name
                          :params parsed-params
                          :param-types param-types
@@ -545,25 +527,15 @@
     (t
      (type-parse-error "Invalid parameter: ~S" item))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Typed Lambda Parser
-;;; ----------------------------------------------------------------------------
 
-(defclass ast-lambda-typed ()
-  ((params :initarg :params :reader ast-lambda-typed-params
-           :documentation "List of (name :type type) or just name")
-   (param-types :initarg :param-types :reader ast-lambda-typed-param-types
-                :documentation "List of type-nodes for parameters")
-   (return-type :initarg :return-type :reader ast-lambda-typed-return-type
-                :documentation "Return type as type-node")
-   (body :initarg :body :reader ast-lambda-typed-body
-         :documentation "Body forms as list of AST nodes")
-   (env :initarg :env :initform nil :reader ast-lambda-typed-env
-        :documentation "Captured lexical environment")
-   (source-location :initarg :source-location :initform nil
-                    :reader ast-lambda-typed-source-location
-                    :documentation "Optional source location"))
-  (:documentation "Typed lambda expression AST node."))
+(defstruct ast-lambda-typed
+  (params nil :type list)
+  (param-types nil :type list)
+  (return-type nil)
+  (body nil :type list)
+  (env nil)
+  (source-location nil))
 
 (defun parse-typed-lambda (sexp)
   "Parse a lambda with type annotations.
@@ -594,15 +566,13 @@
         (let ((return-type (extract-return-type return-type-spec)))
 
           ;; Create typed lambda AST
-          (make-instance 'ast-lambda-typed
+          (make-ast-lambda-typed
                          :params parsed-params
                          :param-types param-types
                          :return-type return-type
                          :body body-forms))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Convenience Constructors
-;;; ----------------------------------------------------------------------------
 
 (defun make-type-function-from-spec (param-specs return-spec)
   "Create a type-function from type specifier lists.
@@ -613,9 +583,7 @@
    (mapcar #'parse-type-specifier param-specs)
    (parse-type-specifier return-spec)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Specifier Unparser (for debugging/pretty-printing)
-;;; ----------------------------------------------------------------------------
 
 (defun unparse-type (type-node)
   "Convert a type-node back to a type specifier s-expression.

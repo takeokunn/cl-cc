@@ -1,8 +1,6 @@
 (in-package :cl-cc)
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Condition System
-;;; ----------------------------------------------------------------------------
 ;;;
 ;;; This module implements a condition system for VM error handling.
 ;;; It provides:
@@ -14,9 +12,7 @@
 ;;; The design follows Common Lisp condition system patterns but keeps
 ;;; the implementation minimal for VM use.
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Condition Classes
-;;; ----------------------------------------------------------------------------
 
 (define-condition vm-condition (condition)
   ((vm-state :initarg :vm-state :reader vm-condition-state
@@ -104,9 +100,7 @@ returning from a block that doesn't exist or invalid tagbody jumps.")
              (format stream "VM Division By Zero: attempted to divide ~S by zero"
                      (vm-dividend condition)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Handler Stack
-;;; ----------------------------------------------------------------------------
 ;;;
 ;;; Since we cannot modify vm-state, we use a hash table to associate
 ;;; handler stacks with VM states. This is managed by the VM condition
@@ -180,100 +174,65 @@ Returns the first matching handler or NIL if none found."
   (remhash vm-state *vm-handler-stacks*)
   (remhash vm-state *vm-restart-bindings*))
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Condition Instructions
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-signal (vm-instruction)
-  ((condition-reg :initarg :condition-reg :reader vm-condition-reg
-                  :documentation "Register containing the condition to signal."))
-  (:documentation "Signal a condition. Handlers will be searched and invoked
-if a matching handler is found."))
+(define-vm-instruction vm-signal (vm-instruction)
+  "Signal a condition. Handlers will be searched and invoked
+if a matching handler is found."
+  (condition-reg nil :reader vm-condition-reg)
+  (:sexp-tag :signal)
+  (:sexp-slots condition-reg))
 
-(defclass vm-error-instruction (vm-instruction)
-  ((condition-reg :initarg :condition-reg :reader vm-condition-reg
-                  :documentation "Register containing the error condition to signal."))
-  (:documentation "Signal an error condition. Unlike vm-signal, this will
-propagate if no handler is found."))
+(define-vm-instruction vm-error-instruction (vm-instruction)
+  "Signal an error condition. Unlike vm-signal, this will
+propagate if no handler is found."
+  (condition-reg nil :reader vm-condition-reg)
+  (:sexp-tag :vm-error)
+  (:sexp-slots condition-reg))
 
-(defclass vm-cerror (vm-instruction)
-  ((continue-message :initarg :continue-message :reader vm-continue-message
-                     :documentation "Message for the continue restart.")
-   (condition-reg :initarg :condition-reg :reader vm-condition-reg
-                  :documentation "Register containing the condition."))
-  (:documentation "Signal a correctable error with a continue restart."))
+(define-vm-instruction vm-cerror (vm-instruction)
+  "Signal a correctable error with a continue restart."
+  (continue-message nil :reader vm-continue-message)
+  (condition-reg nil :reader vm-condition-reg)
+  (:sexp-tag :cerror)
+  (:sexp-slots continue-message condition-reg))
 
-(defclass vm-warn (vm-instruction)
-  ((condition-reg :initarg :condition-reg :reader vm-condition-reg
-                  :documentation "Register containing the warning to signal."))
-  (:documentation "Signal a warning. Warnings don't interrupt execution
-unless a handler explicitly handles them."))
+(define-vm-instruction vm-warn (vm-instruction)
+  "Signal a warning. Warnings don't interrupt execution
+unless a handler explicitly handles them."
+  (condition-reg nil :reader vm-condition-reg)
+  (:sexp-tag :warn)
+  (:sexp-slots condition-reg))
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Handler Management Instructions
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-push-handler (vm-instruction)
-  ((handler-type :initarg :type :reader vm-push-handler-type
-                 :documentation "Condition type this handler handles.")
-   (handler-label :initarg :handler-label :reader vm-handler-label
-                  :documentation "Label to jump to when handler is invoked.")
-   (result-reg :initarg :result-reg :reader vm-handler-result-reg
-               :documentation "Register to store condition when handler is called."))
-  (:documentation "Push a condition handler onto the handler stack."))
+(define-vm-instruction vm-push-handler (vm-instruction)
+  "Push a condition handler onto the handler stack."
+  (handler-type nil :reader vm-push-handler-type)
+  (handler-label nil :reader vm-handler-label)
+  (result-reg nil :reader vm-handler-result-reg)
+  (:sexp-tag :push-handler)
+  (:sexp-slots handler-type handler-label result-reg))
 
-(defclass vm-pop-handler (vm-instruction)
-  ()
-  (:documentation "Pop the top handler from the handler stack."))
+(define-vm-instruction vm-pop-handler (vm-instruction)
+  "Pop the top handler from the handler stack."
+  (:sexp-tag :pop-handler))
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Restart Instructions
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-bind-restart (vm-instruction)
-  ((name :initarg :name :reader vm-restart-name-inst
-         :documentation "Name of the restart.")
-   (restart-label :initarg :restart-label :reader vm-restart-label
-                  :documentation "Label to jump to when restart is invoked."))
-  (:documentation "Bind a restart for the current dynamic extent."))
+(define-vm-instruction vm-bind-restart (vm-instruction)
+  "Bind a restart for the current dynamic extent."
+  (name nil :reader vm-restart-name-inst)
+  (restart-label nil :reader vm-restart-label)
+  (:sexp-tag :bind-restart)
+  (:sexp-slots name restart-label))
 
-(defclass vm-invoke-restart (vm-instruction)
-  ((name :initarg :name :reader vm-invoke-restart-name
-         :documentation "Name of the restart to invoke.")
-   (value-reg :initarg :value-reg :reader vm-invoke-value-reg
-              :initform nil :documentation "Optional register containing value to pass to restart."))
-  (:documentation "Invoke a restart by name."))
+(define-vm-instruction vm-invoke-restart (vm-instruction)
+  "Invoke a restart by name."
+  (name nil :reader vm-invoke-restart-name)
+  (value-reg nil :reader vm-invoke-value-reg))
 
-;;; ----------------------------------------------------------------------------
-;;; Instruction -> S-expression Conversion
-;;; ----------------------------------------------------------------------------
-
-(defmethod instruction->sexp ((inst vm-signal))
-  (list :signal (vm-condition-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-error-instruction))
-  (list :vm-error (vm-condition-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-cerror))
-  (list :cerror (vm-continue-message inst) (vm-condition-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-warn))
-  (list :warn (vm-condition-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-push-handler))
-  (list :push-handler
-        (vm-push-handler-type inst)
-        (vm-handler-label inst)
-        (vm-handler-result-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-pop-handler))
-  (list :pop-handler))
-
-(defmethod instruction->sexp ((inst vm-bind-restart))
-  (list :bind-restart
-        (vm-restart-name-inst inst)
-        (vm-restart-label inst)))
-
+;;; vm-invoke-restart has conditional sexp logic, so handle manually.
 (defmethod instruction->sexp ((inst vm-invoke-restart))
   (if (vm-invoke-value-reg inst)
       (list :invoke-restart
@@ -281,13 +240,12 @@ unless a handler explicitly handles them."))
             (vm-invoke-value-reg inst))
       (list :invoke-restart (vm-invoke-restart-name inst))))
 
-;;; ----------------------------------------------------------------------------
-;;; S-expression -> Instruction Conversion
-;;; ----------------------------------------------------------------------------
+(setf (gethash :invoke-restart *instruction-constructors*)
+      (lambda (sexp)
+        (make-vm-invoke-restart :name (second sexp)
+                                :value-reg (third sexp))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Instruction Execution
-;;; ----------------------------------------------------------------------------
 
 (defun vm-signal-condition (condition vm-state &key (error-p nil))
   "Signal a CONDITION in the context of VM-STATE.
@@ -403,9 +361,7 @@ Returns (values handler-found-p handler-info) or signals error."
                :format-control "No restart named ~S found"
                :format-arguments (list restart-name)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Condition Construction Helpers
-;;; ----------------------------------------------------------------------------
 
 (defun make-vm-type-error (vm-state expected-type datum)
   "Construct a vm-type-error condition."
@@ -453,9 +409,7 @@ Returns (values handler-found-p handler-info) or signals error."
                   :vm-state vm-state
                   :dividend dividend))
 
-;;; ----------------------------------------------------------------------------
 ;;; Integration with Existing VM Operations
-;;; ----------------------------------------------------------------------------
 
 (defun vm-checked-binop (op lhs rhs vm-state)
   "Perform a binary operation with type checking.

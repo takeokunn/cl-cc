@@ -10,9 +10,7 @@
   :description "Test suite for macro expansion"
   :in cl-cc-suite)
 
-;;; ----------------------------------------------------------------------------
 ;;; Conditional Macro Tests
-;;; ----------------------------------------------------------------------------
 
 (test when-macro-expansion
   "Test WHEN macro expands to IF with PROGN"
@@ -67,9 +65,7 @@
     (is (eq (caaddr result) 'progn))
     (is (equal (car (cdaddr result)) 'body1))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Boolean Macro Tests
-;;; ----------------------------------------------------------------------------
 
 (test and-macro-empty
   "Test AND with no arguments (returns T)"
@@ -126,9 +122,7 @@
     (let ((inner (caddr (caddr result))))
       (is (eq (car inner) 'if)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Sequential Binding Tests
-;;; ----------------------------------------------------------------------------
 
 (test let*-macro-empty-bindings
   "Test LET* with no bindings (just wraps in PROGN)"
@@ -165,9 +159,7 @@
     (let ((y-binding (caaddr result)))
       (is (eq (car y-binding) 'let)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Definition Macro Tests
-;;; ----------------------------------------------------------------------------
 
 (test defun-macro-expansion
   "Test DEFUN macro expansion"
@@ -183,9 +175,7 @@
     (is (eq (car result) 'setf))
     (is (eq (caaddr result) 'lambda))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Sequencing Macro Tests
-;;; ----------------------------------------------------------------------------
 
 (test prog1-macro-expansion
   "Test PROG1 macro expansion"
@@ -224,9 +214,7 @@
     (is (eq (cadr result) 'first-form))
     (is (eq (caaddr result) 'let))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Assignment Macro Tests
-;;; ----------------------------------------------------------------------------
 
 (test setf-macro-simple-symbol
   "Test SETF with simple symbol"
@@ -271,9 +259,7 @@
      (is (consp (cadr result)))
      (is (eq (car (caddr result)) 'progn))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Multiple Value Macro Tests
-;;; ----------------------------------------------------------------------------
 
 (test multiple-value-bind-macro-expansion
   "Test MULTIPLE-VALUE-BIND macro expansion"
@@ -324,9 +310,7 @@
     (let ((bindings (cadr result)))
       (is (eq (caar bindings) 'multiple-value-list)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Nested Macro Tests
-;;; ----------------------------------------------------------------------------
 
 (test nested-when-in-let*
   "Test WHEN nested inside LET*"
@@ -364,9 +348,7 @@
     (let ((inner-form (caddr result)))
       (is (eq (car inner-form) 'multiple-value-call)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Error Case Tests
-;;; ----------------------------------------------------------------------------
 
 (test error-cond-non-list-clause
   "Test COND error with non-list clause"
@@ -408,9 +390,7 @@
   "Test LET* error with invalid binding format"
   (signals error (our-macroexpand-1 '(let* ((a)) body))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Integration Tests
-;;; ----------------------------------------------------------------------------
 
 (test integration-when-evaluation
   "Integration test: WHEN macro produces correct runtime behavior"
@@ -433,9 +413,7 @@
     (is (eq (car expanded) 'if))
     (is (eq (caaddr expanded) 'if))))  ; else branch should be another IF
 
-;;; ----------------------------------------------------------------------------
 ;;; MULTIPLE-VALUE-LIST Macro Tests (Wave 2)
-;;; ----------------------------------------------------------------------------
 
 (test multiple-value-list-basic
   "Test MULTIPLE-VALUE-LIST basic expansion"
@@ -467,9 +445,7 @@
     (is (eq (car result) 'let))
     (is (eq (caadr result) 'multiple-value-call))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Control Flow Macro Tests - dolist, dotimes, do, do*, case, typecase, loop
-;;; ----------------------------------------------------------------------------
 
 ;;; DOLIST Tests
 

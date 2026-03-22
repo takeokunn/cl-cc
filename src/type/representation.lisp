@@ -1,10 +1,10 @@
 ;;;; representation.lisp - Type Representation Classes
 ;;;;
-;;;; This module provides CLOS classes for representing types in a
+;;;; This module provides structs for representing types in a
 ;;;; Hindley-Milner type system with gradual typing support.
 ;;;;
 ;;;; Type hierarchy:
-;;;;   type-node (base class)
+;;;;   type-node (base struct)
 ;;;;     ├── type-primitive (int, string, bool, etc.)
 ;;;;     ├── type-variable (type variables for polymorphism ?a, ?b)
 ;;;;     ├── type-function (function types T1 -> T2 -> R)
@@ -15,196 +15,127 @@
 
 (in-package :cl-cc/type)
 
-;;; ----------------------------------------------------------------------------
-;;; Type Base Class
-;;; ----------------------------------------------------------------------------
+;;; Type Base Struct
 
-(defclass type-node ()
-  ((source-location :initarg :source-location
-                    :initform nil
-                    :accessor type-node-source-location
-                    :documentation "Optional source location for error messages."))
-  (:documentation "Base class for all type representations in the HM type system."))
+(defstruct type-node
+  "Base type for all type representations in the HM type system."
+  (source-location nil))
 
-;;; ----------------------------------------------------------------------------
 ;;; Primitive Types
-;;; ----------------------------------------------------------------------------
 
-(defclass type-primitive (type-node)
-  ((name :initarg :name
-         :reader type-primitive-name
-         :type symbol
-         :documentation "Name of the primitive type (e.g., fixnum, string, boolean)."))
-  (:documentation "Represents a primitive type like fixnum, string, boolean, etc."))
+(defstruct (type-primitive (:include type-node))
+  "Represents a primitive type like fixnum, string, boolean, etc."
+  (name nil :type symbol))
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Variables (for polymorphism)
-;;; ----------------------------------------------------------------------------
 
 (defvar *type-variable-counter* 0
   "Global counter for generating unique type variable IDs.")
+
+(defstruct (type-variable (:include type-node) (:constructor make-type-variable-raw))
+  "Represents a type variable for polymorphic types (e.g., ?a, ?b)."
+  (id 0 :type integer)
+  (name nil))
 
 (defun make-type-variable (&optional name)
   "Create a fresh type variable with a unique ID.
    NAME is an optional human-readable name for debugging."
   (incf *type-variable-counter*)
-  (make-instance 'type-variable
-                 :id *type-variable-counter*
-                 :name name))
-
-(defclass type-variable (type-node)
-  ((id :initarg :id
-       :reader type-variable-id
-       :type integer
-       :documentation "Unique identifier for this type variable.")
-   (name :initarg :name
-         :initform nil
-         :reader type-variable-name
-         :type (or null symbol)
-         :documentation "Optional human-readable name for debugging."))
-  (:documentation "Represents a type variable for polymorphic types (e.g., ?a, ?b)."))
+  (make-type-variable-raw :id *type-variable-counter* :name name))
 
 (defun reset-type-variable-counter ()
   "Reset the type variable counter. Useful for testing."
   (setf *type-variable-counter* 0))
 
-;;; ----------------------------------------------------------------------------
 ;;; Function Types
-;;; ----------------------------------------------------------------------------
 
-(defclass type-function (type-node)
-  ((params :initarg :params
-           :reader type-function-params
-           :type list
-           :documentation "List of parameter types.")
-   (return :initarg :return
-           :reader type-function-return
-           :type type-node
-           :documentation "Return type of the function."))
-  (:documentation "Represents a function type: T1 -> T2 -> ... -> R."))
+(defstruct (type-function (:include type-node) (:constructor make-type-function-raw))
+  "Represents a function type: T1 -> T2 -> ... -> R."
+  (params nil :type list)
+  (return nil))
 
 (defun make-type-function (params return)
   "Convenience constructor for function types.
    PARAMS is a list of type nodes, RETURN is the return type."
-  (make-instance 'type-function
-                 :params params
-                 :return return))
+  (make-type-function-raw :params params :return return))
 
-;;; ----------------------------------------------------------------------------
 ;;; Tuple/Product Types
-;;; ----------------------------------------------------------------------------
 
-(defclass type-tuple (type-node)
-  ((elements :initarg :elements
-             :reader type-tuple-elements
-             :type list
-             :documentation "List of element types in the tuple."))
-  (:documentation "Represents a tuple/product type: (T1, T2, ...)."))
+(defstruct (type-tuple (:include type-node) (:constructor make-type-tuple-raw))
+  "Represents a tuple/product type."
+  (elements nil :type list))
 
 (defun make-type-tuple (elements)
   "Convenience constructor for tuple types.
    ELEMENTS is a list of type nodes."
-  (make-instance 'type-tuple
-                 :elements elements))
+  (make-type-tuple-raw :elements elements))
 
-;;; ----------------------------------------------------------------------------
 ;;; Union Types (for gradual typing)
-;;; ----------------------------------------------------------------------------
 
-(defclass type-union (type-node)
-  ((types :initarg :types
-          :reader type-union-types
-          :type list
-          :documentation "List of types in the union."))
-  (:documentation "Represents a union type: T1 | T2 | ... for gradual typing."))
+(defstruct (type-union (:include type-node) (:constructor make-type-union-raw))
+  "Represents a union type."
+  (types nil :type list))
 
 (defun make-type-union (types)
   "Convenience constructor for union types.
    TYPES is a list of type nodes."
-  (make-instance 'type-union
-                 :types types))
+  (make-type-union-raw :types types))
 
-;;; ----------------------------------------------------------------------------
 ;;; Intersection Types
-;;; ----------------------------------------------------------------------------
 
-(defclass type-intersection (type-node)
-  ((types :initarg :types
-          :reader type-intersection-types
-          :type list
-          :documentation "List of types in the intersection."))
-  (:documentation "Represents an intersection type: T1 & T2 & ..."))
+(defstruct (type-intersection (:include type-node) (:constructor make-type-intersection-raw))
+  "Represents an intersection type."
+  (types nil :type list))
 
 (defun make-type-intersection (types)
   "Convenience constructor for intersection types.
    TYPES is a list of type nodes."
-  (make-instance 'type-intersection
-                 :types types))
+  (make-type-intersection-raw :types types))
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Constructor (parametric/generic types)
-;;; ----------------------------------------------------------------------------
 
-(defclass type-constructor (type-node)
-  ((name :initarg :name
-         :reader type-constructor-name
-         :type symbol
-         :documentation "Name of the type constructor (e.g., List, Option, Pair).")
-   (args :initarg :args
-         :reader type-constructor-args
-         :type list
-         :documentation "List of type arguments applied to this constructor."))
-  (:documentation "Represents a parametric type like (List fixnum), (Option string).
-                   The NAME is the type constructor, ARGS are the type parameters."))
+(defstruct (type-constructor (:include type-node) (:constructor make-type-constructor-raw))
+  "Represents a parametric type like (List fixnum)."
+  (name nil :type symbol)
+  (args nil :type list))
 
 (defun make-type-constructor (name args)
   "Convenience constructor for parametric types.
    NAME is a symbol, ARGS is a list of type nodes."
-  (make-instance 'type-constructor
-                 :name name
-                 :args args))
+  (make-type-constructor-raw :name name :args args))
 
-;;; ----------------------------------------------------------------------------
 ;;; Unknown Type (escape hatch for gradual typing)
-;;; ----------------------------------------------------------------------------
 
-(defclass type-unknown (type-node)
-  ()
-  (:documentation "Represents an unknown type - escape hatch for gradual typing.
-                   Used when type information is unavailable or when explicit
-                   gradual typing is desired."))
+(defstruct (type-unknown (:include type-node))
+  "Represents an unknown type - escape hatch for gradual typing.")
 
-;;; ----------------------------------------------------------------------------
 ;;; Singleton Type Instances
-;;; ----------------------------------------------------------------------------
 
-(defvar type-int (make-instance 'type-primitive :name 'fixnum)
+(defvar type-int (make-type-primitive :name 'fixnum)
   "Singleton instance for fixnum type.")
 
-(defvar type-string (make-instance 'type-primitive :name 'string)
+(defvar type-string (make-type-primitive :name 'string)
   "Singleton instance for string type.")
 
-(defvar type-bool (make-instance 'type-primitive :name 'boolean)
+(defvar type-bool (make-type-primitive :name 'boolean)
   "Singleton instance for boolean type.")
 
-(defvar type-symbol (make-instance 'type-primitive :name 'symbol)
+(defvar type-symbol (make-type-primitive :name 'symbol)
   "Singleton instance for symbol type.")
 
-(defvar type-cons (make-instance 'type-primitive :name 'cons)
+(defvar type-cons (make-type-primitive :name 'cons)
   "Singleton instance for cons type.")
 
-(defvar type-null (make-instance 'type-primitive :name 'null)
+(defvar type-null (make-type-primitive :name 'null)
   "Singleton instance for null type.")
 
-(defvar type-any (make-instance 'type-primitive :name 't)
+(defvar type-any (make-type-primitive :name 't)
   "Singleton instance for universal type (top type).")
 
-(defvar +type-unknown+ (make-instance 'type-unknown)
+(defvar +type-unknown+ (make-type-unknown)
   "Singleton instance for unknown type (escape hatch for gradual typing).")
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Utility Functions
-;;; ----------------------------------------------------------------------------
 
 (defun type-equal-p (type1 type2)
   "Check structural equality of two types."

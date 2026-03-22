@@ -7,9 +7,7 @@
 
 (in-package :cl-cc)
 
-;;; ----------------------------------------------------------------------------
 ;;; Source Location Data Structure
-;;; ----------------------------------------------------------------------------
 
 (defstruct source-location
   "Structure to hold source location information."
@@ -26,9 +24,7 @@
   (column 0 :type fixnum)
   (position 0 :type fixnum))
 
-;;; ----------------------------------------------------------------------------
 ;;; Source Location Context
-;;; ----------------------------------------------------------------------------
 
 (defvar *source-file* nil
   "Current source file being read (bound dynamically).")
@@ -39,9 +35,7 @@
 (defvar *source-locations* nil
   "Hash table mapping cons cells to source locations.")
 
-;;; ----------------------------------------------------------------------------
 ;;; SBCL-Specific Line/Column Tracking
-;;; ----------------------------------------------------------------------------
 
 (defun get-stream-position (stream)
   "Get current position in stream."
@@ -63,9 +57,7 @@
   ;; Without low-level stream access, we approximate
   0)
 
-;;; ----------------------------------------------------------------------------
 ;;; Enhanced Reader with Location Tracking
-;;; ----------------------------------------------------------------------------
 
 (defun %make-source-location (stream &optional (file *source-file*))
   "Create a source-location structure for current position in STREAM."
@@ -97,9 +89,7 @@
       (let ((*source-input* stream))
         (read-with-location stream t nil)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Location-Preserving AST Creation
-;;; ----------------------------------------------------------------------------
 
 (defun lower-sexp-with-location-to-ast (sexp-location)
   "Convert a source-annotated-sexp to an AST with source location."
@@ -124,9 +114,7 @@
                            :source-column (source-location-column location))
         (lower-sexp-to-ast sexp))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Location-Aware Error Reporting
-;;; ----------------------------------------------------------------------------
 
 (define-condition reader-error-with-location (error)
   ((message :initarg :message :reader reader-error-message)
@@ -145,9 +133,7 @@
          :location location
          :message (apply #'format nil format-control format-args)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Batch Reading with Locations
-;;; ----------------------------------------------------------------------------
 
 (defun read-all-with-locations (stream &key (file nil))
   "Read all S-expressions from STREAM, returning a list of source-annotated-sexp objects."
@@ -175,9 +161,7 @@
   (with-open-file (stream pathname :direction :input)
     (read-all-with-locations stream :file (pathname pathname))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Integration with parse-source
-;;; ----------------------------------------------------------------------------
 
 (defun parse-source-from-file (pathname)
   "Parse the first S-expression from PATHNAME into an AST with locations."
@@ -193,9 +177,7 @@
                                :source-column (source-location-column location))
             (lower-sexp-to-ast sexp))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Debugging Utilities
-;;; ----------------------------------------------------------------------------
 
 (defun print-location (location &optional (stream *standard-output*))
   "Print a human-readable location string to STREAM."

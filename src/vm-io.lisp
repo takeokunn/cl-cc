@@ -1,8 +1,6 @@
 (in-package :cl-cc)
 
-;;; ----------------------------------------------------------------------------
 ;;; VM I/O State - Extended VM State for File I/O Operations
-;;; ----------------------------------------------------------------------------
 
 (defclass vm-io-state (vm-state)
   ((open-files :initform (make-hash-table :test #'eql)
@@ -24,108 +22,128 @@
 (defconstant +stdout-handle+ 1 "File handle for standard output")
 (defconstant +eof-value+ :eof "Special value returned at end of file")
 
-;;; ----------------------------------------------------------------------------
 ;;; I/O Instruction Classes
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-open-file (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst
-        :documentation "Register to store the file handle")
-   (path :initarg :path :reader vm-path
-         :documentation "Register containing the file path string")
-   (direction :initarg :direction :reader vm-file-direction
-              :documentation "Direction keyword: :input or :output"))
-  (:documentation "Open a file for reading or writing. Stores file handle in DST."))
+(define-vm-instruction vm-open-file (vm-instruction)
+  "Open a file for reading or writing. Stores file handle in DST."
+  (dst nil :reader vm-dst)
+  (path nil :reader vm-path)
+  (direction nil :reader vm-file-direction)
+  (:sexp-tag :open-file)
+  (:sexp-slots dst path direction))
 
-(defclass vm-close-file (vm-instruction)
-  ((handle :initarg :handle :reader vm-file-handle
-           :documentation "Register containing the file handle to close"))
-  (:documentation "Close a file handle."))
+(define-vm-instruction vm-close-file (vm-instruction)
+  "Close a file handle."
+  (handle nil :reader vm-file-handle)
+  (:sexp-tag :close-file)
+  (:sexp-slots handle))
 
-(defclass vm-read-char (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst
-        :documentation "Register to store the character read")
-   (handle :initarg :handle :reader vm-file-handle
-           :documentation "Register containing the file handle"))
-  (:documentation "Read a single character from a file."))
+(define-vm-instruction vm-read-char (vm-instruction)
+  "Read a single character from a file."
+  (dst nil :reader vm-dst)
+  (handle nil :reader vm-file-handle)
+  (:sexp-tag :read-char)
+  (:sexp-slots dst handle))
 
-(defclass vm-read-line (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst
-        :documentation "Register to store the line read (string)")
-   (handle :initarg :handle :reader vm-file-handle
-           :documentation "Register containing the file handle"))
-  (:documentation "Read a line from a file as a string."))
+(define-vm-instruction vm-read-line (vm-instruction)
+  "Read a line from a file as a string."
+  (dst nil :reader vm-dst)
+  (handle nil :reader vm-file-handle)
+  (:sexp-tag :read-line)
+  (:sexp-slots dst handle))
 
-(defclass vm-write-char (vm-instruction)
-  ((handle :initarg :handle :reader vm-file-handle
-           :documentation "Register containing the file handle")
-   (char :initarg :char :reader vm-char-reg
-         :documentation "Register containing the character to write"))
-  (:documentation "Write a single character to a file."))
+(define-vm-instruction vm-write-char (vm-instruction)
+  "Write a single character to a file."
+  (handle nil :reader vm-file-handle)
+  (char nil :reader vm-char-reg)
+  (:sexp-tag :write-char)
+  (:sexp-slots handle char))
 
-(defclass vm-write-string (vm-instruction)
-  ((handle :initarg :handle :reader vm-file-handle
-           :documentation "Register containing the file handle")
-   (str :initarg :str :reader vm-str-reg
-        :documentation "Register containing the string to write"))
-  (:documentation "Write a string to a file."))
+(define-vm-instruction vm-write-string (vm-instruction)
+  "Write a string to a file."
+  (handle nil :reader vm-file-handle)
+  (str nil :reader vm-str-reg)
+  (:sexp-tag :write-string)
+  (:sexp-slots handle str))
 
-(defclass vm-peek-char (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst
-        :documentation "Register to store the peeked character")
-   (handle :initarg :handle :reader vm-file-handle
-           :documentation "Register containing the file handle"))
-  (:documentation "Peek at the next character without consuming it."))
+(define-vm-instruction vm-peek-char (vm-instruction)
+  "Peek at the next character without consuming it."
+  (dst nil :reader vm-dst)
+  (handle nil :reader vm-file-handle)
+  (:sexp-tag :peek-char)
+  (:sexp-slots dst handle))
 
-(defclass vm-unread-char (vm-instruction)
-  ((handle :initarg :handle :reader vm-file-handle
-           :documentation "Register containing the file handle")
-   (char :initarg :char :reader vm-char-reg
-         :documentation "Register containing the character to put back"))
-  (:documentation "Put a character back onto the input stream."))
+(define-vm-instruction vm-unread-char (vm-instruction)
+  "Put a character back onto the input stream."
+  (handle nil :reader vm-file-handle)
+  (char nil :reader vm-char-reg)
+  (:sexp-tag :unread-char)
+  (:sexp-slots handle char))
 
-(defclass vm-file-position (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst
-        :documentation "Register to store current position (when getting)")
-   (handle :initarg :handle :reader vm-file-handle
-           :documentation "Register containing the file handle")
-   (position :initarg :position :reader vm-position-reg :initform nil
-             :documentation "Register containing new position (when setting)"))
-  (:documentation "Get or set the file position."))
+;; Custom sexp: conditional on optional position slot
+(define-vm-instruction vm-file-position (vm-instruction)
+  "Get or set the file position."
+  (dst nil :reader vm-dst)
+  (handle nil :reader vm-file-handle)
+  (position nil :reader vm-position-reg))
 
-(defclass vm-file-length (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst
-        :documentation "Register to store the file length")
-   (handle :initarg :handle :reader vm-file-handle
-           :documentation "Register containing the file handle"))
-  (:documentation "Get the length of a file in bytes."))
+(defmethod instruction->sexp ((inst vm-file-position))
+  (if (vm-position-reg inst)
+      (list :file-position (vm-dst inst) (vm-file-handle inst) (vm-position-reg inst))
+      (list :file-position (vm-dst inst) (vm-file-handle inst))))
 
-(defclass vm-eof-p (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst
-        :documentation "Register to store boolean result (1 if EOF, 0 otherwise)")
-   (value :initarg :value :reader vm-value
-          :documentation "Register containing value to check for EOF"))
-  (:documentation "Check if a value is the EOF marker."))
+(setf (gethash :file-position *instruction-constructors*)
+      (lambda (sexp)
+        (if (fourth sexp)
+            (make-vm-file-position :dst (second sexp)
+                                   :handle (third sexp)
+                                   :position (fourth sexp))
+            (make-vm-file-position :dst (second sexp)
+                                   :handle (third sexp)))))
 
-(defclass vm-make-string-stream (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst
-        :documentation "Register to store the stream handle")
-   (direction :initarg :direction :reader vm-stream-direction
-              :documentation "Direction: :input or :output")
-   (initial-string :initarg :initial-string :reader vm-initial-string :initform nil
-                   :documentation "Optional register containing initial string for input streams"))
-  (:documentation "Create an in-memory string stream."))
+(define-vm-instruction vm-file-length (vm-instruction)
+  "Get the length of a file in bytes."
+  (dst nil :reader vm-dst)
+  (handle nil :reader vm-file-handle)
+  (:sexp-tag :file-length)
+  (:sexp-slots dst handle))
 
-(defclass vm-get-string-from-stream (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst
-        :documentation "Register to store the accumulated string")
-   (handle :initarg :handle :reader vm-file-handle
-           :documentation "Register containing the output string stream handle"))
-  (:documentation "Get accumulated string from an output string stream."))
+(define-vm-instruction vm-eof-p (vm-instruction)
+  "Check if a value is the EOF marker."
+  (dst nil :reader vm-dst)
+  (value nil :reader vm-value)
+  (:sexp-tag :eof-p)
+  (:sexp-slots dst value))
 
-;;; ----------------------------------------------------------------------------
+;; Custom sexp: conditional on optional initial-string slot
+(define-vm-instruction vm-make-string-stream (vm-instruction)
+  "Create an in-memory string stream."
+  (dst nil :reader vm-dst)
+  (direction nil :reader vm-stream-direction)
+  (initial-string nil :reader vm-initial-string))
+
+(defmethod instruction->sexp ((inst vm-make-string-stream))
+  (if (vm-initial-string inst)
+      (list :make-string-stream (vm-dst inst) (vm-stream-direction inst) (vm-initial-string inst))
+      (list :make-string-stream (vm-dst inst) (vm-stream-direction inst))))
+
+(setf (gethash :make-string-stream *instruction-constructors*)
+      (lambda (sexp)
+        (if (fourth sexp)
+            (make-vm-make-string-stream :dst (second sexp)
+                                        :direction (third sexp)
+                                        :initial-string (fourth sexp))
+            (make-vm-make-string-stream :dst (second sexp)
+                                        :direction (third sexp)))))
+
+(define-vm-instruction vm-get-string-from-stream (vm-instruction)
+  "Get accumulated string from an output string stream."
+  (dst nil :reader vm-dst)
+  (handle nil :reader vm-file-handle)
+  (:sexp-tag :get-string-from-stream)
+  (:sexp-slots dst handle))
+
 ;;; I/O Helper Functions
-;;; ----------------------------------------------------------------------------
 
 (defun vm-get-stream (state handle)
   "Get the stream associated with HANDLE from STATE.
@@ -154,118 +172,7 @@ Handles special cases for stdin (0) and stdout (1)."
       (gethash handle (vm-open-files state))
       (gethash handle (vm-string-streams state))))
 
-;;; ----------------------------------------------------------------------------
-;;; Instruction -> S-expression Conversion
-;;; ----------------------------------------------------------------------------
-
-(defmethod instruction->sexp ((inst vm-open-file))
-  (list :open-file (vm-dst inst) (vm-path inst) (vm-file-direction inst)))
-
-(defmethod instruction->sexp ((inst vm-close-file))
-  (list :close-file (vm-file-handle inst)))
-
-(defmethod instruction->sexp ((inst vm-read-char))
-  (list :read-char (vm-dst inst) (vm-file-handle inst)))
-
-(defmethod instruction->sexp ((inst vm-read-line))
-  (list :read-line (vm-dst inst) (vm-file-handle inst)))
-
-(defmethod instruction->sexp ((inst vm-write-char))
-  (list :write-char (vm-file-handle inst) (vm-char-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-write-string))
-  (list :write-string (vm-file-handle inst) (vm-str-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-peek-char))
-  (list :peek-char (vm-dst inst) (vm-file-handle inst)))
-
-(defmethod instruction->sexp ((inst vm-unread-char))
-  (list :unread-char (vm-file-handle inst) (vm-char-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-file-position))
-  (if (vm-position-reg inst)
-      (list :file-position (vm-dst inst) (vm-file-handle inst) (vm-position-reg inst))
-      (list :file-position (vm-dst inst) (vm-file-handle inst))))
-
-(defmethod instruction->sexp ((inst vm-file-length))
-  (list :file-length (vm-dst inst) (vm-file-handle inst)))
-
-(defmethod instruction->sexp ((inst vm-eof-p))
-  (list :eof-p (vm-dst inst) (vm-value inst)))
-
-(defmethod instruction->sexp ((inst vm-make-string-stream))
-  (if (vm-initial-string inst)
-      (list :make-string-stream (vm-dst inst) (vm-stream-direction inst) (vm-initial-string inst))
-      (list :make-string-stream (vm-dst inst) (vm-stream-direction inst))))
-
-(defmethod instruction->sexp ((inst vm-get-string-from-stream))
-  (list :get-string-from-stream (vm-dst inst) (vm-file-handle inst)))
-
-;;; ----------------------------------------------------------------------------
-;;; S-expression -> Instruction Conversion
-;;; ----------------------------------------------------------------------------
-
-;; Extend the existing sexp->instruction method by adding cases
-;; Note: This requires modifying the primary method or using :around
-;; For now, we provide a helper function that can be integrated
-
-(defun io-sexp->instruction (sexp)
-  "Convert I/O-related S-expressions to instruction objects."
-  (case (car sexp)
-    (:open-file (make-instance 'vm-open-file
-                               :dst (second sexp)
-                               :path (third sexp)
-                               :direction (or (fourth sexp) :input)))
-    (:close-file (make-instance 'vm-close-file
-                                :handle (second sexp)))
-    (:read-char (make-instance 'vm-read-char
-                               :dst (second sexp)
-                               :handle (third sexp)))
-    (:read-line (make-instance 'vm-read-line
-                               :dst (second sexp)
-                               :handle (third sexp)))
-    (:write-char (make-instance 'vm-write-char
-                                :handle (second sexp)
-                                :char (third sexp)))
-    (:write-string (make-instance 'vm-write-string
-                                  :handle (second sexp)
-                                  :str (third sexp)))
-    (:peek-char (make-instance 'vm-peek-char
-                               :dst (second sexp)
-                               :handle (third sexp)))
-    (:unread-char (make-instance 'vm-unread-char
-                                 :handle (second sexp)
-                                 :char (third sexp)))
-    (:file-position (if (fourth sexp)
-                        (make-instance 'vm-file-position
-                                       :dst (second sexp)
-                                       :handle (third sexp)
-                                       :position (fourth sexp))
-                        (make-instance 'vm-file-position
-                                       :dst (second sexp)
-                                       :handle (third sexp))))
-    (:file-length (make-instance 'vm-file-length
-                                 :dst (second sexp)
-                                 :handle (third sexp)))
-    (:eof-p (make-instance 'vm-eof-p
-                           :dst (second sexp)
-                           :value (third sexp)))
-    (:make-string-stream (if (fourth sexp)
-                             (make-instance 'vm-make-string-stream
-                                            :dst (second sexp)
-                                            :direction (third sexp)
-                                            :initial-string (fourth sexp))
-                             (make-instance 'vm-make-string-stream
-                                            :dst (second sexp)
-                                            :direction (third sexp))))
-    (:get-string-from-stream (make-instance 'vm-get-string-from-stream
-                                            :dst (second sexp)
-                                            :handle (third sexp)))
-    (otherwise nil)))
-
-;;; ----------------------------------------------------------------------------
 ;;; Instruction Execution for I/O Operations
-;;; ----------------------------------------------------------------------------
 
 (defmethod execute-instruction ((inst vm-open-file) state pc labels)
   (declare (ignore labels))
@@ -410,9 +317,7 @@ Handles special cases for stdin (0) and stdout (1)."
           (values (1+ pc) nil nil))
         (error "vm-get-string-from-stream: Handle ~A is not an output string stream" handle))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Convenience Functions for Running I/O Programs
-;;; ----------------------------------------------------------------------------
 
 (defun run-compiled-with-io (program &key
                                        (output-stream *standard-output*)
@@ -444,86 +349,76 @@ OUTPUT-STREAM and INPUT-STREAM can be specified to redirect I/O."
                           :output-stream output-stream
                           :input-stream input-stream)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Simple I/O Instructions (work with any vm-state, use *standard-output*)
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-princ (vm-instruction)
-  ((src :initarg :src :reader vm-src))
-  (:documentation "Print object readably (no escaping) to *standard-output*."))
+(define-vm-instruction vm-princ (vm-instruction)
+  "Print object readably (no escaping) to *standard-output*."
+  (src nil :reader vm-src)
+  (:sexp-tag :princ)
+  (:sexp-slots src))
 
-(defclass vm-prin1 (vm-instruction)
-  ((src :initarg :src :reader vm-src))
-  (:documentation "Print object with escaping to *standard-output*."))
+(define-vm-instruction vm-prin1 (vm-instruction)
+  "Print object with escaping to *standard-output*."
+  (src nil :reader vm-src)
+  (:sexp-tag :prin1)
+  (:sexp-slots src))
 
-(defclass vm-print-inst (vm-instruction)
-  ((src :initarg :src :reader vm-src))
-  (:documentation "Print object with newline prefix and space suffix to *standard-output*."))
+(define-vm-instruction vm-print-inst (vm-instruction)
+  "Print object with newline prefix and space suffix to *standard-output*."
+  (src nil :reader vm-src)
+  (:sexp-tag :print)
+  (:sexp-slots src))
 
-(defclass vm-terpri-inst (vm-instruction)
-  ()
-  (:documentation "Output a newline to *standard-output*."))
+(define-vm-instruction vm-terpri-inst (vm-instruction)
+  "Output a newline to *standard-output*."
+  (:sexp-tag :terpri))
 
-(defclass vm-fresh-line-inst (vm-instruction)
-  ()
-  (:documentation "Output a newline if not at start of line to *standard-output*."))
+(define-vm-instruction vm-fresh-line-inst (vm-instruction)
+  "Output a newline if not at start of line to *standard-output*."
+  (:sexp-tag :fresh-line))
 
-(defclass vm-write-to-string-inst (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Convert object to its printed representation as a string."))
+(define-vm-instruction vm-write-to-string-inst (vm-instruction)
+  "Convert object to its printed representation as a string."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :write-to-string)
+  (:sexp-slots dst src))
 
-(defclass vm-format-inst (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (fmt :initarg :fmt :reader vm-fmt)
-   (arg-regs :initarg :arg-regs :reader vm-arg-regs))
-  (:documentation "Format string with arguments. Result string stored in DST."))
-
-(defclass vm-make-string-output-stream-inst (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst))
-  (:documentation "Create a string output stream, store in DST."))
-
-(defclass vm-get-output-stream-string-inst (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Extract accumulated string from string output stream in SRC, store in DST."))
-
-(defclass vm-stream-write-string-inst (vm-instruction)
-  ((stream-reg :initarg :stream :reader vm-stream-reg)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Write string in SRC to stream in STREAM-REG."))
-
-;;; Instruction -> S-expression for simple I/O
-
-(defmethod instruction->sexp ((inst vm-princ))
-  (list :princ (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-prin1))
-  (list :prin1 (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-print-inst))
-  (list :print (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-terpri-inst))
-  (list :terpri))
-
-(defmethod instruction->sexp ((inst vm-fresh-line-inst))
-  (list :fresh-line))
-
-(defmethod instruction->sexp ((inst vm-write-to-string-inst))
-  (list :write-to-string (vm-dst inst) (vm-src inst)))
+;; Custom sexp: uses list* with variadic arg-regs
+(define-vm-instruction vm-format-inst (vm-instruction)
+  "Format string with arguments. Result string stored in DST."
+  (dst nil :reader vm-dst)
+  (fmt nil :reader vm-fmt)
+  (arg-regs nil :reader vm-arg-regs))
 
 (defmethod instruction->sexp ((inst vm-format-inst))
   (list* :format (vm-dst inst) (vm-fmt inst) (vm-arg-regs inst)))
 
-(defmethod instruction->sexp ((inst vm-make-string-output-stream-inst))
-  (list :make-string-output-stream (vm-dst inst)))
+(setf (gethash :format *instruction-constructors*)
+      (lambda (sexp)
+        (make-vm-format-inst :dst (second sexp)
+                             :fmt (third sexp)
+                             :arg-regs (cdddr sexp))))
 
-(defmethod instruction->sexp ((inst vm-get-output-stream-string-inst))
-  (list :get-output-stream-string (vm-dst inst) (vm-src inst)))
+(define-vm-instruction vm-make-string-output-stream-inst (vm-instruction)
+  "Create a string output stream, store in DST."
+  (dst nil :reader vm-dst)
+  (:sexp-tag :make-string-output-stream)
+  (:sexp-slots dst))
 
-(defmethod instruction->sexp ((inst vm-stream-write-string-inst))
-  (list :stream-write-string (vm-stream-reg inst) (vm-src inst)))
+(define-vm-instruction vm-get-output-stream-string-inst (vm-instruction)
+  "Extract accumulated string from string output stream in SRC, store in DST."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :get-output-stream-string)
+  (:sexp-slots dst src))
+
+(define-vm-instruction vm-stream-write-string-inst (vm-instruction)
+  "Write string in SRC to stream in STREAM-REG."
+  (stream-reg nil :reader vm-stream-reg)
+  (src nil :reader vm-src)
+  (:sexp-tag :stream-write-string)
+  (:sexp-slots stream-reg src))
 
 ;;; Execute simple I/O instructions
 
@@ -587,25 +482,21 @@ OUTPUT-STREAM and INPUT-STREAM can be specified to redirect I/O."
     (write-string str stream)
     (values (1+ pc) nil nil)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Reader Instructions (use host CL reader for bootstrap)
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-read-from-string-inst (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Read an S-expression from a string using host CL reader."))
+(define-vm-instruction vm-read-from-string-inst (vm-instruction)
+  "Read an S-expression from a string using host CL reader."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :read-from-string)
+  (:sexp-slots dst src))
 
-(defclass vm-read-sexp-inst (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Read an S-expression from a stream handle using host CL reader."))
-
-(defmethod instruction->sexp ((inst vm-read-from-string-inst))
-  (list :read-from-string (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-read-sexp-inst))
-  (list :read-sexp (vm-dst inst) (vm-src inst)))
+(define-vm-instruction vm-read-sexp-inst (vm-instruction)
+  "Read an S-expression from a stream handle using host CL reader."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :read-sexp)
+  (:sexp-slots dst src))
 
 (defmethod execute-instruction ((inst vm-read-from-string-inst) state pc labels)
   (declare (ignore labels))

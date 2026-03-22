@@ -5,9 +5,7 @@
 
 (in-package :cl-cc)
 
-;;; ----------------------------------------------------------------------------
 ;;; x86-64 Register Encoding
-;;; ----------------------------------------------------------------------------
 
 ;; Register codes (4-bit values)
 ;; Low registers (0-7): RAX-RDI, REX.B = 0
@@ -35,9 +33,7 @@
 ;; Preserved: RBX, RBP, R12-R15
 ;; Temp: RAX, RCX, RDX, RSI, RDI, R8-R11
 
-;;; ----------------------------------------------------------------------------
 ;;; Output Stream Utilities
-;;; ----------------------------------------------------------------------------
 
 (defmacro with-output-to-vector ((stream-var) &body body)
   "Execute BODY with STREAM-VAR bound to an output stream that collects bytes into a vector."
@@ -69,18 +65,14 @@
   (emit-dword (logand qword #xFFFFFFFF) stream)
   (emit-dword (ash qword -32) stream))
 
-;;; ----------------------------------------------------------------------------
 ;;; REX Prefix
-;;; ----------------------------------------------------------------------------
 
 (defun rex-prefix (&key (w 0) (r 0) (x 0) (b 0))
   "Build REX prefix byte.
    W=1: 64-bit operand, R: ModR/M reg extension, B: ModR/M r/m extension"
   (+ #x40 (ash w 3) (ash r 2) (ash x 1) b))
 
-;;; ----------------------------------------------------------------------------
 ;;; ModR/M Encoding
-;;; ----------------------------------------------------------------------------
 
 (defun modrm (mod reg rm)
   "Build ModR/M byte.
@@ -91,9 +83,7 @@
      (ash (logand reg #x7) 3)
      (logand rm #x7)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Instructions
-;;; ----------------------------------------------------------------------------
 
 (defun emit-mov-rr64 (dst src stream)
   "MOV dst, src (64-bit register to register).
@@ -222,9 +212,7 @@
   (emit-byte #x85 stream)
   (emit-dword offset stream))
 
-;;; ----------------------------------------------------------------------------
 ;;; VM to Machine Code Translation
-;;; ----------------------------------------------------------------------------
 
 (defvar *current-regalloc* nil
   "When non-nil, the current regalloc-result used during code generation.")
@@ -307,9 +295,7 @@
     (emit-mov-rr64 dst lhs stream)
     (emit-imul-rr64 dst rhs stream)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Compare with Zero
-;;; ----------------------------------------------------------------------------
 
 (defun emit-cmp-ri64 (reg imm stream)
   "CMP reg, imm32 (compare register with 32-bit sign-extended immediate).
@@ -328,9 +314,7 @@
   (emit-byte #x85 stream)
   (emit-byte (modrm 3 reg2 reg1) stream))
 
-;;; ----------------------------------------------------------------------------
 ;;; Two-Pass Code Generation (Labels + Jumps)
-;;; ----------------------------------------------------------------------------
 
 (defun instruction-size (inst)
   "Estimate the size in bytes of the x86-64 encoding for a VM instruction.
@@ -364,9 +348,7 @@
       (incf pos (instruction-size inst)))
     offsets))
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Instruction Emitters (with label support)
-;;; ----------------------------------------------------------------------------
 
 (defun emit-vm-halt-inst (inst stream)
   "Emit code for VM HALT instruction.
@@ -472,9 +454,7 @@
     ;; Return
     (emit-ret stream)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Public API
-;;; ----------------------------------------------------------------------------
 
 (defun compile-to-x86-64-bytes (program)
   "Compile VM program to x86-64 machine code bytes.
@@ -483,9 +463,9 @@
   ;; Run register allocation before emitting machine code
   (let* ((instructions (vm-program-instructions program))
          (ra (allocate-registers instructions *x86-64-calling-convention*))
-         (allocated-program (make-instance 'vm-program
-                                           :instructions (regalloc-instructions ra)
-                                           :result-register (vm-program-result-register program))))
+         (allocated-program (make-vm-program
+                             :instructions (regalloc-instructions ra)
+                             :result-register (vm-program-result-register program))))
     ;; Store the regalloc result for use during code generation
     (let ((*current-regalloc* ra))
       (with-output-to-vector (stream)

@@ -42,6 +42,6 @@ rlwrap sbcl
 (asdf:load-system :cl-cc)
 
 (cl-cc:run-string "(+ 1 2)")
-(getf (cl-cc:compile-string "(+ 1 2)" :target :x86_64) :assembly)
-(getf (cl-cc:compile-string "(+ 1 2)" :target :aarch64) :assembly)
+(cl-cc:compilation-result-assembly (cl-cc:compile-string "(+ 1 2)" :target :x86_64))
+(cl-cc:compilation-result-assembly (cl-cc:compile-string "(+ 1 2)" :target :aarch64))
 ```

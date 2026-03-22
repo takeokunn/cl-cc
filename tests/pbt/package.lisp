@@ -37,6 +37,31 @@
                 :ast-call
                 :ast-quote
                 :ast-the
+                ;; AST constructors (defstruct BOA)
+                :make-ast-int
+                :make-ast-var
+                :make-ast-binop
+                :make-ast-if
+                :make-ast-progn
+                :make-ast-print
+                :make-ast-let
+                :make-ast-lambda
+                :make-ast-function
+                :make-ast-flet
+                :make-ast-labels
+                :make-ast-block
+                :make-ast-return-from
+                :make-ast-tagbody
+                :make-ast-go
+                :make-ast-setq
+                :make-ast-multiple-value-call
+                :make-ast-multiple-value-prog1
+                :make-ast-call
+                :make-ast-quote
+                :make-ast-the
+                :make-ast-catch
+                :make-ast-throw
+                :make-ast-unwind-protect
                 ;; AST operations
                 :ast-to-sexp
                 :lower-sexp-to-ast
@@ -108,6 +133,11 @@
                 :vm-rplacd
                 :vm-make-closure
                 :vm-closure-ref-idx
+                ;; VM Instruction constructors (defstruct)
+                :make-vm-add :make-vm-car :make-vm-cdr
+                :make-vm-closure-ref-idx :make-vm-cons :make-vm-const
+                :make-vm-make-closure :make-vm-move :make-vm-mul
+                :make-vm-rplaca :make-vm-rplacd :make-vm-sub
                 ;; VM Helpers
                 :vm-reg-get
                 :vm-reg-set

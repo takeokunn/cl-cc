@@ -10,9 +10,7 @@
 
 (in-suite cl-cc-suite)
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Representation Tests
-;;; ----------------------------------------------------------------------------
 
 (test type-repr-singleton-primitives
   "Test that singleton type instances exist and are type-primitive."
@@ -44,7 +42,7 @@
 
 (test type-repr-function-type
   "Test function type construction and accessors."
-  (let ((fn-type (make-instance 'type-function
+  (let ((fn-type (make-type-function-raw
                                 :params (list type-int type-int)
                                 :return type-int)))
     (is (typep fn-type 'type-function))
@@ -60,13 +58,13 @@
   (let ((v1 (make-type-variable)))
     (is (not (null (type-equal-p v1 v1)))))
   ;; Function types
-  (let ((fn1 (make-instance 'type-function
+  (let ((fn1 (make-type-function-raw
                             :params (list type-int)
                             :return type-int))
-        (fn2 (make-instance 'type-function
+        (fn2 (make-type-function-raw
                             :params (list type-int)
                             :return type-int))
-        (fn3 (make-instance 'type-function
+        (fn3 (make-type-function-raw
                             :params (list type-string)
                             :return type-int)))
     (is (not (null (type-equal-p fn1 fn2))))
@@ -79,7 +77,7 @@
   (is (string= "BOOLEAN" (type-to-string type-bool)))
   (is (string= "?" (type-to-string +type-unknown+)))
   ;; Function type
-  (let ((fn (make-instance 'type-function
+  (let ((fn (make-type-function-raw
                            :params (list type-int)
                            :return type-int)))
     (is (string= "FIXNUM -> FIXNUM" (type-to-string fn)))))
@@ -89,9 +87,7 @@
   (is (typep +type-unknown+ 'type-unknown))
   (is (not (null (type-equal-p +type-unknown+ +type-unknown+)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Unification Tests
-;;; ----------------------------------------------------------------------------
 
 (test unify-primitive-same
   "Test that same primitive types unify successfully."
@@ -133,10 +129,10 @@
 (test unify-function-types-structural
   "Test that function types unify structurally."
   (let* ((v (make-type-variable))
-         (fn1 (make-instance 'type-function
+         (fn1 (make-type-function-raw
                              :params (list v)
                              :return type-int))
-         (fn2 (make-instance 'type-function
+         (fn2 (make-type-function-raw
                              :params (list type-string)
                              :return type-int)))
     (multiple-value-bind (result ok) (type-unify fn1 fn2)
@@ -148,10 +144,10 @@
 
 (test unify-function-types-arity-mismatch
   "Test that function types with different arities fail to unify."
-  (let ((fn1 (make-instance 'type-function
+  (let ((fn1 (make-type-function-raw
                             :params (list type-int)
                             :return type-int))
-        (fn2 (make-instance 'type-function
+        (fn2 (make-type-function-raw
                             :params (list type-int type-int)
                             :return type-int)))
     (multiple-value-bind (subst ok) (type-unify fn1 fn2)
@@ -161,7 +157,7 @@
 (test unify-occurs-check
   "Test that occurs check prevents infinite types."
   (let* ((v (make-type-variable))
-         (fn (make-instance 'type-function
+         (fn (make-type-function-raw
                             :params (list v)
                             :return type-int)))
     ;; Trying to unify v with a type containing v should fail
@@ -232,9 +228,7 @@
         (let ((result (type-substitute v1 subst2)))
           (is (not (null (type-equal-p result type-int)))))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Inference Tests
-;;; ----------------------------------------------------------------------------
 
 (test infer-integer-literal
   "Test that integer literals infer to type-int."
@@ -364,14 +358,12 @@
       (declare (ignore subst))
       (is (not (null (type-equal-p ty type-int)))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Generalization / Instantiation Tests
-;;; ----------------------------------------------------------------------------
 
 (test generalize-no-env-vars
   "Test that generalize quantifies all free variables."
   (let* ((v (make-type-variable 'a))
-         (fn-type (make-instance 'type-function
+         (fn-type (make-type-function-raw
                                  :params (list v)
                                  :return v))
          (scheme (generalize nil fn-type)))
@@ -383,7 +375,7 @@
   "Test that variables free in env are not quantified."
   (let* ((v1 (make-type-variable 'a))
          (v2 (make-type-variable 'b))
-         (fn-type (make-instance 'type-function
+         (fn-type (make-type-function-raw
                                  :params (list v1)
                                  :return v2))
          ;; v1 is free in the environment
@@ -398,7 +390,7 @@
 (test instantiate-creates-fresh-vars
   "Test that instantiation creates fresh type variables."
   (let* ((v (make-type-variable 'a))
-         (fn-type (make-instance 'type-function
+         (fn-type (make-type-function-raw
                                  :params (list v)
                                  :return v))
          (scheme (make-type-scheme (list v) fn-type))
@@ -430,9 +422,7 @@
     (is (null (type-scheme-quantified-vars scheme)))
     (is (not (null (type-equal-p (type-scheme-type scheme) type-int))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Free Variables Tests
-;;; ----------------------------------------------------------------------------
 
 (test free-vars-primitive
   "Test that primitives have no free variables."
@@ -450,15 +440,13 @@
   "Test free variables in function types."
   (let* ((v1 (make-type-variable))
          (v2 (make-type-variable))
-         (fn (make-instance 'type-function
+         (fn (make-type-function-raw
                             :params (list v1)
                             :return v2))
          (fv (type-free-vars fn)))
     (is (= 2 (length fv)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Substitution Tests
-;;; ----------------------------------------------------------------------------
 
 (test substitution-empty
   "Test that empty substitution leaves types unchanged."
@@ -480,7 +468,7 @@
 (test substitution-function-type
   "Test substitution through function types."
   (let* ((v (make-type-variable))
-         (fn (make-instance 'type-function
+         (fn (make-type-function-raw
                             :params (list v)
                             :return v))
          (subst (extend-subst v type-int (empty-subst)))
@@ -489,15 +477,13 @@
     (is (not (null (type-equal-p (first (type-function-params result)) type-int))))
     (is (not (null (type-equal-p (type-function-return result) type-int))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Normalize Type Variables Tests
-;;; ----------------------------------------------------------------------------
 
 (test normalize-type-variables-canonical
   "Test that normalize produces canonical variable names."
   (let* ((v1 (make-type-variable))
          (v2 (make-type-variable))
-         (fn (make-instance 'type-function
+         (fn (make-type-function-raw
                             :params (list v1)
                             :return v2))
          (normalized (normalize-type-variables fn)))

@@ -1,8 +1,6 @@
 (in-package :cl-cc)
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Heap Object Base Class
-;;; ----------------------------------------------------------------------------
 
 (defclass vm-heap-object ()
   ()
@@ -10,18 +8,13 @@
 Provides a common supertype for heap-allocated VM objects like cons cells,
 closures, and reader states."))
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Heap Address Wrapper
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-heap-address ()
-  ((address :initarg :address :reader vm-heap-address-value
-            :type integer :documentation "The heap address (index) of this object."))
-  (:documentation "Wrapper for heap addresses to distinguish them from regular integers."))
+(defstruct vm-heap-address
+  "Wrapper for heap addresses to distinguish them from regular integers."
+  (value 0 :type integer))
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Closure Object
-;;; ----------------------------------------------------------------------------
 
 (defclass vm-closure-object (vm-heap-object)
   ((entry-label :initarg :entry-label :reader vm-closure-entry-label
@@ -38,9 +31,7 @@ closures, and reader states."))
         :documentation "Captured lexical environment values as alist"))
   (:documentation "Represents a closure with code and captured environment."))
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Cons Cell (Heap-based)
-;;; ----------------------------------------------------------------------------
 
 (defclass vm-cons-cell (vm-heap-object)
   ((car :initarg :car :accessor vm-cons-cell-car
@@ -49,123 +40,267 @@ closures, and reader states."))
         :documentation "The cdr (second) element of the cons cell"))
   (:documentation "Heap-allocated cons cell for VM list operations."))
 
-;;; ----------------------------------------------------------------------------
+;;; VM Instruction DSL (Phase 8/9)
+
+(defstruct vm-instruction
+  "Base struct for all VM instructions.")
+
+(defvar *instruction-constructors* (make-hash-table :test 'eq)
+  "Hash table mapping sexp tags (keywords) to constructor functions for sexp->instruction.")
+
+(defgeneric instruction->sexp (instruction)
+  (:documentation "Convert a VM instruction to its sexp representation."))
+
+(defgeneric sexp->instruction (sexp)
+  (:documentation "Convert a sexp to a VM instruction."))
+
+(defmethod sexp->instruction ((sexp cons))
+  (let ((constructor (gethash (car sexp) *instruction-constructors*)))
+    (if constructor
+        (funcall constructor sexp)
+        (error "Unknown instruction sexp: ~S" sexp))))
+
+(defmacro define-vm-instruction (name (parent) &body body)
+  "Define a VM instruction as a defstruct with auto-generated sexp serialization.
+NAME is the struct name. PARENT is the parent struct to :include.
+BODY contains slot definitions, an optional docstring, and options.
+
+Slot definition: (slot-name initform &key reader type)
+Options:
+  (:sexp-tag :keyword) - keyword for instruction->sexp / sexp->instruction
+  (:sexp-slots s1 s2 ...) - slot names in sexp field order (default: all own slots)"
+  (let (docstring slots sexp-tag sexp-slots conc-name-override)
+    (dolist (form body)
+      (cond
+        ((stringp form) (setf docstring form))
+        ((and (consp form) (eq (car form) :sexp-tag))
+         (setf sexp-tag (cadr form)))
+        ((and (consp form) (eq (car form) :sexp-slots))
+         (setf sexp-slots (cdr form)))
+        ((and (consp form) (eq (car form) :conc-name))
+         (setf conc-name-override (cadr form)))
+        ((consp form) (push form slots))
+        (t (error "Invalid form in define-vm-instruction: ~S" form))))
+    (setf slots (nreverse slots))
+    (unless sexp-slots
+      (setf sexp-slots (mapcar #'car slots)))
+    (let ((prefix (if conc-name-override
+                      (string conc-name-override)
+                      (concatenate 'string (symbol-name name) "-"))))
+      (labels ((struct-acc (slot)
+                 (intern (format nil "~A~A" prefix (symbol-name slot))))
+               (ctor ()
+                 (intern (format nil "MAKE-~A" (symbol-name name))))
+               (pos-form (n)
+                 (case n
+                   (1 '(second sexp)) (2 '(third sexp)) (3 '(fourth sexp))
+                   (4 '(fifth sexp)) (5 '(sixth sexp)) (6 '(seventh sexp))
+                   (t `(nth ,n sexp)))))
+        `(progn
+           (defstruct (,name (:include ,parent)
+                            ,@(when conc-name-override
+                                `((:conc-name ,conc-name-override))))
+             ,@(when docstring `(,docstring))
+             ,@(mapcar (lambda (slot)
+                         (let ((sname (car slot))
+                               (init (cadr slot))
+                               (type (getf (cddr slot) :type)))
+                           (if type `(,sname ,init :type ,type) `(,sname ,init))))
+                       slots))
+           ,@(loop for slot in slots
+                   for sname = (car slot)
+                   for reader = (getf (cddr slot) :reader)
+                   when (and reader (not (eq reader (struct-acc sname))))
+                   collect `(eval-when (:compile-toplevel :load-toplevel :execute)
+                              (unless (fboundp ',reader)
+                                (defgeneric ,reader (inst)))
+                              (defmethod ,reader ((inst ,name))
+                                (,(struct-acc sname) inst))))
+           ,@(when sexp-tag
+               `((defmethod instruction->sexp ((inst ,name))
+                   (list ,sexp-tag
+                         ,@(mapcar (lambda (s) `(,(struct-acc s) inst))
+                                   sexp-slots)))
+                 (setf (gethash ,sexp-tag *instruction-constructors*)
+                       (lambda (sexp)
+                         ,@(unless sexp-slots '((declare (ignore sexp))))
+                         (,(ctor)
+                          ,@(loop for s in sexp-slots
+                                  for i from 1
+                                  append `(,(intern (symbol-name s) :keyword)
+                                           ,(pos-form i)))))))))))))
+
+;;; Simple Instruction Method Generator
+
+(defmacro define-simple-instruction (name shape cl-func &key (src 'vm-src) (dst 'vm-dst) (lhs 'vm-lhs) (rhs 'vm-rhs))
+  "Generate a simple execute-instruction method.
+SHAPE is one of:
+  :unary  — (CL-FUNC (vm-reg-get state (SRC inst))) → dst
+  :binary — (CL-FUNC (vm-reg-get state (LHS inst)) (vm-reg-get state (RHS inst))) → dst
+  :pred1  — (if (CL-FUNC (vm-reg-get state (SRC inst))) 1 0) → dst
+  :pred2  — (if (CL-FUNC (vm-reg-get state (LHS inst)) (vm-reg-get state (RHS inst))) 1 0) → dst"
+  (let ((inst (gensym "INST"))
+        (state (gensym "STATE"))
+        (pc (gensym "PC")))
+    `(defmethod execute-instruction ((,inst ,name) ,state ,pc labels)
+       (declare (ignore labels))
+       (vm-reg-set ,state (,dst ,inst)
+                   ,(ecase shape
+                      (:unary `(,cl-func (vm-reg-get ,state (,src ,inst))))
+                      (:binary `(,cl-func (vm-reg-get ,state (,lhs ,inst))
+                                          (vm-reg-get ,state (,rhs ,inst))))
+                      (:pred1 `(if (,cl-func (vm-reg-get ,state (,src ,inst))) 1 0))
+                      (:pred2 `(if (,cl-func (vm-reg-get ,state (,lhs ,inst))
+                                             (vm-reg-get ,state (,rhs ,inst)))
+                                   1 0))))
+       (values (1+ ,pc) nil nil))))
+
 ;;; VM Instructions
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-instruction () ())
+(define-vm-instruction vm-const (vm-instruction)
+  (dst nil :reader vm-dst)
+  (value nil :reader vm-value)
+  (:sexp-tag :const))
 
-(defclass vm-const (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (value :initarg :value :reader vm-value)))
+(define-vm-instruction vm-move (vm-instruction)
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :move))
 
-(defclass vm-move (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src)))
+(define-vm-instruction vm-binop (vm-instruction)
+  (dst nil :reader vm-dst)
+  (lhs nil :reader vm-lhs)
+  (rhs nil :reader vm-rhs))
 
-(defclass vm-binop (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (lhs :initarg :lhs :reader vm-lhs)
-   (rhs :initarg :rhs :reader vm-rhs)))
+(define-vm-instruction vm-add (vm-binop)
+  (:sexp-tag :add)
+  (:sexp-slots dst lhs rhs))
+(define-vm-instruction vm-sub (vm-binop)
+  (:sexp-tag :sub)
+  (:sexp-slots dst lhs rhs))
+(define-vm-instruction vm-mul (vm-binop)
+  (:sexp-tag :mul)
+  (:sexp-slots dst lhs rhs))
 
-(defclass vm-add (vm-binop) ())
-(defclass vm-sub (vm-binop) ())
-(defclass vm-mul (vm-binop) ())
+(define-vm-instruction vm-label (vm-instruction)
+  (name nil :reader vm-name)
+  (:sexp-tag :label)
+  (:conc-name vm-lbl-))
 
-(defclass vm-label (vm-instruction)
-  ((name :initarg :name :reader vm-name)))
+(define-vm-instruction vm-jump (vm-instruction)
+  (label nil :reader vm-label-name)
+  (:sexp-tag :jump))
 
-(defclass vm-jump (vm-instruction)
-  ((label :initarg :label :reader vm-label-name)))
+(define-vm-instruction vm-jump-zero (vm-instruction)
+  (reg nil :reader vm-reg)
+  (label nil :reader vm-label-name)
+  (:sexp-tag :jump-zero))
 
-(defclass vm-jump-zero (vm-instruction)
-  ((reg :initarg :reg :reader vm-reg)
-   (label :initarg :label :reader vm-label-name)))
+(define-vm-instruction vm-print (vm-instruction)
+  (reg nil :reader vm-reg)
+  (:sexp-tag :print))
 
-(defclass vm-print (vm-instruction)
-  ((reg :initarg :reg :reader vm-reg)))
-
-(defclass vm-halt (vm-instruction)
-  ((reg :initarg :reg :reader vm-reg)))
+(define-vm-instruction vm-halt (vm-instruction)
+  (reg nil :reader vm-reg)
+  (:sexp-tag :halt))
 
 ;;; Function support instructions
-(defclass vm-closure (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (label :initarg :label :reader vm-label-name)
-   (params :initarg :params :initform nil :reader vm-closure-params
-    :documentation "List of required parameter register names (e.g., (:PARAM_0 :PARAM_1))")
-   (optional-params :initarg :optional-params :initform nil :reader vm-closure-optional-params
-    :documentation "List of (register default-value) for &optional params")
-   (rest-param :initarg :rest-param :initform nil :reader vm-closure-rest-param
-    :documentation "Register name for &rest parameter, or nil")
-   (key-params :initarg :key-params :initform nil :reader vm-closure-key-params
-    :documentation "List of (keyword register default-value) for &key params")
-   (captured :initarg :captured :initform nil :reader vm-captured-vars
-    :documentation "List of (symbol . register) pairs for captured variables")))
+(define-vm-instruction vm-closure (vm-instruction)
+  (dst nil :reader vm-dst)
+  (label nil :reader vm-label-name)
+  (params nil :reader vm-closure-params)
+  (optional-params nil :reader vm-closure-optional-params)
+  (rest-param nil :reader vm-closure-rest-param)
+  (key-params nil :reader vm-closure-key-params)
+  (captured nil :reader vm-captured-vars)
+  (:sexp-tag :closure)
+  (:sexp-slots dst label params captured)
+  (:conc-name vm-closure-inst-))
 
-(defclass vm-make-closure (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (label :initarg :label :reader vm-label-name)
-   (params :initarg :params :initform nil :reader vm-make-closure-params)
-   (env-regs :initarg :env-regs :initform nil :reader vm-env-regs))
-  (:documentation "Create a closure from LABEL with PARAMS, capturing ENV-REGS values on heap."))
+;; vm-make-closure uses list* for instruction->sexp (custom sexp handling)
+(define-vm-instruction vm-make-closure (vm-instruction)
+  "Create a closure from LABEL with PARAMS, capturing ENV-REGS values on heap."
+  (dst nil :reader vm-dst)
+  (label nil :reader vm-label-name)
+  (params nil :reader vm-make-closure-params)
+  (env-regs nil :reader vm-env-regs))
 
-(defclass vm-closure-ref-idx (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (closure :initarg :closure :reader vm-closure-reg)
-   (index :initarg :index :reader vm-closure-index))
-  (:documentation "Access captured value at INDEX from closure in CLOSURE register."))
+(defmethod instruction->sexp ((inst vm-make-closure))
+  (list* :make-closure (vm-make-closure-dst inst) (vm-make-closure-label inst)
+         (vm-make-closure-params inst) (vm-make-closure-env-regs inst)))
 
-(defclass vm-call (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (func :initarg :func :reader vm-func-reg)
-   (args :initarg :args :reader vm-args)))
+(setf (gethash :make-closure *instruction-constructors*)
+      (lambda (sexp)
+        (make-vm-make-closure :dst (second sexp) :label (third sexp)
+                              :params (fourth sexp) :env-regs (nthcdr 4 sexp))))
 
-(defclass vm-ret (vm-instruction)
-  ((reg :initarg :reg :reader vm-reg)))
+(define-vm-instruction vm-closure-ref-idx (vm-instruction)
+  "Access captured value at INDEX from closure in CLOSURE register."
+  (dst nil :reader vm-dst)
+  (closure nil :reader vm-closure-reg)
+  (index nil :reader vm-closure-index)
+  (:sexp-tag :closure-ref-idx))
 
-(defclass vm-func-ref (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (label :initarg :label :reader vm-label-name)))
+(define-vm-instruction vm-call (vm-instruction)
+  (dst nil :reader vm-dst)
+  (func nil :reader vm-func-reg)
+  (args nil :reader vm-args)
+  (:sexp-tag :call))
+
+(define-vm-instruction vm-ret (vm-instruction)
+  (reg nil :reader vm-reg)
+  (:sexp-tag :ret))
+
+(define-vm-instruction vm-func-ref (vm-instruction)
+  (dst nil :reader vm-dst)
+  (label nil :reader vm-label-name)
+  (:sexp-tag :func-ref))
 
 ;;; Multiple values and apply instructions
-(defclass vm-values (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src-regs :initarg :src-regs :reader vm-src-regs))
-  (:documentation "Multiple values. DST gets primary value, values-list stores all."))
+(define-vm-instruction vm-values (vm-instruction)
+  "Multiple values. DST gets primary value, values-list stores all."
+  (dst nil :reader vm-dst)
+  (src-regs nil :reader vm-src-regs)
+  (:sexp-tag :values))
 
-(defclass vm-mv-bind (vm-instruction)
-  ((dst-regs :initarg :dst-regs :reader vm-dst-regs))
-  (:documentation "Bind multiple values from values-list to registers."))
+(define-vm-instruction vm-mv-bind (vm-instruction)
+  "Bind multiple values from values-list to registers."
+  (dst-regs nil :reader vm-dst-regs)
+  (:sexp-tag :mv-bind))
 
-(defclass vm-values-to-list (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst))
-  (:documentation "Convert vm-values-list to a list in DST register."))
+(define-vm-instruction vm-values-to-list (vm-instruction)
+  "Convert vm-values-list to a list in DST register."
+  (dst nil :reader vm-dst)
+  (:sexp-tag :values-to-list))
 
-(defclass vm-apply (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (func :initarg :func :reader vm-func-reg)
-   (args :initarg :args :reader vm-args))
-  (:documentation "Apply function with spread arguments. Last arg is a list to spread."))
+(define-vm-instruction vm-apply (vm-instruction)
+  "Apply function with spread arguments. Last arg is a list to spread."
+  (dst nil :reader vm-dst)
+  (func nil :reader vm-func-reg)
+  (args nil :reader vm-args)
+  (:sexp-tag :apply))
 
-(defclass vm-register-function (vm-instruction)
-  ((name :initarg :name :reader vm-func-name)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Register a closure in the global function registry by name."))
+(define-vm-instruction vm-register-function (vm-instruction)
+  "Register a closure in the global function registry by name."
+  (name nil :reader vm-func-name)
+  (src nil :reader vm-src)
+  (:sexp-tag :register-function))
 
-(defclass vm-set-global (vm-instruction)
-  ((name :initarg :name :reader vm-global-name)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Store a value in the global variable store (persists across function calls)."))
+(define-vm-instruction vm-set-global (vm-instruction)
+  "Store a value in the global variable store."
+  (name nil :reader vm-global-name)
+  (src nil :reader vm-src)
+  (:sexp-tag :set-global))
 
-(defclass vm-get-global (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (name :initarg :name :reader vm-global-name))
-  (:documentation "Load a value from the global variable store into a register."))
+(define-vm-instruction vm-get-global (vm-instruction)
+  "Load a value from the global variable store into a register."
+  (dst nil :reader vm-dst)
+  (name nil :reader vm-global-name)
+  (:sexp-tag :get-global))
 
-(defclass vm-program ()
-  ((instructions :initarg :instructions :reader vm-program-instructions)
-   (result-register :initarg :result-register :reader vm-program-result-register)))
+(defstruct vm-program
+  (instructions nil :type list)
+  (result-register nil))
 
 (defclass vm-state ()
   ((registers :initform (make-hash-table :test #'equal) :reader vm-state-registers)
@@ -193,9 +328,7 @@ Used for resolving (funcall 'name ...) and (apply 'name ...).")
 Values here persist across function calls (not subject to register save/restore)."))
   (:documentation "VM execution state with registers, call stack, and heap."))
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Heap Operations
-;;; ----------------------------------------------------------------------------
 
 (defun vm-heap-alloc (state object)
   "Allocate OBJECT on the heap, return its address."
@@ -236,369 +369,9 @@ Uses native cons cells (same as vm-cons instruction)."
     (vm-heap-address (vm-heap-address-value object))
     (null nil)))
 
-(defgeneric instruction->sexp (instruction))
+;;; Old instruction->sexp and sexp->instruction removed — auto-generated by define-vm-instruction.
 
-(defmethod instruction->sexp ((inst vm-const))
-  (list :const (vm-dst inst) (vm-value inst)))
-
-(defmethod instruction->sexp ((inst vm-move))
-  (list :move (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-add))
-  (list :add (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-
-(defmethod instruction->sexp ((inst vm-sub))
-  (list :sub (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-
-(defmethod instruction->sexp ((inst vm-mul))
-  (list :mul (vm-dst inst) (vm-lhs inst) (vm-rhs inst)))
-
-(defmethod instruction->sexp ((inst vm-label))
-  (list :label (vm-name inst)))
-
-(defmethod instruction->sexp ((inst vm-jump))
-  (list :jump (vm-label-name inst)))
-
-(defmethod instruction->sexp ((inst vm-jump-zero))
-  (list :jump-zero (vm-reg inst) (vm-label-name inst)))
-
-(defmethod instruction->sexp ((inst vm-print))
-  (list :print (vm-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-halt))
-  (list :halt (vm-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-closure))
-  (list :closure (vm-dst inst) (vm-label-name inst) (vm-closure-params inst)
-        :optional (vm-closure-optional-params inst)
-        :rest (vm-closure-rest-param inst)
-        :key (vm-closure-key-params inst)
-        :captured (vm-captured-vars inst)))
-
-(defmethod instruction->sexp ((inst vm-call))
-  (list :call (vm-dst inst) (vm-func-reg inst) (vm-args inst)))
-
-(defmethod instruction->sexp ((inst vm-ret))
-  (list :ret (vm-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-func-ref))
-  (list :func-ref (vm-dst inst) (vm-label-name inst)))
-
-(defmethod instruction->sexp ((inst vm-make-closure))
-  (list* :make-closure (vm-dst inst) (vm-label-name inst) (vm-make-closure-params inst) (vm-env-regs inst)))
-
-(defmethod instruction->sexp ((inst vm-closure-ref-idx))
-  (list :closure-ref-idx (vm-dst inst) (vm-closure-reg inst) (vm-closure-index inst)))
-
-(defmethod instruction->sexp ((inst vm-values))
-  (list :values (vm-dst inst) (vm-src-regs inst)))
-
-(defmethod instruction->sexp ((inst vm-values-to-list))
-  (list :values-to-list (vm-dst inst)))
-
-(defmethod instruction->sexp ((inst vm-mv-bind))
-  (list :mv-bind (vm-dst-regs inst)))
-
-(defmethod instruction->sexp ((inst vm-apply))
-  (list :apply (vm-dst inst) (vm-func-reg inst) (vm-args inst)))
-
-(defmethod instruction->sexp ((inst vm-register-function))
-  (list :register-function (vm-func-name inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-set-global))
-  (list :set-global (vm-global-name inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-get-global))
-  (list :get-global (vm-dst inst) (vm-global-name inst)))
-
-(defgeneric sexp->instruction (sexp))
-
-(defmethod sexp->instruction ((sexp cons))
-  (case (car sexp)
-    ;; Core instructions (vm.lisp)
-    (:const (make-instance 'vm-const :dst (second sexp) :value (third sexp)))
-    (:move (make-instance 'vm-move :dst (second sexp) :src (third sexp)))
-    (:add (make-instance 'vm-add :dst (second sexp) :lhs (third sexp) :rhs (fourth sexp)))
-    (:sub (make-instance 'vm-sub :dst (second sexp) :lhs (third sexp) :rhs (fourth sexp)))
-    (:mul (make-instance 'vm-mul :dst (second sexp) :lhs (third sexp) :rhs (fourth sexp)))
-    (:label (make-instance 'vm-label :name (second sexp)))
-    (:jump (make-instance 'vm-jump :label (second sexp)))
-    (:jump-zero (make-instance 'vm-jump-zero :reg (second sexp) :label (third sexp)))
-    (:print (make-instance 'vm-print :reg (second sexp)))
-    (:halt (make-instance 'vm-halt :reg (second sexp)))
-    (:closure (make-instance 'vm-closure :dst (second sexp) :label (third sexp) :params (fourth sexp) :captured (fifth sexp)))
-    (:call (make-instance 'vm-call :dst (second sexp) :func (third sexp) :args (fourth sexp)))
-    (:ret (make-instance 'vm-ret :reg (second sexp)))
-    (:func-ref (make-instance 'vm-func-ref :dst (second sexp) :label (third sexp)))
-    ;; New closure instructions
-    (:make-closure (make-instance 'vm-make-closure
-                     :dst (second sexp)
-                     :label (third sexp)
-                     :params (fourth sexp)
-                     :env-regs (nthcdr 4 sexp)))
-    (:closure-ref-idx (make-instance 'vm-closure-ref-idx
-                        :dst (second sexp)
-                        :closure (third sexp)
-                        :index (fourth sexp)))
-    ;; Type predicates (vm-primitives.lisp)
-    (:eq (make-instance 'vm-eq :dst (second sexp) :lhs (third sexp) :rhs (fourth sexp)))
-    (:cons-p (make-instance 'vm-cons-p :dst (second sexp) :src (third sexp)))
-    (:null-p (make-instance 'vm-null-p :dst (second sexp) :src (third sexp)))
-    (:symbol-p (make-instance 'vm-symbol-p :dst (second sexp) :src (third sexp)))
-    (:number-p (make-instance 'vm-number-p :dst (second sexp) :src (third sexp)))
-    (:integer-p (make-instance 'vm-integer-p :dst (second sexp) :src (third sexp)))
-    (:function-p (make-instance 'vm-function-p :dst (second sexp) :src (third sexp)))
-    ;; Comparison operations (vm-primitives.lisp)
-    (:lt (make-instance 'vm-lt :dst (second sexp) :lhs (third sexp) :rhs (fourth sexp)))
-    (:gt (make-instance 'vm-gt :dst (second sexp) :lhs (third sexp) :rhs (fourth sexp)))
-    (:le (make-instance 'vm-le :dst (second sexp) :lhs (third sexp) :rhs (fourth sexp)))
-    (:ge (make-instance 'vm-ge :dst (second sexp) :lhs (third sexp) :rhs (fourth sexp)))
-    (:num-eq (make-instance 'vm-num-eq :dst (second sexp) :lhs (third sexp) :rhs (fourth sexp)))
-    ;; Arithmetic extensions (vm-primitives.lisp)
-    (:div (make-instance 'vm-div :dst (second sexp) :lhs (third sexp) :rhs (fourth sexp)))
-    (:mod (make-instance 'vm-mod :dst (second sexp) :lhs (third sexp) :rhs (fourth sexp)))
-    (:neg (make-instance 'vm-neg :dst (second sexp) :src (third sexp)))
-    (:abs (make-instance 'vm-abs :dst (second sexp) :src (third sexp)))
-    (:inc (make-instance 'vm-inc :dst (second sexp) :src (third sexp)))
-    (:dec (make-instance 'vm-dec :dst (second sexp) :src (third sexp)))
-    ;; Boolean operations (vm-primitives.lisp)
-    (:not (make-instance 'vm-not :dst (second sexp) :src (third sexp)))
-    (:and (make-instance 'vm-and :dst (second sexp) :lhs (third sexp) :rhs (fourth sexp)))
-    (:or (make-instance 'vm-or :dst (second sexp) :lhs (third sexp) :rhs (fourth sexp)))
-    ;; Condition system (vm-conditions.lisp)
-    (:signal (make-instance 'vm-signal
-                            :condition-reg (second sexp)))
-    (:vm-error (make-instance 'vm-error-instruction
-                              :condition-reg (second sexp)))
-    (:cerror (make-instance 'vm-cerror
-                            :continue-message (second sexp)
-                            :condition-reg (third sexp)))
-    (:warn (make-instance 'vm-warn
-                          :condition-reg (second sexp)))
-    (:push-handler (make-instance 'vm-push-handler
-                                  :type (second sexp)
-                                  :handler-label (third sexp)
-                                  :result-reg (fourth sexp)))
-    (:pop-handler (make-instance 'vm-pop-handler))
-    (:bind-restart (make-instance 'vm-bind-restart
-                                  :name (second sexp)
-                                  :restart-label (third sexp)))
-    (:invoke-restart (make-instance 'vm-invoke-restart
-                                    :name (second sexp)
-                                    :value-reg (third sexp)))
-    ;; List operations (vm-list.lisp)
-    (:cons (make-instance 'vm-cons
-             :dst (second sexp)
-             :car-src (third sexp)
-             :cdr-src (fourth sexp)))
-    (:car (make-instance 'vm-car
-            :dst (second sexp)
-            :src (third sexp)))
-    (:cdr (make-instance 'vm-cdr
-            :dst (second sexp)
-            :src (third sexp)))
-    (:list (make-instance 'vm-list
-             :dst (second sexp)
-             :count (third sexp)
-             :src-regs (cdddr sexp)))
-    (:length (make-instance 'vm-length
-               :dst (second sexp)
-               :src (third sexp)))
-    (:reverse (make-instance 'vm-reverse
-                :dst (second sexp)
-                :src (third sexp)))
-    (:append (make-instance 'vm-append
-               :dst (second sexp)
-               :src1 (third sexp)
-               :src2 (fourth sexp)))
-    (:member (make-instance 'vm-member
-               :dst (second sexp)
-               :item (third sexp)
-               :list (fourth sexp)))
-    (:nth (make-instance 'vm-nth
-            :dst (second sexp)
-            :index (third sexp)
-            :list (fourth sexp)))
-    (:nthcdr (make-instance 'vm-nthcdr
-               :dst (second sexp)
-               :index (third sexp)
-               :list (fourth sexp)))
-    (:first (make-instance 'vm-first
-              :dst (second sexp)
-              :src (third sexp)))
-    (:second (make-instance 'vm-second
-               :dst (second sexp)
-               :src (third sexp)))
-    (:third (make-instance 'vm-third
-              :dst (second sexp)
-              :src (third sexp)))
-    (:fourth (make-instance 'vm-fourth
-               :dst (second sexp)
-               :src (third sexp)))
-    (:fifth (make-instance 'vm-fifth
-              :dst (second sexp)
-              :src (third sexp)))
-    (:rest (make-instance 'vm-rest
-             :dst (second sexp)
-             :src (third sexp)))
-    (:last (make-instance 'vm-last
-             :dst (second sexp)
-             :src (third sexp)))
-    (:butlast (make-instance 'vm-butlast
-                :dst (second sexp)
-                :src (third sexp)))
-    (:rplaca (make-instance 'vm-rplaca
-               :cons (second sexp)
-               :val (third sexp)))
-    (:rplacd (make-instance 'vm-rplacd
-               :cons (second sexp)
-               :val (third sexp)))
-    (:list-length (make-instance 'vm-list-length
-                    :dst (second sexp)
-                    :src (third sexp)))
-    (:endp (make-instance 'vm-endp
-             :dst (second sexp)
-             :src (third sexp)))
-    (:null (make-instance 'vm-null
-             :dst (second sexp)
-             :src (third sexp)))
-    (:push (make-instance 'vm-push
-             :dst (second sexp)
-             :item (third sexp)
-             :list (fourth sexp)))
-    (:pop (make-instance 'vm-pop
-            :dst (second sexp)
-            :list (third sexp)))
-    ;; String operations (vm-strings.lisp)
-    (:string= (make-instance 'vm-string= :dst (second sexp) :str1 (third sexp) :str2 (fourth sexp)))
-    (:string< (make-instance 'vm-string< :dst (second sexp) :str1 (third sexp) :str2 (fourth sexp)))
-    (:string> (make-instance 'vm-string> :dst (second sexp) :str1 (third sexp) :str2 (fourth sexp)))
-    (:string<= (make-instance 'vm-string<= :dst (second sexp) :str1 (third sexp) :str2 (fourth sexp)))
-    (:string>= (make-instance 'vm-string>= :dst (second sexp) :str1 (third sexp) :str2 (fourth sexp)))
-    (:string-equal (make-instance 'vm-string-equal :dst (second sexp) :str1 (third sexp) :str2 (fourth sexp)))
-    (:string-lessp (make-instance 'vm-string-lessp :dst (second sexp) :str1 (third sexp) :str2 (fourth sexp)))
-    (:string-greaterp (make-instance 'vm-string-greaterp :dst (second sexp) :str1 (third sexp) :str2 (fourth sexp)))
-    (:string-not-equal (make-instance 'vm-string-not-equal :dst (second sexp) :str1 (third sexp) :str2 (fourth sexp)))
-    (:string-length (make-instance 'vm-string-length :dst (second sexp) :src (third sexp)))
-    (:char (make-instance 'vm-char :dst (second sexp) :string (third sexp) :index (fourth sexp)))
-    (:char-code (make-instance 'vm-char-code :dst (second sexp) :src (third sexp)))
-    (:code-char (make-instance 'vm-code-char :dst (second sexp) :src (third sexp)))
-    (:char= (make-instance 'vm-char= :dst (second sexp) :char1 (third sexp) :char2 (fourth sexp)))
-    (:char< (make-instance 'vm-char< :dst (second sexp) :char1 (third sexp) :char2 (fourth sexp)))
-    (:subseq (make-instance 'vm-subseq :dst (second sexp) :string (third sexp) :start (fourth sexp) :end (fifth sexp)))
-    (:concatenate (make-instance 'vm-concatenate :dst (second sexp) :str1 (third sexp) :str2 (fourth sexp)))
-    (:string-upcase (make-instance 'vm-string-upcase :dst (second sexp) :src (third sexp)))
-    (:string-downcase (make-instance 'vm-string-downcase :dst (second sexp) :src (third sexp)))
-    (:string-capitalize (make-instance 'vm-string-capitalize :dst (second sexp) :src (third sexp)))
-    (:string-trim (make-instance 'vm-string-trim :dst (second sexp) :char-bag (third sexp) :string (fourth sexp)))
-    (:string-left-trim (make-instance 'vm-string-left-trim :dst (second sexp) :char-bag (third sexp) :string (fourth sexp)))
-    (:string-right-trim (make-instance 'vm-string-right-trim :dst (second sexp) :char-bag (third sexp) :string (fourth sexp)))
-    (:search-string (make-instance 'vm-search-string :dst (second sexp) :pattern (third sexp) :string (fourth sexp) :start (fifth sexp)))
-    ;; Hash table operations (vm-hash.lisp)
-    (:make-hash-table
-     (if (third sexp)
-         (make-instance 'vm-make-hash-table
-                        :dst (second sexp)
-                        :test (third sexp))
-         (make-instance 'vm-make-hash-table
-                        :dst (second sexp))))
-    (:gethash
-     (make-instance 'vm-gethash
-                    :dst (second sexp)
-                    :key (third sexp)
-                    :table (fourth sexp)
-                    :found-dst (getf (cdddr sexp) :found-dst)
-                    :default (getf (cdddr sexp) :default)))
-    (:sethash
-     (make-instance 'vm-sethash
-                    :key (second sexp)
-                    :value (third sexp)
-                    :table (fourth sexp)))
-    (:remhash
-     (make-instance 'vm-remhash
-                    :key (second sexp)
-                    :table (third sexp)))
-    (:clrhash
-     (make-instance 'vm-clrhash
-                    :table (second sexp)))
-    (:hash-table-count
-     (make-instance 'vm-hash-table-count
-                    :dst (second sexp)
-                    :table (third sexp)))
-    (:hash-table-p
-     (make-instance 'vm-hash-table-p
-                    :dst (second sexp)
-                    :src (third sexp)))
-    (:maphash
-     (make-instance 'vm-maphash
-                    :fn (second sexp)
-                    :table (third sexp)))
-    (:hash-table-keys
-     (make-instance 'vm-hash-table-keys
-                    :dst (second sexp)
-                    :table (third sexp)))
-    (:hash-table-values
-     (make-instance 'vm-hash-table-values
-                    :dst (second sexp)
-                    :table (third sexp)))
-    ;; CLOS instructions
-    (:class-def (make-instance 'vm-class-def
-                  :dst (second sexp)
-                  :class-name (third sexp)
-                  :superclasses (fourth sexp)
-                  :slot-names (fifth sexp)
-                  :slot-initargs (sixth sexp)
-                  :slot-initform-regs (seventh sexp)))
-    (:make-obj (make-instance 'vm-make-obj
-                 :dst (second sexp)
-                 :class-reg (third sexp)
-                 :initarg-regs (fourth sexp)))
-    (:slot-read (make-instance 'vm-slot-read
-                  :dst (second sexp)
-                  :obj-reg (third sexp)
-                  :slot-name (fourth sexp)))
-    (:slot-write (make-instance 'vm-slot-write
-                   :obj-reg (second sexp)
-                   :slot-name (third sexp)
-                   :value-reg (fourth sexp)))
-    (:register-method (make-instance 'vm-register-method
-                        :gf-reg (second sexp)
-                        :specializer (third sexp)
-                        :method-reg (fourth sexp)))
-    (:generic-call (make-instance 'vm-generic-call
-                     :dst (second sexp)
-                     :gf-reg (third sexp)
-                     :args (fourth sexp)))
-    ;; Handler-case instructions
-    (:establish-handler (make-instance 'vm-establish-handler
-                          :handler-label (second sexp)
-                          :result-reg (third sexp)
-                          :error-type (fourth sexp)))
-    (:remove-handler (make-instance 'vm-remove-handler))
-    (:signal-error (make-instance 'vm-signal-error
-                     :error-reg (second sexp)))
-    ;; Multiple values and apply
-    (:values (make-instance 'vm-values
-               :dst (second sexp)
-               :src-regs (third sexp)))
-    (:mv-bind (make-instance 'vm-mv-bind
-                :dst-regs (second sexp)))
-    (:values-to-list (make-instance 'vm-values-to-list
-                       :dst (second sexp)))
-    (:apply (make-instance 'vm-apply
-              :dst (second sexp)
-              :func (third sexp)
-              :args (fourth sexp)))
-    (:register-function (make-instance 'vm-register-function
-                          :name (second sexp)
-                          :src (third sexp)))
-    (:set-global (make-instance 'vm-set-global
-                   :name (second sexp)
-                   :src (third sexp)))
-    (:get-global (make-instance 'vm-get-global
-                   :dst (second sexp)
-                   :name (third sexp)))
-    (otherwise (error "Unknown instruction sexp: ~S" sexp))))
+;;; instruction->sexp / sexp->instruction now table-driven via define-vm-instruction.
 
 (defgeneric execute-instruction (instruction state pc labels))
 
@@ -648,29 +421,9 @@ If VALUE is a symbol, look it up in the function registry."
   (vm-reg-set state (vm-dst inst) (vm-reg-get state (vm-src inst)))
   (values (1+ pc) nil nil))
 
-(defmethod execute-instruction ((inst vm-add) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state
-              (vm-dst inst)
-              (+ (vm-reg-get state (vm-lhs inst))
-                 (vm-reg-get state (vm-rhs inst))))
-  (values (1+ pc) nil nil))
-
-(defmethod execute-instruction ((inst vm-sub) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state
-              (vm-dst inst)
-              (- (vm-reg-get state (vm-lhs inst))
-                 (vm-reg-get state (vm-rhs inst))))
-  (values (1+ pc) nil nil))
-
-(defmethod execute-instruction ((inst vm-mul) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state
-              (vm-dst inst)
-              (* (vm-reg-get state (vm-lhs inst))
-                 (vm-reg-get state (vm-rhs inst))))
-  (values (1+ pc) nil nil))
+(define-simple-instruction vm-add :binary +)
+(define-simple-instruction vm-sub :binary -)
+(define-simple-instruction vm-mul :binary *)
 
 (defmethod execute-instruction ((inst vm-label) state pc labels)
   (declare (ignore state labels))
@@ -862,9 +615,7 @@ Returns (values next-pc halt-p result) like execute-instruction."
     (vm-reg-set state (vm-dst inst) (nth idx values-list))
     (values (1+ pc) nil nil)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Multiple Values and Apply Execution
-;;; ----------------------------------------------------------------------------
 
 (defmethod execute-instruction ((inst vm-values) state pc labels)
   (declare (ignore labels))
@@ -1054,17 +805,13 @@ Uses class precedence lists for inheritance-based fallback."
       ;; Jump to function entry
       (values (gethash entry-label labels) nil nil))))
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Environment Reference Instruction
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-env-ref (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (var-name :initarg :var-name :reader vm-var-name))
-  (:documentation "Access variable from closure's captured environment."))
-
-(defmethod instruction->sexp ((inst vm-env-ref))
-  (list :env-ref (vm-dst inst) (vm-var-name inst)))
+(define-vm-instruction vm-env-ref (vm-instruction)
+  "Access variable from closure's captured environment."
+  (dst nil :reader vm-dst)
+  (var-name nil :reader vm-var-name)
+  (:sexp-tag :env-ref))
 
 (defmethod execute-instruction ((inst vm-env-ref) state pc labels)
   (declare (ignore labels))
@@ -1096,71 +843,52 @@ Uses class precedence lists for inheritance-based fallback."
       (vm-reg-set state (vm-dst inst) value)
       (values (1+ pc) nil nil))))
 
-;;; ----------------------------------------------------------------------------
 ;;; CLOS VM Instructions
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-class-def (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (class-name :initarg :class-name :reader vm-class-name-sym)
-   (superclasses :initarg :superclasses :initform nil :reader vm-superclasses)
-   (slot-names :initarg :slot-names :reader vm-slot-names)
-   (slot-initargs :initarg :slot-initargs :initform nil :reader vm-slot-initargs)
-   (slot-initform-regs :initarg :slot-initform-regs :initform nil :reader vm-slot-initform-regs
-                       :documentation "Alist of (slot-name . register) for slots with :initform values"))
-  (:documentation "Define a class. Creates a class descriptor hash table."))
+(define-vm-instruction vm-class-def (vm-instruction)
+  "Define a class. Creates a class descriptor hash table."
+  (dst nil :reader vm-dst)
+  (class-name nil :reader vm-class-name-sym)
+  (superclasses nil :reader vm-superclasses)
+  (slot-names nil :reader vm-slot-names)
+  (slot-initargs nil :reader vm-slot-initargs)
+  (slot-initform-regs nil :reader vm-slot-initform-regs)
+  (:sexp-tag :class-def))
 
-(defclass vm-make-obj (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (class-reg :initarg :class-reg :reader vm-class-reg)
-   (initarg-regs :initarg :initarg-regs :initform nil :reader vm-initarg-regs))
-  (:documentation "Create an instance of a class. INITARG-REGS is an alist of (initarg-keyword . register)."))
+(define-vm-instruction vm-make-obj (vm-instruction)
+  "Create an instance of a class."
+  (dst nil :reader vm-dst)
+  (class-reg nil :reader vm-class-reg)
+  (initarg-regs nil :reader vm-initarg-regs)
+  (:sexp-tag :make-obj))
 
-(defclass vm-slot-read (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (obj-reg :initarg :obj-reg :reader vm-obj-reg)
-   (slot-name :initarg :slot-name :reader vm-slot-name-sym))
-  (:documentation "Read a slot value from an object."))
+(define-vm-instruction vm-slot-read (vm-instruction)
+  "Read a slot value from an object."
+  (dst nil :reader vm-dst)
+  (obj-reg nil :reader vm-obj-reg)
+  (slot-name nil :reader vm-slot-name-sym)
+  (:sexp-tag :slot-read))
 
-(defclass vm-slot-write (vm-instruction)
-  ((obj-reg :initarg :obj-reg :reader vm-obj-reg)
-   (slot-name :initarg :slot-name :reader vm-slot-name-sym)
-   (value-reg :initarg :value-reg :reader vm-value-reg))
-  (:documentation "Write a value to an object slot."))
+(define-vm-instruction vm-slot-write (vm-instruction)
+  "Write a value to an object slot."
+  (obj-reg nil :reader vm-obj-reg)
+  (slot-name nil :reader vm-slot-name-sym)
+  (value-reg nil :reader vm-value-reg)
+  (:sexp-tag :slot-write))
 
-(defclass vm-register-method (vm-instruction)
-  ((gf-reg :initarg :gf-reg :reader vm-gf-reg)
-   (specializer :initarg :specializer :reader vm-method-specializer)
-   (method-reg :initarg :method-reg :reader vm-method-reg))
-  (:documentation "Register a method closure on a generic function dispatch table."))
+(define-vm-instruction vm-register-method (vm-instruction)
+  "Register a method closure on a generic function dispatch table."
+  (gf-reg nil :reader vm-gf-reg)
+  (specializer nil :reader vm-method-specializer)
+  (method-reg nil :reader vm-method-reg)
+  (:sexp-tag :register-method))
 
-(defclass vm-generic-call (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (gf-reg :initarg :gf-reg :reader vm-gf-reg)
-   (args :initarg :args :reader vm-args))
-  (:documentation "Dispatch and call a generic function method based on first argument's class."))
-
-;;; CLOS instruction serialization
-
-(defmethod instruction->sexp ((inst vm-class-def))
-  (list :class-def (vm-dst inst) (vm-class-name-sym inst)
-        (vm-superclasses inst) (vm-slot-names inst) (vm-slot-initargs inst)
-        (vm-slot-initform-regs inst)))
-
-(defmethod instruction->sexp ((inst vm-make-obj))
-  (list :make-obj (vm-dst inst) (vm-class-reg inst) (vm-initarg-regs inst)))
-
-(defmethod instruction->sexp ((inst vm-slot-read))
-  (list :slot-read (vm-dst inst) (vm-obj-reg inst) (vm-slot-name-sym inst)))
-
-(defmethod instruction->sexp ((inst vm-slot-write))
-  (list :slot-write (vm-obj-reg inst) (vm-slot-name-sym inst) (vm-value-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-register-method))
-  (list :register-method (vm-gf-reg inst) (vm-method-specializer inst) (vm-method-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-generic-call))
-  (list :generic-call (vm-dst inst) (vm-gf-reg inst) (vm-args inst)))
+(define-vm-instruction vm-generic-call (vm-instruction)
+  "Dispatch and call a generic function method."
+  (dst nil :reader vm-dst)
+  (gf-reg nil :reader vm-gf-reg)
+  (args nil :reader vm-args)
+  (:sexp-tag :generic-call))
 
 ;;; CLOS instruction execution
 
@@ -1304,48 +1032,27 @@ Uses class precedence lists for inheritance-based fallback."
          (dst-reg (vm-dst inst)))
     (vm-dispatch-generic-call gf-ht state pc arg-regs dst-reg labels)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Handler-Case VM Instructions
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-establish-handler (vm-instruction)
-  ((handler-label :initarg :handler-label :reader vm-handler-label
-                  :documentation "Label to jump to when error is caught")
-   (result-reg :initarg :result-reg :reader vm-handler-result-reg
-               :documentation "Register to store the error value in the handler")
-   (error-type :initarg :error-type :initform 'error :reader vm-error-type
-               :documentation "Error type this handler catches (symbol)"))
-  (:documentation "Push a handler entry onto the handler stack for handler-case."))
+(define-vm-instruction vm-establish-handler (vm-instruction)
+  "Push a handler entry onto the handler stack for handler-case."
+  (handler-label nil :reader vm-handler-label)
+  (result-reg nil :reader vm-handler-result-reg)
+  (error-type nil :reader vm-error-type)
+  (:sexp-tag :establish-handler))
 
-(defclass vm-remove-handler (vm-instruction)
-  ()
-  (:documentation "Pop the top handler from the handler stack."))
+(define-vm-instruction vm-remove-handler (vm-instruction)
+  "Pop the top handler from the handler stack."
+  (:sexp-tag :remove-handler))
 
-(defclass vm-sync-handler-regs (vm-instruction)
-  ()
-  (:documentation "Update all remaining handlers' saved-regs with the current register state.
-Used by unwind-protect to propagate cleanup modifications before re-signaling."))
+(define-vm-instruction vm-sync-handler-regs (vm-instruction)
+  "Update all handlers' saved-regs with current register state."
+  (:sexp-tag :sync-handler-regs))
 
-(defclass vm-signal-error (vm-instruction)
-  ((error-reg :initarg :error-reg :reader vm-error-reg
-              :documentation "Register containing the error value to signal"))
-  (:documentation "Signal an error: walk the handler stack to find a matching handler.
-If no handler is found, signal a CL error."))
-
-(defmethod instruction->sexp ((inst vm-establish-handler))
-  (list :establish-handler
-        (vm-handler-label inst)
-        (vm-handler-result-reg inst)
-        (vm-error-type inst)))
-
-(defmethod instruction->sexp ((inst vm-remove-handler))
-  (list :remove-handler))
-
-(defmethod instruction->sexp ((inst vm-sync-handler-regs))
-  (list :sync-handler-regs))
-
-(defmethod instruction->sexp ((inst vm-signal-error))
-  (list :signal-error (vm-error-reg inst)))
+(define-vm-instruction vm-signal-error (vm-instruction)
+  "Signal an error: walk the handler stack to find a matching handler."
+  (error-reg nil :reader vm-error-reg)
+  (:sexp-tag :signal-error))
 
 (defmethod execute-instruction ((inst vm-establish-handler) state pc labels)
   (declare (ignore labels))
@@ -1417,9 +1124,7 @@ CL condition objects use typep."
               (values (gethash handler-label labels) nil nil)))
           (error "Unhandled error in VM: ~S" error-value)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Label Table Building
-;;; ----------------------------------------------------------------------------
 
 (defun build-label-table (instructions)
   (let ((labels (make-hash-table :test #'equal)))

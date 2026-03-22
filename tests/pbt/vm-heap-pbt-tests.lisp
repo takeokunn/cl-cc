@@ -15,7 +15,7 @@
     (car-val (gen-integer :min -1000 :max 1000)
      cdr-val (gen-integer :min -1000 :max 1000))
   (let* ((state (make-instance 'vm-state))
-         (inst (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2)))
+         (inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2)))
     (vm-reg-set state :r1 car-val)
     (vm-reg-set state :r2 cdr-val)
     (execute-instruction inst state 0 (make-hash-table))
@@ -28,8 +28,8 @@
     (car-val (gen-integer :min -1000 :max 1000)
      cdr-val (gen-integer :min -1000 :max 1000))
   (let* ((state (make-instance 'vm-state))
-         (cons-inst (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
-         (car-inst (make-instance 'vm-car :dst :r3 :src :r0)))
+         (cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (car-inst (make-vm-car :dst :r3 :src :r0)))
     (vm-reg-set state :r1 car-val)
     (vm-reg-set state :r2 cdr-val)
     (execute-instruction cons-inst state 0 (make-hash-table))
@@ -40,8 +40,8 @@
     (car-val (gen-integer :min -1000 :max 1000)
      cdr-val (gen-integer :min -1000 :max 1000))
   (let* ((state (make-instance 'vm-state))
-         (cons-inst (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
-         (cdr-inst (make-instance 'vm-cdr :dst :r3 :src :r0)))
+         (cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (cdr-inst (make-vm-cdr :dst :r3 :src :r0)))
     (vm-reg-set state :r1 car-val)
     (vm-reg-set state :r2 cdr-val)
     (execute-instruction cons-inst state 0 (make-hash-table))
@@ -57,8 +57,8 @@
      initial-cdr (gen-integer :min -1000 :max 1000)
      new-car (gen-integer :min -1000 :max 1000))
   (let* ((state (make-instance 'vm-state))
-         (cons-inst (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
-         (rplaca-inst (make-instance 'vm-rplaca :cons :r0 :val :r3)))
+         (cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (rplaca-inst (make-vm-rplaca :cons :r0 :val :r3)))
     (vm-reg-set state :r1 initial-car)
     (vm-reg-set state :r2 initial-cdr)
     (execute-instruction cons-inst state 0 (make-hash-table))
@@ -73,8 +73,8 @@
      initial-cdr (gen-integer :min -1000 :max 1000)
      new-cdr (gen-integer :min -1000 :max 1000))
   (let* ((state (make-instance 'vm-state))
-         (cons-inst (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
-         (rplacd-inst (make-instance 'vm-rplacd :cons :r0 :val :r3)))
+         (cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (rplacd-inst (make-vm-rplacd :cons :r0 :val :r3)))
     (vm-reg-set state :r1 initial-car)
     (vm-reg-set state :r2 initial-cdr)
     (execute-instruction cons-inst state 0 (make-hash-table))
@@ -90,9 +90,9 @@
      val3 (gen-integer :min 0 :max 100)
      val4 (gen-integer :min 0 :max 100))
   (let* ((state (make-instance 'vm-state))
-         (cons-inst (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
-         (rplaca-inst (make-instance 'vm-rplaca :cons :r0 :val :r3))
-         (rplacd-inst (make-instance 'vm-rplacd :cons :r0 :val :r4)))
+         (cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (rplaca-inst (make-vm-rplaca :cons :r0 :val :r3))
+         (rplacd-inst (make-vm-rplacd :cons :r0 :val :r4)))
     (vm-reg-set state :r1 val1)
     (vm-reg-set state :r2 val2)
     (execute-instruction cons-inst state 0 (make-hash-table))
@@ -114,11 +114,11 @@
      val3 (gen-integer :min 0 :max 100))
   (let* ((state (make-instance 'vm-state))
          ;; Create inner cons (val3 . nil)
-         (inst1 (make-instance 'vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (inst1 (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          ;; Create middle cons (val2 . inner)
-         (inst2 (make-instance 'vm-cons :dst :r3 :car-src :r4 :cdr-src :r0))
+         (inst2 (make-vm-cons :dst :r3 :car-src :r4 :cdr-src :r0))
          ;; Create outer cons (val1 . middle)
-         (inst3 (make-instance 'vm-cons :dst :r5 :car-src :r6 :cdr-src :r3)))
+         (inst3 (make-vm-cons :dst :r5 :car-src :r6 :cdr-src :r3)))
     (vm-reg-set state :r1 val3)
     (vm-reg-set state :r2 nil)
     (execute-instruction inst1 state 0 (make-hash-table))
@@ -142,7 +142,7 @@
      env-val2 (gen-integer :min 0 :max 100))
   (let* ((state (make-instance 'vm-state))
          (labels (make-hash-table))
-         (inst (make-instance 'vm-make-closure
+         (inst (make-vm-make-closure
                               :dst :r0
                               :label :func
                               :params nil
@@ -162,20 +162,20 @@
      env-val3 (gen-integer :min 0 :max 100))
   (let* ((state (make-instance 'vm-state))
          (labels (make-hash-table))
-         (make-inst (make-instance 'vm-make-closure
+         (make-inst (make-vm-make-closure
                                   :dst :r0
                                   :label :func
                                   :params nil
                                   :env-regs '(:r1 :r2 :r3)))
-         (ref-inst-0 (make-instance 'vm-closure-ref-idx
+         (ref-inst-0 (make-vm-closure-ref-idx
                                   :dst :r4
                                   :closure :r0
                                   :index 0))
-         (ref-inst-1 (make-instance 'vm-closure-ref-idx
+         (ref-inst-1 (make-vm-closure-ref-idx
                                   :dst :r5
                                   :closure :r0
                                   :index 1))
-         (ref-inst-2 (make-instance 'vm-closure-ref-idx
+         (ref-inst-2 (make-vm-closure-ref-idx
                                   :dst :r6
                                   :closure :r0
                                   :index 2)))
@@ -198,7 +198,7 @@
 (defproperty cons-roundtrip
     (car-reg (gen-one-of '(:r0 :r1 :r2 :r3))
      cdr-reg (gen-one-of '(:r4 :r5 :r6 :r7)))
-  (let* ((original (make-instance 'vm-cons
+  (let* ((original (make-vm-cons
                                   :dst :r0
                                   :car-src car-reg
                                   :cdr-src cdr-reg))
@@ -211,7 +211,7 @@
 
 (defproperty car-roundtrip
     (src (gen-one-of '(:r0 :r1 :r2 :r3)))
-  (let* ((original (make-instance 'vm-car :dst :r4 :src src))
+  (let* ((original (make-vm-car :dst :r4 :src src))
          (sexp (instruction->sexp original))
          (restored (sexp->instruction sexp)))
     (and (typep restored 'vm-car)
@@ -220,7 +220,7 @@
 
 (defproperty cdr-roundtrip
     (src (gen-one-of '(:r0 :r1 :r2 :r3)))
-  (let* ((original (make-instance 'vm-cdr :dst :r4 :src src))
+  (let* ((original (make-vm-cdr :dst :r4 :src src))
          (sexp (instruction->sexp original))
          (restored (sexp->instruction sexp)))
     (and (typep restored 'vm-cdr)
@@ -230,7 +230,7 @@
 (defproperty rplaca-roundtrip
     (cons-reg (gen-one-of '(:r0 :r1 :r2))
      val-reg (gen-one-of '(:r3 :r4 :r5)))
-  (let* ((original (make-instance 'vm-rplaca :cons cons-reg :val val-reg))
+  (let* ((original (make-vm-rplaca :cons cons-reg :val val-reg))
          (sexp (instruction->sexp original))
          (restored (sexp->instruction sexp)))
     (and (typep restored 'vm-rplaca)
@@ -240,7 +240,7 @@
 (defproperty rplacd-roundtrip
     (cons-reg (gen-one-of '(:r0 :r1 :r2))
      val-reg (gen-one-of '(:r3 :r4 :r5)))
-  (let* ((original (make-instance 'vm-rplacd :cons cons-reg :val val-reg))
+  (let* ((original (make-vm-rplacd :cons cons-reg :val val-reg))
          (sexp (instruction->sexp original))
          (restored (sexp->instruction sexp)))
     (and (typep restored 'vm-rplacd)
@@ -250,7 +250,7 @@
 (defproperty closure-ref-idx-roundtrip
     (closure-reg (gen-one-of '(:r0 :r1 :r2))
      index (gen-integer :min 0 :max 10))
-  (let* ((original (make-instance 'vm-closure-ref-idx
+  (let* ((original (make-vm-closure-ref-idx
                                   :dst :r5
                                   :closure closure-reg
                                   :index index))

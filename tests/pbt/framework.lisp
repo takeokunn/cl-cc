@@ -5,9 +5,7 @@
 
 (in-package :cl-cc/pbt)
 
-;;; ----------------------------------------------------------------------------
 ;;; Configuration Variables
-;;; ----------------------------------------------------------------------------
 
 (defvar *test-count* 100
   "Default number of test cases to run for each property.")
@@ -24,9 +22,7 @@
 (defvar *pbt-random-state* (make-random-state t)
   "Random state for reproducible PBT test runs.")
 
-;;; ----------------------------------------------------------------------------
 ;;; Generator Protocol
-;;; ----------------------------------------------------------------------------
 
 (defclass generator ()
   ((generate-fn :initarg :generate-fn :reader generator-generate-fn
@@ -49,9 +45,7 @@
   "Return a list of shrunk values for VALUE using GENERATOR."
   (funcall (generator-shrink-fn generator) value))
 
-;;; ----------------------------------------------------------------------------
 ;;; Generator Construction
-;;; ----------------------------------------------------------------------------
 
 (defun make-generator (generate-fn &key (shrink-fn (lambda (x) (declare (ignore x)) nil)))
   "Create a new generator with the given generate and shrink functions."
@@ -59,9 +53,7 @@
                  :generate-fn generate-fn
                  :shrink-fn shrink-fn))
 
-;;; ----------------------------------------------------------------------------
 ;;; Built-in Generators
-;;; ----------------------------------------------------------------------------
 
 (defun gen-integer (&key (min most-negative-fixnum) (max most-positive-fixnum))
   "Generate random integers between MIN and MAX (inclusive)."
@@ -160,9 +152,7 @@
                                   :max-length max-length))
              'vector))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Combinators
-;;; ----------------------------------------------------------------------------
 
 (defun gen-one-of (choices)
   "Generate one of the elements from CHOICES."
@@ -243,9 +233,7 @@
      (let ((*size* (funcall scale-fn *size*)))
        (generate generator)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; AST Generators
-;;; ----------------------------------------------------------------------------
 
 (defvar *ast-terminal-generators* nil
   "List of generators for terminal AST nodes.")
@@ -259,17 +247,17 @@
         (list
          ;; Integer literal
          (make-generator
-          (lambda () (make-instance 'ast-int :value (generate (gen-integer :min -100 :max 100)))))
+          (lambda () (make-ast-int :value (generate (gen-integer :min -100 :max 100)))))
          ;; Variable
          (make-generator
-          (lambda () (make-instance 'ast-var :name (generate (gen-symbol :prefix "VAR")))))))
+          (lambda () (make-ast-var :name (generate (gen-symbol :prefix "VAR")))))))
 
   (setf *ast-recursive-generators*
         (list
          ;; Binary operation
          (make-generator
           (lambda ()
-            (make-instance 'ast-binop
+            (make-ast-binop
                            :op (generate (gen-one-of '(+ - *)))
                            :lhs (generate (gen-ast-node))
                            :rhs (generate (gen-ast-node)))))
@@ -277,7 +265,7 @@
          ;; If expression
          (make-generator
           (lambda ()
-            (make-instance 'ast-if
+            (make-ast-if
                            :cond (generate (gen-ast-node))
                            :then (generate (gen-ast-node))
                            :else (generate (gen-ast-node)))))
@@ -285,7 +273,7 @@
          ;; Progn
          (make-generator
           (lambda ()
-            (make-instance 'ast-progn
+            (make-ast-progn
                            :forms (generate (gen-list-of (gen-ast-node)
                                                           :min-length 1 :max-length 3)))))
 
@@ -293,14 +281,14 @@
          (make-generator
           (lambda ()
             (let ((var-name (generate (gen-symbol :prefix "VAR"))))
-              (make-instance 'ast-let
+              (make-ast-let
                              :bindings (list (cons var-name (generate (gen-ast-node))))
-                             :body (list (make-instance 'ast-var :name var-name))))))
+                             :body (list (make-ast-var :name var-name))))))
 
          ;; Lambda
          (make-generator
           (lambda ()
-            (make-instance 'ast-lambda
+            (make-ast-lambda
                            :params (generate (gen-list-of (gen-symbol :prefix "ARG")
                                                            :min-length 0 :max-length 3))
                            :body (list (generate (gen-ast-node))))))
@@ -308,7 +296,7 @@
          ;; Function call
          (make-generator
           (lambda ()
-            (make-instance 'ast-call
+            (make-ast-call
                            :func (generate (gen-symbol :prefix "FN"))
                            :args (generate (gen-list-of (gen-ast-node)
                                                          :min-length 0 :max-length 3))))))))
@@ -340,9 +328,7 @@
    These can be fed to the CL-CC frontend for testing."
   (gen-fmap #'ast-to-sexp (gen-ast-node :max-depth max-depth)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Shrinking
-;;; ----------------------------------------------------------------------------
 
 (defun shrink (value)
   "Generic shrink function that dispatches based on VALUE type."
@@ -373,9 +359,7 @@
       (push (subseq lst 0 (floor (length lst) 2)) shrinks))
     shrinks))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property Definition Macros
-;;; ----------------------------------------------------------------------------
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun extract-generators (args)
@@ -495,9 +479,7 @@
         (values nil (nreverse failures))
         (values t nil))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Custom Generator Definition
-;;; ----------------------------------------------------------------------------
 
 (defmacro defgenerator (name args &body body)
   "Define a custom generator function.
@@ -513,9 +495,7 @@
     `(defun ,generator-name ,args
        ,@body)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Test Utilities
-;;; ----------------------------------------------------------------------------
 
 (defun run-property-tests ()
   "Run all property-based tests."
@@ -532,17 +512,13 @@
   (format t "----------------------------~%~%")
   nil)
 
-;;; ----------------------------------------------------------------------------
 ;;; Test Suite Definition
-;;; ----------------------------------------------------------------------------
 
 (def-suite cl-cc-pbt-suite
   :description "Property-Based Testing suite for CL-CC"
   :in cl-cc-suite)
 
-;;; ----------------------------------------------------------------------------
 ;;; Example Properties
-;;; ----------------------------------------------------------------------------
 
 (in-suite cl-cc-pbt-suite)
 

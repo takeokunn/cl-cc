@@ -6,9 +6,7 @@
 
 (in-package :cl-cc)
 
-;;; ----------------------------------------------------------------------------
 ;;; S-Expression Based CPS Transformation (Original - Minimal Bootstrap)
-;;; ----------------------------------------------------------------------------
 
 (defmacro with-cps ((value expr) &body body)
   `(let ((,value (cps-transform ,expr)))
@@ -79,9 +77,7 @@ Produces (lambda (k) ...)."
                (t (error "Unsupported node in CPS: ~S" node)))))
     `(lambda (k) ,(cps expr 'k))))
 
-;;; ----------------------------------------------------------------------------
 ;;; AST-Based CPS Transformation
-;;; ----------------------------------------------------------------------------
 
 (defgeneric cps-transform-ast (node k)
   (:documentation "Transform an AST node to continuation-passing style.
@@ -101,9 +97,7 @@ Returns a CPS-transformed S-expression."))
                                   (declare (ignore ,tmp))
                                   ,(cps-transform-sequence (cdr forms) k)))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Core AST Types
-;;; ----------------------------------------------------------------------------
 
 (defmethod cps-transform-ast ((node ast-int) k)
   (let ((v (gensym "INT")))
@@ -158,9 +152,7 @@ Returns a CPS-transformed S-expression."))
                                              ,(expand-bindings (cdr rest) env-k))))))))
       (expand-bindings bindings k))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Lambda and Closures
-;;; ----------------------------------------------------------------------------
 
 (defmethod cps-transform-ast ((node ast-lambda) k)
   "Transform a lambda expression to CPS. The continuation becomes an extra parameter."
@@ -177,9 +169,7 @@ Returns a CPS-transformed S-expression."))
   "Transform #'var to CPS (function reference)."
   `(funcall ,k (function ,(ast-function-name node))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Block and Return-From
-;;; ----------------------------------------------------------------------------
 
 (defmethod cps-transform-ast ((node ast-block) k)
   "Transform block with named exit point.
@@ -206,9 +196,7 @@ The block creates a catch tag for return-from."
                        `(lambda (,v)
                           (return-from ,name ,v)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Tagbody and Go
-;;; ----------------------------------------------------------------------------
 
 (defun cps-transform-tagbody-section (forms tag-table k)
   "Transform a section of tagbody forms between tags."
@@ -261,9 +249,7 @@ Uses a tag table to map tags to their continuations."
     ;; k is ignored since go performs a non-local jump
     `(go ,tag)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Catch and Throw
-;;; ----------------------------------------------------------------------------
 
 (defmethod cps-transform-ast ((node ast-catch) k)
   "Transform catch with dynamic tag."
@@ -292,9 +278,7 @@ Uses a tag table to map tags to their continuations."
                                                  ;; k is ignored since throw exits
                                                  (throw ,tag-v ,val-v)))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Unwind-Protect
-;;; ----------------------------------------------------------------------------
 
 (defmethod cps-transform-ast ((node ast-unwind-protect) k)
   "Transform unwind-protect with guaranteed cleanup.
@@ -315,9 +299,7 @@ The cleanup forms always run, even on non-local exit."
                                        nil))
             nil))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Flet and Labels (Local Function Bindings)
-;;; ----------------------------------------------------------------------------
 
 (defun cps-transform-fn-binding (binding k-var)
   "Transform a function binding (name params . body) to CPS form."
@@ -349,9 +331,7 @@ The cleanup forms always run, even on non-local exit."
                                 `(lambda (,labels-k)
                                    (funcall ,k ,labels-k))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Additional AST Types
-;;; ----------------------------------------------------------------------------
 
 (defmethod cps-transform-ast ((node ast-setq) k)
   "Transform setq assignment."
@@ -417,9 +397,7 @@ The cleanup forms always run, even on non-local exit."
                                                                (cdr remaining-syms)))))))
             (transform-args args arg-syms))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Entry Point for AST-based CPS Transformation
-;;; ----------------------------------------------------------------------------
 
 (defun cps-transform-ast* (node)
   "Transform an AST node to CPS, wrapping in a lambda for the outer continuation.
@@ -428,9 +406,7 @@ Returns (lambda (k) ...) form."
     `(lambda (,k)
        ,(cps-transform-ast node k))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Dispatcher: Choose between sexp and AST based transformation
-;;; ----------------------------------------------------------------------------
 
 (defun cps-transform* (expr)
   "Transform EXPR to CPS. Works with both S-expressions and AST nodes.

@@ -1,337 +1,223 @@
 (in-package :cl-cc)
 
-;;; ----------------------------------------------------------------------------
 ;;; VM String Instructions
-;;; ----------------------------------------------------------------------------
 ;;;
 ;;; This file extends the VM with string operations including comparisons,
 ;;; manipulation, and character access.
 
-;;; ----------------------------------------------------------------------------
 ;;; String Comparison Instructions
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-string= (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (str1 :initarg :str1 :reader vm-str1)
-   (str2 :initarg :str2 :reader vm-str2))
-  (:documentation "Case-sensitive string equality. Returns 1 if STR1 equals STR2, 0 otherwise."))
+(define-vm-instruction vm-string= (vm-instruction)
+  "Case-sensitive string equality. Returns 1 if STR1 equals STR2, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (str1 nil :reader vm-str1)
+  (str2 nil :reader vm-str2)
+  (:sexp-tag :string=)
+  (:sexp-slots dst str1 str2))
 
-(defclass vm-string< (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (str1 :initarg :str1 :reader vm-str1)
-   (str2 :initarg :str2 :reader vm-str2))
-  (:documentation "Case-sensitive string less than. Returns 1 if STR1 < STR2 lexicographically, 0 otherwise."))
+(define-vm-instruction vm-string< (vm-instruction)
+  "Case-sensitive string less than. Returns 1 if STR1 < STR2 lexicographically, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (str1 nil :reader vm-str1)
+  (str2 nil :reader vm-str2)
+  (:sexp-tag :string<)
+  (:sexp-slots dst str1 str2))
 
-(defclass vm-string> (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (str1 :initarg :str1 :reader vm-str1)
-   (str2 :initarg :str2 :reader vm-str2))
-  (:documentation "Case-sensitive string greater than. Returns 1 if STR1 > STR2 lexicographically, 0 otherwise."))
+(define-vm-instruction vm-string> (vm-instruction)
+  "Case-sensitive string greater than. Returns 1 if STR1 > STR2 lexicographically, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (str1 nil :reader vm-str1)
+  (str2 nil :reader vm-str2)
+  (:sexp-tag :string>)
+  (:sexp-slots dst str1 str2))
 
-(defclass vm-string<= (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (str1 :initarg :str1 :reader vm-str1)
-   (str2 :initarg :str2 :reader vm-str2))
-  (:documentation "Case-sensitive string less than or equal. Returns 1 if STR1 <= STR2, 0 otherwise."))
+(define-vm-instruction vm-string<= (vm-instruction)
+  "Case-sensitive string less than or equal. Returns 1 if STR1 <= STR2, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (str1 nil :reader vm-str1)
+  (str2 nil :reader vm-str2)
+  (:sexp-tag :string<=)
+  (:sexp-slots dst str1 str2))
 
-(defclass vm-string>= (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (str1 :initarg :str1 :reader vm-str1)
-   (str2 :initarg :str2 :reader vm-str2))
-  (:documentation "Case-sensitive string greater than or equal. Returns 1 if STR1 >= STR2, 0 otherwise."))
+(define-vm-instruction vm-string>= (vm-instruction)
+  "Case-sensitive string greater than or equal. Returns 1 if STR1 >= STR2, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (str1 nil :reader vm-str1)
+  (str2 nil :reader vm-str2)
+  (:sexp-tag :string>=)
+  (:sexp-slots dst str1 str2))
 
-(defclass vm-string-equal (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (str1 :initarg :str1 :reader vm-str1)
-   (str2 :initarg :str2 :reader vm-str2))
-  (:documentation "Case-insensitive string equality. Returns 1 if STR1 equals STR2 (ignoring case), 0 otherwise."))
+(define-vm-instruction vm-string-equal (vm-instruction)
+  "Case-insensitive string equality. Returns 1 if STR1 equals STR2 (ignoring case), 0 otherwise."
+  (dst nil :reader vm-dst)
+  (str1 nil :reader vm-str1)
+  (str2 nil :reader vm-str2)
+  (:sexp-tag :string-equal)
+  (:sexp-slots dst str1 str2))
 
-(defclass vm-string-lessp (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (str1 :initarg :str1 :reader vm-str1)
-   (str2 :initarg :str2 :reader vm-str2))
-  (:documentation "Case-insensitive string less than. Returns 1 if STR1 < STR2 (ignoring case), 0 otherwise."))
+(define-vm-instruction vm-string-lessp (vm-instruction)
+  "Case-insensitive string less than. Returns 1 if STR1 < STR2 (ignoring case), 0 otherwise."
+  (dst nil :reader vm-dst)
+  (str1 nil :reader vm-str1)
+  (str2 nil :reader vm-str2)
+  (:sexp-tag :string-lessp)
+  (:sexp-slots dst str1 str2))
 
-(defclass vm-string-greaterp (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (str1 :initarg :str1 :reader vm-str1)
-   (str2 :initarg :str2 :reader vm-str2))
-  (:documentation "Case-insensitive string greater than. Returns 1 if STR1 > STR2 (ignoring case), 0 otherwise."))
+(define-vm-instruction vm-string-greaterp (vm-instruction)
+  "Case-insensitive string greater than. Returns 1 if STR1 > STR2 (ignoring case), 0 otherwise."
+  (dst nil :reader vm-dst)
+  (str1 nil :reader vm-str1)
+  (str2 nil :reader vm-str2)
+  (:sexp-tag :string-greaterp)
+  (:sexp-slots dst str1 str2))
 
-(defclass vm-string-not-equal (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (str1 :initarg :str1 :reader vm-str1)
-   (str2 :initarg :str2 :reader vm-str2))
-  (:documentation "Case-sensitive string inequality. Returns 1 if STR1 not equal to STR2, 0 otherwise."))
+(define-vm-instruction vm-string-not-equal (vm-instruction)
+  "Case-sensitive string inequality. Returns 1 if STR1 not equal to STR2, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (str1 nil :reader vm-str1)
+  (str2 nil :reader vm-str2)
+  (:sexp-tag :string-not-equal)
+  (:sexp-slots dst str1 str2))
 
-;;; ----------------------------------------------------------------------------
 ;;; String Access and Query Instructions
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-string-length (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "String length. DST = length of SRC string."))
+(define-vm-instruction vm-string-length (vm-instruction)
+  "String length. DST = length of SRC string."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :string-length)
+  (:sexp-slots dst src))
 
-(defclass vm-char (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (string :initarg :string :reader vm-string-reg)
-   (index :initarg :index :reader vm-index))
-  (:documentation "Character at position. DST = STRING[INDEX]."))
+(define-vm-instruction vm-char (vm-instruction)
+  "Character at position. DST = STRING[INDEX]."
+  (dst nil :reader vm-dst)
+  (string nil :reader vm-string-reg)
+  (index nil :reader vm-index)
+  (:sexp-tag :char)
+  (:sexp-slots dst string index))
 
-(defclass vm-char-code (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Character code. DST = ASCII/Unicode code of SRC character."))
+(define-vm-instruction vm-char-code (vm-instruction)
+  "Character code. DST = ASCII/Unicode code of SRC character."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :char-code)
+  (:sexp-slots dst src))
 
-(defclass vm-code-char (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Character from code. DST = character with code SRC."))
+(define-vm-instruction vm-code-char (vm-instruction)
+  "Character from code. DST = character with code SRC."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :code-char)
+  (:sexp-slots dst src))
 
-(defclass vm-char= (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (char1 :initarg :char1 :reader vm-char1)
-   (char2 :initarg :char2 :reader vm-char2))
-  (:documentation "Character equality. Returns 1 if CHAR1 equals CHAR2, 0 otherwise."))
+(define-vm-instruction vm-char= (vm-instruction)
+  "Character equality. Returns 1 if CHAR1 equals CHAR2, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (char1 nil :reader vm-char1)
+  (char2 nil :reader vm-char2)
+  (:sexp-tag :char=)
+  (:sexp-slots dst char1 char2))
 
-(defclass vm-char< (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (char1 :initarg :char1 :reader vm-char1)
-   (char2 :initarg :char2 :reader vm-char2))
-  (:documentation "Character less than. Returns 1 if CHAR1 < CHAR2, 0 otherwise."))
+(define-vm-instruction vm-char< (vm-instruction)
+  "Character less than. Returns 1 if CHAR1 < CHAR2, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (char1 nil :reader vm-char1)
+  (char2 nil :reader vm-char2)
+  (:sexp-tag :char<)
+  (:sexp-slots dst char1 char2))
 
-;;; ----------------------------------------------------------------------------
 ;;; String Manipulation Instructions
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-subseq (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (string :initarg :string :reader vm-string-reg)
-   (start :initarg :start :reader vm-start)
-   (end :initarg :end :reader vm-end))
-  (:documentation "Substring extraction. DST = STRING[START:END]."))
+(define-vm-instruction vm-subseq (vm-instruction)
+  "Substring extraction. DST = STRING[START:END]."
+  (dst nil :reader vm-dst)
+  (string nil :reader vm-string-reg)
+  (start nil :reader vm-start)
+  (end nil :reader vm-end)
+  (:sexp-tag :subseq)
+  (:sexp-slots dst string start end))
 
-(defclass vm-concatenate (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (str1 :initarg :str1 :reader vm-str1)
-   (str2 :initarg :str2 :reader vm-str2))
-  (:documentation "String concatenation. DST = STR1 + STR2."))
+(define-vm-instruction vm-concatenate (vm-instruction)
+  "String concatenation. DST = STR1 + STR2."
+  (dst nil :reader vm-dst)
+  (str1 nil :reader vm-str1)
+  (str2 nil :reader vm-str2)
+  (:sexp-tag :concatenate)
+  (:sexp-slots dst str1 str2))
 
-(defclass vm-string-upcase (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Uppercase conversion. DST = uppercase of SRC."))
+(define-vm-instruction vm-string-upcase (vm-instruction)
+  "Uppercase conversion. DST = uppercase of SRC."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :string-upcase)
+  (:sexp-slots dst src))
 
-(defclass vm-string-downcase (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Lowercase conversion. DST = lowercase of SRC."))
+(define-vm-instruction vm-string-downcase (vm-instruction)
+  "Lowercase conversion. DST = lowercase of SRC."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :string-downcase)
+  (:sexp-slots dst src))
 
-(defclass vm-string-capitalize (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Capitalize string. DST = capitalized form of SRC."))
+(define-vm-instruction vm-string-capitalize (vm-instruction)
+  "Capitalize string. DST = capitalized form of SRC."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :string-capitalize)
+  (:sexp-slots dst src))
 
-(defclass vm-string-trim (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (char-bag :initarg :char-bag :reader vm-char-bag)
-   (string :initarg :string :reader vm-string-reg))
-  (:documentation "Trim characters from both ends. DST = STRING with CHAR-BAG chars trimmed from both ends."))
+(define-vm-instruction vm-string-trim (vm-instruction)
+  "Trim characters from both ends. DST = STRING with CHAR-BAG chars trimmed from both ends."
+  (dst nil :reader vm-dst)
+  (char-bag nil :reader vm-char-bag)
+  (string nil :reader vm-string-reg)
+  (:sexp-tag :string-trim)
+  (:sexp-slots dst char-bag string))
 
-(defclass vm-string-left-trim (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (char-bag :initarg :char-bag :reader vm-char-bag)
-   (string :initarg :string :reader vm-string-reg))
-  (:documentation "Trim characters from left. DST = STRING with CHAR-BAG chars trimmed from left."))
+(define-vm-instruction vm-string-left-trim (vm-instruction)
+  "Trim characters from left. DST = STRING with CHAR-BAG chars trimmed from left."
+  (dst nil :reader vm-dst)
+  (char-bag nil :reader vm-char-bag)
+  (string nil :reader vm-string-reg)
+  (:sexp-tag :string-left-trim)
+  (:sexp-slots dst char-bag string))
 
-(defclass vm-string-right-trim (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (char-bag :initarg :char-bag :reader vm-char-bag)
-   (string :initarg :string :reader vm-string-reg))
-  (:documentation "Trim characters from right. DST = STRING with CHAR-BAG chars trimmed from right."))
+(define-vm-instruction vm-string-right-trim (vm-instruction)
+  "Trim characters from right. DST = STRING with CHAR-BAG chars trimmed from right."
+  (dst nil :reader vm-dst)
+  (char-bag nil :reader vm-char-bag)
+  (string nil :reader vm-string-reg)
+  (:sexp-tag :string-right-trim)
+  (:sexp-slots dst char-bag string))
 
-;;; ----------------------------------------------------------------------------
 ;;; String Search Instructions
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-search-string (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (pattern :initarg :pattern :reader vm-pattern)
-   (string :initarg :string :reader vm-string-reg)
-   (start :initarg :start :reader vm-start))
-  (:documentation "Search for pattern in string. DST = index of PATTERN in STRING from START, or -1 if not found."))
+(define-vm-instruction vm-search-string (vm-instruction)
+  "Search for pattern in string. DST = index of PATTERN in STRING from START, or -1 if not found."
+  (dst nil :reader vm-dst)
+  (pattern nil :reader vm-pattern)
+  (string nil :reader vm-string-reg)
+  (start nil :reader vm-start)
+  (:sexp-tag :search-string)
+  (:sexp-slots dst pattern string start))
 
-;;; ----------------------------------------------------------------------------
-;;; Instruction -> S-expression Conversion
-;;; ----------------------------------------------------------------------------
-
-;; String comparisons
-(defmethod instruction->sexp ((inst vm-string=))
-  (list :string= (vm-dst inst) (vm-str1 inst) (vm-str2 inst)))
-
-(defmethod instruction->sexp ((inst vm-string<))
-  (list :string< (vm-dst inst) (vm-str1 inst) (vm-str2 inst)))
-
-(defmethod instruction->sexp ((inst vm-string>))
-  (list :string> (vm-dst inst) (vm-str1 inst) (vm-str2 inst)))
-
-(defmethod instruction->sexp ((inst vm-string<=))
-  (list :string<= (vm-dst inst) (vm-str1 inst) (vm-str2 inst)))
-
-(defmethod instruction->sexp ((inst vm-string>=))
-  (list :string>= (vm-dst inst) (vm-str1 inst) (vm-str2 inst)))
-
-(defmethod instruction->sexp ((inst vm-string-equal))
-  (list :string-equal (vm-dst inst) (vm-str1 inst) (vm-str2 inst)))
-
-(defmethod instruction->sexp ((inst vm-string-lessp))
-  (list :string-lessp (vm-dst inst) (vm-str1 inst) (vm-str2 inst)))
-
-(defmethod instruction->sexp ((inst vm-string-greaterp))
-  (list :string-greaterp (vm-dst inst) (vm-str1 inst) (vm-str2 inst)))
-
-(defmethod instruction->sexp ((inst vm-string-not-equal))
-  (list :string-not-equal (vm-dst inst) (vm-str1 inst) (vm-str2 inst)))
-
-;; String access and query
-(defmethod instruction->sexp ((inst vm-string-length))
-  (list :string-length (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-char))
-  (list :char (vm-dst inst) (vm-string-reg inst) (vm-index inst)))
-
-(defmethod instruction->sexp ((inst vm-char-code))
-  (list :char-code (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-code-char))
-  (list :code-char (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-char=))
-  (list :char= (vm-dst inst) (vm-char1 inst) (vm-char2 inst)))
-
-(defmethod instruction->sexp ((inst vm-char<))
-  (list :char< (vm-dst inst) (vm-char1 inst) (vm-char2 inst)))
-
-;; String manipulation
-(defmethod instruction->sexp ((inst vm-subseq))
-  (list :subseq (vm-dst inst) (vm-string-reg inst) (vm-start inst) (vm-end inst)))
-
-(defmethod instruction->sexp ((inst vm-concatenate))
-  (list :concatenate (vm-dst inst) (vm-str1 inst) (vm-str2 inst)))
-
-(defmethod instruction->sexp ((inst vm-string-upcase))
-  (list :string-upcase (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-string-downcase))
-  (list :string-downcase (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-string-capitalize))
-  (list :string-capitalize (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-string-trim))
-  (list :string-trim (vm-dst inst) (vm-char-bag inst) (vm-string-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-string-left-trim))
-  (list :string-left-trim (vm-dst inst) (vm-char-bag inst) (vm-string-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-string-right-trim))
-  (list :string-right-trim (vm-dst inst) (vm-char-bag inst) (vm-string-reg inst)))
-
-;; String search
-(defmethod instruction->sexp ((inst vm-search-string))
-  (list :search-string (vm-dst inst) (vm-pattern inst) (vm-string-reg inst) (vm-start inst)))
-
-;;; ----------------------------------------------------------------------------
 ;;; S-expression -> Instruction Conversion (Extended)
-;;; ----------------------------------------------------------------------------
 
-;;; ----------------------------------------------------------------------------
 ;;; Instruction Execution - String Comparisons
-;;; ----------------------------------------------------------------------------
 
-(defmethod execute-instruction ((inst vm-string=) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (string= (vm-reg-get state (vm-str1 inst))
-                             (vm-reg-get state (vm-str2 inst)))
-                    1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-simple-instruction vm-string= :pred2 string= :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string< :pred2 string< :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string> :pred2 string> :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string<= :pred2 string<= :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string>= :pred2 string>= :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string-equal :pred2 string-equal :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string-lessp :pred2 string-lessp :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string-greaterp :pred2 string-greaterp :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string-not-equal :pred2 string/= :lhs vm-str1 :rhs vm-str2)
 
-(defmethod execute-instruction ((inst vm-string<) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (string< (vm-reg-get state (vm-str1 inst))
-                             (vm-reg-get state (vm-str2 inst)))
-                    1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-string>) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (string> (vm-reg-get state (vm-str1 inst))
-                             (vm-reg-get state (vm-str2 inst)))
-                    1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-string<=) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (string<= (vm-reg-get state (vm-str1 inst))
-                              (vm-reg-get state (vm-str2 inst)))
-                    1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-string>=) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (string>= (vm-reg-get state (vm-str1 inst))
-                              (vm-reg-get state (vm-str2 inst)))
-                    1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-string-equal) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (string-equal (vm-reg-get state (vm-str1 inst))
-                                  (vm-reg-get state (vm-str2 inst)))
-                    1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-string-lessp) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (string-lessp (vm-reg-get state (vm-str1 inst))
-                                  (vm-reg-get state (vm-str2 inst)))
-                    1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-string-greaterp) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (string-greaterp (vm-reg-get state (vm-str1 inst))
-                                     (vm-reg-get state (vm-str2 inst)))
-                    1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-string-not-equal) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (string/= (vm-reg-get state (vm-str1 inst))
-                              (vm-reg-get state (vm-str2 inst)))
-                    1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-;;; ----------------------------------------------------------------------------
 ;;; Instruction Execution - String Access and Query
-;;; ----------------------------------------------------------------------------
 
-(defmethod execute-instruction ((inst vm-string-length) state pc labels)
-  (declare (ignore labels))
-  (let ((result (length (vm-reg-get state (vm-src inst)))))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-simple-instruction vm-string-length :unary length)
 
 (defmethod execute-instruction ((inst vm-char) state pc labels)
   (declare (ignore labels))
@@ -341,37 +227,13 @@
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
-(defmethod execute-instruction ((inst vm-char-code) state pc labels)
-  (declare (ignore labels))
-  (let ((result (char-code (vm-reg-get state (vm-src inst)))))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-simple-instruction vm-char-code :unary char-code)
+(define-simple-instruction vm-code-char :unary code-char)
 
-(defmethod execute-instruction ((inst vm-code-char) state pc labels)
-  (declare (ignore labels))
-  (let ((result (code-char (vm-reg-get state (vm-src inst)))))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-simple-instruction vm-char= :pred2 char= :lhs vm-char1 :rhs vm-char2)
+(define-simple-instruction vm-char< :pred2 char< :lhs vm-char1 :rhs vm-char2)
 
-(defmethod execute-instruction ((inst vm-char=) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (char= (vm-reg-get state (vm-char1 inst))
-                          (vm-reg-get state (vm-char2 inst)))
-                    1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-char<) state pc labels)
-  (declare (ignore labels))
-  (let ((result (if (char< (vm-reg-get state (vm-char1 inst))
-                          (vm-reg-get state (vm-char2 inst)))
-                    1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-;;; ----------------------------------------------------------------------------
 ;;; Instruction Execution - String Manipulation
-;;; ----------------------------------------------------------------------------
 
 (defmethod execute-instruction ((inst vm-subseq) state pc labels)
   (declare (ignore labels))
@@ -390,23 +252,9 @@
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
-(defmethod execute-instruction ((inst vm-string-upcase) state pc labels)
-  (declare (ignore labels))
-  (let ((result (string-upcase (vm-reg-get state (vm-src inst)))))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-string-downcase) state pc labels)
-  (declare (ignore labels))
-  (let ((result (string-downcase (vm-reg-get state (vm-src inst)))))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-string-capitalize) state pc labels)
-  (declare (ignore labels))
-  (let ((result (string-capitalize (vm-reg-get state (vm-src inst)))))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-simple-instruction vm-string-upcase :unary string-upcase)
+(define-simple-instruction vm-string-downcase :unary string-downcase)
+(define-simple-instruction vm-string-capitalize :unary string-capitalize)
 
 (defmethod execute-instruction ((inst vm-string-trim) state pc labels)
   (declare (ignore labels))
@@ -429,9 +277,7 @@
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Instruction Execution - String Search
-;;; ----------------------------------------------------------------------------
 
 (defmethod execute-instruction ((inst vm-search-string) state pc labels)
   (declare (ignore labels))
@@ -442,62 +288,46 @@
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Symbol Manipulation Instructions
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-symbol-name (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Get the name string of a symbol."))
+(define-vm-instruction vm-symbol-name (vm-instruction)
+  "Get the name string of a symbol."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :symbol-name)
+  (:sexp-slots dst src))
 
-(defclass vm-make-symbol (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Create an uninterned symbol from a string."))
+(define-vm-instruction vm-make-symbol (vm-instruction)
+  "Create an uninterned symbol from a string."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :make-symbol)
+  (:sexp-slots dst src))
 
-(defclass vm-intern-symbol (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src)
-   (pkg :initarg :pkg :reader vm-intern-pkg :initform nil
-        :documentation "Optional register containing package designator"))
-  (:documentation "Intern a string as a symbol. Optional package designator."))
+(define-vm-instruction vm-intern-symbol (vm-instruction)
+  "Intern a string as a symbol. Optional package designator."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (pkg nil :reader vm-intern-pkg)
+  (:sexp-tag :intern)
+  (:sexp-slots dst src))
 
-(defclass vm-gensym-inst (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst))
-  (:documentation "Generate a unique uninterned symbol."))
+(define-vm-instruction vm-gensym-inst (vm-instruction)
+  "Generate a unique uninterned symbol."
+  (dst nil :reader vm-dst)
+  (:sexp-tag :gensym)
+  (:sexp-slots dst))
 
-(defclass vm-keywordp (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Test if value is a keyword symbol. Returns 1 if true, 0 otherwise."))
-
-;; Symbol instruction->sexp
-(defmethod instruction->sexp ((inst vm-symbol-name))
-  (list :symbol-name (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-make-symbol))
-  (list :make-symbol (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-intern-symbol))
-  (list :intern (vm-dst inst) (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-gensym-inst))
-  (list :gensym (vm-dst inst)))
-
-(defmethod instruction->sexp ((inst vm-keywordp))
-  (list :keywordp (vm-dst inst) (vm-src inst)))
+(define-vm-instruction vm-keywordp (vm-instruction)
+  "Test if value is a keyword symbol. Returns 1 if true, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :keywordp)
+  (:sexp-slots dst src))
 
 ;; Symbol execute-instruction
-(defmethod execute-instruction ((inst vm-symbol-name) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (symbol-name (vm-reg-get state (vm-src inst))))
-  (values (1+ pc) nil nil))
-
-(defmethod execute-instruction ((inst vm-make-symbol) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (make-symbol (vm-reg-get state (vm-src inst))))
-  (values (1+ pc) nil nil))
+(define-simple-instruction vm-symbol-name :unary symbol-name)
+(define-simple-instruction vm-make-symbol :unary make-symbol)
 
 (defmethod execute-instruction ((inst vm-intern-symbol) state pc labels)
   (declare (ignore labels))
@@ -515,79 +345,72 @@
   (vm-reg-set state (vm-dst inst) (gensym))
   (values (1+ pc) nil nil))
 
-(defmethod execute-instruction ((inst vm-keywordp) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (if (keywordp (vm-reg-get state (vm-src inst))) 1 0))
-  (values (1+ pc) nil nil))
+(define-simple-instruction vm-keywordp :pred1 keywordp)
 
-;;; ----------------------------------------------------------------------------
 ;;; Character Predicate Instructions
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-digit-char-p (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Test if character is a digit. Returns weight or nil."))
+(define-vm-instruction vm-digit-char-p (vm-instruction)
+  "Test if character is a digit. Returns weight or nil."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :digit-char-p)
+  (:sexp-slots dst src))
 
-(defclass vm-alpha-char-p (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Test if character is alphabetic. Returns 1/0."))
+(define-vm-instruction vm-alpha-char-p (vm-instruction)
+  "Test if character is alphabetic. Returns 1/0."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :alpha-char-p)
+  (:sexp-slots dst src))
 
-(defclass vm-upper-case-p (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Test if character is upper case. Returns 1/0."))
+(define-vm-instruction vm-upper-case-p (vm-instruction)
+  "Test if character is upper case. Returns 1/0."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :upper-case-p)
+  (:sexp-slots dst src))
 
-(defclass vm-lower-case-p (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Test if character is lower case. Returns 1/0."))
+(define-vm-instruction vm-lower-case-p (vm-instruction)
+  "Test if character is lower case. Returns 1/0."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :lower-case-p)
+  (:sexp-slots dst src))
 
-(defclass vm-char-upcase (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Upcase a character. DST = uppercase of SRC."))
+(define-vm-instruction vm-char-upcase (vm-instruction)
+  "Upcase a character. DST = uppercase of SRC."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :char-upcase)
+  (:sexp-slots dst src))
 
-(defclass vm-char-downcase (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Downcase a character. DST = lowercase of SRC."))
+(define-vm-instruction vm-char-downcase (vm-instruction)
+  "Downcase a character. DST = lowercase of SRC."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :char-downcase)
+  (:sexp-slots dst src))
 
-(defclass vm-stringp (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Test if value is a string. Returns 1/0."))
+(define-vm-instruction vm-stringp (vm-instruction)
+  "Test if value is a string. Returns 1/0."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :stringp)
+  (:sexp-slots dst src))
 
-(defclass vm-characterp (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Test if value is a character. Returns 1/0."))
+(define-vm-instruction vm-characterp (vm-instruction)
+  "Test if value is a character. Returns 1/0."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :characterp)
+  (:sexp-slots dst src))
 
-(defclass vm-parse-integer (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Parse an integer from a string. DST = integer value."))
-
-;; Character predicate instruction->sexp
-(defmethod instruction->sexp ((inst vm-digit-char-p))
-  (list :digit-char-p (vm-dst inst) (vm-src inst)))
-(defmethod instruction->sexp ((inst vm-alpha-char-p))
-  (list :alpha-char-p (vm-dst inst) (vm-src inst)))
-(defmethod instruction->sexp ((inst vm-upper-case-p))
-  (list :upper-case-p (vm-dst inst) (vm-src inst)))
-(defmethod instruction->sexp ((inst vm-lower-case-p))
-  (list :lower-case-p (vm-dst inst) (vm-src inst)))
-(defmethod instruction->sexp ((inst vm-char-upcase))
-  (list :char-upcase (vm-dst inst) (vm-src inst)))
-(defmethod instruction->sexp ((inst vm-char-downcase))
-  (list :char-downcase (vm-dst inst) (vm-src inst)))
-(defmethod instruction->sexp ((inst vm-stringp))
-  (list :stringp (vm-dst inst) (vm-src inst)))
-(defmethod instruction->sexp ((inst vm-characterp))
-  (list :characterp (vm-dst inst) (vm-src inst)))
-(defmethod instruction->sexp ((inst vm-parse-integer))
-  (list :parse-integer (vm-dst inst) (vm-src inst)))
+(define-vm-instruction vm-parse-integer (vm-instruction)
+  "Parse an integer from a string. DST = integer value."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :parse-integer)
+  (:sexp-slots dst src))
 
 ;; Character predicate execute-instruction
 (defmethod execute-instruction ((inst vm-digit-char-p) state pc labels)
@@ -597,62 +420,20 @@
     (vm-reg-set state (vm-dst inst) (or result nil))
     (values (1+ pc) nil nil)))
 
-(defmethod execute-instruction ((inst vm-alpha-char-p) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst)
-              (if (alpha-char-p (vm-reg-get state (vm-src inst))) 1 0))
-  (values (1+ pc) nil nil))
+(define-simple-instruction vm-alpha-char-p :pred1 alpha-char-p)
+(define-simple-instruction vm-upper-case-p :pred1 upper-case-p)
+(define-simple-instruction vm-lower-case-p :pred1 lower-case-p)
+(define-simple-instruction vm-char-upcase :unary char-upcase)
+(define-simple-instruction vm-char-downcase :unary char-downcase)
+(define-simple-instruction vm-stringp :pred1 stringp)
+(define-simple-instruction vm-characterp :pred1 characterp)
+(define-simple-instruction vm-parse-integer :unary parse-integer)
 
-(defmethod execute-instruction ((inst vm-upper-case-p) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst)
-              (if (upper-case-p (vm-reg-get state (vm-src inst))) 1 0))
-  (values (1+ pc) nil nil))
+(define-vm-instruction vm-alphanumericp (vm-instruction)
+  "Test if character is alphanumeric. Returns 1/0."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :alphanumericp)
+  (:sexp-slots dst src))
 
-(defmethod execute-instruction ((inst vm-lower-case-p) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst)
-              (if (lower-case-p (vm-reg-get state (vm-src inst))) 1 0))
-  (values (1+ pc) nil nil))
-
-(defmethod execute-instruction ((inst vm-char-upcase) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (char-upcase (vm-reg-get state (vm-src inst))))
-  (values (1+ pc) nil nil))
-
-(defmethod execute-instruction ((inst vm-char-downcase) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (char-downcase (vm-reg-get state (vm-src inst))))
-  (values (1+ pc) nil nil))
-
-(defmethod execute-instruction ((inst vm-stringp) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst)
-              (if (stringp (vm-reg-get state (vm-src inst))) 1 0))
-  (values (1+ pc) nil nil))
-
-(defmethod execute-instruction ((inst vm-characterp) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst)
-              (if (characterp (vm-reg-get state (vm-src inst))) 1 0))
-  (values (1+ pc) nil nil))
-
-(defmethod execute-instruction ((inst vm-parse-integer) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (parse-integer (vm-reg-get state (vm-src inst))))
-  (values (1+ pc) nil nil))
-
-(defclass vm-alphanumericp (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Test if character is alphanumeric. Returns 1/0."))
-
-(defmethod instruction->sexp ((inst vm-alphanumericp))
-  (list :alphanumericp (vm-dst inst) (vm-src inst)))
-
-(defmethod execute-instruction ((inst vm-alphanumericp) state pc labels)
-  (declare (ignore labels))
-  (let* ((ch (vm-reg-get state (vm-src inst)))
-         (result (if (alphanumericp ch) 1 0)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-simple-instruction vm-alphanumericp :pred1 alphanumericp)

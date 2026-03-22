@@ -7,26 +7,7 @@
 
 (in-package :cl-cc/type)
 
-;;; ----------------------------------------------------------------------------
-;;; Type Variable Detection
-;;; ----------------------------------------------------------------------------
-
-(defun type-variable-p (type)
-  "Check if TYPE is a type variable."
-  (typep type 'type-variable))
-
-(defun type-constructor-p (type)
-  "Check if TYPE is a type constructor (not a variable or unknown)."
-  (or (typep type 'type-primitive)
-      (typep type 'type-function)
-      (typep type 'type-tuple)
-      (typep type 'type-union)
-      (typep type 'type-intersection)
-      (typep type 'type-constructor)))
-
-;;; ----------------------------------------------------------------------------
 ;;; Substitution Operations
-;;; ----------------------------------------------------------------------------
 
 (defun empty-subst ()
   "Return an empty substitution."
@@ -50,9 +31,7 @@
    Returns new substitution (does not modify original)."
   (acons var type subst))
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Substitution Application
-;;; ----------------------------------------------------------------------------
 
 (defun type-substitute (type subst)
   "Apply substitution SUBST to TYPE, replacing type variables.
@@ -74,7 +53,7 @@
    
     ;; Function type - substitute in params and return
     ((typep type 'type-function)
-     (make-instance 'type-function
+     (make-type-function-raw
                     :params (mapcar (lambda (p) (type-substitute p subst))
                                     (type-function-params type))
                     :return (type-substitute (type-function-return type) subst)
@@ -82,28 +61,28 @@
    
     ;; Tuple type - substitute in elements
     ((typep type 'type-tuple)
-     (make-instance 'type-tuple
+     (make-type-tuple-raw
                     :elements (mapcar (lambda (e) (type-substitute e subst))
                                       (type-tuple-elements type))
                     :source-location (type-node-source-location type)))
    
      ;; Union type - substitute in alternatives
      ((typep type 'type-union)
-      (make-instance 'type-union
+      (make-type-union-raw
                      :types (mapcar (lambda (ty) (type-substitute ty subst))
                                     (type-union-types type))
                      :source-location (type-node-source-location type)))
     
      ;; Intersection type - substitute in components
      ((typep type 'type-intersection)
-      (make-instance 'type-intersection
+      (make-type-intersection-raw
                      :types (mapcar (lambda (ty) (type-substitute ty subst))
                                     (type-intersection-types type))
                      :source-location (type-node-source-location type)))
 
      ;; Type constructor - substitute in type arguments
      ((typep type 'type-constructor)
-      (make-instance 'type-constructor
+      (make-type-constructor-raw
                      :name (type-constructor-name type)
                      :args (mapcar (lambda (a) (type-substitute a subst))
                                    (type-constructor-args type))
@@ -112,9 +91,7 @@
     ;; Primitive, unknown, and other types - return unchanged
     (t type)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Occurs Check
-;;; ----------------------------------------------------------------------------
 
 (defun type-occurs-p (var type subst)
   "Check if VAR occurs in TYPE (prevents infinite types).
@@ -163,9 +140,7 @@
      ;; Other types (primitive, unknown) - variable cannot occur
      (t nil)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Unification
-;;; ----------------------------------------------------------------------------
 
 (defun type-unify (t1 t2 &optional (subst nil subst-supplied-p))
   "Unify two type-nodes, returning (values substitution success-p).
@@ -296,9 +271,7 @@
            (type-unify-lists (cdr types1) (cdr types2) subst1)
            (values nil nil))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Substitution Composition
-;;; ----------------------------------------------------------------------------
 
 (defun compose-subst (s1 s2)
   "Compose two substitutions: s1 ∘ s2.
@@ -316,9 +289,7 @@
     ;; Prepend s1 bindings (s1 takes precedence for overlapping domains)
     (append s1 s2-applied)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Environment Operations
-;;; ----------------------------------------------------------------------------
 
 (defun apply-subst (env subst)
   "Apply substitution SUBST to type environment ENV.
@@ -338,12 +309,10 @@
 (defun apply-subst-env (env subst)
   "Apply substitution SUBST to type-env object ENV.
    Returns a new type-env with types substituted."
-  (make-instance 'type-env
+  (make-type-env
                  :bindings (apply-subst (type-env-bindings env) subst)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Free Type Variables
-;;; ----------------------------------------------------------------------------
 
 (defun type-free-vars (type)
   "Get all free type variables in TYPE as a list."
@@ -391,24 +360,15 @@
    (mapcan (lambda (entry) (type-free-vars (cdr entry))) env)
    :test #'type-variable-equal-p))
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Schemes for Let-Polymorphism
-;;; ----------------------------------------------------------------------------
 
-(defclass type-scheme ()
-  ((quantified-vars :initarg :quantified-vars
-                    :reader type-scheme-quantified-vars
-                    :type list
-                    :documentation "List of quantified type variables.")
-   (type :initarg :type
-         :reader type-scheme-type
-         :type type-node
-         :documentation "The underlying type."))
-  (:documentation "Represents a type scheme ∀α₁...αₙ. τ for let-polymorphism."))
+(defstruct (type-scheme (:constructor make-type-scheme-raw))
+  (quantified-vars nil :type list)
+  (type nil))
 
 (defun make-type-scheme (quantified-vars type)
   "Create a type scheme with given quantified variables and type."
-  (make-instance 'type-scheme
+  (make-type-scheme-raw
                  :quantified-vars quantified-vars
                  :type type))
 
@@ -416,9 +376,7 @@
   "Convert a monomorphic type to a type scheme with no quantified variables."
   (make-type-scheme nil type))
 
-;;; ----------------------------------------------------------------------------
 ;;; Generalization
-;;; ----------------------------------------------------------------------------
 
 (defun generalize (env type)
   "Generalize TYPE to a type scheme, quantifying free variables.
@@ -438,9 +396,7 @@
                                       :test #'type-variable-equal-p)))
     (make-type-scheme to-quantify type)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Instantiation
-;;; ----------------------------------------------------------------------------
 
 (defun instantiate (scheme)
   "Instantiate type SCHEME with fresh type variables.
@@ -459,9 +415,7 @@
                         quantified)))
     (type-substitute type subst)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Normalize Type (for pretty printing)
-;;; ----------------------------------------------------------------------------
 
 (defun normalize-type-variables (type)
   "Rename type variables in TYPE to canonical names (?a, ?b, ...).
@@ -480,25 +434,23 @@
                  ((type-variable-p ty)
                   (get-canonical ty))
                  ((typep ty 'type-function)
-                  (make-instance 'type-function
+                  (make-type-function-raw
                                  :params (mapcar #'normalize-rec
                                                  (type-function-params ty))
                                  :return (normalize-rec (type-function-return ty))))
                  ((typep ty 'type-tuple)
-                  (make-instance 'type-tuple
+                  (make-type-tuple-raw
                                  :elements (mapcar #'normalize-rec
                                                    (type-tuple-elements ty))))
                  ((typep ty 'type-constructor)
-                  (make-instance 'type-constructor
+                  (make-type-constructor-raw
                                  :name (type-constructor-name ty)
                                  :args (mapcar #'normalize-rec
                                                (type-constructor-args ty))))
                  (t ty))))
       (normalize-rec type))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Utility: Apply Unification Result
-;;; ----------------------------------------------------------------------------
 
 (defun apply-unification (type subst)
   "Apply substitution from unification to TYPE.

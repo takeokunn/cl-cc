@@ -8,11 +8,9 @@
 
 (in-package :cl-cc)
 
-;;; ----------------------------------------------------------------------------
 ;;; Reader State
-;;; ----------------------------------------------------------------------------
 
-(defstruct (vm-reader-state 
+(defstruct (vm-reader-state
              (:conc-name vrs-)
              (:constructor %make-vm-reader-state))
   "State for incremental S-expression reading."
@@ -82,9 +80,7 @@
               (char= ch #\Return)
               (char= ch #\Page))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Reader Conditions
-;;; ----------------------------------------------------------------------------
 
 (define-condition vm-reader-error (error)
   ((message :initarg :message :reader vm-reader-error-message)
@@ -103,9 +99,7 @@
          :column (vrs-column state)
          :message (apply #'format nil format-control format-args)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Core Reader - Integer
-;;; ----------------------------------------------------------------------------
 
 (defun vm-read-integer (state &optional (sign 1))
   "Read an integer from STATE. SIGN is 1 or -1 for already-read sign."
@@ -145,9 +139,7 @@
       (t
        (vm-reader-signal-error state "Expected number, got ~S" ch)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Core Reader - Symbol
-;;; ----------------------------------------------------------------------------
 
 (defun vm-symbol-char-p (ch)
   "Check if CH is valid in a symbol (not including escape chars)."
@@ -204,9 +196,7 @@
                (intern name :keyword)  ;; Escaped symbols become keywords for simplicity
                (intern name :cl-cc-user)))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Core Reader - String
-;;; ----------------------------------------------------------------------------
 
 (defun vm-read-string (state)
   "Read a string literal from STATE."
@@ -250,9 +240,7 @@
            (vm-reader-advance state)))))
     (coerce (nreverse chars) 'string)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Core Reader - List
-;;; ----------------------------------------------------------------------------
 
 (defun vm-read-list (state)
   "Read a list from STATE."
@@ -304,9 +292,7 @@
            (push (vm-read-expr state) elements)))))
     (nreverse elements)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Core Reader - Quote Forms
-;;; ----------------------------------------------------------------------------
 
 (defun vm-read-quote (state)
   "Read a quoted expression: 'expr"
@@ -328,9 +314,7 @@
           (list 'comma-at (vm-read-expr state)))
         (list 'comma (vm-read-expr state)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Core Reader - Dispatch Macro (#)
-;;; ----------------------------------------------------------------------------
 
 (defun vm-read-dispatch (state)
   "Read a dispatch macro character starting with #."
@@ -428,9 +412,7 @@
                  (return)))))
           (t (vm-reader-advance state)))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Main Reader Entry Points
-;;; ----------------------------------------------------------------------------
 
 (defun vm-read-expr (state)
   "Read a single S-expression from reader state."
@@ -529,9 +511,7 @@
   (declare (ignore eof-error-p eof-value))
   (vm-read-delimited-list-internal state delimiter))
 
-;;; ----------------------------------------------------------------------------
 ;;; Printer Functions
-;;; ----------------------------------------------------------------------------
 
 (defun vm-prin1-to-string (object)
   "Convert OBJECT to a machine-readable string representation."
@@ -631,86 +611,48 @@
   "Convert OBJECT to its string representation."
   (vm-prin1-to-string object))
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Reader/Printer Instructions
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-read-sexp (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (stream-reg :initarg :stream :reader vm-stream-reg))
-  (:documentation "Read an S-expression from stream register to dst register."))
+(define-vm-instruction vm-read-sexp (vm-instruction)
+  "Read an S-expression from stream register to dst register."
+  (dst nil :reader vm-dst)
+  (stream-reg nil :reader vm-stream-reg)
+  (:sexp-tag :read-sexp)
+  (:sexp-slots dst stream-reg))
 
-(defclass vm-read-from-string (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (string-reg :initarg :string :reader vm-string-reg))
-  (:documentation "Read an S-expression from string register to dst register."))
+(define-vm-instruction vm-read-from-string-rp (vm-instruction)
+  "Read an S-expression from string register to dst register."
+  (dst nil :reader vm-dst)
+  (string-reg nil :reader vm-string-reg)
+  (:sexp-tag :read-from-string)
+  (:sexp-slots dst string-reg))
 
-(defclass vm-print-sexp (vm-instruction)
-  ((src :initarg :src :reader vm-src))
-  (:documentation "Print S-expression from register with newline."))
+(define-vm-instruction vm-print-sexp (vm-instruction)
+  "Print S-expression from register with newline."
+  (src nil :reader vm-src)
+  (:sexp-tag :print-sexp)
+  (:sexp-slots src))
 
-(defclass vm-prin1-sexp (vm-instruction)
-  ((src :initarg :src :reader vm-src))
-  (:documentation "Print S-expression in machine-readable format."))
+(define-vm-instruction vm-prin1-sexp (vm-instruction)
+  "Print S-expression in machine-readable format."
+  (src nil :reader vm-src)
+  (:sexp-tag :prin1-sexp)
+  (:sexp-slots src))
 
-(defclass vm-princ-sexp (vm-instruction)
-  ((src :initarg :src :reader vm-src))
-  (:documentation "Print S-expression in human-readable format."))
+(define-vm-instruction vm-princ-sexp (vm-instruction)
+  "Print S-expression in human-readable format."
+  (src nil :reader vm-src)
+  (:sexp-tag :princ-sexp)
+  (:sexp-slots src))
 
-(defclass vm-write-to-string (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (src :initarg :src :reader vm-src))
-  (:documentation "Convert S-expression to string and store in dst."))
+(define-vm-instruction vm-write-to-string-rp (vm-instruction)
+  "Convert S-expression to string and store in dst."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :write-to-string)
+  (:sexp-slots dst src))
 
-;;; ----------------------------------------------------------------------------
-;;; Instruction -> S-expression Conversion for Reader/Printer
-;;; ----------------------------------------------------------------------------
-
-(defmethod instruction->sexp ((inst vm-read-sexp))
-  (list :read-sexp (vm-dst inst) (vm-stream-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-read-from-string))
-  (list :read-from-string (vm-dst inst) (vm-string-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-print-sexp))
-  (list :print-sexp (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-prin1-sexp))
-  (list :prin1-sexp (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-princ-sexp))
-  (list :princ-sexp (vm-src inst)))
-
-(defmethod instruction->sexp ((inst vm-write-to-string))
-  (list :write-to-string (vm-dst inst) (vm-src inst)))
-
-;;; ----------------------------------------------------------------------------
-;;; S-expression -> Instruction Conversion for Reader/Printer
-;;; ----------------------------------------------------------------------------
-
-;; Extend sexp->instruction to handle reader/printer instructions
-;; This needs to be added to the existing method in vm.lisp via :after or direct modification
-
-(defun %make-reader-printer-instruction (sexp)
-  "Create a reader/printer instruction from SEXP. Returns nil if not a reader/printer instruction."
-  (case (car sexp)
-    (:read-sexp (make-instance 'vm-read-sexp
-                                :dst (second sexp)
-                                :stream-reg (third sexp)))
-    (:read-from-string (make-instance 'vm-read-from-string
-                                       :dst (second sexp)
-                                       :string-reg (third sexp)))
-    (:print-sexp (make-instance 'vm-print-sexp :src (second sexp)))
-    (:prin1-sexp (make-instance 'vm-prin1-sexp :src (second sexp)))
-    (:princ-sexp (make-instance 'vm-princ-sexp :src (second sexp)))
-    (:write-to-string (make-instance 'vm-write-to-string
-                                      :dst (second sexp)
-                                      :src (third sexp)))
-    (otherwise nil)))
-
-;;; ----------------------------------------------------------------------------
 ;;; Instruction Execution for Reader/Printer
-;;; ----------------------------------------------------------------------------
 
 (defmethod execute-instruction ((inst vm-read-sexp) state pc labels)
   (declare (ignore labels))
@@ -721,7 +663,7 @@
     (vm-reg-set state (vm-dst inst) value)
     (values (1+ pc) nil nil)))
 
-(defmethod execute-instruction ((inst vm-read-from-string) state pc labels)
+(defmethod execute-instruction ((inst vm-read-from-string-rp) state pc labels)
   (declare (ignore labels))
   (let* ((string (vm-reg-get state (vm-string-reg inst)))
          (value (vm-read-from-string string :eof-error-p nil :eof-value nil)))
@@ -749,16 +691,14 @@
     (vm-princ value stream)
     (values (1+ pc) nil nil)))
 
-(defmethod execute-instruction ((inst vm-write-to-string) state pc labels)
+(defmethod execute-instruction ((inst vm-write-to-string-rp) state pc labels)
   (declare (ignore labels))
   (let* ((value (vm-reg-get state (vm-src inst)))
          (string (vm-write-to-string value)))
     (vm-reg-set state (vm-dst inst) string)
     (values (1+ pc) nil nil)))
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Reader State Heap Object
-;;; ----------------------------------------------------------------------------
 
 ;; For storing reader states on the heap
 (defclass vm-reader-state-object (vm-heap-object)
@@ -769,36 +709,32 @@
    (eof-reached :initarg :eof-reached :accessor vm-rso-eof-reached))
   (:documentation "Reader state stored on the VM heap."))
 
-(defclass vm-make-reader (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (stream-reg :initarg :stream :reader vm-stream-reg))
-  (:documentation "Create a new reader state from stream and store in dst."))
+(define-vm-instruction vm-make-reader (vm-instruction)
+  "Create a new reader state from stream and store in dst."
+  (dst nil :reader vm-dst)
+  (stream-reg nil :reader vm-stream-reg)
+  (:sexp-tag :make-reader)
+  (:sexp-slots dst stream-reg))
 
-(defclass vm-reader-read (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (reader-reg :initarg :reader :reader vm-reader-reg))
-  (:documentation "Read next S-expression from reader state."))
+(define-vm-instruction vm-reader-read (vm-instruction)
+  "Read next S-expression from reader state."
+  (dst nil :reader vm-dst)
+  (reader-reg nil :reader vm-reader-reg)
+  (:sexp-tag :reader-read)
+  (:sexp-slots dst reader-reg))
 
-(defclass vm-reader-advance (vm-instruction)
-  ((reader-reg :initarg :reader :reader vm-reader-reg))
-  (:documentation "Advance reader to next character."))
+(define-vm-instruction vm-reader-advance-rp (vm-instruction)
+  "Advance reader to next character."
+  (reader-reg nil :reader vm-reader-reg)
+  (:sexp-tag :reader-advance)
+  (:sexp-slots reader-reg))
 
-(defclass vm-reader-peek (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst)
-   (reader-reg :initarg :reader :reader vm-reader-reg))
-  (:documentation "Peek at current character in reader."))
-
-(defmethod instruction->sexp ((inst vm-make-reader))
-  (list :make-reader (vm-dst inst) (vm-stream-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-reader-read))
-  (list :reader-read (vm-dst inst) (vm-reader-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-reader-advance))
-  (list :reader-advance (vm-reader-reg inst)))
-
-(defmethod instruction->sexp ((inst vm-reader-peek))
-  (list :reader-peek (vm-dst inst) (vm-reader-reg inst)))
+(define-vm-instruction vm-reader-peek-rp (vm-instruction)
+  "Peek at current character in reader."
+  (dst nil :reader vm-dst)
+  (reader-reg nil :reader vm-reader-reg)
+  (:sexp-tag :reader-peek)
+  (:sexp-slots dst reader-reg))
 
 (defmethod execute-instruction ((inst vm-make-reader) state pc labels)
   (declare (ignore labels))
@@ -839,7 +775,7 @@
             (values (1+ pc) nil nil)))
         (error "vm-reader-read: Expected reader state at address ~A" addr))))
 
-(defmethod execute-instruction ((inst vm-reader-advance) state pc labels)
+(defmethod execute-instruction ((inst vm-reader-advance-rp) state pc labels)
   (declare (ignore labels))
   (let* ((addr (vm-reg-get state (vm-reader-reg inst)))
          (rso (vm-heap-get state addr)))
@@ -860,7 +796,7 @@
           (values (1+ pc) nil nil))
         (error "vm-reader-advance: Expected reader state at address ~A" addr))))
 
-(defmethod execute-instruction ((inst vm-reader-peek) state pc labels)
+(defmethod execute-instruction ((inst vm-reader-peek-rp) state pc labels)
   (declare (ignore labels))
   (let* ((addr (vm-reg-get state (vm-reader-reg inst)))
          (rso (vm-heap-get state addr)))
@@ -870,9 +806,7 @@
           (values (1+ pc) nil nil))
         (error "vm-reader-peek: Expected reader state at address ~A" addr))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Utility Functions
-;;; ----------------------------------------------------------------------------
 
 (defun vm-read-all-from-string (string)
   "Read all S-expressions from STRING, returning a list."

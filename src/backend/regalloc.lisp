@@ -6,28 +6,23 @@
 
 (in-package :cl-cc)
 
-;;; ----------------------------------------------------------------------------
 ;;; Data Structures
-;;; ----------------------------------------------------------------------------
 
-(defclass live-interval ()
-  ((vreg :initarg :vreg :reader interval-vreg)
-   (start :initarg :start :accessor interval-start)
-   (end :initarg :end :accessor interval-end)
-   (phys-reg :initform nil :accessor interval-phys-reg)
-   (spill-slot :initform nil :accessor interval-spill-slot)))
+(defstruct (live-interval (:conc-name interval-))
+  "Live interval for register allocation."
+  (vreg nil)
+  (start nil)
+  (end nil)
+  (phys-reg nil)
+  (spill-slot nil))
 
-(defclass regalloc-result ()
-  ((assignment :initarg :assignment :reader regalloc-assignment
-               :documentation "Hash table: vreg -> physical register keyword")
-   (spill-map :initarg :spill-map :reader regalloc-spill-map
-              :documentation "Hash table: vreg -> spill slot offset (integer)")
-   (spill-count :initarg :spill-count :reader regalloc-spill-count)
-   (instructions :initarg :instructions :reader regalloc-instructions)))
+(defstruct (regalloc-result (:conc-name regalloc-))
+  (assignment nil)
+  (spill-map nil)
+  (spill-count 0 :type fixnum)
+  (instructions nil :type list))
 
-;;; ----------------------------------------------------------------------------
 ;;; Instruction Def/Use Analysis
-;;; ----------------------------------------------------------------------------
 
 (defgeneric instruction-defs (inst)
   (:documentation "Returns list of virtual registers defined (written) by INST."))
@@ -89,7 +84,7 @@
 ;; Env-ref: defs dst
 (defmethod instruction-defs ((inst vm-env-ref)) (list (vm-dst inst)))
 
-;;; --- Primitive instructions (vm-primitives.lisp) ---
+;;; Primitive instructions (vm-primitives.lisp)
 
 ;; Comparison ops inherit from vm-instruction, have dst/lhs/rhs pattern
 ;; vm-eq, vm-lt, vm-gt, vm-le, vm-ge, vm-num-eq, vm-div, vm-mod, vm-and, vm-or
@@ -125,7 +120,7 @@
   (def-unary-like vm-dec)
   (def-unary-like vm-not))
 
-;;; --- List instructions (vm-list.lisp) ---
+;;; List instructions (vm-list.lisp)
 
 ;; vm-cons: defs dst, uses car-reg + cdr-reg
 (defmethod instruction-defs ((inst vm-cons)) (list (vm-dst inst)))
@@ -153,7 +148,7 @@
 (defmethod instruction-defs ((inst vm-pop)) (list (vm-dst inst)))
 (defmethod instruction-uses ((inst vm-pop)) (list (vm-cons-reg inst)))
 
-;;; --- CLOS instructions (vm.lisp) ---
+;;; CLOS instructions (vm.lisp)
 
 (defmethod instruction-defs ((inst vm-class-def)) (list (vm-dst inst)))
 (defmethod instruction-defs ((inst vm-make-obj)) (list (vm-dst inst)))
@@ -190,9 +185,7 @@
 (defmethod instruction-uses ((inst vm-signal-error))
   (list (vm-error-reg inst)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Liveness Analysis
-;;; ----------------------------------------------------------------------------
 
 (defun build-label-map (instructions)
   "Build a hash table mapping label names to instruction indices."
@@ -218,7 +211,7 @@
                (when vreg
                  (unless (gethash vreg intervals)
                    (setf (gethash vreg intervals)
-                         (make-instance 'live-interval
+                         (make-live-interval
                                         :vreg vreg :start i :end i)))))
              (dolist (vreg (instruction-uses inst))
                (when vreg
@@ -226,7 +219,7 @@
                    (if interval
                        (setf (interval-end interval) (max (interval-end interval) i))
                        (setf (gethash vreg intervals)
-                             (make-instance 'live-interval
+                             (make-live-interval
                                             :vreg vreg :start 0 :end i)))))))
     ;; Extend intervals across jumps (conservative)
     (loop for inst in instructions
@@ -269,9 +262,7 @@
                intervals)
       (sort result #'< :key #'interval-start))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Linear Scan Allocation
-;;; ----------------------------------------------------------------------------
 
 (defun linear-scan-allocate (intervals cc)
   "Perform linear scan register allocation.
@@ -325,19 +316,17 @@
                                       #'< :key #'interval-end)))))))
     (values assignment spill-map spill-count)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Spill Code Insertion
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-spill-store (vm-instruction)
-  ((src-reg :initarg :src-reg :reader vm-spill-src)
-   (slot :initarg :slot :reader vm-spill-slot))
-  (:documentation "Store register to spill slot [RBP - slot*8]."))
+(define-vm-instruction vm-spill-store (vm-instruction)
+  "Store register to spill slot [RBP - slot*8]."
+  (src-reg nil :reader vm-spill-src)
+  (slot nil :reader vm-spill-slot))
 
-(defclass vm-spill-load (vm-instruction)
-  ((dst-reg :initarg :dst-reg :reader vm-spill-dst)
-   (slot :initarg :slot :reader vm-spill-slot))
-  (:documentation "Load spill slot [RBP - slot*8] into register."))
+(define-vm-instruction vm-spill-load (vm-instruction)
+  "Load spill slot [RBP - slot*8] into register."
+  (dst-reg nil :reader vm-spill-dst)
+  (slot nil :reader vm-spill-slot))
 
 (defun insert-spill-code (instructions assignment spill-map cc)
   "Insert spill loads/stores around instructions that use spilled registers.
@@ -348,8 +337,7 @@
       ;; Load spilled uses before the instruction
       (dolist (vreg (instruction-uses inst))
         (when (and vreg (gethash vreg spill-map))
-          (push (make-instance 'vm-spill-load
-                               :dst-reg scratch
+          (push (make-vm-spill-load :dst-reg scratch
                                :slot (gethash vreg spill-map))
                 result)
           ;; Temporarily map this vreg to scratch for the instruction
@@ -361,15 +349,12 @@
         (when (and vreg (gethash vreg spill-map))
           ;; Map def to scratch, then store
           (setf (gethash vreg assignment) scratch)
-          (push (make-instance 'vm-spill-store
-                               :src-reg scratch
+          (push (make-vm-spill-store :src-reg scratch
                                :slot (gethash vreg spill-map))
                 result))))
     (nreverse result)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Public API
-;;; ----------------------------------------------------------------------------
 
 (defun allocate-registers (instructions cc)
   "Run register allocation on VM instruction list.
@@ -382,7 +367,7 @@
               (if (> spill-count 0)
                   (insert-spill-code instructions assignment spill-map cc)
                   instructions)))
-        (make-instance 'regalloc-result
+        (make-regalloc-result
                        :assignment assignment
                        :spill-map spill-map
                        :spill-count spill-count

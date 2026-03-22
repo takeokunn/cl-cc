@@ -10,9 +10,7 @@
 
 (in-package :cl-cc/pbt)
 
-;;; ----------------------------------------------------------------------------
 ;;; Test Suite Definition
-;;; ----------------------------------------------------------------------------
 
 (def-suite macro-pbt-suite
   :description "Property-Based Tests for Macro Expansion"
@@ -20,9 +18,7 @@
 
 (in-suite macro-pbt-suite)
 
-;;; ----------------------------------------------------------------------------
 ;;; Custom Generators for Macro Testing
-;;; ----------------------------------------------------------------------------
 
 (defun gen-macro-name ()
   "Generate one of the built-in macro names."
@@ -82,9 +78,7 @@
                :min-length min-length
                :max-length max-length))
 
-;;; ----------------------------------------------------------------------------
 ;;; Helper Functions for Property Testing
-;;; ----------------------------------------------------------------------------
 
 (defun form-contains-gensym-p (form)
   "Check if FORM contains any gensym symbols (starting with G or ending with number)."
@@ -155,9 +149,7 @@
        (eq (car form) expected-outer)
        (find expected-inner (cdr form) :key (lambda (x) (when (consp x) (car x))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: WHEN Macro Expansion
-;;; ----------------------------------------------------------------------------
 
 (defproperty when-expands-to-if-with-progn
     (test (gen-test-form)
@@ -197,9 +189,7 @@
          (eq (car expanded) 'if)
          (null (fourth expanded)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: UNLESS Macro Expansion
-;;; ----------------------------------------------------------------------------
 
 (defproperty unless-expands-to-if-with-progn
     (test (gen-test-form)
@@ -231,9 +221,7 @@
          (null (third unless-exp))
          (null (fourth when-exp)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: COND Macro Expansion
-;;; ----------------------------------------------------------------------------
 
 (defproperty cond-empty-returns-nil
     ()
@@ -271,9 +259,7 @@
                (and (consp else-branch)
                     (eq (car else-branch) 'if)))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: AND Macro Expansion
-;;; ----------------------------------------------------------------------------
 
 (defproperty and-empty-returns-t
     ()
@@ -304,9 +290,7 @@
   (let ((expanded (cl-cc:our-macroexpand `(and ,@args))))
     (not (form-contains-symbol-p 'and expanded))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: OR Macro Expansion
-;;; ----------------------------------------------------------------------------
 
 (defproperty or-empty-returns-nil
     ()
@@ -337,9 +321,7 @@
   (let ((expanded (cl-cc:our-macroexpand `(or ,@args))))
     (not (form-contains-symbol-p 'or expanded))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: LET* Macro Expansion
-;;; ----------------------------------------------------------------------------
 
 (defproperty let-star-empty-is-progn
     (body (gen-list-of (gen-body-form) :min-length 1 :max-length 3))
@@ -378,9 +360,7 @@
          (eq (car expanded) 'let)
          (equal (caar (second expanded)) (caar bindings)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: PROG1 and PROG2 Macro Expansion
-;;; ----------------------------------------------------------------------------
 
 (defproperty prog1-introduces-result-variable
     (first-form (gen-body-form)
@@ -427,9 +407,7 @@
            (let ((result-var (caar (second let-form))))
              (eq (car (last let-form)) result-var))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: SETF Macro Expansion
-;;; ----------------------------------------------------------------------------
 
 (defproperty setf-symbol-is-setq
     (var (gen-symbol :prefix "VAR" :package nil)
@@ -441,9 +419,7 @@
          (equal (second expanded) var)
          (equal (third expanded) val))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: PSETQ Macro Expansion
-;;; ----------------------------------------------------------------------------
 
 (defproperty psetq-empty-is-nil
     ()
@@ -471,9 +447,7 @@
          (let ((bindings (second expanded)))
            (equal (mapcar #'second bindings) values)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: MULTIPLE-VALUE-BIND Macro Expansion
-;;; ----------------------------------------------------------------------------
 
 (defproperty mvb-uses-multiple-value-call
     (vars (gen-variable-list :min-length 1 :max-length 5)
@@ -502,9 +476,7 @@
   (let ((expanded (cl-cc:our-macroexpand-1 `(multiple-value-bind ,vars ,form))))
     (equal (third expanded) form)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: MULTIPLE-VALUE-SETQ Macro Expansion
-;;; ----------------------------------------------------------------------------
 
 (defproperty mvsq-uses-multiple-value-list
     (vars (gen-variable-list :min-length 1 :max-length 5)
@@ -526,9 +498,7 @@
     (let ((body (cddr expanded)))
       (= (count-symbols-in-form 'setq body) (length vars)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: MULTIPLE-VALUE-LIST Macro Expansion
-;;; ----------------------------------------------------------------------------
 
 (defproperty mvl-uses-multiple-value-call
     (form (gen-body-form))
@@ -542,9 +512,7 @@
   (let ((expanded (cl-cc:our-macroexpand-1 `(multiple-value-list ,form))))
     (form-contains-symbol-p 'nreverse expanded)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: DEFUN Macro Expansion
-;;; ----------------------------------------------------------------------------
 
 (defproperty defun-uses-setf-fdefinition
     (name (gen-symbol :prefix "FN" :package nil)
@@ -567,9 +535,7 @@
            (eq (car lambda-form) 'lambda)
            (equal (second lambda-form) params)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: Nested Macro Expansion
-;;; ----------------------------------------------------------------------------
 
 (defproperty nested-when-in-let-star
     (var (gen-symbol :prefix "X" :package nil)
@@ -612,9 +578,7 @@
          (consp expanded)
          (eq (car expanded) 'let))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: Macro Expansion Idempotency
-;;; ----------------------------------------------------------------------------
 
 (defproperty macroexpand-idempotent-when
     (test (gen-test-form)
@@ -659,9 +623,7 @@
          (exp2 (cl-cc:our-macroexpand exp1)))
     (equal exp1 exp2)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: Macro Hygiene (Gensym Usage)
-;;; ----------------------------------------------------------------------------
 
 (defproperty prog1-hygiene
     (first-form (gen-body-form)
@@ -706,9 +668,7 @@
   (let ((expanded (cl-cc:our-macroexpand-1 `(multiple-value-list ,form))))
     (form-contains-gensym-p expanded)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: Unique Gensym per Expansion
-;;; ----------------------------------------------------------------------------
 
 (defproperty prog1-unique-gensym-per-expansion
     (first-form (gen-body-form)
@@ -732,9 +692,7 @@
          (gensym2 (caar (second exp2))))
     (not (eq gensym1 gensym2))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: Expansion Structure Validity
-;;; ----------------------------------------------------------------------------
 
 (defproperty when-valid-lisp-form
     (test (gen-test-form)
@@ -763,9 +721,7 @@
          (symbolp (car expanded))
          (listp (cdr expanded)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: Macroexpand-All Recursiveness
-;;; ----------------------------------------------------------------------------
 
 (defproperty macroexpand-all-reaches-all-subforms
     (test (gen-test-form)
@@ -788,9 +744,7 @@
          (eq (car expanded) '+)
          (equal (second expanded) x))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property: Environment Interaction
-;;; ----------------------------------------------------------------------------
 
 (defproperty macroexpand-ignores-nil-env
     (test (gen-test-form)

@@ -1,116 +1,41 @@
 (in-package :cl-cc)
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Hash Table Operations
-;;; ----------------------------------------------------------------------------
 ;;;
 ;;; This file extends the VM with hash table operations for key-value storage.
 ;;;
 
-;;; ----------------------------------------------------------------------------
 ;;; VM Hash Table Heap Object
-;;; ----------------------------------------------------------------------------
 
 (defclass vm-hash-table-object ()
   ((table :initarg :table :reader vm-hash-table-internal
           :documentation "The underlying Common Lisp hash table"))
   (:documentation "Represents a hash table in the VM heap."))
 
-;;; ----------------------------------------------------------------------------
 ;;; Hash Table Instruction Classes
-;;; ----------------------------------------------------------------------------
 
-(defclass vm-make-hash-table (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst
-        :documentation "Register to store the new hash table")
-   (test :initarg :test :reader vm-hash-test :initform nil
-         :documentation "Register containing test function symbol (eq, eql, equal, equalp)"))
-  (:documentation "Create a new hash table. Default test is EQL."))
-
-(defclass vm-gethash (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst
-        :documentation "Register to store the found value")
-  (found-dst :initarg :found-dst :reader vm-found-dst :initform nil
-             :documentation "Optional register to store found-p boolean (1 if found, 0 otherwise)")
-  (key :initarg :key :reader vm-hash-key
-       :documentation "Register containing the key to look up")
-  (table :initarg :table :reader vm-hash-table-reg
-         :documentation "Register containing the hash table")
-  (default :initarg :default :reader vm-hash-default :initform nil
-           :documentation "Optional register containing default value if key not found"))
-  (:documentation "Look up KEY in TABLE. Returns (values VALUE FOUND-P)."))
-
-(defclass vm-sethash (vm-instruction)
-  ((key :initarg :key :reader vm-hash-key
-        :documentation "Register containing the key")
-   (value :initarg :value :reader vm-hash-value
-          :documentation "Register containing the value to store")
-   (table :initarg :table :reader vm-hash-table-reg
-          :documentation "Register containing the hash table"))
-  (:documentation "Store VALUE under KEY in TABLE. Equivalent to (setf (gethash key table) value)."))
-
-(defclass vm-remhash (vm-instruction)
-  ((key :initarg :key :reader vm-hash-key
-        :documentation "Register containing the key to remove")
-   (table :initarg :table :reader vm-hash-table-reg
-          :documentation "Register containing the hash table"))
-  (:documentation "Remove KEY from TABLE. Returns 1 if key existed, 0 otherwise."))
-
-(defclass vm-clrhash (vm-instruction)
-  ((table :initarg :table :reader vm-hash-table-reg
-          :documentation "Register containing the hash table"))
-  (:documentation "Clear all entries from TABLE."))
-
-(defclass vm-hash-table-count (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst
-        :documentation "Register to store the entry count")
-   (table :initarg :table :reader vm-hash-table-reg
-          :documentation "Register containing the hash table"))
-  (:documentation "Return the number of entries in TABLE."))
-
-(defclass vm-hash-table-p (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst
-        :documentation "Register to store the result (1 if hash table, 0 otherwise)")
-   (src :initarg :src :reader vm-src
-        :documentation "Register containing the value to test"))
-  (:documentation "Test if SRC is a hash table. Returns 1 if true, 0 otherwise."))
-
-(defclass vm-maphash (vm-instruction)
-  ((fn :initarg :fn :reader vm-hash-fn
-       :documentation "Register containing the function to apply (closure)")
-   (table :initarg :table :reader vm-hash-table-reg
-          :documentation "Register containing the hash table"))
-  (:documentation "Apply FN to each (KEY . VALUE) pair in TABLE. FN receives key and value as arguments."))
-
-(defclass vm-hash-table-keys (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst
-        :documentation "Register to store the list of keys")
-   (table :initarg :table :reader vm-hash-table-reg
-          :documentation "Register containing the hash table"))
-  (:documentation "Return a list of all keys in TABLE."))
-
-(defclass vm-hash-table-values (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst
-        :documentation "Register to store the list of values")
-   (table :initarg :table :reader vm-hash-table-reg
-          :documentation "Register containing the hash table"))
-  (:documentation "Return a list of all values in TABLE."))
-
-(defclass vm-hash-table-test (vm-instruction)
-  ((dst :initarg :dst :reader vm-dst
-        :documentation "Register to store the test function symbol")
-   (table :initarg :table :reader vm-hash-table-reg
-          :documentation "Register containing the hash table"))
-  (:documentation "Return the test function symbol (eq, eql, equal, equalp) of TABLE."))
-
-;;; ----------------------------------------------------------------------------
-;;; Instruction -> S-expression Conversion
-;;; ----------------------------------------------------------------------------
+(define-vm-instruction vm-make-hash-table (vm-instruction)
+  "Create a new hash table. Default test is EQL."
+  (dst nil :reader vm-dst)
+  (test nil :reader vm-hash-test))
 
 (defmethod instruction->sexp ((inst vm-make-hash-table))
   (if (vm-hash-test inst)
       (list :make-hash-table (vm-dst inst) (vm-hash-test inst))
       (list :make-hash-table (vm-dst inst))))
+
+(setf (gethash :make-hash-table *instruction-constructors*)
+      (lambda (sexp)
+        (make-vm-make-hash-table :dst (second sexp)
+                                 :test (third sexp))))
+
+(define-vm-instruction vm-gethash (vm-instruction)
+  "Look up KEY in TABLE. Returns (values VALUE FOUND-P)."
+  (dst nil :reader vm-dst)
+  (found-dst nil :reader vm-found-dst)
+  (key nil :reader vm-hash-key)
+  (table nil :reader vm-hash-table-reg)
+  (default nil :reader vm-hash-default))
 
 (defmethod instruction->sexp ((inst vm-gethash))
   (let ((result (list :gethash (vm-dst inst)
@@ -122,40 +47,78 @@
       (setf result (append result (list :default (vm-hash-default inst)))))
     result))
 
-(defmethod instruction->sexp ((inst vm-sethash))
-  (list :sethash (vm-hash-key inst) (vm-hash-value inst) (vm-hash-table-reg inst)))
+(setf (gethash :gethash *instruction-constructors*)
+      (lambda (sexp)
+        (make-vm-gethash :dst (second sexp)
+                         :key (third sexp)
+                         :table (fourth sexp)
+                         :found-dst (getf (nthcdr 4 sexp) :found-dst)
+                         :default (getf (nthcdr 4 sexp) :default))))
 
-(defmethod instruction->sexp ((inst vm-remhash))
-  (list :remhash (vm-hash-key inst) (vm-hash-table-reg inst)))
+(define-vm-instruction vm-sethash (vm-instruction)
+  "Store VALUE under KEY in TABLE. Equivalent to (setf (gethash key table) value)."
+  (key nil :reader vm-hash-key)
+  (value nil :reader vm-hash-value)
+  (table nil :reader vm-hash-table-reg)
+  (:sexp-tag :sethash)
+  (:sexp-slots key value table))
 
-(defmethod instruction->sexp ((inst vm-clrhash))
-  (list :clrhash (vm-hash-table-reg inst)))
+(define-vm-instruction vm-remhash (vm-instruction)
+  "Remove KEY from TABLE. Returns 1 if key existed, 0 otherwise."
+  (key nil :reader vm-hash-key)
+  (table nil :reader vm-hash-table-reg)
+  (:sexp-tag :remhash)
+  (:sexp-slots key table))
 
-(defmethod instruction->sexp ((inst vm-hash-table-count))
-  (list :hash-table-count (vm-dst inst) (vm-hash-table-reg inst)))
+(define-vm-instruction vm-clrhash (vm-instruction)
+  "Clear all entries from TABLE."
+  (table nil :reader vm-hash-table-reg)
+  (:sexp-tag :clrhash)
+  (:sexp-slots table))
 
-(defmethod instruction->sexp ((inst vm-hash-table-p))
-  (list :hash-table-p (vm-dst inst) (vm-src inst)))
+(define-vm-instruction vm-hash-table-count (vm-instruction)
+  "Return the number of entries in TABLE."
+  (dst nil :reader vm-dst)
+  (table nil :reader vm-hash-table-reg)
+  (:sexp-tag :hash-table-count)
+  (:sexp-slots dst table))
 
-(defmethod instruction->sexp ((inst vm-maphash))
-  (list :maphash (vm-hash-fn inst) (vm-hash-table-reg inst)))
+(define-vm-instruction vm-hash-table-p (vm-instruction)
+  "Test if SRC is a hash table. Returns 1 if true, 0 otherwise."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :hash-table-p)
+  (:sexp-slots dst src))
 
-(defmethod instruction->sexp ((inst vm-hash-table-keys))
-  (list :hash-table-keys (vm-dst inst) (vm-hash-table-reg inst)))
+(define-vm-instruction vm-maphash (vm-instruction)
+  "Apply FN to each (KEY . VALUE) pair in TABLE. FN receives key and value as arguments."
+  (fn nil :reader vm-hash-fn)
+  (table nil :reader vm-hash-table-reg)
+  (:sexp-tag :maphash)
+  (:sexp-slots fn table))
 
-(defmethod instruction->sexp ((inst vm-hash-table-values))
-  (list :hash-table-values (vm-dst inst) (vm-hash-table-reg inst)))
+(define-vm-instruction vm-hash-table-keys (vm-instruction)
+  "Return a list of all keys in TABLE."
+  (dst nil :reader vm-dst)
+  (table nil :reader vm-hash-table-reg)
+  (:sexp-tag :hash-table-keys)
+  (:sexp-slots dst table))
 
-(defmethod instruction->sexp ((inst vm-hash-table-test))
-  (list :hash-table-test (vm-dst inst) (vm-hash-table-reg inst)))
+(define-vm-instruction vm-hash-table-values (vm-instruction)
+  "Return a list of all values in TABLE."
+  (dst nil :reader vm-dst)
+  (table nil :reader vm-hash-table-reg)
+  (:sexp-tag :hash-table-values)
+  (:sexp-slots dst table))
 
-;;; ----------------------------------------------------------------------------
-;;; S-expression -> Instruction Conversion
-;;; ----------------------------------------------------------------------------
+(define-vm-instruction vm-hash-table-test (vm-instruction)
+  "Return the test function symbol (eq, eql, equal, equalp) of TABLE."
+  (dst nil :reader vm-dst)
+  (table nil :reader vm-hash-table-reg)
+  (:sexp-tag :hash-table-test)
+  (:sexp-slots dst table))
 
-;;; ----------------------------------------------------------------------------
 ;;; Helper Functions
-;;; ----------------------------------------------------------------------------
 
 (defun resolve-hash-test (test-symbol)
   "Convert a test symbol to the actual comparison function."
@@ -171,9 +134,7 @@
   (check-type table-obj vm-hash-table-object)
   (vm-hash-table-internal table-obj))
 
-;;; ----------------------------------------------------------------------------
 ;;; Instruction Execution - Hash Table Operations
-;;; ----------------------------------------------------------------------------
 
 (defmethod execute-instruction ((inst vm-make-hash-table) state pc labels)
   (declare (ignore labels))

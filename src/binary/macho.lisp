@@ -12,9 +12,7 @@
 
 (in-package :cl-cc/binary)
 
-;;; ----------------------------------------------------------------------------
 ;;; Constants
-;;; ----------------------------------------------------------------------------
 
 ;; Magic numbers
 (defconstant +mh-magic-64+ #xFEEDFACF
@@ -56,9 +54,7 @@
 (defconstant +s-attr-some-instructions+ #x400
   "Section contains some instructions.")
 
-;;; ----------------------------------------------------------------------------
 ;;; Structures
-;;; ----------------------------------------------------------------------------
 
 (defstruct mach-header
   "64-bit Mach-O header structure."
@@ -125,9 +121,7 @@
   (n-desc 0 :type (unsigned-byte 16))
   (n-value 0 :type (unsigned-byte 64)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Byte Buffer - Pure Common Lisp Implementation
-;;; ----------------------------------------------------------------------------
 
 (defclass byte-buffer ()
   ((data :initarg :data
@@ -161,9 +155,7 @@
   (declare (type byte-buffer buffer))
   (map '(simple-array (unsigned-byte 8) (*)) #'identity (byte-buffer-data buffer)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Utilities
-;;; ----------------------------------------------------------------------------
 
 (defun align-up (value alignment)
   "Align VALUE up to ALIGNMENT boundary."
@@ -181,9 +173,7 @@
           do (setf (aref result i) (char-code char)))
     result))
 
-;;; ----------------------------------------------------------------------------
 ;;; Serialization Primitives
-;;; ----------------------------------------------------------------------------
 
 (defun serialize-uint32-le (value buffer)
   "Write 32-bit VALUE to BUFFER in little-endian byte order."
@@ -219,9 +209,7 @@
            (optimize (speed 3) (safety 0)))
   (buffer-write-bytes buffer bytes))
 
-;;; ----------------------------------------------------------------------------
 ;;; Structure Serialization
-;;; ----------------------------------------------------------------------------
 
 (defun serialize-mach-header (header buffer)
   "Serialize MACH-HEADER to BUFFER."
@@ -299,9 +287,7 @@
   (serialize-uint32-le (nlist-n-desc nlist) buffer)
   (serialize-uint64-le (nlist-n-value nlist) buffer))
 
-;;; ----------------------------------------------------------------------------
 ;;; Builder
-;;; ----------------------------------------------------------------------------
 
 (defclass mach-o-builder ()
   ((header :reader mach-o-builder-header

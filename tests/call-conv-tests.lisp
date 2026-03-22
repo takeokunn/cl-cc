@@ -11,9 +11,7 @@
 
 (in-suite cl-cc-suite)
 
-;;; ----------------------------------------------------------------------------
 ;;; Helper Functions for Testing
-;;; ----------------------------------------------------------------------------
 
 (defun count-calls (program)
   "Count the number of function calls in a program."
@@ -62,9 +60,7 @@
           do (return-from has-tail-call t)))
   nil)
 
-;;; ----------------------------------------------------------------------------
 ;;; Basic Call/Return Tests
-;;; ----------------------------------------------------------------------------
 
 (test simple-call-return
   "Test that a simple function call returns correctly."
@@ -96,9 +92,7 @@
   (let ((result (run-string "(if 0 1 ((lambda (x) x) 42))")))
     (is (= result 42))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Multiple Argument Tests
-;;; ----------------------------------------------------------------------------
 
 (test zero-arg-function
   "Test function with zero arguments."
@@ -127,9 +121,7 @@
     (is (= result1 10))
     (is (= result2 12))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Nested Call Tests
-;;; ----------------------------------------------------------------------------
 
 (test nested-direct-calls
   "Test nested direct function calls."
@@ -159,9 +151,7 @@
                             (lambda (y) (+ x y))))")))
     (is (= result 23))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Higher-Order Function Tests
-;;; ----------------------------------------------------------------------------
 
 (test function-as-argument
   "Test passing function as argument."
@@ -183,9 +173,7 @@
                          ((compose double inc) 5))")))
     (is (= result 12))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Recursion Tests
-;;; ----------------------------------------------------------------------------
 
 (test simple-recursion
   "Test simple recursive function."
@@ -209,9 +197,7 @@
                    (error () nil))))
     (is (or (and result (= result 1)) (null result)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property-Based Calling Convention Tests
-;;; ----------------------------------------------------------------------------
 
 (test pbt-call-preserves-semantics
   "Property: Function calls preserve arithmetic semantics."
@@ -259,9 +245,7 @@
            (r2 (run-string (format nil "((lambda (x y z) (+ (* x y) (* x z))) ~D ~D ~D)" a b c))))
       (is (= r1 r2)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Tail Call Optimization Tests
-;;; ----------------------------------------------------------------------------
 
 (test tail-call-in-if-then
   "Test tail call in if-then branch."
@@ -278,9 +262,7 @@
   (let ((result (run-string "(progn 1 2 ((lambda (x) x) 3))")))
     (is (= result 3))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Argument Evaluation Order Tests
-;;; ----------------------------------------------------------------------------
 
 (test argument-eval-order
   "Test that arguments are evaluated in order."

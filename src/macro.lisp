@@ -1,17 +1,13 @@
 (in-package :cl-cc)
 
-;;; ----------------------------------------------------------------------------
 ;;; CL-CC Macro System
-;;; ----------------------------------------------------------------------------
 ;;; A complete macro system implementation with:
 ;;; - Full destructuring-bind for lambda lists
 ;;; - Environment classes for lexical scoping
 ;;; - Macro expansion (single and full)
 ;;; - Built-in macros for bootstrap
 
-;;; ----------------------------------------------------------------------------
 ;;; Environment Classes - Available at compile-time for our-defmacro
-;;; ----------------------------------------------------------------------------
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
 
@@ -62,9 +58,7 @@
 
 ) ; end first eval-when
 
-;;; ----------------------------------------------------------------------------
 ;;; Lambda List Parsing - Available at compile-time
-;;; ----------------------------------------------------------------------------
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
 
@@ -230,9 +224,7 @@
 
 ) ; end eval-when
 
-;;; ----------------------------------------------------------------------------
 ;;; Macro Expansion
-;;; ----------------------------------------------------------------------------
 
 (defun our-macroexpand-1 (form &optional env)
   "Perform a single macro expansion on FORM.
@@ -268,9 +260,7 @@
                  (our-macroexpand-all (cdr form) env)))
           (t form)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Macro Definition Macro
-;;; ----------------------------------------------------------------------------
 
 (defmacro our-defmacro (name lambda-list &body body)
   "Define NAME as a macro with LAMBDA-LIST and BODY.
@@ -283,9 +273,7 @@
                        (let* ,(generate-lambda-bindings lambda-list form-var)
                          ,@body)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Destructuring Bind Implementation
-;;; ----------------------------------------------------------------------------
 
 (defun destructure-lambda-list (pattern arg)
   "Destructure ARG according to PATTERN lambda list.
@@ -362,9 +350,7 @@
       
       (nreverse bindings))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Built-in Macros for Bootstrap
-;;; ----------------------------------------------------------------------------
 
 ;; WHEN macro
 (our-defmacro when (test &body body)
@@ -516,9 +502,7 @@
           (nreverse ,acc)))
         ,form)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Control Flow Macros
-;;; ----------------------------------------------------------------------------
 
 ;; DOLIST macro
 (our-defmacro dolist (binding-spec &body body)
@@ -666,9 +650,7 @@
                                    ,(build-typecase rest)))))))))
            (build-typecase cases)))))
 
-;; ----------------------------------------------------------------------------
 ;;; LOOP Macro (Simplified Implementation)
-;;; ----------------------------------------------------------------------------
 
 ;; Helper to parse loop clauses
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -1138,9 +1120,7 @@
                      (has-always-never '(t))
                      (t nil))))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; List Mutation Macros
-;;; ----------------------------------------------------------------------------
 
 ;; PUSH macro
 (our-defmacro push (value place)
@@ -1239,9 +1219,7 @@
          ,@cases
          (otherwise (error "ETYPECASE: no matching clause"))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Test/Debug Utilities
-;;; ----------------------------------------------------------------------------
 
 (defun macroexpand-test (form)
   "Test macro expansion on FORM and print results."

@@ -12,9 +12,7 @@
 
 (in-suite cl-cc-suite)
 
-;;; ----------------------------------------------------------------------------
 ;;; Basic Compiler Tests
-;;; ----------------------------------------------------------------------------
 
 (test vm-exec-arithmetic
   "Test that basic arithmetic operations compile and run correctly."
@@ -32,9 +30,7 @@
   "Test that nested arithmetic operations work correctly."
   (is (= 9 (run-string "(+ (* 2 3) 3)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Conditional Compilation Tests
-;;; ----------------------------------------------------------------------------
 
 (test vm-exec-if-false
   "Test that if with false condition returns else branch."
@@ -52,9 +48,7 @@
   "Test if with variable conditions."
   (is (= 10 (run-string "(let ((x 0)) (if x 20 10))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Let Binding Tests
-;;; ----------------------------------------------------------------------------
 
 (test vm-exec-let-simple
   "Test that simple let binding works."
@@ -72,9 +66,7 @@
   "Test that let bindings with computation work."
   (is (= 17 (run-string "(let ((x 5) (y 7)) (+ (* x 2) y))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Progn Tests
-;;; ----------------------------------------------------------------------------
 
 (test vm-exec-progn-simple
   "Test that simple progn returns the last value."
@@ -88,9 +80,7 @@
   "Test that empty progn signals an error (not yet supported)."
   (signals error (run-string "(progn)")))
 
-;;; ----------------------------------------------------------------------------
 ;;; Print Tests
-;;; ----------------------------------------------------------------------------
 
 (test vm-exec-print
   "Test that print works correctly."
@@ -106,72 +96,66 @@
     (is (search "2" output))
     (is (search "3" output))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Function Compilation Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-simple-lambda
   "Test that a simple lambda compiles correctly."
   (let* ((result (compile-string "(lambda (x) x)" :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (is (not (null program)))
     (is (typep program 'vm-program))))
 
 (test compile-lambda-with-multiple-params
   "Test that lambda with multiple parameters compiles correctly."
   (let* ((result (compile-string "(lambda (x y) (+ x y))" :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (is (not (null program)))
     (is (typep program 'vm-program))))
 
 (test compile-lambda-in-let
   "Test that lambda in a let binding compiles correctly."
   (let* ((result (compile-string "(let ((f (lambda (x) (+ x 1)))) (f 5))" :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (is (not (null program)))))
 
 (test compile-nested-lambda
   "Test that nested lambdas compile correctly."
   (let* ((result (compile-string "(let ((make-adder (lambda (n) (lambda (x) (+ x n))))) (let ((add5 (make-adder 5))) (add5 10)))" :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (is (not (null program)))))
 
 (test compile-recursive-function
   "Test that a recursive function can be defined with labels."
   (let* ((result (compile-string "(labels ((factorial (n) (if (<= n 1) 1 (* n (factorial (- n 1)))))) (factorial 5))" :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (is (not (null program)))))
 
 (test compile-mutually-recursive-functions
   "Test that mutually recursive functions compile correctly."
   (let* ((result (compile-string "(labels ((even? (n) (if (= n 0) 1 (odd? (- n 1)))) (odd? (n) (if (= n 0) 0 (even? (- n 1))))) (even? 10))" :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (is (not (null program)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Higher-Order Function Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-function-as-argument
   "Test that functions can be passed as arguments."
   (let* ((result (compile-string "(let ((apply-twice (lambda (f x) (f (f x))))) (apply-twice (lambda (x) (* x 2)) 3))" :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (is (not (null program)))))
 
 (test compile-function-returning-function
   "Test that functions can return functions."
   (let* ((result (compile-string "(let ((make-multiplier (lambda (n) (lambda (x) (* x n))))) (let ((double (make-multiplier 2))) (double 21)))" :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (is (or program t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Assembly Emission Tests
-;;; ----------------------------------------------------------------------------
 
 (test asm-emission-targets
   "Test that both x86_64 and aarch64 backends generate assembly."
-  (let* ((x86 (getf (compile-string "(+ 1 2)" :target :x86_64) :assembly))
-         (arm (getf (compile-string "(+ 1 2)" :target :aarch64) :assembly)))
+  (let* ((x86 (compilation-result-assembly (compile-string "(+ 1 2)" :target :x86_64)))
+         (arm (compilation-result-assembly (compile-string "(+ 1 2)" :target :aarch64))))
     (is (stringp x86))
     (is (stringp arm))
     (is (search "add" (string-downcase x86)))
@@ -179,31 +163,29 @@
 
 (test asm-emission-if
   "Test that if expressions generate correct assembly."
-  (let* ((x86 (getf (compile-string "(if 1 2 3)" :target :x86_64) :assembly))
-         (arm (getf (compile-string "(if 1 2 3)" :target :aarch64) :assembly)))
+  (let* ((x86 (compilation-result-assembly (compile-string "(if 1 2 3)" :target :x86_64)))
+         (arm (compilation-result-assembly (compile-string "(if 1 2 3)" :target :aarch64))))
     (is (stringp x86))
     (is (stringp arm))))
 
 (test asm-emission-let
   "Test that let expressions generate correct assembly."
-  (let* ((x86 (getf (compile-string "(let ((x 1)) x)" :target :x86_64) :assembly))
-         (arm (getf (compile-string "(let ((x 1)) x)" :target :aarch64) :assembly)))
+  (let* ((x86 (compilation-result-assembly (compile-string "(let ((x 1)) x)" :target :x86_64)))
+         (arm (compilation-result-assembly (compile-string "(let ((x 1)) x)" :target :aarch64))))
     (is (or (stringp x86) (stringp arm)))))
 
 (test asm-emission-lambda
   "Test that lambda expressions generate correct assembly (pending vm-closure emit)."
   (let ((x86 (handler-case
-                 (getf (compile-string "(lambda (x) x)" :target :x86_64) :assembly)
+                 (compilation-result-assembly (compile-string "(lambda (x) x)" :target :x86_64))
                (error () :not-yet-supported)))
         (arm (handler-case
-                 (getf (compile-string "(lambda (x) x)" :target :aarch64) :assembly)
+                 (compilation-result-assembly (compile-string "(lambda (x) x)" :target :aarch64))
                (error () :not-yet-supported))))
     (is (or (eq x86 :not-yet-supported) (stringp x86)))
     (is (or (eq arm :not-yet-supported) (stringp arm)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Error Handling Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-error-unbound-variable
   "Test that unbound variable signals an error."
@@ -223,9 +205,7 @@
       (compile-string "(+ 1)")
     (error () nil)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Integration Tests
-;;; ----------------------------------------------------------------------------
 
 (test integration-factorial
   "Test a complete factorial function."
@@ -246,13 +226,11 @@
   (let ((result (run-string "(let ((x 2) (y 3)) (let ((add (lambda (a b) (+ a b)))) (let ((mul (lambda (a b) (* a b)))) (mul (add x y) (add x y)))))")))
     (is (= result 25))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Label and Jump Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-label-generation
   "Test that the compiler generates unique labels."
-  (let* ((program (getf (compile-string "(if 1 2 3)") :program))
+  (let* ((program (compilation-result-program (compile-string "(if 1 2 3)")))
          (labels (loop for inst in (vm-program-instructions program)
                      when (typep inst 'vm-label)
                      collect (vm-name inst))))
@@ -260,7 +238,7 @@
 
 (test compile-jump-targets
   "Test that jumps refer to existing labels."
-  (let* ((program (getf (compile-string "(if 1 2 3)") :program))
+  (let* ((program (compilation-result-program (compile-string "(if 1 2 3)")))
          (label-names (loop for inst in (vm-program-instructions program)
                           when (typep inst 'vm-label)
                           collect (vm-name inst)))
@@ -270,13 +248,11 @@
                            collect (vm-label-name inst))))
     (is (every (lambda (target) (find target label-names :test #'string=)) jump-targets))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Register Allocation Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-register-creation
   "Test that the compiler creates and increments register IDs."
-  (let* ((program (getf (compile-string "(+ 1 2)") :program))
+  (let* ((program (compilation-result-program (compile-string "(+ 1 2)")))
          (registers (loop for inst in (vm-program-instructions program)
                         append (list (when (slot-exists-p inst 'dst) (slot-value inst 'dst))
                                      (when (slot-exists-p inst 'lhs) (slot-value inst 'lhs))
@@ -286,13 +262,11 @@
 
 (test compile-result-register
   "Test that the result register is properly set."
-  (let* ((program (getf (compile-string "42") :program))
+  (let* ((program (compilation-result-program (compile-string "42")))
          (result-reg (vm-program-result-register program)))
     (is (symbolp result-reg))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Complex Scoping Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-deep-nesting
   "Test deeply nested let bindings."
@@ -309,35 +283,29 @@
   (let ((result (run-string "(let ((x 10)) (let ((get-x (lambda () x))) (let ((x 20)) (get-x))))")))
     (is (or (= result 10) (eq result 20)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Optimization Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-peephole-optimization
   "Test that the peephole optimizer runs (if enabled)."
-  (let* ((program (getf (compile-string "(+ 1 2)") :program))
+  (let* ((program (compilation-result-program (compile-string "(+ 1 2)")))
          (inst-count (length (vm-program-instructions program))))
     (is (> inst-count 0))))
 
-;;; ----------------------------------------------------------------------------
 ;;; CPS Transformation Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-cps-transform-returns-value
   "Test that CPS transform is returned in the compile result."
   (let* ((result (compile-string "(+ 1 2)"))
-         (cps (getf result :cps)))
+         (cps (compilation-result-cps result)))
     (is (or (null cps) (listp cps)))))
 
 (test compile-cps-transform-with-if
   "Test that CPS transform works with if expression."
   (let* ((result (compile-string "(if 1 2 3)"))
-         (cps (getf result :cps)))
+         (cps (compilation-result-cps result)))
     (is (or (null cps) (listp cps)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; PBT for Compiler
-;;; ----------------------------------------------------------------------------
 
 (test pbt-integer-compilation
   "Property: All integers compile correctly."
@@ -415,84 +383,76 @@
           (incf passes))))
     (is (>= (/ passes total) 0.90))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Function Call Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-simple-function-call
   "Test that a simple function call compiles correctly."
   (let* ((result (compile-string "((lambda (x) x) 5)" :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (is (not (null program)))
     (is (typep program 'vm-program))))
 
 (test compile-multiple-argument-call
   "Test that a function call with multiple arguments compiles correctly."
   (let* ((result (compile-string "((lambda (a b c) (+ a (+ b c))) 1 2 3)" :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (is (not (null program)))
     (is (typep program 'vm-program))))
 
 (test compile-nested-function-call
   "Test that nested function calls compile correctly."
   (let* ((result (compile-string "((lambda (x) (+ x 1)) ((lambda (y) (* y 2)) 3))" :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (is (not (null program)))
     (is (typep program 'vm-program))))
 
 (test compile-function-as-return-value
   "Test that functions can be returned from other functions."
   (let* ((result (compile-string "((lambda (n) (lambda (x) (+ x n))) 5)" :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (is (not (null program)))
     (is (typep program 'vm-program))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Flet Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-flet-basic
   "Test that basic flet compiles correctly."
   (let* ((result (compile-string "(flet ((double (x) (* x 2))) (double 21))" :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (is (not (null program)))
     (is (typep program 'vm-program))))
 
 (test compile-flet-multiple-functions
   "Test that flet with multiple functions compiles correctly."
   (let* ((result (compile-string "(flet ((add1 (x) (+ x 1)) (add2 (x) (+ x 2))) (add2 (add1 10)))" :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (is (not (null program)))
     (is (typep program 'vm-program))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Labels Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-labels-simple-recursive
   "Test that a simple recursive function in labels compiles correctly."
   (let* ((result (compile-string "(labels ((count (n) (if (= n 0) 0 (+ 1 (count (- n 1)))))) (count 5))" :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (is (not (null program)))
     (is (typep program 'vm-program))))
 
 (test compile-labels-mutually-recursive
   "Test that mutually recursive functions in labels compile correctly."
   (let* ((result (compile-string "(labels ((even? (n) (if (= n 0) 1 (odd? (- n 1)))) (odd? (n) (if (= n 0) 0 (even? (- n 1))))) (even? 10))" :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (is (not (null program)))
     (is (typep program 'vm-program))))
 
 (test compile-labels-with-let
   "Test that labels with let bindings compile correctly."
   (let* ((result (compile-string "(let ((x 10)) (labels ((rec (n) (if (= n 0) x (+ 1 (rec (- n 1)))))) (rec 3)))" :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (is (not (null program)))
     (is (typep program 'vm-program))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Multiple Top-Level Forms Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-multiple-forms-simple
   "Test that multiple top-level forms compile and execute correctly."
@@ -514,9 +474,7 @@
   "Test defun with recursion in multiple forms."
   (is (= 6 (run-string "(defun sum-to (n) (if (= n 0) 0 (+ n (sum-to (- n 1))))) (sum-to 3)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Multiple Values and Apply Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-values-single
   "Single value from values"
@@ -550,9 +508,7 @@
   (is (= 42 (run-string
     "(multiple-value-bind (x) (values 42) x)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; String/Symbol Builtin Compilation Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-string=
   "string= comparison works"
@@ -601,9 +557,7 @@
   (is (= 1 (run-string "(numberp 42)")))
   (is (= 0 (run-string "(numberp 'foo)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Macro Expansion in Compiler Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-cond-macro
   "cond macro works in compiled code."
@@ -636,9 +590,7 @@
   (is (not (null (run-string "t"))))
   (is (null (run-string "nil"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; List Operation Builtin Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-cons-car-cdr
   "cons, car, cdr builtins work."
@@ -675,9 +627,7 @@
   "reverse builtin works."
   (is (= 3 (run-string "(first (reverse (list 1 2 3)))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Iteration Macro Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-dolist-sum
   "dolist macro works for summing a list."
@@ -695,9 +645,7 @@
                   (setq sum (+ sum i)))
                 sum)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Handler-Case Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-handler-case-no-error
   "handler-case without error returns normal result"
@@ -732,9 +680,7 @@
   (signals error
     (run-string "(error \"unhandled\")")))
 
-;;; ----------------------------------------------------------------------------
 ;;; Hash Table Operation Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-make-hash-table
   "make-hash-table creates a hash table"
@@ -788,9 +734,7 @@
                             (setf (gethash 'k ht) 20)
                             (gethash 'k ht))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Defmacro Compilation Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-defmacro-basic
   "defmacro defines a macro usable in subsequent forms"
@@ -813,9 +757,7 @@
   (is (= 100 (run-string "(defmacro my-square (x) `(* ,x ,x))
                            (let ((n 10)) (my-square n))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Symbol Manipulation Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-symbol-name
   "symbol-name returns the name string"
@@ -841,9 +783,7 @@
   "make-symbol creates an uninterned symbol"
   (is (not (null (run-string "(symbolp (make-symbol \"TEMP\"))")))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Extended List and Macro Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-push-macro
   "push adds element to front of list"
@@ -914,9 +854,7 @@
   "keywords evaluate to themselves"
   (is (eq :test (run-string ":test"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Typep and Destructuring Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-typep-integer
   "typep detects integers"
@@ -956,9 +894,7 @@
   (is (= 2 (run-string "(destructuring-bind (a &rest b) (list 1 2 3)
                            (length b))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Iteration Macro Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-dolist-sum
   "dolist iterates over list"
@@ -976,9 +912,7 @@
   "loop with explicit return"
   (is (= 10 (run-string "(let ((sum 0) (i 0)) (loop (if (= i 5) (return sum)) (setq sum (+ sum i)) (setq i (+ i 1))))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Extended Lambda List Tests (&rest, &optional, &key)
-;;; ----------------------------------------------------------------------------
 
 ;; &rest tests
 (test compile-rest-basic
@@ -1077,9 +1011,7 @@
       (lambda (&rest args) args))
     (funcall (make-lister) 10 20 30)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Variadic Arithmetic and List Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-plus-variadic
   "(+ 1 2 3) via left fold"
@@ -1125,9 +1057,7 @@
   "car of list"
   (is (= 1 (run-string "(car (list 1 2 3))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Standard Library Set Operations Tests
-;;; ----------------------------------------------------------------------------
 
 (test stdlib-set-difference
   "set-difference removes elements in second list"
@@ -1181,9 +1111,7 @@
       (setf (gethash :y ht) 20)
       (length (hash-table-keys ht)))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Defstruct Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-defstruct-basic
   "defstruct creates constructor and accessors"
@@ -1242,9 +1170,7 @@
       (let ((i (make-my-item :value 42)))
         (item-value i)))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Car/Cdr Composition Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-caar
   "caar extracts car of car"
@@ -1262,9 +1188,7 @@
   "caddr extracts third element"
   (is (= 3 (run-string "(caddr (list 1 2 3 4))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Stdlib Find/Position Tests
-;;; ----------------------------------------------------------------------------
 
 (test stdlib-find-basic
   "find locates element in list"
@@ -1305,9 +1229,7 @@
   (is (equal '(2 . b) (run-string
     "(rassoc 'b (list (cons 1 'a) (cons 2 'b) (cons 3 'c)))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Setf Places Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-setf-car
   "setf car mutates cons"
@@ -1343,9 +1265,7 @@
     (let ((pair (cons 1 2)))
       (setf (car pair) 42))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Package System Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-in-package
   "in-package returns package name"
@@ -1359,9 +1279,7 @@
   "in-package followed by code works"
   (is (= 42 (run-string "(progn (in-package :cl-cc) 42)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Macrolet Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-macrolet-basic
   "macrolet defines local macro"
@@ -1390,9 +1308,7 @@
       (macrolet ((sq-plus-sq (a b) `(+ (square ,a) (square ,b))))
         (sq-plus-sq 2 2)))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Function Reference Tests (#'builtin)
-;;; ----------------------------------------------------------------------------
 
 (test compile-function-car
   "#'car creates callable closure"
@@ -1415,17 +1331,13 @@
   (is (equal '(2 . b) (run-string
     "(find 2 (list (cons 1 'a) (cons 2 'b) (cons 3 'c)) :key #'car)" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Warn Test
-;;; ----------------------------------------------------------------------------
 
 (test compile-warn
   "warn expands to format and returns nil"
   (is (eq nil (run-string "(warn \"test warning ~A\" 42)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; String Concatenation Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-string-concat-two
   "string-concat concatenates two strings"
@@ -1443,9 +1355,7 @@
   "concatenate 'string with single string"
   (is (string= "hello" (run-string "(concatenate 'string \"hello\")"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Check-Type Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-check-type-pass
   "check-type passes for correct type"
@@ -1456,9 +1366,7 @@
   (signals error
     (run-string "(let ((x \"hello\")) (check-type x integer))")))
 
-;;; ----------------------------------------------------------------------------
 ;;; Eval-When Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-eval-when-execute
   "eval-when :execute includes body"
@@ -1476,9 +1384,7 @@
   "eval-when with all situations"
   (is (= 5 (run-string "(eval-when (:compile-toplevel :load-toplevel :execute) 5)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Property List and Set Operations Tests
-;;; ----------------------------------------------------------------------------
 
 (test stdlib-getf-found
   "getf finds value by indicator"
@@ -1508,9 +1414,7 @@
   "remove removes matching elements"
   (is (equal '(1 3 5) (run-string "(remove 2 (list 1 2 3 2 5))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Eval Tests
-;;; ----------------------------------------------------------------------------
 
 (test our-eval-basic
   "our-eval compiles and runs a simple form"
@@ -1524,9 +1428,7 @@
   "our-eval handles let bindings"
   (is (= 15 (our-eval '(let ((a 5) (b 10)) (+ a b))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Declare Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-declare-ignore
   "declare ignore is silently skipped"
@@ -1540,9 +1442,7 @@
   "declare type is silently skipped"
   (is (= 3 (run-string "(let ((x 1) (y 2)) (declare (type integer x y)) (+ x y))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Extended Arithmetic Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-mod
   "mod returns remainder"
@@ -1588,9 +1488,7 @@
   "oddp detects odd numbers"
   (is (= 1 (run-string "(oddp 3)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Association List and Utility Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-assoc-found
   "assoc finds key in alist"
@@ -1644,9 +1542,7 @@
   "string coerces symbol to string"
   (is (equal "HELLO" (run-string "(string 'hello)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; String/Character Builtin Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-char-access
   "char extracts character at index"
@@ -1728,9 +1624,7 @@
   "search returns -1 when not found"
   (is (= -1 (run-string "(search \"xyz\" \"hello\")"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; I/O and Format Tests
-;;; ----------------------------------------------------------------------------
 
 (test io-write-to-string
   "write-to-string converts value to string representation"
@@ -1795,9 +1689,7 @@
   "write-char outputs a character and returns it"
   (is (equal #\A (run-string "(write-char #\\A)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Higher-Order Function Tests (require stdlib)
-;;; ----------------------------------------------------------------------------
 
 (test stdlib-mapcar-basic
   "mapcar applies function to each element"
@@ -1852,9 +1744,7 @@
   "count-if counts matching elements"
   (is (= 2 (run-string "(count-if (lambda (x) (> x 2)) (list 1 2 3 4))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; With-Output-To-String Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-with-output-to-string-basic
   "with-output-to-string returns empty string when no writes"
@@ -1880,9 +1770,7 @@
   (is (string= "foo"
                 (run-string "(let ((s (make-string-output-stream))) (write-string \"foo\" s) (get-output-stream-string s))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Array/Vector Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-make-array-basic
   "make-array creates an array"
@@ -1910,9 +1798,7 @@
   "vectorp returns false for non-vector"
   (is (eql 0 (run-string "(vectorp 42)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Sort Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-sort-ascending
   "sort numbers ascending"
@@ -1930,9 +1816,7 @@
   "sort single element"
   (is (equal '(42) (run-string "(sort (list 42) (lambda (a b) (< a b)))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Coerce Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-coerce-char-list-to-string
   "coerce char list to string"
@@ -1948,9 +1832,7 @@
     (is (vectorp result))
     (is (= 3 (length result)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Loop Macro Tests
-;;; ----------------------------------------------------------------------------
 
 (test loop-for-in-collect
   "LOOP FOR...IN with COLLECT accumulation"
@@ -2124,9 +2006,7 @@
   (is (= 15
          (run-string "(loop for i from 1 to 5 sum i into total finally (return total))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Floor/Truncate/Ceiling Multiple Values Tests
-;;; ----------------------------------------------------------------------------
 
 (test floor-multiple-values
   "FLOOR returns quotient and remainder via multiple-value-bind"
@@ -2143,9 +2023,7 @@
   (is (equal '(4 -3)
              (run-string "(multiple-value-bind (q r) (ceiling 17 5) (list q r))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Nested Destructuring-Bind Tests
-;;; ----------------------------------------------------------------------------
 
 (test destructuring-bind-nested
   "DESTRUCTURING-BIND with nested pattern"
@@ -2157,9 +2035,7 @@
   (is (= 15
          (run-string "(destructuring-bind (a (b (c d)) e) (list 1 (list 2 (list 3 4)) 5) (+ a b c d e))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Variadic Append/Nconc Tests
-;;; ----------------------------------------------------------------------------
 
 (test append-three-args
   "APPEND with 3 arguments works correctly"
@@ -2214,9 +2090,7 @@
                  (car stack)))
              (run-vm (compile-node (parse (quote (+ (* 3 4) (- 10 5)))))))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Consp Fix / Type Predicates Tests
-;;; ----------------------------------------------------------------------------
 
 (test consp-on-list
   "CONSP returns true for cons cells from list"
@@ -2235,9 +2109,7 @@
   (is (equal '(:ADD (:CONST 1) (:CONST 2))
              (run-string "(defun my-compile (expr) (cond ((integerp expr) (list :const expr)) ((and (consp expr) (eq (car expr) (quote +))) (list :add (my-compile (second expr)) (my-compile (third expr)))) (t (list :unknown expr)))) (my-compile (quote (+ 1 2)))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Funcall/Apply with Quoted Symbols Tests
-;;; ----------------------------------------------------------------------------
 
 (test funcall-quoted-builtin
   "FUNCALL with quoted builtin symbol"
@@ -2263,9 +2135,7 @@
   "FUNCALL with #'function reference"
   (is (= 7 (run-string "(funcall #'+ 3 4)" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Maphash Tests
-;;; ----------------------------------------------------------------------------
 
 (test maphash-collect-values
   "MAPHASH iterates over hash table entries with closure mutation"
@@ -2300,9 +2170,7 @@
     (maphash (lambda (k v) (setq count (+ count 1))) ht)
     count))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Capture-by-Reference Tests
-;;; ----------------------------------------------------------------------------
 
 (test capture-by-ref-counter
   "Closure captures variable by reference — counter increments across calls"
@@ -2324,9 +2192,7 @@
   (let ((add (lambda (n) (setq sum (+ sum n)) sum)))
     (funcall add 1) (funcall add 2) (funcall add 3) (funcall add 4)))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; File I/O Tests
-;;; ----------------------------------------------------------------------------
 
 (test file-io-write-read
   "Write characters to file and read them back"
@@ -2363,9 +2229,7 @@
   (read in))")))
     (is (listp result))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Setf Accessor Tests
-;;; ----------------------------------------------------------------------------
 
 (test setf-defstruct-accessor
   "SETF on defstruct accessor modifies slot"
@@ -2383,9 +2247,7 @@
   (setf (my-counter2-n c) (+ (my-counter2-n c) 1))
   (my-counter2-n c))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Self-Hosting Pattern Tests
-;;; ----------------------------------------------------------------------------
 
 (test self-host-compiler-context
   "Self-hosting: compile a mini compiler context with defstruct"
@@ -2436,9 +2298,7 @@
                      :rhs (make-instance 'eval-int :value 3)))))
   (eval-node tree))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Labels Mutual Recursion Tests
-;;; ----------------------------------------------------------------------------
 
 (test labels-mutual-recursion
   "Labels: mutually recursive even-p/odd-p"
@@ -2462,9 +2322,7 @@
          (c (n) (if (= n 0) 0 (+ 1 (a (- n 1))))))
   (a 6))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Hash Table :test Parameter Tests
-;;; ----------------------------------------------------------------------------
 
 (test ht-test-equal-quote
   "Hash table with :test 'equal for string keys"
@@ -2487,9 +2345,7 @@
   (setf (gethash 1 ht) 99)
   (gethash 1 ht))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; New Builtin Tests (type-of, make-list, alphanumericp, prin1-to-string)
-;;; ----------------------------------------------------------------------------
 
 (test builtin-type-of-integer
   "type-of returns integer for numbers"
@@ -2527,9 +2383,7 @@
   "princ-to-string converts value to string"
   (is (stringp (run-string "(princ-to-string 42)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Runtime Eval Tests
-;;; ----------------------------------------------------------------------------
 
 (test eval-constant
   "eval returns constants directly"
@@ -2553,9 +2407,7 @@
 (let ((op '+) (a 10) (b 20))
   (eval (list op a b)))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Setf Variable Tests
-;;; ----------------------------------------------------------------------------
 
 (test setf-plain-variable
   "setf on plain variable expands to setq"
@@ -2573,9 +2425,7 @@
   (setf counter (+ counter 1))
   counter)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Stdlib HOF Tests (with stdlib)
-;;; ----------------------------------------------------------------------------
 
 (test stdlib-mapcar
   "mapcar with stdlib loaded"
@@ -2592,9 +2442,7 @@
   (is (equal '(2 4) (run-string
     "(remove-if #'oddp '(1 2 3 4 5))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Let Alias Fix Tests
-;;; ----------------------------------------------------------------------------
 
 (test let-no-alias
   "LET bindings don't alias — mutation of original doesn't affect copy"
@@ -2604,9 +2452,7 @@
   "Nested LET bindings are independent copies"
   (is (= 5 (run-string "(let ((a 5)) (let ((b a)) (let ((c b)) (setq a 99) c)))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Prog1/Prog2/Ignore-Errors Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-prog1-basic
   "prog1 returns first form value"
@@ -2628,9 +2474,7 @@
   "ignore-errors returns nil on error"
   (is (null (run-string "(ignore-errors (error \"boom\"))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Unwind-Protect Integration Tests
-;;; ----------------------------------------------------------------------------
 
 (test unwind-protect-cleanup-visible
   "unwind-protect cleanup side effects visible in handler-case"
@@ -2642,9 +2486,7 @@
       (setf cleaned t))
     (error (e) cleaned)))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Self-Hosting CLOS Compiler Test
-;;; ----------------------------------------------------------------------------
 
 (test self-host-clos-compiler
   "Self-hosting: CLOS-based AST compiler with defgeneric/defmethod dispatch"
@@ -2678,9 +2520,7 @@
     (list r (length (cx6-insts ctx)))))
 " :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Hash Table Extended Builtins Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-hash-table-values
   "hash-table-values returns list of values"
@@ -2708,9 +2548,7 @@
     (setf (gethash :a ht) 99)
     (gethash :a ht2)))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Car/Cdr Composition and List Accessor Tests
-;;; ----------------------------------------------------------------------------
 
 (test cadddr-basic
   "cadddr returns fourth element"
@@ -2724,9 +2562,7 @@
   "caddar returns third element of first sublist"
   (is (equal 3 (run-string "(caddar '((1 2 3) b c))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Self-Hosting Integration Tests
-;;; ----------------------------------------------------------------------------
 
 (test self-host-eval-loop
   "Mini eval that dispatches on form type - core pattern for self-hosting"
@@ -2794,9 +2630,7 @@
   (eval (make-let-expr 'x 10 (make-add-expr 'x 5)))
 " :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Non-Constant Default Parameter Tests
-;;; ----------------------------------------------------------------------------
 
 (test key-non-constant-default
   "Test &key parameter with non-constant default expression."
@@ -2824,9 +2658,7 @@
        (setf (gethash 'foo (registry-entries r)) :bar)
        (gethash 'foo (registry-entries r))))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Multiple Dispatch Tests
-;;; ----------------------------------------------------------------------------
 
 (test multi-dispatch-double-specializer
   "Multiple dispatch: method specialized on two parameters"
@@ -2914,9 +2746,7 @@
     (defmethod ty-eq ((a ty) (b ty)) nil)
     (ty-eq (make-instance 'ty-int) (make-instance 'ty-str)))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; CLOS Initform and Accessor Setf Tests
-;;; ----------------------------------------------------------------------------
 
 (test clos-initform-integer
   "Test CLOS :initform with integer value."
@@ -2942,9 +2772,7 @@
        (setf (counter-n c) (+ (counter-n c) 1))
        (counter-n c)))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Self-Hosting Bootstrap Tests
-;;; ----------------------------------------------------------------------------
 
 (test self-host-make-register
   "Test self-hosting: register allocation utility."
@@ -3088,9 +2916,7 @@
       (cn (parse (quote (let ((x 10)) (if (= x 10) (* x x) (+ x 1))))) nil)
       (rp (nreverse *code*)))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Generic Function as First-Class Value Tests
-;;; ----------------------------------------------------------------------------
 
 (test funcall-generic-function
   "funcall with #'generic-function should dispatch correctly"
@@ -3164,13 +2990,9 @@
                            (make-instance 'inst-add :dst 'r2 :lhs 'r0 :rhs 'r1))))
         (mapcar #'inst-sexp program)))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Run Tests Function
-;;; ----------------------------------------------------------------------------
 
-;;; ----------------------------------------------------------------------------
 ;;; Global Variable (defvar) Persistence Tests
-;;; ----------------------------------------------------------------------------
 
 (test defvar-setq-persists-across-calls
   "defvar + setq mutations should persist across function calls"
@@ -3199,9 +3021,7 @@
         (concatenate 'string prefix \"_\" (write-to-string n))))
     (list (make-label \"L\") (make-label \"L\") (make-label \"L\")))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Defmacro in progn Tests
-;;; ----------------------------------------------------------------------------
 
 (test defmacro-in-progn-simple
   "defmacro should work within progn for subsequent forms"
@@ -3222,9 +3042,7 @@
     (defmacro my-add1 (x) (list '+ x 1))
     (+ (my-add1 5) (my-add1 5)))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Self-Hosting Compiler Pattern Tests
-;;; ----------------------------------------------------------------------------
 
 (test self-host-compiler-context-full
   "Self-hosting: full compiler context with make-register, make-label, emit"
@@ -3288,9 +3106,7 @@
     (expand '(when x (+ 1 2))))" :stdlib t)))
     (is (equal '(IF X (PROGN (+ 1 2)) NIL) result))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Multiple-Value-List Tests
-;;; ----------------------------------------------------------------------------
 
 (test multiple-value-list-floor
   "multiple-value-list captures floor quotient and remainder"
@@ -3304,9 +3120,7 @@
   "multiple-value-list with single value returns singleton list"
   (is (equal '(42) (run-string "(multiple-value-list (values 42))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Apply with Spread Arguments Tests
-;;; ----------------------------------------------------------------------------
 
 (test apply-spread-args-plus
   "apply #'+ with spread args collects all values"
@@ -3328,9 +3142,7 @@
   "apply with quoted + and list arg"
   (is (= 15 (run-string "(apply #'+ (list 1 2 3 4 5))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Typed Defun/Lambda Tests
-;;; ----------------------------------------------------------------------------
 
 (test typed-defun-basic
   "typed defun with fixnum params and return type"
@@ -3371,9 +3183,7 @@
     (run-string "(defun typed-reg-test ((x fixnum)) fixnum x)")
     (is (> (hash-table-count cl-cc:*function-type-registry*) old-count))))
 
-;;; ----------------------------------------------------------------------------
 ;;; CLOS Type Inference Tests
-;;; ----------------------------------------------------------------------------
 
 (test clos-type-make-instance
   "make-instance infers class type"
@@ -3407,9 +3217,7 @@
     (is (typep type 'cl-cc/type:type-primitive))
     (is (string= "STRING" (symbol-name (cl-cc/type:type-primitive-name type))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Alias (deftype) Tests
-;;; ----------------------------------------------------------------------------
 
 (test deftype-basic
   "deftype registers type alias that can be used in typed defun"
@@ -3432,9 +3240,7 @@
     (let ((p (make-instance 'point2 :x 10)))
       (slot-value p 'x)))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Narrowing Tests
-;;; ----------------------------------------------------------------------------
 
 (test type-narrowing-numberp
   "numberp narrows type to fixnum in then-branch"
@@ -3451,9 +3257,7 @@
     (is (string= "hello" result))
     (is (typep type 'cl-cc/type:type-primitive))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Higher-Order Function Macro Expansions (Self-Hosting)
-;;; ----------------------------------------------------------------------------
 
 (test hof-mapcar-basic
   "mapcar applies function to each element"
@@ -3542,9 +3346,7 @@
   (is (equal '(1 2 3)
              (run-string "(remove-duplicates (list 1 2 3 2 1))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Parametric Types (type-constructor)
-;;; ----------------------------------------------------------------------------
 
 (test parametric-type-parse-list
   "Parsing (list fixnum) yields a type-constructor"
@@ -3644,9 +3446,7 @@
     (length (make-nums)))")))
     (is (= 3 result))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Defparameter Tests
-;;; ----------------------------------------------------------------------------
 
 (test defparameter-basic
   "defparameter should work like defvar for variable definition"
@@ -3666,9 +3466,7 @@
     (setq *x* 5)
     *x*)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; String= and Equal Tests
-;;; ----------------------------------------------------------------------------
 
 (test string-equal-basic
   "string= should compare strings for equality"
@@ -3694,9 +3492,7 @@
   "equal should return falsy for different values"
   (is (= 0 (run-string "(equal 1 2)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Numeric Builtins Tests (max, min, mod, zerop, plusp, minusp)
-;;; ----------------------------------------------------------------------------
 
 (test numeric-max-basic
   "max should return the larger of two numbers"
@@ -3750,9 +3546,7 @@
   "oddp should return true for odd numbers"
   (is-true (run-string "(oddp 3)")))
 
-;;; ----------------------------------------------------------------------------
 ;;; Warn Compilation Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-warn-basic
   "warn should compile and not crash (returns nil)"
@@ -3762,9 +3556,7 @@
   "warn should not abort execution"
   (is (= 42 (run-string "(progn (warn \"warning\") 42)"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Format Compilation Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-format-nil-simple
   "format nil with ~A should return string"
@@ -3778,9 +3570,7 @@
   "format nil with multiple ~A should concatenate"
   (is (string= "hello world" (run-string "(format nil \"~A ~A\" \"hello\" \"world\")"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Self-Hosting Smoke Test: Mini-Optimizer with Labels + HOFs
-;;; ----------------------------------------------------------------------------
 
 (test self-host-optimizer-pipeline
   "Self-hosting smoke: CLOS AST + labels recursive optimizer + mapcar + defparameter"
@@ -3826,9 +3616,7 @@
                                    (mk-mul (mk-const 3) (mk-const 10))))))
         (eval-ir (opt ir-prog))))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Self-Hosting Integration: Macro Expander + Type Checker
-;;; ----------------------------------------------------------------------------
 
 (test self-host-macro-system-full
   "Self-hosting: hash-table macro registry + recursive expansion + multiple macros"
@@ -3889,9 +3677,7 @@
           (error (format nil \"bad-value\"))))
     (error (e) (format nil \"caught: ~A\" e)))"))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Prog/With-Slots/Nth-Value Macro Tests
-;;; ----------------------------------------------------------------------------
 
 (test compile-prog-basic
   "prog macro: let + tagbody + block with return"
@@ -3922,9 +3708,7 @@
   "prog without explicit return yields nil"
   (is (null (run-string "(prog ((x 1)) (setq x 2))" :stdlib t))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Run Tests Function
-;;; ----------------------------------------------------------------------------
 
 (defun run-tests ()
   "Run all tests in the cl-cc test suite."

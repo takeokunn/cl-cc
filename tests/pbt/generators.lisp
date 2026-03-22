@@ -7,9 +7,7 @@
 
 (in-package :cl-cc/pbt)
 
-;;; ----------------------------------------------------------------------------
 ;;; Configuration Variables
-;;; ----------------------------------------------------------------------------
 
 (defvar *max-type-depth* 3
   "Maximum depth for recursive type expressions.")
@@ -17,9 +15,7 @@
 (defvar *max-mach-o-sections* 5
   "Maximum number of sections in generated Mach-O segments.")
 
-;;; ----------------------------------------------------------------------------
 ;;; Type Expression Generators
-;;; ----------------------------------------------------------------------------
 
 (defun gen-primitive-type ()
   "Generate a primitive type specifier."
@@ -122,9 +118,7 @@
   "Generate a full type specifier (alias for gen-type-expr)."
   (gen-type-expr))
 
-;;; ----------------------------------------------------------------------------
 ;;; Mach-O Structure Generators
-;;; ----------------------------------------------------------------------------
 
 ;; Mach-O Magic Numbers
 (defvar +mh-magic+ #xFEEDFACE "32-bit Mach-O")
@@ -361,9 +355,7 @@
                     +lc-dysymtab+ +lc-uuid+ +lc-load-dylib+
                     +lc-rpath+ +lc-code-signature+)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Typed AST Generators
-;;; ----------------------------------------------------------------------------
 
 ;; Type-annotated AST node structures
 (defstruct (typed-ast (:constructor make-typed-ast-raw))
@@ -596,9 +588,7 @@
                (3 (gen-typed-call))
                (4 (gen-typed-terminal)))))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Utility Functions for Typed AST
-;;; ----------------------------------------------------------------------------
 
 (defun typed-ast-to-sexp (node)
   "Convert a typed AST node to an S-expression for debugging."
@@ -651,9 +641,7 @@
   "Extract the type from a typed AST node."
   (typed-ast-node-type node))
 
-;;; ----------------------------------------------------------------------------
 ;;; Example Properties Using New Generators
-;;; ----------------------------------------------------------------------------
 
 (in-suite cl-cc-pbt-suite)
 

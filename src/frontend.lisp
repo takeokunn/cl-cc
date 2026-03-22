@@ -7,348 +7,245 @@
 
 (in-package :cl-cc)
 
-;;; ----------------------------------------------------------------------------
-;;; AST Base Class with Source Location Tracking
-;;; ----------------------------------------------------------------------------
+;;; AST Base Struct with Source Location Tracking
 
-(defclass ast-node ()
-  ((source-file :initarg :source-file :initform nil :reader ast-source-file
-                :documentation "Source file path or name")
-   (source-line :initarg :source-line :initform nil :reader ast-source-line
-                :documentation "1-based line number")
-   (source-column :initarg :source-column :initform nil :reader ast-source-column
-                  :documentation "0-based column number"))
-  (:documentation "Base class for all AST nodes with optional source location tracking."))
+(defstruct (ast-node (:conc-name ast-))
+  "Base struct for all AST nodes with optional source location tracking."
+  (source-file nil)
+  (source-line nil)
+  (source-column nil))
 
-;;; ----------------------------------------------------------------------------
-;;; Core AST Classes (Original)
-;;; ----------------------------------------------------------------------------
+;;; Intermediate AST Structs (shared slot groups)
 
-(defclass ast-int (ast-node)
-  ((value :initarg :value :reader ast-int-value))
-  (:documentation "Integer literal AST node."))
+(defstruct (ast-callable (:include ast-node))
+  "Intermediate struct for callable forms (lambda, defun)."
+  (params nil :type list)
+  (optional-params nil :type list)
+  (rest-param nil)
+  (key-params nil :type list)
+  (body nil :type list))
 
-(defclass ast-var (ast-node)
-  ((name :initarg :name :reader ast-var-name))
-  (:documentation "Variable reference AST node."))
+(defstruct (ast-local-fns (:include ast-node))
+  "Intermediate struct for local function binding forms (flet, labels)."
+  (bindings nil :type list)
+  (body nil :type list))
 
-(defclass ast-binop (ast-node)
-  ((op :initarg :op :reader ast-binop-op)
-   (lhs :initarg :lhs :reader ast-binop-lhs)
-   (rhs :initarg :rhs :reader ast-binop-rhs))
-  (:documentation "Binary operation AST node."))
+;;; Core AST Structs
 
-(defclass ast-if (ast-node)
-  ((cond :initarg :cond :reader ast-if-cond)
-   (then :initarg :then :reader ast-if-then)
-   (else :initarg :else :reader ast-if-else))
-  (:documentation "Conditional expression AST node."))
+(defstruct (ast-int (:include ast-node))
+  "Integer literal AST node."
+  (value nil))
 
-(defclass ast-progn (ast-node)
-  ((forms :initarg :forms :reader ast-progn-forms))
-  (:documentation "Sequence of expressions AST node."))
+(defstruct (ast-var (:include ast-node))
+  "Variable reference AST node."
+  (name nil))
 
-(defclass ast-print (ast-node)
-  ((expr :initarg :expr :reader ast-print-expr))
-  (:documentation "Print expression AST node."))
+(defstruct (ast-binop (:include ast-node))
+  "Binary operation AST node."
+  (op nil)
+  (lhs nil)
+  (rhs nil))
 
-(defclass ast-let (ast-node)
-  ((bindings :initarg :bindings :reader ast-let-bindings)
-   (body :initarg :body :reader ast-let-body))
-  (:documentation "Let binding AST node."))
+(defstruct (ast-if (:include ast-node))
+  "Conditional expression AST node."
+  (cond nil)
+  (then nil)
+  (else nil))
 
-;;; ----------------------------------------------------------------------------
-;;; Function and Lambda AST Classes
-;;; ----------------------------------------------------------------------------
+(defstruct (ast-progn (:include ast-node))
+  "Sequence of expressions AST node."
+  (forms nil :type list))
 
-(defclass ast-lambda (ast-node)
-  ((params :initarg :params :reader ast-lambda-params
-           :documentation "List of required parameter symbols")
-   (optional-params :initarg :optional-params :initform nil :reader ast-lambda-optional-params
-                    :documentation "List of (name default-form) for &optional params")
-   (rest-param :initarg :rest-param :initform nil :reader ast-lambda-rest-param
-               :documentation "Symbol for &rest parameter, or nil")
-   (key-params :initarg :key-params :initform nil :reader ast-lambda-key-params
-               :documentation "List of (name default-form) for &key params")
-   (body :initarg :body :reader ast-lambda-body
-         :documentation "Body forms as list of AST nodes")
-   (env :initarg :env :initform nil :reader ast-lambda-env
-        :documentation "Captured lexical environment"))
-  (:documentation "Lambda expression AST node."))
+(defstruct (ast-print (:include ast-node))
+  "Print expression AST node."
+  (expr nil))
 
-(defclass ast-function (ast-node)
-  ((name :initarg :name :reader ast-function-name
-         :documentation "Function name (symbol or (setf name))"))
-  (:documentation "Function reference AST node for #'var."))
+(defstruct (ast-let (:include ast-node))
+  "Let binding AST node."
+  (bindings nil :type list)
+  (body nil :type list))
 
-(defclass ast-flet (ast-node)
-  ((bindings :initarg :bindings :reader ast-flet-bindings
-             :documentation "List of (name params . body) for local functions")
-   (body :initarg :body :reader ast-flet-body
-         :documentation "Body forms as list of AST nodes"))
-  (:documentation "Local non-recursive function bindings AST node."))
+;;; Function and Lambda AST Structs
 
-(defclass ast-labels (ast-node)
-  ((bindings :initarg :bindings :reader ast-labels-bindings
-             :documentation "List of (name params . body) for mutually recursive functions")
-   (body :initarg :body :reader ast-labels-body
-         :documentation "Body forms as list of AST nodes"))
-  (:documentation "Local recursive function bindings AST node."))
+(defstruct (ast-lambda (:include ast-callable))
+  "Lambda expression AST node."
+  (env nil))
 
-(defclass ast-defun (ast-node)
-  ((name :initarg :name :reader ast-defun-name
-         :documentation "Function name (symbol)")
-   (params :initarg :params :reader ast-defun-params
-           :documentation "List of required parameter symbols")
-   (optional-params :initarg :optional-params :initform nil :reader ast-defun-optional-params
-                    :documentation "List of (name default-form) for &optional params")
-   (rest-param :initarg :rest-param :initform nil :reader ast-defun-rest-param
-               :documentation "Symbol for &rest parameter, or nil")
-   (key-params :initarg :key-params :initform nil :reader ast-defun-key-params
-               :documentation "List of (name default-form) for &key params")
-   (body :initarg :body :reader ast-defun-body
-         :documentation "Body forms as list of AST nodes"))
-  (:documentation "Top-level function definition AST node."))
+(defstruct (ast-function (:include ast-node))
+  "Function reference AST node for #'var."
+  (name nil))
 
-(defclass ast-defvar (ast-node)
-  ((name :initarg :name :reader ast-defvar-name
-         :documentation "Variable name (symbol)")
-   (value :initarg :value :initform nil :reader ast-defvar-value
-          :documentation "Initial value expression (AST node or nil)"))
-  (:documentation "Top-level variable definition AST node (defvar/defparameter)."))
+(defstruct (ast-flet (:include ast-local-fns))
+  "Local non-recursive function bindings AST node.")
 
-(defclass ast-defmacro (ast-node)
-  ((name :initarg :name :reader ast-defmacro-name
-         :documentation "Macro name (symbol)")
-   (lambda-list :initarg :lambda-list :reader ast-defmacro-lambda-list
-                :documentation "Macro lambda list (raw list)")
-   (body :initarg :body :reader ast-defmacro-body
-         :documentation "Macro body forms (raw s-expressions, not AST)"))
-  (:documentation "Top-level macro definition AST node."))
+(defstruct (ast-labels (:include ast-local-fns))
+  "Local recursive function bindings AST node.")
 
-;;; ----------------------------------------------------------------------------
-;;; Block and Control Flow AST Classes
-;;; ----------------------------------------------------------------------------
+(defstruct (ast-defun (:include ast-callable))
+  "Top-level function definition AST node."
+  (name nil :type symbol))
 
-(defclass ast-block (ast-node)
-  ((name :initarg :name :reader ast-block-name
-         :documentation "Block name symbol")
-   (body :initarg :body :reader ast-block-body
-         :documentation "Body forms as list of AST nodes"))
-  (:documentation "Named block AST node."))
+(defstruct (ast-defvar (:include ast-node))
+  "Top-level variable definition AST node (defvar/defparameter)."
+  (name nil)
+  (value nil))
 
-(defclass ast-return-from (ast-node)
-  ((name :initarg :name :reader ast-return-from-name
-         :documentation "Block name to return from")
-   (value :initarg :value :reader ast-return-from-value
-          :documentation "Value to return (AST node)"))
-  (:documentation "Return from named block AST node."))
+(defstruct (ast-defmacro (:include ast-node))
+  "Top-level macro definition AST node."
+  (name nil)
+  (lambda-list nil)
+  (body nil :type list))
 
-(defclass ast-tagbody (ast-node)
-  ((tags :initarg :tags :reader ast-tagbody-tags
-         :documentation "Association list of (tag . forms) where forms are AST nodes"))
-  (:documentation "Tagged body for goto-style control flow AST node."))
+;;; Block and Control Flow AST Structs
 
-(defclass ast-go (ast-node)
-  ((tag :initarg :tag :reader ast-go-tag
-        :documentation "Tag to jump to (symbol or integer)"))
-  (:documentation "Go to tag AST node."))
+(defstruct (ast-block (:include ast-node))
+  "Named block AST node."
+  (name nil)
+  (body nil :type list))
 
-;;; ----------------------------------------------------------------------------
-;;; Assignment and Variables AST Classes
-;;; ----------------------------------------------------------------------------
+(defstruct (ast-return-from (:include ast-node))
+  "Return from named block AST node."
+  (name nil)
+  (value nil))
 
-(defclass ast-setq (ast-node)
-  ((var :initarg :var :reader ast-setq-var
-        :documentation "Variable name to assign")
-   (value :initarg :value :reader ast-setq-value
-          :documentation "Value expression (AST node)"))
-  (:documentation "Variable assignment AST node."))
+(defstruct (ast-tagbody (:include ast-node))
+  "Tagged body for goto-style control flow AST node."
+  (tags nil :type list))
 
-;;; ----------------------------------------------------------------------------
-;;; Multiple Values AST Classes
-;;; ----------------------------------------------------------------------------
+(defstruct (ast-go (:include ast-node))
+  "Go to tag AST node."
+  (tag nil))
 
-(defclass ast-multiple-value-call (ast-node)
-  ((func :initarg :func :reader ast-mv-call-func
-         :documentation "Function to call (AST node)")
-   (args :initarg :args :reader ast-mv-call-args
-         :documentation "Argument forms as list of AST nodes"))
-  (:documentation "Multiple-value-call special form AST node."))
+;;; Assignment and Variables AST Structs
 
-(defclass ast-multiple-value-prog1 (ast-node)
-  ((first-form :initarg :first-form :reader ast-mv-prog1-first
-               :documentation "First form whose values are preserved")
-   (forms :initarg :forms :reader ast-mv-prog1-forms
-          :documentation "Subsequent forms as list of AST nodes"))
-  (:documentation "Multiple-value-prog1 special form AST node."))
+(defstruct (ast-setq (:include ast-node))
+  "Variable assignment AST node."
+  (var nil)
+  (value nil))
 
-(defclass ast-values (ast-node)
-  ((forms :initarg :forms :reader ast-values-forms
-          :documentation "List of value expressions (AST nodes)"))
-  (:documentation "Values form AST node."))
+;;; Multiple Values AST Structs
 
-(defclass ast-multiple-value-bind (ast-node)
-  ((vars :initarg :vars :reader ast-mvb-vars
-         :documentation "List of variable symbols to bind")
-   (values-form :initarg :values-form :reader ast-mvb-values-form
-                :documentation "Expression producing multiple values (AST node)")
-   (body :initarg :body :reader ast-mvb-body
-         :documentation "Body forms as list of AST nodes"))
-  (:documentation "Multiple-value-bind AST node."))
+(defstruct (ast-multiple-value-call (:include ast-node) (:conc-name ast-mv-call-))
+  "Multiple-value-call special form AST node."
+  (func nil)
+  (args nil :type list))
 
-(defclass ast-apply (ast-node)
-  ((func :initarg :func :reader ast-apply-func
-         :documentation "Function expression (AST node)")
-   (args :initarg :args :reader ast-apply-args
-         :documentation "Argument expressions (AST nodes), last is list to spread"))
-  (:documentation "Apply form AST node."))
+(defstruct (ast-multiple-value-prog1 (:include ast-node) (:conc-name ast-mv-prog1-))
+  "Multiple-value-prog1 special form AST node."
+  (first nil)
+  (forms nil :type list))
 
-;;; ----------------------------------------------------------------------------
-;;; Exception Handling AST Classes
-;;; ----------------------------------------------------------------------------
+(defstruct (ast-values (:include ast-node))
+  "Values form AST node."
+  (forms nil :type list))
 
-(defclass ast-catch (ast-node)
-  ((tag :initarg :tag :reader ast-catch-tag
-        :documentation "Catch tag (evaluated form)")
-   (body :initarg :body :reader ast-catch-body
-         :documentation "Body forms as list of AST nodes"))
-  (:documentation "Catch block AST node."))
+(defstruct (ast-multiple-value-bind (:include ast-node) (:conc-name ast-mvb-))
+  "Multiple-value-bind AST node."
+  (vars nil :type list)
+  (values-form nil)
+  (body nil :type list))
 
-(defclass ast-throw (ast-node)
-  ((tag :initarg :tag :reader ast-throw-tag
-        :documentation "Tag to throw to (evaluated form)")
-   (value :initarg :value :reader ast-throw-value
-          :documentation "Value to throw (AST node)"))
-  (:documentation "Throw AST node."))
+(defstruct (ast-apply (:include ast-node))
+  "Apply form AST node."
+  (func nil)
+  (args nil :type list))
 
-(defclass ast-unwind-protect (ast-node)
-  ((protected :initarg :protected :reader ast-unwind-protected
-              :documentation "Protected form (AST node)")
-   (cleanup :initarg :cleanup :reader ast-unwind-cleanup
-            :documentation "Cleanup forms as list of AST nodes"))
-  (:documentation "Unwind-protect AST node."))
+;;; Exception Handling AST Structs
 
-(defclass ast-handler-case (ast-node)
-  ((form :initarg :form :reader ast-handler-case-form
-         :documentation "The protected form (AST node)")
-   (clauses :initarg :clauses :reader ast-handler-case-clauses
-            :documentation "List of handler clauses. Each clause is (error-type var . body-forms)."))
-  (:documentation "Handler-case AST node for condition handling."))
+(defstruct (ast-catch (:include ast-node))
+  "Catch block AST node."
+  (tag nil)
+  (body nil :type list))
 
-;;; ----------------------------------------------------------------------------
-;;; Additional AST Classes for Common Operations
-;;; ----------------------------------------------------------------------------
+(defstruct (ast-throw (:include ast-node))
+  "Throw AST node."
+  (tag nil)
+  (value nil))
 
-(defclass ast-call (ast-node)
-  ((func :initarg :func :reader ast-call-func
-         :documentation "Function name or lambda")
-   (args :initarg :args :reader ast-call-args
-         :documentation "Argument forms as list of AST nodes"))
-  (:documentation "Function call AST node (for non-special operator calls)."))
+(defstruct (ast-unwind-protect (:include ast-node) (:conc-name ast-unwind-))
+  "Unwind-protect AST node."
+  (protected nil)
+  (cleanup nil :type list))
 
-(defclass ast-quote (ast-node)
-  ((value :initarg :value :reader ast-quote-value
-          :documentation "Quoted value (literal)"))
-  (:documentation "Quote special form AST node."))
+(defstruct (ast-handler-case (:include ast-node))
+  "Handler-case AST node for condition handling."
+  (form nil)
+  (clauses nil :type list))
 
-(defclass ast-the (ast-node)
-  ((type :initarg :type :reader ast-the-type
-         :documentation "Type specifier")
-   (value :initarg :value :reader ast-the-value
-          :documentation "Value expression (AST node)"))
-  (:documentation "The type declaration AST node."))
+;;; Additional AST Structs for Common Operations
 
-;;; ----------------------------------------------------------------------------
-;;; CLOS AST Classes
-;;; ----------------------------------------------------------------------------
+(defstruct (ast-call (:include ast-node))
+  "Function call AST node (for non-special operator calls)."
+  (func nil)
+  (args nil :type list))
 
-(defclass ast-slot-def ()
-  ((name :initarg :name :reader ast-slot-name
-         :documentation "Slot name (symbol)")
-   (initarg :initarg :initarg :initform nil :reader ast-slot-initarg
-            :documentation "Keyword for initialization")
-   (initform :initarg :initform :initform nil :reader ast-slot-initform
-             :documentation "Default value expression (AST node or nil)")
-   (reader :initarg :reader :initform nil :reader ast-slot-reader
-           :documentation "Reader function name (symbol or nil)")
-   (writer :initarg :writer :initform nil :reader ast-slot-writer
-           :documentation "Writer function name (symbol or nil)")
-   (accessor :initarg :accessor :initform nil :reader ast-slot-accessor
-             :documentation "Accessor function name (symbol or nil)")
-   (slot-type :initarg :slot-type :initform nil :reader ast-slot-type
-              :documentation "Declared type specifier (symbol or list, or nil)"))
-  (:documentation "Slot definition for defclass."))
+(defstruct (ast-quote (:include ast-node))
+  "Quote special form AST node."
+  (value nil))
 
-(defclass ast-defclass (ast-node)
-  ((name :initarg :name :reader ast-defclass-name
-         :documentation "Class name (symbol)")
-   (superclasses :initarg :superclasses :initform nil :reader ast-defclass-superclasses
-                 :documentation "List of superclass names")
-   (slots :initarg :slots :initform nil :reader ast-defclass-slots
-          :documentation "List of ast-slot-def objects"))
-  (:documentation "Class definition AST node (defclass)."))
+(defstruct (ast-the (:include ast-node))
+  "The type declaration AST node."
+  (type nil)
+  (value nil))
 
-(defclass ast-defgeneric (ast-node)
-  ((name :initarg :name :reader ast-defgeneric-name
-         :documentation "Generic function name (symbol)")
-   (params :initarg :params :reader ast-defgeneric-params
-           :documentation "Lambda list"))
-  (:documentation "Generic function definition AST node (defgeneric)."))
+;;; CLOS AST Structs
 
-(defclass ast-defmethod (ast-node)
-  ((name :initarg :name :reader ast-defmethod-name
-         :documentation "Method name (symbol)")
-   (specializers :initarg :specializers :reader ast-defmethod-specializers
-                 :documentation "List of (param-name . class-name) pairs for specialized params")
-   (params :initarg :params :reader ast-defmethod-params
-           :documentation "Full parameter list (names only)")
-   (body :initarg :body :reader ast-defmethod-body
-         :documentation "List of body form AST nodes"))
-  (:documentation "Method definition AST node (defmethod)."))
+(defstruct (ast-slot-def (:conc-name ast-slot-))
+  "Slot definition for defclass."
+  (name nil :type symbol)
+  (initarg nil)
+  (initform nil)
+  (reader nil)
+  (writer nil)
+  (accessor nil)
+  (type nil))
 
-(defclass ast-make-instance (ast-node)
-  ((class-name :initarg :class-name :reader ast-make-instance-class
-               :documentation "Class name expression (AST node)")
-   (initargs :initarg :initargs :initform nil :reader ast-make-instance-initargs
-             :documentation "Alist of (keyword . value-ast) pairs"))
-  (:documentation "Object creation AST node (make-instance)."))
+(defstruct (ast-defclass (:include ast-node))
+  "Class definition AST node (defclass)."
+  (name nil)
+  (superclasses nil :type list)
+  (slots nil :type list))
 
-(defclass ast-slot-value (ast-node)
-  ((object :initarg :object :reader ast-slot-value-object
-           :documentation "Object expression (AST node)")
-   (slot-name :initarg :slot-name :reader ast-slot-value-slot
-              :documentation "Slot name (symbol)"))
-  (:documentation "Slot access AST node (slot-value)."))
+(defstruct (ast-defgeneric (:include ast-node))
+  "Generic function definition AST node (defgeneric)."
+  (name nil)
+  (params nil :type list))
 
-(defclass ast-set-slot-value (ast-node)
-  ((object :initarg :object :reader ast-set-slot-value-object
-           :documentation "Object expression (AST node)")
-   (slot-name :initarg :slot-name :reader ast-set-slot-value-slot
-              :documentation "Slot name (symbol)")
-   (value :initarg :value :reader ast-set-slot-value-value
-          :documentation "New value expression (AST node)"))
-  (:documentation "Slot mutation AST node (setf (slot-value obj 'slot) val)."))
+(defstruct (ast-defmethod (:include ast-node))
+  "Method definition AST node (defmethod)."
+  (name nil)
+  (specializers nil :type list)
+  (params nil :type list)
+  (body nil :type list))
 
-(defclass ast-set-gethash (ast-node)
-  ((key :initarg :key :reader ast-set-gethash-key
-        :documentation "Key expression (AST node)")
-   (table :initarg :table :reader ast-set-gethash-table
-          :documentation "Hash table expression (AST node)")
-   (value :initarg :value :reader ast-set-gethash-value
-          :documentation "Value expression (AST node)"))
-  (:documentation "Hash table mutation AST node (setf (gethash key table) value)."))
+(defstruct (ast-make-instance (:include ast-node))
+  "Object creation AST node (make-instance)."
+  (class nil)
+  (initargs nil :type list))
 
-;;; ----------------------------------------------------------------------------
+(defstruct (ast-slot-value (:include ast-node))
+  "Slot access AST node (slot-value)."
+  (object nil)
+  (slot nil))
+
+(defstruct (ast-set-slot-value (:include ast-node))
+  "Slot mutation AST node (setf (slot-value obj 'slot) val)."
+  (object nil)
+  (slot nil)
+  (value nil))
+
+(defstruct (ast-set-gethash (:include ast-node))
+  "Hash table mutation AST node (setf (gethash key table) value)."
+  (key nil)
+  (table nil)
+  (value nil))
+
 ;;; Source Location Utilities
-;;; ----------------------------------------------------------------------------
 
-(defun make-ast-with-location (class &rest initargs &key source-file source-line source-column &allow-other-keys)
+(defun make-ast-with-location (constructor &rest initargs)
   "Create an AST instance with source location information.
-   If no location is provided, tries to use *current-source-location*."
-  (declare (ignore source-file source-line source-column))
-  (let ((instance (apply #'make-instance class initargs)))
-    instance))
+   CONSTRUCTOR is a struct constructor function (e.g. #'make-ast-int)."
+  (apply constructor initargs))
 
 (defun ast-location-string (node)
   "Return a human-readable string of the source location for NODE."
@@ -381,9 +278,7 @@
                      (ast-error-format-control condition)
                      (ast-error-format-arguments condition)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; S-Expression Parser
-;;; ----------------------------------------------------------------------------
 
 (defun parse-source (source)
   "Parse SOURCE into one s-expression."
@@ -424,33 +319,31 @@
         (setf position next-position)))
     (nreverse forms)))
 
-;;; ----------------------------------------------------------------------------
 ;;; S-Expression to AST Transformation
-;;; ----------------------------------------------------------------------------
 
 (defgeneric lower-sexp-to-ast (node &key source-file source-line source-column)
   (:documentation "Convert an S-expression NODE to an AST node with optional source location."))
 
 (defmethod lower-sexp-to-ast ((node integer) &key source-file source-line source-column)
-  (make-instance 'ast-int :value node
+  (make-ast-int :value node
                  :source-file source-file
                  :source-line source-line
                  :source-column source-column))
 
 (defmethod lower-sexp-to-ast ((node string) &key source-file source-line source-column)
-  (make-instance 'ast-quote :value node
+  (make-ast-quote :value node
                  :source-file source-file
                  :source-line source-line
                  :source-column source-column))
 
 (defmethod lower-sexp-to-ast ((node character) &key source-file source-line source-column)
-  (make-instance 'ast-quote :value node
+  (make-ast-quote :value node
                  :source-file source-file
                  :source-line source-line
                  :source-column source-column))
 
 (defmethod lower-sexp-to-ast ((node symbol) &key source-file source-line source-column)
-  (make-instance 'ast-var :name node
+  (make-ast-var :name node
                  :source-file source-file
                  :source-line source-line
                  :source-column source-column))
@@ -501,7 +394,7 @@ Returns (values required optional rest key) where:
   "Parse a CLOS slot specification into an ast-slot-def.
 Handles both simple (name) and full ((name :initarg :name :reader name-reader)) forms."
   (if (symbolp spec)
-      (make-instance 'ast-slot-def :name spec)
+      (make-ast-slot-def :name spec)
       (let ((name (first spec))
             (initarg nil) (initform nil) (reader nil) (writer nil) (accessor nil)
             (slot-type nil))
@@ -518,14 +411,14 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
                        (:documentation (pop opts))
                        (:type (setf slot-type (pop opts)))
                        (otherwise (pop opts))))))
-        (make-instance 'ast-slot-def
+        (make-ast-slot-def
                        :name name
                        :initarg initarg
                        :initform initform
                        :reader reader
                        :writer writer
                        :accessor accessor
-                       :slot-type slot-type))))
+                       :type slot-type))))
 
 (defun lower-list-to-ast (node &key source-file source-line source-column)
   "Helper to dispatch on list forms."
@@ -534,7 +427,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
     ((+ - * = < > <= >=)
      (unless (= (length node) 3)
        (error "~S takes exactly 2 args" (car node)))
-     (make-instance 'ast-binop
+     (make-ast-binop
                     :op (car node)
                     :lhs (lower-sexp-to-ast (second node))
                     :rhs (lower-sexp-to-ast (third node))
@@ -546,7 +439,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
     (if
      (unless (member (length node) '(3 4))
        (error "if takes cond then [else]"))
-     (make-instance 'ast-if
+     (make-ast-if
                     :cond (lower-sexp-to-ast (second node))
                     :then (lower-sexp-to-ast (third node))
                     :else (if (fourth node)
@@ -560,7 +453,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
     (progn
      (when (< (length node) 2)
        (error "progn needs at least one form"))
-     (make-instance 'ast-progn
+     (make-ast-progn
                     :forms (mapcar #'lower-sexp-to-ast (cdr node))
                     :source-file source-file
                     :source-line source-line
@@ -570,7 +463,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
     (print
      (unless (= (length node) 2)
        (error "print takes one arg"))
-     (make-instance 'ast-print
+     (make-ast-print
                     :expr (lower-sexp-to-ast (second node))
                     :source-file source-file
                     :source-line source-line
@@ -583,8 +476,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (let ((bindings (second node)))
        (unless (listp bindings)
          (error "let bindings must be a list"))
-       (make-instance
-        'ast-let
+       (make-ast-let
         :bindings (mapcar (lambda (binding)
                             (unless (and (consp binding)
                                          (= (length binding) 2)
@@ -608,7 +500,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
        (if (lambda-list-has-extended-p raw-params)
            (multiple-value-bind (required optional rest-param key-params)
                (parse-compiler-lambda-list raw-params)
-             (make-instance 'ast-lambda
+             (make-ast-lambda
                             :params required
                             :optional-params (mapcar (lambda (opt)
                                                        (list (first opt)
@@ -628,7 +520,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
            (progn
              (unless (every #'symbolp raw-params)
                (error "lambda parameters must be symbols"))
-             (make-instance 'ast-lambda
+             (make-ast-lambda
                             :params raw-params
                             :body (mapcar #'lower-sexp-to-ast (cddr node))
                             :source-file source-file
@@ -643,7 +535,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
        (unless (or (symbolp name)
                    (and (consp name) (eq (car name) 'setf)))
          (error "function argument must be a symbol or (setf name)"))
-       (make-instance 'ast-function
+       (make-ast-function
                       :name name
                       :source-file source-file
                       :source-line source-line
@@ -656,7 +548,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (let ((name (second node)))
        (unless (symbolp name)
          (error "block name must be a symbol"))
-       (make-instance 'ast-block
+       (make-ast-block
                       :name name
                       :body (mapcar #'lower-sexp-to-ast (cddr node))
                       :source-file source-file
@@ -670,7 +562,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (let ((name (second node)))
        (unless (symbolp name)
          (error "return-from name must be a symbol"))
-       (make-instance 'ast-return-from
+       (make-ast-return-from
                       :name name
                       :value (lower-sexp-to-ast (third node))
                       :source-file source-file
@@ -693,11 +585,15 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
                (setf current-tag item
                      current-forms nil))
              ;; This is a form
-             (push (lower-sexp-to-ast item) current-forms)))
+             (progn
+               ;; Forms before any tag get a synthesized initial tag
+               (unless current-tag
+                 (setf current-tag (gensym "TAGBODY-START")))
+               (push (lower-sexp-to-ast item) current-forms))))
        ;; Add last tag
        (when current-tag
          (push (cons current-tag (nreverse current-forms)) tags))
-       (make-instance 'ast-tagbody
+       (make-ast-tagbody
                       :tags (nreverse tags)
                       :source-file source-file
                       :source-line source-line
@@ -710,7 +606,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (let ((tag (second node)))
        (unless (or (symbolp tag) (integerp tag))
          (error "go tag must be a symbol or integer"))
-       (make-instance 'ast-go
+       (make-ast-go
                       :tag tag
                       :source-file source-file
                       :source-line source-line
@@ -723,7 +619,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (let ((var (second node)))
        (unless (symbolp var)
          (error "setq variable must be a symbol"))
-       (make-instance 'ast-setq
+       (make-ast-setq
                       :var var
                       :value (lower-sexp-to-ast (third node))
                       :source-file source-file
@@ -745,9 +641,9 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
             (let ((slot-name (if (and (consp slot-form) (eq (car slot-form) 'quote))
                                  (second slot-form)
                                  (error "setf slot-value slot must be quoted"))))
-              (make-instance 'ast-set-slot-value
+              (make-ast-set-slot-value
                              :object (lower-sexp-to-ast obj-form)
-                             :slot-name slot-name
+                             :slot slot-name
                              :value (lower-sexp-to-ast value-form)
                              :source-file source-file
                              :source-line source-line
@@ -755,7 +651,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
          ((eq (car place) 'gethash)
           (let ((key-form (second place))
                 (table-form (third place)))
-            (make-instance 'ast-set-gethash
+            (make-ast-set-gethash
                            :key (lower-sexp-to-ast key-form)
                            :table (lower-sexp-to-ast table-form)
                            :value (lower-sexp-to-ast value-form)
@@ -770,7 +666,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (let ((bindings (second node)))
        (unless (listp bindings)
          (error "flet bindings must be a list"))
-       (make-instance 'ast-flet
+       (make-ast-flet
                       :bindings (mapcar (lambda (binding)
                                           (unless (and (consp binding)
                                                        (>= (length binding) 3)
@@ -793,7 +689,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (let ((bindings (second node)))
        (unless (listp bindings)
          (error "labels bindings must be a list"))
-       (make-instance 'ast-labels
+       (make-ast-labels
                       :bindings (mapcar (lambda (binding)
                                           (unless (and (consp binding)
                                                        (>= (length binding) 3)
@@ -822,7 +718,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
        (if (lambda-list-has-extended-p raw-params)
            (multiple-value-bind (required optional rest-param key-params)
                (parse-compiler-lambda-list raw-params)
-             (make-instance 'ast-defun
+             (make-ast-defun
                             :name name
                             :params required
                             :optional-params (mapcar (lambda (opt)
@@ -843,7 +739,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
            (progn
              (unless (every #'symbolp raw-params)
                (error "defun parameters must be symbols"))
-             (make-instance 'ast-defun
+             (make-ast-defun
                             :name name
                             :params raw-params
                             :body (mapcar #'lower-sexp-to-ast (cdddr node))
@@ -858,7 +754,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (let ((name (second node)))
        (unless (symbolp name)
          (error "~A name must be a symbol" (car node)))
-       (make-instance 'ast-defvar
+       (make-ast-defvar
                       :name name
                       :value (when (>= (length node) 3)
                                (lower-sexp-to-ast (third node)))
@@ -875,7 +771,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
            (body (cdddr node)))
        (unless (symbolp name)
          (error "defmacro name must be a symbol"))
-       (make-instance 'ast-defmacro
+       (make-ast-defmacro
                       :name name
                       :lambda-list lambda-list
                       :body body
@@ -897,7 +793,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
        (unless (listp slot-specs)
          (error "defclass slots must be a list"))
        (let ((slots (mapcar #'parse-slot-spec slot-specs)))
-         (make-instance 'ast-defclass
+         (make-ast-defclass
                         :name name
                         :superclasses superclasses
                         :slots slots
@@ -913,7 +809,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
            (params (third node)))
        (unless (symbolp name)
          (error "defgeneric name must be a symbol"))
-       (make-instance 'ast-defgeneric
+       (make-ast-defgeneric
                       :name name
                       :params params
                       :source-file source-file
@@ -939,7 +835,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
              (progn
                (push nil specializers)
                (push p param-names))))
-       (make-instance 'ast-defmethod
+       (make-ast-defmethod
                       :name name
                       :specializers (nreverse specializers)
                       :params (nreverse param-names)
@@ -963,8 +859,8 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
                     (unless rest
                       (error "make-instance initarg ~S missing value" key))
                     (push (cons key (lower-sexp-to-ast (pop rest))) initargs))))
-       (make-instance 'ast-make-instance
-                      :class-name class-expr
+       (make-ast-make-instance
+                      :class class-expr
                       :initargs (nreverse initargs)
                       :source-file source-file
                       :source-line source-line
@@ -974,9 +870,9 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
     (slot-value
      (unless (= (length node) 3)
        (error "slot-value requires object and slot-name"))
-     (make-instance 'ast-slot-value
+     (make-ast-slot-value
                     :object (lower-sexp-to-ast (second node))
-                    :slot-name (let ((sn (third node)))
+                    :slot (let ((sn (third node)))
                                  (if (and (listp sn) (eq (car sn) 'quote))
                                      (second sn)
                                      sn))
@@ -986,7 +882,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
 
     ;; Values
     (values
-     (make-instance 'ast-values
+     (make-ast-values
                     :forms (mapcar #'lower-sexp-to-ast (cdr node))
                     :source-file source-file
                     :source-line source-line
@@ -1000,7 +896,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
            (values-form (third node)))
        (unless (and (listp vars) (every #'symbolp vars))
          (error "multiple-value-bind vars must be a list of symbols"))
-       (make-instance 'ast-multiple-value-bind
+       (make-ast-multiple-value-bind
                       :vars vars
                       :values-form (lower-sexp-to-ast values-form)
                       :body (mapcar #'lower-sexp-to-ast (cdddr node))
@@ -1012,7 +908,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
     (apply
      (unless (>= (length node) 3)
        (error "apply requires at least a function and one argument"))
-     (make-instance 'ast-apply
+     (make-ast-apply
                     :func (lower-sexp-to-ast (second node))
                     :args (mapcar #'lower-sexp-to-ast (cddr node))
                     :source-file source-file
@@ -1023,7 +919,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
     (multiple-value-call
      (unless (>= (length node) 3)
        (error "multiple-value-call requires function and arguments"))
-     (make-instance 'ast-multiple-value-call
+     (make-ast-multiple-value-call
                     :func (lower-sexp-to-ast (second node))
                     :args (mapcar #'lower-sexp-to-ast (cddr node))
                     :source-file source-file
@@ -1034,8 +930,8 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
     (multiple-value-prog1
      (unless (>= (length node) 2)
        (error "multiple-value-prog1 requires at least one form"))
-     (make-instance 'ast-multiple-value-prog1
-                    :first-form (lower-sexp-to-ast (second node))
+     (make-ast-multiple-value-prog1
+                    :first (lower-sexp-to-ast (second node))
                     :forms (mapcar #'lower-sexp-to-ast (cddr node))
                     :source-file source-file
                     :source-line source-line
@@ -1045,7 +941,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
     (catch
      (unless (>= (length node) 3)
        (error "catch requires tag and body"))
-     (make-instance 'ast-catch
+     (make-ast-catch
                     :tag (lower-sexp-to-ast (second node))
                     :body (mapcar #'lower-sexp-to-ast (cddr node))
                     :source-file source-file
@@ -1056,7 +952,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
     (throw
      (unless (= (length node) 3)
        (error "throw requires tag and value"))
-     (make-instance 'ast-throw
+     (make-ast-throw
                     :tag (lower-sexp-to-ast (second node))
                     :value (lower-sexp-to-ast (third node))
                     :source-file source-file
@@ -1067,7 +963,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
     (unwind-protect
      (unless (>= (length node) 3)
        (error "unwind-protect requires protected form and cleanup"))
-     (make-instance 'ast-unwind-protect
+     (make-ast-unwind-protect
                     :protected (lower-sexp-to-ast (second node))
                     :cleanup (mapcar #'lower-sexp-to-ast (cddr node))
                     :source-file source-file
@@ -1091,7 +987,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
                                     (body (mapcar #'lower-sexp-to-ast (cddr clause))))
                                 (list* error-type var body)))
                             (cddr node))))
-       (make-instance 'ast-handler-case
+       (make-ast-handler-case
                       :form protected-form
                       :clauses clauses
                       :source-file source-file
@@ -1102,7 +998,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
     (quote
      (unless (= (length node) 2)
        (error "quote takes exactly one argument"))
-     (make-instance 'ast-quote
+     (make-ast-quote
                     :value (second node)
                     :source-file source-file
                     :source-line source-line
@@ -1112,7 +1008,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
     (the
      (unless (= (length node) 3)
        (error "the requires type and value"))
-     (make-instance 'ast-the
+     (make-ast-the
                     :type (second node)
                     :value (lower-sexp-to-ast (third node))
                     :source-file source-file
@@ -1121,7 +1017,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
 
     ;; values: (values expr1 expr2 ...)
     (values
-     (make-instance 'ast-values
+     (make-ast-values
                     :forms (mapcar #'lower-sexp-to-ast (cdr node))
                     :source-file source-file
                     :source-line source-line
@@ -1131,7 +1027,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
     (multiple-value-bind
      (unless (>= (length node) 3)
        (error "multiple-value-bind requires vars, values-form, and body"))
-     (make-instance 'ast-multiple-value-bind
+     (make-ast-multiple-value-bind
                     :vars (second node)
                     :values-form (lower-sexp-to-ast (third node))
                     :body (mapcar #'lower-sexp-to-ast (cdddr node))
@@ -1143,7 +1039,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
     (funcall
      (unless (>= (length node) 2)
        (error "funcall requires at least a function argument"))
-     (make-instance 'ast-call
+     (make-ast-call
                     :func (lower-sexp-to-ast (second node))
                     :args (mapcar #'lower-sexp-to-ast (cddr node))
                     :source-file source-file
@@ -1152,7 +1048,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
 
     ;; Default: treat as function call
     (otherwise
-     (make-instance 'ast-call
+     (make-ast-call
                     :func (lower-sexp-to-ast (car node))
                     :args (mapcar #'lower-sexp-to-ast (cdr node))
                     :source-file source-file
@@ -1165,9 +1061,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
                      :source-line source-line
                      :source-column source-column))
 
-;;; ----------------------------------------------------------------------------
 ;;; AST Pretty Printing
-;;; ----------------------------------------------------------------------------
 
 (defgeneric ast-to-sexp (node)
   (:documentation "Convert an AST node back to an S-expression for debugging."))

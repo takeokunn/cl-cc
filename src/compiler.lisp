@@ -53,7 +53,7 @@
 
 (defmethod compile-ast ((node ast-int) ctx)
   (let ((dst (make-register ctx)))
-    (emit ctx (make-instance 'vm-const :dst dst :value (ast-int-value node)))
+    (emit ctx (make-vm-const :dst dst :value (ast-int-value node)))
     dst))
 
 (defmethod compile-ast ((node ast-var) ctx)
@@ -61,15 +61,15 @@
     (cond
       ((eq name t)
        (let ((dst (make-register ctx)))
-         (emit ctx (make-instance 'vm-const :dst dst :value t))
+         (emit ctx (make-vm-const :dst dst :value t))
          dst))
       ((eq name nil)
        (let ((dst (make-register ctx)))
-         (emit ctx (make-instance 'vm-const :dst dst :value nil))
+         (emit ctx (make-vm-const :dst dst :value nil))
          dst))
       ((keywordp name)
        (let ((dst (make-register ctx)))
-         (emit ctx (make-instance 'vm-const :dst dst :value name))
+         (emit ctx (make-vm-const :dst dst :value name))
          dst))
       (t
        (let ((local-entry (assoc name (ctx-env ctx))))
@@ -78,14 +78,14 @@
            ((and local-entry (member name (ctx-boxed-vars ctx)))
             ;; Boxed variable: read via (car box)
             (let ((unboxed (make-register ctx)))
-              (emit ctx (make-instance 'vm-car :dst unboxed :src (cdr local-entry)))
+              (emit ctx (make-vm-car :dst unboxed :src (cdr local-entry)))
               unboxed))
            (local-entry
             (cdr local-entry))
            ;; Global variable: load from global store (persists across function calls)
            ((gethash name (ctx-global-variables ctx))
             (let ((dst (make-register ctx)))
-              (emit ctx (make-instance 'vm-get-global :dst dst :name name))
+              (emit ctx (make-vm-get-global :dst dst :name name))
               dst))
            (t
             (error "Unbound variable: ~S" name))))))))
@@ -94,16 +94,16 @@
   (let* ((lhs (compile-ast (ast-binop-lhs node) ctx))
          (rhs (compile-ast (ast-binop-rhs node) ctx))
          (dst (make-register ctx))
-         (inst-class (ecase (ast-binop-op node)
-                       (+ 'vm-add)
-                       (- 'vm-sub)
-                       (* 'vm-mul)
-                       (= 'vm-num-eq)
-                       (< 'vm-lt)
-                       (> 'vm-gt)
-                       (<= 'vm-le)
-                       (>= 'vm-ge))))
-    (emit ctx (make-instance inst-class :dst dst :lhs lhs :rhs rhs))
+         (ctor (ecase (ast-binop-op node)
+                 (+ #'make-vm-add)
+                 (- #'make-vm-sub)
+                 (* #'make-vm-mul)
+                 (= #'make-vm-num-eq)
+                 (< #'make-vm-lt)
+                 (> #'make-vm-gt)
+                 (<= #'make-vm-le)
+                 (>= #'make-vm-ge))))
+    (emit ctx (funcall ctor :dst dst :lhs lhs :rhs rhs))
     dst))
 
 (defmethod compile-ast ((node ast-progn) ctx)
@@ -114,7 +114,7 @@
 
 (defmethod compile-ast ((node ast-print) ctx)
   (let ((reg (compile-ast (ast-print-expr node) ctx)))
-    (emit ctx (make-instance 'vm-print :reg reg))
+    (emit ctx (make-vm-print :reg reg))
     reg))
 
 (defmethod compile-ast ((node ast-if) ctx)
@@ -122,14 +122,14 @@
          (dst (make-register ctx))
          (else-label (make-label ctx "else"))
          (end-label (make-label ctx "ifend")))
-    (emit ctx (make-instance 'vm-jump-zero :reg cond-reg :label else-label))
+    (emit ctx (make-vm-jump-zero :reg cond-reg :label else-label))
     (let ((then-reg (compile-ast (ast-if-then node) ctx)))
-      (emit ctx (make-instance 'vm-move :dst dst :src then-reg))
-      (emit ctx (make-instance 'vm-jump :label end-label)))
-    (emit ctx (make-instance 'vm-label :name else-label))
+      (emit ctx (make-vm-move :dst dst :src then-reg))
+      (emit ctx (make-vm-jump :label end-label)))
+    (emit ctx (make-vm-label :name else-label))
     (let ((else-reg (compile-ast (ast-if-else node) ctx)))
-      (emit ctx (make-instance 'vm-move :dst dst :src else-reg)))
-    (emit ctx (make-instance 'vm-label :name end-label))
+      (emit ctx (make-vm-move :dst dst :src else-reg)))
+    (emit ctx (make-vm-label :name end-label))
     dst))
 
 (defmethod compile-ast ((node ast-let) ctx)
@@ -154,13 +154,13 @@
                       (val-reg (compile-ast expr ctx))
                       ;; Always copy to fresh register to avoid aliasing
                       (own-reg (make-register ctx)))
-                 (emit ctx (make-instance 'vm-move :dst own-reg :src val-reg))
+                 (emit ctx (make-vm-move :dst own-reg :src val-reg))
                  (if (member name needs-boxing)
                      ;; Box the variable: wrap in (cons val nil)
                      (let ((box-reg (make-register ctx))
                            (nil-reg (make-register ctx)))
-                       (emit ctx (make-instance 'vm-const :dst nil-reg :value nil))
-                       (emit ctx (make-instance 'vm-cons :dst box-reg :car-src own-reg :cdr-src nil-reg))
+                       (emit ctx (make-vm-const :dst nil-reg :value nil))
+                       (emit ctx (make-vm-cons :dst box-reg :car-src own-reg :cdr-src nil-reg))
                        (push (cons name box-reg) new-bindings))
                      (push (cons name own-reg) new-bindings))))
              (setf (ctx-env ctx) (append (nreverse new-bindings) (ctx-env ctx)))
@@ -174,9 +174,7 @@
       (setf (ctx-env ctx) old-env)
       (setf (ctx-boxed-vars ctx) old-boxed))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Control Flow: block/return-from
-;;; ----------------------------------------------------------------------------
 
 (defun lookup-block (ctx name)
   "Look up a block by name, returning (exit-label . result-reg) or error."
@@ -202,11 +200,11 @@
                                   (setf last (compile-ast form ctx)))
                                 last)))
              ;; Normal fall-through: copy result to result register
-             (emit ctx (make-instance 'vm-move :dst result-reg :src body-result))))
+             (emit ctx (make-vm-move :dst result-reg :src body-result))))
       ;; Restore block environment
       (setf (ctx-block-env ctx) old-block-env))
     ;; Emit the exit label for return-from to jump to
-    (emit ctx (make-instance 'vm-label :name exit-label))
+    (emit ctx (make-vm-label :name exit-label))
     result-reg))
 
 (defmethod compile-ast ((node ast-return-from) ctx)
@@ -216,15 +214,13 @@
          (result-reg (cdr block-info))
          (value-reg (compile-ast (ast-return-from-value node) ctx)))
     ;; Move value to block's result register
-    (emit ctx (make-instance 'vm-move :dst result-reg :src value-reg))
+    (emit ctx (make-vm-move :dst result-reg :src value-reg))
     ;; Jump to block's exit label
-    (emit ctx (make-instance 'vm-jump :label exit-label))
+    (emit ctx (make-vm-jump :label exit-label))
     ;; Return the result register (though this won't be reached)
     result-reg))
 
-;;; ----------------------------------------------------------------------------
 ;;; Control Flow: tagbody/go
-;;; ----------------------------------------------------------------------------
 
 (defun lookup-tag (ctx tag)
   "Look up a tag within the current tagbody, returning its label or error."
@@ -249,42 +245,36 @@
                  (append tag-labels (ctx-tagbody-env ctx)))
            ;; First, jump to the first tag (if any) or to end if no tags
            (if tag-labels
-               (emit ctx (make-instance 'vm-jump :label (cdar tag-labels)))
-               (emit ctx (make-instance 'vm-const :dst result-reg :value nil)))
+               (emit ctx (make-vm-jump :label (cdar tag-labels)))
+               (emit ctx (make-vm-const :dst result-reg :value nil)))
            ;; Emit code for each tag section
            (dolist (tag-entry tags)
              (let* ((tag (car tag-entry))
                     (forms (cdr tag-entry))
                     (label (cdr (assoc tag tag-labels))))
                ;; Emit the label for this tag
-               (emit ctx (make-instance 'vm-label :name label))
+               (emit ctx (make-vm-label :name label))
                ;; Compile forms for this tag
                (when forms
-                 (let ((last-reg nil))
-                   (dolist (form forms)
-                     (setf last-reg (compile-ast form ctx)))
-                   ;; After last form, jump to end (implicit go)
-                   (emit ctx (make-instance 'vm-move :dst result-reg :src last-reg))
-                   (emit ctx (make-instance 'vm-jump :label end-label))))))
-           ;; If no tags at all, result is nil
-           (unless tag-labels
-             (emit ctx (make-instance 'vm-const :dst result-reg :value nil))))
+                 (dolist (form forms)
+                   (compile-ast form ctx))
+                 ;; After last form, fall through to end
+                 (emit ctx (make-vm-jump :label end-label))))))
       ;; Restore tagbody environment
       (setf (ctx-tagbody-env ctx) old-tagbody-env))
-    ;; Emit the end label
-    (emit ctx (make-instance 'vm-label :name end-label))
+    ;; Emit the end label, then set result to NIL (tagbody always returns NIL per CL spec)
+    (emit ctx (make-vm-label :name end-label))
+    (emit ctx (make-vm-const :dst result-reg :value nil))
     result-reg))
 
 (defmethod compile-ast ((node ast-go) ctx)
   (let* ((tag (ast-go-tag node))
          (label (lookup-tag ctx tag)))
-    (emit ctx (make-instance 'vm-jump :label label))
+    (emit ctx (make-vm-jump :label label))
     ;; Return a dummy register (won't be reached)
     (make-register ctx)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Assignment: setq
-;;; ----------------------------------------------------------------------------
 
 (defmethod compile-ast ((node ast-setq) ctx)
   (let* ((var-name (ast-setq-var node))
@@ -294,22 +284,20 @@
       ;; Local binding takes priority (even if name matches a global)
       ((and local-entry (member var-name (ctx-boxed-vars ctx)))
        ;; Boxed variable: write via (rplaca box new-val)
-       (emit ctx (make-instance 'vm-rplaca :cons (cdr local-entry) :val value-reg))
+       (emit ctx (make-vm-rplaca :cons (cdr local-entry) :val value-reg))
        value-reg)
       (local-entry
        ;; Unboxed local: direct register move
-       (emit ctx (make-instance 'vm-move :dst (cdr local-entry) :src value-reg))
+       (emit ctx (make-vm-move :dst (cdr local-entry) :src value-reg))
        (cdr local-entry))
       ;; Global variable: write to global store (persists across function calls)
       ((gethash var-name (ctx-global-variables ctx))
-       (emit ctx (make-instance 'vm-set-global :name var-name :src value-reg))
+       (emit ctx (make-vm-set-global :name var-name :src value-reg))
        value-reg)
       (t
        (error "Unbound variable for setq: ~S" var-name)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Quote: literal values
-;;; ----------------------------------------------------------------------------
 
 (defmethod compile-ast ((node ast-quote) ctx)
   (let ((dst (make-register ctx))
@@ -317,20 +305,16 @@
     ;; For simple values (integers, symbols, strings, lists of simple values)
     ;; we can emit them as constants
     ;; For complex structures, this would need proper serialization
-    (emit ctx (make-instance 'vm-const :dst dst :value value))
+    (emit ctx (make-vm-const :dst dst :value value))
     dst))
 
-;;; ----------------------------------------------------------------------------
 ;;; The: type declarations (informational only)
-;;; ----------------------------------------------------------------------------
 
 (defmethod compile-ast ((node ast-the) ctx)
   ;; The type declaration is informational - just compile the value
   (compile-ast (ast-the-value node) ctx))
 
-;;; ----------------------------------------------------------------------------
 ;;; CLOS Compilation
-;;; ----------------------------------------------------------------------------
 
 (defmethod compile-ast ((node ast-defclass) ctx)
   "Compile a class definition.
@@ -352,7 +336,7 @@ and a method dispatch table. The descriptor is registered globally."
                                 collect (cons (ast-slot-name slot)
                                               (compile-ast (ast-slot-initform slot) ctx)))))
     ;; Emit class definition instruction
-    (emit ctx (make-instance 'vm-class-def
+    (emit ctx (make-vm-class-def
                             :dst dst
                             :class-name name
                             :superclasses supers
@@ -388,7 +372,7 @@ and a method dispatch table. The descriptor is registered globally."
        (let ((obj-reg (make-register ctx))
              (result-reg (make-register ctx)))
          ;; Create closure with one parameter
-         (emit ctx (make-instance 'vm-closure
+         (emit ctx (make-vm-closure
                                  :dst closure-reg
                                  :label func-label
                                  :params (list obj-reg)
@@ -397,34 +381,34 @@ and a method dispatch table. The descriptor is registered globally."
          (push (cons accessor-name closure-reg) (ctx-env ctx))
          (setf (gethash accessor-name (ctx-global-functions ctx)) func-label)
          ;; Jump over function body
-         (emit ctx (make-instance 'vm-jump :label end-label))
+         (emit ctx (make-vm-jump :label end-label))
          ;; Function body: read slot
-         (emit ctx (make-instance 'vm-label :name func-label))
-         (emit ctx (make-instance 'vm-slot-read
+         (emit ctx (make-vm-label :name func-label))
+         (emit ctx (make-vm-slot-read
                                  :dst result-reg
                                  :obj-reg obj-reg
                                  :slot-name slot-name))
-         (emit ctx (make-instance 'vm-ret :reg result-reg))
-         (emit ctx (make-instance 'vm-label :name end-label))))
+         (emit ctx (make-vm-ret :reg result-reg))
+         (emit ctx (make-vm-label :name end-label))))
       (:writer
        (let ((val-reg (make-register ctx))
              (obj-reg (make-register ctx)))
          ;; Create closure with two parameters: (new-value object)
-         (emit ctx (make-instance 'vm-closure
+         (emit ctx (make-vm-closure
                                  :dst closure-reg
                                  :label func-label
                                  :params (list val-reg obj-reg)
                                  :captured nil))
          (push (cons accessor-name closure-reg) (ctx-env ctx))
          (setf (gethash accessor-name (ctx-global-functions ctx)) func-label)
-         (emit ctx (make-instance 'vm-jump :label end-label))
-         (emit ctx (make-instance 'vm-label :name func-label))
-         (emit ctx (make-instance 'vm-slot-write
+         (emit ctx (make-vm-jump :label end-label))
+         (emit ctx (make-vm-label :name func-label))
+         (emit ctx (make-vm-slot-write
                                  :obj-reg obj-reg
                                  :slot-name slot-name
                                  :value-reg val-reg))
-         (emit ctx (make-instance 'vm-ret :reg val-reg))
-         (emit ctx (make-instance 'vm-label :name end-label)))))
+         (emit ctx (make-vm-ret :reg val-reg))
+         (emit ctx (make-vm-label :name end-label)))))
     closure-reg))
 
 (defmethod compile-ast ((node ast-defgeneric) ctx)
@@ -433,7 +417,7 @@ Creates a dispatch table (hash table) that maps class names to method closures."
   (let* ((name (ast-defgeneric-name node))
          (dst (make-register ctx)))
     ;; A generic function is a hash table with :__name__, :__params__, :__methods__
-    (emit ctx (make-instance 'vm-class-def
+    (emit ctx (make-vm-class-def
                             :dst dst
                             :class-name name
                             :superclasses nil
@@ -471,20 +455,20 @@ dispatch table, keyed by the composite specializer list for multiple dispatch."
          (param-regs (loop for i from 0 below (length params)
                            collect (make-register ctx))))
     ;; Create closure for method
-    (emit ctx (make-instance 'vm-closure
+    (emit ctx (make-vm-closure
                             :dst closure-reg
                             :label func-label
                             :params param-regs
                             :captured nil))
     ;; Register the method on the generic function with composite key
-    (emit ctx (make-instance 'vm-register-method
+    (emit ctx (make-vm-register-method
                             :gf-reg gf-reg
                             :specializer dispatch-key
                             :method-reg closure-reg))
     ;; Jump over method body
-    (emit ctx (make-instance 'vm-jump :label end-label))
+    (emit ctx (make-vm-jump :label end-label))
     ;; Method body
-    (emit ctx (make-instance 'vm-label :name func-label))
+    (emit ctx (make-vm-label :name func-label))
     (let ((old-env (ctx-env ctx)))
       (unwind-protect
            (progn
@@ -496,9 +480,9 @@ dispatch table, keyed by the composite specializer list for multiple dispatch."
              (let ((last-reg nil))
                (dolist (form body)
                  (setf last-reg (compile-ast form ctx)))
-               (emit ctx (make-instance 'vm-ret :reg last-reg))))
+               (emit ctx (make-vm-ret :reg last-reg))))
         (setf (ctx-env ctx) old-env)))
-    (emit ctx (make-instance 'vm-label :name end-label))
+    (emit ctx (make-vm-label :name end-label))
     closure-reg))
 
 (defmethod compile-ast ((node ast-make-instance) ctx)
@@ -518,7 +502,7 @@ Looks up the class, compiles initarg values, and creates an instance."
          ;; Compile initarg values: initargs is ((keyword . ast-node) ...)
          (initarg-regs (loop for (key . value-ast) in initargs
                              collect (cons key (compile-ast value-ast ctx)))))
-    (emit ctx (make-instance 'vm-make-obj
+    (emit ctx (make-vm-make-obj
                             :dst dst
                             :class-reg class-reg
                             :initarg-regs initarg-regs))
@@ -529,7 +513,7 @@ Looks up the class, compiles initarg values, and creates an instance."
   (let* ((obj-reg (compile-ast (ast-slot-value-object node) ctx))
          (slot-name (ast-slot-value-slot node))
          (dst (make-register ctx)))
-    (emit ctx (make-instance 'vm-slot-read
+    (emit ctx (make-vm-slot-read
                             :dst dst
                             :obj-reg obj-reg
                             :slot-name slot-name))
@@ -540,7 +524,7 @@ Looks up the class, compiles initarg values, and creates an instance."
   (let* ((obj-reg (compile-ast (ast-set-slot-value-object node) ctx))
          (val-reg (compile-ast (ast-set-slot-value-value node) ctx))
          (slot-name (ast-set-slot-value-slot node)))
-    (emit ctx (make-instance 'vm-slot-write
+    (emit ctx (make-vm-slot-write
                             :obj-reg obj-reg
                             :slot-name slot-name
                             :value-reg val-reg))
@@ -551,15 +535,13 @@ Looks up the class, compiles initarg values, and creates an instance."
   (let* ((key-reg (compile-ast (ast-set-gethash-key node) ctx))
          (table-reg (compile-ast (ast-set-gethash-table node) ctx))
          (val-reg (compile-ast (ast-set-gethash-value node) ctx)))
-    (emit ctx (make-instance 'vm-sethash
+    (emit ctx (make-vm-sethash
                             :key key-reg
                             :table table-reg
                             :value val-reg))
     val-reg))
 
-;;; ----------------------------------------------------------------------------
 ;;; Top-Level Definitions: defun
-;;; ----------------------------------------------------------------------------
 
 (defmethod compile-ast ((node ast-defmacro) ctx)
   "Compile a top-level macro definition.
@@ -578,7 +560,7 @@ At runtime, defmacro evaluates to the macro name."
       (register-macro name expander))
     ;; At runtime, defmacro just returns the macro name
     (let ((dst (make-register ctx)))
-      (emit ctx (make-instance 'vm-const :dst dst :value name))
+      (emit ctx (make-vm-const :dst dst :value name))
       dst)))
 
 (defun extract-constant-value (ast-node)
@@ -655,14 +637,14 @@ For each (register . ast-node) pair, emits: if register eq sentinel, register = 
            (cmp-reg (make-register ctx))
            (skip-label (make-label ctx "DEFAULT_SKIP")))
       ;; Load sentinel value
-      (emit ctx (make-instance 'vm-const :dst sentinel-reg :value *non-constant-default-sentinel*))
+      (emit ctx (make-vm-const :dst sentinel-reg :value *non-constant-default-sentinel*))
       ;; Compare: if param-reg != sentinel (eq), skip default computation
-      (emit ctx (make-instance 'vm-eq :dst cmp-reg :lhs param-reg :rhs sentinel-reg))
-      (emit ctx (make-instance 'vm-jump-zero :reg cmp-reg :label skip-label))
+      (emit ctx (make-vm-eq :dst cmp-reg :lhs param-reg :rhs sentinel-reg))
+      (emit ctx (make-vm-jump-zero :reg cmp-reg :label skip-label))
       ;; Compute the actual default value
       (let ((default-reg (compile-ast default-ast ctx)))
-        (emit ctx (make-instance 'vm-move :dst param-reg :src default-reg)))
-      (emit ctx (make-instance 'vm-label :name skip-label)))))
+        (emit ctx (make-vm-move :dst param-reg :src default-reg)))
+      (emit ctx (make-vm-label :name skip-label)))))
 
 (defun build-all-param-bindings (params param-regs opt-bindings rest-binding key-bindings)
   "Build the combined alist of (name . register) for all lambda list parameters."
@@ -687,7 +669,7 @@ Generates a closure at the function's label and registers it globally."
          (func-label (make-label ctx (format nil "DEFUN_~A" name)))
          (end-label (make-label ctx (format nil "DEFUN_~A_END" name)))
          (closure-reg (make-register ctx))
-         (free-vars (let ((temp-ast (make-instance 'ast-lambda
+         (free-vars (let ((temp-ast (make-ast-lambda
                                                    :params params
                                                    :body body)))
                       (find-free-variables temp-ast)))
@@ -703,7 +685,7 @@ Generates a closure at the function's label and registers it globally."
       ;; Register this function globally
       (setf (gethash name (ctx-global-functions ctx)) func-label)
       ;; Emit the closure creation
-      (emit ctx (make-instance 'vm-closure
+      (emit ctx (make-vm-closure
                               :dst closure-reg
                               :label func-label
                               :params param-regs
@@ -714,11 +696,11 @@ Generates a closure at the function's label and registers it globally."
       ;; Register in environment so it can be called
       (push (cons name closure-reg) (ctx-env ctx))
       ;; Register in VM function registry for (funcall 'name ...) resolution
-      (emit ctx (make-instance 'vm-register-function :name name :src closure-reg))
+      (emit ctx (make-vm-register-function :name name :src closure-reg))
       ;; Jump over the function body
-      (emit ctx (make-instance 'vm-jump :label end-label))
+      (emit ctx (make-vm-jump :label end-label))
       ;; Emit the function entry label
-      (emit ctx (make-instance 'vm-label :name func-label))
+      (emit ctx (make-vm-label :name func-label))
       ;; Save old environment and extend with parameters
       (let ((old-env (ctx-env ctx)))
         (unwind-protect
@@ -734,16 +716,14 @@ Generates a closure at the function's label and registers it globally."
                (let ((last-reg nil))
                  (dolist (form body)
                    (setf last-reg (compile-ast form ctx)))
-                 (emit ctx (make-instance 'vm-ret :reg last-reg))))
+                 (emit ctx (make-vm-ret :reg last-reg))))
           ;; Restore environment
           (setf (ctx-env ctx) old-env)))
       ;; Emit end label
-      (emit ctx (make-instance 'vm-label :name end-label))
+      (emit ctx (make-vm-label :name end-label))
       closure-reg)))
 
-;;; ----------------------------------------------------------------------------
 ;;; Top-Level Definitions: defvar/defparameter
-;;; ----------------------------------------------------------------------------
 
 (defmethod compile-ast ((node ast-defvar) ctx)
   "Compile a top-level variable definition.
@@ -755,22 +735,28 @@ so they persist across function calls."
          (value-reg (if value-form
                         (compile-ast value-form ctx)
                         (let ((nil-reg (make-register ctx)))
-                          (emit ctx (make-instance 'vm-const :dst nil-reg :value nil))
+                          (emit ctx (make-vm-const :dst nil-reg :value nil))
                           nil-reg))))
     ;; Store in global variable store
-    (emit ctx (make-instance 'vm-set-global :name name :src value-reg))
+    (emit ctx (make-vm-set-global :name name :src value-reg))
     ;; Register as global (so ast-var and ast-setq use global get/set)
     (setf (gethash name (ctx-global-variables ctx)) t)
     value-reg))
 
-;;; ----------------------------------------------------------------------------
 ;;; Multi-Form Compilation (for compiling entire files)
-;;; ----------------------------------------------------------------------------
+
+(defstruct compilation-result
+  "Result of compiling expressions or top-level forms."
+  (program nil)
+  (assembly nil)
+  (globals nil)
+  (type nil)
+  (cps nil))
 
 (defun compile-toplevel-forms (forms &key (target :x86_64))
   "Compile a list of top-level forms (e.g., from a source file).
 Handles defun, defvar, and expression forms.
-Returns a property list with :program, :assembly, and :globals."
+Returns a compilation-result struct with program, assembly, and globals."
   (let* ((ctx (make-instance 'compiler-context))
          (last-reg nil))
     ;; Compile each top-level form (with macro expansion)
@@ -784,19 +770,17 @@ Returns a property list with :program, :assembly, and :globals."
         (setf last-reg (compile-ast ast ctx))))
     ;; Finalize with halt on the last result
     (when last-reg
-      (emit ctx (make-instance 'vm-halt :reg last-reg)))
+      (emit ctx (make-vm-halt :reg last-reg)))
     (let* ((instructions (nreverse (ctx-instructions ctx)))
            (optimized (optimize-instructions instructions))
-           (program (make-instance 'vm-program
-                                   :instructions optimized
-                                   :result-register last-reg)))
-      (list :program program
-            :assembly (emit-assembly program :target target)
-            :globals (ctx-global-functions ctx)))))
+           (program (make-vm-program
+                     :instructions optimized
+                     :result-register last-reg)))
+      (make-compilation-result :program program
+                              :assembly (emit-assembly program :target target)
+                              :globals (ctx-global-functions ctx)))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Exception Handling: catch/throw/unwind-protect
-;;; ----------------------------------------------------------------------------
 
 (defmethod compile-ast ((node ast-catch) ctx)
   ;; Catch establishes an exception handler for a specific tag.
@@ -812,14 +796,14 @@ Returns a property list with :program, :assembly, and :globals."
         (result-reg (make-register ctx))
         (end-label (make-label ctx "catch_end")))
     ;; Emit catch setup (placeholder - VM would need catch instruction)
-    (emit ctx (make-instance 'vm-label :name (make-label ctx "catch_start")))
+    (emit ctx (make-vm-label :name (make-label ctx "catch_start")))
     ;; Compile body forms
     (let ((body-result (let ((last nil))
                          (dolist (form (ast-catch-body node))
                            (setf last (compile-ast form ctx)))
                          last)))
-      (emit ctx (make-instance 'vm-move :dst result-reg :src body-result)))
-    (emit ctx (make-instance 'vm-label :name end-label))
+      (emit ctx (make-vm-move :dst result-reg :src body-result)))
+    (emit ctx (make-vm-label :name end-label))
     result-reg))
 
 (defmethod compile-ast ((node ast-throw) ctx)
@@ -843,39 +827,37 @@ Returns a property list with :program, :assembly, and :globals."
         (end-label (make-label ctx "unwind_end"))
         (resignal-label (make-label ctx "unwind_resignal")))
     ;; Initialize error flag to nil (no error)
-    (emit ctx (make-instance 'vm-const :dst error-flag-reg :value nil))
+    (emit ctx (make-vm-const :dst error-flag-reg :value nil))
     ;; Establish catch-all handler for errors during protected form
-    (emit ctx (make-instance 'vm-establish-handler
+    (emit ctx (make-vm-establish-handler
                              :handler-label handler-label
                              :result-reg error-reg
                              :error-type 'error))
     ;; Compile protected form
     (let ((protected-result (compile-ast (ast-unwind-protected node) ctx)))
-      (emit ctx (make-instance 'vm-move :dst result-reg :src protected-result)))
+      (emit ctx (make-vm-move :dst result-reg :src protected-result)))
     ;; Remove handler (normal exit)
-    (emit ctx (make-instance 'vm-remove-handler))
+    (emit ctx (make-vm-remove-handler))
     ;; Jump to cleanup (normal path)
-    (emit ctx (make-instance 'vm-jump :label cleanup-label))
+    (emit ctx (make-vm-jump :label cleanup-label))
     ;; Error handler: set error flag and fall through to cleanup
-    (emit ctx (make-instance 'vm-label :name handler-label))
-    (emit ctx (make-instance 'vm-const :dst error-flag-reg :value t))
+    (emit ctx (make-vm-label :name handler-label))
+    (emit ctx (make-vm-const :dst error-flag-reg :value t))
     ;; Cleanup section (runs on both normal and error paths)
-    (emit ctx (make-instance 'vm-label :name cleanup-label))
+    (emit ctx (make-vm-label :name cleanup-label))
     (dolist (form (ast-unwind-cleanup node))
       (compile-ast form ctx))
     ;; If error occurred, re-signal it
-    (emit ctx (make-instance 'vm-jump-zero :reg error-flag-reg :label end-label))
+    (emit ctx (make-vm-jump-zero :reg error-flag-reg :label end-label))
     ;; Sync register state to remaining handlers so cleanup side-effects propagate
-    (emit ctx (make-instance 'vm-sync-handler-regs))
+    (emit ctx (make-vm-sync-handler-regs))
     ;; Re-signal the caught error
-    (emit ctx (make-instance 'vm-signal-error :error-reg error-reg))
+    (emit ctx (make-vm-signal-error :error-reg error-reg))
     ;; Normal end
-    (emit ctx (make-instance 'vm-label :name end-label))
+    (emit ctx (make-vm-label :name end-label))
     result-reg))
 
-;;; ----------------------------------------------------------------------------
 ;;; Handler-Case
-;;; ----------------------------------------------------------------------------
 
 (defmethod compile-ast ((node ast-handler-case) ctx)
   "Compile handler-case: establish handlers, run protected form, handle errors."
@@ -895,18 +877,18 @@ Returns a property list with :program, :assembly, and :globals."
           do (let ((error-type (first clause))
                    (handler-label (first info))
                    (error-reg (second info)))
-               (emit ctx (make-instance 'vm-establish-handler
+               (emit ctx (make-vm-establish-handler
                                        :handler-label handler-label
                                        :result-reg error-reg
                                        :error-type error-type))))
     ;; 2. Compile the protected form
     (let ((form-result (compile-ast (ast-handler-case-form node) ctx)))
-      (emit ctx (make-instance 'vm-move :dst result-reg :src form-result)))
+      (emit ctx (make-vm-move :dst result-reg :src form-result)))
     ;; 3. Remove handlers (one per clause)
     (dotimes (i (length clauses))
-      (emit ctx (make-instance 'vm-remove-handler)))
+      (emit ctx (make-vm-remove-handler)))
     ;; 4. Jump to normal exit
-    (emit ctx (make-instance 'vm-jump :label normal-exit-label))
+    (emit ctx (make-vm-jump :label normal-exit-label))
     ;; 5. Emit handler bodies
     (loop for clause in clauses
           for info in handler-infos
@@ -916,7 +898,7 @@ Returns a property list with :program, :assembly, and :globals."
                     (error-reg (second info))
                     (old-env (ctx-env ctx)))
                ;; Emit handler label
-               (emit ctx (make-instance 'vm-label :name handler-label))
+               (emit ctx (make-vm-label :name handler-label))
                ;; Bind error variable if provided
                (unwind-protect
                     (progn
@@ -928,23 +910,21 @@ Returns a property list with :program, :assembly, and :globals."
                             (dolist (form body)
                               (setf last-reg (compile-ast form ctx)))
                             (setf last-reg error-reg))
-                        (emit ctx (make-instance 'vm-move :dst result-reg :src last-reg))))
+                        (emit ctx (make-vm-move :dst result-reg :src last-reg))))
                  (setf (ctx-env ctx) old-env))
                ;; Jump to normal exit after handler
-               (emit ctx (make-instance 'vm-jump :label normal-exit-label))))
+               (emit ctx (make-vm-jump :label normal-exit-label))))
     ;; 6. Emit normal exit label
-    (emit ctx (make-instance 'vm-label :name normal-exit-label))
+    (emit ctx (make-vm-label :name normal-exit-label))
     result-reg))
 
-;;; ----------------------------------------------------------------------------
 ;;; Multiple Values
-;;; ----------------------------------------------------------------------------
 
 (defmethod compile-ast ((node ast-values) ctx)
   (let* ((forms (ast-values-forms node))
          (src-regs (mapcar (lambda (form) (compile-ast form ctx)) forms))
          (dst (make-register ctx)))
-    (emit ctx (make-instance 'vm-values :dst dst :src-regs src-regs))
+    (emit ctx (make-vm-values :dst dst :src-regs src-regs))
     dst))
 
 (defmethod compile-ast ((node ast-multiple-value-bind) ctx)
@@ -956,7 +936,7 @@ Returns a property list with :program, :assembly, and :globals."
     (compile-ast values-form ctx)
     ;; Create registers for each variable and emit vm-mv-bind
     (let ((var-regs (loop for v in vars collect (make-register ctx))))
-      (emit ctx (make-instance 'vm-mv-bind :dst-regs var-regs))
+      (emit ctx (make-vm-mv-bind :dst-regs var-regs))
       ;; Extend environment with new bindings
       (unwind-protect
            (progn
@@ -974,7 +954,7 @@ Returns a property list with :program, :assembly, and :globals."
          (arg-regs (mapcar (lambda (arg) (compile-ast arg ctx))
                            (ast-apply-args node)))
          (result-reg (make-register ctx)))
-    (emit ctx (make-instance 'vm-apply :dst result-reg :func func-reg :args arg-regs))
+    (emit ctx (make-vm-apply :dst result-reg :func func-reg :args arg-regs))
     result-reg))
 
 (defmethod compile-ast ((node ast-multiple-value-call) ctx)
@@ -992,14 +972,12 @@ Returns a property list with :program, :assembly, and :globals."
   ;; evaluates remaining forms, then returns the saved values.
   (let ((first-reg (compile-ast (ast-mv-prog1-first node) ctx))
         (result-reg (make-register ctx)))
-    (emit ctx (make-instance 'vm-move :dst result-reg :src first-reg))
+    (emit ctx (make-vm-move :dst result-reg :src first-reg))
     (dolist (form (ast-mv-prog1-forms node))
       (compile-ast form ctx))
     result-reg))
 
-;;; ----------------------------------------------------------------------------
 ;;; Functions and Closures
-;;; ----------------------------------------------------------------------------
 
 (defun find-mutated-variables (ast)
   "Find all variable names that are targets of SETQ in AST."
@@ -1041,7 +1019,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
          (let ((free (find-free-variables form)))
            (setf captured (union captured (intersection free params)))))
         (ast-defun
-         (let* ((temp (make-instance 'ast-lambda
+         (let* ((temp (make-ast-lambda
                                      :params (ast-defun-params form)
                                      :body (ast-defun-body form)))
                 (free (find-free-variables temp)))
@@ -1167,7 +1145,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                           non-constant-defaults)
         (allocate-extended-params ctx optional-params rest-param key-params)
       ;; Emit the closure creation instruction
-      (emit ctx (make-instance 'vm-closure
+      (emit ctx (make-vm-closure
                               :dst closure-reg
                               :label func-label
                               :params param-regs
@@ -1176,9 +1154,9 @@ PARAMS are the current scope's bound variables — only those are candidates for
                               :key-params key-closure-data
                               :captured captured-vars))
       ;; Jump over the function body
-      (emit ctx (make-instance 'vm-jump :label end-label))
+      (emit ctx (make-vm-jump :label end-label))
       ;; Emit the function entry label
-      (emit ctx (make-instance 'vm-label :name func-label))
+      (emit ctx (make-vm-label :name func-label))
       ;; Save old environment and extend with parameters
       (let ((old-env (ctx-env ctx)))
         (unwind-protect
@@ -1194,11 +1172,11 @@ PARAMS are the current scope's bound variables — only those are candidates for
                (let ((last-reg nil))
                  (dolist (form body)
                    (setf last-reg (compile-ast form ctx)))
-                 (emit ctx (make-instance 'vm-ret :reg last-reg))))
+                 (emit ctx (make-vm-ret :reg last-reg))))
           ;; Restore environment
           (setf (ctx-env ctx) old-env)))
       ;; Emit end label
-      (emit ctx (make-instance 'vm-label :name end-label))
+      (emit ctx (make-vm-label :name end-label))
       closure-reg)))
 
 (defmethod compile-ast ((node ast-call) ctx)
@@ -1215,21 +1193,23 @@ PARAMS are the current scope's bound variables — only those are candidates for
     (macrolet ((builtin-name-p (sym name-str)
                  `(and ,sym (string= (symbol-name ,sym) ,name-str)))
                (compile-string-cmp-builtin (cl-name vm-class)
-                 `(when (builtin-name-p func-sym ,(symbol-name cl-name))
-                    (let ((arg1-reg (compile-ast (first args) ctx))
-                          (arg2-reg (compile-ast (second args) ctx)))
-                      (emit ctx (make-instance ',vm-class
-                                               :dst result-reg
-                                               :str1 arg1-reg
-                                               :str2 arg2-reg))
-                      (return-from compile-ast result-reg))))
+                 (let ((ctor (intern (format nil "MAKE-~A" (symbol-name vm-class)))))
+                   `(when (builtin-name-p func-sym ,(symbol-name cl-name))
+                      (let ((arg1-reg (compile-ast (first args) ctx))
+                            (arg2-reg (compile-ast (second args) ctx)))
+                        (emit ctx (,ctor
+                                                 :dst result-reg
+                                                 :str1 arg1-reg
+                                                 :str2 arg2-reg))
+                        (return-from compile-ast result-reg)))))
                (compile-unary-builtin (cl-name vm-class)
-                 `(when (builtin-name-p func-sym ,(symbol-name cl-name))
-                    (let ((arg-reg (compile-ast (first args) ctx)))
-                      (emit ctx (make-instance ',vm-class
-                                               :dst result-reg
-                                               :src arg-reg))
-                      (return-from compile-ast result-reg)))))
+                 (let ((ctor (intern (format nil "MAKE-~A" (symbol-name vm-class)))))
+                   `(when (builtin-name-p func-sym ,(symbol-name cl-name))
+                      (let ((arg-reg (compile-ast (first args) ctx)))
+                        (emit ctx (,ctor
+                                                 :dst result-reg
+                                                 :src arg-reg))
+                        (return-from compile-ast result-reg))))))
       ;; String comparison builtins (2 args, :str1/:str2 -> :dst)
       (compile-string-cmp-builtin string= vm-string=)
       (compile-string-cmp-builtin string< vm-string<)
@@ -1274,7 +1254,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
       (when (builtin-name-p func-sym "NTH")
         (let ((idx-reg (compile-ast (first args) ctx))
               (list-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-nth
+          (emit ctx (make-vm-nth
                                    :dst result-reg
                                    :index idx-reg
                                    :list list-reg))
@@ -1282,7 +1262,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
       (when (builtin-name-p func-sym "NTHCDR")
         (let ((idx-reg (compile-ast (first args) ctx))
               (list-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-nthcdr
+          (emit ctx (make-vm-nthcdr
                                    :dst result-reg
                                    :index idx-reg
                                    :list list-reg))
@@ -1290,7 +1270,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
       (when (builtin-name-p func-sym "MEMBER")
         (let ((item-reg (compile-ast (first args) ctx))
               (list-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-member
+          (emit ctx (make-vm-member
                                    :dst result-reg
                                    :item item-reg
                                    :list list-reg))
@@ -1298,18 +1278,18 @@ PARAMS are the current scope's bound variables — only those are candidates for
       ;; Arithmetic predicates
       (when (builtin-name-p func-sym "ZEROP")
         (let ((arg-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-num-eq
+          (emit ctx (make-vm-num-eq
                                    :dst result-reg
                                    :lhs arg-reg
                                    :rhs (let ((zero-reg (make-register ctx)))
-                                          (emit ctx (make-instance 'vm-const :dst zero-reg :value 0))
+                                          (emit ctx (make-vm-const :dst zero-reg :value 0))
                                           zero-reg)))
           (return-from compile-ast result-reg)))
       (when (builtin-name-p func-sym "PLUSP")
         (let ((arg-reg (compile-ast (first args) ctx))
               (zero-reg (make-register ctx)))
-          (emit ctx (make-instance 'vm-const :dst zero-reg :value 0))
-          (emit ctx (make-instance 'vm-gt
+          (emit ctx (make-vm-const :dst zero-reg :value 0))
+          (emit ctx (make-vm-gt
                                    :dst result-reg
                                    :lhs arg-reg
                                    :rhs zero-reg))
@@ -1317,8 +1297,8 @@ PARAMS are the current scope's bound variables — only those are candidates for
       (when (builtin-name-p func-sym "MINUSP")
         (let ((arg-reg (compile-ast (first args) ctx))
               (zero-reg (make-register ctx)))
-          (emit ctx (make-instance 'vm-const :dst zero-reg :value 0))
-          (emit ctx (make-instance 'vm-lt
+          (emit ctx (make-vm-const :dst zero-reg :value 0))
+          (emit ctx (make-vm-lt
                                    :dst result-reg
                                    :lhs arg-reg
                                    :rhs zero-reg))
@@ -1328,7 +1308,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                  (= (length args) 2))
         (let ((lhs-reg (compile-ast (first args) ctx))
               (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-mod
+          (emit ctx (make-vm-mod
                                    :dst result-reg
                                    :lhs lhs-reg
                                    :rhs rhs-reg))
@@ -1337,7 +1317,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                  (= (length args) 2))
         (let ((lhs-reg (compile-ast (first args) ctx))
               (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-rem
+          (emit ctx (make-vm-rem
                                    :dst result-reg
                                    :lhs lhs-reg
                                    :rhs rhs-reg))
@@ -1346,7 +1326,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                  (= (length args) 2))
         (let ((lhs-reg (compile-ast (first args) ctx))
               (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-truncate
+          (emit ctx (make-vm-truncate
                                    :dst result-reg
                                    :lhs lhs-reg
                                    :rhs rhs-reg))
@@ -1355,7 +1335,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                  (= (length args) 2))
         (let ((lhs-reg (compile-ast (first args) ctx))
               (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-floor-inst
+          (emit ctx (make-vm-floor-inst
                                    :dst result-reg
                                    :lhs lhs-reg
                                    :rhs rhs-reg))
@@ -1364,7 +1344,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                  (= (length args) 2))
         (let ((lhs-reg (compile-ast (first args) ctx))
               (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-ceiling-inst
+          (emit ctx (make-vm-ceiling-inst
                                    :dst result-reg
                                    :lhs lhs-reg
                                    :rhs rhs-reg))
@@ -1373,7 +1353,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                  (= (length args) 2))
         (let ((lhs-reg (compile-ast (first args) ctx))
               (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-min
+          (emit ctx (make-vm-min
                                    :dst result-reg
                                    :lhs lhs-reg
                                    :rhs rhs-reg))
@@ -1382,7 +1362,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                  (= (length args) 2))
         (let ((lhs-reg (compile-ast (first args) ctx))
               (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-max
+          (emit ctx (make-vm-max
                                    :dst result-reg
                                    :lhs lhs-reg
                                    :rhs rhs-reg))
@@ -1394,7 +1374,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
       (when (builtin-name-p func-sym "CONS")
         (let ((car-reg (compile-ast (first args) ctx))
               (cdr-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-cons
+          (emit ctx (make-vm-cons
                                    :dst result-reg
                                    :car-src car-reg
                                    :cdr-src cdr-reg))
@@ -1403,24 +1383,24 @@ PARAMS are the current scope's bound variables — only those are candidates for
       (when (builtin-name-p func-sym "RPLACA")
         (let ((cons-reg (compile-ast (first args) ctx))
               (val-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-rplaca
+          (emit ctx (make-vm-rplaca
                                    :cons cons-reg
                                    :val val-reg))
-          (emit ctx (make-instance 'vm-move :dst result-reg :src cons-reg))
+          (emit ctx (make-vm-move :dst result-reg :src cons-reg))
           (return-from compile-ast result-reg)))
       (when (builtin-name-p func-sym "RPLACD")
         (let ((cons-reg (compile-ast (first args) ctx))
               (val-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-rplacd
+          (emit ctx (make-vm-rplacd
                                    :cons cons-reg
                                    :val val-reg))
-          (emit ctx (make-instance 'vm-move :dst result-reg :src cons-reg))
+          (emit ctx (make-vm-move :dst result-reg :src cons-reg))
           (return-from compile-ast result-reg)))
       ;; Equality builtins (2 args, :lhs/:rhs -> :dst)
       (when (builtin-name-p func-sym "EQ")
         (let ((lhs-reg (compile-ast (first args) ctx))
               (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-eq
+          (emit ctx (make-vm-eq
                                    :dst result-reg
                                    :lhs lhs-reg
                                    :rhs rhs-reg))
@@ -1428,7 +1408,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
       (when (builtin-name-p func-sym "EQL")
         (let ((lhs-reg (compile-ast (first args) ctx))
               (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-eq
+          (emit ctx (make-vm-eq
                                    :dst result-reg
                                    :lhs lhs-reg
                                    :rhs rhs-reg))
@@ -1437,7 +1417,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
       (when (builtin-name-p func-sym "APPEND")
         (let ((lhs-reg (compile-ast (first args) ctx))
               (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-append
+          (emit ctx (make-vm-append
                                    :dst result-reg
                                    :src1 lhs-reg
                                    :src2 rhs-reg))
@@ -1445,26 +1425,26 @@ PARAMS are the current scope's bound variables — only those are candidates for
       ;; List (variable args)
       (when (builtin-name-p func-sym "LIST")
         (let ((arg-regs (mapcar (lambda (arg) (compile-ast arg ctx)) args)))
-          (emit ctx (make-instance 'vm-list
+          (emit ctx (make-vm-list
                                    :dst result-reg
                                    :count (length arg-regs)
                                    :src-regs arg-regs))
           (return-from compile-ast result-reg)))
       ;; %values-to-list: capture current values-list as a list
       (when (builtin-name-p func-sym "%VALUES-TO-LIST")
-        (emit ctx (make-instance 'vm-values-to-list :dst result-reg))
+        (emit ctx (make-vm-values-to-list :dst result-reg))
         (return-from compile-ast result-reg))
       ;; error: signal an error via vm-signal-error
       (when (builtin-name-p func-sym "ERROR")
         (let ((arg-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-signal-error :error-reg arg-reg))
+          (emit ctx (make-vm-signal-error :error-reg arg-reg))
           ;; Return a dummy register (won't be reached if error is not caught)
           (return-from compile-ast result-reg)))
       ;; warn: print warning via vm-warn
       (when (builtin-name-p func-sym "WARN")
         (let ((arg-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-warn :condition-reg arg-reg))
-          (emit ctx (make-instance 'vm-const :dst result-reg :value nil))
+          (emit ctx (make-vm-warn :condition-reg arg-reg))
+          (emit ctx (make-vm-const :dst result-reg :value nil))
           (return-from compile-ast result-reg)))
       ;; Hash table builtins
       (when (builtin-name-p func-sym "MAKE-HASH-TABLE")
@@ -1492,8 +1472,8 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                         (t nil))))
                     (when test-sym
                       (setf test-reg (make-register ctx))
-                      (emit ctx (make-instance 'vm-const :dst test-reg :value test-sym))))))))
-          (emit ctx (make-instance 'vm-make-hash-table
+                      (emit ctx (make-vm-const :dst test-reg :value test-sym))))))))
+          (emit ctx (make-vm-make-hash-table
                                    :dst result-reg
                                    :test test-reg))
           (return-from compile-ast result-reg)))
@@ -1501,7 +1481,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
         (let ((key-reg (compile-ast (first args) ctx))
               (table-reg (compile-ast (second args) ctx))
               (default-reg (when (third args) (compile-ast (third args) ctx))))
-          (emit ctx (make-instance 'vm-gethash
+          (emit ctx (make-vm-gethash
                                    :dst result-reg
                                    :found-dst nil
                                    :key key-reg
@@ -1511,32 +1491,32 @@ PARAMS are the current scope's bound variables — only those are candidates for
       (when (builtin-name-p func-sym "REMHASH")
         (let ((key-reg (compile-ast (first args) ctx))
               (table-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-remhash
+          (emit ctx (make-vm-remhash
                                    :key key-reg
                                    :table table-reg))
           (return-from compile-ast result-reg)))
       (when (builtin-name-p func-sym "HASH-TABLE-COUNT")
         (let ((table-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-hash-table-count
+          (emit ctx (make-vm-hash-table-count
                                    :dst result-reg
                                    :table table-reg))
           (return-from compile-ast result-reg)))
       (compile-unary-builtin hash-table-p vm-hash-table-p)
       (when (builtin-name-p func-sym "HASH-TABLE-KEYS")
         (let ((table-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-hash-table-keys
+          (emit ctx (make-vm-hash-table-keys
                                    :dst result-reg
                                    :table table-reg))
           (return-from compile-ast result-reg)))
       (when (builtin-name-p func-sym "HASH-TABLE-VALUES")
         (let ((table-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-hash-table-values
+          (emit ctx (make-vm-hash-table-values
                                    :dst result-reg
                                    :table table-reg))
           (return-from compile-ast result-reg)))
       (when (builtin-name-p func-sym "HASH-TABLE-TEST")
         (let ((table-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-hash-table-test
+          (emit ctx (make-vm-hash-table-test
                                    :dst result-reg
                                    :table table-reg))
           (return-from compile-ast result-reg)))
@@ -1550,72 +1530,72 @@ PARAMS are the current scope's bound variables — only those are candidates for
                (key-reg (make-register ctx))
                (val-reg (make-register ctx)))
           ;; Get all keys
-          (emit ctx (make-instance 'vm-hash-table-keys :dst keys-reg :table table-reg))
+          (emit ctx (make-vm-hash-table-keys :dst keys-reg :table table-reg))
           ;; Loop over keys
-          (emit ctx (make-instance 'vm-label :name loop-start))
+          (emit ctx (make-vm-label :name loop-start))
           ;; End test: jump to end when keys-reg is nil (falsy)
-          (emit ctx (make-instance 'vm-jump-zero :reg keys-reg :label loop-end))
+          (emit ctx (make-vm-jump-zero :reg keys-reg :label loop-end))
           ;; key = (car keys)
-          (emit ctx (make-instance 'vm-car :dst key-reg :src keys-reg))
+          (emit ctx (make-vm-car :dst key-reg :src keys-reg))
           ;; val = (gethash key table)
-          (emit ctx (make-instance 'vm-gethash :dst val-reg :key key-reg :table table-reg))
+          (emit ctx (make-vm-gethash :dst val-reg :key key-reg :table table-reg))
           ;; Call fn(key, val)
           (let ((call-dst (make-register ctx)))
-            (emit ctx (make-instance 'vm-call :dst call-dst :func fn-reg :args (list key-reg val-reg))))
+            (emit ctx (make-vm-call :dst call-dst :func fn-reg :args (list key-reg val-reg))))
           ;; keys = (cdr keys)
-          (emit ctx (make-instance 'vm-cdr :dst keys-reg :src keys-reg))
-          (emit ctx (make-instance 'vm-jump :label loop-start))
-          (emit ctx (make-instance 'vm-label :name loop-end))
+          (emit ctx (make-vm-cdr :dst keys-reg :src keys-reg))
+          (emit ctx (make-vm-jump :label loop-start))
+          (emit ctx (make-vm-label :name loop-end))
           ;; maphash returns nil
-          (emit ctx (make-instance 'vm-const :dst result-reg :value nil))
+          (emit ctx (make-vm-const :dst result-reg :value nil))
           (return-from compile-ast result-reg)))
       ;; make-list
       (when (builtin-name-p func-sym "MAKE-LIST")
         (let ((size-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-make-list :dst result-reg :size size-reg))
+          (emit ctx (make-vm-make-list :dst result-reg :size size-reg))
           (return-from compile-ast result-reg)))
       ;; Array/vector builtins
       (when (builtin-name-p func-sym "MAKE-ARRAY")
         (let ((size-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-make-array
+          (emit ctx (make-vm-make-array
                                    :dst result-reg
-                                   :size size-reg
+                                   :size-reg size-reg
                                    :fill-pointer nil
                                    :adjustable nil))
           (return-from compile-ast result-reg)))
       (when (builtin-name-p func-sym "MAKE-ADJUSTABLE-VECTOR")
         (let ((size-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-make-array
+          (emit ctx (make-vm-make-array
                                    :dst result-reg
-                                   :size size-reg
+                                   :size-reg size-reg
                                    :fill-pointer t
                                    :adjustable t))
           (return-from compile-ast result-reg)))
       (when (builtin-name-p func-sym "AREF")
         (let ((arr-reg (compile-ast (first args) ctx))
               (idx-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-aref
+          (emit ctx (make-vm-aref
                                    :dst result-reg
-                                   :array arr-reg
-                                   :index idx-reg))
+                                   :array-reg arr-reg
+                                   :index-reg idx-reg))
           (return-from compile-ast result-reg)))
       (when (builtin-name-p func-sym "ASET")
         (let ((arr-reg (compile-ast (first args) ctx))
               (idx-reg (compile-ast (second args) ctx))
               (val-reg (compile-ast (third args) ctx)))
-          (emit ctx (make-instance 'vm-aset
-                                   :array arr-reg
-                                   :index idx-reg
-                                   :val val-reg))
-          (emit ctx (make-instance 'vm-move :dst result-reg :src val-reg))
+          (emit ctx (make-vm-aset
+                                   :array-reg arr-reg
+                                   :index-reg idx-reg
+                                   :val-reg val-reg))
+          (emit ctx (make-vm-move :dst result-reg :src val-reg))
           (return-from compile-ast result-reg)))
       (when (builtin-name-p func-sym "VECTOR-PUSH-EXTEND")
         (let ((val-reg (compile-ast (first args) ctx))
               (arr-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-vector-push-extend
+          (emit ctx (make-vm-vector-push-extend
                                    :dst result-reg
-                                   :val val-reg
-                                   :array arr-reg))
+                                   :val-reg val-reg
+                                   :array-reg arr-reg))
           (return-from compile-ast result-reg)))
       (compile-unary-builtin vectorp vm-vectorp)
       (compile-unary-builtin array-length vm-array-length)
@@ -1625,20 +1605,20 @@ PARAMS are the current scope's bound variables — only those are candidates for
       (when (builtin-name-p func-sym "INTERN")
         (let ((str-reg (compile-ast (first args) ctx))
               (pkg-reg (when (second args) (compile-ast (second args) ctx))))
-          (emit ctx (make-instance 'vm-intern-symbol :dst result-reg
+          (emit ctx (make-vm-intern-symbol :dst result-reg
                                                      :src str-reg
                                                      :pkg pkg-reg))
           (return-from compile-ast result-reg)))
       (compile-unary-builtin keywordp vm-keywordp)
       (when (builtin-name-p func-sym "GENSYM")
-        (emit ctx (make-instance 'vm-gensym-inst :dst result-reg))
+        (emit ctx (make-vm-gensym-inst :dst result-reg))
         (return-from compile-ast result-reg))
       ;; Association list and utility builtins
       (when (and (builtin-name-p func-sym "ASSOC")
                  (= (length args) 2))
         (let ((key-reg (compile-ast (first args) ctx))
               (alist-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-assoc
+          (emit ctx (make-vm-assoc
                                    :dst result-reg
                                    :key key-reg
                                    :alist alist-reg))
@@ -1648,7 +1628,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
         (let ((key-reg (compile-ast (first args) ctx))
               (val-reg (compile-ast (second args) ctx))
               (alist-reg (compile-ast (third args) ctx)))
-          (emit ctx (make-instance 'vm-acons
+          (emit ctx (make-vm-acons
                                    :dst result-reg
                                    :key key-reg
                                    :value val-reg
@@ -1658,7 +1638,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                  (= (length args) 2))
         (let ((lhs-reg (compile-ast (first args) ctx))
               (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-equal
+          (emit ctx (make-vm-equal
                                    :dst result-reg
                                    :lhs lhs-reg
                                    :rhs rhs-reg))
@@ -1667,7 +1647,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                  (= (length args) 2))
         (let ((lhs-reg (compile-ast (first args) ctx))
               (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-nconc
+          (emit ctx (make-vm-nconc
                                    :dst result-reg
                                    :lhs lhs-reg
                                    :rhs rhs-reg))
@@ -1679,7 +1659,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
         (let ((new-reg (compile-ast (first args) ctx))
               (old-reg (compile-ast (second args) ctx))
               (tree-reg (compile-ast (third args) ctx)))
-          (emit ctx (make-instance 'vm-subst
+          (emit ctx (make-vm-subst
                                    :dst result-reg
                                    :new-val new-reg
                                    :old-val old-reg
@@ -1693,7 +1673,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
       (when (and (builtin-name-p func-sym "STRING")
                  (= (length args) 1))
         (let ((arg-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-string-coerce
+          (emit ctx (make-vm-string-coerce
                                    :dst result-reg
                                    :src arg-reg))
           (return-from compile-ast result-reg)))
@@ -1702,7 +1682,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                  (= (length args) 2))
         (let ((str-reg (compile-ast (first args) ctx))
               (idx-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-char
+          (emit ctx (make-vm-char
                                    :dst result-reg
                                    :string str-reg
                                    :index idx-reg))
@@ -1713,7 +1693,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                  (= (length args) 2))
         (let ((c1-reg (compile-ast (first args) ctx))
               (c2-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-char=
+          (emit ctx (make-vm-char=
                                    :dst result-reg
                                    :char1 c1-reg
                                    :char2 c2-reg))
@@ -1722,7 +1702,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                  (= (length args) 2))
         (let ((c1-reg (compile-ast (first args) ctx))
               (c2-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-char<
+          (emit ctx (make-vm-char<
                                    :dst result-reg
                                    :char1 c1-reg
                                    :char2 c2-reg))
@@ -1745,9 +1725,9 @@ PARAMS are the current scope's bound variables — only those are candidates for
               (end-reg (if (third args)
                            (compile-ast (third args) ctx)
                            (let ((nil-reg (make-register ctx)))
-                             (emit ctx (make-instance 'vm-const :dst nil-reg :value nil))
+                             (emit ctx (make-vm-const :dst nil-reg :value nil))
                              nil-reg))))
-          (emit ctx (make-instance 'vm-subseq
+          (emit ctx (make-vm-subseq
                                    :dst result-reg
                                    :string str-reg
                                    :start start-reg
@@ -1758,7 +1738,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                  (= (length args) 2))
         (let ((bag-reg (compile-ast (first args) ctx))
               (str-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-string-trim
+          (emit ctx (make-vm-string-trim
                                    :dst result-reg
                                    :char-bag bag-reg
                                    :string str-reg))
@@ -1767,7 +1747,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                  (= (length args) 2))
         (let ((bag-reg (compile-ast (first args) ctx))
               (str-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-string-left-trim
+          (emit ctx (make-vm-string-left-trim
                                    :dst result-reg
                                    :char-bag bag-reg
                                    :string str-reg))
@@ -1776,7 +1756,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                  (= (length args) 2))
         (let ((bag-reg (compile-ast (first args) ctx))
               (str-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-string-right-trim
+          (emit ctx (make-vm-string-right-trim
                                    :dst result-reg
                                    :char-bag bag-reg
                                    :string str-reg))
@@ -1787,9 +1767,9 @@ PARAMS are the current scope's bound variables — only those are candidates for
         (let ((pat-reg (compile-ast (first args) ctx))
               (str-reg (compile-ast (second args) ctx))
               (start-reg (let ((zero-reg (make-register ctx)))
-                           (emit ctx (make-instance 'vm-const :dst zero-reg :value 0))
+                           (emit ctx (make-vm-const :dst zero-reg :value 0))
                            zero-reg)))
-          (emit ctx (make-instance 'vm-search-string
+          (emit ctx (make-vm-search-string
                                    :dst result-reg
                                    :pattern pat-reg
                                    :string str-reg
@@ -1801,66 +1781,66 @@ PARAMS are the current scope's bound variables — only those are candidates for
                  (typep (second args) 'ast-quote))
         (let ((val-reg (compile-ast (first args) ctx))
               (type-sym (ast-quote-value (second args))))
-          (emit ctx (make-instance 'vm-typep
+          (emit ctx (make-vm-typep
                                    :dst result-reg
                                    :src val-reg
                                    :type-name type-sym))
           (return-from compile-ast result-reg)))
       (when (builtin-name-p func-sym "TYPE-OF")
         (let ((src-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-type-of :dst result-reg :src src-reg))
+          (emit ctx (make-vm-type-of :dst result-reg :src src-reg))
           (return-from compile-ast result-reg)))
       ;; eval — meta-circular runtime evaluation
       (when (builtin-name-p func-sym "EVAL")
         (let ((form-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-eval :dst result-reg :src form-reg))
+          (emit ctx (make-vm-eval :dst result-reg :src form-reg))
           (return-from compile-ast result-reg)))
       ;; I/O builtins (simple print/format, work with any vm-state)
       (when (builtin-name-p func-sym "PRINC")
         (let ((arg-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-princ :src arg-reg))
-          (emit ctx (make-instance 'vm-move :dst result-reg :src arg-reg))
+          (emit ctx (make-vm-princ :src arg-reg))
+          (emit ctx (make-vm-move :dst result-reg :src arg-reg))
           (return-from compile-ast result-reg)))
       (when (builtin-name-p func-sym "PRIN1")
         (let ((arg-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-prin1 :src arg-reg))
-          (emit ctx (make-instance 'vm-move :dst result-reg :src arg-reg))
+          (emit ctx (make-vm-prin1 :src arg-reg))
+          (emit ctx (make-vm-move :dst result-reg :src arg-reg))
           (return-from compile-ast result-reg)))
       (when (builtin-name-p func-sym "PRINT")
         (let ((arg-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-print-inst :src arg-reg))
-          (emit ctx (make-instance 'vm-move :dst result-reg :src arg-reg))
+          (emit ctx (make-vm-print-inst :src arg-reg))
+          (emit ctx (make-vm-move :dst result-reg :src arg-reg))
           (return-from compile-ast result-reg)))
       (when (builtin-name-p func-sym "TERPRI")
-        (emit ctx (make-instance 'vm-terpri-inst))
-        (emit ctx (make-instance 'vm-const :dst result-reg :value nil))
+        (emit ctx (make-vm-terpri-inst))
+        (emit ctx (make-vm-const :dst result-reg :value nil))
         (return-from compile-ast result-reg))
       (when (builtin-name-p func-sym "FRESH-LINE")
-        (emit ctx (make-instance 'vm-fresh-line-inst))
-        (emit ctx (make-instance 'vm-const :dst result-reg :value nil))
+        (emit ctx (make-vm-fresh-line-inst))
+        (emit ctx (make-vm-const :dst result-reg :value nil))
         (return-from compile-ast result-reg))
       (when (builtin-name-p func-sym "WRITE-TO-STRING")
         (let ((arg-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-write-to-string-inst
+          (emit ctx (make-vm-write-to-string-inst
                                    :dst result-reg
                                    :src arg-reg))
           (return-from compile-ast result-reg)))
       (when (builtin-name-p func-sym "PRIN1-TO-STRING")
         (let ((src-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-write-to-string-inst :dst result-reg :src src-reg))
+          (emit ctx (make-vm-write-to-string-inst :dst result-reg :src src-reg))
           (return-from compile-ast result-reg)))
       (when (builtin-name-p func-sym "PRINC-TO-STRING")
         (let ((src-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-write-to-string-inst :dst result-reg :src src-reg))
+          (emit ctx (make-vm-write-to-string-inst :dst result-reg :src src-reg))
           (return-from compile-ast result-reg)))
       ;; String output stream builtins
       (when (builtin-name-p func-sym "MAKE-STRING-OUTPUT-STREAM")
-        (emit ctx (make-instance 'vm-make-string-output-stream-inst
+        (emit ctx (make-vm-make-string-output-stream-inst
                                  :dst result-reg))
         (return-from compile-ast result-reg))
       (when (builtin-name-p func-sym "GET-OUTPUT-STREAM-STRING")
         (let ((stream-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-get-output-stream-string-inst
+          (emit ctx (make-vm-get-output-stream-string-inst
                                    :dst result-reg
                                    :src stream-reg))
           (return-from compile-ast result-reg)))
@@ -1869,12 +1849,12 @@ PARAMS are the current scope's bound variables — only those are candidates for
           (if (and (>= (length args) 2))
               ;; (write-string str stream)
               (let ((stream-reg (compile-ast (second args) ctx)))
-                (emit ctx (make-instance 'vm-stream-write-string-inst
-                                         :stream stream-reg
+                (emit ctx (make-vm-stream-write-string-inst
+                                         :stream-reg stream-reg
                                          :src str-reg))
-                (emit ctx (make-instance 'vm-move :dst result-reg :src str-reg)))
+                (emit ctx (make-vm-move :dst result-reg :src str-reg)))
               ;; (write-string str) — to stdout
-              (emit ctx (make-instance 'vm-princ :src str-reg)))
+              (emit ctx (make-vm-princ :src str-reg)))
           (return-from compile-ast result-reg)))
       ;; format: (format nil/t/stream fmt-string args...)
       (when (and (builtin-name-p func-sym "FORMAT")
@@ -1888,36 +1868,34 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                (eq (ast-var-name dest-arg) 't))))
           (cond
             (dest-is-nil
-             (emit ctx (make-instance 'vm-format-inst
+             (emit ctx (make-vm-format-inst
                                       :dst result-reg
                                       :fmt fmt-reg
                                       :arg-regs format-arg-regs))
              (return-from compile-ast result-reg))
             (dest-is-t
              (let ((str-reg (make-register ctx)))
-               (emit ctx (make-instance 'vm-format-inst
+               (emit ctx (make-vm-format-inst
                                         :dst str-reg
                                         :fmt fmt-reg
                                         :arg-regs format-arg-regs))
-               (emit ctx (make-instance 'vm-princ :src str-reg))
-               (emit ctx (make-instance 'vm-const :dst result-reg :value nil))
+               (emit ctx (make-vm-princ :src str-reg))
+               (emit ctx (make-vm-const :dst result-reg :value nil))
                (return-from compile-ast result-reg)))
             (t
              ;; Stream destination: format to string, write to stream
              (let ((str-reg (make-register ctx))
                    (stream-reg (compile-ast dest-arg ctx)))
-               (emit ctx (make-instance 'vm-format-inst
+               (emit ctx (make-vm-format-inst
                                         :dst str-reg
                                         :fmt fmt-reg
                                         :arg-regs format-arg-regs))
-               (emit ctx (make-instance 'vm-stream-write-string-inst
-                                        :stream stream-reg
+               (emit ctx (make-vm-stream-write-string-inst
+                                        :stream-reg stream-reg
                                         :src str-reg))
-               (emit ctx (make-instance 'vm-const :dst result-reg :value nil))
+               (emit ctx (make-vm-const :dst result-reg :value nil))
                (return-from compile-ast result-reg))))))
-      ;; ----------------------------------------------------------------
       ;; File I/O builtins
-      ;; ----------------------------------------------------------------
       ;; open: (open path :direction dir)
       (when (builtin-name-p func-sym "OPEN")
         (let* ((path-reg (compile-ast (first args) ctx))
@@ -1931,7 +1909,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                   (when (and (typep dir-arg 'ast-var)
                              (keywordp (ast-var-name dir-arg)))
                     (setf direction (ast-var-name dir-arg)))))))
-          (emit ctx (make-instance 'vm-open-file
+          (emit ctx (make-vm-open-file
                                    :dst result-reg
                                    :path path-reg
                                    :direction direction))
@@ -1939,20 +1917,20 @@ PARAMS are the current scope's bound variables — only those are candidates for
       ;; close: (close handle)
       (when (builtin-name-p func-sym "CLOSE")
         (let ((handle-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-close-file :handle handle-reg))
-          (emit ctx (make-instance 'vm-const :dst result-reg :value nil))
+          (emit ctx (make-vm-close-file :handle handle-reg))
+          (emit ctx (make-vm-const :dst result-reg :value nil))
           (return-from compile-ast result-reg)))
       ;; read-char: (read-char handle)
       (when (builtin-name-p func-sym "READ-CHAR")
         (let ((handle-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-read-char
+          (emit ctx (make-vm-read-char
                                    :dst result-reg
                                    :handle handle-reg))
           (return-from compile-ast result-reg)))
       ;; read-line: (read-line handle)
       (when (builtin-name-p func-sym "READ-LINE")
         (let ((handle-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-read-line
+          (emit ctx (make-vm-read-line
                                    :dst result-reg
                                    :handle handle-reg))
           (return-from compile-ast result-reg)))
@@ -1962,23 +1940,23 @@ PARAMS are the current scope's bound variables — only those are candidates for
           (if (>= (length args) 2)
               ;; (write-char char stream)
               (let ((handle-reg (compile-ast (second args) ctx)))
-                (emit ctx (make-instance 'vm-write-char
+                (emit ctx (make-vm-write-char
                                          :handle handle-reg
                                          :char char-reg)))
               ;; (write-char char) — to stdout (handle 1)
               (let ((handle-reg (make-register ctx)))
-                (emit ctx (make-instance 'vm-const :dst handle-reg :value 1))
-                (emit ctx (make-instance 'vm-write-char
+                (emit ctx (make-vm-const :dst handle-reg :value 1))
+                (emit ctx (make-vm-write-char
                                          :handle handle-reg
                                          :char char-reg))))
-          (emit ctx (make-instance 'vm-move :dst result-reg :src char-reg))
+          (emit ctx (make-vm-move :dst result-reg :src char-reg))
           (return-from compile-ast result-reg)))
       ;; peek-char: (peek-char nil handle)
       (when (builtin-name-p func-sym "PEEK-CHAR")
         (let ((handle-reg (if (>= (length args) 2)
                               (compile-ast (second args) ctx)
                               (compile-ast (first args) ctx))))
-          (emit ctx (make-instance 'vm-peek-char
+          (emit ctx (make-vm-peek-char
                                    :dst result-reg
                                    :handle handle-reg))
           (return-from compile-ast result-reg)))
@@ -1986,29 +1964,29 @@ PARAMS are the current scope's bound variables — only those are candidates for
       (when (builtin-name-p func-sym "UNREAD-CHAR")
         (let ((char-reg (compile-ast (first args) ctx))
               (handle-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-instance 'vm-unread-char
+          (emit ctx (make-vm-unread-char
                                    :handle handle-reg
                                    :char char-reg))
-          (emit ctx (make-instance 'vm-const :dst result-reg :value nil))
+          (emit ctx (make-vm-const :dst result-reg :value nil))
           (return-from compile-ast result-reg)))
       ;; file-position: (file-position handle)
       (when (builtin-name-p func-sym "FILE-POSITION")
         (let ((handle-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-file-position
+          (emit ctx (make-vm-file-position
                                    :dst result-reg
                                    :handle handle-reg))
           (return-from compile-ast result-reg)))
       ;; file-length: (file-length handle)
       (when (builtin-name-p func-sym "FILE-LENGTH")
         (let ((handle-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-file-length
+          (emit ctx (make-vm-file-length
                                    :dst result-reg
                                    :handle handle-reg))
           (return-from compile-ast result-reg)))
       ;; make-string-input-stream: (make-string-input-stream string)
       (when (builtin-name-p func-sym "MAKE-STRING-INPUT-STREAM")
         (let ((str-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-make-string-stream
+          (emit ctx (make-vm-make-string-stream
                                    :dst result-reg
                                    :direction :input
                                    :initial-string str-reg))
@@ -2016,14 +1994,14 @@ PARAMS are the current scope's bound variables — only those are candidates for
       ;; read-from-string: (read-from-string string)
       (when (builtin-name-p func-sym "READ-FROM-STRING")
         (let ((str-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-read-from-string-inst
+          (emit ctx (make-vm-read-from-string-inst
                                    :dst result-reg
                                    :src str-reg))
           (return-from compile-ast result-reg)))
       ;; read: (read stream)
       (when (builtin-name-p func-sym "READ")
         (let ((stream-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-instance 'vm-read-sexp-inst
+          (emit ctx (make-vm-read-sexp-inst
                                    :dst result-reg
                                    :src stream-reg))
           (return-from compile-ast result-reg)))
@@ -2034,7 +2012,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                  (string= (symbol-name (ast-quote-value (first args))) "STRING"))
         (let ((str1-reg (compile-ast (second args) ctx))
               (str2-reg (compile-ast (third args) ctx)))
-          (emit ctx (make-instance 'vm-concatenate
+          (emit ctx (make-vm-concatenate
                                    :dst result-reg
                                    :str1 str1-reg
                                    :str2 str2-reg))
@@ -2050,7 +2028,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                       (cdr entry)
                                       ;; Not locally bound: emit symbol for runtime resolution
                                       (let ((sym-reg (make-register ctx)))
-                                        (emit ctx (make-instance 'vm-const :dst sym-reg :value func-expr))
+                                        (emit ctx (make-vm-const :dst sym-reg :value func-expr))
                                         sym-reg))))
                                ((typep func-expr 'ast-var)
                                 (let* ((name (ast-var-name func-expr))
@@ -2059,14 +2037,14 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                       (cdr entry)
                                       ;; Not locally bound: emit symbol for runtime resolution
                                       (let ((sym-reg (make-register ctx)))
-                                        (emit ctx (make-instance 'vm-const :dst sym-reg :value name))
+                                        (emit ctx (make-vm-const :dst sym-reg :value name))
                                         sym-reg))))
                                (t (compile-ast func-expr ctx))))
            ;; Unbox labels functions: if this is a boxed labels function,
            ;; emit vm-car to extract the actual closure from the cons cell box
            (func-reg (if (and func-sym (assoc func-sym *labels-boxed-fns*))
                          (let ((unboxed (make-register ctx)))
-                           (emit ctx (make-instance 'vm-car :dst unboxed :src raw-func-reg))
+                           (emit ctx (make-vm-car :dst unboxed :src raw-func-reg))
                            unboxed)
                          raw-func-reg)))
       ;; Compile arguments
@@ -2075,12 +2053,12 @@ PARAMS are the current scope's bound variables — only those are candidates for
         (if (and func-sym
                  (gethash func-sym (ctx-global-generics ctx)))
             ;; Generic function dispatch
-            (emit ctx (make-instance 'vm-generic-call
+            (emit ctx (make-vm-generic-call
                                     :dst result-reg
                                     :gf-reg func-reg
                                     :args arg-regs))
             ;; Regular function call
-            (emit ctx (make-instance 'vm-call
+            (emit ctx (make-vm-call
                                     :dst result-reg
                                     :func func-reg
                                     :args arg-regs)))
@@ -2098,15 +2076,15 @@ PARAMS are the current scope's bound variables — only those are candidates for
              ;; It's a local function binding - use the register
              ;; If boxed (labels mutual recursion), unbox with car first
              (if (assoc name *labels-boxed-fns*)
-                 (emit ctx (make-instance 'vm-car :dst dst :src (cdr entry)))
-                 (emit ctx (make-instance 'vm-move :dst dst :src (cdr entry))))
+                 (emit ctx (make-vm-car :dst dst :src (cdr entry)))
+                 (emit ctx (make-vm-move :dst dst :src (cdr entry))))
              ;; It's a global/top-level function - create function reference
-             (emit ctx (make-instance 'vm-func-ref
+             (emit ctx (make-vm-func-ref
                                      :dst dst
                                      :label (format nil "~A" name))))))
       ;; (setf name) form
       ((and (consp name) (eq (car name) 'setf))
-       (emit ctx (make-instance 'vm-func-ref
+       (emit ctx (make-vm-func-ref
                                :dst dst
                                :label (format nil "SETF_~A" (second name)))))
       (t
@@ -2132,7 +2110,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                               (func-label (make-label ctx "flet_fn"))
                               (closure-reg (make-register ctx)))
                          ;; Find free variables in function body (excluding params)
-                         (let* ((body-ast (make-instance 'ast-progn :forms body-forms))
+                         (let* ((body-ast (make-ast-progn :forms body-forms))
                                 (free-vars (find-free-variables body-ast))
                                 (captured-vars (remove-if-not
                                                 (lambda (v) (assoc v old-env))
@@ -2142,7 +2120,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                                    collect (make-register ctx)))
                                  (skip-label (make-label ctx "flet_skip")))
                              ;; Create closure
-                             (emit ctx (make-instance 'vm-closure
+                             (emit ctx (make-vm-closure
                                                      :dst closure-reg
                                                      :label func-label
                                                      :params param-regs
@@ -2150,9 +2128,9 @@ PARAMS are the current scope's bound variables — only those are candidates for
                              ;; Remember binding for body compilation
                              (push (cons name closure-reg) func-bindings)
                              ;; Jump over this function's body only
-                             (emit ctx (make-instance 'vm-jump :label skip-label))
+                             (emit ctx (make-vm-jump :label skip-label))
                              ;; Emit function label
-                             (emit ctx (make-instance 'vm-label :name func-label))
+                             (emit ctx (make-vm-label :name func-label))
                              ;; Compile function body with parameter bindings
                              (let ((param-bindings nil))
                                (loop for param in params
@@ -2164,9 +2142,9 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                  (dolist (form body-forms)
                                    (setf last-reg (compile-ast form ctx)))
                                  ;; Return
-                                 (emit ctx (make-instance 'vm-ret :reg last-reg))))
+                                 (emit ctx (make-vm-ret :reg last-reg))))
                              ;; Skip label: jump lands here
-                             (emit ctx (make-instance 'vm-label :name skip-label))))))
+                             (emit ctx (make-vm-label :name skip-label))))))
                      ;; Set up environment with function bindings for body
                      (setf (ctx-env ctx) (append (nreverse func-bindings) old-env)))
                    ;; Compile body
@@ -2177,7 +2155,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
               ;; Restore environment
               (setf (ctx-env ctx) old-env))))
       ;; Emit end label
-      (emit ctx (make-instance 'vm-label :name end-label))
+      (emit ctx (make-vm-label :name end-label))
       body-result-reg)))
 
 (defmethod compile-ast ((node ast-labels) ctx)
@@ -2195,7 +2173,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                    ;; Phase 1: Create boxes (cons cells) for each function
                    (let ((func-infos nil)
                          (nil-reg (make-register ctx)))
-                     (emit ctx (make-instance 'vm-const :dst nil-reg :value nil))
+                     (emit ctx (make-vm-const :dst nil-reg :value nil))
                      (dolist (binding bindings)
                        (let* ((name (first binding))
                               (params (second binding))
@@ -2203,7 +2181,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                               (closure-reg (make-register ctx))
                               (box-reg (make-register ctx)))
                          ;; Create a mutable box: (cons nil nil)
-                         (emit ctx (make-instance 'vm-cons :dst box-reg
+                         (emit ctx (make-vm-cons :dst box-reg
                                                            :car-src nil-reg :cdr-src nil-reg))
                          (push (list name func-label closure-reg box-reg params) func-infos)))
                      ;; Environment maps function names to BOX registers
@@ -2223,7 +2201,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
                            (declare (ignore name))
                            (let* ((binding-data (find (first info) bindings :key #'first))
                                   (body-forms (cddr binding-data))
-                                  (body-ast (make-instance 'ast-progn :forms body-forms))
+                                  (body-ast (make-ast-progn :forms body-forms))
                                   (free-vars (set-difference (find-free-variables body-ast) params))
                                   ;; Captured vars: capture BOX registers for siblings
                                   (captured-vars (mapcar (lambda (v) (cons v (lookup-var ctx v)))
@@ -2233,18 +2211,18 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                                     collect (make-register ctx)))
                                   (skip-label (make-label ctx "labels_skip")))
                              ;; Create closure
-                             (emit ctx (make-instance 'vm-closure
+                             (emit ctx (make-vm-closure
                                                       :dst closure-reg
                                                       :label func-label
                                                       :params param-regs
                                                       :captured captured-vars))
                              ;; Fill box with closure via rplaca
-                             (emit ctx (make-instance 'vm-rplaca
+                             (emit ctx (make-vm-rplaca
                                                       :cons box-reg :val closure-reg))
                              ;; Jump over function body
-                             (emit ctx (make-instance 'vm-jump :label skip-label))
+                             (emit ctx (make-vm-jump :label skip-label))
                              ;; Function label
-                             (emit ctx (make-instance 'vm-label :name func-label))
+                             (emit ctx (make-vm-label :name func-label))
                              ;; Compile function body
                              (let ((param-bindings nil))
                                (loop for param in params
@@ -2255,9 +2233,9 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                (let ((last-reg nil))
                                  (dolist (form body-forms)
                                    (setf last-reg (compile-ast form ctx)))
-                                 (emit ctx (make-instance 'vm-ret :reg last-reg))))
+                                 (emit ctx (make-vm-ret :reg last-reg))))
                              ;; Skip label
-                             (emit ctx (make-instance 'vm-label :name skip-label)))))
+                             (emit ctx (make-vm-label :name skip-label)))))
                        ;; Phase 3: Compile body with box-env
                        (let ((func-env (mapcar (lambda (binding)
                                                  (cons (first binding)
@@ -2271,7 +2249,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
               ;; Restore environment and labels-boxes
               (setf (ctx-env ctx) old-env)
               (setf *labels-boxed-fns* old-labels-boxes))))
-      (emit ctx (make-instance 'vm-label :name end-label))
+      (emit ctx (make-vm-label :name end-label))
       body-result-reg)))
 
 (defun optimize-instructions (instructions)
@@ -2298,9 +2276,9 @@ PARAMS are the current scope's bound variables — only those are candidates for
              (ra (allocate-registers instructions *x86-64-calling-convention*)))
         (setf (target-regalloc target-object) ra)
         ;; Use the possibly-modified instruction list (with spill code)
-        (setf program (make-instance 'vm-program
-                                     :instructions (regalloc-instructions ra)
-                                     :result-register (vm-program-result-register program)))))
+        (setf program (make-vm-program
+                       :instructions (regalloc-instructions ra)
+                       :result-register (vm-program-result-register program)))))
     (with-output-to-string (s)
       (format s "; CL-CC bootstrap assembly (~A)~%" target)
       (format s "clcc_entry:~%")
@@ -3436,23 +3414,21 @@ Supports :conc-name, :constructor with boa-lambda-list, slot defaults."
          (result-reg (compile-ast ast ctx))
          (instructions (nreverse (ctx-instructions ctx)))
          (full-instructions (append instructions
-                                    (list (make-instance 'vm-halt
+                                    (list (make-vm-halt
                                                          :reg result-reg))))
          (optimized-instructions (optimize-instructions full-instructions))
-         (optimized-program (make-instance 'vm-program
-                                           :instructions optimized-instructions
-                                           :result-register result-reg)))
-    (list :program optimized-program
-          :assembly (emit-assembly optimized-program :target target)
-          :type (when type-check inferred-type)
-          :cps (if (typep expr 'ast-node)
-                   nil
-                   (handler-case (cps-transform expr)
-                     (error (e) (declare (ignore e)) nil))))))
+         (optimized-program (make-vm-program
+                             :instructions optimized-instructions
+                             :result-register result-reg)))
+    (make-compilation-result :program optimized-program
+                            :assembly (emit-assembly optimized-program :target target)
+                            :type (when type-check inferred-type)
+                            :cps (if (typep expr 'ast-node)
+                                     nil
+                                     (handler-case (cps-transform expr)
+                                       (error (e) (declare (ignore e)) nil))))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Standard Library (Higher-Order Functions)
-;;; ----------------------------------------------------------------------------
 
 (defparameter *standard-library-source*
   "(defun mapcar (fn lst)
@@ -3622,7 +3598,7 @@ Supports :conc-name, :constructor with boa-lambda-list, slot defaults."
   (let* ((result (if stdlib
                      (compile-string-with-stdlib source :target :vm)
                      (compile-string source :target :vm)))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (run-compiled program)))
 
 (defun compile-string-with-stdlib (source &key (target :x86_64))
@@ -3636,19 +3612,17 @@ Supports :conc-name, :constructor with boa-lambda-list, slot defaults."
 This is the self-hosting eval — used for compile-time macro expansion
 instead of the host CL eval."
   (let* ((result (compile-expression form :target :vm))
-         (program (getf result :program)))
+         (program (compilation-result-program result)))
     (run-compiled program)))
 
 (defun run-string-typed (source &key (mode :warn))
   "Compile and run SOURCE with type checking enabled.
    MODE is :WARN (default, log warnings) or :STRICT (signal errors)."
   (let* ((result (compile-string source :target :vm :type-check mode))
-         (program (getf result :program)))
-    (values (run-compiled program) (getf result :type))))
+         (program (compilation-result-program result)))
+    (values (run-compiled program) (compilation-result-type result))))
 
-;;; ----------------------------------------------------------------------------
 ;;; Native Executable Generation (Mach-O)
-;;; ----------------------------------------------------------------------------
 
 (defun compile-to-native (source &key (arch :x86-64) (output-file "a.out"))
   "Compile SOURCE to a native Mach-O executable.
@@ -3664,7 +3638,7 @@ Returns the output file path on success."
          (result (if (stringp source)
                      (compile-string source :target target)
                      (compile-expression source :target target)))
-         (program (getf result :program))
+         (program (compilation-result-program result))
          ;; Generate machine code bytes
          (code-bytes (compile-to-x86-64-bytes program))
          ;; Build Mach-O binary
@@ -3696,7 +3670,7 @@ OUTPUT-FILE defaults to INPUT-FILE with no extension."
          (result (compile-toplevel-forms source :target (ecase arch
                                                           (:x86-64 :x86_64)
                                                           (:arm64 :aarch64))))
-         (program (getf result :program))
+         (program (compilation-result-program result))
          (code-bytes (compile-to-x86-64-bytes program))
          (builder (cl-cc/binary:make-mach-o-builder arch)))
     (cl-cc/binary:add-text-segment builder code-bytes)
