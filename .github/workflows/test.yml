@@ -1,0 +1,24 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SBCL
+        run: brew install sbcl
+
+      - name: Install Quicklisp
+        run: |
+          curl -o quicklisp.lisp https://beta.quicklisp.org/quicklisp.lisp
+          sbcl --non-interactive --load quicklisp.lisp --eval "(quicklisp-quickstart:install :path \"./quicklisp\")"
+
+      - name: Run tests
+        run: sbcl --non-interactive --load ./quicklisp/setup.lisp --load run-ci-tests.lisp
