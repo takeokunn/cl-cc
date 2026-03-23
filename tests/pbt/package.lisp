@@ -4,12 +4,26 @@
 ;;; inspired by QuickCheck and similar tools.
 
 (defpackage :cl-cc/pbt
-  (:use :cl :fiveam)
-  (:shadow #:gen-integer #:gen-character #:gen-float #:gen-list #:gen-string
-           #:gen-buffer #:gen-one-element #:gen-tree
-           #:for-all #:for-all*)
+  (:use :cl)
   (:import-from :cl-cc/test
-                #:cl-cc-suite)
+                #:cl-cc-suite
+                #:defsuite
+                #:in-suite
+                #:deftest
+                #:run-suite
+                #:%fail-test
+                #:test-failure
+                #:*test-registry*
+                #:*current-suite*
+                #:*suite-registry*
+                #:assert-true
+                #:assert-false
+                #:assert-=
+                #:assert-eq
+                #:assert-equal
+                #:assert-null
+                #:assert-type
+                #:assert-signals)
   (:import-from :cl-cc
                 ;; AST classes for generators
                 :ast-node

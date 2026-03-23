@@ -53,13 +53,18 @@
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc :fiveam)
+  :depends-on (:cl-cc)
   :serial t
   :components
   ((:module "tests"
      :serial t
      :components
      ((:file "package")
+      (:file "framework")
+      (:file "framework-advanced")
+      (:file "framework-compiler")
+      (:file "framework-meta")
+      (:file "framework-fuzz")
       (:file "compiler-tests")
       (:file "cps-tests")
       (:file "prolog-tests")
@@ -82,6 +87,7 @@
       (:file "vm-pbt-tests")
       (:file "cps-pbt-tests")
       (:file "ast-pbt-tests")
+      (:file "macro-pbt-tests")
       (:file "prolog-pbt-tests")
       (:file "vm-heap-pbt-tests"))))
   :perform (asdf:test-op (op c)

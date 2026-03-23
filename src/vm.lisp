@@ -273,6 +273,36 @@ SHAPE is one of:
   (dst nil :reader vm-dst)
   (:sexp-tag :values-to-list))
 
+(define-vm-instruction vm-spread-values (vm-instruction)
+  "Spread a list from SRC register as multiple values. DST gets primary value."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :spread-values))
+
+(define-vm-instruction vm-clear-values (vm-instruction)
+  "Clear vm-values-list to nil (reset multiple-values buffer before a form)."
+  (:sexp-tag :clear-values))
+
+(define-vm-instruction vm-ensure-values (vm-instruction)
+  "If vm-values-list is nil, set it to (list (reg-get SRC)).
+   Used after compiling a form for multiple-value-call to normalise
+   plain expressions that do not emit vm-values."
+  (src nil :reader vm-src)
+  (:sexp-tag :ensure-values))
+
+(define-vm-instruction vm-call-next-method (vm-instruction)
+  "Call the next applicable method from the current method dispatch context.
+   ARGS-REG holds the args list (nil means use original args).
+   DST receives the return value."
+  (dst nil :reader vm-dst)
+  (args-reg nil :reader vm-cnm-args-reg)
+  (:sexp-tag :call-next-method))
+
+(define-vm-instruction vm-next-method-p (vm-instruction)
+  "Return T if there is a next applicable method in the current dispatch context."
+  (dst nil :reader vm-dst)
+  (:sexp-tag :next-method-p))
+
 (define-vm-instruction vm-apply (vm-instruction)
   "Apply function with spread arguments. Last arg is a list to spread."
   (dst nil :reader vm-dst)
@@ -325,8 +355,45 @@ Each entry is (handler-label result-reg error-type saved-call-stack saved-regist
 Used for resolving (funcall 'name ...) and (apply 'name ...).")
    (global-vars :initform (make-hash-table :test #'eq) :reader vm-global-vars
                 :documentation "Global variable store for defvar/defparameter.
-Values here persist across function calls (not subject to register save/restore)."))
+Values here persist across function calls (not subject to register save/restore).")
+   (symbol-plists :initform (make-hash-table :test #'eq) :reader vm-symbol-plists
+                  :documentation "Property lists for symbols: sym -> plist.
+Used for get/setf-get/remprop/symbol-plist operations.")
+   (method-call-stack :initform nil :accessor vm-method-call-stack
+                      :documentation "Parallel stack to call-stack tracking CLOS method context.
+Each frame is either NIL (regular call) or (gf-ht methods-list all-args) for generic dispatch.
+Used by call-next-method and next-method-p."))
   (:documentation "VM execution state with registers, call stack, and heap."))
+
+;;; VM State Initialization — pre-populate standard global variables
+
+(defmethod initialize-instance :after ((state vm-state) &key &allow-other-keys)
+  "Initialize standard ANSI CL global variables in the VM."
+  (let ((gv (vm-global-vars state)))
+    ;; FR-1206: *features* and *modules*
+    (setf (gethash '*features* gv) '(:common-lisp :cl-cc))
+    (setf (gethash '*modules* gv) nil)
+    ;; FR-1204: time constants
+    (setf (gethash 'internal-time-units-per-second gv) internal-time-units-per-second)
+    ;; FR-1205: random state
+    (setf (gethash '*random-state* gv) *random-state*)
+    ;; Standard I/O vars
+    (setf (gethash '*standard-output* gv) *standard-output*)
+    (setf (gethash '*standard-input*  gv) *standard-input*)
+    (setf (gethash '*error-output*    gv) *error-output*)
+    (setf (gethash '*trace-output*    gv) *trace-output*)
+    (setf (gethash '*debug-io*        gv) *debug-io*)
+    (setf (gethash '*query-io*        gv) *query-io*)
+    ;; Standard print vars
+    (setf (gethash '*print-base*   gv) 10)
+    (setf (gethash '*print-radix*  gv) nil)
+    (setf (gethash '*print-circle* gv) nil)
+    (setf (gethash '*print-pretty* gv) nil)
+    (setf (gethash '*print-level*  gv) nil)
+    (setf (gethash '*print-length* gv) nil)
+    (setf (gethash '*print-escape* gv) t)
+    (setf (gethash '*print-readably* gv) nil)
+    (setf (gethash '*print-gensym* gv) t)))
 
 ;;; VM Heap Operations
 
@@ -474,13 +541,38 @@ If VALUE is a symbol, look it up in the function registry."
         (setf (cdr cv-pair) closure)))
     (values (1+ pc) nil nil)))
 
+(defun vm-get-all-applicable-methods (gf-ht state all-args)
+  "Return list of all applicable method closures for GF-HT and ALL-ARGS, most-specific first."
+  (let* ((methods-ht (gethash :__methods__ gf-ht))
+         (first-arg (car all-args))
+         (class-name (vm-classify-arg first-arg state))
+         (class-ht (gethash class-name (vm-class-registry state)))
+         (cpl (if class-ht
+                  (let ((c (gethash :__cpl__ class-ht)))
+                    (if (member t c) c (append c (list t))))
+                  (list class-name t)))
+         (result nil))
+    ;; Collect methods in CPL order (most-specific first)
+    (dolist (ancestor cpl)
+      (let ((m (or (gethash (list ancestor) methods-ht)
+                   (gethash ancestor methods-ht))))
+        (when m (push m result))))
+    ;; Fallback: t-specializer (if not already collected)
+    (let ((t-method (gethash t methods-ht)))
+      (when (and t-method (not (member t-method result)))
+        (push t-method result)))
+    (nreverse result)))
+
 (defun vm-dispatch-generic-call (gf-ht state pc arg-regs dst-reg labels)
   "Dispatch a generic function call. GF-HT is the generic function dispatch table.
 Supports multiple dispatch by passing all argument values for composite key lookup.
 Returns (values next-pc halt-p result) like execute-instruction."
   (let* ((all-arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs))
          (first-arg (car all-arg-values))
-         (method-closure (vm-resolve-gf-method gf-ht state first-arg all-arg-values))
+         ;; Compute all applicable methods (for call-next-method support)
+         (all-methods (vm-get-all-applicable-methods gf-ht state all-arg-values))
+         (method-closure (or (car all-methods)
+                             (vm-resolve-gf-method gf-ht state first-arg all-arg-values)))
          (entry-label (vm-closure-entry-label method-closure))
          (params (vm-closure-params method-closure))
          (captured (vm-closure-captured-values method-closure))
@@ -492,6 +584,8 @@ Returns (values next-pc halt-p result) like execute-instruction."
                        copy))
          (arg-values (mapcar (lambda (arg-reg) (vm-reg-get state arg-reg)) arg-regs)))
     (push (list return-pc dst-reg old-closure-env saved-regs) (vm-call-stack state))
+    ;; Push method context for call-next-method support
+    (push (list gf-ht all-methods all-arg-values) (vm-method-call-stack state))
     (loop for var-binding in captured
           do (vm-reg-set state (car var-binding) (cdr var-binding)))
     (loop for param in params
@@ -526,6 +620,8 @@ Returns (values next-pc halt-p result) like execute-instruction."
            (arg-values (mapcar (lambda (arg-reg) (vm-reg-get state arg-reg)) arg-regs)))
       ;; Push call frame with saved registers
       (push (list return-pc dst-reg old-closure-env saved-regs) (vm-call-stack state))
+      ;; Push nil method-call-stack frame (regular function, not generic dispatch)
+      (push nil (vm-method-call-stack state))
       ;; Restore captured variable values into registers
       (loop for var-binding in captured
            do (vm-reg-set state (car var-binding) (cdr var-binding)))
@@ -572,6 +668,9 @@ Returns (values next-pc halt-p result) like execute-instruction."
     (if (vm-call-stack state)
         (destructuring-bind (return-pc dst-reg old-closure-env saved-regs)
             (pop (vm-call-stack state))
+          ;; Pop method-call-stack in sync with call-stack
+          (when (vm-method-call-stack state)
+            (pop (vm-method-call-stack state)))
           ;; Restore caller's register state
           (when saved-regs
             (clrhash (vm-state-registers state))
@@ -642,6 +741,74 @@ Returns (values next-pc halt-p result) like execute-instruction."
   (declare (ignore labels))
   (vm-reg-set state (vm-dst inst) (copy-list (vm-values-list state)))
   (values (1+ pc) nil nil))
+
+(defmethod execute-instruction ((inst vm-spread-values) state pc labels)
+  (declare (ignore labels))
+  (let ((lst (vm-reg-get state (vm-src inst))))
+    (setf (vm-values-list state) (if (listp lst) lst (list lst)))
+    (vm-reg-set state (vm-dst inst) (if (listp lst) (first lst) lst))
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-clear-values) state pc labels)
+  (declare (ignore labels inst))
+  (setf (vm-values-list state) nil)
+  (values (1+ pc) nil nil))
+
+(defmethod execute-instruction ((inst vm-ensure-values) state pc labels)
+  (declare (ignore labels))
+  (unless (vm-values-list state)
+    (setf (vm-values-list state) (list (vm-reg-get state (vm-src inst)))))
+  (values (1+ pc) nil nil))
+
+(defmethod execute-instruction ((inst vm-next-method-p) state pc labels)
+  (declare (ignore labels))
+  ;; Look for the innermost method context in method-call-stack
+  (let ((ctx (car (vm-method-call-stack state))))
+    (vm-reg-set state (vm-dst inst)
+                (if (and ctx (cddr ctx) (cadr ctx) (cdadr ctx))
+                    t
+                    nil)))
+  (values (1+ pc) nil nil))
+
+(defmethod execute-instruction ((inst vm-call-next-method) state pc labels)
+  ;; Find current method context (top of method-call-stack)
+  (let ((ctx (car (vm-method-call-stack state))))
+    (unless ctx
+      (error "call-next-method called outside of a generic function method"))
+    (let* ((gf-ht (first ctx))
+           (methods-list (second ctx))    ; [current-method next1 next2 ...]
+           (orig-args (third ctx))
+           (next-method (cadr methods-list)))
+      (unless next-method
+        (error "No next method for ~S" (gethash :__name__ gf-ht)))
+      ;; Determine arguments: use supplied args or original args
+      (let* ((args-reg (vm-cnm-args-reg inst))
+             (call-args (if args-reg
+                            (vm-reg-get state args-reg)
+                            orig-args))
+             (dst-reg (vm-dst inst))
+             (entry-label (vm-closure-entry-label next-method))
+             (params (vm-closure-params next-method))
+             (captured (vm-closure-captured-values next-method))
+             (return-pc (1+ pc))
+             (old-closure-env (vm-closure-env state))
+             (saved-regs (let ((copy (make-hash-table :test (hash-table-test (vm-state-registers state)))))
+                           (maphash (lambda (k v) (setf (gethash k copy) v))
+                                    (vm-state-registers state))
+                           copy)))
+        ;; Push call frame for next method
+        (push (list return-pc dst-reg old-closure-env saved-regs) (vm-call-stack state))
+        ;; Push updated method context (remaining methods starting from next-method)
+        (push (list gf-ht (cdr methods-list) call-args) (vm-method-call-stack state))
+        ;; Set up next method's parameters
+        (loop for var-binding in captured
+              do (vm-reg-set state (car var-binding) (cdr var-binding)))
+        (loop for param in params
+              for arg-val in call-args
+              do (vm-reg-set state param arg-val))
+        (when captured
+          (setf (vm-closure-env state) captured))
+        (values (gethash entry-label labels) nil nil)))))
 
 (defun vm-list-to-lisp-list (state value)
   "Convert a VM list (possibly using vm-cons-cell heap objects) to a Lisp list."
@@ -792,6 +959,8 @@ Uses class precedence lists for inheritance-based fallback."
                          copy)))
       ;; Push call frame
       (push (list return-pc dst-reg old-closure-env saved-regs) (vm-call-stack state))
+      ;; Push nil method-call-stack frame (apply is not a generic dispatch)
+      (push nil (vm-method-call-stack state))
       ;; Restore captured
       (loop for var-binding in captured
             do (vm-reg-set state (car var-binding) (cdr var-binding)))
@@ -1017,6 +1186,59 @@ Uses class precedence lists for inheritance-based fallback."
     (setf (gethash slot-name obj-ht) value)
     (values (1+ pc) nil nil)))
 
+;;; FR-1002: CLOS slot predicates and slot manipulation
+
+(define-vm-instruction vm-slot-boundp (vm-instruction)
+  "Test if slot SLOT-NAME is bound in object OBJ."
+  (dst nil :reader vm-dst)
+  (obj-reg nil :reader vm-obj-reg)
+  (slot-name-sym nil :reader vm-slot-name-sym)
+  (:sexp-tag :slot-boundp)
+  (:sexp-slots dst obj-reg slot-name-sym))
+
+(defmethod execute-instruction ((inst vm-slot-boundp) state pc labels)
+  (declare (ignore labels))
+  (let* ((obj-ht (vm-reg-get state (vm-obj-reg inst)))
+         (slot-name (vm-slot-name-sym inst)))
+    (multiple-value-bind (value found-p) (gethash slot-name obj-ht)
+      (declare (ignore value))
+      (vm-reg-set state (vm-dst inst) (if found-p t nil))
+      (values (1+ pc) nil nil))))
+
+(define-vm-instruction vm-slot-makunbound (vm-instruction)
+  "Remove slot SLOT-NAME from object OBJ. Returns OBJ."
+  (dst nil :reader vm-dst)
+  (obj-reg nil :reader vm-obj-reg)
+  (slot-name-sym nil :reader vm-slot-name-sym)
+  (:sexp-tag :slot-makunbound)
+  (:sexp-slots dst obj-reg slot-name-sym))
+
+(defmethod execute-instruction ((inst vm-slot-makunbound) state pc labels)
+  (declare (ignore labels))
+  (let* ((obj-ht (vm-reg-get state (vm-obj-reg inst)))
+         (slot-name (vm-slot-name-sym inst)))
+    (remhash slot-name obj-ht)
+    (vm-reg-set state (vm-dst inst) (vm-reg-get state (vm-obj-reg inst)))
+    (values (1+ pc) nil nil)))
+
+(define-vm-instruction vm-slot-exists-p (vm-instruction)
+  "Test if class of OBJ has a slot named SLOT-NAME."
+  (dst nil :reader vm-dst)
+  (obj-reg nil :reader vm-obj-reg)
+  (slot-name-sym nil :reader vm-slot-name-sym)
+  (:sexp-tag :slot-exists-p)
+  (:sexp-slots dst obj-reg slot-name-sym))
+
+(defmethod execute-instruction ((inst vm-slot-exists-p) state pc labels)
+  (declare (ignore labels))
+  (let* ((obj-ht (vm-reg-get state (vm-obj-reg inst)))
+         (slot-name (vm-slot-name-sym inst))
+         (class-ht (when (hash-table-p obj-ht) (gethash :__class__ obj-ht)))
+         (slots (when class-ht (gethash :__slots__ class-ht))))
+    (vm-reg-set state (vm-dst inst)
+                (if (and slots (member slot-name slots)) t nil))
+    (values (1+ pc) nil nil)))
+
 (defmethod execute-instruction ((inst vm-register-method) state pc labels)
   (declare (ignore labels))
   (let* ((gf-ht (vm-reg-get state (vm-gf-reg inst)))
@@ -1065,7 +1287,8 @@ Uses class precedence lists for inheritance-based fallback."
                 (vm-handler-result-reg inst)
                 (vm-error-type inst)
                 (copy-list (vm-call-stack state))
-                saved-regs)
+                saved-regs
+                (copy-list (vm-method-call-stack state)))
           (vm-handler-stack state)))
   (values (1+ pc) nil nil))
 
@@ -1113,10 +1336,12 @@ CL condition objects use typep."
             ;; Remove handlers up to and including the matching one
             (dotimes (i (1+ handlers-to-skip))
               (pop (vm-handler-stack state)))
-            (destructuring-bind (handler-label result-reg error-type saved-call-stack saved-regs)
+            (destructuring-bind (handler-label result-reg error-type saved-call-stack saved-regs
+                                 &optional saved-method-call-stack)
                 matching-handler
               (declare (ignore error-type))
               (setf (vm-call-stack state) saved-call-stack)
+              (setf (vm-method-call-stack state) (or saved-method-call-stack nil))
               (clrhash (vm-state-registers state))
               (maphash (lambda (k v) (setf (gethash k (vm-state-registers state)) v))
                        saved-regs)

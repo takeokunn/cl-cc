@@ -2,20 +2,20 @@
 
 (in-suite cl-cc-suite)
 
-(test prolog-unification-simple
+(deftest prolog-unification-simple
   (let ((env (cl-cc:unify '?x 42 nil)))
-    (is (not (null env)))
-    (is (= (cl-cc:substitute-variables '?x env) 42))))
+    (assert-false (null env))
+    (assert-= (cl-cc:substitute-variables '?x env) 42)))
 
-(test prolog-unification-fails
-  (is (null (cl-cc:unify 1 2 nil))))
+(deftest prolog-unification-fails
+  (assert-null (cl-cc:unify 1 2 nil)))
 
-(test prolog-logic-var-p
-  (is (cl-cc:logic-var-p '?x))
-  (is (not (cl-cc:logic-var-p 'x)))
-  (is (not (cl-cc:logic-var-p 42))))
+(deftest prolog-logic-var-p
+  (assert-true (cl-cc:logic-var-p '?x))
+  (assert-false (cl-cc:logic-var-p 'x))
+  (assert-false (cl-cc:logic-var-p 42)))
 
-(test prolog-substitute-nested
+(deftest prolog-substitute-nested
   (let ((env (cl-cc:unify '?x '(a b c) nil)))
-    (is (not (null env)))
-    (is (equal (cl-cc:substitute-variables '(?x ?y) env) '((a b c) ?y)))))
+    (assert-false (null env))
+    (assert-equal (cl-cc:substitute-variables '(?x ?y) env) '((a b c) ?y))))

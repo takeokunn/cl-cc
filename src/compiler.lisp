@@ -580,6 +580,25 @@ is a compile-time constant (int, string, quote, t, nil)."
   "Sentinel value used for non-constant &optional/&key defaults.
 When the VM sees this as the default, the actual default is computed inline.")
 
+(defun allocate-defaulting-params (ctx params make-entry)
+  "Allocate registers for PARAMS with optional defaults.
+MAKE-ENTRY is called as (name reg default-val) and returns the closure-data entry.
+Returns (values closure-data bindings non-constant-defaults)."
+  (let ((closure-data nil) (bindings nil) (non-constant-defaults nil))
+    (dolist (param params)
+      (let* ((name (first param))
+             (default-ast (second param))
+             (reg (make-register ctx)))
+        (multiple-value-bind (default-val is-constant)
+            (if default-ast (extract-constant-value default-ast) (values nil t))
+          (if (and default-ast (not is-constant))
+              (progn
+                (push (funcall make-entry name reg *non-constant-default-sentinel*) closure-data)
+                (push (cons reg default-ast) non-constant-defaults))
+              (push (funcall make-entry name reg default-val) closure-data)))
+        (push (cons name reg) bindings)))
+    (values (nreverse closure-data) (nreverse bindings) (nreverse non-constant-defaults))))
+
 (defun allocate-extended-params (ctx optional-params rest-param key-params)
   "Allocate registers and build metadata for extended lambda list parameters.
 OPTIONAL-PARAMS and KEY-PARAMS are lists of (name ast-default) from the AST.
@@ -590,40 +609,21 @@ NON-CONSTANT-DEFAULTS is a list of (register . ast-node) for defaults that need 
         (key-closure-data nil) (key-bindings nil)
         (non-constant-defaults nil))
     (when optional-params
-      (dolist (opt optional-params)
-        (let* ((name (first opt))
-               (default-ast (second opt))
-               (reg (make-register ctx)))
-          (multiple-value-bind (default-val is-constant)
-              (if default-ast (extract-constant-value default-ast) (values nil t))
-            (if (and default-ast (not is-constant))
-                (progn
-                  (push (list reg *non-constant-default-sentinel*) opt-closure-data)
-                  (push (cons reg default-ast) non-constant-defaults))
-                (push (list reg default-val) opt-closure-data)))
-          (push (cons name reg) opt-bindings)))
-      (setf opt-closure-data (nreverse opt-closure-data))
-      (setf opt-bindings (nreverse opt-bindings)))
+      (multiple-value-bind (cd binds ncds)
+          (allocate-defaulting-params ctx optional-params
+                                      (lambda (name reg val) (declare (ignore name)) (list reg val)))
+        (setf opt-closure-data cd  opt-bindings binds)
+        (setf non-constant-defaults (nconc non-constant-defaults ncds))))
     (when rest-param
       (setf rest-reg (make-register ctx))
       (setf rest-binding (cons rest-param rest-reg)))
     (when key-params
-      (dolist (kp key-params)
-        (let* ((name (first kp))
-               (default-ast (second kp))
-               (reg (make-register ctx))
-               (keyword (intern (symbol-name name) "KEYWORD")))
-          (multiple-value-bind (default-val is-constant)
-              (if default-ast (extract-constant-value default-ast) (values nil t))
-            (if (and default-ast (not is-constant))
-                (progn
-                  (push (list keyword reg *non-constant-default-sentinel*) key-closure-data)
-                  (push (cons reg default-ast) non-constant-defaults))
-                (push (list keyword reg default-val) key-closure-data)))
-          (push (cons name reg) key-bindings)))
-      (setf key-closure-data (nreverse key-closure-data))
-      (setf key-bindings (nreverse key-bindings)))
-    (setf non-constant-defaults (nreverse non-constant-defaults))
+      (multiple-value-bind (cd binds ncds)
+          (allocate-defaulting-params ctx key-params
+                                      (lambda (name reg val)
+                                        (list (intern (symbol-name name) "KEYWORD") reg val)))
+        (setf key-closure-data cd  key-bindings binds)
+        (setf non-constant-defaults (nconc non-constant-defaults ncds))))
     (values opt-closure-data rest-reg key-closure-data
             opt-bindings rest-binding key-bindings non-constant-defaults)))
 
@@ -656,6 +656,25 @@ For each (register . ast-node) pair, emits: if register eq sentinel, register = 
     (when rest-binding (push rest-binding bindings))
     (dolist (b key-bindings) (push b bindings))
     (nreverse bindings)))
+
+(defun compile-function-body (ctx params param-regs opt-bindings rest-binding
+                              key-bindings non-constant-defaults body)
+  "Bind parameters, emit non-constant defaults, compile BODY, emit vm-ret.
+Saves and restores the compiler environment around the body via unwind-protect."
+  (let ((old-env (ctx-env ctx)))
+    (unwind-protect
+         (progn
+           (setf (ctx-env ctx)
+                 (append (build-all-param-bindings params param-regs
+                                                   opt-bindings rest-binding key-bindings)
+                         (ctx-env ctx)))
+           (when non-constant-defaults
+             (emit-non-constant-defaults ctx non-constant-defaults))
+           (let ((last-reg nil))
+             (dolist (form body)
+               (setf last-reg (compile-ast form ctx)))
+             (emit ctx (make-vm-ret :reg last-reg))))
+      (setf (ctx-env ctx) old-env))))
 
 (defmethod compile-ast ((node ast-defun) ctx)
   "Compile a top-level function definition.
@@ -699,27 +718,9 @@ Generates a closure at the function's label and registers it globally."
       (emit ctx (make-vm-register-function :name name :src closure-reg))
       ;; Jump over the function body
       (emit ctx (make-vm-jump :label end-label))
-      ;; Emit the function entry label
       (emit ctx (make-vm-label :name func-label))
-      ;; Save old environment and extend with parameters
-      (let ((old-env (ctx-env ctx)))
-        (unwind-protect
-             (progn
-               (setf (ctx-env ctx)
-                     (append (build-all-param-bindings params param-regs
-                                                      opt-bindings rest-binding key-bindings)
-                             (ctx-env ctx)))
-               ;; Emit inline default computation for non-constant defaults
-               (when non-constant-defaults
-                 (emit-non-constant-defaults ctx non-constant-defaults))
-               ;; Compile body forms
-               (let ((last-reg nil))
-                 (dolist (form body)
-                   (setf last-reg (compile-ast form ctx)))
-                 (emit ctx (make-vm-ret :reg last-reg))))
-          ;; Restore environment
-          (setf (ctx-env ctx) old-env)))
-      ;; Emit end label
+      (compile-function-body ctx params param-regs opt-bindings rest-binding
+                             key-bindings non-constant-defaults body)
       (emit ctx (make-vm-label :name end-label))
       closure-reg)))
 
@@ -958,13 +959,39 @@ Returns a compilation-result struct with program, assembly, and globals."
     result-reg))
 
 (defmethod compile-ast ((node ast-multiple-value-call) ctx)
-  ;; Multiple-value-call passes all values from arguments to function.
-  ;; For simplicity, we just call with the first value of each form.
-  (let ((func-reg (compile-ast (ast-mv-call-func node) ctx))
-        (arg-regs (mapcar (lambda (arg) (compile-ast arg ctx))
-                          (ast-mv-call-args node)))
-        (result-reg (make-register ctx)))
-    (declare (ignore func-reg arg-regs))
+  ;; Evaluate FUNC, then for each ARG form collect ALL its values via
+  ;; the clear-values / ensure-values / values-to-list idiom, append the
+  ;; per-form lists into one combined list, and apply FUNC to it.
+  (let* ((func-reg (compile-ast (ast-mv-call-func node) ctx))
+         (args (ast-mv-call-args node))
+         (result-reg (make-register ctx)))
+    (if (null args)
+        ;; No argument forms → call func with zero arguments via empty list.
+        (let ((empty-reg (make-register ctx)))
+          (emit ctx (make-vm-const :dst empty-reg :value nil))
+          (emit ctx (make-vm-apply :dst result-reg :func func-reg :args (list empty-reg))))
+        ;; For each arg form: (1) clear values-list, (2) compile form,
+        ;; (3) ensure values-list has at least the primary value,
+        ;; (4) snapshot into a list register.
+        (let ((list-regs
+               (mapcar (lambda (arg)
+                         (emit ctx (make-vm-clear-values))
+                         (let ((primary-reg (compile-ast arg ctx)))
+                           (emit ctx (make-vm-ensure-values :src primary-reg))
+                           (let ((lr (make-register ctx)))
+                             (emit ctx (make-vm-values-to-list :dst lr))
+                             lr)))
+                       args)))
+          ;; Concatenate all per-form value lists with vm-append.
+          (let ((combined-reg
+                 (reduce (lambda (acc lr)
+                           (let ((new-reg (make-register ctx)))
+                             (emit ctx (make-vm-append :dst new-reg :src1 acc :src2 lr))
+                             new-reg))
+                         (cdr list-regs)
+                         :initial-value (car list-regs))))
+            (emit ctx (make-vm-apply :dst result-reg :func func-reg
+                                     :args (list combined-reg))))))
     result-reg))
 
 (defmethod compile-ast ((node ast-multiple-value-prog1) ctx)
@@ -979,84 +1006,72 @@ Returns a compilation-result struct with program, assembly, and globals."
 
 ;;; Functions and Closures
 
+(defun mutated-vars-of-list (nodes)
+  "Union of setq-mutation targets across all AST NODES in a list."
+  (reduce #'union (mapcar #'find-mutated-variables nodes) :initial-value nil))
+
 (defun find-mutated-variables (ast)
   "Find all variable names that are targets of SETQ in AST."
   (typecase ast
-    (ast-setq (union (list (ast-setq-var ast))
-                     (find-mutated-variables (ast-setq-value ast))))
-    (ast-if (union (find-mutated-variables (ast-if-cond ast))
-                   (union (find-mutated-variables (ast-if-then ast))
-                          (find-mutated-variables (ast-if-else ast)))))
-    (ast-progn (reduce #'union (mapcar #'find-mutated-variables (ast-progn-forms ast))
-                        :initial-value nil))
-    (ast-let (reduce #'union
-                     (append (mapcar (lambda (b) (find-mutated-variables (cdr b)))
-                                     (ast-let-bindings ast))
-                             (mapcar #'find-mutated-variables (ast-let-body ast)))
-                     :initial-value nil))
-    (ast-lambda (reduce #'union (mapcar #'find-mutated-variables (ast-lambda-body ast))
-                         :initial-value nil))
-    (ast-defun (reduce #'union (mapcar #'find-mutated-variables (ast-defun-body ast))
-                        :initial-value nil))
-    (ast-call (reduce #'union
-                      (cons (if (typep (ast-call-func ast) 'ast-node)
-                                (find-mutated-variables (ast-call-func ast))
-                                nil)
-                            (mapcar #'find-mutated-variables (ast-call-args ast)))
-                      :initial-value nil))
-    (ast-print (find-mutated-variables (ast-print-expr ast)))
-    (ast-binop (union (find-mutated-variables (ast-binop-lhs ast))
-                      (find-mutated-variables (ast-binop-rhs ast))))
+    (ast-setq  (union (list (ast-setq-var ast))
+                      (find-mutated-variables (ast-setq-value ast))))
+    (ast-if    (union (find-mutated-variables (ast-if-cond ast))
+                      (union (find-mutated-variables (ast-if-then ast))
+                             (find-mutated-variables (ast-if-else ast)))))
+    (ast-progn (mutated-vars-of-list (ast-progn-forms ast)))
+    (ast-let   (mutated-vars-of-list
+                (append (mapcar #'cdr (ast-let-bindings ast))
+                        (ast-let-body ast))))
+    (ast-lambda (mutated-vars-of-list (ast-lambda-body ast)))
+    (ast-defun  (mutated-vars-of-list (ast-defun-body ast)))
+    (ast-call   (mutated-vars-of-list
+                 (cons (if (typep (ast-call-func ast) 'ast-node)
+                           (ast-call-func ast)
+                           nil)
+                       (ast-call-args ast))))
+    (ast-print  (find-mutated-variables (ast-print-expr ast)))
+    (ast-binop  (union (find-mutated-variables (ast-binop-lhs ast))
+                       (find-mutated-variables (ast-binop-rhs ast))))
     (t nil)))
 
 (defun find-captured-in-children (body-forms params)
   "Find variables that inner lambdas/defuns in BODY-FORMS capture as free variables.
 PARAMS are the current scope's bound variables — only those are candidates for boxing."
   (let ((captured nil))
-    (dolist (form body-forms captured)
-      (typecase form
-        (ast-lambda
-         (let ((free (find-free-variables form)))
-           (setf captured (union captured (intersection free params)))))
-        (ast-defun
-         (let* ((temp (make-ast-lambda
-                                     :params (ast-defun-params form)
-                                     :body (ast-defun-body form)))
-                (free (find-free-variables temp)))
-           (setf captured (union captured (intersection free params)))))
-        ;; Recurse into compound forms to find nested lambdas
-        (ast-if
-         (setf captured (union captured
-                               (find-captured-in-children
-                                (list (ast-if-cond form) (ast-if-then form) (ast-if-else form))
-                                params))))
-        (ast-progn
-         (setf captured (union captured
-                               (find-captured-in-children (ast-progn-forms form) params))))
-        (ast-let
-         (setf captured (union captured
-                               (find-captured-in-children (ast-let-body form) params)))
-         (dolist (b (ast-let-bindings form))
-           (setf captured (union captured
-                                 (find-captured-in-children (list (cdr b)) params)))))
-        (ast-call
-         (setf captured (union captured
-                               (find-captured-in-children (ast-call-args form) params)))
-         (when (typep (ast-call-func form) 'ast-node)
-           (setf captured (union captured
-                                 (find-captured-in-children (list (ast-call-func form)) params)))))
-        (ast-print
-         (setf captured (union captured
-                               (find-captured-in-children (list (ast-print-expr form)) params))))
-        (ast-binop
-         (setf captured (union captured
-                               (find-captured-in-children
-                                (list (ast-binop-lhs form) (ast-binop-rhs form))
-                                params))))
-        (ast-setq
-         (setf captured (union captured
-                               (find-captured-in-children
-                                (list (ast-setq-value form)) params))))))))
+    (flet ((add-captured! (forms)
+             "Recurse into FORMS and union any newly-captured vars into CAPTURED."
+             (setf captured (union captured (find-captured-in-children forms params))))
+           (capture-free! (ast-node)
+             "Intersect free vars of AST-NODE with PARAMS and add to CAPTURED."
+             (setf captured (union captured
+                                   (intersection (find-free-variables ast-node) params)))))
+      (dolist (form body-forms captured)
+        (typecase form
+          (ast-lambda (capture-free! form))
+          (ast-defun  (capture-free! (make-ast-lambda :params (ast-defun-params form)
+                                                      :body   (ast-defun-body form))))
+          ;; Recurse into compound forms to find nested lambdas
+          (ast-if    (add-captured! (list (ast-if-cond form)
+                                         (ast-if-then form)
+                                         (ast-if-else form))))
+          (ast-progn (add-captured! (ast-progn-forms form)))
+          (ast-let   (add-captured! (append (mapcar #'cdr (ast-let-bindings form))
+                                            (ast-let-body form))))
+          (ast-call  (add-captured! (if (typep (ast-call-func form) 'ast-node)
+                                        (cons (ast-call-func form) (ast-call-args form))
+                                        (ast-call-args form))))
+          (ast-print (add-captured! (list (ast-print-expr form))))
+          (ast-binop (add-captured! (list (ast-binop-lhs form) (ast-binop-rhs form))))
+          (ast-setq  (add-captured! (list (ast-setq-value form)))))))))
+
+(defun free-vars-of-list (nodes)
+  "Union of free variables across all AST NODES in a list."
+  (reduce #'union (mapcar #'find-free-variables nodes) :initial-value nil))
+
+(defun free-vars-of-defaults (param-list)
+  "Union of free variables in the default expressions of an optional/key PARAM-LIST.
+Each entry is (name default-ast); entries with no default contribute nothing."
+  (free-vars-of-list (remove nil (mapcar #'second param-list))))
 
 (defun find-free-variables (ast)
   "Find all free variables in AST that would need to be captured in a closure."
@@ -1068,19 +1083,13 @@ PARAMS are the current scope's bound variables — only those are candidates for
     (ast-if (union (find-free-variables (ast-if-cond ast))
                    (union (find-free-variables (ast-if-then ast))
                           (find-free-variables (ast-if-else ast)))))
-    (ast-progn (reduce #'union (mapcar #'find-free-variables (ast-progn-forms ast))
-                        :initial-value nil))
+    (ast-progn (free-vars-of-list (ast-progn-forms ast)))
     (ast-print (find-free-variables (ast-print-expr ast)))
-    (ast-let (let ((binding-vars (mapcar #'car (ast-let-bindings ast)))
-                 (binding-exprs (mapcar #'find-free-variables
-                                        (mapcar #'cdr (ast-let-bindings ast))))
-                 (body-vars (reduce #'union
-                                    (mapcar #'find-free-variables (ast-let-body ast))
-                                    :initial-value nil)))
-              ;; Remove bound variables from free set
-              (set-difference (reduce #'union (append binding-exprs (list body-vars))
-                                      :initial-value nil)
-                              binding-vars)))
+    (ast-let
+     (let ((binding-vars (mapcar #'car (ast-let-bindings ast)))
+           (binding-free  (free-vars-of-list (mapcar #'cdr (ast-let-bindings ast))))
+           (body-free     (free-vars-of-list (ast-let-body ast))))
+       (set-difference (union binding-free body-free) binding-vars)))
     (ast-lambda
      (let* ((params (ast-lambda-params ast))
             (all-params (append params
@@ -1088,39 +1097,20 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                 (when (ast-lambda-rest-param ast)
                                   (list (ast-lambda-rest-param ast)))
                                 (mapcar #'first (ast-lambda-key-params ast))))
-            (body-vars (reduce #'union
-                               (mapcar #'find-free-variables (ast-lambda-body ast))
-                               :initial-value nil))
-            ;; Also find free vars in optional/key default forms
-            (default-vars (reduce #'union
-                                  (append
-                                   (mapcar (lambda (opt)
-                                             (if (second opt)
-                                                 (find-free-variables (second opt))
-                                                 nil))
-                                           (ast-lambda-optional-params ast))
-                                   (mapcar (lambda (kp)
-                                             (if (second kp)
-                                                 (find-free-variables (second kp))
-                                                 nil))
-                                           (ast-lambda-key-params ast)))
-                                  :initial-value nil)))
-       (set-difference (union body-vars default-vars) all-params)))
+            (body-free    (free-vars-of-list (ast-lambda-body ast)))
+            (default-free (union (free-vars-of-defaults (ast-lambda-optional-params ast))
+                                 (free-vars-of-defaults (ast-lambda-key-params ast)))))
+       (set-difference (union body-free default-free) all-params)))
     (ast-setq (union (list (ast-setq-var ast))
                      (find-free-variables (ast-setq-value ast))))
     (ast-defun
-     (let* ((params (ast-defun-params ast))
-            (body-vars (reduce #'union
-                               (mapcar #'find-free-variables (ast-defun-body ast))
-                               :initial-value nil)))
-       (set-difference body-vars params)))
+     (set-difference (free-vars-of-list (ast-defun-body ast))
+                     (ast-defun-params ast)))
     (ast-call
      (union (if (typep (ast-call-func ast) 'ast-node)
-               (find-free-variables (ast-call-func ast))
-               nil)
-           (reduce #'union
-                   (mapcar #'find-free-variables (ast-call-args ast))
-                   :initial-value nil)))
+                (find-free-variables (ast-call-func ast))
+                nil)
+            (free-vars-of-list (ast-call-args ast))))
     (ast-quote nil)
     (t nil)))
 
@@ -1153,29 +1143,10 @@ PARAMS are the current scope's bound variables — only those are candidates for
                               :rest-param rest-reg
                               :key-params key-closure-data
                               :captured captured-vars))
-      ;; Jump over the function body
       (emit ctx (make-vm-jump :label end-label))
-      ;; Emit the function entry label
       (emit ctx (make-vm-label :name func-label))
-      ;; Save old environment and extend with parameters
-      (let ((old-env (ctx-env ctx)))
-        (unwind-protect
-             (progn
-               (setf (ctx-env ctx)
-                     (append (build-all-param-bindings params param-regs
-                                                      opt-bindings rest-binding key-bindings)
-                             (ctx-env ctx)))
-               ;; Emit inline default computation for non-constant defaults
-               (when non-constant-defaults
-                 (emit-non-constant-defaults ctx non-constant-defaults))
-               ;; Compile body forms
-               (let ((last-reg nil))
-                 (dolist (form body)
-                   (setf last-reg (compile-ast form ctx)))
-                 (emit ctx (make-vm-ret :reg last-reg))))
-          ;; Restore environment
-          (setf (ctx-env ctx) old-env)))
-      ;; Emit end label
+      (compile-function-body ctx params param-regs opt-bindings rest-binding
+                             key-bindings non-constant-defaults body)
       (emit ctx (make-vm-label :name end-label))
       closure-reg)))
 
@@ -1197,18 +1168,81 @@ PARAMS are the current scope's bound variables — only those are candidates for
                    `(when (builtin-name-p func-sym ,(symbol-name cl-name))
                       (let ((arg1-reg (compile-ast (first args) ctx))
                             (arg2-reg (compile-ast (second args) ctx)))
-                        (emit ctx (,ctor
-                                                 :dst result-reg
-                                                 :str1 arg1-reg
-                                                 :str2 arg2-reg))
+                        (emit ctx (,ctor :dst result-reg :str1 arg1-reg :str2 arg2-reg))
+                        (return-from compile-ast result-reg)))))
+               ;; char comparison builtins: (fn char1 char2) -> :dst/:char1/:char2
+               (compile-char-cmp-builtin (cl-name vm-class)
+                 (let ((ctor (intern (format nil "MAKE-~A" (symbol-name vm-class)))))
+                   `(when (builtin-name-p func-sym ,(symbol-name cl-name))
+                      (let ((c1-reg (compile-ast (first args) ctx))
+                            (c2-reg (compile-ast (second args) ctx)))
+                        (emit ctx (,ctor :dst result-reg :char1 c1-reg :char2 c2-reg))
                         (return-from compile-ast result-reg)))))
                (compile-unary-builtin (cl-name vm-class)
                  (let ((ctor (intern (format nil "MAKE-~A" (symbol-name vm-class)))))
                    `(when (builtin-name-p func-sym ,(symbol-name cl-name))
                       (let ((arg-reg (compile-ast (first args) ctx)))
-                        (emit ctx (,ctor
-                                                 :dst result-reg
-                                                 :src arg-reg))
+                        (emit ctx (,ctor :dst result-reg :src arg-reg))
+                        (return-from compile-ast result-reg)))))
+               ;; 2-arg builtins using :lhs/:rhs/:dst (arithmetic, bitwise, math)
+               (compile-binary-builtin (cl-name vm-class)
+                 (let ((ctor (intern (format nil "MAKE-~A" (symbol-name vm-class)))))
+                   `(when (and (builtin-name-p func-sym ,(symbol-name cl-name))
+                               (= (length args) 2))
+                      (let ((lhs-reg (compile-ast (first args) ctx))
+                            (rhs-reg (compile-ast (second args) ctx)))
+                        (emit ctx (,ctor :dst result-reg :lhs lhs-reg :rhs rhs-reg))
+                        (return-from compile-ast result-reg)))))
+               ;; Print builtins: emit side-effect instruction (:src only), return the arg value
+               (compile-side-effect-builtin (cl-name vm-class)
+                 (let ((ctor (intern (format nil "MAKE-~A" (symbol-name vm-class)))))
+                   `(when (builtin-name-p func-sym ,(symbol-name cl-name))
+                      (let ((arg-reg (compile-ast (first args) ctx)))
+                        (emit ctx (,ctor :src arg-reg))
+                        (emit ctx (make-vm-move :dst result-reg :src arg-reg))
+                        (return-from compile-ast result-reg)))))
+               ;; 0-arg builtins (emit instruction with :dst only, no args)
+               (compile-nullary-builtin (cl-name vm-class)
+                 (let ((ctor (intern (format nil "MAKE-~A" (symbol-name vm-class)))))
+                   `(when (builtin-name-p func-sym ,(symbol-name cl-name))
+                      (emit ctx (,ctor :dst result-reg))
+                      (return-from compile-ast result-reg))))
+               ;; hash-table query builtins: (fn table) -> :dst/:table
+               (compile-table-query-builtin (cl-name vm-class)
+                 (let ((ctor (intern (format nil "MAKE-~A" (symbol-name vm-class)))))
+                   `(when (builtin-name-p func-sym ,(symbol-name cl-name))
+                      (let ((table-reg (compile-ast (first args) ctx)))
+                        (emit ctx (,ctor :dst result-reg :table table-reg))
+                        (return-from compile-ast result-reg)))))
+               ;; stream/file handle builtins: (fn handle) -> :dst/:handle
+               (compile-handle-input-builtin (cl-name vm-class)
+                 (let ((ctor (intern (format nil "MAKE-~A" (symbol-name vm-class)))))
+                   `(when (builtin-name-p func-sym ,(symbol-name cl-name))
+                      (let ((handle-reg (compile-ast (first args) ctx)))
+                        (emit ctx (,ctor :dst result-reg :handle handle-reg))
+                        (return-from compile-ast result-reg)))))
+               ;; string-trim variants: (fn char-bag string) -> :dst/:char-bag/:string
+               (compile-string-trim-builtin (cl-name vm-class)
+                 (let ((ctor (intern (format nil "MAKE-~A" (symbol-name vm-class)))))
+                   `(when (builtin-name-p func-sym ,(symbol-name cl-name))
+                      (let ((bag-reg (compile-ast (first args) ctx))
+                            (str-reg (compile-ast (second args) ctx)))
+                        (emit ctx (,ctor :dst result-reg :char-bag bag-reg :string str-reg))
+                        (return-from compile-ast result-reg)))))
+               ;; 0-arg side-effect builtins: emit no-slot instruction, return nil
+               (compile-void-side-effect-builtin (cl-name vm-class)
+                 (let ((ctor (intern (format nil "MAKE-~A" (symbol-name vm-class)))))
+                   `(when (builtin-name-p func-sym ,(symbol-name cl-name))
+                      (emit ctx (,ctor))
+                      (emit ctx (make-vm-const :dst result-reg :value nil))
+                      (return-from compile-ast result-reg))))
+               ;; 1-arg handle side-effect builtins: (fn handle) -> side effect, return nil
+               (compile-handle-effect-builtin (cl-name vm-class)
+                 (let ((ctor (intern (format nil "MAKE-~A" (symbol-name vm-class)))))
+                   `(when (builtin-name-p func-sym ,(symbol-name cl-name))
+                      (let ((handle-reg (compile-ast (first args) ctx)))
+                        (emit ctx (,ctor :handle handle-reg))
+                        (emit ctx (make-vm-const :dst result-reg :value nil))
                         (return-from compile-ast result-reg))))))
       ;; String comparison builtins (2 args, :str1/:str2 -> :dst)
       (compile-string-cmp-builtin string= vm-string=)
@@ -1220,6 +1254,9 @@ PARAMS are the current scope's bound variables — only those are candidates for
       (compile-string-cmp-builtin string-lessp vm-string-lessp)
       (compile-string-cmp-builtin string-greaterp vm-string-greaterp)
       (compile-string-cmp-builtin string/= vm-string-not-equal)
+      (compile-string-cmp-builtin string-not-equal vm-string-not-equal)
+      (compile-string-cmp-builtin string-not-greaterp vm-string-not-greaterp)
+      (compile-string-cmp-builtin string-not-lessp vm-string-not-lessp)
       ;; String concatenation (2 args, :str1/:str2 -> :dst)
       (compile-string-cmp-builtin string-concat vm-concatenate)
       ;; String unary builtins (1 arg, :src -> :dst)
@@ -1303,73 +1340,97 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                    :lhs arg-reg
                                    :rhs zero-reg))
           (return-from compile-ast result-reg)))
-      ;; Extended arithmetic builtins
-      (when (and (builtin-name-p func-sym "MOD")
-                 (= (length args) 2))
-        (let ((lhs-reg (compile-ast (first args) ctx))
-              (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-mod
-                                   :dst result-reg
-                                   :lhs lhs-reg
-                                   :rhs rhs-reg))
-          (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "REM")
-                 (= (length args) 2))
-        (let ((lhs-reg (compile-ast (first args) ctx))
-              (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-rem
-                                   :dst result-reg
-                                   :lhs lhs-reg
-                                   :rhs rhs-reg))
-          (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "TRUNCATE")
-                 (= (length args) 2))
-        (let ((lhs-reg (compile-ast (first args) ctx))
-              (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-truncate
-                                   :dst result-reg
-                                   :lhs lhs-reg
-                                   :rhs rhs-reg))
-          (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "FLOOR")
-                 (= (length args) 2))
-        (let ((lhs-reg (compile-ast (first args) ctx))
-              (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-floor-inst
-                                   :dst result-reg
-                                   :lhs lhs-reg
-                                   :rhs rhs-reg))
-          (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "CEILING")
-                 (= (length args) 2))
-        (let ((lhs-reg (compile-ast (first args) ctx))
-              (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-ceiling-inst
-                                   :dst result-reg
-                                   :lhs lhs-reg
-                                   :rhs rhs-reg))
-          (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "MIN")
-                 (= (length args) 2))
-        (let ((lhs-reg (compile-ast (first args) ctx))
-              (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-min
-                                   :dst result-reg
-                                   :lhs lhs-reg
-                                   :rhs rhs-reg))
-          (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "MAX")
-                 (= (length args) 2))
-        (let ((lhs-reg (compile-ast (first args) ctx))
-              (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-max
-                                   :dst result-reg
-                                   :lhs lhs-reg
-                                   :rhs rhs-reg))
-          (return-from compile-ast result-reg)))
+      ;; Extended arithmetic builtins (2-arg: :lhs/:rhs -> :dst)
+      (compile-binary-builtin mod vm-mod)
+      (compile-binary-builtin rem vm-rem)
+      (compile-binary-builtin truncate vm-truncate)
+      (compile-binary-builtin floor vm-floor-inst)
+      (compile-binary-builtin ceiling vm-ceiling-inst)
+      (compile-binary-builtin min vm-min)
+      (compile-binary-builtin max vm-max)
       (compile-unary-builtin abs vm-abs)
       (compile-unary-builtin evenp vm-evenp)
       (compile-unary-builtin oddp vm-oddp)
+      ;; FR-301: round (2-arg)
+      (compile-binary-builtin round vm-round-inst)
+      ;; FR-303: Bit operations (2-arg)
+      (compile-binary-builtin ash vm-ash)
+      (compile-binary-builtin logand vm-logand)
+      (compile-binary-builtin logior vm-logior)
+      (compile-binary-builtin logxor vm-logxor)
+      (compile-binary-builtin logeqv vm-logeqv)
+      (compile-binary-builtin logtest vm-logtest)
+      (compile-binary-builtin logbitp vm-logbitp)
+      (compile-unary-builtin lognot vm-lognot)
+      (compile-unary-builtin logcount vm-logcount)
+      (compile-unary-builtin integer-length vm-integer-length)
+      ;; FR-304: Transcendentals
+      (compile-binary-builtin expt vm-expt)
+      (compile-unary-builtin sqrt vm-sqrt)
+      (compile-unary-builtin exp vm-exp-inst)
+      (compile-unary-builtin log vm-log-inst)
+      (compile-unary-builtin sin vm-sin-inst)
+      (compile-unary-builtin cos vm-cos-inst)
+      (compile-unary-builtin tan vm-tan-inst)
+      (compile-unary-builtin asin vm-asin-inst)
+      (compile-unary-builtin acos vm-acos-inst)
+      (compile-unary-builtin atan vm-atan-inst)
+      ;; 2-arg atan -> atan2 (checked after 1-arg; only fires when (length args) = 2)
+      (compile-binary-builtin atan vm-atan2-inst)
+      (compile-unary-builtin sinh vm-sinh-inst)
+      (compile-unary-builtin cosh vm-cosh-inst)
+      (compile-unary-builtin tanh vm-tanh-inst)
+      ;; Phase 2 — FR-305: Float operations
+      (compile-unary-builtin float vm-float-inst)
+      (compile-unary-builtin float-precision vm-float-precision)
+      (compile-unary-builtin float-radix vm-float-radix)
+      (compile-unary-builtin float-sign vm-float-sign)
+      (compile-unary-builtin float-digits vm-float-digits)
+      (compile-unary-builtin decode-float vm-decode-float)
+      (compile-unary-builtin integer-decode-float vm-integer-decode-float)
+      (compile-unary-builtin boundp vm-boundp)
+      (compile-unary-builtin fboundp vm-fboundp)
+      (compile-unary-builtin makunbound vm-makunbound)
+      (compile-unary-builtin fmakunbound vm-fmakunbound)
+      (compile-unary-builtin random vm-random)
+      ;; FR-1205: make-random-state (0 or 1 args)
+      (when (builtin-name-p func-sym "MAKE-RANDOM-STATE")
+        (let ((arg-reg (if args
+                           (compile-ast (first args) ctx)
+                           (let ((r (make-register ctx)))
+                             (emit ctx (make-vm-const :dst r :value nil)) r))))
+          (emit ctx (make-vm-make-random-state :dst result-reg :src arg-reg))
+          (return-from compile-ast result-reg)))
+      (compile-binary-builtin scale-float vm-scale-float)
+      ;; FR-301: Float rounding (ffloor, fceiling, ftruncate, fround) — 1 or 2 args
+      (macrolet ((compile-float-round (name inst-maker)
+                   `(when (builtin-name-p func-sym ,(symbol-name name))
+                      (let* ((lhs-reg (compile-ast (first args) ctx))
+                             (rhs-reg (if (= (length args) 2)
+                                          (compile-ast (second args) ctx)
+                                          (let ((one-reg (make-register ctx)))
+                                            (emit ctx (make-vm-const :dst one-reg :value 1))
+                                            one-reg))))
+                        (emit ctx (,inst-maker :dst result-reg :lhs lhs-reg :rhs rhs-reg))
+                        (return-from compile-ast result-reg)))))
+        (compile-float-round ffloor make-vm-ffloor)
+        (compile-float-round fceiling make-vm-fceiling)
+        (compile-float-round ftruncate make-vm-ftruncate)
+        (compile-float-round fround make-vm-fround))
+      ;; FR-306: Rational number functions
+      (compile-unary-builtin rational vm-rational)
+      (compile-unary-builtin rationalize vm-rationalize)
+      (compile-unary-builtin numerator vm-numerator)
+      (compile-unary-builtin denominator vm-denominator)
+      ;; FR-306: GCD/LCM (2-arg)
+      (compile-binary-builtin gcd vm-gcd)
+      (compile-binary-builtin lcm vm-lcm)
+      ;; FR-307: Complex number functions
+      (compile-unary-builtin realpart vm-realpart)
+      (compile-unary-builtin imagpart vm-imagpart)
+      (compile-unary-builtin conjugate vm-conjugate)
+      (compile-unary-builtin phase vm-phase)
+      (compile-binary-builtin complex vm-complex)
       ;; Cons (2 args, :car-src/:cdr-src -> :dst)
       (when (builtin-name-p func-sym "CONS")
         (let ((car-reg (compile-ast (first args) ctx))
@@ -1396,22 +1457,11 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                    :val val-reg))
           (emit ctx (make-vm-move :dst result-reg :src cons-reg))
           (return-from compile-ast result-reg)))
-      ;; Equality builtins (2 args, :lhs/:rhs -> :dst)
-      (when (builtin-name-p func-sym "EQ")
+      ;; EQ and EQL both compile to vm-eq (pointer equality)
+      (when (or (builtin-name-p func-sym "EQ") (builtin-name-p func-sym "EQL"))
         (let ((lhs-reg (compile-ast (first args) ctx))
               (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-eq
-                                   :dst result-reg
-                                   :lhs lhs-reg
-                                   :rhs rhs-reg))
-          (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "EQL")
-        (let ((lhs-reg (compile-ast (first args) ctx))
-              (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-eq
-                                   :dst result-reg
-                                   :lhs lhs-reg
-                                   :rhs rhs-reg))
+          (emit ctx (make-vm-eq :dst result-reg :lhs lhs-reg :rhs rhs-reg))
           (return-from compile-ast result-reg)))
       ;; Append (2 args, :src1/:src2 -> :dst)
       (when (builtin-name-p func-sym "APPEND")
@@ -1422,18 +1472,20 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                    :src1 lhs-reg
                                    :src2 rhs-reg))
           (return-from compile-ast result-reg)))
-      ;; List (variable args)
-      (when (builtin-name-p func-sym "LIST")
-        (let ((arg-regs (mapcar (lambda (arg) (compile-ast arg ctx)) args)))
-          (emit ctx (make-vm-list
-                                   :dst result-reg
-                                   :count (length arg-regs)
-                                   :src-regs arg-regs))
-          (return-from compile-ast result-reg)))
       ;; %values-to-list: capture current values-list as a list
-      (when (builtin-name-p func-sym "%VALUES-TO-LIST")
-        (emit ctx (make-vm-values-to-list :dst result-reg))
-        (return-from compile-ast result-reg))
+      (compile-nullary-builtin %values-to-list vm-values-to-list)
+      ;; %progv-enter: save bindings and install new ones (for progv macro)
+      (when (and (builtin-name-p func-sym "%PROGV-ENTER") (= (length args) 2))
+        (let ((syms-reg (compile-ast (first args) ctx))
+              (vals-reg (compile-ast (second args) ctx)))
+          (emit ctx (make-vm-progv-enter :dst result-reg :syms syms-reg :vals vals-reg))
+          (return-from compile-ast result-reg)))
+      ;; %progv-exit: restore saved bindings (for progv macro cleanup)
+      (when (and (builtin-name-p func-sym "%PROGV-EXIT") (= (length args) 1))
+        (let ((saved-reg (compile-ast (first args) ctx)))
+          (emit ctx (make-vm-progv-exit :saved saved-reg))
+          (emit ctx (make-vm-const :dst result-reg :value nil))
+          (return-from compile-ast result-reg)))
       ;; error: signal an error via vm-signal-error
       (when (builtin-name-p func-sym "ERROR")
         (let ((arg-reg (compile-ast (first args) ctx)))
@@ -1495,31 +1547,11 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                    :key key-reg
                                    :table table-reg))
           (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "HASH-TABLE-COUNT")
-        (let ((table-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-hash-table-count
-                                   :dst result-reg
-                                   :table table-reg))
-          (return-from compile-ast result-reg)))
+      (compile-table-query-builtin hash-table-count vm-hash-table-count)
       (compile-unary-builtin hash-table-p vm-hash-table-p)
-      (when (builtin-name-p func-sym "HASH-TABLE-KEYS")
-        (let ((table-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-hash-table-keys
-                                   :dst result-reg
-                                   :table table-reg))
-          (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "HASH-TABLE-VALUES")
-        (let ((table-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-hash-table-values
-                                   :dst result-reg
-                                   :table table-reg))
-          (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "HASH-TABLE-TEST")
-        (let ((table-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-hash-table-test
-                                   :dst result-reg
-                                   :table table-reg))
-          (return-from compile-ast result-reg)))
+      (compile-table-query-builtin hash-table-keys vm-hash-table-keys)
+      (compile-table-query-builtin hash-table-values vm-hash-table-values)
+      (compile-table-query-builtin hash-table-test vm-hash-table-test)
       (when (builtin-name-p func-sym "MAPHASH")
         ;; Compile maphash by iterating over keys and calling fn with key,value
         (let* ((fn-reg (compile-ast (first args) ctx))
@@ -1599,6 +1631,59 @@ PARAMS are the current scope's bound variables — only those are candidates for
           (return-from compile-ast result-reg)))
       (compile-unary-builtin vectorp vm-vectorp)
       (compile-unary-builtin array-length vm-array-length)
+      ;; FR-601: Array dimension queries
+      (compile-unary-builtin array-rank vm-array-rank)
+      (compile-unary-builtin array-total-size vm-array-total-size)
+      (compile-unary-builtin array-dimensions vm-array-dimensions)
+      (compile-binary-builtin array-dimension vm-array-dimension)
+      (compile-binary-builtin row-major-aref vm-row-major-aref)
+      ;; FR-602: array-row-major-index — variadic (array &rest subscripts)
+      (when (and (builtin-name-p func-sym "ARRAY-ROW-MAJOR-INDEX") (>= (length args) 1))
+        (let ((arr-reg (compile-ast (first args) ctx))
+              (subs-reg (make-register ctx)))
+          ;; Build list of subscripts
+          (emit ctx (make-vm-const :dst subs-reg :value nil))
+          (dolist (sub (reverse (rest args)))
+            (let ((sub-reg (compile-ast sub ctx))
+                  (new-reg (make-register ctx)))
+              (emit ctx (make-vm-cons :dst new-reg :car-src sub-reg :cdr-src subs-reg))
+              (setf subs-reg new-reg)))
+          (emit ctx (make-vm-array-row-major-index :dst result-reg :arr arr-reg :subs subs-reg))
+          (return-from compile-ast result-reg)))
+      ;; FR-603: svref
+      (compile-binary-builtin svref vm-svref)
+      ;; FR-604: fill-pointer, vector-push, vector-pop
+      (compile-unary-builtin fill-pointer vm-fill-pointer-inst)
+      (compile-unary-builtin array-has-fill-pointer-p vm-array-has-fill-pointer-p)
+      (compile-unary-builtin array-adjustable-p vm-array-adjustable-p)
+      (compile-unary-builtin vector-pop vm-vector-pop)
+      (when (and (builtin-name-p func-sym "VECTOR-PUSH") (= (length args) 2))
+        (let ((val-reg (compile-ast (first args) ctx))
+              (arr-reg (compile-ast (second args) ctx)))
+          (emit ctx (make-vm-vector-push :dst result-reg :val-reg val-reg :array-reg arr-reg))
+          (return-from compile-ast result-reg)))
+      ;; FR-606: bit array operations
+      (when (and (builtin-name-p func-sym "BIT") (= (length args) 2))
+        (let ((arr-reg (compile-ast (first args) ctx))
+              (idx-reg (compile-ast (second args) ctx)))
+          (emit ctx (make-vm-bit-access :dst result-reg :arr arr-reg :idx idx-reg))
+          (return-from compile-ast result-reg)))
+      (when (and (builtin-name-p func-sym "SBIT") (= (length args) 2))
+        (let ((arr-reg (compile-ast (first args) ctx))
+              (idx-reg (compile-ast (second args) ctx)))
+          (emit ctx (make-vm-sbit :dst result-reg :arr arr-reg :idx idx-reg))
+          (return-from compile-ast result-reg)))
+      (compile-binary-builtin bit-and vm-bit-and)
+      (compile-binary-builtin bit-or  vm-bit-or)
+      (compile-binary-builtin bit-xor vm-bit-xor)
+      (compile-unary-builtin bit-not vm-bit-not)
+      ;; FR-605: adjust-array / array-displacement
+      (when (and (builtin-name-p func-sym "ADJUST-ARRAY") (>= (length args) 2))
+        (let ((arr-reg (compile-ast (first args) ctx))
+              (dims-reg (compile-ast (second args) ctx)))
+          (emit ctx (make-vm-adjust-array :dst result-reg :arr arr-reg :dims dims-reg))
+          (return-from compile-ast result-reg)))
+      (compile-unary-builtin array-displacement vm-array-displacement)
       ;; Symbol manipulation builtins
       (compile-unary-builtin symbol-name vm-symbol-name)
       (compile-unary-builtin make-symbol vm-make-symbol)
@@ -1610,9 +1695,71 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                                      :pkg pkg-reg))
           (return-from compile-ast result-reg)))
       (compile-unary-builtin keywordp vm-keywordp)
-      (when (builtin-name-p func-sym "GENSYM")
-        (emit ctx (make-vm-gensym-inst :dst result-reg))
-        (return-from compile-ast result-reg))
+      (compile-nullary-builtin get-universal-time vm-get-universal-time)
+      (compile-nullary-builtin get-internal-real-time vm-get-internal-real-time)
+      (compile-nullary-builtin get-internal-run-time vm-get-internal-run-time)
+      (compile-unary-builtin decode-universal-time vm-decode-universal-time)
+      ;; FR-1204: encode-universal-time (2-7 args: sec min hour date month year [zone])
+      (when (and (builtin-name-p func-sym "ENCODE-UNIVERSAL-TIME")
+                 (>= (length args) 6) (<= (length args) 7))
+        (let ((arg-regs (mapcar (lambda (a) (compile-ast a ctx)) args))
+              (list-reg (make-register ctx)))
+          (emit ctx (make-vm-const :dst list-reg :value nil))
+          (dolist (r (reverse arg-regs))
+            (let ((new-reg (make-register ctx)))
+              (emit ctx (make-vm-cons :dst new-reg :car-src r :cdr-src list-reg))
+              (setf list-reg new-reg)))
+          (emit ctx (make-vm-encode-universal-time :dst result-reg :args-reg list-reg))
+          (return-from compile-ast result-reg)))
+      (compile-nullary-builtin gensym vm-gensym-inst)
+      ;; FR-1201: Symbol property list operations
+      ;; (get sym indicator &optional default)
+      (when (builtin-name-p func-sym "GET")
+        (let* ((sym-reg (compile-ast (first args) ctx))
+               (ind-reg (compile-ast (second args) ctx))
+               (def-reg (if (>= (length args) 3)
+                             (compile-ast (third args) ctx)
+                             (let ((r (make-register ctx)))
+                               (emit ctx (make-vm-const :dst r :value nil))
+                               r))))
+          (emit ctx (make-vm-symbol-get :dst result-reg :sym sym-reg
+                                        :indicator ind-reg :default def-reg))
+          (return-from compile-ast result-reg)))
+      ;; (remprop sym indicator)
+      (when (and (builtin-name-p func-sym "REMPROP") (= (length args) 2))
+        (let ((sym-reg (compile-ast (first args) ctx))
+              (ind-reg (compile-ast (second args) ctx)))
+          (emit ctx (make-vm-remprop :dst result-reg :sym sym-reg :indicator ind-reg))
+          (return-from compile-ast result-reg)))
+      (compile-unary-builtin symbol-plist vm-symbol-plist)
+      ;; (setf (get sym ind) val) internal helper — generated by frontend setf expander
+      (when (and (builtin-name-p func-sym "%SET-SYMBOL-PROP") (= (length args) 3))
+        (let ((sym-reg (compile-ast (first args) ctx))
+              (ind-reg (compile-ast (second args) ctx))
+              (val-reg (compile-ast (third args) ctx)))
+          (emit ctx (make-vm-symbol-set :dst result-reg :sym sym-reg
+                                        :indicator ind-reg :value val-reg))
+          (return-from compile-ast result-reg)))
+      ;; (setf (symbol-plist sym) plist) internal helper — generated by frontend setf expander
+      (when (and (builtin-name-p func-sym "%SET-SYMBOL-PLIST") (= (length args) 2))
+        (let ((sym-reg (compile-ast (first args) ctx))
+              (plist-reg (compile-ast (second args) ctx)))
+          (emit ctx (make-vm-set-symbol-plist :dst result-reg :sym sym-reg :plist-reg plist-reg))
+          (return-from compile-ast result-reg)))
+      ;; (setf (svref arr idx) val) internal helper
+      (when (and (builtin-name-p func-sym "%SVSET") (= (length args) 3))
+        (let ((arr-reg (compile-ast (first args) ctx))
+              (idx-reg (compile-ast (second args) ctx))
+              (val-reg (compile-ast (third args) ctx)))
+          (emit ctx (make-vm-svset :dst result-reg :array-reg arr-reg
+                                   :index-reg idx-reg :val-reg val-reg))
+          (return-from compile-ast result-reg)))
+      ;; (setf (fill-pointer vec) n) internal helper
+      (when (and (builtin-name-p func-sym "%SET-FILL-POINTER") (= (length args) 2))
+        (let ((arr-reg (compile-ast (first args) ctx))
+              (val-reg (compile-ast (second args) ctx)))
+          (emit ctx (make-vm-set-fill-pointer :dst result-reg :array-reg arr-reg :val-reg val-reg))
+          (return-from compile-ast result-reg)))
       ;; Association list and utility builtins
       (when (and (builtin-name-p func-sym "ASSOC")
                  (= (length args) 2))
@@ -1634,24 +1781,8 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                    :value val-reg
                                    :alist alist-reg))
           (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "EQUAL")
-                 (= (length args) 2))
-        (let ((lhs-reg (compile-ast (first args) ctx))
-              (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-equal
-                                   :dst result-reg
-                                   :lhs lhs-reg
-                                   :rhs rhs-reg))
-          (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "NCONC")
-                 (= (length args) 2))
-        (let ((lhs-reg (compile-ast (first args) ctx))
-              (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-nconc
-                                   :dst result-reg
-                                   :lhs lhs-reg
-                                   :rhs rhs-reg))
-          (return-from compile-ast result-reg)))
+      (compile-binary-builtin equal vm-equal)
+      (compile-binary-builtin nconc vm-nconc)
       (compile-unary-builtin copy-list vm-copy-list)
       (compile-unary-builtin copy-tree vm-copy-tree)
       (when (and (builtin-name-p func-sym "SUBST")
@@ -1670,13 +1801,7 @@ PARAMS are the current scope's bound variables — only those are candidates for
       (compile-unary-builtin coerce-to-string vm-coerce-to-string)
       (compile-unary-builtin coerce-to-list vm-coerce-to-list)
       (compile-unary-builtin coerce-to-vector vm-coerce-to-vector)
-      (when (and (builtin-name-p func-sym "STRING")
-                 (= (length args) 1))
-        (let ((arg-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-string-coerce
-                                   :dst result-reg
-                                   :src arg-reg))
-          (return-from compile-ast result-reg)))
+      (compile-unary-builtin string vm-string-coerce)
       ;; Character/string builtins
       (when (and (builtin-name-p func-sym "CHAR")
                  (= (length args) 2))
@@ -1689,24 +1814,39 @@ PARAMS are the current scope's bound variables — only those are candidates for
           (return-from compile-ast result-reg)))
       (compile-unary-builtin char-code vm-char-code)
       (compile-unary-builtin code-char vm-code-char)
-      (when (and (builtin-name-p func-sym "CHAR=")
-                 (= (length args) 2))
-        (let ((c1-reg (compile-ast (first args) ctx))
-              (c2-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-char=
-                                   :dst result-reg
-                                   :char1 c1-reg
-                                   :char2 c2-reg))
+      ;; Character comparison builtins (case-sensitive and case-insensitive)
+      (compile-char-cmp-builtin char= vm-char=)
+      (compile-char-cmp-builtin char< vm-char<)
+      (compile-char-cmp-builtin char> vm-char>)
+      (compile-char-cmp-builtin char<= vm-char<=)
+      (compile-char-cmp-builtin char>= vm-char>=)
+      (compile-char-cmp-builtin char/= vm-char/=)
+      (compile-char-cmp-builtin char-equal vm-char-equal)
+      (compile-char-cmp-builtin char-not-equal vm-char-not-equal)
+      (compile-char-cmp-builtin char-lessp vm-char-lessp)
+      (compile-char-cmp-builtin char-greaterp vm-char-greaterp)
+      (compile-char-cmp-builtin char-not-greaterp vm-char-not-greaterp)
+      (compile-char-cmp-builtin char-not-lessp vm-char-not-lessp)
+      ;; FR-409/410: char predicates and ops
+      (compile-unary-builtin both-case-p vm-both-case-p)
+      (compile-unary-builtin graphic-char-p vm-graphic-char-p)
+      (compile-unary-builtin standard-char-p vm-standard-char-p)
+      (compile-unary-builtin digit-char vm-digit-char)
+      (compile-unary-builtin char-name vm-char-name)
+      (compile-unary-builtin name-char vm-name-char)
+      ;; FR-410: char-int is identical to char-code per ANSI CL spec
+      (compile-unary-builtin char-int vm-char-code)
+      ;; FR-405: make-string — 1-arg or (make-string size :initial-element char)
+      (when (builtin-name-p func-sym "MAKE-STRING")
+        (let ((size-reg (compile-ast (first args) ctx)))
+          (if (and (= (length args) 3)
+                   (typep (second args) 'ast-var)
+                   (eq (ast-var-name (second args)) :initial-element))
+              (let ((char-reg (compile-ast (third args) ctx)))
+                (emit ctx (make-vm-make-string :dst result-reg :src size-reg :char char-reg)))
+              (emit ctx (make-vm-make-string :dst result-reg :src size-reg)))
           (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "CHAR<")
-                 (= (length args) 2))
-        (let ((c1-reg (compile-ast (first args) ctx))
-              (c2-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-char<
-                                   :dst result-reg
-                                   :char1 c1-reg
-                                   :char2 c2-reg))
-          (return-from compile-ast result-reg)))
+      ;; Existing char predicates
       (compile-unary-builtin digit-char-p vm-digit-char-p)
       (compile-unary-builtin alpha-char-p vm-alpha-char-p)
       (compile-unary-builtin alphanumericp vm-alphanumericp)
@@ -1717,6 +1857,12 @@ PARAMS are the current scope's bound variables — only those are candidates for
       (compile-unary-builtin stringp vm-stringp)
       (compile-unary-builtin characterp vm-characterp)
       (compile-unary-builtin parse-integer vm-parse-integer)
+      ;; values-list: spread a list as multiple values
+      (when (and (builtin-name-p func-sym "VALUES-LIST")
+                 (= (length args) 1))
+        (let ((lst-reg (compile-ast (first args) ctx)))
+          (emit ctx (make-vm-spread-values :dst result-reg :src lst-reg))
+          (return-from compile-ast result-reg)))
       ;; subseq: (subseq string start &optional end)
       (when (and (builtin-name-p func-sym "SUBSEQ")
                  (>= (length args) 2))
@@ -1733,34 +1879,9 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                    :start start-reg
                                    :end end-reg))
           (return-from compile-ast result-reg)))
-      ;; string-trim: (string-trim char-bag string)
-      (when (and (builtin-name-p func-sym "STRING-TRIM")
-                 (= (length args) 2))
-        (let ((bag-reg (compile-ast (first args) ctx))
-              (str-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-string-trim
-                                   :dst result-reg
-                                   :char-bag bag-reg
-                                   :string str-reg))
-          (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "STRING-LEFT-TRIM")
-                 (= (length args) 2))
-        (let ((bag-reg (compile-ast (first args) ctx))
-              (str-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-string-left-trim
-                                   :dst result-reg
-                                   :char-bag bag-reg
-                                   :string str-reg))
-          (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "STRING-RIGHT-TRIM")
-                 (= (length args) 2))
-        (let ((bag-reg (compile-ast (first args) ctx))
-              (str-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-string-right-trim
-                                   :dst result-reg
-                                   :char-bag bag-reg
-                                   :string str-reg))
-          (return-from compile-ast result-reg)))
+      (compile-string-trim-builtin string-trim vm-string-trim)
+      (compile-string-trim-builtin string-left-trim vm-string-left-trim)
+      (compile-string-trim-builtin string-right-trim vm-string-right-trim)
       ;; search: (search pattern string)
       (when (and (builtin-name-p func-sym "SEARCH")
                  (>= (length args) 2))
@@ -1786,64 +1907,54 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                    :src val-reg
                                    :type-name type-sym))
           (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "TYPE-OF")
-        (let ((src-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-type-of :dst result-reg :src src-reg))
+      (compile-unary-builtin type-of vm-type-of)
+      ;; FR-1002: CLOS slot predicates
+      (macrolet ((compile-slot-pred (name inst-maker)
+                   `(when (and (builtin-name-p func-sym ,(symbol-name name))
+                               (= (length args) 2)
+                               (typep (second args) 'ast-quote))
+                      (let ((obj-reg (compile-ast (first args) ctx))
+                            (slot-sym (ast-quote-value (second args))))
+                        (emit ctx (,inst-maker :dst result-reg :obj-reg obj-reg :slot-name-sym slot-sym))
+                        (return-from compile-ast result-reg)))))
+        (compile-slot-pred slot-boundp make-vm-slot-boundp)
+        (compile-slot-pred slot-exists-p make-vm-slot-exists-p)
+        (compile-slot-pred slot-makunbound make-vm-slot-makunbound))
+      ;; FR-1001: call-next-method — invoke next applicable method
+      (when (builtin-name-p func-sym "CALL-NEXT-METHOD")
+        (let ((args-reg (if args
+                            ;; explicit args supplied: build a list from them
+                            (let* ((arg-regs (mapcar (lambda (a) (compile-ast a ctx)) args))
+                                   (list-reg (make-register ctx)))
+                              (emit ctx (make-vm-const :dst list-reg :value nil))
+                              (dolist (r (reverse arg-regs))
+                                (let ((new-reg (make-register ctx)))
+                                  (emit ctx (make-vm-cons :dst new-reg :car-src r :cdr-src list-reg))
+                                  (setf list-reg new-reg)))
+                              list-reg)
+                            nil)))
+          (emit ctx (make-vm-call-next-method :dst result-reg :args-reg args-reg))
           (return-from compile-ast result-reg)))
+      ;; FR-1001: next-method-p — check if a next method exists
+      (compile-nullary-builtin next-method-p vm-next-method-p)
       ;; eval — meta-circular runtime evaluation
-      (when (builtin-name-p func-sym "EVAL")
-        (let ((form-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-eval :dst result-reg :src form-reg))
-          (return-from compile-ast result-reg)))
+      (compile-unary-builtin eval vm-eval)
       ;; I/O builtins (simple print/format, work with any vm-state)
-      (when (builtin-name-p func-sym "PRINC")
-        (let ((arg-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-princ :src arg-reg))
-          (emit ctx (make-vm-move :dst result-reg :src arg-reg))
-          (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "PRIN1")
-        (let ((arg-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-prin1 :src arg-reg))
-          (emit ctx (make-vm-move :dst result-reg :src arg-reg))
-          (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "PRINT")
-        (let ((arg-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-print-inst :src arg-reg))
-          (emit ctx (make-vm-move :dst result-reg :src arg-reg))
-          (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "TERPRI")
-        (emit ctx (make-vm-terpri-inst))
-        (emit ctx (make-vm-const :dst result-reg :value nil))
-        (return-from compile-ast result-reg))
-      (when (builtin-name-p func-sym "FRESH-LINE")
-        (emit ctx (make-vm-fresh-line-inst))
-        (emit ctx (make-vm-const :dst result-reg :value nil))
-        (return-from compile-ast result-reg))
-      (when (builtin-name-p func-sym "WRITE-TO-STRING")
-        (let ((arg-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-write-to-string-inst
-                                   :dst result-reg
-                                   :src arg-reg))
-          (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "PRIN1-TO-STRING")
-        (let ((src-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-write-to-string-inst :dst result-reg :src src-reg))
-          (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "PRINC-TO-STRING")
+      (compile-side-effect-builtin princ vm-princ)
+      (compile-side-effect-builtin prin1 vm-prin1)
+      (compile-side-effect-builtin print vm-print-inst)
+      (compile-void-side-effect-builtin terpri     vm-terpri-inst)
+      (compile-void-side-effect-builtin fresh-line vm-fresh-line-inst)
+      ;; All three stringify functions use the same vm-write-to-string-inst
+      (when (or (builtin-name-p func-sym "WRITE-TO-STRING")
+                (builtin-name-p func-sym "PRIN1-TO-STRING")
+                (builtin-name-p func-sym "PRINC-TO-STRING"))
         (let ((src-reg (compile-ast (first args) ctx)))
           (emit ctx (make-vm-write-to-string-inst :dst result-reg :src src-reg))
           (return-from compile-ast result-reg)))
       ;; String output stream builtins
-      (when (builtin-name-p func-sym "MAKE-STRING-OUTPUT-STREAM")
-        (emit ctx (make-vm-make-string-output-stream-inst
-                                 :dst result-reg))
-        (return-from compile-ast result-reg))
-      (when (builtin-name-p func-sym "GET-OUTPUT-STREAM-STRING")
-        (let ((stream-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-get-output-stream-string-inst
-                                   :dst result-reg
-                                   :src stream-reg))
-          (return-from compile-ast result-reg)))
+      (compile-nullary-builtin make-string-output-stream vm-make-string-output-stream-inst)
+      (compile-unary-builtin get-output-stream-string vm-get-output-stream-string-inst)
       (when (builtin-name-p func-sym "WRITE-STRING")
         (let ((str-reg (compile-ast (first args) ctx)))
           (if (and (>= (length args) 2))
@@ -1914,26 +2025,10 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                    :path path-reg
                                    :direction direction))
           (return-from compile-ast result-reg)))
-      ;; close: (close handle)
-      (when (builtin-name-p func-sym "CLOSE")
-        (let ((handle-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-close-file :handle handle-reg))
-          (emit ctx (make-vm-const :dst result-reg :value nil))
-          (return-from compile-ast result-reg)))
-      ;; read-char: (read-char handle)
-      (when (builtin-name-p func-sym "READ-CHAR")
-        (let ((handle-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-read-char
-                                   :dst result-reg
-                                   :handle handle-reg))
-          (return-from compile-ast result-reg)))
-      ;; read-line: (read-line handle)
-      (when (builtin-name-p func-sym "READ-LINE")
-        (let ((handle-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-read-line
-                                   :dst result-reg
-                                   :handle handle-reg))
-          (return-from compile-ast result-reg)))
+      ;; close: (close handle) -> side effect, return nil
+      (compile-handle-effect-builtin close vm-close-file)
+      (compile-handle-input-builtin read-char vm-read-char)
+      (compile-handle-input-builtin read-line vm-read-line)
       ;; write-char: (write-char char &optional stream)
       (when (builtin-name-p func-sym "WRITE-CHAR")
         (let ((char-reg (compile-ast (first args) ctx)))
@@ -1951,14 +2046,12 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                          :char char-reg))))
           (emit ctx (make-vm-move :dst result-reg :src char-reg))
           (return-from compile-ast result-reg)))
-      ;; peek-char: (peek-char nil handle)
+      ;; peek-char: (peek-char nil handle) or (peek-char handle)
       (when (builtin-name-p func-sym "PEEK-CHAR")
         (let ((handle-reg (if (>= (length args) 2)
                               (compile-ast (second args) ctx)
                               (compile-ast (first args) ctx))))
-          (emit ctx (make-vm-peek-char
-                                   :dst result-reg
-                                   :handle handle-reg))
+          (emit ctx (make-vm-peek-char :dst result-reg :handle handle-reg))
           (return-from compile-ast result-reg)))
       ;; unread-char: (unread-char char handle)
       (when (builtin-name-p func-sym "UNREAD-CHAR")
@@ -1969,20 +2062,8 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                    :char char-reg))
           (emit ctx (make-vm-const :dst result-reg :value nil))
           (return-from compile-ast result-reg)))
-      ;; file-position: (file-position handle)
-      (when (builtin-name-p func-sym "FILE-POSITION")
-        (let ((handle-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-file-position
-                                   :dst result-reg
-                                   :handle handle-reg))
-          (return-from compile-ast result-reg)))
-      ;; file-length: (file-length handle)
-      (when (builtin-name-p func-sym "FILE-LENGTH")
-        (let ((handle-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-file-length
-                                   :dst result-reg
-                                   :handle handle-reg))
-          (return-from compile-ast result-reg)))
+      (compile-handle-input-builtin file-position vm-file-position)
+      (compile-handle-input-builtin file-length vm-file-length)
       ;; make-string-input-stream: (make-string-input-stream string)
       (when (builtin-name-p func-sym "MAKE-STRING-INPUT-STREAM")
         (let ((str-reg (compile-ast (first args) ctx)))
@@ -1991,20 +2072,8 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                    :direction :input
                                    :initial-string str-reg))
           (return-from compile-ast result-reg)))
-      ;; read-from-string: (read-from-string string)
-      (when (builtin-name-p func-sym "READ-FROM-STRING")
-        (let ((str-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-read-from-string-inst
-                                   :dst result-reg
-                                   :src str-reg))
-          (return-from compile-ast result-reg)))
-      ;; read: (read stream)
-      (when (builtin-name-p func-sym "READ")
-        (let ((stream-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-read-sexp-inst
-                                   :dst result-reg
-                                   :src stream-reg))
-          (return-from compile-ast result-reg)))
+      (compile-unary-builtin read-from-string vm-read-from-string-inst)
+      (compile-unary-builtin read vm-read-sexp-inst)
       ;; concatenate: only handle (concatenate 'string a b)
       (when (and (builtin-name-p func-sym "CONCATENATE")
                  (>= (length args) 3)
@@ -2362,101 +2431,77 @@ PARAMS are the current scope's bound variables — only those are candidates for
     (values (nreverse plain) (nreverse type-alist))))
 
 (defparameter *compiler-special-forms*
-  '(if let progn lambda quote setq setf
+  '(if progn lambda quote setq setf
     defun defvar defparameter defmacro defclass defgeneric defmethod
     make-instance slot-value
     block return-from tagbody go
     flet labels function funcall
     the print
     catch throw unwind-protect
-    handler-case declare eval-when defstruct
+    handler-case eval-when defstruct
     macrolet symbol-macrolet
-    in-package defpackage export
     multiple-value-call multiple-value-prog1
-    values multiple-value-bind apply
-    prog prog* with-slots nth-value)
-  "Forms handled directly by the parser/compiler — not subject to macro expansion.")
+    values multiple-value-bind apply)
+  "Forms handled directly by the parser/compiler — not subject to macro expansion.
+   Note: declare, in-package, defpackage, export, locally, warn, coerce,
+   with-open-file, copy-hash-table are registered as our-defmacro in macro.lisp.")
 
 (defun expand-defstruct (form)
   "Expand (defstruct name-or-options slot...) to progn of defclass + defuns.
 Supports :conc-name, :constructor with boa-lambda-list, slot defaults."
   (let* ((name-and-options (second form))
          (slots-raw (cddr form))
-         ;; Parse name and options
          (name (if (listp name-and-options) (first name-and-options) name-and-options))
          (options (when (listp name-and-options) (rest name-and-options)))
-         ;; Extract :conc-name option (default is name-)
          (conc-name-opt (find :conc-name options :key (lambda (o) (when (listp o) (first o)))))
          (conc-name (if conc-name-opt
                         (second conc-name-opt)
                         (intern (concatenate 'string (symbol-name name) "-"))))
-         ;; Extract :constructor option
          (constructor-opt (find :constructor options :key (lambda (o) (when (listp o) (first o)))))
          (constructor-name (if constructor-opt
                                (second constructor-opt)
                                (intern (concatenate 'string "MAKE-" (symbol-name name)))))
          (boa-args (when (and constructor-opt (cddr constructor-opt))
                      (third constructor-opt)))
-         ;; Parse slots: each is either a symbol or (slot-name default :type type)
          (parsed-slots (mapcar (lambda (s)
                                  (if (listp s)
-                                     (list (first s) (second s))  ; (name default)
-                                     (list s nil)))               ; (name nil)
-                               ;; Filter out docstrings
+                                     (list (first s) (second s))
+                                     (list s nil)))
                                (remove-if #'stringp slots-raw)))
-         ;; Generate the expansion
-         (predicate-name (intern (concatenate 'string (symbol-name name) "-P")))
-         (copier-name (intern (concatenate 'string "COPY-" (symbol-name name)))))
-    ;; Build the expansion
-    ;; Register accessor→slot mappings at macro-expansion time
-    (dolist (slot parsed-slots)
-      (let* ((slot-name (first slot))
-             (accessor-name (if conc-name
-                                (intern (concatenate 'string
-                                                     (symbol-name conc-name)
-                                                     (symbol-name slot-name)))
-                                slot-name)))
-        (setf (gethash accessor-name *accessor-slot-map*)
-              (cons name slot-name))))
-    ;; Return the expansion
-    `(progn
-       ;; Define the class
-       (defclass ,name ()
-         ,(mapcar (lambda (slot)
-                    (let* ((slot-name (first slot))
-                           (default (second slot))
-                           (accessor-name (if conc-name
-                                              (intern (concatenate 'string
-                                                                   (symbol-name conc-name)
-                                                                   (symbol-name slot-name)))
-                                              slot-name))
-                           (initarg (intern (symbol-name slot-name) "KEYWORD")))
-                      `(,slot-name :initarg ,initarg
-                                   :initform ,default
-                                   :accessor ,accessor-name)))
-                  parsed-slots))
-       ;; Constructor
-       ,(if boa-args
-            ;; BOA constructor: positional args map to slots
-            `(defun ,constructor-name ,boa-args
-               (make-instance ',name
-                              ,@(mapcan (lambda (arg)
-                                          (list (intern (symbol-name arg) "KEYWORD") arg))
-                                        boa-args)))
-            ;; Default constructor: keyword args with defaults
-            `(defun ,constructor-name (&key ,@(mapcar (lambda (slot)
-                                                        (list (first slot) (second slot)))
-                                                      parsed-slots))
-               (make-instance ',name
-                              ,@(mapcan (lambda (slot)
-                                          (list (intern (symbol-name (first slot)) "KEYWORD")
-                                                (first slot)))
-                                        parsed-slots))))
-       ;; Predicate
-       (defun ,predicate-name (obj) (typep obj ',name))
-       ;; Accessors are already generated by defclass via :accessor
-       ;; Return the name
-       ',name)))
+         (predicate-name (intern (concatenate 'string (symbol-name name) "-P"))))
+    (flet ((slot-accessor (slot-name)
+             "Compute the accessor symbol for SLOT-NAME under CONC-NAME."
+             (if conc-name
+                 (intern (concatenate 'string (symbol-name conc-name) (symbol-name slot-name)))
+                 slot-name)))
+      ;; Register accessor→slot mappings at macro-expansion time
+      (dolist (slot parsed-slots)
+        (setf (gethash (slot-accessor (first slot)) *accessor-slot-map*)
+              (cons name (first slot))))
+      `(progn
+         (defclass ,name ()
+           ,(mapcar (lambda (slot)
+                      `(,(first slot)
+                        :initarg ,(intern (symbol-name (first slot)) "KEYWORD")
+                        :initform ,(second slot)
+                        :accessor ,(slot-accessor (first slot))))
+                    parsed-slots))
+         ,(if boa-args
+              `(defun ,constructor-name ,boa-args
+                 (make-instance ',name
+                                ,@(mapcan (lambda (arg)
+                                            (list (intern (symbol-name arg) "KEYWORD") arg))
+                                          boa-args)))
+              `(defun ,constructor-name (&key ,@(mapcar (lambda (slot)
+                                                          (list (first slot) (second slot)))
+                                                        parsed-slots))
+                 (make-instance ',name
+                                ,@(mapcan (lambda (slot)
+                                            (list (intern (symbol-name (first slot)) "KEYWORD")
+                                                  (first slot)))
+                                          parsed-slots))))
+         (defun ,predicate-name (obj) (typep obj ',name))
+         ',name))))
 
 (defun reduce-variadic-op (op args identity)
   "Reduce a variadic arithmetic form (OP arg...) to nested binary forms.
@@ -2467,6 +2512,295 @@ Supports :conc-name, :constructor with boa-lambda-list, slot defaults."
     (2 (list op (first args) (second args)))
     (t (reduce (lambda (acc x) (list op acc x)) (cddr args)
                :initial-value (list op (first args) (second args))))))
+
+;;; ------------------------------------------------------------
+;;; Builtin Arity Classification (data layer)
+;;; ------------------------------------------------------------
+;;; These tables drive both the #'name → lambda wrapping and the
+;;; (apply #'name list) → dolist-fold expansion in compiler-macroexpand-all.
+
+(defparameter *variadic-fold-builtins*
+  '(+ * append nconc)
+  "Builtins that fold over a list with an identity: (OP a b c) = (OP (OP a b) c).")
+
+(defparameter *binary-builtins*
+  '(cons = < > <= >= mod rem eq eql equal
+    nth nthcdr member assoc acons
+    string= string< string> string<= string>= string-equal
+    string-lessp string-greaterp string/=
+    string-not-equal string-not-greaterp string-not-lessp string-concat
+    char min max floor ceiling truncate round ffloor fceiling ftruncate fround
+    ash logand logior logxor logeqv logtest logbitp
+    expt scale-float gcd lcm complex
+    array-dimension row-major-aref svref vector-push
+    bit sbit bit-and bit-or bit-xor adjust-array)
+  "Builtins that take exactly 2 arguments.")
+
+(defparameter *unary-builtins*
+  '(car cdr not null consp symbolp numberp integerp stringp
+    atom listp characterp functionp
+    first second third fourth fifth rest last
+    nreverse butlast endp reverse length copy-list copy-tree
+    symbol-name make-symbol intern gensym keywordp
+    string-length string-upcase string-downcase
+    char-code code-char
+    typep hash-table-p hash-table-count
+    hash-table-test hash-table-keys hash-table-values
+    zerop plusp minusp evenp oddp abs lognot logcount integer-length
+    sqrt exp log sin cos tan asin acos atan sinh cosh tanh float float-sign
+    rational rationalize numerator denominator realpart imagpart conjugate phase
+    boundp fboundp makunbound fmakunbound
+    array-rank array-total-size array-dimensions
+    fill-pointer array-has-fill-pointer-p array-adjustable-p vector-pop
+    bit-not array-displacement char-int
+    princ prin1 print write-to-string prin1-to-string princ-to-string
+    type-of make-list alphanumericp eval identity)
+  "Builtins that take exactly 1 argument.")
+
+(defparameter *cxr-builtins*
+  '(caar cadr cdar cddr
+    caaar cdaar cadar cddar
+    caadr cdadr caddr cdddr
+    caaaar cadaar caadar caddar
+    cdaaar cddaar cdadar cdddar
+    caaadr cadadr caaddr cadddr
+    cdaadr cddadr cdaddr cddddr)
+  "CXR accessor builtins — all unary.")
+
+(defparameter *all-builtin-names*
+  (append *variadic-fold-builtins* '(- list) *binary-builtins* *unary-builtins* *cxr-builtins*)
+  "Union of all known builtin names — used to decide whether #'name needs a lambda wrapper.")
+
+;;; ------------------------------------------------------------
+;;; compiler-macroexpand-all helper functions
+;;; ------------------------------------------------------------
+
+(defun register-defclass-accessors (class-name slot-specs)
+  "Register ACCESSOR → (CLASS-NAME . SLOT-NAME) mappings in *accessor-slot-map*.
+   Called during macro expansion so later (setf (accessor obj) val) forms
+   can be lowered to (setf (slot-value ...)) without runtime lookup."
+  (when (listp slot-specs)
+    (dolist (spec slot-specs)
+      (when (listp spec)
+        (let ((accessor (getf (rest spec) :accessor)))
+          (when accessor
+            (setf (gethash accessor *accessor-slot-map*)
+                  (cons class-name (first spec)))))))))
+
+(defun expand-defclass-slot-spec (spec)
+  "Expand only the :initform value inside a slot SPEC list, leaving all other
+   keys (slot name, :accessor, :initarg, :reader, :writer, :type) untouched."
+  (if (listp spec)
+      (list* (first spec)
+             (loop for (k v) on (rest spec) by #'cddr
+                   append (list k (if (eq k :initform)
+                                      (compiler-macroexpand-all v)
+                                      v))))
+      spec))
+
+(defun expand-typed-defun-or-lambda (head name params rest-forms)
+  "Strip type annotations from PARAMS, register the type signature, and
+   rebuild a plain DEFUN or LAMBDA form with check-type assertions.
+   HEAD is 'defun or 'lambda; NAME is the function name (nil for lambda)."
+  (multiple-value-bind (plain-params type-alist)
+      (strip-typed-params params)
+    (let* ((has-return-type (and rest-forms
+                                 (symbolp (first rest-forms))
+                                 (cl-cc/type:looks-like-type-specifier-p (first rest-forms))))
+           (return-type-spec (when has-return-type (first rest-forms)))
+           (body-forms       (if has-return-type (cdr rest-forms) rest-forms)))
+      ;; Register the function's type signature for the type checker
+      (let ((param-types (mapcar (lambda (e)
+                                   (cl-cc/type:parse-type-specifier (cdr e)))
+                                 type-alist))
+            (return-type  (if return-type-spec
+                              (cl-cc/type:parse-type-specifier return-type-spec)
+                              cl-cc/type:+type-unknown+)))
+        (when (eq head 'defun)
+          (register-function-type name param-types return-type)))
+      ;; Build the annotated body
+      (let* ((typed-body (if return-type-spec
+                             `((the ,return-type-spec (progn ,@body-forms)))
+                             body-forms))
+             (checks (loop for (pname . ptype) in type-alist
+                           collect `(check-type ,pname ,ptype)))
+             (full-body (append checks typed-body)))
+        (compiler-macroexpand-all
+         (if (eq head 'defun)
+             `(defun ,name ,plain-params ,@full-body)
+             `(lambda ,plain-params ,@full-body)))))))
+
+(defun make-macro-expander (lambda-list body)
+  "Build a macro expander function for a LAMBDA-LIST and BODY.
+   The expander destructures the macro call form and evaluates BODY."
+  (let ((form-var (gensym "FORM"))
+        (env-var  (gensym "ENV")))
+    (eval `(lambda (,form-var ,env-var)
+             (declare (ignore ,env-var))
+             (let* ,(generate-lambda-bindings lambda-list form-var)
+               ,@body)))))
+
+(defun expand-macrolet-form (bindings body)
+  "Register local macro BINDINGS, expand BODY under them, then restore.
+   Returns the expanded BODY wrapped in PROGN."
+  (let ((saved nil))
+    (dolist (b bindings)
+      (let ((name        (first b))
+            (lambda-list (second b))
+            (macro-body  (cddr b)))
+        (push (cons name (lookup-macro name)) saved)
+        (register-macro name (make-macro-expander lambda-list macro-body))))
+    (let ((result (compiler-macroexpand-all (cons 'progn body))))
+      (dolist (s saved)
+        (if (cdr s)
+            (register-macro (car s) (cdr s))
+            (remhash (car s) (macro-env-table *macro-environment*))))
+      result)))
+
+(defun expand-progn-with-eager-defmacro (subforms)
+  "Expand each form in SUBFORMS, eagerly registering any DEFMACRO/OUR-DEFMACRO forms so
+   later sibling forms can immediately use the new macro."
+  (let ((out nil))
+    (dolist (sub subforms)
+      (let ((exp (compiler-macroexpand-all sub)))
+        (when (and (consp exp) (eq (car exp) 'defmacro))
+          (register-macro (second exp)
+                          (make-macro-expander (third exp) (cdddr exp))))
+        ;; our-defmacro forms (from define-modify-macro, etc.) need to be evaluated
+        ;; eagerly so that sibling forms can use the newly registered macro.
+        (when (and (consp exp) (eq (car exp) 'our-defmacro))
+          (eval exp))
+        (push exp out)))
+    (cons 'progn (nreverse out))))
+
+(defun expand-function-builtin (name)
+  "Wrap a known builtin NAME in a first-class lambda for higher-order use."
+  (cond
+    ((member name *variadic-fold-builtins*)
+     (let ((args (gensym "ARGS")) (acc (gensym "ACC")) (x (gensym "X"))
+           (id   (case name ((+) 0) ((*) 1) (t nil))))
+       (compiler-macroexpand-all
+        `(lambda (&rest ,args)
+           (let ((,acc ,id))
+             (dolist (,x ,args ,acc)
+               (setq ,acc (,name ,acc ,x))))))))
+    ((eq name '-)
+     (let ((args (gensym "ARGS")) (acc (gensym "ACC")) (x (gensym "X")))
+       (compiler-macroexpand-all
+        `(lambda (&rest ,args)
+           (if (null (cdr ,args))
+               (- 0 (car ,args))
+               (let ((,acc (car ,args)))
+                 (dolist (,x (cdr ,args) ,acc)
+                   (setq ,acc (- ,acc ,x)))))))))
+    ((eq name 'list)
+     (let ((args (gensym "ARGS")))
+       (compiler-macroexpand-all `(lambda (&rest ,args) ,args))))
+    ((member name *binary-builtins*)
+     (let ((a (gensym "A")) (b (gensym "B")))
+       (compiler-macroexpand-all `(lambda (,a ,b) (,name ,a ,b)))))
+    (t
+     (let ((x (gensym "X")))
+       (compiler-macroexpand-all `(lambda (,x) (,name ,x)))))))
+
+(defun expand-apply-named-fn (fn-name args-form)
+  "Expand (apply 'FN-NAME args-form) where FN-NAME is a known symbol.
+   Variadic builtins get a dolist fold; others normalise to (apply #'fn args)."
+  (if (member fn-name (list* '- 'list *variadic-fold-builtins*))
+      (let ((acc (gensym "ACC")) (x (gensym "X")) (lst (gensym "LST"))
+            (id  (case fn-name ((+) 0) ((*) 1) (t nil))))
+        (if (eq fn-name '-)
+            (compiler-macroexpand-all
+             `(let ((,lst ,args-form))
+                (if (null (cdr ,lst))
+                    (- 0 (car ,lst))
+                    (let ((,acc (car ,lst)))
+                      (dolist (,x (cdr ,lst) ,acc)
+                        (setq ,acc (- ,acc ,x)))))))
+            (compiler-macroexpand-all
+             `(let ((,acc ,id))
+                (dolist (,x ,args-form ,acc)
+                  (setq ,acc (,fn-name ,acc ,x)))))))
+      (list 'apply (list 'function fn-name)
+            (compiler-macroexpand-all args-form))))
+
+(defun expand-eval-when-form (situations body)
+  "Handle EVAL-WHEN phase control.
+   Evaluate BODY immediately if :compile-toplevel is listed; include in output
+   if :execute or :load-toplevel is listed."
+  (when (member :compile-toplevel situations)
+    (dolist (b body)
+      (our-eval (compiler-macroexpand-all b))))
+  (if (or (member :execute situations)
+          (member :load-toplevel situations))
+      (compiler-macroexpand-all (cons 'progn body))
+      nil))
+
+(defun expand-setf-cons-place (place value)
+  "Expand (setf (ACCESSOR ARGS...) value) for cons-cell accessors to rplaca/rplacd."
+  (let ((v (gensym "V")))
+    (case (car place)
+      ((car first)
+       `(let ((,v ,value)) (rplaca ,(second place) ,v) ,v))
+      ((cdr rest)
+       `(let ((,v ,value)) (rplacd ,(second place) ,v) ,v))
+      (nth
+       `(let ((,v ,value)) (rplaca (nthcdr ,(second place) ,(third place)) ,v) ,v))
+      (cadr
+       `(let ((,v ,value)) (rplaca (cdr ,(second place)) ,v) ,v))
+      (cddr
+       `(let ((,v ,value)) (rplacd (cdr ,(second place)) ,v) ,v)))))
+
+(defun expand-make-array-form (size rest-args)
+  "Expand (make-array size &rest keyword-args).
+   Promotes to make-adjustable-vector when :fill-pointer or :adjustable is given."
+  (let (fp adj)
+    (loop for (key val) on rest-args by #'cddr
+          do (case key
+               (:fill-pointer (setf fp val))
+               (:adjustable   (setf adj val))))
+    (if (or fp adj)
+        (compiler-macroexpand-all `(make-adjustable-vector ,size))
+        (compiler-macroexpand-all `(make-array ,size)))))
+
+(defun expand-setf-accessor (place value)
+  "Expand (setf (ACCESSOR OBJ) VAL) via *accessor-slot-map* for known struct accessors,
+   or fall back to generic (setf (slot-value obj 'accessor-name) val)."
+  (let ((mapping (gethash (car place) *accessor-slot-map*)))
+    (if mapping
+        (compiler-macroexpand-all
+         `(setf (slot-value ,(second place) ',(cdr mapping)) ,value))
+        (compiler-macroexpand-all
+         `(setf (slot-value ,(second place) ',(car place)) ,value)))))
+
+(defun expand-let-binding (b)
+  "Macro-expand the value in a LET binding, leaving the binding name untouched."
+  (if (and (consp b) (symbolp (car b)))
+      (list (car b) (compiler-macroexpand-all (cadr b)))
+      b))
+
+(defun expand-flet-labels-binding (binding)
+  "Macro-expand only the body forms of an FLET/LABELS binding; leave params untouched."
+  (if (and (consp binding) (>= (length binding) 3))
+      (list* (first binding) (second binding)
+             (mapcar #'compiler-macroexpand-all (cddr binding)))
+      binding))
+
+(defun expand-lambda-list-defaults (params)
+  "Expand macro calls in &optional/&key default value positions within PARAMS.
+Leaves required params, lambda-list keywords, and supplied-p vars untouched."
+  (let (in-extended)
+    (mapcar (lambda (p)
+               (cond
+                 ((member p '(&optional &rest &key &allow-other-keys &aux &body &whole))
+                  (setf in-extended t) p)
+                 ((and in-extended (consp p) (cdr p))
+                  ;; (name default ...) — expand only the default (second element)
+                  (list* (first p)
+                         (compiler-macroexpand-all (second p))
+                         (cddr p)))
+                 (t p)))
+             params)))
 
 (defun compiler-macroexpand-all (form)
   "Expand macros in FORM for the compiler pipeline.
@@ -2492,64 +2826,13 @@ Supports :conc-name, :constructor with boa-lambda-list, slot defaults."
             (combined (reduce (lambda (a rest) `(cons ,a ,rest))
                               spread-args :from-end t :initial-value last-arg)))
        (compiler-macroexpand-all `(apply ,fn ,combined))))
-    ;; (apply 'name list-form) with quoted symbol => expand based on function
+    ;; (apply 'name/function-ref list-form) — variadic builtins get dolist fold; others normalize to #'
     ((and (consp form) (eq (car form) 'apply)
           (= (length form) 3)
           (consp (second form))
-          (eq (car (second form)) 'quote)
-          (symbolp (second (second form))))
-     (let ((fn-name (second (second form)))
-           (args-form (third form)))
-       (if (member fn-name '(+ - * append nconc list))
-           ;; Variadic builtins: dolist fold (no reduce dependency)
-           (let ((acc (gensym "ACC"))
-                 (x (gensym "X"))
-                 (lst (gensym "LST"))
-                 (identity (case fn-name ((+) 0) ((*) 1) ((append nconc list) nil))))
-             (if (eq fn-name '-)
-                 (compiler-macroexpand-all
-                  `(let ((,lst ,args-form))
-                     (if (null (cdr ,lst))
-                         (- 0 (car ,lst))
-                         (let ((,acc (car ,lst)))
-                           (dolist (,x (cdr ,lst) ,acc)
-                             (setq ,acc (- ,acc ,x)))))))
-                 (compiler-macroexpand-all
-                  `(let ((,acc ,identity))
-                     (dolist (,x ,args-form ,acc)
-                       (setq ,acc (,fn-name ,acc ,x)))))))
-           ;; Non-variadic: convert to #'name form, expand args only
-           (list 'apply (list 'function fn-name)
-                 (compiler-macroexpand-all args-form)))))
-    ;; (apply #'name list-form) with function ref => expand variadic, pass through others
-    ((and (consp form) (eq (car form) 'apply)
-          (= (length form) 3)
-          (consp (second form))
-          (eq (car (second form)) 'function)
-          (symbolp (second (second form))))
-     (let ((fn-name (second (second form)))
-           (args-form (third form)))
-       (if (member fn-name '(+ - * append nconc list))
-           ;; Variadic builtins: dolist fold (no reduce dependency)
-           (let ((acc (gensym "ACC"))
-                 (x (gensym "X"))
-                 (lst (gensym "LST"))
-                 (identity (case fn-name ((+) 0) ((*) 1) ((append nconc list) nil))))
-             (if (eq fn-name '-)
-                 (compiler-macroexpand-all
-                  `(let ((,lst ,args-form))
-                     (if (null (cdr ,lst))
-                         (- 0 (car ,lst))
-                         (let ((,acc (car ,lst)))
-                           (dolist (,x (cdr ,lst) ,acc)
-                             (setq ,acc (- ,acc ,x)))))))
-                 (compiler-macroexpand-all
-                  `(let ((,acc ,identity))
-                     (dolist (,x ,args-form ,acc)
-                       (setq ,acc (,fn-name ,acc ,x)))))))
-           ;; Non-variadic: pass through, expand args only
-           (list 'apply (list 'function fn-name)
-                 (compiler-macroexpand-all args-form)))))
+          (or (and (eq (car (second form)) 'quote)    (symbolp (second (second form))))
+              (and (eq (car (second form)) 'function) (symbolp (second (second form))))))
+     (expand-apply-named-fn (second (second form)) (third form)))
     ;; (make-hash-table :test #'fn) → (make-hash-table :test 'fn)
     ((and (eq (car form) 'make-hash-table)
           (>= (length form) 3)
@@ -2562,126 +2845,14 @@ Supports :conc-name, :constructor with boa-lambda-list, slot defaults."
     ;; (function builtin) — wrap builtins in lambda for first-class use
     ((eq (car form) 'function)
      (let ((name (second form)))
-       (if (and (symbolp name)
-                (member name '(car cdr cons list append length reverse
-                               not null consp symbolp numberp integerp stringp
-                               atom listp characterp functionp
-                               + - * = < > <= >= mod rem
-                               eq eql equal
-                               first second third fourth fifth rest last
-                               nreverse butlast endp nth nthcdr member
-                               assoc acons nconc copy-list copy-tree subst
-                               symbol-name make-symbol intern gensym keywordp
-                               string-length string-upcase string-downcase
-                               string= string< string> string-concat
-                               char char-code code-char
-                               typep hash-table-p hash-table-count
-                               hash-table-test hash-table-keys hash-table-values
-                               zerop plusp minusp evenp oddp abs
-                               min max floor ceiling truncate
-                               princ prin1 print write-to-string
-                               prin1-to-string princ-to-string
-                               type-of make-list alphanumericp
-                               eval identity
-                               caar cadr cdar cddr
-                               caaar cdaar cadar cddar
-                               caadr cdadr caddr cdddr
-                               caaaar cadaar caadar caddar
-                               cdaaar cddaar cdadar cdddar
-                               caaadr cadadr caaddr cadddr
-                               cdaadr cddadr cdaddr cddddr)))
-           ;; Wrap builtins in lambda — variadic builtins get &rest + dolist fold
-           (cond
-             ;; Variadic builtins: wrap with &rest + dolist fold (no reduce dependency)
-             ((member name '(+ * append nconc))
-              (let ((args (gensym "ARGS"))
-                    (acc (gensym "ACC"))
-                    (x (gensym "X"))
-                    (identity (case name ((+) 0) ((*) 1) ((append nconc) nil))))
-                (compiler-macroexpand-all
-                 `(lambda (&rest ,args)
-                    (let ((,acc ,identity))
-                      (dolist (,x ,args ,acc)
-                        (setq ,acc (,name ,acc ,x))))))))
-             ((eq name '-)
-              (let ((args (gensym "ARGS"))
-                    (acc (gensym "ACC"))
-                    (x (gensym "X")))
-                (compiler-macroexpand-all
-                 `(lambda (&rest ,args)
-                    (if (null (cdr ,args))
-                        (- 0 (car ,args))
-                        (let ((,acc (car ,args)))
-                          (dolist (,x (cdr ,args) ,acc)
-                            (setq ,acc (- ,acc ,x)))))))))
-             ((eq name 'list)
-              (let ((args (gensym "ARGS")))
-                (compiler-macroexpand-all `(lambda (&rest ,args) ,args))))
-             ;; Binary builtins
-             ((member name '(cons = < > <= >= mod rem eq eql equal
-                             nth nthcdr member assoc acons
-                             string= string< string> string-concat
-                             char min max floor ceiling truncate))
-              (let ((a (gensym "A")) (b (gensym "B")))
-                (compiler-macroexpand-all `(lambda (,a ,b) (,name ,a ,b)))))
-             ;; Unary builtins
-             (t
-              (let ((x (gensym "X")))
-                (compiler-macroexpand-all `(lambda (,x) (,name ,x))))))
-           ;; Not a builtin — pass through for func-ref lookup
+       (if (and (symbolp name) (member name *all-builtin-names*))
+           (expand-function-builtin name)
            form)))
-    ;; Variadic builtins: (+ a b c) => (+ (+ a b) c), (append a b c) => (append (append a b) c)
-    ((and (consp form) (member (car form) '(+ - * append nconc))
-          (/= (length (cdr form)) 2))
-     (let ((op (car form))
-           (identity (case (car form) ((+ -) 0) (* 1) ((append nconc) nil))))
-       (compiler-macroexpand-all
-        (reduce-variadic-op op (cdr form) identity))))
-    ;; car/cdr composition accessors: caar, cadr, cdar, cddr, caddr, cadddr, etc.
-    ;; NOTE: first/second/third etc. are NOT included here because they shadow
-    ;; valid parameter/variable names (e.g. &key (first 0) in defstruct constructors).
-    ((and (consp form) (= (length form) 2)
-          (member (car form) '(caar cadr cdar cddr
-                               caaar cdaar cadar cddar
-                               caadr cdadr caddr cdddr
-                               caaaar cadaar caadar caddar
-                               cdaaar cddaar cdadar cdddar
-                               caaadr cadadr caaddr cadddr
-                               cdaadr cddadr cdaddr cddddr)))
-     (let ((ops (car form))
-           (arg (second form)))
-       (compiler-macroexpand-all
-        (case ops
-          (caar  `(car (car ,arg)))
-          (cadr  `(car (cdr ,arg)))
-          (cdar  `(cdr (car ,arg)))
-          (cddr  `(cdr (cdr ,arg)))
-          (caaar `(car (car (car ,arg))))
-          (cdaar `(cdr (car (car ,arg))))
-          (cadar `(car (cdr (car ,arg))))
-          (cddar `(cdr (cdr (car ,arg))))
-          (caadr `(car (car (cdr ,arg))))
-          (cdadr `(cdr (car (cdr ,arg))))
-          (caddr `(car (cdr (cdr ,arg))))
-          (cdddr `(cdr (cdr (cdr ,arg))))
-          (caaaar `(car (car (car (car ,arg)))))
-          (cadaar `(car (cdr (car (car ,arg)))))
-          (caadar `(car (car (cdr (car ,arg)))))
-          (caddar `(car (cdr (cdr (car ,arg)))))
-          (caaadr `(car (car (car (cdr ,arg)))))
-          (cadadr `(car (cdr (car (cdr ,arg)))))
-          (caaddr `(car (car (cdr (cdr ,arg)))))
-          (cadddr `(car (cdr (cdr (cdr ,arg)))))
-          (cdaaar `(cdr (car (car (car ,arg)))))
-          (cddaar `(cdr (cdr (car (car ,arg)))))
-          (cdadar `(cdr (car (cdr (car ,arg)))))
-          (cdddar `(cdr (cdr (cdr (car ,arg)))))
-          (cdaadr `(cdr (car (car (cdr ,arg)))))
-          (cddadr `(cdr (cdr (car (cdr ,arg)))))
-          (cdaddr `(cdr (car (cdr (cdr ,arg)))))
-          (cddddr `(cdr (cdr (cdr (cdr ,arg)))))
-          (t `(car ,arg))))))
-    ;; (multiple-value-list expr) => evaluate expr then capture values-list
+    ;; (multiple-value-list expr) — must live here (not our-defmacro) because the
+    ;; %values-to-list VM intrinsic is position-sensitive: no other instruction
+    ;; must execute between the multi-valued form and the capture call.
+    ;; declare-ignore in the body is intentional — the binder just triggers the
+    ;; VM's values-buffer fill; the primary-value binding itself is discarded.
     ((and (consp form) (eq (car form) 'multiple-value-list)
           (= (length form) 2))
      (let ((tmp (gensym "MVL")))
@@ -2689,15 +2860,20 @@ Supports :conc-name, :constructor with boa-lambda-list, slot defaults."
         `(let ((,tmp ,(second form)))
            (declare (ignore ,tmp))
            (%values-to-list)))))
-    ;; (deftype name type-spec) — register type alias
+    ;; Variadic builtins: (+ a b c) => (+ (+ a b) c), (append a b c) => (append (append a b) c)
+    ((and (consp form) (member (car form) (cons '- *variadic-fold-builtins*))
+          (/= (length (cdr form)) 2))
+     (let ((op (car form))
+           (identity (case (car form) ((+ -) 0) (* 1) (t nil))))
+       (compiler-macroexpand-all
+        (reduce-variadic-op op (cdr form) identity))))
+    ;; (deftype name type-spec) — register type alias at expand time
+    ;; (kept here rather than our-defmacro because cl-cc/type is loaded after macro.lisp)
     ((and (consp form) (eq (car form) 'deftype)
           (= (length form) 3)
           (symbolp (second form)))
      (cl-cc/type:register-type-alias (second form) (third form))
      `(quote ,(second form)))
-    ;; (declare ...) — silently ignore declarations
-    ((and (consp form) (eq (car form) 'declare))
-     nil)
     ;; (setf var val) => (setq var val) — plain variable assignment
     ((and (consp form) (eq (car form) 'setf)
           (= (length form) 3)
@@ -2712,677 +2888,85 @@ Supports :conc-name, :constructor with boa-lambda-list, slot defaults."
            (idx (third (second form)))
            (val (third form)))
        (compiler-macroexpand-all `(aset ,arr ,idx ,val))))
-    ;; (map result-type fn seq) => (coerce (mapcar fn (coerce seq 'list)) result-type)
-    ((and (consp form) (eq (car form) 'map)
-          (= (length form) 4))
-     (let ((result-type (second form))
-           (fn (third form))
-           (seq (fourth form)))
-       (compiler-macroexpand-all
-        `(coerce (mapcar ,fn (coerce ,seq 'list)) ,result-type))))
     ;; (make-array size :fill-pointer fp :adjustable adj ...) => make-adjustable-vector
     ((and (consp form) (eq (car form) 'make-array)
           (>= (length form) 4))
-     (let ((size (second form))
-           (rest (cddr form))
-           (fp nil) (adj nil))
-       ;; Parse keyword args
-       (loop for (key val) on rest by #'cddr
-             do (case key
-                  (:fill-pointer (setf fp val))
-                  (:adjustable (setf adj val))))
-       (if (or fp adj)
-           (compiler-macroexpand-all `(make-adjustable-vector ,size))
-           (compiler-macroexpand-all `(make-array ,size)))))
+     (expand-make-array-form (second form) (cddr form)))
     ;; (setf (car/cdr/first/rest/nth ...) val) — expand to rplaca/rplacd
     ((and (consp form) (eq (car form) 'setf)
           (= (length form) 3)
           (consp (second form))
           (member (car (second form)) '(car cdr first rest nth cadr cddr)))
-     (let ((place (second form))
-           (value (third form)))
-       (compiler-macroexpand-all
-        (case (car place)
-          ((car first)
-           (let ((v (gensym "V")))
-             `(let ((,v ,value))
-                (rplaca ,(second place) ,v)
-                ,v)))
-          ((cdr rest)
-           (let ((v (gensym "V")))
-             `(let ((,v ,value))
-                (rplacd ,(second place) ,v)
-                ,v)))
-          (nth
-           (let ((v (gensym "V")))
-             `(let ((,v ,value))
-                (rplaca (nthcdr ,(second place) ,(third place)) ,v)
-                ,v)))
-          (cadr
-           (let ((v (gensym "V")))
-             `(let ((,v ,value))
-                (rplaca (cdr ,(second place)) ,v)
-                ,v)))
-          (cddr
-           (let ((v (gensym "V")))
-             `(let ((,v ,value))
-                (rplacd (cdr ,(second place)) ,v)
-                ,v)))))))
+     (compiler-macroexpand-all
+      (expand-setf-cons-place (second form) (third form))))
     ;; (setf (accessor obj) val) — expand via accessor-slot-map or to slot-value
     ((and (consp form) (eq (car form) 'setf)
           (= (length form) 3)
           (consp (second form))
           (symbolp (car (second form)))
           (= (length (second form)) 2))
-     (let* ((place (second form))
-            (accessor-name (car place))
-            (obj-form (second place))
-            (value (third form))
-            (mapping (gethash accessor-name *accessor-slot-map*)))
-       (if mapping
-           ;; Known struct accessor: expand to (setf (slot-value obj 'slot) val)
-           (compiler-macroexpand-all
-            `(setf (slot-value ,obj-form ',(cdr mapping)) ,value))
-           ;; Unknown accessor: try slot-value with accessor name as slot
-           (compiler-macroexpand-all
-            `(setf (slot-value ,obj-form ',accessor-name) ,value)))))
-    ;; (coerce seq 'type) => (coerce-to-string/list/vector seq)
-    ((and (consp form) (eq (car form) 'coerce)
-          (= (length form) 3)
-          (consp (third form))
-          (eq (car (third form)) 'quote))
-     (let ((value (second form))
-           (type (second (third form))))
-       (compiler-macroexpand-all
-        (cond
-          ((and (symbolp type)
-                (member type '(string simple-string base-string)))
-           `(coerce-to-string ,value))
-          ((and (symbolp type) (eq type 'list))
-           `(coerce-to-list ,value))
-          ((and (symbolp type)
-                (member type '(vector simple-vector)))
-           `(coerce-to-vector ,value))
-          ;; Compound types: (simple-array ...), (array ...), (vector ...)
-          ((and (consp type)
-                (member (car type) '(simple-array array)))
-           `(coerce-to-vector ,value))
-          ((and (consp type) (eq (car type) 'vector))
-           `(coerce-to-vector ,value))
-          (t `(coerce-to-string ,value))))))
-    ;; (with-output-to-string (var) body...) => let + make-string-output-stream + body + get-output-stream-string
-    ((and (consp form) (eq (car form) 'with-output-to-string)
-          (consp (second form)))
-     (let ((var (car (second form)))
-           (body (cddr form))
-           (result-var (gensym "RESULT")))
-       (compiler-macroexpand-all
-        `(let ((,var (make-string-output-stream)))
-           ,@body
-           (let ((,result-var (get-output-stream-string ,var)))
-             ,result-var)))))
-    ;; (with-open-file (var path :direction dir) body...)
-    ;; => (let ((var (open path :direction dir)))
-    ;;      (unwind-protect (progn body...)
-    ;;        (close var)))
-    ((and (consp form) (eq (car form) 'with-open-file)
-          (consp (second form)))
-     (let* ((stream-spec (second form))
-            (var (first stream-spec))
-            (path (second stream-spec))
-            (options (cddr stream-spec))
-            (body (cddr form)))
-       (compiler-macroexpand-all
-        `(let ((,var (open ,path ,@options)))
-           (unwind-protect (progn ,@body)
-             (close ,var))))))
-    ;; (in-package name) — package system (currently a no-op, returns package name)
-    ((and (consp form) (eq (car form) 'in-package))
-     `(quote ,(second form)))
-    ;; (defpackage name options...) — package definition (currently returns name)
-    ((and (consp form) (eq (car form) 'defpackage))
-     `(quote ,(second form)))
-    ;; (export symbols &optional package) — export declaration (currently no-op)
-    ((and (consp form) (eq (car form) 'export))
-     nil)
-    ;; (warn fmt args...) => (progn (format t "~&WARNING: " fmt args...) nil)
-    ((and (consp form) (eq (car form) 'warn))
-     (compiler-macroexpand-all
-      `(progn (format t ,(concatenate 'string "~&WARNING: " (if (stringp (second form))
-                                                                 (second form)
-                                                                 "~A"))
-                      ,@(cddr form))
-              nil)))
-    ;; (prog (bindings) body...) => (block nil (let (bindings) (tagbody body...)))
-    ((and (consp form) (eq (car form) 'prog)
-          (>= (length form) 2) (listp (second form)))
-     (compiler-macroexpand-all
-      `(block nil (let ,(second form) (tagbody ,@(cddr form))))))
-    ;; (prog* (bindings) body...) => (block nil (let* (bindings) (tagbody body...)))
-    ((and (consp form) (eq (car form) 'prog*)
-          (>= (length form) 2) (listp (second form)))
-     (compiler-macroexpand-all
-      `(block nil (let* ,(second form) (tagbody ,@(cddr form))))))
-    ;; (with-slots (slot...) instance body...) => let binding slot-value calls
-    ((and (consp form) (eq (car form) 'with-slots)
-          (>= (length form) 3) (listp (second form)))
-     (let ((inst-var (gensym "INST")))
-       (compiler-macroexpand-all
-        `(let ((,inst-var ,(third form)))
-           (let ,(mapcar (lambda (slot)
-                           (if (listp slot)
-                               `(,(first slot) (slot-value ,inst-var ',(second slot)))
-                               `(,slot (slot-value ,inst-var ',slot))))
-                         (second form))
-             ,@(cdddr form))))))
-    ;; (nth-value n form) => (nth n (multiple-value-list form))
-    ((and (consp form) (eq (car form) 'nth-value)
-          (= (length form) 3))
-     (compiler-macroexpand-all
-      `(nth ,(second form) (multiple-value-list ,(third form)))))
+     (expand-setf-accessor (second form) (third form)))
     ;; (defstruct ...) — expand to defclass + constructor + predicate
     ((and (consp form) (eq (car form) 'defstruct))
      (compiler-macroexpand-all (expand-defstruct form)))
     ;; (eval-when (situations...) body...) — phase control
     ((and (consp form) (eq (car form) 'eval-when))
-     (let ((situations (second form))
-           (body (cddr form)))
-       ;; At compile time: if :compile-toplevel, eval body now
-       (when (member :compile-toplevel situations)
-         (dolist (b body)
-           (our-eval (compiler-macroexpand-all b))))
-       ;; For output: if :execute or :load-toplevel, include the body
-       (if (or (member :execute situations)
-               (member :load-toplevel situations))
-           (compiler-macroexpand-all (cons 'progn body))
-           nil)))
+     (expand-eval-when-form (second form) (cddr form)))
     ;; (macrolet ((name lambda-list body)...) forms...) — local macros
     ((and (consp form) (eq (car form) 'macrolet))
-     (let ((bindings (second form))
-           (body (cddr form))
-           (saved-macros nil))
-       ;; Save existing macros and register local ones
-       (dolist (binding bindings)
-         (let* ((name (first binding))
-                (lambda-list (second binding))
-                (macro-body (cddr binding))
-                (old-macro (lookup-macro name))
-                (form-var (gensym "FORM"))
-                (env-var (gensym "ENV"))
-                (expander (eval `(lambda (,form-var ,env-var)
-                                   (declare (ignore ,env-var))
-                                   (let* ,(generate-lambda-bindings lambda-list form-var)
-                                     ,@macro-body)))))
-           (push (cons name old-macro) saved-macros)
-           (register-macro name expander)))
-       ;; Expand the body with local macros active
-       (let ((result (compiler-macroexpand-all (cons 'progn body))))
-         ;; Restore saved macros
-         (dolist (saved saved-macros)
-           (if (cdr saved)
-               (register-macro (car saved) (cdr saved))
-               (remhash (car saved) (macro-env-table *macro-environment*))))
-         result)))
-    ;; (copy-hash-table ht) => make new HT, copy entries
-    ((and (consp form) (symbolp (car form))
-          (string-equal (symbol-name (car form)) "COPY-HASH-TABLE")
-          (= (length form) 2))
-     (let ((ht (gensym "HT")) (new (gensym "NEW")) (k (gensym "K")) (v (gensym "V")))
-       (compiler-macroexpand-all
-        `(let ((,ht ,(second form)))
-           (let ((,new (make-hash-table :test (hash-table-test ,ht))))
-             (maphash (lambda (,k ,v) (setf (gethash ,k ,new) ,v)) ,ht)
-             ,new)))))
-    ;; (prog1 first-form body...) => (let ((#:g first-form)) body... #:g)
-    ((and (consp form) (eq (car form) 'prog1) (>= (length form) 2))
-     (let ((tmp (gensym "PROG1")))
-       (compiler-macroexpand-all
-        `(let ((,tmp ,(second form)))
-           ,@(cddr form)
-           ,tmp))))
-    ;; (prog2 first-form second-form body...) => (progn first-form (prog1 second-form body...))
-    ((and (consp form) (eq (car form) 'prog2) (>= (length form) 3))
-     (compiler-macroexpand-all
-      `(progn ,(second form) (prog1 ,(third form) ,@(cdddr form)))))
-    ;; (ignore-errors form...) => (handler-case (progn form...) (error (e) (values nil e)))
-    ((and (consp form) (eq (car form) 'ignore-errors))
-     (let ((e-var (gensym "E")))
-       (compiler-macroexpand-all
-        `(handler-case (progn ,@(cdr form))
-           (error (,e-var) nil)))))
-    ;; (reduce fn lst :initial-value val) => (reduce fn lst val t)
-    ((and (consp form) (eq (car form) 'reduce)
-          (= (length form) 5)
-          (eq (fourth form) :initial-value))
-     (compiler-macroexpand-all
-      (list 'reduce (second form) (third form) (fifth form) 't)))
-    ;; (mapcar fn list) => dolist-based collect loop
-    ((and (consp form) (eq (car form) 'mapcar)
-          (= (length form) 3))
-     (let ((fn-var (gensym "FN"))
-           (x (gensym "X"))
-           (acc (gensym "ACC")))
-       (compiler-macroexpand-all
-        `(let ((,fn-var ,(second form))
-               (,acc nil))
-           (dolist (,x ,(third form) (nreverse ,acc))
-             (setq ,acc (cons (funcall ,fn-var ,x) ,acc)))))))
-    ;; (mapc fn list) => dolist side-effect loop, returns list
-    ((and (consp form) (eq (car form) 'mapc)
-          (= (length form) 3))
-     (let ((fn-var (gensym "FN"))
-           (lst (gensym "LST"))
-           (x (gensym "X")))
-       (compiler-macroexpand-all
-        `(let ((,fn-var ,(second form))
-               (,lst ,(third form)))
-           (dolist (,x ,lst ,lst)
-             (funcall ,fn-var ,x))))))
-    ;; (mapcan fn list) => dolist + nconc
-    ((and (consp form) (eq (car form) 'mapcan)
-          (= (length form) 3))
-     (let ((fn-var (gensym "FN"))
-           (x (gensym "X"))
-           (acc (gensym "ACC")))
-       (compiler-macroexpand-all
-        `(let ((,fn-var ,(second form))
-               (,acc nil))
-           (dolist (,x ,(third form) ,acc)
-             (setq ,acc (nconc ,acc (funcall ,fn-var ,x))))))))
-    ;; (every pred list) => dolist with early exit
-    ((and (consp form) (eq (car form) 'every)
-          (= (length form) 3))
-     (let ((fn-var (gensym "FN"))
-           (x (gensym "X")))
-       (compiler-macroexpand-all
-        `(let ((,fn-var ,(second form)))
-           (block nil
-             (dolist (,x ,(third form) t)
-               (unless (funcall ,fn-var ,x)
-                 (return nil))))))))
-    ;; (some pred list) => dolist with early exit
-    ((and (consp form) (eq (car form) 'some)
-          (= (length form) 3))
-     (let ((fn-var (gensym "FN"))
-           (x (gensym "X"))
-           (result (gensym "R")))
-       (compiler-macroexpand-all
-        `(let ((,fn-var ,(second form)))
-           (block nil
-             (dolist (,x ,(third form) nil)
-               (let ((,result (funcall ,fn-var ,x)))
-                 (when ,result (return ,result)))))))))
-    ;; (remove-if pred list) => dolist filter
-    ((and (consp form) (eq (car form) 'remove-if)
-          (= (length form) 3))
-     (let ((fn-var (gensym "FN"))
-           (x (gensym "X"))
-           (acc (gensym "ACC")))
-       (compiler-macroexpand-all
-        `(let ((,fn-var ,(second form))
-               (,acc nil))
-           (dolist (,x ,(third form) (nreverse ,acc))
-             (unless (funcall ,fn-var ,x)
-               (setq ,acc (cons ,x ,acc))))))))
-    ;; (remove-if-not pred list) => dolist keep-if filter
-    ((and (consp form) (eq (car form) 'remove-if-not)
-          (= (length form) 3))
-     (let ((fn-var (gensym "FN"))
-           (x (gensym "X"))
-           (acc (gensym "ACC")))
-       (compiler-macroexpand-all
-        `(let ((,fn-var ,(second form))
-               (,acc nil))
-           (dolist (,x ,(third form) (nreverse ,acc))
-             (when (funcall ,fn-var ,x)
-               (setq ,acc (cons ,x ,acc))))))))
-    ;; (find item list) => dolist with eql test
-    ((and (consp form) (eq (car form) 'find)
-          (= (length form) 3))
-     (let ((item (gensym "ITEM"))
-           (x (gensym "X")))
-       (compiler-macroexpand-all
-        `(let ((,item ,(second form)))
-           (block nil
-             (dolist (,x ,(third form) nil)
-               (when (eql ,item ,x)
-                 (return ,x))))))))
-    ;; (find-if pred list) => dolist with predicate test
-    ((and (consp form) (eq (car form) 'find-if)
-          (= (length form) 3))
-     (let ((fn-var (gensym "FN"))
-           (x (gensym "X")))
-       (compiler-macroexpand-all
-        `(let ((,fn-var ,(second form)))
-           (block nil
-             (dolist (,x ,(third form) nil)
-               (when (funcall ,fn-var ,x)
-                 (return ,x))))))))
-    ;; (position item list) => dolist with index counter
-    ((and (consp form) (eq (car form) 'position)
-          (= (length form) 3))
-     (let ((item (gensym "ITEM"))
-           (x (gensym "X"))
-           (idx (gensym "IDX")))
-       (compiler-macroexpand-all
-        `(let ((,item ,(second form))
-               (,idx 0))
-           (block nil
-             (dolist (,x ,(third form) nil)
-               (when (eql ,item ,x)
-                 (return ,idx))
-               (setq ,idx (+ ,idx 1))))))))
-    ;; (count item list) => dolist with counter
-    ((and (consp form) (eq (car form) 'count)
-          (= (length form) 3))
-     (let ((item (gensym "ITEM"))
-           (x (gensym "X"))
-           (cnt (gensym "CNT")))
-       (compiler-macroexpand-all
-        `(let ((,item ,(second form))
-               (,cnt 0))
-           (dolist (,x ,(third form) ,cnt)
-             (when (eql ,item ,x)
-               (setq ,cnt (+ ,cnt 1))))))))
-    ;; (count-if pred list) => dolist with predicate counter
-    ((and (consp form) (eq (car form) 'count-if)
-          (= (length form) 3))
-     (let ((fn-var (gensym "FN"))
-           (x (gensym "X"))
-           (cnt (gensym "CNT")))
-       (compiler-macroexpand-all
-        `(let ((,fn-var ,(second form))
-               (,cnt 0))
-           (dolist (,x ,(third form) ,cnt)
-             (when (funcall ,fn-var ,x)
-               (setq ,cnt (+ ,cnt 1))))))))
-    ;; (remove item list) => dolist filter by eql
-    ((and (consp form) (eq (car form) 'remove)
-          (= (length form) 3))
-     (let ((item (gensym "ITEM"))
-           (x (gensym "X"))
-           (acc (gensym "ACC")))
-       (compiler-macroexpand-all
-        `(let ((,item ,(second form))
-               (,acc nil))
-           (dolist (,x ,(third form) (nreverse ,acc))
-             (unless (eql ,item ,x)
-               (setq ,acc (cons ,x ,acc))))))))
-    ;; (remove-duplicates list) => dolist with membership check
-    ((and (consp form) (eq (car form) 'remove-duplicates)
-          (= (length form) 2))
-     (let ((x (gensym "X"))
-           (acc (gensym "ACC")))
-       (compiler-macroexpand-all
-        `(let ((,acc nil))
-           (dolist (,x ,(second form) (nreverse ,acc))
-             (unless (member ,x ,acc)
-               (setq ,acc (cons ,x ,acc))))))))
-    ;; (union list1 list2) => append elements from list1 not in list2
-    ((and (consp form) (eq (car form) 'union)
-          (= (length form) 3))
-     (let ((l1 (gensym "L1"))
-           (l2 (gensym "L2"))
-           (x (gensym "X"))
-           (acc (gensym "ACC")))
-       (compiler-macroexpand-all
-        `(let ((,l1 ,(second form))
-               (,l2 ,(third form))
-               (,acc nil))
-           ;; Start with all of l2
-           (dolist (,x ,l2)
-             (setq ,acc (cons ,x ,acc)))
-           ;; Add elements from l1 not already in result
-           (dolist (,x ,l1 (nreverse ,acc))
-             (unless (member ,x ,l2)
-               (setq ,acc (cons ,x ,acc))))))))
-    ;; (set-difference list1 list2) => elements in list1 not in list2
-    ((and (consp form) (eq (car form) 'set-difference)
-          (= (length form) 3))
-     (let ((l2 (gensym "L2"))
-           (x (gensym "X"))
-           (acc (gensym "ACC")))
-       (compiler-macroexpand-all
-        `(let ((,l2 ,(third form))
-               (,acc nil))
-           (dolist (,x ,(second form) (nreverse ,acc))
-             (unless (member ,x ,l2)
-               (setq ,acc (cons ,x ,acc))))))))
-    ;; (intersection list1 list2) => elements in both lists
-    ((and (consp form) (eq (car form) 'intersection)
-          (= (length form) 3))
-     (let ((l2 (gensym "L2"))
-           (x (gensym "X"))
-           (acc (gensym "ACC")))
-       (compiler-macroexpand-all
-        `(let ((,l2 ,(third form))
-               (,acc nil))
-           (dolist (,x ,(second form) (nreverse ,acc))
-             (when (member ,x ,l2)
-               (setq ,acc (cons ,x ,acc))))))))
-    ;; (rassoc item alist) => find by cdr
-    ((and (consp form) (eq (car form) 'rassoc)
-          (= (length form) 3))
-     (let ((item (gensym "ITEM"))
-           (x (gensym "X")))
-       (compiler-macroexpand-all
-        `(let ((,item ,(second form)))
-           (block nil
-             (dolist (,x ,(third form) nil)
-               (when (and (consp ,x) (eql ,item (cdr ,x)))
-                 (return ,x))))))))
-    ;; (pairlis keys data &optional alist) => zip into alist
-    ((and (consp form) (eq (car form) 'pairlis)
-          (>= (length form) 3))
-     (let ((ks (gensym "KS"))
-           (ds (gensym "DS"))
-           (acc (gensym "ACC")))
-       (compiler-macroexpand-all
-        `(let ((,ks ,(second form))
-               (,ds ,(third form))
-               (,acc ,(if (= (length form) 4) (fourth form) nil)))
-           (tagbody
-            pairlis-loop
-              (when (and ,ks ,ds)
-                (setq ,acc (cons (cons (car ,ks) (car ,ds)) ,acc))
-                (setq ,ks (cdr ,ks))
-                (setq ,ds (cdr ,ds))
-                (go pairlis-loop)))
-           ,acc))))
-    ;; (sort list predicate) => inline merge sort via labels
-    ((and (consp form) (eq (car form) 'sort)
-          (= (length form) 3))
-     (let ((lst (gensym "LST"))
-           (pred (gensym "PRED"))
-           (len (gensym "LEN"))
-           (mid (gensym "MID"))
-           (left (gensym "LEFT"))
-           (right (gensym "RIGHT"))
-           (acc (gensym "ACC"))
-           (i (gensym "I"))
-           (tmp (gensym "TMP"))
-           (msort (gensym "MSORT"))
-           (mmerge (gensym "MMERGE"))
-           (take-n (gensym "TAKEN")))
-       (compiler-macroexpand-all
-        `(let ((,pred ,(third form)))
-           (labels ((,take-n (lst n)
-                      (if (= n 0) nil
-                          (cons (car lst) (,take-n (cdr lst) (- n 1)))))
-                    (,mmerge (a b)
-                      (cond ((null a) b)
-                            ((null b) a)
-                            ((funcall ,pred (car a) (car b))
-                             (cons (car a) (,mmerge (cdr a) b)))
-                            (t (cons (car b) (,mmerge a (cdr b))))))
-                    (,msort (lst)
-                      (let ((,len (length lst)))
-                        (if (<= ,len 1) lst
-                            (let* ((,mid (truncate ,len 2))
-                                   (,left (,take-n lst ,mid))
-                                   (,right (nthcdr ,mid lst)))
-                              (,mmerge (,msort ,left) (,msort ,right)))))))
-             (,msort ,(second form)))))))
-    ;; (stable-sort list predicate) => same as sort (merge sort is stable)
-    ((and (consp form) (eq (car form) 'stable-sort)
-          (= (length form) 3))
-     (compiler-macroexpand-all
-      `(sort ,(second form) ,(third form))))
-    ;; (notany pred list) => (not (some pred list))
-    ((and (consp form) (eq (car form) 'notany)
-          (= (length form) 3))
-     (compiler-macroexpand-all
-      `(not (some ,(second form) ,(third form)))))
-    ;; (notevery pred list) => (not (every pred list))
-    ((and (consp form) (eq (car form) 'notevery)
-          (= (length form) 3))
-     (compiler-macroexpand-all
-      `(not (every ,(second form) ,(third form)))))
-    ;; (subsetp list1 list2) => (every (lambda (x) (member x list2)) list1)
-    ((and (consp form) (eq (car form) 'subsetp)
-          (= (length form) 3))
-     (let ((l2 (gensym "L2"))
-           (x (gensym "X")))
-       (compiler-macroexpand-all
-        `(let ((,l2 ,(third form)))
-           (every (lambda (,x) (member ,x ,l2)) ,(second form))))))
-    ;; (adjoin item list) => add if not member
-    ((and (consp form) (eq (car form) 'adjoin)
-          (= (length form) 3))
-     (let ((item (gensym "ITEM"))
-           (lst (gensym "LST")))
-       (compiler-macroexpand-all
-        `(let ((,item ,(second form))
-               (,lst ,(third form)))
-           (if (member ,item ,lst) ,lst (cons ,item ,lst))))))
-    ;; (concatenate 'string s1 s2 ...) => nested string-concat
-    ((and (consp form) (eq (car form) 'concatenate)
-          (>= (length form) 3))
-     (let ((strings (cddr form)))
-       (compiler-macroexpand-all
-        (if (= (length strings) 1)
-            (first strings)
-            (reduce (lambda (acc s) (list 'string-concat acc s))
-                    (cddr strings)
-                    :initial-value (list 'string-concat (first strings) (second strings)))))))
-    ;; (list ...) => nested cons
-    ((and (consp form) (eq (car form) 'list))
-     (compiler-macroexpand-all
-      (if (null (cdr form))
-          'nil
-          (reduce (lambda (x acc) (list 'cons x acc))
-                  (cdr form) :from-end t :initial-value 'nil))))
-    ;; Typed defun: (defun name ((x fixnum) (y string)) return-type body...)
-    ;; → strip types, register in *function-type-registry*, transform to plain defun
+     (expand-macrolet-form (second form) (cddr form)))
+    ;; Typed defun: (defun name ((x fixnum) ...) return-type body...)
     ((and (consp form) (eq (car form) 'defun)
           (>= (length form) 4)
           (symbolp (second form))
           (listp (third form))
           (lambda-list-has-typed-p (third form)))
-     (let ((name (second form))
-           (raw-params (third form))
-           (rest-forms (cdddr form)))
-       (multiple-value-bind (plain-params type-alist)
-           (strip-typed-params raw-params)
-         ;; Detect optional return type (first body form that's a type specifier symbol)
-         (let* ((has-return-type (and rest-forms
-                                     (symbolp (first rest-forms))
-                                     (cl-cc/type:looks-like-type-specifier-p (first rest-forms))))
-                (return-type-spec (when has-return-type (first rest-forms)))
-                (body-forms (if has-return-type (cdr rest-forms) rest-forms)))
-           ;; Register function type for type checking
-           (let ((param-types (mapcar (lambda (entry)
-                                        (cl-cc/type:parse-type-specifier (cdr entry)))
-                                      type-alist))
-                 (return-type (if return-type-spec
-                                  (cl-cc/type:parse-type-specifier return-type-spec)
-                                  cl-cc/type:+type-unknown+)))
-             (register-function-type name param-types return-type))
-           ;; Transform to plain defun with type assertions
-           (let ((typed-body
-                   (if return-type-spec
-                       `((the ,return-type-spec (progn ,@body-forms)))
-                       body-forms)))
-             ;; Add check-type assertions for typed params
-             (let ((checks (loop for (pname . ptype) in type-alist
-                                 collect `(check-type ,pname ,ptype))))
-               (compiler-macroexpand-all
-                `(defun ,name ,plain-params
-                   ,@checks
-                   ,@typed-body))))))))
-    ;; Typed lambda: (lambda ((x fixnum) (y string)) return-type body...)
+     (expand-typed-defun-or-lambda 'defun (second form) (third form) (cdddr form)))
+    ;; Typed lambda: (lambda ((x fixnum) ...) return-type body...)
     ((and (consp form) (eq (car form) 'lambda)
           (>= (length form) 3)
           (listp (second form))
           (lambda-list-has-typed-p (second form)))
-     (let ((raw-params (second form))
-           (rest-forms (cddr form)))
-       (multiple-value-bind (plain-params type-alist)
-           (strip-typed-params raw-params)
-         (let* ((has-return-type (and rest-forms
-                                     (symbolp (first rest-forms))
-                                     (cl-cc/type:looks-like-type-specifier-p (first rest-forms))))
-                (return-type-spec (when has-return-type (first rest-forms)))
-                (body-forms (if has-return-type (cdr rest-forms) rest-forms)))
-           (let ((typed-body
-                   (if return-type-spec
-                       `((the ,return-type-spec (progn ,@body-forms)))
-                       body-forms)))
-             (let ((checks (loop for (pname . ptype) in type-alist
-                                 collect `(check-type ,pname ,ptype))))
-               (compiler-macroexpand-all
-                `(lambda ,plain-params
-                   ,@checks
-                   ,@typed-body))))))))
+     (expand-typed-defun-or-lambda 'lambda nil (second form) (cddr form)))
     ;; (defclass name supers (slot-specs...)) — extract accessor mappings for setf expansion
     ((and (consp form) (eq (car form) 'defclass))
-     (let* ((class-name (second form))
-            (slot-specs (fourth form)))
-       ;; Register accessor->slot mappings so setf works in same progn
-       (when (listp slot-specs)
-         (dolist (spec slot-specs)
-           (when (listp spec)
-             (let* ((slot-name (first spec))
-                    (opts (rest spec))
-                    (accessor (getf opts :accessor)))
-               (when accessor
-                 (setf (gethash accessor *accessor-slot-map*)
-                       (cons class-name slot-name)))))))
-       ;; Process as normal special form
-       (cons (car form)
-             (mapcar #'compiler-macroexpand-all (cdr form)))))
+     (let ((class-name (second form))
+           (slot-specs (fourth form)))
+       (register-defclass-accessors class-name slot-specs)
+       (list 'defclass class-name
+             (mapcar #'compiler-macroexpand-all (third form))
+             (when (listp slot-specs)
+               (mapcar #'expand-defclass-slot-spec slot-specs)))))
     ;; progn — process forms sequentially so defmacro takes effect for later forms
     ((and (consp form) (eq (car form) 'progn))
-     (let ((expanded-forms nil))
-       (dolist (sub (cdr form))
-         (let ((exp-sub (compiler-macroexpand-all sub)))
-           ;; If this is a defmacro, register the macro immediately
-           (when (and (consp exp-sub) (eq (car exp-sub) 'defmacro))
-             (let* ((name (second exp-sub))
-                    (lambda-list (third exp-sub))
-                    (body (cdddr exp-sub))
-                    (form-var (gensym "FORM"))
-                    (env-var (gensym "ENV")))
-               (let ((expander (eval `(lambda (,form-var ,env-var)
-                                        (declare (ignore ,env-var))
-                                        (let* ,(generate-lambda-bindings lambda-list form-var)
-                                          ,@body)))))
-                 (register-macro name expander))))
-           (push exp-sub expanded-forms)))
-       (cons 'progn (nreverse expanded-forms))))
+     (expand-progn-with-eager-defmacro (cdr form)))
+    ;; defun/lambda (untyped) — protect required params from expansion; expand default values and body
+    ((and (consp form) (member (car form) '(defun lambda))
+          (>= (length form) 3)
+          (listp (second (if (eq (car form) 'lambda) form (cdr form)))))
+     (if (eq (car form) 'defun)
+         ;; (defun name params body...)
+         (list* 'defun (second form) (expand-lambda-list-defaults (third form))
+                (mapcar #'compiler-macroexpand-all (cdddr form)))
+         ;; (lambda params body...)
+         (list* 'lambda (expand-lambda-list-defaults (second form))
+                (mapcar #'compiler-macroexpand-all (cddr form)))))
+    ;; let — expand only binding VALUES, not binding names (let* is a macro, handled by our-macroexpand-1)
+    ((and (consp form) (eq (car form) 'let)
+          (>= (length form) 2) (listp (second form)))
+     (list* 'let
+            (mapcar #'expand-let-binding (second form))
+            (mapcar #'compiler-macroexpand-all (cddr form))))
     ;; flet/labels — expand only function bodies, not binding structure
     ((and (consp form) (member (car form) '(flet labels))
           (>= (length form) 3) (listp (second form)))
-     (let ((expanded-bindings
-             (mapcar (lambda (binding)
-                       (if (and (consp binding) (>= (length binding) 3))
-                           ;; (name (params...) body...) — only expand body
-                           (list* (first binding) (second binding)
-                                  (mapcar #'compiler-macroexpand-all (cddr binding)))
-                           binding))
-                     (second form)))
-           (expanded-body (mapcar #'compiler-macroexpand-all (cddr form))))
-       (list* (car form) expanded-bindings expanded-body)))
+     (list* (car form)
+            (mapcar #'expand-flet-labels-binding (second form))
+            (mapcar #'compiler-macroexpand-all (cddr form))))
+    ;; FR-301: normalize 1-arg rounding forms to 2-arg with divisor 1
+    ((and (consp form) (= (length form) 2)
+          (member (car form) '(floor ceiling truncate round)))
+     (compiler-macroexpand-all `(,(car form) ,(second form) 1)))
     ;; Special forms — recurse into subforms but don't expand the head
     ((and (symbolp (car form))
           (member (car form) *compiler-special-forms*))
@@ -3595,7 +3179,10 @@ Supports :conc-name, :constructor with boa-lambda-list, slot defaults."
 
 (defun run-string (source &key stdlib)
   "Compile and run SOURCE. When STDLIB is true, include standard library."
-  (let* ((result (if stdlib
+  (let* ((*package* (find-package :cl-cc))
+         (*accessor-slot-map* (make-hash-table :test #'eq))
+         (*labels-boxed-fns* nil)
+         (result (if stdlib
                      (compile-string-with-stdlib source :target :vm)
                      (compile-string source :target :vm)))
          (program (compilation-result-program result)))

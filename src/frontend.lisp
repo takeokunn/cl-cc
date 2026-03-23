@@ -330,6 +330,12 @@
                  :source-line source-line
                  :source-column source-column))
 
+(defmethod lower-sexp-to-ast ((node float) &key source-file source-line source-column)
+  (make-ast-quote :value node
+                  :source-file source-file
+                  :source-line source-line
+                  :source-column source-column))
+
 (defmethod lower-sexp-to-ast ((node string) &key source-file source-line source-column)
   (make-ast-quote :value node
                  :source-file source-file
@@ -422,52 +428,45 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
 
 (defun lower-list-to-ast (node &key source-file source-line source-column)
   "Helper to dispatch on list forms."
-  (case (car node)
+  (macrolet ((sloc (ctor &rest args)
+               `(,ctor ,@args
+                       :source-file source-file
+                       :source-line source-line
+                       :source-column source-column)))
+    (case (car node)
     ;; Arithmetic and comparison operators
     ((+ - * = < > <= >=)
      (unless (= (length node) 3)
        (error "~S takes exactly 2 args" (car node)))
-     (make-ast-binop
+     (sloc make-ast-binop
                     :op (car node)
                     :lhs (lower-sexp-to-ast (second node))
-                    :rhs (lower-sexp-to-ast (third node))
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))
+                    :rhs (lower-sexp-to-ast (third node))))
     
     ;; Conditional
     (if
      (unless (member (length node) '(3 4))
        (error "if takes cond then [else]"))
-     (make-ast-if
+     (sloc make-ast-if
                     :cond (lower-sexp-to-ast (second node))
                     :then (lower-sexp-to-ast (third node))
                     :else (if (fourth node)
                               (lower-sexp-to-ast (fourth node))
-                              (lower-sexp-to-ast nil))
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))
+                              (lower-sexp-to-ast nil))))
     
     ;; Sequence
     (progn
      (when (< (length node) 2)
        (error "progn needs at least one form"))
-     (make-ast-progn
-                    :forms (mapcar #'lower-sexp-to-ast (cdr node))
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))
+     (sloc make-ast-progn
+                    :forms (mapcar #'lower-sexp-to-ast (cdr node))))
     
     ;; Print
     (print
      (unless (= (length node) 2)
        (error "print takes one arg"))
-     (make-ast-print
-                    :expr (lower-sexp-to-ast (second node))
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))
+     (sloc make-ast-print
+                    :expr (lower-sexp-to-ast (second node))))
     
     ;; Let binding
     (let
@@ -476,7 +475,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (let ((bindings (second node)))
        (unless (listp bindings)
          (error "let bindings must be a list"))
-       (make-ast-let
+       (sloc make-ast-let
         :bindings (mapcar (lambda (binding)
                             (unless (and (consp binding)
                                          (= (length binding) 2)
@@ -485,10 +484,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
                             (cons (first binding)
                                   (lower-sexp-to-ast (second binding))))
                           bindings)
-        :body (mapcar #'lower-sexp-to-ast (cddr node))
-        :source-file source-file
-        :source-line source-line
-        :source-column source-column)))
+        :body (mapcar #'lower-sexp-to-ast (cddr node)))))
     
     ;; Lambda expression
     (lambda
@@ -500,7 +496,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
        (if (lambda-list-has-extended-p raw-params)
            (multiple-value-bind (required optional rest-param key-params)
                (parse-compiler-lambda-list raw-params)
-             (make-ast-lambda
+             (sloc make-ast-lambda
                             :params required
                             :optional-params (mapcar (lambda (opt)
                                                        (list (first opt)
@@ -513,19 +509,13 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
                                                         (when (second kp)
                                                           (lower-sexp-to-ast (second kp)))))
                                                 key-params)
-                            :body (mapcar #'lower-sexp-to-ast (cddr node))
-                            :source-file source-file
-                            :source-line source-line
-                            :source-column source-column))
+                            :body (mapcar #'lower-sexp-to-ast (cddr node))))
            (progn
              (unless (every #'symbolp raw-params)
                (error "lambda parameters must be symbols"))
-             (make-ast-lambda
+             (sloc make-ast-lambda
                             :params raw-params
-                            :body (mapcar #'lower-sexp-to-ast (cddr node))
-                            :source-file source-file
-                            :source-line source-line
-                            :source-column source-column)))))
+                            :body (mapcar #'lower-sexp-to-ast (cddr node)))))))
     
     ;; Function reference (#'var)
     (function
@@ -535,11 +525,8 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
        (unless (or (symbolp name)
                    (and (consp name) (eq (car name) 'setf)))
          (error "function argument must be a symbol or (setf name)"))
-       (make-ast-function
-                      :name name
-                      :source-file source-file
-                      :source-line source-line
-                      :source-column source-column)))
+       (sloc make-ast-function
+                      :name name)))
     
     ;; Block
     (block
@@ -548,12 +535,9 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (let ((name (second node)))
        (unless (symbolp name)
          (error "block name must be a symbol"))
-       (make-ast-block
+       (sloc make-ast-block
                       :name name
-                      :body (mapcar #'lower-sexp-to-ast (cddr node))
-                      :source-file source-file
-                      :source-line source-line
-                      :source-column source-column)))
+                      :body (mapcar #'lower-sexp-to-ast (cddr node)))))
     
     ;; Return-from
     (return-from
@@ -562,12 +546,9 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (let ((name (second node)))
        (unless (symbolp name)
          (error "return-from name must be a symbol"))
-       (make-ast-return-from
+       (sloc make-ast-return-from
                       :name name
-                      :value (lower-sexp-to-ast (third node))
-                      :source-file source-file
-                      :source-line source-line
-                      :source-column source-column)))
+                      :value (lower-sexp-to-ast (third node)))))
     
     ;; Tagbody
     (tagbody
@@ -593,11 +574,8 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
        ;; Add last tag
        (when current-tag
          (push (cons current-tag (nreverse current-forms)) tags))
-       (make-ast-tagbody
-                      :tags (nreverse tags)
-                      :source-file source-file
-                      :source-line source-line
-                      :source-column source-column)))
+       (sloc make-ast-tagbody
+                      :tags (nreverse tags))))
     
     ;; Go
     (go
@@ -606,11 +584,8 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (let ((tag (second node)))
        (unless (or (symbolp tag) (integerp tag))
          (error "go tag must be a symbol or integer"))
-       (make-ast-go
-                      :tag tag
-                      :source-file source-file
-                      :source-line source-line
-                      :source-column source-column)))
+       (sloc make-ast-go
+                      :tag tag)))
     
     ;; Setq
     (setq
@@ -619,12 +594,9 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (let ((var (second node)))
        (unless (symbolp var)
          (error "setq variable must be a symbol"))
-       (make-ast-setq
+       (sloc make-ast-setq
                       :var var
-                      :value (lower-sexp-to-ast (third node))
-                      :source-file source-file
-                      :source-line source-line
-                      :source-column source-column)))
+                      :value (lower-sexp-to-ast (third node)))))
     
     ;; Setf - generalized assignment
     (setf
@@ -632,32 +604,58 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
        (error "setf requires a place and a value"))
      (let ((place (second node))
            (value-form (third node)))
-       (unless (and (consp place) (member (car place) '(slot-value gethash)))
-         (error "setf only supports (slot-value obj 'slot) and (gethash key table) places"))
+       (unless (and (consp place)
+                  (member (car place) '(slot-value gethash get symbol-plist
+                                        aref svref row-major-aref fill-pointer car cdr)))
+         (error "setf only supports slot-value, gethash, get, symbol-plist, aref, svref, fill-pointer places"))
        (cond
+         ((eq (car place) 'get)
+          ;; (setf (get sym indicator) value) => vm-symbol-set
+          (lower-sexp-to-ast
+           `(%set-symbol-prop ,(second place) ,(third place) ,value-form)))
+         ((eq (car place) 'symbol-plist)
+          ;; (setf (symbol-plist sym) plist) => vm-set-symbol-plist
+          (lower-sexp-to-ast
+           `(%set-symbol-plist ,(second place) ,value-form)))
+         ((eq (car place) 'aref)
+          ;; (setf (aref arr idx) val) => vm-aset
+          (lower-sexp-to-ast
+           `(aset ,(second place) ,(third place) ,value-form)))
+         ((eq (car place) 'svref)
+          ;; (setf (svref arr idx) val) => vm-svset
+          (lower-sexp-to-ast
+           `(%svset ,(second place) ,(third place) ,value-form)))
+         ((eq (car place) 'row-major-aref)
+          ;; (setf (row-major-aref arr idx) val) => setf aref on row-major index
+          (lower-sexp-to-ast
+           `(aset ,(second place) ,(third place) ,value-form)))
+         ((eq (car place) 'fill-pointer)
+          ;; (setf (fill-pointer vec) n) => vm-set-fill-pointer
+          (lower-sexp-to-ast
+           `(%set-fill-pointer ,(second place) ,value-form)))
+         ((eq (car place) 'car)
+          ;; (setf (car x) v) => (rplaca x v)
+          (lower-sexp-to-ast `(rplaca ,(second place) ,value-form)))
+         ((eq (car place) 'cdr)
+          ;; (setf (cdr x) v) => (rplacd x v)
+          (lower-sexp-to-ast `(rplacd ,(second place) ,value-form)))
          ((eq (car place) 'slot-value)
           (let ((obj-form (second place))
                 (slot-form (third place)))
             (let ((slot-name (if (and (consp slot-form) (eq (car slot-form) 'quote))
                                  (second slot-form)
                                  (error "setf slot-value slot must be quoted"))))
-              (make-ast-set-slot-value
+              (sloc make-ast-set-slot-value
                              :object (lower-sexp-to-ast obj-form)
                              :slot slot-name
-                             :value (lower-sexp-to-ast value-form)
-                             :source-file source-file
-                             :source-line source-line
-                             :source-column source-column))))
+                             :value (lower-sexp-to-ast value-form)))))
          ((eq (car place) 'gethash)
           (let ((key-form (second place))
                 (table-form (third place)))
-            (make-ast-set-gethash
+            (sloc make-ast-set-gethash
                            :key (lower-sexp-to-ast key-form)
                            :table (lower-sexp-to-ast table-form)
-                           :value (lower-sexp-to-ast value-form)
-                           :source-file source-file
-                           :source-line source-line
-                           :source-column source-column))))))
+                           :value (lower-sexp-to-ast value-form)))))))
 
     ;; Flet (non-recursive local functions)
     (flet
@@ -666,7 +664,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (let ((bindings (second node)))
        (unless (listp bindings)
          (error "flet bindings must be a list"))
-       (make-ast-flet
+       (sloc make-ast-flet
                       :bindings (mapcar (lambda (binding)
                                           (unless (and (consp binding)
                                                        (>= (length binding) 3)
@@ -677,10 +675,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
                                                  (second binding)
                                                  (mapcar #'lower-sexp-to-ast (cddr binding))))
                                         bindings)
-                      :body (mapcar #'lower-sexp-to-ast (cddr node))
-                      :source-file source-file
-                      :source-line source-line
-                      :source-column source-column)))
+                      :body (mapcar #'lower-sexp-to-ast (cddr node)))))
     
     ;; Labels (mutually recursive local functions)
     (labels
@@ -689,7 +684,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (let ((bindings (second node)))
        (unless (listp bindings)
          (error "labels bindings must be a list"))
-       (make-ast-labels
+       (sloc make-ast-labels
                       :bindings (mapcar (lambda (binding)
                                           (unless (and (consp binding)
                                                        (>= (length binding) 3)
@@ -700,10 +695,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
                                                  (second binding)
                                                  (mapcar #'lower-sexp-to-ast (cddr binding))))
                                         bindings)
-                      :body (mapcar #'lower-sexp-to-ast (cddr node))
-                      :source-file source-file
-                      :source-line source-line
-                      :source-column source-column)))
+                      :body (mapcar #'lower-sexp-to-ast (cddr node)))))
     
     ;; Defun (top-level function definition)
     (defun
@@ -718,7 +710,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
        (if (lambda-list-has-extended-p raw-params)
            (multiple-value-bind (required optional rest-param key-params)
                (parse-compiler-lambda-list raw-params)
-             (make-ast-defun
+             (sloc make-ast-defun
                             :name name
                             :params required
                             :optional-params (mapcar (lambda (opt)
@@ -732,20 +724,14 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
                                                         (when (second kp)
                                                           (lower-sexp-to-ast (second kp)))))
                                                 key-params)
-                            :body (mapcar #'lower-sexp-to-ast (cdddr node))
-                            :source-file source-file
-                            :source-line source-line
-                            :source-column source-column))
+                            :body (mapcar #'lower-sexp-to-ast (cdddr node))))
            (progn
              (unless (every #'symbolp raw-params)
                (error "defun parameters must be symbols"))
-             (make-ast-defun
+             (sloc make-ast-defun
                             :name name
                             :params raw-params
-                            :body (mapcar #'lower-sexp-to-ast (cdddr node))
-                            :source-file source-file
-                            :source-line source-line
-                            :source-column source-column)))))
+                            :body (mapcar #'lower-sexp-to-ast (cdddr node)))))))
 
     ;; Defvar / Defparameter (top-level variable definition)
     ((defvar defparameter)
@@ -754,13 +740,10 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (let ((name (second node)))
        (unless (symbolp name)
          (error "~A name must be a symbol" (car node)))
-       (make-ast-defvar
+       (sloc make-ast-defvar
                       :name name
                       :value (when (>= (length node) 3)
-                               (lower-sexp-to-ast (third node)))
-                      :source-file source-file
-                      :source-line source-line
-                      :source-column source-column)))
+                               (lower-sexp-to-ast (third node))))))
     
     ;; Defmacro (top-level macro definition)
     (defmacro
@@ -771,13 +754,10 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
            (body (cdddr node)))
        (unless (symbolp name)
          (error "defmacro name must be a symbol"))
-       (make-ast-defmacro
+       (sloc make-ast-defmacro
                       :name name
                       :lambda-list lambda-list
-                      :body body
-                      :source-file source-file
-                      :source-line source-line
-                      :source-column source-column)))
+                      :body body)))
 
     ;; Defclass (CLOS class definition)
     (defclass
@@ -793,13 +773,10 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
        (unless (listp slot-specs)
          (error "defclass slots must be a list"))
        (let ((slots (mapcar #'parse-slot-spec slot-specs)))
-         (make-ast-defclass
+         (sloc make-ast-defclass
                         :name name
                         :superclasses superclasses
-                        :slots slots
-                        :source-file source-file
-                        :source-line source-line
-                        :source-column source-column))))
+                        :slots slots))))
 
     ;; Defgeneric
     (defgeneric
@@ -809,12 +786,9 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
            (params (third node)))
        (unless (symbolp name)
          (error "defgeneric name must be a symbol"))
-       (make-ast-defgeneric
+       (sloc make-ast-defgeneric
                       :name name
-                      :params params
-                      :source-file source-file
-                      :source-line source-line
-                      :source-column source-column)))
+                      :params params)))
 
     ;; Defmethod
     (defmethod
@@ -835,14 +809,11 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
              (progn
                (push nil specializers)
                (push p param-names))))
-       (make-ast-defmethod
+       (sloc make-ast-defmethod
                       :name name
                       :specializers (nreverse specializers)
                       :params (nreverse param-names)
-                      :body (mapcar #'lower-sexp-to-ast (cdddr node))
-                      :source-file source-file
-                      :source-line source-line
-                      :source-column source-column)))
+                      :body (mapcar #'lower-sexp-to-ast (cdddr node)))))
 
     ;; Make-instance
     (make-instance
@@ -859,34 +830,25 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
                     (unless rest
                       (error "make-instance initarg ~S missing value" key))
                     (push (cons key (lower-sexp-to-ast (pop rest))) initargs))))
-       (make-ast-make-instance
+       (sloc make-ast-make-instance
                       :class class-expr
-                      :initargs (nreverse initargs)
-                      :source-file source-file
-                      :source-line source-line
-                      :source-column source-column)))
+                      :initargs (nreverse initargs))))
 
     ;; Slot-value
     (slot-value
      (unless (= (length node) 3)
        (error "slot-value requires object and slot-name"))
-     (make-ast-slot-value
+     (sloc make-ast-slot-value
                     :object (lower-sexp-to-ast (second node))
                     :slot (let ((sn (third node)))
                                  (if (and (listp sn) (eq (car sn) 'quote))
                                      (second sn)
-                                     sn))
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))
+                                     sn))))
 
     ;; Values
     (values
-     (make-ast-values
-                    :forms (mapcar #'lower-sexp-to-ast (cdr node))
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))
+     (sloc make-ast-values
+                    :forms (mapcar #'lower-sexp-to-ast (cdr node))))
 
     ;; Multiple-value-bind
     (multiple-value-bind
@@ -896,79 +858,58 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
            (values-form (third node)))
        (unless (and (listp vars) (every #'symbolp vars))
          (error "multiple-value-bind vars must be a list of symbols"))
-       (make-ast-multiple-value-bind
+       (sloc make-ast-multiple-value-bind
                       :vars vars
                       :values-form (lower-sexp-to-ast values-form)
-                      :body (mapcar #'lower-sexp-to-ast (cdddr node))
-                      :source-file source-file
-                      :source-line source-line
-                      :source-column source-column)))
+                      :body (mapcar #'lower-sexp-to-ast (cdddr node)))))
 
     ;; Apply
     (apply
      (unless (>= (length node) 3)
        (error "apply requires at least a function and one argument"))
-     (make-ast-apply
+     (sloc make-ast-apply
                     :func (lower-sexp-to-ast (second node))
-                    :args (mapcar #'lower-sexp-to-ast (cddr node))
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))
+                    :args (mapcar #'lower-sexp-to-ast (cddr node))))
 
     ;; Multiple-value-call
     (multiple-value-call
      (unless (>= (length node) 3)
        (error "multiple-value-call requires function and arguments"))
-     (make-ast-multiple-value-call
+     (sloc make-ast-multiple-value-call
                     :func (lower-sexp-to-ast (second node))
-                    :args (mapcar #'lower-sexp-to-ast (cddr node))
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))
+                    :args (mapcar #'lower-sexp-to-ast (cddr node))))
     
     ;; Multiple-value-prog1
     (multiple-value-prog1
      (unless (>= (length node) 2)
        (error "multiple-value-prog1 requires at least one form"))
-     (make-ast-multiple-value-prog1
+     (sloc make-ast-multiple-value-prog1
                     :first (lower-sexp-to-ast (second node))
-                    :forms (mapcar #'lower-sexp-to-ast (cddr node))
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))
+                    :forms (mapcar #'lower-sexp-to-ast (cddr node))))
     
     ;; Catch
     (catch
      (unless (>= (length node) 3)
        (error "catch requires tag and body"))
-     (make-ast-catch
+     (sloc make-ast-catch
                     :tag (lower-sexp-to-ast (second node))
-                    :body (mapcar #'lower-sexp-to-ast (cddr node))
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))
+                    :body (mapcar #'lower-sexp-to-ast (cddr node))))
     
     ;; Throw
     (throw
      (unless (= (length node) 3)
        (error "throw requires tag and value"))
-     (make-ast-throw
+     (sloc make-ast-throw
                     :tag (lower-sexp-to-ast (second node))
-                    :value (lower-sexp-to-ast (third node))
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))
+                    :value (lower-sexp-to-ast (third node))))
     
     ;; Unwind-protect
     (unwind-protect
      (unless (>= (length node) 3)
        (error "unwind-protect requires protected form and cleanup"))
-     (make-ast-unwind-protect
+     (sloc make-ast-unwind-protect
                     :protected (lower-sexp-to-ast (second node))
-                    :cleanup (mapcar #'lower-sexp-to-ast (cddr node))
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))
+                    :cleanup (mapcar #'lower-sexp-to-ast (cddr node))))
 
     ;; Handler-case
     (handler-case
@@ -987,73 +928,52 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
                                     (body (mapcar #'lower-sexp-to-ast (cddr clause))))
                                 (list* error-type var body)))
                             (cddr node))))
-       (make-ast-handler-case
+       (sloc make-ast-handler-case
                       :form protected-form
-                      :clauses clauses
-                      :source-file source-file
-                      :source-line source-line
-                      :source-column source-column)))
+                      :clauses clauses)))
     
     ;; Quote
     (quote
      (unless (= (length node) 2)
        (error "quote takes exactly one argument"))
-     (make-ast-quote
-                    :value (second node)
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))
+     (sloc make-ast-quote
+                    :value (second node)))
     
     ;; The type declaration
     (the
      (unless (= (length node) 3)
        (error "the requires type and value"))
-     (make-ast-the
+     (sloc make-ast-the
                     :type (second node)
-                    :value (lower-sexp-to-ast (third node))
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))
+                    :value (lower-sexp-to-ast (third node))))
 
     ;; values: (values expr1 expr2 ...)
     (values
-     (make-ast-values
-                    :forms (mapcar #'lower-sexp-to-ast (cdr node))
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))
+     (sloc make-ast-values
+                    :forms (mapcar #'lower-sexp-to-ast (cdr node))))
 
     ;; multiple-value-bind: (multiple-value-bind (v1 v2 ...) values-form body...)
     (multiple-value-bind
      (unless (>= (length node) 3)
        (error "multiple-value-bind requires vars, values-form, and body"))
-     (make-ast-multiple-value-bind
+     (sloc make-ast-multiple-value-bind
                     :vars (second node)
                     :values-form (lower-sexp-to-ast (third node))
-                    :body (mapcar #'lower-sexp-to-ast (cdddr node))
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))
+                    :body (mapcar #'lower-sexp-to-ast (cdddr node))))
 
     ;; funcall: (funcall fn args...) -> (ast-call fn args...)
     (funcall
      (unless (>= (length node) 2)
        (error "funcall requires at least a function argument"))
-     (make-ast-call
+     (sloc make-ast-call
                     :func (lower-sexp-to-ast (second node))
-                    :args (mapcar #'lower-sexp-to-ast (cddr node))
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))
+                    :args (mapcar #'lower-sexp-to-ast (cddr node))))
 
     ;; Default: treat as function call
     (otherwise
-     (make-ast-call
+     (sloc make-ast-call
                     :func (lower-sexp-to-ast (car node))
-                    :args (mapcar #'lower-sexp-to-ast (cdr node))
-                    :source-file source-file
-                    :source-line source-line
-                    :source-column source-column))))
+                    :args (mapcar #'lower-sexp-to-ast (cdr node)))))))
 
 (defmethod lower-sexp-to-ast ((node cons) &key source-file source-line source-column)
   (lower-list-to-ast node

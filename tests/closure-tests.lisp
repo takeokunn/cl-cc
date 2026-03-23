@@ -11,9 +11,9 @@
 
 ;;; Test Suite Definition
 
-(def-suite closure-tests-suite
+(defsuite closure-tests-suite
   :description "Tests for closure and lambda expression compilation"
-  :in cl-cc-suite)
+  :parent cl-cc-suite)
 
 (in-suite closure-tests-suite)
 
@@ -45,35 +45,35 @@
 
 ;;; Simple Closure Tests
 
-(test simple-closure-captures-variable
+(deftest simple-closure-captures-variable
   "Test that a simple closure correctly captures a variable."
   (let* ((closure-expr "(let ((x 10))
                          (lambda (y) (+ x y)))")
          (result (compile-string closure-expr :target :vm)))
     ;; The closure should be compiled without errors
-    (is (compilation-result-program result))
-    (is (typep (compilation-result-program result) 'vm-program))))
+    (assert-true (compilation-result-program result))
+    (assert-type vm-program (compilation-result-program result))))
 
-(test closure-captures-multiple-variables
+(deftest closure-captures-multiple-variables
   "Test that a closure can capture multiple variables."
   (let* ((closure-expr "(let ((x 5) (y 10))
                          (lambda (z) (+ (+ x y) z)))")
          (result (compile-string closure-expr :target :vm)))
-    (is (compilation-result-program result))
-    (is (typep (compilation-result-program result) 'vm-program))))
+    (assert-true (compilation-result-program result))
+    (assert-type vm-program (compilation-result-program result))))
 
-(test closure-returns-captured-value
+(deftest closure-returns-captured-value
   "Test that a closure can return the captured value."
   (let* ((closure-expr "(let ((x 42))
                          ((lambda () x)))")
          (program (compilation-result-program (compile-string closure-expr :target :vm))))
-    (is (not (null program)))
+    (assert-false (null program))
     ;; Verify the program has instructions
-    (is (> (length (vm-program-instructions program)) 0))))
+    (assert-true (> (length (vm-program-instructions program)) 0))))
 
 ;;; Nested Closure Tests
 
-(test nested-closures-basic
+(deftest nested-closures-basic
   "Test that nested closures work correctly."
   (let* ((nested-expr "(let ((outer 10))
                         (lambda ()
@@ -81,18 +81,18 @@
                             (lambda ()
                               (+ outer inner)))))")
          (result (compile-string nested-expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
-(test nested-closures-with-shared-capture
+(deftest nested-closures-with-shared-capture
   "Test nested closures sharing captured variables."
   (let* ((expr "(let ((x 1))
                  (let ((f (lambda () x))
                        (g (lambda () (+ x 1))))
                    (+ (funcall f) (funcall g))))")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
-(test triple-nested-closures
+(deftest triple-nested-closures
   "Test three levels of nested closures."
   (let* ((expr "(let ((a 1))
                  (lambda ()
@@ -102,28 +102,28 @@
                          (lambda ()
                            (+ (+ a b) c)))))))")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
 ;;; Closure with Mutation Tests
 
-(test closure-with-setq-basic
+(deftest closure-with-setq-basic
   "Test closure with variable mutation using setq."
   (let* ((expr "(let ((counter 0))
                  (lambda ()
                    (setq counter (+ counter 1))
                    counter))")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
-(test closure-mutation-preserves-capture
+(deftest closure-mutation-preserves-capture
   "Test that mutation doesn't break variable capture."
   (let* ((expr "(let ((x 10))
                  (setq x 20)
                  (lambda () x))")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
-(test multiple-setq-in-closure
+(deftest multiple-setq-in-closure
   "Test multiple setq operations in closure body."
   (let* ((expr "(let ((a 0) (b 0))
                  (lambda (x y)
@@ -131,20 +131,20 @@
                    (setq b y)
                    (+ a b)))")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
 ;;; Closure as Return Value Tests
 
-(test closure-factory-function
+(deftest closure-factory-function
   "Test function that returns a closure."
   (let* ((expr "(let ((make-adder
                   (lambda (n)
                     (lambda (x) (+ n x)))))
                  (funcall (funcall make-adder 10) 5))")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
-(test closure-as-data-structure
+(deftest closure-as-data-structure
   "Test using closures to implement simple data structures."
   (let* ((expr "(let ((make-counter
                   (lambda (start)
@@ -152,9 +152,9 @@
                  (let ((counter (funcall make-counter 0)))
                    (funcall counter)))")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
-(test higher-order-function-with-closure
+(deftest higher-order-function-with-closure
   "Test higher-order function that takes and returns closures."
   (let* ((expr "(let ((compose
                   (lambda (f g)
@@ -164,79 +164,79 @@
                        (mul2 (lambda (x) (* x 2))))
                    (funcall (funcall (funcall compose add1) mul2) 5)))")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
 ;;; Lambda Expression Tests
 
-(test lambda-no-parameters
+(deftest lambda-no-parameters
   "Test lambda with no parameters."
   (let* ((expr "(funcall (lambda () 42))")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
-(test lambda-single-parameter
+(deftest lambda-single-parameter
   "Test lambda with a single parameter."
   (let* ((expr "(funcall (lambda (x) (+ x 1)) 10)")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
-(test lambda-multiple-parameters
+(deftest lambda-multiple-parameters
   "Test lambda with multiple parameters."
   (let* ((expr "(funcall (lambda (x y z) (+ (+ x y) z)) 1 2 3)")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
-(test lambda-with-progn-body
+(deftest lambda-with-progn-body
   "Test lambda with multiple body forms."
   (let* ((expr "(funcall (lambda (x)
                    (print x)
                    (+ x 1))
                  5)")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
-(test lambda-nested-in-expression
+(deftest lambda-nested-in-expression
   "Test lambda nested within an expression."
   (let* ((expr "(+ 1 (funcall (lambda (x) (* x 2)) 10))")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
 ;;; Flet Tests (Non-recursive Local Functions)
 
-(test flet-single-function
+(deftest flet-single-function
   "Test flet with a single local function."
   (let* ((expr "(flet ((double (x) (* x 2)))
                  (double 5))")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
-(test flet-multiple-functions
+(deftest flet-multiple-functions
   "Test flet with multiple local functions."
   (let* ((expr "(flet ((add1 (x) (+ x 1))
                 (mul2 (x) (* x 2)))
                  (+ (add1 5) (mul2 3)))")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
-(test flet-calls-another-flet
+(deftest flet-calls-another-flet
   "Test labels function calling another function (labels allows mutual visibility)."
   (let* ((expr "(labels ((a (x) (+ x 1))
                          (b (x) (a (* x 2))))
                  (b 5))")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
-(test flet-with-closure
+(deftest flet-with-closure
   "Test flet with function that returns a closure."
   (let* ((expr "(flet ((make-adder (n)
                   (lambda (x) (+ n x))))
                  (funcall (make-adder 10) 5))")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
 ;;; Labels Tests (Mutually Recursive Functions)
 
-(test labels-single-recursive-function
+(deftest labels-single-recursive-function
   "Test labels with a single recursive function."
   (let* ((expr "(labels ((fact (n)
                   (if n
@@ -244,9 +244,9 @@
                       1)))
                  (fact 5))")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
-(test labels-mutually-recursive
+(deftest labels-mutually-recursive
   "Test labels with mutually recursive functions."
   (let* ((expr "(labels ((even-p (n)
                   (if n
@@ -258,9 +258,9 @@
                       0)))
                  (even-p 10))")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
-(test labels-with-closure
+(deftest labels-with-closure
   "Test labels with function that creates a closure."
   (let* ((expr "(labels ((make-counter ()
                   (let ((count 0))
@@ -271,80 +271,80 @@
                    (funcall c)
                    (funcall c)))")
          (result (compile-string expr :target :vm)))
-    (is (compilation-result-program result))))
+    (assert-true (compilation-result-program result))))
 
 ;;; AST Structure Tests
 
-(test ast-lambda-structure
+(deftest ast-lambda-structure
   "Test AST structure for lambda expressions."
   (let* ((sexp '(lambda (x y) (+ x y)))
          (ast (lower-sexp-to-ast sexp)))
-    (is (typep ast 'ast-lambda))
-    (is (equal (ast-lambda-params ast) '(x y)))
-    (is (= 1 (length (ast-lambda-body ast))))
-    (is (typep (first (ast-lambda-body ast)) 'ast-binop))))
+    (assert-type ast-lambda ast)
+    (assert-equal (ast-lambda-params ast) '(x y))
+    (assert-= 1 (length (ast-lambda-body ast)))
+    (assert-type ast-binop (first (ast-lambda-body ast)))))
 
-(test ast-flet-structure
+(deftest ast-flet-structure
   "Test AST structure for flet expressions."
   (let* ((sexp '(flet ((double (x) (* x 2))) (double 5)))
          (ast (lower-sexp-to-ast sexp)))
-    (is (typep ast 'ast-flet))
-    (is (= 1 (length (ast-flet-bindings ast))))
-    (is (eq 'double (first (first (ast-flet-bindings ast)))))
-    (is (equal '(x) (second (first (ast-flet-bindings ast)))))))
+    (assert-type ast-flet ast)
+    (assert-= 1 (length (ast-flet-bindings ast)))
+    (assert-eq 'double (first (first (ast-flet-bindings ast))))
+    (assert-equal '(x) (second (first (ast-flet-bindings ast))))))
 
-(test ast-labels-structure
+(deftest ast-labels-structure
   "Test AST structure for labels expressions."
   (let* ((sexp '(labels ((fact (n) (if n (* n (fact (- n 1))) 1))) (fact 5)))
          (ast (lower-sexp-to-ast sexp)))
-    (is (typep ast 'ast-labels))
-    (is (= 1 (length (ast-labels-bindings ast))))
-    (is (eq 'fact (first (first (ast-labels-bindings ast)))))))
+    (assert-type ast-labels ast)
+    (assert-= 1 (length (ast-labels-bindings ast)))
+    (assert-eq 'fact (first (first (ast-labels-bindings ast))))))
 
 ;;; Roundtrip Tests
 
-(test lambda-roundtrip
+(deftest lambda-roundtrip
   "Test lambda AST to sexp and back."
   (let* ((original '(lambda (x y) (+ x y)))
          (ast (lower-sexp-to-ast original))
          (back (ast-to-sexp ast)))
-    (is (equal original back))))
+    (assert-equal original back)))
 
-(test flet-roundtrip
+(deftest flet-roundtrip
   "Test flet AST to sexp and back."
   (let* ((original '(flet ((double (x) (* x 2))) (double 5)))
          (ast (lower-sexp-to-ast original))
          (back (ast-to-sexp ast)))
-    (is (equal original back))))
+    (assert-equal original back)))
 
-(test labels-roundtrip
+(deftest labels-roundtrip
   "Test labels AST to sexp and back."
   (let* ((original '(labels ((fact (n) (if n (* n (fact (- n 1))) 1))) (fact 5)))
          (ast (lower-sexp-to-ast original))
          (back (ast-to-sexp ast)))
-    (is (equal original back))))
+    (assert-equal original back)))
 
-(test nested-lambda-roundtrip
+(deftest nested-lambda-roundtrip
   "Test nested lambda AST to sexp and back."
   (let* ((original '(let ((x 10)) (lambda (y) (+ x y))))
          (ast (lower-sexp-to-ast original))
          (back (ast-to-sexp ast)))
-    (is (equal original back))))
+    (assert-equal original back)))
 
 ;;; Assembly Emission Tests
 
-(test closure-assembly-x86-64
+(deftest closure-assembly-x86-64
   "Test that closures compile to x86-64 assembly (pending vm-closure emit-instruction)."
   (let ((result (handler-case
                     (compilation-result-assembly (compile-string "(lambda (x) (+ x 1))" :target :x86_64))
                   (error () :not-yet-supported))))
-    (is (or (eq result :not-yet-supported)
+    (assert-true (or (eq result :not-yet-supported)
             (and (stringp result) (> (length result) 0))))))
 
-(test closure-assembly-aarch64
+(deftest closure-assembly-aarch64
   "Test that closures compile to aarch64 assembly (pending vm-closure emit-instruction)."
   (let ((result (handler-case
                     (compilation-result-assembly (compile-string "(lambda (x) (+ x 1))" :target :aarch64))
                   (error () :not-yet-supported))))
-    (is (or (eq result :not-yet-supported)
+    (assert-true (or (eq result :not-yet-supported)
             (and (stringp result) (> (length result) 0))))))

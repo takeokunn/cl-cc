@@ -344,6 +344,7 @@
     :vm-pop
     :vm-env-ref
     :vm-values
+    :vm-spread-values
     :vm-mv-bind
     :vm-dst-regs
     :vm-apply
@@ -371,47 +372,69 @@
     :make-vm-instruction
     :make-vm-abs :make-vm-acons :make-vm-add :make-vm-alpha-char-p
     :make-vm-alphanumericp :make-vm-and :make-vm-append :make-vm-apply
-    :make-vm-aref :make-vm-array-length :make-vm-aset :make-vm-assoc
-    :make-vm-atom :make-vm-bind-restart :make-vm-binop :make-vm-butlast
-    :make-vm-call :make-vm-car :make-vm-cdr :make-vm-ceiling-inst
+    :make-vm-adjust-array :make-vm-aref :make-vm-array-length :make-vm-aset :make-vm-assoc
+    :make-vm-array-adjustable-p :make-vm-array-dimension
+    :make-vm-array-dimensions :make-vm-array-displacement :make-vm-array-has-fill-pointer-p
+    :make-vm-array-rank :make-vm-array-row-major-index :make-vm-array-total-size
+    :make-vm-atom :make-vm-bind-restart :make-vm-binop :make-vm-bit-access
+    :make-vm-bit-and :make-vm-bit-not :make-vm-bit-or :make-vm-bit-set :make-vm-bit-xor
+    :make-vm-butlast :make-vm-sbit
+    :make-vm-call :make-vm-call-next-method :make-vm-car :make-vm-cdr :make-vm-ceiling-inst
     :make-vm-cerror :make-vm-char :make-vm-char-code :make-vm-char-downcase
+    :make-vm-char-not-greaterp :make-vm-char-not-lessp
     :make-vm-char-upcase :make-vm-char< :make-vm-char= :make-vm-characterp
     :make-vm-class-def :make-vm-close-file :make-vm-closure
     :make-vm-closure-ref-idx :make-vm-clrhash :make-vm-code-char
     :make-vm-coerce-to-list :make-vm-coerce-to-string :make-vm-coerce-to-vector
+    :make-vm-clear-values
     :make-vm-concatenate :make-vm-cons :make-vm-cons-p :make-vm-const
-    :make-vm-copy-list :make-vm-copy-tree :make-vm-dec :make-vm-digit-char-p
+    :make-vm-complex :make-vm-conjugate
+    :make-vm-copy-list :make-vm-copy-tree :make-vm-dec :make-vm-denominator
+    :make-vm-digit-char-p
     :make-vm-div :make-vm-endp :make-vm-env-ref :make-vm-eof-p :make-vm-eq
     :make-vm-equal :make-vm-error-instruction :make-vm-establish-handler
-    :make-vm-eval :make-vm-evenp :make-vm-fifth :make-vm-file-length
+    :make-vm-ensure-values
+    :make-vm-eval :make-vm-evenp :make-vm-fceiling :make-vm-ffloor
+    :make-vm-fifth :make-vm-file-length :make-vm-fill-pointer-inst
     :make-vm-file-position :make-vm-first :make-vm-floor-inst
-    :make-vm-format-inst :make-vm-fourth :make-vm-fresh-line-inst
+    :make-vm-fmakunbound :make-vm-format-inst :make-vm-fourth
+    :make-vm-fround :make-vm-fresh-line-inst :make-vm-ftruncate
     :make-vm-func-ref :make-vm-function-p :make-vm-ge :make-vm-generic-call
     :make-vm-gensym-inst :make-vm-get-global
     :make-vm-get-output-stream-string-inst :make-vm-get-string-from-stream
-    :make-vm-gethash :make-vm-gt :make-vm-halt :make-vm-hash-table-count
+    :make-vm-get-universal-time :make-vm-get-internal-real-time :make-vm-get-internal-run-time
+    :make-vm-decode-universal-time :make-vm-encode-universal-time
+    :make-vm-gcd :make-vm-gethash :make-vm-gt :make-vm-halt
+    :make-vm-hash-table-count
     :make-vm-hash-table-keys :make-vm-hash-table-p :make-vm-hash-table-test
     :make-vm-hash-table-values :make-vm-inc :make-vm-integer-p
-    :make-vm-intern-symbol :make-vm-invoke-restart :make-vm-jump
+    :make-vm-imagpart :make-vm-intern-symbol :make-vm-invoke-restart :make-vm-jump
     :make-vm-jump-zero :make-vm-keywordp :make-vm-label :make-vm-last
-    :make-vm-le :make-vm-length :make-vm-list :make-vm-list-length
+    :make-vm-lcm :make-vm-le :make-vm-length :make-vm-list-length
     :make-vm-listp :make-vm-lower-case-p :make-vm-lt :make-vm-make-array
     :make-vm-make-closure :make-vm-make-hash-table :make-vm-make-list
     :make-vm-make-obj :make-vm-make-reader
     :make-vm-make-string-output-stream-inst :make-vm-make-string-stream
     :make-vm-make-symbol :make-vm-maphash :make-vm-max :make-vm-member
     :make-vm-min :make-vm-mod :make-vm-move :make-vm-mul :make-vm-mv-bind
-    :make-vm-nconc :make-vm-neg :make-vm-not :make-vm-nreverse :make-vm-nth
+    :make-vm-makunbound :make-vm-nconc :make-vm-neg :make-vm-not
+    :make-vm-nreverse :make-vm-nth :make-vm-numerator
+    :make-vm-next-method-p
     :make-vm-nthcdr :make-vm-null :make-vm-null-p :make-vm-num-eq
     :make-vm-number-p :make-vm-oddp :make-vm-open-file :make-vm-or
-    :make-vm-parse-integer :make-vm-peek-char :make-vm-pop :make-vm-pop-handler
+    :make-vm-parse-integer :make-vm-peek-char :make-vm-phase
+    :make-vm-pop :make-vm-pop-handler
+    :make-vm-progv-enter :make-vm-progv-exit
     :make-vm-prin1 :make-vm-prin1-sexp :make-vm-princ :make-vm-princ-sexp
     :make-vm-print :make-vm-print-inst :make-vm-print-sexp :make-vm-push
     :make-vm-push-handler :make-vm-read-char :make-vm-read-from-string-inst
     :make-vm-read-from-string-rp :make-vm-read-line :make-vm-read-sexp
     :make-vm-read-sexp-inst :make-vm-reader-advance-rp :make-vm-reader-peek-rp
     :make-vm-reader-read :make-vm-register-function :make-vm-register-method
-    :make-vm-rem :make-vm-remhash :make-vm-remove-handler :make-vm-rest
+    :make-vm-rational :make-vm-rationalize :make-vm-realpart
+    :make-vm-random :make-vm-make-random-state
+    :make-vm-rem :make-vm-remhash :make-vm-remove-handler :make-vm-remprop
+    :make-vm-rest :make-vm-row-major-aref
     :make-vm-ret :make-vm-reverse :make-vm-rplaca :make-vm-rplacd
     :make-vm-search-string :make-vm-second :make-vm-set-global :make-vm-sethash
     :make-vm-signal :make-vm-signal-error :make-vm-slot-read :make-vm-slot-write
@@ -423,10 +446,16 @@
     :make-vm-string-trim :make-vm-string-upcase :make-vm-string<
     :make-vm-string<= :make-vm-string= :make-vm-string> :make-vm-string>=
     :make-vm-stringp :make-vm-sub :make-vm-subseq :make-vm-subst
-    :make-vm-symbol-name :make-vm-symbol-p :make-vm-sync-handler-regs
+    :make-vm-set-fill-pointer :make-vm-set-symbol-plist
+    :make-vm-slot-boundp :make-vm-slot-exists-p :make-vm-slot-makunbound
+    :make-vm-svref :make-vm-svset
+    :make-vm-symbol-get :make-vm-symbol-name
+    :make-vm-symbol-p :make-vm-symbol-plist :make-vm-symbol-set
+    :make-vm-sync-handler-regs
     :make-vm-terpri-inst :make-vm-third :make-vm-truncate :make-vm-type-of
     :make-vm-typep :make-vm-unread-char :make-vm-upper-case-p :make-vm-values
-    :make-vm-values-to-list :make-vm-vector-push-extend :make-vm-vectorp
+    :make-vm-spread-values :make-vm-values-to-list :make-vm-vector-pop :make-vm-vector-push
+    :make-vm-vector-push-extend :make-vm-vectorp
     :make-vm-warn :make-vm-write-char :make-vm-write-string
     :make-vm-write-to-string-inst :make-vm-write-to-string-rp
 
@@ -459,6 +488,7 @@
     :vm-state-heap
     :vm-heap-counter
     :vm-call-stack
+    :vm-method-call-stack
     :vm-return-stack
      :vm-closure-env
      :vm-heap-alloc
@@ -522,7 +552,6 @@
      :vm-cons
      :vm-car
      :vm-cdr
-     :vm-list
      :vm-length
      :vm-reverse
      :vm-append
@@ -548,7 +577,6 @@
      ;; VM List Operations - Accessors
      :vm-car-reg
      :vm-cdr-reg
-     :vm-list-count
      :vm-src-regs
      :vm-item-reg
      :vm-list-reg

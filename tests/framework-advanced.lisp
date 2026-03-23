@@ -1,0 +1,246 @@
+;;;; tests/framework-advanced.lisp — CL-CC Test Framework (Advanced Features)
+;;;; Parameterized tests, nesting, snapshots, pipeline testing, combinatorial, flaky.
+
+(in-package :cl-cc/test)
+
+;;; ------------------------------------------------------------
+;;; Dynamic Variables for Advanced Features
+;;; ------------------------------------------------------------
+
+(defvar *testing-context* nil
+  "Stack of nested testing labels, accumulated as a string path.")
+
+(defvar *update-snapshots* nil
+  "When t, overwrite snapshot files on assert-snapshot mismatch.")
+
+;;; ------------------------------------------------------------
+;;; FR-015 — testing: Nested Sub-Cases
+;;; ------------------------------------------------------------
+
+(defmacro testing (label &body body)
+  "Run BODY as a named sub-case within the current test.
+TAP output will include the context path: outer > inner.
+Uses *testing-context* to accumulate nesting depth."
+  (let ((ctx-var (gensym "CTX")))
+    `(let* ((,ctx-var (if *testing-context*
+                          (format nil "~A > ~A" *testing-context* ,label)
+                          ,label))
+            (*testing-context* ,ctx-var))
+       (handler-case
+           (progn ,@body)
+         (test-failure (c)
+           ;; Re-signal with context prepended to the message
+           (let ((orig-msg (test-failure-message c)))
+             (error 'test-failure
+                    :message (format nil "~A~%  context: ~A"
+                                     orig-msg ,ctx-var))))))))
+
+;;; ------------------------------------------------------------
+;;; FR-016 — assert-snapshot: Snapshot Testing
+;;; ------------------------------------------------------------
+
+(defun %snapshot-path (name)
+  "Return the full path for snapshot NAME."
+  (concatenate 'string *snapshot-dir* name ".snap"))
+
+(defun %read-snapshot (path)
+  "Read and return the saved snapshot value from PATH, or return the
+ symbol :snapshot-not-found if the file does not exist."
+  (handler-case
+      (with-open-file (stream path :direction :input)
+        (read stream))
+    (file-error () :snapshot-not-found)))
+
+(defun %write-snapshot (path value)
+  "Write VALUE to the snapshot file at PATH, creating directories as needed."
+  (ensure-directories-exist path)
+  (with-open-file (stream path
+                          :direction :output
+                          :if-exists :supersede
+                          :if-does-not-exist :create)
+    (write value :stream stream)))
+
+(defmacro assert-snapshot (name form)
+  "Assert that FORM evaluates to the same value as the saved snapshot NAME.
+On first run (no snapshot file), saves the result.
+When *update-snapshots* is t, overwrites the saved file with the current value."
+  (let ((actual-var  (gensym "ACTUAL"))
+        (path-var    (gensym "PATH"))
+        (saved-var   (gensym "SAVED")))
+    `(let* ((,actual-var ,form)
+            (,path-var   (%snapshot-path ,name))
+            (,saved-var  (%read-snapshot ,path-var)))
+       (cond
+         ;; First run: no snapshot yet — save and pass
+         ((eq ,saved-var :snapshot-not-found)
+          (%write-snapshot ,path-var ,actual-var))
+         ;; Update mode: overwrite snapshot unconditionally
+         (*update-snapshots*
+          (%write-snapshot ,path-var ,actual-var))
+         ;; Normal run: compare
+         ((not (equal ,saved-var ,actual-var))
+          (%fail-test (format nil "assert-snapshot ~S mismatch" ,name)
+                      :expected ,saved-var
+                      :actual   ,actual-var
+                      :form     ',form))))))
+
+;;; ------------------------------------------------------------
+;;; FR-014 — deftest-each: Parameterized Tests
+;;; ------------------------------------------------------------
+
+(defmacro deftest-each (base-name docstring &rest args)
+  "Define one test per entry in CASES.
+Each case is a list whose first element is the case label string and
+whose remaining elements are bound to the variables in the VARS list.
+
+Syntax:
+  (deftest-each base-name
+    \"docstring\"
+    :cases ((\"label\" val ...) ...)
+    (var ...)
+    body...)
+
+Generates tests named BASE-NAME [label] for each case."
+  ;; Extract :cases keyword and the trailing body (var-list + body forms).
+  (let* ((cases-pos (position :cases args))
+         (cases     (if cases-pos (nth (1+ cases-pos) args) nil))
+         (body      (if cases-pos (nthcdr (+ 2 cases-pos) args) args)))
+    ;; BODY starts with a variable-list form, followed by the actual body forms.
+    (destructuring-bind (vars &rest body-forms) body
+      (let ((expansions
+              (loop for case-entry in cases
+                    collect
+                    (let* ((case-label (first case-entry))
+                           (case-vals  (rest case-entry))
+                           (test-name  (intern
+                                        (format nil "~A [~A]"
+                                                (symbol-name base-name)
+                                                case-label)))
+                           (bindings   (mapcar #'list vars case-vals)))
+                      `(deftest ,test-name
+                         ,docstring
+                         (let ,bindings
+                           ,@body-forms))))))
+        `(progn ,@expansions)))))
+
+;;; ------------------------------------------------------------
+;;; FR-027 — deftest-combinatorial: All-Combinations Testing
+;;; ------------------------------------------------------------
+
+(defun %cross-product (lists)
+  "Return the cross-product of a list of lists as a list of lists."
+  (if (null lists)
+      '(())
+      (let ((head (car lists))
+            (rest-product (%cross-product (cdr lists))))
+        (loop for item in head
+              nconc (loop for combo in rest-product
+                          collect (cons item combo))))))
+
+(defmacro deftest-combinatorial (base-name &rest args)
+  "Define one test per combination of all parameter values.
+PARAMS is a list of (var form) pairs where form evaluates to a list of values.
+Each combination gets its own deftest named BASE-NAME [v1 v2 ...].
+
+Syntax:
+  (deftest-combinatorial base-name
+    :params ((var1 '(val...)) (var2 '(val...)) ...)
+    body...)
+
+Evaluates all param value forms at macro-expansion time (quoted lists)
+or generates runtime expansion."
+  ;; Extract :params keyword and the trailing body forms.
+  (let* ((params-pos  (position :params args))
+         (params      (if params-pos (nth (1+ params-pos) args) nil))
+         (body        (if params-pos (nthcdr (+ 2 params-pos) args) args))
+         (param-vars  (mapcar #'first  params))
+         (param-forms (mapcar #'second params))
+         (combo-gensym (gensym "COMBOS")))
+    `(let ((,combo-gensym (%cross-product (list ,@param-forms))))
+       (dolist (combo ,combo-gensym)
+         (let* ,(loop for var in param-vars
+                      for idx from 0
+                      collect `(,var (nth ,idx combo)))
+           (let* ((label-str (format nil "~{~A~^ ~}" combo))
+                  (test-name (intern (format nil "~A [~A]"
+                                             ',(symbol-name base-name)
+                                             label-str))))
+             (setf (gethash test-name *test-registry*)
+                   (let ((captured-combo combo))
+                     (list :name test-name
+                           :fn (let ,(loop for var in param-vars
+                                           for idx from 0
+                                           collect `(,var (nth ,idx captured-combo)))
+                                 (lambda () ,@body))
+                           :suite *current-suite*
+                           :timeout nil
+                           :depends-on nil
+                           :tags nil
+                           :docstring (format nil "~A combination ~A"
+                                              ',base-name label-str))))))))))
+
+;;; ------------------------------------------------------------
+;;; FR-021 — deftest-pipeline: Pipeline Stage Testing
+;;; ------------------------------------------------------------
+
+;; The _ symbol used in pipeline stage checks is simply bound to the
+;; stage output before each check form is evaluated.
+
+(defmacro deftest-pipeline (expr &rest stage-checks)
+  "Define a pipeline test that runs EXPR through compiler stages.
+Available stage keys: :parse :expand :compile :execute
+In each stage body, _ is bound to the output of that stage.
+
+  :parse    lower-sexp-to-ast
+  :expand   our-macroexpand
+  :compile  compile-expression
+  :execute  run-string
+
+Syntax:
+  (deftest-pipeline expr-string
+    :parse   check-form...
+    :compile check-form...
+    :execute check-form...)"
+  (let ((test-name (gensym "PIPELINE-TEST"))
+        (forms '()))
+    ;; Build up the stage forms in order of appearance.
+    (do ((rest stage-checks rest))
+        ((null rest))
+      (let ((key  (pop rest))
+            (chk  (pop rest)))
+        (push (list key chk) forms)))
+    (let ((stage-list (nreverse forms)))
+      `(deftest ,test-name
+         ,(format nil "pipeline test for ~S" expr)
+         ,@(loop for (stage-key check-form) in stage-list
+                 collect
+                 (ecase stage-key
+                   (:parse
+                    `(let ((_ (lower-sexp-to-ast
+                               (read-from-string ,expr))))
+                       ,check-form))
+                   (:expand
+                    `(let ((_ (our-macroexpand
+                               (read-from-string ,expr))))
+                       ,check-form))
+                   (:compile
+                    `(let ((_ (compile-expression
+                               (lower-sexp-to-ast
+                                (read-from-string ,expr)))))
+                       ,check-form))
+                   (:execute
+                    `(let ((_ (run-string ,expr)))
+                       ,check-form))))))))
+
+;;; ------------------------------------------------------------
+;;; Convenience: assert-snapshot update helper
+;;; ------------------------------------------------------------
+
+(defun update-snapshots! ()
+  "Bind *update-snapshots* to t for the dynamic extent of this call.
+Intended to be called from the REPL when you want to refresh all snapshots."
+  (setf *update-snapshots* t))
+
+(defun reset-snapshots! ()
+  "Reset snapshot update mode to nil."
+  (setf *update-snapshots* nil))

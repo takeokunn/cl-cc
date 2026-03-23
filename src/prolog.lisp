@@ -75,21 +75,17 @@
   "Substitute all bound logic variables in TERM (alias for logic-substitute)."
   (logic-substitute term env))
 
-;;; Goal and Rule Representation (CLOS)
+;;; Goal and Rule Representation
 
-(defclass prolog-goal ()
-  ((predicate :initarg :predicate :reader goal-predicate
-              :documentation "The predicate symbol (e.g., 'member, 'append)")
-   (args :initarg :args :reader goal-args
-         :documentation "List of arguments to the predicate"))
-  (:documentation "Represents a Prolog goal to be solved."))
+(defstruct (prolog-goal (:conc-name goal-))
+  "Represents a Prolog goal to be solved."
+  predicate   ; the predicate symbol (e.g., 'member, 'append)
+  args)       ; list of arguments
 
-(defclass prolog-rule ()
-  ((head :initarg :head :reader rule-head
-         :documentation "Head of the rule (predicate with arguments)")
-   (body :initarg :body :initform nil :reader rule-body
-         :documentation "Body of the rule (list of goals), nil for facts"))
-  (:documentation "Represents a Prolog rule or fact."))
+(defstruct (prolog-rule (:conc-name rule-))
+  "Represents a Prolog rule or fact."
+  head        ; head of the rule (predicate with arguments)
+  (body nil)) ; body (list of goals), nil for facts
 
 ;;; Prolog Database
 
@@ -107,15 +103,11 @@
 
 (defmacro def-fact (head)
   "Define a Prolog fact. Usage: (def-fact (parent tom mary))"
-  `(setf (gethash ',(car head) *prolog-rules*)
-         (cons (make-instance 'prolog-rule :head ',head)
-               (gethash ',(car head) *prolog-rules*))))
+  `(add-rule ',(car head) (make-prolog-rule :head ',head)))
 
 (defmacro def-rule (head &body body)
   "Define a Prolog rule. Usage: (def-rule (grandparent ?x ?z) (parent ?x ?y) (parent ?y ?z))"
-  `(setf (gethash ',(car head) *prolog-rules*)
-         (cons (make-instance 'prolog-rule :head ',head :body ',body)
-               (gethash ',(car head) *prolog-rules*))))
+  `(add-rule ',(car head) (make-prolog-rule :head ',head :body ',body)))
 
 ;;; Variable Renaming for Recursion
 
@@ -130,9 +122,8 @@
                      ((consp term)
                       (cons (rename-term (car term)) (rename-term (cdr term))))
                      (t term))))
-      (make-instance 'prolog-rule
-                     :head (rename-term (rule-head rule))
-                     :body (mapcar #'rename-term (rule-body rule))))))
+      (make-prolog-rule :head (rename-term (rule-head rule))
+                        :body (mapcar #'rename-term (rule-body rule))))))
 
 ;;; Cut Operator Support
 
@@ -143,57 +134,67 @@
   ()
   (:documentation "Condition signaled when cut (!) is encountered."))
 
+;;; Built-in Predicate Dispatch Table (data layer)
+;;;
+;;; Each handler is (lambda (args env k)) — continuation-passing style:
+;;; args = predicate arguments, env = current bindings, k = success continuation.
+
+(defvar *builtin-predicates*
+  (let ((ht (make-hash-table :test 'eq)))
+    ;; ! (cut): succeed once, then stop backtracking for the parent goal
+    (setf (gethash '! ht)
+          (lambda (args env k)
+            (declare (ignore args))
+            (funcall k env)
+            (signal 'prolog-cut)))
+    ;; and: conjunction — solve goals left to right
+    (setf (gethash 'and ht)
+          (lambda (args env k)
+            (solve-conjunction args env k)))
+    ;; or: disjunction — try each alternative
+    (setf (gethash 'or ht)
+          (lambda (args env k)
+            (dolist (alt args)
+              (solve-goal alt env k))))
+    ;; = (unification)
+    (setf (gethash '= ht)
+          (lambda (args env k)
+            (let ((new-env (unify (first args) (second args) env)))
+              (when new-env (funcall k new-env)))))
+    ;; /= (non-unification: succeed when the two terms are not equal)
+    (setf (gethash '/= ht)
+          (lambda (args env k)
+            (let ((v1 (logic-substitute (first args) env))
+                  (v2 (logic-substitute (second args) env)))
+              (when (not (equal v1 v2)) (funcall k env)))))
+    ;; :when / when: evaluate an embedded Lisp condition
+    (let ((lisp-cond (lambda (args env k)
+                       (when (eval-lisp-condition (first args) env)
+                         (funcall k env)))))
+      (setf (gethash ':when ht) lisp-cond)
+      (setf (gethash 'when  ht) lisp-cond))
+    ht)
+  "Hash table mapping built-in predicate symbols to CPS handler functions.")
+
 ;;; Backtracking Solver using Continuations
 
 (defun solve-goal (goal env k)
   "Solve GOAL in environment ENV, call continuation K with each solution.
    GOAL can be a prolog-goal object or a list (predicate arg1 arg2 ...).
    K is a continuation function that receives the new environment."
-  (let* ((predicate (if (typep goal 'prolog-goal)
-                        (goal-predicate goal)
-                        (car goal)))
-         (args (if (typep goal 'prolog-goal)
-                   (goal-args goal)
-                   (cdr goal))))
-    ;; Handle cut operator
-    (when (eq predicate '!)
-      (funcall k env)
-      (signal 'prolog-cut)
-      (return-from solve-goal))
-    ;; Handle conjunction (and) in goal position
-    (when (eq predicate 'and)
-      (solve-conjunction args env k)
-      (return-from solve-goal))
-    ;; Handle disjunction (or) in goal position
-    (when (eq predicate 'or)
-      (dolist (alternative args)
-        (solve-goal alternative env k))
-      (return-from solve-goal))
-    ;; Handle built-in equality
-    (when (eq predicate '=)
-      (let ((new-env (unify (first args) (second args) env)))
-        (when new-env
-          (funcall k new-env)))
-      (return-from solve-goal))
-    ;; Handle built-in not-equal
-    (when (eq predicate '/=)
-      (let ((v1 (logic-substitute (first args) env))
-            (v2 (logic-substitute (second args) env)))
-        (when (not (equal v1 v2))
-          (funcall k env)))
-      (return-from solve-goal))
-    ;; Handle built-in when/:when
-    (when (member predicate '(:when when))
-      (let ((condition (first args)))
-        (when (eval-lisp-condition condition env)
-          (funcall k env)))
-      (return-from solve-goal))
-    ;; Regular predicate lookup
+  (let* ((predicate (if (prolog-goal-p goal) (goal-predicate goal) (car goal)))
+         (args      (if (prolog-goal-p goal) (goal-args      goal) (cdr goal))))
+    ;; Dispatch to built-in handler first
+    (let ((builtin (gethash predicate *builtin-predicates*)))
+      (when builtin
+        (funcall builtin args env k)
+        (return-from solve-goal)))
+    ;; Regular predicate: try each matching rule in the database
     (dolist (rule (gethash predicate *prolog-rules*))
       (let* ((fresh-rule (rename-variables rule))
-             (head (rule-head fresh-rule))
-             (body (rule-body fresh-rule))
-             (new-env (unify args (cdr head) env)))
+             (head       (rule-head fresh-rule))
+             (body       (rule-body fresh-rule))
+             (new-env    (unify args (cdr head) env)))
         (when new-env
           (handler-case
               (if body
@@ -201,7 +202,7 @@
                   (funcall k new-env))
             (prolog-cut ()
               ;; Cut stops further alternatives for this goal
-              (return-from solve-goal))))))))
+              (return-from solve-goal))))))));; solve-conjunction is already CPS — passes accumulated env to k
 
 (defun solve-conjunction (goals env k)
   "Solve a conjunction of goals (AND). Call K when all goals succeed."

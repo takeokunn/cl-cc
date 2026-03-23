@@ -8,10 +8,6 @@
 
 ;;; S-Expression Based CPS Transformation (Original - Minimal Bootstrap)
 
-(defmacro with-cps ((value expr) &body body)
-  `(let ((,value (cps-transform ,expr)))
-     ,@body))
-
 (defun cps-transform (expr)
   "Minimal CPS conversion for bootstrap language.
 Produces (lambda (k) ...)."
@@ -100,8 +96,7 @@ Returns a CPS-transformed S-expression."))
 ;;; Core AST Types
 
 (defmethod cps-transform-ast ((node ast-int) k)
-  (let ((v (gensym "INT")))
-    `(funcall ,k ,(ast-int-value node))))
+  `(funcall ,k ,(ast-int-value node)))
 
 (defmethod cps-transform-ast ((node ast-var) k)
   `(funcall ,k ,(ast-var-name node)))
@@ -157,10 +152,8 @@ Returns a CPS-transformed S-expression."))
 (defmethod cps-transform-ast ((node ast-lambda) k)
   "Transform a lambda expression to CPS. The continuation becomes an extra parameter."
   (let* ((params (ast-lambda-params node))
-         (body (ast-lambda-body node))
-         (k-var (gensym "K"))
-         (lambda-k (gensym "LK")))
-    ;; Create a CPS lambda that takes original params + continuation
+         (body   (ast-lambda-body node))
+         (k-var  (gensym "K")))
     `(funcall ,k
               (lambda (,@params ,k-var)
                 ,(cps-transform-sequence body k-var)))))
@@ -176,7 +169,6 @@ Returns a CPS-transformed S-expression."))
 The block creates a catch tag for return-from."
   (let* ((name (ast-block-name node))
          (body (ast-block-body node))
-         (block-k (gensym "BLOCK-K"))
          (result (gensym "RESULT")))
     ;; The continuation for the body is a special one that returns from the block
     `(block ,name
@@ -198,49 +190,28 @@ The block creates a catch tag for return-from."
 
 ;;; Tagbody and Go
 
-(defun cps-transform-tagbody-section (forms tag-table k)
-  "Transform a section of tagbody forms between tags."
+(defun cps-transform-tagbody-section (forms k)
+  "Transform a section of tagbody forms between tags, passing NIL to K when done."
   (if (null forms)
       `(funcall ,k nil)
-      (cps-transform-ast (car forms)
-                         (let ((tmp (gensym "TAG")))
+      (let ((tmp (gensym "TAG")))
+        (cps-transform-ast (car forms)
                            `(lambda (,tmp)
                               (declare (ignore ,tmp))
-                              ,(cps-transform-tagbody-section (cdr forms) tag-table k))))))
-
-(defun cps-transform-tag-entry (tags tag-table k)
-  "Transform tagbody tags into labels with go capability."
-  (if (null tags)
-      `(funcall ,k nil)
-      (let* ((entry (car tags))
-             (tag (car entry))
-             (forms (cdr entry))
-             (rest (cdr tags)))
-        `(progn
-           ,tag
-           ,(cps-transform-tagbody-section forms tag-table
-                                           (if (null rest)
-                                               k
-                                               (let ((tmp (gensym "NEXT")))
-                                                 `(lambda (,tmp)
-                                                    (declare (ignore ,tmp))
-                                                    ,(cps-transform-tag-entry rest tag-table k)))))))))
+                              ,(cps-transform-tagbody-section (cdr forms) k))))))
 
 (defmethod cps-transform-ast ((node ast-tagbody) k)
   "Transform tagbody with labeled sections.
 Uses a tag table to map tags to their continuations."
   (let* ((tags (ast-tagbody-tags node))
          (tag-k (gensym "TAG-K")))
-    ;; Build the tagbody with all tags as entry points
     `(tagbody
        ,@(loop for entry in tags
                for tag = (car entry)
                for forms = (cdr entry)
+               for result-k = (if (eq entry (car (last tags))) k tag-k)
                collect tag
-               append (let ((result-k (if (eq entry (car (last tags)))
-                                          k
-                                          tag-k)))
-                        (list (cps-transform-tagbody-section forms nil result-k))))
+               collect (cps-transform-tagbody-section forms result-k))
        (funcall ,k nil))))
 
 (defmethod cps-transform-ast ((node ast-go) k)
@@ -309,27 +280,23 @@ The cleanup forms always run, even on non-local exit."
     `(,name (lambda (,@params ,k-var)
               ,(cps-transform-sequence body k-var)))))
 
+(defun cps-transform-local-fns (form-kw bindings body k)
+  "Transform a flet/labels binding group to CPS.
+FORM-KW is either 'flet or 'labels; they share identical CPS structure."
+  (let ((fn-k (gensym (if (eq form-kw 'flet) "FLET-K" "LABELS-K"))))
+    `(,form-kw ,(loop for binding in bindings
+                      collect (cps-transform-fn-binding binding fn-k))
+       ,(cps-transform-sequence body
+                                `(lambda (,fn-k)
+                                   (funcall ,k ,fn-k))))))
+
 (defmethod cps-transform-ast ((node ast-flet) k)
   "Transform flet (non-recursive local functions)."
-  (let* ((bindings (ast-flet-bindings node))
-         (body (ast-flet-body node))
-         (flet-k (gensym "FLET-K")))
-    `(flet ,(loop for binding in bindings
-                  collect (cps-transform-fn-binding binding flet-k))
-       ,(cps-transform-sequence body
-                                `(lambda (,flet-k)
-                                   (funcall ,k ,flet-k))))))
+  (cps-transform-local-fns 'flet (ast-flet-bindings node) (ast-flet-body node) k))
 
 (defmethod cps-transform-ast ((node ast-labels) k)
   "Transform labels (mutually recursive local functions)."
-  (let* ((bindings (ast-labels-bindings node))
-         (body (ast-labels-body node))
-         (labels-k (gensym "LABELS-K")))
-    `(labels ,(loop for binding in bindings
-                    collect (cps-transform-fn-binding binding labels-k))
-       ,(cps-transform-sequence body
-                                `(lambda (,labels-k)
-                                   (funcall ,k ,labels-k))))))
+  (cps-transform-local-fns 'labels (ast-labels-bindings node) (ast-labels-body node) k))
 
 ;;; Additional AST Types
 

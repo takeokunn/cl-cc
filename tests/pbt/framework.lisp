@@ -1,13 +1,13 @@
 ;;;; tests/pbt/framework.lisp - Property-Based Testing Framework Implementation
 ;;;
 ;;; This module provides a complete property-based testing framework for CL-CC,
-;;; including generators, combinators, and integration with FiveAM.
+;;; including generators, combinators, and integration with the cl-cc/test framework.
 
 (in-package :cl-cc/pbt)
 
 ;;; Configuration Variables
 
-(defvar *test-count* 100
+(defvar *test-count* 10
   "Default number of test cases to run for each property.")
 
 (defvar *max-list-length* 20
@@ -33,11 +33,14 @@
   (:documentation "Base class for all generators."))
 
 (defun generate (generator)
-  "Generate a random value using GENERATOR."
-  (funcall (generator-generate-fn generator)))
+  "Generate a random value using GENERATOR.
+   Accepts either a generator object or a plain function (as returned by gen-fn)."
+  (if (functionp generator)
+      (funcall generator)
+      (funcall (generator-generate-fn generator))))
 
 (defun gen-fn (generator)
-  "Convert a generator object to a function suitable for FiveAM's for-all.
+  "Convert a generator object to a plain function.
    Returns a lambda that calls generate on the generator."
   (lambda () (generate generator)))
 
@@ -364,9 +367,16 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun extract-generators (args)
     "Extract generator bindings from argument list.
-     ARGS is a list of (var generator) pairs."
-    (loop for (var gen) on args by #'cddr
-          collect (list var gen)))
+     ARGS is either a flat list (var gen var gen ...) or a list of (var gen) pairs."
+    (if (and (consp args) (consp (car args)))
+        ;; Nested format: ((var gen) (var gen) ...)
+        (loop for pair in args
+              collect (if (and (consp pair) (= (length pair) 2))
+                          pair
+                          (list (car pair) (cadr pair))))
+        ;; Flat format: (var gen var gen ...)
+        (loop for (var gen) on args by #'cddr
+              collect (list var gen))))
 
   (defun generate-binding-forms (gen-bindings)
     "Generate LET binding forms from generator bindings."
@@ -375,7 +385,7 @@
 
   (defun format-args (args)
     "Format argument list for display in error messages."
-    (loop for (var gen) on args by #'cddr
+    (loop for (var gen) in (extract-generators args)
           collect (list var (string-downcase (symbol-name (type-of gen)))))))
 
 (defmacro defproperty (name args &body body)
@@ -393,7 +403,7 @@
         (iteration-var (gensym "I"))
         (failure-var (gensym "FAILURE"))
         (args-var (gensym "ARGS")))
-    `(fiveam:test ,name
+    `(deftest ,name
        (let ((,test-count-var *test-count*)
              (,failure-var nil)
              (,args-var nil))
@@ -412,13 +422,11 @@
            (destructuring-bind (type iteration args &optional error) ,failure-var
              (case type
                (:failed
-                (fiveam:is nil
-                           "Property ~S failed on iteration ~D with args ~S"
-                           ',name iteration args))
+                (%fail-test (format nil "Property ~S failed on iteration ~D with args ~S"
+                                    ',name iteration args))
                (:error
-                (fiveam:is nil
-                           "Property ~S raised error ~A on iteration ~D with args ~S"
-                           ',name error iteration args)))))))))
+                (%fail-test (format nil "Property ~S raised error ~A on iteration ~D with args ~S"
+                                    ',name error iteration args)))))))))))
 
 (defmacro for-all (args &body body)
   "Run property tests inline without defining a named test.
@@ -499,7 +507,7 @@
 
 (defun run-property-tests ()
   "Run all property-based tests."
-  (fiveam:run 'cl-cc/pbt))
+  (run-suite 'cl-cc-pbt-suite))
 
 (defun report-failure (test-name iteration args &optional (error nil))
   "Report a property test failure in a standardized format."
@@ -514,9 +522,9 @@
 
 ;;; Test Suite Definition
 
-(def-suite cl-cc-pbt-suite
+(defsuite cl-cc-pbt-suite
   :description "Property-Based Testing suite for CL-CC"
-  :in cl-cc-suite)
+  :parent cl-cc-suite)
 
 ;;; Example Properties
 

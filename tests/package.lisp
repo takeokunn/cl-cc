@@ -1,5 +1,5 @@
 (defpackage :cl-cc/test
-  (:use :cl :fiveam)
+  (:use :cl)
   (:import-from :cl-cc
                  ;; Compiler
                  :compile-string
@@ -294,10 +294,49 @@
                  :type-inference-error
                  :unbound-variable-error
                  :type-mismatch-error)
-  (:export :run-tests :cl-cc-suite))
-
-(in-package :cl-cc/test)
-
-;; Define the main test suite
-(def-suite cl-cc-suite
-  :description "CL-CC Test - Main suite for all tests")
+  (:export :run-tests :cl-cc-suite
+           :run-suite
+           :deftest
+           :defsuite
+           :in-suite
+           :assert-=
+           :assert-eq
+           :assert-eql
+           :assert-equal
+           :assert-string=
+           :assert-null
+           :assert-true
+           :assert-false
+           :assert-type
+           :assert-signals
+           :assert-values
+           :assert-snapshot
+           :assert-compiles-to
+           :assert-evaluates-to
+           :assert-macro-expands-to
+           :assert-infers-type
+           :assert-same-as-sbcl
+           :assert-instructions-match
+           :assert-ast-matches
+           :assert-faster-than
+           :assert-no-consing
+           :assert-backends-agree
+           :assert-deterministic
+           :assert-equivalent-execution
+           :assert-roundtrip-preserves
+           :deftest-each
+           :testing
+           :deftest-combinatorial
+           :deftest-pipeline
+           :deftest-differential
+           :deftest-cross-backend
+           :defbefore
+           :defafter
+           :skip
+           :pending
+           :deftest-fuzz
+           :assert-no-crash
+           :assert-terminates
+           :defmetamorphic
+           :definvariant
+           :run-mutation-test))

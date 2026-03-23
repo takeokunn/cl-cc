@@ -12,9 +12,9 @@
 
 ;;; Test Suite Definition
 
-(def-suite macro-pbt-suite
+(defsuite macro-pbt-suite
   :description "Property-Based Tests for Macro Expansion"
-  :in cl-cc-pbt-suite)
+  :parent cl-cc-pbt-suite)
 
 (in-suite macro-pbt-suite)
 
@@ -31,19 +31,25 @@
 
 (defun gen-test-form ()
   "Generate a form suitable for use as a test condition."
-  (gen-one-of (list (gen-symbol :prefix "TEST" :package nil)
-                    (gen-integer :min -100 :max 100)
-                    (gen-boolean)
-                    (gen-fmap (lambda (x) `(= ,x 0))
-                              (gen-integer :min -10 :max 10)))))
+  (let ((sub-gens (list (gen-symbol :prefix "TEST" :package nil)
+                        (gen-integer :min -100 :max 100)
+                        (gen-boolean)
+                        (gen-fmap (lambda (x) `(= ,x 0))
+                                  (gen-integer :min -10 :max 10)))))
+    (gen-bind
+     (gen-integer :min 0 :max (1- (length sub-gens)))
+     (lambda (i) (nth i sub-gens)))))
 
 (defun gen-body-form ()
   "Generate a form suitable for use in a macro body."
-  (gen-one-of (list (gen-symbol :prefix "BODY" :package nil)
-                    (gen-integer :min -100 :max 100)
-                    (gen-string :max-length 10)
-                    (gen-fmap (lambda (x) `(print ,x))
-                              (gen-integer :min -10 :max 10)))))
+  (let ((sub-gens (list (gen-symbol :prefix "BODY" :package nil)
+                        (gen-integer :min -100 :max 100)
+                        (gen-string :max-length 10)
+                        (gen-fmap (lambda (x) `(print ,x))
+                                  (gen-integer :min -10 :max 10)))))
+    (gen-bind
+     (gen-integer :min 0 :max (1- (length sub-gens)))
+     (lambda (i) (nth i sub-gens)))))
 
 (defun gen-binding-pair ()
   "Generate a (symbol value) binding pair."
@@ -248,16 +254,16 @@
 
 (defproperty cond-multiple-clauses-nested-if
     (clauses (gen-cond-clauses :min-length 2 :max-length 5))
-  "Multiple-clause COND produces nested IF structure."
+  "Multiple-clause COND produces nested conditional structure (IF or OR)."
   (let ((expanded (cl-cc:our-macroexpand-1 `(cond ,@clauses))))
     (and (consp expanded)
-         (eq (car expanded) 'if)
-         ;; The else branch should contain another COND or IF
-         (let ((else-branch (fourth expanded)))
-           (or (and (consp else-branch)
-                    (eq (car else-branch) 'cond))
-               (and (consp else-branch)
-                    (eq (car else-branch) 'if)))))))
+         ;; Single-expression clause: (cond (x) ...) => (or x (cond ...))
+         ;; Multi-body clause:        (cond (x y) ...) => (if x (progn y) (cond ...))
+         (member (car expanded) '(if or))
+         ;; Remaining clauses should appear as a nested COND in some sub-form
+         (some (lambda (sub)
+                 (and (consp sub) (eq (car sub) 'cond)))
+               (cdr expanded)))))
 
 ;;; Property: AND Macro Expansion
 
@@ -287,7 +293,7 @@
 (defproperty and-full-expansion-no-and
     (args (gen-list-of (gen-body-form) :min-length 2 :max-length 4))
   "Fully expanded AND contains no AND forms."
-  (let ((expanded (cl-cc:our-macroexpand `(and ,@args))))
+  (let ((expanded (cl-cc:our-macroexpand-all `(and ,@args))))
     (not (form-contains-symbol-p 'and expanded))))
 
 ;;; Property: OR Macro Expansion
@@ -318,7 +324,7 @@
 (defproperty or-full-expansion-no-or
     (args (gen-list-of (gen-body-form) :min-length 2 :max-length 4))
   "Fully expanded OR contains no OR forms."
-  (let ((expanded (cl-cc:our-macroexpand `(or ,@args))))
+  (let ((expanded (cl-cc:our-macroexpand-all `(or ,@args))))
     (not (form-contains-symbol-p 'or expanded))))
 
 ;;; Property: LET* Macro Expansion
@@ -344,7 +350,7 @@
     (bindings (gen-binding-list :min-length 2 :max-length 4)
      body (gen-body-form))
   "LET* with multiple bindings creates nested LETs."
-  (let ((expanded (cl-cc:our-macroexpand `(let* ,bindings ,body))))
+  (let ((expanded (cl-cc:our-macroexpand-all `(let* ,bindings ,body))))
     (labels ((count-nested-lets (form depth)
                (if (and (consp form) (eq (car form) 'let))
                    (count-nested-lets (third form) (1+ depth))
@@ -508,7 +514,7 @@
 
 (defproperty mvl-accumulates-into-list
     (form (gen-body-form))
-  "MULTIPLE-VALUE-LIST accumulates results into a list."
+  "MULTIPLE-VALUE-LIST accumulates results into a list via NREVERSE."
   (let ((expanded (cl-cc:our-macroexpand-1 `(multiple-value-list ,form))))
     (form-contains-symbol-p 'nreverse expanded)))
 
@@ -522,7 +528,8 @@
   (let ((expanded (cl-cc:our-macroexpand-1 `(defun ,name ,params ,@body))))
     (and (consp expanded)
          (eq (car expanded) 'setf)
-         (equal (second expanded) 'fdefinition))))
+         (and (consp (second expanded))
+              (eq (car (second expanded)) 'fdefinition)))))
 
 (defproperty defun-creates-lambda
     (name (gen-symbol :prefix "FN" :package nil)
@@ -543,7 +550,7 @@
      test (gen-test-form)
      body (gen-body-form))
   "Nested WHEN in LET* fully expands both macros."
-  (let ((expanded (cl-cc:our-macroexpand `(let* ((,var ,val)) (when ,test ,body)))))
+  (let ((expanded (cl-cc:our-macroexpand-all `(let* ((,var ,val)) (when ,test ,body)))))
     (and (consp expanded)
          (eq (car expanded) 'let)
          ;; Inner should have no WHEN or LET*
@@ -555,7 +562,7 @@
      test2 (gen-test-form)
      body (gen-body-form))
   "Nested COND in AND fully expands both macros."
-  (let ((expanded (cl-cc:our-macroexpand `(and ,test1 (cond ((,test2 ,body)))))))
+  (let ((expanded (cl-cc:our-macroexpand-all `(and ,test1 (cond ((,test2 ,body)))))))
     (and (not (form-contains-symbol-p 'cond expanded))
          (not (form-contains-symbol-p 'and expanded)))))
 
@@ -564,7 +571,7 @@
      bindings2 (gen-binding-list :min-length 1 :max-length 2)
      body (gen-body-form))
   "Nested LET* fully expands to nested LETs."
-  (let ((expanded (cl-cc:our-macroexpand `(let* ,bindings1 (let* ,bindings2 ,body)))))
+  (let ((expanded (cl-cc:our-macroexpand-all `(let* ,bindings1 (let* ,bindings2 ,body)))))
     (and (not (form-contains-symbol-p 'let* expanded))
          ;; Should have nested LETs
          (eq (car expanded) 'let))))
@@ -573,7 +580,7 @@
     (args1 (gen-list-of (gen-body-form) :min-length 2 :max-length 3)
      args2 (gen-list-of (gen-body-form) :min-length 2 :max-length 3))
   "Nested OR in PROG1 fully expands."
-  (let ((expanded (cl-cc:our-macroexpand `(prog1 (or ,@args1) (or ,@args2)))))
+  (let ((expanded (cl-cc:our-macroexpand-all `(prog1 (or ,@args1) (or ,@args2)))))
     (and (not (form-contains-symbol-p 'or expanded))
          (consp expanded)
          (eq (car expanded) 'let))))
@@ -706,8 +713,9 @@
 (defproperty and-valid-lisp-form
     (args (gen-list-of (gen-body-form) :min-length 0 :max-length 5))
   "AND expansion is always a valid Lisp form."
+  ;; (and) => t (symbol), (and x) => x (any atom), (and x y) => (if x (and y) nil) (cons)
   (let ((expanded (cl-cc:our-macroexpand-1 `(and ,@args))))
-    (or (symbolp expanded)
+    (or (atom expanded)
         (and (consp expanded)
              (symbolp (car expanded))
              (listp (cdr expanded))))))
