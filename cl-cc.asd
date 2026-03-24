@@ -15,25 +15,31 @@
     :serial t
     :components
     ((:file "package")
-     ;; Stage 1: Source → S-expressions + AST
+     ;; Stage 1: Source → CST → S-expressions (2026 modern parser)
      (:module "parse"
       :serial t
       :components
-      ((:file "package")
+      ((:file "cst")
+       (:file "diagnostics")
        (:file "ast")
        (:file "reader")
        (:file "prolog")
-       (:file "combinators")
+       (:file "combinators")  ; transitional: PHP parser still uses token/alt/seq
+       (:file "dcg")
+       (:file "lexer")
+       (:file "incremental")
        (:module "cl"
         :serial t
         :components
         ((:file "lexer")
-         (:file "parser")))
+         (:file "parser")
+         (:file "grammar")))
        (:module "php"
         :serial t
         :components
         ((:file "lexer")
-         (:file "parser")))))
+         (:file "parser")
+         (:file "grammar")))))
      ;; Stage 2: S-expressions → macro-expanded S-expressions
      (:module "expand"
       :serial t
@@ -140,6 +146,8 @@
         :serial t
         :components
         ((:file "ast-tests")
+         (:file "cst-tests")
+         (:file "lexer-tests")
          (:file "prolog-tests")
          (:file "parser-combinator-tests")
          (:file "php-tests")))

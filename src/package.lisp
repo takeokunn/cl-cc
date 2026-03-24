@@ -1,6 +1,35 @@
 (defpackage :cl-cc
   (:use :cl)
   (:export
+    ;; CST (Concrete Syntax Tree) — modern parser layer
+    :cst-node :cst-node-p :cst-node-kind :cst-node-start-byte :cst-node-end-byte :cst-node-source-file
+    :cst-token :cst-token-p :cst-token-value :make-cst-token
+    :cst-interior :cst-interior-p :cst-interior-children :make-cst-interior
+    :cst-error-node :cst-error-node-p :cst-error-p :cst-error-node-message :make-cst-error-node
+    :cst-child :cst-children :cst-walk :cst-collect-errors
+    :cst-to-sexp :sexp-to-cst :sexp-head-to-kind
+    :cst-location-string
+    :cst-trivia :make-cst-trivia
+    ;; Lexer
+    :lexer-token :lexer-token-type :lexer-token-value
+    :lexer-token-start-byte :lexer-token-end-byte
+    :lexer-token-line :lexer-token-column :lexer-token-trivia
+    :make-lexer :lex-all :lexer-read-token
+    ;; CST parser
+    :parse-cl-source :parse-cl-source-single
+    ;; Diagnostics
+    :diagnostic :make-diagnostic :diagnostic-severity :diagnostic-message :diagnostic-span
+    :make-parse-error :make-parse-warning :parse-failure
+    :byte-offset-to-line-col :source-line-at
+    :format-diagnostic :format-diagnostic-list
+    ;; Incremental parsing
+    :edit-operation :make-edit-operation
+    :parse-incremental :cst-equal-p
+    :cache-lookup :cache-store :invalidate-parse-cache
+    ;; DCG
+    :def-dcg-rule :phrase :phrase-rest :phrase-all
+    :dcg-fresh-var :dcg-reset-counter
+
     ;; Core compiler
     :parse-source
     :parse-all-forms
