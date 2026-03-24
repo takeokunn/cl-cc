@@ -88,6 +88,44 @@
                                    (type-constructor-args type))
                      :source-location (type-node-source-location type)))
 
+    ;; Effect row - substitute in row variable
+    ((typep type 'type-effect-row)
+     (let ((rv (type-effect-row-row-var type)))
+       (if rv
+           (let ((new-rv (type-substitute rv subst)))
+             ;; If row-var resolved to another effect-row, merge effects
+             (if (typep new-rv 'type-effect-row)
+                 (make-type-effect-row
+                  :effects (append (type-effect-row-effects type)
+                                   (type-effect-row-effects new-rv))
+                  :row-var (type-effect-row-row-var new-rv))
+                 (make-type-effect-row
+                  :effects (type-effect-row-effects type)
+                  :row-var new-rv)))
+           type)))
+
+    ;; Effectful function - substitute in all parts
+    ((typep type 'type-effectful-function)
+     (make-type-effectful-function
+      :params (mapcar (lambda (p) (type-substitute p subst))
+                      (type-function-params type))
+      :return (type-substitute (type-function-return type) subst)
+      :effects (type-substitute (type-effectful-function-effects type) subst)))
+
+    ;; Skolem constants - rigid, not substituted
+    ((typep type 'type-skolem) type)
+
+    ;; Forall types - rename-avoiding substitution
+    ;; If the substitution would capture the bound variable, leave it unchanged
+    ((typep type 'type-forall)
+     (let ((bound-var (type-forall-var type)))
+       (if (assoc bound-var subst :test #'type-variable-equal-p)
+           ;; Bound variable shadowed - don't substitute inside
+           type
+           (make-type-forall
+            :var bound-var
+            :type (type-substitute (type-forall-type type) subst)))))
+
     ;; Primitive, unknown, and other types - return unchanged
     (t type)))
 
@@ -137,7 +175,11 @@
       (some (lambda (a) (type-occurs-p var a subst))
             (type-constructor-args type)))
 
-     ;; Other types (primitive, unknown) - variable cannot occur
+     ;; Forall - check in body (bound var doesn't count as free)
+     ((typep type 'type-forall)
+      (type-occurs-p var (type-forall-type type) subst))
+
+     ;; Other types (primitive, unknown, skolem) - variable cannot occur
      (t nil)))
 
 ;;; Type Unification
@@ -172,10 +214,17 @@
              (if (and (type-variable-p t2) (type-variable-equal-p t1 t2))
                  ;; Same variable - success
                  (succeed subst)
-                 ;; Check occurs and bind
-                 (if (type-occurs-p t1 t2 subst)
-                     (fail)  ; Occurs check failed - would create infinite type
-                     (succeed (extend-subst t1 t2 subst)))))))
+                 ;; Impredicativity guard: refuse to bind a type variable to a forall type
+                 (if (typep t2 'type-forall)
+                     (error 'type-inference-error
+                            :message (format nil "Impredicative type: cannot unify type variable ~A with ~A. ~
+                                                  Rank-N types must appear in argument positions checked top-down."
+                                             (type-to-string t1)
+                                             (type-to-string t2)))
+                     ;; Check occurs and bind
+                     (if (type-occurs-p t1 t2 subst)
+                         (fail)  ; Occurs check failed - would create infinite type
+                         (succeed (extend-subst t1 t2 subst))))))))
 
       ;; T2 is type variable
       ((type-variable-p t2)
@@ -183,10 +232,16 @@
          (if found-p
              ;; T2 is bound - unify T1 with the binding
              (type-unify t1 binding subst)
-             ;; T2 is unbound - check occurs and bind
-             (if (type-occurs-p t2 t1 subst)
-                 (fail)  ; Occurs check failed
-                 (succeed (extend-subst t2 t1 subst))))))
+             ;; Impredicativity guard: refuse to bind a type variable to a forall type
+             (if (typep t1 'type-forall)
+                 (error 'type-inference-error
+                        :message (format nil "Impredicative type: cannot unify ~A with type variable ~A."
+                                         (type-to-string t1)
+                                         (type-to-string t2)))
+                 ;; T2 is unbound - check occurs and bind
+                 (if (type-occurs-p t2 t1 subst)
+                     (fail)  ; Occurs check failed
+                     (succeed (extend-subst t2 t1 subst)))))))
 
       ;; Both are function types
       ((and (typep t1 'type-function) (typep t2 'type-function))
@@ -210,10 +265,10 @@
                          (type-tuple-elements t2)
                          subst))
 
-      ;; Both are union types (simplified - require same structure)
+      ;; Both are union types — use canonical sort for order-independence
       ((and (typep t1 'type-union) (typep t2 'type-union))
-       (let ((types1 (type-union-types t1))
-             (types2 (type-union-types t2)))
+       (let ((types1 (sort (copy-list (type-union-types t1)) #'string< :key #'type-to-string))
+             (types2 (sort (copy-list (type-union-types t2)) #'string< :key #'type-to-string)))
          (unless (= (length types1) (length types2))
            (return-from type-unify (fail)))
          (type-unify-lists types1 types2 subst)))
@@ -252,8 +307,108 @@
       ((typep t2 'type-unknown)
        (succeed subst))
 
+      ;; Both are effect rows — unify by row extension
+      ((and (typep t1 'type-effect-row) (typep t2 'type-effect-row))
+       (unify-effect-rows t1 t2 subst))
+
+      ;; Both are effectful functions — unify params, return, and effects
+      ((and (typep t1 'type-effectful-function)
+            (typep t2 'type-effectful-function))
+       (let ((params1 (type-function-params t1))
+             (params2 (type-function-params t2)))
+         (unless (= (length params1) (length params2))
+           (return-from type-unify (fail)))
+         (multiple-value-bind (subst-params ok)
+             (type-unify-lists params1 params2 subst)
+           (if ok
+               (multiple-value-bind (subst-ret ok2)
+                   (type-unify (type-function-return t1)
+                               (type-function-return t2)
+                               subst-params)
+                 (if ok2
+                     (type-unify (type-effectful-function-effects t1)
+                                 (type-effectful-function-effects t2)
+                                 subst-ret)
+                     (fail)))
+               (fail)))))
+
+      ;; Prevent impredicative instantiation: a type variable cannot be unified
+      ;; with a forall type unless the forall is at the let-binding level.
+      ;; Signal a clear error rather than silently failing.
+      ((and (type-variable-p t1) (typep t2 'type-forall))
+       (error 'type-inference-error
+              :message (format nil "Impredicative type: cannot unify type variable ~A with ~A. ~
+                                    Rank-N types must appear in argument positions checked top-down."
+                                (type-to-string t1)
+                                (type-to-string t2))))
+
+      ((and (typep t1 'type-forall) (type-variable-p t2))
+       (error 'type-inference-error
+              :message (format nil "Impredicative type: cannot unify ~A with type variable ~A."
+                                (type-to-string t1)
+                                (type-to-string t2))))
+
       ;; Different type constructors - fail
       (t (fail)))))
+
+(defun unify-effect-rows (row1 row2 subst)
+  "Unify two effect rows.
+   {e1..en | r1} and {f1..fm | r2}:
+   - Compute symmetric difference of concrete effects
+   - If row1 has a row-var, bind it to remaining effects from row2 (and vice versa)
+   - If neither has a row-var, the effect sets must be equal"
+  (let* ((effs1 (type-effect-row-effects row1))
+         (effs2 (type-effect-row-effects row2))
+         (rv1   (type-effect-row-row-var row1))
+         (rv2   (type-effect-row-row-var row2))
+         ;; Canonical effect names for set comparison
+         (names1 (mapcar #'type-effect-name effs1))
+         (names2 (mapcar #'type-effect-name effs2))
+         (only-in-1 (remove-if (lambda (n) (member n names2)) names1))
+         (only-in-2 (remove-if (lambda (n) (member n names1)) names2)))
+    (macrolet ((succeed (s) `(values ,s t))
+               (fail () `(values nil nil)))
+      (cond
+        ;; Both sides equal, no row vars needed
+        ((and (null only-in-1) (null only-in-2))
+         (cond
+           ((and rv1 rv2) (type-unify rv1 rv2 subst))
+           ((and (null rv1) (null rv2)) (succeed subst))
+           (rv1 (type-unify rv1 (make-type-effect-row :effects nil :row-var nil) subst))
+           (rv2 (type-unify rv2 (make-type-effect-row :effects nil :row-var nil) subst))))
+        ;; row2 has effects not in row1 — bind rv1 to them if possible
+        ((and (null only-in-1) only-in-2)
+         (if rv1
+             (let ((extension (make-type-effect-row
+                               :effects (mapcar (lambda (n) (make-type-effect :name n))
+                                                only-in-2)
+                               :row-var rv2)))
+               (type-unify rv1 extension subst))
+             (fail)))
+        ;; row1 has effects not in row2 — bind rv2 to them if possible
+        ((and only-in-1 (null only-in-2))
+         (if rv2
+             (let ((extension (make-type-effect-row
+                               :effects (mapcar (lambda (n) (make-type-effect :name n))
+                                                only-in-1)
+                               :row-var rv1)))
+               (type-unify rv2 extension subst))
+             (fail)))
+        ;; Both have unique effects — need both row vars to absorb them
+        (t
+         (if (and rv1 rv2)
+             (let* ((fresh-var (make-type-variable "r"))
+                    (ext1 (make-type-effect-row
+                           :effects (mapcar (lambda (n) (make-type-effect :name n)) only-in-2)
+                           :row-var fresh-var))
+                    (ext2 (make-type-effect-row
+                           :effects (mapcar (lambda (n) (make-type-effect :name n)) only-in-1)
+                           :row-var fresh-var)))
+               (multiple-value-bind (s1 ok1) (type-unify rv1 ext1 subst)
+                 (if ok1
+                     (type-unify rv2 ext2 s1)
+                     (fail))))
+             (fail)))))))
 
 (defun type-unify-lists (types1 types2 subst)
   "Unify two lists of types element-wise.
@@ -310,7 +465,8 @@
   "Apply substitution SUBST to type-env object ENV.
    Returns a new type-env with types substituted."
   (make-type-env
-                 :bindings (apply-subst (type-env-bindings env) subst)))
+   :bindings (apply-subst (type-env-bindings env) subst)
+   :dict-bindings (type-env-dict-bindings env)))
 
 ;;; Free Type Variables
 
@@ -350,6 +506,29 @@
      (remove-duplicates
       (mapcan #'type-free-vars (type-constructor-args type))
       :test #'type-variable-equal-p))
+
+    ;; Effect row variable
+    ((typep type 'type-effect-row)
+     (let ((rv (type-effect-row-row-var type)))
+       (if (and rv (typep rv 'type-variable))
+           (list rv)
+           nil)))
+
+    ;; Effectful function
+    ((typep type 'type-effectful-function)
+     (remove-duplicates
+      (append (mapcan #'type-free-vars (type-function-params type))
+              (type-free-vars (type-function-return type))
+              (type-free-vars (type-effectful-function-effects type)))
+      :test #'type-variable-equal-p))
+
+    ;; Forall - bound variable is not free
+    ((typep type 'type-forall)
+     (remove-if (lambda (v) (type-variable-equal-p v (type-forall-var type)))
+                (type-free-vars (type-forall-type type))))
+
+    ;; Skolem - no free type variables (it is rigid)
+    ((typep type 'type-skolem) nil)
 
     ;; Other types - no free variables
     (t nil)))

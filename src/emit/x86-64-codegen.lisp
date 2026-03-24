@@ -1,0 +1,1140 @@
+;;;; src/backend/x86-64-codegen.lisp - x86-64 Machine Code Generation
+;;;
+;;; Generates native x86-64 machine code bytes from VM instructions.
+;;; Uses REX prefixes, ModR/M encoding, and proper instruction encoding.
+
+(in-package :cl-cc)
+
+;;; x86-64 Register Encoding
+
+;; Register codes (4-bit values)
+;; Low registers (0-7): RAX-RDI, REX.B = 0
+;; High registers (8-15): R8-R15, REX.B = 1
+(defconstant +rax+ 0)
+(defconstant +rcx+ 1)
+(defconstant +rdx+ 2)
+(defconstant +rbx+ 3)
+(defconstant +rsp+ 4)
+(defconstant +rbp+ 5)
+(defconstant +rsi+ 6)
+(defconstant +rdi+ 7)
+(defconstant +r8+  8)
+(defconstant +r9+  9)
+(defconstant +r10+ 10)
+(defconstant +r11+ 11)
+(defconstant +r12+ 12)
+(defconstant +r13+ 13)
+(defconstant +r14+ 14)
+(defconstant +r15+ 15)
+
+;; Calling convention (System V AMD64 ABI)
+;; Arguments: RDI, RSI, RDX, RCX, R8, R9
+;; Return: RAX
+;; Preserved: RBX, RBP, R12-R15
+;; Temp: RAX, RCX, RDX, RSI, RDI, R8-R11
+
+;;; Output Stream Utilities
+
+(defmacro with-output-to-vector ((stream-var) &body body)
+  "Execute BODY with STREAM-VAR bound to an output stream that collects bytes into a vector."
+  `(let ((bytes '()))
+      (labels ((stream-write-byte (byte)
+                (push byte bytes)))
+        (let ((,stream-var #'stream-write-byte))
+          ,@body
+          (coerce (nreverse bytes) '(simple-array (unsigned-byte 8) (*)))))))
+
+(defun emit-byte (byte stream)
+  "Write single byte to stream (which is a function that takes a byte)."
+  (funcall stream (logand byte #xFF)))
+
+(defun emit-word (word stream)
+  "Write 16-bit value (little-endian)."
+  (emit-byte (logand word #xFF) stream)
+  (emit-byte (logand (ash word -8) #xFF) stream))
+
+(defun emit-dword (dword stream)
+  "Write 32-bit value (little-endian)."
+  (emit-byte (logand dword #xFF) stream)
+  (emit-byte (logand (ash dword -8) #xFF) stream)
+  (emit-byte (logand (ash dword -16) #xFF) stream)
+  (emit-byte (logand (ash dword -24) #xFF) stream))
+
+(defun emit-qword (qword stream)
+  "Write 64-bit value (little-endian)."
+  (emit-dword (logand qword #xFFFFFFFF) stream)
+  (emit-dword (ash qword -32) stream))
+
+;;; REX Prefix
+
+(defun rex-prefix (&key (w 0) (r 0) (x 0) (b 0))
+  "Build REX prefix byte.
+   W=1: 64-bit operand, R: ModR/M reg extension, B: ModR/M r/m extension"
+  (+ #x40 (ash w 3) (ash r 2) (ash x 1) b))
+
+;;; ModR/M Encoding
+
+(defun modrm (mod reg rm)
+  "Build ModR/M byte.
+   MOD: 2 bits (00=mem, 01=disp8, 10=disp32, 11=reg)
+   REG: 3 bits (register or opcode extension)
+   RM: 3 bits (register or addressing mode)"
+  (+ (ash (logand mod #x3) 6)
+     (ash (logand reg #x7) 3)
+     (logand rm #x7)))
+
+;;; Instructions
+
+(defun emit-mov-rr64 (dst src stream)
+  "MOV dst, src (64-bit register to register).
+
+   Encoding: MOV r/m64, r64 (0x89): REG=src, R/M=dst
+             REX.R extends REG (src), REX.B extends R/M (dst)"
+  (emit-byte (rex-prefix :w 1 :r (ash src -3) :b (ash dst -3)) stream)
+  (emit-byte #x89 stream)
+  (emit-byte (modrm 3 src dst) stream))
+
+(defun emit-mov-ri64 (dst imm stream)
+  "MOV dst, imm64 (64-bit immediate to register).
+
+   Encoding: REX.W + B8+ rd"
+  (emit-byte (rex-prefix :w 1 :b (ash dst -3)) stream)
+  (emit-byte (+ #xB8 (logand dst #x7)) stream)
+  (emit-qword imm stream))
+
+(defun emit-mov-rm64 (dst base offset stream)
+  "MOV dst, [base + offset] (load from memory).
+
+   For offset = 0: REX.W + 8B /r (mod=00)
+   For offset fits in byte: REX.W + 8B /r (mod=01)"
+  (emit-byte (rex-prefix :w 1 :r (ash dst -3) :b (ash base -3)) stream)
+  (emit-byte #x8B stream)
+  (if (zerop offset)
+      (emit-byte (modrm 0 dst base) stream)
+      (progn
+        (emit-byte (modrm 1 dst base) stream)
+        (emit-byte (logand offset #xFF) stream))))
+
+(defun emit-mov-mr64 (base offset src stream)
+  "MOV [base + offset], src (store to memory)."
+  (emit-byte (rex-prefix :w 1 :r (ash src -3) :b (ash base -3)) stream)
+  (emit-byte #x89 stream)
+  (if (zerop offset)
+      (emit-byte (modrm 0 src base) stream)
+      (progn
+        (emit-byte (modrm 1 src base) stream)
+        (emit-byte (logand offset #xFF) stream))))
+
+(defun emit-add-rr64 (dst src stream)
+  "ADD dst, src (64-bit).
+
+   Encoding: REX.W + 01 /r"
+  (emit-byte (rex-prefix :w 1 :r (ash src -3) :b (ash dst -3)) stream)
+  (emit-byte #x01 stream)
+  (emit-byte (modrm 3 src dst) stream))
+
+(defun emit-sub-rr64 (dst src stream)
+  "SUB dst, src (64-bit).
+
+   Encoding: REX.W + 29 /r"
+  (emit-byte (rex-prefix :w 1 :r (ash src -3) :b (ash dst -3)) stream)
+  (emit-byte #x29 stream)
+  (emit-byte (modrm 3 src dst) stream))
+
+(defun emit-imul-rr64 (dst src stream)
+  "IMUL dst, src (64-bit signed multiply).
+
+   Encoding: REX.W + 0F AF /r"
+  (emit-byte (rex-prefix :w 1 :r (ash dst -3) :b (ash src -3)) stream)
+  (emit-byte #x0F stream)
+  (emit-byte #xAF stream)
+  (emit-byte (modrm 3 dst src) stream))
+
+(defun emit-cmp-rr64 (op1 op2 stream)
+  "CMP op1, op2 (64-bit compare).
+
+   Encoding: REX.W + 39 /r"
+  (emit-byte (rex-prefix :w 1 :r (ash op2 -3) :b (ash op1 -3)) stream)
+  (emit-byte #x39 stream)
+  (emit-byte (modrm 3 op2 op1) stream))
+
+(defun emit-push-r64 (reg stream)
+  "PUSH reg (64-bit).
+
+   Encoding: 50+ rd"
+  (emit-byte (+ #x50 (logand reg #x7)) stream))
+
+(defun emit-pop-r64 (reg stream)
+  "POP reg (64-bit).
+
+   Encoding: 58+ rd"
+  (emit-byte (+ #x58 (logand reg #x7)) stream))
+
+(defun emit-call-r64 (reg stream)
+  "CALL reg (indirect call).
+
+   Encoding: FF /2"
+  (emit-byte #xFF stream)
+  (emit-byte (modrm 3 2 reg) stream))
+
+(defun emit-ret (stream)
+  "RET (return).
+
+   Encoding: C3"
+  (emit-byte #xC3 stream))
+
+(defun emit-nop (stream)
+  "NOP (no operation).
+
+   Encoding: 90"
+  (emit-byte #x90 stream))
+
+(defun emit-jmp-rel32 (offset stream)
+  "JMP rel32 (near jump).
+
+   Encoding: E9 cd"
+  (emit-byte #xE9 stream)
+  (emit-dword offset stream))
+
+(defun emit-je-rel32 (offset stream)
+  "JE rel32 (jump if equal).
+
+   Encoding: 0F 84 cd"
+  (emit-byte #x0F stream)
+  (emit-byte #x84 stream)
+  (emit-dword offset stream))
+
+(defun emit-jne-rel32 (offset stream)
+  "JNE rel32 (jump if not equal).
+
+   Encoding: 0F 85 cd"
+  (emit-byte #x0F stream)
+  (emit-byte #x85 stream)
+  (emit-dword offset stream))
+
+;;; VM to Machine Code Translation
+
+(defvar *current-regalloc* nil
+  "When non-nil, the current regalloc-result used during code generation.")
+
+(defparameter *vm-reg-map*
+  `((:R0 . ,+rax+)
+    (:R1 . ,+rcx+)
+    (:R2 . ,+rdx+)
+    (:R3 . ,+rbx+)
+    (:R4 . ,+rsi+)
+    (:R5 . ,+rdi+)
+    (:R6 . ,+r8+)
+    (:R7 . ,+r9+))
+  "Mapping from VM keyword registers to x86-64 register codes.")
+
+(defun vm-reg-to-x86 (vm-reg)
+  "Map VM register to x86-64 register code.
+   When *current-regalloc* is set, uses register allocation results.
+   Otherwise falls back to naive mapping."
+  (if *current-regalloc*
+      (vm-reg-to-x86-with-alloc *current-regalloc* vm-reg)
+      (let ((entry (assoc vm-reg *vm-reg-map*)))
+        (unless entry
+          (error "VM register ~A has no x86-64 mapping (only R0-R7 supported)" vm-reg))
+        (cdr entry))))
+
+(defparameter *phys-reg-to-x86-code*
+  `((:rax . ,+rax+) (:rcx . ,+rcx+) (:rdx . ,+rdx+) (:rbx . ,+rbx+)
+    (:rsi . ,+rsi+) (:rdi . ,+rdi+) (:r8 . ,+r8+) (:r9 . ,+r9+)
+    (:r10 . ,+r10+) (:r11 . ,+r11+) (:r12 . ,+r12+) (:r13 . ,+r13+)
+    (:r14 . ,+r14+) (:r15 . ,+r15+))
+  "Mapping from physical register keywords to x86-64 register codes.")
+
+(defun vm-reg-to-x86-with-alloc (ra vm-reg)
+  "Map VM register to x86-64 register code using register allocation result.
+   RA is a regalloc-result, VM-REG is a virtual register keyword.
+   Returns the integer register code (e.g., +rax+ = 0)."
+  (let ((phys (gethash vm-reg (regalloc-assignment ra))))
+    (unless phys
+      (error "Virtual register ~A not allocated (possibly spilled)" vm-reg))
+    (let ((entry (assoc phys *phys-reg-to-x86-code*)))
+      (unless entry
+        (error "Unknown physical register: ~A" phys))
+      (cdr entry))))
+
+(defun vm-const-to-integer (value)
+  "Coerce a VM constant value to an integer for native code emission.
+   In integer-only binary mode: nil->0, t->1, integers pass through, other->0."
+  (cond ((null value) 0)
+        ((eq value t) 1)
+        ((integerp value) value)
+        (t 0)))
+
+(defun emit-vm-const (inst stream)
+  "Emit code for VM CONST instruction."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (value (vm-const-to-integer (vm-value inst))))
+    (emit-mov-ri64 dst value stream)))
+
+(defun emit-vm-move (inst stream)
+  "Emit code for VM MOVE instruction."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (src (vm-reg-to-x86 (vm-src inst))))
+    (emit-mov-rr64 dst src stream)))
+
+(defun emit-vm-add (inst stream)
+  "Emit code for VM ADD instruction."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    ;; Move lhs to dst, then add rhs
+    (emit-mov-rr64 dst lhs stream)
+    (emit-add-rr64 dst rhs stream)))
+
+(defun emit-vm-sub (inst stream)
+  "Emit code for VM SUB instruction."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 dst lhs stream)
+    (emit-sub-rr64 dst rhs stream)))
+
+(defun emit-vm-mul (inst stream)
+  "Emit code for VM MUL instruction."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 dst lhs stream)
+    (emit-imul-rr64 dst rhs stream)))
+
+;;; Compare with Zero
+
+(defun emit-cmp-ri64 (reg imm stream)
+  "CMP reg, imm32 (compare register with 32-bit sign-extended immediate).
+
+   Encoding: REX.W + 81 /7 id"
+  (emit-byte (rex-prefix :w 1 :b (ash reg -3)) stream)
+  (emit-byte #x81 stream)
+  (emit-byte (modrm 3 7 reg) stream)
+  (emit-dword imm stream))
+
+(defun emit-test-rr64 (reg1 reg2 stream)
+  "TEST reg1, reg2 (bitwise AND, set flags, discard result).
+
+   Encoding: REX.W + 85 /r"
+  (emit-byte (rex-prefix :w 1 :r (ash reg2 -3) :b (ash reg1 -3)) stream)
+  (emit-byte #x85 stream)
+  (emit-byte (modrm 3 reg2 reg1) stream))
+
+;;; Integer Division via IDIV
+;;;
+;;; IDIV r64 requires RDX:RAX as the implicit 128-bit dividend, producing:
+;;;   quotient  -> RAX
+;;;   remainder -> RDX  (truncate semantics)
+;;;
+;;; We save/restore RAX and RDX around the instruction and use R11 (scratch)
+;;; as an intermediate to hold both rhs and the result. Fixed 21-byte layout:
+;;;
+;;;   [0  +3] MOV  R11, rhs   -- save divisor to scratch
+;;;   [3  +1] PUSH RAX        -- save RAX
+;;;   [4  +1] PUSH RDX        -- save RDX
+;;;   [5  +3] MOV  RAX, lhs   -- set up dividend in RAX
+;;;   [8  +2] CQO             -- sign-extend RAX -> RDX:RAX
+;;;   [10 +3] IDIV R11        -- quotient->RAX, remainder->RDX
+;;;   [13 +3] MOV  R11, RAX   -- save quotient (or R11,RDX for rem)
+;;;   [16 +1] POP  RDX        -- restore RDX
+;;;   [17 +1] POP  RAX        -- restore RAX
+;;;   (caller moves R11 to dst afterward, +3 bytes)
+;;;   Total: 21 bytes (sequence only, not including final MOV dst,R11)
+
+(defun emit-idiv-r11 (stream)
+  "IDIV R11 -- 64-bit signed division by R11. REX.W.B + F7 /7 + ModRM"
+  (emit-byte #x49 stream)   ; REX.W=1, REX.B=1 (R11 is R/M field register)
+  (emit-byte #xF7 stream)
+  (emit-byte (modrm 3 7 3) stream)) ; ModRM: mod=11, reg=7(/7=IDIV), rm=3 (R11&7=3)
+
+(defun emit-cqo (stream)
+  "CQO -- sign-extend RAX into RDX:RAX. REX.W + 99"
+  (emit-byte #x48 stream)
+  (emit-byte #x99 stream))
+
+(defun emit-idiv-sequence (lhs rhs result-is-remainder stream)
+  "Emit the full IDIV save/setup/divide/restore sequence.
+   RESULT-IS-REMAINDER: if true, dst gets RDX (remainder); else RAX (quotient).
+   Caller must do (emit-mov-rr64 dst +r11+ stream) afterward."
+  (let ((r11 +r11+))
+    (emit-mov-rr64 r11 rhs stream)                          ; [0  +3] MOV R11, rhs
+    (emit-push-r64 +rax+ stream)                            ; [3  +1] PUSH RAX
+    (emit-push-r64 +rdx+ stream)                            ; [4  +1] PUSH RDX
+    (emit-mov-rr64 +rax+ lhs stream)                        ; [5  +3] MOV RAX, lhs
+    (emit-cqo stream)                                       ; [8  +2] CQO
+    (emit-idiv-r11 stream)                                  ; [10 +3] IDIV R11
+    ;; Save the desired result to R11 before restoring RAX/RDX
+    (if result-is-remainder
+        (emit-mov-rr64 r11 +rdx+ stream)                    ; [13 +3] MOV R11, RDX
+        (emit-mov-rr64 r11 +rax+ stream))                   ; [13 +3] MOV R11, RAX
+    (emit-pop-r64 +rdx+ stream)                             ; [16 +1] POP RDX
+    (emit-pop-r64 +rax+ stream)))                           ; [17 +1] POP RAX
+    ;; Caller moves R11 to dst afterward
+
+(defun emit-vm-truncate (inst stream)
+  "vm-truncate: dst = truncate(lhs / rhs)  -- quotient, truncate-toward-zero."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-idiv-sequence lhs rhs nil stream)                 ; [0..17]
+    (emit-mov-rr64 dst +r11+ stream)))                      ; [18 +3] MOV dst, R11
+
+(defun emit-vm-rem (inst stream)
+  "vm-rem: dst = rem(lhs, rhs)  -- remainder, truncate semantics (same sign as lhs)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-idiv-sequence lhs rhs t stream)                   ; [0..17]
+    (emit-mov-rr64 dst +r11+ stream)))                      ; [18 +3] MOV dst, R11
+
+;;; Floor Division: vm-div, vm-mod
+;;;
+;;; x86-64 IDIV gives truncation-towards-zero.  CL's floor/mod differ when
+;;; lhs and rhs have opposite signs and the remainder is non-zero:
+;;;   floor quotient  = truncate quotient - 1   (iff rem!=0 && sign(rem)!=sign(div))
+;;;   floor remainder = truncate remainder + div (iff rem!=0 && sign(rem)!=sign(div))
+;;;
+;;; vm-div -- floor quotient (34 bytes):
+;;;   [0  +3] MOV  R11, rhs        -- R11 = divisor (IDIV preserves R11)
+;;;   [3  +1] PUSH RAX
+;;;   [4  +1] PUSH RDX
+;;;   [5  +3] MOV  RAX, lhs
+;;;   [8  +2] CQO
+;;;   [10 +3] IDIV R11             -- RAX=q(trunc), RDX=rem, R11=divisor (unchanged)
+;;;   [13 +3] TEST RDX, RDX        -- rem == 0?
+;;;   [16 +2] JE   +8              -- if 0, skip to [26] (no correction)
+;;;   [18 +3] XOR  R11, RDX        -- R11[63]=1 iff divisor and rem have different signs
+;;;   [21 +2] JNS  +3              -- if same signs, skip to [26]
+;;;   [23 +3] DEC  RAX             -- floor correction: quotient--
+;;;   [26 +3] MOV  R11, RAX        -- R11 = floor quotient
+;;;   [29 +1] POP  RDX
+;;;   [30 +1] POP  RAX
+;;;   [31 +3] MOV  dst, R11
+;;;   Total: 34 bytes
+;;;
+;;; vm-mod -- floor remainder (37 bytes):
+;;;   [0  +3] MOV  R11, rhs        -- R11 = divisor
+;;;   [3  +1] PUSH RAX
+;;;   [4  +1] PUSH RDX
+;;;   [5  +3] MOV  RAX, lhs
+;;;   [8  +2] CQO
+;;;   [10 +3] IDIV R11             -- RAX=q(trunc, unused), RDX=rem, R11=divisor
+;;;   [13 +3] TEST RDX, RDX        -- rem == 0?
+;;;   [16 +2] JE   +11             -- if 0, skip to [29] (result = 0)
+;;;   [18 +3] MOV  RAX, R11        -- RAX = divisor (reuse quotient slot for sign check)
+;;;   [21 +3] XOR  RAX, RDX        -- RAX[63]=1 iff divisor and rem have different signs
+;;;   [24 +2] JNS  +3              -- if same signs, skip to [29]
+;;;   [26 +3] ADD  RDX, R11        -- floor correction: rem += divisor
+;;;   [29 +3] MOV  R11, RDX        -- R11 = floor remainder
+;;;   [32 +1] POP  RDX
+;;;   [33 +1] POP  RAX
+;;;   [34 +3] MOV  dst, R11
+;;;   Total: 37 bytes
+
+(defun emit-vm-div (inst stream)
+  "vm-div: dst = floor(lhs / rhs)  -- floor division (CL semantics)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 +r11+ rhs stream)                         ; [0  +3]
+    (emit-push-r64 +rax+ stream)                             ; [3  +1]
+    (emit-push-r64 +rdx+ stream)                             ; [4  +1]
+    (emit-mov-rr64 +rax+ lhs stream)                         ; [5  +3]
+    (emit-cqo stream)                                        ; [8  +2]
+    (emit-idiv-r11 stream)                                   ; [10 +3]
+    (emit-test-rr64 +rdx+ +rdx+ stream)                      ; [13 +3]
+    (emit-byte #x74 stream) (emit-byte 8 stream)             ; [16 +2] JE +8 -> [26]
+    (emit-xor-rr64 +r11+ +rdx+ stream)                       ; [18 +3] R11 ^= RDX
+    (emit-byte #x79 stream) (emit-byte 3 stream)             ; [21 +2] JNS +3 -> [26]
+    (emit-dec-r64 +rax+ stream)                              ; [23 +3] floor correction
+    (emit-mov-rr64 +r11+ +rax+ stream)                       ; [26 +3]
+    (emit-pop-r64 +rdx+ stream)                              ; [29 +1]
+    (emit-pop-r64 +rax+ stream)                              ; [30 +1]
+    (emit-mov-rr64 dst +r11+ stream)))                       ; [31 +3]
+
+(defun emit-vm-mod (inst stream)
+  "vm-mod: dst = mod(lhs, rhs)  -- floor modulo (CL semantics)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 +r11+ rhs stream)                         ; [0  +3]
+    (emit-push-r64 +rax+ stream)                             ; [3  +1]
+    (emit-push-r64 +rdx+ stream)                             ; [4  +1]
+    (emit-mov-rr64 +rax+ lhs stream)                         ; [5  +3]
+    (emit-cqo stream)                                        ; [8  +2]
+    (emit-idiv-r11 stream)                                   ; [10 +3]
+    (emit-test-rr64 +rdx+ +rdx+ stream)                      ; [13 +3]
+    (emit-byte #x74 stream) (emit-byte 11 stream)            ; [16 +2] JE +11 -> [29]
+    (emit-mov-rr64 +rax+ +r11+ stream)                       ; [18 +3] RAX = divisor
+    (emit-xor-rr64 +rax+ +rdx+ stream)                       ; [21 +3] RAX ^= RDX
+    (emit-byte #x79 stream) (emit-byte 3 stream)             ; [24 +2] JNS +3 -> [29]
+    (emit-add-rr64 +rdx+ +r11+ stream)                       ; [26 +3] floor correction
+    (emit-mov-rr64 +r11+ +rdx+ stream)                       ; [29 +3]
+    (emit-pop-r64 +rdx+ stream)                              ; [32 +1]
+    (emit-pop-r64 +rax+ stream)                              ; [33 +1]
+    (emit-mov-rr64 dst +r11+ stream)))                       ; [34 +3]
+
+;;; Shift Operations
+;;;
+;;; x86-64 variable-count shifts (SAL/SAR) require the count in CL (low byte of RCX).
+;;; We save/restore RCX around vm-ash, giving a fixed 24-byte instruction sequence.
+
+(defun emit-sal-r64-cl (reg stream)
+  "SAL reg, CL (shift arithmetic left by CL). REX.W + D3 /4"
+  (emit-byte (rex-prefix :w 1 :b (ash reg -3)) stream)
+  (emit-byte #xD3 stream)
+  (emit-byte (modrm 3 4 reg) stream))
+
+(defun emit-sar-r64-cl (reg stream)
+  "SAR reg, CL (shift arithmetic right by CL). REX.W + D3 /7"
+  (emit-byte (rex-prefix :w 1 :b (ash reg -3)) stream)
+  (emit-byte #xD3 stream)
+  (emit-byte (modrm 3 7 reg) stream))
+
+;;; Immediate Arithmetic (ADD/SUB/AND reg, imm8)
+
+(defun emit-add-ri8 (reg imm stream)
+  "ADD reg, imm8 (sign-extended to 64-bit). REX.W + 83 /0 ib"
+  (emit-byte (rex-prefix :w 1 :b (ash reg -3)) stream)
+  (emit-byte #x83 stream)
+  (emit-byte (modrm 3 0 reg) stream)
+  (emit-byte (logand imm #xFF) stream))
+
+(defun emit-sub-ri8 (reg imm stream)
+  "SUB reg, imm8 (sign-extended to 64-bit). REX.W + 83 /5 ib"
+  (emit-byte (rex-prefix :w 1 :b (ash reg -3)) stream)
+  (emit-byte #x83 stream)
+  (emit-byte (modrm 3 5 reg) stream)
+  (emit-byte (logand imm #xFF) stream))
+
+(defun emit-and-ri8 (reg imm stream)
+  "AND reg, imm8 (sign-extended to 64-bit). REX.W + 83 /4 ib"
+  (emit-byte (rex-prefix :w 1 :b (ash reg -3)) stream)
+  (emit-byte #x83 stream)
+  (emit-byte (modrm 3 4 reg) stream)
+  (emit-byte (logand imm #xFF) stream))
+
+(defun emit-jge-short (offset stream)
+  "JGE rel8 (short conditional jump if >=). 7D cb
+   OFFSET is byte displacement from end of this instruction."
+  (emit-byte #x7D stream)
+  (emit-byte (logand offset #xFF) stream))
+
+;;; Conditional Move (CMOVcc)
+
+(defun emit-cmovl-rr64 (dst src stream)
+  "CMOVL dst, src -- conditional move if less (signed). REX.W + 0F 4C /r"
+  (emit-byte (rex-prefix :w 1 :r (ash dst -3) :b (ash src -3)) stream)
+  (emit-byte #x0F stream)
+  (emit-byte #x4C stream)
+  (emit-byte (modrm 3 dst src) stream))
+
+(defun emit-cmovg-rr64 (dst src stream)
+  "CMOVG dst, src -- conditional move if greater (signed). REX.W + 0F 4F /r"
+  (emit-byte (rex-prefix :w 1 :r (ash dst -3) :b (ash src -3)) stream)
+  (emit-byte #x0F stream)
+  (emit-byte #x4F stream)
+  (emit-byte (modrm 3 dst src) stream))
+
+;;; Logical / Bitwise Operations
+
+(defun emit-and-rr64 (dst src stream)
+  "AND dst, src (64-bit). REX.W + 21 /r"
+  (emit-byte (rex-prefix :w 1 :r (ash src -3) :b (ash dst -3)) stream)
+  (emit-byte #x21 stream)
+  (emit-byte (modrm 3 src dst) stream))
+
+(defun emit-or-rr64 (dst src stream)
+  "OR dst, src (64-bit). REX.W + 09 /r"
+  (emit-byte (rex-prefix :w 1 :r (ash src -3) :b (ash dst -3)) stream)
+  (emit-byte #x09 stream)
+  (emit-byte (modrm 3 src dst) stream))
+
+(defun emit-xor-rr64 (dst src stream)
+  "XOR dst, src (64-bit). REX.W + 31 /r"
+  (emit-byte (rex-prefix :w 1 :r (ash src -3) :b (ash dst -3)) stream)
+  (emit-byte #x31 stream)
+  (emit-byte (modrm 3 src dst) stream))
+
+(defun emit-not-r64 (reg stream)
+  "NOT reg (bitwise complement 64-bit). REX.W + F7 /2"
+  (emit-byte (rex-prefix :w 1 :b (ash reg -3)) stream)
+  (emit-byte #xF7 stream)
+  (emit-byte (modrm 3 2 reg) stream))
+
+(defun emit-neg-r64 (reg stream)
+  "NEG reg (two's complement negate 64-bit). REX.W + F7 /3"
+  (emit-byte (rex-prefix :w 1 :b (ash reg -3)) stream)
+  (emit-byte #xF7 stream)
+  (emit-byte (modrm 3 3 reg) stream))
+
+(defun emit-dec-r64 (reg stream)
+  "DEC reg (64-bit decrement). REX.W + FF /1"
+  (emit-byte (rex-prefix :w 1 :b (ash reg -3)) stream)
+  (emit-byte #xFF stream)
+  (emit-byte (modrm 3 1 reg) stream))
+
+;;; SETcc + MOVZX helpers for comparison results
+;;;
+;;; SETcc opcode2 values (second byte after 0F):
+;;;   #x94 = SETE   (ZF=1)          #x95 = SETNE  (ZF=0)
+;;;   #x9C = SETL   (SF/=OF)        #x9D = SETGE  (SF=OF)
+;;;   #x9E = SETLE  (ZF=1|SF/=OF)   #x9F = SETG   (ZF=0 & SF=OF)
+
+(defun emit-setcc (opcode2 reg stream)
+  "SETcc reg8: set byte register to 0/1 based on condition flags.
+   OPCODE2 is the second byte of SETcc (e.g., #x9C for SETL).
+   REG is an x86-64 register code (0-15).
+   Requires REX prefix for SIL/DIL (codes 6/7) and R8+ (codes >= 8)."
+  (when (>= reg 4)
+    (emit-byte (rex-prefix :b (if (>= reg 8) 1 0)) stream))
+  (emit-byte #x0F stream)
+  (emit-byte opcode2 stream)
+  (emit-byte (modrm 3 0 reg) stream))
+
+(defun emit-movzx-r64-r8 (dst src stream)
+  "MOVZX dst64, src8 -- zero-extend byte register to 64-bit. REX.W + 0F B6 /r"
+  (emit-byte (rex-prefix :w 1 :r (ash dst -3) :b (ash src -3)) stream)
+  (emit-byte #x0F stream)
+  (emit-byte #xB6 stream)
+  (emit-byte (modrm 3 dst src) stream))
+
+;;; Comparison instruction emitters (CMP lhs, rhs -> SETcc dst8 -> MOVZX dst64)
+
+(defun emit-vm-lt (inst stream)
+  "vm-lt: dst = (lhs < rhs) ? 1 : 0  -- signed."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-cmp-rr64 lhs rhs stream)
+    (emit-setcc #x9C dst stream)
+    (emit-movzx-r64-r8 dst dst stream)))
+
+(defun emit-vm-gt (inst stream)
+  "vm-gt: dst = (lhs > rhs) ? 1 : 0  -- signed."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-cmp-rr64 lhs rhs stream)
+    (emit-setcc #x9F dst stream)
+    (emit-movzx-r64-r8 dst dst stream)))
+
+(defun emit-vm-le (inst stream)
+  "vm-le: dst = (lhs <= rhs) ? 1 : 0  -- signed."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-cmp-rr64 lhs rhs stream)
+    (emit-setcc #x9E dst stream)
+    (emit-movzx-r64-r8 dst dst stream)))
+
+(defun emit-vm-ge (inst stream)
+  "vm-ge: dst = (lhs >= rhs) ? 1 : 0  -- signed."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-cmp-rr64 lhs rhs stream)
+    (emit-setcc #x9D dst stream)
+    (emit-movzx-r64-r8 dst dst stream)))
+
+(defun emit-vm-num-eq (inst stream)
+  "vm-num-eq: dst = (lhs == rhs) ? 1 : 0  -- integer equality."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-cmp-rr64 lhs rhs stream)
+    (emit-setcc #x94 dst stream)
+    (emit-movzx-r64-r8 dst dst stream)))
+
+(defun emit-vm-eq (inst stream)
+  "vm-eq: dst = (lhs == rhs) ? 1 : 0  -- general equality (same x86 encoding)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-cmp-rr64 lhs rhs stream)
+    (emit-setcc #x94 dst stream)
+    (emit-movzx-r64-r8 dst dst stream)))
+
+;;; Unary arithmetic/logical instruction emitters
+
+(defun emit-vm-neg (inst stream)
+  "vm-neg: dst = -src  (two's complement negation)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (src (vm-reg-to-x86 (vm-src inst))))
+    (emit-mov-rr64 dst src stream)
+    (emit-neg-r64 dst stream)))
+
+(defun emit-vm-not (inst stream)
+  "vm-not: dst = (src == 0) ? 1 : 0  (logical NOT -- zero -> 1, nonzero -> 0)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (src (vm-reg-to-x86 (vm-src inst))))
+    ;; TEST src, src sets ZF iff src == 0; SETE captures that
+    (emit-test-rr64 src src stream)
+    (emit-setcc #x94 dst stream)           ; SETE
+    (emit-movzx-r64-r8 dst dst stream)))
+
+(defun emit-vm-lognot (inst stream)
+  "vm-lognot: dst = ~src  (bitwise complement)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (src (vm-reg-to-x86 (vm-src inst))))
+    (emit-mov-rr64 dst src stream)
+    (emit-not-r64 dst stream)))
+
+;;; Increment / Decrement
+
+(defun emit-vm-inc (inst stream)
+  "vm-inc: dst = src + 1."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (src (vm-reg-to-x86 (vm-src inst))))
+    (emit-mov-rr64 dst src stream)
+    (emit-add-ri8 dst 1 stream)))
+
+(defun emit-vm-dec (inst stream)
+  "vm-dec: dst = src - 1."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (src (vm-reg-to-x86 (vm-src inst))))
+    (emit-mov-rr64 dst src stream)
+    (emit-sub-ri8 dst 1 stream)))
+
+;;; Absolute Value
+;;;
+;;; Strategy (branch-free at the cost of 1 extra MOV):
+;;;   MOV dst, src          ; copy value
+;;;   CMP dst, 0            ; set flags
+;;;   JGE +4                ; skip NEG if already >= 0  (short jump, 2 bytes)
+;;;   NEG dst               ; negate if negative
+
+(defun emit-vm-abs (inst stream)
+  "vm-abs: dst = |src|  (two's complement absolute value)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (src (vm-reg-to-x86 (vm-src inst))))
+    ;; Layout: MOV(3) + CMP-imm32(7) + JGE(2) + NEG(3) = 15 bytes
+    ;; JGE skips only the NEG (3 bytes ahead of JGE's end)
+    (emit-mov-rr64 dst src stream)               ; 3 bytes
+    (emit-cmp-ri64 dst 0 stream)                 ; 7 bytes: REX+0x81+ModRM+imm32
+    (emit-jge-short 3 stream)                    ; 2 bytes: 7D 03 -- skip NEG (3 bytes)
+    (emit-neg-r64 dst stream)))                  ; 3 bytes
+
+;;; Arithmetic Shift (vm-ash)
+;;;
+;;; Fixed 24-byte layout (all sub-instructions are exactly 3 or 1 bytes):
+;;;
+;;;   [0  +1] PUSH RCX                -- save CL/RCX
+;;;   [1  +3] MOV  RCX, rhs           -- load shift count
+;;;   [4  +3] MOV  dst,  lhs          -- copy value
+;;;   [7  +3] TEST RCX, RCX           -- set flags for sign check
+;;;   [10 +2] JGE  +8                 -- if count>=0 jump to SAL at [20]
+;;;   [12 +3] NEG  RCX                -- negate for right-shift
+;;;   [15 +3] SAR  dst,  CL           -- arithmetic right shift
+;;;   [18 +2] JMP  +3                 -- skip SAL, jump to POP at [23]
+;;;   [20 +3] SAL  dst,  CL           -- arithmetic left shift
+;;;   [23 +1] POP  RCX                -- restore CL/RCX
+;;;   Total: 24 bytes (independent of which physical registers are used)
+
+(defun emit-vm-ash (inst stream)
+  "vm-ash: dst = (ash lhs rhs)
+   Positive rhs = left shift, negative rhs = right shift.
+   RCX is saved/restored; CL carries the shift count."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-push-r64 +rcx+ stream)                  ; 1 byte
+    (emit-mov-rr64 +rcx+ rhs stream)              ; 3 bytes
+    (emit-mov-rr64 dst lhs stream)                ; 3 bytes
+    (emit-test-rr64 +rcx+ +rcx+ stream)           ; 3 bytes
+    (emit-byte #x7D stream) (emit-byte 8 stream)  ; 2 bytes: JGE +8 -> [20]=SAL
+    (emit-neg-r64 +rcx+ stream)                   ; 3 bytes
+    (emit-sar-r64-cl dst stream)                  ; 3 bytes
+    (emit-byte #xEB stream) (emit-byte 3 stream)  ; 2 bytes: JMP +3 -> [23]=POP
+    (emit-sal-r64-cl dst stream)                  ; 3 bytes
+    (emit-pop-r64 +rcx+ stream)))                 ; 1 byte
+
+;;; Min / Max via CMOVcc
+
+(defun emit-vm-min (inst stream)
+  "vm-min: dst = min(lhs, rhs)  -- signed, branchless via CMOVG."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    ;; dst = lhs; if dst > rhs then dst = rhs  -> dst = min(lhs, rhs)
+    (emit-mov-rr64 dst lhs stream)
+    (emit-cmp-rr64 dst rhs stream)
+    (emit-cmovg-rr64 dst rhs stream)))
+
+(defun emit-vm-max (inst stream)
+  "vm-max: dst = max(lhs, rhs)  -- signed, branchless via CMOVL."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    ;; dst = lhs; if dst < rhs then dst = rhs  -> dst = max(lhs, rhs)
+    (emit-mov-rr64 dst lhs stream)
+    (emit-cmp-rr64 dst rhs stream)
+    (emit-cmovl-rr64 dst rhs stream)))
+
+;;; Type Predicate Instruction Emitters
+;;;
+;;; In the integer-only binary codegen domain:
+;;;   null-p    -- zero check (nil = 0)
+;;;   number-p, integer-p -- always 1 (all values are integers)
+;;;   symbol-p, cons-p, function-p -- always 0 (no heap in binary mode)
+
+(defun emit-vm-null-p (inst stream)
+  "vm-null-p: dst = (src == 0) ? 1 : 0  (nil test -- same encoding as vm-not)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (src (vm-reg-to-x86 (vm-src inst))))
+    (emit-test-rr64 src src stream)
+    (emit-setcc #x94 dst stream)               ; SETE
+    (emit-movzx-r64-r8 dst dst stream)))
+
+(defun emit-vm-true-pred (inst stream)
+  "Emit dst = 1 for predicates that are always true in integer-only mode."
+  (emit-mov-ri64 (vm-reg-to-x86 (vm-dst inst)) 1 stream))
+
+(defun emit-vm-false-pred (inst stream)
+  "Emit dst = 0 for predicates that are always false in integer-only mode."
+  (emit-mov-ri64 (vm-reg-to-x86 (vm-dst inst)) 0 stream))
+
+;;; Boolean Logical Instruction Emitters (vm-and, vm-or)
+;;;
+;;; vm-and: dst = (lhs != 0 AND rhs != 0) ? 1 : 0    (17 bytes)
+;;;   [0  +3] XOR dst, dst     -- dst = 0
+;;;   [3  +3] TEST lhs, lhs
+;;;   [6  +2] JE   +9          -- if lhs==0: jump to done [17]
+;;;   [8  +3] TEST rhs, rhs
+;;;   [11 +2] JE   +4          -- if rhs==0: jump to done [17]
+;;;   [13 +4] ADD  dst, 1      -- both nonzero: dst = 1
+;;;   [17] done
+;;;
+;;; vm-or: dst = (lhs != 0 OR rhs != 0) ? 1 : 0      (17 bytes)
+;;;   [0  +3] XOR dst, dst     -- dst = 0
+;;;   [3  +3] TEST lhs, lhs
+;;;   [6  +2] JNE  +5          -- if lhs!=0: jump to add [13]
+;;;   [8  +3] TEST rhs, rhs
+;;;   [11 +2] JE   +4          -- if rhs==0: jump to done [17]
+;;;   [13 +4] ADD  dst, 1      -- at least one nonzero: dst = 1
+;;;   [17] done
+
+(defun emit-vm-and (inst stream)
+  "vm-and: dst = (lhs && rhs) ? 1 : 0  (logical AND, integer-only mode)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-xor-rr64 dst dst stream)                           ; [0  +3] dst = 0
+    (emit-test-rr64 lhs lhs stream)                          ; [3  +3]
+    (emit-byte #x74 stream) (emit-byte 9 stream)             ; [6  +2] JE +9 -> [17]
+    (emit-test-rr64 rhs rhs stream)                          ; [8  +3]
+    (emit-byte #x74 stream) (emit-byte 4 stream)             ; [11 +2] JE +4 -> [17]
+    (emit-add-ri8 dst 1 stream)))                            ; [13 +4] dst = 1
+
+(defun emit-vm-or (inst stream)
+  "vm-or: dst = (lhs || rhs) ? 1 : 0  (logical OR, integer-only mode)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-xor-rr64 dst dst stream)                           ; [0  +3] dst = 0
+    (emit-test-rr64 lhs lhs stream)                          ; [3  +3]
+    (emit-byte #x75 stream) (emit-byte 5 stream)             ; [6  +2] JNE +5 -> [13]
+    (emit-test-rr64 rhs rhs stream)                          ; [8  +3]
+    (emit-byte #x74 stream) (emit-byte 4 stream)             ; [11 +2] JE +4 -> [17]
+    (emit-add-ri8 dst 1 stream)))                            ; [13 +4] dst = 1
+
+;;; Binary logical instruction emitters
+
+(defun emit-vm-logand (inst stream)
+  "vm-logand: dst = lhs & rhs  (bitwise AND)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 dst lhs stream)
+    (emit-and-rr64 dst rhs stream)))
+
+(defun emit-vm-logior (inst stream)
+  "vm-logior: dst = lhs | rhs  (bitwise OR)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 dst lhs stream)
+    (emit-or-rr64 dst rhs stream)))
+
+(defun emit-vm-logxor (inst stream)
+  "vm-logxor: dst = lhs ^ rhs  (bitwise XOR)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 dst lhs stream)
+    (emit-xor-rr64 dst rhs stream)))
+
+(defun emit-vm-logeqv (inst stream)
+  "vm-logeqv: dst = ~(lhs ^ rhs)  (bitwise XNOR / logical equivalence).
+   Layout (9 bytes): MOV(3) + XOR(3) + NOT(3)"
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 dst lhs stream)       ; [0 +3]
+    (emit-xor-rr64 dst rhs stream)       ; [3 +3]
+    (emit-not-r64 dst stream)))          ; [6 +3]
+
+;;; vm-logtest -- (logand lhs rhs) /= 0 -> 0 or 1           (14 bytes)
+;;;   [0  +3] MOV  dst, lhs
+;;;   [3  +3] AND  dst, rhs   -- sets ZF=1 iff (lhs & rhs) == 0
+;;;   [6 +4*] SETNE dst8      -- dst8 = (ZF==0) ? 1 : 0  (*4 bytes for reg>=4)
+;;;   [10 +4] MOVZX dst, dst8
+;;;   Total: conservative 14 bytes
+
+(defun emit-vm-logtest (inst stream)
+  "vm-logtest: dst = ((logand lhs rhs) /= 0) ? 1 : 0  (boolean AND test)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 dst lhs stream)            ; [0  +3]
+    (emit-and-rr64 dst rhs stream)            ; [3  +3] sets ZF
+    (emit-setcc #x95 dst stream)              ; [6 +3/4] SETNE
+    (emit-movzx-r64-r8 dst dst stream)))      ; [9/10 +4]
+
+;;; vm-logbitp -- test bit LHS of integer RHS -> 0 or 1      (15 bytes)
+;;;   [0  +1] PUSH RCX
+;;;   [1  +3] MOV  RCX, lhs   -- bit position
+;;;   [4  +3] MOV  dst, rhs   -- integer to test
+;;;   [7  +3] SAR  dst, CL    -- shift right by bit position
+;;;   [10 +4] AND  dst, 1     -- isolate low bit
+;;;   [14 +1] POP  RCX
+;;;   Total: 15 bytes
+
+(defun emit-vm-logbitp (inst stream)
+  "vm-logbitp: dst = (logbitp lhs rhs) -- test bit LHS of integer RHS."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-push-r64 +rcx+ stream)              ; [0  +1]
+    (emit-mov-rr64 +rcx+ lhs stream)          ; [1  +3] bit position -> RCX
+    (emit-mov-rr64 dst rhs stream)            ; [4  +3] integer -> dst
+    (emit-sar-r64-cl dst stream)              ; [7  +3] shift right by CL
+    (emit-and-ri8 dst 1 stream)               ; [10 +4] isolate bit
+    (emit-pop-r64 +rcx+ stream)))             ; [14 +1]
+
+;;; Two-Pass Code Generation (Labels + Jumps)
+
+(defun instruction-size (inst)
+  "Estimate the size in bytes of the x86-64 encoding for a VM instruction.
+   Used in first pass to build label offset table."
+  (typecase inst
+    (vm-const 10)    ; REX + opcode + 8-byte immediate
+    (vm-move 3)      ; REX + opcode + ModR/M
+    (vm-add 6)       ; mov + add (3+3)
+    (vm-sub 6)       ; mov + sub (3+3)
+    (vm-mul 7)       ; mov + imul (3+4, 0F AF)
+    (vm-halt 3)      ; mov result to RAX (3 bytes, or 0 if already RAX)
+    (vm-label 0)     ; Labels emit no code
+    (vm-jump 5)      ; JMP rel32
+    (vm-jump-zero 9) ; TEST + JE rel32 (3 + 6)
+    (vm-print 0)     ; No-op in native code
+    (vm-closure 0)   ; Skip in basic codegen
+    (vm-call 0)      ; Skip in basic codegen
+    (vm-ret 1)       ; RET
+    (vm-spill-store 4) ; MOV [rbp-disp8], reg (REX + opcode + ModRM + disp8)
+    (vm-spill-load 4)  ; MOV reg, [rbp-disp8] (REX + opcode + ModRM + disp8)
+    ;; Comparison: CMP(3) + SETcc(3-4) + MOVZX(4) = 11 max; use 12 conservatively
+    (vm-lt 12) (vm-gt 12) (vm-le 12) (vm-ge 12) (vm-num-eq 12) (vm-eq 12)
+    ;; Logical NOT: TEST(3) + SETE(4) + MOVZX(4) = 11; logical/bitwise unary: MOV(3)+op(4)=7
+    (vm-not 12) (vm-lognot 7)
+    ;; Negation: MOV(3) + NEG(4) = 7
+    (vm-neg 7)
+    ;; Inc/dec: MOV(3) + ADD/SUB-imm8(4) = 7
+    (vm-inc 7) (vm-dec 7)
+    ;; Abs: MOV(3) + CMP-imm32(7) + JGE-short(2) + NEG(3) = 15
+    (vm-abs 15)
+    ;; Min/max: MOV(3) + CMP(3) + CMOV(4) = 10
+    (vm-min 10) (vm-max 10)
+    ;; Ash: fixed 24-byte sequence (see emit-vm-ash comment)
+    (vm-ash 24)
+    ;; Truncate division via IDIV: MOV(3)+PUSH(1)+PUSH(1)+MOV(3)+CQO(2)+IDIV(3)+MOV(3)+POP(1)+POP(1)+MOV(3) = 21
+    (vm-truncate 21) (vm-rem 21)
+    ;; Floor division via IDIV + sign correction: 34 bytes (vm-div) / 37 bytes (vm-mod)
+    (vm-div 34) (vm-mod 37)
+    ;; Boolean logical: XOR(3)+TEST(3)+JE(2)+TEST(3)+JE(2)+ADD-ri8(4) = 17
+    (vm-and 17) (vm-or 17)
+    ;; Binary logical: MOV(3) + op(3) = 6
+    (vm-logand 6) (vm-logior 6) (vm-logxor 6)
+    ;; XNOR: MOV(3)+XOR(3)+NOT(3) = 9; logtest: MOV+AND+SETNE+MOVZX = 14; logbitp: PUSH+MOV+MOV+SAR+AND+POP = 15
+    (vm-logeqv 9) (vm-logtest 14) (vm-logbitp 15)
+    ;; Type predicates: null-p = TEST+SETE+MOVZX (11); always-true/false = MOV imm64 (10)
+    (vm-null-p 11)
+    (vm-number-p 10) (vm-integer-p 10)
+    (vm-cons-p 10) (vm-symbol-p 10) (vm-function-p 10)
+    (t 0)))
+
+(defun build-label-offsets (instructions prologue-size)
+  "Build a hash table mapping label names to byte offsets.
+   First pass: walk instructions, accumulate sizes."
+  (let ((offsets (make-hash-table :test #'equal))
+        (pos prologue-size))
+    (dolist (inst instructions)
+      (when (typep inst 'vm-label)
+        (setf (gethash (vm-name inst) offsets) pos))
+      (incf pos (instruction-size inst)))
+    offsets))
+
+;;; VM Instruction Emitters (with label support)
+
+(defun emit-vm-halt-inst (inst stream)
+  "Emit code for VM HALT instruction.
+   Moves the result register to RAX for the return value."
+  (let ((result-reg (vm-reg-to-x86 (vm-reg inst))))
+    (unless (= result-reg +rax+)
+      (emit-mov-rr64 +rax+ result-reg stream))))
+
+(defun emit-vm-jump-inst (inst stream current-pos label-offsets)
+  "Emit code for VM JUMP instruction (unconditional jump)."
+  (let* ((target-label (vm-label-name inst))
+         (target-pos (gethash target-label label-offsets))
+         ;; JMP rel32 is 5 bytes, offset is relative to end of instruction
+         (offset (- target-pos (+ current-pos 5))))
+    (emit-jmp-rel32 offset stream)))
+
+(defun emit-vm-jump-zero-inst (inst stream current-pos label-offsets)
+  "Emit code for VM JUMP-ZERO instruction (jump if register is zero).
+   TEST reg, reg + JE rel32"
+  (let* ((reg (vm-reg-to-x86 (vm-reg inst)))
+         (target-label (vm-label-name inst))
+         (target-pos (gethash target-label label-offsets))
+         ;; TEST is 3 bytes, JE rel32 is 6 bytes, total 9 bytes
+         (offset (- target-pos (+ current-pos 9))))
+    ;; TEST reg, reg (sets ZF if reg is 0)
+    (emit-test-rr64 reg reg stream)
+    ;; JE rel32 (jump if zero flag set)
+    (emit-je-rel32 offset stream)))
+
+(defun emit-vm-ret-inst (inst stream)
+  "Emit code for VM RET instruction."
+  (declare (ignore inst))
+  (emit-ret stream))
+
+(defun emit-vm-spill-store-inst (inst stream)
+  "Emit code for VM SPILL-STORE instruction: MOV [RBP - slot*8], src."
+  (let* ((src-reg (vm-spill-src inst))
+         (src-code (let ((entry (assoc src-reg *phys-reg-to-x86-code*)))
+                     (if entry (cdr entry)
+                         (error "Unknown physical register for spill store: ~A" src-reg))))
+         (offset (- (* (vm-spill-slot inst) 8))))
+    (emit-mov-mr64 +rbp+ offset src-code stream)))
+
+(defun emit-vm-spill-load-inst (inst stream)
+  "Emit code for VM SPILL-LOAD instruction: MOV dst, [RBP - slot*8]."
+  (let* ((dst-reg (vm-spill-dst inst))
+         (dst-code (let ((entry (assoc dst-reg *phys-reg-to-x86-code*)))
+                     (if entry (cdr entry)
+                         (error "Unknown physical register for spill load: ~A" dst-reg))))
+         (offset (- (* (vm-spill-slot inst) 8))))
+    (emit-mov-rm64 dst-code +rbp+ offset stream)))
+
+(defun emit-vm-instruction-with-labels (inst stream current-pos label-offsets)
+  "Emit machine code for a VM instruction, with label/jump support."
+  (typecase inst
+    (vm-const (emit-vm-const inst stream))
+    (vm-move (emit-vm-move inst stream))
+    (vm-add (emit-vm-add inst stream))
+    (vm-sub (emit-vm-sub inst stream))
+    (vm-mul (emit-vm-mul inst stream))
+    (vm-halt (emit-vm-halt-inst inst stream))
+    (vm-label nil)
+    (vm-jump (emit-vm-jump-inst inst stream current-pos label-offsets))
+    (vm-jump-zero (emit-vm-jump-zero-inst inst stream current-pos label-offsets))
+    (vm-ret (emit-vm-ret-inst inst stream))
+    (vm-print nil)
+    (vm-spill-store (emit-vm-spill-store-inst inst stream))
+    (vm-spill-load (emit-vm-spill-load-inst inst stream))
+    ;; Comparison instructions
+    (vm-lt (emit-vm-lt inst stream))
+    (vm-gt (emit-vm-gt inst stream))
+    (vm-le (emit-vm-le inst stream))
+    (vm-ge (emit-vm-ge inst stream))
+    (vm-num-eq (emit-vm-num-eq inst stream))
+    (vm-eq (emit-vm-eq inst stream))
+    ;; Unary arithmetic/logical
+    (vm-neg (emit-vm-neg inst stream))
+    (vm-not (emit-vm-not inst stream))
+    (vm-lognot (emit-vm-lognot inst stream))
+    (vm-inc (emit-vm-inc inst stream))
+    (vm-dec (emit-vm-dec inst stream))
+    (vm-abs (emit-vm-abs inst stream))
+    ;; Min/max/ash
+    (vm-min (emit-vm-min inst stream))
+    (vm-max (emit-vm-max inst stream))
+    (vm-ash (emit-vm-ash inst stream))
+    ;; Integer division (IDIV-based)
+    (vm-truncate (emit-vm-truncate inst stream))
+    (vm-rem (emit-vm-rem inst stream))
+    (vm-div (emit-vm-div inst stream))
+    (vm-mod (emit-vm-mod inst stream))
+    ;; Boolean logical
+    (vm-and (emit-vm-and inst stream))
+    (vm-or  (emit-vm-or  inst stream))
+    ;; Binary logical
+    (vm-logand (emit-vm-logand inst stream))
+    (vm-logior (emit-vm-logior inst stream))
+    (vm-logxor (emit-vm-logxor inst stream))
+    (vm-logeqv (emit-vm-logeqv inst stream))
+    (vm-logtest (emit-vm-logtest inst stream))
+    (vm-logbitp (emit-vm-logbitp inst stream))
+    ;; Type predicates
+    (vm-null-p (emit-vm-null-p inst stream))
+    (vm-number-p (emit-vm-true-pred inst stream))
+    (vm-integer-p (emit-vm-true-pred inst stream))
+    (vm-cons-p (emit-vm-false-pred inst stream))
+    (vm-symbol-p (emit-vm-false-pred inst stream))
+    (vm-function-p (emit-vm-false-pred inst stream))
+    (t (warn "Skipping unsupported VM instruction: ~A" (type-of inst)))))
+
+(defun emit-vm-program (program stream)
+  "Emit machine code for entire VM program.
+   Uses two-pass approach: first pass builds label offset table,
+   second pass emits code with resolved jump targets."
+  (let* ((instructions (vm-program-instructions program))
+         ;; Prologue: 6 PUSH instructions, 1 byte each
+         (prologue-size 6)
+         ;; First pass: build label offset table
+         (label-offsets (build-label-offsets instructions prologue-size)))
+
+    ;; Prologue: save callee-saved registers
+    (emit-push-r64 +rbx+ stream)
+    (emit-push-r64 +rbp+ stream)
+    (emit-push-r64 +r12+ stream)
+    (emit-push-r64 +r13+ stream)
+    (emit-push-r64 +r14+ stream)
+    (emit-push-r64 +r15+ stream)
+
+    ;; Second pass: emit instructions with resolved jumps
+    (let ((pos prologue-size))
+      (dolist (inst instructions)
+        (emit-vm-instruction-with-labels inst stream pos label-offsets)
+        (incf pos (instruction-size inst))))
+
+    ;; Epilogue: restore callee-saved registers
+    (emit-pop-r64 +r15+ stream)
+    (emit-pop-r64 +r14+ stream)
+    (emit-pop-r64 +r13+ stream)
+    (emit-pop-r64 +r12+ stream)
+    (emit-pop-r64 +rbp+ stream)
+    (emit-pop-r64 +rbx+ stream)
+
+    ;; Return
+    (emit-ret stream)))
+
+;;; Public API
+
+(defun compile-to-x86-64-bytes (program)
+  "Compile VM program to x86-64 machine code bytes.
+
+   Returns: (simple-array (unsigned-byte 8) (*))"
+  ;; Run register allocation before emitting machine code
+  (let* ((instructions (vm-program-instructions program))
+         (ra (allocate-registers instructions *x86-64-calling-convention*))
+         (allocated-program (make-vm-program
+                             :instructions (regalloc-instructions ra)
+                             :result-register (vm-program-result-register program))))
+    ;; Store the regalloc result for use during code generation
+    (let ((*current-regalloc* ra))
+      (with-output-to-vector (stream)
+        (emit-vm-program allocated-program stream)))))

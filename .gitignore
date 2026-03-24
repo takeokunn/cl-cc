@@ -1,0 +1,21 @@
+.claude/
+
+# Common Lisp compiled artifacts
+*.fasl
+*.fas
+*.lib
+*.o
+*.lx64fsl
+*.dx64fsl
+
+# Native executables
+a.out
+*.o
+
+# SBCL core files
+*.core
+
+# Editor artifacts
+*~
+\#*\#
+.#*

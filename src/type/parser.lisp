@@ -147,12 +147,81 @@
          (type-parse-error "array type requires exactly 1 type"))
        (make-type-constructor 'array (list (parse-type-specifier (first args)))))
 
-      ;; Parametric type constructor: (TypeName Arg1 Arg2 ...)
-      ;; E.g. (Option fixnum), (Pair fixnum string), (Result fixnum string)
+      ;; Rank-N, effect, qualified, and parametric types:
+      ;; These use string= on symbol-name for package-independent matching.
       (otherwise
-       (if (and (symbolp head) args)
-           (make-type-constructor head (mapcar #'parse-type-specifier args))
-           (make-type-primitive :name spec))))))
+       (cond
+        ;; Rank-N universal quantification: (forall a T) or (∀ a T)
+        ((and (symbolp head)
+              (or (string= (symbol-name head) "FORALL")
+                  (string= (symbol-name head) "∀")))
+         (unless (= (length args) 2)
+           (type-parse-error "forall requires exactly 2 arguments: (forall var type)"))
+         (let* ((var-name (first args))
+                (body-spec (second args))
+                (var (make-type-variable var-name))
+                (body (parse-type-specifier body-spec)))
+           (make-type-forall :var var :type body)))
+
+        ;; Effect-annotated function: (-> A B ! EffectRow)
+        ;; Syntax: (-> param-types... -> return-type ! effect1 effect2...)
+        ;; Short form: (-> A B ! IO) = A -> B with IO effect
+        ((and (symbolp head) (string= (symbol-name head) "->"))
+         (let* ((bang-pos (position-if
+                           (lambda (s) (and (symbolp s) (string= (symbol-name s) "!")))
+                           args))
+                ;; arrow-pos: position of explicit -> separator in args (if any)
+                ;; If no -> in args: params are before the return type, return is before !
+                (inner-arrow-pos (position-if
+                                  (lambda (s) (and (symbolp s) (string= (symbol-name s) "->")))
+                                  args))
+                ;; When there's a ! but no ->, return type is just before the !
+                (arrow-pos (or inner-arrow-pos
+                               (if bang-pos (1- bang-pos) (1- (length args)))))
+                (param-specs (subseq args 0 arrow-pos))
+                (return-spec (if inner-arrow-pos
+                                 (nth (1+ inner-arrow-pos) args)
+                                 (if bang-pos
+                                     (nth arrow-pos args)
+                                     (car (last args)))))
+                (effect-specs (when bang-pos
+                                (subseq args (1+ bang-pos)))))
+           (let ((params (mapcar #'parse-type-specifier param-specs))
+                 (ret (parse-type-specifier return-spec))
+                 (effects (if effect-specs
+                              (make-type-effect-row
+                               :effects (mapcar (lambda (e)
+                                                  (make-type-effect :name e))
+                                                effect-specs)
+                               :row-var nil)
+                              +pure-effect-row+)))
+             (if effect-specs
+                 (make-type-effectful-function :params params :return ret :effects effects)
+                 (make-type-function params ret)))))
+
+        ;; Qualified type with constraints: (=> (C1 a) (C2 a) T)
+        ;; Syntax: (=> constraint... type)
+        ((and (symbolp head) (string= (symbol-name head) "=>"))
+         (unless (>= (length args) 2)
+           (type-parse-error "=> requires at least 2 arguments: (=> constraint... type)"))
+         (let* ((type-spec (car (last args)))
+                (constraint-specs (butlast args))
+                (type (parse-type-specifier type-spec))
+                (constraints (mapcar (lambda (c)
+                                       (unless (and (consp c) (symbolp (car c)) (= (length c) 2))
+                                         (type-parse-error "Constraint must be (ClassName TypeArg): ~S" c))
+                                       (make-type-class-constraint
+                                        :class-name (car c)
+                                        :type-arg (parse-type-specifier (cadr c))))
+                                     constraint-specs)))
+           (make-type-qualified :constraints constraints :type type)))
+
+        ;; Parametric type constructor: (TypeName Arg1 Arg2 ...)
+        ;; E.g. (Option fixnum), (Pair fixnum string), (Result fixnum string)
+        (t
+         (if (and (symbolp head) args)
+             (make-type-constructor head (mapcar #'parse-type-specifier args))
+             (make-type-primitive :name spec))))))))
 
 (defun parse-function-type (args)
   "Parse function type arguments: ((PARAM-TYPES...) RETURN-TYPE) or (PARAM-TYPES... -> RETURN-TYPE)."
@@ -618,6 +687,25 @@
 
     ((typep type-node 'type-unknown)
      '?)
+
+    ((typep type-node 'type-forall)
+     `(forall ,(type-variable-name (type-forall-var type-node))
+              ,(unparse-type (type-forall-type type-node))))
+
+    ((typep type-node 'type-qualified)
+     `(=> ,@(mapcar (lambda (c)
+                      `(,(type-class-constraint-class-name c)
+                        ,(unparse-type (type-class-constraint-type-arg c))))
+                    (type-qualified-constraints type-node))
+          ,(unparse-type (type-qualified-type type-node))))
+
+    ((typep type-node 'type-effectful-function)
+     (let ((params (mapcar #'unparse-type (type-function-params type-node)))
+           (ret (unparse-type (type-function-return type-node)))
+           (eff (type-effectful-function-effects type-node)))
+       `(-> ,@params -> ,ret
+            ! ,@(mapcar (lambda (e) (type-effect-name e))
+                        (type-effect-row-effects eff)))))
 
     (t
      (type-parse-error "Unknown type node: ~S" type-node))))

@@ -55,7 +55,8 @@
 ;;; Type Environment
 
 (defstruct type-env
-  (bindings nil :type list))
+  (bindings nil :type list)
+  (dict-bindings nil :type list))
 
 (defun type-env-empty ()
   "Create empty type environment."
@@ -68,7 +69,8 @@
 (defun type-env-extend (name scheme env)
   "Extend environment with new binding."
   (make-type-env :bindings (cons (cons name scheme)
-                               (type-env-bindings env))))
+                                (type-env-bindings env))
+                 :dict-bindings (type-env-dict-bindings env)))
 
 (defun type-env-extend* (bindings env)
   "Extend environment with multiple bindings."
@@ -76,6 +78,22 @@
             (type-env-extend (car binding) (cdr binding) env))
           bindings
           :initial-value env))
+
+(defun dict-env-extend (class-name type-spec methods env)
+  "Add a dictionary (method implementations) to the type environment.
+   CLASS-NAME is a symbol, TYPE-SPEC is a type-node, METHODS is an alist."
+  (make-type-env
+   :bindings (type-env-bindings env)
+   :dict-bindings (cons (list class-name type-spec methods)
+                        (type-env-dict-bindings env))))
+
+(defun dict-env-lookup (class-name type-spec env)
+  "Look up the method alist for (CLASS-NAME, TYPE-SPEC) in the dict environment.
+   Returns the methods alist or NIL."
+  (dolist (entry (type-env-dict-bindings env) nil)
+    (when (and (eq (first entry) class-name)
+               (type-equal-p (second entry) type-spec))
+      (return (third entry)))))
 
 (defun type-env-to-alist (env)
   "Convert type environment to alist."
@@ -334,19 +352,30 @@
 (defun extract-type-guard (cond-ast)
   "Extract type guard info from a condition AST.
    If the condition is (predicate var) where predicate is a type predicate,
-   returns (values var-name narrowed-type) or (values nil nil)."
+   returns (values var-name narrowed-type) or (values nil nil).
+   Also handles (typep var 'classname) pattern."
   (when (typep cond-ast 'cl-cc:ast-call)
     (let ((func (cl-cc:ast-call-func cond-ast))
           (args (cl-cc:ast-call-args cond-ast)))
-      ;; Check for (predicate var) pattern
-      (when (and (typep func 'cl-cc:ast-var)
-                 (= (length args) 1)
-                 (typep (first args) 'cl-cc:ast-var))
-        (let ((pred-type (type-predicate-to-type (cl-cc:ast-var-name func))))
-          (when pred-type
-            (values (cl-cc:ast-var-name (first args)) pred-type))))))
-  ;; Also handle (typep var 'type) pattern
-  )
+      (cond
+        ;; (predicate var) pattern
+        ((and (typep func 'cl-cc:ast-var)
+              (= (length args) 1)
+              (typep (first args) 'cl-cc:ast-var))
+         (let ((pred-type (type-predicate-to-type (cl-cc:ast-var-name func))))
+           (when pred-type
+             (values (cl-cc:ast-var-name (first args)) pred-type))))
+        ;; (typep var 'classname) pattern
+        ((and (typep func 'cl-cc:ast-var)
+              (eq (cl-cc:ast-var-name func) 'typep)
+              (= (length args) 2)
+              (typep (first args) 'cl-cc:ast-var)
+              (typep (second args) 'cl-cc:ast-quote)
+              (symbolp (cl-cc:ast-quote-value (second args))))
+         (let* ((class-name (cl-cc:ast-quote-value (second args)))
+                (prim-type (make-type-primitive :name class-name)))
+           (values (cl-cc:ast-var-name (first args)) prim-type)))
+        (t (values nil nil))))))
 
 (defun narrow-union-type (union-type keep-type)
   "Remove KEEP-TYPE from UNION-TYPE, returning the remaining types.
@@ -438,8 +467,40 @@
   "Infer type for print (returns type of printed expression)."
   (infer (cl-cc:ast-print-expr ast) env))
 
+(defun check-qualified-constraints (func-type subst env)
+  "If FUNC-TYPE is a qualified type (Eq a) => ..., verify each constraint
+   is satisfied for the instantiated type argument."
+  (declare (ignore env))
+  (when (typep func-type 'type-qualified)
+    (dolist (constraint (type-qualified-constraints func-type))
+      (let* ((class-name (type-class-constraint-class-name constraint))
+             (type-arg (type-substitute
+                        (type-class-constraint-type-arg constraint)
+                        subst)))
+        (unless (or (typep type-arg 'type-unknown)
+                    (typep type-arg 'type-variable)
+                    (has-typeclass-instance-p class-name type-arg))
+          (error 'type-inference-error
+                 :message (format nil "No instance of ~A for ~A"
+                                  class-name
+                                  (type-to-string type-arg))))))))
+
+(defun infer-or-check-arg (arg expected-type env)
+  "Infer or check a single argument.
+   If EXPECTED-TYPE is type-forall, use check mode (top-down).
+   Otherwise, use synthesize mode (bottom-up)."
+  (if (typep expected-type 'type-forall)
+      ;; Higher-rank argument: check mode with skolem
+      (progn
+        (check arg expected-type env)
+        ;; Return the expected type (since check mode verifies conformance)
+        expected-type)
+      ;; Regular argument: synthesize mode
+      (multiple-value-bind (type subst) (infer arg env)
+        (type-substitute type subst))))
+
 (defun infer-call (ast env)
-  "Infer type for function call."
+  "Infer type for function call with typeclass constraint checking."
   (multiple-value-bind (func-type subst1)
       (infer (cl-cc:ast-call-func ast) env)
     (let* ((result-type (fresh-type-var))
@@ -447,26 +508,36 @@
                                   (apply-subst-env env subst1)))
            (expected-fn (make-type-function-raw
                                        :params arg-types
-                                       :return result-type))
-           )
-      (multiple-value-bind (subst ok) (type-unify func-type expected-fn subst1)
+                                       :return result-type)))
+      (multiple-value-bind (subst ok)
+          (type-unify func-type expected-fn subst1)
         (if ok
-            (values (type-substitute result-type subst) subst)
+            (progn
+              ;; Check typeclass constraints if callee has a qualified type
+              (check-qualified-constraints func-type subst env)
+              (values (type-substitute result-type subst) subst))
             (error 'type-mismatch-error
                    :expected expected-fn :actual func-type))))))
 
 (defun infer-args (asts env)
-  "Infer types for list of ASTs (function arguments)."
-  (mapcar (lambda (ast)
-            (multiple-value-bind (type subst) (infer ast env)
-              (type-substitute type subst)))
-          asts))
+  "Infer types for list of ASTs (function arguments).
+   Threads substitution through each argument so constraints from arg N
+   propagate to the environment for arg N+1."
+  (let ((subst nil)
+        (current-env env))
+    (mapcar (lambda (ast)
+              (multiple-value-bind (type new-subst)
+                  (infer ast current-env)
+                (setf subst (compose-subst new-subst subst))
+                (setf current-env (apply-subst-env current-env new-subst))
+                (type-substitute type subst)))
+            asts)))
 
 (defun infer-body (asts env)
   "Infer type of sequence (return last type).
    ASTS is a list of AST nodes. ENV must be a type-env object."
   (if (null asts)
-      (values type-int nil)
+      (values type-null nil)
       (let ((subst nil)
             (current-env env))
         (dolist (ast asts)
@@ -496,6 +567,106 @@
 (defun infer-with-env (ast)
   "Infer type of AST in empty environment (convenience function)."
   (infer ast (type-env-empty)))
+
+;;; Effect Inference (Phase 5)
+
+(defun effect-row-union (row1 row2)
+  "Compute the union of two effect rows (for sequential composition).
+   Returns a new type-effect-row with all effects from both rows combined."
+  (let* ((effs1 (type-effect-row-effects row1))
+         (effs2 (type-effect-row-effects row2))
+         (names1 (mapcar #'type-effect-name effs1))
+         (new-effs (append effs1
+                           (remove-if (lambda (e)
+                                        (member (type-effect-name e) names1))
+                                      effs2)))
+         (rv (or (type-effect-row-row-var row1)
+                 (type-effect-row-row-var row2))))
+    (make-type-effect-row :effects new-effs :row-var rv)))
+
+(defun infer-effects (ast env)
+  "Infer the effect row produced by evaluating AST in environment ENV.
+   Returns a type-effect-row. Pure expressions return +pure-effect-row+."
+  (cond
+    ((or (typep ast 'cl-cc:ast-int) (typep ast 'cl-cc:ast-quote))
+     +pure-effect-row+)
+    ((typep ast 'cl-cc:ast-var)
+     +pure-effect-row+)
+    ((typep ast 'cl-cc:ast-binop)
+     +pure-effect-row+)
+    ((typep ast 'cl-cc:ast-if)
+     (effect-row-union
+      (infer-effects (cl-cc:ast-if-cond ast) env)
+      (effect-row-union
+       (infer-effects (cl-cc:ast-if-then ast) env)
+       (infer-effects (cl-cc:ast-if-else ast) env))))
+    ((typep ast 'cl-cc:ast-let)
+     (let ((binding-effects
+            (reduce #'effect-row-union
+                    (mapcar (lambda (b) (infer-effects (cdr b) env))
+                            (cl-cc:ast-let-bindings ast))
+                    :initial-value +pure-effect-row+)))
+       (effect-row-union
+        binding-effects
+        (reduce #'effect-row-union
+                (mapcar (lambda (b) (infer-effects b env))
+                        (cl-cc:ast-let-body ast))
+                :initial-value +pure-effect-row+))))
+    ((typep ast 'cl-cc:ast-lambda)
+     +pure-effect-row+)
+    ((typep ast 'cl-cc:ast-progn)
+     (reduce #'effect-row-union
+             (mapcar (lambda (f) (infer-effects f env))
+                     (cl-cc:ast-progn-forms ast))
+             :initial-value +pure-effect-row+))
+    ((typep ast 'cl-cc:ast-print)
+     +io-effect-row+)
+    ((typep ast 'cl-cc:ast-call)
+     (let* ((func (cl-cc:ast-call-func ast))
+            (base-effects
+             (if (typep func 'cl-cc:ast-var)
+                 (lookup-effect-signature (cl-cc:ast-var-name func))
+                 +pure-effect-row+))
+            (arg-effects
+             (reduce #'effect-row-union
+                     (mapcar (lambda (a) (infer-effects a env))
+                             (cl-cc:ast-call-args ast))
+                     :initial-value +pure-effect-row+)))
+       (effect-row-union base-effects arg-effects)))
+    ((typep ast 'cl-cc:ast-setq)
+     (make-type-effect-row
+      :effects (list (make-type-effect :name 'state))
+      :row-var nil))
+    ((or (typep ast 'cl-cc:ast-defun) (typep ast 'cl-cc:ast-defvar))
+     +pure-effect-row+)
+    ((typep ast 'cl-cc:ast-block)
+     (reduce #'effect-row-union
+             (mapcar (lambda (b) (infer-effects b env))
+                     (cl-cc:ast-block-body ast))
+             :initial-value +pure-effect-row+))
+    (t (make-type-effect-row
+        :effects nil
+        :row-var (make-type-variable "eff")))))
+
+(defun infer-with-effects (ast env)
+  "Infer type, substitution, AND effect row for AST.
+   Returns (values type substitution effect-row)."
+  (multiple-value-bind (type subst) (infer ast env)
+    (let ((effects (infer-effects ast env)))
+      (values type subst effects))))
+
+(defun check-body-effects (asts declared-effects env)
+  "Check that the union of effects in ASTS is a subset of DECLARED-EFFECTS.
+   Signals type-inference-error if the body has undeclared effects."
+  (let ((actual-effects
+         (reduce #'effect-row-union
+                 (mapcar (lambda (a) (infer-effects a env)) asts)
+                 :initial-value +pure-effect-row+)))
+    (unless (effect-row-subset-p actual-effects declared-effects)
+      (error 'type-inference-error
+             :message (format nil "Function has undeclared effects: ~A (declared: ~A)"
+                               (type-to-string actual-effects)
+                               (type-to-string declared-effects))))))
 
 ;;; Type Annotation
 
@@ -527,6 +698,115 @@
              (format stream "Type mismatch: expected ~A, got ~A"
                      (type-to-string (type-mismatch-error-expected condition))
                      (type-to-string (type-mismatch-error-actual condition))))))
+
+;;; Bidirectional Type Checking (Phase 3)
+;;;
+;;; Bidirectional type checking separates:
+;;;   SYNTHESIS (bottom-up): synthesize — given AST, produce type
+;;;   CHECKING  (top-down):  check — given AST + expected type, verify conformance
+;;;
+;;; Bidirectional is required for Rank-N polymorphism: (forall a T) in argument
+;;; position cannot be synthesized; it must be checked top-down.
+
+(defun synthesize (ast env)
+  "Synthesize type of AST in ENV (bottom-up, alias for INFER).
+   Returns (values type substitution).
+   Use when no expected type is known."
+  (infer ast env))
+
+;;; Skolem escape checking helpers (Phase E)
+
+(defun skolem-appears-in-type-p (skolem type)
+  "Return T if SKOLEM appears free in TYPE."
+  (cond
+    ((typep type 'type-skolem) (type-skolem-equal-p skolem type))
+    ((typep type 'type-variable) nil)
+    ((typep type 'type-function)
+     (or (some (lambda (p) (skolem-appears-in-type-p skolem p))
+               (type-function-params type))
+         (skolem-appears-in-type-p skolem (type-function-return type))))
+    ((typep type 'type-forall)
+     (skolem-appears-in-type-p skolem (type-forall-type type)))
+    ((typep type 'type-constructor)
+     (some (lambda (a) (skolem-appears-in-type-p skolem a))
+           (type-constructor-args type)))
+    ((typep type 'type-tuple)
+     (some (lambda (e) (skolem-appears-in-type-p skolem e))
+           (type-tuple-elements type)))
+    (t nil)))
+
+(defun skolem-appears-in-subst-p (skolem subst)
+  "Return T if SKOLEM appears in the range of SUBST."
+  (some (lambda (binding)
+          (skolem-appears-in-type-p skolem (cdr binding)))
+        subst))
+
+(defun check-skolem-escape (skolem subst)
+  "Signal an error if SKOLEM appears in the range of SUBST (skolem escape)."
+  (when (skolem-appears-in-subst-p skolem subst)
+    (error 'type-inference-error
+           :message (format nil "Skolem escape: rigid type variable ~A leaked out of its scope."
+                             (type-to-string skolem)))))
+
+(defun check (ast expected-type env)
+  "Check that AST conforms to EXPECTED-TYPE in ENV (top-down).
+   Returns substitution on success, signals type-mismatch-error on failure.
+   Gradual typing: unknown expected type always succeeds.
+   Rank-N: forall in expected position introduces skolem constants."
+  (cond
+    ;; Gradual typing escape hatch: unknown expected type always succeeds
+    ((typep expected-type 'type-unknown)
+     nil)
+
+    ;; Rank-N: checking against (forall a T) introduces a skolem for a
+    ;; and checks the body under that skolem
+    ((typep expected-type 'type-forall)
+     (let* ((bound-var (type-forall-var expected-type))
+            (skolem (make-type-skolem (if (type-variable-name bound-var)
+                                          (type-variable-name bound-var)
+                                          "a")))
+            ;; Substitute the bound variable with the skolem in the body type
+            (body-type (type-substitute (type-forall-type expected-type)
+                                        (list (cons bound-var skolem)))))
+       (let ((subst (check ast body-type env)))
+         ;; Verify the skolem did not escape (it should not appear in
+         ;; the range of the substitution)
+         (check-skolem-escape skolem subst)
+         subst)))
+
+    ;; Default: synthesize and verify via unification
+    (t
+     (multiple-value-bind (actual-type subst) (synthesize ast env)
+       (let ((actual (type-substitute actual-type subst)))
+         (cond
+           ;; Actual unknown: gradual typing, always ok
+           ((typep actual 'type-unknown) subst)
+           ;; Try unification (handles type variables)
+           (t
+            (multiple-value-bind (unified ok)
+                (type-unify actual expected-type subst)
+              (if ok
+                  unified
+                  (error 'type-mismatch-error
+                         :expected expected-type
+                         :actual actual))))))))))
+
+(defun check-body (asts expected-type env)
+  "Check that the last form in ASTS has EXPECTED-TYPE in ENV.
+   Earlier forms are synthesized (side-effect only).
+   Returns substitution."
+  (if (null asts)
+      nil
+      (let ((subst nil)
+            (current-env env))
+        ;; Synthesize all but the last form
+        (dolist (ast (butlast asts))
+          (multiple-value-bind (type new-subst) (synthesize ast current-env)
+            (declare (ignore type))
+            (setf subst (compose-subst new-subst subst))
+            (setf current-env (apply-subst-env current-env subst))))
+        ;; Check the last form against expected type
+        (check (car (last asts)) expected-type current-env))))
 
 ;;; Constraint Solving (for future extension)
 
@@ -569,6 +849,97 @@
    Ensures fresh variables don't clash."
   (instantiate scheme))
 
+;;; Typeclass Registry (Phase 4)
+;;;
+;;; The typeclass registry stores class definitions and instances so that:
+;;; - type-driven dispatch can check constraint satisfaction
+;;; - dictionary passing can be performed at call sites
+
+(defvar *typeclass-registry* (make-hash-table :test #'eq)
+  "Maps typeclass name (symbol) to its type-class struct.")
+
+(defun register-typeclass (name type-class)
+  "Register a typeclass DEFINITION under NAME."
+  (setf (gethash name *typeclass-registry*) type-class))
+
+(defun lookup-typeclass (name)
+  "Return the type-class struct for NAME, or NIL if not registered."
+  (gethash name *typeclass-registry*))
+
+(defvar *typeclass-instance-registry* (make-hash-table :test #'equal)
+  "Maps (class-name . type-spec-sexp) to an alist of method implementations.
+The key is EQUAL-compared so that (EQ FIXNUM) and (SHOW STRING) each
+get their own bucket even though the cons cells differ.")
+
+(defun register-typeclass-instance (class-name type-spec methods)
+  "Register that TYPE-SPEC (a type-node) implements CLASS-NAME.
+METHODS is an alist mapping method names to their implementations."
+  (setf (gethash (cons class-name type-spec) *typeclass-instance-registry*) methods))
+
+(defun lookup-typeclass-instance (class-name type-spec)
+  "Return the method alist for (CLASS-NAME, TYPE-SPEC), or NIL."
+  (gethash (cons class-name type-spec) *typeclass-instance-registry*))
+
+;;; Effect Signature Table (Phase 5)
+
+(defvar *effect-signature-table* (make-hash-table :test #'eq)
+  "Maps operation names (symbols) to their effect rows (type-effect-row).
+   Operations not in this table are treated as pure ({}).")
+
+(defun register-effect-signature (op-name effect-row)
+  "Register that OP-NAME has the given EFFECT-ROW."
+  (setf (gethash op-name *effect-signature-table*) effect-row))
+
+(defun lookup-effect-signature (op-name)
+  "Return the effect-row for OP-NAME, or +pure-effect-row+ if not registered."
+  (gethash op-name *effect-signature-table* +pure-effect-row+))
+
+;; Initialize built-in effect signatures
+(let ((io-row +io-effect-row+)
+      (error-row (make-type-effect-row
+                  :effects (list (make-type-effect :name 'error))
+                  :row-var nil))
+      (state-row (make-type-effect-row
+                  :effects (list (make-type-effect :name 'state))
+                  :row-var nil)))
+  ;; IO effects
+  (dolist (op '(print format read read-line read-char write-char
+                vm-print vm-format-inst vm-read-char vm-read-line
+                vm-write-string vm-fresh-line))
+    (register-effect-signature op io-row))
+  ;; Error effects
+  (dolist (op '(error signal warn vm-signal-error vm-condition-case
+                vm-handler-bind))
+    (register-effect-signature op error-row))
+  ;; State effects (global mutation)
+  (dolist (op '(setq vm-setq setf vm-set-global))
+    (register-effect-signature op state-row)))
+
+(defun has-typeclass-instance-p (class-name type-spec)
+  "Return T if TYPE-SPEC has a registered instance for CLASS-NAME,
+   including instances inherited via superclass relationships."
+  (or (not (null (lookup-typeclass-instance class-name type-spec)))
+      ;; Check superclasses
+      (let ((class-def (lookup-typeclass class-name)))
+        (when class-def
+          (some (lambda (super-name)
+                  (has-typeclass-instance-p super-name type-spec))
+                (type-class-superclasses class-def))))))
+
+(defun check-typeclass-constraint (constraint type subst)
+  "Verify that TYPE satisfies CONSTRAINT given substitution SUBST.
+Returns NIL on success.  Signals type-inference-error if unsatisfied.
+Gradual typing: unknown and free type variables are always accepted."
+  (let* ((class-name (type-class-constraint-class-name constraint))
+         (actual     (type-substitute type subst)))
+    (unless (or (typep actual 'type-unknown)
+                (typep actual 'type-variable)
+                (has-typeclass-instance-p class-name actual))
+      (error 'type-inference-error
+             :message (format nil "No instance of ~A for ~A"
+                               class-name
+                               (type-to-string actual))))))
+
 ;;; Exports
 
 (export '(infer
@@ -584,10 +955,40 @@
           infer-with-env
           annotate-type
 
+          ;; Bidirectional type checking (Phase 3)
+          synthesize
+          check
+          check-body
+
           type-inference-error
           type-inference-error-message
           unbound-variable-error
           unbound-variable-error-name
           type-mismatch-error
           type-mismatch-error-expected
-          type-mismatch-error-actual))
+          type-mismatch-error-actual
+
+          ;; Type class registries (Phase 4)
+          *typeclass-registry*
+          register-typeclass
+          lookup-typeclass
+          *typeclass-instance-registry*
+          register-typeclass-instance
+          lookup-typeclass-instance
+          has-typeclass-instance-p
+          check-typeclass-constraint
+          dict-env-extend
+          dict-env-lookup
+          check-qualified-constraints
+
+          ;; Phase 5 effect type inference
+          infer-effects
+          infer-with-effects
+          effect-row-union
+          check-body-effects
+          register-effect-signature
+          lookup-effect-signature
+          *effect-signature-table*
+
+          ;; Phase 6 rank-N: check mode required for forall
+          ))

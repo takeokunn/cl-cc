@@ -198,6 +198,87 @@
 
      ;; Generalization/Instantiation Helpers
      #:generalize-in-env
-     #:instantiate-scheme))
+     #:instantiate-scheme
+
+     ;; Bidirectional Type Checking (Phase 3)
+     #:synthesize
+     #:check
+     #:check-body
+
+     ;; Typeclass Registry (Phase 4)
+     #:*typeclass-registry*
+     #:register-typeclass
+     #:lookup-typeclass
+     #:*typeclass-instance-registry*
+     #:register-typeclass-instance
+     #:lookup-typeclass-instance
+     #:has-typeclass-instance-p
+     #:check-typeclass-constraint
+
+     ;; Phase 4: Typeclass Type Nodes
+     #:type-class
+     #:make-type-class
+     #:type-class-name
+     #:type-class-type-param
+     #:type-class-methods
+     #:type-class-p
+
+     #:type-class-constraint
+     #:make-type-class-constraint
+     #:type-class-constraint-class-name
+     #:type-class-constraint-type-arg
+     #:type-class-constraint-p
+
+     #:type-qualified
+     #:make-type-qualified
+     #:type-qualified-constraints
+     #:type-qualified-type
+     #:type-qualified-p
+
+     ;; Phase 5: Effect Type Nodes
+     #:type-effect
+     #:make-type-effect
+     #:type-effect-name
+     #:type-effect-p
+
+     #:type-effect-row
+     #:make-type-effect-row
+     #:type-effect-row-effects
+     #:type-effect-row-row-var
+     #:type-effect-row-p
+
+     #:+pure-effect-row+
+     #:+io-effect-row+
+
+     #:type-effectful-function
+     #:make-type-effectful-function
+     #:type-effectful-function-effects
+
+     ;; Phase 5: Effect Inference Functions
+     #:infer-effects
+     #:infer-with-effects
+     #:effect-row-union
+     #:effect-row-subset-p
+     #:check-body-effects
+     #:register-effect-signature
+     #:lookup-effect-signature
+     #:*effect-signature-table*
+
+     ;; Phase 6: Rank-N Polymorphism
+     #:type-forall
+     #:make-type-forall
+     #:type-forall-var
+     #:type-forall-type
+     #:type-forall-p
+
+     ;; Phase 6 Rank-N skolem constants
+     #:type-skolem
+     #:make-type-skolem
+     #:type-skolem-p
+     #:type-skolem-id
+     #:type-skolem-name
+     #:type-skolem-equal-p
+     #:check-skolem-escape
+     #:skolem-appears-in-type-p))
 
 (in-package :cl-cc/type)

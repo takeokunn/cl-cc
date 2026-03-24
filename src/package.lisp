@@ -5,8 +5,10 @@
     :parse-source
     :parse-all-forms
     :cps-transform
+    :cps-transform*
     :cps-transform-ast
     :cps-transform-ast*
+    :cps-transform-sequence
     :cps-transform-eval
    :compile-expression
    :compile-string
@@ -14,6 +16,8 @@
    :run-compiled
    :run-string
    :run-string-typed
+   :optimize-instructions
+   :%get-instructions
    :our-eval
    :type-check-ast
    :lookup-function-type
@@ -36,7 +40,9 @@
    :clear-prolog-database
    :*prolog-rules*
    :prolog-goal
+   :make-prolog-rule
    :prolog-rule
+   :prolog-cut
    :goal-predicate
    :goal-args
    :rule-head
@@ -176,12 +182,15 @@
    :ast-mv-prog1-first
    :ast-mv-prog1-forms
    :ast-values
+   :make-ast-values
    :ast-values-forms
    :ast-multiple-value-bind
+   :make-ast-multiple-value-bind
    :ast-mvb-vars
    :ast-mvb-values-form
    :ast-mvb-body
    :ast-apply
+   :make-ast-apply
    :ast-apply-func
    :ast-apply-args
 
@@ -283,7 +292,6 @@
    ;; AST Transformation Utilities
    :lower-sexp-to-ast
    :ast-to-sexp
-   :make-ast-with-location
 
    ;; Source Location Structures and Functions
    :source-location
@@ -400,6 +408,10 @@
     :make-vm-fmakunbound :make-vm-format-inst :make-vm-fourth
     :make-vm-fround :make-vm-fresh-line-inst :make-vm-ftruncate
     :make-vm-func-ref :make-vm-function-p :make-vm-ge :make-vm-generic-call
+    :make-vm-generic-add :make-vm-generic-sub :make-vm-generic-mul
+    :make-vm-generic-div :make-vm-generic-eq :make-vm-generic-lt :make-vm-generic-gt
+    :vm-generic-add :vm-generic-sub :vm-generic-mul
+    :vm-generic-div :vm-generic-eq :vm-generic-lt :vm-generic-gt
     :make-vm-gensym-inst :make-vm-get-global
     :make-vm-get-output-stream-string-inst :make-vm-get-string-from-stream
     :make-vm-get-universal-time :make-vm-get-internal-real-time :make-vm-get-internal-run-time
@@ -828,6 +840,32 @@
        ;; Native Compilation
        :compile-to-native
        :compile-file-to-native
-       :compile-toplevel-forms))
+       :compile-toplevel-forms
+
+       ;; Parser Combinator Engine
+       :*grammar-rules*
+       :def-grammar-rule
+       :query-grammar
+       :clear-grammar-rules
+       :parse-combinator
+       :parse-ok-p
+       :parse-with-grammar
+
+       ;; PHP Frontend
+       :tokenize-php-source
+       :parse-php-source
+       :parse-source-for-language
+
+       ;; AST Predicates (defstruct-generated, needed by test suite)
+       :ast-int-p
+       :ast-print-p
+       :ast-let-p
+       :ast-setq-p
+       :ast-if-p
+       :ast-defun-p
+       :ast-quote-p
+       :ast-defclass-p
+       :ast-call-p
+       :ast-binop-p))
 
 (in-package :cl-cc)
