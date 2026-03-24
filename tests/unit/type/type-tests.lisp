@@ -75,17 +75,26 @@
   (assert-string= "FIXNUM" (type-to-string type-int))
   (assert-string= "STRING" (type-to-string type-string))
   (assert-string= "BOOLEAN" (type-to-string type-bool))
-  (assert-string= "?" (type-to-string +type-unknown+))
-  ;; Function type
+  ;; +type-unknown+ is now a type-error sentinel — printed as "<error: ...>"
+  (assert-string= "<error: unknown>" (type-to-string +type-unknown+))
+  ;; Arrow type (using backward-compat make-type-function-raw)
   (let ((fn (make-type-function-raw
                            :params (list type-int)
                            :return type-int)))
     (assert-string= "FIXNUM -> FIXNUM" (type-to-string fn))))
 
 (deftest type-repr-unknown-type
-  "Test that unknown type singleton exists and is a type-unknown."
+  "Test that +type-unknown+ is a type-error sentinel (gradual typing removed).
+In the 2026 type system, there is no gradual typing; type-unknown is a backward-compat
+alias for a type-error sentinel used for error recovery."
+  ;; Backward-compat: typep via deftype alias still works
   (assert-type type-unknown +type-unknown+)
-  (assert-true (not (null (type-equal-p +type-unknown+ +type-unknown+)))))
+  ;; type-error nodes are intentionally never structurally equal (distinct error points)
+  (assert-false (type-equal-p +type-unknown+ +type-unknown+))
+  ;; The backward-compat predicate still works
+  (assert-true (type-unknown-p +type-unknown+))
+  ;; The underlying struct is type-error
+  (assert-true (type-error-p +type-unknown+)))
 
 ;;; Unification Tests
 
@@ -666,11 +675,18 @@
     (assert-eq 'a (type-variable-name (type-forall-var result)))))
 
 (deftest parser-effect-arrow-syntax
-  "(-> fixnum fixnum ! io) parses to effectful-function."
+  "(-> fixnum fixnum ! io) parses to a type-arrow with an effects slot.
+In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
+:effects slot — there is no separate type-effectful-function constructor."
   (let ((result (cl-cc/type:parse-type-specifier '(-> fixnum fixnum ! io))))
-    (assert-true (typep result 'type-effectful-function))
-    (assert-= 1 (length (type-function-params result)))
-    (assert-true (type-equal-p type-int (type-function-return result)))))
+    ;; Parser returns a plain type-arrow (not type-effectful-function sub-struct)
+    (assert-true (type-arrow-p result))
+    (assert-= 1 (length (type-arrow-params result)))
+    (assert-true (type-equal-p type-int (type-arrow-return result)))
+    ;; The effects slot is set to an IO effect row
+    (let ((effs (type-arrow-effects result)))
+      (assert-true (type-effect-row-p effs))
+      (assert-= 1 (length (type-effect-row-effects effs))))))
 
 (deftest parser-qualified-syntax
   "(=> (Num a) (function (a a) a)) parses to type-qualified."
@@ -857,3 +873,560 @@
       (declare (ignore subst))
       (assert-true (typep ty 'type-function))
       (assert-= 1 (length (type-function-params ty))))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; 2026 Type System: Kind System Tests
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest kind-type-singleton
+  "+kind-type+ is the singleton * kind."
+  (assert-true (kind-type-p +kind-type+))
+  (assert-true (kind-node-p +kind-type+))
+  ;; Singletons: structural equality
+  (assert-true (kind-equal-p +kind-type+ +kind-type+))
+  (assert-true (kind-equal-p (make-kind-type) (make-kind-type))))
+
+(deftest kind-arrow-creation
+  "kind-fun builds arrow kinds like * -> * for List."
+  (let ((list-kind (kind-fun +kind-type+ +kind-type+)))
+    (assert-true (kind-arrow-p list-kind))
+    (assert-true (kind-equal-p (kind-arrow-from list-kind) +kind-type+))
+    (assert-true (kind-equal-p (kind-arrow-to list-kind)   +kind-type+))
+    ;; (-> (-> * *) *) — higher-order, for Fix
+    (let ((fix-kind (kind-fun list-kind +kind-type+)))
+      (assert-true (kind-arrow-p fix-kind))
+      (assert-true (kind-equal-p (kind-arrow-from fix-kind) list-kind)))))
+
+(deftest kind-effect-row-singletons
+  "+kind-effect+ and +kind-row-type+ are the Effect and Row * kinds."
+  (assert-true (kind-effect-p +kind-effect+))
+  (assert-true (kind-row-p +kind-row-type+))
+  (assert-true (kind-row-p +kind-row-effect+))
+  (assert-true (kind-equal-p (kind-row-elem +kind-row-type+)   +kind-type+))
+  (assert-true (kind-equal-p (kind-row-elem +kind-row-effect+) +kind-effect+)))
+
+(deftest kind-equal-p-basic
+  "kind-equal-p compares structural equality."
+  (assert-true  (kind-equal-p +kind-type+   +kind-type+))
+  (assert-true  (kind-equal-p +kind-effect+ +kind-effect+))
+  (assert-false (kind-equal-p +kind-type+   +kind-effect+))
+  ;; Two freshly built * -> * are equal
+  (assert-true  (kind-equal-p (kind-fun +kind-type+ +kind-type+)
+                               (kind-fun +kind-type+ +kind-type+)))
+  ;; * -> Effect ≠ * -> *
+  (assert-false (kind-equal-p (kind-fun +kind-type+ +kind-effect+)
+                               (kind-fun +kind-type+ +kind-type+))))
+
+(deftest kind-var-fresh
+  "fresh-kind-var generates distinct kind variables."
+  (let ((k1 (fresh-kind-var 'k))
+        (k2 (fresh-kind-var 'k)))
+    (assert-true (kind-var-p k1))
+    (assert-true (kind-var-p k2))
+    (assert-false (kind-var-equal-p k1 k2))
+    (assert-true  (kind-var-equal-p k1 k1))))
+
+(deftest kind-to-string-basic
+  "kind-to-string produces human-readable kind names."
+  (assert-string= "*"            (kind-to-string +kind-type+))
+  (assert-string= "Effect"       (kind-to-string +kind-effect+))
+  (assert-string= "Constraint"   (kind-to-string +kind-constraint+))
+  (assert-string= "Multiplicity" (kind-to-string +kind-multiplicity+))
+  (assert-string= "Row *"        (kind-to-string +kind-row-type+))
+  (assert-string= "Row Effect"   (kind-to-string +kind-row-effect+))
+  (assert-string= "* -> *"       (kind-to-string (kind-fun +kind-type+ +kind-type+))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; 2026 Type System: Multiplicity / Graded Modal Types Tests
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest multiplicity-constants
+  "The three multiplicity grades are distinct keywords."
+  (assert-true (multiplicity-p +mult-zero+))
+  (assert-true (multiplicity-p +mult-one+))
+  (assert-true (multiplicity-p +mult-omega+))
+  (assert-eq :zero  +mult-zero+)
+  (assert-eq :one   +mult-one+)
+  (assert-eq :omega +mult-omega+))
+
+(deftest multiplicity-add-semiring
+  "mult-add is a commutative join: 0+q=q, q+q=q, 1+ω=ω."
+  (assert-eq :zero  (mult-add :zero  :zero))
+  (assert-eq :one   (mult-add :zero  :one))
+  (assert-eq :one   (mult-add :one   :zero))
+  (assert-eq :omega (mult-add :zero  :omega))
+  (assert-eq :one   (mult-add :one   :one))   ; join of 1+1 = 1 under semiring
+  (assert-eq :omega (mult-add :one   :omega))
+  (assert-eq :omega (mult-add :omega :omega)))
+
+(deftest multiplicity-mul-semiring
+  "mult-mul is scaling: 0*q=0, 1*q=q, ω*ω=ω."
+  (assert-eq :zero  (mult-mul :zero :zero))
+  (assert-eq :zero  (mult-mul :zero :one))
+  (assert-eq :zero  (mult-mul :zero :omega))
+  (assert-eq :zero  (mult-mul :one  :zero))
+  (assert-eq :one   (mult-mul :one  :one))
+  (assert-eq :omega (mult-mul :one  :omega))
+  (assert-eq :zero  (mult-mul :omega :zero))
+  (assert-eq :omega (mult-mul :omega :one))
+  (assert-eq :omega (mult-mul :omega :omega)))
+
+(deftest multiplicity-leq-ordering
+  "mult-leq: 0 ≤ 1 ≤ ω, reflexive, antisymmetric."
+  (assert-true  (mult-leq :zero  :zero))
+  (assert-true  (mult-leq :zero  :one))
+  (assert-true  (mult-leq :zero  :omega))
+  (assert-true  (mult-leq :one   :one))
+  (assert-true  (mult-leq :one   :omega))
+  (assert-true  (mult-leq :omega :omega))
+  (assert-false (mult-leq :one   :zero))
+  (assert-false (mult-leq :omega :one))
+  (assert-false (mult-leq :omega :zero)))
+
+(deftest multiplicity-to-string
+  "mult-to-string produces the expected grade symbols."
+  (assert-string= "0" (mult-to-string :zero))
+  (assert-string= "1" (mult-to-string :one))
+  (assert-string= "ω" (mult-to-string :omega)))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; 2026 Type System: New Type Node Tests (direct new API)
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest type-rigid-creation
+  "fresh-rigid-var creates distinct skolem/rigid variables."
+  (let ((r1 (fresh-rigid-var 'a))
+        (r2 (fresh-rigid-var 'a)))
+    (assert-true  (type-rigid-p r1))
+    (assert-true  (type-rigid-p r2))
+    ;; Two fresh rigids with the same name are NOT equal (unique IDs)
+    (assert-false (type-rigid-equal-p r1 r2))
+    ;; Same rigid equals itself
+    (assert-true  (type-rigid-equal-p r1 r1))
+    (assert-eq 'a (type-rigid-name r1))))
+
+(deftest type-product-creation
+  "make-type-product creates tuples; type-product-elems returns the elements."
+  (let ((pair (make-type-product :elems (list type-int type-string))))
+    (assert-true (type-product-p pair))
+    (assert-= 2 (length (type-product-elems pair)))
+    (assert-true (type-equal-p type-int    (first  (type-product-elems pair))))
+    (assert-true (type-equal-p type-string (second (type-product-elems pair))))))
+
+(deftest type-record-creation
+  "make-type-record creates row-polymorphic records."
+  ;; Closed record {name: String, age: Int}
+  (let ((rec (make-type-record :fields (list (cons 'name type-string)
+                                             (cons 'age  type-int))
+                               :row-var nil)))
+    (assert-true  (type-record-p rec))
+    (assert-= 2 (length (type-record-fields rec)))
+    (assert-null  (type-record-row-var rec)))
+  ;; Open record {name: String | ρ}
+  (let* ((rho (fresh-type-var 'rho))
+         (rec (make-type-record :fields (list (cons 'name type-string))
+                                :row-var rho)))
+    (assert-true (type-record-p rec))
+    (assert-true (type-var-p (type-record-row-var rec)))))
+
+(deftest type-variant-creation
+  "make-type-variant creates row-polymorphic variant/sum types."
+  (let ((v (make-type-variant :cases (list (cons 'some type-int)
+                                           (cons 'none type-null))
+                              :row-var nil)))
+    (assert-true (type-variant-p v))
+    (assert-= 2 (length (type-variant-cases v)))
+    (assert-null (type-variant-row-var v))))
+
+(deftest type-arrow-with-effects-and-mult
+  "make-type-arrow-raw supports effects and multiplicity slots."
+  ;; Linear arrow Int -1-> Int
+  (let ((arr (make-type-arrow-raw :params (list type-int)
+                                  :return type-int
+                                  :effects +pure-effect-row+
+                                  :mult :one)))
+    (assert-true (type-arrow-p arr))
+    (assert-eq :one (type-arrow-mult arr))
+    (assert-true (type-effect-row-p (type-arrow-effects arr))))
+  ;; Erased arrow (grade 0)
+  (let ((arr0 (make-type-arrow-raw :params (list type-bool)
+                                   :return type-null
+                                   :effects nil
+                                   :mult :zero)))
+    (assert-eq :zero (type-arrow-mult arr0))))
+
+(deftest type-forall-body-keyword
+  "make-type-forall uses :body (not :type) in the new API."
+  (let* ((a  (fresh-type-var 'a))
+         (fn (make-type-arrow (list a) a))
+         ;; New canonical keyword
+         (fa (make-type-forall :var a :body fn)))
+    (assert-true (type-forall-p fa))
+    (assert-true (type-var-equal-p a (type-forall-var fa)))
+    ;; Both :body and backward-compat :type accessors work
+    (assert-true (type-equal-p fn (type-forall-body fa)))
+    (assert-true (type-equal-p fn (type-forall-type fa)))))
+
+(deftest type-exists-creation
+  "make-type-exists creates existential types."
+  (let* ((a    (fresh-type-var 'a))
+         (pair (make-type-product :elems (list type-string a)))
+         (ex   (make-type-exists :var a :knd nil :body pair)))
+    (assert-true (type-exists-p ex))
+    (assert-true (type-var-equal-p a (type-exists-var ex)))
+    (assert-true (type-product-p (type-exists-body ex)))))
+
+(deftest type-mu-creation
+  "make-type-mu creates iso-recursive types μa.T."
+  (let* ((a   (fresh-type-var 'a))
+         ;; μa. (null | (cons int a))  —  list of int
+         (mu  (make-type-mu :var a
+                            :body (make-type-union (list type-null
+                                                         (make-type-product
+                                                          :elems (list type-int a)))))))
+    (assert-true (type-mu-p mu))
+    (assert-true (type-var-equal-p a (type-mu-var mu)))
+    (assert-true (type-union-p (type-mu-body mu)))))
+
+(deftest type-linear-creation
+  "make-type-linear creates graded modal types !_q T."
+  (let ((linear-int   (make-type-linear :base type-int  :grade :one))
+        (erased-str   (make-type-linear :base type-string :grade :zero))
+        (default-bool (make-type-linear :base type-bool  :grade :omega)))
+    (assert-true (type-linear-p linear-int))
+    (assert-eq :one   (type-linear-grade linear-int))
+    (assert-eq :zero  (type-linear-grade erased-str))
+    (assert-eq :omega (type-linear-grade default-bool))
+    (assert-true (type-equal-p type-int (type-linear-base linear-int)))))
+
+(deftest type-app-hkt
+  "make-type-app represents higher-kinded type application F A."
+  (let* ((list-con (make-type-primitive :name 'list))
+         (list-int (make-type-app :fun list-con :arg type-int)))
+    (assert-true (type-app-p list-int))
+    (assert-true (type-primitive-p (type-app-fun list-int)))
+    (assert-true (type-equal-p type-int (type-app-arg list-int)))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; 2026 Type System: Hash-Table Substitution API Tests
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest subst-empty-functional
+  "make-substitution creates an empty hash-table substitution."
+  (let ((s (make-substitution)))
+    (assert-true (substitution-p s))
+    (assert-= 0 (substitution-generation s))
+    (let ((v (fresh-type-var)))
+      (multiple-value-bind (bound found) (subst-lookup v s)
+        (declare (ignore bound))
+        (assert-false found)))))
+
+(deftest subst-extend-functional
+  "subst-extend returns a new substitution without modifying the original."
+  (let* ((v  (fresh-type-var))
+         (s0 (make-substitution))
+         (s1 (subst-extend v type-int s0)))
+    ;; s0 is unchanged
+    (multiple-value-bind (b f) (subst-lookup v s0) (declare (ignore b)) (assert-false f))
+    ;; s1 has the binding
+    (multiple-value-bind (bound found) (subst-lookup v s1)
+      (assert-true found)
+      (assert-true (type-equal-p type-int bound)))
+    ;; Generation was incremented
+    (assert-true (> (substitution-generation s1)
+                    (substitution-generation s0)))))
+
+(deftest subst-extend-destructive
+  "subst-extend! mutates the substitution in place (O(1) for hot paths)."
+  (let* ((v (fresh-type-var))
+         (s (make-substitution)))
+    (subst-extend! v type-string s)
+    (multiple-value-bind (bound found) (subst-lookup v s)
+      (assert-true found)
+      (assert-true (type-equal-p type-string bound)))))
+
+(deftest subst-compose-transitivity
+  "subst-compose applies s2 first then s1: (s1 ∘ s2)(v2) = s1(s2(v2))."
+  (let* ((v1 (fresh-type-var))
+         (v2 (fresh-type-var))
+         ;; s1: v1 → Int
+         (s1 (subst-extend v1 type-int (make-substitution)))
+         ;; s2: v2 → v1
+         (s2 (subst-extend v2 v1 (make-substitution)))
+         ;; s1 ∘ s2: v2 should map to Int (via v1)
+         (s12 (subst-compose s1 s2)))
+    (let ((result (zonk v2 s12)))
+      (assert-true (type-equal-p type-int result)))))
+
+(deftest zonk-arrow-substitution
+  "zonk eagerly applies substitution through arrow types."
+  (let* ((v  (fresh-type-var))
+         (fn (make-type-arrow (list v) v))
+         (s  (subst-extend v type-bool (make-substitution)))
+         (r  (zonk fn s)))
+    (assert-true (type-arrow-p r))
+    (assert-true (type-equal-p type-bool (first (type-arrow-params r))))
+    (assert-true (type-equal-p type-bool (type-arrow-return r)))))
+
+(deftest type-occurs-p-basic
+  "type-occurs-p detects circular references (for occurs check)."
+  (let* ((v   (fresh-type-var))
+         (fn  (make-type-arrow (list v) type-int))
+         (s   (make-substitution)))
+    ;; v occurs in (v -> Int)
+    (assert-true  (type-occurs-p v fn s))
+    ;; v does not occur in Int
+    (assert-false (type-occurs-p v type-int s))
+    ;; Fresh var does not occur in anything built from v
+    (let ((w (fresh-type-var)))
+      (assert-false (type-occurs-p w fn s)))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; 2026 Type System: Row Polymorphism Tests
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest row-extend-basic
+  "row-extend adds a label to an existing row."
+  (let* ((base (make-type-record :fields (list (cons 'x type-int)) :row-var nil))
+         (ext  (row-extend 'y type-string base)))
+    (assert-true (type-record-p ext))
+    (assert-= 2 (length (type-record-fields ext)))
+    (assert-true (not (null (assoc 'y (type-record-fields ext)))))))
+
+(deftest row-restrict-basic
+  "row-restrict removes a label from a row."
+  (let* ((rec (make-type-record :fields (list (cons 'x type-int)
+                                              (cons 'y type-string))
+                                :row-var nil))
+         (r   (row-restrict 'x rec)))
+    (assert-true (type-record-p r))
+    (assert-= 1 (length (type-record-fields r)))
+    (assert-null (assoc 'x (type-record-fields r)))))
+
+(deftest row-select-basic
+  "row-select retrieves a field type by label."
+  (let ((rec (make-type-record :fields (list (cons 'name type-string)
+                                             (cons 'age  type-int))
+                               :row-var nil)))
+    (assert-true (type-equal-p type-string (row-select 'name rec)))
+    (assert-true (type-equal-p type-int    (row-select 'age  rec)))
+    (assert-null (row-select 'missing rec))))
+
+(deftest row-labels-basic
+  "row-labels returns all field labels in a record row."
+  (let ((rec (make-type-record :fields (list (cons 'a type-int)
+                                             (cons 'b type-bool))
+                               :row-var nil)))
+    (let ((labs (row-labels rec)))
+      (assert-= 2 (length labs))
+      (assert-true (member 'a labs))
+      (assert-true (member 'b labs)))))
+
+(deftest row-open-closed
+  "row-closed-p / row-open-p distinguish closed vs open rows."
+  (let* ((closed (make-type-record :fields (list (cons 'x type-int)) :row-var nil))
+         (rv     (fresh-type-var 'rho))
+         (open   (make-type-record :fields (list (cons 'x type-int)) :row-var rv)))
+    (assert-true  (row-closed-p closed))
+    (assert-false (row-open-p   closed))
+    (assert-false (row-closed-p open))
+    (assert-true  (row-open-p   open))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; 2026 Type System: Parser New Syntax Tests
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest parser-linear-arrow-1
+  "(->1 A B) parses to a linear (grade 1) arrow type."
+  (let ((result (cl-cc/type:parse-type-specifier '(->1 fixnum boolean))))
+    (assert-true (type-arrow-p result))
+    (assert-eq :one (type-arrow-mult result))
+    (assert-= 1 (length (type-arrow-params result)))
+    (assert-true (type-equal-p type-bool (type-arrow-return result)))))
+
+(deftest parser-erased-arrow-0
+  "(->0 A B) parses to an erased (grade 0) arrow type."
+  (let ((result (cl-cc/type:parse-type-specifier '(->0 fixnum boolean))))
+    (assert-true (type-arrow-p result))
+    (assert-eq :zero (type-arrow-mult result))))
+
+(deftest parser-forall-body-keyword
+  "(forall a T) parses to type-forall with :body set."
+  (let* ((result (cl-cc/type:parse-type-specifier '(forall a (-> a a)))))
+    (assert-true (type-forall-p result))
+    ;; var is a fresh type-var named 'a
+    (assert-eq 'a (type-var-name (type-forall-var result)))
+    ;; body is an arrow type
+    (assert-true (type-arrow-p (type-forall-body result)))))
+
+(deftest parser-exists-syntax
+  "(exists a T) parses to type-exists."
+  (let ((result (cl-cc/type:parse-type-specifier '(exists a (values string a)))))
+    (assert-true (type-exists-p result))
+    (assert-eq 'a (type-var-name (type-exists-var result)))
+    (assert-true (type-product-p (type-exists-body result)))))
+
+(deftest parser-mu-syntax
+  "(mu a T) parses to type-mu — recursive types."
+  (let ((result (cl-cc/type:parse-type-specifier '(mu a (or null (values int a))))))
+    (assert-true (type-mu-p result))
+    (assert-eq 'a (type-var-name (type-mu-var result)))
+    (assert-true (type-union-p (type-mu-body result)))))
+
+(deftest parser-record-closed
+  "(Record (l T) ...) parses to a closed record type."
+  (let ((result (cl-cc/type:parse-type-specifier '(record (name string) (age fixnum)))))
+    (assert-true (type-record-p result))
+    (assert-= 2 (length (type-record-fields result)))
+    (assert-null (type-record-row-var result))))
+
+(deftest parser-record-open
+  "(Record (l T) ... | rho) parses to an open record type."
+  (let ((result (cl-cc/type:parse-type-specifier '(record (name string) | rho))))
+    (assert-true (type-record-p result))
+    (assert-= 1 (length (type-record-fields result)))
+    ;; row-var is a fresh type variable for the open tail
+    (assert-true (not (null (type-record-row-var result))))))
+
+(deftest parser-variant-syntax
+  "(Variant (L T) ...) parses to a closed variant type."
+  (let ((result (cl-cc/type:parse-type-specifier '(variant (some fixnum) (none null)))))
+    (assert-true (type-variant-p result))
+    (assert-= 2 (length (type-variant-cases result)))
+    (assert-null (type-variant-row-var result))))
+
+(deftest parser-linear-modal-syntax
+  "(!1 T) and (!ω T) parse to graded modal types."
+  (let ((lin   (cl-cc/type:parse-type-specifier '(!1 fixnum)))
+        (unr   (cl-cc/type:parse-type-specifier '(!ω string)))
+        (erased (cl-cc/type:parse-type-specifier '(!0 boolean))))
+    (assert-true (type-linear-p lin))
+    (assert-eq :one   (type-linear-grade lin))
+    (assert-true (type-linear-p unr))
+    (assert-eq :omega (type-linear-grade unr))
+    (assert-true (type-linear-p erased))
+    (assert-eq :zero  (type-linear-grade erased))))
+
+(deftest parser-refinement-syntax
+  "(Refine T pred) parses to a refinement type."
+  (let ((result (cl-cc/type:parse-type-specifier
+                 '(refine fixnum (lambda (x) (> x 0))))))
+    (assert-true (type-refinement-p result))
+    (assert-true (type-equal-p type-int (type-refinement-base result)))
+    (assert-true (not (null (type-refinement-predicate result))))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; 2026 Type System: Printer Tests (printer.lisp full implementation)
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest printer-type-error-sentinel
+  "type-to-string formats type-error as <error: message>."
+  (let ((e1 (make-type-error :message "unbound x"))
+        (e2 (make-type-error :message "unknown")))
+    (assert-string= "<error: unbound x>" (type-to-string e1))
+    (assert-string= "<error: unknown>"   (type-to-string e2))
+    ;; +type-unknown+ backward compat
+    (assert-string= "<error: unknown>" (type-to-string +type-unknown+))))
+
+(deftest printer-type-product
+  "type-to-string formats tuples as (A, B, C)."
+  (let ((pair (make-type-product :elems (list type-int type-string))))
+    (assert-string= "(FIXNUM, STRING)" (type-to-string pair))))
+
+(deftest printer-type-record
+  "type-to-string formats records with and without a row variable."
+  (let ((closed (make-type-record :fields (list (cons 'x type-int)
+                                                (cons 'y type-bool))
+                                  :row-var nil))
+        (rho    (fresh-type-var 'rho))
+        (open   (make-type-record :fields (list (cons 'x type-int))
+                                  :row-var (fresh-type-var 'rho))))
+    (declare (ignore rho))
+    ;; Closed record
+    (let ((s (type-to-string closed)))
+      (assert-true (search "X" (string-upcase s)))
+      (assert-true (search "Y" (string-upcase s))))
+    ;; Open record has | separator
+    (let ((s (type-to-string open)))
+      (assert-true (search "|" s)))))
+
+(deftest printer-linear-type
+  "type-to-string formats graded modal types with grade prefix."
+  (let ((lin (make-type-linear :base type-int :grade :one)))
+    (let ((s (type-to-string lin)))
+      ;; Should contain the grade and the base type name
+      (assert-true (search "1" s))
+      (assert-true (search "FIXNUM" s)))))
+
+(deftest printer-forall-type
+  "type-to-string formats forall types with ∀."
+  (let* ((a  (fresh-type-var 'a))
+         (fn (make-type-arrow (list a) a))
+         (fa (make-type-forall :var a :body fn)))
+    (let ((s (type-to-string fa)))
+      ;; Should contain the ∀ symbol
+      (assert-true (search "∀" s)))))
+
+(deftest printer-mu-type
+  "type-to-string formats μ-types with μ."
+  (let* ((a (fresh-type-var 'a))
+         (mu (make-type-mu :var a :body (make-type-union (list type-null a)))))
+    (let ((s (type-to-string mu)))
+      (assert-true (search "μ" s)))))
+
+(deftest printer-effect-row-open
+  "type-to-string formats open effect rows with | separator."
+  (let* ((rv  (fresh-type-var 'epsilon))
+         (row (make-type-effect-row
+               :effects (list (make-type-effect-op :name 'io))
+               :row-var rv)))
+    (let ((s (type-to-string row)))
+      (assert-true (search "IO" (string-upcase s)))
+      (assert-true (search "|" s)))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; 2026 Type System: New typeclass-def API Tests
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest typeclass-def-creation
+  "make-typeclass-def creates a full typeclass definition."
+  (let* ((a  (fresh-type-var 'a))
+         (tc (make-typeclass-def
+              :name 'functor-test
+              :type-params (list a)
+              :superclasses nil
+              :methods (list (cons 'fmap
+                                   (make-type-arrow (list type-any) type-any)))
+              :associated-types nil
+              :functional-deps nil)))
+    (assert-true (typeclass-def-p tc))
+    (assert-eq 'functor-test (typeclass-def-name tc))
+    (assert-= 1 (length (typeclass-def-type-params tc)))
+    (assert-= 1 (length (typeclass-def-methods tc)))))
+
+(deftest typeclass-def-register-lookup
+  "register-typeclass / lookup-typeclass round-trip with new typeclass-def."
+  (let* ((a  (fresh-type-var 'a))
+         (tc (make-typeclass-def
+              :name 'show-test
+              :type-params (list a)
+              :superclasses nil
+              :methods (list (cons 'show (make-type-arrow (list a) type-string)))
+              :associated-types nil
+              :functional-deps nil)))
+    (register-typeclass 'show-test tc)
+    (let ((retrieved (lookup-typeclass 'show-test)))
+      (assert-true (not (null retrieved)))
+      (assert-true (typeclass-def-p retrieved))
+      (assert-eq 'show-test (typeclass-def-name retrieved)))))
+
+(deftest typeclass-instance-registration-new
+  "register-typeclass-instance and lookup-typeclass-instance work with new API."
+  (register-typeclass-instance 'show-int-test type-int
+                               (list (cons 'show (lambda (x) (format nil "~A" x)))))
+  (let ((inst (lookup-typeclass-instance 'show-int-test type-int)))
+    (assert-true (not (null inst)))
+    (assert-true (typeclass-instance-p inst))
+    (assert-eq 'show-int-test (typeclass-instance-class-name inst)))
+  (assert-true (has-typeclass-instance-p 'show-int-test type-int))
+  (assert-false (has-typeclass-instance-p 'show-int-test type-string)))

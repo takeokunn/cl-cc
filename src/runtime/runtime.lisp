@@ -20,14 +20,14 @@
 ;;; Tagged Pointer Constants
 ;;; ------------------------------------------------------------
 
-(defconstant +tag-fixnum+    0)
-(defconstant +tag-cons+      1)
-(defconstant +tag-symbol+    2)
-(defconstant +tag-function+  3)
-(defconstant +tag-character+ 4)
-(defconstant +tag-array+     5)
-(defconstant +tag-string+    6)
-(defconstant +tag-other+     7)
+(defconstant +tag-fixnum+     0)
+(defconstant +rt-tag-cons+    1)
+(defconstant +rt-tag-symbol+  2)
+(defconstant +rt-tag-function+ 3)
+(defconstant +tag-character+  4)
+(defconstant +tag-array+      5)
+(defconstant +rt-tag-string+  6)
+(defconstant +tag-other+      7)
 
 (defun rt-tag-fixnum (n)    (ash n 3))
 (defun rt-untag-fixnum (x)  (ash x -3))

@@ -22,24 +22,24 @@
       ((:file "cst")
        (:file "diagnostics")
        (:file "ast")
-       (:file "reader")
        (:file "prolog")
-       (:file "combinators")  ; transitional: PHP parser still uses token/alt/seq
        (:file "dcg")
        (:file "lexer")
        (:file "incremental")
+       (:file "pratt")
+       (:file "combinators")
        (:module "cl"
         :serial t
         :components
-        ((:file "lexer")
-         (:file "parser")
+        ((:file "parser")
          (:file "grammar")))
        (:module "php"
         :serial t
         :components
         ((:file "lexer")
          (:file "parser")
-         (:file "grammar")))))
+         (:file "grammar")))
+       (:file "cst-to-ast")))
      ;; Stage 2: S-expressions → macro-expanded S-expressions
      (:module "expand"
       :serial t
@@ -63,16 +63,33 @@
       :serial t
       :components
       ((:file "package")
+       (:file "kind")
+       (:file "multiplicity")
        (:file "representation")
+       (:file "substitution")
        (:file "unification")
        (:file "subtyping")
+       (:file "effect")
+       (:file "row")
+       (:file "constraint")
        (:file "parser")
-       (:file "inference")))
+       (:file "typeclass")
+       (:file "solver")
+       (:file "inference")
+       (:file "checker")
+       (:file "printer")))
      ;; Stage 4: AST → VM IR (context/closure/cps/codegen — before optimize/emit)
      (:module "compile"
       :serial t
       :components
-      ((:file "context")
+      ((:module "ir"                   ; Phase 1: compile-level SSA IR foundation
+        :serial t
+        :components
+        ((:file "types")               ; ir-value, ir-inst, ir-block, ir-function, ir-module
+         (:file "block")               ; CFG edges, RPO traversal, dominator tree
+         (:file "ssa")                 ; Braun et al. 2013 SSA variable tracking
+         (:file "printer")))           ; human-readable IR dump
+       (:file "context")
        (:file "closure")
        (:file "cps")
        (:file "codegen")))
@@ -80,12 +97,19 @@
      (:module "optimize"
       :serial t
       :components
-      ((:file "optimizer")))
+      ((:file "effects")        ; Phase 0: effect-kind bridge (type-effect-row → optimizer)
+       (:file "cfg")            ; Phase 1: CFG construction + dominator tree + DF
+       (:file "ssa")            ; Phase 1: SSA construction + destruction
+       (:file "egraph")         ; Phase 2: E-graph engine (union-find, saturation, extraction)
+       (:file "egraph-rules")   ; Phase 2: defrule macro + built-in rewrite rules
+       (:file "optimizer")))
      ;; Stage 7: VM IR → native code + binary formats
      (:module "emit"
       :serial t
       :components
-      ((:file "calling-convention")
+      ((:file "mir")                 ; Phase 1: MIR IR — SSA CFG intermediate
+       (:file "target")              ; Phase 1: target-desc — unified target descriptors
+       (:file "calling-convention")
        (:file "regalloc")
        (:file "x86-64")
        (:file "x86-64-codegen")
@@ -103,12 +127,21 @@
          (:file "macho")
          (:file "elf")
          (:file "wasm")))))
+     ;; Bytecode ISA v2: 32-bit instruction encoding + disassembly
+     (:module "bytecode"
+      :serial t
+      :components
+      ((:file "package")
+       (:file "encode")
+       (:file "decode")))
      ;; Runtime support: GC + heap
      (:module "runtime"
       :serial t
       :components
       ((:file "package")
        (:file "runtime")
+       (:file "value")
+       (:file "frame")
        (:file "heap")
        (:file "gc")))
      ;; Stage 4 (pipeline): compile-expression, run-string, stdlib API
@@ -142,14 +175,18 @@
      (:module "unit"
       :serial t
       :components
-      ((:module "parse"
+      ((:module "vm"
+        :serial t
+        :components
+        ((:file "vm2-tests")))
+       (:module "parse"
         :serial t
         :components
         ((:file "ast-tests")
          (:file "cst-tests")
          (:file "lexer-tests")
          (:file "prolog-tests")
-         (:file "parser-combinator-tests")
+         (:file "pratt-tests")
          (:file "php-tests")))
        (:module "expand"
         :serial t
@@ -162,21 +199,37 @@
        (:module "compile"
         :serial t
         :components
-        ((:file "cps-tests")))
+        ((:module "ir"
+          :serial t
+          :components
+          ((:file "ir-types-tests")))
+         (:file "cps-tests")))
        (:module "optimize"
         :serial t
         :components
-        ((:file "optimizer-tests")))
+        ((:file "optimizer-tests")
+         (:file "effects-tests")
+         (:file "cfg-tests")
+         (:file "ssa-tests")
+         (:file "egraph-tests")))
        (:module "emit"
         :serial t
         :components
-        ((:file "regalloc-tests")
+        ((:file "mir-tests")
+         (:file "regalloc-tests")
          (:file "wasm-tests")))
        (:module "runtime"
         :serial t
         :components
         ((:file "gc-tests")
-         (:file "heap-tests")))))
+         (:file "heap-tests")
+         (:file "value-tests")
+         (:file "frame-tests")))
+       (:module "bytecode"
+        :serial t
+        :components
+        ((:file "encode-tests")
+         (:file "decode-tests")))))
      (:module "integration"
       :serial t
       :components

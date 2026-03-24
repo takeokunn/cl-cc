@@ -24,9 +24,15 @@
              (occurs-check var (cdr term) env)))
         (t nil)))
 
+(defun unify-failed-p (result)
+  "Return T if RESULT represents a unification failure (distinguished from empty env)."
+  (eq result :unify-fail))
+
 (defun unify (term1 term2 &optional (env nil))
-  "Unify two terms, returning updated environment or NIL on failure.
-   TERM1 and TERM2 can be atoms, logic variables (?x), or cons cells."
+  "Unify two terms, returning updated environment or :UNIFY-FAIL on failure.
+   TERM1 and TERM2 can be atoms, logic variables (?x), or cons cells.
+   NOTE: Returns NIL for a successful empty environment (not failure — use
+   unify-failed-p to distinguish failure from an empty environment)."
   (cond
     ;; Both are logic variables
     ((and (logic-var-p term1) (logic-var-p term2))
@@ -42,19 +48,21 @@
        (if binding
            (unify (cdr binding) term2 env)
            (if (occurs-check term1 term2 env)
-               nil  ; Cycle detected
+               :unify-fail  ; Cycle detected
                (acons term1 term2 env)))))
     ;; term2 is logic variable
     ((logic-var-p term2)
      (unify term2 term1 env))
-    ;; Both are cons cells
+    ;; Both are cons cells — use unify-failed-p to distinguish nil-env from failure
     ((and (consp term1) (consp term2))
      (let ((env1 (unify (car term1) (car term2) env)))
-       (and env1 (unify (cdr term1) (cdr term2) env1))))
+       (if (unify-failed-p env1)
+           :unify-fail
+           (unify (cdr term1) (cdr term2) env1))))
     ;; Both are equal atoms
     ((equal term1 term2) env)
     ;; Unification failure
-    (t nil)))
+    (t :unify-fail)))
 
 ;;; Variable Substitution
 
@@ -157,7 +165,7 @@
     (setf (gethash '= ht)
           (lambda (args env k)
             (let ((new-env (unify (first args) (second args) env)))
-              (when new-env (funcall k new-env)))))
+              (unless (unify-failed-p new-env) (funcall k new-env)))))
     ;; /= (non-unification: succeed when the two terms are not equal)
     (setf (gethash '/= ht)
           (lambda (args env k)
@@ -192,7 +200,7 @@
              (head       (rule-head fresh-rule))
              (body       (rule-body fresh-rule))
              (new-env    (unify args (cdr head) env)))
-        (when new-env
+        (unless (unify-failed-p new-env)
           (handler-case
               (if body
                   (solve-conjunction body new-env k)
@@ -353,9 +361,9 @@
              (dolist (rule *peephole-rules* (values nil nil))
                (destructuring-bind (cur-pat next-pat result-list) rule
                  (let ((env (unify cur-pat current nil)))
-                   (when env
+                   (unless (unify-failed-p env)
                      (let ((env2 (unify next-pat next env)))
-                       (when env2
+                       (unless (unify-failed-p env2)
                          (return (values (mapcar (lambda (tmpl)
                                                    (logic-substitute tmpl env2))
                                                  result-list)

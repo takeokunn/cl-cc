@@ -33,7 +33,7 @@
 (defproperty unify-fails-on-different-integers
     (a (gen-integer :min 0 :max 500)
      b (gen-integer :min 501 :max 1000))
-  (null (unify a b)))
+  (unify-failed-p (unify a b)))
 
 (defproperty substitute-preserves-non-variables
     (n (gen-integer :min -1000 :max 1000))

@@ -33,12 +33,8 @@
    do not write a destination (jump, halt, ret, print, etc.) or for unknown types."
   (ignore-errors (vm-dst inst)))
 
-(defun opt-inst-pure-p (inst)
-  "T if INST has no side effects and is safe to remove when its result is unused.
-   vm-const and vm-move are pure: they only write to a register with no other
-   observable effects. vm-func-ref, vm-closure, etc. may have initialization
-   side-effects (e.g. registering a function name) so they are not included."
-  (typep inst '(or vm-const vm-move)))
+;;; opt-inst-pure-p is defined in effects.lisp (loaded first in the optimize module).
+;;; It replaces the former 2-type whitelist with a 100+-type data-driven table.
 
 (defun opt-inst-read-regs (inst)
   "Return a list of all register names read by INST."
@@ -397,11 +393,11 @@
     (dolist (inst instructions)
       (dolist (reg (opt-inst-read-regs inst))
         (setf (gethash reg used) t)))
-    ;; Pass 2: drop pure instructions whose dst is never read
+    ;; Pass 2: drop DCE-eligible instructions (pure + alloc) whose dst is never read
     (remove-if (lambda (inst)
-                 (and (opt-inst-pure-p inst)
-                      (let ((dst (vm-dst inst)))
-                        (not (gethash dst used)))))
+                 (and (opt-inst-dce-eligible-p inst)
+                      (let ((dst (ignore-errors (vm-dst inst))))
+                        (and dst (not (gethash dst used))))))
                instructions)))
 
 ;;; ─── Pass 3: Jump Threading + Dead Jump Elimination ─────────────────────

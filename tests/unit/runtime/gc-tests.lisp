@@ -138,27 +138,27 @@
 (deftest gc-alloc-first-object-address
   "First allocation returns young-from-base (0)."
   (let* ((heap (%make-small-heap))
-         (addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+tag-cons+ 3)))
+         (addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)))
     (assert-= 0 addr)))
 
 (deftest gc-alloc-advances-free-pointer
   "After allocating 3 words, young-free advances to 3."
   (let* ((heap (%make-small-heap)))
-    (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+tag-cons+ 3)
+    (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)
     (assert-= 3 (cl-cc/runtime:rt-heap-young-free heap))))
 
 (deftest gc-alloc-second-object-address
   "Second allocation starts at the end of the first object."
   (let* ((heap (%make-small-heap)))
-    (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+tag-cons+ 3)
-    (let ((addr2 (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+tag-cons+ 3)))
+    (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)
+    (let ((addr2 (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)))
       (assert-= 3 addr2))))
 
 (deftest gc-alloc-header-size-readable
   "After writing a header, rt-heap-object-size returns the correct size."
   (let* ((heap (%make-small-heap))
-         (addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+tag-cons+ 3)))
-    (%write-header heap addr 3 cl-cc/runtime:+tag-cons+)
+         (addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)))
+    (%write-header heap addr 3 cl-cc/runtime:+rt-tag-cons+)
     (assert-= 3 (cl-cc/runtime:rt-heap-object-size heap addr))))
 
 ;;; ------------------------------------------------------------
@@ -169,10 +169,10 @@
   "After minor GC, the unreachable object's words are counted as collected."
   (let* ((heap (%make-small-heap)))
     ;; Allocate two 3-word objects
-    (let ((addr1 (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+tag-cons+ 3))
-          (addr2 (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+tag-cons+ 3)))
-      (%write-header heap addr1 3 cl-cc/runtime:+tag-cons+)
-      (%write-header heap addr2 3 cl-cc/runtime:+tag-cons+)
+    (let ((addr1 (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3))
+          (addr2 (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)))
+      (%write-header heap addr1 3 cl-cc/runtime:+rt-tag-cons+)
+      (%write-header heap addr2 3 cl-cc/runtime:+rt-tag-cons+)
       ;; Only register addr1 as a root
       (let ((root (cons nil addr1)))
         (cl-cc/runtime:rt-gc-add-root heap root)
@@ -186,8 +186,8 @@
 (deftest gc-minor-gc-root-address-updated
   "After minor GC, root cell's cdr is updated to the live object's new address."
   (let* ((heap (%make-small-heap)))
-    (let ((addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+tag-cons+ 3)))
-      (%write-header heap addr 3 cl-cc/runtime:+tag-cons+)
+    (let ((addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)))
+      (%write-header heap addr 3 cl-cc/runtime:+rt-tag-cons+)
       (let ((root (cons nil addr)))
         (cl-cc/runtime:rt-gc-add-root heap root)
         (cl-cc/runtime:rt-gc-minor-collect heap)
@@ -204,8 +204,8 @@
   "After minor GC, a live object's slot values are preserved."
   (let* ((heap (%make-small-heap)))
     ;; Allocate a 3-word cons-like object: header + 2 data words
-    (let ((addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+tag-cons+ 3)))
-      (%write-header heap addr 3 cl-cc/runtime:+tag-cons+)
+    (let ((addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)))
+      (%write-header heap addr 3 cl-cc/runtime:+rt-tag-cons+)
       ;; Write slot values (non-pointer integers, safe for this test)
       (cl-cc/runtime:rt-heap-set heap (+ addr 1) 111)
       (cl-cc/runtime:rt-heap-set heap (+ addr 2) 222)
@@ -221,14 +221,14 @@
 (deftest gc-minor-gc-header-tag-preserved
   "After minor GC, the live object's tag is preserved in its header."
   (let* ((heap (%make-small-heap)))
-    (let ((addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+tag-string+ 3)))
-      (%write-header heap addr 3 cl-cc/runtime:+tag-string+)
+    (let ((addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-string+ 3)))
+      (%write-header heap addr 3 cl-cc/runtime:+rt-tag-string+)
       (let ((root (cons nil addr)))
         (cl-cc/runtime:rt-gc-add-root heap root)
         (cl-cc/runtime:rt-gc-minor-collect heap)
         (let* ((new-addr (cdr root))
                (new-hdr  (cl-cc/runtime:rt-heap-object-header heap new-addr)))
-          (assert-= cl-cc/runtime:+tag-string+ (cl-cc/runtime:header-tag new-hdr)))
+          (assert-= cl-cc/runtime:+rt-tag-string+ (cl-cc/runtime:header-tag new-hdr)))
         (cl-cc/runtime:rt-gc-remove-root heap root)))))
 
 ;;; ------------------------------------------------------------
@@ -239,12 +239,12 @@
   "An object that survives enough minor GCs is promoted to old space."
   ;; Use a larger heap to fit the object after repeated copies.
   (let* ((heap (cl-cc/runtime:make-rt-heap :young-size 128 :old-size 64)))
-    (let ((addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+tag-cons+ 3)))
+    (let ((addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)))
       ;; Write header with age already at the tenuring threshold so the
       ;; very next minor GC will promote it.
       (cl-cc/runtime:rt-heap-set-header
        heap addr
-       (cl-cc/runtime:make-header 3 cl-cc/runtime:+tag-cons+
+       (cl-cc/runtime:make-header 3 cl-cc/runtime:+rt-tag-cons+
                                   cl-cc/runtime:*gc-tenuring-threshold*))
       (let ((root (cons nil addr)))
         (cl-cc/runtime:rt-gc-add-root heap root)
@@ -263,8 +263,8 @@
   "rt-gc-write-barrier marks the old-space card dirty when writing a young pointer."
   (let* ((heap (cl-cc/runtime:make-rt-heap :young-size 64 :old-size 64)))
     ;; Allocate an object in young space (will serve as the 'new-val' pointer)
-    (let ((young-addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+tag-cons+ 3)))
-      (%write-header heap young-addr 3 cl-cc/runtime:+tag-cons+)
+    (let ((young-addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)))
+      (%write-header heap young-addr 3 cl-cc/runtime:+rt-tag-cons+)
       ;; Manually place an object in old space by bumping old-free
       (let* ((old-addr (cl-cc/runtime:rt-heap-old-base heap)))
         ;; Write a valid header so the object is recognisable
@@ -317,8 +317,8 @@
 (deftest gc-stats-minor-gc-count-increments
   "After one minor GC, :minor-gc-count is 1."
   (let* ((heap (%make-small-heap)))
-    (let ((addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+tag-cons+ 3)))
-      (%write-header heap addr 3 cl-cc/runtime:+tag-cons+)
+    (let ((addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)))
+      (%write-header heap addr 3 cl-cc/runtime:+rt-tag-cons+)
       (let ((root (cons nil addr)))
         (cl-cc/runtime:rt-gc-add-root heap root)
         (cl-cc/runtime:rt-gc-minor-collect heap)
@@ -342,6 +342,6 @@
 (deftest gc-stats-young-used-after-alloc
   ":young-used reflects allocated words before GC."
   (let* ((heap (%make-small-heap)))
-    (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+tag-cons+ 3)
-    (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+tag-cons+ 3)
+    (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)
+    (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)
     (assert-= 6 (getf (cl-cc/runtime:rt-gc-stats heap) :young-used))))

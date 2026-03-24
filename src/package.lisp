@@ -30,6 +30,12 @@
     :def-dcg-rule :phrase :phrase-rest :phrase-all
     :dcg-fresh-var :dcg-reset-counter
 
+    ;; CST → AST bridge
+    :lower-cst-to-ast
+    :lower-cst-list-to-ast
+    :parse-and-lower
+    :parse-and-lower-one
+
     ;; Core compiler
     :parse-source
     :parse-all-forms
@@ -56,6 +62,7 @@
    ;; Prolog system
    :logic-var-p
    :unify
+   :unify-failed-p
    :occurs-check
    :logic-substitute
    :substitute-variables
@@ -895,6 +902,137 @@
        :ast-quote-p
        :ast-defclass-p
        :ast-call-p
-       :ast-binop-p))
+       :ast-binop-p
+
+       ;; ── Compile-Level IR Foundation (src/compile/ir/) ────────────────────
+       ;; IR Value (SSA virtual register)
+       :ir-value :make-ir-value :ir-value-p
+       :irv-id :irv-type :irv-def
+       ;; IR Instruction (base)
+       :ir-inst :make-ir-inst :ir-inst-p
+       :iri-result :iri-block
+       :ir-operands
+       ;; IR Basic Block
+       :ir-block :make-ir-block :ir-block-p
+       :irb-id :irb-label :irb-params :irb-insts :irb-terminator
+       :irb-predecessors :irb-successors :irb-sealed-p :irb-incomplete-phis
+       ;; IR Function
+       :ir-function :make-ir-function :ir-function-p
+       :irf-name :irf-params :irf-entry :irf-blocks :irf-return-type
+       :irf-value-counter :irf-block-counter :irf-current-defs
+       ;; IR Module
+       :ir-module :make-ir-module :ir-module-p
+       :irm-functions :irm-globals
+       ;; Allocators and builder
+       :ir-new-value :ir-new-block :ir-make-function
+       ;; CFG utilities
+       :ir-add-edge :ir-emit :ir-set-terminator
+       :ir-rpo :ir-dominators
+       :ir-collect-uses :ir-value-uses :ir-verify-ssa
+       ;; SSA variable tracking (Braun et al. 2013)
+       :ir-write-var :ir-read-var :ir-seal-block
+       ;; Printer
+       :ir-format-value :ir-print-inst :ir-print-block
+       :ir-print-function :ir-function-to-string :ir-print-module
+
+       ;; ── MIR: Target-Neutral SSA Intermediate Representation ──────────────
+       ;; MIR Value (SSA virtual register)
+       :mir-value :make-mir-value :mir-value-p
+       :mirv-id :mirv-name :mirv-type :mirv-def-inst :mirv-use-count
+       ;; MIR Constant
+       :mir-const :make-mir-const :mir-const-p
+       :mirc-value :mirc-type
+       ;; MIR Instruction
+       :mir-inst :make-mir-inst :mir-inst-p
+       :miri-op :miri-dst :miri-srcs :miri-type :miri-block :miri-meta
+       ;; MIR Basic Block
+       :mir-block :make-mir-block :mir-block-p
+       :mirb-id :mirb-label :mirb-insts :mirb-preds :mirb-succs
+       :mirb-sealed-p :mirb-phis :mirb-incomplete-phis
+       ;; MIR Function
+       :mir-function :make-mir-function :mir-function-p
+       :mirf-name :mirf-params :mirf-blocks :mirf-entry
+       :mirf-current-defs :mirf-value-counter :mirf-block-counter
+       ;; MIR Module
+       :mir-module :make-mir-module :mir-module-p
+       :mirm-functions :mirm-globals :mirm-string-table
+       ;; Generic op vocabulary
+       :*mir-generic-ops*
+       ;; Builder API
+       :mir-new-value :mir-new-block :mir-make-function
+       :mir-emit :mir-add-pred :mir-add-succ
+       :mir-write-var :mir-read-var :mir-seal-block
+       ;; CFG utilities
+       :mir-rpo :mir-dominators
+       ;; Printer
+       :mir-format-value :mir-print-inst :mir-print-block :mir-print-function
+
+       ;; ── Target Descriptors ───────────────────────────────────────────────
+       :target-desc :make-target-desc :target-desc-p
+       :target-name :target-word-size :target-endianness
+       :target-gpr-count :target-gpr-names
+       :target-arg-regs :target-ret-reg
+       :target-callee-saved :target-scratch-regs
+       :target-stack-alignment :target-legal-ops :target-features
+       ;; Predefined targets
+       :*x86-64-target* :*aarch64-target* :*riscv64-target* :*wasm32-target*
+       ;; Target registry
+       :*target-registry* :register-target :find-target
+       ;; Target predicates and utilities
+       :target-64-bit-p :target-has-feature-p
+       :target-allocatable-regs :target-caller-saved
+       :target-reg-index :target-op-legal-p :target-op-expand
+
+       ;; ── Optimizer Phase 0: Effect-Kind System ────────────────────────────
+       :vm-inst-effect-kind
+       :opt-inst-pure-p
+       :opt-inst-dce-eligible-p
+       :opt-inst-cse-eligible-p
+       :effect-row->effect-kind
+       :opt-call-effect-kind
+
+       ;; ── Optimizer Phase 1: CFG + Dominator Tree + DF ─────────────────────
+       ;; basic-block struct
+       :basic-block :make-basic-block :basic-block-p
+       :bb-id :bb-label :bb-instructions :bb-predecessors :bb-successors
+       :bb-idom :bb-dom-children :bb-dom-frontier :bb-loop-depth :bb-rpo-index
+       ;; cfg struct
+       :cfg :make-cfg :cfg-p
+       :cfg-blocks :cfg-entry :cfg-exit :cfg-label->block :cfg-next-id
+       ;; CFG builder and algorithms
+       :cfg-build :cfg-block-count :cfg-get-block-by-label
+       :cfg-compute-rpo :cfg-compute-dominators :cfg-compute-dominance-frontiers
+       :cfg-dominates-p :cfg-idf :cfg-flatten
+
+       ;; ── Optimizer Phase 1: SSA Construction + Destruction ────────────────
+       ;; ssa-rename-state struct
+       :ssa-rename-state :make-ssa-rename-state :ssa-rename-state-p
+       :ssr-counters :ssr-stacks
+       :ssr-push-new-version :ssr-current-version :ssr-pop-version
+       ;; ssa-phi struct
+       :ssa-phi :make-ssa-phi :ssa-phi-p
+       :phi-dst :phi-args :phi-reg
+       ;; SSA algorithms
+       :ssa-versioned-reg :ssa-construct :ssa-destroy :ssa-round-trip
+       :ssa-place-phis :ssa-rename :ssa-sequentialize-copies
+
+       ;; ── Optimizer Phase 2: E-Graph Engine ────────────────────────────────
+       ;; e-node struct
+       :e-node :make-e-node :e-node-p
+       :en-op :en-children :en-eclass
+       ;; e-class struct
+       :e-class :make-e-class :e-class-p
+       :ec-id :ec-nodes :ec-parents :ec-data
+       ;; e-graph struct
+       :e-graph :make-e-graph :e-graph-p
+       :eg-classes :eg-memo :eg-union-find :eg-worklist :eg-next-id
+       ;; E-graph operations
+       :egraph-find :egraph-add :egraph-merge :egraph-rebuild
+       :egraph-saturate :egraph-extract :egraph-default-cost
+       :egraph-stats :egraph-pattern-var-p :egraph-match-pattern
+
+       ;; ── Optimizer Phase 2: E-Graph Rules ─────────────────────────────────
+       :defrule :egraph-rule-register :egraph-builtin-rules
+       :optimize-with-egraph))
 
 (in-package :cl-cc)

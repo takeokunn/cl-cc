@@ -173,6 +173,7 @@
                 :vm-closure-index
                 ;; Prolog
                 :unify
+                 :unify-failed-p
                 :substitute-variables
                 :logic-var-p)
   (:export

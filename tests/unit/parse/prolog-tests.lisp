@@ -87,12 +87,12 @@
           ("diff ints"     1   2  nil)
           ("int vs sym"   42  'a  nil))
   (t1 t2 ok)
-  ;; Use a non-nil seed env so we can distinguish "success with no new bindings"
-  ;; (returns seed-env, which is non-nil) from "failure" (returns nil).
-  ;; Starting from nil is ambiguous: (unify 42 42 nil) = nil = (unify 1 2 nil).
-  (let* ((seed-env (list (cons '?seed 'seed)))
-         (env (cl-cc:unify t1 t2 seed-env)))
-    (if ok (assert-true env) (assert-null env))))
+  ;; unify now returns :unify-fail on failure (not nil), so unify-failed-p
+  ;; correctly distinguishes failure from success with empty environment.
+  (let ((env (cl-cc:unify t1 t2 nil)))
+    (if ok
+        (assert-false (cl-cc:unify-failed-p env))
+        (assert-true  (cl-cc:unify-failed-p env)))))
 
 (deftest prolog-unify-var-binds-to-atom
   "unify: logic variable binds to an atom"
@@ -115,7 +115,7 @@
 
 (deftest prolog-unify-cycle-rejected
   "unify: occurs-check prevents ?x = f(?x)"
-  (assert-null (cl-cc:unify '?x '(?x) nil)))
+  (assert-true (cl-cc:unify-failed-p (cl-cc:unify '?x '(?x) nil))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; logic-substitute / substitute-variables

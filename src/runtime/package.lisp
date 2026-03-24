@@ -3,9 +3,9 @@
 (defpackage :cl-cc/runtime
   (:use :cl)
   (:export
-   ;; Tagged pointer constants
-   #:+tag-fixnum+ #:+tag-cons+ #:+tag-symbol+ #:+tag-function+
-   #:+tag-character+ #:+tag-array+ #:+tag-string+ #:+tag-other+
+   ;; Tagged pointer constants (3-bit native tag values, used by runtime.lisp / heap.lisp)
+   #:+tag-fixnum+ #:+rt-tag-cons+ #:+rt-tag-symbol+ #:+rt-tag-function+
+   #:+tag-character+ #:+tag-array+ #:+rt-tag-string+ #:+tag-other+
    ;; Tag helpers
    #:rt-tag-fixnum #:rt-untag-fixnum #:rt-tag-bits
    ;; Type predicates
@@ -123,6 +123,53 @@
    #:rt-make-pathname #:rt-namestring #:rt-pathname-component
    #:rt-merge-pathnames #:rt-enough-namestring
    #:rt-write-to-string
+   ;; ---------------------------------------------------------------
+   ;; NaN-boxing value representation (value.lisp)
+   ;; ---------------------------------------------------------------
+   ;; Bit-pattern constants
+   #:+nan-boxing-quiet-nan+
+   #:+ptr-base+ #:+ptr-mask+ #:+tag-mask+ #:+addr-mask+
+   #:+tag-object+ #:+tag-cons+ #:+tag-symbol+ #:+tag-function+ #:+tag-string+
+   #:+tag-char+
+   #:+fixnum-tag+ #:+fixnum-mask+ #:+fixnum-shift+
+   #:+val-nil+ #:+val-t+ #:+val-unbound+
+   #:+nan-tag-base+
+   ;; Type predicates
+   #:val-fixnum-p #:val-double-p #:val-pointer-p
+   #:val-nil-p #:val-t-p #:val-char-p #:val-unbound-p
+   #:val-object-p #:val-cons-p #:val-symbol-p #:val-function-p #:val-string-p
+   ;; Encode / decode
+   #:encode-fixnum #:decode-fixnum
+   #:encode-double #:decode-double
+   #:encode-pointer #:decode-pointer #:pointer-tag
+   #:encode-char #:decode-char
+   #:encode-bool
+   ;; CL interop
+   #:cl-value->val #:val->cl-value
+   ;; ---------------------------------------------------------------
+   ;; Register file and stack frames (frame.lisp)
+   ;; ---------------------------------------------------------------
+   ;; Frame constants
+   #:+frame-register-count+
+   #:+frame-caller-save-start+ #:+frame-caller-save-end+
+   #:+frame-callee-save-start+ #:+frame-callee-save-end+
+   #:+frame-arg-start+ #:+frame-arg-end+
+   #:+frame-return-reg+ #:+frame-spill-start+
+   #:+frame-pool-size+
+   ;; vm-frame struct + accessors
+   #:vm-frame
+   #:vm-frame-registers #:vm-frame-sp #:vm-frame-pc
+   #:vm-frame-closure #:vm-frame-return-frame
+   #:vm-frame-p
+   ;; Frame pool
+   #:*frame-pool* #:*frame-pool-top*
+   #:initialize-frame-pool
+   #:frame-pool-acquire #:frame-pool-release
+   ;; Register access
+   #:frame-reg-get #:frame-reg-set
+   ;; Utilities
+   #:frame-reset
+   ;; ---------------------------------------------------------------
    ;; GC configuration
    #:*gc-young-size-words* #:*gc-old-size-words* #:*gc-tenuring-threshold*
    #:+gc-card-size-words+

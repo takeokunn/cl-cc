@@ -1,284 +1,230 @@
-;;;; package.lisp - Type Representation Package Definition
+;;;; package.lisp - cl-cc/type Package Definition
 ;;;;
-;;;; This module defines the package for HM type system with gradual typing.
+;;;; Exports the complete 2026 type system API.
 
 (defpackage :cl-cc/type
   (:use :cl)
+  ;; Shadow cl:type-error so we can define our own type-error struct
+  (:shadow #:type-error)
   (:export
-   ;; Type Base Class
-   #:type-node
-   #:type-node-source-location
 
-   ;; Type Classes
-   #:type-primitive
-   #:type-variable
-   #:type-function
-   #:type-tuple
-   #:type-union
-   #:type-intersection
-   #:type-constructor
-   #:type-unknown
+   ;; ─── Kind system ─────────────────────────────────────────────────────
+   #:kind-node
+   #:kind-type   #:kind-type-p   #:make-kind-type   #:+kind-type+
+   #:kind-arrow  #:kind-arrow-p  #:make-kind-arrow  #:kind-arrow-from #:kind-arrow-to #:kind-fun
+   #:kind-effect #:kind-effect-p #:make-kind-effect #:+kind-effect+
+   #:kind-row    #:kind-row-p    #:make-kind-row    #:kind-row-elem
+   #:+kind-row-type+ #:+kind-row-effect+
+   #:kind-constraint   #:kind-constraint-p   #:make-kind-constraint   #:+kind-constraint+
+   #:kind-multiplicity #:kind-multiplicity-p #:make-kind-multiplicity #:+kind-multiplicity+
+   #:kind-var  #:kind-var-p  #:fresh-kind-var  #:kind-var-id #:kind-var-name
+   #:kind-var-equal-p  #:kind-equal-p  #:kind-to-string
 
-   ;; Type Accessors
-   #:type-primitive-name
-   #:type-variable-id
-   #:type-variable-name
-   #:type-function-params
-   #:type-function-return
-   #:type-tuple-elements
-   #:type-union-types
-   #:type-intersection-types
-   #:type-constructor-name
-   #:type-constructor-args
+   ;; ─── Multiplicity ─────────────────────────────────────────────────────
+   #:multiplicity  #:+mult-zero+ #:+mult-one+ #:+mult-omega+
+   #:multiplicity-p  #:mult-add #:mult-mul #:mult-leq  #:mult-to-string
 
-   ;; Type Constructors
-   #:make-type-primitive
-   #:make-type-variable
-   #:make-type-function
-   #:make-type-function-raw
-   #:make-type-tuple
-   #:make-type-tuple-raw
-   #:make-type-union
-   #:make-type-union-raw
-   #:make-type-intersection
-   #:make-type-intersection-raw
-   #:make-type-constructor
-   #:make-type-constructor-raw
-   #:make-type-unknown
-   #:make-type-env
-   #:make-type-constraint
-   #:make-type-scheme
-   #:make-type-scheme-raw
-   #:make-ast-defun-typed
-   #:make-ast-lambda-typed
+   ;; ─── Type node base ───────────────────────────────────────────────────
+   #:type-node  #:type-node-source-location  #:type-node-kind
 
-    ;; Singleton Type Instances
-    #:type-int
-    #:type-string
-    #:type-bool
-    #:type-symbol
-    #:type-cons
-    #:type-null
-    #:type-any
-    #:+type-unknown+
+   ;; ─── Primitive ───────────────────────────────────────────────────────
+   #:type-primitive   #:type-primitive-p   #:make-type-primitive  #:type-primitive-name
+   #:type-int #:type-float #:type-string #:type-bool
+   #:type-symbol #:type-cons #:type-null #:type-any  #:type-char #:type-unit
 
-    ;; Type Predicates
-    #:type-variable-p
-    #:type-constructor-p
-    #:type-variable-equal-p
-    #:type-equal-p
-    #:type-to-string
+   ;; ─── Type variable ────────────────────────────────────────────────────
+   #:type-var    #:type-var-p    #:fresh-type-var
+   #:type-var-id #:type-var-name #:type-var-link  #:type-var-equal-p
+   #:reset-type-vars!
+   #:make-type-variable #:type-variable-p #:type-variable-id
+   #:type-variable-name #:type-variable-equal-p
 
-    ;; Substitution Operations
-    #:empty-subst
-    #:subst-lookup
-    #:extend-subst
-    #:type-substitute
-    #:apply-subst
-    #:apply-subst-env
-    #:compose-subst
+   ;; ─── Rigid (skolem) ───────────────────────────────────────────────────
+   #:type-rigid    #:type-rigid-p    #:fresh-rigid-var
+   #:type-rigid-id #:type-rigid-name  #:type-rigid-equal-p
+   #:type-skolem   #:type-skolem-p   #:make-type-skolem
+   #:type-skolem-id #:type-skolem-name #:type-skolem-equal-p
 
-    ;; Unification
-    #:type-unify
-    #:type-unify-lists
-    #:type-occurs-p
+   ;; ─── Arrow ───────────────────────────────────────────────────────────
+   #:type-arrow    #:type-arrow-p    #:make-type-arrow
+   #:type-arrow-params #:type-arrow-return #:type-arrow-effects #:type-arrow-mult
+   #:make-type-function #:make-type-function-raw #:type-function-p
+   #:type-function-params #:type-function-return
 
-    ;; Free Variables
-    #:type-free-vars
-    #:environment-free-vars
+   ;; ─── Product (tuple) ─────────────────────────────────────────────────
+   #:type-product  #:type-product-p  #:make-type-product  #:type-product-elems
+   #:type-tuple #:type-tuple-p #:make-type-tuple  #:make-type-tuple-raw  #:type-tuple-elements
 
-    ;; Type Schemes (Let-Polymorphism)
-    #:type-scheme
-    #:type-scheme-quantified-vars
-    #:type-scheme-type
-    #:make-type-scheme
-    #:type-to-scheme
-    #:generalize
-    #:instantiate
+   ;; ─── Record / Variant ────────────────────────────────────────────────
+   #:type-record   #:type-record-p   #:make-type-record
+   #:type-record-fields #:type-record-row-var
+   #:type-variant  #:type-variant-p  #:make-type-variant
+   #:type-variant-cases #:type-variant-row-var
 
-    ;; Utility
-    #:normalize-type-variables
-    #:apply-unification
+   ;; ─── Union / Intersection ────────────────────────────────────────────
+   #:type-union    #:type-union-p    #:make-type-union  #:make-type-union-raw  #:type-union-types
+   #:type-intersection  #:type-intersection-p  #:make-type-intersection
+   #:make-type-intersection-raw  #:type-intersection-types
 
-    ;; Type Parser - Conditions
-    #:type-parse-error
-    #:type-parse-error-message
+   ;; ─── Forall / Exists ─────────────────────────────────────────────────
+   #:type-forall   #:type-forall-p   #:make-type-forall
+   #:type-forall-var #:type-forall-knd #:type-forall-body #:type-forall-type
+   #:type-exists   #:type-exists-p   #:make-type-exists
+   #:type-exists-var #:type-exists-knd #:type-exists-body
 
-    ;; Type Parser - Core Functions
-    #:parse-type-specifier
-    #:parse-primitive-type
-    #:parse-compound-type
-    #:parse-function-type
+   ;; ─── HKT / Lambda / Mu ───────────────────────────────────────────────
+   #:type-app    #:type-app-p    #:make-type-app  #:type-app-fun #:type-app-arg
+   #:type-lambda   #:type-lambda-p   #:make-type-lambda
+   #:type-lambda-var #:type-lambda-knd #:type-lambda-body
+   #:type-mu   #:type-mu-p   #:make-type-mu  #:type-mu-var #:type-mu-body
+   #:type-constructor #:make-type-constructor #:type-constructor-p
+   #:type-constructor-name #:type-constructor-args  #:make-type-constructor-raw
 
-    ;; Type Parser - Lambda List Functions
-    #:parse-lambda-list-with-types
-    #:parse-typed-parameter
-    #:parse-typed-optional-parameter
-    #:parse-typed-rest-parameter
+   ;; ─── Refinement / Linear / Capability ───────────────────────────────
+   #:type-refinement   #:type-refinement-p   #:make-type-refinement
+   #:type-refinement-base #:type-refinement-predicate
+   #:type-linear   #:type-linear-p   #:make-type-linear
+   #:type-linear-base #:type-linear-grade
+   #:type-capability   #:type-capability-p   #:make-type-capability
+   #:type-capability-base #:type-capability-cap
 
-    ;; Type Parser - Return Type Functions
-    #:extract-return-type
+   ;; ─── Effect types ────────────────────────────────────────────────────
+   #:type-effect-row   #:type-effect-row-p   #:make-type-effect-row
+   #:type-effect-row-effects #:type-effect-row-row-var
+   #:+pure-effect-row+ #:+io-effect-row+
+   #:type-effect-op   #:type-effect-op-p   #:make-type-effect-op
+   #:type-effect-op-name #:type-effect-op-args
+   #:type-handler   #:type-handler-p   #:make-type-handler
+   #:type-handler-effect #:type-handler-input #:type-handler-output
+   #:type-effect #:type-effect-p #:make-type-effect #:type-effect-name
+   #:type-effectful-function #:make-type-effectful-function
+   #:type-effectful-function-effects
 
-    ;; Type Parser - Typed AST Classes
-    #:ast-defun-typed
-    #:ast-defun-typed-name
-    #:ast-defun-typed-params
-    #:ast-defun-typed-param-types
-    #:ast-defun-typed-return-type
-    #:ast-defun-typed-body
-    #:ast-defun-typed-source-location
+   ;; ─── GADT ────────────────────────────────────────────────────────────
+   #:type-gadt-con   #:type-gadt-con-p   #:make-type-gadt-con
+   #:type-gadt-con-name #:type-gadt-con-arg-types #:type-gadt-con-index-type
 
-    #:ast-lambda-typed
-    #:ast-lambda-typed-params
-    #:ast-lambda-typed-param-types
-    #:ast-lambda-typed-return-type
-    #:ast-lambda-typed-body
-    #:ast-lambda-typed-env
-    #:ast-lambda-typed-source-location
+   ;; ─── Constraint / Qualified ──────────────────────────────────────────
+   #:type-constraint   #:type-constraint-p   #:make-type-constraint
+   #:type-constraint-class-name #:type-constraint-type-arg
+   #:type-class-constraint   #:type-class-constraint-p   #:make-type-class-constraint
+   #:type-class-constraint-class-name #:type-class-constraint-type-arg
+   #:type-qualified   #:type-qualified-p   #:make-type-qualified
+   #:type-qualified-constraints #:type-qualified-body #:type-qualified-type
 
-    ;; Type Parser - AST Parsers
-    #:parse-typed-defun
-    #:parse-typed-lambda
-    #:parse-typed-lambda-list
-    #:extract-return-type-from-body
+   ;; ─── Error sentinel / unknown ────────────────────────────────────────
+   #:type-error   #:type-error-p   #:make-type-error  #:type-error-message
+   #:type-unknown  #:type-unknown-p  #:make-type-unknown  #:+type-unknown+
 
-     ;; Type Parser - Utilities
-     #:make-type-function-from-spec
-     #:unparse-type
-     #:looks-like-type-specifier-p
-     #:*lambda-list-keywords*
+   ;; ─── Type scheme ─────────────────────────────────────────────────────
+   #:type-scheme   #:type-scheme-p
+   #:type-scheme-quantified-vars #:type-scheme-type
+   #:make-type-scheme  #:make-type-scheme-raw  #:type-to-scheme
+   #:generalize    #:generalize-in-env  #:instantiate   #:instantiate-scheme
 
-     ;; Type Environment
-     #:type-env
-     #:type-env-empty
-     #:type-env-lookup
-     #:type-env-extend
-     #:type-env-extend*
-     #:type-env-to-alist
-     #:type-env-free-vars
+   ;; ─── Type environment ────────────────────────────────────────────────
+   #:type-env  #:type-env-p  #:make-type-env #:type-env-bindings
+   #:type-env-empty  #:type-env-lookup  #:type-env-extend  #:type-env-extend*
+   #:type-env-to-alist  #:type-env-free-vars
 
-     ;; Type Inference - Algorithm W
-     #:fresh-type-var
-     #:reset-type-vars!
-     #:infer
-     #:infer-binop
-     #:infer-if
-     #:infer-let
-     #:infer-lambda
-     #:infer-call
-     #:infer-progn
-     #:infer-sequence
-     #:infer-args
-     #:infer-top-level
-     #:infer-with-env
-     #:annotate-type
+   ;; ─── Structural utilities ────────────────────────────────────────────
+   #:type-equal-p  #:type-free-vars
+   #:type-to-string  #:normalize-type-variables
 
-     ;; Class Type Registry
-     #:*class-type-registry*
-     #:register-class-type
-     #:lookup-class-type
-     #:lookup-slot-type
+   ;; ─── Substitution ────────────────────────────────────────────────────
+   #:substitution  #:substitution-p  #:make-substitution
+   #:substitution-bindings  #:substitution-generation
+   #:empty-subst
+   #:subst-lookup  #:subst-extend  #:subst-extend!  #:subst-compose
+   #:extend-subst  #:compose-subst
+   #:zonk
+   #:type-substitute  #:apply-subst  #:apply-subst-env
+   #:type-occurs-p  #:apply-unification
+   #:environment-free-vars
 
-     ;; Type Alias Registry
-     #:*type-alias-registry*
-     #:register-type-alias
-     #:lookup-type-alias
+   ;; ─── Unification ─────────────────────────────────────────────────────
+   #:type-unify  #:type-unify-lists
+   #:type-inference-error  #:type-inference-error-message
+   #:type-mismatch-error
+   #:unbound-variable-error #:unbound-variable-name
 
-     ;; Type Inference Conditions
-     #:type-inference-error
-     #:type-inference-error-message
-     #:unbound-variable-error
-     #:type-mismatch-error
+   ;; ─── Effect system ───────────────────────────────────────────────────
+   #:effect-def  #:effect-def-p  #:make-effect-def
+   #:effect-def-name  #:effect-def-type-params  #:effect-def-operations
+   #:*effect-registry*  #:register-effect  #:lookup-effect
+   #:*effect-signature-table*
+   #:register-effect-signature  #:lookup-effect-signature
+   #:effect-row-union  #:effect-row-subset-p
+   #:infer-effects  #:infer-with-effects  #:check-body-effects
 
-     ;; Constraint Solving
-     #:type-constraint
-     #:make-constraint
-     #:collect-constraints
-     #:solve-constraints
+   ;; ─── Row polymorphism ────────────────────────────────────────────────
+   #:row-extend  #:row-restrict  #:row-select  #:row-labels
+   #:row-closed-p  #:row-open-p
+   #:effect-row-extend  #:effect-row-restrict  #:effect-row-member-p
 
-     ;; Generalization/Instantiation Helpers
-     #:generalize-in-env
-     #:instantiate-scheme
+   ;; ─── Constraint language ─────────────────────────────────────────────
+   #:constraint  #:constraint-p  #:constraint-kind  #:constraint-args
+   #:make-equal-constraint        #:make-subtype-constraint
+   #:make-typeclass-constraint    #:make-implication-constraint
+   #:make-effect-subset-constraint #:make-mult-leq-constraint
+   #:make-row-lacks-constraint    #:make-kind-equal-constraint
+   #:constraint-free-vars  #:constraint-substitute  #:make-constraint
 
-     ;; Bidirectional Type Checking (Phase 3)
-     #:synthesize
-     #:check
-     #:check-body
+   ;; ─── Subtyping ───────────────────────────────────────────────────────
+   #:type-constructor-def  #:type-constructor-def-p
+   #:*type-constructor-registry*
+   #:register-type-constructor  #:lookup-type-constructor
+   #:is-subtype-p  #:subtype-check
 
-     ;; Typeclass Registry (Phase 4)
-     #:*typeclass-registry*
-     #:register-typeclass
-     #:lookup-typeclass
-     #:*typeclass-instance-registry*
-     #:register-typeclass-instance
-     #:lookup-typeclass-instance
-     #:has-typeclass-instance-p
-     #:check-typeclass-constraint
+   ;; ─── Typeclass system ────────────────────────────────────────────────
+   #:typeclass-def  #:typeclass-def-p  #:make-typeclass-def
+   #:typeclass-def-name  #:typeclass-def-type-params  #:typeclass-def-superclasses
+   #:typeclass-def-methods  #:typeclass-def-associated-types
+   #:*typeclass-registry*  #:register-typeclass  #:lookup-typeclass
+   #:typeclass-instance  #:typeclass-instance-p
+   #:*typeclass-instance-registry*
+   #:register-typeclass-instance  #:lookup-typeclass-instance
+   #:has-typeclass-instance-p  #:check-typeclass-constraint
+   #:dict-env-extend  #:dict-env-lookup
+   #:type-class   #:type-class-p   #:make-type-class
+   #:type-class-name  #:type-class-type-param  #:type-class-methods
 
-     ;; Phase 4: Typeclass Type Nodes
-     #:type-class
-     #:make-type-class
-     #:type-class-name
-     #:type-class-type-param
-     #:type-class-methods
-     #:type-class-p
+   ;; ─── Constraint solver ───────────────────────────────────────────────
+   #:collect-constraints  #:solve-constraints
 
-     #:type-class-constraint
-     #:make-type-class-constraint
-     #:type-class-constraint-class-name
-     #:type-class-constraint-type-arg
-     #:type-class-constraint-p
+   ;; ─── Inference engine ────────────────────────────────────────────────
+   #:infer  #:infer-with-env  #:infer-top-level
+   #:infer-binop  #:infer-if  #:infer-let  #:infer-lambda
+   #:infer-call   #:infer-progn  #:infer-sequence  #:infer-args
+   #:annotate-type
+   #:*class-type-registry*  #:register-class-type
+   #:lookup-class-type  #:lookup-slot-type
+   #:*type-alias-registry*  #:register-type-alias  #:lookup-type-alias
 
-     #:type-qualified
-     #:make-type-qualified
-     #:type-qualified-constraints
-     #:type-qualified-type
-     #:type-qualified-p
+   ;; ─── Bidirectional checker ───────────────────────────────────────────
+   #:synthesize  #:check  #:check-body
+   #:check-skolem-escape  #:skolem-appears-in-type-p
 
-     ;; Phase 5: Effect Type Nodes
-     #:type-effect
-     #:make-type-effect
-     #:type-effect-name
-     #:type-effect-p
+   ;; ─── Parser ──────────────────────────────────────────────────────────
+   #:type-parse-error  #:type-parse-error-message
+   #:parse-type-specifier  #:parse-primitive-type  #:parse-compound-type
+   #:parse-function-type
+   #:parse-lambda-list-with-types  #:parse-typed-parameter
+   #:parse-typed-optional-parameter  #:parse-typed-rest-parameter
+   #:extract-return-type  #:extract-return-type-from-body
+   #:ast-defun-typed  #:ast-defun-typed-name  #:ast-defun-typed-params
+   #:ast-defun-typed-param-types  #:ast-defun-typed-return-type
+   #:ast-defun-typed-body  #:ast-defun-typed-source-location  #:make-ast-defun-typed
+   #:ast-lambda-typed  #:ast-lambda-typed-params  #:ast-lambda-typed-param-types
+   #:ast-lambda-typed-return-type  #:ast-lambda-typed-body
+   #:ast-lambda-typed-env  #:ast-lambda-typed-source-location  #:make-ast-lambda-typed
+   #:parse-typed-defun  #:parse-typed-lambda  #:parse-typed-lambda-list
+   #:make-type-function-from-spec  #:looks-like-type-specifier-p
+   #:*lambda-list-keywords*
 
-     #:type-effect-row
-     #:make-type-effect-row
-     #:type-effect-row-effects
-     #:type-effect-row-row-var
-     #:type-effect-row-p
+   ;; ─── Printer ─────────────────────────────────────────────────────────
+   #:unparse-type
 
-     #:+pure-effect-row+
-     #:+io-effect-row+
-
-     #:type-effectful-function
-     #:make-type-effectful-function
-     #:type-effectful-function-effects
-
-     ;; Phase 5: Effect Inference Functions
-     #:infer-effects
-     #:infer-with-effects
-     #:effect-row-union
-     #:effect-row-subset-p
-     #:check-body-effects
-     #:register-effect-signature
-     #:lookup-effect-signature
-     #:*effect-signature-table*
-
-     ;; Phase 6: Rank-N Polymorphism
-     #:type-forall
-     #:make-type-forall
-     #:type-forall-var
-     #:type-forall-type
-     #:type-forall-p
-
-     ;; Phase 6 Rank-N skolem constants
-     #:type-skolem
-     #:make-type-skolem
-     #:type-skolem-p
-     #:type-skolem-id
-     #:type-skolem-name
-     #:type-skolem-equal-p
-     #:check-skolem-escape
-     #:skolem-appears-in-type-p))
+   ))
 
 (in-package :cl-cc/type)

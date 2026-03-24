@@ -58,7 +58,7 @@
           (solve-goal (list rule s-in s-out) env k)
           ;; Epsilon: s-in = s-out
           (let ((eps-env (unify s-in s-out env)))
-            (when eps-env
+            (unless (unify-failed-p eps-env)
               (funcall k eps-env))))))
 
 ;; dcg-star: Kleene star (zero or more)
@@ -72,7 +72,7 @@
           (labels ((star-loop (current-in current-env)
                      ;; First try epsilon (base case)
                      (let ((eps-env (unify current-in s-out current-env)))
-                       (when eps-env
+                       (unless (unify-failed-p eps-env)
                          (funcall k eps-env)))
                      ;; Then try one more match + recurse
                      (let ((mid (gensym "?MID")))
@@ -113,12 +113,12 @@
                          ;; Empty input: unify with s-out
                          ((null remaining)
                           (let ((new-env (unify s-out nil env)))
-                            (when new-env (funcall k new-env))))
+                            (unless (unify-failed-p new-env) (funcall k new-env))))
                          ;; Sync token found: unify s-out with remaining
                          ((and (consp (car remaining))
                                (member (caar remaining) *dcg-sync-tokens*))
                           (let ((new-env (unify s-out remaining env)))
-                            (when new-env (funcall k new-env))))
+                            (unless (unify-failed-p new-env) (funcall k new-env))))
                          ;; Skip and continue
                          (t (skip-loop (cdr remaining))))))
               (skip-loop input))))))
