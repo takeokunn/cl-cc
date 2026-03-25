@@ -32,28 +32,6 @@
           (or num 0)))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
-;;; WAT type name helpers
-;;; ─────────────────────────────────────────────────────────────────────────────
-
-(defun wat-type-name (type-idx)
-  "Return the WAT name for a predefined type index."
-  (case type-idx
-    (#.+type-idx-main-func+   "$main_func_t")
-    (#.+type-idx-bytes-array+ "$bytes_array_t")
-    (#.+type-idx-string+      "$string_t")
-    (#.+type-idx-symbol+      "$symbol_t")
-    (#.+type-idx-cons+        "$cons_t")
-    (#.+type-idx-eqref-array+ "$eqref_array_t")
-    (#.+type-idx-env+         "$env_t")
-    (#.+type-idx-closure+     "$closure_t")
-    (#.+type-idx-class-meta+  "$class_meta_t")
-    (#.+type-idx-instance+    "$instance_t")
-    (#.+type-idx-htable+      "$htable_t")
-    (#.+type-idx-float+       "$float_t")
-    (#.+type-idx-char+        "$char_t")
-    (t (format nil "~D" type-idx))))
-
-;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; WAT module header: predefined GC type section
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
@@ -414,17 +392,4 @@
     (with-output-to-string (s)
       (emit-wasm-module module s))))
 
-(defun compile-to-wasm-binary (program)
-  "Compile a vm-program to a WASM binary.
-   Returns a (simple-array (unsigned-byte 8) (*)).
-   Full binary encoding is in src/binary/wasm.lisp."
-  (declare (ignore program))
-  (error "compile-to-wasm-binary: binary encoder not yet fully integrated. Use compile-to-wasm-wat."))
 
-(defun write-wasm-wat-file (filename program)
-  "Compile PROGRAM to WAT and write to FILENAME."
-  (let ((wat (compile-to-wasm-wat program)))
-    (with-open-file (out filename
-                         :direction :output
-                         :if-exists :supersede)
-      (write-string wat out))))

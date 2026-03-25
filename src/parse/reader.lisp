@@ -2,7 +2,6 @@
 ;;;;
 ;;;; This module provides:
 ;;;; - Source location (file, line, column) tracking during reading
-;;;; - Integration with SBCL's reader for line/column extraction
 ;;;; - Location-annotated S-expressions for better error messages
 
 (in-package :cl-cc)
@@ -35,26 +34,20 @@
 (defvar *source-locations* nil
   "Hash table mapping cons cells to source locations.")
 
-;;; SBCL-Specific Line/Column Tracking
+;;; Stream Position Tracking
 
 (defun get-stream-position (stream)
-  "Get current position in stream."
+  "Get current byte position in stream."
   (file-position stream))
 
 (defun get-line-number (stream)
-  "Get current line number from stream (approximation using count-newlines)."
-  ;; SBCL provides sb-impl::stream-line-column for some streams
-  ;; This is a fallback implementation
-  (let ((position (get-stream-position stream)))
-    (when (and *source-input* (eq stream *source-input*))
-      ;; Simple approximation: count newlines from beginning
-      ;; For accurate line tracking, we'd need to track as we read
-      1)))
+  "Get current line number from stream (approximation)."
+  (declare (ignore stream))
+  1)
 
 (defun get-column-number (stream)
-  "Get current column number from stream."
+  "Get current column number from stream (approximation)."
   (declare (ignore stream))
-  ;; Without low-level stream access, we approximate
   0)
 
 ;;; Enhanced Reader with Location Tracking
@@ -63,8 +56,8 @@
   "Create a source-location structure for current position in STREAM."
   (make-source-location
    :file file
-   :line (or (ignore-errors (sb-impl::stream-line-column stream)) 1)
-   :column (or (ignore-errors (sb-impl::stream-line-column stream)) 0)
+   :line 1
+   :column 0
    :position (or (get-stream-position stream) 0)))
 
 (defun read-with-location (stream &optional eof-error-p eof-value)

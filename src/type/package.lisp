@@ -175,6 +175,8 @@
    #:*type-constructor-registry*
    #:register-type-constructor  #:lookup-type-constructor
    #:is-subtype-p  #:subtype-check
+   #:type-join  #:type-meet
+   #:*subtype-table*  #:type-name-subtype-p  #:find-common-supertype
 
    ;; ─── Typeclass system ────────────────────────────────────────────────
    #:typeclass-def  #:typeclass-def-p  #:make-typeclass-def
@@ -193,7 +195,7 @@
    #:collect-constraints  #:solve-constraints
 
    ;; ─── Inference engine ────────────────────────────────────────────────
-   #:infer  #:infer-with-env  #:infer-top-level
+   #:infer  #:infer-with-env
    #:infer-binop  #:infer-if  #:infer-let  #:infer-lambda
    #:infer-call   #:infer-progn  #:infer-args
    #:annotate-type

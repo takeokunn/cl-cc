@@ -19,17 +19,13 @@
 ;;; Singleton constants
 ;;; ------------------------------------------------------------
 
-(deftest value-nil-constant
-  "NIL sentinel has expected bit pattern."
-  (assert-= #x7FFF000000000000 cl-cc/runtime:+val-nil+))
-
-(deftest value-t-constant
-  "T sentinel has expected bit pattern."
-  (assert-= #x7FFF000000000001 cl-cc/runtime:+val-t+))
-
-(deftest value-unbound-constant
-  "Unbound sentinel has expected bit pattern."
-  (assert-= #x7FFF000000000002 cl-cc/runtime:+val-unbound+))
+(deftest-each value-singleton-constants
+  "NaN-boxing singleton constants have expected 64-bit bit patterns."
+  :cases (("nil"     cl-cc/runtime:+val-nil+     #x7FFF000000000000)
+          ("t"       cl-cc/runtime:+val-t+        #x7FFF000000000001)
+          ("unbound" cl-cc/runtime:+val-unbound+  #x7FFF000000000002))
+  (const expected-bits)
+  (assert-= expected-bits const))
 
 ;;; ------------------------------------------------------------
 ;;; val-nil-p / val-t-p / val-unbound-p
@@ -63,43 +59,27 @@
 ;;; Fixnum encode/decode round-trip
 ;;; ------------------------------------------------------------
 
-(deftest value-fixnum-encode-zero
-  "encode-fixnum 0 decodes back to 0."
-  (assert-= 0 (cl-cc/runtime:decode-fixnum (cl-cc/runtime:encode-fixnum 0))))
-
-(deftest value-fixnum-encode-positive
-  "encode-fixnum positive integer round-trips."
-  (assert-= 42 (cl-cc/runtime:decode-fixnum (cl-cc/runtime:encode-fixnum 42))))
-
-(deftest value-fixnum-encode-negative
-  "encode-fixnum negative integer round-trips."
-  (assert-= -1 (cl-cc/runtime:decode-fixnum (cl-cc/runtime:encode-fixnum -1))))
-
-(deftest value-fixnum-encode-large-positive
-  "encode-fixnum near max 51-bit positive round-trips."
-  (let ((n (1- (expt 2 50))))
-    (assert-= n (cl-cc/runtime:decode-fixnum (cl-cc/runtime:encode-fixnum n)))))
-
-(deftest value-fixnum-encode-large-negative
-  "encode-fixnum near min 51-bit negative round-trips."
-  (let ((n (- (expt 2 50))))
-    (assert-= n (cl-cc/runtime:decode-fixnum (cl-cc/runtime:encode-fixnum n)))))
+(deftest-each value-fixnum-round-trip
+  "encode-fixnum / decode-fixnum round-trips for representative integer values."
+  :cases (("zero"           0)
+          ("positive"       42)
+          ("negative"      -1)
+          ("large-positive" (1- (expt 2 50)))
+          ("large-negative" (- (expt 2 50))))
+  (n)
+  (assert-= n (cl-cc/runtime:decode-fixnum (cl-cc/runtime:encode-fixnum n))))
 
 ;;; ------------------------------------------------------------
 ;;; val-fixnum-p
 ;;; ------------------------------------------------------------
 
-(deftest value-fixnum-p-zero
-  "val-fixnum-p recognises encoded 0."
-  (assert-true (cl-cc/runtime:val-fixnum-p (cl-cc/runtime:encode-fixnum 0))))
-
-(deftest value-fixnum-p-positive
-  "val-fixnum-p recognises encoded positive."
-  (assert-true (cl-cc/runtime:val-fixnum-p (cl-cc/runtime:encode-fixnum 100))))
-
-(deftest value-fixnum-p-negative
-  "val-fixnum-p recognises encoded negative."
-  (assert-true (cl-cc/runtime:val-fixnum-p (cl-cc/runtime:encode-fixnum -100))))
+(deftest-each value-fixnum-p-recognises
+  "val-fixnum-p recognises encoded fixnums of all sign classes."
+  :cases (("zero"     0)
+          ("positive" 100)
+          ("negative" -100))
+  (n)
+  (assert-true (cl-cc/runtime:val-fixnum-p (cl-cc/runtime:encode-fixnum n))))
 
 (deftest value-fixnum-p-rejects-nil
   "val-fixnum-p rejects +val-nil+."
@@ -113,19 +93,13 @@
 ;;; Character encode/decode round-trip
 ;;; ------------------------------------------------------------
 
-(deftest value-char-encode-a
-  "encode-char #\\A decodes back to #\\A."
-  (assert-equal #\A (cl-cc/runtime:decode-char (cl-cc/runtime:encode-char #\A))))
-
-(deftest value-char-encode-nul
-  "encode-char NUL (codepoint 0) decodes back."
-  (assert-equal (code-char 0)
-                (cl-cc/runtime:decode-char (cl-cc/runtime:encode-char (code-char 0)))))
-
-(deftest value-char-encode-unicode
-  "encode-char Unicode codepoint round-trips."
-  (let ((c (code-char #x1F600)))          ; emoji codepoint
-    (assert-equal c (cl-cc/runtime:decode-char (cl-cc/runtime:encode-char c)))))
+(deftest-each value-char-round-trip
+  "encode-char / decode-char round-trips for ASCII, NUL, and Unicode codepoints."
+  :cases (("ascii"   #\A)
+          ("nul"     (code-char 0))
+          ("unicode" (code-char #x1F600)))
+  (c)
+  (assert-equal c (cl-cc/runtime:decode-char (cl-cc/runtime:encode-char c))))
 
 ;;; ------------------------------------------------------------
 ;;; val-char-p
@@ -187,42 +161,26 @@
 ;;; Pointer encode/decode
 ;;; ------------------------------------------------------------
 
-(deftest value-pointer-encode-object
-  "encode-pointer with +tag-object+ round-trips address."
-  (let ((addr #x0000DEADBEEF))
-    (let ((v (cl-cc/runtime:encode-pointer addr cl-cc/runtime:+tag-object+)))
-      (assert-= addr (cl-cc/runtime:decode-pointer v)))))
-
-(deftest value-pointer-encode-cons
-  "encode-pointer with +tag-cons+ round-trips address."
-  (let ((addr #x0000CAFE1234))
-    (let ((v (cl-cc/runtime:encode-pointer addr cl-cc/runtime:+tag-cons+)))
-      (assert-= addr (cl-cc/runtime:decode-pointer v)))))
-
-(deftest value-pointer-encode-function
-  "encode-pointer with +tag-function+ round-trips address."
-  (let ((addr #x0000000100FF))
-    (let ((v (cl-cc/runtime:encode-pointer addr cl-cc/runtime:+tag-function+)))
-      (assert-= addr (cl-cc/runtime:decode-pointer v)))))
+(deftest-each value-pointer-round-trip
+  "encode-pointer / decode-pointer round-trips for each pointer tag."
+  :cases (("object"   #x0000DEADBEEF cl-cc/runtime:+tag-object+)
+          ("cons"     #x0000CAFE1234 cl-cc/runtime:+tag-cons+)
+          ("function" #x0000000100FF cl-cc/runtime:+tag-function+))
+  (addr tag)
+  (let ((v (cl-cc/runtime:encode-pointer addr tag)))
+    (assert-= addr (cl-cc/runtime:decode-pointer v))))
 
 ;;; ------------------------------------------------------------
 ;;; val-pointer-p / sub-tag predicates
 ;;; ------------------------------------------------------------
 
-(deftest value-pointer-p-object
-  "val-pointer-p recognises object-tagged pointer."
-  (let ((v (cl-cc/runtime:encode-pointer #x1000 cl-cc/runtime:+tag-object+)))
-    (assert-true (cl-cc/runtime:val-pointer-p v))))
-
-(deftest value-pointer-p-cons
-  "val-pointer-p recognises cons-tagged pointer."
-  (let ((v (cl-cc/runtime:encode-pointer #x1000 cl-cc/runtime:+tag-cons+)))
-    (assert-true (cl-cc/runtime:val-pointer-p v))))
-
-(deftest value-pointer-p-string
-  "val-pointer-p recognises string-tagged pointer."
-  (let ((v (cl-cc/runtime:encode-pointer #x1000 cl-cc/runtime:+tag-string+)))
-    (assert-true (cl-cc/runtime:val-pointer-p v))))
+(deftest-each value-pointer-p-recognises
+  "val-pointer-p recognises all pointer-tagged values."
+  :cases (("object" cl-cc/runtime:+tag-object+)
+          ("cons"   cl-cc/runtime:+tag-cons+)
+          ("string" cl-cc/runtime:+tag-string+))
+  (tag)
+  (assert-true (cl-cc/runtime:val-pointer-p (cl-cc/runtime:encode-pointer #x1000 tag))))
 
 (deftest value-pointer-p-false-for-nil
   "val-pointer-p rejects +val-nil+ (special, not pointer)."
@@ -232,35 +190,16 @@
   "val-pointer-p rejects an encoded character (char range, not pointer range)."
   (assert-false (cl-cc/runtime:val-pointer-p (cl-cc/runtime:encode-char #\A))))
 
-(deftest value-object-p-true
-  "val-object-p recognises +tag-object+."
-  (let ((v (cl-cc/runtime:encode-pointer #x1000 cl-cc/runtime:+tag-object+)))
-    (assert-true (cl-cc/runtime:val-object-p v))))
-
-(deftest value-object-p-false-for-cons
-  "val-object-p rejects +tag-cons+."
-  (let ((v (cl-cc/runtime:encode-pointer #x1000 cl-cc/runtime:+tag-cons+)))
-    (assert-false (cl-cc/runtime:val-object-p v))))
-
-(deftest value-cons-p-true
-  "val-cons-p recognises +tag-cons+."
-  (let ((v (cl-cc/runtime:encode-pointer #x1000 cl-cc/runtime:+tag-cons+)))
-    (assert-true (cl-cc/runtime:val-cons-p v))))
-
-(deftest value-symbol-p-true
-  "val-symbol-p recognises +tag-symbol+."
-  (let ((v (cl-cc/runtime:encode-pointer #x1000 cl-cc/runtime:+tag-symbol+)))
-    (assert-true (cl-cc/runtime:val-symbol-p v))))
-
-(deftest value-function-p-true
-  "val-function-p recognises +tag-function+."
-  (let ((v (cl-cc/runtime:encode-pointer #x1000 cl-cc/runtime:+tag-function+)))
-    (assert-true (cl-cc/runtime:val-function-p v))))
-
-(deftest value-string-p-true
-  "val-string-p recognises +tag-string+."
-  (let ((v (cl-cc/runtime:encode-pointer #x1000 cl-cc/runtime:+tag-string+)))
-    (assert-true (cl-cc/runtime:val-string-p v))))
+(deftest-each value-sub-tag-predicates
+  "Each sub-tag predicate recognises its own tag and rejects others."
+  :cases (("object"   cl-cc/runtime:+tag-object+   #'cl-cc/runtime:val-object-p)
+          ("cons"     cl-cc/runtime:+tag-cons+     #'cl-cc/runtime:val-cons-p)
+          ("symbol"   cl-cc/runtime:+tag-symbol+   #'cl-cc/runtime:val-symbol-p)
+          ("function" cl-cc/runtime:+tag-function+ #'cl-cc/runtime:val-function-p)
+          ("string"   cl-cc/runtime:+tag-string+   #'cl-cc/runtime:val-string-p))
+  (tag pred)
+  (let ((v (cl-cc/runtime:encode-pointer #x1000 tag)))
+    (assert-true (funcall pred v))))
 
 ;;; ------------------------------------------------------------
 ;;; No collisions between types
@@ -286,17 +225,13 @@
 ;;; encode-bool
 ;;; ------------------------------------------------------------
 
-(deftest value-encode-bool-true
-  "encode-bool on true CL value gives +val-t+."
-  (assert-= cl-cc/runtime:+val-t+ (cl-cc/runtime:encode-bool t)))
-
-(deftest value-encode-bool-false
-  "encode-bool on nil gives +val-nil+."
-  (assert-= cl-cc/runtime:+val-nil+ (cl-cc/runtime:encode-bool nil)))
-
-(deftest value-encode-bool-truthy
-  "encode-bool on any non-nil value gives +val-t+."
-  (assert-= cl-cc/runtime:+val-t+ (cl-cc/runtime:encode-bool 42)))
+(deftest-each value-encode-bool
+  "encode-bool maps CL truthiness to val-t or val-nil."
+  :cases (("t"      t   cl-cc/runtime:+val-t+)
+          ("nil"    nil cl-cc/runtime:+val-nil+)
+          ("truthy" 42  cl-cc/runtime:+val-t+))
+  (cl-val expected-tag)
+  (assert-= expected-tag (cl-cc/runtime:encode-bool cl-val)))
 
 ;;; ------------------------------------------------------------
 ;;; cl-value->val / val->cl-value round-trips

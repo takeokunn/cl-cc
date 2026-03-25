@@ -36,161 +36,266 @@
 ;;; opt-inst-pure-p is defined in effects.lisp (loaded first in the optimize module).
 ;;; It replaces the former 2-type whitelist with a 100+-type data-driven table.
 
+;;; ─── Data-Driven Fold Tables ───────────────────────────────────────────
+;;;
+;;; Each table maps a VM instruction struct-type symbol to a CL function
+;;; that performs the compile-time fold.  Adding a new foldable instruction
+;;; requires only ONE entry here — opt-fold-binop-value, opt-pass-fold,
+;;; and opt-pass-cse all derive their behavior from these tables.
+
+(defparameter *opt-binary-fold-table*
+  (let ((ht (make-hash-table :test #'eq)))
+    (setf (gethash 'vm-add ht) #'+)
+    (setf (gethash 'vm-sub ht) #'-)
+    (setf (gethash 'vm-mul ht) #'*)
+    (setf (gethash 'vm-mod ht) #'mod)
+    (setf (gethash 'vm-rem ht) #'rem)
+    (setf (gethash 'vm-min ht) #'min)
+    (setf (gethash 'vm-max ht) #'max)
+    (setf (gethash 'vm-logand ht) #'logand)
+    (setf (gethash 'vm-logior ht) #'logior)
+    (setf (gethash 'vm-logxor ht) #'logxor)
+    (setf (gethash 'vm-logeqv ht) #'logeqv)
+    (setf (gethash 'vm-ash ht) #'ash)
+    ht)
+  "Maps binary VM instruction types to their CL fold functions.
+   Used by opt-fold-binop-value for constant folding.")
+
+(defparameter *opt-binary-cmp-fold-table*
+  (let ((ht (make-hash-table :test #'eq)))
+    (setf (gethash 'vm-lt ht) #'<)
+    (setf (gethash 'vm-gt ht) #'>)
+    (setf (gethash 'vm-le ht) #'<=)
+    (setf (gethash 'vm-ge ht) #'>=)
+    (setf (gethash 'vm-num-eq ht) #'=)
+    ht)
+  "Maps comparison VM instruction types to their CL predicate functions.
+   Comparisons fold to 1/0 (not t/nil) for VM register semantics.")
+
+(defparameter *opt-binary-zero-guard-types*
+  '(vm-div vm-mod vm-rem)
+  "Binary instruction types that must guard against zero divisor before folding.")
+
+(defparameter *opt-binary-no-fold-types*
+  '(vm-floor-inst vm-ceiling-inst vm-truncate vm-round-inst)
+  "Binary instruction types that set vm-values-list side-channel and must NOT be folded.")
+
+(defparameter *opt-unary-fold-table*
+  (let ((ht (make-hash-table :test #'eq)))
+    (setf (gethash 'vm-neg ht) #'-)
+    (setf (gethash 'vm-abs ht) #'abs)
+    (setf (gethash 'vm-inc ht) #'1+)
+    (setf (gethash 'vm-dec ht) #'1-)
+    (setf (gethash 'vm-lognot ht) #'lognot)
+    (setf (gethash 'vm-not ht) (lambda (x) (if (or (null x) (eql x 0)) t nil)))
+    ht)
+  "Maps unary VM instruction types to their CL fold functions.")
+
+(defparameter *opt-type-pred-fold-table*
+  (let ((ht (make-hash-table :test #'eq)))
+    (setf (gethash 'vm-null-p ht) #'null)
+    (setf (gethash 'vm-cons-p ht) #'consp)
+    (setf (gethash 'vm-symbol-p ht) #'symbolp)
+    (setf (gethash 'vm-number-p ht) #'numberp)
+    (setf (gethash 'vm-integer-p ht) #'integerp)
+    (setf (gethash 'vm-function-p ht) (lambda (x) (declare (ignore x)) nil))
+    ht)
+  "Maps type-predicate VM instruction types to their CL predicate functions.
+   Predicates fold to 1/0.  vm-function-p always returns 0 for constants.")
+
+(defparameter *opt-foldable-binary-types*
+  (let ((types nil))
+    (maphash (lambda (k v) (declare (ignore v)) (push k types)) *opt-binary-fold-table*)
+    (maphash (lambda (k v) (declare (ignore v)) (push k types)) *opt-binary-cmp-fold-table*)
+    types)
+  "All binary instruction types that participate in constant folding or CSE.
+   Derived from the fold tables — single source of truth.")
+
+(defparameter *opt-foldable-unary-types*
+  (let ((types nil))
+    (maphash (lambda (k v) (declare (ignore v)) (push k types)) *opt-unary-fold-table*)
+    (maphash (lambda (k v) (declare (ignore v)) (push k types)) *opt-type-pred-fold-table*)
+    types)
+  "All unary instruction types that participate in constant folding or CSE.
+   Derived from the fold tables — single source of truth.")
+
+(defparameter *opt-binary-lhs-rhs-types*
+  '(vm-lt vm-gt vm-le vm-ge vm-num-eq vm-eq
+    vm-mod vm-rem vm-min vm-max
+    vm-truncate vm-floor-inst vm-ceiling-inst vm-round-inst
+    vm-logand vm-logior vm-logxor vm-logeqv vm-ash
+    vm-div vm-ffloor vm-fceiling vm-ftruncate vm-fround)
+  "Non-binop-subclass instruction types that have vm-lhs/vm-rhs accessors.
+   vm-binop (parent of vm-add/vm-sub/vm-mul) is handled by typecase inheritance.
+   Used by opt-inst-read-regs, opt-pass-fold, opt-pass-cse, and WASM register collection.")
+
+(defparameter *opt-unary-src-types*
+  '(vm-neg vm-abs vm-inc vm-dec vm-lognot vm-not
+    vm-cons-p vm-null-p vm-symbol-p vm-number-p
+    vm-integer-p vm-function-p)
+  "Instruction types that have vm-src/vm-dst unary accessors.
+   Used by opt-inst-read-regs, opt-pass-fold, opt-pass-cse, and WASM register collection.")
+
+(defparameter *opt-commutative-inst-types*
+  '(vm-add vm-mul vm-logand vm-logior vm-logxor vm-logeqv
+    vm-num-eq vm-eq vm-min vm-max)
+  "VM binary instruction struct-type symbols where operand order is irrelevant.
+   Used by opt-pass-cse to produce a canonical key for commutative expressions,
+   enabling (+ a b) and (+ b a) to share the same CSE memo entry.")
+
 (defun opt-inst-read-regs (inst)
-  "Return a list of all register names read by INST."
-  (typecase inst
-    (vm-const nil)
-    (vm-func-ref nil)
-    (vm-get-global nil)
-    (vm-values-to-list nil)
-    (vm-move (list (vm-src inst)))
-    ;; vm-binop covers vm-add, vm-sub, vm-mul
-    (vm-binop (list (vm-lhs inst) (vm-rhs inst)))
-    ((or vm-lt vm-gt vm-le vm-ge vm-num-eq vm-eq
-         vm-div vm-mod vm-rem vm-min vm-max
-         vm-truncate vm-floor-inst vm-ceiling-inst
-         vm-logand vm-logior vm-logxor vm-logeqv vm-ash)
-     (list (vm-lhs inst) (vm-rhs inst)))
-    ;; All single-source unary instructions (including boolean/bitwise)
-    ((or vm-neg vm-abs vm-inc vm-dec vm-lognot vm-not
-         vm-cons-p vm-null-p vm-symbol-p vm-number-p
-         vm-integer-p vm-function-p)
-     (list (vm-src inst)))
-    (vm-jump-zero (list (vm-reg inst)))
-    ((or vm-print vm-halt vm-ret) (list (vm-reg inst)))
-    (vm-set-global (list (vm-src inst)))
-    (vm-register-function (list (vm-src inst)))
-    (vm-call (cons (vm-func-reg inst) (vm-args inst)))
-    (vm-apply (cons (vm-func-reg inst) (vm-args inst)))
-    (vm-generic-call (cons (vm-gf-reg inst) (vm-args inst)))
-    (vm-values (vm-src-regs inst))
-    (vm-ensure-values (list (vm-src inst)))
-    (vm-spread-values (list (vm-src inst)))
-    (vm-closure-ref-idx (list (vm-closure-reg inst)))
-    (vm-slot-read (list (vm-obj-reg inst)))
-    (vm-slot-write (list (vm-obj-reg inst) (vm-value-reg inst)))
-    (vm-register-method (list (vm-gf-reg inst) (vm-method-reg inst)))
-    (vm-make-obj (cons (vm-class-reg inst) (mapcar #'cdr (vm-initarg-regs inst))))
-    ;; vm-make-string: src=length, char=optional initial-element register
-    (vm-make-string (remove nil (list (vm-src inst) (vm-char inst))))
-    ;; vm-intern-symbol: src=string, pkg=optional package designator register
-    (vm-intern-symbol (remove nil (list (vm-src inst) (vm-intern-pkg inst))))
-    ;; vm-make-array: size-reg=size, plus optional initial-element/fill-pointer/adjustable registers
-    (vm-make-array (remove nil (list (vm-size-reg inst) (vm-initial-element inst)
-                                     (vm-fill-pointer inst) (vm-adjustable inst))))
-    (t
-     ;; Fallback: serialize to sexp and collect all register-shaped keywords.
-     ;; Every VM instruction has an instruction->sexp method; registers are
-     ;; keywords named Rn (e.g. :R0, :R15).  We exclude the destination register
-     ;; to avoid marking DST as "used by its own definition".
-     (let ((dst (opt-inst-dst inst))
-           (regs nil))
-       (labels ((collect (x)
-                  (cond ((and (keywordp x)
-                              (opt-register-keyword-p x)
-                              (not (eq x dst)))
-                         (push x regs))
-                        ((consp x)
-                         (collect (car x))
-                         (collect (cdr x))))))
-         (handler-case (collect (instruction->sexp inst))
-           (error () nil)))
-       regs))))
+  "Return a list of all register names read by INST.
+   Uses *opt-binary-lhs-rhs-types* and *opt-unary-src-types* data tables
+   for lhs/rhs and src classification — single source of truth."
+  (let ((tp (type-of inst)))
+    (cond
+      ;; Zero-read instructions
+      ((member tp '(vm-const vm-func-ref vm-get-global vm-values-to-list) :test #'eq)
+       nil)
+      ;; Move: single source
+      ((eq tp 'vm-move) (list (vm-src inst)))
+      ;; vm-binop subclasses (vm-add, vm-sub, vm-mul) — handled by typep
+      ((typep inst 'vm-binop) (list (vm-lhs inst) (vm-rhs inst)))
+      ;; Non-binop binary: data-driven from *opt-binary-lhs-rhs-types*
+      ((member tp *opt-binary-lhs-rhs-types* :test #'eq)
+       (list (vm-lhs inst) (vm-rhs inst)))
+      ;; Unary: data-driven from *opt-unary-src-types*
+      ((member tp *opt-unary-src-types* :test #'eq)
+       (list (vm-src inst)))
+      ;; Single-reg instructions
+      ((eq tp 'vm-jump-zero) (list (vm-reg inst)))
+      ((member tp '(vm-print vm-halt vm-ret) :test #'eq) (list (vm-reg inst)))
+      ((member tp '(vm-set-global vm-register-function vm-ensure-values vm-spread-values)
+               :test #'eq)
+       (list (vm-src inst)))
+      ;; Call-family: func/gf register + args
+      ((eq tp 'vm-call)         (cons (vm-func-reg inst) (vm-args inst)))
+      ((eq tp 'vm-apply)        (cons (vm-func-reg inst) (vm-args inst)))
+      ((eq tp 'vm-generic-call) (cons (vm-gf-reg inst) (vm-args inst)))
+      ;; Multiple values
+      ((eq tp 'vm-values) (vm-src-regs inst))
+      ;; Object operations
+      ((eq tp 'vm-closure-ref-idx) (list (vm-closure-reg inst)))
+      ((eq tp 'vm-slot-read)  (list (vm-obj-reg inst)))
+      ((eq tp 'vm-slot-write) (list (vm-obj-reg inst) (vm-value-reg inst)))
+      ((eq tp 'vm-register-method) (list (vm-gf-reg inst) (vm-method-reg inst)))
+      ((eq tp 'vm-make-obj) (cons (vm-class-reg inst) (mapcar #'cdr (vm-initarg-regs inst))))
+      ;; Compound instructions with optional registers
+      ((eq tp 'vm-make-string) (remove nil (list (vm-src inst) (vm-char inst))))
+      ((eq tp 'vm-intern-symbol) (remove nil (list (vm-src inst) (vm-intern-pkg inst))))
+      ((eq tp 'vm-make-array) (remove nil (list (vm-size-reg inst) (vm-initial-element inst)
+                                                 (vm-fill-pointer inst) (vm-adjustable inst))))
+      (t
+       ;; Fallback: serialize to sexp and collect all register-shaped keywords.
+       ;; Every VM instruction has an instruction->sexp method; registers are
+       ;; keywords named Rn (e.g. :R0, :R15).  We exclude the destination register
+       ;; to avoid marking DST as "used by its own definition".
+       (let ((dst (opt-inst-dst inst))
+             (regs nil))
+         (labels ((collect (x)
+                    (cond ((and (keywordp x)
+                                (opt-register-keyword-p x)
+                                (not (eq x dst)))
+                           (push x regs))
+                          ((consp x)
+                           (collect (car x))
+                           (collect (cdr x))))))
+           (handler-case (collect (instruction->sexp inst))
+             (error () nil)))
+         regs)))))
 
 ;;; ─── Pass 1: Constant Folding + Algebraic Simplification ─────────────────
 
 (defun opt-fold-binop-value (inst lval rval)
   "Fold binary INST with numeric constants LVAL and RVAL.
-   Returns (values folded-value t) on success, or (values nil nil) if not foldable."
-  (typecase inst
-    (vm-add (values (+ lval rval) t))
-    (vm-sub (values (- lval rval) t))
-    (vm-mul (values (* lval rval) t))
-    (vm-div
-     (if (zerop rval) (values nil nil) (values (floor lval rval) t)))
-    ;; vm-floor-inst sets values-list side-channel, cannot be folded
-    (vm-floor-inst (values nil nil))
-    (vm-mod
-     (if (zerop rval) (values nil nil) (values (mod lval rval) t)))
-    (vm-rem
-     (if (zerop rval) (values nil nil) (values (rem lval rval) t)))
-    ;; floor/ceiling/truncate set the values-list side-channel (for multiple values)
-    ;; so they must NOT be constant-folded here — use (values nil nil) to skip folding
-    (vm-truncate (values nil nil))
-    (vm-ceiling-inst (values nil nil))
-    (vm-min    (values (min lval rval) t))
-    (vm-max    (values (max lval rval) t))
-    (vm-logand (values (logand lval rval) t))
-    (vm-logior (values (logior lval rval) t))
-    (vm-logxor (values (logxor lval rval) t))
-    (vm-logeqv (values (logeqv lval rval) t))
-    (vm-ash    (values (ash lval rval) t))
-    (vm-lt  (values (if (< lval rval) 1 0) t))
-    (vm-gt  (values (if (> lval rval) 1 0) t))
-    (vm-le  (values (if (<= lval rval) 1 0) t))
-    (vm-ge  (values (if (>= lval rval) 1 0) t))
-    (vm-num-eq (values (if (= lval rval) 1 0) t))
-    (t (values nil nil))))
+   Returns (values folded-value t) on success, or (values nil nil) if not foldable.
+   Dispatch is data-driven via *opt-binary-fold-table* and *opt-binary-cmp-fold-table*."
+  (let* ((tp (type-of inst))
+         (arith-fn (gethash tp *opt-binary-fold-table*))
+         (cmp-fn   (gethash tp *opt-binary-cmp-fold-table*)))
+    (cond
+      ;; Instructions that must not be folded (values-list side-channel)
+      ((member tp *opt-binary-no-fold-types* :test #'eq)
+       (values nil nil))
+      ;; Zero-guarded arithmetic (div/mod/rem)
+      ((and arith-fn (member tp *opt-binary-zero-guard-types* :test #'eq))
+       (if (zerop rval)
+           (values nil nil)
+           (values (funcall arith-fn lval rval) t)))
+      ;; Normal arithmetic fold
+      (arith-fn
+       (values (funcall arith-fn lval rval) t))
+      ;; Comparison fold → 1/0
+      (cmp-fn
+       (values (if (funcall cmp-fn lval rval) 1 0) t))
+      (t (values nil nil)))))
+
+;;; Algebraic identity rules table.
+;;; Each entry: (inst-type . ((condition . action) ...))
+;;; Conditions: (:rconst N) = right operand is constant N
+;;;             (:lconst N) = left operand is constant N
+;;;             :same-reg   = both operands are the same register
+;;; Actions:    :move-lhs / :move-rhs   = copy one operand
+;;;             (:const V)              = produce constant V
+;;;             (:neg :lhs) / (:neg :rhs) = negate one operand
+(defparameter *opt-algebraic-identity-rules*
+  (let ((ht (make-hash-table :test #'eq)))
+    (flet ((reg (tp rules) (setf (gethash tp ht) rules)))
+      ;; Arithmetic
+      (reg 'vm-add       '(((:rconst 0) . :move-lhs) ((:lconst 0) . :move-rhs)))
+      (reg 'vm-sub       '(((:rconst 0) . :move-lhs) (:same-reg . (:const 0))))
+      (reg 'vm-mul       '(((:rconst 1) . :move-lhs) ((:lconst 1) . :move-rhs)
+                            ((:rconst 0) . (:const 0)) ((:lconst 0) . (:const 0))
+                            ((:rconst -1) . (:neg :lhs)) ((:lconst -1) . (:neg :rhs))))
+      (reg 'vm-div       '(((:rconst 1) . :move-lhs)))
+      (reg 'vm-floor-inst '(((:rconst 1) . :move-lhs)))
+      (reg 'vm-mod       '(((:lconst 0) . (:const 0))))
+      ;; Comparisons
+      (dolist (tp '(vm-num-eq vm-eq vm-le vm-ge))
+        (reg tp '((:same-reg . (:const 1)))))
+      (dolist (tp '(vm-lt vm-gt))
+        (reg tp '((:same-reg . (:const 0)))))
+      ;; Bitwise
+      (reg 'vm-logand    '(((:rconst 0) . (:const 0)) ((:lconst 0) . (:const 0))
+                            ((:rconst -1) . :move-lhs) ((:lconst -1) . :move-rhs)
+                            (:same-reg . :move-lhs)))
+      (reg 'vm-logior    '(((:rconst 0) . :move-lhs) ((:lconst 0) . :move-rhs)
+                            ((:rconst -1) . (:const -1)) ((:lconst -1) . (:const -1))
+                            (:same-reg . :move-lhs)))
+      (reg 'vm-logxor    '(((:rconst 0) . :move-lhs) ((:lconst 0) . :move-rhs)
+                            (:same-reg . (:const 0))))
+      (reg 'vm-ash       '(((:rconst 0) . :move-lhs) ((:lconst 0) . (:const 0)))))
+    ht)
+  "Maps VM binary instruction types to lists of algebraic identity rules.")
 
 (defun opt-simplify-binop (inst dst lhs-reg rhs-reg lval rval)
-  "Algebraic simplification of binary INST.
+  "Algebraic simplification of binary INST via rule table lookup.
    LVAL/RVAL are known constant values or :unknown.
    Returns a simplified instruction, or NIL if no simplification applies."
-  (flet ((const-p (v) (and (not (eq v :unknown)) (numberp v))))
-    (typecase inst
-      (vm-add
-       (cond ((and (const-p rval) (eql rval 0)) (make-vm-move :dst dst :src lhs-reg))  ; x+0→x
-             ((and (const-p lval) (eql lval 0)) (make-vm-move :dst dst :src rhs-reg))  ; 0+x→x
-             (t nil)))
-      (vm-sub
-       (cond ((and (const-p rval) (eql rval 0)) (make-vm-move :dst dst :src lhs-reg))  ; x-0→x
-             ((eq lhs-reg rhs-reg)               (make-vm-const :dst dst :value 0))      ; x-x→0
-             (t nil)))
-      (vm-mul
-       (cond ((and (const-p rval) (eql rval 1)) (make-vm-move :dst dst :src lhs-reg))   ; x*1→x
-             ((and (const-p lval) (eql lval 1)) (make-vm-move :dst dst :src rhs-reg))   ; 1*x→x
-             ((and (const-p rval) (eql rval 0)) (make-vm-const :dst dst :value 0))      ; x*0→0
-             ((and (const-p lval) (eql lval 0)) (make-vm-const :dst dst :value 0))      ; 0*x→0
-             ((and (const-p rval) (eql rval -1)) (make-vm-neg :dst dst :src lhs-reg))   ; x*-1→(neg x)
-             ((and (const-p lval) (eql lval -1)) (make-vm-neg :dst dst :src rhs-reg))   ; -1*x→(neg x)
-             (t nil)))
-      ((or vm-div vm-floor-inst)
-       (cond ((and (const-p rval) (eql rval 1)) (make-vm-move :dst dst :src lhs-reg))  ; x/1→x
-             (t nil)))
-      ((or vm-num-eq vm-eq)
-       (if (eq lhs-reg rhs-reg) (make-vm-const :dst dst :value 1) nil))                 ; x=x→1
-      ((or vm-lt vm-gt)
-       (if (eq lhs-reg rhs-reg) (make-vm-const :dst dst :value 0) nil))                 ; x<x→0
-      ((or vm-le vm-ge)
-       (if (eq lhs-reg rhs-reg) (make-vm-const :dst dst :value 1) nil))                 ; x≤x→1
-      ;; Bitwise identities
-      (vm-logand
-       (cond ((and (const-p rval) (eql rval 0))   (make-vm-const :dst dst :value 0))   ; x AND 0 → 0
-             ((and (const-p lval) (eql lval 0))   (make-vm-const :dst dst :value 0))   ; 0 AND x → 0
-             ((and (const-p rval) (eql rval -1))  (make-vm-move  :dst dst :src lhs-reg)); x AND -1 → x
-             ((and (const-p lval) (eql lval -1))  (make-vm-move  :dst dst :src rhs-reg)); -1 AND x → x
-             ((eq lhs-reg rhs-reg)                 (make-vm-move  :dst dst :src lhs-reg)); x AND x → x
-             (t nil)))
-      (vm-logior
-       (cond ((and (const-p rval) (eql rval 0))   (make-vm-move  :dst dst :src lhs-reg)); x OR 0 → x
-             ((and (const-p lval) (eql lval 0))   (make-vm-move  :dst dst :src rhs-reg)); 0 OR x → x
-             ((and (const-p rval) (eql rval -1))  (make-vm-const :dst dst :value -1))  ; x OR -1 → -1
-             ((and (const-p lval) (eql lval -1))  (make-vm-const :dst dst :value -1))  ; -1 OR x → -1
-             ((eq lhs-reg rhs-reg)                 (make-vm-move  :dst dst :src lhs-reg)); x OR x → x
-             (t nil)))
-      (vm-logxor
-       (cond ((and (const-p rval) (eql rval 0))   (make-vm-move  :dst dst :src lhs-reg)); x XOR 0 → x
-             ((and (const-p lval) (eql lval 0))   (make-vm-move  :dst dst :src rhs-reg)); 0 XOR x → x
-             ((eq lhs-reg rhs-reg)                 (make-vm-const :dst dst :value 0))   ; x XOR x → 0
-             (t nil)))
-      (vm-ash
-       (cond ((and (const-p rval) (eql rval 0))   (make-vm-move  :dst dst :src lhs-reg)); (ash x 0) → x
-             ((and (const-p lval) (eql lval 0))   (make-vm-const :dst dst :value 0))   ; (ash 0 n) → 0
-             (t nil)))
-      (vm-mod
-       (cond ((and (const-p lval) (eql lval 0))   (make-vm-const :dst dst :value 0))   ; 0 mod x → 0
-             (t nil)))
-      (t nil))))
+  (let ((rules (gethash (type-of inst) *opt-algebraic-identity-rules*)))
+    (flet ((const-p (v) (and (not (eq v :unknown)) (numberp v)))
+           (apply-action (action)
+             (case action
+               (:move-lhs (make-vm-move :dst dst :src lhs-reg))
+               (:move-rhs (make-vm-move :dst dst :src rhs-reg))
+               (otherwise
+                (if (consp action)
+                    (case (car action)
+                      (:const (make-vm-const :dst dst :value (cadr action)))
+                      (:neg   (if (eq (cadr action) :lhs)
+                                  (make-vm-neg :dst dst :src lhs-reg)
+                                  (make-vm-neg :dst dst :src rhs-reg))))
+                    nil)))))
+      (dolist (rule rules nil)
+        (let ((cond (car rule))
+              (action (cdr rule)))
+          (when (cond
+                  ((eq cond :same-reg) (eq lhs-reg rhs-reg))
+                  ((and (consp cond) (eq (car cond) :rconst))
+                   (and (const-p rval) (eql rval (cadr cond))))
+                  ((and (consp cond) (eq (car cond) :lconst))
+                   (and (const-p lval) (eql lval (cadr cond)))))
+            (return (apply-action action))))))))
 
 (defun opt-pass-fold (instructions)
   "Forward pass: constant folding, algebraic simplification, constant branch elimination."
@@ -226,10 +331,10 @@
                       (progn (clear dst) (emit inst))))))))
 
           ;; Binary arithmetic/comparison: full fold or algebraic simplification
-          ;; Note: vm-floor-inst/vm-ceiling-inst/vm-truncate are excluded here because
-          ;; they set the vm-values-list side-channel and must not be constant-folded.
+          ;; Dispatch is data-driven via *opt-foldable-binary-types* (derived from fold tables).
+          ;; vm-floor-inst/vm-ceiling-inst/vm-truncate are excluded (values-list side-channel).
           ((or vm-binop vm-lt vm-gt vm-le vm-ge vm-num-eq vm-eq
-               vm-div vm-mod vm-rem vm-min vm-max
+               vm-mod vm-rem vm-min vm-max
                vm-logand vm-logior vm-logxor vm-logeqv vm-ash)
            (let* ((dst (vm-dst inst))
                   (lhs (vm-lhs inst))
@@ -257,33 +362,26 @@
                          (emit simp))
                         (t (clear dst) (emit inst))))))))))
 
-          ;; Unary arithmetic: neg, abs, inc, dec, lognot, not
+          ;; Unary arithmetic: data-driven via *opt-unary-fold-table*
           ((or vm-neg vm-abs vm-inc vm-dec vm-lognot vm-not)
-           (let ((dst (vm-dst inst)) (src (vm-src inst)))
+           (let* ((dst (vm-dst inst)) (src (vm-src inst))
+                  (fold-fn (gethash (type-of inst) *opt-unary-fold-table*)))
              (multiple-value-bind (sval found) (gethash src env)
-               (if (and found (numberp sval))
-                   (emit-const dst (typecase inst
-                                     (vm-neg    (- sval))
-                                     (vm-abs    (abs sval))
-                                     (vm-inc    (1+ sval))
-                                     (vm-dec    (1- sval))
-                                     (vm-lognot (lognot sval))
-                                     (vm-not    (if (opt-falsep sval) t nil))))
+               (if (and found fold-fn
+                        (or (numberp sval)
+                            ;; vm-not handles non-numeric values (nil → t)
+                            (eq (type-of inst) 'vm-not)))
+                   (emit-const dst (funcall fold-fn sval))
                    (progn (clear dst) (emit inst))))))
 
-          ;; Type predicates on known constants
+          ;; Type predicates: data-driven via *opt-type-pred-fold-table*
           ((or vm-cons-p vm-null-p vm-symbol-p vm-number-p
                vm-integer-p vm-function-p)
-           (let ((dst (vm-dst inst)) (src (vm-src inst)))
+           (let* ((dst (vm-dst inst)) (src (vm-src inst))
+                  (pred-fn (gethash (type-of inst) *opt-type-pred-fold-table*)))
              (multiple-value-bind (sval found) (gethash src env)
-               (if found
-                   (emit-const dst (typecase inst
-                                     (vm-null-p    (if (null sval) 1 0))
-                                     (vm-cons-p    (if (consp sval) 1 0))
-                                     (vm-symbol-p  (if (symbolp sval) 1 0))
-                                     (vm-number-p  (if (numberp sval) 1 0))
-                                     (vm-integer-p (if (integerp sval) 1 0))
-                                     (vm-function-p 0))) ; constants can't be closures
+               (if (and found pred-fn)
+                   (emit-const dst (if (funcall pred-fn sval) 1 0))
                    (progn (clear dst) (emit inst))))))
 
           ;; Constant branch folding: known-false → unconditional jump; known-true → drop
@@ -622,6 +720,21 @@
   (let* ((func-defs (opt-collect-function-defs instructions))
          (base-idx  (1+ (opt-max-reg-index instructions)))
          (reg-track (make-hash-table :test #'eq)) ; reg → label of known function
+         ;; Build name→label mapping from vm-register-function instructions
+         (name-to-label (let ((ht (make-hash-table :test #'eq)))
+                          (dolist (inst instructions ht)
+                            (when (vm-register-function-p inst)
+                              (let ((label (gethash (vm-src inst) reg-track)))
+                                ;; reg-track may not be populated yet; scan closures first
+                                (when (null label)
+                                  ;; Find the closure that the register came from
+                                  (dolist (i instructions)
+                                    (when (and (vm-closure-p i)
+                                               (eq (vm-dst i) (vm-src inst)))
+                                      (setf label (vm-label-name i))
+                                      (return))))
+                                (when label
+                                  (setf (gethash (vm-func-name inst) ht) label)))))))
          (result nil))
     (dolist (inst instructions)
       (typecase inst
@@ -629,6 +742,13 @@
         ((or vm-closure vm-func-ref)
          (let ((label (vm-label-name inst)))
            (when (gethash label func-defs)
+             (setf (gethash (vm-dst inst) reg-track) label)))
+         (push inst result))
+        ;; Track vm-const loading a function name symbol
+        (vm-const
+         (let* ((val (vm-value inst))
+                (label (when (symbolp val) (gethash val name-to-label))))
+           (when (and label (gethash label func-defs))
              (setf (gethash (vm-dst inst) reg-track) label)))
          (push inst result))
         ;; Attempt inlining
@@ -733,17 +853,6 @@
                   (emit (make-vm-const :dst shift-reg :value k))
                   (emit (make-vm-ash   :dst dst :lhs rhs :rhs shift-reg))))
                (t (emit inst)))))
-          (vm-div
-           (let* ((dst (vm-dst inst))
-                  (lhs (vm-lhs inst))
-                  (rhs (vm-rhs inst))
-                  (rv  (const-val rhs)))
-             (if (and rv (opt-power-of-2-p rv))
-                 (let* ((k         (1- (integer-length rv)))
-                        (shift-reg (new-shift-reg)))
-                   (emit (make-vm-const :dst shift-reg :value (- k)))
-                   (emit (make-vm-ash   :dst dst :lhs lhs :rhs shift-reg)))
-                 (emit inst))))
           (t
            (let ((dst (opt-inst-dst inst)))
              (when dst (remhash dst env)))
@@ -779,8 +888,7 @@
              (val< (a b)
                (string< (format nil "~S" a) (format nil "~S" b)))
              (commutative-p (inst)
-               (typep inst '(or vm-add vm-mul vm-logand vm-logior vm-logxor
-                                vm-logeqv vm-num-eq vm-eq vm-min vm-max)))
+               (member (type-of inst) *opt-commutative-inst-types* :test #'eq))
              (try-cse (key)
                ;; Return existing reg if key is memoized, else nil
                (gethash key memo))
@@ -819,8 +927,9 @@
              (bump-gen dst)
              (setf (gethash dst val-env) src-val)
              (push inst result)))
+          ;; CSE for binary ops: data-driven via *opt-foldable-binary-types*
           ((or vm-binop vm-lt vm-gt vm-le vm-ge vm-num-eq vm-eq
-               vm-div vm-mod vm-rem vm-min vm-max
+               vm-mod vm-rem vm-min vm-max
                vm-logand vm-logior vm-logxor vm-logeqv vm-ash)
            (let* ((dst (vm-dst inst))
                   (lv  (get-val (vm-lhs inst)))
@@ -831,6 +940,7 @@
                                     (if (val< lv rv) rv lv))
                            (list op lv rv))))
              (emit-or-cse inst dst key)))
+          ;; CSE for unary ops: data-driven via *opt-foldable-unary-types*
           ((or vm-neg vm-abs vm-inc vm-dec vm-lognot vm-not
                vm-cons-p vm-null-p vm-symbol-p vm-number-p
                vm-integer-p vm-function-p)

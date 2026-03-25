@@ -18,6 +18,12 @@
 (defvar *accessor-slot-map* (make-hash-table :test #'eq)
   "Maps accessor function names to (class-name . slot-name) for setf expansion.")
 
+(defvar *macro-eval-fn* #'eval
+  "Function used to evaluate macro bodies at compile time.
+Initially bound to the host CL eval for bootstrap.  After the full
+pipeline loads, rebound to our-eval so that macro expansion runs
+through cl-cc's own compiler and VM — the key step for self-hosting.")
+
 (defparameter *compiler-special-forms*
   '(if progn lambda quote setq setf
     defun defvar defparameter defmacro defclass defgeneric defmethod
@@ -220,13 +226,29 @@ Supports :conc-name, :constructor with boa-lambda-list, slot defaults."
 
 (defun make-macro-expander (lambda-list body)
   "Build a macro expander function for a LAMBDA-LIST and BODY.
-   The expander destructures the macro call form and evaluates BODY."
-  (let ((form-var (gensym "FORM"))
-        (env-var  (gensym "ENV")))
-    (eval `(lambda (,form-var ,env-var)
-             (declare (ignore ,env-var))
-             (let* ,(generate-lambda-bindings lambda-list form-var)
-               ,@body)))))
+   The expander destructures the macro call form and evaluates BODY.
+   Quasiquotes in BODY (cl-cc::backquote/unquote) are pre-expanded so
+   that the host eval can handle them without knowing the cl-cc read macros.
+   When *macro-eval-fn* is our-eval (self-hosting mode), the returned
+   function is a host CL closure that delegates to our-eval at each
+   invocation — so funcall works from the macro expansion pipeline."
+  (let ((expanded-body (mapcar #'our-macroexpand-all body)))
+    (if (eq *macro-eval-fn* #'eval)
+        ;; Bootstrap path: compile lambda via host eval → host CL closure
+        (let ((form-var (gensym "FORM"))
+              (env-var  (gensym "ENV")))
+          (eval `(lambda (,form-var ,env-var)
+                   (declare (ignore ,env-var))
+                   (let* ,(generate-lambda-bindings lambda-list form-var)
+                     ,@expanded-body))))
+        ;; Self-hosting path: host CL closure wrapping our-eval
+        (lambda (form env)
+          (declare (ignore env))
+          (let ((form-var (gensym "FORM")))
+            (funcall *macro-eval-fn*
+                     `(let ((,form-var ',form))
+                        (let* ,(generate-lambda-bindings lambda-list form-var)
+                          ,@expanded-body))))))))
 
 (defun expand-macrolet-form (bindings body)
   "Register local macro BINDINGS, expand BODY under them, then restore.
@@ -257,6 +279,9 @@ Supports :conc-name, :constructor with boa-lambda-list, slot defaults."
         ;; our-defmacro forms (from define-modify-macro, etc.) need to be evaluated
         ;; eagerly so that sibling forms can use the newly registered macro.
         (when (and (consp exp) (eq (car exp) 'our-defmacro))
+          ;; Must use host eval — our-defmacro registers macros via
+          ;; register-macro which mutates the host macro environment.
+          ;; Using our-eval would modify the VM's copy instead.
           (eval exp))
         (push exp out)))
     (cons 'progn (nreverse out))))
@@ -462,6 +487,19 @@ Leaves required params, lambda-list keywords, and supplied-p vars untouched."
           (symbolp (second form)))
      (cl-cc/type:register-type-alias (second form) (third form))
      `(quote ,(second form)))
+    ;; (defconstant name value [doc]) — compile-time constants treated as defparameter
+    ;; Constant semantics (rebinding forbidden) are not enforced; value is mutable at runtime.
+    ((and (consp form) (eq (car form) 'defconstant)
+          (>= (length form) 3)
+          (symbolp (second form)))
+     (compiler-macroexpand-all `(defparameter ,(second form) ,(third form))))
+    ;; (setf a 1 b 2) => (progn (setf a 1) (setf b 2)) — multi-var setf
+    ((and (consp form) (eq (car form) 'setf)
+          (> (length form) 3)
+          (evenp (length (cdr form))))
+     (compiler-macroexpand-all
+      `(progn ,@(loop for (place val) on (cdr form) by #'cddr
+                      collect `(setf ,place ,val)))))
     ;; (setf var val) => (setq var val) — plain variable assignment
     ((and (consp form) (eq (car form) 'setf)
           (= (length form) 3)

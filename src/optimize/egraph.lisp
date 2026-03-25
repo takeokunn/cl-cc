@@ -318,22 +318,26 @@
 
 ;;; ─── Cost Model + Extraction ─────────────────────────────────────────────
 
+(defparameter *egraph-op-base-costs*
+  '(("CONST"        . 0)
+    ("MOVE"         . 1)
+    ("ADD"          . 1) ("SUB"          . 1) ("NEG"          . 1)
+    ("MUL"          . 3)
+    ("ASH"          . 2)
+    ("DIV"          . 4) ("MOD"          . 4)
+    ("CALL"         . 10)
+    ("GENERIC-CALL" . 20))
+  "Base instruction latency costs for the e-graph default cost model.
+   Keys are op symbol-name strings (uppercase); values are integer base costs.
+   Unlisted operations default to 2.  Compares with #'equal (string).")
+
 (defun egraph-default-cost (op children-costs)
-  "Default cost model: instruction latency + sum of children costs.
+  "Default cost model: base latency + sum of children costs.
    Constants are free; simple arithmetic costs 1; calls cost 10+.
    Compares by symbol-name so cross-package symbol variants work."
   (let* ((op-str (when (symbolp op) (symbol-name op)))
-         (base (cond
-                 ((equal op-str "CONST")        0)
-                 ((equal op-str "MOVE")         1)
-                 ((member op-str '("ADD" "SUB") :test #'equal) 1)
-                 ((equal op-str "NEG")          1)
-                 ((equal op-str "MUL")          3)
-                 ((equal op-str "ASH")          2)
-                 ((member op-str '("DIV" "MOD") :test #'equal) 4)
-                 ((equal op-str "CALL")         10)
-                 ((equal op-str "GENERIC-CALL") 20)
-                 (t                             2))))
+         (entry  (assoc op-str *egraph-op-base-costs* :test #'equal))
+         (base   (if entry (cdr entry) 2)))
     (+ base (reduce #'+ children-costs :initial-value 0))))
 
 (defun egraph-extract (eg root-id &optional (cost-fn #'egraph-default-cost))

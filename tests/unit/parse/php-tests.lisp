@@ -27,47 +27,41 @@
     (assert-eq :T-FLOAT (php-tok-type (first tokens)))
     (assert-true (< (abs (- 3.14 (php-tok-value (first tokens)))) 1e-6))))
 
-(deftest php-lex-string-double-quote
-  (let ((tokens (tokenize-php-source "<?php \"hello\";")))
-    (assert-eq :T-STRING (php-tok-type (first tokens)))
-    (assert-equal "hello" (php-tok-value (first tokens)))))
-
-(deftest php-lex-string-single-quote
-  (let ((tokens (tokenize-php-source "<?php 'world';")))
-    (assert-eq :T-STRING (php-tok-type (first tokens)))
-    (assert-equal "world" (php-tok-value (first tokens)))))
+(deftest-each php-lex-string-literals
+  "Both single- and double-quoted strings lex as :T-STRING"
+  :cases (("double-quote" "<?php \"hello\";" "hello")
+          ("single-quote" "<?php 'world';"  "world"))
+  (source expected-val)
+  (let ((tok (first (tokenize-php-source source))))
+    (assert-eq :T-STRING (php-tok-type tok))
+    (assert-equal expected-val (php-tok-value tok))))
 
 (deftest php-lex-variable
   (let ((tokens (tokenize-php-source "<?php $x;")))
     (assert-eq :T-VAR (php-tok-type (first tokens)))
     (assert-true (string-equal "x" (symbol-name (php-tok-value (first tokens)))))))
 
-(deftest php-lex-keyword-if
-  (let ((tokens (tokenize-php-source "<?php if")))
-    (assert-eq :T-KEYWORD (php-tok-type (first tokens)))
-    (assert-eq :if (php-tok-value (first tokens)))))
-
-(deftest php-lex-keyword-function
-  (let ((tokens (tokenize-php-source "<?php function")))
-    (assert-eq :T-KEYWORD (php-tok-type (first tokens)))
-    (assert-eq :function (php-tok-value (first tokens)))))
+(deftest-each php-lex-keywords
+  "PHP reserved words lex as :T-KEYWORD with the correct value"
+  :cases (("if"       "<?php if"       :if)
+          ("function" "<?php function" :function))
+  (source expected-kw)
+  (let ((tok (first (tokenize-php-source source))))
+    (assert-eq :T-KEYWORD (php-tok-type tok))
+    (assert-eq expected-kw (php-tok-value tok))))
 
 (deftest php-lex-type-int
   (let ((tokens (tokenize-php-source "<?php int")))
     (assert-eq :T-TYPE (php-tok-type (first tokens)))
     (assert-eq :int (php-tok-value (first tokens)))))
 
-(deftest php-lex-arrow
-  (let ((tokens (tokenize-php-source "<?php ->")))
-    (assert-eq :T-ARROW (php-tok-type (first tokens)))))
-
-(deftest php-lex-nullsafe-arrow
-  (let ((tokens (tokenize-php-source "<?php ?->")))
-    (assert-eq :T-NULLSAFE-ARROW (php-tok-type (first tokens)))))
-
-(deftest php-lex-semicolon
-  (let ((tokens (tokenize-php-source "<?php ;")))
-    (assert-eq :T-SEMI (php-tok-type (first tokens)))))
+(deftest-each php-lex-punctuation
+  "PHP punctuation tokens lex to the correct token type"
+  :cases (("arrow"         "<?php ->"  :T-ARROW)
+          ("nullsafe-arrow" "<?php ?->" :T-NULLSAFE-ARROW)
+          ("semicolon"     "<?php ;"   :T-SEMI))
+  (source expected-type)
+  (assert-eq expected-type (php-tok-type (first (tokenize-php-source source)))))
 
 (deftest php-lex-comment-line
   "Comments should be skipped."

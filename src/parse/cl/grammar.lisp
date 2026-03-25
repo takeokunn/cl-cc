@@ -172,7 +172,8 @@
                        (lexer-token-value head-tok)))
            (kind (when head-sym (sexp-head-to-kind head-sym))))
       ;; Parse all elements generically — works for all forms
-      (let ((children nil))
+      (let ((children nil)
+            (dotted-p nil))
         (loop until (or (ts-at-end-p ts) (eq (ts-peek-type ts) :T-RPAREN))
               do (cond
                    ;; Dotted pair
@@ -180,6 +181,7 @@
                     (ts-advance ts) ; consume dot
                     (let ((cdr-form (parse-cl-form ts)))
                       (when cdr-form (push cdr-form children)))
+                    (setf dotted-p t)
                     (return))
                    (t
                     (let ((elem (parse-cl-form ts)))
@@ -188,7 +190,8 @@
         (setf children (nreverse children))
         (let ((close (ts-expect ts :T-RPAREN "list form")))
           (let ((end (if close (lexer-token-end-byte close) start)))
-            (%make-list-cst (or kind :list) children start end)))))))
+            (%make-list-cst (if dotted-p :dotted-list (or kind :list))
+                            children start end)))))))
 
 ;;; ─── Specialized Parsers ────────────────────────────────────────────────────
 ;;;

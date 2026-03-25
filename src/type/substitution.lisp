@@ -111,129 +111,101 @@ Nil is treated as the empty substitution (identity element)."
 
 (defun zonk (ty subst)
   "Eagerly apply SUBST to TY, following variable chains to fixpoints."
-  (cond
-    ;; nil / non-type
-    ((null ty) nil)
-    ;; Follow type-var links (path compression)
-    ((type-var-p ty)
+  (typecase ty
+    (null nil)
+    (type-var
      (let ((link (type-var-link ty)))
-       (cond
-         (link
-          ;; Chain: follow link (with path compression)
-          (let ((resolved (zonk link subst)))
-            (setf (type-var-link ty) resolved)
-            resolved))
-         (t
-          ;; Check substitution map
-          (multiple-value-bind (bound found-p) (subst-lookup ty subst)
-            (if found-p
-                (let ((resolved (zonk bound subst)))
-                  (setf (type-var-link ty) resolved)
-                  resolved)
-                ty))))))
-    ;; Rigid — never zonked
-    ((type-rigid-p ty) ty)
-    ;; Primitive / error — leaf types
-    ((or (type-primitive-p ty) (type-error-p ty)) ty)
-    ;; Arrow
-    ((type-arrow-p ty)
+       (if link
+           (let ((resolved (zonk link subst)))
+             (setf (type-var-link ty) resolved)
+             resolved)
+           (multiple-value-bind (bound found-p) (subst-lookup ty subst)
+             (if found-p
+                 (let ((resolved (zonk bound subst)))
+                   (setf (type-var-link ty) resolved)
+                   resolved)
+                 ty)))))
+    (type-rigid ty)
+    ((or type-primitive type-error) ty)
+    (type-arrow
      (make-type-arrow-raw
       :params  (mapcar (lambda (p) (zonk p subst)) (type-arrow-params ty))
       :return  (zonk (type-arrow-return ty) subst)
       :effects (when (type-arrow-effects ty) (zonk (type-arrow-effects ty) subst))
       :mult    (type-arrow-mult ty)))
-    ;; Product
-    ((type-product-p ty)
+    (type-product
      (make-type-product :elems (mapcar (lambda (e) (zonk e subst)) (type-product-elems ty))))
-    ;; Record
-    ((type-record-p ty)
+    (type-record
      (make-type-record
       :fields  (mapcar (lambda (f) (cons (car f) (zonk (cdr f) subst)))
                        (type-record-fields ty))
       :row-var (when (type-record-row-var ty) (zonk (type-record-row-var ty) subst))))
-    ;; Variant
-    ((type-variant-p ty)
+    (type-variant
      (make-type-variant
       :cases   (mapcar (lambda (c) (cons (car c) (zonk (cdr c) subst)))
                        (type-variant-cases ty))
       :row-var (when (type-variant-row-var ty) (zonk (type-variant-row-var ty) subst))))
-    ;; Union
-    ((type-union-p ty)
+    (type-union
      (make-type-union-raw
       :types (mapcar (lambda (t0) (zonk t0 subst)) (type-union-types ty))))
-    ;; Intersection
-    ((type-intersection-p ty)
+    (type-intersection
      (make-type-intersection-raw
       :types (mapcar (lambda (t0) (zonk t0 subst)) (type-intersection-types ty))))
-    ;; Forall — zonk body, leave var alone
-    ((type-forall-p ty)
+    (type-forall
      (make-type-forall :var (type-forall-var ty)
                        :knd (type-forall-knd ty)
                        :body (zonk (type-forall-body ty) subst)))
-    ;; Exists
-    ((type-exists-p ty)
+    (type-exists
      (make-type-exists :var (type-exists-var ty)
                        :knd (type-exists-knd ty)
                        :body (zonk (type-exists-body ty) subst)))
-    ;; App
-    ((type-app-p ty)
+    (type-app
      (make-type-app :fun (zonk (type-app-fun ty) subst)
                     :arg (zonk (type-app-arg ty) subst)))
-    ;; Lambda
-    ((type-lambda-p ty)
+    (type-lambda
      (make-type-lambda :var (type-lambda-var ty)
                        :knd (type-lambda-knd ty)
                        :body (zonk (type-lambda-body ty) subst)))
-    ;; Mu
-    ((type-mu-p ty)
+    (type-mu
      (make-type-mu :var (type-mu-var ty)
                    :body (zonk (type-mu-body ty) subst)))
-    ;; Refinement
-    ((type-refinement-p ty)
+    (type-refinement
      (make-type-refinement :base (zonk (type-refinement-base ty) subst)
                            :predicate (type-refinement-predicate ty)))
-    ;; Linear
-    ((type-linear-p ty)
+    (type-linear
      (make-type-linear :base (zonk (type-linear-base ty) subst)
                        :grade (type-linear-grade ty)))
-    ;; Capability
-    ((type-capability-p ty)
+    (type-capability
      (make-type-capability :base (zonk (type-capability-base ty) subst)
                            :cap  (type-capability-cap ty)))
-    ;; Effect-row
-    ((type-effect-row-p ty)
-     (let ((effects (mapcar (lambda (e) (zonk e subst)) (type-effect-row-effects ty)))
-           (rv (type-effect-row-row-var ty)))
-       (if rv
-           (let ((resolved (zonk rv subst)))
-             (if (type-effect-row-p resolved)
-                 ;; Merge rows if row-var resolved to another row
-                 (make-type-effect-row
-                  :effects (append effects (type-effect-row-effects resolved))
-                  :row-var (type-effect-row-row-var resolved))
-                 (make-type-effect-row :effects effects :row-var resolved)))
-           (make-type-effect-row :effects effects :row-var nil))))
-    ;; Effect-op
-    ((type-effect-op-p ty)
+    (type-effect-row
+     (let* ((effects  (mapcar (lambda (e) (zonk e subst)) (type-effect-row-effects ty)))
+            (rv       (type-effect-row-row-var ty))
+            (resolved (when rv (zonk rv subst))))
+       (cond
+         ((null rv) (make-type-effect-row :effects effects :row-var nil))
+         ((type-effect-row-p resolved)
+          ;; Row-var resolved to another row: merge
+          (make-type-effect-row
+           :effects (append effects (type-effect-row-effects resolved))
+           :row-var (type-effect-row-row-var resolved)))
+         (t (make-type-effect-row :effects effects :row-var resolved)))))
+    (type-effect-op
      (make-type-effect-op :name (type-effect-op-name ty)
                           :args (mapcar (lambda (a) (zonk a subst))
                                         (type-effect-op-args ty))))
-    ;; Handler
-    ((type-handler-p ty)
+    (type-handler
      (make-type-handler :effect (zonk (type-handler-effect ty) subst)
                         :input  (zonk (type-handler-input  ty) subst)
                         :output (zonk (type-handler-output ty) subst)))
-    ;; Constraint
-    ((type-constraint-p ty)
+    (type-constraint
      (make-type-constraint :class-name (type-constraint-class-name ty)
                            :type-arg   (zonk (type-constraint-type-arg ty) subst)))
-    ;; Qualified
-    ((type-qualified-p ty)
+    (type-qualified
      (make-type-qualified
       :constraints (mapcar (lambda (c) (zonk c subst))
                            (type-qualified-constraints ty))
       :body        (zonk (type-qualified-body ty) subst)))
-    ;; Fallthrough
     (t ty)))
 
 ;;; ─── Backward-compat: type-substitute ────────────────────────────────────
@@ -263,35 +235,33 @@ Nil is treated as the empty substitution (identity element)."
 (defun type-occurs-p (var ty subst)
   "True iff type-var VAR appears free in TY (under SUBST)."
   (labels ((occ (t0)
-             (cond
-               ((type-var-p t0)
+             (typecase t0
+               (type-var
                 (multiple-value-bind (bound found-p) (subst-lookup t0 subst)
-                  (if found-p
-                      (occ bound)
-                      (type-var-equal-p var t0))))
-               ((type-arrow-p t0)
+                  (if found-p (occ bound) (type-var-equal-p var t0))))
+               (type-arrow
                 (or (some #'occ (type-arrow-params t0))
                     (occ (type-arrow-return t0))
                     (and (type-arrow-effects t0) (occ (type-arrow-effects t0)))))
-               ((type-product-p t0)      (some #'occ (type-product-elems t0)))
-               ((type-union-p t0)        (some #'occ (type-union-types t0)))
-               ((type-intersection-p t0) (some #'occ (type-intersection-types t0)))
-               ((type-record-p t0)
+               (type-product      (some #'occ (type-product-elems t0)))
+               (type-union        (some #'occ (type-union-types t0)))
+               (type-intersection (some #'occ (type-intersection-types t0)))
+               (type-record
                 (or (some (lambda (f) (occ (cdr f))) (type-record-fields t0))
                     (and (type-record-row-var t0) (occ (type-record-row-var t0)))))
-               ((type-variant-p t0)
+               (type-variant
                 (or (some (lambda (c) (occ (cdr c))) (type-variant-cases t0))
                     (and (type-variant-row-var t0) (occ (type-variant-row-var t0)))))
-               ((type-forall-p t0) (occ (type-forall-body t0)))
-               ((type-exists-p t0) (occ (type-exists-body t0)))
-               ((type-app-p t0) (or (occ (type-app-fun t0)) (occ (type-app-arg t0))))
-               ((type-mu-p t0) (occ (type-mu-body t0)))
-               ((type-linear-p t0) (occ (type-linear-base t0)))
-               ((type-effect-row-p t0)
+               (type-forall  (occ (type-forall-body t0)))
+               (type-exists  (occ (type-exists-body t0)))
+               (type-app     (or (occ (type-app-fun t0)) (occ (type-app-arg t0))))
+               (type-mu      (occ (type-mu-body t0)))
+               (type-linear  (occ (type-linear-base t0)))
+               (type-effect-row
                 (or (some #'occ (type-effect-row-effects t0))
                     (and (type-effect-row-row-var t0) (occ (type-effect-row-row-var t0)))))
-               ((type-constraint-p t0) (occ (type-constraint-type-arg t0)))
-               ((type-qualified-p t0)
+               (type-constraint (occ (type-constraint-type-arg t0)))
+               (type-qualified
                 (or (some #'occ (type-qualified-constraints t0))
                     (occ (type-qualified-body t0))))
                (t nil))))
@@ -340,15 +310,15 @@ ENV may be a type-env struct, an alist (backward compat), or nil (empty env)."
                      (setf (gethash (type-var-id v) mapping) nv)
                      nv)))
              (norm (t0)
-               (cond
-                 ((type-var-p t0) (canonical t0))
-                 ((type-arrow-p t0)
+               (typecase t0
+                 (type-var (canonical t0))
+                 (type-arrow
                   (make-type-arrow-raw
                    :params (mapcar #'norm (type-arrow-params t0))
                    :return (norm (type-arrow-return t0))
                    :effects (when (type-arrow-effects t0) (norm (type-arrow-effects t0)))
                    :mult (type-arrow-mult t0)))
-                 ((type-product-p t0)
+                 (type-product
                   (make-type-product :elems (mapcar #'norm (type-product-elems t0))))
                  (t t0))))
       (norm ty))))

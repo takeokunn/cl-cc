@@ -73,72 +73,44 @@
 
 (defun infer (ast env)
   "Infer type of AST in environment.
-
    Returns (values type substitution) or signals type-error."
-  (cond
-    ;; Integer literal
-    ((typep ast 'cl-cc:ast-int)
+  (typecase ast
+    (cl-cc:ast-int
      (values type-int nil))
 
-    ;; Variable reference
-    ((typep ast 'cl-cc:ast-var)
+    (cl-cc:ast-var
      (multiple-value-bind (scheme found-p) (type-env-lookup (cl-cc:ast-var-name ast) env)
        (if found-p
            (values (instantiate scheme) nil)
-           (error 'unbound-variable-error
-                  :name (cl-cc:ast-var-name ast)))))
+           (error 'unbound-variable-error :name (cl-cc:ast-var-name ast)))))
 
-    ;; Binary operation
-    ((typep ast 'cl-cc:ast-binop)
-     (infer-binop ast env))
+    (cl-cc:ast-binop  (infer-binop  ast env))
+    (cl-cc:ast-if     (infer-if     ast env))
+    (cl-cc:ast-let    (infer-let    ast env))
+    (cl-cc:ast-lambda (infer-lambda ast env))
+    (cl-cc:ast-progn  (infer-progn  ast env))
+    (cl-cc:ast-call   (infer-call   ast env))
+    (cl-cc:ast-print  (infer-print  ast env))
 
-    ;; If expression
-    ((typep ast 'cl-cc:ast-if)
-     (infer-if ast env))
-
-    ;; Let binding
-    ((typep ast 'cl-cc:ast-let)
-     (infer-let ast env))
-
-    ;; Lambda
-    ((typep ast 'cl-cc:ast-lambda)
-     (infer-lambda ast env))
-
-    ;; Progn (sequence)
-    ((typep ast 'cl-cc:ast-progn)
-     (infer-progn ast env))
-
-    ;; Function call
-    ((typep ast 'cl-cc:ast-call)
-     (infer-call ast env))
-
-    ;; Print (side effect, returns type of expr)
-    ((typep ast 'cl-cc:ast-print)
-     (infer-print ast env))
-
-    ;; Quote - infer type from quoted value
-    ((typep ast 'cl-cc:ast-quote)
+    (cl-cc:ast-quote
      (let ((val (cl-cc:ast-quote-value ast)))
-       (values (cond ((integerp val) type-int)
-                     ((stringp val) type-string)
-                     ((symbolp val) type-symbol)
-                     ((consp val) type-cons)
-                     (t +type-unknown+))
+       (values (typecase val
+                 (integer type-int)
+                 (string  type-string)
+                 (symbol  type-symbol)
+                 (cons    type-cons)
+                 (t       +type-unknown+))
                nil)))
 
-    ;; The - type assertion
-    ((typep ast 'cl-cc:ast-the)
+    (cl-cc:ast-the
      (multiple-value-bind (body-type subst) (infer (cl-cc:ast-the-value ast) env)
        (let ((declared (parse-type-specifier (cl-cc:ast-the-type ast))))
          (multiple-value-bind (unified ok) (type-unify body-type declared subst)
            (if ok
                (values (type-substitute declared unified) unified)
-               (error 'type-mismatch-error
-                      :expected declared
-                      :actual body-type))))))
+               (error 'type-mismatch-error :expected declared :actual body-type))))))
 
-    ;; Setq - variable assignment
-    ((typep ast 'cl-cc:ast-setq)
+    (cl-cc:ast-setq
      (multiple-value-bind (val-type subst) (infer (cl-cc:ast-setq-value ast) env)
        (multiple-value-bind (scheme found-p) (type-env-lookup (cl-cc:ast-setq-var ast) env)
          (if found-p
@@ -146,102 +118,79 @@
                (multiple-value-bind (unified ok) (type-unify val-type declared subst)
                  (if ok
                      (values (type-substitute val-type unified) unified)
-                     (error 'type-mismatch-error
-                            :expected declared
-                            :actual val-type))))
+                     (error 'type-mismatch-error :expected declared :actual val-type))))
              (values val-type subst)))))
 
-    ;; Defun - top-level function definition
-    ((typep ast 'cl-cc:ast-defun)
-     (let* ((param-types (mapcar (lambda (p)
-                                   (declare (ignore p))
-                                   (fresh-type-var))
-                                 (cl-cc:ast-defun-params ast)))
+    (cl-cc:ast-defun
+     (let* ((param-types    (mapcar (lambda (p) (declare (ignore p)) (fresh-type-var))
+                                    (cl-cc:ast-defun-params ast)))
             (param-bindings (mapcar (lambda (name type)
-                                     (cons name (make-type-scheme nil type)))
-                                   (cl-cc:ast-defun-params ast)
-                                   param-types))
+                                      (cons name (make-type-scheme nil type)))
+                                    (cl-cc:ast-defun-params ast) param-types))
             (body-env (type-env-extend* param-bindings env)))
        (infer-body (cl-cc:ast-defun-body ast) body-env)
        (values type-symbol nil)))
 
-    ;; Defvar - top-level variable definition
-    ((typep ast 'cl-cc:ast-defvar)
+    (cl-cc:ast-defvar
      (when (cl-cc:ast-defvar-value ast)
        (infer (cl-cc:ast-defvar-value ast) env))
      (values type-symbol nil))
 
-    ;; Function reference (#'name)
-    ((typep ast 'cl-cc:ast-function)
+    (cl-cc:ast-function
      (multiple-value-bind (scheme found-p) (type-env-lookup (cl-cc:ast-function-name ast) env)
        (if found-p
            (values (instantiate scheme) nil)
            (values +type-unknown+ nil))))
 
-    ;; Flet - local non-recursive function bindings
-    ((typep ast 'cl-cc:ast-flet)
+    (cl-cc:ast-flet
      (let ((new-env env))
        (dolist (binding (cl-cc:ast-flet-bindings ast))
          (setf new-env (%infer-fn-binding binding env new-env)))
        (infer-body (cl-cc:ast-flet-body ast) new-env)))
 
-    ;; Labels - local recursive function bindings
-    ((typep ast 'cl-cc:ast-labels)
+    (cl-cc:ast-labels
      (let ((new-env env))
-       ;; First pass: seed all names so recursive calls resolve
+       ;; First pass: seed all names so recursive calls resolve.
        (dolist (binding (cl-cc:ast-labels-bindings ast))
          (setf new-env (type-env-extend (first binding)
                                         (make-type-scheme nil (fresh-type-var))
                                         new-env)))
-       ;; Second pass: infer each body in the mutually-recursive env
+       ;; Second pass: infer each binding in the mutually-recursive env.
        (dolist (binding (cl-cc:ast-labels-bindings ast))
          (setf new-env (%infer-fn-binding binding new-env new-env)))
        (infer-body (cl-cc:ast-labels-body ast) new-env)))
 
-    ;; Block - named block
-    ((typep ast 'cl-cc:ast-block)
-     (infer-body (cl-cc:ast-block-body ast) env))
+    (cl-cc:ast-block       (infer-body (cl-cc:ast-block-body ast) env))
+    (cl-cc:ast-return-from (infer (cl-cc:ast-return-from-value ast) env))
 
-    ;; Return-from - return from named block
-    ((typep ast 'cl-cc:ast-return-from)
-     (infer (cl-cc:ast-return-from-value ast) env))
-
-    ;; Defclass - class definition: register slot types
-    ((typep ast 'cl-cc:ast-defclass)
+    (cl-cc:ast-defclass
      (let* ((class-name (cl-cc:ast-defclass-name ast))
-            (slots (cl-cc:ast-defclass-slots ast))
-            (slot-types
-              (loop for slot in slots
-                    for stype = (cl-cc:ast-slot-type slot)
-                    collect (cons (cl-cc:ast-slot-name slot)
-                                  (if stype
-                                      (parse-type-specifier stype)
-                                      +type-unknown+)))))
+            (slot-types (loop for slot in (cl-cc:ast-defclass-slots ast)
+                              for stype = (cl-cc:ast-slot-type slot)
+                              collect (cons (cl-cc:ast-slot-name slot)
+                                            (if stype
+                                                (parse-type-specifier stype)
+                                                +type-unknown+)))))
        (register-class-type class-name slot-types)
        (values type-symbol nil)))
 
-    ;; Make-instance - object creation: return class as named type
-    ((typep ast 'cl-cc:ast-make-instance)
+    (cl-cc:ast-make-instance
      (let ((class-expr (cl-cc:ast-make-instance-class ast)))
        (if (and (typep class-expr 'cl-cc:ast-quote)
                 (symbolp (cl-cc:ast-quote-value class-expr)))
-           (values (make-type-primitive
-                                  :name (cl-cc:ast-quote-value class-expr))
-                   nil)
+           (values (make-type-primitive :name (cl-cc:ast-quote-value class-expr)) nil)
            (values +type-unknown+ nil))))
 
-    ;; Slot-value - slot access: look up slot type from class registry
-    ((typep ast 'cl-cc:ast-slot-value)
+    (cl-cc:ast-slot-value
      (multiple-value-bind (obj-type subst) (infer (cl-cc:ast-slot-value-object ast) env)
        (let* ((slot-name (cl-cc:ast-slot-value-slot ast))
-              (slot-type
-                (if (typep obj-type 'type-primitive)
-                    (or (lookup-slot-type (type-primitive-name obj-type) slot-name)
-                        +type-unknown+)
-                    +type-unknown+)))
+              (slot-type (if (typep obj-type 'type-primitive)
+                             (or (lookup-slot-type (type-primitive-name obj-type) slot-name)
+                                 +type-unknown+)
+                             +type-unknown+)))
          (values slot-type subst))))
 
-    ;; Unknown AST type - return unknown for gradual typing
+    ;; Unknown AST node — gradual typing fallback.
     (t (values +type-unknown+ nil))))
 
 (defun infer-binop (ast env)
@@ -415,19 +364,6 @@
                                   class-name
                                   (type-to-string type-arg))))))))
 
-(defun infer-or-check-arg (arg expected-type env)
-  "Infer or check a single argument.
-   If EXPECTED-TYPE is type-forall, use check mode (top-down).
-   Otherwise, use synthesize mode (bottom-up)."
-  (if (typep expected-type 'type-forall)
-      ;; Higher-rank argument: check mode with skolem
-      (progn
-        (check arg expected-type env)
-        ;; Return the expected type (since check mode verifies conformance)
-        expected-type)
-      ;; Regular argument: synthesize mode
-      (multiple-value-bind (type subst) (infer arg env)
-        (type-substitute type subst))))
 
 (defun infer-call (ast env)
   "Infer type for function call with typeclass constraint checking."
@@ -482,13 +418,6 @@
             (values (type-substitute final-type (compose-subst final-subst subst))
                     (compose-subst final-subst subst)))))))
 
-(defun infer-top-level (asts &optional (env (type-env-empty)))
-  "Infer types for multiple top-level forms.
-   Returns list of (type . substitution) pairs."
-  (mapcar (lambda (ast)
-            (multiple-value-bind (type subst) (infer ast env)
-              (cons type subst)))
-          asts))
 
 (defun infer-with-env (ast)
   "Infer type of AST in empty environment (convenience function)."
@@ -501,66 +430,46 @@
 (defun infer-effects (ast env)
   "Infer the effect row produced by evaluating AST in environment ENV.
    Returns a type-effect-row. Pure expressions return +pure-effect-row+."
-  (cond
-    ((or (typep ast 'cl-cc:ast-int) (typep ast 'cl-cc:ast-quote))
-     +pure-effect-row+)
-    ((typep ast 'cl-cc:ast-var)
-     +pure-effect-row+)
-    ((typep ast 'cl-cc:ast-binop)
-     +pure-effect-row+)
-    ((typep ast 'cl-cc:ast-if)
-     (effect-row-union
-      (infer-effects (cl-cc:ast-if-cond ast) env)
-      (effect-row-union
-       (infer-effects (cl-cc:ast-if-then ast) env)
-       (infer-effects (cl-cc:ast-if-else ast) env))))
-    ((typep ast 'cl-cc:ast-let)
-     (let ((binding-effects
-            (reduce #'effect-row-union
-                    (mapcar (lambda (b) (infer-effects (cdr b) env))
-                            (cl-cc:ast-let-bindings ast))
-                    :initial-value +pure-effect-row+)))
+  (flet ((union-list (forms)
+           (reduce #'effect-row-union
+                   (mapcar (lambda (f) (infer-effects f env)) forms)
+                   :initial-value +pure-effect-row+)))
+    (typecase ast
+      ((or cl-cc:ast-int cl-cc:ast-quote cl-cc:ast-var
+           cl-cc:ast-binop cl-cc:ast-lambda
+           cl-cc:ast-defun cl-cc:ast-defvar)
+       +pure-effect-row+)
+
+      (cl-cc:ast-print +io-effect-row+)
+
+      (cl-cc:ast-setq
+       (make-type-effect-row :effects (list (make-type-effect :name 'state))
+                             :row-var nil))
+
+      (cl-cc:ast-if
+       (effect-row-union (infer-effects (cl-cc:ast-if-cond ast) env)
+                         (effect-row-union
+                          (infer-effects (cl-cc:ast-if-then ast) env)
+                          (infer-effects (cl-cc:ast-if-else ast) env))))
+
+      (cl-cc:ast-let
        (effect-row-union
-        binding-effects
-        (reduce #'effect-row-union
-                (mapcar (lambda (b) (infer-effects b env))
-                        (cl-cc:ast-let-body ast))
-                :initial-value +pure-effect-row+))))
-    ((typep ast 'cl-cc:ast-lambda)
-     +pure-effect-row+)
-    ((typep ast 'cl-cc:ast-progn)
-     (reduce #'effect-row-union
-             (mapcar (lambda (f) (infer-effects f env))
-                     (cl-cc:ast-progn-forms ast))
-             :initial-value +pure-effect-row+))
-    ((typep ast 'cl-cc:ast-print)
-     +io-effect-row+)
-    ((typep ast 'cl-cc:ast-call)
-     (let* ((func (cl-cc:ast-call-func ast))
-            (base-effects
-             (if (typep func 'cl-cc:ast-var)
-                 (lookup-effect-signature (cl-cc:ast-var-name func))
-                 +pure-effect-row+))
-            (arg-effects
-             (reduce #'effect-row-union
-                     (mapcar (lambda (a) (infer-effects a env))
-                             (cl-cc:ast-call-args ast))
-                     :initial-value +pure-effect-row+)))
-       (effect-row-union base-effects arg-effects)))
-    ((typep ast 'cl-cc:ast-setq)
-     (make-type-effect-row
-      :effects (list (make-type-effect :name 'state))
-      :row-var nil))
-    ((or (typep ast 'cl-cc:ast-defun) (typep ast 'cl-cc:ast-defvar))
-     +pure-effect-row+)
-    ((typep ast 'cl-cc:ast-block)
-     (reduce #'effect-row-union
-             (mapcar (lambda (b) (infer-effects b env))
-                     (cl-cc:ast-block-body ast))
-             :initial-value +pure-effect-row+))
-    (t (make-type-effect-row
-        :effects nil
-        :row-var (make-type-variable "eff")))))
+        (union-list (mapcar #'cdr (cl-cc:ast-let-bindings ast)))
+        (union-list (cl-cc:ast-let-body ast))))
+
+      (cl-cc:ast-progn  (union-list (cl-cc:ast-progn-forms ast)))
+      (cl-cc:ast-block  (union-list (cl-cc:ast-block-body  ast)))
+
+      (cl-cc:ast-call
+       (let* ((func         (cl-cc:ast-call-func ast))
+              (base-effects (if (typep func 'cl-cc:ast-var)
+                                (lookup-effect-signature (cl-cc:ast-var-name func))
+                                +pure-effect-row+)))
+         (effect-row-union base-effects
+                           (union-list (cl-cc:ast-call-args ast)))))
+
+      (t (make-type-effect-row :effects nil
+                               :row-var (make-type-variable "eff"))))))
 
 (defun infer-with-effects (ast env)
   "Infer type, substitution, AND effect row for AST.
@@ -632,21 +541,17 @@
 
 (defun skolem-appears-in-type-p (skolem type)
   "Return T if SKOLEM appears free in TYPE."
-  (cond
-    ((typep type 'type-skolem) (type-skolem-equal-p skolem type))
-    ((typep type 'type-variable) nil)
-    ((typep type 'type-function)
-     (or (some (lambda (p) (skolem-appears-in-type-p skolem p))
-               (type-function-params type))
-         (skolem-appears-in-type-p skolem (type-function-return type))))
-    ((typep type 'type-forall)
-     (skolem-appears-in-type-p skolem (type-forall-body type)))
-    ((typep type 'type-constructor)
-     (some (lambda (a) (skolem-appears-in-type-p skolem a))
-           (type-constructor-args type)))
-    ((typep type 'type-tuple)
-     (some (lambda (e) (skolem-appears-in-type-p skolem e))
-           (type-tuple-elements type)))
+  (typecase type
+    (type-skolem      (type-skolem-equal-p skolem type))
+    (type-variable    nil)
+    (type-function    (or (some (lambda (p) (skolem-appears-in-type-p skolem p))
+                               (type-function-params type))
+                         (skolem-appears-in-type-p skolem (type-function-return type))))
+    (type-forall      (skolem-appears-in-type-p skolem (type-forall-body type)))
+    (type-constructor (some (lambda (a) (skolem-appears-in-type-p skolem a))
+                            (type-constructor-args type)))
+    (type-tuple       (some (lambda (e) (skolem-appears-in-type-p skolem e))
+                            (type-tuple-elements type)))
     (t nil)))
 
 (defun skolem-appears-in-subst-p (skolem subst)
@@ -672,14 +577,13 @@
    Returns substitution on success, signals type-mismatch-error on failure.
    Gradual typing: unknown expected type always succeeds.
    Rank-N: forall in expected position introduces skolem constants."
-  (cond
+  (typecase expected-type
     ;; Gradual typing escape hatch: unknown expected type always succeeds
-    ((typep expected-type 'type-unknown)
-     nil)
+    (type-unknown nil)
 
     ;; Rank-N: checking against (forall a T) introduces a skolem for a
     ;; and checks the body under that skolem
-    ((typep expected-type 'type-forall)
+    (type-forall
      (let* ((bound-var (type-forall-var expected-type))
             (skolem (make-type-skolem (if (type-variable-name bound-var)
                                           (type-variable-name bound-var)
@@ -699,18 +603,17 @@
     (t
      (multiple-value-bind (actual-type subst) (synthesize ast env)
        (let ((actual (type-substitute actual-type subst)))
-         (cond
-           ;; Actual unknown: gradual typing, always ok
-           ((typep actual 'type-unknown) subst)
-           ;; Try unification (handles type variables)
-           (t
-            (multiple-value-bind (unified ok)
-                (type-unify actual expected-type subst)
-              (if ok
-                  unified
-                  (error 'type-mismatch-error
-                         :expected expected-type
-                         :actual actual))))))))))
+         (if (typep actual 'type-unknown)
+             ;; Actual unknown: gradual typing, always ok
+             subst
+             ;; Try unification (handles type variables)
+             (multiple-value-bind (unified ok)
+                 (type-unify actual expected-type subst)
+               (if ok
+                   unified
+                   (error 'type-mismatch-error
+                          :expected expected-type
+                          :actual actual)))))))))
 
 (defun check-body (asts expected-type env)
   "Check that the last form in ASTS has EXPECTED-TYPE in ENV.
@@ -787,7 +690,6 @@
           infer-call
           infer-progn
           infer-args
-          infer-top-level
           infer-with-env
           annotate-type
 

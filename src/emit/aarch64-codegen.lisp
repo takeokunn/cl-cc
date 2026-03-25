@@ -129,15 +129,6 @@
   (logior #x14000000
           (logand imm26 #x3FFFFFF)))
 
-;;; B.EQ #imm (Conditional branch, equal / zero flag)
-;;; Encoding: #x54000000 | (imm19 << 5) | cond
-;;; EQ=0, NE=1
-(defun encode-b-cond (imm19 cond)
-  "B.cond #imm19. cond: 0=EQ, 1=NE. imm19 in instruction units."
-  (logior #x54000000
-          (ash (logand imm19 #x7FFFF) 5)
-          (logand cond #xF)))
-
 ;;; BLR Xn (Branch with Link to Register - indirect call)
 ;;; Encoding: #xD63F0000 | (Xn << 5)
 (defun encode-blr (rn)
@@ -220,24 +211,30 @@
 
 ;;; Instruction Size Estimation (for two-pass label resolution)
 
+(defparameter *a64-instruction-sizes*
+  (let ((ht (make-hash-table :test #'eq)))
+    (setf (gethash 'vm-move ht) 4)          ; encode-mov-rr
+    (setf (gethash 'vm-add ht) 4)           ; encode-add
+    (setf (gethash 'vm-sub ht) 4)           ; encode-sub
+    (setf (gethash 'vm-mul ht) 4)           ; encode-mul
+    (setf (gethash 'vm-label ht) 0)         ; no code
+    (setf (gethash 'vm-jump ht) 4)          ; encode-b
+    (setf (gethash 'vm-jump-zero ht) 4)     ; encode-cbz
+    (setf (gethash 'vm-halt ht) 4)          ; encode-mov-rr
+    (setf (gethash 'vm-ret ht) 28)          ; 6x LDP + RET = 7 instructions
+    (setf (gethash 'vm-call ht) 4)          ; encode-blr
+    (setf (gethash 'vm-spill-store ht) 4)   ; STUR
+    (setf (gethash 'vm-spill-load ht) 4)    ; LDUR
+    (setf (gethash 'vm-print ht) 0)
+    ht)
+  "Maps VM instruction type symbols to their AArch64 encoded byte sizes.")
+
 (defun a64-instruction-size (inst)
   "Return size in bytes (multiple of 4) for an AArch64-encoded VM instruction."
-  (typecase inst
-    (vm-const (* 4 (a64-imm64-size (logand (vm-value inst) #xFFFFFFFFFFFFFFFF))))
-    (vm-move 4)          ; encode-mov-rr
-    (vm-add 4)           ; encode-add
-    (vm-sub 4)           ; encode-sub
-    (vm-mul 4)           ; encode-mul
-    (vm-label 0)         ; no code
-    (vm-jump 4)          ; encode-b
-    (vm-jump-zero 4)     ; encode-cbz (one instruction)
-    (vm-halt 4)          ; encode-mov-rr (always 1 instruction)
-    (vm-ret 28)          ; 6x LDP + RET = 7 instructions (see emit-a64-vm-ret)
-    (vm-call 4)          ; encode-blr
-    (vm-spill-store 4)   ; STUR
-    (vm-spill-load 4)    ; LDUR
-    (vm-print 0)
-    (t 0)))
+  (let ((tp (type-of inst)))
+    (if (eq tp 'vm-const)
+        (* 4 (a64-imm64-size (logand (vm-value inst) #xFFFFFFFFFFFFFFFF)))
+        (or (gethash tp *a64-instruction-sizes*) 0))))
 
 ;;; Label offset table builder
 
@@ -334,24 +331,35 @@
 
 ;;; Main program emitter
 
+(defparameter *a64-emitter-table*
+  (let ((ht (make-hash-table :test #'eq)))
+    (setf (gethash 'vm-const ht) #'emit-a64-vm-const)
+    (setf (gethash 'vm-move ht) #'emit-a64-vm-move)
+    (setf (gethash 'vm-add ht) #'emit-a64-vm-add)
+    (setf (gethash 'vm-sub ht) #'emit-a64-vm-sub)
+    (setf (gethash 'vm-mul ht) #'emit-a64-vm-mul)
+    (setf (gethash 'vm-halt ht) #'emit-a64-vm-halt)
+    (setf (gethash 'vm-ret ht) #'emit-a64-vm-ret)
+    (setf (gethash 'vm-spill-store ht) #'emit-a64-vm-spill-store)
+    (setf (gethash 'vm-spill-load ht) #'emit-a64-vm-spill-load)
+    ht)
+  "Maps VM instruction type symbols to AArch64 emitter functions (inst stream).")
+
 (defun emit-a64-instruction (inst stream current-pos label-offsets)
   "Emit AArch64 machine code for one VM instruction."
-  (typecase inst
-    (vm-const    (emit-a64-vm-const inst stream))
-    (vm-move     (emit-a64-vm-move inst stream))
-    (vm-add      (emit-a64-vm-add inst stream))
-    (vm-sub      (emit-a64-vm-sub inst stream))
-    (vm-mul      (emit-a64-vm-mul inst stream))
-    (vm-label    nil)
-    (vm-jump     (emit-a64-vm-jump inst stream current-pos label-offsets))
-    (vm-jump-zero (emit-a64-vm-jump-zero inst stream current-pos label-offsets))
-    (vm-halt     (emit-a64-vm-halt inst stream))
-    (vm-ret      (emit-a64-vm-ret inst stream))
-    (vm-call     (emit-a64-instr (encode-blr (a64-reg (vm-func-reg inst))) stream))
-    (vm-spill-store (emit-a64-vm-spill-store inst stream))
-    (vm-spill-load  (emit-a64-vm-spill-load inst stream))
-    (vm-print    nil)
-    (t           (warn "Skipping unsupported AArch64 instruction: ~A" (type-of inst)))))
+  (let ((tp (type-of inst)))
+    (cond
+      ((or (eq tp 'vm-label) (eq tp 'vm-print)) nil)
+      ((eq tp 'vm-jump)
+       (emit-a64-vm-jump inst stream current-pos label-offsets))
+      ((eq tp 'vm-jump-zero)
+       (emit-a64-vm-jump-zero inst stream current-pos label-offsets))
+      ((eq tp 'vm-call)
+       (emit-a64-instr (encode-blr (a64-reg (vm-func-reg inst))) stream))
+      (t (let ((emitter (gethash tp *a64-emitter-table*)))
+           (if emitter
+               (funcall emitter inst stream)
+               (warn "Skipping unsupported AArch64 instruction: ~A" tp)))))))
 
 ;;; AArch64 callee-saved registers to save/restore (X19-X28, X29, X30)
 ;;; X29 = frame pointer (FP), X30 = link register (LR)

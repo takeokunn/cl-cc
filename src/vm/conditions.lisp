@@ -382,57 +382,9 @@ Returns (values handler-found-p handler-info) or signals error."
                   :vm-state vm-state
                   :function-name function-name))
 
-(defun make-vm-arg-count-error (vm-state function-name expected actual)
-  "Construct a vm-arg-count-error condition."
-  (make-condition 'vm-arg-count-error
-                  :vm-state vm-state
-                  :function-name function-name
-                  :expected-count expected
-                  :actual-count actual))
-
-(defun make-vm-control-error (vm-state context)
-  "Construct a vm-control-error condition."
-  (make-condition 'vm-control-error
-                  :vm-state vm-state
-                  :context context))
-
-(defun make-vm-reader-error (vm-state position message)
-  "Construct a vm-reader-error condition."
-  (make-condition 'vm-reader-error
-                  :vm-state vm-state
-                  :position position
-                  :message message))
-
 (defun make-vm-division-by-zero (vm-state dividend)
   "Construct a vm-division-by-zero condition."
   (make-condition 'vm-division-by-zero
                   :vm-state vm-state
                   :dividend dividend))
 
-;;; Integration with Existing VM Operations
-
-(defun vm-checked-binop (op lhs rhs vm-state)
-  "Perform a binary operation with type checking.
-Signals appropriate conditions for errors."
-  (case op
-    ((add +) (+ lhs rhs))
-    ((sub -) (- lhs rhs))
-    ((mul *) (* lhs rhs))
-    ((div /)
-     (if (zerop rhs)
-         (error (make-vm-division-by-zero vm-state lhs))
-         (/ lhs rhs)))
-    (otherwise
-     (error (make-vm-type-error vm-state 'binop op)))))
-
-(defun vm-checked-car (cons-cell vm-state)
-  "Get car of cons-cell with type checking."
-  (if (typep cons-cell 'vm-cons-cell)
-      (vm-heap-car cons-cell)
-      (error (make-vm-type-error vm-state 'vm-cons-cell cons-cell))))
-
-(defun vm-checked-cdr (cons-cell vm-state)
-  "Get cdr of cons-cell with type checking."
-  (if (typep cons-cell 'vm-cons-cell)
-      (vm-heap-cdr cons-cell)
-      (error (make-vm-type-error vm-state 'vm-cons-cell cons-cell))))

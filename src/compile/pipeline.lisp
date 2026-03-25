@@ -25,6 +25,9 @@
          (optimized-program (make-vm-program
                              :instructions optimized-instructions
                              :result-register result-reg)))
+    ;; Capture label counter for REPL continuity
+    (when *repl-capture-label-counter*
+      (setf *repl-capture-label-counter* (ctx-next-label ctx)))
     (make-compilation-result :program optimized-program
                             :assembly (emit-assembly optimized-program :target target)
                             :type (when type-check inferred-type)
@@ -232,6 +235,163 @@ instead of the host CL eval."
          (program (compilation-result-program result)))
     (run-compiled program)))
 
+;;; ─── Self-Hosting Bootstrap ──────────────────────────────────────────────
+;;;
+;;; Now that compile-expression and run-compiled are available, switch macro
+;;; expansion from the host CL eval to our-eval.  From this point on, every
+;;; defmacro/macrolet body is compiled and executed by cl-cc's own pipeline —
+;;; the fundamental requirement for self-hosting.
+
+(setf *macro-eval-fn* #'our-eval)
+
+;;; ─── REPL Persistent State ────────────────────────────────────────────────
+;;;
+;;; The REPL accumulates all compiled instructions into a shared pool so that
+;;; closures defined in one expression (with entry labels in that expression's
+;;; instruction range) remain callable in subsequent expressions.  Each new
+;;; compile-string result is appended to *repl-pool-instructions*, and its
+;;; labels are inserted into *repl-pool-labels* with a global offset.  Only
+;;; the newly-added slice is executed, but the full pool's label table is used
+;;; for all label lookups — so cross-call closure invocations work correctly.
+
+(defvar *repl-vm-state* nil
+  "Persistent VM state for the interactive REPL.
+Reused across form evaluations so that functions and variables defined
+in one expression remain accessible in subsequent ones.")
+
+(defvar *repl-accessor-map* nil
+  "Persistent accessor map for the REPL.
+Accumulates defstruct slot accessor mappings across form evaluations.")
+
+(defvar *repl-pool-instructions* nil
+  "Adjustable vector accumulating ALL instructions from the current REPL session.
+Enables cross-expression closure calls (body labels remain globally valid).")
+
+(defvar *repl-pool-labels* nil
+  "Hash table mapping label names to absolute PCs in *repl-pool-instructions*.")
+
+(defvar *repl-global-vars-persistent* nil
+  "Persistent hash table tracking global variable names defined across REPL calls.
+When non-nil, this is bound to *repl-global-variables* during compilation
+so that variables from (defvar ...) in one REPL call are visible in the next.")
+
+(defun reset-repl-state ()
+  "Reset the REPL persistent state, starting a completely fresh session."
+  (setf *repl-vm-state* nil
+        *repl-accessor-map* nil
+        *repl-pool-instructions* nil
+        *repl-pool-labels* nil
+        *repl-global-vars-persistent* nil
+        *repl-label-counter* nil))
+
+(defun run-string-repl (source)
+  "Compile and run SOURCE using the persistent REPL state.
+Unlike run-string, this reuses the VM state (function-registry, class-registry,
+heap) across calls so that top-level definitions persist into later expressions.
+Cross-expression closure calls work because all instructions share one pool.
+
+Example:
+  (run-string-repl \"(defun double (x) (* x 2))\")
+  (run-string-repl \"(double 21)\")  ; => 42"
+  (unless *repl-vm-state*
+    (setf *repl-vm-state*
+          (make-instance 'vm-io-state :output-stream *standard-output*)))
+  (unless *repl-accessor-map*
+    (setf *repl-accessor-map* (make-hash-table :test #'eq)))
+  (unless *repl-pool-instructions*
+    (setf *repl-pool-instructions*
+          (make-array 64 :adjustable t :fill-pointer 0 :element-type t)))
+  (unless *repl-pool-labels*
+    (setf *repl-pool-labels* (make-hash-table :test #'equal)))
+  (unless *repl-global-vars-persistent*
+    (setf *repl-global-vars-persistent* (make-hash-table :test #'eq)))
+  (let* ((*package* (find-package :cl-cc))
+         (*accessor-slot-map* *repl-accessor-map*)
+         (*labels-boxed-fns* nil)
+         ;; Bind persistent globals so compiler-context picks them up
+         (*repl-global-variables* *repl-global-vars-persistent*)
+         ;; Enable label counter capture so we can persist it
+         (*repl-capture-label-counter* t)
+         (result (compile-string source :target :vm))
+         (program (compilation-result-program result))
+         (new-insts (vm-program-instructions program))
+         ;; PC where the new code will start in the global pool
+         (start-pc (fill-pointer *repl-pool-instructions*)))
+    ;; Persist the label counter for the next compilation
+    (when (integerp *repl-capture-label-counter*)
+      (setf *repl-label-counter* *repl-capture-label-counter*))
+    ;; Track any new global variables defined by this compilation
+    (dolist (inst new-insts)
+      (when (typep inst 'vm-set-global)
+        (setf (gethash (vm-global-name inst) *repl-global-vars-persistent*) t)))
+    ;; Append new instructions to the shared pool
+    (dolist (inst new-insts)
+      (vector-push-extend inst *repl-pool-instructions*))
+    ;; Merge new labels (with global offset) into the pool label table
+    (let ((new-labels (build-label-table new-insts)))
+      (maphash (lambda (label local-pc)
+                 (setf (gethash label *repl-pool-labels*)
+                       (+ start-pc local-pc)))
+               new-labels))
+    ;; Execute only the new slice, using the full pool for label resolution
+    (run-program-slice *repl-pool-instructions* *repl-pool-labels*
+                       start-pc *repl-vm-state*)))
+
+;;; ─── Self-Hosting Load ──────────────────────────────────────────────────
+;;;
+;;; (our-load pathname) reads a file, parses all forms, and compiles+executes
+;;; them in the persistent REPL state. This is the key primitive for cl-cc to
+;;; load its own source files.
+
+(defun %prescan-in-package (source)
+  "Pre-scan SOURCE for an (in-package ...) form and return the package name string.
+   Returns nil if not found. Used to set *package* before full parsing so that
+   #. read-time eval resolves symbols in the correct package."
+  (let ((pos (search "(in-package " source :test #'char-equal)))
+    (when pos
+      (let* ((start (+ pos (length "(in-package ")))
+             (trimmed (string-trim '(#\Space #\Tab) (subseq source start))))
+        ;; Handle :pkg, :pkg), "pkg", 'pkg forms
+        (cond
+          ((and (> (length trimmed) 0) (char= (first (coerce trimmed 'list)) #\:))
+           (let ((end (position-if (lambda (c) (or (char= c #\)) (char= c #\Space))) trimmed)))
+             (when end (subseq trimmed 1 end))))
+          ((and (> (length trimmed) 0) (char= (first (coerce trimmed 'list)) #\"))
+           (let ((end (position #\" trimmed :start 1)))
+             (when end (subseq trimmed 1 end))))
+          (t nil))))))
+
+(defun our-load (pathname &key (verbose nil) (print nil))
+  "Load a Lisp source file by reading, compiling, and executing each form.
+Uses the persistent REPL state so definitions accumulate across forms.
+VERBOSE prints the file being loaded. PRINT prints each form's result."
+  (let ((path (namestring (truename pathname))))
+    (when verbose
+      (format *standard-output* "; Loading ~A~%" path))
+    (let ((source (with-open-file (in path :direction :input)
+                    (let ((buf (make-string (file-length in))))
+                      (read-sequence buf in)
+                      buf))))
+      ;; Pre-scan for (in-package ...) to set *package* before parsing,
+      ;; so #. read-time eval resolves symbols in the correct package.
+      (let* ((pkg-name (%prescan-in-package source))
+             (pkg (when pkg-name (find-package (string-upcase pkg-name))))
+             (*package* (or pkg *package*)))
+        ;; Parse all forms and compile/run each through the REPL pipeline
+        (let ((forms (parse-all-forms source))
+              (last-result nil))
+          (dolist (form forms last-result)
+            (let ((form-str (write-to-string form)))
+              (setf last-result
+                    (handler-case (run-string-repl form-str)
+                      (error (e)
+                        (format *error-output* "; Error loading ~A: ~A~%  Form: ~S~%"
+                                path e form)
+                        nil)))
+              (when print
+                (format *standard-output* "~S~%" last-result)))))))))
+
+
 (defun run-string-typed (source &key (mode :warn))
   "Compile and run SOURCE with type checking enabled.
    MODE is :WARN (default, log warnings) or :STRICT (signal errors)."
@@ -249,16 +409,15 @@ OUTPUT-FILE is the path for the executable.
 LANGUAGE is :LISP (default) or :PHP.
 
 Returns the output file path on success."
-  (let* ((target (ecase arch
-                   (:x86-64 :x86_64)
-                   (:arm64 :aarch64)))
-         ;; Parse and compile to VM program
+  (let* (;; Parse and compile to VM program (:target :vm avoids text assembly backends)
          (result (if (stringp source)
-                     (compile-string source :target target :language language)
-                     (compile-expression source :target target)))
+                     (compile-string source :target :vm :language language)
+                     (compile-expression source :target :vm)))
          (program (compilation-result-program result))
-         ;; Generate machine code bytes
-         (code-bytes (compile-to-x86-64-bytes program))
+         ;; Generate machine code bytes (dispatch on target architecture)
+         (code-bytes (ecase arch
+                       (:x86-64 (compile-to-x86-64-bytes program))
+                       (:arm64  (compile-to-aarch64-bytes program))))
          ;; Build Mach-O binary
          (builder (cl-cc/binary:make-mach-o-builder arch)))
     ;; Add code as __TEXT segment
@@ -269,8 +428,7 @@ Returns the output file path on success."
     (let ((mach-o-bytes (cl-cc/binary:build-mach-o builder code-bytes)))
       (cl-cc/binary:write-mach-o-file output-file mach-o-bytes))
     ;; Make executable
-    #+sbcl (sb-ext:run-program "/bin/chmod" (list "+x" (namestring output-file))
-                                :search nil :wait t)
+    (uiop:run-program (list "chmod" "+x" (namestring output-file)) :ignore-error-status t)
     output-file))
 
 (defun compile-file-to-native (input-file &key (arch :x86-64) (output-file nil) (language nil))
@@ -297,22 +455,19 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
                            (end-of-file () nil))
                          (nreverse forms)))))
          (result (if (eq effective-language :php)
-                     (compile-string source :target (ecase arch
-                                                      (:x86-64 :x86_64)
-                                                      (:arm64 :aarch64))
-                                            :language :php)
-                     (compile-toplevel-forms source :target (ecase arch
-                                                              (:x86-64 :x86_64)
-                                                              (:arm64 :aarch64)))))
+                     (compile-string source :target :vm :language :php)
+                     (compile-toplevel-forms source :target :vm)))
          (program (compilation-result-program result))
-         (code-bytes (compile-to-x86-64-bytes program))
+         ;; Dispatch to architecture-specific machine code generator
+         (code-bytes (ecase arch
+                       (:x86-64 (compile-to-x86-64-bytes program))
+                       (:arm64  (compile-to-aarch64-bytes program))))
          (builder (cl-cc/binary:make-mach-o-builder arch)))
     (cl-cc/binary:add-text-segment builder code-bytes)
     (cl-cc/binary:add-symbol builder "_main" :value 0 :type #x0F :sect 1)
     (let ((mach-o-bytes (cl-cc/binary:build-mach-o builder code-bytes)))
       (cl-cc/binary:write-mach-o-file output mach-o-bytes))
-    #+sbcl (sb-ext:run-program "/bin/chmod" (list "+x" (namestring output))
-                                :search nil :wait t)
+    (uiop:run-program (list "chmod" "+x" (namestring output)) :ignore-error-status t)
     output))
 
 ;;; Typeclass Macros (Phase 4) — registered here because cl-cc/type loads before compiler
@@ -377,6 +532,3 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
            (defvar ,dict-var (list ,@method-forms))
            ',class-name)))))
 
-(defun %get-instructions (compilation-result)
-  "Extract the raw VM instruction list from a COMPILATION-RESULT."
-  (vm-program-instructions (compilation-result-program compilation-result)))

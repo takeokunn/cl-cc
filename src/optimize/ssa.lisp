@@ -26,10 +26,6 @@
   "Return an SSA-versioned register keyword :R<n>.<v> for BASE-REG and VERSION."
   (intern (format nil "~A.~A" (symbol-name base-reg) version) :keyword))
 
-(defun ssa-phi-name (block-id reg-name)
-  "Return a unique symbol for a phi-node in BLOCK-ID for register REG-NAME."
-  (intern (format nil "PHI-~A-~A" block-id (symbol-name reg-name)) :keyword))
-
 ;;; ─── SSA Rename State ────────────────────────────────────────────────────
 
 (defstruct (ssa-rename-state (:conc-name ssr-))

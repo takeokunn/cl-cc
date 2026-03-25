@@ -216,19 +216,42 @@
    Returns the IEEE 754 bit pattern as (unsigned-byte 64)."
   (declare (type double-float f))
   #+sbcl
-  ;; double-float-bits returns (signed-byte 64); mask to (unsigned-byte 64).
   (logand (sb-kernel:double-float-bits f) #xFFFFFFFFFFFFFFFF)
-  #-sbcl (error "encode-double: not implemented on this platform"))
+  #-sbcl
+  (let ((sign-bit (if (minusp (float-sign f)) #x8000000000000000 0)))
+    (cond
+      ((not (= f f)) #xFFF8000000000000)
+      ((> f most-positive-double-float) (logior sign-bit #x7FF0000000000000))
+      ((< f (- most-positive-double-float)) #xFFF0000000000000)
+      ((zerop f) sign-bit)
+      (t
+       (multiple-value-bind (significand exponent sig-sign)
+           (integer-decode-float f)
+         (declare (ignore sig-sign))
+         (let* ((biased-exp (+ exponent 52 1023)))
+           (if (>= biased-exp 1)
+               (logior sign-bit (ash biased-exp 52) (- significand (ash 1 52)))
+               (logior sign-bit (ash significand (- biased-exp 1))))))))))
 
 (defun decode-double (v)
   "Unbox NaN-boxed value V to a double-float."
   (declare (type (unsigned-byte 64) v))
   #+sbcl
   (let* ((high (ldb (byte 32 32) v))
-         ;; sb-kernel:make-double-float expects a signed 32-bit high word.
          (high-signed (if (logbitp 31 high) (- high #x100000000) high)))
     (sb-kernel:make-double-float high-signed (ldb (byte 32 0) v)))
-  #-sbcl (error "decode-double: not implemented on this platform"))
+  #-sbcl
+  (let* ((sign (ldb (byte 1 63) v))
+         (biased-exp (ldb (byte 11 52) v))
+         (mantissa (ldb (byte 52 0) v))
+         (sign-factor (if (zerop sign) 1.0d0 -1.0d0)))
+    (cond
+      ((and (= biased-exp #x7FF) (not (zerop mantissa))) (sqrt -1.0d0))
+      ((and (= biased-exp #x7FF) (zerop mantissa)) (* sign-factor (expt 2.0d0 1025)))
+      ((and (zerop biased-exp) (zerop mantissa)) (* sign-factor 0.0d0))
+      ((zerop biased-exp) (* sign-factor (scale-float (float mantissa 0.0d0) -1074)))
+      (t (let ((significand (logior mantissa (ash 1 52))))
+           (* sign-factor (scale-float (float significand 0.0d0) (- biased-exp 1075))))))))
 
 ;;; ------------------------------------------------------------
 ;;; Pointer encode / decode

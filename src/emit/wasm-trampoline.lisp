@@ -120,10 +120,74 @@
         (format stream "~%      ;; WARNING: unknown label ~S" label-name))
     (format stream "~%      (br $dispatch)")))
 
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; Data-Driven WASM Emission Tables
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defparameter *wasm-i64-binop-table*
+  (let ((ht (make-hash-table :test #'eq)))
+    (setf (gethash 'vm-add ht) "i64.add")
+    (setf (gethash 'vm-sub ht) "i64.sub")
+    (setf (gethash 'vm-mul ht) "i64.mul")
+    (setf (gethash 'vm-div ht) "i64.div_s")
+    (setf (gethash 'vm-mod ht) "i64.rem_s")   ; CL mod ≈ i64.rem_s for same-sign
+    (setf (gethash 'vm-truncate ht) "i64.div_s")
+    (setf (gethash 'vm-logand ht) "i64.and")
+    (setf (gethash 'vm-logior ht) "i64.or")
+    (setf (gethash 'vm-logxor ht) "i64.xor")
+    ht)
+  "Maps binary VM instruction types to WASM i64 opcode strings.
+   All entries use the unbox-op-box pattern via wasm-i64-binop.")
+
+(defparameter *wasm-i64-cmp-table*
+  (let ((ht (make-hash-table :test #'eq)))
+    (setf (gethash 'vm-num-eq ht) "i64.eq")
+    (setf (gethash 'vm-eq ht) "i64.eq")
+    (setf (gethash 'vm-lt ht) "i64.lt_s")
+    (setf (gethash 'vm-gt ht) "i64.gt_s")
+    (setf (gethash 'vm-le ht) "i64.le_s")
+    (setf (gethash 'vm-ge ht) "i64.ge_s")
+    ht)
+  "Maps comparison VM instruction types to WASM i64 comparison opcode strings.
+   All entries use the unbox-cmp-bool pattern via wasm-i64-cmp.")
+
+(defparameter *wasm-unary-fixnum-table*
+  (let ((ht (make-hash-table :test #'eq)))
+    (setf (gethash 'vm-inc ht) "(i64.add ~A (i64.const 1))")
+    (setf (gethash 'vm-dec ht) "(i64.sub ~A (i64.const 1))")
+    (setf (gethash 'vm-neg ht) "(i64.sub (i64.const 0) ~A)")
+    (setf (gethash 'vm-lognot ht) "(i64.xor ~A (i64.const -1))")
+    ht)
+  "Maps unary VM instruction types to WASM i64 format strings (~A = unboxed src).
+   All entries use the unbox-op-box pattern.")
+
 (defun emit-trampoline-instruction (inst label-pc-map reg-map num-blocks stream)
   "Emit WAT text for a single VM instruction to STREAM.
    Returns T if instruction was handled, NIL otherwise (emits warn comment)."
   (declare (ignore num-blocks))
+  ;; Data-driven dispatch: check tables before falling through to typecase
+  (let ((tp (type-of inst)))
+    ;; Binary i64 operations (9 instruction types)
+    (let ((binop (gethash tp *wasm-i64-binop-table*)))
+      (when binop
+        (format stream "~%      ~A"
+                (wasm-i64-binop reg-map (vm-dst inst) (vm-lhs inst) (vm-rhs inst) binop))
+        (return-from emit-trampoline-instruction t)))
+    ;; Comparison operations (6 instruction types)
+    (let ((cmpop (gethash tp *wasm-i64-cmp-table*)))
+      (when cmpop
+        (format stream "~%      ~A"
+                (wasm-i64-cmp reg-map (vm-dst inst) (vm-lhs inst) (vm-rhs inst) cmpop))
+        (return-from emit-trampoline-instruction t)))
+    ;; Unary fixnum operations (4 instruction types)
+    (let ((unary-fmt (gethash tp *wasm-unary-fixnum-table*)))
+      (when unary-fmt
+        (let ((src (wasm-fixnum-unbox reg-map (vm-src inst))))
+          (format stream "~%      ~A"
+                  (reg-local-set reg-map (vm-dst inst)
+                                 (wasm-fixnum-box (format nil unary-fmt src)))))
+        (return-from emit-trampoline-instruction t))))
+  ;; Remaining instructions handled by typecase (unique logic per instruction)
   (typecase inst
     ;; ── Constant ──
     (vm-const
@@ -148,31 +212,6 @@
      (format stream "~%      ~A"
              (reg-local-set reg-map (vm-dst inst)
                             (reg-local-ref reg-map (vm-src inst))))
-     t)
-    ;; ── Arithmetic: vm-add, vm-sub, vm-mul (subtypes of vm-binop) ──
-    (vm-add
-     (format stream "~%      ~A"
-             (reg-local-set reg-map (vm-dst inst)
-                            (wasm-fixnum-box
-                             (format nil "(i64.add ~A ~A)"
-                                     (wasm-fixnum-unbox reg-map (vm-lhs inst))
-                                     (wasm-fixnum-unbox reg-map (vm-rhs inst))))))
-     t)
-    (vm-sub
-     (format stream "~%      ~A"
-             (reg-local-set reg-map (vm-dst inst)
-                            (wasm-fixnum-box
-                             (format nil "(i64.sub ~A ~A)"
-                                     (wasm-fixnum-unbox reg-map (vm-lhs inst))
-                                     (wasm-fixnum-unbox reg-map (vm-rhs inst))))))
-     t)
-    (vm-mul
-     (format stream "~%      ~A"
-             (reg-local-set reg-map (vm-dst inst)
-                            (wasm-fixnum-box
-                             (format nil "(i64.mul ~A ~A)"
-                                     (wasm-fixnum-unbox reg-map (vm-lhs inst))
-                                     (wasm-fixnum-unbox reg-map (vm-rhs inst))))))
      t)
     ;; ── Unconditional jump ──
     (vm-jump
@@ -212,27 +251,7 @@
              (vm-global-wat-name (vm-global-name inst))
              (reg-local-ref reg-map (vm-src inst)))
      t)
-    ;; ── Extended arithmetic ──
-    (vm-div
-     (format stream "~%      ~A"
-             (wasm-i64-binop reg-map (vm-dst inst) (vm-lhs inst) (vm-rhs inst) "i64.div_s"))
-     t)
-    (vm-mod
-     ;; CL mod is floor-based; i64.rem_s is truncate. For same-sign operands they match.
-     (format stream "~%      ~A"
-             (wasm-i64-binop reg-map (vm-dst inst) (vm-lhs inst) (vm-rhs inst) "i64.rem_s"))
-     t)
-    (vm-truncate
-     (format stream "~%      ~A"
-             (wasm-i64-binop reg-map (vm-dst inst) (vm-lhs inst) (vm-rhs inst) "i64.div_s"))
-     t)
-    (vm-neg
-     (let ((src (wasm-fixnum-unbox reg-map (vm-src inst))))
-       (format stream "~%      ~A"
-               (reg-local-set reg-map (vm-dst inst)
-                              (wasm-fixnum-box
-                               (format nil "(i64.sub (i64.const 0) ~A)" src))))
-       t))
+    ;; ── Abs (unique: conditional branch) ──
     (vm-abs
      (let ((src (wasm-fixnum-unbox reg-map (vm-src inst))))
        (format stream "~%      ~A"
@@ -243,20 +262,7 @@
                                       (wasm-fixnum-box
                                        (format nil "(i64.sub (i64.const 0) ~A)" src)))))
        t))
-    (vm-inc
-     (let ((src (wasm-fixnum-unbox reg-map (vm-src inst))))
-       (format stream "~%      ~A"
-               (reg-local-set reg-map (vm-dst inst)
-                              (wasm-fixnum-box
-                               (format nil "(i64.add ~A (i64.const 1))" src))))
-       t))
-    (vm-dec
-     (let ((src (wasm-fixnum-unbox reg-map (vm-src inst))))
-       (format stream "~%      ~A"
-               (reg-local-set reg-map (vm-dst inst)
-                              (wasm-fixnum-box
-                               (format nil "(i64.sub ~A (i64.const 1))" src))))
-       t))
+    ;; ── Min/max (unique: conditional select) ──
     (vm-min
      (let ((l (wasm-fixnum-unbox reg-map (vm-lhs inst)))
            (r (wasm-fixnum-unbox reg-map (vm-rhs inst))))
@@ -273,26 +279,7 @@
                               (format nil "(if (result eqref) (i64.ge_s ~A ~A) (then ~A) (else ~A))"
                                       l r (wasm-fixnum-box l) (wasm-fixnum-box r))))
        t))
-    ;; ── Bitwise operations ──
-    (vm-logand
-     (format stream "~%      ~A"
-             (wasm-i64-binop reg-map (vm-dst inst) (vm-lhs inst) (vm-rhs inst) "i64.and"))
-     t)
-    (vm-logior
-     (format stream "~%      ~A"
-             (wasm-i64-binop reg-map (vm-dst inst) (vm-lhs inst) (vm-rhs inst) "i64.or"))
-     t)
-    (vm-logxor
-     (format stream "~%      ~A"
-             (wasm-i64-binop reg-map (vm-dst inst) (vm-lhs inst) (vm-rhs inst) "i64.xor"))
-     t)
-    (vm-lognot
-     (let ((src (wasm-fixnum-unbox reg-map (vm-src inst))))
-       (format stream "~%      ~A"
-               (reg-local-set reg-map (vm-dst inst)
-                              (wasm-fixnum-box
-                               (format nil "(i64.xor ~A (i64.const -1))" src))))
-       t))
+    ;; ── Ash (unique: conditional shift direction) ──
     (vm-ash
      (let ((lhs (wasm-fixnum-unbox reg-map (vm-lhs inst)))
            (rhs (wasm-fixnum-unbox reg-map (vm-rhs inst))))
@@ -303,31 +290,6 @@
                                       (wasm-fixnum-box (format nil "(i64.shl ~A ~A)" lhs rhs))
                                       (wasm-fixnum-box (format nil "(i64.shr_s ~A (i64.sub (i64.const 0) ~A))" lhs rhs)))))
        t))
-    ;; ── Comparisons ──
-    (vm-num-eq
-     (format stream "~%      ~A"
-             (wasm-i64-cmp reg-map (vm-dst inst) (vm-lhs inst) (vm-rhs inst) "i64.eq"))
-     t)
-    (vm-eq
-     (format stream "~%      ~A"
-             (wasm-i64-cmp reg-map (vm-dst inst) (vm-lhs inst) (vm-rhs inst) "i64.eq"))
-     t)
-    (vm-lt
-     (format stream "~%      ~A"
-             (wasm-i64-cmp reg-map (vm-dst inst) (vm-lhs inst) (vm-rhs inst) "i64.lt_s"))
-     t)
-    (vm-gt
-     (format stream "~%      ~A"
-             (wasm-i64-cmp reg-map (vm-dst inst) (vm-lhs inst) (vm-rhs inst) "i64.gt_s"))
-     t)
-    (vm-le
-     (format stream "~%      ~A"
-             (wasm-i64-cmp reg-map (vm-dst inst) (vm-lhs inst) (vm-rhs inst) "i64.le_s"))
-     t)
-    (vm-ge
-     (format stream "~%      ~A"
-             (wasm-i64-cmp reg-map (vm-dst inst) (vm-lhs inst) (vm-rhs inst) "i64.ge_s"))
-     t)
     ;; ── Print ──
     ;; Delegate to the $host_print_val import.  The host runtime calls its
     ;; native print/write on the eqref value.
@@ -478,40 +440,19 @@
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
 (defun collect-registers-from-instructions (instructions reg-map)
-  "Pre-allocate local indices for all virtual registers used in INSTRUCTIONS."
+  "Pre-allocate local indices for all virtual registers used in INSTRUCTIONS.
+   Uses the optimizer's opt-inst-dst and opt-inst-read-regs for register discovery,
+   avoiding duplication of per-instruction-type register access knowledge."
   (dolist (inst instructions)
     (flet ((touch (reg)
              (when (and reg (keywordp reg))
                (wasm-reg-to-local reg-map reg))))
-      (typecase inst
-        (vm-const    (touch (vm-dst inst)))
-        (vm-move     (touch (vm-dst inst)) (touch (vm-src inst)))
-        (vm-binop    (touch (vm-dst inst)) (touch (vm-lhs inst)) (touch (vm-rhs inst)))
-        (vm-jump-zero (touch (vm-reg inst)))
-        (vm-ret      (touch (vm-reg inst)))
-        (vm-halt     (touch (vm-reg inst)))
-        (vm-print    (touch (vm-reg inst)))
-        (vm-call     (touch (vm-dst inst)) (touch (vm-func-reg inst))
-                     (dolist (a (vm-args inst)) (touch a)))
-        (vm-closure  (touch (vm-dst inst)))
-        (vm-cons     (touch (vm-dst inst)) (touch (vm-car-reg inst)) (touch (vm-cdr-reg inst)))
-        (vm-car      (touch (vm-dst inst)) (touch (vm-src inst)))
-        (vm-cdr      (touch (vm-dst inst)) (touch (vm-src inst)))
-        (vm-null-p   (touch (vm-dst inst)) (touch (vm-src inst)))
-        (vm-not      (touch (vm-dst inst)) (touch (vm-src inst)))
-        (vm-get-global (touch (vm-dst inst)))
-        (vm-set-global (touch (vm-src inst)))
-        ;; Unary arithmetic (vm-neg, vm-abs, vm-inc, vm-dec, vm-lognot)
-        ((or vm-neg vm-abs vm-inc vm-dec vm-lognot)
-         (touch (vm-dst inst)) (touch (vm-src inst)))
-        ;; Binary arithmetic not subclassed from vm-binop
-        ((or vm-div vm-mod vm-truncate vm-floor-inst vm-ceiling-inst
-             vm-min vm-max vm-logand vm-logior vm-logxor vm-ash)
-         (touch (vm-dst inst)) (touch (vm-lhs inst)) (touch (vm-rhs inst)))
-        ;; Comparisons
-        ((or vm-num-eq vm-eq vm-lt vm-gt vm-le vm-ge)
-         (touch (vm-dst inst)) (touch (vm-lhs inst)) (touch (vm-rhs inst)))
-        (t nil)))))
+      ;; Touch destination register
+      (let ((dst (opt-inst-dst inst)))
+        (when dst (touch dst)))
+      ;; Touch all source registers
+      (dolist (reg (opt-inst-read-regs inst))
+        (touch reg)))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Step 6: Build complete WAT body for a single wasm-function-def

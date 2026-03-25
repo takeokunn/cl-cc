@@ -25,6 +25,47 @@
 
 
 
+;;; Pre-populate global-variables with ANSI CL special variables
+;;; that the VM state initializes, so compiled code can access them
+;;; without requiring explicit (defvar ...) forms.
+(defparameter *builtin-special-variables*
+  '(*features* *modules* *active-restarts*
+    *standard-output* *standard-input* *error-output*
+    *trace-output* *debug-io* *query-io*
+    *print-base* *print-radix* *print-circle* *print-pretty*
+    *print-level* *print-length* *print-escape* *print-readably*
+    *print-gensym* *random-state*
+    internal-time-units-per-second)
+  "Variables known to exist in the VM global environment at startup.")
+
+(defvar *repl-global-variables* nil
+  "When non-nil, a persistent hash table of global variable names accumulated
+across REPL evaluations.  Merged into each new compiler-context so that
+variables defined by (defvar ...) in one REPL call are visible in subsequent calls.")
+
+(defvar *repl-label-counter* nil
+  "When non-nil, the starting label counter for the next REPL compilation.
+Ensures labels are globally unique across REPL calls (prevents label collision
+when multiple compilations share the same instruction pool).")
+
+(defvar *repl-capture-label-counter* nil
+  "When non-nil, set to the final ctx-next-label after compilation completes.
+Used by run-string-repl to persist the label counter across calls.")
+
+(defmethod initialize-instance :after ((ctx compiler-context) &key &allow-other-keys)
+  "Register built-in special variables so they compile to vm-get-global.
+Also merges any persistent REPL globals and continues label counter."
+  (let ((gv (ctx-global-variables ctx)))
+    (dolist (name *builtin-special-variables*)
+      (setf (gethash name gv) t))
+    ;; Merge persistent REPL globals
+    (when *repl-global-variables*
+      (maphash (lambda (k v) (setf (gethash k gv) v))
+               *repl-global-variables*)))
+  ;; Continue label counter from previous REPL compilation to avoid collisions
+  (when *repl-label-counter*
+    (setf (ctx-next-label ctx) *repl-label-counter*)))
+
 (defvar *labels-boxed-fns* nil
   "Alist mapping labels function names to their box registers for mutual recursion.")
 

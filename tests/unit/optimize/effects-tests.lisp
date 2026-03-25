@@ -188,3 +188,26 @@
                       (make-vm-ret   :reg :r2)))  ; r2 is used here
          (result (cl-cc::opt-pass-dce insts)))
     (assert-true (some (lambda (i) (typep i 'cl-cc::vm-add)) result))))
+
+;;; ─── effect-row->effect-kind bridge ─────────────────────────────────────
+
+(defun make-effect-row (&rest effect-names)
+  "Helper: build a type-effect-row with the given effect name symbols."
+  (cl-cc/type:make-type-effect-row
+   :effects (mapcar (lambda (n) (cl-cc/type:make-type-effect :name n)) effect-names)
+   :row-var nil))
+
+(deftest-each effect-row->kind
+  "effect-row->effect-kind maps type system rows to optimizer effect kinds."
+  :cases (("pure"         (make-effect-row)         :pure)
+          ("io"           (make-effect-row 'io)      :io)
+          ("state"        (make-effect-row 'state)   :write-global)
+          ("error"        (make-effect-row 'error)   :control)
+          ("unknown-tag"  (make-effect-row 'network) :unknown))
+  (row expected)
+  (assert-eq expected (cl-cc::effect-row->effect-kind row)))
+
+(deftest effect-kind-vm-label-is-control
+  "vm-label instruction is classified as :control by the typecase fast-path."
+  (assert-eq :control
+             (cl-cc::vm-inst-effect-kind (make-vm-label :name "L0"))))

@@ -40,12 +40,13 @@
 
 (defun parse-type-specifier (spec)
   "Parse SPEC into a type-node."
-  (cond
-    ((null spec)     type-null)
-    ((eq spec '?)    (make-type-error :message "unknown"))   ; ? → error sentinel
-    ((symbolp spec)  (parse-primitive-type spec))
-    ((consp spec)    (parse-compound-type spec))
-    (t (type-parse-error "Invalid type specifier: ~S" spec))))
+  (typecase spec
+    (null   type-null)
+    (symbol (if (eq spec '?)
+                (make-type-error :message "unknown")   ; ? → gradual typing hole
+                (parse-primitive-type spec)))
+    (cons   (parse-compound-type spec))
+    (t      (type-parse-error "Invalid type specifier: ~S" spec))))
 
 ;;; ─── Primitive types ──────────────────────────────────────────────────────
 

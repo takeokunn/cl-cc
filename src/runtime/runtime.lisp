@@ -511,7 +511,7 @@
 (defun rt-get-universal-time () (get-universal-time))
 (defun rt-get-internal-real-time () (get-internal-real-time))
 (defun rt-get-internal-run-time () (get-internal-run-time))
-(defun rt-eval (x) (eval x))
+(defun rt-eval (x) (cl-cc:our-eval x))
 (defun rt-read-from-string (s) (read-from-string s))
 (defun rt-read-sexp (stream) (read stream))
 (defun rt-coerce (x type) (coerce x type))

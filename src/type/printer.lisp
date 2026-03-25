@@ -10,29 +10,21 @@
 
 (defun type-to-string (ty)
   "Convert a type-node TY to a human-readable string."
-  (when (null ty) (return-from type-to-string "()"))
-  (cond
-    ;; Primitive
-    ((type-primitive-p ty)
-     (symbol-name (type-primitive-name ty)))
-
-    ;; Unification variable
-    ((type-var-p ty)
+  (typecase ty
+    (null "NIL")
+    (type-primitive (symbol-name (type-primitive-name ty)))
+    (type-var
      (let ((link (type-var-link ty)))
        (if link
            (type-to-string link)
            (if (type-var-name ty)
                (format nil "?~A" (type-var-name ty))
                (format nil "?t~D" (type-var-id ty))))))
-
-    ;; Rigid (skolem)
-    ((type-rigid-p ty)
+    (type-rigid
      (if (type-rigid-name ty)
          (format nil "sk~D[~A]" (type-rigid-id ty) (type-rigid-name ty))
          (format nil "sk~D" (type-rigid-id ty))))
-
-    ;; Arrow
-    ((type-arrow-p ty)
+    (type-arrow
      (let* ((params  (type-arrow-params ty))
             (ret     (type-to-string (type-arrow-return ty)))
             (effects (type-arrow-effects ty))
@@ -43,29 +35,20 @@
                        (:omega "->"))))
        (if (and effects (not (eq effects +pure-effect-row+))
                 (type-effect-row-effects effects))
-           ;; Effectful arrow
            (if (= 1 (length params))
                (format nil "~A -[~A]~A ~A"
-                       (type-to-string (first params))
-                       (type-to-string effects)
-                       arrow ret)
+                       (type-to-string (first params)) (type-to-string effects) arrow ret)
                (format nil "(~{~A~^ ~A ~}) -[~A]~A ~A"
                        (list-interleave (mapcar #'type-to-string params) arrow)
-                       (type-to-string effects)
-                       arrow ret))
-           ;; Pure arrow
+                       (type-to-string effects) arrow ret))
            (if (= 1 (length params))
                (format nil "~A ~A ~A" (type-to-string (first params)) arrow ret)
                (format nil "(~{~A~^ ~A ~}) ~A ~A"
                        (list-interleave (mapcar #'type-to-string params) arrow)
                        arrow ret)))))
-
-    ;; Product (tuple)
-    ((type-product-p ty)
+    (type-product
      (format nil "(~{~A~^, ~})" (mapcar #'type-to-string (type-product-elems ty))))
-
-    ;; Record
-    ((type-record-p ty)
+    (type-record
      (let ((fields (type-record-fields ty))
            (rv     (type-record-row-var ty)))
        (if rv
@@ -74,9 +57,7 @@
                    (type-to-string rv))
            (format nil "{~{~A: ~A~^, ~}}"
                    (mapcan (lambda (f) (list (car f) (type-to-string (cdr f)))) fields)))))
-
-    ;; Variant
-    ((type-variant-p ty)
+    (type-variant
      (let ((cases (type-variant-cases ty))
            (rv    (type-variant-row-var ty)))
        (if rv
@@ -85,144 +66,91 @@
                    (type-to-string rv))
            (format nil "<~{~A: ~A~^, ~}>"
                    (mapcan (lambda (c) (list (car c) (type-to-string (cdr c)))) cases)))))
-
-    ;; Union
-    ((type-union-p ty)
+    (type-union
      (format nil "(~{~A~^ | ~})" (mapcar #'type-to-string (type-union-types ty))))
-
-    ;; Intersection
-    ((type-intersection-p ty)
+    (type-intersection
      (format nil "(~{~A~^ & ~})" (mapcar #'type-to-string (type-intersection-types ty))))
-
-    ;; Forall
-    ((type-forall-p ty)
+    (type-forall
      (format nil "(∀~A. ~A)"
              (type-to-string (type-forall-var ty))
              (type-to-string (type-forall-body ty))))
-
-    ;; Exists
-    ((type-exists-p ty)
+    (type-exists
      (format nil "(∃~A. ~A)"
              (type-to-string (type-exists-var ty))
              (type-to-string (type-exists-body ty))))
-
-    ;; Type application
-    ((type-app-p ty)
+    (type-app
      (format nil "(~A ~A)"
              (type-to-string (type-app-fun ty))
              (type-to-string (type-app-arg ty))))
-
-    ;; Type lambda
-    ((type-lambda-p ty)
+    (type-lambda
      (format nil "(λ~A. ~A)"
              (type-to-string (type-lambda-var ty))
              (type-to-string (type-lambda-body ty))))
-
-    ;; Mu (recursive)
-    ((type-mu-p ty)
+    (type-mu
      (format nil "(μ~A. ~A)"
              (type-to-string (type-mu-var ty))
              (type-to-string (type-mu-body ty))))
-
-    ;; Refinement
-    ((type-refinement-p ty)
+    (type-refinement
      (format nil "{~A | <pred>}" (type-to-string (type-refinement-base ty))))
-
-    ;; Linear / graded modal
-    ((type-linear-p ty)
+    (type-linear
      (format nil "!~A ~A"
              (mult-to-string (type-linear-grade ty))
              (type-to-string (type-linear-base ty))))
-
-    ;; Capability
-    ((type-capability-p ty)
+    (type-capability
      (format nil "~A^{~A}"
              (type-to-string (type-capability-base ty))
              (type-capability-cap ty)))
-
-    ;; Effect row
-    ((type-effect-row-p ty)
+    (type-effect-row
      (let ((effs (type-effect-row-effects ty))
            (rv   (type-effect-row-row-var ty)))
        (cond
          ((and (null effs) (null rv)) "{}")
-         ((null rv)
-          (format nil "{~{~A~^, ~}}" (mapcar #'type-to-string effs)))
-         ((null effs)
-          (format nil "{| ~A}" (type-to-string rv)))
-         (t
-          (format nil "{~{~A~^, ~} | ~A}"
-                  (mapcar #'type-to-string effs)
-                  (type-to-string rv))))))
-
-    ;; Effect op label
-    ((type-effect-op-p ty)
+         ((null rv)   (format nil "{~{~A~^, ~}}" (mapcar #'type-to-string effs)))
+         ((null effs) (format nil "{| ~A}" (type-to-string rv)))
+         (t           (format nil "{~{~A~^, ~} | ~A}"
+                              (mapcar #'type-to-string effs) (type-to-string rv))))))
+    (type-effect-op
      (if (type-effect-op-args ty)
          (format nil "(~A~{ ~A~})"
                  (type-effect-op-name ty)
                  (mapcar #'type-to-string (type-effect-op-args ty)))
          (symbol-name (type-effect-op-name ty))))
-
-    ;; Handler
-    ((type-handler-p ty)
+    (type-handler
      (format nil "[~A => ~A / ~A]"
              (type-to-string (type-handler-effect ty))
              (type-to-string (type-handler-input ty))
              (type-to-string (type-handler-output ty))))
-
-    ;; GADT constructor
-    ((type-gadt-con-p ty)
+    (type-gadt-con
      (format nil "~A :: ~{~A ~}-> ~A"
              (type-gadt-con-name ty)
              (mapcar #'type-to-string (type-gadt-con-arg-types ty))
              (type-to-string (type-gadt-con-index-type ty))))
-
-    ;; Typeclass constraint
-    ((type-constraint-p ty)
+    (type-constraint
      (format nil "(~A ~A)"
              (type-constraint-class-name ty)
              (type-to-string (type-constraint-type-arg ty))))
-
-    ;; Qualified type
-    ((type-qualified-p ty)
+    (type-qualified
      (if (null (type-qualified-constraints ty))
          (type-to-string (type-qualified-body ty))
          (format nil "(~{~A~^, ~}) => ~A"
                  (mapcar #'type-to-string (type-qualified-constraints ty))
                  (type-to-string (type-qualified-body ty)))))
-
-    ;; Error sentinel
-    ((type-error-p ty)
+    (type-error
      (format nil "<error: ~A>" (type-error-message ty)))
-
-    ;; Type scheme
-    ((type-scheme-p ty)
+    (type-scheme
      (if (null (type-scheme-quantified-vars ty))
          (type-to-string (type-scheme-type ty))
          (format nil "(∀~{~A~^ ~}. ~A)"
                  (mapcar #'type-to-string (type-scheme-quantified-vars ty))
                  (type-to-string (type-scheme-type ty)))))
-
     ;; ── backward-compat structs (defined in typeclass.lisp) ──────────────
-
-    ;; type-class-constraint (backward-compat of type-constraint)
-    ((type-class-constraint-p ty)
+    (type-class-constraint
      (format nil "(~A ~A)"
              (type-class-constraint-class-name ty)
              (type-to-string (type-class-constraint-type-arg ty))))
-
-    ;; type-skolem (backward-compat rigid variable)
-    ((type-skolem-p ty)
-     (format nil "!sk~D" (type-skolem-id ty)))
-
-    ;; type-effect (backward-compat effect label)
-    ((type-effect-p ty)
-     (symbol-name (%type-effect-name ty)))
-
-    ;; type-unknown (gradual typing hole)
-    ((type-unknown-p ty)
-     "?")
-
+    (type-skolem  (format nil "!sk~D" (type-skolem-id ty)))
+    (type-effect  (symbol-name (%type-effect-name ty)))
+    (type-unknown "?")
     (t (format nil "#<type ~A>" (type-of ty)))))
 
 ;;; ─── Backward-compat methods (old code used defmethod type-to-string) ─────
@@ -243,23 +171,20 @@
 
 (defun unparse-type (ty)
   "Convert a type-node back to a type specifier s-expression."
-  (cond
-    ((type-primitive-p ty) (type-primitive-name ty))
-    ((type-var-p ty)
+  (typecase ty
+    (type-primitive (type-primitive-name ty))
+    (type-var
      (if (type-var-name ty) (type-var-name ty) (intern (format nil "?T~D" (type-var-id ty)))))
-    ((type-arrow-p ty)
+    (type-arrow
      `(-> ,@(mapcar #'unparse-type (type-arrow-params ty))
           ,(unparse-type (type-arrow-return ty))))
-    ((type-product-p ty)
-     `(values ,@(mapcar #'unparse-type (type-product-elems ty))))
-    ((type-union-p ty)
-     `(or ,@(mapcar #'unparse-type (type-union-types ty))))
-    ((type-intersection-p ty)
-     `(and ,@(mapcar #'unparse-type (type-intersection-types ty))))
-    ((type-forall-p ty)
+    (type-product `(values ,@(mapcar #'unparse-type (type-product-elems ty))))
+    (type-union   `(or  ,@(mapcar #'unparse-type (type-union-types ty))))
+    (type-intersection `(and ,@(mapcar #'unparse-type (type-intersection-types ty))))
+    (type-forall
      `(forall ,(type-var-name (type-forall-var ty))
               ,(unparse-type (type-forall-body ty))))
-    ((type-app-p ty)
+    (type-app
      ;; Flatten curried type-app: ((F A) B) → (F A B) for roundtrip compatibility
      (let ((name (type-constructor-name ty))
            (args (type-constructor-args ty)))

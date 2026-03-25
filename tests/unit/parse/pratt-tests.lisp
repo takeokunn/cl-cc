@@ -122,17 +122,13 @@
   "CL LED table is empty (CL has no infix operators)"
   (assert-= 0 (hash-table-count cl-cc::*cl-led-table*)))
 
-(deftest cl-nud-table-has-int-handler
-  "NUD table has handler for :T-INT"
-  (assert-true (not (null (gethash :T-INT cl-cc::*cl-nud-table*)))))
-
-(deftest cl-nud-table-has-lparen-handler
-  "NUD table has handler for :T-LPAREN"
-  (assert-true (not (null (gethash :T-LPAREN cl-cc::*cl-nud-table*)))))
-
-(deftest cl-nud-table-has-quote-handler
-  "NUD table has handler for :T-QUOTE"
-  (assert-true (not (null (gethash :T-QUOTE cl-cc::*cl-nud-table*)))))
+(deftest-each cl-nud-table-has-handler
+  "NUD table has handler for each required token type"
+  :cases (("int"    :T-INT)
+          ("lparen" :T-LPAREN)
+          ("quote"  :T-QUOTE))
+  (token-type)
+  (assert-true (not (null (gethash token-type cl-cc::*cl-nud-table*)))))
 
 ;;; ─── parse-cl-source: CST Structure ─────────────────────────────────────────
 
@@ -143,30 +139,22 @@
     (assert-eq :T-INT (cl-cc:cst-node-kind node))
     (assert-= 42 (cl-cc:cst-token-value node))))
 
-(deftest parse-float-produces-cst-token
-  "Parsing a float produces a cst-token"
-  (let ((node (parse-one-cst "3.14")))
+(deftest-each parse-literal-kind
+  "Parsing each literal type produces a cst-token with the correct kind"
+  :cases (("float"   "3.14" :T-FLOAT)
+          ("symbol"  "foo"  :T-IDENT)
+          ("keyword" ":foo" :T-KEYWORD))
+  (source expected-kind)
+  (let ((node (parse-one-cst source)))
     (assert-true (cl-cc:cst-token-p node))
-    (assert-eq :T-FLOAT (cl-cc:cst-node-kind node))))
+    (assert-eq expected-kind (cl-cc:cst-node-kind node))))
 
 (deftest parse-string-produces-cst-token
-  "Parsing a string produces a cst-token"
+  "Parsing a string produces a cst-token with the correct value"
   (let ((node (parse-one-cst "\"hello\"")))
     (assert-true (cl-cc:cst-token-p node))
     (assert-eq :T-STRING (cl-cc:cst-node-kind node))
     (assert-string= "hello" (cl-cc:cst-token-value node))))
-
-(deftest parse-symbol-produces-cst-token
-  "Parsing a symbol produces a :T-IDENT cst-token"
-  (let ((node (parse-one-cst "foo")))
-    (assert-true (cl-cc:cst-token-p node))
-    (assert-eq :T-IDENT (cl-cc:cst-node-kind node))))
-
-(deftest parse-keyword-produces-cst-token
-  "Parsing a keyword produces a :T-KEYWORD cst-token"
-  (let ((node (parse-one-cst ":foo")))
-    (assert-true (cl-cc:cst-token-p node))
-    (assert-eq :T-KEYWORD (cl-cc:cst-node-kind node))))
 
 (deftest parse-empty-list-produces-interior
   "Parsing () produces a cst-interior with :list kind"
@@ -318,30 +306,16 @@
 
 ;;; ─── Special Forms: sexp-head-to-kind Dispatch ───────────────────────────────
 
-(deftest parse-defun-head-kind
-  "Parser recognizes defun head → :defun kind"
-  (let ((node (parse-one-cst "(defun f (x) x)")))
-    (assert-eq :defun (cl-cc:cst-node-kind node))))
-
-(deftest parse-let-head-kind
-  "Parser recognizes let head → :let kind"
-  (let ((node (parse-one-cst "(let ((x 1)) x)")))
-    (assert-eq :let (cl-cc:cst-node-kind node))))
-
-(deftest parse-if-head-kind
-  "Parser recognizes if head → :if kind"
-  (let ((node (parse-one-cst "(if t 1 2)")))
-    (assert-eq :if (cl-cc:cst-node-kind node))))
-
-(deftest parse-lambda-head-kind
-  "Parser recognizes lambda head → :lambda kind"
-  (let ((node (parse-one-cst "(lambda (x) x)")))
-    (assert-eq :lambda (cl-cc:cst-node-kind node))))
-
-(deftest parse-unknown-head-call-kind
-  "Unknown head defaults to :call kind"
-  (let ((node (parse-one-cst "(my-fn a b)")))
-    (assert-eq :call (cl-cc:cst-node-kind node))))
+(deftest-each parse-special-form-head-kind
+  "Parser assigns correct CST kind to special form heads"
+  :cases (("defun"   "(defun f (x) x)"  :defun)
+          ("let"     "(let ((x 1)) x)"  :let)
+          ("if"      "(if t 1 2)"       :if)
+          ("lambda"  "(lambda (x) x)"   :lambda)
+          ("unknown" "(my-fn a b)"      :call))
+  (source expected-kind)
+  (let ((node (parse-one-cst source)))
+    (assert-eq expected-kind (cl-cc:cst-node-kind node))))
 
 ;;; ─── parse-and-lower: Full Pipeline ─────────────────────────────────────────
 
@@ -361,3 +335,96 @@
   "parse-and-lower on multiple forms returns list of equal length"
   (let ((asts (cl-cc:parse-and-lower "1 2 3")))
     (assert-= 3 (length asts))))
+
+;;; ─── pratt-parse-expr: Direct Tests ──────────────────────────────────────────
+
+(deftest pratt-parse-expr-integer
+  "pratt-parse-expr returns cst-token for integer."
+  (let ((ctx (make-test-ctx "42")))
+    (let ((node (cl-cc::pratt-parse-expr ctx)))
+      (assert-true (cl-cc:cst-token-p node))
+      (assert-equal 42 (cl-cc:cst-token-value node)))))
+
+(deftest pratt-parse-expr-symbol
+  "pratt-parse-expr returns cst-token for symbol."
+  (let ((ctx (make-test-ctx "foo")))
+    (let ((node (cl-cc::pratt-parse-expr ctx)))
+      (assert-true (cl-cc:cst-token-p node)))))
+
+(deftest pratt-parse-expr-list
+  "pratt-parse-expr returns cst-interior for list."
+  (let ((ctx (make-test-ctx "(+ 1 2)")))
+    (let ((node (cl-cc::pratt-parse-expr ctx)))
+      (assert-true (cl-cc:cst-interior-p node)))))
+
+(deftest pratt-parse-expr-error-on-eof
+  "pratt-parse-expr on empty stream returns error node."
+  (let ((ctx (make-test-ctx "")))
+    (let ((node (cl-cc::pratt-parse-expr ctx)))
+      (assert-true (cl-cc::cst-error-node-p node)))))
+
+(deftest pratt-parse-expr-quoted
+  "pratt-parse-expr handles quote syntax."
+  (let ((ctx (make-test-ctx "'x")))
+    (let ((node (cl-cc::pratt-parse-expr ctx)))
+      (assert-true (cl-cc:cst-interior-p node))
+      (assert-eq :quote (cl-cc:cst-node-kind node)))))
+
+(deftest pratt-parse-expr-nested-list
+  "pratt-parse-expr handles nested lists returning cst-interior."
+  (let ((ctx (make-test-ctx "(let ((x 1)) x)")))
+    (let ((node (cl-cc::pratt-parse-expr ctx)))
+      (assert-true (cl-cc:cst-interior-p node)))))
+
+;;; ─── pratt-add-diagnostic: Direct Tests ─────────────────────────────────────
+
+(deftest pratt-add-diagnostic-pushes
+  "pratt-add-diagnostic pushes a diagnostic to the context."
+  (let ((ctx (make-test-ctx "42")))
+    (cl-cc::pratt-add-diagnostic ctx "test error" (cons 0 2))
+    (assert-equal 1 (length (cl-cc::pratt-context-diagnostics ctx)))))
+
+(deftest pratt-add-diagnostic-accumulates
+  "pratt-add-diagnostic accumulates multiple diagnostics."
+  (let ((ctx (make-test-ctx "42")))
+    (cl-cc::pratt-add-diagnostic ctx "error 1" (cons 0 1))
+    (cl-cc::pratt-add-diagnostic ctx "error 2" (cons 1 2))
+    (assert-equal 2 (length (cl-cc::pratt-context-diagnostics ctx)))))
+
+(deftest pratt-add-diagnostic-records-message
+  "pratt-add-diagnostic stores the error message."
+  (let ((ctx (make-test-ctx "42")))
+    (cl-cc::pratt-add-diagnostic ctx "unexpected token" (cons 0 2))
+    (let ((diag (first (cl-cc::pratt-context-diagnostics ctx))))
+      (assert-true (not (null diag))))))
+
+;;; ─── pratt-parse-list-until: Direct Tests ───────────────────────────────────
+
+(deftest pratt-parse-list-until-empty
+  "pratt-parse-list-until on () returns empty list."
+  (let ((ctx (make-test-ctx "()")))
+    ;; Advance past the LPAREN
+    (cl-cc::pratt-advance ctx)
+    (let ((items (cl-cc::pratt-parse-list-until ctx :T-RPAREN
+                   (lambda (c) (cl-cc::pratt-parse-expr c)))))
+      (assert-equal 0 (length items)))))
+
+(deftest pratt-parse-list-until-elements
+  "pratt-parse-list-until collects parsed elements."
+  (let ((ctx (make-test-ctx "(1 2 3)")))
+    ;; Advance past the LPAREN
+    (cl-cc::pratt-advance ctx)
+    (let ((items (cl-cc::pratt-parse-list-until ctx :T-RPAREN
+                   (lambda (c) (cl-cc::pratt-parse-expr c)))))
+      (assert-equal 3 (length items)))))
+
+(deftest pratt-parse-list-until-consumes-terminator
+  "pratt-parse-list-until consumes the end token."
+  (let ((ctx (make-test-ctx "(1) 42")))
+    (cl-cc::pratt-advance ctx) ; consume LPAREN
+    (cl-cc::pratt-parse-list-until ctx :T-RPAREN
+      (lambda (c) (cl-cc::pratt-parse-expr c)))
+    ;; Next token should be 42, not RPAREN
+    (let ((tok (cl-cc::pratt-peek ctx)))
+      (assert-eq :T-INT (cl-cc:lexer-token-type tok))
+      (assert-equal 42 (cl-cc:lexer-token-value tok)))))

@@ -10,43 +10,19 @@
 ;;; S-Expression Parser
 
 (defun parse-source (source)
-  "Parse SOURCE into one s-expression."
-  (multiple-value-bind (form position)
-      (read-from-string source nil :eof)
-    (when (eq form :eof)
+  "Parse SOURCE into one s-expression using the hand-written CL lexer."
+  (let ((forms (parse-all-forms source)))
+    (when (null forms)
       (error "Empty source"))
-    (let ((rest (subseq source position)))
-      (unless (every (lambda (ch)
-                       (member ch '(#\Space #\Tab #\Newline #\Return)))
-                     rest)
-        (error "Multiple top-level forms are not supported yet")))
-    form))
+    (first forms)))
 
 (defun parse-all-forms (source)
-  "Parse SOURCE into a list of all top-level s-expressions."
-  (let ((forms nil)
-        (position 0)
-        (source-length (length source)))
-    (loop
-      (when (>= position source-length)
-        (return))
-      ;; Skip whitespace
-      (loop while (and (< position source-length)
-                       (member (char source position) '(#\Space #\Tab #\Newline #\Return)))
-            do (incf position))
-      (when (>= position source-length)
-        (return))
-      ;; Read next form
-      (multiple-value-bind (form next-position)
-          (handler-case
-              (read-from-string source nil :eof :start position)
-            (error (e)
-              (error "Parse error at position ~D: ~A" position e)))
-        (when (eq form :eof)
-          (return))
-        (push form forms)
-        (setf position next-position)))
-    (nreverse forms)))
+  "Parse SOURCE into a list of all top-level s-expressions.
+Uses the hand-written CL lexer and recursive-descent parser (no host reader)."
+  (multiple-value-bind (cst-list _diagnostics)
+      (parse-cl-source source)
+    (declare (ignore _diagnostics))
+    (mapcar #'cst-to-sexp cst-list)))
 
 ;;; S-Expression to AST Transformation
 
@@ -212,12 +188,22 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
          (error "let bindings must be a list"))
        (sloc make-ast-let
         :bindings (mapcar (lambda (binding)
-                            (unless (and (consp binding)
-                                         (= (length binding) 2)
-                                         (symbolp (first binding)))
-                              (error "Invalid let binding: ~S" binding))
-                            (cons (first binding)
-                                  (lower-sexp-to-ast (second binding))))
+                            (cond
+                              ;; Bare symbol: (let (x) ...) => bind x to nil
+                              ((symbolp binding)
+                               (cons binding (make-ast-quote :value nil)))
+                              ;; Standard 2-element list: (let ((x val)) ...)
+                              ((and (consp binding)
+                                    (= (length binding) 2)
+                                    (symbolp (first binding)))
+                               (cons (first binding)
+                                     (lower-sexp-to-ast (second binding))))
+                              ;; Single-element list: (let ((x)) ...) => bind x to nil
+                              ((and (consp binding)
+                                    (= (length binding) 1)
+                                    (symbolp (first binding)))
+                               (cons (first binding) (make-ast-quote :value nil)))
+                              (t (error "Invalid let binding: ~S" binding))))
                           bindings)
         :body (mapcar #'lower-sexp-to-ast (cddr node)))))
 
@@ -322,16 +308,27 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
        (sloc make-ast-go
                       :tag tag)))
 
-    ;; Setq
+    ;; Setq — supports multi-var: (setq a 1 b 2) => (progn (setq a 1) (setq b 2))
     (setq
-     (unless (= (length node) 3)
-       (error "setq requires exactly variable and value"))
-     (let ((var (second node)))
-       (unless (symbolp var)
-         (error "setq variable must be a symbol"))
-       (sloc make-ast-setq
-                      :var var
-                      :value (lower-sexp-to-ast (third node)))))
+     (let ((args (cdr node)))
+       (unless (and args (evenp (length args)))
+         (error "setq requires pairs of variable and value"))
+       (if (= (length args) 2)
+           ;; Simple case: (setq var val)
+           (let ((var (first args)))
+             (unless (symbolp var)
+               (error "setq variable must be a symbol"))
+             (sloc make-ast-setq
+                   :var var
+                   :value (lower-sexp-to-ast (second args))))
+           ;; Multi-var case: expand to progn of setq pairs
+           (sloc make-ast-progn
+                 :forms (loop for (var val) on args by #'cddr
+                              collect (progn
+                                        (unless (symbolp var)
+                                          (error "setq variable must be a symbol"))
+                                        (make-ast-setq :var var
+                                                       :value (lower-sexp-to-ast val))))))))
 
     ;; Setf - generalized assignment
     (setf

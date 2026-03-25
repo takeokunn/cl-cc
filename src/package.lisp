@@ -49,13 +49,17 @@
    :compile-string
    :emit-assembly
    :run-compiled
+   :run-program-slice
    :run-string
+   :run-string-repl
    :run-string-typed
+   :reset-repl-state
+   :*repl-vm-state*
    :optimize-instructions
    :%get-instructions
    :our-eval
+   :our-load
    :type-check-ast
-   :lookup-function-type
    :register-function-type
    :*function-type-registry*
 
@@ -117,6 +121,7 @@
    :register-macro
    :lookup-macro
    :*macro-environment*
+   :*macro-eval-fn*
 
     ;; Built-in macro exports
     :our-d
@@ -401,6 +406,8 @@
     :vm-register-function
     :vm-function-registry
     :vm-resolve-function
+    :vm-register-host-bridge
+    :*vm-host-bridge-functions*
     :vm-generic-function-p
     :vm-resolve-gf-method
     :vm-set-global
@@ -510,8 +517,14 @@
     :make-vm-typep :make-vm-unread-char :make-vm-upper-case-p :make-vm-values
     :make-vm-spread-values :make-vm-values-to-list :make-vm-vector-pop :make-vm-vector-push
     :make-vm-vector-push-extend :make-vm-vectorp
-    :make-vm-warn :make-vm-write-char :make-vm-write-string
-    :make-vm-write-to-string-inst :make-vm-write-to-string-rp
+    :make-vm-warn :make-vm-write-byte :make-vm-write-char :make-vm-write-line
+    :make-vm-write-string :make-vm-write-to-string-inst :make-vm-write-to-string-rp
+    ;; Stream predicates + control
+    :make-vm-streamp :make-vm-input-stream-p :make-vm-output-stream-p
+    :make-vm-open-stream-p :make-vm-interactive-stream-p :make-vm-stream-element-type-inst
+    :make-vm-read-byte :make-vm-listen-inst
+    :make-vm-force-output :make-vm-finish-output :make-vm-clear-input
+    :make-vm-load-file
 
     ;; VM Heap Operations
     :vm-alloc
@@ -838,6 +851,7 @@
 
        ;; Backend Code Generation
        :compile-to-x86-64-bytes
+       :compile-to-aarch64-bytes
 
        ;; Register Allocation
        :calling-convention
@@ -934,7 +948,7 @@
        ;; CFG utilities
        :ir-add-edge :ir-emit :ir-set-terminator
        :ir-rpo :ir-dominators
-       :ir-collect-uses :ir-value-uses :ir-verify-ssa
+       :ir-collect-uses :ir-verify-ssa
        ;; SSA variable tracking (Braun et al. 2013)
        :ir-write-var :ir-read-var :ir-seal-block
        ;; Printer
@@ -995,7 +1009,6 @@
        :opt-inst-dce-eligible-p
        :opt-inst-cse-eligible-p
        :effect-row->effect-kind
-       :opt-call-effect-kind
 
        ;; ── Optimizer Phase 1: CFG + Dominator Tree + DF ─────────────────────
        ;; basic-block struct

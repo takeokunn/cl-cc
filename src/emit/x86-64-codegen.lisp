@@ -48,11 +48,6 @@
   "Write single byte to stream (which is a function that takes a byte)."
   (funcall stream (logand byte #xFF)))
 
-(defun emit-word (word stream)
-  "Write 16-bit value (little-endian)."
-  (emit-byte (logand word #xFF) stream)
-  (emit-byte (logand (ash word -8) #xFF) stream))
-
 (defun emit-dword (dword stream)
   "Write 32-bit value (little-endian)."
   (emit-byte (logand dword #xFF) stream)
@@ -170,24 +165,11 @@
    Encoding: 58+ rd"
   (emit-byte (+ #x58 (logand reg #x7)) stream))
 
-(defun emit-call-r64 (reg stream)
-  "CALL reg (indirect call).
-
-   Encoding: FF /2"
-  (emit-byte #xFF stream)
-  (emit-byte (modrm 3 2 reg) stream))
-
 (defun emit-ret (stream)
   "RET (return).
 
    Encoding: C3"
   (emit-byte #xC3 stream))
-
-(defun emit-nop (stream)
-  "NOP (no operation).
-
-   Encoding: 90"
-  (emit-byte #x90 stream))
 
 (defun emit-jmp-rel32 (offset stream)
   "JMP rel32 (near jump).
@@ -202,14 +184,6 @@
    Encoding: 0F 84 cd"
   (emit-byte #x0F stream)
   (emit-byte #x84 stream)
-  (emit-dword offset stream))
-
-(defun emit-jne-rel32 (offset stream)
-  "JNE rel32 (jump if not equal).
-
-   Encoding: 0F 85 cd"
-  (emit-byte #x0F stream)
-  (emit-byte #x85 stream)
   (emit-dword offset stream))
 
 ;;; VM to Machine Code Translation
@@ -916,54 +890,72 @@
 
 ;;; Two-Pass Code Generation (Labels + Jumps)
 
+(defparameter *x86-64-instruction-sizes*
+  (let ((ht (make-hash-table :test #'eq)))
+    ;; Constants and copies
+    (setf (gethash 'vm-const ht) 10)       ; REX + opcode + 8-byte immediate
+    (setf (gethash 'vm-move ht) 3)         ; REX + opcode + ModR/M
+    ;; Arithmetic: mov + op
+    (setf (gethash 'vm-add ht) 6)          ; mov + add (3+3)
+    (setf (gethash 'vm-sub ht) 6)          ; mov + sub (3+3)
+    (setf (gethash 'vm-mul ht) 7)          ; mov + imul (3+4, 0F AF)
+    ;; Control flow
+    (setf (gethash 'vm-halt ht) 3)         ; mov result to RAX
+    (setf (gethash 'vm-label ht) 0)        ; Labels emit no code
+    (setf (gethash 'vm-jump ht) 5)         ; JMP rel32
+    (setf (gethash 'vm-jump-zero ht) 9)    ; TEST + JE rel32 (3 + 6)
+    (setf (gethash 'vm-ret ht) 1)          ; RET
+    ;; No-ops in native codegen
+    (setf (gethash 'vm-print ht) 0)
+    (setf (gethash 'vm-closure ht) 0)
+    (setf (gethash 'vm-call ht) 0)
+    ;; Register spilling
+    (setf (gethash 'vm-spill-store ht) 4)  ; MOV [rbp-disp8], reg
+    (setf (gethash 'vm-spill-load ht) 4)   ; MOV reg, [rbp-disp8]
+    ;; Comparison: CMP(3) + SETcc(3-4) + MOVZX(4) = 12 max
+    (dolist (tp '(vm-lt vm-gt vm-le vm-ge vm-num-eq vm-eq))
+      (setf (gethash tp ht) 12))
+    ;; Logical NOT: TEST+SETE+MOVZX = 11→12; bitwise NOT: MOV+NOT = 7
+    (setf (gethash 'vm-not ht) 12)
+    (setf (gethash 'vm-lognot ht) 7)
+    ;; Unary arithmetic: MOV(3) + op(3-4) = 7
+    (setf (gethash 'vm-neg ht) 7)
+    (setf (gethash 'vm-inc ht) 7)
+    (setf (gethash 'vm-dec ht) 7)
+    ;; Abs: MOV + CMP-imm32 + JGE-short + NEG = 15
+    (setf (gethash 'vm-abs ht) 15)
+    ;; Min/max: MOV + CMP + CMOV = 10
+    (setf (gethash 'vm-min ht) 10)
+    (setf (gethash 'vm-max ht) 10)
+    ;; Ash: fixed 24-byte sequence
+    (setf (gethash 'vm-ash ht) 24)
+    ;; IDIV-based: truncate/rem = 21, floor-div = 34, floor-mod = 37
+    (setf (gethash 'vm-truncate ht) 21)
+    (setf (gethash 'vm-rem ht) 21)
+    (setf (gethash 'vm-div ht) 34)
+    (setf (gethash 'vm-mod ht) 37)
+    ;; Boolean logical: XOR+TEST+JE+TEST+JE+ADD = 17
+    (setf (gethash 'vm-and ht) 17)
+    (setf (gethash 'vm-or ht) 17)
+    ;; Binary logical: MOV + op = 6
+    (dolist (tp '(vm-logand vm-logior vm-logxor))
+      (setf (gethash tp ht) 6))
+    ;; XNOR = 9, logtest = 14, logbitp = 15
+    (setf (gethash 'vm-logeqv ht) 9)
+    (setf (gethash 'vm-logtest ht) 14)
+    (setf (gethash 'vm-logbitp ht) 15)
+    ;; Type predicates: null-p = 11; others = 10 (MOV imm64)
+    (setf (gethash 'vm-null-p ht) 11)
+    (dolist (tp '(vm-number-p vm-integer-p vm-cons-p vm-symbol-p vm-function-p))
+      (setf (gethash tp ht) 10))
+    ht)
+  "Maps VM instruction struct-type symbols to their x86-64 encoded byte sizes.
+   Used by the first pass of two-pass code generation to build label offset tables.")
+
 (defun instruction-size (inst)
   "Estimate the size in bytes of the x86-64 encoding for a VM instruction.
    Used in first pass to build label offset table."
-  (typecase inst
-    (vm-const 10)    ; REX + opcode + 8-byte immediate
-    (vm-move 3)      ; REX + opcode + ModR/M
-    (vm-add 6)       ; mov + add (3+3)
-    (vm-sub 6)       ; mov + sub (3+3)
-    (vm-mul 7)       ; mov + imul (3+4, 0F AF)
-    (vm-halt 3)      ; mov result to RAX (3 bytes, or 0 if already RAX)
-    (vm-label 0)     ; Labels emit no code
-    (vm-jump 5)      ; JMP rel32
-    (vm-jump-zero 9) ; TEST + JE rel32 (3 + 6)
-    (vm-print 0)     ; No-op in native code
-    (vm-closure 0)   ; Skip in basic codegen
-    (vm-call 0)      ; Skip in basic codegen
-    (vm-ret 1)       ; RET
-    (vm-spill-store 4) ; MOV [rbp-disp8], reg (REX + opcode + ModRM + disp8)
-    (vm-spill-load 4)  ; MOV reg, [rbp-disp8] (REX + opcode + ModRM + disp8)
-    ;; Comparison: CMP(3) + SETcc(3-4) + MOVZX(4) = 11 max; use 12 conservatively
-    (vm-lt 12) (vm-gt 12) (vm-le 12) (vm-ge 12) (vm-num-eq 12) (vm-eq 12)
-    ;; Logical NOT: TEST(3) + SETE(4) + MOVZX(4) = 11; logical/bitwise unary: MOV(3)+op(4)=7
-    (vm-not 12) (vm-lognot 7)
-    ;; Negation: MOV(3) + NEG(4) = 7
-    (vm-neg 7)
-    ;; Inc/dec: MOV(3) + ADD/SUB-imm8(4) = 7
-    (vm-inc 7) (vm-dec 7)
-    ;; Abs: MOV(3) + CMP-imm32(7) + JGE-short(2) + NEG(3) = 15
-    (vm-abs 15)
-    ;; Min/max: MOV(3) + CMP(3) + CMOV(4) = 10
-    (vm-min 10) (vm-max 10)
-    ;; Ash: fixed 24-byte sequence (see emit-vm-ash comment)
-    (vm-ash 24)
-    ;; Truncate division via IDIV: MOV(3)+PUSH(1)+PUSH(1)+MOV(3)+CQO(2)+IDIV(3)+MOV(3)+POP(1)+POP(1)+MOV(3) = 21
-    (vm-truncate 21) (vm-rem 21)
-    ;; Floor division via IDIV + sign correction: 34 bytes (vm-div) / 37 bytes (vm-mod)
-    (vm-div 34) (vm-mod 37)
-    ;; Boolean logical: XOR(3)+TEST(3)+JE(2)+TEST(3)+JE(2)+ADD-ri8(4) = 17
-    (vm-and 17) (vm-or 17)
-    ;; Binary logical: MOV(3) + op(3) = 6
-    (vm-logand 6) (vm-logior 6) (vm-logxor 6)
-    ;; XNOR: MOV(3)+XOR(3)+NOT(3) = 9; logtest: MOV+AND+SETNE+MOVZX = 14; logbitp: PUSH+MOV+MOV+SAR+AND+POP = 15
-    (vm-logeqv 9) (vm-logtest 14) (vm-logbitp 15)
-    ;; Type predicates: null-p = TEST+SETE+MOVZX (11); always-true/false = MOV imm64 (10)
-    (vm-null-p 11)
-    (vm-number-p 10) (vm-integer-p 10)
-    (vm-cons-p 10) (vm-symbol-p 10) (vm-function-p 10)
-    (t 0)))
+  (or (gethash (type-of inst) *x86-64-instruction-sizes*) 0))
 
 (defun build-label-offsets (instructions prologue-size)
   "Build a hash table mapping label names to byte offsets.
@@ -1029,63 +1021,76 @@
          (offset (- (* (vm-spill-slot inst) 8))))
     (emit-mov-rm64 dst-code +rbp+ offset stream)))
 
+(defparameter *x86-64-emitter-table*
+  (let ((ht (make-hash-table :test #'eq)))
+    (setf (gethash 'vm-const ht) #'emit-vm-const)
+    (setf (gethash 'vm-move ht) #'emit-vm-move)
+    (setf (gethash 'vm-add ht) #'emit-vm-add)
+    (setf (gethash 'vm-sub ht) #'emit-vm-sub)
+    (setf (gethash 'vm-mul ht) #'emit-vm-mul)
+    (setf (gethash 'vm-halt ht) #'emit-vm-halt-inst)
+    (setf (gethash 'vm-ret ht) #'emit-vm-ret-inst)
+    (setf (gethash 'vm-spill-store ht) #'emit-vm-spill-store-inst)
+    (setf (gethash 'vm-spill-load ht) #'emit-vm-spill-load-inst)
+    ;; Comparison
+    (setf (gethash 'vm-lt ht) #'emit-vm-lt)
+    (setf (gethash 'vm-gt ht) #'emit-vm-gt)
+    (setf (gethash 'vm-le ht) #'emit-vm-le)
+    (setf (gethash 'vm-ge ht) #'emit-vm-ge)
+    (setf (gethash 'vm-num-eq ht) #'emit-vm-num-eq)
+    (setf (gethash 'vm-eq ht) #'emit-vm-eq)
+    ;; Unary arithmetic/logical
+    (setf (gethash 'vm-neg ht) #'emit-vm-neg)
+    (setf (gethash 'vm-not ht) #'emit-vm-not)
+    (setf (gethash 'vm-lognot ht) #'emit-vm-lognot)
+    (setf (gethash 'vm-inc ht) #'emit-vm-inc)
+    (setf (gethash 'vm-dec ht) #'emit-vm-dec)
+    (setf (gethash 'vm-abs ht) #'emit-vm-abs)
+    ;; Min/max/ash
+    (setf (gethash 'vm-min ht) #'emit-vm-min)
+    (setf (gethash 'vm-max ht) #'emit-vm-max)
+    (setf (gethash 'vm-ash ht) #'emit-vm-ash)
+    ;; Integer division (IDIV-based)
+    (setf (gethash 'vm-truncate ht) #'emit-vm-truncate)
+    (setf (gethash 'vm-rem ht) #'emit-vm-rem)
+    (setf (gethash 'vm-div ht) #'emit-vm-div)
+    (setf (gethash 'vm-mod ht) #'emit-vm-mod)
+    ;; Boolean logical
+    (setf (gethash 'vm-and ht) #'emit-vm-and)
+    (setf (gethash 'vm-or ht) #'emit-vm-or)
+    ;; Binary logical
+    (setf (gethash 'vm-logand ht) #'emit-vm-logand)
+    (setf (gethash 'vm-logior ht) #'emit-vm-logior)
+    (setf (gethash 'vm-logxor ht) #'emit-vm-logxor)
+    (setf (gethash 'vm-logeqv ht) #'emit-vm-logeqv)
+    (setf (gethash 'vm-logtest ht) #'emit-vm-logtest)
+    (setf (gethash 'vm-logbitp ht) #'emit-vm-logbitp)
+    ;; Type predicates
+    (setf (gethash 'vm-null-p ht) #'emit-vm-null-p)
+    (setf (gethash 'vm-number-p ht) #'emit-vm-true-pred)
+    (setf (gethash 'vm-integer-p ht) #'emit-vm-true-pred)
+    (setf (gethash 'vm-cons-p ht) #'emit-vm-false-pred)
+    (setf (gethash 'vm-symbol-p ht) #'emit-vm-false-pred)
+    (setf (gethash 'vm-function-p ht) #'emit-vm-false-pred)
+    ht)
+  "Maps VM instruction type symbols to emitter functions (inst stream).")
+
 (defun emit-vm-instruction-with-labels (inst stream current-pos label-offsets)
   "Emit machine code for a VM instruction, with label/jump support."
-  (typecase inst
-    (vm-const (emit-vm-const inst stream))
-    (vm-move (emit-vm-move inst stream))
-    (vm-add (emit-vm-add inst stream))
-    (vm-sub (emit-vm-sub inst stream))
-    (vm-mul (emit-vm-mul inst stream))
-    (vm-halt (emit-vm-halt-inst inst stream))
-    (vm-label nil)
-    (vm-jump (emit-vm-jump-inst inst stream current-pos label-offsets))
-    (vm-jump-zero (emit-vm-jump-zero-inst inst stream current-pos label-offsets))
-    (vm-ret (emit-vm-ret-inst inst stream))
-    (vm-print nil)
-    (vm-spill-store (emit-vm-spill-store-inst inst stream))
-    (vm-spill-load (emit-vm-spill-load-inst inst stream))
-    ;; Comparison instructions
-    (vm-lt (emit-vm-lt inst stream))
-    (vm-gt (emit-vm-gt inst stream))
-    (vm-le (emit-vm-le inst stream))
-    (vm-ge (emit-vm-ge inst stream))
-    (vm-num-eq (emit-vm-num-eq inst stream))
-    (vm-eq (emit-vm-eq inst stream))
-    ;; Unary arithmetic/logical
-    (vm-neg (emit-vm-neg inst stream))
-    (vm-not (emit-vm-not inst stream))
-    (vm-lognot (emit-vm-lognot inst stream))
-    (vm-inc (emit-vm-inc inst stream))
-    (vm-dec (emit-vm-dec inst stream))
-    (vm-abs (emit-vm-abs inst stream))
-    ;; Min/max/ash
-    (vm-min (emit-vm-min inst stream))
-    (vm-max (emit-vm-max inst stream))
-    (vm-ash (emit-vm-ash inst stream))
-    ;; Integer division (IDIV-based)
-    (vm-truncate (emit-vm-truncate inst stream))
-    (vm-rem (emit-vm-rem inst stream))
-    (vm-div (emit-vm-div inst stream))
-    (vm-mod (emit-vm-mod inst stream))
-    ;; Boolean logical
-    (vm-and (emit-vm-and inst stream))
-    (vm-or  (emit-vm-or  inst stream))
-    ;; Binary logical
-    (vm-logand (emit-vm-logand inst stream))
-    (vm-logior (emit-vm-logior inst stream))
-    (vm-logxor (emit-vm-logxor inst stream))
-    (vm-logeqv (emit-vm-logeqv inst stream))
-    (vm-logtest (emit-vm-logtest inst stream))
-    (vm-logbitp (emit-vm-logbitp inst stream))
-    ;; Type predicates
-    (vm-null-p (emit-vm-null-p inst stream))
-    (vm-number-p (emit-vm-true-pred inst stream))
-    (vm-integer-p (emit-vm-true-pred inst stream))
-    (vm-cons-p (emit-vm-false-pred inst stream))
-    (vm-symbol-p (emit-vm-false-pred inst stream))
-    (vm-function-p (emit-vm-false-pred inst stream))
-    (t (warn "Skipping unsupported VM instruction: ~A" (type-of inst)))))
+  (let ((tp (type-of inst)))
+    (cond
+      ;; No-op instructions
+      ((or (eq tp 'vm-label) (eq tp 'vm-print)) nil)
+      ;; Jump instructions need extra args (current-pos, label-offsets)
+      ((eq tp 'vm-jump)
+       (emit-vm-jump-inst inst stream current-pos label-offsets))
+      ((eq tp 'vm-jump-zero)
+       (emit-vm-jump-zero-inst inst stream current-pos label-offsets))
+      ;; Table-driven dispatch for all (inst stream) emitters
+      (t (let ((emitter (gethash tp *x86-64-emitter-table*)))
+           (if emitter
+               (funcall emitter inst stream)
+               (warn "Skipping unsupported VM instruction: ~A" tp)))))))
 
 (defun emit-vm-program (program stream)
   "Emit machine code for entire VM program.

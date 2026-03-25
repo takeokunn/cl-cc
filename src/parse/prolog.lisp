@@ -250,7 +250,7 @@
   (handler-case
       (let ((substituted (subst-for-eval condition env)))
         (typecase substituted
-          (cons (eval substituted))
+          (cons (our-eval substituted))
           (t substituted)))
     (error () nil)))
 
@@ -366,7 +366,22 @@
 (defparameter *peephole-rules*
   '(;; (:const :R1 42)(:move :R2 :R1) → (:const :R2 42)
     ;; Fires when copy-prop is blocked by a label reset but DCE kept the const alive.
-    ((:const ?src ?val) (:move ?dst ?src) ((:const ?dst ?val)))))
+    ((:const ?src ?val) (:move ?dst ?src) ((:const ?dst ?val)))
+
+    ;; (:jump "L0")(:label "L0") → (:label "L0")
+    ;; Eliminates a jump to the immediately following label (dead branch after threading).
+    ((:jump ?lbl) (:label ?lbl) ((:label ?lbl)))
+
+    ;; (:const ?r ?v1)(:const ?r ?v2) → (:const ?r ?v2)
+    ;; Second const-load to the same register makes the first dead.
+    ;; Safe in a 2-window because no instruction can read ?r between adjacent instructions.
+    ((:const ?r ?_v1) (:const ?r ?v2) ((:const ?r ?v2)))
+
+    ;; (:move ?mid ?src)(:move ?dst ?mid) → (:move ?mid ?src)(:move ?dst ?src)
+    ;; Copy-propagation through a move chain: ?mid still gets ?src (in case it
+    ;; is read elsewhere), but ?dst now reads directly from ?src, enabling DCE
+    ;; to later eliminate ?mid if it has no remaining readers.
+    ((:move ?mid ?src) (:move ?dst ?mid) ((:move ?mid ?src) (:move ?dst ?src)))))
 
 (defparameter *enable-prolog-peephole* t)
 
@@ -406,7 +421,7 @@
                     (if consumed-two
                         (walk (cddr rest)
                               (let ((acc out))
-                                (dolist (r (reverse replacements) acc)
+                                (dolist (r replacements acc)
                                   (push r acc))
                                 acc))
                         (walk (cdr rest) (cons curr out)))))))))

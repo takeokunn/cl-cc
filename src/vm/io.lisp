@@ -143,12 +143,119 @@
   (:sexp-tag :get-string-from-stream)
   (:sexp-slots dst handle))
 
+;;; Stream Type Predicates
+
+(define-vm-instruction vm-streamp (vm-instruction)
+  "Check if a value is a stream."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :streamp)
+  (:sexp-slots dst src))
+
+(define-vm-instruction vm-input-stream-p (vm-instruction)
+  "Check if a value is an input stream."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :input-stream-p)
+  (:sexp-slots dst src))
+
+(define-vm-instruction vm-output-stream-p (vm-instruction)
+  "Check if a value is an output stream."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :output-stream-p)
+  (:sexp-slots dst src))
+
+(define-vm-instruction vm-open-stream-p (vm-instruction)
+  "Check if a stream is open."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :open-stream-p)
+  (:sexp-slots dst src))
+
+(define-vm-instruction vm-interactive-stream-p (vm-instruction)
+  "Check if a stream is interactive."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :interactive-stream-p)
+  (:sexp-slots dst src))
+
+(define-vm-instruction vm-stream-element-type-inst (vm-instruction)
+  "Get the element type of a stream."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :stream-element-type)
+  (:sexp-slots dst src))
+
+;;; Binary I/O Instructions
+
+(define-vm-instruction vm-read-byte (vm-instruction)
+  "Read a byte from a binary stream."
+  (dst nil :reader vm-dst)
+  (handle nil :reader vm-file-handle)
+  (:sexp-tag :read-byte)
+  (:sexp-slots dst handle))
+
+(define-vm-instruction vm-write-byte (vm-instruction)
+  "Write a byte to a binary stream."
+  (handle nil :reader vm-file-handle)
+  (byte-val nil :reader vm-byte-val)
+  (:sexp-tag :write-byte)
+  (:sexp-slots handle byte-val))
+
+;;; Stream Control Instructions
+
+(define-vm-instruction vm-force-output (vm-instruction)
+  "Force buffered output to be sent."
+  (handle nil :reader vm-file-handle)
+  (:sexp-tag :force-output)
+  (:sexp-slots handle))
+
+(define-vm-instruction vm-finish-output (vm-instruction)
+  "Ensure all output is completed."
+  (handle nil :reader vm-file-handle)
+  (:sexp-tag :finish-output)
+  (:sexp-slots handle))
+
+(define-vm-instruction vm-clear-input (vm-instruction)
+  "Clear any buffered input."
+  (handle nil :reader vm-file-handle)
+  (:sexp-tag :clear-input)
+  (:sexp-slots handle))
+
+(define-vm-instruction vm-listen-inst (vm-instruction)
+  "Check if input is available on a stream."
+  (dst nil :reader vm-dst)
+  (handle nil :reader vm-file-handle)
+  (:sexp-tag :listen)
+  (:sexp-slots dst handle))
+
+;;; write-line Instruction
+
+(define-vm-instruction vm-write-line (vm-instruction)
+  "Write a string followed by a newline to a stream."
+  (handle nil :reader vm-file-handle)
+  (str nil :reader vm-str-reg)
+  (:sexp-tag :write-line)
+  (:sexp-slots handle str))
+
+;;; Load File Instruction
+
+(define-vm-instruction vm-load-file (vm-instruction)
+  "Load and execute a Lisp source file."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :load-file)
+  (:sexp-slots dst src))
+
 ;;; I/O Helper Functions
 
 (defun vm-get-stream (state handle)
   "Get the stream associated with HANDLE from STATE.
-Handles special cases for stdin (0) and stdout (1)."
+Handles special cases for stdin (0), stdout (1), and direct CL stream objects."
   (cond
+    ;; Direct CL stream object (from make-string-input-stream etc.)
+    ((streamp handle) handle)
     ((eql handle +stdin-handle+)
      (vm-standard-input state))
     ((eql handle +stdout-handle+)
@@ -167,7 +274,8 @@ Handles special cases for stdin (0) and stdout (1)."
 
 (defun vm-stream-open-p (state handle)
   "Check if a file handle is currently open."
-  (or (and (eql handle +stdin-handle+) (vm-standard-input state))
+  (or (streamp handle)
+      (and (eql handle +stdin-handle+) (vm-standard-input state))
       (and (eql handle +stdout-handle+) (vm-standard-output state))
       (gethash handle (vm-open-files state))
       (gethash handle (vm-string-streams state))))
@@ -224,11 +332,12 @@ Handles special cases for stdin (0) and stdout (1)."
   (declare (ignore labels))
   (let* ((handle (vm-reg-get state (vm-file-handle inst)))
          (stream (vm-get-stream state handle)))
-    (multiple-value-bind (line eof-p)
+    (multiple-value-bind (line missing-newline-p)
         (read-line stream nil +eof-value+)
-      (if eof-p
-          (vm-reg-set state (vm-dst inst) +eof-value+)
-          (vm-reg-set state (vm-dst inst) line))
+      (declare (ignore missing-newline-p))
+      ;; read-line returns the line even when EOF terminates it.
+      ;; Only return :eof when the stream was already at EOF (line = +eof-value+).
+      (vm-reg-set state (vm-dst inst) line)
       (values (1+ pc) nil nil))))
 
 (defmethod execute-instruction ((inst vm-write-char) state pc labels)
@@ -316,6 +425,137 @@ Handles special cases for stdin (0) and stdout (1)."
           (vm-reg-set state (vm-dst inst) (get-output-stream-string stream))
           (values (1+ pc) nil nil))
         (error "vm-get-string-from-stream: Handle ~A is not an output string stream" handle))))
+
+;;; Stream Predicate Execution
+;;;
+;;; Values can be either direct CL stream objects or integer handles.
+;;; We resolve handles to streams before applying predicates.
+
+(defun %resolve-stream-val (state val)
+  "Resolve VAL to a CL stream: if it's already a stream, return it;
+if it's an integer handle, look it up in STATE's stream tables."
+  (cond
+    ((streamp val) val)
+    ((integerp val)
+     (cond
+       ((eql val +stdin-handle+) (vm-standard-input state))
+       ((eql val +stdout-handle+) (vm-standard-output state))
+       ((typep state 'vm-io-state)
+        (or (gethash val (vm-open-files state))
+            (gethash val (vm-string-streams state))))
+       (t nil)))
+    (t nil)))
+
+(defmethod execute-instruction ((inst vm-streamp) state pc labels)
+  (declare (ignore labels))
+  (let* ((val (vm-reg-get state (vm-src inst)))
+         (stream (%resolve-stream-val state val)))
+    (vm-reg-set state (vm-dst inst) (if stream t nil))
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-input-stream-p) state pc labels)
+  (declare (ignore labels))
+  (let* ((val (vm-reg-get state (vm-src inst)))
+         (stream (%resolve-stream-val state val)))
+    (vm-reg-set state (vm-dst inst) (if (and stream (input-stream-p stream)) t nil))
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-output-stream-p) state pc labels)
+  (declare (ignore labels))
+  (let* ((val (vm-reg-get state (vm-src inst)))
+         (stream (%resolve-stream-val state val)))
+    (vm-reg-set state (vm-dst inst) (if (and stream (output-stream-p stream)) t nil))
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-open-stream-p) state pc labels)
+  (declare (ignore labels))
+  (let* ((val (vm-reg-get state (vm-src inst)))
+         (stream (%resolve-stream-val state val)))
+    (vm-reg-set state (vm-dst inst) (if (and stream (open-stream-p stream)) t nil))
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-interactive-stream-p) state pc labels)
+  (declare (ignore labels))
+  (let* ((val (vm-reg-get state (vm-src inst)))
+         (stream (%resolve-stream-val state val)))
+    (vm-reg-set state (vm-dst inst) (if (and stream (interactive-stream-p stream)) t nil))
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-stream-element-type-inst) state pc labels)
+  (declare (ignore labels))
+  (let* ((val (vm-reg-get state (vm-src inst)))
+         (stream (%resolve-stream-val state val)))
+    (vm-reg-set state (vm-dst inst) (if stream (stream-element-type stream) nil))
+    (values (1+ pc) nil nil)))
+
+;;; Binary I/O Execution
+
+(defmethod execute-instruction ((inst vm-read-byte) state pc labels)
+  (declare (ignore labels))
+  (let* ((handle (vm-reg-get state (vm-file-handle inst)))
+         (stream (vm-get-stream state handle))
+         (byte (read-byte stream nil +eof-value+)))
+    (vm-reg-set state (vm-dst inst) byte)
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-write-byte) state pc labels)
+  (declare (ignore labels))
+  (let* ((handle (vm-reg-get state (vm-file-handle inst)))
+         (byte (vm-reg-get state (vm-byte-val inst)))
+         (stream (vm-get-stream state handle)))
+    (write-byte byte stream)
+    (values (1+ pc) nil nil)))
+
+;;; Stream Control Execution
+
+(defmethod execute-instruction ((inst vm-force-output) state pc labels)
+  (declare (ignore labels))
+  (let* ((handle (vm-reg-get state (vm-file-handle inst)))
+         (stream (vm-get-stream state handle)))
+    (force-output stream)
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-finish-output) state pc labels)
+  (declare (ignore labels))
+  (let* ((handle (vm-reg-get state (vm-file-handle inst)))
+         (stream (vm-get-stream state handle)))
+    (finish-output stream)
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-clear-input) state pc labels)
+  (declare (ignore labels))
+  (let* ((handle (vm-reg-get state (vm-file-handle inst)))
+         (stream (vm-get-stream state handle)))
+    (clear-input stream)
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-listen-inst) state pc labels)
+  (declare (ignore labels))
+  (let* ((handle (vm-reg-get state (vm-file-handle inst)))
+         (stream (vm-get-stream state handle)))
+    (vm-reg-set state (vm-dst inst) (if (listen stream) t nil))
+    (values (1+ pc) nil nil)))
+
+;;; write-line Execution
+
+(defmethod execute-instruction ((inst vm-write-line) state pc labels)
+  (declare (ignore labels))
+  (let* ((handle (vm-reg-get state (vm-file-handle inst)))
+         (str (vm-reg-get state (vm-str-reg inst)))
+         (stream (vm-get-stream state handle)))
+    (write-line str stream)
+    (values (1+ pc) nil nil)))
+
+;;; Load File Execution
+;;; our-load is defined in pipeline.lisp (loaded after this file).
+;;; Use funcall + symbol-function to avoid forward reference.
+
+(defmethod execute-instruction ((inst vm-load-file) state pc labels)
+  (declare (ignore labels))
+  (let* ((path (vm-reg-get state (vm-src inst)))
+         (result (funcall (symbol-function 'our-load) path)))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
 
 ;;; Convenience Functions for Running I/O Programs
 
@@ -425,29 +665,29 @@ OUTPUT-STREAM and INPUT-STREAM can be specified to redirect I/O."
 (defmethod execute-instruction ((inst vm-princ) state pc labels)
   (declare (ignore labels))
   (let ((val (vm-reg-get state (vm-src inst))))
-    (princ val)
+    (princ val (vm-output-stream state))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-prin1) state pc labels)
   (declare (ignore labels))
   (let ((val (vm-reg-get state (vm-src inst))))
-    (prin1 val)
+    (prin1 val (vm-output-stream state))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-print-inst) state pc labels)
   (declare (ignore labels))
   (let ((val (vm-reg-get state (vm-src inst))))
-    (print val)
+    (print val (vm-output-stream state))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-terpri-inst) state pc labels)
   (declare (ignore labels))
-  (terpri)
+  (terpri (vm-output-stream state))
   (values (1+ pc) nil nil))
 
 (defmethod execute-instruction ((inst vm-fresh-line-inst) state pc labels)
   (declare (ignore labels))
-  (fresh-line)
+  (fresh-line (vm-output-stream state))
   (values (1+ pc) nil nil))
 
 (defmethod execute-instruction ((inst vm-write-to-string-inst) state pc labels)
@@ -477,22 +717,25 @@ OUTPUT-STREAM and INPUT-STREAM can be specified to redirect I/O."
 
 (defmethod execute-instruction ((inst vm-stream-write-string-inst) state pc labels)
   (declare (ignore labels))
-  (let ((stream (vm-reg-get state (vm-stream-reg inst)))
-        (str (vm-reg-get state (vm-src inst))))
+  (let* ((stream-val (vm-reg-get state (vm-stream-reg inst)))
+         (stream (if (streamp stream-val)
+                     stream-val
+                     (vm-get-stream state stream-val)))
+         (str (vm-reg-get state (vm-src inst))))
     (write-string str stream)
     (values (1+ pc) nil nil)))
 
-;;; Reader Instructions (use host CL reader for bootstrap)
+;;; Reader Instructions (use cl-cc's own lexer/parser)
 
 (define-vm-instruction vm-read-from-string-inst (vm-instruction)
-  "Read an S-expression from a string using host CL reader."
+  "Read an S-expression from a string using cl-cc's own parser."
   (dst nil :reader vm-dst)
   (src nil :reader vm-src)
   (:sexp-tag :read-from-string)
   (:sexp-slots dst src))
 
 (define-vm-instruction vm-read-sexp-inst (vm-instruction)
-  "Read an S-expression from a stream handle using host CL reader."
+  "Read an S-expression from a stream handle using cl-cc's own parser."
   (dst nil :reader vm-dst)
   (src nil :reader vm-src)
   (:sexp-tag :read-sexp)
@@ -501,7 +744,8 @@ OUTPUT-STREAM and INPUT-STREAM can be specified to redirect I/O."
 (defmethod execute-instruction ((inst vm-read-from-string-inst) state pc labels)
   (declare (ignore labels))
   (let* ((str (vm-reg-get state (vm-src inst)))
-         (value (read-from-string str)))
+         (forms (parse-all-forms str))
+         (value (if forms (first forms) nil)))
     (vm-reg-set state (vm-dst inst) value)
     (values (1+ pc) nil nil)))
 
@@ -509,6 +753,7 @@ OUTPUT-STREAM and INPUT-STREAM can be specified to redirect I/O."
   (declare (ignore labels))
   (let* ((handle (vm-reg-get state (vm-src inst)))
          (stream (vm-get-stream state handle))
-         (value (read stream nil nil)))
+         (line (read-line stream nil nil))
+         (value (when line (first (parse-all-forms line)))))
     (vm-reg-set state (vm-dst inst) value)
     (values (1+ pc) nil nil)))

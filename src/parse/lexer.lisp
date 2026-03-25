@@ -199,28 +199,40 @@
            (lex-advance state) ; consume dot
            (let ((frac-start (lexer-state-pos state))
                  (frac-val 0)
-                 (frac-digits 0))
+                 (frac-digits 0)
+                 (exp-marker nil))
+             (declare (ignore frac-start))
              (loop for ch = (lex-peek state)
                    while (and ch (digit-char-p ch))
                    do (setf frac-val (+ (* frac-val 10) (digit-char-p ch)))
                       (incf frac-digits)
                       (lex-advance state))
-             (let ((mantissa (+ int-part (/ frac-val (expt 10.0d0 frac-digits)))))
-               ;; Exponent
+             ;; Compute mantissa as exact rational to avoid premature type coercion
+             (let ((mantissa (+ int-part (/ frac-val (expt 10 frac-digits))))
+                   (exp-val 0)
+                   (exp-sign 1))
+               ;; Exponent — record marker char to determine float type
                (when (and (not (lex-at-end-p state))
                           (member (lex-peek state) '(#\e #\E #\d #\D #\f #\F #\s #\S #\l #\L)
                                   :test #'char=))
+                 (setf exp-marker (lex-peek state))
                  (lex-advance state)
-                 (let ((exp-sign 1))
-                   (when (and (not (lex-at-end-p state))
-                              (or (char= (lex-peek state) #\+)
-                                  (char= (lex-peek state) #\-)))
-                     (when (char= (lex-peek state) #\-)
-                       (setf exp-sign -1))
-                     (lex-advance state))
-                   (let ((exp-val (lex-read-radix-integer state 10)))
-                     (setf mantissa (* mantissa (expt 10.0d0 (* exp-sign exp-val)))))))
-               (lex-make-token state :T-FLOAT (* sign mantissa) start))))
+                 (when (and (not (lex-at-end-p state))
+                            (or (char= (lex-peek state) #\+)
+                                (char= (lex-peek state) #\-)))
+                   (when (char= (lex-peek state) #\-)
+                     (setf exp-sign -1))
+                   (lex-advance state))
+                 (setf exp-val (lex-read-radix-integer state 10)))
+               ;; Coerce to the right float type based on exponent marker:
+               ;;   d/D → double-float; all others → single-float (ANSI default)
+               (let* ((scaled (* mantissa (expt 10 (* exp-sign exp-val))))
+                      (float-val (if (and exp-marker
+                                         (or (char= exp-marker #\d)
+                                             (char= exp-marker #\D)))
+                                     (float (* sign scaled) 0.0d0)
+                                     (float (* sign scaled) 0.0))))
+                 (lex-make-token state :T-FLOAT float-val start)))))
           ;; Plain integer
           (has-int
            (lex-make-token state :T-INT (* sign int-part) start))
@@ -366,6 +378,164 @@
     (let ((name (lex-read-symbol-name state)))
       (lex-make-token state :T-KEYWORD (intern name :keyword) start))))
 
+;;; ─── Feature Conditionals & Read-Time Eval ─────────────────────────────────
+
+(defun lex-skip-form (state)
+  "Skip a single balanced form from STATE (for #+/- when feature test fails).
+   Handles atoms, lists, strings, and nested forms."
+  (lex-skip-trivia state)
+  (when (lex-at-end-p state) (return-from lex-skip-form))
+  (let ((ch (lex-peek state)))
+    (cond
+      ;; Skip a list form
+      ((char= ch #\()
+       (lex-advance state)
+       (let ((depth 1))
+         (loop while (and (> depth 0) (not (lex-at-end-p state)))
+               do (let ((c (lex-peek state)))
+                    (lex-advance state)
+                    (cond ((char= c #\() (incf depth))
+                          ((char= c #\)) (decf depth))
+                          ((char= c #\") ; skip string
+                           (loop until (or (lex-at-end-p state)
+                                           (char= (lex-peek state) #\"))
+                                 do (when (char= (lex-peek state) #\\)
+                                      (lex-advance state))
+                                    (lex-advance state))
+                           (unless (lex-at-end-p state) (lex-advance state)))
+                          ((char= c #\;) ; skip line comment
+                           (loop until (or (lex-at-end-p state)
+                                           (char= (lex-peek state) #\Newline))
+                                 do (lex-advance state))))))))
+      ;; Skip a string
+      ((char= ch #\")
+       (lex-advance state)
+       (loop until (or (lex-at-end-p state) (char= (lex-peek state) #\"))
+             do (when (char= (lex-peek state) #\\) (lex-advance state))
+                (lex-advance state))
+       (unless (lex-at-end-p state) (lex-advance state)))
+      ;; Skip quote/backquote prefix + the following form
+      ((or (char= ch #\') (char= ch #\`) (char= ch #\,))
+       (lex-advance state)
+       (when (and (not (lex-at-end-p state)) (char= (lex-peek state) #\@))
+         (lex-advance state))
+       (lex-skip-form state))
+      ;; Skip #-dispatched form
+      ((char= ch #\#)
+       (lex-advance state)
+       (unless (lex-at-end-p state)
+         (let ((dispatch-ch (lex-peek state)))
+           (lex-advance state)
+           (cond
+             ;; #( vector — skip balanced parens
+             ((char= dispatch-ch #\()
+              (let ((depth 1))
+                (loop while (and (> depth 0) (not (lex-at-end-p state)))
+                      do (let ((c (lex-peek state)))
+                           (lex-advance state)
+                           (cond ((char= c #\() (incf depth))
+                                 ((char= c #\)) (decf depth)))))))
+             ;; #' #. — skip the next form
+             ((or (char= dispatch-ch #\') (char= dispatch-ch #\.))
+              (lex-skip-form state))
+             ;; #\ character — skip one or more chars (e.g. #\Space)
+             ((char= dispatch-ch #\\)
+              (unless (lex-at-end-p state)
+                (lex-advance state)
+                (loop while (and (not (lex-at-end-p state))
+                                 (lex-constituent-p (lex-peek state)))
+                      do (lex-advance state))))
+             ;; #+ #- — skip feature + form
+             ((or (char= dispatch-ch #\+) (char= dispatch-ch #\-))
+              (lex-skip-form state) ; feature
+              (lex-skip-form state)) ; body
+             ;; #| block comment
+             ((char= dispatch-ch #\|)
+              (lex-skip-block-comment state))
+             ;; Other: skip an atom
+             (t (loop while (and (not (lex-at-end-p state))
+                                  (lex-constituent-p (lex-peek state)))
+                      do (lex-advance state)))))))
+      ;; Skip an atom (symbol, number, keyword)
+      (t
+       (when (char= ch #\:) (lex-advance state)) ; keyword colon
+       (loop while (and (not (lex-at-end-p state))
+                        (lex-constituent-p (lex-peek state)))
+             do (lex-advance state))))))
+
+(defun lex-read-feature-expr (state)
+  "Read a feature expression for #+/#-. Returns a keyword symbol or a list like (:or :sbcl :ccl)."
+  (lex-skip-trivia state)
+  (when (lex-at-end-p state)
+    (error "Lexer error: unexpected end in feature expression"))
+  (let ((ch (lex-peek state)))
+    (if (char= ch #\()
+        ;; Compound feature expression: (:or ...), (:and ...), (:not ...)
+        (progn
+          (lex-advance state) ; skip (
+          (let ((parts nil))
+            (loop
+              (lex-skip-trivia state)
+              (when (or (lex-at-end-p state) (char= (lex-peek state) #\)))
+                (unless (lex-at-end-p state) (lex-advance state))
+                (return (nreverse parts)))
+              (push (lex-read-feature-expr state) parts))))
+        ;; Simple feature keyword
+        (let ((name (lex-read-symbol-name state)))
+          (intern (string-upcase name) :keyword)))))
+
+(defun lex-feature-present-p (feature)
+  "Evaluate a feature expression against *features*."
+  (cond
+    ((keywordp feature) (member feature *features*))
+    ((and (consp feature) (eq (car feature) :or))
+     (some #'lex-feature-present-p (cdr feature)))
+    ((and (consp feature) (eq (car feature) :and))
+     (every #'lex-feature-present-p (cdr feature)))
+    ((and (consp feature) (eq (car feature) :not))
+     (not (lex-feature-present-p (cadr feature))))
+    (t nil)))
+
+(defun lex-read-form-text (state)
+  "Read a single balanced form's raw text from STATE and return it as a string.
+   Advances STATE past the form."
+  (lex-skip-trivia state)
+  (when (lex-at-end-p state)
+    (error "Lexer error: unexpected end in form"))
+  (let ((start (lexer-state-pos state))
+        (ch (lex-peek state)))
+    (cond
+      ;; Parenthesized form
+      ((char= ch #\()
+       (lex-advance state)
+       (let ((depth 1))
+         (loop while (and (> depth 0) (not (lex-at-end-p state)))
+               do (let ((c (lex-peek state)))
+                    (lex-advance state)
+                    (cond ((char= c #\() (incf depth))
+                          ((char= c #\)) (decf depth))
+                          ((char= c #\")
+                           (loop until (or (lex-at-end-p state)
+                                           (char= (lex-peek state) #\"))
+                                 do (when (char= (lex-peek state) #\\)
+                                      (lex-advance state))
+                                    (lex-advance state))
+                           (unless (lex-at-end-p state) (lex-advance state))))))))
+      ;; String
+      ((char= ch #\")
+       (lex-advance state)
+       (loop until (or (lex-at-end-p state) (char= (lex-peek state) #\"))
+             do (when (char= (lex-peek state) #\\) (lex-advance state))
+                (lex-advance state))
+       (unless (lex-at-end-p state) (lex-advance state)))
+      ;; Atom (symbol, number, keyword)
+      (t
+       (when (char= ch #\:) (lex-advance state))
+       (loop while (and (not (lex-at-end-p state))
+                        (lex-constituent-p (lex-peek state)))
+             do (lex-advance state))))
+    (subseq (lexer-state-source state) start (lexer-state-pos state))))
+
 ;;; ─── Hash Dispatch ──────────────────────────────────────────────────────────
 
 (defun lex-read-hash-dispatch (state)
@@ -411,6 +581,32 @@
              (lex-skip-block-comment state)
              ;; Return nil to signal "no token, just trivia"
              nil)
+        ;; #: uninterned symbol
+        (#\: (lex-advance state)
+             (let ((name (lex-read-symbol-name state)))
+               (lex-make-token state :T-IDENT (make-symbol name) start)))
+        ;; #+ feature conditional (include if feature present)
+        (#\+ (lex-advance state)
+             (let ((feature (lex-read-feature-expr state)))
+               (if (lex-feature-present-p feature)
+                   ;; Feature present: return nil (like block comment), next token is the real one
+                   nil
+                   ;; Feature absent: skip the next form, return nil
+                   (progn (lex-skip-form state) nil))))
+        ;; #- feature conditional (include if feature absent)
+        (#\- (lex-advance state)
+             (let ((feature (lex-read-feature-expr state)))
+               (if (lex-feature-present-p feature)
+                   ;; Feature present: skip the next form
+                   (progn (lex-skip-form state) nil)
+                   ;; Feature absent: include the next form
+                   nil)))
+        ;; #. read-time eval — must use host eval for access to host-defined constants
+        (#\. (lex-advance state)
+             (let* ((text (lex-read-form-text state))
+                    (form (read-from-string text))
+                    (value (eval form)))
+               (lex-make-token state :T-INT value start)))
         ;; Boolean dispatch (non-standard but useful)
         (#\t (lex-advance state)
              (lex-make-token state :T-BOOL-TRUE t start))

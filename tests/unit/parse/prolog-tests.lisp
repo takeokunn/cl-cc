@@ -195,13 +195,12 @@
   "Built-in 'or' tries each alternative"
   (assert-= 2 (length (all-envs '(or (= ?x 1) (= ?x 2))))))
 
-(deftest prolog-builtin-when-true
-  "Built-in :when succeeds for a truthy Lisp form"
-  (assert-= 1 (length (all-envs '(:when t)))))
-
-(deftest prolog-builtin-when-false
-  "Built-in :when fails for a falsy Lisp form"
-  (assert-= 0 (length (all-envs '(:when nil)))))
+(deftest-each prolog-builtin-when
+  "Built-in :when: succeeds for truthy, fails for falsy"
+  :cases (("true"  '(:when t)   1)
+          ("false" '(:when nil) 0))
+  (goal expected-count)
+  (assert-= expected-count (length (all-envs goal))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Cut operator
@@ -242,21 +241,19 @@
   (let ((sols (cl-cc:query-all `(append ,l1 ,l2 ?r))))
     (assert-= 1 (length sols))))
 
-(deftest prolog-reverse-empty
-  "reverse/2: empty list reverses to empty"
-  (assert-= 1 (length (all-envs '(reverse nil ?r)))))
+(deftest-each prolog-reverse-queries
+  "reverse/2: produces exactly one solution"
+  :cases (("empty"     '(reverse nil ?r))
+          ("singleton" '(reverse (cons 1 nil) ?r)))
+  (goal)
+  (assert-= 1 (length (all-envs goal))))
 
-(deftest prolog-reverse-singleton
-  "reverse/2: singleton reverses to itself"
-  (assert-= 1 (length (all-envs '(reverse (cons 1 nil) ?r)))))
-
-(deftest prolog-length-empty
-  "length/2: empty list has length 0"
-  (assert-= 1 (length (all-envs '(length nil ?n)))))
-
-(deftest prolog-length-three
-  "length/2: three-element cons-list has length (+ 1 (+ 1 (+ 1 0)))"
-  (assert-= 1 (length (all-envs '(length (cons a (cons b (cons c nil))) ?n)))))
+(deftest-each prolog-length-queries
+  "length/2: produces exactly one solution"
+  :cases (("empty" '(length nil ?n))
+          ("three" '(length (cons a (cons b (cons c nil))) ?n)))
+  (goal)
+  (assert-= 1 (length (all-envs goal))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; solve-conjunction
@@ -391,3 +388,43 @@
     (assert-= 2 (length result))
     (assert-equal '(:const :r1 1) (first result))
     (assert-equal '(:add :r2 :r1 :r1) (second result))))
+
+(deftest prolog-peephole-jump-to-next-label-eliminated
+  "Peephole rule 2: (:jump L0)(:label L0) → (:label L0)"
+  (let ((result (cl-cc:apply-prolog-peephole
+                 '((:jump "L0") (:label "L0")))))
+    (assert-= 1 (length result))
+    (assert-equal '(:label "L0") (first result))))
+
+(deftest prolog-peephole-jump-to-different-label-kept
+  "Peephole rule 2: (:jump L1)(:label L0) — label mismatch, no elimination"
+  (let ((result (cl-cc:apply-prolog-peephole
+                 '((:jump "L1") (:label "L0")))))
+    (assert-= 2 (length result))))
+
+(deftest prolog-peephole-double-const-same-reg
+  "Peephole rule 3: (:const ?r v1)(:const ?r v2) — second overwrites first"
+  (let ((result (cl-cc:apply-prolog-peephole
+                 '((:const :r0 1) (:const :r0 99)))))
+    (assert-= 1 (length result))
+    (assert-equal '(:const :r0 99) (first result))))
+
+(deftest prolog-peephole-double-const-different-regs-kept
+  "Peephole rule 3: (:const :r0 v1)(:const :r1 v2) — different regs, no merge"
+  (let ((result (cl-cc:apply-prolog-peephole
+                 '((:const :r0 1) (:const :r1 2)))))
+    (assert-= 2 (length result))))
+
+(deftest prolog-peephole-move-chain-propagates-source
+  "Peephole rule 4: (:move :r1 :r0)(:move :r2 :r1) — source propagated to end of chain"
+  (let ((result (cl-cc:apply-prolog-peephole
+                 '((:move :r1 :r0) (:move :r2 :r1)))))
+    (assert-= 2 (length result))
+    (assert-equal '(:move :r1 :r0) (first result))
+    (assert-equal '(:move :r2 :r0) (second result))))
+
+(deftest prolog-peephole-move-chain-non-chain-kept
+  "Peephole rule 4: (:move :r1 :r0)(:move :r3 :r2) — different source, no propagation"
+  (let ((result (cl-cc:apply-prolog-peephole
+                 '((:move :r1 :r0) (:move :r3 :r2)))))
+    (assert-= 2 (length result))))

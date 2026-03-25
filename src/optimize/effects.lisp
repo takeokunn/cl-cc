@@ -186,18 +186,16 @@
 
 (defun effect-row->effect-kind (effect-row)
   "Convert a cl-cc/type system type-effect-row to an optimizer effect-kind.
-   Used when callee effect information is available from the HM type system."
-  (let ((effects (cl-cc/type:type-effect-row-effects effect-row)))
+   Used when callee effect information is available from the HM type system.
+   Compares effect names by string= to avoid cross-package symbol mismatch."
+  (let* ((effects (cl-cc/type:type-effect-row-effects effect-row))
+         (names   (mapcar (lambda (e)
+                            (string-upcase (symbol-name (cl-cc/type:type-effect-name e))))
+                          effects)))
     (cond
-      ((null effects)                                        :pure)
-      ((member 'io    (mapcar #'cl-cc/type:type-effect-name effects)) :io)
-      ((member 'state (mapcar #'cl-cc/type:type-effect-name effects)) :write-global)
-      ((member 'error (mapcar #'cl-cc/type:type-effect-name effects)) :control)
-      (t                                                     :unknown))))
+      ((null effects)                          :pure)
+      ((member "IO"    names :test #'string=)  :io)
+      ((member "STATE" names :test #'string=)  :write-global)
+      ((member "ERROR" names :test #'string=)  :control)
+      (t                                       :unknown))))
 
-(defun opt-call-effect-kind (op-name)
-  "Look up the effect-kind of a call to OP-NAME via the effect signature table.
-   Returns :pure if OP-NAME is not registered (unknown operations assumed pure
-   conservatively — register known-impure ops in *effect-signature-table*)."
-  (let ((row (cl-cc/type:lookup-effect-signature op-name)))
-    (effect-row->effect-kind row)))

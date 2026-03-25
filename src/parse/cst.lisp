@@ -108,6 +108,15 @@
          (:unquote-splicing  (list 'cl-cc::unquote-splicing (cst-to-sexp (first children))))
          (:function          (list 'function (cst-to-sexp (first children))))
          (:vector            (coerce (mapcar #'cst-to-sexp children) 'vector))
+         (:dotted-list
+          ;; Dotted pair: (a b c . d) → children are (a b c d), last is cdr
+          (let ((sexps (mapcar #'cst-to-sexp children)))
+            (if (null sexps)
+                nil
+                (let* ((reversed (reverse sexps))
+                       (result (car reversed)))
+                  (dolist (s (cdr reversed) result)
+                    (setf result (cons s result)))))))
          (t                  (mapcar #'cst-to-sexp children)))))
     ((cst-error-p node) nil)
     (t node)))

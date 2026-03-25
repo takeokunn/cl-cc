@@ -12,50 +12,29 @@
 
 ;;; Conditional Macro Tests
 
-(deftest when-macro-expansion
-  "Test WHEN macro expands to IF with PROGN"
-  (assert-equal (our-macroexpand-1 '(when test body1 body2))
-                '(if test (progn body1 body2) nil)))
+(deftest-each when-macro-expansions
+  "WHEN expands to (if test (progn ...) nil)"
+  :cases (("multi-body"   '(when test body1 body2) '(if test (progn body1 body2) nil))
+          ("single-body"  '(when test body)        '(if test (progn body) nil))
+          ("no-body"      '(when test)              '(if test (progn) nil)))
+  (form expected)
+  (assert-equal (our-macroexpand-1 form) expected))
 
-(deftest when-macro-single-body
-  "Test WHEN with single body form"
-  (assert-equal (our-macroexpand-1 '(when test body))
-                '(if test (progn body) nil)))
+(deftest-each unless-macro-expansions
+  "UNLESS expands to (if test nil (progn ...))"
+  :cases (("multi-body"   '(unless test body1 body2) '(if test nil (progn body1 body2)))
+          ("single-body"  '(unless test body)        '(if test nil (progn body)))
+          ("no-body"      '(unless test)              '(if test nil (progn))))
+  (form expected)
+  (assert-equal (our-macroexpand-1 form) expected))
 
-(deftest when-macro-no-body
-  "Test WHEN with no body forms (degenerate case)"
-  (assert-equal (our-macroexpand-1 '(when test))
-                '(if test (progn) nil)))
-
-(deftest unless-macro-expansion
-  "Test UNLESS macro expands to IF with PROGN"
-  (assert-equal (our-macroexpand-1 '(unless test body1 body2))
-                '(if test nil (progn body1 body2))))
-
-(deftest unless-macro-single-body
-  "Test UNLESS with single body form"
-  (assert-equal (our-macroexpand-1 '(unless test body))
-                '(if test nil (progn body))))
-
-(deftest unless-macro-no-body
-  "Test UNLESS with no body forms (degenerate case)"
-  (assert-equal (our-macroexpand-1 '(unless test))
-                '(if test nil (progn))))
-
-(deftest cond-macro-empty
-  "Test COND with no clauses"
-  (assert-equal (our-macroexpand-1 '(cond))
-                nil))
-
-(deftest cond-macro-single-expr-clause
-  "Test COND with single expression clause (falls through to OR)"
-  (assert-equal (our-macroexpand-1 '(cond (x)))
-                '(or x (cond))))
-
-(deftest cond-macro-single-clause
-  "Test COND with single full clause"
-  (assert-equal (our-macroexpand-1 '(cond (test body)))
-                '(if test (progn body) (cond))))
+(deftest-each cond-macro-simple-expansions
+  "COND base cases expand correctly"
+  :cases (("empty"       '(cond)           nil)
+          ("single-expr" '(cond (x))       '(or x (cond)))
+          ("single-full" '(cond (test body)) '(if test (progn body) (cond))))
+  (form expected)
+  (assert-equal (our-macroexpand-1 form) expected))
 
 (deftest cond-macro-multiple-clauses
   "Test COND with multiple clauses"
@@ -67,25 +46,14 @@
 
 ;;; Boolean Macro Tests
 
-(deftest and-macro-empty
-  "Test AND with no arguments (returns T)"
-  (assert-equal (our-macroexpand-1 '(and))
-                t))
-
-(deftest and-macro-single-arg
-  "Test AND with single argument (returns it unchanged)"
-  (assert-equal (our-macroexpand-1 '(and x))
-                'x))
-
-(deftest and-macro-two-args
-  "Test AND with two arguments"
-  (assert-equal (our-macroexpand-1 '(and a b))
-                '(if a (and b) nil)))
-
-(deftest and-macro-multiple-args
-  "Test AND with multiple arguments"
-  (assert-equal (our-macroexpand-1 '(and a b c))
-                '(if a (and b c) nil)))
+(deftest-each and-macro-simple-expansions
+  "AND expands each arity correctly"
+  :cases (("empty"         '(and)       t)
+          ("single-arg"    '(and x)     'x)
+          ("two-args"      '(and a b)   '(if a (and b) nil))
+          ("multiple-args" '(and a b c) '(if a (and b c) nil)))
+  (form expected)
+  (assert-equal (our-macroexpand-1 form) expected))
 
 (deftest and-macro-full-expansion
   "Test full expansion of AND creates nested IFs"
@@ -96,15 +64,12 @@
     ;; Then-branch should be another IF
     (assert-eq (caaddr result) 'if)))
 
-(deftest or-macro-empty
-  "Test OR with no arguments (returns NIL)"
-  (assert-equal (our-macroexpand-1 '(or))
-                nil))
-
-(deftest or-macro-single-arg
-  "Test OR with single argument (returns it unchanged)"
-  (assert-equal (our-macroexpand-1 '(or x))
-                'x))
+(deftest-each or-macro-simple-expansions
+  "OR expands to nil for empty and identity for single arg"
+  :cases (("empty"      '(or)  nil)
+          ("single-arg" '(or x) 'x))
+  (form expected)
+  (assert-equal (our-macroexpand-1 form) expected))
 
 (deftest or-macro-two-args
   "Test OR with two arguments"
@@ -164,18 +129,14 @@
 
 ;;; Definition Macro Tests
 
-(deftest defun-macro-expansion
-  "Test DEFUN macro expansion"
-  (let ((result (our-macroexpand-1 '(defun foo (x y) body1 body2))))
+(deftest-each defun-macro-structure
+  "DEFUN expands to (setf (fdefinition ...) (lambda ...)) regardless of docstring"
+  :cases (("basic"          '(defun foo (x y) body1 body2))
+          ("with-docstring" '(defun foo (x y) "Docstring" body)))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
     (assert-eq (car result) 'setf)
     (assert-equal (cadr result) '(fdefinition 'foo))
-    (assert-eq (caaddr result) 'lambda)))
-
-(deftest defun-macro-with-docstring
-  "Test DEFUN with docstring"
-  (let ((result (our-macroexpand-1 '(defun foo (x y) "Docstring" body))))
-    ;; Should still expand to setf/lambda structure
-    (assert-eq (car result) 'setf)
     (assert-eq (caaddr result) 'lambda)))
 
 ;;; Sequencing Macro Tests
@@ -372,37 +333,33 @@
   "Test COND error with empty clause list"
   (assert-signals error (our-macroexpand-1 '(cond ()))))
 
-(deftest error-psetq-non-pair
-  "Test PSETQ error with non-pair elements"
-  (assert-signals error (our-macroexpand-1 '(psetq x))))
+(deftest-each error-psetq-malformed
+  "PSETQ signals an error on malformed argument lists"
+  :cases (("non-pair"  '(psetq x))
+          ("odd-args"  '(psetq a 1 b)))
+  (form)
+  (assert-signals error (our-macroexpand-1 form)))
 
-(deftest error-psetq-odd-args
-  "Test PSETQ error with odd number of arguments"
-  (assert-signals error (our-macroexpand-1 '(psetq a 1 b))))
+(deftest-each error-multiple-value-bind-malformed
+  "MULTIPLE-VALUE-BIND signals an error on malformed variable lists"
+  :cases (("non-list-vars"  '(multiple-value-bind a b (values 1 2) body))
+          ("empty-vars"     '(multiple-value-bind () (values 1 2) body)))
+  (form)
+  (assert-signals error (our-macroexpand-1 form)))
 
-(deftest error-multiple-value-bind-non-list-vars
-  "Test MULTIPLE-VALUE-BIND error with non-list variables"
-  (assert-signals error (our-macroexpand-1 '(multiple-value-bind a b (values 1 2) body))))
+(deftest-each error-multiple-value-setq-malformed
+  "MULTIPLE-VALUE-SETQ signals an error on malformed variable lists"
+  :cases (("non-list-vars"  '(multiple-value-setq a b (values 1 2)))
+          ("empty-vars"     '(multiple-value-setq () (values 1 2))))
+  (form)
+  (assert-signals error (our-macroexpand-1 form)))
 
-(deftest error-multiple-value-bind-empty-vars
-  "Test MULTIPLE-VALUE-BIND error with empty variable list"
-  (assert-signals error (our-macroexpand-1 '(multiple-value-bind () (values 1 2) body))))
-
-(deftest error-multiple-value-setq-non-list-vars
-  "Test MULTIPLE-VALUE-SETQ error with non-list variables"
-  (assert-signals error (our-macroexpand-1 '(multiple-value-setq a b (values 1 2)))))
-
-(deftest error-multiple-value-setq-empty-vars
-  "Test MULTIPLE-VALUE-SETQ error with empty variable list"
-  (assert-signals error (our-macroexpand-1 '(multiple-value-setq () (values 1 2)))))
-
-(deftest error-let*-non-list-binding
-  "Test LET* error with non-list binding"
-  (assert-signals error (our-macroexpand-1 '(let* (x 1) body))))
-
-(deftest error-let*-invalid-binding
-  "Test LET* error with invalid binding format"
-  (assert-signals error (our-macroexpand-1 '(let* ((a)) body))))
+(deftest-each error-let*-malformed
+  "LET* signals an error on malformed binding lists"
+  :cases (("non-list-binding"    '(let* (x 1) body))
+          ("invalid-binding"     '(let* ((a)) body)))
+  (form)
+  (assert-signals error (our-macroexpand-1 form)))
 
 ;;; Integration Tests
 
@@ -564,16 +521,12 @@
     (assert-eq (car result) 'let)
     (assert-true (search "eql" (string-downcase (format nil "~S" result))))))
 
-(deftest case-with-otherwise-clause
-  "Test CASE with otherwise clause"
-  (let ((result (our-macroexpand-1 '(case key (a body-a) (otherwise default-body)))))
-    (assert-eq (car result) 'let)
-    ;; Otherwise should result in progn
-    (assert-true (search "default-body" (string-downcase (format nil "~S" result))))))
-
-(deftest case-with-t-clause
-  "Test CASE with t clause (same as otherwise)"
-  (let ((result (our-macroexpand-1 '(case key (a body-a) (t default-body)))))
+(deftest-each case-default-clause
+  "CASE with otherwise/t clauses both produce a let including the default body"
+  :cases (("otherwise" '(case key (a body-a) (otherwise default-body)))
+          ("t-clause"  '(case key (a body-a) (t default-body))))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
     (assert-eq (car result) 'let)
     (assert-true (search "default-body" (string-downcase (format nil "~S" result))))))
 
@@ -600,15 +553,12 @@
     ;; Should use typep for type checking
     (assert-true (search "typep" (string-downcase (format nil "~S" result))))))
 
-(deftest typecase-with-otherwise-clause
-  "Test TYPECASE with otherwise clause"
-  (let ((result (our-macroexpand-1 '(typecase val (string body-string) (otherwise default-body)))))
-    (assert-eq (car result) 'let)
-    (assert-true (search "default-body" (string-downcase (format nil "~S" result))))))
-
-(deftest typecase-with-t-clause
-  "Test TYPECASE with t clause"
-  (let ((result (our-macroexpand-1 '(typecase val (string body-string) (t default-body)))))
+(deftest-each typecase-default-clause
+  "TYPECASE with otherwise/t clauses both produce a let including the default body"
+  :cases (("otherwise" '(typecase val (string body-string) (otherwise default-body)))
+          ("t-clause"  '(typecase val (string body-string) (t default-body))))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
     (assert-eq (car result) 'let)
     (assert-true (search "default-body" (string-downcase (format nil "~S" result))))))
 
@@ -620,23 +570,14 @@
 
 ;;; LOOP Tests (Simplified)
 
-(deftest loop-for-from-to
-  "Test LOOP with for/from/to iteration"
-  (let ((result (our-macroexpand-1 '(loop for i from 1 to 10 do (print i)))))
-    ;; Should contain block, let, tagbody
-    (assert-eq (car result) 'block)
-    (assert-true (search "tagbody" (string-downcase (format nil "~S" result))))))
-
-(deftest loop-for-in-list
-  "Test LOOP with for/in list iteration"
-  (let ((result (our-macroexpand-1 '(loop for item in list do (print item)))))
-    (assert-eq (car result) 'block)
-    (assert-true (search "tagbody" (string-downcase (format nil "~S" result))))))
-
-(deftest loop-for-on-list
-  "Test LOOP with for/on list iteration"
-  (let ((result (our-macroexpand-1 '(loop for tail on list do (print tail)))))
-    (assert-eq (car result) 'block)
+(deftest-each loop-forms-expand-to-block
+  "LOOP iteration forms expand to (block ...) containing tagbody"
+  :cases (("for-from-to"  '(loop for i from 1 to 10 do (print i)))
+          ("for-in-list"  '(loop for item in list do (print item)))
+          ("for-on-list"  '(loop for tail on list do (print tail))))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
+    (assert-eq 'block (car result))
     (assert-true (search "tagbody" (string-downcase (format nil "~S" result))))))
 
 (deftest loop-with-collect
@@ -653,22 +594,14 @@
     ;; Should contain + for summation
     (assert-true (search "+" (string-downcase (format nil "~S" result))))))
 
-(deftest loop-with-while
-  "Test LOOP with while condition"
-  (let ((result (our-macroexpand-1 '(loop for i from 1 to 10 while (< i 5) do (print i)))))
-    (assert-eq (car result) 'block)
-    (assert-true (search "tagbody" (string-downcase (format nil "~S" result))))))
-
-(deftest loop-with-until
-  "Test LOOP with until condition"
-  (let ((result (our-macroexpand-1 '(loop for i from 1 to 10 until (>= i 5) do (print i)))))
-    (assert-eq (car result) 'block)
-    (assert-true (search "tagbody" (string-downcase (format nil "~S" result))))))
-
-(deftest loop-for-below
-  "Test LOOP with for/below (exclusive upper bound)"
-  (let ((result (our-macroexpand-1 '(loop for i from 0 below 5 do (print i)))))
-    (assert-eq (car result) 'block)
+(deftest-each loop-conditional-forms
+  "LOOP with while/until/below all expand to block+tagbody"
+  :cases (("while"    '(loop for i from 1 to 10 while (< i 5) do (print i)))
+          ("until"    '(loop for i from 1 to 10 until (>= i 5) do (print i)))
+          ("below"    '(loop for i from 0 below 5 do (print i))))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
+    (assert-eq 'block (car result))
     (assert-true (search "tagbody" (string-downcase (format nil "~S" result))))))
 
 (deftest loop-with-count
@@ -680,21 +613,14 @@
 
 ;;; Integration Tests for Control Flow Macros
 
-(deftest integration-dolist-evaluation
-  "Integration test: DOLIST produces correct structure"
-  (let ((expanded (our-macroexpand '(dolist (x '(1 2 3)) (print x)))))
-    ;; Should be a block with let and tagbody
-    (assert-eq (car expanded) 'block)))
-
-(deftest integration-dotimes-evaluation
-  "Integration test: DOTIMES produces correct structure"
-  (let ((expanded (our-macroexpand '(dotimes (i 3) (print i)))))
-    (assert-eq (car expanded) 'block)))
-
-(deftest integration-do-evaluation
-  "Integration test: DO produces correct structure"
-  (let ((expanded (our-macroexpand '(do ((i 0 (1+ i))) ((= i 5)) (print i)))))
-    (assert-eq (car expanded) 'block)))
+(deftest-each integration-loop-macros-expand-to-block
+  "dolist/dotimes/do all expand to a block at the top level"
+  :cases (("dolist"  '(dolist (x '(1 2 3)) (print x)))
+          ("dotimes" '(dotimes (i 3) (print i)))
+          ("do"      '(do ((i 0 (1+ i))) ((= i 5)) (print i))))
+  (form)
+  (let ((expanded (our-macroexpand form)))
+    (assert-eq 'block (car expanded))))
 
 (deftest integration-case-evaluation
   "Integration test: CASE produces correct structure"

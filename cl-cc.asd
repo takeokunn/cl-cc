@@ -92,6 +92,7 @@
        (:file "context")
        (:file "closure")
        (:file "cps")
+       (:file "builtin-registry")
        (:file "codegen")))
      ;; Stage 5: VM IR → optimized VM IR
      (:module "optimize"
@@ -152,12 +153,28 @@
       :components
       ((:file "pipeline")))))))
 
+(asdf:defsystem :cl-cc/bin
+  :description "CL-CC CLI tool"
+  :author "CL-CC"
+  :license "MIT"
+  :version "0.1.0"
+  :depends-on (:cl-cc)
+  :components
+  ((:module "src"
+    :components
+    ((:module "cli"
+      :serial t
+      :components
+      ((:file "package")
+       (:file "args")
+       (:file "main")))))))
+
 (asdf:defsystem :cl-cc/test
   :description "CL-CC tests"
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc)
+  :depends-on (:cl-cc :cl-cc/bin)
   :serial t
   :components
   ((:module "tests"
@@ -175,10 +192,19 @@
      (:module "unit"
       :serial t
       :components
-      ((:module "vm"
+      ((:module "cli"
         :serial t
         :components
-        ((:file "vm2-tests")))
+        ((:file "args-tests")
+         (:file "cli-tests")))
+       (:module "vm"
+        :serial t
+        :components
+        ((:file "vm2-tests")
+         (:file "conditions-tests")
+         (:file "hash-tests")
+         (:file "strings-tests")
+         (:file "io-tests")))
        (:module "parse"
         :serial t
         :components
@@ -187,23 +213,46 @@
          (:file "lexer-tests")
          (:file "prolog-tests")
          (:file "pratt-tests")
-         (:file "php-tests")))
+         (:file "php-tests")
+         (:file "combinator-tests")
+         (:file "dcg-tests")
+         (:file "incremental-tests")
+         (:file "cst-to-ast-tests")
+         (:file "diagnostics-tests")))
        (:module "expand"
         :serial t
         :components
-        ((:file "macro-tests")))
+        ((:file "macro-tests")
+         (:file "lambda-list-tests")
+         (:file "defstruct-tests")
+         (:file "expander-tests")))
        (:module "type"
         :serial t
         :components
-        ((:file "type-tests")))
+        ((:file "type-tests")
+         (:file "kind-tests")
+         (:file "multiplicity-tests")
+         (:file "row-tests")
+         (:file "subtyping-tests")
+         (:file "effect-tests")
+         (:file "constraint-tests")
+         (:file "solver-tests")
+         (:file "representation-tests")
+         (:file "typeclass-tests")
+         (:file "printer-tests")
+         (:file "parser-tests")))
        (:module "compile"
         :serial t
         :components
         ((:module "ir"
           :serial t
           :components
-          ((:file "ir-types-tests")))
-         (:file "cps-tests")))
+          ((:file "ir-types-tests")
+           (:file "ir-printer-tests")))
+         (:file "cps-tests")
+         (:file "builtin-registry-tests")
+         (:file "closure-tests")
+         (:file "context-tests")))
        (:module "optimize"
         :serial t
         :components
@@ -217,7 +266,12 @@
         :components
         ((:file "mir-tests")
          (:file "regalloc-tests")
-         (:file "wasm-tests")))
+         (:file "wasm-tests")
+         (:file "aarch64-codegen-tests")
+         (:file "target-tests")
+         (:file "wasm-extract-tests")
+         (:file "wasm-trampoline-tests")
+         (:file "calling-convention-tests")))
        (:module "runtime"
         :serial t
         :components
@@ -238,6 +292,8 @@
        (:file "call-conv-tests")
        (:file "control-flow-tests")
        (:file "clos-tests")
+       (:file "stream-tests")
+       (:file "selfhost-tests")
        (:module "pbt"
         :serial t
         :components

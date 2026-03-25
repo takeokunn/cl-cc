@@ -4,6 +4,8 @@
                  ;; Compiler
                  :compile-string
                  :run-string
+                 :run-string-repl
+                 :reset-repl-state
                  :run-string-typed
                  :compile-expression
                  :compile-ast
@@ -232,6 +234,11 @@
                  :vm-spill-store
                  :vm-spill-load
                  :our-eval
+                 ;; Native code generation
+                 :compile-to-x86-64-bytes
+                 :compile-to-aarch64-bytes
+                 :compile-to-native
+                 :compile-file-to-native
                  ;; Compilation Result
                  :compilation-result
                  :make-compilation-result
@@ -482,6 +489,13 @@
                  ;; Type-union
                  :make-type-union
                  :type-union-p
+                 :type-union-types
+                 ;; Type-intersection
+                 :make-type-intersection
+                 :type-intersection-p
+                 :type-intersection-types
+                 ;; Type-unknown (struct constructor)
+                 :make-type-unknown
                  ;; Type-variant
                  :make-type-variant
                  :type-variant-p
@@ -529,7 +543,16 @@
                  :row-closed-p
                  :row-open-p
                  ;; Effect op
-                 :make-type-effect-op)
+                 :make-type-effect-op
+                 ;; Constraint language
+                 :constraint :constraint-p :constraint-kind :constraint-args
+                 :make-equal-constraint :make-subtype-constraint
+                 :make-typeclass-constraint :make-implication-constraint
+                 :make-effect-subset-constraint :make-mult-leq-constraint
+                 :make-row-lacks-constraint :make-kind-equal-constraint
+                 :make-constraint
+                 ;; Constraint solver
+                 :solve-constraints :collect-constraints)
   (:export :run-tests :cl-cc-suite
            :run-suite
            :deftest

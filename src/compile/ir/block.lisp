@@ -6,7 +6,7 @@
 ;;;;   ir-set-terminator — set block's exit instruction
 ;;;;   ir-rpo        — reverse post-order traversal
 ;;;;   ir-dominators — Cooper et al. 2001 dominator tree
-;;;;   ir-collect-uses / ir-value-uses — use-def chains
+;;;;   ir-collect-uses — use-def chains
 ;;;;   ir-verify-ssa — check the single-definition SSA property
 
 (in-package :cl-cc)
@@ -121,9 +121,6 @@
           (push inst (gethash operand uses)))))
     uses))
 
-(defun ir-value-uses (fn value)
-  "Return the list of instructions in FN that use VALUE as an operand."
-  (gethash value (ir-collect-uses fn)))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; SSA Verifier

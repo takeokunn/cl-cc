@@ -308,15 +308,12 @@ Maps to type-rigid semantics."
     "Convert a type to a human-readable string.
 Handles all type-nodes including backward-compat types (type-class-constraint,
 type-skolem, type-effect) in addition to the representation.lisp core nodes."
-    (cond
-      ((type-class-constraint-p ty)
+    (typecase ty
+      (type-class-constraint
        (format nil "(~A ~A)"
                (type-class-constraint-class-name ty)
                (funcall prior-type-to-string
                         (type-class-constraint-type-arg ty))))
-      ((type-skolem-p ty)
-       (format nil "!sk~D" (type-skolem-id ty)))
-      ((type-effect-p ty)
-       (symbol-name (%type-effect-name ty)))
-      (t
-       (funcall prior-type-to-string ty)))))
+      (type-skolem  (format nil "!sk~D" (type-skolem-id ty)))
+      (type-effect  (symbol-name (%type-effect-name ty)))
+      (t            (funcall prior-type-to-string ty)))))

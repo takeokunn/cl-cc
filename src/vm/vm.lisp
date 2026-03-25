@@ -373,6 +373,7 @@ Used by call-next-method and next-method-p."))
     ;; FR-1206: *features* and *modules*
     (setf (gethash '*features* gv) '(:common-lisp :cl-cc))
     (setf (gethash '*modules* gv) nil)
+    (setf (gethash '*active-restarts* gv) nil)
     ;; FR-1204: time constants
     (setf (gethash 'internal-time-units-per-second gv) internal-time-units-per-second)
     ;; FR-1205: random state
@@ -448,19 +449,46 @@ Uses native cons cells (same as vm-cons instruction)."
        (gethash :__methods__ value)
        t))
 
+;;; Host Function Bridge — whitelist of host CL functions callable from VM
+;;;
+;;; Only functions explicitly registered here can be resolved via fboundp.
+;;; This prevents the VM from accidentally routing calls like `funcall` or
+;;; `mapcar` to host CL (which would receive vm-closure-objects it can't handle).
+
+(defvar *vm-host-bridge-functions* (make-hash-table :test #'eq)
+  "Set of symbols whose host CL functions may be called directly from the VM.
+Only functions that accept non-closure arguments (strings, numbers, symbols,
+lists of data) should be registered here.")
+
+(defun vm-register-host-bridge (sym)
+  "Register SYM as a host-bridgeable function for the VM."
+  (setf (gethash sym *vm-host-bridge-functions*) t))
+
+;; Register self-hosting functions: these take strings/forms, not closures
+(dolist (sym '(run-string run-string-repl our-eval our-load
+              compile-expression compile-string
+              parse-all-forms))
+  (vm-register-host-bridge sym))
+
 (defun vm-resolve-function (state value)
-  "Resolve VALUE to a closure or generic function dispatch table.
+  "Resolve VALUE to a closure, generic function, or host bridge function.
 If VALUE is already a closure, return it.
 If VALUE is a hash table with :__methods__, return it (generic function).
-If VALUE is a symbol, look it up in the function registry."
+If VALUE is a symbol, look it up in the function registry first, then
+check the host bridge whitelist."
   (cond
     ((typep value 'vm-closure-object) value)
     ((vm-generic-function-p value) value)
+    ((functionp value) value)
     ((symbolp value)
      (let ((entry (gethash value (vm-function-registry state))))
-       (if entry
-           entry
-           (error "Undefined function: ~S" value))))
+       (cond
+         (entry entry)
+         ;; Only bridge whitelisted host functions
+         ((and (gethash value *vm-host-bridge-functions*)
+               (fboundp value))
+          (symbol-function value))
+         (t (error "Undefined function: ~S" value)))))
     (t (error "Invalid function designator: ~S" value))))
 
 (defun vm-closure-ref (state var-name)
@@ -597,6 +625,11 @@ Returns (values next-pc halt-p result) like execute-instruction."
     (when (vm-generic-function-p func)
       (return-from execute-instruction
         (vm-dispatch-generic-call func state pc arg-regs dst-reg labels)))
+    ;; Host CL function (from whitelist bridge) — apply directly
+    (when (functionp func)
+      (let ((arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs)))
+        (vm-reg-set state dst-reg (apply func arg-values))
+        (return-from execute-instruction (values (1+ pc) nil nil))))
     ;; Normal closure call
     (let* ((closure func)
            (entry-label (vm-closure-entry-label closure))
@@ -678,11 +711,18 @@ Returns (values next-pc halt-p result) like execute-instruction."
 
 (defmethod execute-instruction ((inst vm-func-ref) state pc labels)
   (declare (ignore pc labels))
-  (vm-reg-set state (vm-dst inst)
-              (make-instance 'vm-closure-object
-                             :entry-label (vm-label-name inst)
-                             :params nil
-                             :captured-values nil))
+  ;; Try the function registry first — user-defined functions (defun) register
+  ;; closures with proper entry-label, params, and captured-values.
+  ;; Fall back to a bare closure for local labels in the same compilation unit.
+  (let* ((label-str (vm-label-name inst))
+         (sym (find-symbol label-str :cl-cc))
+         (registered (when sym (gethash sym (vm-function-registry state)))))
+    (vm-reg-set state (vm-dst inst)
+                (or registered
+                    (make-instance 'vm-closure-object
+                                   :entry-label label-str
+                                   :params nil
+                                   :captured-values nil))))
   (values (1+ pc) nil nil))
 
 (defmethod execute-instruction ((inst vm-make-closure) state pc labels)
@@ -936,8 +976,12 @@ Uses class precedence lists for inheritance-based fallback."
                             (let ((normal (butlast arg-values))
                                   (last-arg (car (last arg-values))))
                               (append normal (vm-list-to-lisp-list state last-arg)))
-                            nil))
-           ;; If generic function, resolve to the applicable method
+                            nil)))
+      ;; Host CL function (from whitelist bridge) — apply directly
+      (when (functionp func)
+        (vm-reg-set state dst-reg (apply func spread-args))
+        (return-from execute-instruction (values (1+ pc) nil nil)))
+      (let* (;; If generic function, resolve to the applicable method
            (closure (if (vm-generic-function-p func)
                         (vm-resolve-gf-method func state (car spread-args) spread-args)
                         func))
@@ -965,7 +1009,7 @@ Uses class precedence lists for inheritance-based fallback."
       (when captured
         (setf (vm-closure-env state) captured))
       ;; Jump to function entry
-      (values (gethash entry-label labels) nil nil))))
+      (values (gethash entry-label labels) nil nil)))))
 
 ;;; VM Environment Reference Instruction
 
@@ -1352,10 +1396,27 @@ CL condition objects use typep."
                (setf (gethash (vm-name inst) labels) pc)))
     labels))
 
-(defun run-compiled (program &key (output-stream *standard-output*))
+(defun run-program-slice (instructions labels start-pc state)
+  "Execute INSTRUCTIONS (a vector) from START-PC to end, using LABELS for
+label resolution and STATE for VM state.  Returns the halted result value,
+or NIL if execution falls off the end without a halt instruction.
+Used by run-string-repl for incremental REPL execution against a shared pool."
+  (loop with pc = start-pc
+        while (< pc (length instructions))
+        do (multiple-value-bind (next-pc halted result)
+               (execute-instruction (aref instructions pc) state pc labels)
+             (when halted
+               (return result))
+             (setf pc next-pc))
+        finally (return nil)))
+
+(defun run-compiled (program &key (output-stream *standard-output*) state)
+  "Run a compiled VM program.
+If STATE is provided, execute using that existing vm-io-state (for REPL persistence).
+Otherwise a fresh state is created from OUTPUT-STREAM."
   (let* ((instructions (vm-program-instructions program))
          (labels (build-label-table instructions))
-         (state (make-instance 'vm-io-state :output-stream output-stream)))
+         (state (or state (make-instance 'vm-io-state :output-stream output-stream))))
     (loop with pc = 0
           while (< pc (length instructions))
           do (multiple-value-bind (next-pc halted result)
@@ -1417,6 +1478,13 @@ returns the next PC value."
                 &aux (registers (make-array +vm-register-count+ :initial-element nil))
                      (global-vars (let ((ht (make-hash-table)))
                                     (setf (gethash '*features* ht) '(:cl-cc))
+                                    (setf (gethash '*active-restarts* ht) nil)
+                                    (setf (gethash '*standard-output* ht) *standard-output*)
+                                    (setf (gethash '*standard-input* ht) *standard-input*)
+                                    (setf (gethash '*error-output* ht) *error-output*)
+                                    (setf (gethash '*trace-output* ht) *trace-output*)
+                                    (setf (gethash '*debug-io* ht) *debug-io*)
+                                    (setf (gethash '*query-io* ht) *query-io*)
                                     ht)))))
   "VM2 state for the flat-vector run-vm interpreter.
 REGISTERS: simple-vector of 256 integer-indexed slots (fast svref access).
@@ -1520,7 +1588,7 @@ Returns the value in the result register when halt2 executes."
 ;;; ─── vm2-state compatibility shims ──────────────────────────────────────────
 ;;;
 ;;; These make vm2-state accessible via the same API as vm-state, allowing
-;;; tests to use make-vm-state, vm-state-p, vm-state-registers, vm-reg-get,
+;;; tests to use make-vm-state, vm-state-registers, vm-reg-get,
 ;;; vm-reg-set, vm-output-stream, and vm-global-vars uniformly.
 
 (defun make-vm-state (&key (output-stream *standard-output*))
@@ -1529,9 +1597,6 @@ This is the PREFERRED constructor for new code; vm-io-state is for the
 legacy CLOS execute-instruction pipeline."
   (make-vm2-state :output-stream output-stream))
 
-(defun vm-state-p (x)
-  "Return T if X is any kind of VM state (vm-state class or vm2-state struct)."
-  (or (typep x 'vm-state) (vm2-state-p x)))
 
 ;;; Extend existing CLOS generic functions to dispatch on vm2-state
 (defmethod vm-state-registers ((s vm2-state))

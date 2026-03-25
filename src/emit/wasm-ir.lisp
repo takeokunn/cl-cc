@@ -161,11 +161,6 @@
           global-def))
   global-def)
 
-;;; Helper: lookup a wasm-global-def by its WAT name
-(defun wasm-module-find-global (module wat-name)
-  "Look up a global by its WAT name. Returns wasm-global-def or nil."
-  (gethash wat-name (wasm-module-global-name-table module)))
-
 ;;; Helper: convert a Lisp global variable name to a WAT identifier
 (defun wasm-lisp-name-to-wat-id (name)
   "Downcase NAME and replace non-alphanumeric chars with underscores."

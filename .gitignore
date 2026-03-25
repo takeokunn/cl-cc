@@ -1,4 +1,5 @@
 .claude/
+.direnv/
 
 # Common Lisp compiled artifacts
 *.fasl
@@ -7,6 +8,7 @@
 *.o
 *.lx64fsl
 *.dx64fsl
+cl-cc
 
 # Native executables
 a.out

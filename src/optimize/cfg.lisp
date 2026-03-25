@@ -142,21 +142,21 @@
                      (let ((term (find-if (lambda (i) (typep i '(or vm-jump vm-jump-zero
                                                                     vm-ret vm-halt)))
                                           (reverse insts))))
-                       (cond
+                       (typecase term
                          ;; Unconditional jump: edge to target only
-                         ((and term (vm-jump-p term))
+                         (vm-jump
                           (let ((tgt-b (cfg-get-block-by-label g (vm-label-name term))))
                             (when tgt-b (cfg-add-edge b tgt-b))))
                          ;; Conditional jump: fall-through AND target
-                         ((and term (vm-jump-zero-p term))
+                         (vm-jump-zero
                           (let ((tgt-b (cfg-get-block-by-label g (vm-label-name term)))
                                 (fall-b (and (car rest) (gethash (car rest) blocks-by-start))))
                             (when tgt-b  (cfg-add-edge b tgt-b))
                             (when fall-b (cfg-add-edge b fall-b))))
                          ;; Return / halt: no outgoing edges
-                         ((and term (or (vm-ret-p term) (vm-halt-p term)))
+                         ((or vm-ret vm-halt)
                           nil)
-                         ;; No explicit terminator: fall through to next block
+                         ;; No explicit terminator (or nil term): fall through
                          (t
                           (let ((fall-b (and (car rest) (gethash (car rest) blocks-by-start))))
                             (when fall-b (cfg-add-edge b fall-b))))))))))
@@ -324,10 +324,6 @@
     (nreverse result)))
 
 ;;; ─── Accessors / Utilities ───────────────────────────────────────────────
-
-(defun cfg-all-blocks (cfg)
-  "Return a list of all basic-blocks in CFG."
-  (loop for b across (cfg-blocks cfg) collect b))
 
 (defun cfg-block-count (cfg)
   "Return the number of basic blocks in CFG."

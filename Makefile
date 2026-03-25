@@ -1,4 +1,4 @@
-.PHONY: test load clean
+.PHONY: test load build clean
 
 test:
 	sbcl --non-interactive \
@@ -12,6 +12,13 @@ load:
 	     --eval '(require :asdf)' \
 	     --load cl-cc.asd \
 	     --eval '(asdf:load-system :cl-cc)'
+
+build:
+	sbcl --non-interactive \
+	     --eval '(require :asdf)' \
+	     --load cl-cc.asd \
+	     --eval '(asdf:load-system :cl-cc/bin)' \
+	     --load scripts/build-cli.lisp
 
 clean:
 	rm -rf *.fasl *.lib *.dex

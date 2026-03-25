@@ -681,5 +681,3 @@ This stub is overridden by the printer module when loaded."
              (type-to-string (type-qualified-body ty))))
     (t (format nil "#<~A>" (type-of ty)))))
 
-(defun reset-type-vars!-alias ()
-  (reset-type-vars!))

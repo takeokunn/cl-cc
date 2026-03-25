@@ -135,51 +135,38 @@
   "Build a simple-vector bytecode from alternating opcode/dst/src1/src2 quads."
   (coerce words 'simple-vector))
 
-(deftest run-vm-const-load
-  "OP2-CONST loads an immediate value into a register."
+(deftest-each run-vm-basic-ops
+  "run-vm executes a basic VM2 program and returns the correct halted value."
+  :cases (("const-load"
+           (make-bytecode cl-cc::+op2-const+ 0 42 nil
+                          cl-cc::+op2-halt2+ 0 nil nil)
+           42)
+          ("move"
+           (make-bytecode cl-cc::+op2-const+ 1 7   nil
+                          cl-cc::+op2-move+  0 1   nil
+                          cl-cc::+op2-halt2+ 0 nil nil)
+           7)
+          ("add"
+           (make-bytecode cl-cc::+op2-const+ 1 3   nil
+                          cl-cc::+op2-const+ 2 4   nil
+                          cl-cc::+op2-add2+  0 1   2
+                          cl-cc::+op2-halt2+ 0 nil nil)
+           7)
+          ("sub"
+           (make-bytecode cl-cc::+op2-const+ 1 10  nil
+                          cl-cc::+op2-const+ 2 3   nil
+                          cl-cc::+op2-sub2+  0 1   2
+                          cl-cc::+op2-halt2+ 0 nil nil)
+           7)
+          ("mul"
+           (make-bytecode cl-cc::+op2-const+ 1 6   nil
+                          cl-cc::+op2-const+ 2 7   nil
+                          cl-cc::+op2-mul2+  0 1   2
+                          cl-cc::+op2-halt2+ 0 nil nil)
+           42))
+  (bytecode expected)
   (let ((s (cl-cc::make-vm2-state)))
-    ;; Program: r0 ← 42; halt(r0)
-    (let ((code (make-bytecode cl-cc::+op2-const+ 0 42 nil
-                               cl-cc::+op2-halt2+ 0 nil nil)))
-      (let ((result (cl-cc::run-vm code s)))
-        (assert-= 42 result)))))
-
-(deftest run-vm-move
-  "OP2-MOVE copies a register value."
-  (let ((s (cl-cc::make-vm2-state)))
-    ;; r1 ← 7; r0 ← r1; halt(r0)
-    (let ((code (make-bytecode cl-cc::+op2-const+ 1 7 nil
-                               cl-cc::+op2-move+  0 1 nil
-                               cl-cc::+op2-halt2+ 0 nil nil)))
-      (assert-= 7 (cl-cc::run-vm code s)))))
-
-(deftest run-vm-add
-  "OP2-ADD computes sum of two registers."
-  (let ((s (cl-cc::make-vm2-state)))
-    ;; r1 ← 3; r2 ← 4; r0 ← r1 + r2; halt
-    (let ((code (make-bytecode cl-cc::+op2-const+ 1 3   nil
-                               cl-cc::+op2-const+ 2 4   nil
-                               cl-cc::+op2-add2+  0 1   2
-                               cl-cc::+op2-halt2+ 0 nil nil)))
-      (assert-= 7 (cl-cc::run-vm code s)))))
-
-(deftest run-vm-sub
-  "OP2-SUB computes difference of two registers."
-  (let ((s (cl-cc::make-vm2-state)))
-    (let ((code (make-bytecode cl-cc::+op2-const+ 1 10  nil
-                               cl-cc::+op2-const+ 2 3   nil
-                               cl-cc::+op2-sub2+  0 1   2
-                               cl-cc::+op2-halt2+ 0 nil nil)))
-      (assert-= 7 (cl-cc::run-vm code s)))))
-
-(deftest run-vm-mul
-  "OP2-MUL computes product of two registers."
-  (let ((s (cl-cc::make-vm2-state)))
-    (let ((code (make-bytecode cl-cc::+op2-const+ 1 6   nil
-                               cl-cc::+op2-const+ 2 7   nil
-                               cl-cc::+op2-mul2+  0 1   2
-                               cl-cc::+op2-halt2+ 0 nil nil)))
-      (assert-= 42 (cl-cc::run-vm code s)))))
+    (assert-= expected (cl-cc::run-vm bytecode s))))
 
 (deftest run-vm-chained-arithmetic
   "run-vm correctly chains multiple arithmetic operations."

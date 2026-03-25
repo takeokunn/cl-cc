@@ -27,6 +27,11 @@
     (ast-print  (find-mutated-variables (ast-print-expr ast)))
     (ast-binop  (union (find-mutated-variables (ast-binop-lhs ast))
                        (find-mutated-variables (ast-binop-rhs ast))))
+    ;; labels/flet: recurse into binding bodies AND outer body
+    (ast-local-fns
+     (mutated-vars-of-list
+      (append (loop for b in (ast-local-fns-bindings ast) append (cddr b))
+              (ast-local-fns-body ast))))
     (t nil)))
 
 (defun find-captured-in-children (body-forms params)
@@ -57,7 +62,14 @@ PARAMS are the current scope's bound variables — only those are candidates for
                                         (ast-call-args form))))
           (ast-print (add-captured! (list (ast-print-expr form))))
           (ast-binop (add-captured! (list (ast-binop-lhs form) (ast-binop-rhs form))))
-          (ast-setq  (add-captured! (list (ast-setq-value form)))))))))
+          (ast-setq  (add-captured! (list (ast-setq-value form))))
+          ;; labels/flet: each binding body is a lambda-like closure; outer body also recurses
+          (ast-local-fns
+           (dolist (binding (ast-local-fns-bindings form))
+             (let ((pseudo-lambda (make-ast-lambda :params (second binding)
+                                                   :body (cddr binding))))
+               (capture-free! pseudo-lambda)))
+           (add-captured! (ast-local-fns-body form))))))))
 
 (defun free-vars-of-list (nodes)
   "Union of free variables across all AST NODES in a list."
@@ -107,5 +119,14 @@ Each entry is (name default-ast); entries with no default contribute nothing."
                 nil)
             (free-vars-of-list (ast-call-args ast))))
     (ast-quote nil)
+    ;; labels/flet: free vars in binding bodies (minus their params) and outer body, minus func names
+    (ast-local-fns
+     (let* ((func-names (mapcar #'first (ast-local-fns-bindings ast)))
+            (binding-free (free-vars-of-list
+                           (mapcar (lambda (b)
+                                     (make-ast-lambda :params (second b) :body (cddr b)))
+                                   (ast-local-fns-bindings ast))))
+            (body-free (free-vars-of-list (ast-local-fns-body ast))))
+       (set-difference (union binding-free body-free) func-names)))
     (t nil)))
 
