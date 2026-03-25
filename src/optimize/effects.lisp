@@ -25,11 +25,8 @@
     ;; but optimizer already handles folding — kept pure for DCE/CSE)
     vm-add vm-sub vm-mul vm-neg vm-abs vm-inc vm-dec
     vm-div vm-mod vm-rem
-    ;; Integer floor/ceiling/truncate/round (set values-list side-channel,
-    ;; but no observable global effect — pure for optimizer purposes)
-    vm-floor-inst vm-ceiling-inst vm-truncate vm-round-inst
-    ;; Float floor/ceiling/truncate/round
-    vm-ffloor vm-fceiling vm-ftruncate vm-fround
+    ;; (floor/ceiling/truncate/round moved to :write-global — they set the
+    ;; vm-values-list side-channel, which DCE must not eliminate)
     ;; Integer comparison
     vm-lt vm-gt vm-le vm-ge vm-num-eq vm-eq
     ;; Bitwise / shift
@@ -118,6 +115,10 @@
     vm-vector-push-extend vm-adjust-array vm-array-displacement
     vm-bit-set vm-bit-and vm-bit-or vm-bit-xor vm-bit-not
     vm-push vm-pop vm-nconc vm-nreverse
+    ;; Multiple-values side-channel producers — write to vm-values-list global
+    ;; so DCE must never remove them even if their primary dst is unused
+    vm-floor-inst vm-ceiling-inst vm-truncate vm-round-inst
+    vm-ffloor vm-fceiling vm-ftruncate vm-fround
     ;; Allocation with initialization effects
     vm-make-array vm-make-hash vm-closure vm-make-closure vm-make-obj
     vm-class-def)

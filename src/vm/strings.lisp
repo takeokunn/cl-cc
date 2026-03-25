@@ -410,7 +410,7 @@
   (src nil :reader vm-src)
   (char nil :reader vm-char)
   (:sexp-tag :make-string)
-  (:sexp-slots dst src))
+  (:sexp-slots dst src char))
 
 (defmethod execute-instruction ((inst vm-make-string) state pc labels)
   (declare (ignore labels))
@@ -498,7 +498,7 @@
   (src nil :reader vm-src)
   (pkg nil :reader vm-intern-pkg)
   (:sexp-tag :intern)
-  (:sexp-slots dst src))
+  (:sexp-slots dst src pkg))
 
 (define-vm-instruction vm-gensym-inst (vm-instruction)
   "Generate a unique uninterned symbol."

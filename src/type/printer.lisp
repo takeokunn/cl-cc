@@ -203,6 +203,26 @@
                  (mapcar #'type-to-string (type-scheme-quantified-vars ty))
                  (type-to-string (type-scheme-type ty)))))
 
+    ;; ── backward-compat structs (defined in typeclass.lisp) ──────────────
+
+    ;; type-class-constraint (backward-compat of type-constraint)
+    ((type-class-constraint-p ty)
+     (format nil "(~A ~A)"
+             (type-class-constraint-class-name ty)
+             (type-to-string (type-class-constraint-type-arg ty))))
+
+    ;; type-skolem (backward-compat rigid variable)
+    ((type-skolem-p ty)
+     (format nil "!sk~D" (type-skolem-id ty)))
+
+    ;; type-effect (backward-compat effect label)
+    ((type-effect-p ty)
+     (symbol-name (%type-effect-name ty)))
+
+    ;; type-unknown (gradual typing hole)
+    ((type-unknown-p ty)
+     "?")
+
     (t (format nil "#<type ~A>" (type-of ty)))))
 
 ;;; ─── Backward-compat methods (old code used defmethod type-to-string) ─────
@@ -240,7 +260,12 @@
      `(forall ,(type-var-name (type-forall-var ty))
               ,(unparse-type (type-forall-body ty))))
     ((type-app-p ty)
-     (list (unparse-type (type-app-fun ty)) (unparse-type (type-app-arg ty))))
+     ;; Flatten curried type-app: ((F A) B) → (F A B) for roundtrip compatibility
+     (let ((name (type-constructor-name ty))
+           (args (type-constructor-args ty)))
+       (if name
+           `(,name ,@(mapcar #'unparse-type args))
+           (list (unparse-type (type-app-fun ty)) (unparse-type (type-app-arg ty))))))
     (t ty)))
 
 ;;; ─── looks-like-type-specifier-p ─────────────────────────────────────────
@@ -248,8 +273,10 @@
 (defun looks-like-type-specifier-p (spec)
   "True iff SPEC looks like it might be a type specifier."
   (or (and (symbolp spec)
-           (member spec '(fixnum string boolean symbol cons null t
-                          int bool top float character)))
+           (or (member spec '(fixnum string boolean symbol cons null t
+                              int bool top float character))
+               ;; Check user-defined type aliases registered via deftype
+               (lookup-type-alias spec)))
       (eq spec '?)
       (and (consp spec)
            (member (car spec) '(or and function values cons list vector array

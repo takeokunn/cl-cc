@@ -49,15 +49,16 @@ Returns (values type t) if found, (values nil nil) otherwise."
 
 (defun subst-extend (var ty subst)
   "Return a NEW substitution that is SUBST extended with VAR -> TY.
-Does not modify SUBST."
-  (let ((new-bindings (make-hash-table :test #'eql))
-        (old-bindings (substitution-bindings subst)))
-    ;; Copy old bindings
-    (maphash (lambda (k v) (setf (gethash k new-bindings) v)) old-bindings)
+Does not modify SUBST.  Handles NIL as the empty substitution."
+  (let ((new-bindings (make-hash-table :test #'eql)))
+    ;; Copy old bindings (subst may be nil — treated as empty)
+    (when subst
+      (maphash (lambda (k v) (setf (gethash k new-bindings) v))
+               (substitution-bindings subst)))
     ;; Add new binding
     (setf (gethash (type-var-id var) new-bindings) ty)
     (%make-substitution :bindings   new-bindings
-                        :generation (1+ (substitution-generation subst)))))
+                        :generation (if subst (1+ (substitution-generation subst)) 1))))
 
 ;;; ─── Extend (destructive — for performance in hot paths) ─────────────────
 
@@ -78,19 +79,25 @@ Does not modify SUBST."
 (defun subst-compose (s1 s2)
   "Compose substitutions: (s1 ∘ s2).
 The result maps v to (zonk (s2 v) s1) for v in dom(s2),
-and s1(v) for v in dom(s1) \\ dom(s2)."
-  (let ((result (make-substitution)))
-    ;; s2 entries, with s1 applied to their ranges
-    (maphash (lambda (id ty)
-               (setf (gethash id (substitution-bindings result))
-                     (zonk ty s1)))
-             (substitution-bindings s2))
-    ;; s1 entries not already covered by s2
-    (maphash (lambda (id ty)
-               (unless (gethash id (substitution-bindings s2))
-                 (setf (gethash id (substitution-bindings result)) ty)))
-             (substitution-bindings s1))
-    result))
+and s1(v) for v in dom(s1) \\ dom(s2).
+Nil is treated as the empty substitution (identity element)."
+  (cond
+    ;; Identity shortcuts: avoid allocating a new subst when one side is empty
+    ((null s2) (or s1 (make-substitution)))
+    ((null s1) s2)
+    (t
+     (let ((result (make-substitution)))
+       ;; s2 entries, with s1 applied to their ranges
+       (maphash (lambda (id ty)
+                  (setf (gethash id (substitution-bindings result))
+                        (zonk ty s1)))
+                (substitution-bindings s2))
+       ;; s1 entries not already covered by s2
+       (maphash (lambda (id ty)
+                  (unless (gethash id (substitution-bindings s2))
+                    (setf (gethash id (substitution-bindings result)) ty)))
+                (substitution-bindings s1))
+       result))))
 
 (defun compose-subst (s1 s2)
   "Alias — backward compat."
@@ -248,7 +255,8 @@ and s1(v) for v in dom(s1) \\ dom(s2)."
 
 (defun apply-subst-env (env subst)
   "Apply SUBST to a type-env struct (backward compat)."
-  (make-type-env :bindings (apply-subst (type-env-bindings env) subst)))
+  (make-type-env :bindings      (apply-subst (type-env-bindings env) subst)
+                 :dict-bindings (type-env-dict-bindings env)))
 
 ;;; ─── Occurs check ─────────────────────────────────────────────────────────
 
@@ -292,9 +300,14 @@ and s1(v) for v in dom(s1) \\ dom(s2)."
 ;;; ─── Generalize / Instantiate ─────────────────────────────────────────────
 
 (defun generalize (env ty)
-  "Generalize TY by quantifying free vars not free in ENV."
+  "Generalize TY by quantifying free vars not free in ENV.
+ENV may be a type-env struct, an alist (backward compat), or nil (empty env)."
   (let* ((ty-fv  (type-free-vars ty))
-         (env-fv (type-env-free-vars env))
+         (env-fv (cond
+                   ((null env)       nil)
+                   ((type-env-p env) (type-env-free-vars env))
+                   ((listp env)      (environment-free-vars env))
+                   (t                (type-env-free-vars env))))
          (to-q   (set-difference ty-fv env-fv :test #'type-var-equal-p)))
     (make-type-scheme to-q ty)))
 

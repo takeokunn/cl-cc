@@ -14,70 +14,48 @@
 
 ;;; Basic Compiler Tests
 
-(deftest vm-exec-arithmetic
-  "Test that basic arithmetic operations compile and run correctly."
-  (assert-true (= 7 (run-string "(+ 3 4)"))))
-
-(deftest vm-exec-subtraction
-  "Test that subtraction operations compile and run correctly."
-  (assert-true (= 3 (run-string "(- 10 7)"))))
-
-(deftest vm-exec-multiplication
-  "Test that multiplication operations compile and run correctly."
-  (assert-true (= 42 (run-string "(* 6 7)"))))
-
-(deftest vm-exec-nested-arithmetic
-  "Test that nested arithmetic operations work correctly."
-  (assert-true (= 9 (run-string "(+ (* 2 3) 3)"))))
+(deftest-each vm-exec-arithmetic
+  "Basic arithmetic expressions compile and evaluate correctly."
+  :cases (("add"        "(+ 3 4)"           7)
+          ("sub"        "(- 10 7)"           3)
+          ("mul"        "(* 6 7)"            42)
+          ("nested"     "(+ (* 2 3) 3)"      9))
+  (code expected)
+  (assert-run= expected code))
 
 ;;; Conditional Compilation Tests
 
-(deftest vm-exec-if-false
-  "Test that if with false condition returns else branch."
-  (assert-true (= 20 (run-string "(if 0 10 20)"))))
-
-(deftest vm-exec-if-true
-  "Test that if with true condition returns then branch."
-  (assert-true (= 10 (run-string "(if 1 10 20)"))))
-
-(deftest vm-exec-if-nested
-  "Test that nested if expressions work correctly."
-  (assert-true (= 2 (run-string "(if 1 (if 0 1 2) 3)"))))
-
-(deftest vm-exec-if-with-variables
-  "Test if with variable conditions."
-  (assert-true (= 10 (run-string "(let ((x 0)) (if x 20 10))"))))
+(deftest-each vm-exec-if
+  "If expressions compile and branch correctly."
+  :cases (("false-cond"     "(if 0 10 20)"                    20)
+          ("true-cond"      "(if 1 10 20)"                    10)
+          ("nested"         "(if 1 (if 0 1 2) 3)"             2)
+          ("var-cond"       "(let ((x 0)) (if x 20 10))"      10))
+  (code expected)
+  (assert-run= expected code))
 
 ;;; Let Binding Tests
 
-(deftest vm-exec-let-simple
-  "Test that simple let binding works."
-  (assert-true (= 42 (run-string "(let ((x 42)) x)"))))
-
-(deftest vm-exec-let-multiple-bindings
-  "Test that multiple let bindings work."
-  (assert-true (= 5 (run-string "(let ((x 2) (y 3)) (+ x y))"))))
-
-(deftest vm-exec-let-shadowing
-  "Test that variable shadowing works in let."
-  (assert-true (= 20 (run-string "(let ((x 10)) (let ((x 20)) x))"))))
-
-(deftest vm-exec-let-with-computation
-  "Test that let bindings with computation work."
-  (assert-true (= 17 (run-string "(let ((x 5) (y 7)) (+ (* x 2) y))"))))
+(deftest-each vm-exec-let
+  "Let binding forms compile and evaluate correctly."
+  :cases (("simple"      "(let ((x 42)) x)"                       42)
+          ("multi"       "(let ((x 2) (y 3)) (+ x y))"            5)
+          ("shadowing"   "(let ((x 10)) (let ((x 20)) x))"         20)
+          ("computed"    "(let ((x 5) (y 7)) (+ (* x 2) y))"      17))
+  (code expected)
+  (assert-run= expected code))
 
 ;;; Progn Tests
 
-(deftest vm-exec-progn-simple
-  "Test that simple progn returns the last value."
-  (assert-true (= 3 (run-string "(progn 1 2 3)"))))
-
-(deftest vm-exec-progn-with-let
-  "Test that progn with let works correctly."
-  (assert-true (= 3 (run-string "(progn (let ((x 2)) x) (let ((y 3)) y))"))))
+(deftest-each vm-exec-progn
+  "Progn sequences compile and return the last value."
+  :cases (("simple"    "(progn 1 2 3)"                               3)
+          ("with-let"  "(progn (let ((x 2)) x) (let ((y 3)) y))"    3))
+  (code expected)
+  (assert-run= expected code))
 
 (deftest vm-exec-progn-empty
-  "Test that empty progn signals an error (not yet supported)."
+  "Empty progn signals an error (not yet supported)."
   (assert-signals error (run-string "(progn)")))
 
 ;;; Print Tests
@@ -98,64 +76,35 @@
 
 ;;; Function Compilation Tests
 
-(deftest compile-simple-lambda
-  "Test that a simple lambda compiles correctly."
-  (let* ((result (compile-string "(lambda (x) x)" :target :vm))
-         (program (compilation-result-program result)))
-    (assert-false (null program))
-    (assert-type vm-program program)))
-
-(deftest compile-lambda-with-multiple-params
-  "Test that lambda with multiple parameters compiles correctly."
-  (let* ((result (compile-string "(lambda (x y) (+ x y))" :target :vm))
-         (program (compilation-result-program result)))
-    (assert-false (null program))
-    (assert-type vm-program program)))
-
-(deftest compile-lambda-in-let
-  "Test that lambda in a let binding compiles correctly."
-  (let* ((result (compile-string "(let ((f (lambda (x) (+ x 1)))) (f 5))" :target :vm))
-         (program (compilation-result-program result)))
-    (assert-false (null program))))
-
-(deftest compile-nested-lambda
-  "Test that nested lambdas compile correctly."
-  (let* ((result (compile-string "(let ((make-adder (lambda (n) (lambda (x) (+ x n))))) (let ((add5 (make-adder 5))) (add5 10)))" :target :vm))
-         (program (compilation-result-program result)))
-    (assert-false (null program))))
-
-(deftest compile-recursive-function
-  "Test that a recursive function can be defined with labels."
-  (let* ((result (compile-string "(labels ((factorial (n) (if (<= n 1) 1 (* n (factorial (- n 1)))))) (factorial 5))" :target :vm))
-         (program (compilation-result-program result)))
-    (assert-false (null program))))
-
-(deftest compile-mutually-recursive-functions
-  "Test that mutually recursive functions compile correctly."
-  (let* ((result (compile-string "(labels ((even? (n) (if (= n 0) 1 (odd? (- n 1)))) (odd? (n) (if (= n 0) 0 (even? (- n 1))))) (even? 10))" :target :vm))
-         (program (compilation-result-program result)))
-    (assert-false (null program))))
-
-;;; Higher-Order Function Tests
-
-(deftest compile-function-as-argument
-  "Test that functions can be passed as arguments."
-  (let* ((result (compile-string "(let ((apply-twice (lambda (f x) (f (f x))))) (apply-twice (lambda (x) (* x 2)) 3))" :target :vm))
-         (program (compilation-result-program result)))
-    (assert-false (null program))))
-
-(deftest compile-function-returning-function
-  "Test that functions can return functions."
-  (let* ((result (compile-string "(let ((make-multiplier (lambda (n) (lambda (x) (* x n))))) (let ((double (make-multiplier 2))) (double 21)))" :target :vm))
-         (program (compilation-result-program result)))
-    (assert-true (or program t))))
+(deftest-each compile-function-forms
+  "Lambda and labels forms compile to a valid vm-program."
+  :cases
+  (("simple-lambda"
+    "(lambda (x) x)")
+   ("multi-param-lambda"
+    "(lambda (x y) (+ x y))")
+   ("lambda-in-let"
+    "(let ((f (lambda (x) (+ x 1)))) (f 5))")
+   ("nested-lambda"
+    "(let ((make-adder (lambda (n) (lambda (x) (+ x n))))) (let ((add5 (make-adder 5))) (add5 10)))")
+   ("recursive-labels"
+    "(labels ((factorial (n) (if (<= n 1) 1 (* n (factorial (- n 1)))))) (factorial 5))")
+   ("mutually-recursive-labels"
+    "(labels ((even? (n) (if (= n 0) 1 (odd? (- n 1)))) (odd? (n) (if (= n 0) 0 (even? (- n 1))))) (even? 10))")
+   ("hof-function-as-arg"
+    "(let ((apply-twice (lambda (f x) (f (f x))))) (apply-twice (lambda (x) (* x 2)) 3))")
+   ("hof-returning-function"
+    "(let ((make-mul (lambda (n) (lambda (x) (* x n))))) (let ((double (make-mul 2))) (double 21)))"))
+  (code)
+  (assert-true (compilation-result-program (compile-string code :target :vm))))
 
 ;;; Assembly Emission Tests
 
 (deftest asm-emission-targets
   "Test that both x86_64 and aarch64 backends generate assembly."
-  (let* ((x86 (compilation-result-assembly (compile-string "(+ 1 2)" :target :x86_64)))
-         (arm (compilation-result-assembly (compile-string "(+ 1 2)" :target :aarch64))))
+  ;; Use a lambda with a parameter so (+ x 2) is not constant-folded.
+  (let* ((x86 (compilation-result-assembly (compile-string "(lambda (x) (+ x 2))" :target :x86_64)))
+         (arm (compilation-result-assembly (compile-string "(lambda (x) (+ x 2))" :target :aarch64))))
     (assert-true (stringp x86))
     (assert-true (stringp arm))
     (assert-true (search "add" (string-downcase x86)))
@@ -2871,12 +2820,15 @@
                                   cl-cc/type:type-string))))
 
 (deftest parametric-type-unify-same
-  "Unifying (List fixnum) with (List fixnum) succeeds"
+  "Unifying (List fixnum) with (List fixnum) succeeds with no new bindings"
   (let ((t1 (cl-cc/type:parse-type-specifier '(list fixnum)))
         (t2 (cl-cc/type:parse-type-specifier '(list fixnum))))
     (multiple-value-bind (subst ok) (cl-cc/type:type-unify t1 t2)
       (assert-true ok)
-      (assert-null subst))))
+      ;; No bindings needed — subst may be empty struct or nil
+      (assert-true (or (null subst)
+                       (zerop (hash-table-count
+                                (cl-cc/type:substitution-bindings subst))))))))
 
 (deftest parametric-type-unify-with-var
   "Unifying (List ?a) with (List fixnum) binds ?a to fixnum"

@@ -86,6 +86,12 @@
    :rename-variables
    :apply-prolog-peephole
    :*enable-prolog-peephole*
+   ;; Prolog type-inference functors (atoms used as structured term tags in rules)
+   :integer-type
+   :boolean-type
+   :const
+   :binop
+   :cmp
 
    ;; Macro System
    :macro-env

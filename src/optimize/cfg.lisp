@@ -84,11 +84,8 @@
           for inst = (aref vec i)
           do (typecase inst
                (vm-jump
-                ;; unconditional jump: target is leader, instruction after is dead
-                ;; (but mark it leader anyway for unreachable-block handling)
-                (let ((tgt (cfg-resolve-jump-target g (vm-label-name inst))))
-                  (declare (ignore tgt)))
-                ;; We'll wire edges in Pass 3; just mark i+1 as potential leader
+                ;; unconditional jump: mark instruction after as potential leader
+                ;; (for unreachable-block handling); edges wired in Pass 3
                 (when (< (1+ i) n) (setf (aref leader (1+ i)) 1)))
                (vm-jump-zero
                 ;; conditional jump: both fall-through and target are leaders
@@ -186,12 +183,6 @@
   "Return the basic-block for the given LABEL-NAME, or NIL."
   (gethash label-name (cfg-label->block cfg)))
 
-(defun cfg-resolve-jump-target (cfg label-name)
-  "Return the block for LABEL-NAME, or NIL.  Side-effect-free placeholder
-   for pass 1 leader marking; actual edge wiring happens in pass 3."
-  (declare (ignore cfg label-name))
-  nil)
-
 ;;; ─── Reverse Post-Order ──────────────────────────────────────────────────
 
 (defun cfg-compute-rpo (cfg)
@@ -208,11 +199,11 @@
                  (push b post-order))))
       (when (cfg-entry cfg)
         (dfs (cfg-entry cfg))))
-    ;; RPO = reverse of post-order; assign indices
-    (let ((rpo (nreverse post-order)))
-      (loop for b in rpo for i from 0
-            do (setf (bb-rpo-index b) i))
-      rpo)))
+    ;; `push` prepends, so the last-pushed node (entry) is at the front.
+    ;; post-order already holds blocks in RPO order — no nreverse needed.
+    (loop for b in post-order for i from 0
+          do (setf (bb-rpo-index b) i))
+    post-order))
 
 ;;; ─── Dominator Tree (Cooper et al. 2001) ─────────────────────────────────
 
@@ -296,17 +287,25 @@
 
 (defun cfg-idf (def-blocks)
   "Compute the iterated dominance frontier (IDF) of DEF-BLOCKS.
-   Returns the smallest set S ⊇ DF+(DEF-BLOCKS) such that DF(S) ⊆ S.
-   Used for Cytron phi-node placement."
-  (let ((result (make-hash-table :test #'eq))
+   Returns the set of join points where phi-nodes must be placed.
+   DEF-BLOCKS themselves are NOT included unless they appear in a frontier.
+
+   Algorithm (Cytron et al.):
+     visited tracks processed nodes to prevent infinite loops.
+     result contains only blocks that are in some dominance frontier."
+  (let ((result  (make-hash-table :test #'eq))  ; actual IDF members
+        (visited (make-hash-table :test #'eq))  ; processed worklist nodes
         (worklist (copy-list def-blocks)))
-    (dolist (b def-blocks) (setf (gethash b result) t))
+    ;; Mark def-blocks as visited to avoid redundant re-processing
+    (dolist (b def-blocks) (setf (gethash b visited) t))
     (loop while worklist
           do (let ((b (pop worklist)))
                (dolist (f (bb-dom-frontier b))
                  (unless (gethash f result)
                    (setf (gethash f result) t)
-                   (push f worklist)))))
+                   (unless (gethash f visited)
+                     (setf (gethash f visited) t)
+                     (push f worklist))))))
     (loop for b being the hash-keys of result collect b)))
 
 ;;; ─── CFG → Flat Instruction List ─────────────────────────────────────────

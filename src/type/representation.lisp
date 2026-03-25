@@ -328,8 +328,12 @@ MESSAGE: a human-readable description of the type error."
 ;;; ─── Type equality (structural) ───────────────────────────────────────────
 
 (defun type-equal-p (t1 t2)
-  "Structural equality of two types (no substitution applied)."
+  "Structural equality of two types (no substitution applied).
+Type-error nodes are never considered equal (each represents a distinct error point),
+even if they happen to be the same object."
   (cond
+    ;; error — always distinct, checked before the (eq t1 t2) shortcut
+    ((or (type-error-p t1) (type-error-p t2)) nil)
     ((eq t1 t2) t)
     ;; primitives
     ((and (type-primitive-p t1) (type-primitive-p t2))
@@ -568,6 +572,39 @@ DICT-BINDINGS: alist of ((class-name . type-key) . method-alist) for typeclass d
 
 (defvar +type-unknown+ (make-type-error :message "unknown")
   "Backward-compat singleton for the old gradual typing escape hatch.")
+
+;;; ─── type-constructor backward-compat API over curried type-app ──────────
+;;; Old code used (make-type-constructor 'list (list T)) which produced a flat
+;;; struct with :name and :args slots. New code uses curried type-app chains.
+;;; These adapters encode/decode the curried representation.
+
+(defun type-constructor-p (x) (type-app-p x))
+
+(defun type-constructor-name (ty)
+  "Return the head constructor name from a curried type-app chain."
+  (when (type-app-p ty)
+    (loop for node = ty then (type-app-fun node)
+          while (type-app-p node)
+          finally (return (when (type-primitive-p node)
+                            (type-primitive-name node))))))
+
+(defun type-constructor-args (ty)
+  "Return all arguments from a curried type-app chain as a flat list."
+  (when (type-app-p ty)
+    (loop for node = ty then (type-app-fun node)
+          while (type-app-p node)
+          collect (type-app-arg node) into args-rev
+          finally (return (nreverse args-rev)))))
+
+(defun make-type-constructor (name args)
+  "Build a curried type-app chain for constructor NAME with ARGS list."
+  (reduce (lambda (acc arg) (make-type-app :fun acc :arg arg))
+          args
+          :initial-value (make-type-primitive :name name)))
+
+(defun make-type-constructor-raw (name args)
+  "Alias for make-type-constructor — backward compatibility."
+  (make-type-constructor name args))
 
 ;;; ─── deftype aliases for typep-based test assertions ─────────────────────
 ;;; Tests call (typep x 'type-variable) etc. via assert-type macro.

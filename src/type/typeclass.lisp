@@ -23,7 +23,7 @@
 
 ;;; ─── typeclass-def defstruct ──────────────────────────────────────────────
 
-(defstruct (typeclass-def (:constructor %make-typeclass-def))
+(defstruct typeclass-def
   "A multi-parameter typeclass definition.
 NAME:             the typeclass symbol (e.g., 'EQ, 'NUM, 'FUNCTOR).
 TYPE-PARAMS:      list of type-var nodes (the class's type parameters).

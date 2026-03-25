@@ -51,7 +51,8 @@
          vm-truncate vm-floor-inst vm-ceiling-inst
          vm-logand vm-logior vm-logxor vm-logeqv vm-ash)
      (list (vm-lhs inst) (vm-rhs inst)))
-    ((or vm-neg vm-abs vm-inc vm-dec
+    ;; All single-source unary instructions (including boolean/bitwise)
+    ((or vm-neg vm-abs vm-inc vm-dec vm-lognot vm-not
          vm-cons-p vm-null-p vm-symbol-p vm-number-p
          vm-integer-p vm-function-p)
      (list (vm-src inst)))
@@ -800,9 +801,18 @@
            (clrhash gen) (clrhash val-env) (clrhash memo)
            (push inst result))
           (vm-const
+           ;; Never replace vm-const with vm-move: doing so creates a
+           ;; fold<->CSE oscillation that DCE can turn into a dangling
+           ;; register reference (first canonical reg gets removed by
+           ;; DCE while later moves still point to it, leaving the
+           ;; register uninitialized = 0 instead of NIL).
+           ;; The fold pass already propagates constant values; CSE is
+           ;; only needed for computed expressions.
            (let ((dst (vm-dst inst))
                  (key (list :const (vm-value inst))))
-             (emit-or-cse inst dst key)))
+             (bump-gen dst)
+             (record dst key)
+             (push inst result)))
           (vm-move
            (let* ((dst     (vm-move-dst inst))
                   (src-val (get-val (vm-move-src inst))))
@@ -857,26 +867,38 @@
 
 ;;; ─── Top-Level Optimizer ─────────────────────────────────────────────────
 
+(defparameter *opt-convergence-passes*
+  (list #'opt-pass-fold
+        #'opt-pass-strength-reduce
+        #'opt-pass-copy-prop
+        #'opt-pass-cse
+        #'opt-pass-jump
+        #'opt-pass-dead-labels
+        #'opt-pass-unreachable
+        #'opt-pass-dce)
+  "Ordered list of passes run to convergence in optimize-instructions.
+   Each pass is a function (instructions) -> instructions.
+   Add new passes here; the convergence loop requires no other changes.")
+
+(defun opt-run-passes-once (prog)
+  "Apply every convergence pass in *opt-convergence-passes* once, left to right."
+  (reduce (lambda (p f) (funcall f p)) *opt-convergence-passes* :initial-value prog))
+
+(defun opt-converged-p (prev next)
+  "T if a pass-cycle produced no change (same length and all instructions eq)."
+  (and (= (length prev) (length next))
+       (every #'eq prev next)))
+
 (defun optimize-instructions (instructions &key (max-iterations 20))
   "Run the full multi-pass optimization pipeline on a VM instruction sequence.
    Runs until no changes or MAX-ITERATIONS reached."
-  (let ((prog instructions))
-    (setf prog (opt-pass-inline prog :threshold 15))
+  (let ((prog (opt-pass-inline instructions :threshold 15)))
     (loop for _ from 0 below max-iterations
           for prev = prog
-          do (setf prog (opt-pass-fold prog))
-             (setf prog (opt-pass-strength-reduce prog))
-             (setf prog (opt-pass-copy-prop prog))
-             (setf prog (opt-pass-cse prog))
-             (setf prog (opt-pass-jump prog))
-             (setf prog (opt-pass-dead-labels prog))
-             (setf prog (opt-pass-unreachable prog))
-             (setf prog (opt-pass-dce prog))
-          when (and (= (length prev) (length prog))
-                    (every #'eq prev prog))
+          do (setf prog (opt-run-passes-once prog))
+          when (opt-converged-p prev prog)
           return prog)
     (if *enable-prolog-peephole*
-        (let* ((sexps (mapcar #'instruction->sexp prog))
-               (optimized (apply-prolog-peephole sexps)))
-          (mapcar #'sexp->instruction optimized))
+        (mapcar #'sexp->instruction
+                (apply-prolog-peephole (mapcar #'instruction->sexp prog)))
         prog)))

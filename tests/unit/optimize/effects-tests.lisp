@@ -91,7 +91,7 @@
 (deftest dce-not-eligible-set-global
   "vm-set-global is NOT DCE-eligible."
   (assert-false (cl-cc::opt-inst-dce-eligible-p
-                  (make-vm-set-global :src :r0 :var-name 'x))))
+                  (make-vm-set-global :src :r0 :name 'x))))
 
 ;;; ─── opt-inst-cse-eligible-p ─────────────────────────────────────────────
 
@@ -104,6 +104,70 @@
   "Allocation instructions (vm-cons) are NOT CSE-eligible (creates distinct objects)."
   (assert-false (cl-cc::opt-inst-cse-eligible-p
                   (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))))
+
+;;; ─── Effect Kind: IO / Alloc / Read-Only / Write-Global ─────────────────
+
+(deftest-each effect-kind-io
+  "I/O instructions are classified as :io."
+  :cases (("vm-print"  (make-vm-print      :reg :r0))
+          ("vm-format" (make-vm-format-inst :dst :r0 :fmt "" :arg-regs nil)))
+  (inst)
+  (assert-eq :io (cl-cc::vm-inst-effect-kind inst)))
+
+(deftest-each effect-kind-alloc
+  "Allocation instructions are classified as :alloc."
+  :cases (("vm-cons"        (make-vm-cons        :dst :r0 :car-src :r1 :cdr-src :r2))
+          ("vm-make-string" (make-vm-make-string  :dst :r0 :src :r1 :char nil)))
+  (inst)
+  (assert-eq :alloc (cl-cc::vm-inst-effect-kind inst)))
+
+(deftest-each effect-kind-read-only
+  "Read-only heap/global instructions are classified as :read-only."
+  :cases (("vm-car"        (make-vm-car        :dst :r0 :src :r1))
+          ("vm-cdr"        (make-vm-cdr        :dst :r0 :src :r1))
+          ("vm-get-global" (make-vm-get-global  :dst :r0 :name 'x)))
+  (inst)
+  (assert-eq :read-only (cl-cc::vm-inst-effect-kind inst)))
+
+(deftest-each effect-kind-write-global
+  "Global/heap mutation instructions are classified as :write-global."
+  :cases (("vm-set-global" (make-vm-set-global :src :r0 :name 'x))
+          ("vm-rplaca"     (make-vm-rplaca     :cons :r0 :val :r1))
+          ("vm-rplacd"     (make-vm-rplacd     :cons :r0 :val :r1)))
+  (inst)
+  (assert-eq :write-global (cl-cc::vm-inst-effect-kind inst)))
+
+(deftest-each effect-kind-bitwise-pure
+  "Bitwise / boolean unary instructions are classified as :pure."
+  :cases (("vm-not"    (make-vm-not    :dst :r0 :src :r1))
+          ("vm-lognot" (make-vm-lognot :dst :r0 :src :r1)))
+  (inst)
+  (assert-eq :pure (cl-cc::vm-inst-effect-kind inst)))
+
+;;; ─── CSE / DCE Properties of New Kinds ──────────────────────────────────
+
+(deftest-each dce-eligible-kinds
+  "Pure and alloc instructions are DCE-eligible."
+  :cases (("pure-add"   (make-vm-add  :dst :r0 :lhs :r1 :rhs :r2))
+          ("alloc-cons" (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2)))
+  (inst)
+  (assert-true (cl-cc::opt-inst-dce-eligible-p inst)))
+
+(deftest-each dce-not-eligible-kinds
+  "IO, write-global, and read-only instructions are NOT DCE-eligible."
+  :cases (("io-print"        (make-vm-print      :reg :r0))
+          ("write-set-global" (make-vm-set-global :src :r0 :name 'x))
+          ("read-get-global"  (make-vm-get-global :dst :r0 :name 'x)))
+  (inst)
+  (assert-false (cl-cc::opt-inst-dce-eligible-p inst)))
+
+(deftest-each cse-not-eligible-non-pure
+  "Non-pure instructions are not CSE-eligible."
+  :cases (("alloc-cons"      (make-vm-cons       :dst :r0 :car-src :r1 :cdr-src :r2))
+          ("io-print"        (make-vm-print       :reg :r0))
+          ("read-get-global" (make-vm-get-global  :dst :r0 :name 'x)))
+  (inst)
+  (assert-false (cl-cc::opt-inst-cse-eligible-p inst)))
 
 ;;; ─── DCE Extended Coverage ───────────────────────────────────────────────
 

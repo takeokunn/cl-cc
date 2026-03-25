@@ -247,8 +247,8 @@
            (multiple-value-bind (tok rest2) (php-consume rest)
              (declare (ignore tok))
              (setf rest rest2)))
-          (t (return))))
-    (values obj rest kv))))
+          (t (return)))))
+    (values obj rest kv)))
 
 (defun php-parse-unary (stream known-vars)
   "Parse unary expressions: !, -, +."

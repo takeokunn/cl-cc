@@ -320,18 +320,20 @@
 
 (defun egraph-default-cost (op children-costs)
   "Default cost model: instruction latency + sum of children costs.
-   Constants are free; simple arithmetic costs 1; calls cost 10+."
-  (let ((base (case op
-                (const      0)
-                (move        1)
-                ((add sub)   1)
-                (neg         1)
-                (mul         3)
-                (ash         2)
-                ((div mod)   4)
-                (call       10)
-                (generic-call 20)
-                (t           2))))
+   Constants are free; simple arithmetic costs 1; calls cost 10+.
+   Compares by symbol-name so cross-package symbol variants work."
+  (let* ((op-str (when (symbolp op) (symbol-name op)))
+         (base (cond
+                 ((equal op-str "CONST")        0)
+                 ((equal op-str "MOVE")         1)
+                 ((member op-str '("ADD" "SUB") :test #'equal) 1)
+                 ((equal op-str "NEG")          1)
+                 ((equal op-str "MUL")          3)
+                 ((equal op-str "ASH")          2)
+                 ((member op-str '("DIV" "MOD") :test #'equal) 4)
+                 ((equal op-str "CALL")         10)
+                 ((equal op-str "GENERIC-CALL") 20)
+                 (t                             2))))
     (+ base (reduce #'+ children-costs :initial-value 0))))
 
 (defun egraph-extract (eg root-id &optional (cost-fn #'egraph-default-cost))

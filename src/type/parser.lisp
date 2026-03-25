@@ -76,12 +76,12 @@
       ;; (or T1 T2 ...) — union
       ((or)
        (unless args (type-parse-error "or requires at least one type"))
-       (make-type-union :types (mapcar #'parse-type-specifier args)))
+       (make-type-union (mapcar #'parse-type-specifier args)))
 
       ;; (and T1 T2 ...) — intersection
       ((and)
        (unless args (type-parse-error "and requires at least one type"))
-       (make-type-intersection :types (mapcar #'parse-type-specifier args)))
+       (make-type-intersection (mapcar #'parse-type-specifier args)))
 
       ;; (function (PARAMS...) RETURN) — backward-compat function type
       ((function)
@@ -170,17 +170,19 @@
        (make-type-refinement :base (parse-type-specifier (first args))
                              :predicate (second args)))
 
-      ;; ─── Graded modal: (! q T) or (!1 T) or (!ω T) ──────────────────
-      ((and hn (or (string= hn "!") (string= hn "!1") (string= hn "!ω") (string= hn "!0")))
-       (let ((grade (cond ((string= hn "!1")  :one)
-                          ((string= hn "!0")  :zero)
-                          ((string= hn "!ω")  :omega)
-                          (t ; (! q T) form
-                           (case (first args)
-                             ((1 :one one)    :one)
-                             ((0 :zero zero)  :zero)
-                             (otherwise :omega)))))
-             (inner-spec (if (string= hn "!") (second args) (first args))))
+      ;; ─── Graded modal: (! q T) or (!1 T) or (!ω T) / (!Ω T) ────────
+      ;; Match any symbol starting with "!" — handles Unicode-uppercased !ω → !Ω
+      ((and hn (> (length hn) 0) (char= (char hn 0) #\!))
+       (let* ((suffix (subseq hn 1))
+              (grade (cond ((string= suffix "1") :one)
+                           ((string= suffix "0") :zero)
+                           ((string= suffix "")  ; plain "!" form: (! multiplicity T)
+                            (case (first args)
+                              ((1 :one one)   :one)
+                              ((0 :zero zero) :zero)
+                              (otherwise      :omega)))
+                           (t :omega)))  ; !ω, !Ω, or any other suffix → unrestricted
+              (inner-spec (if (string= suffix "") (second args) (first args))))
          (make-type-linear :base (parse-type-specifier inner-spec) :grade grade)))
 
       ;; ─── Record: (Record (l1 T1) (l2 T2) ... | ρ) ────────────────────
@@ -203,8 +205,10 @@
 
 (defun parse-arrow-type (args mult)
   "Parse (->/->1/->0 PARAMS... RETURN [! EFFECTS...]) or (-> P... / <...>)."
-  ;; Check for effect annotation via !
-  (let* ((bang-pos  (position '! args))
+  ;; Check for effect annotation via ! (package-independent: compare by symbol-name)
+  (let* ((bang-pos  (position-if (lambda (x) (and (symbolp x)
+                                                    (string= (symbol-name x) "!")))
+                                  args))
          ;; Check for (/ ...) effect annotation
          (slash-pos (and (null bang-pos)
                          (position-if (lambda (x) (and (symbolp x) (string= (symbol-name x) "/")))
@@ -230,14 +234,18 @@
   (if (and (= (length specs) 1) (consp (first specs)))
       ;; Angle-bracket form: (<IO State | ε>) — treat as tagged list
       (let* ((inner (first specs))
-             (pipe-pos (position '\| inner))
+             (pipe-pos (position-if (lambda (x) (and (symbolp x)
+                                                      (string= (symbol-name x) "|")))
+                                    inner))
              (eff-names (if pipe-pos (subseq inner 0 pipe-pos) inner))
              (row-var   (when pipe-pos (parse-type-specifier (nth (1+ pipe-pos) inner)))))
         (make-type-effect-row
          :effects (mapcar (lambda (n) (make-type-effect-op :name n)) eff-names)
          :row-var row-var))
       ;; Flat list of names: (IO State | ε)
-      (let* ((pipe-pos (position '\| specs))
+      (let* ((pipe-pos (position-if (lambda (x) (and (symbolp x)
+                                                      (string= (symbol-name x) "|")))
+                                    specs))
              (eff-names (if pipe-pos (subseq specs 0 pipe-pos) specs))
              (row-var   (when pipe-pos (parse-type-specifier (nth (1+ pipe-pos) specs)))))
         (make-type-effect-row
@@ -248,7 +256,9 @@
 
 (defun parse-row-type (args kind)
   "Parse (Record (l1 T1) ... | ρ) or (Variant (L1 T1) ... | ρ)."
-  (let* ((pipe-pos (position '\| args))
+  (let* ((pipe-pos (position-if (lambda (x) (and (symbolp x)
+                                                   (string= (symbol-name x) "|")))
+                                 args))
          (field-specs (if pipe-pos (subseq args 0 pipe-pos) args))
          (row-var-spec (when pipe-pos (nth (1+ pipe-pos) args)))
          (row-var (when row-var-spec (parse-type-specifier row-var-spec)))
@@ -264,11 +274,11 @@
 ;;; ─── Constraint spec parsing ──────────────────────────────────────────────
 
 (defun parse-constraint-spec (spec)
-  "Parse a typeclass constraint spec like (Num a) into a type-constraint."
+  "Parse a typeclass constraint spec like (Num a) into a type-class-constraint."
   (unless (and (consp spec) (>= (length spec) 2) (symbolp (first spec)))
     (type-parse-error "Constraint must be (ClassName type-arg), got ~S" spec))
-  (make-type-constraint :class-name (first spec)
-                        :type-arg   (parse-type-specifier (second spec))))
+  (make-type-class-constraint :class-name (first spec)
+                               :type-arg   (parse-type-specifier (second spec))))
 
 ;;; ─── Lambda-list parsing ──────────────────────────────────────────────────
 

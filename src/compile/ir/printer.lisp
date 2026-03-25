@@ -45,10 +45,14 @@
 ;;;; Block Dump
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
+(defun %ir-label-string (label)
+  "Return the lowercase string form of a block label (keyword or string)."
+  (string-downcase (format nil "~A" label)))
+
 (defun ir-print-block (blk &optional (stream *standard-output*))
   "Print block BLK in human-readable IR form to STREAM."
   ;; Header: label + optional block parameters
-  (format stream "~A" (irb-label blk))
+  (format stream "~A" (%ir-label-string (irb-label blk)))
   (when (irb-params blk)
     (format stream "(~{~A~^, ~})"
             (mapcar #'ir-format-value (irb-params blk))))
@@ -56,7 +60,7 @@
   ;; Predecessor annotation
   (if (irb-predecessors blk)
       (format stream "  ; preds: ~{~A~^, ~}~%"
-              (mapcar (lambda (p) (format nil "~A" (irb-label p)))
+              (mapcar (lambda (p) (%ir-label-string (irb-label p)))
                       (irb-predecessors blk)))
       (format stream "  ; preds: (none)~%"))
   ;; Body instructions
@@ -76,7 +80,7 @@
   "Print function FN in human-readable IR form to STREAM.
    Blocks are printed in RPO order (entry first)."
   (format stream "define ~A(~{~A~^, ~}) -> ~A {~%"
-          (or (irf-name fn) "<anonymous>")
+          (string-downcase (format nil "~A" (or (irf-name fn) "<anonymous>")))
           (mapcar #'ir-format-value (irf-params fn))
           (or (irf-return-type fn) "any"))
   (dolist (blk (ir-rpo fn))

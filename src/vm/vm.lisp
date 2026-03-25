@@ -214,7 +214,7 @@ SHAPE is one of:
   (key-params nil :reader vm-closure-key-params)
   (captured nil :reader vm-captured-vars)
   (:sexp-tag :closure)
-  (:sexp-slots dst label params captured)
+  (:sexp-slots dst label params optional-params rest-param key-params captured)
   (:conc-name vm-closure-inst-))
 
 ;; vm-make-closure uses list* for instruction->sexp (custom sexp handling)
@@ -441,13 +441,6 @@ Uses native cons cells (same as vm-cons instruction)."
 ;;; instruction->sexp / sexp->instruction now table-driven via define-vm-instruction.
 
 (defgeneric execute-instruction (instruction state pc labels))
-
-(defun vm-reg-get (state reg)
-  (gethash reg (vm-state-registers state) 0))
-
-(defun vm-reg-set (state reg value)
-  (setf (gethash reg (vm-state-registers state)) value)
-  value)
 
 (defun vm-generic-function-p (value)
   "Return T if VALUE is a generic function dispatch table (hash table with :__methods__)."
@@ -1371,3 +1364,198 @@ CL condition objects use typep."
                  (return result))
                (setf pc next-pc))
           finally (return nil))))
+
+;;; ─── Phase A: defopcode dispatch table + vm-state defstruct + run-vm ────────
+
+;;; Opcode dispatch tables (256-slot vectors)
+(defparameter *opcode-dispatch-table*
+  (make-array 256 :initial-element nil)
+  "Vector mapping opcode integer → handler function (lambda (state code pc) ...).")
+
+(defparameter *opcode-name-table*
+  (make-array 256 :initial-element nil)
+  "Vector mapping opcode integer → symbol name.")
+
+(defparameter *opcode-encoder-table*
+  (make-hash-table :test 'eq)
+  "Hash table mapping opcode symbol name → opcode integer.")
+
+;;; Opcode counter (auto-incremented by defopcode)
+;;; eval-when ensures this is bound at compile time (needed by defconstant in defopcode)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defvar *next-opcode* 0
+    "Next available opcode integer; incremented by each defopcode form."))
+
+(defmacro defopcode (name &body body)
+  "Define a bytecode opcode NAME.
+Assigns it the next available opcode number, registers it in all three
+dispatch tables, and defines a constant +OP2-NAME+ for the opcode number.
+
+The BODY must contain exactly one form: (lambda (state code pc) ...) which
+returns the next PC value."
+  ;; Capture and increment at macro-expansion time so defconstant gets a literal.
+  (let ((op-sym (intern (format nil "+OP2-~A+" (symbol-name name))))
+        (op-num *next-opcode*))
+    (incf *next-opcode*)
+    `(progn
+       (defconstant ,op-sym ,op-num)
+       (setf (aref *opcode-dispatch-table* ,op-sym) ,@body)
+       (setf (aref *opcode-name-table*     ,op-sym) ',name)
+       (setf (gethash ',name *opcode-encoder-table*) ,op-sym)
+       ',name)))
+
+;;; Register file size constant
+(defconstant +vm-register-count+ 256
+  "Number of integer-indexed registers in the vm2-state register file.")
+
+;;; vm2-state defstruct with integer-indexed register file
+;;; Distinct from vm-state (defclass, CLOS execute-instruction system).
+;;; This is the flat-vector interpreter state for run-vm.
+(defstruct (vm2-state
+             (:constructor make-vm2-state
+               (&key (output-stream *standard-output*)
+                &aux (registers (make-array +vm-register-count+ :initial-element nil))
+                     (global-vars (let ((ht (make-hash-table)))
+                                    (setf (gethash '*features* ht) '(:cl-cc))
+                                    ht)))))
+  "VM2 state for the flat-vector run-vm interpreter.
+REGISTERS: simple-vector of 256 integer-indexed slots (fast svref access).
+GLOBAL-VARS: hash table for global variable bindings.
+OUTPUT-STREAM: stream for I/O."
+  (registers    nil :type simple-vector)
+  (global-vars  nil :type hash-table)
+  (output-stream *standard-output*))
+
+;;; Integer-indexed register accessors for vm2-state
+(defun vm2-reg-get (state reg)
+  "Get register REG (integer) from vm2-state STATE."
+  (svref (vm2-state-registers state) reg))
+
+(defun vm2-reg-set (state reg value)
+  "Set register REG (integer) to VALUE in vm2-state STATE. Returns VALUE."
+  (setf (svref (vm2-state-registers state) reg) value)
+  value)
+
+;;; Bytecode layout: flat simple-vector of 4-word groups
+;;;   word 0: opcode (fixnum)
+;;;   word 1: dst register (fixnum or nil)
+;;;   word 2: src1/immediate (any CL object)
+;;;   word 3: src2 register (fixnum or nil)
+
+;;; Opcode definitions
+
+(defopcode const
+  (lambda (state code pc regs)
+    (declare (ignore state))
+    ;; CONST dst immediate → regs[dst] := immediate
+    (let ((dst (svref code (+ pc 1)))
+          (imm (svref code (+ pc 2))))
+      (setf (svref regs dst) imm))
+    (+ pc 4)))
+
+(defopcode move
+  (lambda (state code pc regs)
+    (declare (ignore state))
+    ;; MOVE dst src → regs[dst] := regs[src]
+    (let ((dst (svref code (+ pc 1)))
+          (src (svref code (+ pc 2))))
+      (setf (svref regs dst) (svref regs src)))
+    (+ pc 4)))
+
+(defopcode add2
+  (lambda (state code pc regs)
+    (declare (ignore state))
+    ;; ADD2 dst src1 src2 → regs[dst] := regs[src1] + regs[src2]
+    (let ((dst  (svref code (+ pc 1)))
+          (src1 (svref code (+ pc 2)))
+          (src2 (svref code (+ pc 3))))
+      (setf (svref regs dst) (+ (svref regs src1) (svref regs src2))))
+    (+ pc 4)))
+
+(defopcode sub2
+  (lambda (state code pc regs)
+    (declare (ignore state))
+    ;; SUB2 dst src1 src2 → regs[dst] := regs[src1] - regs[src2]
+    (let ((dst  (svref code (+ pc 1)))
+          (src1 (svref code (+ pc 2)))
+          (src2 (svref code (+ pc 3))))
+      (setf (svref regs dst) (- (svref regs src1) (svref regs src2))))
+    (+ pc 4)))
+
+(defopcode mul2
+  (lambda (state code pc regs)
+    (declare (ignore state))
+    ;; MUL2 dst src1 src2 → regs[dst] := regs[src1] * regs[src2]
+    (let ((dst  (svref code (+ pc 1)))
+          (src1 (svref code (+ pc 2)))
+          (src2 (svref code (+ pc 3))))
+      (setf (svref regs dst) (* (svref regs src1) (svref regs src2))))
+    (+ pc 4)))
+
+(defopcode halt2
+  (lambda (state code pc regs)
+    ;; HALT2 result-reg → return regs[result-reg] from run-vm
+    ;; We signal halt by calling a non-local exit; run-vm catches it.
+    (declare (ignore state))
+    (let ((result-reg (svref code (+ pc 1))))
+      (throw 'vm-halt (svref regs result-reg)))))
+
+;;; Redefine run-vm to handle halt via catch/throw
+
+(defun run-vm (code state)
+  "Run bytecode CODE (a simple-vector) using STATE (a vm2-state struct).
+Returns the value in the result register when halt2 executes."
+  (declare (type simple-vector code)
+           (type vm2-state state))
+  (let ((regs (vm2-state-registers state))
+        (len  (length code))
+        (pc   0))
+    (catch 'vm-halt
+      (loop while (< pc len)
+            do (let ((op (svref code pc)))
+                 (let ((handler (aref *opcode-dispatch-table* op)))
+                   (setf pc (funcall handler state code pc regs))))
+            finally (return nil)))))
+
+;;; ─── vm2-state compatibility shims ──────────────────────────────────────────
+;;;
+;;; These make vm2-state accessible via the same API as vm-state, allowing
+;;; tests to use make-vm-state, vm-state-p, vm-state-registers, vm-reg-get,
+;;; vm-reg-set, vm-output-stream, and vm-global-vars uniformly.
+
+(defun make-vm-state (&key (output-stream *standard-output*))
+  "Create a vm2-state with an integer-indexed register file.
+This is the PREFERRED constructor for new code; vm-io-state is for the
+legacy CLOS execute-instruction pipeline."
+  (make-vm2-state :output-stream output-stream))
+
+(defun vm-state-p (x)
+  "Return T if X is any kind of VM state (vm-state class or vm2-state struct)."
+  (or (typep x 'vm-state) (vm2-state-p x)))
+
+;;; Extend existing CLOS generic functions to dispatch on vm2-state
+(defmethod vm-state-registers ((s vm2-state))
+  "Return the simple-vector register file of a vm2-state."
+  (vm2-state-registers s))
+
+(defmethod vm-output-stream ((s vm2-state))
+  "Return the output stream of a vm2-state."
+  (vm2-state-output-stream s))
+
+(defmethod vm-global-vars ((s vm2-state))
+  "Return the global-vars hash table of a vm2-state."
+  (vm2-state-global-vars s))
+
+;;; Redefine vm-reg-get/vm-reg-set to dispatch on vm2-state vs vm-state
+;;; For vm2-state: use integer-indexed svref (registers = simple-vector)
+;;; For vm-state class: use gethash with keyword or integer key
+(defun vm-reg-get (state reg)
+  (if (vm2-state-p state)
+      (svref (vm2-state-registers state) reg)
+      (gethash reg (slot-value state 'registers) 0)))
+
+(defun vm-reg-set (state reg value)
+  (if (vm2-state-p state)
+      (setf (svref (vm2-state-registers state) reg) value)
+      (setf (gethash reg (slot-value state 'registers)) value))
+  value)

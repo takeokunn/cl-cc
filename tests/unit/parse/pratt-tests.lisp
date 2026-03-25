@@ -77,7 +77,7 @@
   "pratt-tok-value returns value using context's accessor function"
   (let* ((ctx (make-test-ctx "hello"))
          (tok (cl-cc::pratt-peek ctx)))
-    (assert-string= "hello" (string (cl-cc::pratt-tok-value ctx tok)))))
+    (assert-string= "HELLO" (string (cl-cc::pratt-tok-value ctx tok)))))
 
 (deftest pratt-tok-type-nil-safe
   "pratt-tok-type returns nil when tok is nil"
@@ -261,7 +261,7 @@
 
 (deftest parse-all-forms-symbol
   "parse-all-forms returns symbol for identifier"
-  (assert-eq 'foo (parse-one-sexp "foo")))
+  (assert-string= "FOO" (symbol-name (parse-one-sexp "foo"))))
 
 (deftest parse-all-forms-string
   "parse-all-forms returns string for string literal"
@@ -282,20 +282,20 @@
   "parse-all-forms returns (quote x) for 'x"
   (let ((form (parse-one-sexp "'foo")))
     (assert-eq 'quote (car form))
-    (assert-eq 'foo (cadr form))))
+    (assert-string= "FOO" (symbol-name (cadr form)))))
 
 (deftest parse-all-forms-multiple
   "parse-all-forms returns all top-level forms"
   (let ((forms (cl-cc:parse-all-forms "(defun f (x) x) (f 1)")))
     (assert-= 2 (length forms))
     (assert-eq 'defun (caar forms))
-    (assert-eq 'f (cadar forms))))
+    (assert-string= "F" (symbol-name (cadar forms)))))
 
 (deftest parse-all-forms-nested
   "parse-all-forms handles deeply nested forms"
   (let ((form (parse-one-sexp "(let ((x (+ 1 2))) (* x x))")))
     (assert-eq 'let (car form))
-    (assert-eq 'x (caadr form))))
+    (assert-string= "X" (symbol-name (caaadr form)))))
 
 ;;; ─── parse-source: Single Form ───────────────────────────────────────────────
 

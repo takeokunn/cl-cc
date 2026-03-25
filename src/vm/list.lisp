@@ -463,7 +463,7 @@
   (fill-pointer nil :reader vm-fill-pointer)
   (adjustable nil :reader vm-adjustable)
   (:sexp-tag :make-array)
-  (:sexp-slots dst size-reg))
+  (:sexp-slots dst size-reg initial-element fill-pointer adjustable))
 
 (define-vm-instruction vm-aref (vm-instruction)
   "Get element at INDEX from ARRAY, store in DST."

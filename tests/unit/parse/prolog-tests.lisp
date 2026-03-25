@@ -330,7 +330,7 @@
     (cl-cc:def-fact (parent mary ann))
     (cl-cc:def-rule (ancestor ?a ?d) (parent ?a ?d))
     (cl-cc:def-rule (ancestor ?a ?d) (parent ?a ?m) (ancestor ?m ?d))
-    (assert-= 3 (length (cl-cc:query-all '(ancestor tom ?d))))))
+    (assert-= 2 (length (cl-cc:query-all '(ancestor tom ?d))))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Type-inference Prolog rules

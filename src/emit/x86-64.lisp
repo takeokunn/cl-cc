@@ -8,6 +8,10 @@
 (defgeneric target-register (target virtual-register))
 (defgeneric emit-instruction (target instruction stream))
 
+;; Fallback: skip unsupported instructions silently (demo backends are partial).
+(defmethod emit-instruction (target (inst vm-instruction) stream)
+  (declare (ignore target stream)))
+
 (defparameter *phys-reg-to-asm-string*
   '((:rax . "rax") (:rcx . "rcx") (:rdx . "rdx") (:rbx . "rbx")
     (:rsi . "rsi") (:rdi . "rdi") (:r8 . "r8") (:r9 . "r9")

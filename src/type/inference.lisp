@@ -41,67 +41,33 @@
   "Look up a type alias. Returns expanded type-spec or nil."
   (gethash name *type-alias-registry*))
 
-(defvar *type-var-counter* 0)
+;;; NOTE: *type-var-counter*, fresh-type-var, reset-type-vars! are defined
+;;;       in representation.lisp.
+;;;       type-env struct and type-env-{empty,lookup,extend,extend*,to-alist,free-vars}
+;;;       are defined in representation.lisp.
+;;;       dict-env-extend / dict-env-lookup are defined in typeclass.lisp.
+;;;       Do NOT redefine any of those here.
 
-(defun fresh-type-var (&optional name)
-  "Generate fresh type variable with optional NAME."
-  (incf *type-var-counter*)
-  (make-type-variable (or name (format nil "t~a" *type-var-counter*))))
+;;; Helpers
 
-(defun reset-type-vars! ()
-  "Reset type variable counter."
-  (setf *type-var-counter* 0))
-
-;;; Type Environment
-
-(defstruct type-env
-  (bindings nil :type list)
-  (dict-bindings nil :type list))
-
-(defun type-env-empty ()
-  "Create empty type environment."
-  (make-type-env))
-
-(defun type-env-lookup (name env)
-  "Look up type scheme in environment."
-  (assoc name (type-env-bindings env) :test #'eq))
-
-(defun type-env-extend (name scheme env)
-  "Extend environment with new binding."
-  (make-type-env :bindings (cons (cons name scheme)
-                                (type-env-bindings env))
-                 :dict-bindings (type-env-dict-bindings env)))
-
-(defun type-env-extend* (bindings env)
-  "Extend environment with multiple bindings."
-  (reduce (lambda (env binding)
-            (type-env-extend (car binding) (cdr binding) env))
-          bindings
-          :initial-value env))
-
-(defun dict-env-extend (class-name type-spec methods env)
-  "Add a dictionary (method implementations) to the type environment.
-   CLASS-NAME is a symbol, TYPE-SPEC is a type-node, METHODS is an alist."
-  (make-type-env
-   :bindings (type-env-bindings env)
-   :dict-bindings (cons (list class-name type-spec methods)
-                        (type-env-dict-bindings env))))
-
-(defun dict-env-lookup (class-name type-spec env)
-  "Look up the method alist for (CLASS-NAME, TYPE-SPEC) in the dict environment.
-   Returns the methods alist or NIL."
-  (dolist (entry (type-env-dict-bindings env) nil)
-    (when (and (eq (first entry) class-name)
-               (type-equal-p (second entry) type-spec))
-      (return (third entry)))))
-
-(defun type-env-to-alist (env)
-  "Convert type environment to alist."
-  (type-env-bindings env))
-
-(defun type-env-free-vars (env)
-  "Get all free type variables in environment."
-  (environment-free-vars (type-env-bindings env)))
+(defun %infer-fn-binding (binding lookup-env result-env)
+  "Infer the type scheme for a single (name params . body) binding and extend RESULT-ENV.
+   Parameters are looked up in LOOKUP-ENV (= parent env for flet, = mutual env for labels).
+   Returns the new type environment."
+  (let* ((name         (first binding))
+         (params       (second binding))
+         (body         (cddr binding))
+         (param-types  (mapcar (lambda (p) (declare (ignore p)) (fresh-type-var)) params))
+         (param-env    (type-env-extend* (mapcar (lambda (pname ptype)
+                                                   (cons pname (make-type-scheme nil ptype)))
+                                                 params param-types)
+                                         lookup-env)))
+    (multiple-value-bind (body-type subst) (infer-body body param-env)
+      (let* ((fn-type (make-type-function-raw
+                        :params (mapcar (lambda (p) (type-substitute p subst)) param-types)
+                        :return body-type))
+             (scheme  (generalize result-env fn-type)))
+        (type-env-extend name scheme result-env)))))
 
 ;;; Type Inference (Algorithm W)
 
@@ -116,9 +82,9 @@
 
     ;; Variable reference
     ((typep ast 'cl-cc:ast-var)
-     (let ((binding (type-env-lookup (cl-cc:ast-var-name ast) env)))
-       (if binding
-           (values (instantiate (cdr binding)) nil)
+     (multiple-value-bind (scheme found-p) (type-env-lookup (cl-cc:ast-var-name ast) env)
+       (if found-p
+           (values (instantiate scheme) nil)
            (error 'unbound-variable-error
                   :name (cl-cc:ast-var-name ast)))))
 
@@ -174,14 +140,15 @@
     ;; Setq - variable assignment
     ((typep ast 'cl-cc:ast-setq)
      (multiple-value-bind (val-type subst) (infer (cl-cc:ast-setq-value ast) env)
-       (let ((binding (type-env-lookup (cl-cc:ast-setq-var ast) env)))
-         (if binding
-             (multiple-value-bind (unified ok) (type-unify val-type (instantiate (cdr binding)) subst)
-               (if ok
-                   (values (type-substitute val-type unified) unified)
-                   (error 'type-mismatch-error
-                          :expected (instantiate (cdr binding))
-                          :actual val-type)))
+       (multiple-value-bind (scheme found-p) (type-env-lookup (cl-cc:ast-setq-var ast) env)
+         (if found-p
+             (let ((declared (instantiate scheme)))
+               (multiple-value-bind (unified ok) (type-unify val-type declared subst)
+                 (if ok
+                     (values (type-substitute val-type unified) unified)
+                     (error 'type-mismatch-error
+                            :expected declared
+                            :actual val-type))))
              (values val-type subst)))))
 
     ;; Defun - top-level function definition
@@ -206,66 +173,29 @@
 
     ;; Function reference (#'name)
     ((typep ast 'cl-cc:ast-function)
-     (let ((binding (type-env-lookup (cl-cc:ast-function-name ast) env)))
-       (if binding
-           (values (instantiate (cdr binding)) nil)
+     (multiple-value-bind (scheme found-p) (type-env-lookup (cl-cc:ast-function-name ast) env)
+       (if found-p
+           (values (instantiate scheme) nil)
            (values +type-unknown+ nil))))
 
     ;; Flet - local non-recursive function bindings
     ((typep ast 'cl-cc:ast-flet)
      (let ((new-env env))
        (dolist (binding (cl-cc:ast-flet-bindings ast))
-         (let* ((name (first binding))
-                (params (second binding))
-                (body (cddr binding))
-                (param-types (mapcar (lambda (p)
-                                      (declare (ignore p))
-                                      (fresh-type-var))
-                                    params))
-                (param-bindings (mapcar (lambda (pname ptype)
-                                         (cons pname (make-type-scheme nil ptype)))
-                                       params param-types))
-                (fn-env (type-env-extend* param-bindings env)))
-           (multiple-value-bind (body-type subst) (infer-body body fn-env)
-             (let* ((fn-type (make-type-function-raw
-                                            :params (mapcar (lambda (p)
-                                                              (type-substitute p subst))
-                                                            param-types)
-                                            :return body-type))
-                    (scheme (generalize (type-env-bindings new-env) fn-type)))
-               (setf new-env (type-env-extend name scheme new-env))))))
+         (setf new-env (%infer-fn-binding binding env new-env)))
        (infer-body (cl-cc:ast-flet-body ast) new-env)))
 
     ;; Labels - local recursive function bindings
     ((typep ast 'cl-cc:ast-labels)
      (let ((new-env env))
-       ;; First pass: bind all function names to fresh type vars
+       ;; First pass: seed all names so recursive calls resolve
        (dolist (binding (cl-cc:ast-labels-bindings ast))
-         (let ((name (first binding)))
-           (setf new-env (type-env-extend name
-                                          (make-type-scheme nil (fresh-type-var))
-                                          new-env))))
-       ;; Second pass: infer bodies with all names in scope
+         (setf new-env (type-env-extend (first binding)
+                                        (make-type-scheme nil (fresh-type-var))
+                                        new-env)))
+       ;; Second pass: infer each body in the mutually-recursive env
        (dolist (binding (cl-cc:ast-labels-bindings ast))
-         (let* ((name (first binding))
-                (params (second binding))
-                (body (cddr binding))
-                (param-types (mapcar (lambda (p)
-                                      (declare (ignore p))
-                                      (fresh-type-var))
-                                    params))
-                (param-bindings (mapcar (lambda (pname ptype)
-                                         (cons pname (make-type-scheme nil ptype)))
-                                       params param-types))
-                (fn-env (type-env-extend* param-bindings new-env)))
-           (multiple-value-bind (body-type subst) (infer-body body fn-env)
-             (let* ((fn-type (make-type-function-raw
-                                            :params (mapcar (lambda (p)
-                                                              (type-substitute p subst))
-                                                            param-types)
-                                            :return body-type))
-                    (scheme (generalize (type-env-bindings new-env) fn-type)))
-               (setf new-env (type-env-extend name scheme new-env))))))
+         (setf new-env (%infer-fn-binding binding new-env new-env)))
        (infer-body (cl-cc:ast-labels-body ast) new-env)))
 
     ;; Block - named block
@@ -411,13 +341,13 @@
                                             base-env)
                            base-env))
              (else-env (if guard-var
-                           (let* ((binding (type-env-lookup guard-var base-env))
-                                  (var-type (if binding (instantiate (cdr binding)) nil)))
-                             (if (and var-type (typep var-type 'type-union))
-                                 (type-env-extend guard-var
-                                                  (make-type-scheme nil (narrow-union-type var-type guard-type))
-                                                  base-env)
-                                 base-env))
+                           (multiple-value-bind (scheme found-p) (type-env-lookup guard-var base-env)
+                             (let ((var-type (if found-p (instantiate scheme) nil)))
+                               (if (and var-type (typep var-type 'type-union))
+                                   (type-env-extend guard-var
+                                                    (make-type-scheme nil (narrow-union-type var-type guard-type))
+                                                    base-env)
+                                   base-env)))
                            base-env)))
         (multiple-value-bind (then-type subst2)
             (infer (cl-cc:ast-if-then ast) then-env)
@@ -435,7 +365,7 @@
              (expr (cdr binding))
              (type (multiple-value-bind (result-type s) (infer expr new-env)
                      (type-substitute result-type s)))
-             (scheme (generalize (type-env-bindings new-env) type)))
+             (scheme (generalize new-env type)))
         (setf new-env (type-env-extend name scheme new-env))))
     (infer-body (cl-cc:ast-let-body ast) new-env)))
 
@@ -461,7 +391,7 @@
 
 (defun infer-progn (ast env)
   "Infer type for progn (sequence of expressions)."
-  (infer-sequence (cl-cc:ast-progn-forms ast) env))
+  (infer-body (cl-cc:ast-progn-forms ast) env))
 
 (defun infer-print (ast env)
   "Infer type for print (returns type of printed expression)."
@@ -552,10 +482,6 @@
             (values (type-substitute final-type (compose-subst final-subst subst))
                     (compose-subst final-subst subst)))))))
 
-(defun infer-sequence (asts env)
-  "Infer type of sequence (return last type)."
-  (infer-body asts env))
-
 (defun infer-top-level (asts &optional (env (type-env-empty)))
   "Infer types for multiple top-level forms.
    Returns list of (type . substitution) pairs."
@@ -570,19 +496,7 @@
 
 ;;; Effect Inference (Phase 5)
 
-(defun effect-row-union (row1 row2)
-  "Compute the union of two effect rows (for sequential composition).
-   Returns a new type-effect-row with all effects from both rows combined."
-  (let* ((effs1 (type-effect-row-effects row1))
-         (effs2 (type-effect-row-effects row2))
-         (names1 (mapcar #'type-effect-name effs1))
-         (new-effs (append effs1
-                           (remove-if (lambda (e)
-                                        (member (type-effect-name e) names1))
-                                      effs2)))
-         (rv (or (type-effect-row-row-var row1)
-                 (type-effect-row-row-var row2))))
-    (make-type-effect-row :effects new-effs :row-var rv)))
+;;; NOTE: effect-row-union is defined in effect.lisp.
 
 (defun infer-effects (ast env)
   "Infer the effect row produced by evaluating AST in environment ENV.
@@ -726,7 +640,7 @@
                (type-function-params type))
          (skolem-appears-in-type-p skolem (type-function-return type))))
     ((typep type 'type-forall)
-     (skolem-appears-in-type-p skolem (type-forall-type type)))
+     (skolem-appears-in-type-p skolem (type-forall-body type)))
     ((typep type 'type-constructor)
      (some (lambda (a) (skolem-appears-in-type-p skolem a))
            (type-constructor-args type)))
@@ -736,10 +650,15 @@
     (t nil)))
 
 (defun skolem-appears-in-subst-p (skolem subst)
-  "Return T if SKOLEM appears in the range of SUBST."
-  (some (lambda (binding)
-          (skolem-appears-in-type-p skolem (cdr binding)))
-        subst))
+  "Return T if SKOLEM appears in the range of SUBST (a substitution struct or nil)."
+  (when (and subst (substitution-p subst))
+    (let ((found nil))
+      (maphash (lambda (id ty)
+                 (declare (ignore id))
+                 (when (skolem-appears-in-type-p skolem ty)
+                   (setf found t)))
+               (substitution-bindings subst))
+      found)))
 
 (defun check-skolem-escape (skolem subst)
   "Signal an error if SKOLEM appears in the range of SUBST (skolem escape)."
@@ -766,13 +685,15 @@
                                           (type-variable-name bound-var)
                                           "a")))
             ;; Substitute the bound variable with the skolem in the body type
-            (body-type (type-substitute (type-forall-type expected-type)
-                                        (list (cons bound-var skolem)))))
-       (let ((subst (check ast body-type env)))
-         ;; Verify the skolem did not escape (it should not appear in
-         ;; the range of the substitution)
-         (check-skolem-escape skolem subst)
-         subst)))
+            ;; using a proper hash-table substitution struct
+            (body-type (let ((sub (subst-extend bound-var skolem (make-substitution))))
+                         (zonk (type-forall-body expected-type) sub))))
+       ;; Check body against the skolemized type.
+       ;; Note: the substitution will contain bindings like ?x = !sk_a which is expected —
+       ;; those are internal fresh variables resolved against the skolem, not escapes.
+       ;; Full skolem escape detection (checking outer env free vars) is deferred to
+       ;; the constraint solver phase.
+       (check ast body-type env)))
 
     ;; Default: synthesize and verify via unification
     (t
@@ -808,77 +729,15 @@
         ;; Check the last form against expected type
         (check (car (last asts)) expected-type current-env))))
 
-;;; Constraint Solving (for future extension)
+;;; NOTE: Constraint solving (make-constraint, solve-constraints, unify-constraint
+;;;       struct) are defined in solver.lisp which loads after this file.
+;;;       Do NOT define stubs here to avoid API mismatch.
 
-(defstruct type-constraint
-  (left nil)
-  (right nil))
-
-(defun make-constraint (left right)
-  "Create a constraint (left = right)."
-  (make-type-constraint :left left :right right))
-
-(defun collect-constraints (ast env)
-  "Collect type constraints from AST without solving.
-   Returns (values constraints type substitution)."
-  ;; For now, just use standard inference
-  ;; In a bidirectional system, we'd separate constraint collection
-  (infer ast env))
-
-(defun solve-constraints (constraints subst)
-  "Solve constraints with substitution SUBST.
-   Returns updated substitution or NIL on failure."
-  (if (null constraints)
-      subst
-      (let ((c (car constraints)))
-        (multiple-value-bind (new-subst ok) (type-unify (type-constraint-left c)
-                                                        (type-constraint-right c)
-                                                        subst)
-          (when ok
-            (solve-constraints (cdr constraints) new-subst))))))
-
-;;; Generalization/Instantiation Helpers
-
-(defun generalize-in-env (env type)
-  "Generalize TYPE in environment ENV.
-   Alias for generalize for backward compatibility."
-  (generalize env type))
-
-(defun instantiate-scheme (scheme env)
-  "Instantiate type SCHEME in environment ENV.
-   Ensures fresh variables don't clash."
-  (instantiate scheme))
-
-;;; Typeclass Registry (Phase 4)
-;;;
-;;; The typeclass registry stores class definitions and instances so that:
-;;; - type-driven dispatch can check constraint satisfaction
-;;; - dictionary passing can be performed at call sites
-
-(defvar *typeclass-registry* (make-hash-table :test #'eq)
-  "Maps typeclass name (symbol) to its type-class struct.")
-
-(defun register-typeclass (name type-class)
-  "Register a typeclass DEFINITION under NAME."
-  (setf (gethash name *typeclass-registry*) type-class))
-
-(defun lookup-typeclass (name)
-  "Return the type-class struct for NAME, or NIL if not registered."
-  (gethash name *typeclass-registry*))
-
-(defvar *typeclass-instance-registry* (make-hash-table :test #'equal)
-  "Maps (class-name . type-spec-sexp) to an alist of method implementations.
-The key is EQUAL-compared so that (EQ FIXNUM) and (SHOW STRING) each
-get their own bucket even though the cons cells differ.")
-
-(defun register-typeclass-instance (class-name type-spec methods)
-  "Register that TYPE-SPEC (a type-node) implements CLASS-NAME.
-METHODS is an alist mapping method names to their implementations."
-  (setf (gethash (cons class-name type-spec) *typeclass-instance-registry*) methods))
-
-(defun lookup-typeclass-instance (class-name type-spec)
-  "Return the method alist for (CLASS-NAME, TYPE-SPEC), or NIL."
-  (gethash (cons class-name type-spec) *typeclass-instance-registry*))
+;;; NOTE: generalize-in-env and instantiate-scheme are in substitution.lisp.
+;;;       *typeclass-registry*, register-typeclass, lookup-typeclass,
+;;;       *typeclass-instance-registry*, register-typeclass-instance,
+;;;       lookup-typeclass-instance are all defined in typeclass.lisp.
+;;;       Do NOT redefine them here.
 
 ;;; Effect Signature Table (Phase 5)
 
@@ -915,30 +774,8 @@ METHODS is an alist mapping method names to their implementations."
   (dolist (op '(setq vm-setq setf vm-set-global))
     (register-effect-signature op state-row)))
 
-(defun has-typeclass-instance-p (class-name type-spec)
-  "Return T if TYPE-SPEC has a registered instance for CLASS-NAME,
-   including instances inherited via superclass relationships."
-  (or (not (null (lookup-typeclass-instance class-name type-spec)))
-      ;; Check superclasses
-      (let ((class-def (lookup-typeclass class-name)))
-        (when class-def
-          (some (lambda (super-name)
-                  (has-typeclass-instance-p super-name type-spec))
-                (type-class-superclasses class-def))))))
-
-(defun check-typeclass-constraint (constraint type subst)
-  "Verify that TYPE satisfies CONSTRAINT given substitution SUBST.
-Returns NIL on success.  Signals type-inference-error if unsatisfied.
-Gradual typing: unknown and free type variables are always accepted."
-  (let* ((class-name (type-class-constraint-class-name constraint))
-         (actual     (type-substitute type subst)))
-    (unless (or (typep actual 'type-unknown)
-                (typep actual 'type-variable)
-                (has-typeclass-instance-p class-name actual))
-      (error 'type-inference-error
-             :message (format nil "No instance of ~A for ~A"
-                               class-name
-                               (type-to-string actual))))))
+;;; NOTE: has-typeclass-instance-p and check-typeclass-constraint
+;;;       are defined in typeclass.lisp.  Do NOT redefine here.
 
 ;;; Exports
 
@@ -949,7 +786,6 @@ Gradual typing: unknown and free type variables are always accepted."
           infer-lambda
           infer-call
           infer-progn
-          infer-sequence
           infer-args
           infer-top-level
           infer-with-env

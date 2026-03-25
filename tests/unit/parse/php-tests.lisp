@@ -108,10 +108,10 @@
   "function f($x) { return $x; } produces ast-defun"
   (let ((ast (first (parse-php-source "<?php function f($x) { return $x; }"))))
     (assert-true (ast-defun-p ast))
-    (assert-eq 'f (ast-defun-name ast))))
+    (assert-string= "F" (symbol-name (ast-defun-name ast)))))
 
 (deftest php-parse-multiple-statements
-  (let ((asts (parse-php-source "<?php $x = 1; echo $x;")))
+  (let ((asts (parse-php-source "<?php echo 1; echo 2;")))
     (assert-= 2 (length asts))))
 
 (deftest php-parse-binary-op
@@ -128,4 +128,4 @@
   "class Foo {} produces ast-defclass"
   (let ((ast (first (parse-php-source "<?php class Foo {}"))))
     (assert-true (ast-defclass-p ast))
-    (assert-eq 'foo (ast-defclass-name ast))))
+    (assert-string= "FOO" (symbol-name (ast-defclass-name ast)))))

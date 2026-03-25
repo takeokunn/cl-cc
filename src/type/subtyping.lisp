@@ -52,15 +52,8 @@
         (and supertypes
              (not (null (member name2 supertypes :test #'eq)))))))
 
-;;; Effect Row Subset Check
-
-(defun effect-row-subset-p (row1 row2)
-  "Return T if all effects in ROW1 are present in ROW2.
-   An open row (with row-var) is treated as potentially containing any effect."
-  (let ((names1 (mapcar #'type-effect-name (type-effect-row-effects row1)))
-        (names2 (mapcar #'type-effect-name (type-effect-row-effects row2))))
-    (or (type-effect-row-row-var row2)      ; open row accepts anything
-        (every (lambda (n) (member n names2)) names1))))
+;;; NOTE: effect-row-subset-p is defined in effect.lisp which loads after
+;;;       this file.  Do not define a duplicate here.
 
 ;;; Main Subtyping Predicate
 

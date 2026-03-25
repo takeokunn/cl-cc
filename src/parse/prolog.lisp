@@ -185,8 +185,16 @@
 
 (defun solve-goal (goal env k)
   "Solve GOAL in environment ENV, call continuation K with each solution.
-   GOAL can be a prolog-goal object or a list (predicate arg1 arg2 ...).
+   GOAL can be a prolog-goal object, a list (predicate arg1 arg2 ...), or a
+   bare atom like ! (cut).
    K is a continuation function that receives the new environment."
+  ;; Handle bare atomic goals (e.g. ! used directly as a body element).
+  ;; Compare by symbol-name to be package-agnostic (rules may come from any package).
+  (when (and (symbolp goal) (not (prolog-goal-p goal)))
+    (when (string= (symbol-name goal) "!")
+      (funcall k env)
+      (signal 'prolog-cut))
+    (return-from solve-goal))
   (let* ((predicate (if (prolog-goal-p goal) (goal-predicate goal) (car goal)))
          (args      (if (prolog-goal-p goal) (goal-args      goal) (cdr goal))))
     ;; Dispatch to built-in handler first
@@ -217,12 +225,30 @@
                   (lambda (new-env)
                     (solve-conjunction (cdr goals) new-env k)))))
 
+(defun subst-for-eval (form env)
+  "Like substitute-variables, but wraps substituted non-self-evaluating
+   symbols in (quote ...) so they survive CL eval, and skips (quote ...) forms."
+  (cond
+    ((logic-var-p form)
+     (let ((val (logic-substitute form env)))
+       (if (logic-var-p val)
+           val  ; still unbound — leave as symbol (will likely cause eval error)
+           (if (and (symbolp val) val (not (keywordp val)))
+               `(quote ,val)
+               val))))
+    ((and (consp form) (eq (car form) 'quote))
+     form)  ; don't recurse into quoted forms
+    ((consp form)
+     (cons (subst-for-eval (car form) env)
+           (subst-for-eval (cdr form) env)))
+    (t form)))
+
 (defun eval-lisp-condition (condition env)
   "Evaluate a Lisp condition embedded in Prolog rules."
-  (declare (ignore env))
-  ;; Substitute variables and evaluate as Lisp
+  ;; Substitute logic variables using current bindings before evaluating.
+  ;; subst-for-eval quotes substituted symbols so they are treated as literals.
   (handler-case
-      (let ((substituted (substitute-variables condition nil)))
+      (let ((substituted (subst-for-eval condition env)))
         (typecase substituted
           (cons (eval substituted))
           (t substituted)))
@@ -285,8 +311,8 @@
 ;; reverse/2: (reverse list ?result)
 (def-rule (reverse nil nil))
 (def-rule (reverse (cons ?x ?xs) ?result)
-          (append ?rev-xs (cons ?x nil) ?result)
-          (reverse ?xs ?rev-xs))
+          (reverse ?xs ?rev-xs)
+          (append ?rev-xs (cons ?x nil) ?result))
 
 ;; length/2: (length list ?n)
 (def-rule (length nil 0))
@@ -307,13 +333,13 @@
 (def-rule (type-of (binop ?op ?a ?b) ?env (integer-type))
           (type-of ?a ?env (integer-type))
           (type-of ?b ?env (integer-type))
-          (member ?op (+ - * / mod)))
+          (:when (member ?op '(+ - * / mod))))
 
 ;; Comparison operations
 (def-rule (type-of (cmp ?op ?a ?b) ?env (boolean-type))
           (type-of ?a ?env (integer-type))
           (type-of ?b ?env (integer-type))
-          (member ?op (< > <= >= = /=)))
+          (:when (member ?op '(< > <= >= = /=))))
 
 ;; If expression
 (def-rule (type-of (if ?cond ?then ?else) ?env ?type)

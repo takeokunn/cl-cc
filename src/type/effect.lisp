@@ -45,19 +45,9 @@ OPERATIONS:  alist of (op-name . type-arrow) — the effect's operations."
   (gethash name *effect-registry*))
 
 ;;; ─── Effect signature table ───────────────────────────────────────────────
-
-(defvar *effect-signature-table*
-  (make-hash-table :test #'eq)
-  "Maps op-name symbol -> effect-name symbol.")
-
-(defun register-effect-signature (op-name effect-name)
-  "Register that OP-NAME belongs to effect EFFECT-NAME."
-  (setf (gethash op-name *effect-signature-table*) effect-name)
-  op-name)
-
-(defun lookup-effect-signature (op-name)
-  "Return the effect name that owns OP-NAME, or nil if unknown."
-  (gethash op-name *effect-signature-table*))
+;;; NOTE: *effect-signature-table*, register-effect-signature, and
+;;;       lookup-effect-signature are defined in inference.lisp which loads
+;;;       later.  Do NOT define them here to avoid API mismatch warnings.
 
 ;;; ─── Effect row operations ────────────────────────────────────────────────
 
@@ -104,52 +94,5 @@ Open row2 (with a row-var) is treated as a superset of everything."
              (member (%effect-node-name e) names2))
            (type-effect-row-effects row1))))
 
-;;; ─── Effect inference ─────────────────────────────────────────────────────
-
-(defun infer-effects (ast env)
-  "Conservative effect inference for AST node AST in type environment ENV.
-Returns a type-effect-row.
-
-For ast-call nodes whose function name appears in *effect-signature-table*,
-we return a singleton effect row for that effect.  All other nodes are
-treated as pure for now — a full effect solver elaborates these later."
-  (declare (ignore env))
-  (let ((node-type (type-of ast)))
-    (cond
-      ;; For call nodes, check if the function is an effect operation.
-      ;; We handle both the struct name used in the project and a plain list form.
-      ((eq node-type 'cons)
-       ;; Plain s-expression: (fn-name arg ...) — check fn-name
-       (let ((fn (car ast)))
-         (when (symbolp fn)
-           (let ((eff-name (lookup-effect-signature fn)))
-             (when eff-name
-               (return-from infer-effects
-                 (make-type-effect-row
-                  :effects (list (make-type-effect-op :name eff-name))
-                  :row-var nil))))))
-       +pure-effect-row+)
-      (t
-       ;; For all other AST types, conservatively return pure.
-       ;; Structural effect inference is performed by the constraint solver.
-       +pure-effect-row+))))
-
-(defun infer-with-effects (ast env)
-  "Infer a type and effect row for AST in ENV.
-Returns (values type effect-row).
-The type is inferred via a fresh type variable (placeholder); a full
-inference pass will unify it.  This function exists for the interface —
-callers that need full inference should use the constraint solver."
-  (declare (ignore ast env))
-  (values (fresh-type-var "t") +pure-effect-row+))
-
-(defun check-body-effects (body-forms expected-effects env)
-  "Check that every form in BODY-FORMS produces effects ≤ EXPECTED-EFFECTS.
-Signals type-mismatch-error if any body form's inferred effects
-are not a subset of EXPECTED-EFFECTS."
-  (dolist (form body-forms)
-    (let ((actual (infer-effects form env)))
-      (unless (effect-row-subset-p actual expected-effects)
-        (error 'type-mismatch-error
-               :message
-               (format nil "Body has unexpected effects not in expected effect row"))))))
+;;; NOTE: infer-effects, infer-with-effects, check-body-effects are defined
+;;;       in inference.lisp which loads later with full AST-walker implementations.

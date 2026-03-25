@@ -9,7 +9,7 @@
   (:export
 
    ;; ─── Kind system ─────────────────────────────────────────────────────
-   #:kind-node
+   #:kind-node  #:kind-node-p
    #:kind-type   #:kind-type-p   #:make-kind-type   #:+kind-type+
    #:kind-arrow  #:kind-arrow-p  #:make-kind-arrow  #:kind-arrow-from #:kind-arrow-to #:kind-fun
    #:kind-effect #:kind-effect-p #:make-kind-effect #:+kind-effect+
@@ -46,7 +46,7 @@
    #:type-skolem-id #:type-skolem-name #:type-skolem-equal-p
 
    ;; ─── Arrow ───────────────────────────────────────────────────────────
-   #:type-arrow    #:type-arrow-p    #:make-type-arrow
+   #:type-arrow    #:type-arrow-p    #:make-type-arrow  #:make-type-arrow-raw
    #:type-arrow-params #:type-arrow-return #:type-arrow-effects #:type-arrow-mult
    #:make-type-function #:make-type-function-raw #:type-function-p
    #:type-function-params #:type-function-return
@@ -181,7 +181,7 @@
    #:typeclass-def-name  #:typeclass-def-type-params  #:typeclass-def-superclasses
    #:typeclass-def-methods  #:typeclass-def-associated-types
    #:*typeclass-registry*  #:register-typeclass  #:lookup-typeclass
-   #:typeclass-instance  #:typeclass-instance-p
+   #:typeclass-instance  #:typeclass-instance-p  #:typeclass-instance-class-name
    #:*typeclass-instance-registry*
    #:register-typeclass-instance  #:lookup-typeclass-instance
    #:has-typeclass-instance-p  #:check-typeclass-constraint
@@ -195,7 +195,7 @@
    ;; ─── Inference engine ────────────────────────────────────────────────
    #:infer  #:infer-with-env  #:infer-top-level
    #:infer-binop  #:infer-if  #:infer-let  #:infer-lambda
-   #:infer-call   #:infer-progn  #:infer-sequence  #:infer-args
+   #:infer-call   #:infer-progn  #:infer-args
    #:annotate-type
    #:*class-type-registry*  #:register-class-type
    #:lookup-class-type  #:lookup-slot-type

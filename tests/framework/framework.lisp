@@ -328,6 +328,39 @@ Returns (values docstring timeout depends-on tags body-forms)."
                        :actual ,actuals
                        :form ',form))))))
 
+(defmacro assert-type-equal (expected actual)
+  "Assert that two type-nodes are structurally equal via type-equal-p.
+Produces a human-readable message using type-to-string on failure."
+  (let ((e (gensym "E")) (a (gensym "A")))
+    `(let ((,e ,expected) (,a ,actual))
+       (unless (type-equal-p ,e ,a)
+         (%fail-test "assert-type-equal: types not equal"
+                     :expected (type-to-string ,e)
+                     :actual   (type-to-string ,a)
+                     :form '(type-equal-p ,expected ,actual))))))
+
+(defmacro assert-unifies (t1 t2)
+  "Assert that types T1 and T2 unify successfully."
+  (let ((s (gensym "S")) (ok (gensym "OK")))
+    `(multiple-value-bind (,s ,ok) (type-unify ,t1 ,t2)
+       (declare (ignore ,s))
+       (unless ,ok
+         (%fail-test "assert-unifies: types failed to unify"
+                     :expected "unification success"
+                     :actual   "unification failure"
+                     :form '(type-unify ,t1 ,t2))))))
+
+(defmacro assert-not-unifies (t1 t2)
+  "Assert that types T1 and T2 fail to unify."
+  (let ((s (gensym "S")) (ok (gensym "OK")))
+    `(multiple-value-bind (,s ,ok) (type-unify ,t1 ,t2)
+       (declare (ignore ,s))
+       (when ,ok
+         (%fail-test "assert-not-unifies: types unexpectedly unified"
+                     :expected "unification failure"
+                     :actual   "unification success"
+                     :form '(type-unify ,t1 ,t2))))))
+
 ;;; ------------------------------------------------------------
 ;;; TAP Output
 ;;; ------------------------------------------------------------

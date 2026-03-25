@@ -52,11 +52,11 @@
 (deftest type-repr-type-equal-p
   "Test type-equal-p for various types."
   ;; Primitives
-  (assert-true (not (null (type-equal-p type-int type-int))))
+  (assert-type-equal type-int type-int)
   (assert-false (type-equal-p type-int type-string))
   ;; Variables
   (let ((v1 (make-type-variable)))
-    (assert-true (not (null (type-equal-p v1 v1)))))
+    (assert-type-equal v1 v1))
   ;; Function types
   (let ((fn1 (make-type-function-raw
                             :params (list type-int)
@@ -67,7 +67,7 @@
         (fn3 (make-type-function-raw
                             :params (list type-string)
                             :return type-int)))
-    (assert-true (not (null (type-equal-p fn1 fn2))))
+    (assert-type-equal fn1 fn2)
     (assert-false (type-equal-p fn1 fn3))))
 
 (deftest type-repr-type-to-string
@@ -100,115 +100,76 @@ alias for a type-error sentinel used for error recovery."
 
 (deftest unify-primitive-same
   "Test that same primitive types unify successfully."
-  (multiple-value-bind (subst ok) (type-unify type-int type-int)
-    (declare (ignore subst))
-    (assert-true (not (null ok)))))
+  (assert-unifies type-int type-int))
 
 (deftest unify-primitive-different
   "Test that different primitive types fail to unify."
-  (multiple-value-bind (subst ok) (type-unify type-int type-string)
-    (declare (ignore subst))
-    (assert-false ok)))
+  (assert-not-unifies type-int type-string))
 
 (deftest unify-variable-with-primitive
   "Test that a type variable unifies with a primitive type."
   (let ((v (make-type-variable)))
     (multiple-value-bind (result ok) (type-unify v type-int)
-      (assert-true (not (null ok)))
-      ;; The substitution should bind v to type-int
+      (assert-true ok)
       (multiple-value-bind (binding found) (subst-lookup v result)
-        (assert-true (not (null found)))
-        (assert-true (not (null (type-equal-p binding type-int))))))))
+        (assert-true found)
+        (assert-type-equal binding type-int)))))
 
 (deftest unify-variable-with-variable
   "Test that two different type variables unify."
-  (let ((v1 (make-type-variable))
-        (v2 (make-type-variable)))
-    (multiple-value-bind (subst ok) (type-unify v1 v2)
-      (declare (ignore subst))
-      (assert-true (not (null ok))))))
+  (assert-unifies (make-type-variable) (make-type-variable)))
 
 (deftest unify-same-variable
   "Test that a type variable unifies with itself."
   (let ((v (make-type-variable)))
-    (multiple-value-bind (subst ok) (type-unify v v)
-      (declare (ignore subst))
-      (assert-true (not (null ok))))))
+    (assert-unifies v v)))
 
 (deftest unify-function-types-structural
-  "Test that function types unify structurally."
-  (let* ((v (make-type-variable))
-         (fn1 (make-type-function-raw
-                             :params (list v)
-                             :return type-int))
-         (fn2 (make-type-function-raw
-                             :params (list type-string)
-                             :return type-int)))
+  "Test that function types unify structurally — parameter variable is bound."
+  (let* ((v   (make-type-variable))
+         (fn1 (make-type-function-raw :params (list v)           :return type-int))
+         (fn2 (make-type-function-raw :params (list type-string) :return type-int)))
     (multiple-value-bind (result ok) (type-unify fn1 fn2)
-      (assert-true (not (null ok)))
-      ;; v should be bound to type-string
+      (assert-true ok)
       (multiple-value-bind (binding found) (subst-lookup v result)
-        (assert-true (not (null found)))
-        (assert-true (not (null (type-equal-p binding type-string))))))))
+        (assert-true found)
+        (assert-type-equal binding type-string)))))
 
 (deftest unify-function-types-arity-mismatch
   "Test that function types with different arities fail to unify."
-  (let ((fn1 (make-type-function-raw
-                            :params (list type-int)
-                            :return type-int))
-        (fn2 (make-type-function-raw
-                            :params (list type-int type-int)
-                            :return type-int)))
-    (multiple-value-bind (subst ok) (type-unify fn1 fn2)
-      (declare (ignore subst))
-      (assert-false ok))))
+  (assert-not-unifies
+   (make-type-function-raw :params (list type-int)            :return type-int)
+   (make-type-function-raw :params (list type-int type-int)   :return type-int)))
 
 (deftest unify-occurs-check
-  "Test that occurs check prevents infinite types."
-  (let* ((v (make-type-variable))
-         (fn (make-type-function-raw
-                            :params (list v)
-                            :return type-int)))
-    ;; Trying to unify v with a type containing v should fail
-    (multiple-value-bind (subst ok) (type-unify v fn)
-      (declare (ignore subst))
-      (assert-false ok))))
+  "Test that occurs check prevents infinite types (v cannot unify with v -> Int)."
+  (let* ((v  (make-type-variable))
+         (fn (make-type-function-raw :params (list v) :return type-int)))
+    (assert-not-unifies v fn)))
 
 (deftest unify-lists-success
   "Test that type-unify-lists works for matching lists."
-  (multiple-value-bind (subst ok) (type-unify-lists (list type-int type-string)
-                                                     (list type-int type-string)
-                                                     nil)
-    (declare (ignore subst))
-    (assert-true (not (null ok)))))
+  (assert-true (nth-value 1 (type-unify-lists (list type-int type-string)
+                                              (list type-int type-string)
+                                              nil))))
 
 (deftest unify-lists-failure
   "Test that type-unify-lists fails for non-matching lists."
-  (multiple-value-bind (subst ok) (type-unify-lists (list type-int type-string)
-                                                     (list type-string type-int)
-                                                     nil)
-    (declare (ignore subst))
-    (assert-false ok)))
+  (assert-false (nth-value 1 (type-unify-lists (list type-int type-string)
+                                               (list type-string type-int)
+                                               nil))))
 
 (deftest unify-lists-length-mismatch
   "Test that type-unify-lists fails for lists of different lengths."
-  (multiple-value-bind (subst ok) (type-unify-lists (list type-int)
-                                                     (list type-int type-string)
-                                                     nil)
-    (declare (ignore subst))
-    (assert-false ok)))
+  (assert-false (nth-value 1 (type-unify-lists (list type-int)
+                                               (list type-int type-string)
+                                               nil))))
 
 (deftest unify-unknown-with-anything
-  "Test that unknown type unifies with any type."
-  (multiple-value-bind (s1 ok1) (type-unify +type-unknown+ type-int)
-    (declare (ignore s1))
-    (assert-true (not (null ok1))))
-  (multiple-value-bind (s2 ok2) (type-unify type-string +type-unknown+)
-    (declare (ignore s2))
-    (assert-true (not (null ok2))))
-  (multiple-value-bind (s3 ok3) (type-unify +type-unknown+ +type-unknown+)
-    (declare (ignore s3))
-    (assert-true (not (null ok3)))))
+  "Test that the type-error sentinel (unknown) unifies with any type."
+  (assert-unifies +type-unknown+ type-int)
+  (assert-unifies type-string +type-unknown+)
+  (assert-unifies +type-unknown+ +type-unknown+))
 
 (deftest unify-substitution-composition
   "Test that compose-subst applies correctly."
@@ -222,7 +183,7 @@ alias for a type-error sentinel used for error recovery."
          (composed (compose-subst s1 s2)))
     ;; After composition, applying to v2 should give type-int
     (let ((result (type-substitute v2 composed)))
-      (assert-true (not (null (type-equal-p result type-int)))))))
+      (assert-type-equal result type-int))))
 
 (deftest unify-transitive-binding
   "Test that transitive variable bindings are resolved."
@@ -230,12 +191,12 @@ alias for a type-error sentinel used for error recovery."
          (v2 (make-type-variable)))
     ;; Unify v1 with v2, then v2 with type-int
     (multiple-value-bind (subst1 ok1) (type-unify v1 v2)
-      (assert-true (not (null ok1)))
+      (assert-true ok1)
       (multiple-value-bind (subst2 ok2) (type-unify v2 type-int subst1)
-        (assert-true (not (null ok2)))
+        (assert-true ok2)
         ;; v1 should resolve to type-int through v2
         (let ((result (type-substitute v1 subst2)))
-          (assert-true (not (null (type-equal-p result type-int)))))))))
+          (assert-type-equal result type-int))))))
 
 ;;; Type Inference Tests
 
@@ -245,7 +206,7 @@ alias for a type-error sentinel used for error recovery."
   (let ((ast (lower-sexp-to-ast '42)))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-true (not (null (type-equal-p ty type-int)))))))
+      (assert-type-equal ty type-int))))
 
 (deftest infer-binop-addition
   "Test that binary addition infers to type-int."
@@ -253,7 +214,7 @@ alias for a type-error sentinel used for error recovery."
   (let ((ast (lower-sexp-to-ast '(+ 1 2))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-true (not (null (type-equal-p ty type-int)))))))
+      (assert-type-equal ty type-int))))
 
 (deftest infer-binop-nested
   "Test that nested binary operations infer to type-int."
@@ -261,7 +222,7 @@ alias for a type-error sentinel used for error recovery."
   (let ((ast (lower-sexp-to-ast '(+ (* 2 3) (- 4 1)))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-true (not (null (type-equal-p ty type-int)))))))
+      (assert-type-equal ty type-int))))
 
 (deftest infer-variable-from-env
   "Test that variables are looked up in the type environment."
@@ -270,7 +231,7 @@ alias for a type-error sentinel used for error recovery."
          (env (type-env-extend 'x (type-to-scheme type-int) (type-env-empty))))
     (multiple-value-bind (ty subst) (infer ast env)
       (declare (ignore subst))
-      (assert-true (not (null (type-equal-p ty type-int)))))))
+      (assert-type-equal ty type-int))))
 
 (deftest infer-unbound-variable-error
   "Test that unbound variables signal an error."
@@ -285,7 +246,7 @@ alias for a type-error sentinel used for error recovery."
   (let ((ast (lower-sexp-to-ast '(let ((x 42)) x))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-true (not (null (type-equal-p ty type-int)))))))
+      (assert-type-equal ty type-int))))
 
 (deftest infer-let-binding-with-binop
   "Test that let bindings with binary operations work."
@@ -293,7 +254,7 @@ alias for a type-error sentinel used for error recovery."
   (let ((ast (lower-sexp-to-ast '(let ((x 10) (y 20)) (+ x y)))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-true (not (null (type-equal-p ty type-int)))))))
+      (assert-type-equal ty type-int))))
 
 (deftest infer-lambda-identity
   "Test that lambda type is inferred as a function type."
@@ -311,10 +272,10 @@ alias for a type-error sentinel used for error recovery."
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
       (assert-type type-function ty)
-      (assert-true (not (null (type-equal-p (type-function-return ty) type-int))))
+      (assert-type-equal (type-function-return ty) type-int)
       ;; Parameter should be constrained to int
       (let ((param-type (first (type-function-params ty))))
-        (assert-true (not (null (type-equal-p param-type type-int))))))))
+        (assert-type-equal param-type type-int)))))
 
 (deftest infer-function-call
   "Test that function application infers the return type."
@@ -322,7 +283,7 @@ alias for a type-error sentinel used for error recovery."
   (let ((ast (lower-sexp-to-ast '(let ((f (lambda (x) (+ x 1)))) (f 5)))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-true (not (null (type-equal-p ty type-int)))))))
+      (assert-type-equal ty type-int))))
 
 (deftest infer-if-expression
   "Test that if expressions unify branches."
@@ -333,7 +294,7 @@ alias for a type-error sentinel used for error recovery."
                                (type-env-empty))))
     (multiple-value-bind (ty subst) (infer ast env)
       (declare (ignore subst))
-      (assert-true (not (null (type-equal-p ty type-int)))))))
+      (assert-type-equal ty type-int))))
 
 (deftest infer-print-returns-expr-type
   "Test that print returns the type of the printed expression."
@@ -341,7 +302,7 @@ alias for a type-error sentinel used for error recovery."
   (let ((ast (lower-sexp-to-ast '(print 42))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-true (not (null (type-equal-p ty type-int)))))))
+      (assert-type-equal ty type-int))))
 
 (deftest infer-progn-returns-last
   "Test that progn returns the type of the last expression."
@@ -349,7 +310,7 @@ alias for a type-error sentinel used for error recovery."
   (let ((ast (lower-sexp-to-ast '(progn 1 2 3))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-true (not (null (type-equal-p ty type-int)))))))
+      (assert-type-equal ty type-int))))
 
 (deftest infer-quote-symbol
   "Test that quoted symbol infers to type-symbol."
@@ -357,7 +318,7 @@ alias for a type-error sentinel used for error recovery."
   (let ((ast (lower-sexp-to-ast '(quote hello))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-true (not (null (type-equal-p ty type-symbol)))))))
+      (assert-type-equal ty type-symbol))))
 
 (deftest infer-quote-integer
   "Test that quoted integer infers to type-int."
@@ -365,7 +326,7 @@ alias for a type-error sentinel used for error recovery."
   (let ((ast (lower-sexp-to-ast '(quote 42))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-true (not (null (type-equal-p ty type-int)))))))
+      (assert-type-equal ty type-int))))
 
 ;;; Generalization / Instantiation Tests
 
@@ -392,9 +353,8 @@ alias for a type-error sentinel used for error recovery."
          (scheme (generalize env fn-type)))
     ;; Only v2 should be quantified (v1 is in env)
     (assert-= 1 (length (type-scheme-quantified-vars scheme)))
-    (assert-true (not (null (type-variable-equal-p
-                    (first (type-scheme-quantified-vars scheme))
-                    v2))))))
+    (assert-true (type-variable-equal-p (first (type-scheme-quantified-vars scheme))
+                                        v2))))
 
 (deftest instantiate-creates-fresh-vars
   "Test that instantiation creates fresh type variables."
@@ -411,7 +371,7 @@ alias for a type-error sentinel used for error recovery."
       (assert-type type-variable new-param)
       (assert-false (type-variable-equal-p new-param v))
       ;; Param and return should be the same fresh variable
-      (assert-true (not (null (type-variable-equal-p new-param new-ret)))))))
+      (assert-true (type-variable-equal-p new-param new-ret)))))
 
 (deftest let-polymorphism-identity
   "Test let-polymorphism: identity function used at different types."
@@ -422,14 +382,14 @@ alias for a type-error sentinel used for error recovery."
   (let ((ast (lower-sexp-to-ast '(let ((id (lambda (x) x))) (id 42)))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-true (not (null (type-equal-p ty type-int)))))))
+      (assert-type-equal ty type-int))))
 
 (deftest type-scheme-monomorphic
   "Test that type-to-scheme creates a monomorphic scheme."
   (let ((scheme (type-to-scheme type-int)))
     (assert-type type-scheme scheme)
     (assert-null (type-scheme-quantified-vars scheme))
-    (assert-true (not (null (type-equal-p (type-scheme-type scheme) type-int))))))
+    (assert-type-equal (type-scheme-type scheme) type-int)))
 
 ;;; Free Variables Tests
 
@@ -443,7 +403,7 @@ alias for a type-error sentinel used for error recovery."
   (let* ((v (make-type-variable))
          (fv (type-free-vars v)))
     (assert-= 1 (length fv))
-    (assert-true (not (null (type-variable-equal-p (first fv) v))))))
+    (assert-true (type-variable-equal-p (first fv) v))))
 
 (deftest free-vars-function
   "Test free variables in function types."
@@ -466,13 +426,13 @@ alias for a type-error sentinel used for error recovery."
   (let* ((v (make-type-variable))
          (subst (extend-subst v type-int (empty-subst)))
          (result (type-substitute v subst)))
-    (assert-true (not (null (type-equal-p result type-int))))))
+    (assert-type-equal result type-int)))
 
 (deftest substitution-variable-unbound
   "Test that unbound variables are unchanged."
   (let* ((v (make-type-variable))
          (result (type-substitute v (empty-subst))))
-    (assert-true (not (null (type-variable-equal-p result v))))))
+    (assert-true (type-variable-equal-p result v))))
 
 (deftest substitution-function-type
   "Test substitution through function types."
@@ -483,8 +443,8 @@ alias for a type-error sentinel used for error recovery."
          (subst (extend-subst v type-int (empty-subst)))
          (result (type-substitute fn subst)))
     (assert-type type-function result)
-    (assert-true (not (null (type-equal-p (first (type-function-params result)) type-int))))
-    (assert-true (not (null (type-equal-p (type-function-return result) type-int))))))
+    (assert-type-equal (first (type-function-params result)) type-int)
+    (assert-type-equal (type-function-return result) type-int)))
 
 ;;; Normalize Type Variables Tests
 
@@ -548,7 +508,7 @@ alias for a type-error sentinel used for error recovery."
                                     type-bool))))))
     (register-typeclass 'eq-test tc)
     (let ((retrieved (lookup-typeclass 'eq-test)))
-      (assert-true (not (null retrieved)))
+      (assert-true retrieved)
       (assert-true (type-class-p retrieved))
       (assert-eq 'eq-test (type-class-name retrieved)))))
 
@@ -725,21 +685,21 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
       (type-unify u type-int)
       (declare (ignore subst))
       ;; Union should unify with int (is-subtype-p int (or int string) = T via union right)
-      (assert-true (not (null ok))))))
+      (assert-true ok))))
 
 (deftest phase-a-infer-empty-progn
   "Empty progn body infers to null type."
   (reset-type-vars!)
-  (let* ((ast (lower-sexp-to-ast '(progn))))
-    ;; Empty progn: progn with no body forms returns nil -> type-null
-    (handler-case
+  ;; lower-sexp-to-ast '(progn) may signal an error -- wrap the whole thing
+  (handler-case
+    (let* ((ast (lower-sexp-to-ast '(progn))))
       (multiple-value-bind (ty subst) (infer-with-env ast)
         (declare (ignore subst))
         ;; Should return type-null or type-unknown for empty body
         (assert-true (or (type-equal-p ty type-null)
                          (typep ty 'type-unknown)
-                         (not (null ty)))))
-      (error () (assert-true t)))))  ; any error is acceptable
+                         (not (null ty))))))
+    (error () (assert-true t))))
 
 ;;; Phase C: Typeclass Dictionary Passing
 
@@ -749,7 +709,7 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
          (env0 (type-env-empty))
          (env1 (cl-cc/type:dict-env-extend 'num type-int methods env0))
          (found (cl-cc/type:dict-env-lookup 'num type-int env1)))
-    (assert-true (not (null found)))
+    (assert-true found)
     (assert-= 2 (length found))))
 
 (deftest phase-c-dict-env-miss
@@ -766,8 +726,8 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
   (let* ((env0 (type-env-empty))
          (env1 (cl-cc/type:dict-env-extend 'eq type-int '((eq-p . #'equal)) env0))
          (env2 (cl-cc/type:dict-env-extend 'num type-int '((plus . #'+)) env1)))
-    (assert-true (not (null (cl-cc/type:dict-env-lookup 'eq type-int env2))))
-    (assert-true (not (null (cl-cc/type:dict-env-lookup 'num type-int env2))))))
+    (assert-true (cl-cc/type:dict-env-lookup 'eq type-int env2))
+    (assert-true (cl-cc/type:dict-env-lookup 'num type-int env2))))
 
 ;;; Phase D: Row-Based Effect Type Inference
 
@@ -1191,7 +1151,7 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
          (ext  (row-extend 'y type-string base)))
     (assert-true (type-record-p ext))
     (assert-= 2 (length (type-record-fields ext)))
-    (assert-true (not (null (assoc 'y (type-record-fields ext)))))))
+    (assert-true (assoc 'y (type-record-fields ext)))))
 
 (deftest row-restrict-basic
   "row-restrict removes a label from a row."
@@ -1282,11 +1242,11 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
 
 (deftest parser-record-open
   "(Record (l T) ... | rho) parses to an open record type."
-  (let ((result (cl-cc/type:parse-type-specifier '(record (name string) | rho))))
+  (let ((result (cl-cc/type:parse-type-specifier '(record (name string) \| rho))))
     (assert-true (type-record-p result))
     (assert-= 1 (length (type-record-fields result)))
     ;; row-var is a fresh type variable for the open tail
-    (assert-true (not (null (type-record-row-var result))))))
+    (assert-true (type-record-row-var result))))
 
 (deftest parser-variant-syntax
   "(Variant (L T) ...) parses to a closed variant type."
@@ -1313,7 +1273,7 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
                  '(refine fixnum (lambda (x) (> x 0))))))
     (assert-true (type-refinement-p result))
     (assert-true (type-equal-p type-int (type-refinement-base result)))
-    (assert-true (not (null (type-refinement-predicate result))))))
+    (assert-true (type-refinement-predicate result))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; 2026 Type System: Printer Tests (printer.lisp full implementation)
@@ -1416,7 +1376,7 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
               :functional-deps nil)))
     (register-typeclass 'show-test tc)
     (let ((retrieved (lookup-typeclass 'show-test)))
-      (assert-true (not (null retrieved)))
+      (assert-true retrieved)
       (assert-true (typeclass-def-p retrieved))
       (assert-eq 'show-test (typeclass-def-name retrieved)))))
 
@@ -1425,7 +1385,7 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
   (register-typeclass-instance 'show-int-test type-int
                                (list (cons 'show (lambda (x) (format nil "~A" x)))))
   (let ((inst (lookup-typeclass-instance 'show-int-test type-int)))
-    (assert-true (not (null inst)))
+    (assert-true inst)
     (assert-true (typeclass-instance-p inst))
     (assert-eq 'show-int-test (typeclass-instance-class-name inst)))
   (assert-true (has-typeclass-instance-p 'show-int-test type-int))

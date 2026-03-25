@@ -309,7 +309,11 @@ GENERIC-P selects the polymorphic variant; default is typed (fixnum)."
                                        (ast-source-line node))
                      :format-control "Type error in ~A: ~A"
                      :format-arguments (list *compiling-typed-fn*
-                                             (type-error-message-from-mismatch e))))))))
+                                             (type-error-message-from-mismatch e))))
+            ;; Unbound variables and other inference errors just mean the
+            ;; type checker lacks context (e.g., function params are not in
+            ;; the empty tenv). Skip the check silently.
+            (cl-cc/type:type-inference-error () nil)))))
     reg))
 
 ;;; CLOS Compilation
@@ -1865,10 +1869,16 @@ Returns a compilation-result struct with program, assembly, and globals."
         (let* ((dest-arg (first args))
                (fmt-reg (compile-ast (second args) ctx))
                (format-arg-regs (mapcar (lambda (a) (compile-ast a ctx)) (cddr args)))
-               (dest-is-nil (and (typep dest-arg 'ast-var)
-                                 (eq (ast-var-name dest-arg) 'nil)))
-               (dest-is-t (and (typep dest-arg 'ast-var)
-                               (eq (ast-var-name dest-arg) 't))))
+               (dest-is-nil (or (and (typep dest-arg 'ast-var)
+                                     (eq (ast-var-name dest-arg) 'nil))
+                                 ;; nil may be lowered to (quote nil) = ast-quote
+                                 (and (typep dest-arg 'ast-quote)
+                                      (null (ast-quote-value dest-arg)))))
+               (dest-is-t (or (and (typep dest-arg 'ast-var)
+                                   (eq (ast-var-name dest-arg) 't))
+                               ;; t may be lowered to (quote t) = ast-quote
+                               (and (typep dest-arg 'ast-quote)
+                                    (eq (ast-quote-value dest-arg) t)))))
           (cond
             (dest-is-nil
              (emit ctx (make-vm-format-inst
@@ -2222,6 +2232,8 @@ Returns a compilation-result struct with program, assembly, and globals."
 (defun emit-assembly (program &key (target :x86_64))
   (when (eq target :vm)
     (return-from emit-assembly ""))
+  (when (eq target :wasm)
+    (return-from emit-assembly (compile-to-wasm-wat program)))
   (let ((target-object (target-instance target)))
     ;; When targeting x86-64, run register allocation
     (when (and (typep target-object 'x86-64-target)

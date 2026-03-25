@@ -123,6 +123,13 @@
                  :make-vm-rplaca :make-vm-rplacd :make-vm-sub
                  :make-vm-closure :make-vm-jump :make-vm-ret :make-vm-func-ref
                  :make-vm-print :make-vm-spill-load :make-vm-spill-store
+                 ;; Additional constructors for effects/optimizer tests
+                 :make-vm-neg :make-vm-inc :make-vm-dec
+                 :make-vm-lt :make-vm-gt :make-vm-le :make-vm-ge
+                 :make-vm-null-p :make-vm-cons-p :make-vm-number-p
+                 :make-vm-set-global :make-vm-get-global
+                 :make-vm-not :make-vm-lognot
+                 :make-vm-format-inst :make-vm-make-string
                  ;; VM Heap operations
                  :vm-alloc
                  :vm-cons
@@ -292,7 +299,9 @@
                  :*target-registry* :register-target :find-target
                  :target-64-bit-p :target-has-feature-p
                  :target-allocatable-regs :target-caller-saved
-                 :target-reg-index :target-op-legal-p :target-op-expand)
+                 :target-reg-index :target-op-legal-p :target-op-expand
+                 ;; Prolog type-inference functor atoms
+                 :integer-type :boolean-type :const :binop :cmp)
   (:import-from :cl-cc/type
                  ;; Type classes
                  :type-node
@@ -396,7 +405,131 @@
                  :make-type-forall
                  :type-forall-p
                  :type-forall-var
-                 :type-forall-type)
+                 :type-forall-type
+                 :type-forall-body
+                 ;; Kind system (additional)
+                 :kind-node-p
+                 :fresh-kind-var
+                 :kind-var-p
+                 :kind-var-equal-p
+                 :kind-type-p
+                 :make-kind-type
+                 :kind-arrow-p
+                 :kind-arrow-from
+                 :kind-arrow-to
+                 :kind-fun
+                 :kind-effect-p
+                 :kind-row-p
+                 :kind-row-elem
+                 :kind-equal-p
+                 :kind-to-string
+                 ;; Kind singletons (constants)
+                 :+kind-type+
+                 :+kind-effect+
+                 :+kind-constraint+
+                 :+kind-multiplicity+
+                 :+kind-row-type+
+                 :+kind-row-effect+
+                 ;; Multiplicity
+                 :+mult-zero+
+                 :+mult-one+
+                 :+mult-omega+
+                 :multiplicity-p
+                 :mult-add
+                 :mult-mul
+                 :mult-leq
+                 :mult-to-string
+                 ;; Type-arrow (full API)
+                 :make-type-arrow
+                 :make-type-arrow-raw
+                 :type-arrow-p
+                 :type-arrow-params
+                 :type-arrow-return
+                 :type-arrow-effects
+                 :type-arrow-mult
+                 ;; Type-app (HKT application)
+                 :make-type-app
+                 :type-app-p
+                 :type-app-fun
+                 :type-app-arg
+                 ;; Type-error sentinel
+                 :make-type-error
+                 :type-error-p
+                 ;; Type-exists
+                 :make-type-exists
+                 :type-exists-p
+                 :type-exists-var
+                 :type-exists-body
+                 ;; Type-linear
+                 :make-type-linear
+                 :type-linear-p
+                 :type-linear-base
+                 :type-linear-grade
+                 ;; Type-mu (recursive)
+                 :make-type-mu
+                 :type-mu-p
+                 :type-mu-var
+                 :type-mu-body
+                 ;; Type-product (tuple)
+                 :make-type-product
+                 :type-product-p
+                 :type-product-elems
+                 ;; Type-record
+                 :make-type-record
+                 :type-record-p
+                 :type-record-fields
+                 :type-record-row-var
+                 ;; Type-union
+                 :make-type-union
+                 :type-union-p
+                 ;; Type-variant
+                 :make-type-variant
+                 :type-variant-p
+                 :type-variant-cases
+                 :type-variant-row-var
+                 ;; Type-refinement
+                 :type-refinement-p
+                 :type-refinement-base
+                 :type-refinement-predicate
+                 ;; Type-rigid (skolem)
+                 :fresh-rigid-var
+                 :type-rigid-p
+                 :type-rigid-name
+                 :type-rigid-equal-p
+                 ;; Type-unknown
+                 :type-unknown-p
+                 ;; Type-primitive
+                 :type-primitive-p
+                 ;; Old type-var API (aliases)
+                 :type-var-p
+                 :type-var-name
+                 :type-var-equal-p
+                 ;; Substitution (full API)
+                 :make-substitution
+                 :substitution-p
+                 :substitution-generation
+                 :subst-extend
+                 :subst-extend!
+                 :subst-compose
+                 :zonk
+                 ;; Typeclass (extended API)
+                 :make-typeclass-def
+                 :typeclass-def-p
+                 :typeclass-def-name
+                 :typeclass-def-type-params
+                 :typeclass-def-methods
+                 :typeclass-instance-p
+                 :typeclass-instance-class-name
+                 :lookup-typeclass-instance
+                 ;; Row polymorphism
+                 :row-extend
+                 :row-restrict
+                 :row-select
+                 :row-labels
+                 :row-closed-p
+                 :row-open-p
+                 ;; Effect op
+                 :make-type-effect-op)
   (:export :run-tests :cl-cc-suite
            :run-suite
            :deftest
@@ -413,6 +546,9 @@
            :assert-type
            :assert-signals
            :assert-values
+           :assert-type-equal
+           :assert-unifies
+           :assert-not-unifies
            :assert-snapshot
            :assert-compiles-to
            :assert-evaluates-to
