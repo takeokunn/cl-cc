@@ -44,7 +44,16 @@
      (:module "expand"
       :serial t
       :components
-      ((:file "macro")
+      ((:file "macro")           ; core: macro-env, lambda-list, defmacro machinery
+       (:file "macros-basic")    ; bootstrap: when/unless/cond/and/or/let*/setf/dolist/do/case
+       (:file "loop-data")       ; LOOP: grammar tables — the "Prolog database"
+       (:file "loop-parser")     ; LOOP: CPS token parser → IR plist
+       (:file "loop-emitters")   ; LOOP: IR → code-fragment tables
+       (:file "loop")            ; LOOP: generator — assembles tagbody from IR
+       (:file "macros-stdlib")   ; stdlib: push/pop/incf + ANSI CL + higher-order fns
+       (:file "macros-sequence") ; sequences: sort/reduce/substitute + CLOS/coerce/plist
+       (:file "expander-data")      ; expander: grammar tables + dispatch table declarations
+       (:file "expander-defstruct") ; expander: defstruct expansion helpers
        (:file "expander")))
      ;; Stage 6: VM execution (loaded before compile/ so VM types are available)
      (:module "vm"
@@ -52,6 +61,8 @@
       :components
       ((:file "package")
        (:file "vm")
+       (:file "vm-clos")    ; CLOS instruction defstructs + execute-instruction methods
+       (:file "vm-run")     ; Handler-case, label table, run-vm, vm2-state
        (:file "primitives")
        (:file "io")
        (:file "conditions")
@@ -93,6 +104,9 @@
        (:file "closure")
        (:file "cps")
        (:file "builtin-registry")
+       (:file "codegen-core")
+       (:file "codegen-clos")
+       (:file "codegen-functions")
        (:file "codegen")))
      ;; Stage 5: VM IR → optimized VM IR
      (:module "optimize"
@@ -229,7 +243,11 @@
          (:file "defstruct-tests")
          (:file "expander-tests")
          (:file "loop-macro-tests")
-         (:file "macro-advanced-tests")))
+         (:file "macro-advanced-tests")
+         (:file "macros-basic-tests")    ; check-type, list, setf places
+         (:file "macros-stdlib-tests")   ; push/pop/incf/HOFs/CXR/etc
+         (:file "macros-sequence-tests") ; reduce/substitute/getf/coerce/etc
+         ))
        (:module "type"
         :serial t
         :components

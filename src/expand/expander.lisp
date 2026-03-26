@@ -1,4 +1,15 @@
-;;;; expand/expander.lisp - Compiler Macro Expander
+(in-package :cl-cc)
+;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;; Expander — Logic Layer
+;;;
+;;; Data lives in expander-data.lisp; defstruct helpers in expander-defstruct.lisp.
+;;; This file: helper functions, define-expander-for registration macro,
+;;; all handler registrations, and the short table-driven compiler-macroexpand-all.
+;;;
+;;; Design: *expander-head-table* is a Prolog-style clause database.
+;;; Each (define-expander-for HEAD (form) body...) adds one clause.
+;;; compiler-macroexpand-all is the inference engine — ~15 lines.
+;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ;;; Ensure cl-cc/type package exists at compile time so that qualified symbols
 ;;; like cl-cc/type:looks-like-type-specifier-p can be read before type/ loads.
@@ -12,137 +23,7 @@
                #:+type-unknown+
                #:register-type-alias))))
 
-(in-package :cl-cc)
-
-;;; Accessor-to-slot mapping for setf expansion (populated by defstruct)
-(defvar *accessor-slot-map* (make-hash-table :test #'eq)
-  "Maps accessor function names to (class-name . slot-name) for setf expansion.")
-
-(defvar *defstruct-slot-registry* (make-hash-table :test #'eq)
-  "Maps struct name to list of (slot-name default-value) for :include inheritance.")
-
-(defvar *macro-eval-fn* #'eval
-  "Function used to evaluate macro bodies at compile time.
-Initially bound to the host CL eval for bootstrap.  After the full
-pipeline loads, rebound to our-eval so that macro expansion runs
-through cl-cc's own compiler and VM — the key step for self-hosting.")
-
-(defparameter *compiler-special-forms*
-  '(if progn lambda quote setq setf
-    defun defvar defparameter defmacro defclass defgeneric defmethod
-    make-instance slot-value
-    block return-from tagbody go
-    flet labels function funcall
-    the print
-    catch throw unwind-protect
-    handler-case eval-when defstruct
-    macrolet symbol-macrolet
-    multiple-value-call multiple-value-prog1
-    values multiple-value-bind apply)
-  "Forms handled directly by the parser/compiler — not subject to macro expansion.
-   Note: declare, in-package, defpackage, export, locally, warn, coerce,
-   with-open-file, copy-hash-table are registered as our-defmacro in macro.lisp.")
-
-(defun %defstruct-extract-boa-parts (boa-args)
-  "Split BOA lambda list into (normal-params . aux-bindings)."
-  (let ((normal nil) (aux nil) (in-aux nil))
-    (dolist (arg boa-args)
-      (cond ((eq arg '&aux) (setf in-aux t))
-            (in-aux (if (consp arg)
-                        (push arg aux)
-                        (push (list arg nil) aux)))
-            (t (push arg normal))))
-    (cons (nreverse normal) (nreverse aux))))
-
-(defun %defstruct-boa-param-names (normal-params)
-  "Extract bound parameter names from a BOA lambda list (excluding &aux)."
-  (let ((names nil))
-    (dolist (p normal-params)
-      (cond ((member p '(&key &optional &rest &body &allow-other-keys)) nil)
-            ((consp p) (push (if (consp (first p)) (second (first p)) (first p)) names))
-            ((symbolp p) (push p names))))
-    (nreverse names)))
-
-(defun %defstruct-make-constructor (ctor-name class-name boa-args all-slots)
-  "Generate a defun form for a defstruct constructor using explicit list construction."
-  (if boa-args
-      (let* ((parts (%defstruct-extract-boa-parts boa-args))
-             (normal-params (car parts))
-             (aux-bindings (cdr parts))
-             (param-names (%defstruct-boa-param-names normal-params))
-             (aux-names (mapcar #'first aux-bindings))
-             (bound-names (append param-names aux-names))
-             (initargs (loop for (sname default) in all-slots
-                             append (list (intern (symbol-name sname) "KEYWORD")
-                                         (if (member sname bound-names :test #'string=)
-                                             sname
-                                             default))))
-             (aux-lets (mapcar (lambda (b) (list (first b) (second b))) aux-bindings)))
-        (list 'defun ctor-name normal-params
-              (list 'let* aux-lets
-                    (list* 'make-instance (list 'quote class-name) initargs))))
-      (let ((key-params (mapcar (lambda (s) (list (first s) (second s))) all-slots))
-            (initargs (mapcan (lambda (s)
-                                (list (intern (symbol-name (first s)) "KEYWORD")
-                                      (first s)))
-                              all-slots)))
-        (list 'defun ctor-name (cons '&key key-params)
-              (list* 'make-instance (list 'quote class-name) initargs)))))
-
-(defun expand-defstruct (form)
-  "Expand (defstruct name-or-options slot...) to progn of defclass + defuns.
-Supports :conc-name, :constructor with boa-lambda-list, :include, slot defaults."
-  (let* ((name-and-options (second form))
-         (slots-raw (cddr form))
-         (name (if (listp name-and-options) (first name-and-options) name-and-options))
-         (options (when (listp name-and-options) (rest name-and-options)))
-         (conc-name-opt (find :conc-name options :key (lambda (o) (when (listp o) (first o)))))
-         (conc-name (if conc-name-opt
-                        (second conc-name-opt)
-                        (intern (concatenate 'string (symbol-name name) "-"))))
-         (constructor-opt (find :constructor options :key (lambda (o) (when (listp o) (first o)))))
-         (constructor-name (if constructor-opt
-                               (second constructor-opt)
-                               (intern (concatenate 'string "MAKE-" (symbol-name name)))))
-         (boa-args (when (and constructor-opt (cddr constructor-opt))
-                     (third constructor-opt)))
-         (include-opt (find :include options :key (lambda (o) (when (listp o) (first o)))))
-         (parent-name (when include-opt (second include-opt)))
-         (parent-slots (when parent-name
-                         (gethash parent-name *defstruct-slot-registry*)))
-         (own-slots (mapcar (lambda (s)
-                              (if (listp s)
-                                  (list (first s) (second s))
-                                  (list s nil)))
-                            (remove-if #'stringp slots-raw)))
-         (all-slots (append (or parent-slots nil) own-slots))
-         (predicate-name (intern (concatenate 'string (symbol-name name) "-P"))))
-    (setf (gethash name *defstruct-slot-registry*) all-slots)
-    (flet ((slot-accessor (slot-name)
-             (if conc-name
-                 (intern (concatenate 'string (symbol-name conc-name) (symbol-name slot-name)))
-                 slot-name)))
-      (dolist (slot all-slots)
-        (setf (gethash (slot-accessor (first slot)) *accessor-slot-map*)
-              (cons name (first slot))))
-      (let* ((defclass-slots
-               (mapcar (lambda (slot)
-                         (list (first slot)
-                               :initarg (intern (symbol-name (first slot)) "KEYWORD")
-                               :initform (second slot)
-                               :accessor (slot-accessor (first slot))))
-                       all-slots))
-             (superclasses (if parent-name (list parent-name) nil))
-             (defclass-form (list 'defclass name superclasses defclass-slots))
-             (ctor-form (%defstruct-make-constructor
-                         constructor-name name boa-args all-slots))
-             (pred-form (list 'defun predicate-name '(obj)
-                              (list 'typep 'obj (list 'quote name)))))
-        (list 'progn
-              defclass-form
-              ctor-form
-              pred-form
-              (list 'quote name))))))
+;;; ── Helper functions ─────────────────────────────────────────────────────
 
 (defun reduce-variadic-op (op args identity)
   "Reduce a variadic arithmetic form (OP arg...) to nested binary forms.
@@ -154,72 +35,10 @@ Supports :conc-name, :constructor with boa-lambda-list, :include, slot defaults.
     (t (reduce (lambda (acc x) (list op acc x)) (cddr args)
                :initial-value (list op (first args) (second args))))))
 
-;;; ------------------------------------------------------------
-;;; Builtin Arity Classification (data layer)
-;;; ------------------------------------------------------------
-;;; These tables drive both the #'name → lambda wrapping and the
-;;; (apply #'name list) → dolist-fold expansion in compiler-macroexpand-all.
-
-(defparameter *variadic-fold-builtins*
-  '(+ * append nconc)
-  "Builtins that fold over a list with an identity: (OP a b c) = (OP (OP a b) c).")
-
-(defparameter *binary-builtins*
-  '(cons = < > <= >= mod rem eq eql equal
-    nth nthcdr member assoc acons
-    string= string< string> string<= string>= string-equal
-    string-lessp string-greaterp string/=
-    string-not-equal string-not-greaterp string-not-lessp string-concat
-    char min max floor ceiling truncate round ffloor fceiling ftruncate fround
-    ash logand logior logxor logeqv logtest logbitp
-    expt scale-float gcd lcm complex
-    array-dimension row-major-aref svref vector-push
-    bit sbit bit-and bit-or bit-xor adjust-array)
-  "Builtins that take exactly 2 arguments.")
-
-(defparameter *unary-builtins*
-  '(car cdr not null consp symbolp numberp integerp stringp
-    atom listp characterp functionp
-    first second third fourth fifth rest last
-    nreverse butlast endp reverse length copy-list copy-tree
-    symbol-name make-symbol intern gensym keywordp
-    string-length string-upcase string-downcase
-    char-code code-char
-    typep hash-table-p hash-table-count
-    hash-table-test hash-table-keys hash-table-values
-    zerop plusp minusp evenp oddp abs lognot logcount integer-length
-    sqrt exp log sin cos tan asin acos atan sinh cosh tanh float float-sign
-    rational rationalize numerator denominator realpart imagpart conjugate phase
-    boundp fboundp makunbound fmakunbound
-    array-rank array-total-size array-dimensions
-    fill-pointer array-has-fill-pointer-p array-adjustable-p vector-pop
-    bit-not array-displacement char-int
-    princ prin1 print write-to-string prin1-to-string princ-to-string
-    type-of make-list alphanumericp eval identity)
-  "Builtins that take exactly 1 argument.")
-
-(defparameter *cxr-builtins*
-  '(caar cadr cdar cddr
-    caaar cdaar cadar cddar
-    caadr cdadr caddr cdddr
-    caaaar cadaar caadar caddar
-    cdaaar cddaar cdadar cdddar
-    caaadr cadadr caaddr cadddr
-    cdaadr cddadr cdaddr cddddr)
-  "CXR accessor builtins — all unary.")
-
-(defparameter *all-builtin-names*
-  (append *variadic-fold-builtins* '(- list) *binary-builtins* *unary-builtins* *cxr-builtins*)
-  "Union of all known builtin names — used to decide whether #'name needs a lambda wrapper.")
-
-;;; ------------------------------------------------------------
-;;; compiler-macroexpand-all helper functions
-;;; ------------------------------------------------------------
-
 (defun register-defclass-accessors (class-name slot-specs)
-  "Register ACCESSOR → (CLASS-NAME . SLOT-NAME) mappings in *accessor-slot-map*.
-   Called during macro expansion so later (setf (accessor obj) val) forms
-   can be lowered to (setf (slot-value ...)) without runtime lookup."
+  "Register ACCESSOR → (CLASS-NAME . SLOT-NAME) in *accessor-slot-map*.
+Called at expand time so later (setf (accessor obj) val) can be lowered
+to (setf (slot-value ...)) without runtime lookup."
   (when (listp slot-specs)
     (dolist (spec slot-specs)
       (when (listp spec)
@@ -229,8 +48,8 @@ Supports :conc-name, :constructor with boa-lambda-list, :include, slot defaults.
                   (cons class-name (first spec)))))))))
 
 (defun expand-defclass-slot-spec (spec)
-  "Expand only the :initform value inside a slot SPEC list, leaving all other
-   keys (slot name, :accessor, :initarg, :reader, :writer, :type) untouched."
+  "Expand only the :initform value inside a slot SPEC, leaving all other
+keys (:accessor, :initarg, :reader, :writer, :type) untouched."
   (if (listp spec)
       (list* (first spec)
              (loop for (k v) on (rest spec) by #'cddr
@@ -241,8 +60,8 @@ Supports :conc-name, :constructor with boa-lambda-list, :include, slot defaults.
 
 (defun expand-typed-defun-or-lambda (head name params rest-forms)
   "Strip type annotations from PARAMS, register the type signature, and
-   rebuild a plain DEFUN or LAMBDA form with check-type assertions.
-   HEAD is 'defun or 'lambda; NAME is the function name (nil for lambda)."
+rebuild a plain DEFUN or LAMBDA form with check-type assertions.
+HEAD is 'defun or 'lambda; NAME is the function name (nil for lambda)."
   (multiple-value-bind (plain-params type-alist)
       (strip-typed-params params)
     (let* ((has-return-type (and rest-forms
@@ -250,7 +69,6 @@ Supports :conc-name, :constructor with boa-lambda-list, :include, slot defaults.
                                  (cl-cc/type:looks-like-type-specifier-p (first rest-forms))))
            (return-type-spec (when has-return-type (first rest-forms)))
            (body-forms       (if has-return-type (cdr rest-forms) rest-forms)))
-      ;; Register the function's type signature for the type checker
       (let ((param-types (mapcar (lambda (e)
                                    (cl-cc/type:parse-type-specifier (cdr e)))
                                  type-alist))
@@ -259,7 +77,6 @@ Supports :conc-name, :constructor with boa-lambda-list, :include, slot defaults.
                               cl-cc/type:+type-unknown+)))
         (when (eq head 'defun)
           (register-function-type name param-types return-type)))
-      ;; Build the annotated body
       (let* ((typed-body (if return-type-spec
                              `((the ,return-type-spec (progn ,@body-forms)))
                              body-forms))
@@ -273,22 +90,17 @@ Supports :conc-name, :constructor with boa-lambda-list, :include, slot defaults.
 
 (defun make-macro-expander (lambda-list body)
   "Build a macro expander function for a LAMBDA-LIST and BODY.
-   The expander destructures the macro call form and evaluates BODY.
-   Quasiquotes in BODY (cl-cc::backquote/unquote) are pre-expanded so
-   that the host eval can handle them without knowing the cl-cc read macros.
-   When *macro-eval-fn* is our-eval (self-hosting mode), the returned
-   function is a host CL closure that delegates to our-eval at each
-   invocation — so funcall works from the macro expansion pipeline."
+Quasiquotes in BODY are pre-expanded so the host eval can handle them.
+When *macro-eval-fn* is our-eval (self-hosting mode), the returned
+function is a host CL closure delegating to our-eval at each invocation."
   (let ((expanded-body (mapcar #'our-macroexpand-all body)))
     (if (eq *macro-eval-fn* #'eval)
-        ;; Bootstrap path: compile lambda via host eval → host CL closure
         (let ((form-var (gensym "FORM"))
               (env-var  (gensym "ENV")))
           (eval `(lambda (,form-var ,env-var)
                    (declare (ignore ,env-var))
                    (let* ,(generate-lambda-bindings lambda-list form-var)
                      ,@expanded-body))))
-        ;; Self-hosting path: host CL closure wrapping our-eval
         (lambda (form env)
           (declare (ignore env))
           (let ((form-var (gensym "FORM")))
@@ -299,7 +111,7 @@ Supports :conc-name, :constructor with boa-lambda-list, :include, slot defaults.
 
 (defun expand-macrolet-form (bindings body)
   "Register local macro BINDINGS, expand BODY under them, then restore.
-   Returns the expanded BODY wrapped in PROGN."
+Returns the expanded BODY wrapped in PROGN."
   (let ((saved nil))
     (dolist (b bindings)
       (let ((name        (first b))
@@ -315,20 +127,16 @@ Supports :conc-name, :constructor with boa-lambda-list, :include, slot defaults.
       result)))
 
 (defun expand-progn-with-eager-defmacro (subforms)
-  "Expand each form in SUBFORMS, eagerly registering any DEFMACRO/OUR-DEFMACRO forms so
-   later sibling forms can immediately use the new macro."
+  "Expand each form in SUBFORMS, eagerly registering DEFMACRO forms so
+later siblings can immediately use the new macro."
   (let ((out nil))
     (dolist (sub subforms)
       (let ((exp (compiler-macroexpand-all sub)))
         (when (and (consp exp) (eq (car exp) 'defmacro))
           (register-macro (second exp)
                           (make-macro-expander (third exp) (cdddr exp))))
-        ;; our-defmacro forms (from define-modify-macro, etc.) need to be evaluated
-        ;; eagerly so that sibling forms can use the newly registered macro.
         (when (and (consp exp) (eq (car exp) 'our-defmacro))
-          ;; Must use host eval — our-defmacro registers macros via
-          ;; register-macro which mutates the host macro environment.
-          ;; Using our-eval would modify the VM's copy instead.
+          ;; Must use host eval — our-defmacro mutates the host macro environment.
           (eval exp))
         (push exp out)))
     (cons 'progn (nreverse out))))
@@ -365,7 +173,7 @@ Supports :conc-name, :constructor with boa-lambda-list, :include, slot defaults.
 
 (defun expand-apply-named-fn (fn-name args-form)
   "Expand (apply 'FN-NAME args-form) where FN-NAME is a known symbol.
-   Variadic builtins get a dolist fold; others normalise to (apply #'fn args)."
+Variadic builtins get a dolist fold; others normalise to (apply #'fn args)."
   (if (member fn-name (list* '- 'list *variadic-fold-builtins*))
       (let ((acc (gensym "ACC")) (x (gensym "X")) (lst (gensym "LST"))
             (id  (case fn-name ((+) 0) ((*) 1) (t nil))))
@@ -386,19 +194,11 @@ Supports :conc-name, :constructor with boa-lambda-list, :include, slot defaults.
 
 (defun expand-eval-when-form (situations body)
   "Handle EVAL-WHEN phase control.
-   Evaluate BODY immediately if :compile-toplevel is listed; include in output
-   if :execute or :load-toplevel is listed.
-   Errors in :compile-toplevel evaluation are silently ignored — the forms
-   will still be included in the output for :execute/:load-toplevel.
-   Uses run-string-repl (persistent state) when available, otherwise our-eval."
+Evaluate BODY immediately for :compile-toplevel; include in output for :execute/:load-toplevel."
   (when (member :compile-toplevel situations)
     (dolist (b body)
       (handler-case
           (let ((expanded (compiler-macroexpand-all b)))
-            ;; defvar/defparameter must bind in BOTH host CL environment
-            ;; (for macros compiled by host eval) AND VM global store
-            ;; (for macros using our-eval). Execute via host eval first,
-            ;; then also through run-string-repl for VM visibility.
             (when (and (consp expanded)
                        (member (car expanded) '(defvar defparameter)))
               (handler-case (eval expanded) (error () nil)))
@@ -428,7 +228,7 @@ Supports :conc-name, :constructor with boa-lambda-list, :include, slot defaults.
 
 (defun expand-make-array-form (size rest-args)
   "Expand (make-array size &rest keyword-args).
-   Promotes to make-adjustable-vector when :fill-pointer or :adjustable is given."
+Promotes to make-adjustable-vector when :fill-pointer or :adjustable is given."
   (let (fp adj)
     (loop for (key val) on rest-args by #'cddr
           do (case key
@@ -440,7 +240,7 @@ Supports :conc-name, :constructor with boa-lambda-list, :include, slot defaults.
 
 (defun expand-setf-accessor (place value)
   "Expand (setf (ACCESSOR OBJ) VAL) via *accessor-slot-map* for known struct accessors,
-   or fall back to generic (setf (slot-value obj 'accessor-name) val)."
+or fall back to generic (setf (slot-value obj 'accessor-name) val)."
   (let ((mapping (gethash (car place) *accessor-slot-map*)))
     (if mapping
         (compiler-macroexpand-all
@@ -470,194 +270,210 @@ Leaves required params, lambda-list keywords, and supplied-p vars untouched."
                  ((member p '(&optional &rest &key &allow-other-keys &aux &body &whole))
                   (setf in-extended t) p)
                  ((and in-extended (consp p) (cdr p))
-                  ;; (name default ...) — expand only the default (second element)
                   (list* (first p)
                          (compiler-macroexpand-all (second p))
                          (cddr p)))
                  (t p)))
              params)))
 
-(defun compiler-macroexpand-all (form)
-  "Expand macros in FORM for the compiler pipeline.
-   Skips forms the compiler handles as special forms."
+;;; ── Registration macro ───────────────────────────────────────────────────
+
+(defmacro define-expander-for (head (form) &body body)
+  "Register a handler in *expander-head-table* for forms whose head is HEAD.
+Contract: handler receives the full form and returns a fully-expanded form."
+  `(setf (gethash ',head *expander-head-table*)
+         (lambda (,form) ,@body)))
+
+;;; ── Expander handler registrations ──────────────────────────────────────
+;;;
+;;; Each (define-expander-for HEAD ...) corresponds to one clause in the
+;;; Prolog sense: head(Form) :- body(Form).  The inference engine
+;;; (compiler-macroexpand-all) queries this database by head symbol.
+
+;; quote — never recurse into quoted forms
+(define-expander-for quote (form) form)
+
+;; backquote — expand (cl-cc::backquote template) into list/cons/append
+(define-expander-for cl-cc::backquote (form)
+  (compiler-macroexpand-all (%expand-quasiquote (second form))))
+
+;; funcall — (funcall 'name ...) with quoted symbol → direct call
+(define-expander-for funcall (form)
+  (if (and (>= (length form) 2)
+           (consp (second form))
+           (eq (car (second form)) 'quote)
+           (symbolp (second (second form))))
+      (compiler-macroexpand-all (cons (second (second form)) (cddr form)))
+      (cons 'funcall (mapcar #'compiler-macroexpand-all (cdr form)))))
+
+;; apply — spread-args normalisation + variadic builtin fold
+(define-expander-for apply (form)
   (cond
-    ;; Atoms pass through
-    ((atom form) form)
-    ;; Quote — never recurse into quoted forms
-    ((eq (car form) 'quote) form)
-    ;; Quasiquote — expand (cl-cc::backquote template) into list/cons/append
-    ((eq (car form) 'cl-cc::backquote)
-     (compiler-macroexpand-all (%expand-quasiquote (second form))))
-    ;; (funcall 'name ...) with quoted symbol => (name ...) direct call
-    ((and (consp form) (eq (car form) 'funcall)
-          (>= (length form) 2)
-          (consp (second form))
-          (eq (car (second form)) 'quote)
-          (symbolp (second (second form))))
-     (compiler-macroexpand-all (cons (second (second form)) (cddr form))))
-    ;; (apply fn a1 a2 ... list-form) with spread args => (apply fn (cons a1 (cons a2 ... list-form)))
-    ((and (consp form) (eq (car form) 'apply)
-          (> (length form) 3))
-     (let* ((fn (second form))
+    ;; (apply fn a1 a2 ... list) with spread args → cons-fold
+    ((> (length form) 3)
+     (let* ((fn         (second form))
             (spread-args (butlast (cddr form)))
-            (last-arg (car (last form)))
-            (combined (reduce (lambda (a rest) `(cons ,a ,rest))
-                              spread-args :from-end t :initial-value last-arg)))
+            (last-arg    (car (last form)))
+            (combined    (reduce (lambda (a rest) `(cons ,a ,rest))
+                                 spread-args :from-end t :initial-value last-arg)))
        (compiler-macroexpand-all `(apply ,fn ,combined))))
-    ;; (apply 'name/function-ref list-form) — variadic builtins get dolist fold; others normalize to #'
-    ((and (consp form) (eq (car form) 'apply)
-          (= (length form) 3)
+    ;; (apply 'name list) or (apply #'name list)
+    ((and (= (length form) 3)
           (consp (second form))
           (or (and (eq (car (second form)) 'quote)    (symbolp (second (second form))))
               (and (eq (car (second form)) 'function) (symbolp (second (second form))))))
      (expand-apply-named-fn (second (second form)) (third form)))
-    ;; (make-hash-table :test #'fn) → (make-hash-table :test 'fn)
-    ((and (eq (car form) 'make-hash-table)
-          (>= (length form) 3)
-          (eq (second form) :test)
-          (consp (third form))
-          (eq (car (third form)) 'function)
-          (symbolp (second (third form))))
-     (compiler-macroexpand-all
-      `(make-hash-table :test ',(second (third form)) ,@(cdddr form))))
-    ;; (function builtin) — wrap builtins in lambda for first-class use
-    ((eq (car form) 'function)
-     (let ((name (second form)))
-       (if (and (symbolp name) (member name *all-builtin-names*))
-           (expand-function-builtin name)
-           form)))
-    ;; (multiple-value-list expr) — must live here (not our-defmacro) because the
-    ;; %values-to-list VM intrinsic is position-sensitive: no other instruction
-    ;; must execute between the multi-valued form and the capture call.
-    ;; declare-ignore in the body is intentional — the binder just triggers the
-    ;; VM's values-buffer fill; the primary-value binding itself is discarded.
-    ((and (consp form) (eq (car form) 'multiple-value-list)
-          (= (length form) 2))
-     (let ((tmp (gensym "MVL")))
+    ;; default: expand args
+    (t (cons 'apply (mapcar #'compiler-macroexpand-all (cdr form))))))
+
+;; make-hash-table — :test #'fn → :test 'fn normalisation
+(define-expander-for make-hash-table (form)
+  (if (and (>= (length form) 3)
+           (eq (second form) :test)
+           (consp (third form))
+           (eq (car (third form)) 'function)
+           (symbolp (second (third form))))
+      (compiler-macroexpand-all
+       `(make-hash-table :test ',(second (third form)) ,@(cdddr form)))
+      (cons 'make-hash-table (mapcar #'compiler-macroexpand-all (cdr form)))))
+
+;; function — wrap builtins in first-class lambda
+(define-expander-for function (form)
+  (let ((name (second form)))
+    (if (and (symbolp name) (member name *all-builtin-names*))
+        (expand-function-builtin name)
+        form)))
+
+;; multiple-value-list — must be here (not our-defmacro): %values-to-list is
+;; position-sensitive and must follow the multi-valued form with no gap.
+(define-expander-for multiple-value-list (form)
+  (let ((tmp (gensym "MVL")))
+    (compiler-macroexpand-all
+     `(let ((,tmp ,(second form)))
+        (declare (ignore ,tmp))
+        (%values-to-list)))))
+
+;; Variadic builtins: (OP a b c) → (OP (OP a b) c); each handler covers all arities.
+(dolist (entry '((+ 0) (* 1) (append nil) (nconc nil)))
+  (let ((op (first entry)) (id (second entry)))
+    (setf (gethash op *expander-head-table*)
+          (lambda (form)
+            (if (/= (length (cdr form)) 2)
+                (compiler-macroexpand-all (reduce-variadic-op op (cdr form) id))
+                (list op
+                      (compiler-macroexpand-all (second form))
+                      (compiler-macroexpand-all (third form))))))))
+
+;; - (subtraction / negation): same folding pattern with identity 0
+(define-expander-for - (form)
+  (if (/= (length (cdr form)) 2)
+      (compiler-macroexpand-all (reduce-variadic-op '- (cdr form) 0))
+      (list '- (compiler-macroexpand-all (second form))
+               (compiler-macroexpand-all (third form)))))
+
+;; deftype — register type alias at expand time; returns (quote name)
+(define-expander-for deftype (form)
+  (when (and (= (length form) 3) (symbolp (second form)))
+    (cl-cc/type:register-type-alias (second form) (third form)))
+  `(quote ,(second form)))
+
+;; defconstant — compile-time constants treated as defparameter
+(define-expander-for defconstant (form)
+  (compiler-macroexpand-all `(defparameter ,(second form) ,(third form))))
+
+;; setf — unified place dispatcher
+(define-expander-for setf (form)
+  (let ((len (length form)))
+    (cond
+      ;; (setf a 1 b 2 ...) → (progn (setf a 1) (setf b 2) ...)
+      ((and (> len 3) (evenp (1- len)))
        (compiler-macroexpand-all
-        `(let ((,tmp ,(second form)))
-           (declare (ignore ,tmp))
-           (%values-to-list)))))
-    ;; Variadic builtins: (+ a b c) => (+ (+ a b) c), (append a b c) => (append (append a b) c)
-    ((and (consp form) (member (car form) (cons '- *variadic-fold-builtins*))
-          (/= (length (cdr form)) 2))
-     (let ((op (car form))
-           (identity (case (car form) ((+ -) 0) (* 1) (t nil))))
-       (compiler-macroexpand-all
-        (reduce-variadic-op op (cdr form) identity))))
-    ;; (deftype name type-spec) — register type alias at expand time
-    ;; (kept here rather than our-defmacro because cl-cc/type is loaded after macro.lisp)
-    ((and (consp form) (eq (car form) 'deftype)
-          (= (length form) 3)
-          (symbolp (second form)))
-     (cl-cc/type:register-type-alias (second form) (third form))
-     `(quote ,(second form)))
-    ;; (defconstant name value [doc]) — compile-time constants treated as defparameter
-    ;; Constant semantics (rebinding forbidden) are not enforced; value is mutable at runtime.
-    ((and (consp form) (eq (car form) 'defconstant)
-          (>= (length form) 3)
-          (symbolp (second form)))
-     (compiler-macroexpand-all `(defparameter ,(second form) ,(third form))))
-    ;; (setf a 1 b 2) => (progn (setf a 1) (setf b 2)) — multi-var setf
-    ((and (consp form) (eq (car form) 'setf)
-          (> (length form) 3)
-          (evenp (length (cdr form))))
-     (compiler-macroexpand-all
-      `(progn ,@(loop for (place val) on (cdr form) by #'cddr
-                      collect `(setf ,place ,val)))))
-    ;; (setf var val) => (setq var val) — plain variable assignment
-    ((and (consp form) (eq (car form) 'setf)
-          (= (length form) 3)
-          (symbolp (second form)))
-     (compiler-macroexpand-all `(setq ,(second form) ,(third form))))
-    ;; (setf (aref arr idx) val) => (aset arr idx val)
-    ((and (consp form) (eq (car form) 'setf)
-          (= (length form) 3)
-          (consp (second form))
-          (eq (car (second form)) 'aref))
-     (let ((arr (second (second form)))
-           (idx (third (second form)))
-           (val (third form)))
-       (compiler-macroexpand-all `(aset ,arr ,idx ,val))))
-    ;; (setf (getf plist indicator) val) => (let ((#:V val)) (setq plist (rt-plist-put plist indicator #:V)) #:V)
-    ((and (consp form) (eq (car form) 'setf)
-          (= (length form) 3)
-          (consp (second form))
-          (eq (car (second form)) 'getf))
-     (let ((plist-var (second (second form)))
-           (indicator (third (second form)))
-           (val (third form))
-           (v (gensym "V")))
-       (compiler-macroexpand-all
-        `(let ((,v ,val))
-           (setq ,plist-var (rt-plist-put ,plist-var ,indicator ,v))
-           ,v))))
-    ;; (make-array size :fill-pointer fp :adjustable adj ...) => make-adjustable-vector
-    ((and (consp form) (eq (car form) 'make-array)
-          (>= (length form) 4))
-     (expand-make-array-form (second form) (cddr form)))
-    ;; (setf (car/cdr/first/rest/nth ...) val) — expand to rplaca/rplacd
-    ((and (consp form) (eq (car form) 'setf)
-          (= (length form) 3)
-          (consp (second form))
-          (member (car (second form)) '(car cdr first rest nth cadr cddr)))
-     (compiler-macroexpand-all
-      (expand-setf-cons-place (second form) (third form))))
-    ;; (setf (accessor obj) val) — expand via accessor-slot-map or to slot-value
-    ((and (consp form) (eq (car form) 'setf)
-          (= (length form) 3)
-          (consp (second form))
-          (symbolp (car (second form)))
-          (= (length (second form)) 2))
-     (expand-setf-accessor (second form) (third form)))
-    ;; (defstruct ...) — expand to defclass + constructor + predicate
-    ((and (consp form) (eq (car form) 'defstruct))
-     (compiler-macroexpand-all (expand-defstruct form)))
-    ;; (eval-when (situations...) body...) — phase control
-    ((and (consp form) (eq (car form) 'eval-when))
-     (expand-eval-when-form (second form) (cddr form)))
-    ;; (macrolet ((name lambda-list body)...) forms...) — local macros
-    ((and (consp form) (eq (car form) 'macrolet))
-     (expand-macrolet-form (second form) (cddr form)))
-    ;; Typed defun: (defun name ((x fixnum) ...) return-type body...)
-    ((and (consp form) (eq (car form) 'defun)
-          (>= (length form) 4)
-          (symbolp (second form))
-          (listp (third form))
-          (lambda-list-has-typed-p (third form)))
-     (expand-typed-defun-or-lambda 'defun (second form) (third form) (cdddr form)))
-    ;; Typed lambda: (lambda ((x fixnum) ...) return-type body...)
-    ((and (consp form) (eq (car form) 'lambda)
-          (>= (length form) 3)
-          (listp (second form))
-          (lambda-list-has-typed-p (second form)))
-     (expand-typed-defun-or-lambda 'lambda nil (second form) (cddr form)))
-    ;; (defclass name supers (slot-specs...)) — extract accessor mappings for setf expansion
-    ((and (consp form) (eq (car form) 'defclass))
-     (let ((class-name (second form))
-           (slot-specs (fourth form)))
-       (register-defclass-accessors class-name slot-specs)
-       (list 'defclass class-name
-             (mapcar #'compiler-macroexpand-all (third form))
-             (when (listp slot-specs)
-               (mapcar #'expand-defclass-slot-spec slot-specs)))))
-    ;; progn — process forms sequentially so defmacro takes effect for later forms
-    ((and (consp form) (eq (car form) 'progn))
-     (expand-progn-with-eager-defmacro (cdr form)))
-    ;; defun/lambda (untyped) — protect required params from expansion; expand default values and body
-    ((and (consp form) (member (car form) '(defun lambda))
-          (>= (length form) 3)
-          (listp (second (if (eq (car form) 'lambda) form (cdr form)))))
-     (if (eq (car form) 'defun)
-         ;; (defun name params body...)
-         (list* 'defun (second form) (expand-lambda-list-defaults (third form))
-                (mapcar #'compiler-macroexpand-all (cdddr form)))
-         ;; (lambda params body...)
-         (list* 'lambda (expand-lambda-list-defaults (second form))
-                (mapcar #'compiler-macroexpand-all (cddr form)))))
-    ;; let with destructuring bindings — desugar to destructuring-bind chains
-    ((and (consp form) (eq (car form) 'let)
-          (>= (length form) 2) (listp (second form))
+        `(progn ,@(loop for (place val) on (cdr form) by #'cddr
+                        collect `(setf ,place ,val)))))
+      ;; (setf var val) → (setq var val)
+      ((and (= len 3) (symbolp (second form)))
+       (compiler-macroexpand-all `(setq ,(second form) ,(third form))))
+      ;; compound place
+      ((and (= len 3) (consp (second form)))
+       (let ((place (second form)) (value (third form)))
+         (cond
+           ((eq (car place) 'aref)
+            (compiler-macroexpand-all
+             `(aset ,(second place) ,(third place) ,value)))
+           ((eq (car place) 'getf)
+            (let ((v (gensym "V")))
+              (compiler-macroexpand-all
+               `(let ((,v ,value))
+                  (setq ,(second place)
+                        (rt-plist-put ,(second place) ,(third place) ,v))
+                  ,v))))
+           ((member (car place) '(car first cdr rest nth cadr cddr))
+            (compiler-macroexpand-all (expand-setf-cons-place place value)))
+           ((and (symbolp (car place)) (= (length place) 2))
+            (expand-setf-accessor place value))
+           (t
+            ;; Unknown compound place (e.g., slot-value, gethash):
+            ;; expand args and keep structure; let compiler handle actual setf.
+            (cons 'setf (mapcar #'compiler-macroexpand-all (cdr form)))))))
+      (t (cons 'setf (mapcar #'compiler-macroexpand-all (cdr form)))))))
+
+;; make-array — promote to make-adjustable-vector when :fill-pointer/:adjustable given
+(define-expander-for make-array (form)
+  (if (>= (length form) 4)
+      (expand-make-array-form (second form) (cddr form))
+      (cons 'make-array (mapcar #'compiler-macroexpand-all (cdr form)))))
+
+;; defstruct — expand to defclass + constructor + predicate
+(define-expander-for defstruct (form)
+  (compiler-macroexpand-all (expand-defstruct form)))
+
+;; eval-when — phase control (compile-toplevel vs execute/load-toplevel)
+(define-expander-for eval-when (form)
+  (expand-eval-when-form (second form) (cddr form)))
+
+;; macrolet — local macro bindings scoped to body
+(define-expander-for macrolet (form)
+  (expand-macrolet-form (second form) (cddr form)))
+
+;; defun — typed params get check-type assertions; untyped: expand defaults + body
+(define-expander-for defun (form)
+  (if (and (>= (length form) 4)
+           (symbolp (second form))
+           (listp (third form))
+           (lambda-list-has-typed-p (third form)))
+      (expand-typed-defun-or-lambda 'defun (second form) (third form) (cdddr form))
+      (list* 'defun (second form)
+             (expand-lambda-list-defaults (third form))
+             (mapcar #'compiler-macroexpand-all (cdddr form)))))
+
+;; lambda — typed params get check-type assertions; untyped: expand defaults + body
+(define-expander-for lambda (form)
+  (if (and (>= (length form) 3)
+           (listp (second form))
+           (lambda-list-has-typed-p (second form)))
+      (expand-typed-defun-or-lambda 'lambda nil (second form) (cddr form))
+      (list* 'lambda
+             (expand-lambda-list-defaults (second form))
+             (mapcar #'compiler-macroexpand-all (cddr form)))))
+
+;; defclass — register accessor mappings; expand :initform values in slot specs
+(define-expander-for defclass (form)
+  (let ((class-name (second form))
+        (slot-specs (fourth form)))
+    (register-defclass-accessors class-name slot-specs)
+    (list 'defclass class-name
+          (mapcar #'compiler-macroexpand-all (third form))
+          (when (listp slot-specs)
+            (mapcar #'expand-defclass-slot-spec slot-specs)))))
+
+;; progn — process forms sequentially, eagerly registering any defmacro siblings
+(define-expander-for progn (form)
+  (expand-progn-with-eager-defmacro (cdr form)))
+
+;; let — destructuring bindings desugar to destructuring-bind chains; plain let expands values
+(define-expander-for let (form)
+  (cond
+    ((and (>= (length form) 2) (listp (second form))
           (some (lambda (b) (and (consp b) (>= (length b) 2) (consp (first b))))
                 (second form)))
      (let ((simple nil) (destructuring nil))
@@ -672,32 +488,59 @@ Leaves required params, lambda-list keywords, and supplied-p vars untouched."
          (dolist (d (reverse destructuring))
            (setf inner (list 'destructuring-bind (first d) (second d) inner)))
          (compiler-macroexpand-all inner))))
-    ;; let — expand only binding VALUES, not binding names (let* is a macro, handled by our-macroexpand-1)
-    ((and (consp form) (eq (car form) 'let)
-          (>= (length form) 2) (listp (second form)))
+    ((and (>= (length form) 2) (listp (second form)))
      (list* 'let
             (mapcar #'expand-let-binding (second form))
             (mapcar #'compiler-macroexpand-all (cddr form))))
-    ;; flet/labels — expand only function bodies, not binding structure
-    ((and (consp form) (member (car form) '(flet labels))
-          (>= (length form) 3) (listp (second form)))
-     (list* (car form)
-            (mapcar #'expand-flet-labels-binding (second form))
-            (mapcar #'compiler-macroexpand-all (cddr form))))
-    ;; FR-301: normalize 1-arg rounding forms to 2-arg with divisor 1
-    ((and (consp form) (= (length form) 2)
-          (member (car form) '(floor ceiling truncate round)))
-     (compiler-macroexpand-all `(,(car form) ,(second form) 1)))
-    ;; Special forms — recurse into subforms but don't expand the head
-    ((and (symbolp (car form))
-          (member (car form) *compiler-special-forms*))
-     (cons (car form)
-           (mapcar #'compiler-macroexpand-all (cdr form))))
-    ;; Try macro expansion
-    (t
-     (multiple-value-bind (exp expanded-p)
-         (our-macroexpand-1 form)
-       (if expanded-p
-           (compiler-macroexpand-all exp)
-           (mapcar #'compiler-macroexpand-all form))))))
+    (t (cons 'let (mapcar #'compiler-macroexpand-all (cdr form))))))
 
+;; flet — expand only function bodies, not binding structure
+(define-expander-for flet (form)
+  (if (and (>= (length form) 3) (listp (second form)))
+      (list* 'flet
+             (mapcar #'expand-flet-labels-binding (second form))
+             (mapcar #'compiler-macroexpand-all (cddr form)))
+      (cons 'flet (mapcar #'compiler-macroexpand-all (cdr form)))))
+
+;; labels — same as flet but allows mutual recursion
+(define-expander-for labels (form)
+  (if (and (>= (length form) 3) (listp (second form)))
+      (list* 'labels
+             (mapcar #'expand-flet-labels-binding (second form))
+             (mapcar #'compiler-macroexpand-all (cddr form)))
+      (cons 'labels (mapcar #'compiler-macroexpand-all (cdr form)))))
+
+;; FR-301: normalise 1-arg rounding ops to 2-arg form with divisor 1.
+;; Registered via dolist for all *rounding-ops* at once (data-driven).
+(dolist (op *rounding-ops*)
+  (setf (gethash op *expander-head-table*)
+        (lambda (form)
+          (if (= (length form) 2)
+              (compiler-macroexpand-all `(,(car form) ,(second form) 1))
+              (list (car form)
+                    (compiler-macroexpand-all (second form))
+                    (compiler-macroexpand-all (third form)))))))
+
+;;; ── Main dispatcher ──────────────────────────────────────────────────────
+;;;
+;;; The inference engine: 4 clauses, ~15 lines.
+;;; Handlers in *expander-head-table* take priority over *compiler-special-forms*.
+
+(defun compiler-macroexpand-all (form)
+  "Expand macros in FORM for the compiler pipeline.
+Dispatch order: (1) atoms pass through; (2) *expander-head-table* handlers;
+(3) *compiler-special-forms* recurse-fallback; (4) our-macroexpand-1."
+  (cond
+    ((atom form) form)
+    (t
+     (let ((handler (gethash (car form) *expander-head-table*)))
+       (cond
+         (handler
+          (funcall handler form))
+         ((member (car form) *compiler-special-forms*)
+          (cons (car form) (mapcar #'compiler-macroexpand-all (cdr form))))
+         (t
+          (multiple-value-bind (exp expanded-p) (our-macroexpand-1 form)
+            (if expanded-p
+                (compiler-macroexpand-all exp)
+                (mapcar #'compiler-macroexpand-all form)))))))))
