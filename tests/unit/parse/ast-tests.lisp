@@ -209,3 +209,181 @@
   (let ((node (cl-cc:make-ast-int :value 1 :source-file "t.lisp" :source-line 1)))
     (assert-signals cl-cc:ast-compilation-error
       (cl-cc:ast-error node "test error ~A" 42))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; ast-children — structural data layer
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest-each ast-children-leaves
+  "Leaf AST nodes have no children."
+  :cases (("int"      (cl-cc:make-ast-int :value 42))
+          ("var"      (cl-cc:make-ast-var :name 'x))
+          ("quote"    (cl-cc:make-ast-quote :value 'hello))
+          ("function" (cl-cc:make-ast-function :name 'foo))
+          ("go"       (cl-cc:make-ast-go :tag 'start)))
+  (node)
+  (assert-null (cl-cc:ast-children node)))
+
+(deftest ast-children-binop
+  "ast-binop children are (lhs rhs)."
+  (let* ((lhs (cl-cc:make-ast-int :value 1))
+         (rhs (cl-cc:make-ast-int :value 2))
+         (node (cl-cc:make-ast-binop :op '+ :lhs lhs :rhs rhs))
+         (children (cl-cc:ast-children node)))
+    (assert-equal 2 (length children))
+    (assert-eq lhs (first children))
+    (assert-eq rhs (second children))))
+
+(deftest ast-children-if
+  "ast-if children are (cond then else)."
+  (let* ((c (cl-cc:make-ast-int :value 1))
+         (th (cl-cc:make-ast-int :value 2))
+         (el (cl-cc:make-ast-int :value 3))
+         (node (cl-cc:make-ast-if :cond c :then th :else el)))
+    (assert-equal 3 (length (cl-cc:ast-children node)))))
+
+(deftest ast-children-progn
+  "ast-progn children are its forms."
+  (let* ((f1 (cl-cc:make-ast-int :value 1))
+         (f2 (cl-cc:make-ast-int :value 2))
+         (node (cl-cc:make-ast-progn :forms (list f1 f2))))
+    (assert-equal 2 (length (cl-cc:ast-children node)))))
+
+(deftest ast-children-let
+  "ast-let children include init-exprs and body."
+  (let* ((init (cl-cc:make-ast-int :value 1))
+         (body (cl-cc:make-ast-var :name 'x))
+         (node (cl-cc:make-ast-let :bindings (list (cons 'x init))
+                                   :body (list body)))
+         (children (cl-cc:ast-children node)))
+    (assert-equal 2 (length children))
+    (assert-true (member init children :test #'eq))
+    (assert-true (member body children :test #'eq))))
+
+(deftest ast-children-lambda
+  "ast-lambda children are body forms."
+  (let* ((body (cl-cc:make-ast-var :name 'x))
+         (node (cl-cc:make-ast-lambda :params '(x) :body (list body))))
+    (assert-equal 1 (length (cl-cc:ast-children node)))))
+
+(deftest ast-children-setq
+  "ast-setq child is the value expression."
+  (let* ((val (cl-cc:make-ast-int :value 42))
+         (node (cl-cc:make-ast-setq :var 'x :value val)))
+    (assert-equal 1 (length (cl-cc:ast-children node)))
+    (assert-eq val (first (cl-cc:ast-children node)))))
+
+(deftest ast-children-call
+  "ast-call children are func (if AST) + args."
+  (let* ((arg1 (cl-cc:make-ast-int :value 1))
+         (arg2 (cl-cc:make-ast-int :value 2))
+         (node (cl-cc:make-ast-call :func 'foo :args (list arg1 arg2))))
+    (assert-equal 2 (length (cl-cc:ast-children node))))
+  ;; With AST func
+  (let* ((func (cl-cc:make-ast-var :name 'f))
+         (arg1 (cl-cc:make-ast-int :value 1))
+         (node (cl-cc:make-ast-call :func func :args (list arg1))))
+    (assert-equal 2 (length (cl-cc:ast-children node)))
+    (assert-eq func (first (cl-cc:ast-children node)))))
+
+(deftest ast-children-block
+  "ast-block children are body forms."
+  (let* ((body (cl-cc:make-ast-int :value 1))
+         (node (cl-cc:make-ast-block :name 'b :body (list body))))
+    (assert-equal 1 (length (cl-cc:ast-children node)))))
+
+(deftest ast-children-catch
+  "ast-catch children are tag + body."
+  (let* ((tag (cl-cc:make-ast-var :name 'tag))
+         (body (cl-cc:make-ast-int :value 1))
+         (node (cl-cc:make-ast-catch :tag tag :body (list body))))
+    (assert-equal 2 (length (cl-cc:ast-children node)))
+    (assert-eq tag (first (cl-cc:ast-children node)))))
+
+(deftest ast-children-throw
+  "ast-throw children are (tag value)."
+  (let* ((tag (cl-cc:make-ast-var :name 'tag))
+         (val (cl-cc:make-ast-int :value 42))
+         (node (cl-cc:make-ast-throw :tag tag :value val)))
+    (assert-equal 2 (length (cl-cc:ast-children node)))))
+
+(deftest ast-children-the
+  "ast-the child is the value expression."
+  (let* ((val (cl-cc:make-ast-int :value 1))
+         (node (cl-cc:make-ast-the :type 'fixnum :value val)))
+    (assert-equal 1 (length (cl-cc:ast-children node)))
+    (assert-eq val (first (cl-cc:ast-children node)))))
+
+(deftest ast-children-defvar-with-value
+  "ast-defvar with value has one child."
+  (let* ((val (cl-cc:make-ast-int :value 0))
+         (node (cl-cc::make-ast-defvar :name '*x* :value val)))
+    (assert-equal 1 (length (cl-cc:ast-children node)))))
+
+(deftest ast-children-defvar-no-value
+  "ast-defvar without value has no children."
+  (let ((node (cl-cc::make-ast-defvar :name '*x*)))
+    (assert-null (cl-cc:ast-children node))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; ast-bound-names — scoping data layer
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest ast-bound-names-let
+  "ast-let binds variable names from bindings."
+  (let ((node (cl-cc:make-ast-let :bindings (list (cons 'x (cl-cc:make-ast-int :value 1))
+                                                  (cons 'y (cl-cc:make-ast-int :value 2)))
+                                  :body (list (cl-cc:make-ast-var :name 'x)))))
+    (assert-equal '(x y) (cl-cc:ast-bound-names node))))
+
+(deftest ast-bound-names-lambda
+  "ast-lambda binds required params."
+  (let ((node (cl-cc:make-ast-lambda :params '(a b) :body (list (cl-cc:make-ast-var :name 'a)))))
+    (assert-equal '(a b) (cl-cc:ast-bound-names node))))
+
+(deftest ast-bound-names-lambda-optional
+  "ast-lambda with optional params includes them."
+  (let ((node (cl-cc:make-ast-lambda :params '(a)
+                                     :optional-params '((b nil))
+                                     :body (list (cl-cc:make-ast-var :name 'a)))))
+    (assert-equal '(a b) (cl-cc:ast-bound-names node))))
+
+(deftest ast-bound-names-lambda-rest
+  "ast-lambda with rest param includes it."
+  (let ((node (cl-cc:make-ast-lambda :params '(a)
+                                     :rest-param 'rest
+                                     :body (list (cl-cc:make-ast-var :name 'a)))))
+    (assert-equal '(a rest) (cl-cc:ast-bound-names node))))
+
+(deftest ast-bound-names-defun
+  "ast-defun binds params."
+  (let ((node (cl-cc::make-ast-defun :name 'foo :params '(x y) :body (list (cl-cc:make-ast-var :name 'x)))))
+    (assert-equal '(x y) (cl-cc:ast-bound-names node))))
+
+(deftest ast-bound-names-flet
+  "ast-flet binds function names."
+  (let ((node (cl-cc:make-ast-flet :bindings (list (list 'f '(x) (cl-cc:make-ast-var :name 'x)))
+                                   :body (list (cl-cc:make-ast-int :value 1)))))
+    (assert-equal '(f) (cl-cc:ast-bound-names node))))
+
+(deftest ast-bound-names-labels
+  "ast-labels binds function names."
+  (let ((node (cl-cc:make-ast-labels :bindings (list (list 'g '(x) (cl-cc:make-ast-var :name 'x)))
+                                     :body (list (cl-cc:make-ast-int :value 1)))))
+    (assert-equal '(g) (cl-cc:ast-bound-names node))))
+
+(deftest ast-bound-names-mvb
+  "ast-multiple-value-bind binds variable names."
+  (let ((node (cl-cc:make-ast-multiple-value-bind
+               :vars '(a b c)
+               :values-form (cl-cc:make-ast-values :forms (list (cl-cc:make-ast-int :value 1)))
+               :body (list (cl-cc:make-ast-var :name 'a)))))
+    (assert-equal '(a b c) (cl-cc:ast-bound-names node))))
+
+(deftest ast-bound-names-non-binding
+  "Non-binding nodes return nil."
+  (assert-null (cl-cc:ast-bound-names (cl-cc:make-ast-int :value 42)))
+  (assert-null (cl-cc:ast-bound-names (cl-cc:make-ast-if
+                                       :cond (cl-cc:make-ast-int :value 1)
+                                       :then (cl-cc:make-ast-int :value 2)
+                                       :else (cl-cc:make-ast-int :value 3)))))

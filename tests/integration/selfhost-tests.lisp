@@ -408,6 +408,7 @@ Returns the result of the last form."
 
 (deftest selfhost-load-own-source
   "cl-cc can load a representative subset of its own source files."
+  :timeout 30
   (let ((ok 0))
     (let ((cl-cc::*repl-vm-state* nil)
           (cl-cc::*repl-accessor-map* nil)

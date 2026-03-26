@@ -1,0 +1,176 @@
+;;;; tests/unit/emit/x86-64-emit-tests.lisp — x86-64 Assembly Emit Tests
+;;;;
+;;;; Tests for src/emit/x86-64.lisp:
+;;;; target base class, x86-64-target, target-register, emit-instruction methods,
+;;;; *phys-reg-to-asm-string*, spill-store/spill-load emission
+
+(in-package :cl-cc/test)
+
+(defsuite x86-64-emit-suite :description "x86-64 assembly emit tests")
+
+;;; ─── Helper: emit an instruction to string ─────────────────────────────────────
+
+(defun %x86-emit (target inst)
+  "Emit INST to a string using TARGET and return the result."
+  (let ((s (make-string-output-stream)))
+    (cl-cc::emit-instruction target inst s)
+    (get-output-stream-string s)))
+
+(defun %make-x86-target ()
+  "Create a plain x86-64-target with no regalloc (fallback mapping)."
+  (make-instance 'cl-cc::x86-64-target))
+
+;;; ─── *phys-reg-to-asm-string* table ─────────────────────────────────────────
+
+(deftest x86-phys-reg-table-has-14-entries
+  "Physical register table maps all 14 x86-64 GP registers."
+  (assert-equal 14 (length cl-cc::*phys-reg-to-asm-string*)))
+
+(deftest-each x86-phys-reg-table-entries
+  "Physical register table contains correct mappings."
+  :cases (("rax" :rax "rax")
+          ("rcx" :rcx "rcx")
+          ("rdx" :rdx "rdx")
+          ("rbx" :rbx "rbx")
+          ("rsi" :rsi "rsi")
+          ("rdi" :rdi "rdi")
+          ("r8"  :r8  "r8")
+          ("r15" :r15 "r15"))
+  (phys-key expected-str)
+  (assert-equal expected-str (cdr (assoc phys-key cl-cc::*phys-reg-to-asm-string*))))
+
+;;; ─── target-register: fallback (no regalloc) ──────────────────────────────────
+
+(deftest-each x86-target-register-fallback
+  "Fallback target-register maps :R0..:R7 to the naive pool."
+  :cases (("r0" :r0 "rax")
+          ("r1" :r1 "rbx")
+          ("r2" :r2 "rcx")
+          ("r3" :r3 "rdx")
+          ("r4" :r4 "r8")
+          ("r5" :r5 "r9")
+          ("r6" :r6 "r10")
+          ("r7" :r7 "r11"))
+  (vreg expected)
+  (let ((tgt (%make-x86-target)))
+    (assert-equal expected (cl-cc::target-register tgt vreg))))
+
+(deftest x86-target-register-fallback-overflow
+  "Fallback target-register signals error for :R8+ (pool exhausted)."
+  (let ((tgt (%make-x86-target)))
+    (assert-signals error (cl-cc::target-register tgt :r8))))
+
+;;; ─── target-register: with regalloc ────────────────────────────────────────────
+
+(deftest x86-target-register-with-regalloc
+  "target-register uses regalloc assignment when available."
+  (let* ((ht (make-hash-table))
+         (ra (cl-cc::make-regalloc-result :assignment ht))
+         (tgt (make-instance 'cl-cc::x86-64-target :regalloc ra)))
+    (setf (gethash :r0 ht) :rax)
+    (assert-equal "rax" (cl-cc::target-register tgt :r0))))
+
+(deftest x86-target-register-regalloc-unallocated
+  "target-register signals error for unallocated register in regalloc."
+  (let* ((ht (make-hash-table))
+         (ra (cl-cc::make-regalloc-result :assignment ht))
+         (tgt (make-instance 'cl-cc::x86-64-target :regalloc ra)))
+    (assert-signals error (cl-cc::target-register tgt :r99))))
+
+;;; ─── emit-instruction methods ──────────────────────────────────────────────────
+
+(deftest x86-emit-const
+  "vm-const emits mov dst, value."
+  (let* ((tgt (%make-x86-target))
+         (asm (%x86-emit tgt (make-vm-const :dst :r0 :value 42))))
+    (assert-true (search "mov" asm))
+    (assert-true (search "rax" asm))
+    (assert-true (search "42" asm))))
+
+(deftest x86-emit-move
+  "vm-move emits mov dst, src."
+  (let* ((tgt (%make-x86-target))
+         (asm (%x86-emit tgt (make-vm-move :dst :r0 :src :r1))))
+    (assert-true (search "mov" asm))
+    (assert-true (search "rax" asm))
+    (assert-true (search "rbx" asm))))
+
+(deftest x86-emit-add
+  "vm-add emits mov+add sequence."
+  (let* ((tgt (%make-x86-target))
+         (asm (%x86-emit tgt (make-vm-add :dst :r0 :lhs :r1 :rhs :r2))))
+    (assert-true (search "mov" asm))
+    (assert-true (search "add" asm))))
+
+(deftest x86-emit-sub
+  "vm-sub emits mov+sub sequence."
+  (let* ((tgt (%make-x86-target))
+         (asm (%x86-emit tgt (make-vm-sub :dst :r0 :lhs :r1 :rhs :r2))))
+    (assert-true (search "sub" asm))))
+
+(deftest x86-emit-mul
+  "vm-mul emits mov+imul sequence."
+  (let* ((tgt (%make-x86-target))
+         (asm (%x86-emit tgt (make-vm-mul :dst :r0 :lhs :r1 :rhs :r2))))
+    (assert-true (search "imul" asm))))
+
+(deftest x86-emit-label
+  "vm-label emits label: format."
+  (let* ((tgt (%make-x86-target))
+         (asm (%x86-emit tgt (make-vm-label :name "loop"))))
+    (assert-true (search "loop:" asm))))
+
+(deftest x86-emit-jump
+  "vm-jump emits jmp label."
+  (let* ((tgt (%make-x86-target))
+         (asm (%x86-emit tgt (make-vm-jump :label "done"))))
+    (assert-true (search "jmp" asm))
+    (assert-true (search "done" asm))))
+
+(deftest x86-emit-jump-zero
+  "vm-jump-zero emits cmp+je sequence."
+  (let* ((tgt (%make-x86-target))
+         (asm (%x86-emit tgt (make-vm-jump-zero :reg :r0 :label "else"))))
+    (assert-true (search "cmp" asm))
+    (assert-true (search "je" asm))
+    (assert-true (search "else" asm))))
+
+(deftest x86-emit-halt
+  "vm-halt emits mov rax+ret."
+  (let* ((tgt (%make-x86-target))
+         (asm (%x86-emit tgt (make-vm-halt :reg :r0))))
+    (assert-true (search "mov rax" asm))
+    (assert-true (search "ret" asm))))
+
+(deftest x86-emit-print-signals-error
+  "vm-print signals error (not implemented)."
+  (let ((tgt (%make-x86-target)))
+    (assert-signals error (%x86-emit tgt (make-vm-print :reg :r0)))))
+
+(deftest x86-emit-unsupported-silent
+  "Unsupported instructions emit nothing (base method)."
+  (let* ((tgt (%make-x86-target))
+         (asm (%x86-emit tgt (make-vm-ret :reg :r0))))
+    (assert-equal "" asm)))
+
+;;; ─── Spill code emission ──────────────────────────────────────────────────────
+
+(deftest x86-emit-spill-store
+  "vm-spill-store emits mov [rbp-N], reg."
+  (let* ((tgt (%make-x86-target))
+         (inst (make-vm-spill-store :src-reg :rax :slot 2))
+         (asm (%x86-emit tgt inst)))
+    (assert-true (search "mov" asm))
+    (assert-true (search "rbp" asm))
+    (assert-true (search "16" asm))   ; slot 2 * 8 = 16
+    (assert-true (search "rax" asm))))
+
+(deftest x86-emit-spill-load
+  "vm-spill-load emits mov reg, [rbp-N]."
+  (let* ((tgt (%make-x86-target))
+         (inst (make-vm-spill-load :dst-reg :rbx :slot 3))
+         (asm (%x86-emit tgt inst)))
+    (assert-true (search "mov" asm))
+    (assert-true (search "rbx" asm))
+    (assert-true (search "rbp" asm))
+    (assert-true (search "24" asm))))  ; slot 3 * 8 = 24

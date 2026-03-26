@@ -143,10 +143,46 @@
    Used by opt-pass-cse to produce a canonical key for commutative expressions,
    enabling (+ a b) and (+ b a) to share the same CSE memo entry.")
 
+(defparameter *opt-read-regs-table*
+  (let ((ht (make-hash-table :test #'eq)))
+    ;; Single vm-reg accessor
+    (dolist (tp '(vm-jump-zero vm-print vm-halt vm-ret))
+      (setf (gethash tp ht) (lambda (inst) (list (vm-reg inst)))))
+    ;; Single vm-src accessor
+    (dolist (tp '(vm-set-global vm-register-function vm-ensure-values vm-spread-values))
+      (setf (gethash tp ht) (lambda (inst) (list (vm-src inst)))))
+    ;; Call-family: func/gf register + args
+    (dolist (tp '(vm-call vm-apply))
+      (setf (gethash tp ht) (lambda (inst) (cons (vm-func-reg inst) (vm-args inst)))))
+    (setf (gethash 'vm-generic-call ht)
+          (lambda (inst) (cons (vm-gf-reg inst) (vm-args inst))))
+    ;; Multiple values
+    (setf (gethash 'vm-values ht)       (lambda (inst) (vm-src-regs inst)))
+    ;; Object operations
+    (setf (gethash 'vm-closure-ref-idx ht) (lambda (inst) (list (vm-closure-reg inst))))
+    (setf (gethash 'vm-slot-read ht)    (lambda (inst) (list (vm-obj-reg inst))))
+    (setf (gethash 'vm-slot-write ht)   (lambda (inst) (list (vm-obj-reg inst) (vm-value-reg inst))))
+    (setf (gethash 'vm-register-method ht)
+          (lambda (inst) (list (vm-gf-reg inst) (vm-method-reg inst))))
+    (setf (gethash 'vm-make-obj ht)
+          (lambda (inst) (cons (vm-class-reg inst) (mapcar #'cdr (vm-initarg-regs inst)))))
+    ;; Compound instructions with optional registers
+    (setf (gethash 'vm-make-string ht)
+          (lambda (inst) (remove nil (list (vm-src inst) (vm-char inst)))))
+    (setf (gethash 'vm-intern-symbol ht)
+          (lambda (inst) (remove nil (list (vm-src inst) (vm-intern-pkg inst)))))
+    (setf (gethash 'vm-make-array ht)
+          (lambda (inst) (remove nil (list (vm-size-reg inst) (vm-initial-element inst)
+                                           (vm-fill-pointer inst) (vm-adjustable inst)))))
+    ht)
+  "Maps VM instruction type symbols to (lambda (inst) ...) read-reg extractors.
+   Used by opt-inst-read-regs for types not covered by the bulk tables.")
+
 (defun opt-inst-read-regs (inst)
   "Return a list of all register names read by INST.
-   Uses *opt-binary-lhs-rhs-types* and *opt-unary-src-types* data tables
-   for lhs/rhs and src classification — single source of truth."
+   Dispatch: zero-read types → nil, move → src, binop → lhs/rhs,
+   binary/unary tables, then *opt-read-regs-table* for specific types,
+   finally sexp-reflection fallback."
   (let ((tp (type-of inst)))
     (cond
       ;; Zero-read instructions
@@ -162,47 +198,24 @@
       ;; Unary: data-driven from *opt-unary-src-types*
       ((member tp *opt-unary-src-types* :test #'eq)
        (list (vm-src inst)))
-      ;; Single-reg instructions
-      ((eq tp 'vm-jump-zero) (list (vm-reg inst)))
-      ((member tp '(vm-print vm-halt vm-ret) :test #'eq) (list (vm-reg inst)))
-      ((member tp '(vm-set-global vm-register-function vm-ensure-values vm-spread-values)
-               :test #'eq)
-       (list (vm-src inst)))
-      ;; Call-family: func/gf register + args
-      ((eq tp 'vm-call)         (cons (vm-func-reg inst) (vm-args inst)))
-      ((eq tp 'vm-apply)        (cons (vm-func-reg inst) (vm-args inst)))
-      ((eq tp 'vm-generic-call) (cons (vm-gf-reg inst) (vm-args inst)))
-      ;; Multiple values
-      ((eq tp 'vm-values) (vm-src-regs inst))
-      ;; Object operations
-      ((eq tp 'vm-closure-ref-idx) (list (vm-closure-reg inst)))
-      ((eq tp 'vm-slot-read)  (list (vm-obj-reg inst)))
-      ((eq tp 'vm-slot-write) (list (vm-obj-reg inst) (vm-value-reg inst)))
-      ((eq tp 'vm-register-method) (list (vm-gf-reg inst) (vm-method-reg inst)))
-      ((eq tp 'vm-make-obj) (cons (vm-class-reg inst) (mapcar #'cdr (vm-initarg-regs inst))))
-      ;; Compound instructions with optional registers
-      ((eq tp 'vm-make-string) (remove nil (list (vm-src inst) (vm-char inst))))
-      ((eq tp 'vm-intern-symbol) (remove nil (list (vm-src inst) (vm-intern-pkg inst))))
-      ((eq tp 'vm-make-array) (remove nil (list (vm-size-reg inst) (vm-initial-element inst)
-                                                 (vm-fill-pointer inst) (vm-adjustable inst))))
-      (t
-       ;; Fallback: serialize to sexp and collect all register-shaped keywords.
-       ;; Every VM instruction has an instruction->sexp method; registers are
-       ;; keywords named Rn (e.g. :R0, :R15).  We exclude the destination register
-       ;; to avoid marking DST as "used by its own definition".
-       (let ((dst (opt-inst-dst inst))
-             (regs nil))
-         (labels ((collect (x)
-                    (cond ((and (keywordp x)
-                                (opt-register-keyword-p x)
-                                (not (eq x dst)))
-                           (push x regs))
-                          ((consp x)
-                           (collect (car x))
-                           (collect (cdr x))))))
-           (handler-case (collect (instruction->sexp inst))
-             (error () nil)))
-         regs)))))
+      ;; Per-type table lookup
+      (t (let ((handler (gethash tp *opt-read-regs-table*)))
+           (if handler
+               (funcall handler inst)
+               ;; Fallback: serialize to sexp and collect all register-shaped keywords
+               (let ((dst (opt-inst-dst inst))
+                     (regs nil))
+                 (labels ((collect (x)
+                            (cond ((and (keywordp x)
+                                        (opt-register-keyword-p x)
+                                        (not (eq x dst)))
+                                   (push x regs))
+                                  ((consp x)
+                                   (collect (car x))
+                                   (collect (cdr x))))))
+                   (handler-case (collect (instruction->sexp inst))
+                     (error () nil)))
+                 regs)))))))
 
 ;;; ─── Pass 1: Constant Folding + Algebraic Simplification ─────────────────
 

@@ -167,15 +167,15 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
 
     ;; Sequence
     (progn
-     (when (< (length node) 2)
-       (error "progn needs at least one form"))
-     (sloc make-ast-progn
-                    :forms (mapcar #'lower-sexp-to-ast (cdr node))))
+     (if (< (length node) 2)
+         (make-ast-quote :value nil)
+         (sloc make-ast-progn
+                        :forms (mapcar #'lower-sexp-to-ast (cdr node)))))
 
     ;; Print
     (print
-     (unless (= (length node) 2)
-       (error "print takes one arg"))
+     (unless (member (length node) '(2 3))
+       (error "print takes one or two args"))
      (sloc make-ast-print
                     :expr (lower-sexp-to-ast (second node))))
 
@@ -243,33 +243,44 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (unless (= (length node) 2)
        (error "function takes exactly one argument"))
      (let ((name (second node)))
-       (unless (or (symbolp name)
-                   (and (consp name) (eq (car name) 'setf)))
-         (error "function argument must be a symbol or (setf name)"))
-       (sloc make-ast-function
-                      :name name)))
+       (cond
+         ;; #'(lambda ...) → treat as (lambda ...)
+         ((and (consp name) (eq (car name) 'lambda))
+          (lower-sexp-to-ast name))
+         ;; #'symbol or #'(setf name)
+         ((or (symbolp name)
+              (and (consp name) (eq (car name) 'setf)))
+          (sloc make-ast-function :name name))
+         (t (error "function argument must be a symbol, (setf name), or (lambda ...)")))))
 
     ;; Block
     (block
-     (unless (>= (length node) 3)
-       (error "block requires a name and body"))
+     (unless (>= (length node) 2)
+       (error "block requires a name"))
      (let ((name (second node)))
        (unless (symbolp name)
          (error "block name must be a symbol"))
-       (sloc make-ast-block
-                      :name name
-                      :body (mapcar #'lower-sexp-to-ast (cddr node)))))
+       (if (cddr node)
+           (sloc make-ast-block
+                          :name name
+                          :body (mapcar #'lower-sexp-to-ast (cddr node)))
+           ;; (block name) with no body → returns nil
+           (sloc make-ast-block
+                          :name name
+                          :body (list (make-ast-quote :value nil))))))
 
     ;; Return-from
     (return-from
-     (unless (= (length node) 3)
-       (error "return-from requires name and value"))
+     (unless (member (length node) '(2 3))
+       (error "return-from requires name and optional value"))
      (let ((name (second node)))
        (unless (symbolp name)
          (error "return-from name must be a symbol"))
        (sloc make-ast-return-from
                       :name name
-                      :value (lower-sexp-to-ast (third node)))))
+                      :value (if (= (length node) 3)
+                                 (lower-sexp-to-ast (third node))
+                                 (make-ast-quote :value nil)))))
 
     ;; Tagbody
     (tagbody
@@ -343,9 +354,10 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
                  :var place
                  :value (lower-sexp-to-ast value-form))))
        (unless (and (consp place)
-                  (member (car place) '(slot-value gethash get symbol-plist
-                                        aref svref row-major-aref fill-pointer car cdr)))
-         (error "setf only supports symbol, slot-value, gethash, get, symbol-plist, aref, svref, fill-pointer places"))
+                  (member (car place) '(slot-value gethash getf get symbol-plist
+                                        aref svref row-major-aref fill-pointer
+                                        car cdr bit sbit char schar elt nth)))
+         (error "setf only supports symbol, slot-value, gethash, getf, aref, svref, car, cdr, bit, char, elt, nth places"))
        (cond
          ((eq (car place) 'get)
           ;; (setf (get sym indicator) value) => vm-symbol-set
@@ -380,20 +392,59 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
          ((eq (car place) 'slot-value)
           (let ((obj-form (second place))
                 (slot-form (third place)))
-            (let ((slot-name (if (and (consp slot-form) (eq (car slot-form) 'quote))
-                                 (second slot-form)
-                                 (error "setf slot-value slot must be quoted"))))
-              (sloc make-ast-set-slot-value
-                             :object (lower-sexp-to-ast obj-form)
-                             :slot slot-name
-                             :value (lower-sexp-to-ast value-form)))))
+            (if (and (consp slot-form) (eq (car slot-form) 'quote))
+                (sloc make-ast-set-slot-value
+                               :object (lower-sexp-to-ast obj-form)
+                               :slot (second slot-form)
+                               :value (lower-sexp-to-ast value-form))
+                ;; Dynamic slot name: compile to runtime call
+                (lower-sexp-to-ast
+                 (list 'rt-slot-set obj-form slot-form value-form)))))
          ((eq (car place) 'gethash)
           (let ((key-form (second place))
                 (table-form (third place)))
             (sloc make-ast-set-gethash
                            :key (lower-sexp-to-ast key-form)
                            :table (lower-sexp-to-ast table-form)
-                           :value (lower-sexp-to-ast value-form)))))))
+                           :value (lower-sexp-to-ast value-form))))
+         ((member (car place) '(bit sbit))
+          ;; (setf (bit bv idx) val) => (rt-bit-set bv idx val)
+          (lower-sexp-to-ast
+           `(rt-bit-set ,(second place) ,(third place) ,value-form)))
+         ((member (car place) '(char schar))
+          ;; (setf (char s idx) c) => (rt-string-set s idx c)
+          (lower-sexp-to-ast
+           `(rt-string-set ,(second place) ,(third place) ,value-form)))
+         ((eq (car place) 'elt)
+          ;; (setf (elt seq idx) val) => (aset seq idx val)
+          (lower-sexp-to-ast
+           `(aset ,(second place) ,(third place) ,value-form)))
+         ((eq (car place) 'nth)
+          ;; (setf (nth n list) val) => (%set-nth n list val)
+          (lower-sexp-to-ast
+           `(%set-nth ,(second place) ,(third place) ,value-form)))
+         ((eq (car place) 'getf)
+          ;; (setf (getf plist indicator) val) — expand to runtime %plist-put call
+          ;; %plist-put returns the new plist; setq updates the local variable
+          (let ((plist-var (second place))
+                (indicator (third place)))
+            (if (symbolp plist-var)
+                ;; Simple case: plist-var is a symbol, setq it with rebuilt plist
+                ;; Generate AST directly: (progn (setq plist-var (rt-plist-put plist-var ind val)) val)
+                (let ((val-ast (lower-sexp-to-ast value-form))
+                      (plist-ast (lower-sexp-to-ast plist-var))
+                      (ind-ast (lower-sexp-to-ast indicator)))
+                  (make-ast-progn
+                   :forms (list
+                           (make-ast-setq
+                            :var plist-var
+                            :value (make-ast-call
+                                    :func (lower-sexp-to-ast 'rt-plist-put)
+                                    :args (list plist-ast ind-ast val-ast)))
+                           val-ast)))
+                ;; Complex case: just call rt-plist-put (won't update in place)
+                (lower-sexp-to-ast
+                 `(rt-plist-put ,(second place) ,(third place) ,value-form))))))))
 
     ;; Flet (non-recursive local functions)
     (flet
@@ -445,31 +496,33 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
          (error "defun name must be a symbol"))
        (unless (listp raw-params)
          (error "defun parameters must be a list"))
-       (if (lambda-list-has-extended-p raw-params)
-           (multiple-value-bind (required optional rest-param key-params)
-               (parse-compiler-lambda-list raw-params)
-             (sloc make-ast-defun
-                            :name name
-                            :params required
-                            :optional-params (mapcar (lambda (opt)
-                                                       (list (first opt)
-                                                             (when (second opt)
-                                                               (lower-sexp-to-ast (second opt)))))
-                                                     optional)
-                            :rest-param rest-param
-                            :key-params (mapcar (lambda (kp)
-                                                  (list (first kp)
-                                                        (when (second kp)
-                                                          (lower-sexp-to-ast (second kp)))))
-                                                key-params)
-                            :body (mapcar #'lower-sexp-to-ast (cdddr node))))
-           (progn
-             (unless (every #'symbolp raw-params)
-               (error "defun parameters must be symbols"))
-             (sloc make-ast-defun
-                            :name name
-                            :params raw-params
-                            :body (mapcar #'lower-sexp-to-ast (cdddr node)))))))
+       ;; Wrap body in implicit (block name ...) per ANSI CL
+       (let ((block-body (list (lower-sexp-to-ast (list* 'block name (cdddr node))))))
+         (if (lambda-list-has-extended-p raw-params)
+             (multiple-value-bind (required optional rest-param key-params)
+                 (parse-compiler-lambda-list raw-params)
+               (sloc make-ast-defun
+                              :name name
+                              :params required
+                              :optional-params (mapcar (lambda (opt)
+                                                         (list (first opt)
+                                                               (when (second opt)
+                                                                 (lower-sexp-to-ast (second opt)))))
+                                                       optional)
+                              :rest-param rest-param
+                              :key-params (mapcar (lambda (kp)
+                                                    (list (first kp)
+                                                          (when (second kp)
+                                                            (lower-sexp-to-ast (second kp)))))
+                                                  key-params)
+                              :body block-body))
+             (progn
+               (unless (every #'symbolp raw-params)
+                 (error "defun parameters must be symbols"))
+               (sloc make-ast-defun
+                              :name name
+                              :params raw-params
+                              :body block-body))))))
 
     ;; Defvar / Defparameter (top-level variable definition)
     ((defvar defparameter)
@@ -533,11 +586,20 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
      (unless (>= (length node) 4)
        (error "defmethod requires name, parameters, and body"))
      (let* ((name (second node))
-            (raw-params (third node))
+            ;; Handle method qualifiers (:before, :after, :around)
+            (rest-after-name (cddr node))
+            (qualifier (when (and (symbolp (car rest-after-name))
+                                  (not (listp (car rest-after-name))))
+                         (pop rest-after-name)))
+            (raw-params (car rest-after-name))
+            (body-forms (cdr rest-after-name))
             (specializers nil)
             (param-names nil))
+       (declare (ignore qualifier))
        (unless (symbolp name)
          (error "defmethod name must be a symbol"))
+       (unless (listp raw-params)
+         (error "defmethod parameters must be a list"))
        ;; Parse specialized parameter list: ((x class-name) y z) -> specializers + names
        (dolist (p raw-params)
          (if (listp p)
@@ -547,11 +609,13 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
              (progn
                (push nil specializers)
                (push p param-names))))
-       (sloc make-ast-defmethod
-                      :name name
-                      :specializers (nreverse specializers)
-                      :params (nreverse param-names)
-                      :body (mapcar #'lower-sexp-to-ast (cdddr node)))))
+       ;; Wrap body in implicit (block name ...) per ANSI CL
+       (let ((block-body (list (lower-sexp-to-ast (list* 'block name body-forms)))))
+         (sloc make-ast-defmethod
+                        :name name
+                        :specializers (nreverse specializers)
+                        :params (nreverse param-names)
+                        :body block-body))))
 
     ;; Make-instance
     (make-instance

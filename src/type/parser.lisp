@@ -42,7 +42,7 @@
   "Parse SPEC into a type-node."
   (typecase spec
     (null   type-null)
-    (symbol (if (eq spec '?)
+    (symbol (if (string= (symbol-name spec) "?")
                 (make-type-error :message "unknown")   ; ? → gradual typing hole
                 (parse-primitive-type spec)))
     (cons   (parse-compound-type spec))
@@ -51,22 +51,24 @@
 ;;; ─── Primitive types ──────────────────────────────────────────────────────
 
 (defun parse-primitive-type (name)
-  (case name
-    ((fixnum integer int)    type-int)
-    ((float single-float double-float) type-float)
-    ((string simple-string)  type-string)
-    ((boolean bool)          type-bool)
-    ((symbol)                type-symbol)
-    ((cons)                  type-cons)
-    ((null nil)              type-null)
-    ((t top)                 type-any)
-    ((character char)        type-char)
-    (otherwise
-     (let ((alias (and (boundp '*type-alias-registry*)
-                       (gethash name *type-alias-registry*))))
-       (if alias
-           (parse-type-specifier alias)
-           (make-type-primitive :name name))))))
+  "Parse a symbol into a primitive type. Uses string= for package-independent matching."
+  (let ((sname (symbol-name name)))
+    (cond
+      ((member sname '("FIXNUM" "INTEGER" "INT") :test #'string=)       type-int)
+      ((member sname '("FLOAT" "SINGLE-FLOAT" "DOUBLE-FLOAT") :test #'string=) type-float)
+      ((member sname '("STRING" "SIMPLE-STRING") :test #'string=)       type-string)
+      ((member sname '("BOOLEAN" "BOOL") :test #'string=)               type-bool)
+      ((string= sname "SYMBOL")                                          type-symbol)
+      ((string= sname "CONS")                                            type-cons)
+      ((member sname '("NULL" "NIL") :test #'string=)                   type-null)
+      ((member sname '("T" "TOP") :test #'string=)                      type-any)
+      ((member sname '("CHARACTER" "CHAR") :test #'string=)             type-char)
+      (t
+       (let ((alias (and (boundp '*type-alias-registry*)
+                         (gethash name *type-alias-registry*))))
+         (if alias
+             (parse-type-specifier alias)
+             (make-type-primitive :name name)))))))
 
 ;;; ─── Compound types ───────────────────────────────────────────────────────
 
@@ -326,7 +328,8 @@ Returns (values param-names param-types) where untyped params get type-any."
              (eq (caar body) 'declare))
     (let ((decl (cdar body)))
       (when (and decl (consp (car decl))
-                 (eq (caar decl) 'return-type))
+                 (and (symbolp (caar decl))
+                      (string= (symbol-name (caar decl)) "RETURN-TYPE")))
         (parse-type-specifier (cadar decl))))))
 
 (defun extract-return-type-from-body (body)

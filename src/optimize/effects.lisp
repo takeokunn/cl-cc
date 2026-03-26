@@ -126,7 +126,7 @@
 
 (defparameter *opt-control-inst-types*
   '(;; Control flow
-    vm-jump vm-jump-zero vm-ret vm-halt
+    vm-label vm-jump vm-jump-zero vm-ret vm-halt
     ;; Error / condition handling
     vm-signal-error vm-condition-case vm-handler-bind
     vm-establish-handler vm-remove-handler vm-sync-handler-regs
@@ -153,12 +153,8 @@
 (defun vm-inst-effect-kind (inst)
   "Return the effect-kind of VM instruction INST.
    Effect kinds: :pure :read-only :alloc :io :write-global :control :unknown.
-   vm-call/vm-generic-call/vm-apply return :unknown conservatively;
-   Phase 6 (cost-model inlining) will refine these using type information."
-  (typecase inst
-    ((or vm-call vm-apply vm-generic-call) :unknown)
-    (vm-label :control)
-    (t (or (gethash (type-of inst) *opt-effect-kind-table*) :unknown))))
+   Unlisted types (vm-call, vm-apply, vm-generic-call, etc.) default to :unknown."
+  (or (gethash (type-of inst) *opt-effect-kind-table*) :unknown))
 
 ;;; ─── Purity Predicates ───────────────────────────────────────────────────
 

@@ -90,13 +90,6 @@
   (:sexp-tag :hash-table-p)
   (:sexp-slots dst src))
 
-(define-vm-instruction vm-maphash (vm-instruction)
-  "Apply FN to each (KEY . VALUE) pair in TABLE. FN receives key and value as arguments."
-  (fn nil :reader vm-hash-fn)
-  (table nil :reader vm-hash-table-reg)
-  (:sexp-tag :maphash)
-  (:sexp-slots fn table))
-
 (define-vm-instruction vm-hash-table-keys (vm-instruction)
   "Return a list of all keys in TABLE."
   (dst nil :reader vm-dst)
@@ -201,16 +194,6 @@
   (let* ((value (vm-reg-get state (vm-src inst)))
          (result (if (typep value 'vm-hash-table-object) 1 0)))
     (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-maphash) state pc labels)
-  "Execute maphash — placeholder. Use hash-table-keys + dolist + funcall instead."
-  (declare (ignore labels))
-  (let* ((table-obj (vm-reg-get state (vm-hash-table-reg inst)))
-         (table (vm-hash-table-get-internal table-obj)))
-    (declare (ignore table))
-    ;; maphash with closures requires re-entrant VM execution.
-    ;; Use (dolist (k (hash-table-keys ht)) (funcall fn k (gethash k ht))) instead.
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-hash-table-keys) state pc labels)

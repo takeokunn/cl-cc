@@ -214,6 +214,7 @@
   "Compile and run SOURCE. When STDLIB is true, include standard library."
   (let* ((*package* (find-package :cl-cc))
          (*accessor-slot-map* (make-hash-table :test #'eq))
+         (*defstruct-slot-registry* (make-hash-table :test #'eq))
          (*labels-boxed-fns* nil)
          (result (if stdlib
                      (compile-string-with-stdlib source :target :vm)
@@ -275,6 +276,10 @@ Enables cross-expression closure calls (body labels remain globally valid).")
 When non-nil, this is bound to *repl-global-variables* during compilation
 so that variables from (defvar ...) in one REPL call are visible in the next.")
 
+(defvar *repl-defstruct-registry* nil
+  "Persistent defstruct slot registry for the REPL.
+Accumulates slot info across form evaluations so :include works across calls.")
+
 (defun reset-repl-state ()
   "Reset the REPL persistent state, starting a completely fresh session."
   (setf *repl-vm-state* nil
@@ -282,6 +287,7 @@ so that variables from (defvar ...) in one REPL call are visible in the next.")
         *repl-pool-instructions* nil
         *repl-pool-labels* nil
         *repl-global-vars-persistent* nil
+        *repl-defstruct-registry* nil
         *repl-label-counter* nil))
 
 (defun run-string-repl (source)
@@ -305,8 +311,11 @@ Example:
     (setf *repl-pool-labels* (make-hash-table :test #'equal)))
   (unless *repl-global-vars-persistent*
     (setf *repl-global-vars-persistent* (make-hash-table :test #'eq)))
+  (unless *repl-defstruct-registry*
+    (setf *repl-defstruct-registry* (make-hash-table :test #'eq)))
   (let* ((*package* (find-package :cl-cc))
          (*accessor-slot-map* *repl-accessor-map*)
+         (*defstruct-slot-registry* *repl-defstruct-registry*)
          (*labels-boxed-fns* nil)
          ;; Bind persistent globals so compiler-context picks them up
          (*repl-global-variables* *repl-global-vars-persistent*)
@@ -380,16 +389,29 @@ VERBOSE prints the file being loaded. PRINT prints each form's result."
         ;; Parse all forms and compile/run each through the REPL pipeline
         (let ((forms (parse-all-forms source))
               (last-result nil))
-          (dolist (form forms last-result)
-            (let ((form-str (write-to-string form)))
-              (setf last-result
-                    (handler-case (run-string-repl form-str)
-                      (error (e)
-                        (format *error-output* "; Error loading ~A: ~A~%  Form: ~S~%"
-                                path e form)
-                        nil)))
-              (when print
-                (format *standard-output* "~S~%" last-result)))))))))
+          (flet ((%whitespace-symbol-p (form)
+                   (and (symbolp form)
+                        (not (null form))
+                        (not (keywordp form))
+                        (let ((name (symbol-name form)))
+                          (and (> (length name) 0)
+                               (not (find-if (lambda (c)
+                                               (and (graphic-char-p c)
+                                                    (not (eql c #\Space))))
+                                             name)))))))
+            (dolist (form forms last-result)
+              (unless (or (%whitespace-symbol-p form)
+                          ;; Skip unsupported top-level forms
+                          (and (consp form) (member (car form) '(declaim deftype))))
+                (let ((form-str (write-to-string form)))
+                  (setf last-result
+                        (handler-case (run-string-repl form-str)
+                          (error (e)
+                            (format *error-output* "; Error loading ~A: ~A~%  Form: ~S~%"
+                                    path e form)
+                            nil)))
+                  (when print
+                    (format *standard-output* "~S~%" last-result)))))))))))
 
 
 (defun run-string-typed (source &key (mode :warn))

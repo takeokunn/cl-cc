@@ -7,56 +7,15 @@
 ;;; - Macro expansion (single and full)
 ;;; - Built-in macros for bootstrap
 
-;;; Environment Classes - Available at compile-time for our-defmacro
+;;; Macro Environment - Available at compile-time for our-defmacro
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
 
 (defclass macro-env ()
   ((macros :initform (make-hash-table :test 'eq) :reader macro-env-table))
-  (:documentation "Environment for macro definitions."))
+  (:documentation "Global environment for macro definitions."))
 
-(defclass compilation-env ()
-  ((macros :initform (make-hash-table :test 'eq) :reader env-macros)
-   (functions :initform (make-hash-table :test 'eq) :reader env-functions)
-   (variables :initform (make-hash-table :test 'eq) :reader env-variables)
-   (parent :initarg :parent :initform nil :reader env-parent))
-  (:documentation "Full compilation environment with lexical scoping support."))
-
-(defun make-compilation-env (&optional parent)
-  "Create a new compilation environment optionally with a PARENT."
-  (make-instance 'compilation-env :parent parent))
-
-(defun env-lookup-macro (symbol env)
-  "Look up SYMBOL as a macro in ENV, checking parent environments."
-  (or (gethash symbol (env-macros env))
-      (when (env-parent env)
-        (env-lookup-macro symbol (env-parent env)))))
-
-(defun env-lookup-function (symbol env)
-  "Look up SYMBOL as a function in ENV, checking parent environments."
-  (or (gethash symbol (env-functions env))
-      (when (env-parent env)
-        (env-lookup-function symbol (env-parent env)))))
-
-(defun env-lookup-variable (symbol env)
-  "Look up SYMBOL as a variable in ENV, checking parent environments."
-  (or (gethash symbol (env-variables env))
-      (when (env-parent env)
-        (env-lookup-variable symbol (env-parent env)))))
-
-(defun env-add-macro (symbol macro-fn env)
-  "Add SYMBOL with MACRO-FN to ENV."
-  (setf (gethash symbol (env-macros env)) macro-fn))
-
-(defun env-add-function (symbol fn env)
-  "Add SYMBOL with FN to ENV."
-  (setf (gethash symbol (env-functions env)) fn))
-
-(defun env-add-variable (symbol value env)
-  "Add SYMBOL with VALUE to ENV."
-  (setf (gethash symbol (env-variables env)) value))
-
-) ; end first eval-when
+) ; end eval-when
 
 ;;; Lambda List Parsing - Available at compile-time
 
@@ -217,10 +176,9 @@
   (setf (gethash name (macro-env-table *macro-environment*)) expander))
 
 (defun lookup-macro (name &optional env)
-  "Look up macro NAME in ENV (or global environment if nil)."
-  (if env
-      (env-lookup-macro name env)
-      (gethash name (macro-env-table *macro-environment*))))
+  "Look up macro NAME in the global macro environment."
+  (declare (ignore env))
+  (gethash name (macro-env-table *macro-environment*)))
 
 ) ; end eval-when
 
@@ -246,19 +204,50 @@
         (return (values form (not (eq form expanded)))))
       (setf form expanded))))
 
+(defun %expand-quasiquote (template)
+  "Transform a quasiquote template into list/cons/append calls.
+Handles (cl-cc::unquote x) and (cl-cc::unquote-splicing x) within template."
+  (cond
+    ;; (cl-cc::unquote x) at top level => just x
+    ((and (consp template) (eq (car template) 'cl-cc::unquote))
+     (second template))
+    ;; A list => process each element for unquote/splicing
+    ((consp template)
+     (let ((parts nil))
+       (dolist (elem template)
+         (cond
+           ((and (consp elem) (eq (car elem) 'cl-cc::unquote))
+            (push (list 'list (second elem)) parts))
+           ((and (consp elem) (eq (car elem) 'cl-cc::unquote-splicing))
+            (push (second elem) parts))
+           (t
+            (push (list 'list (%expand-quasiquote elem)) parts))))
+       (let ((reversed (nreverse parts)))
+         (if (= (length reversed) 1)
+             (first reversed)
+             (cons 'append reversed)))))
+    ;; Atom => quote it
+    (t (list 'quote template))))
+
 (defun our-macroexpand-all (form &optional env)
   "Recursively expand all macros in FORM, including in subforms."
-  (multiple-value-bind (exp expanded-p)
-      (our-macroexpand-1 form env)
-    (if expanded-p
-        ;; Form was a macro call, expand it and continue
-        (our-macroexpand-all exp env)
-        ;; Not a macro call, recurse into subforms
-        (typecase form
-          (cons
-           (cons (our-macroexpand-all (car form) env)
-                 (our-macroexpand-all (cdr form) env)))
-          (t form)))))
+  (cond
+    ;; Quasiquote — expand before further processing
+    ((and (consp form) (eq (car form) 'cl-cc::backquote))
+     (our-macroexpand-all (%expand-quasiquote (second form)) env))
+    ;; Quote — never recurse into quoted data
+    ((and (consp form) (eq (car form) 'quote))
+     form)
+    ;; General: try macro expansion first, then recurse
+    (t
+     (multiple-value-bind (exp expanded-p)
+         (our-macroexpand-1 form env)
+       (if expanded-p
+           (our-macroexpand-all exp env)
+           (typecase form
+             (cons
+              (mapcar (lambda (x) (our-macroexpand-all x env)) form))
+             (t form)))))))
 
 ;;; Macro Definition Macro
 
@@ -448,6 +437,12 @@
     ((and (consp place) (eq (car place) 'slot-value))
      ;; (setf (slot-value obj slot) value) — handled by parser, but macro fallback
      `(setf-slot-value ,(second place) ,(third place) ,value))
+    ((and (consp place) (eq (car place) 'getf))
+     ;; (setf (getf plist indicator) value) — rebuild plist with new value
+     (let ((v (gensym "V")))
+       `(let ((,v ,value))
+          (setq ,(second place) (rt-plist-put ,(second place) ,(third place) ,v))
+          ,v)))
     (t
      (error "SETF: Unsupported place ~S" place))))
 
@@ -637,6 +632,20 @@ MAKE-STEP-FORMS is (vars steps) -> list of step forms to splice into tagbody."
 
 ;;; LOOP Macro (Simplified Implementation)
 
+;; Loop iteration emitter table: maps iteration-type keyword → emitter function.
+;; Each emitter receives (var iter bindings end-tests pre-body step-forms) and
+;; destructively pushes its contributions onto the binding/step lists.
+;; Returns nothing; side-effects the accumulators.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+
+(defvar *loop-iter-emitters* (make-hash-table :test 'eq)
+  "Dispatch table: iteration-type keyword → emitter function.")
+
+(defvar *loop-acc-emitters* (make-hash-table :test 'eq)
+  "Dispatch table: accumulation-type keyword → (lambda (acc-var acc-form bindings) body-form).")
+
+) ; end eval-when for dispatch tables
+
 ;; Helper to parse loop clauses
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun loop-kw-p (sym name)
@@ -723,6 +732,13 @@ MAKE-STEP-FORMS is (vars steps) -> list of step forms to splice into tagbody."
                  ((loop-kw-p kw "ACROSS")
                   (setf (getf spec :type) :across)
                   (setf (getf spec :across) (pop remaining)))
+                 ;; FOR var = expr [THEN step-expr]
+                 ((loop-kw-p kw "=")
+                  (setf (getf spec :type) :equals)
+                  (setf (getf spec :equals) (pop remaining))
+                  (when (and remaining (loop-kw-p (car remaining) "THEN"))
+                    (pop remaining)
+                    (setf (getf spec :then) (pop remaining))))
                  ;; FOR var BEING THE HASH-KEYS/HASH-VALUES OF table [USING (HASH-VALUE/HASH-KEY other-var)]
                  ((loop-kw-p kw "BEING")
                   ;; Skip "THE" if present
@@ -829,7 +845,208 @@ MAKE-STEP-FORMS is (vars steps) -> list of step forms to splice into tagbody."
             :conditions (nreverse conditions)
             :initially initially          ; NOT nreversed — loop macro will nreverse
             :finally finally))))          ; NOT nreversed — loop macro will nreverse
-)
+
+;;; --- Accumulation emitters ---
+;; Each returns the body-form to push into the loop body.
+;; Side-effects: pushes (acc-var init) into bindings, optionally pushes into result-form.
+
+(defmacro define-loop-acc-emitter (type (acc-var acc-form bindings-var result-form-var into-var-var) &body body)
+  "Register an accumulation emitter for TYPE in *loop-acc-emitters*."
+  `(setf (gethash ,type *loop-acc-emitters*)
+         (lambda (,acc-var ,acc-form ,bindings-var ,result-form-var ,into-var-var)
+           ,@body)))
+
+(define-loop-acc-emitter :collect (acc-var acc-form bindings result-form into-var)
+  (push (list acc-var nil) bindings)
+  (unless into-var
+    (push (list 'nreverse acc-var) result-form))
+  (values (list 'setq acc-var (list 'cons acc-form acc-var)) bindings result-form))
+
+(define-loop-acc-emitter :sum (acc-var acc-form bindings result-form into-var)
+  (declare (ignore result-form into-var))
+  (push (list acc-var 0) bindings)
+  (values (list 'setq acc-var (list '+ acc-var acc-form)) bindings nil))
+
+(define-loop-acc-emitter :count (acc-var acc-form bindings result-form into-var)
+  (declare (ignore result-form into-var))
+  (push (list acc-var 0) bindings)
+  (values (list 'when acc-form (list 'setq acc-var (list '+ acc-var 1))) bindings nil))
+
+(define-loop-acc-emitter :maximize (acc-var acc-form bindings result-form into-var)
+  (declare (ignore result-form into-var))
+  (push (list acc-var nil) bindings)
+  (values (list 'if acc-var
+                (list 'when (list '> acc-form acc-var)
+                      (list 'setq acc-var acc-form))
+                (list 'setq acc-var acc-form))
+          bindings nil))
+
+(define-loop-acc-emitter :minimize (acc-var acc-form bindings result-form into-var)
+  (declare (ignore result-form into-var))
+  (push (list acc-var nil) bindings)
+  (values (list 'if acc-var
+                (list 'when (list '< acc-form acc-var)
+                      (list 'setq acc-var acc-form))
+                (list 'setq acc-var acc-form))
+          bindings nil))
+
+(define-loop-acc-emitter :append (acc-var acc-form bindings result-form into-var)
+  (declare (ignore result-form into-var))
+  (push (list acc-var nil) bindings)
+  (values (list 'setq acc-var (list 'append acc-var acc-form)) bindings nil))
+
+(define-loop-acc-emitter :nconc (acc-var acc-form bindings result-form into-var)
+  (declare (ignore result-form into-var))
+  (push (list acc-var nil) bindings)
+  (values (list 'setq acc-var (list 'nconc acc-var acc-form)) bindings nil))
+
+;;; --- Iteration emitters ---
+;; Each receives (var iter) and returns (values bindings end-tests pre-body step-forms)
+;; as fresh lists to be appended to the loop's accumulators.
+
+(defmacro define-loop-iter-emitter (type (var iter) &body body)
+  "Register an iteration emitter for TYPE in *loop-iter-emitters*."
+  `(setf (gethash ,type *loop-iter-emitters*)
+         (lambda (,var ,iter) ,@body)))
+
+(define-loop-iter-emitter :from (var iter)
+  (let ((from (getf iter :from))
+        (to (getf iter :to))
+        (below (getf iter :below))
+        (by-form (getf iter :by))
+        (bindings nil) (end-tests nil) (step-forms nil))
+    (push (list var from) bindings)
+    (if by-form
+        (push (list 'setq var (list '+ var by-form)) step-forms)
+        (push (list 'setq var (list '+ var 1)) step-forms))
+    (cond (to    (push (list '> var to) end-tests))
+          (below (push (list '>= var below) end-tests)))
+    (values bindings end-tests nil step-forms)))
+
+(defun %loop-destructure-var (pattern accessor)
+  "Generate (var accessor-form) bindings for a destructuring PATTERN applied to ACCESSOR.
+Supports proper lists (a b c), dotted pairs (a . b), and nested patterns."
+  (cond
+    ((null pattern) nil)
+    ((symbolp pattern) (list (list pattern accessor)))
+    ((consp pattern)
+     (append (%loop-destructure-var (car pattern) (list 'car accessor))
+             (if (and (cdr pattern) (atom (cdr pattern)))
+                 ;; Dotted pair: (a . b) → b = (cdr accessor)
+                 (list (list (cdr pattern) (list 'cdr accessor)))
+                 ;; Proper list: recurse on cdr
+                 (%loop-destructure-var (cdr pattern) (list 'cdr accessor)))))
+    (t nil)))
+
+(define-loop-iter-emitter :in (var iter)
+  (let* ((destructuring-p (consp var))
+         (real-var (if destructuring-p (gensym "DVAR") var))
+         (list-var (gensym (if destructuring-p "DLIST" (symbol-name var))))
+         (list-form (getf iter :in))
+         (by-fn (getf iter :by))
+         (bindings nil) (end-tests nil) (pre-body nil) (step-forms nil))
+    (push (list list-var list-form) bindings)
+    (push (list real-var (list 'car list-var)) bindings)
+    ;; For destructuring patterns, bind sub-variables and set them in pre-body/step
+    (when destructuring-p
+      (let ((destr-bindings (%loop-destructure-var var real-var)))
+        (dolist (b destr-bindings) (push (list (first b) nil) bindings))
+        (let ((setqs (mapcar (lambda (b) `(setq ,(first b) ,(second b))) destr-bindings)))
+          (dolist (s setqs) (push s pre-body))
+          ;; Also set after step
+          (dolist (s (reverse setqs)) (push s step-forms)))))
+    (push (list 'null list-var) end-tests)
+    (if by-fn
+        (push (list 'setq list-var (list 'funcall by-fn list-var)) step-forms)
+        (push (list 'setq list-var (list 'cdr list-var)) step-forms))
+    (push (list 'setq real-var (list 'car list-var)) step-forms)
+    (values bindings end-tests pre-body step-forms)))
+
+(define-loop-iter-emitter :on (var iter)
+  (let* ((destructuring-p (consp var))
+         (real-var (if destructuring-p (gensym "DVAR") var))
+         (list-form (getf iter :on))
+         (by-fn (getf iter :by))
+         (bindings nil) (end-tests nil) (pre-body nil) (step-forms nil))
+    (push (list real-var list-form) bindings)
+    ;; For destructuring patterns like (for (k v) on plist by #'cddr)
+    (when destructuring-p
+      (let ((destr-bindings (%loop-destructure-var var real-var)))
+        (dolist (b destr-bindings) (push (list (first b) nil) bindings))
+        (let ((setqs (mapcar (lambda (b) `(setq ,(first b) ,(second b))) destr-bindings)))
+          (dolist (s setqs) (push s pre-body))
+          (dolist (s (reverse setqs)) (push s step-forms)))))
+    (if by-fn
+        (push (list 'setq real-var (list 'funcall by-fn real-var)) step-forms)
+        (push (list 'setq real-var (list 'cdr real-var)) step-forms))
+    (push (list 'null real-var) end-tests)
+    (values bindings end-tests pre-body step-forms)))
+
+(define-loop-iter-emitter :across (var iter)
+  (let ((vec-var (gensym "VEC"))
+        (idx-var (gensym "IDX"))
+        (len-var (gensym "LEN"))
+        (vec-form (getf iter :across))
+        (bindings nil) (end-tests nil) (pre-body nil) (step-forms nil))
+    (push (list vec-var vec-form) bindings)
+    (push (list len-var (list 'length vec-var)) bindings)
+    (push (list idx-var 0) bindings)
+    (push (list var nil) bindings)
+    (push (list '>= idx-var len-var) end-tests)
+    (push (list 'setq var (list 'aref vec-var idx-var)) pre-body)
+    (push (list 'setq idx-var (list '+ idx-var 1)) step-forms)
+    (values bindings end-tests pre-body step-forms)))
+
+(define-loop-iter-emitter :hash-keys (var iter)
+  (let ((keys-var (gensym "KEYS"))
+        (table-form (getf iter :hash-table))
+        (ht-var (gensym "HT"))
+        (using-type (getf iter :using-type))
+        (using-var (getf iter :using-var))
+        (bindings nil) (end-tests nil) (pre-body nil) (step-forms nil))
+    (push (list ht-var table-form) bindings)
+    (push (list keys-var (list 'hash-table-keys ht-var)) bindings)
+    (push (list var (list 'car keys-var)) bindings)
+    (push (list 'null keys-var) end-tests)
+    (when (and using-var (eq using-type :hash-value))
+      (push (list using-var nil) bindings)
+      (push (list 'setq using-var (list 'gethash var ht-var)) pre-body))
+    (push (list 'setq keys-var (list 'cdr keys-var)) step-forms)
+    (push (list 'setq var (list 'car keys-var)) step-forms)
+    (values bindings end-tests pre-body step-forms)))
+
+(define-loop-iter-emitter :hash-values (var iter)
+  (let ((vals-var (gensym "VALS"))
+        (table-form (getf iter :hash-table))
+        (ht-var (gensym "HT"))
+        (using-type (getf iter :using-type))
+        (using-var (getf iter :using-var))
+        (bindings nil) (end-tests nil) (pre-body nil) (step-forms nil))
+    (push (list ht-var table-form) bindings)
+    (push (list vals-var (list 'hash-table-values ht-var)) bindings)
+    (push (list var (list 'car vals-var)) bindings)
+    (push (list 'null vals-var) end-tests)
+    (when (and using-var (eq using-type :hash-key))
+      (let ((keys-var (gensym "KEYS")))
+        (push (list keys-var (list 'hash-table-keys ht-var)) bindings)
+        (push (list using-var nil) bindings)
+        (push (list 'setq using-var (list 'car keys-var)) pre-body)
+        (push (list 'setq keys-var (list 'cdr keys-var)) step-forms)))
+    (push (list 'setq vals-var (list 'cdr vals-var)) step-forms)
+    (push (list 'setq var (list 'car vals-var)) step-forms)
+    (values bindings end-tests pre-body step-forms)))
+
+(define-loop-iter-emitter :equals (var iter)
+  (let ((init-form (getf iter :equals))
+        (then-form (getf iter :then))
+        (bindings nil) (pre-body nil) (step-forms nil))
+    (push (list var init-form) bindings)
+    (if then-form
+        (push (list 'setq var then-form) step-forms)
+        (push (list 'setq var init-form) pre-body))
+    (values bindings nil pre-body step-forms)))
+
+) ; end eval-when
 
 ;; LOOP macro
 (our-defmacro loop (&rest clauses)
@@ -854,154 +1071,50 @@ MAKE-STEP-FORMS is (vars steps) -> list of step forms to splice into tagbody."
           (acc-vars nil)
           (init-acc nil)
           (result-form nil))
-      ;; Process iterations
+      ;; Process iterations — table-driven dispatch
       (dolist (iter iterations)
         (cond
-          ;; REPEAT n: (:repeat count-var count-form)
+          ;; REPEAT n: (:repeat count-var count-form) — special form, not FOR-based
           ((eq (car iter) :repeat)
            (let ((count-var (second iter))
                  (count-form (third iter)))
              (push (list count-var count-form) bindings)
              (push (list '<= count-var 0) end-tests)
              (push (list 'setq count-var (list '- count-var 1)) step-forms)))
-          ;; WITH auxiliary binding: (:with var val)
+          ;; WITH auxiliary binding: (:with var val) — special form, not FOR-based
           ((eq (car iter) :with)
            (let ((var (second iter))
                  (val (third iter)))
              (push (list var val) bindings)))
-          ;; FOR-based iterations
+          ;; FOR-based iterations — dispatch via *loop-iter-emitters*
           (t
-           (let ((var (getf iter :for))
-                 (iter-type (getf iter :type)))
-             (case iter-type
-               ;; FOR var FROM ... TO/BELOW [BY step]
-               (:from
-                (let ((from (getf iter :from))
-                      (to (getf iter :to))
-                      (below (getf iter :below))
-                      (by-form (getf iter :by)))
-                  (push (list var from) bindings)
-                  (if by-form
-                      (push (list 'setq var (list '+ var by-form)) step-forms)
-                      (push (list 'setq var (list '+ var 1)) step-forms))
-                  (if to
-                      (push (list '> var to) end-tests)
-                      (push (list '>= var below) end-tests))))
-               ;; FOR var IN list [BY step-fn]
-               (:in
-                (let ((list-var (gensym (symbol-name var)))
-                      (list-form (getf iter :in))
-                      (by-fn (getf iter :by)))
-                  (push (list list-var list-form) bindings)
-                  (push (list var (list 'car list-var)) bindings)
-                  (push (list 'null list-var) end-tests)
-                  (if by-fn
-                      (push (list 'setq list-var (list 'funcall by-fn list-var)) step-forms)
-                      (push (list 'setq list-var (list 'cdr list-var)) step-forms))
-                  (push (list 'setq var (list 'car list-var)) step-forms)))
-               ;; FOR var ON list [BY step-fn]
-               (:on
-                (let ((list-form (getf iter :on))
-                      (by-fn (getf iter :by)))
-                  (push (list var list-form) bindings)
-                  (if by-fn
-                      (push (list 'setq var (list 'funcall by-fn var)) step-forms)
-                      (push (list 'setq var (list 'cdr var)) step-forms))
-                  (push (list 'null var) end-tests)))
-               ;; FOR var ACROSS vector
-               (:across
-                (let ((vec-var (gensym "VEC"))
-                      (idx-var (gensym "IDX"))
-                      (len-var (gensym "LEN"))
-                      (vec-form (getf iter :across)))
-                  (push (list vec-var vec-form) bindings)
-                  (push (list len-var (list 'length vec-var)) bindings)
-                  (push (list idx-var 0) bindings)
-                  (push (list var nil) bindings)
-                  (push (list '>= idx-var len-var) end-tests)
-                  ;; Set var from current index before body
-                  (push (list 'setq var (list 'aref vec-var idx-var)) pre-body)
-                  ;; Step: increment index
-                  (push (list 'setq idx-var (list '+ idx-var 1)) step-forms)))
-               ;; FOR var BEING THE HASH-KEYS OF table [USING (HASH-VALUE val)]
-               (:hash-keys
-                (let ((keys-var (gensym "KEYS"))
-                      (table-form (getf iter :hash-table))
-                      (ht-var (gensym "HT"))
-                      (using-type (getf iter :using-type))
-                      (using-var (getf iter :using-var)))
-                  (push (list ht-var table-form) bindings)
-                  (push (list keys-var (list 'hash-table-keys ht-var)) bindings)
-                  (push (list var (list 'car keys-var)) bindings)
-                  (push (list 'null keys-var) end-tests)
-                  ;; If USING (HASH-VALUE val), bind val from gethash
-                  (when (and using-var (eq using-type :hash-value))
-                    (push (list using-var nil) bindings)
-                    (push (list 'setq using-var (list 'gethash var ht-var)) pre-body))
-                  (push (list 'setq keys-var (list 'cdr keys-var)) step-forms)
-                  (push (list 'setq var (list 'car keys-var)) step-forms)))
-               ;; FOR var BEING THE HASH-VALUES OF table [USING (HASH-KEY key)]
-               (:hash-values
-                (let ((vals-var (gensym "VALS"))
-                      (table-form (getf iter :hash-table))
-                      (ht-var (gensym "HT"))
-                      (using-type (getf iter :using-type))
-                      (using-var (getf iter :using-var)))
-                  (push (list ht-var table-form) bindings)
-                  (push (list vals-var (list 'hash-table-values ht-var)) bindings)
-                  (push (list var (list 'car vals-var)) bindings)
-                  (push (list 'null vals-var) end-tests)
-                  ;; If USING (HASH-KEY key), we need keys list too
-                  (when (and using-var (eq using-type :hash-key))
-                    (let ((keys-var (gensym "KEYS")))
-                      (push (list keys-var (list 'hash-table-keys ht-var)) bindings)
-                      (push (list using-var nil) bindings)
-                      (push (list 'setq using-var (list 'car keys-var)) pre-body)
-                      (push (list 'setq keys-var (list 'cdr keys-var)) step-forms)))
-                  (push (list 'setq vals-var (list 'cdr vals-var)) step-forms)
-                  (push (list 'setq var (list 'car vals-var)) step-forms))))))))
-      ;; Process accumulations
+           (let* ((var (getf iter :for))
+                  (iter-type (getf iter :type))
+                  (emitter (gethash iter-type *loop-iter-emitters*)))
+             (if emitter
+                 (multiple-value-bind (new-binds new-ends new-pre new-steps)
+                     (funcall emitter var iter)
+                   ;; Emitters push in forward order, so their lists are reversed.
+                   ;; We splice them onto the caller's reversed lists preserving order.
+                   (setf bindings   (nconc new-binds bindings))
+                   (setf end-tests  (nconc new-ends end-tests))
+                   (setf pre-body   (nconc new-pre pre-body))
+                   (setf step-forms (nconc new-steps step-forms)))
+                 (error "Unknown loop iteration type: ~S" iter-type))))))
+      ;; Process accumulations — table-driven dispatch
       (dolist (acc accumulations)
         (let* ((acc-type (car acc))
                (acc-form (cadr acc))
                (into-var (caddr acc))
                (filter (cadddr acc))
-               (acc-var (or into-var (gensym "ACC"))))
-          ;; Only add to implicit result for unnamed accumulators
+               (acc-var (or into-var (gensym "ACC")))
+               (emitter (gethash acc-type *loop-acc-emitters*)))
           (unless into-var (push acc-var acc-vars))
-          ;; Generate the accumulation body form
-          (let ((acc-body
-                  (case acc-type
-                    (:collect
-                     (push (list acc-var nil) bindings)
-                     (unless into-var
-                       (push (list 'nreverse acc-var) result-form))
-                     (list 'setq acc-var (list 'cons acc-form acc-var)))
-                    (:sum
-                     (push (list acc-var 0) bindings)
-                     (list 'setq acc-var (list '+ acc-var acc-form)))
-                    (:count
-                     (push (list acc-var 0) bindings)
-                     (list 'when acc-form (list 'setq acc-var (list '+ acc-var 1))))
-                    (:maximize
-                     (push (list acc-var nil) bindings)
-                     (list 'if acc-var
-                           (list 'when (list '> acc-form acc-var)
-                                 (list 'setq acc-var acc-form))
-                           (list 'setq acc-var acc-form)))
-                    (:minimize
-                     (push (list acc-var nil) bindings)
-                     (list 'if acc-var
-                           (list 'when (list '< acc-form acc-var)
-                                 (list 'setq acc-var acc-form))
-                           (list 'setq acc-var acc-form)))
-                    (:append
-                     (push (list acc-var nil) bindings)
-                     (list 'setq acc-var (list 'append acc-var acc-form)))
-                    (:nconc
-                     (push (list acc-var nil) bindings)
-                     (list 'setq acc-var (list 'nconc acc-var acc-form))))))
-            ;; Wrap in filter condition if present
+          (unless emitter (error "Unknown loop accumulation type: ~S" acc-type))
+          (multiple-value-bind (acc-body new-bindings new-result)
+              (funcall emitter acc-var acc-form bindings result-form into-var)
+            (setf bindings new-bindings)
+            (when new-result (setf result-form new-result))
             (if filter
                 (let ((wrapper (if (eq (car filter) :when) 'when 'unless)))
                   (push (list wrapper (cadr filter) acc-body) body))
@@ -1058,25 +1171,25 @@ MAKE-STEP-FORMS is (vars steps) -> list of step forms to splice into tagbody."
 ;; PUSH macro
 (our-defmacro push (value place)
   "Push VALUE onto the front of list PLACE."
-  `(setq ,place (cons ,value ,place)))
+  `(setf ,place (cons ,value ,place)))
 
 ;; POP macro
 (our-defmacro pop (place)
   "Remove and return the first element of list PLACE."
   (let ((tmp (gensym "TMP")))
     `(let ((,tmp (car ,place)))
-       (setq ,place (cdr ,place))
+       (setf ,place (cdr ,place))
        ,tmp)))
 
 ;; INCF macro
 (our-defmacro incf (place &optional (delta 1))
   "Increment PLACE by DELTA (default 1)."
-  `(setq ,place (+ ,place ,delta)))
+  `(setf ,place (+ ,place ,delta)))
 
 ;; DECF macro
 (our-defmacro decf (place &optional (delta 1))
   "Decrement PLACE by DELTA (default 1)."
-  `(setq ,place (- ,place ,delta)))
+  `(setf ,place (- ,place ,delta)))
 
 ;; 1+ and 1- utility functions
 (our-defmacro 1+ (n)
@@ -2312,18 +2425,18 @@ For our VM hash-table instances, like reinitialize-instance but slot-filtered."
               (go si-loop)))))
        ,inst-v)))
 
-;;; Test/Debug Utilities
+;;; %plist-put — non-destructive plist update (used by setf getf expansion)
+(our-defmacro %plist-put (plist indicator value)
+  (let ((p (gensym "P")) (result (gensym "R")) (found (gensym "F"))
+        (k (gensym "K")) (v (gensym "V")))
+    `(let ((,p ,plist) (,v ,value) (,result nil) (,found nil))
+       (loop while ,p do
+         (let ((,k (car ,p)))
+           (if (eq ,k ,indicator)
+               (progn (push ,indicator ,result) (push ,v ,result) (setf ,found t))
+               (progn (push ,k ,result) (push (cadr ,p) ,result)))
+           (setf ,p (cddr ,p))))
+       (unless ,found
+         (push ,v ,result) (push ,indicator ,result))
+       (nreverse ,result))))
 
-(defun macroexpand-test (form)
-  "Test macro expansion on FORM and print results."
-  (let ((result (our-macroexpand-1 form)))
-    (format t "Form: ~S~%" form)
-    (format t "Expanded: ~S~%" result)
-    result))
-
-(defun full-macroexpand-test (form)
-  "Test full macro expansion on FORM and print results."
-  (let ((result (our-macroexpand form)))
-    (format t "Form: ~S~%" form)
-    (format t "Fully expanded: ~S~%" result)
-    result))

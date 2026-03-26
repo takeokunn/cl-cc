@@ -81,9 +81,6 @@
 (defmethod instruction-uses ((inst vm-call))
   (cons (vm-func-reg inst) (copy-list (vm-args inst))))
 
-;; Env-ref: defs dst
-(defmethod instruction-defs ((inst vm-env-ref)) (list (vm-dst inst)))
-
 ;;; Primitive instructions (vm-primitives.lisp)
 
 ;; Comparison ops inherit from vm-instruction, have dst/lhs/rhs pattern

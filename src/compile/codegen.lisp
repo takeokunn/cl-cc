@@ -35,6 +35,11 @@
             (let ((dst (make-register ctx)))
               (emit ctx (make-vm-get-global :dst dst :name name))
               dst))
+           ;; Host-bound special variable (e.g. *package*, most-positive-fixnum)
+           ((boundp name)
+            (let ((dst (make-register ctx)))
+              (emit ctx (make-vm-get-global :dst dst :name name))
+              dst))
            (t
             (error "Unbound variable: ~S" name))))))))
 
@@ -51,22 +56,9 @@
     (>= . make-vm-ge))
   "Maps arithmetic/comparison operators to their typed (fixnum) VM instruction constructors.")
 
-(defparameter *generic-binop-ctors*
-  '((+  . make-vm-generic-add)
-    (-  . make-vm-generic-sub)
-    (*  . make-vm-generic-mul)
-    (=  . make-vm-generic-eq)
-    (<  . make-vm-generic-lt)
-    (>  . make-vm-generic-gt)
-    (<= . make-vm-le)
-    (>= . make-vm-ge))
-  "Maps arithmetic/comparison operators to their polymorphic VM instruction constructors.")
-
-(defun binop-ctor (op &optional generic-p)
-  "Return the instruction constructor for OP.
-GENERIC-P selects the polymorphic variant; default is typed (fixnum)."
-  (let* ((table (if generic-p *generic-binop-ctors* *typed-binop-ctors*))
-         (entry (assoc op table)))
+(defun binop-ctor (op)
+  "Return the instruction constructor for OP."
+  (let ((entry (assoc op *typed-binop-ctors*)))
     (unless entry
       (error "Unknown binary operator: ~S" op))
     (symbol-function (cdr entry))))
@@ -298,7 +290,9 @@ GENERIC-P selects the polymorphic variant; default is typed (fixnum)."
   (let ((reg (compile-ast (ast-the-value node) ctx)))
     (when *compiling-typed-fn*
       (let ((declared (ast-the-type node)))
-        (when (and declared (not (typep declared 'cl-cc/type:type-unknown)))
+        (when (and declared
+                    (not (consp declared))
+                    (not (typep declared 'cl-cc/type:type-unknown)))
           (handler-case
             (let ((tenv (cl-cc/type:type-env-empty)))
               (cl-cc/type:check (ast-the-value node) declared tenv))
@@ -422,20 +416,40 @@ and a method dispatch table. The descriptor is registered globally."
 
 (defmethod compile-ast ((node ast-defgeneric) ctx)
   "Compile a generic function definition.
-Creates a dispatch table (hash table) that maps class names to method closures."
+Creates a dispatch table (hash table) that maps class names to method closures.
+Idempotent: if already defined at compile-time or runtime, reuse existing."
   (let* ((name (ast-defgeneric-name node))
-         (dst (make-register ctx)))
-    ;; A generic function is a hash table with :__name__, :__params__, :__methods__
-    (emit ctx (make-vm-class-def
-                            :dst dst
-                            :class-name name
-                            :superclasses nil
-                            :slot-names nil
-                            :slot-initargs nil))
-    ;; Register globally
-    (setf (gethash name (ctx-global-generics ctx)) dst)
-    (push (cons name dst) (ctx-env ctx))
-    dst))
+         (existing (gethash name (ctx-global-generics ctx))))
+    (if existing
+        ;; Already defined in this compilation — reuse
+        existing
+        (let ((dst (make-register ctx))
+              (sym-reg (make-register ctx))
+              (check-reg (make-register ctx))
+              (skip-label (gensym "GF-EXISTS-"))
+              (end-label (gensym "GF-END-")))
+          ;; Runtime check: boundp on the global name
+          (emit ctx (make-vm-const :dst sym-reg :value name))
+          (emit ctx (make-vm-boundp :dst check-reg :src sym-reg))
+          (emit ctx (make-vm-not :dst check-reg :src check-reg))
+          (emit ctx (make-vm-jump-zero :reg check-reg :label skip-label))
+          ;; Not found — create new generic function dispatch table
+          (emit ctx (make-vm-class-def
+                                  :dst dst
+                                  :class-name name
+                                  :superclasses nil
+                                  :slot-names nil
+                                  :slot-initargs nil))
+          (emit ctx (make-vm-set-global :name name :src dst))
+          (emit ctx (make-vm-jump :label end-label))
+          ;; Found — load existing
+          (emit ctx (make-vm-label :name skip-label))
+          (emit ctx (make-vm-get-global :dst dst :name name))
+          (emit ctx (make-vm-label :name end-label))
+          ;; Register in compile context
+          (setf (gethash name (ctx-global-generics ctx)) dst)
+          (push (cons name dst) (ctx-env ctx))
+          dst))))
 
 (defmethod compile-ast ((node ast-defmethod) ctx)
   "Compile a method definition.
@@ -445,10 +459,36 @@ dispatch table, keyed by the composite specializer list for multiple dispatch."
          (specializers (ast-defmethod-specializers node))
          (params (ast-defmethod-params node))
          (body (ast-defmethod-body node))
-         ;; Look up the generic function
+         ;; Look up the generic function, or auto-create if not found
+         ;; (defmethod without explicit defgeneric — common for CLOS standard generics)
          (gf-reg (or (gethash name (ctx-global-generics ctx))
                      (cdr (assoc name (ctx-env ctx)))
-                     (error "Generic function ~S not defined" name)))
+                     (let ((dst (make-register ctx))
+                           (sym-reg (make-register ctx))
+                           (check-reg (make-register ctx))
+                           (skip-label (gensym "DM-GF-EXISTS-"))
+                           (end-label (gensym "DM-GF-END-")))
+                       ;; Runtime check: if generic already exists, load it; else create
+                       (emit ctx (make-vm-const :dst sym-reg :value name))
+                       (emit ctx (make-vm-boundp :dst check-reg :src sym-reg))
+                       (emit ctx (make-vm-not :dst check-reg :src check-reg))
+                       (emit ctx (make-vm-jump-zero :reg check-reg :label skip-label))
+                       ;; Not found — create new generic function dispatch table
+                       (emit ctx (make-vm-class-def
+                                               :dst dst
+                                               :class-name name
+                                               :superclasses nil
+                                               :slot-names nil
+                                               :slot-initargs nil))
+                       (emit ctx (make-vm-set-global :name name :src dst))
+                       (emit ctx (make-vm-jump :label end-label))
+                       ;; Found — load existing
+                       (emit ctx (make-vm-label :name skip-label))
+                       (emit ctx (make-vm-get-global :dst dst :name name))
+                       (emit ctx (make-vm-label :name end-label))
+                       ;; Register in compile context
+                       (setf (gethash name (ctx-global-generics ctx)) dst)
+                       dst)))
          ;; Build composite dispatch key from ALL specializers
          ;; Each specializer is (param . class-name) or nil for unspecialized
          (dispatch-key (mapcar (lambda (spec)
@@ -496,32 +536,29 @@ dispatch table, keyed by the composite specializer list for multiple dispatch."
 
 (defmethod compile-ast ((node ast-make-instance) ctx)
   "Compile make-instance.
-Looks up the class, compiles initarg values, and creates an instance."
+Looks up the class, compiles initarg values, and creates an instance.
+Handles both static class names (ast-quote/symbol) and dynamic names (ast-var)."
   (let* ((class-ast (ast-make-instance-class node))
-         ;; Extract the class name symbol from the AST node
-         (class-name (etypecase class-ast
-                       (ast-quote (ast-quote-value class-ast))
-                       (symbol class-ast)))
          (initargs (ast-make-instance-initargs node))
-         (dst (make-register ctx))
-         ;; Look up the class register.
-         ;; Prefer a compile-time register if available (same compilation).
-         ;; Otherwise emit vm-get-global so cross-call REPL works (class was
-         ;; stored as a global by vm-set-global during defclass execution).
-         (class-reg (or (gethash class-name (ctx-global-classes ctx))
-                        (cdr (assoc class-name (ctx-env ctx)))
-                        ;; Cross-call REPL fallback: load from persistent global store
-                        (let ((r (make-register ctx)))
-                          (emit ctx (make-vm-get-global :dst r :name class-name))
-                          r)))
-         ;; Compile initarg values: initargs is ((keyword . ast-node) ...)
-         (initarg-regs (loop for (key . value-ast) in initargs
-                             collect (cons key (compile-ast value-ast ctx)))))
-    (emit ctx (make-vm-make-obj
-                            :dst dst
-                            :class-reg class-reg
-                            :initarg-regs initarg-regs))
-    dst))
+         (dst (make-register ctx)))
+    (if (typep class-ast 'ast-var)
+        ;; Dynamic class name: compile variable expression for class-reg
+        (let* ((class-reg (compile-ast class-ast ctx))
+               (initarg-regs (loop for (key . value-ast) in initargs
+                                   collect (cons key (compile-ast value-ast ctx)))))
+          (emit ctx (make-vm-make-obj :dst dst :class-reg class-reg :initarg-regs initarg-regs))
+          dst)
+        ;; Static class name: always use vm-get-global for correctness in function bodies
+        (let* ((class-name (etypecase class-ast
+                             (ast-quote (ast-quote-value class-ast))
+                             (symbol class-ast)))
+               (class-reg (let ((r (make-register ctx)))
+                            (emit ctx (make-vm-get-global :dst r :name class-name))
+                            r))
+               (initarg-regs (loop for (key . value-ast) in initargs
+                                   collect (cons key (compile-ast value-ast ctx)))))
+          (emit ctx (make-vm-make-obj :dst dst :class-reg class-reg :initarg-regs initarg-regs))
+          dst))))
 
 (defmethod compile-ast ((node ast-slot-value) ctx)
   "Compile slot-value access."
@@ -1078,120 +1115,14 @@ Returns a compilation-result struct with program, assembly, and globals."
           (let ((result (emit-registered-builtin entry args result-reg ctx)))
             (when result
               (return-from compile-ast result))))))
-    ;; ── Phase 2: Custom builtins with non-standard argument handling ────
+    ;; ── Phase 2: Builtins requiring AST introspection ──────────────────
+    ;; These 17 handlers cannot be data-driven because they inspect AST
+    ;; node types at compile time (quote guards, keyword arg parsing,
+    ;; variadic cons-chain construction, or multi-path emission).
+    ;; See builtin-registry.lisp for the 22 migrated data-driven handlers.
     (macrolet ((builtin-name-p (sym name-str)
                  `(and ,sym (string= (symbol-name ,sym) ,name-str))))
-      ;; Nth / Nthcdr / Member (custom slot names: :index/:list, :item/:list)
-      (when (builtin-name-p func-sym "NTH")
-        (let ((idx-reg (compile-ast (first args) ctx))
-              (list-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-nth :dst result-reg :index idx-reg :list list-reg))
-          (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "NTHCDR")
-        (let ((idx-reg (compile-ast (first args) ctx))
-              (list-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-nthcdr :dst result-reg :index idx-reg :list list-reg))
-          (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "MEMBER")
-        (let ((item-reg (compile-ast (first args) ctx))
-              (list-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-member :dst result-reg :item item-reg :list list-reg))
-          (return-from compile-ast result-reg)))
-      ;; Arithmetic predicates (synthesize comparison against zero)
-      (when (builtin-name-p func-sym "ZEROP")
-        (let ((arg-reg (compile-ast (first args) ctx))
-              (zero-reg (make-register ctx)))
-          (emit ctx (make-vm-const :dst zero-reg :value 0))
-          (emit ctx (make-vm-num-eq :dst result-reg :lhs arg-reg :rhs zero-reg))
-          (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "PLUSP")
-        (let ((arg-reg (compile-ast (first args) ctx))
-              (zero-reg (make-register ctx)))
-          (emit ctx (make-vm-const :dst zero-reg :value 0))
-          (emit ctx (make-vm-gt :dst result-reg :lhs arg-reg :rhs zero-reg))
-          (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "MINUSP")
-        (let ((arg-reg (compile-ast (first args) ctx))
-              (zero-reg (make-register ctx)))
-          (emit ctx (make-vm-const :dst zero-reg :value 0))
-          (emit ctx (make-vm-lt :dst result-reg :lhs arg-reg :rhs zero-reg))
-          (return-from compile-ast result-reg)))
-      ;; make-random-state (0 or 1 args)
-      (when (builtin-name-p func-sym "MAKE-RANDOM-STATE")
-        (let ((arg-reg (if args
-                           (compile-ast (first args) ctx)
-                           (let ((r (make-register ctx)))
-                             (emit ctx (make-vm-const :dst r :value nil)) r))))
-          (emit ctx (make-vm-make-random-state :dst result-reg :src arg-reg))
-          (return-from compile-ast result-reg)))
-      ;; Float rounding (ffloor, fceiling, ftruncate, fround) — 1 or 2 args
-      (macrolet ((compile-float-round (name inst-maker)
-                   `(when (builtin-name-p func-sym ,(symbol-name name))
-                      (let* ((lhs-reg (compile-ast (first args) ctx))
-                             (rhs-reg (if (= (length args) 2)
-                                          (compile-ast (second args) ctx)
-                                          (let ((one-reg (make-register ctx)))
-                                            (emit ctx (make-vm-const :dst one-reg :value 1))
-                                            one-reg))))
-                        (emit ctx (,inst-maker :dst result-reg :lhs lhs-reg :rhs rhs-reg))
-                        (return-from compile-ast result-reg)))))
-        (compile-float-round ffloor make-vm-ffloor)
-        (compile-float-round fceiling make-vm-fceiling)
-        (compile-float-round ftruncate make-vm-ftruncate)
-        (compile-float-round fround make-vm-fround))
-      ;; Cons (custom slot names: :car-src/:cdr-src)
-      (when (builtin-name-p func-sym "CONS")
-        (let ((car-reg (compile-ast (first args) ctx))
-              (cdr-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-cons :dst result-reg :car-src car-reg :cdr-src cdr-reg))
-          (return-from compile-ast result-reg)))
-      ;; Rplaca/Rplacd (mutating, return the cons)
-      (when (builtin-name-p func-sym "RPLACA")
-        (let ((cons-reg (compile-ast (first args) ctx))
-              (val-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-rplaca :cons cons-reg :val val-reg))
-          (emit ctx (make-vm-move :dst result-reg :src cons-reg))
-          (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "RPLACD")
-        (let ((cons-reg (compile-ast (first args) ctx))
-              (val-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-rplacd :cons cons-reg :val val-reg))
-          (emit ctx (make-vm-move :dst result-reg :src cons-reg))
-          (return-from compile-ast result-reg)))
-      ;; EQ and EQL both compile to vm-eq
-      (when (or (builtin-name-p func-sym "EQ") (builtin-name-p func-sym "EQL"))
-        (let ((lhs-reg (compile-ast (first args) ctx))
-              (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-eq :dst result-reg :lhs lhs-reg :rhs rhs-reg))
-          (return-from compile-ast result-reg)))
-      ;; Append (custom slot names: :src1/:src2)
-      (when (builtin-name-p func-sym "APPEND")
-        (let ((lhs-reg (compile-ast (first args) ctx))
-              (rhs-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-append :dst result-reg :src1 lhs-reg :src2 rhs-reg))
-          (return-from compile-ast result-reg)))
-      ;; %progv-enter / %progv-exit (custom slot names)
-      (when (and (builtin-name-p func-sym "%PROGV-ENTER") (= (length args) 2))
-        (let ((syms-reg (compile-ast (first args) ctx))
-              (vals-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-progv-enter :dst result-reg :syms syms-reg :vals vals-reg))
-          (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "%PROGV-EXIT") (= (length args) 1))
-        (let ((saved-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-progv-exit :saved saved-reg))
-          (emit ctx (make-vm-const :dst result-reg :value nil))
-          (return-from compile-ast result-reg)))
-      ;; error / warn (custom slot names: :error-reg, :condition-reg)
-      (when (builtin-name-p func-sym "ERROR")
-        (let ((arg-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-signal-error :error-reg arg-reg))
-          (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "WARN")
-        (let ((arg-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-warn :condition-reg arg-reg))
-          (emit ctx (make-vm-const :dst result-reg :value nil))
-          (return-from compile-ast result-reg)))
-      ;; Hash table builtins (complex keyword arg handling)
+      ;; ─ Keyword arg parsing: extract keyword values from AST ─
       (when (builtin-name-p func-sym "MAKE-HASH-TABLE")
         (let ((test-reg nil))
           (when (>= (length args) 2)
@@ -1224,11 +1155,6 @@ Returns a compilation-result struct with program, assembly, and globals."
           (emit ctx (make-vm-gethash :dst result-reg :found-dst nil
                                      :key key-reg :table table-reg :default default-reg))
           (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "REMHASH")
-        (let ((key-reg (compile-ast (first args) ctx))
-              (table-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-remhash :key key-reg :table table-reg))
-          (return-from compile-ast result-reg)))
       (when (builtin-name-p func-sym "MAPHASH")
         (let* ((fn-reg (compile-ast (first args) ctx))
                (table-reg (compile-ast (second args) ctx))
@@ -1249,12 +1175,7 @@ Returns a compilation-result struct with program, assembly, and globals."
           (emit ctx (make-vm-label :name loop-end))
           (emit ctx (make-vm-const :dst result-reg :value nil))
           (return-from compile-ast result-reg)))
-      ;; make-list
-      (when (builtin-name-p func-sym "MAKE-LIST")
-        (let ((size-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-make-list :dst result-reg :size size-reg))
-          (return-from compile-ast result-reg)))
-      ;; Array/vector builtins (custom slot names)
+      ;; ─ Simple custom slots (no keyword parsing) ─
       (when (builtin-name-p func-sym "MAKE-ARRAY")
         (let ((size-reg (compile-ast (first args) ctx)))
           (emit ctx (make-vm-make-array :dst result-reg :size-reg size-reg
@@ -1265,24 +1186,7 @@ Returns a compilation-result struct with program, assembly, and globals."
           (emit ctx (make-vm-make-array :dst result-reg :size-reg size-reg
                                         :fill-pointer t :adjustable t))
           (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "AREF")
-        (let ((arr-reg (compile-ast (first args) ctx))
-              (idx-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-aref :dst result-reg :array-reg arr-reg :index-reg idx-reg))
-          (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "ASET")
-        (let ((arr-reg (compile-ast (first args) ctx))
-              (idx-reg (compile-ast (second args) ctx))
-              (val-reg (compile-ast (third args) ctx)))
-          (emit ctx (make-vm-aset :array-reg arr-reg :index-reg idx-reg :val-reg val-reg))
-          (emit ctx (make-vm-move :dst result-reg :src val-reg))
-          (return-from compile-ast result-reg)))
-      (when (builtin-name-p func-sym "VECTOR-PUSH-EXTEND")
-        (let ((val-reg (compile-ast (first args) ctx))
-              (arr-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-vector-push-extend :dst result-reg :val-reg val-reg :array-reg arr-reg))
-          (return-from compile-ast result-reg)))
-      ;; array-row-major-index — variadic
+      ;; ─ Variadic cons-chain builders ─
       (when (and (builtin-name-p func-sym "ARRAY-ROW-MAJOR-INDEX") (>= (length args) 1))
         (let ((arr-reg (compile-ast (first args) ctx))
               (subs-reg (make-register ctx)))
@@ -1294,35 +1198,7 @@ Returns a compilation-result struct with program, assembly, and globals."
               (setf subs-reg new-reg)))
           (emit ctx (make-vm-array-row-major-index :dst result-reg :arr arr-reg :subs subs-reg))
           (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "VECTOR-PUSH") (= (length args) 2))
-        (let ((val-reg (compile-ast (first args) ctx))
-              (arr-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-vector-push :dst result-reg :val-reg val-reg :array-reg arr-reg))
-          (return-from compile-ast result-reg)))
-      ;; Bit array access (custom slot names: :arr/:idx)
-      (when (and (builtin-name-p func-sym "BIT") (= (length args) 2))
-        (let ((arr-reg (compile-ast (first args) ctx))
-              (idx-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-bit-access :dst result-reg :arr arr-reg :idx idx-reg))
-          (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "SBIT") (= (length args) 2))
-        (let ((arr-reg (compile-ast (first args) ctx))
-              (idx-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-sbit :dst result-reg :arr arr-reg :idx idx-reg))
-          (return-from compile-ast result-reg)))
-      ;; adjust-array
-      (when (and (builtin-name-p func-sym "ADJUST-ARRAY") (>= (length args) 2))
-        (let ((arr-reg (compile-ast (first args) ctx))
-              (dims-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-adjust-array :dst result-reg :arr arr-reg :dims dims-reg))
-          (return-from compile-ast result-reg)))
-      ;; intern (optional package arg)
-      (when (builtin-name-p func-sym "INTERN")
-        (let ((str-reg (compile-ast (first args) ctx))
-              (pkg-reg (when (second args) (compile-ast (second args) ctx))))
-          (emit ctx (make-vm-intern-symbol :dst result-reg :src str-reg :pkg pkg-reg))
-          (return-from compile-ast result-reg)))
-      ;; encode-universal-time (6-7 args → list)
+      ;; encode-universal-time: variadic (6-7 args → list)
       (when (and (builtin-name-p func-sym "ENCODE-UNIVERSAL-TIME")
                  (>= (length args) 6) (<= (length args) 7))
         (let ((arg-regs (mapcar (lambda (a) (compile-ast a ctx)) args))
@@ -1334,71 +1210,7 @@ Returns a compilation-result struct with program, assembly, and globals."
               (setf list-reg new-reg)))
           (emit ctx (make-vm-encode-universal-time :dst result-reg :args-reg list-reg))
           (return-from compile-ast result-reg)))
-      ;; Symbol property list operations (custom slot names)
-      (when (builtin-name-p func-sym "GET")
-        (let* ((sym-reg (compile-ast (first args) ctx))
-               (ind-reg (compile-ast (second args) ctx))
-               (def-reg (if (>= (length args) 3)
-                             (compile-ast (third args) ctx)
-                             (let ((r (make-register ctx)))
-                               (emit ctx (make-vm-const :dst r :value nil)) r))))
-          (emit ctx (make-vm-symbol-get :dst result-reg :sym sym-reg
-                                        :indicator ind-reg :default def-reg))
-          (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "REMPROP") (= (length args) 2))
-        (let ((sym-reg (compile-ast (first args) ctx))
-              (ind-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-remprop :dst result-reg :sym sym-reg :indicator ind-reg))
-          (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "%SET-SYMBOL-PROP") (= (length args) 3))
-        (let ((sym-reg (compile-ast (first args) ctx))
-              (ind-reg (compile-ast (second args) ctx))
-              (val-reg (compile-ast (third args) ctx)))
-          (emit ctx (make-vm-symbol-set :dst result-reg :sym sym-reg
-                                        :indicator ind-reg :value val-reg))
-          (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "%SET-SYMBOL-PLIST") (= (length args) 2))
-        (let ((sym-reg (compile-ast (first args) ctx))
-              (plist-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-set-symbol-plist :dst result-reg :sym sym-reg :plist-reg plist-reg))
-          (return-from compile-ast result-reg)))
-      ;; Setf helpers for svref and fill-pointer
-      (when (and (builtin-name-p func-sym "%SVSET") (= (length args) 3))
-        (let ((arr-reg (compile-ast (first args) ctx))
-              (idx-reg (compile-ast (second args) ctx))
-              (val-reg (compile-ast (third args) ctx)))
-          (emit ctx (make-vm-svset :dst result-reg :array-reg arr-reg
-                                   :index-reg idx-reg :val-reg val-reg))
-          (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "%SET-FILL-POINTER") (= (length args) 2))
-        (let ((arr-reg (compile-ast (first args) ctx))
-              (val-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-set-fill-pointer :dst result-reg :array-reg arr-reg :val-reg val-reg))
-          (return-from compile-ast result-reg)))
-      ;; Association list builtins (custom slot names)
-      (when (and (builtin-name-p func-sym "ASSOC") (= (length args) 2))
-        (let ((key-reg (compile-ast (first args) ctx))
-              (alist-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-assoc :dst result-reg :key key-reg :alist alist-reg))
-          (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "ACONS") (= (length args) 3))
-        (let ((key-reg (compile-ast (first args) ctx))
-              (val-reg (compile-ast (second args) ctx))
-              (alist-reg (compile-ast (third args) ctx)))
-          (emit ctx (make-vm-acons :dst result-reg :key key-reg :value val-reg :alist alist-reg))
-          (return-from compile-ast result-reg)))
-      (when (and (builtin-name-p func-sym "SUBST") (= (length args) 3))
-        (let ((new-reg (compile-ast (first args) ctx))
-              (old-reg (compile-ast (second args) ctx))
-              (tree-reg (compile-ast (third args) ctx)))
-          (emit ctx (make-vm-subst :dst result-reg :new-val new-reg :old-val old-reg :tree tree-reg))
-          (return-from compile-ast result-reg)))
-      ;; char: (char string index) — custom slot names :string/:index
-      (when (and (builtin-name-p func-sym "CHAR") (= (length args) 2))
-        (let ((str-reg (compile-ast (first args) ctx))
-              (idx-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-char :dst result-reg :string str-reg :index idx-reg))
-          (return-from compile-ast result-reg)))
+      ;; ─ Keyword arg parsing (single keyword) ─
       ;; make-string — optional :initial-element keyword
       (when (builtin-name-p func-sym "MAKE-STRING")
         (let ((size-reg (compile-ast (first args) ctx)))
@@ -1409,33 +1221,7 @@ Returns a compilation-result struct with program, assembly, and globals."
                 (emit ctx (make-vm-make-string :dst result-reg :src size-reg :char char-reg)))
               (emit ctx (make-vm-make-string :dst result-reg :src size-reg)))
           (return-from compile-ast result-reg)))
-      ;; values-list: spread a list as multiple values
-      (when (and (builtin-name-p func-sym "VALUES-LIST") (= (length args) 1))
-        (let ((lst-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-spread-values :dst result-reg :src lst-reg))
-          (return-from compile-ast result-reg)))
-      ;; subseq: (subseq string start &optional end)
-      (when (and (builtin-name-p func-sym "SUBSEQ") (>= (length args) 2))
-        (let ((str-reg (compile-ast (first args) ctx))
-              (start-reg (compile-ast (second args) ctx))
-              (end-reg (if (third args)
-                           (compile-ast (third args) ctx)
-                           (let ((nil-reg (make-register ctx)))
-                             (emit ctx (make-vm-const :dst nil-reg :value nil))
-                             nil-reg))))
-          (emit ctx (make-vm-subseq :dst result-reg :string str-reg
-                                    :start start-reg :end end-reg))
-          (return-from compile-ast result-reg)))
-      ;; search: (search pattern string)
-      (when (and (builtin-name-p func-sym "SEARCH") (>= (length args) 2))
-        (let ((pat-reg (compile-ast (first args) ctx))
-              (str-reg (compile-ast (second args) ctx))
-              (start-reg (let ((zero-reg (make-register ctx)))
-                           (emit ctx (make-vm-const :dst zero-reg :value 0))
-                           zero-reg)))
-          (emit ctx (make-vm-search-string :dst result-reg :pattern pat-reg
-                                           :string str-reg :start start-reg))
-          (return-from compile-ast result-reg)))
+      ;; ─ Quote guards: inspect ast-quote at compile time ─
       ;; typep: (typep value 'type) — requires quoted type
       (when (and (builtin-name-p func-sym "TYPEP")
                  (= (length args) 2)
@@ -1456,6 +1242,7 @@ Returns a compilation-result struct with program, assembly, and globals."
         (compile-slot-pred slot-boundp make-vm-slot-boundp)
         (compile-slot-pred slot-exists-p make-vm-slot-exists-p)
         (compile-slot-pred slot-makunbound make-vm-slot-makunbound))
+      ;; ─ CLOS dispatch helpers ─
       ;; call-next-method (variadic args → list)
       (when (builtin-name-p func-sym "CALL-NEXT-METHOD")
         (let ((args-reg (if args
@@ -1470,13 +1257,7 @@ Returns a compilation-result struct with program, assembly, and globals."
                             nil)))
           (emit ctx (make-vm-call-next-method :dst result-reg :args-reg args-reg))
           (return-from compile-ast result-reg)))
-      ;; write-to-string / prin1-to-string / princ-to-string (three names → one instruction)
-      (when (or (builtin-name-p func-sym "WRITE-TO-STRING")
-                (builtin-name-p func-sym "PRIN1-TO-STRING")
-                (builtin-name-p func-sym "PRINC-TO-STRING"))
-        (let ((src-reg (compile-ast (first args) ctx)))
-          (emit ctx (make-vm-write-to-string-inst :dst result-reg :src src-reg))
-          (return-from compile-ast result-reg)))
+      ;; ─ Multi-path emission: output destination branching ─
       ;; write-string: optional stream argument
       (when (builtin-name-p func-sym "WRITE-STRING")
         (let ((str-reg (compile-ast (first args) ctx)))
@@ -1519,7 +1300,8 @@ Returns a compilation-result struct with program, assembly, and globals."
                (emit ctx (make-vm-stream-write-string-inst :stream-reg stream-reg :src str-reg))
                (emit ctx (make-vm-const :dst result-reg :value nil))
                (return-from compile-ast result-reg))))))
-      ;; File I/O: open (keyword arg :direction)
+      ;; ─ I/O with keyword args or path branching ─
+      ;; open: keyword arg :direction
       (when (builtin-name-p func-sym "OPEN")
         (let* ((path-reg (compile-ast (first args) ctx))
                (direction :input))
@@ -1533,17 +1315,6 @@ Returns a compilation-result struct with program, assembly, and globals."
                     (setf direction (ast-var-name dir-arg)))))))
           (emit ctx (make-vm-open-file :dst result-reg :path path-reg :direction direction))
           (return-from compile-ast result-reg)))
-      ;; write-char: optional stream argument
-      (when (builtin-name-p func-sym "WRITE-CHAR")
-        (let ((char-reg (compile-ast (first args) ctx)))
-          (if (>= (length args) 2)
-              (let ((handle-reg (compile-ast (second args) ctx)))
-                (emit ctx (make-vm-write-char :handle handle-reg :char char-reg)))
-              (let ((handle-reg (make-register ctx)))
-                (emit ctx (make-vm-const :dst handle-reg :value 1))
-                (emit ctx (make-vm-write-char :handle handle-reg :char char-reg))))
-          (emit ctx (make-vm-move :dst result-reg :src char-reg))
-          (return-from compile-ast result-reg)))
       ;; peek-char: (peek-char nil handle) or (peek-char handle)
       (when (builtin-name-p func-sym "PEEK-CHAR")
         (let ((handle-reg (if (>= (length args) 2)
@@ -1551,88 +1322,11 @@ Returns a compilation-result struct with program, assembly, and globals."
                               (compile-ast (first args) ctx))))
           (emit ctx (make-vm-peek-char :dst result-reg :handle handle-reg))
           (return-from compile-ast result-reg)))
-      ;; unread-char: (unread-char char handle)
-      (when (builtin-name-p func-sym "UNREAD-CHAR")
-        (let ((char-reg (compile-ast (first args) ctx))
-              (handle-reg (compile-ast (second args) ctx)))
-          (emit ctx (make-vm-unread-char :handle handle-reg :char char-reg))
-          (emit ctx (make-vm-const :dst result-reg :value nil))
-          (return-from compile-ast result-reg)))
       ;; make-string-input-stream
       (when (builtin-name-p func-sym "MAKE-STRING-INPUT-STREAM")
         (let ((str-reg (compile-ast (first args) ctx)))
           (emit ctx (make-vm-make-string-stream :dst result-reg :direction :input
                                                 :initial-string str-reg))
-          (return-from compile-ast result-reg)))
-      ;; read-char: optional stream argument (ANSI CL: read-char &optional stream)
-      (when (builtin-name-p func-sym "READ-CHAR")
-        (let ((handle-reg (if (>= (length args) 1)
-                              (compile-ast (first args) ctx)
-                              (let ((r (make-register ctx)))
-                                (emit ctx (make-vm-const :dst r :value 0))
-                                r))))
-          (emit ctx (make-vm-read-char :dst result-reg :handle handle-reg))
-          (return-from compile-ast result-reg)))
-      ;; read-line: optional stream argument
-      (when (builtin-name-p func-sym "READ-LINE")
-        (let ((handle-reg (if (>= (length args) 1)
-                              (compile-ast (first args) ctx)
-                              (let ((r (make-register ctx)))
-                                (emit ctx (make-vm-const :dst r :value 0))
-                                r))))
-          (emit ctx (make-vm-read-line :dst result-reg :handle handle-reg))
-          (return-from compile-ast result-reg)))
-      ;; write-byte: (write-byte byte &optional stream)
-      (when (builtin-name-p func-sym "WRITE-BYTE")
-        (let ((byte-reg (compile-ast (first args) ctx)))
-          (if (>= (length args) 2)
-              (let ((handle-reg (compile-ast (second args) ctx)))
-                (emit ctx (make-vm-write-byte :handle handle-reg :byte-val byte-reg)))
-              (let ((handle-reg (make-register ctx)))
-                (emit ctx (make-vm-const :dst handle-reg :value 1))
-                (emit ctx (make-vm-write-byte :handle handle-reg :byte-val byte-reg))))
-          (emit ctx (make-vm-move :dst result-reg :src byte-reg))
-          (return-from compile-ast result-reg)))
-      ;; write-line: (write-line string &optional stream)
-      (when (builtin-name-p func-sym "WRITE-LINE")
-        (let ((str-reg (compile-ast (first args) ctx)))
-          (if (>= (length args) 2)
-              (let ((handle-reg (compile-ast (second args) ctx)))
-                (emit ctx (make-vm-write-line :handle handle-reg :str str-reg)))
-              (let ((handle-reg (make-register ctx)))
-                (emit ctx (make-vm-const :dst handle-reg :value 1))
-                (emit ctx (make-vm-write-line :handle handle-reg :str str-reg))))
-          (emit ctx (make-vm-move :dst result-reg :src str-reg))
-          (return-from compile-ast result-reg)))
-      ;; force-output: optional stream (default stdout=1)
-      (when (builtin-name-p func-sym "FORCE-OUTPUT")
-        (let ((handle-reg (if (>= (length args) 1)
-                              (compile-ast (first args) ctx)
-                              (let ((r (make-register ctx)))
-                                (emit ctx (make-vm-const :dst r :value 1))
-                                r))))
-          (emit ctx (make-vm-force-output :handle handle-reg))
-          (emit ctx (make-vm-const :dst result-reg :value nil))
-          (return-from compile-ast result-reg)))
-      ;; finish-output: optional stream (default stdout=1)
-      (when (builtin-name-p func-sym "FINISH-OUTPUT")
-        (let ((handle-reg (if (>= (length args) 1)
-                              (compile-ast (first args) ctx)
-                              (let ((r (make-register ctx)))
-                                (emit ctx (make-vm-const :dst r :value 1))
-                                r))))
-          (emit ctx (make-vm-finish-output :handle handle-reg))
-          (emit ctx (make-vm-const :dst result-reg :value nil))
-          (return-from compile-ast result-reg)))
-      ;; clear-input: optional stream (default stdin=0)
-      (when (builtin-name-p func-sym "CLEAR-INPUT")
-        (let ((handle-reg (if (>= (length args) 1)
-                              (compile-ast (first args) ctx)
-                              (let ((r (make-register ctx)))
-                                (emit ctx (make-vm-const :dst r :value 0))
-                                r))))
-          (emit ctx (make-vm-clear-input :handle handle-reg))
-          (emit ctx (make-vm-const :dst result-reg :value nil))
           (return-from compile-ast result-reg)))
       ;; concatenate: only (concatenate 'string a b)
       (when (and (builtin-name-p func-sym "CONCATENATE")
@@ -1744,9 +1438,11 @@ Returns a compilation-result struct with program, assembly, and globals."
                          ;; Find free variables in function body (excluding params)
                          (let* ((body-ast (make-ast-progn :forms body-forms))
                                 (free-vars (find-free-variables body-ast))
-                                (captured-vars (remove-if-not
-                                                (lambda (v) (assoc v old-env))
-                                                (set-difference free-vars params))))
+                                (captured-vars (mapcar (lambda (v)
+                                                         (cons v (lookup-var ctx v)))
+                                                       (remove-if-not
+                                                        (lambda (v) (assoc v old-env))
+                                                        (set-difference free-vars params)))))
                            ;; Create unique parameter registers
                            (let ((param-regs (loop for i from 0 below (length params)
                                                    collect (make-register ctx)))

@@ -128,8 +128,6 @@
                 :vm-state
                 :vm-heap-counter
                 :vm-cons-cell
-                :vm-heap-car
-                :vm-heap-cdr
                 :vm-closure-object
                 :vm-closure-entry-label
                 :vm-closure-params

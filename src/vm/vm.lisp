@@ -412,13 +412,6 @@ Used by call-next-method and next-method-p."))
   "Set OBJECT at heap ADDRESS."
   (setf (gethash address (vm-state-heap state)) object))
 
-(defun vm-heap-car (cons-cell)
-  "Get the car of a vm-cons-cell."
-  (vm-cons-cell-car cons-cell))
-
-(defun vm-heap-cdr (cons-cell)
-  "Get the cdr of a vm-cons-cell."
-  (vm-cons-cell-cdr cons-cell))
 
 (defun vm-build-list (state values)
   "Build a native CL list from VALUES for use as a &rest parameter.
@@ -426,9 +419,6 @@ Uses native cons cells (same as vm-cons instruction)."
   (declare (ignore state))
   (copy-list values))
 
-(defun get-vm-heap (state)
-  "Get the heap hash-table from VM state for direct access."
-  (vm-state-heap state))
 
 (defun vm-heap-address (object)
   "Get heap address from an object. For cons cells and closures."
@@ -464,10 +454,30 @@ lists of data) should be registered here.")
   "Register SYM as a host-bridgeable function for the VM."
   (setf (gethash sym *vm-host-bridge-functions*) t))
 
+;;; Runtime helpers for setf expansion
+(defun rt-plist-put (plist indicator value)
+  "Return a new plist with INDICATOR set to VALUE. Non-destructive."
+  (let ((result nil) (found nil) (p plist))
+    (loop while p do
+          (let ((k (car p)))
+            (if (eq k indicator)
+                (progn (push indicator result) (push value result) (setf found t))
+                (progn (push k result) (push (cadr p) result)))
+            (setf p (cddr p))))
+    (unless found
+      (push value result) (push indicator result))
+    (nreverse result)))
+
 ;; Register self-hosting functions: these take strings/forms, not closures
 (dolist (sym '(run-string run-string-repl our-eval our-load
               compile-expression compile-string
-              parse-all-forms))
+              parse-all-forms
+              ;; Macro expansion support
+              generate-lambda-bindings register-macro
+              ;; CL functions needed by self-hosting code
+              find-package symbol-function intern
+              ;; Runtime helpers for setf expansion
+              rt-plist-put))
   (vm-register-host-bridge sym))
 
 (defun vm-resolve-function (state value)
@@ -490,14 +500,6 @@ check the host bridge whitelist."
           (symbol-function value))
          (t (error "Undefined function: ~S" value)))))
     (t (error "Invalid function designator: ~S" value))))
-
-(defun vm-closure-ref (state var-name)
-  "Look up a variable in the current closure's captured environment."
-  (let ((closure-env (vm-closure-env state)))
-    (let ((entry (assoc var-name closure-env)))
-      (if entry
-          (cdr entry)
-          (error "Unbound closure variable: ~S" var-name)))))
 
 (defmethod execute-instruction ((inst vm-const) state pc labels)
   (declare (ignore labels))
@@ -1010,21 +1012,6 @@ Uses class precedence lists for inheritance-based fallback."
         (setf (vm-closure-env state) captured))
       ;; Jump to function entry
       (values (gethash entry-label labels) nil nil)))))
-
-;;; VM Environment Reference Instruction
-
-(define-vm-instruction vm-env-ref (vm-instruction)
-  "Access variable from closure's captured environment."
-  (dst nil :reader vm-dst)
-  (var-name nil :reader vm-var-name)
-  (:sexp-tag :env-ref))
-
-(defmethod execute-instruction ((inst vm-env-ref) state pc labels)
-  (declare (ignore labels))
-  (let* ((var-name (vm-var-name inst))
-         (value (vm-closure-ref state var-name)))
-    (vm-reg-set state (vm-dst inst) value)
-    (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-register-function) state pc labels)
   (declare (ignore labels))

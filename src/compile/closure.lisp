@@ -6,70 +6,35 @@
   (reduce #'union (mapcar #'find-mutated-variables nodes) :initial-value nil))
 
 (defun find-mutated-variables (ast)
-  "Find all variable names that are targets of SETQ in AST."
-  (typecase ast
-    (ast-setq  (union (list (ast-setq-var ast))
-                      (find-mutated-variables (ast-setq-value ast))))
-    (ast-if    (union (find-mutated-variables (ast-if-cond ast))
-                      (union (find-mutated-variables (ast-if-then ast))
-                             (find-mutated-variables (ast-if-else ast)))))
-    (ast-progn (mutated-vars-of-list (ast-progn-forms ast)))
-    (ast-let   (mutated-vars-of-list
-                (append (mapcar #'cdr (ast-let-bindings ast))
-                        (ast-let-body ast))))
-    (ast-lambda (mutated-vars-of-list (ast-lambda-body ast)))
-    (ast-defun  (mutated-vars-of-list (ast-defun-body ast)))
-    (ast-call   (mutated-vars-of-list
-                 (cons (if (typep (ast-call-func ast) 'ast-node)
-                           (ast-call-func ast)
-                           nil)
-                       (ast-call-args ast))))
-    (ast-print  (find-mutated-variables (ast-print-expr ast)))
-    (ast-binop  (union (find-mutated-variables (ast-binop-lhs ast))
-                       (find-mutated-variables (ast-binop-rhs ast))))
-    ;; labels/flet: recurse into binding bodies AND outer body
-    (ast-local-fns
-     (mutated-vars-of-list
-      (append (loop for b in (ast-local-fns-bindings ast) append (cddr b))
-              (ast-local-fns-body ast))))
-    (t nil)))
+  "Find all variable names that are targets of SETQ in AST.
+Uses ast-children for generic traversal — new node types work automatically."
+  (if (typep ast 'ast-setq)
+      (union (list (ast-setq-var ast))
+             (mutated-vars-of-list (ast-children ast)))
+      (mutated-vars-of-list (ast-children ast))))
 
 (defun find-captured-in-children (body-forms params)
   "Find variables that inner lambdas/defuns in BODY-FORMS capture as free variables.
-PARAMS are the current scope's bound variables — only those are candidates for boxing."
+PARAMS are the current scope's bound variables — only those are candidates for boxing.
+Uses ast-children for generic traversal."
   (let ((captured nil))
-    (flet ((add-captured! (forms)
-             "Recurse into FORMS and union any newly-captured vars into CAPTURED."
-             (setf captured (union captured (find-captured-in-children forms params))))
-           (capture-free! (ast-node)
-             "Intersect free vars of AST-NODE with PARAMS and add to CAPTURED."
-             (setf captured (union captured
-                                   (intersection (find-free-variables ast-node) params)))))
-      (dolist (form body-forms captured)
-        (typecase form
-          (ast-lambda (capture-free! form))
-          (ast-defun  (capture-free! (make-ast-lambda :params (ast-defun-params form)
-                                                      :body   (ast-defun-body form))))
-          ;; Recurse into compound forms to find nested lambdas
-          (ast-if    (add-captured! (list (ast-if-cond form)
-                                         (ast-if-then form)
-                                         (ast-if-else form))))
-          (ast-progn (add-captured! (ast-progn-forms form)))
-          (ast-let   (add-captured! (append (mapcar #'cdr (ast-let-bindings form))
-                                            (ast-let-body form))))
-          (ast-call  (add-captured! (if (typep (ast-call-func form) 'ast-node)
-                                        (cons (ast-call-func form) (ast-call-args form))
-                                        (ast-call-args form))))
-          (ast-print (add-captured! (list (ast-print-expr form))))
-          (ast-binop (add-captured! (list (ast-binop-lhs form) (ast-binop-rhs form))))
-          (ast-setq  (add-captured! (list (ast-setq-value form))))
-          ;; labels/flet: each binding body is a lambda-like closure; outer body also recurses
-          (ast-local-fns
-           (dolist (binding (ast-local-fns-bindings form))
-             (let ((pseudo-lambda (make-ast-lambda :params (second binding)
-                                                   :body (cddr binding))))
-               (capture-free! pseudo-lambda)))
-           (add-captured! (ast-local-fns-body form))))))))
+    (dolist (form body-forms captured)
+      (typecase form
+        ;; Lambda/defun boundaries: capture free vars that overlap with PARAMS
+        (ast-lambda
+         (setf captured (union captured (intersection (find-free-variables form) params))))
+        (ast-defun
+         (let ((pseudo (make-ast-lambda :params (ast-defun-params form)
+                                        :body   (ast-defun-body form))))
+           (setf captured (union captured (intersection (find-free-variables pseudo) params)))))
+        ;; labels/flet: each binding body is a closure boundary
+        (ast-local-fns
+         (dolist (binding (ast-local-fns-bindings form))
+           (let ((pseudo (make-ast-lambda :params (second binding) :body (cddr binding))))
+             (setf captured (union captured (intersection (find-free-variables pseudo) params)))))
+         (setf captured (union captured (find-captured-in-children (ast-local-fns-body form) params))))
+        ;; All other compound forms: recurse via ast-children
+        (t (setf captured (union captured (find-captured-in-children (ast-children form) params))))))))
 
 (defun free-vars-of-list (nodes)
   "Union of free variables across all AST NODES in a list."
@@ -81,52 +46,37 @@ Each entry is (name default-ast); entries with no default contribute nothing."
   (free-vars-of-list (remove nil (mapcar #'second param-list))))
 
 (defun find-free-variables (ast)
-  "Find all free variables in AST that would need to be captured in a closure."
+  "Find all free variables in AST that would need to be captured in a closure.
+Binding forms use ast-bound-names; others fall through to ast-children."
   (typecase ast
-    (ast-int nil)
+    ;; Leaves
     (ast-var (list (ast-var-name ast)))
-    (ast-binop (union (find-free-variables (ast-binop-lhs ast))
-                      (find-free-variables (ast-binop-rhs ast))))
-    (ast-if (union (find-free-variables (ast-if-cond ast))
-                   (union (find-free-variables (ast-if-then ast))
-                          (find-free-variables (ast-if-else ast)))))
-    (ast-progn (free-vars-of-list (ast-progn-forms ast)))
-    (ast-print (find-free-variables (ast-print-expr ast)))
-    (ast-let
-     (let ((binding-vars (mapcar #'car (ast-let-bindings ast)))
-           (binding-free  (free-vars-of-list (mapcar #'cdr (ast-let-bindings ast))))
-           (body-free     (free-vars-of-list (ast-let-body ast))))
-       (set-difference (union binding-free body-free) binding-vars)))
-    (ast-lambda
-     (let* ((params (ast-lambda-params ast))
-            (all-params (append params
-                                (mapcar #'first (ast-lambda-optional-params ast))
-                                (when (ast-lambda-rest-param ast)
-                                  (list (ast-lambda-rest-param ast)))
-                                (mapcar #'first (ast-lambda-key-params ast))))
-            (body-free    (free-vars-of-list (ast-lambda-body ast)))
-            (default-free (union (free-vars-of-defaults (ast-lambda-optional-params ast))
-                                 (free-vars-of-defaults (ast-lambda-key-params ast)))))
-       (set-difference (union body-free default-free) all-params)))
+    ;; Assignment: the var itself is free (it must exist in some enclosing scope)
     (ast-setq (union (list (ast-setq-var ast))
                      (find-free-variables (ast-setq-value ast))))
+    ;; Binding forms: recurse into children, subtract bound names
+    (ast-let
+     (let ((binding-free (free-vars-of-list (mapcar #'cdr (ast-let-bindings ast))))
+           (body-free    (free-vars-of-list (ast-let-body ast))))
+       (set-difference (union binding-free body-free) (ast-bound-names ast))))
+    (ast-lambda
+     (let ((body-free    (free-vars-of-list (ast-lambda-body ast)))
+           (default-free (union (free-vars-of-defaults (ast-lambda-optional-params ast))
+                                (free-vars-of-defaults (ast-lambda-key-params ast)))))
+       (set-difference (union body-free default-free) (ast-bound-names ast))))
     (ast-defun
-     (set-difference (free-vars-of-list (ast-defun-body ast))
-                     (ast-defun-params ast)))
-    (ast-call
-     (union (if (typep (ast-call-func ast) 'ast-node)
-                (find-free-variables (ast-call-func ast))
-                nil)
-            (free-vars-of-list (ast-call-args ast))))
-    (ast-quote nil)
-    ;; labels/flet: free vars in binding bodies (minus their params) and outer body, minus func names
+     (set-difference (free-vars-of-list (ast-defun-body ast)) (ast-bound-names ast)))
     (ast-local-fns
-     (let* ((func-names (mapcar #'first (ast-local-fns-bindings ast)))
-            (binding-free (free-vars-of-list
-                           (mapcar (lambda (b)
-                                     (make-ast-lambda :params (second b) :body (cddr b)))
-                                   (ast-local-fns-bindings ast))))
-            (body-free (free-vars-of-list (ast-local-fns-body ast))))
-       (set-difference (union binding-free body-free) func-names)))
-    (t nil)))
+     (let ((binding-free (free-vars-of-list
+                          (mapcar (lambda (b)
+                                    (make-ast-lambda :params (second b) :body (cddr b)))
+                                  (ast-local-fns-bindings ast))))
+           (body-free (free-vars-of-list (ast-local-fns-body ast))))
+       (set-difference (union binding-free body-free) (ast-bound-names ast))))
+    (ast-multiple-value-bind
+     (set-difference (union (find-free-variables (ast-mvb-values-form ast))
+                            (free-vars-of-list (ast-mvb-body ast)))
+                     (ast-bound-names ast)))
+    ;; All other nodes: generic traversal via ast-children
+    (t (free-vars-of-list (ast-children ast)))))
 

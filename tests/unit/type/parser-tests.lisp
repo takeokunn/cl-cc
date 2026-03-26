@@ -76,7 +76,7 @@
   "(or fixnum string) produces a type-union."
   (let ((ty (cl-cc/type::parse-type-specifier '(or fixnum string))))
     (assert-true (type-union-p ty))
-    (assert-equal 2 (length (type-union-members ty)))))
+    (assert-equal 2 (length (type-union-types ty)))))
 
 (deftest parse-or-error-empty
   "(or) signals type-parse-error."
@@ -87,7 +87,7 @@
   "(and fixnum string) produces a type-intersection."
   (let ((ty (cl-cc/type::parse-type-specifier '(and fixnum string))))
     (assert-true (type-intersection-p ty))
-    (assert-equal 2 (length (cl-cc/type::type-intersection-members ty)))))
+    (assert-equal 2 (length (type-intersection-types ty)))))
 
 (deftest parse-and-error-empty
   "(and) signals type-parse-error."

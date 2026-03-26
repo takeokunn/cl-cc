@@ -100,18 +100,6 @@
    ;; Macro System
    :macro-env
    :macro-env-table
-   :compilation-env
-   :env-macros
-   :env-functions
-   :env-variables
-   :env-parent
-   :make-compilation-env
-   :env-lookup-macro
-   :env-lookup-function
-   :env-lookup-variable
-   :env-add-macro
-   :env-add-function
-   :env-add-variable
    :parse-lambda-list
    :destructure-lambda-list
    :our-defmacro
@@ -122,9 +110,6 @@
    :lookup-macro
    :*macro-environment*
    :*macro-eval-fn*
-
-    ;; Built-in macro exports
-    :our-d
 
     ;; Control flow macro exports
     :dolist
@@ -143,6 +128,8 @@
    :ast-location-string
    :ast-error
    :ast-compilation-error
+   :ast-children
+   :ast-bound-names
 
    ;; Core AST Classes
    :ast-int
@@ -340,29 +327,6 @@
    :lower-sexp-to-ast
    :ast-to-sexp
 
-   ;; Source Location Structures and Functions
-   :source-location
-   :source-location-p
-   :source-location-file
-   :source-location-line
-   :source-location-column
-   :source-location-position
-   :source-annotated-sexp
-   :source-annotated-sexp-p
-   :source-annotated-sexp-sexp
-   :print-location
-   :format-with-location
-
-   ;; Enhanced Reader Functions
-   :read-with-location
-   :read-from-string-with-location
-   :read-all-with-locations
-   :read-file-with-locations
-    :parse-source-with-location
-    :parse-source-from-file
-    :lower-sexp-with-location-to-ast
-    :reader-error-with-location
-
      ;; VM Heap Object Classes
      :vm-heap-object
      :vm-heap-address
@@ -371,8 +335,6 @@
      :vm-cons-cell
      :vm-cons-cell-car
      :vm-cons-cell-cdr
-     :vm-heap-car
-     :vm-heap-cdr
      :vm-closure-object
      :vm-closure-entry-label
      :vm-closure-params
@@ -397,7 +359,6 @@
     :vm-func-ref
     :vm-push
     :vm-pop
-    :vm-env-ref
     :vm-values
     :vm-spread-values
     :vm-mv-bind
@@ -433,11 +394,11 @@
     :make-vm-array-adjustable-p :make-vm-array-dimension
     :make-vm-array-dimensions :make-vm-array-displacement :make-vm-array-has-fill-pointer-p
     :make-vm-array-rank :make-vm-array-row-major-index :make-vm-array-total-size
-    :make-vm-atom :make-vm-bind-restart :make-vm-binop :make-vm-bit-access
+    :make-vm-atom :make-vm-binop :make-vm-bit-access
     :make-vm-bit-and :make-vm-bit-not :make-vm-bit-or :make-vm-bit-set :make-vm-bit-xor
     :make-vm-butlast :make-vm-sbit
     :make-vm-call :make-vm-call-next-method :make-vm-car :make-vm-cdr :make-vm-ceiling-inst
-    :make-vm-cerror :make-vm-char :make-vm-char-code :make-vm-char-downcase
+    :make-vm-char :make-vm-char-code :make-vm-char-downcase
     :make-vm-char-not-greaterp :make-vm-char-not-lessp
     :make-vm-char-upcase :make-vm-char< :make-vm-char= :make-vm-characterp
     :make-vm-class-def :make-vm-close-file :make-vm-closure
@@ -447,9 +408,11 @@
     :make-vm-concatenate :make-vm-cons :make-vm-cons-p :make-vm-const
     :make-vm-complex :make-vm-conjugate
     :make-vm-copy-list :make-vm-copy-tree :make-vm-dec :make-vm-denominator
-    :make-vm-digit-char-p
-    :make-vm-div :make-vm-endp :make-vm-env-ref :make-vm-eof-p :make-vm-eq
-    :make-vm-equal :make-vm-error-instruction :make-vm-establish-handler
+    :make-vm-digit-char-p :make-vm-digit-char
+    :make-vm-both-case-p :make-vm-graphic-char-p :make-vm-standard-char-p
+    :make-vm-char-name :make-vm-name-char
+    :make-vm-div :make-vm-endp :make-vm-eof-p :make-vm-eq
+    :make-vm-equal :make-vm-establish-handler
     :make-vm-ensure-values
     :make-vm-eval :make-vm-evenp :make-vm-fceiling :make-vm-ffloor
     :make-vm-fifth :make-vm-file-length :make-vm-fill-pointer-inst
@@ -469,14 +432,14 @@
     :make-vm-hash-table-count
     :make-vm-hash-table-keys :make-vm-hash-table-p :make-vm-hash-table-test
     :make-vm-hash-table-values :make-vm-inc :make-vm-integer-p
-    :make-vm-imagpart :make-vm-intern-symbol :make-vm-invoke-restart :make-vm-jump
+    :make-vm-imagpart :make-vm-intern-symbol :make-vm-jump
     :make-vm-jump-zero :make-vm-keywordp :make-vm-label :make-vm-last
     :make-vm-lcm :make-vm-le :make-vm-length :make-vm-list-length
     :make-vm-listp :make-vm-lower-case-p :make-vm-lt :make-vm-make-array
     :make-vm-make-closure :make-vm-make-hash-table :make-vm-make-list
-    :make-vm-make-obj :make-vm-make-reader
+    :make-vm-make-obj
     :make-vm-make-string-output-stream-inst :make-vm-make-string-stream
-    :make-vm-make-symbol :make-vm-maphash :make-vm-max :make-vm-member
+    :make-vm-make-symbol :make-vm-max :make-vm-member
     :make-vm-min :make-vm-mod :make-vm-move :make-vm-mul :make-vm-mv-bind
     :make-vm-makunbound :make-vm-nconc :make-vm-neg :make-vm-not
     :make-vm-nreverse :make-vm-nth :make-vm-numerator
@@ -484,11 +447,11 @@
     :make-vm-nthcdr :make-vm-null :make-vm-null-p :make-vm-num-eq
     :make-vm-number-p :make-vm-oddp :make-vm-open-file :make-vm-or
     :make-vm-parse-integer :make-vm-peek-char :make-vm-phase
-    :make-vm-pop :make-vm-pop-handler
+    :make-vm-pop
     :make-vm-progv-enter :make-vm-progv-exit
     :make-vm-prin1 :make-vm-prin1-sexp :make-vm-princ :make-vm-princ-sexp
     :make-vm-print :make-vm-print-inst :make-vm-print-sexp :make-vm-push
-    :make-vm-push-handler :make-vm-read-char :make-vm-read-from-string-inst
+    :make-vm-read-char :make-vm-read-from-string-inst
     :make-vm-read-from-string-rp :make-vm-read-line :make-vm-read-sexp
     :make-vm-read-sexp-inst :make-vm-reader-advance-rp :make-vm-reader-peek-rp
     :make-vm-reader-read :make-vm-register-function :make-vm-register-method
@@ -498,7 +461,7 @@
     :make-vm-rest :make-vm-row-major-aref
     :make-vm-ret :make-vm-reverse :make-vm-rplaca :make-vm-rplacd
     :make-vm-search-string :make-vm-second :make-vm-set-global :make-vm-sethash
-    :make-vm-signal :make-vm-signal-error :make-vm-slot-read :make-vm-slot-write
+    :make-vm-signal-error :make-vm-slot-read :make-vm-slot-write
     :make-vm-spill-load :make-vm-spill-store
     :make-vm-stream-write-string-inst :make-vm-string-capitalize
     :make-vm-string-coerce :make-vm-string-downcase :make-vm-string-equal
@@ -527,16 +490,11 @@
     :make-vm-load-file
 
     ;; VM Heap Operations
-    :vm-alloc
     :vm-cons
-    :vm-car-reg
-    :vm-cdr-reg
     :vm-car
     :vm-cdr
     :vm-rplaca
     :vm-rplacd
-    :vm-cons-reg
-    :vm-val-reg
 
     ;; VM Closure Heap Operations
     :vm-make-closure
@@ -556,16 +514,12 @@
     :vm-heap-counter
     :vm-call-stack
     :vm-method-call-stack
-    :vm-return-stack
      :vm-closure-env
      :vm-heap-alloc
      :vm-heap-get
      :vm-heap-set
-     :get-vm-heap
      :vm-reg-get
      :vm-reg-set
-     :vm-closure-ref
-
     ;; VM Execution
     :execute-instruction
 
@@ -691,53 +645,17 @@
      :vm-stream-direction
      :vm-initial-string
 
-      ;; VM Reader/Printer - Reader State
-      :vm-reader-state
-      :vm-reader-state-p
-      :vrs-stream
-      :vrs-char
-      :vrs-line
-      :vrs-column
-      :vrs-eof-reached
-      :vrs-readtable
-      :make-vm-reader-state
-      :vm-reader-advance
-      :vm-reader-peek
-      :vm-reader-skip-whitespace
-
-      ;; VM Reader/Printer - Reader Functions
-      :vm-read
-      :vm-read-preserving-whitespace
-      :vm-read-from-string
-      :vm-read-delimited-list
-      :vm-read-all-from-string
-      :vm-read-expr
-
-      ;; VM Reader/Printer - Printer Functions
-      :vm-prin1
-      :vm-princ
-      :vm-print
-      :vm-write-to-string
-      :vm-prin1-to-string
-      :vm-princ-to-string
-
       ;; VM Reader/Printer - Conditions
       :vm-reader-error
-      :vm-reader-error-message
-      :vm-reader-error-line
-      :vm-reader-error-column
 
       ;; VM Reader/Printer - Instruction Classes
       :vm-read-sexp
-      :vm-read-from-string-instruction
       :vm-print-sexp
       :vm-prin1-sexp
       :vm-princ-sexp
-      :vm-write-to-string-instruction
       :vm-make-string-output-stream-inst
       :vm-get-output-stream-string-inst
       :vm-stream-write-string-inst
-      :vm-stream-reg
       :vm-read-from-string-inst
       :vm-read-sexp-inst
       ;; VM Primitives - recently added
@@ -745,21 +663,7 @@
       :vm-type-of
       :vm-make-list
       :vm-alphanumericp
-      :vm-make-reader
       :vm-reader-read
-      :vm-reader-advance-instruction
-      :vm-reader-peek-instruction
-      :vm-reader-reg
-      :vm-stream-reg
-      :vm-string-reg
-
-       ;; VM Reader/Printer - Heap Objects
-       :vm-reader-state-object
-       :vm-rso-stream
-       :vm-rso-line
-       :vm-rso-column
-       :vm-rso-char
-       :vm-rso-eof-reached
 
        ;; VM String Operations - Instruction Classes
        :vm-string=
@@ -811,7 +715,6 @@
        :vm-clrhash
        :vm-hash-table-count
        :vm-hash-table-p
-       :vm-maphash
        :vm-hash-table-keys
        :vm-hash-table-values
        :vm-hash-table-test

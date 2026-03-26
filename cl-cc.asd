@@ -209,8 +209,10 @@
         :serial t
         :components
         ((:file "ast-tests")
+         (:file "cl-parser-tests")
          (:file "cst-tests")
          (:file "lexer-tests")
+         (:file "grammar-tests")
          (:file "prolog-tests")
          (:file "pratt-tests")
          (:file "php-tests")
@@ -225,7 +227,8 @@
         ((:file "macro-tests")
          (:file "lambda-list-tests")
          (:file "defstruct-tests")
-         (:file "expander-tests")))
+         (:file "expander-tests")
+         (:file "loop-macro-tests")))
        (:module "type"
         :serial t
         :components
@@ -252,7 +255,8 @@
          (:file "cps-tests")
          (:file "builtin-registry-tests")
          (:file "closure-tests")
-         (:file "context-tests")))
+         (:file "context-tests")
+         (:file "codegen-tests")))
        (:module "optimize"
         :serial t
         :components
@@ -260,7 +264,8 @@
          (:file "effects-tests")
          (:file "cfg-tests")
          (:file "ssa-tests")
-         (:file "egraph-tests")))
+         (:file "egraph-tests")
+         (:file "egraph-rules-tests")))
        (:module "emit"
         :serial t
         :components

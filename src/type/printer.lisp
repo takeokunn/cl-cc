@@ -196,13 +196,14 @@
 ;;; ─── looks-like-type-specifier-p ─────────────────────────────────────────
 
 (defun looks-like-type-specifier-p (spec)
-  "True iff SPEC looks like it might be a type specifier."
+  "True iff SPEC looks like it might be a type specifier.
+Uses string= for non-CL symbols to ensure package-independent matching."
   (or (and (symbolp spec)
-           (or (member spec '(fixnum string boolean symbol cons null t
-                              int bool top float character))
-               ;; Check user-defined type aliases registered via deftype
-               (lookup-type-alias spec)))
-      (eq spec '?)
+           (let ((sn (symbol-name spec)))
+             (or (member spec '(fixnum string boolean symbol cons null t float character char))
+                 (member sn '("INT" "BOOL" "TOP" "?") :test #'string=)
+                 ;; Check user-defined type aliases registered via deftype
+                 (lookup-type-alias spec))))
       (and (consp spec)
            (member (car spec) '(or and function values cons list vector array
                                 -> ->0 ->1 forall ∀ => exists mu refine

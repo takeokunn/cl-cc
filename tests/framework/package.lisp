@@ -91,8 +91,6 @@
                  ;; VM Heap object classes
                  :vm-heap-object
                  :vm-cons-cell
-                 :vm-heap-car
-                 :vm-heap-cdr
                  :vm-closure-object
                  :vm-closure-entry-label
                  :vm-closure-params
@@ -116,7 +114,6 @@
                  :vm-func-ref
                  :vm-push
                  :vm-pop
-                 :vm-env-ref
                  ;; VM Instruction constructors (defstruct)
                  :make-vm-add :make-vm-call :make-vm-car :make-vm-cdr
                  :make-vm-closure-ref-idx :make-vm-cons :make-vm-const
@@ -133,7 +130,6 @@
                  :make-vm-not :make-vm-lognot
                  :make-vm-format-inst :make-vm-make-string
                  ;; VM Heap operations
-                 :vm-alloc
                  :vm-cons
                  :vm-car
                  :vm-cdr
@@ -150,7 +146,6 @@
                  :vm-heap-alloc
                  :vm-heap-get
                  :vm-heap-set
-                 :vm-closure-ref
                  ;; VM Instruction accessors
                  :vm-dst
                  :vm-src
@@ -327,11 +322,15 @@
                  :type-scheme-type
                  ;; Singleton instances
                  :type-int
+                 :type-float
                  :type-string
                  :type-bool
                  :type-symbol
+                 :type-cons
                  :type-null
                  :type-any
+                 :type-char
+                 :type-unit
                  :+type-unknown+
                  ;; Type constructors
                  :make-type-primitive

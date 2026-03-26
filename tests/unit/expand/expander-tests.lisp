@@ -169,3 +169,448 @@
     (assert-equal '+ (first result))
     (assert-true (consp (second result)))
     (assert-equal '+ (first (second result)))))
+
+;;; ─── setf expansions ────────────────────────────────────────────────────────
+
+(deftest expander-setf-multi-var-progn
+  "compiler-macroexpand-all: (setf x 1 y 2) expands to progn of setq."
+  (let ((result (cl-cc::compiler-macroexpand-all '(setf x 1 y 2))))
+    (assert-eq 'progn (car result))
+    ;; Each sub-form should be a setq
+    (assert-eq 'setq (car (second result)))
+    (assert-eq 'setq (car (third result)))))
+
+(deftest expander-setf-plain-var-to-setq
+  "compiler-macroexpand-all: (setf x 42) expands to (setq x 42)."
+  (let ((result (cl-cc::compiler-macroexpand-all '(setf x 42))))
+    (assert-eq 'setq (car result))
+    (assert-eq 'x (second result))
+    (assert-equal 42 (third result))))
+
+(deftest expander-setf-aref-to-aset
+  "compiler-macroexpand-all: (setf (aref v i) val) expands to (aset ...)."
+  (let ((result (cl-cc::compiler-macroexpand-all '(setf (aref v i) val))))
+    (assert-eq 'cl-cc::aset (car result))
+    (assert-eq 'v (second result))
+    (assert-eq 'i (third result))
+    (assert-eq 'val (fourth result))))
+
+(deftest expander-setf-car-place
+  "compiler-macroexpand-all: (setf (car x) v) expands via rplaca."
+  (let ((result (cl-cc::compiler-macroexpand-all '(setf (car x) v))))
+    ;; After expansion the top form is a let wrapping rplaca
+    (let ((str (format nil "~S" result)))
+      (assert-true (search "RPLACA" str)))))
+
+(deftest expander-setf-cdr-place
+  "compiler-macroexpand-all: (setf (cdr x) v) expands via rplacd."
+  (let ((result (cl-cc::compiler-macroexpand-all '(setf (cdr x) v))))
+    (let ((str (format nil "~S" result)))
+      (assert-true (search "RPLACD" str)))))
+
+(deftest expander-setf-accessor-slot-value-fallback
+  "compiler-macroexpand-all: (setf (foo obj) v) with unknown accessor falls back to slot-value."
+  ;; Use a name that is definitely not in *accessor-slot-map*
+  (let ((result (cl-cc::compiler-macroexpand-all '(setf (my-unknown-accessor-xyz obj) v))))
+    ;; After expand-setf-accessor → setf (slot-value ...) → set-slot-value or similar
+    (let ((str (format nil "~S" result)))
+      (assert-true (search "SLOT-VALUE" str)))))
+
+;;; ─── defstruct expansion ────────────────────────────────────────────────────
+
+(deftest expander-defstruct-basic-shape
+  "compiler-macroexpand-all: defstruct expands to progn of defclass + defun + defun."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(defstruct exptest-shape alpha beta))))
+    (assert-eq 'progn (car result))
+    ;; First sub-form is defclass
+    (assert-eq 'defclass (car (second result)))
+    (assert-equal "EXPTEST-SHAPE" (symbol-name (second (second result))))
+    ;; Constructor defun named make-exptest-shape
+    (assert-eq 'defun (car (third result)))
+    (assert-equal "MAKE-EXPTEST-SHAPE" (symbol-name (second (third result))))
+    ;; Predicate defun named exptest-shape-p
+    (assert-eq 'defun (car (fourth result)))
+    (assert-equal "EXPTEST-SHAPE-P" (symbol-name (second (fourth result))))))
+
+(deftest expander-defstruct-registers-slots
+  "expand-defstruct registers slot info in *defstruct-slot-registry*."
+  (cl-cc::compiler-macroexpand-all '(defstruct reg-test-struct alpha beta))
+  (let ((slots (gethash 'reg-test-struct cl-cc::*defstruct-slot-registry*)))
+    (assert-true (consp slots))
+    (assert-equal 'alpha (first (first slots)))
+    (assert-equal 'beta (first (second slots)))))
+
+(deftest expander-defstruct-conc-name-option
+  "defstruct with :conc-name uses that prefix for accessors."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(defstruct (vec (:conc-name vec/)) x y))))
+    (assert-eq 'progn (car result))
+    ;; defclass slot specs should use vec/x and vec/y as accessor names
+    (let ((str (format nil "~S" result)))
+      (assert-true (search "VEC/X" str)))))
+
+;;; ─── eval-when ──────────────────────────────────────────────────────────────
+
+(deftest expander-eval-when-execute-included
+  "compiler-macroexpand-all: eval-when with :execute produces progn of body."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(eval-when (:execute) (+ 1 2)))))
+    (assert-eq 'progn (car result))))
+
+(deftest expander-eval-when-load-toplevel-included
+  "compiler-macroexpand-all: eval-when with :load-toplevel produces progn of body."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(eval-when (:load-toplevel) (+ 1 2)))))
+    (assert-eq 'progn (car result))))
+
+(deftest expander-eval-when-compile-only-returns-nil
+  "compiler-macroexpand-all: eval-when with only :compile-toplevel returns nil."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(eval-when (:compile-toplevel) (+ 1 2)))))
+    (assert-null result)))
+
+(deftest expander-eval-when-compile-and-execute-included
+  "compiler-macroexpand-all: eval-when with :compile-toplevel and :execute produces progn."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(eval-when (:compile-toplevel :execute) (+ 1 2)))))
+    (assert-eq 'progn (car result))))
+
+;;; ─── macrolet ───────────────────────────────────────────────────────────────
+
+(deftest expander-macrolet-expands-body
+  "compiler-macroexpand-all: macrolet registers local macro and expands body."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(macrolet ((double (x) (list '+ x x)))
+                    (double 5)))))
+    ;; The body (double 5) should be expanded to (+ 5 5) and wrapped in progn
+    (assert-eq 'progn (car result))
+    (let ((body (second result)))
+      (assert-eq '+ (car body))
+      (assert-equal 5 (second body))
+      (assert-equal 5 (third body)))))
+
+(deftest expander-macrolet-local-scope
+  "compiler-macroexpand-all: macrolet local macro does not leak outside."
+  ;; After the macrolet form, 'triple should not be a known macro
+  (cl-cc::compiler-macroexpand-all
+   '(macrolet ((triple (x) (list '+ x x x)))
+      (triple 1)))
+  ;; 'triple is not a registered macro in the global environment
+  (assert-null (cl-cc::lookup-macro 'triple)))
+
+;;; ─── typed defun / typed lambda ─────────────────────────────────────────────
+
+(deftest expander-typed-defun-strips-type-annotations
+  "compiler-macroexpand-all: typed defun strips param type annotations."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(defun add-ints ((x fixnum) (y fixnum)) fixnum
+                    (+ x y)))))
+    ;; Should produce a defun with plain params x y
+    (assert-eq 'defun (car result))
+    (assert-eq 'add-ints (second result))
+    (let ((params (third result)))
+      (assert-true (member 'x params))
+      (assert-true (member 'y params)))))
+
+(deftest expander-typed-defun-return-type-stripped
+  "compiler-macroexpand-all: typed defun return type does not appear in param list."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(defun id-int ((x fixnum)) fixnum x))))
+    (assert-eq 'defun (car result))
+    ;; fixnum should not appear in the plain parameter list
+    (assert-false (member 'fixnum (third result)))))
+
+(deftest expander-typed-lambda-strips-type-annotations
+  "compiler-macroexpand-all: typed lambda strips param type annotations."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(lambda ((x fixnum)) fixnum x))))
+    (assert-eq 'lambda (car result))
+    (let ((params (second result)))
+      (assert-true (member 'x params))
+      (assert-false (member 'fixnum params)))))
+
+;;; ─── floor/ceiling/truncate/round 1-arg normalization ───────────────────────
+
+(deftest expander-floor-one-arg-normalizes
+  "compiler-macroexpand-all: (floor x) normalizes to (floor x 1)."
+  (let ((result (cl-cc::compiler-macroexpand-all '(floor n))))
+    (assert-eq 'floor (car result))
+    (assert-eq 'n (second result))
+    (assert-equal 1 (third result))))
+
+(deftest expander-ceiling-one-arg-normalizes
+  "compiler-macroexpand-all: (ceiling x) normalizes to (ceiling x 1)."
+  (let ((result (cl-cc::compiler-macroexpand-all '(ceiling n))))
+    (assert-eq 'ceiling (car result))
+    (assert-equal 1 (third result))))
+
+(deftest expander-truncate-one-arg-normalizes
+  "compiler-macroexpand-all: (truncate x) normalizes to (truncate x 1)."
+  (let ((result (cl-cc::compiler-macroexpand-all '(truncate n))))
+    (assert-eq 'truncate (car result))
+    (assert-equal 1 (third result))))
+
+(deftest expander-round-one-arg-normalizes
+  "compiler-macroexpand-all: (round x) normalizes to (round x 1)."
+  (let ((result (cl-cc::compiler-macroexpand-all '(round n))))
+    (assert-eq 'round (car result))
+    (assert-equal 1 (third result))))
+
+(deftest expander-floor-two-arg-unchanged
+  "compiler-macroexpand-all: (floor x d) with explicit divisor passes through."
+  (let ((result (cl-cc::compiler-macroexpand-all '(floor n 3))))
+    (assert-eq 'floor (car result))
+    (assert-eq 'n (second result))
+    (assert-equal 3 (third result))))
+
+;;; ─── make-hash-table :test #'fn normalization ────────────────────────────────
+
+(deftest expander-make-hash-table-function-test
+  "compiler-macroexpand-all: (make-hash-table :test #'equal) normalizes to :test 'equal."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(make-hash-table :test #'equal))))
+    (assert-eq 'make-hash-table (car result))
+    (assert-eq :test (second result))
+    ;; Value should be the quoted symbol, not #'equal
+    (assert-equal '(quote equal) (third result))))
+
+(deftest expander-make-hash-table-quoted-test-unchanged
+  "compiler-macroexpand-all: (make-hash-table :test 'eql) passes through without change."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(make-hash-table :test 'eql))))
+    (assert-eq 'make-hash-table (car result))
+    (assert-eq :test (second result))))
+
+;;; ─── make-array with :fill-pointer / :adjustable ─────────────────────────────
+
+(deftest expander-make-array-fill-pointer-promotes
+  "compiler-macroexpand-all: (make-array n :fill-pointer t) becomes make-adjustable-vector."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(make-array 10 :fill-pointer t))))
+    (let ((str (format nil "~S" result)))
+      (assert-true (search "MAKE-ADJUSTABLE-VECTOR" str)))))
+
+(deftest expander-make-array-adjustable-promotes
+  "compiler-macroexpand-all: (make-array n :adjustable t) becomes make-adjustable-vector."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(make-array 5 :adjustable t))))
+    (let ((str (format nil "~S" result)))
+      (assert-true (search "MAKE-ADJUSTABLE-VECTOR" str)))))
+
+(deftest expander-make-array-plain-passthrough
+  "compiler-macroexpand-all: (make-array n) with no keywords stays as make-array."
+  ;; Only 2-arg (size + no keywords) — does NOT trigger the >=4 branch
+  (let ((result (cl-cc::compiler-macroexpand-all '(make-array 10))))
+    (assert-eq 'make-array (car result))))
+
+;;; ─── deftype ────────────────────────────────────────────────────────────────
+
+(deftest expander-deftype-registers-alias
+  "compiler-macroexpand-all: (deftype foo fixnum) registers the alias and returns (quote foo)."
+  (let ((result (cl-cc::compiler-macroexpand-all '(deftype my-index-type fixnum))))
+    ;; Return value is (quote name)
+    (assert-eq 'quote (car result))
+    (assert-eq 'my-index-type (second result))))
+
+;;; ─── defconstant ────────────────────────────────────────────────────────────
+
+(deftest expander-defconstant-to-defparameter
+  "compiler-macroexpand-all: (defconstant +k+ 42) expands to (defparameter +k+ 42)."
+  (let ((result (cl-cc::compiler-macroexpand-all '(defconstant +my-const+ 42))))
+    (assert-eq 'defparameter (car result))
+    (assert-eq '+my-const+ (second result))
+    (assert-equal 42 (third result))))
+
+(deftest expander-defconstant-with-docstring
+  "compiler-macroexpand-all: defconstant with doc string still expands to defparameter."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(defconstant +pi+ 3.14159 "Pi constant"))))
+    (assert-eq 'defparameter (car result))
+    (assert-eq '+pi+ (second result))))
+
+;;; ─── #'builtin → lambda wrapping ────────────────────────────────────────────
+
+(deftest expander-function-binary-builtin-wraps-lambda
+  "compiler-macroexpand-all: #'cons expands to a lambda (a b) (cons a b)."
+  (let ((result (cl-cc::compiler-macroexpand-all '(function cons))))
+    (assert-eq 'lambda (car result))
+    (assert-equal 2 (length (second result)))))
+
+(deftest expander-function-unary-builtin-wraps-lambda
+  "compiler-macroexpand-all: #'car expands to a lambda (x) (car x)."
+  (let ((result (cl-cc::compiler-macroexpand-all '(function car))))
+    (assert-eq 'lambda (car result))
+    (assert-equal 1 (length (second result)))))
+
+(deftest expander-function-variadic-builtin-wraps-lambda
+  "compiler-macroexpand-all: #'+ expands to a variadic lambda with dolist fold."
+  (let ((result (cl-cc::compiler-macroexpand-all '(function +))))
+    ;; expand-function-builtin for variadic returns a compiled lambda
+    (assert-eq 'lambda (car result))))
+
+(deftest expander-function-non-builtin-passthrough
+  "compiler-macroexpand-all: #'user-fn (not a builtin) passes through as (function user-fn)."
+  (let ((result (cl-cc::compiler-macroexpand-all '(function my-user-defined-fn))))
+    (assert-eq 'function (car result))
+    (assert-eq 'my-user-defined-fn (second result))))
+
+;;; ─── (funcall 'name ...) → direct call ──────────────────────────────────────
+
+(deftest expander-funcall-quoted-symbol-to-direct-call
+  "compiler-macroexpand-all: (funcall 'foo x) becomes (foo x)."
+  (let ((result (cl-cc::compiler-macroexpand-all '(funcall 'foo x))))
+    (assert-eq 'foo (car result))
+    (assert-eq 'x (second result))))
+
+(deftest expander-funcall-quoted-builtin-direct-call
+  "compiler-macroexpand-all: (funcall 'car lst) becomes (car lst)."
+  (let ((result (cl-cc::compiler-macroexpand-all '(funcall 'car lst))))
+    (assert-eq 'car (car result))
+    (assert-eq 'lst (second result))))
+
+;;; ─── (apply fn a b ... list) spread-args normalization ──────────────────────
+
+(deftest expander-apply-spread-args-cons-wraps
+  "compiler-macroexpand-all: (apply fn a b lst) wraps spread args in cons."
+  (let ((result (cl-cc::compiler-macroexpand-all '(apply fn a b lst))))
+    ;; Should become (apply fn (cons a (cons b lst)))
+    (assert-eq 'apply (car result))
+    (assert-eq 'fn (second result))
+    (let ((combined (third result)))
+      (assert-eq 'cons (car combined)))))
+
+(deftest expander-apply-two-arg-passthrough
+  "compiler-macroexpand-all: (apply fn lst) with exactly 2 args does not wrap."
+  (let ((result (cl-cc::compiler-macroexpand-all '(apply 'myf lst))))
+    ;; 3-element apply — hits the named-fn branch, not spread-args
+    ;; Result should not be the spread-args cons wrapping
+    (assert-eq 'apply (car result))))
+
+;;; ─── progn eager defmacro ────────────────────────────────────────────────────
+
+(deftest expander-progn-passthrough-forms
+  "compiler-macroexpand-all: progn expands each sub-form."
+  (let ((result (cl-cc::compiler-macroexpand-all '(progn (+ 1 2) (+ 3 4)))))
+    (assert-eq 'progn (car result))
+    (assert-equal 2 (length (cdr result)))))
+
+(deftest expander-progn-single-form
+  "compiler-macroexpand-all: progn with one form expands that form."
+  (let ((result (cl-cc::compiler-macroexpand-all '(progn 42))))
+    (assert-eq 'progn (car result))
+    (assert-equal 42 (second result))))
+
+;;; ─── defclass accessor registration ─────────────────────────────────────────
+
+(deftest expander-defclass-registers-accessors
+  "compiler-macroexpand-all: defclass with :accessor registers in *accessor-slot-map*."
+  (cl-cc::compiler-macroexpand-all
+   '(defclass my-reg-point ()
+      ((x :initarg :x :accessor my-reg-point-x)
+       (y :initarg :y :accessor my-reg-point-y))))
+  (assert-true (gethash 'my-reg-point-x cl-cc::*accessor-slot-map*))
+  (assert-true (gethash 'my-reg-point-y cl-cc::*accessor-slot-map*)))
+
+(deftest expander-defclass-slot-initform-expanded
+  "compiler-macroexpand-all: defclass :initform is macro-expanded."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(defclass foo-cls ()
+                    ((val :initform (+ 1 2)))))))
+    ;; Result is still a defclass
+    (assert-eq 'defclass (car result))
+    ;; The :initform should have been expanded (+ 1 2 stays as (+ 1 2) since it's already canonical)
+    (let* ((slot-specs (fourth result))
+           (slot (first slot-specs))
+           (initform (getf (rest slot) :initform)))
+      (assert-equal '(+ 1 2) initform))))
+
+;;; ─── variadic fold for multi-arg + / * / append ──────────────────────────────
+
+(deftest expander-variadic-multiply-three
+  "compiler-macroexpand-all: (* a b c) nests left-associatively."
+  (let ((result (cl-cc::compiler-macroexpand-all '(* a b c))))
+    (assert-eq '* (car result))
+    (assert-true (consp (second result)))
+    (assert-eq '* (car (second result)))))
+
+(deftest expander-variadic-append-three
+  "compiler-macroexpand-all: (append a b c) nests left-associatively."
+  (let ((result (cl-cc::compiler-macroexpand-all '(append a b c))))
+    (assert-eq 'append (car result))
+    (assert-true (consp (second result)))
+    (assert-eq 'append (car (second result)))))
+
+(deftest expander-variadic-minus-three
+  "compiler-macroexpand-all: (- a b c) nests left-associatively."
+  (let ((result (cl-cc::compiler-macroexpand-all '(- a b c))))
+    (assert-eq '- (car result))
+    (assert-true (consp (second result)))
+    (assert-eq '- (car (second result)))))
+
+(deftest expander-variadic-plus-zero-args
+  "compiler-macroexpand-all: (+) with no args returns identity 0."
+  (let ((result (cl-cc::compiler-macroexpand-all '(+))))
+    (assert-equal 0 result)))
+
+(deftest expander-variadic-multiply-zero-args
+  "compiler-macroexpand-all: (*) with no args returns identity 1."
+  (let ((result (cl-cc::compiler-macroexpand-all '(*))))
+    (assert-equal 1 result)))
+
+;;; ─── flet / labels body expansion ───────────────────────────────────────────
+
+(deftest expander-flet-expands-body-forms
+  "compiler-macroexpand-all: flet expands body forms but not function names."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(flet ((sq (x) (* x x)))
+                    (sq 3)))))
+    (assert-eq 'flet (car result))
+    ;; Binding preserved
+    (assert-eq 'sq (first (first (second result))))))
+
+(deftest expander-labels-expands-body-forms
+  "compiler-macroexpand-all: labels expands body forms but not binding names."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(labels ((fact (n) (if (= n 0) 1 (* n (fact (- n 1))))))
+                    (fact 5)))))
+    (assert-eq 'labels (car result))
+    (assert-eq 'fact (first (first (second result))))))
+
+;;; ─── defun / lambda default param expansion ──────────────────────────────────
+
+(deftest expander-defun-expands-body
+  "compiler-macroexpand-all: plain defun body is recursively expanded."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(defun triple (x) (* 3 x)))))
+    (assert-eq 'defun (car result))
+    (assert-eq 'triple (second result))
+    (assert-equal '(x) (third result))))
+
+(deftest expander-lambda-expands-body
+  "compiler-macroexpand-all: plain lambda body is recursively expanded."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(lambda (x y) (+ x y)))))
+    (assert-eq 'lambda (car result))
+    (assert-equal '(x y) (second result))))
+
+(deftest expander-lambda-optional-default-expanded
+  "compiler-macroexpand-all: lambda &optional default value is expanded."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(lambda (x &optional (y (+ 1 1))) (+ x y)))))
+    (assert-eq 'lambda (car result))
+    (let* ((params (second result))
+           (opt-param (third params)))  ; (y <expanded-default>)
+      (assert-equal 'y (first opt-param))
+      ;; Default (+ 1 1) is a 2-arg binary — passes through unchanged
+      (assert-equal '(+ 1 1) (second opt-param)))))
+
+;;; ─── setf slot-value (special form passthrough) ──────────────────────────────
+
+(deftest expander-setf-slot-value-passthrough
+  "compiler-macroexpand-all: (setf (slot-value obj 'slot) v) is a special form and recurses."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(setf (slot-value obj 'field) new-val))))
+    ;; slot-value is a compiler special form; setf of slot-value goes through
+    ;; the accessor branch which calls set-slot-value or similar
+    (assert-true (consp result))))
