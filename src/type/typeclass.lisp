@@ -303,7 +303,9 @@ Maps to type-rigid semantics."
 ;;; type-to-string here to add those cases, delegating to the prior definition
 ;;; for all other node types.
 
-(let ((prior-type-to-string (symbol-function 'type-to-string)))
+(let ((prior-type-to-string (if (fboundp 'type-to-string)
+                               #'type-to-string
+                               nil)))
   (defun type-to-string (ty)
     "Convert a type to a human-readable string.
 Handles all type-nodes including backward-compat types (type-class-constraint,
@@ -312,8 +314,12 @@ type-skolem, type-effect) in addition to the representation.lisp core nodes."
       (type-class-constraint
        (format nil "(~A ~A)"
                (type-class-constraint-class-name ty)
-               (funcall prior-type-to-string
-                        (type-class-constraint-type-arg ty))))
+               (if prior-type-to-string
+                   (funcall prior-type-to-string
+                            (type-class-constraint-type-arg ty))
+                   (format nil "~A" (type-class-constraint-type-arg ty)))))
       (type-skolem  (format nil "!sk~D" (type-skolem-id ty)))
       (type-effect  (symbol-name (%type-effect-name ty)))
-      (t            (funcall prior-type-to-string ty)))))
+      (t            (if prior-type-to-string
+                        (funcall prior-type-to-string ty)
+                        (format nil "~A" ty))))))

@@ -128,7 +128,7 @@
   '(;; Control flow
     vm-label vm-jump vm-jump-zero vm-ret vm-halt
     ;; Error / condition handling
-    vm-signal-error vm-condition-case vm-handler-bind
+    vm-signal-error
     vm-establish-handler vm-remove-handler vm-sync-handler-regs
     ;; CLOS method dispatch continuation
     vm-call-next-method vm-next-method-p)

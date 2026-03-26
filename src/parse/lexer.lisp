@@ -37,7 +37,7 @@
   "Is CH a constituent character for CL symbols?"
   (and ch
        (not (lex-whitespace-p ch))
-       (not (member ch '(#\( #\) #\' #\` #\, #\" #\;) :test #'char=))))
+       (not (member ch '(#\( #\) #\' #\` #\, #\" #\; #\:) :test #'char=))))
 
 (defun lex-terminating-p (ch)
   "Is CH a terminating macro character or whitespace or nil?"
@@ -349,28 +349,35 @@
         (setf (lexer-state-pos state) start)))
     ;; Read as symbol
     (let* ((name (lex-read-symbol-name state))
-           (sym-name name))
+           (sym-name name)
+           (pkg-name nil))
       ;; Check for package qualifier
       (when (and (not (lex-at-end-p state))
                  (char= (lex-peek state) #\:))
         ;; This was actually a package prefix
+        (setf pkg-name name)
         (lex-advance state)
         ;; Skip optional second colon (internal symbol)
         (when (and (not (lex-at-end-p state))
                    (char= (lex-peek state) #\:))
           (lex-advance state))
-        (let ((sym-part (lex-read-symbol-name state)))
-          (setf sym-name (format nil "~A:~A" name sym-part))))
+        (setf sym-name (lex-read-symbol-name state)))
       ;; Determine token type
       (cond
-        ((string= sym-name "T")
+        ((and (null pkg-name) (string= sym-name "T"))
          (lex-make-token state :T-BOOL-TRUE t start))
-        ((string= sym-name "NIL")
+        ((and (null pkg-name) (string= sym-name "NIL"))
          (lex-make-token state :T-BOOL-FALSE nil start))
-        ((string= sym-name ".")
+        ((and (null pkg-name) (string= sym-name "."))
          (lex-make-token state :T-DOT nil start))
         (t
-         (lex-make-token state :T-IDENT (intern sym-name) start))))))
+         (let ((symbol (if pkg-name
+                           (let ((pkg (find-package (string-upcase pkg-name))))
+                             (if pkg
+                                 (intern sym-name pkg)
+                                 (intern (format nil "~A::~A" pkg-name sym-name))))
+                           (intern sym-name))))
+           (lex-make-token state :T-IDENT symbol start)))))))
 
 (defun lex-read-keyword (state)
   "Read a keyword symbol (after the colon)."

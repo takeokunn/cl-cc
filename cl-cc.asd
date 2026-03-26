@@ -228,7 +228,8 @@
          (:file "lambda-list-tests")
          (:file "defstruct-tests")
          (:file "expander-tests")
-         (:file "loop-macro-tests")))
+         (:file "loop-macro-tests")
+         (:file "macro-advanced-tests")))
        (:module "type"
         :serial t
         :components

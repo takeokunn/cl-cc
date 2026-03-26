@@ -230,3 +230,8 @@
    ))
 
 (in-package :cl-cc/type)
+
+;; Define *type-alias-registry* early so type/parser.lisp can reference it
+;; before type/inference.lisp is loaded. defvar is idempotent.
+(defvar *type-alias-registry* (make-hash-table :test #'eq)
+  "Maps type alias names to their type specifications.")

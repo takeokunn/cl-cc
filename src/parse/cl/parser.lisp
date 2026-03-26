@@ -53,6 +53,13 @@ Uses the hand-written CL lexer and recursive-descent parser (no host reader)."
                  :source-line source-line
                  :source-column source-column))
 
+(defmethod lower-sexp-to-ast ((node array) &key source-file source-line source-column)
+  ;; Vector/array literals like #() or #(:X :Y) are self-evaluating constants.
+  (make-ast-quote :value node
+                  :source-file source-file
+                  :source-line source-line
+                  :source-column source-column))
+
 (defmethod lower-sexp-to-ast ((node symbol) &key source-file source-line source-column)
   ;; nil and t are self-evaluating constants, not variable references.
   (if (member node '(nil t))

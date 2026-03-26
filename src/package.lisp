@@ -645,9 +645,6 @@
      :vm-stream-direction
      :vm-initial-string
 
-      ;; VM Reader/Printer - Conditions
-      :vm-reader-error
-
       ;; VM Reader/Printer - Instruction Classes
       :vm-read-sexp
       :vm-print-sexp

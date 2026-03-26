@@ -402,7 +402,7 @@ VERBOSE prints the file being loaded. PRINT prints each form's result."
             (dolist (form forms last-result)
               (unless (or (%whitespace-symbol-p form)
                           ;; Skip unsupported top-level forms
-                          (and (consp form) (member (car form) '(declaim deftype))))
+                          (and (consp form) (member (car form) '(declaim deftype defopcode))))
                 (let ((form-str (write-to-string form)))
                   (setf last-result
                         (handler-case (run-string-repl form-str)

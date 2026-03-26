@@ -43,65 +43,72 @@
         (key-params nil)
         (allow-other-keys nil)
         (aux nil))
-    (dolist (item lambda-list)
-      (case item
-        (&optional
-         (setf state :optional))
-        (&rest
-         (setf state :rest))
-        (&body
-         (setf state :body))
-        (&key
-         (setf state :key))
-        (&allow-other-keys
-         (when (eq state :key)
-           (setf allow-other-keys t)))
-        (&aux
-         (setf state :aux))
-        (t
-         (case state
-           (:required
-            (push item required))
-           (:optional
-            (cond ((symbolp item)
-                   (push (list item nil nil) optional))
-                  ((consp item)
-                   (let ((name (first item))
-                         (default (if (cdr item) (second item) nil))
-                         (supplied-p (if (cddr item) (third item) nil)))
-                     (push (list name default supplied-p) optional)))
-                  (t (error "Invalid &optional parameter: ~S" item))))
-           (:rest
-            (setf rest item
-                  state :after-rest))
-           (:body
-            (setf body item
-                  state :after-body))
-           (:key
-            (cond ((symbolp item)
-                   (let ((keyword (intern (symbol-name item) :keyword)))
-                     (push (list (list keyword item) nil nil) key-params)))
-                  ((consp item)
-                   (let* ((name-spec (first item))
-                          (name (if (consp name-spec)
-                                    (progn
-                                      (unless (= (length name-spec) 2)
-                                        (error "Invalid key name spec: ~S" name-spec))
-                                      name-spec)
-                                    (list (intern (symbol-name name-spec) :keyword) name-spec)))
-                          (default (if (cdr item) (second item) nil))
-                          (supplied-p (if (cddr item) (third item) nil)))
-                     (push (list name default supplied-p) key-params)))
-                  (t (error "Invalid &key parameter: ~S" item))))
-           (:aux
-            (cond ((symbolp item)
-                   (push (list item nil) aux))
-                  ((consp item)
-                   (push (list (first item) (if (cdr item) (second item) nil)) aux))
-                  (t (error "Invalid &aux parameter: ~S" item))))
-           ((:after-rest :after-body)
-            (error "Unexpected parameter after ~A: ~S"
-                   (if (eq state :after-rest) "&rest" "&body") item))))))
+    ;; Use a manual loop to handle both proper and improper (dotted) lists.
+    ;; A dotted tail like (a b . rest) means 'rest' is an implicit &rest var.
+    (do ((current lambda-list (cdr current)))
+        ((atom current)
+         ;; Dotted rest: non-nil atom at end means implicit &rest variable
+         (when current
+           (setf rest current)))
+      (let ((item (car current)))
+        (case item
+          (&optional
+           (setf state :optional))
+          (&rest
+           (setf state :rest))
+          (&body
+           (setf state :body))
+          (&key
+           (setf state :key))
+          (&allow-other-keys
+           (when (eq state :key)
+             (setf allow-other-keys t)))
+          (&aux
+           (setf state :aux))
+          (t
+           (case state
+             (:required
+              (push item required))
+             (:optional
+              (cond ((symbolp item)
+                     (push (list item nil nil) optional))
+                    ((consp item)
+                     (let ((name (first item))
+                           (default (if (cdr item) (second item) nil))
+                           (supplied-p (if (cddr item) (third item) nil)))
+                       (push (list name default supplied-p) optional)))
+                    (t (error "Invalid &optional parameter: ~S" item))))
+             (:rest
+              (setf rest item
+                    state :after-rest))
+             (:body
+              (setf body item
+                    state :after-body))
+             (:key
+              (cond ((symbolp item)
+                     (let ((keyword (intern (symbol-name item) :keyword)))
+                       (push (list (list keyword item) nil nil) key-params)))
+                    ((consp item)
+                     (let* ((name-spec (first item))
+                            (name (if (consp name-spec)
+                                      (progn
+                                        (unless (= (length name-spec) 2)
+                                          (error "Invalid key name spec: ~S" name-spec))
+                                        name-spec)
+                                      (list (intern (symbol-name name-spec) :keyword) name-spec)))
+                            (default (if (cdr item) (second item) nil))
+                            (supplied-p (if (cddr item) (third item) nil)))
+                       (push (list name default supplied-p) key-params)))
+                    (t (error "Invalid &key parameter: ~S" item))))
+             (:aux
+              (cond ((symbolp item)
+                     (push (list item nil) aux))
+                    ((consp item)
+                     (push (list (first item) (if (cdr item) (second item) nil)) aux))
+                    (t (error "Invalid &aux parameter: ~S" item))))
+             ((:after-rest :after-body)
+              (error "Unexpected parameter after ~A: ~S"
+                     (if (eq state :after-rest) "&rest" "&body") item)))))))
     (make-lambda-list-info
      :required (nreverse required)
      :optional (nreverse optional)

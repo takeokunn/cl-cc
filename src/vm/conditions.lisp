@@ -57,40 +57,6 @@ the expected type.")
              (format stream "VM Undefined Function: ~S"
                      (vm-function-name condition)))))
 
-(define-condition vm-arg-count-error (vm-error)
-  ((function-name :initarg :function-name :reader vm-arg-count-function-name
-                  :documentation "The name of the function being called.")
-   (expected-count :initarg :expected-count :reader vm-expected-arg-count
-                   :documentation "The expected number of arguments.")
-   (actual-count :initarg :actual-count :reader vm-actual-arg-count
-                 :documentation "The actual number of arguments provided."))
-  (:documentation "Error raised when a function is called with the wrong
-number of arguments.")
-  (:report (lambda (condition stream)
-             (format stream "VM Argument Count Error: ~S expects ~A argument~:P, got ~A"
-                     (vm-arg-count-function-name condition)
-                     (vm-expected-arg-count condition)
-                     (vm-actual-arg-count condition)))))
-
-(define-condition vm-control-error (vm-error)
-  ((context :initarg :context :reader vm-control-context
-            :documentation "Additional context about the control flow error."))
-  (:documentation "Error raised for invalid control flow operations, such as
-returning from a block that doesn't exist or invalid tagbody jumps.")
-  (:report (lambda (condition stream)
-             (format stream "VM Control Error: ~A"
-                     (vm-control-context condition)))))
-
-(define-condition vm-reader-error (vm-error)
-  ((position :initarg :position :reader vm-reader-position
-             :documentation "Position in the input where the error occurred.")
-   (message :initarg :message :reader vm-reader-message
-            :documentation "Description of the reader error."))
-  (:documentation "Error raised during parsing/reading of input.")
-  (:report (lambda (condition stream)
-             (format stream "VM Reader Error at position ~A: ~A"
-                     (vm-reader-position condition)
-                     (vm-reader-message condition)))))
 
 (define-condition vm-division-by-zero (vm-error)
   ((dividend :initarg :dividend :reader vm-dividend

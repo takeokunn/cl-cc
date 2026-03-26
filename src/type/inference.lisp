@@ -670,8 +670,7 @@
                 vm-write-string vm-fresh-line))
     (register-effect-signature op io-row))
   ;; Error effects
-  (dolist (op '(error signal warn vm-signal-error vm-condition-case
-                vm-handler-bind))
+  (dolist (op '(error signal warn vm-signal-error))
     (register-effect-signature op error-row))
   ;; State effects (global mutation)
   (dolist (op '(setq vm-setq setf vm-set-global))

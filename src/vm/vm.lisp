@@ -475,7 +475,7 @@ lists of data) should be registered here.")
               ;; Macro expansion support
               generate-lambda-bindings register-macro
               ;; CL functions needed by self-hosting code
-              find-package symbol-function intern
+              find-package symbol-function intern gensym
               ;; Runtime helpers for setf expansion
               rt-plist-put))
   (vm-register-host-bridge sym))
@@ -1266,10 +1266,11 @@ Uses class precedence lists for inheritance-based fallback."
 (defmethod execute-instruction ((inst vm-register-method) state pc labels)
   (declare (ignore labels))
   (let* ((gf-ht (vm-reg-get state (vm-gf-reg inst)))
-         (methods-ht (gethash :__methods__ gf-ht))
+         (methods-ht (when (hash-table-p gf-ht) (gethash :__methods__ gf-ht)))
          (specializer (vm-method-specializer inst))
          (method-closure (vm-reg-get state (vm-method-reg inst))))
-    (setf (gethash specializer methods-ht) method-closure)
+    (when methods-ht
+      (setf (gethash specializer methods-ht) method-closure))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-generic-call) state pc labels)
