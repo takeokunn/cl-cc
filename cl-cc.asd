@@ -84,7 +84,9 @@
       ((:file "package")
        (:file "kind")
        (:file "multiplicity")
-       (:file "representation")
+       (:file "types-core")
+       (:file "types-extended")
+       (:file "types-env")
        (:file "substitution")
        (:file "unification")
        (:file "subtyping")
@@ -230,6 +232,7 @@
         :components
         ((:file "vm2-tests")
          (:file "list-tests")       ; defines make-test-vm / exec1 helpers
+         (:file "vm-execute-tests")
          (:file "primitives-tests") ; execute-instruction for type predicates + arithmetic
          (:file "vm-clos-tests")    ; execute-instruction for CLOS instructions
          (:file "vm-call-tests")    ; vm-call / vm-tail-call / vm-ret + %vm-dispatch-call
