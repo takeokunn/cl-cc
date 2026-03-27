@@ -355,6 +355,7 @@
     :vm-halt
     :vm-closure
     :vm-call
+    :vm-tail-call
     :vm-ret
     :vm-func-ref
     :vm-push
@@ -397,7 +398,7 @@
     :make-vm-atom :make-vm-binop :make-vm-bit-access
     :make-vm-bit-and :make-vm-bit-not :make-vm-bit-or :make-vm-bit-set :make-vm-bit-xor
     :make-vm-butlast :make-vm-sbit
-    :make-vm-call :make-vm-call-next-method :make-vm-car :make-vm-cdr :make-vm-ceiling-inst
+    :make-vm-call :make-vm-tail-call :make-vm-call-next-method :make-vm-car :make-vm-cdr :make-vm-ceiling-inst
     :make-vm-char :make-vm-char-code :make-vm-char-downcase
     :make-vm-char-not-greaterp :make-vm-char-not-lessp
     :make-vm-char-upcase :make-vm-char< :make-vm-char= :make-vm-characterp

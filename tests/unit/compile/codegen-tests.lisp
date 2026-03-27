@@ -119,41 +119,21 @@
 
 ;;; ─── compile-ast: ast-binop ─────────────────────────────────────────────
 
-(deftest codegen-binop-add-emits-vm-add
-  "Compiling (+ a b) emits a vm-add instruction."
+(deftest-each codegen-binop-emits-correct-instruction
+  "Each binary operator compiles to its corresponding VM instruction."
+  :cases (("add" '+ 'cl-cc::vm-add)
+          ("sub" '- 'cl-cc::vm-sub)
+          ("mul" '* 'cl-cc::vm-mul)
+          ("lt"  '< 'cl-cc::vm-lt)
+          ("gt"  '> 'cl-cc::vm-gt)
+          ("eq"  '= 'cl-cc::vm-num-eq))
+  (op inst-type)
   (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-binop :op '+
+    (compile-ast (make-ast-binop :op op
                                   :lhs (make-ast-int :value 1)
                                   :rhs (make-ast-int :value 2))
                  ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-add))))
-
-(deftest codegen-binop-sub-emits-vm-sub
-  "Compiling (- a b) emits a vm-sub instruction."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-binop :op '-
-                                  :lhs (make-ast-int :value 5)
-                                  :rhs (make-ast-int :value 3))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-sub))))
-
-(deftest codegen-binop-mul-emits-vm-mul
-  "Compiling (* a b) emits a vm-mul instruction."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-binop :op '*
-                                  :lhs (make-ast-int :value 2)
-                                  :rhs (make-ast-int :value 3))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-mul))))
-
-(deftest codegen-binop-lt-emits-vm-lt
-  "Compiling (< a b) emits a vm-lt instruction."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-binop :op '<
-                                  :lhs (make-ast-int :value 1)
-                                  :rhs (make-ast-int :value 2))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-lt))))
+    (assert-true (codegen-find-inst ctx inst-type))))
 
 ;;; ─── compile-ast: ast-if ────────────────────────────────────────────────
 
@@ -1011,3 +991,66 @@
   "apply accepts leading fixed arguments before the final list argument."
   (assert-run= 10
     "(apply #'+ 1 2 '(3 4))"))
+
+;;; ─── %resolve-func-sym-reg ──────────────────────────────────────────────
+
+(deftest resolve-func-sym-global-emits-const
+  "%resolve-func-sym-reg for a global symbol emits vm-const with that symbol."
+  (let ((ctx (make-codegen-ctx)))
+    (cl-cc::%resolve-func-sym-reg 'foo ctx)
+    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-const)))
+      (assert-true inst)
+      (assert-eq 'foo (cl-cc::vm-const-value inst)))))
+
+(deftest resolve-func-sym-local-returns-env-reg
+  "%resolve-func-sym-reg returns the local env register when symbol is in env."
+  (let* ((ctx (make-codegen-ctx))
+         (local-reg :r42))
+    (push (cons 'my-fn local-reg) (cl-cc::ctx-env ctx))
+    (let ((result (cl-cc::%resolve-func-sym-reg 'my-fn ctx)))
+      (assert-eq local-reg result))))
+
+(deftest resolve-func-sym-local-no-const-emitted
+  "%resolve-func-sym-reg for local var emits no vm-const."
+  (let* ((ctx (make-codegen-ctx))
+         (local-reg :r99))
+    (push (cons 'loc local-reg) (cl-cc::ctx-env ctx))
+    (cl-cc::%resolve-func-sym-reg 'loc ctx)
+    (assert-eq nil (codegen-find-inst ctx 'cl-cc::vm-const))))
+
+(deftest resolve-func-sym-global-shadows-local
+  "%resolve-func-sym-reg for a global function loads the symbol even if env has entry."
+  (let* ((ctx (make-codegen-ctx))
+         (local-reg :r77))
+    (push (cons 'gfn local-reg) (cl-cc::ctx-env ctx))
+    ;; Mark gfn as global
+    (setf (gethash 'gfn (cl-cc::ctx-global-functions ctx)) t)
+    (cl-cc::%resolve-func-sym-reg 'gfn ctx)
+    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-const)))
+      (assert-true inst)
+      (assert-eq 'gfn (cl-cc::vm-const-value inst)))))
+
+;;; ─── %compile-closure-body (flet/labels helper) ─────────────────────────
+
+(deftest compile-closure-body-emits-ret
+  "%compile-closure-body emits a vm-ret instruction."
+  (let* ((ctx (make-codegen-ctx))
+         (param-reg (cl-cc::make-register ctx))
+         (old-env (cl-cc::ctx-env ctx)))
+    (cl-cc::%compile-closure-body ctx '(x) (list param-reg)
+                                  (list (make-ast-int :value 5)) old-env)
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-ret))))
+
+(deftest compile-closure-body-binds-params-in-env
+  "%compile-closure-body adds param bindings to ctx-env during compilation.
+   (Caller is responsible for restoration via unwind-protect.)"
+  (let* ((ctx (make-codegen-ctx))
+         (saved-reg :r0)
+         (base-env (list (cons 'outer saved-reg)))
+         (param-reg (cl-cc::make-register ctx)))
+    (setf (cl-cc::ctx-env ctx) base-env)
+    ;; Use an ast-var that references 'p so we can confirm env was extended
+    (cl-cc::%compile-closure-body ctx '(p) (list param-reg)
+                                  (list (make-ast-int :value 1)) base-env)
+    ;; After the call, ctx-env has param binding prepended (caller restores)
+    (assert-true (assoc 'p (cl-cc::ctx-env ctx)))))

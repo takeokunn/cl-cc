@@ -50,15 +50,9 @@
     max-depth))
 
 (defun has-tail-call (program)
-  "Check if program has tail call optimization."
-  ;; A tail call is a call followed immediately by return
-  (let ((insts (coerce (vm-program-instructions program) 'vector)))
-    (loop for i from 0 below (1- (length insts))
-          for inst = (aref insts i)
-          when (and (typep inst 'vm-call)
-                    (typep (aref insts (1+ i)) 'vm-ret))
-          do (return-from has-tail-call t)))
-  nil)
+  "Check if program has tail call optimization (vm-tail-call instruction)."
+  (some (lambda (inst) (typep inst 'vm-tail-call))
+        (vm-program-instructions program)))
 
 ;;; Basic Call/Return Tests
 
@@ -272,3 +266,25 @@
   "Test that arguments are eagerly evaluated."
   (let ((result (run-string "((lambda (a b) (+ a b)) (+ 1 2) (+ 3 4))")))
     (assert-= result 10)))
+
+;;; Deep Recursion TCO Tests
+
+(deftest deep-recursion-tco
+  "Test that deep self-tail recursion does not stack-overflow."
+  (let ((result (run-string
+                 "(labels ((count-down (n acc)
+                     (if (= n 0)
+                         acc
+                         (count-down (- n 1) (+ acc 1)))))
+                   (count-down 100000 0))")))
+    (assert-= result 100000)))
+
+(deftest mutual-tail-recursion-tco
+  "Test mutual tail recursion between two functions."
+  (let ((result (run-string
+                 "(labels ((even? (n)
+                     (if (= n 0) t (odd? (- n 1))))
+                   (odd? (n)
+                     (if (= n 0) nil (even? (- n 1)))))
+                   (even? 1000))")))
+    (assert-true (eq result t))))

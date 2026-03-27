@@ -226,3 +226,139 @@ Returns a function that takes a continuation."
          (sexp  (cl-cc:cps-transform-sequence (list node) k-var)))
     ;; Should be the direct CPS form for the integer, not an extra lambda wrap
     (assert-true (listp sexp))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; CPS for block / return-from
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest cps-block-outer-is-block
+  "CPS of ast-block produces a (block NAME ...) form."
+  (let* ((node (cl-cc:make-ast-block
+                :name 'nil
+                :body (list (cl-cc:make-ast-int :value 1))))
+         (k (gensym "K"))
+         (result (cl-cc::cps-transform-ast node k)))
+    (assert-eq 'block (car result))))
+
+(deftest cps-return-from-ignores-k
+  "CPS of ast-return-from produces (return-from NAME ...) — k is not called."
+  (let* ((node (cl-cc:make-ast-return-from
+                :name 'nil
+                :value (cl-cc:make-ast-int :value 42)))
+         (k (gensym "K"))
+         (result (format nil "~S" (cl-cc::cps-transform-ast node k))))
+    (assert-true (search "RETURN-FROM" result))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; CPS for catch / throw
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest cps-catch-outer-is-funcall
+  "CPS of ast-catch evaluates the tag first (funcall on outer lambda)."
+  (let* ((node (cl-cc:make-ast-catch
+                :tag (cl-cc:make-ast-quote :value :done)
+                :body (list (cl-cc:make-ast-int :value 0))))
+         (k (gensym "K"))
+         (result (cl-cc::cps-transform-ast node k)))
+    ;; Outer form should be (funcall <lambda> ...) or (lambda ...) wrapping catch
+    (assert-eq 'funcall (car result))))
+
+(deftest cps-throw-produces-throw
+  "CPS of ast-throw produces a (throw TAG VAL) form."
+  (let* ((node (cl-cc:make-ast-throw
+                :tag (cl-cc:make-ast-quote :value :done)
+                :value (cl-cc:make-ast-int :value 99)))
+         (k (gensym "K"))
+         (result (format nil "~S" (cl-cc::cps-transform-ast node k))))
+    (assert-true (search "THROW" result))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; CPS for tagbody-section
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest cps-tagbody-section-empty-calls-k-with-nil
+  "cps-transform-tagbody-section with empty list calls (funcall k nil)."
+  (let* ((k (gensym "K"))
+         (result (cl-cc::cps-transform-tagbody-section nil k)))
+    (assert-eq 'funcall (car result))
+    (assert-eq k (second result))
+    (assert-eq nil (third result))))
+
+(deftest cps-tagbody-section-single-form-is-wrapped
+  "cps-transform-tagbody-section with one form wraps it in a lambda continuation."
+  (let* ((k (gensym "K"))
+         (result (cl-cc::cps-transform-tagbody-section
+                  (list (cl-cc:make-ast-int :value 1)) k)))
+    ;; Result should be the CPS of the form, which is a funcall
+    (assert-eq 'funcall (car result))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; CPS for local function bindings (flet/labels helpers)
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest cps-fn-binding-outer-is-name
+  "cps-transform-fn-binding preserves the function name as car."
+  (let* ((k-var (gensym "K"))
+         ;; body must be AST nodes — use a single ast-int
+         (binding (list 'my-fn '(x) (cl-cc:make-ast-int :value 42)))
+         (result (cl-cc::cps-transform-fn-binding binding k-var)))
+    (assert-eq 'my-fn (first result))))
+
+(deftest cps-fn-binding-body-is-lambda
+  "cps-transform-fn-binding wraps params+k in a lambda."
+  (let* ((k-var (gensym "K"))
+         (binding (list 'my-fn '(x) (cl-cc:make-ast-int :value 1)))
+         (result (cl-cc::cps-transform-fn-binding binding k-var)))
+    (assert-eq 'lambda (first (second result)))))
+
+(deftest cps-fn-binding-k-appended-to-params
+  "cps-transform-fn-binding appends the continuation var to the param list."
+  (let* ((k-var 'my-k)
+         (binding (list 'my-fn '(a b) (cl-cc:make-ast-int :value 0)))
+         (result (cl-cc::cps-transform-fn-binding binding k-var)))
+    (let ((lambda-list (second (second result))))
+      (assert-eq 'a (first lambda-list))
+      (assert-eq 'b (second lambda-list))
+      (assert-eq 'my-k (third lambda-list)))))
+
+(deftest cps-local-fns-outer-is-form-kw
+  "cps-transform-local-fns produces (flet ...) or (labels ...) as outer form."
+  (let* ((k (gensym "K"))
+         (body (list (cl-cc:make-ast-int :value 42)))
+         (result-flet   (cl-cc::cps-transform-local-fns 'flet   nil body k))
+         (result-labels (cl-cc::cps-transform-local-fns 'labels nil body k)))
+    (assert-eq 'flet   (first result-flet))
+    (assert-eq 'labels (first result-labels))))
+
+(deftest cps-local-fns-bindings-transformed
+  "cps-transform-local-fns applies cps-transform-fn-binding to each binding."
+  (let* ((k (gensym "K"))
+         (body (list (cl-cc:make-ast-int :value 1)))
+         ;; binding = (f (x) <ast-node>)
+         (binding (list 'f '(x) (cl-cc:make-ast-int :value 99)))
+         (result (cl-cc::cps-transform-local-fns
+                  'flet (list binding) body k)))
+    ;; second element is the binding list: ((f (lambda (x K) ...)))
+    (assert-eq 'f (first (first (second result))))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; CPS for unwind-protect
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest cps-unwind-protect-outer-is-unwind-protect
+  "ast-unwind-protect CPS produces (unwind-protect ...)."
+  (let* ((node (cl-cc:make-ast-unwind-protect
+                :protected (cl-cc:make-ast-int :value 1)
+                :cleanup   (list (cl-cc:make-ast-int :value 2))))
+         (k (gensym "K"))
+         (result (cl-cc::cps-transform-ast node k)))
+    (assert-eq 'unwind-protect (first result))))
+
+(deftest cps-unwind-protect-no-cleanup-second-is-nil
+  "ast-unwind-protect with no cleanup emits nil as the cleanup form."
+  (let* ((node (cl-cc:make-ast-unwind-protect
+                :protected (cl-cc:make-ast-int :value 1)
+                :cleanup   nil))
+         (k (gensym "K"))
+         (result (cl-cc::cps-transform-ast node k)))
+    (assert-eq nil (third result))))

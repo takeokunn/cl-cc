@@ -132,3 +132,114 @@
          (setq-form (caddr result)))
     (assert-eq (car setq-form) 'setq)
     (assert-equal (symbol-name (car (caddr setq-form))) "RT-PLIST-PUT")))
+
+;;; ── DOLIST ───────────────────────────────────────────────────────────────────
+
+(deftest dolist-outer-is-block-nil
+  "DOLIST outer form is (BLOCK NIL ...) for RETURN support"
+  (let ((result (our-macroexpand-1 '(dolist (x lst) body))))
+    (assert-eq (car result) 'block)
+    (assert-eq (second result) nil)))
+
+(deftest dolist-inner-is-let-with-tagbody
+  "DOLIST inner LET binds list-var and element-var; body is TAGBODY"
+  (let* ((result (our-macroexpand-1 '(dolist (x lst) body)))
+         (let-form (third result)))
+    (assert-eq (car let-form) 'let)
+    (assert-eq (car (caddr let-form)) 'tagbody)))
+
+(deftest dolist-result-form-propagated
+  "DOLIST optional result-form appears after TAGBODY"
+  (let* ((result (our-macroexpand-1 '(dolist (x lst :done) body)))
+         (let-form (third result)))
+    (assert-eq (car (last let-form)) :done)))
+
+;;; ── DOTIMES ──────────────────────────────────────────────────────────────────
+
+(deftest dotimes-outer-is-block-nil
+  "DOTIMES outer form is (BLOCK NIL ...) for RETURN support"
+  (let ((result (our-macroexpand-1 '(dotimes (i 10) body))))
+    (assert-eq (car result) 'block)
+    (assert-eq (second result) nil)))
+
+(deftest dotimes-inner-binds-counter-and-limit
+  "DOTIMES inner LET binds the loop variable to 0 and a count-var to the limit"
+  (let* ((result (our-macroexpand-1 '(dotimes (i 10) body)))
+         (let-form (third result))
+         (bindings (second let-form)))
+    ;; bindings: ((i 0) (count-var 10))
+    (assert-= (length bindings) 2)
+    (assert-= (second (first bindings)) 0)))
+
+;;; ── DO / DO* ─────────────────────────────────────────────────────────────────
+
+(deftest do-outer-is-block-nil
+  "DO outer form is (BLOCK NIL ...) for RETURN support"
+  (let ((result (our-macroexpand-1 '(do ((i 0 (1+ i))) ((= i 10) i) body))))
+    (assert-eq (car result) 'block)
+    (assert-eq (second result) nil)))
+
+(deftest do-uses-let-for-parallel-binding
+  "DO uses LET (parallel) for initial bindings; DO* uses LET*"
+  (let* ((result  (our-macroexpand-1 '(do ((i 0 (1+ i))) ((= i 10)) body)))
+         (let-form (third result)))
+    (assert-eq (car let-form) 'let)))
+
+(deftest do*-uses-let*-for-sequential-binding
+  "DO* uses LET* (sequential) for initial bindings"
+  (let* ((result  (our-macroexpand-1 '(do* ((i 0 (1+ i))) ((= i 10)) body)))
+         (let*-form (third result)))
+    (assert-eq (car let*-form) 'let*)))
+
+(deftest do-uses-psetq-for-parallel-steps
+  "DO updates vars with PSETQ (simultaneous) while DO* uses sequential SETQs"
+  (let* ((result (our-macroexpand-1 '(do ((i 0 (1+ i)) (j 1 (1+ j))) ((= i 5)))))
+         (let-form (third result))
+         (tagbody-form (caddr let-form))
+         ;; PSETQ appears inside tagbody before (go start)
+         (tagbody-body (cddr tagbody-form)))
+    ;; Find PSETQ form among tagbody body items
+    (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'psetq)))
+                       tagbody-body))))
+
+;;; ── CASE ─────────────────────────────────────────────────────────────────────
+
+(deftest case-outer-is-let
+  "CASE wraps keyform in a LET binding to avoid double evaluation"
+  (let ((result (our-macroexpand-1 '(case x (1 :one) (2 :two)))))
+    (assert-eq (car result) 'let)))
+
+(deftest case-single-key-uses-eql
+  "CASE single key checks with EQL"
+  (let* ((result (our-macroexpand-1 '(case x (1 :one))))
+         (body   (caddr result)))   ; (let ((kv x)) body)
+    ;; body is (if (eql kv '1) (progn :one) nil)
+    (assert-eq (car body) 'if)
+    (assert-equal (symbol-name (caar (cdr body))) "EQL")))
+
+(deftest case-otherwise-clause-is-progn
+  "CASE OTHERWISE (or T) clause becomes plain PROGN with no condition test"
+  (let* ((result (our-macroexpand-1 '(case x (otherwise :default))))
+         (body   (caddr result)))
+    (assert-eq (car body) 'progn)))
+
+;;; ── TYPECASE ─────────────────────────────────────────────────────────────────
+
+(deftest typecase-outer-is-let
+  "TYPECASE wraps keyform in a LET binding to avoid double evaluation"
+  (let ((result (our-macroexpand-1 '(typecase x (integer :int) (string :str)))))
+    (assert-eq (car result) 'let)))
+
+(deftest typecase-uses-typep
+  "TYPECASE clause check uses TYPEP for type dispatch"
+  (let* ((result (our-macroexpand-1 '(typecase x (integer :int))))
+         (body   (caddr result)))
+    ;; body is (if (typep kv 'integer) (progn :int) nil)
+    (assert-eq (car body) 'if)
+    (assert-equal (symbol-name (caar (cdr body))) "TYPEP")))
+
+(deftest typecase-otherwise-clause-is-progn
+  "TYPECASE OTHERWISE clause becomes PROGN (no TYPEP test)"
+  (let* ((result (our-macroexpand-1 '(typecase x (otherwise :default))))
+         (body   (caddr result)))
+    (assert-eq (car body) 'progn)))

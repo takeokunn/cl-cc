@@ -21,7 +21,9 @@
    (top-level-p :initform t :accessor ctx-top-level-p
                 :documentation "Whether we are at top-level (not inside a function body)")
    (boxed-vars :initform nil :accessor ctx-boxed-vars
-               :documentation "List of variable names that are boxed (stored in cons cells for capture-by-reference)")))
+               :documentation "List of variable names that are boxed (stored in cons cells for capture-by-reference)")
+   (tail-position :initform nil :accessor ctx-tail-position
+                  :documentation "Whether the current compilation position is a tail position.")))
 
 
 

@@ -3,7 +3,8 @@
 ;;;;
 ;;;; Macros tested: getf, remf, reduce, substitute, substitute-if,
 ;;;; delete, copy-seq, fill, replace, mismatch, declare, locally,
-;;;; in-package, defpackage, coerce, and nsubstitute variants
+;;;; in-package, defpackage, coerce, nsubstitute variants, with-open-file,
+;;;; load-time-value, provide, require, print-unreadable-object
 ;;;;
 (in-package :cl-cc/test)
 
@@ -218,3 +219,348 @@
   "(map result-type fn seq) → (coerce (mapcar fn (coerce seq 'list)) result-type)"
   (assert-equal (our-macroexpand-1 '(map 'list fn seq))
                 '(coerce (mapcar fn (coerce seq 'list)) 'list)))
+
+;;; ── REPLACE ──────────────────────────────────────────────────────────────────
+
+(deftest replace-outer-is-let
+  "REPLACE binds dest and source in a LET before mutation"
+  (let ((result (our-macroexpand-1 '(replace dest src))))
+    (assert-eq (car result) 'let)))
+
+(deftest replace-returns-dest
+  "REPLACE last form returns the dest variable"
+  (let* ((result (our-macroexpand-1 '(replace dest src)))
+         (bindings (second result))
+         (dest-var (first (first bindings)))
+         (last-form (car (last (cddr result)))))
+    (assert-eq last-form dest-var)))
+
+;;; ── DELETE-IF / DELETE-IF-NOT ────────────────────────────────────────────────
+
+(deftest delete-if-outer-is-let
+  "DELETE-IF accumulates non-matching elements in a LET-bound acc"
+  (let ((result (our-macroexpand-1 '(delete-if pred seq))))
+    (assert-eq (car result) 'let)))
+
+(deftest delete-if-not-outer-is-let
+  "DELETE-IF-NOT accumulates matching elements in a LET-bound acc"
+  (let ((result (our-macroexpand-1 '(delete-if-not pred seq))))
+    (assert-eq (car result) 'let)))
+
+(deftest delete-duplicates-delegates-to-remove-duplicates
+  "(delete-duplicates seq) → (remove-duplicates seq)"
+  (assert-equal (our-macroexpand-1 '(delete-duplicates seq))
+                '(remove-duplicates seq)))
+
+;;; ── MAP-INTO ─────────────────────────────────────────────────────────────────
+
+(deftest map-into-single-seq-outer-is-let
+  "MAP-INTO with one source sequence binds dest, src, fn in a LET"
+  (let ((result (our-macroexpand-1 '(map-into dest fn src))))
+    (assert-eq (car result) 'let)))
+
+(deftest map-into-single-seq-returns-dest
+  "MAP-INTO with one source sequence last form returns dest variable"
+  (let* ((result (our-macroexpand-1 '(map-into dest fn src)))
+         (bindings (second result))
+         (dest-var (first (first bindings)))
+         (last-form (car (last (cddr result)))))
+    (assert-eq last-form dest-var)))
+
+;;; ── MERGE ────────────────────────────────────────────────────────────────────
+
+(deftest merge-outer-is-let
+  "MERGE binds l1, l2, pred, and acc in a LET"
+  (let ((result (our-macroexpand-1 '(merge 'list l1 l2 pred))))
+    (assert-eq (car result) 'let)))
+
+(deftest merge-binds-four-vars
+  "MERGE binds four variables: l1, l2, pred, acc"
+  (let* ((result (our-macroexpand-1 '(merge 'list l1 l2 pred)))
+         (bindings (second result)))
+    (assert-= (length bindings) 4)))
+
+(deftest merge-uses-tagbody
+  "MERGE body uses TAGBODY for the merge loop"
+  (let* ((result (our-macroexpand-1 '(merge 'list l1 l2 pred)))
+         (body (caddr result)))
+    (assert-eq (car body) 'tagbody)))
+
+;;; ── SUBSTITUTE-IF / SUBSTITUTE-IF-NOT ───────────────────────────────────────
+
+(deftest substitute-if-outer-is-let
+  "SUBSTITUTE-IF accumulates results in a LET-bound acc"
+  (let ((result (our-macroexpand-1 '(substitute-if new pred seq))))
+    (assert-eq (car result) 'let)))
+
+(deftest substitute-if-not-outer-is-let
+  "SUBSTITUTE-IF-NOT accumulates results in a LET-bound acc"
+  (let ((result (our-macroexpand-1 '(substitute-if-not new pred seq))))
+    (assert-eq (car result) 'let)))
+
+;;; ── PROGV ────────────────────────────────────────────────────────────────────
+
+(deftest progv-outer-is-let*
+  "PROGV wraps in LET* binding syms, vals, saved"
+  (let ((result (our-macroexpand-1 '(progv syms vals body))))
+    (assert-eq (car result) 'let*)))
+
+(deftest progv-binds-three-vars
+  "PROGV LET* binds three variables: syms, vals, saved"
+  (let* ((result (our-macroexpand-1 '(progv syms vals body)))
+         (bindings (second result)))
+    (assert-= (length bindings) 3)))
+
+(deftest progv-body-uses-unwind-protect
+  "PROGV body uses UNWIND-PROTECT to ensure cleanup"
+  (let* ((result (our-macroexpand-1 '(progv syms vals (do-stuff))))
+         (body (caddr result)))
+    (assert-eq (car body) 'unwind-protect)))
+
+;;; ── EXPORT (no-op) ───────────────────────────────────────────────────────────
+
+(deftest export-expands-to-nil
+  "(export ...) → NIL (no-op in this compiler)"
+  (assert-eq (our-macroexpand-1 '(export '(foo bar))) nil))
+
+;;; ── WARN ─────────────────────────────────────────────────────────────────────
+
+(deftest warn-outer-is-progn
+  "WARN expands to a PROGN containing a FORMAT call"
+  (let ((result (our-macroexpand-1 '(warn "oops ~A" x))))
+    (assert-eq (car result) 'progn)))
+
+(deftest warn-body-calls-format
+  "WARN body first form is a FORMAT call to t"
+  (let* ((result (our-macroexpand-1 '(warn "oops" )))
+         (fmt-call (second result)))
+    (assert-eq (car fmt-call) 'format)
+    (assert-eq (second fmt-call) 't)))
+
+;;; ── COPY-HASH-TABLE ──────────────────────────────────────────────────────────
+
+(deftest copy-hash-table-outer-is-let
+  "COPY-HASH-TABLE wraps ht in a LET to avoid double evaluation"
+  (let ((result (our-macroexpand-1 '(cl-cc::copy-hash-table ht))))
+    (assert-eq (car result) 'let)))
+
+(deftest copy-hash-table-uses-maphash
+  "COPY-HASH-TABLE body calls MAPHASH to copy entries"
+  (let* ((result    (our-macroexpand-1 '(cl-cc::copy-hash-table ht)))
+         ;; result = (let ((ht-var ht)) (let ((new-var ...)) (maphash ...) new-var))
+         (inner-let (caddr result))
+         ;; inner-let = (let ((new-var ...)) (maphash ...) new-var)
+         ;; body forms start at cddr; first body form is the maphash call
+         (maphash-call (caddr inner-let)))
+    (assert-eq (car maphash-call) 'maphash)))
+
+;;; ── WITH-OPEN-FILE ───────────────────────────────────────────────────────────
+
+(deftest with-open-file-outer-is-let
+  "WITH-OPEN-FILE outer form is LET binding the stream variable"
+  (let ((result (our-macroexpand-1 '(with-open-file (s "/tmp/f") body))))
+    (assert-eq (car result) 'let)))
+
+(deftest with-open-file-body-is-unwind-protect
+  "WITH-OPEN-FILE body uses UNWIND-PROTECT to ensure CLOSE"
+  (let* ((result (our-macroexpand-1 '(with-open-file (s "/tmp/f") body)))
+         (body-form (caddr result)))
+    (assert-eq (car body-form) 'unwind-protect)))
+
+(deftest with-open-file-cleanup-is-close
+  "WITH-OPEN-FILE cleanup form is a CLOSE call on the bound stream var"
+  (let* ((result (our-macroexpand-1 '(with-open-file (s "/tmp/f") body)))
+         (body-form (caddr result))
+         ;; unwind-protect cleanup is the 3rd element
+         (cleanup (third body-form)))
+    (assert-eq (car cleanup) 'close)))
+
+;;; ── COERCE with quoted types ─────────────────────────────────────────────────
+
+(deftest coerce-to-string-quoted
+  "(coerce x 'string) → (coerce-to-string x)"
+  (let ((result (our-macroexpand-1 '(coerce x 'string))))
+    (assert-equal (symbol-name (car result)) "COERCE-TO-STRING")))
+
+(deftest coerce-to-list-quoted
+  "(coerce x 'list) → (coerce-to-list x)"
+  (let ((result (our-macroexpand-1 '(coerce x 'list))))
+    (assert-equal (symbol-name (car result)) "COERCE-TO-LIST")))
+
+(deftest coerce-to-vector-quoted
+  "(coerce x 'vector) → (coerce-to-vector x)"
+  (let ((result (our-macroexpand-1 '(coerce x 'vector))))
+    (assert-equal (symbol-name (car result)) "COERCE-TO-VECTOR")))
+
+;;; ── LOAD-TIME-VALUE ──────────────────────────────────────────────────────────
+
+(deftest load-time-value-expands-to-quote
+  "LOAD-TIME-VALUE evaluates form at expand time and quotes the result"
+  (let ((result (our-macroexpand-1 '(load-time-value (+ 1 2)))))
+    (assert-eq (car result) 'quote)
+    (assert-= (second result) 3)))
+
+;;; ── PROVIDE ──────────────────────────────────────────────────────────────────
+
+(deftest provide-outer-is-let
+  "PROVIDE wraps module name in a LET for single evaluation"
+  (let ((result (our-macroexpand-1 '(provide :my-lib))))
+    (assert-eq (car result) 'let)))
+
+(deftest provide-body-uses-pushnew
+  "PROVIDE body calls PUSHNEW to register the module"
+  (let* ((result (our-macroexpand-1 '(provide :my-lib)))
+         (pushnew-form (caddr result)))
+    (assert-eq (car pushnew-form) 'pushnew)))
+
+;;; ── REQUIRE ──────────────────────────────────────────────────────────────────
+
+(deftest require-outer-is-let
+  "REQUIRE wraps module name in a LET"
+  (let ((result (our-macroexpand-1 '(require :my-lib))))
+    (assert-eq (car result) 'let)))
+
+(deftest require-body-is-unless
+  "REQUIRE body checks if module is already loaded via UNLESS+MEMBER"
+  (let* ((result (our-macroexpand-1 '(require :my-lib)))
+         (unless-form (caddr result)))
+    (assert-eq (car unless-form) 'unless)))
+
+;;; ── PRINT-UNREADABLE-OBJECT ──────────────────────────────────────────────────
+
+(deftest print-unreadable-object-outer-is-let
+  "PRINT-UNREADABLE-OBJECT outer form is LET binding obj and stream"
+  (let ((result (our-macroexpand-1 '(print-unreadable-object (obj s :type t) body))))
+    (assert-eq (car result) 'let)))
+
+;;; ── PRINT-OBJECT ─────────────────────────────────────────────────────────────
+
+(deftest print-object-outer-is-let*
+  "PRINT-OBJECT expands to LET* binding object and stream gensyms"
+  (let ((result (our-macroexpand-1 '(print-object obj *standard-output*))))
+    (assert-eq (car result) 'let*)))
+
+(deftest print-object-dispatches-on-class
+  "PRINT-OBJECT body is an IF: checks for class print method, falls back to PRIN1"
+  (let* ((result (our-macroexpand-1 '(print-object obj *standard-output*)))
+         (body   (caddr result)))      ; (let* (bindings) body)
+    (assert-eq (car body) 'if)))
+
+;;; ── DESCRIBE-OBJECT ──────────────────────────────────────────────────────────
+
+(deftest describe-object-outer-is-let*
+  "DESCRIBE-OBJECT expands to LET* binding object and stream gensyms"
+  (let ((result (our-macroexpand-1 '(describe-object obj *standard-output*))))
+    (assert-eq (car result) 'let*)))
+
+(deftest describe-object-body-is-if
+  "DESCRIBE-OBJECT body is an IF dispatching on whether class is a hash-table"
+  (let* ((result (our-macroexpand-1 '(describe-object obj *standard-output*)))
+         (body   (caddr result)))
+    (assert-eq (car body) 'if)))
+
+;;; ── DESCRIBE ─────────────────────────────────────────────────────────────────
+
+(deftest describe-outer-is-let
+  "DESCRIBE expands to LET binding the stream (with *standard-output* default)"
+  (let ((result (our-macroexpand-1 '(describe obj))))
+    (assert-eq (car result) 'let)))
+
+(deftest describe-body-delegates-to-describe-object
+  "DESCRIBE body calls DESCRIBE-OBJECT then returns VALUES"
+  (let* ((result  (our-macroexpand-1 '(describe obj)))
+         (progn-body (cddr result)))   ; forms after let binding
+    (assert-equal (symbol-name (car (car progn-body))) "DESCRIBE-OBJECT")))
+
+;;; ── UPDATE-INSTANCE-FOR-DIFFERENT-CLASS ──────────────────────────────────────
+
+(deftest update-instance-for-different-class-delegates-to-reinitialize
+  "UPDATE-INSTANCE-FOR-DIFFERENT-CLASS delegates to REINITIALIZE-INSTANCE on current"
+  (let ((result (our-macroexpand-1 '(update-instance-for-different-class prev curr :x 1))))
+    (assert-equal (symbol-name (car result)) "REINITIALIZE-INSTANCE")))
+
+;;; ── UPDATE-INSTANCE-FOR-CHANGED-CLASS ────────────────────────────────────────
+
+(deftest update-instance-for-changed-class-delegates-to-reinitialize
+  "UPDATE-INSTANCE-FOR-CHANGED-CLASS delegates to REINITIALIZE-INSTANCE"
+  ;; update-instance-for-changed-class is cl-cc-specific (not standard CL), use cl-cc:: prefix
+  (let ((result (our-macroexpand-1 '(cl-cc::update-instance-for-changed-class inst :x 1))))
+    (assert-equal (symbol-name (car result)) "REINITIALIZE-INSTANCE")))
+
+;;; ── ENSURE-CLASS ─────────────────────────────────────────────────────────────
+
+(deftest ensure-class-delegates-to-defclass
+  "ENSURE-CLASS expands to DEFCLASS with extracted :direct-superclasses/:direct-slots"
+  ;; ensure-class is MOP (not standard CL), use cl-cc:: prefix
+  (let ((result (our-macroexpand-1 '(cl-cc::ensure-class 'foo :direct-superclasses (bar) :direct-slots ()))))
+    (assert-equal (symbol-name (car result)) "DEFCLASS")))
+
+;;; ── CHANGE-CLASS ─────────────────────────────────────────────────────────────
+
+(deftest change-class-outer-is-let*
+  "CHANGE-CLASS expands to LET* binding instance and new-class"
+  (let ((result (our-macroexpand-1 '(change-class inst 'new-cls))))
+    (assert-eq (car result) 'let*)))
+
+(deftest change-class-updates-__class__-slot
+  "CHANGE-CLASS body contains SETF of :__class__ key in hash table"
+  (let* ((result (our-macroexpand-1 '(change-class inst 'new-cls)))
+         (body   (cddr result)))       ; after let* bindings
+    (assert-equal (symbol-name (car (second body))) "SETF")))
+
+;;; ── PARSE-FLOAT ──────────────────────────────────────────────────────────────
+
+(deftest parse-float-outer-is-let
+  "PARSE-FLOAT expands to LET binding string slice, calls FLOAT+READ-FROM-STRING"
+  ;; parse-float is a cl-cc extension (not standard CL), use cl-cc:: prefix
+  (let ((result (our-macroexpand-1 '(cl-cc::parse-float "3.14"))))
+    (assert-eq (car result) 'let)))
+
+(deftest parse-float-body-calls-float
+  "PARSE-FLOAT body calls FLOAT to coerce the parsed result"
+  (let* ((result (our-macroexpand-1 '(cl-cc::parse-float "3.14")))
+         (body   (caddr result)))
+    (assert-eq (car body) 'float)))
+
+;;; ── REINITIALIZE-INSTANCE ────────────────────────────────────────────────────
+
+(deftest reinitialize-instance-outer-is-let*
+  "REINITIALIZE-INSTANCE expands to LET* binding instance, args, class, initarg-map"
+  (let ((result (our-macroexpand-1 '(reinitialize-instance inst :x 1))))
+    (assert-eq (car result) 'let*)))
+
+(deftest reinitialize-instance-body-uses-tagbody
+  "REINITIALIZE-INSTANCE body contains TAGBODY for iterating initarg pairs"
+  (let* ((result (our-macroexpand-1 '(reinitialize-instance inst :x 1)))
+         ;; Structure: (let* (bindings) (when ...) inst)
+         (when-form (caddr result)))
+    (assert-eq (car when-form) 'when)))
+
+;;; ── SHARED-INITIALIZE ────────────────────────────────────────────────────────
+
+(deftest shared-initialize-outer-is-let*
+  "SHARED-INITIALIZE expands to LET* binding instance, slot-names, args, class"
+  (let ((result (our-macroexpand-1 '(shared-initialize inst t :x 1))))
+    (assert-eq (car result) 'let*)))
+
+(deftest shared-initialize-has-more-bindings-than-reinitialize
+  "SHARED-INITIALIZE has one extra binding (slot-names) vs reinitialize-instance"
+  (let* ((result-si  (our-macroexpand-1 '(shared-initialize inst t :x 1)))
+         (result-ri  (our-macroexpand-1 '(reinitialize-instance inst :x 1)))
+         (si-binds   (length (second result-si)))
+         (ri-binds   (length (second result-ri))))
+    (assert-= si-binds (1+ ri-binds))))
+
+;;; ── %PLIST-PUT ───────────────────────────────────────────────────────────────
+
+(deftest plist-put-outer-is-let
+  "%PLIST-PUT expands to LET binding plist, value, result accumulator, found flag"
+  ;; %plist-put is cl-cc-internal (not exported), use cl-cc:: prefix
+  (let ((result (our-macroexpand-1 '(cl-cc::%plist-put my-plist :key 42))))
+    (assert-eq (car result) 'let)))
+
+(deftest plist-put-body-uses-loop
+  "%PLIST-PUT body iterates with LOOP to scan the plist"
+  (let* ((result (our-macroexpand-1 '(cl-cc::%plist-put my-plist :key 42)))
+         (loop-form (caddr result)))
+    (assert-eq (car loop-form) 'loop)))

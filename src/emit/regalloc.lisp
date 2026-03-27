@@ -81,6 +81,11 @@
 (defmethod instruction-uses ((inst vm-call))
   (cons (vm-func-reg inst) (copy-list (vm-args inst))))
 
+;; Tail-call: defs dst, uses func + args (same as vm-call)
+(defmethod instruction-defs ((inst vm-tail-call)) (list (vm-dst inst)))
+(defmethod instruction-uses ((inst vm-tail-call))
+  (cons (vm-func-reg inst) (copy-list (vm-args inst))))
+
 ;;; Primitive instructions (vm-primitives.lisp)
 
 ;; Comparison ops inherit from vm-instruction, have dst/lhs/rhs pattern

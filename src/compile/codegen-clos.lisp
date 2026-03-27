@@ -15,6 +15,7 @@
   "Compile a class definition.
 Creates a class descriptor hash table with metadata about slots, superclasses,
 and a method dispatch table.  The descriptor is registered globally."
+  (setf (ctx-tail-position ctx) nil)
   (let* ((name (ast-defclass-name node))
          (supers (ast-defclass-superclasses node))
          (slots (ast-defclass-slots node))
@@ -129,6 +130,7 @@ Returns the register holding the GF dispatch table."
   "Compile a generic function definition.
 Creates a dispatch table (hash table) that maps class names to method closures.
 Idempotent: if already defined at compile-time or runtime, reuse existing."
+  (setf (ctx-tail-position ctx) nil)
   (let* ((name (ast-defgeneric-name node))
          (existing (gethash name (ctx-global-generics ctx))))
     (if existing
@@ -141,6 +143,7 @@ Idempotent: if already defined at compile-time or runtime, reuse existing."
   "Compile a method definition.
 Compiles the method body as a closure and registers it on the generic function's
 dispatch table, keyed by the composite specializer list for multiple dispatch."
+  (setf (ctx-tail-position ctx) nil)
   (let* ((name (ast-defmethod-name node))
          (specializers (ast-defmethod-specializers node))
          (params (ast-defmethod-params node))
@@ -178,7 +181,10 @@ dispatch table, keyed by the composite specializer list for multiple dispatch."
                            (ctx-env ctx)))
              (let ((last-reg nil))
                (dolist (form body)
+                 (setf (ctx-tail-position ctx)
+                       (if (eq form (car (last body))) t nil))
                  (setf last-reg (compile-ast form ctx)))
+               (setf (ctx-tail-position ctx) nil)
                (emit ctx (make-vm-ret :reg last-reg))))
         (setf (ctx-env ctx) old-env)))
     (emit ctx (make-vm-label :name end-label))
@@ -189,6 +195,7 @@ dispatch table, keyed by the composite specializer list for multiple dispatch."
 (defmethod compile-ast ((node ast-make-instance) ctx)
   "Compile make-instance.
 Handles both dynamic class names (ast-var) and static names (ast-quote/symbol)."
+  (setf (ctx-tail-position ctx) nil)
   (let* ((class-ast (ast-make-instance-class node))
          (initargs (ast-make-instance-initargs node))
          (dst (make-register ctx)))
@@ -211,6 +218,7 @@ Handles both dynamic class names (ast-var) and static names (ast-quote/symbol)."
 
 (defmethod compile-ast ((node ast-slot-value) ctx)
   "Compile slot-value access."
+  (setf (ctx-tail-position ctx) nil)
   (let* ((obj-reg (compile-ast (ast-slot-value-object node) ctx))
          (dst (make-register ctx)))
     (emit ctx (make-vm-slot-read
@@ -219,6 +227,7 @@ Handles both dynamic class names (ast-var) and static names (ast-quote/symbol)."
 
 (defmethod compile-ast ((node ast-set-slot-value) ctx)
   "Compile (setf (slot-value obj 'slot) value)."
+  (setf (ctx-tail-position ctx) nil)
   (let* ((obj-reg (compile-ast (ast-set-slot-value-object node) ctx))
          (val-reg (compile-ast (ast-set-slot-value-value node) ctx)))
     (emit ctx (make-vm-slot-write
@@ -229,6 +238,7 @@ Handles both dynamic class names (ast-var) and static names (ast-quote/symbol)."
 
 (defmethod compile-ast ((node ast-set-gethash) ctx)
   "Compile (setf (gethash key table) value)."
+  (setf (ctx-tail-position ctx) nil)
   (let* ((key-reg (compile-ast (ast-set-gethash-key node) ctx))
          (table-reg (compile-ast (ast-set-gethash-table node) ctx))
          (val-reg (compile-ast (ast-set-gethash-value node) ctx)))

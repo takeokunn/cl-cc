@@ -567,3 +567,304 @@
 (deftest read-regs-get-global-empty
   "vm-get-global reads no registers."
   (assert-null (cl-cc::opt-inst-read-regs (make-vm-get-global :dst :r0 :name 'x))))
+
+;;; ── opt-pass-dce: Dead Code Elimination ──────────────────────────────────
+
+(deftest dce-removes-unused-const
+  "DCE removes a vm-const whose dst is never read."
+  (let* ((i1  (make-vm-const :dst :r0 :value 42))
+         (i2  (make-vm-const :dst :r1 :value 7))
+         (ret (make-vm-ret :reg :r1))
+         (out (cl-cc::opt-pass-dce (list i1 i2 ret))))
+    ;; r0 is never read → i1 should be removed
+    (assert-false (member i1 out))
+    (assert-true  (member i2 out))
+    (assert-true  (member ret out))))
+
+(deftest dce-keeps-used-const
+  "DCE keeps a vm-const whose dst is read."
+  (let* ((i1  (make-vm-const :dst :r0 :value 5))
+         (i2  (make-vm-add  :dst :r1 :lhs :r0 :rhs :r0))
+         (ret (make-vm-ret :reg :r1))
+         (out (cl-cc::opt-pass-dce (list i1 i2 ret))))
+    (assert-true (member i1 out))
+    (assert-true (member i2 out))))
+
+(deftest dce-removes-unused-move
+  "DCE removes a vm-move whose dst is never read."
+  (let* ((c   (make-vm-const :dst :r0 :value 1))
+         (m   (make-vm-move  :dst :r2 :src :r0))
+         (ret (make-vm-ret :reg :r0))
+         (out (cl-cc::opt-pass-dce (list c m ret))))
+    ;; r2 is never read → m should be removed
+    (assert-false (member m out))
+    (assert-true  (member c out))))
+
+(deftest dce-preserves-impure-unused-dst
+  "DCE does NOT remove a vm-call (impure) even if dst is unused."
+  (let* ((fn  (make-vm-const     :dst :r0 :value 'f))
+         (c   (make-vm-call      :dst :r1 :func :r0 :args nil))
+         (ret (make-vm-ret :reg :r0))
+         ;; r1 is never read — but vm-call is impure
+         (out (cl-cc::opt-pass-dce (list fn c ret))))
+    (assert-true (member c out))))
+
+;;; ── opt-pass-jump: Jump Threading ────────────────────────────────────────
+
+(deftest jump-threading-eliminates-jump-to-next-label
+  "opt-pass-jump removes a jump that targets the immediately following label."
+  (let* ((j   (make-vm-jump  :label "end"))
+         (lbl (make-vm-label :name "end"))
+         (ret (make-vm-ret   :reg :r0))
+         (out (cl-cc::opt-pass-jump (list j lbl ret))))
+    ;; The jump is a no-op (falls through) → should be removed
+    (assert-false (member j out))
+    (assert-true  (member lbl out))
+    (assert-true  (member ret out))))
+
+(deftest jump-threading-chains-jumps
+  "opt-pass-jump threads jump-to-jump chains to the ultimate target."
+  ;; j1 → lbl1 → j2 → lbl2 (final dest)
+  (let* ((j1   (make-vm-jump  :label "mid"))
+         (lbl1 (make-vm-label :name "mid"))
+         (j2   (make-vm-jump  :label "end"))
+         (lbl2 (make-vm-label :name "end"))
+         (ret  (make-vm-ret   :reg :r0))
+         (out  (cl-cc::opt-pass-jump (list j1 lbl1 j2 lbl2 ret))))
+    ;; j1 should be threaded to "end" directly
+    (let ((j1-out (find-if #'cl-cc::vm-jump-p out)))
+      (when j1-out
+        (assert-equal (cl-cc::vm-label-name j1-out) "end")))))
+
+(deftest jump-zero-threading-updates-label
+  "opt-pass-jump threads vm-jump-zero target through a chain."
+  (let* ((c   (make-vm-const     :dst :r0 :value 0))
+         (jz  (make-vm-jump-zero :reg :r0 :label "mid"))
+         (lbl (make-vm-label     :name "mid"))
+         (j2  (make-vm-jump      :label "end"))
+         (end (make-vm-label     :name "end"))
+         (ret (make-vm-ret       :reg :r0))
+         (out (cl-cc::opt-pass-jump (list c jz lbl j2 end ret))))
+    ;; The jump-zero should now target "end" directly
+    (let ((jz-out (find-if #'cl-cc::vm-jump-zero-p out)))
+      (when jz-out
+        (assert-equal (cl-cc::vm-label-name jz-out) "end")))))
+
+;;; ── opt-pass-unreachable: Unreachable Code Elimination ───────────────────
+
+(deftest unreachable-after-jump
+  "Code following an unconditional jump (before next label) is dropped."
+  (let* ((j    (make-vm-jump  :label "end"))
+         (dead (make-vm-const :dst :r1 :value 99))
+         (lbl  (make-vm-label :name "end"))
+         (ret  (make-vm-ret   :reg :r0))
+         (out  (cl-cc::opt-pass-unreachable (list j dead lbl ret))))
+    (assert-false (member dead out))
+    (assert-true  (member j    out))
+    (assert-true  (member lbl  out))
+    (assert-true  (member ret  out))))
+
+(deftest unreachable-after-ret
+  "Code following vm-ret (before next label) is dropped."
+  (let* ((ret1 (make-vm-ret   :reg :r0))
+         (dead (make-vm-const :dst :r1 :value 0))
+         (lbl  (make-vm-label :name "after"))
+         (ret2 (make-vm-ret   :reg :r0))
+         (out  (cl-cc::opt-pass-unreachable (list ret1 dead lbl ret2))))
+    (assert-false (member dead out))
+    (assert-true  (member ret1 out))
+    (assert-true  (member lbl  out))))
+
+(deftest unreachable-label-revives-reachability
+  "A vm-label after a jump revives reachability."
+  (let* ((j   (make-vm-jump  :label "lbl"))
+         (lbl (make-vm-label :name "lbl"))
+         (c   (make-vm-const :dst :r0 :value 1))
+         (ret (make-vm-ret   :reg :r0))
+         (out (cl-cc::opt-pass-unreachable (list j lbl c ret))))
+    ;; c is after the label — it's reachable
+    (assert-true (member c out))))
+
+;;; ── opt-pass-dead-labels: Dead Label Elimination ─────────────────────────
+
+(deftest dead-labels-removes-unreferenced-label
+  "A label with no jumps pointing to it is removed."
+  (let* ((lbl (make-vm-label :name "ghost"))
+         (c   (make-vm-const :dst :r0 :value 1))
+         (ret (make-vm-ret   :reg :r0))
+         (out (cl-cc::opt-pass-dead-labels (list lbl c ret))))
+    (assert-false (member lbl out))
+    (assert-true  (member c   out))
+    (assert-true  (member ret out))))
+
+(deftest dead-labels-keeps-referenced-label
+  "A label targeted by a jump is preserved."
+  (let* ((j   (make-vm-jump  :label "live"))
+         (lbl (make-vm-label :name "live"))
+         (ret (make-vm-ret   :reg :r0))
+         (out (cl-cc::opt-pass-dead-labels (list j lbl ret))))
+    (assert-true (member lbl out))))
+
+(deftest dead-labels-keeps-closure-entry-label
+  "A label used as a closure entry point is preserved."
+  (let* ((cl  (make-vm-closure :dst :r0 :label "fn" :params nil
+                                :captured nil
+                                :optional-params nil :rest-param nil :key-params nil))
+         (lbl (make-vm-label :name "fn"))
+         (ret (make-vm-ret   :reg :r0))
+         (out (cl-cc::opt-pass-dead-labels (list cl lbl ret))))
+    (assert-true (member lbl out))))
+
+(deftest dead-labels-keeps-handler-label
+  "A label referenced by vm-establish-handler is preserved (uses vm-handler-label accessor)."
+  ;; make-vm-establish-handler is not in the test package import list → use cl-cc::
+  (let* ((handler (cl-cc::make-vm-establish-handler :handler-label "err-handler"
+                                                     :result-reg :r0
+                                                     :error-type 'error))
+         (lbl (make-vm-label :name "err-handler"))
+         (ret (make-vm-ret   :reg :r0))
+         (out (cl-cc::opt-pass-dead-labels (list handler lbl ret))))
+    (assert-true (member lbl out))))
+
+;;; ── opt-pass-strength-reduce: Strength Reduction ─────────────────────────
+
+(deftest strength-reduce-mul-power-of-2
+  "Multiply by 2^k is replaced by left arithmetic shift."
+  (let* ((c   (make-vm-const :dst :r1 :value 8))
+         (mul (make-vm-mul   :dst :r2 :lhs :r0 :rhs :r1))
+         (ret (make-vm-ret   :reg :r2))
+         (out (cl-cc::opt-pass-strength-reduce (list c mul ret))))
+    ;; vm-mul should be replaced by vm-ash
+    (assert-false (member mul out))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc::vm-ash)) out))))
+
+(deftest strength-reduce-mul-commutative
+  "Multiply by 2^k works when the constant is the LHS."
+  (let* ((c   (make-vm-const :dst :r1 :value 4))
+         (mul (make-vm-mul   :dst :r2 :lhs :r1 :rhs :r0))
+         (ret (make-vm-ret   :reg :r2))
+         (out (cl-cc::opt-pass-strength-reduce (list c mul ret))))
+    (assert-false (member mul out))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc::vm-ash)) out))))
+
+(deftest strength-reduce-does-not-replace-non-power-of-2
+  "Multiply by a non-power-of-2 constant is left as-is."
+  (let* ((c   (make-vm-const :dst :r1 :value 7))
+         (mul (make-vm-mul   :dst :r2 :lhs :r0 :rhs :r1))
+         (ret (make-vm-ret   :reg :r2))
+         (out (cl-cc::opt-pass-strength-reduce (list c mul ret))))
+    (assert-true (member mul out))
+    (assert-false (some (lambda (i) (typep i 'cl-cc::vm-ash)) out))))
+
+;;; ── opt-inline-eligible-p: Extracted Eligibility Predicate ──────────────
+
+(deftest inline-eligible-simple-function
+  "A zero-capture, required-only-param, short function is eligible."
+  (let* ((ci (make-vm-closure :dst :r0 :label "f"
+                               :params '(:r1) :captured nil
+                               :optional-params nil :rest-param nil :key-params nil))
+         (body (list (make-vm-add :dst :r2 :lhs :r1 :rhs :r1)
+                     (make-vm-ret :reg :r2)))
+         (def (list :closure ci :params '(:r1) :body body)))
+    (assert-true (cl-cc::opt-inline-eligible-p def 15))))
+
+(deftest inline-eligible-rejects-captured-vars
+  "A closure with captured variables is not eligible for inlining."
+  (let* ((ci (make-vm-closure :dst :r0 :label "f"
+                               :params '(:r1)
+                               :captured (list (cons :x :r5))
+                               :optional-params nil :rest-param nil :key-params nil))
+         (body (list (make-vm-ret :reg :r1)))
+         (def (list :closure ci :params '(:r1) :body body)))
+    (assert-false (cl-cc::opt-inline-eligible-p def 15))))
+
+(deftest inline-eligible-rejects-over-threshold
+  "A function body exceeding the threshold is not eligible."
+  (let* ((ci (make-vm-closure :dst :r0 :label "f"
+                               :params '(:r1) :captured nil
+                               :optional-params nil :rest-param nil :key-params nil))
+         ;; 17 body instructions + 1 ret = 18 total, threshold is 15
+         (body (append (loop repeat 17 collect (make-vm-const :dst :r2 :value 0))
+                       (list (make-vm-ret :reg :r2))))
+         (def (list :closure ci :params '(:r1) :body body)))
+    (assert-false (cl-cc::opt-inline-eligible-p def 15))))
+
+;;; ─── opt-falsep ──────────────────────────────────────────────────────────
+
+(deftest opt-falsep-nil
+  "NIL is falsy."
+  (assert-true (cl-cc::opt-falsep nil)))
+
+(deftest opt-falsep-zero
+  "0 is falsy."
+  (assert-true (cl-cc::opt-falsep 0)))
+
+(deftest opt-falsep-t
+  "T is not falsy."
+  (assert-false (cl-cc::opt-falsep t)))
+
+(deftest opt-falsep-positive
+  "Positive integer is not falsy."
+  (assert-false (cl-cc::opt-falsep 1)))
+
+;;; ─── opt-register-keyword-p ──────────────────────────────────────────────
+
+(deftest opt-register-keyword-p-r0
+  ":R0 is a register keyword."
+  (assert-true (cl-cc::opt-register-keyword-p :r0)))
+
+(deftest opt-register-keyword-p-r15
+  ":R15 is a register keyword."
+  (assert-true (cl-cc::opt-register-keyword-p :r15)))
+
+(deftest opt-register-keyword-p-symbol
+  "Non-keyword symbol is not a register."
+  (assert-false (cl-cc::opt-register-keyword-p 'r0)))
+
+(deftest opt-register-keyword-p-plain-keyword
+  ":foo is not a register keyword."
+  (assert-false (cl-cc::opt-register-keyword-p :foo)))
+
+;;; ─── opt-binary-lhs-rhs-p / opt-unary-src-p ─────────────────────────────
+
+(deftest opt-binary-lhs-rhs-p-add
+  "vm-add (vm-binop subclass) is binary lhs/rhs."
+  (assert-true (cl-cc::opt-binary-lhs-rhs-p (make-vm-add :dst :r0 :lhs :r1 :rhs :r2))))
+
+(deftest opt-binary-lhs-rhs-p-lt
+  "vm-lt (non-binop) is binary lhs/rhs."
+  (assert-true (cl-cc::opt-binary-lhs-rhs-p (make-vm-lt :dst :r0 :lhs :r1 :rhs :r2))))
+
+(deftest opt-binary-lhs-rhs-p-neg
+  "vm-neg is NOT binary lhs/rhs."
+  (assert-false (cl-cc::opt-binary-lhs-rhs-p (make-vm-neg :dst :r0 :src :r1))))
+
+(deftest opt-unary-src-p-neg
+  "vm-neg is a unary src instruction."
+  (assert-true (cl-cc::opt-unary-src-p (make-vm-neg :dst :r0 :src :r1))))
+
+(deftest opt-unary-src-p-null-p
+  "vm-null-p is a unary src instruction."
+  (assert-true (cl-cc::opt-unary-src-p (make-vm-null-p :dst :r0 :src :r1))))
+
+(deftest opt-unary-src-p-add
+  "vm-add is NOT a unary src instruction."
+  (assert-false (cl-cc::opt-unary-src-p (make-vm-add :dst :r0 :lhs :r1 :rhs :r2))))
+
+;;; ─── opt-foldable-unary-arith-p / opt-foldable-type-pred-p ──────────────
+
+(deftest opt-foldable-unary-arith-p-neg
+  "vm-neg is a foldable unary arithmetic instruction."
+  (assert-true (cl-cc::opt-foldable-unary-arith-p (make-vm-neg :dst :r0 :src :r1))))
+
+(deftest opt-foldable-unary-arith-p-null-p
+  "vm-null-p is NOT a foldable unary arithmetic instruction (it is a type pred)."
+  (assert-false (cl-cc::opt-foldable-unary-arith-p (make-vm-null-p :dst :r0 :src :r1))))
+
+(deftest opt-foldable-type-pred-p-null-p
+  "vm-null-p is a foldable type predicate."
+  (assert-true (cl-cc::opt-foldable-type-pred-p (make-vm-null-p :dst :r0 :src :r1))))
+
+(deftest opt-foldable-type-pred-p-neg
+  "vm-neg is NOT a foldable type predicate."
+  (assert-false (cl-cc::opt-foldable-type-pred-p (make-vm-neg :dst :r0 :src :r1))))

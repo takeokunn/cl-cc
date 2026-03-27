@@ -102,6 +102,16 @@ These recurse into subforms but their head is not macro-expanded.")
 (defparameter *rounding-ops* '(floor ceiling truncate round)
   "Rounding ops for which (op x) normalises to (op x 1) (FR-301).")
 
+;;; ── setf compound-place dispatch table ──────────────────────────────────
+;;;
+;;; Populated in expander.lisp after helper functions are defined.
+;;; Maps a place head symbol to (lambda (place value) → expanded-form).
+;;; Adding a new settable place requires exactly one entry here.
+
+(defvar *setf-compound-place-handlers* (make-hash-table :test 'eq)
+  "Dispatch: compound-place head symbol → (lambda (place value) → expanded-form).
+Known entries: aref, getf, car, first, cdr, rest, nth, cadr, cddr.")
+
 ;;; ── Expander dispatch table ───────────────────────────────────────────────
 ;;;
 ;;; Populated by define-expander-for in expander.lisp.

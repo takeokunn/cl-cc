@@ -634,3 +634,49 @@
   (let ((expanded (our-macroexpand '(typecase x (string "string") (integer "int") (t "other")))))
     (assert-eq (car expanded) 'let)
     (assert-true (search "typep" (string-downcase (format nil "~S" expanded))))))
+
+;;; ─── %expand-quasiquote ──────────────────────────────────────────────────
+
+(deftest expand-quasiquote-atom-quotes
+  "%expand-quasiquote wraps atoms in quote."
+  (assert-equal '(quote foo) (cl-cc::%expand-quasiquote 'foo)))
+
+(deftest expand-quasiquote-number-quotes
+  "%expand-quasiquote wraps numbers in quote."
+  (assert-equal '(quote 42) (cl-cc::%expand-quasiquote 42)))
+
+(deftest expand-quasiquote-unquote-extracts
+  "Top-level unquote returns its argument directly."
+  (assert-equal 'x (cl-cc::%expand-quasiquote '(cl-cc::unquote x))))
+
+(deftest expand-quasiquote-list-wraps-in-list
+  "Plain list elements are wrapped in (list ...) and appended."
+  (let ((result (cl-cc::%expand-quasiquote '(a b))))
+    ;; Result should be (append (list ...) (list ...))
+    (assert-eq 'append (car result))))
+
+(deftest expand-quasiquote-unquote-in-list
+  "Unquote inside list is spliced as a (list val) part."
+  ;; Use explicit quote to avoid CL's own unquote processing.
+  (let* ((result (cl-cc::%expand-quasiquote '(a (cl-cc::unquote x))))
+         (str (format nil "~S" result)))
+    (assert-true (search "X" str))))
+
+;;; ─── generate-lambda-bindings ────────────────────────────────────────────
+
+(deftest generate-lambda-bindings-required
+  "generate-lambda-bindings for required params produces correct binding count."
+  (let ((bindings (cl-cc::generate-lambda-bindings '(a b) 'form)))
+    ;; Each required produces 2 bindings (temp + param), so 4 total for 2 params
+    (assert-= 4 (length bindings))))
+
+(deftest generate-lambda-bindings-rest
+  "generate-lambda-bindings with &rest produces a binding for the rest var."
+  (let ((bindings (cl-cc::generate-lambda-bindings '(&rest args) 'form)))
+    ;; args should appear in the binding names
+    (assert-true (assoc 'args bindings))))
+
+(deftest generate-lambda-bindings-empty
+  "generate-lambda-bindings with empty lambda list produces no bindings."
+  (let ((bindings (cl-cc::generate-lambda-bindings '() 'form)))
+    (assert-equal nil bindings)))

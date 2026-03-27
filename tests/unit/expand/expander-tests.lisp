@@ -216,6 +216,62 @@
     (let ((str (format nil "~S" result)))
       (assert-true (search "SLOT-VALUE" str)))))
 
+;;; *setf-compound-place-handlers* — table-driven place dispatch ─────────────
+
+(deftest expander-setf-first-place
+  "(setf (first x) v) expands via rplaca (synonym for car)."
+  (let ((str (format nil "~S"
+                     (cl-cc::compiler-macroexpand-all '(setf (first lst) newval)))))
+    (assert-true (search "RPLACA" str))))
+
+(deftest expander-setf-rest-place
+  "(setf (rest x) v) expands via rplacd (synonym for cdr)."
+  (let ((str (format nil "~S"
+                     (cl-cc::compiler-macroexpand-all '(setf (rest lst) newval)))))
+    (assert-true (search "RPLACD" str))))
+
+(deftest expander-setf-nth-place
+  "(setf (nth i x) v) expands via rplaca + nthcdr."
+  (let ((str (format nil "~S"
+                     (cl-cc::compiler-macroexpand-all '(setf (nth 2 lst) newval)))))
+    (assert-true (search "RPLACA" str))
+    (assert-true (search "NTHCDR" str))))
+
+(deftest expander-setf-cadr-place
+  "(setf (cadr x) v) expands via rplaca on cdr."
+  (let ((str (format nil "~S"
+                     (cl-cc::compiler-macroexpand-all '(setf (cadr x) newval)))))
+    (assert-true (search "RPLACA" str))
+    (assert-true (search "CDR" str))))
+
+(deftest expander-setf-cddr-place
+  "(setf (cddr x) v) expands via rplacd on cdr."
+  (let ((str (format nil "~S"
+                     (cl-cc::compiler-macroexpand-all '(setf (cddr x) newval)))))
+    (assert-true (search "RPLACD" str))
+    (assert-true (search "CDR" str))))
+
+(deftest expander-setf-getf-place
+  "(setf (getf plist key) v) expands via rt-plist-put."
+  (let ((str (format nil "~S"
+                     (cl-cc::compiler-macroexpand-all '(setf (getf my-plist :foo) 42)))))
+    (assert-true (search "RT-PLIST-PUT" str))))
+
+(deftest expander-setf-getf-returns-value
+  "(setf (getf ...) v) expansion introduces a temp variable for the value."
+  (let ((result (cl-cc::compiler-macroexpand-all '(setf (getf plist :k) val))))
+    ;; Top form is LET with a temp binding
+    (assert-eq 'let (car result))
+    ;; The let body contains setq and the temp var
+    (let ((str (format nil "~S" result)))
+      (assert-true (search "RT-PLIST-PUT" str)))))
+
+(deftest expander-setf-multi-place-dispatches-each
+  "(setf a 1 b 2) expands to progn of two individual setf/setq forms."
+  (let ((result (cl-cc::compiler-macroexpand-all '(setf a 1 b 2))))
+    (assert-eq 'progn (car result))
+    (assert-= 2 (length (cdr result)))))
+
 ;;; ─── defstruct expansion ────────────────────────────────────────────────────
 
 (deftest expander-defstruct-basic-shape
@@ -613,4 +669,74 @@
                  '(setf (slot-value obj 'field) new-val))))
     ;; slot-value is a compiler special form; setf of slot-value goes through
     ;; the accessor branch which calls set-slot-value or similar
+    (assert-true (consp result))))
+
+;;; ─── expand-make-array-form ───────────────────────────────────────────────
+
+(deftest expand-make-array-simple
+  "expand-make-array-form without adjustable keywords expands to (make-array SIZE)."
+  (let ((result (cl-cc::expand-make-array-form 10 nil)))
+    ;; Should ultimately lower to a vm instruction, but at sexp level should be non-nil
+    (assert-true result)))
+
+(deftest expand-make-array-adjustable-promotes
+  "expand-make-array-form with :adjustable t uses make-adjustable-vector."
+  (let ((result (format nil "~S" (cl-cc::expand-make-array-form 10 '(:adjustable t)))))
+    (assert-true (search "ADJUSTABLE" result))))
+
+(deftest expand-make-array-fill-pointer-promotes
+  "expand-make-array-form with :fill-pointer t uses make-adjustable-vector."
+  (let ((result (format nil "~S" (cl-cc::expand-make-array-form 10 '(:fill-pointer t)))))
+    (assert-true (search "ADJUSTABLE" result))))
+
+;;; ─── expand-eval-when-form ────────────────────────────────────────────────
+
+(deftest expand-eval-when-execute-keeps-body
+  "eval-when :execute includes the body as a progn."
+  (let ((result (cl-cc::expand-eval-when-form '(:execute) '((+ 1 2)))))
+    (assert-true (consp result))))
+
+(deftest expand-eval-when-load-toplevel-keeps-body
+  "eval-when :load-toplevel includes the body."
+  (let ((result (cl-cc::expand-eval-when-form '(:load-toplevel) '((+ 1 2)))))
+    (assert-true (consp result))))
+
+(deftest expand-eval-when-compile-only-returns-nil
+  "eval-when :compile-toplevel alone returns nil (excluded from output)."
+  (let ((result (cl-cc::expand-eval-when-form '(:compile-toplevel) '((+ 1 2)))))
+    (assert-eq nil result)))
+
+;;; ─── expand-apply-named-fn ───────────────────────────────────────────────
+
+(deftest expand-apply-named-fn-binary
+  "expand-apply-named-fn for a binary builtin (cons) normalises to (apply #'cons ...)."
+  (let ((result (cl-cc::expand-apply-named-fn 'cons 'args)))
+    ;; Non-variadic: (apply #'cons <args>)
+    (assert-eq (car result) 'apply)))
+
+(deftest expand-apply-named-fn-variadic-plus
+  "expand-apply-named-fn for + generates a fold loop (not (apply #'+ ...))."
+  (let* ((result (cl-cc::expand-apply-named-fn '+ 'args))
+         (str    (format nil "~S" result)))
+    ;; Must NOT produce (apply #'+ ...) — variadic get inlined fold
+    (assert-false (search "(APPLY" str))))
+
+;;; ─── expand-macrolet-form ────────────────────────────────────────────────
+
+(deftest expand-macrolet-form-expands-local-macro
+  "expand-macrolet-form makes a local macro visible in the body.
+   Result is (progn <expanded-body>) since the body is wrapped in progn."
+  (let* ((result (cl-cc::expand-macrolet-form
+                  '((my-one () 1))
+                  '((my-one))))
+         (str (format nil "~S" result)))
+    ;; Body (my-one) should expand to 1; result is (progn 1) or similar
+    (assert-true (search "1" str))))
+
+(deftest expand-macrolet-form-body-is-progn
+  "expand-macrolet-form with multiple body forms wraps in progn."
+  (let ((result (cl-cc::expand-macrolet-form
+                 '((add1 (x) (+ x 1)))
+                 '((add1 2) (add1 3)))))
+    ;; Result should be the last form or a progn-wrapped result
     (assert-true (consp result))))

@@ -76,6 +76,7 @@ Also recognizes registered type aliases."
   "Compile a top-level macro definition.
 Registers the macro expander at compile time so subsequent forms can use it.
 At runtime, defmacro evaluates to the macro name."
+  (setf (ctx-tail-position ctx) nil)
   (let ((name (ast-defmacro-name node))
         (lambda-list (ast-defmacro-lambda-list node))
         (body (ast-defmacro-body node)))
@@ -180,7 +181,8 @@ For each (register . ast-node), emits: if register eq sentinel, register = compi
                               key-bindings non-constant-defaults body)
   "Bind parameters, emit non-constant defaults, compile BODY, emit vm-ret.
 Saves and restores the compiler environment around the body via unwind-protect."
-  (let ((old-env (ctx-env ctx)))
+  (let ((old-env (ctx-env ctx))
+        (old-tail (ctx-tail-position ctx)))
     (unwind-protect
          (progn
            (setf (ctx-env ctx)
@@ -191,9 +193,13 @@ Saves and restores the compiler environment around the body via unwind-protect."
              (emit-non-constant-defaults ctx non-constant-defaults))
            (let ((last-reg nil))
              (dolist (form body)
+               (setf (ctx-tail-position ctx)
+                     (if (eq form (car (last body))) t nil))
                (setf last-reg (compile-ast form ctx)))
+             (setf (ctx-tail-position ctx) nil)
              (emit ctx (make-vm-ret :reg last-reg))))
-      (setf (ctx-env ctx) old-env))))
+      (setf (ctx-env ctx) old-env)
+      (setf (ctx-tail-position ctx) old-tail))))
 
 ;;; ── Lambda and defun ─────────────────────────────────────────────────────
 
@@ -208,6 +214,7 @@ Saves and restores the compiler environment around the body via unwind-protect."
   (emit ctx (make-vm-label :name end-label)))
 
 (defmethod compile-ast ((node ast-lambda) ctx)
+  (setf (ctx-tail-position ctx) nil)
   (let* ((params (ast-lambda-params node))
          (body (ast-lambda-body node))
          (func-label (make-label ctx "lambda"))
@@ -237,6 +244,7 @@ Saves and restores the compiler environment around the body via unwind-protect."
 (defmethod compile-ast ((node ast-defun) ctx)
   "Compile a top-level function definition.
 Generates a closure at the function's label and registers it globally."
+  (setf (ctx-tail-position ctx) nil)
   (let* ((name (ast-defun-name node))
          (params (ast-defun-params node))
          (body (ast-defun-body node))
@@ -277,6 +285,7 @@ Generates a closure at the function's label and registers it globally."
   "Compile a top-level variable definition.
 Global variables are stored in the VM's global variable store so they
 persist across function calls."
+  (setf (ctx-tail-position ctx) nil)
   (let* ((name (ast-defvar-name node))
          (value-form (ast-defvar-value node))
          (value-reg (if value-form

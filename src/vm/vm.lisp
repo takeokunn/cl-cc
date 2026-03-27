@@ -247,6 +247,13 @@ SHAPE is one of:
   (args nil :reader vm-args)
   (:sexp-tag :call))
 
+(define-vm-instruction vm-tail-call (vm-instruction)
+  "Tail call: reuses current call frame instead of pushing a new one."
+  (dst nil :reader vm-dst)
+  (func nil :reader vm-func-reg)
+  (args nil :reader vm-args)
+  (:sexp-tag :tail-call))
+
 (define-vm-instruction vm-ret (vm-instruction)
   (reg nil :reader vm-reg)
   (:sexp-tag :ret))
@@ -591,104 +598,44 @@ check the host bridge whitelist."
 Supports multiple dispatch by passing all argument values for composite key lookup.
 Returns (values next-pc halt-p result) like execute-instruction."
   (let* ((all-arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs))
-         (first-arg (car all-arg-values))
-         ;; Compute all applicable methods (for call-next-method support)
-         (all-methods (vm-get-all-applicable-methods gf-ht state all-arg-values))
+         (all-methods    (vm-get-all-applicable-methods gf-ht state all-arg-values))
          (method-closure (or (car all-methods)
-                             (vm-resolve-gf-method gf-ht state first-arg all-arg-values)))
-         (entry-label (vm-closure-entry-label method-closure))
-         (params (vm-closure-params method-closure))
-         (captured (vm-closure-captured-values method-closure))
-         (return-pc (1+ pc))
-         (old-closure-env (vm-closure-env state))
-         (saved-regs (let ((copy (make-hash-table :test (hash-table-test (vm-state-registers state)))))
-                       (maphash (lambda (k v) (setf (gethash k copy) v))
-                                (vm-state-registers state))
-                       copy))
-         (arg-values (mapcar (lambda (arg-reg) (vm-reg-get state arg-reg)) arg-regs)))
-    (push (list return-pc dst-reg old-closure-env saved-regs) (vm-call-stack state))
-    ;; Push method context for call-next-method support
+                             (vm-resolve-gf-method gf-ht state
+                                                   (car all-arg-values) all-arg-values))))
+    (vm-push-call-frame state (1+ pc) dst-reg)
     (push (list gf-ht all-methods all-arg-values) (vm-method-call-stack state))
-    (loop for var-binding in captured
-          do (vm-reg-set state (car var-binding) (cdr var-binding)))
-    (loop for param in params
-          for arg-val in arg-values
-          do (vm-reg-set state param arg-val))
-    (when captured
-      (setf (vm-closure-env state) captured))
-    (values (gethash entry-label labels) nil nil)))
+    (vm-bind-closure-args method-closure state all-arg-values)
+    (values (gethash (vm-closure-entry-label method-closure) labels) nil nil)))
+
+(defun %vm-dispatch-call (func state pc labels arg-regs dst-reg tail-p)
+  "Shared call dispatch for vm-call and vm-tail-call.
+   TAIL-P suppresses frame push for TCO: the current frame's return address
+   is reused, keeping the call stack O(1) for tail-recursive functions."
+  (cond
+    ;; Generic function: delegate to multi-dispatch resolver (always non-tail for safety)
+    ((vm-generic-function-p func)
+     (vm-dispatch-generic-call func state pc arg-regs dst-reg labels))
+    ;; Host CL function (whitelist bridge) — apply directly, no frame ops needed
+    ((functionp func)
+     (vm-reg-set state dst-reg
+                 (apply func (mapcar (lambda (r) (vm-reg-get state r)) arg-regs)))
+     (values (1+ pc) nil nil))
+    ;; Normal closure — optionally push frame (skipped for TCO), bind args, jump
+    (t
+     (let ((arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs)))
+       (unless tail-p
+         (vm-push-call-frame state (1+ pc) dst-reg)
+         (push nil (vm-method-call-stack state)))
+       (vm-bind-closure-args func state arg-values)
+       (values (gethash (vm-closure-entry-label func) labels) nil nil)))))
 
 (defmethod execute-instruction ((inst vm-call) state pc labels)
-  (let* ((raw-func (vm-reg-get state (vm-func-reg inst)))
-         (func (vm-resolve-function state raw-func))
-         (arg-regs (vm-args inst))
-         (dst-reg (vm-dst inst)))
-    ;; If it's a generic function dispatch table, route to generic dispatch
-    (when (vm-generic-function-p func)
-      (return-from execute-instruction
-        (vm-dispatch-generic-call func state pc arg-regs dst-reg labels)))
-    ;; Host CL function (from whitelist bridge) — apply directly
-    (when (functionp func)
-      (let ((arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs)))
-        (vm-reg-set state dst-reg (apply func arg-values))
-        (return-from execute-instruction (values (1+ pc) nil nil))))
-    ;; Normal closure call
-    (let* ((closure func)
-           (entry-label (vm-closure-entry-label closure))
-           (params (vm-closure-params closure))
-           (captured (vm-closure-captured-values closure))
-           (return-pc (1+ pc))
-           (old-closure-env (vm-closure-env state))
-           ;; Save caller's register state for restoration on return
-           (saved-regs (let ((copy (make-hash-table :test (hash-table-test (vm-state-registers state)))))
-                         (maphash (lambda (k v) (setf (gethash k copy) v))
-                                  (vm-state-registers state))
-                         copy))
-           ;; Read argument values BEFORE overwriting registers
-           (arg-values (mapcar (lambda (arg-reg) (vm-reg-get state arg-reg)) arg-regs)))
-      ;; Push call frame with saved registers
-      (push (list return-pc dst-reg old-closure-env saved-regs) (vm-call-stack state))
-      ;; Push nil method-call-stack frame (regular function, not generic dispatch)
-      (push nil (vm-method-call-stack state))
-      ;; Restore captured variable values into registers
-      (loop for var-binding in captured
-           do (vm-reg-set state (car var-binding) (cdr var-binding)))
-      ;; Bind required arguments to parameters using pre-saved values
-      (loop for param in params
-            for arg-val in arg-values
-            do (vm-reg-set state param arg-val))
-      ;; Handle &optional parameters
-      (let ((opt-params (vm-closure-optional-params closure))
-            (remaining-args (nthcdr (length params) arg-values)))
-        (when opt-params
-          (loop for (opt-reg default-val) in opt-params
-                for i from 0
-                do (vm-reg-set state opt-reg
-                               (if (< i (length remaining-args))
-                                   (nth i remaining-args)
-                                   default-val)))
-          (setf remaining-args (nthcdr (length opt-params) remaining-args)))
-        ;; Handle &rest parameter
-        (let ((rest-param (vm-closure-rest-param closure)))
-          (when rest-param
-            (let ((rest-start (+ (length params) (length opt-params))))
-              (vm-reg-set state rest-param
-                          (vm-build-list state (nthcdr rest-start arg-values))))))
-        ;; Handle &key parameters
-        (let ((key-params (vm-closure-key-params closure)))
-          (when key-params
-            (let ((key-args (nthcdr (+ (length params) (length opt-params)) arg-values)))
-              (loop for (keyword key-reg default-val) in key-params
-                    do (let ((pos (position keyword key-args)))
-                         (vm-reg-set state key-reg
-                                     (if pos
-                                         (nth (1+ pos) key-args)
-                                         default-val))))))))
-      ;; Set up closure's captured environment for nested closures
-      (when captured
-        (setf (vm-closure-env state) captured))
-      ;; Jump to function entry
-      (values (gethash entry-label labels) nil nil))))
+  (let ((func     (vm-resolve-function state (vm-reg-get state (vm-func-reg inst)))))
+    (%vm-dispatch-call func state pc labels (vm-args inst) (vm-dst inst) nil)))
+
+(defmethod execute-instruction ((inst vm-tail-call) state pc labels)
+  (let ((func     (vm-resolve-function state (vm-reg-get state (vm-func-reg inst)))))
+    (%vm-dispatch-call func state pc labels (vm-args inst) (vm-dst inst) t)))
 
 (defmethod execute-instruction ((inst vm-ret) state pc labels)
   (declare (ignore pc labels))
@@ -699,11 +646,7 @@ Returns (values next-pc halt-p result) like execute-instruction."
           ;; Pop method-call-stack in sync with call-stack
           (when (vm-method-call-stack state)
             (pop (vm-method-call-stack state)))
-          ;; Restore caller's register state
-          (when saved-regs
-            (clrhash (vm-state-registers state))
-            (maphash (lambda (k v) (setf (gethash k (vm-state-registers state)) v))
-                     saved-regs))
+          (vm-restore-registers state saved-regs)
           ;; Write the return value into the destination register
           (vm-reg-set state dst-reg result)
           (when old-closure-env
@@ -817,33 +760,79 @@ Returns (values next-pc halt-p result) like execute-instruction."
       (unless next-method
         (error "No next method for ~S" (gethash :__name__ gf-ht)))
       ;; Determine arguments: use supplied args or original args
-      (let* ((args-reg (vm-cnm-args-reg inst))
-             (call-args (if args-reg
-                            (vm-reg-get state args-reg)
-                            orig-args))
-             (dst-reg (vm-dst inst))
-             (entry-label (vm-closure-entry-label next-method))
-             (params (vm-closure-params next-method))
-             (captured (vm-closure-captured-values next-method))
-             (return-pc (1+ pc))
-             (old-closure-env (vm-closure-env state))
-             (saved-regs (let ((copy (make-hash-table :test (hash-table-test (vm-state-registers state)))))
-                           (maphash (lambda (k v) (setf (gethash k copy) v))
-                                    (vm-state-registers state))
-                           copy)))
-        ;; Push call frame for next method
-        (push (list return-pc dst-reg old-closure-env saved-regs) (vm-call-stack state))
-        ;; Push updated method context (remaining methods starting from next-method)
+      (let* ((call-args (if (vm-cnm-args-reg inst)
+                            (vm-reg-get state (vm-cnm-args-reg inst))
+                            orig-args)))
+        (vm-push-call-frame state (1+ pc) (vm-dst inst))
         (push (list gf-ht (cdr methods-list) call-args) (vm-method-call-stack state))
-        ;; Set up next method's parameters
-        (loop for var-binding in captured
-              do (vm-reg-set state (car var-binding) (cdr var-binding)))
-        (loop for param in params
-              for arg-val in call-args
-              do (vm-reg-set state param arg-val))
-        (when captured
-          (setf (vm-closure-env state) captured))
-        (values (gethash entry-label labels) nil nil)))))
+        (vm-bind-closure-args next-method state call-args)
+        (values (gethash (vm-closure-entry-label next-method) labels) nil nil)))))
+
+;;; ── Call-frame helpers ───────────────────────────────────────────────────
+;;;
+;;; These three functions eliminate duplicated call-setup logic that previously
+;;; appeared verbatim in vm-call, vm-dispatch-generic-call, vm-call-next-method,
+;;; and vm-apply.
+
+(defun vm-save-registers (state)
+  "Return a snapshot copy of the current register file."
+  (let ((copy (make-hash-table :test (hash-table-test (vm-state-registers state)))))
+    (maphash (lambda (k v) (setf (gethash k copy) v))
+             (vm-state-registers state))
+    copy))
+
+(defun vm-restore-registers (state saved-regs)
+  "Replace the current register file with the SAVED-REGS snapshot."
+  (when saved-regs
+    (clrhash (vm-state-registers state))
+    (maphash (lambda (k v) (setf (gethash k (vm-state-registers state)) v))
+             saved-regs)))
+
+(defun vm-push-call-frame (state return-pc dst-reg)
+  "Save current environment and push a call frame onto the call stack."
+  (push (list return-pc dst-reg (vm-closure-env state) (vm-save-registers state))
+        (vm-call-stack state)))
+
+(defun vm-bind-closure-args (closure state arg-values)
+  "Bind ARG-VALUES to CLOSURE's parameter registers in STATE.
+Restores captured environment, then handles required, &optional, &rest, and &key."
+  (let ((params     (vm-closure-params closure))
+        (opt-params (vm-closure-optional-params closure))
+        (rest-param (vm-closure-rest-param closure))
+        (key-params (vm-closure-key-params closure))
+        (captured   (vm-closure-captured-values closure)))
+    ;; Restore captured environment into registers
+    (dolist (binding captured)
+      (vm-reg-set state (car binding) (cdr binding)))
+    ;; Required parameters
+    (loop for param in params
+          for val   in arg-values
+          do (vm-reg-set state param val))
+    ;; &optional parameters
+    (let* ((n-req      (length params))
+           (n-opt      (length opt-params))
+           (after-req  (nthcdr n-req arg-values)))
+      (when opt-params
+        (loop for (reg default) in opt-params
+              for i from 0
+              do (vm-reg-set state reg
+                             (if (< i (length after-req))
+                                 (nth i after-req)
+                                 default))))
+      ;; &rest parameter
+      (when rest-param
+        (vm-reg-set state rest-param
+                    (vm-build-list state (nthcdr (+ n-req n-opt) arg-values))))
+      ;; &key parameters
+      (when key-params
+        (let ((kw-args (nthcdr (+ n-req n-opt) arg-values)))
+          (loop for (keyword reg default) in key-params
+                do (let ((pos (position keyword kw-args)))
+                     (vm-reg-set state reg
+                                 (if pos (nth (1+ pos) kw-args) default)))))))
+    ;; Activate closure environment for nested closures
+    (when captured
+      (setf (vm-closure-env state) captured))))
 
 (defun vm-list-to-lisp-list (state value)
   "Convert a VM list (possibly using vm-cons-cell heap objects) to a Lisp list."
@@ -968,50 +957,29 @@ Uses class precedence lists for inheritance-based fallback."
         nil)))
 
 (defmethod execute-instruction ((inst vm-apply) state pc labels)
-  (let* ((raw-func (vm-reg-get state (vm-func-reg inst)))
-         (func (vm-resolve-function state raw-func))
-         (arg-regs (vm-args inst))
-         (dst-reg (vm-dst inst)))
-    ;; Build argument list: all args except last are normal, last is a list to spread
-    (let* ((arg-values (mapcar (lambda (reg) (vm-reg-get state reg)) arg-regs))
-           (spread-args (if arg-values
-                            (let ((normal (butlast arg-values))
-                                  (last-arg (car (last arg-values))))
-                              (append normal (vm-list-to-lisp-list state last-arg)))
-                            nil)))
-      ;; Host CL function (from whitelist bridge) — apply directly
-      (when (functionp func)
-        (vm-reg-set state dst-reg (apply func spread-args))
-        (return-from execute-instruction (values (1+ pc) nil nil)))
-      (let* (;; If generic function, resolve to the applicable method
-           (closure (if (vm-generic-function-p func)
-                        (vm-resolve-gf-method func state (car spread-args) spread-args)
-                        func))
-           (entry-label (vm-closure-entry-label closure))
-           (params (vm-closure-params closure))
-           (captured (vm-closure-captured-values closure))
-           (return-pc (1+ pc))
-           (old-closure-env (vm-closure-env state))
-           (saved-regs (let ((copy (make-hash-table :test (hash-table-test (vm-state-registers state)))))
-                         (maphash (lambda (k v) (setf (gethash k copy) v))
-                                  (vm-state-registers state))
-                         copy)))
-      ;; Push call frame
-      (push (list return-pc dst-reg old-closure-env saved-regs) (vm-call-stack state))
-      ;; Push nil method-call-stack frame (apply is not a generic dispatch)
-      (push nil (vm-method-call-stack state))
-      ;; Restore captured
-      (loop for var-binding in captured
-            do (vm-reg-set state (car var-binding) (cdr var-binding)))
-      ;; Bind spread arguments to parameters
-      (loop for param in params
-            for arg-val in spread-args
-            do (vm-reg-set state param arg-val))
-      ;; Set up closure environment
-      (when captured
-        (setf (vm-closure-env state) captured))
-      ;; Jump to function entry
-      (values (gethash entry-label labels) nil nil)))))
+  (let* ((func      (vm-resolve-function state (vm-reg-get state (vm-func-reg inst))))
+         (arg-regs  (vm-args inst))
+         (dst-reg   (vm-dst inst))
+         ;; Spread the last argument: (apply fn a b list) → args are (a b . list)
+         (arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs))
+         (spread-args (if arg-values
+                          (append (butlast arg-values)
+                                  (vm-list-to-lisp-list state (car (last arg-values))))
+                          nil)))
+    (cond
+      ;; Host CL function — apply directly, no frame push
+      ((functionp func)
+       (vm-reg-set state dst-reg (apply func spread-args))
+       (values (1+ pc) nil nil))
+      ;; Generic function or closure
+      (t
+       (let ((closure (if (vm-generic-function-p func)
+                          (vm-resolve-gf-method func state (car spread-args) spread-args)
+                          func)))
+         (vm-push-call-frame state (1+ pc) dst-reg)
+         (push nil (vm-method-call-stack state))
+         (vm-bind-closure-args closure state spread-args)
+         (values (gethash (vm-closure-entry-label closure) labels) nil nil))))))
 
 (defmethod execute-instruction ((inst vm-register-function) state pc labels)
   (declare (ignore labels))

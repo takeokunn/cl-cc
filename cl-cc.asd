@@ -64,6 +64,8 @@
        (:file "vm-clos")    ; CLOS instruction defstructs + execute-instruction methods
        (:file "vm-run")     ; Handler-case, label table, run-vm, vm2-state
        (:file "primitives")
+       (:file "vm-numeric")
+       (:file "vm-extensions")
        (:file "io")
        (:file "conditions")
        (:file "list")
@@ -103,20 +105,23 @@
        (:file "context")
        (:file "closure")
        (:file "cps")
+       (:file "builtin-registry-data") ; Entry alists — pure data, no logic
        (:file "builtin-registry")
        (:file "codegen-core")
        (:file "codegen-clos")
        (:file "codegen-functions")
+       (:file "codegen-phase2")  ; Phase 2 AST-introspecting builtin handlers
        (:file "codegen")))
      ;; Stage 5: VM IR → optimized VM IR
      (:module "optimize"
       :serial t
       :components
-      ((:file "effects")        ; Phase 0: effect-kind bridge (type-effect-row → optimizer)
-       (:file "cfg")            ; Phase 1: CFG construction + dominator tree + DF
-       (:file "ssa")            ; Phase 1: SSA construction + destruction
-       (:file "egraph")         ; Phase 2: E-graph engine (union-find, saturation, extraction)
-       (:file "egraph-rules")   ; Phase 2: defrule macro + built-in rewrite rules
+      ((:file "effects")          ; Phase 0: effect-kind bridge (type-effect-row → optimizer)
+       (:file "cfg")              ; Phase 1: CFG construction + dominator tree + DF
+       (:file "ssa")              ; Phase 1: SSA construction + destruction
+       (:file "egraph")           ; Phase 2: E-graph engine (union-find, saturation, extraction)
+       (:file "egraph-rules")     ; Phase 2: defrule macro + built-in rewrite rules
+       (:file "optimizer-tables") ; Data tables + predicates (loaded before passes)
        (:file "optimizer")))
      ;; Stage 7: VM IR → native code + binary formats
      (:module "emit"
@@ -215,6 +220,10 @@
         :serial t
         :components
         ((:file "vm2-tests")
+         (:file "list-tests")       ; defines make-test-vm / exec1 helpers
+         (:file "primitives-tests") ; execute-instruction for type predicates + arithmetic
+         (:file "vm-clos-tests")    ; execute-instruction for CLOS instructions
+         (:file "vm-call-tests")    ; vm-call / vm-tail-call / vm-ret + %vm-dispatch-call
          (:file "conditions-tests")
          (:file "hash-tests")
          (:file "strings-tests")
@@ -275,7 +284,9 @@
          (:file "builtin-registry-tests")
          (:file "closure-tests")
          (:file "context-tests")
-         (:file "codegen-tests")))
+         (:file "codegen-tests")
+         (:file "phase2-handler-tests")
+         (:file "codegen-phase2-tests")))
        (:module "optimize"
         :serial t
         :components

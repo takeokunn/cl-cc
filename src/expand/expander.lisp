@@ -248,6 +248,31 @@ or fall back to generic (setf (slot-value obj 'accessor-name) val)."
         (compiler-macroexpand-all
          `(setf (slot-value ,(second place) ',(car place)) ,value)))))
 
+;;; ── setf compound-place dispatch table — fact registration ──────────────
+;;;
+;;; Each entry maps a known place-head symbol to its expansion rule.
+;;; The setf handler does a single gethash; no cond branching needed.
+
+(setf (gethash 'aref *setf-compound-place-handlers*)
+      (lambda (place value)
+        (compiler-macroexpand-all
+         `(aset ,(second place) ,(third place) ,value))))
+
+(setf (gethash 'getf *setf-compound-place-handlers*)
+      (lambda (place value)
+        (let ((v (gensym "V")))
+          (compiler-macroexpand-all
+           `(let ((,v ,value))
+              (setq ,(second place)
+                    (rt-plist-put ,(second place) ,(third place) ,v))
+              ,v)))))
+
+;; All cons-cell accessors share the same expansion logic
+(dolist (sym '(car first cdr rest nth cadr cddr))
+  (setf (gethash sym *setf-compound-place-handlers*)
+        (lambda (place value)
+          (compiler-macroexpand-all (expand-setf-cons-place place value)))))
+
 (defun expand-let-binding (b)
   "Macro-expand the value in a LET binding, leaving the binding name untouched."
   (if (and (consp b) (symbolp (car b)))
@@ -393,27 +418,16 @@ Contract: handler receives the full form and returns a fully-expanded form."
       ;; (setf var val) → (setq var val)
       ((and (= len 3) (symbolp (second form)))
        (compiler-macroexpand-all `(setq ,(second form) ,(third form))))
-      ;; compound place
+      ;; compound place — table lookup first, then generic accessor, then passthrough
       ((and (= len 3) (consp (second form)))
-       (let ((place (second form)) (value (third form)))
+       (let* ((place (second form))
+              (value (third form))
+              (handler (gethash (car place) *setf-compound-place-handlers*)))
          (cond
-           ((eq (car place) 'aref)
-            (compiler-macroexpand-all
-             `(aset ,(second place) ,(third place) ,value)))
-           ((eq (car place) 'getf)
-            (let ((v (gensym "V")))
-              (compiler-macroexpand-all
-               `(let ((,v ,value))
-                  (setq ,(second place)
-                        (rt-plist-put ,(second place) ,(third place) ,v))
-                  ,v))))
-           ((member (car place) '(car first cdr rest nth cadr cddr))
-            (compiler-macroexpand-all (expand-setf-cons-place place value)))
+           (handler (funcall handler place value))
            ((and (symbolp (car place)) (= (length place) 2))
             (expand-setf-accessor place value))
            (t
-            ;; Unknown compound place (e.g., slot-value, gethash):
-            ;; expand args and keep structure; let compiler handle actual setf.
             (cons 'setf (mapcar #'compiler-macroexpand-all (cdr form)))))))
       (t (cons 'setf (mapcar #'compiler-macroexpand-all (cdr form)))))))
 

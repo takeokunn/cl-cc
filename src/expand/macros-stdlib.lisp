@@ -407,27 +407,25 @@
 (our-defmacro notevery (pred list)
   `(not (every ,pred ,list)))
 
-;; REMOVE-IF: keep elements for which pred is false
-(our-defmacro remove-if (pred list)
+;; Shared expansion for remove-if / remove-if-not.
+;; KEEP-COND is the form head that gates accumulation ('when or 'unless).
+(defun %filter-list-expand (keep-cond pred list)
   (let ((fn-var (gensym "FN"))
-        (x (gensym "X"))
-        (acc (gensym "ACC")))
+        (x      (gensym "X"))
+        (acc    (gensym "ACC")))
     `(let ((,fn-var ,pred)
            (,acc nil))
        (dolist (,x ,list (nreverse ,acc))
-         (unless (funcall ,fn-var ,x)
+         (,keep-cond (funcall ,fn-var ,x)
            (setq ,acc (cons ,x ,acc)))))))
+
+;; REMOVE-IF: keep elements for which pred is false
+(our-defmacro remove-if (pred list)
+  (%filter-list-expand 'unless pred list))
 
 ;; REMOVE-IF-NOT: keep elements for which pred is true
 (our-defmacro remove-if-not (pred list)
-  (let ((fn-var (gensym "FN"))
-        (x (gensym "X"))
-        (acc (gensym "ACC")))
-    `(let ((,fn-var ,pred)
-           (,acc nil))
-       (dolist (,x ,list (nreverse ,acc))
-         (when (funcall ,fn-var ,x)
-           (setq ,acc (cons ,x ,acc)))))))
+  (%filter-list-expand 'when pred list))
 
 ;; FIND: first element eql to item, or nil
 (our-defmacro find (item list &rest keys)
