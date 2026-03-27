@@ -25,13 +25,12 @@
 
 ;;; ─── parse-source ───────────────────────────────────────────────────────────
 
-(deftest parser-parse-source-integer
-  "parse-source: integer literal"
-  (assert-= 42 (parse-one "42")))
-
-(deftest parser-parse-source-negative
-  "parse-source: negative integer"
-  (assert-= -7 (parse-one "-7")))
+(deftest-each parser-parse-source-integer
+  "parse-source: integer literals (positive and negative)."
+  :cases (("positive" 42 "42")
+          ("negative" -7 "-7"))
+  (expected source)
+  (assert-= expected (parse-one source)))
 
 (deftest parser-parse-source-string
   "parse-source: string literal"
@@ -41,17 +40,16 @@
   "parse-source: symbol is interned and uppercased"
   (assert-equal "FOO" (symbol-name (parse-one "foo"))))
 
-(deftest parser-parse-source-nil
-  "parse-source: nil literal"
-  (assert-null (parse-one "nil")))
+(deftest-each parser-parse-source-null-values
+  "parse-source: forms that evaluate to nil/null."
+  :cases (("nil"        "nil")
+          ("empty-list" "()"))
+  (source)
+  (assert-null (parse-one source)))
 
 (deftest parser-parse-source-t
   "parse-source: t literal"
   (assert-true (eq t (parse-one "t"))))
-
-(deftest parser-parse-source-empty-list
-  "parse-source: empty list"
-  (assert-null (parse-one "()")))
 
 (deftest parser-parse-source-list
   "parse-source: simple list"
@@ -212,68 +210,46 @@
 
 ;;; ─── lambda-list-has-extended-p ──────────────────────────────────────────────
 
-(deftest parser-lambda-list-has-extended-optional
-  "lambda-list-has-extended-p: true for &optional"
-  (assert-true (cl-cc::lambda-list-has-extended-p '(x &optional y))))
-
-(deftest parser-lambda-list-has-extended-rest
-  "lambda-list-has-extended-p: true for &rest"
-  (assert-true (cl-cc::lambda-list-has-extended-p '(x &rest args))))
-
-(deftest parser-lambda-list-has-extended-key
-  "lambda-list-has-extended-p: true for &key"
-  (assert-true (cl-cc::lambda-list-has-extended-p '(x &key y))))
-
-(deftest parser-lambda-list-has-extended-false
-  "lambda-list-has-extended-p: false for simple params"
-  (assert-false (cl-cc::lambda-list-has-extended-p '(x y z))))
-
-(deftest parser-lambda-list-has-extended-empty
-  "lambda-list-has-extended-p: false for empty list"
-  (assert-false (cl-cc::lambda-list-has-extended-p '())))
+(deftest-each parser-lambda-list-has-extended-p
+  "lambda-list-has-extended-p returns correct boolean for each lambda list."
+  :cases (("optional" '(x &optional y) t)
+          ("rest"     '(x &rest args)  t)
+          ("key"      '(x &key y)      t)
+          ("simple"   '(x y z)         nil)
+          ("empty"    '()              nil))
+  (lambda-list expected)
+  (assert-equal expected (if (cl-cc::lambda-list-has-extended-p lambda-list) t nil)))
 
 ;;; ─── lower-sexp-to-ast: atoms ────────────────────────────────────────────────
 
 (deftest lower-integer-produces-ast-int
-  "lower-sexp-to-ast: integer -> ast-int"
+  "lower-sexp-to-ast: integer -> ast-int with correct value"
   (let ((node (lower 42)))
     (assert-true (cl-cc::ast-int-p node))
     (assert-= 42 (cl-cc::ast-int-value node))))
 
 (deftest lower-symbol-produces-ast-var
-  "lower-sexp-to-ast: symbol -> ast-var"
+  "lower-sexp-to-ast: symbol -> ast-var with correct name"
   (let ((node (lower 'x)))
     (assert-true (cl-cc::ast-var-p node))
     (assert-eq 'x (cl-cc::ast-var-name node))))
 
-(deftest lower-nil-produces-ast-quote
-  "lower-sexp-to-ast: nil -> ast-quote wrapping nil"
-  (let ((node (lower nil)))
-    (assert-true (cl-cc::ast-quote-p node))
-    (assert-null (cl-cc::ast-quote-value node))))
+(deftest-each lower-self-eval-produces-ast-quote
+  "lower-sexp-to-ast: nil/t/float all produce ast-quote."
+  :cases (("nil"   nil)
+          ("t"     t)
+          ("float" 3.14))
+  (input)
+  (assert-true (cl-cc::ast-quote-p (lower input))))
 
-(deftest lower-t-produces-ast-quote
-  "lower-sexp-to-ast: t -> ast-quote wrapping t"
-  (let ((node (lower t)))
+(deftest-each lower-literal-values-in-ast-quote
+  "lower-sexp-to-ast: string and character literals produce ast-quote preserving their value."
+  :cases (("string"    "hello")
+          ("character" #\a))
+  (input)
+  (let ((node (lower input)))
     (assert-true (cl-cc::ast-quote-p node))
-    (assert-eq t (cl-cc::ast-quote-value node))))
-
-(deftest lower-string-produces-ast-quote
-  "lower-sexp-to-ast: string -> ast-quote"
-  (let ((node (lower "hello")))
-    (assert-true (cl-cc::ast-quote-p node))
-    (assert-string= "hello" (cl-cc::ast-quote-value node))))
-
-(deftest lower-float-produces-ast-quote
-  "lower-sexp-to-ast: float -> ast-quote"
-  (let ((node (lower 3.14)))
-    (assert-true (cl-cc::ast-quote-p node))))
-
-(deftest lower-character-produces-ast-quote
-  "lower-sexp-to-ast: character -> ast-quote"
-  (let ((node (lower #\a)))
-    (assert-true (cl-cc::ast-quote-p node))
-    (assert-true (char= #\a (cl-cc::ast-quote-value node)))))
+    (assert-equal input (cl-cc::ast-quote-value node))))
 
 ;;; ─── lower-sexp-to-ast: special forms ───────────────────────────────────────
 
@@ -371,11 +347,14 @@
     (assert-true (cl-cc::ast-return-from-p node))
     (assert-eq 'my-block (cl-cc::ast-return-from-name node))))
 
-(deftest lower-function-ref
-  "lower-sexp-to-ast: (function foo) -> ast-function"
-  (let ((node (lower '(function foo))))
+(deftest-each lower-function-name-forms
+  "lower-sexp-to-ast: (function <name>) produces ast-function with correct name."
+  :cases (("symbol-ref" '(function foo)        'foo)
+          ("setf-name"  '(function (setf foo))  '(setf foo)))
+  (form expected-name)
+  (let ((node (lower form)))
     (assert-true (cl-cc::ast-function-p node))
-    (assert-eq 'foo (cl-cc::ast-function-name node))))
+    (assert-equal expected-name (cl-cc::ast-function-name node))))
 
 (deftest lower-function-lambda
   "lower-sexp-to-ast: (function (lambda ...)) signals error (not yet supported)"
@@ -400,37 +379,28 @@
     (assert-true (cl-cc::ast-go-p node))
     (assert-eq 'my-tag (cl-cc::ast-go-tag node))))
 
-(deftest lower-tagbody-form
-  "lower-sexp-to-ast: tagbody form -> ast-tagbody"
-  (let ((node (lower '(tagbody start (print 1) end (print 2)))))
-    (assert-true (cl-cc::ast-tagbody-p node))))
-
 (deftest lower-catch-form
   "lower-sexp-to-ast: catch form -> ast-catch"
   (let ((node (lower '(catch 'my-tag 1 2))))
     (assert-true (cl-cc::ast-catch-p node))
     (assert-= 2 (length (cl-cc::ast-catch-body node)))))
 
-(deftest lower-throw-form
-  "lower-sexp-to-ast: throw form -> ast-throw"
-  (let ((node (lower '(throw 'my-tag 42))))
-    (assert-true (cl-cc::ast-throw-p node))))
+(deftest-each lower-type-only
+  "lower-sexp-to-ast: forms whose only check is the AST node type predicate."
+  :cases (("throw"       '(throw 'my-tag 42)                          #'cl-cc::ast-throw-p)
+          ("apply"       '(apply #'foo '(1 2))                         #'cl-cc::ast-apply-p)
+          ("funcall"     '(funcall #'foo 1 2)                          #'cl-cc::ast-call-p)
+          ("tagbody"     '(tagbody start (print 1) end (print 2))      #'cl-cc::ast-tagbody-p)
+          ("setf-gethash"  '(setf (gethash 'k tbl) 42)                #'cl-cc::ast-set-gethash-p)
+          ("mv-prog1"    '(multiple-value-prog1 (values 1 2) (print 3)) #'cl-cc::ast-multiple-value-prog1-p))
+  (form pred)
+  (assert-true (funcall pred (lower form))))
 
 (deftest lower-unwind-protect-form
   "lower-sexp-to-ast: unwind-protect form -> ast-unwind-protect"
   (let ((node (lower '(unwind-protect (risky) (cleanup)))))
     (assert-true (cl-cc::ast-unwind-protect-p node))
     (assert-= 1 (length (cl-cc::ast-unwind-cleanup node)))))
-
-(deftest lower-apply-form
-  "lower-sexp-to-ast: apply form -> ast-apply"
-  (let ((node (lower '(apply #'foo '(1 2)))))
-    (assert-true (cl-cc::ast-apply-p node))))
-
-(deftest lower-funcall-form
-  "lower-sexp-to-ast: funcall form -> ast-call"
-  (let ((node (lower '(funcall #'foo 1 2))))
-    (assert-true (cl-cc::ast-call-p node))))
 
 (deftest lower-generic-call
   "lower-sexp-to-ast: generic call -> ast-call"
@@ -465,33 +435,17 @@
 
 ;;; ─── lower-sexp-to-ast: error cases ────────────────────────────────────────
 
-(deftest lower-if-error-wrong-arity
-  "lower-sexp-to-ast: (if) with missing args signals error"
-  (assert-signals error (lower '(if))))
-
-(deftest lower-if-error-too-many-args
-  "lower-sexp-to-ast: (if a b c d) signals error"
-  (assert-signals error (lower '(if a b c d))))
-
-(deftest lower-let-error-no-bindings
-  "lower-sexp-to-ast: (let) with no bindings signals error"
-  (assert-signals error (lower '(let))))
-
-(deftest lower-defun-error-no-params
-  "lower-sexp-to-ast: (defun f) without params signals error"
-  (assert-signals error (lower '(defun f))))
-
-(deftest lower-setq-error-odd-args
-  "lower-sexp-to-ast: (setq x) with odd number of args signals error"
-  (assert-signals error (lower '(setq x))))
-
-(deftest lower-quote-error-wrong-arity
-  "lower-sexp-to-ast: (quote) with no arg signals error"
-  (assert-signals error (lower '(quote))))
-
-(deftest lower-function-error-no-arg
-  "lower-sexp-to-ast: (function) with no arg signals error"
-  (assert-signals error (lower '(function))))
+(deftest-each lower-sexp-arity-errors
+  "lower-sexp-to-ast signals error for malformed special forms."
+  :cases (("if-missing-args"   '(if))
+          ("if-too-many-args"  '(if a b c d))
+          ("let-no-bindings"   '(let))
+          ("defun-no-params"   '(defun f))
+          ("setq-odd-args"     '(setq x))
+          ("quote-wrong-arity" '(quote))
+          ("function-no-arg"   '(function)))
+  (form)
+  (assert-signals error (lower form)))
 
 ;;; ─── ast-to-sexp roundtrip ──────────────────────────────────────────────────
 
@@ -499,160 +453,98 @@
   "Lower sexp to AST then convert back to sexp."
   (cl-cc::ast-to-sexp (lower sexp)))
 
-(deftest ast-roundtrip-integer
-  "ast-to-sexp roundtrip: integer"
-  (assert-= 42 (ast-roundtrip 42)))
-
-(deftest ast-roundtrip-symbol
-  "ast-to-sexp roundtrip: symbol"
-  (assert-eq 'x (ast-roundtrip 'x)))
-
-(deftest ast-roundtrip-if
-  "ast-to-sexp roundtrip: if form"
+(deftest ast-roundtrip
+  "ast-to-sexp roundtrip: atoms, control flow, bindings, definitions, and data."
+  ;; Atoms
+  (assert-= 42 (ast-roundtrip 42))
+  (assert-eq 'x (ast-roundtrip 'x))
+  ;; Control flow
   (let ((result (ast-roundtrip '(if x 1 2))))
     (assert-eq 'if (first result))
     (assert-eq 'x (second result))
     (assert-= 1 (third result))
-    (assert-= 2 (fourth result))))
-
-(deftest ast-roundtrip-let
-  "ast-to-sexp roundtrip: let form"
+    (assert-= 2 (fourth result)))
+  (let ((result (ast-roundtrip '(progn 1 2 3))))
+    (assert-eq 'progn (first result))
+    (assert-= 3 (length (rest result))))
+  (let ((result (ast-roundtrip '(block outer 1 2))))
+    (assert-eq 'block (first result))
+    (assert-eq 'outer (second result)))
+  ;; Bindings
   (let ((result (ast-roundtrip '(let ((x 10)) x))))
-    (assert-eq 'let (first result))))
-
-(deftest ast-roundtrip-lambda
-  "ast-to-sexp roundtrip: lambda form"
+    (assert-eq 'let (first result)))
+  (let ((result (ast-roundtrip '(setq x 42))))
+    (assert-equal '(setq x 42) result))
+  ;; Functions
   (let ((result (ast-roundtrip '(lambda (x y) (+ x y)))))
     (assert-eq 'lambda (first result))
-    (assert-equal '(x y) (second result))))
-
-(deftest ast-roundtrip-defun
-  "ast-to-sexp roundtrip: defun form"
+    (assert-equal '(x y) (second result)))
   (let ((result (ast-roundtrip '(defun add (a b) (+ a b)))))
     (assert-eq 'defun (first result))
     (assert-eq 'add (second result))
-    (assert-equal '(a b) (third result))))
-
-(deftest ast-roundtrip-defvar-with-value
-  "ast-to-sexp roundtrip: defvar with value"
+    (assert-equal '(a b) (third result)))
+  ;; Definitions and data
   (let ((result (ast-roundtrip '(defvar *count* 0))))
     (assert-eq 'defvar (first result))
     (assert-eq '*count* (second result))
-    (assert-= 0 (third result))))
-
-(deftest ast-roundtrip-quote
-  "ast-to-sexp roundtrip: quoted form"
+    (assert-= 0 (third result)))
   (let ((result (ast-roundtrip '(quote hello))))
     (assert-equal '(quote hello) result)))
 
-(deftest ast-roundtrip-progn
-  "ast-to-sexp roundtrip: progn form"
-  (let ((result (ast-roundtrip '(progn 1 2 3))))
-    (assert-eq 'progn (first result))
-    (assert-= 3 (length (rest result)))))
-
-(deftest ast-roundtrip-setq
-  "ast-to-sexp roundtrip: setq form"
-  (let ((result (ast-roundtrip '(setq x 42))))
-    (assert-equal '(setq x 42) result)))
-
-(deftest ast-roundtrip-block
-  "ast-to-sexp roundtrip: block form"
-  (let ((result (ast-roundtrip '(block outer 1 2))))
-    (assert-eq 'block (first result))
-    (assert-eq 'outer (second result))))
-
 ;;; ─── sexp-head-to-kind ───────────────────────────────────────────────────────
 
-(deftest grammar-sexp-head-to-kind-defun
-  "sexp-head-to-kind: defun -> :defun"
-  (assert-eq :defun (cl-cc::sexp-head-to-kind 'defun)))
-
-(deftest grammar-sexp-head-to-kind-let
-  "sexp-head-to-kind: let -> :let"
-  (assert-eq :let (cl-cc::sexp-head-to-kind 'let)))
-
-(deftest grammar-sexp-head-to-kind-if
-  "sexp-head-to-kind: if -> :if"
-  (assert-eq :if (cl-cc::sexp-head-to-kind 'if)))
-
-(deftest grammar-sexp-head-to-kind-lambda
-  "sexp-head-to-kind: lambda -> :lambda"
-  (assert-eq :lambda (cl-cc::sexp-head-to-kind 'lambda)))
-
-(deftest grammar-sexp-head-to-kind-setq
-  "sexp-head-to-kind: setq -> :setq"
-  (assert-eq :setq (cl-cc::sexp-head-to-kind 'setq)))
-
-(deftest grammar-sexp-head-to-kind-progn
-  "sexp-head-to-kind: progn -> :progn"
-  (assert-eq :progn (cl-cc::sexp-head-to-kind 'progn)))
-
-(deftest grammar-sexp-head-to-kind-defclass
-  "sexp-head-to-kind: defclass -> :defclass"
-  (assert-eq :defclass (cl-cc::sexp-head-to-kind 'defclass)))
-
-(deftest grammar-sexp-head-to-kind-unknown
-  "sexp-head-to-kind: unknown symbol -> :call"
-  (assert-eq :call (cl-cc::sexp-head-to-kind 'completely-unknown-symbol)))
+(deftest-each grammar-sexp-head-to-kind
+  "sexp-head-to-kind maps each special form head to its kind keyword."
+  :cases (("defun"   'defun                   :defun)
+          ("let"     'let                     :let)
+          ("if"      'if                      :if)
+          ("lambda"  'lambda                  :lambda)
+          ("setq"    'setq                    :setq)
+          ("progn"   'progn                   :progn)
+          ("defclass" 'defclass               :defclass)
+          ("unknown" 'completely-unknown-symbol :call))
+  (sym expected)
+  (assert-eq expected (cl-cc::sexp-head-to-kind sym)))
 
 ;;; ─── Grammar specialized parsers ────────────────────────────────────────────
 
-(deftest grammar-parse-cl-form-integer
-  "parse-cl-form: integer token -> cst-token of kind :T-INT"
+(deftest grammar-parse-cl-form-atoms
+  "parse-cl-form: scalar tokens produce cst-token with correct value."
   (let* ((tokens (cl-cc:lex-all "42"))
          (ts (cl-cc::make-token-stream :tokens tokens :source "42"))
          (form (cl-cc::parse-cl-form ts)))
     (assert-true (cl-cc:cst-token-p form))
-    (assert-= 42 (cl-cc:cst-token-value form))))
-
-(deftest grammar-parse-cl-form-string
-  "parse-cl-form: string token -> cst-token"
+    (assert-= 42 (cl-cc:cst-token-value form)))
   (let* ((tokens (cl-cc:lex-all "\"hello\""))
          (ts (cl-cc::make-token-stream :tokens tokens :source "\"hello\""))
          (form (cl-cc::parse-cl-form ts)))
     (assert-true (cl-cc:cst-token-p form))
     (assert-string= "hello" (cl-cc:cst-token-value form))))
 
-(deftest grammar-parse-cl-form-list
-  "parse-cl-form: list -> cst-interior node"
+(deftest grammar-parse-cl-form-lists
+  "parse-cl-form: list -> cst-interior; empty list -> nil children."
   (let* ((tokens (cl-cc:lex-all "(1 2 3)"))
          (ts (cl-cc::make-token-stream :tokens tokens :source "(1 2 3)"))
          (form (cl-cc::parse-cl-form ts)))
     (assert-true (cl-cc:cst-interior-p form))
-    (assert-= 3 (length (cl-cc:cst-children form)))))
-
-(deftest grammar-parse-cl-form-empty-list
-  "parse-cl-form: empty list -> empty cst-interior"
+    (assert-= 3 (length (cl-cc:cst-children form))))
   (let* ((tokens (cl-cc:lex-all "()"))
          (ts (cl-cc::make-token-stream :tokens tokens :source "()"))
          (form (cl-cc::parse-cl-form ts)))
     (assert-true (cl-cc:cst-interior-p form))
     (assert-null (cl-cc:cst-children form))))
 
-(deftest grammar-parse-cl-form-quote-sugar
-  "parse-cl-form: 'x -> :quote interior node"
-  (let* ((tokens (cl-cc:lex-all "'foo"))
-         (ts (cl-cc::make-token-stream :tokens tokens :source "'foo"))
+(deftest-each grammar-parse-cl-form-reader-macros
+  "parse-cl-form: reader-macro sugar -> cst-interior node with correct kind."
+  :cases (("quote"    "'foo"  :quote)
+          ("backquote" "`foo" :quasiquote)
+          ("function" "#'foo" :function))
+  (source expected-kind)
+  (let* ((tokens (cl-cc:lex-all source))
+         (ts (cl-cc::make-token-stream :tokens tokens :source source))
          (form (cl-cc::parse-cl-form ts)))
     (assert-true (cl-cc:cst-interior-p form))
-    (assert-eq :quote (cl-cc:cst-node-kind form))))
-
-(deftest grammar-parse-cl-form-backquote
-  "parse-cl-form: `x -> :quasiquote interior node"
-  (let* ((tokens (cl-cc:lex-all "`foo"))
-         (ts (cl-cc::make-token-stream :tokens tokens :source "`foo"))
-         (form (cl-cc::parse-cl-form ts)))
-    (assert-true (cl-cc:cst-interior-p form))
-    (assert-eq :quasiquote (cl-cc:cst-node-kind form))))
-
-(deftest grammar-parse-cl-form-function-ref
-  "parse-cl-form: #'fn -> :function interior node"
-  (let* ((tokens (cl-cc:lex-all "#'foo"))
-         (ts (cl-cc::make-token-stream :tokens tokens :source "#'foo"))
-         (form (cl-cc::parse-cl-form ts)))
-    (assert-true (cl-cc:cst-interior-p form))
-    (assert-eq :function (cl-cc:cst-node-kind form))))
+    (assert-eq expected-kind (cl-cc:cst-node-kind form))))
 
 (deftest grammar-parse-cl-form-at-end
   "parse-cl-form: returns nil at end of stream"
@@ -670,35 +562,32 @@
 
 ;;; ─── defclass lowering ───────────────────────────────────────────────────────
 
-(deftest lower-defclass-form
-  "lower-sexp-to-ast: defclass form -> ast-defclass"
-  (let ((node (lower '(defclass point () (x y)))))
+(deftest-each lower-defclass-form
+  "lower-sexp-to-ast: defclass -> ast-defclass with correct name, superclasses, and slot count."
+  :cases (("no-superclass"   '(defclass point () (x y))              'point '()      2)
+          ("with-superclass" '(defclass colored-point (point) (color)) 'colored-point '(point) 1))
+  (form expected-name expected-supers expected-slots)
+  (let ((node (lower form)))
     (assert-true (cl-cc::ast-defclass-p node))
-    (assert-eq 'point (cl-cc::ast-defclass-name node))
-    (assert-null (cl-cc::ast-defclass-superclasses node))
-    (assert-= 2 (length (cl-cc::ast-defclass-slots node)))))
-
-(deftest lower-defclass-with-superclass
-  "lower-sexp-to-ast: defclass with superclasses"
-  (let ((node (lower '(defclass colored-point (point) (color)))))
-    (assert-true (cl-cc::ast-defclass-p node))
-    (assert-equal '(point) (cl-cc::ast-defclass-superclasses node))))
+    (assert-eq expected-name (cl-cc::ast-defclass-name node))
+    (assert-equal expected-supers (cl-cc::ast-defclass-superclasses node))
+    (assert-= expected-slots (length (cl-cc::ast-defclass-slots node)))))
 
 ;;; ─── defgeneric / defmethod lowering ────────────────────────────────────────
 
-(deftest lower-defgeneric-form
-  "lower-sexp-to-ast: defgeneric form -> ast-defgeneric"
-  (let ((node (lower '(defgeneric area (shape)))))
-    (assert-true (cl-cc::ast-defgeneric-p node))
-    (assert-eq 'area (cl-cc::ast-defgeneric-name node))
-    (assert-equal '(shape) (cl-cc::ast-defgeneric-params node))))
-
-(deftest lower-defmethod-form
-  "lower-sexp-to-ast: defmethod form -> ast-defmethod"
-  (let ((node (lower '(defmethod area ((s circle)) (* pi (expt (slot-value s 'radius) 2))))))
-    (assert-true (cl-cc::ast-defmethod-p node))
-    (assert-eq 'area (cl-cc::ast-defmethod-name node))
-    (assert-equal '(s) (cl-cc::ast-defmethod-params node))))
+(deftest-each lower-generic-dispatch-forms
+  "lower-sexp-to-ast: defgeneric and defmethod produce correct AST nodes."
+  :cases (("defgeneric" '(defgeneric area (shape))
+           #'cl-cc::ast-defgeneric-p #'cl-cc::ast-defgeneric-name #'cl-cc::ast-defgeneric-params
+           'area '(shape))
+          ("defmethod"  '(defmethod area ((s circle)) (* pi (expt (slot-value s 'radius) 2)))
+           #'cl-cc::ast-defmethod-p #'cl-cc::ast-defmethod-name #'cl-cc::ast-defmethod-params
+           'area '(s)))
+  (form pred-p get-name get-params expected-name expected-params)
+  (let ((node (lower form)))
+    (assert-true (funcall pred-p node))
+    (assert-eq expected-name (funcall get-name node))
+    (assert-equal expected-params (funcall get-params node))))
 
 ;;; ─── make-instance lowering ──────────────────────────────────────────────────
 
@@ -739,20 +628,14 @@
     (assert-equal "A" (symbol-name (car result)))
     (assert-equal "B" (symbol-name (cdr result)))))
 
-(deftest parser-parse-source-vector
-  "parse-source: #(1 2 3) parses to vector"
-  (let ((result (parse-one "#(1 2 3)")))
+(deftest-each parser-parse-source-vector
+  "parse-source: vector literals parse to vectors with the expected length."
+  :cases (("empty" "#()"      0)
+          ("three" "#(1 2 3)" 3))
+  (source expected-len)
+  (let ((result (parse-one source)))
     (assert-true (vectorp result))
-    (assert-= 3 (length result))
-    (assert-= 1 (aref result 0))
-    (assert-= 2 (aref result 1))
-    (assert-= 3 (aref result 2))))
-
-(deftest parser-parse-source-empty-vector
-  "parse-source: #() parses to empty vector"
-  (let ((result (parse-one "#()")))
-    (assert-true (vectorp result))
-    (assert-= 0 (length result))))
+    (assert-= expected-len (length result))))
 
 (deftest parser-parse-source-backquote
   "parse-source: backquote expands to backquote form"
@@ -836,18 +719,15 @@
     (assert-= 10 (cl-cc::ast-source-line node))
     (assert-= 5 (cl-cc::ast-source-column node))))
 
-(deftest ast-location-string-full
-  "ast-location-string: formats file:line:col"
-  (let ((node (cl-cc::make-ast-int :value 1
-                                    :source-file "foo.lisp"
-                                    :source-line 3
-                                    :source-column 7)))
-    (assert-string= "foo.lisp:3:7" (cl-cc::ast-location-string node))))
-
-(deftest ast-location-string-unknown
-  "ast-location-string: returns <unknown location> when no source info"
-  (let ((node (cl-cc::make-ast-int :value 1)))
-    (assert-string= "<unknown location>" (cl-cc::ast-location-string node))))
+(deftest-each ast-location-string-formats
+  "ast-location-string formats file:line:col when present; falls back to <unknown location>."
+  :cases (("with-location"    (cl-cc::make-ast-int :value 1
+                                :source-file "foo.lisp" :source-line 3 :source-column 7)
+           "foo.lisp:3:7")
+          ("unknown-location" (cl-cc::make-ast-int :value 1)
+           "<unknown location>"))
+  (node expected)
+  (assert-string= expected (cl-cc::ast-location-string node)))
 
 (deftest ast-callable-slots
   "ast-callable derived structs have optional/rest/key param slots"
@@ -900,24 +780,21 @@
       (assert-true (cl-cc::ast-quote-p (cdr binding)))
       (assert-null (cl-cc::ast-quote-value (cdr binding))))))
 
-(deftest lower-lambda-with-optional
-  "lower-sexp-to-ast: lambda with &optional -> ast-lambda with optional-params"
-  (let ((node (lower '(lambda (x &optional (y 0)) (+ x y)))))
-    (assert-true (cl-cc::ast-lambda-p node))
-    (assert-equal '(x) (cl-cc::ast-lambda-params node))
-    (assert-= 1 (length (cl-cc::ast-lambda-optional-params node)))))
-
-(deftest lower-lambda-with-rest
-  "lower-sexp-to-ast: lambda with &rest -> ast-lambda with rest-param"
-  (let ((node (lower '(lambda (x &rest args) args))))
-    (assert-true (cl-cc::ast-lambda-p node))
-    (assert-eq 'args (cl-cc::ast-lambda-rest-param node))))
-
-(deftest lower-defun-with-key-params
-  "lower-sexp-to-ast: defun with &key -> ast-defun with key-params"
-  (let ((node (lower '(defun f (x &key (size 10)) x))))
-    (assert-true (cl-cc::ast-defun-p node))
-    (assert-= 1 (length (cl-cc::ast-defun-key-params node)))))
+(deftest-each lower-extended-lambda-list-params
+  "lower-sexp-to-ast: &optional, &rest, &key all populate the correct extended-params slot."
+  :cases (("optional" '(lambda (x &optional (y 0)) (+ x y))
+           #'cl-cc::ast-lambda-p #'cl-cc::ast-lambda-optional-params 1)
+          ("rest"     '(lambda (x &rest args) args)
+           #'cl-cc::ast-lambda-p #'cl-cc::ast-lambda-rest-param :rest)
+          ("key"      '(defun f (x &key (size 10)) x)
+           #'cl-cc::ast-defun-p #'cl-cc::ast-defun-key-params 1))
+  (form pred-p get-slot expected)
+  (let ((node (lower form)))
+    (assert-true (funcall pred-p node))
+    (let ((slot-val (funcall get-slot node)))
+      (if (eq expected :rest)
+          (assert-eq 'args slot-val)
+          (assert-= expected (length slot-val))))))
 
 (deftest lower-defparameter-form
   "lower-sexp-to-ast: defparameter -> ast-defvar (same as defvar)"
@@ -929,27 +806,11 @@
   "lower-sexp-to-ast: (return-from blk) with no value signals error (not yet supported)"
   (assert-signals error (lower '(return-from blk))))
 
-(deftest lower-function-setf
-  "lower-sexp-to-ast: (function (setf foo)) -> ast-function"
-  (let ((node (lower '(function (setf foo)))))
-    (assert-true (cl-cc::ast-function-p node))
-    (assert-equal '(setf foo) (cl-cc::ast-function-name node))))
-
 (deftest lower-multiple-value-call-form
   "lower-sexp-to-ast: multiple-value-call -> ast-multiple-value-call"
   (let ((node (lower '(multiple-value-call #'list (values 1 2) (values 3 4)))))
     (assert-true (cl-cc::ast-multiple-value-call-p node))
     (assert-= 2 (length (cl-cc::ast-mv-call-args node)))))
-
-(deftest lower-multiple-value-prog1-form
-  "lower-sexp-to-ast: multiple-value-prog1 -> ast-multiple-value-prog1"
-  (let ((node (lower '(multiple-value-prog1 (values 1 2) (print 3)))))
-    (assert-true (cl-cc::ast-multiple-value-prog1-p node))))
-
-(deftest lower-setf-gethash
-  "lower-sexp-to-ast: (setf (gethash k tbl) v) -> ast-set-gethash"
-  (let ((node (lower '(setf (gethash 'k tbl) 42))))
-    (assert-true (cl-cc::ast-set-gethash-p node))))
 
 (deftest lower-setf-slot-value
   "lower-sexp-to-ast: (setf (slot-value obj 'x) v) -> ast-set-slot-value"
@@ -965,132 +826,59 @@
 
 ;;; ─── NEW: lower-sexp-to-ast error cases ───────────────────────────────────
 
-(deftest lower-error-progn-no-body
-  "lower-sexp-to-ast: (progn) signals error"
-  (assert-signals error (lower '(progn))))
-
-(deftest lower-error-let-no-body
-  "lower-sexp-to-ast: (let ()) signals error"
-  (assert-signals error (lower '(let ()))))
-
-(deftest lower-error-lambda-no-body
-  "lower-sexp-to-ast: (lambda ()) signals error"
-  (assert-signals error (lower '(lambda ()))))
-
-(deftest lower-error-defun-no-body
-  "lower-sexp-to-ast: (defun f ()) signals error"
-  (assert-signals error (lower '(defun f ()))))
-
-(deftest lower-error-block-no-body
-  "lower-sexp-to-ast: (block b) signals error"
-  (assert-signals error (lower '(block b))))
-
-(deftest lower-error-binop-wrong-arity
-  "lower-sexp-to-ast: (+ 1) signals error"
-  (assert-signals error (lower '(+ 1))))
-
-(deftest lower-error-go-no-tag
-  "lower-sexp-to-ast: (go) signals error"
-  (assert-signals error (lower '(go))))
-
-(deftest lower-error-catch-no-body
-  "lower-sexp-to-ast: (catch 'tag) signals error"
-  (assert-signals error (lower '(catch 'tag))))
-
-(deftest lower-error-throw-wrong-arity
-  "lower-sexp-to-ast: (throw 'tag) signals error"
-  (assert-signals error (lower '(throw 'tag))))
-
-(deftest lower-error-unwind-no-cleanup
-  "lower-sexp-to-ast: (unwind-protect (x)) signals error"
-  (assert-signals error (lower '(unwind-protect (x)))))
-
-(deftest lower-error-handler-no-clause
-  "lower-sexp-to-ast: (handler-case (x)) signals error"
-  (assert-signals error (lower '(handler-case (x)))))
-
-(deftest lower-error-the-wrong-arity
-  "lower-sexp-to-ast: (the fixnum) signals error"
-  (assert-signals error (lower '(the fixnum))))
-
-(deftest lower-error-defclass-no-slots
-  "lower-sexp-to-ast: (defclass c ()) signals error"
-  (assert-signals error (lower '(defclass c ()))))
-
-(deftest lower-error-defgeneric-no-ll
-  "lower-sexp-to-ast: (defgeneric g) signals error"
-  (assert-signals error (lower '(defgeneric g))))
-
-(deftest lower-error-defmethod-no-body
-  "lower-sexp-to-ast: (defmethod m ()) signals error"
-  (assert-signals error (lower '(defmethod m ()))))
-
-(deftest lower-error-defmacro-no-body
-  "lower-sexp-to-ast: (defmacro m ()) signals error"
-  (assert-signals error (lower '(defmacro m ()))))
+(deftest-each lower-sexp-body-errors
+  "lower-sexp-to-ast signals error for forms missing required body or cleanup."
+  :cases (("progn-no-body"     '(progn))
+          ("let-no-body"       '(let ()))
+          ("lambda-no-body"    '(lambda ()))
+          ("defun-no-body"     '(defun f ()))
+          ("block-no-body"     '(block b))
+          ("binop-wrong-arity" '(+ 1))
+          ("go-no-tag"         '(go))
+          ("catch-no-body"     '(catch 'tag))
+          ("throw-wrong-arity" '(throw 'tag))
+          ("unwind-no-cleanup" '(unwind-protect (x)))
+          ("handler-no-clause" '(handler-case (x)))
+          ("the-wrong-arity"   '(the fixnum))
+          ("defclass-no-slots" '(defclass c ()))
+          ("defgeneric-no-ll"  '(defgeneric g))
+          ("defmethod-no-body" '(defmethod m ()))
+          ("defmacro-no-body"  '(defmacro m ())))
+  (form)
+  (assert-signals error (lower form)))
 
 ;;; ─── NEW: ast-to-sexp roundtrip additional forms ──────────────────────────
 
-(deftest ast-roundtrip-return-from
-  "ast-to-sexp roundtrip: return-from preserves head"
-  (let ((result (ast-roundtrip '(return-from blk 42))))
-    (assert-eq 'return-from (first result))))
+(deftest-each ast-roundtrip-head-preserved
+  "ast-to-sexp roundtrip: each form round-trips with its head symbol intact."
+  :cases (("return-from"   '(return-from blk 42)          'return-from)
+          ("go"            '(go my-tag)                   'go)
+          ("catch"         '(catch 'tag 1 2)              'catch)
+          ("throw"         '(throw 'tag 99)               'throw)
+          ("the"           '(the fixnum x)                'the)
+          ("values"        '(values 1 2 3)                'values)
+          ("print"         '(print 42)                    'print)
+          ("make-instance" '(make-instance 'point :x 1 :y 2) 'make-instance))
+  (form expected-head)
+  (assert-eq expected-head (first (ast-roundtrip form))))
 
-(deftest ast-roundtrip-go
-  "ast-to-sexp roundtrip: go preserves head"
-  (let ((result (ast-roundtrip '(go my-tag))))
-    (assert-eq 'go (first result))))
-
-(deftest ast-roundtrip-catch
-  "ast-to-sexp roundtrip: catch preserves head"
-  (let ((result (ast-roundtrip '(catch 'tag 1 2))))
-    (assert-eq 'catch (first result))))
-
-(deftest ast-roundtrip-throw
-  "ast-to-sexp roundtrip: throw preserves head"
-  (let ((result (ast-roundtrip '(throw 'tag 99))))
-    (assert-eq 'throw (first result))))
-
-(deftest ast-roundtrip-the
-  "ast-to-sexp roundtrip: the preserves head"
-  (let ((result (ast-roundtrip '(the fixnum x))))
-    (assert-eq 'the (first result))))
-
-(deftest ast-roundtrip-values
-  "ast-to-sexp roundtrip: values preserves head"
-  (let ((result (ast-roundtrip '(values 1 2 3))))
-    (assert-eq 'values (first result))))
-
-(deftest ast-roundtrip-print
-  "ast-to-sexp roundtrip: print preserves head"
-  (let ((result (ast-roundtrip '(print 42))))
-    (assert-eq 'print (first result))))
-
-(deftest ast-roundtrip-flet
-  "ast-to-sexp roundtrip: flet preserves structure"
-  (let ((result (ast-roundtrip '(flet ((f (x) x)) (f 1)))))
-    (assert-eq 'flet (first result))
+(deftest-each ast-roundtrip-local-fn-forms
+  "ast-to-sexp roundtrip: flet/labels preserve structure with one binding."
+  :cases (("flet"   'flet   '(flet ((f (x) x)) (f 1)))
+          ("labels" 'labels '(labels ((f (n) (if (= n 0) 1 (f (- n 1))))) (f 5))))
+  (expected-head form)
+  (let ((result (ast-roundtrip form)))
+    (assert-eq expected-head (first result))
     (assert-= 1 (length (second result)))))
 
-(deftest ast-roundtrip-labels
-  "ast-to-sexp roundtrip: labels preserves structure"
-  (let ((result (ast-roundtrip '(labels ((f (n) (if (= n 0) 1 (f (- n 1))))) (f 5)))))
-    (assert-eq 'labels (first result))
-    (assert-= 1 (length (second result)))))
-
-(deftest ast-roundtrip-handler-case
-  "ast-to-sexp roundtrip: handler-case preserves clauses"
-  (let ((result (ast-roundtrip '(handler-case (risky) (error (e) (print e))))))
-    (assert-eq 'handler-case (first result))
-    ;; form + at least one clause
-    (assert-true (>= (length result) 3))))
-
-(deftest ast-roundtrip-unwind-protect
-  "ast-to-sexp roundtrip: unwind-protect preserves structure"
-  (let ((result (ast-roundtrip '(unwind-protect (risky) (cleanup1) (cleanup2)))))
-    (assert-eq 'unwind-protect (first result))
-    ;; protected + 2 cleanup forms
-    (assert-= 4 (length result))))
+(deftest-each ast-roundtrip-condition-control
+  "ast-to-sexp roundtrip: handler-case and unwind-protect preserve head and structure length."
+  :cases (("handler-case"   '(handler-case (risky) (error (e) (print e)))       'handler-case   3)
+          ("unwind-protect" '(unwind-protect (risky) (cleanup1) (cleanup2))     'unwind-protect 4))
+  (form expected-head expected-min-len)
+  (let ((result (ast-roundtrip form)))
+    (assert-eq expected-head (first result))
+    (assert-true (>= (length result) expected-min-len))))
 
 (deftest ast-roundtrip-defvar-no-value
   "ast-to-sexp roundtrip: defvar without value"
@@ -1109,11 +897,6 @@
   (let ((result (ast-roundtrip '(defmethod area ((s circle)) (* 3 (slot-value s 'r))))))
     (assert-eq 'defmethod (first result))
     (assert-eq 'area (second result))))
-
-(deftest ast-roundtrip-make-instance
-  "ast-to-sexp roundtrip: make-instance preserves initargs"
-  (let ((result (ast-roundtrip '(make-instance 'point :x 1 :y 2))))
-    (assert-eq 'make-instance (first result))))
 
 ;;; ─── NEW: parse-slot-spec ──────────────────────────────────────────────────
 

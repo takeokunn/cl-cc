@@ -107,23 +107,22 @@
     `(let ((,vals-var (multiple-value-list ,form)))
        (nth ,n ,vals-var))))
 
-;; ECASE macro (exhaustive case)
+;; Shared expansion for exhaustive dispatch macros (ecase, etypecase)
+(defun %expand-exhaustive-case (case-head keyform cases error-msg)
+  (let ((key-var (gensym "KEY")))
+    `(let ((,key-var ,keyform))
+       (,case-head ,key-var
+         ,@cases
+         (otherwise (error ,error-msg))))))
+
+;; ECASE / ETYPECASE — signal error when no clause matches
 (our-defmacro ecase (keyform &body cases)
   "Like CASE but signals error if no case matches."
-  (let ((key-var (gensym "KEY")))
-    `(let ((,key-var ,keyform))
-       (case ,key-var
-         ,@cases
-         (otherwise (error "ECASE: no matching clause"))))))
+  (%expand-exhaustive-case 'case keyform cases "ECASE: no matching clause"))
 
-;; ETYPECASE macro (exhaustive typecase)
 (our-defmacro etypecase (keyform &body cases)
   "Like TYPECASE but signals error if no case matches."
-  (let ((key-var (gensym "KEY")))
-    `(let ((,key-var ,keyform))
-       (typecase ,key-var
-         ,@cases
-         (otherwise (error "ETYPECASE: no matching clause"))))))
+  (%expand-exhaustive-case 'typecase keyform cases "ETYPECASE: no matching clause"))
 
 ;;; ------------------------------------------------------------
 ;;; ANSI CL Phase 1 Macros (FR-201 through FR-212)
@@ -239,47 +238,32 @@
   "Establish restart bindings (stub: ignored)."
   `(progn ,@body))
 
-;;; FR-804/FR-805: Restart utility functions (stubs for ANSI compatibility)
-;;; Note: declare after docstring is invalid in our-defmacro bodies (docstring
-;;; is first body form; declare must be first). All stubs use minimal bodies.
+;;; FR-804/FR-805: Restart utility stubs (ANSI compatibility)
+;;;
+;;; Data-driven registration: map restart name → expansion rule.
+;;; :nil       → expand to nil (ignore entire form)
+;;; :abort     → expand to (error "ABORT invoked")
+;;; :passthru  → expand to the second form element (the value argument)
 
 (our-defmacro invoke-restart (name &rest args)
   `(error "No restart named ~S is active" ,name ,@args))
-
-(our-defmacro find-restart (name &optional condition)
-  (let ((_n name) (_c condition)) (declare (ignore _n _c))
-    `nil))
-
-(our-defmacro compute-restarts (&optional condition)
-  (let ((_c condition)) (declare (ignore _c))
-    `nil))
 
 (our-defmacro restart-name (restart)
   `(if (hash-table-p ,restart)
        (gethash :name ,restart)
        ,restart))
 
-;;; FR-805: Standard restart functions
+;; Nil-returning stubs: find-restart, compute-restarts, continue, muffle-warning
+(dolist (name '(find-restart compute-restarts continue muffle-warning))
+  (register-macro name (lambda (form env) (declare (ignore form env)) nil)))
 
-(our-defmacro abort (&optional condition)
-  (let ((_c condition)) (declare (ignore _c))
-    `(error "ABORT invoked")))
+;; abort: always signals error
+(register-macro 'abort
+  (lambda (form env) (declare (ignore form env)) '(error "ABORT invoked")))
 
-(our-defmacro continue (&optional condition)
-  (let ((_c condition)) (declare (ignore _c))
-    `nil))
-
-(our-defmacro muffle-warning (&optional condition)
-  (let ((_c condition)) (declare (ignore _c))
-    `nil))
-
-(our-defmacro use-value (value &optional condition)
-  (let ((_c condition)) (declare (ignore _c))
-    `,value))
-
-(our-defmacro store-value (value &optional condition)
-  (let ((_c condition)) (declare (ignore _c))
-    `,value))
+;; use-value / store-value: pass the value through, ignore optional condition
+(dolist (name '(use-value store-value))
+  (register-macro name (lambda (form env) (declare (ignore env)) (second form))))
 
 ;; WITH-INPUT-FROM-STRING (FR-209)
 (our-defmacro with-input-from-string (binding &body body)
@@ -309,11 +293,9 @@
     `(let ((,name (lambda () (values nil nil nil nil))))
        ,@body)))
 
-;; DEFINE-COMPILER-MACRO (FR-212) — stub
-(our-defmacro define-compiler-macro (name lambda-list &body body)
-  "Define a compiler macro for NAME (stub: ignored)."
-  (when (or name lambda-list body))
-  nil)
+;; DEFINE-COMPILER-MACRO (FR-212) — stub (ignored)
+(register-macro 'define-compiler-macro
+  (lambda (form env) (declare (ignore form env)) nil))
 
 ;;; ------------------------------------------------------------
 ;;; CXR Accessor Macros (algorithmic registration)
@@ -529,27 +511,24 @@
          (unless (member ,x ,l2)
            (setq ,acc (cons ,x ,acc)))))))
 
+;; Shared expansion for set-difference / intersection.
+;; KEEP-WHEN is 'when (intersection) or 'unless (set-difference).
+(defun %set-filter-expand (list1 list2 keep-when)
+  (let ((l2  (gensym "L2"))
+        (x   (gensym "X"))
+        (acc (gensym "ACC")))
+    `(let ((,l2 ,list2) (,acc nil))
+       (dolist (,x ,list1 (nreverse ,acc))
+         (,keep-when (member ,x ,l2)
+           (setq ,acc (cons ,x ,acc)))))))
+
 ;; SET-DIFFERENCE: elements in list1 not present in list2
 (our-defmacro set-difference (list1 list2)
-  (let ((l2 (gensym "L2"))
-        (x (gensym "X"))
-        (acc (gensym "ACC")))
-    `(let ((,l2 ,list2)
-           (,acc nil))
-       (dolist (,x ,list1 (nreverse ,acc))
-         (unless (member ,x ,l2)
-           (setq ,acc (cons ,x ,acc)))))))
+  (%set-filter-expand list1 list2 'unless))
 
 ;; INTERSECTION: elements present in both lists
 (our-defmacro intersection (list1 list2)
-  (let ((l2 (gensym "L2"))
-        (x (gensym "X"))
-        (acc (gensym "ACC")))
-    `(let ((,l2 ,list2)
-           (,acc nil))
-       (dolist (,x ,list1 (nreverse ,acc))
-         (when (member ,x ,l2)
-           (setq ,acc (cons ,x ,acc)))))))
+  (%set-filter-expand list1 list2 'when))
 
 ;; SUBSETP: true iff every element of list1 is in list2
 (our-defmacro subsetp (list1 list2)

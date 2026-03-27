@@ -223,36 +223,17 @@
           (incf passes))))
     (assert-true (>= (/ passes total) 0.90))))
 
-(deftest pbt-addition-commutative
-  "Property: Addition is commutative in compiled code."
-  (let ((passes 0)
-        (total 50))
+(deftest-each pbt-binary-op-commutative
+  "Property: binary arithmetic operations are commutative in compiled code."
+  :cases (("addition"       "+" 100)
+          ("multiplication" "*"  50))
+  (op range)
+  (let ((passes 0) (total 50))
     (dotimes (i total)
-      (let* ((a (random 100))
-             (b (random 100))
-             (r1 (handler-case
-                     (run-string (format nil "(+ ~D ~D)" a b))
-                   (error () nil)))
-             (r2 (handler-case
-                     (run-string (format nil "(+ ~D ~D)" b a))
-                   (error () nil))))
-        (when (and r1 r2 (= r1 r2))
-          (incf passes))))
-    (assert-true (>= (/ passes total) 0.90))))
-
-(deftest pbt-multiplication-commutative
-  "Property: Multiplication is commutative in compiled code."
-  (let ((passes 0)
-        (total 50))
-    (dotimes (i total)
-      (let* ((a (random 50))
-             (b (random 50))
-             (r1 (handler-case
-                     (run-string (format nil "(* ~D ~D)" a b))
-                   (error () nil)))
-             (r2 (handler-case
-                     (run-string (format nil "(* ~D ~D)" b a))
-                   (error () nil))))
+      (let* ((a (random range))
+             (b (random range))
+             (r1 (handler-case (run-string (format nil "(~A ~D ~D)" op a b)) (error () nil)))
+             (r2 (handler-case (run-string (format nil "(~A ~D ~D)" op b a)) (error () nil))))
         (when (and r1 r2 (= r1 r2))
           (incf passes))))
     (assert-true (>= (/ passes total) 0.90))))
@@ -450,7 +431,7 @@
 ;;; Hash Table Operation Tests
 
 (deftest-each compile-hash-table-numeric
-  "Hash table operations return the expected numeric values."
+  "Hash table operations return the expected numeric values; gethash returns nil when missing with no default."
   :cases (("hash-table-p"   1  "(let ((ht (make-hash-table))) (hash-table-p ht))")
           ("gethash-get"    42 "(let ((ht (make-hash-table))) (setf (gethash 'x ht) 42) (gethash 'x ht))")
           ("gethash-default" 99 "(let ((ht (make-hash-table))) (gethash 'missing ht 99))")
@@ -460,10 +441,7 @@
           ("setf-returns"  100 "(let ((ht (make-hash-table))) (setf (gethash 'k ht) 100))")
           ("overwrite"      20 "(let ((ht (make-hash-table))) (setf (gethash 'k ht) 10) (setf (gethash 'k ht) 20) (gethash 'k ht))"))
   (expected form)
-  (assert-= expected (run-string form)))
-
-(deftest compile-gethash-nil-when-missing
-  "gethash returns nil when key not found and no default"
+  (assert-= expected (run-string form))
   (assert-true (null (run-string "(let ((ht (make-hash-table))) (gethash 'missing ht))"))))
 
 ;;; Defmacro Compilation Tests
@@ -518,11 +496,14 @@
   (assert-true (not (null (run-string "(member 3 (list 1 2 3 4))")))))
 
 (deftest-each compile-numeric-predicates
-  "zerop/plusp/minusp return 1/0 for matching/non-matching values."
+  "zerop/plusp/minusp/evenp/oddp return 1/0 for matching/non-matching values."
   :cases (("zerop-0"    1 "(zerop 0)")
           ("zerop-5"    0 "(zerop 5)")
           ("plusp-5"    1 "(plusp 5)")
-          ("minusp-neg" 1 "(minusp (- 0 3))"))
+          ("minusp-neg" 1 "(minusp (- 0 3))")
+          ("evenp-true"  1 "(evenp 4)")
+          ("evenp-false" 0 "(evenp 3)")
+          ("oddp-true"   1 "(oddp 3)"))
   (expected form)
   (assert-= expected (run-string form)))
 
@@ -910,14 +891,6 @@
           ("abs"      5 "(abs (- 0 5))")
           ("min"      2 "(min 5 2)")
           ("max"      5 "(max 5 2)"))
-  (expected form)
-  (assert-= expected (run-string form)))
-
-(deftest-each compile-parity-predicates
-  "evenp/oddp return 1 for matching parity, 0 otherwise."
-  :cases (("evenp-true"  1 "(evenp 4)")
-          ("evenp-false" 0 "(evenp 3)")
-          ("oddp-true"   1 "(oddp 3)"))
   (expected form)
   (assert-= expected (run-string form)))
 
@@ -1401,15 +1374,14 @@
   (assert-true (equal expected (run-string form))))
 
 (deftest-each builtin-alphanumericp
-  "alphanumericp returns truthy for alphanumeric chars and 0 for others."
-  :cases (("alpha" "(alphanumericp #\\a)")
-          ("digit" "(alphanumericp #\\5)"))
-  (form)
-  (assert-true (not (zerop (run-string form)))))
-
-(deftest builtin-alphanumericp-punct
-  "alphanumericp returns 0 for punctuation"
-  (assert-true (zerop (run-string "(alphanumericp #\\!)"))))
+  "alphanumericp returns truthy for alphanumeric chars and 0 for punctuation."
+  :cases (("alpha" "(alphanumericp #\\a)" t)
+          ("digit" "(alphanumericp #\\5)" t)
+          ("punct" "(alphanumericp #\\!)" nil))
+  (form expected)
+  (if expected
+      (assert-true (not (zerop (run-string form))))
+      (assert-true (zerop  (run-string form)))))
 
 (deftest-each builtin-print-to-string
   "prin1-to-string and princ-to-string both return strings."
@@ -1563,16 +1535,15 @@
 
 ;;; Multiple Dispatch Tests
 
-(deftest multi-dispatch-numeric
+(deftest-each multi-dispatch-numeric
   "Multiple dispatch: double/mixed specialization and CLOS second arg."
-  ;; double specializer
-  (assert-= 1 (run-string "(progn (defclass animal () ()) (defclass dog (animal) ()) (defclass cat (animal) ()) (defclass food () ()) (defclass bone (food) ()) (defclass fish (food) ()) (defgeneric feed (a f)) (defmethod feed ((a dog) (f bone)) 1) (defmethod feed ((a cat) (f fish)) 2) (feed (make-instance 'dog) (make-instance 'bone)))" :stdlib t))
-  (assert-= 2 (run-string "(progn (defclass animal () ()) (defclass dog (animal) ()) (defclass cat (animal) ()) (defclass food () ()) (defclass bone (food) ()) (defclass fish (food) ()) (defgeneric feed (a f)) (defmethod feed ((a dog) (f bone)) 1) (defmethod feed ((a cat) (f fish)) 2) (feed (make-instance 'cat) (make-instance 'fish)))" :stdlib t))
-  ;; mixed specialization
-  (assert-= 10 (run-string "(progn (defclass shape () ()) (defclass circle (shape) ()) (defclass rect (shape) ()) (defgeneric area (s ctx)) (defmethod area ((s circle) ctx) 10) (defmethod area ((s rect) ctx) 20) (area (make-instance 'circle) 99))" :stdlib t))
-  (assert-= 20 (run-string "(progn (defclass shape () ()) (defclass circle (shape) ()) (defclass rect (shape) ()) (defgeneric area (s ctx)) (defmethod area ((s circle) ctx) 10) (defmethod area ((s rect) ctx) 20) (area (make-instance 'rect) 99))" :stdlib t))
-  ;; CLOS second arg
-  (assert-= 42 (run-string "(progn (defclass ctx () ()) (defclass nd () ()) (defclass nd-int (nd) ((v :initarg :v :reader nd-v))) (defgeneric cmp (n c)) (defmethod cmp ((n nd-int) c) 42) (cmp (make-instance 'nd-int :v 1) (make-instance 'ctx)))" :stdlib t)))
+  :cases (("dog+bone"     1  "(progn (defclass animal () ()) (defclass dog (animal) ()) (defclass cat (animal) ()) (defclass food () ()) (defclass bone (food) ()) (defclass fish (food) ()) (defgeneric feed (a f)) (defmethod feed ((a dog) (f bone)) 1) (defmethod feed ((a cat) (f fish)) 2) (feed (make-instance 'dog) (make-instance 'bone)))")
+           ("cat+fish"     2  "(progn (defclass animal () ()) (defclass dog (animal) ()) (defclass cat (animal) ()) (defclass food () ()) (defclass bone (food) ()) (defclass fish (food) ()) (defgeneric feed (a f)) (defmethod feed ((a dog) (f bone)) 1) (defmethod feed ((a cat) (f fish)) 2) (feed (make-instance 'cat) (make-instance 'fish)))")
+           ("circle-mixed" 10 "(progn (defclass shape () ()) (defclass circle (shape) ()) (defclass rect (shape) ()) (defgeneric area (s ctx)) (defmethod area ((s circle) ctx) 10) (defmethod area ((s rect) ctx) 20) (area (make-instance 'circle) 99))")
+           ("rect-mixed"   20 "(progn (defclass shape () ()) (defclass circle (shape) ()) (defclass rect (shape) ()) (defgeneric area (s ctx)) (defmethod area ((s circle) ctx) 10) (defmethod area ((s rect) ctx) 20) (area (make-instance 'rect) 99))")
+           ("clos-2nd-arg" 42 "(progn (defclass ctx () ()) (defclass nd () ()) (defclass nd-int (nd) ((v :initarg :v :reader nd-v))) (defgeneric cmp (n c)) (defmethod cmp ((n nd-int) c) 42) (cmp (make-instance 'nd-int :v 1) (make-instance 'ctx)))"))
+  (expected form)
+  (assert-= expected (run-string form :stdlib t)))
 
 (deftest multi-dispatch-inheritance-fallback
   "Multiple dispatch: dispatch falls back via class inheritance"
@@ -1580,10 +1551,12 @@
                         (let ((*package* (find-package :cl-cc)) (*print-pretty* nil))
                           (string-downcase (format nil "~S" (run-string "(progn (defclass a () ()) (defclass b (a) ()) (defclass x () ()) (defclass y (x) ()) (defgeneric op (p q)) (defmethod op ((p a) (q x)) 'base) (op (make-instance 'b) (make-instance 'y)))" :stdlib t)))))))
 
-(deftest multi-dispatch-type-equality
+(deftest-each multi-dispatch-type-equality
   "Multiple dispatch: double dispatch for type equality (self-hosting pattern)"
-  (assert-eq t (run-string "(progn (defclass ty () ()) (defclass ty-int (ty) ()) (defclass ty-str (ty) ()) (defgeneric ty-eq (a b)) (defmethod ty-eq ((a ty-int) (b ty-int)) t) (defmethod ty-eq ((a ty-str) (b ty-str)) t) (defmethod ty-eq ((a ty) (b ty)) nil) (ty-eq (make-instance 'ty-int) (make-instance 'ty-int)))" :stdlib t))
-  (assert-null (run-string "(progn (defclass ty () ()) (defclass ty-int (ty) ()) (defclass ty-str (ty) ()) (defgeneric ty-eq (a b)) (defmethod ty-eq ((a ty-int) (b ty-int)) t) (defmethod ty-eq ((a ty-str) (b ty-str)) t) (defmethod ty-eq ((a ty) (b ty)) nil) (ty-eq (make-instance 'ty-int) (make-instance 'ty-str)))" :stdlib t)))
+  :cases (("same-type" t   "(progn (defclass ty () ()) (defclass ty-int (ty) ()) (defclass ty-str (ty) ()) (defgeneric ty-eq (a b)) (defmethod ty-eq ((a ty-int) (b ty-int)) t) (defmethod ty-eq ((a ty-str) (b ty-str)) t) (defmethod ty-eq ((a ty) (b ty)) nil) (ty-eq (make-instance 'ty-int) (make-instance 'ty-int)))")
+           ("diff-type" nil "(progn (defclass ty () ()) (defclass ty-int (ty) ()) (defclass ty-str (ty) ()) (defgeneric ty-eq (a b)) (defmethod ty-eq ((a ty-int) (b ty-int)) t) (defmethod ty-eq ((a ty-str) (b ty-str)) t) (defmethod ty-eq ((a ty) (b ty)) nil) (ty-eq (make-instance 'ty-int) (make-instance 'ty-str)))"))
+  (expected form)
+  (assert-true (equal expected (run-string form :stdlib t))))
 
 ;;; CLOS Initform and Accessor Setf Tests
 
@@ -2206,42 +2179,43 @@
            (sq-plus-sq 2 2)))")))
 
 
-(deftest selfhost-cps-transformer
-  "cl-cc compiles and runs its own CPS transformer for (+ 1 2) and (* 6 7)."
-  (assert-= 3
-    (run-string
-      "(defun %cps-node (node k)
-         (cond
-           ((integerp node) `(funcall ,k ,node))
-           ((symbolp  node) `(funcall ,k ,node))
-           ((consp node)
-            (case (car node)
-              ((+ - *)
-               (let ((va (gensym \"A\")) (vb (gensym \"B\")))
-                 (%cps-node (second node)
-                   `(lambda (,va)
-                      ,(%cps-node (third node)
-                          `(lambda (,vb)
-                             (funcall ,k (,(car node) ,va ,vb))))))))
-              (otherwise (error \"Unsupported\"))))))
-       (defun cps-run (expr)
-         (eval (list `(lambda (k) ,(%cps-node expr 'k))
-                     '(lambda (result) result))))
-       (cps-run '(+ 1 2))"))
-  (assert-= 42
-    (run-string
-      "(defun %cps-node2 (node k)
-         (cond
-           ((integerp node) `(funcall ,k ,node))
-           ((symbolp  node) `(funcall ,k ,node))
-           ((consp node)
-            (let ((va (gensym \"A\")) (vb (gensym \"B\")))
-              (%cps-node2 (second node)
-                `(lambda (,va)
-                   ,(%cps-node2 (third node)
-                       `(lambda (,vb)
-                          (funcall ,k (,(car node) ,va ,vb))))))))))
-       (eval (list `(lambda (k) ,(%cps-node2 '(* 6 7) 'k))
-                   '(lambda (result) result)))")))
+(deftest-each selfhost-cps-transformer
+  "cl-cc compiles and runs its own CPS transformer for arithmetic expressions."
+  :cases (("add-1-2" 3
+           "(defun %cps-node (node k)
+              (cond
+                ((integerp node) `(funcall ,k ,node))
+                ((symbolp  node) `(funcall ,k ,node))
+                ((consp node)
+                 (case (car node)
+                   ((+ - *)
+                    (let ((va (gensym \"A\")) (vb (gensym \"B\")))
+                      (%cps-node (second node)
+                        `(lambda (,va)
+                           ,(%cps-node (third node)
+                               `(lambda (,vb)
+                                  (funcall ,k (,(car node) ,va ,vb))))))))
+                   (otherwise (error \"Unsupported\"))))))
+            (defun cps-run (expr)
+              (eval (list `(lambda (k) ,(%cps-node expr 'k))
+                          '(lambda (result) result))))
+            (cps-run '(+ 1 2))")
+          ("mul-6-7" 42
+           "(defun %cps-node2 (node k)
+              (cond
+                ((integerp node) `(funcall ,k ,node))
+                ((symbolp  node) `(funcall ,k ,node))
+                ((consp node)
+                 (let ((va (gensym \"A\")) (vb (gensym \"B\")))
+                   (%cps-node2 (second node)
+                     `(lambda (,va)
+                        ,(%cps-node2 (third node)
+                            `(lambda (,vb)
+                               (funcall ,k (,(car node) ,va ,vb))))))))))
+            (eval (list `(lambda (k) ,(%cps-node2 '(* 6 7) 'k))
+                        '(lambda (result) result)))"))
+  (expected form)
+  (assert-= expected (run-string form)))
+
 
 ;;; (run-tests is defined in framework.lisp)

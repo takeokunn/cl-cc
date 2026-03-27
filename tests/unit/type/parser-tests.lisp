@@ -20,49 +20,21 @@
   (let ((ty (cl-cc/type::parse-type-specifier '?)))
     (assert-true (cl-cc/type::type-error-p ty))))
 
-(deftest parse-fixnum
-  "fixnum symbol parses to type-int."
-  (assert-true (type-equal-p type-int (cl-cc/type::parse-type-specifier 'fixnum))))
-
-(deftest parse-integer-alias
-  "integer is an alias for type-int."
-  (assert-true (type-equal-p type-int (cl-cc/type::parse-type-specifier 'integer))))
-
-(deftest parse-string-type
-  "string parses to type-string."
-  (assert-true (type-equal-p type-string (cl-cc/type::parse-type-specifier 'string))))
-
-(deftest parse-boolean-type
-  "boolean parses to type-bool."
-  (assert-true (type-equal-p type-bool (cl-cc/type::parse-type-specifier 'boolean))))
-
-(deftest parse-bool-alias
-  "bool is an alias for type-bool."
-  (assert-true (type-equal-p type-bool (cl-cc/type::parse-type-specifier 'bool))))
-
-(deftest parse-symbol-type
-  "symbol parses to type-symbol."
-  (assert-true (type-equal-p type-symbol (cl-cc/type::parse-type-specifier 'symbol))))
-
-(deftest parse-character-type
-  "character parses to type-char."
-  (assert-true (type-equal-p type-char (cl-cc/type::parse-type-specifier 'character))))
-
-(deftest parse-char-alias
-  "char is an alias for type-char."
-  (assert-true (type-equal-p type-char (cl-cc/type::parse-type-specifier 'char))))
-
-(deftest parse-t-to-any
-  "t parses to type-any."
-  (assert-true (type-equal-p type-any (cl-cc/type::parse-type-specifier 't))))
-
-(deftest parse-top-to-any
-  "top parses to type-any."
-  (assert-true (type-equal-p type-any (cl-cc/type::parse-type-specifier 'top))))
-
-(deftest parse-cons-atom
-  "cons (as atom) parses to type-cons."
-  (assert-true (type-equal-p type-cons (cl-cc/type::parse-type-specifier 'cons))))
+(deftest-each parse-primitive-symbols
+  "Primitive type symbols parse to their expected type nodes."
+  :cases (("fixnum"    'fixnum    type-int)
+          ("integer"   'integer   type-int)
+          ("string"    'string    type-string)
+          ("boolean"   'boolean   type-bool)
+          ("bool"      'bool      type-bool)
+          ("symbol"    'symbol    type-symbol)
+          ("character" 'character type-char)
+          ("char"      'char      type-char)
+          ("t"         't         type-any)
+          ("top"       'top       type-any)
+          ("cons"      'cons      type-cons))
+  (sym expected)
+  (assert-true (type-equal-p expected (cl-cc/type::parse-type-specifier sym))))
 
 (deftest parse-unknown-symbol
   "Unknown symbol becomes type-primitive with that name."
@@ -78,21 +50,19 @@
     (assert-true (type-union-p ty))
     (assert-equal 2 (length (type-union-types ty)))))
 
-(deftest parse-or-error-empty
-  "(or) signals type-parse-error."
+(deftest-each parse-boolean-ops-empty-error
+  "(or) and (and) with no arguments each signal type-parse-error."
+  :cases (("or"  '(or))
+          ("and" '(and)))
+  (form)
   (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-type-specifier '(or))))
+    (cl-cc/type::parse-type-specifier form)))
 
 (deftest parse-and-intersection
   "(and fixnum string) produces a type-intersection."
   (let ((ty (cl-cc/type::parse-type-specifier '(and fixnum string))))
     (assert-true (type-intersection-p ty))
     (assert-equal 2 (length (type-intersection-types ty)))))
-
-(deftest parse-and-error-empty
-  "(and) signals type-parse-error."
-  (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-type-specifier '(and))))
 
 ;;; ─── parse-type-specifier: function / values / cons ──────────────────────
 
@@ -144,15 +114,12 @@
   (assert-signals cl-cc/type::type-parse-error
     (cl-cc/type::parse-type-specifier '(list fixnum string))))
 
-(deftest parse-vector-type-app
-  "(vector fixnum) produces type-app."
-  (let ((ty (cl-cc/type::parse-type-specifier '(vector fixnum))))
-    (assert-true (type-app-p ty))))
-
-(deftest parse-array-type-app
-  "(array string) produces type-app."
-  (let ((ty (cl-cc/type::parse-type-specifier '(array string))))
-    (assert-true (type-app-p ty))))
+(deftest-each parse-collection-type-apps
+  "(vector T) and (array T) both produce type-app nodes."
+  :cases (("vector" '(vector fixnum))
+          ("array"  '(array string)))
+  (form)
+  (assert-true (type-app-p (cl-cc/type::parse-type-specifier form))))
 
 ;;; ─── Arrow types: ->, ->1, ->0 ──────────────────────────────────────────
 
@@ -170,17 +137,14 @@
     (assert-equal 2 (length (type-arrow-params ty)))
     (assert-true (type-equal-p type-bool (type-arrow-return ty)))))
 
-(deftest parse-arrow-linear
-  "(->1 fixnum string) has :one multiplicity."
-  (let ((ty (cl-cc/type::parse-type-specifier `(,(intern "->1" :cl-cc/type) fixnum string))))
+(deftest-each parse-arrow-multiplicity
+  "->1 and ->0 produce arrow types with :one and :zero multiplicity respectively."
+  :cases (("linear" (intern "->1" :cl-cc/type) :one)
+          ("erased" (intern "->0" :cl-cc/type) :zero))
+  (arrow-sym expected-mult)
+  (let ((ty (cl-cc/type::parse-type-specifier `(,arrow-sym fixnum string))))
     (assert-true (type-arrow-p ty))
-    (assert-eq :one (cl-cc/type::type-arrow-mult ty))))
-
-(deftest parse-arrow-erased
-  "(->0 fixnum string) has :zero multiplicity."
-  (let ((ty (cl-cc/type::parse-type-specifier `(,(intern "->0" :cl-cc/type) fixnum string))))
-    (assert-true (type-arrow-p ty))
-    (assert-eq :zero (cl-cc/type::type-arrow-mult ty))))
+    (assert-eq expected-mult (cl-cc/type::type-arrow-mult ty))))
 
 (deftest parse-arrow-error-too-few
   "(-> fixnum) with only one arg signals error."
@@ -205,10 +169,14 @@
     (assert-true (type-var-p (type-forall-var ty)))
     (assert-true (type-equal-p type-int (cl-cc/type::type-forall-body ty)))))
 
-(deftest parse-forall-error-wrong-arity
-  "(forall a) signals error."
+(deftest-each parse-quantifier-arity-errors
+  "forall, exists, and mu with only one argument each signal type-parse-error."
+  :cases (("forall" '(forall a))
+          ("exists" '(exists a))
+          ("mu"     '(mu a)))
+  (form)
   (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-type-specifier '(forall a))))
+    (cl-cc/type::parse-type-specifier form)))
 
 (deftest parse-exists
   "(exists a fixnum) produces type-exists."
@@ -216,21 +184,11 @@
     (assert-true (type-exists-p ty))
     (assert-true (type-var-p (cl-cc/type::type-exists-var ty)))))
 
-(deftest parse-exists-error
-  "(exists a) signals error."
-  (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-type-specifier '(exists a))))
-
 (deftest parse-mu-recursive
   "(mu a fixnum) produces type-mu."
   (let ((ty (cl-cc/type::parse-type-specifier '(mu a fixnum))))
     (assert-true (type-mu-p ty))
     (assert-true (type-var-p (cl-cc/type::type-mu-var ty)))))
-
-(deftest parse-mu-error
-  "(mu a) signals error."
-  (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-type-specifier '(mu a))))
 
 ;;; ─── Qualified types: => ─────────────────────────────────────────────────
 
@@ -263,24 +221,15 @@
 
 ;;; ─── Graded modal types ─────────────────────────────────────────────────
 
-(deftest parse-graded-bang-one
-  "(!1 fixnum) produces linear type with grade :one."
-  (let ((ty (cl-cc/type::parse-type-specifier `(,(intern "!1" :cl-cc/type) fixnum))))
+(deftest-each parse-graded-modal-types
+  "!1, !0, and !W produce linear types with :one, :zero, :omega grades."
+  :cases (("one"   (intern "!1" :cl-cc/type) :one)
+          ("zero"  (intern "!0" :cl-cc/type) :zero)
+          ("omega" (intern "!W" :cl-cc/type) :omega))
+  (bang-sym expected-grade)
+  (let ((ty (cl-cc/type::parse-type-specifier `(,bang-sym fixnum))))
     (assert-true (type-linear-p ty))
-    (assert-eq :one (cl-cc/type::type-linear-grade ty))
-    (assert-true (type-equal-p type-int (cl-cc/type::type-linear-base ty)))))
-
-(deftest parse-graded-bang-zero
-  "(!0 fixnum) produces linear type with grade :zero."
-  (let ((ty (cl-cc/type::parse-type-specifier `(,(intern "!0" :cl-cc/type) fixnum))))
-    (assert-true (type-linear-p ty))
-    (assert-eq :zero (cl-cc/type::type-linear-grade ty))))
-
-(deftest parse-graded-bang-omega
-  "(!w fixnum) produces linear type with grade :omega."
-  (let ((ty (cl-cc/type::parse-type-specifier `(,(intern "!W" :cl-cc/type) fixnum))))
-    (assert-true (type-linear-p ty))
-    (assert-eq :omega (cl-cc/type::type-linear-grade ty))))
+    (assert-eq expected-grade (cl-cc/type::type-linear-grade ty))))
 
 (deftest parse-graded-bang-explicit
   "(! 1 fixnum) produces linear type with grade :one."
@@ -386,28 +335,22 @@
 
 ;;; ─── parse-typed-parameter ───────────────────────────────────────────────
 
-(deftest parse-typed-param-with-type
-  "(x fixnum) returns (x . type-int)."
+(deftest parse-typed-parameter-cases
+  "parse-typed-parameter: (x fixnum)→int; bare x→any."
   (let ((result (cl-cc/type::parse-typed-parameter '(x fixnum))))
     (assert-eq 'x (car result))
-    (assert-true (type-equal-p type-int (cdr result)))))
-
-(deftest parse-typed-param-no-type
-  "x returns (x . type-any)."
+    (assert-true (type-equal-p type-int (cdr result))))
   (let ((result (cl-cc/type::parse-typed-parameter 'x)))
     (assert-eq 'x (car result))
     (assert-true (type-equal-p type-any (cdr result)))))
 
 ;;; ─── parse-typed-optional-parameter ──────────────────────────────────────
 
-(deftest parse-optional-param-typed
-  "(x fixnum default) returns (x . type-int)."
+(deftest parse-optional-parameter-cases
+  "parse-typed-optional-parameter: (x fixnum nil)→int; bare x→any."
   (let ((result (cl-cc/type::parse-typed-optional-parameter '(x fixnum nil))))
     (assert-eq 'x (car result))
-    (assert-true (type-equal-p type-int (cdr result)))))
-
-(deftest parse-optional-param-bare
-  "x returns (x . type-any)."
+    (assert-true (type-equal-p type-int (cdr result))))
   (let ((result (cl-cc/type::parse-typed-optional-parameter 'x)))
     (assert-eq 'x (car result))
     (assert-true (type-equal-p type-any (cdr result)))))
@@ -420,12 +363,9 @@
     (let ((ty (cl-cc/type::extract-return-type body)))
       (assert-true (type-equal-p type-int ty)))))
 
-(deftest extract-return-type-absent
-  "Body without declare returns nil."
-  (assert-null (cl-cc/type::extract-return-type '((+ x 1)))))
-
-(deftest extract-return-type-nil-body
-  "nil body returns nil."
+(deftest extract-return-type-nil-cases
+  "Body without return-type declare, and nil body, both return nil."
+  (assert-null (cl-cc/type::extract-return-type '((+ x 1))))
   (assert-null (cl-cc/type::extract-return-type nil)))
 
 ;;; ─── Typed AST nodes ─────────────────────────────────────────────────────
@@ -448,35 +388,22 @@
 
 ;;; ─── looks-like-type-specifier-p ─────────────────────────────────────────
 
-(deftest looks-like-type-spec-primitives
-  "Recognized primitive names return true."
-  (assert-true (cl-cc/type::looks-like-type-specifier-p 'fixnum))
-  (assert-true (cl-cc/type::looks-like-type-specifier-p 'string))
-  (assert-true (cl-cc/type::looks-like-type-specifier-p 'boolean)))
-
-(deftest looks-like-type-spec-question-mark
-  "? returns true."
-  (assert-true (cl-cc/type::looks-like-type-specifier-p '?)))
-
-(deftest looks-like-type-spec-compound
-  "Compound forms with recognized heads return true."
-  (assert-true (cl-cc/type::looks-like-type-specifier-p '(or fixnum string)))
-  (assert-true (cl-cc/type::looks-like-type-specifier-p '(function (fixnum) string)))
-  (assert-true (cl-cc/type::looks-like-type-specifier-p '(values fixnum string))))
-
-(deftest looks-like-type-spec-unknown
-  "Random symbol returns nil (not a recognized type)."
+(deftest looks-like-type-specifier-p-behavior
+  "looks-like-type-specifier-p: recognized primitives/?, compound forms → true; unknown symbol → false."
+  (assert-true  (cl-cc/type::looks-like-type-specifier-p 'fixnum))
+  (assert-true  (cl-cc/type::looks-like-type-specifier-p 'string))
+  (assert-true  (cl-cc/type::looks-like-type-specifier-p 'boolean))
+  (assert-true  (cl-cc/type::looks-like-type-specifier-p '?))
+  (assert-true  (cl-cc/type::looks-like-type-specifier-p '(or fixnum string)))
+  (assert-true  (cl-cc/type::looks-like-type-specifier-p '(function (fixnum) string)))
+  (assert-true  (cl-cc/type::looks-like-type-specifier-p '(values fixnum string)))
   (assert-false (cl-cc/type::looks-like-type-specifier-p 'my-random-thing)))
 
 ;;; ─── parse-type-specifier-maybe ──────────────────────────────────────────
 
-(deftest parse-type-specifier-maybe-valid
-  "Valid type returns a type-node."
-  (let ((ty (cl-cc/type::parse-type-specifier-maybe 'fixnum)))
-    (assert-true (type-equal-p type-int ty))))
-
-(deftest parse-type-specifier-maybe-invalid
-  "Non-type returns nil."
+(deftest parse-type-specifier-maybe-behavior
+  "parse-type-specifier-maybe: recognized type→node; unknown symbol→nil."
+  (assert-true (type-equal-p type-int (cl-cc/type::parse-type-specifier-maybe 'fixnum)))
   (assert-null (cl-cc/type::parse-type-specifier-maybe 'my-random-thing)))
 
 ;;; ─── make-type-function-from-spec ────────────────────────────────────────

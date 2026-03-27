@@ -97,22 +97,14 @@
 
 ;;; ─── Rule Application ────────────────────────────────────────────────────
 
-(deftest egraph-rule-add-zero-r
-  "The add-zero-r rule (x+0 → x) is registered in *egraph-rules*."
+(deftest-each egraph-rule-registered
+  "Each builtin rewrite rule name is present in egraph-builtin-rules."
+  :cases (("add-zero-r"  'cl-cc::add-zero-r)
+          ("fold-add"    'cl-cc::fold-add)
+          ("mul-pow2"    'cl-cc::mul-pow2))
+  (rule-name)
   (let ((rules (cl-cc::egraph-builtin-rules)))
-    (assert-true (find 'cl-cc::add-zero-r rules
-                        :key (lambda (r) (getf r :name))))))
-
-(deftest egraph-rule-fold-add-registered
-  "The fold-add rule is registered."
-  (let ((rules (cl-cc::egraph-builtin-rules)))
-    (assert-true (find 'cl-cc::fold-add rules
-                        :key (lambda (r) (getf r :name))))))
-
-(deftest egraph-rule-mul-pow2-registered
-  "The mul-pow2 strength-reduction rule is registered."
-  (let ((rules (cl-cc::egraph-builtin-rules)))
-    (assert-true (find 'cl-cc::mul-pow2 rules
+    (assert-true (find rule-name rules
                         :key (lambda (r) (getf r :name))))))
 
 ;;; ─── Saturation ──────────────────────────────────────────────────────────
@@ -174,14 +166,10 @@
 
 ;;; ─── Cost Model ──────────────────────────────────────────────────────────
 
-(deftest egraph-default-cost-const
-  "Constants have cost 0."
-  (assert-= 0 (cl-cc::egraph-default-cost 'const nil)))
-
-(deftest egraph-default-cost-add
-  "Addition has cost 1 (plus children)."
-  (assert-= 3 (cl-cc::egraph-default-cost 'add '(1 1))))
-
-(deftest egraph-default-cost-call
-  "Call has cost 10."
-  (assert-= 10 (cl-cc::egraph-default-cost 'call nil)))
+(deftest-each egraph-cost-model-cases
+  "egraph-default-cost returns the correct cost for each node type."
+  :cases (("const"  'const nil   0)
+          ("add"    'add   '(1 1) 3)
+          ("call"   'call  nil   10))
+  (op children expected)
+  (assert-= expected (cl-cc::egraph-default-cost op children)))

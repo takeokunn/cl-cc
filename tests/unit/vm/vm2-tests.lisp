@@ -15,24 +15,15 @@
 ;;; defopcode registration
 ;;; ------------------------------------------------------------
 
-(deftest vm2-opcode-const-registered
-  "defopcode const assigns a constant and populates the dispatch table."
+(deftest vm2-opcode-registration
+  "defopcode: each opcode has a numeric id, dispatch handler, name entry, and encoder mapping."
   (assert-true (numberp cl-cc::+op2-const+))
-  (assert-true (not (null (aref cl-cc::*opcode-dispatch-table* cl-cc::+op2-const+)))))
-
-(deftest vm2-opcode-add2-registered
-  "defopcode add2 has a dispatch handler and name entry."
+  (assert-true (not (null (aref cl-cc::*opcode-dispatch-table* cl-cc::+op2-const+))))
   (assert-true (not (null (aref cl-cc::*opcode-dispatch-table* cl-cc::+op2-add2+))))
-  (assert-equal 'cl-cc::add2 (aref cl-cc::*opcode-name-table* cl-cc::+op2-add2+)))
-
-(deftest vm2-opcode-encoder-table
-  "defopcode registers the name->opcode mapping in *opcode-encoder-table*."
-  (assert-= cl-cc::+op2-const+
-            (gethash 'cl-cc::const cl-cc::*opcode-encoder-table*))
-  (assert-= cl-cc::+op2-move+
-            (gethash 'cl-cc::move cl-cc::*opcode-encoder-table*))
-  (assert-= cl-cc::+op2-add2+
-            (gethash 'cl-cc::add2 cl-cc::*opcode-encoder-table*)))
+  (assert-equal 'cl-cc::add2 (aref cl-cc::*opcode-name-table* cl-cc::+op2-add2+))
+  (assert-= cl-cc::+op2-const+ (gethash 'cl-cc::const cl-cc::*opcode-encoder-table*))
+  (assert-= cl-cc::+op2-move+  (gethash 'cl-cc::move  cl-cc::*opcode-encoder-table*))
+  (assert-= cl-cc::+op2-add2+  (gethash 'cl-cc::add2  cl-cc::*opcode-encoder-table*)))
 
 (deftest vm2-opcode-distinct-values
   "Each defopcode gets a unique opcode number."
@@ -48,84 +39,56 @@
 ;;; vm2-state defstruct
 ;;; ------------------------------------------------------------
 
-(deftest vm2-state-is-struct
-  "make-vm-state creates a vm2-state struct."
+(deftest vm2-state-structure
+  "make-vm2-state: struct predicate, 256-register vector (all nil), :output-stream kwarg, *features* populated."
   (let ((s (cl-cc::make-vm2-state)))
-    (assert-true (cl-cc::vm2-state-p s))))
-
-(deftest vm2-state-register-file-is-simple-vector
-  "vm-state-registers is a simple-vector of 256 elements."
-  (let ((s (cl-cc::make-vm2-state)))
+    (assert-true (cl-cc::vm2-state-p s))
     (assert-true (simple-vector-p (cl-cc::vm2-state-registers s)))
-    (assert-= 256 (length (cl-cc::vm2-state-registers s)))))
-
-(deftest vm2-state-registers-init-nil
-  "All 256 registers are initialised to NIL."
-  (let ((s (cl-cc::make-vm2-state)))
+    (assert-= 256 (length (cl-cc::vm2-state-registers s)))
     (dotimes (i 256)
-      (assert-true (null (cl-cc::vm2-reg-get s i))))))
-
-(deftest vm2-state-output-stream
-  "make-vm-state :output-stream sets the output stream slot."
+      (assert-true (null (cl-cc::vm2-reg-get s i))))
+    (assert-true (not (null (gethash '*features* (cl-cc::vm2-state-global-vars s))))))
   (let* ((str (make-string-output-stream))
          (s   (cl-cc::make-vm2-state :output-stream str)))
     (assert-equal str (cl-cc::vm2-state-output-stream s))))
-
-(deftest vm2-state-globals-populated
-  "make-vm-state pre-populates *features* and other global vars."
-  (let ((s (cl-cc::make-vm2-state)))
-    (assert-true (not (null (gethash '*features* (cl-cc::vm2-state-global-vars s)))))))
 
 ;;; ------------------------------------------------------------
 ;;; vm-reg-get / vm-reg-set (integer-indexed)
 ;;; ------------------------------------------------------------
 
-(deftest vm2-reg-set-and-get
-  "vm-reg-set stores a value; vm-reg-get retrieves it."
+(deftest vm2-reg-operations
+  "vm2-reg-set/get: stores, retrieves, returns value, overwrites; all 256 slots independent."
   (let ((s (cl-cc::make-vm2-state)))
     (cl-cc::vm2-reg-set s 0 42)
-    (assert-= 42 (cl-cc::vm2-reg-get s 0))))
-
-(deftest vm2-reg-all-256-independent
-  "All 256 registers are independent storage slots."
-  (let ((s (cl-cc::make-vm2-state)))
+    (assert-= 42 (cl-cc::vm2-reg-get s 0))
+    ;; set returns the written value
+    (assert-= 99 (cl-cc::vm2-reg-set s 5 99))
+    ;; overwrite
+    (cl-cc::vm2-reg-set s 3 100)
+    (cl-cc::vm2-reg-set s 3 200)
+    (assert-= 200 (cl-cc::vm2-reg-get s 3))
+    ;; all 256 slots are independent
     (dotimes (i 256)
       (cl-cc::vm2-reg-set s i i))
     (dotimes (i 256)
       (assert-= i (cl-cc::vm2-reg-get s i)))))
 
-(deftest vm2-reg-set-returns-value
-  "vm-reg-set returns the written value."
-  (let ((s (cl-cc::make-vm2-state)))
-    (assert-= 99 (cl-cc::vm2-reg-set s 5 99))))
-
-(deftest vm2-reg-overwrite
-  "vm-reg-set overwrites a previously written value."
-  (let ((s (cl-cc::make-vm2-state)))
-    (cl-cc::vm2-reg-set s 3 100)
-    (cl-cc::vm2-reg-set s 3 200)
-    (assert-= 200 (cl-cc::vm2-reg-get s 3))))
-
 ;;; ------------------------------------------------------------
 ;;; make-register allocates unique keyword names
 ;;; ------------------------------------------------------------
 
-(deftest make-register-returns-keyword
-  "make-register returns a keyword symbol :R0, :R1, ... (old-style register names)."
+(deftest make-register-allocation
+  "make-register allocates :R0, :R1, :R2, ... as keywords in sequential order."
   (let ((ctx (make-instance 'cl-cc::compiler-context)))
     (let ((r0 (cl-cc::make-register ctx))
           (r1 (cl-cc::make-register ctx))
           (r2 (cl-cc::make-register ctx)))
       (assert-true (keywordp r0))
       (assert-true (keywordp r1))
-      (assert-true (keywordp r2)))))
-
-(deftest make-register-sequential
-  "make-register allocates :R0, :R1, :R2, ... in order."
-  (let ((ctx (make-instance 'cl-cc::compiler-context)))
-    (assert-eq :r0 (cl-cc::make-register ctx))
-    (assert-eq :r1 (cl-cc::make-register ctx))
-    (assert-eq :r2 (cl-cc::make-register ctx))))
+      (assert-true (keywordp r2))
+      (assert-eq :r0 r0)
+      (assert-eq :r1 r1)
+      (assert-eq :r2 r2))))
 
 ;;; ------------------------------------------------------------
 ;;; run-vm — basic programs
@@ -227,35 +190,17 @@
 ;;; vm-const (CLOS)
 ;;; ------------------------------------------------------------
 
-(deftest vm-const-stores-integer
-  "vm-const stores an integer into a register."
+(deftest-each vm-const-stores-value
+  "vm-const stores any CL value type into a register."
+  :cases (("integer" 42)
+          ("string"  "hello")
+          ("nil"     nil)
+          ("symbol"  'foo)
+          ("list"    '(1 2 3)))
+  (value)
   (let ((s (make-clos-vm-state)))
-    (exec1 (cl-cc::make-vm-const :dst :r0 :value 42) s)
-    (assert-= 42 (cl-cc::vm-reg-get s :r0))))
-
-(deftest vm-const-stores-string
-  "vm-const stores a string into a register."
-  (let ((s (make-clos-vm-state)))
-    (exec1 (cl-cc::make-vm-const :dst :r1 :value "hello") s)
-    (assert-string= "hello" (cl-cc::vm-reg-get s :r1))))
-
-(deftest vm-const-stores-nil
-  "vm-const stores nil into a register."
-  (let ((s (make-clos-vm-state)))
-    (exec1 (cl-cc::make-vm-const :dst :r2 :value nil) s)
-    (assert-null (cl-cc::vm-reg-get s :r2))))
-
-(deftest vm-const-stores-symbol
-  "vm-const stores a symbol into a register."
-  (let ((s (make-clos-vm-state)))
-    (exec1 (cl-cc::make-vm-const :dst :r3 :value 'foo) s)
-    (assert-eq 'foo (cl-cc::vm-reg-get s :r3))))
-
-(deftest vm-const-stores-list
-  "vm-const stores a list into a register."
-  (let ((s (make-clos-vm-state)))
-    (exec1 (cl-cc::make-vm-const :dst :r4 :value '(1 2 3)) s)
-    (assert-equal '(1 2 3) (cl-cc::vm-reg-get s :r4))))
+    (exec1 (cl-cc::make-vm-const :dst :r0 :value value) s)
+    (assert-equal value (cl-cc::vm-reg-get s :r0))))
 
 (deftest vm-const-advances-pc
   "vm-const returns next-pc = 1."
@@ -269,19 +214,13 @@
 ;;; vm-move (CLOS)
 ;;; ------------------------------------------------------------
 
-(deftest vm-move-copies-register
-  "vm-move copies the value of src to dst."
+(deftest vm-move-behavior
+  "vm-move copies src to dst and leaves src unchanged."
   (let ((s (make-clos-vm-state)))
     (cl-cc::vm-reg-set s :r1 99)
     (exec1 (cl-cc::make-vm-move :dst :r0 :src :r1) s)
-    (assert-= 99 (cl-cc::vm-reg-get s :r0))))
-
-(deftest vm-move-does-not-clobber-src
-  "vm-move leaves the source register unchanged."
-  (let ((s (make-clos-vm-state)))
-    (cl-cc::vm-reg-set s :r1 77)
-    (exec1 (cl-cc::make-vm-move :dst :r0 :src :r1) s)
-    (assert-= 77 (cl-cc::vm-reg-get s :r1))))
+    (assert-= 99 (cl-cc::vm-reg-get s :r0))
+    (assert-= 99 (cl-cc::vm-reg-get s :r1))))
 
 ;;; ------------------------------------------------------------
 ;;; vm-add / vm-sub / vm-mul (CLOS)
@@ -305,25 +244,18 @@
 ;;; vm-halt (CLOS)
 ;;; ------------------------------------------------------------
 
-(deftest vm-halt-signals-halt
-  "vm-halt sets halt-p to T and returns the register value."
+(deftest-each vm-halt-behavior
+  "vm-halt sets halt-p to T and returns the register value for any stored value."
+  :cases (("integer" 123)
+          ("nil"     nil))
+  (halt-val)
   (let ((s (make-clos-vm-state)))
-    (cl-cc::vm-reg-set s :r0 123)
+    (cl-cc::vm-reg-set s :r0 halt-val)
     (multiple-value-bind (next-pc halt-p result)
         (exec1 (cl-cc::make-vm-halt :reg :r0) s)
       (assert-null next-pc)
       (assert-true halt-p)
-      (assert-= 123 result))))
-
-(deftest vm-halt-with-nil
-  "vm-halt returns nil when the halting register contains nil."
-  (let ((s (make-clos-vm-state)))
-    (cl-cc::vm-reg-set s :r0 nil)
-    (multiple-value-bind (next-pc halt-p result)
-        (exec1 (cl-cc::make-vm-halt :reg :r0) s)
-      (assert-null next-pc)
-      (assert-true halt-p)
-      (assert-null result))))
+      (assert-equal halt-val result))))
 
 ;;; ------------------------------------------------------------
 ;;; vm-jump / vm-jump-zero (CLOS)
@@ -339,75 +271,48 @@
       (assert-= 5 next-pc)
       (assert-null halt-p))))
 
-(deftest vm-jump-zero-taken-on-nil
-  "vm-jump-zero jumps when register is nil (falsy)."
+(deftest-each vm-jump-zero-behavior
+  "vm-jump-zero jumps when register is falsy (nil/0), falls through when truthy."
+  :cases (("nil-jumps"           nil "skip"        10 10)
+          ("zero-jumps"          0   "zero-target"  7  7)
+          ("truthy-falls-through" 42 "skip"         10  1))
+  (reg-val label table-pc expected-pc)
   (let ((s   (make-clos-vm-state))
-        (lbl (make-labels-table "skip" 10)))
-    (cl-cc::vm-reg-set s :r0 nil)
+        (lbl (make-labels-table label table-pc)))
+    (cl-cc::vm-reg-set s :r0 reg-val)
     (multiple-value-bind (next-pc halt-p)
         (cl-cc::execute-instruction
-         (cl-cc::make-vm-jump-zero :reg :r0 :label "skip") s 0 lbl)
-      (assert-= 10 next-pc)
+         (cl-cc::make-vm-jump-zero :reg :r0 :label label) s 0 lbl)
+      (assert-= expected-pc next-pc)
       (assert-null halt-p))))
-
-(deftest vm-jump-zero-not-taken-on-truthy
-  "vm-jump-zero falls through when register is truthy."
-  (let ((s   (make-clos-vm-state))
-        (lbl (make-labels-table "skip" 10)))
-    (cl-cc::vm-reg-set s :r0 42)
-    (multiple-value-bind (next-pc halt-p)
-        (cl-cc::execute-instruction
-         (cl-cc::make-vm-jump-zero :reg :r0 :label "skip") s 0 lbl)
-      (assert-= 1 next-pc)
-      (assert-null halt-p))))
-
-(deftest vm-jump-zero-taken-on-zero
-  "vm-jump-zero also jumps when register value is 0."
-  (let ((s   (make-clos-vm-state))
-        (lbl (make-labels-table "zero-target" 7)))
-    (cl-cc::vm-reg-set s :r0 0)
-    (multiple-value-bind (next-pc)
-        (cl-cc::execute-instruction
-         (cl-cc::make-vm-jump-zero :reg :r0 :label "zero-target") s 0 lbl)
-      (assert-= 7 next-pc))))
 
 ;;; ------------------------------------------------------------
 ;;; vm-set-global / vm-get-global (CLOS)
 ;;; ------------------------------------------------------------
 
-(deftest vm-set-global-stores-value
-  "vm-set-global stores a value in the global-vars table."
+(deftest vm-globals-operations
+  "vm-set-global/vm-get-global: store, retrieve, and round-trip global variables."
   (let ((s (make-clos-vm-state)))
     (cl-cc::vm-reg-set s :r0 42)
     (exec1 (cl-cc::make-vm-set-global :name 'myvar :src :r0) s)
-    (assert-= 42 (gethash 'myvar (cl-cc::vm-global-vars s)))))
-
-(deftest vm-get-global-retrieves-value
-  "vm-get-global loads a previously stored global into a register."
+    (assert-= 42 (gethash 'myvar (cl-cc::vm-global-vars s))))
   (let ((s (make-clos-vm-state)))
     (setf (gethash 'myvar2 (cl-cc::vm-global-vars s)) 99)
     (exec1 (cl-cc::make-vm-get-global :dst :r0 :name 'myvar2) s)
-    (assert-= 99 (cl-cc::vm-reg-get s :r0))))
-
-(deftest vm-globals-roundtrip
-  "set-global then get-global round-trips a string value."
+    (assert-= 99 (cl-cc::vm-reg-get s :r0)))
   (let ((s (make-clos-vm-state)))
     (cl-cc::vm-reg-set s :r1 "world")
     (exec1 (cl-cc::make-vm-set-global :name 'strvar :src :r1) s)
     (exec1 (cl-cc::make-vm-get-global :dst :r2 :name 'strvar) s)
     (assert-string= "world" (cl-cc::vm-reg-get s :r2))))
 
-(deftest vm2-state-globals-active-restarts
-  "vm2-state pre-populates *active-restarts* to nil."
+(deftest vm2-state-globals-init
+  "vm2-state pre-populates *active-restarts* (nil) and *standard-output* (non-nil)."
   (let ((s (cl-cc::make-vm2-state)))
     (multiple-value-bind (val found-p)
         (gethash 'cl-cc::*active-restarts* (cl-cc::vm2-state-global-vars s))
       (assert-true found-p)
-      (assert-null val))))
-
-(deftest vm2-state-globals-standard-output
-  "vm2-state pre-populates *standard-output* in global-vars."
-  (let ((s (cl-cc::make-vm2-state)))
+      (assert-null val))
     (assert-true (not (null (gethash '*standard-output* (cl-cc::vm2-state-global-vars s)))))))
 
 ;;; ------------------------------------------------------------
@@ -424,55 +329,46 @@
     (assert-= 10 (cl-cc::vm-reg-get s :r0))
     (assert-equal '(10 20 30) (cl-cc::vm-values-list s))))
 
-(deftest vm-mv-bind-distributes-values
-  "vm-mv-bind distributes values-list into multiple destination registers."
+(deftest vm-mv-bind-behavior
+  "vm-mv-bind distributes values-list to registers; pads nil when list is shorter."
   (let ((s (make-clos-vm-state)))
     (setf (cl-cc::vm-values-list s) '(1 2 3))
     (exec1 (cl-cc::make-vm-mv-bind :dst-regs (list :r0 :r1 :r2)) s)
     (assert-= 1 (cl-cc::vm-reg-get s :r0))
     (assert-= 2 (cl-cc::vm-reg-get s :r1))
-    (assert-= 3 (cl-cc::vm-reg-get s :r2))))
-
-(deftest vm-mv-bind-pads-nil-for-missing-values
-  "vm-mv-bind pads nil when values-list is shorter than dst-regs."
+    (assert-= 3 (cl-cc::vm-reg-get s :r2)))
   (let ((s (make-clos-vm-state)))
     (setf (cl-cc::vm-values-list s) '(42))
     (exec1 (cl-cc::make-vm-mv-bind :dst-regs (list :r0 :r1)) s)
     (assert-= 42 (cl-cc::vm-reg-get s :r0))
     (assert-null (cl-cc::vm-reg-get s :r1))))
 
-(deftest vm-values-to-list-copies-values-list
-  "vm-values-to-list copies vm-values-list into a register."
+(deftest vm-values-list-operations
+  "vm-values-to-list, vm-spread-values, and vm-clear-values each manage the values-list slot."
+  ;; values-to-list: copies values-list into a register
   (let ((s (make-clos-vm-state)))
     (setf (cl-cc::vm-values-list s) '(7 8 9))
     (exec1 (cl-cc::make-vm-values-to-list :dst :r0) s)
-    (assert-equal '(7 8 9) (cl-cc::vm-reg-get s :r0))))
-
-(deftest vm-spread-values-from-list
-  "vm-spread-values sets values-list from a register holding a list."
+    (assert-equal '(7 8 9) (cl-cc::vm-reg-get s :r0)))
+  ;; spread-values: loads values-list from a register holding a list
   (let ((s (make-clos-vm-state)))
     (cl-cc::vm-reg-set s :r1 '(100 200 300))
     (exec1 (cl-cc::make-vm-spread-values :dst :r0 :src :r1) s)
     (assert-= 100 (cl-cc::vm-reg-get s :r0))
-    (assert-equal '(100 200 300) (cl-cc::vm-values-list s))))
-
-(deftest vm-clear-values-resets-list
-  "vm-clear-values sets vm-values-list to nil."
+    (assert-equal '(100 200 300) (cl-cc::vm-values-list s)))
+  ;; clear-values: resets values-list to nil
   (let ((s (make-clos-vm-state)))
     (setf (cl-cc::vm-values-list s) '(1 2 3))
     (exec1 (cl-cc::make-vm-clear-values) s)
     (assert-null (cl-cc::vm-values-list s))))
 
-(deftest vm-ensure-values-sets-list-when-nil
-  "vm-ensure-values initialises values-list from src when list is nil."
+(deftest vm-ensure-values-behavior
+  "vm-ensure-values: initialises from src when nil; no-op when already set."
   (let ((s (make-clos-vm-state)))
     (cl-cc::vm-reg-set s :r0 55)
     (setf (cl-cc::vm-values-list s) nil)
     (exec1 (cl-cc::make-vm-ensure-values :src :r0) s)
-    (assert-equal '(55) (cl-cc::vm-values-list s))))
-
-(deftest vm-ensure-values-noop-when-already-set
-  "vm-ensure-values does not overwrite an existing values-list."
+    (assert-equal '(55) (cl-cc::vm-values-list s)))
   (let ((s (make-clos-vm-state)))
     (cl-cc::vm-reg-set s :r0 99)
     (setf (cl-cc::vm-values-list s) '(1 2))
@@ -483,28 +379,16 @@
 ;;; vm-heap-alloc / vm-heap-get / vm-heap-set
 ;;; ------------------------------------------------------------
 
-(deftest vm-heap-alloc-returns-integer
-  "vm-heap-alloc returns a positive integer address."
+(deftest vm-heap-alloc-operations
+  "vm-heap-alloc returns a positive integer; get roundtrips; set overwrites; addresses are unique."
   (let ((s (make-clos-vm-state)))
     (let ((addr (cl-cc::vm-heap-alloc s :some-object)))
       (assert-true (integerp addr))
-      (assert-true (> addr 0)))))
-
-(deftest vm-heap-alloc-and-get-roundtrip
-  "vm-heap-alloc followed by vm-heap-get retrieves the original object."
-  (let ((s (make-clos-vm-state)))
-    (let ((addr (cl-cc::vm-heap-alloc s "test-payload")))
-      (assert-string= "test-payload" (cl-cc::vm-heap-get s addr)))))
-
-(deftest vm-heap-set-overwrites-object
-  "vm-heap-set replaces an object at an existing address."
+      (assert-true (> addr 0))))
   (let ((s (make-clos-vm-state)))
     (let ((addr (cl-cc::vm-heap-alloc s "original")))
       (cl-cc::vm-heap-set s addr "replaced")
-      (assert-string= "replaced" (cl-cc::vm-heap-get s addr)))))
-
-(deftest vm-heap-alloc-multiple-addresses-unique
-  "Multiple vm-heap-alloc calls return distinct addresses."
+      (assert-string= "replaced" (cl-cc::vm-heap-get s addr))))
   (let ((s (make-clos-vm-state)))
     (let ((a1 (cl-cc::vm-heap-alloc s 1))
           (a2 (cl-cc::vm-heap-alloc s 2))
@@ -513,41 +397,37 @@
       (assert-true (/= a2 a3))
       (assert-true (/= a1 a3)))))
 
-(deftest vm-heap-alloc-stores-list-object
-  "vm-heap-alloc can store arbitrary CL objects including lists."
-  (let ((s (make-clos-vm-state)))
-    (let ((addr (cl-cc::vm-heap-alloc s '(a b c))))
-      (assert-equal '(a b c) (cl-cc::vm-heap-get s addr)))))
+(deftest-each vm-heap-alloc-roundtrip
+  "vm-heap-alloc followed by vm-heap-get retrieves the original object for any value type."
+  :cases (("string" "test-payload")
+          ("list"   '(a b c)))
+  (value)
+  (let* ((s    (make-clos-vm-state))
+         (addr (cl-cc::vm-heap-alloc s value)))
+    (assert-equal value (cl-cc::vm-heap-get s addr))))
+
 
 ;;; ------------------------------------------------------------
 ;;; vm-closure-object creation and inspection
 ;;; ------------------------------------------------------------
 
-(deftest vm-closure-object-creation
-  "make-instance vm-closure-object stores entry-label and params."
+(deftest vm-closure-object
+  "vm-closure-object: entry-label/params/captured-values stored; typep passes."
+  ;; basic slots
   (let ((c (make-instance 'cl-cc::vm-closure-object
                            :entry-label "my-fn"
                            :params (list :r1 :r2)
                            :captured-values nil)))
     (assert-string= "my-fn" (cl-cc::vm-closure-entry-label c))
     (assert-equal (list :r1 :r2) (cl-cc::vm-closure-params c))
-    (assert-null (cl-cc::vm-closure-captured-values c))))
-
-(deftest vm-closure-object-with-captures
-  "vm-closure-object stores captured variable values."
+    (assert-null (cl-cc::vm-closure-captured-values c))
+    (assert-true (typep c 'cl-cc::vm-closure-object)))
+  ;; captured variables
   (let ((c (make-instance 'cl-cc::vm-closure-object
                            :entry-label "adder"
                            :params (list :r1)
                            :captured-values (list (cons :r0 10)))))
     (assert-equal (list (cons :r0 10)) (cl-cc::vm-closure-captured-values c))))
-
-(deftest vm-closure-object-type-predicate
-  "vm-closure-object passes typep check."
-  (let ((c (make-instance 'cl-cc::vm-closure-object
-                           :entry-label "fn"
-                           :params nil
-                           :captured-values nil)))
-    (assert-true (typep c 'cl-cc::vm-closure-object))))
 
 ;;; ------------------------------------------------------------
 ;;; vm-register-function / vm-function-registry
@@ -587,62 +467,49 @@
     (assert-eq str (cl-cc::vm2-state-output-stream s))))
 
 ;;; ------------------------------------------------------------
-;;; run-vm — sub instruction (regression for negatives)
+;;; run-vm — edge cases (negatives, zero, large immediate, nil, move chain)
 ;;; ------------------------------------------------------------
 
-(deftest run-vm-sub-produces-negative
-  "run-vm sub2 correctly produces a negative result."
+(deftest-each run-vm-edge-cases
+  "run-vm handles edge-case operand values correctly."
+  :cases (("sub-negative"
+           (make-bytecode cl-cc::+op2-const+ 1 3   nil
+                          cl-cc::+op2-const+ 2 10  nil
+                          cl-cc::+op2-sub2+  0 1   2
+                          cl-cc::+op2-halt2+ 0 nil nil)
+           -7)
+          ("mul-by-zero"
+           (make-bytecode cl-cc::+op2-const+ 1 12  nil
+                          cl-cc::+op2-const+ 2 0   nil
+                          cl-cc::+op2-mul2+  0 1   2
+                          cl-cc::+op2-halt2+ 0 nil nil)
+           0)
+          ("large-immediate"
+           (make-bytecode cl-cc::+op2-const+ 0 1000000 nil
+                          cl-cc::+op2-halt2+ 0 nil     nil)
+           1000000)
+          ("nil-immediate"
+           (make-bytecode cl-cc::+op2-const+ 0 nil nil
+                          cl-cc::+op2-halt2+ 0 nil nil)
+           nil)
+          ("move-chain"
+           (make-bytecode cl-cc::+op2-const+ 1 55  nil
+                          cl-cc::+op2-move+  2 1   nil
+                          cl-cc::+op2-move+  0 2   nil
+                          cl-cc::+op2-halt2+ 0 nil nil)
+           55))
+  (code expected)
   (let ((s (cl-cc::make-vm2-state)))
-    (let ((code (make-bytecode cl-cc::+op2-const+ 1 3   nil
-                               cl-cc::+op2-const+ 2 10  nil
-                               cl-cc::+op2-sub2+  0 1   2
-                               cl-cc::+op2-halt2+ 0 nil nil)))
-      (assert-= -7 (cl-cc::run-vm code s)))))
-
-(deftest run-vm-mul-by-zero
-  "run-vm mul2 with zero produces zero."
-  (let ((s (cl-cc::make-vm2-state)))
-    (let ((code (make-bytecode cl-cc::+op2-const+ 1 12  nil
-                               cl-cc::+op2-const+ 2 0   nil
-                               cl-cc::+op2-mul2+  0 1   2
-                               cl-cc::+op2-halt2+ 0 nil nil)))
-      (assert-= 0 (cl-cc::run-vm code s)))))
-
-(deftest run-vm-large-immediate
-  "run-vm const can hold a large immediate value."
-  (let ((s (cl-cc::make-vm2-state)))
-    (let ((code (make-bytecode cl-cc::+op2-const+ 0 1000000 nil
-                               cl-cc::+op2-halt2+ 0 nil     nil)))
-      (assert-= 1000000 (cl-cc::run-vm code s)))))
-
-(deftest run-vm-nil-immediate
-  "run-vm const can hold nil as an immediate."
-  (let ((s (cl-cc::make-vm2-state)))
-    (let ((code (make-bytecode cl-cc::+op2-const+ 0 nil nil
-                               cl-cc::+op2-halt2+ 0 nil nil)))
-      (assert-null (cl-cc::run-vm code s)))))
-
-(deftest run-vm-move-chain
-  "run-vm move can chain: r1 → r2 → r0."
-  (let ((s (cl-cc::make-vm2-state)))
-    (let ((code (make-bytecode cl-cc::+op2-const+ 1 55  nil
-                               cl-cc::+op2-move+  2 1   nil
-                               cl-cc::+op2-move+  0 2   nil
-                               cl-cc::+op2-halt2+ 0 nil nil)))
-      (assert-= 55 (cl-cc::run-vm code s)))))
+    (assert-equal expected (cl-cc::run-vm code s))))
 
 ;;; ------------------------------------------------------------
 ;;; vm2-state — global-vars API through vm-global-vars shim
 ;;; ------------------------------------------------------------
 
 (deftest vm2-global-vars-shim
-  "vm-global-vars shim returns the global-vars hash table of a vm2-state."
+  "vm-global-vars shim returns a hash table; vm2-state pre-populates *features*."
   (let ((s (cl-cc::make-vm2-state)))
-    (assert-true (hash-table-p (cl-cc::vm-global-vars s)))))
-
-(deftest vm2-global-vars-features-populated
-  "vm2-state global-vars contains *features* key."
-  (let ((s (cl-cc::make-vm2-state)))
+    (assert-true (hash-table-p (cl-cc::vm-global-vars s)))
     (assert-true (not (null (gethash '*features* (cl-cc::vm-global-vars s)))))))
 
 ;;; ------------------------------------------------------------
@@ -661,21 +528,13 @@
 ;;; vm-cons-cell construction and accessors
 ;;; ------------------------------------------------------------
 
-(deftest vm-cons-cell-creation
-  "make-instance vm-cons-cell stores car and cdr."
+(deftest vm-cons-cell
+  "vm-cons-cell: stores car/cdr, car is setf-able, subtype of vm-heap-object."
   (let ((cell (make-instance 'cl-cc::vm-cons-cell :car 1 :cdr 2)))
     (assert-= 1 (cl-cc::vm-cons-cell-car cell))
-    (assert-= 2 (cl-cc::vm-cons-cell-cdr cell))))
-
-(deftest vm-cons-cell-setf-car
-  "vm-cons-cell-car is setf-able."
-  (let ((cell (make-instance 'cl-cc::vm-cons-cell :car 1 :cdr 2)))
+    (assert-= 2 (cl-cc::vm-cons-cell-cdr cell))
     (setf (cl-cc::vm-cons-cell-car cell) 99)
-    (assert-= 99 (cl-cc::vm-cons-cell-car cell))))
-
-(deftest vm-cons-cell-type
-  "vm-cons-cell is a subtype of vm-heap-object."
-  (let ((cell (make-instance 'cl-cc::vm-cons-cell :car nil :cdr nil)))
+    (assert-= 99 (cl-cc::vm-cons-cell-car cell))
     (assert-true (typep cell 'cl-cc::vm-heap-object))))
 
 ;;; ------------------------------------------------------------
@@ -683,13 +542,9 @@
 ;;; ------------------------------------------------------------
 
 (deftest vm-heap-address-struct
-  "make-vm-heap-address creates a struct with the given value."
+  "make-vm-heap-address creates a struct with correct value; predicate recognizes it."
   (let ((ha (cl-cc::make-vm-heap-address :value 42)))
-    (assert-= 42 (cl-cc::vm-heap-address-value ha))))
-
-(deftest vm-heap-address-predicate
-  "vm-heap-address-p recognises vm-heap-address structs."
-  (let ((ha (cl-cc::make-vm-heap-address :value 0)))
+    (assert-= 42 (cl-cc::vm-heap-address-value ha))
     (assert-true (cl-cc::vm-heap-address-p ha))))
 
 ;;; ------------------------------------------------------------
@@ -705,19 +560,13 @@
 ;;; vm-state class-registry
 ;;; ------------------------------------------------------------
 
-(deftest vm-state-class-registry-is-hash-table
-  "vm-state class-registry is a hash table."
+(deftest-each vm-state-registries-are-hash-tables
+  "vm-state class-registry and function-registry are both hash tables."
+  :cases (("class-registry"    #'cl-cc::vm-class-registry)
+          ("function-registry" #'cl-cc::vm-function-registry))
+  (accessor)
   (let ((s (make-clos-vm-state)))
-    (assert-true (hash-table-p (cl-cc::vm-class-registry s)))))
-
-;;; ------------------------------------------------------------
-;;; vm-state function-registry
-;;; ------------------------------------------------------------
-
-(deftest vm-state-function-registry-is-hash-table
-  "vm-state function-registry is a hash table."
-  (let ((s (make-clos-vm-state)))
-    (assert-true (hash-table-p (cl-cc::vm-function-registry s)))))
+    (assert-true (hash-table-p (funcall accessor s)))))
 
 ;;; ------------------------------------------------------------
 ;;; vm-falsep predicate
@@ -735,3 +584,43 @@
   (if expected-false-p
       (assert-true  (cl-cc::vm-falsep input))
       (assert-null  (cl-cc::vm-falsep input))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; rt-plist-put
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest rt-plist-put
+  "rt-plist-put: add new key, replace existing, preserve others, non-destructive."
+  ;; add new key
+  (assert-equal 42 (getf (cl-cc::rt-plist-put nil :foo 42) :foo))
+  ;; replace existing key, leave others
+  (let ((result (cl-cc::rt-plist-put '(:foo 1 :bar 2) :foo 99)))
+    (assert-equal 99 (getf result :foo))
+    (assert-equal 2  (getf result :bar)))
+  ;; multiple unrelated keys preserved
+  (let ((result (cl-cc::rt-plist-put '(:a 1 :b 2 :c 3) :b 20)))
+    (assert-equal 1  (getf result :a))
+    (assert-equal 20 (getf result :b))
+    (assert-equal 3  (getf result :c)))
+  ;; non-destructive
+  (let ((orig '(:x 10)))
+    (cl-cc::rt-plist-put orig :x 99)
+    (assert-equal 10 (getf orig :x))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; vm-list-to-lisp-list
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest vm-list-to-lisp-list
+  "vm-list-to-lisp-list: nil→nil, native list passthrough, vm-cons chain, atom wrapped."
+  ;; nil
+  (assert-equal nil (cl-cc::vm-list-to-lisp-list nil nil))
+  ;; native CL list passthrough
+  (let ((lst '(1 2 3)))
+    (assert-equal lst (cl-cc::vm-list-to-lisp-list nil lst)))
+  ;; vm-cons-cell chain
+  (let* ((tail (make-instance 'cl-cc::vm-cons-cell :car 2 :cdr nil))
+         (head (make-instance 'cl-cc::vm-cons-cell :car 1 :cdr tail)))
+    (assert-equal '(1 2) (cl-cc::vm-list-to-lisp-list nil head)))
+  ;; atom wrapped in list
+  (assert-equal '(some-atom) (cl-cc::vm-list-to-lisp-list nil 'some-atom)))

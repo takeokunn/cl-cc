@@ -13,105 +13,84 @@
 ;;;; ir-value allocation (types.lisp)
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest ir-value-fresh-ids
-  "ir-new-value assigns monotonically increasing IDs."
+(deftest ir-value-creation
+  "ir-new-value: IDs, type annotation, predicate, and def slot."
   (let* ((fn (cl-cc:ir-make-function 'test))
          (v0 (cl-cc:ir-new-value fn))
          (v1 (cl-cc:ir-new-value fn))
          (v2 (cl-cc:ir-new-value fn :type :integer)))
+    ;; monotonically increasing IDs
     (assert-= 0 (cl-cc:irv-id v0))
     (assert-= 1 (cl-cc:irv-id v1))
     (assert-= 2 (cl-cc:irv-id v2))
+    ;; type annotation
     (assert-eq :integer (cl-cc:irv-type v2))
-    (assert-null (cl-cc:irv-type v0))))
-
-(deftest ir-value-predicate
-  "ir-value-p correctly identifies ir-value structs."
-  (let* ((fn (cl-cc:ir-make-function 'test))
-         (v  (cl-cc:ir-new-value fn)))
-    (assert-true  (cl-cc:ir-value-p v))
+    (assert-null (cl-cc:irv-type v0))
+    ;; predicate
+    (assert-true  (cl-cc:ir-value-p v0))
     (assert-false (cl-cc:ir-value-p 42))
     (assert-false (cl-cc:ir-value-p nil))
-    (assert-false (cl-cc:ir-value-p "string"))))
-
-(deftest ir-value-def-initially-nil
-  "A freshly allocated ir-value has no defining instruction yet."
-  (let* ((fn (cl-cc:ir-make-function 'test))
-         (v  (cl-cc:ir-new-value fn)))
-    (assert-null (cl-cc:irv-def v))))
+    (assert-false (cl-cc:ir-value-p "string"))
+    ;; def slot initially nil
+    (assert-null (cl-cc:irv-def v0))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; ir-block allocation and ir-make-function (types.lisp)
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest ir-make-function-creates-entry-block
-  "ir-make-function creates a function with a pre-allocated :entry block."
-  (let ((fn (cl-cc:ir-make-function 'my-fn :return-type :integer)))
+(deftest ir-block-creation
+  "ir-make-function and ir-new-block: entry block, auto-labels, empty slots, ordering."
+  (let* ((fn  (cl-cc:ir-make-function 'my-fn :return-type :integer))
+         (b1  (cl-cc:ir-new-block fn))
+         (b2  (cl-cc:ir-new-block fn :then))
+         (fn2 (cl-cc:ir-make-function 'test))
+         (ba  (cl-cc:ir-new-block fn2 :b1))
+         (bb  (cl-cc:ir-new-block fn2 :b2)))
+    ;; ir-make-function creates entry block
     (assert-true  (cl-cc:ir-function-p fn))
     (assert-true  (cl-cc:ir-block-p    (cl-cc:irf-entry fn)))
     (assert-eq    :entry (cl-cc:irb-label (cl-cc:irf-entry fn)))
     (assert-equal :integer (cl-cc:irf-return-type fn))
-    (assert-eq    'my-fn (cl-cc:irf-name fn))))
-
-(deftest ir-new-block-auto-label
-  "ir-new-block generates :BLOCK<id> labels automatically when none given."
-  (let* ((fn (cl-cc:ir-make-function 'test))
-         ;; entry is id=0; next will be id=1
-         (b1 (cl-cc:ir-new-block fn))
-         (b2 (cl-cc:ir-new-block fn :then)))
+    (assert-eq    'my-fn (cl-cc:irf-name fn))
+    ;; auto-generated labels and IDs (entry=0, b1=1, b2=2)
     (assert-= 1 (cl-cc:irb-id b1))
     (assert-= 2 (cl-cc:irb-id b2))
     (assert-eq :block1 (cl-cc:irb-label b1))
-    (assert-eq :then   (cl-cc:irb-label b2))))
-
-(deftest ir-new-block-starts-empty
-  "A freshly created ir-block has no instructions, params, preds, or succs."
-  (let* ((fn (cl-cc:ir-make-function 'test))
-         (b  (cl-cc:ir-new-block fn)))
-    (assert-null (cl-cc:irb-insts        b))
-    (assert-null (cl-cc:irb-params       b))
-    (assert-null (cl-cc:irb-predecessors b))
-    (assert-null (cl-cc:irb-successors   b))
-    (assert-null (cl-cc:irb-terminator   b))))
-
-(deftest ir-new-block-appended-to-function
-  "ir-new-block appends new blocks to irf-blocks in creation order."
-  (let* ((fn  (cl-cc:ir-make-function 'test))
-         (b1  (cl-cc:ir-new-block fn :b1))
-         (b2  (cl-cc:ir-new-block fn :b2)))
-    (let ((blocks (cl-cc:irf-blocks fn)))
-      ;; entry is always first (created by ir-make-function)
+    (assert-eq :then   (cl-cc:irb-label b2))
+    ;; new block starts empty
+    (assert-null (cl-cc:irb-insts        b1))
+    (assert-null (cl-cc:irb-params       b1))
+    (assert-null (cl-cc:irb-predecessors b1))
+    (assert-null (cl-cc:irb-successors   b1))
+    (assert-null (cl-cc:irb-terminator   b1))
+    ;; blocks appended in creation order
+    (let ((blocks (cl-cc:irf-blocks fn2)))
       (assert-= 3 (length blocks))
-      (assert-eq (cl-cc:irf-entry fn) (first blocks))
-      (assert-eq b1 (second blocks))
-      (assert-eq b2 (third  blocks)))))
+      (assert-eq (cl-cc:irf-entry fn2) (first blocks))
+      (assert-eq ba (second blocks))
+      (assert-eq bb (third  blocks)))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; CFG edge management (block.lisp)
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest ir-add-edge-links-both-sides
-  "ir-add-edge updates successor and predecessor lists on both blocks."
+(deftest ir-add-edge-behavior
+  "ir-add-edge links both sides and rejects duplicate edges."
   (let* ((fn    (cl-cc:ir-make-function 'test))
          (entry (cl-cc:irf-entry fn))
          (then  (cl-cc:ir-new-block fn :then))
          (else  (cl-cc:ir-new-block fn :else)))
+    ;; links successor and predecessor lists on both blocks
     (cl-cc:ir-add-edge entry then)
     (cl-cc:ir-add-edge entry else)
     (assert-true (member then  (cl-cc:irb-successors   entry) :test #'eq))
     (assert-true (member else  (cl-cc:irb-successors   entry) :test #'eq))
     (assert-true (member entry (cl-cc:irb-predecessors then)  :test #'eq))
-    (assert-true (member entry (cl-cc:irb-predecessors else)  :test #'eq))))
-
-(deftest ir-add-edge-no-duplicates
-  "ir-add-edge does not add duplicate edges."
-  (let* ((fn   (cl-cc:ir-make-function 'test))
-         (a    (cl-cc:irf-entry fn))
-         (b    (cl-cc:ir-new-block fn :b)))
-    (cl-cc:ir-add-edge a b)
-    (cl-cc:ir-add-edge a b)  ; duplicate — should be ignored
-    (assert-= 1 (length (cl-cc:irb-successors   a)))
-    (assert-= 1 (length (cl-cc:irb-predecessors b)))))
+    (assert-true (member entry (cl-cc:irb-predecessors else)  :test #'eq))
+    ;; duplicate edge is ignored
+    (cl-cc:ir-add-edge entry then)
+    (assert-= 2 (length (cl-cc:irb-successors   entry)))
+    (assert-= 1 (length (cl-cc:irb-predecessors then)))))
 
 (deftest ir-emit-appends-to-block
   "ir-emit appends instructions in order and sets block back-pointer."
@@ -257,32 +236,22 @@
 ;;;; SSA variable tracking (ssa.lisp)
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest ir-write-read-var-same-block
-  "ir-read-var returns the value written with ir-write-var in the same block."
+(deftest ir-ssa-write-read-var
+  "ir-write-var / ir-read-var: same-block lookup, linear propagation, overwrite."
   (let* ((fn    (cl-cc:ir-make-function 'test))
          (entry (cl-cc:irf-entry fn))
-         (val   (cl-cc:ir-new-value fn :type :integer)))
-    (cl-cc:ir-write-var fn 'x entry val)
-    (assert-eq val (cl-cc:ir-read-var fn 'x entry))))
-
-(deftest ir-write-read-var-linear-propagation
-  "ir-read-var reaches through a single predecessor."
-  (let* ((fn    (cl-cc:ir-make-function 'test))
-         (entry (cl-cc:irf-entry fn))
+         (val   (cl-cc:ir-new-value fn :type :integer))
          (next  (cl-cc:ir-new-block fn :next))
-         (val   (cl-cc:ir-new-value fn :type :integer)))
-    (cl-cc:ir-add-edge entry next)
-    (cl-cc:ir-seal-block fn next)    ; all preds (just entry) are now known
-    (cl-cc:ir-write-var fn 'x entry val)
-    ;; Reading x from 'next' should find 'val' from entry
-    (assert-eq val (cl-cc:ir-read-var fn 'x next))))
-
-(deftest ir-write-var-overwrite
-  "A second ir-write-var in the same block overwrites the first."
-  (let* ((fn    (cl-cc:ir-make-function 'test))
-         (entry (cl-cc:irf-entry fn))
          (v1    (cl-cc:ir-new-value fn))
          (v2    (cl-cc:ir-new-value fn)))
+    ;; same-block read
+    (cl-cc:ir-write-var fn 'x entry val)
+    (assert-eq val (cl-cc:ir-read-var fn 'x entry))
+    ;; propagation through sealed predecessor
+    (cl-cc:ir-add-edge entry next)
+    (cl-cc:ir-seal-block fn next)
+    (assert-eq val (cl-cc:ir-read-var fn 'x next))
+    ;; overwrite in same block keeps last value
     (cl-cc:ir-write-var fn 'y entry v1)
     (cl-cc:ir-write-var fn 'y entry v2)
     (assert-eq v2 (cl-cc:ir-read-var fn 'y entry))))

@@ -9,31 +9,22 @@
 
 ;;; ─── kind struct predicates ──────────────────────────────────────────────────
 
-(deftest kind-type-singleton
-  "kind-type-p recognizes the singleton * kind."
-  (assert-true (kind-type-p +kind-type+)))
+(deftest-each kind-singleton-predicates
+  "Each kind singleton constant is recognized by its own predicate."
+  :cases (("type"         #'kind-type-p              +kind-type+)
+          ("effect"       #'kind-effect-p             +kind-effect+)
+          ("constraint"   #'cl-cc/type::kind-constraint-p   +kind-constraint+)
+          ("multiplicity" #'cl-cc/type::kind-multiplicity-p +kind-multiplicity+))
+  (pred-fn kind)
+  (assert-true (funcall pred-fn kind)))
 
-(deftest kind-effect-singleton
-  "kind-effect-p recognizes the singleton Effect kind."
-  (assert-true (kind-effect-p +kind-effect+)))
-
-(deftest kind-constraint-singleton
-  "+kind-constraint+ is a kind-constraint."
-  (assert-true (cl-cc/type::kind-constraint-p +kind-constraint+)))
-
-(deftest kind-multiplicity-singleton
-  "+kind-multiplicity+ is a kind-multiplicity."
-  (assert-true (cl-cc/type::kind-multiplicity-p +kind-multiplicity+)))
-
-(deftest kind-row-type-singleton
-  "+kind-row-type+ has elem = *."
-  (assert-true (kind-row-p +kind-row-type+))
-  (assert-true (kind-type-p (kind-row-elem +kind-row-type+))))
-
-(deftest kind-row-effect-singleton
-  "+kind-row-effect+ has elem = Effect."
-  (assert-true (kind-row-p +kind-row-effect+))
-  (assert-true (kind-effect-p (kind-row-elem +kind-row-effect+))))
+(deftest-each kind-row-singletons
+  "Row kind singletons are kind-row-p with the expected element kind."
+  :cases (("row-type"   +kind-row-type+   #'kind-type-p)
+          ("row-effect" +kind-row-effect+ #'kind-effect-p))
+  (row-kind elem-pred)
+  (assert-true (kind-row-p row-kind))
+  (assert-true (funcall elem-pred (kind-row-elem row-kind))))
 
 ;;; ─── kind-fun (arrow construction) ──────────────────────────────────────────
 
@@ -53,27 +44,17 @@
 
 ;;; ─── kind variables ─────────────────────────────────────────────────────────
 
-(deftest kind-var-fresh
-  "fresh-kind-var returns a kind-var."
-  (let ((kv (fresh-kind-var)))
-    (assert-true (kind-var-p kv))))
-
-(deftest kind-var-unique-ids
-  "Two fresh kind vars have different IDs."
-  (let ((kv1 (fresh-kind-var))
-        (kv2 (fresh-kind-var)))
-    (assert-false (kind-var-equal-p kv1 kv2))))
-
-(deftest kind-var-self-equal
-  "A kind var equals itself."
-  (let ((kv (fresh-kind-var)))
-    (assert-true (kind-var-equal-p kv kv))))
-
-(deftest kind-var-with-name
-  "fresh-kind-var with a name stores it."
-  (let ((kv (fresh-kind-var "test")))
-    (assert-true (kind-var-p kv))
-    (assert-equal "test" (cl-cc/type::kind-var-name kv))))
+(deftest kind-var-properties
+  "fresh-kind-var: is a kind-var, unique IDs, self-equal, stores optional name."
+  (let ((kv  (fresh-kind-var))
+        (kv1 (fresh-kind-var))
+        (kv2 (fresh-kind-var))
+        (kvn (fresh-kind-var "test")))
+    (assert-true  (kind-var-p kv))
+    (assert-false (kind-var-equal-p kv1 kv2))
+    (assert-true  (kind-var-equal-p kv kv))
+    (assert-true  (kind-var-p kvn))
+    (assert-equal "test" (cl-cc/type::kind-var-name kvn))))
 
 ;;; ─── kind-equal-p ───────────────────────────────────────────────────────────
 
@@ -94,24 +75,13 @@
   (k1 k2)
   (assert-false (kind-equal-p k1 k2)))
 
-(deftest kind-equal-arrow
-  "Two identical arrows are equal."
-  (assert-true (kind-equal-p
-                (kind-fun +kind-type+ +kind-type+)
-                (kind-fun +kind-type+ +kind-type+))))
-
-(deftest kind-not-equal-arrow-diff
-  "Arrows with different components are not equal."
-  (assert-false (kind-equal-p
-                 (kind-fun +kind-type+ +kind-effect+)
-                 (kind-fun +kind-type+ +kind-type+))))
-
-(deftest kind-equal-row
-  "Two Row * kinds are equal."
-  (assert-true (kind-equal-p +kind-row-type+ +kind-row-type+)))
-
-(deftest kind-not-equal-row-diff
-  "Row * and Row Effect are not equal."
+(deftest kind-equal-arrow-and-row
+  "Arrow equality (same/different components) and row kind equality."
+  (assert-true  (kind-equal-p (kind-fun +kind-type+ +kind-type+)
+                               (kind-fun +kind-type+ +kind-type+)))
+  (assert-false (kind-equal-p (kind-fun +kind-type+ +kind-effect+)
+                               (kind-fun +kind-type+ +kind-type+)))
+  (assert-true  (kind-equal-p +kind-row-type+ +kind-row-type+))
   (assert-false (kind-equal-p +kind-row-type+ +kind-row-effect+)))
 
 ;;; ─── kind-to-string ─────────────────────────────────────────────────────────
@@ -127,16 +97,10 @@
   (expected kind)
   (assert-equal expected (kind-to-string kind)))
 
-(deftest kind-to-string-arrow
-  "Arrow kind prints as '* -> *'."
-  (assert-equal "* -> *" (kind-to-string (kind-fun +kind-type+ +kind-type+))))
-
-(deftest kind-to-string-nested-arrow
-  "Nested arrow kind parenthesizes left: '(* -> *) -> *'."
+(deftest kind-to-string-computed-kinds
+  "Arrow kind prints as '* -> *'; nested arrow parenthesizes left; named var prints as 'k<name>'."
+  (assert-equal "* -> *" (kind-to-string (kind-fun +kind-type+ +kind-type+)))
   (let ((inner (kind-fun +kind-type+ +kind-type+)))
-    (assert-equal "(* -> *) -> *" (kind-to-string (kind-fun inner +kind-type+)))))
-
-(deftest kind-to-string-var-with-name
-  "Kind var with name prints as 'k<name>'."
+    (assert-equal "(* -> *) -> *" (kind-to-string (kind-fun inner +kind-type+))))
   (let ((kv (fresh-kind-var "foo")))
     (assert-equal "kfoo" (kind-to-string kv))))

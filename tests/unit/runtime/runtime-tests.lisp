@@ -10,26 +10,27 @@
 
 ;;; ─── Tagged Pointers ───────────────────────────────────────────────────────
 
-(deftest rt-tag-fixnum-zero
-  "rt-tag-fixnum 0 → 0 (tag bits are 000)."
-  (assert-= 0 (cl-cc/runtime:rt-tag-fixnum 0)))
-
-(deftest rt-tag-fixnum-positive
-  "rt-tag-fixnum shifts left by 3 bits."
-  (assert-= 8 (cl-cc/runtime:rt-tag-fixnum 1))
-  (assert-= 336 (cl-cc/runtime:rt-tag-fixnum 42)))
+(deftest-each rt-tag-fixnum
+  "rt-tag-fixnum shifts left by 3 bits; tag is 000 for fixnum."
+  :cases (("zero"       0   0)
+          ("one"        1   8)
+          ("forty-two"  42  336))
+  (n expected)
+  (assert-= expected (cl-cc/runtime:rt-tag-fixnum n)))
 
 (deftest rt-untag-fixnum-roundtrip
   "rt-untag-fixnum reverses rt-tag-fixnum."
   (dolist (n '(0 1 42 -7 1000000))
     (assert-= n (cl-cc/runtime:rt-untag-fixnum (cl-cc/runtime:rt-tag-fixnum n)))))
 
-(deftest rt-tag-bits-extracts-low-3
+(deftest-each rt-tag-bits-extracts-low-3
   "rt-tag-bits returns the low 3 bits."
-  (assert-= 0 (cl-cc/runtime:rt-tag-bits 8))   ; fixnum tag
-  (assert-= 1 (cl-cc/runtime:rt-tag-bits 9))   ; cons tag
-  (assert-= 7 (cl-cc/runtime:rt-tag-bits 15))  ; other tag
-  (assert-= 5 (cl-cc/runtime:rt-tag-bits 5)))
+  :cases (("fixnum-8"  8  0)
+          ("cons-9"    9  1)
+          ("max-15"    15 7)
+          ("plain-5"   5  5))
+  (tagged expected-bits)
+  (assert-= expected-bits (cl-cc/runtime:rt-tag-bits tagged)))
 
 (deftest rt-tag-constants-distinct
   "All 8 tag constants have distinct values 0-7."
@@ -46,14 +47,10 @@
 
 ;;; ─── Multiple Values Buffer ────────────────────────────────────────────────
 
-(deftest rt-values-buffer-clear-empty
-  "rt-values-clear resets to empty; count is 0."
+(deftest rt-values-buffer-push-ops
+  "rt-values-clear resets to empty; rt-values-push increments count."
   (cl-cc/runtime:rt-values-clear)
-  (assert-= 0 (cl-cc/runtime:rt-values-count)))
-
-(deftest rt-values-buffer-push-and-count
-  "rt-values-push adds values; count reflects them."
-  (cl-cc/runtime:rt-values-clear)
+  (assert-= 0 (cl-cc/runtime:rt-values-count))
   (cl-cc/runtime:rt-values-push 10)
   (cl-cc/runtime:rt-values-push 20)
   (assert-= 2 (cl-cc/runtime:rt-values-count)))
@@ -75,34 +72,26 @@
   (cl-cc/runtime:rt-values-push 2)
   (assert-equal '(1 2) (cl-cc/runtime:rt-values-to-list)))
 
-(deftest rt-spread-values-list
-  "rt-spread-values spreads a list into the buffer."
+(deftest-each rt-spread-values-shapes
+  "rt-spread-values: list spreads all elements; atom pushes one."
+  :cases (("list" '(10 20 30) 3 10)
+          ("atom" 42          1 42))
+  (input expected-count expected-first)
   (cl-cc/runtime:rt-values-clear)
-  (cl-cc/runtime:rt-spread-values '(10 20 30))
-  (assert-= 3 (cl-cc/runtime:rt-values-count))
-  (assert-= 10 (cl-cc/runtime:rt-values-ref 0)))
+  (cl-cc/runtime:rt-spread-values input)
+  (assert-= expected-count (cl-cc/runtime:rt-values-count))
+  (assert-= expected-first (cl-cc/runtime:rt-values-ref 0)))
 
-(deftest rt-spread-values-atom
-  "rt-spread-values on a non-list pushes one value."
+(deftest-each rt-ensure-values-behavior
+  "rt-ensure-values pushes val when empty; is a no-op when buffer already has a value."
+  :cases (("empty"     nil 99 1 99)
+          ("non-empty" 1   99 1 1))
+  (pre-val ensure-val expected-count expected-ref0)
   (cl-cc/runtime:rt-values-clear)
-  (cl-cc/runtime:rt-spread-values 42)
-  (assert-= 1 (cl-cc/runtime:rt-values-count))
-  (assert-= 42 (cl-cc/runtime:rt-values-ref 0)))
-
-(deftest rt-ensure-values-empty
-  "rt-ensure-values pushes val when buffer is empty."
-  (cl-cc/runtime:rt-values-clear)
-  (cl-cc/runtime:rt-ensure-values 99)
-  (assert-= 1 (cl-cc/runtime:rt-values-count))
-  (assert-= 99 (cl-cc/runtime:rt-values-ref 0)))
-
-(deftest rt-ensure-values-non-empty
-  "rt-ensure-values is a no-op when buffer already has values."
-  (cl-cc/runtime:rt-values-clear)
-  (cl-cc/runtime:rt-values-push 1)
-  (cl-cc/runtime:rt-ensure-values 99)
-  (assert-= 1 (cl-cc/runtime:rt-values-count))
-  (assert-= 1 (cl-cc/runtime:rt-values-ref 0)))
+  (when pre-val (cl-cc/runtime:rt-values-push pre-val))
+  (cl-cc/runtime:rt-ensure-values ensure-val)
+  (assert-= expected-count (cl-cc/runtime:rt-values-count))
+  (assert-= expected-ref0 (cl-cc/runtime:rt-values-ref 0)))
 
 ;;; ─── Closure Support ───────────────────────────────────────────────────────
 
@@ -118,31 +107,24 @@
     (assert-eq 'b (cl-cc/runtime:rt-closure-ref c 1))
     (assert-eq 'c (cl-cc/runtime:rt-closure-ref c 2))))
 
-(deftest rt-call-fn-closure
-  "rt-call-fn calls through a closure object."
-  (let ((c (cl-cc/runtime:rt-make-closure (lambda (x) (* x 2)) nil)))
-    (assert-= 10 (cl-cc/runtime:rt-call-fn c 5))))
+(deftest-each rt-call-fn-dispatch
+  "rt-call-fn dispatches uniformly to closures and plain functions."
+  :cases (("closure"  (cl-cc/runtime:rt-make-closure (lambda (x) (* x 2)) nil) (5)   10)
+          ("plain-fn" #'+                                                        (3 4)  7))
+  (fn args expected)
+  (assert-= expected (apply #'cl-cc/runtime:rt-call-fn fn args)))
 
-(deftest rt-call-fn-plain-function
-  "rt-call-fn works with a plain function."
-  (assert-= 7 (cl-cc/runtime:rt-call-fn #'+ 3 4)))
+(deftest-each rt-apply-fn-dispatch
+  "rt-apply-fn applies args list uniformly to closures and plain functions."
+  :cases (("closure"  (cl-cc/runtime:rt-make-closure (lambda (a b) (+ a b)) nil) '(10 5) 15)
+          ("plain-fn" #'*                                                          '(2 3)   6))
+  (fn args expected)
+  (assert-= expected (cl-cc/runtime:rt-apply-fn fn args)))
 
-(deftest rt-apply-fn-closure
-  "rt-apply-fn applies args list through a closure."
-  (let ((c (cl-cc/runtime:rt-make-closure (lambda (a b) (+ a b)) nil)))
-    (assert-= 15 (cl-cc/runtime:rt-apply-fn c '(10 5)))))
-
-(deftest rt-apply-fn-plain-function
-  "rt-apply-fn works with a plain function."
-  (assert-= 6 (cl-cc/runtime:rt-apply-fn #'* '(2 3))))
-
-(deftest rt-call-next-method-signals
-  "rt-call-next-method signals error when no next method."
+(deftest rt-next-method-absent
+  "With no method stack: rt-next-method-p returns nil; rt-call-next-method signals error."
+  (assert-false  (cl-cc/runtime:rt-next-method-p))
   (assert-signals error (cl-cc/runtime:rt-call-next-method)))
-
-(deftest rt-next-method-p-returns-nil
-  "rt-next-method-p returns nil (no method stack)."
-  (assert-false (cl-cc/runtime:rt-next-method-p)))
 
 ;;; ─── Type Predicates (1/0 return convention) ───────────────────────────────
 
@@ -183,10 +165,12 @@
   (let ((c (cl-cc/runtime:rt-make-closure #'identity nil)))
     (assert-= 1 (cl-cc/runtime:rt-functionp c))))
 
-(deftest rt-typep-integer
+(deftest-each rt-typep-integer
   "rt-typep checks CL type by name."
-  (assert-= 1 (cl-cc/runtime:rt-typep 42 'integer))
-  (assert-= 0 (cl-cc/runtime:rt-typep "hi" 'integer)))
+  :cases (("match"    42   'integer 1)
+          ("no-match" "hi" 'integer 0))
+  (val type expected)
+  (assert-= expected (cl-cc/runtime:rt-typep val type)))
 
 (deftest rt-type-of-integer
   "rt-type-of returns the CL type."
@@ -232,15 +216,12 @@
 
 ;;; ─── Array Operations ─────────────────────────────────────────────────────
 
-(deftest rt-make-array-simple
-  "rt-make-array creates an array."
-  (let ((a (cl-cc/runtime:rt-make-array 5)))
-    (assert-= 5 (cl-cc/runtime:rt-array-length a))))
-
-(deftest rt-make-array-with-init
-  "rt-make-array with :initial-element."
-  (let ((a (cl-cc/runtime:rt-make-array 3 :initial-element 0)))
-    (assert-= 0 (cl-cc/runtime:rt-aref a 0))))
+(deftest rt-make-array-creation
+  "rt-make-array: correct length; :initial-element initializes all slots."
+  (let ((a5 (cl-cc/runtime:rt-make-array 5))
+        (a3 (cl-cc/runtime:rt-make-array 3 :initial-element 0)))
+    (assert-= 5 (cl-cc/runtime:rt-array-length a5))
+    (assert-= 0 (cl-cc/runtime:rt-aref a3 0))))
 
 (deftest rt-aset-sets-element
   "rt-aset sets array element (indices-then-value convention)."
@@ -340,15 +321,14 @@
   (assert-= 8 (cl-cc/runtime:rt-ash 2 2))
   (assert-= 2 (cl-cc/runtime:rt-ash 8 -2)))
 
-(deftest rt-logtest-convention
-  "rt-logtest returns 1 if bits overlap, 0 otherwise."
-  (assert-= 1 (cl-cc/runtime:rt-logtest #b1010 #b1000))
-  (assert-= 0 (cl-cc/runtime:rt-logtest #b1010 #b0101)))
-
-(deftest rt-logbitp-convention
-  "rt-logbitp returns 1/0."
-  (assert-= 1 (cl-cc/runtime:rt-logbitp 0 1))
-  (assert-= 0 (cl-cc/runtime:rt-logbitp 1 1)))
+(deftest-each rt-bitwise-predicate-conventions
+  "rt-logtest and rt-logbitp return 1/0 (bit overlap and bit position tests)."
+  :cases (("logtest-overlap"  #'cl-cc/runtime:rt-logtest  #b1010 #b1000 1)
+          ("logtest-disjoint" #'cl-cc/runtime:rt-logtest  #b1010 #b0101 0)
+          ("logbitp-set"      #'cl-cc/runtime:rt-logbitp  0      1      1)
+          ("logbitp-clear"    #'cl-cc/runtime:rt-logbitp  1      1      0))
+  (pred-fn a b expected)
+  (assert-= expected (funcall pred-fn a b)))
 
 ;;; ─── String Operations ─────────────────────────────────────────────────────
 
@@ -371,17 +351,16 @@
   (cmp-fn a b expected)
   (assert-= expected (funcall cmp-fn a b)))
 
-(deftest rt-string-case-ops
-  "rt-string-upcase/downcase/capitalize."
-  (assert-equal "HELLO" (cl-cc/runtime:rt-string-upcase "hello"))
-  (assert-equal "hello" (cl-cc/runtime:rt-string-downcase "HELLO"))
-  (assert-equal "Hello World" (cl-cc/runtime:rt-string-capitalize "hello world")))
-
-(deftest rt-string-trim-ops
-  "rt-string-trim/left-trim/right-trim."
-  (assert-equal "hello" (cl-cc/runtime:rt-string-trim " " " hello "))
-  (assert-equal "hello " (cl-cc/runtime:rt-string-left-trim " " " hello "))
-  (assert-equal " hello" (cl-cc/runtime:rt-string-right-trim " " " hello ")))
+(deftest-each rt-string-transform-ops
+  "String case and trim operations produce correct output."
+  :cases (("upcase"      #'cl-cc/runtime:rt-string-upcase                        "hello"    "HELLO")
+          ("downcase"    #'cl-cc/runtime:rt-string-downcase                       "HELLO"    "hello")
+          ("capitalize"  #'cl-cc/runtime:rt-string-capitalize                     "hello world" "Hello World")
+          ("trim"        (lambda (s) (cl-cc/runtime:rt-string-trim " " s))        " hello "  "hello")
+          ("left-trim"   (lambda (s) (cl-cc/runtime:rt-string-left-trim " " s))  " hello "  "hello ")
+          ("right-trim"  (lambda (s) (cl-cc/runtime:rt-string-right-trim " " s)) " hello "  " hello"))
+  (fn input expected)
+  (assert-equal expected (funcall fn input)))
 
 (deftest rt-search-string-and-subseq
   "rt-search-string and rt-subseq."
@@ -492,12 +471,9 @@
   "rt-coerce delegates to CL coerce."
   (assert-equal '(1 2 3) (cl-cc/runtime:rt-coerce #(1 2 3) 'list)))
 
-(deftest rt-parse-integer-basic
-  "rt-parse-integer parses simple integer."
-  (assert-= 42 (cl-cc/runtime:rt-parse-integer "42")))
-
-(deftest rt-parse-integer-radix
-  "rt-parse-integer with radix."
+(deftest rt-parse-integer
+  "rt-parse-integer: decimal and hex (with :radix) parsing."
+  (assert-= 42  (cl-cc/runtime:rt-parse-integer "42"))
   (assert-= 255 (cl-cc/runtime:rt-parse-integer "FF" :radix 16)))
 
 ;;; ─── I/O Wrappers ──────────────────────────────────────────────────────────

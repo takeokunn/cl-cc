@@ -166,28 +166,16 @@
 
 ;;; ─── Self-Hosting: Reader Macros ─────────────────────────────────────────
 
-(deftest selfhost-reader-uninterned-symbol
-  "#: produces uninterned symbols."
+(deftest selfhost-reader-macros
+  "Reader macros #:, #+, #-, and #. compile and evaluate correctly."
   (assert-true
-    (run-string "(symbolp (quote #:foo))")))
-
-(deftest selfhost-reader-feature-plus
-  "#+ includes form when feature is present."
+    (run-string "(symbolp (quote #:foo))"))
   (assert-eq :yes
-    (run-string "#+sbcl :yes")))
-
-(deftest selfhost-reader-feature-minus
-  "#- includes form when feature is absent."
+    (run-string "#+sbcl :yes"))
   (assert-eq :yes
-    (run-string "#-nonexistent-feature :yes")))
-
-(deftest selfhost-reader-feature-skip
-  "#+ skips form when feature is absent."
+    (run-string "#-nonexistent-feature :yes"))
   (assert-eq :fallback
-    (run-string "(progn #+nonexistent-feature :no :fallback)")))
-
-(deftest selfhost-reader-read-time-eval
-  "#. evaluates form at read time."
+    (run-string "(progn #+nonexistent-feature :no :fallback)"))
   (assert-eql 6
     (run-string "(+ 1 #.(+ 2 3))")))
 
@@ -216,19 +204,13 @@
 ;;; demonstration of meta-circular compilation: the compiler compiles code
 ;;; that invokes the compiler.
 
-(deftest selfhost-vm-calls-run-string
-  "VM code calls run-string via host bridge — true meta-circular compilation."
+(deftest selfhost-meta-circular-compilation
+  "VM code invokes cl-cc's own compiler via host bridge (true meta-circular compilation)."
   (assert-eql 42
-    (run-string "(run-string \"(+ 21 21)\")")))
-
-(deftest selfhost-vm-meta-defun
-  "VM code defines a function via nested run-string invocation."
+    (run-string "(run-string \"(+ 21 21)\")"))
   (assert-eql 120
     (run-string
-     "(run-string \"(defun sh-meta-fact (n) (if (<= n 1) 1 (* n (sh-meta-fact (- n 1))))) (sh-meta-fact 5)\")")))
-
-(deftest selfhost-vm-meta-closure
-  "VM code creates and invokes a closure via nested compilation."
+     "(run-string \"(defun sh-meta-fact (n) (if (<= n 1) 1 (* n (sh-meta-fact (- n 1))))) (sh-meta-fact 5)\")"))
   (assert-eql 15
     (run-string
      "(run-string \"(let ((x 10)) (funcall (lambda (y) (+ x y)) 5))\")")))

@@ -43,54 +43,46 @@ nodes referring to these names succeeds without signaling 'unbound variable'."
 
 ;;; ── MAKE-HASH-TABLE ───────────────────────────────────────────────────────
 
-(deftest phase2-make-hash-table-no-test
-  "(make-hash-table) emits vm-make-hash-table"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'make-hash-table) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-hash-table))))
-
-(deftest phase2-make-hash-table-quoted-test
-  "(make-hash-table :test 'equal) extracts the test symbol"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'make-hash-table
-                            (make-var :test)
-                            (make-quoted 'equal))
-                 ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-make-hash-table)))
-      (assert-true inst)
-      ;; test-reg should be non-nil — a register was allocated for the test sym
-      (assert-true (cl-cc::vm-make-hash-table-test inst)))))
-
-(deftest phase2-make-hash-table-var-test
-  "(make-hash-table :test equal) where equal is an ast-var extracts test symbol"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'make-hash-table
-                            (make-var :test)
-                            (make-var 'equal))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-hash-table))))
-
-(deftest phase2-make-hash-table-function-test
-  "(make-hash-table :test #'equal) via ast-function extracts test symbol"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'make-hash-table
-                            (make-var :test)
-                            (make-fn 'equal))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-hash-table))))
+(deftest-each phase2-make-hash-table-variants
+  "make-hash-table emits vm-make-hash-table across all :test forms"
+  ((no-test
+    (let ((ctx (make-codegen-ctx)))
+      (compile-ast (make-call 'make-hash-table) ctx)
+      (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-hash-table))))
+   (quoted-test
+    (let ((ctx (make-codegen-ctx)))
+      (compile-ast (make-call 'make-hash-table
+                              (make-var :test)
+                              (make-quoted 'equal))
+                   ctx)
+      (let ((inst (codegen-find-inst ctx 'cl-cc::vm-make-hash-table)))
+        (assert-true inst)
+        ;; test-reg should be non-nil — a register was allocated for the test sym
+        (assert-true (cl-cc::vm-make-hash-table-test inst)))))
+   (var-test
+    (let ((ctx (make-codegen-ctx)))
+      (compile-ast (make-call 'make-hash-table
+                              (make-var :test)
+                              (make-var 'equal))
+                   ctx)
+      (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-hash-table))))
+   (function-test
+    (let ((ctx (make-codegen-ctx)))
+      (compile-ast (make-call 'make-hash-table
+                              (make-var :test)
+                              (make-fn 'equal))
+                   ctx)
+      (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-hash-table))))))
 
 ;;; ── GETHASH ───────────────────────────────────────────────────────────────
 
-(deftest phase2-gethash-two-args
-  "(gethash key table) emits vm-gethash with nil default"
+(deftest phase2-gethash-arities
+  "gethash emits vm-gethash with correct default slot for 2 and 3 args"
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'gethash (make-quoted 'k) (make-quoted 'ht)) ctx)
     (let ((inst (codegen-find-inst ctx 'cl-cc::vm-gethash)))
       (assert-true inst)
-      (assert-true (null (cl-cc::vm-gethash-default inst))))))
-
-(deftest phase2-gethash-three-args
-  "(gethash key table default) emits vm-gethash with default register"
+      (assert-true (null (cl-cc::vm-gethash-default inst)))))
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'gethash
                             (make-quoted 'k) (make-quoted 'ht) (make-int 0))
@@ -101,77 +93,54 @@ nodes referring to these names succeeds without signaling 'unbound variable'."
 
 ;;; ── MAPHASH ───────────────────────────────────────────────────────────────
 
-(deftest phase2-maphash-emits-hash-table-keys
-  "(maphash fn ht) generates an iteration loop beginning with hash-table-keys"
+(deftest phase2-maphash-codegen
+  "(maphash fn ht) emits hash-table-keys, a vm-call, and returns nil"
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'maphash (make-quoted 'fn) (make-quoted 'ht)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-hash-table-keys))))
-
-(deftest phase2-maphash-emits-call-to-fn
-  "(maphash fn ht) emits a vm-call for the function application"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'maphash (make-quoted 'fn) (make-quoted 'ht)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-call))))
-
-(deftest phase2-maphash-returns-nil
-  "(maphash fn ht) result register holds nil (maphash is void)"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'maphash (make-quoted 'fn) (make-quoted 'ht)) ctx)
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-hash-table-keys))
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-call))
     ;; Last emitted const before halt should be nil (the return value)
     (let ((consts (remove-if-not (lambda (i) (typep i 'cl-cc::vm-const))
                                   (codegen-instructions ctx))))
       (assert-true (some (lambda (i) (null (cl-cc::vm-const-value i))) consts)))))
 
-;;; ── MAKE-ARRAY ────────────────────────────────────────────────────────────
+;;; ── MAKE-ARRAY / MAKE-ADJUSTABLE-VECTOR ──────────────────────────────────
 
-(deftest phase2-make-array-emits-vm-make-array
-  "(make-array n) emits vm-make-array"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'make-array (make-int 10)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-array))))
-
-(deftest phase2-make-array-not-adjustable
-  "(make-array n) produces a fixed array (fill-pointer nil, adjustable nil)"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'make-array (make-int 10)) ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-make-array)))
-      (assert-true (null (cl-cc::vm-make-array-fill-pointer inst)))
-      (assert-true (null (cl-cc::vm-make-array-adjustable inst))))))
-
-;;; ── MAKE-ADJUSTABLE-VECTOR ────────────────────────────────────────────────
-
-(deftest phase2-make-adjustable-vector-emits-vm-make-array
-  "(make-adjustable-vector n) emits vm-make-array"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'make-adjustable-vector (make-int 10)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-array))))
-
-(deftest phase2-make-adjustable-vector-is-adjustable
-  "(make-adjustable-vector n) sets fill-pointer and adjustable"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'make-adjustable-vector (make-int 10)) ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-make-array)))
-      (assert-true (cl-cc::vm-make-array-fill-pointer inst))
-      (assert-true (cl-cc::vm-make-array-adjustable inst)))))
+(deftest-each phase2-make-array-variants
+  "make-array and make-adjustable-vector emit vm-make-array with correct flags"
+  ((fixed-array-emits-inst
+    (let ((ctx (make-codegen-ctx)))
+      (compile-ast (make-call 'make-array (make-int 10)) ctx)
+      (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-array))))
+   (fixed-array-not-adjustable
+    (let ((ctx (make-codegen-ctx)))
+      (compile-ast (make-call 'make-array (make-int 10)) ctx)
+      (let ((inst (codegen-find-inst ctx 'cl-cc::vm-make-array)))
+        (assert-true (null (cl-cc::vm-make-array-fill-pointer inst)))
+        (assert-true (null (cl-cc::vm-make-array-adjustable inst))))))
+   (adjustable-vector-emits-inst
+    (let ((ctx (make-codegen-ctx)))
+      (compile-ast (make-call 'make-adjustable-vector (make-int 10)) ctx)
+      (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-array))))
+   (adjustable-vector-is-adjustable
+    (let ((ctx (make-codegen-ctx)))
+      (compile-ast (make-call 'make-adjustable-vector (make-int 10)) ctx)
+      (let ((inst (codegen-find-inst ctx 'cl-cc::vm-make-array)))
+        (assert-true (cl-cc::vm-make-array-fill-pointer inst))
+        (assert-true (cl-cc::vm-make-array-adjustable inst)))))))
 
 ;;; ── ARRAY-ROW-MAJOR-INDEX ────────────────────────────────────────────────
 
-(deftest phase2-array-row-major-index-one-subscript
-  "(array-row-major-index arr i) emits vm-array-row-major-index"
+(deftest phase2-array-row-major-index
+  "array-row-major-index emits the instruction and builds a cons chain for subscripts"
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'array-row-major-index (make-int 10) (make-int 0)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-array-row-major-index))))
-
-(deftest phase2-array-row-major-index-two-subscripts
-  "(array-row-major-index arr i j) also emits vm-array-row-major-index"
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-array-row-major-index)))
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'array-row-major-index
                             (make-int 10) (make-int 0) (make-int 1))
                  ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-array-row-major-index))))
-
-(deftest phase2-array-row-major-index-builds-subscript-cons-chain
-  "(array-row-major-index arr i j) builds a cons-chain for the subscripts"
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-array-row-major-index)))
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'array-row-major-index
                             (make-int 10) (make-int 2) (make-int 3))
@@ -201,21 +170,15 @@ nodes referring to these names succeeds without signaling 'unbound variable'."
 
 ;;; ── MAKE-STRING ──────────────────────────────────────────────────────────
 
-(deftest phase2-make-string-basic
-  "(make-string n) emits vm-make-string"
+(deftest phase2-make-string-variants
+  "make-string emits vm-make-string with correct char slot"
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'make-string (make-int 5)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-string))))
-
-(deftest phase2-make-string-no-char-by-default
-  "(make-string n) without :initial-element leaves char slot nil"
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-string)))
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'make-string (make-int 5)) ctx)
     (let ((inst (codegen-find-inst ctx 'cl-cc::vm-make-string)))
-      (assert-true (null (cl-cc::vm-make-string-char inst))))))
-
-(deftest phase2-make-string-with-initial-element
-  "(make-string n :initial-element ch) sets the char register"
+      (assert-true (null (cl-cc::vm-make-string-char inst)))))
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'make-string
                             (make-int 5)
@@ -228,21 +191,15 @@ nodes referring to these names succeeds without signaling 'unbound variable'."
 
 ;;; ── TYPEP ─────────────────────────────────────────────────────────────────
 
-(deftest phase2-typep-quoted-type
-  "(typep x 'integer) with quoted type emits vm-typep"
+(deftest phase2-typep-variants
+  "typep emits vm-typep for quoted types and falls through for unquoted"
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'typep (make-int 42) (make-quoted 'integer)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-typep))))
-
-(deftest phase2-typep-quoted-type-symbol
-  "(typep x 'string) stores the type symbol in the instruction"
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-typep)))
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'typep (make-int 42) (make-quoted 'string)) ctx)
     (let ((inst (codegen-find-inst ctx 'cl-cc::vm-typep)))
-      (assert-eq 'string (cl-cc::vm-typep-type-name inst)))))
-
-(deftest phase2-typep-unquoted-falls-through
-  "(typep x integer) without quote does NOT emit vm-typep (falls through)"
+      (assert-eq 'string (cl-cc::vm-typep-type-name inst))))
   (let ((ctx (make-ctx-with-vars 'integer)))
     ;; Pass unquoted ast-var — handler guard fails
     (compile-ast (make-call 'typep (make-int 42) (make-var 'integer)) ctx)
@@ -319,28 +276,22 @@ nodes referring to these names succeeds without signaling 'unbound variable'."
 
 ;;; ── FORMAT ────────────────────────────────────────────────────────────────
 
-(deftest phase2-format-nil-dest-emits-format-inst
-  "(format nil fmt) emits vm-format-inst"
+(deftest phase2-format-destinations
+  "format emits correct instructions for nil, t, and stream destinations"
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'format
                             (make-var 'nil)
                             (make-quoted "~A")
                             (make-int 42))
                  ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-format-inst))))
-
-(deftest phase2-format-nil-dest-no-princ
-  "(format nil fmt) does NOT emit vm-princ — result stays in register"
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-format-inst)))
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'format
                             (make-var 'nil)
                             (make-quoted "~A")
                             (make-int 1))
                  ctx)
-    (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-princ)))))
-
-(deftest phase2-format-t-dest-emits-format-and-princ
-  "(format t fmt) emits both vm-format-inst and vm-princ"
+    (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-princ))))
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'format
                             (make-var 't)
@@ -348,10 +299,7 @@ nodes referring to these names succeeds without signaling 'unbound variable'."
                             (make-int 1))
                  ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc::vm-format-inst))
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-princ))))
-
-(deftest phase2-format-stream-dest-emits-stream-write
-  "(format stream fmt) emits vm-format-inst and vm-stream-write-string-inst"
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-princ)))
   (let ((ctx (make-ctx-with-vars 'out-stream)))
     (compile-ast (make-call 'format
                             (make-var 'out-stream)
@@ -369,21 +317,15 @@ nodes referring to these names succeeds without signaling 'unbound variable'."
 
 ;;; ── OPEN ──────────────────────────────────────────────────────────────────
 
-(deftest phase2-open-emits-vm-open-file
-  "(open path) emits vm-open-file"
+(deftest phase2-open-variants
+  "open emits vm-open-file with correct direction for all call forms"
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'open (make-quoted "/tmp/f")) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-open-file))))
-
-(deftest phase2-open-defaults-to-input
-  "(open path) with no :direction defaults to :input"
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-open-file)))
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'open (make-quoted "/tmp/f")) ctx)
     (let ((inst (codegen-find-inst ctx 'cl-cc::vm-open-file)))
-      (assert-eq :input (cl-cc::vm-open-file-direction inst)))))
-
-(deftest phase2-open-with-direction-output
-  "(open path :direction :output) sets direction to :output"
+      (assert-eq :input (cl-cc::vm-open-file-direction inst))))
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'open
                             (make-quoted "/tmp/f")
@@ -395,14 +337,11 @@ nodes referring to these names succeeds without signaling 'unbound variable'."
 
 ;;; ── PEEK-CHAR ────────────────────────────────────────────────────────────
 
-(deftest phase2-peek-char-one-arg
-  "(peek-char handle) with 1 arg uses that arg as handle"
+(deftest phase2-peek-char-arities
+  "peek-char emits vm-peek-char for both 1-arg and 2-arg forms"
   (let ((ctx (make-ctx-with-vars 'handle)))
     (compile-ast (make-call 'peek-char (make-var 'handle)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-peek-char))))
-
-(deftest phase2-peek-char-two-args
-  "(peek-char nil handle) with 2 args uses second arg as handle"
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-peek-char)))
   (let ((ctx (make-ctx-with-vars 'handle)))
     (compile-ast (make-call 'peek-char (make-var 'nil) (make-var 'handle)) ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc::vm-peek-char))))
@@ -424,28 +363,22 @@ nodes referring to these names succeeds without signaling 'unbound variable'."
 
 ;;; ── CONCATENATE ──────────────────────────────────────────────────────────
 
-(deftest phase2-concatenate-string-type-emits-vm-concatenate
-  "(concatenate 'string a b) emits vm-concatenate"
+(deftest phase2-concatenate-variants
+  "concatenate emits vm-concatenate only for quoted 'string type"
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'concatenate
                             (make-quoted 'string)
                             (make-quoted "hello")
                             (make-quoted " world"))
                  ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-concatenate))))
-
-(deftest phase2-concatenate-non-string-falls-through
-  "(concatenate 'list a b) does NOT emit vm-concatenate (guard: 'string only)"
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-concatenate)))
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'concatenate
                             (make-quoted 'list)
                             (make-quoted "a")
                             (make-quoted "b"))
                  ctx)
-    (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-concatenate)))))
-
-(deftest phase2-concatenate-requires-quoted-type
-  "(concatenate string a b) with unquoted type falls through"
+    (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-concatenate))))
   (let ((ctx (make-ctx-with-vars 'string)))
     (compile-ast (make-call 'concatenate
                             (make-var 'string)   ; NOT ast-quote

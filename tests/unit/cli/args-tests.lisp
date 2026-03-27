@@ -68,49 +68,35 @@
 ;;; String flags — --key value form
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest cli-args-output-long
-  "parse-args: --output value (long form)"
-  (let ((p (cl-cc/cli:parse-args '("compile" "f.lisp" "--output" "out"))))
-    (assert-string= "out" (%flags p "--output"))))
+(deftest-each cli-args-output-long-and-short
+  "parse-args: output flag in long and short form"
+  :cases (("long form" '("compile" "f.lisp" "--output" "out")   "--output" "out")
+          ("short form" '("compile" "f.lisp" "-o" "mybin")       "-o"       "mybin"))
+  (argv flag-key expected)
+  (let ((p (cl-cc/cli:parse-args argv)))
+    (assert-string= expected (%flags p flag-key))))
 
-(deftest cli-args-output-short
-  "parse-args: -o value (short form)"
-  (let ((p (cl-cc/cli:parse-args '("compile" "f.lisp" "-o" "mybin"))))
-    (assert-string= "mybin" (%flags p "-o"))))
-
-(deftest cli-args-arch-flag
-  "parse-args: --arch arm64"
-  (let ((p (cl-cc/cli:parse-args '("compile" "f.lisp" "--arch" "arm64"))))
-    (assert-string= "arm64" (%flags p "--arch"))))
-
-(deftest cli-args-lang-php
-  "parse-args: --lang php"
-  (let ((p (cl-cc/cli:parse-args '("run" "f.php" "--lang" "php"))))
-    (assert-string= "php" (%flags p "--lang"))))
-
-(deftest cli-args-lang-lisp
-  "parse-args: --lang lisp"
-  (let ((p (cl-cc/cli:parse-args '("run" "f.lisp" "--lang" "lisp"))))
-    (assert-string= "lisp" (%flags p "--lang"))))
+(deftest-each cli-args-string-flags
+  "parse-args: arch and lang string flags (--key value form)"
+  :cases (("arch arm64"  '("compile" "f.lisp" "--arch" "arm64") "--arch" "arm64")
+          ("lang php"    '("run" "f.php"  "--lang" "php")        "--lang" "php")
+          ("lang lisp"   '("run" "f.lisp" "--lang" "lisp")       "--lang" "lisp"))
+  (argv flag-key expected)
+  (let ((p (cl-cc/cli:parse-args argv)))
+    (assert-string= expected (%flags p flag-key))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; String flags — --key=value inline form
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest cli-args-output-equals
-  "parse-args: --output=mybin inline equals form"
-  (let ((p (cl-cc/cli:parse-args '("compile" "f.lisp" "--output=mybin"))))
-    (assert-string= "mybin" (%flags p "--output"))))
-
-(deftest cli-args-arch-equals
-  "parse-args: --arch=arm64 inline equals form"
-  (let ((p (cl-cc/cli:parse-args '("compile" "f.lisp" "--arch=arm64"))))
-    (assert-string= "arm64" (%flags p "--arch"))))
-
-(deftest cli-args-lang-equals
-  "parse-args: --lang=php inline equals form"
-  (let ((p (cl-cc/cli:parse-args '("run" "f.php" "--lang=php"))))
-    (assert-string= "php" (%flags p "--lang"))))
+(deftest-each cli-args-equals-form
+  "parse-args: inline --key=value form for output, arch, and lang"
+  :cases (("output=mybin" '("compile" "f.lisp" "--output=mybin") "--output" "mybin")
+          ("arch=arm64"   '("compile" "f.lisp" "--arch=arm64")   "--arch"   "arm64")
+          ("lang=php"     '("run"     "f.php"  "--lang=php")     "--lang"   "php"))
+  (argv flag-key expected)
+  (let ((p (cl-cc/cli:parse-args argv)))
+    (assert-string= expected (%flags p flag-key))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; flag / flag-or accessor helpers

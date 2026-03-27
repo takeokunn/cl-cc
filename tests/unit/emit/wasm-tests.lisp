@@ -49,16 +49,11 @@
 ;;; Section 3: Function emission
 ;;; ──────────────────────────────────────────────────────────────────────────
 
-(deftest wasm-defun-produces-func
-  "Test that compiling a defun produces WAT containing a (func ...) definition."
+(deftest wasm-defun-structure
+  "Compiled defun produces WAT with (func ...) and (result eqref) per WASM GC ABI."
   (let ((wat (%wat-for "(defun add (x y) (+ x y))")))
     (assert-true wat)
-    (assert-output-contains wat "(func")))
-
-(deftest wasm-defun-result-eqref
-  "Test that compiled functions declare (result eqref) as per the WASM GC ABI."
-  (let ((wat (%wat-for "(defun add (x y) (+ x y))")))
-    (assert-true wat)
+    (assert-output-contains wat "(func")
     (assert-output-contains wat "(result eqref)")))
 
 (deftest wasm-simple-arithmetic-compiles
@@ -81,22 +76,12 @@
 ;;; Section 5: compile-string integration
 ;;; ──────────────────────────────────────────────────────────────────────────
 
-(deftest wasm-compile-string-returns-compilation-result
-  "Test that compile-string :target :wasm returns a compilation-result struct."
-  (let ((result (ignore-errors (compile-string "(+ 1 2)" :target :wasm))))
+(deftest wasm-compilation-result-structure
+  "compile-string :target :wasm returns a compilation-result with a non-empty string assembly."
+  (let* ((result (ignore-errors (compile-string "(+ 1 2)" :target :wasm)))
+         (asm (when result (compilation-result-assembly result))))
     (assert-true result)
-    (assert-type compilation-result result)))
-
-(deftest wasm-compilation-result-assembly-is-string
-  "Test that compilation-result-assembly on a :wasm compile returns a string."
-  (let* ((result (ignore-errors (compile-string "(+ 1 2)" :target :wasm)))
-         (asm (when result (compilation-result-assembly result))))
-    (assert-type string asm)))
-
-(deftest wasm-compilation-result-assembly-non-empty
-  "Test that the WAT assembly string is non-empty for a trivial expression."
-  (let* ((result (ignore-errors (compile-string "(+ 1 2)" :target :wasm)))
-         (asm (when result (compilation-result-assembly result))))
+    (assert-type compilation-result result)
     (assert-type string asm)
     (assert-true (> (length asm) 0))))
 
@@ -144,31 +129,19 @@
     (assert-true wat)
     (assert-output-contains wat "struct.new $closure_t")))
 
-(deftest wasm-call-emits-call-indirect
-  "Test that calling a closure via funcall emits call_indirect.
-   funcall with a lambda prevents static inlining by the optimizer."
+(deftest wasm-funcall-dispatch
+  "funcall via closure: emits call_indirect with $main_func_t type and global.set $cl_arg0 for arg-passing."
   (let ((wat (%wat-for "(let ((f (lambda (x) (* x 2)))) (funcall f 5))")))
     (assert-true wat)
-    (assert-output-contains wat "call_indirect")))
-
-(deftest wasm-call-uses-main-func-type
-  "Test that call_indirect uses $main_func_t type."
-  (let ((wat (%wat-for "(let ((f (lambda (x) (+ x 1)))) (funcall f 10))")))
-    (assert-true wat)
-    (assert-output-contains wat "$main_func_t")))
+    (assert-output-contains wat "call_indirect")
+    (assert-output-contains wat "$main_func_t")
+    (assert-output-contains wat "(global.set $cl_arg0")))
 
 (deftest wasm-elem-segment-present
   "Test that the WAT module includes an elem segment to populate the funcref table."
   (let ((wat (%wat-for "(defun f (x) x)")))
     (assert-true wat)
     (assert-output-contains wat "(elem")))
-
-(deftest wasm-call-args-written-to-globals
-  "Test that funcall with an arg emits global.set $cl_arg0 (arg-passing convention)."
-  ;; funcall prevents inlining so vm-call is preserved in the output
-  (let ((wat (%wat-for "(let ((f (lambda (x) (- 0 x)))) (funcall f 5))")))
-    (assert-true wat)
-    (assert-output-contains wat "(global.set $cl_arg0")))
 
 (deftest wasm-closure-table-index-nonzero-for-second-function
   "Test that a second defined function gets a non-zero table index in $closure_t."

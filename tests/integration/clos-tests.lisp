@@ -10,8 +10,8 @@
 
 ;;; AST Parsing Tests
 
-(deftest clos-parse-defclass
-  "Test parsing a defclass form into AST."
+(deftest clos-parse-clos-forms
+  "AST parsing for defclass, defclass-with-superclass, defgeneric, defmethod, make-instance, and slot-value forms."
   (let ((ast (lower-sexp-to-ast '(defclass point ()
                                     ((x :initarg :x :reader point-x)
                                      (y :initarg :y :reader point-y))))))
@@ -22,25 +22,16 @@
     (let ((x-slot (first (ast-defclass-slots ast))))
       (assert-eq 'x (ast-slot-name x-slot))
       (assert-eq :x (ast-slot-initarg x-slot))
-      (assert-eq 'point-x (ast-slot-reader x-slot)))))
-
-(deftest clos-parse-defclass-with-superclass
-  "Test parsing defclass with superclasses."
+      (assert-eq 'point-x (ast-slot-reader x-slot))))
   (let ((ast (lower-sexp-to-ast '(defclass colored-point (point)
                                     ((color :initarg :color))))))
     (assert-type ast-defclass ast)
     (assert-eq 'colored-point (ast-defclass-name ast))
-    (assert-equal '(point) (ast-defclass-superclasses ast))))
-
-(deftest clos-parse-defgeneric
-  "Test parsing a defgeneric form."
+    (assert-equal '(point) (ast-defclass-superclasses ast)))
   (let ((ast (lower-sexp-to-ast '(defgeneric area (shape)))))
     (assert-type ast-defgeneric ast)
     (assert-eq 'area (ast-defgeneric-name ast))
-    (assert-equal '(shape) (ast-defgeneric-params ast))))
-
-(deftest clos-parse-defmethod
-  "Test parsing a defmethod form."
+    (assert-equal '(shape) (ast-defgeneric-params ast)))
   (let ((ast (lower-sexp-to-ast '(defmethod area ((s circle))
                                    (* 3 (slot-value s 'radius))))))
     (assert-type ast-defmethod ast)
@@ -50,19 +41,13 @@
     ;; Check specializer
     (let ((specs (ast-defmethod-specializers ast)))
       (assert-= 1 (length specs))
-      (assert-equal '(s . circle) (first specs)))))
-
-(deftest clos-parse-make-instance
-  "Test parsing a make-instance form."
+      (assert-equal '(s . circle) (first specs))))
   (let ((ast (lower-sexp-to-ast '(make-instance 'point :x 10 :y 20))))
     (assert-type ast-make-instance ast)
     (assert-type ast-quote (ast-make-instance-class ast))
     (assert-= 2 (length (ast-make-instance-initargs ast)))
     (assert-eq :x (car (first (ast-make-instance-initargs ast))))
-    (assert-eq :y (car (second (ast-make-instance-initargs ast))))))
-
-(deftest clos-parse-slot-value
-  "Test parsing a slot-value form."
+    (assert-eq :y (car (second (ast-make-instance-initargs ast)))))
   (let ((ast (lower-sexp-to-ast '(slot-value obj 'x))))
     (assert-type ast-slot-value ast)
     (assert-eq 'x (ast-slot-value-slot ast))
@@ -70,8 +55,8 @@
 
 ;;; AST Roundtrip Tests
 
-(deftest clos-defclass-roundtrip
-  "Test defclass AST to sexp roundtrip."
+(deftest clos-roundtrip-forms
+  "CLOS AST-to-sexp roundtrip for defclass, defgeneric, and slot-value forms."
   (let* ((sexp '(defclass point nil
                   ((x :initarg :x :reader point-x)
                    (y :initarg :y :reader point-y))))
@@ -80,17 +65,11 @@
     (assert-eq 'defclass (first result))
     (assert-eq 'point (second result))
     (assert-null (third result))
-    (assert-= 2 (length (fourth result)))))
-
-(deftest clos-defgeneric-roundtrip
-  "Test defgeneric AST to sexp roundtrip."
+    (assert-= 2 (length (fourth result))))
   (let* ((sexp '(defgeneric compute (obj)))
          (ast (lower-sexp-to-ast sexp))
          (result (ast-to-sexp ast)))
-    (assert-equal '(defgeneric compute (obj)) result)))
-
-(deftest clos-slot-value-roundtrip
-  "Test slot-value AST to sexp roundtrip."
+    (assert-equal '(defgeneric compute (obj)) result))
   (let* ((ast (lower-sexp-to-ast '(slot-value obj 'x)))
          (result (ast-to-sexp ast)))
     (assert-eq 'slot-value (first result))
@@ -99,26 +78,20 @@
 
 ;;; Compilation and Execution Tests
 
-(deftest clos-compile-defclass-slot-value
-  "Test compiling defclass + make-instance + slot-value."
+(deftest clos-compile-slot-access
+  "Slot access (first, second, arithmetic) compiles and evaluates correctly."
   (assert-= 10 (run-string
              "(defclass point ()
                 ((x :initarg :x)
                  (y :initarg :y)))
               (let ((p (make-instance 'point :x 10 :y 20)))
-                (slot-value p 'x))")))
-
-(deftest clos-compile-slot-value-second-slot
-  "Test accessing the second slot."
+                (slot-value p 'x))"))
   (assert-= 20 (run-string
              "(defclass point ()
                 ((x :initarg :x)
                  (y :initarg :y)))
               (let ((p (make-instance 'point :x 10 :y 20)))
-                (slot-value p 'y))")))
-
-(deftest clos-compile-multiple-slots-arithmetic
-  "Test arithmetic on multiple slot values."
+                (slot-value p 'y))"))
   (assert-= 8 (run-string
             "(defclass rect ()
                ((w :initarg :w)
@@ -126,26 +99,23 @@
              (let ((r (make-instance 'rect :w 5 :h 3)))
                (+ (slot-value r 'w) (slot-value r 'h)))")))
 
-(deftest clos-compile-reader-accessor
-  "Test reader accessor method compilation."
-  (assert-= 3 (run-string
-            "(defclass vec ()
+(deftest-each clos-compile-reader-methods
+  "Reader accessor methods work on first and second class slots."
+  :cases (("first-field"  3 "(defclass vec ()
                ((dx :initarg :dx :reader vec-dx)
                 (dy :initarg :dy :reader vec-dy)))
              (let ((v (make-instance 'vec :dx 3 :dy 4)))
-               (vec-dx v))")))
-
-(deftest clos-compile-reader-second-field
-  "Test reader accessor on the second field."
-  (assert-= 4 (run-string
-            "(defclass vec ()
+               (vec-dx v))")
+          ("second-field" 4 "(defclass vec ()
                ((dx :initarg :dx :reader vec-dx)
                 (dy :initarg :dy :reader vec-dy)))
              (let ((v (make-instance 'vec :dx 3 :dy 4)))
-               (vec-dy v))")))
+               (vec-dy v))"))
+  (expected form)
+  (assert-= expected (run-string form)))
 
-(deftest clos-compile-defgeneric-defmethod
-  "Test basic generic function dispatch."
+(deftest clos-compile-generic-methods
+  "Generic function dispatch, slot-accessing methods, and formula methods compile correctly."
   (assert-= 42 (run-string
              "(defclass animal ()
                 ((name :initarg :name)))
@@ -153,10 +123,7 @@
               (defmethod speak ((a animal))
                 42)
               (let ((a (make-instance 'animal :name 'dog)))
-                (speak a))")))
-
-(deftest clos-compile-method-with-slot-access
-  "Test method that accesses slots of its argument."
+                (speak a))"))
   (assert-= 20 (run-string
              "(defclass pair ()
                 ((a :initarg :a)
@@ -165,10 +132,7 @@
               (defmethod pair-sum ((p pair))
                 (+ (slot-value p 'a) (slot-value p 'b)))
               (let ((p (make-instance 'pair :a 7 :b 13)))
-                (pair-sum p))")))
-
-(deftest clos-compile-method-with-arithmetic
-  "Test method that computes a formula on slot values."
+                (pair-sum p))"))
   (assert-= 15 (run-string
              "(defclass rect ()
                 ((w :initarg :w)
@@ -179,33 +143,24 @@
               (let ((r (make-instance 'rect :w 3 :h 5)))
                 (area r))")))
 
-(deftest clos-compile-multiple-instances
-  "Test creating multiple instances of the same class."
+(deftest clos-compile-instance-variations
+  "Multiple instances, uninitialized slots, conditional slot access, and three-slot classes compile correctly."
   (assert-= 30 (run-string
              "(defclass counter ()
                 ((val :initarg :val)))
               (let ((c1 (make-instance 'counter :val 10))
                     (c2 (make-instance 'counter :val 20)))
-                (+ (slot-value c1 'val) (slot-value c2 'val)))")))
-
-(deftest clos-compile-slot-default-nil
-  "Test that uninitialized slots default to nil."
+                (+ (slot-value c1 'val) (slot-value c2 'val)))"))
   (assert-null (run-string
             "(defclass box ()
                ((content :initarg :content)))
              (let ((b (make-instance 'box)))
-               (slot-value b 'content))")))
-
-(deftest clos-compile-nested-slot-access
-  "Test conditional based on slot value."
+               (slot-value b 'content))"))
   (assert-= 1 (run-string
             "(defclass flag ()
                ((active :initarg :active)))
              (let ((f (make-instance 'flag :active 1)))
-               (if (slot-value f 'active) 1 0))")))
-
-(deftest clos-compile-defclass-three-slots
-  "Test class with three slots."
+               (if (slot-value f 'active) 1 0))"))
   (assert-= 60 (run-string
              "(defclass color ()
                 ((r :initarg :r)
@@ -218,25 +173,19 @@
 
 ;;; Slot Specification Parsing Tests
 
-(deftest clos-parse-slot-spec-symbol
-  "Test parsing a bare symbol slot spec."
+(deftest clos-parse-slot-specs
+  "Slot specification parsing: bare symbol, full spec with all options, and sexp conversion."
   (let ((slot (parse-slot-spec 'x)))
     (assert-type ast-slot-def slot)
     (assert-eq 'x (ast-slot-name slot))
     (assert-null (ast-slot-initarg slot))
-    (assert-null (ast-slot-reader slot))))
-
-(deftest clos-parse-slot-spec-full
-  "Test parsing a full slot spec with all options."
+    (assert-null (ast-slot-reader slot)))
   (let ((slot (parse-slot-spec '(x :initarg :x :reader get-x :writer set-x :accessor x-accessor))))
     (assert-eq 'x (ast-slot-name slot))
     (assert-eq :x (ast-slot-initarg slot))
     (assert-eq 'get-x (ast-slot-reader slot))
     (assert-eq 'set-x (ast-slot-writer slot))
-    (assert-eq 'x-accessor (ast-slot-accessor slot))))
-
-(deftest clos-slot-def-to-sexp
-  "Test slot-def to sexp conversion."
+    (assert-eq 'x-accessor (ast-slot-accessor slot)))
   (let* ((slot (parse-slot-spec '(x :initarg :x :reader get-x)))
          (sexp (slot-def-to-sexp slot)))
     (assert-eq 'x (first sexp))

@@ -15,15 +15,12 @@
 
 ;;; ─── SSA Value Naming ────────────────────────────────────────────────────
 
-(deftest ssa-versioned-reg-format
-  "ssa-versioned-reg produces :R5.3 from :R5 version 3."
-  (let ((v (cl-cc::ssa-versioned-reg :r5 3)))
-    (assert-equal "R5.3" (symbol-name v))))
-
-(deftest ssa-versioned-reg-zero
-  "ssa-versioned-reg version 0 produces :R0.0."
-  (let ((v (cl-cc::ssa-versioned-reg :r0 0)))
-    (assert-equal "R0.0" (symbol-name v))))
+(deftest-each ssa-versioned-reg-format
+  "ssa-versioned-reg produces correctly formatted register keywords."
+  :cases (("version-3" :r5 3 "R5.3")
+          ("version-0" :r0 0 "R0.0"))
+  (reg ver expected)
+  (assert-equal expected (symbol-name (cl-cc::ssa-versioned-reg reg ver))))
 
 ;;; ─── SSA Rename State ────────────────────────────────────────────────────
 
@@ -44,38 +41,33 @@
 
 ;;; ─── SSA Round-Trip ──────────────────────────────────────────────────────
 
-(deftest ssa-round-trip-linear-sequence
-  "SSA round-trip on a linear sequence produces a non-empty instruction list."
-  (let* ((insts (list (make-vm-const :dst :r0 :value 1)
-                      (make-vm-const :dst :r1 :value 2)
-                      (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)
-                      (make-vm-ret   :reg :r2)))
-         (result (cl-cc::ssa-round-trip insts)))
-    (assert-true (>= (length result) 1))))
-
-(deftest ssa-round-trip-preserves-types
-  "SSA round-trip preserves the instruction type variety."
-  (let* ((insts (list (make-vm-const :dst :r0 :value 42)
-                      (make-vm-ret   :reg :r0)))
-         (result (cl-cc::ssa-round-trip insts)))
-    ;; Result should still contain a return
-    (assert-true (some (lambda (i) (typep i 'cl-cc::vm-ret)) result))))
-
-(deftest ssa-round-trip-empty
-  "SSA round-trip on empty instructions returns an empty list."
-  (let ((result (cl-cc::ssa-round-trip nil)))
-    (assert-null result)))
-
-(deftest ssa-round-trip-with-label
-  "SSA round-trip correctly handles labeled blocks."
-  (let* ((insts (list (make-vm-const    :dst :r0 :value 1)
-                      (make-vm-jump-zero :reg :r0 :label "L1")
-                      (make-vm-const    :dst :r0 :value 2)
-                      (make-vm-label    :name "L1")
-                      (make-vm-ret      :reg :r0)))
-         (result (cl-cc::ssa-round-trip insts)))
-    ;; Label should still be present somewhere in output
-    (assert-true (some (lambda (i) (typep i 'cl-cc::vm-label)) result))))
+(deftest-each ssa-round-trip-cases
+  "ssa-round-trip handles various instruction sequences correctly."
+  :cases (("linear-sequence"
+           (list (make-vm-const :dst :r0 :value 1)
+                 (make-vm-const :dst :r1 :value 2)
+                 (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)
+                 (make-vm-ret   :reg :r2))
+           (lambda (result) (assert-true (>= (length result) 1))))
+          ("preserves-types"
+           (list (make-vm-const :dst :r0 :value 42)
+                 (make-vm-ret   :reg :r0))
+           (lambda (result)
+             (assert-true (some (lambda (i) (typep i 'cl-cc::vm-ret)) result))))
+          ("empty"
+           nil
+           (lambda (result) (assert-null result)))
+          ("with-label"
+           (list (make-vm-const    :dst :r0 :value 1)
+                 (make-vm-jump-zero :reg :r0 :label "L1")
+                 (make-vm-const    :dst :r0 :value 2)
+                 (make-vm-label    :name "L1")
+                 (make-vm-ret      :reg :r0))
+           (lambda (result)
+             (assert-true (some (lambda (i) (typep i 'cl-cc::vm-label)) result)))))
+  (insts assert-fn)
+  (let ((result (cl-cc::ssa-round-trip insts)))
+    (funcall assert-fn result)))
 
 ;;; ─── Phi Placement ───────────────────────────────────────────────────────
 
@@ -108,21 +100,15 @@
 
 ;;; ─── Parallel Copy Sequentialization ─────────────────────────────────────
 
-(deftest ssa-seq-copies-simple
-  "A simple non-conflicting copy sequence is emitted correctly."
-  (let* ((copies '((:r0 . :r1) (:r2 . :r3)))
-         (result (cl-cc::ssa-sequentialize-copies copies)))
+(deftest ssa-seq-copies-behavior
+  "ssa-sequentialize-copies: empty→nil; simple→N vm-move; swap→≥2 vm-move."
+  ;; empty parallel copies
+  (assert-null (cl-cc::ssa-sequentialize-copies nil))
+  ;; simple non-conflicting: 2 copies → 2 moves
+  (let* ((result (cl-cc::ssa-sequentialize-copies '((:r0 . :r1) (:r2 . :r3)))))
     (assert-= 2 (length result))
-    (assert-true (every (lambda (i) (typep i 'cl-cc::vm-move)) result))))
-
-(deftest ssa-seq-copies-empty
-  "Empty parallel copies produces an empty list."
-  (assert-null (cl-cc::ssa-sequentialize-copies nil)))
-
-(deftest ssa-seq-copies-swap
-  "A two-register swap uses a temporary register."
-  (let* ((copies '((:r0 . :r1) (:r1 . :r0)))  ; swap r0 and r1
-         (result (cl-cc::ssa-sequentialize-copies copies)))
-    ;; Needs 3 moves: temp←r0, r0←r1, r1←temp (or equivalent)
+    (assert-true (every (lambda (i) (typep i 'cl-cc::vm-move)) result)))
+  ;; swap: needs ≥2 moves, all vm-move
+  (let* ((result (cl-cc::ssa-sequentialize-copies '((:r0 . :r1) (:r1 . :r0)))))
     (assert-true (>= (length result) 2))
     (assert-true (every (lambda (i) (typep i 'cl-cc::vm-move)) result))))

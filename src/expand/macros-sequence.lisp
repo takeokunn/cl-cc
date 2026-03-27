@@ -82,31 +82,16 @@
          (unless (eql ,item-var ,x)
            (setq ,acc (cons ,x ,acc)))))))
 
-;; DELETE-IF (FR-504)
+;; DELETE-IF / DELETE-IF-NOT (FR-504) — reuse %filter-list-expand from macros-stdlib
 (our-defmacro delete-if (pred seq &rest keys)
-  "Remove all elements for which PRED is true."
+  "Remove all elements for which PRED is true (same as remove-if)."
   (when keys)
-  (let ((fn-var (gensym "FN"))
-        (x (gensym "X"))
-        (acc (gensym "ACC")))
-    `(let ((,fn-var ,pred)
-           (,acc nil))
-       (dolist (,x ,seq (nreverse ,acc))
-         (unless (funcall ,fn-var ,x)
-           (setq ,acc (cons ,x ,acc)))))))
+  (%filter-list-expand 'unless pred seq))
 
-;; DELETE-IF-NOT (FR-504)
 (our-defmacro delete-if-not (pred seq &rest keys)
-  "Remove all elements for which PRED is false."
+  "Remove all elements for which PRED is false (same as remove-if-not)."
   (when keys)
-  (let ((fn-var (gensym "FN"))
-        (x (gensym "X"))
-        (acc (gensym "ACC")))
-    `(let ((,fn-var ,pred)
-           (,acc nil))
-       (dolist (,x ,seq (nreverse ,acc))
-         (when (funcall ,fn-var ,x)
-           (setq ,acc (cons ,x ,acc)))))))
+  (%filter-list-expand 'when pred seq))
 
 ;; DELETE-DUPLICATES (FR-504)
 (our-defmacro delete-duplicates (seq &rest keys)
@@ -128,33 +113,33 @@
        (dolist (,x ,seq (nreverse ,acc))
          (setq ,acc (cons (if (eql ,x ,old-var) ,new-var ,x) ,acc))))))
 
-;; SUBSTITUTE-IF (FR-505)
+;; Shared expansion for substitute-if / substitute-if-not.
+;; MATCH-FORM: the value chosen when PRED is true (new-var or x).
+;; ELSE-FORM:  the value chosen when PRED is false (x or new-var).
+(defun %substitute-if-expand (new pred seq match-form else-form)
+  (let ((new-var (gensym "NEW"))
+        (fn-var  (gensym "FN"))
+        (x       (gensym "X"))
+        (acc     (gensym "ACC")))
+    (let ((match (subst new-var 'new-var (subst x 'x match-form)))
+          (else  (subst new-var 'new-var (subst x 'x else-form))))
+      `(let ((,new-var ,new)
+             (,fn-var  ,pred)
+             (,acc nil))
+         (dolist (,x ,seq (nreverse ,acc))
+           (setq ,acc (cons (if (funcall ,fn-var ,x) ,match ,else) ,acc)))))))
+
+;; SUBSTITUTE-IF (FR-505) — replace where pred is true
 (our-defmacro substitute-if (new pred seq &rest keys)
   "Replace elements for which PRED is true with NEW."
   (when keys)
-  (let ((new-var (gensym "NEW"))
-        (fn-var (gensym "FN"))
-        (x (gensym "X"))
-        (acc (gensym "ACC")))
-    `(let ((,new-var ,new)
-           (,fn-var ,pred)
-           (,acc nil))
-       (dolist (,x ,seq (nreverse ,acc))
-         (setq ,acc (cons (if (funcall ,fn-var ,x) ,new-var ,x) ,acc))))))
+  (%substitute-if-expand new pred seq 'new-var 'x))
 
-;; SUBSTITUTE-IF-NOT (FR-505)
+;; SUBSTITUTE-IF-NOT (FR-505) — replace where pred is false
 (our-defmacro substitute-if-not (new pred seq &rest keys)
   "Replace elements for which PRED is false with NEW."
   (when keys)
-  (let ((new-var (gensym "NEW"))
-        (fn-var (gensym "FN"))
-        (x (gensym "X"))
-        (acc (gensym "ACC")))
-    `(let ((,new-var ,new)
-           (,fn-var ,pred)
-           (,acc nil))
-       (dolist (,x ,seq (nreverse ,acc))
-         (setq ,acc (cons (if (funcall ,fn-var ,x) ,x ,new-var) ,acc))))))
+  (%substitute-if-expand new pred seq 'x 'new-var))
 
 ;; NSUBSTITUTE / NSUBSTITUTE-IF / NSUBSTITUTE-IF-NOT (FR-505): same as substitute (non-destructive)
 ;;; REDUCE (FR-500 adjacent): fold a sequence using a binary function
@@ -393,13 +378,11 @@
         (cond
           ((and (symbolp type) (member type '(string simple-string base-string)))
            `(coerce-to-string ,value))
-          ((and (symbolp type) (eq type 'list))
+          ((eq type 'list)
            `(coerce-to-list ,value))
-          ((and (symbolp type) (member type '(vector simple-vector)))
-           `(coerce-to-vector ,value))
-          ((and (consp type) (member (car type) '(simple-array array)))
-           `(coerce-to-vector ,value))
-          ((and (consp type) (eq (car type) 'vector))
+          ;; vector, simple-vector, (vector ...), (array ...), (simple-array ...)
+          ((or (and (symbolp type) (member type '(vector simple-vector)))
+               (and (consp type) (member (car type) '(vector simple-array array))))
            `(coerce-to-vector ,value))
           (t `(coerce-to-string ,value))))
       `(coerce-to-string ,value)))

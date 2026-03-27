@@ -25,15 +25,12 @@
 
 ;;; ─── Stream Operations ───────────────────────────────────────────────────────
 
-(deftest pratt-peek-returns-first-token
-  "pratt-peek returns the current token without advancing"
+(deftest pratt-peek-behavior
+  "pratt-peek returns the current token without advancing, and is idempotent"
   (let ((ctx (make-test-ctx "42")))
     (let ((tok (cl-cc::pratt-peek ctx)))
       (assert-true (not (null tok)))
-      (assert-eq :T-INT (cl-cc:lexer-token-type tok)))))
-
-(deftest pratt-peek-does-not-consume
-  "pratt-peek called twice returns the same token"
+      (assert-eq :T-INT (cl-cc:lexer-token-type tok))))
   (let ((ctx (make-test-ctx "42")))
     (let ((tok1 (cl-cc::pratt-peek ctx))
           (tok2 (cl-cc::pratt-peek ctx)))
@@ -49,21 +46,18 @@
       (assert-eq :T-INT (cl-cc:lexer-token-type tok2))
       (assert-= 2 (cl-cc:lexer-token-value tok2)))))
 
-(deftest pratt-at-end-p-empty-source
-  "pratt-at-end-p returns true when only EOF token remains"
-  (let ((ctx (make-test-ctx "")))
-    (assert-true (cl-cc::pratt-at-end-p ctx))))
-
-(deftest pratt-at-end-p-non-empty
-  "pratt-at-end-p returns false when tokens remain"
-  (let ((ctx (make-test-ctx "42")))
-    (assert-false (cl-cc::pratt-at-end-p ctx))))
-
-(deftest pratt-at-end-p-after-advance
-  "pratt-at-end-p returns true after consuming all tokens"
-  (let ((ctx (make-test-ctx "x")))
-    (cl-cc::pratt-advance ctx) ; consume :T-IDENT
-    (assert-true (cl-cc::pratt-at-end-p ctx))))
+(deftest-each pratt-at-end-p-states
+  "pratt-at-end-p returns the correct value in each parser state"
+  :cases (("empty-source"  "" t   nil)
+          ("non-empty"     "42" nil nil)
+          ("after-advance" "x" t   t))
+  (source expected advance-first)
+  (let ((ctx (make-test-ctx source)))
+    (when advance-first
+      (cl-cc::pratt-advance ctx))
+    (if expected
+        (assert-true (cl-cc::pratt-at-end-p ctx))
+        (assert-false (cl-cc::pratt-at-end-p ctx)))))
 
 ;;; ─── Token Accessors ─────────────────────────────────────────────────────────
 
@@ -243,21 +237,17 @@
 
 ;;; ─── parse-all-forms: S-expression Output ───────────────────────────────────
 
-(deftest parse-all-forms-integer
-  "parse-all-forms returns integer as number"
-  (assert-= 42 (parse-one-sexp "42")))
+(deftest-each parse-all-forms-literal-types
+  "parse-all-forms returns the correct value for each literal type"
+  :cases (("integer"  "42"       42)
+          ("string"   "\"hello\"" "hello")
+          ("nil-list" "()"       nil))
+  (source expected)
+  (assert-equal expected (parse-one-sexp source)))
 
-(deftest parse-all-forms-symbol
-  "parse-all-forms returns symbol for identifier"
+(deftest parse-all-forms-literal-types-symbol
+  "parse-all-forms returns a symbol named FOO for the source \"foo\""
   (assert-string= "FOO" (symbol-name (parse-one-sexp "foo"))))
-
-(deftest parse-all-forms-string
-  "parse-all-forms returns string for string literal"
-  (assert-string= "hello" (parse-one-sexp "\"hello\"")))
-
-(deftest parse-all-forms-nil-list
-  "parse-all-forms returns nil for empty list"
-  (assert-eq nil (parse-one-sexp "()")))
 
 (deftest parse-all-forms-simple-call
   "parse-all-forms returns proper list for (f x)"

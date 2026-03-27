@@ -61,8 +61,8 @@
 
 ;;; ─── cst-walk ───────────────────────────────────────────────────────────────
 
-(deftest cst-walk-visits-all
-  "cst-walk visits all nodes in pre-order"
+(deftest cst-walk-behavior
+  "cst-walk visits all nodes in pre-order and calls fn exactly once on a leaf"
   (let* ((leaf1 (cl-cc:make-cst-token :kind :int :value 1))
          (leaf2 (cl-cc:make-cst-token :kind :int :value 2))
          (inner (cl-cc:make-cst-interior :kind :list :children (list leaf1 leaf2)))
@@ -70,10 +70,7 @@
     (cl-cc:cst-walk inner (lambda (n) (push n visited)))
     (assert-= 3 (length visited))
     ;; Pre-order: inner first
-    (assert-true (cl-cc:cst-interior-p (car (last visited))))))
-
-(deftest cst-walk-leaf-only
-  "cst-walk on a leaf calls fn exactly once"
+    (assert-true (cl-cc:cst-interior-p (car (last visited)))))
   (let ((count 0)
         (leaf (cl-cc:make-cst-token :kind :int :value 42)))
     (cl-cc:cst-walk leaf (lambda (n) (declare (ignore n)) (incf count)))
@@ -118,30 +115,16 @@
 
 ;;; ─── sexp-to-cst ────────────────────────────────────────────────────────────
 
-(deftest sexp-to-cst-integer
-  "sexp-to-cst on an integer produces :int token"
-  (let ((node (cl-cc:sexp-to-cst 42)))
+(deftest-each sexp-to-cst-literal-types
+  "sexp-to-cst produces the correct token kind for each literal type"
+  :cases (("integer" 42      :int)
+          ("string"  "hello" :string)
+          ("nil"     nil     :nil)
+          ("keyword" :foo    :keyword))
+  (input expected-kind)
+  (let ((node (cl-cc:sexp-to-cst input)))
     (assert-true (cl-cc:cst-token-p node))
-    (assert-eq :int (cl-cc:cst-node-kind node))
-    (assert-= 42 (cl-cc:cst-token-value node))))
-
-(deftest sexp-to-cst-string
-  "sexp-to-cst on a string produces :string token"
-  (let ((node (cl-cc:sexp-to-cst "hello")))
-    (assert-true (cl-cc:cst-token-p node))
-    (assert-eq :string (cl-cc:cst-node-kind node))))
-
-(deftest sexp-to-cst-nil
-  "sexp-to-cst on nil produces :nil token"
-  (let ((node (cl-cc:sexp-to-cst nil)))
-    (assert-true (cl-cc:cst-token-p node))
-    (assert-eq :nil (cl-cc:cst-node-kind node))))
-
-(deftest sexp-to-cst-keyword
-  "sexp-to-cst on a keyword produces :keyword token"
-  (let ((node (cl-cc:sexp-to-cst :foo)))
-    (assert-true (cl-cc:cst-token-p node))
-    (assert-eq :keyword (cl-cc:cst-node-kind node))))
+    (assert-eq expected-kind (cl-cc:cst-node-kind node))))
 
 ;;; ─── Roundtrip ──────────────────────────────────────────────────────────────
 

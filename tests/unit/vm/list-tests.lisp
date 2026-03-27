@@ -18,16 +18,12 @@
 
 ;;; ─── make-list ──────────────────────────────────────────────────────────────
 
-(deftest vm-list-make-list-creates-nils
-  "vm-make-list creates a list of N nils."
+(deftest vm-list-make-list
+  "vm-make-list: N nils for size N; empty list for size 0."
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 3)
     (exec1 (cl-cc::make-vm-make-list :dst 0 :size 1) s)
-    (let ((result (cl-cc:vm-reg-get s 0)))
-      (assert-equal '(nil nil nil) result))))
-
-(deftest vm-list-make-list-zero
-  "vm-make-list with 0 creates empty list."
+    (assert-equal '(nil nil nil) (cl-cc:vm-reg-get s 0)))
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 0)
     (exec1 (cl-cc::make-vm-make-list :dst 0 :size 1) s)
@@ -59,19 +55,16 @@
 
 ;;; ─── member / nth / nthcdr ─────────────────────────────────────────────────
 
-(deftest vm-list-member-found
-  "vm-member returns tail starting at found element."
+(deftest vm-list-member-behavior
+  "vm-member returns tail on hit; nil on miss."
   (let ((s (make-test-vm)))
+    (cl-cc:vm-reg-set s 2 '(a b c))
     (cl-cc:vm-reg-set s 1 'b)
-    (cl-cc:vm-reg-set s 2 '(a b c))
     (exec1 (cl-cc::make-vm-member :dst 0 :item 1 :list 2) s)
-    (assert-equal '(b c) (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-list-member-not-found
-  "vm-member returns nil when item is absent."
+    (assert-equal '(b c) (cl-cc:vm-reg-get s 0)))
   (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 'z)
     (cl-cc:vm-reg-set s 2 '(a b c))
+    (cl-cc:vm-reg-set s 1 'z)
     (exec1 (cl-cc::make-vm-member :dst 0 :item 1 :list 2) s)
     (assert-null (cl-cc:vm-reg-get s 0))))
 
@@ -94,38 +87,20 @@
 ;;; ─── Named accessors ───────────────────────────────────────────────────────
 
 (deftest-each vm-list-named-accessors
-  "Named accessor instructions extract correct positional elements."
-  :cases (("first"  #'cl-cc::make-vm-first  '(10 20 30 40 50) 10)
-          ("second" #'cl-cc::make-vm-second '(10 20 30 40 50) 20)
-          ("third"  #'cl-cc::make-vm-third  '(10 20 30 40 50) 30)
-          ("fourth" #'cl-cc::make-vm-fourth '(10 20 30 40 50) 40)
-          ("fifth"  #'cl-cc::make-vm-fifth  '(10 20 30 40 50) 50))
+  "Named accessor instructions (first–fifth, rest, last, butlast) extract the correct element."
+  :cases (("first"   #'cl-cc::make-vm-first   '(10 20 30 40 50) 10)
+          ("second"  #'cl-cc::make-vm-second  '(10 20 30 40 50) 20)
+          ("third"   #'cl-cc::make-vm-third   '(10 20 30 40 50) 30)
+          ("fourth"  #'cl-cc::make-vm-fourth  '(10 20 30 40 50) 40)
+          ("fifth"   #'cl-cc::make-vm-fifth   '(10 20 30 40 50) 50)
+          ("rest"    #'cl-cc::make-vm-rest    '(a b c)          '(b c))
+          ("last"    #'cl-cc::make-vm-last    '(a b c)          '(c))
+          ("butlast" #'cl-cc::make-vm-butlast '(a b c)          '(a b)))
   (constructor input expected)
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 input)
     (exec1 (funcall constructor :dst 0 :src 1) s)
     (assert-equal expected (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-list-rest-is-cdr
-  "vm-rest returns the cdr of the list."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 '(a b c))
-    (exec1 (cl-cc::make-vm-rest :dst 0 :src 1) s)
-    (assert-equal '(b c) (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-list-last-cons
-  "vm-last returns the last cons cell."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 '(a b c))
-    (exec1 (cl-cc::make-vm-last :dst 0 :src 1) s)
-    (assert-equal '(c) (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-list-butlast-drops-last
-  "vm-butlast returns all but the last element."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 '(a b c))
-    (exec1 (cl-cc::make-vm-butlast :dst 0 :src 1) s)
-    (assert-equal '(a b) (cl-cc:vm-reg-get s 0))))
 
 ;;; ─── Destructive operations ─────────────────────────────────────────────────
 
@@ -145,44 +120,25 @@
     (exec1 (cl-cc::make-vm-list-length :dst 0 :src 1) s)
     (assert-= 3 (cl-cc:vm-reg-get s 0))))
 
-(deftest vm-list-endp-nil
-  "vm-endp returns 1 for nil (empty list)."
+(deftest-each vm-list-empty-predicates
+  "vm-endp and vm-null both detect the empty list."
+  :cases (("endp/nil"       #'cl-cc::make-vm-endp nil  1)
+          ("endp/non-empty" #'cl-cc::make-vm-endp '(a) 0)
+          ("null/nil"       #'cl-cc::make-vm-null nil  1)
+          ("null/non-nil"   #'cl-cc::make-vm-null 42   0))
+  (constructor value expected)
   (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 nil)
-    (exec1 (cl-cc::make-vm-endp :dst 0 :src 1) s)
-    (assert-= 1 (cl-cc:vm-reg-get s 0))))
+    (cl-cc:vm-reg-set s 1 value)
+    (exec1 (funcall constructor :dst 0 :src 1) s)
+    (assert-= expected (cl-cc:vm-reg-get s 0))))
 
-(deftest vm-list-endp-non-empty
-  "vm-endp returns 0 for non-empty list."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 '(a))
-    (exec1 (cl-cc::make-vm-endp :dst 0 :src 1) s)
-    (assert-= 0 (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-list-null-nil
-  "vm-null returns 1 for nil."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 nil)
-    (exec1 (cl-cc::make-vm-null :dst 0 :src 1) s)
-    (assert-= 1 (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-list-null-non-nil
-  "vm-null returns 0 for non-nil value."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 42)
-    (exec1 (cl-cc::make-vm-null :dst 0 :src 1) s)
-    (assert-= 0 (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-list-push-prepends
-  "vm-push conses item onto list."
+(deftest vm-list-push-and-pop
+  "vm-push conses item onto list; vm-pop extracts car."
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 'x)
     (cl-cc:vm-reg-set s 2 '(a b))
     (exec1 (cl-cc::make-vm-push :dst 0 :item 1 :list 2) s)
-    (assert-equal '(x a b) (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-list-pop-extracts-car
-  "vm-pop extracts the car of the list."
+    (assert-equal '(x a b) (cl-cc:vm-reg-get s 0)))
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 '(first second third))
     (exec1 (cl-cc::make-vm-pop :dst 0 :list 1) s)
@@ -190,16 +146,13 @@
 
 ;;; ─── Association lists ──────────────────────────────────────────────────────
 
-(deftest vm-list-assoc-found
-  "vm-assoc finds key in alist."
+(deftest vm-list-assoc-behavior
+  "vm-assoc returns matching pair on hit; nil on miss."
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 'b)
     (cl-cc:vm-reg-set s 2 '((a . 1) (b . 2) (c . 3)))
     (exec1 (cl-cc::make-vm-assoc :dst 0 :key 1 :alist 2) s)
-    (assert-equal '(b . 2) (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-list-assoc-not-found
-  "vm-assoc returns nil for missing key."
+    (assert-equal '(b . 2) (cl-cc:vm-reg-get s 0)))
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 'z)
     (cl-cc:vm-reg-set s 2 '((a . 1)))
@@ -219,16 +172,13 @@
 
 ;;; ─── equal / nconc / copy-list / copy-tree / subst ──────────────────────────
 
-(deftest vm-list-equal-same
-  "vm-equal returns 1 for structurally equal trees."
+(deftest vm-list-equal-behavior
+  "vm-equal returns 1 for structurally equal trees; 0 for different trees."
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 '(a (b c)))
     (cl-cc:vm-reg-set s 2 '(a (b c)))
     (exec1 (cl-cc::make-vm-equal :dst 0 :lhs 1 :rhs 2) s)
-    (assert-= 1 (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-list-equal-different
-  "vm-equal returns 0 for different trees."
+    (assert-= 1 (cl-cc:vm-reg-get s 0)))
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 '(a b))
     (cl-cc:vm-reg-set s 2 '(a c))
@@ -274,59 +224,34 @@
 
 ;;; ─── Type predicates ────────────────────────────────────────────────────────
 
-(deftest vm-list-listp-cons
-  "vm-listp returns 1 for a cons cell."
+(deftest-each vm-list-type-predicates
+  "vm-listp and vm-atom classify values as list or atom."
+  :cases (("listp/cons"   #'cl-cc::make-vm-listp '(a) 1)
+          ("listp/nil"    #'cl-cc::make-vm-listp nil  1)
+          ("listp/atom"   #'cl-cc::make-vm-listp 42   0)
+          ("atom/number"  #'cl-cc::make-vm-atom  42   1)
+          ("atom/cons"    #'cl-cc::make-vm-atom  '(a) 0))
+  (constructor value expected)
   (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 '(a))
-    (exec1 (cl-cc::make-vm-listp :dst 0 :src 1) s)
-    (assert-= 1 (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-list-listp-nil
-  "vm-listp returns 1 for nil."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 nil)
-    (exec1 (cl-cc::make-vm-listp :dst 0 :src 1) s)
-    (assert-= 1 (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-list-listp-atom
-  "vm-listp returns 0 for non-list."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 42)
-    (exec1 (cl-cc::make-vm-listp :dst 0 :src 1) s)
-    (assert-= 0 (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-list-atom-number
-  "vm-atom returns 1 for a number."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 42)
-    (exec1 (cl-cc::make-vm-atom :dst 0 :src 1) s)
-    (assert-= 1 (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-list-atom-cons
-  "vm-atom returns 0 for a cons."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 '(a))
-    (exec1 (cl-cc::make-vm-atom :dst 0 :src 1) s)
-    (assert-= 0 (cl-cc:vm-reg-get s 0))))
+    (cl-cc:vm-reg-set s 1 value)
+    (exec1 (funcall constructor :dst 0 :src 1) s)
+    (assert-= expected (cl-cc:vm-reg-get s 0))))
 
 ;;; ─── Coercion instructions ─────────────────────────────────────────────────
 
-(deftest vm-list-coerce-to-string
-  "vm-coerce-to-string coerces a character list to string."
+(deftest-each vm-list-coerce-simple
+  "Simple coercion instructions round-trip a single value correctly."
+  :cases (("chars-to-string" #'cl-cc::make-vm-coerce-to-string  '(#\h #\i)  "hi")
+          ("vector-to-list"  #'cl-cc::make-vm-coerce-to-list    #(1 2 3)    '(1 2 3))
+          ("symbol-to-name"  #'cl-cc::make-vm-string-coerce     'hello      "HELLO"))
+  (ctor input expected)
   (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 '(#\h #\i))
-    (exec1 (cl-cc::make-vm-coerce-to-string :dst 0 :src 1) s)
-    (assert-equal "hi" (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-list-coerce-to-list
-  "vm-coerce-to-list coerces a vector to list."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 #(1 2 3))
-    (exec1 (cl-cc::make-vm-coerce-to-list :dst 0 :src 1) s)
-    (assert-equal '(1 2 3) (cl-cc:vm-reg-get s 0))))
+    (cl-cc:vm-reg-set s 1 input)
+    (exec1 (funcall ctor :dst 0 :src 1) s)
+    (assert-equal expected (cl-cc:vm-reg-get s 0))))
 
 (deftest vm-list-coerce-to-vector
-  "vm-coerce-to-vector coerces a list to vector."
+  "vm-coerce-to-vector coerces a list to a proper vector."
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 '(a b c))
     (exec1 (cl-cc::make-vm-coerce-to-vector :dst 0 :src 1) s)
@@ -334,13 +259,6 @@
       (assert-true (vectorp v))
       (assert-= 3 (length v))
       (assert-eq 'a (aref v 0)))))
-
-(deftest vm-list-string-coerce-symbol
-  "vm-string-coerce converts a symbol to its name string."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 'hello)
-    (exec1 (cl-cc::make-vm-string-coerce :dst 0 :src 1) s)
-    (assert-equal "HELLO" (cl-cc:vm-reg-get s 0))))
 
 ;;; ─── Array operations ──────────────────────────────────────────────────────
 
@@ -394,35 +312,27 @@
     (exec1 (cl-cc::make-vm-array-length :dst 0 :src 1) s)
     (assert-= 4 (cl-cc:vm-reg-get s 0))))
 
-(deftest vm-array-vectorp-true
-  "vm-vectorp returns 1 for a vector."
+(deftest-each vm-array-vectorp
+  "vm-vectorp returns 1 for vectors, 0 for non-vectors."
+  :cases (("vector"     #(1 2) 1)
+          ("non-vector" '(a b) 0))
+  (value expected)
   (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 #(1 2))
+    (cl-cc:vm-reg-set s 1 value)
     (exec1 (cl-cc::make-vm-vectorp :dst 0 :src 1) s)
-    (assert-= 1 (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-array-vectorp-false
-  "vm-vectorp returns 0 for a non-vector."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 '(a b))
-    (exec1 (cl-cc::make-vm-vectorp :dst 0 :src 1) s)
-    (assert-= 0 (cl-cc:vm-reg-get s 0))))
+    (assert-= expected (cl-cc:vm-reg-get s 0))))
 
 ;;; ─── Array dimension queries ────────────────────────────────────────────────
 
-(deftest vm-array-rank-1d
-  "vm-array-rank returns 1 for a 1D vector."
+(deftest-each vm-array-rank
+  "vm-array-rank returns the number of dimensions."
+  :cases (("1d" #(1 2 3)          1)
+          ("2d" (make-array '(2 3)) 2))
+  (arr expected)
   (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 #(1 2 3))
+    (cl-cc:vm-reg-set s 1 arr)
     (exec1 (cl-cc::make-vm-array-rank :dst 0 :src 1) s)
-    (assert-= 1 (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-array-rank-2d
-  "vm-array-rank returns 2 for a 2D array."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 (make-array '(2 3)))
-    (exec1 (cl-cc::make-vm-array-rank :dst 0 :src 1) s)
-    (assert-= 2 (cl-cc:vm-reg-get s 0))))
+    (assert-= expected (cl-cc:vm-reg-get s 0))))
 
 (deftest vm-array-total-size-2d
   "vm-array-total-size returns total element count."
@@ -489,29 +399,16 @@
 
 ;;; ─── Fill-pointer operations ────────────────────────────────────────────────
 
-(deftest vm-array-fill-pointer-reads
-  "vm-fill-pointer-inst returns current fill pointer."
-  (let ((s (make-test-vm))
-        (v (make-array 5 :fill-pointer 3)))
-    (cl-cc:vm-reg-set s 1 v)
-    (exec1 (cl-cc::make-vm-fill-pointer-inst :dst 0 :src 1) s)
-    (assert-= 3 (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-array-has-fill-pointer-true
-  "vm-array-has-fill-pointer-p returns 1 for vector with fill-pointer."
-  (let ((s (make-test-vm))
-        (v (make-array 5 :fill-pointer 0)))
-    (cl-cc:vm-reg-set s 1 v)
-    (exec1 (cl-cc::make-vm-array-has-fill-pointer-p :dst 0 :src 1) s)
-    (assert-= 1 (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-array-adjustable-true
-  "vm-array-adjustable-p returns 1 for adjustable array."
-  (let ((s (make-test-vm))
-        (v (make-array 5 :adjustable t)))
-    (cl-cc:vm-reg-set s 1 v)
-    (exec1 (cl-cc::make-vm-array-adjustable-p :dst 0 :src 1) s)
-    (assert-= 1 (cl-cc:vm-reg-get s 0))))
+(deftest-each vm-array-fill-pointer-query
+  "Fill-pointer and adjustability queries return the expected value."
+  :cases (("fill-pointer"     (make-array 5 :fill-pointer 3) #'cl-cc::make-vm-fill-pointer-inst      3)
+          ("has-fill-pointer" (make-array 5 :fill-pointer 0) #'cl-cc::make-vm-array-has-fill-pointer-p 1)
+          ("adjustable"       (make-array 5 :adjustable t)   #'cl-cc::make-vm-array-adjustable-p       1))
+  (arr ctor expected)
+  (let ((s (make-test-vm)))
+    (cl-cc:vm-reg-set s 1 arr)
+    (exec1 (funcall ctor :dst 0 :src 1) s)
+    (assert-= expected (cl-cc:vm-reg-get s 0))))
 
 (deftest vm-array-vector-push-basic
   "vm-vector-push pushes value and returns new index."
@@ -544,14 +441,18 @@
 
 ;;; ─── Bit array operations ──────────────────────────────────────────────────
 
-(deftest vm-bit-access-reads
-  "vm-bit-access reads a bit from a bit-array."
-  (let ((s (make-test-vm))
-        (ba (make-array 4 :element-type 'bit :initial-contents '(1 0 1 0))))
+(deftest-each vm-bit-simple-reads
+  "Bit read instructions (bit-access, sbit) return the correct bit value."
+  :cases (("bit-access" #'cl-cc::make-vm-bit-access
+           (make-array 4 :element-type 'bit :initial-contents '(1 0 1 0)) 2 1)
+          ("sbit"       #'cl-cc::make-vm-sbit
+           (make-array 3 :element-type 'bit :initial-contents '(0 1 0))   1 1))
+  (ctor ba idx expected)
+  (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 ba)
-    (cl-cc:vm-reg-set s 2 2)
-    (exec1 (cl-cc::make-vm-bit-access :dst 0 :arr 1 :idx 2) s)
-    (assert-= 1 (cl-cc:vm-reg-get s 0))))
+    (cl-cc:vm-reg-set s 2 idx)
+    (exec1 (funcall ctor :dst 0 :arr 1 :idx 2) s)
+    (assert-= expected (cl-cc:vm-reg-get s 0))))
 
 (deftest vm-bit-set-writes
   "vm-bit-set writes a bit to a bit-array."
@@ -593,15 +494,6 @@
       (assert-= 1 (bit result 1))
       (assert-= 0 (bit result 2))
       (assert-= 1 (bit result 3)))))
-
-(deftest vm-sbit-reads-simple-bit-vector
-  "vm-sbit reads from a simple bit-vector."
-  (let ((s (make-test-vm))
-        (bv (make-array 3 :element-type 'bit :initial-contents '(0 1 0))))
-    (cl-cc:vm-reg-set s 1 bv)
-    (cl-cc:vm-reg-set s 2 1)
-    (exec1 (cl-cc::make-vm-sbit :dst 0 :arr 1 :idx 2) s)
-    (assert-= 1 (cl-cc:vm-reg-get s 0))))
 
 ;;; ─── adjust-array / array-displacement ──────────────────────────────────────
 

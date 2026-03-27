@@ -12,25 +12,17 @@
 
 ;;; ─── Section 1: GETHASH ─────────────────────────────────────────────────────
 
-(deftest codegen-phase2-gethash-two-args-emits-vm-gethash
-  "Compiling (gethash key table) emits a vm-gethash instruction."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'gethash
-                                :args (list (make-ast-quote :value 'my-key)
-                                            (make-ast-quote :value 'my-ht)))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc:vm-gethash))))
-
-(deftest codegen-phase2-gethash-two-args-default-is-nil
-  "Compiling (gethash key table) with no default leaves default register nil."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'gethash
-                                :args (list (make-ast-quote :value :k)
-                                            (make-ast-quote :value :ht)))
-                 ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc:vm-gethash)))
-      (assert-true inst)
-      (assert-true (null (cl-cc::vm-gethash-default inst))))))
+(deftest codegen-phase2-gethash-two-args
+  "Compiling (gethash key table): emits vm-gethash with nil default; returns register."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast (make-ast-call :func 'gethash
+                                          :args (list (make-ast-quote :value :k)
+                                                      (make-ast-quote :value :ht)))
+                           ctx))
+         (inst (codegen-find-inst ctx 'cl-cc:vm-gethash)))
+    (assert-true inst)
+    (assert-true (null (cl-cc::vm-gethash-default inst)))
+    (assert-true (keywordp reg))))
 
 (deftest codegen-phase2-gethash-three-args-default-register-set
   "Compiling (gethash key table default) sets the default register in vm-gethash."
@@ -44,58 +36,26 @@
       (assert-true inst)
       (assert-true (cl-cc::vm-gethash-default inst)))))
 
-(deftest codegen-phase2-gethash-returns-register
-  "Compiling (gethash key table) returns a keyword register."
-  (let* ((ctx (make-codegen-ctx))
-         (reg (compile-ast (make-ast-call :func 'gethash
-                                          :args (list (make-ast-quote :value :k)
-                                                      (make-ast-quote :value :ht)))
-                           ctx)))
-    (assert-true (keywordp reg))))
 
 ;;; ─── Section 2: MAPHASH ─────────────────────────────────────────────────────
 
-(deftest codegen-phase2-maphash-emits-vm-hash-table-keys
-  "Compiling (maphash fn ht) emits a vm-hash-table-keys instruction."
+(deftest codegen-phase2-maphash-compilation
+  "Compiling (maphash fn ht): emits vm-hash-table-keys, vm-call, and a nil-const for void return."
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-ast-call :func 'maphash
                                 :args (list (make-ast-quote :value 'my-fn)
                                             (make-ast-quote :value 'my-ht)))
                  ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-hash-table-keys))))
-
-(deftest codegen-phase2-maphash-emits-vm-call
-  "Compiling (maphash fn ht) emits a vm-call to apply the function to each entry."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'maphash
-                                :args (list (make-ast-quote :value 'my-fn)
-                                            (make-ast-quote :value 'my-ht)))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc:vm-call))))
-
-(deftest codegen-phase2-maphash-result-is-nil
-  "Compiling (maphash fn ht) emits a vm-const nil for the void return value."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'maphash
-                                :args (list (make-ast-quote :value 'my-fn)
-                                            (make-ast-quote :value 'my-ht)))
-                 ctx)
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-hash-table-keys))
+    (assert-true (codegen-find-inst ctx 'cl-cc:vm-call))
     (let ((consts (remove-if-not (lambda (i) (typep i 'cl-cc::vm-const))
                                   (codegen-instructions ctx))))
       (assert-true (some (lambda (i) (null (cl-cc::vm-const-value i))) consts)))))
 
 ;;; ─── Section 3: MAKE-ARRAY ──────────────────────────────────────────────────
 
-(deftest codegen-phase2-make-array-emits-vm-make-array
-  "Compiling (make-array n) emits a vm-make-array instruction."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'make-array
-                                :args (list (make-ast-int :value 10)))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-array))))
-
-(deftest codegen-phase2-make-array-fixed-not-adjustable
-  "Compiling (make-array n) produces a non-adjustable array with no fill-pointer."
+(deftest codegen-phase2-make-array
+  "Compiling (make-array n): emits vm-make-array; no fill-pointer or adjustable; works with size zero."
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-ast-call :func 'make-array
                                 :args (list (make-ast-int :value 5)))
@@ -103,10 +63,7 @@
     (let ((inst (codegen-find-inst ctx 'cl-cc::vm-make-array)))
       (assert-true inst)
       (assert-true (null (cl-cc::vm-make-array-fill-pointer inst)))
-      (assert-true (null (cl-cc::vm-make-array-adjustable inst))))))
-
-(deftest codegen-phase2-make-array-size-zero
-  "Compiling (make-array 0) emits vm-make-array with a zero-size constant."
+      (assert-true (null (cl-cc::vm-make-array-adjustable inst)))))
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-ast-call :func 'make-array
                                 :args (list (make-ast-int :value 0)))
@@ -115,16 +72,8 @@
 
 ;;; ─── Section 4: MAKE-ADJUSTABLE-VECTOR ─────────────────────────────────────
 
-(deftest codegen-phase2-make-adjustable-vector-emits-vm-make-array
-  "Compiling (make-adjustable-vector n) emits a vm-make-array instruction."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'make-adjustable-vector
-                                :args (list (make-ast-int :value 8)))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-array))))
-
-(deftest codegen-phase2-make-adjustable-vector-is-adjustable
-  "Compiling (make-adjustable-vector n) sets fill-pointer t and adjustable t."
+(deftest codegen-phase2-make-adjustable-vector-compilation
+  "Compiling (make-adjustable-vector n): emits vm-make-array with fill-pointer t and adjustable t."
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-ast-call :func 'make-adjustable-vector
                                 :args (list (make-ast-int :value 8)))
@@ -136,8 +85,8 @@
 
 ;;; ─── Section 5: TYPEP ───────────────────────────────────────────────────────
 
-(deftest codegen-phase2-typep-quoted-integer-emits-vm-typep
-  "Compiling (typep 42 'integer) emits a vm-typep instruction."
+(deftest codegen-phase2-typep-quoted-emits-vm-typep
+  "Compiling (typep x 'integer) emits vm-typep."
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-ast-call :func 'typep
                                 :args (list (make-ast-int :value 42)
@@ -145,27 +94,19 @@
                  ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc::vm-typep))))
 
-(deftest codegen-phase2-typep-type-name-stored
-  "Compiling (typep x 'string) stores 'string as the type-name in vm-typep."
+(deftest-each codegen-phase2-typep-type-name-stored
+  "Compiling (typep x 'TYPE) stores TYPE as the type-name in the vm-typep instruction."
+  :cases (("string" 'string)
+          ("list"   'list))
+  (type-sym)
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-ast-call :func 'typep
                                 :args (list (make-ast-int :value 42)
-                                            (make-ast-quote :value 'string)))
+                                            (make-ast-quote :value type-sym)))
                  ctx)
     (let ((inst (codegen-find-inst ctx 'cl-cc::vm-typep)))
       (assert-true inst)
-      (assert-eq 'string (cl-cc::vm-typep-type-name inst)))))
-
-(deftest codegen-phase2-typep-quoted-list-type
-  "Compiling (typep x 'list) emits vm-typep with type-name list."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'typep
-                                :args (list (make-ast-int :value 99)
-                                            (make-ast-quote :value 'list)))
-                 ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-typep)))
-      (assert-true inst)
-      (assert-eq 'list (cl-cc::vm-typep-type-name inst)))))
+      (assert-eq type-sym (cl-cc::vm-typep-type-name inst)))))
 
 (deftest codegen-phase2-typep-unquoted-falls-through
   "Compiling (typep x integer) with unquoted type does not emit vm-typep."
@@ -179,24 +120,15 @@
 
 ;;; ─── Section 6: FORMAT ──────────────────────────────────────────────────────
 
-(deftest codegen-phase2-format-nil-dest-emits-vm-format-inst
-  "Compiling (format nil fmt arg) emits vm-format-inst."
+(deftest codegen-phase2-format-nil-dest
+  "Compiling (format nil fmt arg): emits vm-format-inst but NOT vm-princ."
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-ast-call :func 'format
                                 :args (list (make-ast-var :name nil)
                                             (make-ast-quote :value "~A")
                                             (make-ast-int :value 42)))
                  ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-format-inst))))
-
-(deftest codegen-phase2-format-nil-dest-no-princ
-  "Compiling (format nil fmt) does NOT emit vm-princ — result stays in register."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'format
-                                :args (list (make-ast-var :name nil)
-                                            (make-ast-quote :value "~A")
-                                            (make-ast-int :value 1)))
-                 ctx)
+    (assert-true  (codegen-find-inst ctx 'cl-cc::vm-format-inst))
     (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-princ)))))
 
 (deftest codegen-phase2-format-t-dest-emits-format-and-princ
@@ -219,15 +151,8 @@
 
 ;;; ─── Section 7: MAKE-HASH-TABLE ─────────────────────────────────────────────
 
-(deftest codegen-phase2-make-hash-table-no-args-emits-instruction
-  "Compiling (make-hash-table) with no args emits vm-make-hash-table."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'make-hash-table :args '())
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-hash-table))))
-
-(deftest codegen-phase2-make-hash-table-no-args-test-slot-nil
-  "Compiling (make-hash-table) without :test leaves test register nil."
+(deftest codegen-phase2-make-hash-table-no-args
+  "Compiling (make-hash-table): emits vm-make-hash-table with nil test slot."
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-ast-call :func 'make-hash-table :args '())
                  ctx)
@@ -258,42 +183,32 @@
                  ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc::vm-concatenate))))
 
-(deftest codegen-phase2-concatenate-non-string-type-falls-through
-  "Compiling (concatenate 'list a b) does NOT emit vm-concatenate."
+(deftest-each codegen-phase2-concatenate-non-string-falls-through
+  "Compiling (concatenate TYPE ...) with non-string or unquoted type does NOT emit vm-concatenate."
+  :cases (("non-string-type"
+           nil
+           (list (make-ast-quote :value 'list)
+                 (make-ast-quote :value "a")
+                 (make-ast-quote :value "b")))
+          ("unquoted-type"
+           (list (cons 'string :R99))
+           (list (make-ast-var :name 'string)
+                 (make-ast-quote :value "a")
+                 (make-ast-quote :value "b"))))
+  (extra-env args)
   (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'concatenate
-                                :args (list (make-ast-quote :value 'list)
-                                            (make-ast-quote :value "a")
-                                            (make-ast-quote :value "b")))
-                 ctx)
-    (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-concatenate)))))
-
-(deftest codegen-phase2-concatenate-unquoted-type-falls-through
-  "Compiling (concatenate string a b) with unquoted type falls through."
-  (let ((ctx (make-codegen-ctx)))
-    (setf (cl-cc::ctx-env ctx) (list (cons 'string :R99)))
-    (compile-ast (make-ast-call :func 'concatenate
-                                :args (list (make-ast-var :name 'string)
-                                            (make-ast-quote :value "a")
-                                            (make-ast-quote :value "b")))
-                 ctx)
+    (when extra-env
+      (setf (cl-cc::ctx-env ctx) extra-env))
+    (compile-ast (make-ast-call :func 'concatenate :args args) ctx)
     (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-concatenate)))))
 
 ;;; ─── Section 9: MAKE-STRING-INPUT-STREAM ────────────────────────────────────
 
-(deftest codegen-phase2-make-string-input-stream-emits-vm-make-string-stream
-  "Compiling (make-string-input-stream str) emits vm-make-string-stream."
+(deftest codegen-phase2-make-string-input-stream-compilation
+  "Compiling (make-string-input-stream str): emits vm-make-string-stream with :input direction."
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-ast-call :func 'make-string-input-stream
                                 :args (list (make-ast-quote :value "hello")))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-string-stream))))
-
-(deftest codegen-phase2-make-string-input-stream-direction-is-input
-  "Compiling (make-string-input-stream str) sets direction to :input."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'make-string-input-stream
-                                :args (list (make-ast-quote :value "world")))
                  ctx)
     (let ((inst (codegen-find-inst ctx 'cl-cc::vm-make-string-stream)))
       (assert-true inst)
@@ -301,16 +216,8 @@
 
 ;;; ─── Section 10: OPEN ───────────────────────────────────────────────────────
 
-(deftest codegen-phase2-open-emits-vm-open-file
-  "Compiling (open path) emits a vm-open-file instruction."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'open
-                                :args (list (make-ast-quote :value "/tmp/test.txt")))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-open-file))))
-
-(deftest codegen-phase2-open-defaults-to-input-direction
-  "Compiling (open path) with no :direction keyword defaults to :input."
+(deftest codegen-phase2-open-compilation
+  "Compiling (open path): emits vm-open-file defaulting to :input direction."
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-ast-call :func 'open
                                 :args (list (make-ast-quote :value "/tmp/in.txt")))
@@ -333,23 +240,15 @@
 
 ;;; ─── Section 11: PEEK-CHAR ──────────────────────────────────────────────────
 
-(deftest codegen-phase2-peek-char-one-arg-emits-vm-peek-char
-  "Compiling (peek-char handle) with 1 arg emits vm-peek-char."
+(deftest-each codegen-phase2-peek-char-emits-vm-peek-char
+  "Compiling peek-char with 1 or 2 args always emits vm-peek-char."
+  :cases (("one-arg" :R10 (list (make-ast-var :name 'handle)))
+          ("two-args" :R11 (list (make-ast-var :name nil)
+                                  (make-ast-var :name 'handle))))
+  (reg args)
   (let ((ctx (make-codegen-ctx)))
-    (setf (cl-cc::ctx-env ctx) (list (cons 'handle :R10)))
-    (compile-ast (make-ast-call :func 'peek-char
-                                :args (list (make-ast-var :name 'handle)))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-peek-char))))
-
-(deftest codegen-phase2-peek-char-two-args-emits-vm-peek-char
-  "Compiling (peek-char nil handle) with 2 args emits vm-peek-char."
-  (let ((ctx (make-codegen-ctx)))
-    (setf (cl-cc::ctx-env ctx) (list (cons 'handle :R11)))
-    (compile-ast (make-ast-call :func 'peek-char
-                                :args (list (make-ast-var :name nil)
-                                            (make-ast-var :name 'handle)))
-                 ctx)
+    (setf (cl-cc::ctx-env ctx) (list (cons 'handle reg)))
+    (compile-ast (make-ast-call :func 'peek-char :args args) ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc::vm-peek-char))))
 
 ;;; ─── Section 12: WRITE-STRING ───────────────────────────────────────────────

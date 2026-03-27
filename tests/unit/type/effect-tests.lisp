@@ -38,77 +38,36 @@
 
 ;;; ─── effect registry ────────────────────────────────────────────────────────
 
-(deftest effect-registry-roundtrip
-  "register-effect + lookup-effect round-trips."
+(deftest effect-registry-operations
+  "Effect registry: round-trip register+lookup; lookup of absent effect returns nil."
   (let ((cl-cc/type::*effect-registry* (make-hash-table :test #'eq)))
     (let ((ed (cl-cc/type::make-effect-def :name 'test-eff :type-params nil :operations nil)))
       (cl-cc/type::register-effect 'test-eff ed)
-      (assert-eq ed (cl-cc/type::lookup-effect 'test-eff)))))
-
-(deftest effect-registry-missing
-  "lookup-effect returns nil for unregistered effects."
-  (let ((cl-cc/type::*effect-registry* (make-hash-table :test #'eq)))
+      (assert-eq ed (cl-cc/type::lookup-effect 'test-eff)))
     (assert-null (cl-cc/type::lookup-effect 'nonexistent))))
 
 ;;; ─── effect-row-union ───────────────────────────────────────────────────────
 
-(deftest effect-row-union-disjoint
-  "Union of disjoint rows contains all effects."
-  (let* ((r1 (make-effect-row :io))
-         (r2 (make-effect-row :state))
-         (result (cl-cc/type::effect-row-union r1 r2)))
-    (assert-equal 2 (length (type-effect-row-effects result)))))
-
-(deftest effect-row-union-overlapping
-  "Union deduplicates by name."
-  (let* ((r1 (make-effect-row :io :state))
-         (r2 (make-effect-row :io :exn))
-         (result (cl-cc/type::effect-row-union r1 r2)))
-    ;; r1 has io+state, r2 has io+exn → result has io+state+exn (3, not 4)
-    (assert-equal 3 (length (type-effect-row-effects result)))))
-
-(deftest effect-row-union-empty
-  "Union of two empty rows is empty."
-  (let* ((r1 (make-effect-row))
-         (r2 (make-effect-row))
-         (result (cl-cc/type::effect-row-union r1 r2)))
-    (assert-null (type-effect-row-effects result))))
-
-(deftest effect-row-union-preserves-row-var
-  "Union preserves row-var from row2 (or row1 if row2 has none)."
+(deftest effect-row-union-behavior
+  "effect-row-union: disjoint (2 effects), overlapping deduplicates (3 not 4), empty stays empty, row-var preserved."
+  (assert-equal 2 (length (type-effect-row-effects
+                            (cl-cc/type::effect-row-union (make-effect-row :io) (make-effect-row :state)))))
+  (assert-equal 3 (length (type-effect-row-effects
+                            (cl-cc/type::effect-row-union (make-effect-row :io :state) (make-effect-row :io :exn)))))
+  (assert-null (type-effect-row-effects
+                (cl-cc/type::effect-row-union (make-effect-row) (make-effect-row))))
   (let* ((rv (fresh-type-var))
-         (r1 (make-effect-row :io))
-         (r2 (make-open-effect-row rv :state))
-         (result (cl-cc/type::effect-row-union r1 r2)))
+         (result (cl-cc/type::effect-row-union (make-effect-row :io) (make-open-effect-row rv :state))))
     (assert-true (type-variable-p (type-effect-row-row-var result)))))
 
 ;;; ─── effect-row-subset-p ────────────────────────────────────────────────────
 
-(deftest effect-row-subset-empty
-  "Empty row is a subset of any row."
-  (let ((empty (make-effect-row))
-        (full (make-effect-row :io :state)))
-    (assert-true (cl-cc/type::effect-row-subset-p empty full))))
-
-(deftest effect-row-subset-self
-  "A row is a subset of itself."
+(deftest effect-row-subset-p-behavior
+  "effect-row-subset-p: empty⊆any, self⊆self, {io}⊆{io,state}, {io,state}⊄{io}, anything⊆open-row."
+  (assert-true  (cl-cc/type::effect-row-subset-p (make-effect-row) (make-effect-row :io :state)))
   (let ((r (make-effect-row :io :state)))
-    (assert-true (cl-cc/type::effect-row-subset-p r r))))
-
-(deftest effect-row-subset-proper
-  "{io} ⊆ {io, state}."
-  (let ((r1 (make-effect-row :io))
-        (r2 (make-effect-row :io :state)))
-    (assert-true (cl-cc/type::effect-row-subset-p r1 r2))))
-
-(deftest effect-row-not-subset
-  "{io, state} is NOT ⊆ {io}."
-  (let ((r1 (make-effect-row :io :state))
-        (r2 (make-effect-row :io)))
-    (assert-false (cl-cc/type::effect-row-subset-p r1 r2))))
-
-(deftest effect-row-subset-open-row-is-superset
-  "An open row (with row-var) is a superset of everything."
-  (let ((r1 (make-effect-row :io :state :exn))
-        (r2 (make-open-effect-row (fresh-type-var))))
-    (assert-true (cl-cc/type::effect-row-subset-p r1 r2))))
+    (assert-true  (cl-cc/type::effect-row-subset-p r r)))
+  (assert-true  (cl-cc/type::effect-row-subset-p (make-effect-row :io) (make-effect-row :io :state)))
+  (assert-false (cl-cc/type::effect-row-subset-p (make-effect-row :io :state) (make-effect-row :io)))
+  (assert-true  (cl-cc/type::effect-row-subset-p (make-effect-row :io :state :exn)
+                                                  (make-open-effect-row (fresh-type-var)))))

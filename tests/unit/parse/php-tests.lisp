@@ -77,24 +77,16 @@
 
 ;;; ─── Parser Tests ───────────────────────────────────────────────────────────
 
-(deftest php-parse-integer-literal
+(deftest php-parse-single-forms
+  "Single-form PHP statements each produce the expected AST node type"
   (let ((ast (first (parse-php-source "<?php 42;"))))
     (assert-true (ast-int-p ast))
-    (assert-= 42 (ast-int-value ast))))
-
-(deftest php-parse-echo
-  "echo expr produces ast-print"
+    (assert-= 42 (ast-int-value ast)))
   (let ((ast (first (parse-php-source "<?php echo 42;"))))
     (assert-true (ast-print-p ast))
-    (assert-true (ast-int-p (ast-print-expr ast)))))
-
-(deftest php-parse-variable-assignment
-  "$x = 42 produces ast-let or ast-setq"
+    (assert-true (ast-int-p (ast-print-expr ast))))
   (let ((ast (first (parse-php-source "<?php $x = 42;"))))
-    (assert-true (or (ast-let-p ast) (ast-setq-p ast)))))
-
-(deftest php-parse-if-statement
-  "if ($c) { echo 1; } produces ast-if"
+    (assert-true (or (ast-let-p ast) (ast-setq-p ast))))
   (let ((ast (first (parse-php-source "<?php if ($x) { echo 1; }"))))
     (assert-true (ast-if-p ast))))
 

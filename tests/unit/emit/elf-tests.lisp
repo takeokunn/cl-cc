@@ -39,39 +39,30 @@
     (assert-equal 0 (length buf))
     (assert-true (adjustable-array-p buf))))
 
-(deftest elf-buf-u8-writes-byte
-  "elf-buf-u8 appends a single byte."
+(deftest elf-buf-u8-behavior
+  "elf-buf-u8 appends a single byte and masks values to 8 bits."
   (let ((buf (cl-cc/binary::elf-make-buffer)))
     (cl-cc/binary::elf-buf-u8 buf #xAB)
     (assert-equal 1 (length buf))
-    (assert-equal #xAB (aref buf 0))))
-
-(deftest elf-buf-u8-masks-to-8-bits
-  "elf-buf-u8 masks values to 8 bits."
+    (assert-equal #xAB (aref buf 0)))
   (let ((buf (cl-cc/binary::elf-make-buffer)))
     (cl-cc/binary::elf-buf-u8 buf #x1FF)
     (assert-equal #xFF (aref buf 0))))
 
-(deftest elf-buf-u16le-little-endian
-  "elf-buf-u16le writes 16-bit value little-endian."
+(deftest elf-buf-little-endian-writes
+  "elf-buf-u16le/u32le/u64le write little-endian: low byte at index 0."
   (let ((buf (cl-cc/binary::elf-make-buffer)))
     (cl-cc/binary::elf-buf-u16le buf #x1234)
     (assert-equal 2 (length buf))
     (assert-equal #x34 (aref buf 0))
-    (assert-equal #x12 (aref buf 1))))
-
-(deftest elf-buf-u32le-little-endian
-  "elf-buf-u32le writes 32-bit value little-endian."
+    (assert-equal #x12 (aref buf 1)))
   (let ((buf (cl-cc/binary::elf-make-buffer)))
     (cl-cc/binary::elf-buf-u32le buf #xDEADBEEF)
     (assert-equal 4 (length buf))
     (assert-equal #xEF (aref buf 0))
     (assert-equal #xBE (aref buf 1))
     (assert-equal #xAD (aref buf 2))
-    (assert-equal #xDE (aref buf 3))))
-
-(deftest elf-buf-u64le-little-endian
-  "elf-buf-u64le writes 64-bit value little-endian."
+    (assert-equal #xDE (aref buf 3)))
   (let ((buf (cl-cc/binary::elf-make-buffer)))
     (cl-cc/binary::elf-buf-u64le buf #x0102030405060708)
     (assert-equal 8 (length buf))
@@ -111,21 +102,15 @@
     (assert-equal 1 (length (cl-cc/binary::strtab-bytes st)))
     (assert-equal 0 (aref (cl-cc/binary::strtab-bytes st) 0))))
 
-(deftest elf-strtab-add-returns-offset
-  "strtab-add returns byte offset of added string."
+(deftest elf-strtab-add-behavior
+  "strtab-add: returns offset 1 for first string; deduplicates; distinct strings get distinct offsets."
   (let* ((st (cl-cc/binary::make-strtab))
          (off (cl-cc/binary::strtab-add st "hello")))
-    (assert-equal 1 off)))
-
-(deftest elf-strtab-add-dedup
-  "strtab-add returns same offset for duplicate strings."
+    (assert-equal 1 off))
   (let* ((st (cl-cc/binary::make-strtab))
          (off1 (cl-cc/binary::strtab-add st "hello"))
          (off2 (cl-cc/binary::strtab-add st "hello")))
-    (assert-equal off1 off2)))
-
-(deftest elf-strtab-add-multiple
-  "strtab-add tracks multiple distinct strings."
+    (assert-equal off1 off2))
   (let* ((st (cl-cc/binary::make-strtab))
          (off1 (cl-cc/binary::strtab-add st "foo"))
          (off2 (cl-cc/binary::strtab-add st "bar")))
@@ -181,47 +166,28 @@
       (assert-true (> (length result) 0))
       (assert-true (typep result '(simple-array (unsigned-byte 8) (*)))))))
 
-(deftest elf64-finalize-starts-with-magic
-  "Finalized ELF starts with \\x7FELF magic."
-  (let ((b (cl-cc/binary::make-elf64-object))
-        (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
+(deftest elf64-finalize-header-prefix
+  "Finalized ELF: magic \\x7FELF at bytes 0-3; ELFCLASS64=2 at byte 4; ELFDATA2LSB=1 at byte 5."
+  (let* ((b (cl-cc/binary::make-elf64-object))
+         (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
     (cl-cc/binary::elf64-add-text-bytes b code)
     (cl-cc/binary::elf64-add-global-symbol b "_start" :section-idx 1 :value 0 :size 1)
     (let ((result (cl-cc/binary::elf64-finalize b)))
       (assert-equal #x7F (aref result 0))
       (assert-equal (char-code #\E) (aref result 1))
       (assert-equal (char-code #\L) (aref result 2))
-      (assert-equal (char-code #\F) (aref result 3)))))
-
-(deftest elf64-finalize-header-class64
-  "ELF header has ELFCLASS64 at byte 4."
-  (let ((b (cl-cc/binary::make-elf64-object))
-        (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
-    (cl-cc/binary::elf64-add-text-bytes b code)
-    (cl-cc/binary::elf64-add-global-symbol b "_start" :section-idx 1 :value 0 :size 1)
-    (let ((result (cl-cc/binary::elf64-finalize b)))
-      (assert-equal 2 (aref result 4)))))
-
-(deftest elf64-finalize-header-lsb
-  "ELF header has ELFDATA2LSB (little-endian) at byte 5."
-  (let ((b (cl-cc/binary::make-elf64-object))
-        (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
-    (cl-cc/binary::elf64-add-text-bytes b code)
-    (cl-cc/binary::elf64-add-global-symbol b "_start" :section-idx 1 :value 0 :size 1)
-    (let ((result (cl-cc/binary::elf64-finalize b)))
+      (assert-equal (char-code #\F) (aref result 3))
+      (assert-equal 2 (aref result 4))
       (assert-equal 1 (aref result 5)))))
 
 ;;; ─── Additional Buffer Tests ─────────────────────────────────────────────
 
-(deftest elf-buf-s64le-negative
-  "elf-buf-s64le encodes -1 as all 0xFF bytes."
+(deftest elf-buf-s64le-behavior
+  "elf-buf-s64le: -1 → all #xFF; positive values match elf-buf-u64le."
   (let ((buf (cl-cc/binary::elf-make-buffer)))
     (cl-cc/binary::elf-buf-s64le buf -1)
     (assert-equal 8 (length buf))
-    (assert-true (every (lambda (b) (= b #xFF)) (coerce buf 'list)))))
-
-(deftest elf-buf-s64le-positive
-  "elf-buf-s64le encodes positive value identically to elf-buf-u64le."
+    (assert-true (every (lambda (b) (= b #xFF)) (coerce buf 'list))))
   (let ((buf1 (cl-cc/binary::elf-make-buffer))
         (buf2 (cl-cc/binary::elf-make-buffer)))
     (cl-cc/binary::elf-buf-s64le buf1 42)
@@ -253,23 +219,17 @@
 
 ;;; ─── Additional String Table Tests ──────────────────────────────────────
 
-(deftest elf-strtab-empty-string-at-zero
-  "Empty string is deduplicated and always at offset 0."
+(deftest elf-strtab-offset-layout
+  "strtab layout: empty string at 0; first string at 1; offsets advance by len+1; total size correct."
   (let ((st (cl-cc/binary::make-strtab)))
-    (assert-equal 0 (cl-cc/binary::strtab-add st ""))))
-
-(deftest elf-strtab-second-string-offset
-  "Second string starts at offset 1 + length-of-first + 1 (NUL)."
+    (assert-equal 0 (cl-cc/binary::strtab-add st "")))
   (let* ((st (cl-cc/binary::make-strtab))
-         (off1 (cl-cc/binary::strtab-add st "abc"))  ; offset 1, len=3, NUL => next at 5
-         (off2 (cl-cc/binary::strtab-add st "xy")))  ; offset 5
+         (off1 (cl-cc/binary::strtab-add st "abc"))
+         (off2 (cl-cc/binary::strtab-add st "xy")))
     (assert-equal 1 off1)
-    (assert-equal 5 off2)))
-
-(deftest elf-strtab-size-after-adds
-  "strtab byte size accounts for initial NUL + each string + NUL."
+    (assert-equal 5 off2))
   (let ((st (cl-cc/binary::make-strtab)))
-    (cl-cc/binary::strtab-add st "ab")  ; 1 + 2 + 1 = 4 bytes total
+    (cl-cc/binary::strtab-add st "ab")
     (assert-equal 4 (length (cl-cc/binary::strtab-bytes st)))))
 
 ;;; ─── Additional ELF64 Builder Tests ──────────────────────────────────────
@@ -300,43 +260,18 @@
       (assert-equal "puts" (third entry))     ; sym-name
       (assert-equal -4 (fourth entry)))))     ; addend
 
-(deftest elf64-finalize-header-type-rel
-  "ELF header e_type field is ET_REL (1) at bytes 16-17."
-  (let ((b (cl-cc/binary::make-elf64-object))
-        (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
+(deftest elf64-finalize-header-fields
+  "ELF header: e_type=ET_REL at [16]; e_machine=EM_X86_64 at [18]; e_shnum=6 at [60]; e_shstrndx=5 at [62]."
+  (let* ((b (cl-cc/binary::make-elf64-object))
+         (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
     (cl-cc/binary::elf64-add-text-bytes b code)
     (let ((result (cl-cc/binary::elf64-finalize b)))
-      ;; e_type at offset 16, little-endian: ET_REL=1 => bytes [1, 0]
-      (assert-equal 1 (aref result 16))
-      (assert-equal 0 (aref result 17)))))
-
-(deftest elf64-finalize-header-machine-x86-64
-  "ELF header e_machine field is EM_X86_64 (#x3E) at bytes 18-19."
-  (let ((b (cl-cc/binary::make-elf64-object))
-        (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
-    (cl-cc/binary::elf64-add-text-bytes b code)
-    (let ((result (cl-cc/binary::elf64-finalize b)))
-      ;; e_machine at offset 18, little-endian: #x3E => bytes [#x3E, 0]
+      (assert-equal 1    (aref result 16))
+      (assert-equal 0    (aref result 17))
       (assert-equal #x3E (aref result 18))
-      (assert-equal 0 (aref result 19)))))
-
-(deftest elf64-finalize-section-count
-  "ELF header e_shnum is 6 (NULL + .text + .rela.text + .symtab + .strtab + .shstrtab)."
-  (let ((b (cl-cc/binary::make-elf64-object))
-        (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
-    (cl-cc/binary::elf64-add-text-bytes b code)
-    (let ((result (cl-cc/binary::elf64-finalize b)))
-      ;; e_shnum at offset 60 (2 bytes), little-endian
-      (assert-equal 6 (aref result 60)))))
-
-(deftest elf64-finalize-shstrndx
-  "ELF header e_shstrndx is 5 (.shstrtab is the 6th section, index 5)."
-  (let ((b (cl-cc/binary::make-elf64-object))
-        (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
-    (cl-cc/binary::elf64-add-text-bytes b code)
-    (let ((result (cl-cc/binary::elf64-finalize b)))
-      ;; e_shstrndx at offset 62 (2 bytes), little-endian
-      (assert-equal 5 (aref result 62)))))
+      (assert-equal 0    (aref result 19))
+      (assert-equal 6    (aref result 60))
+      (assert-equal 5    (aref result 62)))))
 
 (deftest elf64-finalize-size-at-least-header
   "Finalized ELF is at least 64 bytes (ELF header alone)."

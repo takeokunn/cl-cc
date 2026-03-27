@@ -43,10 +43,12 @@
     (assert-equal 1 (length (second (constraint-args c))))
     (assert-equal 1 (length (third (constraint-args c))))))
 
-(deftest constraint-effect-subset-creation
-  "make-effect-subset-constraint produces (:effect-subset e1 e2)."
-  (let ((c (make-effect-subset-constraint +pure-effect-row+ +io-effect-row+)))
-    (assert-eq :effect-subset (constraint-kind c))))
+(deftest constraint-minor-kinds-creation
+  "effect-subset and kind-equal constraints have the correct :constraint-kind."
+  (assert-eq :effect-subset (constraint-kind
+                              (make-effect-subset-constraint +pure-effect-row+ +io-effect-row+)))
+  (assert-eq :kind-equal    (constraint-kind
+                              (make-kind-equal-constraint +kind-type+ +kind-type+))))
 
 (deftest constraint-mult-leq-creation
   "make-mult-leq-constraint produces (:mult-leq q1 q2)."
@@ -62,20 +64,14 @@
     (assert-eq :row-lacks (constraint-kind c))
     (assert-eq 'x (second (constraint-args c)))))
 
-(deftest constraint-kind-equal-creation
-  "make-kind-equal-constraint produces (:kind-equal k1 k2)."
-  (let ((c (make-kind-equal-constraint +kind-type+ +kind-type+)))
-    (assert-eq :kind-equal (constraint-kind c))))
-
 ;;; ─── constraint-free-vars ──────────────────────────────────────────────────
 
-(deftest constraint-free-vars-equal
-  "Free vars of (:equal v1 v2) are {v1, v2}."
-  (let* ((v1 (fresh-type-var "a"))
-         (v2 (fresh-type-var "b"))
-         (c (make-equal-constraint v1 v2))
-         (fvs (cl-cc/type::constraint-free-vars c)))
-    (assert-equal 2 (length fvs))))
+(deftest-each constraint-free-vars-binary-constraints
+  "Binary constraints (:equal and :subtype) each have 2 free vars when both args are distinct vars."
+  :cases (("equal"   (let* ((v1 (fresh-type-var "a")) (v2 (fresh-type-var "b"))) (make-equal-constraint v1 v2)))
+          ("subtype" (let* ((v1 (fresh-type-var "x")) (v2 (fresh-type-var "y"))) (make-subtype-constraint v1 v2))))
+  (c)
+  (assert-equal 2 (length (cl-cc/type::constraint-free-vars c))))
 
 (deftest constraint-free-vars-equal-dedup
   "Free vars of (:equal v v) are {v} (deduplicated)."
@@ -84,13 +80,6 @@
          (fvs (cl-cc/type::constraint-free-vars c)))
     (assert-equal 1 (length fvs))))
 
-(deftest constraint-free-vars-subtype
-  "Free vars of (:subtype v1 v2) are {v1, v2}."
-  (let* ((v1 (fresh-type-var "x"))
-         (v2 (fresh-type-var "y"))
-         (c (make-subtype-constraint v1 v2))
-         (fvs (cl-cc/type::constraint-free-vars c)))
-    (assert-equal 2 (length fvs))))
 
 (deftest constraint-free-vars-typeclass
   "Free vars of (:typeclass C v) are just {v}."
@@ -109,30 +98,19 @@
          (fvs (cl-cc/type::constraint-free-vars c)))
     (assert-equal 0 (length fvs))))
 
-(deftest constraint-free-vars-mult-leq-empty
-  "(:mult-leq) has no type-vars."
-  (let* ((c (make-mult-leq-constraint :one :omega))
-         (fvs (cl-cc/type::constraint-free-vars c)))
-    (assert-null fvs)))
+(deftest constraint-free-vars-ground-types-empty
+  "Ground-type-only constraints (:mult-leq, :kind-equal) have no type-vars."
+  (assert-null (cl-cc/type::constraint-free-vars (make-mult-leq-constraint :one :omega)))
+  (assert-null (cl-cc/type::constraint-free-vars (make-kind-equal-constraint +kind-type+ +kind-effect+))))
 
-(deftest constraint-free-vars-kind-equal-empty
-  "(:kind-equal) has no type-vars."
-  (let* ((c (make-kind-equal-constraint +kind-type+ +kind-effect+))
+(deftest-each constraint-free-vars-row-lacks
+  "(:row-lacks rho x) has rho free; non-type-node has no free vars."
+  :cases (("with-var"    (fresh-type-var "rho") 1)
+          ("without-var" 'not-a-type             0))
+  (rho-val expected-count)
+  (let* ((c (make-row-lacks-constraint rho-val 'x))
          (fvs (cl-cc/type::constraint-free-vars c)))
-    (assert-null fvs)))
-
-(deftest constraint-free-vars-row-lacks-var
-  "(:row-lacks v label) has v as free."
-  (let* ((v (fresh-type-var "rho"))
-         (c (make-row-lacks-constraint v 'x))
-         (fvs (cl-cc/type::constraint-free-vars c)))
-    (assert-equal 1 (length fvs))))
-
-(deftest constraint-free-vars-row-lacks-no-var
-  "(:row-lacks non-type-node label) has no free vars."
-  (let* ((c (make-row-lacks-constraint 'not-a-type 'x))
-         (fvs (cl-cc/type::constraint-free-vars c)))
-    (assert-null fvs)))
+    (assert-equal expected-count (length fvs))))
 
 ;;; ─── constraint-substitute ─────────────────────────────────────────────────
 
@@ -169,19 +147,13 @@
       (assert-eq 'show (first (constraint-args c2)))
       (assert-true (type-equal-p type-string (second (constraint-args c2)))))))
 
-(deftest constraint-substitute-mult-leq-identity
-  "(:mult-leq) substitution is identity."
-  (let* ((c (make-mult-leq-constraint :one :omega))
-         (s (make-substitution))
-         (c2 (cl-cc/type::constraint-substitute c s)))
-    (assert-eq c c2)))
-
-(deftest constraint-substitute-kind-equal-identity
-  "(:kind-equal) substitution is identity."
-  (let* ((c (make-kind-equal-constraint +kind-type+ +kind-type+))
-         (s (make-substitution))
-         (c2 (cl-cc/type::constraint-substitute c s)))
-    (assert-eq c c2)))
+(deftest constraint-substitute-identity-cases
+  "Substitution on ground constraints (:mult-leq, :kind-equal) is identity (returns eq object)."
+  (let ((s (make-substitution)))
+    (let ((c (make-mult-leq-constraint :one :omega)))
+      (assert-eq c (cl-cc/type::constraint-substitute c s)))
+    (let ((c (make-kind-equal-constraint +kind-type+ +kind-type+)))
+      (assert-eq c (cl-cc/type::constraint-substitute c s)))))
 
 (deftest constraint-substitute-effect-subset
   "Substitution applies to both effect rows."

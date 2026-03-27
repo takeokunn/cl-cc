@@ -37,113 +37,84 @@
 
 ;;; ─── Geometric Predicates ──────────────────────────────────────────────────
 
-(deftest incr-overlaps-edit-true
-  "cst-overlaps-edit-p returns true when node spans edit region."
-  (let ((node (make-test-token :T-INT 1 5 15))
+(deftest-each incr-overlaps-edit-cases
+  "cst-overlaps-edit-p returns correct result for each node position."
+  ((node-start node-end expected)
+   (5  15 t)
+   (0  5  nil)
+   (25 30 nil))
+  (let ((node (make-test-token :T-INT 1 node-start node-end))
         (edit (make-test-edit 10 20 25)))
-    (assert-true (cl-cc::cst-overlaps-edit-p node edit))))
+    (assert-equal expected (cl-cc::cst-overlaps-edit-p node edit))))
 
-(deftest incr-overlaps-edit-false-before
-  "cst-overlaps-edit-p returns false when node is entirely before edit."
-  (let ((node (make-test-token :T-INT 1 0 5))
+(deftest-each incr-before-after-edit-cases
+  "cst-before-edit-p and cst-after-edit-p return correct results for each node position."
+  ((predicate node-start node-end expected)
+   (cl-cc::cst-before-edit-p  0  10 t)
+   (cl-cc::cst-before-edit-p  0  15 nil)
+   (cl-cc::cst-after-edit-p  20  30 t)
+   (cl-cc::cst-after-edit-p  15  25 nil))
+  (let ((node (make-test-token :T-INT 1 node-start node-end))
         (edit (make-test-edit 10 20 25)))
-    (assert-false (cl-cc::cst-overlaps-edit-p node edit))))
+    (assert-equal expected (funcall predicate node edit))))
 
-(deftest incr-overlaps-edit-false-after
-  "cst-overlaps-edit-p returns false when node is entirely after edit."
-  (let ((node (make-test-token :T-INT 1 25 30))
+(deftest-each incr-reuse-p-cases
+  "cst-reuse-p returns correct result for node before vs overlapping edit."
+  ((node-start node-end expected)
+   (0  5 t)
+   (5 15 nil))
+  (let ((node (make-test-token :T-INT 1 node-start node-end))
         (edit (make-test-edit 10 20 25)))
-    (assert-false (cl-cc::cst-overlaps-edit-p node edit))))
-
-(deftest incr-before-edit-true
-  "cst-before-edit-p returns true when node ends at or before edit start."
-  (let ((node (make-test-token :T-INT 1 0 10))
-        (edit (make-test-edit 10 20 25)))
-    (assert-true (cl-cc::cst-before-edit-p node edit))))
-
-(deftest incr-before-edit-false
-  "cst-before-edit-p returns false when node extends past edit start."
-  (let ((node (make-test-token :T-INT 1 0 15))
-        (edit (make-test-edit 10 20 25)))
-    (assert-false (cl-cc::cst-before-edit-p node edit))))
-
-(deftest incr-after-edit-true
-  "cst-after-edit-p returns true when node starts at or after edit old-end."
-  (let ((node (make-test-token :T-INT 1 20 30))
-        (edit (make-test-edit 10 20 25)))
-    (assert-true (cl-cc::cst-after-edit-p node edit))))
-
-(deftest incr-after-edit-false
-  "cst-after-edit-p returns false when node starts before edit old-end."
-  (let ((node (make-test-token :T-INT 1 15 25))
-        (edit (make-test-edit 10 20 25)))
-    (assert-false (cl-cc::cst-after-edit-p node edit))))
-
-(deftest incr-reuse-p-before
-  "cst-reuse-p returns true for node before edit."
-  (let ((node (make-test-token :T-INT 1 0 5))
-        (edit (make-test-edit 10 20 25)))
-    (assert-true (cl-cc::cst-reuse-p node edit))))
-
-(deftest incr-reuse-p-overlapping
-  "cst-reuse-p returns false for overlapping node."
-  (let ((node (make-test-token :T-INT 1 5 15))
-        (edit (make-test-edit 10 20 25)))
-    (assert-false (cl-cc::cst-reuse-p node edit))))
+    (assert-equal expected (cl-cc::cst-reuse-p node edit))))
 
 ;;; ─── Byte Shifting ──────────────────────────────────────────────────────────
 
-(deftest incr-edit-byte-delta-positive
-  "edit-byte-delta returns positive delta for insertion."
-  (let ((edit (make-test-edit 10 10 15)))
-    (assert-equal 5 (cl-cc::edit-byte-delta edit))))
+(deftest-each incr-edit-byte-delta-cases
+  "edit-byte-delta returns correct signed delta for insertion, deletion, and replacement."
+  ((old-end new-end expected)
+   (10 15   5)
+   (20 15  -5)
+   (20 20   0))
+  (let ((edit (make-test-edit 10 old-end new-end)))
+    (assert-equal expected (cl-cc::edit-byte-delta edit))))
 
-(deftest incr-edit-byte-delta-negative
-  "edit-byte-delta returns negative delta for deletion."
-  (let ((edit (make-test-edit 10 20 15)))
-    (assert-equal -5 (cl-cc::edit-byte-delta edit))))
-
-(deftest incr-edit-byte-delta-zero
-  "edit-byte-delta returns zero for same-length replacement."
-  (let ((edit (make-test-edit 10 20 20)))
-    (assert-equal 0 (cl-cc::edit-byte-delta edit))))
-
-(deftest incr-shift-bytes-token
-  "cst-shift-bytes shifts token byte positions."
-  (let* ((tok (make-test-token :T-INT 42 10 15))
-         (shifted (cl-cc::cst-shift-bytes tok 5)))
-    (assert-true (cl-cc::cst-token-p shifted))
-    (assert-equal 15 (cl-cc::cst-node-start-byte shifted))
-    (assert-equal 20 (cl-cc::cst-node-end-byte shifted))
-    (assert-equal 42 (cl-cc::cst-token-value shifted))))
-
-(deftest incr-shift-bytes-interior
-  "cst-shift-bytes recursively shifts interior node and children."
-  (let* ((child (make-test-token :T-INT 1 5 10))
-         (parent (make-test-interior :list 0 20 (list child)))
-         (shifted (cl-cc::cst-shift-bytes parent 10)))
-    (assert-true (cl-cc::cst-interior-p shifted))
-    (assert-equal 10 (cl-cc::cst-node-start-byte shifted))
-    (assert-equal 30 (cl-cc::cst-node-end-byte shifted))
-    (let ((shifted-child (first (cl-cc::cst-interior-children shifted))))
-      (assert-equal 15 (cl-cc::cst-node-start-byte shifted-child))
-      (assert-equal 20 (cl-cc::cst-node-end-byte shifted-child)))))
-
-(deftest incr-shift-bytes-error-node
-  "cst-shift-bytes shifts error node byte positions."
-  (let* ((err (cl-cc::make-cst-error-node :kind :error :start-byte 10 :end-byte 20
-                                           :message "bad token"))
-         (shifted (cl-cc::cst-shift-bytes err 5)))
-    (assert-true (cl-cc::cst-error-p shifted))
-    (assert-equal 15 (cl-cc::cst-node-start-byte shifted))
-    (assert-equal 25 (cl-cc::cst-node-end-byte shifted))))
-
-(deftest incr-shift-bytes-negative
-  "cst-shift-bytes handles negative delta."
-  (let* ((tok (make-test-token :T-INT 1 20 30))
-         (shifted (cl-cc::cst-shift-bytes tok -5)))
-    (assert-equal 15 (cl-cc::cst-node-start-byte shifted))
-    (assert-equal 25 (cl-cc::cst-node-end-byte shifted))))
+(deftest-each incr-shift-bytes-cases
+  "cst-shift-bytes adjusts byte positions for tokens, interior nodes, error nodes, and negative deltas."
+  ((label)
+   (:token)
+   (:interior)
+   (:error-node)
+   (:negative))
+  (ecase label
+    (:token
+     (let* ((tok (make-test-token :T-INT 42 10 15))
+            (shifted (cl-cc::cst-shift-bytes tok 5)))
+       (assert-true (cl-cc::cst-token-p shifted))
+       (assert-equal 15 (cl-cc::cst-node-start-byte shifted))
+       (assert-equal 20 (cl-cc::cst-node-end-byte shifted))
+       (assert-equal 42 (cl-cc::cst-token-value shifted))))
+    (:interior
+     (let* ((child (make-test-token :T-INT 1 5 10))
+            (parent (make-test-interior :list 0 20 (list child)))
+            (shifted (cl-cc::cst-shift-bytes parent 10)))
+       (assert-true (cl-cc::cst-interior-p shifted))
+       (assert-equal 10 (cl-cc::cst-node-start-byte shifted))
+       (assert-equal 30 (cl-cc::cst-node-end-byte shifted))
+       (let ((shifted-child (first (cl-cc::cst-interior-children shifted))))
+         (assert-equal 15 (cl-cc::cst-node-start-byte shifted-child))
+         (assert-equal 20 (cl-cc::cst-node-end-byte shifted-child)))))
+    (:error-node
+     (let* ((err (cl-cc::make-cst-error-node :kind :error :start-byte 10 :end-byte 20
+                                              :message "bad token"))
+            (shifted (cl-cc::cst-shift-bytes err 5)))
+       (assert-true (cl-cc::cst-error-p shifted))
+       (assert-equal 15 (cl-cc::cst-node-start-byte shifted))
+       (assert-equal 25 (cl-cc::cst-node-end-byte shifted))))
+    (:negative
+     (let* ((tok (make-test-token :T-INT 1 20 30))
+            (shifted (cl-cc::cst-shift-bytes tok -5)))
+       (assert-equal 15 (cl-cc::cst-node-start-byte shifted))
+       (assert-equal 25 (cl-cc::cst-node-end-byte shifted))))))
 
 ;;; ─── Minimal Reparse Detection ──────────────────────────────────────────────
 
@@ -199,20 +170,14 @@
 
 ;;; ─── Parse Cache ───────────────────────────────────────────────────────────
 
-(deftest incr-cache-store-and-lookup
-  "cache-store + cache-lookup roundtrips."
+(deftest incr-cache-operations
+  "cache-store, cache-lookup, and invalidate-parse-cache work correctly."
   (let ((cl-cc::*parse-cache* (make-hash-table :test 'equal)))
     (let ((nodes (list (make-test-token :T-INT 42 0 2))))
       (cl-cc::cache-store "42" nodes)
-      (assert-equal nodes (cl-cc::cache-lookup "42")))))
-
-(deftest incr-cache-lookup-miss
-  "cache-lookup returns nil for unknown source."
+      (assert-equal nodes (cl-cc::cache-lookup "42"))))
   (let ((cl-cc::*parse-cache* (make-hash-table :test 'equal)))
-    (assert-null (cl-cc::cache-lookup "unknown"))))
-
-(deftest incr-cache-invalidate
-  "invalidate-parse-cache clears all entries."
+    (assert-null (cl-cc::cache-lookup "unknown")))
   (let ((cl-cc::*parse-cache* (make-hash-table :test 'equal)))
     (cl-cc::cache-store "a" '(1))
     (cl-cc::cache-store "b" '(2))
@@ -227,23 +192,15 @@
 
 ;;; ─── CST Equality ──────────────────────────────────────────────────────────
 
-(deftest incr-cst-equal-tokens
-  "cst-equal-p returns true for identical tokens."
-  (let ((a (make-test-token :T-INT 42 0 2))
-        (b (make-test-token :T-INT 42 0 2)))
-    (assert-true (cl-cc::cst-equal-p a b))))
-
-(deftest incr-cst-equal-tokens-differ-value
-  "cst-equal-p returns false for different token values."
-  (let ((a (make-test-token :T-INT 42 0 2))
-        (b (make-test-token :T-INT 99 0 2)))
-    (assert-false (cl-cc::cst-equal-p a b))))
-
-(deftest incr-cst-equal-tokens-differ-kind
-  "cst-equal-p returns false for different token kinds."
-  (let ((a (make-test-token :T-INT 1 0 2))
-        (b (make-test-token :T-IDENT 1 0 2)))
-    (assert-false (cl-cc::cst-equal-p a b))))
+(deftest-each incr-cst-equal-token-cases
+  "cst-equal-p returns correct result for identical vs differing tokens."
+  ((a-kind a-val b-kind b-val expected)
+   (:T-INT   42 :T-INT   42 t)
+   (:T-INT   42 :T-INT   99 nil)
+   (:T-INT    1 :T-IDENT  1 nil))
+  (let ((a (make-test-token a-kind a-val 0 2))
+        (b (make-test-token b-kind b-val 0 2)))
+    (assert-equal expected (cl-cc::cst-equal-p a b))))
 
 (deftest incr-cst-equal-interior
   "cst-equal-p returns true for structurally equal interior nodes."
@@ -261,18 +218,13 @@
   (assert-false (cl-cc::cst-equal-p nil (make-test-token :T-INT 1 0 1)))
   (assert-false (cl-cc::cst-equal-p (make-test-token :T-INT 1 0 1) nil)))
 
-(deftest incr-cst-equal-error-nodes
-  "cst-equal-p compares error nodes by message and position."
+(deftest-each incr-cst-equal-error-node-cases
+  "cst-equal-p compares error nodes by message: equal messages → true, differing → false."
+  ((msg-a msg-b expected)
+   ("bad"  "bad"   t)
+   ("bad"  "worse" nil))
   (let ((a (cl-cc::make-cst-error-node :kind :error :start-byte 0 :end-byte 5
-                                        :message "bad"))
+                                        :message msg-a))
         (b (cl-cc::make-cst-error-node :kind :error :start-byte 0 :end-byte 5
-                                        :message "bad")))
-    (assert-true (cl-cc::cst-equal-p a b))))
-
-(deftest incr-cst-equal-error-nodes-differ
-  "cst-equal-p returns false for error nodes with different messages."
-  (let ((a (cl-cc::make-cst-error-node :kind :error :start-byte 0 :end-byte 5
-                                        :message "bad"))
-        (b (cl-cc::make-cst-error-node :kind :error :start-byte 0 :end-byte 5
-                                        :message "worse")))
-    (assert-false (cl-cc::cst-equal-p a b))))
+                                        :message msg-b)))
+    (assert-equal expected (cl-cc::cst-equal-p a b))))

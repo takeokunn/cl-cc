@@ -289,6 +289,15 @@ Returns a compilation-result struct with program, assembly, and globals."
 
 ;;; ── Function references and local function bindings ──────────────────────
 
+(defun %compile-body-with-tail (body tail ctx)
+  "Compile BODY forms with tail-position tracking. Returns the last result register."
+  (let ((last-reg nil))
+    (dolist (form body)
+      (setf (ctx-tail-position ctx)
+            (if (eq form (car (last body))) tail nil))
+      (setf last-reg (compile-ast form ctx)))
+    last-reg))
+
 (defun %compile-closure-body (ctx params param-regs body-forms env)
   "Emit the body of a local function (flet/labels closure).
    Binds PARAMS to PARAM-REGS in CTX-ENV under base ENV, compiles BODY-FORMS
@@ -330,51 +339,41 @@ Returns a compilation-result struct with program, assembly, and globals."
   (let* ((tail (ctx-tail-position ctx))
          (bindings (ast-flet-bindings node))
          (body (ast-flet-body node))
-         (end-label (make-label ctx "flet_end"))
          (old-env (ctx-env ctx)))
-    (let ((body-result-reg
-            (unwind-protect
-                 (progn
-                   (let ((func-bindings nil))
-                     (dolist (binding bindings)
-                       (let* ((name (first binding))
-                              (params (second binding))
-                              (body-forms (cddr binding))
-                              (func-label (make-label ctx "flet_fn"))
-                              (closure-reg (make-register ctx)))
-                         (let* ((body-ast (make-ast-progn :forms body-forms))
-                                (free-vars (find-free-variables body-ast))
-                                (captured-vars (mapcar (lambda (v) (cons v (lookup-var ctx v)))
-                                                       (remove-if-not
-                                                        (lambda (v) (assoc v old-env))
-                                                        (set-difference free-vars params)))))
-                           (let ((param-regs (loop for i from 0 below (length params)
-                                                   collect (make-register ctx)))
-                                 (skip-label (make-label ctx "flet_skip")))
-                             (emit ctx (make-vm-closure :dst closure-reg :label func-label
-                                                        :params param-regs :captured captured-vars))
-                             (push (cons name closure-reg) func-bindings)
-                             (emit ctx (make-vm-jump :label skip-label))
-                             (emit ctx (make-vm-label :name func-label))
-                             (%compile-closure-body ctx params param-regs body-forms old-env)
-                             (emit ctx (make-vm-label :name skip-label))))))
-                     (setf (ctx-env ctx) (append (nreverse func-bindings) old-env)))
-                   (let ((last-reg nil))
-                     (dolist (form body)
-                       (setf (ctx-tail-position ctx)
-                             (if (eq form (car (last body))) tail nil))
-                       (setf last-reg (compile-ast form ctx)))
-                     last-reg))
-              (setf (ctx-env ctx) old-env))))
-      (emit ctx (make-vm-label :name end-label))
-      body-result-reg)))
+    (unwind-protect
+         (progn
+           (let ((func-bindings nil))
+             (dolist (binding bindings)
+               (let* ((name (first binding))
+                      (params (second binding))
+                      (body-forms (cddr binding))
+                      (func-label (make-label ctx "flet_fn"))
+                      (closure-reg (make-register ctx)))
+                 (let* ((body-ast (make-ast-progn :forms body-forms))
+                        (free-vars (find-free-variables body-ast))
+                        (captured-vars (mapcar (lambda (v) (cons v (lookup-var ctx v)))
+                                               (remove-if-not
+                                                (lambda (v) (assoc v old-env))
+                                                (set-difference free-vars params)))))
+                   (let ((param-regs (loop for i from 0 below (length params)
+                                           collect (make-register ctx)))
+                         (skip-label (make-label ctx "flet_skip")))
+                     (emit ctx (make-vm-closure :dst closure-reg :label func-label
+                                                :params param-regs :captured captured-vars))
+                     (push (cons name closure-reg) func-bindings)
+                     (emit ctx (make-vm-jump :label skip-label))
+                     (emit ctx (make-vm-label :name func-label))
+                     (%compile-closure-body ctx params param-regs body-forms old-env)
+                     (emit ctx (make-vm-label :name skip-label))))))
+             (setf (ctx-env ctx) (append (nreverse func-bindings) old-env)))
+           (%compile-body-with-tail body tail ctx))
+      (setf (ctx-env ctx) old-env))))
 
 (defmethod compile-ast ((node ast-labels) ctx)
   "Compile labels: mutually recursive local function bindings via cons-cell boxing."
   (let* ((tail (ctx-tail-position ctx))
          (bindings (ast-labels-bindings node))
          (body (ast-labels-body node))
-         (end-label (make-label ctx "labels_end"))
          (old-env (ctx-env ctx))
          (old-labels-boxes *labels-boxed-fns*))
     (let ((body-result-reg
@@ -395,10 +394,7 @@ Returns a compilation-result struct with program, assembly, and globals."
                          (push (list name func-label closure-reg box-reg params) func-infos)))
                      (let ((forward-env (mapcar (lambda (info) (cons (first info) (fourth info)))
                                                 func-infos)))
-                       (setf *labels-boxed-fns*
-                             (append (mapcar (lambda (info) (cons (first info) (fourth info)))
-                                            func-infos)
-                                     old-labels-boxes))
+                       (setf *labels-boxed-fns* (append forward-env old-labels-boxes))
                        (setf (ctx-env ctx) (append forward-env old-env))
                        ;; Phase 2: Create closures and fill boxes
                        (dolist (info (nreverse func-infos))
@@ -427,15 +423,9 @@ Returns a compilation-result struct with program, assembly, and globals."
                                                        (lookup-var ctx (first binding))))
                                                bindings)))
                          (setf (ctx-env ctx) (append func-env old-env)))
-                       (let ((last-reg nil))
-                         (dolist (form body)
-                           (setf (ctx-tail-position ctx)
-                                 (if (eq form (car (last body))) tail nil))
-                           (setf last-reg (compile-ast form ctx)))
-                         last-reg))))
+                       (%compile-body-with-tail body tail ctx))))
               (setf (ctx-env ctx) old-env)
               (setf *labels-boxed-fns* old-labels-boxes))))
-      (emit ctx (make-vm-label :name end-label))
       body-result-reg)))
 
 ;;; ── Assembly and type utilities ───────────────────────────────────────────

@@ -9,21 +9,12 @@
 
 ;;; ─── Constants ──────────────────────────────────────────────────────────
 
-(deftest macho-magic-64
-  "Mach-O 64-bit magic is #xFEEDFACF."
-  (assert-equal #xFEEDFACF cl-cc/binary:+mh-magic-64+))
-
-(deftest macho-cpu-types
-  "CPU type constants for x86-64 and arm64."
+(deftest macho-constants
+  "Mach-O magic, CPU types, file type, and load command constants."
+  (assert-equal #xFEEDFACF cl-cc/binary:+mh-magic-64+)
   (assert-equal #x01000007 cl-cc/binary:+cpu-type-x86-64+)
-  (assert-equal #x0100000C cl-cc/binary:+cpu-type-arm64+))
-
-(deftest macho-file-type-execute
-  "MH_EXECUTE = 2."
-  (assert-equal 2 cl-cc/binary:+mh-execute+))
-
-(deftest macho-load-command-types
-  "LC_SEGMENT_64 = #x19, LC_SYMTAB = #x03."
+  (assert-equal #x0100000C cl-cc/binary:+cpu-type-arm64+)
+  (assert-equal 2 cl-cc/binary:+mh-execute+)
   (assert-equal #x19 cl-cc/binary:+lc-segment-64+)
   (assert-equal #x03 cl-cc/binary:+lc-symtab+))
 
@@ -37,14 +28,11 @@
     (assert-equal 2 (cl-cc/binary:mach-header-filetype hdr))
     (assert-equal 0 (cl-cc/binary:mach-header-ncmds hdr))))
 
-(deftest macho-segment-command-defaults
-  "Default segment-command has LC_SEGMENT_64 cmd."
+(deftest macho-command-defaults
+  "Default segment-command has LC_SEGMENT_64; default entry-point-command has LC_MAIN."
   (let ((seg (cl-cc/binary::make-segment-command)))
     (assert-equal #x19 (cl-cc/binary:segment-command-cmd seg))
-    (assert-equal "" (cl-cc/binary:segment-command-segname seg))))
-
-(deftest macho-entry-point-defaults
-  "Default entry-point-command has LC_MAIN cmd."
+    (assert-equal "" (cl-cc/binary:segment-command-segname seg)))
   (let ((ep (cl-cc/binary::make-entry-point-command)))
     (assert-equal cl-cc/binary:+lc-main+ (cl-cc/binary:entry-point-command-cmd ep))
     (assert-equal 0 (cl-cc/binary:entry-point-command-entryoff ep))))
@@ -71,20 +59,14 @@
 
 ;;; ─── Buffer ─────────────────────────────────────────────────────────────
 
-(deftest macho-byte-buffer-fresh
-  "Fresh byte buffer is empty."
+(deftest macho-buffer-operations
+  "byte-buffer: fresh → empty; write-byte appends; get-bytes returns simple array."
   (let ((buf (cl-cc/binary::make-byte-buffer)))
-    (assert-equal 0 (length (cl-cc/binary::byte-buffer-data buf)))))
-
-(deftest macho-buffer-write-byte
-  "buffer-write-byte appends a single byte."
+    (assert-equal 0 (length (cl-cc/binary::byte-buffer-data buf))))
   (let ((buf (cl-cc/binary::make-byte-buffer)))
     (cl-cc/binary::buffer-write-byte buf 42)
     (assert-equal 1 (length (cl-cc/binary::byte-buffer-data buf)))
-    (assert-equal 42 (aref (cl-cc/binary::byte-buffer-data buf) 0))))
-
-(deftest macho-buffer-get-bytes
-  "buffer-get-bytes returns simple array."
+    (assert-equal 42 (aref (cl-cc/binary::byte-buffer-data buf) 0)))
   (let ((buf (cl-cc/binary::make-byte-buffer)))
     (cl-cc/binary::buffer-write-byte buf 1)
     (cl-cc/binary::buffer-write-byte buf 2)
@@ -94,8 +76,8 @@
 
 ;;; ─── Serialization ──────────────────────────────────────────────────────
 
-(deftest macho-serialize-uint32-le
-  "serialize-uint32-le writes 4 bytes little-endian."
+(deftest macho-serialize-uint-le
+  "serialize-uint32-le writes 4 bytes; serialize-uint64-le writes 8 bytes; low byte first."
   (let ((buf (cl-cc/binary::make-byte-buffer)))
     (cl-cc/binary:serialize-uint32-le #xDEADBEEF buf)
     (let ((data (cl-cc/binary::byte-buffer-data buf)))
@@ -103,10 +85,7 @@
       (assert-equal #xEF (aref data 0))
       (assert-equal #xBE (aref data 1))
       (assert-equal #xAD (aref data 2))
-      (assert-equal #xDE (aref data 3)))))
-
-(deftest macho-serialize-uint64-le
-  "serialize-uint64-le writes 8 bytes little-endian."
+      (assert-equal #xDE (aref data 3))))
   (let ((buf (cl-cc/binary::make-byte-buffer)))
     (cl-cc/binary:serialize-uint64-le #x0102030405060708 buf)
     (let ((data (cl-cc/binary::byte-buffer-data buf)))
@@ -125,20 +104,13 @@
       (assert-equal 0 (aref data 2))
       (assert-equal 0 (aref data 15)))))
 
-(deftest macho-serialize-mach-header-size
-  "Serialized mach-header is 32 bytes (8 uint32 fields)."
-  (let ((buf (cl-cc/binary::make-byte-buffer))
-        (hdr (cl-cc/binary::make-mach-header)))
-    (cl-cc/binary::serialize-mach-header hdr buf)
-    (assert-equal 32 (length (cl-cc/binary::byte-buffer-data buf)))))
-
-(deftest macho-serialize-mach-header-magic
-  "Serialized mach-header starts with FEEDFACF magic."
+(deftest macho-serialize-mach-header
+  "Serialized mach-header: 32 bytes; starts with FEEDFACF (little-endian: CF FA ED FE)."
   (let ((buf (cl-cc/binary::make-byte-buffer))
         (hdr (cl-cc/binary::make-mach-header)))
     (cl-cc/binary::serialize-mach-header hdr buf)
     (let ((data (cl-cc/binary::byte-buffer-data buf)))
-      ;; FEEDFACF little-endian: CF FA ED FE
+      (assert-equal 32  (length data))
       (assert-equal #xCF (aref data 0))
       (assert-equal #xFA (aref data 1))
       (assert-equal #xED (aref data 2))
@@ -146,15 +118,12 @@
 
 ;;; ─── Builder API ────────────────────────────────────────────────────────
 
-(deftest macho-builder-x86-64
-  "make-mach-o-builder for :x86-64 sets correct CPU type."
-  (let ((b (cl-cc/binary:make-mach-o-builder :x86-64)))
-    (assert-true b)))
-
-(deftest macho-builder-arm64
-  "make-mach-o-builder for :arm64 creates builder."
-  (let ((b (cl-cc/binary:make-mach-o-builder :arm64)))
-    (assert-true b)))
+(deftest-each macho-builder-creation
+  "make-mach-o-builder creates a non-nil builder for all supported targets."
+  :cases (("x86-64" :x86-64)
+          ("arm64"  :arm64))
+  (target)
+  (assert-true (cl-cc/binary:make-mach-o-builder target)))
 
 (deftest macho-add-entry-point
   "add-entry-point sets offset in builder."
@@ -204,24 +173,18 @@
 
 ;;; ─── Additional Structure Tests ─────────────────────────────────────────
 
-(deftest macho-nlist-defaults
-  "Default nlist has zeroed fields."
+(deftest macho-structure-defaults
+  "Default nlist (zeroed), symtab-command (LC_SYMTAB, 24-byte cmdsize), and section (empty names) defaults."
   (let ((nl (cl-cc/binary::make-nlist)))
     (assert-equal 0 (cl-cc/binary::nlist-n-strx nl))
     (assert-equal 0 (cl-cc/binary::nlist-n-type nl))
     (assert-equal 0 (cl-cc/binary::nlist-n-sect nl))
     (assert-equal 0 (cl-cc/binary::nlist-n-desc nl))
-    (assert-equal 0 (cl-cc/binary::nlist-n-value nl))))
-
-(deftest macho-symtab-command-defaults
-  "Default symtab-command has LC_SYMTAB cmd and 24-byte cmdsize."
+    (assert-equal 0 (cl-cc/binary::nlist-n-value nl)))
   (let ((sc (cl-cc/binary::make-symtab-command)))
     (assert-equal cl-cc/binary:+lc-symtab+ (cl-cc/binary::symtab-command-cmd sc))
     (assert-equal 24 (cl-cc/binary::symtab-command-cmdsize sc))
-    (assert-equal 0 (cl-cc/binary::symtab-command-nsyms sc))))
-
-(deftest macho-section-defaults
-  "Default section has empty names and zeroed fields."
+    (assert-equal 0 (cl-cc/binary::symtab-command-nsyms sc)))
   (let ((sect (cl-cc/binary::make-section)))
     (assert-equal "" (cl-cc/binary:section-sectname sect))
     (assert-equal "" (cl-cc/binary:section-segname sect))
@@ -232,14 +195,11 @@
   "LC_MAIN constant value includes the REQ_DYLD bit."
   (assert-equal #x80000028 cl-cc/binary:+lc-main+))
 
-(deftest macho-header-flags-constants
-  "Mach-O header flag constants have correct values."
+(deftest macho-extended-constants
+  "Header flag constants and CPU subtype constants."
   (assert-equal 1 cl-cc/binary:+mh-noundefs+)
   (assert-equal 4 cl-cc/binary:+mh-dyldlink+)
-  (assert-equal #x200000 cl-cc/binary:+mh-pie+))
-
-(deftest macho-cpu-subtypes
-  "CPU subtype constants are correct."
+  (assert-equal #x200000 cl-cc/binary:+mh-pie+)
   (assert-equal #x00000003 cl-cc/binary:+cpu-subtype-x86-64-all+)
   (assert-equal #x00000000 cl-cc/binary:+cpu-subtype-arm64-all+))
 
@@ -262,23 +222,16 @@
       (assert-equal 5 (aref data 0))
       (assert-equal 0 (aref data 1)))))
 
-(deftest macho-serialize-entry-point-size
-  "Serialized entry-point-command is 24 bytes (2 u32 + 2 u64)."
+(deftest macho-command-serialization-sizes
+  "Serialized command sizes: entry-point=24, symtab=24, section=80 bytes."
   (let ((buf (cl-cc/binary::make-byte-buffer))
         (ep (cl-cc/binary::make-entry-point-command)))
     (cl-cc/binary::serialize-entry-point ep buf)
-    (assert-equal 24 (length (cl-cc/binary::byte-buffer-data buf)))))
-
-(deftest macho-serialize-symtab-command-size
-  "Serialized symtab-command is 24 bytes (6 u32 fields)."
+    (assert-equal 24 (length (cl-cc/binary::byte-buffer-data buf))))
   (let ((buf (cl-cc/binary::make-byte-buffer))
         (sc (cl-cc/binary::make-symtab-command)))
     (cl-cc/binary::serialize-symtab-command sc buf)
-    (assert-equal 24 (length (cl-cc/binary::byte-buffer-data buf)))))
-
-(deftest macho-serialize-section-size
-  "Serialized section is 80 bytes (2x16 + u64 + u64 + 6xu32)."
-  ;; 16 + 16 + 8 + 8 + 4*6 = 72... actual = 80 bytes per Mach-O spec
+    (assert-equal 24 (length (cl-cc/binary::byte-buffer-data buf))))
   (let ((buf (cl-cc/binary::make-byte-buffer))
         (sect (cl-cc/binary::make-section :sectname "__text" :segname "__TEXT")))
     (cl-cc/binary::serialize-section sect buf)
@@ -297,17 +250,14 @@
 
 ;;; ─── Additional Builder API Tests ───────────────────────────────────────
 
-(deftest macho-builder-x86-64-cputype
-  "make-mach-o-builder :x86-64 sets correct CPU type in header."
-  (let* ((b (cl-cc/binary:make-mach-o-builder :x86-64))
+(deftest-each macho-builder-cputypes
+  "make-mach-o-builder sets the correct CPU type constant in the header."
+  :cases (("x86-64" :x86-64 cl-cc/binary:+cpu-type-x86-64+)
+          ("arm64"  :arm64  cl-cc/binary:+cpu-type-arm64+))
+  (target expected-cputype)
+  (let* ((b (cl-cc/binary:make-mach-o-builder target))
          (hdr (cl-cc/binary::mach-o-builder-header b)))
-    (assert-equal cl-cc/binary:+cpu-type-x86-64+ (cl-cc/binary:mach-header-cputype hdr))))
-
-(deftest macho-builder-arm64-cputype
-  "make-mach-o-builder :arm64 sets ARM64 CPU type in header."
-  (let* ((b (cl-cc/binary:make-mach-o-builder :arm64))
-         (hdr (cl-cc/binary::mach-o-builder-header b)))
-    (assert-equal cl-cc/binary:+cpu-type-arm64+ (cl-cc/binary:mach-header-cputype hdr))))
+    (assert-equal expected-cputype (cl-cc/binary:mach-header-cputype hdr))))
 
 (deftest macho-add-text-segment
   "add-text-segment adds one segment to the builder."
@@ -316,14 +266,11 @@
     (cl-cc/binary:add-text-segment b code)
     (assert-equal 1 (length (cl-cc/binary::mach-o-builder-segments b)))))
 
-(deftest macho-add-symbol-appears-in-table
-  "add-symbol inserts nlist entry into symbol-table."
+(deftest macho-add-symbol-behavior
+  "add-symbol inserts into symbol-table; multiple calls accumulate."
   (let ((b (cl-cc/binary:make-mach-o-builder :x86-64)))
     (cl-cc/binary:add-symbol b "_main" :value 0 :sect 1)
-    (assert-equal 1 (length (cl-cc/binary::mach-o-builder-symbol-table b)))))
-
-(deftest macho-add-symbol-multiple
-  "Multiple add-symbol calls accumulate entries."
+    (assert-equal 1 (length (cl-cc/binary::mach-o-builder-symbol-table b))))
   (let ((b (cl-cc/binary:make-mach-o-builder :x86-64)))
     (cl-cc/binary:add-symbol b "_start" :value 0 :sect 1)
     (cl-cc/binary:add-symbol b "_exit"  :value 10 :sect 1)

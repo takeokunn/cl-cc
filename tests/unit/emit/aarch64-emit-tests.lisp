@@ -66,17 +66,14 @@
     (assert-true (search "x1" asm))
     (assert-true (search "x2" asm))))
 
-(deftest aarch64-emit-sub
-  "vm-sub emits 3-operand sub."
+(deftest-each aarch64-emit-arithmetic-mnemonics
+  "vm-sub and vm-mul each emit their expected mnemonic in the output."
+  :cases (("sub" (make-vm-sub :dst :r0 :lhs :r1 :rhs :r2) "sub")
+          ("mul" (make-vm-mul :dst :r0 :lhs :r1 :rhs :r2) "mul"))
+  (inst expected-mnemonic)
   (let* ((tgt (%make-aarch64-target))
-         (asm (%aarch64-emit tgt (make-vm-sub :dst :r0 :lhs :r1 :rhs :r2))))
-    (assert-true (search "sub" asm))))
-
-(deftest aarch64-emit-mul
-  "vm-mul emits 3-operand mul."
-  (let* ((tgt (%make-aarch64-target))
-         (asm (%aarch64-emit tgt (make-vm-mul :dst :r0 :lhs :r1 :rhs :r2))))
-    (assert-true (search "mul" asm))))
+         (asm (%aarch64-emit tgt inst)))
+    (assert-true (search expected-mnemonic asm))))
 
 (deftest aarch64-emit-label
   "vm-label emits label: format."
@@ -107,13 +104,8 @@
     (assert-true (search "mov x0" asm))
     (assert-true (search "ret" asm))))
 
-(deftest aarch64-emit-print-signals-error
-  "vm-print signals error (not implemented)."
+(deftest aarch64-emit-error-and-silent-cases
+  "vm-print signals error (not implemented); unsupported instructions emit empty string."
   (let ((tgt (%make-aarch64-target)))
-    (assert-signals error (%aarch64-emit tgt (make-vm-print :reg :r0)))))
-
-(deftest aarch64-emit-unsupported-silent
-  "Unsupported instructions emit nothing (base method)."
-  (let* ((tgt (%make-aarch64-target))
-         (asm (%aarch64-emit tgt (make-vm-ret :reg :r0))))
-    (assert-equal "" asm)))
+    (assert-signals error (%aarch64-emit tgt (make-vm-print :reg :r0)))
+    (assert-equal "" (%aarch64-emit tgt (make-vm-ret :reg :r0)))))

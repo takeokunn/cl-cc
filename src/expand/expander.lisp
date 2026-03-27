@@ -146,7 +146,7 @@ later siblings can immediately use the new macro."
   (cond
     ((member name *variadic-fold-builtins*)
      (let ((args (gensym "ARGS")) (acc (gensym "ACC")) (x (gensym "X"))
-           (id   (case name ((+) 0) ((*) 1) (t nil))))
+           (id   (cdr (assoc name *variadic-fold-identities*))))
        (compiler-macroexpand-all
         `(lambda (&rest ,args)
            (let ((,acc ,id))
@@ -176,7 +176,7 @@ later siblings can immediately use the new macro."
 Variadic builtins get a dolist fold; others normalise to (apply #'fn args)."
   (if (member fn-name (list* '- 'list *variadic-fold-builtins*))
       (let ((acc (gensym "ACC")) (x (gensym "X")) (lst (gensym "LST"))
-            (id  (case fn-name ((+) 0) ((*) 1) (t nil))))
+            (id  (cdr (assoc fn-name *variadic-fold-identities*))))
         (if (eq fn-name '-)
             (compiler-macroexpand-all
              `(let ((,lst ,args-form))
@@ -267,11 +267,11 @@ or fall back to generic (setf (slot-value obj 'accessor-name) val)."
                     (rt-plist-put ,(second place) ,(third place) ,v))
               ,v)))))
 
-;; All cons-cell accessors share the same expansion logic
-(dolist (sym '(car first cdr rest nth cadr cddr))
-  (setf (gethash sym *setf-compound-place-handlers*)
-        (lambda (place value)
-          (compiler-macroexpand-all (expand-setf-cons-place place value)))))
+;; All cons-cell accessors share the same expansion logic — hoist the closure once
+(let ((cons-place-handler (lambda (place value)
+                            (compiler-macroexpand-all (expand-setf-cons-place place value)))))
+  (dolist (sym '(car first cdr rest nth cadr cddr))
+    (setf (gethash sym *setf-compound-place-handlers*) cons-place-handler)))
 
 (defun expand-let-binding (b)
   "Macro-expand the value in a LET binding, leaving the binding name untouched."
@@ -508,21 +508,16 @@ Contract: handler receives the full form and returns a fully-expanded form."
             (mapcar #'compiler-macroexpand-all (cddr form))))
     (t (cons 'let (mapcar #'compiler-macroexpand-all (cdr form))))))
 
-;; flet — expand only function bodies, not binding structure
-(define-expander-for flet (form)
+;; flet/labels — expand only function bodies; head symbol tells them apart
+(defun %expand-flet-or-labels (head form)
   (if (and (>= (length form) 3) (listp (second form)))
-      (list* 'flet
+      (list* head
              (mapcar #'expand-flet-labels-binding (second form))
              (mapcar #'compiler-macroexpand-all (cddr form)))
-      (cons 'flet (mapcar #'compiler-macroexpand-all (cdr form)))))
+      (cons head (mapcar #'compiler-macroexpand-all (cdr form)))))
 
-;; labels — same as flet but allows mutual recursion
-(define-expander-for labels (form)
-  (if (and (>= (length form) 3) (listp (second form)))
-      (list* 'labels
-             (mapcar #'expand-flet-labels-binding (second form))
-             (mapcar #'compiler-macroexpand-all (cddr form)))
-      (cons 'labels (mapcar #'compiler-macroexpand-all (cdr form)))))
+(define-expander-for flet   (form) (%expand-flet-or-labels 'flet   form))
+(define-expander-for labels (form) (%expand-flet-or-labels 'labels form))
 
 ;; FR-301: normalise 1-arg rounding ops to 2-arg form with divisor 1.
 ;; Registered via dolist for all *rounding-ops* at once (data-driven).

@@ -25,117 +25,112 @@
 
 ;;; Token matching
 
-(deftest parse-token-match
-  (let ((stream (list (make-tok :T-INT 42))))
-    (multiple-value-bind (ast rest) (parse-combinator '(token :T-INT) stream)
-      (assert-true (parse-ok-p ast))
-      (assert-= 42 ast)
-      (assert-null rest))))
-
-(deftest parse-token-no-match
-  (let ((stream (list (make-tok :T-IDENT "foo"))))
-    (multiple-value-bind (ast rest) (parse-combinator '(token :T-INT) stream)
-      (declare (ignore rest))
-      (assert-false (parse-ok-p ast)))))
-
-(deftest parse-token-empty-stream
-  (multiple-value-bind (ast rest) (parse-combinator '(token :T-INT) nil)
-    (declare (ignore rest))
-    (assert-false (parse-ok-p ast))))
-
-(deftest parse-token-with-value
-  (let ((stream (list (make-tok :T-OP "+") (make-tok :T-INT 1))))
-    (multiple-value-bind (ast rest) (parse-combinator '(token :T-OP "+") stream)
-      (assert-true (parse-ok-p ast))
-      (assert-equal "+" ast)
-      (assert-= 1 (length rest)))))
+(deftest-each parse-token-cases
+  "Token matching: hit, miss, empty stream, value-constrained match"
+  :cases (("match"      (list (make-tok :T-INT 42))                          :match)
+          ("no-match"   (list (make-tok :T-IDENT "foo"))                     :no-match)
+          ("empty"      nil                                                   :no-match)
+          ("with-value" (list (make-tok :T-OP "+") (make-tok :T-INT 1))      :with-value))
+  (stream kind)
+  (ecase kind
+    (:match
+     (multiple-value-bind (ast rest) (parse-combinator '(token :T-INT) stream)
+       (assert-true (parse-ok-p ast))
+       (assert-= 42 ast)
+       (assert-null rest)))
+    (:no-match
+     (multiple-value-bind (ast rest) (parse-combinator '(token :T-INT) stream)
+       (declare (ignore rest))
+       (assert-false (parse-ok-p ast))))
+    (:with-value
+     (multiple-value-bind (ast rest) (parse-combinator '(token :T-OP "+") stream)
+       (assert-true (parse-ok-p ast))
+       (assert-equal "+" ast)
+       (assert-= 1 (length rest))))))
 
 ;;; Sequence
 
-(deftest parse-seq-success
-  (let ((stream (list (make-tok :T-INT 1) (make-tok :T-OP "+") (make-tok :T-INT 2))))
+(deftest parse-seq-cases
+  (let ((stream-ok (list (make-tok :T-INT 1) (make-tok :T-OP "+") (make-tok :T-INT 2))))
     (multiple-value-bind (ast rest)
-        (parse-combinator '(seq (token :T-INT) (token :T-OP "+") (token :T-INT)) stream)
+        (parse-combinator '(seq (token :T-INT) (token :T-OP "+") (token :T-INT)) stream-ok)
       (assert-true (parse-ok-p ast))
       (assert-equal '(1 "+" 2) ast)
-      (assert-null rest))))
-
-(deftest parse-seq-partial-failure
-  (let ((stream (list (make-tok :T-INT 1) (make-tok :T-IDENT "foo"))))
+      (assert-null rest)))
+  (let ((stream-bad (list (make-tok :T-INT 1) (make-tok :T-IDENT "foo"))))
     (multiple-value-bind (ast rest)
-        (parse-combinator '(seq (token :T-INT) (token :T-OP "+")) stream)
+        (parse-combinator '(seq (token :T-INT) (token :T-OP "+")) stream-bad)
       (declare (ignore rest))
       (assert-false (parse-ok-p ast)))))
 
 ;;; Alternation
 
-(deftest parse-alt-first-succeeds
-  (let ((stream (list (make-tok :T-INT 42))))
-    (multiple-value-bind (ast rest)
-        (parse-combinator '(alt (token :T-INT) (token :T-IDENT)) stream)
-      (declare (ignore rest))
-      (assert-true (parse-ok-p ast))
-      (assert-= 42 ast))))
-
-(deftest parse-alt-second-succeeds
-  (let ((stream (list (make-tok :T-IDENT "foo"))))
-    (multiple-value-bind (ast rest)
-        (parse-combinator '(alt (token :T-INT) (token :T-IDENT)) stream)
-      (declare (ignore rest))
-      (assert-true (parse-ok-p ast))
-      (assert-equal "foo" ast))))
-
-(deftest parse-alt-both-fail
-  (let ((stream (list (make-tok :T-OP "+"))))
-    (multiple-value-bind (ast rest)
-        (parse-combinator '(alt (token :T-INT) (token :T-IDENT)) stream)
-      (declare (ignore rest))
-      (assert-false (parse-ok-p ast)))))
+(deftest-each parse-alt-cases
+  "Alternation: first branch wins, second branch wins, both branches fail"
+  :cases (("first-succeeds"  (list (make-tok :T-INT 42))        :first)
+          ("second-succeeds" (list (make-tok :T-IDENT "foo"))   :second)
+          ("both-fail"       (list (make-tok :T-OP "+"))        :fail))
+  (stream kind)
+  (multiple-value-bind (ast rest)
+      (parse-combinator '(alt (token :T-INT) (token :T-IDENT)) stream)
+    (declare (ignore rest))
+    (ecase kind
+      (:first
+       (assert-true (parse-ok-p ast))
+       (assert-= 42 ast))
+      (:second
+       (assert-true (parse-ok-p ast))
+       (assert-equal "foo" ast))
+      (:fail
+       (assert-false (parse-ok-p ast))))))
 
 ;;; Repetition
 
-(deftest parse-many-zero
-  (let ((stream (list (make-tok :T-IDENT "x"))))
-    (multiple-value-bind (ast rest) (parse-combinator '(many (token :T-INT)) stream)
-      (assert-true (parse-ok-p ast))
-      (assert-null ast)
-      (assert-= 1 (length rest)))))
+(deftest-each parse-many-cases
+  "many: zero matches succeed with nil, multiple matches collect all"
+  :cases (("zero"     (list (make-tok :T-IDENT "x"))                                          :zero)
+          ("multiple" (list (make-tok :T-INT 1) (make-tok :T-INT 2) (make-tok :T-INT 3)
+                            (make-tok :T-EOF nil))                                             :multiple))
+  (stream kind)
+  (multiple-value-bind (ast rest) (parse-combinator '(many (token :T-INT)) stream)
+    (assert-true (parse-ok-p ast))
+    (ecase kind
+      (:zero
+       (assert-null ast)
+       (assert-= 1 (length rest)))
+      (:multiple
+       (assert-equal '(1 2 3) ast)
+       (assert-= 1 (length rest))))))
 
-(deftest parse-many-multiple
-  (let ((stream (list (make-tok :T-INT 1) (make-tok :T-INT 2) (make-tok :T-INT 3)
-                      (make-tok :T-EOF nil))))
-    (multiple-value-bind (ast rest) (parse-combinator '(many (token :T-INT)) stream)
-      (assert-true (parse-ok-p ast))
-      (assert-equal '(1 2 3) ast)
-      (assert-= 1 (length rest)))))
-
-(deftest parse-many1-requires-one
-  (let ((stream (list (make-tok :T-IDENT "x"))))
-    (multiple-value-bind (ast rest) (parse-combinator '(many1 (token :T-INT)) stream)
-      (declare (ignore rest))
-      (assert-false (parse-ok-p ast)))))
-
-(deftest parse-many1-one-match
-  (let ((stream (list (make-tok :T-INT 7) (make-tok :T-IDENT "x"))))
-    (multiple-value-bind (ast rest) (parse-combinator '(many1 (token :T-INT)) stream)
-      (declare (ignore rest))
-      (assert-true (parse-ok-p ast))
-      (assert-equal '(7) ast))))
+(deftest-each parse-many1-cases
+  "many1: fails when no tokens match, succeeds with at least one"
+  :cases (("requires-one" (list (make-tok :T-IDENT "x"))                        :fail)
+          ("one-match"    (list (make-tok :T-INT 7) (make-tok :T-IDENT "x"))    :ok))
+  (stream kind)
+  (multiple-value-bind (ast rest) (parse-combinator '(many1 (token :T-INT)) stream)
+    (declare (ignore rest))
+    (ecase kind
+      (:fail  (assert-false (parse-ok-p ast)))
+      (:ok
+       (assert-true (parse-ok-p ast))
+       (assert-equal '(7) ast)))))
 
 ;;; Optional
 
-(deftest parse-opt-present
-  (let ((stream (list (make-tok :T-INT 5))))
-    (multiple-value-bind (ast rest) (parse-combinator '(opt (token :T-INT)) stream)
-      (assert-true (parse-ok-p ast))
-      (assert-= 5 ast)
-      (assert-null rest))))
-
-(deftest parse-opt-absent
-  (let ((stream (list (make-tok :T-IDENT "x"))))
-    (multiple-value-bind (ast rest) (parse-combinator '(opt (token :T-INT)) stream)
-      (assert-eq :opt-absent ast)
-      (assert-= 1 (length rest)))))
+(deftest-each parse-opt-cases
+  "opt: returns value when token present, :opt-absent when absent"
+  :cases (("present" (list (make-tok :T-INT 5))      :present)
+          ("absent"  (list (make-tok :T-IDENT "x"))  :absent))
+  (stream kind)
+  (multiple-value-bind (ast rest) (parse-combinator '(opt (token :T-INT)) stream)
+    (ecase kind
+      (:present
+       (assert-true (parse-ok-p ast))
+       (assert-= 5 ast)
+       (assert-null rest))
+      (:absent
+       (assert-eq :opt-absent ast)
+       (assert-= 1 (length rest))))))
 
 ;;; Named rule reference
 

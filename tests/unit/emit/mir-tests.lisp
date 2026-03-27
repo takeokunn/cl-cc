@@ -40,23 +40,18 @@
 
 ;;;; ─── mir-const ────────────────────────────────────────────────────────
 
-(deftest mir-const-integer
-  "make-mir-const stores integer value and type."
-  (let ((c (make-mir-const :value 42 :type :integer)))
-    (assert-= 42 (mirc-value c))
-    (assert-eq :integer (mirc-type c))
-    (assert-true (mir-const-p c))))
-
-(deftest mir-const-nil-value
-  "make-mir-const can hold NIL as a value."
-  (let ((c (make-mir-const :value nil :type :pointer)))
-    (assert-null (mirc-value c))
-    (assert-eq :pointer (mirc-type c))))
-
-(deftest mir-const-string-value
-  "make-mir-const can hold string values."
-  (let ((c (make-mir-const :value "hello")))
-    (assert-equal "hello" (mirc-value c))))
+(deftest-each mir-const-types
+  "make-mir-const stores value and type for integer, nil, and string payloads."
+  :cases (("integer" 42      :integer  42      nil)
+          ("nil"     nil     :pointer  nil     t)
+          ("string"  "hello" :any      "hello" nil))
+  (val type expected-val nil-val-p)
+  (let ((c (make-mir-const :value val :type type)))
+    (assert-true (mir-const-p c))
+    (assert-eq type (mirc-type c))
+    (if nil-val-p
+        (assert-null (mirc-value c))
+        (assert-equal expected-val (mirc-value c)))))
 
 ;;;; ─── mir-block ────────────────────────────────────────────────────────
 
@@ -241,8 +236,8 @@
     (assert-= 1 (length rpo))
     (assert-eq entry (first rpo))))
 
-(deftest mir-rpo-linear-chain
-  "mir-rpo returns all blocks in a linear chain."
+(deftest mir-linear-chain-rpo-and-dominators
+  "Linear chain b0→b1→b2: RPO includes all 3 in order; idom(b1)=b0, idom(b2)=b1."
   (let* ((fn  (mir-make-function :f))
          (b0  (mirf-entry fn))
          (b1  (mir-new-block fn :label :b1))
@@ -251,13 +246,16 @@
     (mir-add-succ b1 b2)
     (let ((rpo (mir-rpo fn)))
       (assert-= 3 (length rpo))
-      ;; b0 must appear before b1, b1 before b2 in RPO
       (let ((pos (lambda (b) (position b rpo :test #'eq))))
         (assert-true (< (funcall pos b0) (funcall pos b1)))
-        (assert-true (< (funcall pos b1) (funcall pos b2)))))))
+        (assert-true (< (funcall pos b1) (funcall pos b2)))))
+    (let ((idom (mir-dominators fn)))
+      (assert-eq b0 (gethash (mirb-id b0) idom))
+      (assert-eq b0 (gethash (mirb-id b1) idom))
+      (assert-eq b1 (gethash (mirb-id b2) idom)))))
 
-(deftest mir-rpo-diamond-cfg
-  "mir-rpo visits all blocks in a diamond (if/merge) CFG."
+(deftest mir-diamond-cfg-rpo-and-dominators
+  "Diamond CFG (entry→then/else→merge): RPO visits all 4 blocks with entry first; merge dominated by entry."
   (let* ((fn    (mir-make-function :f))
          (entry (mirf-entry fn))
          (then  (mir-new-block fn :label :then))
@@ -269,37 +267,9 @@
     (mir-add-succ else merge)
     (let ((rpo (mir-rpo fn)))
       (assert-= 4 (length rpo))
-      ;; Entry must come first
-      (assert-eq entry (first rpo)))))
-
-(deftest mir-dominators-linear
-  "Immediate dominators in a linear chain: each block dominated by predecessor."
-  (let* ((fn  (mir-make-function :f))
-         (b0  (mirf-entry fn))
-         (b1  (mir-new-block fn :label :b1))
-         (b2  (mir-new-block fn :label :b2)))
-    (mir-add-succ b0 b1)
-    (mir-add-succ b1 b2)
+      (assert-eq entry (first rpo)))
     (let ((idom (mir-dominators fn)))
-      (assert-eq b0 (gethash (mirb-id b0) idom))  ; entry dom. itself
-      (assert-eq b0 (gethash (mirb-id b1) idom))  ; b1 idom = b0
-      (assert-eq b1 (gethash (mirb-id b2) idom))))) ; b2 idom = b1
-
-(deftest mir-dominators-diamond
-  "Immediate dominators in a diamond CFG: merge dominated by entry."
-  (let* ((fn    (mir-make-function :f))
-         (entry (mirf-entry fn))
-         (then  (mir-new-block fn :label :then))
-         (else  (mir-new-block fn :label :else))
-         (merge (mir-new-block fn :label :merge)))
-    (mir-add-succ entry then)
-    (mir-add-succ entry else)
-    (mir-add-succ then merge)
-    (mir-add-succ else merge)
-    (let ((idom (mir-dominators fn)))
-      ;; merge is dominated by entry (not then or else — both are branches)
       (assert-eq entry (gethash (mirb-id merge) idom))
-      ;; then and else are dominated by entry
       (assert-eq entry (gethash (mirb-id then) idom))
       (assert-eq entry (gethash (mirb-id else) idom)))))
 
@@ -326,20 +296,16 @@
 
 ;;;; ─── printer smoke tests ───────────────────────────────────────────────
 
-(deftest mir-format-value-mir-value
-  "mir-format-value formats a mir-value as %id/name (CL symbols upcase)."
+(deftest mir-format-value
+  "mir-format-value: mir-value as %id/name; mir-const as #value."
   (let* ((fn (mir-make-function :f))
-         (v  (mir-new-value fn :name :x)))
-    (let ((s (mir-format-value v)))
-      (assert-true (search "%0" s))
-      ;; CL formats :x as "X" (standard upcase printing)
-      (assert-true (search "X"  s)))))
-
-(deftest mir-format-value-mir-const
-  "mir-format-value formats a mir-const as #value."
-  (let ((c (make-mir-const :value 42)))
-    (let ((s (mir-format-value c)))
-      (assert-true (search "42" s)))))
+         (v  (mir-new-value fn :name :x))
+         (c  (make-mir-const :value 42)))
+    (let ((sv (mir-format-value v))
+          (sc (mir-format-value c)))
+      (assert-true (search "%0" sv))
+      (assert-true (search "X"  sv))   ; CL upcases :x → "X"
+      (assert-true (search "42" sc)))))
 
 (deftest mir-print-function-no-error
   "mir-print-function completes without signalling an error."
@@ -355,21 +321,15 @@
 
 ;;;; ─── target-desc ──────────────────────────────────────────────────────
 
-(deftest target-x86-64-basic
-  "x86-64 target has correct name, word-size, and endianness."
-  (assert-eq    :x86-64  (target-name *x86-64-target*))
-  (assert-=     8        (target-word-size *x86-64-target*))
-  (assert-eq    :little  (target-endianness *x86-64-target*))
-  (assert-=     16       (target-stack-alignment *x86-64-target*)))
-
-(deftest target-x86-64-calling-convention
-  "x86-64 target has correct arg registers and return register."
-  (assert-eq :rax (target-ret-reg *x86-64-target*))
-  (assert-eq :rdi (first (target-arg-regs *x86-64-target*)))
-  (assert-=   6   (length (target-arg-regs *x86-64-target*))))
-
-(deftest target-x86-64-callee-saved
-  "x86-64 callee-saved registers include rbx and r12."
+(deftest target-x86-64-description
+  "x86-64 target: name/word-size/endianness, arg registers, return rax, callee-saved."
+  (assert-eq :x86-64  (target-name *x86-64-target*))
+  (assert-=  8        (target-word-size *x86-64-target*))
+  (assert-eq :little  (target-endianness *x86-64-target*))
+  (assert-=  16       (target-stack-alignment *x86-64-target*))
+  (assert-eq :rax     (target-ret-reg *x86-64-target*))
+  (assert-eq :rdi     (first (target-arg-regs *x86-64-target*)))
+  (assert-=  6        (length (target-arg-regs *x86-64-target*)))
   (assert-true (member :rbx (target-callee-saved *x86-64-target*)))
   (assert-true (member :r12 (target-callee-saved *x86-64-target*))))
 

@@ -86,19 +86,14 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
 ;;; %read-file — content correctness
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest cli-read-file-ascii-roundtrip
-  "read-file: ASCII content is returned unchanged"
-  (%with-temp-file (path "(+ 1 2)")
-    (assert-string= "(+ 1 2)" (cl-cc/cli::%read-file path))))
-
-(deftest cli-read-file-empty
-  "read-file: an empty file returns an empty string"
-  (%with-temp-file (path "")
-    (assert-string= "" (cl-cc/cli::%read-file path))))
-
-(deftest cli-read-file-newlines
-  "read-file: content with newlines is preserved exactly"
-  (let ((content (format nil "(defun f (x)~%  (+ x 1))~%")))
+(deftest-each cli-read-file-content-types
+  "read-file: various content types are returned correctly"
+  :cases (("ascii roundtrip" "(+ 1 2)")
+          ("empty string"    "")
+          ("with newlines"   nil))
+  (content-or-nil)
+  (let ((content (or content-or-nil
+                     (format nil "(defun f (x)~%  (+ x 1))~%"))))
     (%with-temp-file (path content)
       (assert-string= content (cl-cc/cli::%read-file path)))))
 

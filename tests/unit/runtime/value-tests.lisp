@@ -31,29 +31,18 @@
 ;;; val-nil-p / val-t-p / val-unbound-p
 ;;; ------------------------------------------------------------
 
-(deftest value-nil-p-true
-  "val-nil-p recognises +val-nil+."
-  (assert-true (cl-cc/runtime:val-nil-p cl-cc/runtime:+val-nil+)))
-
-(deftest value-nil-p-false-for-t
-  "val-nil-p rejects +val-t+."
-  (assert-false (cl-cc/runtime:val-nil-p cl-cc/runtime:+val-t+)))
-
-(deftest value-t-p-true
-  "val-t-p recognises +val-t+."
-  (assert-true (cl-cc/runtime:val-t-p cl-cc/runtime:+val-t+)))
-
-(deftest value-t-p-false-for-nil
-  "val-t-p rejects +val-nil+."
-  (assert-false (cl-cc/runtime:val-t-p cl-cc/runtime:+val-nil+)))
-
-(deftest value-unbound-p-true
-  "val-unbound-p recognises +val-unbound+."
-  (assert-true (cl-cc/runtime:val-unbound-p cl-cc/runtime:+val-unbound+)))
-
-(deftest value-unbound-p-false-for-nil
-  "val-unbound-p rejects +val-nil+."
-  (assert-false (cl-cc/runtime:val-unbound-p cl-cc/runtime:+val-nil+)))
+(deftest-each value-sentinel-predicates
+  "val-nil-p, val-t-p, val-unbound-p each recognize their own sentinel and reject others."
+  :cases (("nil-recognizes-nil"  #'cl-cc/runtime:val-nil-p     cl-cc/runtime:+val-nil+     t)
+          ("nil-rejects-t"       #'cl-cc/runtime:val-nil-p     cl-cc/runtime:+val-t+       nil)
+          ("t-recognizes-t"      #'cl-cc/runtime:val-t-p       cl-cc/runtime:+val-t+       t)
+          ("t-rejects-nil"       #'cl-cc/runtime:val-t-p       cl-cc/runtime:+val-nil+     nil)
+          ("unbound-recognizes"  #'cl-cc/runtime:val-unbound-p  cl-cc/runtime:+val-unbound+ t)
+          ("unbound-rejects-nil" #'cl-cc/runtime:val-unbound-p  cl-cc/runtime:+val-nil+    nil))
+  (pred-fn val expected)
+  (if expected
+      (assert-true  (funcall pred-fn val))
+      (assert-false (funcall pred-fn val))))
 
 ;;; ------------------------------------------------------------
 ;;; Fixnum encode/decode round-trip
@@ -81,12 +70,9 @@
   (n)
   (assert-true (cl-cc/runtime:val-fixnum-p (cl-cc/runtime:encode-fixnum n))))
 
-(deftest value-fixnum-p-rejects-nil
-  "val-fixnum-p rejects +val-nil+."
-  (assert-false (cl-cc/runtime:val-fixnum-p cl-cc/runtime:+val-nil+)))
-
-(deftest value-fixnum-p-rejects-t
-  "val-fixnum-p rejects +val-t+."
+(deftest value-fixnum-p-rejects-sentinels
+  "val-fixnum-p rejects +val-nil+ and +val-t+."
+  (assert-false (cl-cc/runtime:val-fixnum-p cl-cc/runtime:+val-nil+))
   (assert-false (cl-cc/runtime:val-fixnum-p cl-cc/runtime:+val-t+)))
 
 ;;; ------------------------------------------------------------
@@ -105,16 +91,10 @@
 ;;; val-char-p
 ;;; ------------------------------------------------------------
 
-(deftest value-char-p-true
-  "val-char-p recognises an encoded character."
-  (assert-true (cl-cc/runtime:val-char-p (cl-cc/runtime:encode-char #\x))))
-
-(deftest value-char-p-false-for-nil
-  "val-char-p rejects +val-nil+."
-  (assert-false (cl-cc/runtime:val-char-p cl-cc/runtime:+val-nil+)))
-
-(deftest value-char-p-false-for-fixnum
-  "val-char-p rejects an encoded fixnum."
+(deftest value-char-p-cases
+  "val-char-p: recognizes encoded char; rejects +val-nil+ and encoded fixnum."
+  (assert-true  (cl-cc/runtime:val-char-p (cl-cc/runtime:encode-char #\x)))
+  (assert-false (cl-cc/runtime:val-char-p cl-cc/runtime:+val-nil+))
   (assert-false (cl-cc/runtime:val-char-p (cl-cc/runtime:encode-fixnum 65))))
 
 ;;; ------------------------------------------------------------
@@ -149,13 +129,12 @@
    indistinguishable from fixnums by bit pattern alone; use 0.1d0 instead."
   (assert-true (cl-cc/runtime:val-double-p (cl-cc/runtime:encode-double 0.1d0))))
 
-(deftest value-double-p-false-for-fixnum
-  "val-double-p rejects an encoded fixnum."
-  (assert-false (cl-cc/runtime:val-double-p (cl-cc/runtime:encode-fixnum 42))))
-
-(deftest value-double-p-false-for-nil
-  "val-double-p rejects +val-nil+."
-  (assert-false (cl-cc/runtime:val-double-p cl-cc/runtime:+val-nil+)))
+(deftest-each value-double-p-false-for-non-doubles
+  "val-double-p rejects non-double values."
+  :cases (("fixnum" (cl-cc/runtime:encode-fixnum 42))
+          ("nil"    cl-cc/runtime:+val-nil+))
+  (val)
+  (assert-false (cl-cc/runtime:val-double-p val)))
 
 ;;; ------------------------------------------------------------
 ;;; Pointer encode/decode

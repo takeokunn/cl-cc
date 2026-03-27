@@ -2,13 +2,15 @@
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;; VM — Numeric Tower Extensions
 ;;;
-;;; Contains: round (FR-301), bit operations (FR-303), transcendental
-;;; functions (FR-304), float operations (FR-305), float decode/inspect,
-;;; environment predicates (FR-1202), random (FR-1205), universal-time ops,
-;;; float rounding (ffloor/fceiling/ftruncate/fround), rational (FR-306),
-;;; complex numbers (FR-307).
+;;; Contains: round (FR-301), float operations (FR-305), float decode/inspect,
+;;; float rounding (ffloor/fceiling/ftruncate/fround), environment predicates
+;;; (FR-1202), random (FR-1205), universal-time ops (FR-1204),
+;;; rational numbers (FR-306), complex numbers (FR-307).
 ;;;
-;;; Load order: after primitives.lisp.
+;;; Bitwise operations (FR-303) → src/vm/vm-bitwise.lisp
+;;; Transcendental functions (FR-304) → src/vm/vm-transcendental.lisp
+;;;
+;;; Load order: after vm-transcendental.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ;;; ------------------------------------------------------------
@@ -34,298 +36,25 @@
     (setf (vm-values-list state) (list q r)))
   (values (1+ pc) nil nil))
 
-;;; FR-303: Bit Operations
-
-(define-vm-instruction vm-ash (vm-instruction)
-  "Arithmetic shift: (ash integer count). Positive count = left shift."
-  (dst nil :reader vm-dst)
-  (lhs nil :reader vm-lhs)
-  (rhs nil :reader vm-rhs)
-  (:sexp-tag :ash)
-  (:sexp-slots dst lhs rhs))
-
-(define-simple-instruction vm-ash :binary ash)
-
-(define-vm-instruction vm-logand (vm-instruction)
-  "Bitwise AND."
-  (dst nil :reader vm-dst)
-  (lhs nil :reader vm-lhs)
-  (rhs nil :reader vm-rhs)
-  (:sexp-tag :logand)
-  (:sexp-slots dst lhs rhs))
-
-(define-simple-instruction vm-logand :binary logand)
-
-(define-vm-instruction vm-logior (vm-instruction)
-  "Bitwise inclusive OR."
-  (dst nil :reader vm-dst)
-  (lhs nil :reader vm-lhs)
-  (rhs nil :reader vm-rhs)
-  (:sexp-tag :logior)
-  (:sexp-slots dst lhs rhs))
-
-(define-simple-instruction vm-logior :binary logior)
-
-(define-vm-instruction vm-logxor (vm-instruction)
-  "Bitwise exclusive OR."
-  (dst nil :reader vm-dst)
-  (lhs nil :reader vm-lhs)
-  (rhs nil :reader vm-rhs)
-  (:sexp-tag :logxor)
-  (:sexp-slots dst lhs rhs))
-
-(define-simple-instruction vm-logxor :binary logxor)
-
-(define-vm-instruction vm-logeqv (vm-instruction)
-  "Bitwise equivalence (XNOR)."
-  (dst nil :reader vm-dst)
-  (lhs nil :reader vm-lhs)
-  (rhs nil :reader vm-rhs)
-  (:sexp-tag :logeqv)
-  (:sexp-slots dst lhs rhs))
-
-(define-simple-instruction vm-logeqv :binary logeqv)
-
-(define-vm-instruction vm-lognot (vm-instruction)
-  "Bitwise complement."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :lognot)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-lognot :unary lognot)
-
-(define-vm-instruction vm-logtest (vm-instruction)
-  "Test if any bits are set in common: (logtest j k) => t/nil."
-  (dst nil :reader vm-dst)
-  (lhs nil :reader vm-lhs)
-  (rhs nil :reader vm-rhs)
-  (:sexp-tag :logtest)
-  (:sexp-slots dst lhs rhs))
-
-(define-simple-instruction vm-logtest :pred2 logtest)
-
-(define-vm-instruction vm-logbitp (vm-instruction)
-  "Test if bit INDEX is set in INTEGER: (logbitp index integer) => t/nil."
-  (dst nil :reader vm-dst)
-  (lhs nil :reader vm-lhs)
-  (rhs nil :reader vm-rhs)
-  (:sexp-tag :logbitp)
-  (:sexp-slots dst lhs rhs))
-
-(define-simple-instruction vm-logbitp :pred2 logbitp)
-
-(define-vm-instruction vm-logcount (vm-instruction)
-  "Count set bits in integer."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :logcount)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-logcount :unary logcount)
-
-(define-vm-instruction vm-integer-length (vm-instruction)
-  "Number of bits needed to represent integer."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :integer-length)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-integer-length :unary integer-length)
-
-;;; FR-304: Transcendental Functions
-
-(define-vm-instruction vm-expt (vm-instruction)
-  "Exponentiation: (expt base power)."
-  (dst nil :reader vm-dst)
-  (lhs nil :reader vm-lhs)
-  (rhs nil :reader vm-rhs)
-  (:sexp-tag :expt)
-  (:sexp-slots dst lhs rhs))
-
-(define-simple-instruction vm-expt :binary expt)
-
-(define-vm-instruction vm-sqrt (vm-instruction)
-  "Square root."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :sqrt)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-sqrt :unary sqrt)
-
-(define-vm-instruction vm-exp-inst (vm-instruction)
-  "e raised to the power x."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :exp)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-exp-inst :unary exp)
-
-(define-vm-instruction vm-log-inst (vm-instruction)
-  "Natural logarithm."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :log)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-log-inst :unary log)
-
-(define-vm-instruction vm-sin-inst (vm-instruction)
-  "Sine (radians)."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :sin)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-sin-inst :unary sin)
-
-(define-vm-instruction vm-cos-inst (vm-instruction)
-  "Cosine (radians)."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :cos)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-cos-inst :unary cos)
-
-(define-vm-instruction vm-tan-inst (vm-instruction)
-  "Tangent (radians)."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :tan)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-tan-inst :unary tan)
-
-(define-vm-instruction vm-asin-inst (vm-instruction)
-  "Arc sine."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :asin)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-asin-inst :unary asin)
-
-(define-vm-instruction vm-acos-inst (vm-instruction)
-  "Arc cosine."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :acos)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-acos-inst :unary acos)
-
-(define-vm-instruction vm-atan-inst (vm-instruction)
-  "Arc tangent (1-arg: atan y)."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :atan)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-atan-inst :unary atan)
-
-(define-vm-instruction vm-atan2-inst (vm-instruction)
-  "Arc tangent (2-arg: atan y x)."
-  (dst nil :reader vm-dst)
-  (lhs nil :reader vm-lhs)
-  (rhs nil :reader vm-rhs)
-  (:sexp-tag :atan2)
-  (:sexp-slots dst lhs rhs))
-
-(define-simple-instruction vm-atan2-inst :binary atan)
-
-(define-vm-instruction vm-sinh-inst (vm-instruction)
-  "Hyperbolic sine."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :sinh)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-sinh-inst :unary sinh)
-
-(define-vm-instruction vm-cosh-inst (vm-instruction)
-  "Hyperbolic cosine."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :cosh)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-cosh-inst :unary cosh)
-
-(define-vm-instruction vm-tanh-inst (vm-instruction)
-  "Hyperbolic tangent."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :tanh)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-tanh-inst :unary tanh)
 
 ;;; FR-305: Float Operations
+;; define-vm-unary-instruction / define-vm-binary-instruction defined in vm.lisp.
 
-(define-vm-instruction vm-float-inst (vm-instruction)
-  "Convert number to float."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :float)
-  (:sexp-slots dst src))
+(define-vm-unary-instruction vm-float-inst       :float           "Convert number to float.")
+(define-vm-unary-instruction vm-float-precision  :float-precision "Number of significant radix digits in a float.")
+(define-vm-unary-instruction vm-float-radix      :float-radix     "Radix of the float representation.")
+(define-vm-unary-instruction vm-float-sign       :float-sign      "Sign of a float as float.")
+(define-vm-unary-instruction vm-float-digits     :float-digits    "Number of radix digits in the float mantissa.")
+(define-vm-binary-instruction vm-scale-float     :scale-float     "Scale a float by a power of the radix.")
 
-(define-simple-instruction vm-float-inst :unary float)
-
-(define-vm-instruction vm-float-precision (vm-instruction)
-  "Number of significant radix digits in a float."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :float-precision)
-  (:sexp-slots dst src))
-
+(define-simple-instruction vm-float-inst      :unary float)
 (define-simple-instruction vm-float-precision :unary float-precision)
+(define-simple-instruction vm-float-radix     :unary float-radix)
+(define-simple-instruction vm-float-sign      :unary float-sign)
+(define-simple-instruction vm-float-digits    :unary float-digits)
+(define-simple-instruction vm-scale-float     :binary scale-float)
 
-(define-vm-instruction vm-float-radix (vm-instruction)
-  "Radix of the float representation."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :float-radix)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-float-radix :unary float-radix)
-
-(define-vm-instruction vm-float-sign (vm-instruction)
-  "Sign of a float as float."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :float-sign)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-float-sign :unary float-sign)
-
-(define-vm-instruction vm-float-digits (vm-instruction)
-  "Number of radix digits in the float mantissa."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :float-digits)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-float-digits :unary float-digits)
-
-(define-vm-instruction vm-scale-float (vm-instruction)
-  "Scale a float by a power of the radix."
-  (dst nil :reader vm-dst)
-  (lhs nil :reader vm-lhs)
-  (rhs nil :reader vm-rhs)
-  (:sexp-tag :scale-float)
-  (:sexp-slots dst lhs rhs))
-
-(define-simple-instruction vm-scale-float :binary scale-float)
-
-(define-vm-instruction vm-decode-float (vm-instruction)
-  "Decode float into significand, exponent, sign (3 multiple values)."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :decode-float)
-  (:sexp-slots dst src))
+(define-vm-unary-instruction vm-decode-float :decode-float "Decode float into significand, exponent, sign (3 multiple values).")
 
 (defmethod execute-instruction ((inst vm-decode-float) state pc labels)
   (declare (ignore labels))
@@ -335,12 +64,7 @@
     (setf (vm-values-list state) (list sig exp sign)))
   (values (1+ pc) nil nil))
 
-(define-vm-instruction vm-integer-decode-float (vm-instruction)
-  "Decode float into integer significand, exponent, sign (3 multiple values)."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :integer-decode-float)
-  (:sexp-slots dst src))
+(define-vm-unary-instruction vm-integer-decode-float :integer-decode-float "Decode float into integer significand, exponent, sign (3 multiple values).")
 
 (defmethod execute-instruction ((inst vm-integer-decode-float) state pc labels)
   (declare (ignore labels))
@@ -511,10 +235,7 @@
 
 ;;; FR-301: Float rounding functions (ffloor, fceiling, ftruncate, fround)
 
-(define-vm-instruction vm-ffloor (vm-instruction)
-  "Float floor: returns float quotient and float remainder."
-  (dst nil :reader vm-dst) (lhs nil :reader vm-lhs) (rhs nil :reader vm-rhs)
-  (:sexp-tag :ffloor) (:sexp-slots dst lhs rhs))
+(define-vm-binary-instruction vm-ffloor :ffloor "Float floor: returns float quotient and float remainder.")
 
 (defmethod execute-instruction ((inst vm-ffloor) state pc labels)
   (declare (ignore labels))
@@ -524,10 +245,7 @@
     (setf (vm-values-list state) (list q r))
     (values (1+ pc) nil nil)))
 
-(define-vm-instruction vm-fceiling (vm-instruction)
-  "Float ceiling: returns float quotient and float remainder."
-  (dst nil :reader vm-dst) (lhs nil :reader vm-lhs) (rhs nil :reader vm-rhs)
-  (:sexp-tag :fceiling) (:sexp-slots dst lhs rhs))
+(define-vm-binary-instruction vm-fceiling :fceiling "Float ceiling: returns float quotient and float remainder.")
 
 (defmethod execute-instruction ((inst vm-fceiling) state pc labels)
   (declare (ignore labels))
@@ -537,10 +255,7 @@
     (setf (vm-values-list state) (list q r))
     (values (1+ pc) nil nil)))
 
-(define-vm-instruction vm-ftruncate (vm-instruction)
-  "Float truncate: returns float quotient and float remainder."
-  (dst nil :reader vm-dst) (lhs nil :reader vm-lhs) (rhs nil :reader vm-rhs)
-  (:sexp-tag :ftruncate) (:sexp-slots dst lhs rhs))
+(define-vm-binary-instruction vm-ftruncate :ftruncate "Float truncate: returns float quotient and float remainder.")
 
 (defmethod execute-instruction ((inst vm-ftruncate) state pc labels)
   (declare (ignore labels))
@@ -550,10 +265,7 @@
     (setf (vm-values-list state) (list q r))
     (values (1+ pc) nil nil)))
 
-(define-vm-instruction vm-fround (vm-instruction)
-  "Float round: returns float quotient and float remainder."
-  (dst nil :reader vm-dst) (lhs nil :reader vm-lhs) (rhs nil :reader vm-rhs)
-  (:sexp-tag :fround) (:sexp-slots dst lhs rhs))
+(define-vm-binary-instruction vm-fround :fround "Float round: returns float quotient and float remainder.")
 
 (defmethod execute-instruction ((inst vm-fround) state pc labels)
   (declare (ignore labels))
@@ -565,106 +277,30 @@
 
 ;;; FR-306: Rational number functions
 
-(define-vm-instruction vm-rational (vm-instruction)
-  "Convert number to rational."
-  (dst nil :reader vm-dst) (src nil :reader vm-src)
-  (:sexp-tag :rational) (:sexp-slots dst src))
-(defmethod execute-instruction ((inst vm-rational) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (rational (vm-reg-get state (vm-src inst))))
-  (values (1+ pc) nil nil))
+(define-vm-unary-instruction vm-rational    :rational    "Convert number to rational.")
+(define-vm-unary-instruction vm-rationalize :rationalize "Rationalize a float to closest rational.")
+(define-vm-unary-instruction vm-numerator   :numerator   "Return numerator of rational.")
+(define-vm-unary-instruction vm-denominator :denominator "Return denominator of rational.")
+(define-vm-binary-instruction vm-gcd        :gcd         "Return greatest common divisor.")
+(define-vm-binary-instruction vm-lcm        :lcm         "Return least common multiple.")
 
-(define-vm-instruction vm-rationalize (vm-instruction)
-  "Rationalize a float to closest rational."
-  (dst nil :reader vm-dst) (src nil :reader vm-src)
-  (:sexp-tag :rationalize) (:sexp-slots dst src))
-(defmethod execute-instruction ((inst vm-rationalize) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (rationalize (vm-reg-get state (vm-src inst))))
-  (values (1+ pc) nil nil))
-
-(define-vm-instruction vm-numerator (vm-instruction)
-  "Return numerator of rational."
-  (dst nil :reader vm-dst) (src nil :reader vm-src)
-  (:sexp-tag :numerator) (:sexp-slots dst src))
-(defmethod execute-instruction ((inst vm-numerator) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (numerator (vm-reg-get state (vm-src inst))))
-  (values (1+ pc) nil nil))
-
-(define-vm-instruction vm-denominator (vm-instruction)
-  "Return denominator of rational."
-  (dst nil :reader vm-dst) (src nil :reader vm-src)
-  (:sexp-tag :denominator) (:sexp-slots dst src))
-(defmethod execute-instruction ((inst vm-denominator) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (denominator (vm-reg-get state (vm-src inst))))
-  (values (1+ pc) nil nil))
-
-(define-vm-instruction vm-gcd (vm-instruction)
-  "Return greatest common divisor."
-  (dst nil :reader vm-dst) (lhs nil :reader vm-lhs) (rhs nil :reader vm-rhs)
-  (:sexp-tag :gcd) (:sexp-slots dst lhs rhs))
-(defmethod execute-instruction ((inst vm-gcd) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst)
-              (gcd (vm-reg-get state (vm-lhs inst)) (vm-reg-get state (vm-rhs inst))))
-  (values (1+ pc) nil nil))
-
-(define-vm-instruction vm-lcm (vm-instruction)
-  "Return least common multiple."
-  (dst nil :reader vm-dst) (lhs nil :reader vm-lhs) (rhs nil :reader vm-rhs)
-  (:sexp-tag :lcm) (:sexp-slots dst lhs rhs))
-(defmethod execute-instruction ((inst vm-lcm) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst)
-              (lcm (vm-reg-get state (vm-lhs inst)) (vm-reg-get state (vm-rhs inst))))
-  (values (1+ pc) nil nil))
+(define-simple-instruction vm-rational    :unary  rational)
+(define-simple-instruction vm-rationalize :unary  rationalize)
+(define-simple-instruction vm-numerator   :unary  numerator)
+(define-simple-instruction vm-denominator :unary  denominator)
+(define-simple-instruction vm-gcd         :binary gcd)
+(define-simple-instruction vm-lcm         :binary lcm)
 
 ;;; FR-307: Complex number functions
 
-(define-vm-instruction vm-realpart (vm-instruction)
-  "Return real part of number."
-  (dst nil :reader vm-dst) (src nil :reader vm-src)
-  (:sexp-tag :realpart) (:sexp-slots dst src))
-(defmethod execute-instruction ((inst vm-realpart) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (realpart (vm-reg-get state (vm-src inst))))
-  (values (1+ pc) nil nil))
+(define-vm-unary-instruction vm-realpart  :realpart  "Return real part of number.")
+(define-vm-unary-instruction vm-imagpart  :imagpart  "Return imaginary part of number.")
+(define-vm-unary-instruction vm-conjugate :conjugate "Return complex conjugate.")
+(define-vm-unary-instruction vm-phase     :phase     "Return phase angle of complex number.")
+(define-vm-binary-instruction vm-complex  :complex   "Construct a complex number from real and imaginary parts.")
 
-(define-vm-instruction vm-imagpart (vm-instruction)
-  "Return imaginary part of number."
-  (dst nil :reader vm-dst) (src nil :reader vm-src)
-  (:sexp-tag :imagpart) (:sexp-slots dst src))
-(defmethod execute-instruction ((inst vm-imagpart) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (imagpart (vm-reg-get state (vm-src inst))))
-  (values (1+ pc) nil nil))
-
-(define-vm-instruction vm-conjugate (vm-instruction)
-  "Return complex conjugate."
-  (dst nil :reader vm-dst) (src nil :reader vm-src)
-  (:sexp-tag :conjugate) (:sexp-slots dst src))
-(defmethod execute-instruction ((inst vm-conjugate) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (conjugate (vm-reg-get state (vm-src inst))))
-  (values (1+ pc) nil nil))
-
-(define-vm-instruction vm-phase (vm-instruction)
-  "Return phase angle of complex number."
-  (dst nil :reader vm-dst) (src nil :reader vm-src)
-  (:sexp-tag :phase) (:sexp-slots dst src))
-(defmethod execute-instruction ((inst vm-phase) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (phase (vm-reg-get state (vm-src inst))))
-  (values (1+ pc) nil nil))
-
-(define-vm-instruction vm-complex (vm-instruction)
-  "Construct a complex number from real and imaginary parts."
-  (dst nil :reader vm-dst) (lhs nil :reader vm-lhs) (rhs nil :reader vm-rhs)
-  (:sexp-tag :complex) (:sexp-slots dst lhs rhs))
-(defmethod execute-instruction ((inst vm-complex) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst)
-              (complex (vm-reg-get state (vm-lhs inst)) (vm-reg-get state (vm-rhs inst))))
-  (values (1+ pc) nil nil))
+(define-simple-instruction vm-realpart  :unary  realpart)
+(define-simple-instruction vm-imagpart  :unary  imagpart)
+(define-simple-instruction vm-conjugate :unary  conjugate)
+(define-simple-instruction vm-phase     :unary  phase)
+(define-simple-instruction vm-complex   :binary complex)

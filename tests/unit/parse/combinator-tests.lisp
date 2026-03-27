@@ -21,12 +21,9 @@
 
 ;;; ─── Token Stream Protocol ──────────────────────────────────────────────────
 
-(deftest comb-stream-empty-p-nil
-  "Empty stream is empty."
-  (assert-true (cl-cc::stream-empty-p nil)))
-
-(deftest comb-stream-empty-p-nonempty
-  "Non-empty stream is not empty."
+(deftest comb-stream-empty-p-behavior
+  "stream-empty-p returns true for nil and false for non-empty stream."
+  (assert-true (cl-cc::stream-empty-p nil))
   (assert-false (cl-cc::stream-empty-p (toks :T-INT 1))))
 
 (deftest comb-stream-peek
@@ -53,21 +50,15 @@
 
 ;;; ─── Grammar Rule Database ──────────────────────────────────────────────────
 
-(deftest comb-grammar-rule-store-and-query
-  "def-grammar-rule stores, query-grammar retrieves."
+(deftest comb-grammar-rule-lifecycle
+  "Grammar rule database: store-and-query, missing returns nil, clear empties DB."
   (let ((cl-cc::*grammar-rules* (make-hash-table)))
     (setf (gethash :test-rule cl-cc::*grammar-rules*) '(token :T-INT))
     (let ((rule (cl-cc::query-grammar :test-rule)))
       (assert-true (consp rule))
-      (assert-equal 'token (first rule)))))
-
-(deftest comb-query-grammar-missing
-  "query-grammar returns nil for undefined rule."
+      (assert-equal 'token (first rule))))
   (let ((cl-cc::*grammar-rules* (make-hash-table)))
-    (assert-null (cl-cc::query-grammar :nonexistent))))
-
-(deftest comb-clear-grammar-rules
-  "clear-grammar-rules empties the database."
+    (assert-null (cl-cc::query-grammar :nonexistent)))
   (let ((cl-cc::*grammar-rules* (make-hash-table)))
     (setf (gethash :foo cl-cc::*grammar-rules*) '(token :T-INT))
     (cl-cc::clear-grammar-rules)
@@ -101,21 +92,16 @@
       (assert-equal "foo" ast)
       (assert-null rest))))
 
-(deftest comb-token-mismatch-type
-  "parse-token* fails on type mismatch."
+(deftest comb-token-mismatch-cases
+  "parse-token* returns :fail on type mismatch, value mismatch, and empty stream."
   (let ((s (toks :T-INT 1)))
     (multiple-value-bind (ast rest) (cl-cc::parse-token* :T-IDENT nil s)
       (assert-equal :fail ast)
-      (assert-null rest))))
-
-(deftest comb-token-mismatch-value
-  "parse-token* fails on value mismatch."
+      (assert-null rest)))
   (let ((s (toks :T-IDENT "bar")))
     (multiple-value-bind (ast rest) (cl-cc::parse-token* :T-IDENT "foo" s)
-      (assert-equal :fail ast))))
-
-(deftest comb-token-empty-stream
-  "parse-token* fails on empty stream."
+      (declare (ignore rest))
+      (assert-equal :fail ast)))
   (multiple-value-bind (ast rest) (cl-cc::parse-token* :T-INT nil nil)
     (assert-equal :fail ast)
     (assert-null rest)))
@@ -189,22 +175,16 @@
 
 ;;; ─── parse-many* ────────────────────────────────────────────────────────────
 
-(deftest comb-many-zero
-  "parse-many* succeeds with zero matches."
+(deftest comb-many-behavior
+  "parse-many* succeeds with zero matches, collects all matches, and stops at mismatch."
   (let ((s (toks :T-IDENT "x")))
     (multiple-value-bind (ast rest) (cl-cc::parse-many* '(token :T-INT) s)
       (assert-equal nil ast)
-      (assert-equal 1 (length rest)))))
-
-(deftest comb-many-multiple
-  "parse-many* collects all matches."
+      (assert-equal 1 (length rest))))
   (let ((s (toks :T-INT 1 :T-INT 2 :T-INT 3)))
     (multiple-value-bind (ast rest) (cl-cc::parse-many* '(token :T-INT) s)
       (assert-equal '(1 2 3) ast)
-      (assert-null rest))))
-
-(deftest comb-many-stops-at-mismatch
-  "parse-many* stops at first non-match, leaving rest."
+      (assert-null rest)))
   (let ((s (toks :T-INT 1 :T-INT 2 :T-IDENT "x")))
     (multiple-value-bind (ast rest) (cl-cc::parse-many* '(token :T-INT) s)
       (assert-equal '(1 2) ast)
@@ -212,22 +192,16 @@
 
 ;;; ─── parse-many1* ───────────────────────────────────────────────────────────
 
-(deftest comb-many1-one
-  "parse-many1* succeeds with one match."
+(deftest comb-many1-behavior
+  "parse-many1* succeeds with one or more matches, fails with zero."
   (let ((s (toks :T-INT 1 :T-IDENT "x")))
     (multiple-value-bind (ast rest) (cl-cc::parse-many1* '(token :T-INT) s)
       (assert-equal '(1) ast)
-      (assert-equal 1 (length rest)))))
-
-(deftest comb-many1-multiple
-  "parse-many1* collects multiple matches."
+      (assert-equal 1 (length rest))))
   (let ((s (toks :T-INT 1 :T-INT 2)))
     (multiple-value-bind (ast rest) (cl-cc::parse-many1* '(token :T-INT) s)
       (assert-equal '(1 2) ast)
-      (assert-null rest))))
-
-(deftest comb-many1-zero-fails
-  "parse-many1* fails with zero matches."
+      (assert-null rest)))
   (let ((s (toks :T-IDENT "x")))
     (multiple-value-bind (ast _rest) (cl-cc::parse-many1* '(token :T-INT) s)
       (declare (ignore _rest))

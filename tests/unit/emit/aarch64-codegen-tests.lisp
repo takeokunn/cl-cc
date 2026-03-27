@@ -27,25 +27,17 @@ Returns the byte vector, or NIL on error."
 ;;; Return-type contract
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest aarch64-bytes-returns-octet-vector
-  "compile-to-aarch64-bytes returns an array of (unsigned-byte 8)."
+(deftest aarch64-bytes-output-contract
+  "compile-to-aarch64-bytes returns a non-empty (unsigned-byte 8) vector with length divisible by 4."
   (let ((bytes (%a64-compile "(+ 1 2)")))
     (assert-true bytes)
-    (assert-true (typep bytes '(array (unsigned-byte 8) (*))))))
-
-(deftest aarch64-bytes-non-empty
-  "compile-to-aarch64-bytes emits at least one byte."
-  (assert-true (> (length (%a64-compile "(+ 1 2)")) 0)))
+    (assert-true (typep bytes '(array (unsigned-byte 8) (*))))
+    (assert-true (> (length bytes) 0))
+    (assert-= 0 (mod (length bytes) 4))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; AArch64 ISA alignment: all instructions are 4 bytes
 ;;; ─────────────────────────────────────────────────────────────────────────
-
-(deftest aarch64-bytes-length-multiple-of-4
-  "Emitted byte vector length must be a multiple of 4 (AArch64 fixed-width ISA)."
-  (let ((bytes (%a64-compile "(+ 1 2)")))
-    (assert-true bytes)
-    (assert-= 0 (mod (length bytes) 4))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Regression guard: arm64 != x86-64

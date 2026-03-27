@@ -16,21 +16,14 @@
   (assert-null (type-children type-string))
   (assert-null (type-children type-bool)))
 
-(deftest type-children-var
-  "Type variables have no children."
-  (assert-null (type-children (fresh-type-var "a"))))
-
-(deftest type-children-rigid
-  "Rigid variables have no children."
-  (assert-null (type-children (fresh-rigid-var "r"))))
-
-(deftest type-children-error
-  "Error sentinels have no children."
-  (assert-null (type-children (make-type-error :message "test"))))
-
-(deftest type-children-nil
-  "nil returns nil."
-  (assert-null (type-children nil)))
+(deftest-each type-children-atomic-leaf-types
+  "Leaf types (variable, rigid, error, nil) have no children."
+  :cases (("var"   (fresh-type-var "a"))
+          ("rigid" (fresh-rigid-var "r"))
+          ("error" (make-type-error :message "test"))
+          ("nil"   nil))
+  (leaf-type)
+  (assert-null (type-children leaf-type)))
 
 ;;; ─── type-children: compound types ─────────────────────────────────────────
 
@@ -57,17 +50,12 @@
     (assert-equal 3 (length ch))
     (assert-true (type-equal-p type-int (first ch)))))
 
-(deftest type-children-union
-  "Union type returns its alternatives."
-  (let* ((u  (make-type-union (list type-int type-string)))
-         (ch (type-children u)))
-    (assert-equal 2 (length ch))))
-
-(deftest type-children-intersection
-  "Intersection type returns its types."
-  (let* ((i  (make-type-intersection (list type-int type-string)))
-         (ch (type-children i)))
-    (assert-equal 2 (length ch))))
+(deftest-each type-children-binary-collection-types
+  "Union and intersection types return their 2 members as children."
+  :cases (("union"        (make-type-union (list type-int type-string)))
+          ("intersection" (make-type-intersection (list type-int type-string))))
+  (ty)
+  (assert-equal 2 (length (type-children ty))))
 
 (deftest type-children-record-closed
   "Closed record returns field values."
@@ -102,21 +90,14 @@
     (assert-equal 2 (length ch))
     (assert-true (type-var-p (second ch)))))
 
-(deftest type-children-forall
-  "Forall returns only the body (not the bound var)."
-  (let* ((a (fresh-type-var "a"))
-         (f (make-type-forall :var a :body type-int))
-         (ch (type-children f)))
+(deftest-each type-children-quantifier-return-body
+  "Forall and exists return only the body (1 child)."
+  :cases (("forall" (make-type-forall :var (fresh-type-var "a") :body type-int)  type-int)
+          ("exists" (make-type-exists :var (fresh-type-var "a") :body type-string) type-string))
+  (ty expected-body)
+  (let ((ch (type-children ty)))
     (assert-equal 1 (length ch))
-    (assert-true (type-equal-p type-int (first ch)))))
-
-(deftest type-children-exists
-  "Exists returns only the body."
-  (let* ((a (fresh-type-var "a"))
-         (e (make-type-exists :var a :body type-string))
-         (ch (type-children e)))
-    (assert-equal 1 (length ch))
-    (assert-true (type-equal-p type-string (first ch)))))
+    (assert-true (type-equal-p expected-body (first ch)))))
 
 (deftest type-children-app
   "Type application returns fun and arg."
@@ -126,39 +107,22 @@
     (assert-true (type-equal-p type-int (first ch)))
     (assert-true (type-equal-p type-string (second ch)))))
 
-(deftest type-children-lambda
-  "Type lambda returns only the body."
-  (let* ((a (fresh-type-var "a"))
-         (lam (cl-cc/type::make-type-lambda :var a :body type-int))
-         (ch  (type-children lam)))
-    (assert-equal 1 (length ch))
-    (assert-true (type-equal-p type-int (first ch)))))
+(deftest type-children-lambda-and-mu
+  "Type lambda and mu return only the body (1 child)."
+  (let ((a (fresh-type-var "a")))
+    (let ((ch (type-children (cl-cc/type::make-type-lambda :var a :body type-int))))
+      (assert-equal 1 (length ch))
+      (assert-true (type-equal-p type-int (first ch))))
+    (let ((ch (type-children (make-type-mu :var a :body type-int))))
+      (assert-equal 1 (length ch)))))
 
-(deftest type-children-mu
-  "Mu (recursive) returns only the body."
-  (let* ((a (fresh-type-var "a"))
-         (m (make-type-mu :var a :body type-int))
-         (ch (type-children m)))
-    (assert-equal 1 (length ch))))
-
-(deftest type-children-refinement
-  "Refinement returns only the base type."
-  (let* ((r  (cl-cc/type::make-type-refinement :base type-int :predicate #'numberp))
-         (ch (type-children r)))
-    (assert-equal 1 (length ch))
-    (assert-true (type-equal-p type-int (first ch)))))
-
-(deftest type-children-linear
-  "Linear returns only the base type."
-  (let* ((lin (make-type-linear :base type-int :grade :one))
-         (ch  (type-children lin)))
-    (assert-equal 1 (length ch))
-    (assert-true (type-equal-p type-int (first ch)))))
-
-(deftest type-children-capability
-  "Capability returns only the base type."
-  (let* ((cap (cl-cc/type::make-type-capability :base type-int :cap 'read))
-         (ch  (type-children cap)))
+(deftest-each type-children-wrapper-types
+  "Refinement, linear, and capability all return only the base type (1 child)."
+  :cases (("refinement"  (cl-cc/type::make-type-refinement :base type-int :predicate #'numberp))
+          ("linear"      (make-type-linear :base type-int :grade :one))
+          ("capability"  (cl-cc/type::make-type-capability :base type-int :cap 'read)))
+  (ty)
+  (let ((ch (type-children ty)))
     (assert-equal 1 (length ch))
     (assert-true (type-equal-p type-int (first ch)))))
 
@@ -216,29 +180,14 @@
 
 ;;; ─── type-bound-var ────────────────────────────────────────────────────────
 
-(deftest type-bound-var-forall
-  "Forall binds a type variable."
-  (let* ((a (fresh-type-var "a"))
-         (f (make-type-forall :var a :body type-int)))
-    (assert-true (type-var-equal-p a (type-bound-var f)))))
-
-(deftest type-bound-var-exists
-  "Exists binds a type variable."
-  (let* ((a (fresh-type-var "a"))
-         (e (make-type-exists :var a :body type-int)))
-    (assert-true (type-var-equal-p a (type-bound-var e)))))
-
-(deftest type-bound-var-lambda
-  "Type lambda binds a type variable."
-  (let* ((a (fresh-type-var "a"))
-         (lam (cl-cc/type::make-type-lambda :var a :body type-int)))
-    (assert-true (type-var-equal-p a (type-bound-var lam)))))
-
-(deftest type-bound-var-mu
-  "Mu binds a type variable."
-  (let* ((a (fresh-type-var "a"))
-         (m (make-type-mu :var a :body type-int)))
-    (assert-true (type-var-equal-p a (type-bound-var m)))))
+(deftest-each type-bound-var-binding-types
+  "Forall, exists, type-lambda, and mu all bind a type variable."
+  :cases (("forall" (let ((a (fresh-type-var "a"))) (make-type-forall :var a :body type-int)))
+          ("exists" (let ((a (fresh-type-var "a"))) (make-type-exists :var a :body type-int)))
+          ("lambda" (let ((a (fresh-type-var "a"))) (cl-cc/type::make-type-lambda :var a :body type-int)))
+          ("mu"     (let ((a (fresh-type-var "a"))) (make-type-mu :var a :body type-int))))
+  (ty)
+  (assert-true (type-var-p (type-bound-var ty))))
 
 (deftest type-bound-var-non-binding
   "Non-binding types return nil."
@@ -297,23 +246,14 @@
 
 ;;; ─── Integration: type-occurs-p still works correctly ──────────────────────
 
-(deftest type-occurs-p-via-children-direct
-  "type-occurs-p finds var directly."
-  (let* ((a (fresh-type-var "a")))
-    (assert-true (type-occurs-p a a (make-substitution)))))
-
-(deftest type-occurs-p-via-children-in-arrow
-  "type-occurs-p finds var in arrow params."
-  (let* ((a   (fresh-type-var "a"))
-         (arr (make-type-arrow (list a) type-int)))
-    (assert-true (type-occurs-p a arr (make-substitution)))))
-
-(deftest type-occurs-p-via-children-absent
-  "type-occurs-p returns nil when var absent."
-  (let* ((a (fresh-type-var "a"))
-         (b (fresh-type-var "b"))
-         (arr (make-type-arrow (list a) type-int)))
-    (assert-false (type-occurs-p b arr (make-substitution)))))
+(deftest type-occurs-p-via-children
+  "type-occurs-p finds var directly, in arrow params, and returns nil when absent."
+  (let ((a (fresh-type-var "a"))
+        (b (fresh-type-var "b"))
+        (s (make-substitution)))
+    (assert-true  (type-occurs-p a a s))
+    (assert-true  (type-occurs-p a (make-type-arrow (list a) type-int) s))
+    (assert-false (type-occurs-p b (make-type-arrow (list a) type-int) s))))
 
 (deftest type-occurs-p-via-children-through-subst
   "type-occurs-p follows substitution chains."

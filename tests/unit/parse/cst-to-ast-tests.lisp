@@ -13,29 +13,17 @@
   "lower-cst-to-ast returns nil for nil input."
   (assert-null (cl-cc::lower-cst-to-ast nil)))
 
-(deftest cst-ast-integer-token
-  "lower-cst-to-ast converts integer CST token to AST."
-  (let* ((cst (cl-cc::make-cst-token :kind :T-INT :value 42
-                                      :start-byte 0 :end-byte 2))
-         (ast (cl-cc::lower-cst-to-ast cst :source "42")))
+(deftest-each cst-ast-token-types
+  "lower-cst-to-ast converts each CST token kind to the correct AST node type"
+  :cases (("integer" :T-INT    42      "42"    #'cl-cc::ast-int-p)
+          ("symbol"  :T-SYMBOL 'hello  "hello" #'cl-cc::ast-node-p)
+          ("string"  :T-STRING "hi"    "\"hi\"" #'cl-cc::ast-quote-p))
+  (kind value source pred)
+  (let* ((cst (cl-cc::make-cst-token :kind kind :value value
+                                     :start-byte 0 :end-byte (length source)))
+         (ast (cl-cc::lower-cst-to-ast cst :source source)))
     (assert-true (cl-cc::ast-node-p ast))
-    (assert-true (cl-cc::ast-int-p ast))
-    (assert-equal 42 (cl-cc::ast-int-value ast))))
-
-(deftest cst-ast-symbol-token
-  "lower-cst-to-ast converts symbol CST token to AST."
-  (let* ((cst (cl-cc::make-cst-token :kind :T-SYMBOL :value 'hello
-                                      :start-byte 0 :end-byte 5))
-         (ast (cl-cc::lower-cst-to-ast cst :source "hello")))
-    (assert-true (cl-cc::ast-node-p ast))))
-
-(deftest cst-ast-string-token
-  "lower-cst-to-ast converts string CST token to AST."
-  (let* ((cst (cl-cc::make-cst-token :kind :T-STRING :value "hi"
-                                      :start-byte 0 :end-byte 4))
-         (ast (cl-cc::lower-cst-to-ast cst :source "\"hi\"")))
-    (assert-true (cl-cc::ast-quote-p ast))
-    (assert-equal "hi" (cl-cc::ast-quote-value ast))))
+    (assert-true (funcall pred ast))))
 
 (deftest cst-ast-source-file-propagation
   "lower-cst-to-ast propagates source-file to AST."
@@ -63,30 +51,16 @@
 
 ;;; ─── parse-and-lower ────────────────────────────────────────────────────────
 
-(deftest cst-ast-parse-and-lower-integer
-  "parse-and-lower converts integer source to AST list."
-  (let ((result (cl-cc::parse-and-lower "42")))
-    (assert-equal 1 (length result))
-    (assert-true (cl-cc::ast-int-p (first result)))
-    (assert-equal 42 (cl-cc::ast-int-value (first result)))))
-
-(deftest cst-ast-parse-and-lower-string
-  "parse-and-lower converts string literal to AST."
-  (let ((result (cl-cc::parse-and-lower "\"hello\"")))
-    (assert-equal 1 (length result))
-    (assert-true (cl-cc::ast-quote-p (first result)))
-    (assert-equal "hello" (cl-cc::ast-quote-value (first result)))))
-
-(deftest cst-ast-parse-and-lower-multiple
-  "parse-and-lower converts multiple forms."
-  (let ((result (cl-cc::parse-and-lower "1 2 3")))
-    (assert-equal 3 (length result))))
-
-(deftest cst-ast-parse-and-lower-list
-  "parse-and-lower converts list form to AST."
-  (let ((result (cl-cc::parse-and-lower "(+ 1 2)")))
-    (assert-equal 1 (length result))
-    (assert-true (cl-cc::ast-node-p (first result)))))
+(deftest-each cst-ast-parse-and-lower-cases
+  "parse-and-lower converts each source form to a correctly-typed AST list"
+  :cases (("integer"  "42"        1 #'cl-cc::ast-int-p)
+          ("string"   "\"hello\"" 1 #'cl-cc::ast-quote-p)
+          ("multiple" "1 2 3"     3 #'cl-cc::ast-node-p)
+          ("list"     "(+ 1 2)"   1 #'cl-cc::ast-node-p))
+  (source expected-len pred)
+  (let ((result (cl-cc::parse-and-lower source)))
+    (assert-equal expected-len (length result))
+    (assert-true (funcall pred (first result)))))
 
 (deftest cst-ast-parse-and-lower-source-file
   "parse-and-lower accepts optional source-file parameter."
@@ -95,14 +69,11 @@
 
 ;;; ─── parse-and-lower-one ────────────────────────────────────────────────────
 
-(deftest cst-ast-parse-and-lower-one-single
-  "parse-and-lower-one returns a single AST node."
+(deftest cst-ast-parse-and-lower-one
+  "parse-and-lower-one returns a single AST node for atomic and list forms"
   (let ((ast (cl-cc::parse-and-lower-one "42")))
     (assert-true (cl-cc::ast-int-p ast))
-    (assert-equal 42 (cl-cc::ast-int-value ast))))
-
-(deftest cst-ast-parse-and-lower-one-list
-  "parse-and-lower-one handles list forms."
+    (assert-equal 42 (cl-cc::ast-int-value ast)))
   (let ((ast (cl-cc::parse-and-lower-one "(if t 1 2)")))
     (assert-true (cl-cc::ast-node-p ast))))
 

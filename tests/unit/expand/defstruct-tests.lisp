@@ -20,56 +20,28 @@
 
 ;;; ─── Basic struct ─────────────────────────────────────────────────────────
 
-(deftest ds-basic-is-progn
-  "Basic defstruct expansion is a progn."
-  (let ((exp (ds-expand '(defstruct point x y))))
-    (assert-equal 'progn (first exp))))
-
-(deftest ds-basic-defclass
-  "Basic defstruct generates defclass with correct name."
-  (let* ((exp (ds-expand '(defstruct point x y)))
-         (defclass-form (second exp)))
+(deftest ds-basic-expansion
+  "Basic defstruct: is progn, generates defclass with correct name, slot count, initarg, and initform."
+  (let* ((exp         (ds-expand '(defstruct point x y)))
+         (defclass-form (second exp))
+         (slot-specs  (fourth defclass-form))
+         (first-slot  (first slot-specs)))
+    (assert-equal 'progn   (first exp))
     (assert-equal 'defclass (first defclass-form))
-    (assert-equal 'point (second defclass-form))))
+    (assert-equal 'point    (second defclass-form))
+    (assert-equal 2         (length slot-specs))
+    (assert-equal :x        (getf (rest first-slot) :initarg))
+    (assert-equal nil       (getf (rest first-slot) :initform))))
 
-(deftest ds-basic-slot-count
-  "Basic defstruct generates correct number of slots in defclass."
-  (let* ((exp (ds-expand '(defstruct point x y)))
-         (defclass-form (second exp))
-         (slot-specs (fourth defclass-form)))
-    (assert-equal 2 (length slot-specs))))
-
-(deftest ds-basic-slot-initarg
-  "Slots get keyword initargs matching their names."
-  (let* ((exp (ds-expand '(defstruct point x y)))
-         (defclass-form (second exp))
-         (slot-specs (fourth defclass-form))
-         (first-slot (first slot-specs)))
-    (assert-equal :x (getf (rest first-slot) :initarg))))
-
-(deftest ds-basic-slot-default
-  "Slots without defaults get nil initform."
-  (let* ((exp (ds-expand '(defstruct point x y)))
-         (defclass-form (second exp))
-         (slot-specs (fourth defclass-form))
-         (first-slot (first slot-specs)))
-    (assert-equal nil (getf (rest first-slot) :initform))))
-
-(deftest ds-basic-constructor-name
-  "Default constructor is MAKE-<name>."
-  (let* ((exp (ds-expand '(defstruct point x y)))
+(deftest ds-basic-constructor
+  "Default constructor is MAKE-<name> and its body calls make-instance."
+  (let* ((exp   (ds-expand '(defstruct point x y)))
          (forms (ds-progn-forms exp))
-         (ctor (second forms)))
-    (assert-equal 'defun (first ctor))
-    (assert-equal (intern "MAKE-POINT") (second ctor))))
-
-(deftest ds-basic-constructor-uses-make-instance
-  "Default constructor body calls make-instance."
-  (let* ((exp (ds-expand '(defstruct point x y)))
-         (forms (ds-progn-forms exp))
-         (ctor (second forms))
-         (body (fourth ctor)))
-    (assert-equal 'make-instance (first body))))
+         (ctor  (second forms))
+         (body  (fourth ctor)))
+    (assert-equal 'defun              (first ctor))
+    (assert-equal (intern "MAKE-POINT") (second ctor))
+    (assert-equal 'make-instance      (first body))))
 
 (deftest ds-basic-predicate
   "Basic defstruct generates a predicate POINT-P."
@@ -99,21 +71,14 @@
 
 ;;; ─── :conc-name option ────────────────────────────────────────────────────
 
-(deftest ds-conc-name-accessor
-  ":conc-name changes accessor prefix."
-  (let* ((exp (ds-expand '(defstruct (point (:conc-name pt-)) x y)))
-         (defclass-form (second exp))
-         (slot-specs (fourth defclass-form))
-         (first-slot (first slot-specs)))
-    (assert-equal (intern "PT-X") (getf (rest first-slot) :accessor))))
-
-(deftest ds-default-conc-name
-  "Default conc-name is NAME- (struct name + hyphen)."
-  (let* ((exp (ds-expand '(defstruct point x)))
-         (defclass-form (second exp))
-         (slot-specs (fourth defclass-form))
-         (first-slot (first slot-specs)))
-    (assert-equal (intern "POINT-X") (getf (rest first-slot) :accessor))))
+(deftest ds-conc-name-behavior
+  "conc-name: custom prefix and default NAME- prefix are applied correctly."
+  (let* ((exp-custom  (ds-expand '(defstruct (point (:conc-name pt-)) x y)))
+         (slot-custom (first (fourth (second exp-custom))))
+         (exp-default (ds-expand '(defstruct point x)))
+         (slot-default (first (fourth (second exp-default)))))
+    (assert-equal (intern "PT-X")    (getf (rest slot-custom)  :accessor))
+    (assert-equal (intern "POINT-X") (getf (rest slot-default) :accessor))))
 
 ;;; ─── :constructor option ──────────────────────────────────────────────────
 

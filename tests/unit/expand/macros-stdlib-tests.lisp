@@ -21,147 +21,98 @@
   (assert-equal (our-macroexpand-1 '(push v lst))
                 '(setf lst (cons v lst))))
 
-(deftest pop-outer-is-let
-  "POP wraps (car place) binding in a LET then (setf place (cdr place))"
-  (let ((result (our-macroexpand-1 '(pop lst))))
-    (assert-eq (car result) 'let)))
+(deftest pop-expansion
+  "POP wraps (car place) in a LET, then (setf place (cdr place)) in the body."
+  (let* ((result     (our-macroexpand-1 '(pop lst)))
+         (setf-form  (caddr result)))
+    (assert-eq  (car result)          'let)
+    (assert-eq  (car setf-form)       'setf)
+    (assert-equal (caddr setf-form)   '(cdr lst))))
 
-(deftest pop-body-contains-setf-cdr
-  "POP body contains (setf lst (cdr lst))"
-  (let* ((result (our-macroexpand-1 '(pop lst)))
-         (setf-form (caddr result)))
-    (assert-eq (car setf-form) 'setf)
-    (assert-equal (caddr setf-form) '(cdr lst))))
-
-(deftest incf-default-delta
-  "(incf x) → (setf x (+ x 1))"
-  (assert-equal (our-macroexpand-1 '(incf x))
-                '(setf x (+ x 1))))
-
-(deftest incf-custom-delta
-  "(incf x 5) → (setf x (+ x 5))"
-  (assert-equal (our-macroexpand-1 '(incf x 5))
-                '(setf x (+ x 5))))
-
-(deftest decf-default-delta
-  "(decf x) → (setf x (- x 1))"
-  (assert-equal (our-macroexpand-1 '(decf x))
-                '(setf x (- x 1))))
-
-(deftest decf-custom-delta
-  "(decf x 3) → (setf x (- x 3))"
-  (assert-equal (our-macroexpand-1 '(decf x 3))
-                '(setf x (- x 3))))
+(deftest-each incf-decf-expansion
+  "incf/decf expand to (setf x (OP x delta))."
+  :cases (("incf-default" '(incf x)   '(setf x (+ x 1)))
+          ("incf-custom"  '(incf x 5) '(setf x (+ x 5)))
+          ("decf-default" '(decf x)   '(setf x (- x 1)))
+          ("decf-custom"  '(decf x 3) '(setf x (- x 3))))
+  (form expected)
+  (assert-equal (our-macroexpand-1 form) expected))
 
 ;;; ── Numeric shorthand ────────────────────────────────────────────────────────
 
-(deftest 1+-expands-to-plus
-  "(1+ n) → (+ n 1)"
-  (assert-equal (our-macroexpand-1 '(1+ n)) '(+ n 1)))
+(deftest-each 1+-1--expansion
+  "1+ and 1- are shorthand for (+ n 1) and (- n 1)."
+  :cases (("1+" '(1+ n) '(+ n 1))
+          ("1-" '(1- n) '(- n 1)))
+  (form expected)
+  (assert-equal (our-macroexpand-1 form) expected))
 
-(deftest 1--expands-to-minus
-  "(1- n) → (- n 1)"
-  (assert-equal (our-macroexpand-1 '(1- n)) '(- n 1)))
-
-(deftest signum-outer-is-let
-  "SIGNUM wraps n in a LET to avoid double evaluation"
-  (let ((result (our-macroexpand-1 '(signum n))))
-    (assert-eq (car result) 'let)))
-
-(deftest signum-body-uses-cond
-  "SIGNUM body dispatches via COND on zerop/plusp"
+(deftest signum-expansion
+  "SIGNUM wraps n in a LET (avoids double evaluation) and dispatches via COND."
   (let* ((result (our-macroexpand-1 '(signum n)))
          (body   (caddr result)))
-    (assert-eq (car body) 'cond)))
+    (assert-eq (car result) 'let)
+    (assert-eq (car body)   'cond)))
 
 ;;; ── RETURN ───────────────────────────────────────────────────────────────────
 
-(deftest return-with-value-to-return-from-nil
-  "(return v) → (return-from nil v)"
-  (assert-equal (our-macroexpand-1 '(return v)) '(return-from nil v)))
-
-(deftest return-no-value-to-return-from-nil
-  "(return) → (return-from nil nil)"
-  (assert-equal (our-macroexpand-1 '(return)) '(return-from nil nil)))
+(deftest-each return-expansion
+  "return expands to (return-from nil ...) with optional value."
+  :cases (("with-value" '(return v)  '(return-from nil v))
+          ("no-value"   '(return)    '(return-from nil nil)))
+  (form expected)
+  (assert-equal (our-macroexpand-1 form) expected))
 
 ;;; ── WITH-SLOTS ───────────────────────────────────────────────────────────────
 
-(deftest with-slots-outer-is-let
-  "WITH-SLOTS wraps instance in a LET then binds slot vars"
-  (let ((result (our-macroexpand-1 '(with-slots (x y) obj body))))
-    (assert-eq (car result) 'let)))
-
-(deftest with-slots-inner-let-binds-slot-value
-  "WITH-SLOTS inner LET binds each slot via SLOT-VALUE"
-  (let* ((result (our-macroexpand-1 '(with-slots (x) obj body)))
-         ;; outer let binds the instance; inner let binds slots
-         (inner-let (caddr result)))
+(deftest with-slots-expansion
+  "WITH-SLOTS: outer LET binds the instance; inner LET binds each slot via SLOT-VALUE."
+  (let* ((result     (our-macroexpand-1 '(with-slots (x) obj body)))
+         (inner-let  (caddr result))
+         (binding    (caadr inner-let)))
+    (assert-eq (car result)    'let)
     (assert-eq (car inner-let) 'let)
-    (let ((binding (caadr inner-let)))
-      (assert-eq (car binding) 'x)
-      (assert-eq (caadr binding) 'slot-value))))
+    (assert-eq (car binding)   'x)
+    (assert-eq (caadr binding) 'slot-value)))
 
 ;;; ── NTH-VALUE ────────────────────────────────────────────────────────────────
 
-(deftest nth-value-outer-is-let
-  "NTH-VALUE binds (multiple-value-list form) in a LET then calls NTH"
-  (let ((result (our-macroexpand-1 '(nth-value 1 form))))
-    (assert-eq (car result) 'let)))
-
-(deftest nth-value-body-is-nth
-  "NTH-VALUE body calls (nth n gensym)"
+(deftest nth-value-expansion
+  "NTH-VALUE binds (multiple-value-list form) in a LET then calls (nth n gensym)."
   (let* ((result (our-macroexpand-1 '(nth-value 1 form)))
          (body   (caddr result)))
-    (assert-eq (car body) 'nth)
-    (assert-equal (cadr body) 1)))
+    (assert-eq    (car result)  'let)
+    (assert-eq    (car body)    'nth)
+    (assert-equal (cadr body)   1)))
 
 ;;; ── DESTRUCTURING-BIND ───────────────────────────────────────────────────────
 
-(deftest destructuring-bind-outer-is-let
-  "DESTRUCTURING-BIND wraps expr in a LET"
-  (let ((result (our-macroexpand-1 '(destructuring-bind (a b) expr body))))
-    (assert-eq (car result) 'let)))
-
-(deftest destructuring-bind-body-is-let*
-  "DESTRUCTURING-BIND inner form is LET* with destructured bindings"
+(deftest destructuring-bind-expansion
+  "DESTRUCTURING-BIND outer form is LET; inner form is LET* with destructured bindings."
   (let* ((result (our-macroexpand-1 '(destructuring-bind (a b) expr body)))
          (inner  (caddr result)))
-    (assert-eq (car inner) 'let*)))
+    (assert-eq (car result) 'let)
+    (assert-eq (car inner)  'let*)))
 
 ;;; ── ASSERT ───────────────────────────────────────────────────────────────────
 
-(deftest assert-basic-expands-to-unless
-  "(assert test) → (unless test (error ...))"
-  (let ((result (our-macroexpand-1 '(assert test))))
-    (assert-eq (car result) 'unless)
-    (assert-equal (cadr result) 'test)))
-
-(deftest assert-body-is-error
-  "(assert test) body is an (error ...) call"
-  (let* ((result (our-macroexpand-1 '(assert test)))
-         (body   (caddr result)))
-    (assert-eq (car body) 'error)))
-
-(deftest assert-with-datum
-  "(assert test () \"msg\") signals that message"
-  (let* ((result (our-macroexpand-1 '(assert test () "bad input")))
-         (body   (caddr result)))
-    (assert-eq (car body) 'error)
-    (assert-equal (cadr body) "bad input")))
+(deftest assert-expansion
+  "ASSERT: outer is UNLESS, body is ERROR; custom datum is passed through."
+  (let* ((basic  (our-macroexpand-1 '(assert test)))
+         (custom (our-macroexpand-1 '(assert test () "bad input"))))
+    (assert-eq    (car  basic)          'unless)
+    (assert-equal (cadr basic)          'test)
+    (assert-eq    (car (caddr basic))   'error)
+    (assert-eq    (car (caddr custom))  'error)
+    (assert-equal (cadr (caddr custom)) "bad input")))
 
 ;;; ── IGNORE-ERRORS ────────────────────────────────────────────────────────────
 
-(deftest ignore-errors-outer-is-handler-case
-  "IGNORE-ERRORS wraps forms in HANDLER-CASE"
-  (let ((result (our-macroexpand-1 '(ignore-errors expr))))
-    (assert-eq (car result) 'handler-case)))
-
-(deftest ignore-errors-catches-error-type
-  "IGNORE-ERRORS handler clause catches ERROR type"
-  ;; expansion: (handler-case (progn expr) (error (evar) nil))
-  ;; caddr is the error clause, not cadddr (only 3 top-level elements)
+(deftest ignore-errors-expansion
+  "IGNORE-ERRORS wraps in HANDLER-CASE with an ERROR handler clause."
   (let* ((result (our-macroexpand-1 '(ignore-errors expr)))
          (clause (caddr result)))
+    (assert-eq (car result) 'handler-case)
     (assert-eq (car clause) 'error)))
 
 ;;; ── CONCATENATE ──────────────────────────────────────────────────────────────
@@ -173,19 +124,15 @@
   (form expected)
   (assert-equal (our-macroexpand-1 form) expected))
 
-(deftest concatenate-two-strings
-  "(concatenate 'string a b) → (string-concat a b)"
+(deftest concatenate-expansion
+  "CONCATENATE: 2-arg → (string-concat a b); 3-arg → left-associative nesting."
   (let ((result (our-macroexpand-1 '(concatenate 'string "a" "b"))))
-    (assert-equal (symbol-name (car result)) "STRING-CONCAT")
-    (assert-equal (cdr result) '("a" "b"))))
-
-(deftest concatenate-three-strings-left-associative
-  "(concatenate 'string a b c) → (string-concat (string-concat a b) c)"
+    (assert-equal "STRING-CONCAT" (symbol-name (car result)))
+    (assert-equal '("a" "b") (cdr result)))
   (let ((result (our-macroexpand-1 '(concatenate 'string "a" "b" "c"))))
-    (assert-equal (symbol-name (car result)) "STRING-CONCAT")
-    ;; inner call is also string-concat
-    (assert-equal (symbol-name (caadr result)) "STRING-CONCAT")
-    (assert-equal (caddr result) "c")))
+    (assert-equal "STRING-CONCAT" (symbol-name (car result)))
+    (assert-equal "STRING-CONCAT" (symbol-name (caadr result)))
+    (assert-equal "c" (caddr result))))
 
 ;;; ── CXR accessors ────────────────────────────────────────────────────────────
 
@@ -225,21 +172,19 @@
          (dolist-form (caddr result)))
     (assert-eq (car dolist-form) 'dolist)))
 
-(deftest every-body-has-block-and-dolist
-  "EVERY body is a BLOCK containing DOLIST with UNLESS return"
-  (let* ((result (our-macroexpand-1 '(every pred lst)))
+(deftest every-short-circuits-on-false
+  "EVERY body is a BLOCK NIL (for short-circuit RETURN); contains DOLIST"
+  (let* ((result     (our-macroexpand-1 '(every pred lst)))
          (block-form (caddr result)))
-    (assert-eq (car block-form) 'block)))
+    (assert-eq (car  block-form) 'block)
+    (assert-eq (second block-form) nil)))
 
-(deftest notany-delegates-to-some
-  "(notany pred lst) → (not (some pred lst))"
-  (assert-equal (our-macroexpand-1 '(notany pred lst))
-                '(not (some pred lst))))
-
-(deftest notevery-delegates-to-every
-  "(notevery pred lst) → (not (every pred lst))"
-  (assert-equal (our-macroexpand-1 '(notevery pred lst))
-                '(not (every pred lst))))
+(deftest-each notany-notevery-negation
+  "notany/notevery are simple (not ...) wrappers around some/every."
+  :cases (("notany"   '(notany   pred lst) '(not (some  pred lst)))
+          ("notevery" '(notevery pred lst) '(not (every pred lst))))
+  (form expected)
+  (assert-equal (our-macroexpand-1 form) expected))
 
 (deftest find-no-keys-is-eql-loop
   "FIND without keyword args generates a fast EQL check loop"
@@ -263,223 +208,138 @@
 
 ;;; ── ROTATEF ──────────────────────────────────────────────────────────────────
 
-(deftest rotatef-outer-is-let
-  "ROTATEF wraps swap in a LET binding a temp variable"
-  (let ((result (our-macroexpand-1 '(rotatef a b))))
-    (assert-eq (car result) 'let)))
+(deftest rotatef-expansion
+  "ROTATEF: outer LET binds a temp; body sets A to B via SETQ; returns NIL."
+  (let* ((result    (our-macroexpand-1 '(rotatef a b)))
+         (setq-form (second (cdr result)))
+         (forms     (cddr result)))
+    (assert-eq  (car result)            'let)
+    (assert-eq  (car setq-form)         'setq)
+    (assert-eq  (second setq-form)      'a)
+    (assert-eq  (third setq-form)       'b)
+    (assert-eq  (car (last forms))      nil)))
 
-(deftest rotatef-body-contains-setq-of-a
-  "ROTATEF second form sets A to B"
-  (let* ((result (our-macroexpand-1 '(rotatef a b)))
-         (setq-form (second (cdr result))))
-    (assert-eq (car setq-form) 'setq)
-    (assert-eq (second setq-form) 'a)
-    (assert-eq (third setq-form) 'b)))
+;;; ── ECASE / ETYPECASE ────────────────────────────────────────────────────────
 
-(deftest rotatef-returns-nil
-  "ROTATEF result form is NIL (last body form)"
-  (let* ((result (our-macroexpand-1 '(rotatef a b)))
-         (forms (cddr result)))
-    (assert-eq (car (last forms)) nil)))
+(deftest-each exhaustive-case-outer-is-let
+  "ECASE and ETYPECASE wrap keyform in a LET to avoid double evaluation."
+  :cases (("ecase"     '(ecase x (1 :one) (2 :two)))
+          ("etypecase" '(etypecase x (integer 1) (string 2))))
+  (form)
+  (assert-eq (car (our-macroexpand-1 form)) 'let))
 
-;;; ── ECASE ────────────────────────────────────────────────────────────────────
+(deftest-each exhaustive-case-inner-form
+  "ECASE body is CASE; ETYPECASE body is TYPECASE."
+  :cases (("ecase"     '(ecase x (1 :one) (2 :two))     'case)
+          ("etypecase" '(etypecase x (integer 1))        'typecase))
+  (form inner-head)
+  (let* ((result (our-macroexpand-1 form))
+         (body   (caddr result)))
+    (assert-eq (car body) inner-head)))
 
-(deftest ecase-outer-is-let
-  "ECASE wraps keyform in a LET to avoid double evaluation"
-  (let ((result (our-macroexpand-1 '(ecase x (1 :one) (2 :two)))))
-    (assert-eq (car result) 'let)))
-
-(deftest ecase-body-is-case
-  "ECASE body is a CASE form"
-  (let* ((result (our-macroexpand-1 '(ecase x (1 :one) (2 :two))))
-         (body (caddr result)))
-    (assert-eq (car body) 'case)))
-
-(deftest ecase-has-otherwise-error-clause
-  "ECASE appends an OTHERWISE error clause to the user's cases"
-  (let* ((result (our-macroexpand-1 '(ecase x (:a 1))))
-         (case-form (caddr result))
-         (last-clause (car (last (cddr case-form)))))
-    (assert-eq (car last-clause) 'otherwise)))
-
-;;; ── ETYPECASE ────────────────────────────────────────────────────────────────
-
-(deftest etypecase-outer-is-let
-  "ETYPECASE wraps keyform in a LET"
-  (let ((result (our-macroexpand-1 '(etypecase x (integer 1) (string 2)))))
-    (assert-eq (car result) 'let)))
-
-(deftest etypecase-body-is-typecase
-  "ETYPECASE body is a TYPECASE form"
-  (let* ((result (our-macroexpand-1 '(etypecase x (integer 1))))
-         (body (caddr result)))
-    (assert-eq (car body) 'typecase)))
-
-(deftest etypecase-has-otherwise-error-clause
-  "ETYPECASE appends an OTHERWISE error clause"
-  (let* ((result (our-macroexpand-1 '(etypecase x (integer 1))))
-         (typecase-form (caddr result))
-         (last-clause (car (last (cddr typecase-form)))))
+(deftest-each exhaustive-case-has-otherwise-clause
+  "ECASE and ETYPECASE append an OTHERWISE error clause."
+  :cases (("ecase"     '(ecase x (:a 1))         'case)
+          ("etypecase" '(etypecase x (integer 1)) 'typecase))
+  (form inner-head)
+  (let* ((result      (our-macroexpand-1 form))
+         (inner-form  (caddr result))
+         (last-clause (car (last (cddr inner-form)))))
+    (assert-eq (car inner-form) inner-head)
     (assert-eq (car last-clause) 'otherwise)))
 
 ;;; ── PSETF ────────────────────────────────────────────────────────────────────
 
-(deftest psetf-outer-is-let
-  "PSETF evaluates all new values before assigning — outer form is LET"
-  (let ((result (our-macroexpand-1 '(psetf a 1 b 2))))
-    (assert-eq (car result) 'let)))
-
-(deftest psetf-binds-two-temps
-  "PSETF for two pairs binds two temporary variables"
-  (let* ((result (our-macroexpand-1 '(psetf a 1 b 2)))
-         (bindings (second result)))
-    (assert-= (length bindings) 2)))
-
-(deftest psetf-returns-nil
-  "PSETF last form is NIL"
-  (let* ((result (our-macroexpand-1 '(psetf a 1)))
-         (forms (cddr result)))
-    (assert-eq (car (last forms)) nil)))
+(deftest psetf-expansion
+  "PSETF: outer LET evaluates all new values before assigning; returns NIL."
+  (let* ((result2   (our-macroexpand-1 '(psetf a 1 b 2)))
+         (result1   (our-macroexpand-1 '(psetf a 1)))
+         (bindings  (second result2))
+         (forms     (cddr result1)))
+    (assert-eq (car result2)          'let)
+    (assert-=  (length bindings)      2)
+    (assert-eq (car (last forms))     nil)))
 
 ;;; ── SHIFTF ───────────────────────────────────────────────────────────────────
 
-(deftest shiftf-outer-is-let
-  "SHIFTF saves old values in a LET before shifting"
-  (let ((result (our-macroexpand-1 '(shiftf a b 99))))
-    (assert-eq (car result) 'let)))
-
-(deftest shiftf-binds-one-temp-per-place
-  "SHIFTF binds one temp per place — (shiftf a b 99) has 2 places → 2 temps"
-  (let* ((result (our-macroexpand-1 '(shiftf a b 99)))
-         (bindings (second result)))
-    (assert-= (length bindings) 2)))
-
-(deftest shiftf-returns-first-old-value
-  "SHIFTF last form is the temp holding old value of first place"
-  (let* ((result (our-macroexpand-1 '(shiftf a b 99)))
-         (forms (cddr result))
-         (ret (car (last forms))))
-    ;; ret must be a symbol (the gensym for old a)
+(deftest shiftf-expansion
+  "SHIFTF: outer LET saves old values; one temp per place; returns first old value."
+  (let* ((result   (our-macroexpand-1 '(shiftf a b 99)))
+         (bindings (second result))
+         (forms    (cddr result))
+         (ret      (car (last forms))))
+    (assert-eq (car result)     'let)
+    (assert-=  (length bindings) 2)
     (assert-true (symbolp ret))))
 
 ;;; ── PROG / PROG* ─────────────────────────────────────────────────────────────
 
-(deftest prog-outer-is-block
-  "PROG wraps body in BLOCK NIL"
-  (let ((result (our-macroexpand-1 '(prog (x y) (setq x 1)))))
-    (assert-eq (car result) 'block)
+(deftest-each prog-prog*-outer-is-block
+  "PROG and PROG* both wrap their body in BLOCK NIL."
+  :cases (("prog"  '(prog  (x y)       (setq x 1)))
+          ("prog*" '(prog* ((x 1) (y x)) y)))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
+    (assert-eq (car result)    'block)
     (assert-eq (second result) nil)))
 
-(deftest prog-body-is-let-tagbody
-  "PROG body is (let vars (tagbody ...))"
-  (let* ((result (our-macroexpand-1 '(prog (x) :tag (setq x 1))))
+(deftest-each prog-inner-binding-form
+  "PROG inner form is LET (parallel); PROG* inner form is LET* (sequential)."
+  :cases (("prog"  '(prog  (x) :tag (setq x 1)) 'let)
+          ("prog*" '(prog* ((x 1)) x)           'let*))
+  (form let-head)
+  (let* ((result   (our-macroexpand-1 form))
          (let-form (third result)))
-    (assert-eq (car let-form) 'let)))
-
-(deftest prog*-outer-is-block
-  "PROG* wraps body in BLOCK NIL"
-  (let ((result (our-macroexpand-1 '(prog* ((x 1) (y x)) y))))
-    (assert-eq (car result) 'block)
-    (assert-eq (second result) nil)))
-
-(deftest prog*-body-is-let*-tagbody
-  "PROG* uses LET* for sequential bindings"
-  (let* ((result (our-macroexpand-1 '(prog* ((x 1)) x)))
-         (let-form (third result)))
-    (assert-eq (car let-form) 'let*)))
+    (assert-eq (car let-form) let-head)))
 
 ;;; ── MAPC ─────────────────────────────────────────────────────────────────────
 
-(deftest mapc-outer-is-let
-  "MAPC binds fn and list in a LET before dolist"
-  (let ((result (our-macroexpand-1 '(mapc fn lst))))
-    (assert-eq (car result) 'let)))
-
-(deftest mapc-returns-original-list
-  "MAPC returns the original list (dolist result form is the list binding)"
-  (let* ((result (our-macroexpand-1 '(mapc fn lst)))
-         (bindings (second result))
-         ;; lst binding is second in the LET
-         (lst-binding (second bindings))
-         (lst-var (first lst-binding))
-         ;; dolist form in body: (dolist (x lst-var lst-var) body...)
-         ;; the result is the third element of the dolist var-spec
+(deftest mapc-expansion
+  "MAPC binds fn and list in a LET; DOLIST result form is the original list."
+  (let* ((result      (our-macroexpand-1 '(mapc fn lst)))
+         (bindings    (second result))
+         (lst-var     (first (second bindings)))
          (dolist-form (caddr result))
-         (dolist-result (third (second dolist-form))))
-    (assert-eq dolist-result lst-var)))
+         (dolist-ret  (third (second dolist-form))))
+    (assert-eq (car result)  'let)
+    (assert-eq dolist-ret    lst-var)))
 
-;;; ── FIND-IF ──────────────────────────────────────────────────────────────────
+;;; ── FIND-IF / COUNT-IF / REMOVE-DUPLICATES ───────────────────────────────────
 
-(deftest find-if-outer-is-let
-  "FIND-IF binds pred in a LET before the search loop"
-  (let ((result (our-macroexpand-1 '(find-if pred lst))))
-    (assert-eq (car result) 'let)))
+(deftest-each list-scan-macro-outer-is-let
+  "Predicate-based list-scan macros all expand to a LET."
+  :cases (("find-if"           '(find-if pred lst))
+          ("count-if"          '(count-if pred lst))
+          ("remove-duplicates" '(remove-duplicates lst)))
+  (form)
+  (assert-eq (car (our-macroexpand-1 form)) 'let))
 
-(deftest find-if-body-is-block
-  "FIND-IF body is a BLOCK (for early return)"
-  (let* ((result (our-macroexpand-1 '(find-if pred lst)))
-         (body (caddr result)))
-    (assert-eq (car body) 'block)))
+(deftest-each list-scan-macro-body-type
+  "Predicate-based list-scan macros have their expected inner control form."
+  :cases (("find-if"           '(find-if pred lst)      'block)
+          ("count-if"          '(count-if pred lst)     'dolist)
+          ("remove-duplicates" '(remove-duplicates lst) 'dolist))
+  (form body-type)
+  (assert-eq body-type (car (caddr (our-macroexpand-1 form)))))
 
-;;; ── COUNT-IF ─────────────────────────────────────────────────────────────────
+;;; ── Set operations ───────────────────────────────────────────────────────────
 
-(deftest count-if-outer-is-let
-  "COUNT-IF binds fn and counter in a LET"
-  (let ((result (our-macroexpand-1 '(count-if pred lst))))
-    (assert-eq (car result) 'let)))
-
-(deftest count-if-body-is-dolist
-  "COUNT-IF body is a DOLIST incrementing a counter"
-  (let* ((result (our-macroexpand-1 '(count-if pred lst)))
-         (body (caddr result)))
-    (assert-eq (car body) 'dolist)))
-
-;;; ── REMOVE-DUPLICATES ────────────────────────────────────────────────────────
-
-(deftest remove-duplicates-outer-is-let
-  "REMOVE-DUPLICATES accumulates unique items in a LET-bound list"
-  (let ((result (our-macroexpand-1 '(remove-duplicates lst))))
-    (assert-eq (car result) 'let)))
-
-(deftest remove-duplicates-body-is-dolist
-  "REMOVE-DUPLICATES iterates with DOLIST, checking MEMBER before adding"
-  (let* ((result (our-macroexpand-1 '(remove-duplicates lst)))
-         (body (caddr result)))
-    (assert-eq (car body) 'dolist)))
-
-;;; ── UNION ────────────────────────────────────────────────────────────────────
-
-(deftest union-outer-is-let
-  "UNION binds both lists and accumulator in a LET"
-  (let ((result (our-macroexpand-1 '(union l1 l2))))
-    (assert-eq (car result) 'let)))
+(deftest-each set-op-outer-is-let
+  "Set-operation macros all wrap their work in a LET."
+  :cases (("union"          '(union l1 l2))
+          ("set-difference" '(set-difference l1 l2))
+          ("intersection"   '(intersection l1 l2))
+          ("subsetp"        '(subsetp l1 l2))
+          ("adjoin"         '(adjoin item lst))
+          ("pairlis"        '(pairlis ks ds)))
+  (form)
+  (assert-eq (car (our-macroexpand-1 form)) 'let))
 
 (deftest union-binds-three-vars
   "UNION binds l1, l2, and acc — three bindings"
   (let* ((result (our-macroexpand-1 '(union l1 l2)))
          (bindings (second result)))
     (assert-= (length bindings) 3)))
-
-;;; ── SET-DIFFERENCE ───────────────────────────────────────────────────────────
-
-(deftest set-difference-outer-is-let
-  "SET-DIFFERENCE binds l2 and acc in a LET"
-  (let ((result (our-macroexpand-1 '(set-difference l1 l2))))
-    (assert-eq (car result) 'let)))
-
-;;; ── INTERSECTION ─────────────────────────────────────────────────────────────
-
-(deftest intersection-outer-is-let
-  "INTERSECTION binds l2 and acc in a LET"
-  (let ((result (our-macroexpand-1 '(intersection l1 l2))))
-    (assert-eq (car result) 'let)))
-
-;;; ── SUBSETP ──────────────────────────────────────────────────────────────────
-
-(deftest subsetp-outer-is-let
-  "SUBSETP binds l2 in a LET then uses EVERY+MEMBER"
-  (let ((result (our-macroexpand-1 '(subsetp l1 l2))))
-    (assert-eq (car result) 'let)))
 
 (deftest subsetp-body-is-every
   "SUBSETP body calls EVERY with a MEMBER predicate"
@@ -488,11 +348,6 @@
     (assert-eq (car body) 'every)))
 
 ;;; ── ADJOIN ───────────────────────────────────────────────────────────────────
-
-(deftest adjoin-outer-is-let
-  "ADJOIN binds item and list in a LET to avoid double evaluation"
-  (let ((result (our-macroexpand-1 '(adjoin item lst))))
-    (assert-eq (car result) 'let)))
 
 (deftest adjoin-body-is-if-member
   "ADJOIN body is (if (member ...) lst (cons item lst))"
@@ -503,585 +358,172 @@
 
 ;;; ── RASSOC ───────────────────────────────────────────────────────────────────
 
-(deftest rassoc-outer-is-let
-  "RASSOC binds item in a LET before the search loop"
-  (let ((result (our-macroexpand-1 '(rassoc item alist))))
-    (assert-eq (car result) 'let)))
-
-(deftest rassoc-body-is-block
-  "RASSOC body is a BLOCK for early return"
-  (let* ((result (our-macroexpand-1 '(rassoc item alist)))
-         (body (caddr result)))
-    (assert-eq (car body) 'block)))
-
-(deftest rassoc-checks-cdr
-  "RASSOC dolist body checks (eql item (cdr pair)) — cdr is nested in the eql call"
-  (let* ((result (our-macroexpand-1 '(rassoc item alist)))
-         (block-body (caddr result))
-         ;; block-body = (block nil (dolist ...))
+(deftest rassoc-expansion
+  "RASSOC: outer LET + BLOCK; dolist body checks (eql item (cdr pair))."
+  (let* ((result      (our-macroexpand-1 '(rassoc item alist)))
+         (block-body  (caddr result))
          (dolist-form (third block-body))
-         ;; dolist-form = (dolist (x alist nil) (when (and ...) ...))
-         (when-form (second (cdr dolist-form)))
-         ;; when-form = (when (and (consp x) (eql item-var (cdr x))) ...)
-         (and-form (second when-form))
-         ;; and-form = (and (consp x) (eql item-var (cdr x)))
-         (eql-check (third and-form))
-         ;; eql-check = (eql item-var (cdr x))
-         ;; third arg of eql is (cdr x)
-         (cdr-form (third eql-check)))
-    (assert-eq (car cdr-form) 'cdr)))
+         (when-form   (second (cdr dolist-form)))
+         (and-form    (second when-form))
+         (eql-check   (third and-form))
+         (cdr-form    (third eql-check)))
+    (assert-eq 'let (car result))
+    (assert-eq 'block (car block-body))
+    (assert-eq 'cdr (car cdr-form))))
 
 ;;; ── SORT ─────────────────────────────────────────────────────────────────────
 
-(deftest sort-outer-is-let
-  "SORT outer form is LET binding the predicate"
-  (let ((result (our-macroexpand-1 '(sort lst pred))))
-    (assert-eq (car result) 'let)))
-
-(deftest sort-body-uses-labels
-  "SORT defines merge-sort helpers via LABELS"
-  (let* ((result (our-macroexpand-1 '(sort lst pred)))
-         (body (caddr result)))
-    (assert-eq (car body) 'labels)))
-
-(deftest sort-labels-has-three-helpers
-  "SORT LABELS defines take-n, merge, and msort (3 helpers)"
-  (let* ((result (our-macroexpand-1 '(sort lst pred)))
-         (bindings (cadr (caddr result))))
-    (assert-= (length bindings) 3)))
+(deftest sort-expansion
+  "SORT outer LET binds the predicate; body is LABELS defining 3 merge-sort helpers."
+  (let* ((result   (our-macroexpand-1 '(sort lst pred)))
+         (body     (caddr result))
+         (bindings (cadr body)))
+    (assert-eq (car result) 'let)
+    (assert-eq (car body)   'labels)
+    (assert-=  (length bindings) 3)))
 
 ;;; ── REMOVE ───────────────────────────────────────────────────────────────────
 
-(deftest remove-outer-is-let
-  "REMOVE outer form is LET binding the item and acc"
-  (let ((result (our-macroexpand-1 '(remove x lst))))
-    (assert-eq (car result) 'let)))
-
-(deftest remove-body-contains-dolist
-  "REMOVE body iterates with DOLIST and filters with UNLESS+EQL"
-  (let* ((result (our-macroexpand-1 '(remove x lst)))
-         (dolist-form (caddr result)))  ; (let (bindings) (dolist ...)) → body is 3rd
-    (assert-eq (car dolist-form) 'dolist)))
-
-(deftest remove-result-is-nreverse
-  "REMOVE result form in DOLIST is (nreverse acc)"
-  (let* ((result (our-macroexpand-1 '(remove x lst)))
-         (dolist-form (caddr result))            ; (dolist (var lst result-form) body...)
-         (result-form (third (second dolist-form)))) ; 3rd of (var lst result-form)
+(deftest remove-expansion
+  "REMOVE: outer LET binds item and acc; body is DOLIST; result is (nreverse acc)."
+  (let* ((result      (our-macroexpand-1 '(remove x lst)))
+         (dolist-form (caddr result))
+         (result-form (third (second dolist-form))))
+    (assert-eq    (car result)      'let)
+    (assert-eq    (car dolist-form) 'dolist)
     (assert-equal (symbol-name (car result-form)) "NREVERSE")))
 
 ;;; ── WITH-ACCESSORS ───────────────────────────────────────────────────────────
 
 (deftest with-accessors-outer-is-let
   "WITH-ACCESSORS outer form is LET binding the instance"
-  (let ((result (our-macroexpand-1 '(with-accessors ((x acc-x) (y acc-y)) obj body))))
+  (let ((result (our-macroexpand-1 '(with-accessors ((x acc-x)) obj body))))
     (assert-eq (car result) 'let)))
-
-(deftest with-accessors-inner-binds-accessor-calls
-  "WITH-ACCESSORS inner LET binds each var to its accessor applied to the instance"
-  (let* ((result (our-macroexpand-1 '(with-accessors ((x acc-x)) obj body)))
-         (inner-let (caddr result))
-         (bindings (second inner-let))
-         (first-binding (first bindings)))
-    ;; first-binding is (x (acc-x inst-var))
-    (assert-eq (car first-binding) 'x)
-    (assert-eq (caar (cdr first-binding)) 'acc-x)))
 
 ;;; ── DEFINE-MODIFY-MACRO ──────────────────────────────────────────────────────
 
-(deftest define-modify-macro-generates-our-defmacro
-  "DEFINE-MODIFY-MACRO expands to an OUR-DEFMACRO form"
-  (let ((result (our-macroexpand-1 '(define-modify-macro my-incf (&optional (n 1)) +))))
-    ;; Check by symbol-name to avoid cross-package eq failure
-    (assert-equal (symbol-name (car result)) "OUR-DEFMACRO")
-    (assert-equal (symbol-name (second result)) "MY-INCF")))
-
-(deftest define-modify-macro-body-uses-setf
-  "DEFINE-MODIFY-MACRO body has (setf place (fn place args...))"
-  (let* ((result (our-macroexpand-1 '(define-modify-macro my-incf (&optional (n 1)) +)))
-         ;; result = (our-defmacro my-incf (place-var &optional (n 1)) `(setf ...))
-         (body (cdddr result))
+(deftest define-modify-macro-expansion
+  "DEFINE-MODIFY-MACRO: expands to OUR-DEFMACRO with correct name and a cons body template."
+  (let* ((result   (our-macroexpand-1 '(define-modify-macro my-incf (&optional (n 1)) +)))
+         (body     (cdddr result))
          (template (car body)))
-    ;; template is a backquoted form; the backquote-expanded car is setf
+    (assert-equal "OUR-DEFMACRO" (symbol-name (car result)))
+    (assert-equal "MY-INCF" (symbol-name (second result)))
     (assert-true (consp template))))
 
 ;;; ── DEFINE-CONDITION ─────────────────────────────────────────────────────────
 
 (deftest define-condition-expands-to-defclass
-  "DEFINE-CONDITION expands to a DEFCLASS form"
+  "DEFINE-CONDITION expands to a DEFCLASS form with the given name."
   (let ((result (our-macroexpand-1 '(define-condition my-error (error) ()))))
-    (assert-eq (car result) 'defclass)
-    (assert-eq (second result) 'my-error)))
+    (assert-eq    (car result)    'defclass)
+    (assert-eq    (second result) 'my-error)))
 
-(deftest define-condition-no-parents-uses-error
-  "DEFINE-CONDITION with empty parent list defaults to (error)"
-  (let* ((result (our-macroexpand-1 '(define-condition my-err () ())))
-         (parents (third result)))
-    (assert-equal parents '(error))))
-
-(deftest define-condition-explicit-parent
-  "DEFINE-CONDITION with explicit parent passes it through"
-  (let* ((result (our-macroexpand-1 '(define-condition my-type-err (type-error) ())))
-         (parents (third result)))
-    (assert-equal parents '(type-error))))
+(deftest-each define-condition-parent-list
+  "DEFINE-CONDITION: empty parents default to (error); explicit parents pass through."
+  :cases (("default-parent"   '(define-condition my-err () ())           '(error))
+          ("explicit-parent"  '(define-condition my-type-err (type-error) ()) '(type-error)))
+  (form expected-parents)
+  (let ((parents (third (our-macroexpand-1 form))))
+    (assert-equal parents expected-parents)))
 
 ;;; ── HANDLER-BIND ─────────────────────────────────────────────────────────────
 
-(deftest handler-bind-no-bindings-is-progn
-  "HANDLER-BIND with empty bindings expands to PROGN body"
-  (let ((result (our-macroexpand-1 '(handler-bind () body))))
-    (assert-eq (car result) 'progn)))
-
-(deftest handler-bind-one-binding-is-handler-case
-  "HANDLER-BIND with one binding wraps in HANDLER-CASE"
-  (let ((result (our-macroexpand-1 '(handler-bind ((error #'my-handler)) body))))
-    (assert-eq (car result) 'handler-case)))
+(deftest-each handler-bind-expansion
+  "HANDLER-BIND: empty bindings → PROGN; one binding → HANDLER-CASE."
+  :cases (("no-bindings"   '(handler-bind () body)                      'progn)
+          ("one-binding"   '(handler-bind ((error #'my-handler)) body)  'handler-case))
+  (form expected-head)
+  (assert-eq (car (our-macroexpand-1 form)) expected-head))
 
 ;;; ── RESTART-CASE ─────────────────────────────────────────────────────────────
 
-(deftest restart-case-no-clauses-is-form
-  "RESTART-CASE with no clauses returns the form unchanged"
-  (let ((result (our-macroexpand-1 '(restart-case (do-stuff)))))
-    (assert-equal result '(do-stuff))))
-
-(deftest restart-case-with-clause-is-handler-case
-  "RESTART-CASE with a clause wraps in HANDLER-CASE"
-  (let ((result (our-macroexpand-1 '(restart-case (do-stuff) (my-restart () ok)))))
-    (assert-eq (car result) 'handler-case)))
+(deftest-each restart-case-expansion
+  "RESTART-CASE: no clauses → form unchanged; with clause → HANDLER-CASE."
+  :cases (("no-clauses"    '(restart-case (do-stuff))                       '(do-stuff))
+          ("with-clause"   '(restart-case (do-stuff) (my-restart () ok))    nil))
+  (form expected-or-nil)
+  (let ((result (our-macroexpand-1 form)))
+    (if expected-or-nil
+        (assert-equal result expected-or-nil)
+        (assert-eq (car result) 'handler-case))))
 
 ;;; ── ISQRT ────────────────────────────────────────────────────────────────────
 
 (deftest isqrt-expands-to-floor-sqrt
   "ISQRT expands to (floor (sqrt (float n)))"
   (let ((result (our-macroexpand-1 '(isqrt n))))
-    (assert-eq (car result) 'floor)
+    (assert-eq (car result)      'floor)
     (assert-eq (caar (cdr result)) 'sqrt)))
 
 ;;; ── WITH-OPEN-STREAM ─────────────────────────────────────────────────────────
 
-(deftest with-open-stream-outer-is-let
-  "WITH-OPEN-STREAM outer form is LET binding the stream variable"
-  (let ((result (our-macroexpand-1 '(with-open-stream (s (open f)) body))))
-    (assert-eq (car result) 'let)))
-
-(deftest with-open-stream-body-is-unwind-protect
-  "WITH-OPEN-STREAM body uses UNWIND-PROTECT to ensure CLOSE"
-  (let* ((result (our-macroexpand-1 '(with-open-stream (s (open f)) body)))
+(deftest with-open-stream-expansion
+  "WITH-OPEN-STREAM: outer LET binds the stream; body is UNWIND-PROTECT to ensure CLOSE."
+  (let* ((result    (our-macroexpand-1 '(with-open-stream (s (open f)) body)))
          (body-form (caddr result)))
+    (assert-eq (car result)    'let)
     (assert-eq (car body-form) 'unwind-protect)))
 
-;;; ── PUSH / POP ───────────────────────────────────────────────────────────────
-
-(deftest push-expands-to-setf-cons
-  "PUSH expands to (setf place (cons value place))"
-  (let ((result (our-macroexpand-1 '(push x lst))))
-    (assert-eq (car result) 'setf)
-    (assert-eq (car (caddr result)) 'cons)))
-
-(deftest pop-outer-is-let
-  "POP expands to LET capturing the car, then SETF to advance"
-  (let ((result (our-macroexpand-1 '(pop lst))))
-    (assert-eq (car result) 'let)))
-
-;;; ── INCF / DECF ──────────────────────────────────────────────────────────────
-
-(deftest incf-expands-to-setf-plus
-  "INCF expands to (setf place (+ place delta))"
-  (let* ((result (our-macroexpand-1 '(incf x)))
-         (rhs (caddr result)))         ; (setf x (+ x delta))
-    (assert-eq (car result) 'setf)
-    (assert-eq (car rhs) '+)))
-
-(deftest decf-expands-to-setf-minus
-  "DECF expands to (setf place (- place delta))"
-  (let* ((result (our-macroexpand-1 '(decf x)))
-         (rhs (caddr result)))
-    (assert-eq (car result) 'setf)
-    (assert-eq (car rhs) '-)))
-
-;;; ── 1+ / 1- ──────────────────────────────────────────────────────────────────
-
-(deftest 1+-expands-to-plus-1
-  "1+ expands to (+ n 1)"
-  (let ((result (our-macroexpand-1 '(1+ x))))
-    (assert-eq (car result) '+)
-    (assert-= (third result) 1)))
-
-(deftest 1--expands-to-minus-1
-  "1- expands to (- n 1)"
-  (let ((result (our-macroexpand-1 '(1- x))))
-    (assert-eq (car result) '-)
-    (assert-= (third result) 1)))
-
-;;; ── RETURN ───────────────────────────────────────────────────────────────────
-
-(deftest return-expands-to-return-from-nil
-  "RETURN expands to (return-from nil value)"
-  (let ((result (our-macroexpand-1 '(return 42))))
-    (assert-eq (car result) 'return-from)
-    (assert-eq (second result) nil)))
-
-;;; ── ROTATEF ──────────────────────────────────────────────────────────────────
-
-(deftest rotatef-outer-is-let
-  "ROTATEF expands to LET capturing the first value, then SETQs"
-  (let ((result (our-macroexpand-1 '(rotatef a b))))
-    (assert-eq (car result) 'let)))
-
-(deftest rotatef-returns-nil
-  "ROTATEF body ends with NIL (per ANSI spec)"
-  (let* ((result (our-macroexpand-1 '(rotatef a b)))
-         (last-form (car (last (cddr result)))))
-    (assert-eq last-form nil)))
-
-;;; ── PROG / PROG* ─────────────────────────────────────────────────────────────
-
-(deftest prog-outer-is-block-nil
-  "PROG outer form is (BLOCK NIL ...)"
-  (let ((result (our-macroexpand-1 '(prog (x) (setq x 1)))))
-    (assert-eq (car result) 'block)
-    (assert-eq (second result) nil)))
-
-(deftest prog-body-is-let-with-tagbody
-  "PROG inner is LET with TAGBODY inside"
-  (let* ((result  (our-macroexpand-1 '(prog (x) tag1 body1)))
-         (let-form (third result)))
-    (assert-eq (car let-form) 'let)
-    (assert-eq (car (caddr let-form)) 'tagbody)))
-
-(deftest prog*-uses-let*
-  "PROG* uses LET* for sequential bindings (unlike PROG which uses LET)"
-  (let* ((result (our-macroexpand-1 '(prog* ((x 1) (y x)) body)))
-         (let*-form (third result)))
-    (assert-eq (car let*-form) 'let*)))
-
-;;; ── NTH-VALUE ────────────────────────────────────────────────────────────────
-
-(deftest nth-value-outer-is-let
-  "NTH-VALUE expands to LET binding multiple-value-list result"
-  (let ((result (our-macroexpand-1 '(nth-value 0 (floor 7 2)))))
-    (assert-eq (car result) 'let)))
-
-(deftest nth-value-body-calls-nth
-  "NTH-VALUE body calls NTH to extract the desired position"
-  (let* ((result (our-macroexpand-1 '(nth-value 0 (floor 7 2))))
-         (nth-form (caddr result)))
-    (assert-eq (car nth-form) 'nth)))
-
-;;; ── ECASE / ETYPECASE ────────────────────────────────────────────────────────
-
-(deftest ecase-outer-is-let
-  "ECASE wraps keyform in LET to avoid double evaluation"
-  (let ((result (our-macroexpand-1 '(ecase x (1 :one) (2 :two)))))
-    (assert-eq (car result) 'let)))
-
-(deftest ecase-body-is-case-with-otherwise-error
-  "ECASE body is CASE with an OTHERWISE clause that signals ERROR"
-  (let* ((result (our-macroexpand-1 '(ecase x (1 :one))))
-         (case-form (caddr result))
-         (otherwise (car (last case-form))))
-    (assert-eq (car case-form) 'case)
-    (assert-eq (car otherwise) 'otherwise)))
-
-(deftest etypecase-body-is-typecase
-  "ETYPECASE body is TYPECASE with OTHERWISE error clause"
-  (let* ((result (our-macroexpand-1 '(etypecase x (integer :int))))
-         (tc-form (caddr result)))
-    (assert-eq (car tc-form) 'typecase)))
-
-;;; ── EVERY / SOME / NOTANY / NOTEVERY ────────────────────────────────────────
-
-(deftest every-outer-is-let
-  "EVERY expands to LET binding the predicate, uses BLOCK+DOLIST"
-  (let ((result (our-macroexpand-1 '(every #'oddp lst))))
-    (assert-eq (car result) 'let)))
-
-(deftest every-short-circuits-on-false
-  "EVERY body contains BLOCK NIL for short-circuit RETURN"
-  (let* ((result (our-macroexpand-1 '(every #'oddp lst)))
-         (block-form (caddr result)))
-    (assert-eq (car block-form) 'block)
-    (assert-eq (second block-form) nil)))
-
-(deftest some-outer-is-let
-  "SOME expands to LET binding the predicate"
-  (let ((result (our-macroexpand-1 '(some #'oddp lst))))
-    (assert-eq (car result) 'let)))
-
-(deftest notany-delegates-to-not-some
-  "NOTANY expands to (NOT (SOME pred list))"
-  (let ((result (our-macroexpand-1 '(notany #'oddp lst))))
-    (assert-eq (car result) 'not)
-    (assert-equal (symbol-name (caadr result)) "SOME")))
-
-(deftest notevery-delegates-to-not-every
-  "NOTEVERY expands to (NOT (EVERY pred list))"
-  (let ((result (our-macroexpand-1 '(notevery #'oddp lst))))
-    (assert-eq (car result) 'not)
-    (assert-equal (symbol-name (caadr result)) "EVERY")))
-
-;;; ── MAPCAR / MAPC / MAPCAN ───────────────────────────────────────────────────
-
-(deftest mapcar-outer-is-let
-  "MAPCAR expands to LET binding fn and accumulator, uses DOLIST+NREVERSE"
-  (let ((result (our-macroexpand-1 '(mapcar #'1+ lst))))
-    (assert-eq (car result) 'let)))
-
-(deftest mapc-outer-is-let
-  "MAPC expands to LET binding fn and the original list for return"
-  (let ((result (our-macroexpand-1 '(mapc #'print lst))))
-    (assert-eq (car result) 'let)))
-
-(deftest mapcan-outer-is-let
-  "MAPCAN expands to LET binding fn and accumulator, uses NCONC"
-  (let ((result (our-macroexpand-1 '(mapcan #'list lst))))
-    (assert-eq (car result) 'let)))
-
-;;; ── FIND / FIND-IF / POSITION / COUNT / COUNT-IF ────────────────────────────
-
-(deftest find-no-keys-outer-is-let
-  "FIND without key/test args binds item-var, uses BLOCK+DOLIST+EQL"
-  (let ((result (our-macroexpand-1 '(find x lst))))
-    (assert-eq (car result) 'let)))
-
-(deftest find-no-keys-body-uses-block
-  "FIND without key args has BLOCK NIL for early RETURN"
-  (let* ((result (our-macroexpand-1 '(find x lst)))
-         (block-form (caddr result)))
-    (assert-eq (car block-form) 'block)))
-
-(deftest find-if-outer-is-let
-  "FIND-IF expands to LET binding predicate, uses BLOCK+DOLIST"
-  (let ((result (our-macroexpand-1 '(find-if #'oddp lst))))
-    (assert-eq (car result) 'let)))
-
-(deftest position-outer-is-let
-  "POSITION expands to LET binding item and index counter"
-  (let ((result (our-macroexpand-1 '(position x lst))))
-    (assert-eq (car result) 'let)))
-
-(deftest count-outer-is-let
-  "COUNT expands to LET binding item and count accumulator"
-  (let ((result (our-macroexpand-1 '(count x lst))))
-    (assert-eq (car result) 'let)))
-
-(deftest count-if-outer-is-let
-  "COUNT-IF expands to LET binding predicate and count accumulator"
-  (let ((result (our-macroexpand-1 '(count-if #'oddp lst))))
-    (assert-eq (car result) 'let)))
-
-;;; ── REMOVE / REMOVE-DUPLICATES ───────────────────────────────────────────────
-
-(deftest remove-outer-is-let
-  "REMOVE expands to LET binding item and accumulator for filtering"
-  (let ((result (our-macroexpand-1 '(remove x lst))))
-    (assert-eq (car result) 'let)))
-
-(deftest remove-duplicates-outer-is-let
-  "REMOVE-DUPLICATES expands to LET with accumulator using MEMBER check"
-  (let ((result (our-macroexpand-1 '(remove-duplicates lst))))
-    (assert-eq (car result) 'let)))
-
-;;; ── UNION / SET-DIFFERENCE / INTERSECTION / SUBSETP ─────────────────────────
-
-(deftest union-outer-is-let
-  "UNION expands to LET binding both lists and an accumulator"
-  (let ((result (our-macroexpand-1 '(union l1 l2))))
-    (assert-eq (car result) 'let)))
-
-(deftest set-difference-outer-is-let
-  "SET-DIFFERENCE expands to LET binding l2 for membership tests"
-  (let ((result (our-macroexpand-1 '(set-difference l1 l2))))
-    (assert-eq (car result) 'let)))
-
-(deftest intersection-outer-is-let
-  "INTERSECTION expands to LET binding l2 and accumulator"
-  (let ((result (our-macroexpand-1 '(intersection l1 l2))))
-    (assert-eq (car result) 'let)))
-
-(deftest subsetp-outer-is-let
-  "SUBSETP expands to LET binding l2, then delegates to EVERY+MEMBER"
-  (let ((result (our-macroexpand-1 '(subsetp l1 l2))))
-    (assert-eq (car result) 'let)))
-
-;;; ── ADJOIN / RASSOC / PAIRLIS ────────────────────────────────────────────────
-
-(deftest adjoin-outer-is-let
-  "ADJOIN expands to LET binding item and list, then IF+MEMBER"
-  (let ((result (our-macroexpand-1 '(adjoin x lst))))
-    (assert-eq (car result) 'let)))
-
-(deftest rassoc-outer-is-let
-  "RASSOC expands to LET binding item, then BLOCK+DOLIST checking CDR"
-  (let ((result (our-macroexpand-1 '(rassoc x alist))))
-    (assert-eq (car result) 'let)))
-
-(deftest pairlis-outer-is-let
-  "PAIRLIS expands to LET binding keys, data, and optional alist init"
-  (let ((result (our-macroexpand-1 '(pairlis ks ds))))
-    (assert-eq (car result) 'let)))
-
-;;; ── PSETF / SHIFTF ───────────────────────────────────────────────────────────
-
-(deftest psetf-outer-is-let
-  "PSETF expands to LET binding all new values, then SETFs, returns NIL"
-  (let ((result (our-macroexpand-1 '(psetf a 1 b 2))))
-    (assert-eq (car result) 'let)))
-
-(deftest psetf-returns-nil
-  "PSETF last form is NIL (per ANSI spec)"
-  (let* ((result (our-macroexpand-1 '(psetf a 1 b 2)))
-         (last-form (car (last (cddr result)))))
-    (assert-eq last-form nil)))
-
-(deftest shiftf-outer-is-let
-  "SHIFTF expands to LET capturing old values, then SETFs, returns first old value"
-  (let ((result (our-macroexpand-1 '(shiftf a b 0))))
-    (assert-eq (car result) 'let)))
-
-;;; ── WITH-SLOTS ───────────────────────────────────────────────────────────────
-
-(deftest with-slots-outer-is-let
-  "WITH-SLOTS binds the instance first (outer LET), then slots via inner LET"
-  (let ((result (our-macroexpand-1 '(with-slots (x y) obj body))))
-    (assert-eq (car result) 'let)))
-
-(deftest with-slots-inner-uses-slot-value
-  "WITH-SLOTS inner bindings call SLOT-VALUE for each named slot"
-  (let* ((result (our-macroexpand-1 '(with-slots (x) obj body)))
-         (inner-let (caddr result))
-         (binding (caadr inner-let)))   ; first binding: (x (slot-value inst 'x))
-    (assert-equal (symbol-name (caadr binding)) "SLOT-VALUE")))
-
-;;; ── WITH-INPUT-FROM-STRING / WITH-OUTPUT-TO-STRING ───────────────────────────
-
-(deftest with-input-from-string-outer-is-let
-  "WITH-INPUT-FROM-STRING expands to LET binding var to make-string-input-stream"
-  (let ((result (our-macroexpand-1 '(with-input-from-string (s "hello") body))))
-    (assert-eq (car result) 'let)))
-
-(deftest with-output-to-string-outer-is-let
-  "WITH-OUTPUT-TO-STRING expands to LET binding var to make-string-output-stream"
-  (let ((result (our-macroexpand-1 '(with-output-to-string (s) (write-char #\x s)))))
-    (assert-eq (car result) 'let)))
-
-;;; ── IGNORE-ERRORS ────────────────────────────────────────────────────────────
-
-(deftest ignore-errors-outer-is-handler-case
-  "IGNORE-ERRORS wraps body in HANDLER-CASE catching ERROR and returning NIL"
-  (let ((result (our-macroexpand-1 '(ignore-errors (risky-op)))))
-    (assert-eq (car result) 'handler-case)))
-
-;;; ── MAP / CONCATENATE / STABLE-SORT ─────────────────────────────────────────
+;;; ── MAP ───────────────────────────────────────────────────────────────────────
 
 (deftest map-delegates-to-coerce-mapcar
   "MAP expands to (coerce (mapcar fn (coerce seq 'list)) result-type)"
   (let ((result (our-macroexpand-1 '(map 'vector #'1+ v))))
     (assert-equal (symbol-name (car result)) "COERCE")))
 
-(deftest stable-sort-delegates-to-sort
-  "STABLE-SORT expands to SORT (merge sort is inherently stable)"
-  (let ((result (our-macroexpand-1 '(stable-sort lst #'<))))
-    (assert-eq (car result) 'sort)))
+;;; ── Stream macros ────────────────────────────────────────────────────────────
 
-;;; ── RESTART STUB MACROS ──────────────────────────────────────────────────────
+(deftest-each stream-macro-outer-is-let
+  "Stream-binding macros expand to a LET."
+  :cases (("with-input-from-string" '(with-input-from-string (s "hello") body))
+          ("with-output-to-string"  '(with-output-to-string (s) (write-char #\x s)))
+          ("with-package-iterator"  '(with-package-iterator (sym pkg) body)))
+  (form)
+  (assert-eq (car (our-macroexpand-1 form)) 'let))
 
-(deftest invoke-restart-expands-to-error
-  "INVOKE-RESTART expands to (ERROR ...) since restarts are not implemented"
-  (let ((result (our-macroexpand-1 '(invoke-restart 'my-restart))))
-    (assert-eq (car result) 'error)))
+;;; ── Restart stubs ────────────────────────────────────────────────────────────
 
-(deftest find-restart-expands-to-nil
-  "FIND-RESTART expands to NIL (stub: no restart stack)"
-  (let ((result (our-macroexpand-1 '(find-restart 'my-restart))))
-    (assert-eq result nil)))
+(deftest-each restart-stub-returns-nil
+  "Unimplemented restart stubs expand to NIL."
+  :cases (("find-restart"     '(find-restart 'my-restart))
+          ("compute-restarts" '(compute-restarts))
+          ("continue"         '(continue))
+          ("muffle-warning"   '(muffle-warning)))
+  (form)
+  (assert-eq (our-macroexpand-1 form) nil))
 
-(deftest compute-restarts-expands-to-nil
-  "COMPUTE-RESTARTS expands to NIL (stub)"
-  (let ((result (our-macroexpand-1 '(compute-restarts))))
-    (assert-eq result nil)))
+(deftest-each restart-stub-value-passthrough
+  "USE-VALUE and STORE-VALUE pass through the value form."
+  :cases (("use-value"   '(use-value 42))
+          ("store-value" '(store-value 42)))
+  (form)
+  (assert-= (our-macroexpand-1 form) 42))
+
+(deftest-each restart-stubs-expand-to-error
+  "Unimplemented restart operations expand to (ERROR ...) stubs."
+  :cases (("invoke-restart" '(invoke-restart 'my-restart))
+          ("abort"          '(abort)))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
+    (assert-eq 'error (car result))))
 
 (deftest restart-name-checks-hash-table
   "RESTART-NAME expands to IF+HASH-TABLE-P to extract :name key or return restart"
   (let ((result (our-macroexpand-1 '(restart-name r))))
     (assert-eq (car result) 'if)))
 
-(deftest restart-bind-ignores-bindings
-  "RESTART-BIND expands to PROGN body (bindings are stubbed out)"
-  (let ((result (our-macroexpand-1 '(restart-bind ((my-r #'fn)) body))))
-    (assert-eq (car result) 'progn)))
+;;; ── Misc stubs ───────────────────────────────────────────────────────────────
 
-(deftest abort-expands-to-error
-  "ABORT expands to (ERROR \"ABORT invoked\")"
-  (let ((result (our-macroexpand-1 '(abort))))
-    (assert-eq (car result) 'error)))
-
-(deftest continue-expands-to-nil
-  "CONTINUE expands to NIL (stub)"
-  (let ((result (our-macroexpand-1 '(continue))))
-    (assert-eq result nil)))
-
-(deftest muffle-warning-expands-to-nil
-  "MUFFLE-WARNING expands to NIL (stub)"
-  (let ((result (our-macroexpand-1 '(muffle-warning))))
-    (assert-eq result nil)))
-
-(deftest use-value-returns-value
-  "USE-VALUE expands to the value form itself"
-  (let ((result (our-macroexpand-1 '(use-value 42))))
-    (assert-= result 42)))
-
-(deftest store-value-returns-value
-  "STORE-VALUE expands to the value form itself"
-  (let ((result (our-macroexpand-1 '(store-value 42))))
-    (assert-= result 42)))
-
-;;; ── WITH-STANDARD-IO-SYNTAX / WITH-PACKAGE-ITERATOR / DEFINE-COMPILER-MACRO ─
-
-(deftest with-standard-io-syntax-is-progn
-  "WITH-STANDARD-IO-SYNTAX expands to PROGN body (stub: no I/O var rebinding)"
-  (let ((result (our-macroexpand-1 '(with-standard-io-syntax body1 body2))))
-    (assert-eq (car result) 'progn)))
-
-(deftest with-package-iterator-outer-is-let
-  "WITH-PACKAGE-ITERATOR expands to LET binding name to an exhausted-iterator lambda"
-  (let ((result (our-macroexpand-1 '(with-package-iterator (sym pkg) body))))
-    (assert-eq (car result) 'let)))
+(deftest-each stub-macros-expand-to-progn
+  "Stub macros that expand body forms into a PROGN."
+  :cases (("restart-bind"           '(restart-bind ((my-r #'fn)) body))
+          ("with-standard-io-syntax" '(with-standard-io-syntax body1 body2)))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
+    (assert-eq 'progn (car result))))
 
 (deftest define-compiler-macro-expands-to-nil
   "DEFINE-COMPILER-MACRO is a stub that expands to NIL"
   (let ((result (our-macroexpand-1 '(define-compiler-macro foo (x) (+ x 1)))))
     (assert-eq result nil)))
-
-;;; ── DESTRUCTURING-BIND ───────────────────────────────────────────────────────
-
-(deftest destructuring-bind-outer-is-let
-  "DESTRUCTURING-BIND expands to LET binding the expression, then LET* for pattern vars"
-  (let ((result (our-macroexpand-1 '(destructuring-bind (x y) pair body))))
-    (assert-eq (car result) 'let)))
-
-(deftest destructuring-bind-inner-is-let*
-  "DESTRUCTURING-BIND inner form is LET* for sequential pattern variable binding"
-  (let* ((result (our-macroexpand-1 '(destructuring-bind (x y) pair body)))
-         (let*-form (caddr result)))
-    (assert-eq (car let*-form) 'let*)))
-
-;;; ── SIGNUM ───────────────────────────────────────────────────────────────────
-
-(deftest signum-outer-is-let
-  "SIGNUM expands to LET binding n for single evaluation, then COND"
-  (let ((result (our-macroexpand-1 '(signum x))))
-    (assert-eq (car result) 'let)))
-
-(deftest signum-body-is-cond
-  "SIGNUM body is COND checking zerop, plusp, and default -1"
-  (let* ((result (our-macroexpand-1 '(signum x)))
-         (cond-form (caddr result)))
-    (assert-eq (car cond-form) 'cond)))
-
-;;; ── 1- ───────────────────────────────────────────────────────────────────────
-
-(deftest 1--expands-to-minus-1-inner-check
-  "1- is also an our-defmacro; confirm it expands to (- n 1) by checking operator"
-  (let ((result (our-macroexpand-1 '(1- x))))
-    (assert-eq (car result) '-)))

@@ -23,52 +23,31 @@
   "T if compiling EXPR leaves at least one instruction of TYPE-SYM after optimization."
   (> (opt-count-instr expr type-sym) 0))
 
-;;; ── Constant Folding: Semantics ──────────────────────────────────────────
+;;; ── Constant Folding ─────────────────────────────────────────────────────
+;;; Each case verifies: (1) correct runtime value, (2) binary-op eliminated.
 
 (deftest-each optimizer-fold
-  "Constant arithmetic folds at compile time and evaluates correctly."
-  :cases (("add"           7  "(+ 3 4)")
-          ("sub"           6  "(- 10 4)")
-          ("mul"          12  "(* 3 4)")
-          ("chained"      12  "(+ (* 2 3) (- 10 4))")
-          ("deeper-chain" 16  "(- (* 5 5) (* 3 3))"))
-  (expected expr)
-  (assert-run= expected expr))
-
-;;; ── Constant Folding: No Runtime Instructions ────────────────────────────
-;;; Each entry: (label expression instruction-type-that-must-vanish)
-
-(deftest-each optimizer-fold-no-runtime-instr
-  "Constant-folded expressions leave no binary-op instructions in the output."
-  :cases (("add"     "(+ 2 3)"                  'vm-add)
-          ("sub"     "(- 10 4)"                 'vm-sub)
-          ("mul"     "(* 3 7)"                  'vm-mul)
-          ("chain-add" "(+ (* 2 3) (- 10 4))"  'vm-add)
-          ("chain-mul" "(+ (* 2 3) (- 10 4))"  'vm-mul)
-          ("chain-sub" "(+ (* 2 3) (- 10 4))"  'vm-sub))
-  (expr instr)
+  "Constant arithmetic folds: value is correct and the binary-op instruction is eliminated."
+  :cases (("add"           7  "(+ 3 4)"                 'vm-add)
+          ("sub"           6  "(- 10 4)"                'vm-sub)
+          ("mul"          12  "(* 3 4)"                 'vm-mul)
+          ("chained"      12  "(+ (* 2 3) (- 10 4))"   'vm-add)
+          ("deeper-chain" 16  "(- (* 5 5) (* 3 3))"    'vm-sub))
+  (expected expr instr)
+  (assert-run= expected expr)
   (assert-false (opt-has-p expr instr)))
 
-;;; ── Algebraic Identity Simplification: Semantics ─────────────────────────
+;;; ── Algebraic Identity Simplification ───────────────────────────────────
+;;; Each case verifies: (1) correct runtime value, (2) instruction eliminated.
 
-(deftest-each optimizer-algebraic-identity-value
-  "Algebraic identity simplifications preserve correct runtime values."
-  :cases (("add-zero"  5  "(let ((x 5)) (+ x 0))")
-          ("mul-one"   7  "(let ((x 7)) (* x 1))")
-          ("mul-zero"  0  "(let ((x 99)) (* x 0))")
-          ("sub-zero" 42  "(let ((x 42)) (- x 0))"))
-  (expected expr)
-  (assert-run= expected expr))
-
-;;; ── Algebraic Identity Simplification: No-Op Instructions ────────────────
-
-(deftest-each optimizer-algebraic-identity-no-op
-  "Algebraic identity rules eliminate the corresponding instruction entirely."
-  :cases (("add-zero"  "(let ((x 5))  (+ x 0))"  'vm-add)
-          ("mul-one"   "(let ((x 7))  (* x 1))"  'vm-mul)
-          ("mul-zero"  "(let ((x 99)) (* x 0))"  'vm-mul)
-          ("sub-zero"  "(let ((x 42)) (- x 0))"  'vm-sub))
-  (expr instr)
+(deftest-each optimizer-algebraic-identity
+  "Algebraic identities: value is correct and the corresponding instruction is eliminated."
+  :cases (("add-zero"  5  "(let ((x 5))  (+ x 0))"  'vm-add)
+          ("mul-one"   7  "(let ((x 7))  (* x 1))"  'vm-mul)
+          ("mul-zero"  0  "(let ((x 99)) (* x 0))"  'vm-mul)
+          ("sub-zero" 42  "(let ((x 42)) (- x 0))"  'vm-sub))
+  (expected expr instr)
+  (assert-run= expected expr)
   (assert-false (opt-has-p expr instr)))
 
 ;;; ── Dead Code Elimination: Semantics ─────────────────────────────────────
@@ -115,40 +94,28 @@
   (expected expr)
   (assert-run= expected expr))
 
-;;; ── Bitwise Algebraic Identities: Semantics ──────────────────────────────
+;;; ── Bitwise Algebraic Identities ─────────────────────────────────────────
+;;; instr = nil means value-correctness only (no instruction-elimination check).
 
-(deftest-each optimizer-bitwise-value
-  "Bitwise algebraic identities evaluate to the correct value."
-  :cases (("logand-zero"      0  "(let ((x 42)) (logand x 0))")
-          ("logand-minus-one" 42 "(let ((x 42)) (logand x -1))")
-          ("logand-self"      12 "(let ((x 12)) (logand x x))")
-          ("logior-zero"      42 "(let ((x 42)) (logior x 0))")
-          ("logxor-zero"      42 "(let ((x 42)) (logxor x 0))")
-          ("logxor-self"       0 "(let ((x 42)) (logxor x x))")
-          ("ash-zero"         42 "(let ((x 42)) (ash x 0))"))
-  (expected expr)
-  (assert-run= expected expr))
-
-;;; ── Bitwise Algebraic Identities: No-Op Instructions ─────────────────────
-
-(deftest-each optimizer-bitwise-no-op
-  "Bitwise algebraic identities eliminate the corresponding instruction entirely."
-  :cases (("logand-zero"       "(let ((x 42)) (logand x 0))"   'vm-logand)
-          ("logand-minus-one"  "(let ((x 42)) (logand x -1))"  'vm-logand)
-          ("logior-zero"       "(let ((x 42)) (logior x 0))"   'vm-logior)
-          ("logxor-self"       "(let ((x 42)) (logxor x x))"   'vm-logxor)
-          ("ash-zero"          "(let ((x 42)) (ash x 0))"      'vm-ash))
-  (expr instr)
-  (assert-false (opt-has-p expr instr)))
+(deftest-each optimizer-bitwise
+  "Bitwise identities: value is correct; instruction eliminated where applicable."
+  :cases (("logand-zero"      0  "(let ((x 42)) (logand x 0))"   'vm-logand)
+          ("logand-minus-one" 42 "(let ((x 42)) (logand x -1))"  'vm-logand)
+          ("logand-self"      12 "(let ((x 12)) (logand x x))"   nil)
+          ("logior-zero"      42 "(let ((x 42)) (logior x 0))"   'vm-logior)
+          ("logxor-zero"      42 "(let ((x 42)) (logxor x 0))"   nil)
+          ("logxor-self"       0 "(let ((x 42)) (logxor x x))"   'vm-logxor)
+          ("ash-zero"         42 "(let ((x 42)) (ash x 0))"      'vm-ash))
+  (expected expr instr)
+  (assert-run= expected expr)
+  (when instr
+    (assert-false (opt-has-p expr instr))))
 
 ;;; ── Unary Constant Folding ────────────────────────────────────────────────
 
-(deftest optimizer-lognot-constant-value
-  "(lognot 0) = -1"
-  (assert-run= -1 "(lognot 0)"))
-
-(deftest optimizer-lognot-constant-no-op
-  "Constant (lognot 0) folds; no vm-lognot remains."
+(deftest optimizer-lognot-constant
+  "(lognot 0) folds at compile time: value is -1 and no vm-lognot remains."
+  (assert-run= -1 "(lognot 0)")
   (assert-false (opt-has-p "(lognot 0)" 'vm-lognot)))
 
 (deftest optimizer-not-zero-value
@@ -157,37 +124,22 @@
 
 ;;; ── Function Inlining ────────────────────────────────────────────────────
 
-(deftest optimizer-inline-simple-function-value
-  "A small single-arg function inlines and produces the correct value."
-  (assert-run= 5 "(defun double-inc (x) (+ x 1)) (double-inc 4)"))
-
-(deftest optimizer-inline-removes-call
-  "Inlining a small fn eliminates the vm-call instruction."
-  (assert-false (opt-has-p "(defun double-inc (x) (+ x 1)) (double-inc 4)" 'vm-call)))
-
-(deftest optimizer-inline-two-args-value
-  "A two-arg inlinable function produces the correct value."
+(deftest optimizer-inline
+  "Small functions inline: correct value and no vm-call; two-arg case also checked."
+  (assert-run= 5 "(defun double-inc (x) (+ x 1)) (double-inc 4)")
+  (assert-false (opt-has-p "(defun double-inc (x) (+ x 1)) (double-inc 4)" 'vm-call))
   (assert-run= 7 "(defun add2 (a b) (+ a b)) (add2 3 4)"))
 
 ;;; ── CSE (Common Subexpression Elimination) Unit Tests ──────────────────────
 
-(deftest cse-binary-dedup
-  "Two identical vm-add with same operands: second becomes vm-move."
+(deftest-each cse-dedup
+  "Duplicate vm-add — same or commuted operands — CSE's second to vm-move."
+  :cases (("same-order"    (cl-cc::make-vm-add :dst :R3 :lhs :R0 :rhs :R1))
+          ("swapped-order" (cl-cc::make-vm-add :dst :R3 :lhs :R1 :rhs :R0)))
+  (i4)
   (let* ((i1 (cl-cc::make-vm-const :dst :R0 :value 10))
          (i2 (cl-cc::make-vm-const :dst :R1 :value 20))
          (i3 (cl-cc::make-vm-add :dst :R2 :lhs :R0 :rhs :R1))
-         (i4 (cl-cc::make-vm-add :dst :R3 :lhs :R0 :rhs :R1))
-         (out (cl-cc::opt-pass-cse (list i1 i2 i3 i4))))
-    (assert-true (cl-cc::vm-add-p (third out)))
-    (assert-true (cl-cc::vm-move-p (fourth out)))
-    (assert-equal :R2 (cl-cc::vm-src (fourth out)))))
-
-(deftest cse-commutative-dedup
-  "Commutative vm-add with swapped operands: second becomes vm-move."
-  (let* ((i1 (cl-cc::make-vm-const :dst :R0 :value 10))
-         (i2 (cl-cc::make-vm-const :dst :R1 :value 20))
-         (i3 (cl-cc::make-vm-add :dst :R2 :lhs :R0 :rhs :R1))
-         (i4 (cl-cc::make-vm-add :dst :R3 :lhs :R1 :rhs :R0))
          (out (cl-cc::opt-pass-cse (list i1 i2 i3 i4))))
     (assert-true (cl-cc::vm-add-p (third out)))
     (assert-true (cl-cc::vm-move-p (fourth out)))
@@ -240,28 +192,8 @@
   (some #'cl-cc::vm-call-p instructions))
 
 (deftest inline-small-function
-  "A small function (vm-const + vm-ret) called via vm-func-ref is inlined;
-   the vm-call is eliminated from the output."
-  (let* ((closure (cl-cc::make-vm-closure :dst :R0 :label "f"
-                                          :params '(:R10)
-                                          :captured nil))
-         (fref    (cl-cc::make-vm-func-ref :dst :R5 :label "f"))
-         (jump-past (cl-cc::make-vm-jump :label "after_f"))
-         (lbl     (cl-cc::make-vm-label :name "f"))
-         (body1   (cl-cc::make-vm-const :dst :R11 :value 1))
-         (body2   (cl-cc::make-vm-add :dst :R12 :lhs :R10 :rhs :R11))
-         (ret     (cl-cc::make-vm-ret :reg :R12))
-         (after   (cl-cc::make-vm-label :name "after_f"))
-         (arg     (cl-cc::make-vm-const :dst :R1 :value 4))
-         (call    (cl-cc::make-vm-call :dst :R6 :func :R5 :args '(:R1)))
-         (halt    (cl-cc::make-vm-halt))
-         (instrs  (list closure fref jump-past lbl body1 body2 ret after arg call halt))
-         (out     (cl-cc::opt-pass-inline instrs)))
-    (assert-true (not (inline-has-call-p out)))))
-
-(deftest inline-preserves-value
-  "After inlining a function that returns (+ x 1), the constant 1 and a
-   vm-move copying the result into the call's dst register must appear."
+  "A small function (+ x 1) called via vm-func-ref: vm-call eliminated and
+   result vm-move into the call's dst register (:R6) must appear."
   (let* ((closure (cl-cc::make-vm-closure :dst :R0 :label "inc"
                                           :params '(:R10)
                                           :captured nil))
@@ -277,7 +209,6 @@
          (halt    (cl-cc::make-vm-halt))
          (instrs  (list closure fref jump-past lbl body1 body2 ret after arg call halt))
          (out     (cl-cc::opt-pass-inline instrs)))
-    ;; The vm-call is gone and a vm-move into :R6 (the original call dst) exists
     (assert-true (not (inline-has-call-p out)))
     (assert-true (some (lambda (i)
                          (and (cl-cc::vm-move-p i)
@@ -400,50 +331,32 @@
     ;; The inc should survive (not folded to const 43) because the label flushes env
     (assert-true (find-if (lambda (i) (typep i 'cl-cc::vm-inc)) out))))
 
-(deftest fold-unary-not-nil
-  "vm-not on a known nil value folds to t."
-  (let* ((instrs (list (cl-cc::make-vm-const :dst :R0 :value nil)
+(deftest-each fold-unary-not-falsy
+  "vm-not on any falsy value (nil, 0) folds to t."
+  :cases (("nil"  nil)
+          ("zero" 0))
+  (input-val)
+  (let* ((instrs (list (cl-cc::make-vm-const :dst :R0 :value input-val)
                        (cl-cc::make-vm-not :dst :R1 :src :R0)))
-         (out (cl-cc::opt-pass-fold instrs)))
-    ;; The vm-not should be folded to (vm-const :R1 t)
-    (let ((r1-const (find-if (lambda (i) (and (cl-cc::vm-const-p i)
-                                              (eq (cl-cc::vm-dst i) :R1)))
-                             out)))
-      (assert-true r1-const)
-      (assert-equal t (cl-cc::vm-value r1-const)))))
+         (out (cl-cc::opt-pass-fold instrs))
+         (r1-const (find-if (lambda (i) (and (cl-cc::vm-const-p i)
+                                             (eq (cl-cc::vm-dst i) :R1)))
+                            out)))
+    (assert-true r1-const)
+    (assert-equal t (cl-cc::vm-value r1-const))))
 
-(deftest fold-unary-not-zero
-  "vm-not on a known zero value folds to t (zero is falsy)."
-  (let* ((instrs (list (cl-cc::make-vm-const :dst :R0 :value 0)
-                       (cl-cc::make-vm-not :dst :R1 :src :R0)))
-         (out (cl-cc::opt-pass-fold instrs)))
-    (let ((r1-const (find-if (lambda (i) (and (cl-cc::vm-const-p i)
-                                              (eq (cl-cc::vm-dst i) :R1)))
-                             out)))
-      (assert-true r1-const)
-      (assert-equal t (cl-cc::vm-value r1-const)))))
-
-(deftest fold-type-pred-number
-  "vm-number-p on a known number folds to 1."
-  (let* ((instrs (list (cl-cc::make-vm-const :dst :R0 :value 42)
-                       (cl-cc::make-vm-number-p :dst :R1 :src :R0)))
-         (out (cl-cc::opt-pass-fold instrs)))
-    (let ((r1-const (find-if (lambda (i) (and (cl-cc::vm-const-p i)
-                                              (eq (cl-cc::vm-dst i) :R1)))
-                             out)))
-      (assert-true r1-const)
-      (assert-equal 1 (cl-cc::vm-value r1-const)))))
-
-(deftest fold-type-pred-symbol
-  "vm-symbol-p on a known number folds to 0."
-  (let* ((instrs (list (cl-cc::make-vm-const :dst :R0 :value 42)
-                       (cl-cc::make-vm-symbol-p :dst :R1 :src :R0)))
-         (out (cl-cc::opt-pass-fold instrs)))
-    (let ((r1-const (find-if (lambda (i) (and (cl-cc::vm-const-p i)
-                                              (eq (cl-cc::vm-dst i) :R1)))
-                             out)))
-      (assert-true r1-const)
-      (assert-equal 0 (cl-cc::vm-value r1-const)))))
+(deftest-each fold-type-pred
+  "Type predicate instructions fold at compile time against a known constant."
+  :cases (("number-p" (cl-cc::make-vm-number-p :dst :R1 :src :R0) 1)
+          ("symbol-p" (cl-cc::make-vm-symbol-p :dst :R1 :src :R0) 0))
+  (pred-inst expected)
+  (let* ((instrs (list (cl-cc::make-vm-const :dst :R0 :value 42) pred-inst))
+         (out (cl-cc::opt-pass-fold instrs))
+         (r1-const (find-if (lambda (i) (and (cl-cc::vm-const-p i)
+                                             (eq (cl-cc::vm-dst i) :R1)))
+                            out)))
+    (assert-true r1-const)
+    (assert-equal expected (cl-cc::vm-value r1-const))))
 
 (deftest fold-branch-known-true
   "vm-jump-zero with a known non-zero value is dropped entirely."
@@ -512,91 +425,49 @@
 
 ;;; ─── opt-inst-read-regs ──────────────────────────────────────────────────────
 
-(deftest read-regs-const-empty
-  "vm-const reads no registers."
-  (assert-null (cl-cc::opt-inst-read-regs (make-vm-const :dst :r0 :value 42))))
-
-(deftest read-regs-func-ref-empty
-  "vm-func-ref reads no registers."
-  (assert-null (cl-cc::opt-inst-read-regs (make-vm-func-ref :dst :r0 :label "fn"))))
-
-(deftest read-regs-move-src
-  "vm-move reads one register (src)."
-  (assert-equal '(:r1) (cl-cc::opt-inst-read-regs (make-vm-move :dst :r0 :src :r1))))
-
-(deftest read-regs-binop-lhs-rhs
-  "vm-add (binop) reads lhs and rhs."
-  (let ((regs (cl-cc::opt-inst-read-regs (make-vm-add :dst :r0 :lhs :r1 :rhs :r2))))
-    (assert-equal 2 (length regs))
-    (assert-true (member :r1 regs))
-    (assert-true (member :r2 regs))))
-
-(deftest read-regs-comparison-lhs-rhs
-  "vm-lt (non-binop binary) reads lhs and rhs via data table."
-  (let ((regs (cl-cc::opt-inst-read-regs (make-vm-lt :dst :r0 :lhs :r1 :rhs :r2))))
-    (assert-equal 2 (length regs))
-    (assert-true (member :r1 regs))
-    (assert-true (member :r2 regs))))
-
-(deftest read-regs-unary-src
-  "vm-neg (unary) reads one register (src) via data table."
-  (assert-equal '(:r1) (cl-cc::opt-inst-read-regs (make-vm-neg :dst :r0 :src :r1))))
-
-(deftest read-regs-type-pred-src
-  "vm-null-p (type predicate) reads src via data table."
-  (assert-equal '(:r1) (cl-cc::opt-inst-read-regs (make-vm-null-p :dst :r0 :src :r1))))
-
-(deftest read-regs-ret-reg
-  "vm-ret reads one register."
-  (assert-equal '(:r0) (cl-cc::opt-inst-read-regs (make-vm-ret :reg :r0))))
-
-(deftest read-regs-call-func-and-args
-  "vm-call reads func register plus args."
-  (let ((regs (cl-cc::opt-inst-read-regs
-                (make-vm-call :dst :r0 :func :r1 :args '(:r2 :r3)))))
-    (assert-equal 3 (length regs))
-    (assert-true (member :r1 regs))
-    (assert-true (member :r2 regs))
-    (assert-true (member :r3 regs))))
-
-(deftest read-regs-set-global-src
-  "vm-set-global reads src."
-  (assert-equal '(:r0) (cl-cc::opt-inst-read-regs
-                          (make-vm-set-global :src :r0 :name 'x))))
-
-(deftest read-regs-get-global-empty
-  "vm-get-global reads no registers."
-  (assert-null (cl-cc::opt-inst-read-regs (make-vm-get-global :dst :r0 :name 'x))))
+(deftest-each opt-inst-read-regs-cases
+  "opt-inst-read-regs returns the correct source register list for each instruction type."
+  :cases (("const"      (make-vm-const      :dst :r0 :value 42)             '())
+          ("func-ref"   (make-vm-func-ref   :dst :r0 :label "fn")           '())
+          ("get-global" (make-vm-get-global :dst :r0 :name 'x)              '())
+          ("move"       (make-vm-move       :dst :r0 :src :r1)              '(:r1))
+          ("neg"        (make-vm-neg        :dst :r0 :src :r1)              '(:r1))
+          ("null-p"     (make-vm-null-p     :dst :r0 :src :r1)              '(:r1))
+          ("ret"        (make-vm-ret        :reg :r0)                        '(:r0))
+          ("set-global" (make-vm-set-global :src :r0 :name 'x)              '(:r0))
+          ("add"        (make-vm-add        :dst :r0 :lhs :r1 :rhs :r2)    '(:r1 :r2))
+          ("lt"         (make-vm-lt         :dst :r0 :lhs :r1 :rhs :r2)    '(:r1 :r2))
+          ("call"       (make-vm-call       :dst :r0 :func :r1 :args '(:r2 :r3)) '(:r1 :r2 :r3)))
+  (inst expected-members)
+  (let ((regs (cl-cc::opt-inst-read-regs inst)))
+    (assert-equal (length expected-members) (length regs))
+    (dolist (r expected-members)
+      (assert-true (member r regs)))))
 
 ;;; ── opt-pass-dce: Dead Code Elimination ──────────────────────────────────
 
-(deftest dce-removes-unused-const
-  "DCE removes a vm-const whose dst is never read."
+(deftest dce-removes-unused-pure-instructions
+  "DCE removes pure instructions (vm-const, vm-move) whose dst is never read; keeps used ones."
+  ;; vm-const: r0 unused → removed; r1 used by ret → kept
   (let* ((i1  (make-vm-const :dst :r0 :value 42))
          (i2  (make-vm-const :dst :r1 :value 7))
          (ret (make-vm-ret :reg :r1))
          (out (cl-cc::opt-pass-dce (list i1 i2 ret))))
-    ;; r0 is never read → i1 should be removed
     (assert-false (member i1 out))
     (assert-true  (member i2 out))
-    (assert-true  (member ret out))))
-
-(deftest dce-keeps-used-const
-  "DCE keeps a vm-const whose dst is read."
+    (assert-true  (member ret out)))
+  ;; vm-const: r0 read by vm-add → kept
   (let* ((i1  (make-vm-const :dst :r0 :value 5))
          (i2  (make-vm-add  :dst :r1 :lhs :r0 :rhs :r0))
          (ret (make-vm-ret :reg :r1))
          (out (cl-cc::opt-pass-dce (list i1 i2 ret))))
     (assert-true (member i1 out))
-    (assert-true (member i2 out))))
-
-(deftest dce-removes-unused-move
-  "DCE removes a vm-move whose dst is never read."
+    (assert-true (member i2 out)))
+  ;; vm-move: r2 unused → removed; r0 read by ret → kept
   (let* ((c   (make-vm-const :dst :r0 :value 1))
          (m   (make-vm-move  :dst :r2 :src :r0))
          (ret (make-vm-ret :reg :r0))
          (out (cl-cc::opt-pass-dce (list c m ret))))
-    ;; r2 is never read → m should be removed
     (assert-false (member m out))
     (assert-true  (member c out))))
 
@@ -652,8 +523,9 @@
 
 ;;; ── opt-pass-unreachable: Unreachable Code Elimination ───────────────────
 
-(deftest unreachable-after-jump
-  "Code following an unconditional jump (before next label) is dropped."
+(deftest unreachable-code-eliminated
+  "opt-pass-unreachable drops dead code after unconditional jump or ret (revived by next label)."
+  ;; code after vm-jump (before label) is dead
   (let* ((j    (make-vm-jump  :label "end"))
          (dead (make-vm-const :dst :r1 :value 99))
          (lbl  (make-vm-label :name "end"))
@@ -662,10 +534,8 @@
     (assert-false (member dead out))
     (assert-true  (member j    out))
     (assert-true  (member lbl  out))
-    (assert-true  (member ret  out))))
-
-(deftest unreachable-after-ret
-  "Code following vm-ret (before next label) is dropped."
+    (assert-true  (member ret  out)))
+  ;; code after vm-ret (before label) is dead; label revives reachability
   (let* ((ret1 (make-vm-ret   :reg :r0))
          (dead (make-vm-const :dst :r1 :value 0))
          (lbl  (make-vm-label :name "after"))
@@ -697,174 +567,125 @@
     (assert-true  (member c   out))
     (assert-true  (member ret out))))
 
-(deftest dead-labels-keeps-referenced-label
-  "A label targeted by a jump is preserved."
-  (let* ((j   (make-vm-jump  :label "live"))
-         (lbl (make-vm-label :name "live"))
+(deftest-each dead-labels-preserves-referenced-labels
+  "Labels referenced by jumps, closures, or handler instrs are preserved by opt-pass-dead-labels."
+  :cases (("jump-target"
+           (make-vm-jump :label "live") "live")
+          ("closure-entry"
+           (make-vm-closure :dst :r0 :label "fn" :params nil :captured nil
+                            :optional-params nil :rest-param nil :key-params nil) "fn")
+          ("handler-label"
+           (cl-cc::make-vm-establish-handler :handler-label "err-handler"
+                                              :result-reg :r0 :error-type 'error)
+           "err-handler"))
+  (ref-inst lbl-name)
+  (let* ((lbl (make-vm-label :name lbl-name))
          (ret (make-vm-ret   :reg :r0))
-         (out (cl-cc::opt-pass-dead-labels (list j lbl ret))))
-    (assert-true (member lbl out))))
-
-(deftest dead-labels-keeps-closure-entry-label
-  "A label used as a closure entry point is preserved."
-  (let* ((cl  (make-vm-closure :dst :r0 :label "fn" :params nil
-                                :captured nil
-                                :optional-params nil :rest-param nil :key-params nil))
-         (lbl (make-vm-label :name "fn"))
-         (ret (make-vm-ret   :reg :r0))
-         (out (cl-cc::opt-pass-dead-labels (list cl lbl ret))))
-    (assert-true (member lbl out))))
-
-(deftest dead-labels-keeps-handler-label
-  "A label referenced by vm-establish-handler is preserved (uses vm-handler-label accessor)."
-  ;; make-vm-establish-handler is not in the test package import list → use cl-cc::
-  (let* ((handler (cl-cc::make-vm-establish-handler :handler-label "err-handler"
-                                                     :result-reg :r0
-                                                     :error-type 'error))
-         (lbl (make-vm-label :name "err-handler"))
-         (ret (make-vm-ret   :reg :r0))
-         (out (cl-cc::opt-pass-dead-labels (list handler lbl ret))))
+         (out (cl-cc::opt-pass-dead-labels (list ref-inst lbl ret))))
     (assert-true (member lbl out))))
 
 ;;; ── opt-pass-strength-reduce: Strength Reduction ─────────────────────────
 
-(deftest strength-reduce-mul-power-of-2
-  "Multiply by 2^k is replaced by left arithmetic shift."
-  (let* ((c   (make-vm-const :dst :r1 :value 8))
-         (mul (make-vm-mul   :dst :r2 :lhs :r0 :rhs :r1))
+(deftest-each strength-reduce-cases
+  "opt-pass-strength-reduce: power-of-2 multiplies become vm-ash; non-power-of-2 are left as-is."
+  :cases (("rhs-const-pow2"     8 (make-vm-mul :dst :r2 :lhs :r0 :rhs :r1) t)
+          ("lhs-const-pow2"     4 (make-vm-mul :dst :r2 :lhs :r1 :rhs :r0) t)
+          ("non-power-of-2"     7 (make-vm-mul :dst :r2 :lhs :r0 :rhs :r1) nil))
+  (const-val mul should-reduce-p)
+  (let* ((c   (make-vm-const :dst :r1 :value const-val))
          (ret (make-vm-ret   :reg :r2))
          (out (cl-cc::opt-pass-strength-reduce (list c mul ret))))
-    ;; vm-mul should be replaced by vm-ash
-    (assert-false (member mul out))
-    (assert-true  (some (lambda (i) (typep i 'cl-cc::vm-ash)) out))))
-
-(deftest strength-reduce-mul-commutative
-  "Multiply by 2^k works when the constant is the LHS."
-  (let* ((c   (make-vm-const :dst :r1 :value 4))
-         (mul (make-vm-mul   :dst :r2 :lhs :r1 :rhs :r0))
-         (ret (make-vm-ret   :reg :r2))
-         (out (cl-cc::opt-pass-strength-reduce (list c mul ret))))
-    (assert-false (member mul out))
-    (assert-true  (some (lambda (i) (typep i 'cl-cc::vm-ash)) out))))
-
-(deftest strength-reduce-does-not-replace-non-power-of-2
-  "Multiply by a non-power-of-2 constant is left as-is."
-  (let* ((c   (make-vm-const :dst :r1 :value 7))
-         (mul (make-vm-mul   :dst :r2 :lhs :r0 :rhs :r1))
-         (ret (make-vm-ret   :reg :r2))
-         (out (cl-cc::opt-pass-strength-reduce (list c mul ret))))
-    (assert-true (member mul out))
-    (assert-false (some (lambda (i) (typep i 'cl-cc::vm-ash)) out))))
+    (if should-reduce-p
+        (progn
+          (assert-false (member mul out))
+          (assert-true  (some (lambda (i) (typep i 'cl-cc::vm-ash)) out)))
+        (progn
+          (assert-true  (member mul out))
+          (assert-false (some (lambda (i) (typep i 'cl-cc::vm-ash)) out))))))
 
 ;;; ── opt-inline-eligible-p: Extracted Eligibility Predicate ──────────────
 
-(deftest inline-eligible-simple-function
-  "A zero-capture, required-only-param, short function is eligible."
-  (let* ((ci (make-vm-closure :dst :r0 :label "f"
-                               :params '(:r1) :captured nil
-                               :optional-params nil :rest-param nil :key-params nil))
-         (body (list (make-vm-add :dst :r2 :lhs :r1 :rhs :r1)
-                     (make-vm-ret :reg :r2)))
-         (def (list :closure ci :params '(:r1) :body body)))
-    (assert-true (cl-cc::opt-inline-eligible-p def 15))))
-
-(deftest inline-eligible-rejects-captured-vars
-  "A closure with captured variables is not eligible for inlining."
-  (let* ((ci (make-vm-closure :dst :r0 :label "f"
-                               :params '(:r1)
-                               :captured (list (cons :x :r5))
-                               :optional-params nil :rest-param nil :key-params nil))
+(deftest opt-inline-eligible-p-cases
+  "opt-inline-eligible-p: eligible when short+no-captures; rejects captured vars or over-threshold."
+  ;; short, zero captures → eligible
+  (let* ((ci   (make-vm-closure :dst :r0 :label "f"
+                                 :params '(:r1) :captured nil
+                                 :optional-params nil :rest-param nil :key-params nil))
+         (body (list (make-vm-add :dst :r2 :lhs :r1 :rhs :r1) (make-vm-ret :reg :r2)))
+         (def  (list :closure ci :params '(:r1) :body body)))
+    (assert-true (cl-cc::opt-inline-eligible-p def 15)))
+  ;; captured variables → not eligible
+  (let* ((ci   (make-vm-closure :dst :r0 :label "f"
+                                 :params '(:r1) :captured (list (cons :x :r5))
+                                 :optional-params nil :rest-param nil :key-params nil))
          (body (list (make-vm-ret :reg :r1)))
-         (def (list :closure ci :params '(:r1) :body body)))
-    (assert-false (cl-cc::opt-inline-eligible-p def 15))))
-
-(deftest inline-eligible-rejects-over-threshold
-  "A function body exceeding the threshold is not eligible."
-  (let* ((ci (make-vm-closure :dst :r0 :label "f"
-                               :params '(:r1) :captured nil
-                               :optional-params nil :rest-param nil :key-params nil))
-         ;; 17 body instructions + 1 ret = 18 total, threshold is 15
+         (def  (list :closure ci :params '(:r1) :body body)))
+    (assert-false (cl-cc::opt-inline-eligible-p def 15)))
+  ;; 18 instructions, threshold 15 → not eligible
+  (let* ((ci   (make-vm-closure :dst :r0 :label "f"
+                                 :params '(:r1) :captured nil
+                                 :optional-params nil :rest-param nil :key-params nil))
          (body (append (loop repeat 17 collect (make-vm-const :dst :r2 :value 0))
                        (list (make-vm-ret :reg :r2))))
-         (def (list :closure ci :params '(:r1) :body body)))
+         (def  (list :closure ci :params '(:r1) :body body)))
     (assert-false (cl-cc::opt-inline-eligible-p def 15))))
 
 ;;; ─── opt-falsep ──────────────────────────────────────────────────────────
 
-(deftest opt-falsep-nil
-  "NIL is falsy."
-  (assert-true (cl-cc::opt-falsep nil)))
-
-(deftest opt-falsep-zero
-  "0 is falsy."
-  (assert-true (cl-cc::opt-falsep 0)))
-
-(deftest opt-falsep-t
-  "T is not falsy."
-  (assert-false (cl-cc::opt-falsep t)))
-
-(deftest opt-falsep-positive
-  "Positive integer is not falsy."
-  (assert-false (cl-cc::opt-falsep 1)))
+(deftest-each opt-falsep
+  "opt-falsep correctly classifies falsy (nil, 0) and truthy (t, 1) values."
+  :cases (("nil"      nil t)
+          ("zero"     0   t)
+          ("t"        t   nil)
+          ("positive" 1   nil))
+  (value expected)
+  (assert-equal expected (cl-cc::opt-falsep value)))
 
 ;;; ─── opt-register-keyword-p ──────────────────────────────────────────────
 
-(deftest opt-register-keyword-p-r0
-  ":R0 is a register keyword."
-  (assert-true (cl-cc::opt-register-keyword-p :r0)))
-
-(deftest opt-register-keyword-p-r15
-  ":R15 is a register keyword."
-  (assert-true (cl-cc::opt-register-keyword-p :r15)))
-
-(deftest opt-register-keyword-p-symbol
-  "Non-keyword symbol is not a register."
-  (assert-false (cl-cc::opt-register-keyword-p 'r0)))
-
-(deftest opt-register-keyword-p-plain-keyword
-  ":foo is not a register keyword."
-  (assert-false (cl-cc::opt-register-keyword-p :foo)))
+(deftest-each opt-register-keyword-p
+  "opt-register-keyword-p recognizes :RN keywords; rejects non-register symbols and plain keywords."
+  :cases (("r0"            :r0  t)
+          ("r15"           :r15 t)
+          ("plain-symbol"  'r0  nil)
+          ("plain-keyword" :foo nil))
+  (value expected)
+  (assert-equal expected (cl-cc::opt-register-keyword-p value)))
 
 ;;; ─── opt-binary-lhs-rhs-p / opt-unary-src-p ─────────────────────────────
 
-(deftest opt-binary-lhs-rhs-p-add
-  "vm-add (vm-binop subclass) is binary lhs/rhs."
-  (assert-true (cl-cc::opt-binary-lhs-rhs-p (make-vm-add :dst :r0 :lhs :r1 :rhs :r2))))
+(deftest-each opt-binary-lhs-rhs-p
+  "opt-binary-lhs-rhs-p is true for binary instructions, false for unary ones."
+  :cases (("add" (make-vm-add :dst :r0 :lhs :r1 :rhs :r2) t)
+          ("lt"  (make-vm-lt  :dst :r0 :lhs :r1 :rhs :r2) t)
+          ("neg" (make-vm-neg :dst :r0 :src :r1)           nil))
+  (inst expected)
+  (if expected
+      (assert-true  (cl-cc::opt-binary-lhs-rhs-p inst))
+      (assert-false (cl-cc::opt-binary-lhs-rhs-p inst))))
 
-(deftest opt-binary-lhs-rhs-p-lt
-  "vm-lt (non-binop) is binary lhs/rhs."
-  (assert-true (cl-cc::opt-binary-lhs-rhs-p (make-vm-lt :dst :r0 :lhs :r1 :rhs :r2))))
-
-(deftest opt-binary-lhs-rhs-p-neg
-  "vm-neg is NOT binary lhs/rhs."
-  (assert-false (cl-cc::opt-binary-lhs-rhs-p (make-vm-neg :dst :r0 :src :r1))))
-
-(deftest opt-unary-src-p-neg
-  "vm-neg is a unary src instruction."
-  (assert-true (cl-cc::opt-unary-src-p (make-vm-neg :dst :r0 :src :r1))))
-
-(deftest opt-unary-src-p-null-p
-  "vm-null-p is a unary src instruction."
-  (assert-true (cl-cc::opt-unary-src-p (make-vm-null-p :dst :r0 :src :r1))))
-
-(deftest opt-unary-src-p-add
-  "vm-add is NOT a unary src instruction."
-  (assert-false (cl-cc::opt-unary-src-p (make-vm-add :dst :r0 :lhs :r1 :rhs :r2))))
+(deftest-each opt-unary-src-p
+  "opt-unary-src-p is true for unary instructions, false for binary ones."
+  :cases (("neg"    (make-vm-neg    :dst :r0 :src :r1)           t)
+          ("null-p" (make-vm-null-p :dst :r0 :src :r1)           t)
+          ("add"    (make-vm-add    :dst :r0 :lhs :r1 :rhs :r2)  nil))
+  (inst expected)
+  (if expected
+      (assert-true  (cl-cc::opt-unary-src-p inst))
+      (assert-false (cl-cc::opt-unary-src-p inst))))
 
 ;;; ─── opt-foldable-unary-arith-p / opt-foldable-type-pred-p ──────────────
 
-(deftest opt-foldable-unary-arith-p-neg
-  "vm-neg is a foldable unary arithmetic instruction."
-  (assert-true (cl-cc::opt-foldable-unary-arith-p (make-vm-neg :dst :r0 :src :r1))))
+(deftest-each opt-foldable-unary-arith-p
+  "opt-foldable-unary-arith-p is true for arithmetic unary ops, false for type predicates."
+  :cases (("neg"    (make-vm-neg    :dst :r0 :src :r1) t)
+          ("null-p" (make-vm-null-p :dst :r0 :src :r1) nil))
+  (inst expected)
+  (assert-equal expected (cl-cc::opt-foldable-unary-arith-p inst)))
 
-(deftest opt-foldable-unary-arith-p-null-p
-  "vm-null-p is NOT a foldable unary arithmetic instruction (it is a type pred)."
-  (assert-false (cl-cc::opt-foldable-unary-arith-p (make-vm-null-p :dst :r0 :src :r1))))
-
-(deftest opt-foldable-type-pred-p-null-p
-  "vm-null-p is a foldable type predicate."
-  (assert-true (cl-cc::opt-foldable-type-pred-p (make-vm-null-p :dst :r0 :src :r1))))
-
-(deftest opt-foldable-type-pred-p-neg
-  "vm-neg is NOT a foldable type predicate."
-  (assert-false (cl-cc::opt-foldable-type-pred-p (make-vm-neg :dst :r0 :src :r1))))
+(deftest-each opt-foldable-type-pred-p
+  "opt-foldable-type-pred-p is true for type predicates, false for arithmetic ops."
+  :cases (("null-p" (make-vm-null-p :dst :r0 :src :r1) t)
+          ("neg"    (make-vm-neg    :dst :r0 :src :r1) nil))
+  (inst expected)
+  (assert-equal expected (cl-cc::opt-foldable-type-pred-p inst)))

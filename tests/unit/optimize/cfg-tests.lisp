@@ -37,20 +37,12 @@
 
 ;;; ─── Basic CFG Construction ──────────────────────────────────────────────
 
-(deftest cfg-linear-block-count
-  "A linear sequence produces exactly one basic block."
-  (let ((cfg (make-test-cfg-linear)))
-    (assert-= 1 (cl-cc::cfg-block-count cfg))))
-
-(deftest cfg-linear-entry-exists
-  "The entry block is non-nil for a non-empty instruction list."
-  (let ((cfg (make-test-cfg-linear)))
-    (assert-true (cl-cc::cfg-entry cfg))))
-
-(deftest cfg-linear-entry-has-instructions
-  "The entry block contains the instructions (excluding labels)."
-  (let* ((cfg  (make-test-cfg-linear))
+(deftest cfg-linear-cfg-structure
+  "A linear sequence: exactly 1 block; non-nil entry; entry has instructions."
+  (let* ((cfg   (make-test-cfg-linear))
          (entry (cl-cc::cfg-entry cfg)))
+    (assert-= 1 (cl-cc::cfg-block-count cfg))
+    (assert-true entry)
     (assert-true (cl-cc::bb-instructions entry))))
 
 (deftest cfg-empty-instructions
@@ -86,34 +78,23 @@
 
 ;;; ─── RPO ─────────────────────────────────────────────────────────────────
 
-(deftest cfg-rpo-includes-all-blocks
-  "RPO visits all reachable blocks."
-  (let* ((cfg  (make-test-cfg-branch))
-         (rpo  (cl-cc::cfg-compute-rpo cfg)))
-    (assert-= (cl-cc::cfg-block-count cfg) (length rpo))))
-
-(deftest cfg-rpo-entry-first
-  "RPO starts with the entry block (index 0)."
+(deftest cfg-rpo-ordering
+  "RPO visits all reachable blocks; entry block is first."
   (let* ((cfg   (make-test-cfg-branch))
          (rpo   (cl-cc::cfg-compute-rpo cfg))
          (entry (cl-cc::cfg-entry cfg)))
+    (assert-= (cl-cc::cfg-block-count cfg) (length rpo))
     (assert-eq entry (car rpo))))
 
 ;;; ─── Dominator Tree ──────────────────────────────────────────────────────
 
-(deftest cfg-dominator-entry-dominates-all
-  "After computing dominators, the entry block's idom points to itself."
-  (let* ((cfg (make-test-cfg-branch)))
+(deftest cfg-dominator-properties
+  "Entry idom is itself; entry dominates the exit block."
+  (let* ((cfg   (make-test-cfg-branch))
+         (entry (cl-cc::cfg-entry cfg)))
     (cl-cc::cfg-compute-dominators cfg)
-    (let ((entry (cl-cc::cfg-entry cfg)))
-      (assert-eq entry (cl-cc::bb-idom entry)))))
-
-(deftest cfg-dominator-successors-dominated
-  "In a branch CFG, the entry dominates the then/exit blocks."
-  (let* ((cfg  (make-test-cfg-branch)))
-    (cl-cc::cfg-compute-dominators cfg)
-    (let ((entry (cl-cc::cfg-entry cfg))
-          (exit   (cl-cc::cfg-get-block-by-label cfg "exit")))
+    (assert-eq entry (cl-cc::bb-idom entry))
+    (let ((exit (cl-cc::cfg-get-block-by-label cfg "exit")))
       (when exit
         (assert-true (cl-cc::cfg-dominates-p entry exit))))))
 

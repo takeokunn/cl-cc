@@ -10,74 +10,47 @@
 
 ;;; ─── type-equal-p: product ─────────────────────────────────────────────────
 
-(deftest type-equal-product-same
-  "Equal products with same elements."
-  (let ((p1 (make-type-product :elems (list type-int type-string)))
-        (p2 (make-type-product :elems (list type-int type-string))))
-    (assert-true (type-equal-p p1 p2))))
-
-(deftest type-equal-product-different-length
-  "Products with different lengths are not equal."
-  (let ((p1 (make-type-product :elems (list type-int)))
-        (p2 (make-type-product :elems (list type-int type-string))))
-    (assert-false (type-equal-p p1 p2))))
-
-(deftest type-equal-product-different-elems
-  "Products with different elements are not equal."
-  (let ((p1 (make-type-product :elems (list type-int type-int)))
-        (p2 (make-type-product :elems (list type-int type-string))))
-    (assert-false (type-equal-p p1 p2))))
+(deftest type-equal-product
+  "type-equal-p on products: same elements equal; different length/elements not equal."
+  (assert-true  (type-equal-p (make-type-product :elems (list type-int type-string))
+                               (make-type-product :elems (list type-int type-string))))
+  (assert-false (type-equal-p (make-type-product :elems (list type-int))
+                               (make-type-product :elems (list type-int type-string))))
+  (assert-false (type-equal-p (make-type-product :elems (list type-int type-int))
+                               (make-type-product :elems (list type-int type-string)))))
 
 ;;; ─── type-equal-p: union / intersection ────────────────────────────────────
 
-(deftest type-equal-union-same
-  "Equal unions."
-  (let ((u1 (make-type-union (list type-int type-string)))
-        (u2 (make-type-union (list type-int type-string))))
-    (assert-true (type-equal-p u1 u2))))
-
-(deftest type-equal-intersection-same
-  "Equal intersections."
-  (let ((i1 (make-type-intersection (list type-int type-any)))
-        (i2 (make-type-intersection (list type-int type-any))))
-    (assert-true (type-equal-p i1 i2))))
+(deftest type-equal-union-intersection-same
+  "Equal unions and equal intersections are recognized by type-equal-p."
+  (assert-true (type-equal-p (make-type-union (list type-int type-string))
+                              (make-type-union (list type-int type-string))))
+  (assert-true (type-equal-p (make-type-intersection (list type-int type-any))
+                              (make-type-intersection (list type-int type-any)))))
 
 ;;; ─── type-equal-p: forall / exists ─────────────────────────────────────────
 
-(deftest type-equal-forall-same
-  "Forall types with same var and body are equal."
-  (let* ((v (fresh-type-var "a"))
-         (f1 (make-type-forall :var v :body (make-type-arrow (list v) type-int)))
-         (f2 (make-type-forall :var v :body (make-type-arrow (list v) type-int))))
-    (assert-true (type-equal-p f1 f2))))
-
-(deftest type-equal-forall-different-body
-  "Forall types with different bodies are not equal."
-  (let* ((v (fresh-type-var "a"))
-         (f1 (make-type-forall :var v :body type-int))
-         (f2 (make-type-forall :var v :body type-string)))
-    (assert-false (type-equal-p f1 f2))))
-
-(deftest type-equal-exists-same
-  "Exists types with same var and body are equal."
-  (let* ((v (fresh-type-var "a"))
-         (e1 (make-type-exists :var v :body type-int))
-         (e2 (make-type-exists :var v :body type-int)))
-    (assert-true (type-equal-p e1 e2))))
+(deftest type-equal-quantified-types
+  "type-equal-p on forall/exists: same-body equal; different-body not equal."
+  (let ((v (fresh-type-var "a")))
+    (assert-true  (type-equal-p
+                   (make-type-forall :var v :body (make-type-arrow (list v) type-int))
+                   (make-type-forall :var v :body (make-type-arrow (list v) type-int))))
+    (assert-false (type-equal-p
+                   (make-type-forall :var v :body type-int)
+                   (make-type-forall :var v :body type-string)))
+    (assert-true  (type-equal-p
+                   (make-type-exists :var v :body type-int)
+                   (make-type-exists :var v :body type-int)))))
 
 ;;; ─── type-equal-p: type-app ────────────────────────────────────────────────
 
-(deftest type-equal-app-same
-  "Type applications with same fun and arg are equal."
-  (let ((a1 (make-type-app :fun type-int :arg type-string))
-        (a2 (make-type-app :fun type-int :arg type-string)))
-    (assert-true (type-equal-p a1 a2))))
-
-(deftest type-equal-app-different-arg
-  "Type applications with different args are not equal."
-  (let ((a1 (make-type-app :fun type-int :arg type-string))
-        (a2 (make-type-app :fun type-int :arg type-int)))
-    (assert-false (type-equal-p a1 a2))))
+(deftest type-equal-app-cases
+  "type-equal-p on type-app: same fun/arg equal; different arg not equal."
+  (assert-true  (type-equal-p (make-type-app :fun type-int :arg type-string)
+                               (make-type-app :fun type-int :arg type-string)))
+  (assert-false (type-equal-p (make-type-app :fun type-int :arg type-string)
+                               (make-type-app :fun type-int :arg type-int))))
 
 ;;; ─── type-equal-p: type-mu ─────────────────────────────────────────────────
 
@@ -90,53 +63,33 @@
 
 ;;; ─── type-equal-p: type-linear ─────────────────────────────────────────────
 
-(deftest type-equal-linear-same
-  "Linear types with same grade and base are equal."
+(deftest type-equal-linear-grade-sensitivity
+  "Linear types are equal with same grade and base; unequal with different grade."
   (let ((l1 (make-type-linear :base type-int :grade :one))
-        (l2 (make-type-linear :base type-int :grade :one)))
-    (assert-true (type-equal-p l1 l2))))
-
-(deftest type-equal-linear-different-grade
-  "Linear types with different grades are not equal."
-  (let ((l1 (make-type-linear :base type-int :grade :one))
-        (l2 (make-type-linear :base type-int :grade :omega)))
-    (assert-false (type-equal-p l1 l2))))
+        (l2 (make-type-linear :base type-int :grade :one))
+        (l3 (make-type-linear :base type-int :grade :omega)))
+    (assert-true  (type-equal-p l1 l2))
+    (assert-false (type-equal-p l1 l3))))
 
 ;;; ─── type-equal-p: effect-row / effect-op ──────────────────────────────────
 
-(deftest type-equal-effect-row-same
-  "Same effect rows are equal."
-  (assert-true (type-equal-p +pure-effect-row+ +pure-effect-row+)))
-
-(deftest type-equal-effect-row-different
-  "Pure and IO effect rows are not equal."
-  (assert-false (type-equal-p +pure-effect-row+ +io-effect-row+)))
-
-(deftest type-equal-effect-op-same
-  "Same effect ops are equal."
-  (let ((e1 (make-type-effect-op :name 'io :args nil))
-        (e2 (make-type-effect-op :name 'io :args nil)))
-    (assert-true (type-equal-p e1 e2))))
-
-(deftest type-equal-effect-op-different-name
-  "Effect ops with different names are not equal."
-  (let ((e1 (make-type-effect-op :name 'io :args nil))
-        (e2 (make-type-effect-op :name 'state :args nil)))
-    (assert-false (type-equal-p e1 e2))))
+(deftest type-equal-effect-rows-and-ops
+  "type-equal-p on effect rows (pure/io) and effect ops (same/different name)."
+  (assert-true  (type-equal-p +pure-effect-row+ +pure-effect-row+))
+  (assert-false (type-equal-p +pure-effect-row+ +io-effect-row+))
+  (assert-true  (type-equal-p (make-type-effect-op :name 'io    :args nil)
+                               (make-type-effect-op :name 'io    :args nil)))
+  (assert-false (type-equal-p (make-type-effect-op :name 'io    :args nil)
+                               (make-type-effect-op :name 'state :args nil))))
 
 ;;; ─── type-equal-p: constraint / qualified ──────────────────────────────────
 
-(deftest type-equal-constraint-same
-  "Type-constraint nodes with same class and arg are equal."
-  (let ((c1 (cl-cc/type::make-type-constraint :class-name 'eq :type-arg type-int))
-        (c2 (cl-cc/type::make-type-constraint :class-name 'eq :type-arg type-int)))
-    (assert-true (type-equal-p c1 c2))))
-
-(deftest type-equal-constraint-different-class
-  "Type-constraint nodes with different class names are not equal."
-  (let ((c1 (cl-cc/type::make-type-constraint :class-name 'eq :type-arg type-int))
-        (c2 (cl-cc/type::make-type-constraint :class-name 'ord :type-arg type-int)))
-    (assert-false (type-equal-p c1 c2))))
+(deftest type-equal-constraint-cases
+  "type-equal-p on type-constraint: same class equal; different class name not equal."
+  (assert-true  (type-equal-p (cl-cc/type::make-type-constraint :class-name 'eq  :type-arg type-int)
+                               (cl-cc/type::make-type-constraint :class-name 'eq  :type-arg type-int)))
+  (assert-false (type-equal-p (cl-cc/type::make-type-constraint :class-name 'eq  :type-arg type-int)
+                               (cl-cc/type::make-type-constraint :class-name 'ord :type-arg type-int))))
 
 (deftest type-equal-qualified-same
   "Qualified types with same constraints and body are equal."
@@ -148,25 +101,19 @@
 ;;; ─── type-equal-p: error sentinel ──────────────────────────────────────────
 
 (deftest type-equal-error-never-equal
-  "Two type-error nodes are never equal (even same object)."
+  "type-error nodes are never equal (even to themselves, or to primitives)."
   (let ((e (make-type-error :message "test")))
-    (assert-false (type-equal-p e e))))
-
-(deftest type-equal-error-vs-primitive
-  "type-error is not equal to any primitive."
-  (assert-false (type-equal-p (make-type-error :message "x") type-int)))
+    (assert-false (type-equal-p e e))
+    (assert-false (type-equal-p e type-int))))
 
 ;;; ─── type-equal-p: rigid ───────────────────────────────────────────────────
 
-(deftest type-equal-rigid-same
-  "Same rigid var is equal to itself."
-  (let ((r (fresh-rigid-var "a")))
-    (assert-true (type-equal-p r r))))
-
-(deftest type-equal-rigid-different
-  "Different rigid vars are not equal."
-  (let ((r1 (fresh-rigid-var "a"))
+(deftest type-equal-rigid-vars
+  "Rigid vars: same var equals itself; different rigid vars are not equal."
+  (let ((r  (fresh-rigid-var "a"))
+        (r1 (fresh-rigid-var "a"))
         (r2 (fresh-rigid-var "b")))
+    (assert-true  (type-equal-p r r))
     (assert-false (type-equal-p r1 r2))))
 
 ;;; ─── type-free-vars ────────────────────────────────────────────────────────
@@ -190,26 +137,12 @@
          (fvs (type-free-vars arr)))
     (assert-equal 2 (length fvs))))
 
-(deftest free-vars-forall-binds
-  "Forall binds its var, removing it from free vars."
-  (let* ((v (fresh-type-var "a"))
-         (f (make-type-forall :var v :body v))
-         (fvs (type-free-vars f)))
-    (assert-null fvs)))
-
-(deftest free-vars-exists-binds
-  "Exists binds its var."
-  (let* ((v (fresh-type-var "a"))
-         (e (make-type-exists :var v :body v))
-         (fvs (type-free-vars e)))
-    (assert-null fvs)))
-
-(deftest free-vars-mu-binds
-  "Mu binds its recursion var."
-  (let* ((v (fresh-type-var "a"))
-         (m (make-type-mu :var v :body v))
-         (fvs (type-free-vars m)))
-    (assert-null fvs)))
+(deftest free-vars-binding-forms-remove-var
+  "Forall, exists, and mu all bind their recursion var, yielding no free variables."
+  (let ((v (fresh-type-var "a")))
+    (assert-null (type-free-vars (make-type-forall :var v :body v)))
+    (assert-null (type-free-vars (make-type-exists :var v :body v)))
+    (assert-null (type-free-vars (make-type-mu :var v :body v)))))
 
 (deftest free-vars-product
   "Product collects free vars from all elements."

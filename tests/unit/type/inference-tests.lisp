@@ -31,32 +31,27 @@
     (assert-true (cl-cc/type:type-primitive-p ty))
     (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty))))
 
-(deftest infer-lookup-slot-type-missing
-  "lookup-slot-type returns nil for unknown slot."
+(deftest infer-lookup-unknown-types-return-nil
+  "lookup-slot-type and lookup-class-type return nil for unknown slot/class."
   (cl-cc/type:register-class-type 'test-class-7893
     (list (cons 'x cl-cc/type:type-int)))
-  (assert-null (cl-cc/type:lookup-slot-type 'test-class-7893 'nonexistent)))
-
-(deftest infer-lookup-class-type-unregistered
-  "lookup-class-type returns nil for unregistered class."
+  (assert-null (cl-cc/type:lookup-slot-type 'test-class-7893 'nonexistent))
   (assert-null (cl-cc/type:lookup-class-type 'completely-unknown-class-xyz)))
 
 ;;; ─── Type Alias Registry ──────────────────────────────────────────────────
 
-(deftest infer-register-type-alias
-  "register-type-alias + lookup-type-alias roundtrip."
+(deftest infer-type-alias-registry
+  "register-type-alias/lookup-type-alias roundtrip; unknown alias returns nil."
   (cl-cc/type:register-type-alias 'test-alias-7891 '(or fixnum string))
-  (assert-equal '(or fixnum string) (cl-cc/type:lookup-type-alias 'test-alias-7891)))
-
-(deftest infer-lookup-type-alias-missing
-  "lookup-type-alias returns nil for unknown alias."
+  (assert-equal '(or fixnum string) (cl-cc/type:lookup-type-alias 'test-alias-7891))
   (assert-null (cl-cc/type:lookup-type-alias 'no-such-alias-xyz)))
 
 ;;; ─── Type Predicate Table ─────────────────────────────────────────────────
 
-(deftest infer-type-predicate-table-is-hash
-  "*type-predicate-table* is a hash table."
-  (assert-true (hash-table-p cl-cc/type:*type-predicate-table*)))
+(deftest infer-global-tables-are-hash-tables
+  "*type-predicate-table* and *constant-effect-table* are both hash tables."
+  (assert-true (hash-table-p cl-cc/type:*type-predicate-table*))
+  (assert-true (hash-table-p cl-cc/type:*constant-effect-table*)))
 
 (deftest infer-register-type-predicate-custom
   "register-type-predicate adds a custom predicate."
@@ -66,10 +61,6 @@
     (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty))))
 
 ;;; ─── Constant Effect Table ────────────────────────────────────────────────
-
-(deftest infer-constant-effect-table-is-hash
-  "*constant-effect-table* is a hash table."
-  (assert-true (hash-table-p cl-cc/type:*constant-effect-table*)))
 
 (deftest infer-constant-effect-table-int-is-pure
   "ast-int maps to +pure-effect-row+ in the constant table."
@@ -132,21 +123,16 @@
       (assert-eq 'x var-name)
       (assert-eq 'my-class (cl-cc/type:type-primitive-name guard-type)))))
 
-(deftest infer-extract-type-guard-non-predicate
-  "extract-type-guard returns nil for non-predicate calls."
-  (let ((ast (cl-cc:lower-sexp-to-ast '(foo x))))
-    (multiple-value-bind (var-name guard-type)
-        (cl-cc/type::extract-type-guard ast)
-      (assert-null var-name)
-      (assert-null guard-type))))
-
-(deftest infer-extract-type-guard-non-call
-  "extract-type-guard returns nil for non-call AST."
-  (let ((ast (cl-cc:lower-sexp-to-ast '42)))
-    (multiple-value-bind (var-name guard-type)
-        (cl-cc/type::extract-type-guard ast)
-      (assert-null var-name)
-      (assert-null guard-type))))
+(deftest infer-extract-type-guard-returns-nil
+  "extract-type-guard returns nil for non-predicate calls and non-call AST."
+  (let ((ast-call (cl-cc:lower-sexp-to-ast '(foo x)))
+        (ast-int  (cl-cc:lower-sexp-to-ast '42)))
+    (multiple-value-bind (v1 t1) (cl-cc/type::extract-type-guard ast-call)
+      (assert-null v1)
+      (assert-null t1))
+    (multiple-value-bind (v2 t2) (cl-cc/type::extract-type-guard ast-int)
+      (assert-null v2)
+      (assert-null t2))))
 
 ;;; ─── narrow-union-type ────────────────────────────────────────────────────
 
@@ -173,21 +159,16 @@
 
 ;;; ─── infer: ast-quote edge cases ──────────────────────────────────────────
 
-(deftest infer-quote-string
-  "Quoting a string infers type-string."
+(deftest-each infer-quote-literal-types
+  "Quoting a string infers type-string; quoting a cons infers type-cons."
+  :cases (("string" '(quote "hello") cl-cc/type:type-string)
+          ("cons"   '(quote (1 2 3)) cl-cc/type:type-cons))
+  (sexp expected-type)
   (reset-type-vars!)
-  (let ((ast (cl-cc:lower-sexp-to-ast '(quote "hello"))))
+  (let ((ast (cl-cc:lower-sexp-to-ast sexp)))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-type-equal ty cl-cc/type:type-string))))
-
-(deftest infer-quote-cons
-  "Quoting a cons infers type-cons."
-  (reset-type-vars!)
-  (let ((ast (cl-cc:lower-sexp-to-ast '(quote (1 2 3)))))
-    (multiple-value-bind (ty subst) (infer-with-env ast)
-      (declare (ignore subst))
-      (assert-type-equal ty cl-cc/type:type-cons))))
+      (assert-type-equal ty expected-type))))
 
 ;;; ─── infer: ast-the ───────────────────────────────────────────────────────
 
@@ -208,18 +189,15 @@
 
 ;;; ─── infer: ast-setq ─────────────────────────────────────────────────────
 
-(deftest infer-setq-bound-var
-  "infer (setq x 42) where x:int succeeds."
+(deftest infer-setq-returns-value-type
+  "infer (setq x 42) returns fixnum regardless of whether x is bound in env."
   (reset-type-vars!)
   (let* ((ast (cl-cc:lower-sexp-to-ast '(setq x 42)))
          (env (type-env-extend 'x (type-to-scheme cl-cc/type:type-int)
                                (type-env-empty))))
     (multiple-value-bind (ty subst) (cl-cc/type:infer ast env)
       (declare (ignore subst))
-      (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty)))))
-
-(deftest infer-setq-unbound-var
-  "infer (setq x 42) where x is unbound still returns the value type."
+      (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty))))
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast '(setq x 42))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
@@ -228,26 +206,14 @@
 
 ;;; ─── infer: ast-defun / ast-defvar ────────────────────────────────────────
 
-(deftest infer-defun-returns-symbol
-  "infer (defun f (x) (+ x 1)) returns type-symbol."
+(deftest-each infer-top-level-form-returns-symbol
+  "Top-level defun and defvar all return type-symbol."
+  :cases (("defun"         '(defun f (x) (+ x 1)))
+          ("defvar-init"   '(defvar *x* 42))
+          ("defvar-no-val" '(defvar *x*)))
+  (sexp)
   (reset-type-vars!)
-  (let ((ast (cl-cc:lower-sexp-to-ast '(defun f (x) (+ x 1)))))
-    (multiple-value-bind (ty subst) (infer-with-env ast)
-      (declare (ignore subst))
-      (assert-type-equal ty cl-cc/type:type-symbol))))
-
-(deftest infer-defvar-returns-symbol
-  "infer (defvar *x* 42) returns type-symbol."
-  (reset-type-vars!)
-  (let ((ast (cl-cc:lower-sexp-to-ast '(defvar *x* 42))))
-    (multiple-value-bind (ty subst) (infer-with-env ast)
-      (declare (ignore subst))
-      (assert-type-equal ty cl-cc/type:type-symbol))))
-
-(deftest infer-defvar-no-value-returns-symbol
-  "infer (defvar *x*) with no init returns type-symbol."
-  (reset-type-vars!)
-  (let ((ast (cl-cc:lower-sexp-to-ast '(defvar *x*))))
+  (let ((ast (cl-cc:lower-sexp-to-ast sexp)))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
       (assert-type-equal ty cl-cc/type:type-symbol))))
@@ -275,19 +241,13 @@
 
 ;;; ─── infer: ast-flet / ast-labels ─────────────────────────────────────────
 
-(deftest infer-flet-body-uses-binding
-  "infer (flet ((f (x) (+ x 1))) (f 5)) returns int."
+(deftest-each infer-local-function-forms
+  "flet and labels local function bindings are usable in their body scope."
+  :cases (("flet"   '(flet   ((f (x) (+ x 1))) (f 5)))
+          ("labels" '(labels ((f (x) (+ x 1))) (f 5))))
+  (sexp)
   (reset-type-vars!)
-  (let ((ast (cl-cc:lower-sexp-to-ast '(flet ((f (x) (+ x 1))) (f 5)))))
-    (multiple-value-bind (ty subst) (infer-with-env ast)
-      (declare (ignore subst))
-      (assert-type-equal ty cl-cc/type:type-int))))
-
-(deftest infer-labels-recursive
-  "infer (labels ((f (x) (if ... (f ...)))) (f 5)) returns int."
-  (reset-type-vars!)
-  (let ((ast (cl-cc:lower-sexp-to-ast
-              '(labels ((f (x) (+ x 1))) (f 5)))))
+  (let ((ast (cl-cc:lower-sexp-to-ast sexp)))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
       (assert-type-equal ty cl-cc/type:type-int))))
@@ -387,50 +347,34 @@
 
 ;;; ─── check-body-effects ───────────────────────────────────────────────────
 
-(deftest infer-check-body-effects-passes
-  "check-body-effects passes when declared effects cover actual."
-  (let ((asts (list (cl-cc:lower-sexp-to-ast '(print 42))))
-        (declared cl-cc/type:+io-effect-row+))
-    ;; Should not signal
-    (cl-cc/type:check-body-effects asts declared (type-env-empty))
-    (assert-true t)))
-
-(deftest infer-check-body-effects-fails
-  "check-body-effects signals error when undeclared effects present."
-  (let ((asts (list (cl-cc:lower-sexp-to-ast '(print 42))))
-        (declared cl-cc/type:+pure-effect-row+))
+(deftest infer-check-body-effects-behavior
+  "check-body-effects passes when declared effects cover actual; signals error when undeclared effects present."
+  (let ((asts (list (cl-cc:lower-sexp-to-ast '(print 42)))))
+    (cl-cc/type:check-body-effects asts cl-cc/type:+io-effect-row+ (type-env-empty))
+    (assert-true t)
     (assert-signals cl-cc/type:type-inference-error
-      (cl-cc/type:check-body-effects asts declared (type-env-empty)))))
+      (cl-cc/type:check-body-effects asts cl-cc/type:+pure-effect-row+ (type-env-empty)))))
 
 ;;; ─── Skolem Helpers ───────────────────────────────────────────────────────
 
-(deftest infer-skolem-appears-in-type-fn
-  "skolem-appears-in-type-p detects skolem in function type."
+(deftest infer-skolem-appears-in-type-p
+  "skolem-appears-in-type-p detects skolem in type when present; nil when absent."
   (let* ((sk (cl-cc/type:make-type-skolem "a"))
-         (fn (cl-cc/type:make-type-function-raw
-              :params (list sk) :return cl-cc/type:type-int)))
-    (assert-true (cl-cc/type::skolem-appears-in-type-p sk fn))))
+         (fn-with (cl-cc/type:make-type-function-raw
+                   :params (list sk) :return cl-cc/type:type-int))
+         (fn-without (cl-cc/type:make-type-function-raw
+                      :params (list cl-cc/type:type-int) :return cl-cc/type:type-int)))
+    (assert-true  (cl-cc/type::skolem-appears-in-type-p sk fn-with))
+    (assert-false (cl-cc/type::skolem-appears-in-type-p sk fn-without))))
 
-(deftest infer-skolem-appears-in-type-absent
-  "skolem-appears-in-type-p returns nil when skolem not present."
-  (let ((sk (cl-cc/type:make-type-skolem "a"))
-        (fn (cl-cc/type:make-type-function-raw
-             :params (list cl-cc/type:type-int) :return cl-cc/type:type-int)))
-    (assert-false (cl-cc/type::skolem-appears-in-type-p sk fn))))
-
-(deftest infer-skolem-appears-in-subst
-  "skolem-appears-in-subst-p detects skolem in substitution range."
+(deftest infer-skolem-appears-in-subst-p
+  "skolem-appears-in-subst-p detects skolem in substitution range when present; nil when absent."
   (let* ((sk (cl-cc/type:make-type-skolem "a"))
-         (v (cl-cc/type:make-type-variable 'x))
-         (s (subst-extend v sk (make-substitution))))
-    (assert-true (cl-cc/type::skolem-appears-in-subst-p sk s))))
-
-(deftest infer-skolem-appears-in-subst-absent
-  "skolem-appears-in-subst-p returns nil when skolem not in range."
-  (let* ((sk (cl-cc/type:make-type-skolem "a"))
-         (v (cl-cc/type:make-type-variable 'x))
-         (s (subst-extend v cl-cc/type:type-int (make-substitution))))
-    (assert-false (cl-cc/type::skolem-appears-in-subst-p sk s))))
+         (v  (cl-cc/type:make-type-variable 'x)))
+    (let ((s-with (subst-extend v sk (make-substitution))))
+      (assert-true (cl-cc/type::skolem-appears-in-subst-p sk s-with)))
+    (let ((s-without (subst-extend v cl-cc/type:type-int (make-substitution))))
+      (assert-false (cl-cc/type::skolem-appears-in-subst-p sk s-without)))))
 
 (deftest infer-check-skolem-escape-signals
   "check-skolem-escape signals error when skolem leaks."

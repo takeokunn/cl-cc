@@ -38,10 +38,8 @@ Options:
 
 Version: ~A~%" *version*))
 
-(defun %print-command-help (command)
-  (cond
-    ((string= command "run")
-     (format t "Usage: cl-cc run [options] <file>
+(defparameter *cli-help-strings*
+  '(("run" . "Usage: cl-cc run [options] <file>
 
   Compile and run a source file using the CL-CC VM.
 
@@ -49,9 +47,8 @@ Options:
   --lang lisp|php   Source language (auto-detect from .php extension)
   --stdlib          Prepend standard library
   --verbose         Show compilation details on stderr
-"))
-    ((string= command "compile")
-     (format t "Usage: cl-cc compile [options] <file>
+")
+    ("compile" . "Usage: cl-cc compile [options] <file>
 
   Compile source to a native Mach-O binary.
 
@@ -60,18 +57,16 @@ Options:
   --arch x86-64|arm64   Target architecture (default: x86-64)
   --lang lisp|php       Source language (auto-detect from .php extension)
   --verbose             Show compilation details on stderr
-"))
-    ((string= command "eval")
-     (format t "Usage: cl-cc eval [options] <expr>
+")
+    ("eval" . "Usage: cl-cc eval [options] <expr>
 
   Evaluate a CL-CC expression and print the result.
 
 Options:
   --stdlib   Prepend standard library
   --verbose  Show compilation details on stderr
-"))
-    ((string= command "repl")
-     (format t "Usage: cl-cc repl [options]
+")
+    ("repl" . "Usage: cl-cc repl [options]
 
   Start an interactive ANSI Common Lisp REPL.
   Definitions persist across expressions within the session.
@@ -84,9 +79,8 @@ Examples:
   * (square 7)
   => 49
   * (exit) or Ctrl+D to quit
-"))
-    ((string= command "check")
-     (format t "Usage: cl-cc check [options] <file>
+")
+    ("check" . "Usage: cl-cc check [options] <file>
 
   Run type inference on a source file without executing it.
 
@@ -94,9 +88,8 @@ Options:
   --lang lisp|php   Source language
   --strict          Treat type warnings as errors (exit 1)
   --verbose         Show type-inference details on stderr
-"))
-    ((string= command "selfhost")
-     (format t "Usage: cl-cc selfhost
+")
+    ("selfhost" . "Usage: cl-cc selfhost
 
   Verify cl-cc's self-hosting capabilities.
 
@@ -104,14 +97,20 @@ Options:
     1. Macro expansion through own VM (our-eval)
     2-5. Basic compilation (arithmetic, recursion, closure, defmacro)
     6-7. Meta-circular compilation (compiler compiles compiler)
-    8. Source file self-loading (84/84 files)
+    8. Source file self-loading (87/87 files)
     9. Host eval elimination (4/7 replaced)
 
   Exit code 0 if all checks pass, 1 otherwise.
 "))
-    (t
-     (format *error-output* "Unknown command: ~A~%" command)
-     (%print-global-help))))
+  "Alist mapping command name strings to their help text strings.")
+
+(defun %print-command-help (command)
+  (let ((entry (assoc command *cli-help-strings* :test #'string=)))
+    (if entry
+        (format t "~A" (cdr entry))
+        (progn
+          (format *error-output* "Unknown command: ~A~%" command)
+          (%print-global-help)))))
 
 (defun %print-help (&optional command)
   (if command
@@ -378,7 +377,7 @@ Calls (uiop:quit 2) on unrecognised values."
                    (error () :err)))
 
       ;; 4. Source file self-loading
-      (format t "--- Source file self-loading (84 files) ---~%")
+      (format t "--- Source file self-loading (87 files) ---~%")
       (let ((ok 0)
             (files '("src/package.lisp" "src/parse/cst.lisp" "src/parse/diagnostics.lisp"
                      "src/parse/ast.lisp" "src/parse/prolog.lisp" "src/parse/dcg.lisp"
@@ -387,8 +386,9 @@ Calls (uiop:quit 2) on unrecognised values."
                      "src/parse/php/lexer.lisp" "src/parse/php/parser.lisp" "src/parse/php/grammar.lisp"
                      "src/parse/cst-to-ast.lisp" "src/expand/macro.lisp" "src/expand/expander.lisp"
                      "src/vm/package.lisp" "src/vm/vm.lisp" "src/vm/primitives.lisp"
-                     "src/vm/io.lisp" "src/vm/conditions.lisp" "src/vm/list.lisp"
-                     "src/vm/strings.lisp" "src/vm/hash.lisp"
+                     "src/vm/io.lisp" "src/vm/format.lisp" "src/vm/conditions.lisp"
+                     "src/vm/list.lisp" "src/vm/array.lisp"
+                     "src/vm/strings.lisp" "src/vm/symbols.lisp" "src/vm/hash.lisp"
                      "src/type/package.lisp" "src/type/kind.lisp" "src/type/multiplicity.lisp"
                      "src/type/representation.lisp" "src/type/substitution.lisp" "src/type/unification.lisp"
                      "src/type/subtyping.lisp" "src/type/effect.lisp" "src/type/row.lisp"
@@ -448,7 +448,7 @@ Calls (uiop:quit 2) on unrecognised values."
             (format t "  Proven capabilities:~%")
             (format t "    - Macro expansion through own VM (our-eval)~%")
             (format t "    - Meta-circular compilation (compiler compiles compiler)~%")
-            (format t "    - 84/84 source files self-load through own compiler~%")
+            (format t "    - 87/87 source files self-load through own compiler~%")
             (format t "    - VM host function bridge (whitelist-based)~%")
             (format t "    - #'fn resolves registered closures from function registry~%")
             (uiop:quit 0))
@@ -459,6 +459,15 @@ Calls (uiop:quit 2) on unrecognised values."
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Main dispatcher
 ;;; ─────────────────────────────────────────────────────────────────────────
+
+(defparameter *cli-command-dispatch*
+  '(("run"      . %do-run)
+    ("compile"  . %do-compile)
+    ("eval"     . %do-eval)
+    ("repl"     . %do-repl)
+    ("check"    . %do-check)
+    ("selfhost" . %do-selfhost))
+  "Alist mapping command name strings to their handler functions.")
 
 (defun main ()
   "CL-CC CLI entry point.
@@ -485,13 +494,11 @@ subcommands, then dispatches to the appropriate handler."
         ((string= command "help")
          (%print-help (car (parsed-args-positional parsed)))
          (uiop:quit 0))
-        ((string= command "run")     (%do-run     parsed))
-        ((string= command "compile") (%do-compile parsed))
-        ((string= command "eval")    (%do-eval    parsed))
-        ((string= command "repl")    (%do-repl    parsed))
-        ((string= command "check")   (%do-check   parsed))
-        ((string= command "selfhost") (%do-selfhost parsed))
         (t
-         (format *error-output* "Unknown command: ~A~%~%" command)
-         (%print-global-help)
-         (uiop:quit 2))))))
+         (let ((entry (assoc command *cli-command-dispatch* :test #'string=)))
+           (if entry
+               (funcall (cdr entry) parsed)
+               (progn
+                 (format *error-output* "Unknown command: ~A~%~%" command)
+                 (%print-global-help)
+                 (uiop:quit 2)))))))))

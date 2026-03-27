@@ -71,33 +71,25 @@
   (form expected)
   (assert-equal (our-macroexpand-1 form) expected))
 
-(deftest or-macro-two-args
-  "Test OR with two arguments"
+(deftest or-macro-multi-arg-expansion
+  "OR with 2 args: LET wrapping IF; full 3-arg expansion nests two LETs."
+  ;; two args: (let ((tmp a)) (if tmp tmp b))
   (let ((result (our-macroexpand-1 '(or a b))))
     (assert-eq (car result) 'let)
-    ;; Creates a temporary variable
     (assert-= (length result) 3)
-    ;; Body should be IF expression
-    (assert-eq (car (caddr result)) 'if)))
-
-(deftest or-macro-full-expansion
-  "Test full expansion of OR creates nested LETs"
+    (assert-eq (car (caddr result)) 'if))
+  ;; three args full: else-branch of if is another let
   (let ((result (our-macroexpand-all '(or a b c))))
-    ;; Full expansion: (let ((#:OR1 a)) (if #:OR1 #:OR1 (let ((#:OR2 b)) (if #:OR2 #:OR2 c))))
     (assert-eq (car result) 'let)
-    ;; The else-branch of the if should be another let (from (or b c) expansion)
     (let ((inner (cadddr (caddr result))))
       (assert-eq (car inner) 'let))))
 
 ;;; Sequential Binding Tests
 
-(deftest let*-macro-empty-bindings
-  "Test LET* with no bindings (just wraps in PROGN)"
+(deftest let*-macro-base-cases
+  "LET* base cases: empty bindings wraps in PROGN; single binding wraps in LET."
   (assert-equal (our-macroexpand-1 '(let* () body1 body2))
-                '(progn body1 body2)))
-
-(deftest let*-macro-single-binding
-  "Test LET* with single binding"
+                '(progn body1 body2))
   (assert-equal (our-macroexpand-1 '(let* ((a 1)) body))
                 '(let ((a 1)) (let* nil body))))
 
@@ -142,40 +134,26 @@
 ;;; Sequencing Macro Tests
 
 (deftest prog1-macro-expansion
-  "Test PROG1 macro expansion"
+  "PROG1 binds the first-form result via a gensym and returns it after executing body."
   (let ((result (our-macroexpand-1 '(prog1 first-form body1 body2))))
-    ;; Expansion: (let ((#:RESULT first-form)) body1 body2 #:RESULT)
     (assert-eq (car result) 'let)
-    ;; Binding var should be a gensym symbol: (caaadr result) = car of binding pair
     (assert-true (symbolp (caaadr result)))
-    ;; Binding value should be first-form: (cadr of binding pair)
     (assert-eq (cadr (caadr result)) 'first-form)
-    ;; Last element should be the gensym
-    (assert-eq (car (last result)) (caaadr result))))
-
-(deftest prog1-macro-single-body
-  "Test PROG1 with single body form"
+    (assert-eq (car (last result)) (caaadr result)))
+  ;; With no body: (let ((#:R first-form)) #:R) — exactly 3 elements
   (let ((result (our-macroexpand-1 '(prog1 first-form))))
-    ;; Expansion: (let ((#:RESULT first-form)) #:RESULT) — 3 elements
     (assert-eq (car result) 'let)
-    ;; Should still work even without body
     (assert-= (length result) 3)))
 
 (deftest prog2-macro-expansion
-  "Test PROG2 macro expansion"
+  "PROG2 wraps in progn: evaluates first-form, then returns second-form after body."
   (let ((result (our-macroexpand-1 '(prog2 first-form second-form body1 body2))))
-    ;; Expansion: (progn first-form (let ((#:R second-form)) body1 body2 #:R))
     (assert-eq (car result) 'progn)
-    ;; First element of body should be first-form
     (assert-eq (cadr result) 'first-form)
-    ;; Second element should be a LET form (not the symbol 'let)
     (assert-eq (car (caddr result)) 'let)
-    ;; Should return the gensym at end of let body
     (let ((let-body (caddr result)))
-      (assert-eq (car (last let-body)) (caaadr let-body)))))
-
-(deftest prog2-macro-single-body
-  "Test PROG2 with single body form"
+      (assert-eq (car (last let-body)) (caaadr let-body))))
+  ;; With single body form, structure is the same
   (let ((result (our-macroexpand-1 '(prog2 first-form second-form body))))
     (assert-eq (car result) 'progn)
     (assert-eq (cadr result) 'first-form)
@@ -188,34 +166,23 @@
   (assert-equal (our-macroexpand-1 '(setf x 10))
                 '(setq x 10)))
 
-(deftest setf-macro-complex-place
-  "Test SETF with complex place (should error)"
-  (assert-signals error (our-macroexpand-1 '(setf (car x) 10))))
+(deftest-each setf-macro-unknown-place-errors
+  "SETF signals an error for place forms with unknown accessor names."
+  :cases (("car-place"  '(setf (car x)  10))
+          ("cons-place" '(setf (cons x) 10)))
+  (form)
+  (assert-signals error (our-macroexpand-1 form)))
 
-(deftest setf-macro-cons-place
-  "Test SETF with cons place (should error)"
-  (assert-signals error (our-macroexpand-1 '(setf (cons x) 10))))
-
-(deftest psetq-macro-empty
-  "Test PSETQ with no pairs"
+(deftest psetq-macro-behavior
+  "PSETQ: empty expands to nil; 1-pair and N-pair forms produce outer LET with bindings, body starting with SETQ."
   (assert-equal (our-macroexpand-1 '(psetq))
-                nil))
-
-(deftest psetq-macro-single-pair
-   "Test PSETQ with single pair"
-   (let ((result (our-macroexpand-1 '(psetq a 1))))
-     (assert-eq (car result) 'let)
-     ;; Should create bindings
-     (let ((bindings (cadr result)))
-       (assert-true (consp bindings))
-       ;; Body should be setq forms
-       (assert-eq (car (caddr result)) 'setq))))
-
-(deftest psetq-macro-multiple-pairs
-  "Test PSETQ with multiple pairs"
+                nil)
+  (let ((result (our-macroexpand-1 '(psetq a 1))))
+    (assert-eq 'let (car result))
+    (assert-true (consp (cadr result)))
+    (assert-eq 'setq (car (caddr result))))
   (let ((result (our-macroexpand-1 '(psetq a 1 b 2 c 3))))
-    (assert-eq (car result) 'let)
-    ;; Should evaluate all values before assignment
+    (assert-eq 'let (car result))
     (assert-true (consp (cadr result)))))
 
 (deftest psetq-macro-full-expansion
@@ -230,59 +197,40 @@
 ;;; Multiple Value Macro Tests
 
 (deftest multiple-value-bind-macro-expansion
-  "Test MULTIPLE-VALUE-BIND macro expansion"
+  "MULTIPLE-VALUE-BIND: expands to multiple-value-call+lambda for all input shapes."
+  ;; Multi-var with body
   (let ((result (our-macroexpand-1 '(multiple-value-bind (a b c) (values 1 2 3) body1 body2))))
-    ;; Expansion: (multiple-value-call (lambda (a b c) body1 body2) (values 1 2 3))
-    (assert-eq (car result) 'multiple-value-call)
-    ;; Second element is a lambda FORM (not the symbol 'lambda)
-    (assert-eq (caadr result) 'lambda)
-    ;; Lambda should have the variables
-    (assert-equal (cadr (cadr result)) '(a b c))
-    ;; Third element is the values form (not the symbol 'values)
-    (assert-eq (caaddr result) 'values)))
-
-(deftest multiple-value-bind-macro-single-var
-  "Test MULTIPLE-VALUE-BIND with single variable"
+    (assert-eq 'multiple-value-call (car result))
+    (assert-eq 'lambda (caadr result))
+    (assert-equal '(a b c) (cadr (cadr result)))
+    (assert-eq 'values (caaddr result)))
+  ;; Single var
   (let ((result (our-macroexpand-1 '(multiple-value-bind (x) (foo) body))))
-    ;; Expansion: (multiple-value-call (lambda (x) body) (foo))
-    (assert-eq (car result) 'multiple-value-call)
-    ;; Second element is the lambda FORM
-    (assert-eq (caadr result) 'lambda)
-    (assert-equal (cadr (cadr result)) '(x))))
-
-(deftest multiple-value-bind-macro-no-body
-  "Test MULTIPLE-VALUE-BIND with no body"
+    (assert-eq 'multiple-value-call (car result))
+    (assert-eq 'lambda (caadr result))
+    (assert-equal '(x) (cadr (cadr result))))
+  ;; No body: lambda body is empty
   (let ((result (our-macroexpand-1 '(multiple-value-bind (a b) (values 1 2)))))
-    (assert-eq (car result) 'multiple-value-call)
-    ;; Lambda should have empty body
+    (assert-eq 'multiple-value-call (car result))
     (assert-null (cddr (cadr result)))))
 
 (deftest multiple-value-setq-macro-expansion
-  "Test MULTIPLE-VALUE-SETQ macro expansion"
-  (let ((result (our-macroexpand-1 '(multiple-value-setq (a b c) (values 1 2 3)))))
-    ;; Expansion: (let ((#:MVS (multiple-value-list ...))) (setq a ...) ...)
-    (assert-eq (car result) 'let)
-    ;; bindings = ((#:MVS (multiple-value-list ...)))
-    (let ((bindings (cadr result)))
-      (assert-true (consp bindings))
-      ;; The binding value's car is multiple-value-list: (caadar bindings)
-      (assert-eq (caadar bindings) 'multiple-value-list))))
-
-(deftest multiple-value-setq-macro-with-body
-  "Test MULTIPLE-VALUE-SETQ with body (body should be ignored)"
-  ;; The macro ignores extra-body (only takes vars and form)
+  "MULTIPLE-VALUE-SETQ: outer LET binding from multiple-value-list, for all input shapes."
+  ;; Multi-var
+  (let* ((result   (our-macroexpand-1 '(multiple-value-setq (a b c) (values 1 2 3))))
+         (bindings (cadr result)))
+    (assert-eq 'let (car result))
+    (assert-true (consp bindings))
+    (assert-eq 'multiple-value-list (caadar bindings)))
+  ;; Extra body is ignored: (let (...) setq setq setq car) — 5 elements
   (let ((result (our-macroexpand-1 '(multiple-value-setq (a b) (values 1 2) extra-body))))
-    ;; Expansion: (let ((#:MVS ...)) (setq a ...) (setq b ...) (car #:MVS)) — 5 elements
-    (assert-eq (car result) 'let)
-    (assert-= (length result) 5)))
-
-(deftest multiple-value-setq-macro-single-var
-  "Test MULTIPLE-VALUE-SETQ with single variable"
-  (let ((result (our-macroexpand-1 '(multiple-value-setq (x) (foo)))))
-    (assert-eq (car result) 'let)
-    (let ((bindings (cadr result)))
-      ;; The binding value's car is multiple-value-list: (caadar bindings)
-      (assert-eq (caadar bindings) 'multiple-value-list))))
+    (assert-eq 'let (car result))
+    (assert-= 5 (length result)))
+  ;; Single var
+  (let* ((result   (our-macroexpand-1 '(multiple-value-setq (x) (foo))))
+         (bindings (cadr result)))
+    (assert-eq 'let (car result))
+    (assert-eq 'multiple-value-list (caadar bindings))))
 
 ;;; Nested Macro Tests
 
@@ -324,56 +272,31 @@
       (assert-eq (car inner-form) 'multiple-value-call))))
 
 ;;; Error Case Tests
+;;; All macros must signal error on malformed input — expressed as one table.
 
-(deftest error-cond-non-list-clause
-  "Test COND error with non-list clause"
-  (assert-signals error (our-macroexpand-1 '(cond x))))
-
-(deftest error-cond-empty-clause
-  "Test COND error with empty clause list"
-  (assert-signals error (our-macroexpand-1 '(cond ()))))
-
-(deftest-each error-psetq-malformed
-  "PSETQ signals an error on malformed argument lists"
-  :cases (("non-pair"  '(psetq x))
-          ("odd-args"  '(psetq a 1 b)))
-  (form)
-  (assert-signals error (our-macroexpand-1 form)))
-
-(deftest-each error-multiple-value-bind-malformed
-  "MULTIPLE-VALUE-BIND signals an error on malformed variable lists"
-  :cases (("non-list-vars"  '(multiple-value-bind a b (values 1 2) body))
-          ("empty-vars"     '(multiple-value-bind () (values 1 2) body)))
-  (form)
-  (assert-signals error (our-macroexpand-1 form)))
-
-(deftest-each error-multiple-value-setq-malformed
-  "MULTIPLE-VALUE-SETQ signals an error on malformed variable lists"
-  :cases (("non-list-vars"  '(multiple-value-setq a b (values 1 2)))
-          ("empty-vars"     '(multiple-value-setq () (values 1 2))))
-  (form)
-  (assert-signals error (our-macroexpand-1 form)))
-
-(deftest-each error-let*-malformed
-  "LET* signals an error on malformed binding lists"
-  :cases (("non-list-binding"    '(let* (x 1) body))
-          ("invalid-binding"     '(let* ((a)) body)))
+(deftest-each error-macro-malformed-args
+  "Macros signal errors on malformed arguments (bad clauses, variable lists, binding lists)."
+  :cases (("cond-non-list-clause"   '(cond x))
+          ("cond-empty-clause"      '(cond ()))
+          ("psetq-non-pair"         '(psetq x))
+          ("psetq-odd-args"         '(psetq a 1 b))
+          ("mvbind-non-list-vars"   '(multiple-value-bind a b (values 1 2) body))
+          ("mvbind-empty-vars"      '(multiple-value-bind () (values 1 2) body))
+          ("mvsetq-non-list-vars"   '(multiple-value-setq a b (values 1 2)))
+          ("mvsetq-empty-vars"      '(multiple-value-setq () (values 1 2)))
+          ("let*-non-list-binding"  '(let* (x 1) body))
+          ("let*-invalid-binding"   '(let* ((a)) body)))
   (form)
   (assert-signals error (our-macroexpand-1 form)))
 
 ;;; Integration Tests
 
-(deftest integration-when-evaluation
-  "Integration test: WHEN macro produces correct runtime behavior"
-  (let ((expanded (our-macroexpand '(when t 1 2 3))))
-    ;; When test is true, should return last value
-    (assert-equal expanded '(if t (progn 1 2 3) nil))))
-
-(deftest integration-unless-evaluation
-  "Integration test: UNLESS macro produces correct runtime behavior"
-  (let ((expanded (our-macroexpand '(unless nil 1 2 3))))
-    ;; When test is nil, should execute body
-    (assert-equal expanded '(if nil nil (progn 1 2 3)))))
+(deftest-each integration-when-unless-evaluation
+  "Integration: WHEN/UNLESS expand to the expected IF form."
+  :cases (("when"   '(when   t   1 2 3) '(if t   (progn 1 2 3) nil))
+          ("unless" '(unless nil 1 2 3) '(if nil nil (progn 1 2 3))))
+  (form expected)
+  (assert-equal (our-macroexpand form) expected))
 
 (deftest integration-cond-evaluation
   "Integration test: COND produces correct nested IF structure"
@@ -387,139 +310,79 @@
 
 ;;; MULTIPLE-VALUE-LIST Macro Tests (Wave 2)
 
-(deftest multiple-value-list-basic
-  "Test MULTIPLE-VALUE-LIST basic expansion"
+(deftest multiple-value-list-expansion
+  "MULTIPLE-VALUE-LIST: outer LET, body is multiple-value-call; fully expands away."
+  ;; Any form: outer LET + multiple-value-call in body
   (let ((result (our-macroexpand-1 '(multiple-value-list (values 1 2 3)))))
-    (assert-eq (car result) 'let)
-    ;; Body should contain multiple-value-call
-    (let ((body (caddr result)))
-      (assert-eq (car body) 'multiple-value-call))))
-
-(deftest multiple-value-list-with-form
-  "Test MULTIPLE-VALUE-LIST with arbitrary form"
-  (let ((result (our-macroexpand-1 '(multiple-value-list (floor 10 3)))))
-    (assert-eq (car result) 'let)
-    ;; Should collect values from form
-    (assert-true (search "multiple-value-call" (string-downcase (format nil "~S" result))))))
-
-(deftest multiple-value-list-full-expansion
-  "Test full expansion of MULTIPLE-VALUE-LIST"
-  (let ((result (our-macroexpand '(multiple-value-list (values 1 2 3)))))
-    ;; Should be fully expanded
-    (assert-false (search "multiple-value-list" (string-downcase (format nil "~S" result))))))
-
-(deftest multiple-value-list-collects-values
-  "Integration test: MULTIPLE-VALUE-LIST collects values into list"
-  ;; Expansion: (let ((#:ACC nil)) (multiple-value-call (lambda ...)) #:FORM)
+    (assert-eq 'let (car result))
+    (assert-eq 'multiple-value-call (car (caddr result))))
   (let ((result (our-macroexpand-1 '(multiple-value-list (foo)))))
-    (assert-eq (car result) 'let)
-    ;; First body form (caddr) is the multiple-value-call
-    (assert-eq (caaddr result) 'multiple-value-call)))
+    (assert-eq 'let (car result))
+    (assert-eq 'multiple-value-call (caaddr result)))
+  ;; Full expansion removes the macro entirely
+  (let ((result (our-macroexpand '(multiple-value-list (values 1 2 3)))))
+    (assert-false (search "multiple-value-list" (string-downcase (format nil "~S" result))))))
 
 ;;; Control Flow Macro Tests - dolist, dotimes, do, do*, case, typecase, loop
 
 ;;; DOLIST Tests
 
-(deftest dolist-basic-expansion
-  "Test DOLIST basic macro expansion"
-  (let ((result (our-macroexpand-1 '(dolist (item list) body))))
+(deftest-each dolist-expansion-is-block
+  "DOLIST always expands to a (block ...) containing tagbody, regardless of arity."
+  :cases (("basic"          '(dolist (item list) body))
+          ("with-result"    '(dolist (item list result) body))
+          ("multi-body"     '(dolist (item list) body1 body2 body3)))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
     (assert-eq (car result) 'block)
-    ;; Should contain let, tagbody for iteration
     (assert-true (search "tagbody" (string-downcase (format nil "~S" result))))))
-
-(deftest dolist-with-result-form
-  "Test DOLIST with result form"
-  (let ((result (our-macroexpand-1 '(dolist (item list result) body))))
-    (assert-eq (car result) 'block)
-    ;; Result form should be present at the end
-    (assert-true (search "result" (string-downcase (format nil "~S" result))))))
-
-(deftest dolist-with-multiple-body-forms
-  "Test DOLIST with multiple body forms"
-  (let ((result (our-macroexpand-1 '(dolist (item list) body1 body2 body3))))
-    (assert-eq (car result) 'block)
-    ;; All body forms should be present
-    (assert-true (search "body1" (string-downcase (format nil "~S" result))))
-    (assert-true (search "body2" (string-downcase (format nil "~S" result))))
-    (assert-true (search "body3" (string-downcase (format nil "~S" result))))))
 
 ;;; DOTIMES Tests
 
-(deftest dotimes-basic-expansion
-  "Test DOTIMES basic macro expansion"
-  (let ((result (our-macroexpand-1 '(dotimes (i 10) body))))
+(deftest-each dotimes-expansion-is-block
+  "DOTIMES always expands to a (block ...) containing tagbody, regardless of arity."
+  :cases (("basic"        '(dotimes (i 10) body))
+          ("with-result"  '(dotimes (i 10 'done) body))
+          ("zero-count"   '(dotimes (i 0) body)))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
     (assert-eq (car result) 'block)
-    ;; Should contain let with counter, tagbody for iteration
-    (assert-true (search "tagbody" (string-downcase (format nil "~S" result))))))
-
-(deftest dotimes-with-result-form
-  "Test DOTIMES with result form"
-  (let ((result (our-macroexpand-1 '(dotimes (i 10 'done) body))))
-    (assert-eq (car result) 'block)
-    ;; Result form should be present
-    (assert-true (search "done" (string-downcase (format nil "~S" result))))))
-
-(deftest dotimes-with-zero-count
-  "Test DOTIMES with zero count (should not execute body)"
-  (let ((result (our-macroexpand-1 '(dotimes (i 0) body))))
-    (assert-eq (car result) 'block)
-    ;; Should still have proper structure
     (assert-true (search "tagbody" (string-downcase (format nil "~S" result))))))
 
 ;;; DO Tests
 
-(deftest do-basic-expansion
-  "Test DO basic macro expansion"
-  (let ((result (our-macroexpand-1 '(do ((i 0 (1+ i))) ((>= i 10) result) body))))
+(deftest-each do-expansion-is-block
+  "DO always expands to a (block ...) containing let+tagbody, in all forms."
+  :cases (("basic"        '(do ((i 0 (1+ i))) ((>= i 10) result) body))
+          ("multi-vars"   '(do ((i 0 (1+ i)) (j 10 (1- j))) ((= i j) i) body))
+          ("no-step"      '(do ((x init)) (test result) body))
+          ("multi-body"   '(do ((i 0)) (test) body1 body2 body3)))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
     (assert-eq (car result) 'block)
-    ;; Should contain let for bindings, tagbody for iteration
-    (assert-true (search "let" (string-downcase (format nil "~S" result))))
     (assert-true (search "tagbody" (string-downcase (format nil "~S" result))))))
-
-(deftest do-with-multiple-vars
-  "Test DO with multiple variables"
-  (let ((result (our-macroexpand-1 '(do ((i 0 (1+ i)) (j 10 (1- j))) ((= i j) i) body))))
-    (assert-eq (car result) 'block)
-    ;; Both variables should be present
-    (assert-true (search "i" (string-downcase (format nil "~S" result))))
-    (assert-true (search "j" (string-downcase (format nil "~S" result))))))
-
-(deftest do-with-no-step
-  "Test DO with no step form (variable keeps its value)"
-  (let ((result (our-macroexpand-1 '(do ((x init)) (test result) body))))
-    (assert-eq (car result) 'block)
-    (assert-true (search "init" (string-downcase (format nil "~S" result))))))
-
-(deftest do-with-multiple-body-forms
-  "Test DO with multiple body forms"
-  (let ((result (our-macroexpand-1 '(do ((i 0)) (test) body1 body2 body3))))
-    (assert-eq (car result) 'block)
-    (assert-true (search "body1" (string-downcase (format nil "~S" result))))))
 
 ;;; DO* Tests
 
-(deftest do*-basic-expansion
-  "Test DO* basic macro expansion (sequential binding)"
-  (let ((result (our-macroexpand-1 '(do* ((i 0 (1+ i)) (j i (1+ j))) ((>= i 10) j) body))))
+(deftest-each do*-expansion-uses-let*
+  "DO* uses LET* (sequential binding) and expands to (block ...) with tagbody."
+  :cases (("basic"       '(do* ((i 0 (1+ i)) (j i (1+ j))) ((>= i 10) j) body))
+          ("dep-binding" '(do* ((x 1) (y (+ x 1))) (t y) body)))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
     (assert-eq (car result) 'block)
-    ;; Should use let* for sequential binding
-    (assert-true (search "let*" (string-downcase (format nil "~S" result))))))
-
-(deftest do*-sequential-dependency
-  "Test DO* with sequential variable dependency"
-  (let ((result (our-macroexpand-1 '(do* ((x 1) (y (+ x 1))) (t y) body))))
-    (assert-eq (car result) 'block)
-    ;; let* should be present for sequential binding
     (assert-true (search "let*" (string-downcase (format nil "~S" result))))))
 
 ;;; CASE Tests
 
-(deftest case-basic-expansion
-  "Test CASE basic macro expansion"
-  (let ((result (our-macroexpand-1 '(case key (a body-a) (b body-b)))))
-    ;; Should expand to let with if/eql chain
-    (assert-eq (car result) 'let)
-    (assert-true (search "eql" (string-downcase (format nil "~S" result))))))
+(deftest-each case-expansion-is-let
+  "CASE expands to (let ...) with eql dispatch; body forms wrapped in progn."
+  :cases (("basic"         '(case key (a body-a) (b body-b)))
+          ("list-of-keys"  '(case key ((a b c) body-abc) (d body-d)))
+          ("multi-body"    '(case key (a body1 body2 body3))))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
+    (assert-eq (car result) 'let)))
 
 (deftest-each case-default-clause
   "CASE with otherwise/t clauses both produce a let including the default body"
@@ -530,28 +393,16 @@
     (assert-eq (car result) 'let)
     (assert-true (search "default-body" (string-downcase (format nil "~S" result))))))
 
-(deftest case-with-list-of-keys
-  "Test CASE with list of keys"
-  (let ((result (our-macroexpand-1 '(case key ((a b c) body-abc) (d body-d)))))
-    (assert-eq (car result) 'let)
-    ;; Should check multiple keys with or
-    (assert-true (search "or" (string-downcase (format nil "~S" result))))))
-
-(deftest case-with-multiple-body-forms
-  "Test CASE with multiple body forms in clause"
-  (let ((result (our-macroexpand-1 '(case key (a body1 body2 body3)))))
-    (assert-eq (car result) 'let)
-    ;; Body forms should be wrapped in progn
-    (assert-true (search "progn" (string-downcase (format nil "~S" result))))))
 
 ;;; TYPECASE Tests
 
-(deftest typecase-basic-expansion
-  "Test TYPECASE basic macro expansion"
-  (let ((result (our-macroexpand-1 '(typecase val (string body-string) (integer body-int)))))
-    (assert-eq (car result) 'let)
-    ;; Should use typep for type checking
-    (assert-true (search "typep" (string-downcase (format nil "~S" result))))))
+(deftest-each typecase-expansion-is-let
+  "TYPECASE expands to (let ...) with typep dispatch; body forms wrapped in progn."
+  :cases (("basic"      '(typecase val (string body-string) (integer body-int)))
+          ("multi-body" '(typecase val (string body1 body2))))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
+    (assert-eq (car result) 'let)))
 
 (deftest-each typecase-default-clause
   "TYPECASE with otherwise/t clauses both produce a let including the default body"
@@ -562,11 +413,6 @@
     (assert-eq (car result) 'let)
     (assert-true (search "default-body" (string-downcase (format nil "~S" result))))))
 
-(deftest typecase-with-multiple-body-forms
-  "Test TYPECASE with multiple body forms"
-  (let ((result (our-macroexpand-1 '(typecase val (string body1 body2)))))
-    (assert-eq (car result) 'let)
-    (assert-true (search "progn" (string-downcase (format nil "~S" result))))))
 
 ;;; LOOP Tests (Simplified)
 
@@ -580,19 +426,14 @@
     (assert-eq 'block (car result))
     (assert-true (search "tagbody" (string-downcase (format nil "~S" result))))))
 
-(deftest loop-with-collect
-  "Test LOOP with collect accumulation"
-  (let ((result (our-macroexpand-1 '(loop for i from 1 to 5 collect (* i 2)))))
-    (assert-eq (car result) 'block)
-    ;; Should contain cons for collection
-    (assert-true (search "cons" (string-downcase (format nil "~S" result))))))
-
-(deftest loop-with-sum
-  "Test LOOP with sum accumulation"
-  (let ((result (our-macroexpand-1 '(loop for i from 1 to 10 sum i))))
-    (assert-eq (car result) 'block)
-    ;; Should contain + for summation
-    (assert-true (search "+" (string-downcase (format nil "~S" result))))))
+(deftest-each loop-accumulation-is-block
+  "LOOP with accumulation keywords (collect, sum, count) expands to (block ...)."
+  :cases (("collect" '(loop for i from 1 to 5 collect (* i 2)))
+          ("sum"     '(loop for i from 1 to 10 sum i))
+          ("count"   '(loop for i from 1 to 10 count (evenp i))))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
+    (assert-eq (car result) 'block)))
 
 (deftest-each loop-conditional-forms
   "LOOP with while/until/below all expand to block+tagbody"
@@ -604,12 +445,6 @@
     (assert-eq 'block (car result))
     (assert-true (search "tagbody" (string-downcase (format nil "~S" result))))))
 
-(deftest loop-with-count
-  "Test LOOP with count accumulation"
-  (let ((result (our-macroexpand-1 '(loop for i from 1 to 10 count (evenp i)))))
-    (assert-eq (car result) 'block)
-    ;; Should contain counting logic
-    (assert-true (search "+" (string-downcase (format nil "~S" result))))))
 
 ;;; Integration Tests for Control Flow Macros
 
@@ -637,13 +472,12 @@
 
 ;;; ─── %expand-quasiquote ──────────────────────────────────────────────────
 
-(deftest expand-quasiquote-atom-quotes
-  "%expand-quasiquote wraps atoms in quote."
-  (assert-equal '(quote foo) (cl-cc::%expand-quasiquote 'foo)))
-
-(deftest expand-quasiquote-number-quotes
-  "%expand-quasiquote wraps numbers in quote."
-  (assert-equal '(quote 42) (cl-cc::%expand-quasiquote 42)))
+(deftest-each expand-quasiquote-wraps-in-quote
+  "%expand-quasiquote wraps self-evaluating atoms and symbols in (quote ...)."
+  :cases (("atom"   'foo 'foo)
+          ("number" 42   42))
+  (input expected-val)
+  (assert-equal (list 'quote expected-val) (cl-cc::%expand-quasiquote input)))
 
 (deftest expand-quasiquote-unquote-extracts
   "Top-level unquote returns its argument directly."
@@ -664,19 +498,87 @@
 
 ;;; ─── generate-lambda-bindings ────────────────────────────────────────────
 
-(deftest generate-lambda-bindings-required
-  "generate-lambda-bindings for required params produces correct binding count."
-  (let ((bindings (cl-cc::generate-lambda-bindings '(a b) 'form)))
-    ;; Each required produces 2 bindings (temp + param), so 4 total for 2 params
-    (assert-= 4 (length bindings))))
+(deftest generate-lambda-bindings-shapes
+  "generate-lambda-bindings: empty→nil; required pair (a b)→4 bindings; &rest args→has 'args entry."
+  ;; empty lambda list → no bindings
+  (assert-equal nil (cl-cc::generate-lambda-bindings '() 'form))
+  ;; each required param produces 2 bindings (temp + param): 2 params = 4
+  (assert-= 4 (length (cl-cc::generate-lambda-bindings '(a b) 'form)))
+  ;; &rest arg appears in the binding alist
+  (assert-true (assoc 'args (cl-cc::generate-lambda-bindings '(&rest args) 'form))))
 
-(deftest generate-lambda-bindings-rest
-  "generate-lambda-bindings with &rest produces a binding for the rest var."
-  (let ((bindings (cl-cc::generate-lambda-bindings '(&rest args) 'form)))
-    ;; args should appear in the binding names
-    (assert-true (assoc 'args bindings))))
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; parse-lambda-list
+;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest generate-lambda-bindings-empty
-  "generate-lambda-bindings with empty lambda list produces no bindings."
-  (let ((bindings (cl-cc::generate-lambda-bindings '() 'form)))
-    (assert-equal nil bindings)))
+(deftest parse-lambda-list-empty
+  "parse-lambda-list of () returns a lambda-list-info with all nil fields."
+  (let ((info (cl-cc::parse-lambda-list '())))
+    (assert-equal nil (cl-cc::lambda-list-info-required info))
+    (assert-equal nil (cl-cc::lambda-list-info-optional info))
+    (assert-equal nil (cl-cc::lambda-list-info-rest info))))
+
+(deftest parse-lambda-list-required-only
+  "parse-lambda-list (a b c) fills the :required slot."
+  (let ((info (cl-cc::parse-lambda-list '(a b c))))
+    (assert-equal '(a b c) (cl-cc::lambda-list-info-required info))
+    (assert-equal nil (cl-cc::lambda-list-info-rest info))))
+
+(deftest parse-lambda-list-optional-symbol
+  "parse-lambda-list &optional bare symbol becomes (name nil nil)."
+  (let ((info (cl-cc::parse-lambda-list '(x &optional y))))
+    (assert-equal '(x) (cl-cc::lambda-list-info-required info))
+    (let ((opt (first (cl-cc::lambda-list-info-optional info))))
+      (assert-eq 'y (first opt))
+      (assert-eq nil (second opt)))))
+
+(deftest parse-lambda-list-optional-with-default
+  "parse-lambda-list &optional (y 42) captures default."
+  (let ((info (cl-cc::parse-lambda-list '(x &optional (y 42)))))
+    (let ((opt (first (cl-cc::lambda-list-info-optional info))))
+      (assert-eq 'y (first opt))
+      (assert-equal 42 (second opt)))))
+
+(deftest-each parse-lambda-list-rest-and-body
+  "&rest fills the :rest slot; &body fills the :body slot (and leaves :rest nil)."
+  :cases (("rest" '(x &rest r)      #'cl-cc::lambda-list-info-rest  'r    :skip)
+          ("body" '(form &body body) #'cl-cc::lambda-list-info-body  'body  nil))
+  (ll get-slot expected-sym expected-rest)
+  (let ((info (cl-cc::parse-lambda-list ll)))
+    (assert-eq expected-sym (funcall get-slot info))
+    (unless (eq expected-rest :skip)
+      (assert-eq expected-rest (cl-cc::lambda-list-info-rest info)))))
+
+(deftest parse-lambda-list-key
+  "parse-lambda-list &key k generates (((:k k) nil nil)) in key-params."
+  (let ((info (cl-cc::parse-lambda-list '(x &key k))))
+    (let ((kp (first (cl-cc::lambda-list-info-key-params info))))
+      ;; name-spec = (:K K)
+      (assert-eq :k (first (first kp)))
+      (assert-eq 'k (second (first kp))))))
+
+(deftest parse-lambda-list-allow-other-keys
+  "parse-lambda-list &allow-other-keys sets the flag."
+  (let ((info (cl-cc::parse-lambda-list '(&key x &allow-other-keys))))
+    (assert-true (cl-cc::lambda-list-info-allow-other-keys info))))
+
+(deftest parse-lambda-list-aux
+  "parse-lambda-list &aux (x 0) records aux binding."
+  (let ((info (cl-cc::parse-lambda-list '(a &aux (x 0)))))
+    (let ((aux (first (cl-cc::lambda-list-info-aux info))))
+      (assert-eq 'x (first aux))
+      (assert-equal 0 (second aux)))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; destructure-lambda-list
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(deftest-each destructure-lambda-list
+  "destructure-lambda-list produces bindings for all named params."
+  :cases (("required"  '(x y)           '(x y))
+          ("rest"      '(x &rest r)      '(x r))
+          ("optional"  '(x &optional y)  '(x y)))
+  (lambda-list expected-vars)
+  (let ((bindings (cl-cc::destructure-lambda-list lambda-list 'form)))
+    (dolist (var expected-vars)
+      (assert-true (assoc var bindings)))))

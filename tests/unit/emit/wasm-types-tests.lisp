@@ -80,24 +80,21 @@
 
 ;;; ─── Export/import descriptors ─────────────────────────────────────────────
 
-(deftest wasm-export-import-symmetry
-  "Export and import descriptor types use the same encoding."
+(deftest wasm-export-import-descriptors
+  "Export/import descriptors span 0-3 and export/import encodings are identical."
+  (assert-equal 0 cl-cc::+wasm-export-func+)
+  (assert-equal 1 cl-cc::+wasm-export-table+)
+  (assert-equal 2 cl-cc::+wasm-export-memory+)
+  (assert-equal 3 cl-cc::+wasm-export-global+)
   (assert-equal cl-cc::+wasm-export-func+   cl-cc::+wasm-import-func+)
   (assert-equal cl-cc::+wasm-export-table+  cl-cc::+wasm-import-table+)
   (assert-equal cl-cc::+wasm-export-memory+ cl-cc::+wasm-import-memory+)
   (assert-equal cl-cc::+wasm-export-global+ cl-cc::+wasm-import-global+))
 
-(deftest wasm-export-descriptor-values
-  "Export descriptors span 0-3."
-  (assert-equal 0 cl-cc::+wasm-export-func+)
-  (assert-equal 1 cl-cc::+wasm-export-table+)
-  (assert-equal 2 cl-cc::+wasm-export-memory+)
-  (assert-equal 3 cl-cc::+wasm-export-global+))
-
 ;;; ─── Core opcodes ──────────────────────────────────────────────────────────
 
-(deftest wasm-control-opcodes
-  "Core control flow opcodes."
+(deftest wasm-control-flow-opcodes
+  "Control, branch, and call opcodes."
   (assert-equal #x00 cl-cc::+wasm-unreachable+)
   (assert-equal #x01 cl-cc::+wasm-nop+)
   (assert-equal #x02 cl-cc::+wasm-block+)
@@ -105,16 +102,10 @@
   (assert-equal #x04 cl-cc::+wasm-if+)
   (assert-equal #x05 cl-cc::+wasm-else+)
   (assert-equal #x0b cl-cc::+wasm-end+)
-  (assert-equal #x0f cl-cc::+wasm-return+))
-
-(deftest wasm-branch-opcodes
-  "Branch opcodes."
+  (assert-equal #x0f cl-cc::+wasm-return+)
   (assert-equal #x0c cl-cc::+wasm-br+)
   (assert-equal #x0d cl-cc::+wasm-br-if+)
-  (assert-equal #x0e cl-cc::+wasm-br-table+))
-
-(deftest wasm-call-opcodes
-  "Call opcodes."
+  (assert-equal #x0e cl-cc::+wasm-br-table+)
   (assert-equal #x10 cl-cc::+wasm-call+)
   (assert-equal #x11 cl-cc::+wasm-call-indirect+))
 
@@ -262,8 +253,8 @@
 
 ;;; ─── Uniqueness invariants ─────────────────────────────────────────────────
 
-(deftest wasm-section-ids-unique
-  "All section IDs are unique."
+(deftest wasm-uniqueness-invariants
+  "Section IDs, predefined type indices, and GC struct opcodes are all unique/contiguous."
   (let ((ids (list cl-cc::+wasm-section-custom+ cl-cc::+wasm-section-type+
                    cl-cc::+wasm-section-import+ cl-cc::+wasm-section-function+
                    cl-cc::+wasm-section-table+ cl-cc::+wasm-section-memory+
@@ -271,10 +262,7 @@
                    cl-cc::+wasm-section-start+ cl-cc::+wasm-section-element+
                    cl-cc::+wasm-section-code+ cl-cc::+wasm-section-data+
                    cl-cc::+wasm-section-data-count+)))
-    (assert-equal (length ids) (length (remove-duplicates ids)))))
-
-(deftest wasm-type-indices-unique
-  "All predefined type indices are unique."
+    (assert-equal (length ids) (length (remove-duplicates ids))))
   (let ((indices (list cl-cc::+type-idx-main-func+ cl-cc::+type-idx-bytes-array+
                        cl-cc::+type-idx-string+ cl-cc::+type-idx-symbol+
                        cl-cc::+type-idx-cons+ cl-cc::+type-idx-eqref-array+
@@ -282,10 +270,7 @@
                        cl-cc::+type-idx-class-meta+ cl-cc::+type-idx-instance+
                        cl-cc::+type-idx-htable+ cl-cc::+type-idx-float+
                        cl-cc::+type-idx-char+)))
-    (assert-equal (length indices) (length (remove-duplicates indices)))))
-
-(deftest wasm-gc-struct-opcodes-unique
-  "GC struct opcodes 0-5 are contiguous."
+    (assert-equal (length indices) (length (remove-duplicates indices))))
   (let ((ops (list cl-cc::+wasm-gc-struct-new+ cl-cc::+wasm-gc-struct-new-default+
                    cl-cc::+wasm-gc-struct-get+ cl-cc::+wasm-gc-struct-get-s+
                    cl-cc::+wasm-gc-struct-get-u+ cl-cc::+wasm-gc-struct-set+)))

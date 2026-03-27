@@ -18,8 +18,8 @@
 
 ;;; ─── lexer-tokens-to-dcg-input ─────────────────────────────────────────────
 
-(deftest dcg-convert-plist-tokens
-  "lexer-tokens-to-dcg-input converts plist tokens to cons pairs."
+(deftest dcg-convert-cases
+  "lexer-tokens-to-dcg-input converts plist tokens, struct tokens, and passes through other values"
   (let ((tokens (list (list :type :T-INT :value 42)
                       (list :type :T-IDENT :value "x"))))
     (let ((result (cl-cc::lexer-tokens-to-dcg-input tokens)))
@@ -27,18 +27,12 @@
       (assert-equal :T-INT (caar result))
       (assert-equal 42 (cdar result))
       (assert-equal :T-IDENT (caadr result))
-      (assert-equal "x" (cdadr result)))))
-
-(deftest dcg-convert-lexer-token-structs
-  "lexer-tokens-to-dcg-input converts lexer-token structs to cons pairs."
+      (assert-equal "x" (cdadr result))))
   (let ((tokens (list (cl-cc::make-lexer-token :type :T-INT :value 99))))
     (let ((result (cl-cc::lexer-tokens-to-dcg-input tokens)))
       (assert-equal 1 (length result))
       (assert-equal :T-INT (caar result))
-      (assert-equal 99 (cdar result)))))
-
-(deftest dcg-convert-passthrough
-  "lexer-tokens-to-dcg-input passes through non-plist non-struct values."
+      (assert-equal 99 (cdar result))))
   (let ((tokens (list 42)))
     (let ((result (cl-cc::lexer-tokens-to-dcg-input tokens)))
       (assert-equal 1 (length result))
@@ -90,8 +84,8 @@
 
 ;;; ─── DCG Builtins via solve-goal ───────────────────────────────────────────
 
-(deftest dcg-alt-first-matches
-  "dcg-alt tries alternatives, first match succeeds."
+(deftest dcg-alt-behavior
+  "dcg-alt matches the first alternative and falls through to the second"
   (with-fresh-prolog
     (cl-cc::def-fact (rule-a ((:T-INT . ?v) . ?rest) ?rest))
     (cl-cc::def-fact (rule-b ((:T-IDENT . ?v) . ?rest) ?rest))
@@ -105,10 +99,7 @@
         (cl-cc::prolog-cut ()))
       (assert-true (>= (length results) 1))
       ;; After matching rule-a, remaining should be nil
-      (assert-null (first results)))))
-
-(deftest dcg-alt-second-matches
-  "dcg-alt falls through to second alternative."
+      (assert-null (first results))))
   (with-fresh-prolog
     (cl-cc::def-fact (rule-a ((:T-INT . ?v) . ?rest) ?rest))
     (cl-cc::def-fact (rule-b ((:T-IDENT . ?v) . ?rest) ?rest))
@@ -122,8 +113,8 @@
         (cl-cc::prolog-cut ()))
       (assert-true (>= (length results) 1)))))
 
-(deftest dcg-opt-match
-  "dcg-opt matches when sub-rule matches."
+(deftest dcg-opt-behavior
+  "dcg-opt matches when sub-rule matches and succeeds with epsilon when sub-rule fails"
   (with-fresh-prolog
     (cl-cc::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
     (let ((results nil)
@@ -135,10 +126,7 @@
                               (push (cl-cc::logic-substitute '?out env) results)))
         (cl-cc::prolog-cut ()))
       ;; Should have at least the successful match (empty remaining)
-      (assert-true (member nil results :test #'equal)))))
-
-(deftest dcg-opt-epsilon
-  "dcg-opt succeeds with epsilon when sub-rule fails."
+      (assert-true (member nil results :test #'equal))))
   (with-fresh-prolog
     (cl-cc::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
     (let ((results nil)
@@ -152,8 +140,8 @@
       ;; Epsilon match: out = input (unconsumed)
       (assert-true (>= (length results) 1)))))
 
-(deftest dcg-star-zero
-  "dcg-star succeeds with zero matches."
+(deftest dcg-star-behavior
+  "dcg-star succeeds with zero matches and matches multiple tokens"
   (with-fresh-prolog
     (cl-cc::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
     (let ((results nil)
@@ -165,10 +153,7 @@
                               (push (cl-cc::logic-substitute '?out env) results)))
         (cl-cc::prolog-cut ()))
       ;; Zero matches: out = input
-      (assert-true (>= (length results) 1)))))
-
-(deftest dcg-star-multiple
-  "dcg-star matches multiple tokens."
+      (assert-true (>= (length results) 1))))
   (with-fresh-prolog
     (cl-cc::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
     (let ((results nil)
@@ -182,8 +167,8 @@
       ;; Should include the fully-consumed result (nil)
       (assert-true (member nil results :test #'equal)))))
 
-(deftest dcg-plus-one
-  "dcg-plus matches one token."
+(deftest dcg-plus-behavior
+  "dcg-plus matches one or more tokens and fails with zero matches"
   (with-fresh-prolog
     (cl-cc::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
     (let ((results nil)
@@ -194,10 +179,7 @@
                             (lambda (env)
                               (push (cl-cc::logic-substitute '?out env) results)))
         (cl-cc::prolog-cut ()))
-      (assert-true (>= (length results) 1)))))
-
-(deftest dcg-plus-zero-fails
-  "dcg-plus fails with zero matches."
+      (assert-true (>= (length results) 1))))
   (with-fresh-prolog
     (cl-cc::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
     (let ((results nil)

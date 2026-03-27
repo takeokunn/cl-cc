@@ -7,102 +7,33 @@
 
 ;;; String Comparison Instructions
 
-(define-vm-instruction vm-string= (vm-instruction)
-  "Case-sensitive string equality. Returns 1 if STR1 equals STR2, 0 otherwise."
-  (dst nil :reader vm-dst)
-  (str1 nil :reader vm-str1)
-  (str2 nil :reader vm-str2)
-  (:sexp-tag :string=)
-  (:sexp-slots dst str1 str2))
+;; All binary string comparisons share the same (dst str1 str2) slot structure.
+(defmacro define-vm-string-comparison (name tag docstring)
+  `(define-vm-instruction ,name (vm-instruction)
+     ,docstring
+     (dst nil :reader vm-dst)
+     (str1 nil :reader vm-str1)
+     (str2 nil :reader vm-str2)
+     (:sexp-tag ,tag)
+     (:sexp-slots dst str1 str2)))
 
-(define-vm-instruction vm-string< (vm-instruction)
-  "Case-sensitive string less than. Returns 1 if STR1 < STR2 lexicographically, 0 otherwise."
-  (dst nil :reader vm-dst)
-  (str1 nil :reader vm-str1)
-  (str2 nil :reader vm-str2)
-  (:sexp-tag :string<)
-  (:sexp-slots dst str1 str2))
-
-(define-vm-instruction vm-string> (vm-instruction)
-  "Case-sensitive string greater than. Returns 1 if STR1 > STR2 lexicographically, 0 otherwise."
-  (dst nil :reader vm-dst)
-  (str1 nil :reader vm-str1)
-  (str2 nil :reader vm-str2)
-  (:sexp-tag :string>)
-  (:sexp-slots dst str1 str2))
-
-(define-vm-instruction vm-string<= (vm-instruction)
-  "Case-sensitive string less than or equal. Returns 1 if STR1 <= STR2, 0 otherwise."
-  (dst nil :reader vm-dst)
-  (str1 nil :reader vm-str1)
-  (str2 nil :reader vm-str2)
-  (:sexp-tag :string<=)
-  (:sexp-slots dst str1 str2))
-
-(define-vm-instruction vm-string>= (vm-instruction)
-  "Case-sensitive string greater than or equal. Returns 1 if STR1 >= STR2, 0 otherwise."
-  (dst nil :reader vm-dst)
-  (str1 nil :reader vm-str1)
-  (str2 nil :reader vm-str2)
-  (:sexp-tag :string>=)
-  (:sexp-slots dst str1 str2))
-
-(define-vm-instruction vm-string-equal (vm-instruction)
-  "Case-insensitive string equality. Returns 1 if STR1 equals STR2 (ignoring case), 0 otherwise."
-  (dst nil :reader vm-dst)
-  (str1 nil :reader vm-str1)
-  (str2 nil :reader vm-str2)
-  (:sexp-tag :string-equal)
-  (:sexp-slots dst str1 str2))
-
-(define-vm-instruction vm-string-lessp (vm-instruction)
-  "Case-insensitive string less than. Returns 1 if STR1 < STR2 (ignoring case), 0 otherwise."
-  (dst nil :reader vm-dst)
-  (str1 nil :reader vm-str1)
-  (str2 nil :reader vm-str2)
-  (:sexp-tag :string-lessp)
-  (:sexp-slots dst str1 str2))
-
-(define-vm-instruction vm-string-greaterp (vm-instruction)
-  "Case-insensitive string greater than. Returns 1 if STR1 > STR2 (ignoring case), 0 otherwise."
-  (dst nil :reader vm-dst)
-  (str1 nil :reader vm-str1)
-  (str2 nil :reader vm-str2)
-  (:sexp-tag :string-greaterp)
-  (:sexp-slots dst str1 str2))
-
-(define-vm-instruction vm-string-not-equal (vm-instruction)
-  "Case-sensitive string inequality. Returns 1 if STR1 not equal to STR2, 0 otherwise."
-  (dst nil :reader vm-dst)
-  (str1 nil :reader vm-str1)
-  (str2 nil :reader vm-str2)
-  (:sexp-tag :string-not-equal)
-  (:sexp-slots dst str1 str2))
-
-(define-vm-instruction vm-string-not-greaterp (vm-instruction)
-  "Case-insensitive string <=. Returns 1 if STR1 <= STR2 (ignoring case), 0 otherwise."
-  (dst nil :reader vm-dst)
-  (str1 nil :reader vm-str1)
-  (str2 nil :reader vm-str2)
-  (:sexp-tag :string-not-greaterp)
-  (:sexp-slots dst str1 str2))
-
-(define-vm-instruction vm-string-not-lessp (vm-instruction)
-  "Case-insensitive string >=. Returns 1 if STR1 >= STR2 (ignoring case), 0 otherwise."
-  (dst nil :reader vm-dst)
-  (str1 nil :reader vm-str1)
-  (str2 nil :reader vm-str2)
-  (:sexp-tag :string-not-lessp)
-  (:sexp-slots dst str1 str2))
+(define-vm-string-comparison vm-string=           :string=          "Case-sensitive string equality. Returns 1 if equal, 0 otherwise.")
+(define-vm-string-comparison vm-string<           :string<          "Case-sensitive string less than. Returns 1 if STR1 < STR2, 0 otherwise.")
+(define-vm-string-comparison vm-string>           :string>          "Case-sensitive string greater than. Returns 1 if STR1 > STR2, 0 otherwise.")
+(define-vm-string-comparison vm-string<=          :string<=         "Case-sensitive string <=. Returns 1 if STR1 <= STR2, 0 otherwise.")
+(define-vm-string-comparison vm-string>=          :string>=         "Case-sensitive string >=. Returns 1 if STR1 >= STR2, 0 otherwise.")
+(define-vm-string-comparison vm-string-equal      :string-equal     "Case-insensitive string equality. Returns 1 if equal (ignoring case), 0 otherwise.")
+(define-vm-string-comparison vm-string-lessp      :string-lessp     "Case-insensitive string <. Returns 1 if STR1 < STR2 (ignoring case), 0 otherwise.")
+(define-vm-string-comparison vm-string-greaterp   :string-greaterp  "Case-insensitive string >. Returns 1 if STR1 > STR2 (ignoring case), 0 otherwise.")
+(define-vm-string-comparison vm-string-not-equal  :string-not-equal "Case-sensitive string inequality. Returns 1 if STR1 /= STR2, 0 otherwise.")
+(define-vm-string-comparison vm-string-not-greaterp :string-not-greaterp "Case-insensitive string <=. Returns 1 if STR1 <= STR2 (ignoring case), 0 otherwise.")
+(define-vm-string-comparison vm-string-not-lessp  :string-not-lessp "Case-insensitive string >=. Returns 1 if STR1 >= STR2 (ignoring case), 0 otherwise.")
 
 ;;; String Access and Query Instructions
 
-(define-vm-instruction vm-string-length (vm-instruction)
-  "String length. DST = length of SRC string."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :string-length)
-  (:sexp-slots dst src))
+;; define-vm-unary-instruction and define-vm-char-comparison are defined in vm.lisp.
+
+(define-vm-unary-instruction vm-string-length :string-length "String length. DST = length of SRC string.")
 
 (define-vm-instruction vm-char (vm-instruction)
   "Character at position. DST = STRING[INDEX]."
@@ -112,35 +43,11 @@
   (:sexp-tag :char)
   (:sexp-slots dst string index))
 
-(define-vm-instruction vm-char-code (vm-instruction)
-  "Character code. DST = ASCII/Unicode code of SRC character."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :char-code)
-  (:sexp-slots dst src))
+(define-vm-unary-instruction vm-char-code :char-code "Character code. DST = ASCII/Unicode code of SRC character.")
+(define-vm-unary-instruction vm-code-char :code-char "Character from code. DST = character with code SRC.")
 
-(define-vm-instruction vm-code-char (vm-instruction)
-  "Character from code. DST = character with code SRC."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :code-char)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-char= (vm-instruction)
-  "Character equality. Returns 1 if CHAR1 equals CHAR2, 0 otherwise."
-  (dst nil :reader vm-dst)
-  (char1 nil :reader vm-char1)
-  (char2 nil :reader vm-char2)
-  (:sexp-tag :char=)
-  (:sexp-slots dst char1 char2))
-
-(define-vm-instruction vm-char< (vm-instruction)
-  "Character less than. Returns 1 if CHAR1 < CHAR2, 0 otherwise."
-  (dst nil :reader vm-dst)
-  (char1 nil :reader vm-char1)
-  (char2 nil :reader vm-char2)
-  (:sexp-tag :char<)
-  (:sexp-slots dst char1 char2))
+(define-vm-char-comparison vm-char= :char= "Character equality. Returns 1 if CHAR1 equals CHAR2, 0 otherwise.")
+(define-vm-char-comparison vm-char< :char< "Character less than. Returns 1 if CHAR1 < CHAR2, 0 otherwise.")
 
 ;;; String Manipulation Instructions
 
@@ -161,26 +68,9 @@
   (:sexp-tag :concatenate)
   (:sexp-slots dst str1 str2))
 
-(define-vm-instruction vm-string-upcase (vm-instruction)
-  "Uppercase conversion. DST = uppercase of SRC."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :string-upcase)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-string-downcase (vm-instruction)
-  "Lowercase conversion. DST = lowercase of SRC."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :string-downcase)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-string-capitalize (vm-instruction)
-  "Capitalize string. DST = capitalized form of SRC."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :string-capitalize)
-  (:sexp-slots dst src))
+(define-vm-unary-instruction vm-string-upcase    :string-upcase    "Uppercase conversion. DST = uppercase of SRC.")
+(define-vm-unary-instruction vm-string-downcase  :string-downcase  "Lowercase conversion. DST = lowercase of SRC.")
+(define-vm-unary-instruction vm-string-capitalize :string-capitalize "Capitalize string. DST = capitalized form of SRC.")
 
 (define-vm-instruction vm-string-trim (vm-instruction)
   "Trim characters from both ends. DST = STRING with CHAR-BAG chars trimmed from both ends."
@@ -251,157 +141,45 @@
 (define-simple-instruction vm-char= :pred2 char= :lhs vm-char1 :rhs vm-char2)
 (define-simple-instruction vm-char< :pred2 char< :lhs vm-char1 :rhs vm-char2)
 
-;;; Phase 3 — FR-406/FR-407: Missing character comparison operators
+;;; Character Comparison Instructions (FR-406/FR-407)
 
-(define-vm-instruction vm-char> (vm-instruction)
-  "Character greater-than comparison."
-  (dst nil :reader vm-dst)
-  (char1 nil :reader vm-char1)
-  (char2 nil :reader vm-char2)
-  (:sexp-tag :char>)
-  (:sexp-slots dst char1 char2))
+(define-vm-char-comparison vm-char>          :char>          "Character greater-than. Returns 1 if CHAR1 > CHAR2, 0 otherwise.")
+(define-vm-char-comparison vm-char<=         :char<=         "Character less-or-equal. Returns 1 if CHAR1 <= CHAR2, 0 otherwise.")
+(define-vm-char-comparison vm-char>=         :char>=         "Character greater-or-equal. Returns 1 if CHAR1 >= CHAR2, 0 otherwise.")
+(define-vm-char-comparison vm-char/=         :char/=         "Character inequality. Returns 1 if CHAR1 /= CHAR2, 0 otherwise.")
+(define-vm-char-comparison vm-char-equal     :char-equal     "Case-insensitive character equality.")
+(define-vm-char-comparison vm-char-not-equal :char-not-equal "Case-insensitive character inequality.")
+(define-vm-char-comparison vm-char-lessp     :char-lessp     "Case-insensitive character less-than.")
+(define-vm-char-comparison vm-char-greaterp  :char-greaterp  "Case-insensitive character greater-than.")
+(define-vm-char-comparison vm-char-not-lessp    :char-not-lessp    "Case-insensitive char<=.")
+(define-vm-char-comparison vm-char-not-greaterp :char-not-greaterp "Case-insensitive char>=.")
 
-(define-simple-instruction vm-char> :pred2 char> :lhs vm-char1 :rhs vm-char2)
-
-(define-vm-instruction vm-char<= (vm-instruction)
-  "Character less-or-equal comparison."
-  (dst nil :reader vm-dst)
-  (char1 nil :reader vm-char1)
-  (char2 nil :reader vm-char2)
-  (:sexp-tag :char<=)
-  (:sexp-slots dst char1 char2))
-
-(define-simple-instruction vm-char<= :pred2 char<= :lhs vm-char1 :rhs vm-char2)
-
-(define-vm-instruction vm-char>= (vm-instruction)
-  "Character greater-or-equal comparison."
-  (dst nil :reader vm-dst)
-  (char1 nil :reader vm-char1)
-  (char2 nil :reader vm-char2)
-  (:sexp-tag :char>=)
-  (:sexp-slots dst char1 char2))
-
-(define-simple-instruction vm-char>= :pred2 char>= :lhs vm-char1 :rhs vm-char2)
-
-(define-vm-instruction vm-char/= (vm-instruction)
-  "Character inequality comparison."
-  (dst nil :reader vm-dst)
-  (char1 nil :reader vm-char1)
-  (char2 nil :reader vm-char2)
-  (:sexp-tag :char/=)
-  (:sexp-slots dst char1 char2))
-
-(define-simple-instruction vm-char/= :pred2 char/= :lhs vm-char1 :rhs vm-char2)
-
-;; Case-insensitive character comparisons (FR-407)
-(define-vm-instruction vm-char-equal (vm-instruction)
-  "Case-insensitive character equality."
-  (dst nil :reader vm-dst)
-  (char1 nil :reader vm-char1)
-  (char2 nil :reader vm-char2)
-  (:sexp-tag :char-equal)
-  (:sexp-slots dst char1 char2))
-
-(define-simple-instruction vm-char-equal :pred2 char-equal :lhs vm-char1 :rhs vm-char2)
-
-(define-vm-instruction vm-char-not-equal (vm-instruction)
-  "Case-insensitive character inequality."
-  (dst nil :reader vm-dst)
-  (char1 nil :reader vm-char1)
-  (char2 nil :reader vm-char2)
-  (:sexp-tag :char-not-equal)
-  (:sexp-slots dst char1 char2))
-
+(define-simple-instruction vm-char>          :pred2 char>          :lhs vm-char1 :rhs vm-char2)
+(define-simple-instruction vm-char<=         :pred2 char<=         :lhs vm-char1 :rhs vm-char2)
+(define-simple-instruction vm-char>=         :pred2 char>=         :lhs vm-char1 :rhs vm-char2)
+(define-simple-instruction vm-char/=         :pred2 char/=         :lhs vm-char1 :rhs vm-char2)
+(define-simple-instruction vm-char-equal     :pred2 char-equal     :lhs vm-char1 :rhs vm-char2)
 (define-simple-instruction vm-char-not-equal :pred2 char-not-equal :lhs vm-char1 :rhs vm-char2)
-
-(define-vm-instruction vm-char-lessp (vm-instruction)
-  "Case-insensitive character less-than."
-  (dst nil :reader vm-dst)
-  (char1 nil :reader vm-char1)
-  (char2 nil :reader vm-char2)
-  (:sexp-tag :char-lessp)
-  (:sexp-slots dst char1 char2))
-
-(define-simple-instruction vm-char-lessp :pred2 char-lessp :lhs vm-char1 :rhs vm-char2)
-
-(define-vm-instruction vm-char-greaterp (vm-instruction)
-  "Case-insensitive character greater-than."
-  (dst nil :reader vm-dst)
-  (char1 nil :reader vm-char1)
-  (char2 nil :reader vm-char2)
-  (:sexp-tag :char-greaterp)
-  (:sexp-slots dst char1 char2))
-
-(define-simple-instruction vm-char-greaterp :pred2 char-greaterp :lhs vm-char1 :rhs vm-char2)
-
-;; FR-407: char-not-lessp, char-not-greaterp (case-insensitive <=, >=)
-(define-vm-instruction vm-char-not-lessp (vm-instruction)
-  "Case-insensitive char<=."
-  (dst nil :reader vm-dst) (char1 nil :reader vm-char1) (char2 nil :reader vm-char2)
-  (:sexp-tag :char-not-lessp) (:sexp-slots dst char1 char2))
-(define-simple-instruction vm-char-not-lessp :pred2 char-not-lessp :lhs vm-char1 :rhs vm-char2)
-
-(define-vm-instruction vm-char-not-greaterp (vm-instruction)
-  "Case-insensitive char>=."
-  (dst nil :reader vm-dst) (char1 nil :reader vm-char1) (char2 nil :reader vm-char2)
-  (:sexp-tag :char-not-greaterp) (:sexp-slots dst char1 char2))
+(define-simple-instruction vm-char-lessp     :pred2 char-lessp     :lhs vm-char1 :rhs vm-char2)
+(define-simple-instruction vm-char-greaterp  :pred2 char-greaterp  :lhs vm-char1 :rhs vm-char2)
+(define-simple-instruction vm-char-not-lessp    :pred2 char-not-lessp    :lhs vm-char1 :rhs vm-char2)
 (define-simple-instruction vm-char-not-greaterp :pred2 char-not-greaterp :lhs vm-char1 :rhs vm-char2)
 
-;; FR-409: Missing character predicates
-(define-vm-instruction vm-both-case-p (vm-instruction)
-  "Test if character has both upper and lower case versions."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :both-case-p)
-  (:sexp-slots dst src))
+;;; Character Predicate and Conversion Instructions (FR-409/FR-410)
 
-(define-simple-instruction vm-both-case-p :pred1 both-case-p)
+(define-vm-unary-instruction vm-both-case-p     :both-case-p     "Test if character has both upper and lower case versions.")
+(define-vm-unary-instruction vm-graphic-char-p  :graphic-char-p  "Test if character is a graphic (printable) character.")
+(define-vm-unary-instruction vm-standard-char-p :standard-char-p "Test if character is a standard character.")
+(define-vm-unary-instruction vm-digit-char      :digit-char      "Convert digit (0-9) to the character representing it.")
+(define-vm-unary-instruction vm-char-name       :char-name       "Return the name of a character as a string, or nil.")
+(define-vm-unary-instruction vm-name-char       :name-char       "Return the character with the given name string, or nil.")
 
-(define-vm-instruction vm-graphic-char-p (vm-instruction)
-  "Test if character is a graphic (printable) character."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :graphic-char-p)
-  (:sexp-slots dst src))
-
+(define-simple-instruction vm-both-case-p    :pred1 both-case-p)
 (define-simple-instruction vm-graphic-char-p :pred1 graphic-char-p)
-
-(define-vm-instruction vm-standard-char-p (vm-instruction)
-  "Test if character is a standard character."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :standard-char-p)
-  (:sexp-slots dst src))
-
 (define-simple-instruction vm-standard-char-p :pred1 standard-char-p)
-
-;; FR-410: digit-char, char-name, name-char
-(define-vm-instruction vm-digit-char (vm-instruction)
-  "Convert digit (0-9) to the character representing it."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :digit-char)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-digit-char :unary digit-char)
-
-(define-vm-instruction vm-char-name (vm-instruction)
-  "Return the name of a character as a string, or nil."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :char-name)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-char-name :unary char-name)
-
-(define-vm-instruction vm-name-char (vm-instruction)
-  "Return the character with the given name string, or nil."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :name-char)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-name-char :unary name-char)
+(define-simple-instruction vm-digit-char     :unary digit-char)
+(define-simple-instruction vm-char-name      :unary char-name)
+(define-simple-instruction vm-name-char      :unary name-char)
 
 ;; FR-405: make-string (1-arg: size; optional char slot for :initial-element)
 (define-vm-instruction vm-make-string (vm-instruction)
@@ -476,152 +254,5 @@
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
-;;; Symbol Manipulation Instructions
 
-(define-vm-instruction vm-symbol-name (vm-instruction)
-  "Get the name string of a symbol."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :symbol-name)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-make-symbol (vm-instruction)
-  "Create an uninterned symbol from a string."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :make-symbol)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-intern-symbol (vm-instruction)
-  "Intern a string as a symbol. Optional package designator."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (pkg nil :reader vm-intern-pkg)
-  (:sexp-tag :intern)
-  (:sexp-slots dst src pkg))
-
-(define-vm-instruction vm-gensym-inst (vm-instruction)
-  "Generate a unique uninterned symbol."
-  (dst nil :reader vm-dst)
-  (:sexp-tag :gensym)
-  (:sexp-slots dst))
-
-(define-vm-instruction vm-keywordp (vm-instruction)
-  "Test if value is a keyword symbol. Returns 1 if true, 0 otherwise."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :keywordp)
-  (:sexp-slots dst src))
-
-;; Symbol execute-instruction
-(define-simple-instruction vm-symbol-name :unary symbol-name)
-(define-simple-instruction vm-make-symbol :unary make-symbol)
-
-(defmethod execute-instruction ((inst vm-intern-symbol) state pc labels)
-  (declare (ignore labels))
-  (let* ((name (vm-reg-get state (vm-src inst)))
-         (pkg-designator (when (vm-intern-pkg inst)
-                           (vm-reg-get state (vm-intern-pkg inst))))
-         (result (if pkg-designator
-                     (intern name (find-package pkg-designator))
-                     (intern name))))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-gensym-inst) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (gensym))
-  (values (1+ pc) nil nil))
-
-(define-simple-instruction vm-keywordp :pred1 keywordp)
-
-;;; Character Predicate Instructions
-
-(define-vm-instruction vm-digit-char-p (vm-instruction)
-  "Test if character is a digit. Returns weight or nil."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :digit-char-p)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-alpha-char-p (vm-instruction)
-  "Test if character is alphabetic. Returns 1/0."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :alpha-char-p)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-upper-case-p (vm-instruction)
-  "Test if character is upper case. Returns 1/0."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :upper-case-p)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-lower-case-p (vm-instruction)
-  "Test if character is lower case. Returns 1/0."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :lower-case-p)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-char-upcase (vm-instruction)
-  "Upcase a character. DST = uppercase of SRC."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :char-upcase)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-char-downcase (vm-instruction)
-  "Downcase a character. DST = lowercase of SRC."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :char-downcase)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-stringp (vm-instruction)
-  "Test if value is a string. Returns 1/0."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :stringp)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-characterp (vm-instruction)
-  "Test if value is a character. Returns 1/0."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :characterp)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-parse-integer (vm-instruction)
-  "Parse an integer from a string. DST = integer value."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :parse-integer)
-  (:sexp-slots dst src))
-
-;; Character predicate execute-instruction
-(defmethod execute-instruction ((inst vm-digit-char-p) state pc labels)
-  (declare (ignore labels))
-  (let* ((ch (vm-reg-get state (vm-src inst)))
-         (result (digit-char-p ch)))
-    (vm-reg-set state (vm-dst inst) (or result nil))
-    (values (1+ pc) nil nil)))
-
-(define-simple-instruction vm-alpha-char-p :pred1 alpha-char-p)
-(define-simple-instruction vm-upper-case-p :pred1 upper-case-p)
-(define-simple-instruction vm-lower-case-p :pred1 lower-case-p)
-(define-simple-instruction vm-char-upcase :unary char-upcase)
-(define-simple-instruction vm-char-downcase :unary char-downcase)
-(define-simple-instruction vm-stringp :pred1 stringp)
-(define-simple-instruction vm-characterp :pred1 characterp)
-(define-simple-instruction vm-parse-integer :unary parse-integer)
-
-(define-vm-instruction vm-alphanumericp (vm-instruction)
-  "Test if character is alphanumeric. Returns 1/0."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :alphanumericp)
-  (:sexp-slots dst src))
-
-(define-simple-instruction vm-alphanumericp :pred1 alphanumericp)
+;;; (Symbol manipulation and character predicate instructions moved to src/vm/symbols.lisp)

@@ -27,115 +27,70 @@
 
 ;;; ─── row-extend ──────────────────────────────────────────────────────────────
 
-(deftest row-extend-adds-field
-  "row-extend prepends a new label:type pair."
+(deftest row-extend-behavior
+  "row-extend: adds field (2 fields); preserves row-var; shadows existing label."
   (let* ((r (make-closed-record :x type-int))
          (r2 (row-extend :y type-string r)))
     (assert-true (type-record-p r2))
-    (assert-equal 2 (length (type-record-fields r2)))))
-
-(deftest row-extend-preserves-row-var
-  "row-extend preserves the row variable."
+    (assert-equal 2 (length (type-record-fields r2))))
   (let* ((rv (fresh-type-var))
-         (r (make-open-record rv :x type-int))
-         (r2 (row-extend :y type-string r)))
-    (assert-true (type-variable-p (type-record-row-var r2)))))
-
-(deftest row-extend-shadows-existing
-  "row-extend with existing label shadows (doesn't remove) old binding."
+         (r2 (row-extend :y type-string (make-open-record rv :x type-int))))
+    (assert-true (type-variable-p (type-record-row-var r2))))
   (let* ((r (make-closed-record :x type-int))
          (r2 (row-extend :x type-string r)))
-    ;; Two entries for :x — the new one shadows
     (assert-equal 2 (length (type-record-fields r2)))
-    ;; row-select returns the first (new) binding
     (assert-true (type-equal-p type-string (row-select :x r2)))))
 
 ;;; ─── row-restrict ────────────────────────────────────────────────────────────
 
-(deftest row-restrict-removes-label
-  "row-restrict removes a label from the record."
+(deftest row-restrict-behavior
+  "row-restrict: removes present label; absent label is no-op; preserves row-var."
   (let* ((r (make-closed-record :x type-int :y type-string))
          (r2 (row-restrict :x r)))
     (assert-equal 1 (length (type-record-fields r2)))
     (assert-null (row-select :x r2))
-    (assert-true (type-equal-p type-string (row-select :y r2)))))
-
-(deftest row-restrict-nonexistent-is-noop
-  "row-restrict on absent label returns same fields."
-  (let* ((r (make-closed-record :x type-int))
-         (r2 (row-restrict :z r)))
-    (assert-equal 1 (length (type-record-fields r2)))))
-
-(deftest row-restrict-preserves-row-var
-  "row-restrict preserves the row variable."
+    (assert-true (type-equal-p type-string (row-select :y r2))))
+  (assert-equal 1 (length (type-record-fields
+                             (row-restrict :z (make-closed-record :x type-int)))))
   (let* ((rv (fresh-type-var))
-         (r (make-open-record rv :x type-int))
-         (r2 (row-restrict :x r)))
+         (r2 (row-restrict :x (make-open-record rv :x type-int))))
     (assert-true (type-variable-p (type-record-row-var r2)))))
 
 ;;; ─── row-select ──────────────────────────────────────────────────────────────
 
-(deftest row-select-found
-  "row-select returns the type for a present label."
+(deftest row-select-behavior
+  "row-select: returns type for present label; nil for absent; works on type-variant."
   (let ((r (make-closed-record :x type-int :y type-string)))
     (assert-true (type-equal-p type-int (row-select :x r)))
-    (assert-true (type-equal-p type-string (row-select :y r)))))
-
-(deftest row-select-absent
-  "row-select returns nil for an absent label."
-  (let ((r (make-closed-record :x type-int)))
-    (assert-null (row-select :z r))))
-
-(deftest row-select-variant
-  "row-select works on type-variant too."
-  (let ((v (make-type-variant :cases (list (cons :some type-int)
-                                           (cons :none type-null))
+    (assert-true (type-equal-p type-string (row-select :y r))))
+  (assert-null (row-select :z (make-closed-record :x type-int)))
+  (let ((v (make-type-variant :cases (list (cons :some type-int) (cons :none type-null))
                               :row-var nil)))
-    (assert-true (type-equal-p type-int (row-select :some v)))
+    (assert-true (type-equal-p type-int  (row-select :some v)))
     (assert-true (type-equal-p type-null (row-select :none v)))))
 
 ;;; ─── row-labels ──────────────────────────────────────────────────────────────
 
-(deftest row-labels-record
-  "row-labels returns all label names from a record."
-  (let ((r (make-closed-record :x type-int :y type-string)))
-    (assert-equal '(:x :y) (row-labels r))))
-
-(deftest row-labels-variant
-  "row-labels returns all label names from a variant."
-  (let ((v (make-type-variant :cases (list (cons :a type-int)
-                                           (cons :b type-string))
-                              :row-var nil)))
-    (assert-equal '(:a :b) (row-labels v))))
-
-(deftest row-labels-empty
-  "row-labels on empty record returns nil."
-  (let ((r (make-closed-record)))
-    (assert-null (row-labels r))))
+(deftest row-labels-behavior
+  "row-labels: returns label list for record; for variant; nil for empty record."
+  (assert-equal '(:x :y) (row-labels (make-closed-record :x type-int :y type-string)))
+  (assert-equal '(:a :b) (row-labels (make-type-variant :cases (list (cons :a type-int)
+                                                                      (cons :b type-string))
+                                                         :row-var nil)))
+  (assert-null (row-labels (make-closed-record))))
 
 ;;; ─── row-closed-p / row-open-p ──────────────────────────────────────────────
 
-(deftest row-closed-record
-  "Closed record has no row-var."
+(deftest row-closed-open-predicate-behavior
+  "Closed record: closed-p=true, open-p=false. Open record: opposite. Same for variants."
   (let ((r (make-closed-record :x type-int)))
-    (assert-true (row-closed-p r))
-    (assert-false (row-open-p r))))
-
-(deftest row-open-record
-  "Open record has a row-var."
+    (assert-true  (row-closed-p r))
+    (assert-false (row-open-p r)))
   (let ((r (make-open-record (fresh-type-var) :x type-int)))
-    (assert-true (row-open-p r))
-    (assert-false (row-closed-p r))))
-
-(deftest row-closed-variant
-  "Closed variant (row-var nil) is closed."
-  (let ((v (make-type-variant :cases nil :row-var nil)))
-    (assert-true (row-closed-p v))))
-
-(deftest row-open-variant
-  "Open variant (row-var non-nil) is open."
-  (let ((v (make-type-variant :cases nil :row-var (fresh-type-var))))
-    (assert-true (row-open-p v))))
+    (assert-true  (row-open-p r))
+    (assert-false (row-closed-p r)))
+  (assert-true (row-closed-p (make-type-variant :cases nil :row-var nil)))
+  (assert-true (row-open-p   (make-type-variant :cases nil :row-var (fresh-type-var)))))
 
 ;;; ─── effect-row operations ──────────────────────────────────────────────────
 
@@ -154,13 +109,10 @@
          (row2 (cl-cc/type::effect-row-restrict :io row)))
     (assert-equal 1 (length (type-effect-row-effects row2)))))
 
-(deftest effect-row-member-present
-  "effect-row-member-p returns true for present effect."
-  (let* ((op (cl-cc/type::make-type-effect-op :name :io :args nil))
-         (row (make-type-effect-row :effects (list op) :row-var nil)))
-    (assert-true (cl-cc/type::effect-row-member-p :io row))))
-
-(deftest effect-row-member-absent
-  "effect-row-member-p returns nil for absent effect."
-  (let* ((row (make-type-effect-row :effects nil :row-var nil)))
-    (assert-false (cl-cc/type::effect-row-member-p :io row))))
+(deftest effect-row-member-p-behavior
+  "effect-row-member-p: true for present effect; false for absent."
+  (let ((row-with-io (make-type-effect-row :effects (list (cl-cc/type::make-type-effect-op :name :io :args nil))
+                                            :row-var nil))
+        (empty-row   (make-type-effect-row :effects nil :row-var nil)))
+    (assert-true  (cl-cc/type::effect-row-member-p :io row-with-io))
+    (assert-false (cl-cc/type::effect-row-member-p :io empty-row))))

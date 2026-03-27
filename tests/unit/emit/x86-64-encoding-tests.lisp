@@ -18,54 +18,27 @@
 
 ;;; ─── rex-prefix ──────────────────────────────────────────────────────────
 
-(deftest x86-rex-base
-  "REX prefix with no flags set is #x40."
-  (assert-equal #x40 (cl-cc::rex-prefix)))
-
-(deftest x86-rex-w
-  "REX.W sets 64-bit operand size (bit 3)."
-  (assert-equal #x48 (cl-cc::rex-prefix :w 1)))
-
-(deftest x86-rex-r
-  "REX.R extends ModR/M reg field (bit 2)."
-  (assert-equal #x44 (cl-cc::rex-prefix :r 1)))
-
-(deftest x86-rex-b
-  "REX.B extends ModR/M r/m field (bit 0)."
-  (assert-equal #x41 (cl-cc::rex-prefix :b 1)))
-
-(deftest x86-rex-wrb
-  "REX.WRB combined."
-  (assert-equal #x4D (cl-cc::rex-prefix :w 1 :r 1 :b 1)))
-
-(deftest x86-rex-all
-  "REX with all flags."
-  (assert-equal #x4F (cl-cc::rex-prefix :w 1 :r 1 :x 1 :b 1)))
+(deftest-each x86-rex-prefix-flags
+  "rex-prefix computes correct byte for each flag combination."
+  :cases (("base" nil                       #x40)
+          ("w"    '(:w 1)                   #x48)
+          ("r"    '(:r 1)                   #x44)
+          ("b"    '(:b 1)                   #x41)
+          ("wrb"  '(:w 1 :r 1 :b 1)        #x4D)
+          ("all"  '(:w 1 :r 1 :x 1 :b 1)   #x4F))
+  (args expected)
+  (assert-equal expected (apply #'cl-cc::rex-prefix args)))
 
 ;;; ─── modrm ──────────────────────────────────────────────────────────────
 
-(deftest x86-modrm-reg-reg
-  "ModR/M with mod=11 (register), reg=0, rm=0."
-  (assert-equal #xC0 (cl-cc::modrm 3 0 0)))
-
-(deftest x86-modrm-reg-fields
-  "ModR/M with mod=11, reg=1, rm=2."
-  (let ((byte (cl-cc::modrm 3 1 2)))
-    ;; 11_001_010 = #xCA
-    (assert-equal #xCA byte)
-    ;; Verify field extraction
-    (assert-equal 3 (ash byte -6))           ; mod
-    (assert-equal 1 (logand (ash byte -3) 7)) ; reg
-    (assert-equal 2 (logand byte 7))))         ; rm
-
-(deftest x86-modrm-memory-indirect
-  "ModR/M with mod=00 (memory indirect), reg=0, rm=0."
-  (assert-equal #x00 (cl-cc::modrm 0 0 0)))
-
-(deftest x86-modrm-disp8
-  "ModR/M with mod=01 (8-bit displacement)."
-  ;; mod=01, reg=3, rm=5: 01_011_101 = #x5D
-  (assert-equal #x5D (cl-cc::modrm 1 3 5)))
+(deftest-each x86-modrm-cases
+  "ModR/M byte computation for register, memory-indirect, and displacement modes."
+  :cases (("reg-reg"          3 0 0 #xC0)
+          ("reg-fields"       3 1 2 #xCA)
+          ("memory-indirect"  0 0 0 #x00)
+          ("disp8"            1 3 5 #x5D))
+  (mod reg rm expected)
+  (assert-equal expected (cl-cc::modrm mod reg rm)))
 
 ;;; ─── emit-byte / emit-dword / emit-qword ────────────────────────────────
 
@@ -114,27 +87,16 @@
 
 ;;; ─── emit-add-rr64 / emit-sub-rr64 ──────────────────────────────────────
 
-(deftest x86-add-rr64-opcode
-  "ADD RAX, RCX emits opcode #x01."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-add-rr64 cl-cc::+rax+ cl-cc::+rcx+ s)))))
-    (assert-equal 3 (length bytes))
-    (assert-equal #x01 (second bytes))))
-
-(deftest x86-sub-rr64-opcode
-  "SUB RAX, RCX emits opcode #x29."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-sub-rr64 cl-cc::+rax+ cl-cc::+rcx+ s)))))
-    (assert-equal 3 (length bytes))
-    (assert-equal #x29 (second bytes))))
-
-(deftest x86-add-sub-same-size
-  "ADD and SUB emit same number of bytes."
+(deftest x86-add-sub-rr64-encoding
+  "ADD rr64 emits opcode #x01; SUB rr64 emits #x29; both 3 bytes."
   (let ((add-bytes (%x86-collect-bytes
-                    (lambda (s) (cl-cc::emit-add-rr64 0 1 s))))
+                    (lambda (s) (cl-cc::emit-add-rr64 cl-cc::+rax+ cl-cc::+rcx+ s))))
         (sub-bytes (%x86-collect-bytes
-                    (lambda (s) (cl-cc::emit-sub-rr64 0 1 s)))))
-    (assert-equal (length add-bytes) (length sub-bytes))))
+                    (lambda (s) (cl-cc::emit-sub-rr64 cl-cc::+rax+ cl-cc::+rcx+ s)))))
+    (assert-equal 3 (length add-bytes))
+    (assert-equal #x01 (second add-bytes))
+    (assert-equal 3 (length sub-bytes))
+    (assert-equal #x29 (second sub-bytes))))
 
 ;;; ─── emit-imul-rr64 ─────────────────────────────────────────────────────
 
@@ -148,22 +110,15 @@
 
 ;;; ─── emit-push-r64 / emit-pop-r64 ───────────────────────────────────────
 
-(deftest x86-push-rax
-  "PUSH RAX emits #x50."
-  (let ((bytes (%x86-collect-bytes (lambda (s) (cl-cc::emit-push-r64 cl-cc::+rax+ s)))))
+(deftest-each x86-push-pop-opcodes
+  "PUSH/POP low registers emit single-byte opcodes."
+  :cases (("push-rax" (lambda (s) (cl-cc::emit-push-r64 cl-cc::+rax+ s)) #x50)
+          ("push-rcx" (lambda (s) (cl-cc::emit-push-r64 cl-cc::+rcx+ s)) #x51)
+          ("pop-rax"  (lambda (s) (cl-cc::emit-pop-r64  cl-cc::+rax+ s)) #x58))
+  (emit-fn opcode)
+  (let ((bytes (%x86-collect-bytes emit-fn)))
     (assert-equal 1 (length bytes))
-    (assert-equal #x50 (first bytes))))
-
-(deftest x86-push-rcx
-  "PUSH RCX emits #x51."
-  (let ((bytes (%x86-collect-bytes (lambda (s) (cl-cc::emit-push-r64 cl-cc::+rcx+ s)))))
-    (assert-equal #x51 (first bytes))))
-
-(deftest x86-pop-rax
-  "POP RAX emits #x58."
-  (let ((bytes (%x86-collect-bytes (lambda (s) (cl-cc::emit-pop-r64 cl-cc::+rax+ s)))))
-    (assert-equal 1 (length bytes))
-    (assert-equal #x58 (first bytes))))
+    (assert-equal opcode (first bytes))))
 
 (deftest x86-push-pop-offset
   "PUSH and POP base opcodes differ by 8."
@@ -179,18 +134,15 @@
 
 ;;; ─── emit-jmp-rel32 / emit-je-rel32 ─────────────────────────────────────
 
-(deftest x86-jmp-rel32-opcode
-  "JMP rel32 emits E9 + 4-byte offset."
-  (let ((bytes (%x86-collect-bytes (lambda (s) (cl-cc::emit-jmp-rel32 0 s)))))
-    (assert-equal 5 (length bytes))
-    (assert-equal #xE9 (first bytes))))
-
-(deftest x86-jmp-rel32-offset
-  "JMP with offset 256 encodes offset correctly."
-  (let ((bytes (%x86-collect-bytes (lambda (s) (cl-cc::emit-jmp-rel32 256 s)))))
+(deftest x86-jmp-rel32-encoding
+  "JMP rel32 emits E9 + 4-byte offset; offset 256 encodes correctly in LE."
+  (let ((bytes-zero (%x86-collect-bytes (lambda (s) (cl-cc::emit-jmp-rel32 0 s))))
+        (bytes-256  (%x86-collect-bytes (lambda (s) (cl-cc::emit-jmp-rel32 256 s)))))
+    (assert-equal 5 (length bytes-zero))
+    (assert-equal #xE9 (first bytes-zero))
     ;; offset = 256 = #x00000100 little-endian: 00 01 00 00
-    (assert-equal #x00 (second bytes))
-    (assert-equal #x01 (third bytes))))
+    (assert-equal #x00 (second bytes-256))
+    (assert-equal #x01 (third bytes-256))))
 
 (deftest x86-je-rel32-opcode
   "JE rel32 emits 0F 84 + 4-byte offset."
@@ -201,13 +153,12 @@
 
 ;;; ─── VM register mapping ─────────────────────────────────────────────────
 
-(deftest x86-vm-reg-map-r0-rax
-  "VM :R0 maps to RAX."
-  (assert-equal cl-cc::+rax+ (cdr (assoc :r0 cl-cc::*vm-reg-map*))))
-
-(deftest x86-vm-reg-map-r1-rcx
-  "VM :R1 maps to RCX."
-  (assert-equal cl-cc::+rcx+ (cdr (assoc :r1 cl-cc::*vm-reg-map*))))
+(deftest-each x86-vm-reg-map-spot-checks
+  "VM register map: :r0→RAX(0), :r1→RCX(1)."
+  :cases (("r0-rax" :r0 cl-cc::+rax+)
+          ("r1-rcx" :r1 cl-cc::+rcx+))
+  (vm-reg expected)
+  (assert-equal expected (cdr (assoc vm-reg cl-cc::*vm-reg-map*))))
 
 (deftest x86-vm-reg-map-coverage
   "VM register map has 8 entries."
@@ -215,21 +166,13 @@
 
 ;;; ─── emit-mov-ri64 ──────────────────────────────────────────────────────
 
-(deftest x86-mov-ri64-size
-  "MOV RAX, imm64 emits REX + opcode + 8 bytes = 10 bytes total."
+(deftest x86-mov-ri64-rax
+  "MOV RAX, 42: 10 bytes, REX.W=#x48, opcode=#xB8, immediate LE."
   (let ((bytes (%x86-collect-bytes
                 (lambda (s) (cl-cc::emit-mov-ri64 cl-cc::+rax+ 42 s)))))
     (assert-equal 10 (length bytes))
-    ;; REX.W prefix
     (assert-equal #x48 (first bytes))
-    ;; B8 + rd for RAX(0)
-    (assert-equal #xB8 (second bytes))))
-
-(deftest x86-mov-ri64-immediate-value
-  "MOV RAX, 42 encodes 42 in the immediate field."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-mov-ri64 cl-cc::+rax+ 42 s)))))
-    ;; Bytes 3-10 are the 64-bit immediate (little-endian)
+    (assert-equal #xB8 (second bytes))
     (assert-equal 42 (third bytes))
     (assert-equal 0 (fourth bytes))))
 
@@ -273,17 +216,12 @@
     (assert-equal 7 (length bytes))
     (assert-equal #x81 (second bytes))))
 
-(deftest x86-not-r64-opcode
-  "NOT RAX emits opcode #xF7 with /2 extension."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-not-r64 cl-cc::+rax+ s)))))
-    (assert-equal 3 (length bytes))
-    (assert-equal #xF7 (second bytes))))
-
-(deftest x86-neg-r64-opcode
-  "NEG RAX emits opcode #xF7 with /3 extension."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-neg-r64 cl-cc::+rax+ s)))))
+(deftest-each x86-not-neg-r64-opcode
+  "NOT and NEG share opcode #xF7; both emit 3 bytes."
+  :cases (("not" (lambda (s) (cl-cc::emit-not-r64 cl-cc::+rax+ s)))
+          ("neg" (lambda (s) (cl-cc::emit-neg-r64 cl-cc::+rax+ s))))
+  (emit-fn)
+  (let ((bytes (%x86-collect-bytes emit-fn)))
     (assert-equal 3 (length bytes))
     (assert-equal #xF7 (second bytes))))
 
@@ -294,17 +232,12 @@
     (assert-equal 3 (length bytes))
     (assert-equal #xFF (second bytes))))
 
-(deftest x86-add-ri8-size
-  "ADD RAX, imm8 emits 4 bytes (REX+#x83+ModRM+imm8)."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-add-ri8 cl-cc::+rax+ 1 s)))))
-    (assert-equal 4 (length bytes))
-    (assert-equal #x83 (second bytes))))
-
-(deftest x86-sub-ri8-size
-  "SUB RAX, imm8 emits 4 bytes."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-sub-ri8 cl-cc::+rax+ 1 s)))))
+(deftest-each x86-ri8-arith-size
+  "ADD/SUB RAX, imm8 each emit 4 bytes with shared opcode #x83."
+  :cases (("add" (lambda (s) (cl-cc::emit-add-ri8 cl-cc::+rax+ 1 s)))
+          ("sub" (lambda (s) (cl-cc::emit-sub-ri8 cl-cc::+rax+ 1 s))))
+  (emit-fn)
+  (let ((bytes (%x86-collect-bytes emit-fn)))
     (assert-equal 4 (length bytes))
     (assert-equal #x83 (second bytes))))
 
@@ -314,26 +247,15 @@
                 (lambda (s) (cl-cc::emit-and-ri8 cl-cc::+rax+ 1 s)))))
     (assert-equal 4 (length bytes))))
 
-(deftest x86-and-rr64-opcode
-  "AND RAX, RCX emits opcode #x21."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-and-rr64 cl-cc::+rax+ cl-cc::+rcx+ s)))))
+(deftest-each x86-binary-logical-opcodes
+  "AND/OR/XOR r/m64,r64 each emit 3 bytes with correct opcode."
+  :cases (("and" (lambda (s) (cl-cc::emit-and-rr64 cl-cc::+rax+ cl-cc::+rcx+ s)) #x21)
+          ("or"  (lambda (s) (cl-cc::emit-or-rr64  cl-cc::+rax+ cl-cc::+rcx+ s)) #x09)
+          ("xor" (lambda (s) (cl-cc::emit-xor-rr64 cl-cc::+rax+ cl-cc::+rcx+ s)) #x31))
+  (emit-fn opcode)
+  (let ((bytes (%x86-collect-bytes emit-fn)))
     (assert-equal 3 (length bytes))
-    (assert-equal #x21 (second bytes))))
-
-(deftest x86-or-rr64-opcode
-  "OR RAX, RCX emits opcode #x09."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-or-rr64 cl-cc::+rax+ cl-cc::+rcx+ s)))))
-    (assert-equal 3 (length bytes))
-    (assert-equal #x09 (second bytes))))
-
-(deftest x86-xor-rr64-opcode
-  "XOR RAX, RCX emits opcode #x31."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-xor-rr64 cl-cc::+rax+ cl-cc::+rcx+ s)))))
-    (assert-equal 3 (length bytes))
-    (assert-equal #x31 (second bytes))))
+    (assert-equal opcode (second bytes))))
 
 (deftest x86-setcc-sete-size
   "SETE on low register (RAX) emits 3 bytes (0F opcode2 ModRM)."
@@ -357,33 +279,23 @@
     (assert-equal #x0F (second bytes))
     (assert-equal #xB6 (third bytes))))
 
-(deftest x86-sal-r64-cl-opcode
-  "SAL RAX, CL emits REX+#xD3+ModRM (3 bytes)."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-sal-r64-cl cl-cc::+rax+ s)))))
+(deftest-each x86-shift-cl-opcode
+  "SAL/SAR RAX, CL each emit 3 bytes with shared opcode #xD3."
+  :cases (("sal" (lambda (s) (cl-cc::emit-sal-r64-cl cl-cc::+rax+ s)))
+          ("sar" (lambda (s) (cl-cc::emit-sar-r64-cl cl-cc::+rax+ s))))
+  (emit-fn)
+  (let ((bytes (%x86-collect-bytes emit-fn)))
     (assert-equal 3 (length bytes))
     (assert-equal #xD3 (second bytes))))
 
-(deftest x86-sar-r64-cl-opcode
-  "SAR RAX, CL emits REX+#xD3+ModRM (3 bytes)."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-sar-r64-cl cl-cc::+rax+ s)))))
-    (assert-equal 3 (length bytes))
-    (assert-equal #xD3 (second bytes))))
-
-(deftest x86-cmovl-rr64-size
-  "CMOVL RAX, RCX emits 4 bytes (REX+0F+4C+ModRM)."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-cmovl-rr64 cl-cc::+rax+ cl-cc::+rcx+ s)))))
+(deftest-each x86-cmov-encoding
+  "CMOVL/CMOVG each emit 4 bytes; third byte is the distinguishing opcode."
+  :cases (("cmovl" (lambda (s) (cl-cc::emit-cmovl-rr64 cl-cc::+rax+ cl-cc::+rcx+ s)) #x4C)
+          ("cmovg" (lambda (s) (cl-cc::emit-cmovg-rr64 cl-cc::+rax+ cl-cc::+rcx+ s)) #x4F))
+  (emit-fn opcode3)
+  (let ((bytes (%x86-collect-bytes emit-fn)))
     (assert-equal 4 (length bytes))
-    (assert-equal #x4C (third bytes))))
-
-(deftest x86-cmovg-rr64-size
-  "CMOVG RAX, RCX emits 4 bytes (REX+0F+4F+ModRM)."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-cmovg-rr64 cl-cc::+rax+ cl-cc::+rcx+ s)))))
-    (assert-equal 4 (length bytes))
-    (assert-equal #x4F (third bytes))))
+    (assert-equal opcode3 (third bytes))))
 
 (deftest x86-jge-short-size
   "JGE short emits 2 bytes (#x7D + offset)."
@@ -468,19 +380,14 @@
                              (cl-cc::make-vm-logeqv :dst :R0 :lhs :R1 :rhs :R2) s)))))
     (assert-equal 9 (length bytes))))
 
-(deftest x86-vm-and-size
-  "vm-and (boolean) emits 17-byte sequence."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-vm-and
-                             (cl-cc::make-vm-and :dst :R0 :lhs :R1 :rhs :R2) s)))))
-    (assert-equal 17 (length bytes))))
-
-(deftest x86-vm-or-size
-  "vm-or (boolean) emits 17-byte sequence."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-vm-or
-                             (cl-cc::make-vm-or :dst :R0 :lhs :R1 :rhs :R2) s)))))
-    (assert-equal 17 (length bytes))))
+(deftest-each x86-vm-bool-and-or-size
+  "vm-and and vm-or (boolean) each emit 17 bytes."
+  :cases (("and" (lambda (s) (cl-cc::emit-vm-and
+                              (cl-cc::make-vm-and :dst :R0 :lhs :R1 :rhs :R2) s)))
+          ("or"  (lambda (s) (cl-cc::emit-vm-or
+                              (cl-cc::make-vm-or  :dst :R0 :lhs :R1 :rhs :R2) s))))
+  (emit-fn)
+  (assert-equal 17 (length (%x86-collect-bytes emit-fn))))
 
 (deftest x86-vm-null-p-size
   "vm-null-p emits TEST+SETE+MOVZX."
@@ -489,35 +396,25 @@
                              (cl-cc::make-vm-null-p :dst :R0 :src :R1) s)))))
     (assert-true (>= (length bytes) 10))))
 
-(deftest x86-vm-true-pred-size
-  "vm-true-pred emits MOV imm64 (10 bytes)."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-vm-true-pred
-                             (cl-cc::make-vm-number-p :dst :R0 :src :R1) s)))))
-    (assert-equal 10 (length bytes))))
-
-(deftest x86-vm-false-pred-size
-  "vm-false-pred emits MOV imm64 (10 bytes)."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-vm-false-pred
-                             (cl-cc::make-vm-cons-p :dst :R0 :src :R1) s)))))
-    (assert-equal 10 (length bytes))))
+(deftest-each x86-vm-const-pred-size
+  "vm-true-pred and vm-false-pred each emit MOV imm64 = 10 bytes."
+  :cases (("true"  (lambda (s) (cl-cc::emit-vm-true-pred
+                                (cl-cc::make-vm-number-p :dst :R0 :src :R1) s)))
+          ("false" (lambda (s) (cl-cc::emit-vm-false-pred
+                                (cl-cc::make-vm-cons-p :dst :R0 :src :R1) s))))
+  (emit-fn)
+  (assert-equal 10 (length (%x86-collect-bytes emit-fn))))
 
 ;;; ─── IDIV-based emitter sizes ───────────────────────────────────────────
 
-(deftest x86-vm-truncate-size
-  "vm-truncate emits 21-byte IDIV sequence."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-vm-truncate
-                             (make-vm-truncate :dst :R0 :lhs :R1 :rhs :R2) s)))))
-    (assert-equal 21 (length bytes))))
-
-(deftest x86-vm-rem-size
-  "vm-rem emits 21-byte IDIV sequence."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-vm-rem
-                             (cl-cc::make-vm-rem :dst :R0 :lhs :R1 :rhs :R2) s)))))
-    (assert-equal 21 (length bytes))))
+(deftest-each x86-vm-idiv-ops-size
+  "vm-truncate and vm-rem each emit 21-byte IDIV sequences."
+  :cases (("truncate" (lambda (s) (cl-cc::emit-vm-truncate
+                                   (make-vm-truncate :dst :R0 :lhs :R1 :rhs :R2) s)))
+          ("rem"      (lambda (s) (cl-cc::emit-vm-rem
+                                   (cl-cc::make-vm-rem :dst :R0 :lhs :R1 :rhs :R2) s))))
+  (emit-fn)
+  (assert-equal 21 (length (%x86-collect-bytes emit-fn))))
 
 (deftest x86-vm-ash-size
   "vm-ash emits fixed 24-byte sequence."
@@ -613,18 +510,15 @@
     ;; REX.W=1, REX.R=1 (src R9>=8), REX.B=1 (dst R8>=8)
     (assert-equal #x4D (first bytes))))
 
-(deftest x86-mov-rm64-zero-offset
-  "MOV RAX, [RCX+0] uses mod=00 (no displacement)."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-mov-rm64 cl-cc::+rax+ cl-cc::+rcx+ 0 s)))))
-    (assert-equal 3 (length bytes))))
-
-(deftest x86-mov-rm64-with-offset
-  "MOV RAX, [RCX+8] uses mod=01 with byte displacement."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-mov-rm64 cl-cc::+rax+ cl-cc::+rcx+ 8 s)))))
-    (assert-equal 4 (length bytes))
-    (assert-equal 8 (fourth bytes))))
+(deftest x86-mov-rm64-offsets
+  "MOV RAX,[RCX+0] emits 3 bytes (mod=00); MOV RAX,[RCX+8] emits 4 bytes (mod=01)."
+  (let ((zero-bytes (%x86-collect-bytes
+                     (lambda (s) (cl-cc::emit-mov-rm64 cl-cc::+rax+ cl-cc::+rcx+ 0 s))))
+        (disp-bytes (%x86-collect-bytes
+                     (lambda (s) (cl-cc::emit-mov-rm64 cl-cc::+rax+ cl-cc::+rcx+ 8 s)))))
+    (assert-equal 3 (length zero-bytes))
+    (assert-equal 4 (length disp-bytes))
+    (assert-equal 8 (fourth disp-bytes))))
 
 (deftest x86-mov-mr64-with-offset
   "MOV [RCX+16], RAX stores with byte displacement."
@@ -635,56 +529,42 @@
 
 ;;; ─── emit-mov-rr64 ModR/M correctness ──────────────────────────────────
 
-(deftest x86-mov-rr64-modrm-rax-rbx
-  "MOV RAX, RBX: ModR/M mod=11, reg=RBX(3), rm=RAX(0) = 11_011_000 = #xD8."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-mov-rr64 cl-cc::+rax+ cl-cc::+rbx+ s)))))
-    (assert-equal #x48 (first bytes))    ; REX.W only
-    (assert-equal #x89 (second bytes))   ; MOV r/m64, r64
-    (assert-equal #xD8 (third bytes))))  ; mod=11, reg=3(RBX), rm=0(RAX)
-
-(deftest x86-mov-rr64-same-reg
-  "MOV RAX, RAX: self-copy produces ModR/M #xC0."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-mov-rr64 cl-cc::+rax+ cl-cc::+rax+ s)))))
-    ;; mod=11, reg=0(RAX), rm=0(RAX) = #xC0
-    (assert-equal #xC0 (third bytes))))
+(deftest x86-mov-rr64-modrm-encoding
+  "MOV rr64 ModR/M: RAX←RBX=#xD8 (mod=11,reg=3,rm=0); RAX←RAX=#xC0 (self-copy)."
+  (let ((rax-rbx (%x86-collect-bytes
+                  (lambda (s) (cl-cc::emit-mov-rr64 cl-cc::+rax+ cl-cc::+rbx+ s))))
+        (rax-rax (%x86-collect-bytes
+                  (lambda (s) (cl-cc::emit-mov-rr64 cl-cc::+rax+ cl-cc::+rax+ s)))))
+    (assert-equal #x48 (first rax-rbx))
+    (assert-equal #x89 (second rax-rbx))
+    (assert-equal #xD8 (third rax-rbx))
+    (assert-equal #xC0 (third rax-rax))))
 
 ;;; ─── emit-add-rr64 / emit-sub-rr64 ModR/M ──────────────────────────────
 
-(deftest x86-add-rr64-modrm
-  "ADD RCX, RDX: ModR/M mod=11, reg=RDX(2), rm=RCX(1) = 11_010_001 = #xD1."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-add-rr64 cl-cc::+rcx+ cl-cc::+rdx+ s)))))
-    (assert-equal #x48 (first bytes))    ; REX.W
-    (assert-equal #x01 (second bytes))   ; ADD r/m64, r64
-    (assert-equal #xD1 (third bytes))))  ; mod=11, reg=2(RDX), rm=1(RCX)
-
-(deftest x86-sub-rr64-modrm
-  "SUB RCX, RDX: ModR/M = #xD1 (same fields as ADD but different opcode)."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-sub-rr64 cl-cc::+rcx+ cl-cc::+rdx+ s)))))
-    (assert-equal #x29 (second bytes))   ; SUB r/m64, r64
-    (assert-equal #xD1 (third bytes))))
+(deftest x86-add-sub-rr64-modrm
+  "ADD/SUB RCX,RDX: both produce ModR/M=#xD1 (mod=11,reg=2,rm=1); opcodes #x01/#x29."
+  (let ((add-bytes (%x86-collect-bytes
+                    (lambda (s) (cl-cc::emit-add-rr64 cl-cc::+rcx+ cl-cc::+rdx+ s))))
+        (sub-bytes (%x86-collect-bytes
+                    (lambda (s) (cl-cc::emit-sub-rr64 cl-cc::+rcx+ cl-cc::+rdx+ s)))))
+    (assert-equal #x48 (first add-bytes))
+    (assert-equal #x01 (second add-bytes))
+    (assert-equal #xD1 (third add-bytes))
+    (assert-equal #x29 (second sub-bytes))
+    (assert-equal #xD1 (third sub-bytes))))
 
 ;;; ─── High-register push/pop ─────────────────────────────────────────────
 
-(deftest x86-push-rbx
-  "PUSH RBX emits #x53 (no REX needed for low registers)."
-  (let ((bytes (%x86-collect-bytes (lambda (s) (cl-cc::emit-push-r64 cl-cc::+rbx+ s)))))
+(deftest-each x86-push-pop-single-byte-opcodes
+  "PUSH/POP low registers emit single-byte opcodes."
+  :cases (("push-rbx" cl-cc::+rbx+ #'cl-cc::emit-push-r64 #x53)
+          ("pop-rcx"  cl-cc::+rcx+ #'cl-cc::emit-pop-r64  #x59)
+          ("pop-rdx"  cl-cc::+rdx+ #'cl-cc::emit-pop-r64  #x5A))
+  (reg emit-fn opcode)
+  (let ((bytes (%x86-collect-bytes (lambda (s) (funcall emit-fn reg s)))))
     (assert-equal 1 (length bytes))
-    (assert-equal #x53 (first bytes))))
-
-(deftest x86-pop-rcx
-  "POP RCX emits #x59."
-  (let ((bytes (%x86-collect-bytes (lambda (s) (cl-cc::emit-pop-r64 cl-cc::+rcx+ s)))))
-    (assert-equal 1 (length bytes))
-    (assert-equal #x59 (first bytes))))
-
-(deftest x86-pop-rdx
-  "POP RDX emits #x5A."
-  (let ((bytes (%x86-collect-bytes (lambda (s) (cl-cc::emit-pop-r64 cl-cc::+rdx+ s)))))
-    (assert-equal #x5A (first bytes))))
+    (assert-equal opcode (first bytes))))
 
 ;;; ─── emit-mov-ri64 high registers ───────────────────────────────────────
 
@@ -796,16 +676,10 @@
 
 ;;; ─── *phys-reg-to-x86-code* completeness ────────────────────────────────
 
-(deftest x86-phys-reg-map-rax
-  "Physical register :rax maps to code 0."
-  (assert-equal 0 (cdr (assoc :rax cl-cc::*phys-reg-to-x86-code*))))
-
-(deftest x86-phys-reg-map-r15
-  "Physical register :r15 maps to code 15."
-  (assert-equal 15 (cdr (assoc :r15 cl-cc::*phys-reg-to-x86-code*))))
-
-(deftest x86-phys-reg-map-count
-  "Physical register map covers 14 registers (RAX through R15, excluding RSP/RBP)."
+(deftest x86-phys-reg-map
+  "Physical register alist: :rax=0, :r15=15, covers 14 registers."
+  (assert-equal 0  (cdr (assoc :rax cl-cc::*phys-reg-to-x86-code*)))
+  (assert-equal 15 (cdr (assoc :r15 cl-cc::*phys-reg-to-x86-code*)))
   (assert-equal 14 (length cl-cc::*phys-reg-to-x86-code*)))
 
 ;;; ─── emit-vm-const and emit-vm-move sizes ───────────────────────────────
@@ -817,21 +691,15 @@
                              (cl-cc::make-vm-const :dst :R0 :value 99) s)))))
     (assert-equal 10 (length bytes))))
 
-(deftest x86-vm-const-zero-value
-  "vm-const with value NIL emits 0 as immediate (nil -> 0)."
+(deftest-each x86-vm-const-bool-immediate
+  "vm-const nil→0, t→1 encodes correct LE immediate bytes."
+  :cases (("nil" nil 0)
+          ("t"   t   1))
+  (val expected-byte)
   (let ((bytes (%x86-collect-bytes
                 (lambda (s) (cl-cc::emit-vm-const
-                             (cl-cc::make-vm-const :dst :R0 :value nil) s)))))
-    ;; Bytes 3-10 are 64-bit LE immediate; all should be zero
-    (assert-equal 0 (third bytes))
-    (assert-equal 0 (fourth bytes))))
-
-(deftest x86-vm-const-t-value
-  "vm-const with value T emits 1 as immediate (t -> 1)."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-vm-const
-                             (cl-cc::make-vm-const :dst :R0 :value t) s)))))
-    (assert-equal 1 (third bytes))
+                             (cl-cc::make-vm-const :dst :R0 :value val) s)))))
+    (assert-equal expected-byte (third bytes))
     (assert-equal 0 (fourth bytes))))
 
 (deftest x86-vm-move-size
@@ -844,21 +712,15 @@
 
 ;;; ─── emit-vm-halt (emit-vm-halt-inst) ───────────────────────────────────
 
-(deftest x86-vm-halt-result-already-rax
-  "vm-halt with R0 (mapped to RAX): no MOV emitted (0 bytes)."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-vm-halt-inst
-                             (cl-cc::make-vm-halt :reg :R0) s)))))
-    ;; R0 -> RAX (code 0), which is already +rax+, so no mov
-    (assert-equal 0 (length bytes))))
-
-(deftest x86-vm-halt-result-other-reg
-  "vm-halt with R1 (mapped to RCX): emits MOV RAX, RCX (3 bytes)."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc::emit-vm-halt-inst
-                             (cl-cc::make-vm-halt :reg :R1) s)))))
-    (assert-equal 3 (length bytes))
-    (assert-equal #x89 (second bytes))))
+(deftest x86-vm-halt-encoding
+  "vm-halt: R0→RAX emits 0 bytes (already in RAX); R1→RCX emits MOV RAX,RCX (3 bytes)."
+  (let ((r0-bytes (%x86-collect-bytes
+                   (lambda (s) (cl-cc::emit-vm-halt-inst (cl-cc::make-vm-halt :reg :R0) s))))
+        (r1-bytes (%x86-collect-bytes
+                   (lambda (s) (cl-cc::emit-vm-halt-inst (cl-cc::make-vm-halt :reg :R1) s)))))
+    (assert-equal 0 (length r0-bytes))
+    (assert-equal 3 (length r1-bytes))
+    (assert-equal #x89 (second r1-bytes))))
 
 ;;; ─── emit-vm-ret-inst ────────────────────────────────────────────────────
 
@@ -872,21 +734,13 @@
 
 ;;; ─── emit-idiv-sequence ──────────────────────────────────────────────────
 
-(deftest x86-idiv-sequence-quotient-size
-  "emit-idiv-sequence (quotient) emits exactly 18 bytes."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s)
-                  (cl-cc::emit-idiv-sequence cl-cc::+rcx+ cl-cc::+rdx+ nil s)))))
-    ;; MOV R11,rhs(3) + PUSH RAX(1) + PUSH RDX(1) + MOV RAX,lhs(3)
-    ;; + CQO(2) + IDIV R11(3) + MOV R11,RAX(3) + POP RDX(1) + POP RAX(1) = 18
-    (assert-equal 18 (length bytes))))
-
-(deftest x86-idiv-sequence-remainder-size
-  "emit-idiv-sequence (remainder) also emits exactly 18 bytes."
-  (let ((bytes (%x86-collect-bytes
-                (lambda (s)
-                  (cl-cc::emit-idiv-sequence cl-cc::+rcx+ cl-cc::+rdx+ t s)))))
-    (assert-equal 18 (length bytes))))
+(deftest x86-idiv-sequence-size
+  "emit-idiv-sequence emits exactly 18 bytes for both quotient and remainder modes."
+  (dolist (remainder-p '(nil t))
+    (let ((bytes (%x86-collect-bytes
+                  (lambda (s)
+                    (cl-cc::emit-idiv-sequence cl-cc::+rcx+ cl-cc::+rdx+ remainder-p s)))))
+      (assert-equal 18 (length bytes)))))
 
 ;;; ─── emit-vm-program prologue/epilogue ───────────────────────────────────
 

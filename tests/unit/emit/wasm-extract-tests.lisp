@@ -9,36 +9,27 @@
 
 ;;; ─── collect-entry-labels ─────────────────────────────────────────────────────
 
-(deftest extract-entry-labels-empty
-  "collect-entry-labels on empty list returns empty hash table."
-  (let ((ht (cl-cc::collect-entry-labels nil)))
-    (assert-true (hash-table-p ht))
-    (assert-equal 0 (hash-table-count ht))))
-
-(deftest extract-entry-labels-no-closures
-  "collect-entry-labels with no closure/func-ref returns empty."
+(deftest extract-entry-labels-empty-cases
+  "collect-entry-labels returns empty hash table for empty list or instructions with no closure/func-ref."
+  (let ((ht-nil (cl-cc::collect-entry-labels nil)))
+    (assert-true (hash-table-p ht-nil))
+    (assert-equal 0 (hash-table-count ht-nil)))
   (let* ((instrs (list (make-vm-const :dst :r0 :value 42)
                        (make-vm-ret :reg :r0)))
          (ht (cl-cc::collect-entry-labels instrs)))
     (assert-equal 0 (hash-table-count ht))))
 
-(deftest extract-entry-labels-closure
-  "collect-entry-labels finds vm-closure entry labels."
-  (let* ((instrs (list (make-vm-closure :dst :r0
-                                        :label "fn1"
-                                        :params '(:r1)
-                                        :captured nil)
-                       (make-vm-ret :reg :r0)))
-         (ht (cl-cc::collect-entry-labels instrs)))
+(deftest-each extract-entry-labels-single-entry
+  "collect-entry-labels finds entry labels from vm-closure and vm-func-ref instructions."
+  :cases (("closure"  (list (make-vm-closure :dst :r0 :label "fn1" :params '(:r1) :captured nil)
+                            (make-vm-ret :reg :r0))
+                      "fn1")
+          ("func-ref" (list (make-vm-func-ref :dst :r0 :label "fn2"))
+                      "fn2"))
+  (instrs label)
+  (let ((ht (cl-cc::collect-entry-labels instrs)))
     (assert-equal 1 (hash-table-count ht))
-    (assert-true (gethash "fn1" ht))))
-
-(deftest extract-entry-labels-func-ref
-  "collect-entry-labels finds vm-func-ref entry labels."
-  (let* ((instrs (list (make-vm-func-ref :dst :r0 :label "fn2")))
-         (ht (cl-cc::collect-entry-labels instrs)))
-    (assert-equal 1 (hash-table-count ht))
-    (assert-true (gethash "fn2" ht))))
+    (assert-true (gethash label ht))))
 
 (deftest extract-entry-labels-mixed
   "collect-entry-labels finds both closure and func-ref labels."
@@ -97,31 +88,21 @@
           ;; Body includes label + body-inst + ret
           (assert-equal 3 (length (third seg))))))))
 
-(deftest segment-toplevel-then-function
-  "Toplevel code before a function produces two segments."
+(deftest-each segment-mixed-ordering
+  "Mixed toplevel + function code produces 2 segments; first-segment type depends on order."
+  :cases (("toplevel-first" t   :toplevel :function)
+          ("function-first" nil :function :toplevel))
+  (toplevel-first expected-car1 expected-car2)
   (let ((entry-labels (make-hash-table :test #'equal)))
     (setf (gethash "fn1" entry-labels) t)
     (let* ((top (make-vm-const :dst :r0 :value 0))
            (lbl (make-vm-label :name "fn1"))
            (ret (make-vm-ret :reg :r0))
-           (instrs (list top lbl ret)))
+           (instrs (if toplevel-first (list top lbl ret) (list lbl ret top))))
       (let ((segs (cl-cc::segment-instructions instrs entry-labels)))
         (assert-equal 2 (length segs))
-        (assert-eq :toplevel (car (first segs)))
-        (assert-eq :function (car (second segs)))))))
-
-(deftest segment-function-then-toplevel
-  "A function body followed by toplevel code produces two segments."
-  (let ((entry-labels (make-hash-table :test #'equal)))
-    (setf (gethash "fn1" entry-labels) t)
-    (let* ((lbl (make-vm-label :name "fn1"))
-           (ret (make-vm-ret :reg :r0))
-           (top (make-vm-const :dst :r0 :value 0))
-           (instrs (list lbl ret top)))
-      (let ((segs (cl-cc::segment-instructions instrs entry-labels)))
-        (assert-equal 2 (length segs))
-        (assert-eq :function (car (first segs)))
-        (assert-eq :toplevel (car (second segs)))))))
+        (assert-eq expected-car1 (car (first segs)))
+        (assert-eq expected-car2 (car (second segs)))))))
 
 (deftest segment-two-functions
   "Two consecutive function bodies produce two :function segments."

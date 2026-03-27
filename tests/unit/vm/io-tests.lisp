@@ -28,26 +28,16 @@
 
 ;;; ─── write-to-string ──────────────────────────────────────────────────────
 
-(deftest io-write-to-string-number
-  "vm-write-to-string converts number to string."
+(deftest-each io-write-to-string
+  "vm-write-to-string converts various CL values to their printed representation."
+  :cases (("number" 42   "42")
+          ("symbol" :test ":TEST")
+          ("string" "hi" "\"hi\""))
+  (value expected)
   (let ((s (io-vm)))
-    (cl-cc::vm-reg-set s :R1 42)
+    (cl-cc::vm-reg-set s :R1 value)
     (io-exec (cl-cc::make-vm-write-to-string-inst :dst :R0 :src :R1) s)
-    (assert-equal "42" (cl-cc::vm-reg-get s :R0))))
-
-(deftest io-write-to-string-symbol
-  "vm-write-to-string converts symbol to string (may include package)."
-  (let ((s (io-vm)))
-    (cl-cc::vm-reg-set s :R1 :test)
-    (io-exec (cl-cc::make-vm-write-to-string-inst :dst :R0 :src :R1) s)
-    (assert-equal ":TEST" (cl-cc::vm-reg-get s :R0))))
-
-(deftest io-write-to-string-string
-  "vm-write-to-string wraps string in quotes."
-  (let ((s (io-vm)))
-    (cl-cc::vm-reg-set s :R1 "hi")
-    (io-exec (cl-cc::make-vm-write-to-string-inst :dst :R0 :src :R1) s)
-    (assert-equal "\"hi\"" (cl-cc::vm-reg-get s :R0))))
+    (assert-equal expected (cl-cc::vm-reg-get s :R0))))
 
 ;;; ─── format ───────────────────────────────────────────────────────────────
 
@@ -77,19 +67,15 @@
 
 ;;; ─── princ / prin1 / print ───────────────────────────────────────────────
 
-(deftest io-princ-number
-  "vm-princ prints number without escaping."
+(deftest-each io-princ-values
+  "vm-princ prints values without escaping: numbers as digits, strings without quotes."
+  :cases (("number" 42      "42")
+          ("string" "hello" "hello"))
+  (value expected)
   (let ((s (io-vm)))
-    (cl-cc::vm-reg-set s :R1 42)
+    (cl-cc::vm-reg-set s :R1 value)
     (io-exec (cl-cc::make-vm-princ :src :R1) s)
-    (assert-equal "42" (io-capture s))))
-
-(deftest io-princ-string
-  "vm-princ prints string without quotes."
-  (let ((s (io-vm)))
-    (cl-cc::vm-reg-set s :R1 "hello")
-    (io-exec (cl-cc::make-vm-princ :src :R1) s)
-    (assert-equal "hello" (io-capture s))))
+    (assert-equal expected (io-capture s))))
 
 (deftest io-prin1-string
   "vm-prin1 prints string with quotes."
@@ -170,13 +156,8 @@
 
 ;;; ─── vm-allocate-file-handle ────────────────────────────────────────────────
 
-(deftest io-allocate-handle-starts-at-2
-  "First allocated handle is 2 (0=stdin, 1=stdout reserved)."
-  (let ((s (io-vm-full)))
-    (assert-equal 2 (cl-cc::vm-allocate-file-handle s))))
-
-(deftest io-allocate-handle-increments
-  "Successive allocations return incrementing handles."
+(deftest io-allocate-handle-sequence
+  "Handles start at 2 (0=stdin, 1=stdout reserved) and increment by 1."
   (let ((s (io-vm-full)))
     (let ((h1 (cl-cc::vm-allocate-file-handle s))
           (h2 (cl-cc::vm-allocate-file-handle s))
@@ -187,17 +168,13 @@
 
 ;;; ─── vm-get-stream ──────────────────────────────────────────────────────────
 
-(deftest io-get-stream-stdin
-  "vm-get-stream resolves stdin handle to standard-input."
+(deftest-each io-get-stream-std-handles
+  "vm-get-stream resolves stdin/stdout handles to the corresponding vm streams."
+  :cases (("stdin"  #'cl-cc::vm-standard-input  cl-cc::+stdin-handle+)
+          ("stdout" #'cl-cc::vm-standard-output cl-cc::+stdout-handle+))
+  (accessor handle)
   (let ((s (io-vm-full)))
-    (assert-equal (cl-cc::vm-standard-input s)
-                  (cl-cc::vm-get-stream s cl-cc::+stdin-handle+))))
-
-(deftest io-get-stream-stdout
-  "vm-get-stream resolves stdout handle to standard-output."
-  (let ((s (io-vm-full)))
-    (assert-equal (cl-cc::vm-standard-output s)
-                  (cl-cc::vm-get-stream s cl-cc::+stdout-handle+))))
+    (assert-equal (funcall accessor s) (cl-cc::vm-get-stream s handle))))
 
 (deftest io-get-stream-cl-stream-passthrough
   "vm-get-stream passes through CL stream objects directly."
@@ -228,15 +205,13 @@
 
 ;;; ─── vm-stream-open-p ──────────────────────────────────────────────────────
 
-(deftest io-stream-open-p-stdin
-  "vm-stream-open-p returns truthy for stdin handle."
+(deftest-each io-stream-open-p-standard-handles
+  "vm-stream-open-p returns truthy for both standard stdin and stdout handles."
+  :cases (("stdin"  cl-cc::+stdin-handle+)
+          ("stdout" cl-cc::+stdout-handle+))
+  (handle)
   (let ((s (io-vm-full)))
-    (assert-true (cl-cc::vm-stream-open-p s cl-cc::+stdin-handle+))))
-
-(deftest io-stream-open-p-stdout
-  "vm-stream-open-p returns truthy for stdout handle."
-  (let ((s (io-vm-full)))
-    (assert-true (cl-cc::vm-stream-open-p s cl-cc::+stdout-handle+))))
+    (assert-true (cl-cc::vm-stream-open-p s handle))))
 
 (deftest io-stream-open-p-unknown
   "vm-stream-open-p returns nil for unknown handle."
@@ -250,19 +225,15 @@
 
 ;;; ─── stream predicate instructions ─────────────────────────────────────────
 
-(deftest io-streamp-cl-stream
-  "vm-streamp returns t for a CL stream object."
+(deftest-each io-streamp
+  "vm-streamp returns t for CL streams, nil for non-streams."
+  :cases (("cl-stream" (make-string-output-stream) t)
+          ("non-stream" 42                         nil))
+  (value expected)
   (let ((s (io-vm-full)))
-    (cl-cc::vm-reg-set s :R1 (make-string-output-stream))
+    (cl-cc::vm-reg-set s :R1 value)
     (io-exec (cl-cc::make-vm-streamp :dst :R0 :src :R1) s)
-    (assert-equal t (cl-cc::vm-reg-get s :R0))))
-
-(deftest io-streamp-non-stream
-  "vm-streamp returns nil for non-stream."
-  (let ((s (io-vm-full)))
-    (cl-cc::vm-reg-set s :R1 42)
-    (io-exec (cl-cc::make-vm-streamp :dst :R0 :src :R1) s)
-    (assert-equal nil (cl-cc::vm-reg-get s :R0))))
+    (assert-equal expected (cl-cc::vm-reg-get s :R0))))
 
 (deftest io-streamp-handle-resolved
   "vm-streamp resolves integer handle to stream via vm-io-state."
@@ -271,33 +242,25 @@
     (io-exec (cl-cc::make-vm-streamp :dst :R0 :src :R1) s)
     (assert-equal t (cl-cc::vm-reg-get s :R0))))
 
-(deftest io-input-stream-p-true
-  "vm-input-stream-p returns t for input stream."
+(deftest-each io-input-stream-p
+  "vm-input-stream-p returns t for input streams, nil for output streams."
+  :cases (("input-stream"  (make-string-input-stream "hello") t)
+          ("output-stream" (make-string-output-stream)        nil))
+  (stream-val expected)
   (let ((s (io-vm-full)))
-    (cl-cc::vm-reg-set s :R1 (make-string-input-stream "hello"))
+    (cl-cc::vm-reg-set s :R1 stream-val)
     (io-exec (cl-cc::make-vm-input-stream-p :dst :R0 :src :R1) s)
-    (assert-equal t (cl-cc::vm-reg-get s :R0))))
+    (assert-equal expected (cl-cc::vm-reg-get s :R0))))
 
-(deftest io-input-stream-p-false
-  "vm-input-stream-p returns nil for output stream."
+(deftest-each io-output-stream-p
+  "vm-output-stream-p returns t for output streams, nil for input streams."
+  :cases (("output-stream" (make-string-output-stream)   t)
+          ("input-stream"  (make-string-input-stream "x") nil))
+  (stream-val expected)
   (let ((s (io-vm-full)))
-    (cl-cc::vm-reg-set s :R1 (make-string-output-stream))
-    (io-exec (cl-cc::make-vm-input-stream-p :dst :R0 :src :R1) s)
-    (assert-equal nil (cl-cc::vm-reg-get s :R0))))
-
-(deftest io-output-stream-p-true
-  "vm-output-stream-p returns t for output stream."
-  (let ((s (io-vm-full)))
-    (cl-cc::vm-reg-set s :R1 (make-string-output-stream))
+    (cl-cc::vm-reg-set s :R1 stream-val)
     (io-exec (cl-cc::make-vm-output-stream-p :dst :R0 :src :R1) s)
-    (assert-equal t (cl-cc::vm-reg-get s :R0))))
-
-(deftest io-output-stream-p-false
-  "vm-output-stream-p returns nil for input stream."
-  (let ((s (io-vm-full)))
-    (cl-cc::vm-reg-set s :R1 (make-string-input-stream "x"))
-    (io-exec (cl-cc::make-vm-output-stream-p :dst :R0 :src :R1) s)
-    (assert-equal nil (cl-cc::vm-reg-get s :R0))))
+    (assert-equal expected (cl-cc::vm-reg-get s :R0))))
 
 (deftest io-open-stream-p-true
   "vm-open-stream-p returns t for open stream."
@@ -345,19 +308,15 @@
 
 ;;; ─── eof-p ──────────────────────────────────────────────────────────────────
 
-(deftest io-eof-p-true
-  "vm-eof-p returns 1 for :eof value."
+(deftest-each io-eof-p
+  "vm-eof-p returns 1 for :eof, 0 for non-eof values."
+  :cases (("eof"     :eof 1)
+          ("non-eof" #\a  0))
+  (value expected)
   (let ((s (io-vm-full)))
-    (cl-cc::vm-reg-set s :R1 :eof)
+    (cl-cc::vm-reg-set s :R1 value)
     (io-exec (cl-cc::make-vm-eof-p :dst :R0 :value :R1) s)
-    (assert-equal 1 (cl-cc::vm-reg-get s :R0))))
-
-(deftest io-eof-p-false
-  "vm-eof-p returns 0 for non-eof value."
-  (let ((s (io-vm-full)))
-    (cl-cc::vm-reg-set s :R1 #\a)
-    (io-exec (cl-cc::make-vm-eof-p :dst :R0 :value :R1) s)
-    (assert-equal 0 (cl-cc::vm-reg-get s :R0))))
+    (assert-equal expected (cl-cc::vm-reg-get s :R0))))
 
 ;;; ─── read-char / read-line via handle ──────────────────────────────────────
 

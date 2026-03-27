@@ -58,20 +58,11 @@
 ;;; occurs-check
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest prolog-occurs-check-self
-  "occurs-check: ?x occurs in ?x"
-  (assert-true (cl-cc:occurs-check '?x '?x nil)))
-
-(deftest prolog-occurs-check-in-structure
-  "occurs-check: ?x occurs inside a nested term"
-  (assert-true (cl-cc:occurs-check '?x '(?x 1) nil)))
-
-(deftest prolog-occurs-check-absent
-  "occurs-check: ?x does not occur in an unrelated atom"
-  (assert-false (cl-cc:occurs-check '?x 42 nil)))
-
-(deftest prolog-occurs-check-via-binding
-  "occurs-check: follows a chain of bindings in env"
+(deftest prolog-occurs-check-cases
+  "occurs-check: self, nested structure, absent, and via binding"
+  (assert-true  (cl-cc:occurs-check '?x '?x nil))
+  (assert-true  (cl-cc:occurs-check '?x '(?x 1) nil))
+  (assert-false (cl-cc:occurs-check '?x 42 nil))
   ;; env says ?y → ?x; checking ?x in ?y should detect the cycle
   (let ((env (list (cons '?y '?x))))
     (assert-true (cl-cc:occurs-check '?x '?y env))))
@@ -176,13 +167,12 @@
     (assert-= 1 (length envs))
     (assert-= 42 (cl-cc:substitute-variables '?x (car envs)))))
 
-(deftest prolog-builtin-non-unification-succeeds
-  "Built-in /= succeeds when terms are not equal"
-  (assert-= 1 (length (all-envs '(/= 1 2)))))
-
-(deftest prolog-builtin-non-unification-fails
-  "Built-in /= fails when terms are equal"
-  (assert-= 0 (length (all-envs '(/= 1 1)))))
+(deftest-each prolog-non-unification-cases
+  "Built-in /=: succeeds when terms differ, fails when equal"
+  :cases (("succeeds" '(/= 1 2) 1)
+          ("fails"    '(/= 1 1) 0))
+  (goal expected-count)
+  (assert-= expected-count (length (all-envs goal))))
 
 (deftest prolog-builtin-conjunction
   "Built-in 'and' chains goals and accumulates bindings"
@@ -220,16 +210,10 @@
 ;;; Standard database predicates — cons-functor notation
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest prolog-member-hit
-  "member/2: succeeds when element is in the cons-list"
-  (assert-= 1 (length (all-envs '(member 2 (cons 1 (cons 2 (cons 3 nil))))))))
-
-(deftest prolog-member-miss
-  "member/2: fails when element is absent"
-  (assert-= 0 (length (all-envs '(member 99 (cons 1 (cons 2 nil)))))))
-
-(deftest prolog-member-enumerates-all
-  "member/2: generates one solution per list element"
+(deftest prolog-member-behavior
+  "member/2: hit, miss, and full enumeration"
+  (assert-= 1 (length (all-envs '(member 2 (cons 1 (cons 2 (cons 3 nil)))))))
+  (assert-= 0 (length (all-envs '(member 99 (cons 1 (cons 2 nil))))))
   (assert-= 3 (length (cl-cc:query-all '(member ?x (cons 1 (cons 2 (cons 3 nil))))))))
 
 (deftest-each prolog-append-known-inputs
@@ -356,18 +340,12 @@
 ;;; Prolog peephole optimizer
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest prolog-peephole-const-move-fused
-  "Peephole: (:const Rx V)(:move Ry Rx) → (:const Ry V)"
+(deftest prolog-peephole-cases
+  "Peephole: const-move fusion, self-move removal, and passthrough"
   (assert-equal '((:const :r1 42))
-                (cl-cc:apply-prolog-peephole '((:const :r0 42) (:move :r1 :r0)))))
-
-(deftest prolog-peephole-self-move-removed
-  "Peephole pre-pass: (:move Rx Rx) is a no-op and is deleted"
+                (cl-cc:apply-prolog-peephole '((:const :r0 42) (:move :r1 :r0))))
   (let ((result (cl-cc:apply-prolog-peephole '((:move :r0 :r0) (:const :r1 1)))))
-    (assert-false (member '(:move :r0 :r0) result :test #'equal))))
-
-(deftest prolog-peephole-no-match-passthrough
-  "Peephole: unmatched instructions pass through unchanged"
+    (assert-false (member '(:move :r0 :r0) result :test #'equal)))
   (assert-equal '((:add :r2 :r0 :r1))
                 (cl-cc:apply-prolog-peephole '((:add :r2 :r0 :r1)))))
 

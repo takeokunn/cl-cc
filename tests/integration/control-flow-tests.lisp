@@ -16,15 +16,13 @@
 ;; setq tests
 ;; ----------------------------------------------------------------------------
 
-(deftest setq-basic
-  (assert-true (is-compile-string "(let ((x 1)) (setq x 42) x)" :target :x86_64))
-  (let ((result (run-string "(let ((x 1)) (setq x 42) x)")))
-    (assert-= result 42)))
-
-(deftest setq-multiple
-  (assert-true (is-compile-string "(let ((x 1) (y 2)) (setq x (+ x y)) x)" :target :x86_64))
-  (let ((result (run-string "(let ((x 1) (y 2)) (setq x (+ x y)) x)")))
-    (assert-= result 3)))
+(deftest-each setq-forms
+  "setq assignment compiles and updates variable bindings correctly."
+  :cases (("basic"    "(let ((x 1)) (setq x 42) x)"              42)
+          ("multiple" "(let ((x 1) (y 2)) (setq x (+ x y)) x)"    3))
+  (source expected)
+  (assert-true (is-compile-string source :target :x86_64))
+  (assert-= expected (run-string source)))
 
 ;; ----------------------------------------------------------------------------
 ;; quote tests
@@ -35,47 +33,38 @@
   (let ((result (run-string "(quote 42)")))
     (assert-= result 42)))
 
-(deftest quote-symbol
-  (assert-true (is-compile-string "(quote foo)" :target :x86_64)))
-
-(deftest quote-list
-  (assert-true (is-compile-string "(quote (1 2 3))" :target :x86_64)))
-
-(deftest quote-nested
-  (assert-true (is-compile-string "(quote (a (b c) d))" :target :x86_64)))
+(deftest-each quote-compile-forms
+  "Symbol, list, and nested-list quote forms compile without error."
+  :cases (("symbol" "(quote foo)")
+          ("list"   "(quote (1 2 3))")
+          ("nested" "(quote (a (b c) d))"))
+  (source)
+  (assert-true (is-compile-string source :target :x86_64)))
 
 ;; ----------------------------------------------------------------------------
 ;; the tests
 ;; ----------------------------------------------------------------------------
 
-(deftest the-integer
-  (assert-true (is-compile-string "(the integer 42)" :target :x86_64))
-  (let ((result (run-string "(the integer 42)")))
-    (assert-= result 42)))
-
-(deftest the-in-expression
-  (assert-true (is-compile-string "(the integer (+ 1 2))" :target :x86_64))
-  (let ((result (run-string "(the integer (+ 1 2))")))
-    (assert-= result 3)))
+(deftest-each the-forms
+  "The type annotation forms compile and evaluate correctly."
+  :cases (("integer"       "(the integer 42)"       42)
+          ("in-expression" "(the integer (+ 1 2))"   3))
+  (source expected)
+  (assert-true (is-compile-string source :target :x86_64))
+  (assert-= expected (run-string source)))
 
 ;; ----------------------------------------------------------------------------
 ;; block/return-from tests
 ;; ----------------------------------------------------------------------------
 
-(deftest block-normal-return
-  (assert-true (is-compile-string "(block foo 42)" :target :x86_64))
-  (let ((result (run-string "(block foo 42)")))
-    (assert-= result 42)))
-
-(deftest block-early-return
-  (assert-true (is-compile-string "(block foo (return-from foo 10) 20)" :target :x86_64))
-  (let ((result (run-string "(block foo (return-from foo 10) 20)")))
-    (assert-= result 10)))
-
-(deftest block-nested
-  (assert-true (is-compile-string "(block outer (block inner (return-from inner 5) 10) 20)" :target :x86_64))
-  (let ((result (run-string "(block outer (block inner (return-from inner 5) 10) 20)")))
-    (assert-= result 20)))
+(deftest-each block-forms
+  "Block normal return, early return-from, and nested blocks evaluate correctly."
+  :cases (("normal-return" "(block foo 42)"                                             42)
+          ("early-return"  "(block foo (return-from foo 10) 20)"                        10)
+          ("nested"        "(block outer (block inner (return-from inner 5) 10) 20)"    20))
+  (source expected)
+  (assert-true (is-compile-string source :target :x86_64))
+  (assert-= expected (run-string source)))
 
 ;; ----------------------------------------------------------------------------
 ;; tagbody/go tests
@@ -88,20 +77,14 @@
 ;; catch/throw tests
 ;; ----------------------------------------------------------------------------
 
-(deftest catch-no-throw
+(deftest control-flow-constructs
+  "catch, unwind-protect, and multiple-value-prog1 compile and evaluate to their primary value."
   (assert-true (is-compile-string "(catch 'foo 42)" :target :x86_64))
-  (let ((result (run-string "(catch 'foo 42)")))
-    (assert-= result 42)))
-
-(deftest unwind-protect-normal
+  (assert-= 42 (run-string "(catch 'foo 42)"))
   (assert-true (is-compile-string "(unwind-protect 42 (print 0))" :target :vm))
-  (let ((result (run-string "(unwind-protect 42 (print 0))")))
-    (assert-= result 42)))
-
-(deftest multiple-value-prog1
+  (assert-= 42 (run-string "(unwind-protect 42 (print 0))"))
   (assert-true (is-compile-string "(multiple-value-prog1 42 (print 1) (print 2))" :target :vm))
-  (let ((result (run-string "(multiple-value-prog1 42 (print 1) (print 2))")))
-    (assert-= result 42)))
+  (assert-= 42 (run-string "(multiple-value-prog1 42 (print 1) (print 2))")))
 
 ;; ----------------------------------------------------------------------------
 ;; Run control flow tests

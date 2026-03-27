@@ -61,15 +61,21 @@
       :components
       ((:file "package")
        (:file "vm")
+       (:file "vm-execute") ; Core execute-instruction methods + call-frame helpers
        (:file "vm-clos")    ; CLOS instruction defstructs + execute-instruction methods
        (:file "vm-run")     ; Handler-case, label table, run-vm, vm2-state
        (:file "primitives")
+       (:file "vm-bitwise")        ; FR-303: ash, logand, logior, logxor, logeqv, lognot, logtest, logbitp, logcount, integer-length
+       (:file "vm-transcendental") ; FR-304: expt, sqrt, exp, log, trig, hyperbolic
        (:file "vm-numeric")
        (:file "vm-extensions")
        (:file "io")
+       (:file "format")
        (:file "conditions")
        (:file "list")
+       (:file "array")
        (:file "strings")
+       (:file "symbols")
        (:file "hash")))
      ;; Stage 3: Type checking and inference
      (:module "type"
@@ -89,6 +95,8 @@
        (:file "typeclass")
        (:file "solver")
        (:file "inference")
+       (:file "inference-effects")
+       (:file "bidirectional")
        (:file "checker")
        (:file "printer")))
      ;; Stage 4: AST → VM IR (context/closure/cps/codegen — before optimize/emit)
@@ -132,6 +140,7 @@
        (:file "calling-convention")
        (:file "regalloc")
        (:file "x86-64")
+       (:file "x86-64-encoding")
        (:file "x86-64-codegen")
        (:file "aarch64")
        (:file "aarch64-codegen")
@@ -306,6 +315,7 @@
          (:file "target-tests")
          (:file "wasm-extract-tests")
          (:file "wasm-trampoline-tests")
+         (:file "x86-64-codegen-tests")
          (:file "calling-convention-tests")))
        (:module "runtime"
         :serial t

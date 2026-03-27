@@ -9,22 +9,16 @@
 
 ;;; ─── Calling Convention Struct ──────────────────────────────────────────────
 
-(deftest cc-x86-64-arg-registers
-  "x86-64 SysV ABI passes first 6 args in registers."
+(deftest cc-x86-64-registers
+  "x86-64 SysV ABI: 6 arg registers starting at :rdi; returns in :rax."
   (assert-equal 6 (length (cl-cc::cc-arg-registers cl-cc::*x86-64-calling-convention*)))
-  (assert-eq :rdi (first (cl-cc::cc-arg-registers cl-cc::*x86-64-calling-convention*))))
-
-(deftest cc-x86-64-return-register
-  "x86-64 returns in rax."
+  (assert-eq :rdi (first (cl-cc::cc-arg-registers cl-cc::*x86-64-calling-convention*)))
   (assert-eq :rax (cl-cc::cc-return-register cl-cc::*x86-64-calling-convention*)))
 
-(deftest cc-aarch64-arg-registers
-  "AArch64 AAPCS passes first 8 args in registers."
+(deftest cc-aarch64-registers
+  "AArch64 AAPCS: 8 arg registers starting at :x0; returns in :x0."
   (assert-equal 8 (length (cl-cc::cc-arg-registers cl-cc::*aarch64-calling-convention*)))
-  (assert-eq :x0 (first (cl-cc::cc-arg-registers cl-cc::*aarch64-calling-convention*))))
-
-(deftest cc-aarch64-return-register
-  "AArch64 returns in x0."
+  (assert-eq :x0 (first (cl-cc::cc-arg-registers cl-cc::*aarch64-calling-convention*)))
   (assert-eq :x0 (cl-cc::cc-return-register cl-cc::*aarch64-calling-convention*)))
 
 (deftest cc-callee-saved-disjoint-from-caller
@@ -68,57 +62,39 @@
 
 ;;; ─── Target Registry ────────────────────────────────────────────────────────
 
-(deftest target-registry-find-x86-64
-  "find-target looks up :x86-64."
-  (let ((found (cl-cc::find-target :x86-64)))
-    (assert-true (cl-cc::target-desc-p found))
-    (assert-eq :x86-64 (cl-cc::target-name found))))
-
-(deftest target-registry-find-all-predefined
-  "All 4 predefined targets are in the registry."
-  (assert-true (cl-cc::target-desc-p (cl-cc::find-target :x86-64)))
+(deftest target-registry-find
+  "find-target: all 4 predefined targets found; unknown target returns nil."
+  (let ((x86 (cl-cc::find-target :x86-64)))
+    (assert-true (cl-cc::target-desc-p x86))
+    (assert-eq :x86-64 (cl-cc::target-name x86)))
   (assert-true (cl-cc::target-desc-p (cl-cc::find-target :aarch64)))
   (assert-true (cl-cc::target-desc-p (cl-cc::find-target :riscv64)))
-  (assert-true (cl-cc::target-desc-p (cl-cc::find-target :wasm32))))
-
-(deftest target-registry-find-nonexistent
-  "find-target returns nil for unknown target."
+  (assert-true (cl-cc::target-desc-p (cl-cc::find-target :wasm32)))
   (assert-null (cl-cc::find-target :pdp-11)))
 
 ;;; ─── Target Utility Functions ───────────────────────────────────────────────
 
-(deftest target-64-bit-p-true
-  "target-64-bit-p returns true for 64-bit targets."
-  (assert-true (cl-cc::target-64-bit-p cl-cc::*x86-64-target*))
-  (assert-true (cl-cc::target-64-bit-p cl-cc::*aarch64-target*))
-  (assert-true (cl-cc::target-64-bit-p cl-cc::*riscv64-target*)))
-
-(deftest target-64-bit-p-false-wasm
-  "target-64-bit-p returns false for wasm32."
+(deftest target-64-bit-p-behavior
+  "target-64-bit-p: true for x86-64/aarch64/riscv64; false for wasm32."
+  (assert-true  (cl-cc::target-64-bit-p cl-cc::*x86-64-target*))
+  (assert-true  (cl-cc::target-64-bit-p cl-cc::*aarch64-target*))
+  (assert-true  (cl-cc::target-64-bit-p cl-cc::*riscv64-target*))
   (assert-false (cl-cc::target-64-bit-p cl-cc::*wasm32-target*)))
 
-(deftest target-has-feature-p-present
-  "target-has-feature-p finds known features."
-  (assert-true (cl-cc::target-has-feature-p cl-cc::*x86-64-target* :sysv-abi))
-  (assert-true (cl-cc::target-has-feature-p cl-cc::*aarch64-target* :aapcs64))
-  (assert-true (cl-cc::target-has-feature-p cl-cc::*wasm32-target* :structured-control-flow)))
-
-(deftest target-has-feature-p-absent
-  "target-has-feature-p returns nil for absent features."
+(deftest target-has-feature-p-behavior
+  "target-has-feature-p: finds known features; returns nil for absent features."
+  (assert-true  (cl-cc::target-has-feature-p cl-cc::*x86-64-target* :sysv-abi))
+  (assert-true  (cl-cc::target-has-feature-p cl-cc::*aarch64-target* :aapcs64))
+  (assert-true  (cl-cc::target-has-feature-p cl-cc::*wasm32-target* :structured-control-flow))
   (assert-false (cl-cc::target-has-feature-p cl-cc::*x86-64-target* :structured-control-flow))
   (assert-false (cl-cc::target-has-feature-p cl-cc::*wasm32-target* :sysv-abi)))
 
-(deftest target-allocatable-regs-excludes-scratch
-  "target-allocatable-regs excludes scratch registers."
+(deftest target-allocatable-regs-behavior
+  "target-allocatable-regs: x86-64 excludes scratch (:rsp/:r11), includes :rax; wasm32 empty."
   (let ((alloc (cl-cc::target-allocatable-regs cl-cc::*x86-64-target*)))
-    ;; rsp and r11 are scratch, should not appear
     (assert-false (member :rsp alloc))
     (assert-false (member :r11 alloc))
-    ;; rax should be allocatable
-    (assert-true (member :rax alloc))))
-
-(deftest target-allocatable-regs-wasm-empty
-  "Wasm has no allocatable registers."
+    (assert-true  (member :rax alloc)))
   (assert-null (cl-cc::target-allocatable-regs cl-cc::*wasm32-target*)))
 
 (deftest target-caller-saved-subset-of-allocatable
@@ -127,14 +103,11 @@
         (alloc  (cl-cc::target-allocatable-regs cl-cc::*x86-64-target*)))
     (assert-true (every (lambda (r) (member r alloc)) caller))))
 
-(deftest target-reg-index-known
-  "target-reg-index returns correct index for known registers."
+(deftest target-reg-index-behavior
+  "target-reg-index: correct index for known registers; nil for unknown."
   (assert-equal 0 (cl-cc::target-reg-index cl-cc::*x86-64-target* :rax))
-  (assert-equal 7 (cl-cc::target-reg-index cl-cc::*x86-64-target* :rdi)))
-
-(deftest target-reg-index-unknown
-  "target-reg-index returns nil for unknown register."
-  (assert-null (cl-cc::target-reg-index cl-cc::*x86-64-target* :r99)))
+  (assert-equal 7 (cl-cc::target-reg-index cl-cc::*x86-64-target* :rdi))
+  (assert-null    (cl-cc::target-reg-index cl-cc::*x86-64-target* :r99)))
 
 (deftest target-op-legal-default
   "Unregistered ops are legal by default (permissive)."

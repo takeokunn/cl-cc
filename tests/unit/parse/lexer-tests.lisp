@@ -108,21 +108,14 @@
 
 ;;; ─── Quote Macros ───────────────────────────────────────────────────────────
 
-(deftest lexer-quote
-  "Lexer: quote character"
-  (assert-eq :T-QUOTE (first-token-type "'x")))
-
-(deftest lexer-backquote
-  "Lexer: backquote character"
-  (assert-eq :T-BACKQUOTE (first-token-type "`x")))
-
-(deftest lexer-unquote
-  "Lexer: unquote"
-  (assert-eq :T-UNQUOTE (first-token-type ",x")))
-
-(deftest lexer-unquote-splicing
-  "Lexer: unquote-splicing"
-  (assert-eq :T-UNQUOTE-SPLICING (first-token-type ",@x")))
+(deftest-each lexer-quote-macros
+  "Lexer: quote macro characters produce correct token types"
+  ((input expected-token-type)
+   ("'x"  :T-QUOTE)
+   ("`x"  :T-BACKQUOTE)
+   (",x"  :T-UNQUOTE)
+   (",@x" :T-UNQUOTE-SPLICING))
+  (assert-eq expected-token-type (first-token-type input)))
 
 ;;; ─── Hash Dispatch ──────────────────────────────────────────────────────────
 
@@ -145,17 +138,13 @@
 
 ;;; ─── Radix Dispatch ─────────────────────────────────────────────────────────
 
-(deftest lexer-radix-binary
-  "Lexer: #b binary"
-  (assert-= 5 (first-token-value "#b101")))
-
-(deftest lexer-radix-octal
-  "Lexer: #o octal"
-  (assert-= 8 (first-token-value "#o10")))
-
-(deftest lexer-radix-hex
-  "Lexer: #x hexadecimal"
-  (assert-= 255 (first-token-value "#xFF")))
+(deftest-each lexer-radix-dispatch
+  "Lexer: radix dispatch produces correct integer values"
+  ((input expected-value)
+   ("#b101" 5)
+   ("#o10"  8)
+   ("#xFF"  255))
+  (assert-= expected-value (first-token-value input)))
 
 ;;; ─── Comments ───────────────────────────────────────────────────────────────
 

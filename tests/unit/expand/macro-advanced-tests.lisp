@@ -37,10 +37,8 @@
       (assert-eq (cadr (cadddr result)) 'y)
       (assert-eq (caddr (cadddr result)) tmp-var)
       ;; Final form is nil
-      (assert-null (car (last result))))))
-
-(deftest rotatef-two-var-returns-nil
-  "ROTATEF expansion ends with nil (returns nil)"
+      (assert-null (car (last result)))))
+  ;; Verify nil-return independently of variable names
   (let ((result (our-macroexpand-1 '(rotatef a b))))
     (assert-null (car (last result)))))
 
@@ -75,8 +73,8 @@
     (assert-null (cadr result))
     (assert-null (car (last result)))))
 
-(deftest psetf-single-pair-structure
-  "PSETF with one pair expands to LET with temp binding then SETF"
+(deftest psetf-structure-cases
+  "PSETF with one pair has one temp binding; with two pairs captures both values before any assignment."
   (let ((result (our-macroexpand-1 '(psetf x 10))))
     ;; (let ((#:PSETF x)) (setf x #:PSETF) nil)
     (assert-eq (car result) 'let)
@@ -87,10 +85,7 @@
     (assert-eq (car (caddr result)) 'setf)
     (assert-eq (cadr (caddr result)) 'x)
     ;; Returns nil at end
-    (assert-null (car (last result)))))
-
-(deftest psetf-two-pairs-parallel
-  "PSETF with two pairs evaluates both values before any assignment"
+    (assert-null (car (last result))))
   (let ((result (our-macroexpand-1 '(psetf a 1 b 2))))
     (assert-eq (car result) 'let)
     ;; Two temp bindings: both values captured first

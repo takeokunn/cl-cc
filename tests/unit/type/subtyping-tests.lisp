@@ -64,36 +64,20 @@
 
 ;;; ─── is-subtype-p (structural subtyping) ────────────────────────────────────
 
-(deftest subtype-reflexive
-  "type-int <: type-int (reflexive)."
-  (assert-true (cl-cc/type::is-subtype-p type-int type-int)))
-
-(deftest subtype-primitive-chain
-  "type-int <: type-any (fixnum <: t via primitives)."
-  (assert-true (cl-cc/type::is-subtype-p type-int type-any)))
-
-(deftest subtype-unknown-left
-  "unknown <: anything (gradual typing)."
-  (assert-true (cl-cc/type::is-subtype-p +type-unknown+ type-int)))
-
-(deftest subtype-unknown-right
-  "anything <: unknown (gradual typing)."
-  (assert-true (cl-cc/type::is-subtype-p type-string +type-unknown+)))
-
-(deftest subtype-not-primitive
-  "string is not a subtype of integer."
+(deftest subtype-primitive-and-gradual-typing
+  "is-subtype-p: reflexive, chain, unknown<:anything, anything<:unknown, non-subtype."
+  (assert-true  (cl-cc/type::is-subtype-p type-int     type-int))
+  (assert-true  (cl-cc/type::is-subtype-p type-int     type-any))
+  (assert-true  (cl-cc/type::is-subtype-p +type-unknown+ type-int))
+  (assert-true  (cl-cc/type::is-subtype-p type-string +type-unknown+))
   (assert-false (cl-cc/type::is-subtype-p type-string type-int)))
 
 ;;; ─── Union subtyping ────────────────────────────────────────────────────────
 
-(deftest subtype-union-left
-  "(int | string) <: t — both members <: t."
+(deftest subtype-union-left-behavior
+  "(int | string) <: t (both members <: t); but NOT <: int (string is not <: int)."
   (let ((u (make-type-union (list type-int type-string))))
-    (assert-true (cl-cc/type::is-subtype-p u type-any))))
-
-(deftest subtype-union-left-fails
-  "(int | string) is NOT <: int — string is not <: int."
-  (let ((u (make-type-union (list type-int type-string))))
+    (assert-true  (cl-cc/type::is-subtype-p u type-any))
     (assert-false (cl-cc/type::is-subtype-p u type-int))))
 
 (deftest subtype-union-right
@@ -103,40 +87,27 @@
 
 ;;; ─── Intersection subtyping ─────────────────────────────────────────────────
 
-(deftest subtype-intersection-left
-  "(int & string) <: int — some component <: int."
-  (let ((i (make-type-intersection (list type-int type-string))))
-    (assert-true (cl-cc/type::is-subtype-p i type-int))))
-
-(deftest subtype-intersection-right
-  "int <: (int & t) requires int <: both, but int is NOT <: string."
-  (let ((i (make-type-intersection (list type-int type-string))))
-    (assert-false (cl-cc/type::is-subtype-p type-int i))))
-
-(deftest subtype-intersection-right-both
-  "int <: (int & t) — int <: both int and t."
-  (let ((i (make-type-intersection (list type-int type-any))))
-    (assert-true (cl-cc/type::is-subtype-p type-int i))))
+(deftest subtype-intersection-cases
+  "Intersection subtyping: left/right covariance; int NOT <: (int & string)."
+  (let ((i-int-str (make-type-intersection (list type-int type-string)))
+        (i-int-any (make-type-intersection (list type-int type-any))))
+    (assert-true  (cl-cc/type::is-subtype-p i-int-str type-int))
+    (assert-false (cl-cc/type::is-subtype-p type-int i-int-str))
+    (assert-true  (cl-cc/type::is-subtype-p type-int i-int-any))))
 
 ;;; ─── Function subtyping (contravariant params, covariant return) ────────────
 
-(deftest subtype-function-identical
-  "Identical function types are subtypes."
-  (let ((f1 (make-type-function (list type-int) type-string))
-        (f2 (make-type-function (list type-int) type-string)))
-    (assert-true (cl-cc/type::is-subtype-p f1 f2))))
-
-(deftest subtype-function-covariant-return
-  "(int -> int) <: (int -> t) — covariant return."
-  (let ((f1 (make-type-function (list type-int) type-int))
-        (f2 (make-type-function (list type-int) type-any)))
-    (assert-true (cl-cc/type::is-subtype-p f1 f2))))
-
-(deftest subtype-function-contravariant-param
-  "(t -> int) <: (int -> int) — contravariant in params."
-  (let ((f1 (make-type-function (list type-any) type-int))
-        (f2 (make-type-function (list type-int) type-int)))
-    (assert-true (cl-cc/type::is-subtype-p f1 f2))))
+(deftest subtype-function-variance
+  "Function subtyping: identical, covariant return, contravariant params."
+  (assert-true (cl-cc/type::is-subtype-p
+                (make-type-function (list type-int) type-string)
+                (make-type-function (list type-int) type-string)))
+  (assert-true (cl-cc/type::is-subtype-p      ; covariant return
+                (make-type-function (list type-int) type-int)
+                (make-type-function (list type-int) type-any)))
+  (assert-true (cl-cc/type::is-subtype-p      ; contravariant params
+                (make-type-function (list type-any) type-int)
+                (make-type-function (list type-int) type-int))))
 
 (deftest subtype-function-not-covariant-param
   "(int -> int) is NOT <: (t -> int) — params are contravariant."
@@ -165,9 +136,14 @@
 
 ;;; ─── type-join (LUB) ────────────────────────────────────────────────────────
 
-(deftest type-join-same
-  "Join of same type is that type."
-  (let ((result (cl-cc/type::type-join type-int type-int)))
+(deftest-each type-lattice-identity-same
+  "Join and meet of a type with itself is that type (identity law)."
+  :cases (("join" :join)
+          ("meet" :meet))
+  (op)
+  (let ((result (if (eq op :join)
+                    (cl-cc/type::type-join type-int type-int)
+                    (cl-cc/type::type-meet type-int type-int))))
     (assert-true (type-equal-p type-int result))))
 
 (deftest type-join-subtype
@@ -198,11 +174,6 @@
     (assert-true result)))
 
 ;;; ─── type-meet (GLB) ────────────────────────────────────────────────────────
-
-(deftest type-meet-same
-  "Meet of same type is that type."
-  (let ((result (cl-cc/type::type-meet type-int type-int)))
-    (assert-true (type-equal-p type-int result))))
 
 (deftest type-meet-subtype
   "Meet of fixnum and integer is fixnum (fixnum <: integer)."

@@ -71,13 +71,12 @@
 ;;; Section 2: EQL comparison (pred2 — return 1/0)
 ;;; ═══════════════════════════════════════════════════════════════════════════
 
-(deftest prim-eq-equal
-  "vm-eq returns 1 for eql values."
-  (assert-= 1 (%make-pred2 #'cl-cc::make-vm-eq 42 42)))
-
-(deftest prim-eq-not-equal
-  "vm-eq returns 0 for non-eql values."
-  (assert-= 0 (%make-pred2 #'cl-cc::make-vm-eq 42 99)))
+(deftest-each prim-eq
+  "vm-eq returns 1 for eql values, 0 otherwise."
+  :cases (("equal"     42 42 1)
+          ("not-equal" 42 99 0))
+  (lhs rhs expected)
+  (assert-= expected (%make-pred2 #'cl-cc::make-vm-eq lhs rhs)))
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
 ;;; Section 3: Numeric Comparisons (pred2 — return 1/0)
@@ -141,97 +140,68 @@
 
 ;;; Division by zero errors
 
-(deftest prim-div-by-zero
-  "vm-div signals error on division by zero."
+(deftest-each prim-div-by-zero
+  "vm-div and vm-mod both signal error on division by zero."
+  :cases (("div" #'cl-cc::make-vm-div)
+          ("mod" #'cl-cc::make-vm-mod))
+  (make-inst)
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 10)
     (cl-cc:vm-reg-set s 2 0)
     (assert-signals error
-      (exec1 (cl-cc::make-vm-div :dst 0 :lhs 1 :rhs 2) s))))
-
-(deftest prim-mod-by-zero
-  "vm-mod signals error on division by zero."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 10)
-    (cl-cc:vm-reg-set s 2 0)
-    (assert-signals error
-      (exec1 (cl-cc::make-vm-mod :dst 0 :lhs 1 :rhs 2) s))))
+      (exec1 (funcall make-inst :dst 0 :lhs 1 :rhs 2) s))))
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
 ;;; Section 6: Multiple-Value Division (truncate/floor/ceiling/round)
 ;;; ═══════════════════════════════════════════════════════════════════════════
 
-(deftest prim-truncate-quotient
-  "vm-truncate stores quotient in dst."
-  (assert-= 3 (%make-binary #'cl-cc::make-vm-truncate 7 2)))
-
-(deftest prim-truncate-values
-  "vm-truncate stores (quotient remainder) in vm-values-list."
+(deftest-each prim-rounding-behavior
+  "Rounding instructions (7 / 2): quotient in dst and (quotient remainder) in vm-values-list.
+Round is excluded from the values-list check (nil means skip)."
+  :cases (("truncate" #'cl-cc::make-vm-truncate     3 '(3  1))
+          ("floor"    #'cl-cc::make-vm-floor-inst   3 '(3  1))
+          ("ceiling"  #'cl-cc::make-vm-ceiling-inst 4 '(4 -1))
+          ("round"    #'cl-cc::make-vm-round-inst   4 nil))
+  (make-inst expected-q expected-vals)
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 7)
     (cl-cc:vm-reg-set s 2 2)
-    (exec1 (cl-cc::make-vm-truncate :dst 0 :lhs 1 :rhs 2) s)
-    (assert-equal '(3 1) (cl-cc:vm-values-list s))))
-
-(deftest prim-floor-quotient
-  "vm-floor-inst stores floor quotient in dst."
-  (assert-= 3 (%make-binary #'cl-cc::make-vm-floor-inst 7 2)))
-
-(deftest prim-floor-values
-  "vm-floor-inst stores (quotient remainder) in vm-values-list."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 7)
-    (cl-cc:vm-reg-set s 2 2)
-    (exec1 (cl-cc::make-vm-floor-inst :dst 0 :lhs 1 :rhs 2) s)
-    (assert-equal '(3 1) (cl-cc:vm-values-list s))))
-
-(deftest prim-ceiling-quotient
-  "vm-ceiling-inst stores ceiling quotient in dst."
-  (assert-= 4 (%make-binary #'cl-cc::make-vm-ceiling-inst 7 2)))
-
-(deftest prim-ceiling-values
-  "vm-ceiling-inst stores (quotient remainder) in vm-values-list."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 7)
-    (cl-cc:vm-reg-set s 2 2)
-    (exec1 (cl-cc::make-vm-ceiling-inst :dst 0 :lhs 1 :rhs 2) s)
-    (assert-equal '(4 -1) (cl-cc:vm-values-list s))))
-
-(deftest prim-round-quotient
-  "vm-round-inst stores rounded quotient in dst (banker's rounding)."
-  (assert-= 4 (%make-binary #'cl-cc::make-vm-round-inst 7 2)))
+    (exec1 (funcall make-inst :dst 0 :lhs 1 :rhs 2) s)
+    (assert-= expected-q (cl-cc:vm-reg-get s 0))
+    (when expected-vals
+      (assert-equal expected-vals (cl-cc:vm-values-list s)))))
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
 ;;; Section 7: Boolean Operations
 ;;; ═══════════════════════════════════════════════════════════════════════════
 
-(deftest prim-not-nil
-  "vm-not on nil returns t."
-  (assert-equal t (%make-unary #'cl-cc::make-vm-not nil)))
+(deftest-each prim-not-cases
+  "vm-not: nil/0 are falsey → t; truthy → nil."
+  :cases (("nil-is-false"    nil  t)
+          ("zero-is-false"   0    t)
+          ("truthy-is-true"  42   nil))
+  (input expected)
+  (if expected
+      (assert-equal t   (%make-unary #'cl-cc::make-vm-not input))
+      (assert-null      (%make-unary #'cl-cc::make-vm-not input))))
 
-(deftest prim-not-zero
-  "vm-not on 0 returns t (0 is falsey in vm-falsep)."
-  (assert-equal t (%make-unary #'cl-cc::make-vm-not 0)))
+(deftest-each prim-and-cases
+  "vm-and: both truthy → t; any nil → nil."
+  :cases (("both-true"  1   2   t)
+          ("one-false"  1   nil nil))
+  (lhs rhs expected)
+  (if expected
+      (assert-equal t (%make-binary #'cl-cc::make-vm-and lhs rhs))
+      (assert-null    (%make-binary #'cl-cc::make-vm-and lhs rhs))))
 
-(deftest prim-not-truthy
-  "vm-not on a truthy value returns nil."
-  (assert-null (%make-unary #'cl-cc::make-vm-not 42)))
-
-(deftest prim-and-both-true
-  "vm-and with both truthy returns t."
-  (assert-equal t (%make-binary #'cl-cc::make-vm-and 1 2)))
-
-(deftest prim-and-one-false
-  "vm-and with one nil returns nil."
-  (assert-null (%make-binary #'cl-cc::make-vm-and 1 nil)))
-
-(deftest prim-or-both-false
-  "vm-or with both nil returns nil."
-  (assert-null (%make-binary #'cl-cc::make-vm-or nil nil)))
-
-(deftest prim-or-one-true
-  "vm-or with one truthy returns t."
-  (assert-equal t (%make-binary #'cl-cc::make-vm-or nil 42)))
+(deftest-each prim-or-cases
+  "vm-or: both nil → nil; any truthy → t."
+  :cases (("both-false"  nil nil nil)
+          ("one-true"    nil 42  t))
+  (lhs rhs expected)
+  (if expected
+      (assert-equal t (%make-binary #'cl-cc::make-vm-or lhs rhs))
+      (assert-null    (%make-binary #'cl-cc::make-vm-or lhs rhs))))
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
 ;;; Section 8: Bitwise Operations
@@ -313,45 +283,23 @@
 ;;; Section 11: Transcendental Functions
 ;;; ═══════════════════════════════════════════════════════════════════════════
 
-(deftest prim-sqrt
-  "vm-sqrt computes square root."
-  (assert-= 2.0 (%make-unary #'cl-cc::make-vm-sqrt 4.0)))
-
-(deftest prim-exp
-  "vm-exp-inst computes e^0 = 1."
-  (assert-= 1.0 (%make-unary #'cl-cc::make-vm-exp-inst 0.0)))
-
-(deftest prim-log
-  "vm-log-inst computes ln(1) = 0."
-  (assert-= 0.0 (%make-unary #'cl-cc::make-vm-log-inst 1.0)))
-
-(deftest prim-sin-zero
-  "vm-sin-inst of 0 is 0."
-  (assert-= 0.0 (%make-unary #'cl-cc::make-vm-sin-inst 0.0)))
-
-(deftest prim-cos-zero
-  "vm-cos-inst of 0 is 1."
-  (assert-= 1.0 (%make-unary #'cl-cc::make-vm-cos-inst 0.0)))
-
-(deftest prim-tan-zero
-  "vm-tan-inst of 0 is 0."
-  (assert-= 0.0 (%make-unary #'cl-cc::make-vm-tan-inst 0.0)))
+(deftest-each prim-transcendental-unary
+  "Unary transcendental functions produce correct results at known points."
+  :cases (("sqrt-4"   #'cl-cc::make-vm-sqrt     4.0  2.0)
+          ("exp-0"    #'cl-cc::make-vm-exp-inst  0.0  1.0)
+          ("log-1"    #'cl-cc::make-vm-log-inst  1.0  0.0)
+          ("sin-0"    #'cl-cc::make-vm-sin-inst  0.0  0.0)
+          ("cos-0"    #'cl-cc::make-vm-cos-inst  0.0  1.0)
+          ("tan-0"    #'cl-cc::make-vm-tan-inst  0.0  0.0)
+          ("sinh-0"   #'cl-cc::make-vm-sinh-inst 0.0  0.0)
+          ("cosh-0"   #'cl-cc::make-vm-cosh-inst 0.0  1.0)
+          ("tanh-0"   #'cl-cc::make-vm-tanh-inst 0.0  0.0))
+  (ctor input expected)
+  (assert-= expected (%make-unary ctor input)))
 
 (deftest prim-atan2
   "vm-atan2-inst computes atan(0, 1) = 0."
   (assert-= 0.0 (%make-binary #'cl-cc::make-vm-atan2-inst 0.0 1.0)))
-
-(deftest prim-sinh-zero
-  "vm-sinh-inst of 0 is 0."
-  (assert-= 0.0 (%make-unary #'cl-cc::make-vm-sinh-inst 0.0)))
-
-(deftest prim-cosh-zero
-  "vm-cosh-inst of 0 is 1."
-  (assert-= 1.0 (%make-unary #'cl-cc::make-vm-cosh-inst 0.0)))
-
-(deftest prim-tanh-zero
-  "vm-tanh-inst of 0 is 0."
-  (assert-= 0.0 (%make-unary #'cl-cc::make-vm-tanh-inst 0.0)))
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
 ;;; Section 12: Float Operations
@@ -365,18 +313,14 @@
   "vm-scale-float scales 1.0 by 2^3 = 8.0."
   (assert-= 8.0 (%make-binary #'cl-cc::make-vm-scale-float 1.0 3)))
 
-(deftest prim-decode-float-values
-  "vm-decode-float stores 3 multiple values."
+(deftest-each prim-float-decode-values
+  "vm-decode-float and vm-integer-decode-float both store exactly 3 multiple values."
+  :cases (("decode-float"         #'cl-cc::make-vm-decode-float)
+          ("integer-decode-float" #'cl-cc::make-vm-integer-decode-float))
+  (ctor)
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 1.0)
-    (exec1 (cl-cc::make-vm-decode-float :dst 0 :src 1) s)
-    (assert-= 3 (length (cl-cc:vm-values-list s)))))
-
-(deftest prim-integer-decode-float-values
-  "vm-integer-decode-float stores 3 multiple values."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 1.0)
-    (exec1 (cl-cc::make-vm-integer-decode-float :dst 0 :src 1) s)
+    (exec1 (funcall ctor :dst 0 :src 1) s)
     (assert-= 3 (length (cl-cc:vm-values-list s)))))
 
 ;;; Float rounding operations
@@ -403,33 +347,30 @@
   "vm-rational converts 0.5 to 1/2."
   (assert-equal 1/2 (%make-unary #'cl-cc::make-vm-rational 0.5)))
 
-(deftest prim-numerator
-  "vm-numerator returns numerator of 3/4."
-  (assert-= 3 (%make-unary #'cl-cc::make-vm-numerator 3/4)))
+(deftest-each prim-rational-parts
+  "vm-numerator/denominator extract the correct part of 3/4."
+  :cases (("numerator"   #'cl-cc::make-vm-numerator   3)
+          ("denominator" #'cl-cc::make-vm-denominator 4))
+  (make-inst expected)
+  (assert-= expected (%make-unary make-inst 3/4)))
 
-(deftest prim-denominator
-  "vm-denominator returns denominator of 3/4."
-  (assert-= 4 (%make-unary #'cl-cc::make-vm-denominator 3/4)))
-
-(deftest prim-gcd
-  "vm-gcd of 12 and 8 is 4."
-  (assert-= 4 (%make-binary #'cl-cc::make-vm-gcd 12 8)))
-
-(deftest prim-lcm
-  "vm-lcm of 4 and 6 is 12."
-  (assert-= 12 (%make-binary #'cl-cc::make-vm-lcm 4 6)))
+(deftest-each prim-gcd-lcm
+  "vm-gcd and vm-lcm compute correct results for known inputs."
+  :cases (("gcd" #'cl-cc::make-vm-gcd 12 8  4)
+          ("lcm" #'cl-cc::make-vm-lcm  4 6 12))
+  (make-inst a b expected)
+  (assert-= expected (%make-binary make-inst a b)))
 
 (deftest prim-complex-construct
   "vm-complex constructs #C(3 4)."
   (assert-equal #C(3 4) (%make-binary #'cl-cc::make-vm-complex 3 4)))
 
-(deftest prim-realpart
-  "vm-realpart of #C(3 4) is 3."
-  (assert-= 3 (%make-unary #'cl-cc::make-vm-realpart #C(3 4))))
-
-(deftest prim-imagpart
-  "vm-imagpart of #C(3 4) is 4."
-  (assert-= 4 (%make-unary #'cl-cc::make-vm-imagpart #C(3 4))))
+(deftest-each prim-complex-parts
+  "vm-realpart/imagpart extract the correct component of #C(3 4)."
+  :cases (("realpart" #'cl-cc::make-vm-realpart 3)
+          ("imagpart" #'cl-cc::make-vm-imagpart 4))
+  (make-inst expected)
+  (assert-= expected (%make-unary make-inst #C(3 4))))
 
 (deftest prim-conjugate
   "vm-conjugate of #C(3 4) is #C(3 -4)."
@@ -439,12 +380,9 @@
 ;;; Section 14: Environment Predicates (boundp/fboundp/makunbound/fmakunbound)
 ;;; ═══════════════════════════════════════════════════════════════════════════
 
-(deftest prim-boundp-unbound
-  "vm-boundp returns nil for unbound symbol."
-  (assert-null (%make-unary #'cl-cc::make-vm-boundp 'test-prim-var)))
-
-(deftest prim-boundp-bound
-  "vm-boundp returns t for bound symbol."
+(deftest prim-boundp
+  "vm-boundp returns nil for unbound symbol and t after binding."
+  (assert-null (%make-unary #'cl-cc::make-vm-boundp 'test-prim-var))
   (let ((s (make-test-vm)))
     (setf (gethash 'test-prim-var (cl-cc:vm-global-vars s)) 42)
     (cl-cc:vm-reg-set s 1 'test-prim-var)
@@ -493,17 +431,14 @@
 ;;; Section 16: Time Functions
 ;;; ═══════════════════════════════════════════════════════════════════════════
 
-(deftest prim-get-universal-time
-  "vm-get-universal-time returns a positive integer."
+(deftest-each prim-get-time
+  "Time query instructions return non-negative integers."
+  :cases (("universal-time"    #'cl-cc::make-vm-get-universal-time     #'>)
+          ("internal-realtime" #'cl-cc::make-vm-get-internal-real-time #'>=))
+  (ctor cmp)
   (let ((s (make-test-vm)))
-    (exec1 (cl-cc::make-vm-get-universal-time :dst 0) s)
-    (assert-true (> (cl-cc:vm-reg-get s 0) 0))))
-
-(deftest prim-get-internal-real-time
-  "vm-get-internal-real-time returns a non-negative integer."
-  (let ((s (make-test-vm)))
-    (exec1 (cl-cc::make-vm-get-internal-real-time :dst 0) s)
-    (assert-true (>= (cl-cc:vm-reg-get s 0) 0))))
+    (exec1 (funcall ctor :dst 0) s)
+    (assert-true (funcall cmp (cl-cc:vm-reg-get s 0) 0))))
 
 (deftest prim-decode-universal-time-values
   "vm-decode-universal-time stores 9 values."
@@ -591,21 +526,16 @@
   (ctor lhs rhs expected)
   (assert-= expected (%make-binary ctor lhs rhs)))
 
-(deftest prim-generic-eq-true
-  "vm-generic-eq uses EQUAL and returns t for equal values."
-  (assert-equal t (%make-binary #'cl-cc::make-vm-generic-eq "hello" "hello")))
-
-(deftest prim-generic-eq-false
-  "vm-generic-eq returns nil for non-equal values."
-  (assert-null (%make-binary #'cl-cc::make-vm-generic-eq "hello" "world")))
-
-(deftest prim-generic-lt
-  "vm-generic-lt returns t when lhs < rhs."
-  (assert-equal t (%make-binary #'cl-cc::make-vm-generic-lt 3 5)))
-
-(deftest prim-generic-gt
-  "vm-generic-gt returns nil when lhs < rhs."
-  (assert-null (%make-binary #'cl-cc::make-vm-generic-gt 3 5)))
+(deftest-each prim-generic-comparison
+  "Generic comparison instructions: eq/lt/gt over known values."
+  :cases (("eq-equal"    #'cl-cc::make-vm-generic-eq "hello" "hello" t)
+          ("eq-unequal"  #'cl-cc::make-vm-generic-eq "hello" "world" nil)
+          ("lt-true"     #'cl-cc::make-vm-generic-lt 3       5       t)
+          ("gt-false"    #'cl-cc::make-vm-generic-gt 3       5       nil))
+  (ctor lhs rhs expected)
+  (if expected
+      (assert-equal t  (%make-binary ctor lhs rhs))
+      (assert-null     (%make-binary ctor lhs rhs))))
 
 (deftest prim-generic-div-by-zero
   "vm-generic-div signals error on division by zero."

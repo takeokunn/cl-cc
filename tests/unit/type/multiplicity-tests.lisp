@@ -101,13 +101,12 @@
   (lower)
   (assert-true (mult-leq lower :omega)))
 
-(deftest mult-leq-one-not-leq-zero
-  "1 ≤ 0 is false."
-  (assert-false (mult-leq :one :zero)))
-
-(deftest mult-leq-omega-not-leq-one
-  "ω ≤ 1 is false."
-  (assert-false (mult-leq :omega :one)))
+(deftest-each mult-leq-false-cases
+  "Non-trivial ordering: 1 ≤ 0 and ω ≤ 1 are both false."
+  :cases (("one-not-leq-zero"   :one   :zero)
+          ("omega-not-leq-one"  :omega :one))
+  (lower upper)
+  (assert-false (mult-leq lower upper)))
 
 ;;; ─── mult-to-string ─────────────────────────────────────────────────────────
 

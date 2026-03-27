@@ -33,16 +33,11 @@
       (assert-= cl-cc/runtime:+val-nil+
                 (cl-cc/runtime:frame-reg-get f i)))))
 
-(deftest frame-pool-acquire-initial-sp-zero
-  "A freshly acquired frame has sp = 0."
+(deftest frame-pool-acquire-initial-meta-fields
+  "A freshly acquired frame has sp = 0 and pc = 0."
   (cl-cc/runtime:initialize-frame-pool)
   (let ((f (cl-cc/runtime:frame-pool-acquire)))
-    (assert-= 0 (cl-cc/runtime:vm-frame-sp f))))
-
-(deftest frame-pool-acquire-initial-pc-zero
-  "A freshly acquired frame has pc = 0."
-  (cl-cc/runtime:initialize-frame-pool)
-  (let ((f (cl-cc/runtime:frame-pool-acquire)))
+    (assert-= 0 (cl-cc/runtime:vm-frame-sp f))
     (assert-= 0 (cl-cc/runtime:vm-frame-pc f))))
 
 ;;; ------------------------------------------------------------
@@ -91,48 +86,38 @@
 ;;; frame-reset
 ;;; ------------------------------------------------------------
 
-(deftest frame-reset-clears-registers
-  "frame-reset restores all registers to +val-nil+."
+(deftest frame-reset-behavior
+  "frame-reset: clears all registers to +val-nil+; zeroes pc/sp; returns frame."
   (cl-cc/runtime:initialize-frame-pool)
   (let ((f (cl-cc/runtime:frame-pool-acquire)))
+    ;; fill registers, then reset
     (dotimes (i 256)
       (cl-cc/runtime:frame-reg-set f i (cl-cc/runtime:encode-fixnum i)))
-    (cl-cc/runtime:frame-reset f)
-    (dotimes (i 256)
-      (assert-= cl-cc/runtime:+val-nil+ (cl-cc/runtime:frame-reg-get f i)))))
-
-(deftest frame-reset-clears-pc-sp
-  "frame-reset zeroes pc and sp."
-  (cl-cc/runtime:initialize-frame-pool)
-  (let ((f (cl-cc/runtime:frame-pool-acquire)))
     (setf (cl-cc/runtime:vm-frame-pc f) 99
           (cl-cc/runtime:vm-frame-sp f) 42)
-    (cl-cc/runtime:frame-reset f)
-    (assert-= 0 (cl-cc/runtime:vm-frame-pc f))
-    (assert-= 0 (cl-cc/runtime:vm-frame-sp f))))
-
-(deftest frame-reset-returns-frame
-  "frame-reset returns the frame itself."
-  (cl-cc/runtime:initialize-frame-pool)
-  (let ((f (cl-cc/runtime:frame-pool-acquire)))
-    (assert-equal f (cl-cc/runtime:frame-reset f))))
+    (let ((ret (cl-cc/runtime:frame-reset f)))
+      ;; returns the frame
+      (assert-equal f ret)
+      ;; all registers cleared
+      (dotimes (i 256)
+        (assert-= cl-cc/runtime:+val-nil+ (cl-cc/runtime:frame-reg-get f i)))
+      ;; pc and sp zeroed
+      (assert-= 0 (cl-cc/runtime:vm-frame-pc f))
+      (assert-= 0 (cl-cc/runtime:vm-frame-sp f)))))
 
 ;;; ------------------------------------------------------------
 ;;; frame-pool-release
 ;;; ------------------------------------------------------------
 
-(deftest frame-pool-release-clears-registers
-  "A released-then-acquired frame has all registers as +val-nil+."
+(deftest frame-pool-release-clears-all-fields
+  "A released-then-acquired frame has all registers as +val-nil+ and pc/sp zeroed."
   (cl-cc/runtime:initialize-frame-pool)
   (let ((f (cl-cc/runtime:frame-pool-acquire)))
     (cl-cc/runtime:frame-reg-set f 10 (cl-cc/runtime:encode-fixnum 999))
     (cl-cc/runtime:frame-pool-release f)
     ;; Acquire a frame; it may be the same one just released.
     (let ((f2 (cl-cc/runtime:frame-pool-acquire)))
-      (assert-= cl-cc/runtime:+val-nil+ (cl-cc/runtime:frame-reg-get f2 10)))))
-
-(deftest frame-pool-release-clears-meta-fields
-  "A released frame has nil closure and nil return-frame."
+      (assert-= cl-cc/runtime:+val-nil+ (cl-cc/runtime:frame-reg-get f2 10))))
   (cl-cc/runtime:initialize-frame-pool)
   (let ((f (cl-cc/runtime:frame-pool-acquire)))
     (setf (cl-cc/runtime:vm-frame-pc f) 5

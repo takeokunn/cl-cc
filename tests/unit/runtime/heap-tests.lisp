@@ -83,8 +83,8 @@
 
 ;;; Car/Cdr Tests
 
-(deftest vm-car-extracts-value
-  "Test that vm-car extracts the car of a cons cell."
+(deftest vm-car-cdr-extract-values
+  "Test that vm-car and vm-cdr each extract the correct half of a cons cell."
   (let* ((state (make-instance 'vm-state))
          (cons-inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
          (car-inst (make-vm-car :dst 3 :src 0)))
@@ -92,10 +92,7 @@
     (vm-reg-set state 2 456)
     (execute-instruction cons-inst state 0 (make-hash-table))
     (execute-instruction car-inst state 1 (make-hash-table))
-    (assert-= (vm-reg-get state 3) 123)))
-
-(deftest vm-cdr-extracts-value
-  "Test that vm-cdr extracts the cdr of a cons cell."
+    (assert-= (vm-reg-get state 3) 123))
   (let* ((state (make-instance 'vm-state))
          (cons-inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
          (cdr-inst (make-vm-cdr :dst 3 :src 0)))
@@ -127,8 +124,8 @@
 
 ;;; Rplaca/Rplacd Tests
 
-(deftest vm-rplaca-modifies-car
-  "Test that vm-rplaca modifies the car of a cons cell."
+(deftest vm-rplaca-rplacd-mutate-pair
+  "Test that vm-rplaca modifies the car and vm-rplacd modifies the cdr of a cons cell."
   (let* ((state (make-instance 'vm-state))
          (cons-inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
          (rplaca-inst (make-vm-rplaca :cons 0 :val 3)))
@@ -144,10 +141,7 @@
     ;; Verify modification
     (let ((cell (vm-reg-get state 0)))
       (assert-= (car cell) 99)
-      (assert-= (cdr cell) 20))))
-
-(deftest vm-rplacd-modifies-cdr
-  "Test that vm-rplacd modifies the cdr of a cons cell."
+      (assert-= (cdr cell) 20)))
   (let* ((state (make-instance 'vm-state))
          (cons-inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
          (rplacd-inst (make-vm-rplacd :cons 0 :val 3)))
@@ -258,47 +252,24 @@
 
 ;;; Instruction <-> S-exp Conversion Tests
 
-(deftest instruction->sexp-vm-cons
-  "Test instruction->sexp for vm-cons."
-  (let ((inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2)))
-    (assert-equal (instruction->sexp inst) '(:cons 0 1 2))))
-
-(deftest instruction->sexp-vm-car
-  "Test instruction->sexp for vm-car."
-  (let ((inst (make-vm-car :dst 0 :src 1)))
-    (assert-equal (instruction->sexp inst) '(:car 0 1))))
-
-(deftest instruction->sexp-vm-cdr
-  "Test instruction->sexp for vm-cdr."
-  (let ((inst (make-vm-cdr :dst 0 :src 1)))
-    (assert-equal (instruction->sexp inst) '(:cdr 0 1))))
-
-(deftest instruction->sexp-vm-rplaca
-  "Test instruction->sexp for vm-rplaca."
-  (let ((inst (make-vm-rplaca :cons 0 :val 1)))
-    (assert-equal (instruction->sexp inst) '(:rplaca 0 1))))
-
-(deftest instruction->sexp-vm-rplacd
-  "Test instruction->sexp for vm-rplacd."
-  (let ((inst (make-vm-rplacd :cons 0 :val 1)))
-    (assert-equal (instruction->sexp inst) '(:rplacd 0 1))))
-
-(deftest instruction->sexp-vm-make-closure
-  "Test instruction->sexp for vm-make-closure."
-  (let ((inst (make-vm-make-closure
-                             :dst 0
-                             :label :func
-                             :params '(:x :y)
-                             :env-regs '(1 2))))
-    (assert-equal (instruction->sexp inst) '(:make-closure 0 :func (:x :y) 1 2))))
-
-(deftest instruction->sexp-vm-closure-ref-idx
-  "Test instruction->sexp for vm-closure-ref-idx."
-  (let ((inst (make-vm-closure-ref-idx
-                             :dst 0
-                             :closure 1
-                             :index 2)))
-    (assert-equal (instruction->sexp inst) '(:closure-ref-idx 0 1 2))))
+(deftest-each instruction->sexp-heap-instructions
+  "instruction->sexp produces correct s-expression for each heap instruction type."
+  :cases (("vm-cons"         (make-vm-cons :dst 0 :car-src 1 :cdr-src 2)
+           '(:cons 0 1 2))
+          ("vm-car"          (make-vm-car :dst 0 :src 1)
+           '(:car 0 1))
+          ("vm-cdr"          (make-vm-cdr :dst 0 :src 1)
+           '(:cdr 0 1))
+          ("vm-rplaca"       (make-vm-rplaca :cons 0 :val 1)
+           '(:rplaca 0 1))
+          ("vm-rplacd"       (make-vm-rplacd :cons 0 :val 1)
+           '(:rplacd 0 1))
+          ("vm-make-closure" (make-vm-make-closure :dst 0 :label :func :params '(:x :y) :env-regs '(1 2))
+           '(:make-closure 0 :func (:x :y) 1 2))
+          ("vm-closure-ref"  (make-vm-closure-ref-idx :dst 0 :closure 1 :index 2)
+           '(:closure-ref-idx 0 1 2)))
+  (inst expected)
+  (assert-equal expected (instruction->sexp inst)))
 
 (deftest sexp->instruction-vm-cons
   "Test sexp->instruction for vm-cons."
@@ -355,61 +326,19 @@
 
 ;;; Round-trip Tests
 
-(deftest roundtrip-vm-cons
-  "Test roundtrip conversion for vm-cons."
-  (let* ((original (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
-         (sexp (instruction->sexp original))
+(deftest-each roundtrip-heap-instructions
+  "instruction->sexp→sexp->instruction roundtrip preserves s-expression for each heap instruction."
+  :cases (("vm-cons"         (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
+          ("vm-car"          (make-vm-car :dst 0 :src 1))
+          ("vm-cdr"          (make-vm-cdr :dst 0 :src 1))
+          ("vm-rplaca"       (make-vm-rplaca :cons 0 :val 1))
+          ("vm-rplacd"       (make-vm-rplacd :cons 0 :val 1))
+          ("vm-make-closure" (make-vm-make-closure :dst 0 :label :func :params '(:x :y) :env-regs '(1 2)))
+          ("vm-closure-ref"  (make-vm-closure-ref-idx :dst 0 :closure 1 :index 5)))
+  (original)
+  (let* ((sexp     (instruction->sexp original))
          (restored (sexp->instruction sexp)))
-    (assert-equal (instruction->sexp restored) sexp)))
-
-(deftest roundtrip-vm-car
-  "Test roundtrip conversion for vm-car."
-  (let* ((original (make-vm-car :dst 0 :src 1))
-         (sexp (instruction->sexp original))
-         (restored (sexp->instruction sexp)))
-    (assert-equal (instruction->sexp restored) sexp)))
-
-(deftest roundtrip-vm-cdr
-  "Test roundtrip conversion for vm-cdr."
-  (let* ((original (make-vm-cdr :dst 0 :src 1))
-         (sexp (instruction->sexp original))
-         (restored (sexp->instruction sexp)))
-    (assert-equal (instruction->sexp restored) sexp)))
-
-(deftest roundtrip-vm-rplaca
-  "Test roundtrip conversion for vm-rplaca."
-  (let* ((original (make-vm-rplaca :cons 0 :val 1))
-         (sexp (instruction->sexp original))
-         (restored (sexp->instruction sexp)))
-    (assert-equal (instruction->sexp restored) sexp)))
-
-(deftest roundtrip-vm-rplacd
-  "Test roundtrip conversion for vm-rplacd."
-  (let* ((original (make-vm-rplacd :cons 0 :val 1))
-         (sexp (instruction->sexp original))
-         (restored (sexp->instruction sexp)))
-    (assert-equal (instruction->sexp restored) sexp)))
-
-(deftest roundtrip-vm-make-closure
-  "Test roundtrip conversion for vm-make-closure."
-  (let* ((original (make-vm-make-closure
-                                  :dst 0
-                                  :label :func
-                                  :params '(:x :y)
-                                  :env-regs '(1 2)))
-         (sexp (instruction->sexp original))
-         (restored (sexp->instruction sexp)))
-    (assert-equal (instruction->sexp restored) sexp)))
-
-(deftest roundtrip-vm-closure-ref-idx
-  "Test roundtrip conversion for vm-closure-ref-idx."
-  (let* ((original (make-vm-closure-ref-idx
-                                  :dst 0
-                                  :closure 1
-                                  :index 5))
-         (sexp (instruction->sexp original))
-         (restored (sexp->instruction sexp)))
-    (assert-equal (instruction->sexp restored) sexp)))
+    (assert-equal sexp (instruction->sexp restored))))
 
 ;;; Integration: Building Lists
 

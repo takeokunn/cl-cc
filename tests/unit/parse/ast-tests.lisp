@@ -184,25 +184,20 @@
 ;;; Source location utility
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest ast-location-string-full
-  "ast-location-string returns file:line:col when all slots are present"
-  (let ((node (cl-cc:make-ast-int :value 1
-                                  :source-file "foo.lisp"
-                                  :source-line 10
-                                  :source-column 5)))
-    (assert-equal "foo.lisp:10:5" (cl-cc:ast-location-string node))))
-
-(deftest ast-location-string-file-line
-  "ast-location-string returns file:line when column is absent"
-  (let ((node (cl-cc:make-ast-int :value 1
-                                  :source-file "foo.lisp"
-                                  :source-line 3)))
-    (assert-equal "foo.lisp:3" (cl-cc:ast-location-string node))))
-
-(deftest ast-location-string-unknown
-  "ast-location-string returns <unknown location> when no slots are set"
-  (let ((node (cl-cc:make-ast-int :value 1)))
-    (assert-equal "<unknown location>" (cl-cc:ast-location-string node))))
+(deftest-each ast-location-string-cases
+  "ast-location-string formats source location from node metadata"
+  :cases
+  (("full"
+    (cl-cc:make-ast-int :value 1 :source-file "foo.lisp" :source-line 10 :source-column 5)
+    "foo.lisp:10:5")
+   ("file-line"
+    (cl-cc:make-ast-int :value 1 :source-file "foo.lisp" :source-line 3)
+    "foo.lisp:3")
+   ("unknown"
+    (cl-cc:make-ast-int :value 1)
+    "<unknown location>"))
+  (node expected)
+  (assert-equal expected (cl-cc:ast-location-string node)))
 
 (deftest ast-error-signals-condition
   "ast-error signals ast-compilation-error with location from node"
@@ -224,33 +219,28 @@
   (node)
   (assert-null (cl-cc:ast-children node)))
 
-(deftest ast-children-binop
-  "ast-binop children are (lhs rhs)."
+(deftest ast-children-node-types
+  "ast-children returns the correct child sub-expressions for each node type."
+  ;; binop: (lhs rhs)
   (let* ((lhs (cl-cc:make-ast-int :value 1))
          (rhs (cl-cc:make-ast-int :value 2))
          (node (cl-cc:make-ast-binop :op '+ :lhs lhs :rhs rhs))
          (children (cl-cc:ast-children node)))
     (assert-equal 2 (length children))
     (assert-eq lhs (first children))
-    (assert-eq rhs (second children))))
-
-(deftest ast-children-if
-  "ast-if children are (cond then else)."
+    (assert-eq rhs (second children)))
+  ;; if: (cond then else)
   (let* ((c (cl-cc:make-ast-int :value 1))
          (th (cl-cc:make-ast-int :value 2))
          (el (cl-cc:make-ast-int :value 3))
          (node (cl-cc:make-ast-if :cond c :then th :else el)))
-    (assert-equal 3 (length (cl-cc:ast-children node)))))
-
-(deftest ast-children-progn
-  "ast-progn children are its forms."
+    (assert-equal 3 (length (cl-cc:ast-children node))))
+  ;; progn: forms
   (let* ((f1 (cl-cc:make-ast-int :value 1))
          (f2 (cl-cc:make-ast-int :value 2))
          (node (cl-cc:make-ast-progn :forms (list f1 f2))))
-    (assert-equal 2 (length (cl-cc:ast-children node)))))
-
-(deftest ast-children-let
-  "ast-let children include init-exprs and body."
+    (assert-equal 2 (length (cl-cc:ast-children node))))
+  ;; let: init-exprs + body
   (let* ((init (cl-cc:make-ast-int :value 1))
          (body (cl-cc:make-ast-var :name 'x))
          (node (cl-cc:make-ast-let :bindings (list (cons 'x init))
@@ -258,70 +248,52 @@
          (children (cl-cc:ast-children node)))
     (assert-equal 2 (length children))
     (assert-true (member init children :test #'eq))
-    (assert-true (member body children :test #'eq))))
-
-(deftest ast-children-lambda
-  "ast-lambda children are body forms."
+    (assert-true (member body children :test #'eq)))
+  ;; lambda: body forms
   (let* ((body (cl-cc:make-ast-var :name 'x))
          (node (cl-cc:make-ast-lambda :params '(x) :body (list body))))
-    (assert-equal 1 (length (cl-cc:ast-children node)))))
-
-(deftest ast-children-setq
-  "ast-setq child is the value expression."
+    (assert-equal 1 (length (cl-cc:ast-children node))))
+  ;; setq: value expression
   (let* ((val (cl-cc:make-ast-int :value 42))
          (node (cl-cc:make-ast-setq :var 'x :value val)))
     (assert-equal 1 (length (cl-cc:ast-children node)))
-    (assert-eq val (first (cl-cc:ast-children node)))))
-
-(deftest ast-children-call
-  "ast-call children are func (if AST) + args."
+    (assert-eq val (first (cl-cc:ast-children node))))
+  ;; call with symbol func: args only
   (let* ((arg1 (cl-cc:make-ast-int :value 1))
          (arg2 (cl-cc:make-ast-int :value 2))
          (node (cl-cc:make-ast-call :func 'foo :args (list arg1 arg2))))
     (assert-equal 2 (length (cl-cc:ast-children node))))
-  ;; With AST func
+  ;; call with AST func: func + args
   (let* ((func (cl-cc:make-ast-var :name 'f))
          (arg1 (cl-cc:make-ast-int :value 1))
          (node (cl-cc:make-ast-call :func func :args (list arg1))))
     (assert-equal 2 (length (cl-cc:ast-children node)))
-    (assert-eq func (first (cl-cc:ast-children node)))))
-
-(deftest ast-children-block
-  "ast-block children are body forms."
+    (assert-eq func (first (cl-cc:ast-children node))))
+  ;; block: body forms
   (let* ((body (cl-cc:make-ast-int :value 1))
          (node (cl-cc:make-ast-block :name 'b :body (list body))))
-    (assert-equal 1 (length (cl-cc:ast-children node)))))
-
-(deftest ast-children-catch
-  "ast-catch children are tag + body."
+    (assert-equal 1 (length (cl-cc:ast-children node))))
+  ;; catch: tag + body
   (let* ((tag (cl-cc:make-ast-var :name 'tag))
          (body (cl-cc:make-ast-int :value 1))
          (node (cl-cc:make-ast-catch :tag tag :body (list body))))
     (assert-equal 2 (length (cl-cc:ast-children node)))
-    (assert-eq tag (first (cl-cc:ast-children node)))))
-
-(deftest ast-children-throw
-  "ast-throw children are (tag value)."
+    (assert-eq tag (first (cl-cc:ast-children node))))
+  ;; throw: (tag value)
   (let* ((tag (cl-cc:make-ast-var :name 'tag))
          (val (cl-cc:make-ast-int :value 42))
          (node (cl-cc:make-ast-throw :tag tag :value val)))
-    (assert-equal 2 (length (cl-cc:ast-children node)))))
-
-(deftest ast-children-the
-  "ast-the child is the value expression."
+    (assert-equal 2 (length (cl-cc:ast-children node))))
+  ;; the: value expression
   (let* ((val (cl-cc:make-ast-int :value 1))
          (node (cl-cc:make-ast-the :type 'fixnum :value val)))
     (assert-equal 1 (length (cl-cc:ast-children node)))
-    (assert-eq val (first (cl-cc:ast-children node)))))
-
-(deftest ast-children-defvar-with-value
-  "ast-defvar with value has one child."
+    (assert-eq val (first (cl-cc:ast-children node))))
+  ;; defvar with value: one child
   (let* ((val (cl-cc:make-ast-int :value 0))
          (node (cl-cc::make-ast-defvar :name '*x* :value val)))
-    (assert-equal 1 (length (cl-cc:ast-children node)))))
-
-(deftest ast-children-defvar-no-value
-  "ast-defvar without value has no children."
+    (assert-equal 1 (length (cl-cc:ast-children node))))
+  ;; defvar without value: no children
   (let ((node (cl-cc::make-ast-defvar :name '*x*)))
     (assert-null (cl-cc:ast-children node))))
 
@@ -329,56 +301,47 @@
 ;;; ast-bound-names — scoping data layer
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest ast-bound-names-let
-  "ast-let binds variable names from bindings."
-  (let ((node (cl-cc:make-ast-let :bindings (list (cons 'x (cl-cc:make-ast-int :value 1))
-                                                  (cons 'y (cl-cc:make-ast-int :value 2)))
-                                  :body (list (cl-cc:make-ast-var :name 'x)))))
-    (assert-equal '(x y) (cl-cc:ast-bound-names node))))
-
-(deftest ast-bound-names-lambda
-  "ast-lambda binds required params."
-  (let ((node (cl-cc:make-ast-lambda :params '(a b) :body (list (cl-cc:make-ast-var :name 'a)))))
-    (assert-equal '(a b) (cl-cc:ast-bound-names node))))
-
-(deftest ast-bound-names-lambda-optional
-  "ast-lambda with optional params includes them."
-  (let ((node (cl-cc:make-ast-lambda :params '(a)
-                                     :optional-params '((b nil))
-                                     :body (list (cl-cc:make-ast-var :name 'a)))))
-    (assert-equal '(a b) (cl-cc:ast-bound-names node))))
-
-(deftest ast-bound-names-lambda-rest
-  "ast-lambda with rest param includes it."
-  (let ((node (cl-cc:make-ast-lambda :params '(a)
-                                     :rest-param 'rest
-                                     :body (list (cl-cc:make-ast-var :name 'a)))))
-    (assert-equal '(a rest) (cl-cc:ast-bound-names node))))
-
-(deftest ast-bound-names-defun
-  "ast-defun binds params."
-  (let ((node (cl-cc::make-ast-defun :name 'foo :params '(x y) :body (list (cl-cc:make-ast-var :name 'x)))))
-    (assert-equal '(x y) (cl-cc:ast-bound-names node))))
-
-(deftest ast-bound-names-flet
-  "ast-flet binds function names."
-  (let ((node (cl-cc:make-ast-flet :bindings (list (list 'f '(x) (cl-cc:make-ast-var :name 'x)))
-                                   :body (list (cl-cc:make-ast-int :value 1)))))
-    (assert-equal '(f) (cl-cc:ast-bound-names node))))
-
-(deftest ast-bound-names-labels
-  "ast-labels binds function names."
-  (let ((node (cl-cc:make-ast-labels :bindings (list (list 'g '(x) (cl-cc:make-ast-var :name 'x)))
-                                     :body (list (cl-cc:make-ast-int :value 1)))))
-    (assert-equal '(g) (cl-cc:ast-bound-names node))))
-
-(deftest ast-bound-names-mvb
-  "ast-multiple-value-bind binds variable names."
-  (let ((node (cl-cc:make-ast-multiple-value-bind
-               :vars '(a b c)
-               :values-form (cl-cc:make-ast-values :forms (list (cl-cc:make-ast-int :value 1)))
-               :body (list (cl-cc:make-ast-var :name 'a)))))
-    (assert-equal '(a b c) (cl-cc:ast-bound-names node))))
+(deftest-each ast-bound-names-binding-forms
+  "ast-bound-names returns the names introduced by each binding form."
+  :cases
+  (("let"
+    (cl-cc:make-ast-let :bindings (list (cons 'x (cl-cc:make-ast-int :value 1))
+                                        (cons 'y (cl-cc:make-ast-int :value 2)))
+                        :body (list (cl-cc:make-ast-var :name 'x)))
+    '(x y))
+   ("lambda-required"
+    (cl-cc:make-ast-lambda :params '(a b) :body (list (cl-cc:make-ast-var :name 'a)))
+    '(a b))
+   ("lambda-optional"
+    (cl-cc:make-ast-lambda :params '(a)
+                           :optional-params '((b nil))
+                           :body (list (cl-cc:make-ast-var :name 'a)))
+    '(a b))
+   ("lambda-rest"
+    (cl-cc:make-ast-lambda :params '(a)
+                           :rest-param 'rest
+                           :body (list (cl-cc:make-ast-var :name 'a)))
+    '(a rest))
+   ("defun"
+    (cl-cc::make-ast-defun :name 'foo :params '(x y)
+                           :body (list (cl-cc:make-ast-var :name 'x)))
+    '(x y))
+   ("flet"
+    (cl-cc:make-ast-flet :bindings (list (list 'f '(x) (cl-cc:make-ast-var :name 'x)))
+                         :body (list (cl-cc:make-ast-int :value 1)))
+    '(f))
+   ("labels"
+    (cl-cc:make-ast-labels :bindings (list (list 'g '(x) (cl-cc:make-ast-var :name 'x)))
+                           :body (list (cl-cc:make-ast-int :value 1)))
+    '(g))
+   ("mvb"
+    (cl-cc:make-ast-multiple-value-bind
+     :vars '(a b c)
+     :values-form (cl-cc:make-ast-values :forms (list (cl-cc:make-ast-int :value 1)))
+     :body (list (cl-cc:make-ast-var :name 'a)))
+    '(a b c)))
+  (node expected)
+  (assert-equal expected (cl-cc:ast-bound-names node)))
 
 (deftest ast-bound-names-non-binding
   "Non-binding nodes return nil."

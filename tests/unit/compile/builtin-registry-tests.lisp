@@ -109,29 +109,22 @@
              cl-cc::*builtin-registry*)
     (assert-equal 17 count)))
 
-(deftest binary-custom-entries-have-slots
-  "Every binary-custom entry in the registry has a 2-element slots list."
-  (let ((all-ok t))
+(deftest binary-custom-entry-validation
+  "Every binary-custom entry has a 2-element slots list with keyword slot names."
+  (let ((slots-ok t)
+        (keywords-ok t))
     (maphash (lambda (_key entry)
                (declare (ignore _key))
                (when (eq (cl-cc::be-convention entry) :binary-custom)
                  (unless (and (listp (cl-cc::be-slots entry))
                               (= 2 (length (cl-cc::be-slots entry))))
-                   (setf all-ok nil))))
-             cl-cc::*builtin-registry*)
-    (assert-true all-ok)))
-
-(deftest binary-custom-slot-names-are-keywords
-  "All slot names in binary-custom entries are keywords."
-  (let ((all-ok t))
-    (maphash (lambda (_key entry)
-               (declare (ignore _key))
-               (when (eq (cl-cc::be-convention entry) :binary-custom)
+                   (setf slots-ok nil))
                  (unless (and (keywordp (first (cl-cc::be-slots entry)))
                               (keywordp (second (cl-cc::be-slots entry))))
-                   (setf all-ok nil))))
+                   (setf keywords-ok nil))))
              cl-cc::*builtin-registry*)
-    (assert-true all-ok)))
+    (assert-true slots-ok)
+    (assert-true keywords-ok)))
 
 (deftest binary-custom-cons-entry
   "cons is registered as binary-custom with :car-src/:cdr-src slots."
@@ -199,20 +192,11 @@
 
 ;;; ─── Integration: Stream I/O Compilation ──────────────────────────────────
 
-(deftest stream-io-read-char-compiles
-  "read-char is resolved through the registry (stream-input-opt convention)."
+(deftest stream-io-operation-behavior
+  "Stream I/O: read-char resolves via registry; write-char returns value; force-output and clear-input return nil."
   (let ((entry (gethash "READ-CHAR" cl-cc::*builtin-registry*)))
     (assert-true entry)
-    (assert-eq :stream-input-opt (cl-cc::be-convention entry))))
-
-(deftest stream-io-write-char-returns-value
-  "write-char returns its character argument."
-  (assert-equal #\A (cl-cc:run-string "(write-char #\\A)")))
-
-(deftest stream-io-force-output-returns-nil
-  "force-output returns nil."
-  (assert-null (cl-cc:run-string "(force-output)")))
-
-(deftest stream-io-clear-input-returns-nil
-  "clear-input returns nil."
+    (assert-eq :stream-input-opt (cl-cc::be-convention entry)))
+  (assert-equal #\A (cl-cc:run-string "(write-char #\\A)"))
+  (assert-null (cl-cc:run-string "(force-output)"))
   (assert-null (cl-cc:run-string "(clear-input)")))

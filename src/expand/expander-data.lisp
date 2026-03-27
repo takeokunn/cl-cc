@@ -102,6 +102,15 @@ These recurse into subforms but their head is not macro-expanded.")
 (defparameter *rounding-ops* '(floor ceiling truncate round)
   "Rounding ops for which (op x) normalises to (op x 1) (FR-301).")
 
+;; Identity elements for variadic-fold builtins — used by both
+;; expand-function-builtin (#'name wrapping) and expand-apply-named-fn.
+(defparameter *variadic-fold-identities*
+  '((+      . 0)
+    (*      . 1)
+    (append . nil)
+    (nconc  . nil))
+  "Maps each variadic-fold builtin to its identity element for fold initialisation.")
+
 ;;; ── setf compound-place dispatch table ──────────────────────────────────
 ;;;
 ;;; Populated in expander.lisp after helper functions are defined.

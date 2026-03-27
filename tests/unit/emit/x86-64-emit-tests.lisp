@@ -62,19 +62,13 @@
 
 ;;; ─── target-register: with regalloc ────────────────────────────────────────────
 
-(deftest x86-target-register-with-regalloc
-  "target-register uses regalloc assignment when available."
+(deftest x86-target-register-regalloc-behavior
+  "target-register uses regalloc assignment when available; signals error for unallocated register."
   (let* ((ht (make-hash-table))
          (ra (cl-cc::make-regalloc-result :assignment ht))
          (tgt (make-instance 'cl-cc::x86-64-target :regalloc ra)))
     (setf (gethash :r0 ht) :rax)
-    (assert-equal "rax" (cl-cc::target-register tgt :r0))))
-
-(deftest x86-target-register-regalloc-unallocated
-  "target-register signals error for unallocated register in regalloc."
-  (let* ((ht (make-hash-table))
-         (ra (cl-cc::make-regalloc-result :assignment ht))
-         (tgt (make-instance 'cl-cc::x86-64-target :regalloc ra)))
+    (assert-equal "rax" (cl-cc::target-register tgt :r0))
     (assert-signals error (cl-cc::target-register tgt :r99))))
 
 ;;; ─── emit-instruction methods ──────────────────────────────────────────────────
@@ -102,17 +96,14 @@
     (assert-true (search "mov" asm))
     (assert-true (search "add" asm))))
 
-(deftest x86-emit-sub
-  "vm-sub emits mov+sub sequence."
+(deftest-each x86-emit-arithmetic-mnemonics
+  "vm-sub emits sub mnemonic; vm-mul emits imul mnemonic."
+  :cases (("sub" (make-vm-sub :dst :r0 :lhs :r1 :rhs :r2) "sub")
+          ("mul" (make-vm-mul :dst :r0 :lhs :r1 :rhs :r2) "imul"))
+  (inst expected-mnemonic)
   (let* ((tgt (%make-x86-target))
-         (asm (%x86-emit tgt (make-vm-sub :dst :r0 :lhs :r1 :rhs :r2))))
-    (assert-true (search "sub" asm))))
-
-(deftest x86-emit-mul
-  "vm-mul emits mov+imul sequence."
-  (let* ((tgt (%make-x86-target))
-         (asm (%x86-emit tgt (make-vm-mul :dst :r0 :lhs :r1 :rhs :r2))))
-    (assert-true (search "imul" asm))))
+         (asm (%x86-emit tgt inst)))
+    (assert-true (search expected-mnemonic asm))))
 
 (deftest x86-emit-label
   "vm-label emits label: format."
@@ -155,22 +146,16 @@
 
 ;;; ─── Spill code emission ──────────────────────────────────────────────────────
 
-(deftest x86-emit-spill-store
-  "vm-spill-store emits mov [rbp-N], reg."
-  (let* ((tgt (%make-x86-target))
-         (inst (make-vm-spill-store :src-reg :rax :slot 2))
-         (asm (%x86-emit tgt inst)))
-    (assert-true (search "mov" asm))
-    (assert-true (search "rbp" asm))
-    (assert-true (search "16" asm))   ; slot 2 * 8 = 16
-    (assert-true (search "rax" asm))))
-
-(deftest x86-emit-spill-load
-  "vm-spill-load emits mov reg, [rbp-N]."
-  (let* ((tgt (%make-x86-target))
-         (inst (make-vm-spill-load :dst-reg :rbx :slot 3))
-         (asm (%x86-emit tgt inst)))
-    (assert-true (search "mov" asm))
-    (assert-true (search "rbx" asm))
-    (assert-true (search "rbp" asm))
-    (assert-true (search "24" asm))))  ; slot 3 * 8 = 24
+(deftest x86-emit-spill-operations
+  "vm-spill-store emits mov [rbp-N], reg; vm-spill-load emits mov reg, [rbp-N]."
+  (let ((tgt (%make-x86-target)))
+    (let ((asm (%x86-emit tgt (make-vm-spill-store :src-reg :rax :slot 2))))
+      (assert-true (search "mov" asm))
+      (assert-true (search "rbp" asm))
+      (assert-true (search "16" asm))
+      (assert-true (search "rax" asm)))
+    (let ((asm (%x86-emit tgt (make-vm-spill-load :dst-reg :rbx :slot 3))))
+      (assert-true (search "mov" asm))
+      (assert-true (search "rbx" asm))
+      (assert-true (search "rbp" asm))
+      (assert-true (search "24" asm)))))

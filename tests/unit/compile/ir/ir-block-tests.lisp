@@ -19,29 +19,26 @@
 
 ;;; ─── ir-add-edge ────────────────────────────────────────────────────────────
 
-(deftest ir-add-edge-basic
-  "ir-add-edge adds successor to FROM and predecessor to TO."
+(deftest ir-add-edge-behavior
+  "ir-add-edge: sets successor+predecessor; is idempotent (no duplicates); supports multiple successors."
+  ;; basic: adds forward and back edges
   (let* ((fn (make-test-fn))
          (b1 (cl-cc:irf-entry fn))
          (b2 (cl-cc:ir-new-block fn :then)))
     (cl-cc:ir-add-edge b1 b2)
     (assert-true (member b2 (cl-cc:irb-successors b1)))
-    (assert-true (member b1 (cl-cc:irb-predecessors b2)))))
-
-(deftest ir-add-edge-no-duplicates
-  "ir-add-edge does not add duplicate edges."
+    (assert-true (member b1 (cl-cc:irb-predecessors b2))))
+  ;; idempotent: double add → still one edge each direction
   (let* ((fn (make-test-fn))
          (b1 (cl-cc:irf-entry fn))
          (b2 (cl-cc:ir-new-block fn :then)))
     (cl-cc:ir-add-edge b1 b2)
     (cl-cc:ir-add-edge b1 b2)
     (assert-= 1 (length (cl-cc:irb-successors b1)))
-    (assert-= 1 (length (cl-cc:irb-predecessors b2)))))
-
-(deftest ir-add-edge-multiple-successors
-  "A block can have multiple successors (branch)."
+    (assert-= 1 (length (cl-cc:irb-predecessors b2))))
+  ;; branch: block can have two successors
   (let* ((fn (make-test-fn))
-         (entry (cl-cc:irf-entry fn))
+         (entry  (cl-cc:irf-entry fn))
          (then-b (cl-cc:ir-new-block fn :then))
          (else-b (cl-cc:ir-new-block fn :else)))
     (cl-cc:ir-add-edge entry then-b)
@@ -50,25 +47,19 @@
 
 ;;; ─── ir-emit / ir-set-terminator ────────────────────────────────────────────
 
-(deftest ir-emit-appends
-  "ir-emit appends instruction to block's inst list."
-  (let* ((fn (make-test-fn))
-         (blk (cl-cc:irf-entry fn))
+(deftest ir-emit-behavior
+  "ir-emit appends instructions in order and sets each instruction's owning block."
+  (let* ((fn    (make-test-fn))
+         (blk   (cl-cc:irf-entry fn))
          (inst1 (make-test-inst fn))
          (inst2 (make-test-inst fn)))
     (cl-cc:ir-emit blk inst1)
     (cl-cc:ir-emit blk inst2)
     (assert-= 2 (length (cl-cc:irb-insts blk)))
-    (assert-eq inst1 (first (cl-cc:irb-insts blk)))
-    (assert-eq inst2 (second (cl-cc:irb-insts blk)))))
-
-(deftest ir-emit-sets-back-pointer
-  "ir-emit sets the instruction's owning block."
-  (let* ((fn (make-test-fn))
-         (blk (cl-cc:irf-entry fn))
-         (inst (make-test-inst fn)))
-    (cl-cc:ir-emit blk inst)
-    (assert-eq blk (cl-cc:iri-block inst))))
+    (assert-eq inst1 (first  (cl-cc:irb-insts blk)))
+    (assert-eq inst2 (second (cl-cc:irb-insts blk)))
+    (assert-eq blk (cl-cc:iri-block inst1))
+    (assert-eq blk (cl-cc:iri-block inst2))))
 
 (deftest ir-set-terminator-stores
   "ir-set-terminator sets the block's terminator."
@@ -174,22 +165,20 @@
 
 ;;; ─── ir-verify-ssa ──────────────────────────────────────────────────────────
 
-(deftest ir-verify-ssa-valid
-  "ir-verify-ssa returns T for valid SSA."
+(deftest ir-verify-ssa-behavior
+  "ir-verify-ssa: returns T for valid SSA; signals error on duplicate defs."
+  ;; valid: two distinct values each defined once
   (let* ((fn (make-test-fn))
          (blk (cl-cc:irf-entry fn))
          (v1 (cl-cc:ir-new-value fn))
          (v2 (cl-cc:ir-new-value fn)))
     (cl-cc:ir-emit blk (cl-cc::make-ir-inst :result v1))
     (cl-cc:ir-emit blk (cl-cc::make-ir-inst :result v2))
-    (assert-true (cl-cc:ir-verify-ssa fn))))
-
-(deftest ir-verify-ssa-duplicate-def-signals
-  "ir-verify-ssa signals error for duplicate definitions."
+    (assert-true (cl-cc:ir-verify-ssa fn)))
+  ;; invalid: same value defined twice — SSA violation
   (let* ((fn (make-test-fn))
          (blk (cl-cc:irf-entry fn))
          (v1 (cl-cc:ir-new-value fn)))
-    ;; Same value defined twice — SSA violation
     (cl-cc:ir-emit blk (cl-cc::make-ir-inst :result v1))
     (cl-cc:ir-emit blk (cl-cc::make-ir-inst :result v1))
     (assert-true
@@ -199,12 +188,21 @@
 ;;; ─── Braun SSA: ir-write-var / ir-read-var ──────────────────────────────────
 
 (deftest ir-ssa-write-read-same-block
-  "ir-read-var finds value written in the same block."
+  "ir-write/read-var in the same block: basic read-back and overwrite behavior."
+  ;; basic: read finds what was written
   (let* ((fn (make-test-fn))
          (blk (cl-cc:irf-entry fn))
          (val (cl-cc:ir-new-value fn)))
     (cl-cc:ir-write-var fn 'x blk val)
-    (assert-eq val (cl-cc:ir-read-var fn 'x blk))))
+    (assert-eq val (cl-cc:ir-read-var fn 'x blk)))
+  ;; overwrite: later write shadows earlier in same block
+  (let* ((fn (make-test-fn))
+         (blk (cl-cc:irf-entry fn))
+         (v1 (cl-cc:ir-new-value fn))
+         (v2 (cl-cc:ir-new-value fn)))
+    (cl-cc:ir-write-var fn 'x blk v1)
+    (cl-cc:ir-write-var fn 'x blk v2)
+    (assert-eq v2 (cl-cc:ir-read-var fn 'x blk))))
 
 (deftest ir-ssa-read-propagates-from-predecessor
   "ir-read-var finds value from single sealed predecessor."
@@ -217,16 +215,6 @@
     (cl-cc:ir-seal-block fn next)
     (cl-cc:ir-write-var fn 'x entry val)
     (assert-eq val (cl-cc:ir-read-var fn 'x next))))
-
-(deftest ir-ssa-write-overwrites-in-same-block
-  "Later ir-write-var to same var in same block overwrites."
-  (let* ((fn (make-test-fn))
-         (blk (cl-cc:irf-entry fn))
-         (v1 (cl-cc:ir-new-value fn))
-         (v2 (cl-cc:ir-new-value fn)))
-    (cl-cc:ir-write-var fn 'x blk v1)
-    (cl-cc:ir-write-var fn 'x blk v2)
-    (assert-eq v2 (cl-cc:ir-read-var fn 'x blk))))
 
 (deftest ir-ssa-join-creates-block-arg
   "ir-read-var at join with two predecessors creates a block argument."
@@ -270,24 +258,16 @@
     (assert-= 0 (cl-cc:irv-id v0))
     (assert-= 1 (cl-cc:irv-id v1))))
 
-(deftest ir-new-block-increments-id
-  "ir-new-block allocates blocks with incrementing IDs."
+(deftest ir-block-and-function-construction
+  "ir-new-block increments IDs and adds to function; ir-make-function creates entry block."
   (let* ((fn (make-test-fn))
-         ;; Entry block already has ID 0
          (b1 (cl-cc:ir-new-block fn :test)))
-    ;; Entry is 0, b1 is 1
+    ;; Entry block is ID 0; new block is ID 1
     (assert-= 0 (cl-cc:irb-id (cl-cc:irf-entry fn)))
-    (assert-= 1 (cl-cc:irb-id b1))))
-
-(deftest ir-new-block-added-to-function
-  "ir-new-block adds the block to the function's block list."
-  (let* ((fn (make-test-fn)))
-    (cl-cc:ir-new-block fn :extra)
-    (assert-= 2 (length (cl-cc:irf-blocks fn)))))
-
-(deftest ir-make-function-has-entry
-  "ir-make-function creates a function with an entry block."
-  (let ((fn (make-test-fn)))
+    (assert-= 1 (cl-cc:irb-id b1))
+    ;; New block is registered in function's block list
+    (assert-= 2 (length (cl-cc:irf-blocks fn)))
+    ;; Entry block has the correct label and type
     (assert-true (cl-cc:ir-block-p (cl-cc:irf-entry fn)))
     (assert-eq :entry (cl-cc:irb-label (cl-cc:irf-entry fn)))))
 
@@ -529,8 +509,9 @@
 
 ;;; ─── ir-verify-ssa: cross-block checks ──────────────────────────────────────
 
-(deftest ir-verify-ssa-across-blocks-valid
-  "ir-verify-ssa passes when distinct values are defined in separate blocks."
+(deftest ir-verify-ssa-cross-block-valid
+  "ir-verify-ssa passes for distinct defs across blocks and for void instructions."
+  ;; distinct values in separate blocks
   (let* ((fn    (make-test-fn))
          (entry (cl-cc:irf-entry fn))
          (next  (cl-cc:ir-new-block fn :next))
@@ -539,13 +520,10 @@
     (cl-cc:ir-add-edge entry next)
     (cl-cc:ir-emit entry (cl-cc::make-ir-inst :result v0))
     (cl-cc:ir-emit next  (cl-cc::make-ir-inst :result v1))
-    (assert-true (cl-cc:ir-verify-ssa fn))))
-
-(deftest ir-verify-ssa-void-instructions-ok
-  "ir-verify-ssa passes for void instructions (nil result) in a block."
+    (assert-true (cl-cc:ir-verify-ssa fn)))
+  ;; void instructions (nil result) define no SSA value — still valid
   (let* ((fn    (make-test-fn))
          (entry (cl-cc:irf-entry fn))
-         ;; Two void instructions — no SSA value defined by them
          (i0    (cl-cc::make-ir-inst))
          (i1    (cl-cc::make-ir-inst)))
     (cl-cc:ir-emit entry i0)
@@ -554,8 +532,9 @@
 
 ;;; ─── ir-write-var / ir-read-var: multiple independent variables ──────────────
 
-(deftest ir-ssa-multiple-independent-vars
-  "Different variable names are tracked independently by ir-write/read-var."
+(deftest ir-ssa-independent-vars
+  "Different variables are tracked independently, both within and across blocks."
+  ;; within same block: a, b, c remain distinct
   (let* ((fn    (make-test-fn))
          (entry (cl-cc:irf-entry fn))
          (va    (cl-cc:ir-new-value fn))
@@ -566,10 +545,8 @@
     (cl-cc:ir-write-var fn 'c entry vc)
     (assert-eq va (cl-cc:ir-read-var fn 'a entry))
     (assert-eq vb (cl-cc:ir-read-var fn 'b entry))
-    (assert-eq vc (cl-cc:ir-read-var fn 'c entry))))
-
-(deftest ir-ssa-vars-independent-across-blocks
-  "Writing var A in block-1 does not affect var B read from block-2."
+    (assert-eq vc (cl-cc:ir-read-var fn 'c entry)))
+  ;; across blocks: vars written in entry are both readable from successor
   (let* ((fn    (make-test-fn))
          (entry (cl-cc:irf-entry fn))
          (next  (cl-cc:ir-new-block fn :next))
@@ -580,6 +557,5 @@
     (cl-cc:ir-seal-block fn next)
     (cl-cc:ir-write-var fn 'a entry va)
     (cl-cc:ir-write-var fn 'b entry vb)
-    ;; Both should be readable from next
     (assert-eq va (cl-cc:ir-read-var fn 'a next))
     (assert-eq vb (cl-cc:ir-read-var fn 'b next))))

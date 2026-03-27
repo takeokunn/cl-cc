@@ -446,40 +446,26 @@ if it's an integer handle, look it up in STATE's stream tables."
        (t nil)))
     (t nil)))
 
-(defmethod execute-instruction ((inst vm-streamp) state pc labels)
-  (declare (ignore labels))
-  (let* ((val (vm-reg-get state (vm-src inst)))
-         (stream (%resolve-stream-val state val)))
-    (vm-reg-set state (vm-dst inst) (if stream t nil))
-    (values (1+ pc) nil nil)))
+;;; Stream predicate dispatch — data table drives code generation.
+;;; Each entry maps an instruction type to its CL predicate (or nil = just test existence).
+(defmacro define-stream-predicate-instruction (inst-type pred-fn)
+  "Generate an execute-instruction that resolves a stream and applies PRED-FN.
+PRED-FN nil means test stream existence only."
+  `(defmethod execute-instruction ((inst ,inst-type) state pc labels)
+     (declare (ignore labels))
+     (let* ((val    (vm-reg-get state (vm-src inst)))
+            (stream (%resolve-stream-val state val)))
+       (vm-reg-set state (vm-dst inst)
+                   ,(if pred-fn
+                        `(if (and stream (,pred-fn stream)) t nil)
+                        `(if stream t nil)))
+       (values (1+ pc) nil nil))))
 
-(defmethod execute-instruction ((inst vm-input-stream-p) state pc labels)
-  (declare (ignore labels))
-  (let* ((val (vm-reg-get state (vm-src inst)))
-         (stream (%resolve-stream-val state val)))
-    (vm-reg-set state (vm-dst inst) (if (and stream (input-stream-p stream)) t nil))
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-output-stream-p) state pc labels)
-  (declare (ignore labels))
-  (let* ((val (vm-reg-get state (vm-src inst)))
-         (stream (%resolve-stream-val state val)))
-    (vm-reg-set state (vm-dst inst) (if (and stream (output-stream-p stream)) t nil))
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-open-stream-p) state pc labels)
-  (declare (ignore labels))
-  (let* ((val (vm-reg-get state (vm-src inst)))
-         (stream (%resolve-stream-val state val)))
-    (vm-reg-set state (vm-dst inst) (if (and stream (open-stream-p stream)) t nil))
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-interactive-stream-p) state pc labels)
-  (declare (ignore labels))
-  (let* ((val (vm-reg-get state (vm-src inst)))
-         (stream (%resolve-stream-val state val)))
-    (vm-reg-set state (vm-dst inst) (if (and stream (interactive-stream-p stream)) t nil))
-    (values (1+ pc) nil nil)))
+(define-stream-predicate-instruction vm-streamp              nil)
+(define-stream-predicate-instruction vm-input-stream-p       input-stream-p)
+(define-stream-predicate-instruction vm-output-stream-p      output-stream-p)
+(define-stream-predicate-instruction vm-open-stream-p        open-stream-p)
+(define-stream-predicate-instruction vm-interactive-stream-p interactive-stream-p)
 
 (defmethod execute-instruction ((inst vm-stream-element-type-inst) state pc labels)
   (declare (ignore labels))
@@ -506,28 +492,19 @@ if it's an integer handle, look it up in STATE's stream tables."
     (write-byte byte stream)
     (values (1+ pc) nil nil)))
 
-;;; Stream Control Execution
+;;; Stream control dispatch — data table drives code generation.
+(defmacro define-stream-control-instruction (inst-type cl-fn)
+  "Generate an execute-instruction that resolves a stream handle and calls CL-FN on it."
+  `(defmethod execute-instruction ((inst ,inst-type) state pc labels)
+     (declare (ignore labels))
+     (let* ((handle (vm-reg-get state (vm-file-handle inst)))
+            (stream (vm-get-stream state handle)))
+       (,cl-fn stream)
+       (values (1+ pc) nil nil))))
 
-(defmethod execute-instruction ((inst vm-force-output) state pc labels)
-  (declare (ignore labels))
-  (let* ((handle (vm-reg-get state (vm-file-handle inst)))
-         (stream (vm-get-stream state handle)))
-    (force-output stream)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-finish-output) state pc labels)
-  (declare (ignore labels))
-  (let* ((handle (vm-reg-get state (vm-file-handle inst)))
-         (stream (vm-get-stream state handle)))
-    (finish-output stream)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-clear-input) state pc labels)
-  (declare (ignore labels))
-  (let* ((handle (vm-reg-get state (vm-file-handle inst)))
-         (stream (vm-get-stream state handle)))
-    (clear-input stream)
-    (values (1+ pc) nil nil)))
+(define-stream-control-instruction vm-force-output  force-output)
+(define-stream-control-instruction vm-finish-output finish-output)
+(define-stream-control-instruction vm-clear-input   clear-input)
 
 (defmethod execute-instruction ((inst vm-listen-inst) state pc labels)
   (declare (ignore labels))
@@ -589,171 +566,5 @@ OUTPUT-STREAM and INPUT-STREAM can be specified to redirect I/O."
                           :output-stream output-stream
                           :input-stream input-stream)))
 
-;;; Simple I/O Instructions (work with any vm-state, use *standard-output*)
 
-(define-vm-instruction vm-princ (vm-instruction)
-  "Print object readably (no escaping) to *standard-output*."
-  (src nil :reader vm-src)
-  (:sexp-tag :princ)
-  (:sexp-slots src))
-
-(define-vm-instruction vm-prin1 (vm-instruction)
-  "Print object with escaping to *standard-output*."
-  (src nil :reader vm-src)
-  (:sexp-tag :prin1)
-  (:sexp-slots src))
-
-(define-vm-instruction vm-print-inst (vm-instruction)
-  "Print object with newline prefix and space suffix to *standard-output*."
-  (src nil :reader vm-src)
-  (:sexp-tag :print)
-  (:sexp-slots src))
-
-(define-vm-instruction vm-terpri-inst (vm-instruction)
-  "Output a newline to *standard-output*."
-  (:sexp-tag :terpri))
-
-(define-vm-instruction vm-fresh-line-inst (vm-instruction)
-  "Output a newline if not at start of line to *standard-output*."
-  (:sexp-tag :fresh-line))
-
-(define-vm-instruction vm-write-to-string-inst (vm-instruction)
-  "Convert object to its printed representation as a string."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :write-to-string)
-  (:sexp-slots dst src))
-
-;; Custom sexp: uses list* with variadic arg-regs
-(define-vm-instruction vm-format-inst (vm-instruction)
-  "Format string with arguments. Result string stored in DST."
-  (dst nil :reader vm-dst)
-  (fmt nil :reader vm-fmt)
-  (arg-regs nil :reader vm-arg-regs))
-
-(defmethod instruction->sexp ((inst vm-format-inst))
-  (list* :format (vm-dst inst) (vm-fmt inst) (vm-arg-regs inst)))
-
-(setf (gethash :format *instruction-constructors*)
-      (lambda (sexp)
-        (make-vm-format-inst :dst (second sexp)
-                             :fmt (third sexp)
-                             :arg-regs (cdddr sexp))))
-
-(define-vm-instruction vm-make-string-output-stream-inst (vm-instruction)
-  "Create a string output stream, store in DST."
-  (dst nil :reader vm-dst)
-  (:sexp-tag :make-string-output-stream)
-  (:sexp-slots dst))
-
-(define-vm-instruction vm-get-output-stream-string-inst (vm-instruction)
-  "Extract accumulated string from string output stream in SRC, store in DST."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :get-output-stream-string)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-stream-write-string-inst (vm-instruction)
-  "Write string in SRC to stream in STREAM-REG."
-  (stream-reg nil :reader vm-stream-reg)
-  (src nil :reader vm-src)
-  (:sexp-tag :stream-write-string)
-  (:sexp-slots stream-reg src))
-
-;;; Execute simple I/O instructions
-
-(defmethod execute-instruction ((inst vm-princ) state pc labels)
-  (declare (ignore labels))
-  (let ((val (vm-reg-get state (vm-src inst))))
-    (princ val (vm-output-stream state))
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-prin1) state pc labels)
-  (declare (ignore labels))
-  (let ((val (vm-reg-get state (vm-src inst))))
-    (prin1 val (vm-output-stream state))
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-print-inst) state pc labels)
-  (declare (ignore labels))
-  (let ((val (vm-reg-get state (vm-src inst))))
-    (print val (vm-output-stream state))
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-terpri-inst) state pc labels)
-  (declare (ignore labels))
-  (terpri (vm-output-stream state))
-  (values (1+ pc) nil nil))
-
-(defmethod execute-instruction ((inst vm-fresh-line-inst) state pc labels)
-  (declare (ignore labels))
-  (fresh-line (vm-output-stream state))
-  (values (1+ pc) nil nil))
-
-(defmethod execute-instruction ((inst vm-write-to-string-inst) state pc labels)
-  (declare (ignore labels))
-  (let ((val (vm-reg-get state (vm-src inst))))
-    (vm-reg-set state (vm-dst inst) (write-to-string val))
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-format-inst) state pc labels)
-  (declare (ignore labels))
-  (let* ((fmt-str (vm-reg-get state (vm-fmt inst)))
-         (arg-vals (mapcar (lambda (r) (vm-reg-get state r)) (vm-arg-regs inst)))
-         (result (apply #'format nil fmt-str arg-vals)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-make-string-output-stream-inst) state pc labels)
-  (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (make-string-output-stream))
-  (values (1+ pc) nil nil))
-
-(defmethod execute-instruction ((inst vm-get-output-stream-string-inst) state pc labels)
-  (declare (ignore labels))
-  (let ((stream (vm-reg-get state (vm-src inst))))
-    (vm-reg-set state (vm-dst inst) (get-output-stream-string stream))
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-stream-write-string-inst) state pc labels)
-  (declare (ignore labels))
-  (let* ((stream-val (vm-reg-get state (vm-stream-reg inst)))
-         (stream (if (streamp stream-val)
-                     stream-val
-                     (vm-get-stream state stream-val)))
-         (str (vm-reg-get state (vm-src inst))))
-    (write-string str stream)
-    (values (1+ pc) nil nil)))
-
-;;; Reader Instructions (use cl-cc's own lexer/parser)
-
-(define-vm-instruction vm-read-from-string-inst (vm-instruction)
-  "Read an S-expression from a string using cl-cc's own parser."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :read-from-string)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-read-sexp-inst (vm-instruction)
-  "Read an S-expression from a stream handle using cl-cc's own parser."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :read-sexp)
-  (:sexp-slots dst src))
-
-(defmethod execute-instruction ((inst vm-read-from-string-inst) state pc labels)
-  (declare (ignore labels))
-  (let* ((str (vm-reg-get state (vm-src inst)))
-         (forms (parse-all-forms str))
-         (value (if forms (first forms) nil)))
-    (vm-reg-set state (vm-dst inst) value)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-read-sexp-inst) state pc labels)
-  (declare (ignore labels))
-  (let* ((handle (vm-reg-get state (vm-src inst)))
-         (stream (vm-get-stream state handle))
-         (line (read-line stream nil nil))
-         (value (when line (first (parse-all-forms line)))))
-    (vm-reg-set state (vm-dst inst) value)
-    (values (1+ pc) nil nil)))
+;;; (Formatted output and reader instructions moved to src/vm/format.lisp)

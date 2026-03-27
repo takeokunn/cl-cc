@@ -9,42 +9,28 @@
 
 ;;; ─── x86-64 System V ABI ──────────────────────────────────────────────────
 
-(deftest cc-x86-64-exists
-  "x86-64 calling convention is defined."
-  (assert-true (cl-cc::calling-convention-p cl-cc::*x86-64-calling-convention*)))
-
-(deftest cc-x86-64-arg-registers
-  "x86-64 SysV uses rdi, rsi, rdx, rcx, r8, r9 for args."
+(deftest cc-x86-64-basic-properties
+  "x86-64 calling convention: exists, arg registers, return rax, scratch r11."
+  (assert-true (cl-cc::calling-convention-p cl-cc::*x86-64-calling-convention*))
   (let ((args (cl-cc::cc-arg-registers cl-cc::*x86-64-calling-convention*)))
     (assert-equal 6 (length args))
     (assert-eq :rdi (first args))
-    (assert-eq :r9 (car (last args)))))
-
-(deftest cc-x86-64-return-register
-  "x86-64 returns in rax."
-  (assert-eq :rax (cl-cc::cc-return-register cl-cc::*x86-64-calling-convention*)))
-
-(deftest cc-x86-64-scratch-register
-  "x86-64 scratch register is r11."
+    (assert-eq :r9 (car (last args))))
+  (assert-eq :rax (cl-cc::cc-return-register cl-cc::*x86-64-calling-convention*))
   (assert-eq :r11 (cl-cc::cc-scratch-register cl-cc::*x86-64-calling-convention*)))
 
-(deftest cc-x86-64-callee-saved
-  "x86-64 callee-saved includes rbx and r12-r15."
-  (let ((saved (cl-cc::cc-callee-saved cl-cc::*x86-64-calling-convention*)))
-    (assert-true (member :rbx saved))
-    (assert-true (member :r12 saved))
-    (assert-true (member :r15 saved))
-    ;; rax is NOT callee-saved
-    (assert-false (member :rax saved))))
-
-(deftest cc-x86-64-caller-saved
-  "x86-64 caller-saved includes rax, rcx, rdx."
-  (let ((saved (cl-cc::cc-caller-saved cl-cc::*x86-64-calling-convention*)))
-    (assert-true (member :rax saved))
-    (assert-true (member :rcx saved))
-    (assert-true (member :rdx saved))
-    ;; rbx is NOT caller-saved
-    (assert-false (member :rbx saved))))
+(deftest cc-x86-64-save-categories
+  "x86-64 callee-saved includes rbx/r12-r15 (not rax); caller-saved includes rax/rcx/rdx (not rbx)."
+  (let ((callee (cl-cc::cc-callee-saved cl-cc::*x86-64-calling-convention*))
+        (caller (cl-cc::cc-caller-saved cl-cc::*x86-64-calling-convention*)))
+    (assert-true  (member :rbx callee))
+    (assert-true  (member :r12 callee))
+    (assert-true  (member :r15 callee))
+    (assert-false (member :rax callee))
+    (assert-true  (member :rax caller))
+    (assert-true  (member :rcx caller))
+    (assert-true  (member :rdx caller))
+    (assert-false (member :rbx caller))))
 
 (deftest cc-x86-64-gpr-pool
   "x86-64 GPR pool has 13 registers (excludes rsp, rbp, r11)."
@@ -56,33 +42,21 @@
 
 ;;; ─── AArch64 AAPCS ────────────────────────────────────────────────────────
 
-(deftest cc-aarch64-exists
-  "AArch64 calling convention is defined."
-  (assert-true (cl-cc::calling-convention-p cl-cc::*aarch64-calling-convention*)))
-
-(deftest cc-aarch64-arg-registers
-  "AArch64 uses x0-x7 for args."
+(deftest cc-aarch64-basic-properties
+  "AArch64 calling convention: exists, arg registers x0-x7, return x0, scratch x16."
+  (assert-true (cl-cc::calling-convention-p cl-cc::*aarch64-calling-convention*))
   (let ((args (cl-cc::cc-arg-registers cl-cc::*aarch64-calling-convention*)))
     (assert-equal 8 (length args))
     (assert-eq :x0 (first args))
-    (assert-eq :x7 (car (last args)))))
-
-(deftest cc-aarch64-return-register
-  "AArch64 returns in x0."
-  (assert-eq :x0 (cl-cc::cc-return-register cl-cc::*aarch64-calling-convention*)))
-
-(deftest cc-aarch64-scratch-register
-  "AArch64 scratch register is x16."
+    (assert-eq :x7 (car (last args))))
+  (assert-eq :x0 (cl-cc::cc-return-register cl-cc::*aarch64-calling-convention*))
   (assert-eq :x16 (cl-cc::cc-scratch-register cl-cc::*aarch64-calling-convention*)))
 
-(deftest cc-aarch64-callee-saved
-  "AArch64 callee-saved includes x19-x28."
-  (let ((saved (cl-cc::cc-callee-saved cl-cc::*aarch64-calling-convention*)))
-    (assert-true (member :x19 saved))
-    (assert-true (member :x28 saved))
-    (assert-equal 10 (length saved))))
-
-(deftest cc-aarch64-no-x18
-  "AArch64 GPR pool excludes x18 (platform register)."
-  (let ((pool (cl-cc::cc-gpr-pool cl-cc::*aarch64-calling-convention*)))
+(deftest cc-aarch64-save-categories
+  "AArch64 callee-saved includes x19-x28 (10 regs); GPR pool excludes x18 (platform register)."
+  (let ((saved (cl-cc::cc-callee-saved cl-cc::*aarch64-calling-convention*))
+        (pool  (cl-cc::cc-gpr-pool    cl-cc::*aarch64-calling-convention*)))
+    (assert-true  (member :x19 saved))
+    (assert-true  (member :x28 saved))
+    (assert-equal 10 (length saved))
     (assert-false (member :x18 pool))))

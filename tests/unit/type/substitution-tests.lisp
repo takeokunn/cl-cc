@@ -13,20 +13,15 @@
   (let ((s (make-substitution)))
     (assert-= 0 (substitution-generation s))))
 
-(deftest subst-lookup-empty
-  "Looking up in an empty substitution returns nil."
-  (let ((s (make-substitution))
-        (v (cl-cc/type:make-type-variable 'a)))
-    (multiple-value-bind (val found) (subst-lookup v s)
-      (assert-null val)
-      (assert-false found))))
-
-(deftest subst-lookup-nil-subst
-  "Looking up in nil substitution returns nil."
+(deftest subst-lookup-empty-cases
+  "Looking up in empty substitution or nil substitution both return nil/not-found."
   (let ((v (cl-cc/type:make-type-variable 'a)))
-    (multiple-value-bind (val found) (subst-lookup v nil)
-      (assert-null val)
-      (assert-false found))))
+    (multiple-value-bind (v1 f1) (subst-lookup v (make-substitution))
+      (assert-null v1)
+      (assert-false f1))
+    (multiple-value-bind (v2 f2) (subst-lookup v nil)
+      (assert-null v2)
+      (assert-false f2))))
 
 (deftest subst-extend-functional-creates-new
   "subst-extend returns a new substitution, leaving original unchanged."
@@ -49,42 +44,29 @@
       (assert-eq cl-cc/type:type-int val))
     (assert-= 1 (substitution-generation s))))
 
-(deftest subst-extend-bang-mutates
-  "subst-extend! mutates the substitution in place."
-  (let* ((v (cl-cc/type:make-type-variable 'a))
-         (s (make-substitution)))
-    (subst-extend! v cl-cc/type:type-int s)
-    (multiple-value-bind (val found) (subst-lookup v s)
-      (assert-true found)
-      (assert-eq cl-cc/type:type-int val))
-    (assert-= 1 (substitution-generation s))))
-
-(deftest subst-extend-bang-increments-generation
-  "subst-extend! increments generation on each call."
+(deftest subst-extend-bang-behavior
+  "subst-extend! mutates in place and increments generation on each call."
   (let* ((v1 (cl-cc/type:make-type-variable 'a))
          (v2 (cl-cc/type:make-type-variable 'b))
-         (s (make-substitution)))
+         (s  (make-substitution)))
     (subst-extend! v1 cl-cc/type:type-int s)
+    (multiple-value-bind (val found) (subst-lookup v1 s)
+      (assert-true found)
+      (assert-eq cl-cc/type:type-int val))
     (assert-= 1 (substitution-generation s))
     (subst-extend! v2 cl-cc/type:type-string s)
     (assert-= 2 (substitution-generation s))))
 
 ;;; ─── Composition ────────────────────────────────────────────────────────
 
-(deftest subst-compose-nil-nil
-  "Composing nil with nil returns an empty substitution."
+(deftest subst-compose-nil-cases
+  "Boundary cases when composing nil substitutions."
   (let ((s (subst-compose nil nil)))
-    (assert-true (cl-cc/type:substitution-p s))))
-
-(deftest subst-compose-nil-left
-  "s1=nil, s2=S returns S."
+    (assert-true (cl-cc/type:substitution-p s)))
   (let* ((v (cl-cc/type:make-type-variable 'a))
          (s2 (subst-extend v cl-cc/type:type-int nil))
          (result (subst-compose nil s2)))
-    (assert-eq s2 result)))
-
-(deftest subst-compose-nil-right
-  "s1=S, s2=nil returns S (or equivalent)."
+    (assert-eq s2 result))
   (let* ((v (cl-cc/type:make-type-variable 'a))
          (s1 (subst-extend v cl-cc/type:type-int nil))
          (result (subst-compose s1 nil)))
@@ -109,18 +91,13 @@
 
 ;;; ─── Zonk: Various Type Constructors ────────────────────────────────────
 
-(deftest zonk-nil-type
-  "Zonking nil returns nil."
-  (assert-null (zonk nil (make-substitution))))
-
-(deftest zonk-primitive-unchanged
-  "Zonking a primitive type returns it unchanged."
-  (assert-eq cl-cc/type:type-int (zonk cl-cc/type:type-int (make-substitution))))
-
-(deftest zonk-unbound-var-unchanged
-  "Zonking an unbound variable returns the variable itself."
-  (let ((v (cl-cc/type:make-type-variable 'a)))
-    (assert-eq v (zonk v (make-substitution)))))
+(deftest zonk-unchanged-types
+  "Zonking nil, a primitive, or an unbound variable leaves them unchanged."
+  (let ((s (make-substitution)))
+    (assert-null (zonk nil s))
+    (assert-eq cl-cc/type:type-int (zonk cl-cc/type:type-int s))
+    (let ((v (cl-cc/type:make-type-variable 'a)))
+      (assert-eq v (zonk v s)))))
 
 (deftest zonk-bound-var-resolves
   "Zonking a bound variable resolves to its binding."
@@ -140,8 +117,8 @@
       (assert-true (cl-cc/type:type-primitive-p result))
       (assert-eq 'fixnum (cl-cc/type:type-primitive-name result)))))
 
-(deftest zonk-arrow-substitutes-params-and-return
-  "Zonking an arrow type substitutes in params and return."
+(deftest zonk-type-constructors
+  "Zonking substitutes variables in all type constructor positions."
   (let* ((a (cl-cc/type:make-type-variable 'a))
          (b (cl-cc/type:make-type-variable 'b))
          (fn-ty (cl-cc/type:make-type-arrow-raw :params (list a) :return b))
@@ -151,10 +128,7 @@
     (let ((result (zonk fn-ty s)))
       (assert-true (cl-cc/type:type-arrow-p result))
       (assert-eq 'fixnum (cl-cc/type:type-primitive-name (car (cl-cc/type:type-arrow-params result))))
-      (assert-eq 'string (cl-cc/type:type-primitive-name (cl-cc/type:type-arrow-return result))))))
-
-(deftest zonk-product-substitutes-elems
-  "Zonking a product type substitutes in elements."
+      (assert-eq 'string (cl-cc/type:type-primitive-name (cl-cc/type:type-arrow-return result)))))
   (let* ((a (cl-cc/type:make-type-variable 'a))
          (prod (cl-cc/type:make-type-product :elems (list a cl-cc/type:type-string)))
          (s (subst-extend a cl-cc/type:type-int nil)))
@@ -162,10 +136,7 @@
       (assert-true (cl-cc/type:type-product-p result))
       (assert-= 2 (length (cl-cc/type:type-product-elems result)))
       (assert-eq 'fixnum (cl-cc/type:type-primitive-name
-                           (first (cl-cc/type:type-product-elems result)))))))
-
-(deftest zonk-forall-substitutes-body
-  "Zonking a forall type substitutes in the body."
+                           (first (cl-cc/type:type-product-elems result))))))
   (let* ((a (cl-cc/type:make-type-variable 'a))
          (b (cl-cc/type:make-type-variable 'b))
          (forall-ty (cl-cc/type:make-type-forall :var a :body b))
@@ -173,10 +144,7 @@
     (let ((result (zonk forall-ty s)))
       (assert-true (cl-cc/type:type-forall-p result))
       (assert-eq 'fixnum (cl-cc/type:type-primitive-name
-                           (cl-cc/type:type-forall-body result))))))
-
-(deftest zonk-app-substitutes-both
-  "Zonking a type-app substitutes in fun and arg."
+                           (cl-cc/type:type-forall-body result)))))
   (let* ((a (cl-cc/type:make-type-variable 'a))
          (b (cl-cc/type:make-type-variable 'b))
          (app-ty (cl-cc/type:make-type-app :fun a :arg b))
@@ -186,10 +154,7 @@
     (let ((result (zonk app-ty s)))
       (assert-true (cl-cc/type:type-app-p result))
       (assert-eq 'fixnum (cl-cc/type:type-primitive-name (cl-cc/type:type-app-fun result)))
-      (assert-eq 'string (cl-cc/type:type-primitive-name (cl-cc/type:type-app-arg result))))))
-
-(deftest zonk-union-substitutes-members
-  "Zonking a union type substitutes in all members."
+      (assert-eq 'string (cl-cc/type:type-primitive-name (cl-cc/type:type-app-arg result)))))
   (let* ((a (cl-cc/type:make-type-variable 'a))
          (union-ty (cl-cc/type:make-type-union-raw :types (list a cl-cc/type:type-string)))
          (s (subst-extend a cl-cc/type:type-int nil)))
@@ -197,17 +162,14 @@
       (assert-true (cl-cc/type:type-union-p result))
       (assert-= 2 (length (cl-cc/type:type-union-types result))))))
 
-(deftest zonk-effect-row-substitutes-effects
-  "Zonking an effect row substitutes in effects and row-var."
+(deftest zonk-effect-row-cases
+  "Zonking effect rows: substitutes row-var and merges resolved effect rows."
   (let* ((rv (cl-cc/type:make-type-variable 'r))
          (eff (cl-cc/type:make-type-effect-op :name 'io :args nil))
          (row (cl-cc/type:make-type-effect-row :effects (list eff) :row-var rv))
          (s (subst-extend rv (cl-cc/type:make-type-effect-row :effects nil :row-var nil) nil)))
     (let ((result (zonk row s)))
-      (assert-true (cl-cc/type:type-effect-row-p result)))))
-
-(deftest zonk-effect-row-merges-resolved
-  "When row-var resolves to another effect row, effects are merged."
+      (assert-true (cl-cc/type:type-effect-row-p result))))
   (let* ((rv (cl-cc/type:make-type-variable 'r))
          (eff1 (cl-cc/type:make-type-effect-op :name 'io :args nil))
          (eff2 (cl-cc/type:make-type-effect-op :name 'exn :args nil))
@@ -220,24 +182,13 @@
 
 ;;; ─── Occurs Check ───────────────────────────────────────────────────────
 
-(deftest occurs-direct
-  "A variable occurs in itself."
-  (let ((v (cl-cc/type:make-type-variable 'a)))
-    (assert-true (type-occurs-p v v (make-substitution)))))
-
-(deftest occurs-in-arrow
-  "A variable occurs in an arrow type containing it."
-  (let* ((v (cl-cc/type:make-type-variable 'a))
-         (fn-ty (cl-cc/type:make-type-arrow-raw :params (list v) :return cl-cc/type:type-int)))
-    (assert-true (type-occurs-p v fn-ty (make-substitution)))))
-
-(deftest occurs-not-in-unrelated
-  "A variable does not occur in an unrelated type."
-  (let ((v (cl-cc/type:make-type-variable 'a)))
-    (assert-false (type-occurs-p v cl-cc/type:type-int (make-substitution)))))
-
-(deftest occurs-through-subst
-  "Occurs check follows substitution chains."
+(deftest type-occurs-check
+  "Occurs check: var in itself, in arrow, not in unrelated type, follows subst chains."
+  (let ((s (make-substitution)))
+    (let ((v (cl-cc/type:make-type-variable 'a)))
+      (assert-true  (type-occurs-p v v s))
+      (assert-true  (type-occurs-p v (cl-cc/type:make-type-arrow-raw :params (list v) :return cl-cc/type:type-int) s))
+      (assert-false (type-occurs-p v cl-cc/type:type-int s))))
   (let* ((a (cl-cc/type:make-type-variable 'a))
          (b (cl-cc/type:make-type-variable 'b))
          (fn-ty (cl-cc/type:make-type-arrow-raw :params (list a) :return cl-cc/type:type-int))
@@ -279,28 +230,23 @@
 
 ;;; ─── Normalize ──────────────────────────────────────────────────────────
 
-(deftest normalize-renames-to-canonical
-  "normalize-type-variables renames vars to a, b, c, ..."
-  (let* ((v1 (cl-cc/type:make-type-variable 'xyz))
-         (v2 (cl-cc/type:make-type-variable 'qqq))
-         (fn (cl-cc/type:make-type-arrow-raw :params (list v1) :return v2))
+(deftest normalize-type-variables-behavior
+  "normalize-type-variables: renames vars to canonical a,b,c,...; same var in two positions gets same canonical."
+  (let* ((fn (cl-cc/type:make-type-arrow-raw
+              :params (list (cl-cc/type:make-type-variable 'xyz))
+              :return (cl-cc/type:make-type-variable 'qqq)))
          (normed (cl-cc/type:normalize-type-variables fn)))
-    (assert-true (cl-cc/type:type-arrow-p normed))
     (let ((p (car (cl-cc/type:type-arrow-params normed)))
           (r (cl-cc/type:type-arrow-return normed)))
-      (assert-true (cl-cc/type:type-var-p p))
-      (assert-true (cl-cc/type:type-var-p r))
-      ;; Should be different vars
-      (assert-false (cl-cc/type:type-var-equal-p p r)))))
-
-(deftest normalize-same-var-same-canonical
-  "Same var in multiple positions gets same canonical name."
+      (assert-true  (cl-cc/type:type-var-p p))
+      (assert-true  (cl-cc/type:type-var-p r))
+      (assert-false (cl-cc/type:type-var-equal-p p r))))
   (let* ((v (cl-cc/type:make-type-variable 'x))
          (fn (cl-cc/type:make-type-arrow-raw :params (list v) :return v))
          (normed (cl-cc/type:normalize-type-variables fn)))
-    (let ((p (car (cl-cc/type:type-arrow-params normed)))
-          (r (cl-cc/type:type-arrow-return normed)))
-      (assert-true (cl-cc/type:type-var-equal-p p r)))))
+    (assert-true (cl-cc/type:type-var-equal-p
+                  (car (cl-cc/type:type-arrow-params normed))
+                  (cl-cc/type:type-arrow-return normed)))))
 
 ;;; ─── apply-subst (env) ─────────────────────────────────────────────────
 

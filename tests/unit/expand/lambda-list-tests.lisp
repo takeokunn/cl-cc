@@ -25,22 +25,16 @@
 
 ;;; ─── &optional ────────────────────────────────────────────────────────────
 
-(deftest parse-ll-optional-symbol
-  "Symbol &optional param gets nil default and nil supplied-p."
-  (let ((info (cl-cc::parse-lambda-list '(x &optional y))))
-    (assert-equal '(x) (cl-cc::lambda-list-info-required info))
-    (let ((opt (cl-cc::lambda-list-info-optional info)))
-      (assert-equal 1 (length opt))
-      (assert-equal 'y (first (first opt)))
-      (assert-equal nil (second (first opt))))))
-
-(deftest parse-ll-optional-with-default
-  "&optional param with default and supplied-p."
-  (let* ((info (cl-cc::parse-lambda-list '(&optional (x 42 x-p))))
-         (opt (first (cl-cc::lambda-list-info-optional info))))
-    (assert-equal 'x (first opt))
-    (assert-equal 42 (second opt))
-    (assert-equal 'x-p (third opt))))
+(deftest-each parse-ll-optional-cases
+  "&optional: symbol gets nil default; (name default supplied-p) is parsed correctly"
+  :cases (("symbol"       '(x &optional y)           'y   nil  nil)
+          ("with-default" '(&optional (x 42 x-p))    'x   42   'x-p))
+  (ll expected-name expected-default expected-supplied)
+  (let* ((info (cl-cc::parse-lambda-list ll))
+         (opt  (first (cl-cc::lambda-list-info-optional info))))
+    (assert-equal expected-name     (first opt))
+    (assert-equal expected-default  (second opt))
+    (assert-equal expected-supplied (third opt))))
 
 ;;; ─── &rest / &body ───────────────────────────────────────────────────────
 
@@ -81,19 +75,15 @@
 
 ;;; ─── &aux ─────────────────────────────────────────────────────────────────
 
-(deftest parse-ll-aux-symbol
-  "&aux symbol gets nil init."
-  (let* ((info (cl-cc::parse-lambda-list '(&aux temp)))
-         (aux (first (cl-cc::lambda-list-info-aux info))))
-    (assert-equal 'temp (first aux))
-    (assert-equal nil (second aux))))
-
-(deftest parse-ll-aux-with-init
-  "&aux param with init form."
-  (let* ((info (cl-cc::parse-lambda-list '(&aux (count 0))))
-         (aux (first (cl-cc::lambda-list-info-aux info))))
-    (assert-equal 'count (first aux))
-    (assert-equal 0 (second aux))))
+(deftest-each parse-ll-aux-cases
+  "&aux: symbol gets nil init; (name init) is parsed correctly"
+  :cases (("symbol"    '(&aux temp)      'temp  nil)
+          ("with-init" '(&aux (count 0)) 'count 0))
+  (ll expected-name expected-init)
+  (let* ((info (cl-cc::parse-lambda-list ll))
+         (aux  (first (cl-cc::lambda-list-info-aux info))))
+    (assert-equal expected-name (first aux))
+    (assert-equal expected-init (second aux))))
 
 ;;; ─── Combined ─────────────────────────────────────────────────────────────
 

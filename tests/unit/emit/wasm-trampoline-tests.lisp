@@ -23,8 +23,9 @@
     (assert-equal 0 (cl-cc::wasm-bb-pc-index (first bbs)))
     (assert-equal 2 (length (cl-cc::wasm-bb-instructions (first bbs))))))
 
-(deftest trampoline-bb-single-label
-  "A label followed by instructions produces one basic block."
+(deftest trampoline-bb-label-grouping
+  "group-into-basic-blocks correctly groups instructions across label boundary cases."
+  ;; single label followed by instructions → one block
   (let* ((instrs (list (make-vm-label :name "entry")
                        (make-vm-const :dst :r0 :value 42)
                        (make-vm-ret :reg :r0)))
@@ -32,10 +33,8 @@
     (assert-equal 1 (length bbs))
     (assert-equal "entry" (cl-cc::wasm-bb-label (first bbs)))
     (assert-equal 0 (cl-cc::wasm-bb-pc-index (first bbs)))
-    (assert-equal 2 (length (cl-cc::wasm-bb-instructions (first bbs))))))
-
-(deftest trampoline-bb-two-labels
-  "Two labels produce two basic blocks with ascending pc-index."
+    (assert-equal 2 (length (cl-cc::wasm-bb-instructions (first bbs)))))
+  ;; two labels produce two blocks with ascending pc-index
   (let* ((instrs (list (make-vm-label :name "a")
                        (make-vm-const :dst :r0 :value 1)
                        (make-vm-label :name "b")
@@ -45,10 +44,8 @@
     (assert-equal "a" (cl-cc::wasm-bb-label (first bbs)))
     (assert-equal 0 (cl-cc::wasm-bb-pc-index (first bbs)))
     (assert-equal "b" (cl-cc::wasm-bb-label (second bbs)))
-    (assert-equal 1 (cl-cc::wasm-bb-pc-index (second bbs)))))
-
-(deftest trampoline-bb-instructions-before-first-label
-  "Instructions before the first label form a nil-label entry block."
+    (assert-equal 1 (cl-cc::wasm-bb-pc-index (second bbs))))
+  ;; instructions before first label form a nil-label entry block
   (let* ((instrs (list (make-vm-const :dst :r0 :value 0)
                        (make-vm-label :name "loop")
                        (make-vm-ret :reg :r0)))
@@ -56,10 +53,8 @@
     (assert-equal 2 (length bbs))
     (assert-null (cl-cc::wasm-bb-label (first bbs)))
     (assert-equal 1 (length (cl-cc::wasm-bb-instructions (first bbs))))
-    (assert-equal "loop" (cl-cc::wasm-bb-label (second bbs)))))
-
-(deftest trampoline-bb-consecutive-labels
-  "Two consecutive labels with no instructions between produce two blocks."
+    (assert-equal "loop" (cl-cc::wasm-bb-label (second bbs))))
+  ;; two consecutive labels with no instructions between produce two blocks
   (let* ((instrs (list (make-vm-label :name "a")
                        (make-vm-label :name "b")
                        (make-vm-ret :reg :r0)))
@@ -77,30 +72,25 @@
 
 ;;; ─── build-label-pc-map ───────────────────────────────────────────────────────
 
-(deftest trampoline-pc-map-empty
-  "build-label-pc-map on empty list returns empty hash table."
-  (let ((m (cl-cc::build-label-pc-map nil)))
-    (assert-true (hash-table-p m))
-    (assert-equal 0 (hash-table-count m))))
-
-(deftest trampoline-pc-map-nil-label-excluded
-  "build-label-pc-map skips blocks with nil label."
+(deftest trampoline-pc-map-zero-entries
+  "build-label-pc-map returns a 0-count map for empty input or instructions with no labels."
+  (assert-true (hash-table-p (cl-cc::build-label-pc-map nil)))
+  (assert-equal 0 (hash-table-count (cl-cc::build-label-pc-map nil)))
   (let* ((instrs (list (make-vm-const :dst :r0 :value 1)))
          (bbs (cl-cc::group-into-basic-blocks instrs))
          (m (cl-cc::build-label-pc-map bbs)))
     (assert-equal 0 (hash-table-count m))))
 
-(deftest trampoline-pc-map-single
-  "build-label-pc-map maps a single label to its pc-index."
+(deftest trampoline-pc-map-labels
+  "build-label-pc-map maps labels to correct pc-indices for single and multiple labels."
+  ;; single label maps to pc-index 0
   (let* ((instrs (list (make-vm-label :name "main")
                        (make-vm-ret :reg :r0)))
          (bbs (cl-cc::group-into-basic-blocks instrs))
          (m (cl-cc::build-label-pc-map bbs)))
     (assert-equal 1 (hash-table-count m))
-    (assert-equal 0 (gethash "main" m))))
-
-(deftest trampoline-pc-map-multiple
-  "build-label-pc-map maps each label to its correct pc-index."
+    (assert-equal 0 (gethash "main" m)))
+  ;; three labels each map to their correct ascending pc-index
   (let* ((instrs (list (make-vm-label :name "a")
                        (make-vm-const :dst :r0 :value 1)
                        (make-vm-label :name "b")

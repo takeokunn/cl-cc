@@ -61,47 +61,34 @@
   (assert-true (cl-cc::opt-inst-pure-p inst)))
 
 (deftest-each opt-not-pure-io
-  "I/O instructions are not pure."
-  :cases (("print" (make-vm-print :reg :r0)))
+  "I/O and call instructions are not pure."
+  :cases (("print" (make-vm-print :reg :r0))
+          ("call"  (make-vm-call  :dst :r0 :func :r1 :args nil)))
   (inst)
   (assert-false (cl-cc::opt-inst-pure-p inst)))
 
-(deftest opt-not-pure-call
-  "vm-call is not pure (unknown effects)."
-  (assert-false (cl-cc::opt-inst-pure-p
-                  (make-vm-call :dst :r0 :func :r1 :args nil))))
-
 ;;; ─── opt-inst-dce-eligible-p ─────────────────────────────────────────────
 
-(deftest dce-eligible-pure-instructions
-  "Pure instructions are DCE-eligible."
-  (assert-true (cl-cc::opt-inst-dce-eligible-p
-                 (make-vm-add :dst :r0 :lhs :r1 :rhs :r2))))
+(deftest-each dce-eligible-simple
+  "Pure and alloc instructions are DCE-eligible."
+  :cases (("pure-add"   (make-vm-add  :dst :r0 :lhs :r1 :rhs :r2))
+          ("alloc-cons" (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2)))
+  (inst)
+  (assert-true (cl-cc::opt-inst-dce-eligible-p inst)))
 
-(deftest dce-eligible-alloc
-  "Allocation instructions (vm-cons) are DCE-eligible."
-  (assert-true (cl-cc::opt-inst-dce-eligible-p
-                 (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))))
-
-(deftest dce-not-eligible-print
-  "I/O instructions are NOT DCE-eligible."
-  (assert-false (cl-cc::opt-inst-dce-eligible-p
-                  (make-vm-print :reg :r0))))
-
-(deftest dce-not-eligible-set-global
-  "vm-set-global is NOT DCE-eligible."
-  (assert-false (cl-cc::opt-inst-dce-eligible-p
-                  (make-vm-set-global :src :r0 :name 'x))))
+(deftest-each dce-not-eligible-simple
+  "I/O and global-write instructions are NOT DCE-eligible."
+  :cases (("io-print"       (make-vm-print      :reg :r0))
+          ("set-global"     (make-vm-set-global :src :r0 :name 'x)))
+  (inst)
+  (assert-false (cl-cc::opt-inst-dce-eligible-p inst)))
 
 ;;; ─── opt-inst-cse-eligible-p ─────────────────────────────────────────────
 
-(deftest cse-eligible-pure
-  "Pure instructions are CSE-eligible."
-  (assert-true (cl-cc::opt-inst-cse-eligible-p
-                 (make-vm-add :dst :r0 :lhs :r1 :rhs :r2))))
-
-(deftest cse-not-eligible-alloc
-  "Allocation instructions (vm-cons) are NOT CSE-eligible (creates distinct objects)."
+(deftest cse-eligibility
+  "Pure instructions are CSE-eligible; allocation instructions are not."
+  (assert-true  (cl-cc::opt-inst-cse-eligible-p
+                  (make-vm-add  :dst :r0 :lhs :r1 :rhs :r2)))
   (assert-false (cl-cc::opt-inst-cse-eligible-p
                   (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))))
 
@@ -171,23 +158,20 @@
 
 ;;; ─── DCE Extended Coverage ───────────────────────────────────────────────
 
-(deftest dce-eliminates-dead-add
-  "Dead vm-add with unused result is eliminated by the extended DCE pass."
-  (let* ((insts (list (make-vm-const :dst :r0 :value 1)
-                      (make-vm-const :dst :r1 :value 2)
-                      (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1) ; dead: r2 unused
-                      (make-vm-ret   :reg :r0)))
-         (result (cl-cc::opt-pass-dce insts)))
-    (assert-false (some (lambda (i) (typep i 'cl-cc::vm-add)) result))))
-
-(deftest dce-preserves-used-add
-  "vm-add whose result IS used is preserved."
-  (let* ((insts (list (make-vm-const :dst :r0 :value 1)
-                      (make-vm-const :dst :r1 :value 2)
-                      (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)
-                      (make-vm-ret   :reg :r2)))  ; r2 is used here
-         (result (cl-cc::opt-pass-dce insts)))
-    (assert-true (some (lambda (i) (typep i 'cl-cc::vm-add)) result))))
+(deftest dce-add-elimination
+  "DCE eliminates dead vm-add (unused result) but preserves used vm-add."
+  (let* ((dead-insts (list (make-vm-const :dst :r0 :value 1)
+                           (make-vm-const :dst :r1 :value 2)
+                           (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1) ; dead: r2 unused
+                           (make-vm-ret   :reg :r0)))
+         (used-insts (list (make-vm-const :dst :r0 :value 1)
+                           (make-vm-const :dst :r1 :value 2)
+                           (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)
+                           (make-vm-ret   :reg :r2)))) ; r2 is used here
+    (assert-false (some (lambda (i) (typep i 'cl-cc::vm-add))
+                        (cl-cc::opt-pass-dce dead-insts)))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc::vm-add))
+                        (cl-cc::opt-pass-dce used-insts)))))
 
 ;;; ─── effect-row->effect-kind bridge ─────────────────────────────────────
 

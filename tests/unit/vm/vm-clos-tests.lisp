@@ -5,8 +5,8 @@
 ;;;;   collect-inherited-initargs       (3 tests)
 ;;;;   compute-class-precedence-list    (4 tests)
 ;;;;   vm-error-type-matches-p          (5 tests via deftest-each)
-;;;;   vm-classify-arg                  (4 tests)
-;;;;   vm-generic-function-p            (3 tests)
+;;;;   vm-classify-arg                  (3+2 tests: deftest-each + hash-table cases)
+;;;;   vm-generic-function-p            (2+1 tests: deftest-each + truthy case)
 
 (in-package :cl-cc/test)
 
@@ -38,30 +38,25 @@
 ;;; 1. collect-inherited-slots
 ;;; ------------------------------------------------------------
 
-(deftest collect-inherited-slots-no-superclasses
-  "No superclasses yields an empty slot list."
+(deftest collect-inherited-slots
+  "collect-inherited-slots: no-super, single-super, multiple-supers, no-duplicates."
   (let ((reg (make-test-registry)))
-    (assert-null (cl-cc::collect-inherited-slots '() reg))))
-
-(deftest collect-inherited-slots-single-super
-  "Slots from a single superclass are returned."
+    ;; no superclasses
+    (assert-null (cl-cc::collect-inherited-slots '() reg)))
   (let ((reg (make-test-registry)))
+    ;; single superclass
     (registry-add-class reg 'animal :slots '(name age))
     (assert-equal '(name age)
-                  (cl-cc::collect-inherited-slots '(animal) reg))))
-
-(deftest collect-inherited-slots-multiple-supers
-  "Slots from multiple superclasses are unioned in depth-first, left-to-right order."
+                  (cl-cc::collect-inherited-slots '(animal) reg)))
   (let ((reg (make-test-registry)))
+    ;; multiple superclasses
     (registry-add-class reg 'flyable  :slots '(wingspan))
     (registry-add-class reg 'swimable :slots '(fin-count))
     (let ((result (cl-cc::collect-inherited-slots '(flyable swimable) reg)))
       (assert-true (member 'wingspan  result))
-      (assert-true (member 'fin-count result)))))
-
-(deftest collect-inherited-slots-no-duplicates
-  "A slot appearing in two superclasses is included only once."
+      (assert-true (member 'fin-count result))))
   (let ((reg (make-test-registry)))
+    ;; no duplicates
     (registry-add-class reg 'base  :slots '(id))
     (registry-add-class reg 'mixin :slots '(id extra))
     (let ((result (cl-cc::collect-inherited-slots '(base mixin) reg)))
@@ -73,22 +68,19 @@
 ;;; 2. collect-inherited-initargs
 ;;; ------------------------------------------------------------
 
-(deftest collect-inherited-initargs-no-superclasses
-  "No superclasses yields an empty initarg list."
+(deftest collect-inherited-initargs
+  "collect-inherited-initargs: no-super, single-super, multiple-supers."
   (let ((reg (make-test-registry)))
-    (assert-null (cl-cc::collect-inherited-initargs '() reg))))
-
-(deftest collect-inherited-initargs-single-super
-  "Initargs from a single superclass are returned."
+    ;; no superclasses
+    (assert-null (cl-cc::collect-inherited-initargs '() reg)))
   (let ((reg (make-test-registry)))
+    ;; single superclass
     (registry-add-class reg 'person :initargs '((:name . name) (:age . age)))
     (let ((result (cl-cc::collect-inherited-initargs '(person) reg)))
       (assert-true (assoc :name result))
-      (assert-true (assoc :age  result)))))
-
-(deftest collect-inherited-initargs-multiple-supers
-  "Initargs from multiple superclasses are unioned; first occurrence wins."
+      (assert-true (assoc :age  result))))
   (let ((reg (make-test-registry)))
+    ;; multiple superclasses; first occurrence wins
     (registry-add-class reg 'named  :initargs '((:name . name)))
     (registry-add-class reg 'tagged :initargs '((:tag . tag)))
     (let ((result (cl-cc::collect-inherited-initargs '(named tagged) reg)))
@@ -99,33 +91,28 @@
 ;;; 3. compute-class-precedence-list
 ;;; ------------------------------------------------------------
 
-(deftest compute-cpl-no-super
-  "A class with no superclasses has a CPL containing only itself."
+(deftest compute-class-precedence-list
+  "compute-class-precedence-list: no-super, single-super, linear-chain, diamond."
   (let ((reg (make-test-registry)))
+    ;; no superclasses
     (registry-add-class reg 'root)
     (assert-equal '(root)
-                  (cl-cc::compute-class-precedence-list 'root reg))))
-
-(deftest compute-cpl-single-super
-  "A class with one superclass yields [class super] in CPL."
+                  (cl-cc::compute-class-precedence-list 'root reg)))
   (let ((reg (make-test-registry)))
+    ;; single superclass
     (registry-add-class reg 'animal)
     (registry-add-class reg 'dog :superclasses '(animal))
     (assert-equal '(dog animal)
-                  (cl-cc::compute-class-precedence-list 'dog reg))))
-
-(deftest compute-cpl-linear-chain
-  "A linear chain A -> B -> C yields CPL [A B C]."
+                  (cl-cc::compute-class-precedence-list 'dog reg)))
   (let ((reg (make-test-registry)))
+    ;; linear chain A -> B -> C
     (registry-add-class reg 'c)
     (registry-add-class reg 'b :superclasses '(c))
     (registry-add-class reg 'a :superclasses '(b))
     (assert-equal '(a b c)
-                  (cl-cc::compute-class-precedence-list 'a reg))))
-
-(deftest compute-cpl-diamond-no-crash
-  "Diamond inheritance (A -> B, A -> C, B -> D, C -> D) does not crash and includes all classes."
+                  (cl-cc::compute-class-precedence-list 'a reg)))
   (let ((reg (make-test-registry)))
+    ;; diamond: A -> B, A -> C, B -> D, C -> D
     (registry-add-class reg 'd)
     (registry-add-class reg 'b :superclasses '(d))
     (registry-add-class reg 'c :superclasses '(d))
@@ -165,19 +152,15 @@
 ;;; 5. vm-classify-arg
 ;;; ------------------------------------------------------------
 
-(deftest vm-classify-arg-integer
-  "An integer argument is classified as 'integer."
-  ;; vm-classify-arg takes (arg state); state is only used for heap lookups on
-  ;; hash-table arguments, so nil is safe for primitive values.
-  (assert-eq 'integer (cl-cc::vm-classify-arg 42 nil)))
-
-(deftest vm-classify-arg-string
-  "A string argument is classified as 'string."
-  (assert-eq 'string (cl-cc::vm-classify-arg "hello" nil)))
-
-(deftest vm-classify-arg-symbol
-  "A symbol argument is classified as 'symbol."
-  (assert-eq 'symbol (cl-cc::vm-classify-arg 'foo nil)))
+;;; vm-classify-arg takes (arg state); state is only used for heap lookups on
+;;; hash-table arguments, so nil is safe for primitive values.
+(deftest-each vm-classify-arg-primitive
+  "Each primitive type is classified by its CL typecase clause."
+  :cases (("integer" 42      'integer)
+          ("string"  "hello" 'string)
+          ("symbol"  'foo    'symbol))
+  (value expected-class)
+  (assert-eq expected-class (cl-cc::vm-classify-arg value nil)))
 
 (deftest vm-classify-arg-hash-table-no-class
   "A plain hash table with no :__class__ key is classified as T (catch-all)."
@@ -196,17 +179,15 @@
 ;;; 6. vm-generic-function-p
 ;;; ------------------------------------------------------------
 
-(deftest vm-generic-function-p-plain-hash-table
-  "A plain hash table without :__methods__ is not a generic function."
-  (let ((ht (make-hash-table :test #'eq)))
-    (assert-false (cl-cc::vm-generic-function-p ht))))
-
-(deftest vm-generic-function-p-with-methods-key
-  "A hash table that has :__methods__ set to a truthy value is a generic function."
-  (let ((ht (make-hash-table :test #'eq)))
-    (setf (gethash :__methods__ ht) (make-hash-table :test #'equal))
-    (assert-true (cl-cc::vm-generic-function-p ht))))
-
-(deftest vm-generic-function-p-non-hash-table
-  "A non-hash-table value (integer) is not a generic function."
-  (assert-false (cl-cc::vm-generic-function-p 99)))
+(deftest-each vm-generic-function-p
+  "vm-generic-function-p recognises generic functions and rejects non-gf values."
+  :cases (("plain-hash-table"   (make-hash-table :test #'eq)                          nil)
+          ("integer"            99                                                     nil)
+          ("hash-with-methods"  (let ((ht (make-hash-table :test #'eq)))
+                                  (setf (gethash :__methods__ ht)
+                                        (make-hash-table :test #'equal))
+                                  ht)                                                  t))
+  (value expected)
+  (if expected
+      (assert-true  (cl-cc::vm-generic-function-p value))
+      (assert-false (cl-cc::vm-generic-function-p value))))

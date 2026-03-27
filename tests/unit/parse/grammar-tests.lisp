@@ -42,19 +42,22 @@
 
 ;;; ─── Token Stream: ts-peek ─────────────────────────────────────────────────
 
-(deftest grammar-ts-peek-returns-first
-  "ts-peek returns the first token without consuming it"
-  (let ((ts (make-grammar-ts '(:T-INT 42) '(:T-INT 99))))
-    (let ((tok (cl-cc::ts-peek ts)))
-      (assert-eq :T-INT (cl-cc::lexer-token-type tok))
-      (assert-= 42 (cl-cc::lexer-token-value tok))
-      ;; Peeking again returns the same token
-      (assert-= 42 (cl-cc::lexer-token-value (cl-cc::ts-peek ts))))))
-
-(deftest grammar-ts-peek-empty-stream
-  "ts-peek on empty stream returns nil"
-  (let ((ts (cl-cc::make-token-stream :tokens nil :source "")))
-    (assert-null (cl-cc::ts-peek ts))))
+(deftest-each grammar-ts-peek-cases
+  "ts-peek behavior on non-empty and empty streams"
+  :cases (("non-empty" :non-empty)
+          ("empty"     :empty))
+  (scenario)
+  (ecase scenario
+    (:non-empty
+     (let* ((ts (make-grammar-ts '(:T-INT 42) '(:T-INT 99)))
+            (tok (cl-cc::ts-peek ts)))
+       (assert-eq :T-INT (cl-cc::lexer-token-type tok))
+       (assert-= 42 (cl-cc::lexer-token-value tok))
+       ;; Peeking again returns the same token
+       (assert-= 42 (cl-cc::lexer-token-value (cl-cc::ts-peek ts)))))
+    (:empty
+     (let ((ts (cl-cc::make-token-stream :tokens nil :source "")))
+       (assert-null (cl-cc::ts-peek ts))))))
 
 ;;; ─── Token Stream: ts-advance ──────────────────────────────────────────────
 
@@ -72,107 +75,101 @@
 
 ;;; ─── Token Stream: ts-peek-type ────────────────────────────────────────────
 
-(deftest grammar-ts-peek-type-returns-keyword
-  "ts-peek-type returns the token type keyword"
-  (let ((ts (make-grammar-ts '(:T-STRING "hello"))))
-    (assert-eq :T-STRING (cl-cc::ts-peek-type ts))))
-
-(deftest grammar-ts-peek-type-empty
-  "ts-peek-type on empty stream returns nil"
-  (let ((ts (cl-cc::make-token-stream :tokens nil :source "")))
-    (assert-null (cl-cc::ts-peek-type ts))))
+(deftest-each grammar-ts-peek-type-cases
+  "ts-peek-type behavior on non-empty and empty streams"
+  :cases (("non-empty" :non-empty)
+          ("empty"     :empty))
+  (scenario)
+  (ecase scenario
+    (:non-empty
+     (let ((ts (make-grammar-ts '(:T-STRING "hello"))))
+       (assert-eq :T-STRING (cl-cc::ts-peek-type ts))))
+    (:empty
+     (let ((ts (cl-cc::make-token-stream :tokens nil :source "")))
+       (assert-null (cl-cc::ts-peek-type ts))))))
 
 ;;; ─── Token Stream: ts-expect ───────────────────────────────────────────────
 
-(deftest grammar-ts-expect-matching
-  "ts-expect with matching type consumes and returns the token"
-  (let ((ts (make-grammar-ts '(:T-INT 42))))
-    (let ((tok (cl-cc::ts-expect ts :T-INT)))
-      (assert-true (not (null tok)))
-      (assert-= 42 (cl-cc::lexer-token-value tok))
-      ;; Stream is now empty
-      (assert-null (cl-cc::ts-peek ts)))))
-
-(deftest grammar-ts-expect-mismatch-adds-diagnostic
-  "ts-expect with wrong type adds a diagnostic and returns nil"
-  (let ((ts (make-grammar-ts '(:T-INT 42))))
-    (let ((result (cl-cc::ts-expect ts :T-STRING)))
-      (assert-null result)
-      ;; Diagnostic was added
-      (assert-true (not (null (cl-cc::token-stream-diagnostics ts))))
-      ;; Token was NOT consumed
-      (assert-= 42 (cl-cc::lexer-token-value (cl-cc::ts-peek ts))))))
-
-(deftest grammar-ts-expect-at-end-adds-diagnostic
-  "ts-expect at end of input adds a diagnostic about unexpected end"
-  (let ((ts (cl-cc::make-token-stream :tokens nil :source "")))
-    (let ((result (cl-cc::ts-expect ts :T-RPAREN)))
-      (assert-null result)
-      (assert-true (not (null (cl-cc::token-stream-diagnostics ts)))))))
+(deftest grammar-ts-expect-behavior
+  "ts-expect: matching consumes token; mismatch and end-of-input add diagnostics"
+  ;; Matching type consumes and returns the token
+  (let* ((ts (make-grammar-ts '(:T-INT 42)))
+         (tok (cl-cc::ts-expect ts :T-INT)))
+    (assert-true (not (null tok)))
+    (assert-= 42 (cl-cc::lexer-token-value tok))
+    ;; Stream is now empty
+    (assert-null (cl-cc::ts-peek ts)))
+  ;; Mismatch adds a diagnostic and returns nil without consuming
+  (let* ((ts (make-grammar-ts '(:T-INT 42)))
+         (result (cl-cc::ts-expect ts :T-STRING)))
+    (assert-null result)
+    (assert-true (not (null (cl-cc::token-stream-diagnostics ts))))
+    ;; Token was NOT consumed
+    (assert-= 42 (cl-cc::lexer-token-value (cl-cc::ts-peek ts))))
+  ;; At end of input adds a diagnostic
+  (let* ((ts (cl-cc::make-token-stream :tokens nil :source ""))
+         (result (cl-cc::ts-expect ts :T-RPAREN)))
+    (assert-null result)
+    (assert-true (not (null (cl-cc::token-stream-diagnostics ts))))))
 
 ;;; ─── Token Stream: ts-at-end-p ─────────────────────────────────────────────
 
-(deftest grammar-ts-at-end-p-empty
-  "ts-at-end-p on empty token list returns true"
-  (let ((ts (cl-cc::make-token-stream :tokens nil :source "")))
-    (assert-true (cl-cc::ts-at-end-p ts))))
-
-(deftest grammar-ts-at-end-p-non-empty
-  "ts-at-end-p on non-empty stream returns false"
-  (let ((ts (make-grammar-ts '(:T-INT 42))))
-    (assert-false (cl-cc::ts-at-end-p ts))))
-
-(deftest grammar-ts-at-end-p-eof-token
-  "ts-at-end-p on :T-EOF token returns true"
-  (let ((ts (make-grammar-ts '(:T-EOF nil))))
-    (assert-true (cl-cc::ts-at-end-p ts))))
+(deftest-each grammar-ts-at-end-p-cases
+  "ts-at-end-p: empty list and :T-EOF return true; non-empty returns false"
+  :cases (("empty"     :empty     t)
+          ("non-empty" :non-empty nil)
+          ("eof-token" :eof       t))
+  (scenario expected)
+  (let ((ts (ecase scenario
+               (:empty     (cl-cc::make-token-stream :tokens nil :source ""))
+               (:non-empty (make-grammar-ts '(:T-INT 42)))
+               (:eof       (make-grammar-ts '(:T-EOF nil))))))
+    (if expected
+        (assert-true  (cl-cc::ts-at-end-p ts))
+        (assert-false (cl-cc::ts-at-end-p ts)))))
 
 ;;; ─── Token Stream: ts-token-value ──────────────────────────────────────────
 
-(deftest grammar-ts-token-value-returns-value
-  "ts-token-value returns the value of the current token"
-  (let ((ts (make-grammar-ts '(:T-INT 42))))
-    (assert-= 42 (cl-cc::ts-token-value ts))))
-
-(deftest grammar-ts-token-value-empty
-  "ts-token-value on empty stream returns nil"
-  (let ((ts (cl-cc::make-token-stream :tokens nil :source "")))
-    (assert-null (cl-cc::ts-token-value ts))))
+(deftest-each grammar-ts-token-value-cases
+  "ts-token-value: returns current token value or nil on empty stream"
+  :cases (("non-empty" :non-empty)
+          ("empty"     :empty))
+  (scenario)
+  (ecase scenario
+    (:non-empty
+     (let ((ts (make-grammar-ts '(:T-INT 42))))
+       (assert-= 42 (cl-cc::ts-token-value ts))))
+    (:empty
+     (let ((ts (cl-cc::make-token-stream :tokens nil :source "")))
+       (assert-null (cl-cc::ts-token-value ts))))))
 
 ;;; ─── parse-cl-atom ─────────────────────────────────────────────────────────
 
-(deftest grammar-atom-integer
-  "parse-cl-atom: integer token produces cst-token"
-  (let* ((ts (make-grammar-ts '(:T-INT 42)))
+(deftest-each grammar-parse-cl-atom-cases
+  "parse-cl-atom: integer/string/keyword produce cst-token; LPAREN and empty stream return nil"
+  :cases (("integer"   :integer   42        :int     :T-INT)
+          ("string"    :string    "hello"   :string  :T-STRING)
+          ("keyword"   :keyword   :foo      :keyword :T-KEYWORD)
+          ("non-atom"  :non-atom  nil       nil      :T-LPAREN)
+          ("empty"     :empty     nil       nil      nil))
+  (scenario value kind tok-type)
+  (declare (ignore kind))
+  (let* ((ts (if tok-type
+                 (make-grammar-ts (list tok-type value))
+                 (cl-cc::make-token-stream :tokens nil :source "")))
          (node (cl-cc::parse-cl-atom ts)))
-    (assert-true (cl-cc:cst-token-p node))
-    (assert-= 42 (cl-cc:cst-token-value node))))
-
-(deftest grammar-atom-string
-  "parse-cl-atom: string token produces cst-token"
-  (let* ((ts (make-grammar-ts '(:T-STRING "hello")))
-         (node (cl-cc::parse-cl-atom ts)))
-    (assert-true (cl-cc:cst-token-p node))
-    (assert-string= "hello" (cl-cc:cst-token-value node))))
-
-(deftest grammar-atom-keyword
-  "parse-cl-atom: keyword token produces cst-token"
-  (let* ((ts (make-grammar-ts '(:T-KEYWORD :foo)))
-         (node (cl-cc::parse-cl-atom ts)))
-    (assert-true (cl-cc:cst-token-p node))
-    (assert-eq :foo (cl-cc:cst-token-value node))))
-
-(deftest grammar-atom-non-atom-returns-nil
-  "parse-cl-atom: LPAREN token returns nil (not an atom)"
-  (let* ((ts (make-grammar-ts '(:T-LPAREN nil)))
-         (node (cl-cc::parse-cl-atom ts)))
-    (assert-null node)))
-
-(deftest grammar-atom-empty-stream
-  "parse-cl-atom: empty stream returns nil"
-  (let* ((ts (cl-cc::make-token-stream :tokens nil :source ""))
-         (node (cl-cc::parse-cl-atom ts)))
-    (assert-null node)))
+    (ecase scenario
+      (:integer
+       (assert-true (cl-cc:cst-token-p node))
+       (assert-= value (cl-cc:cst-token-value node)))
+      (:string
+       (assert-true (cl-cc:cst-token-p node))
+       (assert-string= value (cl-cc:cst-token-value node)))
+      (:keyword
+       (assert-true (cl-cc:cst-token-p node))
+       (assert-eq value (cl-cc:cst-token-value node)))
+      ((:non-atom :empty)
+       (assert-null node)))))
 
 ;;; ─── parse-cl-source: atoms ────────────────────────────────────────────────
 
@@ -190,68 +187,49 @@
 
 ;;; ─── parse-cl-source: quote sugar ──────────────────────────────────────────
 
-(deftest grammar-parse-quote-sugar
-  "parse-cl-source: 'x produces :quote CST with 1 child"
-  (let ((node (parse-first-form "'x")))
+(deftest-each grammar-quote-sugar-forms
+  "parse-cl-source: quote sugar and vector reader macros produce correct interior CST nodes"
+  :cases (("quote"      "'x"       :quote       1)
+          ("backquote"  "`x"       :quasiquote  1)
+          ("unquote"    ",x"       :unquote     1)
+          ("function"   "#'foo"    :function    1)
+          ("vector"     "#(1 2 3)" :vector      3))
+  (source expected-kind expected-children)
+  (let ((node (parse-first-form source)))
     (assert-true (cl-cc:cst-interior-p node))
-    (assert-eq :quote (cl-cc:cst-node-kind node))
-    (assert-= 1 (length (cl-cc:cst-interior-children node)))))
-
-(deftest grammar-parse-backquote
-  "parse-cl-source: `x produces :quasiquote CST"
-  (let ((node (parse-first-form "`x")))
-    (assert-true (cl-cc:cst-interior-p node))
-    (assert-eq :quasiquote (cl-cc:cst-node-kind node))
-    (assert-= 1 (length (cl-cc:cst-interior-children node)))))
-
-(deftest grammar-parse-unquote
-  "parse-cl-source: ,x produces :unquote CST"
-  (let ((node (parse-first-form ",x")))
-    (assert-true (cl-cc:cst-interior-p node))
-    (assert-eq :unquote (cl-cc:cst-node-kind node))))
-
-(deftest grammar-parse-function-sugar
-  "parse-cl-source: #'foo produces :function CST"
-  (let ((node (parse-first-form "#'foo")))
-    (assert-true (cl-cc:cst-interior-p node))
-    (assert-eq :function (cl-cc:cst-node-kind node))
-    (assert-= 1 (length (cl-cc:cst-interior-children node)))))
-
-(deftest grammar-parse-vector
-  "parse-cl-source: #(1 2 3) produces :vector CST with 3 children"
-  (let ((node (parse-first-form "#(1 2 3)")))
-    (assert-true (cl-cc:cst-interior-p node))
-    (assert-eq :vector (cl-cc:cst-node-kind node))
-    (assert-= 3 (length (cl-cc:cst-interior-children node)))))
+    (assert-eq expected-kind (cl-cc:cst-node-kind node))
+    (assert-= expected-children (length (cl-cc:cst-interior-children node)))))
 
 ;;; ─── parse-cl-source: list forms ───────────────────────────────────────────
 
-(deftest grammar-parse-empty-list
-  "parse-cl-source: () produces :list with no children"
-  (let ((node (parse-first-form "()")))
+(deftest-each grammar-list-forms
+  "parse-cl-source: empty list, simple list, and dotted list produce correct CST interior nodes"
+  :cases (("empty-list"   "()"      :list        0)
+          ("simple-list"  "(a b c)" nil          3)
+          ("dotted-list"  "(a . b)" :dotted-list 2))
+  (source expected-kind expected-children)
+  (let ((node (parse-first-form source)))
     (assert-true (cl-cc:cst-interior-p node))
-    (assert-eq :list (cl-cc:cst-node-kind node))
-    (assert-= 0 (length (cl-cc:cst-interior-children node)))))
-
-(deftest grammar-parse-simple-list
-  "parse-cl-source: (a b c) produces :list with 3 children"
-  (let ((node (parse-first-form "(a b c)")))
-    (assert-true (cl-cc:cst-interior-p node))
-    ;; (a b c) with no special head sym maps to :call
-    (assert-= 3 (length (cl-cc:cst-interior-children node)))))
-
-(deftest grammar-parse-dotted-list
-  "parse-cl-source: (a . b) produces :dotted-list CST"
-  (let ((node (parse-first-form "(a . b)")))
-    (assert-true (cl-cc:cst-interior-p node))
-    (assert-eq :dotted-list (cl-cc:cst-node-kind node))
-    (assert-= 2 (length (cl-cc:cst-interior-children node)))))
+    (when expected-kind
+      (assert-eq expected-kind (cl-cc:cst-node-kind node)))
+    (assert-= expected-children (length (cl-cc:cst-interior-children node)))))
 
 ;;; ─── parse-cl-source: special form dispatch ────────────────────────────────
 
-(deftest grammar-parse-defun-kind
-  "parse-cl-source: (defun f (x) x) has kind :defun"
-  (assert-eq :defun (parse-first-kind "(defun f (x) x)")))
+(deftest-each grammar-special-form-kinds
+  "parse-cl-source: special form heads map to the expected CST kind"
+  :cases (("defun"   "(defun f (x) x)"                  :defun)
+          ("let"     "(let ((x 1)) x)"                  :let)
+          ("if"      "(if t 1 2)"                        :if)
+          ("lambda"  "(lambda (x) x)"                    :lambda)
+          ("progn"   "(progn 1 2 3)"                     :progn)
+          ("setq"    "(setq x 1)"                        :setq)
+          ("block"   "(block nil 1)"                     :block)
+          ("cond"    "(cond (t 1))"                      :cond)
+          ("loop"    "(loop for x from 1 to 10 collect x)" :loop)
+          ("call"    "(foo 1 2)"                         :call))
+  (source expected-kind)
+  (assert-eq expected-kind (parse-first-kind source)))
 
 (deftest grammar-parse-defun-children
   "parse-cl-source: (defun f (x) x) has 4 children"
@@ -259,25 +237,13 @@
     ;; children: defun, f, (x), x
     (assert-= 4 (length (cl-cc:cst-interior-children node)))))
 
-(deftest grammar-parse-let-kind
-  "parse-cl-source: (let ((x 1)) x) has kind :let"
-  (assert-eq :let (parse-first-kind "(let ((x 1)) x)")))
-
-(deftest grammar-parse-if-kind
-  "parse-cl-source: (if t 1 2) has kind :if"
-  (assert-eq :if (parse-first-kind "(if t 1 2)")))
-
 (deftest grammar-parse-if-children
   "parse-cl-source: (if t 1 2) has 4 children (if, cond, then, else)"
   (let ((node (parse-first-form "(if t 1 2)")))
     (assert-= 4 (length (cl-cc:cst-interior-children node)))))
 
-(deftest grammar-parse-lambda-kind
-  "parse-cl-source: (lambda (x) x) has kind :lambda"
-  (assert-eq :lambda (parse-first-kind "(lambda (x) x)")))
-
 (deftest grammar-parse-quote-form-kind
-  "parse-cl-source: (quote x) has kind :quote via sexp-head-to-kind"
+  "parse-cl-source: (quote x) is an interior node with children"
   ;; Note: (quote x) is parsed as a list form; sexp-head-to-kind
   ;; does not exist for the generic path, but the kind check does.
   ;; The generic parser sees QUOTE as head ident and maps via sexp-head-to-kind.
@@ -287,73 +253,37 @@
     ;; but the head is an interned symbol. Verify the node is an interior node.
     (assert-true (not (null (cl-cc:cst-interior-children node))))))
 
-(deftest grammar-parse-progn-kind
-  "parse-cl-source: (progn 1 2 3) has kind :progn"
-  (assert-eq :progn (parse-first-kind "(progn 1 2 3)")))
-
-(deftest grammar-parse-setq-kind
-  "parse-cl-source: (setq x 1) has kind :setq"
-  (assert-eq :setq (parse-first-kind "(setq x 1)")))
-
-(deftest grammar-parse-block-kind
-  "parse-cl-source: (block nil 1) has kind :block"
-  (assert-eq :block (parse-first-kind "(block nil 1)")))
-
-(deftest grammar-parse-cond-kind
-  "parse-cl-source: (cond (t 1)) has kind :cond"
-  (assert-eq :cond (parse-first-kind "(cond (t 1))")))
-
-(deftest grammar-parse-loop-kind
-  "parse-cl-source: (loop for x from 1 to 10 collect x) has kind :loop"
-  (assert-eq :loop (parse-first-kind "(loop for x from 1 to 10 collect x)")))
-
-(deftest grammar-parse-generic-call-kind
-  "parse-cl-source: (foo 1 2) has kind :call for unknown head"
-  (assert-eq :call (parse-first-kind "(foo 1 2)")))
-
 ;;; ─── parse-cl-source: multi-form ───────────────────────────────────────────
 
-(deftest grammar-multi-form-three-atoms
-  "parse-cl-source: \"1 2 3\" returns 3 CST nodes"
+(deftest-each grammar-multi-form-cases
+  "parse-cl-source: three atoms, defun+call, and empty input return correct form counts"
+  :cases (("three-atoms"    "1 2 3"                3   nil)
+          ("defun-and-call" "(defun f () 1) (f)"   2   :defun)
+          ("empty-input"    ""                     0   nil))
+  (source expected-count expected-first-kind)
   (multiple-value-bind (forms diags)
-      (cl-cc:parse-cl-source "1 2 3")
+      (cl-cc:parse-cl-source source)
     (declare (ignore diags))
-    (assert-= 3 (length forms))))
-
-(deftest grammar-multi-form-defun-and-call
-  "parse-cl-source: two top-level forms returns 2 nodes"
-  (multiple-value-bind (forms diags)
-      (cl-cc:parse-cl-source "(defun f () 1) (f)")
-    (declare (ignore diags))
-    (assert-= 2 (length forms))
-    (assert-eq :defun (cl-cc:cst-node-kind (first forms)))))
-
-(deftest grammar-multi-form-empty-input
-  "parse-cl-source: empty string returns empty list"
-  (multiple-value-bind (forms diags)
-      (cl-cc:parse-cl-source "")
-    (declare (ignore diags))
-    (assert-= 0 (length forms))))
+    (assert-= expected-count (length forms))
+    (when expected-first-kind
+      (assert-eq expected-first-kind (cl-cc:cst-node-kind (first forms))))))
 
 ;;; ─── Error Recovery ────────────────────────────────────────────────────────
 
-(deftest grammar-error-missing-close-paren
-  "parse-cl-source: missing close paren adds diagnostic"
+(deftest grammar-error-recovery-behavior
+  "parse-cl-source: missing close paren adds diagnostic; diagnostics are a list; valid input has none"
+  ;; Missing close paren adds a diagnostic
   (multiple-value-bind (forms diags)
       (cl-cc:parse-cl-source "(a b c")
     (declare (ignore forms))
-    (assert-true (> (length diags) 0))))
-
-(deftest grammar-error-diagnostics-as-second-value
-  "parse-cl-source: diagnostics returned as second value"
+    (assert-true (> (length diags) 0)))
+  ;; Diagnostics are returned as a list (second value)
   (multiple-value-bind (forms diags)
       (cl-cc:parse-cl-source "(a b")
     (declare (ignore forms))
     (assert-true (listp diags))
-    (assert-true (> (length diags) 0))))
-
-(deftest grammar-error-valid-input-no-diagnostics
-  "parse-cl-source: valid input returns empty diagnostics"
+    (assert-true (> (length diags) 0)))
+  ;; Valid input returns empty diagnostics
   (multiple-value-bind (forms diags)
       (cl-cc:parse-cl-source "(+ 1 2)")
     (declare (ignore forms))
@@ -379,17 +309,14 @@
 
 ;;; ─── CST byte positions ────────────────────────────────────────────────────
 
-(deftest grammar-byte-positions-atom
-  "parse-cl-source: atom CST node has correct byte positions"
-  (let ((node (parse-first-form "  42")))
-    (assert-= 2 (cl-cc:cst-node-start-byte node))
-    (assert-= 4 (cl-cc:cst-node-end-byte node))))
-
-(deftest grammar-byte-positions-list
-  "parse-cl-source: list CST node spans from ( to )"
-  (let ((node (parse-first-form "(+ 1 2)")))
-    (assert-= 0 (cl-cc:cst-node-start-byte node))
-    (assert-= 7 (cl-cc:cst-node-end-byte node))))
+(deftest-each grammar-byte-positions-cases
+  "parse-cl-source: CST nodes carry correct start/end byte offsets"
+  :cases (("atom" "  42"    2 4)
+          ("list" "(+ 1 2)" 0 7))
+  (source expected-start expected-end)
+  (let ((node (parse-first-form source)))
+    (assert-= expected-start (cl-cc:cst-node-start-byte node))
+    (assert-= expected-end   (cl-cc:cst-node-end-byte   node))))
 
 ;;; ─── Unquote-splicing ──────────────────────────────────────────────────────
 

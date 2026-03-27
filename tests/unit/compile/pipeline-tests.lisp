@@ -9,40 +9,21 @@
 
 ;;; ─── compile-expression ─────────────────────────────────────────────────
 
-(deftest pipeline-compile-expression-returns-result
-  "compile-expression returns a compilation-result struct."
-  (let ((result (compile-expression '(+ 1 2))))
-    (assert-true (typep result 'cl-cc::compilation-result))))
-
-(deftest pipeline-compile-expression-has-program
-  "compilation-result contains a vm-program."
+(deftest pipeline-compile-expression-properties
+  "compile-expression returns a well-formed compilation-result."
   (let* ((result (compile-expression '(+ 1 2)))
-         (prog (compilation-result-program result)))
-    (assert-true (typep prog 'cl-cc::vm-program))))
-
-(deftest pipeline-compile-expression-has-instructions
-  "The vm-program has a non-empty instruction list."
-  (let* ((result (compile-expression '(+ 1 2)))
-         (instrs (vm-program-instructions (compilation-result-program result))))
-    (assert-true (> (length instrs) 0))))
-
-(deftest pipeline-compile-expression-has-assembly
-  "compilation-result includes assembly output."
-  (let* ((result (compile-expression '(+ 1 2)))
-         (asm (compilation-result-assembly result)))
-    (assert-true (stringp asm))))
-
-(deftest pipeline-compile-expression-literal
-  "Compiling a literal produces instructions ending with halt."
+         (prog   (compilation-result-program result))
+         (instrs (vm-program-instructions prog))
+         (asm    (compilation-result-assembly result))
+         (cps    (compilation-result-cps result)))
+    (assert-true (typep result 'cl-cc::compilation-result))
+    (assert-true (typep prog 'cl-cc::vm-program))
+    (assert-true (> (length instrs) 0))
+    (assert-true (stringp asm))
+    (assert-true (or (null cps) (consp cps))))
   (let* ((result (compile-expression 42))
          (instrs (vm-program-instructions (compilation-result-program result))))
     (assert-true (typep (car (last instrs)) 'cl-cc::vm-halt))))
-
-(deftest pipeline-compile-expression-cps
-  "compilation-result includes CPS transformation when possible."
-  (let* ((result (compile-expression '(+ 1 2)))
-         (cps (compilation-result-cps result)))
-    (assert-true (or (null cps) (consp cps)))))
 
 ;;; ─── compile-string ─────────────────────────────────────────────────────
 
@@ -58,53 +39,27 @@
 
 ;;; ─── run-string ─────────────────────────────────────────────────────────
 
-(deftest pipeline-run-string-arithmetic
-  "run-string evaluates arithmetic expressions."
-  (assert-= 3 (run-string "(+ 1 2)")))
-
-(deftest pipeline-run-string-literal
-  "run-string returns literal values."
-  (assert-= 42 (run-string "42")))
-
-(deftest pipeline-run-string-nested
-  "run-string handles nested expressions."
-  (assert-= 12 (run-string "(+ (* 2 3) (- 7 1))")))
-
-(deftest pipeline-run-string-let
-  "run-string handles let forms."
-  (assert-= 5 (run-string "(let ((x 2) (y 3)) (+ x y))")))
-
-(deftest pipeline-run-string-if-true
-  "run-string handles if with true condition."
-  (assert-= 1 (run-string "(if t 1 2)")))
-
-(deftest pipeline-run-string-if-false
-  "run-string handles if with false condition."
-  (assert-= 2 (run-string "(if nil 1 2)")))
-
-(deftest pipeline-run-string-lambda
-  "run-string handles lambda calls."
-  (assert-= 9 (run-string "((lambda (x) (* x x)) 3)")))
+(deftest-each pipeline-run-string-forms
+  "run-string evaluates various expression forms."
+  :cases ((arithmetic  3  "(+ 1 2)")
+          (literal    42  "42")
+          (nested     12  "(+ (* 2 3) (- 7 1))")
+          (let-form    5  "(let ((x 2) (y 3)) (+ x y))")
+          (if-true     1  "(if t 1 2)")
+          (if-false    2  "(if nil 1 2)")
+          (lambda      9  "((lambda (x) (* x x)) 3)"))
+  (assert-= expected (run-string expr)))
 
 ;;; ─── %prescan-in-package ────────────────────────────────────────────────
 
-(deftest pipeline-prescan-keyword-package
-  "%prescan-in-package extracts keyword package name."
-  (let ((result (cl-cc::%prescan-in-package "(in-package :cl-cc)")))
-    (assert-true (stringp result))
-    (assert-string= "CL-CC" (string-upcase result))))
-
-(deftest pipeline-prescan-string-package
-  "%prescan-in-package extracts string package name."
+(deftest pipeline-prescan-in-package-behavior
+  "%prescan-in-package extracts package names in all supported forms."
+  (let ((kw-result (cl-cc::%prescan-in-package "(in-package :cl-cc)")))
+    (assert-true (stringp kw-result))
+    (assert-string= "CL-CC" (string-upcase kw-result)))
   (assert-equal "CL-CC"
-    (cl-cc::%prescan-in-package "(in-package \"CL-CC\")")))
-
-(deftest pipeline-prescan-no-package
-  "%prescan-in-package returns nil when no in-package."
-  (assert-null (cl-cc::%prescan-in-package "(defun f (x) x)")))
-
-(deftest pipeline-prescan-with-preceding-code
-  "%prescan-in-package finds in-package after other forms."
+    (cl-cc::%prescan-in-package "(in-package \"CL-CC\")"))
+  (assert-null (cl-cc::%prescan-in-package "(defun f (x) x)"))
   (let ((result (cl-cc::%prescan-in-package
                   (format nil ";;; header comment~%(in-package :cl-cc)"))))
     (assert-true (stringp result))))
@@ -129,22 +84,14 @@
 
 ;;; ─── get-stdlib-forms ───────────────────────────────────────────────────
 
-(deftest pipeline-stdlib-forms-nonempty
-  "get-stdlib-forms returns a non-empty list of forms."
+(deftest pipeline-stdlib-forms-content
+  "get-stdlib-forms returns a non-empty list containing key definitions."
   (let ((forms (cl-cc::get-stdlib-forms)))
-    (assert-true (> (length forms) 10))))
-
-(deftest pipeline-stdlib-has-mapcar
-  "Standard library includes mapcar definition."
-  (let ((forms (cl-cc::get-stdlib-forms)))
+    (assert-true (> (length forms) 10))
     (assert-true (cl:some (lambda (f)
                             (and (consp f) (eq (car f) 'defun)
                                  (eq (cadr f) 'mapcar)))
-                          forms))))
-
-(deftest pipeline-stdlib-has-reduce
-  "Standard library includes reduce definition."
-  (let ((forms (cl-cc::get-stdlib-forms)))
+                          forms))
     (assert-true (cl:some (lambda (f)
                             (and (consp f) (eq (car f) 'defun)
                                  (eq (cadr f) 'reduce)))
@@ -152,17 +99,12 @@
 
 ;;; ─── our-eval ───────────────────────────────────────────────────────────
 
-(deftest pipeline-our-eval-arithmetic
-  "our-eval evaluates arithmetic."
-  (assert-= 6 (cl-cc::our-eval '(* 2 3))))
-
-(deftest pipeline-our-eval-quote
-  "our-eval handles quoted data."
-  (assert-equal '(a b c) (cl-cc::our-eval '(quote (a b c)))))
-
-(deftest pipeline-our-eval-if
-  "our-eval handles conditionals."
-  (assert-= 10 (cl-cc::our-eval '(if t 10 20))))
+(deftest-each pipeline-our-eval-forms
+  "our-eval evaluates arithmetic, quoted data, and conditionals."
+  :cases ((arithmetic  6          '(* 2 3))
+          (quote-data  '(a b c)   '(quote (a b c)))
+          (if-form     10         '(if t 10 20)))
+  (assert-equal expected (cl-cc::our-eval expr)))
 
 ;;; ─── run-string-repl (persistent state) ─────────────────────────────────
 
@@ -210,12 +152,10 @@
 
 ;;; ─── run-string with :stdlib ────────────────────────────────────────────
 
-(deftest pipeline-run-string-stdlib-mapcar
-  "run-string with :stdlib enables mapcar."
-  (let ((result (run-string "(mapcar (lambda (x) (+ x 1)) '(1 2 3))" :stdlib t)))
-    (assert-equal '(2 3 4) result)))
-
-(deftest pipeline-run-string-stdlib-reduce
-  "run-string with :stdlib enables reduce."
-  (let ((result (run-string "(reduce (lambda (a b) (+ a b)) '(1 2 3 4) 0 t)" :stdlib t)))
-    (assert-= 10 result)))
+(deftest-each pipeline-run-string-stdlib-forms
+  "run-string with :stdlib enables stdlib functions."
+  :cases ((mapcar-inc  '(2 3 4)
+           "(mapcar (lambda (x) (+ x 1)) '(1 2 3))")
+          (reduce-sum  10
+           "(reduce (lambda (a b) (+ a b)) '(1 2 3 4) 0 t)"))
+  (assert-equal expected (run-string expr :stdlib t)))

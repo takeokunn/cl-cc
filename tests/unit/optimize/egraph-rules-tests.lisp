@@ -97,59 +97,31 @@
 ;;; current pattern-matcher constant-pattern branch.  We test that the rules
 ;;; are correctly registered.
 
-(deftest egraph-rule-fold-add-registered
-  "fold-add rule is registered in *egraph-rules*."
-  (assert-true (eg-rule-registered-p 'cl-cc::fold-add)))
+(deftest-each egraph-fold-rules-registered
+  "All fold-* rules are registered in *egraph-rules*."
+  :cases (("fold-add" 'cl-cc::fold-add)
+          ("fold-sub" 'cl-cc::fold-sub)
+          ("fold-mul" 'cl-cc::fold-mul)
+          ("fold-neg" 'cl-cc::fold-neg)
+          ("fold-not" 'cl-cc::fold-not)
+          ("fold-lt"  'cl-cc::fold-lt)
+          ("fold-gt"  'cl-cc::fold-gt)
+          ("fold-le"  'cl-cc::fold-le)
+          ("fold-ge"  'cl-cc::fold-ge))
+  (rule-name)
+  (assert-true (eg-rule-registered-p rule-name)))
 
-(deftest egraph-rule-fold-sub-registered
-  "fold-sub rule is registered."
-  (assert-true (eg-rule-registered-p 'cl-cc::fold-sub)))
+;;; ─── Algebraic Identity: add-zero ───────────────────────────────────────
+;;; Pattern: (add ?x (const 0)) → ?x   and   (add (const 0) ?x) → ?x
 
-(deftest egraph-rule-fold-mul-registered
-  "fold-mul rule is registered."
-  (assert-true (eg-rule-registered-p 'cl-cc::fold-mul)))
-
-(deftest egraph-rule-fold-neg-registered
-  "fold-neg rule is registered."
-  (assert-true (eg-rule-registered-p 'cl-cc::fold-neg)))
-
-(deftest egraph-rule-fold-not-registered
-  "fold-not rule is registered."
-  (assert-true (eg-rule-registered-p 'cl-cc::fold-not)))
-
-(deftest egraph-rule-fold-lt-registered
-  "fold-lt rule is registered."
-  (assert-true (eg-rule-registered-p 'cl-cc::fold-lt)))
-
-(deftest egraph-rule-fold-gt-registered
-  "fold-gt rule is registered."
-  (assert-true (eg-rule-registered-p 'cl-cc::fold-gt)))
-
-(deftest egraph-rule-fold-le-registered
-  "fold-le rule is registered."
-  (assert-true (eg-rule-registered-p 'cl-cc::fold-le)))
-
-(deftest egraph-rule-fold-ge-registered
-  "fold-ge rule is registered."
-  (assert-true (eg-rule-registered-p 'cl-cc::fold-ge)))
-
-;;; ─── Algebraic Identity: add-zero-r ─────────────────────────────────────
-;;; Pattern: (add ?x (const 0)) → ?x
-;;; The (const 0) uses a LITERAL match: ec-data == 0 via #'equal.
-
-(deftest egraph-rule-add-zero-r-fires
-  "add-zero-r: (add ?x (const 0)) merges with ?x."
+(deftest egraph-rule-add-zero-fires
+  "add-zero: both (add x 0) and (add 0 x) merge with x."
   (let* ((eg (cl-cc::make-e-graph))
          (x  (cl-cc::egraph-add eg 'cl-cc::var))
          (c0 (make-eg-const eg 0))
          (id (cl-cc::egraph-add eg 'cl-cc::add x c0)))
     (eg-saturate eg)
-    (assert-true (eg-merged-p eg id x))))
-
-;;; ─── Algebraic Identity: add-zero-l ─────────────────────────────────────
-
-(deftest egraph-rule-add-zero-l-fires
-  "add-zero-l: (add (const 0) ?x) merges with ?x."
+    (assert-true (eg-merged-p eg id x)))
   (let* ((eg (cl-cc::make-e-graph))
          (x  (cl-cc::egraph-add eg 'cl-cc::var))
          (c0 (make-eg-const eg 0))
@@ -157,32 +129,16 @@
     (eg-saturate eg)
     (assert-true (eg-merged-p eg id x))))
 
-;;; ─── Algebraic Identity: sub-zero ────────────────────────────────────────
+;;; ─── Algebraic Identity: mul-one ────────────────────────────────────────
 
-(deftest egraph-rule-sub-zero-fires
-  "sub-zero: (sub ?x (const 0)) merges with ?x."
-  (let* ((eg (cl-cc::make-e-graph))
-         (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (c0 (make-eg-const eg 0))
-         (id (cl-cc::egraph-add eg 'cl-cc::sub x c0)))
-    (eg-saturate eg)
-    (assert-true (eg-merged-p eg id x))))
-
-;;; ─── Algebraic Identity: mul-one-r ──────────────────────────────────────
-
-(deftest egraph-rule-mul-one-r-fires
-  "mul-one-r: (mul ?x (const 1)) merges with ?x."
+(deftest egraph-rule-mul-one-fires
+  "mul-one: (mul ?x (const 1)) and (mul (const 1) ?x) both merge with ?x."
   (let* ((eg (cl-cc::make-e-graph))
          (x  (cl-cc::egraph-add eg 'cl-cc::var))
          (c1 (make-eg-const eg 1))
          (id (cl-cc::egraph-add eg 'cl-cc::mul x c1)))
     (eg-saturate eg)
-    (assert-true (eg-merged-p eg id x))))
-
-;;; ─── Algebraic Identity: mul-one-l ──────────────────────────────────────
-
-(deftest egraph-rule-mul-one-l-fires
-  "mul-one-l: (mul (const 1) ?x) merges with ?x."
+    (assert-true (eg-merged-p eg id x)))
   (let* ((eg (cl-cc::make-e-graph))
          (x  (cl-cc::egraph-add eg 'cl-cc::var))
          (c1 (make-eg-const eg 1))
@@ -190,24 +146,19 @@
     (eg-saturate eg)
     (assert-true (eg-merged-p eg id x))))
 
-;;; ─── Algebraic Identity: mul-zero-r ─────────────────────────────────────
+;;; ─── Algebraic Identity: mul-zero ───────────────────────────────────────
 ;;; RHS is (const 0). egraph-build-rhs for the template (const 0) creates a
 ;;; const-with-child node (a new class).  eg-all-nodes detects both the mul
 ;;; and const nodes in the merged equivalence class.
 
-(deftest egraph-rule-mul-zero-r-fires
-  "mul-zero-r: (mul ?x (const 0)) merges with a class containing a const node."
+(deftest egraph-rule-mul-zero-fires
+  "mul-zero: (mul ?x (const 0)) and (mul (const 0) ?x) merge to a const class."
   (let* ((eg (cl-cc::make-e-graph))
          (x  (cl-cc::egraph-add eg 'cl-cc::var))
          (c0 (make-eg-const eg 0))
          (id (cl-cc::egraph-add eg 'cl-cc::mul x c0)))
     (eg-saturate eg)
-    (assert-true (eg-class-contains-op-p eg id 'cl-cc::const))))
-
-;;; ─── Algebraic Identity: mul-zero-l ─────────────────────────────────────
-
-(deftest egraph-rule-mul-zero-l-fires
-  "mul-zero-l: (mul (const 0) ?x) merges with a class containing a const node."
+    (assert-true (eg-class-contains-op-p eg id 'cl-cc::const)))
   (let* ((eg (cl-cc::make-e-graph))
          (x  (cl-cc::egraph-add eg 'cl-cc::var))
          (c0 (make-eg-const eg 0))
@@ -215,99 +166,55 @@
     (eg-saturate eg)
     (assert-true (eg-class-contains-op-p eg id 'cl-cc::const))))
 
-;;; ─── Algebraic Identity: div-one ─────────────────────────────────────────
+;;; ─── Algebraic Identity: single-sided zero/one identities ───────────────
 
-(deftest egraph-rule-div-one-fires
-  "div-one: (div ?x (const 1)) merges with ?x."
+(deftest-each egraph-single-sided-identity-rules-fire
+  "Single-sided identity rules: (op ?x (const N)) merges with ?x."
+  :cases (("sub-zero" 'cl-cc::sub 0)
+          ("div-one"  'cl-cc::div 1)
+          ("ash-zero" 'cl-cc::ash 0))
+  (op const-val)
   (let* ((eg (cl-cc::make-e-graph))
          (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (c1 (make-eg-const eg 1))
-         (id (cl-cc::egraph-add eg 'cl-cc::div x c1)))
+         (c  (make-eg-const eg const-val))
+         (id (cl-cc::egraph-add eg op x c)))
     (eg-saturate eg)
     (assert-true (eg-merged-p eg id x))))
 
-;;; ─── Self-Reference: sub-self ────────────────────────────────────────────
+;;; ─── Self-Reference Rules ────────────────────────────────────────────────
 ;;; sub-self: (sub ?x ?x) → (const 0).
 ;;; Both args are the same class (memoized var).  RHS (const 0) creates a
 ;;; const-with-child zombie class.  Use eg-class-contains-op-p.
 
-(deftest egraph-rule-sub-self-fires
-  "sub-self: (sub ?x ?x) merges with a class containing a const node."
+(deftest-each egraph-self-reference-rules-fire
+  "Self-reference rules: (op ?x ?x) saturates to a class containing a const node."
+  :cases (("sub-self" 'cl-cc::sub)
+          ("eq-self"  'cl-cc::num-eq)
+          ("lt-self"  'cl-cc::lt)
+          ("gt-self"  'cl-cc::gt)
+          ("le-self"  'cl-cc::le)
+          ("ge-self"  'cl-cc::ge))
+  (op)
   (let* ((eg (cl-cc::make-e-graph))
          (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (id (cl-cc::egraph-add eg 'cl-cc::sub x x)))
+         (id (cl-cc::egraph-add eg op x x)))
     (eg-saturate eg)
     (assert-true (eg-class-contains-op-p eg id 'cl-cc::const))))
 
-;;; ─── Self-Reference: eq-self ─────────────────────────────────────────────
-
-(deftest egraph-rule-eq-self-fires
-  "eq-self: (num-eq ?x ?x) merges with a class containing a const node."
-  (let* ((eg (cl-cc::make-e-graph))
-         (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (id (cl-cc::egraph-add eg 'cl-cc::num-eq x x)))
-    (eg-saturate eg)
-    (assert-true (eg-class-contains-op-p eg id 'cl-cc::const))))
-
-;;; ─── Self-Reference: lt-self ─────────────────────────────────────────────
-
-(deftest egraph-rule-lt-self-fires
-  "lt-self: (lt ?x ?x) merges with a class containing a const node."
-  (let* ((eg (cl-cc::make-e-graph))
-         (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (id (cl-cc::egraph-add eg 'cl-cc::lt x x)))
-    (eg-saturate eg)
-    (assert-true (eg-class-contains-op-p eg id 'cl-cc::const))))
-
-;;; ─── Self-Reference: gt-self ─────────────────────────────────────────────
-
-(deftest egraph-rule-gt-self-fires
-  "gt-self: (gt ?x ?x) merges with a class containing a const node."
-  (let* ((eg (cl-cc::make-e-graph))
-         (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (id (cl-cc::egraph-add eg 'cl-cc::gt x x)))
-    (eg-saturate eg)
-    (assert-true (eg-class-contains-op-p eg id 'cl-cc::const))))
-
-;;; ─── Self-Reference: le-self ─────────────────────────────────────────────
-
-(deftest egraph-rule-le-self-fires
-  "le-self: (le ?x ?x) merges with a class containing a const node."
-  (let* ((eg (cl-cc::make-e-graph))
-         (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (id (cl-cc::egraph-add eg 'cl-cc::le x x)))
-    (eg-saturate eg)
-    (assert-true (eg-class-contains-op-p eg id 'cl-cc::const))))
-
-;;; ─── Self-Reference: ge-self ─────────────────────────────────────────────
-
-(deftest egraph-rule-ge-self-fires
-  "ge-self: (ge ?x ?x) merges with a class containing a const node."
-  (let* ((eg (cl-cc::make-e-graph))
-         (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (id (cl-cc::egraph-add eg 'cl-cc::ge x x)))
-    (eg-saturate eg)
-    (assert-true (eg-class-contains-op-p eg id 'cl-cc::const))))
-
-;;; ─── Negation: mul-neg1-r ────────────────────────────────────────────────
+;;; ─── Negation: mul-neg1 ──────────────────────────────────────────────────
 ;;; mul-neg1-r: (mul ?x (const -1)) → (neg ?x)
 ;;; RHS (neg ?x) is an actual neg-node, not a const.  Pre-add (neg x) so
 ;;; the rule can merge mul-id with the pre-existing neg class.
 
-(deftest egraph-rule-mul-neg1-r-fires
-  "mul-neg1-r: (mul ?x (const -1)) merges with (neg ?x)."
+(deftest egraph-rule-mul-neg1-fires
+  "mul-neg1: (mul ?x (const -1)) and (mul (const -1) ?x) both merge with (neg ?x)."
   (let* ((eg  (cl-cc::make-e-graph))
          (x   (cl-cc::egraph-add eg 'cl-cc::var))
          (cn1 (make-eg-const eg -1))
          (mul (cl-cc::egraph-add eg 'cl-cc::mul x cn1))
          (neg (cl-cc::egraph-add eg 'cl-cc::neg x)))
     (eg-saturate eg)
-    (assert-true (eg-merged-p eg mul neg))))
-
-;;; ─── Negation: mul-neg1-l ────────────────────────────────────────────────
-
-(deftest egraph-rule-mul-neg1-l-fires
-  "mul-neg1-l: (mul (const -1) ?x) merges with (neg ?x)."
+    (assert-true (eg-merged-p eg mul neg)))
   (let* ((eg  (cl-cc::make-e-graph))
          (x   (cl-cc::egraph-add eg 'cl-cc::var))
          (cn1 (make-eg-const eg -1))
@@ -316,27 +223,19 @@
     (eg-saturate eg)
     (assert-true (eg-merged-p eg mul neg))))
 
-;;; ─── Negation: double-neg ────────────────────────────────────────────────
+;;; ─── Negation: double-neg / not-not ─────────────────────────────────────
 
-(deftest egraph-rule-double-neg-fires
-  "double-neg: (neg (neg ?x)) merges with ?x."
+(deftest-each egraph-rule-double-negation-fires
+  "Double negation: (op (op ?x)) merges with ?x for both neg and not."
+  :cases (("double-neg" 'cl-cc::neg)
+          ("not-not"    'cl-cc::not))
+  (op)
   (let* ((eg   (cl-cc::make-e-graph))
          (x    (cl-cc::egraph-add eg 'cl-cc::var))
-         (neg1 (cl-cc::egraph-add eg 'cl-cc::neg x))
-         (neg2 (cl-cc::egraph-add eg 'cl-cc::neg neg1)))
+         (op1  (cl-cc::egraph-add eg op x))
+         (op2  (cl-cc::egraph-add eg op op1)))
     (eg-saturate eg)
-    (assert-true (eg-merged-p eg neg2 x))))
-
-;;; ─── Negation: not-not ───────────────────────────────────────────────────
-
-(deftest egraph-rule-not-not-fires
-  "not-not: (not (not ?x)) merges with ?x."
-  (let* ((eg   (cl-cc::make-e-graph))
-         (x    (cl-cc::egraph-add eg 'cl-cc::var))
-         (not1 (cl-cc::egraph-add eg 'cl-cc::not x))
-         (not2 (cl-cc::egraph-add eg 'cl-cc::not not1)))
-    (eg-saturate eg)
-    (assert-true (eg-merged-p eg not2 x))))
+    (assert-true (eg-merged-p eg op2 x))))
 
 ;;; ─── Negation: add-neg ───────────────────────────────────────────────────
 ;;; add-neg: (add ?x (neg ?y)) → (sub ?x ?y)
@@ -366,43 +265,16 @@
     (eg-saturate eg)
     (assert-true (eg-merged-p eg sub add))))
 
-;;; ─── Bitwise: logand-zero ────────────────────────────────────────────────
-
-(deftest egraph-rule-logand-zero-fires
-  "logand-zero: (logand ?x (const 0)) merges with a class containing a const."
-  (let* ((eg (cl-cc::make-e-graph))
-         (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (c0 (make-eg-const eg 0))
-         (id (cl-cc::egraph-add eg 'cl-cc::logand x c0)))
-    (eg-saturate eg)
-    (assert-true (eg-class-contains-op-p eg id 'cl-cc::const))))
-
-;;; ─── Bitwise: logand-zero-l ──────────────────────────────────────────────
-
-(deftest egraph-rule-logand-zero-l-fires
-  "logand-zero-l: (logand (const 0) ?x) merges with a class containing a const."
-  (let* ((eg (cl-cc::make-e-graph))
-         (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (c0 (make-eg-const eg 0))
-         (id (cl-cc::egraph-add eg 'cl-cc::logand c0 x)))
-    (eg-saturate eg)
-    (assert-true (eg-class-contains-op-p eg id 'cl-cc::const))))
-
 ;;; ─── Bitwise: logand-neg1 ────────────────────────────────────────────────
 
 (deftest egraph-rule-logand-neg1-fires
-  "logand-neg1: (logand ?x (const -1)) merges with ?x."
+  "logand-neg1: (logand ?x (const -1)) and (logand (const -1) ?x) → merge with ?x."
   (let* ((eg  (cl-cc::make-e-graph))
          (x   (cl-cc::egraph-add eg 'cl-cc::var))
          (cn1 (make-eg-const eg -1))
          (id  (cl-cc::egraph-add eg 'cl-cc::logand x cn1)))
     (eg-saturate eg)
-    (assert-true (eg-merged-p eg id x))))
-
-;;; ─── Bitwise: logand-neg1-l ──────────────────────────────────────────────
-
-(deftest egraph-rule-logand-neg1-l-fires
-  "logand-neg1-l: (logand (const -1) ?x) merges with ?x."
+    (assert-true (eg-merged-p eg id x)))
   (let* ((eg  (cl-cc::make-e-graph))
          (x   (cl-cc::egraph-add eg 'cl-cc::var))
          (cn1 (make-eg-const eg -1))
@@ -410,69 +282,55 @@
     (eg-saturate eg)
     (assert-true (eg-merged-p eg id x))))
 
-;;; ─── Bitwise: logand-self ────────────────────────────────────────────────
+;;; ─── Bitwise: self-identity (logand-self, logior-self) ──────────────────
 
-(deftest egraph-rule-logand-self-fires
-  "logand-self: (logand ?x ?x) merges with ?x."
+(deftest-each egraph-bitwise-self-identity-fires
+  "Bitwise self-identity: (op ?x ?x) merges with ?x for logand and logior."
+  :cases (("logand-self" 'cl-cc::logand)
+          ("logior-self" 'cl-cc::logior))
+  (op)
   (let* ((eg (cl-cc::make-e-graph))
          (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (id (cl-cc::egraph-add eg 'cl-cc::logand x x)))
+         (id (cl-cc::egraph-add eg op x x)))
     (eg-saturate eg)
     (assert-true (eg-merged-p eg id x))))
 
-;;; ─── Bitwise: logior-zero ────────────────────────────────────────────────
+;;; ─── Bitwise: logior-zero / logxor-zero (bidirectional zero-identity) ───
 
-(deftest egraph-rule-logior-zero-fires
-  "logior-zero: (logior ?x (const 0)) merges with ?x."
-  (let* ((eg (cl-cc::make-e-graph))
-         (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (c0 (make-eg-const eg 0))
-         (id (cl-cc::egraph-add eg 'cl-cc::logior x c0)))
-    (eg-saturate eg)
-    (assert-true (eg-merged-p eg id x))))
-
-;;; ─── Bitwise: logior-zero-l ──────────────────────────────────────────────
-
-(deftest egraph-rule-logior-zero-l-fires
-  "logior-zero-l: (logior (const 0) ?x) merges with ?x."
+(deftest-each egraph-bitwise-zero-identity-fires
+  "Bidirectional zero-identity: both (op ?x (const 0)) and (op (const 0) ?x) merge with ?x."
+  :cases (("logior-zero" 'cl-cc::logior)
+          ("logxor-zero" 'cl-cc::logxor))
+  (op)
   (let* ((eg (cl-cc::make-e-graph))
          (x  (cl-cc::egraph-add eg 'cl-cc::var))
          (c0 (make-eg-const eg 0))
-         (id (cl-cc::egraph-add eg 'cl-cc::logior c0 x)))
+         (id (cl-cc::egraph-add eg op x c0)))
     (eg-saturate eg)
-    (assert-true (eg-merged-p eg id x))))
-
-;;; ─── Bitwise: logior-self ────────────────────────────────────────────────
-
-(deftest egraph-rule-logior-self-fires
-  "logior-self: (logior ?x ?x) merges with ?x."
-  (let* ((eg (cl-cc::make-e-graph))
-         (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (id (cl-cc::egraph-add eg 'cl-cc::logior x x)))
-    (eg-saturate eg)
-    (assert-true (eg-merged-p eg id x))))
-
-;;; ─── Bitwise: logxor-zero ────────────────────────────────────────────────
-
-(deftest egraph-rule-logxor-zero-fires
-  "logxor-zero: (logxor ?x (const 0)) merges with ?x."
+    (assert-true (eg-merged-p eg id x)))
   (let* ((eg (cl-cc::make-e-graph))
          (x  (cl-cc::egraph-add eg 'cl-cc::var))
          (c0 (make-eg-const eg 0))
-         (id (cl-cc::egraph-add eg 'cl-cc::logxor x c0)))
+         (id (cl-cc::egraph-add eg op c0 x)))
     (eg-saturate eg)
     (assert-true (eg-merged-p eg id x))))
 
-;;; ─── Bitwise: logxor-zero-l ──────────────────────────────────────────────
+;;; ─── Bitwise: logand-zero (bidirectional annihilator → const) ───────────
 
-(deftest egraph-rule-logxor-zero-l-fires
-  "logxor-zero-l: (logxor (const 0) ?x) merges with ?x."
+(deftest egraph-rule-logand-zero-fires
+  "logand-zero: (logand ?x (const 0)) and (logand (const 0) ?x) → const class."
   (let* ((eg (cl-cc::make-e-graph))
          (x  (cl-cc::egraph-add eg 'cl-cc::var))
          (c0 (make-eg-const eg 0))
-         (id (cl-cc::egraph-add eg 'cl-cc::logxor c0 x)))
+         (id (cl-cc::egraph-add eg 'cl-cc::logand x c0)))
     (eg-saturate eg)
-    (assert-true (eg-merged-p eg id x))))
+    (assert-true (eg-class-contains-op-p eg id 'cl-cc::const)))
+  (let* ((eg (cl-cc::make-e-graph))
+         (x  (cl-cc::egraph-add eg 'cl-cc::var))
+         (c0 (make-eg-const eg 0))
+         (id (cl-cc::egraph-add eg 'cl-cc::logand c0 x)))
+    (eg-saturate eg)
+    (assert-true (eg-class-contains-op-p eg id 'cl-cc::const))))
 
 ;;; ─── Bitwise: logxor-self ────────────────────────────────────────────────
 ;;; logxor-self: (logxor ?x ?x) → (const 0).
@@ -485,17 +343,6 @@
          (id (cl-cc::egraph-add eg 'cl-cc::logxor x x)))
     (eg-saturate eg)
     (assert-true (eg-class-contains-op-p eg id 'cl-cc::const))))
-
-;;; ─── Bitwise: ash-zero ───────────────────────────────────────────────────
-
-(deftest egraph-rule-ash-zero-fires
-  "ash-zero: (ash ?x (const 0)) merges with ?x."
-  (let* ((eg (cl-cc::make-e-graph))
-         (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (c0 (make-eg-const eg 0))
-         (id (cl-cc::egraph-add eg 'cl-cc::ash x c0)))
-    (eg-saturate eg)
-    (assert-true (eg-merged-p eg id x))))
 
 ;;; ─── Bitwise: ash-zero-base ──────────────────────────────────────────────
 ;;; ash-zero-base: (ash (const 0) ?x) → (const 0).
@@ -514,17 +361,13 @@
 ;;; mul-pow2/mul-pow2-l/div-pow2 use (const ?n) guards that cannot bind ?n
 ;;; via the current pattern-matcher.  Test registration only.
 
-(deftest egraph-rule-mul-pow2-registered
-  "mul-pow2 rule is registered."
-  (assert-true (eg-rule-registered-p 'cl-cc::mul-pow2)))
-
-(deftest egraph-rule-mul-pow2-l-registered
-  "mul-pow2-l rule is registered."
-  (assert-true (eg-rule-registered-p 'cl-cc::mul-pow2-l)))
-
-(deftest egraph-rule-div-pow2-registered
-  "div-pow2 rule is registered."
-  (assert-true (eg-rule-registered-p 'cl-cc::div-pow2)))
+(deftest-each egraph-strength-reduction-rules-registered
+  "Strength-reduction rules (mul-pow2, mul-pow2-l, div-pow2) are registered."
+  :cases (("mul-pow2"   'cl-cc::mul-pow2)
+          ("mul-pow2-l" 'cl-cc::mul-pow2-l)
+          ("div-pow2"   'cl-cc::div-pow2))
+  (rule-name)
+  (assert-true (eg-rule-registered-p rule-name)))
 
 (deftest egraph-rule-mul-pow2-guard-check
   "mul-pow2 :when guard is present (non-nil)."
@@ -545,21 +388,14 @@
 
 ;;; ─── Type Predicate Rules — Registration Tests ───────────────────────────
 
-(deftest egraph-rule-null-p-const-registered
-  "null-p-const rule is registered."
-  (assert-true (eg-rule-registered-p 'cl-cc::null-p-const)))
-
-(deftest egraph-rule-cons-p-const-registered
-  "cons-p-const rule is registered."
-  (assert-true (eg-rule-registered-p 'cl-cc::cons-p-const)))
-
-(deftest egraph-rule-number-p-const-registered
-  "number-p-const rule is registered."
-  (assert-true (eg-rule-registered-p 'cl-cc::number-p-const)))
-
-(deftest egraph-rule-integer-p-const-registered
-  "integer-p-const rule is registered."
-  (assert-true (eg-rule-registered-p 'cl-cc::integer-p-const)))
+(deftest-each egraph-type-predicate-rules-registered
+  "Type-predicate constant rules are registered."
+  :cases (("null-p-const"    'cl-cc::null-p-const)
+          ("cons-p-const"    'cl-cc::cons-p-const)
+          ("number-p-const"  'cl-cc::number-p-const)
+          ("integer-p-const" 'cl-cc::integer-p-const))
+  (rule-name)
+  (assert-true (eg-rule-registered-p rule-name)))
 
 ;;; ─── Advanced: mul-neg-neg ───────────────────────────────────────────────
 ;;; mul-neg-neg: (mul (neg ?x) (neg ?y)) → (mul ?x ?y).
@@ -615,10 +451,14 @@
 
 ;;; ─── Rule Registry: All 51 Rules Present ────────────────────────────────
 
-(deftest egraph-all-51-rules-registered
-  "All 51 built-in rule names are present in *egraph-rules*."
+(deftest egraph-rule-registry-complete
+  "Rule registry: >=51 rules, all have :lhs/:rhs, and all expected names are present."
   (let* ((rules (cl-cc::egraph-builtin-rules))
          (names (mapcar (lambda (r) (getf r :name)) rules)))
+    (assert-true (>= (length rules) 51))
+    (dolist (rule rules)
+      (assert-true (getf rule :lhs))
+      (assert-true (not (eq (getf rule :rhs :missing) :missing))))
     (dolist (n '(cl-cc::fold-add cl-cc::fold-sub cl-cc::fold-mul
                  cl-cc::fold-neg cl-cc::fold-not
                  cl-cc::fold-lt cl-cc::fold-gt cl-cc::fold-le cl-cc::fold-ge
@@ -640,16 +480,6 @@
                  cl-cc::number-p-const cl-cc::integer-p-const
                  cl-cc::mul-neg-neg cl-cc::neg-sub))
       (assert-true (member n names)))))
-
-(deftest egraph-rules-count-at-least-51
-  "At least 51 rules are registered."
-  (assert-true (>= (length (cl-cc::egraph-builtin-rules)) 51)))
-
-(deftest egraph-rules-all-have-lhs-rhs
-  "Every registered rule has non-null :lhs and a :rhs key."
-  (dolist (rule (cl-cc::egraph-builtin-rules))
-    (assert-true (getf rule :lhs))
-    (assert-true (not (eq (getf rule :rhs :missing) :missing)))))
 
 ;;; ─── Idempotency ─────────────────────────────────────────────────────────
 

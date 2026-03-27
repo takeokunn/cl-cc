@@ -41,19 +41,16 @@
       (assert-true (type-equal-p type-int (zonk v1 new-subst)))
       (assert-true (type-equal-p type-int (zonk v2 new-subst))))))
 
-(deftest solver-equality-conflicting
-  "Conflicting equalities (v ~ int, v ~ string) produce residual."
-  (let* ((v (fresh-type-var "a"))
+(deftest solver-equality-edge-cases
+  "Conflicting equalities (v~int, v~string) produce residual; trivial (int~int) has none."
+  (let* ((v  (fresh-type-var "a"))
          (c1 (make-equal-constraint v type-int))
          (c2 (make-equal-constraint v type-string))
-         (s (make-substitution)))
+         (s  (make-substitution)))
     (multiple-value-bind (_subst residual)
         (cl-cc/type::solve-constraints (list c1 c2) s)
       (declare (ignore _subst))
-      (assert-true (> (length residual) 0)))))
-
-(deftest solver-equality-same-type
-  "Solving (int ~ int) succeeds with no residual."
+      (assert-true (> (length residual) 0))))
   (let* ((c (make-equal-constraint type-int type-int))
          (s (make-substitution)))
     (multiple-value-bind (_subst residual)
@@ -63,136 +60,35 @@
 
 ;;; ─── solve-constraints: subtyping ──────────────────────────────────────────
 
-(deftest solver-subtype-satisfied
-  "(:subtype int t) is satisfied — no residual."
-  (let* ((c (make-subtype-constraint type-int type-any))
-         (s (make-substitution)))
-    (multiple-value-bind (_subst residual)
-        (cl-cc/type::solve-constraints (list c) s)
-      (declare (ignore _subst))
-      (assert-null residual))))
-
-(deftest solver-subtype-violated
-  "(:subtype string int) is not satisfied — becomes residual."
-  (let* ((c (make-subtype-constraint type-string type-int))
-         (s (make-substitution)))
-    (multiple-value-bind (_subst residual)
-        (cl-cc/type::solve-constraints (list c) s)
-      (declare (ignore _subst))
-      (assert-equal 1 (length residual)))))
-
-;;; ─── solve-constraints: typeclass ──────────────────────────────────────────
-
-(deftest solver-typeclass-free-var-deferred
-  "(:typeclass C v) with unresolved v becomes residual."
-  (let* ((v (fresh-type-var "a"))
-         (c (make-typeclass-constraint 'eq v))
-         (s (make-substitution)))
-    (multiple-value-bind (_subst residual)
-        (cl-cc/type::solve-constraints (list c) s)
-      (declare (ignore _subst))
-      (assert-equal 1 (length residual)))))
-
-(deftest solver-typeclass-unknown-accepted
-  "(:typeclass C unknown) is accepted (gradual typing)."
-  (let* ((c (make-typeclass-constraint 'eq +type-unknown+))
-         (s (make-substitution)))
-    (multiple-value-bind (_subst residual)
-        (cl-cc/type::solve-constraints (list c) s)
-      (declare (ignore _subst))
-      (assert-null residual))))
-
-;;; ─── solve-constraints: effect-subset ──────────────────────────────────────
-
-(deftest solver-effect-subset-satisfied
-  "Pure ⊆ IO is satisfied."
-  (let* ((c (make-effect-subset-constraint +pure-effect-row+ +io-effect-row+))
-         (s (make-substitution)))
-    (multiple-value-bind (_subst residual)
-        (cl-cc/type::solve-constraints (list c) s)
-      (declare (ignore _subst))
-      (assert-null residual))))
-
-(deftest solver-effect-subset-violated
-  "IO ⊆ Pure is not satisfied."
-  (let* ((c (make-effect-subset-constraint +io-effect-row+ +pure-effect-row+))
-         (s (make-substitution)))
-    (multiple-value-bind (_subst residual)
-        (cl-cc/type::solve-constraints (list c) s)
-      (declare (ignore _subst))
-      (assert-equal 1 (length residual)))))
-
-;;; ─── solve-constraints: mult-leq ──────────────────────────────────────────
-
-(deftest solver-mult-leq-satisfied
-  "(:mult-leq :zero :omega) is satisfied."
-  (let* ((c (make-mult-leq-constraint :zero :omega))
-         (s (make-substitution)))
-    (multiple-value-bind (_subst residual)
-        (cl-cc/type::solve-constraints (list c) s)
-      (declare (ignore _subst))
-      (assert-null residual))))
-
-(deftest solver-mult-leq-violated
-  "(:mult-leq :omega :zero) is not satisfied."
-  (let* ((c (make-mult-leq-constraint :omega :zero))
-         (s (make-substitution)))
-    (multiple-value-bind (_subst residual)
-        (cl-cc/type::solve-constraints (list c) s)
-      (declare (ignore _subst))
-      (assert-equal 1 (length residual)))))
-
-;;; ─── solve-constraints: kind-equal ─────────────────────────────────────────
-
-(deftest solver-kind-equal-satisfied
-  "(:kind-equal * *) is satisfied."
-  (let* ((c (make-kind-equal-constraint +kind-type+ +kind-type+))
-         (s (make-substitution)))
-    (multiple-value-bind (_subst residual)
-        (cl-cc/type::solve-constraints (list c) s)
-      (declare (ignore _subst))
-      (assert-null residual))))
-
-(deftest solver-kind-equal-violated
-  "(:kind-equal * Effect) is not satisfied."
-  (let* ((c (make-kind-equal-constraint +kind-type+ +kind-effect+))
-         (s (make-substitution)))
-    (multiple-value-bind (_subst residual)
-        (cl-cc/type::solve-constraints (list c) s)
-      (declare (ignore _subst))
-      (assert-equal 1 (length residual)))))
+(deftest-each solver-binary-constraint-kinds
+  "Each constraint kind: satisfying case produces no residual; violating case produces 1."
+  :cases (("subtype"       (make-subtype-constraint type-int type-any)
+                           (make-subtype-constraint type-string type-int))
+          ("typeclass"     (make-typeclass-constraint 'eq +type-unknown+)
+                           (make-typeclass-constraint 'eq (fresh-type-var "a")))
+          ("effect-subset" (make-effect-subset-constraint +pure-effect-row+ +io-effect-row+)
+                           (make-effect-subset-constraint +io-effect-row+ +pure-effect-row+))
+          ("mult-leq"      (make-mult-leq-constraint :zero :omega)
+                           (make-mult-leq-constraint :omega :zero))
+          ("kind-equal"    (make-kind-equal-constraint +kind-type+ +kind-type+)
+                           (make-kind-equal-constraint +kind-type+ +kind-effect+)))
+  (sat-c viol-c)
+  (flet ((residuals (c)
+           (nth-value 1 (cl-cc/type::solve-constraints (list c) (make-substitution)))))
+    (assert-null   (residuals sat-c))
+    (assert-equal 1 (length (residuals viol-c)))))
 
 ;;; ─── solve-constraints: row-lacks ──────────────────────────────────────────
 
-(deftest solver-row-lacks-open-var
-  "(:row-lacks v x) with type-var v — no violation (not a record)."
-  (let* ((v (fresh-type-var "rho"))
-         (c (make-row-lacks-constraint v 'x))
-         (s (make-substitution)))
-    (multiple-value-bind (_subst residual)
-        (cl-cc/type::solve-constraints (list c) s)
-      (declare (ignore _subst))
-      (assert-null residual))))
-
-(deftest solver-row-lacks-record-absent
-  "Row-lacks satisfied when label is absent from record."
-  (let* ((rec (make-type-record :fields (list (cons 'y type-int)) :row-var nil))
-         (c (make-row-lacks-constraint rec 'x))
-         (s (make-substitution)))
-    (multiple-value-bind (_subst residual)
-        (cl-cc/type::solve-constraints (list c) s)
-      (declare (ignore _subst))
-      (assert-null residual))))
-
-(deftest solver-row-lacks-record-present
-  "Row-lacks violated when label IS present in record."
-  (let* ((rec (make-type-record :fields (list (cons 'x type-int)) :row-var nil))
-         (c (make-row-lacks-constraint rec 'x))
-         (s (make-substitution)))
-    (multiple-value-bind (_subst residual)
-        (cl-cc/type::solve-constraints (list c) s)
-      (declare (ignore _subst))
-      (assert-equal 1 (length residual)))))
+(deftest solver-row-lacks-constraints
+  "Row-lacks: open-var no residual; label absent no residual; label present → 1 residual."
+  (flet ((residuals (c)
+           (nth-value 1 (cl-cc/type::solve-constraints (list c) (make-substitution)))))
+    (assert-null (residuals (make-row-lacks-constraint (fresh-type-var "rho") 'x)))
+    (assert-null (residuals (make-row-lacks-constraint
+                              (make-type-record :fields (list (cons 'y type-int)) :row-var nil) 'x)))
+    (assert-equal 1 (length (residuals (make-row-lacks-constraint
+                                         (make-type-record :fields (list (cons 'x type-int)) :row-var nil) 'x))))))
 
 ;;; ─── solve-constraints: implication ────────────────────────────────────────
 
@@ -210,22 +106,16 @@
 
 ;;; ─── solve-constraints: empty input ────────────────────────────────────────
 
-(deftest solver-empty-constraints
-  "Solving empty constraint list returns empty residual."
+(deftest solver-empty-and-nil-subst
+  "Empty constraint list and nil subst both return a valid substitution with no residual."
   (multiple-value-bind (subst residual)
       (cl-cc/type::solve-constraints nil nil)
     (assert-true (substitution-p subst))
+    (assert-null residual))
+  (multiple-value-bind (subst residual)
+      (cl-cc/type::solve-constraints (list (make-equal-constraint type-int type-int)) nil)
+    (assert-true (substitution-p subst))
     (assert-null residual)))
-
-;;; ─── solve-constraints: nil subst ──────────────────────────────────────────
-
-(deftest solver-nil-subst-creates-fresh
-  "Passing nil subst creates a fresh substitution."
-  (let* ((c (make-equal-constraint type-int type-int)))
-    (multiple-value-bind (subst residual)
-        (cl-cc/type::solve-constraints (list c) nil)
-      (assert-true (substitution-p subst))
-      (assert-null residual))))
 
 ;;; ─── solve-constraints: mixed ──────────────────────────────────────────────
 

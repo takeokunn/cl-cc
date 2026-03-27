@@ -79,104 +79,47 @@
 ;;;
 ;;; These replace opt-fold-binop-value and the unary fold table.
 
-(defrule fold-add
-  (add (const ?a) (const ?b))
-  (const)
-  :when (let ((a (egraph-binding-const eg bindings '?a))
-              (b (egraph-binding-const eg bindings '?b)))
-          (and (numberp a) (numberp b)
-               (let* ((result (+ a b))
-                      (cid (egraph-add eg 'const)))
-                 (let ((cls (gethash (egraph-find eg cid) (eg-classes eg))))
-                   (when cls (setf (ec-data cls) result)))
-                 t))))
+(defun %egraph-store-const (eg result)
+  "Allocate a new const e-class, store RESULT into it, and return T."
+  (let* ((cid (egraph-add eg 'const))
+         (cls (gethash (egraph-find eg cid) (eg-classes eg))))
+    (when cls (setf (ec-data cls) result))
+    t))
 
-(defrule fold-sub
-  (sub (const ?a) (const ?b))
-  (const)
-  :when (let ((a (egraph-binding-const eg bindings '?a))
-              (b (egraph-binding-const eg bindings '?b)))
-          (and (numberp a) (numberp b)
-               (let* ((result (- a b))
-                      (cid (egraph-add eg 'const)))
-                 (let ((cls (gethash (egraph-find eg cid) (eg-classes eg))))
-                   (when cls (setf (ec-data cls) result)))
-                 t))))
+(defun %egraph-fold-binop (eg bindings cl-fn)
+  "Fold a binary const rule: extract ?a and ?b, apply CL-FN, store result."
+  (let ((a (egraph-binding-const eg bindings '?a))
+        (b (egraph-binding-const eg bindings '?b)))
+    (when (and (numberp a) (numberp b))
+      (%egraph-store-const eg (funcall cl-fn a b)))))
 
-(defrule fold-mul
-  (mul (const ?a) (const ?b))
-  (const)
-  :when (let ((a (egraph-binding-const eg bindings '?a))
-              (b (egraph-binding-const eg bindings '?b)))
-          (and (numberp a) (numberp b)
-               (let* ((result (* a b))
-                      (cid (egraph-add eg 'const)))
-                 (let ((cls (gethash (egraph-find eg cid) (eg-classes eg))))
-                   (when cls (setf (ec-data cls) result)))
-                 t))))
+(defun %egraph-fold-cmp (eg bindings cl-pred)
+  "Fold a comparison const rule: apply CL-PRED, store 0 or 1."
+  (let ((a (egraph-binding-const eg bindings '?a))
+        (b (egraph-binding-const eg bindings '?b)))
+    (when (and (numberp a) (numberp b))
+      (%egraph-store-const eg (if (funcall cl-pred a b) 1 0)))))
+
+(defrule fold-add (add (const ?a) (const ?b)) (const) :when (%egraph-fold-binop eg bindings #'+))
+(defrule fold-sub (sub (const ?a) (const ?b)) (const) :when (%egraph-fold-binop eg bindings #'-))
+(defrule fold-mul (mul (const ?a) (const ?b)) (const) :when (%egraph-fold-binop eg bindings #'*))
 
 (defrule fold-neg
   (neg (const ?a))
   (const)
   :when (let ((a (egraph-binding-const eg bindings '?a)))
-          (and (numberp a)
-               (let ((cid (egraph-add eg 'const)))
-                 (let ((cls (gethash (egraph-find eg cid) (eg-classes eg))))
-                   (when cls (setf (ec-data cls) (- a))))
-                 t))))
+          (when (numberp a) (%egraph-store-const eg (- a)))))
 
 (defrule fold-not
   (not (const ?a))
   (const)
   :when (let ((a (egraph-binding-const eg bindings '?a)))
-          (let ((cid (egraph-add eg 'const)))
-            (let ((cls (gethash (egraph-find eg cid) (eg-classes eg))))
-              (when cls (setf (ec-data cls) (if (or (null a) (eql a 0)) t nil))))
-            t)))
+          (%egraph-store-const eg (if (or (null a) (eql a 0)) t nil))))
 
-(defrule fold-lt
-  (lt (const ?a) (const ?b))
-  (const)
-  :when (let ((a (egraph-binding-const eg bindings '?a))
-              (b (egraph-binding-const eg bindings '?b)))
-          (and (numberp a) (numberp b)
-               (let ((cid (egraph-add eg 'const)))
-                 (let ((cls (gethash (egraph-find eg cid) (eg-classes eg))))
-                   (when cls (setf (ec-data cls) (if (< a b) 1 0))))
-                 t))))
-
-(defrule fold-gt
-  (gt (const ?a) (const ?b))
-  (const)
-  :when (let ((a (egraph-binding-const eg bindings '?a))
-              (b (egraph-binding-const eg bindings '?b)))
-          (and (numberp a) (numberp b)
-               (let ((cid (egraph-add eg 'const)))
-                 (let ((cls (gethash (egraph-find eg cid) (eg-classes eg))))
-                   (when cls (setf (ec-data cls) (if (> a b) 1 0))))
-                 t))))
-
-(defrule fold-le
-  (le (const ?a) (const ?b))
-  (const)
-  :when (let ((a (egraph-binding-const eg bindings '?a))
-              (b (egraph-binding-const eg bindings '?b)))
-          (and (numberp a) (numberp b)
-               (let ((cid (egraph-add eg 'const)))
-                 (let ((cls (gethash (egraph-find eg cid) (eg-classes eg))))
-                   (when cls (setf (ec-data cls) (if (<= a b) 1 0))))
-                 t))))
-
-(defrule fold-ge
-  (ge (const ?a) (const ?b))
-  (const)
-  :when (let ((a (egraph-binding-const eg bindings '?a))
-              (b (egraph-binding-const eg bindings '?b)))
-          (and (numberp a) (numberp b)
-               (let ((cid (egraph-add eg 'const)))
-                 (let ((cls (gethash (egraph-find eg cid) (eg-classes eg))))
-                   (when cls (setf (ec-data cls) (if (>= a b) 1 0))))
-                 t))))
+(defrule fold-lt (lt (const ?a) (const ?b)) (const) :when (%egraph-fold-cmp eg bindings #'<))
+(defrule fold-gt (gt (const ?a) (const ?b)) (const) :when (%egraph-fold-cmp eg bindings #'>))
+(defrule fold-le (le (const ?a) (const ?b)) (const) :when (%egraph-fold-cmp eg bindings #'<=))
+(defrule fold-ge (ge (const ?a) (const ?b)) (const) :when (%egraph-fold-cmp eg bindings #'>=))
 
 ;;; ─── Algebraic Identity Rules ─────────────────────────────────────────────
 ;;;

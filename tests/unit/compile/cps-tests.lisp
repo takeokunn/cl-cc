@@ -52,10 +52,6 @@ Returns a function that takes a continuation."
 ;;; AST CPS — semantic (evaluable forms)
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest cps-ast-integer
-  "cps-transform-ast: integer node evaluates to its value"
-  (assert-= 42 (run-cps-ast (cl-cc:make-ast-int :value 42))))
-
 (deftest-each cps-ast-binop
   "cps-transform-ast: binary arithmetic operations evaluate correctly"
   :cases (("add"      '+ 3  4  7)
@@ -77,46 +73,34 @@ Returns a function that takes a continuation."
                                 :else (cl-cc:make-ast-int :value else-val))))
     (assert-= expected (run-cps-ast ast))))
 
-(deftest cps-ast-progn-last-value
-  "cps-transform-ast: progn returns the value of its last form"
-  (let* ((forms (list (cl-cc:make-ast-int :value 1)
-                      (cl-cc:make-ast-int :value 2)
-                      (cl-cc:make-ast-int :value 99)))
-         (ast (cl-cc:make-ast-progn :forms forms)))
-    (assert-= 99 (run-cps-ast ast))))
-
-(deftest cps-ast-let-bindings
-  "cps-transform-ast: let binds values and body uses them"
-  (let* ((bindings (list (cons 'x (cl-cc:make-ast-int :value 3))
-                         (cons 'y (cl-cc:make-ast-int :value 4))))
-         (body     (list (cl-cc:make-ast-binop
-                          :op '+
-                          :lhs (cl-cc:make-ast-var :name 'x)
-                          :rhs (cl-cc:make-ast-var :name 'y))))
-         (ast (cl-cc:make-ast-let :bindings bindings :body body)))
-    (assert-= 7 (run-cps-ast ast))))
-
-(deftest cps-ast-print-returns-value
-  "cps-transform-ast: print node passes printed value to continuation"
-  (let* ((expr (cl-cc:make-ast-int :value 42))
-         (ast  (cl-cc:make-ast-print :expr expr)))
-    (assert-= 42 (run-cps-ast ast))))
-
-(deftest cps-ast-quote
-  "cps-transform-ast: quoted literal is passed to continuation as-is"
-  (let* ((ast (cl-cc:make-ast-quote :value 'hello)))
-    (assert-eq 'hello (run-cps-ast ast))))
-
-(deftest cps-ast-quote-list
-  "cps-transform-ast: quoted list is passed unchanged"
-  (let* ((ast (cl-cc:make-ast-quote :value '(1 2 3))))
-    (assert-equal '(1 2 3) (run-cps-ast ast))))
-
-(deftest cps-ast-the-transparent
-  "cps-transform-ast: the wraps in a CL type declaration but passes value through"
-  (let* ((inner (cl-cc:make-ast-int :value 7))
-         (ast   (cl-cc:make-ast-the :type 'integer :value inner)))
-    (assert-= 7 (run-cps-ast ast))))
+(deftest-each cps-evaluable-forms
+  "cps-transform-ast: each evaluable AST node type evaluates to its expected value via run-cps-ast."
+  :cases (("integer"      (cl-cc:make-ast-int :value 42)
+                          42)
+          ("progn"        (cl-cc:make-ast-progn
+                           :forms (list (cl-cc:make-ast-int :value 1)
+                                        (cl-cc:make-ast-int :value 2)
+                                        (cl-cc:make-ast-int :value 99)))
+                          99)
+          ("let"          (cl-cc:make-ast-let
+                           :bindings (list (cons 'x (cl-cc:make-ast-int :value 3))
+                                           (cons 'y (cl-cc:make-ast-int :value 4)))
+                           :body (list (cl-cc:make-ast-binop
+                                        :op '+
+                                        :lhs (cl-cc:make-ast-var :name 'x)
+                                        :rhs (cl-cc:make-ast-var :name 'y))))
+                          7)
+          ("print"        (cl-cc:make-ast-print :expr (cl-cc:make-ast-int :value 42))
+                          42)
+          ("quote-symbol" (cl-cc:make-ast-quote :value 'hello)
+                          'hello)
+          ("quote-list"   (cl-cc:make-ast-quote :value '(1 2 3))
+                          '(1 2 3))
+          ("the"          (cl-cc:make-ast-the :type 'integer
+                                              :value (cl-cc:make-ast-int :value 7))
+                          7))
+  (ast expected)
+  (assert-equal expected (run-cps-ast ast)))
 
 (deftest cps-ast-setq-returns-value
   "cps-transform-ast: setq evaluates the value and passes it to continuation"
@@ -196,36 +180,27 @@ Returns a function that takes a continuation."
 ;;; cps-transform* dispatcher
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest cps-transform*-on-ast-node
-  "cps-transform* dispatches to the AST transformer for AST nodes"
-  (let* ((ast    (cl-cc:make-ast-int :value 42))
-         (result (cl-cc:cps-transform* ast)))
-    (assert-true (is-cps-lambda result))))
-
-(deftest cps-transform*-on-sexp
-  "cps-transform* dispatches to the sexp transformer for non-AST values"
-  (let ((result (cl-cc:cps-transform* '(+ 1 2))))
-    (assert-true (is-cps-lambda result))))
+(deftest-each cps-transform*-dispatch
+  "cps-transform* dispatches to AST transformer for AST nodes and sexp transformer otherwise."
+  :cases (("ast-node" (cl-cc:make-ast-int :value 42))
+          ("sexp"     '(+ 1 2)))
+  (input)
+  (assert-true (is-cps-lambda (cl-cc:cps-transform* input))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; cps-transform-sequence edge cases
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest cps-sequence-empty-returns-nil
-  "cps-transform-sequence with empty list calls continuation with nil"
-  (let* ((k-var (gensym "K"))
-         (sexp  (cl-cc:cps-transform-sequence nil k-var)))
-    ;; Should be (funcall k nil)
-    (assert-true (listp sexp))
-    (assert-eq 'funcall (car sexp))))
-
-(deftest cps-sequence-single-delegates
-  "cps-transform-sequence with one form delegates directly to cps-transform-ast"
-  (let* ((node  (cl-cc:make-ast-int :value 5))
-         (k-var (gensym "K"))
-         (sexp  (cl-cc:cps-transform-sequence (list node) k-var)))
-    ;; Should be the direct CPS form for the integer, not an extra lambda wrap
-    (assert-true (listp sexp))))
+(deftest cps-sequence-behavior
+  "cps-transform-sequence: empty→(funcall k nil); single→direct CPS form."
+  (let ((k-var (gensym "K")))
+    ;; empty: calls continuation with nil
+    (let ((sexp (cl-cc:cps-transform-sequence nil k-var)))
+      (assert-true (listp sexp))
+      (assert-eq 'funcall (car sexp)))
+    ;; single form: delegates to cps-transform-ast (still a list)
+    (let ((sexp (cl-cc:cps-transform-sequence (list (cl-cc:make-ast-int :value 5)) k-var)))
+      (assert-true (listp sexp)))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; CPS for block / return-from
@@ -253,73 +228,54 @@ Returns a function that takes a continuation."
 ;;; CPS for catch / throw
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest cps-catch-outer-is-funcall
-  "CPS of ast-catch evaluates the tag first (funcall on outer lambda)."
-  (let* ((node (cl-cc:make-ast-catch
-                :tag (cl-cc:make-ast-quote :value :done)
-                :body (list (cl-cc:make-ast-int :value 0))))
-         (k (gensym "K"))
-         (result (cl-cc::cps-transform-ast node k)))
-    ;; Outer form should be (funcall <lambda> ...) or (lambda ...) wrapping catch
-    (assert-eq 'funcall (car result))))
-
-(deftest cps-throw-produces-throw
-  "CPS of ast-throw produces a (throw TAG VAL) form."
-  (let* ((node (cl-cc:make-ast-throw
-                :tag (cl-cc:make-ast-quote :value :done)
-                :value (cl-cc:make-ast-int :value 99)))
-         (k (gensym "K"))
-         (result (format nil "~S" (cl-cc::cps-transform-ast node k))))
-    (assert-true (search "THROW" result))))
+(deftest cps-exception-forms
+  "CPS of ast-catch produces (funcall ...); ast-throw produces a THROW form."
+  (let ((k (gensym "K")))
+    ;; catch: outer form is funcall wrapping the tag evaluation
+    (let* ((node (cl-cc:make-ast-catch
+                  :tag  (cl-cc:make-ast-quote :value :done)
+                  :body (list (cl-cc:make-ast-int :value 0))))
+           (result (cl-cc::cps-transform-ast node k)))
+      (assert-eq 'funcall (car result)))
+    ;; throw: stringified result contains THROW
+    (let* ((node (cl-cc:make-ast-throw
+                  :tag   (cl-cc:make-ast-quote :value :done)
+                  :value (cl-cc:make-ast-int :value 99)))
+           (result (format nil "~S" (cl-cc::cps-transform-ast node k))))
+      (assert-true (search "THROW" result)))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; CPS for tagbody-section
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest cps-tagbody-section-empty-calls-k-with-nil
-  "cps-transform-tagbody-section with empty list calls (funcall k nil)."
-  (let* ((k (gensym "K"))
-         (result (cl-cc::cps-transform-tagbody-section nil k)))
-    (assert-eq 'funcall (car result))
-    (assert-eq k (second result))
-    (assert-eq nil (third result))))
-
-(deftest cps-tagbody-section-single-form-is-wrapped
-  "cps-transform-tagbody-section with one form wraps it in a lambda continuation."
-  (let* ((k (gensym "K"))
-         (result (cl-cc::cps-transform-tagbody-section
-                  (list (cl-cc:make-ast-int :value 1)) k)))
-    ;; Result should be the CPS of the form, which is a funcall
-    (assert-eq 'funcall (car result))))
+(deftest cps-tagbody-section-behavior
+  "cps-transform-tagbody-section: empty→(funcall k nil); single form→funcall."
+  (let ((k (gensym "K")))
+    ;; empty: calls (funcall k nil)
+    (let ((result (cl-cc::cps-transform-tagbody-section nil k)))
+      (assert-eq 'funcall (car result))
+      (assert-eq k (second result))
+      (assert-eq nil (third result)))
+    ;; single form: CPS wrapper is a funcall
+    (let ((result (cl-cc::cps-transform-tagbody-section
+                   (list (cl-cc:make-ast-int :value 1)) k)))
+      (assert-eq 'funcall (car result)))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; CPS for local function bindings (flet/labels helpers)
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest cps-fn-binding-outer-is-name
-  "cps-transform-fn-binding preserves the function name as car."
-  (let* ((k-var (gensym "K"))
-         ;; body must be AST nodes — use a single ast-int
-         (binding (list 'my-fn '(x) (cl-cc:make-ast-int :value 42)))
-         (result (cl-cc::cps-transform-fn-binding binding k-var)))
-    (assert-eq 'my-fn (first result))))
-
-(deftest cps-fn-binding-body-is-lambda
-  "cps-transform-fn-binding wraps params+k in a lambda."
-  (let* ((k-var (gensym "K"))
-         (binding (list 'my-fn '(x) (cl-cc:make-ast-int :value 1)))
-         (result (cl-cc::cps-transform-fn-binding binding k-var)))
-    (assert-eq 'lambda (first (second result)))))
-
-(deftest cps-fn-binding-k-appended-to-params
-  "cps-transform-fn-binding appends the continuation var to the param list."
+(deftest cps-fn-binding-structure
+  "cps-transform-fn-binding: preserves name as car, wraps in lambda, appends k to params."
   (let* ((k-var 'my-k)
-         (binding (list 'my-fn '(a b) (cl-cc:make-ast-int :value 0)))
+         (binding (list 'my-fn '(a b) (cl-cc:make-ast-int :value 42)))
          (result (cl-cc::cps-transform-fn-binding binding k-var)))
+    (assert-eq 'my-fn (first result))
+    (assert-eq 'lambda (first (second result)))
     (let ((lambda-list (second (second result))))
-      (assert-eq 'a (first lambda-list))
-      (assert-eq 'b (second lambda-list))
-      (assert-eq 'my-k (third lambda-list)))))
+      (assert-eq 'a    (first  lambda-list))
+      (assert-eq 'b    (second lambda-list))
+      (assert-eq 'my-k (third  lambda-list)))))
 
 (deftest cps-local-fns-outer-is-form-kw
   "cps-transform-local-fns produces (flet ...) or (labels ...) as outer form."
@@ -345,20 +301,16 @@ Returns a function that takes a continuation."
 ;;; CPS for unwind-protect
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest cps-unwind-protect-outer-is-unwind-protect
-  "ast-unwind-protect CPS produces (unwind-protect ...)."
-  (let* ((node (cl-cc:make-ast-unwind-protect
-                :protected (cl-cc:make-ast-int :value 1)
-                :cleanup   (list (cl-cc:make-ast-int :value 2))))
-         (k (gensym "K"))
-         (result (cl-cc::cps-transform-ast node k)))
-    (assert-eq 'unwind-protect (first result))))
-
-(deftest cps-unwind-protect-no-cleanup-second-is-nil
-  "ast-unwind-protect with no cleanup emits nil as the cleanup form."
-  (let* ((node (cl-cc:make-ast-unwind-protect
-                :protected (cl-cc:make-ast-int :value 1)
-                :cleanup   nil))
-         (k (gensym "K"))
-         (result (cl-cc::cps-transform-ast node k)))
-    (assert-eq nil (third result))))
+(deftest cps-unwind-protect-structure
+  "ast-unwind-protect CPS: outer is (unwind-protect ...) and nil cleanup emits nil."
+  (let ((k (gensym "K")))
+    (let* ((node (cl-cc:make-ast-unwind-protect
+                  :protected (cl-cc:make-ast-int :value 1)
+                  :cleanup   (list (cl-cc:make-ast-int :value 2))))
+           (result (cl-cc::cps-transform-ast node k)))
+      (assert-eq 'unwind-protect (first result)))
+    (let* ((node (cl-cc:make-ast-unwind-protect
+                  :protected (cl-cc:make-ast-int :value 1)
+                  :cleanup   nil))
+           (result (cl-cc::cps-transform-ast node k)))
+      (assert-eq nil (third result)))))

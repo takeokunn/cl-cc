@@ -6,40 +6,21 @@
 
 ;;; Instruction Def/Use Tests
 
-(deftest regalloc-defs-const
-  "vm-const defines its dst register."
-  (let ((inst (make-vm-const :dst :r0 :value 42)))
-    (assert-equal '(:r0) (instruction-defs inst))
-    (assert-null (instruction-uses inst))))
-
-(deftest regalloc-defs-binop
-  "vm-add defines dst, uses lhs and rhs."
-  (let ((inst (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)))
-    (assert-equal '(:r2) (instruction-defs inst))
-    (assert-equal '(:r0 :r1) (instruction-uses inst))))
-
-(deftest regalloc-defs-call
-  "vm-call defines dst, uses func and args."
-  (let ((inst (make-vm-call :dst :r3 :func :r0 :args '(:r1 :r2))))
-    (assert-equal '(:r3) (instruction-defs inst))
-    (assert-equal '(:r0 :r1 :r2) (instruction-uses inst))))
-
-(deftest regalloc-defs-jump-zero
-  "vm-jump-zero uses reg but defines nothing."
-  (let ((inst (make-vm-jump-zero :reg :r0 :label "L1")))
-    (assert-null (instruction-defs inst))
-    (assert-equal '(:r0) (instruction-uses inst))))
-
-(deftest regalloc-defs-label
-  "vm-label defines and uses nothing."
-  (let ((inst (make-vm-label :name "L1")))
-    (assert-null (instruction-defs inst))
-    (assert-null (instruction-uses inst))))
+(deftest-each regalloc-defs-and-uses
+  "instruction-defs and instruction-uses return correct register sets for each instruction type."
+  :cases (("vm-const"     (make-vm-const     :dst :r0 :value 42)                 '(:r0) nil)
+          ("vm-binop"     (make-vm-add       :dst :r2 :lhs :r0 :rhs :r1)         '(:r2) '(:r0 :r1))
+          ("vm-call"      (make-vm-call      :dst :r3 :func :r0 :args '(:r1 :r2)) '(:r3) '(:r0 :r1 :r2))
+          ("vm-jump-zero" (make-vm-jump-zero :reg :r0 :label "L1")                nil    '(:r0))
+          ("vm-label"     (make-vm-label     :name "L1")                           nil    nil))
+  (inst expected-defs expected-uses)
+  (assert-equal expected-defs (instruction-defs inst))
+  (assert-equal expected-uses (instruction-uses inst)))
 
 ;;; Liveness Analysis Tests
 
-(deftest regalloc-liveness-simple
-  "Simple linear code liveness."
+(deftest regalloc-liveness-analysis
+  "Liveness analysis: 3 overlapping intervals; 2 disjoint intervals prove no overlap."
   (let* ((instructions (list (make-vm-const :dst :r0 :value 1)
                              (make-vm-const :dst :r1 :value 2)
                              (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
@@ -60,17 +41,14 @@
     (let ((r2-int (find :r2 intervals :key #'interval-vreg)))
       (assert-false (null r2-int))
       (assert-= 2 (interval-start r2-int))
-      (assert-= 3 (interval-end r2-int)))))
-
-(deftest regalloc-liveness-reuse
-  "Register reuse after last use."
+      (assert-= 3 (interval-end r2-int))))
+  ;; Disjoint intervals: R0 ends before R1 starts, so no overlap
   (let* ((instructions (list (make-vm-const :dst :r0 :value 1)
                              (make-vm-halt :reg :r0)
                              (make-vm-const :dst :r1 :value 2)
                              (make-vm-halt :reg :r1)))
          (intervals (compute-live-intervals instructions)))
     (assert-= 2 (length intervals))
-    ;; R0 and R1 don't overlap, so only 1 physical register needed
     (let ((r0-int (find :r0 intervals :key #'interval-vreg))
           (r1-int (find :r1 intervals :key #'interval-vreg)))
       (assert-true (<= (interval-end r0-int) (interval-start r1-int))))))

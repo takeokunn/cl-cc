@@ -123,25 +123,22 @@
 
 ;;; ─── force-output / finish-output ───────────────────────────────────────
 
-(deftest force-output-no-error
-  "force-output on string stream doesn't error."
-  (let ((result (ignore-errors
-                  (run-string
-                   "(let ((s (make-string-output-stream)))
-                      (write-string \"test\" s)
-                      (force-output s)
-                      (get-output-stream-string s))"))))
-    (assert-true (stringp result))))
-
-(deftest finish-output-no-error
-  "finish-output on string stream doesn't error."
-  (let ((result (ignore-errors
-                  (run-string
-                   "(let ((s (make-string-output-stream)))
-                      (write-string \"test\" s)
-                      (finish-output s)
-                      (get-output-stream-string s))"))))
-    (assert-true (stringp result))))
+(deftest stream-output-control-no-error
+  "force-output and finish-output on string stream don't error."
+  (let ((result-force (ignore-errors
+                        (run-string
+                         "(let ((s (make-string-output-stream)))
+                            (write-string \"test\" s)
+                            (force-output s)
+                            (get-output-stream-string s))"))))
+    (assert-true (stringp result-force)))
+  (let ((result-finish (ignore-errors
+                         (run-string
+                          "(let ((s (make-string-output-stream)))
+                             (write-string \"test\" s)
+                             (finish-output s)
+                             (get-output-stream-string s))"))))
+    (assert-true (stringp result-finish))))
 
 ;;; ─── with-open-file (file I/O roundtrip) ────────────────────────────────
 

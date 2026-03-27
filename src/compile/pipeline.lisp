@@ -423,6 +423,15 @@ VERBOSE prints the file being loaded. PRINT prints each form's result."
 
 ;;; Native Executable Generation (Mach-O)
 
+(defun %write-native-binary (builder code-bytes output-path)
+  "Finalize BUILDER with CODE-BYTES, write Mach-O to OUTPUT-PATH, and mark it executable."
+  (cl-cc/binary:add-text-segment builder code-bytes)
+  (cl-cc/binary:add-symbol builder "_main" :value 0 :type #x0F :sect 1)
+  (let ((mach-o-bytes (cl-cc/binary:build-mach-o builder code-bytes)))
+    (cl-cc/binary:write-mach-o-file output-path mach-o-bytes))
+  (uiop:run-program (list "chmod" "+x" (namestring output-path)) :ignore-error-status t)
+  output-path)
+
 (defun compile-to-native (source &key (arch :x86-64) (output-file "a.out") (language :lisp))
   "Compile SOURCE to a native Mach-O executable.
 SOURCE can be a string (single expression) or a list of forms.
@@ -431,27 +440,15 @@ OUTPUT-FILE is the path for the executable.
 LANGUAGE is :LISP (default) or :PHP.
 
 Returns the output file path on success."
-  (let* (;; Parse and compile to VM program (:target :vm avoids text assembly backends)
-         (result (if (stringp source)
+  (let* ((result (if (stringp source)
                      (compile-string source :target :vm :language language)
                      (compile-expression source :target :vm)))
-         (program (compilation-result-program result))
-         ;; Generate machine code bytes (dispatch on target architecture)
+         (program    (compilation-result-program result))
          (code-bytes (ecase arch
                        (:x86-64 (compile-to-x86-64-bytes program))
                        (:arm64  (compile-to-aarch64-bytes program))))
-         ;; Build Mach-O binary
-         (builder (cl-cc/binary:make-mach-o-builder arch)))
-    ;; Add code as __TEXT segment
-    (cl-cc/binary:add-text-segment builder code-bytes)
-    ;; Add entry point symbol
-    (cl-cc/binary:add-symbol builder "_main" :value 0 :type #x0F :sect 1)
-    ;; Build and write
-    (let ((mach-o-bytes (cl-cc/binary:build-mach-o builder code-bytes)))
-      (cl-cc/binary:write-mach-o-file output-file mach-o-bytes))
-    ;; Make executable
-    (uiop:run-program (list "chmod" "+x" (namestring output-file)) :ignore-error-status t)
-    output-file))
+         (builder    (cl-cc/binary:make-mach-o-builder arch)))
+    (%write-native-binary builder code-bytes output-file)))
 
 (defun compile-file-to-native (input-file &key (arch :x86-64) (output-file nil) (language nil))
   "Compile a CL-CC source file to a native Mach-O executable.
@@ -479,18 +476,12 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
          (result (if (eq effective-language :php)
                      (compile-string source :target :vm :language :php)
                      (compile-toplevel-forms source :target :vm)))
-         (program (compilation-result-program result))
-         ;; Dispatch to architecture-specific machine code generator
+         (program    (compilation-result-program result))
          (code-bytes (ecase arch
                        (:x86-64 (compile-to-x86-64-bytes program))
                        (:arm64  (compile-to-aarch64-bytes program))))
-         (builder (cl-cc/binary:make-mach-o-builder arch)))
-    (cl-cc/binary:add-text-segment builder code-bytes)
-    (cl-cc/binary:add-symbol builder "_main" :value 0 :type #x0F :sect 1)
-    (let ((mach-o-bytes (cl-cc/binary:build-mach-o builder code-bytes)))
-      (cl-cc/binary:write-mach-o-file output mach-o-bytes))
-    (uiop:run-program (list "chmod" "+x" (namestring output)) :ignore-error-status t)
-    output))
+         (builder    (cl-cc/binary:make-mach-o-builder arch)))
+    (%write-native-binary builder code-bytes output)))
 
 ;;; Typeclass Macros (Phase 4) — registered here because cl-cc/type loads before compiler
 

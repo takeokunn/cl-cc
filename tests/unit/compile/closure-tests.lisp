@@ -10,15 +10,12 @@
 
 ;;; ─── Literals ─────────────────────────────────────────────────────────────
 
-(deftest free-vars-int-literal
-  "Integer literals have no free variables."
-  (assert-equal nil
-    (cl-cc::find-free-variables (cl-cc::make-ast-int :value 42))))
-
-(deftest free-vars-quote
-  "Quoted forms have no free variables."
-  (assert-equal nil
-    (cl-cc::find-free-variables (cl-cc::make-ast-quote :value '(a b c)))))
+(deftest-each free-vars-atomic-forms
+  "Atomic forms (integer literal, quote) have no free variables."
+  :cases (("int"   (cl-cc::make-ast-int   :value 42))
+          ("quote" (cl-cc::make-ast-quote :value '(a b c))))
+  (node)
+  (assert-equal nil (cl-cc::find-free-variables node)))
 
 ;;; ─── Simple references ────────────────────────────────────────────────────
 
@@ -48,39 +45,32 @@
 
 ;;; ─── Let binding ──────────────────────────────────────────────────────────
 
-(deftest free-vars-let-shadows-body
-  "Let-bound variables are not free in the body."
-  (let ((result (cl-cc::find-free-variables
-                 (cl-cc::make-ast-let
-                  :bindings (list (cons 'x (cl-cc::make-ast-int :value 1)))
-                  :body (list (cl-cc::make-ast-var :name 'x))))))
-    (assert-equal nil result)))
-
-(deftest free-vars-let-binding-expr-free
-  "Variables in let binding expressions are free."
-  (let ((result (cl-cc::find-free-variables
-                 (cl-cc::make-ast-let
-                  :bindings (list (cons 'x (cl-cc::make-ast-var :name 'y)))
-                  :body (list (cl-cc::make-ast-var :name 'x))))))
-    ;; y is free (in the binding expr), x is bound
-    (assert-equal '(y) result)))
-
-(deftest free-vars-let-body-has-unbound
-  "Let body references to unbound variables remain free."
-  (let ((result (cl-cc::find-free-variables
-                 (cl-cc::make-ast-let
-                  :bindings (list (cons 'x (cl-cc::make-ast-int :value 1)))
-                  :body (list (cl-cc::make-ast-binop
-                               :op '+
-                               :lhs (cl-cc::make-ast-var :name 'x)
-                               :rhs (cl-cc::make-ast-var :name 'z)))))))
-    ;; x is bound, z is free
-    (assert-equal '(z) result)))
+(deftest free-vars-let-scenarios
+  "Let: bound vars shadow body; binding exprs are free; unbound body vars remain free."
+  ;; x bound in let → not free
+  (assert-equal nil (cl-cc::find-free-variables
+                     (cl-cc::make-ast-let
+                      :bindings (list (cons 'x (cl-cc::make-ast-int :value 1)))
+                      :body     (list (cl-cc::make-ast-var :name 'x)))))
+  ;; binding expr references y → y is free; x is bound
+  (assert-equal '(y) (cl-cc::find-free-variables
+                      (cl-cc::make-ast-let
+                       :bindings (list (cons 'x (cl-cc::make-ast-var :name 'y)))
+                       :body     (list (cl-cc::make-ast-var :name 'x)))))
+  ;; x bound, z is free in body
+  (assert-equal '(z) (cl-cc::find-free-variables
+                      (cl-cc::make-ast-let
+                       :bindings (list (cons 'x (cl-cc::make-ast-int :value 1)))
+                       :body     (list (cl-cc::make-ast-binop
+                                        :op '+
+                                        :lhs (cl-cc::make-ast-var :name 'x)
+                                        :rhs (cl-cc::make-ast-var :name 'z)))))))
 
 ;;; ─── Lambda params ────────────────────────────────────────────────────────
 
-(deftest free-vars-lambda-shadows-params
-  "Lambda required params are not free in body."
+(deftest free-vars-lambda-scope
+  "Lambda params are not free in body; outer variables referenced in body are free."
+  ;; params shadow body references — no free vars
   (let ((result (cl-cc::find-free-variables
                  (cl-cc::make-ast-lambda
                   :params '(x y)
@@ -88,10 +78,8 @@
                                :op '+
                                :lhs (cl-cc::make-ast-var :name 'x)
                                :rhs (cl-cc::make-ast-var :name 'y)))))))
-    (assert-equal nil result)))
-
-(deftest free-vars-lambda-captures-outer
-  "Lambda body referencing outer variables marks them free."
+    (assert-equal nil result))
+  ;; x is a param (bound), z is free
   (let ((result (cl-cc::find-free-variables
                  (cl-cc::make-ast-lambda
                   :params '(x)
@@ -99,26 +87,22 @@
                                :op '+
                                :lhs (cl-cc::make-ast-var :name 'x)
                                :rhs (cl-cc::make-ast-var :name 'z)))))))
-    ;; x is a param (bound), z is free
     (assert-equal '(z) result)))
 
-(deftest free-vars-lambda-rest-param
-  "Lambda rest param is not free in body."
-  (let ((result (cl-cc::find-free-variables
-                 (cl-cc::make-ast-lambda
-                  :params '(x)
-                  :rest-param 'rest
-                  :body (list (cl-cc::make-ast-var :name 'rest))))))
-    (assert-equal nil result)))
-
-(deftest free-vars-lambda-optional-param
-  "Lambda optional params are not free in body."
-  (let ((result (cl-cc::find-free-variables
-                 (cl-cc::make-ast-lambda
-                  :params nil
-                  :optional-params (list (list 'a (cl-cc::make-ast-int :value 0)))
-                  :body (list (cl-cc::make-ast-var :name 'a))))))
-    (assert-equal nil result)))
+(deftest free-vars-lambda-extended-params-shadow
+  "Lambda &rest and &optional params shadow their names in the body."
+  ;; &rest param
+  (assert-equal nil (cl-cc::find-free-variables
+                     (cl-cc::make-ast-lambda
+                      :params '(x)
+                      :rest-param 'rest
+                      :body (list (cl-cc::make-ast-var :name 'rest)))))
+  ;; &optional param
+  (assert-equal nil (cl-cc::find-free-variables
+                     (cl-cc::make-ast-lambda
+                      :params nil
+                      :optional-params (list (list 'a (cl-cc::make-ast-int :value 0)))
+                      :body (list (cl-cc::make-ast-var :name 'a))))))
 
 (deftest free-vars-lambda-optional-default-free
   "Free variables in optional param defaults are captured."
@@ -184,17 +168,15 @@
 
 ;;; ─── Call ─────────────────────────────────────────────────────────────────
 
-(deftest free-vars-call-symbol-func
-  "Call with a symbol function name has free vars only from args."
+(deftest free-vars-call-function-forms
+  "Call: symbol func contributes no free vars (only args); AST func node contributes free vars from both func and args."
+  ;; symbol func — only arg x is free
   (let ((result (cl-cc::find-free-variables
                  (cl-cc::make-ast-call
                   :func 'foo
                   :args (list (cl-cc::make-ast-var :name 'x))))))
-    ;; Symbol func doesn't contribute free vars, only the arg x
-    (assert-equal '(x) result)))
-
-(deftest free-vars-call-ast-func
-  "Call with an AST function node has free vars from both func and args."
+    (assert-equal '(x) result))
+  ;; AST func node — both f and x are free
   (let ((result (cl-cc::find-free-variables
                  (cl-cc::make-ast-call
                   :func (cl-cc::make-ast-var :name 'f)
@@ -228,18 +210,15 @@
 
 ;;; ─── If / Progn ──────────────────────────────────────────────────────────
 
-(deftest free-vars-if-all-branches
-  "If collects free vars from condition, then, and else branches."
+(deftest free-vars-control-forms
+  "If collects free vars from all three branches; progn collects free vars from all forms."
   (let ((result (cl-cc::find-free-variables
                  (cl-cc::make-ast-if
                   :cond (cl-cc::make-ast-var :name 'p)
                   :then (cl-cc::make-ast-var :name 'x)
                   :else (cl-cc::make-ast-var :name 'y)))))
     (assert-true (and (member 'p result) (member 'x result) (member 'y result)))
-    (assert-equal 3 (length result))))
-
-(deftest free-vars-progn
-  "Progn collects free vars from all forms."
+    (assert-equal 3 (length result)))
   (let ((result (cl-cc::find-free-variables
                  (cl-cc::make-ast-progn
                   :forms (list (cl-cc::make-ast-var :name 'a)
