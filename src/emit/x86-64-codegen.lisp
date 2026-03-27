@@ -61,6 +61,47 @@
         ((integerp value) value)
         (t 0)))
 
+(defmacro define-binary-alu-emitter (fn-name asm-op description)
+  "Define an emitter for a binary VM instruction: MOV dst←lhs, then ASM-OP dst←rhs."
+  `(defun ,fn-name (inst stream)
+     ,description
+     (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+           (lhs (vm-reg-to-x86 (vm-lhs inst)))
+           (rhs (vm-reg-to-x86 (vm-rhs inst))))
+       (emit-mov-rr64 dst lhs stream)
+       (,asm-op dst rhs stream))))
+
+(defmacro define-cmov-emitter (fn-name cmov-op description)
+  "Define an emitter for a CMOVcc-based min/max: MOV dst←lhs, CMP dst rhs, CMOVcc dst←rhs."
+  `(defun ,fn-name (inst stream)
+     ,description
+     (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+           (lhs (vm-reg-to-x86 (vm-lhs inst)))
+           (rhs (vm-reg-to-x86 (vm-rhs inst))))
+       (emit-mov-rr64 dst lhs stream)
+       (emit-cmp-rr64 dst rhs stream)
+       (,cmov-op dst rhs stream))))
+
+(defmacro define-cmp-emitter (fn-name setcc-opcode description)
+  "Define a comparison emitter: CMP lhs,rhs → SETcc dst → MOVZX dst,dst."
+  `(defun ,fn-name (inst stream)
+     ,description
+     (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+           (lhs (vm-reg-to-x86 (vm-lhs inst)))
+           (rhs (vm-reg-to-x86 (vm-rhs inst))))
+       (emit-cmp-rr64 lhs rhs stream)
+       (emit-setcc ,setcc-opcode dst stream)
+       (emit-movzx-r64-r8 dst dst stream))))
+
+(defmacro define-unary-mov-emitter (fn-name asm-op description)
+  "Define a unary emitter: MOV dst←src, then ASM-OP dst."
+  `(defun ,fn-name (inst stream)
+     ,description
+     (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+           (src (vm-reg-to-x86 (vm-src inst))))
+       (emit-mov-rr64 dst src stream)
+       (,asm-op dst stream))))
+
 (defun emit-vm-const (inst stream)
   "Emit code for VM CONST instruction."
   (let ((dst (vm-reg-to-x86 (vm-dst inst)))
@@ -73,30 +114,9 @@
         (src (vm-reg-to-x86 (vm-src inst))))
     (emit-mov-rr64 dst src stream)))
 
-(defun emit-vm-add (inst stream)
-  "Emit code for VM ADD instruction."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (lhs (vm-reg-to-x86 (vm-lhs inst)))
-        (rhs (vm-reg-to-x86 (vm-rhs inst))))
-    ;; Move lhs to dst, then add rhs
-    (emit-mov-rr64 dst lhs stream)
-    (emit-add-rr64 dst rhs stream)))
-
-(defun emit-vm-sub (inst stream)
-  "Emit code for VM SUB instruction."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (lhs (vm-reg-to-x86 (vm-lhs inst)))
-        (rhs (vm-reg-to-x86 (vm-rhs inst))))
-    (emit-mov-rr64 dst lhs stream)
-    (emit-sub-rr64 dst rhs stream)))
-
-(defun emit-vm-mul (inst stream)
-  "Emit code for VM MUL instruction."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (lhs (vm-reg-to-x86 (vm-lhs inst)))
-        (rhs (vm-reg-to-x86 (vm-rhs inst))))
-    (emit-mov-rr64 dst lhs stream)
-    (emit-imul-rr64 dst rhs stream)))
+(define-binary-alu-emitter emit-vm-add    emit-add-rr64  "vm-add: dst = lhs + rhs.")
+(define-binary-alu-emitter emit-vm-sub    emit-sub-rr64  "vm-sub: dst = lhs - rhs.")
+(define-binary-alu-emitter emit-vm-mul    emit-imul-rr64 "vm-mul: dst = lhs * rhs.")
 
 (defun emit-vm-truncate (inst stream)
   "vm-truncate: dst = truncate(lhs / rhs)  -- quotient, truncate-toward-zero."
@@ -202,69 +222,18 @@
     (emit-mov-rr64 dst +r11+ stream)))                       ; [34 +3]
 
 ;;; Comparison instruction emitters (CMP lhs, rhs -> SETcc dst8 -> MOVZX dst64)
+;;; SETcc opcode bytes: SETL=#x9C, SETG=#x9F, SETLE=#x9E, SETGE=#x9D, SETE=#x94
 
-(defun emit-vm-lt (inst stream)
-  "vm-lt: dst = (lhs < rhs) ? 1 : 0  -- signed."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (lhs (vm-reg-to-x86 (vm-lhs inst)))
-        (rhs (vm-reg-to-x86 (vm-rhs inst))))
-    (emit-cmp-rr64 lhs rhs stream)
-    (emit-setcc #x9C dst stream)
-    (emit-movzx-r64-r8 dst dst stream)))
-
-(defun emit-vm-gt (inst stream)
-  "vm-gt: dst = (lhs > rhs) ? 1 : 0  -- signed."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (lhs (vm-reg-to-x86 (vm-lhs inst)))
-        (rhs (vm-reg-to-x86 (vm-rhs inst))))
-    (emit-cmp-rr64 lhs rhs stream)
-    (emit-setcc #x9F dst stream)
-    (emit-movzx-r64-r8 dst dst stream)))
-
-(defun emit-vm-le (inst stream)
-  "vm-le: dst = (lhs <= rhs) ? 1 : 0  -- signed."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (lhs (vm-reg-to-x86 (vm-lhs inst)))
-        (rhs (vm-reg-to-x86 (vm-rhs inst))))
-    (emit-cmp-rr64 lhs rhs stream)
-    (emit-setcc #x9E dst stream)
-    (emit-movzx-r64-r8 dst dst stream)))
-
-(defun emit-vm-ge (inst stream)
-  "vm-ge: dst = (lhs >= rhs) ? 1 : 0  -- signed."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (lhs (vm-reg-to-x86 (vm-lhs inst)))
-        (rhs (vm-reg-to-x86 (vm-rhs inst))))
-    (emit-cmp-rr64 lhs rhs stream)
-    (emit-setcc #x9D dst stream)
-    (emit-movzx-r64-r8 dst dst stream)))
-
-(defun emit-vm-num-eq (inst stream)
-  "vm-num-eq: dst = (lhs == rhs) ? 1 : 0  -- integer equality."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (lhs (vm-reg-to-x86 (vm-lhs inst)))
-        (rhs (vm-reg-to-x86 (vm-rhs inst))))
-    (emit-cmp-rr64 lhs rhs stream)
-    (emit-setcc #x94 dst stream)
-    (emit-movzx-r64-r8 dst dst stream)))
-
-(defun emit-vm-eq (inst stream)
-  "vm-eq: dst = (lhs == rhs) ? 1 : 0  -- general equality (same x86 encoding)."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (lhs (vm-reg-to-x86 (vm-lhs inst)))
-        (rhs (vm-reg-to-x86 (vm-rhs inst))))
-    (emit-cmp-rr64 lhs rhs stream)
-    (emit-setcc #x94 dst stream)
-    (emit-movzx-r64-r8 dst dst stream)))
+(define-cmp-emitter emit-vm-lt    #x9C "vm-lt: dst = (lhs < rhs) ? 1 : 0  -- signed.")
+(define-cmp-emitter emit-vm-gt    #x9F "vm-gt: dst = (lhs > rhs) ? 1 : 0  -- signed.")
+(define-cmp-emitter emit-vm-le    #x9E "vm-le: dst = (lhs <= rhs) ? 1 : 0  -- signed.")
+(define-cmp-emitter emit-vm-ge    #x9D "vm-ge: dst = (lhs >= rhs) ? 1 : 0  -- signed.")
+(define-cmp-emitter emit-vm-num-eq #x94 "vm-num-eq: dst = (lhs == rhs) ? 1 : 0  -- integer equality.")
+(define-cmp-emitter emit-vm-eq    #x94 "vm-eq: dst = (lhs == rhs) ? 1 : 0  -- general equality (same x86 encoding).")
 
 ;;; Unary arithmetic/logical instruction emitters
 
-(defun emit-vm-neg (inst stream)
-  "vm-neg: dst = -src  (two's complement negation)."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (src (vm-reg-to-x86 (vm-src inst))))
-    (emit-mov-rr64 dst src stream)
-    (emit-neg-r64 dst stream)))
+(define-unary-mov-emitter emit-vm-neg    emit-neg-r64 "vm-neg: dst = -src  (two's complement negation).")
 
 (defun emit-vm-not (inst stream)
   "vm-not: dst = (src == 0) ? 1 : 0  (logical NOT -- zero -> 1, nonzero -> 0)."
@@ -275,12 +244,7 @@
     (emit-setcc #x94 dst stream)           ; SETE
     (emit-movzx-r64-r8 dst dst stream)))
 
-(defun emit-vm-lognot (inst stream)
-  "vm-lognot: dst = ~src  (bitwise complement)."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (src (vm-reg-to-x86 (vm-src inst))))
-    (emit-mov-rr64 dst src stream)
-    (emit-not-r64 dst stream)))
+(define-unary-mov-emitter emit-vm-lognot emit-not-r64 "vm-lognot: dst = ~src  (bitwise complement).")
 
 ;;; Increment / Decrement
 
@@ -353,25 +317,10 @@
 
 ;;; Min / Max via CMOVcc
 
-(defun emit-vm-min (inst stream)
-  "vm-min: dst = min(lhs, rhs)  -- signed, branchless via CMOVG."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (lhs (vm-reg-to-x86 (vm-lhs inst)))
-        (rhs (vm-reg-to-x86 (vm-rhs inst))))
-    ;; dst = lhs; if dst > rhs then dst = rhs  -> dst = min(lhs, rhs)
-    (emit-mov-rr64 dst lhs stream)
-    (emit-cmp-rr64 dst rhs stream)
-    (emit-cmovg-rr64 dst rhs stream)))
-
-(defun emit-vm-max (inst stream)
-  "vm-max: dst = max(lhs, rhs)  -- signed, branchless via CMOVL."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (lhs (vm-reg-to-x86 (vm-lhs inst)))
-        (rhs (vm-reg-to-x86 (vm-rhs inst))))
-    ;; dst = lhs; if dst < rhs then dst = rhs  -> dst = max(lhs, rhs)
-    (emit-mov-rr64 dst lhs stream)
-    (emit-cmp-rr64 dst rhs stream)
-    (emit-cmovl-rr64 dst rhs stream)))
+(define-cmov-emitter emit-vm-min emit-cmovg-rr64
+  "vm-min: dst = min(lhs, rhs)  -- signed, branchless via CMOVG.")
+(define-cmov-emitter emit-vm-max emit-cmovl-rr64
+  "vm-max: dst = max(lhs, rhs)  -- signed, branchless via CMOVL.")
 
 ;;; Type Predicate Instruction Emitters
 ;;;
@@ -442,29 +391,9 @@
 
 ;;; Binary logical instruction emitters
 
-(defun emit-vm-logand (inst stream)
-  "vm-logand: dst = lhs & rhs  (bitwise AND)."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (lhs (vm-reg-to-x86 (vm-lhs inst)))
-        (rhs (vm-reg-to-x86 (vm-rhs inst))))
-    (emit-mov-rr64 dst lhs stream)
-    (emit-and-rr64 dst rhs stream)))
-
-(defun emit-vm-logior (inst stream)
-  "vm-logior: dst = lhs | rhs  (bitwise OR)."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (lhs (vm-reg-to-x86 (vm-lhs inst)))
-        (rhs (vm-reg-to-x86 (vm-rhs inst))))
-    (emit-mov-rr64 dst lhs stream)
-    (emit-or-rr64 dst rhs stream)))
-
-(defun emit-vm-logxor (inst stream)
-  "vm-logxor: dst = lhs ^ rhs  (bitwise XOR)."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (lhs (vm-reg-to-x86 (vm-lhs inst)))
-        (rhs (vm-reg-to-x86 (vm-rhs inst))))
-    (emit-mov-rr64 dst lhs stream)
-    (emit-xor-rr64 dst rhs stream)))
+(define-binary-alu-emitter emit-vm-logand emit-and-rr64  "vm-logand: dst = lhs & rhs  (bitwise AND).")
+(define-binary-alu-emitter emit-vm-logior emit-or-rr64   "vm-logior: dst = lhs | rhs  (bitwise OR).")
+(define-binary-alu-emitter emit-vm-logxor emit-xor-rr64  "vm-logxor: dst = lhs ^ rhs  (bitwise XOR).")
 
 (defun emit-vm-logeqv (inst stream)
   "vm-logeqv: dst = ~(lhs ^ rhs)  (bitwise XNOR / logical equivalence).

@@ -16,6 +16,9 @@
     (string-upcase    . make-vm-string-upcase)
     (string-downcase  . make-vm-string-downcase)
     (string-capitalize . make-vm-string-capitalize)
+    (nstring-upcase   . make-vm-nstring-upcase)
+    (nstring-downcase . make-vm-nstring-downcase)
+    (nstring-capitalize . make-vm-nstring-capitalize)
     ;; Type predicates
     (symbolp          . make-vm-symbol-p)
     (numberp          . make-vm-number-p)
@@ -31,6 +34,11 @@
     (third            . make-vm-third)
     (fourth           . make-vm-fourth)
     (fifth            . make-vm-fifth)
+    (sixth            . make-vm-sixth)
+    (seventh          . make-vm-seventh)
+    (eighth           . make-vm-eighth)
+    (ninth            . make-vm-ninth)
+    (tenth            . make-vm-tenth)
     (rest             . make-vm-rest)
     (last             . make-vm-last)
     (length           . make-vm-length)
@@ -38,7 +46,12 @@
     (not              . make-vm-not)
     (nreverse         . make-vm-nreverse)
     (butlast          . make-vm-butlast)
+    (nbutlast         . make-vm-nbutlast)
     (endp             . make-vm-endp)
+    ;; FR-597: higher-order function combinators
+    (identity         . make-vm-identity)
+    (constantly       . make-vm-constantly)
+    (complement       . make-vm-complement)
     ;; Arithmetic
     (abs              . make-vm-abs)
     (evenp            . make-vm-evenp)
@@ -60,6 +73,9 @@
     (sinh             . make-vm-sinh-inst)
     (cosh             . make-vm-cosh-inst)
     (tanh             . make-vm-tanh-inst)
+    (asinh            . make-vm-asinh-inst)
+    (acosh            . make-vm-acosh-inst)
+    (atanh            . make-vm-atanh-inst)
     ;; Float operations
     (float            . make-vm-float-inst)
     (float-precision  . make-vm-float-precision)
@@ -96,6 +112,7 @@
     (stream-element-type . make-vm-stream-element-type-inst)
     ;; Array/vector
     (vectorp          . make-vm-vectorp)
+    (simple-vector-p  . make-vm-simple-vector-p)
     (array-length     . make-vm-array-length)
     (array-rank       . make-vm-array-rank)
     (array-total-size . make-vm-array-total-size)
@@ -112,7 +129,8 @@
     (make-symbol      . make-vm-make-symbol)
     (keywordp         . make-vm-keywordp)
     (symbol-plist     . make-vm-symbol-plist)
-    ;; Time
+    ;; Time / system
+    (sleep               . make-vm-sleep-inst)
     (decode-universal-time . make-vm-decode-universal-time)
     ;; Character predicates and operations
     (both-case-p      . make-vm-both-case-p)
@@ -140,6 +158,7 @@
     (coerce-to-vector . make-vm-coerce-to-vector)
     (string           . make-vm-string-coerce)
     ;; List utilities
+    (list-length      . make-vm-list-length)
     (listp            . make-vm-listp)
     (atom             . make-vm-atom)
     (copy-list        . make-vm-copy-list)
@@ -148,6 +167,14 @@
     (type-of          . make-vm-type-of)
     ;; Eval
     (eval             . make-vm-eval)
+    ;; FR-631: Macro expansion
+    (macroexpand-1    . make-vm-macroexpand-1-inst)
+    (macroexpand      . make-vm-macroexpand-inst)
+    ;; FR-498: Hash code
+    (sxhash           . make-vm-sxhash)
+    ;; FR-677: CLOS introspection
+    (class-name       . make-vm-class-name-fn)
+    (class-of         . make-vm-class-of-fn)
     ;; Values
     (values-list      . make-vm-spread-values)
     ;; Write-to-string (three CL names → one instruction)
@@ -201,6 +228,7 @@
     ;; List
     (equal            . make-vm-equal)
     (nconc            . make-vm-nconc)
+    (nreconc          . make-vm-nreconc)
     ;; Equality (both map to vm-eq)
     (eq               . make-vm-eq)
     (eql              . make-vm-eq)
@@ -242,10 +270,13 @@
   "Alist of (cl-symbol . vm-constructor) for char comparison builtins: (fn c1 c2) → (:dst :char1 :char2).")
 
 (defparameter *builtin-table-query-entries*
-  '((hash-table-count  . make-vm-hash-table-count)
-    (hash-table-keys   . make-vm-hash-table-keys)
-    (hash-table-values . make-vm-hash-table-values)
-    (hash-table-test   . make-vm-hash-table-test))
+  '((hash-table-count              . make-vm-hash-table-count)
+    (hash-table-keys               . make-vm-hash-table-keys)
+    (hash-table-values             . make-vm-hash-table-values)
+    (hash-table-test               . make-vm-hash-table-test)
+    (hash-table-size               . make-vm-hash-table-size)
+    (hash-table-rehash-size        . make-vm-hash-table-rehash-size)
+    (hash-table-rehash-threshold   . make-vm-hash-table-rehash-threshold))
   "Alist of (cl-symbol . vm-constructor) for hash-table query builtins: (fn table) → (:dst :table).")
 
 (defparameter *builtin-handle-input-entries*
@@ -274,7 +305,17 @@ read-char and read-line have optional stream args, so they use :stream-input-opt
     (get-internal-real-time  . make-vm-get-internal-real-time)
     (get-internal-run-time   . make-vm-get-internal-run-time)
     (next-method-p           . make-vm-next-method-p)
-    (make-string-output-stream . make-vm-make-string-output-stream-inst))
+    (make-string-output-stream . make-vm-make-string-output-stream-inst)
+    ;; FR-507: Environment query functions
+    (lisp-implementation-type    . make-vm-lisp-implementation-type)
+    (lisp-implementation-version . make-vm-lisp-implementation-version)
+    (machine-type                . make-vm-machine-type)
+    (machine-version             . make-vm-machine-version)
+    (machine-instance            . make-vm-machine-instance)
+    (software-type               . make-vm-software-type)
+    (software-version            . make-vm-software-version)
+    (short-site-name             . make-vm-short-site-name)
+    (long-site-name              . make-vm-long-site-name))
   "Alist of (cl-symbol . vm-constructor) for nullary builtins: (fn) → (:dst).")
 
 (defparameter *builtin-string-trim-entries*
@@ -324,7 +365,8 @@ read-char and read-line have optional stream args, so they use :stream-input-opt
 (defparameter *builtin-unary-custom-void-entries*
   '((%progv-exit make-vm-progv-exit    :saved)
     (error       make-vm-signal-error  :error-reg)
-    (warn        make-vm-warn          :condition-reg))
+    (warn        make-vm-warn          :condition-reg)
+    (clrhash     make-vm-clrhash       :table))
   "Unary builtins with a custom slot name (no :dst), returning nil.
    (cl-sym vm-ctor slot).")
 
@@ -374,14 +416,16 @@ read-char and read-line have optional stream args, so they use :stream-input-opt
 
 (defparameter *builtin-stream-input-opt-entries*
   '((read-char  make-vm-read-char  0)
-    (read-line  make-vm-read-line  0))
+    (read-line  make-vm-read-line  0)
+    (peek-char  make-vm-peek-char  0))
   "List of (cl-sym vm-ctor default-handle) for stream-input-opt:
    (fn &optional stream) → (:dst :handle), handle defaults to stdin(0).")
 
 (defparameter *builtin-stream-void-opt-entries*
   '((force-output   make-vm-force-output   1)
     (finish-output  make-vm-finish-output  1)
-    (clear-input    make-vm-clear-input    0))
+    (clear-input    make-vm-clear-input    0)
+    (clear-output   make-vm-clear-output   1))
   "List of (cl-sym vm-ctor default-handle) for stream-void-opt:
    (fn &optional stream) → (:handle), returns nil.  Default 1=stdout, 0=stdin.")
 
@@ -404,5 +448,8 @@ read-char and read-line have optional stream args, so they use :stream-input-opt
     (%set-symbol-prop  make-vm-symbol-set :sym       :indicator :value     :dst)
     (%svset            make-vm-svset      :array-reg :index-reg :val-reg   :dst)
     ;; no :dst — return third arg via move
-    (aset              make-vm-aset       :array-reg :index-reg :val-reg   :move-third))
+    (aset              make-vm-aset       :array-reg :index-reg :val-reg   :move-third)
+    ;; string/bit array mutation — return new value via :dst
+    (rt-string-set     make-vm-string-set :str       :idx       :val-reg   :dst)
+    (rt-bit-set        make-vm-bit-set    :arr       :idx       :val       :dst))
   "List of (cl-sym vm-ctor slot1 slot2 slot3 return-style) for ternary builtins.")

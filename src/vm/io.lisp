@@ -223,6 +223,12 @@
   (:sexp-tag :clear-input)
   (:sexp-slots handle))
 
+(define-vm-instruction vm-clear-output (vm-instruction)
+  "Abort any pending buffered output."
+  (handle nil :reader vm-file-handle)
+  (:sexp-tag :clear-output)
+  (:sexp-slots handle))
+
 (define-vm-instruction vm-listen-inst (vm-instruction)
   "Check if input is available on a stream."
   (dst nil :reader vm-dst)
@@ -505,6 +511,7 @@ PRED-FN nil means test stream existence only."
 (define-stream-control-instruction vm-force-output  force-output)
 (define-stream-control-instruction vm-finish-output finish-output)
 (define-stream-control-instruction vm-clear-input   clear-input)
+(define-stream-control-instruction vm-clear-output  clear-output)
 
 (defmethod execute-instruction ((inst vm-listen-inst) state pc labels)
   (declare (ignore labels))

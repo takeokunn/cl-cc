@@ -47,3 +47,13 @@
 (define-simple-instruction vm-sinh-inst :unary sinh)
 (define-simple-instruction vm-cosh-inst :unary cosh)
 (define-simple-instruction vm-tanh-inst :unary tanh)
+
+;;; ─── Inverse hyperbolic ─────────────────────────────────────────────────────
+
+(define-vm-unary-instruction vm-asinh-inst :asinh "Inverse hyperbolic sine.")
+(define-vm-unary-instruction vm-acosh-inst :acosh "Inverse hyperbolic cosine.")
+(define-vm-unary-instruction vm-atanh-inst :atanh "Inverse hyperbolic tangent.")
+
+(define-simple-instruction vm-asinh-inst :unary asinh)
+(define-simple-instruction vm-acosh-inst :unary acosh)
+(define-simple-instruction vm-atanh-inst :unary atanh)

@@ -146,6 +146,130 @@
   (sym)
   (assert-true (functionp (gethash sym cl-cc::*x86-64-emitter-table*))))
 
+;;; Helper: collect bytes emitted by a function (local copy; also defined in encoding-tests)
+(defun %x86-collect-bytes (emit-fn)
+  "Call EMIT-FN with a stream that collects bytes. Returns byte list."
+  (let ((bytes nil))
+    (funcall emit-fn (lambda (b) (push b bytes)))
+    (nreverse bytes)))
+
+;;; ─── Comparison emitter byte content ────────────────────────────────────────
+;;;
+;;; Each comparison emitter emits: CMP(3) + SETcc(3) + MOVZX(4) = 10 bytes
+;;; (when all three registers are low regs R0/R1/R2 = rax/rcx/rdx, no REX on SETcc).
+;;; The SETcc sub-sequence is at offset [3]: 0F <opcode2> ModRM.
+;;; So byte index 4 is the condition opcode distinguishing each comparison.
+
+(deftest-each x86-64-comparison-emitter-setcc-opcode
+  "Each comparison emitter embeds the correct SETcc condition opcode at byte index 4."
+  :cases (("vm-lt"     (lambda (s) (cl-cc::emit-vm-lt
+                          (cl-cc::make-vm-lt :dst :R0 :lhs :R1 :rhs :R2) s))    #x9C)
+          ("vm-gt"     (lambda (s) (cl-cc::emit-vm-gt
+                          (cl-cc::make-vm-gt :dst :R0 :lhs :R1 :rhs :R2) s))    #x9F)
+          ("vm-le"     (lambda (s) (cl-cc::emit-vm-le
+                          (cl-cc::make-vm-le :dst :R0 :lhs :R1 :rhs :R2) s))    #x9E)
+          ("vm-ge"     (lambda (s) (cl-cc::emit-vm-ge
+                          (cl-cc::make-vm-ge :dst :R0 :lhs :R1 :rhs :R2) s))    #x9D)
+          ("vm-num-eq" (lambda (s) (cl-cc::emit-vm-num-eq
+                          (cl-cc::make-vm-num-eq :dst :R0 :lhs :R1 :rhs :R2) s)) #x94)
+          ("vm-eq"     (lambda (s) (cl-cc::emit-vm-eq
+                          (cl-cc::make-vm-eq :dst :R0 :lhs :R1 :rhs :R2) s))    #x94))
+  (emit-fn expected-opcode2)
+  (let* ((bytes (%x86-collect-bytes emit-fn))
+         ;; CMP rax,rcx = 3 bytes; SETcc sequence starts at offset 3.
+         ;; SETcc on low reg (rax=0): 0F <opcode2> ModRM -- opcode2 is at index 4.
+         (setcc-opcode2 (nth 4 bytes)))
+    (assert-= 10 (length bytes))
+    (assert-= expected-opcode2 setcc-opcode2)))
+
+(deftest-each x86-64-comparison-emitter-cmp-opcode
+  "All comparison emitters begin with a CMP rr64 whose opcode byte is #x39."
+  :cases (("vm-lt"     (lambda (s) (cl-cc::emit-vm-lt
+                          (cl-cc::make-vm-lt :dst :R0 :lhs :R1 :rhs :R2) s)))
+          ("vm-gt"     (lambda (s) (cl-cc::emit-vm-gt
+                          (cl-cc::make-vm-gt :dst :R0 :lhs :R1 :rhs :R2) s)))
+          ("vm-le"     (lambda (s) (cl-cc::emit-vm-le
+                          (cl-cc::make-vm-le :dst :R0 :lhs :R1 :rhs :R2) s)))
+          ("vm-ge"     (lambda (s) (cl-cc::emit-vm-ge
+                          (cl-cc::make-vm-ge :dst :R0 :lhs :R1 :rhs :R2) s)))
+          ("vm-num-eq" (lambda (s) (cl-cc::emit-vm-num-eq
+                          (cl-cc::make-vm-num-eq :dst :R0 :lhs :R1 :rhs :R2) s)))
+          ("vm-eq"     (lambda (s) (cl-cc::emit-vm-eq
+                          (cl-cc::make-vm-eq :dst :R0 :lhs :R1 :rhs :R2) s))))
+  (emit-fn)
+  ;; REX.W prefix at byte 0; CMP opcode #x39 at byte 1
+  (let ((bytes (%x86-collect-bytes emit-fn)))
+    (assert-= #x39 (nth 1 bytes))))
+
+(deftest x86-64-num-eq-and-eq-share-encoding
+  "vm-num-eq and vm-eq use identical byte sequences (both use SETE/#x94)."
+  (let ((num-eq-bytes (%x86-collect-bytes
+                       (lambda (s) (cl-cc::emit-vm-num-eq
+                                    (cl-cc::make-vm-num-eq :dst :R0 :lhs :R1 :rhs :R2) s))))
+        (eq-bytes (%x86-collect-bytes
+                   (lambda (s) (cl-cc::emit-vm-eq
+                                (cl-cc::make-vm-eq :dst :R0 :lhs :R1 :rhs :R2) s)))))
+    (assert-equal num-eq-bytes eq-bytes)))
+
+;;; ─── Unary emitter byte content ──────────────────────────────────────────────
+;;;
+;;; vm-neg:    MOV dst←src (3) + NEG dst (3) = 6 bytes
+;;; vm-lognot: MOV dst←src (3) + NOT dst (3) = 6 bytes
+;;; vm-not:    TEST src,src (3) + SETE dst (3) + MOVZX dst,dst8 (4) = 10 bytes
+;;; vm-inc:    MOV dst←src (3) + ADD dst,1 imm8 (4) = 7 bytes
+;;; vm-dec:    MOV dst←src (3) + SUB dst,1 imm8 (4) = 7 bytes
+
+(deftest-each x86-64-unary-emitter-byte-count
+  "Unary VM instruction emitters produce the correct total byte count."
+  :cases (("vm-neg"    (lambda (s) (cl-cc::emit-vm-neg
+                          (cl-cc::make-vm-neg :dst :R0 :src :R1) s))    6)
+          ("vm-lognot" (lambda (s) (cl-cc::emit-vm-lognot
+                          (cl-cc::make-vm-lognot :dst :R0 :src :R1) s)) 6)
+          ("vm-not"    (lambda (s) (cl-cc::emit-vm-not
+                          (cl-cc::make-vm-not :dst :R0 :src :R1) s))   10)
+          ("vm-inc"    (lambda (s) (cl-cc::emit-vm-inc
+                          (cl-cc::make-vm-inc :dst :R0 :src :R1) s))    7)
+          ("vm-dec"    (lambda (s) (cl-cc::emit-vm-dec
+                          (cl-cc::make-vm-dec :dst :R0 :src :R1) s))    7))
+  (emit-fn expected-size)
+  (assert-= expected-size (length (%x86-collect-bytes emit-fn))))
+
+(deftest x86-64-unary-neg-starts-with-mov
+  "vm-neg begins with MOV dst←src: REX.W(#x48) at byte 0, MOV opcode(#x89) at byte 1."
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s) (cl-cc::emit-vm-neg
+                             (cl-cc::make-vm-neg :dst :R0 :src :R1) s)))))
+    (assert-= #x48 (nth 0 bytes))
+    (assert-= #x89 (nth 1 bytes))))
+
+(deftest x86-64-unary-not-uses-sete
+  "vm-not uses TEST+SETE: byte 0 is REX.W (#x48) for TEST; byte 4 is #x0F (SETcc escape)."
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s) (cl-cc::emit-vm-not
+                             (cl-cc::make-vm-not :dst :R0 :src :R1) s)))))
+    ;; TEST rcx,rcx: REX.W(#x48) at byte 0
+    (assert-= #x48 (nth 0 bytes))
+    ;; SETE starts at offset 3: 0F at index 3
+    (assert-= #x0F (nth 3 bytes))
+    ;; opcode2 = #x94 (SETE) at index 4
+    (assert-= #x94 (nth 4 bytes))))
+
+(deftest x86-64-unary-inc-dec-use-add-sub
+  "vm-inc uses ADD imm8 and vm-dec uses SUB imm8 as their second instruction."
+  (let ((inc-bytes (%x86-collect-bytes
+                   (lambda (s) (cl-cc::emit-vm-inc
+                                (cl-cc::make-vm-inc :dst :R0 :src :R1) s))))
+        (dec-bytes (%x86-collect-bytes
+                   (lambda (s) (cl-cc::emit-vm-dec
+                                (cl-cc::make-vm-dec :dst :R0 :src :R1) s)))))
+    ;; After MOV (3 bytes), ADD/SUB ri8 begins; opcode byte at index 4 (REX at 3, opcode at 4)
+    ;; ADD r/m64, imm8 = #x83 /0; SUB r/m64, imm8 = #x83 /5 -- same opcode #x83, different ModRM
+    (assert-= #x83 (nth 4 inc-bytes))
+    (assert-= #x83 (nth 4 dec-bytes))
+    ;; The immediate byte (last byte) is 1 in both cases
+    (assert-= 1 (car (last inc-bytes)))
+    (assert-= 1 (car (last dec-bytes)))))
+
 ;;; ─── build-label-offsets ────────────────────────────────────────────────────
 
 (deftest x86-64-build-label-offsets-empty

@@ -65,8 +65,10 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
   "Check if VALUE is of TYPE-SYM. Handles both host CL types and VM CLOS types."
   (case type-sym
     ((integer fixnum) (integerp value))
+    ((float single-float double-float) (floatp value))
     ((string) (stringp value))
     ((symbol) (symbolp value))
+    ((keyword) (keywordp value))
     ((cons) (consp value))
     ((null) (null value))
     ((list) (listp value))
@@ -74,7 +76,16 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
     ((character) (characterp value))
     ((atom) (atom value))
     ((function) (functionp value))
-    ((hash-table) (hash-table-p value))
+    ((vector) (vectorp value))
+    ((array) (arrayp value))
+    ;; FR-598: stream type specifiers
+    ((stream) (streamp value))
+    ((input-stream) (input-stream-p value))
+    ((output-stream) (output-stream-p value))
+    ((file-stream) (typep value 'file-stream))
+    ((string-stream) (typep value 'string-stream))
+    ;; VM hash tables are wrapped in vm-hash-table-object
+    ((hash-table) (typep value 'vm-hash-table-object))
     (otherwise
      (if (and (hash-table-p value)
               (gethash :__class__ value))
@@ -211,12 +222,20 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
          (result (cond
                    ((null value) 'null)
                    ((integerp value) 'integer)
+                   ((floatp value) (if (typep value 'double-float) 'double-float 'single-float))
                    ((stringp value) 'string)
                    ((characterp value) 'character)
                    ((symbolp value) 'symbol)
                    ((consp value) 'cons)
+                   ((functionp value) 'function)
                    ((vectorp value) 'vector)
-                   ((hash-table-p value) 'hash-table)
+                   ;; VM CLOS instances are hash tables with :__class__ — return the class name
+                   ((and (hash-table-p value) (gethash :__class__ value))
+                    (let ((class-ht (gethash :__class__ value)))
+                      (if (hash-table-p class-ht)
+                          (or (gethash :__name__ class-ht) 't)
+                          't)))
+                   ((typep value 'vm-hash-table-object) 'hash-table)
                    (t 't))))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
@@ -233,6 +252,33 @@ This enables meta-circular self-hosting: compiled code can call eval.")
          (result (our-eval form)))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
+
+;;; FR-631: Macro expansion at runtime
+
+(define-vm-unary-instruction vm-macroexpand-1-inst :macroexpand-1
+  "Expand a macro form once. Returns the (possibly unexpanded) form.")
+
+(defmethod execute-instruction ((inst vm-macroexpand-1-inst) state pc labels)
+  (declare (ignore labels))
+  (let* ((form (vm-reg-get state (vm-src inst)))
+         (result (our-macroexpand-1 form)))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
+(define-vm-unary-instruction vm-macroexpand-inst :macroexpand
+  "Fully expand a macro form. Returns the expanded form.")
+
+(defmethod execute-instruction ((inst vm-macroexpand-inst) state pc labels)
+  (declare (ignore labels))
+  (let* ((form (vm-reg-get state (vm-src inst)))
+         (result (our-macroexpand form)))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
+;;; FR-498: Hash code computation
+
+(define-vm-unary-instruction vm-sxhash :sxhash "Compute hash code for an object.")
+(define-simple-instruction vm-sxhash :unary sxhash)
 
 ;;; vm-numeric.lisp — Numeric tower (round, bit ops, transcendentals, float, rational, complex)
 ;;; vm-extensions.lisp — Char comparisons, symbol plist, PROGV, generic arith

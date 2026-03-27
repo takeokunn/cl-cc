@@ -61,32 +61,40 @@ keys (:accessor, :initarg, :reader, :writer, :type) untouched."
 (defun expand-typed-defun-or-lambda (head name params rest-forms)
   "Strip type annotations from PARAMS, register the type signature, and
 rebuild a plain DEFUN or LAMBDA form with check-type assertions.
-HEAD is 'defun or 'lambda; NAME is the function name (nil for lambda)."
+
+HEAD is 'defun or 'lambda; NAME is the function name (nil for lambda).
+
+Side effects:
+  - For DEFUN, calls register-function-type with the resolved param/return types.
+
+Handles return-type annotation: if the first element of REST-FORMS is a type
+specifier symbol, it is treated as the declared return type and wrapped in
+(the RETURN-TYPE (progn ...)) in the output body."
   (multiple-value-bind (plain-params type-alist)
       (strip-typed-params params)
-    (let* ((has-return-type (and rest-forms
-                                 (symbolp (first rest-forms))
-                                 (cl-cc/type:looks-like-type-specifier-p (first rest-forms))))
+    (let* ((has-return-type  (and rest-forms
+                                  (symbolp (first rest-forms))
+                                  (cl-cc/type:looks-like-type-specifier-p (first rest-forms))))
            (return-type-spec (when has-return-type (first rest-forms)))
-           (body-forms       (if has-return-type (cdr rest-forms) rest-forms)))
-      (let ((param-types (mapcar (lambda (e)
-                                   (cl-cc/type:parse-type-specifier (cdr e)))
-                                 type-alist))
-            (return-type  (if return-type-spec
-                              (cl-cc/type:parse-type-specifier return-type-spec)
-                              cl-cc/type:+type-unknown+)))
-        (when (eq head 'defun)
-          (register-function-type name param-types return-type)))
-      (let* ((typed-body (if return-type-spec
-                             `((the ,return-type-spec (progn ,@body-forms)))
-                             body-forms))
-             (checks (loop for (pname . ptype) in type-alist
-                           collect `(check-type ,pname ,ptype)))
-             (full-body (append checks typed-body)))
-        (compiler-macroexpand-all
-         (if (eq head 'defun)
-             `(defun ,name ,plain-params ,@full-body)
-             `(lambda ,plain-params ,@full-body)))))))
+           (body-forms       (if has-return-type (cdr rest-forms) rest-forms))
+           (param-types      (mapcar (lambda (e)
+                                       (cl-cc/type:parse-type-specifier (cdr e)))
+                                     type-alist))
+           (return-type      (if return-type-spec
+                                 (cl-cc/type:parse-type-specifier return-type-spec)
+                                 cl-cc/type:+type-unknown+))
+           (typed-body       (if return-type-spec
+                                 `((the ,return-type-spec (progn ,@body-forms)))
+                                 body-forms))
+           (checks           (loop for (pname . ptype) in type-alist
+                                   collect `(check-type ,pname ,ptype)))
+           (full-body        (append checks typed-body)))
+      (when (eq head 'defun)
+        (register-function-type name param-types return-type))
+      (compiler-macroexpand-all
+       (if (eq head 'defun)
+           `(defun ,name ,plain-params ,@full-body)
+           `(lambda ,plain-params ,@full-body))))))
 
 (defun make-macro-expander (lambda-list body)
   "Build a macro expander function for a LAMBDA-LIST and BODY.
@@ -273,6 +281,32 @@ or fall back to generic (setf (slot-value obj 'accessor-name) val)."
   (dolist (sym '(car first cdr rest nth cadr cddr))
     (setf (gethash sym *setf-compound-place-handlers*) cons-place-handler)))
 
+;;; FR-593: (setf (subseq seq start end) new-seq) → (replace seq new-seq :start1 start :end1 end)
+(setf (gethash 'subseq *setf-compound-place-handlers*)
+      (lambda (place value)
+        (compiler-macroexpand-all
+         `(replace ,(second place) ,value
+                   :start1 ,(third place)
+                   ,@(when (fourth place) `(:end1 ,(fourth place)))))))
+
+;;; FR-614: (setf (char s i) v) and (setf (schar s i) v)
+(let ((char-place-handler (lambda (place value)
+                            (compiler-macroexpand-all
+                             `(rt-string-set ,(second place) ,(third place) ,value)))))
+  (dolist (sym '(char schar))
+    (setf (gethash sym *setf-compound-place-handlers*) char-place-handler)))
+
+;;; FR-620: (setf (svref v i) x) and (setf (row-major-aref a i) x)
+(setf (gethash 'svref *setf-compound-place-handlers*)
+      (lambda (place value)
+        (compiler-macroexpand-all
+         `(%svset ,(second place) ,(third place) ,value))))
+
+(setf (gethash 'row-major-aref *setf-compound-place-handlers*)
+      (lambda (place value)
+        (compiler-macroexpand-all
+         `(aset ,(second place) ,(third place) ,value))))
+
 (defun expand-let-binding (b)
   "Macro-expand the value in a LET binding, leaving the binding name untouched."
   (if (and (consp b) (symbolp (car b)))
@@ -389,12 +423,15 @@ Contract: handler receives the full form and returns a fully-expanded form."
                       (compiler-macroexpand-all (second form))
                       (compiler-macroexpand-all (third form))))))))
 
-;; - (subtraction / negation): same folding pattern with identity 0
+;; - (subtraction / negation): unary → (- 0 x), 0-arg → error, N-arg → left fold
 (define-expander-for - (form)
-  (if (/= (length (cdr form)) 2)
-      (compiler-macroexpand-all (reduce-variadic-op '- (cdr form) 0))
-      (list '- (compiler-macroexpand-all (second form))
-               (compiler-macroexpand-all (third form)))))
+  (let ((nargs (length (cdr form))))
+    (cond
+      ((= nargs 0) (error "- requires at least one argument"))
+      ((= nargs 1) (list '- 0 (compiler-macroexpand-all (second form))))
+      ((= nargs 2) (list '- (compiler-macroexpand-all (second form))
+                            (compiler-macroexpand-all (third form))))
+      (t (compiler-macroexpand-all (reduce-variadic-op '- (cdr form) 0))))))
 
 ;; deftype — register type alias at expand time; returns (quote name)
 (define-expander-for deftype (form)
@@ -408,7 +445,8 @@ Contract: handler receives the full form and returns a fully-expanded form."
 
 ;; setf — unified place dispatcher
 (define-expander-for setf (form)
-  (let ((len (length form)))
+  (let ((len (length form))
+        (expand-args (lambda () (cons 'setf (mapcar #'compiler-macroexpand-all (cdr form))))))
     (cond
       ;; (setf a 1 b 2 ...) → (progn (setf a 1) (setf b 2) ...)
       ((and (> len 3) (evenp (1- len)))
@@ -420,16 +458,15 @@ Contract: handler receives the full form and returns a fully-expanded form."
        (compiler-macroexpand-all `(setq ,(second form) ,(third form))))
       ;; compound place — table lookup first, then generic accessor, then passthrough
       ((and (= len 3) (consp (second form)))
-       (let* ((place (second form))
-              (value (third form))
+       (let* ((place   (second form))
+              (value   (third form))
               (handler (gethash (car place) *setf-compound-place-handlers*)))
          (cond
            (handler (funcall handler place value))
            ((and (symbolp (car place)) (= (length place) 2))
             (expand-setf-accessor place value))
-           (t
-            (cons 'setf (mapcar #'compiler-macroexpand-all (cdr form)))))))
-      (t (cons 'setf (mapcar #'compiler-macroexpand-all (cdr form)))))))
+           (t (funcall expand-args)))))
+      (t (funcall expand-args)))))
 
 ;; make-array — promote to make-adjustable-vector when :fill-pointer/:adjustable given
 (define-expander-for make-array (form)
@@ -529,6 +566,23 @@ Contract: handler receives the full form and returns a fully-expanded form."
               (list (car form)
                     (compiler-macroexpand-all (second form))
                     (compiler-macroexpand-all (third form)))))))
+
+;;; ── FR-626: error/warn format-string desugaring ──────────────────────────
+;;;
+;;; (error fmt arg ...) → (error (format nil fmt arg ...)) when 2+ args.
+;;; Single-arg form passes through to builtin dispatch unchanged.
+;; Only desugar when datum is a string and extra format args are present.
+;; Handler-case clauses (error (var) body) have a list as second element —
+;; those must pass through to the parser unchanged.
+(dolist (op '(error warn))
+  (setf (gethash op *expander-head-table*)
+        (lambda (form)
+          (if (and (> (length form) 2) (stringp (second form)))
+              ;; (error "fmt" arg...) → (error (format nil "fmt" arg...))
+              (compiler-macroexpand-all
+               `(,(car form) (format nil ,@(cdr form))))
+              ;; 1-arg form or handler-case clause: pass through unchanged
+              (mapcar #'compiler-macroexpand-all form)))))
 
 ;;; ── Main dispatcher ──────────────────────────────────────────────────────
 ;;;

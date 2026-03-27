@@ -304,3 +304,28 @@
 (define-simple-instruction vm-conjugate :unary  conjugate)
 (define-simple-instruction vm-phase     :unary  phase)
 (define-simple-instruction vm-complex   :binary complex)
+
+;;; FR-507: Environment query functions (nullary — return host CL values)
+(defmacro %define-nullary-env-query (name tag cl-form doc)
+  `(progn
+     (define-vm-instruction ,name (vm-instruction)
+       ,doc
+       (dst nil :reader vm-dst)
+       (:sexp-tag ,tag)
+       (:sexp-slots dst))
+     (defmethod execute-instruction ((inst ,name) state pc labels)
+       (declare (ignore labels))
+       (vm-reg-set state (vm-dst inst) ,cl-form)
+       (values (1+ pc) nil nil))))
+
+(%define-nullary-env-query vm-lisp-implementation-type :lisp-implementation-type
+  (lisp-implementation-type) "Return the Lisp implementation type string.")
+(%define-nullary-env-query vm-lisp-implementation-version :lisp-implementation-version
+  (lisp-implementation-version) "Return the Lisp implementation version string.")
+(%define-nullary-env-query vm-machine-type    :machine-type    (machine-type)    "Return the machine type string.")
+(%define-nullary-env-query vm-machine-version :machine-version (machine-version) "Return the machine version string.")
+(%define-nullary-env-query vm-machine-instance :machine-instance (machine-instance) "Return the machine instance string.")
+(%define-nullary-env-query vm-software-type   :software-type   (software-type)   "Return the OS type string.")
+(%define-nullary-env-query vm-software-version :software-version (software-version) "Return the OS version string.")
+(%define-nullary-env-query vm-short-site-name :short-site-name (short-site-name) "Return the short site name string.")
+(%define-nullary-env-query vm-long-site-name  :long-site-name  (long-site-name)  "Return the long site name string.")

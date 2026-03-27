@@ -25,6 +25,7 @@
        (:file "prolog")
        (:file "dcg")
        (:file "lexer")
+       (:file "lexer-dispatch")
        (:file "incremental")
        (:file "pratt")
        (:file "combinators")
@@ -32,6 +33,7 @@
         :serial t
         :components
         ((:file "parser")
+         (:file "parser-roundtrip")
          (:file "grammar")))
        (:module "php"
         :serial t
@@ -51,7 +53,8 @@
        (:file "loop-emitters")   ; LOOP: IR → code-fragment tables
        (:file "loop")            ; LOOP: generator — assembles tagbody from IR
        (:file "macros-stdlib")   ; stdlib: push/pop/incf + ANSI CL + higher-order fns
-       (:file "macros-sequence") ; sequences: sort/reduce/substitute + CLOS/coerce/plist
+       (:file "macros-sequence") ; sequences: sort/reduce/substitute
+       (:file "macros-compat")  ; ANSI CL compat: package no-ops, getf/remf, progv, coerce, CLOS, plist
        (:file "expander-data")      ; expander: grammar tables + dispatch table declarations
        (:file "expander-defstruct") ; expander: defstruct expansion helpers
        (:file "expander")))
@@ -132,6 +135,7 @@
        (:file "egraph")           ; Phase 2: E-graph engine (union-find, saturation, extraction)
        (:file "egraph-rules")     ; Phase 2: defrule macro + built-in rewrite rules
        (:file "optimizer-tables") ; Data tables + predicates (loaded before passes)
+       (:file "optimizer-inline") ; Function inlining pass (opt-pass-inline)
        (:file "optimizer")))
      ;; Stage 7: VM IR → native code + binary formats
      (:module "emit"
@@ -181,7 +185,8 @@
       :pathname "compile"
       :serial t
       :components
-      ((:file "pipeline")))))))
+      ((:file "stdlib-source") ; *standard-library-source* string (separated for readability)
+       (:file "pipeline")))))))
 
 (asdf:defsystem :cl-cc/bin
   :description "CL-CC CLI tool"

@@ -111,6 +111,27 @@
   (:sexp-tag :hash-table-test)
   (:sexp-slots dst table))
 
+(define-vm-instruction vm-hash-table-size (vm-instruction)
+  "Return the current size (bucket count) of TABLE."
+  (dst nil :reader vm-dst)
+  (table nil :reader vm-hash-table-reg)
+  (:sexp-tag :hash-table-size)
+  (:sexp-slots dst table))
+
+(define-vm-instruction vm-hash-table-rehash-size (vm-instruction)
+  "Return the rehash-size of TABLE."
+  (dst nil :reader vm-dst)
+  (table nil :reader vm-hash-table-reg)
+  (:sexp-tag :hash-table-rehash-size)
+  (:sexp-slots dst table))
+
+(define-vm-instruction vm-hash-table-rehash-threshold (vm-instruction)
+  "Return the rehash-threshold of TABLE."
+  (dst nil :reader vm-dst)
+  (table nil :reader vm-hash-table-reg)
+  (:sexp-tag :hash-table-rehash-threshold)
+  (:sexp-slots dst table))
+
 ;;; Helper Functions
 
 (defun resolve-hash-test (test-symbol)
@@ -229,4 +250,25 @@
                          ((and (functionp test-val) (eq test-val #'equalp)) 'equalp)
                          (t 'eql))))
     (vm-reg-set state (vm-dst inst) test-sym)
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-hash-table-size) state pc labels)
+  (declare (ignore labels))
+  (let* ((table-obj (vm-reg-get state (vm-hash-table-reg inst)))
+         (table (vm-hash-table-get-internal table-obj)))
+    (vm-reg-set state (vm-dst inst) (hash-table-size table))
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-hash-table-rehash-size) state pc labels)
+  (declare (ignore labels))
+  (let* ((table-obj (vm-reg-get state (vm-hash-table-reg inst)))
+         (table (vm-hash-table-get-internal table-obj)))
+    (vm-reg-set state (vm-dst inst) (hash-table-rehash-size table))
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-hash-table-rehash-threshold) state pc labels)
+  (declare (ignore labels))
+  (let* ((table-obj (vm-reg-get state (vm-hash-table-reg inst)))
+         (table (vm-hash-table-get-internal table-obj)))
+    (vm-reg-set state (vm-dst inst) (hash-table-rehash-threshold table))
     (values (1+ pc) nil nil)))

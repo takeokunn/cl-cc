@@ -1,8 +1,1163 @@
-# Concurrency & Threading
+# Runtime: Subsystems & Infrastructure
 
-Concurrency infrastructure, threading, OS integration, and lightweight scheduling.
+Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent runtime, dynamic code management, runtime self-hosting, advanced optimization, Unicode, pathname, streams, pretty printer.
 
 ---
+
+### Phase 90 — インラインキャッシュ・動的ディスパッチ最適化
+
+2026年のモダンJIT（V8 Maglev/Turbofan、GraalVM、HotSpot C2）が実装する動的ディスパッチの最適化インフラ。
+
+#### FR-500: Monomorphic Inline Cache (MIC) for Generic Functions
+
+- **対象**: `src/vm/vm-clos.lisp`, `src/compile/codegen.lisp`
+- **現状**: `vm-generic-call`が毎回ディスパッチテーブルをフルスキャン（`vm-clos.lisp:execute-instruction vm-generic-call`）
+- **内容**:
+  - 各call siteに「最後に見た型→メソッドクロージャ」のインラインキャッシュを添付
+  - 同じ型で呼ばれた場合はディスパッチテーブル検索をスキップ
+  - キャッシュミス時のみフォールバック（フルスキャン）
+  - 型変化を検出したら Polymorphic IC (FR-501) にエスカレート
+- **根拠**: V8 IC / HotSpot inline cache。ジェネリック関数呼び出しコストを1〜2命令に削減
+- **難易度**: Hard
+
+#### FR-501: Polymorphic Inline Cache (PIC) for Generic Functions
+
+- **対象**: `src/vm/vm-clos.lisp`, `src/compile/codegen.lisp`
+- **依存**: FR-500
+- **現状**: MIC実装後、複数型から呼ばれるcall siteで毎回キャッシュミスが発生する
+- **内容**:
+  - キャッシュを最大N件（デフォルト4）の`(type . method)`ペア配列に拡張
+  - 線形スキャンでO(N)の型マッチ、N超過でメガモーフィック状態に移行
+  - PIC配列をVM命令のスロット（`:sexp-slots`）に格納してGC管理
+- **根拠**: SpiderMonkey PIC / V8 polymorphic IC。2〜4型のジェネリック関数呼び出しを高速化
+- **難易度**: Hard
+
+#### FR-502: Megamorphic Call Site Handling
+
+- **対象**: `src/vm/vm-clos.lisp`
+- **依存**: FR-501
+- **内容**:
+  - PICがN型を超えた場合、グローバルメガモーフィックキャッシュ（全call site共有のハッシュテーブル）に移行
+  - メガモーフィック状態は「最適化を諦めて安定した低コスト実装に落とす」戦略
+  - インライン化候補から除外（FR-158への入力として利用）
+- **根拠**: V8 megamorphic stub / HotSpot MegamorphicCache。多態性の高いcall siteを安定処理
+- **難易度**: Medium
+
+#### FR-503: Type Feedback Vector (TFV)
+
+- **対象**: `src/compile/codegen.lisp`, `src/vm/vm-run.lisp`
+- **内容**:
+  - 各関数に対してcall site数分のフィードバックスロットを持つベクタを割り当て
+  - 実行時に型情報（引数型、分岐方向、ループカウント）をスロットに記録
+  - Tier-1コンパイル時（FR-154）にTFVを参照して特化コード生成
+- **根拠**: V8 FeedbackVector / HotSpot MethodData。型プロファイリングの中核データ構造
+- **難易度**: Hard
+
+#### FR-504: Call Site Speculation (呼び出し先特化)
+
+- **対象**: `src/compile/codegen.lisp`, `src/optimize/optimizer.lisp`
+- **依存**: FR-503
+- **内容**:
+  - TFVから「このcall siteは常に関数Fを呼ぶ」と判明した場合、直接呼び出しにコンパイル
+  - ガードチェック（`(eq callee F)`）＋直接call＋ガード失敗時のfallback
+  - クロージャ変数を介した高階関数の直接インライン展開が可能になる
+- **根拠**: V8 function monomorphism optimization。高階関数の呼び出しオーバーヘッドを除去
+- **難易度**: Very Hard
+
+---
+
+### Phase 91 — セーフポイント・スタックマップ
+
+#### FR-510: GC Safepoint Infrastructure (GCセーフポイント基盤)
+
+- **対象**: `src/vm/vm-run.lisp`, `src/runtime/gc.lisp`
+- **現状**: GCは任意のタイミングで`rt-gc-collect`を呼び出せる前提。スタック上のVM値がGCルートとして登録されていない
+- **内容**:
+  - セーフポイント: 関数呼び出し・ループバックエッジ・メモリ割り当て直前を「安全点」とする
+  - セーフポイント到達時のみGCが起動（コオペラティブ方式）
+  - `*gc-pending*`フラグをセーフポイントチェック命令でポーリング
+- **根拠**: HotSpot Safepoint / V8 GC safepoints。正確なGCの必須インフラ
+- **難易度**: Hard
+
+#### FR-511: Precise Stack Map (精確スタックマップ)
+
+- **対象**: `src/compile/codegen.lisp`, `src/runtime/gc.lisp`
+- **依存**: FR-510
+- **現状**: GCはスタックフレームのどのスロットがLispオブジェクトかを知らない（保守的スキャン）
+- **内容**:
+  - 各セーフポイントでレジスタ・スタックスロット中のオブジェクト参照の位置情報を記録
+  - `stackmap: ((frame-offset . :object) ...)` テーブルをコンパイル時に生成
+  - GCがスタックマップを参照して精確にオブジェクトを追跡
+- **根拠**: JVM StackMapTable / GHC info tables。保守的GCによる偽参照保持を排除
+- **難易度**: Very Hard
+
+#### FR-512: Return Address Poisoning (リターンアドレス保護)
+
+- **対象**: `src/vm/vm-execute.lisp`, `src/runtime/runtime.lisp`
+- **内容**:
+  - GCがフレームをスキャンする際、リターンアドレスとLispオブジェクトポインタを区別
+  - リターンアドレスにタグビットを付与（または別フィールドに移動）してGCスキャンから除外
+  - セキュリティ上も有益: Shadow Stack（FR-513）との連携
+- **根拠**: V8 / HotSpot frame layout。スタックスキャンの正確性向上
+- **難易度**: Medium
+
+#### FR-513: Shadow Stack for CLOS Dispatch (CLOSディスパッチ用シャドウスタック)
+
+- **対象**: `src/vm/vm-clos.lisp`, `src/vm/vm-execute.lisp`
+- **内容**:
+  - CLOS `call-next-method` の連鎖をスタックとは別の「シャドウスタック」で管理
+  - メソッドコンビネーション（:before/:after/:around）の呼び出し順を明示的なデータ構造で表現
+  - 現状の暗黙的な再帰呼び出しを排除し、デバッグ・プロファイリングを容易にする
+- **根拠**: CLOS next-method chain visualization。SBCL PCL実装の参照実装
+- **難易度**: Medium
+
+---
+
+### Phase 92 — 数値タワー・Unboxed演算
+
+#### FR-520: Fixnum Unboxed Arithmetic Path
+
+- **対象**: `src/vm/primitives.lisp`, `src/compile/codegen.lisp`
+- **現状**: 全算術演算が`vm-value-fixnum-p`チェック後にunboxして計算、再boxして返す
+- **内容**:
+  - 型推論（FR-004）でfixnumと確定した変数に対してunboxedレジスタを割り当て
+  - `vm-add-fixnum`/`vm-mul-fixnum`等の型特化命令を追加
+  - box/unboxコストを完全除去。内側ループでの数値演算が2-5倍高速化
+- **根拠**: SBCL `(declare (type fixnum n))` unboxed / HotSpot int intrinsics
+- **難易度**: Hard
+
+#### FR-521: Float Unboxed Arithmetic (浮動小数点Unboxed演算)
+
+- **対象**: `src/vm/primitives.lisp`, `src/compile/codegen.lisp`
+- **依存**: FR-520
+- **内容**:
+  - NaN-boxingの64-bit doubleペイロードを直接XMMレジスタに保持
+  - `vm-fadd`/`vm-fmul`/`vm-fsqrt`等のfloat専用命令
+  - float配列に対するループでのスカラー展開
+- **根拠**: SBCL `(declare (type double-float x))` / LuaJIT float unboxing
+- **難易度**: Hard
+
+#### FR-522: Bignum Fast Path (Bignum高速パス)
+
+- **対象**: `src/vm/primitives.lisp`
+- **現状**: bignum演算はホストCL `+`/`*`等に完全委譲
+- **内容**:
+  - 小bignum（2ワード以内）をfixnum隣接の特化パスで処理
+  - Karatsuba乗算（FR-523の基盤）
+  - コンパイル時bignum畳み込みをFR-181の定数プールに統合
+- **根拠**: GMP / Java BigInteger fast path。数値演算ベンチマークの底上げ
+- **難易度**: Hard
+
+#### FR-523: SIMD Intrinsics (SIMDイントリンシクス)
+
+- **対象**: `src/emit/x86-64-codegen.lisp`, `src/vm/vm.lisp`
+- **内容**:
+  - `(simd:+ vec1 vec2)` / `(simd:dot vec1 vec2)` 等のSIMD組み込み関数
+  - SSE2/AVX2命令への直接マッピング (`vmovdqu`, `vaddps`, `vmulps`)
+  - `make-array :element-type 'single-float` の配列を SIMD バッファとして扱う
+  - 自動ベクタライザ（FR-524）の低レベル基盤
+- **根拠**: LLVM vector intrinsics / LuaJIT FFI SIMD。数値計算の10-20倍高速化
+- **難易度**: Very Hard
+
+#### FR-524: Auto-Vectorization (自動ベクタライズ)
+
+- **対象**: `src/optimize/optimizer.lisp`, `src/emit/x86-64-codegen.lisp`
+- **依存**: FR-521, FR-523
+- **内容**:
+  - float配列に対する単純ループ（`(dotimes (i n) (aset r i (f+ (aref a i) (aref b i))))`）をSIMDループに変換
+  - ループ長が4の倍数でない場合のスカラーエピローグ自動生成
+  - エイリアス解析（FR-017）でa/b/rが重ならないことを確認してからベクタライズ
+- **根拠**: GCC/LLVM auto-vectorization (-O3 -march=native)
+- **難易度**: Very Hard
+
+#### FR-525: Number Tower Rationalization (数値タワー整理)
+
+- **対象**: `src/vm/primitives.lisp`, `src/expand/macros-stdlib.lisp`
+- **現状**: `ratio`/`complex`型はホストCLに完全委譲。VM内での数値タワー一貫処理なし
+- **内容**:
+  - `ratio`: `(/ 3 4)` → VM内 ratio オブジェクト（分子/分母2ワード）
+  - `complex`: `(complex 1.0 2.0)` → VM内 complex オブジェクト
+  - `number`型の`+`/`-`/`*`/`/`の型ディスパッチをVMで一元化
+- **根拠**: ANSI CL 12.1 Number Tower。cl-ccが完全自立ランタイムになるための必須条件
+- **難易度**: Hard
+
+---
+
+### Phase 93 — FFI・ネイティブブリッジ
+
+#### FR-530: C FFI Layer (C言語インターフェース)
+
+- **対象**: `src/runtime/runtime.lisp`, `src/vm/vm.lisp` (新ファイル `src/ffi/cffi.lisp`)
+- **現状**: ホストCLの`cffi`に完全依存。ネイティブバイナリビルド後のCライブラリ呼び出し手段なし
+- **内容**:
+  - `(define-foreign-function "printf" (:pointer :string) :int)` のような宣言マクロ
+  - 引数のVM値 → C ABI変換（NaN-unbox → C型）
+  - 戻り値のC型 → VM値変換
+  - macOS: `dlopen`/`dlsym` 経由。Linux: `ld.so` 経由
+- **根拠**: CFFI / SBCL SB-ALIEN。ネイティブバイナリのシステムライブラリ呼び出し必須
+- **難易度**: Very Hard
+
+#### FR-531: Callback Support (コールバック登録)
+
+- **対象**: `src/ffi/cffi.lisp` (FR-530)
+- **依存**: FR-530
+- **内容**:
+  - `(make-callback fn :int (:int :int))` — CLクロージャをC関数ポインタとして登録
+  - x86-64 ABI準拠のトランポリン生成（`mmap`+`mprotect`で実行可能メモリ確保）
+  - GCとの統合: コールバック経由でCLクロージャがGCルートとして保持される
+- **根拠**: SBCL SB-ALIEN callback / LuaJIT FFI callback
+- **難易度**: Very Hard
+
+#### FR-532: Native Struct Mapping (ネイティブ構造体マッピング)
+
+- **対象**: `src/ffi/cffi.lisp`
+- **依存**: FR-530
+- **内容**:
+  - `(define-foreign-struct stat ...)` — Cの`struct`をVMオブジェクトとしてマッピング
+  - フィールドアクセサの自動生成（`stat-st-size`等）
+  - アライメント・パディングのABI準拠計算
+- **根拠**: CFFI defcstruct / SBCL SB-ALIEN define-alien-type
+- **難易度**: Hard
+
+#### FR-533: Inline Assembly (インラインアセンブリ)
+
+- **対象**: `src/emit/x86-64-codegen.lisp`
+- **内容**:
+  - `(asm :mov :rax 42)` — VM命令シーケンス中にアセンブリ命令を直接埋め込む
+  - システムコール発行(`syscall`命令)のためのインターフェース
+  - CPUID/RDTSC等の特殊命令へのアクセス
+- **根拠**: GCC `__asm__` / SBCL `%primitive`。低レベルランタイム操作の基盤
+- **難易度**: Medium
+
+---
+
+### Phase 94 — デバッグ・プロファイリングインフラ
+
+#### FR-540: DWARF Debug Information Generation
+
+- **対象**: `src/binary/macho.lisp`, `src/compile/codegen.lisp`
+- **現状**: Mach-Oバイナリ生成時にデバッグ情報なし。`lldb`/`gdb`でソースマップ不可
+- **内容**:
+  - DWARF 5形式でデバッグ情報を生成（`.debug_info`, `.debug_line`, `.debug_abbrev`セクション）
+  - VM命令→元のLispフォームのソース位置マッピング
+  - 変数名・型情報の埋め込み（デバッガからスロットが見える）
+  - `--debug`ビルドフラグで有効化
+- **根拠**: DWARF standard / LLVM debug info。プロダクションデバッグの必須条件
+- **難易度**: Very Hard
+
+#### FR-541: Sampling Profiler (サンプリングプロファイラ)
+
+- **対象**: `src/vm/vm-run.lisp`, `src/cli/main.lisp`
+- **現状**: プロファイリング機能なし。ホットスポット特定が不可能
+- **内容**:
+  - `SIGPROF`シグナルハンドラでスタックトレースをサンプリング（macOS: `setitimer`）
+  - 関数名→カウントのヒストグラムを収集
+  - `./cl-cc profile myscript.lisp` でフレームグラフ出力
+  - FR-503（TFV）のプロファイルデータと統合
+- **根拠**: Linux perf / py-spy / rbspy。実行時ホットスポット特定の標準ツール
+- **難易度**: Hard
+
+#### FR-542: Allocation Profiler (アロケーションプロファイラ)
+
+- **対象**: `src/runtime/gc.lisp`, `src/vm/vm-run.lisp`
+- **内容**:
+  - `rt-gc-alloc`呼び出し時に呼び出し元情報（関数名・行番号）を記録
+  - 型別・サイズ別の割り当て統計（`cons`が全割り当ての何%か等）
+  - GCプレッシャーの高い関数を特定してTRMC/スタック割り当て変換の対象を絞る
+- **根拠**: JVM allocation profiling (-agentlib:hprof) / Heaptrack
+- **難易度**: Medium
+
+#### FR-543: VM Instruction Tracer (VM命令トレーサ)
+
+- **対象**: `src/vm/vm-run.lisp`
+- **内容**:
+  - `*vm-trace-mode*` フラグで実行命令をリアルタイム出力
+  - 条件付きブレークポイント: `(vm-break-on 'vm-generic-call)` で特定命令型で停止
+  - デバッガREPLへの接続（`slynk`/`swank`プロトコル拡張）
+- **根拠**: SBCL `(trace)` / ChakraCore instruction tracing
+- **難易度**: Medium
+
+#### FR-544: Coverage Instrumentation (カバレッジ計測)
+
+- **対象**: `src/compile/codegen.lisp`, `src/vm/vm-run.lisp`
+- **内容**:
+  - `--coverage`フラグで各フォームの実行カウンタを埋め込み
+  - `lcov`互換カバレッジレポートをHTMLで出力
+  - テストスイートの未カバーパス特定（FiveAMとの統合）
+- **根拠**: SBCL sb-cover / Istanbul / gcov
+- **難易度**: Medium
+
+---
+
+### Phase 95 — コンカレントランタイム基盤
+
+#### FR-550: Thread-Local Allocation Buffer (TLAB)
+
+- **対象**: `src/runtime/heap.lisp`, `src/runtime/gc.lisp`
+- **現状**: 単一バンプポインタ（`young-free`）へのアクセスがシリアライズされる
+- **内容**:
+  - 各スレッドにナーサリの一部（デフォルト256KB）を専有させる
+  - スレッドローカルなバンプポインタでアロケーション
+  - TLABが枯渇したらGCロックを取ってリフィル
+- **根拠**: HotSpot TLAB / GraalVM TLAB。マルチスレッドアロケーションのスケールアップ
+- **難易度**: Hard
+
+#### FR-551: Atomic Value Operations (アトミック値操作)
+
+- **対象**: `src/vm/vm.lisp`, `src/vm/primitives.lisp`
+- **内容**:
+  - `(atomic-swap! place new-val)` — CAS (Compare-And-Swap)
+  - `(atomic-incf! place delta)` — アトミックインクリメント
+  - `(memory-barrier)` — フェンス命令
+  - x86-64: `lock cmpxchg` / AArch64: `ldxr`/`stxr`
+- **根拠**: SBCL `sb-ext:atomic-push` / Java `AtomicInteger`。ロックフリーデータ構造の基盤
+- **難易度**: Hard
+
+#### FR-552: Green Thread / Continuation (グリーンスレッド/継続)
+
+- **対象**: `src/vm/vm-execute.lisp`, `src/vm/vm-run.lisp`
+- **内容**:
+  - `(spawn fn args)` — VMレジスタファイルをスタックに保存して新コルーチンを作成
+  - `(yield)` — 現スレッドをサスペンドしてスケジューラに制御を返す
+  - `(resume co val)` — 保存されたレジスタファイルを復元して実行再開
+  - M:Nスレッドスケジューラ（Mグリーンスレッド : NホストOSスレッド）
+- **根拠**: Go goroutine / Erlang process / Ruby Fiber。Lispのcall/ccを軽量実装する基盤
+- **難易度**: Very Hard
+
+#### FR-553: Delimited Continuations (限定継続)
+
+- **対象**: `src/vm/vm-execute.lisp`, `src/compile/cps.lisp`
+- **依存**: FR-552
+- **内容**:
+  - `(reset thunk)` / `(shift k body)` — Filinski演算子
+  - CPS変換済みコードとの統合（現在のCPS変換をshift/resetのコンパイルターゲットとして活用）
+  - `call/cc` のより効率的な代替実装
+- **根拠**: Racket delimited continuations / Koka effect handlers
+- **難易度**: Very Hard
+
+#### FR-554: Lock-Free Symbol Table (ロックフリーシンボルテーブル)
+
+- **対象**: `src/vm/vm.lisp` (`vm-intern-symbol`)
+- **現状**: シンボルインターンはハッシュテーブル（`vm-intern-table`）へのシリアルアクセス
+- **内容**:
+  - ロックフリーなhash map（Cliff Click's lock-free hash map / Swiss Table）への置換
+  - `(intern "foo")` がCASループのみで完結
+  - インターン済みシンボルの読み取りがノーロック
+- **根拠**: Hotspot StringTable lock-free / Clojure persistent HashMap
+- **難易度**: Hard
+
+---
+
+### Phase 96 — 動的コード管理・モジュールシステム
+
+#### FR-560: JIT Code Cache Management (JITコードキャッシュ管理)
+
+- **対象**: `src/compile/pipeline.lisp`, `src/cli/main.lisp`
+- **現状**: コンパイル済みVM命令列はメモリ上に保持されるが容量上限なし。再コンパイル時の古いコード回収なし
+- **内容**:
+  - コードキャッシュサイズ上限（デフォルト256MB）を設定
+  - LRU / 呼び出し頻度ベースの退避ポリシー
+  - 退避されたコードを再JIT可能な状態で保持（ソースは保持）
+- **根拠**: HotSpot code cache / V8 code flushing。長時間動作プロセスのメモリ安定化
+- **難易度**: Hard
+
+#### FR-561: Lazy Module Loading (遅延モジュールロード)
+
+- **対象**: `src/compile/pipeline.lisp`, `src/cli/main.lisp`
+- **内容**:
+  - `(require "module")` を遅延実行：参照時点でコンパイル・ロード
+  - モジュール依存グラフの構築と循環依存検出
+  - コンパイル済みFASLキャッシュとの統合（タイムスタンプで再コンパイル判定）
+- **根拠**: Python `importlib` lazy loading / Node.js lazy require
+- **難易度**: Medium
+
+#### FR-562: Hot Code Reload (ホットコードリロード)
+
+- **対象**: `src/compile/pipeline.lisp`, `src/vm/vm.lisp`
+- **内容**:
+  - `(reload-function 'foo)` — 実行中プロセスの関数定義を差し替え
+  - 実行中フレームの古い定義への参照を新定義にリダイレクト（Erlang hot_code_replace相当）
+  - REPL・開発環境での高速イテレーション
+- **根拠**: Erlang hot code reload / SBCL `(compile 'foo)`。Lisp開発体験の中核
+- **難易度**: Hard
+
+#### FR-563: Image Snapshot / Heap Dump (イメージスナップショット)
+
+- **対象**: `src/runtime/heap.lisp`, `src/cli/main.lisp`
+- **内容**:
+  - `(save-image "myapp.img")` — 現在のヒープ状態をバイナリ化してディスクに保存
+  - `./cl-cc --image myapp.img` — イメージをロードして実行再開
+  - すべてのグローバル変数・定義済み関数・インターン済みシンボルを保存
+- **根拠**: SBCL `save-lisp-and-die` / Smalltalk image。起動コスト0化の必殺技
+- **難易度**: Very Hard
+
+#### FR-564: Incremental Compilation Cache (増分コンパイルキャッシュ)
+
+- **対象**: `src/compile/pipeline.lisp`
+- **現状**: `./cl-cc selfhost`が毎回全84ファイルを再コンパイル（フルビルド）
+- **内容**:
+  - ファイルレベルのコンテンツハッシュ（SHA-256）で変更検出
+  - 依存関係グラフ（`cl-cc.asd`のモジュール順序）を保持
+  - 変更ファイルとその依存のみを再コンパイル
+- **根拠**: `ccache` / Buck2 / Bazel incrementality。selfhostサイクルを10秒→1秒に短縮
+- **難易度**: Medium
+
+---
+
+### Phase 97 — ランタイム完全自立化
+
+#### FR-570: OS Abstraction Layer (OS抽象化レイヤ)
+
+- **対象**: `src/runtime/runtime.lisp` (新ファイル `src/runtime/os.lisp`)
+- **内容**:
+  - ファイルIO: `rt-open`/`rt-read`/`rt-write`/`rt-close` — `read`/`write` syscallの薄いラッパ
+  - プロセス: `rt-fork`/`rt-exec`/`rt-waitpid`
+  - タイマー: `rt-gettime`（`clock_gettime`）/ `rt-sleep`（`nanosleep`）
+  - macOS/Linux共通インターフェース（syscall番号をプラットフォーム別定数で分岐）
+- **根拠**: musl libc相当の最小OSインターフェース。ホストCL依存を段階的に解消する基盤
+- **難易度**: Hard
+
+#### FR-571: Standalone Binary Bootstrap
+
+- **対象**: `src/cli/main.lisp`, `src/binary/macho.lisp`, Makefile
+- **依存**: FR-570
+- **内容**:
+  - `./cl-cc compile --standalone foo.lisp -o foo` で依存ゼロのネイティブバイナリを生成
+  - ランタイム（GC + VM interpreter + 標準ライブラリ）をバイナリに静的リンク
+  - エントリポイント: `_start` → ランタイム初期化 → `main`関数呼び出し
+- **根拠**: Go `go build` の静的バイナリ / Zig `zig build-exe`
+- **難易度**: Very Hard
+
+#### FR-572: Signal Handling (シグナルハンドリング)
+
+- **対象**: `src/runtime/os.lisp` (FR-570)
+- **内容**:
+  - `(signal-handler SIGINT (lambda () ...))` — OSシグナルをLispハンドラに変換
+  - `SIGFPE` → `arithmetic-error` condition
+  - `SIGSEGV` → `storage-condition` condition（スタックオーバーフロー検出）
+  - セーフポイント（FR-510）との統合: シグナルはセーフポイントでのみ配送
+- **根拠**: SBCL `sb-sys:enable-interrupt` / Erlang signal handling
+- **難易度**: Hard
+
+#### FR-573: Process/Environment Interface (プロセス・環境インターフェース)
+
+- **対象**: `src/cli/main.lisp`, `src/runtime/runtime.lisp`
+- **現状**: `(uiop:getenv "PATH")` 等のホストCL経由。ネイティブバイナリでは使用不可
+- **内容**:
+  - `(getenv "PATH")` — `environ`配列からの環境変数取得
+  - `(argv)` — コマンドライン引数リスト
+  - `(exit code)` — `_exit` syscall
+  - `(getcwd)` / `(chdir path)`
+- **根拠**: POSIX.1 process model。完全自立バイナリの必須インターフェース
+- **難易度**: Easy
+
+#### FR-574: Socket/Network Primitives (ソケット・ネットワーク原語)
+
+- **対象**: 新ファイル `src/runtime/net.lisp`
+- **内容**:
+  - `(socket :tcp)` / `(bind s addr port)` / `(connect s addr port)` / `(listen s)` / `(accept s)`
+  - ノンブロッキングIO: `(set-nonblocking s)` + `(select fds timeout)`
+  - `epoll`（Linux）/ `kqueue`（macOS）イベントループ統合
+- **根拠**: SBCL `sb-bsd-sockets` / Erlang gen_tcp。Webサーバ・REPLサーバの基盤
+- **難易度**: Hard
+
+---
+
+### Phase 98 — 高度なランタイム最適化 (2026年最先端)
+
+#### FR-580: Shape-Based Object Layout (シェイプ最適化)
+
+- **対象**: `src/vm/vm-clos.lisp`, `src/runtime/heap.lisp`
+- **現状**: CLOSインスタンスはハッシュテーブル（スロット名→値）。`slot-value`が毎回ハッシュ参照
+- **内容**:
+  - Hidden Class / Object Shape: 同じスロット集合を持つインスタンスは同一「シェイプ」を共有
+  - シェイプIDをオブジェクトヘッダ（FR-266）に格納
+  - `slot-value` → 固定オフセット配列アクセスに変換（ハッシュ参照不要）
+  - `(slot-value obj 'x)` → `(aref (object-slots obj) shape-offset-of-x)`
+- **根拠**: V8 Hidden Classes / PyPy map cache / SBCL structure slots
+- **難易度**: Very Hard
+
+#### FR-581: Speculative Slot Access Optimization
+
+- **対象**: `src/vm/vm-clos.lisp`, `src/compile/codegen.lisp`
+- **依存**: FR-580, FR-503
+- **内容**:
+  - TFVから「このオブジェクトは常にシェイプSを持つ」と判明した場合、固定オフセットアクセスにコンパイル
+  - シェイプチェックガード（1命令）＋固定オフセットロード
+  - シェイプ変化時はdeopt（FR-155）
+- **根拠**: V8 Maglev property access / SpiderMonkey JIT slot load
+- **難易度**: Very Hard
+
+#### FR-582: Escape Analysis → Stack Allocation
+
+- **対象**: `src/optimize/optimizer.lisp`, `src/compile/codegen.lisp`
+- **依存**: FR-007（エスケープ解析）
+- **内容**:
+  - エスケープしないと証明されたCLOSインスタンス・クロージャをVMスタックフレームに直接展開
+  - `(let ((p (make-instance 'point :x 1 :y 2))) (+ (slot-value p 'x) (slot-value p 'y)))` → スタック上の2変数に展開
+  - GCヒープ割り当てを完全回避
+- **根拠**: HotSpot Escape Analysis + Scalar Replacement / GraalVM PE
+- **難易度**: Very Hard
+
+#### FR-583: Partial Evaluation / Supercompilation
+
+- **対象**: `src/optimize/optimizer.lisp`, `src/compile/codegen.lisp`
+- **内容**:
+  - `(defun make-adder (n) (lambda (x) (+ x n)))` → `(make-adder 5)` → `(lambda (x) (+ x 5))` に部分評価
+  - 定数引数が既知の関数呼び出しを特化クロージャとしてコンパイル
+  - メモ化付き特化（同じ定数引数の組み合わせは1回だけコンパイル）
+- **根拠**: Futamura projections / GraalVM partial evaluation / PyPy tracing JIT
+- **難易度**: Very Hard
+
+#### FR-584: Profile-Guided Optimization (PGO)
+
+- **対象**: `src/compile/pipeline.lisp`, `src/optimize/optimizer.lisp`
+- **依存**: FR-541（サンプリングプロファイラ）, FR-503（TFV）
+- **内容**:
+  - Tier-1コンパイル時にTFVのプロファイルデータを参照して最適化判断
+  - ホットブランチ予測情報をコード配置（hot/cold分離）に反映
+  - `./cl-cc pgo-train myscript.lisp` → プロファイルデータ生成 → `./cl-cc compile --pgo`
+- **根拠**: LLVM PGO / GCC -fprofile-use / HotSpot tiered profiling
+- **難易度**: Very Hard
+
+#### FR-585: Concurrent Compilation (並列コンパイル)
+
+- **対象**: `src/compile/pipeline.lisp`, `src/cli/main.lisp`
+- **現状**: selfhostが84ファイルをシリアルにコンパイル
+- **内容**:
+  - ASDF依存グラフのトポロジカルソートから並列化可能なファイルセットを抽出
+  - `lparallel`/OSスレッドプールで独立ファイルを並列コンパイル
+  - コンパイル中のマクロ定義が後続ファイルに伝播するセマンティクスを保持
+- **根拠**: `make -jN` / Buck2 parallel actions / Gradle parallel tasks
+- **難易度**: Hard
+
+#### FR-586: Compressed Instructions (命令圧縮)
+
+- **対象**: `src/vm/vm.lisp`, `src/vm/vm-run.lisp`
+- **現状**: 全VM命令がCLOSオブジェクト（デフストラクト）としてリスト/ベクタに格納
+- **内容**:
+  - 高頻度命令（`vm-move`, `vm-const`, `vm-add`, `vm-call`）をfixed-width バイト列にエンコード
+  - 命令デコーダ（`decode-instruction`）をdispatch-tableで実装
+  - メモリフットプリントを最大70%削減、icache効率向上
+- **根拠**: JVM bytecode / WASM binary format / RISC-V C拡張（16-bit圧縮命令）
+- **難易度**: Hard
+
+#### FR-587: Tracing JIT Prototype (トレースJITプロトタイプ)
+
+- **対象**: `src/vm/vm-run.lisp`, `src/emit/x86-64-codegen.lisp`
+- **依存**: FR-154, FR-155, FR-503
+- **内容**:
+  - ループバックエッジでのホットループ検出（カウンタ閾値100回）
+  - トレース記録: ループ1周分のVM命令列をそのまま記録
+  - トレース最適化: 型ガード挿入→定数畳み込み→レジスタ割り当て→x86-64ネイティブ出力
+  - LuaJITに近い「インタープリタ主体、ホットループだけネイティブ」の戦略
+- **根拠**: LuaJIT tracing JIT / TraceMonkey。実装コストに対してROIが高い
+- **難易度**: Very Hard
+
+---
+
+### Phase 99 — Unicode・文字システム
+
+#### FR-590: Full Unicode Character Database
+
+- **対象**: `src/vm/strings.lisp`, `src/vm/vm.lisp` (新ファイル `src/vm/unicode.lisp`)
+- **現状**: 文字述語（`alpha-char-p`等）がASCII範囲のみ動作。Unicode 15+の多バイト文字で誤動作
+- **内容**:
+  - Unicode Character Database (UCD) を静的テーブルとして埋め込み（約200KB）
+  - `char-upcase`/`char-downcase` — Unicode case folding (Turkish dotless-i等の特殊ケース含む)
+  - `alpha-char-p`/`digit-char-p`/`alphanumericp`/`upper-case-p`/`lower-case-p` — UCD General Category準拠
+  - `char-code` — Unicode code point (U+0000〜U+10FFFF)、`code-char` — code point → character
+- **根拠**: ANSI CL 13章 / Unicode 15.0 standard。多言語テキスト処理の必須基盤
+- **難易度**: Hard
+
+#### FR-591: Unicode String Normalization (Unicode正規化)
+
+- **対象**: `src/vm/strings.lisp`
+- **依存**: FR-590
+- **内容**:
+  - NFC (Canonical Decomposition, Canonical Composition) — 最も一般的な形式
+  - NFD (Canonical Decomposition)
+  - NFKC/NFKD (Compatibility forms)
+  - `(string-normalize str :nfc)` — 正規化API
+  - `string=` / `string<` でのユニコード照合順序（UCA: Unicode Collation Algorithm）
+- **根拠**: ICU (International Components for Unicode) / Python `unicodedata.normalize`
+- **難易度**: Very Hard
+
+#### FR-592: UTF-8 Internal Encoding (内部エンコーディング)
+
+- **対象**: `src/vm/strings.lisp`, `src/runtime/value.lisp`
+- **現状**: 文字列がホストCLの内部表現に依存（SBCLはUTF-32等）
+- **内容**:
+  - VM内部文字列をUTF-8バイト列として格納（最もメモリ効率が高い）
+  - `vm-char`命令 → コードポイント単位のインデックス（O(n)だが一般的）
+  - `vm-string-byte-length` vs `vm-string-char-length` の区別
+  - FR-265（SSO）との統合：7バイト以下のUTF-8シーケンスをインライン格納
+- **根拠**: Go `string` / Rust `str` / Python 3.12 PEP 623 compact encoding
+- **難易度**: Hard
+
+#### FR-593: Character Syntax Classes (文字構文クラス)
+
+- **対象**: `src/parse/cl/lexer.lisp`
+- **現状**: FR-136のASCII 256バイトテーブル。リードテーブルの文字構文クラス（whitespace/constituent/macro-char等）がハードコード
+- **内容**:
+  - `readtable-syntax-type`: `:constituent` / `:whitespace` / `:terminating-macro` / `:non-terminating-macro` / `:single-escape` / `:multiple-escape`
+  - `set-syntax-from-char` — 文字の構文クラスをコピー
+  - Unicode空白文字（U+00A0, U+2003等）を`:whitespace`として認識
+- **根拠**: ANSI CL 2.1 Character Syntax Types
+- **難易度**: Medium
+
+---
+
+### Phase 100 — パスネーム・ファイルシステム
+
+#### FR-595: ANSI CL Pathname System (パスネームシステム)
+
+- **対象**: `src/vm/io.lisp` (新ファイル `src/vm/pathname.lisp`)
+- **現状**: ファイルパスをそのまま文字列として扱う。`pathname`型なし
+- **内容**:
+  - `pathname` オブジェクト: `host`/`device`/`directory`/`name`/`type`/`version` コンポーネント
+  - `make-pathname` / `pathname-host` / `pathname-directory` / `pathname-name` / `pathname-type`
+  - `merge-pathnames` — 相対パスの解決
+  - `namestring` / `file-namestring` / `directory-namestring` / `enough-namestring`
+  - Unix形式: `/foo/bar/baz.lisp` ↔ `(:absolute "foo" "bar")` + name `"baz"` + type `"lisp"`
+- **根拠**: ANSI CL 19章 Filenames。`compile-file` / `load` / `open` の基盤
+- **難易度**: Medium
+
+#### FR-596: Logical Pathnames (論理パスネーム)
+
+- **対象**: `src/vm/pathname.lisp` (FR-595)
+- **依存**: FR-595
+- **内容**:
+  - `logical-pathname` 型: `"SRC:COMPILE;CODEGEN.LISP"` 形式
+  - `logical-pathname-translations` — 論理→物理パスのマッピングテーブル
+  - `translate-logical-pathname` — 変換の実行
+  - ASDF統合: `:cl-cc` ホストを自動登録
+- **根拠**: ANSI CL 19.3 Logical Pathnames。ポータブルなソース参照に必要
+- **難易度**: Medium
+
+#### FR-597: Filesystem Operations (ファイルシステム操作)
+
+- **対象**: `src/vm/io.lisp`
+- **現状**: `open`/`close`/`read`/`write`は部分実装。ディレクトリ操作なし
+- **内容**:
+  - `probe-file` — ファイル存在確認
+  - `file-write-date` / `file-author` — ファイルメタデータ
+  - `directory` — ディレクトリ一覧（ワイルドカードパスネーム対応）
+  - `rename-file` / `delete-file` / `ensure-directories-exist`
+  - `file-length` — ファイルサイズ取得
+- **根拠**: ANSI CL 20章 Files。ビルドシステム・コンパイラの必須インターフェース
+- **難易度**: Medium
+
+---
+
+### Phase 101 — ストリーム階層
+
+#### FR-600: ANSI CL Stream Types (ストリーム型完全実装)
+
+- **対象**: `src/vm/io.lisp` (新ファイル `src/vm/stream.lisp`)
+- **現状**: ファイルストリームと文字列ストリームの部分実装のみ
+- **内容**:
+  - `broadcast-stream` — 複数ストリームへの同時書き込み (`make-broadcast-stream`)
+  - `concatenated-stream` — 複数ストリームからの順次読み込み (`make-concatenated-stream`)
+  - `echo-stream` — 入力を出力にコピーしながら読む (`make-echo-stream`)
+  - `synonym-stream` — シンボルが指すストリームへの委譲 (`make-synonym-stream`)
+  - `two-way-stream` — 入力ストリームと出力ストリームの組み合わせ (`make-two-way-stream`)
+  - `string-input-stream` / `string-output-stream` / `get-output-stream-string`
+- **根拠**: ANSI CL 21章 Streams。`*standard-output*` 等の標準変数の基盤
+- **難易度**: Medium
+
+#### FR-601: Gray Streams (Grayストリーム拡張)
+
+- **対象**: `src/vm/stream.lisp` (FR-600)
+- **依存**: FR-600
+- **内容**:
+  - `fundamental-stream` / `fundamental-character-input-stream` / `fundamental-character-output-stream`
+  - ユーザーが `stream-read-char` / `stream-write-char` 等のジェネリック関数をオーバーライドしてカスタムストリームを作成
+  - `with-input-from-string` / `with-output-to-string` の内部実装として活用
+- **根拠**: Gray Streams proposal (STREAM-DEFINITION-BY-USER) / SBCL Gray streams
+- **難易度**: Medium
+
+#### FR-602: Bivalent Streams (バイバレントストリーム)
+
+- **対象**: `src/vm/stream.lisp`
+- **内容**:
+  - `read-byte` / `write-byte` — バイナリモード
+  - `read-char` / `write-char` — 文字モード
+  - `:element-type '(unsigned-byte 8)` の `open` でバイナリストリーム
+  - `:external-format :utf-8` — エンコーディング指定
+- **根拠**: ANSI CL 21.1。バイナリファイルとテキストファイルの統一的な扱い
+- **難易度**: Medium
+
+---
+
+### Phase 102 — プリティプリンタ・リードテーブル
+
+#### FR-605: ANSI CL Pretty Printer (プリティプリンタ)
+
+- **対象**: `src/vm/io.lisp` (新ファイル `src/vm/pprint.lisp`)
+- **現状**: `print`/`princ`/`prin1` は基本実装のみ。インデント・改行なし
+- **内容**:
+  - `pprint-logical-block` / `pprint-indent` / `pprint-newline` / `pprint-tab`
+  - `pprint-dispatch-table` — 型→プリンタ関数のディスパッチテーブル
+  - `copy-pprint-dispatch` / `set-pprint-dispatch` / `get-pprint-dispatch`
+  - `*print-pretty*` = `t` 時に自動使用
+  - Lispコードの標準的なインデント（`defun`/`let`/`if`等のフォーム別ルール）
+- **根拠**: ANSI CL 22.3 Pretty Printer。REPL出力の可読性に直結
+- **難易度**: Hard
+
+#### FR-606: Print Control Variables (印刷制御変数)
+
+- **対象**: `src/vm/io.lisp`, `src/vm/vm.lisp`
+- **現状**: `*print-escape*` のみ部分実装。循環検出・深さ制限なし
+- **内容**:
+  - `*print-level*` — 構造の最大深さ（超えたら `#` を出力）
+  - `*print-length*` — リストの最大表示要素数（超えたら `...` を出力）
+  - `*print-circle*` — 循環構造の `#1=`/`#1#` 表現
+  - `*print-readably*` — read-backできる形式を保証
+  - `*print-base*` / `*print-radix*` — 整数の基数
+  - `with-standard-io-syntax` — 上記を標準値にバインド
+- **根拠**: ANSI CL 22.1。デバッグ出力・シリアライズの制御
+- **難易度**: Medium
+
+#### FR-607: Multiple Readtables (複数リードテーブル)
+
+- **対象**: `src/parse/cl/lexer.lisp`, `src/vm/vm.lisp`
+- **現状**: 単一グローバルリードテーブル。`*readtable*` 変数なし
+- **内容**:
+  - `make-readtable` / `copy-readtable` — リードテーブルオブジェクト
+  - `set-macro-character` / `get-macro-character` — マクロ文字の登録
+  - `set-dispatch-macro-character` / `get-dispatch-macro-character` — `#X` ディスパッチ文字
+  - `*readtable*` — 現在のリードテーブルを保持するスペシャル変数
+  - `readtable-case` — `:upcase`/`:downcase`/`:preserve`/`:invert`
+- **根拠**: ANSI CL 2.1 / SBCL named-readtables。DSLやリーダーマクロライブラリの基盤
+- **難易度**: Hard
+
+---
+
+### Phase 103 — 時刻・乱数・環境API
+
+#### FR-610: Time API (時刻API)
+
+- **対象**: `src/vm/vm.lisp` (新ファイル `src/vm/time.lisp`)
+- **現状**: `get-universal-time` / `get-internal-real-time` がホストCL経由のスタブ
+- **内容**:
+  - `get-universal-time` — Unix epoch からの秒数（`clock_gettime(CLOCK_REALTIME)`）
+  - `get-internal-real-time` / `internal-time-units-per-second` — 高精度タイマー
+  - `sleep` — `nanosleep` syscall
+  - `encode-universal-time year month day hour minute second &optional timezone`
+  - `decode-universal-time universal-time &optional timezone` → 7値返却
+  - `time` マクロ — フォーム実行時間の計測と出力
+- **根拠**: ANSI CL 25.1 Time。ベンチマーク・スケジューラ・ログの基盤
+- **難易度**: Easy
+
+#### FR-611: Random Number Generator (乱数生成器)
+
+- **対象**: `src/vm/primitives.lisp` (新ファイル `src/vm/random.lisp`)
+- **現状**: `random` がホストCLに委譲。`make-random-state` なし
+- **内容**:
+  - `random-state` オブジェクト（Mersenne Twister MT19937の内部状態）
+  - `make-random-state &optional state` — `t` で現在時刻からシード生成
+  - `*random-state*` — デフォルトのスペシャル変数
+  - `random n &optional random-state` — [0, n) の一様乱数
+  - `(random 1.0)` — float乱数も対応
+  - スレッドセーフ: 各スレッドが独立した `*random-state*` を持つ
+- **根拠**: ANSI CL 12.1.7 Random Number Generation / MT19937 (1998)
+- **難易度**: Easy
+
+#### FR-612: Environment Introspection API (環境内省API)
+
+- **対象**: `src/vm/vm.lisp`, `src/cli/main.lisp`
+- **内容**:
+  - `lisp-implementation-type` → `"cl-cc"`
+  - `lisp-implementation-version` → バージョン文字列
+  - `machine-type` / `machine-version` / `machine-instance`
+  - `software-type` / `software-version`
+  - `room` — ヒープ使用状況の表示
+  - `apropos` / `apropos-list` — シンボル名の部分一致検索
+- **根拠**: ANSI CL 25.2 Environment Inquiry。REPL・開発ツールの基盤
+- **難易度**: Easy
+
+---
+
+### Phase 104 — 末尾呼び出し・スタック安全
+
+#### FR-615: Full Proper Tail Calls (完全末尾呼び出し最適化)
+
+- **対象**: `src/compile/cps.lisp`, `src/compile/codegen.lisp`
+- **現状**: FR-045 (TRMC) は `(cons x (f y))` パターンのみ。相互再帰の末尾呼び出し最適化は限定的
+- **内容**:
+  - CPS変換後の全末尾位置を検出（`ast-tail-position-p`述語）
+  - 末尾呼び出し位置の `vm-call` → `vm-tail-call` 命令に変換
+  - `vm-tail-call`: 現スタックフレームを使い回し（新フレームをpushしない）
+  - 相互再帰 `(f → g → f → ...)` がスタックオーバーフローしない
+  - `named-let` / `labels` の相互再帰が定数スタックで動作
+- **根拠**: ANSI CL 5.3 TAIL-RECURSIVE / Scheme R7RS TCO要件 / SBCL proper tail calls
+- **難易度**: Hard
+
+#### FR-616: Stack Overflow Guard (スタックオーバーフロー保護)
+
+- **対象**: `src/vm/vm-run.lisp`, `src/runtime/runtime.lisp`
+- **現状**: 深い再帰でホストCLのスタックオーバーフローが発生し、Lispレベルのエラーでなくクラッシュ
+- **内容**:
+  - `*max-call-stack-depth*` — 最大呼び出し深さ（デフォルト10000）
+  - 各 `vm-call` でデプスカウンタをインクリメント、閾値で `stack-overflow` conditionを signal
+  - ネイティブバックエンド（FR-571）ではガードページ（`mmap`で無効ページ配置）
+  - `sb-kernel:*max-trace-depth*` 相当のデバッガ制御
+- **根拠**: SBCL `sb-kernel:stack-overflow` / JVM `-Xss` スタックサイズ指定
+- **難易度**: Medium
+
+#### FR-617: OOM Condition / GC Pressure Threshold (メモリ不足ハンドリング)
+
+- **対象**: `src/runtime/gc.lisp`, `src/runtime/heap.lisp`
+- **現状**: メモリ枯渇時にホストCLのエラーが発生。Lispレベルでの回復不可
+- **内容**:
+  - `storage-condition` — ANSI CL標準のメモリ不足condition
+  - `rt-gc-alloc`失敗時（旧世代もフル）に`signal 'storage-condition`
+  - ヒープ使用量 80% / 90% / 95% 閾値でのwarning condition
+  - `*heap-limit*` — プロセス全体のヒープ上限
+  - `with-memory-limit (n) body` — スコープ内のメモリ使用量制限
+- **根拠**: ANSI CL 09.1 / SBCL `storage-condition` / JVM `-Xmx` / Node.js `--max-old-space-size`
+- **難易度**: Medium
+
+---
+
+### Phase 105 — シンボル・パッケージシステム
+
+#### FR-620: Symbol Property Lists (シンボルプロパティリスト)
+
+- **対象**: `src/vm/vm.lisp`
+- **現状**: `vm-symbol`はname/packageのみ保持。プロパティリストなし
+- **内容**:
+  - `symbol-plist` — シンボルのプロパティリスト（`(:key1 val1 :key2 val2 ...)`形式）
+  - `get symbol indicator &optional default` — プロパティ取得
+  - `(setf (get sym :prop) val)` — プロパティ設定
+  - `remprop symbol indicator` — プロパティ削除
+  - `symbol-value` / `symbol-function` — Lispレベルのアクセサ
+- **根拠**: ANSI CL 10.1 Symbol Concepts。マクロ展開情報・型宣言の格納先
+- **難易度**: Easy
+
+#### FR-621: Package System Completeness (パッケージシステム完全化)
+
+- **対象**: `src/vm/vm.lisp` (`vm-intern-symbol`, `vm-find-package`)
+- **現状**: パッケージの基本インターン機能のみ。パッケージ操作API不完全
+- **内容**:
+  - `make-package` / `delete-package` / `find-package` / `list-all-packages`
+  - `package-name` / `package-nicknames` / `package-use-list` / `package-used-by-list`
+  - `use-package` / `unuse-package`
+  - `shadow` / `shadowing-import` / `unexport` / `unintern`
+  - `do-symbols` / `do-external-symbols` / `do-all-symbols`
+  - `with-package-iterator`
+- **根拠**: ANSI CL 11章 Packages。モジュール分離・名前空間管理の基盤
+- **難易度**: Medium
+
+#### FR-622: Package Locks (パッケージロック)
+
+- **対象**: `src/vm/vm.lisp`
+- **依存**: FR-621
+- **内容**:
+  - `lock-package` / `unlock-package` — パッケージのシンボル追加を禁止
+  - `:cl` / `:cl-user` パッケージのデフォルトロック
+  - `with-unlocked-packages` — ロックを一時解除
+  - `package-locked-error` condition
+- **根拠**: SBCL package locks / CMUCL。標準パッケージの保護
+- **難易度**: Easy
+
+---
+
+### Phase 106 — 数値パーサ・formatディレクティブ完全化
+
+#### FR-625: Number Reader Completeness (数値リーダ完全化)
+
+- **対象**: `src/parse/cl/lexer.lisp`
+- **現状**: integer / float の基本パース。Rational・Complex・N進数が未実装
+- **内容**:
+  - Rational: `3/4` → `(make-rational 3 4)` — スラッシュで分子/分母を分割
+  - Complex: `#C(1.0 2.0)` / `#C(1 2)` — ディスパッチマクロ `#C`
+  - N進数: `#2r1010` (2進)、`#8r17` (8進)、`#16rFF` (16進)、`#Nrdigits` (N=2〜36)
+  - `#b`/`#o`/`#x` ショートハンド
+  - `*read-base*` — デフォルト基数（標準は10）
+- **根拠**: ANSI CL 2.3 Interpretation of Tokens。数値リテラルの完全サポート
+- **難易度**: Medium
+
+#### FR-626: Format Directive Completeness (formatディレクティブ完全化)
+
+- **対象**: `src/vm/format.lisp` (または `src/vm/io.lisp`)
+- **現状**: `~A`/`~S`/`~%`/`~&`/`~T` の基本実装のみ
+- **内容**:
+  - 数値系: `~D`(10進) / `~B`(2進) / `~O`(8進) / `~X`(16進) / `~R`(任意基数/英語序数)
+  - 浮動小数: `~F`(固定) / `~E`(指数) / `~G`(適応) / `~$`(通貨)
+  - 文字: `~C` (char名)
+  - 繰り返し: `~*`(引数スキップ) / `~?`(間接参照) / `~{...~}`(リストループ) / `~<...~>`(詰め込み)
+  - 条件: `~[...~]`(選択) / `~^`(ループ終了)
+  - 複数値: `~/pkg:fn/`(ユーザー定義ディレクティブ)
+- **根拠**: ANSI CL 22.3 Formatted Output。CLコードの出力の大部分がformatを使用
+- **難易度**: Hard
+
+#### FR-627: READ-EVAL-PRINT Loop Completeness (REPL完全化)
+
+- **対象**: `src/cli/main.lisp`, `src/vm/vm.lisp`
+- **現状**: 基本的なread-eval-printループ。`*` / `**` / `***` / `+` / `++` / `+++` なし
+- **内容**:
+  - `*`/`**`/`***` — 直近3つの一次返却値
+  - `+`/`++`/`+++` — 直近3つの入力フォーム
+  - `/`/`//`/`///` — 直近3つの返却値リスト（`values`対応）
+  - `*terminal-io*` / `*query-io*` / `*debug-io*` の独立管理
+  - `:exit` / `:help` コマンドのREPL組み込み
+- **根拠**: ANSI CL 25.1 The Read-Eval-Print Loop / SBCL REPL variables
+- **難易度**: Easy
+
+---
+
+### Phase 107 — 配列完全化 (Adjustable/Fill-Pointer/Displaced/Bit)
+
+#### FR-630: Adjustable Arrays (可変長配列)
+
+- **対象**: `src/vm/array.lisp`, `src/vm/list.lisp`
+- **現状**: `make-array`は固定長のみ。`:adjustable t`オプションを無視
+- **内容**:
+  - `(make-array n :adjustable t)` — サイズ変更可能フラグをオブジェクトヘッダに格納
+  - `adjust-array array new-size &key initial-element` — 配列のin-place拡張/縮小
+  - 拡張時: 新バッファを`rt-gc-alloc`で確保してコピー（`realloc`相当）
+  - `adjustable-array-p` — アジャスタブルフラグの問い合わせ
+  - `array-element-type` — 要素型の取得
+- **根拠**: ANSI CL 15.2 — adjustable arrays。動的サイズのバッファに必須
+- **難易度**: Medium
+
+#### FR-631: Fill Pointer (フィルポインタ)
+
+- **対象**: `src/vm/array.lisp`
+- **現状**: 配列のフィルポインタなし。`vector-push`/`vector-pop`未実装
+- **内容**:
+  - `(make-array 16 :fill-pointer 0)` — フィルポインタ初期値を指定
+  - `vector-push element vector` — フィルポインタ位置に書き込み、インクリメント
+  - `vector-push-extend element vector &optional extension` — フィルポインタ超過時に自動拡張
+  - `vector-pop vector` — フィルポインタをデクリメントして末尾要素を返す
+  - `fill-pointer vector` / `(setf fill-pointer)` — フィルポインタの読み書き
+  - `array-has-fill-pointer-p` — フィルポインタ有無の確認
+- **根拠**: ANSI CL 15.2。スタック・キュー・動的バッファの基本操作
+- **難易度**: Medium
+
+#### FR-632: Displaced Arrays (ディスプレースト配列)
+
+- **対象**: `src/vm/array.lisp`
+- **内容**:
+  - `(make-array n :displaced-to base-array :displaced-index-offset k)` — 別配列の一部を共有
+  - `aref`/`aset` が透過的にベース配列のオフセット位置にアクセス
+  - `array-displacement` — ベース配列とオフセットの取得
+  - 多次元配列のスライス操作に利用（行列の行ベクタ抽出等）
+- **根拠**: ANSI CL 15.1.2。数値計算・行列演算の基盤
+- **難易度**: Hard
+
+#### FR-633: Bit Arrays / Bit Vectors (ビット配列)
+
+- **対象**: `src/vm/array.lisp`
+- **現状**: `bit-vector-p` は部分実装。ビット演算命令なし
+- **内容**:
+  - `(make-array n :element-type 'bit)` — ビットベクタ（64bits/ワードで圧縮格納）
+  - `bit-and`/`bit-or`/`bit-xor`/`bit-eqv`/`bit-nand`/`bit-nor`/`bit-andc1`/`bit-andc2`/`bit-orc1`/`bit-orc2`/`bit-not`
+  - `bit`/`sbit` — ビットベクタのインデックスアクセス
+  - ビット演算は`unsigned-long`単位で実装し、要素ループを最大64倍高速化
+- **根拠**: ANSI CL 15.3。集合演算・フィルタマスク・GCビットマップに活用
+- **難易度**: Medium
+
+#### FR-634: Array Dimension Queries (配列次元問い合わせ)
+
+- **対象**: `src/vm/array.lisp`
+- **内容**:
+  - `array-rank` — 次元数（1次元ベクタ→1）
+  - `array-dimensions` — 各次元のサイズリスト
+  - `array-dimension array axis-number` — 特定次元のサイズ
+  - `array-total-size` — 全要素数
+  - `array-in-bounds-p array &rest subscripts` — インデックス境界チェック
+  - `row-major-aref` / `(setf row-major-aref)` — 線形インデックスアクセス
+- **根拠**: ANSI CL 15.2。多次元配列操作の必須述語群
+- **難易度**: Easy
+
+---
+
+### Phase 108 — I/O操作完全化
+
+#### FR-638: Read Operations Completeness (read系操作完全化)
+
+- **対象**: `src/vm/io.lisp`, `src/vm/format.lisp`
+- **現状**: `read-char`は部分実装。`unread-char`/`peek-char`/`read-line`/`read-sequence`なし
+- **内容**:
+  - `read-char &optional stream eof-error-p eof-value recursive-p`
+  - `unread-char character &optional stream` — 1文字プッシュバック（1文字保証）
+  - `peek-char &optional peek-type stream eof-error-p eof-value recursive-p`
+  - `read-line &optional stream eof-error-p eof-value recursive-p` → (string . missing-newline-p)
+  - `read-sequence sequence stream &key start end` — バッファ一括読み込み
+  - `listen &optional stream` — ノンブロッキング入力確認
+  - `clear-input &optional stream` — 入力バッファフラッシュ
+- **根拠**: ANSI CL 21.2 / 13.2 Stream Input。パーサ・REPLの基盤
+- **難易度**: Medium
+
+#### FR-639: Write Operations Completeness (write系操作完全化)
+
+- **対象**: `src/vm/io.lisp`, `src/vm/format.lisp`
+- **内容**:
+  - `write-sequence sequence stream &key start end` — バッファ一括書き込み
+  - `write-char character &optional stream` — 単一文字出力
+  - `write-string string &optional stream &key start end`
+  - `write-line string &optional stream &key start end` — 末尾改行付き
+  - `clear-output &optional stream` / `finish-output &optional stream` / `force-output &optional stream`
+  - `write-to-string object &rest keys` / `prin1-to-string object` / `princ-to-string object`
+- **根拠**: ANSI CL 21.2 Stream Output。`format`以外の出力基盤
+- **難易度**: Easy
+
+#### FR-640: with-open-file Full Options (with-open-fileオプション完全化)
+
+- **対象**: `src/vm/io.lisp`
+- **現状**: `:input`/`:output`の基本モードのみ。`:if-exists`/`:if-does-not-exist`を無視
+- **内容**:
+  - `:direction` — `:input`/`:output`/`:io`/`:probe`
+  - `:if-exists` — `:error`/`:new-version`/`:rename`/`:rename-and-delete`/`:overwrite`/`:append`/`:supersede`/`nil`
+  - `:if-does-not-exist` — `:error`/`:create`/`nil`
+  - `:external-format` — `:utf-8`/`:latin-1`/`:default`
+  - `:element-type` — `'character`/`'(unsigned-byte 8)`
+- **根拠**: ANSI CL 21.2 open。ファイル操作の全ユースケースをカバー
+- **難易度**: Medium
+
+---
+
+### Phase 109 — コンディションシステム完全化
+
+#### FR-643: Standard Condition Type Hierarchy (標準コンディション型階層)
+
+- **対象**: `src/vm/conditions.lisp`
+- **現状**: `error`/`simple-error`の基本型のみ。標準型階層が未完全
+- **内容**:
+  ```
+  condition
+  ├── serious-condition
+  │   ├── error
+  │   │   ├── simple-error
+  │   │   ├── type-error (datum, expected-type)
+  │   │   ├── arithmetic-error (operation, operands)
+  │   │   │   ├── division-by-zero
+  │   │   │   ├── floating-point-overflow
+  │   │   │   └── floating-point-underflow
+  │   │   ├── cell-error (name)
+  │   │   │   ├── unbound-variable
+  │   │   │   ├── undefined-function
+  │   │   │   └── unbound-slot (instance)
+  │   │   ├── control-error
+  │   │   │   └── program-error
+  │   │   ├── stream-error (stream)
+  │   │   │   ├── end-of-file
+  │   │   │   └── reader-error
+  │   │   └── package-error (package)
+  │   └── storage-condition
+  └── warning
+      ├── simple-warning
+      └── style-warning
+  ```
+- **根拠**: ANSI CL 9.2 Condition Types。型安全なエラー処理の必須基盤
+- **難易度**: Medium
+
+#### FR-644: Standard Restarts (標準リスタート)
+
+- **対象**: `src/vm/conditions.lisp`
+- **内容**:
+  - `abort` — 現在の操作を中止して最も近い`restart-case`へ
+  - `continue` — 警告等を無視して継続
+  - `muffle-warning` — `warning`を黙殺（`handler-bind`との組み合わせ）
+  - `use-value value` — 代替値を提供して継続
+  - `store-value value` — 値を格納して継続（`cell-error`の修正）
+  - `retry` — 操作を最初からリトライ
+  - `invoke-restart`/`find-restart`/`restart-name`/`compute-restarts`
+- **根拠**: ANSI CL 9.1.4 Standard Restart Functions
+- **難易度**: Medium
+
+#### FR-645: Debugger Hook / Interactive Debugger (デバッガフック)
+
+- **対象**: `src/vm/conditions.lisp`, `src/cli/main.lisp`
+- **内容**:
+  - `*debugger-hook*` — デバッガ起動時に呼ばれるフック関数 `(lambda (condition hook) ...)`
+  - `invoke-debugger condition` — デバッガを明示的に起動
+  - `break &optional format-string &rest args` — デバッガに入る（`continue`リスタート付き）
+  - `*break-on-signals*` — 特定conditionでbreak
+  - デバッガレベル: `*debugger-level*` のネスト管理
+- **根拠**: ANSI CL 9.2 / SBCL debugger。本番バグの対話的修復
+- **難易度**: Hard
+
+#### FR-646: Condition Report / Print-Object Integration
+
+- **対象**: `src/vm/conditions.lisp`, `src/vm/io.lisp`
+- **内容**:
+  - `define-condition` の `:report` オプション — condition→文字列の変換関数
+  - `print-object` メソッドで `#<ERROR: message>` 形式のデフォルト出力
+  - `condition-report condition stream` — condition型のhuman-readable報告
+  - バックトレース付きエラー出力: `print-backtrace &optional stream n-frames`
+- **根拠**: ANSI CL 9.1.3。`(format t "~A" err)` で読みやすいエラーメッセージ
+- **難易度**: Medium
+
+---
+
+### Phase 110 — 文字・文字列操作完全化
+
+#### FR-650: Character Comparison Functions (文字比較関数)
+
+- **対象**: `src/vm/strings.lisp`
+- **現状**: `char=`/`char/=`のみ実装。大小比較・ケース非依存比較なし
+- **内容**:
+  - ケース依存: `char<`/`char>`/`char<=`/`char>=`
+  - ケース非依存: `char-equal`/`char-not-equal`/`char-lessp`/`char-greaterp`/`char-not-greaterp`/`char-not-lessp`
+  - 全て可変引数対応: `(char< a b c)` → `(and (char< a b) (char< b c))`
+  - Unicode照合順序（FR-591 UCA）との統合
+- **根拠**: ANSI CL 13.2 Character Comparisons
+- **難易度**: Easy
+
+#### FR-651: Character Name Functions (文字名関数)
+
+- **対象**: `src/vm/strings.lisp`, `src/parse/cl/lexer.lisp`
+- **現状**: `#\Space`/`#\Newline` 等のリードは実装済みだが、`char-name`/`name-char`なし
+- **内容**:
+  - `char-name character` → 名前文字列 (`#\Space` → `"Space"`, `#\A` → `nil`)
+  - `name-char name` → 文字 (`"Space"` → `#\Space`, `"Newline"` → `#\Newline`)
+  - 標準名前: `Space`, `Newline`, `Tab`, `Return`, `Rubout`, `Backspace`, `Page`, `Null`, `Altmode`, `Delete`, `Escape`
+  - Unicode拡張名: U+XXXX形式の名前もサポート
+- **根拠**: ANSI CL 13.2
+- **難易度**: Easy
+
+#### FR-652: String Trim Functions (文字列トリム関数)
+
+- **対象**: `src/vm/strings.lisp`
+- **現状**: `string-trim`/`string-left-trim`/`string-right-trim`なし
+- **内容**:
+  - `string-trim bag string` — 両端からbag中の文字を除去
+  - `string-left-trim bag string` — 先頭のみ
+  - `string-right-trim bag string` — 末尾のみ
+  - bagは文字バッグ（文字リスト/文字列）
+  - `(string-trim " " "  hello  ")` → `"hello"`
+- **根拠**: ANSI CL 16.2 String Trimming
+- **難易度**: Easy
+
+#### FR-653: Destructive String Case (破壊的文字列大小変換)
+
+- **対象**: `src/vm/strings.lisp`
+- **現状**: `string-upcase`/`string-downcase`/`string-capitalize`は非破壊版のみ
+- **内容**:
+  - `nstring-upcase`/`nstring-downcase`/`nstring-capitalize` — in-place変換
+  - `:start`/`:end`キーワードによる部分範囲操作
+  - `string-upcase`/`string-downcase`/`string-capitalize` にも`:start`/`:end`を追加
+- **根拠**: ANSI CL 16.2
+- **難易度**: Easy
+
+#### FR-654: String Comparison Functions (文字列比較関数)
+
+- **対象**: `src/vm/strings.lisp`
+- **現状**: `string=`/`string/=`のみ
+- **内容**:
+  - ケース依存: `string<`/`string>`/`string<=`/`string>=`
+  - ケース非依存: `string-equal`/`string-not-equal`/`string-lessp`/`string-greaterp`/`string-not-greaterp`/`string-not-lessp`
+  - 全て `:start1`/`:end1`/`:start2`/`:end2` キーワード対応
+  - 不一致位置のインデックスを返す（`string<` は最初の相違点の位置）
+- **根拠**: ANSI CL 16.2 String Comparisons
+- **難易度**: Easy
+
+---
+
 
 ### Phase 35 — 並行性・スレッド基盤
 

@@ -183,7 +183,7 @@ BODY must be a single (lambda (state code pc regs) ...) returning next PC."
                (&key (output-stream *standard-output*)
                 &aux (registers (make-array +vm-register-count+ :initial-element nil))
                      (global-vars (let ((ht (make-hash-table)))
-                                    (setf (gethash '*features* ht) '(:cl-cc))
+                                    (setf (gethash '*features* ht) '(:common-lisp :cl-cc))
                                     (setf (gethash '*active-restarts* ht) nil)
                                     (setf (gethash '*standard-output* ht) *standard-output*)
                                     (setf (gethash '*standard-input* ht) *standard-input*)

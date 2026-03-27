@@ -119,6 +119,8 @@
   ;; Integer division ops (inherit vm-instruction directly, not vm-binop)
   (def-binop-like vm-truncate)
   (def-binop-like vm-rem)
+  ;; FR-640: nreconc
+  (def-binop-like vm-nreconc)
   )
 
 ;; Unary ops: dst+src pattern
@@ -138,7 +140,29 @@
   (def-unary-like vm-dec)
   (def-unary-like vm-not)
   ;; Bitwise complement (vm-instruction directly, not vm-binop)
-  (def-unary-like vm-lognot))
+  (def-unary-like vm-lognot)
+  ;; FR-648: simple-vector-p predicate
+  (def-unary-like vm-simple-vector-p)
+  ;; FR-563: sixth–tenth list accessors
+  (def-unary-like vm-sixth)
+  (def-unary-like vm-seventh)
+  (def-unary-like vm-eighth)
+  (def-unary-like vm-ninth)
+  (def-unary-like vm-tenth)
+  ;; FR-596: nbutlast
+  (def-unary-like vm-nbutlast)
+  ;; FR-597: function combinators
+  (def-unary-like vm-identity)
+  (def-unary-like vm-constantly)
+  (def-unary-like vm-complement)
+  ;; FR-631: macro expansion
+  (def-unary-like vm-macroexpand-1-inst)
+  (def-unary-like vm-macroexpand-inst)
+  ;; FR-498: hash code
+  (def-unary-like vm-sxhash)
+  ;; FR-677: CLOS introspection
+  (def-unary-like vm-class-name-fn)
+  (def-unary-like vm-class-of-fn))
 
 ;;; List instructions (vm-list.lisp)
 

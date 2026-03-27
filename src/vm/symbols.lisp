@@ -97,3 +97,8 @@
 (define-simple-instruction vm-characterp :pred1 characterp)
 (define-simple-instruction vm-parse-integer :unary parse-integer)
 (define-simple-instruction vm-alphanumericp :pred1 alphanumericp)
+
+;;; ─── Sleep (FR-681) ─────────────────────────────────────────────────────────
+
+(define-vm-unary-instruction vm-sleep-inst :sleep "Suspend execution for N seconds.")
+(define-simple-instruction vm-sleep-inst :unary sleep)

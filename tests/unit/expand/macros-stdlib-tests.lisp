@@ -472,6 +472,28 @@
   (let ((result (our-macroexpand-1 '(map 'vector #'1+ v))))
     (assert-equal (symbol-name (car result)) "COERCE")))
 
+;;; ── PAIRLIS ──────────────────────────────────────────────────────────────────
+
+(deftest pairlis-expansion
+  "PAIRLIS: outer LET binds ks, ds, and acc (3 vars); body is TAGBODY loop."
+  (let* ((result   (our-macroexpand-1 '(pairlis ks ds)))
+         (bindings (second result))
+         (body     (caddr result)))
+    (assert-eq (car result)      'let)
+    (assert-=  (length bindings) 3)
+    (assert-eq (car body)        'tagbody)))
+
+;;; ── FIND with keyword args ───────────────────────────────────────────────────
+
+(deftest find-with-key-test-args
+  "FIND with :key/:test keyword args expands to a LET with 3 bindings (item, key, test)."
+  (let* ((result   (our-macroexpand-1 '(find item lst :key #'car :test #'equal)))
+         (bindings (second result))
+         (body     (caddr result)))
+    (assert-eq (car result)      'let)
+    (assert-=  (length bindings) 3)
+    (assert-eq (car body)        'block)))
+
 ;;; ── Stream macros ────────────────────────────────────────────────────────────
 
 (deftest-each stream-macro-outer-is-let
@@ -481,6 +503,14 @@
           ("with-package-iterator"  '(with-package-iterator (sym pkg) body)))
   (form)
   (assert-eq (car (our-macroexpand-1 form)) 'let))
+
+(deftest with-output-to-string-ends-with-get-output-stream-string
+  "WITH-OUTPUT-TO-STRING last form in LET body is (get-output-stream-string var)."
+  (let* ((result    (our-macroexpand-1 '(with-output-to-string (s) body)))
+         (let-body  (cddr result))
+         (last-form (car (last let-body))))
+    (assert-eq    (car result)  'let)
+    (assert-equal (symbol-name (car last-form)) "GET-OUTPUT-STREAM-STRING")))
 
 ;;; ── Restart stubs ────────────────────────────────────────────────────────────
 
@@ -527,3 +557,281 @@
   "DEFINE-COMPILER-MACRO is a stub that expands to NIL"
   (let ((result (our-macroexpand-1 '(define-compiler-macro foo (x) (+ x 1)))))
     (assert-eq result nil)))
+
+;;; ── FIND-IF-NOT ──────────────────────────────────────────────────────────────
+
+(deftest find-if-not-delegates-to-find-if-complement
+  "FIND-IF-NOT expands to (find-if (complement pred) list)."
+  (let ((result (our-macroexpand-1 '(find-if-not pred lst))))
+    (assert-eq (car result) 'find-if)
+    (assert-eq (caadr result) 'complement)))
+
+(deftest find-if-not-runtime
+  "FIND-IF-NOT returns first element not satisfying predicate."
+  (assert-equal (run-string "(find-if-not #'oddp '(1 3 4 5 6))") 4)
+  (assert-eq    (run-string "(find-if-not #'numberp '(1 2 3))") nil))
+
+;;; ── POSITION-IF ──────────────────────────────────────────────────────────────
+
+(deftest position-if-outer-is-let
+  "POSITION-IF expands to a LET binding the predicate."
+  (assert-eq (car (our-macroexpand-1 '(position-if pred lst))) 'let))
+
+(deftest position-if-body-is-block
+  "POSITION-IF body is a BLOCK NIL for early RETURN."
+  (let* ((result (our-macroexpand-1 '(position-if pred lst)))
+         (body   (caddr result)))
+    (assert-eq (car body) 'block)
+    (assert-eq (second body) nil)))
+
+(deftest position-if-runtime
+  "POSITION-IF returns the 0-based index of first matching element."
+  (assert-= (run-string "(position-if #'evenp '(1 3 4 7 8))") 2)
+  (assert-eq (run-string "(position-if #'evenp '(1 3 5))") nil))
+
+;;; ── POSITION-IF-NOT ──────────────────────────────────────────────────────────
+
+(deftest position-if-not-delegates-to-position-if-complement
+  "POSITION-IF-NOT expands to (position-if (complement pred) list)."
+  (let ((result (our-macroexpand-1 '(position-if-not pred lst))))
+    (assert-eq (car result) 'position-if)
+    (assert-eq (caadr result) 'complement)))
+
+(deftest position-if-not-runtime
+  "POSITION-IF-NOT returns index of first element not satisfying predicate."
+  (assert-= (run-string "(position-if-not #'oddp '(1 3 4 5))") 2)
+  (assert-eq (run-string "(position-if-not #'oddp '(1 3 5))") nil))
+
+;;; ── COUNT-IF-NOT ─────────────────────────────────────────────────────────────
+
+(deftest count-if-not-delegates-to-count-if-complement
+  "COUNT-IF-NOT expands to (count-if (complement pred) list)."
+  (let ((result (our-macroexpand-1 '(count-if-not pred lst))))
+    (assert-eq (car result) 'count-if)
+    (assert-eq (caadr result) 'complement)))
+
+(deftest count-if-not-runtime
+  "COUNT-IF-NOT counts elements not satisfying predicate."
+  (assert-= (run-string "(count-if-not #'oddp '(1 2 3 4 5))") 2)
+  (assert-= (run-string "(count-if-not #'numberp '())") 0))
+
+;;; ── SORT with :KEY ───────────────────────────────────────────────────────────
+
+(deftest sort-with-key-has-four-bindings
+  "SORT with :key binds pred AND keyfn — 2 bindings vs no-key 1 binding."
+  (let* ((result   (our-macroexpand-1 '(sort lst pred :key #'car)))
+         (bindings (second result)))
+    (assert-eq (car result) 'let)
+    (assert-= (length bindings) 2)))
+
+(deftest sort-with-key-merge-uses-keyfn
+  "SORT with :key: labels body has 3 helpers; mmerge accepts (a b) params."
+  (let* ((result      (our-macroexpand-1 '(sort lst pred :key #'car)))
+         (labels-form (caddr result))
+         ;; labels bindings: ((take-n ...) (mmerge ...) (msort ...))
+         (fns         (cadr labels-form))
+         ;; mmerge definition: (mmerge-name (a b) (cond ...))
+         (mmerge-def  (second fns))
+         ;; the parameter list is (a b) — 2 params because key-aware merge
+         (params      (second mmerge-def)))
+    (assert-eq  (car labels-form) 'labels)
+    (assert-=   (length fns)      3)
+    ;; mmerge takes exactly 2 params
+    (assert-=   (length params)   2)))
+
+;;; ── STABLE-SORT with :KEY ────────────────────────────────────────────────────
+
+(deftest stable-sort-with-key-delegates-to-sort-with-key
+  "(stable-sort lst pred :key fn) → (sort lst pred :key fn)"
+  (let ((result (our-macroexpand-1 '(stable-sort lst pred :key #'car))))
+    (assert-eq (car result) 'sort)
+    (assert-equal (cddr result) '(pred :key #'car))))
+
+;;; ── CONCATENATE list/vector result types ─────────────────────────────────────
+
+(deftest concatenate-list-expands-to-append
+  "CONCATENATE 'list expands to (append ...sequences)."
+  (assert-equal (our-macroexpand-1 '(concatenate 'list '(1 2) '(3 4)))
+                '(append '(1 2) '(3 4))))
+
+(deftest concatenate-vector-expands-to-coerce-to-vector
+  "CONCATENATE 'vector expands to (coerce-to-vector (append ...))."
+  (let ((result (our-macroexpand-1 '(concatenate 'vector '(1) '(2)))))
+    (assert-equal (symbol-name (car result)) "COERCE-TO-VECTOR")
+    (assert-eq (caadr result) 'append)))
+
+(deftest concatenate-simple-vector-expands-to-coerce-to-vector
+  "CONCATENATE 'simple-vector also uses coerce-to-vector path."
+  (let ((result (our-macroexpand-1 '(concatenate 'simple-vector '(1) '(2)))))
+    (assert-equal (symbol-name (car result)) "COERCE-TO-VECTOR")))
+
+(deftest concatenate-runtime-string
+  "CONCATENATE runtime: string concatenation."
+  (assert-equal (run-string "(concatenate 'string \"hello\" \" \" \"world\")") "hello world")
+  (assert-equal (run-string "(concatenate 'string)") "")
+  (assert-equal (run-string "(concatenate 'string \"only\")") "only"))
+
+(deftest concatenate-runtime-list
+  "CONCATENATE runtime: list concatenation."
+  (assert-equal (run-string "(concatenate 'list '(1 2) '(3 4))") '(1 2 3 4))
+  (assert-= (run-string "(length (concatenate 'list '(1 2) '(3 4)))") 4)
+  (assert-= (run-string "(length (concatenate 'list '(1)))") 1))
+
+;;; ── NOTANY / NOTEVERY runtime ────────────────────────────────────────────────
+
+(deftest-each notany-notevery-runtime
+  "notany/notevery runtime behaviour mirrors (not (some/every ...))."
+  :cases (("notany-all-fail"    "(notany #'evenp '(1 3 5))"   t)
+          ("notany-one-passes"  "(notany #'evenp '(1 2 3))"   nil)
+          ("notevery-all-pass"  "(notevery #'oddp '(1 3 5))"  nil)
+          ("notevery-one-fails" "(notevery #'oddp '(1 2 3))"  t))
+  (code expected)
+  (if expected
+      (assert-true (run-string code))
+      (assert-false (run-string code))))
+
+;;; ── NRECONC ──────────────────────────────────────────────────────────────────
+
+(deftest nreconc-expands-to-nconc-nreverse
+  "NRECONC expands to (nconc (nreverse list) tail)."
+  (let ((result (our-macroexpand-1 '(nreconc lst tail))))
+    (assert-eq (car result) 'nconc)
+    (assert-eq (caadr result) 'nreverse)
+    (assert-eq (caddr result) 'tail)))
+
+(deftest nreconc-runtime
+  "NRECONC prepends reversed list onto tail."
+  (assert-equal (run-string "(nreconc (list 3 2 1) '(4 5))") '(1 2 3 4 5))
+  (assert-equal (run-string "(nreconc '() '(1 2))") '(1 2)))
+
+;;; ── ASSOC-IF / ASSOC-IF-NOT ──────────────────────────────────────────────────
+
+(deftest assoc-if-outer-is-let
+  "ASSOC-IF expands to a LET binding the predicate."
+  (assert-eq (car (our-macroexpand-1 '(assoc-if pred alist))) 'let))
+
+(deftest assoc-if-body-is-dolist
+  "ASSOC-IF body is a DOLIST (linear scan)."
+  (let* ((result (our-macroexpand-1 '(assoc-if pred alist)))
+         (body   (caddr result)))
+    (assert-eq (car body) 'dolist)))
+
+(deftest assoc-if-not-delegates-to-assoc-if-complement
+  "ASSOC-IF-NOT expands to (assoc-if (complement pred) alist)."
+  (let ((result (our-macroexpand-1 '(assoc-if-not pred alist))))
+    (assert-eq (car result) 'assoc-if)
+    (assert-eq (caadr result) 'complement)))
+
+(deftest assoc-if-runtime
+  "ASSOC-IF returns first pair whose car satisfies predicate."
+  (assert-= (run-string "(car (assoc-if #'evenp '((1 . 10) (2 . 20) (3 . 30))))") 2)
+  (assert-eq (run-string "(assoc-if #'evenp '((1 . 10) (3 . 30)))") nil))
+
+(deftest assoc-if-not-runtime
+  "ASSOC-IF-NOT returns first pair whose car does NOT satisfy predicate."
+  (assert-= (run-string "(car (assoc-if-not #'evenp '((2 . 20) (3 . 30))))") 3)
+  (assert-eq (run-string "(assoc-if-not #'evenp '((2 . 20) (4 . 40)))") nil))
+
+;;; ── PUSHNEW with :TEST ───────────────────────────────────────────────────────
+
+(deftest pushnew-default-expansion
+  "PUSHNEW with no :test uses default #'eql in MEMBER call."
+  (let* ((result    (our-macroexpand-1 '(pushnew item place)))
+         (unless-form (caddr result))
+         (member-call (second unless-form)))
+    (assert-eq (car result)      'let)
+    (assert-eq (car unless-form) 'unless)
+    (assert-eq (car member-call) 'member)))
+
+(deftest pushnew-with-test-passes-test-to-member
+  "PUSHNEW :test keyword is forwarded to the MEMBER call."
+  (let* ((result      (our-macroexpand-1 '(pushnew item place :test #'equal)))
+         (unless-form (caddr result))
+         (member-call (second unless-form))
+         ;; member-call = (member item-var place :test #'equal)
+         ;;   length = 5: member + item-var + place + :test + #'equal
+         (last-arg    (car (last member-call))))
+    ;; the test function #'equal is the last arg in the member call
+    (assert-= (length member-call) 5)
+    (assert-equal last-arg '#'equal)))
+
+(deftest pushnew-runtime-adds-missing
+  "PUSHNEW adds item when not present in place."
+  (assert-= (run-string "(let ((lst (list 1 2 3))) (pushnew 4 lst) (length lst))") 4))
+
+(deftest pushnew-runtime-no-duplicate
+  "PUSHNEW does not add item already present."
+  (assert-= (run-string "(let ((lst (list 1 2 3))) (pushnew 2 lst) (length lst))") 3))
+
+;;; ── RASSOC-IF / RASSOC-IF-NOT ────────────────────────────────────────────────
+
+(deftest rassoc-if-outer-is-let
+  "RASSOC-IF expands to a LET binding the predicate."
+  (assert-eq (car (our-macroexpand-1 '(rassoc-if pred alist))) 'let))
+
+(deftest rassoc-if-body-checks-cdr
+  "RASSOC-IF body DOLIST applies predicate to (cdr pair)."
+  (let* ((result      (our-macroexpand-1 '(rassoc-if pred alist)))
+         (dolist-form (caddr result))
+         (when-form   (second (cdr dolist-form)))
+         (and-form    (second when-form))
+         ;; and-form is (and pair (funcall fn (cdr pair)))
+         (funcall-form (third and-form))
+         ;; funcall-form is (funcall fn-var (cdr pair))
+         (cdr-arg      (caddr funcall-form)))
+    (assert-eq (car dolist-form)   'dolist)
+    (assert-eq (car funcall-form)  'funcall)
+    ;; the argument to funcall is the form (cdr pair), so its car is 'cdr
+    (assert-eq (car cdr-arg)       'cdr)))
+
+(deftest rassoc-if-not-delegates-to-rassoc-if-complement
+  "RASSOC-IF-NOT expands to (rassoc-if (complement pred) alist)."
+  (let ((result (our-macroexpand-1 '(rassoc-if-not pred alist))))
+    (assert-eq (car result) 'rassoc-if)
+    (assert-eq (caadr result) 'complement)))
+
+;;; ── MEMBER-IF / MEMBER-IF-NOT ────────────────────────────────────────────────
+
+(deftest member-if-outer-is-let
+  "MEMBER-IF expands to a LET binding the predicate."
+  (assert-eq (car (our-macroexpand-1 '(member-if pred lst))) 'let))
+
+(deftest member-if-body-is-do-loop
+  "MEMBER-IF uses a DO loop walking cdr-by-cdr."
+  (let* ((result (our-macroexpand-1 '(member-if pred lst)))
+         (body   (caddr result)))
+    (assert-eq (car body) 'do)))
+
+(deftest member-if-not-delegates-to-member-if-complement
+  "MEMBER-IF-NOT expands to (member-if (complement pred) list)."
+  (let ((result (our-macroexpand-1 '(member-if-not pred lst))))
+    (assert-eq (car result) 'member-if)
+    (assert-eq (caadr result) 'complement)))
+
+(deftest member-if-runtime
+  "MEMBER-IF returns the tail starting at first satisfying element."
+  (assert-equal (run-string "(member-if #'evenp '(1 3 4 5 6))") '(4 5 6))
+  (assert-eq    (run-string "(member-if #'evenp '(1 3 5))") nil))
+
+(deftest member-if-not-runtime
+  "MEMBER-IF-NOT returns tail starting at first non-matching element."
+  (assert-equal (run-string "(member-if-not #'oddp '(1 3 4 5))") '(4 5))
+  (assert-eq    (run-string "(member-if-not #'oddp '(1 3 5))") nil))
+
+;;; ── COMPLEMENT ───────────────────────────────────────────────────────────────
+
+(deftest complement-outer-is-let
+  "COMPLEMENT expands to a LET binding the predicate, returning a lambda."
+  (let* ((result (our-macroexpand-1 '(complement pred)))
+         (body   (caddr result)))
+    (assert-eq (car result) 'let)
+    (assert-eq (car body)   'lambda)))
+
+(deftest complement-lambda-applies-not
+  "COMPLEMENT lambda body applies NOT to the result of applying pred."
+  (let* ((result  (our-macroexpand-1 '(complement pred)))
+         (lambda-body (caddr (caddr result)))
+         ;; lambda body is (not (apply fn args))
+         (not-form lambda-body))
+    (assert-eq (car not-form) 'not)
+    (assert-eq (caadr not-form) 'apply)))

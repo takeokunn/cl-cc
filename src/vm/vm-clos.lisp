@@ -242,3 +242,31 @@ Returns a list of class names including CLASS-NAME itself."
          (arg-regs (vm-args inst))
          (dst-reg (vm-dst inst)))
     (vm-dispatch-generic-call gf-ht state pc arg-regs dst-reg labels)))
+
+;;; FR-677: class-name and class-of
+
+(define-vm-unary-instruction vm-class-name-fn :class-name
+  "Return the name (symbol) of a class object.")
+
+(defmethod execute-instruction ((inst vm-class-name-fn) state pc labels)
+  (declare (ignore labels))
+  (let ((class (vm-reg-get state (vm-src inst))))
+    (vm-reg-set state (vm-dst inst)
+                (if (hash-table-p class)
+                    (or (gethash :__name__ class)
+                        (error "class-name: not a class object"))
+                    (error "class-name: ~A is not a class" class)))
+    (values (1+ pc) nil nil)))
+
+(define-vm-unary-instruction vm-class-of-fn :class-of
+  "Return the class object of an instance.")
+
+(defmethod execute-instruction ((inst vm-class-of-fn) state pc labels)
+  (declare (ignore labels))
+  (let ((obj (vm-reg-get state (vm-src inst))))
+    (vm-reg-set state (vm-dst inst)
+                (cond
+                  ((and (hash-table-p obj) (gethash :__class__ obj))
+                   (gethash :__class__ obj))
+                  (t (error "class-of: ~A has no class" obj))))
+    (values (1+ pc) nil nil)))

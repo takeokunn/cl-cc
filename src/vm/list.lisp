@@ -125,6 +125,13 @@
   (:sexp-tag :fifth)
   (:sexp-slots dst src))
 
+;;; FR-563: sixth through tenth list accessors
+(define-vm-unary-instruction vm-sixth   :sixth   "Get the sixth element of the list.")
+(define-vm-unary-instruction vm-seventh :seventh "Get the seventh element of the list.")
+(define-vm-unary-instruction vm-eighth  :eighth  "Get the eighth element of the list.")
+(define-vm-unary-instruction vm-ninth   :ninth   "Get the ninth element of the list.")
+(define-vm-unary-instruction vm-tenth   :tenth   "Get the tenth element of the list.")
+
 (define-vm-instruction vm-rest (vm-instruction)
   "Get the cdr (rest) of the list in SRC, store in DST. Alias for vm-cdr."
   (dst nil :reader vm-dst)
@@ -154,6 +161,12 @@
   (src nil :reader vm-src)
   (:sexp-tag :nreverse)
   (:sexp-slots dst src))
+
+;;; FR-596: nbutlast
+(define-vm-unary-instruction vm-nbutlast :nbutlast "Destructively remove last N elements from list.")
+
+;;; FR-640: nreconc
+(define-vm-binary-instruction vm-nreconc :nreconc "Destructively reverse LHS appended to RHS.")
 
 (define-vm-instruction vm-rplaca (vm-instruction)
   "Destructively replace the car of CONS with VAL. Store modified cons in result."
@@ -260,14 +273,21 @@
 (define-simple-instruction vm-second :unary second)
 (define-simple-instruction vm-third :unary third)
 (define-simple-instruction vm-fourth :unary fourth)
-(define-simple-instruction vm-fifth :unary fifth)
+(define-simple-instruction vm-fifth   :unary fifth)
+(define-simple-instruction vm-sixth   :unary sixth)
+(define-simple-instruction vm-seventh :unary seventh)
+(define-simple-instruction vm-eighth  :unary eighth)
+(define-simple-instruction vm-ninth   :unary ninth)
+(define-simple-instruction vm-tenth   :unary tenth)
 (define-simple-instruction vm-rest :unary rest)
 (define-simple-instruction vm-last :unary last)
-(define-simple-instruction vm-butlast :unary butlast)
+(define-simple-instruction vm-butlast  :unary butlast)
+(define-simple-instruction vm-nbutlast :unary nbutlast)
 
 ;;; Instruction Execution - Destructive Operations
 
 (define-simple-instruction vm-nreverse :unary nreverse)
+(define-simple-instruction vm-nreconc  :binary nreconc)
 
 (defmethod execute-instruction ((inst vm-rplaca) state pc labels)
   (declare (ignore labels))
@@ -290,6 +310,14 @@
 (define-simple-instruction vm-list-length :unary list-length)
 (define-simple-instruction vm-endp :pred1 endp)
 (define-simple-instruction vm-null :pred1 null)
+
+;;; FR-597: identity / constantly / complement
+(define-vm-unary-instruction vm-identity   :identity   "Return argument unchanged.")
+(define-vm-unary-instruction vm-constantly :constantly "Return a function that always returns VALUE.")
+(define-vm-unary-instruction vm-complement :complement "Return a function that negates the result of PREDICATE.")
+(define-simple-instruction vm-identity   :unary identity)
+(define-simple-instruction vm-constantly :unary constantly)
+(define-simple-instruction vm-complement :unary complement)
 
 (defmethod execute-instruction ((inst vm-push) state pc labels)
   (declare (ignore labels))

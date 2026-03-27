@@ -325,3 +325,7 @@
     (vm-reg-set state (vm-dst inst) displaced-to)
     (setf (vm-values-list state) (list displaced-to offset))
     (values (1+ pc) nil nil)))
+
+;;; ─── simple-vector-p (FR-648) ────────────────────────────────────────────
+(define-vm-unary-instruction vm-simple-vector-p :simple-vector-p "Test if value is a simple-vector. Returns 1/0.")
+(define-simple-instruction vm-simple-vector-p :pred1 simple-vector-p)

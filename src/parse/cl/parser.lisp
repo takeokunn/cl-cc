@@ -162,6 +162,31 @@ Each handler is a lambda (node source-file source-line source-column)."
      (dolist (head ',heads)
        (setf (gethash head *list-lowering-table*) fn))))
 
+;;; ── Setf simple-place rewrite table ─────────────────────────────────────────
+;;;
+;;; Maps place-head → (runtime-fn num-place-args).
+;;; Used by %lower-setf-place to dispatch the 14 trivial setf places
+;;; without a 14-branch case statement.
+
+(defparameter *setf-place-simple-rewrites*
+  '((get              %set-symbol-prop   2)
+    (symbol-plist     %set-symbol-plist  1)
+    (aref             aset               2)
+    (svref            %svset             2)
+    (row-major-aref   aset               2)
+    (fill-pointer     %set-fill-pointer  1)
+    (car              rplaca             1)
+    (cdr              rplacd             1)
+    (bit              rt-bit-set         2)
+    (sbit             rt-bit-set         2)
+    (char             rt-string-set      2)
+    (schar            rt-string-set      2)
+    (elt              aset               2)
+    (nth              %set-nth           2))
+  "Alist mapping setf place heads to (runtime-fn num-place-args).
+Simple places: the rewrite is (runtime-fn place-arg-1 ... place-arg-N value-form).
+Complex places (slot-value, gethash, getf) are handled separately in %lower-setf-place.")
+
 ;;; Shared helpers ─────────────────────────────────────────────────────────────
 
 (defun %lower-extended-params (raw-params)
@@ -195,7 +220,7 @@ Returns (values required lowered-optional rest-param lowered-key)."
 
 ;;; ── Arithmetic and comparison binary operators ───────────────────────────────
 
-(define-list-lowerer (+ - * = < > <= >=) (node sf sl sc)
+(define-list-lowerer (+ - * / = < > <= >=) (node sf sl sc)
   (unless (= (length node) 3)
     (error "~S takes exactly 2 args" (car node)))
   (make-ast-binop :op (car node)
@@ -379,62 +404,48 @@ Returns (values required lowered-optional rest-param lowered-key)."
 
 (defun %lower-setf-place (place value-form sf sl sc)
   "Lower a (setf (PLACE ...) VALUE-FORM) compound place.
-Dispatches on the place head via a Prolog-style rewrite table."
-  (let ((head (car place)))
-    (case head
-      (get
-       (lower-sexp-to-ast `(%set-symbol-prop ,(second place) ,(third place) ,value-form)))
-      (symbol-plist
-       (lower-sexp-to-ast `(%set-symbol-plist ,(second place) ,value-form)))
-      (aref
-       (lower-sexp-to-ast `(aset ,(second place) ,(third place) ,value-form)))
-      (svref
-       (lower-sexp-to-ast `(%svset ,(second place) ,(third place) ,value-form)))
-      (row-major-aref
-       (lower-sexp-to-ast `(aset ,(second place) ,(third place) ,value-form)))
-      (fill-pointer
-       (lower-sexp-to-ast `(%set-fill-pointer ,(second place) ,value-form)))
-      (car  (lower-sexp-to-ast `(rplaca ,(second place) ,value-form)))
-      (cdr  (lower-sexp-to-ast `(rplacd ,(second place) ,value-form)))
-      (slot-value
-       (let ((obj-form (second place)) (slot-form (third place)))
-         (if (and (consp slot-form) (eq (car slot-form) 'quote))
-             (make-ast-set-slot-value
-              :object (lower-sexp-to-ast obj-form)
-              :slot   (second slot-form)
-              :value  (lower-sexp-to-ast value-form)
-              :source-file sf :source-line sl :source-column sc)
-             (lower-sexp-to-ast (list 'rt-slot-set obj-form slot-form value-form)))))
-      (gethash
-       (make-ast-set-gethash
-        :key   (lower-sexp-to-ast (second place))
-        :table (lower-sexp-to-ast (third place))
-        :value (lower-sexp-to-ast value-form)
-        :source-file sf :source-line sl :source-column sc))
-      ((bit sbit)
-       (lower-sexp-to-ast `(rt-bit-set ,(second place) ,(third place) ,value-form)))
-      ((char schar)
-       (lower-sexp-to-ast `(rt-string-set ,(second place) ,(third place) ,value-form)))
-      (elt
-       (lower-sexp-to-ast `(aset ,(second place) ,(third place) ,value-form)))
-      (nth
-       (lower-sexp-to-ast `(%set-nth ,(second place) ,(third place) ,value-form)))
-      (getf
-       (let ((plist-var (second place)) (indicator (third place)))
-         (if (symbolp plist-var)
-             (let ((val-ast  (lower-sexp-to-ast value-form))
-                   (plist-ast (lower-sexp-to-ast plist-var))
-                   (ind-ast   (lower-sexp-to-ast indicator)))
-               (make-ast-progn
-                :forms (list (make-ast-setq
-                              :var plist-var
-                              :value (make-ast-call
-                                      :func (lower-sexp-to-ast 'rt-plist-put)
-                                      :args (list plist-ast ind-ast val-ast)))
-                             val-ast)))
-             (lower-sexp-to-ast `(rt-plist-put ,(second place) ,(third place) ,value-form)))))
-      (otherwise
-       (error "setf only supports symbol, slot-value, gethash, getf, aref, svref, car, cdr, bit, char, elt, nth places")))))
+Simple places dispatch via *setf-place-simple-rewrites*; complex places
+(slot-value, gethash, getf) are handled specially."
+  (let* ((head (car place))
+         (place-args (cdr place))
+         (rule (assoc head *setf-place-simple-rewrites*)))
+    (if rule
+        (let* ((fn-sym  (second rule))
+               (n-args  (third rule))
+               (used-args (subseq place-args 0 n-args)))
+          (lower-sexp-to-ast `(,fn-sym ,@used-args ,value-form)))
+        (case head
+          (slot-value
+           (let ((obj-form (second place)) (slot-form (third place)))
+             (if (and (consp slot-form) (eq (car slot-form) 'quote))
+                 (make-ast-set-slot-value
+                  :object (lower-sexp-to-ast obj-form)
+                  :slot   (second slot-form)
+                  :value  (lower-sexp-to-ast value-form)
+                  :source-file sf :source-line sl :source-column sc)
+                 (lower-sexp-to-ast (list 'rt-slot-set obj-form slot-form value-form)))))
+          (gethash
+           (make-ast-set-gethash
+            :key   (lower-sexp-to-ast (second place))
+            :table (lower-sexp-to-ast (third place))
+            :value (lower-sexp-to-ast value-form)
+            :source-file sf :source-line sl :source-column sc))
+          (getf
+           (let ((plist-var (second place)) (indicator (third place)))
+             (if (symbolp plist-var)
+                 (let ((val-ast   (lower-sexp-to-ast value-form))
+                       (plist-ast (lower-sexp-to-ast plist-var))
+                       (ind-ast   (lower-sexp-to-ast indicator)))
+                   (make-ast-progn
+                    :forms (list (make-ast-setq
+                                  :var plist-var
+                                  :value (make-ast-call
+                                          :func (lower-sexp-to-ast 'rt-plist-put)
+                                          :args (list plist-ast ind-ast val-ast)))
+                                 val-ast)))
+                 (lower-sexp-to-ast `(rt-plist-put ,(second place) ,(third place) ,value-form)))))
+          (otherwise
+           (error "setf only supports symbol, slot-value, gethash, getf, aref, svref, car, cdr, bit, char, elt, nth places"))))))
 
 (define-list-lowerer (setf) (node sf sl sc)
   (unless (= (length node) 3)
@@ -712,234 +723,3 @@ Dispatches on the place head via a Prolog-style rewrite table."
                      :source-line source-line
                      :source-column source-column))
 
-;;; AST Pretty Printing
-
-(defgeneric ast-to-sexp (node)
-  (:documentation "Convert an AST node back to an S-expression for debugging."))
-
-(defmethod ast-to-sexp ((node ast-int))
-  (ast-int-value node))
-
-(defmethod ast-to-sexp ((node ast-var))
-  (ast-var-name node))
-
-(defmethod ast-to-sexp ((node ast-binop))
-  (list (ast-binop-op node)
-        (ast-to-sexp (ast-binop-lhs node))
-        (ast-to-sexp (ast-binop-rhs node))))
-
-(defmethod ast-to-sexp ((node ast-if))
-  (list 'if
-        (ast-to-sexp (ast-if-cond node))
-        (ast-to-sexp (ast-if-then node))
-        (ast-to-sexp (ast-if-else node))))
-
-(defmethod ast-to-sexp ((node ast-progn))
-  (cons 'progn (mapcar #'ast-to-sexp (ast-progn-forms node))))
-
-(defmethod ast-to-sexp ((node ast-print))
-  (list 'print (ast-to-sexp (ast-print-expr node))))
-
-(defmethod ast-to-sexp ((node ast-let))
-  (list* 'let
-         (mapcar (lambda (binding)
-                   (list (car binding) (ast-to-sexp (cdr binding))))
-                 (ast-let-bindings node))
-         (mapcar #'ast-to-sexp (ast-let-body node))))
-
-(defmethod ast-to-sexp ((node ast-lambda))
-  (list* 'lambda
-         (ast-lambda-params node)
-         (mapcar #'ast-to-sexp (ast-lambda-body node))))
-
-(defmethod ast-to-sexp ((node ast-function))
-  (list 'function (ast-function-name node)))
-
-(defmethod ast-to-sexp ((node ast-block))
-  (list* 'block
-         (ast-block-name node)
-         (mapcar #'ast-to-sexp (ast-block-body node))))
-
-(defmethod ast-to-sexp ((node ast-return-from))
-  (list 'return-from
-        (ast-return-from-name node)
-        (ast-to-sexp (ast-return-from-value node))))
-
-(defmethod ast-to-sexp ((node ast-tagbody))
-  (let ((result (list 'tagbody)))
-    (dolist (tag-entry (ast-tagbody-tags node))
-      (push (car tag-entry) result)
-      (dolist (form (cdr tag-entry))
-        (push (ast-to-sexp form) result)))
-    (nreverse result)))
-
-(defmethod ast-to-sexp ((node ast-go))
-  (list 'go (ast-go-tag node)))
-
-(defmethod ast-to-sexp ((node ast-setq))
-  (list 'setq
-        (ast-setq-var node)
-        (ast-to-sexp (ast-setq-value node))))
-
-(defmethod ast-to-sexp ((node ast-flet))
-  (list* 'flet
-         (mapcar (lambda (binding)
-                   (list* (first binding)
-                          (second binding)
-                          (mapcar #'ast-to-sexp (cddr binding))))
-                 (ast-flet-bindings node))
-         (mapcar #'ast-to-sexp (ast-flet-body node))))
-
-(defmethod ast-to-sexp ((node ast-labels))
-  (list* 'labels
-         (mapcar (lambda (binding)
-                   (list* (first binding)
-                          (second binding)
-                          (mapcar #'ast-to-sexp (cddr binding))))
-                 (ast-labels-bindings node))
-         (mapcar #'ast-to-sexp (ast-labels-body node))))
-
-(defmethod ast-to-sexp ((node ast-defun))
-  (list* 'defun
-         (ast-defun-name node)
-         (ast-defun-params node)
-         (mapcar #'ast-to-sexp (ast-defun-body node))))
-
-(defmethod ast-to-sexp ((node ast-defvar))
-  (if (ast-defvar-value node)
-      (list 'defvar
-            (ast-defvar-name node)
-            (ast-to-sexp (ast-defvar-value node)))
-      (list 'defvar
-            (ast-defvar-name node))))
-
-(defmethod ast-to-sexp ((node ast-defmacro))
-  (list* 'defmacro
-         (ast-defmacro-name node)
-         (ast-defmacro-lambda-list node)
-         (ast-defmacro-body node)))
-
-(defmethod ast-to-sexp ((node ast-multiple-value-call))
-  (list* 'multiple-value-call
-         (ast-to-sexp (ast-mv-call-func node))
-         (mapcar #'ast-to-sexp (ast-mv-call-args node))))
-
-(defmethod ast-to-sexp ((node ast-multiple-value-prog1))
-  (list* 'multiple-value-prog1
-         (ast-to-sexp (ast-mv-prog1-first node))
-         (mapcar #'ast-to-sexp (ast-mv-prog1-forms node))))
-
-(defmethod ast-to-sexp ((node ast-values))
-  (cons 'values (mapcar #'ast-to-sexp (ast-values-forms node))))
-
-(defmethod ast-to-sexp ((node ast-multiple-value-bind))
-  (list* 'multiple-value-bind
-         (ast-mvb-vars node)
-         (ast-to-sexp (ast-mvb-values-form node))
-         (mapcar #'ast-to-sexp (ast-mvb-body node))))
-
-(defmethod ast-to-sexp ((node ast-apply))
-  (list* 'apply
-         (ast-to-sexp (ast-apply-func node))
-         (mapcar #'ast-to-sexp (ast-apply-args node))))
-
-(defmethod ast-to-sexp ((node ast-catch))
-  (list* 'catch
-         (ast-to-sexp (ast-catch-tag node))
-         (mapcar #'ast-to-sexp (ast-catch-body node))))
-
-(defmethod ast-to-sexp ((node ast-throw))
-  (list 'throw
-        (ast-to-sexp (ast-throw-tag node))
-        (ast-to-sexp (ast-throw-value node))))
-
-(defmethod ast-to-sexp ((node ast-unwind-protect))
-  (list* 'unwind-protect
-         (ast-to-sexp (ast-unwind-protected node))
-         (mapcar #'ast-to-sexp (ast-unwind-cleanup node))))
-
-(defmethod ast-to-sexp ((node ast-handler-case))
-  (list* 'handler-case
-         (ast-to-sexp (ast-handler-case-form node))
-         (mapcar (lambda (clause)
-                   (let ((error-type (first clause))
-                         (var (second clause))
-                         (body (cddr clause)))
-                     (list* error-type
-                            (if var (list var) nil)
-                            (mapcar #'ast-to-sexp body))))
-                 (ast-handler-case-clauses node))))
-
-(defmethod ast-to-sexp ((node ast-call))
-  (let ((func (ast-call-func node))
-        (args (mapcar #'ast-to-sexp (ast-call-args node))))
-    (if (typep func 'ast-node)
-        (cons (ast-to-sexp func) args)
-        (cons func args))))
-
-(defmethod ast-to-sexp ((node ast-quote))
-  (list 'quote (ast-quote-value node)))
-
-(defmethod ast-to-sexp ((node ast-the))
-  (list 'the
-        (ast-the-type node)
-        (ast-to-sexp (ast-the-value node))))
-
-;;; CLOS AST to S-expression roundtrip
-
-(defun slot-def-to-sexp (slot)
-  "Convert an ast-slot-def back to a slot specification s-expression."
-  (let ((opts nil))
-    (when (ast-slot-accessor slot) (push (ast-slot-accessor slot) opts) (push :accessor opts))
-    (when (ast-slot-writer slot) (push (ast-slot-writer slot) opts) (push :writer opts))
-    (when (ast-slot-reader slot) (push (ast-slot-reader slot) opts) (push :reader opts))
-    (when (ast-slot-initform slot) (push (ast-to-sexp (ast-slot-initform slot)) opts) (push :initform opts))
-    (when (ast-slot-initarg slot) (push (ast-slot-initarg slot) opts) (push :initarg opts))
-    (if opts
-        (cons (ast-slot-name slot) opts)
-        (ast-slot-name slot))))
-
-(defmethod ast-to-sexp ((node ast-defclass))
-  (list* 'defclass
-         (ast-defclass-name node)
-         (ast-defclass-superclasses node)
-         (list (mapcar #'slot-def-to-sexp (ast-defclass-slots node)))))
-
-(defmethod ast-to-sexp ((node ast-defgeneric))
-  (list 'defgeneric
-        (ast-defgeneric-name node)
-        (ast-defgeneric-params node)))
-
-(defmethod ast-to-sexp ((node ast-defmethod))
-  (let ((params (loop for name in (ast-defmethod-params node)
-                      for spec in (ast-defmethod-specializers node)
-                      collect (if spec (list name (cdr spec)) name))))
-    (list* 'defmethod
-           (ast-defmethod-name node)
-           params
-           (mapcar #'ast-to-sexp (ast-defmethod-body node)))))
-
-(defmethod ast-to-sexp ((node ast-make-instance))
-  (let ((args (list 'make-instance (ast-to-sexp (ast-make-instance-class node)))))
-    (dolist (pair (ast-make-instance-initargs node))
-      (setf args (append args (list (car pair) (ast-to-sexp (cdr pair))))))
-    args))
-
-(defmethod ast-to-sexp ((node ast-slot-value))
-  (list 'slot-value
-        (ast-to-sexp (ast-slot-value-object node))
-        (list 'quote (ast-slot-value-slot node))))
-
-(defmethod ast-to-sexp ((node ast-set-slot-value))
-  (list 'setf
-        (list 'slot-value
-              (ast-to-sexp (ast-set-slot-value-object node))
-              (list 'quote (ast-set-slot-value-slot node)))
-        (ast-to-sexp (ast-set-slot-value-value node))))
-
-(defmethod ast-to-sexp ((node ast-set-gethash))
-  (list 'setf
-        (list 'gethash
-              (ast-to-sexp (ast-set-gethash-key node))
-              (ast-to-sexp (ast-set-gethash-table node)))
-        (ast-to-sexp (ast-set-gethash-value node))))

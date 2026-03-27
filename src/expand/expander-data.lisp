@@ -60,28 +60,30 @@ These recurse into subforms but their head is not macro-expanded.")
     ash logand logior logxor logeqv logtest logbitp
     expt scale-float gcd lcm complex
     array-dimension row-major-aref svref vector-push
-    bit sbit bit-and bit-or bit-xor adjust-array)
+    bit sbit bit-and bit-or bit-xor adjust-array nreconc)
   "Builtins that take exactly 2 arguments.")
 
 (defparameter *unary-builtins*
   '(car cdr not null consp symbolp numberp integerp stringp
     atom listp characterp functionp
-    first second third fourth fifth rest last
-    nreverse butlast endp reverse length copy-list copy-tree
+    first second third fourth fifth sixth seventh eighth ninth tenth rest last
+    nreverse butlast nbutlast endp reverse length copy-list copy-tree
     symbol-name make-symbol intern gensym keywordp
-    string-length string-upcase string-downcase
+    string-length string-upcase string-downcase nstring-upcase nstring-downcase nstring-capitalize
     char-code code-char
-    typep hash-table-p hash-table-count
+    typep hash-table-p hash-table-count simple-vector-p
     hash-table-test hash-table-keys hash-table-values
     zerop plusp minusp evenp oddp abs lognot logcount integer-length
-    sqrt exp log sin cos tan asin acos atan sinh cosh tanh float float-sign
+    sqrt exp log sin cos tan asin acos atan sinh cosh tanh asinh acosh atanh float float-sign
+    list-length
     rational rationalize numerator denominator realpart imagpart conjugate phase
     boundp fboundp makunbound fmakunbound
     array-rank array-total-size array-dimensions
     fill-pointer array-has-fill-pointer-p array-adjustable-p vector-pop
     bit-not array-displacement char-int
     princ prin1 print write-to-string prin1-to-string princ-to-string
-    type-of make-list alphanumericp eval identity)
+    type-of make-list alphanumericp eval identity constantly complement sleep
+    macroexpand-1 macroexpand sxhash class-name class-of)
   "Builtins that take exactly 1 argument.")
 
 (defparameter *cxr-builtins*

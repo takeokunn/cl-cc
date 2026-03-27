@@ -415,8 +415,14 @@
     :make-vm-div :make-vm-endp :make-vm-eof-p :make-vm-eq
     :make-vm-equal :make-vm-establish-handler
     :make-vm-ensure-values
-    :make-vm-eval :make-vm-evenp :make-vm-fceiling :make-vm-ffloor
-    :make-vm-fifth :make-vm-file-length :make-vm-fill-pointer-inst
+    :make-vm-eval :make-vm-macroexpand-1-inst :make-vm-macroexpand-inst
+    :vm-macroexpand-1-inst :vm-macroexpand-inst
+    :make-vm-sxhash :vm-sxhash
+    :make-vm-class-name-fn :make-vm-class-of-fn
+    :vm-class-name-fn :vm-class-of-fn
+    :make-vm-evenp :make-vm-fceiling :make-vm-ffloor
+    :make-vm-fifth :make-vm-sixth :make-vm-seventh :make-vm-eighth :make-vm-ninth :make-vm-tenth
+    :make-vm-file-length :make-vm-fill-pointer-inst
     :make-vm-file-position :make-vm-first :make-vm-floor-inst
     :make-vm-fmakunbound :make-vm-format-inst :make-vm-fourth
     :make-vm-fround :make-vm-fresh-line-inst :make-vm-ftruncate
@@ -429,10 +435,15 @@
     :make-vm-get-output-stream-string-inst :make-vm-get-string-from-stream
     :make-vm-get-universal-time :make-vm-get-internal-real-time :make-vm-get-internal-run-time
     :make-vm-decode-universal-time :make-vm-encode-universal-time
+    :make-vm-lisp-implementation-type :make-vm-lisp-implementation-version
+    :make-vm-machine-type :make-vm-machine-version :make-vm-machine-instance
+    :make-vm-software-type :make-vm-software-version
+    :make-vm-short-site-name :make-vm-long-site-name
     :make-vm-gcd :make-vm-gethash :make-vm-gt :make-vm-halt
     :make-vm-hash-table-count
     :make-vm-hash-table-keys :make-vm-hash-table-p :make-vm-hash-table-test
-    :make-vm-hash-table-values :make-vm-inc :make-vm-integer-p
+    :make-vm-hash-table-values
+    :make-vm-hash-table-size :make-vm-hash-table-rehash-size :make-vm-hash-table-rehash-threshold :make-vm-inc :make-vm-integer-p
     :make-vm-imagpart :make-vm-intern-symbol :make-vm-jump
     :make-vm-jump-zero :make-vm-keywordp :make-vm-label :make-vm-last
     :make-vm-lcm :make-vm-le :make-vm-length :make-vm-list-length
@@ -442,8 +453,10 @@
     :make-vm-make-string-output-stream-inst :make-vm-make-string-stream
     :make-vm-make-symbol :make-vm-max :make-vm-member
     :make-vm-min :make-vm-mod :make-vm-move :make-vm-mul :make-vm-mv-bind
-    :make-vm-makunbound :make-vm-nconc :make-vm-neg :make-vm-not
+    :make-vm-makunbound :make-vm-nconc :make-vm-nreconc :make-vm-nbutlast
+    :make-vm-neg :make-vm-not
     :make-vm-nreverse :make-vm-nth :make-vm-numerator
+    :make-vm-identity :make-vm-constantly :make-vm-complement
     :make-vm-next-method-p
     :make-vm-nthcdr :make-vm-null :make-vm-null-p :make-vm-num-eq
     :make-vm-number-p :make-vm-oddp :make-vm-open-file :make-vm-or
@@ -468,9 +481,11 @@
     :make-vm-string-coerce :make-vm-string-downcase :make-vm-string-equal
     :make-vm-string-greaterp :make-vm-string-left-trim :make-vm-string-length
     :make-vm-string-lessp :make-vm-string-not-equal :make-vm-string-right-trim
-    :make-vm-string-trim :make-vm-string-upcase :make-vm-string<
+    :make-vm-string-trim :make-vm-string-upcase :make-vm-string-downcase :make-vm-string-capitalize
+    :make-vm-nstring-upcase :make-vm-nstring-downcase :make-vm-nstring-capitalize
+    :make-vm-string<
     :make-vm-string<= :make-vm-string= :make-vm-string> :make-vm-string>=
-    :make-vm-stringp :make-vm-sub :make-vm-subseq :make-vm-subst
+    :make-vm-stringp :make-vm-string-set :make-vm-sub :make-vm-subseq :make-vm-subst
     :make-vm-set-fill-pointer :make-vm-set-symbol-plist
     :make-vm-slot-boundp :make-vm-slot-exists-p :make-vm-slot-makunbound
     :make-vm-svref :make-vm-svset
@@ -480,14 +495,14 @@
     :make-vm-terpri-inst :make-vm-third :make-vm-truncate :make-vm-type-of
     :make-vm-typep :make-vm-unread-char :make-vm-upper-case-p :make-vm-values
     :make-vm-spread-values :make-vm-values-to-list :make-vm-vector-pop :make-vm-vector-push
-    :make-vm-vector-push-extend :make-vm-vectorp
+    :make-vm-vector-push-extend :make-vm-vectorp :make-vm-simple-vector-p
     :make-vm-warn :make-vm-write-byte :make-vm-write-char :make-vm-write-line
     :make-vm-write-string :make-vm-write-to-string-inst :make-vm-write-to-string-rp
     ;; Stream predicates + control
     :make-vm-streamp :make-vm-input-stream-p :make-vm-output-stream-p
     :make-vm-open-stream-p :make-vm-interactive-stream-p :make-vm-stream-element-type-inst
     :make-vm-read-byte :make-vm-listen-inst
-    :make-vm-force-output :make-vm-finish-output :make-vm-clear-input
+    :make-vm-force-output :make-vm-finish-output :make-vm-clear-input :make-vm-clear-output
     :make-vm-load-file
 
     ;; VM Heap Operations
@@ -585,9 +600,12 @@
      :vm-third
      :vm-fourth
      :vm-fifth
+     :vm-sixth :vm-seventh :vm-eighth :vm-ninth :vm-tenth
      :vm-rest
      :vm-last
-     :vm-butlast
+     :vm-butlast :vm-nbutlast
+     :vm-nreconc
+     :vm-identity :vm-constantly :vm-complement
      :vm-rplaca
      :vm-rplacd
      :vm-list-length
@@ -684,10 +702,14 @@
        :vm-string-upcase
        :vm-string-downcase
        :vm-string-capitalize
+       :vm-nstring-upcase
+       :vm-nstring-downcase
+       :vm-nstring-capitalize
        :vm-string-trim
        :vm-string-left-trim
        :vm-string-right-trim
        :vm-search-string
+       :vm-string-set
 
        ;; VM String Operations - Instruction Accessors
        :vm-str1
@@ -716,6 +738,9 @@
        :vm-hash-table-keys
        :vm-hash-table-values
        :vm-hash-table-test
+       :vm-hash-table-size
+       :vm-hash-table-rehash-size
+       :vm-hash-table-rehash-threshold
 
         ;; VM Hash Table Operations - Instruction Accessors
         :vm-hash-test

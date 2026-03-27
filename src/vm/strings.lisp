@@ -71,6 +71,10 @@
 (define-vm-unary-instruction vm-string-upcase    :string-upcase    "Uppercase conversion. DST = uppercase of SRC.")
 (define-vm-unary-instruction vm-string-downcase  :string-downcase  "Lowercase conversion. DST = lowercase of SRC.")
 (define-vm-unary-instruction vm-string-capitalize :string-capitalize "Capitalize string. DST = capitalized form of SRC.")
+;;; FR-475: Destructive string case operations
+(define-vm-unary-instruction vm-nstring-upcase    :nstring-upcase    "Destructive uppercase. Modifies and returns SRC.")
+(define-vm-unary-instruction vm-nstring-downcase  :nstring-downcase  "Destructive lowercase. Modifies and returns SRC.")
+(define-vm-unary-instruction vm-nstring-capitalize :nstring-capitalize "Destructive capitalize. Modifies and returns SRC.")
 
 (define-vm-instruction vm-string-trim (vm-instruction)
   "Trim characters from both ends. DST = STRING with CHAR-BAG chars trimmed from both ends."
@@ -221,6 +225,9 @@
 (define-simple-instruction vm-string-upcase :unary string-upcase)
 (define-simple-instruction vm-string-downcase :unary string-downcase)
 (define-simple-instruction vm-string-capitalize :unary string-capitalize)
+(define-simple-instruction vm-nstring-upcase :unary nstring-upcase)
+(define-simple-instruction vm-nstring-downcase :unary nstring-downcase)
+(define-simple-instruction vm-nstring-capitalize :unary nstring-capitalize)
 
 (defmethod execute-instruction ((inst vm-string-trim) state pc labels)
   (declare (ignore labels))
@@ -254,5 +261,26 @@
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
+
+;;; ─── String character mutation (FR-614) ─────────────────────────────────
+;;;
+;;; (setf (char s i) v) / (setf (schar s i) v) → (rt-string-set s i v)
+
+(define-vm-instruction vm-string-set (vm-instruction)
+  "Set character in string at index. Returns the new character."
+  (dst nil :reader vm-dst)
+  (str nil :reader vm-str-reg)
+  (idx nil :reader vm-idx)
+  (val nil :reader vm-val-reg)
+  (:sexp-tag :string-set)
+  (:sexp-slots dst str idx val))
+
+(defmethod execute-instruction ((inst vm-string-set) state pc labels)
+  (declare (ignore labels))
+  (let ((v (vm-reg-get state (vm-val-reg inst))))
+    (setf (char (vm-reg-get state (vm-str-reg inst))
+                (vm-reg-get state (vm-idx inst))) v)
+    (vm-reg-set state (vm-dst inst) v)
+    (values (1+ pc) nil nil)))
 
 ;;; (Symbol manipulation and character predicate instructions moved to src/vm/symbols.lisp)
