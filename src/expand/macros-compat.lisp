@@ -1,18 +1,91 @@
 ;;;; macros-compat.lisp — ANSI CL compatibility and system macros
 (in-package :cl-cc)
 
-;;; Package System (no-ops in this compiler)
+;;; Package System — delegates to host CL via vm-host-bridge
 
 (our-defmacro in-package (name)
-  `(quote ,name))
+  `(progn (setq *package* (find-package ,name)) (quote ,name)))
 
-(our-defmacro defpackage (name &rest options)
-  (declare (ignore options))
-  `(quote ,name))
+(register-macro 'defpackage
+  (lambda (form env)
+    (declare (ignore env))
+    (let* ((name (second form))
+           (options (cddr form))
+           (use-list nil)
+           (export-list nil))
+      ;; Parse :use and :export options
+      (dolist (opt options)
+        (when (consp opt)
+          (case (first opt)
+            (:use (setf use-list (rest opt)))
+            (:export (setf export-list (rest opt))))))
+      `(progn
+         (let ((pkg (or (find-package ',name)
+                        (make-package ',name ,@(when use-list `(:use ',use-list))))))
+           ,@(when export-list
+               `((dolist (sym ',export-list)
+                   (export (intern (string sym) pkg) pkg))))
+           (quote ,name))))))
 
-(our-defmacro export (symbols &optional package)
-  (declare (ignore symbols package))
-  nil)
+;; export — removed no-op stub; now delegates to host CL via vm-host-bridge
+
+;; do-symbols / do-external-symbols / do-all-symbols (FR-361)
+;; These expand to dolist over package symbol lists obtained via host bridge.
+(our-defmacro do-symbols (binding-spec &body body)
+  (let ((var (first binding-spec))
+        (package (second binding-spec))
+        (result (third binding-spec))
+        (pkg-var (gensym "PKG"))
+        (syms-var (gensym "SYMS")))
+    `(let* ((,pkg-var ,(if package `(find-package ,package) '*package*))
+            (,syms-var (%package-symbols ,pkg-var)))
+       (dolist (,var ,syms-var ,result)
+         ,@body))))
+
+(our-defmacro do-external-symbols (binding-spec &body body)
+  (let ((var (first binding-spec))
+        (package (second binding-spec))
+        (result (third binding-spec))
+        (pkg-var (gensym "PKG"))
+        (syms-var (gensym "SYMS")))
+    `(let* ((,pkg-var ,(if package `(find-package ,package) '*package*))
+            (,syms-var (%package-external-symbols ,pkg-var)))
+       (dolist (,var ,syms-var ,result)
+         ,@body))))
+
+(our-defmacro do-all-symbols (binding-spec &body body)
+  (let ((var (first binding-spec))
+        (result (second binding-spec))
+        (syms-var (gensym "SYMS")))
+    `(let ((,syms-var (%all-symbols)))
+       (dolist (,var ,syms-var ,result)
+         ,@body))))
+
+;;; Array type introspection (ANSI CL: implementations may upgrade element types)
+;; All VM arrays accept any element type, so array-element-type always returns T.
+;; All VM arrays are adjustable (hash-table-backed).
+
+(our-defmacro array-element-type (array)
+  (let ((a (gensym "A")))
+    `(let ((,a ,array))
+       (declare (ignore ,a))
+       t)))
+
+(our-defmacro upgraded-array-element-type (typespec &optional env)
+  (declare (ignore typespec env))
+  `(quote t))
+
+(our-defmacro adjustable-array-p (array)
+  (let ((a (gensym "A")))
+    `(let ((,a ,array))
+       (declare (ignore ,a))
+       t)))
+
+(our-defmacro array-has-fill-pointer-p (array)
+  (let ((a (gensym "A")))
+    `(let ((,a ,array))
+       (declare (ignore ,a))
+       nil)))
 
 ;;; Declaration (silently ignored)
 
@@ -54,8 +127,12 @@
 ;;; Scope with Declarations
 
 (our-defmacro locally (&body forms)
-  `(progn ,@(remove-if (lambda (f) (and (consp f) (eq (car f) 'declare)))
-                       forms)))
+  ;; FR-397: preserve declarations by wrapping in (let () decls body)
+  (let ((decls (remove-if-not (lambda (f) (and (consp f) (eq (car f) 'declare))) forms))
+        (body  (remove-if (lambda (f) (and (consp f) (eq (car f) 'declare))) forms)))
+    (if decls
+        `(let () ,@decls ,@body)
+        `(progn ,@body))))
 
 ;; PROGV (FR-102) — dynamic variable binding
 ;; Uses vm-progv-enter/vm-progv-exit to save and restore global-vars around body.
@@ -106,9 +183,14 @@
                   ,ht-var)
          ,new-var))))
 
+;; FR-555: copy-structure — VM structs are hash-tables with :__class__
+(our-defmacro copy-structure (struct)
+  `(copy-hash-table ,struct))
+
 ;;; Type Coercion
 
 (our-defmacro coerce (value type-form)
+  ;; FR-630: quoted literal types → direct call; dynamic types → runtime dispatch
   (if (and (consp type-form) (eq (car type-form) 'quote))
       (let ((type (second type-form)))
         (cond
@@ -116,12 +198,14 @@
            `(coerce-to-string ,value))
           ((eq type 'list)
            `(coerce-to-list ,value))
-          ;; vector, simple-vector, (vector ...), (array ...), (simple-array ...)
           ((or (and (symbolp type) (member type '(vector simple-vector)))
                (and (consp type) (member (car type) '(vector simple-array array))))
            `(coerce-to-vector ,value))
-          (t `(coerce-to-string ,value))))
-      `(coerce-to-string ,value)))
+          ((eq type 'character) `(character ,value))
+          ((member type '(float single-float double-float short-float long-float))
+           `(float ,value))
+          (t `(%coerce-runtime ,value ,type-form))))
+      `(%coerce-runtime ,value ,type-form)))
 
 ;;; Compile-time Evaluation
 
@@ -245,15 +329,102 @@ otherwise falling back to prin1."
 
 (our-defmacro change-class (instance new-class &rest initargs)
   "Change the class of INSTANCE to NEW-CLASS, preserving matching slots.
-INITARGS are passed to update-instance-for-different-class (no-op here)."
+Removes old-only slots, adds new-only slots (nil), calls update-instance-for-different-class."
   (let ((inst-var (gensym "INST"))
-        (new-class-var (gensym "NC")))
+        (new-class-var (gensym "NC"))
+        (old-slots-var (gensym "OLD-SLOTS"))
+        (new-slots-var (gensym "NEW-SLOTS"))
+        (s-var (gensym "S")))
     `(let* ((,inst-var ,instance)
-            (,new-class-var ,new-class))
+            (,new-class-var ,new-class)
+            (,old-slots-var (when (hash-table-p (gethash :__class__ ,inst-var))
+                              (gethash :__slots__ (gethash :__class__ ,inst-var))))
+            (,new-slots-var (when (hash-table-p ,new-class-var)
+                              (gethash :__slots__ ,new-class-var))))
        (unless (hash-table-p ,new-class-var)
          (error "change-class: new-class must be a class descriptor hash table"))
+       ;; Remove slots not in new class
+       (dolist (,s-var ,old-slots-var)
+         (unless (member ,s-var ,new-slots-var :test #'equal)
+           (remhash ,s-var ,inst-var)))
+       ;; Add slots from new class not in old (initialize to nil)
+       (dolist (,s-var ,new-slots-var)
+         (unless (member ,s-var ,old-slots-var :test #'equal)
+           (setf (gethash ,s-var ,inst-var) nil)))
+       ;; Update class reference
        (setf (gethash :__class__ ,inst-var) ,new-class-var)
+       ;; Call update hook with initargs
+       ,@(when initargs
+           `((update-instance-for-different-class nil ,inst-var ,@initargs)))
        ,inst-var)))
+
+;;; FR-376: define-method-combination (short form)
+;;; Registers the combination name so defgeneric can reference it.
+;;; The actual dispatch is handled by the VM in vm-dispatch-generic-call.
+;;; Supported short-form: (define-method-combination name &key operator identity-with-one-argument)
+
+(our-defmacro define-method-combination (name &rest options)
+  (declare (ignore options))
+  `(quote ,name))
+
+;;; FR-523〜528: MOP Introspection Macros
+;;; Class objects in the VM are native CL hash tables with keys like
+;;; :__name__, :__superclasses__, :__slots__, :__initargs__, etc.
+;;; These macros expand inline so user code doesn't need function dispatch.
+
+(our-defmacro class-direct-superclasses (class)
+  (let ((c (gensym "C")))
+    `(let ((,c ,class))
+       (when (hash-table-p ,c)
+         (gethash :__superclasses__ ,c)))))
+
+(our-defmacro class-direct-slots (class)
+  (let ((c (gensym "C")))
+    `(let ((,c ,class))
+       (when (hash-table-p ,c)
+         (gethash :__slots__ ,c)))))
+
+(our-defmacro class-slots (class)
+  (let ((c (gensym "C")))
+    `(let ((,c ,class))
+       (when (hash-table-p ,c)
+         (gethash :__slots__ ,c)))))
+
+(our-defmacro class-direct-default-initargs (class)
+  (let ((c (gensym "C")))
+    `(let ((,c ,class))
+       (when (hash-table-p ,c)
+         (gethash :__default-initargs__ ,c)))))
+
+(register-macro 'class-precedence-list
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((class-form (second form))
+          (c (gensym "C"))
+          (name-v (gensym "NAME"))
+          (result-v (gensym "RES"))
+          (seen-v (gensym "SEEN"))
+          (queue-v (gensym "Q"))
+          (s-v (gensym "S"))
+          (sht-v (gensym "SHT")))
+      `(let ((,c ,class-form))
+         (when (hash-table-p ,c)
+           (let ((,name-v (gethash :__name__ ,c)))
+             (when ,name-v
+               (let ((,result-v (list ,name-v))
+                     (,seen-v (list ,name-v))
+                     (,queue-v (gethash :__superclasses__ ,c)))
+                 (dolist (,s-v ,queue-v)
+                   (unless (member ,s-v ,seen-v)
+                     (push ,s-v ,result-v)
+                     (push ,s-v ,seen-v)
+                     (let ((,sht-v (find-class ,s-v)))
+                       (when (hash-table-p ,sht-v)
+                         (dolist (,s-v (gethash :__superclasses__ ,sht-v))
+                           (unless (member ,s-v ,seen-v)
+                             (push ,s-v ,result-v)
+                             (push ,s-v ,seen-v)))))))
+                 (nreverse ,result-v)))))))))
 
 ;;; FR-302: parse-float — not in ANSI CL but requested; implemented via read-from-string
 

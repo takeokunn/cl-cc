@@ -90,15 +90,25 @@ END-TAG is the loop exit label; WHILE/UNTIL use it, ALWAYS/NEVER/THEREIS ignore 
 ;;; ── Iteration emitters ───────────────────────────────────────────────────
 
 (define-loop-iter-emitter :from (var iter)
-  (let ((from    (getf iter :from))
-        (to      (getf iter :to))
-        (below   (getf iter :below))
-        (by-form (getf iter :by))
+  (let ((from     (getf iter :from))
+        (to       (getf iter :to))
+        (below    (getf iter :below))
+        (above    (getf iter :above))
+        (by-form  (getf iter :by))
+        (downward (getf iter :downward))
         (bindings nil) (end-tests nil) (step-forms nil))
     (push (list var from) bindings)
-    (push (list 'setq var (list '+ var (or by-form 1))) step-forms)
-    (cond (to    (push (list '> var to)    end-tests))
-          (below (push (list '>= var below) end-tests)))
+    (if downward
+        ;; FR-695: downward iteration
+        (progn
+          (push (list 'setq var (list '- var (or by-form 1))) step-forms)
+          (cond (to    (push (list '< var to)     end-tests))
+                (above (push (list '<= var above) end-tests))))
+        ;; upward iteration (original)
+        (progn
+          (push (list 'setq var (list '+ var (or by-form 1))) step-forms)
+          (cond (to    (push (list '> var to)     end-tests))
+                (below (push (list '>= var below) end-tests)))))
     (values bindings end-tests nil step-forms)))
 
 ;;; Destructuring helpers — used by :in and :on emitters.

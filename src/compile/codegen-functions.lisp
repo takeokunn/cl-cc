@@ -106,11 +106,13 @@ Returns (values value is-constant-p).  IS-CONSTANT-P is true for compile-time co
 (defun allocate-defaulting-params (ctx params make-entry)
   "Allocate registers for PARAMS with optional defaults.
 MAKE-ENTRY is called as (name reg default-val) and returns the closure-data entry.
-Returns (values closure-data bindings non-constant-defaults)."
-  (let ((closure-data nil) (bindings nil) (non-constant-defaults nil))
+Returns (values closure-data bindings non-constant-defaults supplied-p-entries)."
+  (let ((closure-data nil) (bindings nil) (non-constant-defaults nil)
+        (supplied-p-entries nil))
     (dolist (param params)
       (let* ((name (first param))
              (default-ast (second param))
+             (supplied-p-name (third param))  ; FR-696: supplied-p variable
              (reg (make-register ctx)))
         (multiple-value-bind (default-val is-constant)
             (if default-ast (extract-constant-value default-ast) (values nil t))
@@ -119,36 +121,69 @@ Returns (values closure-data bindings non-constant-defaults)."
                 (push (funcall make-entry name reg *non-constant-default-sentinel*) closure-data)
                 (push (cons reg default-ast) non-constant-defaults))
               (push (funcall make-entry name reg default-val) closure-data)))
-        (push (cons name reg) bindings)))
-    (values (nreverse closure-data) (nreverse bindings) (nreverse non-constant-defaults))))
+        (push (cons name reg) bindings)
+        ;; FR-696: allocate register for supplied-p variable
+        (when supplied-p-name
+          (let ((sp-reg (make-register ctx)))
+            (push (cons supplied-p-name sp-reg) bindings)
+            (push (cons sp-reg reg) supplied-p-entries)))))
+    (values (nreverse closure-data) (nreverse bindings)
+            (nreverse non-constant-defaults) (nreverse supplied-p-entries))))
 
 (defun allocate-extended-params (ctx optional-params rest-param key-params)
   "Allocate registers and build metadata for extended lambda list parameters.
 Returns (values opt-closure-data rest-reg key-closure-data opt-bindings
-                rest-binding key-bindings non-constant-defaults)."
+                rest-binding key-bindings non-constant-defaults supplied-p-entries)."
   (let ((opt-closure-data nil) (opt-bindings nil)
         (rest-reg nil) (rest-binding nil)
         (key-closure-data nil) (key-bindings nil)
-        (non-constant-defaults nil))
+        (non-constant-defaults nil) (supplied-p-entries nil))
     (when optional-params
-      (multiple-value-bind (cd binds ncds)
+      (multiple-value-bind (cd binds ncds sp-entries)
           (allocate-defaulting-params ctx optional-params
                                       (lambda (name reg val)
                                         (declare (ignore name)) (list reg val)))
         (setf opt-closure-data cd  opt-bindings binds)
-        (setf non-constant-defaults (nconc non-constant-defaults ncds))))
+        (setf non-constant-defaults (nconc non-constant-defaults ncds))
+        (setf supplied-p-entries (nconc supplied-p-entries sp-entries))))
     (when rest-param
       (setf rest-reg (make-register ctx))
       (setf rest-binding (cons rest-param rest-reg)))
     (when key-params
-      (multiple-value-bind (cd binds ncds)
+      (multiple-value-bind (cd binds ncds sp-entries)
           (allocate-defaulting-params ctx key-params
                                       (lambda (name reg val)
                                         (list (intern (symbol-name name) "KEYWORD") reg val)))
         (setf key-closure-data cd  key-bindings binds)
-        (setf non-constant-defaults (nconc non-constant-defaults ncds))))
+        (setf non-constant-defaults (nconc non-constant-defaults ncds))
+        (setf supplied-p-entries (nconc supplied-p-entries sp-entries))))
     (values opt-closure-data rest-reg key-closure-data
-            opt-bindings rest-binding key-bindings non-constant-defaults)))
+            opt-bindings rest-binding key-bindings non-constant-defaults
+            supplied-p-entries)))
+
+(defun emit-supplied-p-checks (ctx supplied-p-entries)
+  "Emit code to set supplied-p registers based on sentinel comparison.
+Each entry is (supplied-p-reg . param-reg). Emits: sp-reg = (param-reg != sentinel)."
+  (when supplied-p-entries
+    (let ((sentinel-reg (make-register ctx)))
+      (emit ctx (make-vm-const :dst sentinel-reg :value *non-constant-default-sentinel*))
+      (dolist (entry supplied-p-entries)
+        (let* ((sp-reg (car entry))
+               (param-reg (cdr entry))
+               (eq-reg (make-register ctx))
+               (was-supplied-label (make-label ctx "SP_YES"))
+               (sp-done-label (make-label ctx "SP_DONE")))
+          ;; Compare param-reg with sentinel
+          (emit ctx (make-vm-eq :dst eq-reg :lhs param-reg :rhs sentinel-reg))
+          ;; If eq=0 (not equal to sentinel = was supplied), jump to SP_YES
+          (emit ctx (make-vm-jump-zero :reg eq-reg :label was-supplied-label))
+          ;; Was sentinel → not supplied → sp-reg = NIL
+          (emit ctx (make-vm-const :dst sp-reg :value nil))
+          (emit ctx (make-vm-jump :label sp-done-label))
+          ;; Was supplied → sp-reg = T
+          (emit ctx (make-vm-label :name was-supplied-label))
+          (emit ctx (make-vm-const :dst sp-reg :value t))
+          (emit ctx (make-vm-label :name sp-done-label)))))))
 
 (defun emit-non-constant-defaults (ctx non-constant-defaults)
   "Emit inline code to compute non-constant default parameter values.
@@ -178,8 +213,9 @@ For each (register . ast-node), emits: if register eq sentinel, register = compi
     (nreverse bindings)))
 
 (defun compile-function-body (ctx params param-regs opt-bindings rest-binding
-                              key-bindings non-constant-defaults body)
-  "Bind parameters, emit non-constant defaults, compile BODY, emit vm-ret.
+                              key-bindings non-constant-defaults body
+                              &optional supplied-p-entries)
+  "Bind parameters, emit supplied-p checks, non-constant defaults, compile BODY, emit vm-ret.
 Saves and restores the compiler environment around the body via unwind-protect."
   (let ((old-env (ctx-env ctx))
         (old-tail (ctx-tail-position ctx)))
@@ -189,6 +225,8 @@ Saves and restores the compiler environment around the body via unwind-protect."
                  (append (build-all-param-bindings params param-regs
                                                    opt-bindings rest-binding key-bindings)
                          (ctx-env ctx)))
+           (when supplied-p-entries
+             (emit-supplied-p-checks ctx supplied-p-entries))
            (when non-constant-defaults
              (emit-non-constant-defaults ctx non-constant-defaults))
            (let ((last-reg nil))
@@ -205,12 +243,14 @@ Saves and restores the compiler environment around the body via unwind-protect."
 
 (defun %emit-closure-body (ctx func-label end-label params param-regs
                            opt-bindings rest-binding key-bindings
-                           non-constant-defaults body)
+                           non-constant-defaults body
+                           &optional supplied-p-entries)
   "Emit the jump-over + label + body + end-label pattern common to lambda and defun."
   (emit ctx (make-vm-jump :label end-label))
   (emit ctx (make-vm-label :name func-label))
   (compile-function-body ctx params param-regs opt-bindings rest-binding
-                         key-bindings non-constant-defaults body)
+                         key-bindings non-constant-defaults body
+                         supplied-p-entries)
   (emit ctx (make-vm-label :name end-label)))
 
 (defmethod compile-ast ((node ast-lambda) ctx)
@@ -227,7 +267,8 @@ Saves and restores the compiler environment around the body via unwind-protect."
          (param-regs (loop for i from 0 below (length params)
                            collect (make-register ctx))))
     (multiple-value-bind (opt-closure-data rest-reg key-closure-data
-                          opt-bindings rest-binding key-bindings non-constant-defaults)
+                          opt-bindings rest-binding key-bindings
+                          non-constant-defaults supplied-p-entries)
         (allocate-extended-params ctx
                                   (ast-lambda-optional-params node)
                                   (ast-lambda-rest-param node)
@@ -238,7 +279,7 @@ Saves and restores the compiler environment around the body via unwind-protect."
                  :key-params key-closure-data :captured captured-vars))
       (%emit-closure-body ctx func-label end-label params param-regs
                           opt-bindings rest-binding key-bindings
-                          non-constant-defaults body)
+                          non-constant-defaults body supplied-p-entries)
       closure-reg)))
 
 (defmethod compile-ast ((node ast-defun) ctx)
@@ -262,7 +303,8 @@ Generates a closure at the function's label and registers it globally."
     ;; Pre-register for recursion support
     (setf (gethash name (ctx-global-functions ctx)) func-label)
     (multiple-value-bind (opt-closure-data rest-reg key-closure-data
-                          opt-bindings rest-binding key-bindings non-constant-defaults)
+                          opt-bindings rest-binding key-bindings
+                          non-constant-defaults supplied-p-entries)
         (allocate-extended-params ctx
                                   (ast-defun-optional-params node)
                                   (ast-defun-rest-param node)
@@ -276,7 +318,7 @@ Generates a closure at the function's label and registers it globally."
       (let ((*compiling-typed-fn* (or name t)))
         (%emit-closure-body ctx func-label end-label params param-regs
                             opt-bindings rest-binding key-bindings
-                            non-constant-defaults body))
+                            non-constant-defaults body supplied-p-entries))
       closure-reg)))
 
 ;;; ── defvar / defparameter ────────────────────────────────────────────────

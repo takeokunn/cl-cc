@@ -34,6 +34,20 @@ violation was found.  All others return NIL when there is no accumulator."
           (has-vacuous-truth '(t))
           (t nil))))
 
+;;; ── FR-539: loop-finish replacement ─────────────────────────────────────
+
+(defun %loop-replace-finish (forms end-tag)
+  "Walk FORMS list and replace (LOOP-FINISH) calls with (GO end-tag)."
+  (mapcar (lambda (form) (%loop-subst-finish form end-tag)) forms))
+
+(defun %loop-subst-finish (form end-tag)
+  "Replace (LOOP-FINISH) in a single form tree.  Skips QUOTE forms."
+  (cond ((atom form) form)
+        ((eq (car form) 'quote) form)
+        ((and (eq (car form) 'loop-finish) (null (cdr form)))
+         `(go ,end-tag))
+        (t (mapcar (lambda (sub) (%loop-subst-finish sub end-tag)) form))))
+
 ;;; ── The LOOP macro ───────────────────────────────────────────────────────
 
 (our-defmacro loop (&rest clauses)
@@ -58,7 +72,8 @@ Body:         DO forms...   INITIALLY forms...   FINALLY forms..."
          (accumulations (getf ir :accumulations))
          (conditions   (getf ir :conditions))
          (initially    (getf ir :initially))
-         (finally      (getf ir :finally)))
+         (finally      (getf ir :finally))
+         (loop-name    (getf ir :loop-name)))   ; FR-638: named loop
     (let ((start-tag   (gensym "START"))
           (end-tag     (gensym "END"))
           (bindings    nil)
@@ -113,16 +128,19 @@ Body:         DO forms...   INITIALLY forms...   FINALLY forms..."
       ;;    :initially/:finally — already forward-ordered by finalize-loop-state.
       ;;    bindings/end-tests/pre-body/step-forms — push-accumulated; nreverse corrects.
       ;;    body — push-accumulated across parse + ②③; nreverse corrects.
-      `(block nil
-         (let* ,(nreverse bindings)
-           ,@initially
-           (tagbody
-              ,start-tag
-              ,@(mapcar (lambda (test) `(when ,test (go ,end-tag))) (nreverse end-tests))
-              ,@(nreverse pre-body)
-              ,@(nreverse body)
-              ,@(nreverse step-forms)
-              (go ,start-tag)
-              ,end-tag)
-           ,@finally
-           ,@(%loop-build-return-forms result-form acc-vars conditions))))))
+      ;; FR-539: replace (loop-finish) with (go end-tag) in body and finally forms.
+      (let ((assembled-body    (%loop-replace-finish (nreverse body) end-tag))
+            (assembled-finally (%loop-replace-finish finally end-tag)))
+        `(block ,(or loop-name nil)  ; FR-638: named loop
+           (let* ,(nreverse bindings)
+             ,@initially
+             (tagbody
+                ,start-tag
+                ,@(mapcar (lambda (test) `(when ,test (go ,end-tag))) (nreverse end-tests))
+                ,@(nreverse pre-body)
+                ,@assembled-body
+                ,@(nreverse step-forms)
+                (go ,start-tag)
+                ,end-tag)
+             ,@assembled-finally
+             ,@(%loop-build-return-forms result-form acc-vars conditions)))))))

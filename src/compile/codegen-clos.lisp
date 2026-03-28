@@ -28,14 +28,23 @@ and a method dispatch table.  The descriptor is registered globally."
          (initform-regs (loop for slot in slots
                               when (ast-slot-initform slot)
                                 collect (cons (ast-slot-name slot)
-                                              (compile-ast (ast-slot-initform slot) ctx)))))
+                                              (compile-ast (ast-slot-initform slot) ctx))))
+         ;; Compile :default-initargs value forms
+         (default-initarg-regs (loop for (key . value-ast) in (ast-defclass-default-initargs node)
+                                     collect (cons key (compile-ast value-ast ctx))))
+         ;; Collect names of :allocation :class slots
+         (class-slot-names (loop for slot in slots
+                                 when (eq :class (ast-slot-allocation slot))
+                                   collect (ast-slot-name slot))))
     (emit ctx (make-vm-class-def
                :dst dst
                :class-name name
                :superclasses supers
                :slot-names slot-names
                :slot-initargs initarg-map
-               :slot-initform-regs initform-regs))
+               :slot-initform-regs initform-regs
+               :default-initarg-regs default-initarg-regs
+               :class-slots class-slot-names))
     (setf (gethash name (ctx-global-classes ctx)) dst)
     (push (cons name dst) (ctx-env ctx))
     (emit ctx (make-vm-set-global :name name :src dst))
@@ -129,13 +138,22 @@ Returns the register holding the GF dispatch table."
 (defmethod compile-ast ((node ast-defgeneric) ctx)
   "Compile a generic function definition.
 Creates a dispatch table (hash table) that maps class names to method closures.
-Idempotent: if already defined at compile-time or runtime, reuse existing."
+Idempotent: if already defined at compile-time or runtime, reuse existing.
+If :method-combination is specified, stores it on the GF as :__method-combination__."
   (setf (ctx-tail-position ctx) nil)
   (let* ((name (ast-defgeneric-name node))
+         (combination (ast-defgeneric-combination node))
          (existing (gethash name (ctx-global-generics ctx))))
     (if existing
         existing
         (let ((dst (%ensure-generic-function ctx name)))
+          ;; Store method combination on the GF if specified
+          (when combination
+            (let ((combo-reg (make-register ctx))
+                  (key-reg (make-register ctx)))
+              (emit ctx (make-vm-const :dst key-reg :value :__method-combination__))
+              (emit ctx (make-vm-const :dst combo-reg :value combination))
+              (emit ctx (make-vm-sethash :key key-reg :table dst :value combo-reg))))
           (push (cons name dst) (ctx-env ctx))
           dst))))
 
@@ -145,6 +163,7 @@ Compiles the method body as a closure and registers it on the generic function's
 dispatch table, keyed by the composite specializer list for multiple dispatch."
   (setf (ctx-tail-position ctx) nil)
   (let* ((name (ast-defmethod-name node))
+         (qualifier (ast-defmethod-qualifier node))
          (specializers (ast-defmethod-specializers node))
          (params (ast-defmethod-params node))
          (body (ast-defmethod-body node))
@@ -153,14 +172,22 @@ dispatch table, keyed by the composite specializer list for multiple dispatch."
                      (cdr (assoc name (ctx-env ctx)))
                      (%ensure-generic-function ctx name)))
          ;; Build composite dispatch key from ALL specializers
+         ;; For eql specializers: (param . (eql 'val)) → (eql val) with quote unwrapped
          (dispatch-key (mapcar (lambda (spec)
                                  (if (and spec (consp spec))
-                                     (cdr spec)
+                                     (let ((raw (cdr spec)))
+                                       (if (and (consp raw) (eq (car raw) 'eql))
+                                           (let ((val (second raw)))
+                                             (list 'eql (if (and (consp val) (eq (car val) 'quote))
+                                                            (second val)
+                                                            val)))
+                                           raw))
                                      (or spec t)))
                                specializers))
+         (qual-str (if qualifier (format nil "_~A" qualifier) ""))
          (label-suffix (format nil "~{~A~^_~}" dispatch-key))
-         (func-label (make-label ctx (format nil "METHOD_~A_~A" name label-suffix)))
-         (end-label (make-label ctx (format nil "METHOD_~A_~A_END" name label-suffix)))
+         (func-label (make-label ctx (format nil "METHOD_~A~A_~A" name qual-str label-suffix)))
+         (end-label (make-label ctx (format nil "METHOD_~A~A_~A_END" name qual-str label-suffix)))
          (closure-reg (make-register ctx))
          (param-regs (loop for i from 0 below (length params)
                            collect (make-register ctx))))
@@ -168,7 +195,8 @@ dispatch table, keyed by the composite specializer list for multiple dispatch."
                :dst closure-reg :label func-label
                :params param-regs :captured nil))
     (emit ctx (make-vm-register-method
-               :gf-reg gf-reg :specializer dispatch-key :method-reg closure-reg))
+               :gf-reg gf-reg :specializer dispatch-key
+               :qualifier qualifier :method-reg closure-reg))
     (emit ctx (make-vm-jump :label end-label))
     (emit ctx (make-vm-label :name func-label))
     (let ((old-env (ctx-env ctx)))

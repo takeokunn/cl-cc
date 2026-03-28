@@ -20,6 +20,10 @@
 Initially #'eval for bootstrap.  After full pipeline loads, rebound to our-eval
 so macro expansion runs through cl-cc's own compiler — the key self-hosting step.")
 
+(defvar *symbol-macro-table* (make-hash-table :test #'eq)
+  "Global symbol macro environment: maps symbol → expansion form.
+Used by define-symbol-macro. Local symbol-macrolet bindings shadow these.")
+
 ;;; ── Compiler special form grammar ────────────────────────────────────────
 ;;;
 ;;; Forms in this list are handled directly by the parser/compiler.

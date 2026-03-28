@@ -1411,6 +1411,23 @@
   (expected form)
   (assert-= expected (run-string form)))
 
+;;; FR-603: (setf (values ...)) assigns to multiple places
+
+(deftest compile-setf-values
+  "(setf (values ...)) assigns multiple values to individual places."
+  (assert-= 10 (run-string
+             "(let ((a 0) (b 0))
+                (setf (values a b) (values 10 20))
+                a)"))
+  (assert-= 20 (run-string
+             "(let ((a 0) (b 0))
+                (setf (values a b) (values 10 20))
+                b)"))
+  (assert-= 30 (run-string
+             "(let ((x 0) (y 0))
+                (setf (values x y) (values 10 20))
+                (+ x y))")))
+
 ;;; Stdlib HOF Tests (with stdlib)
 
 (deftest-each stdlib-hof-basic

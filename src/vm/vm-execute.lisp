@@ -16,6 +16,43 @@
 ;;; Load order: after vm.lisp, before vm-clos.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+;;; ── Execution context for sub-invocations (custom method combination) ────
+
+(defvar *vm-exec-flat* nil
+  "When non-nil, the flat instruction vector of the currently executing VM program.
+Used by custom method combination to do synchronous sub-calls.")
+
+(defvar *vm-exec-labels* nil
+  "When non-nil, the label table of the currently executing VM program.")
+
+(defun %vm-call-closure-sync (closure state args)
+  "Call a VM closure synchronously, returning its result value.
+Requires *vm-exec-flat* and *vm-exec-labels* to be bound.
+Saves and restores call stack around the sub-invocation."
+  (unless (and *vm-exec-flat* *vm-exec-labels*)
+    (error "No VM execution context for synchronous sub-call"))
+  (let* ((result-reg (intern "R0" :keyword))
+         (saved-stack-depth (length (vm-call-stack state)))
+         (saved-method-depth (length (vm-method-call-stack state)))
+         (entry-pc (gethash (vm-closure-entry-label closure) *vm-exec-labels*)))
+    (unless entry-pc
+      (error "Cannot resolve entry label ~A" (vm-closure-entry-label closure)))
+    ;; Push a call frame; return-pc is irrelevant since we detect return by stack depth
+    (vm-push-call-frame state 0 result-reg)
+    (push nil (vm-method-call-stack state))
+    (vm-bind-closure-args closure state args)
+    ;; Mini execution loop — run until our frame is popped
+    (loop with pc = entry-pc
+          do (when (or (null pc) (>= pc (length *vm-exec-flat*)))
+               (return (vm-reg-get state result-reg)))
+             (multiple-value-bind (next-pc halt-p result)
+                 (execute-instruction (aref *vm-exec-flat* pc) state pc *vm-exec-labels*)
+               (when halt-p (return (or result (vm-reg-get state result-reg))))
+               (when (<= (length (vm-call-stack state)) saved-stack-depth)
+                 ;; Our frame was popped — method returned
+                 (return (vm-reg-get state result-reg)))
+               (setf pc next-pc)))))
+
 (defun vm-resolve-function (state value)
   "Resolve VALUE to a closure, generic function, or host bridge function.
 If VALUE is already a closure, return it.
@@ -100,8 +137,19 @@ check the host bridge whitelist."
         (setf (cdr cv-pair) closure)))
     (values (1+ pc) nil nil)))
 
+(defun %eql-specializer-p (key)
+  "Return T if KEY is an eql specializer form (eql value)."
+  (and (consp key) (eq (car key) 'eql)))
+
+(defun %eql-specializer-matches-p (spec-key arg)
+  "Test if an eql specializer key matches ARG.
+SPEC-KEY is (eql value) — matches if (eql arg value)."
+  (and (%eql-specializer-p spec-key)
+       (eql arg (second spec-key))))
+
 (defun vm-get-all-applicable-methods (gf-ht state all-args)
-  "Return list of all applicable method closures for GF-HT and ALL-ARGS, most-specific first."
+  "Return list of all applicable method closures for GF-HT and ALL-ARGS, most-specific first.
+EQL specializers are checked first (most specific), then class-based dispatch via CPL."
   (let* ((methods-ht (gethash :__methods__ gf-ht))
          (first-arg (car all-args))
          (class-name (vm-classify-arg first-arg state))
@@ -111,30 +159,192 @@ check the host bridge whitelist."
                     (if (member t c) c (append c (list t))))
                   (list class-name t)))
          (result nil))
-    ;; Collect methods in CPL order (most-specific first)
+    ;; 1. Check eql specializers first (most specific)
+    (maphash (lambda (key method)
+               (when (or (and (%eql-specializer-p key)
+                              (%eql-specializer-matches-p key first-arg))
+                         (and (consp key) (not (%eql-specializer-p key))
+                              (= 1 (length key))
+                              (%eql-specializer-p (car key))
+                              (%eql-specializer-matches-p (car key) first-arg)))
+                 (push method result)))
+             methods-ht)
+    ;; 2. Collect class-based methods in CPL order (most-specific first)
     (dolist (ancestor cpl)
       (let ((m (or (gethash (list ancestor) methods-ht)
                    (gethash ancestor methods-ht))))
         (when m (push m result))))
-    ;; Fallback: t-specializer (if not already collected)
+    ;; 3. Fallback: t-specializer (if not already collected)
     (let ((t-method (gethash t methods-ht)))
       (when (and t-method (not (member t-method result)))
         (push t-method result)))
     (nreverse result)))
 
+(defun %lookup-qualified-methods (gf-ht qual-key state all-arg-values)
+  "Look up qualified methods for QUAL-KEY (:__BEFORE__ or :__AFTER__) in GF-HT.
+Returns a list of applicable closures for the given argument values."
+  (let ((qual-ht (gethash qual-key gf-ht)))
+    (when qual-ht
+      (let ((first-arg (car all-arg-values))
+            (class-name (vm-classify-arg (car all-arg-values) state))
+            (result nil))
+        (declare (ignore first-arg))
+        ;; Collect matching methods: exact class match, then inheritance
+        (let ((direct (gethash (list class-name) qual-ht)))
+          (when direct
+            (if (listp direct)
+                (dolist (m direct) (push m result))
+                (push direct result))))
+        (let ((t-match (gethash (list t) qual-ht)))
+          (when t-match
+            (if (listp t-match)
+                (dolist (m t-match) (push m result))
+                (push t-match result))))
+        ;; Also check single-key entries for backward compat
+        (let ((direct-single (gethash class-name qual-ht)))
+          (when direct-single
+            (if (listp direct-single)
+                (dolist (m direct-single) (push m result))
+                (push direct-single result))))
+        (let ((t-single (gethash t qual-ht)))
+          (when t-single
+            (if (listp t-single)
+                (dolist (m t-single) (push m result))
+                (push t-single result))))
+        (nreverse result)))))
+
+(defun %collect-combo-methods (gf-ht qual-key state first-arg)
+  "Collect all applicable methods for custom combination by walking the CPL.
+Returns methods most-specific-first, deduplicated."
+  (let* ((qual-ht (gethash qual-key gf-ht))
+         (class-name (vm-classify-arg first-arg state))
+         (class-ht (gethash class-name (vm-class-registry state)))
+         (cpl (if class-ht
+                  (let ((c (gethash :__cpl__ class-ht)))
+                    (if (member t c) c (append c (list t))))
+                  (list class-name t)))
+         (result nil)
+         (seen nil))
+    (when qual-ht
+      ;; Walk CPL (deduplicated) and collect methods from each level
+      (dolist (ancestor cpl)
+        (unless (member ancestor seen)
+          (push ancestor seen)
+          ;; Check plain key
+          (let ((m (gethash ancestor qual-ht)))
+            (when m
+              (if (listp m)
+                  (dolist (method m)
+                    (unless (member method result)
+                      (push method result)))
+                  (unless (member m result)
+                    (push m result)))))
+          ;; Also check list-wrapped keys for multi-dispatch compat
+          (let ((m (gethash (list ancestor) qual-ht)))
+            (when m
+              (if (listp m)
+                  (dolist (method m)
+                    (unless (member method result)
+                      (push method result)))
+                  (unless (member m result)
+                    (push m result))))))))
+    (nreverse result)))
+
+(defun %vm-dispatch-custom-combination (gf-ht state pc arg-regs dst-reg labels combination)
+  "Dispatch a generic function with custom method combination.
+COMBINATION is the combination name (e.g. +, LIST, APPEND).
+Calls all applicable methods with the matching qualifier synchronously
+and folds results using the combination's operator."
+  (let* ((all-arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs))
+         (qual-key (intern (format nil "__~A__" (string-upcase (string combination))) :keyword))
+         (combo-methods (%collect-combo-methods gf-ht qual-key state (car all-arg-values)))
+         ;; Also try primary methods as fallback (some users just define primary methods)
+         (primary-methods (vm-get-all-applicable-methods gf-ht state all-arg-values))
+         (methods (or combo-methods primary-methods))
+         ;; Resolve the operator function
+         (operator (cond
+                     ((eq combination '+) #'+)
+                     ((eq combination '*) #'*)
+                     ((eq combination 'list) #'list)
+                     ((eq combination 'append) #'append)
+                     ((eq combination 'nconc) #'nconc)
+                     ((eq combination 'and) (lambda (&rest args) (every #'identity args)))
+                     ((eq combination 'or) (lambda (&rest args) (some #'identity args)))
+                     ((eq combination 'progn) (lambda (&rest args) (car (last args))))
+                     ((eq combination 'max) #'max)
+                     ((eq combination 'min) #'min)
+                     (t (error "Unknown method combination operator: ~S" combination)))))
+    (if (null methods)
+        (error "No applicable methods for ~S with combination ~S" gf-ht combination)
+        (if *vm-exec-flat*
+            ;; We have execution context — call each method synchronously
+            (let ((results (mapcar (lambda (m)
+                                     (%vm-call-closure-sync m state all-arg-values))
+                                   methods)))
+              (vm-reg-set state dst-reg (apply operator results))
+              (values (1+ pc) nil nil))
+            ;; No execution context (shouldn't happen in practice) — call first method only
+            (let ((method-closure (car methods)))
+              (vm-push-call-frame state (1+ pc) dst-reg)
+              (push (list gf-ht methods all-arg-values) (vm-method-call-stack state))
+              (vm-bind-closure-args method-closure state all-arg-values)
+              (values (gethash (vm-closure-entry-label method-closure) labels) nil nil))))))
+
 (defun vm-dispatch-generic-call (gf-ht state pc arg-regs dst-reg labels)
   "Dispatch a generic function call. GF-HT is the generic function dispatch table.
 Supports multiple dispatch by passing all argument values for composite key lookup.
+Handles standard method combination: :around → :before → primary → :after.
+Custom method combination: calls all qualified methods and folds with operator.
 Returns (values next-pc halt-p result) like execute-instruction."
+  ;; Check for custom method combination
+  (let ((combination (gethash :__method-combination__ gf-ht)))
+    (when (and combination (not (eq combination 'standard)))
+      (return-from vm-dispatch-generic-call
+        (%vm-dispatch-custom-combination gf-ht state pc arg-regs dst-reg labels combination))))
   (let* ((all-arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs))
          (all-methods    (vm-get-all-applicable-methods gf-ht state all-arg-values))
          (method-closure (or (car all-methods)
                              (vm-resolve-gf-method gf-ht state
-                                                   (car all-arg-values) all-arg-values))))
-    (vm-push-call-frame state (1+ pc) dst-reg)
-    (push (list gf-ht all-methods all-arg-values) (vm-method-call-stack state))
-    (vm-bind-closure-args method-closure state all-arg-values)
-    (values (gethash (vm-closure-entry-label method-closure) labels) nil nil)))
+                                                   (car all-arg-values) all-arg-values)))
+         ;; Look up qualified methods
+         (before-methods (%lookup-qualified-methods gf-ht :__BEFORE__ state all-arg-values))
+         (after-methods  (%lookup-qualified-methods gf-ht :__AFTER__ state all-arg-values))
+         (around-methods (%lookup-qualified-methods gf-ht :__AROUND__ state all-arg-values)))
+    (if (and (null before-methods) (null after-methods) (null around-methods))
+        ;; Fast path: no qualified methods — original behavior
+        (progn
+          (vm-push-call-frame state (1+ pc) dst-reg)
+          (push (list gf-ht all-methods all-arg-values) (vm-method-call-stack state))
+          (vm-bind-closure-args method-closure state all-arg-values)
+          (values (gethash (vm-closure-entry-label method-closure) labels) nil nil))
+        ;; Standard method combination with around/before/after
+        (let* ((has-around (not (null around-methods)))
+               (has-before (not (null before-methods)))
+               ;; If around exists, call it first; otherwise start with before or primary
+               (first-method (cond (has-around (car around-methods))
+                                   (has-before (car before-methods))
+                                   (t method-closure))))
+          (vm-push-call-frame state (1+ pc) dst-reg)
+          (push (list gf-ht all-methods all-arg-values
+                      :qualified t
+                      ;; Around method tracking
+                      :around-pending (if has-around (cdr around-methods) nil)
+                      ;; Before/after tracking (deferred until around calls next-method)
+                      :before-pending (if (and (not has-around) has-before)
+                                          (cdr before-methods) nil)
+                      :primary (cond (has-around method-closure)
+                                     (has-before method-closure)
+                                     (t nil))
+                      :after-pending after-methods
+                      :arg-values all-arg-values
+                      :before-methods before-methods
+                      ;; Phase tracking
+                      :phase (cond (has-around :around)
+                                   (has-before :before)
+                                   (t :primary)))
+                (vm-method-call-stack state))
+          (vm-bind-closure-args first-method state all-arg-values)
+          (values (gethash (vm-closure-entry-label first-method) labels) nil nil)))))
 
 (defun %vm-dispatch-call (func state pc labels arg-regs dst-reg tail-p)
   "Shared call dispatch for vm-call and vm-tail-call.
@@ -166,9 +376,90 @@ Returns (values next-pc halt-p result) like execute-instruction."
   (let ((func     (vm-resolve-function state (vm-reg-get state (vm-func-reg inst)))))
     (%vm-dispatch-call func state pc labels (vm-args inst) (vm-dst inst) t)))
 
+(defun %vm-ret-qualified-dispatch (state result labels method-entry)
+  "Handle return from a qualified method. Supports standard method combination:
+:around → :before → primary → :after. Around methods wrap everything; their return
+value is the final result. call-next-method from around triggers before/primary/after."
+  (let ((props (cdddr method-entry)))
+    (let ((before-pending (getf props :before-pending))
+          (primary        (getf props :primary))
+          (after-pending  (getf props :after-pending))
+          (arg-values     (getf props :arg-values))
+          (phase          (getf props :phase)))
+      (cond
+        ;; Around phase: around method returned without call-next-method
+        ;; (if it called call-next-method, phase was already changed to :before/:primary)
+        ((eq phase :around)
+         ;; Around's return value is the final result
+         (pop (vm-method-call-stack state))
+         (if (vm-call-stack state)
+             (destructuring-bind (return-pc dst-reg old-closure-env saved-regs)
+                 (pop (vm-call-stack state))
+               (vm-restore-registers state saved-regs)
+               (vm-reg-set state dst-reg result)
+               (when old-closure-env
+                 (setf (vm-closure-env state) old-closure-env))
+               (values return-pc nil nil))
+             (values nil t result)))
+        ;; More :before methods pending
+        (before-pending
+         (let ((next-before (car before-pending)))
+           (setf (getf (cdddr method-entry) :before-pending) (cdr before-pending))
+           (vm-bind-closure-args next-before state arg-values)
+           (values (gethash (vm-closure-entry-label next-before) labels) nil nil)))
+        ;; All befores done, call primary (only if we haven't called it yet)
+        ((and primary (eq phase :before))
+         (setf (getf (cdddr method-entry) :primary) nil)
+         (setf (getf (cdddr method-entry) :phase) :primary)
+         (vm-bind-closure-args primary state arg-values)
+         (values (gethash (vm-closure-entry-label primary) labels) nil nil))
+        ;; Primary done, call :after methods
+        (after-pending
+         (let ((next-after (car after-pending)))
+           (setf (getf (cdddr method-entry) :after-pending) (cdr after-pending))
+           ;; Save the primary result before calling after methods
+           (when (eq phase :primary)
+             (setf (getf (cdddr method-entry) :primary-result) result)
+             (setf (getf (cdddr method-entry) :phase) :after))
+           (vm-bind-closure-args next-after state arg-values)
+           (values (gethash (vm-closure-entry-label next-after) labels) nil nil)))
+        ;; All before/primary/after done
+        (t
+         (let ((primary-result (if (eq phase :primary)
+                                   result
+                                   (or (getf props :primary-result) result))))
+           ;; Check if returning to an around method's call-next-method
+           (if (getf props :around-return-phase)
+               ;; Return to around method: set phase back, give primary result
+               (progn
+                 (setf (getf (cdddr method-entry) :phase) :around)
+                 (setf (getf (cdddr method-entry) :around-return-phase) nil)
+                 (vm-reg-set state (getf props :around-cnm-dst) primary-result)
+                 (values (getf props :around-return-pc) nil nil))
+               ;; No around, normal return
+               (progn
+                 (pop (vm-method-call-stack state))
+                 (if (vm-call-stack state)
+                     (destructuring-bind (return-pc dst-reg old-closure-env saved-regs)
+                         (pop (vm-call-stack state))
+                       (vm-restore-registers state saved-regs)
+                       (vm-reg-set state dst-reg primary-result)
+                       (when old-closure-env
+                         (setf (vm-closure-env state) old-closure-env))
+                       (values return-pc nil nil))
+                     (values nil t primary-result))))))))))
+
 (defmethod execute-instruction ((inst vm-ret) state pc labels)
-  (declare (ignore pc labels))
+  (declare (ignore pc))
   (let ((result (vm-reg-get state (vm-reg inst))))
+    ;; Check for qualified method dispatch (standard method combination)
+    (let ((method-entry (car (vm-method-call-stack state))))
+      (when (and method-entry (listp method-entry)
+                 (getf (cdddr method-entry) :qualified))
+        ;; We're returning from a qualified method — continue the chain
+        (return-from execute-instruction
+          (%vm-ret-qualified-dispatch state result labels method-entry))))
+    ;; Normal return path
     (if (vm-call-stack state)
         (destructuring-bind (return-pc dst-reg old-closure-env saved-regs)
             (pop (vm-call-stack state))
@@ -282,20 +573,44 @@ Returns (values next-pc halt-p result) like execute-instruction."
   (let ((ctx (car (vm-method-call-stack state))))
     (unless ctx
       (error "call-next-method called outside of a generic function method"))
-    (let* ((gf-ht (first ctx))
-           (methods-list (second ctx))    ; [current-method next1 next2 ...]
-           (orig-args (third ctx))
-           (next-method (cadr methods-list)))
-      (unless next-method
-        (error "No next method for ~S" (gethash :__name__ gf-ht)))
-      ;; Determine arguments: use supplied args or original args
-      (let* ((call-args (if (vm-cnm-args-reg inst)
-                            (vm-reg-get state (vm-cnm-args-reg inst))
-                            orig-args)))
-        (vm-push-call-frame state (1+ pc) (vm-dst inst))
-        (push (list gf-ht (cdr methods-list) call-args) (vm-method-call-stack state))
-        (vm-bind-closure-args next-method state call-args)
-        (values (gethash (vm-closure-entry-label next-method) labels) nil nil)))))
+    ;; Check if we're in an :around method (qualified dispatch)
+    (let ((props (when (and (listp ctx) (> (length ctx) 3)) (cdddr ctx))))
+      (if (and props (eq (getf props :phase) :around))
+          ;; Around method's call-next-method: transition to before→primary→after chain
+          (let* ((arg-values (getf props :arg-values))
+                 (before-methods (getf props :before-methods))
+                 (primary (getf props :primary))
+                 (has-before (not (null before-methods)))
+                 (first-method (if has-before (car before-methods) primary)))
+            (unless first-method
+              (error "no-next-method: no primary method available"))
+            ;; Save around context so we can return to it
+            (setf (getf (cdddr ctx) :around-return-phase) t)
+            (setf (getf (cdddr ctx) :around-return-pc) (1+ pc))
+            (setf (getf (cdddr ctx) :around-cnm-dst) (vm-dst inst))
+            ;; Transition phase to before or primary
+            (setf (getf (cdddr ctx) :phase) (if has-before :before :primary))
+            (setf (getf (cdddr ctx) :before-pending)
+                  (if has-before (cdr before-methods) nil))
+            (when has-before
+              (setf (getf (cdddr ctx) :primary) primary))
+            (vm-bind-closure-args first-method state arg-values)
+            (values (gethash (vm-closure-entry-label first-method) labels) nil nil))
+          ;; Normal call-next-method (non-around)
+          (let* ((gf-ht (first ctx))
+                 (methods-list (second ctx))
+                 (orig-args (third ctx))
+                 (next-method (cadr methods-list)))
+            (unless next-method
+              (error "no-next-method: There is no next method for the generic function ~S when called with arguments ~S"
+                     (gethash :__name__ gf-ht) orig-args))
+            (let* ((call-args (if (vm-cnm-args-reg inst)
+                                  (vm-reg-get state (vm-cnm-args-reg inst))
+                                  orig-args)))
+              (vm-push-call-frame state (1+ pc) (vm-dst inst))
+              (push (list gf-ht (cdr methods-list) call-args) (vm-method-call-stack state))
+              (vm-bind-closure-args next-method state call-args)
+              (values (gethash (vm-closure-entry-label next-method) labels) nil nil)))))))
 
 ;;; ── Call-frame helpers ───────────────────────────────────────────────────
 ;;;
@@ -412,8 +727,20 @@ from all argument classes. Falls back to single dispatch on FIRST-ARG."
                                    all-args))
                (method-closure
                  (or
-                   ;; Exact match
+                   ;; Exact match by class
                    (gethash arg-classes methods-ht)
+                   ;; Try eql specializer match: scan keys with eql specs
+                   (block eql-scan
+                     (maphash (lambda (key method)
+                                (when (and (listp key) (= (length key) (length all-args))
+                                           (every (lambda (spec arg)
+                                                    (or (eq spec t)
+                                                        (eq spec (vm-classify-arg arg state))
+                                                        (%eql-specializer-matches-p spec arg)))
+                                                  key all-args))
+                                  (return-from eql-scan method)))
+                              methods-ht)
+                     nil)
                    ;; Try with inheritance on each position
                    (vm-resolve-multi-dispatch methods-ht state arg-classes)
                    ;; All-t fallback
@@ -426,6 +753,13 @@ from all argument classes. Falls back to single dispatch on FIRST-ARG."
         (let* ((class-name (vm-classify-arg first-arg state))
                (method-closure
                  (or
+                   ;; Try eql specializer match first
+                   (block eql-single
+                     (maphash (lambda (key method)
+                                (when (%eql-specializer-matches-p key first-arg)
+                                  (return-from eql-single method)))
+                              methods-ht)
+                     nil)
                    (gethash class-name methods-ht)
                    (let ((class-ht (gethash class-name (vm-class-registry state))))
                      (when class-ht

@@ -30,6 +30,7 @@
   key-params      ; List of ((keyword-name name) default supplied-p) for &key
   allow-other-keys ; Boolean for &allow-other-keys
   aux             ; List of (name init) for &aux
+  environment     ; Symbol for &environment or nil
   )
 
 (defun parse-lambda-list (lambda-list)
@@ -42,7 +43,8 @@
         (body nil)
         (key-params nil)
         (allow-other-keys nil)
-        (aux nil))
+        (aux nil)
+        (environment nil))
     ;; Use a manual loop to handle both proper and improper (dotted) lists.
     ;; A dotted tail like (a b . rest) means 'rest' is an implicit &rest var.
     (do ((current lambda-list (cdr current)))
@@ -65,6 +67,8 @@
              (setf allow-other-keys t)))
           (&aux
            (setf state :aux))
+          (&environment
+           (setf state :environment))
           (t
            (case state
              (:required
@@ -106,6 +110,9 @@
                     ((consp item)
                      (push (list (first item) (if (cdr item) (second item) nil)) aux))
                     (t (error "Invalid &aux parameter: ~S" item))))
+             (:environment
+              (setf environment item
+                    state :required))
              ((:after-rest :after-body)
               (error "Unexpected parameter after ~A: ~S"
                      (if (eq state :after-rest) "&rest" "&body") item)))))))
@@ -116,7 +123,8 @@
      :body body
      :key-params (nreverse key-params)
      :allow-other-keys allow-other-keys
-     :aux (nreverse aux))))
+     :aux (nreverse aux)
+     :environment environment)))
 
 (defun generate-lambda-bindings (lambda-list form-var)
   "Generate LET bindings from LAMBDA-LIST for the macro form in FORM-VAR."
@@ -261,13 +269,19 @@ Handles (cl-cc::unquote x) and (cl-cc::unquote-splicing x) within template."
 (defmacro our-defmacro (name lambda-list &body body)
   "Define NAME as a macro with LAMBDA-LIST and BODY.
    The macro expander function receives (FORM ENV) as arguments."
-  (let ((form-var (gensym "FORM"))
-        (env-var (gensym "ENV")))
+  (let* ((form-var (gensym "FORM"))
+         (env-var (gensym "ENV"))
+         (info (parse-lambda-list lambda-list))
+         (env-sym (lambda-list-info-environment info)))
     `(register-macro ',name
                      (lambda (,form-var ,env-var)
-                       (declare (ignore ,env-var))
-                       (let* ,(generate-lambda-bindings lambda-list form-var)
-                         ,@body)))))
+                       ,@(if env-sym
+                             `((let ((,env-sym ,env-var))
+                                 (let* ,(generate-lambda-bindings lambda-list form-var)
+                                   ,@body)))
+                             `((declare (ignore ,env-var))
+                               (let* ,(generate-lambda-bindings lambda-list form-var)
+                                 ,@body)))))))
 
 ;;; Destructuring Bind Implementation
 

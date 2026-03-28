@@ -23,7 +23,7 @@
   '((+  . make-vm-add)
     (-  . make-vm-sub)
     (*  . make-vm-mul)
-    (/  . make-vm-div)
+    (/  . make-vm-cl-div)
     (=  . make-vm-num-eq)
     (<  . make-vm-lt)
     (>  . make-vm-gt)

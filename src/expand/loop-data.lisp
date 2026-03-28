@@ -17,7 +17,8 @@
     "MAXIMIZE" "MAXIMIZING" "MINIMIZE" "MINIMIZING"
     "WHILE" "UNTIL" "WHEN" "IF" "UNLESS" "DO" "INITIALLY" "FINALLY" "END"
     "REPEAT" "WITH" "APPEND" "APPENDING" "NCONC" "NCONCING"
-    "BEING" "USING" "=" "ALWAYS" "NEVER" "THEREIS" "BY" "INTO"))
+    "BEING" "USING" "=" "ALWAYS" "NEVER" "THEREIS" "BY" "INTO"
+    "NAMED"))
 
 ;; Condition types that return T when the loop body never executes (vacuous truth).
 ;; ALWAYS and NEVER hold trivially when there is no element to violate them.

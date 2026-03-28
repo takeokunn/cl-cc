@@ -25,6 +25,22 @@
 
 ;;; ── Helper functions ─────────────────────────────────────────────────────
 
+(defun chain-comparison-op (op args)
+  "Chain a comparison (OP a b c) → (AND (OP a b) (OP b c)).
+Uses gensyms for intermediate values to avoid double evaluation.
+(OP) → error, (OP a) → T, (OP a b) → pass through, (OP a b c ...) → AND chain."
+  (case (length args)
+    (0 (error "~A requires at least one argument" op))
+    (1 t)
+    (2 (list op (first args) (second args)))
+    (t (let* ((temps (loop for i from 0 below (length args)
+                           collect (gensym (format nil "CMP~D-" i))))
+              (bindings (mapcar #'list temps args))
+              (pairs (loop for (a b) on temps
+                           while b
+                           collect (list op a b))))
+         `(let ,bindings (and ,@pairs))))))
+
 (defun reduce-variadic-op (op args identity)
   "Reduce a variadic arithmetic form (OP arg...) to nested binary forms.
 (OP) => IDENTITY, (OP a) => a, (OP a b) => (OP a b), (OP a b c ...) => (OP (OP a b) c) ..."
@@ -132,6 +148,22 @@ Returns the expanded BODY wrapped in PROGN."
         (if (cdr s)
             (register-macro (car s) (cdr s))
             (remhash (car s) (macro-env-table *macro-environment*))))
+      result)))
+
+(defun expand-symbol-macrolet-form (bindings body)
+  "Register local symbol macro BINDINGS, expand BODY under them, then restore.
+Each binding is (symbol expansion). Returns the expanded BODY wrapped in PROGN."
+  (let ((saved nil))
+    (dolist (b bindings)
+      (let ((name (first b))
+            (expansion (second b)))
+        (push (cons name (gethash name *symbol-macro-table*)) saved)
+        (setf (gethash name *symbol-macro-table*) expansion)))
+    (let ((result (compiler-macroexpand-all (cons 'progn body))))
+      (dolist (s saved)
+        (if (cdr s)
+            (setf (gethash (car s) *symbol-macro-table*) (cdr s))
+            (remhash (car s) *symbol-macro-table*)))
       result)))
 
 (defun expand-progn-with-eager-defmacro (subforms)
@@ -307,6 +339,34 @@ or fall back to generic (setf (slot-value obj 'accessor-name) val)."
         (compiler-macroexpand-all
          `(aset ,(second place) ,(third place) ,value))))
 
+;;; FR-552: (setf (find-class name) class) → register in class registry
+(setf (gethash 'find-class *setf-compound-place-handlers*)
+      (lambda (place value)
+        (compiler-macroexpand-all
+         `(%set-find-class ,(second place) ,value))))
+
+;;; FR-548: (setf (symbol-function name) fn) → host bridge
+(setf (gethash 'symbol-function *setf-compound-place-handlers*)
+      (lambda (place value)
+        (compiler-macroexpand-all
+         `(set-fdefinition ,value ,(second place)))))
+
+;;; FR-428: (setf (macro-function name) fn) → host bridge
+(setf (gethash 'macro-function *setf-compound-place-handlers*)
+      (lambda (place value)
+        (compiler-macroexpand-all
+         `(%set-macro-function ,(second place) ,value))))
+
+;;; FR-603: (setf (values a b ...) expr) → multiple-value-bind + setq chain
+(setf (gethash 'values *setf-compound-place-handlers*)
+      (lambda (place value)
+        (let* ((vars (cdr place))
+               (temps (mapcar (lambda (v) (declare (ignore v)) (gensym "V")) vars)))
+          (compiler-macroexpand-all
+           `(multiple-value-bind ,temps ,value
+              ,@(mapcar (lambda (var temp) `(setq ,var ,temp)) vars temps)
+              (values ,@vars))))))
+
 (defun expand-let-binding (b)
   "Macro-expand the value in a LET binding, leaving the binding name untouched."
   (if (and (consp b) (symbolp (car b)))
@@ -433,10 +493,367 @@ Contract: handler receives the full form and returns a fully-expanded form."
                             (compiler-macroexpand-all (third form))))
       (t (compiler-macroexpand-all (reduce-variadic-op '- (cdr form) 0))))))
 
+;; / (FR-661): unary → reciprocal (/ 1 x), 0-arg → error, N-arg → left fold
+(define-expander-for / (form)
+  (let ((nargs (length (cdr form))))
+    (cond
+      ((= nargs 0) (error "/ requires at least one argument"))
+      ((= nargs 1) (list '/ 1 (compiler-macroexpand-all (second form))))
+      ((= nargs 2) (list '/ (compiler-macroexpand-all (second form))
+                            (compiler-macroexpand-all (third form))))
+      (t (compiler-macroexpand-all (reduce-variadic-op '/ (cdr form) 1))))))
+
+;; log (FR-476): 1-arg → natural log, 2-arg → change-of-base formula
+(define-expander-for log (form)
+  (let ((nargs (length (cdr form))))
+    (cond
+      ((= nargs 1) (list 'log (compiler-macroexpand-all (second form))))
+      ((= nargs 2) (compiler-macroexpand-all
+                    `(/ (log ,(second form)) (log ,(third form)))))
+      (t (error "log takes 1 or 2 arguments")))))
+
+;; FR-662: min/max — 1-arg → identity, 2-arg → builtin, N-arg → left fold
+(define-expander-for min (form)
+  (let ((nargs (length (cdr form))))
+    (cond
+      ((= nargs 0) (error "min requires at least one argument"))
+      ((= nargs 1) (compiler-macroexpand-all (second form)))
+      ((= nargs 2) (list 'min (compiler-macroexpand-all (second form))
+                              (compiler-macroexpand-all (third form))))
+      (t (compiler-macroexpand-all (reduce-variadic-op 'min (cdr form) nil))))))
+
+(define-expander-for max (form)
+  (let ((nargs (length (cdr form))))
+    (cond
+      ((= nargs 0) (error "max requires at least one argument"))
+      ((= nargs 1) (compiler-macroexpand-all (second form)))
+      ((= nargs 2) (list 'max (compiler-macroexpand-all (second form))
+                              (compiler-macroexpand-all (third form))))
+      (t (compiler-macroexpand-all (reduce-variadic-op 'max (cdr form) nil))))))
+
+;; FR-662: gcd/lcm — 0-arg → identity, 1-arg → abs, 2-arg → builtin, N-arg → fold
+(define-expander-for gcd (form)
+  (let ((nargs (length (cdr form))))
+    (cond
+      ((= nargs 0) 0)
+      ((= nargs 1) (list 'abs (compiler-macroexpand-all (second form))))
+      ((= nargs 2) (list 'gcd (compiler-macroexpand-all (second form))
+                               (compiler-macroexpand-all (third form))))
+      (t (compiler-macroexpand-all (reduce-variadic-op 'gcd (cdr form) 0))))))
+
+(define-expander-for lcm (form)
+  (let ((nargs (length (cdr form))))
+    (cond
+      ((= nargs 0) 1)
+      ((= nargs 1) (list 'abs (compiler-macroexpand-all (second form))))
+      ((= nargs 2) (list 'lcm (compiler-macroexpand-all (second form))
+                               (compiler-macroexpand-all (third form))))
+      (t (compiler-macroexpand-all (reduce-variadic-op 'lcm (cdr form) 1))))))
+
+;; float-sign (FR-685): 1-arg → builtin, 2-arg → (* (float-sign x) (abs y))
+(define-expander-for float-sign (form)
+  (let ((nargs (length (cdr form))))
+    (cond
+      ((= nargs 1) (list 'float-sign (compiler-macroexpand-all (second form))))
+      ((= nargs 2) (compiler-macroexpand-all
+                    `(* (float-sign ,(second form)) (abs ,(third form)))))
+      (t (error "float-sign takes 1 or 2 arguments")))))
+
+;; float (FR-604): 1-arg → builtin, 2-arg → ignore prototype, just convert
+(define-expander-for float (form)
+  (let ((nargs (length (cdr form))))
+    (cond
+      ((= nargs 1) (list 'float (compiler-macroexpand-all (second form))))
+      ((= nargs 2) (list 'float (compiler-macroexpand-all (second form))))
+      (t (error "float takes 1 or 2 arguments")))))
+
+;; FR-667: logand/logior/logxor/logeqv — 0-arg → identity, 1-arg → value, N-arg → left fold
+;; Identity elements: logand → -1 (all bits set), logior → 0, logxor → 0, logeqv → -1
+(dolist (entry '((logand -1) (logior 0) (logxor 0) (logeqv -1)))
+  (let ((op (first entry)) (id (second entry)))
+    (setf (gethash op *expander-head-table*)
+          (lambda (form)
+            (let ((nargs (length (cdr form))))
+              (cond
+                ((= nargs 0) id)
+                ((= nargs 1) (compiler-macroexpand-all (second form)))
+                ((= nargs 2) (list op
+                                   (compiler-macroexpand-all (second form))
+                                   (compiler-macroexpand-all (third form))))
+                (t (compiler-macroexpand-all
+                    (reduce-variadic-op op (cdr form) id)))))))))
+
+;; FR-663: =/</>/<=/>= — 1-arg → T, 2-arg → builtin, N-arg → AND chain with gensyms
+(dolist (op '(= < > <= >=))
+  (let ((op op))
+    (setf (gethash op *expander-head-table*)
+          (lambda (form)
+            (let ((nargs (length (cdr form))))
+              (cond
+                ((= nargs 0) (error "~A requires at least one argument" op))
+                ((= nargs 1) t)
+                ((= nargs 2) (list op
+                                   (compiler-macroexpand-all (second form))
+                                   (compiler-macroexpand-all (third form))))
+                (t (compiler-macroexpand-all
+                    (chain-comparison-op op (cdr form))))))))))
+
+;; FR-645: char=/char</char>/char<=/char>=/char/= — variadic comparison chaining
+;; Also case-insensitive: char-equal/char-lessp/char-greaterp/char-not-greaterp/char-not-lessp
+(dolist (op '(char= char< char> char<= char>= char/=
+              char-equal char-lessp char-greaterp char-not-greaterp char-not-lessp))
+  (let ((op op))
+    (setf (gethash op *expander-head-table*)
+          (lambda (form)
+            (let ((nargs (length (cdr form))))
+              (cond
+                ((= nargs 0) (error "~A requires at least one argument" op))
+                ((= nargs 1) t)
+                ((= nargs 2) (list op
+                                   (compiler-macroexpand-all (second form))
+                                   (compiler-macroexpand-all (third form))))
+                (t (compiler-macroexpand-all
+                    (chain-comparison-op op (cdr form))))))))))
+
+;; /= (not-equal): 1-arg → T, 2-arg → (not (= a b)), N-arg → all-pairs distinct
+(define-expander-for /= (form)
+  (let ((nargs (length (cdr form))))
+    (cond
+      ((= nargs 0) (error "/= requires at least one argument"))
+      ((= nargs 1) t)
+      ((= nargs 2) (compiler-macroexpand-all
+                     `(not (= ,(second form) ,(third form)))))
+      (t (let* ((args (cdr form))
+                (temps (loop for i from 0 below nargs
+                             collect (gensym (format nil "NE~D-" i))))
+                (bindings (mapcar #'list temps args))
+                (pairs (loop for (a . rest) on temps
+                             nconc (loop for b in rest
+                                         collect `(not (= ,a ,b))))))
+           (compiler-macroexpand-all
+            `(let ,bindings (and ,@pairs))))))))
+
+;; FR-665: mapcar/mapc/mapcan — multi-sequence support
+;; 2-arg → inline single-list expansion, 3+ args → labels recursion over N lists
+(dolist (entry '((mapcar :collect) (mapc :side-effect) (mapcan :nconc)))
+  (let ((op (first entry)) (mode (second entry)))
+    (setf (gethash op *expander-head-table*)
+          (lambda (form)
+            (let ((nargs (length (cdr form))))
+              (cond
+                ;; 2-arg: inline the single-list expansion (replaces our-defmacro)
+                ((= nargs 2)
+                 (let ((fn-var (gensym "FN"))
+                       (x (gensym "X"))
+                       (acc (gensym "ACC"))
+                       (lst (gensym "LST"))
+                       (fn-arg (second form))
+                       (list-arg (third form)))
+                   (compiler-macroexpand-all
+                    (ecase mode
+                      (:collect
+                       `(let ((,fn-var ,fn-arg) (,acc nil))
+                          (dolist (,x ,list-arg (nreverse ,acc))
+                            (setq ,acc (cons (funcall ,fn-var ,x) ,acc)))))
+                      (:side-effect
+                       `(let ((,fn-var ,fn-arg) (,lst ,list-arg))
+                          (dolist (,x ,lst ,lst)
+                            (funcall ,fn-var ,x))))
+                      (:nconc
+                       `(let ((,fn-var ,fn-arg) (,acc nil))
+                          (dolist (,x ,list-arg ,acc)
+                            (setq ,acc (nconc ,acc (funcall ,fn-var ,x))))))))))
+                ;; 3+ args: multi-list via labels recursion
+                ((>= nargs 3)
+                 (let* ((fn-arg (second form))
+                        (list-args (cddr form))
+                        (nlists (length list-args))
+                        (fn-var (gensym "FN"))
+                        (list-vars (loop for i from 0 below nlists
+                                         collect (gensym (format nil "L~D-" i))))
+                        (helper (gensym "MAP"))
+                        (null-test `(or ,@(mapcar (lambda (v) `(null ,v)) list-vars)))
+                        (car-args (mapcar (lambda (v) `(car ,v)) list-vars))
+                        (cdr-args (mapcar (lambda (v) `(cdr ,v)) list-vars))
+                        (call `(funcall ,fn-var ,@car-args))
+                        (recurse `(,helper ,@cdr-args))
+                        (body (ecase mode
+                                (:collect `(if ,null-test nil
+                                             (cons ,call ,recurse)))
+                                (:side-effect `(if ,null-test nil
+                                                 (progn ,call ,recurse)))
+                                (:nconc `(if ,null-test nil
+                                            (nconc ,call ,recurse))))))
+                   (compiler-macroexpand-all
+                    `(let ((,fn-var ,fn-arg))
+                       (labels ((,helper ,list-vars ,body))
+                         (,helper ,@list-args))))))
+                (t (error "~A requires at least 2 arguments" op))))))))
+
+;; FR-650: every/some — multi-sequence support
+;; 2-arg → inline single-list expansion, 3+ args → labels recursion over N lists
+(dolist (entry '((every :every) (some :some)))
+  (let ((op (first entry)) (mode (second entry)))
+    (setf (gethash op *expander-head-table*)
+          (lambda (form)
+            (let ((nargs (length (cdr form))))
+              (cond
+                ;; 2-arg: inline the single-list expansion (replaces our-defmacro)
+                ((= nargs 2)
+                 (let ((fn-var (gensym "FN"))
+                       (x (gensym "X"))
+                       (result (gensym "R"))
+                       (pred-arg (second form))
+                       (list-arg (third form)))
+                   (compiler-macroexpand-all
+                    (ecase mode
+                      (:every
+                       `(let ((,fn-var ,pred-arg))
+                          (block nil
+                            (dolist (,x ,list-arg t)
+                              (unless (funcall ,fn-var ,x)
+                                (return nil))))))
+                      (:some
+                       `(let ((,fn-var ,pred-arg))
+                          (block nil
+                            (dolist (,x ,list-arg nil)
+                              (let ((,result (funcall ,fn-var ,x)))
+                                (when ,result (return ,result)))))))))))
+                ;; 3+ args: multi-list via labels recursion
+                ((>= nargs 3)
+                 (let* ((fn-arg (second form))
+                        (list-args (cddr form))
+                        (nlists (length list-args))
+                        (fn-var (gensym "FN"))
+                        (list-vars (loop for i from 0 below nlists
+                                         collect (gensym (format nil "L~D-" i))))
+                        (helper (gensym "QNT"))
+                        (null-test `(or ,@(mapcar (lambda (v) `(null ,v)) list-vars)))
+                        (car-args (mapcar (lambda (v) `(car ,v)) list-vars))
+                        (cdr-args (mapcar (lambda (v) `(cdr ,v)) list-vars))
+                        (call `(funcall ,fn-var ,@car-args))
+                        (recurse `(,helper ,@cdr-args))
+                        (body (ecase mode
+                                (:every `(if ,null-test t
+                                            (if ,call ,recurse nil)))
+                                (:some `(if ,null-test nil
+                                           (let ((r ,call))
+                                             (if r r ,recurse)))))))
+                   (compiler-macroexpand-all
+                    `(let ((,fn-var ,fn-arg))
+                       (labels ((,helper ,list-vars ,body))
+                         (,helper ,@list-args))))))
+                (t (error "~A requires at least 2 arguments" op))))))))
+
+;; FR-478: parse-integer — 1-arg → builtin, N-arg → extract keyword args → stdlib impl
+(define-expander-for parse-integer (form)
+  (let ((nargs (length (cdr form))))
+    (if (= nargs 1)
+        (list 'parse-integer (compiler-macroexpand-all (second form)))
+        (let ((str (second form))
+              (start 0) (end nil) (radix 10) (junk nil)
+              (rest (cddr form)))
+          (loop while rest do
+            (let ((key (car rest)) (val (cadr rest)))
+              (cond ((eq key :start)        (setf start val))
+                    ((eq key :end)          (setf end val))
+                    ((eq key :radix)        (setf radix val))
+                    ((eq key :junk-allowed) (setf junk val)))
+              (setf rest (cddr rest))))
+          (compiler-macroexpand-all
+           `(%parse-integer-impl ,str ,start ,end ,radix ,junk))))))
+
+;; FR-668: digit-char-p — 1-arg → builtin, 2-arg → inline radix check via char-code
+(define-expander-for digit-char-p (form)
+  (let ((nargs (length (cdr form))))
+    (cond
+      ((= nargs 1) (list 'digit-char-p (compiler-macroexpand-all (second form))))
+      ((= nargs 2)
+       (let ((ch (gensym "CH")) (radix (gensym "RADIX")) (code (gensym "CODE")))
+         (compiler-macroexpand-all
+          `(let ((,ch ,(second form)) (,radix ,(third form)))
+             (let ((,code (char-code ,ch)))
+               (cond
+                 ((and (>= ,code 48) (< ,code (min 58 (+ 48 ,radix))))
+                  (- ,code 48))
+                 ((and (>= ,radix 11) (>= ,code 65) (< ,code (+ 55 ,radix)))
+                  (- ,code 55))
+                 ((and (>= ,radix 11) (>= ,code 97) (< ,code (+ 87 ,radix)))
+                  (- ,code 87))
+                 (t nil)))))))
+      (t (error "digit-char-p takes 1 or 2 arguments")))))
+
 ;; deftype — register type alias at expand time; returns (quote name)
+;; Supports: (deftype name expansion) — simple alias (legacy 2-arg)
+;;           (deftype name () body...) — ANSI form with empty lambda-list
+;;           (deftype name (params) body...) — ANSI form with parameters (FR-430)
 (define-expander-for deftype (form)
-  (when (and (= (length form) 3) (symbolp (second form)))
-    (cl-cc/type:register-type-alias (second form) (third form)))
+  (let ((name (second form)))
+    (cond
+      ;; (deftype name (params...) body...) — ANSI form with lambda-list + body
+      ((and (>= (length form) 4) (symbolp name) (listp (third form))
+            (every #'symbolp (third form)))
+       (let* ((lambda-list (third form))
+              (body (cdddr form))
+              (expansion (if (= (length body) 1) (first body) `(progn ,@body))))
+         (if (null lambda-list)
+             ;; No params: evaluate body at expand time for simple type alias
+             (let ((result (eval expansion)))
+               (cl-cc/type:register-type-alias name result))
+             ;; With params: register expander function
+             (let ((expander (eval `(lambda ,lambda-list ,@body))))
+               (cl-cc/type:register-type-alias name expander)))))
+      ;; (deftype name expansion) — legacy 2-arg form
+      ((and (= (length form) 3) (symbolp name))
+       (cl-cc/type:register-type-alias name (third form))))
+    `(quote ,name)))
+
+;; defsetf — register a setf expander for an accessor (FR-355)
+;; Short form: (defsetf accessor updater) → (updater args... value)
+;; Long form: (defsetf accessor lambda-list (store-var) body...) — partial support
+(define-expander-for defsetf (form)
+  (let ((accessor (second form)))
+    (cond
+      ;; Short form: (defsetf accessor updater)
+      ((and (= (length form) 3) (symbolp (third form)))
+       (let ((updater (third form)))
+         (setf (gethash accessor *setf-compound-place-handlers*)
+               (lambda (place value)
+                 (compiler-macroexpand-all
+                  `(,updater ,@(cdr place) ,value))))))
+      ;; Long form: (defsetf accessor (args...) (store-var) body...)
+      ((and (>= (length form) 5) (listp (third form)) (listp (fourth form)))
+       (let* ((lambda-list (third form))
+              (store-vars (fourth form))
+              (body (cddddr form))
+              (store-var (first store-vars)))
+         (setf (gethash accessor *setf-compound-place-handlers*)
+               (let ((ll lambda-list) (sv store-var) (bd body))
+                 (lambda (place value)
+                   (let* ((arg-bindings (mapcar #'list ll (cdr place)))
+                          (store-binding `((,sv ,value))))
+                     (compiler-macroexpand-all
+                      `(let (,@arg-bindings ,@store-binding)
+                         ,@bd)))))))))
+    `(quote ,accessor)))
+
+;; define-setf-expander — register setf expansion function (FR-355)
+;; (define-setf-expander accessor (lambda-list) body...)
+(define-expander-for define-setf-expander (form)
+  (let* ((accessor (second form))
+         (lambda-list (third form))
+         (body (cdddr form))
+         (expander-fn (eval `(lambda ,lambda-list ,@body))))
+    (setf (gethash accessor *setf-compound-place-handlers*)
+          (let ((fn expander-fn))
+            (lambda (place value)
+              (multiple-value-bind (temps vals stores store-form access-form)
+                  (funcall fn place)
+                (declare (ignore access-form))
+                (compiler-macroexpand-all
+                 `(let (,@(mapcar #'list temps vals)
+                        ,@(mapcar (lambda (s) (list s value)) stores))
+                    ,store-form)))))))
   `(quote ,(second form)))
 
 ;; defconstant — compile-time constants treated as defparameter
@@ -486,44 +903,69 @@ Contract: handler receives the full form and returns a fully-expanded form."
 (define-expander-for macrolet (form)
   (expand-macrolet-form (second form) (cddr form)))
 
+;; symbol-macrolet — local symbol macro bindings scoped to body (FR-398)
+(define-expander-for symbol-macrolet (form)
+  (expand-symbol-macrolet-form (second form) (cddr form)))
+
+;; define-symbol-macro — global symbol macro definition (FR-398)
+(define-expander-for define-symbol-macro (form)
+  (let ((name (second form))
+        (expansion (third form)))
+    (setf (gethash name *symbol-macro-table*) expansion)
+    `(quote ,name)))
+
+;; FR-607: Strip leading docstring from body (string + more forms → skip string)
+(defun %strip-docstring (body)
+  (if (and (stringp (car body)) (cdr body))
+      (cdr body)
+      body))
+
 ;; defun — typed params get check-type assertions; untyped: expand defaults + body
 (define-expander-for defun (form)
-  (if (and (>= (length form) 4)
-           (symbolp (second form))
-           (listp (third form))
-           (lambda-list-has-typed-p (third form)))
-      (expand-typed-defun-or-lambda 'defun (second form) (third form) (cdddr form))
-      (list* 'defun (second form)
-             (expand-lambda-list-defaults (third form))
-             (mapcar #'compiler-macroexpand-all (cdddr form)))))
+  (let ((body (%strip-docstring (cdddr form))))
+    (if (and (>= (length form) 4)
+             (symbolp (second form))
+             (listp (third form))
+             (lambda-list-has-typed-p (third form)))
+        (expand-typed-defun-or-lambda 'defun (second form) (third form) body)
+        (list* 'defun (second form)
+               (expand-lambda-list-defaults (third form))
+               (mapcar #'compiler-macroexpand-all body)))))
 
 ;; lambda — typed params get check-type assertions; untyped: expand defaults + body
 (define-expander-for lambda (form)
-  (if (and (>= (length form) 3)
-           (listp (second form))
-           (lambda-list-has-typed-p (second form)))
-      (expand-typed-defun-or-lambda 'lambda nil (second form) (cddr form))
-      (list* 'lambda
-             (expand-lambda-list-defaults (second form))
-             (mapcar #'compiler-macroexpand-all (cddr form)))))
+  (let ((body (%strip-docstring (cddr form))))
+    (if (and (>= (length form) 3)
+             (listp (second form))
+             (lambda-list-has-typed-p (second form)))
+        (expand-typed-defun-or-lambda 'lambda nil (second form) body)
+        (list* 'lambda
+               (expand-lambda-list-defaults (second form))
+               (mapcar #'compiler-macroexpand-all body)))))
 
 ;; defclass — register accessor mappings; expand :initform values in slot specs
+;; Passes class options (5th+ elements like :default-initargs) through to parser
 (define-expander-for defclass (form)
   (let ((class-name (second form))
-        (slot-specs (fourth form)))
+        (slot-specs (fourth form))
+        (class-options (nthcdr 4 form)))
     (register-defclass-accessors class-name slot-specs)
-    (list 'defclass class-name
-          (mapcar #'compiler-macroexpand-all (third form))
-          (when (listp slot-specs)
-            (mapcar #'expand-defclass-slot-spec slot-specs)))))
+    (append (list 'defclass class-name
+                  (mapcar #'compiler-macroexpand-all (third form))
+                  (when (listp slot-specs)
+                    (mapcar #'expand-defclass-slot-spec slot-specs)))
+            class-options)))
 
 ;; progn — process forms sequentially, eagerly registering any defmacro siblings
 (define-expander-for progn (form)
   (expand-progn-with-eager-defmacro (cdr form)))
 
 ;; let — destructuring bindings desugar to destructuring-bind chains; plain let expands values
+;; FR-623: (let () body) → (progn body)
 (define-expander-for let (form)
   (cond
+    ((and (>= (length form) 2) (listp (second form)) (null (second form)))
+     (compiler-macroexpand-all (cons 'progn (cddr form))))
     ((and (>= (length form) 2) (listp (second form))
           (some (lambda (b) (and (consp b) (>= (length b) 2) (consp (first b))))
                 (second form)))
@@ -546,15 +988,44 @@ Contract: handler receives the full form and returns a fully-expanded form."
     (t (cons 'let (mapcar #'compiler-macroexpand-all (cdr form))))))
 
 ;; flet/labels — expand only function bodies; head symbol tells them apart
+;; FR-623: (flet () body) / (labels () body) → (progn body)
 (defun %expand-flet-or-labels (head form)
   (if (and (>= (length form) 3) (listp (second form)))
-      (list* head
-             (mapcar #'expand-flet-labels-binding (second form))
-             (mapcar #'compiler-macroexpand-all (cddr form)))
+      (if (null (second form))
+          (compiler-macroexpand-all (cons 'progn (cddr form)))
+          (list* head
+                 (mapcar #'expand-flet-labels-binding (second form))
+                 (mapcar #'compiler-macroexpand-all (cddr form))))
       (cons head (mapcar #'compiler-macroexpand-all (cdr form)))))
 
 (define-expander-for flet   (form) (%expand-flet-or-labels 'flet   form))
 (define-expander-for labels (form) (%expand-flet-or-labels 'labels form))
+
+;; FR-585: handler-case :no-error clause
+;; (handler-case form (type (v) ...) (:no-error (x) success-body))
+;; → (block #:tag
+;;     (let ((#:r (handler-case form (type (v) (return-from #:tag ...)))))
+;;       success-body-with-x-bound))
+(define-expander-for handler-case (form)
+  (let* ((protected (second form))
+         (all-clauses (cddr form))
+         (no-error-clause (find :no-error all-clauses :key #'car))
+         (error-clauses (remove :no-error all-clauses :key #'car)))
+    (if no-error-clause
+        (let ((tag (gensym "NO-ERROR-"))
+              (ne-vars (second no-error-clause))
+              (ne-body (cddr no-error-clause)))
+          (compiler-macroexpand-all
+           `(block ,tag
+              (let ((,(if (and ne-vars (car ne-vars)) (car ne-vars) (gensym "R-"))
+                     (handler-case ,protected
+                       ,@(mapcar (lambda (c)
+                                   `(,(first c) ,(second c)
+                                     (return-from ,tag (progn ,@(cddr c)))))
+                                 error-clauses))))
+                ,@(or ne-body '(nil))))))
+        ;; No :no-error clause — recurse into subforms normally
+        (cons 'handler-case (mapcar #'compiler-macroexpand-all (cdr form))))))
 
 ;; FR-301: normalise 1-arg rounding ops to 2-arg form with divisor 1.
 ;; Registered via dolist for all *rounding-ops* at once (data-driven).
@@ -591,10 +1062,16 @@ Contract: handler receives the full form and returns a fully-expanded form."
 
 (defun compiler-macroexpand-all (form)
   "Expand macros in FORM for the compiler pipeline.
-Dispatch order: (1) atoms pass through; (2) *expander-head-table* handlers;
-(3) *compiler-special-forms* recurse-fallback; (4) our-macroexpand-1."
+Dispatch order: (1) atoms — symbol macros expanded, others pass through;
+(2) *expander-head-table* handlers; (3) *compiler-special-forms* recurse-fallback;
+(4) our-macroexpand-1."
   (cond
-    ((atom form) form)
+    ((atom form)
+     (if (and (symbolp form)
+              (not (keywordp form))
+              (gethash form *symbol-macro-table*))
+         (compiler-macroexpand-all (gethash form *symbol-macro-table*))
+         form))
     (t
      (let ((handler (gethash (car form) *expander-head-table*)))
        (cond

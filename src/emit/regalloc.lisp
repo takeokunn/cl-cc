@@ -101,6 +101,7 @@
   (def-binop-like vm-ge)
   (def-binop-like vm-num-eq)
   (def-binop-like vm-div)
+  (def-binop-like vm-cl-div)
   (def-binop-like vm-mod)
   (def-binop-like vm-and)
   (def-binop-like vm-or)
@@ -228,6 +229,13 @@
   (list (vm-handler-result-reg inst)))
 (defmethod instruction-uses ((inst vm-signal-error))
   (list (vm-error-reg inst)))
+;; Catch/throw instructions
+(defmethod instruction-defs ((inst vm-establish-catch))
+  (list (vm-catch-result-reg inst)))
+(defmethod instruction-uses ((inst vm-establish-catch))
+  (list (vm-catch-tag-reg inst)))
+(defmethod instruction-uses ((inst vm-throw))
+  (list (vm-throw-tag-reg inst) (vm-throw-value-reg inst)))
 
 ;;; Liveness Analysis
 

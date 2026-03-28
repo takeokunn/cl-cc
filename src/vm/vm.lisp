@@ -431,7 +431,12 @@ Used by call-next-method and next-method-p."))
     (*print-length*     . nil)
     (*print-escape*     . t)
     (*print-readably*   . nil)
-    (*print-gensym*     . t))
+    (*print-gensym*     . t)
+    ;; Package system — bind *package* to host CL-USER
+    (*package*          . ,(find-package :cl-user))
+    ;; Condition/restart system
+    (*%condition-handlers* . nil)
+    (*%active-restarts*    . nil))
   "Initial bindings for standard ANSI CL global variables in each vm-state.")
 
 (defmethod initialize-instance :after ((state vm-state) &key &allow-other-keys)
@@ -498,6 +503,25 @@ lists of data) should be registered here.")
   "Register SYM as a host-bridgeable function for the VM."
   (setf (gethash sym *vm-host-bridge-functions*) t))
 
+;;; Package introspection helpers for do-symbols/do-external-symbols/do-all-symbols
+(defun %package-symbols (package)
+  "Return a list of all symbols accessible in PACKAGE."
+  (let ((result nil))
+    (do-symbols (s package) (push s result))
+    (nreverse result)))
+
+(defun %package-external-symbols (package)
+  "Return a list of all external symbols in PACKAGE."
+  (let ((result nil))
+    (do-external-symbols (s package) (push s result))
+    (nreverse result)))
+
+(defun %all-symbols ()
+  "Return a list of all symbols in all packages."
+  (let ((result nil))
+    (do-all-symbols (s) (push s result))
+    (nreverse result)))
+
 ;;; Runtime helpers for setf expansion
 (defun rt-plist-put (plist indicator value)
   "Return a new plist with INDICATOR set to VALUE. Non-destructive."
@@ -520,6 +544,20 @@ lists of data) should be registered here.")
               generate-lambda-bindings register-macro
               ;; CL functions needed by self-hosting code
               find-package symbol-function intern gensym
+              ;; FR-647/FR-655/FR-428/FR-558: symbol-value, find-symbol, macro-function, symbol-package
+              symbol-value find-symbol macro-function symbol-package
+              ;; FR-624: subtypep — delegate to host CL for standard type hierarchy
+              subtypep
+              ;; FR-512: compile — delegate to host CL
+              compile
+              ;; FR-437/FR-438: Package introspection — delegate to host CL
+              list-all-packages package-name package-nicknames
+              package-use-list package-used-by-list package-shadowing-symbols
+              make-package rename-package delete-package
+              export import unexport shadow shadowing-import
+              use-package unuse-package
+              ;; FR-361: Package symbol iteration helpers
+              %package-symbols %package-external-symbols %all-symbols
               ;; Runtime helpers for setf expansion
               rt-plist-put))
   (vm-register-host-bridge sym))

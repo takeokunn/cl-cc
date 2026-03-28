@@ -42,13 +42,15 @@
   (let ((result (our-macroexpand-1 '(rotatef a b))))
     (assert-null (car (last result)))))
 
-(deftest rotatef-single-var-signals-error
-  "ROTATEF with a single argument signals an error (wrong arity)"
-  (assert-signals error (our-macroexpand-1 '(rotatef x))))
+(deftest rotatef-single-var-returns-nil
+  "ROTATEF with a single argument returns NIL (ANSI: identity)"
+  (assert-null (our-macroexpand-1 '(rotatef x))))
 
-(deftest rotatef-three-var-signals-error
-  "ROTATEF with three arguments signals an error (impl only supports 2-arg)"
-  (assert-signals error (our-macroexpand-1 '(rotatef x y z))))
+(deftest rotatef-three-var-structure
+  "ROTATEF with three arguments expands to LET + chain of SETFs returning nil"
+  (let ((result (our-macroexpand-1 '(rotatef x y z))))
+    (assert-eq (car result) 'let)
+    (assert-null (car (last result)))))
 
 (deftest rotatef-preserves-places
   "ROTATEF correctly names both places in the expansion"

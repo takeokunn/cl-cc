@@ -377,41 +377,76 @@ Calls (uiop:quit 2) on unrecognised values."
                    (error () :err)))
 
       ;; 4. Source file self-loading
-      (format t "--- Source file self-loading (87 files) ---~%")
+      (format t "--- Source file self-loading (117 files) ---~%")
       (let ((ok 0)
-            (files '("src/package.lisp" "src/parse/cst.lisp" "src/parse/diagnostics.lisp"
+            (files '(;; package
+                     "src/package.lisp"
+                     ;; parse
+                     "src/parse/cst.lisp" "src/parse/diagnostics.lisp"
                      "src/parse/ast.lisp" "src/parse/prolog.lisp" "src/parse/dcg.lisp"
-                     "src/parse/lexer.lisp" "src/parse/incremental.lisp" "src/parse/pratt.lisp"
-                     "src/parse/combinators.lisp" "src/parse/cl/parser.lisp" "src/parse/cl/grammar.lisp"
+                     "src/parse/lexer.lisp" "src/parse/lexer-dispatch.lisp"
+                     "src/parse/incremental.lisp" "src/parse/pratt.lisp"
+                     "src/parse/combinators.lisp"
+                     "src/parse/cl/parser.lisp" "src/parse/cl/parser-roundtrip.lisp"
+                     "src/parse/cl/grammar.lisp"
                      "src/parse/php/lexer.lisp" "src/parse/php/parser.lisp" "src/parse/php/grammar.lisp"
-                     "src/parse/cst-to-ast.lisp" "src/expand/macro.lisp" "src/expand/expander.lisp"
-                     "src/vm/package.lisp" "src/vm/vm.lisp" "src/vm/primitives.lisp"
+                     "src/parse/cst-to-ast.lisp"
+                     ;; expand
+                     "src/expand/macro.lisp"
+                     "src/expand/macros-basic.lisp"
+                     "src/expand/loop-data.lisp" "src/expand/loop-parser.lisp"
+                     "src/expand/loop-emitters.lisp" "src/expand/loop.lisp"
+                     "src/expand/macros-stdlib.lisp"
+                     "src/expand/macros-sequence.lisp"
+                     "src/expand/macros-compat.lisp"
+                     "src/expand/expander-data.lisp"
+                     "src/expand/expander-defstruct.lisp"
+                     "src/expand/expander.lisp"
+                     ;; vm
+                     "src/vm/package.lisp" "src/vm/vm.lisp"
+                     "src/vm/vm-execute.lisp" "src/vm/vm-clos.lisp" "src/vm/vm-run.lisp"
+                     "src/vm/primitives.lisp"
+                     "src/vm/vm-bitwise.lisp" "src/vm/vm-transcendental.lisp"
+                     "src/vm/vm-numeric.lisp" "src/vm/vm-extensions.lisp"
                      "src/vm/io.lisp" "src/vm/format.lisp" "src/vm/conditions.lisp"
                      "src/vm/list.lisp" "src/vm/array.lisp"
                      "src/vm/strings.lisp" "src/vm/symbols.lisp" "src/vm/hash.lisp"
+                     ;; type
                      "src/type/package.lisp" "src/type/kind.lisp" "src/type/multiplicity.lisp"
-                     "src/type/representation.lisp" "src/type/substitution.lisp" "src/type/unification.lisp"
+                     "src/type/types-core.lisp" "src/type/types-extended.lisp" "src/type/types-env.lisp"
+                     "src/type/substitution.lisp" "src/type/unification.lisp"
                      "src/type/subtyping.lisp" "src/type/effect.lisp" "src/type/row.lisp"
                      "src/type/constraint.lisp" "src/type/parser.lisp" "src/type/typeclass.lisp"
-                     "src/type/solver.lisp" "src/type/inference.lisp" "src/type/checker.lisp"
-                     "src/type/printer.lisp"
+                     "src/type/solver.lisp" "src/type/inference.lisp"
+                     "src/type/inference-effects.lisp" "src/type/bidirectional.lisp"
+                     "src/type/checker.lisp" "src/type/printer.lisp"
+                     ;; compile
                      "src/compile/ir/types.lisp" "src/compile/ir/block.lisp"
                      "src/compile/ir/ssa.lisp" "src/compile/ir/printer.lisp"
                      "src/compile/context.lisp" "src/compile/closure.lisp" "src/compile/cps.lisp"
-                     "src/compile/builtin-registry.lisp" "src/compile/codegen.lisp"
+                     "src/compile/builtin-registry-data.lisp" "src/compile/builtin-registry.lisp"
+                     "src/compile/codegen-core.lisp" "src/compile/codegen-clos.lisp"
+                     "src/compile/codegen-functions.lisp" "src/compile/codegen-phase2.lisp"
+                     "src/compile/codegen.lisp"
+                     ;; optimize
                      "src/optimize/effects.lisp" "src/optimize/cfg.lisp" "src/optimize/ssa.lisp"
-                     "src/optimize/egraph.lisp" "src/optimize/egraph-rules.lisp" "src/optimize/optimizer.lisp"
+                     "src/optimize/egraph.lisp" "src/optimize/egraph-rules.lisp"
+                     "src/optimize/optimizer-tables.lisp" "src/optimize/optimizer-inline.lisp"
+                     "src/optimize/optimizer.lisp"
+                     ;; emit
                      "src/emit/mir.lisp" "src/emit/target.lisp" "src/emit/calling-convention.lisp"
-                     "src/emit/regalloc.lisp" "src/emit/x86-64.lisp" "src/emit/x86-64-codegen.lisp"
+                     "src/emit/regalloc.lisp"
+                     "src/emit/x86-64.lisp" "src/emit/x86-64-encoding.lisp" "src/emit/x86-64-codegen.lisp"
                      "src/emit/aarch64.lisp" "src/emit/aarch64-codegen.lisp"
                      "src/emit/wasm-types.lisp" "src/emit/wasm-ir.lisp" "src/emit/wasm-extract.lisp"
                      "src/emit/wasm-trampoline.lisp" "src/emit/wasm.lisp"
                      "src/emit/binary/package.lisp" "src/emit/binary/macho.lisp"
                      "src/emit/binary/elf.lisp" "src/emit/binary/wasm.lisp"
+                     ;; bytecode + runtime + pipeline
                      "src/bytecode/package.lisp" "src/bytecode/encode.lisp" "src/bytecode/decode.lisp"
                      "src/runtime/package.lisp" "src/runtime/runtime.lisp" "src/runtime/value.lisp"
                      "src/runtime/frame.lisp" "src/runtime/heap.lisp" "src/runtime/gc.lisp"
-                     "src/compile/pipeline.lisp")))
+                     "src/compile/stdlib-source.lisp" "src/compile/pipeline.lisp")))
         (let ((cl-cc::*repl-vm-state* nil)
               (cl-cc::*repl-accessor-map* nil)
               (cl-cc::*repl-pool-instructions* nil)
@@ -448,7 +483,7 @@ Calls (uiop:quit 2) on unrecognised values."
             (format t "  Proven capabilities:~%")
             (format t "    - Macro expansion through own VM (our-eval)~%")
             (format t "    - Meta-circular compilation (compiler compiles compiler)~%")
-            (format t "    - 87/87 source files self-load through own compiler~%")
+            (format t "    - 117/117 source files self-load through own compiler~%")
             (format t "    - VM host function bridge (whitelist-based)~%")
             (format t "    - #'fn resolves registered closures from function registry~%")
             (uiop:quit 0))

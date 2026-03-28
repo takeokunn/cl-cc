@@ -93,8 +93,8 @@ Returns (values required optional rest key) where:
                           (error "Required parameter must be a symbol: ~S" p))
                         (push p required))
              (:optional (if (listp p)
-                            (push (list (first p) (second p)) optional)
-                            (push (list p nil) optional)))
+                            (push (list (first p) (second p) (third p)) optional)
+                            (push (list p nil nil) optional)))
              (:rest     (unless (symbolp p)
                           (error "&rest parameter must be a symbol: ~S" p))
                         (setf rest-param p)
@@ -103,9 +103,10 @@ Returns (values required optional rest key) where:
                                (t (error "Unexpected parameter after &rest: ~S" p))))
              (:key      (if (listp p)
                             (let ((name (if (listp (first p)) (second (first p)) (first p)))
-                                  (default (second p)))
-                              (push (list name default) key-params))
-                            (push (list p nil) key-params)))))))
+                                  (default (second p))
+                                  (supplied-p (third p)))
+                              (push (list name default supplied-p) key-params))
+                            (push (list p nil nil) key-params)))))))
     (values (nreverse required) (nreverse optional) rest-param (nreverse key-params))))
 
 (defun lambda-list-has-extended-p (params)
@@ -121,7 +122,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
       (make-ast-slot-def :name spec)
       (let ((name (first spec))
             (initarg nil) (initform nil) (reader nil) (writer nil) (accessor nil)
-            (slot-type nil))
+            (slot-type nil) (allocation :instance))
         (let ((opts (rest spec)))
           (loop while opts
                 do (let ((key (pop opts)))
@@ -134,6 +135,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
                        (:accessor (setf accessor (pop opts)))
                        (:documentation (pop opts))
                        (:type (setf slot-type (pop opts)))
+                       (:allocation (setf allocation (pop opts)))
                        (otherwise (pop opts))))))
         (make-ast-slot-def
                        :name name
@@ -142,7 +144,8 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
                        :reader reader
                        :writer writer
                        :accessor accessor
-                       :type slot-type))))
+                       :type slot-type
+                       :allocation allocation))))
 
 ;;; ── List-form lowering dispatch table ───────────────────────────────────────
 ;;;
@@ -197,12 +200,14 @@ Returns (values required lowered-optional rest-param lowered-key)."
     (values required
             (mapcar (lambda (opt)
                       (list (first opt)
-                            (when (second opt) (lower-sexp-to-ast (second opt)))))
+                            (when (second opt) (lower-sexp-to-ast (second opt)))
+                            (third opt)))  ; FR-696: preserve supplied-p name
                     optional)
             rest-param
             (mapcar (lambda (kp)
                       (list (first kp)
-                            (when (second kp) (lower-sexp-to-ast (second kp)))))
+                            (when (second kp) (lower-sexp-to-ast (second kp)))
+                            (third kp)))  ; FR-696: preserve supplied-p name
                     key-params))))
 
 (defun %lower-local-fn-bindings (kind bindings)
@@ -523,13 +528,21 @@ Simple places dispatch via *setf-place-simple-rewrites*; complex places
 (define-list-lowerer (defclass) (node sf sl sc)
   (unless (>= (length node) 4)
     (error "defclass requires name, superclasses, and slot definitions"))
-  (let ((name (second node)) (superclasses (third node)) (slot-specs (fourth node)))
+  (let* ((name (second node)) (superclasses (third node)) (slot-specs (fourth node))
+         ;; Parse class options (5th+ elements): (:default-initargs key val ...)
+         (class-options (nthcdr 4 node))
+         (default-initargs-opt (find :default-initargs class-options
+                                     :key (lambda (o) (when (listp o) (first o)))))
+         (default-initargs (when default-initargs-opt
+                             (loop for (k v) on (rest default-initargs-opt) by #'cddr
+                                   collect (cons k (lower-sexp-to-ast v))))))
     (unless (symbolp name)      (error "defclass name must be a symbol"))
     (unless (listp superclasses) (error "defclass superclasses must be a list"))
     (unless (listp slot-specs)   (error "defclass slots must be a list"))
     (make-ast-defclass :name name
                        :superclasses superclasses
                        :slots (mapcar #'parse-slot-spec slot-specs)
+                       :default-initargs default-initargs
                        :source-file sf :source-line sl :source-column sc)))
 
 ;;; ── Defgeneric ───────────────────────────────────────────────────────────────
@@ -537,10 +550,36 @@ Simple places dispatch via *setf-place-simple-rewrites*; complex places
 (define-list-lowerer (defgeneric) (node sf sl sc)
   (unless (>= (length node) 3)
     (error "defgeneric requires name and lambda-list"))
-  (let ((name (second node)))
+  (let* ((name (second node))
+         (lambda-list (third node))
+         (options (cdddr node))
+         (inline-methods nil))
     (unless (symbolp name) (error "defgeneric name must be a symbol"))
-    (make-ast-defgeneric :name name :params (third node)
-                         :source-file sf :source-line sl :source-column sc)))
+    ;; Parse options: extract (:method ...) forms, :method-combination, accept and ignore others
+    (let ((combination nil))
+      (dolist (opt options)
+        (when (consp opt)
+          (case (car opt)
+            (:method
+             (push (cons 'defmethod (cons name (cdr opt))) inline-methods))
+            (:method-combination
+             (setf combination (second opt))))))
+    (setf inline-methods (nreverse inline-methods))
+    (let ((gf-node (make-ast-defgeneric :name name :params lambda-list
+                                        :combination combination
+                                        :source-file sf :source-line sl
+                                        :source-column sc)))
+      (if inline-methods
+          ;; Wrap in progn: defgeneric + defmethod forms
+          (make-ast-progn
+           :forms (cons gf-node
+                        (mapcar (lambda (m)
+                                  (lower-sexp-to-ast m :source-file sf
+                                                       :source-line sl
+                                                       :source-column sc))
+                                inline-methods))
+           :source-file sf :source-line sl :source-column sc)
+          gf-node)))))
 
 ;;; ── Defmethod ────────────────────────────────────────────────────────────────
 
@@ -556,7 +595,6 @@ Simple places dispatch via *setf-place-simple-rewrites*; complex places
          (raw-params (car rest-after-name))
          (body-forms (cdr rest-after-name))
          (specializers nil) (param-names nil))
-    (declare (ignore qualifier))
     (unless (symbolp name)    (error "defmethod name must be a symbol"))
     (unless (listp raw-params) (error "defmethod parameters must be a list"))
     (dolist (p raw-params)
@@ -567,6 +605,7 @@ Simple places dispatch via *setf-place-simple-rewrites*; complex places
                  (push p param-names))))
     (make-ast-defmethod
      :name name
+     :qualifier qualifier
      :specializers (nreverse specializers)
      :params       (nreverse param-names)
      :body         (list (lower-sexp-to-ast (list* 'block name body-forms)))

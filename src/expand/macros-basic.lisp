@@ -66,10 +66,11 @@
 
 ;; CHECK-TYPE macro
 (our-defmacro check-type (place type &optional type-string)
+  (declare (ignore type-string))
   `(unless (typep ,place ',type)
-     (error ,(if type-string
-                 (format nil "The value of ~S is not of type ~A" place type-string)
-                 (format nil "The value of ~S is not of type ~S" place type)))))
+     (error (make-condition 'type-error
+              :datum ,place
+              :expected-type ',type))))
 
 ;; SETF macro (simplified)
 (our-defmacro setf (place value)

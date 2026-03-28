@@ -14,15 +14,23 @@
        (setf ,place (cdr ,place))
        ,tmp)))
 
-;; INCF macro
+;; INCF macro — FR-693: gensym-protect compound place subforms
 (our-defmacro incf (place &optional (delta 1))
   "Increment PLACE by DELTA (default 1)."
-  `(setf ,place (+ ,place ,delta)))
+  (if (symbolp place)
+      `(setq ,place (+ ,place ,delta))
+      (let ((d (gensym "D")))
+        `(let ((,d ,delta))
+           (setf ,place (+ ,place ,d))))))
 
-;; DECF macro
+;; DECF macro — FR-693: gensym-protect compound place subforms
 (our-defmacro decf (place &optional (delta 1))
   "Decrement PLACE by DELTA (default 1)."
-  `(setf ,place (- ,place ,delta)))
+  (if (symbolp place)
+      `(setq ,place (- ,place ,delta))
+      (let ((d (gensym "D")))
+        `(let ((,d ,delta))
+           (setf ,place (- ,place ,d))))))
 
 ;; 1+ and 1- utility functions
 (our-defmacro 1+ (n)
@@ -32,16 +40,29 @@
   `(- ,n 1))
 
 ;; SIGNUM: returns -1, 0, or 1 based on sign
+;; FR-684: signum — type-preserving (ANSI CL 12.2.17)
 (our-defmacro signum (n)
   (let ((nv (gensym "N")))
     `(let ((,nv ,n))
-       (cond ((zerop ,nv) 0)
-             ((plusp ,nv) 1)
-             (t -1)))))
+       (cond ((zerop ,nv) ,nv)
+             ((> ,nv 0) (if (integerp ,nv) 1 1.0))
+             (t (if (integerp ,nv) -1 -1.0))))))
 
 ;; ISQRT: integer square root (floor of real square root)
+;; FR-683: isqrt — integer Newton's method for precision on large integers
 (our-defmacro isqrt (n)
-  `(floor (sqrt (float ,n))))
+  (let ((nvar (gensym "N")) (g (gensym "G")) (prev (gensym "P")))
+    `(let* ((,nvar ,n)
+            (,g (floor (sqrt (float ,nvar))))
+            (,prev nil))
+       ;; Newton correction loop: converges in 0-2 iterations
+       (block nil
+         (tagbody
+           :loop
+           (when (eql ,g ,prev) (return ,g))
+           (setq ,prev ,g)
+           (setq ,g (floor (+ ,g (floor ,nvar ,g)) 2))
+           (go :loop))))))
 
 ;; WITH-OPEN-STREAM: like with-open-file but for existing streams
 (our-defmacro with-open-stream (var-stream &body body)
@@ -57,13 +78,22 @@
   `(return-from nil ,value))
 
 ;; ROTATEF macro
-(our-defmacro rotatef (a b)
-  "Swap the values of A and B."
-  (let ((tmp (gensym "TMP")))
-    `(let ((,tmp ,a))
-       (setq ,a ,b)
-       (setq ,b ,tmp)
-       nil)))
+(our-defmacro rotatef (&rest places)
+  (cond
+    ((< (length places) 2) nil)
+    ((= (length places) 2)
+     (let ((tmp (gensym "TMP")))
+       `(let ((,tmp ,(first places)))
+          (setq ,(first places) ,(second places))
+          (setq ,(second places) ,tmp)
+          nil)))
+    (t (let ((tmp (gensym "TMP")))
+         `(let ((,tmp ,(first places)))
+            ,@(loop for (a b) on places
+                    while b
+                    collect `(setf ,a ,b))
+            (setf ,(car (last places)) ,tmp)
+            nil)))))
 
 ;; DESTRUCTURING-BIND macro
 (our-defmacro destructuring-bind (pattern expr &body body)
@@ -90,39 +120,85 @@
 
 ;; WITH-SLOTS macro - bind slot accessors as local variables
 (our-defmacro with-slots (slot-names instance &body body)
-  "Evaluate BODY with SLOT-NAMES bound to slot values of INSTANCE."
+  "Evaluate BODY with SLOT-NAMES as symbol macros for slot-value of INSTANCE.
+ANSI: uses symbol-macrolet so setf on slot names writes back to the object."
   (let ((inst-var (gensym "INST")))
     `(let ((,inst-var ,instance))
-       (let ,(mapcar (lambda (slot)
-                       (if (listp slot)
-                           `(,(first slot) (slot-value ,inst-var ',(second slot)))
-                           `(,slot (slot-value ,inst-var ',slot))))
-                     slot-names)
+       (symbol-macrolet ,(mapcar (lambda (slot)
+                                   (if (listp slot)
+                                       `(,(first slot) (slot-value ,inst-var ',(second slot)))
+                                       `(,slot (slot-value ,inst-var ',slot))))
+                                 slot-names)
          ,@body))))
 
 ;; NTH-VALUE macro - extract nth return value from multiple-values form
+;; FR-402: when N is a constant integer, expand to multiple-value-bind directly
 (our-defmacro nth-value (n form)
-  "Return the Nth value from a multiple-values-producing FORM."
-  (let ((vals-var (gensym "VALS")))
-    `(let ((,vals-var (multiple-value-list ,form)))
-       (nth ,n ,vals-var))))
+  (if (and (integerp n) (<= 0 n 19))
+      (let ((vars (loop for i from 0 to n collect (gensym (format nil "V~D-" i)))))
+        `(multiple-value-bind ,vars ,form
+           (declare (ignore ,@(butlast vars)))
+           ,(car (last vars))))
+      (let ((vals-var (gensym "VALS")))
+        `(let ((,vals-var (multiple-value-list ,form)))
+           (nth ,n ,vals-var)))))
 
-;; Shared expansion for exhaustive dispatch macros (ecase, etypecase)
-(defun %expand-exhaustive-case (case-head keyform cases error-msg)
-  (let ((key-var (gensym "KEY")))
-    `(let ((,key-var ,keyform))
-       (,case-head ,key-var
-         ,@cases
-         (otherwise (error ,error-msg))))))
-
-;; ECASE / ETYPECASE — signal error when no clause matches
+;; ECASE — signal type-error when no clause matches
 (our-defmacro ecase (keyform &body cases)
-  "Like CASE but signals error if no case matches."
-  (%expand-exhaustive-case 'case keyform cases "ECASE: no matching clause"))
+  "Like CASE but signals a TYPE-ERROR if no case matches."
+  (let ((key-var (gensym "KEY"))
+        (keys (mapcan (lambda (c) (let ((k (car c)))
+                                    (if (listp k) (copy-list k) (list k))))
+                      cases)))
+    `(let ((,key-var ,keyform))
+       (case ,key-var
+         ,@cases
+         (otherwise
+          (error (make-condition 'type-error
+                   :datum ,key-var
+                   :expected-type '(member ,@keys))))))))
 
+;; ETYPECASE — signal type-error when no clause matches
 (our-defmacro etypecase (keyform &body cases)
-  "Like TYPECASE but signals error if no case matches."
-  (%expand-exhaustive-case 'typecase keyform cases "ETYPECASE: no matching clause"))
+  "Like TYPECASE but signals a TYPE-ERROR if no case matches."
+  (let ((key-var (gensym "KEY"))
+        (types (mapcar #'car cases)))
+    `(let ((,key-var ,keyform))
+       (typecase ,key-var
+         ,@cases
+         (otherwise
+          (error (make-condition 'type-error
+                   :datum ,key-var
+                   :expected-type '(or ,@types))))))))
+
+;; CCASE — correctable case: like ecase but signals continuable type-error (FR-354)
+;; Without full restart system, behaves like ecase (signals type-error).
+(our-defmacro ccase (keyform &body cases)
+  "Like CASE but signals a correctable TYPE-ERROR if no case matches."
+  (let ((key-var (gensym "KEY"))
+        (keys (mapcan (lambda (c) (let ((k (car c)))
+                                    (if (listp k) (copy-list k) (list k))))
+                      cases)))
+    `(let ((,key-var ,keyform))
+       (case ,key-var
+         ,@cases
+         (otherwise
+          (error (make-condition 'type-error
+                   :datum ,key-var
+                   :expected-type '(member ,@keys))))))))
+
+;; CTYPECASE — correctable typecase: like etypecase but signals continuable type-error (FR-354)
+(our-defmacro ctypecase (keyform &body cases)
+  "Like TYPECASE but signals a correctable TYPE-ERROR if no case matches."
+  (let ((key-var (gensym "KEY"))
+        (types (mapcar #'car cases)))
+    `(let ((,key-var ,keyform))
+       (typecase ,key-var
+         ,@cases
+         (otherwise
+          (error (make-condition 'type-error
+                   :datum ,key-var
+                   :expected-type '(or ,@types))))))))
 
 ;;; ------------------------------------------------------------
 ;;; ANSI CL Phase 1 Macros (FR-201 through FR-212)
@@ -166,14 +242,15 @@
 
 ;; WITH-ACCESSORS (FR-205) — bind local vars to accessor function results
 (our-defmacro with-accessors (slot-entries instance &body body)
-  "Binds local variables to slot values read via accessor functions.
-   Each entry is (local-var-name accessor-function-name)."
+  "Binds symbol macros to accessor calls for slot access.
+   Each entry is (local-var-name accessor-function-name).
+   ANSI: uses symbol-macrolet so setf writes back through accessor."
   (let ((inst-var (gensym "INST")))
     `(let ((,inst-var ,instance))
-       (let ,(mapcar (lambda (entry)
-                       (destructuring-bind (var-name accessor-name) entry
-                         `(,var-name (,accessor-name ,inst-var))))
-                     slot-entries)
+       (symbol-macrolet ,(mapcar (lambda (entry)
+                                   (destructuring-bind (var-name accessor-name) entry
+                                     `(,var-name (,accessor-name ,inst-var))))
+                                 slot-entries)
          ,@body))))
 
 ;; DEFINE-MODIFY-MACRO (FR-208) — define a read-modify-write macro
@@ -190,80 +267,220 @@
     `(our-defmacro ,name (,place-var ,@lambda-list)
        `(setf ,,place-var (,',function ,,place-var ,,@param-names)))))
 
-;; ASSERT (FR-203) — signal an error if a test fails
+;; ASSERT (FR-203) — signal a continuable error if a test fails
 (our-defmacro assert (test &optional places datum &rest args)
   (declare (ignore places))   ; PLACES not supported in this impl; declare before docstring
-  "Signal a correctable error if TEST is false."
+  "Signal a continuable error if TEST is false."
   `(unless ,test
      ,(if datum
-          `(error ,datum ,@args)
-          `(error "Assertion failed: ~S" ',test))))
+          `(cerror "Continue." ,datum ,@args)
+          `(cerror "Continue." "Assertion failed: ~S" ',test))))
 
 ;; DEFINE-CONDITION (FR-204) — define a condition type (expands to defclass)
+;; FR-417: now handles :report option → defmethod print-object
 (our-defmacro define-condition (name parent-list slot-specs &rest options)
-  (declare (ignore options))   ; before docstring — declare after string is invalid in our-defmacro
-  "Define a condition type NAME."
-  (let ((parent-names (if parent-list parent-list '(error))))
-    `(defclass ,name ,parent-names
-       ,slot-specs)))
+  "Define a condition type NAME with optional :report."
+  (let* ((parent-names (if parent-list parent-list '(error)))
+         (report-opt (find :report options
+                           :key (lambda (o) (when (listp o) (first o)))))
+         (report-fn (when report-opt (second report-opt)))
+         (defclass-form `(defclass ,name ,parent-names ,slot-specs))
+         (report-form
+           (when report-fn
+             (let ((c (gensym "C")) (s (gensym "S")))
+               (cond
+                 ((stringp report-fn)
+                  `(defmethod print-object ((,c ,name) ,s)
+                     (write-string ,report-fn ,s)))
+                 ((and (consp report-fn) (eq (car report-fn) 'lambda))
+                  `(defmethod print-object ((,c ,name) ,s)
+                     (funcall ,report-fn ,c ,s)))
+                 (t
+                  `(defmethod print-object ((,c ,name) ,s)
+                     (funcall (function ,report-fn) ,c ,s))))))))
+    (if report-form
+        `(progn ,defclass-form ,report-form (quote ,name))
+        defclass-form)))
 
-;; HANDLER-BIND (FR-201) — simplified via HANDLER-CASE
-(our-defmacro handler-bind (bindings &body body)
-  "Establish condition handlers around BODY (simplified: stack unwinds)."
+;; HANDLER-BIND (FR-201) — non-unwinding handler protocol via dynamic registry.
+;; Uses PROGV for true dynamic binding so called functions (signal) see the handlers.
+;; Handlers are called in the dynamic context of the signaler (no stack unwind).
+;; If a handler returns normally it "declines" and the next handler is tried.
+;; Handlers can transfer control via invoke-restart, throw, or return-from.
+(register-macro 'handler-bind
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((bindings (second form))
+          (body (cddr form)))
+      (if (null bindings)
+          `(progn ,@body)
+          (let ((new-handlers-var (gensym "HANDLERS"))
+                (entries (mapcar (lambda (b)
+                                  `(list ',(first b) ,(second b)))
+                                bindings)))
+            `(let ((,new-handlers-var (append (list ,@entries) *%condition-handlers*)))
+               (progv '(*%condition-handlers*) (list ,new-handlers-var)
+                 ,@body)))))))
+
+;; SIGNAL (FR-201) — walk handler-bind registry without unwinding.
+;; Defined as macro so it expands inline and reads *%condition-handlers* in caller's scope.
+(our-defmacro signal (condition &rest args)
+  (declare (ignore args))
+  (let ((cond-var (gensym "COND"))
+        (entry-var (gensym "ENTRY"))
+        (type-var (gensym "TYPE"))
+        (fn-var (gensym "FN")))
+    `(let ((,cond-var ,condition))
+       (dolist (,entry-var *%condition-handlers*)
+         (let ((,type-var (first ,entry-var))
+               (,fn-var (second ,entry-var)))
+           (when (or (eq ,type-var t) (eq ,type-var 'condition)
+                     (eq ,type-var 'error) (eq ,type-var 'warning)
+                     (eq ,type-var 'serious-condition))
+             (funcall ,fn-var ,cond-var))))
+       nil)))
+
+;;; ── Restart Protocol (FR-202/FR-421) ────────────────────────────────────────
+;;;
+;;; Minimal restart protocol using catch/throw and a dynamic restart registry.
+;;; *%active-restarts* is a list of (name . catch-tag) entries.
+;;; restart-case pushes entries and wraps form in nested catches.
+;;; invoke-restart throws to the matching tag.
+
+;; RESTART-CASE (FR-202) — working restart protocol via catch/throw
+(register-macro 'restart-case
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((clauses (cddr form))
+          (form-expr (second form)))
+      (if (null clauses)
+          form-expr
+          ;; Parse each clause: (name lambda-list [:report r] [:interactive i] [:test t] . body)
+          (let ((parsed-clauses nil)
+                (counter 0))
+            (dolist (clause clauses)
+              (let* ((name (first clause))
+                     (lambda-list (second clause))
+                     (rest (cddr clause))
+                     (body (progn
+                             (loop while (and rest (keywordp (car rest))
+                                              (member (car rest) '(:report :interactive :test)))
+                                   do (setf rest (cddr rest)))
+                             rest))
+                     (tag (intern (format nil "RESTART-~A-~D" name (incf counter))
+                                  (find-package :cl-cc))))
+                (push (list name tag lambda-list body) parsed-clauses)))
+            (setf parsed-clauses (nreverse parsed-clauses))
+            ;; Build nested catches from inside out
+            (let* ((result-var (gensym "RESULT"))
+                   (restarts-var (gensym "RESTARTS"))
+                   ;; innermost: the form wrapped in handler-case
+                   (inner form-expr)
+                   ;; Wrap each restart as a catch tag
+                   (wrapped inner))
+              ;; Build the catch nesting from last to first
+              (dolist (pc (reverse parsed-clauses))
+                (let ((tag (second pc))
+                      (ll  (third pc))
+                      (body (fourth pc)))
+                  (setf wrapped
+                        `(let ((,result-var (catch ',tag ,wrapped)))
+                           ;; If we got here via throw, result-var holds the thrown value
+                           ;; Run the restart body; bind lambda-list params if any
+                           ,(if (and ll (car ll))
+                                `(let ((,(car ll) ,result-var)) ,@(or body '(nil)))
+                                `(progn ,@(or body '(nil))))))))
+              ;; Build the *%active-restarts* binding
+              (let ((restart-entries (mapcar (lambda (pc)
+                                              `(cons ',(first pc) ',(second pc)))
+                                            parsed-clauses)))
+                `(let ((,restarts-var (list ,@restart-entries)))
+                   (let ((*%active-restarts* (append ,restarts-var *%active-restarts*)))
+                     ,wrapped)))))))))
+
+;; RESTART-BIND (FR-202) — binds restarts for the dynamic extent of body
+(our-defmacro restart-bind (bindings &body body)
+  "Establish restart bindings around BODY."
   (if (null bindings)
       `(progn ,@body)
-      `(handler-case (progn ,@body)
-         ,@(mapcar (lambda (binding)
-                     (let ((cvar (gensym "COND")))
-                       `(,(first binding) (,cvar)
-                          (funcall ,(second binding) ,cvar))))
-                   bindings))))
+      (let ((restarts-var (gensym "RESTARTS"))
+            (entries (mapcar (lambda (b) `(cons ',(first b) ',(gensym "RBTAG")))
+                             bindings)))
+        `(let ((,restarts-var (list ,@entries)))
+           (let ((*%active-restarts* (append ,restarts-var *%active-restarts*)))
+             ,@body)))))
 
-;; RESTART-CASE (FR-202) — simplified
-(our-defmacro restart-case (form &rest clauses)
-  "Execute FORM with named restarts (simplified; restarts not invokable)."
-  (if (null clauses)
-      form
-      (let* ((first-clause (first clauses))
-             (first-body   (cdddr first-clause))
-             (err-var (gensym "ERR")))
-        `(handler-case ,form
-           (error (,err-var)
-             (declare (ignore ,err-var))
-             ,@(if first-body first-body '(nil)))))))
-
-;; RESTART-BIND (FR-202) — stub
-(our-defmacro restart-bind (bindings &body body)
-  (declare (ignore bindings))   ; before docstring — declare after string is invalid in our-defmacro
-  "Establish restart bindings (stub: ignored)."
-  `(progn ,@body))
-
-;;; FR-804/FR-805: Restart utility stubs (ANSI compatibility)
-;;;
-;;; Data-driven registration: map restart name → expansion rule.
-;;; :nil       → expand to nil (ignore entire form)
-;;; :abort     → expand to (error "ABORT invoked")
-;;; :passthru  → expand to the second form element (the value argument)
-
+;; INVOKE-RESTART — look up and throw to the restart's catch tag
 (our-defmacro invoke-restart (name &rest args)
-  `(error "No restart named ~S is active" ,name ,@args))
+  "Invoke restart NAME. Transfers control to the matching restart-case clause."
+  (let ((entry-var (gensym "ENTRY"))
+        (name-var (gensym "NAME"))
+        (val-var (gensym "VAL")))
+    `(let* ((,name-var ,name)
+            (,entry-var (assoc ,name-var *%active-restarts* :test #'eq)))
+       (if ,entry-var
+           (throw (cdr ,entry-var) ,(if args (first args) nil))
+           (error (format nil "No restart named ~A is active" ,name-var))))))
 
+;; INVOKE-RESTART-INTERACTIVELY — same as invoke-restart (no interactive support)
+(our-defmacro invoke-restart-interactively (name)
+  `(invoke-restart ,name))
+
+;; RESTART-NAME — extract name from a restart entry
 (our-defmacro restart-name (restart)
-  `(if (hash-table-p ,restart)
-       (gethash :name ,restart)
-       ,restart))
+  `(if (consp ,restart) (car ,restart) ,restart))
 
-;; Nil-returning stubs: find-restart, compute-restarts, continue, muffle-warning
-(dolist (name '(find-restart compute-restarts continue muffle-warning))
-  (register-macro name (lambda (form env) (declare (ignore form env)) nil)))
+;; FIND-RESTART — search the active restart list
+(our-defmacro find-restart (name &optional condition)
+  (declare (ignore condition))
+  (let ((name-var (gensym "NAME")))
+    `(let ((,name-var ,name))
+       (assoc ,name-var *%active-restarts* :test #'eq))))
 
-;; abort: always signals error
-(register-macro 'abort
-  (lambda (form env) (declare (ignore form env)) '(error "ABORT invoked")))
+;; COMPUTE-RESTARTS — return all active restarts
+(our-defmacro compute-restarts (&optional condition)
+  (declare (ignore condition))
+  '*%active-restarts*)
 
-;; use-value / store-value: pass the value through, ignore optional condition
-(dolist (name '(use-value store-value))
-  (register-macro name (lambda (form env) (declare (ignore env)) (second form))))
+;; RESTART-P — check if something is a restart
+(register-macro 'restart-p
+  (lambda (form env) (declare (ignore env)) `(consp ,(second form))))
+
+;; ABORT — invoke the abort restart, or signal error if none
+(our-defmacro abort (&optional condition)
+  (declare (ignore condition))
+  `(let ((r (find-restart 'abort)))
+     (if r
+         (invoke-restart 'abort)
+         (error "ABORT invoked"))))
+
+;; CONTINUE — invoke the continue restart if available
+(our-defmacro continue (&optional condition)
+  (declare (ignore condition))
+  `(let ((r (find-restart 'continue)))
+     (when r (invoke-restart 'continue))))
+
+;; MUFFLE-WARNING — invoke the muffle-warning restart if available
+(our-defmacro muffle-warning (&optional condition)
+  (declare (ignore condition))
+  `(let ((r (find-restart 'muffle-warning)))
+     (when r (invoke-restart 'muffle-warning))))
+
+;; USE-VALUE — invoke the use-value restart with a value
+(our-defmacro use-value (value &optional condition)
+  (declare (ignore condition))
+  `(let ((r (find-restart 'use-value)))
+     (if r
+         (invoke-restart 'use-value ,value)
+         ,value)))
+
+;; STORE-VALUE — invoke the store-value restart with a value
+(our-defmacro store-value (value &optional condition)
+  (declare (ignore condition))
+  `(let ((r (find-restart 'store-value)))
+     (if r
+         (invoke-restart 'store-value ,value)
+         ,value)))
 
 ;; WITH-INPUT-FROM-STRING (FR-209)
 (our-defmacro with-input-from-string (binding &body body)
@@ -286,16 +503,60 @@
   "Execute BODY with standard I/O syntax bindings (stub)."
   `(progn ,@body))
 
-;; WITH-PACKAGE-ITERATOR (FR-211) — stub
-(our-defmacro with-package-iterator (binding &body body)
-  "Iterate over package symbols (stub: iterator always exhausted)."
-  (let ((name (first binding)))
-    `(let ((,name (lambda () (values nil nil nil nil))))
-       ,@body)))
+;; WITH-PACKAGE-ITERATOR (FR-211) — real implementation via host bridge
+(register-macro 'with-package-iterator
+  (lambda (form env)
+    (declare (ignore env))
+    (let* ((binding (second form))
+           (body (cddr form))
+           (name (first binding))
+           (packages (second binding))
+           (symbol-types (cddr binding))
+           (syms-var (gensym "SYMS"))
+           (idx-var (gensym "IDX"))
+           (len-var (gensym "LEN")))
+      (declare (ignore symbol-types))
+      ;; Collect external symbols from the given packages
+      `(let* ((,syms-var (let ((acc nil))
+                           (dolist (p (if (listp ,packages) ,packages (list ,packages)))
+                             (let ((pkg (find-package p)))
+                               (when pkg
+                                 (dolist (s (%package-external-symbols pkg))
+                                   (push (list s :external pkg) acc)))))
+                           (nreverse acc)))
+              (,idx-var 0)
+              (,len-var (length ,syms-var)))
+         (let ((,name (lambda ()
+                        (if (>= ,idx-var ,len-var)
+                            (values nil nil nil nil)
+                            (let ((entry (nth ,idx-var ,syms-var)))
+                              (setq ,idx-var (1+ ,idx-var))
+                              (values t (first entry) (second entry) (third entry)))))))
+           ,@body)))))
 
-;; DEFINE-COMPILER-MACRO (FR-212) — stub (ignored)
+;; DEFINE-COMPILER-MACRO (FR-212) — accepts and returns name (no compile-time expansion)
 (register-macro 'define-compiler-macro
-  (lambda (form env) (declare (ignore form env)) nil))
+  (lambda (form env) (declare (ignore env)) `(quote ,(second form))))
+
+;; WITH-COMPILATION-UNIT (FR-363) — stub: just executes body
+;; Uses register-macro because our-defmacro can't handle nested lambda lists.
+(register-macro 'with-compilation-unit
+  (lambda (form env)
+    (declare (ignore env))
+    ;; (with-compilation-unit (options...) body...)
+    `(progn ,@(cddr form))))
+
+;; WITH-SIMPLE-RESTART (FR-422) — stub: just executes body
+(register-macro 'with-simple-restart
+  (lambda (form env)
+    (declare (ignore env))
+    ;; (with-simple-restart (name fmt args...) body...)
+    `(progn ,@(cddr form))))
+
+;; WITH-CONDITION-RESTARTS (FR-423) — stub: just executes body
+(our-defmacro with-condition-restarts (condition restarts &body body)
+  (declare (ignore condition restarts))
+  `(progn ,@body))
 
 ;;; ------------------------------------------------------------
 ;;; CXR Accessor Macros (algorithmic registration)
@@ -673,7 +934,7 @@
 (our-defmacro ignore-errors (&body forms)
   (let ((e-var (gensym "E")))
     `(handler-case (progn ,@forms)
-       (error (,e-var) nil))))
+       (error (,e-var) (values nil ,e-var)))))
 
 ;; CONCATENATE: type-dispatching sequence concatenation (FR-615)
 (our-defmacro concatenate (result-type &rest sequences)

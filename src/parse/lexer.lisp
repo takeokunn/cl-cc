@@ -307,6 +307,9 @@
                                ((string= name-str "RUBOUT") #\Rubout)
                                ((string= name-str "LINEFEED") #\Linefeed)
                                ((string= name-str "NUL") #\Nul)
+                               ((string= name-str "NULL") #\Nul)
+                               ((string= name-str "ESCAPE") #\Escape)
+                               ((string= name-str "ESC") #\Escape)
                                (t (error "Lexer error: unknown character name ~S" name-str)))
                              start)))
           ;; Single character

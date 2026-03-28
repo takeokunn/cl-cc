@@ -207,11 +207,18 @@
 (defmethod ast-to-sexp ((node ast-defmethod))
   (let ((params (loop for name in (ast-defmethod-params node)
                       for spec in (ast-defmethod-specializers node)
-                      collect (if spec (list name (cdr spec)) name))))
-    (list* 'defmethod
-           (ast-defmethod-name node)
-           params
-           (mapcar #'ast-to-sexp (ast-defmethod-body node)))))
+                      collect (if spec (list name (cdr spec)) name)))
+        (qualifier (ast-defmethod-qualifier node)))
+    (if qualifier
+        (list* 'defmethod
+               (ast-defmethod-name node)
+               qualifier
+               params
+               (mapcar #'ast-to-sexp (ast-defmethod-body node)))
+        (list* 'defmethod
+               (ast-defmethod-name node)
+               params
+               (mapcar #'ast-to-sexp (ast-defmethod-body node))))))
 
 (defmethod ast-to-sexp ((node ast-make-instance))
   (let ((args (list 'make-instance (ast-to-sexp (ast-make-instance-class node)))))

@@ -70,7 +70,7 @@
    Comparisons fold to 1/0 (not t/nil) for VM register semantics.")
 
 (defparameter *opt-binary-zero-guard-types*
-  '(vm-div vm-mod vm-rem)
+  '(vm-div vm-cl-div vm-mod vm-rem)
   "Binary instruction types that must guard against zero divisor before folding.")
 
 (defparameter *opt-binary-no-fold-types*
@@ -121,7 +121,7 @@
     vm-mod vm-rem vm-min vm-max
     vm-truncate vm-floor-inst vm-ceiling-inst vm-round-inst
     vm-logand vm-logior vm-logxor vm-logeqv vm-ash
-    vm-div vm-ffloor vm-fceiling vm-ftruncate vm-fround)
+    vm-div vm-cl-div vm-ffloor vm-fceiling vm-ftruncate vm-fround)
   "Non-binop-subclass instruction types that have vm-lhs/vm-rhs accessors.
    vm-binop (parent of vm-add/vm-sub/vm-mul) is handled by typecase inheritance.
    Used by opt-inst-read-regs, opt-pass-fold, opt-pass-cse, and WASM register collection.")
@@ -234,6 +234,7 @@
                             ((:rconst 0) . (:const 0)) ((:lconst 0) . (:const 0))
                             ((:rconst -1) . (:neg :lhs)) ((:lconst -1) . (:neg :rhs))))
       (reg 'vm-div       '(((:rconst 1) . :move-lhs)))
+      (reg 'vm-cl-div    '(((:rconst 1) . :move-lhs)))
       (reg 'vm-floor-inst '(((:rconst 1) . :move-lhs)))
       (reg 'vm-mod       '(((:lconst 0) . (:const 0))))
       ;; Comparisons
@@ -291,6 +292,8 @@
       (setf (gethash tp ht) #'vm-label-name))
     ;; Handler labels use a distinct accessor
     (setf (gethash 'vm-establish-handler ht) #'vm-handler-label)
+    ;; Catch labels use a distinct accessor
+    (setf (gethash 'vm-establish-catch ht) #'vm-catch-handler-label)
     ht)
   "Maps instruction type symbols to accessor functions that extract referenced label names.
    Used by opt-pass-dead-labels to collect all live labels without typecase dispatch.")

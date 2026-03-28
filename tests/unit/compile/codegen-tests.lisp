@@ -298,22 +298,24 @@
 ;;; ─── compile-ast: ast-catch / ast-throw ──────────────────────────────────
 
 (deftest codegen-catch-compilation
-  "Compiling catch emits labels and returns a register."
+  "Compiling catch emits establish-catch, labels, and returns a register."
   (let* ((ctx (make-codegen-ctx))
          (reg (compile-ast (make-ast-catch
                              :tag  (make-ast-quote :value 'my-tag)
                              :body (list (make-ast-int :value 42)))
                            ctx)))
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-establish-catch))
     (assert-true (codegen-find-inst ctx 'cl-cc::vm-label))
     (assert-true (keywordp reg))))
 
 (deftest codegen-throw-compiles-tag-and-value
-  "Compiling throw compiles both tag and value expressions."
+  "Compiling throw emits vm-throw with tag and value registers."
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-ast-throw
                    :tag (make-ast-quote :value 'my-tag)
                    :value (make-ast-int :value 42))
                  ctx)
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-throw))
     ;; Should have at least 2 vm-const: one for 'my-tag, one for 42
     (let* ((insts (codegen-instructions ctx))
            (consts (remove-if-not (lambda (i) (typep i 'cl-cc::vm-const)) insts)))

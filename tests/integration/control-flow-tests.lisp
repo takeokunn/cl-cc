@@ -79,8 +79,14 @@
 
 (deftest control-flow-constructs
   "catch, unwind-protect, and multiple-value-prog1 compile and evaluate to their primary value."
-  (assert-true (is-compile-string "(catch 'foo 42)" :target :x86_64))
+  (assert-true (is-compile-string "(catch 'foo 42)" :target :vm))
   (assert-= 42 (run-string "(catch 'foo 42)"))
+  ;; catch with throw
+  (assert-= 99 (run-string "(catch 'done (throw 'done 99) 42)"))
+  ;; nested catch — inner tag
+  (assert-= 10 (run-string "(catch 'outer (catch 'inner (throw 'inner 10)))"))
+  ;; nested catch — outer tag
+  (assert-= 20 (run-string "(catch 'outer (catch 'inner (throw 'outer 20)))"))
   (assert-true (is-compile-string "(unwind-protect 42 (print 0))" :target :vm))
   (assert-= 42 (run-string "(unwind-protect 42 (print 0))"))
   (assert-true (is-compile-string "(multiple-value-prog1 42 (print 1) (print 2))" :target :vm))

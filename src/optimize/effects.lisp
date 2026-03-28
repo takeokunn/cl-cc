@@ -24,7 +24,7 @@
     ;; Integer arithmetic (may signal zero-division for div/mod/rem,
     ;; but optimizer already handles folding — kept pure for DCE/CSE)
     vm-add vm-sub vm-mul vm-neg vm-abs vm-inc vm-dec
-    vm-div vm-mod vm-rem
+    vm-div vm-cl-div vm-mod vm-rem
     ;; (floor/ceiling/truncate/round moved to :write-global — they set the
     ;; vm-values-list side-channel, which DCE must not eliminate)
     ;; Integer comparison
@@ -130,6 +130,8 @@
     ;; Error / condition handling
     vm-signal-error
     vm-establish-handler vm-remove-handler vm-sync-handler-regs
+    ;; Catch/throw
+    vm-establish-catch vm-throw
     ;; CLOS method dispatch continuation
     vm-call-next-method vm-next-method-p)
   "VM instruction struct-type symbols that affect control flow or error handling.")

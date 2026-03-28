@@ -28,6 +28,7 @@
 ;;; Arithmetic Extensions
 
 (define-vm-binary-instruction vm-div          :div      "Integer division. DST = floor(LHS / RHS).")
+(define-vm-binary-instruction vm-cl-div       :cl-div   "CL division. DST = LHS / RHS (rational-preserving).")
 (define-vm-binary-instruction vm-mod          :mod      "Modulo operation. DST = LHS mod RHS.")
 (define-vm-unary-instruction  vm-neg          :neg      "Negation. DST = -SRC.")
 (define-vm-unary-instruction  vm-abs          :abs      "Absolute value. DST = |SRC|.")
@@ -65,7 +66,9 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
   "Check if VALUE is of TYPE-SYM. Handles both host CL types and VM CLOS types."
   (case type-sym
     ((integer fixnum) (integerp value))
-    ((float single-float double-float) (floatp value))
+    ((float single-float double-float short-float long-float) (floatp value))
+    ((real) (realp value))
+    ((rational) (rationalp value))
     ((string) (stringp value))
     ((symbol) (symbolp value))
     ((keyword) (keywordp value))
@@ -73,7 +76,8 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
     ((null) (null value))
     ((list) (listp value))
     ((number) (numberp value))
-    ((character) (characterp value))
+    ((character base-char standard-char) (characterp value))
+    ((bit) (or (eql value 0) (eql value 1)))
     ((atom) (atom value))
     ((function) (functionp value))
     ((vector) (vectorp value))
@@ -87,16 +91,38 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
     ;; VM hash tables are wrapped in vm-hash-table-object
     ((hash-table) (typep value 'vm-hash-table-object))
     (otherwise
-     (if (and (hash-table-p value)
-              (gethash :__class__ value))
-         (let* ((class-ht (gethash :__class__ value))
-                (class-name (when (hash-table-p class-ht)
-                              (gethash :__name__ class-ht)))
-                (cpl (when (hash-table-p class-ht)
-                       (gethash :__cpl__ class-ht))))
-           (or (eq class-name type-sym)
-               (member type-sym cpl)))
-         (ignore-errors (typep value type-sym))))))
+     (cond
+       ;; FR-581: compound type specifiers passed as lists
+       ((and (consp type-sym) (eq (car type-sym) 'satisfies))
+        (let ((pred (second type-sym)))
+          (ignore-errors (funcall pred value))))
+       ((and (consp type-sym) (eq (car type-sym) 'or))
+        (some (lambda (t2) (vm-typep-check value t2)) (cdr type-sym)))
+       ((and (consp type-sym) (eq (car type-sym) 'and))
+        (every (lambda (t2) (vm-typep-check value t2)) (cdr type-sym)))
+       ((and (consp type-sym) (eq (car type-sym) 'not))
+        (not (vm-typep-check value (second type-sym))))
+       ((and (consp type-sym) (eq (car type-sym) 'member))
+        (member value (cdr type-sym) :test #'eql))
+       ((and (consp type-sym) (eq (car type-sym) 'eql))
+        (eql value (second type-sym)))
+       ;; FR-512: (values ...) compound type — any value satisfies in non-MV context
+       ((and (consp type-sym) (eq (car type-sym) 'values))
+        t)
+       ;; FR-512: (function ...) compound type — check if value is a function
+       ((and (consp type-sym) (eq (car type-sym) 'function))
+        (or (typep value 'vm-closure-object) (functionp value)))
+       ;; VM CLOS objects — check CPL
+       ((and (hash-table-p value)
+             (gethash :__class__ value))
+        (let* ((class-ht (gethash :__class__ value))
+               (class-name (when (hash-table-p class-ht)
+                             (gethash :__name__ class-ht)))
+               (cpl (when (hash-table-p class-ht)
+                      (gethash :__cpl__ class-ht))))
+          (or (eq class-name type-sym)
+              (member type-sym cpl))))
+       (t (ignore-errors (typep value type-sym)))))))
 
 (defmethod execute-instruction ((inst vm-typep) state pc labels)
   (declare (ignore labels))
@@ -138,6 +164,15 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
     (if (zerop divisor)
         (error "vm-div: Division by zero")
         (let ((result (floor (vm-reg-get state (vm-lhs inst)) divisor)))
+          (vm-reg-set state (vm-dst inst) result)
+          (values (1+ pc) nil nil)))))
+
+(defmethod execute-instruction ((inst vm-cl-div) state pc labels)
+  (declare (ignore labels))
+  (let ((divisor (vm-reg-get state (vm-rhs inst))))
+    (if (zerop divisor)
+        (error "Division by zero")
+        (let ((result (/ (vm-reg-get state (vm-lhs inst)) divisor)))
           (vm-reg-set state (vm-dst inst) result)
           (values (1+ pc) nil nil)))))
 
@@ -227,7 +262,7 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
                    ((characterp value) 'character)
                    ((symbolp value) 'symbol)
                    ((consp value) 'cons)
-                   ((functionp value) 'function)
+                   ((or (functionp value) (typep value 'vm-closure-object)) 'function)
                    ((vectorp value) 'vector)
                    ;; VM CLOS instances are hash tables with :__class__ — return the class name
                    ((and (hash-table-p value) (gethash :__class__ value))

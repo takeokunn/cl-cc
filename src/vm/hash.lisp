@@ -144,9 +144,12 @@
     (otherwise (error "Unknown hash table test: ~S" test-symbol))))
 
 (defun vm-hash-table-get-internal (table-obj)
-  "Get the internal hash table from a VM hash table object."
-  (check-type table-obj vm-hash-table-object)
-  (vm-hash-table-internal table-obj))
+  "Get the internal hash table from a VM hash table object or native CL hash table.
+Class registry entries and GF dispatch tables are native hash tables, so we
+must handle both representations transparently."
+  (etypecase table-obj
+    (vm-hash-table-object (vm-hash-table-internal table-obj))
+    (hash-table table-obj)))
 
 ;;; Instruction Execution - Hash Table Operations
 
@@ -213,7 +216,9 @@
 (defmethod execute-instruction ((inst vm-hash-table-p) state pc labels)
   (declare (ignore labels))
   (let* ((value (vm-reg-get state (vm-src inst)))
-         (result (if (typep value 'vm-hash-table-object) 1 0)))
+         (result (if (or (typep value 'vm-hash-table-object)
+                         (hash-table-p value))
+                     1 0)))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 

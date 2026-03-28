@@ -33,6 +33,7 @@
                  :ast-binop
                  :ast-if
                  :ast-progn
+                 :ast-progn-forms
                  :ast-print
                  :ast-let
                  :ast-lambda

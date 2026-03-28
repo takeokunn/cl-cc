@@ -30,11 +30,11 @@
     (assert-equal (caddr setf-form)   '(cdr lst))))
 
 (deftest-each incf-decf-expansion
-  "incf/decf expand to (setf x (OP x delta))."
-  :cases (("incf-default" '(incf x)   '(setf x (+ x 1)))
-          ("incf-custom"  '(incf x 5) '(setf x (+ x 5)))
-          ("decf-default" '(decf x)   '(setf x (- x 1)))
-          ("decf-custom"  '(decf x 3) '(setf x (- x 3))))
+  "incf/decf expand to (setq x (OP x delta)) for simple symbol places."
+  :cases (("incf-default" '(incf x)   '(setq x (+ x 1)))
+          ("incf-custom"  '(incf x 5) '(setq x (+ x 5)))
+          ("decf-default" '(decf x)   '(setq x (- x 1)))
+          ("decf-custom"  '(decf x 3) '(setq x (- x 3))))
   (form expected)
   (assert-equal (our-macroexpand-1 form) expected))
 
@@ -66,24 +66,23 @@
 ;;; ── WITH-SLOTS ───────────────────────────────────────────────────────────────
 
 (deftest with-slots-expansion
-  "WITH-SLOTS: outer LET binds the instance; inner LET binds each slot via SLOT-VALUE."
+  "WITH-SLOTS: outer LET binds instance; inner SYMBOL-MACROLET binds each slot."
   (let* ((result     (our-macroexpand-1 '(with-slots (x) obj body)))
-         (inner-let  (caddr result))
-         (binding    (caadr inner-let)))
-    (assert-eq (car result)    'let)
-    (assert-eq (car inner-let) 'let)
-    (assert-eq (car binding)   'x)
-    (assert-eq (caadr binding) 'slot-value)))
+         (inner-form (caddr result))
+         (binding    (caadr inner-form)))
+    (assert-eq (car result)     'let)
+    (assert-eq (car inner-form) 'symbol-macrolet)
+    (assert-eq (car binding)    'x)
+    (assert-eq (caadr binding)  'slot-value)))
 
 ;;; ── NTH-VALUE ────────────────────────────────────────────────────────────────
 
 (deftest nth-value-expansion
-  "NTH-VALUE binds (multiple-value-list form) in a LET then calls (nth n gensym)."
-  (let* ((result (our-macroexpand-1 '(nth-value 1 form)))
-         (body   (caddr result)))
-    (assert-eq    (car result)  'let)
-    (assert-eq    (car body)    'nth)
-    (assert-equal (cadr body)   1)))
+  "NTH-VALUE with constant N expands to MULTIPLE-VALUE-BIND selecting the Nth var."
+  (let* ((result (our-macroexpand-1 '(nth-value 1 form))))
+    (assert-eq (car result) 'multiple-value-bind)
+    ;; Should bind 2 vars (v0 v1), return v1
+    (assert-= (length (second result)) 2)))
 
 ;;; ── DESTRUCTURING-BIND ───────────────────────────────────────────────────────
 
@@ -97,14 +96,14 @@
 ;;; ── ASSERT ───────────────────────────────────────────────────────────────────
 
 (deftest assert-expansion
-  "ASSERT: outer is UNLESS, body is ERROR; custom datum is passed through."
+  "ASSERT: outer is UNLESS, body is CERROR (continuable); custom datum is passed through."
   (let* ((basic  (our-macroexpand-1 '(assert test)))
          (custom (our-macroexpand-1 '(assert test () "bad input"))))
     (assert-eq    (car  basic)          'unless)
     (assert-equal (cadr basic)          'test)
-    (assert-eq    (car (caddr basic))   'error)
-    (assert-eq    (car (caddr custom))  'error)
-    (assert-equal (cadr (caddr custom)) "bad input")))
+    (assert-eq    (car (caddr basic))   'cerror)
+    (assert-eq    (car (caddr custom))  'cerror)
+    (assert-equal (caddr (caddr custom)) "bad input")))
 
 ;;; ── IGNORE-ERRORS ────────────────────────────────────────────────────────────
 
@@ -396,9 +395,11 @@
 ;;; ── WITH-ACCESSORS ───────────────────────────────────────────────────────────
 
 (deftest with-accessors-outer-is-let
-  "WITH-ACCESSORS outer form is LET binding the instance"
-  (let ((result (our-macroexpand-1 '(with-accessors ((x acc-x)) obj body))))
-    (assert-eq (car result) 'let)))
+  "WITH-ACCESSORS outer form is LET; inner is SYMBOL-MACROLET binding accessor calls."
+  (let* ((result (our-macroexpand-1 '(with-accessors ((x acc-x)) obj body)))
+         (inner-form (caddr result)))
+    (assert-eq (car result) 'let)
+    (assert-eq (car inner-form) 'symbol-macrolet)))
 
 ;;; ── DEFINE-MODIFY-MACRO ──────────────────────────────────────────────────────
 
@@ -430,31 +431,31 @@
 ;;; ── HANDLER-BIND ─────────────────────────────────────────────────────────────
 
 (deftest-each handler-bind-expansion
-  "HANDLER-BIND: empty bindings → PROGN; one binding → HANDLER-CASE."
+  "HANDLER-BIND: empty bindings → PROGN; one binding → LET (dynamic handler registry)."
   :cases (("no-bindings"   '(handler-bind () body)                      'progn)
-          ("one-binding"   '(handler-bind ((error #'my-handler)) body)  'handler-case))
+          ("one-binding"   '(handler-bind ((error #'my-handler)) body)  'let))
   (form expected-head)
   (assert-eq (car (our-macroexpand-1 form)) expected-head))
 
 ;;; ── RESTART-CASE ─────────────────────────────────────────────────────────────
 
-(deftest-each restart-case-expansion
-  "RESTART-CASE: no clauses → form unchanged; with clause → HANDLER-CASE."
+(deftest-each restart-case-basic-expansion
+  "RESTART-CASE: no clauses → form unchanged; with clause → LET (restart binding)."
   :cases (("no-clauses"    '(restart-case (do-stuff))                       '(do-stuff))
           ("with-clause"   '(restart-case (do-stuff) (my-restart () ok))    nil))
   (form expected-or-nil)
   (let ((result (our-macroexpand-1 form)))
     (if expected-or-nil
         (assert-equal result expected-or-nil)
-        (assert-eq (car result) 'handler-case))))
+        (assert-eq (car result) 'let))))
 
 ;;; ── ISQRT ────────────────────────────────────────────────────────────────────
 
 (deftest isqrt-expands-to-floor-sqrt
-  "ISQRT expands to (floor (sqrt (float n)))"
+  "ISQRT expands to let* with Newton correction loop"
   (let ((result (our-macroexpand-1 '(isqrt n))))
-    (assert-eq (car result)      'floor)
-    (assert-eq (caar (cdr result)) 'sqrt)))
+    ;; FR-683: isqrt now uses integer Newton's method for precision
+    (assert-eq (car result) 'let*)))
 
 ;;; ── WITH-OPEN-STREAM ─────────────────────────────────────────────────────────
 
@@ -497,12 +498,12 @@
 ;;; ── Stream macros ────────────────────────────────────────────────────────────
 
 (deftest-each stream-macro-outer-is-let
-  "Stream-binding macros expand to a LET."
+  "Stream-binding macros expand to a LET or LET*."
   :cases (("with-input-from-string" '(with-input-from-string (s "hello") body))
           ("with-output-to-string"  '(with-output-to-string (s) (write-char #\x s)))
           ("with-package-iterator"  '(with-package-iterator (sym pkg) body)))
   (form)
-  (assert-eq (car (our-macroexpand-1 form)) 'let))
+  (assert-true (member (car (our-macroexpand-1 form)) '(let let*))))
 
 (deftest with-output-to-string-ends-with-get-output-stream-string
   "WITH-OUTPUT-TO-STRING last form in LET body is (get-output-stream-string var)."
@@ -512,51 +513,70 @@
     (assert-eq    (car result)  'let)
     (assert-equal (symbol-name (car last-form)) "GET-OUTPUT-STREAM-STRING")))
 
-;;; ── Restart stubs ────────────────────────────────────────────────────────────
+;;; ── Restart protocol ─────────────────────────────────────────────────────────
 
-(deftest-each restart-stub-returns-nil
-  "Unimplemented restart stubs expand to NIL."
-  :cases (("find-restart"     '(find-restart 'my-restart))
-          ("compute-restarts" '(compute-restarts))
-          ("continue"         '(continue))
-          ("muffle-warning"   '(muffle-warning)))
-  (form)
-  (assert-eq (our-macroexpand-1 form) nil))
+(deftest restart-find-restart-expansion
+  "FIND-RESTART expands to LET with ASSOC lookup on *%active-restarts*."
+  (let ((result (our-macroexpand-1 '(find-restart 'my-restart))))
+    (assert-eq (car result) 'let)))
 
-(deftest-each restart-stub-value-passthrough
-  "USE-VALUE and STORE-VALUE pass through the value form."
-  :cases (("use-value"   '(use-value 42))
-          ("store-value" '(store-value 42)))
-  (form)
-  (assert-= (our-macroexpand-1 form) 42))
+(deftest restart-compute-restarts-expansion
+  "COMPUTE-RESTARTS returns the active restart list."
+  (let ((result (our-macroexpand-1 '(compute-restarts))))
+    (assert-eq result 'cl-cc::*%active-restarts*)))
 
-(deftest-each restart-stubs-expand-to-error
-  "Unimplemented restart operations expand to (ERROR ...) stubs."
-  :cases (("invoke-restart" '(invoke-restart 'my-restart))
-          ("abort"          '(abort)))
-  (form)
-  (let ((result (our-macroexpand-1 form)))
-    (assert-eq 'error (car result))))
+(deftest restart-invoke-restart-expansion
+  "INVOKE-RESTART expands to LET* with ASSOC + THROW."
+  (let ((result (our-macroexpand-1 '(invoke-restart 'my-restart))))
+    (assert-eq (car result) 'let*)))
 
-(deftest restart-name-checks-hash-table
-  "RESTART-NAME expands to IF+HASH-TABLE-P to extract :name key or return restart"
+(deftest restart-abort-expansion
+  "ABORT expands to LET with FIND-RESTART + INVOKE-RESTART fallback."
+  (let ((result (our-macroexpand-1 '(abort))))
+    (assert-eq (car result) 'let)))
+
+(deftest restart-continue-expansion
+  "CONTINUE expands to LET with FIND-RESTART + conditional INVOKE-RESTART."
+  (let ((result (our-macroexpand-1 '(continue))))
+    (assert-eq (car result) 'let)))
+
+(deftest restart-use-value-expansion
+  "USE-VALUE expands to LET with FIND-RESTART + INVOKE-RESTART or passthrough."
+  (let ((result (our-macroexpand-1 '(use-value 42))))
+    (assert-eq (car result) 'let)))
+
+(deftest restart-store-value-expansion
+  "STORE-VALUE expands to LET with FIND-RESTART + INVOKE-RESTART or passthrough."
+  (let ((result (our-macroexpand-1 '(store-value 42))))
+    (assert-eq (car result) 'let)))
+
+(deftest restart-name-checks-cons
+  "RESTART-NAME expands to IF+CONSP to extract name from restart entry."
   (let ((result (our-macroexpand-1 '(restart-name r))))
     (assert-eq (car result) 'if)))
 
+(deftest restart-case-expansion
+  "RESTART-CASE wraps form in nested catches with restart bindings."
+  (let ((result (our-macroexpand-1 '(restart-case (error "bad")
+                                      (retry () 42)))))
+    (assert-eq (car result) 'let)))
+
 ;;; ── Misc stubs ───────────────────────────────────────────────────────────────
 
-(deftest-each stub-macros-expand-to-progn
-  "Stub macros that expand body forms into a PROGN."
-  :cases (("restart-bind"           '(restart-bind ((my-r #'fn)) body))
-          ("with-standard-io-syntax" '(with-standard-io-syntax body1 body2)))
-  (form)
-  (let ((result (our-macroexpand-1 form)))
+(deftest restart-bind-expansion
+  "RESTART-BIND binds restarts via LET and appends to *%active-restarts*."
+  (let ((result (our-macroexpand-1 '(restart-bind ((my-r #'fn)) body))))
+    (assert-eq 'let (car result))))
+
+(deftest with-standard-io-syntax-expansion
+  "WITH-STANDARD-IO-SYNTAX expands body into PROGN."
+  (let ((result (our-macroexpand-1 '(with-standard-io-syntax body1 body2))))
     (assert-eq 'progn (car result))))
 
-(deftest define-compiler-macro-expands-to-nil
-  "DEFINE-COMPILER-MACRO is a stub that expands to NIL"
+(deftest define-compiler-macro-returns-name
+  "DEFINE-COMPILER-MACRO returns the macro name (no compile-time expansion)."
   (let ((result (our-macroexpand-1 '(define-compiler-macro foo (x) (+ x 1)))))
-    (assert-eq result nil)))
+    (assert-equal result '(quote foo))))
 
 ;;; ── FIND-IF-NOT ──────────────────────────────────────────────────────────────
 

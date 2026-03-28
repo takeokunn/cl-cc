@@ -123,7 +123,34 @@
       (assert-true (member 'c cpl))
       (assert-true (member 'd cpl))
       ;; No duplicates
-      (assert-= (length cpl) (length (remove-duplicates cpl))))))
+      (assert-= (length cpl) (length (remove-duplicates cpl)))
+      ;; C3 exact order: A B C D (B before C, both before D)
+      (assert-equal '(a b c d) cpl)))
+  ;; C3 classic example: D(B,C), B(A), C(A) — no duplication of A
+  (let ((reg (make-test-registry)))
+    (registry-add-class reg 'a)
+    (registry-add-class reg 'b :superclasses '(a))
+    (registry-add-class reg 'c :superclasses '(a))
+    (registry-add-class reg 'd :superclasses '(b c))
+    (assert-equal '(d b c a)
+                  (cl-cc::compute-class-precedence-list 'd reg)))
+  ;; C3 inconsistency detection: X(A,B), Y(B,A) — conflicting orders
+  (let ((reg (make-test-registry)))
+    (registry-add-class reg 'a)
+    (registry-add-class reg 'b)
+    (registry-add-class reg 'x :superclasses '(a b))
+    (registry-add-class reg 'y :superclasses '(b a))
+    ;; X and Y alone should work fine
+    (assert-equal '(x a b) (cl-cc::compute-class-precedence-list 'x reg))
+    (assert-equal '(y b a) (cl-cc::compute-class-precedence-list 'y reg)))
+  ;; 3-level chain with branch
+  (let ((reg (make-test-registry)))
+    (registry-add-class reg 'z)
+    (registry-add-class reg 'y :superclasses '(z))
+    (registry-add-class reg 'x :superclasses '(z))
+    (registry-add-class reg 'w :superclasses '(y x))
+    (let ((cpl (cl-cc::compute-class-precedence-list 'w reg)))
+      (assert-equal '(w y x z) cpl))))
 
 ;;; ------------------------------------------------------------
 ;;; 4. vm-error-type-matches-p

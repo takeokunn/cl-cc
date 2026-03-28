@@ -198,22 +198,26 @@
   (reader nil)
   (writer nil)
   (accessor nil)
-  (type nil))
+  (type nil)
+  (allocation :instance))
 
 (defstruct (ast-defclass (:include ast-node))
   "Class definition AST node (defclass)."
   (name nil)
   (superclasses nil :type list)
-  (slots nil :type list))
+  (slots nil :type list)
+  (default-initargs nil :type list))
 
 (defstruct (ast-defgeneric (:include ast-node))
   "Generic function definition AST node (defgeneric)."
   (name nil)
-  (params nil :type list))
+  (params nil :type list)
+  (combination nil))
 
 (defstruct (ast-defmethod (:include ast-node))
   "Method definition AST node (defmethod)."
   (name nil)
+  (qualifier nil)
   (specializers nil :type list)
   (params nil :type list)
   (body nil :type list))
@@ -301,7 +305,8 @@ All structural knowledge about AST shapes lives here."
     ;; Defvar: optional init-form
     (ast-defvar (when (ast-defvar-value node) (list (ast-defvar-value node))))
     ;; CLOS
-    (ast-defclass (remove nil (mapcar #'ast-slot-initform (ast-defclass-slots node))))
+    (ast-defclass (append (remove nil (mapcar #'ast-slot-initform (ast-defclass-slots node)))
+                         (mapcar #'cdr (ast-defclass-default-initargs node))))
     (ast-defgeneric nil)
     (ast-make-instance (loop for (k v) on (ast-make-instance-initargs node) by #'cddr collect v))
     (ast-slot-value (list (ast-slot-value-object node)))

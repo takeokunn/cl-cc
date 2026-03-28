@@ -280,15 +280,18 @@
    :ast-slot-writer
    :ast-slot-accessor
    :ast-slot-type
+   :ast-slot-allocation
    :ast-defclass
    :ast-defclass-name
    :ast-defclass-superclasses
    :ast-defclass-slots
+   :ast-defclass-default-initargs
    :ast-defgeneric
    :ast-defgeneric-name
    :ast-defgeneric-params
    :ast-defmethod
    :ast-defmethod-name
+   :ast-defmethod-qualifier
    :ast-defmethod-specializers
    :ast-defmethod-params
    :ast-defmethod-body
@@ -385,6 +388,14 @@
     :vm-handler-result-reg
     :vm-error-type
     :vm-error-reg
+    ;; Catch/throw
+    :vm-establish-catch
+    :vm-throw
+    :vm-catch-tag-reg
+    :vm-catch-handler-label
+    :vm-catch-result-reg
+    :vm-throw-tag-reg
+    :vm-throw-value-reg
     :vm-handler-stack
 
     ;; VM Instruction Constructors (defstruct make-* functions)
@@ -412,14 +423,14 @@
     :make-vm-digit-char-p :make-vm-digit-char
     :make-vm-both-case-p :make-vm-graphic-char-p :make-vm-standard-char-p
     :make-vm-char-name :make-vm-name-char
-    :make-vm-div :make-vm-endp :make-vm-eof-p :make-vm-eq
-    :make-vm-equal :make-vm-establish-handler
+    :make-vm-div :make-vm-cl-div :vm-cl-div :make-vm-endp :make-vm-eof-p :make-vm-eq
+    :make-vm-equal :make-vm-establish-handler :make-vm-establish-catch
     :make-vm-ensure-values
     :make-vm-eval :make-vm-macroexpand-1-inst :make-vm-macroexpand-inst
     :vm-macroexpand-1-inst :vm-macroexpand-inst
     :make-vm-sxhash :vm-sxhash
-    :make-vm-class-name-fn :make-vm-class-of-fn
-    :vm-class-name-fn :vm-class-of-fn
+    :make-vm-class-name-fn :make-vm-class-of-fn :make-vm-find-class
+    :vm-class-name-fn :vm-class-of-fn :vm-find-class
     :make-vm-evenp :make-vm-fceiling :make-vm-ffloor
     :make-vm-fifth :make-vm-sixth :make-vm-seventh :make-vm-eighth :make-vm-ninth :make-vm-tenth
     :make-vm-file-length :make-vm-fill-pointer-inst
@@ -492,7 +503,7 @@
     :make-vm-symbol-get :make-vm-symbol-name
     :make-vm-symbol-p :make-vm-symbol-plist :make-vm-symbol-set
     :make-vm-sync-handler-regs
-    :make-vm-terpri-inst :make-vm-third :make-vm-truncate :make-vm-type-of
+    :make-vm-terpri-inst :make-vm-third :make-vm-throw :make-vm-truncate :make-vm-type-of
     :make-vm-typep :make-vm-unread-char :make-vm-upper-case-p :make-vm-values
     :make-vm-spread-values :make-vm-values-to-list :make-vm-vector-pop :make-vm-vector-push
     :make-vm-vector-push-extend :make-vm-vectorp :make-vm-simple-vector-p
@@ -757,6 +768,7 @@
        :vm-superclasses
        :vm-slot-names
        :vm-slot-initargs
+       :vm-class-slots
        :vm-make-obj
        :vm-class-reg
        :vm-initarg-regs
@@ -768,6 +780,7 @@
        :vm-register-method
        :vm-gf-reg
        :vm-method-specializer
+       :vm-method-qualifier
        :vm-method-reg
        :vm-generic-call
 

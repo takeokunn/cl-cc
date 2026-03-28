@@ -166,7 +166,7 @@
 ;;; ─── Hash Dispatch ──────────────────────────────────────────────────────────
 
 (defun lex-read-hash-dispatch (state)
-  "Handle # dispatch: #', #\\, #(, #b/B, #o/O, #x/X, #t, #f, #|...|#, #:, #+, #-, #., #0-9."
+  "Handle # dispatch: #', #\\, #(, #b/B, #o/O, #x/X, #s/S, #t, #f, #|...|#, #:, #+, #-, #., #0-9."
   (let ((start (lexer-state-pos state)))
     (lex-advance state) ; skip #
     (when (lex-at-end-p state)
@@ -224,6 +224,13 @@
              (let* ((text (lex-read-form-text state))
                     (form (read-from-string text))
                     (value (eval form)))
+               (lex-make-token state :T-INT value start)))
+        ;; #S(struct-name slot1 val1 ...) — read-time struct constructor
+        ;; Delegates to host CL read to construct the struct at read time
+        (#\s (lex-advance state)
+             (let* ((form-text (lex-read-form-text state))
+                    (full-text (concatenate 'string "#S" form-text))
+                    (value (read-from-string full-text)))
                (lex-make-token state :T-INT value start)))
         ;; Boolean dispatch (non-standard but useful)
         (#\t (lex-advance state)

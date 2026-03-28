@@ -31,7 +31,8 @@
   (conditions    nil)   ; WHILE / UNTIL / ALWAYS / … (reversed)
   (initially     nil)   ; INITIALLY forms             (reversed)
   (finally       nil)   ; FINALLY forms               (reversed)
-  (pending-filter nil)) ; active WHEN/UNLESS filter, or NIL
+  (pending-filter nil)  ; active WHEN/UNLESS filter, or NIL
+  (loop-name     nil))  ; FR-638: named loop block name
 
 (defun finalize-loop-state (state)
   "Build the IR plist from the parse state.
@@ -42,7 +43,8 @@ before nreversing everything at assembly time.  All other fields are nreversed h
         :accumulations (nreverse (lps-accumulations state))
         :conditions    (nreverse (lps-conditions    state))
         :initially     (nreverse (lps-initially     state))
-        :finally       (nreverse (lps-finally       state))))
+        :finally       (nreverse (lps-finally       state))
+        :loop-name     (lps-loop-name state)))
 
 ;;; ── 2b. Token predicates ─────────────────────────────────────────────────
 
@@ -113,10 +115,26 @@ The parser receives (VAR REMAINING) and must return (values spec-plist remaining
              (cons (cons ,keyword #',fn-name)
                    (remove ,keyword *loop-for-parsers* :key #'car :test #'string=))))))
 
-;;; FOR variant: var FROM expr [TO/BELOW/UPTO expr] [BY expr]
+;;; FR-695: FOR variant: var DOWNFROM expr [TO/DOWNTO/ABOVE expr] [BY expr]
+
+(define-loop-for-parser "DOWNFROM" (var remaining)
+  "Parse: var DOWNFROM expr [TO/DOWNTO/ABOVE expr] [BY expr]"
+  (let* ((from (pop remaining))
+         (spec (list :for var :type :from :from from :downward t)))
+    (cond ((loop-kw-p (car remaining) "TO")
+           (pop remaining) (setf (getf spec :to) (pop remaining)))
+          ((loop-kw-p (car remaining) "DOWNTO")
+           (pop remaining) (setf (getf spec :to) (pop remaining)))
+          ((loop-kw-p (car remaining) "ABOVE")
+           (pop remaining) (setf (getf spec :above) (pop remaining))))
+    (multiple-value-bind (by rest) (%loop-opt-by remaining)
+      (when by (setf (getf spec :by) by))
+      (values spec rest))))
+
+;;; FR-695: Also handle DOWNTO/ABOVE as end-condition keywords in FROM parser
 
 (define-loop-for-parser "FROM" (var remaining)
-  "Parse: var FROM expr [TO/BELOW/UPTO expr] [BY expr]"
+  "Parse: var FROM expr [TO/BELOW/UPTO/DOWNTO/ABOVE expr] [BY expr]"
   (let* ((from (pop remaining))
          (spec (list :for var :type :from :from from)))
     (cond ((loop-kw-p (car remaining) "TO")
@@ -124,7 +142,13 @@ The parser receives (VAR REMAINING) and must return (values spec-plist remaining
           ((loop-kw-p (car remaining) "BELOW")
            (pop remaining) (setf (getf spec :below) (pop remaining)))
           ((loop-kw-p (car remaining) "UPTO")
-           (pop remaining) (setf (getf spec :to)    (pop remaining))))
+           (pop remaining) (setf (getf spec :to)    (pop remaining)))
+          ((loop-kw-p (car remaining) "DOWNTO")
+           (pop remaining) (setf (getf spec :to)    (pop remaining))
+           (setf (getf spec :downward) t))
+          ((loop-kw-p (car remaining) "ABOVE")
+           (pop remaining) (setf (getf spec :above) (pop remaining))
+           (setf (getf spec :downward) t)))
     (multiple-value-bind (by rest) (%loop-opt-by remaining)
       (when by (setf (getf spec :by) by))
       (values spec rest))))
@@ -259,6 +283,11 @@ The parser receives (VAR REMAINING) and must return (values spec-plist remaining
     (dolist (f forms) (push f (lps-finally state)))
     (values state rest)))
 
+;; FR-638: NAMED clause — (loop named foo ...)
+(defun %clause-named (state remaining)
+  (setf (lps-loop-name state) (pop remaining))
+  (values state remaining))
+
 (defun %clause-accum (state remaining acc-type)
   (let ((form   (pop remaining))
         (filter (lps-pending-filter state)))
@@ -306,7 +335,8 @@ This is the Prolog rule-derivation step: (keyword . type) fact → (keyword . ha
          (cons "NEVER"     #'%clause-never)
          (cons "THEREIS"   #'%clause-thereis)
          (cons "INITIALLY" #'%clause-initially)
-         (cons "FINALLY"   #'%clause-finally))
+         (cons "FINALLY"   #'%clause-finally)
+         (cons "NAMED"     #'%clause-named))
    ;; Derive accumulation handlers from the data table.
    (mapcar (lambda (entry)
              (cons (car entry) (%make-accum-handler (cdr entry))))

@@ -55,14 +55,24 @@ Returns a compilation-result struct with program, assembly, and globals."
   (setf (ctx-tail-position ctx) nil)
   (let ((tag-reg (compile-ast (ast-catch-tag node) ctx))
         (result-reg (make-register ctx))
+        (handler-label (make-label ctx "catch_handler"))
         (end-label (make-label ctx "catch_end")))
-    (declare (ignore tag-reg))
-    (emit ctx (make-vm-label :name (make-label ctx "catch_start")))
+    ;; Establish catch frame with tag
+    (emit ctx (make-vm-establish-catch
+               :tag-reg tag-reg
+               :handler-label handler-label
+               :result-reg result-reg))
+    ;; Compile body normally
     (let ((body-result (let ((last nil))
                          (dolist (form (ast-catch-body node))
                            (setf last (compile-ast form ctx)))
                          last)))
       (emit ctx (make-vm-move :dst result-reg :src body-result)))
+    ;; Remove catch frame on normal exit
+    (emit ctx (make-vm-remove-handler))
+    (emit ctx (make-vm-jump :label end-label))
+    ;; Handler label: thrown value is already in result-reg
+    (emit ctx (make-vm-label :name handler-label))
     (emit ctx (make-vm-label :name end-label))
     result-reg))
 
@@ -70,7 +80,8 @@ Returns a compilation-result struct with program, assembly, and globals."
   (setf (ctx-tail-position ctx) nil)
   (let ((tag-reg (compile-ast (ast-throw-tag node) ctx))
         (value-reg (compile-ast (ast-throw-value node) ctx)))
-    (declare (ignore tag-reg))
+    ;; Emit throw instruction — will unwind to matching catch
+    (emit ctx (make-vm-throw :tag-reg tag-reg :value-reg value-reg))
     value-reg))
 
 (defmethod compile-ast ((node ast-unwind-protect) ctx)

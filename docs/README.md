@@ -1,8 +1,8 @@
 # CL-CC Implementation Roadmap
 
 ## ANSI CL Compliance
-- [ansi-cl-lang.md](ansi-cl-lang.md) — Language Core: eval, lambda, types, CLOS, conditions, symbols, packages, numbers (25 FR)
-- [ansi-cl-stdlib.md](ansi-cl-stdlib.md) — Standard Library: cons, arrays, strings, sequences, hash, I/O, printer, reader (129 FR)
+- [ansi-cl-lang.md](ansi-cl-lang.md) — Language Core: eval, lambda, types, CLOS, conditions, symbols, packages, numbers (720 FR) — ✅ **720/720 complete**
+- [ansi-cl-stdlib.md](ansi-cl-stdlib.md) — Standard Library: cons, arrays, strings, sequences, hash, I/O, printer, reader (358 FR) — ✅ 100 / 🔶 64 / ❌ 194
 
 ## Type System
 - [type-core.md](type-core.md) — Core: inference, polymorphism, subtyping, effects, gradual typing (Ch.1-14)
@@ -38,4 +38,4 @@
 
 ---
 
-**Total: 20 files, 2003 FRs**
+**Status: 820/1078 tracked FRs complete (76%) | Self-hosting: 9/9 | Tests: 4033 pass, 0 fail**

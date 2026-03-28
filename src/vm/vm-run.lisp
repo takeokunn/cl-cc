@@ -97,6 +97,67 @@ CL condition objects use typep."
               (values (gethash handler-label labels) nil nil)))
           (error "Unhandled error in VM: ~S" error-value)))))
 
+;;; ── Catch/Throw VM Instructions ────────────────────────────────────────
+
+(define-vm-instruction vm-establish-catch (vm-instruction)
+  "Push a catch frame onto the handler stack for CATCH."
+  (tag-reg nil :reader vm-catch-tag-reg)
+  (handler-label nil :reader vm-catch-handler-label)
+  (result-reg nil :reader vm-catch-result-reg)
+  (:sexp-tag :establish-catch))
+
+(define-vm-instruction vm-throw (vm-instruction)
+  "Throw a value to a matching catch tag."
+  (tag-reg nil :reader vm-throw-tag-reg)
+  (value-reg nil :reader vm-throw-value-reg)
+  (:sexp-tag :throw))
+
+(defmethod execute-instruction ((inst vm-establish-catch) state pc labels)
+  (declare (ignore labels))
+  (let ((tag-value (vm-reg-get state (vm-catch-tag-reg inst)))
+        (saved-regs (let ((copy (make-hash-table :test (hash-table-test (vm-state-registers state)))))
+                      (maphash (lambda (k v) (setf (gethash k copy) v))
+                               (vm-state-registers state))
+                      copy)))
+    (push (list :catch
+                (vm-catch-handler-label inst)
+                (vm-catch-result-reg inst)
+                tag-value
+                (copy-list (vm-call-stack state))
+                saved-regs
+                (copy-list (vm-method-call-stack state)))
+          (vm-handler-stack state)))
+  (values (1+ pc) nil nil))
+
+(defmethod execute-instruction ((inst vm-throw) state pc labels)
+  (let ((tag-value (vm-reg-get state (vm-throw-tag-reg inst)))
+        (throw-value (vm-reg-get state (vm-throw-value-reg inst))))
+    ;; Walk handler stack to find matching catch frame
+    (let ((matching nil) (to-skip 0))
+      (dolist (entry (vm-handler-stack state))
+        (if (and (eq (first entry) :catch)
+                 (eql (fourth entry) tag-value))
+            (progn (setf matching entry) (return))
+            (incf to-skip)))
+      (if matching
+          (progn
+            ;; Pop all handlers up to and including the matching one
+            (dotimes (i (1+ to-skip))
+              (pop (vm-handler-stack state)))
+            (let ((handler-label (second matching))
+                  (result-reg (third matching))
+                  (saved-call-stack (fifth matching))
+                  (saved-regs (sixth matching))
+                  (saved-method-stack (seventh matching)))
+              (setf (vm-call-stack state) saved-call-stack)
+              (setf (vm-method-call-stack state) (or saved-method-stack nil))
+              (clrhash (vm-state-registers state))
+              (maphash (lambda (k v) (setf (gethash k (vm-state-registers state)) v))
+                       saved-regs)
+              (vm-reg-set state result-reg throw-value)
+              (values (gethash handler-label labels) nil nil)))
+          (error "No catch tag ~S is active" tag-value)))))
+
 ;;; ── Label table and CLOS-based execution loop ────────────────────────────
 
 (defun build-label-table (instructions)
@@ -127,15 +188,18 @@ If STATE is provided, execute using that existing vm-io-state (for REPL persiste
 Otherwise a fresh state is created from OUTPUT-STREAM."
   (let* ((instructions (vm-program-instructions program))
          (labels (build-label-table instructions))
+         (flat (coerce instructions 'vector))
          (state (or state (make-instance 'vm-io-state :output-stream output-stream))))
-    (loop with pc = 0
-          while (< pc (length instructions))
-          do (multiple-value-bind (next-pc halted result)
-                 (execute-instruction (nth pc instructions) state pc labels)
-               (when halted
-                 (return result))
-               (setf pc next-pc))
-          finally (return nil))))
+    (let ((*vm-exec-flat* flat)
+          (*vm-exec-labels* labels))
+      (loop with pc = 0
+            while (< pc (length flat))
+            do (multiple-value-bind (next-pc halted result)
+                   (execute-instruction (aref flat pc) state pc labels)
+                 (when halted
+                   (return result))
+                 (setf pc next-pc))
+            finally (return nil)))))
 
 ;;; ── Phase A: defopcode dispatch table + flat-vector interpreter ──────────
 

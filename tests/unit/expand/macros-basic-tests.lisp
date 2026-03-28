@@ -12,18 +12,16 @@
 ;;; ── CHECK-TYPE ───────────────────────────────────────────────────────────────
 
 (deftest check-type-expansion
-  "CHECK-TYPE: UNLESS with typep test, body is (error string), string for both default and explicit."
+  "CHECK-TYPE: UNLESS with typep test, body signals type-error via make-condition."
   (let* ((result (our-macroexpand-1 '(check-type x integer)))
          (error-form (caddr result))
-         (msg (cadr error-form)))
+         (make-cond (cadr error-form)))
     (assert-eq 'unless (car result))
     (assert-equal '(typep x 'integer) (cadr result))
     (assert-eq 'error (car error-form))
-    (assert-true (stringp msg)))
-  ;; Explicit type string also produces (error string)
-  (let* ((result (our-macroexpand-1 '(check-type x integer "a number")))
-         (msg (cadr (caddr result))))
-    (assert-true (stringp msg))))
+    ;; Now signals (error (make-condition 'type-error :datum x :expected-type 'integer))
+    (assert-eq 'make-condition (car make-cond))
+    (assert-equal '(quote type-error) (second make-cond))))
 
 ;;; ── LIST macro ───────────────────────────────────────────────────────────────
 

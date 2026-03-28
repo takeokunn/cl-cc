@@ -172,9 +172,10 @@
     (macroexpand      . make-vm-macroexpand-inst)
     ;; FR-498: Hash code
     (sxhash           . make-vm-sxhash)
-    ;; FR-677: CLOS introspection
+    ;; FR-677/FR-552: CLOS introspection
     (class-name       . make-vm-class-name-fn)
     (class-of         . make-vm-class-of-fn)
+    (find-class       . make-vm-find-class)
     ;; Values
     (values-list      . make-vm-spread-values)
     ;; Write-to-string (three CL names → one instruction)
@@ -358,13 +359,15 @@ read-char and read-line have optional stream args, so they use :stream-input-opt
 
 (defparameter *builtin-binary-void-entries*
   '((remhash     make-vm-remhash     :key    :table)
-    (unread-char make-vm-unread-char :char   :handle))
+    (unread-char make-vm-unread-char :char   :handle)
+    (cerror      make-vm-cerror     :continue-message :condition-reg))
   "Binary builtins that emit a void instruction (no :dst) and return nil.
    (cl-sym vm-ctor slot1 slot2).")
 
 (defparameter *builtin-unary-custom-void-entries*
   '((%progv-exit make-vm-progv-exit    :saved)
     (error       make-vm-signal-error  :error-reg)
+    (signal      make-vm-signal        :condition-reg)
     (warn        make-vm-warn          :condition-reg)
     (clrhash     make-vm-clrhash       :table))
   "Unary builtins with a custom slot name (no :dst), returning nil.

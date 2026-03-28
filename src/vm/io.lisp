@@ -550,19 +550,23 @@ PRED-FN nil means test stream existence only."
 OUTPUT-STREAM and INPUT-STREAM can be specified to redirect I/O."
   (let* ((instructions (vm-program-instructions program))
          (labels (build-label-table instructions))
+         (flat (coerce instructions 'vector))
          (state (make-instance 'vm-io-state :output-stream output-stream)))
     ;; Set up standard streams
     (setf (vm-standard-input state) input-stream)
     (setf (vm-standard-output state) output-stream)
-    ;; Run the program
-    (loop with pc = 0
-          while (< pc (length instructions))
-          do (multiple-value-bind (next-pc halted result)
-                 (execute-instruction (nth pc instructions) state pc labels)
-               (when halted
-                 (return result))
-               (setf pc next-pc))
-          finally (return nil))))
+    ;; Bind execution context for sub-invocations (custom method combination)
+    (let ((*vm-exec-flat* flat)
+          (*vm-exec-labels* labels))
+      ;; Run the program
+      (loop with pc = 0
+            while (< pc (length instructions))
+            do (multiple-value-bind (next-pc halted result)
+                   (execute-instruction (aref flat pc) state pc labels)
+                 (when halted
+                   (return result))
+                 (setf pc next-pc))
+            finally (return nil)))))
 
 (defun run-string-with-io (source &key
                                    (output-stream *standard-output*)

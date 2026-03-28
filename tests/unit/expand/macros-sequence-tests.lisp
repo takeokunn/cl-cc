@@ -132,20 +132,28 @@
   (assert-equal (our-macroexpand-1 '(declare (ignore x))) nil))
 
 (deftest locally-strips-declare-forms
-  "LOCALLY removes DECLARE forms and wraps remaining body in PROGN"
+  "LOCALLY preserves DECLARE forms by wrapping in (let () decl body)"
   (let ((result (our-macroexpand-1 '(locally (declare (ignore x)) expr1 expr2))))
+    ;; FR-397: locally now wraps in (let () decl body) to preserve declarations
+    (assert-eq (car result) 'let)
+    (assert-equal (cadr result) nil)  ; empty bindings
+    (assert-equal (caddr result) '(declare (ignore x)))
+    (assert-equal (cadddr result) 'expr1)))
+
+(deftest in-package-sets-package
+  "(in-package :cl-cc) expands to progn that sets *package* and returns quoted name"
+  (let ((result (our-macroexpand-1 '(in-package :cl-cc))))
     (assert-eq (car result) 'progn)
-    (assert-false (member 'declare result))
-    (assert-equal (cadr result) 'expr1)
-    (assert-equal (caddr result) 'expr2)))
+    (assert-eq (car (second result)) 'setq)
+    (assert-equal (third result) '(quote :cl-cc))))
 
-(deftest in-package-quotes-name
-  "(in-package :cl-cc) → (quote :cl-cc)"
-  (assert-equal (our-macroexpand-1 '(in-package :cl-cc)) '(quote :cl-cc)))
-
-(deftest defpackage-quotes-name
-  "(defpackage :foo ...) → (quote :foo) — no-op at runtime"
-  (assert-equal (our-macroexpand-1 '(defpackage :foo (:use :cl))) '(quote :foo)))
+(deftest defpackage-creates-package
+  "(defpackage :foo ...) expands to progn with find-package/make-package"
+  (let* ((result (our-macroexpand-1 '(defpackage :foo (:use :cl))))
+         (result-str (format nil "~S" result)))
+    (assert-eq (car result) 'progn)
+    (assert-true (search "FIND-PACKAGE" result-str))
+    (assert-true (search "MAKE-PACKAGE" result-str))))
 
 ;;; ── COERCE ───────────────────────────────────────────────────────────────────
 
@@ -163,9 +171,9 @@
     (assert-equal (cadr result) 'v)))
 
 (deftest coerce-unquoted-type-fallback
-  "COERCE with a non-literal type defaults to coerce-to-string"
+  "COERCE with a non-literal type dispatches to %coerce-runtime"
   (let ((result (our-macroexpand-1 '(coerce v type-var))))
-    (assert-equal (symbol-name (car result)) "COERCE-TO-STRING")
+    (assert-equal (symbol-name (car result)) "%COERCE-RUNTIME")
     (assert-equal (cadr result) 'v)))
 
 ;;; ── MAP (delegates to mapcar + coerce) ──────────────────────────────────────
@@ -210,11 +218,13 @@
     (assert-= 3 (length bindings))
     (assert-eq 'unwind-protect (car body))))
 
-;;; ── EXPORT (no-op) ───────────────────────────────────────────────────────────
+;;; ── EXPORT (host bridge) ─────────────────────────────────────────────────────
 
-(deftest export-expands-to-nil
-  "(export ...) → NIL (no-op in this compiler)"
-  (assert-eq (our-macroexpand-1 '(export '(foo bar))) nil))
+(deftest export-is-not-a-macro
+  "(export ...) is now a host-bridged function, not a macro"
+  (multiple-value-bind (expansion expanded-p) (our-macroexpand-1 '(export '(foo bar)))
+    (declare (ignore expansion))
+    (assert-true (not expanded-p))))
 
 ;;; ── WARN ─────────────────────────────────────────────────────────────────────
 
@@ -322,11 +332,12 @@
 ;;; ── CHANGE-CLASS ─────────────────────────────────────────────────────────────
 
 (deftest change-class-expansion
-  "CHANGE-CLASS: outer LET*, body contains SETF of :__class__ slot."
+  "CHANGE-CLASS: outer LET*, body contains DOLIST for slot migration and SETF of :__class__."
   (let* ((result (our-macroexpand-1 '(change-class inst 'new-cls)))
-         (body   (cddr result)))
+         (flat   (write-to-string result)))
     (assert-eq 'let* (car result))
-    (assert-equal "SETF" (symbol-name (car (second body))))))
+    (assert-true (search "SETF" flat))
+    (assert-true (search "__class__" (string-downcase flat)))))
 
 ;;; ── PARSE-FLOAT ──────────────────────────────────────────────────────────────
 

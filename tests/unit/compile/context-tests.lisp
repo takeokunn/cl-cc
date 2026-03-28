@@ -80,7 +80,8 @@
     (assert-null (cl-cc::ctx-env ctx))
     (assert-true (gethash '*standard-output* (cl-cc::ctx-global-variables ctx)))
     (assert-true (gethash '*standard-input* (cl-cc::ctx-global-variables ctx)))
-    (assert-true (gethash '*features* (cl-cc::ctx-global-variables ctx)))))
+    (assert-true (gethash '*features* (cl-cc::ctx-global-variables ctx)))
+    (assert-true (gethash '*package* (cl-cc::ctx-global-variables ctx)))))
 
 ;;; ─── REPL state ─────────────────────────────────────────────────────────────
 

@@ -922,7 +922,7 @@ Both must produce EXPECTED under EQUAL comparison."
 
 (check-loop-signals loop-unknown-for-keyword-signals-error
   "FOR with an unrecognised sub-keyword signals an error"
-  (for x downfrom 10 collect x))
+  (for x sideways 10 collect x))
 
 (check-loop-signals loop-being-unknown-hash-type-signals-error
   "BEING THE with an unrecognised hash-iteration keyword signals an error"
