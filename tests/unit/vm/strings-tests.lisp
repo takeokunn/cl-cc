@@ -19,8 +19,8 @@
 
 ;;; ─── String Comparisons (case-sensitive) ──────────────────────────────────
 
-(deftest-each str-comparison-returns-1
-  "Binary string comparison instructions return 1 on their respective true condition."
+(deftest-each str-comparison-truthy
+  "Binary string comparison instructions return truthy (T or mismatch index) on their respective true condition."
   :cases (("equal"         #'cl-cc::make-vm-string=  "hello" "hello")
           ("less-than"     #'cl-cc::make-vm-string<  "abc"   "abd")
           ("greater-than"  #'cl-cc::make-vm-string>  "xyz"   "abc")
@@ -31,20 +31,20 @@
     (cl-cc::vm-reg-set s :R1 str1)
     (cl-cc::vm-reg-set s :R2 str2)
     (str-exec (funcall ctor :dst :R0 :str1 :R1 :str2 :R2) s)
-    (assert-equal 1 (cl-cc::vm-reg-get s :R0))))
+    (assert-true (cl-cc::vm-reg-get s :R0))))
 
 (deftest str-equal-false
-  "vm-string= returns 0 for different strings."
+  "vm-string= returns NIL for different strings."
   (let ((s (str-vm)))
     (cl-cc::vm-reg-set s :R1 "hello")
     (cl-cc::vm-reg-set s :R2 "world")
     (str-exec (cl-cc::make-vm-string= :dst :R0 :str1 :R1 :str2 :R2) s)
-    (assert-equal 0 (cl-cc::vm-reg-get s :R0))))
+    (assert-true (null (cl-cc::vm-reg-get s :R0)))))
 
 ;;; ─── String Comparisons (case-insensitive) ────────────────────────────────
 
-(deftest-each str-insensitive-comparison-returns-1
-  "Case-insensitive string comparison instructions return 1 on their respective true condition."
+(deftest-each str-insensitive-comparison-truthy
+  "Case-insensitive string comparison instructions return truthy on their respective true condition."
   :cases (("equal"     #'cl-cc::make-vm-string-equal     "Hello" "hello")
           ("lessp"     #'cl-cc::make-vm-string-lessp     "ABC"   "abd")
           ("greaterp"  #'cl-cc::make-vm-string-greaterp  "XYZ"   "abc")
@@ -54,7 +54,7 @@
     (cl-cc::vm-reg-set s :R1 str1)
     (cl-cc::vm-reg-set s :R2 str2)
     (str-exec (funcall ctor :dst :R0 :str1 :R1 :str2 :R2) s)
-    (assert-equal 1 (cl-cc::vm-reg-get s :R0))))
+    (assert-true (cl-cc::vm-reg-get s :R0))))
 
 ;;; ─── String Length ────────────────────────────────────────────────────────
 

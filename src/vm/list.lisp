@@ -449,7 +449,7 @@
     (vm-reg-set state (vm-dst inst) (acons key value alist))
     (values (1+ pc) nil nil)))
 
-(define-simple-instruction vm-equal :pred2 equal)
+(define-simple-instruction vm-equal :binary equal)
 (define-simple-instruction vm-nconc :binary nconc)
 (define-simple-instruction vm-copy-list :unary copy-list)
 (define-simple-instruction vm-copy-tree :unary copy-tree)

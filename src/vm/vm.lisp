@@ -436,8 +436,14 @@ Used by call-next-method and next-method-p."))
     (*package*          . ,(find-package :cl-user))
     ;; Condition/restart system
     (*%condition-handlers* . nil)
-    (*%active-restarts*    . nil))
+    (*%active-restarts*    . nil)
+    ;; Documentation table (FR-607): (name . type) → docstring
+    (*documentation-table* . nil))
   "Initial bindings for standard ANSI CL global variables in each vm-state.")
+
+;;; CL-level declaration so (boundp '*documentation-table*) is T in the compiler
+;;; Initialized as a real hash-table so the defun expander can gethash/setf into it
+(defvar *documentation-table* (make-hash-table :test #'equal))
 
 (defmethod initialize-instance :after ((state vm-state) &key &allow-other-keys)
   "Initialize standard ANSI CL global variables in the VM."
@@ -559,8 +565,63 @@ lists of data) should be registered here.")
               ;; FR-361: Package symbol iteration helpers
               %package-symbols %package-external-symbols %all-symbols
               ;; Runtime helpers for setf expansion
-              rt-plist-put))
+              rt-plist-put
+              ;; FR-479: File system operations
+              probe-file rename-file delete-file file-write-date file-author
+              directory ensure-directories-exist
+              ;; FR-566: Pathname constructors + accessors
+              make-pathname
+              pathname pathname-name pathname-type pathname-host
+              pathname-device pathname-directory pathname-version
+              truename parse-namestring merge-pathnames namestring
+              file-namestring directory-namestring host-namestring
+              enough-namestring wild-pathname-p pathname-match-p
+              translate-pathname
+              ;; FR-659: Reader — read-delimited-list
+              read-delimited-list
+              ;; FR-435: Apropos
+              apropos apropos-list
+              ;; FR-393: Composite streams
+              make-synonym-stream make-broadcast-stream
+              make-two-way-stream make-echo-stream
+              make-concatenated-stream
+              ;; FR-567: Composite stream accessors
+              broadcast-stream-streams two-way-stream-input-stream
+              two-way-stream-output-stream echo-stream-input-stream
+              echo-stream-output-stream concatenated-stream-streams
+              synonym-stream-symbol
+              ;; Generic sequence access (used by search, write-sequence, etc.)
+              elt
+              ;; FR-566: compile-file-pathname
+              compile-file-pathname
+              ;; FR-579: Encoding/decoding (SBCL sb-ext wrappers)
+              string-to-octets octets-to-string
+              ;; FR-607: Documentation retrieval from CL-level table
+              %get-documentation))
   (vm-register-host-bridge sym))
+
+;;; FR-579: String encoding helpers (delegate to SBCL's sb-ext)
+(defun string-to-octets (string &key (encoding :utf-8) (external-format :default)
+                                      (start 0) end)
+  "Convert STRING to a byte vector using ENCODING (default UTF-8)."
+  (declare (ignore external-format))
+  (let ((format (case encoding (:utf-8 :utf-8) (:ascii :ascii) (t :utf-8))))
+    (sb-ext:string-to-octets string :external-format format
+                                    :start start :end (or end (length string)))))
+
+(defun octets-to-string (octets &key (encoding :utf-8) (external-format :default)
+                                       (start 0) end)
+  "Convert byte vector OCTETS to a string using ENCODING (default UTF-8)."
+  (declare (ignore external-format))
+  (let ((format (case encoding (:utf-8 :utf-8) (:ascii :ascii) (t :utf-8))))
+    (sb-ext:octets-to-string octets :external-format format
+                                    :start start :end (or end (length octets)))))
+
+;;; FR-607: Documentation retrieval (CL-level, registered by defun expander)
+(defun %get-documentation (name doc-type)
+  "Return documentation string for (NAME DOC-TYPE) from *documentation-table*, or nil."
+  (when (hash-table-p *documentation-table*)
+    (gethash (list name doc-type) *documentation-table*)))
 
 ;;; vm-execute.lisp — execute-instruction methods for core instructions (loaded next)
 ;;; vm-clos.lisp    — CLOS instruction defstructs + execute-instruction methods

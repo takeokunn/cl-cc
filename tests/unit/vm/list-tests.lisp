@@ -173,17 +173,17 @@
 ;;; ─── equal / nconc / copy-list / copy-tree / subst ──────────────────────────
 
 (deftest vm-list-equal-behavior
-  "vm-equal returns 1 for structurally equal trees; 0 for different trees."
+  "vm-equal returns truthy for structurally equal trees; NIL for different trees."
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 '(a (b c)))
     (cl-cc:vm-reg-set s 2 '(a (b c)))
     (exec1 (cl-cc::make-vm-equal :dst 0 :lhs 1 :rhs 2) s)
-    (assert-= 1 (cl-cc:vm-reg-get s 0)))
+    (assert-true (cl-cc:vm-reg-get s 0)))
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 '(a b))
     (cl-cc:vm-reg-set s 2 '(a c))
     (exec1 (cl-cc::make-vm-equal :dst 0 :lhs 1 :rhs 2) s)
-    (assert-= 0 (cl-cc:vm-reg-get s 0))))
+    (assert-true (null (cl-cc:vm-reg-get s 0)))))
 
 (deftest vm-list-nconc-joins
   "vm-nconc destructively concatenates two lists."

@@ -222,10 +222,16 @@ Example:
              (when end (subseq trimmed 1 end))))
           (t nil))))))
 
-(defun our-load (pathname &key (verbose nil) (print nil))
+(defun our-load (pathname &key (verbose nil) (print nil) (if-does-not-exist :error)
+                                 (external-format :default))
   "Load a Lisp source file by reading, compiling, and executing each form.
 Uses the persistent REPL state so definitions accumulate across forms.
-VERBOSE prints the file being loaded. PRINT prints each form's result."
+VERBOSE prints the file being loaded. PRINT prints each form's result.
+IF-DOES-NOT-EXIST controls behavior when file is missing (:error or nil).
+EXTERNAL-FORMAT is accepted but ignored (UTF-8 assumed)."
+  (declare (ignore external-format))
+  (when (and (eq if-does-not-exist nil) (not (probe-file pathname)))
+    (return-from our-load nil))
   (let ((path (namestring (truename pathname))))
     (when verbose
       (format *standard-output* "; Loading ~A~%" path))
@@ -254,7 +260,7 @@ VERBOSE prints the file being loaded. PRINT prints each form's result."
             (dolist (form forms last-result)
               (unless (or (%whitespace-symbol-p form)
                           ;; Skip unsupported top-level forms
-                          (and (consp form) (member (car form) '(declaim deftype defopcode))))
+                          (and (consp form) (member (car form) '(deftype defopcode))))
                 (let ((form-str (write-to-string form)))
                   (setf last-result
                         (handler-case (run-string-repl form-str)

@@ -402,7 +402,8 @@
     :make-vm-instruction
     :make-vm-abs :make-vm-acons :make-vm-add :make-vm-alpha-char-p
     :make-vm-alphanumericp :make-vm-and :make-vm-append :make-vm-apply
-    :make-vm-adjust-array :make-vm-aref :make-vm-array-length :make-vm-aset :make-vm-assoc
+    :make-vm-adjust-array :make-vm-aref :make-vm-aref-multi :vm-aref-multi
+    :make-vm-array-length :make-vm-aset :make-vm-assoc
     :make-vm-array-adjustable-p :make-vm-array-dimension
     :make-vm-array-dimensions :make-vm-array-displacement :make-vm-array-has-fill-pointer-p
     :make-vm-array-rank :make-vm-array-row-major-index :make-vm-array-total-size
@@ -509,6 +510,7 @@
     :make-vm-vector-push-extend :make-vm-vectorp :make-vm-simple-vector-p
     :make-vm-warn :make-vm-write-byte :make-vm-write-char :make-vm-write-line
     :make-vm-write-string :make-vm-write-to-string-inst :make-vm-write-to-string-rp
+    :make-vm-princ-to-string-inst :vm-princ-to-string-inst
     ;; Stream predicates + control
     :make-vm-streamp :make-vm-input-stream-p :make-vm-output-stream-p
     :make-vm-open-stream-p :make-vm-interactive-stream-p :make-vm-stream-element-type-inst

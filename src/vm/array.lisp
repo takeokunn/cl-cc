@@ -27,6 +27,22 @@
   (:sexp-tag :aref)
   (:sexp-slots dst array-reg index-reg))
 
+;; vm-aref-multi: N-dimensional array read (2+ indices) — custom sexp like vm-format-inst
+(define-vm-instruction vm-aref-multi (vm-instruction)
+  "Multi-dimensional array read. DST = (apply #'aref ARRAY INDICES...)."
+  (dst nil :reader vm-dst)
+  (array-reg nil :reader vm-array-reg)
+  (index-regs nil :reader vm-index-regs))
+
+(defmethod instruction->sexp ((inst vm-aref-multi))
+  (list* :aref-multi (vm-dst inst) (vm-array-reg inst) (vm-index-regs inst)))
+
+(setf (gethash :aref-multi *instruction-constructors*)
+      (lambda (sexp)
+        (make-vm-aref-multi :dst (second sexp)
+                            :array-reg (third sexp)
+                            :index-regs (cdddr sexp))))
+
 (define-vm-instruction vm-aset (vm-instruction)
   "Set element at INDEX in ARRAY to VAL."
   (array-reg nil :reader vm-array-reg)
@@ -86,6 +102,13 @@
   (let ((arr (vm-reg-get state (vm-array-reg inst)))
         (idx (vm-reg-get state (vm-index-reg inst))))
     (vm-reg-set state (vm-dst inst) (aref arr idx))
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-aref-multi) state pc labels)
+  (declare (ignore labels))
+  (let ((arr (vm-reg-get state (vm-array-reg inst)))
+        (idxs (mapcar (lambda (r) (vm-reg-get state r)) (vm-index-regs inst))))
+    (vm-reg-set state (vm-dst inst) (apply #'aref arr idxs))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-aset) state pc labels)
@@ -246,9 +269,10 @@
   (:sexp-tag :bit-access) (:sexp-slots dst arr idx))
 (defmethod execute-instruction ((inst vm-bit-access) state pc labels)
   (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst)
-              (bit (vm-reg-get state (vm-arr inst))
-                   (vm-reg-get state (vm-idx inst))))
+  (let ((arr (vm-reg-get state (vm-arr inst)))
+        (idx (vm-reg-get state (vm-idx inst))))
+    (vm-reg-set state (vm-dst inst)
+                (if (bit-vector-p arr) (bit arr idx) (aref arr idx))))
   (values (1+ pc) nil nil))
 
 (define-vm-instruction vm-bit-set (vm-instruction)
@@ -261,7 +285,9 @@
   (let ((arr (vm-reg-get state (vm-arr inst)))
         (idx (vm-reg-get state (vm-idx inst)))
         (v   (vm-reg-get state (vm-val inst))))
-    (setf (bit arr idx) v)
+    (if (bit-vector-p arr)
+        (setf (bit arr idx) v)
+        (setf (aref arr idx) v))
     (vm-reg-set state (vm-dst inst) v)
     (values (1+ pc) nil nil)))
 
@@ -275,7 +301,8 @@
   "Element-wise OR of two bit arrays."
   (dst nil :reader vm-dst) (lhs nil :reader vm-lhs) (rhs nil :reader vm-rhs)
   (:sexp-tag :bit-or) (:sexp-slots dst lhs rhs))
-(define-simple-instruction vm-bit-or :binary bit-or)
+;; ANSI CL uses bit-ior (not bit-or); cl-cc exposes it as bit-or for symmetry
+(define-simple-instruction vm-bit-or :binary bit-ior)
 
 (define-vm-instruction vm-bit-xor (vm-instruction)
   "Element-wise XOR of two bit arrays."

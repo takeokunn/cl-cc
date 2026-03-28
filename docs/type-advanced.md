@@ -3,6 +3,30 @@
 Safety-oriented types, development support, type-level programming, advanced type constructors, termination/totality, types and proofs, type system tooling, concurrency/distributed types, numeric/quantitative types, implementation techniques, dynamic language integration, advanced typeclasses, domain-specific types, types and semantics, type analysis for optimization.
 
 ---
+## 目次
+
+1. [安全性指向型](#15-安全性指向型)
+2. [開発支援型機能](#16-開発支援型機能)
+3. [型レベルプログラミング](#17-型レベルプログラミング)
+4. [高度な型構成子](#18-高度な型構成子)
+5. [停止性・全域性・正当性](#19-停止性全域性正当性)
+6. [型と証明](#20-型と証明)
+7. [型システムとツール連携](#21-型システムとツール連携)
+8. [並行・分散・非同期型](#22-並行分散非同期型)
+9. [数値・計量型](#23-数値計量型)
+10. [型システムの実装技術](#24-型システムの実装技術)
+11. [動的言語の型統合](#25-動的言語の型統合)
+12. [高度な型クラス機構](#26-高度な型クラス機構)
+13. [特殊ドメイン型](#27-特殊ドメイン型)
+14. [型と意味論の対応](#28-型と意味論の対応)
+15. [最適化のための型解析](#29-最適化のための型解析)
+16. [型システムの拡張性と相互運用](#30-型システムの拡張性と相互運用)
+17. [線形論理と型](#31-線形論理と型)
+18. [代数的サブタイピングとパス依存型](#32-代数的サブタイピングとパス依存型)
+19. [TypeScript 型システムの精髄](#33-typescript-型システムの精髄)
+20. [型のエンコーディングと依存型の基盤](#34-型のエンコーディングと依存型の基盤)
+
+---
 ## 15. 安全性指向型
 
 ### FR-1501: Null 安全 / Optional 型 (Null Safety)
@@ -563,7 +587,6 @@ Safety-oriented types, development support, type-level programming, advanced typ
 | FR-2002 | 証明付きコード | Extremely Hard | SMT + 証明チェッカーの統合 |
 | FR-2003 | タクティックベース型検査 | Extremely Hard | Lean 4 相当の証明エンジン |
 | FR-2004 | ホモトピー型理論 | Extremely Hard | Cubical Type Theory が必要 |
-| FR-1702 | 型レベル文字列 | Hard | Medium | FR-1701 |
 
 ---
 

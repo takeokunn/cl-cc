@@ -93,6 +93,12 @@
   (declare (ignore decls))
   nil)
 
+;;; Global declaration (silently ignored — same semantics as declare)
+
+(our-defmacro declaim (&rest decls)
+  (declare (ignore decls))
+  nil)
+
 ;;; FR-1201: Property List Macros (getf, remf, get-properties)
 
 (our-defmacro getf (plist indicator &optional default)
@@ -224,12 +230,15 @@
        ,mod)))
 
 (our-defmacro require (module-name &optional pathnames)
-  "Signal a warning if MODULE-NAME is not already in *modules*.
-PATHNAMES is accepted for compatibility but ignored."
-  (let ((mod (gensym "MOD")))
-    `(let ((,mod (string ,module-name)))
+  "Load files in PATHNAMES if MODULE-NAME is not already in *modules*."
+  (let ((mod (gensym "MOD"))
+        (pn  (gensym "PATHS")))
+    `(let ((,mod (string ,module-name))
+           (,pn  ,pathnames))
        (unless (member ,mod *modules* :test #'string=)
-         (warn "Module ~A not loaded" ,mod))
+         (if ,pn
+             (dolist (p ,pn) (our-load p))
+             (warn "Module ~A not loaded" ,mod)))
        ,mod)))
 
 ;;; FR-1004: print-unreadable-object

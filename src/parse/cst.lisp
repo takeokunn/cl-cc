@@ -97,7 +97,10 @@
   "Convert a CST node back to an S-expression. Drops trivia/positions."
   (cond
     ((cst-token-p node)
-     (cst-token-value node))
+     ;; Cons values in T-INT tokens (from #. or #n= labels) are literal data,
+     ;; not code. Wrap them in (quote ...) so lower-sexp-to-ast treats them as constants.
+     (let ((v (cst-token-value node)))
+       (if (consp v) (list 'quote v) v)))
     ((cst-interior-p node)
      (let ((kind (cst-node-kind node))
            (children (cst-interior-children node)))

@@ -90,10 +90,10 @@
 
 ;;; ── DELETE ───────────────────────────────────────────────────────────────────
 
-(deftest delete-outer-is-let
-  "DELETE (same as remove in this impl) accumulates into a LET"
+(deftest delete-delegates-to-remove
+  "DELETE delegates to REMOVE (no :test/:key → simple remove call)"
   (let ((result (our-macroexpand-1 '(delete item seq))))
-    (assert-eq (car result) 'let)))
+    (assert-eq (car result) 'remove)))
 
 (deftest delete-duplicates-delegates-to-remove-duplicates
   "(delete-duplicates seq) → (remove-duplicates seq)"
@@ -103,17 +103,20 @@
 ;;; ── COPY-SEQ ─────────────────────────────────────────────────────────────────
 
 (deftest copy-seq-delegates-to-copy-list
-  "(copy-seq seq) → (copy-list seq) — thin alias"
-  (assert-equal (our-macroexpand-1 '(copy-seq seq)) '(copy-list seq)))
+  "(copy-seq seq) expands to a form containing copy-list (for lists) and subseq (for vectors)"
+  (let ((result (our-macroexpand-1 '(copy-seq seq))))
+    ;; New expansion: (let ((#:SEQ ...)) (if (listp ...) (copy-list ...) (subseq ... 0)))
+    (assert-eq 'let (car result))))
 
 ;;; ── FILL ─────────────────────────────────────────────────────────────────────
 
 (deftest fill-expansion
-  "FILL: outer LET* containing a TAGBODY mutation loop."
+  "FILL: outer LET* with runtime list/vector dispatch containing a TAGBODY mutation loop."
   (let* ((result (our-macroexpand-1 '(fill seq item)))
          (body   (cddr result)))
     (assert-eq 'let* (car result))
-    (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'tagbody))) body))))
+    ;; Body should contain an IF dispatch between list and vector paths
+    (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'if))) body))))
 
 ;;; ── MISMATCH ─────────────────────────────────────────────────────────────────
 
@@ -186,15 +189,19 @@
 ;;; ── REPLACE / MAP-INTO ───────────────────────────────────────────────────────
 
 (deftest-each dest-returning-sequence-expanders
-  "Destination-returning operators: outer LET, last form is the dest variable."
-  :cases (("replace"  '(replace  dest src))
-          ("map-into" '(map-into dest fn src)))
+  "Destination-returning operators: expansion contains the dest variable and returns it."
+  :cases (("map-into" '(map-into dest fn src)))
   (form)
   (let* ((result    (our-macroexpand-1 form))
          (dest-var  (first (first (second result))))
          (last-form (car (last (cddr result)))))
     (assert-eq 'let (car result))
     (assert-eq last-form dest-var)))
+
+(deftest replace-expansion-vector-path
+  "REPLACE: outer LET* with runtime vector/list dispatch."
+  (let* ((result (our-macroexpand-1 '(replace dest src))))
+    (assert-eq 'let* (car result))))
 
 ;;; ── MERGE ────────────────────────────────────────────────────────────────────
 

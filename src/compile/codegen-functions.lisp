@@ -326,15 +326,47 @@ Generates a closure at the function's label and registers it globally."
 (defmethod compile-ast ((node ast-defvar) ctx)
   "Compile a top-level variable definition.
 Global variables are stored in the VM's global variable store so they
-persist across function calls."
+persist across function calls.
+FR-600: defvar only sets the value if the variable is not already bound;
+        defparameter always sets the value."
   (setf (ctx-tail-position ctx) nil)
   (let* ((name (ast-defvar-name node))
+         (kind (ast-defvar-kind node))  ; 'defvar or 'defparameter
          (value-form (ast-defvar-value node))
-         (value-reg (if value-form
-                        (compile-ast value-form ctx)
-                        (let ((nil-reg (make-register ctx)))
-                          (emit ctx (make-vm-const :dst nil-reg :value nil))
-                          nil-reg))))
-    (emit ctx (make-vm-set-global :name name :src value-reg))
+         (result-reg (make-register ctx)))
     (setf (gethash name (ctx-global-variables ctx)) t)
-    value-reg))
+    (cond
+      ;; defparameter — always set the global (original behavior)
+      ((eq kind 'defparameter)
+       (let ((value-reg (if value-form
+                            (compile-ast value-form ctx)
+                            (progn (emit ctx (make-vm-const :dst result-reg :value nil))
+                                   result-reg))))
+         (emit ctx (make-vm-set-global :name name :src value-reg))
+         value-reg))
+      ;; defvar with no init form — just declare, do not set
+      ((null value-form)
+       (emit ctx (make-vm-const :dst result-reg :value name))
+       result-reg)
+      ;; defvar with init form — only set if variable not already bound
+      (t
+       (let* ((sym-reg   (make-register ctx))
+              (bound-reg (make-register ctx))
+              (label-init (make-label ctx "DEFVAR_INIT"))
+              (label-done (make-label ctx "DEFVAR_DONE")))
+         ;; Load the symbol and check boundp
+         (emit ctx (make-vm-const :dst sym-reg :value name))
+         (emit ctx (make-vm-boundp :dst bound-reg :src sym-reg))
+         ;; If NOT bound (bound-reg = nil), jump to DO_INIT
+         (emit ctx (make-vm-jump-zero :reg bound-reg :label label-init))
+         ;; Already bound — skip to done
+         (emit ctx (make-vm-jump :label label-done))
+         ;; DO_INIT: compile and set the value
+         (emit ctx (make-vm-label :name label-init))
+         (let ((value-reg (compile-ast value-form ctx)))
+           (emit ctx (make-vm-set-global :name name :src value-reg)))
+         ;; DONE: result is the variable name (ANSI: defvar returns the name)
+         (emit ctx (make-vm-label :name label-done))
+         (emit ctx (make-vm-const :dst result-reg :value name))
+         result-reg)))))
+

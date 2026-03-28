@@ -36,10 +36,17 @@
   (:sexp-tag :fresh-line))
 
 (define-vm-instruction vm-write-to-string-inst (vm-instruction)
-  "Convert object to its printed representation as a string."
+  "Convert object to its printed representation as a string (prin1 style, with escaping)."
   (dst nil :reader vm-dst)
   (src nil :reader vm-src)
   (:sexp-tag :write-to-string)
+  (:sexp-slots dst src))
+
+(define-vm-instruction vm-princ-to-string-inst (vm-instruction)
+  "Convert object to its printed representation without escaping (princ style)."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :princ-to-string)
   (:sexp-slots dst src))
 
 ;; Custom sexp: uses list* with variadic arg-regs
@@ -110,10 +117,30 @@
   (fresh-line (vm-output-stream state))
   (values (1+ pc) nil nil))
 
+(defun %vm-read-print-var (state sym default)
+  "Read a print-control variable from VM global state, returning DEFAULT if unbound."
+  (multiple-value-bind (v found) (gethash sym (vm-global-vars state))
+    (if found v default)))
+
 (defmethod execute-instruction ((inst vm-write-to-string-inst) state pc labels)
   (declare (ignore labels))
   (let ((val (vm-reg-get state (vm-src inst))))
-    (vm-reg-set state (vm-dst inst) (write-to-string val))
+    ;; Bind ANSI print-control variables from VM global state so that
+    ;; (setq *print-base* 16) etc. actually affects write-to-string output.
+    (let ((*print-base*    (%vm-read-print-var state '*print-base*   10))
+          (*print-radix*   (%vm-read-print-var state '*print-radix*  nil))
+          (*print-escape*  (%vm-read-print-var state '*print-escape* t))
+          (*print-level*   (%vm-read-print-var state '*print-level*  nil))
+          (*print-length*  (%vm-read-print-var state '*print-length* nil))
+          (*print-circle*  (%vm-read-print-var state '*print-circle* nil))
+          (*print-case*    (%vm-read-print-var state '*print-case*   :upcase)))
+      (vm-reg-set state (vm-dst inst) (write-to-string val)))
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-princ-to-string-inst) state pc labels)
+  (declare (ignore labels))
+  (let ((val (vm-reg-get state (vm-src inst))))
+    (vm-reg-set state (vm-dst inst) (princ-to-string val))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-format-inst) state pc labels)
@@ -163,11 +190,16 @@
 
 (defmethod execute-instruction ((inst vm-read-from-string-inst) state pc labels)
   (declare (ignore labels))
-  (let* ((str (vm-reg-get state (vm-src inst)))
-         (forms (parse-all-forms str))
-         (value (if forms (first forms) nil)))
-    (vm-reg-set state (vm-dst inst) value)
-    (values (1+ pc) nil nil)))
+  (let* ((str (vm-reg-get state (vm-src inst))))
+    ;; Use CL's read-from-string to get both the value and the end position (FR-617)
+    (multiple-value-bind (value end-pos)
+        (if (stringp str)
+            (cl:read-from-string str nil nil)
+            (values nil 0))
+      (vm-reg-set state (vm-dst inst) value)
+      ;; Store both values so (multiple-value-bind (obj pos) (read-from-string ...) ...) works
+      (setf (vm-values-list state) (list value end-pos))
+      (values (1+ pc) nil nil))))
 
 (defmethod execute-instruction ((inst vm-read-sexp-inst) state pc labels)
   (declare (ignore labels))

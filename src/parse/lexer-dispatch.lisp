@@ -163,6 +163,12 @@
              do (lex-advance state))))
     (subseq (lexer-state-source state) start (lexer-state-pos state))))
 
+;;; ─── Label Table for #n= / #n# (FR-599) ────────────────────────────────────
+
+(defvar *lexer-label-table* nil
+  "Hash table mapping integer labels to objects for #n= / #n# reader macros.
+Bound to a fresh HT by lex-all; nil outside lexing context.")
+
 ;;; ─── Hash Dispatch ──────────────────────────────────────────────────────────
 
 (defun lex-read-hash-dispatch (state)
@@ -225,6 +231,12 @@
                     (form (read-from-string text))
                     (value (eval form)))
                (lex-make-token state :T-INT value start)))
+        ;; #C complex literal — #C(real imag) → (complex real imag)
+        (#\c (lex-advance state)
+             (let* ((form-text (lex-read-form-text state))
+                    (full-text (concatenate 'string "#C" form-text))
+                    (value (read-from-string full-text)))
+               (lex-make-token state :T-INT value start)))
         ;; #S(struct-name slot1 val1 ...) — read-time struct constructor
         ;; Delegates to host CL read to construct the struct at read time
         (#\s (lex-advance state)
@@ -232,13 +244,77 @@
                     (full-text (concatenate 'string "#S" form-text))
                     (value (read-from-string full-text)))
                (lex-make-token state :T-INT value start)))
+        ;; #* bit-vector literal — #*1010 → #*1010 (constructed as a bit-vector)
+        (#\* (lex-advance state)
+             (let ((bits ""))
+               (loop while (and (not (lex-at-end-p state))
+                                (or (char= (lex-peek state) #\0)
+                                    (char= (lex-peek state) #\1)))
+                     do (setf bits (concatenate 'string bits (string (lex-advance state)))))
+               (let* ((len (length bits))
+                      (bv  (make-array len :element-type 'bit)))
+                 (dotimes (i len)
+                   (setf (sbit bv i) (if (char= (char bits i) #\1) 1 0)))
+                 (lex-make-token state :T-INT bv start))))
+        ;; #P"pathname" — pathname literal (FR-572)
+        ;; ch is char-downcase'd, so #P and #p both dispatch here
+        (#\p (lex-advance state)
+             (let ((str-token (lex-read-string state)))
+               (lex-make-token state :T-INT
+                               (pathname (lexer-token-value str-token))
+                               start)))
         ;; Boolean dispatch (non-standard but useful)
         (#\t (lex-advance state)
              (lex-make-token state :T-BOOL-TRUE t start))
         (#\f (lex-advance state)
              (lex-make-token state :T-BOOL-FALSE nil start))
         (otherwise
-         (error "Lexer error at byte ~D: unknown dispatch character #~C" start ch))))))
+         (cond
+           ;; #nR — arbitrary radix; #n= — label assignment; #n# — label reference
+           ((digit-char-p ch)
+            (let ((num-str ""))
+              (loop while (and (not (lex-at-end-p state)) (digit-char-p (lex-peek state)))
+                    do (setf num-str (concatenate 'string num-str (string (lex-advance state)))))
+              (when (lex-at-end-p state)
+                (error "Lexer error at byte ~D: unexpected end after #~A" start num-str))
+              (let ((dispatch (lex-peek state)))
+                (cond
+                  ;; #nR — radix integer
+                  ((char-equal dispatch #\r)
+                   (lex-advance state) ; skip 'r'/'R'
+                   (let ((radix (parse-integer num-str)))
+                     (when (or (< radix 2) (> radix 36))
+                       (error "Lexer error at byte ~D: radix ~D out of range 2-36" start radix))
+                     (lex-make-token state :T-INT (lex-read-radix-integer state radix) start)))
+                  ;; #n= — label assignment: #0=(1 2 3) caches (1 2 3) as label 0
+                  ((char= dispatch #\=)
+                   (lex-advance state) ; skip '='
+                   (let* ((form-text (lex-read-form-text state))
+                          (n (parse-integer num-str))
+                          (value (read-from-string form-text)))
+                     (when *lexer-label-table*
+                       (setf (gethash n *lexer-label-table*) value))
+                     (lex-make-token state :T-INT value start)))
+                  ;; #n# — label reference: return previously cached object
+                  ((char= dispatch #\#)
+                   (lex-advance state) ; skip '#'
+                   (let* ((n (parse-integer num-str))
+                          (value (when *lexer-label-table*
+                                   (gethash n *lexer-label-table*))))
+                     (lex-make-token state :T-INT value start)))
+                  ;; #nA(...) — multi-dimensional array literal: #2A((1 2)(3 4))
+                  ((char-equal dispatch #\a)
+                   (lex-advance state) ; skip 'a'/'A'
+                   (let* ((form-text (lex-read-form-text state))
+                          (full-text (concatenate 'string "#" num-str "A" form-text))
+                          (value (read-from-string full-text)))
+                     (lex-make-token state :T-INT value start)))
+                  (t
+                   (error "Lexer error at byte ~D: expected R, =, #, or A after #~A, got ~C"
+                          start num-str dispatch))))))
+           (t
+            (error "Lexer error at byte ~D: unknown dispatch character #~C" start ch))))))))
+
 
 ;;; ─── Main Token Reader ──────────────────────────────────────────────────────
 
@@ -300,7 +376,8 @@
 (defun lex-all (source)
   "Tokenize SOURCE string completely, returning a list of lexer-token structs.
    The last token has type :T-EOF."
-  (let ((state (make-lexer source))
+  (let ((*lexer-label-table* (make-hash-table :test #'eql))
+        (state (make-lexer source))
         (tokens nil))
     (loop
       (let ((tok (lexer-read-token state)))

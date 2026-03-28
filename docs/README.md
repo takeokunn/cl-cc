@@ -2,11 +2,11 @@
 
 ## ANSI CL Compliance
 - [ansi-cl-lang.md](ansi-cl-lang.md) — Language Core: eval, lambda, types, CLOS, conditions, symbols, packages, numbers (720 FR) — ✅ **720/720 complete**
-- [ansi-cl-stdlib.md](ansi-cl-stdlib.md) — Standard Library: cons, arrays, strings, sequences, hash, I/O, printer, reader (358 FR) — ✅ 100 / 🔶 64 / ❌ 194
+- [ansi-cl-stdlib.md](ansi-cl-stdlib.md) — Standard Library: cons, arrays, strings, sequences, hash, I/O, printer, reader (352 FR) — ✅ 297 / 🔶 25 / ❌ 6
 
 ## Type System
 - [type-core.md](type-core.md) — Core: inference, polymorphism, subtyping, effects, gradual typing (Ch.1-14)
-- [type-advanced.md](type-advanced.md) — Advanced: safety types, type-level programming, proofs, concurrency types (Ch.15-29)
+- [type-advanced.md](type-advanced.md) — Advanced: safety types, type-level programming, proofs, concurrency types (Ch.15-34)
 
 ## Optimization
 - [optimize-passes.md](optimize-passes.md) — Core Passes, CPS/SSA & Speculative JIT (175 FR)

@@ -114,18 +114,23 @@
 ;;; S-expression -> Instruction Conversion (Extended)
 
 ;;; Instruction Execution - String Comparisons
+;;; Use :binary (pass-through) so ANSI return values are preserved:
+;;;   string=, string-equal     → T or NIL
+;;;   string<, string>, etc.    → mismatch index (integer) or NIL
+;;; Previously used :pred2 which returned 0/1, but 0 is truthy in CL —
+;;; this caused (if (string< "xyz" "abc") ...) to always take the true branch.
 
-(define-simple-instruction vm-string= :pred2 string= :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string< :pred2 string< :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string> :pred2 string> :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string<= :pred2 string<= :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string>= :pred2 string>= :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string-equal :pred2 string-equal :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string-lessp :pred2 string-lessp :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string-greaterp :pred2 string-greaterp :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string-not-equal :pred2 string-not-equal :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string-not-greaterp :pred2 string-not-greaterp :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string-not-lessp :pred2 string-not-lessp :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string= :binary string= :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string< :binary string< :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string> :binary string> :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string<= :binary string<= :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string>= :binary string>= :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string-equal :binary string-equal :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string-lessp :binary string-lessp :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string-greaterp :binary string-greaterp :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string-not-equal :binary string-not-equal :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string-not-greaterp :binary string-not-greaterp :lhs vm-str1 :rhs vm-str2)
+(define-simple-instruction vm-string-not-lessp :binary string-not-lessp :lhs vm-str1 :rhs vm-str2)
 
 ;;; Instruction Execution - String Access and Query
 
@@ -208,8 +213,9 @@
 (defmethod execute-instruction ((inst vm-subseq) state pc labels)
   (declare (ignore labels))
   (let* ((string (vm-reg-get state (vm-string-reg inst)))
-         (start (vm-reg-get state (vm-start inst)))
-         (end (vm-reg-get state (vm-end inst)))
+         (start  (vm-reg-get state (vm-start inst)))
+         ;; nil end-slot means no upper bound — pass nil to subseq (= end of sequence)
+         (end    (if (vm-end inst) (vm-reg-get state (vm-end inst)) nil))
          (result (subseq string start end)))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))

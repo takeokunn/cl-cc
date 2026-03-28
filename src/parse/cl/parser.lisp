@@ -60,6 +60,13 @@ Uses the hand-written CL lexer and recursive-descent parser (no host reader)."
                   :source-line source-line
                   :source-column source-column))
 
+(defmethod lower-sexp-to-ast ((node pathname) &key source-file source-line source-column)
+  ;; #P"..." pathname literals are self-evaluating.
+  (make-ast-quote :value node
+                  :source-file source-file
+                  :source-line source-line
+                  :source-column source-column))
+
 (defmethod lower-sexp-to-ast ((node symbol) &key source-file source-line source-column)
   ;; nil and t are self-evaluating constants, not variable references.
   (if (member node '(nil t))
@@ -509,6 +516,7 @@ Simple places dispatch via *setf-place-simple-rewrites*; complex places
     (make-ast-defvar :name name
                      :value (when (>= (length node) 3)
                               (lower-sexp-to-ast (third node)))
+                     :kind (car node)   ; FR-600: distinguish defvar from defparameter
                      :source-file sf :source-line sl :source-column sc)))
 
 ;;; ── Defmacro ─────────────────────────────────────────────────────────────────

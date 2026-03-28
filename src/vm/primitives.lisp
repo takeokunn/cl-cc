@@ -88,6 +88,11 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
     ((output-stream) (output-stream-p value))
     ((file-stream) (typep value 'file-stream))
     ((string-stream) (typep value 'string-stream))
+    ((broadcast-stream) (typep value 'broadcast-stream))
+    ((two-way-stream) (typep value 'two-way-stream))
+    ((echo-stream) (typep value 'echo-stream))
+    ((concatenated-stream) (typep value 'concatenated-stream))
+    ((synonym-stream) (typep value 'synonym-stream))
     ;; VM hash tables are wrapped in vm-hash-table-object
     ((hash-table) (typep value 'vm-hash-table-object))
     (otherwise

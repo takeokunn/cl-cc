@@ -22,12 +22,20 @@
                 '(setf lst (cons v lst))))
 
 (deftest pop-expansion
-  "POP wraps (car place) in a LET, then (setf place (cdr place)) in the body."
-  (let* ((result     (our-macroexpand-1 '(pop lst)))
-         (setf-form  (caddr result)))
-    (assert-eq  (car result)          'let)
-    (assert-eq  (car setf-form)       'setf)
-    (assert-equal (caddr setf-form)   '(cdr lst))))
+  "POP expands to (let ((tmp place)) (setf place (cdr tmp)) (car tmp)) — reads place once."
+  (let* ((result      (our-macroexpand-1 '(pop lst)))
+         (bindings    (cadr result))       ; ((#:TMP lst))
+         (setf-form   (caddr result))      ; (setf lst (cdr #:TMP))
+         (tmp-sym     (caar bindings)))    ; the gensym bound to lst
+    (assert-eq   (car result)               'let)
+    ;; Binding binds tmp gensym to lst
+    (assert-equal (cadar bindings)          'lst)
+    ;; Setf form structure: (setf lst (cdr tmp))
+    (assert-eq   (car setf-form)            'setf)
+    (assert-eq   (cadr setf-form)           'lst)
+    ;; Value arg to setf is (cdr tmp)
+    (assert-eq   (car (caddr setf-form))    'cdr)
+    (assert-eq   (cadr (caddr setf-form))   tmp-sym)))
 
 (deftest-each incf-decf-expansion
   "incf/decf expand to (setq x (OP x delta)) for simple symbol places."
@@ -569,9 +577,12 @@
     (assert-eq 'let (car result))))
 
 (deftest with-standard-io-syntax-expansion
-  "WITH-STANDARD-IO-SYNTAX expands body into PROGN."
+  "WITH-STANDARD-IO-SYNTAX expands into a LET binding standard I/O variables."
   (let ((result (our-macroexpand-1 '(with-standard-io-syntax body1 body2))))
-    (assert-eq 'progn (car result))))
+    ;; Expands to (let ((*print-escape* t) ...) body1 body2)
+    (assert-eq 'let (car result))
+    ;; Body forms are preserved
+    (assert-equal '(body1 body2) (cddr result))))
 
 (deftest define-compiler-macro-returns-name
   "DEFINE-COMPILER-MACRO returns the macro name (no compile-time expansion)."
@@ -855,3 +866,40 @@
          (not-form lambda-body))
     (assert-eq (car not-form) 'not)
     (assert-eq (caadr not-form) 'apply)))
+
+;;; ── :key support for -if/-if-not variants (session 19) ──────────────────────
+
+(deftest remove-if-with-key
+  "REMOVE-IF with :key applies key before predicate."
+  (let ((result (our-macroexpand-1 '(remove-if #'oddp lst :key #'car))))
+    (assert-eq (car result) 'let)
+    ;; should have kfn binding
+    (assert-true (> (length (cadr result)) 1))))
+
+(deftest remove-if-not-with-key
+  "REMOVE-IF-NOT with :key applies key before predicate."
+  (let ((result (our-macroexpand-1 '(remove-if-not #'evenp lst :key #'car))))
+    (assert-eq (car result) 'let)
+    (assert-true (> (length (cadr result)) 1))))
+
+(deftest find-if-not-with-key
+  "FIND-IF-NOT with :key delegates to FIND-IF with complement."
+  (let ((result (our-macroexpand-1 '(find-if-not #'oddp lst :key #'car))))
+    (assert-eq (car result) 'find-if)))
+
+(deftest position-if-with-key
+  "POSITION-IF with :key applies key before predicate."
+  (let ((result (our-macroexpand-1 '(position-if #'oddp lst :key #'car))))
+    (assert-eq (car result) 'let)
+    (assert-true (> (length (cadr result)) 2)))) ; fn, kfn, idx bindings
+
+(deftest count-if-not-with-key
+  "COUNT-IF-NOT with :key delegates to COUNT-IF with complement."
+  (let ((result (our-macroexpand-1 '(count-if-not #'oddp lst :key #'car))))
+    (assert-eq (car result) 'count-if)))
+
+(deftest member-if-with-key
+  "MEMBER-IF with :key applies key before predicate."
+  (let ((result (our-macroexpand-1 '(member-if #'oddp lst :key #'car))))
+    (assert-eq (car result) 'let)
+    (assert-true (> (length (cadr result)) 1))))

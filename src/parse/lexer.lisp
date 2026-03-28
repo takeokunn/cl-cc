@@ -310,7 +310,9 @@
                                ((string= name-str "NULL") #\Nul)
                                ((string= name-str "ESCAPE") #\Escape)
                                ((string= name-str "ESC") #\Escape)
-                               (t (error "Lexer error: unknown character name ~S" name-str)))
+                               ;; FR-562: Unicode character names via host CL
+                               (t (or (cl:name-char name-str)
+                                      (error "Lexer error: unknown character name ~S" name-str))))
                              start)))
           ;; Single character
           (lex-make-token state :T-CHAR first-ch start)))))

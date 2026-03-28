@@ -181,7 +181,7 @@
     ;; Write-to-string (three CL names → one instruction)
     (write-to-string  . make-vm-write-to-string-inst)
     (prin1-to-string  . make-vm-write-to-string-inst)
-    (princ-to-string  . make-vm-write-to-string-inst)
+    (princ-to-string  . make-vm-princ-to-string-inst)
     ;; String stream
     (get-output-stream-string . make-vm-get-output-stream-string-inst)
     ;; Reader
@@ -224,7 +224,8 @@
     (svref            . make-vm-svref)
     ;; Bit array
     (bit-and          . make-vm-bit-and)
-    (bit-or           . make-vm-bit-or)
+    (bit-ior          . make-vm-bit-or)  ; ANSI CL name (inclusive or)
+    (bit-or           . make-vm-bit-or)  ; cl-cc alias
     (bit-xor          . make-vm-bit-xor)
     ;; List
     (equal            . make-vm-equal)

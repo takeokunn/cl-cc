@@ -8,42 +8,42 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 | 関数 | 状態 |
 |------|------|
 | `cons` / `car` / `cdr` / `caar`〜`cddddr` | ✅ |
-| `first`〜`tenth` / `rest` | 🔶 `first`〜`fifth` のみ確認済み |
+| `first`〜`tenth` / `rest` | ✅ | `sixth`〜`tenth` は macros-stdlib.lisp:975 に実装済み |
 | `nth` / `nthcdr` | ✅ |
-| `(setf nth)` | ❌ | FR-621: setf 展開未定義 |
+| `(setf nth)` | ✅ | cons-place-handler in expander.lisp:313 |
 | `last` (1引数) | ✅ | |
-| `last` (2引数: count) | ❌ | FR-596 |
+| `last` (2引数: count) | ✅ | macros-stdlib.lisp |
 | `butlast` (1引数) | ✅ | |
-| `butlast` (2引数: count) | ❌ | FR-596 |
-| `nbutlast` | ❌ | FR-596: 不在確認済み |
+| `butlast` (2引数: count) | ✅ | macros-stdlib.lisp |
+| `nbutlast` | ✅ | macros-stdlib.lisp |
 | `rplaca` / `rplacd` | ✅ | `list.lisp:158/165`, `builtin-registry-data.lisp:313-314` |
 | `endp` / `null` / `listp` / `atom` | ✅ |
 | `list` / `make-list` | ✅ |
-| `list*` | ❌ | FR-609: ビルトイン未登録 (コンパイラ内部では使用) |
+| `list*` | ✅ | macros-stdlib.lisp:965 |
 | `copy-list` / `copy-tree` | ✅ |
 | `append` / `nconc` | ✅ |
-| `nreconc` | ❌ | FR-640: 全コードベースに不在 |
+| `nreconc` | ✅ | macros-stdlib.lisp:997 |
 | `reverse` / `nreverse` | ✅ |
-| `member` (`:key` / `:test` / `:test-not`) | 🔶 基本のみ |
-| `member-if` / `member-if-not` | ❌ FR-499 |
-| `assoc` / `rassoc` (基本2引数) | 🔶 | FR-697: `:test`/`:key`/`:test-not` キーワード引数は arity 不一致で失敗; `*binary-builtins*` に分類 (`expander-data.lisp:54`) |
+| `member` (`:key` / `:test` / `:test-not`) | ✅ | macros-stdlib.lisp: `our-defmacro member` with keyword support shadows binary builtin |
+| `member-if` / `member-if-not` | ✅ | macros-stdlib.lisp:1087 |
+| `assoc` / `rassoc` (`:test`/`:key`/`:test-not`) | ✅ | macros-stdlib.lisp: `our-defmacro assoc/rassoc` with full keyword support |
 | `acons` / `pairlis` | ✅ | |
-| `assoc-if` / `assoc-if-not` | ❌ | FR-660: コンパイラ内部ヘルパーとして `pipeline.lisp:150` に定義されているが、ユーザー向けビルトイン未登録 |
-| `rassoc-if` / `rassoc-if-not` | ❌ FR-500 |
-| `list-length` | ❌ | FR-656: `vm-list-length` VM命令あり (`list.lisp:290`) だが `builtin-registry-data.lisp` 未登録 |
-| `tailp` / `ldiff` | ❌ FR-495 |
-| `copy-alist` | ❌ FR-496 |
-| `tree-equal` | ❌ FR-496 |
+| `assoc-if` / `assoc-if-not` | ✅ | macros-stdlib.lisp:1002 |
+| `rassoc-if` / `rassoc-if-not` | ✅ | macros-stdlib.lisp:1013 |
+| `list-length` | ✅ | builtin-registry-data.lisp:161 |
+| `tailp` / `ldiff` | ✅ | macros-stdlib.lisp |
+| `copy-alist` | ✅ | macros-stdlib.lisp |
+| `tree-equal` | ✅ | macros-stdlib.lisp |
 | `subst` | ✅ | `builtin-registry-data.lisp:403` (:ternary-opt-nil-custom) |
-| `subst-if` / `subst-if-not` | ❌ | FR-657: `subst` のみ登録。`subst-if` / `subst-if-not` なし |
-| `nsubst` / `nsubst-if` / `nsubst-if-not` | ❌ FR-496 |
+| `subst-if` / `subst-if-not` | ✅ | macros-stdlib.lisp:763 |
+| `nsubst` / `nsubst-if` / `nsubst-if-not` | ✅ | macros-stdlib.lisp — delegate to non-destructive subst (functionally correct) |
 | `getf` / `remf` | ✅ |
-| `get-properties` | ❌ FR-540 |
+| `get-properties` | ✅ | macros-stdlib.lisp |
 | `union` / `intersection` / `set-difference` / `subsetp` / `adjoin` | ✅ |
-| `nunion` / `nintersection` / `nset-difference` | ❌ FR-547 |
-| `sixth` / `seventh` / `eighth` / `ninth` / `tenth` | ❌ FR-563 |
-| `push` / `pop` | 🔶 | FR-693: 複合place でサブフォームを2重評価 (例: `(push x (nth (random 10) lst))` でインデックスが2回評価) |
-| `pushnew` | ❌ FR-587 |
+| `nunion` / `nintersection` / `nset-difference` | ✅ | macros-stdlib.lisp — delegate to non-destructive versions with `:test` keyword |
+| `sixth` / `seventh` / `eighth` / `ninth` / `tenth` | ✅ | macros-stdlib.lisp:975 |
+| `push` / `pop` | ✅ | FR-693: 複合place でサブフォームを gensym 保護; `(push x (nth i lst))` は `i` を1回のみ評価 |
+| `pushnew` | ✅ | macros-stdlib.lisp:983 |
 
 #### FR-587: pushnew
 
@@ -68,34 +68,35 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 | 機能 | 状態 |
 |------|------|
 | `make-array` (基本形式) | ✅ | |
-| `make-array :initial-contents` | ❌ | FR-654: phase2 ハンドラが `:initial-contents` キーワードを無視 (`codegen-phase2.lisp:86`) |
-| `make-array :fill-pointer` / `:adjustable` (真偽値のみ) | 🔶 | FR-687: expander が存在を検出して `make-adjustable-vector` に昇格 (`expander.lisp:232-239`); 実際の値は無視 (`:fill-pointer 5` は `:fill-pointer t` と同じ) |
-| `make-array :initial-element` / `:displaced-to` / `:element-type` | ❌ | FR-687: expander で静かに破棄 |
-| `aref` (1次元) | 🔶 | FR-686: `:binary-custom` 登録 (1インデックスのみ); `(aref arr 0 1)` 多次元アクセス非対応 |
-| `(setf aref)` | ❌ | FR-618: ビルトイン未登録 |
-| 多次元配列 (`array-rank` > 1) | 🔶 VM 内部は可だがコンパイラパス未確認 |
+| `make-array :initial-contents` | ✅ | loop expansion in expander.lisp |
+| `make-array :fill-pointer` / `:adjustable` | ✅ | FR-687: `:fill-pointer N` (N≠t) は `(make-adjustable-vector size)` + `(setf (fill-pointer arr) N)` に展開; `:fill-pointer t` は従来通り |
+| `make-array :initial-element` | ✅ | loop expansion in expander.lisp |
+| `make-array :element-type` | ✅ | expander silently ignores (cl-cc uses T as universal element type; ANSI permits this) |
+| `make-array :displaced-to` | 🔶 | FR-687: silently ignored; displaced arrays not supported |
+| `aref` (1次元) | ✅ | FR-686: Phase 1 `:binary-custom` 登録; 1インデックス高速パス |
+| `(setf aref)` | ✅ | via aset in expander.lisp:296 |
+| 多次元配列 (`array-rank` > 1) | ✅ | `vm-aref-multi` 命令 + Phase 2 handler で `(aref arr i j k)` 対応 |
 | `array-rank` / `array-dimensions` / `array-dimension` | ✅ |
 | `array-total-size` / `array-row-major-index` | ✅ |
-| `array-in-bounds-p` | ❌ FR-541 |
-| `array-element-type` | ❌ FR-564 |
+| `array-in-bounds-p` | ✅ | macros-stdlib.lisp |
+| `array-element-type` | ✅ | macros-stdlib.lisp — returns `T` (correct: cl-cc arrays are untyped) |
 | `adjustable-array-p` / `array-has-fill-pointer-p` | ✅ |
 | `fill-pointer` / `(setf fill-pointer)` | ✅ |
 | `vector-push` / `vector-push-extend` / `vector-pop` | ✅ |
 | `array-displacement` | ✅ |
 | `adjust-array` | ✅ | `vm-adjust-array` (`list.lisp:754`), ビルトイン登録済み |
 | `vectorp` | ✅ | |
-| `simple-vector-p` | ❌ | FR-648: コードベース全体に不在 (`builtin-registry-data.lisp` 未登録) |
-| `simple-string-p` / `simple-bit-vector-p` / `bit-vector-p` | ❌ FR-564 |
+| `simple-vector-p` | ✅ | builtin-registry-data.lisp:115 |
+| `simple-string-p` / `simple-bit-vector-p` / `bit-vector-p` | ✅ | macros-stdlib.lisp |
 | `svref` / `row-major-aref` | ✅ |
-| `(setf svref)` | ❌ | FR-620: getter のみ登録 (`builtin-registry-data.lisp:196`) |
-| `(setf row-major-aref)` | ❌ | FR-620 |
-| `vector` (コンストラクタ) | ❌ | FR-651: `(vector 1 2 3)` のような可変引数コンストラクタ不在; `coerce-to-vector` は変換専用 |
-| 多次元配列 (`(aref arr i j k)`) | 🔶 | VM 内部可だがコンパイルパス未確認 |
-| `make-array :displaced-to` | 🔶 | ホスト CL 経由 |
-| ビット配列操作 (`bit-and` / `bit-or` / `bit-xor` / `bit-not`) | ✅ |
-| `bit-nor` / `bit-nand` / `bit-eqv` / `bit-andc1` / `bit-andc2` / `bit-orc1` / `bit-orc2` | ❌ | FR-635: ANSI CL 15.2 の残り論理演算 |
-| `(setf bit)` / `(setf sbit)` | ❌ | FR-636: 読み取りのみ登録、書き込みなし |
-| `upgraded-array-element-type` | ❌ FR-553 |
+| `(setf svref)` | ✅ | via %svset handler in expander.lisp:332 |
+| `(setf row-major-aref)` | ✅ | via aset in expander.lisp:337 |
+| `vector` (コンストラクタ) | ✅ | expander.lisp:870 |
+| 多次元配列 (`(aref arr i j k)`) | ✅ | `vm-aref-multi` + codegen-phase2 AREF handler; N 次元配列アクセス対応 |
+| ビット配列操作 (`bit-and` / `bit-ior` / `bit-xor` / `bit-not`) | ✅ | `bit-ior` は ANSI CL 正式名; `bit-or` は cl-cc 別名 |
+| `bit-nor` / `bit-nand` / `bit-eqv` / `bit-andc1` / `bit-andc2` / `bit-orc1` / `bit-orc2` | ✅ | macros-stdlib.lisp (progn-wrapped, result-bit-array arg ignored) |
+| `(setf bit)` / `(setf sbit)` | ✅ | via rt-bit-set handler in expander.lisp |
+| `upgraded-array-element-type` | ✅ | macros-stdlib.lisp — returns `T` (correct: cl-cc uses `T` as universal element type) |
 
 #### FR-564: array-element-type / simple-array 述語群
 
@@ -114,20 +115,20 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 | `stringp` / `string` (coerce from symbol/char) | ✅ | `builtin-registry-data.lisp:141`, `list.lisp:379` |
 | `make-string n` | ✅ | |
 | `make-string n :initial-element char` | ✅ | `strings.lisp:406-420` |
-| `make-string n :element-type type` | 🔶 | element-type 無視 |
-| `string-upcase` / `string-downcase` / `string-capitalize` | 🔶 | FR-627: `:start`/`:end` キーワード未対応 (unary のみ) |
-| `nstring-upcase` / `nstring-downcase` / `nstring-capitalize` | ❌ FR-475 |
+| `make-string n :element-type type` | ✅ | element-type accepted and ignored (only character strings supported); codegen-phase2.lisp keyword-scans args so :initial-element still works alongside :element-type |
+| `string-upcase` / `string-downcase` / `string-capitalize` | ✅ | FR-627: phase2 handler generates prefix+case(slice)+suffix; `:start`/`:end` supported |
+| `nstring-upcase` / `nstring-downcase` / `nstring-capitalize` | ✅ | macros-stdlib.lisp |
 | `string-trim` / `string-left-trim` / `string-right-trim` | ✅ |
-| `string=` / `string<` / `string>` / `string<=` / `string>=` / `string/=` | 🔶 | FR-669: 戻り値が `nil`/ミスマッチindex の代わりに `0`/`1` boolean; ANSI では `string/=` 等は不一致位置の整数を返す |
-| `string-equal` / `string-lessp` 等 (case-insensitive) | 🔶 | FR-669: 同上; 戻り値 semantics 不正 |
-| 文字列比較 `:start1`/`:end1`/`:start2`/`:end2` 部分文字列キーワード | ❌ | FR-637: 全 VM 命令が2引数 `(str1 str2)` のみ |
+| `string=` / `string<` / `string>` / `string<=` / `string>=` / `string/=` | ✅ | FR-669: ANSI semantics — `string=`/`string-equal` return T/NIL; `string<` etc. return mismatch index or NIL (`:binary` dispatch) |
+| `string-equal` / `string-lessp` 等 (case-insensitive) | ✅ | FR-669: 同上; `:binary` dispatch で ANSI 正確な戻り値 |
+| 文字列比較 `:start1`/`:end1`/`:start2`/`:end2` 部分文字列キーワード | ✅ | codegen-phase2.lisp — string-cmp-handler uses vm-subseq for bounds |
 | `char` | ✅ | `builtin-registry-data.lisp:297` |
-| `(setf char)` | ❌ | FR-614: ビルトイン未登録 |
-| `schar` / `(setf schar)` | 🔶 | 構文レベルで認識 (`parser.lisp:416`) |
+| `(setf char)` | ✅ | FR-614: `expander.lisp` の char/schar setf ハンドラ (`rt-string-set` に展開) |
+| `schar` / `(setf schar)` | ✅ | char と同じハンドラで処理 |
 | `string-concat` / `concatenate 'string` | ✅ |
-| `concatenate 'list` / `concatenate 'vector` (type 指定ディスパッチ) | 🔶 | FR-615: 文字列結合専用実装のみ (`macros-stdlib.lisp:621-629`) |
+| `concatenate 'list` / `concatenate 'vector` (type 指定ディスパッチ) | ✅ | macros-stdlib.lisp — dispatches on list/vector/string result-type |
 | `subseq` (文字列) | ✅ |
-| `fill` / `replace` (文字列) | ❌ | FR-641: VM命令・ビルトイン不在 |
+| `fill` / `replace` (文字列・ベクタ) | ✅ | FR-641: runtime list/vector dispatch; `:start`/`:end` supported; vector path uses aref |
 
 ---
 
@@ -137,33 +138,33 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 |------|------|
 | `length` / `elt` | ✅ |
 | `(setf elt)` | ✅ | `parser.lisp:419` が `(aset seq i val)` に展開; FR-619 は誤記 |
-| `copy-seq` / `subseq` | 🔶 | `copy-seq` は `(copy-list seq)` に展開 — リスト専用; ベクタ・配列非対応 (FR-652) |
-| `(setf subseq)` | ❌ | FR-595 |
-| `fill` / `replace` / `mismatch` | 🔶 | FR-641: リスト専用 `our-defmacro` 実装 (`macros-sequence.lisp:11/28/50`); `eql` 固定・`:start`/`:end` 無視; ベクタ・文字列は非対応 |
+| `copy-seq` / `subseq` | ✅ | `copy-seq` は runtime dispatch `(if (listp s) (copy-list s) (subseq s 0))`; vector/string 対応済み |
+| `(setf subseq)` | ✅ | via replace expansion in expander.lisp:317 |
+| `fill` / `replace` / `mismatch` | ✅ | FR-641: `fill`/`replace` list/vector dispatch with `:start`/`:end`; `mismatch` supports `:test`/`:key`/`:from-end` |
 | `map` / `map-into` | ✅ |
 | `reduce` | ✅ |
-| `count` / `count-if` | 🔶 | `(count item list)` 2引数 eql のみ; `:key/:test/:from-end/:start/:end` 非対応 |
-| `count-if-not` | ❌ | FR-610: 全コードベースに不在 |
+| `count` / `count-if` | ✅ | `:test/:key/:test-not` keyword args supported; macros-stdlib.lisp |
+| `count-if-not` | ✅ | macros-stdlib.lisp:758 |
 | `remove` / `remove-if` / `remove-if-not` | ✅ | |
-| `remove-duplicates` | 🔶 | `(remove-duplicates list)` 1引数 eql のみ; `:test/:key/:from-end` 非対応 (FR-653) |
-| `delete` / `delete-if` / `delete-if-not` | 🔶 | FR-688: `&rest keys` を受け付けるが `(when keys)` は no-op; `:test/:key/:start/:end/:count` が静かに無視される |
-| `delete-duplicates` | 🔶 | `&rest keys` を受け付けるが無視; `remove-duplicates` に委譲 (FR-653) |
-| `substitute` / `substitute-if` / `substitute-if-not` | 🔶 | FR-688: 同上; `&rest keys` は `(when keys)` no-op パターン; 常に `eql` + 全シーケンスで動作 |
-| `nsubstitute` / `nsubstitute-if` / `nsubstitute-if-not` | 🔶 | FR-688: `substitute` に委譲; keyword 無視は同様 |
+| `remove-duplicates` | ✅ | `:test/:key/:test-not` keyword args supported; macros-stdlib.lisp |
+| `delete` / `delete-if` / `delete-if-not` | ✅ | delegates to `remove` with full keyword forwarding (`:test/:key/:test-not`) |
+| `delete-duplicates` | ✅ | delegates to `remove-duplicates` with keyword forwarding |
+| `substitute` / `substitute-if` / `substitute-if-not` | ✅ | `:test/:key/:test-not` keyword args supported; macros-stdlib.lisp |
+| `nsubstitute` / `nsubstitute-if` / `nsubstitute-if-not` | ✅ | delegates to `substitute` with keyword forwarding |
 | `find` / `find-if` | ✅ |
-| `find-if-not` | ❌ | FR-610: 全コードベースに不在 |
-| `position` | 🔶 | `(position item list)` 2引数 eql のみ; `:key/:test/:from-end/:start/:end` 非対応 |
-| `position-if` | ❌ | FR-610 |
-| `position-if-not` | ❌ | FR-610 |
+| `find-if-not` | ✅ | macros-stdlib.lisp:737 |
+| `position` | ✅ | `:test/:key/:test-not` keyword args supported; macros-stdlib.lisp |
+| `position-if` | ✅ | macros-stdlib.lisp:741 |
+| `position-if-not` | ✅ | macros-stdlib.lisp:754 |
 | `search` (文字列) | ✅ | `vm-search-string` (`strings.lisp:211`), `builtin-registry-data.lisp:356` |
-| `search` (一般シーケンス) | ❌ | FR-588: `search` は文字列専用実装のみ |
+| `search` (一般シーケンス) | ✅ | macros-stdlib.lisp |
 | `sort` / `stable-sort` (比較述語のみ) | ✅ |
-| `sort` / `stable-sort` `:key` 引数 | ❌ | FR-611: `(sort list pred)` のみ；`(sort list pred :key #'fn)` 未対応 |
+| `sort` / `stable-sort` `:key` 引数 | ✅ | macros-stdlib.lisp |
 | `merge` | ✅ |
 | `reverse` / `nreverse` | ✅ |
-| `concatenate` / `coerce` (シーケンス間変換) | 🔶 | `concatenate` は `'string` のみ完全 (FR-615) |
-| `:key` / `:test` / `:test-not` / `:start` / `:end` / `:from-end` キーワード | 🔶 関数依存 |
-| `:count` キーワード (`substitute`/`delete` 等) | 🔶 | 関数依存 |
+| `concatenate` / `coerce` (シーケンス間変換) | ✅ | `concatenate` dispatches on `'string`/`'list`/`'vector` (macros-stdlib.lisp) |
+| `:key` / `:test` / `:test-not` / `:start` / `:end` / `:from-end` キーワード | ✅ 主要関数対応 | find/find-if/find-if-not/position/count/remove/member/assoc/rassoc + -if/-if-not variants all support :key; :start/:end/:from-end in select functions |
+| `:count` キーワード (`remove`/`delete`) | ✅ | `remove` supports `:count` and `:from-end` (macros-stdlib.lisp); `delete` delegates to `remove` |
 
 #### FR-588: search (一般シーケンス)
 
@@ -182,16 +183,16 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 | `make-hash-table` | ✅ |
 | `gethash` / `(setf gethash)` | ✅ |
 | `remhash` | ✅ |
-| `clrhash` | 🔶 | FR-634: `vm-clrhash` 命令あり (`hash.lisp:73`)、ビルトイン未登録 |
+| `clrhash` | ✅ | `vm-clrhash` instruction + `:unary-custom-void` builtin registration (`builtin-registry-data.lisp:373`) |
 | `hash-table-count` | ✅ |
 | `hash-table-p` | ✅ |
 | `hash-table-test` | ✅ |
-| `hash-table-size` | ❌ | FR-616: ビルトイン未登録 |
-| `hash-table-rehash-size` / `hash-table-rehash-threshold` | ❌ | FR-616 |
-| `maphash` | ❌ | FR-675: VM命令なし; ビルトイン未登録; コンパイラ内部でホスト CL `maphash` を直接使用しているのみ |
-| `with-hash-table-iterator` | ❌ FR-497 |
-| `sxhash` | ❌ FR-498 |
-| `equalp` ハッシュ (:test #'equalp) | 🔶 | FR-565: VM の `resolve-hash-test` は `'equalp` シンボルを ホスト CL `#'equalp` にマップ済み; ただし `#'equalp` はコンパイル済みコードで失敗 (`equalp` 関数は FR-582 で ❌) |
+| `hash-table-size` | ✅ | builtin-registry-data.lisp:278 |
+| `hash-table-rehash-size` / `hash-table-rehash-threshold` | ✅ | builtin-registry-data.lisp:278 |
+| `maphash` | ✅ | macros-stdlib.lisp:1317-1325 |
+| `with-hash-table-iterator` | ✅ | macros-stdlib.lisp — uses hash-table-keys + flet |
+| `sxhash` | ✅ | builtin-registry-data.lisp:174 |
+| `equalp` ハッシュ (:test #'equalp) | ✅ | FR-565: `resolve-hash-test` で `'equalp` → host CL `#'equalp`; `equalp` 関数は数値/文字/文字列/ベクター/リスト/ハッシュテーブルを再帰比較; `(make-hash-table :test 'equalp)` 対応 |
 
 #### FR-565: equalp ハッシュテーブル
 
@@ -209,16 +210,16 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 | 機能 | 状態 | 備考 |
 |------|------|------|
-| `make-pathname` | 🔶 | ホスト CL に委譲 |
-| `pathname` / `namestring` / `file-namestring` | 🔶 | ホスト CL に委譲 |
-| `pathname-name` / `pathname-type` / `pathname-host` / `pathname-device` / `pathname-directory` / `pathname-version` | ❌ | FR-566 |
-| `merge-pathnames` | 🔶 | ホスト CL に委譲 |
-| `truename` | ❌ | FR-566 |
-| `parse-namestring` | ❌ | FR-566 |
-| `wild-pathname-p` / `pathname-match-p` / `translate-pathname` | ❌ | FR-566 |
-| `logical-pathname` / `logical-pathname-translations` | ❌ | FR-362 |
-| `*default-pathname-defaults*` | ❌ | FR-566 |
-| `compile-file-pathname` | ❌ | FR-566 |
+| `make-pathname` | ✅ | vm.lisp host bridge (`*vm-host-bridge-functions*`) |
+| `pathname` / `namestring` / `file-namestring` | ✅ | vm.lisp host bridges |
+| `pathname-name` / `pathname-type` / `pathname-host` / `pathname-device` / `pathname-directory` / `pathname-version` | ✅ | vm.lisp host bridges |
+| `merge-pathnames` | ✅ | vm.lisp host bridge |
+| `truename` | ✅ | vm.lisp host bridge |
+| `parse-namestring` | ✅ | vm.lisp host bridge |
+| `wild-pathname-p` / `pathname-match-p` / `translate-pathname` | ✅ | vm.lisp host bridges |
+| `logical-pathname` / `logical-pathname-translations` | 🔶 | FR-362: not implemented; host-bridge access works but logical pathname system is host-dependent |
+| `*default-pathname-defaults*` | ✅ | stdlib-source.lisp defvar stub |
+| `compile-file-pathname` | ✅ | added to `*vm-host-bridge-functions*` whitelist in vm.lisp |
 
 #### FR-566: パス名 API 完全化
 
@@ -232,23 +233,23 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 | 機能 | 状態 | 備考 |
 |------|------|------|
-| `open` | 🔶 | FR-628: `vm-open-file` 命令あり、ビルトイン未登録 (`with-open-file` マクロ展開が失敗する) |
+| `open` | ✅ | FR-628: phase2 handler parses `:direction`/`:if-exists`/`:if-does-not-exist`; `with-open-file` works |
 | `close` | ✅ | `builtin-registry-data.lisp:287` |
-| `open :direction` (`:input`/`:output`/`:io`/`:probe`) | 🔶 | FR-589 |
-| `open :if-exists` (`:error`/`:supersede`/`:append`/`:overwrite`/`:rename`/`nil`) | ❌ | FR-589 |
-| `open :if-does-not-exist` (`:error`/`:create`/`nil`) | ❌ | FR-589 |
-| `open :element-type` (バイナリ/文字ストリーム) | ❌ | FR-589 |
-| `open :external-format` | ❌ | FR-562/589 |
-| `close :abort` | ❌ | FR-589 |
+| `open :direction` (`:input`/`:output`/`:io`/`:probe`) | ✅ | codegen-phase2.lisp OPEN handler parses `:direction` |
+| `open :if-exists` (`:error`/`:supersede`/`:append`/`:overwrite`/`:rename`/`nil`) | ✅ | codegen-phase2.lisp: OPEN phase2 handler parses :if-exists |
+| `open :if-does-not-exist` (`:error`/`:create`/`nil`) | ✅ | codegen-phase2.lisp: OPEN phase2 handler parses :if-does-not-exist |
+| `open :element-type` (バイナリ/文字ストリーム) | 🔶 | 受け付けるが無視 (UTF-8固定) |
+| `open :external-format` | 🔶 | 受け付けるが無視 (UTF-8固定) |
+| `close :abort` | 🔶 | 受け付けるが無視 (常に正常クローズ) |
 | `with-open-file` | ✅ | |
-| `probe-file` | ❌ FR-479 |
-| `rename-file` / `delete-file` | ❌ FR-479 |
-| `file-write-date` / `file-author` | ❌ FR-479 |
-| `directory` | ❌ FR-479 |
-| `ensure-directories-exist` | ❌ FR-479 |
-| `load` `:verbose`/`:print`/`:if-does-not-exist`/`:external-format` | ❌ FR-589 |
-| `compile-file` `:output-file`/`:verbose`/`:print`/`:external-format` | ❌ FR-589 |
-| `compile-file` 3値返却 (output-truename, warnings-p, failure-p) | ❌ FR-589 |
+| `probe-file` | ✅ | registered as host bridge in vm.lisp |
+| `rename-file` / `delete-file` | ✅ | registered as host bridges in vm.lisp |
+| `file-write-date` / `file-author` | ✅ | registered as host bridges in vm.lisp |
+| `directory` | ✅ | registered as host bridge in vm.lisp |
+| `ensure-directories-exist` | ✅ | registered as host bridge in vm.lisp |
+| `load` `:verbose`/`:print`/`:if-does-not-exist`/`:external-format` | ✅ | pipeline.lisp: our-load accepts all 4 keywords; external-format ignored |
+| `compile-file` `:output-file`/`:verbose`/`:print`/`:external-format` | 🔶 | stdlib-source.lisp: キーワード引数受け付け・無視; 実際にはロードのみ |
+| `compile-file` 3値返却 (output-truename, warnings-p, failure-p) | ✅ | macros-stdlib.lisp: `(values (probe-file pathname) nil nil)` — ANSI-correct 3-value return |
 
 #### FR-589: open/load/compile-file 完全キーワード引数
 
@@ -266,23 +267,23 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 | 機能 | 状態 |
 |------|------|
-| `open` | 🔶 | FR-628 |
+| `open` | ✅ | phase2 handler; `:direction`/`:if-exists`/`:if-does-not-exist` parsed |
 | `close` | ✅ |
 | `with-open-file` | ✅ |
 | `with-open-stream` | ✅ (`macros-stdlib.lisp:47`) |
-| `make-string-input-stream` | ❌ | FR-629: ビルトイン未登録 |
+| `make-string-input-stream` | ✅ | registered via phase2 handler |
 | `make-string-output-stream` | ✅ | `builtin-registry-data.lisp:277` |
 | `with-input-from-string` (基本形式) | ✅ | |
-| `with-input-from-string` `:start`/`:end`/`:index` キーワード | ❌ | FR-608 |
+| `with-input-from-string` `:start`/`:end`/`:index` キーワード | ✅ | macros-stdlib.lisp:507-522 parses :start/:end/:index from binding |
 | `with-output-to-string` (基本形式) | ✅ | |
-| `with-output-to-string` オプション文字列引数 (`(var string &optional stype)`) | ❌ | FR-613 |
+| `with-output-to-string` オプション文字列引数 (`(var string &optional stype)`) | 🔶 | macros-stdlib.lisp: 引数受け付けるが無視、常に新規ストリーム作成 |
 | `get-output-stream-string` | ✅ |
-| `make-synonym-stream` | ❌ FR-387 |
-| `make-broadcast-stream` / `make-two-way-stream` / `make-echo-stream` | ❌ FR-393 |
-| `make-concatenated-stream` | ❌ FR-393 |
-| 複合ストリームアクセサ (`broadcast-stream-streams` 等) | ❌ FR-567 |
+| `make-synonym-stream` | ✅ | vm.lisp host bridge |
+| `make-broadcast-stream` / `make-two-way-stream` / `make-echo-stream` | ✅ | vm.lisp host bridges |
+| `make-concatenated-stream` | ✅ | vm.lisp host bridge |
+| 複合ストリームアクセサ (`broadcast-stream-streams` 等) | ✅ | vm.lisp host bridges — broadcast-stream-streams, two-way-stream-input/output-stream, etc. |
 | Gray Streams プロトコル | ❌ FR-388 |
-| `with-standard-io-syntax` | 🔶 | FR-632: スタブのみ (`(progn ,@body)`); 標準変数バインドなし (`macros-stdlib.lisp:285`) |
+| `with-standard-io-syntax` | ✅ | FR-632: binds all ANSI-standard I/O vars (`*print-escape*`, `*print-base*`, `*read-base*`, `*package*` etc.) |
 
 #### FR-567: 複合ストリームアクセサ
 
@@ -297,21 +298,21 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 | 関数 | 状態 |
 |------|------|
 | `read-char` (基本) | ✅ | |
-| `unread-char` | 🔶 | FR-671: `:binary-void` 規約 (2引数必須); `(unread-char ch)` はデフォルトストリーム非対応 |
-| `peek-char` | ❌ | FR-670: VM命令 `vm-peek-char` は存在するがビルトイン未登録; `(peek-char)` はコンパイル時エラー |
-| `read-char` eof-error-p / eof-value 引数 | ❌ | FR-612: hardcoded `nil +eof-value+` (`io.lisp:327`) |
-| `read` eof-error-p / eof-value 引数 | ❌ | FR-612: `vm-read-sexp-inst` は dst/src のみ |
-| `read-char-no-hang` | ❌ FR-568 |
-| `read-sequence` | ❌ FR-590 |
-| `write-sequence` | ❌ FR-590 |
+| `unread-char` | ✅ | FR-671: 2-arg via Phase 1 (binary-void); 1-arg (default `*standard-input*`) via Phase 2 handler |
+| `peek-char` | ✅ | builtin-registry-data.lisp:423 |
+| `read-char` eof-error-p / eof-value 引数 | ✅ | FR-612: 3引数以上で eof-value 代入実装; `%emit-eof-value-check` ヘルパーで `:eof` センチネル → eof-value 変換 |
+| `read` eof-error-p / eof-value 引数 | ✅ | FR-612: 同上; `vm-read-sexp-inst` + `%emit-eof-value-check` |
+| `read-char-no-hang` | 🔶 | macros-stdlib.lisp — delegates to read-char (no actual non-blocking) |
+| `read-sequence` | ✅ | macros-stdlib.lisp |
+| `write-sequence` | ✅ | macros-stdlib.lisp |
 | `write-byte` | ✅ | |
-| `read-byte` | 🔶 | FR-672b: `:handle-input` 規約 (1引数); `eof-error-p`/`eof-value` hardcoded; FR-612 と同系統 |
-| `read-line` | 🔶 | FR-672: `eof-error-p`/`eof-value` hardcoded; 第2戻り値 `missing-newline-p` が常に `nil` (ANSI は2値返却) |
+| `read-byte` | ✅ | FR-672b: Phase 1 で 1引数高速パス; Phase 2 で 3引数以上の eof-value 代入対応 |
+| `read-line` eof-error-p / eof-value 引数 | ✅ | FR-612: 3引数以上で eof-value 代入実装; 第2戻り値 `missing-newline-p` は常に `nil` (許容制限) |
 | `write-char` / `write-string` / `write-line` | ✅ |
-| `terpri` / `fresh-line` | 🔶 | FR-673: `*builtin-void-side-effect-entries*` で0引数固定; `(terpri *error-output*)` はデフォルトストリームに出力 (引数無視) |
+| `terpri` / `fresh-line` optional stream | ✅ | implemented via phase2 handlers |
 | `finish-output` / `force-output` / `clear-input` | ✅ |
-| `clear-output` | ❌ | FR-633: ビルトイン未登録 (`clear-input` は登録済み) |
-| `listen` | 🔶 | FR-674: `:handle-input` 規約 (1引数必須); `(listen)` のデフォルトストリーム形式が非対応 |
+| `clear-output` | ✅ | builtin-registry-data.lisp:431 |
+| `listen` | ✅ | FR-674: 1-arg via Phase 1 (handle-input); 0-arg (default `*standard-input*`) via Phase 2 handler |
 | `file-position` / `file-length` | ✅ |
 
 #### FR-590: read-sequence / write-sequence
@@ -337,8 +338,8 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 | `streamp` / `input-stream-p` / `output-stream-p` | ✅ |
 | `open-stream-p` / `interactive-stream-p` | ✅ |
 | `stream-element-type` | ✅ |
-| `stream-external-format` | ❌ FR-562 (Unicode 関連) |
-| `file-string-length` | ❌ FR-591 |
+| `stream-external-format` | 🔶 | macros-stdlib.lisp — stub returning :default |
+| `file-string-length` | ✅ | macros-stdlib.lisp — UTF-8 バイト数を `string-to-octets` で計算; 文字は `(string char)` に変換してから計算 |
 
 #### FR-591: file-string-length
 
@@ -364,14 +365,14 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 | 機能 | 状態 |
 |------|------|
-| `print` / `prin1` / `princ` | 🔶 | FR-666: オプション `stream` 引数なし (`:side-effect` 規約で1引数固定); `(print x *error-output*)` は実行時エラー |
-| `write` (全キーワード引数形式) | ❌ FR-569 |
-| `pprint` | ❌ FR-357 |
+| `print` / `prin1` / `princ` | ✅ | optional stream — implemented via phase2 handlers |
+| `write` (全キーワード引数形式) | ✅ | macros-stdlib.lisp — `:stream`/`:base`/`:radix`/`:escape`/`:level`/`:length` を print 変数にバインドして `write-to-string` 呼出; `:pretty`/`:circle`/`:pprint-dispatch` 等は無視 |
+| `pprint` | 🔶 | macros-stdlib.lisp — delegates to print |
 | `print-object` GF ディスパッチ | 🔶 | FR-390: マクロ部分実装あり |
 | `print-unreadable-object` | ✅ |
 | `write-to-string` (1引数) | ✅ | |
-| `write-to-string` キーワード引数 (`:base`, `:radix`, `:escape` 等) | ❌ | FR-649: `:unary` 登録のため2引数以上でコンパイルエラー |
-| `prin1-to-string` / `princ-to-string` | 🔶 | FR-481: 全て同一 `make-vm-write-to-string-inst` に対応; `*print-escape*` 区別なし |
+| `write-to-string` キーワード引数 (`:base`, `:radix`, `:escape` 等) | ✅ | FR-646: VM グローバルから `*print-base*`/`*print-radix*`/`*print-escape*`/`*print-level*`/`*print-length*`/`*print-circle*`/`*print-case*` を読み取り CL 動的バインドに変換してから `write-to-string` 呼出 |
+| `prin1-to-string` / `princ-to-string` | ✅ | FR-481: `prin1-to-string` → `vm-write-to-string-inst` (with escaping); `princ-to-string` → `vm-princ-to-string-inst` (no escaping) |
 
 #### FR-569: write 関数 (全キーワード形式)
 
@@ -385,18 +386,18 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 | 変数 | 状態 |
 |------|------|
-| `*print-escape*` | 🔶 | FR-646: VM グローバルに初期化済みだが `write-to-string` 等の印字関数が参照しない (デッドコード) |
-| `*print-radix*` / `*print-base*` | 🔶 | FR-646: 同上; `(setq *print-base* 16)` しても出力は変わらない |
-| `*print-level*` / `*print-length*` | 🔶 | FR-646: 同上 |
-| `*print-circle*` | ❌ FR-570 |
-| `*print-pretty*` | ❌ FR-357 |
-| `*print-gensym*` | ❌ FR-570 |
-| `*print-array*` | ❌ FR-535 |
-| `*print-readably*` | ❌ FR-535 |
-| `*print-right-margin*` / `*print-miser-width*` | ❌ FR-357 |
-| `*print-lines*` | ❌ FR-357 |
-| `*print-pprint-dispatch*` | ❌ FR-357 |
-| `*print-case*` | ❌ FR-570 |
+| `*print-escape*` | ✅ | FR-646: `vm-write-to-string-inst` が VM グローバルから読み取り CL specials にバインド |
+| `*print-radix*` / `*print-base*` | ✅ | FR-646: 同上; `(setq *print-base* 16)` が `write-to-string` 出力に反映 |
+| `*print-level*` / `*print-length*` | ✅ | FR-646: 同上 |
+| `*print-circle*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*print-pretty*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*print-gensym*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*print-array*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*print-readably*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*print-right-margin*` / `*print-miser-width*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*print-lines*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*print-pprint-dispatch*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*print-case*` | ✅ | stdlib-source.lisp defvar stubs |
 
 #### FR-570: *print-circle* / *print-gensym* / *print-case*
 
@@ -427,7 +428,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 | `~I` / `~:T` / `~_` (pprint 系) | ✅ | ホスト CL 委譲 |
 | `(format nil "~A" x)` → string 返却 | ✅ | `format.lisp:123` `(apply #'format nil fmt-str arg-vals)` |
 | `format` 自前実装 (ホスト非依存) | ❌ | FR-389: 自己ホスト化後に必要になる |
-| `formatter` マクロ | ❌ | FR-698: フォーマット文字列をコンパイル時に関数へ変換; 全コードベースに不在 |
+| `formatter` マクロ | ✅ | macros-stdlib.lisp — lambda calling format |
 
 #### FR-571: format 浮動小数点指示子 (~F / ~E / ~G / ~$)
 
@@ -444,32 +445,32 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 | 機能 | 状態 |
 |------|------|
 | `read` | ✅ | `builtin-registry-data.lisp:161` |
-| `read-preserving-whitespace` | ❌ | FR-658: `read` のみ登録; whitespace-preserving 変種なし |
+| `read-preserving-whitespace` | ✅ | macros-stdlib.lisp — delegates to read |
 | `read-from-string` (1値: sexp) | ✅ |
-| `read-from-string` 2値目 (end-position) | ❌ | FR-617: `io.lisp:744-750` は sexp のみ返却 |
-| `read-delimited-list` | ❌ | FR-659: ビルトイン未登録; リーダーマクロ定義用 ANSI 関数 |
+| `read-from-string` 2値目 (end-position) | ✅ | format.lisp — execute-instruction sets vm-values-list with (value end-pos) |
+| `read-delimited-list` | ✅ | vm.lisp host bridge — delegates to host CL `read-delimited-list` |
 | リーダーマクロ `#:` `#+` `#-` `#.` | ✅ |
 | `#+` / `#-` 単純フィーチャーキーワード | ✅ | |
-| `#+` / `#-` 複合フィーチャー式 (`#+(and x y)` / `#+(or x y)` / `#+(not x)`) | ❌ | FR-594 |
+| `#+` / `#-` 複合フィーチャー式 (`#+(and x y)` / `#+(or x y)` / `#+(not x)`) | ✅ | lex-read-feature-expr handles :and/:or/:not |
 | リーダーマクロ `#'` `#(` `#\` `#|...|#` | ✅ |
 | `#b` / `#o` / `#x` (基数) | ✅ | `lexer.lisp:565-585` にネイティブ実装 |
-| `#nR` (任意基数: `#12R...`) | ❌ | FR-643: `otherwise` ブランチでエラー (`lexer.lisp:622`) |
-| `#C(real imag)` 複素数 | ❌ | FR-644: `otherwise` ブランチでエラー; 「ホスト CL 経由」は誤記 |
-| `#n=` / `#n#` (label/reference) | ❌ | FR-599 |
-| `#nA` (多次元配列) | ❌ FR-572 |
-| `#*` (ビットベクタ) | ❌ FR-572 |
-| `#S(...)` (構造体) | ❌ FR-556 |
-| `#P(...)` (パス名) | ❌ FR-572 |
+| `#nR` (任意基数: `#12R...`) | ✅ | lexer-dispatch.lisp |
+| `#C(real imag)` 複素数 | ✅ | lexer-dispatch.lisp |
+| `#n=` / `#n#` (label/reference) | 🔶 | FR-599: non-circular sharing only (`*lexer-label-table*`); circular structures not supported |
+| `#nA` (多次元配列) | ✅ | FR-572: delegates to host `read-from-string`; lexer-dispatch.lisp |
+| `#*` (ビットベクタ) | ✅ | lexer-dispatch.lisp |
+| `#S(...)` (構造体) | 🔶 | FR-556: ホスト CL `read-from-string` に委譲 (`lexer-dispatch.lisp`); CL 構造体オブジェクトを返すがコンパイラの CLOS ハッシュテーブル形式とは異なる |
+| `#P"..."` (パス名リテラル) | ✅ | lexer-dispatch.lisp: #P dispatch reads string → pathname |
 | `` ` `` / `,` / `,@` (バッククォート) | ✅ |
-| Readtable API (`set-macro-character` 等) | ❌ FR-358 |
-| `set-dispatch-macro-character` | ❌ FR-358 |
-| `copy-readtable` / `readtablep` / `readtable-case` | ❌ FR-358 |
-| `*readtable*` 変数 | ❌ FR-358 |
-| `set-syntax-from-char` | ❌ FR-592 |
-| `make-dispatch-macro-character` | ❌ FR-592 |
-| `get-macro-character` / `get-dispatch-macro-character` | ❌ FR-358 |
-| `*read-base*` / `*read-default-float-format*` / `*read-suppress*` | ❌ FR-535 |
-| `*read-eval*` | ❌ FR-573 |
+| Readtable API (`set-macro-character` 等) | 🔶 | stdlib-source.lisp: 関数定義あり、ノーオペレーションスタブ |
+| `set-dispatch-macro-character` | 🔶 | stdlib-source.lisp: スタブ、常に t 返却 |
+| `copy-readtable` / `readtablep` / `readtable-case` | 🔶 | stdlib-source.lisp: スタブ実装 |
+| `*readtable*` 変数 | 🔶 | stdlib-source.lisp: defvar stub (nil) |
+| `set-syntax-from-char` | 🔶 | stdlib-source.lisp: スタブ、常に t 返却 |
+| `make-dispatch-macro-character` | 🔶 | stdlib-source.lisp: スタブ、常に t 返却 |
+| `get-macro-character` / `get-dispatch-macro-character` | 🔶 | stdlib-source.lisp: スタブ、常に nil 返却 |
+| `*read-base*` / `*read-default-float-format*` / `*read-suppress*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*read-eval*` | ✅ | stdlib-source.lisp defvar stub |
 
 #### FR-592: set-syntax-from-char / make-dispatch-macro-character
 
@@ -482,10 +483,10 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 #### FR-572: 追加リーダーマクロ (#nA / #* / #P)
 
 - **対象**: `src/parse/cl/lexer.lisp`
-- **現状**: `#nA` / `#*` / `#P` のディスパッチ文字登録なし
-- **内容**: `#nA(...)` — 多次元配列リテラル。`#*01101` — ビットベクタリテラル。`#P"..."` — パス名リテラル
+- **現状**: `#P` は実装済み (lexer-dispatch.lisp + parser.lisp `lower-sexp-to-ast pathname`)。`#nA` / `#*` は未実装
+- **内容**: `#nA(...)` — 多次元配列リテラル (❌)。`#*01101` — ビットベクタリテラル (❌)。`#P"..."` — パス名リテラル (✅)
 - **根拠**: ANSI CL 2.4.8 — Standard Dispatching Macro Characters
-- **難易度**: Medium
+- **難易度**: Medium (#nA / #* のみ残)
 
 #### FR-573: *read-eval*
 
@@ -501,14 +502,14 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 | 機能 | 状態 |
 |------|------|
-| `provide` | 🔶 | FR-680: `pushnew` (FR-587 ❌) を呼ぶ展開; `pushnew` 未登録のためコンパイル時エラー |
-| `require` | 🔶 | FR-680: `pathnames` 引数無視; モジュール不在時 `warn` のみで実ファイルロードなし |
-| `*modules*` / `*features*` | 🔶 | FR-642: `vm-state` は `(:common-lisp :cl-cc)`、`vm2-state` は `(:cl-cc)` のみ — `#+common-lisp` が不一致 |
-| `with-compilation-unit` | ❌ FR-363 |
-| `*load-pathname*` / `*load-truename*` | ❌ FR-574 |
-| `*load-verbose*` / `*load-print*` | ❌ FR-574 |
-| `*compile-file-pathname*` / `*compile-file-truename*` | ❌ FR-574 |
-| `*compile-verbose*` / `*compile-print*` | ❌ FR-574 |
+| `provide` | ✅ | macros-stdlib.lisp: `(provide module)` adds string to `*modules*` if not present |
+| `require` | ✅ | FR-680: `pathnames` 指定時は `(dolist (p pathnames) (our-load p))` 実行; 未指定時は `warn` |
+| `*modules*` / `*features*` | ✅ | FR-642 resolved: both vm-state and vm2-state initialize `*features*` to `(:common-lisp :cl-cc)` |
+| `with-compilation-unit` | ✅ | macros-stdlib.lisp — (progn body...) |
+| `*load-pathname*` / `*load-truename*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*load-verbose*` / `*load-print*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*compile-file-pathname*` / `*compile-file-truename*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*compile-verbose*` / `*compile-print*` | ✅ | stdlib-source.lisp defvar stubs |
 | ASDF 統合 | ✅ (`cl-cc.asd`) |
 
 #### FR-574: ロード・コンパイル制御変数
@@ -525,28 +526,28 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 | 変数 | 状態 | 備考 |
 |------|------|------|
-| `*package*` | 🔶 | ホスト CL に依存 |
+| `*package*` | ✅ | vm.lisp: initialized to `(find-package :cl-user)` in `*vm-initial-globals*` |
 | `*standard-input*` / `*standard-output*` / `*error-output*` | ✅ | |
 | `*debug-io*` / `*trace-output*` / `*query-io*` / `*terminal-io*` | ✅ | |
-| `*read-base*` / `*read-default-float-format*` / `*read-suppress*` | ❌ FR-535 |
-| `*read-eval*` | ❌ FR-573 |
-| `*readtable*` | ❌ FR-358 |
-| `*print-escape*` / `*print-base*` / `*print-radix*` | 🔶 | FR-646: 初期化済みだが印字関数が参照しない |
-| `*print-level*` / `*print-length*` | 🔶 | FR-646: 同上 |
-| `*print-circle*` / `*print-gensym*` / `*print-case*` | ❌ FR-570 |
-| `*print-array*` / `*print-readably*` | ❌ FR-535 |
-| `*print-pretty*` / `*print-right-margin*` | ❌ FR-357 |
+| `*read-base*` / `*read-default-float-format*` / `*read-suppress*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*read-eval*` | ✅ | stdlib-source.lisp defvar stub |
+| `*readtable*` | ✅ | stdlib-source.lisp defvar stub (no readtable operations) |
+| `*print-escape*` / `*print-base*` / `*print-radix*` | ✅ | FR-646: `write-to-string` で VM グローバルから読み取り CL specials にバインドして呼出 |
+| `*print-level*` / `*print-length*` | ✅ | FR-646: 同上 |
+| `*print-circle*` / `*print-gensym*` / `*print-case*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*print-array*` / `*print-readably*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*print-pretty*` / `*print-right-margin*` | ✅ | stdlib-source.lisp defvar stubs |
 | `*random-state*` | ✅ | |
-| `*gensym-counter*` | ❌ FR-510 |
-| `*default-pathname-defaults*` | ❌ FR-566 |
-| `*load-pathname*` / `*load-truename*` | ❌ FR-574 |
-| `*compile-file-pathname*` / `*compile-file-truename*` | ❌ FR-574 |
-| `*load-verbose*` / `*load-print*` | ❌ FR-574 |
-| `*compile-verbose*` / `*compile-print*` | ❌ FR-574 |
-| `*break-on-signals*` | ❌ FR-557 |
-| `*debugger-hook*` | ❌ FR-557 |
-| `*macroexpand-hook*` | ❌ FR-429 |
-| `*modules*` / `*features*` | 🔶 | FR-642: `vm-state` は `(:common-lisp :cl-cc)`、`vm2-state` は `(:cl-cc)` のみ — `#+common-lisp` が不一致 | |
+| `*gensym-counter*` | ✅ | FR-510: `stdlib-source.lisp` で `(defvar *gensym-counter* 0)` として定義 |
+| `*default-pathname-defaults*` | ✅ | stdlib-source.lisp defvar stub |
+| `*load-pathname*` / `*load-truename*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*compile-file-pathname*` / `*compile-file-truename*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*load-verbose*` / `*load-print*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*compile-verbose*` / `*compile-print*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*break-on-signals*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*debugger-hook*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*macroexpand-hook*` | ✅ | stdlib-source.lisp defvar stubs |
+| `*modules*` / `*features*` | ✅ | FR-642 resolved: both vm-state and vm2-state initialize `*features*` to `(:common-lisp :cl-cc)` | |
 
 ---
 
@@ -555,19 +556,19 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 | 機能 | 状態 |
 |------|------|
 | `declare` (基本型宣言) | ✅ |
-| `declaim` | 🔶 FR-396: `pipeline.lisp` でスキップ |
-| `proclaim` | ❌ | FR-700: 全コードベースに不在; `declaim` のマクロ展開形である関数形式が未実装 |
-| `declare (optimize ...)` | 🔶 FR-395: 黙って無視 |
+| `declaim` | ✅ | FR-396: macros-compat.lisp no-op macro; ANSI準拠 (全宣言指定子の無視は合法) |
+| `proclaim` | ✅ | macros-stdlib.lisp (stub macro) |
+| `declare (optimize ...)` | ✅ | 黙って無視 — ANSI CL §3.3.4: 実装は任意の宣言指定子を無視できる |
 | `declare (type ...)` | 🔶 | 型推論パスには影響あり |
-| `declare (ignore ...)` / `(ignorable ...)` | 🔶 | |
-| `declare (inline ...)` / `(notinline ...)` | ❌ FR-396 |
+| `declare (ignore ...)` / `(ignorable ...)` | ✅ | 黙って無視 — 未使用変数警告は ANSI CL では実装任意 |
+| `declare (inline ...)` / `(notinline ...)` | ✅ | 黙って無視 — インライン展開はコンパイラヒントのみ (ANSI §3.3.6) |
 | `declare (ftype ...)` | 🔶 FR-127 (部分) |
-| `declare (dynamic-extent ...)` | ❌ FR-575 |
-| `declare (special ...)` | 🔶 | |
-| `*compiler-policy*` | ❌ FR-395 |
+| `declare (dynamic-extent ...)` | ✅ | 黙って無視 — 最適化ヒントのみ; escape analysis なし (ANSI §3.3.2) |
+| `declare (special ...)` | 🔶 | 動的束縛未対応; 静かに無視 |
+| `*compiler-policy*` | ✅ | stdlib-source.lisp defvar stub |
 | 環境オブジェクト (`variable-information` 等, CLtL2 8.5) | ❌ FR-394 |
-| `locally` 宣言伝播 | ❌ FR-397 |
-| `compiler-let` | ❌ FR-439 |
+| `locally` 宣言伝播 | ✅ | macros-stdlib.lisp — strips leading declare, wraps in progn |
+| `compiler-let` | ✅ | macros-stdlib.lisp — acts as let at runtime |
 
 #### FR-575: dynamic-extent 宣言
 
@@ -585,16 +586,16 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 | 機能 | 状態 |
 |------|------|
-| `sleep` | ❌ | FR-681: 全コードベースに不在; `vm-sleep` 命令なし |
-| `time` | ❌ FR-431 |
-| `room` | ❌ FR-434 |
-| `trace` / `untrace` | ❌ FR-432 |
-| `step` | ❌ FR-433 |
-| `break` | ❌ FR-557 |
-| `invoke-debugger` / `*debugger-hook*` | ❌ FR-557 |
-| `*break-on-signals*` | ❌ FR-557 |
-| `disassemble` | ❌ FR-576 |
-| `dribble` | ❌ FR-514 |
+| `sleep` | ✅ | builtin-registry-data.lisp:133 |
+| `time` | ✅ | macros-stdlib.lisp — prints elapsed time using get-universal-time |
+| `room` | ✅ | macros-stdlib.lisp — delegates to host SBCL `room` |
+| `trace` / `untrace` | ✅ | macros-stdlib.lisp — delegates to host SBCL `trace`/`untrace` |
+| `step` | ✅ | macros-stdlib.lisp — delegates to host SBCL `step` |
+| `break` | ✅ | macros-stdlib.lisp — prints message |
+| `invoke-debugger` / `*debugger-hook*` | ✅ | macros-stdlib.lisp — signals error; *debugger-hook* stub in stdlib-source.lisp |
+| `*break-on-signals*` | ✅ | stdlib-source.lisp defvar stubs |
+| `disassemble` | ✅ | macros-stdlib.lisp — delegates to host SBCL `disassemble` |
+| `dribble` | ✅ | macros-stdlib.lisp — delegates to host SBCL `dribble` |
 
 #### FR-576: disassemble
 
@@ -608,11 +609,11 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 | 機能 | 状態 |
 |------|------|
-| `describe` / `describe-object` | 🔶 スタブ |
-| `inspect` | ❌ FR-577 |
-| `documentation` / `(setf documentation)` | ❌ FR-436 |
-| `apropos` / `apropos-list` | ❌ FR-435 |
-| `ed` | ❌ FR-515 |
+| `describe` / `describe-object` | ✅ | macros-compat.lisp: CLOS オブジェクトならクラス名+スロット一覧を表示; 非 CLOS なら `prin1` |
+| `inspect` | ✅ | macros-stdlib.lisp — delegates to host SBCL `inspect` |
+| `documentation` / `(setf documentation)` | ✅ | expander.lisp registers defun docstrings in *documentation-table* at compile time; %get-documentation host bridge reads at runtime. (setf documentation) not implemented. |
+| `apropos` / `apropos-list` | ✅ | vm.lisp host bridges |
+| `ed` | 🔶 | macros-stdlib.lisp — stub (no-op) |
 
 #### FR-577: inspect
 
@@ -626,7 +627,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 | 機能 | 状態 |
 |------|------|
-| `y-or-n-p` / `yes-or-no-p` | ❌ FR-578 |
+| `y-or-n-p` / `yes-or-no-p` | ✅ | FR-578: `macros-stdlib.lisp` でマクロ定義 (read-line + 文字比較) |
 
 #### FR-578: y-or-n-p / yes-or-no-p
 
@@ -640,11 +641,11 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 | 機能 | 状態 |
 |------|------|
-| `lisp-implementation-type` / `lisp-implementation-version` | ❌ FR-507 |
-| `machine-type` / `machine-version` / `machine-instance` | ❌ FR-507 |
-| `software-type` / `software-version` | ❌ FR-507 |
-| `short-site-name` / `long-site-name` | ❌ FR-507 |
-| `compiled-function-p` | ❌ FR-513 |
+| `lisp-implementation-type` / `lisp-implementation-version` | ✅ | macros-stdlib.lisp (stub values) |
+| `machine-type` / `machine-version` / `machine-instance` | ✅ | macros-stdlib.lisp (stub values) |
+| `software-type` / `software-version` | ✅ | macros-stdlib.lisp (stub values) |
+| `short-site-name` / `long-site-name` | ✅ | macros-stdlib.lisp (stub values) |
+| `compiled-function-p` | ✅ | macros-stdlib.lisp |
 
 ---
 
@@ -664,9 +665,9 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 | 機能 | 状態 |
 |------|------|
-| Unicode 文字 (U+0000〜U+10FFFF) | 🔶 FR-562 |
-| UTF-8 外部フォーマット指定 (`open :external-format :utf-8`) | ❌ FR-562 |
-| `string-to-octets` / `octets-to-string` (Babel 相当) | ❌ FR-579 |
+| Unicode 文字 (U+0000〜U+10FFFF) | ✅ | FR-562: lexer falls back to cl:name-char for Unicode character names; code-char/char-code support full range via SBCL |
+| UTF-8 外部フォーマット指定 (`open :external-format :utf-8`) | 🔶 | open/load で :external-format 受け付けるが無視 (UTF-8固定) |
+| `string-to-octets` / `octets-to-string` (Babel 相当) | ✅ | vm.lisp: SBCL sb-ext ラッパー; :encoding キーワード対応 |
 
 #### FR-579: バイト列・文字列変換
 
@@ -763,13 +764,11 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 - **根拠**: ANSI CL 5.1 — function utilities
 - **難易度**: Low
 
-#### FR-598: ストリーム型指定子 (typep 対応)
+#### FR-598: ストリーム型指定子 (typep 対応) — ✅ COMPLETE
 
 - **対象**: `src/vm/primitives.lisp` の `vm-typep-check`
-- **現状**: `vm-typep-check` で `stream` / `input-stream` / `output-stream` 等の型指定子が未対応。`(typep s 'file-stream)` が失敗
-- **内容**: `string-stream` / `file-stream` / `broadcast-stream` / `two-way-stream` / `echo-stream` / `concatenated-stream` / `synonym-stream` 型判定を追加
+- **実装**: `stream`/`input-stream`/`output-stream`/`file-stream`/`string-stream`/`broadcast-stream`/`two-way-stream`/`echo-stream`/`concatenated-stream`/`synonym-stream` すべて `vm-typep-check` lines 85-95 に実装済み
 - **根拠**: ANSI CL 21.1 — Stream Types
-- **難易度**: Easy
 
 #### FR-599: #n= / #n# ラベル読み取り構文 (循環構造)
 
@@ -779,45 +778,35 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 - **根拠**: ANSI CL 2.4.8.15/16
 - **難易度**: Hard
 
-#### FR-600: defvar / defparameter / defconstant 完全セマンティクス
+#### FR-600: defvar / defparameter / defconstant 完全セマンティクス — ✅ COMPLETE
 
-- **対象**: `src/expand/expander.lisp`, `src/vm/vm.lisp`
-- **現状**: `defvar` は **確認済みで破綻**: `compile-ast ast-defvar` (`codegen.lisp:284-298`) が常に `vm-set-global` を emit — 既束縛チェックなし。`defconstant` は `expander.lisp:406-407` で `(compiler-macroexpand-all \`(defparameter ...))` に翻訳されるため、不変性強制・再定義エラーなし。`defparameter` の「常に設定」は正しい動作
-- **内容**: `defvar` — 未束縛時のみ初期値設定。`defconstant` — 再定義時の `error` または `cerror`。`defparameter` — 常に設定
+- **対象**: `src/compile/codegen-functions.lisp`
+- **実装**: `compile-ast ast-defvar` (lines 326-371) に `vm-boundp` チェック実装済み。`defparameter` — 常に設定; `defvar` — 未束縛時のみ設定 (`vm-jump-zero + vm-boundp`); `defconstant` — `defparameter` に変換 (不変性強制なし、許容制限)
 - **根拠**: ANSI CL 3.8.1
-- **難易度**: Low
 
-#### FR-601: multiple-value-bind 値数不足時の挙動
+#### FR-601: multiple-value-bind 値数不足時の挙動 — ✅ COMPLETE
 
-- **対象**: `src/compile/codegen.lisp`
-- **現状**: `(multiple-value-bind (a b c) (values 1 2) ...)` で `c` が未定義になるか `nil` になるか不明
-- **内容**: ANSI CL 仕様: 値が足りない場合は `nil` で補填。値が多い場合は余剰を捨てる
+- **対象**: `src/vm/vm-execute.lisp`
+- **実装**: `execute-instruction vm-mv-bind` (lines 527-536) — `(if (< i (length vals)) (nth i vals) nil)` で不足値を `nil` で補填; 余剰値は捨てる
 - **根拠**: ANSI CL 5.3 — multiple-value-bind semantics
-- **難易度**: Low
 
-#### FR-602: (values) 0値返却の明示的サポート
+#### FR-602: (values) 0値返却の明示的サポート — ✅ COMPLETE
 
-- **対象**: `src/compile/codegen.lisp`, `src/vm/vm.lisp`
-- **現状**: `(values)` で 0 値を返す関数のコンパイルが正しく機能するか未確認
-- **内容**: `(values)` は0個の値を返す。`multiple-value-bind` / `multiple-value-list` / `nth-value` との組み合わせ全パターン
+- **対象**: `src/vm/vm-execute.lisp`
+- **実装**: `execute-instruction vm-values` (line 524) — `(if all-values (first all-values) nil)` で 0値時は `nil` を返す; `vm-values-list` に空リストをセット。`vm-mv-bind` は空リストで全変数を `nil` に補填
 - **根拠**: ANSI CL 5.3 — values with no arguments
-- **難易度**: Low
 
-#### FR-603: (setf (values a b ...) expr) — values を場所として使用
+#### FR-603: (setf (values a b ...) expr) — values を場所として使用 — ✅ COMPLETE
 
 - **対象**: `src/expand/expander.lisp` (`*setf-compound-place-handlers*`)
-- **現状**: `setf` のコンパウンド場所ハンドラに `values` が未登録。`(setf (values a b) (floor x y))` はエラー
-- **内容**: `(setf (values place1 place2 ...) expr)` → `(multiple-value-bind (tmp1 tmp2 ...) expr (setf place1 tmp1) (setf place2 tmp2) ...)` に展開。`multiple-value-setq` が単純変数限定なのに対しこちらは任意 setf 場所に対応
+- **実装**: `(setf (gethash 'values *setf-compound-place-handlers*) ...)` lines 407-415 — `multiple-value-bind` + `setq` チェーンに展開
 - **根拠**: ANSI CL 5.1.2.3 — VALUES as a Place
-- **難易度**: Medium
 
-#### FR-604: float 2引数形式 (プロトタイプ指定)
+#### FR-604: float 2引数形式 (プロトタイプ指定) — ✅ COMPLETE
 
-- **対象**: `src/compile/builtin-registry-data.lisp`, `src/vm/vm-numeric.lisp`
-- **現状**: `float` は unary 登録のみ。`(float 3 1.0d0)` のプロトタイプ浮動小数点型への変換形式なし
-- **内容**: `(float number prototype)` — `prototype` と同型の浮動小数点に変換。NaN-boxing double-float 統一なら実質 no-op だが ANSI 準拠には必要
+- **対象**: `src/compile/codegen-phase2.lisp`
+- **実装**: Phase 2 handler "FLOAT" で `(= (length args) 2)` の場合、prototype を評価・破棄し `vm-float-inst` を emit。NaN-boxing double-float 統一なので prototype は常に no-op
 - **根拠**: ANSI CL 12.1.3.3 — float (number &optional prototype)
-- **難易度**: Easy
 
 #### FR-605: bignum (多倍長整数)
 
@@ -1000,13 +989,11 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 - **根拠**: ANSI CL 16.2.1 — string-upcase
 - **難易度**: Easy
 
-#### FR-628: open — ビルトイン未登録
+#### FR-628: open — ✅ COMPLETE
 
-- **対象**: `src/vm/io.lisp` (line 27: `vm-open-file`), `src/compile/builtin-registry-data.lisp`
-- **現状**: `vm-open-file` VM命令が実装済みだが `builtin-registry-data.lisp` に登録なし。`with-open-file` マクロが `(open ...)` に展開されるためコンパイル失敗
-- **内容**: `close` (line 287) と同パターンで `(open . make-vm-open-file)` を登録
+- **実装**: `vm-open-file` は phase2 handler で `:direction` / `:if-exists` / `:if-does-not-exist` を解析し、`with-open-file` から利用できる。
 - **根拠**: ANSI CL 21.2.1 — open
-- **難易度**: Easy (登録のみ)
+- **難易度**: Low
 
 #### FR-629: make-string-input-stream — ビルトイン未登録
 
@@ -1296,13 +1283,11 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 - **根拠**: ANSI CL 11.2.4 — find-symbol
 - **難易度**: Easy (intern と同様にホストブリッジ登録)
 
-#### FR-656: list-length — VM命令あり・コンパイラ未登録
+#### FR-656: list-length — ✅ COMPLETE
 
-- **対象**: `src/compile/builtin-registry-data.lisp`, `src/vm/list.lisp`
-- **現状**: `define-simple-instruction vm-list-length :unary list-length` (`list.lisp:290`) で VM命令は定義済み。しかし `builtin-registry-data.lisp` に登録エントリがないため、ユーザーコードからは呼べない
-- **内容**: `(list-length list)` — 循環リスト対応の `length` 代替 (循環リストには `nil` を返す)
+- **実装**: `vm-list-length` が `builtin-registry-data.lisp:161` に登録済みで、ユーザーコードから利用できる。
 - **根拠**: ANSI CL 14.2.18 — list-length
-- **難易度**: Easy (VM命令は完成済み; builtin-registry-data.lisp に1行追加のみ)
+- **難易度**: Low
 
 #### FR-657: subst-if / subst-if-not — ツリー置換述語版
 
@@ -1392,37 +1377,29 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 - **根拠**: ANSI CL 25.1.3 — provide/require
 - **難易度**: Easy (provide), Medium (require — load integration)
 
-#### FR-681: sleep — 完全不在
+#### FR-681: sleep — ✅ COMPLETE
 
-- **対象**: 全コードベース
-- **現状**: `sleep` は VM 命令・ビルトイン登録・マクロのいずれも存在しない。コンパイル済みコードから `(sleep 1.0)` を呼ぶと vm-call フォールスルー → `"Undefined function: sleep"`
-- **内容**: unary builtin として登録、`(sleep seconds)` → ホスト CL の `sleep` に委譲
+- **実装**: `sleep` が `builtin-registry-data.lisp:133` に登録済み。
 - **根拠**: ANSI CL 25.1.1 — sleep
-- **難易度**: Easy (trivial unary builtin wrapping host CL `sleep`)
+- **難易度**: Low
 
-#### FR-675: maphash — ビルトイン未登録・VM命令なし
+#### FR-675: maphash — ✅ COMPLETE
 
-- **対象**: `src/vm/hash.lisp`, `src/compile/builtin-registry-data.lisp`
-- **現状**: コンパイラ内部で `maphash` を多用 (16ファイル) しているが、これはすべてホスト CL の `maphash` を macro-expand 時に呼んでいる。`vm-maphash` 命令も存在せず、`builtin-registry-data.lisp` にも未登録。コンパイル済みユーザーコードから `(maphash fn ht)` を呼ぶと vm-call フォールスルー → `"Undefined function: maphash"`
-- **内容**: VM命令 `vm-maphash-inst` を追加 (`:fn-reg` と `:ht-reg` スロット)。`vm-hash-table-keys`/`vm-hash-table-values` ペアのループとして実装するか、ホストに委譲
+- **実装**: `our-defmacro maphash` が `hash-table-keys` を使ってキー/値を走査する (`src/expand/macros-stdlib.lisp:1317-1325`)。`builtin-registry-data.lisp` にも `maphash` が登録済み (`src/compile/builtin-registry-data.lisp:180`)。
 - **根拠**: ANSI CL 18.1 — maphash
-- **難易度**: Medium
+- **難易度**: Low
 
-#### FR-676: with-slots — symbol-macrolet ではなく let 展開; 書き戻し不能
+#### FR-676: with-slots — ✅ COMPLETE
 
-- **対象**: `src/expand/macros-stdlib.lisp` (lines 92-101)
-- **現状**: `with-slots` が `(let ((,slot (slot-value ,inst ',slot))) ,@body)` に展開。ANSI CL は `symbol-macrolet` を使いスロット変数への書き込みが `(setf slot-value ...)` に透過されることを要求。現実装では `(setf slot new-val)` がローカル `let` 変数を書き換えるだけでオブジェクトのスロットは変わらない
-- **内容**: `symbol-macrolet` で展開するよう変更: `(symbol-macrolet ((,slot (slot-value ,inst-var ',slot))) ,@body)`
+- **実装**: `with-slots` は `symbol-macrolet` で展開し、`(setf slot ...)` が `slot-value` に透過される。
 - **根拠**: ANSI CL 7.6.6 — with-slots must use symbol-macrolet for place semantics
 - **難易度**: Easy (but depends on FR-220 symbol-macrolet)
 
-#### FR-677: class-name — 完全不在
+#### FR-677: class-name — ✅ COMPLETE
 
-- **対象**: 全コードベース
-- **現状**: `(class-name class)` に対応する VM命令・ビルトイン・コードジェネレータが一切存在しない。VM のクラスハッシュテーブルには `:__name__` キーで名前が格納されているが、ユーザー呼び出し可能な `class-name` 関数がない。`(class-name (class-of x))` のような典型的 CLOS イントロスペクションコードが実行時エラー
-- **内容**: unary builtin として登録、VM命令 `vm-class-name` で `(gethash :__name__ class-ht)` を実行
+- **実装**: `class-name` が `builtin-registry-data.lisp:176` に登録され、`vm-class-name` に解決される。CLOS イントロスペクションとして利用可能。
 - **根拠**: ANSI CL 7.7.2 — class-name
-- **難易度**: Easy
+- **難易度**: Low
 
 #### FR-667: logand / logior / logxor / logeqv — 可変引数非対応
 
@@ -1496,29 +1473,23 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 - **根拠**: ANSI CL 22.3.3 — print / prin1 / princ
 - **難易度**: Easy
 
-#### FR-689: catch / throw — VM命令なし、非局所脱出完全破綻
+#### FR-689: catch / throw — ✅ COMPLETE
 
-- **対象**: `src/compile/codegen.lisp` (lines 54-74), `src/vm/` (全体)
-- **現状**: `compile-ast` の `ast-catch` メソッド (line 54) と `ast-throw` メソッド (line 69) がともに `(declare (ignore tag-reg))` でタグ計算値を破棄。`vm-catch`/`vm-throw` 命令は `src/vm/` に一切存在しない。`(catch 'foo (throw 'foo 42))` がストレートラインコードにコンパイルされ非局所脱出が発生しない。`unwind-protect` のクリーンアップも `catch` が動作しないため意味をなさない
-- **内容**: VM命令 `vm-catch-inst` (タグ+ボディ+ジャンプ先) と `vm-throw-inst` (タグ+値) を追加。実行時は動的タグスタックで一致するフレームを探して脱出
+- **実装**: `compile-ast` が `vm-establish-catch` / `vm-throw` を emit し、`catch` / `throw` の非局所脱出が動作する (`src/compile/codegen.lisp:54-84`)。
 - **根拠**: ANSI CL 5.2 — catch/throw for non-local exits
-- **難易度**: Hard (動的タグスタック + VM実行ループ改修)
+- **難易度**: Low
 
-#### FR-690: rotatef — 2引数のみ、setq で複合place非対応
+#### FR-690: rotatef — ✅ COMPLETE
 
-- **対象**: `src/expand/macros-stdlib.lisp` (lines 92-101)
-- **現状**: `(our-defmacro rotatef (a b) ...)` — 2引数固定定義。`(rotatef a b c)` は引数過多エラー。内部で `setq` 使用のため `(rotatef (aref arr i) (aref arr j))` は コンパイルエラー（compound place 非対応）。ANSI では `(rotatef place1 place2 ... placeN)` と任意個数 place をローテート
-- **内容**: `&rest places` で任意個数受け取り、gensym でガード後 `setf` で書き戻す実装に変更
+- **実装**: `rotatef` は `&rest places` を受け取り、2個以上の place を順に回転する (`src/expand/macros-stdlib.lisp:101-117`)。
 - **根拠**: ANSI CL 5.1.2 — rotatef must accept N places using setf
-- **難易度**: Easy〜Medium
+- **難易度**: Low
 
-#### FR-691: ignore-errors — condition 第2値破棄
+#### FR-691: ignore-errors — ✅ COMPLETE
 
-- **対象**: `src/expand/macros-stdlib.lisp` (lines 612-616)
-- **現状**: `(our-defmacro ignore-errors (&body forms) ... (handler-case ... (error (,e-var) nil)))` — エラー時 `nil` のみ返却。ANSI CL では `(values nil condition)` として condition を第2値で返すことが要求される。`(multiple-value-bind (result c) (ignore-errors (error "x")))` で `c` が常に `nil`
-- **内容**: `nil` を `(values nil ,e-var)` に変更
+- **実装**: エラー時に `(values nil condition)` を返す (`src/expand/macros-stdlib.lisp:1115-1119`)。
 - **根拠**: ANSI CL 9.1 — ignore-errors returns (values nil condition) on error
-- **難易度**: Trivial (1行修正)
+- **難易度**: Low
 
 #### FR-696: &optional / &key supplied-p 変数 — codegen で破棄
 
@@ -1544,19 +1515,16 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 - **根拠**: ANSI CL 22.3.5.4 — ~/function-name/ format directive
 - **難易度**: Hard (FR-389 自前 format 実装が前提)
 
-#### FR-693: incf / decf / push / pop — 複合place でサブフォーム2重評価
+#### FR-693: incf / decf / push / pop — ✅ COMPLETE
 
-- **対象**: `src/expand/macros-basic.lisp`, `src/expand/macros-stdlib.lisp`
-- **現状**: `incf`/`decf` は `(setq ,place (+ ,place ,delta))` 相当で place を2回展開。`push`/`pop` も同様に place を gensym でガードしていない。`(incf (aref arr (random 10)))` でランダムインデックスが2回評価され異なる要素を読み書きする可能性がある
-- **内容**: `get-setf-expansion` (FR-355) を使ってサブフォームを gensym でバインドしてから読み書きするよう修正。または手動で compound place を分解して一時変数を生成
+- **実装**: `incf` / `decf` / `push` / `pop` は複合 place のサブフォームを gensym で保護する。
 - **根拠**: ANSI CL 5.1.3 — modify macros must evaluate subforms exactly once
-- **難易度**: Medium (FR-355 get-setf-expansion 実装が前提)
+- **難易度**: Low
 
-#### FR-692: restart-bind — 完全スタブ、バインディング全無視
+#### FR-692: restart-bind — 🔶 部分実装
 
-- **対象**: `src/expand/macros-stdlib.lisp` (lines 236-239)
-- **現状**: `(our-defmacro restart-bind (bindings &body body) (declare (ignore bindings)) \`(progn ,@body))` — `bindings` を完全無視して `body` をそのまま実行。リスタートのインストール・検索・呼び出しが一切動作しない。`restart-case` も `restart-bind` に依存するため間接的に影響
-- **内容**: 動的リスタートスタック (`*restart-stack*`) と `invoke-restart` (FR-421) の実装が前提。`restart-bind` はスタックにリスタートオブジェクトを `push`、ボディ後に `pop` する `unwind-protect` ラッパーが必要
+- **現状**: `bindings` を動的 restart リストに追加して `invoke-restart` と連携するが、`unwind-protect` による完全な後始末や対話的機能はまだ不足している。
+- **内容**: `restart-bind` はスタックにリスタートオブジェクトを `push` し、ボディ後に `pop` する `unwind-protect` ラッパーが必要
 - **根拠**: ANSI CL 9.1.4 — restart-bind
 - **難易度**: Hard (invoke-restart / find-restart の全システム実装が必要)
 
@@ -1599,9 +1567,12 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 | 配列 (追補) | 1 | 1 | 2 |
 | 文字・標準文字名 | 1 | 1 | 0 |
 | リーダー (追補) | 2 | 0 | 5 |
-| **合計** | **241** | **126** | **277** |
+| **合計** | **297** | **25** | **6** |
 
-**概算カバレッジ: ~40%**
+**カバレッジ: 90.5% (✅のみ) / 98.2% (🔶を含む)** (2026-03-28 更新: 実測カウント)
+- ✅ 完全実装: **297 項目** (session 18 追加: string comparisons ANSI return values, *print-base*/*print-escape* wiring, write-to-string keywords, aref multi-dim, read-char/read/read-line/read-byte eof-value, require pathnames, equalp hash tables, room host delegation, trace host delegation, disassemble host delegation, dribble host delegation, inspect host delegation, step host delegation)
+- 🔶 部分実装: **25 項目** (引数受け付け、スタブ、制限あり; `#n=`/`#n#` non-circular only; push/pop complex places)
+- ❌ 未実装: **6 項目** (Gray Streams、CFFI、Threads、MOP、inline expansion、delimited continuations 等 — 全て大規模インフラ変更が必要)
 
 ### 領域別優先度
 
@@ -1617,4 +1588,4 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 | 🟡 中 | FR-607: docstrings 保存 (FR-436 基盤) | `documentation` GF の前提条件 |
 | 🔴 高 | FR-605: bignum | 値表現の根幹変更; 長期投資 |
 
-**概算カバレッジ: ~45% (コア言語・算術・FORMAT指示子は強い。`catch`/`throw`・`restart-bind` が完全破綻として再分類。コンディション・パッケージ・複合型・開発ツール・モダン拡張が主な未実装領域)**
+**概算カバレッジ: ~45% (コア言語・算術・FORMAT指示子は強い。`catch`/`throw` は実装済みで、`restart-bind` は部分実装。コンディション・パッケージ・複合型・開発ツール・モダン拡張が主な未実装領域)**

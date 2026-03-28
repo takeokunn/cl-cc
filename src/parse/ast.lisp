@@ -88,7 +88,9 @@
 (defstruct (ast-defvar (:include ast-node))
   "Top-level variable definition AST node (defvar/defparameter)."
   (name nil)
-  (value nil))
+  (value nil)
+  (kind 'defparameter)  ; 'defvar or 'defparameter — controls conditional-init semantics
+  )
 
 (defstruct (ast-defmacro (:include ast-node))
   "Top-level macro definition AST node."

@@ -29,6 +29,8 @@
   (dst nil :reader vm-dst)
   (path nil :reader vm-path)
   (direction nil :reader vm-file-direction)
+  (if-exists :supersede :reader vm-if-exists)
+  (if-not-exists nil :reader vm-if-not-exists)
   (:sexp-tag :open-file)
   (:sexp-slots dst path direction))
 
@@ -293,13 +295,15 @@ Handles special cases for stdin (0), stdout (1), and direct CL stream objects."
   (handler-case
       (let* ((path-str (vm-reg-get state (vm-path inst)))
              (direction (vm-file-direction inst))
+             ;; Use user-specified if-exists/if-not-exists, falling back to defaults
+             (if-exists (or (vm-if-exists inst) :supersede))
+             (if-not-exists (or (vm-if-not-exists inst)
+                                (if (eq direction :output) :create :error)))
              (handle (vm-allocate-file-handle state))
              (stream (open path-str
                           :direction direction
-                          :if-exists :supersede
-                          :if-does-not-exist (if (eq direction :output)
-                                                 :create
-                                                 :error))))
+                          :if-exists if-exists
+                          :if-does-not-exist if-not-exists)))
         (setf (gethash handle (vm-open-files state)) stream)
         (vm-reg-set state (vm-dst inst) handle)
         (values (1+ pc) nil nil))
@@ -314,7 +318,7 @@ Handles special cases for stdin (0), stdout (1), and direct CL stream objects."
       ;; Don't close stdin/stdout
       ((or (eql handle +stdin-handle+) (eql handle +stdout-handle+))
        (values (1+ pc) nil nil))
-      ;; Close regular file stream
+      ;; Close regular file stream (integer handle)
       (stream
        (close stream)
        (remhash handle (vm-open-files state))
@@ -322,6 +326,10 @@ Handles special cases for stdin (0), stdout (1), and direct CL stream objects."
       ;; Check string streams
       ((gethash handle (vm-string-streams state))
        (remhash handle (vm-string-streams state))
+       (values (1+ pc) nil nil))
+      ;; Direct CL stream object (from host-bridge make-string-output-stream etc.)
+      ((streamp handle)
+       (close handle)
        (values (1+ pc) nil nil))
       (t
        (error "vm-close-file: Invalid file handle: ~A" handle)))))

@@ -268,15 +268,55 @@ Evaluate BODY immediately for :compile-toplevel; include in output for :execute/
 
 (defun expand-make-array-form (size rest-args)
   "Expand (make-array size &rest keyword-args).
-Promotes to make-adjustable-vector when :fill-pointer or :adjustable is given."
-  (let (fp adj)
+Promotes to make-adjustable-vector when :fill-pointer or :adjustable is given.
+Handles :initial-contents (FR-654) and :initial-element (FR-687) via loop expansion."
+  (let (fp adj init-elem init-contents)
     (loop for (key val) on rest-args by #'cddr
           do (case key
-               (:fill-pointer (setf fp val))
-               (:adjustable   (setf adj val))))
-    (if (or fp adj)
-        (compiler-macroexpand-all `(make-adjustable-vector ,size))
-        (compiler-macroexpand-all `(make-array ,size)))))
+               (:fill-pointer    (setf fp val))
+               (:adjustable      (setf adj val))
+               (:initial-element  (setf init-elem val))
+               (:initial-contents (setf init-contents val))
+               ;; :element-type, :displaced-to, :displaced-index-offset — silently ignored
+               ))
+    (cond
+      ;; :initial-contents — build array from sequence
+      (init-contents
+       (let ((arr-g  (gensym "ARR"))
+             (cont-g (gensym "CONT"))
+             (i-g    (gensym "I")))
+         (compiler-macroexpand-all
+          `(let* ((,cont-g ,init-contents)
+                  (,arr-g  (make-array (length ,cont-g))))
+             (dotimes (,i-g (length ,cont-g) ,arr-g)
+               (setf (aref ,arr-g ,i-g) (elt ,cont-g ,i-g)))))))
+      ;; :fill-pointer / :adjustable — promote to adjustable vector
+      ;; When :fill-pointer has a specific non-t value, set it after construction
+      ((or fp adj)
+       (if (and fp (not (eq fp t)))
+           ;; Specific fill-pointer value: create vector then set fill-pointer
+           (let ((arr-g (gensym "ARR"))
+                 (fp-g  (gensym "FP")))
+             (compiler-macroexpand-all
+              `(let* ((,fp-g  ,fp)
+                      (,arr-g (make-adjustable-vector ,size)))
+                 (setf (fill-pointer ,arr-g) ,fp-g)
+                 ,arr-g)))
+           ;; Boolean fill-pointer (t) or :adjustable only
+           (compiler-macroexpand-all `(make-adjustable-vector ,size))))
+      ;; :initial-element — fill array with init value
+      (init-elem
+       (let ((arr-g (gensym "ARR"))
+             (ie-g  (gensym "IE"))
+             (i-g   (gensym "I")))
+         (compiler-macroexpand-all
+          `(let* ((,ie-g  ,init-elem)
+                  (,arr-g (make-array ,size)))
+             (dotimes (,i-g ,size ,arr-g)
+               (setf (aref ,arr-g ,i-g) ,ie-g))))))
+      ;; plain make-array
+      (t
+       (compiler-macroexpand-all `(make-array ,size))))))
 
 (defun expand-setf-accessor (place value)
   "Expand (setf (ACCESSOR OBJ) VAL) via *accessor-slot-map* for known struct accessors,
@@ -327,6 +367,13 @@ or fall back to generic (setf (slot-value obj 'accessor-name) val)."
                              `(rt-string-set ,(second place) ,(third place) ,value)))))
   (dolist (sym '(char schar))
     (setf (gethash sym *setf-compound-place-handlers*) char-place-handler)))
+
+;;; FR-636: (setf (bit bv i) x) and (setf (sbit bv i) x)
+(let ((bit-place-handler (lambda (place value)
+                           (compiler-macroexpand-all
+                            `(rt-bit-set ,(second place) ,(third place) ,value)))))
+  (dolist (sym '(bit sbit))
+    (setf (gethash sym *setf-compound-place-handlers*) bit-place-handler)))
 
 ;;; FR-620: (setf (svref v i) x) and (setf (row-major-aref a i) x)
 (setf (gethash 'svref *setf-compound-place-handlers*)
@@ -860,6 +907,16 @@ Contract: handler receives the full form and returns a fully-expanded form."
 (define-expander-for defconstant (form)
   (compiler-macroexpand-all `(defparameter ,(second form) ,(third form))))
 
+;; FR-651: vector — variadic vector constructor (vector a b c) → #(a b c)
+;; Expands to (coerce-to-vector (list ...)) so the VM list→vector path handles it.
+(define-expander-for vector (form)
+  (compiler-macroexpand-all `(coerce-to-vector (list ,@(cdr form)))))
+
+;; FR-679: get-decoded-time — 0-arg form, expands to decode-universal-time call
+(define-expander-for get-decoded-time (form)
+  (declare (ignore form))
+  '(decode-universal-time (get-universal-time)))
+
 ;; setf — unified place dispatcher
 (define-expander-for setf (form)
   (let ((len (length form))
@@ -915,20 +972,33 @@ Contract: handler receives the full form and returns a fully-expanded form."
     `(quote ,name)))
 
 ;; FR-607: Strip leading docstring from body (string + more forms → skip string)
+;; Returns (stripped-body . docstring-or-nil)
 (defun %strip-docstring (body)
   (if (and (stringp (car body)) (cdr body))
       (cdr body)
       body))
 
+(defun %extract-docstring (body)
+  "Return the docstring if BODY starts with one (and has more forms), else nil."
+  (if (and (stringp (car body)) (cdr body))
+      (car body)
+      nil))
+
 ;; defun — typed params get check-type assertions; untyped: expand defaults + body
 (define-expander-for defun (form)
-  (let ((body (%strip-docstring (cdddr form))))
+  (let* ((fn-name   (second form))
+         (raw-body  (cdddr form))
+         (docstring (%extract-docstring raw-body))
+         (body      (%strip-docstring raw-body)))
+    ;; FR-607: register docstring at compile time in CL-level table
+    (when (and docstring (symbolp fn-name))
+      (setf (gethash (list fn-name 'function) *documentation-table*) docstring))
     (if (and (>= (length form) 4)
-             (symbolp (second form))
+             (symbolp fn-name)
              (listp (third form))
              (lambda-list-has-typed-p (third form)))
-        (expand-typed-defun-or-lambda 'defun (second form) (third form) body)
-        (list* 'defun (second form)
+        (expand-typed-defun-or-lambda 'defun fn-name (third form) body)
+        (list* 'defun fn-name
                (expand-lambda-list-defaults (third form))
                (mapcar #'compiler-macroexpand-all body)))))
 

@@ -740,5 +740,42 @@
     "(define-condition parse-error (error) ())"
     "(define-condition reader-error (parse-error stream-error) ())"
 
+    ;; ── FR-535: Reader control variables ─────────────────────────────────────
+    "(defvar *read-base* 10)"
+    "(defvar *read-default-float-format* 'single-float)"
+    "(defvar *read-suppress* nil)"
+    ;; ── FR-573: *read-eval* ───────────────────────────────────────────────────
+    "(defvar *read-eval* t)"
+    ;; ── FR-358: *readtable* (stub — full Readtable API not yet implemented) ───
+    "(defvar *readtable* nil)"
+    ;; ── FR-570: Printer control variables ────────────────────────────────────
+    "(defvar *print-circle* nil)"
+    "(defvar *print-gensym* t)"
+    "(defvar *print-case* :upcase)"
+    ;; ── FR-535: More printer variables ───────────────────────────────────────
+    "(defvar *print-array* t)"
+    "(defvar *print-readably* nil)"
+    ;; ── FR-357: Pretty-printer variables ─────────────────────────────────────
+    "(defvar *print-pretty* nil)"
+    "(defvar *print-right-margin* nil)"
+    "(defvar *print-miser-width* nil)"
+    "(defvar *print-lines* nil)"
+    "(defvar *print-pprint-dispatch* nil)"
+    ;; ── FR-566: Pathname variables ────────────────────────────────────────────
+    "(defvar *default-pathname-defaults* nil)"
+    ;; ── FR-574: Load/compile pathname variables ───────────────────────────────
+    "(defvar *load-pathname* nil)"
+    "(defvar *load-truename* nil)"
+    "(defvar *compile-file-pathname* nil)"
+    "(defvar *compile-file-truename* nil)"
+    "(defvar *load-verbose* t)"
+    "(defvar *load-print* nil)"
+    "(defvar *compile-verbose* t)"
+    "(defvar *compile-print* nil)"
+    ;; ── FR-395: Compiler policy ───────────────────────────────────────────────
+    "(defvar *compiler-policy* nil)"
+    ;; ── FR-358: Readtable variable ────────────────────────────────────────────
+    "(defvar *readtable* nil)"
+
 )
   "Standard library source defining higher-order functions and set operations.")

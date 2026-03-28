@@ -328,17 +328,19 @@
 ;;; String/Symbol Builtin Compilation Tests
 
 (deftest-each compile-string-comparison
-  "String comparison operators return 1 for true and 0 for false."
-  :cases (("string=-match"    1 "(string= \"hello\" \"hello\")")
-          ("string=-mismatch" 0 "(string= \"hello\" \"world\")")
-          ("string<-true"     1 "(string< \"abc\" \"def\")")
-          ("string<-false"    0 "(string< \"def\" \"abc\")")
-          ("string/=-true"    1 "(string/= \"hello\" \"world\")")
-          ("string/=-false"   0 "(string/= \"hello\" \"hello\")")
-          ("string-equal-ci"  1 "(string-equal \"Hello\" \"hello\")")
-          ("string-equal-no"  0 "(string-equal \"hello\" \"world\")"))
+  "String comparison operators return truthy for true condition and NIL for false."
+  :cases (("string=-match"    t   "(string= \"hello\" \"hello\")")
+          ("string=-mismatch" nil "(string= \"hello\" \"world\")")
+          ("string<-true"     t   "(string< \"abc\" \"def\")")
+          ("string<-false"    nil "(string< \"def\" \"abc\")")
+          ("string/=-true"    t   "(string/= \"hello\" \"world\")")
+          ("string/=-false"   nil "(string/= \"hello\" \"hello\")")
+          ("string-equal-ci"  t   "(string-equal \"Hello\" \"hello\")")
+          ("string-equal-no"  nil "(string-equal \"hello\" \"world\")"))
   (expected form)
-  (assert-= expected (run-string form)))
+  (if expected
+      (assert-true (run-string form))
+      (assert-true (null (run-string form)))))
 
 (deftest-each compile-string-ops
   "String length, upcase, downcase, and concatenate return the expected numeric length."
@@ -897,20 +899,23 @@
 ;;; Association List and Utility Tests
 
 (deftest-each compile-alist-and-list-ops
-  "assoc/acons/equal/nconc/copy-list/subst/listp/atom return correct numeric values."
+  "assoc/acons/nconc/copy-list/listp/atom return correct numeric values."
   :cases (("assoc-found"    2 "(cdr (assoc 'b (list (cons 'a 1) (cons 'b 2) (cons 'c 3))))")
           ("acons"         42 "(cdr (car (acons 'x 42 nil)))")
-          ("equal-same"     1 "(equal (list 1 2 3) (list 1 2 3))")
-          ("equal-diff"     0 "(equal (list 1 2) (list 1 3))")
           ("nconc-len"      4 "(length (nconc (list 1 2) (list 3 4)))")
           ("copy-list-len"  3 "(length (copy-list (list 1 2 3)))")
-          ("subst"          1 "(equal (subst 'x 'a (list 'a 'b 'a)) (list 'x 'b 'x))")
           ("listp-list"     1 "(listp (list 1 2))")
           ("listp-nil"      1 "(listp nil)")
           ("atom-true"      1 "(atom 42)")
           ("atom-false"     0 "(atom (cons 1 2))"))
   (expected form)
   (assert-= expected (run-string form)))
+
+(deftest compile-equal-ops
+  "equal returns truthy for matching structures, NIL for different structures."
+  (assert-true (run-string "(equal (list 1 2 3) (list 1 2 3))"))
+  (assert-true (null (run-string "(equal (list 1 2) (list 1 3))")))
+  (assert-true (run-string "(equal (subst 'x 'a (list 'a 'b 'a)) (list 'x 'b 'x))")))
 
 (deftest compile-assoc-and-string
   "assoc returns nil when not found; (string sym) coerces symbol to string."
@@ -956,11 +961,11 @@
   (assert-true (equal expected (run-string form))))
 
 (deftest-each compile-search
-  "search returns the position of the pattern or -1 when not found."
-  :cases (("found"     2  "(search \"ll\" \"hello\")")
-          ("not-found" -1 "(search \"xyz\" \"hello\")"))
+  "search returns the position of the pattern or nil when not found (ANSI CL)."
+  :cases (("found"     2   "(search \"ll\" \"hello\")")
+          ("not-found" nil "(search \"xyz\" \"hello\")"))
   (expected form)
-  (assert-= expected (run-string form)))
+  (assert-equal expected (run-string form)))
 
 ;;; I/O and Format Tests
 
@@ -2035,11 +2040,11 @@
   (assert-true (run-string form)))
 
 (deftest-each compile-equal-false
-  "equal and string= return 0 (falsy) for non-matching values."
+  "equal and string= return NIL (falsy) for non-matching values."
   :cases (("string=-diff" "(string= \"hello\" \"world\")")
           ("equal-diff"   "(equal 1 2)"))
   (form)
-  (assert-true (= 0 (run-string form))))
+  (assert-true (null (run-string form))))
 
 ;;; Numeric Builtins Tests (max, min, mod, zerop, plusp, minusp)
 
@@ -2128,21 +2133,20 @@
 
 (deftest compile-prog-and-friends
   "prog/prog*/with-slots/nth-value macros work in compiled code."
-  ;; prog: let + tagbody + block with return
-  (assert-true (= 10 (run-string "(prog ((x 0))
-    loop
-    (setq x (+ x 1))
-    (when (= x 10) (return x))
-    (go loop))" :stdlib t)))
-  ;; prog*: sequential bindings
-  (assert-true (= 3 (run-string "(prog* ((x 1) (y (+ x 2)))
-    (return y))" :stdlib t)))
-  ;; with-slots
-  (assert-= 30 (run-string "(progn (defclass point () ((x :initarg :x) (y :initarg :y))) (let ((p (make-instance 'point :x 10 :y 20))) (with-slots (x y) p (+ x y))))" :stdlib t))
-  ;; nth-value
-  (assert-true (= 2 (run-string "(nth-value 1 (floor 17 5))" :stdlib t)))
-  ;; prog without return yields nil
-  (assert-true (null (run-string "(prog ((x 1)) (setq x 2))" :stdlib t))))
+  ;; Consolidated into a single :stdlib t run to avoid 5×1s timeout
+  (let ((results (run-string "(list
+    (prog ((x 0)) loop (setq x (+ x 1)) (when (= x 10) (return x)) (go loop))
+    (prog* ((x 1) (y (+ x 2))) (return y))
+    (progn (defclass point () ((x :initarg :x) (y :initarg :y)))
+           (let ((p (make-instance (quote point) :x 10 :y 20)))
+             (with-slots (x y) p (+ x y))))
+    (nth-value 1 (floor 17 5))
+    (prog ((x 1)) (setq x 2)))" :stdlib t)))
+    (assert-= 10 (first results))
+    (assert-= 3 (second results))
+    (assert-= 30 (third results))
+    (assert-= 2 (fourth results))
+    (assert-false (fifth results))))
 
 ;;; ANSI CL FR-400/FR-500 Tests (mismatch, make-string, float literals, string-not-equal)
 
@@ -2234,5 +2238,541 @@
   (expected form)
   (assert-= expected (run-string form)))
 
+
+;;; ─── New stdlib tests (FR-495, FR-496, FR-540, FR-547, FR-582, FR-596, etc.) ──
+
+(deftest compile-tailp
+  "tailp checks pointer identity of list tails."
+  (let ((r (run-string "(let* ((x '(1 2 3)) (tail (cddr x))) (tailp tail x))")))
+    (assert-true r)))
+
+(deftest compile-ldiff
+  "ldiff returns list up to a given tail."
+  (let ((r (run-string "(let* ((x '(1 2 3 4)) (tail (cddr x))) (ldiff x tail))")))
+    (assert-equal '(1 2) r)))
+
+(deftest compile-copy-alist
+  "copy-alist returns a fresh alist with the same content."
+  (let ((r (run-string "(let ((al '((a . 1) (b . 2)))) (equal al (copy-alist al)))")))
+    (assert-true r)))
+
+(deftest compile-tree-equal
+  "tree-equal compares trees recursively."
+  (let ((r (run-string "(tree-equal '(1 (2 3)) '(1 (2 3)))")))
+    (assert-true r)))
+
+(deftest compile-get-properties
+  "get-properties finds first matching plist key."
+  (let ((r (run-string "(get-properties '(:a 1 :b 2 :c 3) '(:b :c))")))
+    (assert-equal :b r)))
+
+(deftest compile-nunion
+  "nunion returns union of two lists."
+  (let ((r (run-string "(sort (nunion '(1 2 3) '(2 3 4)) #'<)")))
+    (assert-equal '(1 2 3 4) r)))
+
+(deftest compile-nsubst
+  "nsubst substitutes numeric values in a tree."
+  (let ((r (run-string "(nsubst 99 1 '(1 2 (1 3)))")))
+    (assert-equal '(99 2 (99 3)) r)))
+
+(deftest compile-nstring-upcase
+  "nstring-upcase returns uppercased string."
+  (let ((r (run-string "(nstring-upcase \"hello\")")))
+    (assert-equal "HELLO" r)))
+
+(deftest compile-array-element-type
+  "array-element-type returns T for all arrays in cl-cc."
+  (let ((r (run-string "(array-element-type (make-array 3))")))
+    (assert-equal t r)))
+
+(deftest compile-array-in-bounds-p
+  "array-in-bounds-p checks index validity."
+  (let ((in  (run-string "(array-in-bounds-p (make-array 5) 3)"))
+        (out (run-string "(array-in-bounds-p (make-array 5) 7)")))
+    (assert-true in)
+    (assert-true (not out))))
+
+(deftest compile-equalp
+  "equalp compares lists and strings case-insensitively."
+  (let ((r1 (run-string "(equalp '(1 2) '(1 2))"))
+        (r2 (run-string "(equalp \"hello\" \"HELLO\")"))
+        (r3 (run-string "(equalp '(1 2) '(1 3))")))
+    (assert-true r1)
+    (assert-true r2)
+    (assert-true (not r3))))
+
+(deftest compile-lisp-implementation-type
+  "lisp-implementation-type returns cl-cc."
+  (let ((r (run-string "(lisp-implementation-type)")))
+    (assert-equal "cl-cc" r)))
+
+(deftest compile-compiled-function-p
+  "compiled-function-p returns true for lambdas."
+  (let ((r (run-string "(compiled-function-p (lambda (x) x))")))
+    (assert-true r)))
+
+(deftest compile-last-with-count
+  "last with count returns last N conses."
+  (let ((r (run-string "(last '(1 2 3 4 5) 2)")))
+    (assert-equal '(4 5) r)))
+
+(deftest compile-butlast-with-count
+  "butlast with count returns all but last N conses."
+  (let ((r (run-string "(butlast '(1 2 3 4 5) 2)")))
+    (assert-equal '(1 2 3) r)))
+
+(deftest compile-make-array-initial-contents
+  "make-array with :initial-contents fills the array."
+  (let ((r (run-string "(let ((a (make-array 3 :initial-contents '(10 20 30)))) (aref a 1))")))
+    (assert-= 20 r)))
+
+(deftest compile-make-array-initial-element
+  "make-array with :initial-element fills with default."
+  (let ((r (run-string "(let ((a (make-array 4 :initial-element 7))) (aref a 3))")))
+    (assert-= 7 r)))
+
+(deftest compile-setf-bit
+  "setf bit mutates a vector element using the bit accessor."
+  (let ((r (run-string "(let ((bv (make-array 4))) (setf (bit bv 2) 1) (bit bv 2))")))
+    (assert-= 1 r)))
+
+(deftest compile-search-vector
+  "search finds a pattern in a vector."
+  (let ((r (run-string "(search '(2 3) '(1 2 3 4))")))
+    (assert-= 1 r)))
+
+(deftest compile-write-to-string-keywords
+  "write-to-string with keyword args ignores unknown keywords."
+  (let ((r (run-string "(write-to-string 42 :base 10)")))
+    (assert-equal "42" r)))
+
+;;; ─── FR-635: bit-nor / bit-nand / bit-eqv ────────────────────────────────────
+
+(deftest compile-bit-nor
+  "bit-nor computes element-wise NOR."
+  (let ((r (run-string "(bit-nor #*1010 #*1100)")))
+    (assert-true (vectorp r))))
+
+(deftest compile-bit-eqv
+  "bit-eqv computes element-wise XNOR."
+  (let ((r (run-string "(bit-eqv #*1010 #*0101)")))
+    (assert-true (vectorp r))))
+
+;;; ─── FR-497: with-hash-table-iterator ────────────────────────────────────────
+
+(deftest compile-with-hash-table-iterator
+  "with-hash-table-iterator iterates all keys."
+  (let ((r (run-string "(let ((h (make-hash-table)) (count 0))
+  (setf (gethash :a h) 1 (gethash :b h) 2)
+  (with-hash-table-iterator (next h)
+    (loop (multiple-value-bind (more k v) (next)
+            (unless more (return count))
+            (incf count)
+            (declare (ignore k v))))))")))
+    (assert-= 2 r)))
+
+;;; ─── FR-617: read-from-string 2nd value ──────────────────────────────────────
+
+(deftest compile-read-from-string-position
+  "read-from-string returns the end position (after delimiter) as second value."
+  (let ((r (run-string "(multiple-value-bind (val pos)
+  (read-from-string \"42 rest\")
+  (list val pos))")))
+    ;; ANSI CL: position is after the token delimiter (space), so 3 not 2
+    (assert-equal '(42 3) r)))
+
+;;; ─── FR-637: string comparison with keyword bounds ───────────────────────────
+
+(deftest compile-string=-start-end
+  "string= with :start1/:end1 compares substrings."
+  (let ((r (run-string "(string= \"hello world\" \"world\" :start1 6)")))
+    (assert-true r)))
+
+(deftest compile-string<-start-end
+  "string< with :start2/:end2 compares substrings; equal substrings return NIL."
+  (let ((r (run-string "(string< \"ab\" \"abcde\" :start2 0 :end2 2)")))
+    ;; "ab" < "ab" is false — ANSI returns NIL
+    (assert-true (null r))))
+
+;;; ─── FR-608: with-input-from-string keyword args ─────────────────────────────
+
+(deftest compile-with-input-from-string-start
+  "with-input-from-string :start skips prefix."
+  (let ((r (run-string "(with-input-from-string (s \"hello world\" :start 6)
+  (read s))")))
+    (assert-equal 'cl-cc::world r)))
+
+;;; ─── FR-363: with-compilation-unit ───────────────────────────────────────────
+
+(deftest compile-with-compilation-unit
+  "with-compilation-unit evaluates body."
+  (let ((r (run-string "(with-compilation-unit () (+ 1 2))")))
+    (assert-= 3 r)))
+
+;;; ─── FR-397: locally ─────────────────────────────────────────────────────────
+
+(deftest compile-locally
+  "locally evaluates forms and strips leading declare."
+  (let ((r (run-string "(locally (+ 10 20))")))
+    (assert-= 30 r)))
+
+;;; ─── FR-439: compiler-let ────────────────────────────────────────────────────
+
+(deftest compile-compiler-let
+  "compiler-let acts as let at runtime."
+  (let ((r (run-string "(compiler-let ((x 5) (y 3)) (+ x y))")))
+    (assert-= 8 r)))
+
+;;; ─── FR-566: pathname host bridges ───────────────────────────────────────────
+
+(deftest compile-pathname-name
+  "pathname-name returns filename without extension."
+  (let ((r (run-string "(pathname-name \"/tmp/foo.lisp\")")))
+    (assert-equal "foo" r)))
+
+(deftest compile-pathname-type
+  "pathname-type returns file extension."
+  (let ((r (run-string "(pathname-type \"/tmp/foo.lisp\")")))
+    (assert-equal "lisp" r)))
+
+;;; ─── FR-572: #nA multi-dimensional array literal ─────────────────────────────
+
+(deftest compile-hash-na-2d-array
+  "#2A creates a 2D array with correct dimensions."
+  (let ((r (run-string "#2A((1 2 3) (4 5 6))")))
+    (assert-true (arrayp r))
+    (assert-= 2 (array-rank r))
+    (assert-= 2 (array-dimension r 0))
+    (assert-= 3 (array-dimension r 1))
+    (assert-= 1 (aref r 0 0))
+    (assert-= 6 (aref r 1 2))))
+
+(deftest compile-hash-na-1d-array
+  "#1A creates a 1D array (same as #(...))."
+  (let ((r (run-string "#1A(10 20 30)")))
+    (assert-true (vectorp r))
+    (assert-= 3 (length r))
+    (assert-= 20 (aref r 1))))
+
+;;; ─── FR-572: #P pathname literal ─────────────────────────────────────────────
+
+(deftest compile-hash-p-pathname-name
+  "#P pathname literal lexes and pathname-name extracts the basename."
+  (let ((r (run-string "(pathname-name #P\"/tmp/foo.lisp\")")))
+    (assert-equal "foo" r)))
+
+(deftest compile-hash-p-pathname-type
+  "#P pathname literal lexes and pathname-type extracts the extension."
+  (let ((r (run-string "(pathname-type #P\"/tmp/bar.txt\")")))
+    (assert-equal "txt" r)))
+
+;;; ─── FR-612: read-char / read-line / read with eof args ──────────────────────
+
+(deftest compile-read-char-eof-args
+  "read-char with eof-error-p and eof-value args compiles without error."
+  (let ((r (run-string
+              "(with-input-from-string (s \"\")
+                 (read-char s nil :end-of-stream))")))
+    ;; :eof sentinel is returned (eof-value arg accepted but internal :eof used)
+    (assert-true (or (eq r :eof) (eq r :end-of-stream) (null r)))))
+
+(deftest compile-read-char-stream-arg
+  "read-char with explicit stream reads a character."
+  (let ((r (run-string
+              "(with-input-from-string (s \"A\")
+                 (read-char s))")))
+    (assert-equal #\A r)))
+
+(deftest compile-read-line-eof-args
+  "read-line with eof args compiles without error (eof-value arg accepted)."
+  (let ((r (run-string
+              "(with-input-from-string (s \"\")
+                 (read-line s nil nil))")))
+    ;; VM returns :eof sentinel regardless of user-supplied eof-value (partial impl)
+    (assert-true (or (null r) (equal r "") (eq r :eof)))))
+
+(deftest compile-close-abort
+  "close with :abort t compiles and returns t."
+  (let ((r (run-string
+              "(let ((s (make-string-output-stream)))
+                 (close s :abort t))")))
+    (assert-true r)))
+
+;;; ─── FR-358: Readtable stubs ─────────────────────────────────────────────────
+
+(deftest compile-readtable-stubs
+  "readtable stubs are defined and callable."
+  (let* ((r1 (run-string "(readtablep *readtable*)" :stdlib t))
+         (r2 (run-string "(copy-readtable)" :stdlib t))
+         (r3 (run-string "(readtable-case nil)" :stdlib t)))
+    (assert-false r1)   ; *readtable* is nil, readtablep nil
+    (assert-false r2)   ; copy-readtable returns nil stub
+    (assert-equal :upcase r3)))
+
+(deftest compile-set-macro-character
+  "set-macro-character and get-macro-character compile without error."
+  (let* ((r1 (run-string
+                "(set-macro-character (code-char 94) (lambda (s c) (declare (ignore s c)) :caret))"
+                :stdlib t))
+         (r2 (run-string "(get-macro-character (code-char 94))" :stdlib t)))
+    (assert-true r1)    ; set-macro-character returns t
+    (assert-false r2))) ; get-macro-character returns nil (stub)
+
+;;; ─── FR-579: string-to-octets / octets-to-string ─────────────────────────────
+
+(deftest compile-string-to-octets
+  "string-to-octets converts a string to a byte vector."
+  (let ((r (run-string "(string-to-octets \"hello\")")))
+    (assert-true (vectorp r))
+    (assert-= 104 (aref r 0))  ; 'h' = ASCII 104
+    (assert-= 5 (length r))))
+
+(deftest compile-octets-to-string
+  "octets-to-string round-trips through string-to-octets."
+  (let ((r (run-string "(octets-to-string (string-to-octets \"hello\"))")))
+    (assert-string= "hello" r)))
+
+;;; ─── FR-502/507: fill/replace/copy-seq vector support ───────────────────────
+
+(deftest compile-fill-vector
+  "fill works on a vector, modifying elements in place."
+  (let ((r (run-string "(let ((v (make-array 3 :initial-contents '(1 2 3))))
+                           (fill v 0)
+                           v)" :stdlib t)))
+    (assert-true (vectorp r))
+    (assert-= 0 (aref r 0))
+    (assert-= 0 (aref r 1))
+    (assert-= 0 (aref r 2))))
+
+(deftest compile-fill-vector-start-end
+  "fill with :start/:end modifies only the specified range."
+  (let ((r (run-string "(let ((v (make-array 5 :initial-contents '(0 1 2 3 4))))
+                           (fill v 9 :start 1 :end 4)
+                           v)" :stdlib t)))
+    (assert-true (vectorp r))
+    (assert-= 0 (aref r 0))
+    (assert-= 9 (aref r 1))
+    (assert-= 9 (aref r 2))
+    (assert-= 9 (aref r 3))
+    (assert-= 4 (aref r 4))))
+
+(deftest compile-replace-vectors
+  "replace copies elements from source vector into dest vector."
+  (let ((r (run-string "(let ((d (make-array 3 :initial-contents '(0 0 0)))
+                              (s (make-array 3 :initial-contents '(1 2 3))))
+                           (replace d s)
+                           d)" :stdlib t)))
+    (assert-true (vectorp r))
+    (assert-= 1 (aref r 0))
+    (assert-= 2 (aref r 1))
+    (assert-= 3 (aref r 2))))
+
+(deftest compile-copy-seq-vector
+  "copy-seq on a vector returns a fresh copy."
+  (let ((r (run-string "(let ((v (make-array 3 :initial-contents '(1 2 3))))
+                           (copy-seq v))" :stdlib t)))
+    (assert-true (vectorp r))
+    (assert-= 3 (length r))
+    (assert-= 1 (aref r 0))))
+
+;;; ─── FR-697: assoc/member with :test/:key keyword args ───────────────────────
+
+(deftest compile-member-test-keyword
+  "member with :test #'equal works for string elements."
+  (let ((r (run-string "(member \"b\" '(\"a\" \"b\" \"c\") :test #'equal)" :stdlib t)))
+    (assert-equal '("b" "c") r)))
+
+(deftest compile-member-key-keyword
+  "member with :key extracts the correct field."
+  (let ((r (run-string "(member 2 '((1 . a) (2 . b) (3 . c)) :key #'car)" :stdlib t)))
+    (assert-true (consp r))
+    (assert-= 2 (caar r))))
+
+(deftest compile-assoc-test-keyword
+  "assoc with :test #'equal works for string keys."
+  (let ((r (run-string "(assoc \"b\" '((\"a\" . 1) (\"b\" . 2)) :test #'equal)" :stdlib t)))
+    (assert-equal '("b" . 2) r)))
+
+(deftest compile-assoc-key-keyword
+  "assoc with :key transforms the key before comparison."
+  ;; key squares each car: look for squared value 4 in ((1 . a) (2 . b) (3 . c))
+  ;; => 2^2=4 matches item 4, returns (2 . b)
+  (let ((r (run-string "(assoc 4 '((1 . a) (2 . b) (3 . c)) :key (lambda (x) (* x x)))" :stdlib t)))
+    (assert-true (consp r))
+    (assert-= 2 (car r))))
+
+;;; ─── position/count/find-if with keyword args ────────────────────────────────
+
+(deftest compile-position-test-keyword
+  "position with :test #'equal works for strings."
+  (let ((r (run-string "(position \"b\" '(\"a\" \"b\" \"c\") :test #'equal)" :stdlib t)))
+    (assert-= 1 r)))
+
+(deftest compile-position-key-keyword
+  "position with :key extracts the right field."
+  (let ((r (run-string "(position 2 '((1 . a) (2 . b) (3 . c)) :key #'car)" :stdlib t)))
+    (assert-= 1 r)))
+
+(deftest compile-count-test-keyword
+  "count with :test #'equal counts strings correctly."
+  (let ((r (run-string "(count \"a\" '(\"a\" \"b\" \"a\") :test #'equal)" :stdlib t)))
+    (assert-= 2 r)))
+
+(deftest compile-find-if-key-keyword
+  "find-if with :key applies the key function."
+  (let ((r (run-string "(find-if #'evenp '((1 . a) (2 . b) (3 . c)) :key #'car)" :stdlib t)))
+    (assert-true (consp r))
+    (assert-= 2 (car r))))
+
+;;; ─── remove-duplicates with :test keyword ────────────────────────────────────
+
+(deftest compile-remove-duplicates-test-keyword
+  "remove-duplicates with :test #'equal handles string equality."
+  (let ((r (run-string "(remove-duplicates '(\"a\" \"b\" \"a\") :test #'equal)" :stdlib t)))
+    (assert-= 2 (length r))))
+
+;;; ─── remove with :test keyword ────────────────────────────────────────────────
+
+(deftest compile-remove-test-keyword
+  "remove with :test #'equal removes matching strings."
+  (let ((r (run-string "(remove \"a\" '(\"a\" \"b\" \"a\") :test #'equal)" :stdlib t)))
+    (assert-equal '("b") r)))
+
+;;; ─── string-upcase/downcase with :start/:end ─────────────────────────────────
+
+(deftest compile-string-upcase-start-end
+  "string-upcase with :start/:end uppercases a substring."
+  (let ((r (run-string "(string-upcase \"hello\" :start 1 :end 3)")))
+    (assert-string= "hELlo" r)))
+
+(deftest compile-string-downcase-start-end
+  "string-downcase with :start/:end lowercases a substring."
+  (let ((r (run-string "(string-downcase \"HELLO\" :start 1 :end 4)")))
+    (assert-string= "HellO" r)))
+
+;;; ─── FR-599: #n= / #n# label and reference reader macros ────────────────────
+
+(deftest compile-hash-n-eq-label
+  "#n= labels a data object and #n# references it."
+  (let ((r (run-string "(list #0=(1 2 3) #0#)")))
+    ;; Both elements are the same list (1 2 3)
+    (assert-equal '(1 2 3) (first r))
+    (assert-equal '(1 2 3) (second r))))
+
+(deftest compile-hash-n-eq-string
+  "#0= with a string literal."
+  (let ((r (run-string "#0=\"hello\"")))
+    (assert-string= "hello" r)))
+
+;;; ─── FR-641: union/intersection/set-difference with :test ────────────────────
+
+(deftest compile-union-test-keyword
+  "union with :test #'equal works for string lists."
+  (let ((r (run-string "(sort (union '(\"a\" \"b\") '(\"b\" \"c\") :test #'equal) #'string<)" :stdlib t)))
+    (assert-= 3 (length r))
+    (assert-string= "a" (first r))))
+
+(deftest compile-set-difference-test-keyword
+  "set-difference with :test #'equal works for string lists."
+  (let ((r (run-string "(set-difference '(\"a\" \"b\" \"c\") '(\"b\") :test #'equal)" :stdlib t)))
+    (assert-= 2 (length r))))
+
+(deftest compile-intersection-test-keyword
+  "intersection with :test #'equal works for string lists."
+  (let ((r (run-string "(intersection '(\"a\" \"b\" \"c\") '(\"b\" \"c\" \"d\") :test #'equal)" :stdlib t)))
+    (assert-= 2 (length r))))
+
+;;; ─── FR-688: delete/substitute with :test keyword ────────────────────────────
+
+(deftest compile-delete-test-keyword
+  "delete with :test #'equal removes matching strings."
+  (let ((r (run-string "(delete \"a\" '(\"a\" \"b\" \"a\") :test #'equal)" :stdlib t)))
+    (assert-equal '("b") r)))
+
+(deftest compile-substitute-test-keyword
+  "substitute with :test #'equal replaces matching strings."
+  (let ((r (run-string "(substitute \"x\" \"a\" '(\"a\" \"b\" \"a\") :test #'equal)" :stdlib t)))
+    (assert-= 3 (length r))
+    (assert-string= "x" (first r))
+    (assert-string= "x" (third r))))
+
+;;; ─── compile-file-pathname host bridge ───────────────────────────────────────
+
+(deftest compile-compile-file-pathname
+  "compile-file-pathname returns a pathname with .fasl type."
+  (let ((r (run-string "(compile-file-pathname \"/tmp/foo.lisp\")")))
+    (assert-true (pathnamep r))))
+
+;;; ─── FR-604: float 2-arg prototype form ──────────────────────────────────────
+
+(deftest compile-float-2arg
+  "float with prototype argument converts to float ignoring prototype."
+  (assert-true (floatp (run-string "(float 3 1.0d0)")))
+  (assert-= (float 3) (run-string "(float 3 1.0d0)")))
+
+;;; ─── FR-396: declaim macro stub ─────────────────────────────────────────────
+
+(deftest compile-declaim-toplevel
+  "declaim at top level is silently ignored."
+  (assert-true (null (run-string "(declaim (optimize (speed 3))) nil"))))
+
+(deftest compile-declaim-inline-noop
+  "declaim inline is a no-op — function still works."
+  (let ((r (run-string "(declaim (inline square)) (defun square (x) (* x x)) (square 5)" :stdlib t)))
+    (assert-= 25 r)))
+
+;;; ─── FR-598: stream typep ────────────────────────────────────────────────────
+
+(deftest compile-typep-stream
+  "typep checks stream type correctly."
+  (assert-true (run-string "(typep *standard-output* 'stream)"))
+  (assert-true (run-string "(typep *standard-output* 'output-stream)"))
+  (assert-= 0 (run-string "(typep 42 'stream)")))
+
+(deftest compile-typep-string-stream
+  "typep checks string-stream type correctly."
+  (let ((r (run-string "(let ((s (make-string-output-stream))) (typep s 'string-stream))" :stdlib t)))
+    (assert-true r)))
+
+;;; ─── FR-603: (setf (values ...)) ────────────────────────────────────────────
+
+(deftest compile-setf-values
+  "(setf (values a b) (floor 7 3)) destructures multiple values."
+  (let ((r (run-string "(let (a b) (setf (values a b) (floor 7 3)) (list a b))" :stdlib t)))
+    (assert-= 2 (first r))
+    (assert-= 1 (second r))))
+
+;;; ─── FR-607: documentation storage ──────────────────────────────────────────
+
+(deftest compile-documentation-defun
+  "defun with docstring stores it in *documentation-table*."
+  (let ((r (run-string "(defun greet (x) \"Greet X.\" (format nil \"Hello ~A\" x)) (documentation 'greet 'function)" :stdlib t)))
+    (assert-string= "Greet X." r)))
+
+(deftest compile-documentation-no-docstring
+  "defun without docstring returns nil from documentation."
+  (let ((r (run-string "(defun add2 (x) (+ x 2)) (documentation 'add2 'function)" :stdlib t)))
+    (assert-true (null r))))
+
+;;; FR-562: Unicode character names via lexer
+(deftest compile-unicode-char-name
+  "Lexer resolves Unicode character names via cl:name-char."
+  (assert-= 945 (run-string "(char-code #\\Greek_Small_Letter_Alpha)"))
+  (assert-= 9731 (run-string "(char-code #\\Snowman)")))
+
+(deftest compile-unicode-code-char
+  "code-char supports full Unicode range."
+  (assert-= 128512 (run-string "(char-code (code-char 128512))")))
+
+;;; FR-687: make-string :element-type with both keywords
+(deftest compile-make-string-element-type
+  "make-string accepts :element-type and ignores it."
+  (assert-= 5 (run-string "(length (make-string 5 :element-type 'character))")))
+
+(deftest compile-make-string-both-keywords
+  "make-string with both :initial-element and :element-type correctly fills."
+  (let ((r (run-string "(make-string 3 :initial-element #\\x :element-type 'character)")))
+    (assert-string= "xxx" r)))
 
 ;;; (run-tests is defined in framework.lisp)
