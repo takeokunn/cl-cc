@@ -8,6 +8,7 @@
 (in-package :cl-cc/test)
 
 (defsuite typeclass-suite :description "Multi-parameter typeclass system tests")
+(in-suite cl-cc-suite)
 
 ;;; ─── typeclass-def struct ──────────────────────────────────────────────────
 
@@ -73,6 +74,33 @@
     (register-typeclass-instance 'eq type-int nil)
     (assert-signals type-inference-error
       (register-typeclass-instance 'eq type-int nil))))
+
+(deftest typeclass-instance-registry-rejects-overlaps
+  "Instance registry rejects overlapping registrations for the same class."
+  (let ((cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
+    (register-typeclass-instance 'eq type-int nil)
+    (assert-signals type-inference-error
+      (register-typeclass-instance 'eq (fresh-type-var "a") nil))))
+
+(deftest typeclass-instance-registry-enforces-functional-dependencies
+  "Functional dependencies reject conflicting instance families."
+  (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
+        (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
+    (register-typeclass 'collection-test
+                       (make-typeclass-def
+                        :name 'collection-test
+                        :type-params (list (fresh-type-var "c") (fresh-type-var "e"))
+                        :superclasses nil
+                        :methods nil
+                        :associated-types nil
+                        :functional-deps '(((c) . (e)))))
+    (register-typeclass-instance 'collection-test
+                                 (make-type-product :elems (list type-int type-string))
+                                 nil)
+    (assert-signals type-inference-error
+      (register-typeclass-instance 'collection-test
+                                   (make-type-product :elems (list type-int type-bool))
+                                   nil))))
 
 ;;; ─── has-typeclass-instance-p ──────────────────────────────────────────────
 

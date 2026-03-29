@@ -30,51 +30,46 @@ Returns a compilation-result struct with program, assembly, and globals."
   (let* ((ctx (make-instance 'compiler-context :safety safety))
          (last-reg nil)
          (last-type nil)
+         (last-cps nil)
          (type-env (cl-cc/type:type-env-empty)))
-    (dolist (form forms)
-      (let* ((expanded (if (typep form 'ast-node)
-                           form
-                           (compiler-macroexpand-all form)))
-             (ast (if (typep expanded 'ast-node)
-                      expanded
-                      (lower-sexp-to-ast expanded))))
-        (when type-check
-          (setf last-type
-                (handler-case
-                    (type-check-ast ast type-env)
-                  (error (e)
-                    (if (eq type-check :strict)
-                        (error e)
-                        (progn
-                          (warn "Type check warning: ~A" e)
-                          nil))))))
-        (when (and type-check
-                   (typep ast 'cl-cc:ast-defvar)
-                   (cl-cc:ast-defvar-value ast))
-          (let ((value-type
+    (labels ((best-effort-type (ast env)
+               (ignore-errors (type-check-ast ast env))))
+      (dolist (form forms)
+        (let* ((expanded (if (typep form 'ast-node)
+                             form
+                             (compiler-macroexpand-all form)))
+               (ast (if (typep expanded 'ast-node)
+                        expanded
+                        (lower-sexp-to-ast expanded))))
+          (setf last-cps (maybe-cps-transform ast))
+          (when type-check
+            (setf last-type
                   (handler-case
-                      (type-check-ast (cl-cc:ast-defvar-value ast) type-env)
+                      (type-check-ast ast type-env)
                     (error (e)
                       (if (eq type-check :strict)
                           (error e)
                           (progn
                             (warn "Type check warning: ~A" e)
                             nil))))))
-            (when value-type
-              (setf type-env
-                    (cl-cc/type:type-env-extend
-                     (cl-cc:ast-defvar-name ast)
-                     (cl-cc/type:type-to-scheme value-type)
-                     type-env)))))
-        (when (and type-check
-                   (typep ast 'cl-cc:ast-defun)
-                   last-type)
-          (setf type-env
-                (cl-cc/type:type-env-extend
-                 (cl-cc:ast-defun-name ast)
-                 (cl-cc/type:type-to-scheme last-type)
-                 type-env)))
-        (setf last-reg (compile-ast ast ctx))))
+          (when (and (typep ast 'cl-cc:ast-defvar)
+                     (cl-cc:ast-defvar-value ast))
+            (let ((value-type (best-effort-type (cl-cc:ast-defvar-value ast) type-env)))
+              (when value-type
+                (setf type-env
+                      (cl-cc/type:type-env-extend
+                       (cl-cc:ast-defvar-name ast)
+                       (cl-cc/type:type-to-scheme value-type)
+                       type-env)))))
+          (when (typep ast 'cl-cc:ast-defun)
+            (let ((fn-type (best-effort-type ast type-env)))
+              (when fn-type
+                (setf type-env
+                      (cl-cc/type:type-env-extend
+                       (cl-cc:ast-defun-name ast)
+                       (cl-cc/type:type-to-scheme fn-type)
+                       type-env)))))
+          (setf last-reg (compile-ast ast ctx)))))
     (setf (ctx-type-env ctx) type-env)
     (when last-reg
       (emit ctx (make-vm-halt :reg last-reg)))
@@ -89,7 +84,8 @@ Returns a compilation-result struct with program, assembly, and globals."
                                :assembly (emit-assembly program :target target)
                                :globals (ctx-global-functions ctx)
                                :type last-type
-                               :type-env (ctx-type-env ctx)))))
+                               :type-env (ctx-type-env ctx)
+                               :cps last-cps))))
 
 ;;; ── Exception handling: catch / throw / unwind-protect / handler-case ────
 

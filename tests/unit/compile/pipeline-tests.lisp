@@ -20,9 +20,11 @@
     (assert-true (typep prog 'cl-cc::vm-program))
     (assert-true (> (length instrs) 0))
     (assert-true (stringp asm))
-    (assert-true (or (null cps) (consp cps))))
+    (assert-true (consp cps)))
   (let* ((result (compile-expression 42))
-         (instrs (vm-program-instructions (compilation-result-program result))))
+         (instrs (vm-program-instructions (compilation-result-program result)))
+         (cps (compilation-result-cps result)))
+    (assert-true (consp cps))
     (assert-true (typep (car (last instrs)) 'cl-cc::vm-halt))))
 
 (deftest pipeline-compile-toplevel-forms-captures-type-env
@@ -38,6 +40,11 @@
       (assert-eq 'fixnum (cl-cc/type:type-primitive-name
                           (cl-cc/type::type-scheme-type scheme))))))
 
+(deftest pipeline-compile-toplevel-forms-captures-cps
+  "compile-toplevel-forms stores a CPS form for top-level input."
+  (let ((result (cl-cc::compile-toplevel-forms '((+ 1 2) (- 4 1)))))
+    (assert-true (consp (cl-cc::compilation-result-cps result)))))
+
 (deftest pipeline-compile-toplevel-forms-captures-defun-type-env
   "compile-toplevel-forms records inferred defun types for later forms."
   (let ((result (cl-cc::compile-toplevel-forms
@@ -50,6 +57,30 @@
       (assert-true found-p)
       (assert-true (cl-cc/type:type-function-p
                     (cl-cc/type::type-scheme-type scheme))))))
+
+(deftest pipeline-compile-toplevel-forms-records-defun-type-without-type-check
+  "compile-toplevel-forms still records inferred defun types when type-check is off."
+  (let ((result (cl-cc::compile-toplevel-forms
+                 '((defun typed-id-no-check (x) x)
+                   (typed-id-no-check 42)))))
+    (multiple-value-bind (scheme found-p)
+        (cl-cc/type::type-env-lookup 'typed-id-no-check
+                                     (cl-cc::compilation-result-type-env result))
+      (assert-true found-p)
+      (assert-true (cl-cc/type:type-function-p
+                    (cl-cc/type::type-scheme-type scheme))))))
+
+(deftest pipeline-compile-toplevel-forms-records-defvar-type-without-type-check
+  "compile-toplevel-forms still records inferred defvar types when type-check is off."
+  (let ((result (cl-cc::compile-toplevel-forms
+                 '((defvar *typed-top-level-no-check* 42)
+                   *typed-top-level-no-check*)))))
+    (multiple-value-bind (scheme found-p)
+        (cl-cc/type::type-env-lookup '*typed-top-level-no-check*
+                                     (cl-cc::compilation-result-type-env result))
+      (assert-true found-p)
+      (assert-eq 'fixnum (cl-cc/type:type-primitive-name
+                          (cl-cc/type::type-scheme-type scheme))))))
 
 (deftest pipeline-the-runtime-assertion
   "run-string executes (the ...) assertions and signals on mismatch."

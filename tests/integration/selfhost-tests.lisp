@@ -40,6 +40,22 @@
 
 ;;; ─── Self-Hosting: CPS Transformer ─────────────────────────────────────────
 
+(deftest selfhost-quasiquote
+  "quasiquote works in defun/macrolet bodies to build and evaluate forms."
+  (assert-= 9
+    (run-repl-forms
+     "(defun make-mul (a b) `(* ,a ,b))"
+     "(let ((form (make-mul 3 3))) (eval form))"))
+  (assert-true
+    (run-repl-forms
+     "(defun wrap-in-let (var val body) `(let ((,var ,val)) ,body))"
+     "(equal (wrap-in-let 'x 5 '(+ x 1)) '(let ((x 5)) (+ x 1)))"))
+  (assert-= 8
+    (run-repl-forms
+     "(macrolet ((square (x) `(* ,x ,x)))
+        (macrolet ((sq-plus-sq (a b) `(+ (square ,a) (square ,b))))
+          (sq-plus-sq 2 2)))")))
+
 (deftest selfhost-cps-transformer
   "cl-cc compiles a CPS transformer using quasiquotes and recursion."
   (let ((r (run-repl-forms
@@ -48,15 +64,53 @@
             "(defun sh-cps (expr k)
               (cond
                 ((sh-cps-atom-p expr) `(funcall ,k ,expr))
-                ((eq (car expr) 'if)
-                 (let ((tv (gensym \"T\"))
-                       (then-r (sh-cps (caddr expr) k))
-                       (else-r (sh-cps (cadddr expr) k)))
-                   (sh-cps (cadr expr)
-                            `(lambda (,tv) (if ,tv ,then-r ,else-r)))))
-                (t `(funcall ,k ,expr))))"
+                 ((eq (car expr) 'if)
+                  (let ((tv (gensym \"T\"))
+                        (then-r (sh-cps (caddr expr) k))
+                        (else-r (sh-cps (cadddr expr) k)))
+                    (sh-cps (cadr expr)
+                             `(lambda (,tv) (if ,tv ,then-r ,else-r)))))
+                 (t `(funcall ,k ,expr))))"
             "(sh-cps '(if x 1 2) '(lambda (v) v))")))
     (assert-true (and (consp r) (eq (car r) 'funcall)))))
+
+(deftest-each selfhost-cps-transformer-arithmetic
+  "cl-cc compiles and runs its own CPS transformer for arithmetic expressions."
+  :cases (("add-1-2" 3
+           "(defun %cps-node (node k)
+              (cond
+                ((integerp node) `(funcall ,k ,node))
+                ((symbolp  node) `(funcall ,k ,node))
+                ((consp node)
+                 (case (car node)
+                   ((+ - *)
+                    (let ((va (gensym \"A\")) (vb (gensym \"B\")))
+                      (%cps-node (second node)
+                        `(lambda (,va)
+                           ,(%cps-node (third node)
+                               `(lambda (,vb)
+                                  (funcall ,k (,(car node) ,va ,vb))))))))
+                   (otherwise (error \"Unsupported\"))))))
+            (defun cps-run (expr)
+              (eval (list `(lambda (k) ,(%cps-node expr 'k))
+                          '(lambda (result) result))))
+            (cps-run '(+ 1 2))")
+          ("mul-6-7" 42
+           "(defun %cps-node2 (node k)
+              (cond
+                ((integerp node) `(funcall ,k ,node))
+                ((symbolp  node) `(funcall ,k ,node))
+                ((consp node)
+                 (let ((va (gensym \"A\")) (vb (gensym \"B\")))
+                   (%cps-node2 (second node)
+                     `(lambda (,va)
+                        ,(%cps-node2 (third node)
+                            `(lambda (,vb)
+                               (funcall ,k (,(car node) ,va ,vb))))))))))
+            (eval (list `(lambda (k) ,(%cps-node2 '(* 6 7) 'k))
+                        '(lambda (result) result)))"))
+  (expected form)
+  (assert-= expected (run-string form)))
 
 ;;; ─── Self-Hosting: Optimizer Pattern Matcher ───────────────────────────────
 

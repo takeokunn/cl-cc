@@ -513,84 +513,84 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 | FR | 機能 | 難易度 | 実用価値 | 依存 |
 |---|---|---|---|---|
-| FR-005 | 型アノテーション → Codegen 接続 | Hard | High | FR-002 |
-| FR-006 | Fixnum Fast Path | Medium | High | FR-005 |
-| FR-302 | 出現型 / Flow-Sensitive Narrowing | Hard | High | FR-005 |
-| FR-105 | ファントム型 | Medium | Medium | — |
-| FR-1202 | ゼロコスト抽象 (Newtype) | Medium | Medium | — |
-| FR-1501 | Null 安全 / Optional 型 | Medium | High | — |
-| FR-1601 | 型付きホール | Medium | High | — |
-| FR-1101 | 変性アノテーション | Hard | Medium | FR-003 |
-| FR-801 | subtypep 完全化 | Hard | High | — |
+| FR-005 (dep ref) | 型アノテーション → Codegen 接続 | Hard | High | FR-002 |
+| FR-006 (dep ref) | Fixnum Fast Path | Medium | High | FR-005 |
+| FR-302 (dep ref) | 出現型 / Flow-Sensitive Narrowing | Hard | High | FR-005 |
+| FR-105 (dep ref) | ファントム型 | Medium | Medium | — |
+| FR-1202 (dep ref) | ゼロコスト抽象 (Newtype) | Medium | Medium | — |
+| FR-1501 (dep ref) | Null 安全 / Optional 型 | Medium | High | — |
+| FR-1601 (dep ref) | 型付きホール | Medium | High | — |
+| FR-1101 (dep ref) | 変性アノテーション | Hard | Medium | FR-003 |
+| FR-801 (dep ref) | subtypep 完全化 | Hard | High | — |
 
 ### Tier 2 — 中期実装 (基盤完成後)
 
 | FR | 機能 | 難易度 | 実用価値 | 依存 |
 |---|---|---|---|---|
-| FR-203 | 行多相 | Hard | Medium | FR-003 |
-| FR-601 | 段階的型付けと責任追跡 | Very Hard | High | FR-005 |
-| FR-602 | 設計による契約 | Hard | Medium | — |
-| FR-701 | エスケープ解析 | Hard | High | — |
-| FR-702 | SROA | Hard | High | FR-701 |
-| FR-104 | 存在型 | Hard | Medium | FR-003 |
-| FR-1001 | 型クラス基盤 | Hard | High | FR-003 |
-| FR-1203 | 再帰型 / μ型 | Hard | Medium | FR-003 |
-| FR-1306 | 型ラムダ | Hard | Medium | FR-101 |
-| FR-1603 | エフェクト推論 | Hard | Medium | FR-401 |
+| FR-203 (dep ref) | 行多相 | Hard | Medium | FR-003 |
+| FR-601 (dep ref) | 段階的型付けと責任追跡 | Very Hard | High | FR-005 |
+| FR-602 (dep ref) | 設計による契約 | Hard | Medium | — |
+| FR-701 (dep ref) | エスケープ解析 | Hard | High | — |
+| FR-702 (dep ref) | SROA | Hard | High | FR-701 |
+| FR-104 (dep ref) | 存在型 | Hard | Medium | FR-003 |
+| FR-1001 (dep ref) | 型クラス基盤 | Hard | High | FR-003 |
+| FR-1203 (dep ref) | 再帰型 / μ型 | Hard | Medium | FR-003 |
+| FR-1306 (dep ref) | 型ラムダ | Hard | Medium | FR-101 |
+| FR-1603 (dep ref) | エフェクト推論 | Hard | Medium | FR-401 |
 
 ### Tier 3 — 長期実装 (研究的・基盤依存)
 
 | FR | 機能 | 難易度 | 実用価値 | 依存 |
 |---|---|---|---|---|
-| FR-401 | エフェクト型 | Very Hard | High | FR-003 |
-| FR-402 | 代数的エフェクト | Very Hard | High | FR-401 |
-| FR-501 | 線形型 / アフィン型 | Very Hard | Medium | FR-003 |
-| FR-301 | 精緻型 (Liquid Types) | Very Hard | High | FR-003, SMT |
-| FR-101 | 高カインド型 | Very Hard | Medium | FR-003 |
-| FR-103 | GADTs | Very Hard | Medium | FR-003 |
-| FR-1301 | カインド多相 | Very Hard | Medium | FR-101 |
-| FR-1404 | 集合論的型システム | Very Hard | Medium | FR-802 |
-| FR-1502 | 並行安全型 | Hard | High | FR-501 |
-| FR-1503 | 情報流型 | Very Hard | Medium | FR-003 |
+| FR-401 (dep ref) | エフェクト型 | Very Hard | High | FR-003 |
+| FR-402 (dep ref) | 代数的エフェクト | Very Hard | High | FR-401 |
+| FR-501 (dep ref) | 線形型 / アフィン型 | Very Hard | Medium | FR-003 |
+| FR-301 (dep ref) | 精緻型 (Liquid Types) | Very Hard | High | FR-003, SMT |
+| FR-101 (dep ref) | 高カインド型 | Very Hard | Medium | FR-003 |
+| FR-103 (dep ref) | GADTs | Very Hard | Medium | FR-003 |
+| FR-1301 (dep ref) | カインド多相 | Very Hard | Medium | FR-101 |
+| FR-1404 (dep ref) | 集合論的型システム | Very Hard | Medium | FR-802 |
+| FR-1502 (dep ref) | 並行安全型 | Hard | High | FR-501 |
+| FR-1503 (dep ref) | 情報流型 | Very Hard | Medium | FR-003 |
 
 ### Tier 2 追加 (新セクション由来)
 
 | FR | 機能 | 難易度 | 実用価値 | 依存 |
 |---|---|---|---|---|
-| FR-1903 | 網羅性検査 | Medium | High | — |
-| FR-2101 | 型指向テスト生成 | Medium | High | FR-1001 |
-| FR-2102 | 型安全シリアライゼーション | Medium | High | FR-1001 |
-| FR-1604 | 値制限 | Medium | High | FR-003 |
-| FR-1802 | 自由モナド | Hard | Medium | FR-1001 |
-| FR-2104 | 型融合 / デフォレスト化 | Hard | High | FR-1403 |
-| FR-2103 | 型安全 FFI | Hard | High | — |
+| FR-1903 (dep ref) | 網羅性検査 | Medium | High | — |
+| FR-2101 (dep ref) | 型指向テスト生成 | Medium | High | FR-1001 |
+| FR-2102 (dep ref) | 型安全シリアライゼーション | Medium | High | FR-1001 |
+| FR-1604 (dep ref) | 値制限 | Medium | High | FR-003 |
+| FR-1802 (dep ref) | 自由モナド | Hard | Medium | FR-1001 |
+| FR-2104 (dep ref) | 型融合 / デフォレスト化 | Hard | High | FR-1403 |
+| FR-2103 (dep ref) | 型安全 FFI | Hard | High | — |
 
 ### Tier 3 追加 (新セクション由来)
 
 | FR | 機能 | 難易度 | 実用価値 | 依存 |
 |---|---|---|---|---|
-| FR-1901 | 停止性検査 | Hard | Medium | FR-1203 |
-| FR-1904 | 正値性検査 | Hard | Medium | FR-103 |
-| FR-1703 | 多段階プログラミング | Very Hard | Medium | FR-003 |
-| FR-1801 | Lens / Optics | Very Hard | Medium | FR-101 |
-| FR-2005 | 正規化による評価 (NbE) | Very Hard | High | FR-303 |
-| FR-1704 | 型安全メタプログラミング | Very Hard | Medium | FR-1703 |
-| FR-1905 | サイズ型 | Very Hard | Medium | FR-1901 |
+| FR-1901 (dep ref) | 停止性検査 | Hard | Medium | FR-1203 |
+| FR-1904 (dep ref) | 正値性検査 | Hard | Medium | FR-103 |
+| FR-1703 (dep ref) | 多段階プログラミング | Very Hard | Medium | FR-003 |
+| FR-1801 (dep ref) | Lens / Optics | Very Hard | Medium | FR-101 |
+| FR-2005 (dep ref) | 正規化による評価 (NbE) | Very Hard | High | FR-303 |
+| FR-1704 (dep ref) | 型安全メタプログラミング | Very Hard | Medium | FR-1703 |
+| FR-1905 (dep ref) | サイズ型 | Very Hard | Medium | FR-1901 |
 
 ### Tier 4 — 研究フェーズ (Extremely Hard)
 
 | FR | 機能 | 難易度 | 根拠 |
 |---|---|---|---|
-| FR-303 | 依存型 | Extremely Hard | Lean 4 / Idris 2 と同等の型理論が必要 |
-| FR-502 | 所有権型 / 借用検査 | Extremely Hard | Polonius アルゴリズム |
-| FR-505 | セッション型 | Extremely Hard | 線形型 + 双対性の完全実装 |
-| FR-1302 | 宇宙多相 | Extremely Hard | 依存型基盤が前提 |
-| FR-1304 | 非述語的多相 | Extremely Hard | 型推論の決定不可能性と戦う |
-| FR-1205 | 商型 | Extremely Hard | 依存型 + cubical TT が必要 |
-| FR-1405 | 極性型理論 | Extremely Hard | フォーカシング証明の実装 |
-| FR-2002 | 証明付きコード | Extremely Hard | SMT + 証明チェッカーの統合 |
-| FR-2003 | タクティックベース型検査 | Extremely Hard | Lean 4 相当の証明エンジン |
-| FR-2004 | ホモトピー型理論 | Extremely Hard | Cubical Type Theory が必要 |
+| FR-303 (dep ref) | 依存型 | Extremely Hard | Lean 4 / Idris 2 と同等の型理論が必要 |
+| FR-502 (dep ref) | 所有権型 / 借用検査 | Extremely Hard | Polonius アルゴリズム |
+| FR-505 (dep ref) | セッション型 | Extremely Hard | 線形型 + 双対性の完全実装 |
+| FR-1302 (dep ref) | 宇宙多相 | Extremely Hard | 依存型基盤が前提 |
+| FR-1304 (dep ref) | 非述語的多相 | Extremely Hard | 型推論の決定不可能性と戦う |
+| FR-1205 (dep ref) | 商型 | Extremely Hard | 依存型 + cubical TT が必要 |
+| FR-1405 (dep ref) | 極性型理論 | Extremely Hard | フォーカシング証明の実装 |
+| FR-2002 (dep ref) | 証明付きコード | Extremely Hard | SMT + 証明チェッカーの統合 |
+| FR-2003 (dep ref) | タクティックベース型検査 | Extremely Hard | Lean 4 相当の証明エンジン |
+| FR-2004 (dep ref) | ホモトピー型理論 | Extremely Hard | Cubical Type Theory が必要 |
 
 ---
 

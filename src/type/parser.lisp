@@ -148,18 +148,26 @@
               (body (parse-type-specifier (second args))))
          (make-type-exists :var var :body body)))
 
-      ;; ─── Recursive: (mu a T) ──────────────────────────────────────────
-      ((and hn (or (string= hn "MU") (string= hn "μ")))
-       (unless (= (length args) 2)
-         (type-parse-error "mu requires (mu var body)"))
-       (let* ((var  (fresh-type-var (first args)))
-              (body (parse-type-specifier (second args))))
-         (make-type-mu :var var :body body)))
+       ;; ─── Recursive: (mu a T) ──────────────────────────────────────────
+       ((and hn (or (string= hn "MU") (string= hn "μ")))
+        (unless (= (length args) 2)
+          (type-parse-error "mu requires (mu var body)"))
+        (let* ((var  (fresh-type-var (first args)))
+               (body (parse-type-specifier (second args))))
+          (make-type-mu :var var :body body)))
 
-      ;; ─── Qualified: (=> (C1 a) ... T) ────────────────────────────────
-      ((and hn (string= hn "=>"))
-       (unless (>= (length args) 2)
-         (type-parse-error "=> requires (=> constraint... body)"))
+       ;; ─── Type lambda: (type-lambda a T) ───────────────────────────────
+       ((and hn (string= hn "TYPE-LAMBDA"))
+        (unless (= (length args) 2)
+          (type-parse-error "type-lambda requires (type-lambda var body)"))
+        (let* ((var  (fresh-type-var (first args)))
+               (body (parse-type-specifier (second args))))
+          (make-type-lambda :var var :body body)))
+
+       ;; ─── Qualified: (=> (C1 a) ... T) ────────────────────────────────
+       ((and hn (string= hn "=>"))
+        (unless (>= (length args) 2)
+          (type-parse-error "=> requires (=> constraint... body)"))
        (let* ((body-spec    (car (last args)))
               (cst-specs    (butlast args))
               (body         (parse-type-specifier body-spec))

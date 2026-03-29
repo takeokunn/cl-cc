@@ -52,8 +52,9 @@
        (:file "loop-parser")     ; LOOP: CPS token parser → IR plist
        (:file "loop-emitters")   ; LOOP: IR → code-fragment tables
        (:file "loop")            ; LOOP: generator — assembles tagbody from IR
-       (:file "macros-stdlib")   ; stdlib: push/pop/incf + ANSI CL + higher-order fns
-       (:file "macros-sequence") ; sequences: sort/reduce/substitute
+        (:file "macros-stdlib")   ; stdlib: push/pop/incf + ANSI CL + higher-order fns
+        (:file "macros-filesystem") ; file/IO/runtime stubs split from stdlib
+        (:file "macros-sequence") ; sequences: sort/reduce/substitute
        (:file "macros-compat")  ; ANSI CL compat: package no-ops, getf/remf, progv, coerce, CLOS, plist
        (:file "expander-data")      ; expander: grammar tables + dispatch table declarations
        (:file "expander-defstruct") ; expander: defstruct expansion helpers

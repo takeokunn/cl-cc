@@ -209,15 +209,28 @@
             (values form nil)))
       (values form nil)))
 
+(defun %our-macroexpand-all-recursive (form env)
+  "Recursively expand FORM after a single expansion step."
+  (multiple-value-bind (expanded expanded-p)
+      (our-macroexpand-1 form env)
+    (if expanded-p
+        (%our-macroexpand-all-recursive expanded env)
+        (typecase form
+          (cons
+           (mapcar (lambda (x) (%our-macroexpand-all-recursive x env)) form))
+          (t form)))))
+
 (defun our-macroexpand (form &optional env)
   "Fully expand FORM by repeatedly applying macroexpand-1.
    Returns (VALUES expanded-form expanded-p)."
-  (loop
-    (multiple-value-bind (expanded expanded-p)
-        (our-macroexpand-1 form env)
-      (unless expanded-p
-        (return (values form (not (eq form expanded)))))
-      (setf form expanded))))
+  (let ((expanded-p nil))
+    (loop
+      (multiple-value-bind (expanded step-expanded-p)
+          (our-macroexpand-1 form env)
+        (unless step-expanded-p
+          (return (values form expanded-p)))
+        (setf form expanded
+              expanded-p t)))))
 
 (defun %expand-quasiquote (template)
   "Transform a quasiquote template into list/cons/append calls.
@@ -249,20 +262,12 @@ Handles (cl-cc::unquote x) and (cl-cc::unquote-splicing x) within template."
   (cond
     ;; Quasiquote — expand before further processing
     ((and (consp form) (eq (car form) 'cl-cc::backquote))
-     (our-macroexpand-all (%expand-quasiquote (second form)) env))
+      (our-macroexpand-all (%expand-quasiquote (second form)) env))
     ;; Quote — never recurse into quoted data
     ((and (consp form) (eq (car form) 'quote))
-     form)
+      form)
     ;; General: try macro expansion first, then recurse
-    (t
-     (multiple-value-bind (exp expanded-p)
-         (our-macroexpand-1 form env)
-       (if expanded-p
-           (our-macroexpand-all exp env)
-           (typecase form
-             (cons
-              (mapcar (lambda (x) (our-macroexpand-all x env)) form))
-             (t form)))))))
+    (t (%our-macroexpand-all-recursive form env))))
 
 ;;; Macro Definition Macro
 

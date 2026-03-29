@@ -190,6 +190,13 @@
     (assert-true (type-mu-p ty))
     (assert-true (type-var-p (cl-cc/type::type-mu-var ty)))))
 
+(deftest parse-type-lambda
+  "(type-lambda a fixnum) produces type-lambda."
+  (let ((ty (cl-cc/type::parse-type-specifier '(type-lambda a fixnum))))
+    (assert-true (type-lambda-p ty))
+    (assert-true (type-var-p (type-lambda-var ty)))
+    (assert-true (type-equal-p type-int (type-lambda-body ty)))))
+
 ;;; ─── Qualified types: => ─────────────────────────────────────────────────
 
 (deftest parse-qualified-type

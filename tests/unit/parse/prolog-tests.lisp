@@ -38,6 +38,33 @@
       (cl-cc::prolog-cut ()))
     (nreverse results)))
 
+(defun prolog-solution-count (goal)
+  "Return the number of solutions for GOAL."
+  (length (all-envs goal)))
+
+(defmacro assert-prolog-peephole-equal (instructions expected)
+  (let ((result (gensym "RESULT")))
+    `(let ((,result (cl-cc:apply-prolog-peephole ,instructions)))
+       (assert-equal ,expected ,result))))
+
+(defmacro assert-prolog-peephole-length= (instructions expected-length)
+  (let ((result (gensym "RESULT")))
+    `(let ((,result (cl-cc:apply-prolog-peephole ,instructions)))
+       (assert-= ,expected-length (length ,result)))))
+
+(defmacro assert-prolog-peephole-not-contains (instructions pattern)
+  (let ((result (gensym "RESULT")))
+    `(let ((,result (cl-cc:apply-prolog-peephole ,instructions)))
+       (assert-false (member ,pattern ,result :test #'equal)))))
+
+(defmacro assert-prolog-query-count= (goal expected-count)
+  (let ((count (gensym "COUNT")))
+    `(let ((,count (prolog-solution-count ,goal)))
+       (assert-= ,expected-count ,count))))
+
+(defmacro assert-prolog-query-one-succeeds (goal)
+  `(assert-true (cl-cc:query-one ,goal)))
+
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; logic-var-p
 ;;; ─────────────────────────────────────────────────────────────────────────
@@ -172,7 +199,7 @@
   :cases (("succeeds" '(/= 1 2) 1)
           ("fails"    '(/= 1 1) 0))
   (goal expected-count)
-  (assert-= expected-count (length (all-envs goal))))
+  (assert-= expected-count (prolog-solution-count goal)))
 
 (deftest prolog-builtin-conjunction
   "Built-in 'and' chains goals and accumulates bindings"
@@ -183,14 +210,14 @@
 
 (deftest prolog-builtin-disjunction
   "Built-in 'or' tries each alternative"
-  (assert-= 2 (length (all-envs '(or (= ?x 1) (= ?x 2))))))
+  (assert-= 2 (prolog-solution-count '(or (= ?x 1) (= ?x 2)))))
 
 (deftest-each prolog-builtin-when
   "Built-in :when: succeeds for truthy, fails for falsy"
   :cases (("true"  '(:when t)   1)
           ("false" '(:when nil) 0))
   (goal expected-count)
-  (assert-= expected-count (length (all-envs goal))))
+  (assert-= expected-count (prolog-solution-count goal)))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Cut operator
@@ -212,8 +239,8 @@
 
 (deftest prolog-member-behavior
   "member/2: hit, miss, and full enumeration"
-  (assert-= 1 (length (all-envs '(member 2 (cons 1 (cons 2 (cons 3 nil)))))))
-  (assert-= 0 (length (all-envs '(member 99 (cons 1 (cons 2 nil))))))
+  (assert-= 1 (prolog-solution-count '(member 2 (cons 1 (cons 2 (cons 3 nil))))))
+  (assert-= 0 (prolog-solution-count '(member 99 (cons 1 (cons 2 nil)))))
   (assert-= 3 (length (cl-cc:query-all '(member ?x (cons 1 (cons 2 (cons 3 nil))))))))
 
 (deftest-each prolog-append-known-inputs
@@ -230,14 +257,14 @@
   :cases (("empty"     '(reverse nil ?r))
           ("singleton" '(reverse (cons 1 nil) ?r)))
   (goal)
-  (assert-= 1 (length (all-envs goal))))
+  (assert-= 1 (prolog-solution-count goal)))
 
 (deftest-each prolog-length-queries
   "length/2: produces exactly one solution"
   :cases (("empty" '(length nil ?n))
           ("three" '(length (cons a (cons b (cons c nil))) ?n)))
   (goal)
-  (assert-= 1 (length (all-envs goal))))
+  (assert-= 1 (prolog-solution-count goal)))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; solve-conjunction
@@ -266,8 +293,7 @@
 
 (deftest prolog-query-one-success
   "query-one returns the first substituted goal on success"
-  (let ((result (cl-cc:query-one '(member ?x (cons a (cons b nil))))))
-    (assert-true result)))
+  (assert-prolog-query-one-succeeds '(member ?x (cons a (cons b nil)))))
 
 (deftest prolog-query-one-failure
   "query-one returns nil when no solution exists"
@@ -275,7 +301,7 @@
 
 (deftest prolog-query-all-count
   "query-all returns every solution"
-  (assert-= 4 (length (cl-cc:query-all '(member ?x (cons 1 (cons 2 (cons 3 (cons 4 nil)))))))))
+  (assert-prolog-query-count= '(member ?x (cons 1 (cons 2 (cons 3 (cons 4 nil))))) 4))
 
 (deftest-each prolog-query-first-n
   "query-first-n returns exactly N solutions"
@@ -294,7 +320,7 @@
   (with-fresh-prolog
     (cl-cc:def-fact (likes alice bob))
     (cl-cc:def-fact (likes bob carol))
-    (assert-= 1 (length (cl-cc:query-all '(likes ?who bob))))))
+    (assert-prolog-query-count= '(likes ?who bob) 1)))
 
 (deftest prolog-def-rule-one-level
   "def-rule resolves one inference step"
@@ -302,7 +328,7 @@
     (cl-cc:def-fact (parent tom mary))
     (cl-cc:def-fact (parent tom john))
     (cl-cc:def-rule (child ?c ?p) (parent ?p ?c))
-    (assert-= 2 (length (cl-cc:query-all '(child ?c tom))))))
+    (assert-prolog-query-count= '(child ?c tom) 2)))
 
 (deftest prolog-def-rule-transitive
   "def-rule supports multi-hop inference"
@@ -311,7 +337,7 @@
     (cl-cc:def-fact (parent mary ann))
     (cl-cc:def-rule (ancestor ?a ?d) (parent ?a ?d))
     (cl-cc:def-rule (ancestor ?a ?d) (parent ?a ?m) (ancestor ?m ?d))
-    (assert-= 2 (length (cl-cc:query-all '(ancestor tom ?d))))))
+    (assert-prolog-query-count= '(ancestor tom ?d) 2)))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Type-inference Prolog rules
@@ -342,12 +368,9 @@
 
 (deftest prolog-peephole-cases
   "Peephole: const-move fusion, self-move removal, and passthrough"
-  (assert-equal '((:const :r1 42))
-                (cl-cc:apply-prolog-peephole '((:const :r0 42) (:move :r1 :r0))))
-  (let ((result (cl-cc:apply-prolog-peephole '((:move :r0 :r0) (:const :r1 1)))))
-    (assert-false (member '(:move :r0 :r0) result :test #'equal)))
-  (assert-equal '((:add :r2 :r0 :r1))
-                (cl-cc:apply-prolog-peephole '((:add :r2 :r0 :r1)))))
+  (assert-prolog-peephole-equal '((:const :r0 42) (:move :r1 :r0)) '((:const :r1 42)))
+  (assert-prolog-peephole-not-contains '((:move :r0 :r0) (:const :r1 1)) '(:move :r0 :r0))
+  (assert-prolog-peephole-equal '((:add :r2 :r0 :r1)) '((:add :r2 :r0 :r1))))
 
 (deftest prolog-peephole-empty-input
   "Peephole: empty instruction list returns empty"
@@ -355,8 +378,7 @@
 
 (deftest prolog-peephole-single-instruction
   "Peephole: a single instruction with no pair is returned unchanged"
-  (assert-equal '((:const :r0 7))
-                (cl-cc:apply-prolog-peephole '((:const :r0 7)))))
+  (assert-prolog-peephole-equal '((:const :r0 7)) '((:const :r0 7))))
 
 (deftest prolog-peephole-multiple-pairs
   "Peephole: only matching pairs are fused; others pass through"
@@ -369,29 +391,23 @@
 
 (deftest prolog-peephole-jump-to-next-label-eliminated
   "Peephole rule 2: (:jump L0)(:label L0) → (:label L0)"
-  (let ((result (cl-cc:apply-prolog-peephole
-                 '((:jump "L0") (:label "L0")))))
-    (assert-= 1 (length result))
-    (assert-equal '(:label "L0") (first result))))
+  (assert-prolog-peephole-length= '((:jump "L0") (:label "L0")) 1)
+  (assert-equal '(:label "L0")
+                (first (cl-cc:apply-prolog-peephole '((:jump "L0") (:label "L0"))))))
 
 (deftest prolog-peephole-jump-to-different-label-kept
   "Peephole rule 2: (:jump L1)(:label L0) — label mismatch, no elimination"
-  (let ((result (cl-cc:apply-prolog-peephole
-                 '((:jump "L1") (:label "L0")))))
-    (assert-= 2 (length result))))
+  (assert-prolog-peephole-length= '((:jump "L1") (:label "L0")) 2))
 
 (deftest prolog-peephole-double-const-same-reg
   "Peephole rule 3: (:const ?r v1)(:const ?r v2) — second overwrites first"
-  (let ((result (cl-cc:apply-prolog-peephole
-                 '((:const :r0 1) (:const :r0 99)))))
-    (assert-= 1 (length result))
-    (assert-equal '(:const :r0 99) (first result))))
+  (assert-prolog-peephole-length= '((:const :r0 1) (:const :r0 99)) 1)
+  (assert-equal '(:const :r0 99)
+                (first (cl-cc:apply-prolog-peephole '((:const :r0 1) (:const :r0 99))))))
 
 (deftest prolog-peephole-double-const-different-regs-kept
   "Peephole rule 3: (:const :r0 v1)(:const :r1 v2) — different regs, no merge"
-  (let ((result (cl-cc:apply-prolog-peephole
-                 '((:const :r0 1) (:const :r1 2)))))
-    (assert-= 2 (length result))))
+  (assert-prolog-peephole-length= '((:const :r0 1) (:const :r1 2)) 2))
 
 (deftest prolog-peephole-move-chain-propagates-source
   "Peephole rule 4: (:move :r1 :r0)(:move :r2 :r1) — source propagated to end of chain"
@@ -403,6 +419,4 @@
 
 (deftest prolog-peephole-move-chain-non-chain-kept
   "Peephole rule 4: (:move :r1 :r0)(:move :r3 :r2) — different source, no propagation"
-  (let ((result (cl-cc:apply-prolog-peephole
-                 '((:move :r1 :r0) (:move :r3 :r2)))))
-    (assert-= 2 (length result))))
+  (assert-prolog-peephole-length= '((:move :r1 :r0) (:move :r3 :r2)) 2))

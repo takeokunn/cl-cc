@@ -53,6 +53,17 @@ TC-DEF may be a typeclass-def or the old type-class struct — both are accepted
   (setf (gethash name *typeclass-registry*) tc-def)
   name)
 
+(defun %typeclass-instance-overlaps-p (type-a type-b)
+  "Return T when TYPE-A and TYPE-B can unify, meaning the instances overlap.
+
+This is a conservative coherence check: if two instances for the same class
+could both match the same concrete type, we reject the later registration."
+  (and (not (type-equal-p type-a type-b))
+       (multiple-value-bind (_subst ok)
+           (type-unify type-a type-b)
+         (declare (ignore _subst))
+         ok)))
+
 (defun %typeclass-default-methods (class-name)
   "Return the default method alist for CLASS-NAME, or NIL."
   (let ((tc-def (lookup-typeclass class-name)))
@@ -68,6 +79,56 @@ TC-DEF may be a typeclass-def or the old type-class struct — both are accepted
             (remove-if (lambda (pair)
                          (assoc (car pair) method-impls :test #'eq))
                        defaults))))
+
+(defun %typeclass-param-name (param)
+  "Return a stable identifier for PARAM, which may be a type-var or symbol."
+  (cond
+    ((type-var-p param) (type-var-name param))
+    ((symbolp param) param)
+    (t param)))
+
+(defun %typeclass-instance-args (type)
+  "Return the ordered instance arguments encoded by TYPE.
+Single-parameter instances use TYPE itself; multi-parameter instances use a type-product."
+  (if (type-product-p type)
+      (type-product-elems type)
+      (list type)))
+
+(defun %typeclass-instance-arg-at (type index)
+  (nth index (%typeclass-instance-args type)))
+
+(defun %typeclass-fundep-pairs (tc-def)
+  "Normalize functional dependencies from TC-DEF into ((from...) . (to...)) pairs."
+  (mapcar (lambda (dep)
+            (cons (if (listp (car dep)) (car dep) (list (car dep)))
+                  (if (listp (cdr dep)) (cdr dep) (list (cdr dep)))))
+          (typeclass-def-functional-deps tc-def)))
+
+(defun %typeclass-fundep-violation-p (tc-def existing-type new-type)
+  "Return T when NEW-TYPE would violate TC-DEF functional dependencies
+relative to EXISTING-TYPE. Uses positional matching over type params."
+  (let* ((params (typeclass-def-type-params tc-def))
+         (param-names (mapcar #'%typeclass-param-name params))
+         (existing-args (%typeclass-instance-args existing-type))
+         (new-args (%typeclass-instance-args new-type)))
+    (dolist (dep (%typeclass-fundep-pairs tc-def) nil)
+      (let* ((from-names (car dep))
+             (to-names   (cdr dep))
+             (from-indices (mapcar (lambda (name)
+                                     (position name param-names :test #'equal))
+                                   from-names))
+             (to-indices   (mapcar (lambda (name)
+                                     (position name param-names :test #'equal))
+                                   to-names)))
+        (when (and (every #'numberp from-indices)
+                   (every #'numberp to-indices))
+          (let ((existing-from (mapcar (lambda (i) (nth i existing-args)) from-indices))
+                (new-from      (mapcar (lambda (i) (nth i new-args)) from-indices)))
+            (when (every #'type-equal-p existing-from new-from)
+              (let ((existing-to (mapcar (lambda (i) (nth i existing-args)) to-indices))
+                    (new-to      (mapcar (lambda (i) (nth i new-args)) to-indices)))
+                (unless (every #'type-equal-p existing-to new-to)
+                  (return t))))))))))
 
 (defun lookup-typeclass (name)
   "Return the typeclass-def (or type-class) for NAME, or nil if not registered."
@@ -111,6 +172,32 @@ METHOD-IMPLS is an alist of (method-name . implementation)."
     (error 'type-inference-error
            :message (format nil "Duplicate typeclass instance for ~A / ~A"
                             class-name (type-to-string type))))
+  (dolist (existing (loop for k being the hash-keys of *typeclass-instance-registry*
+                          using (hash-value inst)
+                          when (and (consp k) (eq (car k) class-name))
+                          collect inst))
+    (when (%typeclass-instance-overlaps-p (typeclass-instance-instance-type existing) type)
+      (error 'type-inference-error
+             :message (format nil
+                              "Overlapping typeclass instances for ~A: ~A and ~A"
+                              class-name
+                              (type-to-string (typeclass-instance-instance-type existing))
+                              (type-to-string type)))))
+  (let ((tc-def (lookup-typeclass class-name)))
+    (when (typeclass-def-p tc-def)
+      (dolist (existing (loop for k being the hash-keys of *typeclass-instance-registry*
+                              using (hash-value inst)
+                              when (and (consp k) (eq (car k) class-name))
+                              collect inst))
+        (when (%typeclass-fundep-violation-p tc-def
+                                             (typeclass-instance-instance-type existing)
+                                             type)
+          (error 'type-inference-error
+                 :message (format nil
+                                  "Functional dependency violation for ~A: ~A vs ~A"
+                                  class-name
+                                  (type-to-string (typeclass-instance-instance-type existing))
+                                  (type-to-string type)))))))
   (let ((inst (%make-typeclass-instance
                 :class-name    class-name
                 :instance-type type

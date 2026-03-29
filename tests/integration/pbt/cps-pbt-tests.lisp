@@ -19,13 +19,23 @@
   "Apply CPS transformation to an expression."
   (cps-transform expr))
 
+(defun cps-lambda-form-p (cps-expr)
+  "Return T when CPS-EXPR is a lambda form."
+  (and (consp cps-expr)
+       (eq (car cps-expr) 'lambda)))
+
 (defun cps-continuation-p (cps-expr)
   "Check if CPS expression is a lambda with continuation parameter.
    Returns T if CPS-EXPR has the form (lambda (k) ...)."
-  (and (consp cps-expr)
-       (eq (car cps-expr) 'lambda)
+  (and (cps-lambda-form-p cps-expr)
        (consp (second cps-expr))
        (symbolp (car (second cps-expr)))
+       (= (length (second cps-expr)) 1)))
+
+(defun cps-lambda-single-parameter-p (cps-expr)
+  "Return T when CPS-EXPR is a single-parameter lambda."
+  (and (cps-lambda-form-p cps-expr)
+       (consp (second cps-expr))
        (= (length (second cps-expr)) 1)))
 
 (defun get-continuation-name (cps-expr)
@@ -33,146 +43,90 @@
   (and (cps-continuation-p cps-expr)
        (car (second cps-expr))))
 
-;; ----------------------------------------------------------------------------
-;; Property Tests
-;; ----------------------------------------------------------------------------
+(defun cps-continuation-name-k-p (cps-expr)
+  "Return T when the continuation parameter is named K."
+  (and (cps-continuation-p cps-expr)
+       (string= (symbol-name (get-continuation-name cps-expr)) "K")))
+
+(defmacro define-cps-shape-properties (&rest specs)
+  "Define a batch of CPS shape properties from a data table."
+  `(progn
+     ,@(mapcar (lambda (spec)
+                 (destructuring-bind (name args expr check) spec
+                   `(defproperty ,name ,args
+                       (funcall #',check (cps-transform ,expr)))))
+                specs)))
 
 (in-suite cl-cc-pbt-suite)
 
-;; -------------------------------------------------------------------------
-;; Property 1: CPS introduces continuation parameter
-;; -------------------------------------------------------------------------
+(define-cps-shape-properties
+  (cps-constant-introduces-continuation
+      (n (gen-integer :min -1000 :max 1000))
+      n
+      cps-continuation-p)
 
-(defproperty cps-constant-introduces-continuation
-    (n (gen-integer :min -1000 :max 1000))
-  (let* ((cps-result (cps-transform n)))
-    (cps-continuation-p cps-result)))
+  (cps-variable-preserves-symbol
+      (sym (gen-symbol :prefix "VAR"))
+      sym
+      cps-continuation-p)
 
-;; -------------------------------------------------------------------------
-;; Property 2: CPS of variable introduces continuation
-;; -------------------------------------------------------------------------
+  (cps-continuation-is-named-k
+      (n (gen-integer :min -1000 :max 1000))
+      n
+      cps-continuation-name-k-p)
 
-(defproperty cps-variable-preserves-symbol
-    (sym (gen-symbol :prefix "VAR"))
-  (let* ((cps-result (cps-transform sym)))
-    (cps-continuation-p cps-result)))
+  (cps-addition-produces-lambda
+      (a (gen-integer :min -100 :max 100)
+       b (gen-integer :min -100 :max 100))
+      `(+ ,a ,b)
+      cps-lambda-form-p)
 
-;; -------------------------------------------------------------------------
-;; Property 3: CPS continuation is named k
-;; -------------------------------------------------------------------------
+  (cps-subtraction-produces-lambda
+      (a (gen-integer :min -100 :max 100)
+       b (gen-integer :min -100 :max 100))
+      `(- ,a ,b)
+      cps-lambda-form-p)
 
-(defproperty cps-continuation-is-named-k
-    (n (gen-integer :min -1000 :max 1000))
-  (let* ((cps-result (cps-transform n)))
-    (and (cps-continuation-p cps-result)
-         (string= (symbol-name (get-continuation-name cps-result)) "K"))))
+  (cps-multiplication-produces-lambda
+      (a (gen-integer :min -100 :max 100)
+       b (gen-integer :min -100 :max 100))
+      `(* ,a ,b)
+      cps-lambda-form-p)
 
-;; -------------------------------------------------------------------------
-;; Property 4: CPS of addition produces lambda
-;; -------------------------------------------------------------------------
+  (cps-if-produces-lambda
+      (cond-val (gen-one-of '(-1 0 1))
+       then-val (gen-integer :min -100 :max 100)
+       else-val (gen-integer :min -100 :max 100))
+      `(if ,cond-val ,then-val ,else-val)
+      cps-lambda-form-p)
 
-(defproperty cps-addition-produces-lambda
-    (a (gen-integer :min -100 :max 100)
-     b (gen-integer :min -100 :max 100))
-  (let* ((expr `(+ ,a ,b))
-         (cps-result (cps-transform expr)))
-    (and (consp cps-result)
-         (eq (car cps-result) 'lambda))))
+  (cps-let-produces-lambda
+      (val1 (gen-integer :min -100 :max 100))
+      `(let ((x ,val1)) x)
+      cps-lambda-form-p)
 
-;; -------------------------------------------------------------------------
-;; Property 5: CPS of subtraction produces lambda
-;; -------------------------------------------------------------------------
+  (cps-progn-produces-lambda
+      (vals (gen-list-of (gen-integer :min -10 :max 10)
+                         :min-length 1 :max-length 3))
+      `(progn ,@vals)
+      cps-lambda-form-p)
 
-(defproperty cps-subtraction-produces-lambda
-    (a (gen-integer :min -100 :max 100)
-     b (gen-integer :min -100 :max 100))
-  (let* ((expr `(- ,a ,b))
-         (cps-result (cps-transform expr)))
-    (and (consp cps-result)
-         (eq (car cps-result) 'lambda))))
+  (cps-lambda-has-one-parameter
+      (n (gen-integer :min -100 :max 100))
+      n
+      cps-lambda-single-parameter-p)
 
-;; -------------------------------------------------------------------------
-;; Property 6: CPS of multiplication produces lambda
-;; -------------------------------------------------------------------------
+  (cps-nested-addition-produces-lambda
+      (a (gen-integer :min -50 :max 50)
+       b (gen-integer :min -50 :max 50)
+       c (gen-integer :min -50 :max 50))
+      `(+ (+ ,a ,b) ,c)
+      cps-lambda-form-p)
 
-(defproperty cps-multiplication-produces-lambda
-    (a (gen-integer :min -100 :max 100)
-     b (gen-integer :min -100 :max 100))
-  (let* ((expr `(* ,a ,b))
-         (cps-result (cps-transform expr)))
-    (and (consp cps-result)
-         (eq (car cps-result) 'lambda))))
-
-;; -------------------------------------------------------------------------
-;; Property 7: CPS of if expression produces lambda
-;; -------------------------------------------------------------------------
-
-(defproperty cps-if-produces-lambda
-    (cond-val (gen-one-of '(-1 0 1))
-     then-val (gen-integer :min -100 :max 100)
-     else-val (gen-integer :min -100 :max 100))
-  (let* ((expr `(if ,cond-val ,then-val ,else-val))
-         (cps-result (cps-transform expr)))
-    (and (consp cps-result)
-         (eq (car cps-result) 'lambda))))
-
-;; -------------------------------------------------------------------------
-;; Property 8: CPS of let produces lambda
-;; -------------------------------------------------------------------------
-
-(defproperty cps-let-produces-lambda
-    (val1 (gen-integer :min -100 :max 100))
-  (let* ((expr `(let ((x ,val1)) x))
-         (cps-result (cps-transform expr)))
-    (and (consp cps-result)
-         (eq (car cps-result) 'lambda))))
-
-;; -------------------------------------------------------------------------
-;; Property 9: CPS of progn produces lambda
-;; -------------------------------------------------------------------------
-
-(defproperty cps-progn-produces-lambda
-    (vals (gen-list-of (gen-integer :min -10 :max 10)
-                       :min-length 1 :max-length 3))
-  (let* ((expr `(progn ,@vals))
-         (cps-result (cps-transform expr)))
-    (and (consp cps-result)
-         (eq (car cps-result) 'lambda))))
-
-;; -------------------------------------------------------------------------
-;; Property 10: CPS always produces lambda with one parameter
-;; -------------------------------------------------------------------------
-
-(defproperty cps-lambda-has-one-parameter
-    (n (gen-integer :min -100 :max 100))
-  (let* ((cps-result (cps-transform n)))
-    (and (consp cps-result)
-         (eq (car cps-result) 'lambda)
-         (consp (second cps-result))
-         (= (length (second cps-result)) 1))))
-
-;; -------------------------------------------------------------------------
-;; Property 11: CPS of nested addition produces lambda
-;; -------------------------------------------------------------------------
-
-(defproperty cps-nested-addition-produces-lambda
-    (a (gen-integer :min -50 :max 50)
-     b (gen-integer :min -50 :max 50)
-     c (gen-integer :min -50 :max 50))
-  (let* ((expr `(+ (+ ,a ,b) ,c))
-         (cps-result (cps-transform expr)))
-    (and (consp cps-result)
-         (eq (car cps-result) 'lambda))))
-
-;; -------------------------------------------------------------------------
-;; Property 12: CPS of print produces lambda
-;; -------------------------------------------------------------------------
-
-(defproperty cps-print-produces-lambda
-    (val (gen-integer :min -100 :max 100))
-  (let* ((expr `(print ,val))
-         (cps-result (cps-transform expr)))
-    (cps-continuation-p cps-result)))
+  (cps-print-produces-lambda
+      (val (gen-integer :min -100 :max 100))
+      `(print ,val)
+      cps-continuation-p))
 
 ;; -------------------------------------------------------------------------
 ;; Property 13: Identity function for simple cases

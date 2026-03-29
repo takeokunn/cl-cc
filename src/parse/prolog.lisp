@@ -133,6 +133,8 @@
       (make-prolog-rule :head (rename-term (rule-head rule))
                         :body (mapcar #'rename-term (rule-body rule))))))
 
+(declaim (ftype function solve-goal solve-conjunction eval-lisp-condition))
+
 ;;; Cut Operator Support
 
 (define-condition prolog-cut (condition)
@@ -144,40 +146,42 @@
 ;;; Each handler is (lambda (args env k)) — continuation-passing style:
 ;;; args = predicate arguments, env = current bindings, k = success continuation.
 
+(defun prolog-cut-handler (args env k)
+  (declare (ignore args))
+  (funcall k env)
+  (signal 'prolog-cut))
+
+(defun prolog-and-handler (args env k)
+  (solve-conjunction args env k))
+
+(defun prolog-or-handler (args env k)
+  (dolist (alt args)
+    (solve-goal alt env k)))
+
+(defun prolog-unify-handler (args env k)
+  (let ((new-env (unify (first args) (second args) env)))
+    (unless (unify-failed-p new-env)
+      (funcall k new-env))))
+
+(defun prolog-not-unify-handler (args env k)
+  (let ((v1 (logic-substitute (first args) env))
+        (v2 (logic-substitute (second args) env)))
+    (when (not (equal v1 v2))
+      (funcall k env))))
+
+(defun prolog-when-handler (args env k)
+  (when (eval-lisp-condition (first args) env)
+    (funcall k env)))
+
 (defvar *builtin-predicates*
   (let ((ht (make-hash-table :test 'eq)))
-    ;; ! (cut): succeed once, then stop backtracking for the parent goal
-    (setf (gethash '! ht)
-          (lambda (args env k)
-            (declare (ignore args))
-            (funcall k env)
-            (signal 'prolog-cut)))
-    ;; and: conjunction — solve goals left to right
-    (setf (gethash 'and ht)
-          (lambda (args env k)
-            (solve-conjunction args env k)))
-    ;; or: disjunction — try each alternative
-    (setf (gethash 'or ht)
-          (lambda (args env k)
-            (dolist (alt args)
-              (solve-goal alt env k))))
-    ;; = (unification)
-    (setf (gethash '= ht)
-          (lambda (args env k)
-            (let ((new-env (unify (first args) (second args) env)))
-              (unless (unify-failed-p new-env) (funcall k new-env)))))
-    ;; /= (non-unification: succeed when the two terms are not equal)
-    (setf (gethash '/= ht)
-          (lambda (args env k)
-            (let ((v1 (logic-substitute (first args) env))
-                  (v2 (logic-substitute (second args) env)))
-              (when (not (equal v1 v2)) (funcall k env)))))
-    ;; :when / when: evaluate an embedded Lisp condition
-    (let ((lisp-cond (lambda (args env k)
-                       (when (eval-lisp-condition (first args) env)
-                         (funcall k env)))))
-      (setf (gethash ':when ht) lisp-cond)
-      (setf (gethash 'when  ht) lisp-cond))
+    (setf (gethash '! ht) #'prolog-cut-handler)
+    (setf (gethash 'and ht) #'prolog-and-handler)
+    (setf (gethash 'or ht) #'prolog-or-handler)
+    (setf (gethash '= ht) #'prolog-unify-handler)
+    (setf (gethash '/= ht) #'prolog-not-unify-handler)
+    (setf (gethash ':when ht) #'prolog-when-handler)
+    (setf (gethash 'when ht) #'prolog-when-handler)
     ht)
   "Hash table mapping built-in predicate symbols to CPS handler functions.")
 
@@ -256,40 +260,43 @@
 
 ;;; Query Interface
 
+(defun %solve-goal-with-cut (goal continuation)
+  "Run GOAL with CONTINUATION and swallow PROLOG-CUT exits."
+  (handler-case
+      (solve-goal goal nil continuation)
+    (prolog-cut ())))
+
 (defun query-all (goal)
   "Return all solutions for GOAL as a list of substituted goals.
    GOAL should be a list like (predicate arg1 arg2 ...)."
   (let ((solutions nil))
-    (handler-case
-        (solve-goal goal nil
-                    (lambda (env)
-                      (push (substitute-variables goal env) solutions)))
-      (prolog-cut ()))
+    (%solve-goal-with-cut
+     goal
+     (lambda (env)
+       (push (substitute-variables goal env) solutions)))
     (nreverse solutions)))
 
 (defun query-one (goal)
   "Return first solution for GOAL, or NIL if no solution exists."
   (block done
-    (handler-case
-        (solve-goal goal nil
-                    (lambda (env)
-                      (return-from done (substitute-variables goal env))))
-      (prolog-cut ()))
+    (%solve-goal-with-cut
+     goal
+     (lambda (env)
+       (return-from done (substitute-variables goal env))))
     nil))
 
 (defun query-first-n (goal n)
   "Return the first N solutions for GOAL."
   (let ((solutions nil)
         (count 0))
-    (handler-case
-        (solve-goal goal nil
-                    (lambda (env)
-                      (when (< count n)
-                        (push (substitute-variables goal env) solutions)
-                        (incf count))
-                      (when (>= count n)
-                        (signal 'prolog-cut))))
-      (prolog-cut ()))
+    (%solve-goal-with-cut
+     goal
+     (lambda (env)
+       (when (< count n)
+         (push (substitute-variables goal env) solutions)
+         (incf count))
+       (when (>= count n)
+         (signal 'prolog-cut))))
     (nreverse solutions)))
 
 ;;; Built-in Predicates
@@ -540,13 +547,11 @@
   "Parse INPUT (a list of tokens) with DCG RULE-NAME.
    Returns the first solution's remaining input, or NIL on failure."
   (let ((result nil))
-    (block done
-      (handler-case
-          (solve-goal (list rule-name input '?dcg-rest) nil
-                      (lambda (env)
-                        (setf result (logic-substitute '?dcg-rest env))
-                        (signal 'prolog-cut)))
-        (prolog-cut ())))
+    (%solve-goal-with-cut
+     (list rule-name input '?dcg-rest)
+     (lambda (env)
+       (setf result (logic-substitute '?dcg-rest env))
+       (signal 'prolog-cut)))
     result))
 
 (defun phrase-rest (rule-name input)
@@ -554,22 +559,19 @@
    MATCHED-P is T if parsing succeeded."
   (let ((result nil)
         (matched nil))
-    (block done
-      (handler-case
-          (solve-goal (list rule-name input '?dcg-rest) nil
-                      (lambda (env)
-                        (setf result (logic-substitute '?dcg-rest env)
-                              matched t)
-                        (signal 'prolog-cut)))
-        (prolog-cut ())))
+    (%solve-goal-with-cut
+     (list rule-name input '?dcg-rest)
+     (lambda (env)
+       (setf result (logic-substitute '?dcg-rest env)
+             matched t)
+       (signal 'prolog-cut)))
     (values matched result)))
 
 (defun phrase-all (rule-name input)
   "Parse INPUT with DCG RULE-NAME, returning all possible remaining inputs."
   (let ((results nil))
-    (handler-case
-        (solve-goal (list rule-name input '?dcg-rest) nil
-                    (lambda (env)
-                      (push (logic-substitute '?dcg-rest env) results)))
-      (prolog-cut ()))
+    (%solve-goal-with-cut
+     (list rule-name input '?dcg-rest)
+     (lambda (env)
+       (push (logic-substitute '?dcg-rest env) results)))
     (nreverse results)))

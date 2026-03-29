@@ -34,13 +34,7 @@
                               :assembly (emit-assembly optimized-program :target target)
                               :type (when type-check inferred-type)
                               :type-env (ctx-type-env ctx)
-                              :cps (if (typep expr 'ast-node)
-                                       nil
-                                       (handler-case
-                                          (cps-transform expr)
-                                        (error (e)
-                                          (declare (ignore e))
-                                          nil))))))
+                              :cps (maybe-cps-transform ast))))
 
 ;;; Standard Library (Higher-Order Functions)
 ;;; *standard-library-source* is defined in stdlib-source.lisp (loaded before this file).

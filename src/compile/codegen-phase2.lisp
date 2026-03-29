@@ -290,6 +290,11 @@ Handler lambda-list: (args result-reg ctx) → result-reg-or-nil.")
     (emit ctx (make-vm-label :name end-label))
     result-reg))
 
+(defun %compile-and-discard-extra-args (args ctx)
+  "Compile trailing ARGS for side effects only."
+  (dolist (extra (cdr args))
+    (compile-ast extra ctx)))
+
 ;; read-char: (read-char &optional stream eof-error-p eof-value recursive-p) — FR-612
 (define-phase2-handler "READ-CHAR" (args result-reg ctx)
   (let ((handle-reg (if args
@@ -305,11 +310,11 @@ Handler lambda-list: (args result-reg ctx) → result-reg-or-nil.")
          (when (fourth args) (compile-ast (fourth args) ctx)) ; recursive-p — discard
          (emit ctx (make-vm-read-char :dst raw-reg :handle handle-reg))
          (%emit-eof-value-check raw-reg eof-val-reg result-reg ctx)))
-      ;; 0-2 args: compile and discard extra args; return :eof sentinel on EOF
-      (t
-       (dolist (extra (cdr args)) (compile-ast extra ctx))
-       (emit ctx (make-vm-read-char :dst result-reg :handle handle-reg))
-       result-reg))))
+       ;; 0-2 args: compile and discard extra args; return :eof sentinel on EOF
+       (t
+        (%compile-and-discard-extra-args args ctx)
+        (emit ctx (make-vm-read-char :dst result-reg :handle handle-reg))
+        result-reg))))
 
 ;; read-line: (read-line &optional stream eof-error-p eof-value recursive-p) — FR-612
 (define-phase2-handler "READ-LINE" (args result-reg ctx)
@@ -326,10 +331,10 @@ Handler lambda-list: (args result-reg ctx) → result-reg-or-nil.")
          (when (fourth args) (compile-ast (fourth args) ctx))
          (emit ctx (make-vm-read-line :dst raw-reg :handle handle-reg))
          (%emit-eof-value-check raw-reg eof-val-reg result-reg ctx)))
-      (t
-       (dolist (extra (cdr args)) (compile-ast extra ctx))
-       (emit ctx (make-vm-read-line :dst result-reg :handle handle-reg))
-       result-reg))))
+       (t
+        (%compile-and-discard-extra-args args ctx)
+        (emit ctx (make-vm-read-line :dst result-reg :handle handle-reg))
+        result-reg))))
 
 ;; read: (read &optional stream eof-error-p eof-value recursive-p) — FR-612
 (define-phase2-handler "READ" (args result-reg ctx)
@@ -346,10 +351,10 @@ Handler lambda-list: (args result-reg ctx) → result-reg-or-nil.")
          (when (fourth args) (compile-ast (fourth args) ctx))
          (emit ctx (make-vm-read-sexp-inst :dst raw-reg :src handle-reg))
          (%emit-eof-value-check raw-reg eof-val-reg result-reg ctx)))
-      (t
-       (dolist (extra (cdr args)) (compile-ast extra ctx))
-       (emit ctx (make-vm-read-sexp-inst :dst result-reg :src handle-reg))
-       result-reg))))
+       (t
+        (%compile-and-discard-extra-args args ctx)
+        (emit ctx (make-vm-read-sexp-inst :dst result-reg :src handle-reg))
+        result-reg))))
 
 ;; peek-char: (peek-char handle) or (peek-char nil handle)
 (define-phase2-handler "PEEK-CHAR" (args result-reg ctx)

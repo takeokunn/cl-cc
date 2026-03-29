@@ -12,6 +12,31 @@
 
 (in-suite cl-cc-suite)
 
+(defun %compiled-assembly (code target)
+  (compilation-result-assembly (compile-string code :target target)))
+
+(defun %assert-assembly-stringp (code)
+  (let ((x86 (%compiled-assembly code :x86_64))
+        (arm (%compiled-assembly code :aarch64)))
+    (assert-true (stringp x86))
+    (assert-true (stringp arm))))
+
+(defun %assert-assembly-contains (code substring)
+  (let ((x86 (string-downcase (%compiled-assembly code :x86_64)))
+        (arm (string-downcase (%compiled-assembly code :aarch64))))
+    (assert-true (search substring x86))
+    (assert-true (search substring arm))))
+
+(defun %assert-assembly-or-not-yet-supported (code)
+  (flet ((compile-or-tag (target)
+           (handler-case
+               (%compiled-assembly code target)
+             (error () :not-yet-supported))))
+    (let ((x86 (compile-or-tag :x86_64))
+          (arm (compile-or-tag :aarch64)))
+      (assert-true (or (eq x86 :not-yet-supported) (stringp x86)))
+      (assert-true (or (eq arm :not-yet-supported) (stringp arm))))))
+
 ;;; Basic Compiler Tests
 
 (deftest-each vm-exec-arithmetic
@@ -99,31 +124,10 @@
 
 (deftest asm-emission
   "Both x86_64 and aarch64 backends generate string assembly for various forms."
-  ;; arithmetic (not constant-folded due to lambda param)
-  (let* ((x86 (compilation-result-assembly (compile-string "(lambda (x) (+ x 2))" :target :x86_64)))
-         (arm (compilation-result-assembly (compile-string "(lambda (x) (+ x 2))" :target :aarch64))))
-    (assert-true (stringp x86))
-    (assert-true (stringp arm))
-    (assert-true (search "add" (string-downcase x86)))
-    (assert-true (search "add" (string-downcase arm))))
-  ;; if
-  (let* ((x86 (compilation-result-assembly (compile-string "(if 1 2 3)" :target :x86_64)))
-         (arm (compilation-result-assembly (compile-string "(if 1 2 3)" :target :aarch64))))
-    (assert-true (stringp x86))
-    (assert-true (stringp arm)))
-  ;; let
-  (let* ((x86 (compilation-result-assembly (compile-string "(let ((x 1)) x)" :target :x86_64)))
-         (arm (compilation-result-assembly (compile-string "(let ((x 1)) x)" :target :aarch64))))
-    (assert-true (or (stringp x86) (stringp arm))))
-  ;; lambda (may not be supported yet)
-  (let ((x86 (handler-case
-                 (compilation-result-assembly (compile-string "(lambda (x) x)" :target :x86_64))
-               (error () :not-yet-supported)))
-        (arm (handler-case
-                 (compilation-result-assembly (compile-string "(lambda (x) x)" :target :aarch64))
-               (error () :not-yet-supported))))
-    (assert-true (or (eq x86 :not-yet-supported) (stringp x86)))
-    (assert-true (or (eq arm :not-yet-supported) (stringp arm)))))
+  (%assert-assembly-contains "(lambda (x) (+ x 2))" "add")
+  (%assert-assembly-stringp "(if 1 2 3)")
+  (%assert-assembly-stringp "(let ((x 1)) x)")
+  (%assert-assembly-or-not-yet-supported "(lambda (x) x)"))
 
 ;;; Error Handling Tests
 
@@ -2186,66 +2190,6 @@
   "string-not-equal returns true for different strings and false for case-insensitively equal strings."
   (assert-true (run-string "(string-not-equal \"abc\" \"def\")" :stdlib t))
   (assert-true (run-string "(if (string-not-equal \"abc\" \"ABC\") nil t)" :stdlib t)))
-
-;;; Self-Hosting via Quasiquote in defun bodies
-;;; These tests verify that cl-cc can compile quasiquote-using code
-;;; identical to its own source files (src/compile/cps.lisp pattern)
-
-(deftest selfhost-quasiquote
-  "quasiquote works in defun/macrolet bodies to build and evaluate forms."
-  (assert-= 9
-    (run-string
-      "(defun make-mul (a b) `(* ,a ,b))
-       (let ((form (make-mul 3 3)))
-         (eval form))"))
-  (assert-true
-    (run-string
-      "(defun wrap-in-let (var val body) `(let ((,var ,val)) ,body))
-       (equal (wrap-in-let 'x 5 '(+ x 1)) '(let ((x 5)) (+ x 1)))"))
-  (assert-= 8
-    (run-string
-      "(macrolet ((square (x) `(* ,x ,x)))
-         (macrolet ((sq-plus-sq (a b) `(+ (square ,a) (square ,b))))
-           (sq-plus-sq 2 2)))")))
-
-
-(deftest-each selfhost-cps-transformer
-  "cl-cc compiles and runs its own CPS transformer for arithmetic expressions."
-  :cases (("add-1-2" 3
-           "(defun %cps-node (node k)
-              (cond
-                ((integerp node) `(funcall ,k ,node))
-                ((symbolp  node) `(funcall ,k ,node))
-                ((consp node)
-                 (case (car node)
-                   ((+ - *)
-                    (let ((va (gensym \"A\")) (vb (gensym \"B\")))
-                      (%cps-node (second node)
-                        `(lambda (,va)
-                           ,(%cps-node (third node)
-                               `(lambda (,vb)
-                                  (funcall ,k (,(car node) ,va ,vb))))))))
-                   (otherwise (error \"Unsupported\"))))))
-            (defun cps-run (expr)
-              (eval (list `(lambda (k) ,(%cps-node expr 'k))
-                          '(lambda (result) result))))
-            (cps-run '(+ 1 2))")
-          ("mul-6-7" 42
-           "(defun %cps-node2 (node k)
-              (cond
-                ((integerp node) `(funcall ,k ,node))
-                ((symbolp  node) `(funcall ,k ,node))
-                ((consp node)
-                 (let ((va (gensym \"A\")) (vb (gensym \"B\")))
-                   (%cps-node2 (second node)
-                     `(lambda (,va)
-                        ,(%cps-node2 (third node)
-                            `(lambda (,vb)
-                               (funcall ,k (,(car node) ,va ,vb))))))))))
-            (eval (list `(lambda (k) ,(%cps-node2 '(* 6 7) 'k))
-                        '(lambda (result) result)))"))
-  (expected form)
-  (assert-= expected (run-string form)))
 
 
 ;;; ─── New stdlib tests (FR-495, FR-496, FR-540, FR-547, FR-582, FR-596, etc.) ──

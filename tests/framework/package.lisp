@@ -408,13 +408,19 @@
                  :make-type-effectful-function
                  :type-effectful-function
                  :type-effectful-function-effects
-                 ;; Phase 6: Rank-N polymorphism
-                 :make-type-forall
-                 :type-forall-p
-                 :type-forall-var
-                 :type-forall-type
-                 :type-forall-body
-                 ;; Kind system (additional)
+                  ;; Phase 6: Rank-N polymorphism
+                  :make-type-forall
+                  :type-forall-p
+                  :type-forall-var
+                  :type-forall-type
+                  :type-forall-body
+                  ;; Type-lambda
+                  :make-type-lambda
+                  :type-lambda-p
+                  :type-lambda-var
+                  :type-lambda-knd
+                  :type-lambda-body
+                  ;; Kind system (additional)
                  :kind-node-p
                  :fresh-kind-var
                  :kind-var-p

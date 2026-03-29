@@ -235,7 +235,6 @@ Uses a tag table to map tags to their continuations."
   (let* ((tag-expr (ast-catch-tag node))
          (body (ast-catch-body node))
          (tag-v (gensym "TAG"))
-         (catch-k (gensym "CATCH-K"))
          (result (gensym "RESULT")))
     (cps-transform-ast tag-expr
                        `(lambda (,tag-v)
@@ -264,7 +263,6 @@ Uses a tag table to map tags to their continuations."
 The cleanup forms always run, even on non-local exit."
   (let* ((protected (ast-unwind-protected node))
          (cleanup (ast-unwind-cleanup node))
-         (unwind-k (gensym "UNWIND-K"))
          (result (gensym "RESULT"))
          (cleanup-result (gensym "CLEANUP")))
     `(unwind-protect
@@ -372,8 +370,7 @@ host CL's multiple-value-call is only usable when args are known sexps."
 (defmethod cps-transform-ast ((node ast-call) k)
   "Transform function call (non-special operator calls)."
   (let* ((func (ast-call-func node))
-         (args (ast-call-args node))
-         (result (gensym "CALL")))
+         (args (ast-call-args node)))
     (if (null args)
         `(funcall ,k (,func))
         (let ((arg-syms (loop for a in args collect (gensym "ARG"))))
@@ -385,6 +382,17 @@ host CL's multiple-value-call is only usable when args are known sexps."
                                                ,(transform-args (cdr remaining-args)
                                                                (cdr remaining-syms)))))))
             (transform-args args arg-syms))))))
+
+(defun maybe-cps-transform (thing)
+  "Best-effort CPS transform for THING.
+Returns a CPS form when supported, otherwise NIL."
+  (handler-case
+      (if (typep thing 'ast-node)
+          (cps-transform-ast* thing)
+          (cps-transform thing))
+    (error (e)
+      (declare (ignore e))
+      nil)))
 
 ;;; Entry Point for AST-based CPS Transformation
 
