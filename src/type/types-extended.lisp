@@ -157,6 +157,11 @@ even if they happen to be the same object."
     ((and (type-linear-p t1) (type-linear-p t2))
      (and (eq (type-linear-grade t1) (type-linear-grade t2))
           (type-equal-p (type-linear-base t1) (type-linear-base t2))))
+    ;; refinement
+    ((and (type-refinement-p t1) (type-refinement-p t2))
+     (and (type-equal-p (type-refinement-base t1) (type-refinement-base t2))
+          (equal (type-refinement-predicate t1)
+                 (type-refinement-predicate t2))))
     ;; effect-row
     ((and (type-effect-row-p t1) (type-effect-row-p t2))
      (and (= (length (type-effect-row-effects t1))

@@ -176,14 +176,25 @@
 ;;; ─── compile-ast: ast-the ────────────────────────────────────────────────
 
 (deftest codegen-the-compiles-inner
-  "Compiling (the integer 42) compiles the inner form and returns a register."
+  "Compiling (the integer 42) compiles the inner form and emits a runtime assertion."
   (let* ((ctx (make-codegen-ctx))
-         ;; ast-the without typed-fn mode just compiles the inner form
          (reg (compile-ast (cl-cc:make-ast-the :type 'integer
-                                          :value (make-ast-int :value 42))
-                           ctx)))
+                                           :value (make-ast-int :value 42))
+                            ctx)))
     (assert-true (keywordp reg))
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-const))))
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-const))
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-typep))
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-signal-error))))
+
+(deftest codegen-if-narrows-branch-type-env
+  "Type guards narrow the then branch so proven vars skip redundant assertions."
+  (let* ((ctx (make-codegen-ctx))
+         (ast (cl-cc:lower-sexp-to-ast
+               '(if (numberp x) (the fixnum x) 0))))
+    (setf (cl-cc::ctx-env ctx) (list (cons 'x :R0)))
+    (compile-ast ast ctx)
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-typep))
+    (assert-null (codegen-find-inst ctx 'cl-cc::vm-signal-error))))
 
 ;;; ─── compile-ast: ast-function ───────────────────────────────────────────
 

@@ -134,28 +134,28 @@ Supported options:
   (:include parent)     — inherit parent slots
   (:type list/vector)   — use list/vector representation instead of CLOS"
   (let* ((name-and-options (second form))
-         (slots-raw        (cddr form))
+         (slots-raw (cddr form))
          ;; Parse name and option list
-         (name    (if (listp name-and-options) (first name-and-options) name-and-options))
+         (name (if (listp name-and-options) (first name-and-options) name-and-options))
          (options (when (listp name-and-options) (rest name-and-options)))
          ;; :conc-name option
-         (conc-opt  (find :conc-name options :key (lambda (o) (when (listp o) (first o)))))
+         (conc-opt (find :conc-name options :key (lambda (o) (when (listp o) (first o)))))
          (conc-name (if conc-opt
                         (second conc-opt)
                         (intern (concatenate 'string (symbol-name name) "-"))))
          ;; :constructor option — (:constructor nil) suppresses
-         (ctor-opt  (find :constructor options :key (lambda (o) (when (listp o) (first o)))))
+         (ctor-opt (find :constructor options :key (lambda (o) (when (listp o) (first o)))))
          (ctor-name (cond
                       ((and ctor-opt (null (second ctor-opt))) nil)
                       (ctor-opt (second ctor-opt))
                       (t (intern (concatenate 'string "MAKE-" (symbol-name name))))))
-         (boa-args  (when (and ctor-opt (cddr ctor-opt)) (third ctor-opt)))
+         (boa-args (when (and ctor-opt (cddr ctor-opt)) (third ctor-opt)))
          ;; :include option
-         (incl-opt    (find :include options :key (lambda (o) (when (listp o) (first o)))))
+         (incl-opt (find :include options :key (lambda (o) (when (listp o) (first o)))))
          (parent-name (when incl-opt (second incl-opt)))
          (parent-slots (when parent-name (gethash parent-name *defstruct-slot-registry*)))
          ;; :type option — (:type list) or (:type vector)
-         (type-opt   (find :type options :key (lambda (o) (when (listp o) (first o)))))
+         (type-opt (find :type options :key (lambda (o) (when (listp o) (first o)))))
          (struct-type (when type-opt (second type-opt)))
          ;; Slot normalization: (slot-name default &key :read-only :type) or bare slot-name
          ;; Returns (slot-name default read-only-p)
@@ -167,7 +167,7 @@ Supported options:
                             (remove-if #'stringp slots-raw)))
          (all-slots (append (or parent-slots nil) own-slots))
          ;; :predicate option — (:predicate nil) suppresses
-         (pred-opt  (find :predicate options :key (lambda (o) (when (listp o) (first o)))))
+         (pred-opt (find :predicate options :key (lambda (o) (when (listp o) (first o)))))
          (pred-name (cond
                       ((and pred-opt (null (second pred-opt))) nil)
                       (pred-opt (second pred-opt))
@@ -176,7 +176,10 @@ Supported options:
          (print-fn-opt (find :print-function options :key (lambda (o) (when (listp o) (first o)))))
          (print-obj-opt (find :print-object options :key (lambda (o) (when (listp o) (first o)))))
          (print-fn (or (when print-fn-opt (second print-fn-opt))
-                       (when print-obj-opt (second print-obj-opt)))))
+                       (when print-obj-opt (second print-obj-opt))))
+         ;; FR-1005: deriving support (minimal core implementation)
+         (deriving-opt (find :deriving options :key (lambda (o) (when (listp o) (first o)))))
+         (derived-classes (when deriving-opt (rest deriving-opt))))
     ;; Register slot info for :include inheritance
     (setf (gethash name *defstruct-slot-registry*) all-slots)
     ;; Dispatch: :type list/vector → non-CLOS expansion; otherwise → CLOS expansion
@@ -185,7 +188,8 @@ Supported options:
         (let* ((ctor-form (when ctor-name
                             (%defstruct-typed-constructor ctor-name name struct-type boa-args all-slots)))
                (accessor-forms (%defstruct-typed-accessors name struct-type conc-name all-slots))
-               (pred-form (%defstruct-typed-predicate pred-name name struct-type (length all-slots))))
+               (pred-form (when pred-name
+                            (%defstruct-typed-predicate pred-name name struct-type (length all-slots)))))
           `(progn ,@(when ctor-form (list ctor-form))
                   ,@accessor-forms
                   ,@(when pred-form (list pred-form))
@@ -195,40 +199,48 @@ Supported options:
                  (if conc-name
                      (intern (concatenate 'string (symbol-name conc-name) (symbol-name slot-name)))
                      slot-name)))
-          ;; Register accessors for setf expansion — only own non-read-only slots
+          ;; Register accessors for setf expansion — only own non-read-only slots.
           ;; (parent accessors are already registered under the parent's conc-name; FR-545)
           (dolist (slot own-slots)
-            (unless (third slot) ; skip read-only slots
+            (unless (third slot)
               (setf (gethash (accessor-name (first slot)) *accessor-slot-map*)
                     (cons name (first slot)))))
           ;; Build DEFCLASS slot specs — only own slots; parent slots are inherited
-          ;; through the CLOS superclass chain (FR-545 fix)
-          ;; Read-only slots get :reader instead of :accessor (no writer)
+          ;; through the CLOS superclass chain (FR-545 fix).
           (let* ((defclass-slots
                    (mapcar (lambda (slot)
                              (let ((acc-key (if (third slot) :reader :accessor)))
                                (list (first slot)
-                                     :initarg  (intern (symbol-name (first slot)) "KEYWORD")
+                                     :initarg (intern (symbol-name (first slot)) "KEYWORD")
                                      :initform (second slot)
                                      acc-key (accessor-name (first slot)))))
                            own-slots))
-                 (superclasses  (when parent-name (list parent-name)))
+                 (superclasses (when parent-name (list parent-name)))
                  (defclass-form `(defclass ,name ,superclasses ,defclass-slots))
-                 (ctor-form     (when ctor-name
-                                  (%defstruct-make-constructor ctor-name name boa-args all-slots)))
-                 (pred-form     (when pred-name
-                                  `(defun ,pred-name (obj) (typep obj ',name))))
+                 (ctor-form (when ctor-name
+                              (%defstruct-make-constructor ctor-name name boa-args all-slots)))
+                 (pred-form (when pred-name
+                              `(defun ,pred-name (obj) (typep obj ',name))))
                  ;; FR-544: :print-function emits defmethod print-object
-                 (print-form    (when print-fn
-                                  (let ((o (gensym "OBJ")) (s (gensym "STR")))
-                                    (if print-fn-opt
-                                        ;; :print-function takes (obj stream depth)
-                                        `(defmethod print-object ((,o ,name) ,s)
-                                           (funcall (function ,print-fn) ,o ,s 0))
-                                        ;; :print-object takes (obj stream)
-                                        `(defmethod print-object ((,o ,name) ,s)
-                                           (funcall (function ,print-fn) ,o ,s)))))))
-            `(progn ,defclass-form ,@(when ctor-form (list ctor-form))
-                                   ,@(when pred-form (list pred-form))
-                                   ,@(when print-form (list print-form))
-                                   (quote ,name)))))))
+                 (print-form (when print-fn
+                               (let ((o (gensym "OBJ")) (s (gensym "STR")))
+                                 (if print-fn-opt
+                                     ;; :print-function takes (obj stream depth)
+                                     `(defmethod print-object ((,o ,name) ,s)
+                                        (funcall (function ,print-fn) ,o ,s 0))
+                                     ;; :print-object takes (obj stream)
+                                     `(defmethod print-object ((,o ,name) ,s)
+                                        (funcall (function ,print-fn) ,o ,s))))))
+                 ;; FR-1005: deriving support (minimal core implementation)
+                 (derive-form (when derived-classes
+                                `(eval-when (:load-toplevel :execute)
+                                   ,@(mapcar (lambda (class)
+                                               `(funcall (find-symbol "REGISTER-TYPECLASS-INSTANCE" "CL-CC/TYPE")
+                                                         ',class ',name nil))
+                                             derived-classes)))))
+            `(progn ,defclass-form
+                    ,@(when ctor-form (list ctor-form))
+                    ,@(when pred-form (list pred-form))
+                    ,@(when print-form (list print-form))
+                    ,@(when derive-form (list derive-form))
+                    (quote ,name)))))))

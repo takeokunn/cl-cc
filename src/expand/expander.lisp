@@ -99,9 +99,12 @@ specifier symbol, it is treated as the declared return type and wrapped in
            (return-type      (if return-type-spec
                                  (cl-cc/type:parse-type-specifier return-type-spec)
                                  cl-cc/type:+type-unknown+))
-           (typed-body       (if return-type-spec
-                                 `((the ,return-type-spec (progn ,@body-forms)))
-                                 body-forms))
+            (typed-return-spec (and return-type-spec
+                                    (or (cl-cc/type::lookup-type-alias return-type-spec)
+                                        return-type-spec)))
+            (typed-body       (if typed-return-spec
+                                  `((the ,typed-return-spec (progn ,@body-forms)))
+                                  body-forms))
            (checks           (loop for (pname . ptype) in type-alist
                                    collect `(check-type ,pname ,ptype)))
            (full-body        (append checks typed-body)))
@@ -439,8 +442,8 @@ Leaves required params, lambda-list keywords, and supplied-p vars untouched."
                   (list* (first p)
                          (compiler-macroexpand-all (second p))
                          (cddr p)))
-                 (t p)))
-             params)))
+                  (t p)))
+              params)))
 
 ;;; ── Registration macro ───────────────────────────────────────────────────
 

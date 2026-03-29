@@ -109,6 +109,32 @@
      (every (lambda (c) (is-subtype-p t1 c))
             (type-intersection-types t2)))
 
+    ;; Refinement types are subtypes of their base type.
+    ((typep t1 'type-refinement)
+     (is-subtype-p (type-refinement-base t1) t2))
+
+    ;; Records: width subtyping with pointwise field subtyping.
+    ;; A record with extra fields is a subtype of one with fewer fields.
+    ((and (typep t1 'type-record) (typep t2 'type-record))
+     (let ((fields1 (type-record-fields t1))
+           (fields2 (type-record-fields t2)))
+       (every (lambda (field2)
+                (let ((field1 (assoc (car field2) fields1 :test #'eq)))
+                  (and field1
+                       (is-subtype-p (cdr field1) (cdr field2)))))
+              fields2)))
+
+    ;; Variants: width subtyping with pointwise case subtyping.
+    ;; A variant with fewer cases is a subtype of one with more cases.
+    ((and (typep t1 'type-variant) (typep t2 'type-variant))
+     (let ((cases1 (type-variant-cases t1))
+           (cases2 (type-variant-cases t2)))
+       (every (lambda (case1)
+                (let ((case2 (assoc (car case1) cases2 :test #'eq)))
+                  (and case2
+                       (is-subtype-p (cdr case1) (cdr case2)))))
+              cases1)))
+
     ;; Function types: contravariant params, covariant return
     ((and (typep t1 'type-function) (typep t2 'type-function))
      (let ((params1 (type-function-params t1))
@@ -147,6 +173,20 @@
 
     ;; Type variables or mismatched kinds: not a subtype
     (t nil)))
+
+(defun subtype-check (t1 t2)
+  "Backward-compatible alias for IS-SUBTYPE-P."
+  (is-subtype-p t1 t2))
+
+(defun subtypep (type1 type2 &optional environment)
+  "ANSI-style subtype predicate for cl-cc/type.
+
+Returns (values subtype-p sure-p). TYPE1 and TYPE2 may be type nodes or
+type specifiers; ENVIRONMENT is accepted for API compatibility and ignored."
+  (declare (ignore environment))
+  (let ((t1 (if (typep type1 'type-node) type1 (parse-type-specifier type1)))
+        (t2 (if (typep type2 'type-node) type2 (parse-type-specifier type2))))
+    (values (is-subtype-p t1 t2) t)))
 
 ;;; Type Lattice Operations
 
@@ -187,6 +227,10 @@
      (make-type-function
       (mapcar #'type-meet (type-function-params t1) (type-function-params t2))
       (type-join (type-function-return t1) (type-function-return t2))))
+    ((typep t1 'type-refinement)
+     (type-join (type-refinement-base t1) t2))
+    ((typep t2 'type-refinement)
+     (type-join t1 (type-refinement-base t2)))
     ;; Default: explicit union
     (t (make-type-union (list t1 t2)))))
 
@@ -213,5 +257,37 @@
      (make-type-function
       (mapcar #'type-join (type-function-params t1) (type-function-params t2))
       (type-meet (type-function-return t1) (type-function-return t2))))
+    ((typep t1 'type-refinement)
+     (type-meet (type-refinement-base t1) t2))
+    ((typep t2 'type-refinement)
+     (type-meet t1 (type-refinement-base t2)))
     ;; Default: explicit intersection
     (t (make-type-intersection (list t1 t2)))))
+
+(defun %normalize-type-specifier (typespec)
+  (cond
+    ((typep typespec 'type-node) typespec)
+    ((symbolp typespec) (parse-type-specifier typespec))
+    (t type-any)))
+
+(defun upgraded-array-element-type (typespec &optional environment)
+  "Return the upgraded array element type for TYPESPEC.
+This repository treats arrays as untyped at the core type layer, so the
+upgraded element type is the top type."
+  (declare (ignore environment))
+  (let ((ty (%normalize-type-specifier typespec)))
+    (cond
+      ((or (type-equal-p ty (parse-type-specifier 'bit))
+           (is-subtype-p ty (parse-type-specifier 'bit)))
+       (parse-type-specifier 'bit))
+      ((or (type-equal-p ty (parse-type-specifier 'character))
+           (is-subtype-p ty (parse-type-specifier 'character)))
+       (parse-type-specifier 'character))
+      (t (parse-type-specifier 't)))))
+
+(defun upgraded-complex-part-type (typespec &optional environment)
+  "Return the upgraded complex part type for TYPESPEC.
+Complex numbers are represented with real parts in the core type layer."
+  (declare (ignore environment))
+  (declare (ignore typespec))
+  (parse-type-specifier 'real))

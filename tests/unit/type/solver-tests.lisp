@@ -104,6 +104,16 @@
       (declare (ignore _subst))
       (assert-null residual))))
 
+(deftest solver-defaults-numeric-typeclass-vars
+  "Unresolved numeric typeclass variables default to the configured numeric type."
+  (let* ((v (fresh-type-var "a"))
+         (c (make-typeclass-constraint 'num v))
+         (s (make-substitution)))
+    (multiple-value-bind (new-subst residual)
+        (cl-cc/type::solve-constraints (list c) s)
+      (assert-null residual)
+      (assert-true (type-equal-p type-int (zonk v new-subst))))))
+
 ;;; ─── solve-constraints: empty input ────────────────────────────────────────
 
 (deftest solver-empty-and-nil-subst

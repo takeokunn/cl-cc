@@ -23,7 +23,10 @@
     vm-const vm-move
     ;; Integer arithmetic (may signal zero-division for div/mod/rem,
     ;; but optimizer already handles folding — kept pure for DCE/CSE)
-    vm-add vm-sub vm-mul vm-neg vm-abs vm-inc vm-dec
+    vm-add vm-integer-add vm-float-add
+    vm-sub vm-integer-sub vm-float-sub
+    vm-mul vm-integer-mul vm-float-mul
+    vm-neg vm-abs vm-inc vm-dec
     vm-div vm-cl-div vm-mod vm-rem
     ;; (floor/ceiling/truncate/round moved to :write-global — they set the
     ;; vm-values-list side-channel, which DCE must not eliminate)
@@ -196,4 +199,3 @@
       ((member "STATE" names :test #'string=)  :write-global)
       ((member "ERROR" names :test #'string=)  :control)
       (t                                       :unknown))))
-

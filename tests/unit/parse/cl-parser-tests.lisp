@@ -421,6 +421,22 @@
     (assert-= 1 (length (cl-cc::ast-flet-bindings node)))
     (assert-= 1 (length (cl-cc::ast-flet-body node)))))
 
+(deftest lower-defun-with-declare-type
+  "lower-sexp-to-ast: leading (declare (type ...)) becomes typed params."
+  (let ((node (lower '(defun add1 (x)
+                        (declare (type fixnum x))
+                        (+ x 1)))))
+    (assert-true (cl-cc::ast-defun-p node))
+    (assert-equal '((x fixnum)) (cl-cc::ast-defun-params node))))
+
+(deftest lower-lambda-with-declare-type
+  "lower-sexp-to-ast: lambda leading type declaration becomes typed params."
+  (let ((node (lower '(lambda (x)
+                        (declare (type fixnum x))
+                        (+ x 1)))))
+    (assert-true (cl-cc::ast-lambda-p node))
+    (assert-equal '((x fixnum)) (cl-cc::ast-lambda-params node))))
+
 (deftest lower-labels-form
   "lower-sexp-to-ast: labels form -> ast-labels"
   (let ((node (lower '(labels ((fact (n) (if (= n 0) 1 (* n (fact (- n 1)))))) (fact 5)))))

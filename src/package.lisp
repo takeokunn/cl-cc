@@ -318,13 +318,14 @@
    :compile-toplevel-forms
 
    ;; Compilation Result
-   :compilation-result
-   :make-compilation-result
-   :compilation-result-program
-   :compilation-result-assembly
-   :compilation-result-globals
-   :compilation-result-type
-   :compilation-result-cps
+    :compilation-result
+    :make-compilation-result
+    :compilation-result-program
+    :compilation-result-assembly
+    :compilation-result-globals
+    :compilation-result-type
+    :compilation-result-type-env
+    :compilation-result-cps
 
    ;; AST Transformation Utilities
    :lower-sexp-to-ast
@@ -349,6 +350,13 @@
     :vm-move
     :vm-binop
     :vm-add
+    :vm-integer-add
+    :vm-integer-sub
+    :vm-integer-mul
+    :vm-float-add
+    :vm-float-sub
+    :vm-float-mul
+    :vm-float-div
     :vm-sub
     :vm-mul
     :vm-label
@@ -400,8 +408,10 @@
 
     ;; VM Instruction Constructors (defstruct make-* functions)
     :make-vm-instruction
-    :make-vm-abs :make-vm-acons :make-vm-add :make-vm-alpha-char-p
-    :make-vm-alphanumericp :make-vm-and :make-vm-append :make-vm-apply
+     :make-vm-abs :make-vm-acons :make-vm-add :make-vm-alpha-char-p
+     :make-vm-integer-add :make-vm-integer-sub :make-vm-integer-mul
+     :make-vm-float-add :make-vm-float-sub :make-vm-float-mul :make-vm-float-div
+     :make-vm-alphanumericp :make-vm-and :make-vm-append :make-vm-apply
     :make-vm-adjust-array :make-vm-aref :make-vm-aref-multi :vm-aref-multi
     :make-vm-array-length :make-vm-aset :make-vm-assoc
     :make-vm-array-adjustable-p :make-vm-array-dimension

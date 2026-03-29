@@ -72,6 +72,18 @@
   (assert-true  (cl-cc/type::is-subtype-p type-string +type-unknown+))
   (assert-false (cl-cc/type::is-subtype-p type-string type-int)))
 
+(deftest subtype-check-alias
+  "subtype-check is a backward-compatible alias for is-subtype-p."
+  (assert-true (cl-cc/type::subtype-check type-int type-any))
+  (assert-false (cl-cc/type::subtype-check type-string type-int)))
+
+(deftest subtypep-wrapper-returns-two-values
+  "subtypep accepts type specifiers and returns ANSI-style two values."
+  (multiple-value-bind (ok surep)
+      (cl-cc/type:subtypep 'fixnum 'integer)
+    (assert-true ok)
+    (assert-true surep)))
+
 ;;; ─── Union subtyping ────────────────────────────────────────────────────────
 
 (deftest subtype-union-left-behavior
@@ -94,6 +106,33 @@
     (assert-true  (cl-cc/type::is-subtype-p i-int-str type-int))
     (assert-false (cl-cc/type::is-subtype-p type-int i-int-str))
     (assert-true  (cl-cc/type::is-subtype-p type-int i-int-any))))
+
+;;; ─── Record / variant structural subtyping ─────────────────────────────────
+
+(deftest subtype-record-width-and-field-types
+  "Records use width subtyping and compare shared fields pointwise."
+  (let ((wide   (make-type-record :fields (list (cons 'x type-int)
+                                                (cons 'y type-string))
+                                  :row-var nil))
+        (narrow (make-type-record :fields (list (cons 'x type-int))
+                                  :row-var nil)))
+    (assert-true (cl-cc/type::is-subtype-p wide narrow))
+    (assert-false (cl-cc/type::is-subtype-p narrow wide))))
+
+(deftest subtype-variant-width-and-case-types
+  "Variants use width subtyping and compare shared cases pointwise."
+  (let ((small (make-type-variant :cases (list (cons 'ok type-int)) :row-var nil))
+        (large (make-type-variant :cases (list (cons 'ok type-int)
+                                                (cons 'err type-string))
+                                  :row-var nil)))
+    (assert-true (cl-cc/type::is-subtype-p small large))
+    (assert-false (cl-cc/type::is-subtype-p large small))))
+
+(deftest subtype-refinement-to-base
+  "A refinement type is a subtype of its base type."
+  (let ((refined (cl-cc/type::make-type-refinement :base type-int :predicate #'plusp)))
+    (assert-true (cl-cc/type::is-subtype-p refined type-int))
+    (assert-false (cl-cc/type::is-subtype-p type-int refined))))
 
 ;;; ─── Function subtyping (contravariant params, covariant return) ────────────
 

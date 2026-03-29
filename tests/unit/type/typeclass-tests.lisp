@@ -41,6 +41,21 @@
       (assert-eq td (lookup-typeclass 'test-tc)))
     (assert-null (lookup-typeclass 'nonexistent))))
 
+(deftest typeclass-default-methods-merge-into-instance
+  "Instance registration fills missing methods from class defaults."
+  (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
+        (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
+    (register-typeclass 'pretty-test
+                        (make-typeclass-def
+                         :name 'pretty-test
+                         :type-params nil
+                         :methods '((show . string))
+                         :defaults '((show . default-show)
+                                     (eq . default-eq))))
+    (let ((inst (register-typeclass-instance 'pretty-test type-int '((eq . custom-eq)))))
+      (assert-eq 'custom-eq (cdr (assoc 'eq (typeclass-instance-methods inst))))
+      (assert-eq 'default-show (cdr (assoc 'show (typeclass-instance-methods inst)))))))
+
 ;;; ─── typeclass-instance registry ───────────────────────────────────────────
 
 (deftest typeclass-instance-registry-operations
@@ -51,6 +66,13 @@
       (assert-eq 'eq (cl-cc/type::typeclass-instance-class-name inst))
       (assert-eq inst (lookup-typeclass-instance 'eq type-int)))
     (assert-null (lookup-typeclass-instance 'eq type-string))))
+
+(deftest typeclass-instance-registry-rejects-duplicates
+  "Instance registry rejects duplicate registrations for the same class/type pair."
+  (let ((cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
+    (register-typeclass-instance 'eq type-int nil)
+    (assert-signals type-inference-error
+      (register-typeclass-instance 'eq type-int nil))))
 
 ;;; ─── has-typeclass-instance-p ──────────────────────────────────────────────
 
@@ -109,11 +131,14 @@
   "type-class backward-compat struct: correct fields; storable in typeclass registry."
   (let ((tc (make-type-class :name 'show
                              :type-param (fresh-type-var "a")
-                             :methods '((show-method . nil)))))
+                             :methods '((show-method . nil))
+                             :defaults '((show-method . default-show)))))
     (assert-true   (type-class-p tc))
     (assert-eq 'show (type-class-name tc))
     (assert-true   (type-var-p (cl-cc/type::type-class-type-param tc)))
-    (assert-equal 1 (length (cl-cc/type::type-class-methods tc))))
+    (assert-equal 1 (length (cl-cc/type::type-class-methods tc)))
+    (assert-equal '((show-method . default-show))
+                  (cl-cc/type::type-class-defaults tc)))
   (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq)))
     (let ((tc (make-type-class :name 'test-compat :type-param nil :methods nil)))
       (register-typeclass 'test-compat tc)

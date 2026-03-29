@@ -2,29 +2,31 @@
 
 Safety-oriented types, development support, type-level programming, advanced type constructors, termination/totality, types and proofs, type system tooling, concurrency/distributed types, numeric/quantitative types, implementation techniques, dynamic language integration, advanced typeclasses, domain-specific types, types and semantics, type analysis for optimization.
 
+> 注: 本書は `type-core.md` の後続であり、コア型判断や codegen 連携の前提にはしない。ここにある要件は、前提条件が満たされた後に導入する拡張群として読むこと。
+
 ---
 ## 目次
 
-1. [安全性指向型](#15-安全性指向型)
-2. [開発支援型機能](#16-開発支援型機能)
-3. [型レベルプログラミング](#17-型レベルプログラミング)
-4. [高度な型構成子](#18-高度な型構成子)
-5. [停止性・全域性・正当性](#19-停止性全域性正当性)
-6. [型と証明](#20-型と証明)
-7. [型システムとツール連携](#21-型システムとツール連携)
-8. [並行・分散・非同期型](#22-並行分散非同期型)
-9. [数値・計量型](#23-数値計量型)
-10. [型システムの実装技術](#24-型システムの実装技術)
-11. [動的言語の型統合](#25-動的言語の型統合)
-12. [高度な型クラス機構](#26-高度な型クラス機構)
-13. [特殊ドメイン型](#27-特殊ドメイン型)
-14. [型と意味論の対応](#28-型と意味論の対応)
-15. [最適化のための型解析](#29-最適化のための型解析)
-16. [型システムの拡張性と相互運用](#30-型システムの拡張性と相互運用)
-17. [線形論理と型](#31-線形論理と型)
-18. [代数的サブタイピングとパス依存型](#32-代数的サブタイピングとパス依存型)
-19. [TypeScript 型システムの精髄](#33-typescript-型システムの精髄)
-20. [型のエンコーディングと依存型の基盤](#34-型のエンコーディングと依存型の基盤)
+15. [安全性指向型](#15-安全性指向型)
+16. [開発支援型機能](#16-開発支援型機能)
+17. [型レベルプログラミング](#17-型レベルプログラミング)
+18. [高度な型構成子](#18-高度な型構成子)
+19. [停止性・全域性・正当性](#19-停止性全域性正当性)
+20. [型と証明](#20-型と証明)
+21. [型システムとツール連携](#21-型システムとツール連携)
+22. [並行・分散・非同期型](#22-並行分散非同期型)
+23. [数値・計量型](#23-数値計量型)
+24. [型システムの実装技術](#24-型システムの実装技術)
+25. [動的言語の型統合](#25-動的言語の型統合)
+26. [高度な型クラス機構](#26-高度な型クラス機構)
+27. [特殊ドメイン型](#27-特殊ドメイン型)
+28. [型と意味論の対応](#28-型と意味論の対応)
+29. [最適化のための型解析](#29-最適化のための型解析)
+30. [型システムの拡張性と相互運用](#30-型システムの拡張性と相互運用)
+31. [線形論理と型](#31-線形論理と型)
+32. [代数的サブタイピングとパス依存型](#32-代数的サブタイピングとパス依存型)
+33. [TypeScript 型システムの精髄](#33-typescript-型システムの精髄)
+34. [型のエンコーディングと依存型の基盤](#34-型のエンコーディングと依存型の基盤)
 
 ---
 ## 15. 安全性指向型
@@ -312,7 +314,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 - **対象**: `src/compile/codegen.lisp`
 - **内容**: すべての関数が任意の入力に対して値を返すことを検証（例外・無限ループなし）
   - 全域 = **停止性** (FR-1901) + **網羅性** (FR-1903)
-  - **全域関数の利点**: メモ化・並列化・等式変換が安全
+  - **全域関数の利点**: メモ化・並列化・等式変換の候補として扱える
   - **部分関数の明示**: `(partial integer -> integer)` — 失敗する可能性のある関数型
   - Idris 2 は全域性を言語レベルで強制。GHC は `-XSafe` + totality プラグイン
   - **Turing 完全性との関係**: 停止性は決定不可能 (Halting Problem)。実用的には「十分なクラス」で検査
@@ -501,11 +503,13 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **スキーマ型**: `(table :users ((:id . integer) (:name . string) (:age . integer)))` — テーブルスキーマを型に
   - **型安全 JOIN**: `(join :users :posts :on (= users.id posts.user-id))` — フィールドの型互換性をコンパイル時検査
   - Haskell の Persistent / Esqueleto: テンプレート Haskell でスキーマを型に変換
-  - **SQL インジェクション防止**: すべての入力が `(sql-param :a)` として型付けされ、直接連結不可
+  - **SQL インジェクション防止**: 型付きパラメータ経由の構築を必須にし、直接連結を避ける
   - TypeScript の Drizzle ORM / Prisma: スキーマから TypeScript 型を自動生成
 - **難易度**: Hard
 
 ### Tier 1 — 近期実装 (実用価値 High / 依存少)
+
+> 注: 以下の Tier 表は計画上の依存関係を示す。FR-005/006/302/801 などの core FR は、advanced 側に移動したという意味ではなく、前提依存として参照している。
 
 | FR | 機能 | 難易度 | 実用価値 | 依存 |
 |---|---|---|---|---|
@@ -1249,7 +1253,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **JSON ↔ CL-CC**: JSON の `null`/`boolean`/`number`/`string`/`array`/`object` → CL-CC の型
   - **Protobuf / MessagePack**: スキーマ定義から CL-CC 型を自動生成
   - **型の安全なシリアライゼーション**: 型情報をワイヤフォーマットに埋め込んで受信側で型チェック
-  - **相互運用の健全性**: 送信側と受信側の型が互換することをコンパイル時に保証
+  - **相互運用の健全性**: 送信側と受信側の型互換性をコンパイル時に検証できる
 - **難易度**: Hard
 
 ### FR-3005: 型ベースドキュメント生成 (Type-Based Documentation)

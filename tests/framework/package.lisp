@@ -305,9 +305,9 @@
                  :target-reg-index :target-op-legal-p :target-op-expand
                  ;; Prolog type-inference functor atoms
                  :integer-type :boolean-type :const :binop :cmp)
-  (:import-from :cl-cc/type
-                 ;; Type classes
-                 :type-node
+  (:shadowing-import-from :cl-cc/type
+                  ;; Type classes
+                  :type-node
                  :type-primitive
                  :type-variable
                  :type-function
@@ -510,10 +510,13 @@
                  :type-rigid-p
                  :type-rigid-name
                  :type-rigid-equal-p
-                 ;; Type-unknown
-                 :type-unknown-p
-                 ;; Type-primitive
-                 :type-primitive-p
+                  ;; Type-unknown
+                  :type-unknown-p
+                  ;; ANSI upgrade helpers
+                  :upgraded-array-element-type
+                  :upgraded-complex-part-type
+                  ;; Type-primitive
+                  :type-primitive-p
                  ;; Old type-var API (aliases)
                  :type-var-p
                  :type-var-name
@@ -527,14 +530,15 @@
                  :subst-compose
                  :zonk
                  ;; Typeclass (extended API)
-                 :make-typeclass-def
-                 :typeclass-def-p
-                 :typeclass-def-name
-                 :typeclass-def-type-params
-                 :typeclass-def-methods
-                 :typeclass-instance-p
-                 :typeclass-instance-class-name
-                 :lookup-typeclass-instance
+                  :make-typeclass-def
+                  :typeclass-def-p
+                  :typeclass-def-name
+                  :typeclass-def-type-params
+                  :typeclass-def-methods
+                  :typeclass-instance-p
+                  :typeclass-instance-class-name
+                  :typeclass-instance-methods
+                  :lookup-typeclass-instance
                  ;; Row polymorphism
                  :row-extend
                  :row-restrict

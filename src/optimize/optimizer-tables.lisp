@@ -43,8 +43,14 @@
 (defparameter *opt-binary-fold-table*
   (let ((ht (make-hash-table :test #'eq)))
     (setf (gethash 'vm-add ht) #'+)
+    (setf (gethash 'vm-integer-add ht) #'+)
+    (setf (gethash 'vm-float-add ht) #'+)
     (setf (gethash 'vm-sub ht) #'-)
+    (setf (gethash 'vm-integer-sub ht) #'-)
+    (setf (gethash 'vm-float-sub ht) #'-)
     (setf (gethash 'vm-mul ht) #'*)
+    (setf (gethash 'vm-integer-mul ht) #'*)
+    (setf (gethash 'vm-float-mul ht) #'*)
     (setf (gethash 'vm-mod ht) #'mod)
     (setf (gethash 'vm-rem ht) #'rem)
     (setf (gethash 'vm-min ht) #'min)
@@ -54,6 +60,7 @@
     (setf (gethash 'vm-logxor ht) #'logxor)
     (setf (gethash 'vm-logeqv ht) #'logeqv)
     (setf (gethash 'vm-ash ht) #'ash)
+    (setf (gethash 'vm-float-div ht) #'/)
     ht)
   "Maps binary VM instruction types to their CL fold functions.
    Used by opt-fold-binop-value for constant folding.")
@@ -70,7 +77,7 @@
    Comparisons fold to 1/0 (not t/nil) for VM register semantics.")
 
 (defparameter *opt-binary-zero-guard-types*
-  '(vm-div vm-cl-div vm-mod vm-rem)
+  '(vm-div vm-cl-div vm-float-div vm-mod vm-rem)
   "Binary instruction types that must guard against zero divisor before folding.")
 
 (defparameter *opt-binary-no-fold-types*
@@ -134,7 +141,9 @@
    Used by opt-inst-read-regs, opt-pass-fold, opt-pass-cse, and WASM register collection.")
 
 (defparameter *opt-commutative-inst-types*
-  '(vm-add vm-mul vm-logand vm-logior vm-logxor vm-logeqv
+  '(vm-add vm-integer-add vm-float-add
+    vm-mul vm-integer-mul vm-float-mul
+    vm-logand vm-logior vm-logxor vm-logeqv
     vm-num-eq vm-eq vm-min vm-max)
   "VM binary instruction struct-type symbols where operand order is irrelevant.
    Used by opt-pass-cse to produce a canonical key for commutative expressions,
@@ -229,12 +238,23 @@
     (flet ((reg (tp rules) (setf (gethash tp ht) rules)))
       ;; Arithmetic
       (reg 'vm-add       '(((:rconst 0) . :move-lhs) ((:lconst 0) . :move-rhs)))
+      (reg 'vm-integer-add '(((:rconst 0) . :move-lhs) ((:lconst 0) . :move-rhs)))
+      (reg 'vm-float-add   '(((:rconst 0) . :move-lhs) ((:lconst 0) . :move-rhs)))
       (reg 'vm-sub       '(((:rconst 0) . :move-lhs) (:same-reg . (:const 0))))
+      (reg 'vm-integer-sub '(((:rconst 0) . :move-lhs) (:same-reg . (:const 0))))
+      (reg 'vm-float-sub   '(((:rconst 0) . :move-lhs) (:same-reg . (:const 0))))
       (reg 'vm-mul       '(((:rconst 1) . :move-lhs) ((:lconst 1) . :move-rhs)
                             ((:rconst 0) . (:const 0)) ((:lconst 0) . (:const 0))
                             ((:rconst -1) . (:neg :lhs)) ((:lconst -1) . (:neg :rhs))))
+      (reg 'vm-integer-mul '(((:rconst 1) . :move-lhs) ((:lconst 1) . :move-rhs)
+                             ((:rconst 0) . (:const 0)) ((:lconst 0) . (:const 0))
+                             ((:rconst -1) . (:neg :lhs)) ((:lconst -1) . (:neg :rhs))))
+      (reg 'vm-float-mul   '(((:rconst 1) . :move-lhs) ((:lconst 1) . :move-rhs)
+                             ((:rconst 0) . (:const 0)) ((:lconst 0) . (:const 0))
+                             ((:rconst -1) . (:neg :lhs)) ((:lconst -1) . (:neg :rhs))))
       (reg 'vm-div       '(((:rconst 1) . :move-lhs)))
       (reg 'vm-cl-div    '(((:rconst 1) . :move-lhs)))
+      (reg 'vm-float-div '(((:rconst 1) . :move-lhs)))
       (reg 'vm-floor-inst '(((:rconst 1) . :move-lhs)))
       (reg 'vm-mod       '(((:lconst 0) . (:const 0))))
       ;; Comparisons

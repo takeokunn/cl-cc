@@ -212,19 +212,34 @@ For each (register . ast-node), emits: if register eq sentinel, register = compi
     (dolist (b key-bindings) (push b bindings))
     (nreverse bindings)))
 
+(defun function-param-type-bindings (name params)
+  "Return an alist of (param . type-scheme) for NAME's typed parameters.
+Falls back to NIL when NAME was not registered with a typed signature."
+  (multiple-value-bind (signature found-p)
+      (gethash name *function-type-registry*)
+    (when found-p
+      (let ((param-types (car signature)))
+        (loop for param in params
+              for param-type in param-types
+              collect (cons param (cl-cc/type:type-to-scheme param-type)))))))
+
 (defun compile-function-body (ctx params param-regs opt-bindings rest-binding
                               key-bindings non-constant-defaults body
-                              &optional supplied-p-entries)
+                              &optional supplied-p-entries type-bindings)
   "Bind parameters, emit supplied-p checks, non-constant defaults, compile BODY, emit vm-ret.
 Saves and restores the compiler environment around the body via unwind-protect."
   (let ((old-env (ctx-env ctx))
+        (old-type-env (ctx-type-env ctx))
         (old-tail (ctx-tail-position ctx)))
     (unwind-protect
          (progn
            (setf (ctx-env ctx)
                  (append (build-all-param-bindings params param-regs
-                                                   opt-bindings rest-binding key-bindings)
+                                                    opt-bindings rest-binding key-bindings)
                          (ctx-env ctx)))
+           (when type-bindings
+             (setf (ctx-type-env ctx)
+                   (cl-cc/type:type-env-extend* type-bindings (ctx-type-env ctx))))
            (when supplied-p-entries
              (emit-supplied-p-checks ctx supplied-p-entries))
            (when non-constant-defaults
@@ -236,21 +251,22 @@ Saves and restores the compiler environment around the body via unwind-protect."
                (setf last-reg (compile-ast form ctx)))
              (setf (ctx-tail-position ctx) nil)
              (emit ctx (make-vm-ret :reg last-reg))))
-      (setf (ctx-env ctx) old-env)
-      (setf (ctx-tail-position ctx) old-tail))))
+       (setf (ctx-env ctx) old-env)
+       (setf (ctx-type-env ctx) old-type-env)
+       (setf (ctx-tail-position ctx) old-tail))))
 
 ;;; ── Lambda and defun ─────────────────────────────────────────────────────
 
 (defun %emit-closure-body (ctx func-label end-label params param-regs
                            opt-bindings rest-binding key-bindings
                            non-constant-defaults body
-                           &optional supplied-p-entries)
+                           &optional supplied-p-entries type-bindings)
   "Emit the jump-over + label + body + end-label pattern common to lambda and defun."
   (emit ctx (make-vm-jump :label end-label))
   (emit ctx (make-vm-label :name func-label))
   (compile-function-body ctx params param-regs opt-bindings rest-binding
                          key-bindings non-constant-defaults body
-                         supplied-p-entries)
+                         supplied-p-entries type-bindings)
   (emit ctx (make-vm-label :name end-label)))
 
 (defmethod compile-ast ((node ast-lambda) ctx)
@@ -289,6 +305,7 @@ Generates a closure at the function's label and registers it globally."
   (let* ((name (ast-defun-name node))
          (params (ast-defun-params node))
          (body (ast-defun-body node))
+         (type-bindings (function-param-type-bindings name params))
          ;; Pre-make the label before emitting so recursive calls can find it
          (func-label (make-label ctx (format nil "DEFUN_~A" name)))
          (end-label (make-label ctx (format nil "DEFUN_~A_END" name)))
@@ -301,10 +318,10 @@ Generates a closure at the function's label and registers it globally."
          (param-regs (loop for i from 0 below (length params)
                            collect (make-register ctx))))
     ;; Pre-register for recursion support
-    (setf (gethash name (ctx-global-functions ctx)) func-label)
-    (multiple-value-bind (opt-closure-data rest-reg key-closure-data
-                          opt-bindings rest-binding key-bindings
-                          non-constant-defaults supplied-p-entries)
+      (setf (gethash name (ctx-global-functions ctx)) func-label)
+      (multiple-value-bind (opt-closure-data rest-reg key-closure-data
+                           opt-bindings rest-binding key-bindings
+                           non-constant-defaults supplied-p-entries)
         (allocate-extended-params ctx
                                   (ast-defun-optional-params node)
                                   (ast-defun-rest-param node)
@@ -315,11 +332,12 @@ Generates a closure at the function's label and registers it globally."
                  :key-params key-closure-data :captured captured-vars))
       (push (cons name closure-reg) (ctx-env ctx))
       (emit ctx (make-vm-register-function :name name :src closure-reg))
-      (let ((*compiling-typed-fn* (or name t)))
-        (%emit-closure-body ctx func-label end-label params param-regs
-                            opt-bindings rest-binding key-bindings
-                            non-constant-defaults body supplied-p-entries))
-      closure-reg)))
+       (let ((*compiling-typed-fn* (or name t)))
+         (%emit-closure-body ctx func-label end-label params param-regs
+                             opt-bindings rest-binding key-bindings
+                             non-constant-defaults body supplied-p-entries
+                             type-bindings))
+       closure-reg)))
 
 ;;; ── defvar / defparameter ────────────────────────────────────────────────
 
@@ -369,4 +387,3 @@ FR-600: defvar only sets the value if the variable is not already bound;
          (emit ctx (make-vm-label :name label-done))
          (emit ctx (make-vm-const :dst result-reg :value name))
          result-reg)))))
-

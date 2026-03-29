@@ -29,12 +29,15 @@ NAME:             the typeclass symbol (e.g., 'EQ, 'NUM, 'FUNCTOR).
 TYPE-PARAMS:      list of type-var nodes (the class's type parameters).
 SUPERCLASSES:     list of typeclass name symbols that this class inherits from.
 METHODS:          alist of (method-name . type-arrow) — the typeclass interface.
+DEFAULTS:         alist of (method-name . implementation) used when instances
+                  omit a method.
 ASSOCIATED-TYPES: alist of (name . kind-node) — associated type families.
 FUNCTIONAL-DEPS:  list of (from-params . to-params) — functional dependencies."
   (name             nil :type symbol)
   (type-params      nil :type list)
   (superclasses     nil :type list)
   (methods          nil :type list)
+  (defaults         nil :type list)
   (associated-types nil :type list)
   (functional-deps  nil :type list))
 
@@ -49,6 +52,22 @@ FUNCTIONAL-DEPS:  list of (from-params . to-params) — functional dependencies.
 TC-DEF may be a typeclass-def or the old type-class struct — both are accepted."
   (setf (gethash name *typeclass-registry*) tc-def)
   name)
+
+(defun %typeclass-default-methods (class-name)
+  "Return the default method alist for CLASS-NAME, or NIL."
+  (let ((tc-def (lookup-typeclass class-name)))
+    (cond
+      ((typeclass-def-p tc-def) (typeclass-def-defaults tc-def))
+      ((type-class-p tc-def)    (type-class-defaults tc-def))
+      (t nil))))
+
+(defun %merge-default-methods (class-name method-impls)
+  "Merge class defaults into METHOD-IMPLS, preserving explicit implementations."
+  (let ((defaults (%typeclass-default-methods class-name)))
+    (append method-impls
+            (remove-if (lambda (pair)
+                         (assoc (car pair) method-impls :test #'eq))
+                       defaults))))
 
 (defun lookup-typeclass (name)
   "Return the typeclass-def (or type-class) for NAME, or nil if not registered."
@@ -75,6 +94,12 @@ METHODS:      alist of (method-name . function) — the method implementations."
 The key uses EQUAL comparison so different type-nodes with the same string
 representation each get their own bucket.")
 
+(defparameter *default-numeric-type* type-int
+  "Default concrete type for unresolved numeric constraints.")
+
+(defparameter *default-numeric-class-names* '("NUM" "NUMERIC")
+  "Typeclass names eligible for numeric defaulting.")
+
 (defun %type-instance-key (class-name type)
   "Build the hash key for (CLASS-NAME, TYPE)."
   (cons class-name (type-to-string type)))
@@ -82,11 +107,15 @@ representation each get their own bucket.")
 (defun register-typeclass-instance (class-name type method-impls)
   "Register that TYPE implements CLASS-NAME with METHOD-IMPLS.
 METHOD-IMPLS is an alist of (method-name . implementation)."
+  (when (lookup-typeclass-instance class-name type)
+    (error 'type-inference-error
+           :message (format nil "Duplicate typeclass instance for ~A / ~A"
+                            class-name (type-to-string type))))
   (let ((inst (%make-typeclass-instance
-               :class-name    class-name
-               :instance-type type
-               :constraints   nil
-               :methods       method-impls)))
+                :class-name    class-name
+                :instance-type type
+                :constraints   nil
+                :methods       (%merge-default-methods class-name method-impls))))
     (setf (gethash (%type-instance-key class-name type)
                    *typeclass-instance-registry*)
           inst)
@@ -110,9 +139,16 @@ including instances inherited via superclass relationships."
                           ((type-class-p tc-def)
                            (type-class-superclasses tc-def))
                           (t nil))))
-            (some (lambda (super)
-                    (has-typeclass-instance-p super type))
-                  supers))))))
+             (some (lambda (super)
+                     (has-typeclass-instance-p super type))
+                   supers))))))
+
+(defun default-numeric-typeclass-p (class-name)
+  "Return T if CLASS-NAME should default unresolved numeric type variables."
+  (and (symbolp class-name)
+       (member (symbol-name class-name)
+               *default-numeric-class-names*
+               :test #'string-equal)))
 
 (defun check-typeclass-constraint (class-name type env)
   "Check if TYPE satisfies CLASS-NAME.
@@ -147,6 +183,17 @@ Returns the methods alist or nil if missing."
     (let ((entry (assoc key (type-env-dict-bindings env) :test #'equal)))
       (when entry (cdr entry)))))
 
+;;; ─── Built-in default numeric instance ───────────────────────────────────
+
+(eval-when (:load-toplevel :execute)
+  (unless (lookup-typeclass 'num)
+    (register-typeclass 'num (make-typeclass-def
+                              :name 'num
+                              :type-params nil
+                              :methods nil)))
+  (unless (lookup-typeclass-instance 'num type-int)
+    (register-typeclass-instance 'num type-int nil)))
+
 ;;; ─── Backward-compat: type-class struct ──────────────────────────────────
 ;;;
 ;;; The old package defined a `type-class` defstruct with these slots:
@@ -171,7 +218,8 @@ For new code, prefer typeclass-def."
   (name         nil :type symbol)
   (type-param   nil)
   (superclasses nil :type list)
-  (methods      nil :type list))
+  (methods      nil :type list)
+  (defaults     nil :type list))
 
 ;;; ─── Backward-compat: type-class-constraint ──────────────────────────────
 ;;;

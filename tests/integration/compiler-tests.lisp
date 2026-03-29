@@ -1365,7 +1365,7 @@
 
 (deftest-each builtin-type-of
   "type-of returns the correct type symbol for common types."
-  :cases (("integer" 'integer "(type-of 42)")
+  :cases (("integer" 'fixnum "(type-of 42)")
           ("string"  'string  "(type-of \"hello\")")
           ("cons"    'cons    "(type-of '(1 2))"))
   (expected form)
@@ -1822,6 +1822,15 @@
   (let ((old-count (hash-table-count cl-cc:*function-type-registry*)))
     (run-string "(defun typed-reg-test ((x fixnum)) fixnum x)")
     (assert-true (> (hash-table-count cl-cc:*function-type-registry*) old-count))))
+
+(deftest typed-multi-form-top-level
+  "Type checking applies to multi-form top-level compilation as well."
+  (multiple-value-bind (result type)
+      (run-string-typed "(defvar *typed-top-level* 1)
+                         42")
+    (assert-= 42 result)
+    (assert-type cl-cc/type:type-primitive type)
+    (assert-string= "FIXNUM" (symbol-name (cl-cc/type:type-primitive-name type)))))
 
 ;;; CLOS Type Inference Tests
 

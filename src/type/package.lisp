@@ -5,7 +5,9 @@
 (defpackage :cl-cc/type
   (:use :cl)
   ;; Shadow cl:type-error so we can define our own type-error struct
-  (:shadow #:type-error)
+  (:shadow #:type-error #:subtypep
+           #:upgraded-array-element-type
+           #:upgraded-complex-part-type)
   (:export
 
    ;; ─── Kind system ─────────────────────────────────────────────────────
@@ -174,22 +176,25 @@
    #:type-constructor-def  #:type-constructor-def-p
    #:*type-constructor-registry*
    #:register-type-constructor  #:lookup-type-constructor
-   #:is-subtype-p  #:subtype-check
-   #:type-join  #:type-meet
-   #:*subtype-table*  #:type-name-subtype-p  #:find-common-supertype
+    #:subtypep  #:is-subtype-p  #:subtype-check
+    #:type-join  #:type-meet
+    #:*subtype-table*  #:type-name-subtype-p  #:find-common-supertype
+    #:upgraded-array-element-type  #:upgraded-complex-part-type
 
-   ;; ─── Typeclass system ────────────────────────────────────────────────
-   #:typeclass-def  #:typeclass-def-p  #:make-typeclass-def
-   #:typeclass-def-name  #:typeclass-def-type-params  #:typeclass-def-superclasses
-   #:typeclass-def-methods  #:typeclass-def-associated-types
-   #:*typeclass-registry*  #:register-typeclass  #:lookup-typeclass
-   #:typeclass-instance  #:typeclass-instance-p  #:typeclass-instance-class-name
-   #:*typeclass-instance-registry*
-   #:register-typeclass-instance  #:lookup-typeclass-instance
-   #:has-typeclass-instance-p  #:check-typeclass-constraint
-   #:dict-env-extend  #:dict-env-lookup
-   #:type-class   #:type-class-p   #:make-type-class
-   #:type-class-name  #:type-class-type-param  #:type-class-methods
+    ;; ─── Typeclass system ────────────────────────────────────────────────
+    #:typeclass-def  #:typeclass-def-p  #:make-typeclass-def
+    #:typeclass-def-name  #:typeclass-def-type-params  #:typeclass-def-superclasses
+    #:typeclass-def-methods  #:typeclass-def-defaults  #:typeclass-def-associated-types
+    #:*typeclass-registry*  #:register-typeclass  #:lookup-typeclass
+     #:typeclass-instance  #:typeclass-instance-p  #:typeclass-instance-class-name
+     #:typeclass-instance-methods
+     #:*typeclass-instance-registry*
+    #:register-typeclass-instance  #:lookup-typeclass-instance
+    #:has-typeclass-instance-p  #:check-typeclass-constraint
+    #:dict-env-extend  #:dict-env-lookup
+    #:type-class   #:type-class-p   #:make-type-class
+    #:type-class-name  #:type-class-type-param  #:type-class-methods
+    #:type-class-defaults
 
    ;; ─── Constraint solver ───────────────────────────────────────────────
    #:collect-constraints  #:solve-constraints
@@ -228,6 +233,10 @@
    #:unparse-type
 
    ))
+
+(declaim (special type-int type-float type-string type-bool type-symbol
+                  type-cons type-null type-any type-char type-unit
+                  +type-unknown+))
 
 (in-package :cl-cc/type)
 

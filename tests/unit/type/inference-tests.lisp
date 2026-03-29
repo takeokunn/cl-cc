@@ -180,6 +180,14 @@
       (declare (ignore subst))
       (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty)))))
 
+(deftest infer-the-refinement-type
+  "infer (the (refine fixnum plusp) 42) succeeds through the refinement base type."
+  (reset-type-vars!)
+  (let ((ast (cl-cc:lower-sexp-to-ast '(the (refine fixnum plusp) 42))))
+    (multiple-value-bind (ty subst) (infer-with-env ast)
+      (declare (ignore subst))
+      (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty)))))
+
 (deftest infer-the-mismatch-error
   "infer (the string 42) signals type-mismatch-error."
   (reset-type-vars!)
@@ -206,17 +214,19 @@
 
 ;;; ─── infer: ast-defun / ast-defvar ────────────────────────────────────────
 
-(deftest-each infer-top-level-form-returns-symbol
-  "Top-level defun and defvar all return type-symbol."
-  :cases (("defun"         '(defun f (x) (+ x 1)))
-          ("defvar-init"   '(defvar *x* 42))
-          ("defvar-no-val" '(defvar *x*)))
-  (sexp)
+(deftest-each infer-top-level-form-types
+  "Top-level defun returns a function type; defvar returns type-symbol."
+  :cases (("defun"         '(defun f (x) (+ x 1))        :function)
+          ("defvar-init"   '(defvar *x* 42)             :symbol)
+          ("defvar-no-val" '(defvar *x*)               :symbol))
+  (sexp expected-kind)
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast sexp)))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-type-equal ty cl-cc/type:type-symbol))))
+      (if (eq expected-kind :function)
+          (assert-true (cl-cc/type:type-function-p ty))
+          (assert-type-equal ty cl-cc/type:type-symbol)))))
 
 ;;; ─── infer: ast-function ──────────────────────────────────────────────────
 
@@ -251,6 +261,18 @@
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
       (assert-type-equal ty cl-cc/type:type-int))))
+
+;;; ─── infer-with-constraints ───────────────────────────────────────────────
+
+(deftest infer-with-constraints-simple-application
+  "infer-with-constraints resolves a simple application via constraints."
+  (reset-type-vars!)
+  (let ((ast (cl-cc:lower-sexp-to-ast '((lambda (x) x) 42))))
+    (multiple-value-bind (ty subst residual)
+        (cl-cc/type::infer-with-constraints ast (type-env-empty))
+      (declare (ignore subst))
+      (assert-null residual)
+      (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty)))))
 
 ;;; ─── infer: ast-block / ast-return-from ───────────────────────────────────
 

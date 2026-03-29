@@ -1,11 +1,12 @@
 # Type System: Core
 
-Type inference engine, polymorphism, subtyping, refinement/dependent types, effect types, resource management, gradual typing, runtime type optimization, ANSI CL type completion, typeclasses, variance, structural extensions, advanced polymorphism, type theory foundations.
+Core type system contract for the compiler: inference, bidirectional checking, constraint solving, type transport into codegen, runtime type semantics, and ANSI CL completion. Advanced research features are deferred to `type-advanced.md`.
 
 ---
 
 ## 目次
 
+0. [Requirements Contract](#0-requirements-contract)
 1. [型推論エンジン](#1-型推論エンジン)
 2. [型の表現力 — 多相性と型コンストラクタ](#2-型の表現力--多相性と型コンストラクタ)
 3. [サブタイピングと構造的型付け](#3-サブタイピングと構造的型付け)
@@ -25,12 +26,42 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 > Ch.15-34 は [type-advanced.md](type-advanced.md) に続く。
 
+> 注: `新ファイル` とある項目は、現時点では実装予定を示す。実在するモジュール名は `src/type/` 配下の現行ファイルに合わせて読むこと。
+> この文書は依存順に読むこと。`1-4` は型判断の基盤、`5-8` は型情報の後段接続、`9-14` は ANSI CL / 汎用型理論との整合である。
+
+## 0. Requirements Contract
+
+### 適用範囲
+
+- 本書は「コア型システム」の要件を定義する。
+- 依存型、所有権/借用検査、宇宙多相、非述語的多相、証明支援系の機能はコア範囲外とする。
+- 型推論の結果を codegen / optimizer / runtime に渡す場合は、明示的な transport 契約が必要である。
+
+### 依存順
+
+1. 型推論と双方向検査
+2. 制約生成/解消
+3. 型情報の AST / compile 境界での保持
+4. 型駆動 codegen
+5. 型情報を使う最適化
+6. runtime 型判定の整合
+
+### 分割方針
+
+- `type-core.md`: コア型判断と実行パイプライン接続。
+- `type-advanced.md`: 安全性指向型、型レベルプログラミング、停止性、証明、並行/数値/DSL 拡張。
+
+### 検証方針
+
+- 各 FR は少なくとも 1 つのテスト、または既存実装への参照を持つこと。
+- FR 番号の意味が他文書と衝突する場合は、文書内の依存関係を優先し、必要に応じて注記すること。
+
 ## 1. 型推論エンジン
 
 ### FR-001: Hindley-Milner 型推論 (基盤)
 
 - **対象**: `src/type/inference.lisp`
-- **現状**: HM 型推論は独立動作。`infer-type` が S 式から型スキームを返す
+ - **現状**: HM 型推論の基盤は存在する。ここでは `infer` をコア入口として定義し、S 式から型スキームを返せることを要件とする
 - **アルゴリズム**: Algorithm W (Damas & Milner 1982) + unification (Robinson 1965)
 - **スコープ**: let-polymorphism, 型変数の全称量化, unification による型変数束縛
 - **参考実装**: OCaml, SML/NJ, GHC Core の型推論基盤
@@ -38,7 +69,7 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 ### FR-002: 双方向型検査 (Bidirectional Type Checking)
 
 - **対象**: `src/type/inference.lisp`
-- **現状**: synthesis モードのみ。check モード（文脈から下方向に型を伝播）がない
+ - **現状**: `synthesize` / `check` の入口は存在する。ここでは双方向検査をコア契約として固定し、文脈から期待型を伝播できることを要件とする
 - **内容**: Dunfield & Krishnaswami (2013) の双方向型検査
   - **synth モード**: 式から型を合成 (`e ⇒ A`)
   - **check モード**: 期待型を文脈から渡す (`e ⇐ A`)
@@ -72,7 +103,7 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 - **依存**: FR-002
 - **対象**: `src/type/inference.lisp` + `src/compile/codegen.lisp`
-- **内容**: `compile-ast` に型環境 `type-env` 引数を追加。`infer-type` の結果を AST ノードにアノテートし codegen で活用
+- **内容**: `compiler-context` / `compilation-result` に型環境 `type-env` を保持し、`infer` の結果を codegen 境界へ伝達する。`compile-ast` は `ctx-type-env` を参照できる
 - **効果**: fixnum fast path（型チェック命令省略）、float unboxing 選択
 
 ### FR-006: Fixnum Fast Path (型特化算術)
@@ -178,7 +209,7 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 - **対象**: `src/vm/primitives.lisp`, `src/type/subtyping.lisp`
 - **内容**: 名前で同一性を判定するサブタイピング（Java/C#/CLOS 方式）
   - CLOS の `:include` / `defclass` 継承で定義される型階層を型推論に反映
-  - `subtypep` の完全実装（FR-482 参照）
+  - `subtypep` の完全実装（FR-801 参照）
 
 ### FR-202: 構造的サブタイピング (Structural Subtyping)
 
@@ -224,6 +255,8 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ## 4. 精緻型・依存型
 
+> 注: FR-301〜304 は core の境界領域である。ここでは要件を catalog するが、実装優先度と acceptance は `type-advanced.md` 側の前提に従う。
+
 ### FR-301: 精緻型 (Refinement Types)
 
 - **対象**: `src/type/inference.lisp`, `src/type/parser.lisp`
@@ -248,7 +281,8 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-303: 依存型 (Dependent Types)
 
-- **対象**: 新ファイル `src/type/dependent.lisp`
+- **対象**: 予定ファイル `src/type/dependent.lisp`
+- **現状**: 未実装（対応モジュールなし）
 - **内容**: 型が値に依存する型システム
   - **依存関数型 (Π 型)**: `(pi (n : nat) (vector n integer))` — 長さ `n` の整数ベクタ
   - **依存ペア型 (Σ 型)**: `(sigma (n : nat) (vector n integer))` — 長さと対応するベクタのペア
@@ -274,18 +308,20 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-401: エフェクト型 (Effect Types)
 
-- **対象**: 新ファイル `src/type/effects.lisp`
+- **対象**: 予定ファイル `src/type/effects.lisp`
+- **現状**: 未実装（現行実装は `src/type/effect.lisp` と `src/type/inference-effects.lisp` の一部）
 - **内容**: 関数の副作用を型に記録する
   - **エフェクトの種類**: `:io` (I/O), `:state` (変更可能状態), `:exception` (例外), `:nondeterminism` (非決定性), `:divergence` (非停止)
   - 関数型: `(function ((integer) (integer)) integer ! (:io :state))` — I/O と状態変更を持つ関数
-  - **純粋関数**: エフェクトセットが空 `{}` の関数はメモ化・並列化が安全
+  - **純粋関数**: エフェクトセットが空 `{}` の関数は、モデル化された副作用がない範囲でメモ化・並列化の候補となる
   - **エフェクト多態性**: `(function (:a) :b ! :e)` — エフェクトを型変数 `:e` で抽象化
   - 参考実装: Koka (Microsoft Research), Frank, Eff, Helium
 - **難易度**: Very Hard
 
 ### FR-402: 代数的エフェクトとハンドラ (Algebraic Effects & Handlers)
 
-- **対象**: 新ファイル `src/type/effects.lisp`, `src/vm/effects.lisp`
+- **対象**: 予定ファイル `src/type/effects.lisp`, `src/vm/effects.lisp`
+- **現状**: 未実装
 - **内容**: エフェクトを first-class な操作として定義し、ハンドラで意味付け
   - **エフェクト定義**: `(define-effect state (get : (unit -> :s)) (put : (:s -> unit)))`
   - **ハンドラ**: `(with-handler state-handler (get () k → (k current-state)) ...)` でエフェクトを解釈
@@ -307,7 +343,8 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-404: 係数型 / コエフェクト (Coeffects)
 
-- **対象**: 新ファイル `src/type/coeffects.lisp`
+- **対象**: 予定ファイル `src/type/coeffects.lisp`
+- **現状**: 未実装
 - **内容**: 関数が**必要とするコンテキスト**を型で追跡（エフェクトの双対）
   - **リソース使用量**: `{uses: 2}` — 引数を 2 回使用する（線形型の一般化）
   - **データフロー**: どの入力変数がどの出力に影響するか（セキュリティ解析に応用）
@@ -319,9 +356,12 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ## 6. リソース管理型
 
+> 注: FR-501〜505 は resource-safety の拡張群であり、core contract の必須前提ではない。
+
 ### FR-501: 線形型 / アフィン型 (Linear / Affine Types)
 
 - **対象**: `src/type/inference.lisp`, `src/type/parser.lisp`
+- **現状**: 部分実装（`src/type/multiplicity.lisp` で等級はあるが、線形/アフィン型の型検査は未実装）
 - **内容**:
   - **線形型**: 値をちょうど 1 回使用することを型で保証 (Wadler 1990)
   - **アフィン型**: 高々 1 回使用（Rust の move semantics に相当）
@@ -332,7 +372,8 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-502: 所有権型 / 借用検査 (Ownership Types & Borrow Checker)
 
-- **対象**: 新ファイル `src/type/ownership.lisp`
+- **対象**: 予定ファイル `src/type/ownership.lisp`
+- **現状**: 未実装
 - **内容**: Rust のオーナーシップシステムを型で表現
   - **オーナーシップ移転**: `(move x)` でオーナーシップを消費。以降 `x` は型エラー
   - **共有借用**: `&x` — 読み取り専用参照。複数同時可
@@ -343,7 +384,8 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-503: 一意型 (Uniqueness Types)
 
-- **対象**: 新ファイル `src/type/uniqueness.lisp`
+- **対象**: 予定ファイル `src/type/uniqueness.lisp`
+- **現状**: 未実装
 - **内容**: Clean 言語の一意型システム。値に「一意性属性」を付与
   - `*a` — 一意型（この値への参照は世界で 1 つ）
   - `a` — 非一意型（共有可能）
@@ -371,7 +413,8 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-505: セッション型 (Session Types)
 
-- **対象**: 新ファイル `src/type/sessions.lisp`
+- **対象**: 予定ファイル `src/type/sessions.lisp`
+- **現状**: 未実装
 - **内容**: 通信プロトコルを型でエンコード
   - `!Int.?String.End` — 整数を送り、文字列を受け取り、終了
   - **双対性**: クライアント型とサーバー型が双対 (dual) であることをコンパイル時検証
@@ -408,7 +451,8 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-603: モジュール型とシグネチャ (Module Types / Signatures)
 
-- **対象**: 新ファイル `src/type/modules.lisp`
+- **対象**: 予定ファイル `src/type/modules.lisp`
+- **現状**: 未実装
 - **内容**: OCaml の module system / SML のシグネチャに相当
   - `(module-type stack-sig (push ...) (pop ...) (empty ...))` — インターフェース定義
   - `(module stack-impl : stack-sig ...)` — 実装がシグネチャを満たすことを検査
@@ -522,7 +566,7 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 ### FR-806: the ランタイムアサーション
 
 - **対象**: `src/compile/codegen-core.lisp`
-- **内容**: safety ≥ 1 の場合、`(the fixnum expr)` にランタイム型チェックを挿入。safety = 0 では無条件信頼
+- **内容**: safety ≥ 1 の場合、`(the fixnum expr)` にランタイム型チェックを挿入。safety = 0 では、静的に保証できる箇所のみ型チェック省略を許可する
 - **根拠**: ANSI CL 3.4.4 — the special form semantics
 - **難易度**: Medium
 
@@ -542,11 +586,13 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ---
 
+> 10-14 は拡張領域との境界にある参照セクションである。コア仕様としては依存関係の説明に留め、詳細な拡張要件は `type-advanced.md` 側で扱う。
+
 ## 10. 型クラスとトレイト
 
 ### FR-1001: 型クラス基盤 (Type Classes)
 
-- **対象**: 新ファイル `src/type/typeclasses.lisp`
+- **対象**: `src/type/typeclass.lisp`
 - **内容**: Haskell 流の型クラス（アドホック多相の型安全な解決機構）
   - `(define-typeclass eq (:a) (= :a :a -> boolean) (/= :a :a -> boolean))`
   - **辞書渡し**: コンパイル後、型クラス制約は暗黙の辞書（レコード）引数として具体化
@@ -558,7 +604,7 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-1002: 多パラメータ型クラス (Multi-Parameter Type Classes)
 
-- **対象**: `src/type/typeclasses.lisp`
+- **対象**: `src/type/typeclass.lisp`
 - **内容**: 複数の型変数にまたがる型クラス
   - `(define-typeclass coerce (:a :b) (coerce :a -> :b))` — `a` から `b` への変換
   - GHC `-XMultiParamTypeClasses`
@@ -567,7 +613,7 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-1003: 関数従属性 (Functional Dependencies)
 
-- **対象**: `src/type/typeclasses.lisp`
+- **対象**: `src/type/typeclass.lisp`
 - **内容**: 多パラメータ型クラスの型変数間の決定関係を宣言
   - `(define-typeclass collection (:c :e) (:fundep :c -> :e) (insert :e :c -> :c))`
   - `:c` が決まれば `:e` が一意に決まる → インスタンス解決の曖昧さを除去
@@ -577,7 +623,7 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-1004: 型クラスのコヒーレンス (Typeclass Coherence)
 
-- **対象**: `src/type/typeclasses.lisp`
+- **対象**: `src/type/typeclass.lisp`
 - **内容**: 同じ型に対して型クラスインスタンスが**世界に 1 つだけ**存在することを保証
   - **孤立インスタンス (Orphan Instances)**: 型もクラスも定義していないパッケージでのインスタンス宣言を禁止
   - **オーバーラッピングインスタンス**: GHC `-XOverlappingInstances` — より特殊化されたインスタンスを優先。コヒーレンス違反のリスクあり
@@ -597,7 +643,7 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-1006: 型クラスのデフォルト規則 (Defaulting Rules)
 
-- **対象**: `src/type/typeclasses.lisp`
+- **対象**: `src/type/typeclass.lisp`
 - **内容**: 型変数が未解決の場合にコンパイラが自動的に具体的型を選択
   - Haskell: `(show 42)` の `42` は `Num a => a` だが、デフォルト規則で `Integer` に解決
   - `(*default-numeric-type* 'fixnum)` — CL-CC での数値型デフォルト
@@ -610,7 +656,8 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-1101: 変性アノテーション (Variance Annotations)
 
-- **対象**: 新ファイル `src/type/variance.lisp`
+- **対象**: 予定ファイル `src/type/variance.lisp`
+- **現状**: 未実装
 - **内容**: 型コンストラクタの引数に変性（サブタイピングの方向）を付与
   - **共変 (Covariant)** `+`: `A <: B` ならば `F[A] <: F[B]`。読み取り専用コンテナ。`(covariant :a)` で宣言
   - **反変 (Contravariant)** `-`: `A <: B` ならば `F[B] <: F[A]`。関数の引数位置。`(contravariant :a)`
@@ -622,7 +669,8 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-1102: 使用点変性 (Use-Site Variance / Wildcards)
 
-- **対象**: `src/type/variance.lisp`
+- **対象**: 予定ファイル `src/type/variance.lisp`
+- **現状**: 未実装
 - **内容**: 型コンストラクタ定義時でなく使用時に変性を指定
   - Java の `? extends T` (上限ワイルドカード、共変的使用) / `? super T` (下限ワイルドカード、反変的使用)
   - Kotlin の `out T` (use-site) vs Scala の `+T` (declaration-site)
@@ -631,7 +679,8 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-1103: 変性推論 (Variance Inference)
 
-- **対象**: `src/type/variance.lisp`
+- **対象**: 予定ファイル `src/type/variance.lisp`
+- **現状**: 未実装
 - **内容**: 型コンストラクタの定義から変性を自動計算
   - `(deftype-alias (my-list :a) (or null (cons :a (my-list :a))))` → `:a` は共変と自動推論
   - 関数型: 引数位置は反変、戻り値位置は共変
@@ -644,7 +693,8 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-1201: 多相ヴァリアント (Polymorphic Variants)
 
-- **対象**: 新ファイル `src/type/poly-variants.lisp`
+- **対象**: 予定ファイル `src/type/poly-variants.lisp`
+- **現状**: 未実装
 - **内容**: OCaml の多相ヴァリアント — 拡張可能な直和型
   - **開放ヴァリアント**: `` `Ok x | `Error e `` — 型名なしでタグを使用。型は自動推論
   - **閉鎖ヴァリアント**: `[> `A | `B]` (下限) / `[< `A | `B]` (上限) で許可タグを制限
@@ -677,7 +727,8 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-1204: 余帰納型 (Coinductive Types / Codata)
 
-- **対象**: 新ファイル `src/type/coinductive.lisp`
+- **対象**: 予定ファイル `src/type/coinductive.lisp`
+- **現状**: 未実装
 - **内容**: 潜在的に無限なデータ構造の型
   - **帰納型 (Inductive)**: 有限構造。`list` は空か `cons`。総称的再帰で「分解」
   - **余帰納型 (Coinductive)**: 無限構造。`stream` は無限に続く。`corecursion` で「生成」
@@ -689,7 +740,8 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-1205: 商型 (Quotient Types)
 
-- **対象**: 新ファイル `src/type/quotient.lisp`
+- **対象**: 予定ファイル `src/type/quotient.lisp`
+- **現状**: 未実装
 - **内容**: 同値関係で割った型。`A / ~` — `A` の要素を `~` で同一視した型
   - **例**: 分数型 `(quotient (pair integer integer) rat-equiv)` — `1/2` と `2/4` を同一視
   - **集合論的型 (Set-Theoretic Types)**: 商型を含む型システムで型を数学的集合として解釈
@@ -701,9 +753,12 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ## 13. 高度な多相性
 
+> 注: この章は研究的拡張の参照領域である。core 実装の完了条件には含めない。
+
 ### FR-1301: カインド多相 (Kind Polymorphism)
 
 - **対象**: `src/type/inference.lisp`
+- **現状**: 基本構造のみ（`src/type/kind.lisp` の kind ノードはあるが、kind polymorphism は未実装）
 - **内容**: 型コンストラクタのカインド自体を多相的に抽象化
   - GHC `-XPolyKinds`: `(forall k. f :: k -> *)` — カインド変数 `k` を導入
   - `Proxy :: forall k. k -> *` — 任意カインドの幽霊型引数を受け取る
@@ -714,7 +769,8 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-1302: 宇宙多相 (Universe Polymorphism)
 
-- **対象**: 新ファイル `src/type/universes.lisp`
+- **対象**: 予定ファイル `src/type/universes.lisp`
+- **現状**: 未実装
 - **内容**: 型の型（宇宙）を階層化し、宇宙レベルを多相的に扱う
   - 動機: 「すべての型の型」は存在できない（Russell のパラドックス）
   - `Type₀ : Type₁ : Type₂ : ...` — 宇宙の無限階層
@@ -746,7 +802,7 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-1305: 総称的関連型 (Generic Associated Types, GATs)
 
-- **対象**: `src/type/typeclasses.lisp`
+- **対象**: `src/type/typeclass.lisp`
 - **内容**: 関連型にライフタイムや型パラメータを付与（Rust 1.65+ の目玉機能）
   - 通常の関連型: `(type-class container (:c) (type item-of :c))` — パラメータなし
   - GAT: `(type-class iterable (:c) (type iter-of (:c :lifetime)))` — ライフタイム付き関連型
@@ -780,6 +836,8 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ## 14. 型理論の基礎
 
+> 注: この章は理論的背景の整理であり、core の直接的な実装要件ではない。
+
 ### FR-1401: 文脈的型付け / 暗黙引数 (Contextual Typing / Implicit Arguments)
 
 - **対象**: `src/type/inference.lisp`
@@ -796,7 +854,7 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 - **対象**: `src/type/inference.lisp`
 - **内容**: 型推論アルゴリズムの理論的保証
   - **主型性 (Principal Types)**: すべての型付けの中で「最も一般的な型」が一意に存在すること。HM は主型性を持つ
-  - **健全性 (Soundness)**: 型検査が通れば実行時型エラーが起きないこと
+  - **健全性 (Soundness)**: 型検査が通る範囲について、仕様で保証された実行時型エラーを抑制すること
   - **完全性 (Completeness)**: 型付け可能なプログラムはすべて型検査が通ること
   - **決定可能性**: 型推論が有限時間で停止すること。System F は決定不可能。HM は決定可能
   - **段階的型付けの健全性**: 段階的型付けでは完全な健全性ではなく「型付き部分の健全性」を保証
@@ -838,7 +896,8 @@ Type inference engine, polymorphism, subtyping, refinement/dependent types, effe
 
 ### FR-1406: 定義的等価性 vs 命題的等価性 (Definitional vs Propositional Equality)
 
-- **対象**: `src/type/dependent.lisp` (FR-303 の依存型実装に必要)
+- **対象**: 予定ファイル `src/type/dependent.lisp` (FR-303 の依存型実装に必要)
+- **現状**: 未実装
 - **内容**: 依存型における型等値の 2 種類
   - **定義的等価性 (Definitional)**: コンパイラが自動的に証明できる等価性。`2 + 2` と `4` は定義的に等価
   - **命題的等価性 (Propositional)**: 証明が必要な等価性。`n + 0 = n` は定義的ではなく命題的（帰納法が必要）

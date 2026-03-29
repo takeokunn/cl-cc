@@ -56,17 +56,24 @@ Returns (values new-subst residual-constraints).
                (push c residual))))
 
           ;; (:typeclass C tau) ─ instance check
-          (:typeclass
-           (let* ((args       (constraint-args c))
-                  (class-name (first args))
-                  (tau        (zonk (second args) current-subst)))
-             (cond
-               ;; Free variable: defer (becomes residual until zonked)
-               ((type-var-p tau)
-                (push c residual))
-               ;; Gradual typing / error: accept
-               ((or (type-error-p tau) (type-unknown-p tau))
-                nil)
+           (:typeclass
+            (let* ((args       (constraint-args c))
+                   (class-name (first args))
+                   (tau        (zonk (second args) current-subst)))
+              (cond
+                ;; Free variable: defer (becomes residual until zonked)
+                ((type-var-p tau)
+                  (if (and (default-numeric-typeclass-p class-name)
+                           *default-numeric-type*)
+                      (multiple-value-bind (new-subst ok)
+                          (type-unify tau *default-numeric-type* current-subst)
+                        (if ok
+                            (setf current-subst new-subst)
+                            (push c residual)))
+                      (push c residual)))
+                ;; Gradual typing / error: accept
+                ((or (type-error-p tau) (type-unknown-p tau))
+                 nil)
                ;; Check instance
                ((has-typeclass-instance-p class-name tau)
                 nil)

@@ -48,6 +48,37 @@
   `(setf (fdefinition ',name)
          (lambda ,params ,@body)))
 
+;; DEFUN/C macro
+;; Minimal design-by-contract support: :requires, :ensures, :invariant.
+(our-defmacro defun/c (name params &rest clauses)
+  (let ((requires nil)
+        (ensures nil)
+        (invariant nil)
+        (body clauses))
+    (loop while (and body
+                     (keywordp (first body))
+                     (member (first body) '(:requires :ensures :invariant) :test #'eq)
+                     (cdr body))
+          do (let ((key (pop body))
+                   (value (pop body)))
+               (case key
+                 (:requires (setf requires value))
+                 (:ensures  (setf ensures value))
+                 (:invariant (setf invariant value)))))
+    (let* ((pre-check  (remove nil (list requires invariant)))
+           (post-check (remove nil (list ensures invariant)))
+           (pre-form   (when pre-check
+                         `(unless (and ,@pre-check)
+                            (error "Precondition failed in ~S" ',name))))
+           (post-form  (when post-check
+                         `(unless (and ,@post-check)
+                            (error "Postcondition failed in ~S" ',name)))))
+      `(defun ,name ,params
+         ,@(when pre-form (list pre-form))
+         (let ((result (progn ,@body)))
+           ,@(when post-form (list post-form))
+           result)))))
+
 ;; PROG1 macro
 (our-defmacro prog1 (first-form &body body)
   (let ((result (gensym "RESULT")))
@@ -290,4 +321,3 @@ MAKE-STEP-FORMS is (vars steps) -> list of step forms to splice into tagbody."
                                    (progn ,@body)
                                    ,(build-typecase rest)))))))))
            (build-typecase cases)))))
-

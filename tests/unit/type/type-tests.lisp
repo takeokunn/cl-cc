@@ -1017,6 +1017,17 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
     (assert-true (type-primitive-p (type-app-fun list-int)))
     (assert-true (type-equal-p type-int (type-app-arg list-int)))))
 
+(deftest upgraded-array-and-complex-part-types
+  "ANSI CL upgrade helpers return the expected core type nodes."
+  (let ((bit-upgraded (upgraded-array-element-type 'bit))
+        (char-upgraded (upgraded-array-element-type 'character))
+        (fallback-upgraded (upgraded-array-element-type '(or fixnum string)))
+        (complex-part (upgraded-complex-part-type 'complex)))
+    (assert-true (type-equal-p (cl-cc/type:parse-type-specifier 'bit) bit-upgraded))
+    (assert-true (type-equal-p (cl-cc/type:parse-type-specifier 'character) char-upgraded))
+    (assert-true (type-equal-p type-any fallback-upgraded))
+    (assert-true (type-equal-p (cl-cc/type:parse-type-specifier 'real) complex-part))))
+
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; 2026 Type System: Hash-Table Substitution API Tests
 ;;; ─────────────────────────────────────────────────────────────────────────

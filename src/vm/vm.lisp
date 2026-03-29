@@ -213,6 +213,27 @@ SHAPE is one of:
   (:sexp-tag :mul)
   (:sexp-slots dst lhs rhs))
 
+;;; Specialized arithmetic instructions used by type-directed codegen.
+(define-vm-instruction vm-integer-add (vm-add)
+  (:sexp-tag :iadd)
+  (:sexp-slots dst lhs rhs))
+(define-vm-instruction vm-integer-sub (vm-sub)
+  (:sexp-tag :isub)
+  (:sexp-slots dst lhs rhs))
+(define-vm-instruction vm-integer-mul (vm-mul)
+  (:sexp-tag :imul)
+  (:sexp-slots dst lhs rhs))
+
+(define-vm-instruction vm-float-add (vm-add)
+  (:sexp-tag :fadd)
+  (:sexp-slots dst lhs rhs))
+(define-vm-instruction vm-float-sub (vm-sub)
+  (:sexp-tag :fsub)
+  (:sexp-slots dst lhs rhs))
+(define-vm-instruction vm-float-mul (vm-mul)
+  (:sexp-tag :fmul)
+  (:sexp-slots dst lhs rhs))
+
 (define-vm-instruction vm-label (vm-instruction)
   (name nil :reader vm-name)
   (:sexp-tag :label)

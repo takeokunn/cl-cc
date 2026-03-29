@@ -119,6 +119,16 @@
       (assert-equal 'widget (car entry))
       (assert-equal 'width (cdr entry)))))
 
+(deftest ds-deriving-registers-typeclass-instances
+  "defstruct :deriving emits the registration hook and registers instances on eval."
+  (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
+        (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal))
+        (name (gensym "DERIVING-POINT-")))
+    (eval (ds-expand `(defstruct (,name (:deriving eq show ord)) x y)))
+    (assert-true (has-typeclass-instance-p 'eq name))
+    (assert-true (has-typeclass-instance-p 'show name))
+    (assert-true (has-typeclass-instance-p 'ord name))))
+
 ;;; ─── Empty struct ─────────────────────────────────────────────────────────
 
 (deftest ds-empty-struct

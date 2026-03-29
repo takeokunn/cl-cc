@@ -6,8 +6,12 @@
    (next-register :initform 0 :accessor ctx-next-register)
    (next-label :initform 0 :accessor ctx-next-label)
    (env :initform nil :accessor ctx-env)
+   (type-env :initform nil :accessor ctx-type-env
+              :documentation "Type environment accumulated during top-level compilation")
+   (safety :initarg :safety :initform 1 :accessor ctx-safety
+           :documentation "Compiler safety level; 0 suppresses runtime type assertions.")
    (block-env :initform nil :accessor ctx-block-env
-              :documentation "Alist mapping block names to (exit-label . result-reg)")
+               :documentation "Alist mapping block names to (exit-label . result-reg)")
    (tagbody-env :initform nil :accessor ctx-tagbody-env
                 :documentation "Alist mapping tags to labels within current tagbody")
    (global-functions :initform (make-hash-table :test #'eq) :accessor ctx-global-functions
@@ -57,7 +61,7 @@ Used by run-string-repl to persist the label counter across calls.")
 
 (defmethod initialize-instance :after ((ctx compiler-context) &key &allow-other-keys)
   "Register built-in special variables so they compile to vm-get-global.
-Also merges any persistent REPL globals and continues label counter."
+  Also merges any persistent REPL globals and continues label counter."
   (let ((gv (ctx-global-variables ctx)))
     (dolist (name *builtin-special-variables*)
       (setf (gethash name gv) t))
@@ -67,7 +71,10 @@ Also merges any persistent REPL globals and continues label counter."
                *repl-global-variables*)))
   ;; Continue label counter from previous REPL compilation to avoid collisions
   (when *repl-label-counter*
-    (setf (ctx-next-label ctx) *repl-label-counter*)))
+    (setf (ctx-next-label ctx) *repl-label-counter*))
+  (unless (ctx-type-env ctx)
+    (setf (ctx-type-env ctx) (cl-cc/type:type-env-empty)))
+  )
 
 (defvar *labels-boxed-fns* nil
   "Alist mapping labels function names to their box registers for mutual recursion.")
@@ -95,4 +102,3 @@ Also merges any persistent REPL globals and continues label counter."
     (unless entry
       (error "Unbound variable: ~S" sym))
     (cdr entry)))
-

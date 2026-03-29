@@ -38,6 +38,54 @@
       (error "Unknown binary operator: ~S" op))
     (symbol-function (cdr entry))))
 
+(defparameter +codegen-fixnum-type+
+  (cl-cc/type:parse-type-specifier 'fixnum))
+
+(defparameter +codegen-float-type+
+  (cl-cc/type:parse-type-specifier 'float))
+
+(defun %ast-proven-type (ctx ast)
+  "Return the currently proven type for AST, if any."
+  (typecase ast
+    (ast-int
+     (when (typep (ast-int-value ast) 'fixnum)
+       +codegen-fixnum-type+))
+    (ast-the
+     (or (let ((declared (ast-the-type ast)))
+           (when declared
+             (cl-cc/type:parse-type-specifier declared)))
+         (%ast-proven-type ctx (ast-the-value ast))))
+    (ast-var
+     (multiple-value-bind (scheme found-p)
+         (cl-cc/type:type-env-lookup (ast-var-name ast) (ctx-type-env ctx))
+       (when found-p
+         (cl-cc/type::instantiate scheme))))
+    (t nil)))
+
+(defun %numeric-binop-constructor (op lhs rhs ctx)
+  "Select a numeric-specialized constructor for OP/LHS/RHS when possible."
+  (let ((lhs-type (%ast-proven-type ctx lhs))
+        (rhs-type (%ast-proven-type ctx rhs)))
+    (labels ((fixnum-type-p (ty)
+               (and ty (cl-cc/type::is-subtype-p ty +codegen-fixnum-type+)))
+             (float-type-p (ty)
+               (and ty (cl-cc/type::is-subtype-p ty +codegen-float-type+))))
+      (cond
+        ((and (fixnum-type-p lhs-type) (fixnum-type-p rhs-type))
+         (case op
+           (+ 'make-vm-integer-add)
+           (- 'make-vm-integer-sub)
+           (* 'make-vm-integer-mul)
+           (otherwise (binop-ctor op))))
+        ((and (float-type-p lhs-type) (float-type-p rhs-type))
+         (case op
+           (+ 'make-vm-float-add)
+           (- 'make-vm-float-sub)
+           (* 'make-vm-float-mul)
+           (/ 'make-vm-float-div)
+           (otherwise (binop-ctor op))))
+        (t (binop-ctor op))))))
+
 ;;; ── Primitive literal forms ──────────────────────────────────────────────
 
 (defmethod compile-ast ((node ast-int) ctx)
@@ -83,7 +131,10 @@
   (let* ((lhs-reg (compile-ast (ast-binop-lhs node) ctx))
          (rhs-reg (compile-ast (ast-binop-rhs node) ctx))
          (dst (make-register ctx))
-         (ctor (binop-ctor (ast-binop-op node))))
+         (ctor (%numeric-binop-constructor (ast-binop-op node)
+                                           (ast-binop-lhs node)
+                                           (ast-binop-rhs node)
+                                           ctx)))
     (emit ctx (funcall ctor :dst dst :lhs lhs-reg :rhs rhs-reg))
     dst))
 
@@ -103,8 +154,45 @@
     (emit ctx (make-vm-print :reg reg))
     reg))
 
+(defun %branch-type-env (ctx guard-var guard-type branch)
+  "Return a branch-specialized type environment for GUARD-VAR/GUARD-TYPE."
+  (let ((base-env (ctx-type-env ctx)))
+    (if guard-var
+        (case branch
+          (:then
+           (cl-cc/type:type-env-extend guard-var
+                                       (cl-cc/type:type-to-scheme guard-type)
+                                       base-env))
+          (:else
+           (multiple-value-bind (scheme found-p)
+               (cl-cc/type:type-env-lookup guard-var base-env)
+             (let ((current-type (and found-p
+                                      (cl-cc/type::instantiate scheme))))
+               (if (and current-type
+                        (typep current-type 'cl-cc/type::type-union))
+                   (cl-cc/type:type-env-extend guard-var
+                                               (cl-cc/type:type-to-scheme
+                                                (cl-cc/type::narrow-union-type
+                                                 current-type guard-type))
+                                               base-env)
+                   base-env))))
+          (t base-env))
+        base-env)))
+
+(defun %ast-var-proven-type (ctx ast)
+  "Return the currently proven type for AST if it is a variable reference."
+  (when (typep ast 'ast-var)
+    (multiple-value-bind (scheme found-p)
+        (cl-cc/type:type-env-lookup (ast-var-name ast) (ctx-type-env ctx))
+      (when found-p
+        (cl-cc/type::instantiate scheme)))))
+
 (defmethod compile-ast ((node ast-if) ctx)
   (let* ((tail (ctx-tail-position ctx))
+         (guard-info (multiple-value-list
+                      (cl-cc/type::extract-type-guard (ast-if-cond node))))
+         (guard-var (first guard-info))
+         (guard-type (second guard-info))
          (cond-reg (progn (setf (ctx-tail-position ctx) nil)
                           (compile-ast (ast-if-cond node) ctx)))
          (dst (make-register ctx))
@@ -112,21 +200,32 @@
          (end-label (make-label ctx "ifend")))
     (emit ctx (make-vm-jump-zero :reg cond-reg :label else-label))
     (setf (ctx-tail-position ctx) tail)
-    (let ((then-reg (compile-ast (ast-if-then node) ctx)))
-      (setf (ctx-tail-position ctx) nil)
-      (emit ctx (make-vm-move :dst dst :src then-reg))
-      (emit ctx (make-vm-jump :label end-label)))
+    (let ((old-type-env (ctx-type-env ctx)))
+      (unwind-protect
+           (progn
+             (setf (ctx-type-env ctx) (%branch-type-env ctx guard-var guard-type :then))
+             (let ((then-reg (compile-ast (ast-if-then node) ctx)))
+               (setf (ctx-tail-position ctx) nil)
+               (emit ctx (make-vm-move :dst dst :src then-reg))
+               (emit ctx (make-vm-jump :label end-label))))
+        (setf (ctx-type-env ctx) old-type-env)))
     (emit ctx (make-vm-label :name else-label))
     (setf (ctx-tail-position ctx) tail)
-    (let ((else-reg (compile-ast (ast-if-else node) ctx)))
-      (setf (ctx-tail-position ctx) nil)
-      (emit ctx (make-vm-move :dst dst :src else-reg)))
+    (let ((old-type-env (ctx-type-env ctx)))
+      (unwind-protect
+           (progn
+             (setf (ctx-type-env ctx) (%branch-type-env ctx guard-var guard-type :else))
+             (let ((else-reg (compile-ast (ast-if-else node) ctx)))
+               (setf (ctx-tail-position ctx) nil)
+               (emit ctx (make-vm-move :dst dst :src else-reg))))
+        (setf (ctx-type-env ctx) old-type-env)))
     (emit ctx (make-vm-label :name end-label))
     dst))
 
 (defmethod compile-ast ((node ast-let) ctx)
   (let ((old-env (ctx-env ctx))
-        (old-boxed (ctx-boxed-vars ctx)))
+        (old-boxed (ctx-boxed-vars ctx))
+        (old-type-env (ctx-type-env ctx)))
     (unwind-protect
          (progn
            ;; A variable needs boxing if it's both:
@@ -152,18 +251,27 @@
                        (emit ctx (make-vm-cons :dst box-reg :car-src own-reg :cdr-src nil-reg))
                        (push (cons name box-reg) new-bindings))
                      (push (cons name own-reg) new-bindings))))
-             (setf (ctx-env ctx) (append (nreverse new-bindings) (ctx-env ctx)))
-             (setf (ctx-boxed-vars ctx) (union needs-boxing (ctx-boxed-vars ctx))))
-           (let ((last nil)
-                 (tail (ctx-tail-position ctx))
-                 (body-forms (ast-let-body node)))
-             (dolist (form body-forms)
-               (setf (ctx-tail-position ctx)
-                     (if (eq form (car (last body-forms))) tail nil))
-               (setf last (compile-ast form ctx)))
-             last))
+              (setf (ctx-env ctx) (append (nreverse new-bindings) (ctx-env ctx)))
+              (setf (ctx-boxed-vars ctx) (union needs-boxing (ctx-boxed-vars ctx))))
+            (dolist (binding (ast-let-bindings node))
+              (let ((binding-type (%ast-proven-type ctx (cdr binding))))
+                (when binding-type
+                  (setf (ctx-type-env ctx)
+                        (cl-cc/type:type-env-extend
+                         (car binding)
+                         (cl-cc/type:type-to-scheme binding-type)
+                         (ctx-type-env ctx))))))
+            (let ((last nil)
+                  (tail (ctx-tail-position ctx))
+                  (body-forms (ast-let-body node)))
+              (dolist (form body-forms)
+                (setf (ctx-tail-position ctx)
+                      (if (eq form (car (last body-forms))) tail nil))
+                (setf last (compile-ast form ctx)))
+              last))
       (setf (ctx-env ctx) old-env)
-      (setf (ctx-boxed-vars ctx) old-boxed))))
+      (setf (ctx-boxed-vars ctx) old-boxed)
+      (setf (ctx-type-env ctx) old-type-env))))
 
 ;;; ── Control flow: block / return-from ────────────────────────────────────
 
@@ -279,6 +387,28 @@
           (cl-cc/type:type-to-string (cl-cc/type:type-mismatch-error-expected e))
           (cl-cc/type:type-to-string (cl-cc/type:type-mismatch-error-actual e))))
 
+(defun %emit-the-runtime-assertion (ctx value-reg declared-type &key (emit-failure-p t))
+  "Emit a runtime assertion for (the DECLARED-TYPE VALUE-REG)."
+  (unless (or (null declared-type)
+              (eq declared-type 't)
+              (typep declared-type 'cl-cc/type:type-unknown))
+    (when (> (ctx-safety ctx) 0)
+      (let ((check-reg (make-register ctx))
+            (fail-label (make-label ctx "the_fail"))
+            (done-label (make-label ctx "the_done"))
+            (error-reg (make-register ctx)))
+        (emit ctx (make-vm-typep :dst check-reg :src value-reg :type-name declared-type))
+        (when emit-failure-p
+          (emit ctx (make-vm-jump-zero :reg check-reg :label fail-label))
+          (emit ctx (make-vm-jump :label done-label))
+          (emit ctx (make-vm-label :name fail-label))
+          (emit ctx (make-vm-const :dst error-reg
+                                   :value (format nil "Type assertion failed: expected ~A"
+                                                  declared-type)))
+          (emit ctx (make-vm-signal-error :error-reg error-reg))
+          (emit ctx (make-vm-label :name done-label))))))
+  value-reg)
+
 (defmethod compile-ast ((node ast-the) ctx)
   "Compile a type declaration. In typed-function mode, verifies the type at compile time."
   (let ((reg (compile-ast (ast-the-value node) ctx)))
@@ -289,13 +419,22 @@
                    (not (typep declared 'cl-cc/type:type-unknown)))
           (handler-case
             (cl-cc/type:check (ast-the-value node) declared (cl-cc/type:type-env-empty))
-            (cl-cc/type:type-mismatch-error (e)
-              (error 'ast-compilation-error
-                     :location (format nil "~A:~A"
-                                       (ast-source-file node)
-                                       (ast-source-line node))
-                     :format-control "Type error in ~A: ~A"
-                     :format-arguments (list *compiling-typed-fn*
-                                             (type-error-message-from-mismatch e))))
-            (cl-cc/type:type-inference-error () nil)))))
-    reg))
+              (cl-cc/type:type-mismatch-error (e)
+               (error 'ast-compilation-error
+                      :location (format nil "~A:~A"
+                                        (ast-source-file node)
+                                        (ast-source-line node))
+                      :format-control "Type error in ~A: ~A"
+                      :format-arguments (list *compiling-typed-fn*
+                                              (type-error-message-from-mismatch e))))
+              (cl-cc/type:type-inference-error () nil)))))
+    (let ((declared (ast-the-type node))
+          (declared-type (and (ast-the-type node)
+                              (cl-cc/type:parse-type-specifier (ast-the-type node)))))
+      (if (and declared-type
+               (typep (ast-the-value node) 'ast-var)
+               (let ((proven (%ast-proven-type ctx (ast-the-value node))))
+                 (and proven (cl-cc/type:type-equal-p proven declared-type))))
+          (%emit-the-runtime-assertion ctx reg declared :emit-failure-p nil)
+          (%emit-the-runtime-assertion ctx reg declared))
+      reg)))

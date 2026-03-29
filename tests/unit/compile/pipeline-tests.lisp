@@ -25,6 +25,52 @@
          (instrs (vm-program-instructions (compilation-result-program result))))
     (assert-true (typep (car (last instrs)) 'cl-cc::vm-halt))))
 
+(deftest pipeline-compile-toplevel-forms-captures-type-env
+  "compile-toplevel-forms retains the inferred top-level type environment."
+  (let ((result (cl-cc::compile-toplevel-forms '((defvar *typed-top-level* 42))
+                                                :type-check t)))
+    (assert-true (typep (cl-cc::compilation-result-type-env result)
+                        'cl-cc/type:type-env))
+    (multiple-value-bind (scheme found-p)
+        (cl-cc/type::type-env-lookup '*typed-top-level*
+                                     (cl-cc::compilation-result-type-env result))
+      (assert-true found-p)
+      (assert-eq 'fixnum (cl-cc/type:type-primitive-name
+                          (cl-cc/type::type-scheme-type scheme))))))
+
+(deftest pipeline-compile-toplevel-forms-captures-defun-type-env
+  "compile-toplevel-forms records inferred defun types for later forms."
+  (let ((result (cl-cc::compile-toplevel-forms
+                 '((defun typed-id (x) x)
+                   (typed-id 42))
+                 :type-check t)))
+    (multiple-value-bind (scheme found-p)
+        (cl-cc/type::type-env-lookup 'typed-id
+                                     (cl-cc::compilation-result-type-env result))
+      (assert-true found-p)
+      (assert-true (cl-cc/type:type-function-p
+                    (cl-cc/type::type-scheme-type scheme))))))
+
+(deftest pipeline-the-runtime-assertion
+  "run-string executes (the ...) assertions and signals on mismatch."
+  (assert-= 42 (run-string "(the fixnum 42)"))
+  (assert-signals error
+    (run-string "(the fixnum \"oops\")")))
+
+(deftest pipeline-the-refinement-runtime-assertion
+  "run-string accepts refinement assertions and rejects predicate failures."
+  (assert-= 42 (run-string "(the (refine fixnum plusp) 42)"))
+  (assert-signals error
+    (run-string "(the (refine fixnum plusp) -1)")))
+
+(deftest pipeline-typed-fixnum-defun-folds-checks
+  "Typed fixnum parameters no longer emit vm-typep checks in the function body."
+  (let* ((result (compile-string
+                  "(defun typed-add ((x fixnum) (y fixnum)) fixnum (+ x y))"))
+         (prog (compilation-result-program result))
+         (instrs (vm-program-instructions prog)))
+    (assert-true (notany (lambda (i) (typep i 'cl-cc::vm-typep)) instrs))))
+
 ;;; ─── compile-string ─────────────────────────────────────────────────────
 
 (deftest pipeline-compile-string-basic

@@ -16,14 +16,15 @@
                 #:*test-registry*
                 #:*current-suite*
                 #:*suite-registry*
-                #:assert-true
-                #:assert-false
-                #:assert-=
-                #:assert-eq
-                #:assert-equal
-                #:assert-null
-                #:assert-type
-                #:assert-signals)
+                 #:assert-true
+                 #:assert-false
+                 #:assert-=
+                 #:assert-eq
+                 #:assert-equal
+                 #:assert-null
+                 #:assert-type
+                 #:assert-signals
+                 #:run-string)
   (:import-from :cl-cc
                 ;; AST classes for generators
                 :ast-node

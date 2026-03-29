@@ -172,7 +172,14 @@ Examples:
                                  (type-effectful-function-effects t2)
                                  subst-ret)
                      (fail)))
-               (fail)))))
+                (fail)))))
+
+      ;; Refinement types unify through their base type.
+      ((type-refinement-p t1)
+       (type-unify (type-refinement-base t1) t2 subst))
+
+      ((type-refinement-p t2)
+       (type-unify t1 (type-refinement-base t2) subst))
 
       ;; Different type constructors - fail
       (t (fail)))))

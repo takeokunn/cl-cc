@@ -20,14 +20,17 @@
   (assembly nil)
   (globals nil)
   (type nil)
+  (type-env nil)
   (cps nil))
 
-(defun compile-toplevel-forms (forms &key (target :x86_64))
+(defun compile-toplevel-forms (forms &key (target :x86_64) type-check (safety 1))
   "Compile a list of top-level forms (e.g., from a source file).
 Handles defun, defvar, and expression forms.
 Returns a compilation-result struct with program, assembly, and globals."
-  (let* ((ctx (make-instance 'compiler-context))
-         (last-reg nil))
+  (let* ((ctx (make-instance 'compiler-context :safety safety))
+         (last-reg nil)
+         (last-type nil)
+         (type-env (cl-cc/type:type-env-empty)))
     (dolist (form forms)
       (let* ((expanded (if (typep form 'ast-node)
                            form
@@ -35,7 +38,44 @@ Returns a compilation-result struct with program, assembly, and globals."
              (ast (if (typep expanded 'ast-node)
                       expanded
                       (lower-sexp-to-ast expanded))))
+        (when type-check
+          (setf last-type
+                (handler-case
+                    (type-check-ast ast type-env)
+                  (error (e)
+                    (if (eq type-check :strict)
+                        (error e)
+                        (progn
+                          (warn "Type check warning: ~A" e)
+                          nil))))))
+        (when (and type-check
+                   (typep ast 'cl-cc:ast-defvar)
+                   (cl-cc:ast-defvar-value ast))
+          (let ((value-type
+                  (handler-case
+                      (type-check-ast (cl-cc:ast-defvar-value ast) type-env)
+                    (error (e)
+                      (if (eq type-check :strict)
+                          (error e)
+                          (progn
+                            (warn "Type check warning: ~A" e)
+                            nil))))))
+            (when value-type
+              (setf type-env
+                    (cl-cc/type:type-env-extend
+                     (cl-cc:ast-defvar-name ast)
+                     (cl-cc/type:type-to-scheme value-type)
+                     type-env)))))
+        (when (and type-check
+                   (typep ast 'cl-cc:ast-defun)
+                   last-type)
+          (setf type-env
+                (cl-cc/type:type-env-extend
+                 (cl-cc:ast-defun-name ast)
+                 (cl-cc/type:type-to-scheme last-type)
+                 type-env)))
         (setf last-reg (compile-ast ast ctx))))
+    (setf (ctx-type-env ctx) type-env)
     (when last-reg
       (emit ctx (make-vm-halt :reg last-reg)))
     (when *repl-capture-label-counter*
@@ -47,7 +87,9 @@ Returns a compilation-result struct with program, assembly, and globals."
                      :result-register last-reg)))
       (make-compilation-result :program program
                                :assembly (emit-assembly program :target target)
-                               :globals (ctx-global-functions ctx)))))
+                               :globals (ctx-global-functions ctx)
+                               :type last-type
+                               :type-env (ctx-type-env ctx)))))
 
 ;;; ── Exception handling: catch / throw / unwind-protect / handler-case ────
 

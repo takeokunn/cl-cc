@@ -123,13 +123,19 @@
 
     (cl-cc:ast-defun
      (let* ((param-types    (mapcar (lambda (p) (declare (ignore p)) (fresh-type-var))
-                                    (cl-cc:ast-defun-params ast)))
+                                     (cl-cc:ast-defun-params ast)))
             (param-bindings (mapcar (lambda (name type)
                                       (cons name (make-type-scheme nil type)))
                                     (cl-cc:ast-defun-params ast) param-types))
             (body-env (type-env-extend* param-bindings env)))
-       (infer-body (cl-cc:ast-defun-body ast) body-env)
-       (values type-symbol nil)))
+       (multiple-value-bind (body-type subst)
+           (infer-body (cl-cc:ast-defun-body ast) body-env)
+         (values (make-type-function-raw
+                  :params (mapcar (lambda (p)
+                                    (type-substitute p subst))
+                                  param-types)
+                  :return body-type)
+                 subst))))
 
     (cl-cc:ast-defvar
      (when (cl-cc:ast-defvar-value ast)
@@ -422,6 +428,15 @@
 (defun infer-with-env (ast)
   "Infer type of AST in empty environment (convenience function)."
   (infer ast (type-env-empty)))
+
+(defun infer-with-constraints (ast env)
+  "Infer type by generating constraints and then solving them.
+   Returns (values type substitution residual-constraints)."
+  (multiple-value-bind (ty constraints)
+      (collect-constraints ast env)
+    (multiple-value-bind (subst residual)
+        (solve-constraints constraints nil)
+      (values (type-substitute ty subst) subst residual))))
 
 ;;; Type Annotation
 

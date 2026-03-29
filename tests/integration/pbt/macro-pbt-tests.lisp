@@ -542,6 +542,23 @@
            (eq (car lambda-form) 'lambda)
            (equal (second lambda-form) params)))))
 
+(deftest defun-c-enforces-contracts
+  "DEFUN/C enforces preconditions and postconditions at runtime."
+  (assert-equal 4
+                (run-string "(progn
+                                (defun/c add1-positive (x)
+                                  :requires (> x 0)
+                                  :ensures (= result (+ x 1))
+                                  (+ x 1))
+                                (add1-positive 3))"))
+  (assert-signals error
+    (run-string "(progn
+                    (defun/c add1-positive (x)
+                      :requires (> x 0)
+                      :ensures (= result (+ x 1))
+                      (+ x 1))
+                    (add1-positive 0))")))
+
 ;;; Property: Nested Macro Expansion
 
 (defproperty nested-when-in-let-star

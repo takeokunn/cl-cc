@@ -1,8 +1,8 @@
 ;;;; compile/pipeline.lisp - Top-Level Compilation API
 (in-package :cl-cc)
 
-(defun compile-expression (expr &key (target :x86_64) type-check)
-  (let* ((ctx (make-instance 'compiler-context))
+(defun compile-expression (expr &key (target :x86_64) type-check (safety 1))
+  (let* ((ctx (make-instance 'compiler-context :safety safety))
          (expanded-expr (if (typep expr 'ast-node)
                             expr
                             (compiler-macroexpand-all expr)))
@@ -10,17 +10,19 @@
                   expanded-expr
                   (lower-sexp-to-ast expanded-expr)))
          (inferred-type (when type-check
-                          (handler-case (type-check-ast ast)
+                          (handler-case
+                              (type-check-ast ast)
                             (error (e)
                               (if (eq type-check :strict)
                                   (error e)
-                                  (warn "Type check warning: ~A" e)
-                                  )))))
+                                  (progn
+                                    (warn "Type check warning: ~A" e)
+                                    nil))))))
          (result-reg (compile-ast ast ctx))
          (instructions (nreverse (ctx-instructions ctx)))
          (full-instructions (append instructions
                                     (list (make-vm-halt
-                                                         :reg result-reg))))
+                                           :reg result-reg))))
          (optimized-instructions (optimize-instructions full-instructions))
          (optimized-program (make-vm-program
                              :instructions optimized-instructions
@@ -29,12 +31,16 @@
     (when *repl-capture-label-counter*
       (setf *repl-capture-label-counter* (ctx-next-label ctx)))
     (make-compilation-result :program optimized-program
-                            :assembly (emit-assembly optimized-program :target target)
-                            :type (when type-check inferred-type)
-                            :cps (if (typep expr 'ast-node)
-                                     nil
-                                     (handler-case (cps-transform expr)
-                                       (error (e) (declare (ignore e)) nil))))))
+                              :assembly (emit-assembly optimized-program :target target)
+                              :type (when type-check inferred-type)
+                              :type-env (ctx-type-env ctx)
+                              :cps (if (typep expr 'ast-node)
+                                       nil
+                                       (handler-case
+                                          (cps-transform expr)
+                                        (error (e)
+                                          (declare (ignore e))
+                                          nil))))))
 
 ;;; Standard Library (Higher-Order Functions)
 ;;; *standard-library-source* is defined in stdlib-source.lisp (loaded before this file).
@@ -55,12 +61,12 @@
     (:php (parse-php-source source))
     (t (error "Unknown language: ~S" language))))
 
-(defun compile-string (source &key (target :x86_64) type-check (language :lisp))
+(defun compile-string (source &key (target :x86_64) type-check (language :lisp) (safety 1))
   (let ((forms (parse-source-for-language source language)))
     (if (and (eq language :lisp) (= (length forms) 1))
-        (compile-expression (first forms) :target target :type-check type-check)
+        (compile-expression (first forms) :target target :type-check type-check :safety safety)
         ;; Multiple forms (or non-lisp): use compile-toplevel-forms for sequential macro expansion
-        (compile-toplevel-forms forms :target target))))
+        (compile-toplevel-forms forms :target target :type-check type-check :safety safety))))
 
 (defun run-string (source &key stdlib)
   "Compile and run SOURCE. When STDLIB is true, include standard library."
@@ -74,11 +80,14 @@
          (program (compilation-result-program result)))
     (run-compiled program)))
 
-(defun compile-string-with-stdlib (source &key (target :x86_64))
+(defun compile-string-with-stdlib (source &key (target :x86_64) type-check (safety 1))
   "Compile SOURCE with standard library prepended."
   (let ((stdlib-forms (get-stdlib-forms))
         (user-forms (parse-all-forms source)))
-    (compile-toplevel-forms (append stdlib-forms user-forms) :target target)))
+    (compile-toplevel-forms (append stdlib-forms user-forms)
+                            :target target
+                            :type-check type-check
+                            :safety safety)))
 
 (defun our-eval (form)
   "Evaluate FORM by compiling it and running it in the VM.
@@ -402,4 +411,3 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
            ;; Store dictionary as global variable for VM access
            (defvar ,dict-var (list ,@method-forms))
            ',class-name)))))
-

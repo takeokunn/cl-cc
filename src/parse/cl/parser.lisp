@@ -211,11 +211,43 @@ Returns (values required lowered-optional rest-param lowered-key)."
                             (third opt)))  ; FR-696: preserve supplied-p name
                     optional)
             rest-param
-            (mapcar (lambda (kp)
-                      (list (first kp)
-                            (when (second kp) (lower-sexp-to-ast (second kp)))
-                            (third kp)))  ; FR-696: preserve supplied-p name
-                    key-params))))
+             (mapcar (lambda (kp)
+                       (list (first kp)
+                             (when (second kp) (lower-sexp-to-ast (second kp)))
+                             (third kp)))  ; FR-696: preserve supplied-p name
+                     key-params))))
+
+(defun %extract-leading-type-declarations (forms)
+  "Extract leading (declare (type ...)) forms from FORMS.
+
+Returns (values type-bindings stripped-forms), where TYPE-BINDINGS is an alist
+mapping variable symbols to type specifiers. A leading docstring is preserved
+in the stripped forms and declarations are extracted after it."
+  (let ((bindings nil)
+        (rest forms)
+        (prefix nil))
+    (when (and rest (stringp (first rest)))
+      (push (first rest) prefix)
+      (setf rest (rest rest)))
+    (loop while (and rest (consp (first rest)) (eq (caar rest) 'declare)) do
+      (dolist (spec (cdar rest))
+        (when (and (consp spec)
+                   (eq (car spec) 'type)
+                   (>= (length spec) 3))
+          (let ((type-spec (second spec)))
+            (dolist (var (cddr spec))
+              (setf bindings (acons var type-spec bindings))))))
+      (setf rest (cdr rest)))
+    (values bindings (nconc (nreverse prefix) rest))))
+
+(defun %apply-type-bindings-to-params (params type-bindings)
+  "Replace matching required PARAMS with typed parameter pairs."
+  (mapcar (lambda (param)
+            (let ((entry (and (symbolp param) (assoc param type-bindings))))
+              (if entry
+                  (list param (cdr entry))
+                  param)))
+          params))
 
 (defun %lower-local-fn-bindings (kind bindings)
   "Lower a list of FLET/LABELS bindings.  KIND is 'flet or 'labels for errors."
@@ -300,21 +332,23 @@ Returns (values required lowered-optional rest-param lowered-key)."
   (let ((raw-params (second node)))
     (unless (listp raw-params)
       (error "lambda parameters must be a list"))
-    (if (lambda-list-has-extended-p raw-params)
-        (multiple-value-bind (required optional rest-param key-params)
-            (%lower-extended-params raw-params)
-          (make-ast-lambda :params required
-                           :optional-params optional
-                           :rest-param rest-param
-                           :key-params key-params
-                           :body (mapcar #'lower-sexp-to-ast (cddr node))
-                           :source-file sf :source-line sl :source-column sc))
-        (progn
-          (unless (every #'symbolp raw-params)
-            (error "lambda parameters must be symbols"))
-          (make-ast-lambda :params raw-params
-                           :body (mapcar #'lower-sexp-to-ast (cddr node))
-                           :source-file sf :source-line sl :source-column sc)))))
+    (multiple-value-bind (type-bindings body-forms)
+        (%extract-leading-type-declarations (cddr node))
+      (if (lambda-list-has-extended-p raw-params)
+          (multiple-value-bind (required optional rest-param key-params)
+              (%lower-extended-params raw-params)
+            (make-ast-lambda :params (%apply-type-bindings-to-params required type-bindings)
+                             :optional-params optional
+                             :rest-param rest-param
+                             :key-params key-params
+                             :body (mapcar #'lower-sexp-to-ast body-forms)
+                             :source-file sf :source-line sl :source-column sc))
+          (progn
+            (unless (every #'symbolp raw-params)
+              (error "lambda parameters must be symbols"))
+            (make-ast-lambda :params (%apply-type-bindings-to-params raw-params type-bindings)
+                             :body (mapcar #'lower-sexp-to-ast body-forms)
+                             :source-file sf :source-line sl :source-column sc))))))
 
 ;;; ── Function reference ───────────────────────────────────────────────────────
 
@@ -492,19 +526,24 @@ Simple places dispatch via *setf-place-simple-rewrites*; complex places
   (let ((name (second node)) (raw-params (third node)))
     (unless (symbolp name)   (error "defun name must be a symbol"))
     (unless (listp raw-params) (error "defun parameters must be a list"))
-    (let ((block-body (list (lower-sexp-to-ast (list* 'block name (cdddr node))))))
-      (if (lambda-list-has-extended-p raw-params)
-          (multiple-value-bind (required optional rest-param key-params)
-              (%lower-extended-params raw-params)
-            (make-ast-defun :name name :params required
-                            :optional-params optional :rest-param rest-param
-                            :key-params key-params   :body block-body
-                            :source-file sf :source-line sl :source-column sc))
-          (progn
-            (unless (every #'symbolp raw-params)
-              (error "defun parameters must be symbols"))
-            (make-ast-defun :name name :params raw-params :body block-body
-                            :source-file sf :source-line sl :source-column sc))))))
+    (multiple-value-bind (type-bindings body-forms)
+        (%extract-leading-type-declarations (cdddr node))
+      (let ((block-body (list (lower-sexp-to-ast (list* 'block name body-forms)))))
+        (if (lambda-list-has-extended-p raw-params)
+            (multiple-value-bind (required optional rest-param key-params)
+                (%lower-extended-params raw-params)
+              (make-ast-defun :name name
+                              :params (%apply-type-bindings-to-params required type-bindings)
+                              :optional-params optional :rest-param rest-param
+                              :key-params key-params   :body block-body
+                              :source-file sf :source-line sl :source-column sc))
+            (progn
+              (unless (every #'symbolp raw-params)
+                (error "defun parameters must be symbols"))
+              (make-ast-defun :name name
+                              :params (%apply-type-bindings-to-params raw-params type-bindings)
+                              :body block-body
+                              :source-file sf :source-line sl :source-column sc)))))))
 
 ;;; ── Defvar / Defparameter ────────────────────────────────────────────────────
 
@@ -769,4 +808,3 @@ Simple places dispatch via *setf-place-simple-rewrites*; complex places
                      :source-file source-file
                      :source-line source-line
                      :source-column source-column))
-

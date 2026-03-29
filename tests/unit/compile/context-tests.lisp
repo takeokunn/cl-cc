@@ -78,6 +78,8 @@
     (assert-true (cl-cc::ctx-top-level-p ctx))
     (assert-null (cl-cc::ctx-instructions ctx))
     (assert-null (cl-cc::ctx-env ctx))
+    (assert-true (typep (cl-cc::ctx-type-env ctx) 'cl-cc/type:type-env))
+    (assert-null (cl-cc/type::type-env-bindings (cl-cc::ctx-type-env ctx)))
     (assert-true (gethash '*standard-output* (cl-cc::ctx-global-variables ctx)))
     (assert-true (gethash '*standard-input* (cl-cc::ctx-global-variables ctx)))
     (assert-true (gethash '*features* (cl-cc::ctx-global-variables ctx)))
