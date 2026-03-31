@@ -1,0 +1,142 @@
+;;;; tests/unit/compile/codegen-runtime-tests.lisp — Codegen runtime semantics tests
+
+(in-package :cl-cc/test)
+(in-suite cl-cc-suite)
+
+(deftest codegen-values-compilation
+  "Compiling ast-values emits vm-values and returns a register."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast (cl-cc::make-ast-values
+                             :forms (list (make-ast-int :value 1)
+                                          (make-ast-int :value 2)
+                                          (make-ast-int :value 3)))
+                           ctx)))
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-values))
+    (assert-true (keywordp reg))))
+
+(deftest codegen-values-basic-run
+  "values returns all values accessible via multiple-value-list."
+  (assert-equal '(1 2 3)
+    (run-string "(multiple-value-list (values 1 2 3))")))
+
+(deftest codegen-values-single-run
+  "values with one argument returns that argument."
+  (assert-run= 42 "(values 42)"))
+
+(deftest codegen-mvb-compilation
+  "Compiling multiple-value-bind emits vm-mv-bind and returns a register."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast (cl-cc::make-ast-multiple-value-bind
+                             :vars '(a b)
+                             :values-form (cl-cc::make-ast-values
+                                           :forms (list (make-ast-int :value 1)
+                                                        (make-ast-int :value 2)))
+                             :body (list (make-ast-var :name 'a)))
+                           ctx)))
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-mv-bind))
+    (assert-true (keywordp reg))))
+
+(deftest-each codegen-mvb-run
+  "multiple-value-bind binds values and evaluates body correctly."
+  :cases (("sum-values"  3  "(multiple-value-bind (a b) (values 1 2) (+ a b))")
+          ("first-value" 10 "(multiple-value-bind (x y) (values 10 20) x)"))
+  (expected code)
+  (assert-run= expected code))
+
+(deftest codegen-mv-call-compilation
+  "Compiling ast-multiple-value-call emits vm-apply and returns a register."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast (cl-cc::make-ast-multiple-value-call
+                             :func (make-ast-function :name '+)
+                             :args (list (cl-cc::make-ast-values
+                                          :forms (list (make-ast-int :value 1)
+                                                       (make-ast-int :value 2)))))
+                           ctx)))
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-apply))
+    (assert-true (keywordp reg))))
+
+(deftest codegen-mv-call-basic-run
+  "multiple-value-call spreads values as arguments to a user-defined function."
+  (assert-run= 3
+    "(multiple-value-call (lambda (a b) (+ a b)) (values 1 2))"))
+
+(deftest codegen-mv-call-cons-run
+  "multiple-value-call with cons spreads two values into car and cdr."
+  (assert-equal '(1 . 2)
+    (run-string "(multiple-value-call #'cons (values 1 2))")))
+
+(deftest codegen-mv-prog1-compilation
+  "Compiling ast-multiple-value-prog1: returns a register and emits all sub-form constants."
+  (let* ((ctx    (make-codegen-ctx))
+         (reg    (compile-ast (cl-cc::make-ast-multiple-value-prog1
+                                :first (make-ast-int :value 1)
+                                :forms (list (make-ast-int :value 2)
+                                             (make-ast-int :value 3)))
+                              ctx))
+         (consts (remove-if-not (lambda (i) (typep i 'cl-cc::vm-const))
+                                (codegen-instructions ctx))))
+    (assert-true (keywordp reg))
+    (assert-true (>= (length consts) 3))))
+
+(deftest codegen-mv-prog1-preserves-first-run
+  "multiple-value-prog1 returns the value of the first form."
+  (assert-run= 1
+    "(multiple-value-prog1 1 2 3)"))
+
+(deftest codegen-mv-prog1-side-effects-run
+  "multiple-value-prog1 evaluates subsequent forms for side effects."
+  (let ((output (with-output-to-string (*standard-output*)
+                  (run-string "(multiple-value-prog1 42 (print 99))"))))
+    (assert-true (search "99" output))))
+
+(deftest-each codegen-exception-form-emits-establish-handler
+  "Both unwind-protect and handler-case emit vm-establish-handler."
+  :cases (("unwind-protect" (cl-cc::make-ast-unwind-protect
+                              :protected (make-ast-int :value 42)
+                              :cleanup (list (make-ast-int :value 0))))
+          ("handler-case"   (cl-cc::make-ast-handler-case
+                              :form (make-ast-int :value 42)
+                              :clauses (list (list 'error 'e (make-ast-int :value 0))))))
+  (ast)
+  (let ((ctx (make-codegen-ctx)))
+    (compile-ast ast ctx)
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-establish-handler))))
+
+(deftest codegen-unwind-protect-returns-register
+  "Compiling ast-unwind-protect returns a register keyword."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast (cl-cc::make-ast-unwind-protect
+                             :protected (make-ast-int :value 7)
+                             :cleanup (list (make-ast-int :value 0)))
+                           ctx)))
+    (assert-true (keywordp reg))))
+
+(deftest codegen-unwind-protect-normal-result-run
+  "unwind-protect returns the protected form value on normal exit."
+  (assert-run= 42
+    "(unwind-protect 42 nil)"))
+
+(deftest codegen-unwind-protect-cleanup-runs-run
+  "unwind-protect cleanup form executes on normal exit."
+  (let ((output (with-output-to-string (*standard-output*)
+                  (run-string "(unwind-protect 1 (print 99))"))))
+    (assert-true (search "99" output))))
+
+(deftest codegen-handler-case-returns-register
+  "Compiling ast-handler-case returns a register keyword."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast (cl-cc::make-ast-handler-case
+                             :form (make-ast-int :value 10)
+                             :clauses (list (list 'error nil (make-ast-int :value 0))))
+                           ctx)))
+    (assert-true (keywordp reg))))
+
+(deftest codegen-handler-case-normal-result-run
+  "handler-case returns the protected form value when no condition is signaled."
+  (assert-run= 42
+    "(handler-case 42 (error (e) -1))"))
+
+(deftest codegen-handler-case-catches-error-run
+  "handler-case invokes the matching handler when a condition is signaled."
+  (assert-run= 99
+    "(handler-case (error \"boom\") (error (e) 99))"))

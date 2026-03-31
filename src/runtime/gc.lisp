@@ -16,6 +16,16 @@
 
 (in-package :cl-cc/runtime)
 
+;; Ensure the card-size constant is present even if this file is compiled or
+;; loaded in isolation during incremental builds.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (unless (boundp '*gc-tenuring-threshold*)
+    (defparameter *gc-tenuring-threshold* 3
+      "Minor GC survival cycles before promotion to old generation."))
+  (unless (boundp '+gc-card-size-words+)
+    (defconstant +gc-card-size-words+ 64
+      "Card size in words (512 bytes with 8-byte words).")))
+
 ;;; ------------------------------------------------------------
 ;;; Section 1: Allocation
 ;;; ------------------------------------------------------------

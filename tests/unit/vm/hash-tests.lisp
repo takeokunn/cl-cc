@@ -7,17 +7,6 @@
 
 (defsuite hash-suite :description "VM hash table operations unit tests")
 
-;;; ─── Helpers ──────────────────────────────────────────────────────────────
-
-(defun make-test-vm-state ()
-  "Create a minimal vm-state for testing."
-  (make-instance 'cl-cc::vm-state))
-
-(defun vm-exec (inst state)
-  "Execute a single instruction against STATE with pc=0 and empty labels.
-Returns the new pc."
-  (cl-cc::execute-instruction inst state 0 (make-hash-table :test #'equal)))
-
 ;;; ─── resolve-hash-test ────────────────────────────────────────────────────
 
 (deftest-each resolve-hash-test-cases
@@ -41,7 +30,7 @@ Returns the new pc."
 
 (deftest make-hash-table-default-test
   "vm-make-hash-table with no test creates an EQL hash table."
-  (let ((state (make-test-vm-state)))
+  (let ((state (make-test-vm)))
     (vm-exec (cl-cc::make-vm-make-hash-table :dst :R0 :test nil) state)
     (let ((obj (cl-cc::vm-reg-get state :R0)))
       (assert-true (typep obj 'cl-cc::vm-hash-table-object)))))
@@ -50,7 +39,7 @@ Returns the new pc."
 
 (deftest sethash-gethash-roundtrip
   "Setting and getting a hash table entry round-trips."
-  (let ((state (make-test-vm-state)))
+  (let ((state (make-test-vm)))
     ;; Create table in :R0
     (vm-exec (cl-cc::make-vm-make-hash-table :dst :R0 :test nil) state)
     ;; Put key=42 in :R1, value=99 in :R2
@@ -64,7 +53,7 @@ Returns the new pc."
 
 (deftest gethash-missing-key
   "Getting a missing key returns nil."
-  (let ((state (make-test-vm-state)))
+  (let ((state (make-test-vm)))
     (vm-exec (cl-cc::make-vm-make-hash-table :dst :R0 :test nil) state)
     (cl-cc::vm-reg-set state :R1 'nonexistent)
     (vm-exec (cl-cc::make-vm-gethash :dst :R3 :key :R1 :table :R0) state)
@@ -74,7 +63,7 @@ Returns the new pc."
 
 (deftest remhash-removes-entry
   "vm-remhash removes an existing entry."
-  (let ((state (make-test-vm-state)))
+  (let ((state (make-test-vm)))
     (vm-exec (cl-cc::make-vm-make-hash-table :dst :R0 :test nil) state)
     (cl-cc::vm-reg-set state :R1 'key)
     (cl-cc::vm-reg-set state :R2 'val)
@@ -87,11 +76,11 @@ Returns the new pc."
 
 (deftest hash-table-count-behavior
   "Hash table count is 0 when empty and reflects number of entries after inserts."
-  (let ((state (make-test-vm-state)))
+  (let ((state (make-test-vm)))
     (vm-exec (cl-cc::make-vm-make-hash-table :dst :R0 :test nil) state)
     (vm-exec (cl-cc::make-vm-hash-table-count :dst :R1 :table :R0) state)
     (assert-equal 0 (cl-cc::vm-reg-get state :R1)))
-  (let ((state (make-test-vm-state)))
+  (let ((state (make-test-vm)))
     (vm-exec (cl-cc::make-vm-make-hash-table :dst :R0 :test nil) state)
     (cl-cc::vm-reg-set state :R1 'a)
     (cl-cc::vm-reg-set state :R2 1)
@@ -106,7 +95,7 @@ Returns the new pc."
 
 (deftest clrhash-empties-table
   "vm-clrhash removes all entries."
-  (let ((state (make-test-vm-state)))
+  (let ((state (make-test-vm)))
     (vm-exec (cl-cc::make-vm-make-hash-table :dst :R0 :test nil) state)
     (cl-cc::vm-reg-set state :R1 'key)
     (cl-cc::vm-reg-set state :R2 'val)
@@ -122,7 +111,7 @@ Returns the new pc."
   :cases (("true"  t)
           ("false" nil))
   (is-ht)
-  (let ((state (make-test-vm-state)))
+  (let ((state (make-test-vm)))
     (if is-ht
         (vm-exec (cl-cc::make-vm-make-hash-table :dst :R0 :test nil) state)
         (cl-cc::vm-reg-set state :R0 42))
@@ -133,7 +122,7 @@ Returns the new pc."
 
 (deftest hash-table-keys-and-values
   "vm-hash-table-keys and vm-hash-table-values each return a 2-element list with correct members."
-  (let ((state (make-test-vm-state)))
+  (let ((state (make-test-vm)))
     (vm-exec (cl-cc::make-vm-make-hash-table :dst :R0 :test nil) state)
     (cl-cc::vm-reg-set state :R1 'x) (cl-cc::vm-reg-set state :R2 10)
     (vm-exec (cl-cc::make-vm-sethash :key :R1 :value :R2 :table :R0) state)
@@ -156,7 +145,7 @@ Returns the new pc."
 
 (deftest hash-table-test-returns-symbol
   "vm-hash-table-test returns test function symbol."
-  (let ((state (make-test-vm-state)))
+  (let ((state (make-test-vm)))
     (vm-exec (cl-cc::make-vm-make-hash-table :dst :R0 :test nil) state)
     (vm-exec (cl-cc::make-vm-hash-table-test :dst :R1 :table :R0) state)
     (assert-equal 'eql (cl-cc::vm-reg-get state :R1))))

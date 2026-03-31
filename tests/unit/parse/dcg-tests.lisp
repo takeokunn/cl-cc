@@ -16,6 +16,17 @@
   (loop for (type val) on type-value-pairs by #'cddr
         collect (cons type val)))
 
+(defun collect-dcg-outcomes (goal &optional (output-var '?out))
+  "Run GOAL through solve-goal and collect the substituted OUTPUT-VAR values."
+  (let ((results nil))
+    (handler-case
+        (cl-cc::solve-goal goal nil
+                           (lambda (env)
+                             (push (cl-cc::logic-substitute output-var env)
+                                   results)))
+      (cl-cc::prolog-cut ()))
+    (nreverse results)))
+
 ;;; ─── lexer-tokens-to-dcg-input ─────────────────────────────────────────────
 
 (deftest dcg-convert-cases
@@ -77,10 +88,32 @@
     ;; Two overlapping rules
     (cl-cc::def-fact (flexible (?h . ?rest) ?rest))       ;; consume 1
     (cl-cc::def-fact (flexible (?a ?b . ?rest) ?rest))    ;; consume 2
-    (let* ((input (dcg-input :T-INT 1 :T-INT 2 :T-INT 3))
+   (let* ((input (dcg-input :T-INT 1 :T-INT 2 :T-INT 3))
            (results (cl-cc::dcg-parse-all 'flexible input)))
       ;; Should get at least 2 results (consume-1 and consume-2)
       (assert-true (>= (length results) 2)))))
+
+(deftest dcg-rule-helpers-roundtrip
+  "def-dcg-rule, phrase, phrase-rest, and phrase-all agree on a simple rule."
+  (with-fresh-prolog
+    (cl-cc:def-dcg-rule accept-all)
+    (let ((input (dcg-input :T-INT 1 :T-EOF nil)))
+      (assert-equal input (cl-cc:phrase 'accept-all input))
+      (multiple-value-bind (matched remaining)
+          (cl-cc:phrase-rest 'accept-all input)
+        (assert-true matched)
+        (assert-equal input remaining))
+      (assert-equal (list input)
+                    (cl-cc:phrase-all 'accept-all input)))))
+
+(deftest dcg-fresh-counter-resets
+  "dcg-fresh-var is deterministic after dcg-reset-counter."
+  (cl-cc:dcg-reset-counter)
+  (let ((first (cl-cc:dcg-fresh-var))
+        (second (cl-cc:dcg-fresh-var)))
+    (assert-false (eq first second))
+    (cl-cc:dcg-reset-counter)
+    (assert-eq first (cl-cc:dcg-fresh-var))))
 
 ;;; ─── DCG Builtins via solve-goal ───────────────────────────────────────────
 
@@ -89,54 +122,30 @@
   (with-fresh-prolog
     (cl-cc::def-fact (rule-a ((:T-INT . ?v) . ?rest) ?rest))
     (cl-cc::def-fact (rule-b ((:T-IDENT . ?v) . ?rest) ?rest))
-    (let ((results nil)
-          (input (dcg-input :T-INT 42)))
-      (handler-case
-          (cl-cc::solve-goal (list 'cl-cc::dcg-alt 'rule-a 'rule-b input '?out)
-                            nil
-                            (lambda (env)
-                              (push (cl-cc::logic-substitute '?out env) results)))
-        (cl-cc::prolog-cut ()))
+    (let ((results (collect-dcg-outcomes
+                    (list 'cl-cc::dcg-alt 'rule-a 'rule-b (dcg-input :T-INT 42) '?out))))
       (assert-true (>= (length results) 1))
       ;; After matching rule-a, remaining should be nil
       (assert-null (first results))))
   (with-fresh-prolog
     (cl-cc::def-fact (rule-a ((:T-INT . ?v) . ?rest) ?rest))
     (cl-cc::def-fact (rule-b ((:T-IDENT . ?v) . ?rest) ?rest))
-    (let ((results nil)
-          (input (dcg-input :T-IDENT "x")))
-      (handler-case
-          (cl-cc::solve-goal (list 'cl-cc::dcg-alt 'rule-a 'rule-b input '?out)
-                            nil
-                            (lambda (env)
-                              (push (cl-cc::logic-substitute '?out env) results)))
-        (cl-cc::prolog-cut ()))
+    (let ((results (collect-dcg-outcomes
+                    (list 'cl-cc::dcg-alt 'rule-a 'rule-b (dcg-input :T-IDENT "x") '?out))))
       (assert-true (>= (length results) 1)))))
 
 (deftest dcg-opt-behavior
   "dcg-opt matches when sub-rule matches and succeeds with epsilon when sub-rule fails"
   (with-fresh-prolog
     (cl-cc::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
-    (let ((results nil)
-          (input (dcg-input :T-INT 1)))
-      (handler-case
-          (cl-cc::solve-goal (list 'cl-cc::dcg-opt 'tok-int input '?out)
-                            nil
-                            (lambda (env)
-                              (push (cl-cc::logic-substitute '?out env) results)))
-        (cl-cc::prolog-cut ()))
+    (let ((results (collect-dcg-outcomes
+                    (list 'cl-cc::dcg-opt 'tok-int (dcg-input :T-INT 1) '?out))))
       ;; Should have at least the successful match (empty remaining)
       (assert-true (member nil results :test #'equal))))
   (with-fresh-prolog
     (cl-cc::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
-    (let ((results nil)
-          (input (dcg-input :T-IDENT "x")))
-      (handler-case
-          (cl-cc::solve-goal (list 'cl-cc::dcg-opt 'tok-int input '?out)
-                            nil
-                            (lambda (env)
-                              (push (cl-cc::logic-substitute '?out env) results)))
-        (cl-cc::prolog-cut ()))
+    (let ((results (collect-dcg-outcomes
+                    (list 'cl-cc::dcg-opt 'tok-int (dcg-input :T-IDENT "x") '?out))))
       ;; Epsilon match: out = input (unconsumed)
       (assert-true (>= (length results) 1)))))
 
@@ -144,26 +153,15 @@
   "dcg-star succeeds with zero matches and matches multiple tokens"
   (with-fresh-prolog
     (cl-cc::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
-    (let ((results nil)
-          (input (dcg-input :T-IDENT "x")))
-      (handler-case
-          (cl-cc::solve-goal (list 'cl-cc::dcg-star 'tok-int input '?out)
-                            nil
-                            (lambda (env)
-                              (push (cl-cc::logic-substitute '?out env) results)))
-        (cl-cc::prolog-cut ()))
+    (let ((results (collect-dcg-outcomes
+                    (list 'cl-cc::dcg-star 'tok-int (dcg-input :T-IDENT "x") '?out))))
       ;; Zero matches: out = input
       (assert-true (>= (length results) 1))))
   (with-fresh-prolog
     (cl-cc::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
-    (let ((results nil)
-          (input (dcg-input :T-INT 1 :T-INT 2 :T-INT 3)))
-      (handler-case
-          (cl-cc::solve-goal (list 'cl-cc::dcg-star 'tok-int input '?out)
-                            nil
-                            (lambda (env)
-                              (push (cl-cc::logic-substitute '?out env) results)))
-        (cl-cc::prolog-cut ()))
+    (let ((results (collect-dcg-outcomes
+                    (list 'cl-cc::dcg-star 'tok-int
+                          (dcg-input :T-INT 1 :T-INT 2 :T-INT 3) '?out))))
       ;; Should include the fully-consumed result (nil)
       (assert-true (member nil results :test #'equal)))))
 
@@ -171,25 +169,13 @@
   "dcg-plus matches one or more tokens and fails with zero matches"
   (with-fresh-prolog
     (cl-cc::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
-    (let ((results nil)
-          (input (dcg-input :T-INT 42)))
-      (handler-case
-          (cl-cc::solve-goal (list 'cl-cc::dcg-plus 'tok-int input '?out)
-                            nil
-                            (lambda (env)
-                              (push (cl-cc::logic-substitute '?out env) results)))
-        (cl-cc::prolog-cut ()))
+    (let ((results (collect-dcg-outcomes
+                    (list 'cl-cc::dcg-plus 'tok-int (dcg-input :T-INT 42) '?out))))
       (assert-true (>= (length results) 1))))
   (with-fresh-prolog
     (cl-cc::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
-    (let ((results nil)
-          (input (dcg-input :T-IDENT "x")))
-      (handler-case
-          (cl-cc::solve-goal (list 'cl-cc::dcg-plus 'tok-int input '?out)
-                            nil
-                            (lambda (env)
-                              (push (cl-cc::logic-substitute '?out env) results)))
-        (cl-cc::prolog-cut ()))
+    (let ((results (collect-dcg-outcomes
+                    (list 'cl-cc::dcg-plus 'tok-int (dcg-input :T-IDENT "x") '?out))))
       (assert-null results))))
 
 ;;; ─── dcg-error-recovery ─────────────────────────────────────────────────────

@@ -120,7 +120,12 @@
 (defun %vm-read-print-var (state sym default)
   "Read a print-control variable from VM global state, returning DEFAULT if unbound."
   (multiple-value-bind (v found) (gethash sym (vm-global-vars state))
-    (if found v default)))
+    (let ((value (if found v default)))
+      ;; Some compile-time paths store singleton lists (e.g. (10)); normalize
+      ;; those back to the scalar value expected by CL print-control variables.
+      (if (and (consp value) (null (cdr value)))
+          (car value)
+          value))))
 
 (defmethod execute-instruction ((inst vm-write-to-string-inst) state pc labels)
   (declare (ignore labels))

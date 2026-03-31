@@ -187,38 +187,35 @@
 
 (deftest pipeline-repl-simple-eval
   "run-string-repl evaluates a simple expression."
-  (reset-repl-state)
-  (let ((result (run-string-repl "42")))
-    (assert-= 42 result)
-    (reset-repl-state)))
+  (with-reset-repl-state
+    (let ((result (run-string-repl "42")))
+      (assert-= 42 result))))
 
 (deftest pipeline-repl-defun-and-call
   "run-string-repl persists defun across calls."
-  (reset-repl-state)
-  (run-string-repl "(defun repl-test-double (x) (* x 2))")
-  (let ((result (run-string-repl "(repl-test-double 21)")))
-    (assert-= 42 result)
-    (reset-repl-state)))
+  (with-reset-repl-state
+    (run-string-repl "(defun repl-test-double (x) (* x 2))")
+    (let ((result (run-string-repl "(repl-test-double 21)")))
+      (assert-= 42 result))))
 
 (deftest pipeline-repl-defvar-persists
   "run-string-repl persists defvar across calls."
-  (reset-repl-state)
-  (run-string-repl "(defvar *repl-test-val* 99)")
-  (let ((result (run-string-repl "*repl-test-val*")))
-    (assert-= 99 result)
-    (reset-repl-state)))
+  (with-reset-repl-state
+    (run-string-repl "(defvar *repl-test-val* 99)")
+    (let ((result (run-string-repl "*repl-test-val*")))
+      (assert-= 99 result))))
 
 ;;; ─── reset-repl-state ──────────────────────────────────────────────────
 
 (deftest pipeline-reset-clears-state
   "reset-repl-state clears all persistent REPL variables."
-  (reset-repl-state)
-  (run-string-repl "42")
-  (assert-true (not (null cl-cc::*repl-vm-state*)))
-  (reset-repl-state)
-  (assert-null cl-cc::*repl-vm-state*)
-  (assert-null cl-cc::*repl-pool-instructions*)
-  (assert-null cl-cc::*repl-pool-labels*))
+  (with-reset-repl-state
+    (run-string-repl "42")
+    (assert-true (not (null cl-cc::*repl-vm-state*)))
+    (reset-repl-state)
+    (assert-null cl-cc::*repl-vm-state*)
+    (assert-null cl-cc::*repl-pool-instructions*)
+    (assert-null cl-cc::*repl-pool-labels*)))
 
 ;;; ─── compile-string-with-stdlib ─────────────────────────────────────────
 

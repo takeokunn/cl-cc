@@ -63,16 +63,16 @@
         (base-g (gensym "BASE")) (radix-g (gensym "RADIX"))
         (esc-g  (gensym "ESC"))  (level-g (gensym "LVL"))
         (len-g  (gensym "LEN")))
-    `(let* ((,obj-g   ,object)
-            (,str-g   ,(or stream '*standard-output*))
-            (,base-g  ,(or base '*print-base*))
-            (,radix-g ,(or radix '*print-radix*))
-            (,esc-g   ,(or escape '*print-escape*))
-            (,level-g ,(or level '*print-level*))
-            (,len-g   ,(or length '*print-length*)))
-       ;; Evaluate remaining ignored args for side effects
-       (progn ,readably ,pretty ,circle ,gensym ,array ,case
-              ,lines ,right-margin ,miser-width ,pprint-dispatch)
+     `(let* ((,obj-g   ,object)
+             (,str-g   ,(or stream '*standard-output*))
+             (,base-g  ,(or base *print-base*))
+             (,radix-g ,(or radix *print-radix*))
+             (,esc-g   ,(or escape *print-escape*))
+             (,level-g ,(or level *print-level*))
+             (,len-g   ,(or length *print-length*)))
+        ;; Evaluate remaining ignored args for side effects
+        (progn ,readably ,pretty ,circle ,gensym ,array ,case
+               ,lines ,right-margin ,miser-width ,pprint-dispatch)
        (let ((*print-base*   ,base-g)  (*print-radix*  ,radix-g)
              (*print-escape* ,esc-g)   (*print-level*  ,level-g)
              (*print-length* ,len-g))
@@ -129,6 +129,41 @@
                                            (eof-error-p t) eof-value recursive-p)
   "Read a form, preserving terminal whitespace (delegates to read in cl-cc)."
   `(read ,stream ,eof-error-p ,eof-value ,recursive-p))
+
+;;; ─── write-sequence / read-sequence stubs (FR-590) ───────────────────────────
+
+(our-defmacro write-sequence (sequence stream &key (start 0) end)
+  "Write elements of SEQUENCE to STREAM."
+  (let ((seq (gensym "SEQ"))
+        (str (gensym "STR"))
+        (i   (gensym "I"))
+        (ev  (gensym "E")))
+    `(let* ((,seq ,sequence)
+            (,str ,stream)
+            (,ev  ,(or end `(length ,seq))))
+       (do ((,i ,start (+ ,i 1)))
+           ((>= ,i ,ev) ,seq)
+         (let ((elem (elt ,seq ,i)))
+           (if (characterp elem)
+               (write-char elem ,str)
+               (write-byte elem ,str)))))))
+
+(our-defmacro read-sequence (sequence stream &key (start 0) end)
+  "Read from STREAM into SEQUENCE."
+  (let ((seq (gensym "SEQ"))
+        (str (gensym "STR"))
+        (i   (gensym "I"))
+        (ev  (gensym "E"))
+        (ch  (gensym "CH")))
+    `(let* ((,seq ,sequence)
+            (,str ,stream)
+            (,ev  ,(or end `(length ,seq))))
+       (do ((,i ,start (+ ,i 1)))
+           ((>= ,i ,ev) ,i)
+         (let ((,ch (read-char ,str nil nil)))
+           (if (null ,ch)
+               (return ,i)
+               (setf (elt ,seq ,i) ,ch)))))))
 
 ;;; ─── read-delimited-list (FR-659) ───────────────────────────────────────────
 

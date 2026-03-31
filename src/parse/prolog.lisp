@@ -109,13 +109,17 @@
   (setf (gethash predicate *prolog-rules*)
         (cons rule (gethash predicate *prolog-rules*))))
 
-(defmacro def-fact (head)
-  "Define a Prolog fact. Usage: (def-fact (parent tom mary))"
-  `(add-rule ',(car head) (make-prolog-rule :head ',head)))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defmacro def-fact (head)
+    "Define a Prolog fact. Usage: (def-fact (parent tom mary))"
+    `(add-rule ',(car head)
+               (make-prolog-rule :head ',head)))
 
-(defmacro def-rule (head &body body)
-  "Define a Prolog rule. Usage: (def-rule (grandparent ?x ?z) (parent ?x ?y) (parent ?y ?z))"
-  `(add-rule ',(car head) (make-prolog-rule :head ',head :body ',body)))
+  (defmacro def-rule (head &body body)
+    "Define a Prolog rule. Usage: (def-rule (grandparent ?x ?z) (parent ?x ?y) (parent ?y ?z))"
+    `(add-rule ',(car head)
+               (make-prolog-rule :head ',head
+                                 :body ',body))))
 
 ;;; Variable Renaming for Recursion
 
@@ -266,38 +270,32 @@
       (solve-goal goal nil continuation)
     (prolog-cut ())))
 
-(defun query-all (goal)
-  "Return all solutions for GOAL as a list of substituted goals.
-   GOAL should be a list like (predicate arg1 arg2 ...)."
-  (let ((solutions nil))
-    (%solve-goal-with-cut
-     goal
-     (lambda (env)
-       (push (substitute-variables goal env) solutions)))
-    (nreverse solutions)))
-
-(defun query-one (goal)
-  "Return first solution for GOAL, or NIL if no solution exists."
-  (block done
-    (%solve-goal-with-cut
-     goal
-     (lambda (env)
-       (return-from done (substitute-variables goal env))))
-    nil))
-
-(defun query-first-n (goal n)
-  "Return the first N solutions for GOAL."
+(defun %collect-query-solutions (goal &optional limit)
+  "Collect substituted solutions for GOAL, optionally stopping after LIMIT."
   (let ((solutions nil)
         (count 0))
     (%solve-goal-with-cut
      goal
      (lambda (env)
-       (when (< count n)
+       (when (or (null limit) (< count limit))
          (push (substitute-variables goal env) solutions)
-         (incf count))
-       (when (>= count n)
-         (signal 'prolog-cut))))
+         (incf count)
+         (when (and limit (>= count limit))
+           (signal 'prolog-cut)))))
     (nreverse solutions)))
+
+(defun query-all (goal)
+  "Return all solutions for GOAL as a list of substituted goals.
+   GOAL should be a list like (predicate arg1 arg2 ...)."
+  (%collect-query-solutions goal))
+
+(defun query-one (goal)
+  "Return first solution for GOAL, or NIL if no solution exists."
+  (first (%collect-query-solutions goal 1)))
+
+(defun query-first-n (goal n)
+  "Return the first N solutions for GOAL."
+  (%collect-query-solutions goal n))
 
 ;;; Built-in Predicates
 ;;;
@@ -340,13 +338,13 @@
 (def-rule (type-of (binop ?op ?a ?b) ?env (integer-type))
           (type-of ?a ?env (integer-type))
           (type-of ?b ?env (integer-type))
-          (:when (member ?op '(+ - * / mod))))
+          (:when (cl:member ?op '(+ - * / mod))))
 
 ;; Comparison operations
 (def-rule (type-of (cmp ?op ?a ?b) ?env (boolean-type))
           (type-of ?a ?env (integer-type))
           (type-of ?b ?env (integer-type))
-          (:when (member ?op '(< > <= >= = /=))))
+          (:when (cl:member ?op '(< > <= >= = /=))))
 
 ;; If expression
 (def-rule (type-of (if ?cond ?then ?else) ?env ?type)
@@ -433,145 +431,3 @@
                                 acc))
                         (walk (cdr rest) (cons curr out)))))))))
     (walk (filter-self-moves instructions) nil)))
-
-;;; ─── DCG (Definite Clause Grammar) Support ──────────────────────────────────
-;;;
-;;; DCG rules transform into difference-list Prolog rules.
-;;; (name --> body...) becomes a rule with two extra state args.
-
-(defvar *dcg-counter* 0
-  "Counter for generating fresh DCG state variables.")
-
-(defun dcg-fresh-var ()
-  "Generate a fresh DCG state variable."
-  (intern (format nil "?S~D" (incf *dcg-counter*))))
-
-(defun dcg-reset-counter ()
-  "Reset the DCG variable counter (for testing)."
-  (setf *dcg-counter* 0))
-
-(defun dcg-transform-body-element (element s-in s-out)
-  "Transform a single DCG body element into a Prolog goal.
-   - A list of terminals: match each token in sequence.
-   - A symbol: call as a non-terminal with state threading.
-   - A list starting with a symbol: call as a non-terminal with args + state."
-  (cond
-    ;; Terminal list: [tok1, tok2, ...] — match tokens in order
-    ((and (consp element) (eq (car element) 'terminal))
-     (let ((terminals (cdr element)))
-       (if (null terminals)
-           ;; Empty terminal list: s-in = s-out
-           (list `(= ,s-in ,s-out))
-           ;; Chain terminal matches
-           (let ((goals nil)
-                 (current s-in))
-             (dolist (term terminals)
-               (let ((next (dcg-fresh-var)))
-                 (push `(= ,current (cons ,term ,next)) goals)
-                 (setf current next)))
-             ;; Unify final state with s-out
-             (push `(= ,current ,s-out) goals)
-             (nreverse goals)))))
-    ;; Non-terminal symbol
-    ((symbolp element)
-     (list (list element s-in s-out)))
-    ;; Non-terminal with arguments: (nt arg1 arg2 ...)
-    ((and (consp element) (symbolp (car element)))
-     (list (append element (list s-in s-out))))
-    ;; Prolog goal in braces: {goal} — execute without consuming input
-    ((and (consp element) (eq (car element) 'brace))
-     (let ((goal (cadr element)))
-       (list goal `(= ,s-in ,s-out))))
-    (t (error "DCG: unknown body element ~S" element))))
-
-(defun dcg-transform-body (body s-in s-out)
-  "Transform a DCG body (list of elements) into a list of Prolog goals,
-   chaining fresh state variables between elements."
-  (if (null body)
-      (list `(= ,s-in ,s-out))
-      (let ((goals nil)
-            (current s-in))
-        (dolist (element (butlast body))
-          (let ((next (dcg-fresh-var)))
-            (setf goals (append goals (dcg-transform-body-element element current next)))
-            (setf current next)))
-        ;; Last element connects to s-out
-        (setf goals (append goals (dcg-transform-body-element (car (last body)) current s-out)))
-        goals)))
-
-(defmacro def-dcg-rule (name &body body)
-  "Define a DCG rule. Transforms (name --> body...) into a Prolog rule
-   with difference-list state threading.
-   Usage: (def-dcg-rule expr term (terminal (+)) term)"
-  (let ((s-in (gensym "?S-IN"))
-        (s-out (gensym "?S-OUT")))
-    (let ((transformed-body (dcg-transform-body body s-in s-out)))
-      `(def-rule (,name ,s-in ,s-out) ,@transformed-body))))
-
-;;; DCG token matching builtins
-
-;; dcg-token-match: match a token by type (cons of (type . value))
-(setf (gethash 'dcg-token-match *builtin-predicates*)
-      (lambda (args env k)
-        (let* ((expected-type (first args))
-               (s-in (second args))
-               (s-out (third args))
-               (input (logic-substitute s-in env)))
-          (when (and (consp input)
-                     (consp (car input))
-                     (eq (caar input) expected-type))
-            (let ((new-env (unify s-out (cdr input) env)))
-              (unless (unify-failed-p new-env)
-                (funcall k new-env)))))))
-
-;; dcg-token-match-value: match token by type AND bind its value
-(setf (gethash 'dcg-token-match-value *builtin-predicates*)
-      (lambda (args env k)
-        (let* ((expected-type (first args))
-               (value-var (second args))
-               (s-in (third args))
-               (s-out (fourth args))
-               (input (logic-substitute s-in env)))
-          (when (and (consp input)
-                     (consp (car input))
-                     (eq (caar input) expected-type))
-            (let ((val-env (unify value-var (cdar input) env)))
-              (unless (unify-failed-p val-env)
-                (let ((new-env (unify s-out (cdr input) val-env)))
-                  (unless (unify-failed-p new-env)
-                    (funcall k new-env)))))))))
-
-;;; DCG query interface
-
-(defun phrase (rule-name input)
-  "Parse INPUT (a list of tokens) with DCG RULE-NAME.
-   Returns the first solution's remaining input, or NIL on failure."
-  (let ((result nil))
-    (%solve-goal-with-cut
-     (list rule-name input '?dcg-rest)
-     (lambda (env)
-       (setf result (logic-substitute '?dcg-rest env))
-       (signal 'prolog-cut)))
-    result))
-
-(defun phrase-rest (rule-name input)
-  "Parse INPUT with DCG RULE-NAME. Returns (values matched-p remaining).
-   MATCHED-P is T if parsing succeeded."
-  (let ((result nil)
-        (matched nil))
-    (%solve-goal-with-cut
-     (list rule-name input '?dcg-rest)
-     (lambda (env)
-       (setf result (logic-substitute '?dcg-rest env)
-             matched t)
-       (signal 'prolog-cut)))
-    (values matched result)))
-
-(defun phrase-all (rule-name input)
-  "Parse INPUT with DCG RULE-NAME, returning all possible remaining inputs."
-  (let ((results nil))
-    (%solve-goal-with-cut
-     (list rule-name input '?dcg-rest)
-     (lambda (env)
-       (push (logic-substitute '?dcg-rest env) results)))
-    (nreverse results)))

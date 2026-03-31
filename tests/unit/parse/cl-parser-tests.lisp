@@ -234,6 +234,22 @@
     (assert-true (cl-cc::ast-var-p node))
     (assert-eq 'x (cl-cc::ast-var-name node))))
 
+(deftest lower-nary-arithmetic-folds-left
+  "lower-sexp-to-ast: n-ary arithmetic folds into nested binary AST."
+  (let ((node (lower '(+ 1 2 3))))
+    (assert-true (cl-cc::ast-binop-p node))
+    (assert-eq '+ (cl-cc::ast-binop-op node))
+    (assert-true (cl-cc::ast-binop-p (cl-cc::ast-binop-lhs node)))
+    (assert-= 3 (cl-cc::ast-int-value (cl-cc::ast-binop-rhs node)))))
+
+(deftest lower-unary-minus-becomes-negation
+  "lower-sexp-to-ast: unary minus is lowered as 0 - x."
+  (let ((node (lower '(- 7))))
+    (assert-true (cl-cc::ast-binop-p node))
+    (assert-eq '- (cl-cc::ast-binop-op node))
+    (assert-= 0 (cl-cc::ast-int-value (cl-cc::ast-binop-lhs node)))
+    (assert-= 7 (cl-cc::ast-int-value (cl-cc::ast-binop-rhs node)))))
+
 (deftest-each lower-self-eval-produces-ast-quote
   "lower-sexp-to-ast: nil/t/float all produce ast-quote."
   :cases (("nil"   nil)

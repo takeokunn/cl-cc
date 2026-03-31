@@ -2456,12 +2456,11 @@
 
 (deftest compile-readtable-stubs
   "readtable stubs are defined and callable."
-  (let* ((r1 (run-string "(readtablep *readtable*)" :stdlib t))
-         (r2 (run-string "(copy-readtable)" :stdlib t))
-         (r3 (run-string "(readtable-case nil)" :stdlib t)))
-    (assert-false r1)   ; *readtable* is nil, readtablep nil
-    (assert-false r2)   ; copy-readtable returns nil stub
-    (assert-equal :upcase r3)))
+  (let ((result (run-string
+                 "(list (readtablep *readtable*)
+                        (copy-readtable)
+                        (readtable-case nil))")))
+    (assert-equal '(nil nil :upcase) result)))
 
 (deftest compile-set-macro-character
   "set-macro-character and get-macro-character compile without error."

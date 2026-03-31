@@ -72,6 +72,12 @@ could both match the same concrete type, we reject the later registration."
       ((type-class-p tc-def)    (type-class-defaults tc-def))
       (t nil))))
 
+(defun %typeclass-name-string (name)
+  "Normalize NAME for dependency comparison."
+  (cond ((symbolp name) (symbol-name name))
+        ((stringp name) (string-upcase name))
+        (t (string-upcase (princ-to-string name)))))
+
 (defun %merge-default-methods (class-name method-impls)
   "Merge class defaults into METHOD-IMPLS, preserving explicit implementations."
   (let ((defaults (%typeclass-default-methods class-name)))
@@ -83,9 +89,9 @@ could both match the same concrete type, we reject the later registration."
 (defun %typeclass-param-name (param)
   "Return a stable identifier for PARAM, which may be a type-var or symbol."
   (cond
-    ((type-var-p param) (type-var-name param))
-    ((symbolp param) param)
-    (t param)))
+    ((type-var-p param) (%typeclass-name-string (type-var-name param)))
+    ((symbolp param)    (%typeclass-name-string param))
+    (t                  (%typeclass-name-string param))))
 
 (defun %typeclass-instance-args (type)
   "Return the ordered instance arguments encoded by TYPE.
@@ -100,9 +106,11 @@ Single-parameter instances use TYPE itself; multi-parameter instances use a type
 (defun %typeclass-fundep-pairs (tc-def)
   "Normalize functional dependencies from TC-DEF into ((from...) . (to...)) pairs."
   (mapcar (lambda (dep)
-            (cons (if (listp (car dep)) (car dep) (list (car dep)))
-                  (if (listp (cdr dep)) (cdr dep) (list (cdr dep)))))
-          (typeclass-def-functional-deps tc-def)))
+            (cons (mapcar #'%typeclass-name-string
+                          (if (listp (car dep)) (car dep) (list (car dep))))
+                  (mapcar #'%typeclass-name-string
+                          (if (listp (cdr dep)) (cdr dep) (list (cdr dep))))))
+           (typeclass-def-functional-deps tc-def)))
 
 (defun %typeclass-fundep-violation-p (tc-def existing-type new-type)
   "Return T when NEW-TYPE would violate TC-DEF functional dependencies

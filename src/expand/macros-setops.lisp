@@ -1,0 +1,177 @@
+(in-package :cl-cc)
+
+;;; ─── List and set operations split from stdlib ───────────────────────────────
+
+;; REMOVE: remove elements matching item (with optional :test/:key/:count)
+(our-defmacro remove (item list &key test key test-not count from-end)
+  (let ((item-var (gensym "ITEM")) (x (gensym "X")) (acc (gensym "ACC"))
+        (tst-var (gensym "TST")) (kfn-var (gensym "KEY"))
+        (cnt-var (gensym "CNT")) (lim-var (gensym "LIM"))
+        (rev-var (gensym "REV")))
+    (let* ((has-keys (or test key test-not))
+           (test-e (cond (test-not `(complement ,test-not)) (test test) (t '#'eql)))
+           (key-bindings (when has-keys
+                           `((,tst-var ,test-e)
+                             (,kfn-var ,(or key '#'identity)))))
+           (match-form
+             (if has-keys
+                 `(funcall ,tst-var ,item-var (funcall ,kfn-var ,x))
+                 `(eql ,item-var ,x))))
+      (cond
+        ;; :count present, :from-end t — walk reversed input, skip last N matches
+        ;; acc ends up in original left-to-right order (double-reversal effect)
+        ((and count from-end)
+         `(let* ((,item-var ,item) ,@key-bindings
+                 (,rev-var (reverse ,list))
+                 (,acc nil) (,cnt-var 0) (,lim-var ,count))
+            (dolist (,x ,rev-var)
+              (if (and (< ,cnt-var ,lim-var) ,match-form)
+                  (setq ,cnt-var (+ ,cnt-var 1))
+                  (setq ,acc (cons ,x ,acc))))
+            ,acc))
+        ;; :count present, forward — remove first N occurrences left-to-right
+        (count
+         `(let* ((,item-var ,item) ,@key-bindings
+                 (,acc nil) (,cnt-var 0) (,lim-var ,count))
+            (dolist (,x ,list (nreverse ,acc))
+              (if (and (< ,cnt-var ,lim-var) ,match-form)
+                  (setq ,cnt-var (+ ,cnt-var 1))
+                  (setq ,acc (cons ,x ,acc))))))
+        ;; No :count — remove all occurrences
+        (has-keys
+         `(let* ((,item-var ,item) ,@key-bindings (,acc nil))
+            (dolist (,x ,list (nreverse ,acc))
+              (unless ,match-form
+                (setq ,acc (cons ,x ,acc))))))
+        (t
+         `(let ((,item-var ,item) (,acc nil))
+            (dolist (,x ,list (nreverse ,acc))
+              (unless ,match-form
+                (setq ,acc (cons ,x ,acc))))))))))
+
+;; REMOVE-DUPLICATES: keep only the first occurrence of each element (with optional :test/:key)
+(our-defmacro remove-duplicates (list &key test key test-not)
+  (if (or test key test-not)
+      (let ((x (gensym "X")) (acc (gensym "ACC"))
+            (tst-var (gensym "TST")) (kfn-var (gensym "KEY")))
+        `(let ((,acc nil)
+               (,tst-var ,(cond (test-not `(complement ,test-not)) (test test) (t '#'eql)))
+               (,kfn-var ,(or key '#'identity)))
+           (dolist (,x ,list (nreverse ,acc))
+             (unless (find (funcall ,kfn-var ,x) ,acc :test ,tst-var)
+               (setq ,acc (cons ,x ,acc))))))
+      (let ((x (gensym "X")) (acc (gensym "ACC")))
+        `(let ((,acc nil))
+           (dolist (,x ,list (nreverse ,acc))
+             (unless (member ,x ,acc)
+               (setq ,acc (cons ,x ,acc))))))))
+
+;; MEMBER: find first tail where (test item element), or nil (with optional :test/:key/:test-not)
+;; Shadows the binary builtin to add keyword arg support.
+(our-defmacro member (item list &key test key test-not)
+  (let ((item-var (gensym "ITEM")) (lst-var (gensym "LST")) (tag (gensym "MLOOP")))
+    (if (or test key test-not)
+        (let ((tst-var (gensym "TST")) (kfn-var (gensym "KEY")))
+          `(let ((,item-var ,item) (,lst-var ,list)
+                 (,tst-var ,(cond (test-not `(complement ,test-not)) (test test) (t '#'eql)))
+                 (,kfn-var ,(or key '#'identity)))
+             (block nil
+               (tagbody
+                ,tag
+                  (when (null ,lst-var) (return nil))
+                  (when (funcall ,tst-var ,item-var (funcall ,kfn-var (car ,lst-var)))
+                    (return ,lst-var))
+                  (setq ,lst-var (cdr ,lst-var))
+                  (go ,tag)))))
+        `(let ((,item-var ,item) (,lst-var ,list))
+           (block nil
+             (tagbody
+              ,tag
+                (when (null ,lst-var) (return nil))
+                (when (eql ,item-var (car ,lst-var)) (return ,lst-var))
+                (setq ,lst-var (cdr ,lst-var))
+                (go ,tag)))))))
+
+;; UNION: all elements present in either list, no duplicates (with optional :test/:key)
+(our-defmacro union (list1 list2 &key test key test-not)
+  (let ((l1 (gensym "L1")) (l2 (gensym "L2")) (x (gensym "X")) (acc (gensym "ACC")))
+    (let ((kws (cond (test `(:test ,test)) (test-not `(:test-not ,test-not)) (t nil))))
+      (let ((kws (if key (append kws `(:key ,key)) kws)))
+        `(let ((,l1 ,list1) (,l2 ,list2) (,acc nil))
+           (dolist (,x ,l2) (setq ,acc (cons ,x ,acc)))
+           (dolist (,x ,l1 (nreverse ,acc))
+             (unless (member ,x ,l2 ,@kws)
+               (setq ,acc (cons ,x ,acc)))))))))
+
+;; Shared expansion for set-difference / intersection with optional :test/:key
+(defun %set-filter-expand (list1 list2 keep-when &optional kws)
+  (let ((l2  (gensym "L2"))
+        (x   (gensym "X"))
+        (acc (gensym "ACC")))
+    `(let ((,l2 ,list2) (,acc nil))
+       (dolist (,x ,list1 (nreverse ,acc))
+         (,keep-when (member ,x ,l2 ,@kws)
+           (setq ,acc (cons ,x ,acc)))))))
+
+;; SET-DIFFERENCE: elements in list1 not present in list2 (with optional :test/:key)
+(our-defmacro set-difference (list1 list2 &key test key test-not)
+  (let ((kws (cond (test `(:test ,test)) (test-not `(:test-not ,test-not)) (t nil))))
+    (%set-filter-expand list1 list2 'unless (if key (append kws `(:key ,key)) kws))))
+
+;; INTERSECTION: elements present in both lists (with optional :test/:key)
+(our-defmacro intersection (list1 list2 &key test key test-not)
+  (let ((kws (cond (test `(:test ,test)) (test-not `(:test-not ,test-not)) (t nil))))
+    (%set-filter-expand list1 list2 'when (if key (append kws `(:key ,key)) kws))))
+
+;; SUBSETP: true iff every element of list1 is in list2 (with optional :test/:key)
+(our-defmacro subsetp (list1 list2 &key test key test-not)
+  (let ((l2 (gensym "L2")) (x (gensym "X")))
+    (let ((kws (cond (test `(:test ,test)) (test-not `(:test-not ,test-not)) (t nil))))
+      (let ((kws (if key (append kws `(:key ,key)) kws)))
+        `(let ((,l2 ,list2))
+           (every (lambda (,x) (member ,x ,l2 ,@kws)) ,list1))))))
+
+;; ADJOIN: cons item onto list only if not already present (with optional :test/:key)
+(our-defmacro adjoin (item list &key test key test-not)
+  (let ((item-var (gensym "ITEM")) (lst (gensym "LST")))
+    (let ((kws (cond (test `(:test ,test)) (test-not `(:test-not ,test-not)) (t nil))))
+      (let ((kws (if key (append kws `(:key ,key)) kws)))
+        `(let ((,item-var ,item) (,lst ,list))
+           (if (member ,item-var ,lst ,@kws) ,lst (cons ,item-var ,lst)))))))
+
+;; RASSOC: find association pair by cdr value (with optional :test/:key/:test-not)
+(our-defmacro rassoc (item alist &key test key test-not)
+  (if (or test key test-not)
+      (let ((item-var (gensym "ITEM")) (x (gensym "X"))
+            (tst-var (gensym "TST")) (kfn-var (gensym "KEY")))
+        `(let ((,item-var ,item)
+               (,tst-var ,(cond (test-not `(complement ,test-not)) (test test) (t '#'eql)))
+               (,kfn-var ,(or key '#'identity)))
+           (block nil
+             (dolist (,x ,alist nil)
+               (when (and (consp ,x)
+                          (funcall ,tst-var ,item-var (funcall ,kfn-var (cdr ,x))))
+                 (return ,x))))))
+      (let ((item-var (gensym "ITEM")) (x (gensym "X")))
+        `(let ((,item-var ,item))
+           (block nil
+             (dolist (,x ,alist nil)
+               (when (and (consp ,x) (eql ,item-var (cdr ,x)))
+                 (return ,x))))))))
+
+;; PAIRLIS: zip keys and data lists into an association list
+(our-defmacro pairlis (keys data &optional alist)
+  (let ((ks (gensym "KS"))
+        (ds (gensym "DS"))
+        (acc (gensym "ACC")))
+    `(let ((,ks ,keys)
+           (,ds ,data)
+           (,acc ,alist))
+       (tagbody
+        pairlis-loop
+          (when (and ,ks ,ds)
+            (setq ,acc (cons (cons (car ,ks) (car ,ds)) ,acc))
+            (setq ,ks (cdr ,ks))
+            (setq ,ds (cdr ,ds))
+            (go pairlis-loop)))
+       ,acc)))

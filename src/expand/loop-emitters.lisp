@@ -18,26 +18,29 @@
 
 ;;; ── Registration macros ──────────────────────────────────────────────────
 
+(defmacro %define-loop-emitter (table type lambda-list &body body)
+  `(setf (gethash ,type ,table)
+         (lambda ,lambda-list ,@body)))
+
 (defmacro define-loop-iter-emitter (type (var iter) &body body)
   "Register an iteration code generator for TYPE in *loop-iter-emitters*.
 Emitter contract: (var iter-plist) → (values bindings end-tests pre-body step-forms).
 All returned lists are in REVERSED order; the generator nreverses them at assembly."
-  `(setf (gethash ,type *loop-iter-emitters*)
-         (lambda (,var ,iter) ,@body)))
+  `(%define-loop-emitter *loop-iter-emitters* ,type (,var ,iter) ,@body))
 
 (defmacro define-loop-acc-emitter (type (acc-var acc-form bindings-var result-var into-var) &body body)
   "Register an accumulation code generator for TYPE in *loop-acc-emitters*.
 Emitter contract: (acc-var acc-form bindings result into-var) → (values body-form bindings result)."
-  `(setf (gethash ,type *loop-acc-emitters*)
-         (lambda (,acc-var ,acc-form ,bindings-var ,result-var ,into-var)
-           ,@body)))
+  `(%define-loop-emitter *loop-acc-emitters*
+                         ,type
+                         (,acc-var ,acc-form ,bindings-var ,result-var ,into-var)
+                         ,@body))
 
 (defmacro define-loop-condition-emitter (type (form end-tag) &body body)
   "Register a condition code generator for TYPE in *loop-condition-emitters*.
 Emitter contract: (form end-tag) → a single tagbody body form.
 END-TAG is the loop exit label; WHILE/UNTIL use it, ALWAYS/NEVER/THEREIS ignore it."
-  `(setf (gethash ,type *loop-condition-emitters*)
-         (lambda (,form ,end-tag) ,@body)))
+  `(%define-loop-emitter *loop-condition-emitters* ,type (,form ,end-tag) ,@body))
 
 ;;; ── Accumulation emitters ────────────────────────────────────────────────
 ;;;

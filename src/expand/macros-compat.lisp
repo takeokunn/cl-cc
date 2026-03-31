@@ -22,36 +22,41 @@
       `(progn
          (let ((pkg (or (find-package ',name)
                         (make-package ',name ,@(when use-list `(:use ',use-list))))))
-           ,@(when export-list
-               `((dolist (sym ',export-list)
-                   (export (intern (string sym) pkg) pkg))))
-           (quote ,name))))))
+            ,@(when export-list
+                `((dolist (sym ',export-list)
+                    (export (intern (string sym) pkg) pkg))))
+            (quote ,name))))))
+
+(defun %expand-package-iteration (binding-spec symbol-list-form-fn body)
+  (let ((var (first binding-spec))
+        (package (second binding-spec))
+        (result (third binding-spec))
+        (pkg-var (gensym "PKG"))
+        (syms-var (gensym "SYMS")))
+    `(let* ((,pkg-var ,(if package `(find-package ,package) '*package*))
+            (,syms-var ,(funcall symbol-list-form-fn pkg-var)))
+       (dolist (,var ,syms-var ,result)
+         ,@body))))
+
+(defun %ignore-argument-expand (argument constant)
+  (let ((arg-var (gensym "ARG")))
+    `(let ((,arg-var ,argument))
+       (declare (ignore ,arg-var))
+       ,constant)))
 
 ;; export — removed no-op stub; now delegates to host CL via vm-host-bridge
 
 ;; do-symbols / do-external-symbols / do-all-symbols (FR-361)
 ;; These expand to dolist over package symbol lists obtained via host bridge.
 (our-defmacro do-symbols (binding-spec &body body)
-  (let ((var (first binding-spec))
-        (package (second binding-spec))
-        (result (third binding-spec))
-        (pkg-var (gensym "PKG"))
-        (syms-var (gensym "SYMS")))
-    `(let* ((,pkg-var ,(if package `(find-package ,package) '*package*))
-            (,syms-var (%package-symbols ,pkg-var)))
-       (dolist (,var ,syms-var ,result)
-         ,@body))))
+  (%expand-package-iteration binding-spec
+                             (lambda (pkg-var) `(%package-symbols ,pkg-var))
+                             body))
 
 (our-defmacro do-external-symbols (binding-spec &body body)
-  (let ((var (first binding-spec))
-        (package (second binding-spec))
-        (result (third binding-spec))
-        (pkg-var (gensym "PKG"))
-        (syms-var (gensym "SYMS")))
-    `(let* ((,pkg-var ,(if package `(find-package ,package) '*package*))
-            (,syms-var (%package-external-symbols ,pkg-var)))
-       (dolist (,var ,syms-var ,result)
-         ,@body))))
+  (%expand-package-iteration binding-spec
+                             (lambda (pkg-var) `(%package-external-symbols ,pkg-var))
+                             body))
 
 (our-defmacro do-all-symbols (binding-spec &body body)
   (let ((var (first binding-spec))
@@ -60,32 +65,6 @@
     `(let ((,syms-var (%all-symbols)))
        (dolist (,var ,syms-var ,result)
          ,@body))))
-
-;;; Array type introspection (ANSI CL: implementations may upgrade element types)
-;; All VM arrays accept any element type, so array-element-type always returns T.
-;; All VM arrays are adjustable (hash-table-backed).
-
-(our-defmacro array-element-type (array)
-  (let ((a (gensym "A")))
-    `(let ((,a ,array))
-       (declare (ignore ,a))
-       t)))
-
-(our-defmacro upgraded-array-element-type (typespec &optional env)
-  (declare (ignore typespec env))
-  `(quote t))
-
-(our-defmacro adjustable-array-p (array)
-  (let ((a (gensym "A")))
-    `(let ((,a ,array))
-       (declare (ignore ,a))
-       t)))
-
-(our-defmacro array-has-fill-pointer-p (array)
-  (let ((a (gensym "A")))
-    `(let ((,a ,array))
-       (declare (ignore ,a))
-       nil)))
 
 ;;; Declaration (silently ignored)
 
@@ -98,37 +77,6 @@
 (our-defmacro declaim (&rest decls)
   (declare (ignore decls))
   nil)
-
-;;; FR-1201: Property List Macros (getf, remf, get-properties)
-
-(our-defmacro getf (plist indicator &optional default)
-  "Return the value for INDICATOR in PLIST, or DEFAULT if not found."
-  (let ((pl (gensym "PL")) (ind (gensym "IND")) (found (gensym "FOUND")))
-    `(let ((,pl ,plist) (,ind ,indicator))
-       (let ((,found (member ,ind ,pl)))
-         (if ,found (cadr ,found) ,default)))))
-
-(our-defmacro remf (plist indicator)
-  "Remove INDICATOR and its value from PLIST. Returns T if found, NIL otherwise."
-  (let ((ind (gensym "IND")) (prev (gensym "PREV")) (cur (gensym "CUR"))
-        (found (gensym "FOUND")))
-    `(let ((,ind ,indicator) (,prev nil) (,cur ,plist) (,found nil))
-       (tagbody
-         :loop
-         (when ,cur
-           (cond
-             ((eq (car ,cur) ,ind)
-              (setq ,found t)
-              (if ,prev
-                  (rplacd (cdr ,prev) (cddr ,cur))
-                  (setq ,plist (cddr ,cur)))
-              (go :done))
-             (t
-              (setq ,prev ,cur)
-              (setq ,cur (cddr ,cur))
-              (go :loop))))
-         :done)
-       ,found)))
 
 ;;; Scope with Declarations
 
@@ -506,18 +454,3 @@ For our VM hash-table instances, like reinitialize-instance but slot-filtered."
               (setf ,pair-v (cddr ,pair-v))
               (go si-loop)))))
        ,inst-v)))
-
-;;; %plist-put — non-destructive plist update (used by setf getf expansion)
-(our-defmacro %plist-put (plist indicator value)
-  (let ((p (gensym "P")) (result (gensym "R")) (found (gensym "F"))
-        (k (gensym "K")) (v (gensym "V")))
-    `(let ((,p ,plist) (,v ,value) (,result nil) (,found nil))
-       (loop while ,p do
-         (let ((,k (car ,p)))
-           (if (eq ,k ,indicator)
-               (progn (push ,indicator ,result) (push ,v ,result) (setf ,found t))
-               (progn (push ,k ,result) (push (cadr ,p) ,result)))
-           (setf ,p (cddr ,p))))
-       (unless ,found
-         (push ,v ,result) (push ,indicator ,result))
-       (nreverse ,result))))

@@ -7,6 +7,21 @@
 
 (defsuite wasm-extract-suite :description "WASM function extraction pass tests")
 
+(defun make-entry-labels (&rest labels)
+  (let ((entry-labels (make-hash-table :test #'equal)))
+    (dolist (label labels entry-labels)
+      (setf (gethash label entry-labels) t))))
+
+(defun make-function-instructions (label &rest body)
+  (cons (make-vm-label :name label) body))
+
+(defun assert-segment (segment kind &key label body-length)
+  (assert-eq kind (car segment))
+  (when label
+    (assert-equal label (second segment)))
+  (when body-length
+    (assert-equal body-length (length (third segment)))))
+
 ;;; ─── collect-entry-labels ─────────────────────────────────────────────────────
 
 (deftest extract-entry-labels-empty-cases
@@ -59,75 +74,63 @@
 
 (deftest segment-empty-instructions
   "segment-instructions on empty list returns empty."
-  (let ((entry-labels (make-hash-table :test #'equal)))
+  (let ((entry-labels (make-entry-labels)))
     (assert-null (cl-cc::segment-instructions nil entry-labels))))
 
 (deftest segment-all-toplevel
   "Instructions with no function entries are all :toplevel."
-  (let ((entry-labels (make-hash-table :test #'equal))
+  (let ((entry-labels (make-entry-labels))
         (instrs (list (make-vm-const :dst :r0 :value 1)
                       (make-vm-ret :reg :r0))))
     (let ((segs (cl-cc::segment-instructions instrs entry-labels)))
       (assert-equal 1 (length segs))
-      (assert-eq :toplevel (car (first segs)))
+      (assert-segment (first segs) :toplevel)
       (assert-equal 2 (length (cdr (first segs)))))))
 
 (deftest segment-one-function
   "A function body between entry-label and vm-ret produces a :function segment."
-  (let ((entry-labels (make-hash-table :test #'equal)))
-    (setf (gethash "fn1" entry-labels) t)
-    (let* ((lbl (make-vm-label :name "fn1"))
-           (body-inst (make-vm-const :dst :r0 :value 99))
+  (let ((entry-labels (make-entry-labels "fn1")))
+    (let* ((body-inst (make-vm-const :dst :r0 :value 99))
            (ret (make-vm-ret :reg :r0))
-           (instrs (list lbl body-inst ret)))
+           (instrs (make-function-instructions "fn1" body-inst ret)))
       (let ((segs (cl-cc::segment-instructions instrs entry-labels)))
         (assert-equal 1 (length segs))
-        (let ((seg (first segs)))
-          (assert-eq :function (first seg))
-          (assert-equal "fn1" (second seg))
-          ;; Body includes label + body-inst + ret
-          (assert-equal 3 (length (third seg))))))))
+        (assert-segment (first segs) :function :label "fn1" :body-length 3)))))
 
 (deftest-each segment-mixed-ordering
   "Mixed toplevel + function code produces 2 segments; first-segment type depends on order."
   :cases (("toplevel-first" t   :toplevel :function)
           ("function-first" nil :function :toplevel))
   (toplevel-first expected-car1 expected-car2)
-  (let ((entry-labels (make-hash-table :test #'equal)))
-    (setf (gethash "fn1" entry-labels) t)
+  (let ((entry-labels (make-entry-labels "fn1")))
     (let* ((top (make-vm-const :dst :r0 :value 0))
            (lbl (make-vm-label :name "fn1"))
            (ret (make-vm-ret :reg :r0))
            (instrs (if toplevel-first (list top lbl ret) (list lbl ret top))))
       (let ((segs (cl-cc::segment-instructions instrs entry-labels)))
         (assert-equal 2 (length segs))
-        (assert-eq expected-car1 (car (first segs)))
-        (assert-eq expected-car2 (car (second segs)))))))
+        (assert-segment (first segs) expected-car1)
+        (assert-segment (second segs) expected-car2)))))
 
 (deftest segment-two-functions
   "Two consecutive function bodies produce two :function segments."
-  (let ((entry-labels (make-hash-table :test #'equal)))
-    (setf (gethash "fn-a" entry-labels) t)
-    (setf (gethash "fn-b" entry-labels) t)
-    (let* ((lbl-a (make-vm-label :name "fn-a"))
-           (ret-a (make-vm-ret :reg :r0))
-           (lbl-b (make-vm-label :name "fn-b"))
+  (let ((entry-labels (make-entry-labels "fn-a" "fn-b")))
+    (let* ((ret-a (make-vm-ret :reg :r0))
            (ret-b (make-vm-ret :reg :r1))
-           (instrs (list lbl-a ret-a lbl-b ret-b)))
+           (instrs (append (make-function-instructions "fn-a" ret-a)
+                           (make-function-instructions "fn-b" ret-b))))
       (let ((segs (cl-cc::segment-instructions instrs entry-labels)))
         (assert-equal 2 (length segs))
-        (assert-eq :function (car (first segs)))
-        (assert-equal "fn-a" (second (first segs)))
-        (assert-eq :function (car (second segs)))
-        (assert-equal "fn-b" (second (second segs)))))))
+        (assert-segment (first segs) :function :label "fn-a")
+        (assert-segment (second segs) :function :label "fn-b")))))
 
 (deftest segment-non-entry-label-stays-toplevel
   "A vm-label not in entry-labels stays in the :toplevel segment."
-  (let ((entry-labels (make-hash-table :test #'equal)))
+  (let ((entry-labels (make-entry-labels)))
     ;; "loop" is NOT an entry label
     (let* ((lbl (make-vm-label :name "loop"))
            (inst (make-vm-const :dst :r0 :value 1))
            (instrs (list lbl inst)))
       (let ((segs (cl-cc::segment-instructions instrs entry-labels)))
         (assert-equal 1 (length segs))
-        (assert-eq :toplevel (car (first segs)))))))
+        (assert-segment (first segs) :toplevel)))))

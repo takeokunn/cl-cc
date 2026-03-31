@@ -167,3 +167,114 @@
          (cl-cc::make-vm-jump-zero :reg :R1 :label "loop") s 10 lbls)
       (declare (ignore halt-p result))
       (assert-= 3 next-pc))))
+
+(deftest vm-execute-vm-label-advances-pc
+  "vm-label is a no-op instruction that just increments pc."
+  (let ((s (make-test-vm)))
+    (multiple-value-bind (next-pc halt-p result)
+        (cl-cc::execute-instruction
+         (cl-cc::make-vm-label :name "entry") s 4 (make-hash-table :test #'equal))
+      (declare (ignore result))
+      (assert-= 5 next-pc)
+      (assert-false halt-p))))
+
+(deftest vm-execute-vm-jump-taken
+  "vm-jump transfers control to the target label."
+  (let ((s (make-test-vm))
+        (lbls (make-hash-table :test #'equal)))
+    (setf (gethash "entry" lbls) 11)
+    (multiple-value-bind (next-pc halt-p result)
+        (cl-cc::execute-instruction
+         (cl-cc::make-vm-jump :label "entry") s 2 lbls)
+      (declare (ignore result))
+      (assert-= 11 next-pc)
+      (assert-false halt-p))))
+
+(deftest vm-execute-vm-values-stores-all-values
+  "vm-values stores the primary value in dst and all values in values-list."
+  (let ((s (make-test-vm)))
+    (cl-cc:vm-reg-set s :R1 10)
+    (cl-cc:vm-reg-set s :R2 20)
+    (cl-cc:vm-reg-set s :R3 30)
+    (cl-cc::execute-instruction
+     (cl-cc::make-vm-values :dst :R0 :src-regs (list :R1 :R2 :R3)) s 0 (make-hash-table :test #'equal))
+    (assert-= 10 (cl-cc:vm-reg-get s :R0))
+    (assert-equal '(10 20 30) (cl-cc::vm-values-list s))))
+
+(deftest vm-execute-vm-mv-bind-distributes-values
+  "vm-mv-bind distributes values-list to destination registers."
+  (let ((s (make-test-vm)))
+    (setf (cl-cc::vm-values-list s) '(1 2 3))
+    (cl-cc::execute-instruction
+     (cl-cc::make-vm-mv-bind :dst-regs (list :R0 :R1 :R2)) s 0 (make-hash-table :test #'equal))
+    (assert-= 1 (cl-cc:vm-reg-get s :R0))
+    (assert-= 2 (cl-cc:vm-reg-get s :R1))
+    (assert-= 3 (cl-cc:vm-reg-get s :R2))))
+
+(deftest vm-execute-vm-values-to-list-copies-list
+  "vm-values-to-list copies values-list into a register."
+  (let ((s (make-test-vm)))
+    (setf (cl-cc::vm-values-list s) '(7 8 9))
+    (cl-cc::execute-instruction
+     (cl-cc::make-vm-values-to-list :dst :R0) s 0 (make-hash-table :test #'equal))
+    (assert-equal '(7 8 9) (cl-cc:vm-reg-get s :R0))))
+
+(deftest vm-execute-vm-spread-values-roundtrips
+  "vm-spread-values loads values-list from a register holding a list."
+  (let ((s (make-test-vm)))
+    (cl-cc:vm-reg-set s :R1 '(100 200 300))
+    (cl-cc::execute-instruction
+     (cl-cc::make-vm-spread-values :dst :R0 :src :R1) s 0 (make-hash-table :test #'equal))
+    (assert-= 100 (cl-cc:vm-reg-get s :R0))
+    (assert-equal '(100 200 300) (cl-cc::vm-values-list s))))
+
+(deftest vm-execute-vm-clear-values-resets-buffer
+  "vm-clear-values resets values-list to nil."
+  (let ((s (make-test-vm)))
+    (setf (cl-cc::vm-values-list s) '(1 2 3))
+    (cl-cc::execute-instruction
+     (cl-cc::make-vm-clear-values) s 0 (make-hash-table :test #'equal))
+    (assert-null (cl-cc::vm-values-list s))))
+
+(deftest vm-execute-vm-ensure-values-initialises-buffer
+  "vm-ensure-values initialises values-list from src when nil."
+  (let ((s (make-test-vm)))
+    (cl-cc:vm-reg-set s :R0 55)
+    (setf (cl-cc::vm-values-list s) nil)
+    (cl-cc::execute-instruction
+     (cl-cc::make-vm-ensure-values :src :R0) s 0 (make-hash-table :test #'equal))
+    (assert-equal '(55) (cl-cc::vm-values-list s))))
+
+(deftest vm-execute-global-operations
+  "vm-set-global/vm-get-global round-trip global variables."
+  (let ((s (make-test-vm)))
+    (cl-cc:vm-reg-set s :R0 42)
+    (cl-cc::execute-instruction
+     (cl-cc::make-vm-set-global :name 'myvar :src :R0) s 0 (make-hash-table :test #'equal))
+    (assert-= 42 (gethash 'myvar (cl-cc::vm-global-vars s))))
+  (let ((s (make-test-vm)))
+    (setf (gethash 'myvar2 (cl-cc::vm-global-vars s)) 99)
+    (cl-cc::execute-instruction
+     (cl-cc::make-vm-get-global :dst :R0 :name 'myvar2) s 0 (make-hash-table :test #'equal))
+    (assert-= 99 (cl-cc:vm-reg-get s :R0))))
+
+(deftest vm-execute-print-writes-stream
+  "vm-print writes the register value followed by newline to output-stream."
+  (let* ((str (make-string-output-stream))
+         (s   (make-instance 'cl-cc::vm-state :output-stream str)))
+    (cl-cc:vm-reg-set s :R0 42)
+    (cl-cc::execute-instruction
+     (cl-cc::make-vm-print :reg :R0) s 0 (make-hash-table :test #'equal))
+    (assert-string= (format nil "42~%") (get-output-stream-string str))))
+
+(deftest vm-execute-register-function-stores-closure
+  "vm-register-function stores a closure in the function registry."
+  (let ((s (make-test-vm)))
+    (let ((closure (make-instance 'cl-cc::vm-closure-object
+                                   :entry-label "myfn"
+                                   :params nil
+                                   :captured-values nil)))
+      (cl-cc:vm-reg-set s :R0 closure)
+      (cl-cc::execute-instruction
+       (cl-cc::make-vm-register-function :name 'myfn :src :R0) s 0 (make-hash-table :test #'equal))
+      (assert-true (not (null (gethash 'myfn (cl-cc::vm-function-registry s))))))))

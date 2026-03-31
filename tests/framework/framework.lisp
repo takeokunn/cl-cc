@@ -158,6 +158,26 @@ Returns (values docstring timeout depends-on tags body-forms)."
   "Signal a pending condition with the given reason."
   (signal 'pending-condition :reason reason))
 
+(defmacro with-reset-repl-state (&body body)
+  "Run BODY with a clean REPL state, and always restore the REPL to empty."
+  `(unwind-protect
+       (progn
+         (reset-repl-state)
+         ,@body)
+     (reset-repl-state)))
+
+(defun make-test-vm ()
+  "Create a fresh VM state for instruction-level testing."
+  (make-instance 'cl-cc:vm-state))
+
+(defun vm-exec (inst state &optional (pc 0) (labels (make-hash-table :test #'equal)))
+  "Execute one VM instruction and return the next program counter."
+  (cl-cc:execute-instruction inst state pc labels))
+
+(defun exec1 (inst state &optional (pc 0))
+  "Execute one VM instruction with a fresh label table."
+  (vm-exec inst state pc (make-hash-table)))
+
 ;;; ------------------------------------------------------------
 ;;; Invariants
 ;;; ------------------------------------------------------------

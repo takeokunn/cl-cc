@@ -105,15 +105,18 @@ Returns (values forms remaining)."
 Each entry is (keyword-string . fn) where fn: (var remaining) → (values spec remaining).
 Populated by define-loop-for-parser.")
 
+(defmacro %define-loop-for-parser (keyword fn-name (var remaining) &body body)
+  `(progn
+     (defun ,fn-name (,var ,remaining) ,@body)
+     (setf *loop-for-parsers*
+           (cons (cons ,keyword #',fn-name)
+                 (remove ,keyword *loop-for-parsers* :key #'car :test #'string=)))))
+
 (defmacro define-loop-for-parser (keyword (var remaining) &body body)
   "Define a FOR sub-parser for KEYWORD string and register it in *loop-for-parsers*.
 The parser receives (VAR REMAINING) and must return (values spec-plist remaining)."
   (let ((fn-name (intern (format nil "%PARSE-FOR-~A" keyword))))
-    `(progn
-       (defun ,fn-name (,var ,remaining) ,@body)
-       (setf *loop-for-parsers*
-             (cons (cons ,keyword #',fn-name)
-                   (remove ,keyword *loop-for-parsers* :key #'car :test #'string=))))))
+    `(%define-loop-for-parser ,keyword ,fn-name (,var ,remaining) ,@body)))
 
 ;;; FR-695: FOR variant: var DOWNFROM expr [TO/DOWNTO/ABOVE expr] [BY expr]
 

@@ -6,6 +6,11 @@
 
 (in-package :cl-cc)
 
+(defun %scan-instructions (instructions fn)
+  "Call FN on each instruction in INSTRUCTIONS."
+  (dolist (inst instructions)
+    (funcall fn inst)))
+
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Step 1: Collect all function entry labels
 ;;; ─────────────────────────────────────────────────────────────────────────────
@@ -14,15 +19,18 @@
   "Scan INSTRUCTIONS and return a hash-set of all function entry label names.
    An entry label appears as (vm-label-name inst) on vm-closure and vm-func-ref."
   (let ((entry-labels (make-hash-table :test #'equal)))
-    (dolist (inst instructions entry-labels)
-      (typecase inst
-        (vm-closure
-         (setf (gethash (vm-label-name inst) entry-labels) t))
-        (vm-func-ref
-         (setf (gethash (vm-label-name inst) entry-labels) t))
-        (vm-register-function
-         ;; vm-register-function stores name in a slot, not a label -- skip
-         nil)))))
+    (%scan-instructions
+     instructions
+     (lambda (inst)
+       (typecase inst
+         (vm-closure
+          (setf (gethash (vm-label-name inst) entry-labels) t))
+         (vm-func-ref
+          (setf (gethash (vm-label-name inst) entry-labels) t))
+         (vm-register-function
+           ;; vm-register-function stores name in a slot, not a label -- skip
+          nil))))
+    entry-labels))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Step 2: Segment the flat instruction list
@@ -89,12 +97,15 @@
    (list of keywords such as (:R0 :R1)).  Used to propagate arity info into
    wasm-function-def so the trampoline can emit a correct arg-load prologue."
   (let ((map (make-hash-table :test #'equal)))
-    (dolist (inst instructions map)
-      (when (typep inst 'vm-closure)
-        (let ((label (vm-label-name inst)))
-          (when label
-            (setf (gethash label map)
-                  (or (vm-closure-params inst) nil))))))))
+    (%scan-instructions
+     instructions
+     (lambda (inst)
+       (when (typep inst 'vm-closure)
+         (let ((label (vm-label-name inst)))
+           (when label
+             (setf (gethash label map)
+                   (or (vm-closure-params inst) nil)))))))
+    map))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Step 3: Build wasm-function-def records from segments

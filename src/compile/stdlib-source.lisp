@@ -148,6 +148,16 @@
      (if (funcall pred (car (car alist))) (car alist)
        (assoc-if pred (cdr alist)))))"
 
+    "(defun assoc (item alist &key test key test-not)
+   (let ((test-fn (cond (test-not (complement test-not))
+                        (test test)
+                        (t #'eql)))
+         (key-fn (if key key #'identity)))
+     (if (null alist) nil
+       (if (funcall test-fn item (funcall key-fn (car (car alist))))
+           (car alist)
+           (assoc item (cdr alist) :test test-fn :key key-fn)))))"
+
     "(defun rassoc (item alist)
    (if (null alist) nil
      (if (eql item (cdr (car alist))) (car alist)
@@ -744,6 +754,12 @@
     "(defvar *read-base* 10)"
     "(defvar *read-default-float-format* 'single-float)"
     "(defvar *read-suppress* nil)"
+    "(defvar *standard-input* *standard-input*)"
+    "(defvar *standard-output* *standard-output*)"
+    "(defvar *error-output* *error-output*)"
+    "(defvar *trace-output* *trace-output*)"
+    "(defvar *debug-io* *debug-io*)"
+    "(defvar *query-io* *query-io*)"
     ;; ── FR-573: *read-eval* ───────────────────────────────────────────────────
     "(defvar *read-eval* t)"
     ;; ── FR-358: *readtable* (stub — full Readtable API not yet implemented) ───

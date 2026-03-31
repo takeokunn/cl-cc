@@ -29,12 +29,13 @@
        (:file "incremental")
        (:file "pratt")
        (:file "combinators")
-       (:module "cl"
-        :serial t
-        :components
-        ((:file "parser")
-         (:file "parser-roundtrip")
-         (:file "grammar")))
+        (:module "cl"
+         :serial t
+         :components
+         ((:file "parser")
+          (:file "lower")
+          (:file "parser-roundtrip")
+          (:file "grammar")))
        (:module "php"
         :serial t
         :components
@@ -42,44 +43,72 @@
          (:file "parser")
          (:file "grammar")))
        (:file "cst-to-ast")))
-     ;; Stage 2: S-expressions → macro-expanded S-expressions
-     (:module "expand"
-      :serial t
-      :components
-      ((:file "macro")           ; core: macro-env, lambda-list, defmacro machinery
-       (:file "macros-basic")    ; bootstrap: when/unless/cond/and/or/let*/setf/dolist/do/case
-       (:file "loop-data")       ; LOOP: grammar tables — the "Prolog database"
-       (:file "loop-parser")     ; LOOP: CPS token parser → IR plist
-       (:file "loop-emitters")   ; LOOP: IR → code-fragment tables
-       (:file "loop")            ; LOOP: generator — assembles tagbody from IR
-        (:file "macros-stdlib")   ; stdlib: push/pop/incf + ANSI CL + higher-order fns
-        (:file "macros-filesystem") ; file/IO/runtime stubs split from stdlib
-        (:file "macros-sequence") ; sequences: sort/reduce/substitute
-       (:file "macros-compat")  ; ANSI CL compat: package no-ops, getf/remf, progv, coerce, CLOS, plist
-       (:file "expander-data")      ; expander: grammar tables + dispatch table declarations
-       (:file "expander-defstruct") ; expander: defstruct expansion helpers
-       (:file "expander")))
+      ;; Stage 2: S-expressions → macro-expanded S-expressions
+      (:module "expand"
+       :serial t
+       :components
+          ((:file "macro-lambda-list") ; shared lambda-list parsing + destructuring helpers
+           (:file "macro")           ; core: macro-env, defmacro machinery, macroexpansion
+           (:file "macros-basic")    ; bootstrap: check-type/setf/list + value helpers
+           (:file "macros-control-flow") ; bootstrap control-flow macros
+           (:file "macros-mutation") ; push/pop/incf/decf split from stdlib
+           (:file "loop-data")       ; LOOP: grammar tables — the "Prolog database"
+           (:file "loop-parser")     ; LOOP: CPS token parser → IR plist
+           (:file "loop-emitters")   ; LOOP: IR → code-fragment tables
+           (:file "loop")            ; LOOP: generator — assembles tagbody from IR
+           (:file "macros-setops")   ; list/set operations split from stdlib
+           (:file "macros-list-utils") ; ordering and list utility helpers
+           (:file "macros-restarts") ; restart/condition protocol split from stdlib
+           (:file "macros-introspection") ; equalp + implementation stubs
+           (:file "macros-stdlib")   ; stdlib: numeric shorthand + ANSI CL + core stubs
+           (:file "macros-cxr")      ; algorithmic CXR accessor registration
+           (:file "macros-hof")      ; higher-order list/search helpers
+           (:file "macros-filesystem") ; file/IO/runtime stubs split from stdlib
+           (:file "macros-sequence") ; sequences: sort/reduce/substitute
+           (:file "macros-list-compat") ; list/sequence compatibility helpers split from stdlib
+           (:file "macros-plist")      ; property list helpers
+           (:file "macros-compat")  ; ANSI CL compat: package no-ops, progv, coerce, CLOS, plist
+           (:file "macros-compat-array") ; array compat wrappers split from macros-compat
+           (:file "expander-data")      ; expander: grammar tables + dispatch table declarations
+           (:file "expander-defstruct") ; expander: defstruct expansion helpers
+           (:file "expander-core")
+           (:file "expander-helpers")   ; expander: shared helper functions extracted from expander.lisp
+           (:file "expander-definitions-helpers") ; expander: lambda-list default expansion helper
+           (:file "expander-control-helpers") ; expander: binding helpers for control forms
+           (:file "expander-setf-places-helpers") ; expander: setf-place cons access helper
+           (:file "expander-setf-places") ; expander: setf compound-place registration table
+           (:file "expander")
+           (:file "expander-definitions-forms")
+           (:file "expander-basic")     ; core application handlers split from expander.lisp
+           (:file "expander-definitions")
+           (:file "expander-control")
+           (:file "expander-tail")
+           (:file "expander-numeric")
+           (:file "expander-sequence")))
      ;; Stage 6: VM execution (loaded before compile/ so VM types are available)
-     (:module "vm"
-      :serial t
-      :components
-      ((:file "package")
-       (:file "vm")
-       (:file "vm-execute") ; Core execute-instruction methods + call-frame helpers
-       (:file "vm-clos")    ; CLOS instruction defstructs + execute-instruction methods
-       (:file "vm-run")     ; Handler-case, label table, run-vm, vm2-state
+      (:module "vm"
+        :serial t
+        :components
+        ((:file "package")
+         (:file "vm")
+         (:file "vm-instructions") ; instruction set definitions
+         (:file "vm-dispatch") ; dispatch protocol + call-frame helpers
+         (:file "vm-execute") ; Core execute-instruction methods + call-frame helpers
+         (:file "vm-clos")    ; CLOS instruction defstructs + execute-instruction methods
+        (:file "vm-run")     ; Handler-case, label table, run-vm, vm2-state
        (:file "primitives")
        (:file "vm-bitwise")        ; FR-303: ash, logand, logior, logxor, logeqv, lognot, logtest, logbitp, logcount, integer-length
        (:file "vm-transcendental") ; FR-304: expt, sqrt, exp, log, trig, hyperbolic
        (:file "vm-numeric")
        (:file "vm-extensions")
-       (:file "io")
-       (:file "format")
-       (:file "conditions")
-       (:file "list")
-       (:file "array")
-       (:file "strings")
-       (:file "symbols")
+        (:file "io")
+        (:file "format")
+        (:file "conditions")
+        (:file "list-coerce")
+        (:file "list")
+        (:file "array")
+        (:file "strings")
+        (:file "symbols")
        (:file "hash")))
      ;; Stage 3: Type checking and inference
      (:module "type"
@@ -118,14 +147,20 @@
          (:file "printer")))           ; human-readable IR dump
        (:file "context")
        (:file "closure")
-       (:file "cps")
-       (:file "builtin-registry-data") ; Entry alists — pure data, no logic
-       (:file "builtin-registry")
-       (:file "codegen-core")
-       (:file "codegen-clos")
-       (:file "codegen-functions")
-       (:file "codegen-phase2")  ; Phase 2 AST-introspecting builtin handlers
-       (:file "codegen")))
+        (:file "cps")
+        (:file "cps-ast")
+         (:file "builtin-registry-data") ; Entry alists — pure data, no logic
+         (:file "builtin-registry")
+         (:file "codegen-core")
+         (:file "codegen-clos")
+         (:file "codegen-functions")
+         (:file "codegen-phase2")  ; Phase 2 AST-introspecting builtin handlers
+         (:file "codegen-control") ; control-flow + multiple-values compiler methods
+         (:file "codegen-io")      ; Phase 2 stream/reader/printer handlers split from phase 2
+         (:file "codegen-hash-table") ; hash-table handler cluster split from phase 2
+         (:file "codegen-slot-predicates") ; CLOS slot predicate handlers split from phase 2
+        (:file "codegen-string-kwargs") ; string comparison/case handlers split from phase 2
+        (:file "codegen")))
      ;; Stage 5: VM IR → optimized VM IR
      (:module "optimize"
       :serial t
@@ -228,53 +263,134 @@
      (:module "unit"
       :serial t
       :components
-      ((:module "cli"
-        :serial t
-        :components
-        ((:file "args-tests")
-         (:file "cli-tests")))
-       (:module "vm"
-        :serial t
-        :components
-        ((:file "vm2-tests")
-         (:file "list-tests")       ; defines make-test-vm / exec1 helpers
-         (:file "vm-execute-tests")
-         (:file "primitives-tests") ; execute-instruction for type predicates + arithmetic
-         (:file "vm-clos-tests")    ; execute-instruction for CLOS instructions
-         (:file "vm-call-tests")    ; vm-call / vm-tail-call / vm-ret + %vm-dispatch-call
-         (:file "conditions-tests")
-         (:file "hash-tests")
-         (:file "strings-tests")
-         (:file "io-tests")))
+       ((:module "cli"
+         :serial t
+         :components
+         ((:file "args-tests")
+          (:file "cli-tests")
+          (:file "main-tests")))
+         (:module "vm"
+         :serial t
+         :components
+           ((:file "vm2-tests")
+            (:file "vm-instructions-tests")
+            (:file "list-tests")       ; defines make-test-vm / exec1 helpers
+           (:file "list-coerce-tests")
+           (:file "array-tests")
+            (:file "vm-execute-tests")
+            (:file "primitives-tests") ; execute-instruction for type predicates + arithmetic
+            (:file "vm-transcendental-tests") ; transcendental math ops
+            (:file "vm-numeric-tests") ; numeric tower + environment queries
+            (:file "vm-extensions-tests") ; symbol plist + progv + generic arithmetic
+            (:file "vm-bitwise-tests") ; bitwise integer instructions
+            (:file "vm-clos-tests")    ; execute-instruction for CLOS instructions
+            (:file "vm-run-tests") ; vm-error-type-matches-p
+            (:file "vm-dispatch-tests") ; vm-classify-arg + vm-generic-function-p
+             (:file "vm-runtime-tests") ; vm-closure-object + heap/plist helpers
+             (:file "vm-tests") ; vm.lisp core state + helper coverage
+             (:file "package-tests") ; cl-cc package export smoke tests
+             (:file "vm-call-tests")    ; vm-call / vm-tail-call / vm-ret + %vm-dispatch-call
+             (:file "conditions-tests")
+            (:file "hash-tests")
+           (:file "symbols-tests")
+           (:file "strings-tests")
+           (:file "io-tests")))
        (:module "parse"
         :serial t
         :components
         ((:file "ast-tests")
-         (:file "cl-parser-tests")
-         (:file "cst-tests")
+          (:file "cl-parser-tests")
+          (:module "cl"
+           :serial t
+           :components
+           ((:file "lower-tests")))
+          (:file "cst-tests")
          (:file "lexer-tests")
          (:file "grammar-tests")
-         (:file "prolog-tests")
-         (:file "pratt-tests")
-         (:file "php-tests")
-         (:file "combinator-tests")
+          (:file "prolog-tests")
+          (:file "pratt-tests")
+          (:file "php-tests")
+        (:module "php"
+         :serial t
+         :components
+         ((:file "parser-tests")
+          (:file "grammar-tests")))
+          (:file "combinator-tests")
          (:file "dcg-tests")
          (:file "incremental-tests")
          (:file "cst-to-ast-tests")
          (:file "diagnostics-tests")))
-       (:module "expand"
-        :serial t
-        :components
-        ((:file "macro-tests")
-         (:file "lambda-list-tests")
-         (:file "defstruct-tests")
-         (:file "expander-tests")
-         (:file "loop-macro-tests")
-         (:file "macro-advanced-tests")
-         (:file "macros-basic-tests")    ; check-type, list, setf places
-         (:file "macros-stdlib-tests")   ; push/pop/incf/HOFs/CXR/etc
-         (:file "macros-sequence-tests") ; reduce/substitute/getf/coerce/etc
-         ))
+        (:module "expand"
+           :serial t
+           :components
+           ((:file "macro-tests")
+              (:file "macro-definition-tests")
+              (:file "macro-assignment-tests")
+              (:file "macro-multiple-value-tests")
+               (:file "macros-control-flow-tests")
+               (:file "macro-lambda-list-tests")
+             (:file "expander-lambda-list-defaults-tests")
+             (:file "expander-core-tests")
+             (:file "expander-data-tests")
+             (:file "expander-test-support")
+              (:file "expander-basic-tests")
+              (:file "macros-basic-check-type-tests")
+              (:file "macros-basic-list-tests")
+              (:file "macros-basic-setf-tests")
+              (:file "expander-setf-tests")
+              (:file "expander-setf-places-tests")
+              (:file "expander-control-tests")
+              (:file "expander-array-tests")
+              (:file "expander-typed-tests")
+             (:file "expander-defclass-tests")
+              (:file "expander-binding-tests")
+                (:file "expander-control-helpers-tests")
+                (:file "expander-definitions-function-tests")
+                (:file "expander-definitions-forms-tests")
+                (:file "expander-definitions-type-tests")
+                (:file "expander-definitions-rounding-tests")
+                (:file "expander-definitions-constant-tests")
+                (:file "expander-definitions-tests")
+                (:file "expander-numeric-tests")
+                (:file "expander-definitions-helpers-tests")
+                (:file "expander-helpers-tests")
+                (:file "expander-sequence-tests")
+                (:file "expander-setf-places-helpers-tests")
+                (:file "expander-tail-tests")
+                (:file "defstruct-tests")
+                (:file "loop-tests")
+                (:file "loop-macro-tests")
+                (:file "loop-data-tests")
+                (:file "loop-parser-tests")
+                (:file "loop-emitters-tests")
+              (:file "macro-rotatef-tests")
+           (:file "macro-psetf-tests")
+           (:file "macro-shiftf-tests")
+           (:file "macro-ecase-tests")
+           (:file "macro-etypecase-tests")
+           (:file "macro-progv-tests")
+           (:file "macro-define-modify-macro-tests")
+                (:file "macros-cxr-tests")
+                (:file "macros-introspection-tests")
+                (:file "macros-list-utils-tests")
+                (:file "macros-restarts-tests")
+                (:file "macros-setops-tests")
+             (:file "macros-stdlib-core-tests")
+             (:file "macros-stdlib-tests")
+             (:file "macros-stdlib-bind-error-tests")
+             (:file "macros-stdlib-sequence-map-tests")
+             (:file "macros-stdlib-list-set-tests")
+             (:file "macros-stdlib-io-tests")
+             (:file "macros-filesystem-tests")
+              (:file "macros-compat-array-tests")   ; array compat wrappers
+              (:file "macros-compat-tests")         ; remaining ANSI CL compat macros
+               (:file "macros-plist-tests")    ; getf/remf/%plist-put
+              (:file "macros-list-compat-tests") ; subst/vector/member-if/maphash
+               (:file "macros-hof-tests")      ; HOF macro expansions split from stdlib
+                (:file "predicate-tests")
+                (:file "macros-mutation-tests")
+                (:file "macros-sequence-tests")
+              ))
        (:module "type"
         :serial t
         :components
@@ -290,21 +406,34 @@
          (:file "typeclass-tests")
          (:file "printer-tests")
          (:file "parser-tests")))
-       (:module "compile"
-        :serial t
-        :components
-        ((:module "ir"
-          :serial t
-          :components
-          ((:file "ir-types-tests")
-           (:file "ir-printer-tests")))
-         (:file "cps-tests")
-         (:file "builtin-registry-tests")
-         (:file "closure-tests")
-         (:file "context-tests")
-         (:file "codegen-tests")
-         (:file "phase2-handler-tests")
-         (:file "codegen-phase2-tests")))
+        (:module "compile"
+         :serial t
+         :components
+         ((:module "ir"
+           :serial t
+           :components
+           ((:file "ir-types-tests")
+            (:file "ir-printer-tests")))
+            (:file "cps-tests")
+            (:file "cps-ast-tests")
+              (:file "builtin-registry-tests")
+             (:file "builtin-registry-data-tests")
+             (:file "closure-tests")
+           (:file "context-tests")
+             (:file "codegen-tests")
+             (:file "codegen-phase2-helpers")
+             (:file "codegen-core-tests")
+             (:file "codegen-functions-tests")
+              (:file "codegen-runtime-tests")
+               (:file "codegen-clos-tests")
+              (:file "codegen-control-tests")
+              (:file "codegen-io-tests")
+              (:file "codegen-hash-table-tests")
+              (:file "codegen-slot-predicates-tests")
+              (:file "codegen-string-kwargs-tests")
+             (:file "phase2-handler-tests")
+             (:file "codegen-phase2-tests")
+             (:file "stdlib-source-tests")))
        (:module "optimize"
         :serial t
         :components

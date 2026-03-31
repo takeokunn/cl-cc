@@ -122,27 +122,29 @@ Supports :test (default #'eql), :key, :from-end."
                ,@(when test-not `(:test-not ,test-not)))
       `(remove ,item ,seq)))
 
+(defun %delete-if-key-expand (pred seq key keep-when-true-p)
+  (let ((fn-var (gensym "FN"))
+        (kfn (gensym "KEY"))
+        (x (gensym "X"))
+        (acc (gensym "ACC")))
+    `(let ((,fn-var ,pred) (,kfn ,key) (,acc nil))
+       (dolist (,x ,seq (nreverse ,acc))
+         (when ,(if keep-when-true-p
+                    `(funcall ,fn-var (funcall ,kfn ,x))
+                    `(not (funcall ,fn-var (funcall ,kfn ,x))))
+           (setq ,acc (cons ,x ,acc)))))))
+
 ;; DELETE-IF / DELETE-IF-NOT (FR-504) — same as remove-if/-not (with :key support)
 (our-defmacro delete-if (pred seq &key key)
   "Remove all elements for which PRED is true (same as remove-if)."
   (if key
-      (let ((fn-var (gensym "FN")) (kfn (gensym "KEY"))
-            (x (gensym "X")) (acc (gensym "ACC")))
-        `(let ((,fn-var ,pred) (,kfn ,key) (,acc nil))
-           (dolist (,x ,seq (nreverse ,acc))
-             (unless (funcall ,fn-var (funcall ,kfn ,x))
-               (setq ,acc (cons ,x ,acc))))))
+      (%delete-if-key-expand pred seq key nil)
       (%filter-list-expand 'unless pred seq)))
 
 (our-defmacro delete-if-not (pred seq &key key)
   "Remove all elements for which PRED is false (same as remove-if-not)."
   (if key
-      (let ((fn-var (gensym "FN")) (kfn (gensym "KEY"))
-            (x (gensym "X")) (acc (gensym "ACC")))
-        `(let ((,fn-var ,pred) (,kfn ,key) (,acc nil))
-           (dolist (,x ,seq (nreverse ,acc))
-             (when (funcall ,fn-var (funcall ,kfn ,x))
-               (setq ,acc (cons ,x ,acc))))))
+      (%delete-if-key-expand pred seq key t)
       (%filter-list-expand 'when pred seq)))
 
 ;; DELETE-DUPLICATES (FR-504) — delegates to remove-duplicates with keyword support
@@ -188,26 +190,34 @@ Supports :test (default #'eql), :key, :from-end."
          (dolist (,x ,seq (nreverse ,acc))
            (setq ,acc (cons (if (funcall ,fn-var ,x) ,match ,else) ,acc)))))))
 
+(defun %substitute-if-key-expand (new pred seq key match-form else-form)
+  (let ((new-var (gensym "NEW"))
+        (fn-var (gensym "FN"))
+        (kfn-var (gensym "KEY"))
+        (x (gensym "X"))
+        (acc (gensym "ACC")))
+    `(let ((,new-var ,new)
+           (,fn-var ,pred)
+           (,kfn-var ,key)
+           (,acc nil))
+       (dolist (,x ,seq (nreverse ,acc))
+         (setq ,acc (cons (if (funcall ,fn-var (funcall ,kfn-var ,x))
+                              ,match-form
+                              ,else-form)
+                          ,acc))))))
+
 ;; SUBSTITUTE-IF (FR-505) — replace where pred is true
 (our-defmacro substitute-if (new pred seq &key key)
   "Replace elements for which PRED is true with NEW."
   (if key
-      (let ((new-var (gensym "NEW")) (fn-var (gensym "FN"))
-            (kfn-var (gensym "KEY")) (x (gensym "X")) (acc (gensym "ACC")))
-        `(let ((,new-var ,new) (,fn-var ,pred) (,kfn-var ,key) (,acc nil))
-           (dolist (,x ,seq (nreverse ,acc))
-             (setq ,acc (cons (if (funcall ,fn-var (funcall ,kfn-var ,x)) ,new-var ,x) ,acc)))))
+      (%substitute-if-key-expand new pred seq key 'new-var 'x)
       (%substitute-if-expand new pred seq 'new-var 'x)))
 
 ;; SUBSTITUTE-IF-NOT (FR-505) — replace where pred is false
 (our-defmacro substitute-if-not (new pred seq &key key)
   "Replace elements for which PRED is false with NEW."
   (if key
-      (let ((new-var (gensym "NEW")) (fn-var (gensym "FN"))
-            (kfn-var (gensym "KEY")) (x (gensym "X")) (acc (gensym "ACC")))
-        `(let ((,new-var ,new) (,fn-var ,pred) (,kfn-var ,key) (,acc nil))
-           (dolist (,x ,seq (nreverse ,acc))
-             (setq ,acc (cons (if (funcall ,fn-var (funcall ,kfn-var ,x)) ,x ,new-var) ,acc)))))
+      (%substitute-if-key-expand new pred seq key 'x 'new-var)
       (%substitute-if-expand new pred seq 'x 'new-var)))
 
 ;; NSUBSTITUTE / NSUBSTITUTE-IF / NSUBSTITUTE-IF-NOT (FR-505): same as substitute (non-destructive)
@@ -330,7 +340,69 @@ Supports :test (default #'eql), :key, :from-end."
          (when ,l2
            (setq ,acc (cons (car ,l2) ,acc))
            (setq ,l2 (cdr ,l2))
-           (go ,lbl3))
-         ,end)
-       (nreverse ,acc))))
+            (go ,lbl3))
+          ,end)
+        (nreverse ,acc))))
 
+;;; LAST/BUTLAST/SEARCH (FR-500 adjacent): sequence tail and subsequence helpers
+
+(our-defmacro last (list &optional (n 1))
+  "Return the last N conses of LIST."
+  (let ((lst (gensym "LST"))
+        (nv  (gensym "N"))
+        (len (gensym "LEN")))
+    `(let* ((,lst ,list)
+            (,nv  ,n)
+            (,len (length ,lst)))
+       (nthcdr (max 0 (- ,len ,nv)) ,lst))))
+
+(our-defmacro butlast (list &optional (n 1))
+  "Return a copy of LIST without the last N conses."
+  (let ((lst (gensym "LST"))
+        (nv  (gensym "N"))
+        (len (gensym "LEN")))
+    `(let* ((,lst ,list)
+            (,nv  ,n)
+            (,len (length ,lst)))
+       (when (> ,len ,nv)
+         (subseq ,lst 0 (- ,len ,nv))))))
+
+(our-defmacro nbutlast (list &optional (n 1))
+  "Destructively trim the last N conses from LIST (delegates to butlast in cl-cc)."
+  `(butlast ,list ,n))
+
+(our-defmacro search (pattern sequence &key (test '#'eql) (start1 0) end1 (start2 0) end2 key)
+  "Search for PATTERN as a subsequence in SEQUENCE (from-end not supported)."
+  (let ((pat   (gensym "PAT"))
+        (seq   (gensym "SEQ"))
+        (fn    (gensym "FN"))
+        (kfn   (gensym "KFN"))
+        (s1    (gensym "S1"))
+        (e1    (gensym "E1"))
+        (s2    (gensym "S2"))
+        (e2    (gensym "E2"))
+        (plen  (gensym "PLEN"))
+        (i     (gensym "I"))
+        (j     (gensym "J"))
+        (match (gensym "MATCH")))
+    `(let* ((,pat  ,pattern)
+            (,seq  ,sequence)
+            (,fn   ,test)
+            (,kfn  ,(if key key `#'identity))
+            (,s1   ,start1)
+            (,e1   ,(or end1 `(length ,pat)))
+            (,s2   ,start2)
+            (,e2   ,(or end2 `(length ,seq)))
+            (,plen (- ,e1 ,s1)))
+       (when (<= ,plen (- ,e2 ,s2))
+         (block found
+           (do ((,i ,s2 (+ ,i 1)))
+               ((> (+ ,i ,plen) ,e2) nil)
+             (let ((,match t))
+               (do ((,j 0 (+ ,j 1)))
+                   ((or (not ,match) (= ,j ,plen)))
+                 (unless (funcall ,fn
+                                  (funcall ,kfn (elt ,pat (+ ,s1 ,j)))
+                                  (funcall ,kfn (elt ,seq (+ ,i ,j))))
+                   (setq ,match nil)))
+               (when ,match (return-from found ,i)))))))))

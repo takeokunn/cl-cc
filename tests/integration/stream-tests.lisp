@@ -198,9 +198,9 @@
            (with-open-file (s tmpfile :direction :output :if-exists :supersede)
              (write-string "(defun load-test-fn-42 (x) (* x 3))" s))
            ;; Use REPL pipeline: load defines the function, then call it
-           (reset-repl-state)
-           (run-string-repl (format nil "(load ~S)" tmpfile))
-           (let ((result (run-string-repl "(load-test-fn-42 14)")))
-             (assert-true (eql result 42))))
-      (ignore-errors (delete-file tmpfile))
-      (reset-repl-state))))
+            (with-reset-repl-state
+              (run-string-repl (format nil "(load ~S)" tmpfile))
+              (let ((result (run-string-repl "(load-test-fn-42 14)")))
+                (assert-true (eql result 42)))))
+       (ignore-errors (delete-file tmpfile))
+       (reset-repl-state))))

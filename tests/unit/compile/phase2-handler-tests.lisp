@@ -16,31 +16,6 @@
   :description "Phase 2 builtin handler dispatch (AST-introspecting builtins)"
   :parent cl-cc-suite)
 
-;;; ── Local helpers ─────────────────────────────────────────────────────────
-
-(defun codegen-count-inst (ctx type)
-  "Count instructions of TYPE emitted into CTX."
-  (count-if (lambda (i) (typep i type)) (codegen-instructions ctx)))
-
-(defun make-call (func &rest arg-forms)
-  "Build an ast-call node. FUNC is a symbol; ARG-FORMS are already-built AST nodes."
-  (make-ast-call :func func :args arg-forms))
-
-(defun make-int (n)    (make-ast-int :value n))
-(defun make-var (s)    (make-ast-var :name s))
-(defun make-quoted (v) (make-ast-quote :value v))
-(defun make-fn (name)  (make-ast-function :name name))
-
-(defun make-ctx-with-vars (&rest names)
-  "Create a codegen ctx with NAMES pre-bound to fresh registers.
-Each name maps to its own unique register so compile-ast on ast-var
-nodes referring to these names succeeds without signaling 'unbound variable'."
-  (let ((ctx (make-codegen-ctx)))
-    (dolist (name names)
-      (let ((reg (cl-cc::make-register ctx)))
-        (push (cons name reg) (cl-cc::ctx-env ctx))))
-    ctx))
-
 ;;; ── MAKE-HASH-TABLE ───────────────────────────────────────────────────────
 
 (deftest-each phase2-make-hash-table-variants
@@ -238,159 +213,12 @@ nodes referring to these names succeeds without signaling 'unbound variable'."
 
 ;;; ── CALL-NEXT-METHOD ─────────────────────────────────────────────────────
 
-(deftest phase2-call-next-method-no-args
-  "(call-next-method) with no args emits vm-call-next-method with nil args-reg"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'call-next-method) ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-call-next-method)))
-      (assert-true inst)
-      (assert-true (null (cl-cc::vm-call-next-method-args-reg inst))))))
-
-(deftest phase2-call-next-method-with-args
-  "(call-next-method x) with args emits vm-call-next-method with args-reg set"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'call-next-method (make-int 42)) ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-call-next-method)))
-      (assert-true inst)
-      (assert-true (cl-cc::vm-call-next-method-args-reg inst)))))
-
-(deftest phase2-call-next-method-args-is-cons-list
-  "(call-next-method x y) builds cons list for args"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'call-next-method (make-int 1) (make-int 2)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-cons))))
-
-;;; ── WRITE-STRING ─────────────────────────────────────────────────────────
-
-(deftest phase2-write-string-one-arg-emits-princ
-  "(write-string str) with no stream emits vm-princ"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'write-string (make-quoted "hello")) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-princ))))
-
-(deftest phase2-write-string-two-args-emits-stream-write
-  "(write-string str stream) emits vm-stream-write-string-inst"
-  (let ((ctx (make-ctx-with-vars 'stream)))
-    (compile-ast (make-call 'write-string (make-quoted "hello") (make-var 'stream)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-stream-write-string-inst))))
-
-;;; ── FORMAT ────────────────────────────────────────────────────────────────
-
-(deftest phase2-format-destinations
-  "format emits correct instructions for nil, t, and stream destinations"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'format
-                            (make-var 'nil)
-                            (make-quoted "~A")
-                            (make-int 42))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-format-inst)))
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'format
-                            (make-var 'nil)
-                            (make-quoted "~A")
-                            (make-int 1))
-                 ctx)
-    (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-princ))))
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'format
-                            (make-var 't)
-                            (make-quoted "~A")
-                            (make-int 1))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-format-inst))
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-princ)))
-  (let ((ctx (make-ctx-with-vars 'out-stream)))
-    (compile-ast (make-call 'format
-                            (make-var 'out-stream)
-                            (make-quoted "hello")
-                            (make-int 1))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-format-inst))
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-stream-write-string-inst))))
-
-(deftest phase2-format-requires-two-args
-  "(format nil) with only 1 arg falls through (handler guard: >= 2 args)"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'format (make-var 'nil)) ctx)
-    (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-format-inst)))))
-
-;;; ── OPEN ──────────────────────────────────────────────────────────────────
-
-(deftest phase2-open-variants
-  "open emits vm-open-file with correct direction for all call forms"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'open (make-quoted "/tmp/f")) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-open-file)))
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'open (make-quoted "/tmp/f")) ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-open-file)))
-      (assert-eq :input (cl-cc::vm-open-file-direction inst))))
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'open
-                            (make-quoted "/tmp/f")
-                            (make-var :direction)
-                            (make-var :output))
-                 ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-open-file)))
-      (assert-eq :output (cl-cc::vm-open-file-direction inst)))))
-
-;;; ── PEEK-CHAR ────────────────────────────────────────────────────────────
-
-(deftest phase2-peek-char-arities
-  "peek-char emits vm-peek-char for both 1-arg and 2-arg forms"
-  (let ((ctx (make-ctx-with-vars 'handle)))
-    (compile-ast (make-call 'peek-char (make-var 'handle)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-peek-char)))
-  (let ((ctx (make-ctx-with-vars 'handle)))
-    (compile-ast (make-call 'peek-char (make-var 'nil) (make-var 'handle)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-peek-char))))
-
-;;; ── MAKE-STRING-INPUT-STREAM ─────────────────────────────────────────────
-
-(deftest phase2-make-string-input-stream-emits-instruction
-  "(make-string-input-stream str) emits vm-make-string-stream"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'make-string-input-stream (make-quoted "hello")) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-string-stream))))
-
-(deftest phase2-make-string-input-stream-direction
-  "(make-string-input-stream str) sets direction to :input"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'make-string-input-stream (make-quoted "hi")) ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-make-string-stream)))
-      (assert-eq :input (cl-cc::vm-make-string-stream-direction inst)))))
-
-;;; ── CONCATENATE ──────────────────────────────────────────────────────────
-
-(deftest phase2-concatenate-variants
-  "concatenate emits vm-concatenate only for quoted 'string type"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'concatenate
-                            (make-quoted 'string)
-                            (make-quoted "hello")
-                            (make-quoted " world"))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-concatenate)))
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'concatenate
-                            (make-quoted 'list)
-                            (make-quoted "a")
-                            (make-quoted "b"))
-                 ctx)
-    (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-concatenate))))
-  (let ((ctx (make-ctx-with-vars 'string)))
-    (compile-ast (make-call 'concatenate
-                            (make-var 'string)   ; NOT ast-quote
-                            (make-quoted "a")
-                            (make-quoted "b"))
-                 ctx)
-    (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-concatenate)))))
+;;; ── I/O AND STRING HANDLERS MOVED TO codegen-io-tests ───────────────────────
 
 ;;; ── Handler table completeness ────────────────────────────────────────────
 
-(deftest phase2-all-17-handlers-registered
-  "All 17 Phase 2 handlers are in *phase2-builtin-handlers*"
+(deftest phase2-all-handlers-registered
+  "All Phase 2 handlers are in *phase2-builtin-handlers*"
   (let ((expected '("MAKE-HASH-TABLE" "GETHASH" "MAPHASH"
                     "MAKE-ARRAY" "MAKE-ADJUSTABLE-VECTOR"
                     "ARRAY-ROW-MAJOR-INDEX" "ENCODE-UNIVERSAL-TIME"

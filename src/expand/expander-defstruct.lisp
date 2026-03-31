@@ -66,8 +66,10 @@ With BOA-ARGS: uses positional parameters.  Without: uses keyword parameters."
 (defun %defstruct-typed-constructor (ctor-name struct-name struct-type boa-args all-slots)
   "Generate a constructor for :type list or :type vector defstruct.
 The first element is the type tag (struct name), followed by slot values."
-  (let* ((slot-count (length all-slots))
-         (total-len (1+ slot-count)))  ;; tag + slots
+  (labels ((emit-container (slot-values)
+             (if (eq struct-type 'list)
+                 `(list ',struct-name ,@slot-values)
+                 `(vector ',struct-name ,@slot-values))))
     (if boa-args
         ;; BOA constructor
         (let* ((parts (%defstruct-extract-boa-parts boa-args))
@@ -82,26 +84,20 @@ The first element is the type tag (struct name), followed by slot values."
                                           (first s)
                                           (second s)))
                                     all-slots)))
-          (if (eq struct-type 'list)
-              `(defun ,ctor-name ,normal-params
-                 (let* ,aux-lets
-                   (list ',struct-name ,@slot-values)))
-              `(defun ,ctor-name ,normal-params
-                 (let* ,aux-lets
-                   (vector ',struct-name ,@slot-values)))))
+          `(defun ,ctor-name ,normal-params
+             (let* ,aux-lets
+               ,(emit-container slot-values))))
         ;; Keyword constructor
         (let ((key-params (mapcar (lambda (s) (list (first s) (second s))) all-slots))
               (slot-values (mapcar #'first all-slots)))
-          (if (eq struct-type 'list)
-              `(defun ,ctor-name (&key ,@key-params)
-                 (list ',struct-name ,@slot-values))
-              `(defun ,ctor-name (&key ,@key-params)
-                 (vector ',struct-name ,@slot-values)))))))
+          `(defun ,ctor-name (&key ,@key-params)
+             ,(emit-container slot-values))))))
 
-(defun %defstruct-typed-accessors (struct-name struct-type conc-name all-slots)
+(defun %defstruct-typed-accessors (struct-type conc-name all-slots)
   "Generate accessor functions for :type list or :type vector defstruct.
 Each slot is at offset (1+ index) since position 0 is the type tag."
-  (loop for (slot-name default read-only-p) in all-slots
+  (loop for slot in all-slots
+        for slot-name = (first slot)
         for idx from 1
         for acc-name = (if conc-name
                            (intern (concatenate 'string (symbol-name conc-name) (symbol-name slot-name)))
@@ -187,7 +183,7 @@ Supported options:
         ;; ── :type list or :type vector expansion (FR-546) ──
         (let* ((ctor-form (when ctor-name
                             (%defstruct-typed-constructor ctor-name name struct-type boa-args all-slots)))
-               (accessor-forms (%defstruct-typed-accessors name struct-type conc-name all-slots))
+                (accessor-forms (%defstruct-typed-accessors struct-type conc-name all-slots))
                (pred-form (when pred-name
                             (%defstruct-typed-predicate pred-name name struct-type (length all-slots)))))
           `(progn ,@(when ctor-form (list ctor-form))
