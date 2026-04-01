@@ -414,6 +414,16 @@
           (setf (gethash dst reg->class) class-id))))
     reg->class))
 
+(defun egraph-class-has-op-p (eg class-id op)
+  (let ((cls (gethash (egraph-find eg class-id) (eg-classes eg))))
+    (and cls
+         (some (lambda (node) (eq (en-op node) op)) (ec-nodes cls)))))
+
+(defun egraph-class-const-value (eg class-id)
+  (let ((canon (egraph-find eg class-id)))
+    (when (egraph-class-has-op-p eg canon 'const)
+      (ec-data (gethash canon (eg-classes eg))))))
+
 ;;; ─── E-Graph Statistics ──────────────────────────────────────────────────
 
 (defun egraph-stats (eg)

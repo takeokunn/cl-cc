@@ -42,8 +42,8 @@
   "Parse SPEC into a type-node."
   (typecase spec
     (null   type-null)
-    (symbol (if (string= (symbol-name spec) "?")
-                (make-type-error :message "unknown")   ; ? → gradual typing hole
+    (symbol (if (member (symbol-name spec) '("?" "_") :test #'string=)
+                (make-type-error :message "unknown")   ; ? / _ → gradual typing hole
                 (parse-primitive-type spec)))
     (cons   (parse-compound-type spec))
     (t      (type-parse-error "Invalid type specifier: ~S" spec))))
@@ -116,17 +116,31 @@
        (make-type-app :fun (make-type-primitive :name 'vector)
                       :arg (parse-type-specifier (first args))))
       ((array simple-array)
-       (unless (= (length args) 1) (type-parse-error "array requires 1 type"))
-       (make-type-app :fun (make-type-primitive :name 'array)
-                      :arg (parse-type-specifier (first args))))
+        (unless (= (length args) 1) (type-parse-error "array requires 1 type"))
+        (make-type-app :fun (make-type-primitive :name 'array)
+                       :arg (parse-type-specifier (first args))))
+
+       ;; (option T) → (or null T) — nullable/optional type sugar
+       ((option)
+        (unless (= (length args) 1)
+          (type-parse-error "option requires exactly 1 type"))
+        (make-type-union (list type-null (parse-type-specifier (first args)))
+                         :constructor-name head))
 
       (otherwise
-       (parse-compound-type-extended head args)))))
+        (parse-compound-type-extended head args)))))
 
 (defun parse-compound-type-extended (head args)
   "Handle all symbol-named compound forms using string comparison for package-independence."
   (let ((hn (and (symbolp head) (symbol-name head))))
     (cond
+       ;; (option T) → (or null T) — package-independent nullable sugar
+       ((and hn (string= hn "OPTION"))
+        (unless (= (length args) 1)
+          (type-parse-error "option requires exactly 1 type"))
+        (make-type-union (list type-null (parse-type-specifier (first args)))
+                         :constructor-name head))
+
       ;; ─── Arrow forms ──────────────────────────────────────────────────
       ((and hn (string= hn "->"))   (parse-arrow-type args :omega))
       ((and hn (string= hn "->1"))  (parse-arrow-type args :one))

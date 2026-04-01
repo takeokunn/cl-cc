@@ -270,10 +270,9 @@
    Returns an optimized instruction list.
 
    Algorithm:
-     1. Add instructions to e-graph (building reg→class mapping)
-     2. Saturate with RULES until fixed-point or resource limit
-     3. Extract optimal representation for each output register
-     4. Reconstruct VM instruction list from extracted terms
+      1. Add instructions to e-graph (building reg→class mapping)
+      2. Saturate with RULES until fixed-point or resource limit
+      3. Lower destination classes proven equal to constants or register aliases
 
    This is NOT yet wired as the main optimizer (Phase 2.6 task).
    Currently callable for testing and benchmarking."
@@ -281,13 +280,29 @@
   (when (null instructions) (return-from optimize-with-egraph instructions))
   (let* ((eg      (make-e-graph))
          (reg-map (egraph-add-instructions eg instructions)))
-    (declare (ignore reg-map))
     ;; Saturate
     (egraph-saturate eg rules
                      :limit saturation-limit
                      :fuel saturation-fuel)
     (egraph-rebuild eg)
-    ;; For now return original instructions (extraction-to-VM lowering
-    ;; is Phase 2.5 — requires full VM instruction reconstruction from e-graph terms)
-    ;; TODO Phase 2.5: extract optimal terms and reconstruct vm-instructions
-    instructions))
+    (let ((class->regs (make-hash-table :test #'equal)))
+      (maphash (lambda (reg class-id)
+                 (push reg (gethash (egraph-find eg class-id) class->regs)))
+               reg-map)
+      (labels ((rewrite (inst)
+                 (let ((dst (ignore-errors (vm-dst inst))))
+                   (cond
+                     ((null dst)
+                      inst)
+                     ((egraph-class-has-op-p eg (gethash dst reg-map) 'const)
+                      (make-vm-const :dst dst
+                                     :value (egraph-class-const-value eg (gethash dst reg-map))))
+                     (t
+                      (let* ((class-id (gethash dst reg-map))
+                             (canon (and class-id (egraph-find eg class-id)))
+                             (regs (and canon (gethash canon class->regs)))
+                             (src (find-if (lambda (reg) (not (eq reg dst))) regs)))
+                        (if src
+                            (make-vm-move :dst dst :src src)
+                            inst)))))))
+        (mapcar #'rewrite instructions)))))

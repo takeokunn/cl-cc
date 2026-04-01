@@ -179,7 +179,11 @@
      `(-> ,@(mapcar #'unparse-type (type-arrow-params ty))
           ,(unparse-type (type-arrow-return ty))))
     (type-product `(values ,@(mapcar #'unparse-type (type-product-elems ty))))
-    (type-union   `(or  ,@(mapcar #'unparse-type (type-union-types ty))))
+    (type-union
+     (let ((name (type-union-constructor-name ty)))
+       (if name
+           `(,name ,@(mapcar #'unparse-type (type-constructor-args ty)))
+           `(or ,@(mapcar #'unparse-type (type-union-types ty))))))
     (type-intersection `(and ,@(mapcar #'unparse-type (type-intersection-types ty))))
     (type-forall
      `(forall ,(type-var-name (type-forall-var ty))
@@ -198,13 +202,23 @@
 (defun looks-like-type-specifier-p (spec)
   "True iff SPEC looks like it might be a type specifier.
 Uses string= for non-CL symbols to ensure package-independent matching."
-  (or (and (symbolp spec)
-           (let ((sn (symbol-name spec)))
-             (or (member spec '(fixnum string boolean symbol cons null t float character char))
-                 (member sn '("INT" "BOOL" "TOP" "?") :test #'string=)
-                 ;; Check user-defined type aliases registered via deftype
-                 (lookup-type-alias spec))))
-      (and (consp spec)
-           (member (car spec) '(or and function values cons list vector array
-                                -> ->0 ->1 forall ∀ => exists mu refine
-                                record variant)))))
+  (labels ((symbol-name= (sym names)
+             (and (symbolp sym)
+                  (member (symbol-name sym) names :test #'string=))))
+    (or (and (symbolp spec)
+             (let ((sn (symbol-name spec)))
+               (or (symbol-name= spec '("FIXNUM" "STRING" "BOOLEAN" "SYMBOL"
+                                        "CONS" "NULL" "T" "FLOAT"
+                                        "CHARACTER" "CHAR"))
+                   (member sn '("INT" "BOOL" "TOP" "?") :test #'string=)
+                   ;; Check user-defined type aliases registered via deftype
+                   (lookup-type-alias spec))))
+        (and (consp spec)
+             (let ((head (car spec)))
+               (or (symbol-name= head '("OR" "AND" "FUNCTION" "VALUES" "CONS"
+                                        "LIST" "VECTOR" "ARRAY" "OPTION"
+                                        "->" "->0" "->1" "FORALL" "∀"
+                                        "=>" "EXISTS" "MU" "REFINE"
+                                        "RECORD" "VARIANT"))
+                   (and (symbolp head)
+                        (char= (char (symbol-name head) 0) #\!))))))))

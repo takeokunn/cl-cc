@@ -17,6 +17,10 @@
 (defmethod ast-to-sexp ((node ast-var))
   (ast-var-name node))
 
+(defmethod ast-to-sexp ((node ast-hole))
+  (declare (ignore node))
+  (intern "_" *package*))
+
 (defmethod ast-to-sexp ((node ast-binop))
   (list (ast-binop-op node)
         (ast-to-sexp (ast-binop-lhs node))

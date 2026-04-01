@@ -84,6 +84,10 @@
            (values (instantiate scheme) nil)
            (error 'unbound-variable-error :name (cl-cc:ast-var-name ast)))))
 
+    (cl-cc::ast-hole
+     (error 'typed-hole-error
+            :message (%typed-hole-message env)))
+
     (cl-cc:ast-binop  (infer-binop  ast env))
     (cl-cc:ast-if     (infer-if     ast env))
     (cl-cc:ast-let    (infer-let    ast env))
@@ -198,6 +202,25 @@
 
     ;; Unknown AST node — gradual typing fallback.
     (t (values +type-unknown+ nil))))
+
+(defun %typed-hole-message (env)
+  "Build a typed-hole error message with available in-scope variables."
+  (let ((bindings (and (type-env-p env)
+                       (type-env-bindings env))))
+    (if bindings
+        (with-output-to-string (out)
+          (write-string "Typed hole '_' cannot be inferred; fill the hole with an expression. Available: " out)
+          (loop for entry in bindings
+                for first-p = t then nil
+                do (unless first-p (write-string ", " out))
+                   (let* ((name (car entry))
+                          (scheme (cdr entry))
+                          (ty (if (type-scheme-p scheme)
+                                  (type-scheme-type scheme)
+                                  scheme)))
+                     (format out "~A :: ~A" name (type-to-string ty))))
+          (write-char #\. out))
+        "Typed hole '_' cannot be inferred; fill the hole with an expression. Available: none.")))
 
 (defun infer-binop (ast env)
   "Infer type for binary operations."
@@ -355,7 +378,6 @@
 (defun check-qualified-constraints (func-type subst env)
   "If FUNC-TYPE is a qualified type (Eq a) => ..., verify each constraint
    is satisfied for the instantiated type argument."
-  (declare (ignore env))
   (when (typep func-type 'type-qualified)
     (dolist (constraint (type-qualified-constraints func-type))
       (let* ((class-name (type-class-constraint-class-name constraint))
@@ -364,6 +386,8 @@
                         subst)))
         (unless (or (typep type-arg 'type-unknown)
                     (typep type-arg 'type-variable)
+                    (and (type-env-p env)
+                         (dict-env-lookup class-name type-arg env))
                     (has-typeclass-instance-p class-name type-arg))
           (error 'type-inference-error
                  :message (format nil "No instance of ~A for ~A"
@@ -454,6 +478,9 @@
   (:report (lambda (condition stream)
              (format stream "Type inference error: ~A"
                      (type-inference-error-message condition)))))
+
+(define-condition typed-hole-error (type-inference-error)
+  ())
 
 (define-condition unbound-variable-error (type-inference-error)
   ((name :initarg :name :initform nil :reader unbound-variable-error-name))

@@ -164,6 +164,33 @@
   (let ((result (cl-cc::optimize-with-egraph nil)))
     (assert-null result)))
 
+(defun egraph-find-dst-inst (insts dst)
+  (find dst insts
+        :key (lambda (inst) (ignore-errors (cl-cc::vm-dst inst)))
+        :test #'eq))
+
+(deftest optimize-with-egraph-lowers-const
+  "A class proven equal to a constant is rewritten as vm-const."
+  (let* ((insts (list (cl-cc:make-vm-const :dst :r0 :value 7)
+                      (cl-cc:make-vm-sub   :dst :r1 :lhs :r0 :rhs :r0)
+                      (cl-cc:make-vm-ret   :reg :r1)))
+         (out (cl-cc::optimize-with-egraph insts))
+         (r1  (egraph-find-dst-inst out :r1)))
+    (assert-true (cl-cc::vm-const-p r1))
+    (assert-equal 0 (cl-cc::vm-value r1))))
+
+(deftest optimize-with-egraph-lowers-alias
+  "A class proven equal to another register is rewritten as vm-move."
+  (let* ((insts (list (cl-cc:make-vm-const :dst :r0 :value 0)
+                      (cl-cc:make-vm-const :dst :r1 :value 5)
+                      (cl-cc:make-vm-cons  :dst :r2 :car-src :r1 :cdr-src :r0)
+                      (cl-cc:make-vm-cons  :dst :r3 :car-src :r1 :cdr-src :r0)
+                      (cl-cc:make-vm-ret   :reg :r3)))
+         (out (cl-cc::optimize-with-egraph insts))
+         (r3  (egraph-find-dst-inst out :r3)))
+    (assert-true (cl-cc::vm-move-p r3))
+    (assert-equal :r2 (cl-cc::vm-src r3))))
+
 ;;; ─── Cost Model ──────────────────────────────────────────────────────────
 
 (deftest-each egraph-cost-model-cases

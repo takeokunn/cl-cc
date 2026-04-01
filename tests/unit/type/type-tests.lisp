@@ -228,6 +228,14 @@ alias for a type-error sentinel used for error recovery."
     (assert-signals unbound-variable-error
       (infer-with-env ast))))
 
+(deftest infer-typed-hole-error
+  "Typed hole '_' in an expression signals a typed-hole inference error."
+  (reset-type-vars!)
+  (let* ((ast (lower-sexp-to-ast '(+ x _)))
+         (env (type-env-extend 'x (type-to-scheme type-int) (type-env-empty))))
+    (assert-signals cl-cc/type::typed-hole-error
+      (infer ast env))))
+
 (deftest infer-let-binding
   "Let bindings infer types correctly: simple and multi-binding with binop."
   (reset-type-vars!)

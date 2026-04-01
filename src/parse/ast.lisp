@@ -40,6 +40,9 @@
   "Variable reference AST node."
   (name nil))
 
+(defstruct (ast-hole (:include ast-node))
+  "Expression-level typed hole AST node for source symbol _.")
+
 (defstruct (ast-binop (:include ast-node))
   "Binary operation AST node."
   (op nil)
@@ -260,7 +263,7 @@
 All structural knowledge about AST shapes lives here."
   (typecase node
     ;; Leaves: no children
-    ((or ast-int ast-var ast-quote ast-function ast-go) nil)
+    ((or ast-int ast-var ast-hole ast-quote ast-function ast-go) nil)
     ;; Binary operation
     (ast-binop (list (ast-binop-lhs node) (ast-binop-rhs node)))
     ;; Conditional

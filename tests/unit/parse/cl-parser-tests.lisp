@@ -234,6 +234,11 @@
     (assert-true (cl-cc::ast-var-p node))
     (assert-eq 'x (cl-cc::ast-var-name node))))
 
+(deftest lower-underscore-produces-ast-hole
+  "lower-sexp-to-ast: '_' lowers to expression-level typed hole ast-hole."
+  (let ((node (lower '_)))
+    (assert-true (cl-cc::ast-hole-p node))))
+
 (deftest lower-nary-arithmetic-folds-left
   "lower-sexp-to-ast: n-ary arithmetic folds into nested binary AST."
   (let ((node (lower '(+ 1 2 3))))
@@ -490,6 +495,7 @@
   ;; Atoms
   (assert-= 42 (ast-roundtrip 42))
   (assert-eq 'x (ast-roundtrip 'x))
+  (assert-string= "_" (symbol-name (ast-roundtrip '_)))
   ;; Control flow
   (let ((result (ast-roundtrip '(if x 1 2))))
     (assert-eq 'if (first result))
@@ -1004,6 +1010,7 @@
           ("nil"         "nil"                    #'cl-cc::ast-quote-p)
           ("t"           "t"                      #'cl-cc::ast-quote-p)
           ("symbol"      "foo"                    #'cl-cc::ast-var-p)
+          ("hole"        "_"                      #'cl-cc::ast-hole-p)
           ("if"          "(if x 1 2)"             #'cl-cc::ast-if-p)
           ("let"         "(let ((x 1)) x)"        #'cl-cc::ast-let-p)
           ("lambda"      "(lambda (x) x)"         #'cl-cc::ast-lambda-p)

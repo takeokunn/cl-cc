@@ -195,6 +195,27 @@
     (assert-signals cl-cc/type:type-mismatch-error
       (infer-with-env ast))))
 
+(deftest infer-binop-typed-hole-in-typed-context
+  "infer (+ x _) in a typed context signals typed-hole-error."
+  (reset-type-vars!)
+  (let* ((env (type-env-extend 'x (type-to-scheme cl-cc/type:type-int)
+                               (type-env-empty)))
+         (ast (cl-cc:lower-sexp-to-ast '(+ x _))))
+    (assert-signals cl-cc/type::typed-hole-error
+      (cl-cc/type:infer ast env))))
+
+(deftest infer-binop-typed-hole-includes-context
+  "Typed hole errors include the in-scope typed variable context."
+  (reset-type-vars!)
+  (let* ((env (type-env-extend 'x (type-to-scheme cl-cc/type:type-int)
+                               (type-env-empty)))
+         (ast (cl-cc:lower-sexp-to-ast '(+ x _))))
+    (handler-case
+        (cl-cc/type:infer ast env)
+      (cl-cc/type::typed-hole-error (e)
+        (let ((message (cl-cc/type:type-inference-error-message e)))
+          (assert-true (search "Available: x :: fixnum" message)))))))
+
 ;;; ─── infer: ast-setq ─────────────────────────────────────────────────────
 
 (deftest infer-setq-returns-value-type
@@ -352,6 +373,19 @@
     (cl-cc/type:register-effect-signature 'http-get-xyz custom-row)
     (let ((result (cl-cc/type:lookup-effect-signature 'http-get-xyz)))
       (assert-eq custom-row result))))
+
+(deftest infer-qualified-constraints-use-dict-env
+  "check-qualified-constraints accepts a local dict-env binding without a global instance."
+  (let* ((env0 (type-env-empty))
+         (env1 (cl-cc/type:dict-env-extend 'local-num type-int '((plus . #'+)) env0))
+         (constraint (cl-cc/type:make-type-class-constraint
+                      :class-name 'local-num
+                      :type-arg type-int))
+         (q (cl-cc/type:make-type-qualified :constraints (list constraint)
+                                            :body type-int)))
+    (cl-cc/type:check-qualified-constraints q nil env1)
+    (assert-signals cl-cc/type:type-inference-error
+      (cl-cc/type:check-qualified-constraints q nil env0))))
 
 ;;; ─── infer-with-effects ───────────────────────────────────────────────────
 

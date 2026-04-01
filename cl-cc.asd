@@ -16,15 +16,16 @@
     :components
     ((:file "package")
      ;; Stage 1: Source → CST → S-expressions (2026 modern parser)
-     (:module "parse"
-      :serial t
-      :components
-      ((:file "cst")
-       (:file "diagnostics")
-       (:file "ast")
-       (:file "prolog")
-       (:file "dcg")
-       (:file "lexer")
+      (:module "parse"
+       :serial t
+       :components
+       ((:file "cst")
+        (:file "diagnostics")
+        (:file "ast")
+        (:file "prolog-data")
+        (:file "prolog")
+        (:file "dcg")
+        (:file "lexer")
        (:file "lexer-dispatch")
        (:file "incremental")
        (:file "pratt")
@@ -272,29 +273,27 @@
          (:module "vm"
          :serial t
          :components
-           ((:file "vm2-tests")
-            (:file "vm-instructions-tests")
-            (:file "list-tests")       ; defines make-test-vm / exec1 helpers
-           (:file "list-coerce-tests")
-           (:file "array-tests")
-            (:file "vm-execute-tests")
-            (:file "primitives-tests") ; execute-instruction for type predicates + arithmetic
+            ((:file "vm-instructions-tests")
+             (:file "list-tests")       ; defines make-test-vm / exec1 helpers
+            (:file "list-coerce-tests")
+            (:file "array-tests")
+             (:file "vm-execute-tests")
+             (:file "primitives-tests") ; execute-instruction for type predicates + arithmetic
             (:file "vm-transcendental-tests") ; transcendental math ops
             (:file "vm-numeric-tests") ; numeric tower + environment queries
             (:file "vm-extensions-tests") ; symbol plist + progv + generic arithmetic
             (:file "vm-bitwise-tests") ; bitwise integer instructions
             (:file "vm-clos-tests")    ; execute-instruction for CLOS instructions
-            (:file "vm-run-tests") ; vm-error-type-matches-p
-            (:file "vm-dispatch-tests") ; vm-classify-arg + vm-generic-function-p
-             (:file "vm-runtime-tests") ; vm-closure-object + heap/plist helpers
-             (:file "vm-tests") ; vm.lisp core state + helper coverage
-             (:file "package-tests") ; cl-cc package export smoke tests
-             (:file "vm-call-tests")    ; vm-call / vm-tail-call / vm-ret + %vm-dispatch-call
-             (:file "conditions-tests")
-            (:file "hash-tests")
-           (:file "symbols-tests")
-           (:file "strings-tests")
-           (:file "io-tests")))
+             (:file "vm-run-tests") ; vm-error-type-matches-p + vm2 run-vm tests
+             (:file "vm-dispatch-tests") ; vm-classify-arg + vm-generic-function-p
+              (:file "vm-tests") ; vm.lisp core state + helper coverage
+              (:file "package-tests") ; cl-cc package export smoke tests
+              (:file "conditions-tests")
+             (:file "hash-tests")
+            (:file "symbols-tests")
+            (:file "strings-tests")
+            (:file "format-tests")
+            (:file "io-tests")))
        (:module "parse"
         :serial t
         :components
@@ -304,11 +303,12 @@
            :serial t
            :components
            ((:file "lower-tests")))
-          (:file "cst-tests")
-         (:file "lexer-tests")
-         (:file "grammar-tests")
-          (:file "prolog-tests")
-          (:file "pratt-tests")
+           (:file "cst-tests")
+          (:file "lexer-tests")
+          (:file "grammar-tests")
+           (:file "prolog-data-tests")
+           (:file "prolog-tests")
+           (:file "pratt-tests")
           (:file "php-tests")
         (:module "php"
          :serial t

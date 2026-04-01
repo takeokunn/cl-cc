@@ -116,23 +116,39 @@ DICT-BINDINGS: alist of ((class-name . type-key) . method-alist) for typeclass d
 ;;; struct with :name and :args slots. New code uses curried type-app chains.
 ;;; These adapters encode/decode the curried representation.
 
-(defun type-constructor-p (x) (type-app-p x))
+(defun %option-type-constructor-p (x)
+  (and (type-union-p x)
+       (= (length (type-union-types x)) 2)
+       (some (lambda (ty) (type-equal-p ty type-null))
+              (type-union-types x))))
+
+(defun type-constructor-p (x)
+  (or (type-app-p x)
+      (%option-type-constructor-p x)))
 
 (defun type-constructor-name (ty)
   "Return the head constructor name from a curried type-app chain."
-  (when (type-app-p ty)
-    (loop for node = ty then (type-app-fun node)
-          while (type-app-p node)
-          finally (return (when (type-primitive-p node)
-                            (type-primitive-name node))))))
+  (cond
+    ((type-app-p ty)
+     (loop for node = ty then (type-app-fun node)
+           while (type-app-p node)
+           finally (return (when (type-primitive-p node)
+                             (type-primitive-name node)))))
+    ((%option-type-constructor-p ty)
+     (or (type-union-constructor-name ty)
+         (intern "OPTION" *package*)))))
 
 (defun type-constructor-args (ty)
   "Return all arguments from a curried type-app chain as a flat list."
-  (when (type-app-p ty)
-    (loop for node = ty then (type-app-fun node)
-          while (type-app-p node)
-          collect (type-app-arg node) into args-rev
-          finally (return (nreverse args-rev)))))
+  (cond
+    ((type-app-p ty)
+     (loop for node = ty then (type-app-fun node)
+           while (type-app-p node)
+           collect (type-app-arg node) into args-rev
+           finally (return (nreverse args-rev))))
+    ((%option-type-constructor-p ty)
+     (remove-if (lambda (ty0) (type-equal-p ty0 type-null))
+                (type-union-types ty)))))
 
 (defun make-type-constructor (name args)
   "Build a curried type-app chain for constructor NAME with ARGS list."
@@ -152,7 +168,8 @@ DICT-BINDINGS: alist of ((class-name . type-key) . method-alist) for typeclass d
 (deftype type-function   () 'type-arrow)
 (deftype type-unknown    () '(and type-error (satisfies type-unknown-p)))
 (deftype type-tuple      () 'type-product)
-(deftype type-constructor () 'type-app)
+(deftype type-constructor ()
+  '(or type-app (and type-union (satisfies %option-type-constructor-p))))
 
 ;;; ─── type-to-string forward declaration ──────────────────────────────────
 ;;; The real implementation is in parser.lisp / printer.lisp (loaded later).

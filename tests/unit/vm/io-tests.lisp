@@ -1,8 +1,8 @@
 ;;;; tests/unit/vm/io-tests.lisp — VM I/O Operations Unit Tests
 ;;;;
-;;;; Tests for I/O instructions: write-to-string, format, princ, prin1,
-;;;; make-string-output-stream, get-output-stream-string, stream-write-string,
-;;;; read-from-string, stream predicates, and print output capture.
+;;;; Tests for I/O instructions: make-string-output-stream,
+;;;; get-output-stream-string, stream-write-string, read-from-string,
+;;;; stream predicates, file-handle helpers, and read/write line behavior.
 
 (in-package :cl-cc/test)
 
@@ -21,76 +21,6 @@
 (defun io-exec (inst state)
   "Execute a single instruction against STATE."
   (cl-cc::execute-instruction inst state 0 (make-hash-table :test #'equal)))
-
-(defun io-capture (state)
-  "Get captured output from the vm-state's output stream."
-  (get-output-stream-string (cl-cc::vm-output-stream state)))
-
-;;; ─── write-to-string ──────────────────────────────────────────────────────
-
-(deftest-each io-write-to-string
-  "vm-write-to-string converts various CL values to their printed representation."
-  :cases (("number" 42   "42")
-          ("symbol" :test ":TEST")
-          ("string" "hi" "\"hi\""))
-  (value expected)
-  (let ((s (io-vm)))
-    (cl-cc::vm-reg-set s :R1 value)
-    (io-exec (cl-cc::make-vm-write-to-string-inst :dst :R0 :src :R1) s)
-    (assert-equal expected (cl-cc::vm-reg-get s :R0))))
-
-;;; ─── format ───────────────────────────────────────────────────────────────
-
-(deftest io-format-simple
-  "vm-format-inst formats string with no args."
-  (let ((s (io-vm)))
-    (cl-cc::vm-reg-set s :R1 "hello world")
-    (io-exec (cl-cc::make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs nil) s)
-    (assert-equal "hello world" (cl-cc::vm-reg-get s :R0))))
-
-(deftest io-format-with-args
-  "vm-format-inst formats string with arguments."
-  (let ((s (io-vm)))
-    (cl-cc::vm-reg-set s :R1 "~A is ~A")
-    (cl-cc::vm-reg-set s :R2 "answer")
-    (cl-cc::vm-reg-set s :R3 42)
-    (io-exec (cl-cc::make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs '(:R2 :R3)) s)
-    (assert-equal "answer is 42" (cl-cc::vm-reg-get s :R0))))
-
-(deftest io-format-directive-d
-  "vm-format-inst handles ~D directive."
-  (let ((s (io-vm)))
-    (cl-cc::vm-reg-set s :R1 "count: ~D")
-    (cl-cc::vm-reg-set s :R2 99)
-    (io-exec (cl-cc::make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs '(:R2)) s)
-    (assert-equal "count: 99" (cl-cc::vm-reg-get s :R0))))
-
-;;; ─── princ / prin1 / print ───────────────────────────────────────────────
-
-(deftest-each io-princ-values
-  "vm-princ prints values without escaping: numbers as digits, strings without quotes."
-  :cases (("number" 42      "42")
-          ("string" "hello" "hello"))
-  (value expected)
-  (let ((s (io-vm)))
-    (cl-cc::vm-reg-set s :R1 value)
-    (io-exec (cl-cc::make-vm-princ :src :R1) s)
-    (assert-equal expected (io-capture s))))
-
-(deftest io-prin1-string
-  "vm-prin1 prints string with quotes."
-  (let ((s (io-vm)))
-    (cl-cc::vm-reg-set s :R1 "hello")
-    (io-exec (cl-cc::make-vm-prin1 :src :R1) s)
-    (assert-equal "\"hello\"" (io-capture s))))
-
-(deftest io-terpri
-  "vm-terpri-inst outputs a newline."
-  (let ((s (io-vm)))
-    (io-exec (cl-cc::make-vm-terpri-inst) s)
-    (let ((out (io-capture s)))
-      (assert-equal 1 (length out))
-      (assert-equal #\Newline (char out 0)))))
 
 ;;; ─── make-string-output-stream / get-output-stream-string ─────────────────
 

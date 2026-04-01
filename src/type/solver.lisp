@@ -127,15 +127,29 @@ Returns (values new-subst residual-constraints).
              (unless (mult-leq q1 q2)
                (push c residual))))
 
-          ;; (:row-lacks rho label) ─ row does not contain label
-          (:row-lacks
-           (let* ((args  (constraint-args c))
-                  (rho   (zonk (first args) current-subst))
-                  (label (second args)))
-             ;; If rho is a record and label is present, it's a violation
-             (when (and (type-record-p rho)
-                        (row-select label rho))
-               (push c residual))))
+           ;; (:row-lacks rho label) ─ row does not contain label
+           (:row-lacks
+            (let* ((args  (constraint-args c))
+                   (rho   (zonk (first args) current-subst))
+                   (label (second args)))
+               ;; Only discharge the constraint when the row is concrete and
+               ;; the label is definitely absent.  Open row variables are
+               ;; accepted here; concrete open rows stay residual so the caller
+               ;; can refine them later.
+               (cond
+                 ((type-var-p rho)
+                  nil)
+                 ((or (type-record-p rho)
+                      (type-variant-p rho)
+                      (type-effect-row-p rho))
+                  (if (row-closed-p rho)
+                      (when (or (row-select label rho)
+                                (and (type-effect-row-p rho)
+                                     (effect-row-member-p label rho)))
+                        (push c residual))
+                      nil))
+                 (t
+                  (push c residual)))))
 
           ;; (:kind-equal k1 k2) ─ kind equality
           (:kind-equal

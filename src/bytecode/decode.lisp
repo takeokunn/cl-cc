@@ -16,25 +16,25 @@
   "Extract opcode byte from bits [31:24]."
   (declare (type (unsigned-byte 32) word)
            (optimize (speed 3) (safety 1)))
-  (the (unsigned-byte 8) (ldb (byte 8 24) word)))
+  (ldb (byte 8 24) word))
 
 (defun decode-dst (word)
   "Extract dst field from bits [23:16]."
   (declare (type (unsigned-byte 32) word)
            (optimize (speed 3) (safety 1)))
-  (the (unsigned-byte 8) (ldb (byte 8 16) word)))
+  (ldb (byte 8 16) word))
 
 (defun decode-src1 (word)
   "Extract src1 field from bits [15:8]."
   (declare (type (unsigned-byte 32) word)
            (optimize (speed 3) (safety 1)))
-  (the (unsigned-byte 8) (ldb (byte 8 8) word)))
+  (ldb (byte 8 8) word))
 
 (defun decode-src2 (word)
   "Extract src2 field from bits [7:0]."
   (declare (type (unsigned-byte 32) word)
            (optimize (speed 3) (safety 1)))
-  (the (unsigned-byte 8) (ldb (byte 8 0) word)))
+  (ldb (byte 8 0) word))
 
 (defun decode-imm16 (word)
   "Extract signed 16-bit immediate from bits [15:0]."
@@ -156,41 +156,41 @@
   (declare (type (unsigned-byte 8) opcode))
   (case opcode
     ;; 3-operand: arithmetic, comparisons, call, collections, slots
-    ((#.+op-add+  #.+op-sub+  #.+op-mul+  #.+op-div+  #.+op-mod+
-      #.+op-eq+   #.+op-eql+  #.+op-equal+
-      #.+op-num-lt+ #.+op-num-gt+ #.+op-num-le+ #.+op-num-ge+ #.+op-num-eq+
-      #.+op-call+ #.+op-tail-call+
-      #.+op-load-const+
-      #.+op-make-closure+
-      #.+op-get-slot+ #.+op-set-slot+
-      #.+op-make-instance+
-      #.+op-cons+
-      #.+op-make-vector+ #.+op-vector-ref+ #.+op-vector-set+
-      #.+op-hash-ref+    #.+op-hash-set+
-      #.+op-type-check+)
-     :3op)
+    ((#x10 #x11 #x12 #x13 #x14
+      #x20 #x21 #x22
+      #x23 #x24 #x25 #x26 #x27
+      #x33 #x34
+      #x01
+      #x40
+      #x50 #x51
+      #x54
+      #x60
+      #x63 #x64 #x65
+      #x67 #x68
+      #x70)
+      :3op)
     ;; 2-operand: unary ops, moves, type predicates
-    ((#.+op-move+
-      #.+op-load-nil+ #.+op-load-true+
-      #.+op-neg+ #.+op-inc+ #.+op-dec+
-      #.+op-return+
-      #.+op-get-upvalue+ #.+op-set-upvalue+ #.+op-close-upvalue+
-      #.+op-get-global+  #.+op-set-global+
-      #.+op-car+ #.+op-cdr+
-      #.+op-make-hash+
-      #.+op-fixnump+ #.+op-consp+ #.+op-symbolp+ #.+op-functionp+ #.+op-stringp+
-      #.+op-values+ #.+op-recv-values+
-      #.+op-signal+
-      #.+op-pop-unwind+)
-     :2op)
+    ((#x02
+      #x03 #x04
+      #x15 #x16 #x17
+      #x35
+      #x41 #x42 #x43
+      #x52 #x53
+      #x61 #x62
+      #x66
+      #x71 #x72 #x73 #x74 #x75
+      #x80 #x81
+      #x92
+      #x94)
+      :2op)
     ;; Immediate: load-fixnum, conditional branches, push-handler
-    ((#.+op-load-fixnum+
-      #.+op-jump-if-nil+ #.+op-jump-if-true+
-      #.+op-push-handler+)
-     :imm)
+    ((#x05
+      #x31 #x32
+      #x90)
+      :imm)
     ;; Branch: unconditional jump, push-unwind
-    ((#.+op-jump+ #.+op-push-unwind+)
-     :branch)
+    ((#x30 #x93)
+      :branch)
     ;; Special / zero-operand
     (otherwise
      :special)))

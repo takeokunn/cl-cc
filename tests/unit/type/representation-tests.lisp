@@ -249,6 +249,13 @@
     (assert-eq 'list (cl-cc/type::type-constructor-name tc))
     (assert-equal 1 (length (cl-cc/type::type-constructor-args tc)))))
 
+(deftest compat-type-option-roundtrip
+  "Option constructor round-trips through unparse-type."
+  (let* ((ty (cl-cc/type::parse-type-specifier '(Option string)))
+         (spec (cl-cc/type::unparse-type ty)))
+    (assert-eq 'Option (first spec))
+    (assert-true (type-equal-p ty (cl-cc/type::parse-type-specifier spec)))))
+
 (deftest compat-type-unknown-singleton
   "type-unknown-p recognizes +type-unknown+."
   (assert-true (type-unknown-p +type-unknown+))

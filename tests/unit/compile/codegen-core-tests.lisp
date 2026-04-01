@@ -54,10 +54,20 @@
   "Compiling (the integer ...) emits the inner assertion path."
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (cl-cc:make-ast-the :type 'integer
-                                :value (make-ast-int :value 42))
+                                 :value (make-ast-int :value 42))
                  ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc::vm-typep))
     (assert-true (codegen-find-inst ctx 'cl-cc::vm-signal-error))))
+
+(deftest codegen-hole-signals-typed-hole-message
+  "Compiling '_' signals an ast-compilation-error mentioning typed holes."
+  (let ((ctx (make-codegen-ctx)))
+    (handler-case
+        (progn
+          (compile-ast (cl-cc::lower-sexp-to-ast '_) ctx)
+          (assert-true nil))
+      (cl-cc:ast-compilation-error (e)
+        (assert-true (search "Typed hole" (format nil "~A" e)))))))
 
 (deftest codegen-if-narrows-branch-type-env
   "Type guards narrow the then branch so proven vars skip redundant assertions."

@@ -31,6 +31,18 @@
                (num (parse-integer name :start 1 :junk-allowed t)))
           (or num 0)))))
 
+(defun %wasm-function-index-for-label (module label)
+  (let ((func (find label (wasm-module-functions module)
+                    :key (lambda (f)
+                           (let ((wat-name (wasm-func-wat-name f)))
+                             (if (and wat-name (> (length wat-name) 0)
+                                      (char= (char wat-name 0) #\$))
+                                 (subseq wat-name 1)
+                                 wat-name)))
+                    :test #'equal)))
+    (when func
+      (wasm-func-index func))))
+
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; WAT module header: predefined GC type section
 ;;; ─────────────────────────────────────────────────────────────────────────────
@@ -303,38 +315,42 @@
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-print) stream)
   (declare (ignore stream))
-  ;; Actual print goes via $host_write_string import; stub here.
+  ;; Actual print goes via $host_write_string import in the trampoline path.
   )
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-set-global) stream)
   (let ((reg-map (wasm-target-reg-map target)))
-    (format stream "~%    ;; set-global ~S (stub)"
-            (vm-global-name inst))
-    (format stream "~%    (drop ~A)"
+    (format stream "~%    (global.set ~A ~A)"
+            (vm-global-wat-name (vm-global-name inst))
             (reg-local-ref reg-map (vm-src inst)))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-get-global) stream)
   (let ((reg-map (wasm-target-reg-map target)))
-    (format stream "~%    ;; get-global ~S (stub)"
-            (vm-global-name inst))
     (format stream "~%    ~A"
-            (reg-local-set reg-map (vm-dst inst) "(ref.null eq)"))))
+            (reg-local-set reg-map (vm-dst inst)
+                           (format nil "(global.get ~A)"
+                                   (vm-global-wat-name (vm-global-name inst)))))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-call) stream)
   (let ((reg-map (wasm-target-reg-map target)))
-    (format stream "~%    ;; call local ~D -> local ~D (stub)"
-            (wasm-reg-to-local reg-map (vm-func-reg inst))
-            (wasm-reg-to-local reg-map (vm-dst inst)))
-    (format stream "~%    ~A"
-            (reg-local-set reg-map (vm-dst inst) "(ref.null eq)"))))
+    (let* ((module (wasm-target-module target))
+           (entry-idx (or (%wasm-function-index-for-label module (vm-label-name inst)) 0)))
+      (loop for arg in (vm-args inst) for i from 0 do
+        (format stream "~%    (global.set $cl_arg~D ~A)" i (reg-local-ref reg-map arg)))
+      (format stream "~%    ~A"
+              (reg-local-set reg-map (vm-dst inst)
+                             (format nil "(call_indirect (type $main_func_t) (table $funcref_table) (i32.const ~D))"
+                                     entry-idx))))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-closure) stream)
   (let ((reg-map (wasm-target-reg-map target)))
-    (format stream "~%    ;; closure ~A entry=~S (stub)"
-            (vm-dst inst) (vm-label-name inst))
-    (format stream "~%    ~A"
-            (reg-local-set reg-map (vm-dst inst)
-                           "(struct.new $closure_t (i32.const 0) (ref.null $env_t))"))))
+    (let ((entry-idx (or (%wasm-function-index-for-label (wasm-target-module target)
+                                                         (vm-label-name inst))
+                         0)))
+      (format stream "~%    ~A"
+              (reg-local-set reg-map (vm-dst inst)
+                             (format nil "(struct.new $closure_t (i32.const ~D) (ref.null $env_t))"
+                                     entry-idx))))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-cons) stream)
   (let ((reg-map (wasm-target-reg-map target)))
@@ -391,5 +407,3 @@
     ;; Serialize to WAT
     (with-output-to-string (s)
       (emit-wasm-module module s))))
-
-

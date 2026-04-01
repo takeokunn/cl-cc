@@ -70,17 +70,22 @@
                (and ty (cl-cc/type::is-subtype-p ty +codegen-fixnum-type+)))
              (float-type-p (ty)
                (and ty (cl-cc/type::is-subtype-p ty +codegen-float-type+))))
-      (cond
-        ((and (fixnum-type-p lhs-type) (fixnum-type-p rhs-type))
-         (case op
-           (+ 'make-vm-integer-add)
-           (- 'make-vm-integer-sub)
-           (* 'make-vm-integer-mul)
-           (otherwise (binop-ctor op))))
-        ((and (float-type-p lhs-type) (float-type-p rhs-type))
-         (case op
-           (+ 'make-vm-float-add)
-           (- 'make-vm-float-sub)
+       (cond
+         ((and (fixnum-type-p lhs-type) (fixnum-type-p rhs-type))
+          (case op
+            (+ 'make-vm-integer-add)
+            (- 'make-vm-integer-sub)
+            (* 'make-vm-integer-mul)
+            (< 'make-vm-lt)
+            (> 'make-vm-gt)
+            (= 'make-vm-num-eq)
+            (<= 'make-vm-le)
+            (>= 'make-vm-ge)
+            (otherwise (binop-ctor op))))
+         ((and (float-type-p lhs-type) (float-type-p rhs-type))
+          (case op
+            (+ 'make-vm-float-add)
+            (- 'make-vm-float-sub)
            (* 'make-vm-float-mul)
            (/ 'make-vm-float-div)
            (otherwise (binop-ctor op))))
@@ -92,6 +97,10 @@
   (let ((dst (make-register ctx)))
     (emit ctx (make-vm-const :dst dst :value (ast-int-value node)))
     dst))
+
+(defmethod compile-ast ((node ast-hole) ctx)
+  (declare (ignore ctx))
+  (ast-error node "Typed hole '_' must be filled before compilation."))
 
 (defmethod compile-ast ((node ast-var) ctx)
   (let ((name (ast-var-name node)))
@@ -388,49 +397,52 @@
           (cl-cc/type:type-to-string (cl-cc/type:type-mismatch-error-actual e))))
 
 (defun %emit-the-runtime-assertion (ctx value-reg declared-type &key (emit-failure-p t))
-  "Emit a runtime assertion for (the DECLARED-TYPE VALUE-REG)."
+  "Emit a runtime assertion for (the DECLARED-TYPE VALUE-REG).
+When EMIT-FAILURE-P is NIL, keep the lightweight type check but omit failure handling."
   (unless (or (null declared-type)
               (eq declared-type 't)
               (typep declared-type 'cl-cc/type:type-unknown))
     (when (> (ctx-safety ctx) 0)
-      (let ((check-reg (make-register ctx))
-            (fail-label (make-label ctx "the_fail"))
-            (done-label (make-label ctx "the_done"))
-            (error-reg (make-register ctx)))
+      (let ((check-reg (make-register ctx)))
         (emit ctx (make-vm-typep :dst check-reg :src value-reg :type-name declared-type))
         (when emit-failure-p
-          (emit ctx (make-vm-jump-zero :reg check-reg :label fail-label))
-          (emit ctx (make-vm-jump :label done-label))
-          (emit ctx (make-vm-label :name fail-label))
-          (emit ctx (make-vm-const :dst error-reg
-                                   :value (format nil "Type assertion failed: expected ~A"
-                                                  declared-type)))
-          (emit ctx (make-vm-signal-error :error-reg error-reg))
-          (emit ctx (make-vm-label :name done-label))))))
+          (let ((fail-label (make-label ctx "the_fail"))
+                (done-label (make-label ctx "the_done"))
+                (error-reg (make-register ctx)))
+            (emit ctx (make-vm-jump-zero :reg check-reg :label fail-label))
+            (emit ctx (make-vm-jump :label done-label))
+            (emit ctx (make-vm-label :name fail-label))
+            (emit ctx (make-vm-const :dst error-reg
+                                     :value (format nil "Type assertion failed: expected ~A"
+                                                    declared-type)))
+            (emit ctx (make-vm-signal-error :error-reg error-reg))
+            (emit ctx (make-vm-label :name done-label)))))))
   value-reg)
 
 (defmethod compile-ast ((node ast-the) ctx)
   "Compile a type declaration. In typed-function mode, verifies the type at compile time."
   (let ((reg (compile-ast (ast-the-value node) ctx)))
-    (when *compiling-typed-fn*
-      (let ((declared (ast-the-type node)))
-        (when (and declared
-                   (not (consp declared))
-                   (not (typep declared 'cl-cc/type:type-unknown)))
+    (let* ((declared (ast-the-type node))
+           (declared-type (and declared (cl-cc/type:parse-type-specifier declared))))
+      (when *compiling-typed-fn*
+        (when (and declared-type
+                   (not (and (typep (ast-the-value node) 'ast-var)
+                             (let ((proven (%ast-proven-type ctx (ast-the-value node))))
+                               (and proven
+                                    (cl-cc/type:type-equal-p proven declared-type))))))
           (handler-case
-            (cl-cc/type:check (ast-the-value node) declared (cl-cc/type:type-env-empty))
-              (cl-cc/type:type-mismatch-error (e)
-               (error 'ast-compilation-error
-                      :location (format nil "~A:~A"
-                                        (ast-source-file node)
-                                        (ast-source-line node))
-                      :format-control "Type error in ~A: ~A"
-                      :format-arguments (list *compiling-typed-fn*
-                                              (type-error-message-from-mismatch e))))
-              (cl-cc/type:type-inference-error () nil)))))
-    (let ((declared (ast-the-type node))
-          (declared-type (and (ast-the-type node)
-                              (cl-cc/type:parse-type-specifier (ast-the-type node)))))
+              (cl-cc/type:check (ast-the-value node) declared-type
+                                (or (ctx-type-env ctx)
+                                    (cl-cc/type:type-env-empty)))
+            (cl-cc/type:type-mismatch-error (e)
+              (error 'ast-compilation-error
+                     :location (format nil "~A:~A"
+                                       (ast-source-file node)
+                                       (ast-source-line node))
+                     :format-control "Type error in ~A: ~A"
+                     :format-arguments (list *compiling-typed-fn*
+                                             (type-error-message-from-mismatch e))))
+            (cl-cc/type:type-inference-error () nil))))
       (if (and declared-type
                (typep (ast-the-value node) 'ast-var)
                (let ((proven (%ast-proven-type ctx (ast-the-value node))))

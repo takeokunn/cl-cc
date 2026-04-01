@@ -69,15 +69,22 @@ Uses the hand-written CL lexer and recursive-descent parser (no host reader)."
 
 (defmethod lower-sexp-to-ast ((node symbol) &key source-file source-line source-column)
   ;; nil and t are self-evaluating constants, not variable references.
-  (if (member node '(nil t))
-      (make-ast-quote :value node
-                      :source-file source-file
-                      :source-line source-line
-                      :source-column source-column)
-      (make-ast-var :name node
-                    :source-file source-file
+  ;; '_' is reserved as an expression-level typed hole.
+  (cond
+    ((member node '(nil t))
+     (make-ast-quote :value node
+                     :source-file source-file
+                     :source-line source-line
+                     :source-column source-column))
+    ((string= (symbol-name node) "_")
+     (make-ast-hole :source-file source-file
                     :source-line source-line
-                    :source-column source-column)))
+                    :source-column source-column))
+    (t
+     (make-ast-var :name node
+                   :source-file source-file
+                   :source-line source-line
+                   :source-column source-column))))
 
 (defun parse-compiler-lambda-list (params)
   "Parse a lambda list into required, optional, rest, and key parameters.

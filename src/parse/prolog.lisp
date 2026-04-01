@@ -110,16 +110,18 @@
         (cons rule (gethash predicate *prolog-rules*))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
+  (defmacro %def-prolog-clause (head &key body)
+    `(add-rule ',(car head)
+               (make-prolog-rule :head ',head
+                                 ,@(when body `(:body ',body)))))
+
   (defmacro def-fact (head)
     "Define a Prolog fact. Usage: (def-fact (parent tom mary))"
-    `(add-rule ',(car head)
-               (make-prolog-rule :head ',head)))
+    `(%def-prolog-clause ,head))
 
   (defmacro def-rule (head &body body)
     "Define a Prolog rule. Usage: (def-rule (grandparent ?x ?z) (parent ?x ?y) (parent ?y ?z))"
-    `(add-rule ',(car head)
-               (make-prolog-rule :head ',head
-                                 :body ',body))))
+    `(%def-prolog-clause ,head :body ,body)))
 
 ;;; Variable Renaming for Recursion
 
@@ -177,17 +179,26 @@
   (when (eval-lisp-condition (first args) env)
     (funcall k env)))
 
-(defvar *builtin-predicates*
+(defun %make-builtin-predicates ()
   (let ((ht (make-hash-table :test 'eq)))
-    (setf (gethash '! ht) #'prolog-cut-handler)
-    (setf (gethash 'and ht) #'prolog-and-handler)
-    (setf (gethash 'or ht) #'prolog-or-handler)
-    (setf (gethash '= ht) #'prolog-unify-handler)
-    (setf (gethash '/= ht) #'prolog-not-unify-handler)
-    (setf (gethash ':when ht) #'prolog-when-handler)
-    (setf (gethash 'when ht) #'prolog-when-handler)
-    ht)
+    (dolist (spec (if (boundp '*builtin-predicate-specs*)
+                      *builtin-predicate-specs*
+                      '((! prolog-cut-handler)
+                        (and prolog-and-handler)
+                        (or prolog-or-handler)
+                        (= prolog-unify-handler)
+                        (/= prolog-not-unify-handler)
+                        (:when prolog-when-handler)
+                        (when prolog-when-handler)))
+                  ht)
+      (destructuring-bind (predicate handler) spec
+        (setf (gethash predicate ht) (symbol-function handler))))))
+
+(defvar *builtin-predicates* nil
   "Hash table mapping built-in predicate symbols to CPS handler functions.")
+
+(eval-when (:load-toplevel :execute)
+  (setf *builtin-predicates* (%make-builtin-predicates)))
 
 ;;; Backtracking Solver using Continuations
 
@@ -356,39 +367,6 @@
 (def-rule (env-lookup (cons (cons ?name ?type) ?rest) ?name ?type))
 (def-rule (env-lookup (cons ?binding ?rest) ?name ?type)
           (env-lookup ?rest ?name ?type))
-
-;;; Peephole Optimizer
-;;;
-;;; Three bugs fixed from the original:
-;;;   Bug 1: Wrong instruction order — consts come BEFORE binops in the stream.
-;;;   Bug 2: Walker advanced by 1 on match; must advance by 2 (consume both).
-;;;   Bug 3: Old rules duplicated opt-simplify-binop (runs first); replaced
-;;;          with patterns that survive the structural optimizer.
-;;;
-;;; Rule format: (current-pattern next-pattern result-list)
-;;; result-list is a list of replacement sexps (empty=delete both, one sexp=replace both).
-
-(defparameter *peephole-rules*
-  '(;; (:const :R1 42)(:move :R2 :R1) → (:const :R2 42)
-    ;; Fires when copy-prop is blocked by a label reset but DCE kept the const alive.
-    ((:const ?src ?val) (:move ?dst ?src) ((:const ?dst ?val)))
-
-    ;; (:jump "L0")(:label "L0") → (:label "L0")
-    ;; Eliminates a jump to the immediately following label (dead branch after threading).
-    ((:jump ?lbl) (:label ?lbl) ((:label ?lbl)))
-
-    ;; (:const ?r ?v1)(:const ?r ?v2) → (:const ?r ?v2)
-    ;; Second const-load to the same register makes the first dead.
-    ;; Safe in a 2-window because no instruction can read ?r between adjacent instructions.
-    ((:const ?r ?_v1) (:const ?r ?v2) ((:const ?r ?v2)))
-
-    ;; (:move ?mid ?src)(:move ?dst ?mid) → (:move ?mid ?src)(:move ?dst ?src)
-    ;; Copy-propagation through a move chain: ?mid still gets ?src (in case it
-    ;; is read elsewhere), but ?dst now reads directly from ?src, enabling DCE
-    ;; to later eliminate ?mid if it has no remaining readers.
-    ((:move ?mid ?src) (:move ?dst ?mid) ((:move ?mid ?src) (:move ?dst ?src)))))
-
-(defparameter *enable-prolog-peephole* t)
 
 (defun apply-prolog-peephole (instructions)
   "Apply Prolog-unification peephole rules over two-instruction windows.

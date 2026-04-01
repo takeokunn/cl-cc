@@ -146,8 +146,9 @@ Nil is treated as the empty substitution (identity element)."
                        (type-variant-cases ty))
       :row-var (when (type-variant-row-var ty) (zonk (type-variant-row-var ty) subst))))
     (type-union
-     (make-type-union-raw
-      :types (mapcar (lambda (t0) (zonk t0 subst)) (type-union-types ty))))
+      (make-type-union-raw
+       :types (mapcar (lambda (t0) (zonk t0 subst)) (type-union-types ty))
+       :constructor-name (type-union-constructor-name ty)))
     (type-intersection
      (make-type-intersection-raw
       :types (mapcar (lambda (t0) (zonk t0 subst)) (type-intersection-types ty))))

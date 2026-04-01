@@ -546,7 +546,7 @@
   "Run the full multi-pass optimization pipeline on a VM instruction sequence.
    Runs until no changes or MAX-ITERATIONS reached."
   (let ((prog (opt-pass-inline instructions :threshold 15)))
-    (loop for _ from 0 below max-iterations
+    (loop for iteration from 0 below max-iterations
           for prev = prog
           do (setf prog (opt-run-passes-once prog))
           when (opt-converged-p prev prog)

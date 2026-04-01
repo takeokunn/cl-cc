@@ -112,13 +112,15 @@ ROW-VAR:  an open row variable or nil for closed variants."
 ;;; ─── type-union ───────────────────────────────────────────────────────────
 
 (defstruct (type-union (:include type-node)
-                       (:constructor make-type-union-raw))
-  "A union type A | B. TYPES is a list of alternatives (canonical, de-duplicated)."
-  (types nil :type list))
+                        (:constructor make-type-union-raw))
+  "A union type A | B. TYPES is a list of alternatives (canonical, de-duplicated).
+CONSTRUCTOR-NAME preserves sugar provenance for round-tripping forms like OPTION."
+  (types nil :type list)
+  (constructor-name nil :type (or symbol null)))
 
-(defun make-type-union (types)
+(defun make-type-union (types &key constructor-name)
   "Positional convenience constructor: (make-type-union '(type-a type-b))."
-  (make-type-union-raw :types types))
+  (make-type-union-raw :types types :constructor-name constructor-name))
 
 ;;; ─── type-intersection ────────────────────────────────────────────────────
 

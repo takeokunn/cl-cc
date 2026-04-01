@@ -65,6 +65,16 @@
 (defmacro assert-prolog-query-one-succeeds (goal)
   `(assert-true (cl-cc:query-one ,goal)))
 
+(defmacro with-prolog-single-solution ((env goal) &body body)
+  `(let ((solutions (all-envs ,goal)))
+     (assert-= 1 (length solutions))
+     (let ((,env (car solutions)))
+       ,@body)))
+
+(defmacro assert-prolog-binding= (goal var expected)
+  `(with-prolog-single-solution (env ,goal)
+     (assert-= ,expected (cl-cc:substitute-variables ,var env))))
+
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; logic-var-p
 ;;; ─────────────────────────────────────────────────────────────────────────
@@ -114,9 +124,7 @@
 
 (deftest prolog-unify-var-binds-to-atom
   "unify: logic variable binds to an atom"
-  (let ((env (cl-cc:unify '?x 42 nil)))
-    (assert-false (null env))
-    (assert-= 42 (cl-cc:substitute-variables '?x env))))
+  (assert-prolog-binding= '(= ?x 42) '?x 42))
 
 (deftest prolog-unify-two-vars-aliased
   "unify: two distinct vars become aliased"
@@ -126,8 +134,7 @@
 
 (deftest prolog-unify-list-structure
   "unify: cons structures are unified component-wise"
-  (let ((env (cl-cc:unify '(?x 2) '(1 ?y) nil)))
-    (assert-false (null env))
+  (with-prolog-single-solution (env '(= (?x 2) (1 ?y)))
     (assert-= 1 (cl-cc:substitute-variables '?x env))
     (assert-= 2 (cl-cc:substitute-variables '?y env))))
 
@@ -190,9 +197,7 @@
 
 (deftest prolog-builtin-unification-succeeds
   "Built-in = unifies and calls continuation once"
-  (let ((envs (all-envs '(= ?x 42))))
-    (assert-= 1 (length envs))
-    (assert-= 42 (cl-cc:substitute-variables '?x (car envs)))))
+  (assert-prolog-binding= '(= ?x 42) '?x 42))
 
 (deftest-each prolog-non-unification-cases
   "Built-in /=: succeeds when terms differ, fails when equal"
@@ -203,10 +208,9 @@
 
 (deftest prolog-builtin-conjunction
   "Built-in 'and' chains goals and accumulates bindings"
-  (let ((envs (all-envs '(and (= ?x 1) (= ?y 2)))))
-    (assert-= 1 (length envs))
-    (assert-= 1 (cl-cc:substitute-variables '?x (car envs)))
-    (assert-= 2 (cl-cc:substitute-variables '?y (car envs)))))
+  (with-prolog-single-solution (env '(and (= ?x 1) (= ?y 2)))
+    (assert-= 1 (cl-cc:substitute-variables '?x env))
+    (assert-= 2 (cl-cc:substitute-variables '?y env))))
 
 (deftest prolog-builtin-disjunction
   "Built-in 'or' tries each alternative"

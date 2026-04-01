@@ -20,6 +20,23 @@
   (let ((ty (cl-cc/type::parse-type-specifier '?)))
     (assert-true (cl-cc/type::type-error-p ty))))
 
+(deftest parse-underscore-hole
+  "_ parses to a type-error node (gradual hole)."
+  (let ((ty (cl-cc/type::parse-type-specifier '_)))
+    (assert-true (cl-cc/type::type-error-p ty))))
+
+(deftest parse-option-type
+  "(option T) parses to (or null T)."
+  (let ((ty (cl-cc/type::parse-type-specifier '(option string))))
+    (assert-true (type-union-p ty))
+    (assert-equal 2 (length (type-union-types ty)))
+    (assert-true (some (lambda (x) (type-equal-p x type-null)) (type-union-types ty)))
+    (assert-true (some (lambda (x) (type-equal-p x type-string)) (type-union-types ty)))))
+
+(deftest looks-like-type-specifier-option
+  "looks-like-type-specifier-p recognizes option sugar forms."
+  (assert-true (cl-cc/type::looks-like-type-specifier-p '(option fixnum))))
+
 (deftest-each parse-primitive-symbols
   "Primitive type symbols parse to their expected type nodes."
   :cases (("fixnum"    'fixnum    type-int)

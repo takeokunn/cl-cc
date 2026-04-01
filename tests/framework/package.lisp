@@ -334,11 +334,17 @@
                  :type-unit
                  :+type-unknown+
                  ;; Type constructors
-                 :make-type-primitive
-                 :make-type-variable
-                 :make-type-function-raw
-                 :make-type-scheme
-                 :type-to-scheme
+                  :make-type-primitive
+                  :make-type-variable
+                  :make-type-function-raw
+                  :make-type-scheme
+                  :type-constructor
+                  :type-constructor-p
+                  :type-constructor-name
+                  :type-constructor-args
+                  :make-type-constructor
+                  :make-type-constructor-raw
+                  :type-to-scheme
                  ;; Type predicates and equality
                  :type-variable-p
                  :type-variable-equal-p

@@ -102,6 +102,25 @@
          (instrs (vm-program-instructions prog)))
     (assert-true (notany (lambda (i) (typep i 'cl-cc::vm-typep)) instrs))))
 
+(deftest pipeline-typed-fixnum-compare-fast-path
+  "Typed fixnum comparisons emit the specialized compare VM instruction without vm-typep."
+  (let* ((ctx (make-instance 'cl-cc::compiler-context))
+         (env0 (cl-cc/type:type-env-empty))
+         (env1 (cl-cc/type:type-env-extend 'x
+                                           (cl-cc/type:type-to-scheme cl-cc/type:type-int)
+                                           env0))
+         (env2 (cl-cc/type:type-env-extend 'y
+                                           (cl-cc/type:type-to-scheme cl-cc/type:type-int)
+                                           env1))
+         (ast (make-ast-binop :op '<
+                              :lhs (make-ast-var :name 'x)
+                              :rhs (make-ast-var :name 'y))))
+    (setf (cl-cc::ctx-type-env ctx) env2)
+    (compile-ast ast ctx)
+    (let ((instrs (nreverse (copy-list (cl-cc::ctx-instructions ctx)))))
+      (assert-true (notany (lambda (i) (typep i 'cl-cc::vm-typep)) instrs))
+      (assert-true (some (lambda (i) (typep i 'cl-cc::vm-lt)) instrs)))))
+
 ;;; ─── compile-string ─────────────────────────────────────────────────────
 
 (deftest pipeline-compile-string-basic

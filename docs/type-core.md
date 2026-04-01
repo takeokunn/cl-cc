@@ -1,6 +1,6 @@
 # Type System: Core
 
-Core type system contract for the compiler: inference, bidirectional checking, constraint solving, type transport into codegen, and runtime type semantics. Chapters 2 and 4-14 continue in `type-advanced.md`.
+Core type system contract for the compiler: inference, bidirectional checking, constraint solving, type transport into codegen, and runtime type semantics. Chapters 15-34 continue in `type-advanced.md`.
 
 ---
 
@@ -27,7 +27,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 > Ch.15-34 は [type-advanced.md](type-advanced.md) に続く。
 
 > 注: `新ファイル` とある項目は、現時点では実装予定を示す。実在するモジュール名は `src/type/` 配下の現行ファイルに合わせて読むこと。
-> この文書は依存順に読むこと。第1章と第3章はコア型判断の基盤であり、第2章と第4-14章は `type-advanced.md` に続く。
+> この文書は依存順に読むこと。第1-14章はコア型判断の基盤であり、第15-34章は `type-advanced.md` に続く。下の「続き」節は、後続文書の章立てを先読みするためのブリッジである。
 
 
 ## 0. Requirements Contract

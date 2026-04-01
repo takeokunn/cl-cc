@@ -33,6 +33,10 @@
     (cl-cc:make-ast-var :name 'x)
     (lambda (ast2) (assert-eq 'x (cl-cc:ast-var-name ast2))))
 
+   ("hole"
+    (cl-cc::make-ast-hole)
+    (lambda (ast2) (assert-type cl-cc::ast-hole ast2)))
+
    ("quote-atom"
     (cl-cc:make-ast-quote :value 'hello)
     (lambda (ast2) (assert-type cl-cc:ast-quote ast2)))
@@ -213,6 +217,7 @@
   "Leaf AST nodes have no children."
   :cases (("int"      (cl-cc:make-ast-int :value 42))
           ("var"      (cl-cc:make-ast-var :name 'x))
+          ("hole"     (cl-cc::make-ast-hole))
           ("quote"    (cl-cc:make-ast-quote :value 'hello))
           ("function" (cl-cc:make-ast-function :name 'foo))
           ("go"       (cl-cc:make-ast-go :tag 'start)))
