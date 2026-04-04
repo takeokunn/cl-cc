@@ -221,6 +221,30 @@
   (emit-byte #x85 stream)
   (emit-byte (modrm 3 reg2 reg1) stream))
 
+(defun emit-je-short (offset stream)
+  "JE rel8 (short conditional jump if equal/zero). 74 cb"
+  (emit-byte #x74 stream)
+  (emit-byte (logand offset #xFF) stream))
+
+(defun emit-popcnt-rr64 (dst src stream)
+  "POPCNT dst, src (64-bit population count).
+
+   Encoding: F3 REX.W 0F B8 /r"
+  (emit-byte #xF3 stream)
+  (emit-byte (rex-prefix :w 1 :r (ash dst -3) :b (ash src -3)) stream)
+  (emit-byte #x0F stream)
+  (emit-byte #xB8 stream)
+  (emit-byte (modrm 3 dst src) stream))
+
+(defun emit-bsr-rr64 (dst src stream)
+  "BSR dst, src (64-bit bit-scan reverse).
+
+   Encoding: REX.W + 0F BD /r"
+  (emit-byte (rex-prefix :w 1 :r (ash dst -3) :b (ash src -3)) stream)
+  (emit-byte #x0F stream)
+  (emit-byte #xBD stream)
+  (emit-byte (modrm 3 dst src) stream))
+
 ;;; Integer Division via IDIV
 ;;;
 ;;; IDIV r64 requires RDX:RAX as the implicit 128-bit dividend, producing:

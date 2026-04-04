@@ -32,6 +32,18 @@
   (error-reg nil :reader vm-error-reg)
   (:sexp-tag :signal-error))
 
+(defun vm-handler-entry-saved-regs (entry)
+  "Return the saved register snapshot stored in handler stack ENTRY."
+  (if (and (consp entry) (eq (first entry) :catch))
+      (sixth entry)
+      (fifth entry)))
+
+(defun (setf vm-handler-entry-saved-regs) (snapshot entry)
+  "Replace the saved register snapshot stored in handler stack ENTRY."
+  (if (and (consp entry) (eq (first entry) :catch))
+      (setf (sixth entry) snapshot)
+      (setf (fifth entry) snapshot)))
+
 (defmethod execute-instruction ((inst vm-establish-handler) state pc labels)
   (declare (ignore labels))
   (let ((saved-regs (let ((copy (make-hash-table :test (hash-table-test (vm-state-registers state)))))
@@ -41,9 +53,9 @@
     (push (list (vm-handler-label inst)
                 (vm-handler-result-reg inst)
                 (vm-error-type inst)
-                (copy-list (vm-call-stack state))
+                (vm-call-stack state)
                 saved-regs
-                (copy-list (vm-method-call-stack state)))
+                (vm-method-call-stack state))
           (vm-handler-stack state)))
   (values (1+ pc) nil nil))
 
@@ -60,10 +72,7 @@
                              (vm-state-registers state))
                     copy)))
     (dolist (entry (vm-handler-stack state))
-      (let ((saved-regs (fifth entry)))
-        (clrhash saved-regs)
-        (maphash (lambda (k v) (setf (gethash k saved-regs) v))
-                 snapshot))))
+      (setf (vm-handler-entry-saved-regs entry) snapshot)))
   (values (1+ pc) nil nil))
 
 (defun vm-error-type-matches-p (error-value handler-type)
@@ -128,9 +137,9 @@ CL condition objects use typep."
                 (vm-catch-handler-label inst)
                 (vm-catch-result-reg inst)
                 tag-value
-                (copy-list (vm-call-stack state))
+                (vm-call-stack state)
                 saved-regs
-                (copy-list (vm-method-call-stack state)))
+                (vm-method-call-stack state))
           (vm-handler-stack state)))
   (values (1+ pc) nil nil))
 
@@ -223,6 +232,95 @@ Otherwise a fresh state is created from OUTPUT-STREAM."
 (defparameter *opcode-encoder-table*
   (make-hash-table :test 'eq)
   "Hash table mapping opcode symbol name → opcode integer.")
+
+(defun vm2-collect-opcode-bigrams (code)
+  "Collect opcode bigram frequencies from flat VM2 CODE.
+
+CODE is expected to follow the 4-word instruction layout used by run-vm.
+Returns an EQUAL hash-table keyed by (opcode-a opcode-b) symbol pairs." 
+  (let ((counts (make-hash-table :test #'equal))
+        (n (length code)))
+    (loop for pc from 0 below (- n 4) by 4
+          for next-pc = (+ pc 4)
+          for op-a = (aref code pc)
+          for op-b = (and (< next-pc n) (aref code next-pc))
+          for name-a = (and (integerp op-a) (< op-a (length *opcode-name-table*))
+                            (aref *opcode-name-table* op-a))
+          for name-b = (and (integerp op-b) (< op-b (length *opcode-name-table*))
+                            (aref *opcode-name-table* op-b))
+          when (and name-a name-b)
+            do (incf (gethash (list name-a name-b) counts 0)))
+    counts))
+
+(defun vm2-top-superoperator-candidates (code &key (limit 20))
+  "Return the top opcode bigram candidates from CODE.
+
+Each result element is (pair count), sorted by descending count then name." 
+  (let (pairs)
+    (maphash (lambda (pair count)
+               (push (list pair count) pairs))
+             (vm2-collect-opcode-bigrams code))
+    (subseq (sort pairs (lambda (a b)
+                          (or (> (second a) (second b))
+                              (and (= (second a) (second b))
+                                   (string< (prin1-to-string (first a))
+                                   (prin1-to-string (first b)))))))
+            0 (min limit (length pairs)))))
+
+(defun vm2-fuse-immediate-superinstructions (code)
+  "Fuse const+arith bytecode pairs into existing immediate opcodes.
+
+This is a conservative VM2 superinstruction helper. It recognizes:
+  const rX IMM ; add2 dst src rX  -> add-imm2 dst src IMM
+  const rX IMM ; add2 dst rX src  -> add-imm2 dst src IMM
+  const rX IMM ; sub2 dst src rX  -> sub-imm2 dst src IMM
+  const rX IMM ; mul2 dst src rX  -> mul-imm2 dst src IMM
+  const rX IMM ; mul2 dst rX src  -> mul-imm2 dst src IMM
+The helper leaves all other instruction sequences unchanged." 
+  (let ((out (make-array 0 :adjustable t :fill-pointer 0))
+        (n (length code))
+        (pc 0))
+    (labels ((emit4 (op a b c)
+               (vector-push-extend op out)
+               (vector-push-extend a out)
+               (vector-push-extend b out)
+               (vector-push-extend c out)))
+      (loop while (< pc n)
+            do (if (<= (+ pc 8) n)
+                   (let* ((op1 (aref code pc))
+                          (dst1 (aref code (+ pc 1)))
+                          (imm1 (aref code (+ pc 2)))
+                          (aux1 (aref code (+ pc 3)))
+                          (op2 (aref code (+ pc 4)))
+                          (dst2 (aref code (+ pc 5)))
+                          (src21 (aref code (+ pc 6)))
+                          (src22 (aref code (+ pc 7))))
+                     (cond
+                       ((and (= op1 +op2-const+) (= op2 +op2-add2+) (= src22 dst1))
+                        (emit4 +op2-add-imm2+ dst2 src21 imm1)
+                        (incf pc 8))
+                       ((and (= op1 +op2-const+) (= op2 +op2-add2+) (= src21 dst1))
+                        (emit4 +op2-add-imm2+ dst2 src22 imm1)
+                        (incf pc 8))
+                       ((and (= op1 +op2-const+) (= op2 +op2-sub2+) (= src22 dst1))
+                        (emit4 +op2-sub-imm2+ dst2 src21 imm1)
+                        (incf pc 8))
+                       ((and (= op1 +op2-const+) (= op2 +op2-mul2+) (= src22 dst1))
+                        (emit4 +op2-mul-imm2+ dst2 src21 imm1)
+                        (incf pc 8))
+                       ((and (= op1 +op2-const+) (= op2 +op2-mul2+) (= src21 dst1))
+                        (emit4 +op2-mul-imm2+ dst2 src22 imm1)
+                        (incf pc 8))
+                       (t
+                        (emit4 op1 dst1 imm1 aux1)
+                        (incf pc 4))))
+                   (progn
+                     (emit4 (aref code pc)
+                            (if (< (+ pc 1) n) (aref code (+ pc 1)) nil)
+                            (if (< (+ pc 2) n) (aref code (+ pc 2)) nil)
+                            (if (< (+ pc 3) n) (aref code (+ pc 3)) nil))
+                     (incf pc 4)))))
+      (coerce out 'simple-vector)))
 
 ;;; Opcode counter (auto-incremented by defopcode)
 ;;; eval-when ensures this is bound at compile time (needed by defconstant in defopcode)
@@ -411,14 +509,48 @@ OUTPUT-STREAM: stream for I/O."
 Returns the value in the result register when halt2 executes."
   (declare (type simple-vector code)
            (type vm2-state state))
-  (let ((regs (vm2-state-registers state))
-        (len  (length code))
-        (pc   0))
+  (let* ((code (vm2-fuse-immediate-superinstructions code))
+         (regs (vm2-state-registers state))
+         (len  (length code))
+         (pc   0))
     (catch 'vm-halt
       (loop while (< pc len)
             do (let ((op (svref code pc)))
-                 (let ((handler (aref *opcode-dispatch-table* op)))
-                   (setf pc (funcall handler state code pc regs))))
+                 (setf pc
+                       (cond
+                         ((= op +op2-const+)
+                          (let ((dst (svref code (+ pc 1)))
+                                (imm (svref code (+ pc 2))))
+                            (setf (svref regs dst) imm)
+                            (+ pc 4)))
+                         ((= op +op2-move+)
+                          (let ((dst (svref code (+ pc 1)))
+                                (src (svref code (+ pc 2))))
+                            (setf (svref regs dst) (svref regs src))
+                            (+ pc 4)))
+                         ((= op +op2-add-imm2+)
+                          (let ((dst (svref code (+ pc 1)))
+                                (src (svref code (+ pc 2)))
+                                (imm (svref code (+ pc 3))))
+                            (setf (svref regs dst) (+ (svref regs src) imm))
+                            (+ pc 4)))
+                         ((= op +op2-sub-imm2+)
+                          (let ((dst (svref code (+ pc 1)))
+                                (src (svref code (+ pc 2)))
+                                (imm (svref code (+ pc 3))))
+                            (setf (svref regs dst) (- (svref regs src) imm))
+                            (+ pc 4)))
+                         ((= op +op2-mul-imm2+)
+                          (let ((dst (svref code (+ pc 1)))
+                                (src (svref code (+ pc 2)))
+                                (imm (svref code (+ pc 3))))
+                            (setf (svref regs dst) (* (svref regs src) imm))
+                            (+ pc 4)))
+                         ((= op +op2-halt2+)
+                          (throw 'vm-halt (svref regs (svref code (+ pc 1)))))
+                         (t
+                          (let ((handler (aref *opcode-dispatch-table* op)))
+                            (funcall handler state code pc regs))))))
             finally (return nil)))))
 
 ;;; ── vm2-state compatibility shims ────────────────────────────────────────

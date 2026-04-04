@@ -52,6 +52,7 @@
   "Boolean flags are stored as T when present"
   :cases (("stdlib"  '("run" "f.lisp" "--stdlib")  "--stdlib")
           ("verbose" '("run" "f.lisp" "--verbose") "--verbose")
+          ("pass timings" '("eval" "(+ 1 2)" "--print-pass-timings") "--print-pass-timings")
           ("strict"  '("check" "f.lisp" "--strict") "--strict")
           ("help"    '("--help")                   "--help"))
   (argv flag-key)
@@ -80,7 +81,9 @@
   "parse-args: arch and lang string flags (--key value form)"
   :cases (("arch arm64"  '("compile" "f.lisp" "--arch" "arm64") "--arch" "arm64")
           ("lang php"    '("run" "f.php"  "--lang" "php")        "--lang" "php")
-          ("lang lisp"   '("run" "f.lisp" "--lang" "lisp")       "--lang" "lisp"))
+          ("lang lisp"   '("run" "f.lisp" "--lang" "lisp")       "--lang" "lisp")
+          ("pass pipeline" '("eval" "(+ 1 2)" "--pass-pipeline" "fold,dce") "--pass-pipeline" "fold,dce")
+          ("opt remarks" '("eval" "(+ 1 2)" "--opt-remarks" "changed") "--opt-remarks" "changed"))
   (argv flag-key expected)
   (let ((p (cl-cc/cli:parse-args argv)))
     (assert-string= expected (%flags p flag-key))))
@@ -93,7 +96,9 @@
   "parse-args: inline --key=value form for output, arch, and lang"
   :cases (("output=mybin" '("compile" "f.lisp" "--output=mybin") "--output" "mybin")
           ("arch=arm64"   '("compile" "f.lisp" "--arch=arm64")   "--arch"   "arm64")
-          ("lang=php"     '("run"     "f.php"  "--lang=php")     "--lang"   "php"))
+          ("lang=php"     '("run"     "f.php"  "--lang=php")     "--lang"   "php")
+          ("pipeline=fold,dce" '("eval" "(+ 1 2)" "--pass-pipeline=fold,dce") "--pass-pipeline" "fold,dce")
+          ("opt-remarks=missed" '("eval" "(+ 1 2)" "--opt-remarks=missed") "--opt-remarks" "missed"))
   (argv flag-key expected)
   (let ((p (cl-cc/cli:parse-args argv)))
     (assert-string= expected (%flags p flag-key))))

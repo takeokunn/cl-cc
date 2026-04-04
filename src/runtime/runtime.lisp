@@ -228,7 +228,7 @@
 (defun rt-bit-access (bv idx) (bit bv idx))
 (defun rt-bit-set (bv idx val) (setf (bit bv idx) val))
 (defun rt-bit-and (a b) (bit-and a b))
-(defun rt-bit-or (a b) (bit-or a b))
+(defun rt-bit-or (a b) (bit-ior a b))
 (defun rt-bit-xor (a b) (bit-xor a b))
 (defun rt-bit-not (a) (bit-not a))
 (defun rt-sbit (sv idx) (sbit sv idx))

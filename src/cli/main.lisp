@@ -35,7 +35,10 @@ Options:
   --dump-ir <phase>       Dump IR for phase: ast, cps, ssa, vm, opt, asm
   --annotate-source       Add source-location comments when available
   --stdlib                Prepend standard library (run/eval only)
+  --opt-remarks <mode>    Print optimizer remarks: all, changed, missed
   --verbose               Show compilation details on stderr
+  --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
+  --print-pass-timings    Print per-pass optimizer timings
   --strict                Treat type warnings as errors (check only)
 
 Version: ~A~%" *version*))
@@ -50,7 +53,10 @@ Options:
   --dump-ir <phase>  Dump IR for phase: ast, cps, ssa, vm, opt, asm
   --annotate-source  Add source-location comments when available
   --stdlib          Prepend standard library
+  --opt-remarks <mode>  Print optimizer remarks: all, changed, missed
   --verbose         Show compilation details on stderr
+  --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
+  --print-pass-timings    Print per-pass optimizer timings
 ")
     ("compile" . "Usage: cl-cc compile [options] <file>
 
@@ -62,7 +68,10 @@ Options:
   --lang lisp|php       Source language (auto-detect from .php extension)
   --dump-ir <phase>     Dump IR for phase: ast, cps, ssa, vm, opt, asm
   --annotate-source     Add source-location comments when available
+  --opt-remarks <mode>  Print optimizer remarks: all, changed, missed
   --verbose             Show compilation details on stderr
+  --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
+  --print-pass-timings    Print per-pass optimizer timings
 ")
     ("eval" . "Usage: cl-cc eval [options] <expr>
 
@@ -70,7 +79,10 @@ Options:
 
 Options:
   --stdlib   Prepend standard library
+  --opt-remarks <mode>  Print optimizer remarks: all, changed, missed
   --verbose  Show compilation details on stderr
+  --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
+  --print-pass-timings    Print per-pass optimizer timings
 ")
     ("repl" . "Usage: cl-cc repl [options]
 
@@ -296,6 +308,17 @@ Calls (uiop:quit 2) on unrecognised values."
          (string= arch-str "aarch64")) :aarch64)
     (t (error "Unknown architecture for compilation: ~A" arch-str))))
 
+(defun %parse-opt-remarks-mode (mode-str)
+  (let ((s (string-downcase (or mode-str ""))))
+    (cond
+      ((string= s "") nil)
+      ((string= s "all") :all)
+      ((string= s "changed") :changed)
+      ((string= s "missed") :missed)
+      (t
+       (format *error-output* "Unknown opt-remarks mode: ~A (use all|changed|missed)~%" mode-str)
+       (uiop:quit 2)))))
+
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Subcommand handlers
 ;;; ─────────────────────────────────────────────────────────────────────────
@@ -306,11 +329,14 @@ Calls (uiop:quit 2) on unrecognised values."
       (format *error-output* "Error: 'run' requires a file argument.~%")
       (%print-help "run")
       (uiop:quit 2))
-    (let* ((lang-flag (or (flag parsed "--lang") ""))
-           (language  (%detect-language file lang-flag))
-           (stdlib    (flag parsed "--stdlib"))
-           (verbose   (flag parsed "--verbose"))
-           (source    (handler-case (%read-file file)
+      (let* ((lang-flag (or (flag parsed "--lang") ""))
+             (language  (%detect-language file lang-flag))
+             (stdlib    (flag parsed "--stdlib"))
+             (verbose   (flag parsed "--verbose"))
+             (pass-pipeline (flag parsed "--pass-pipeline"))
+             (print-pass-timings (flag parsed "--print-pass-timings"))
+             (opt-remarks-mode (%parse-opt-remarks-mode (flag parsed "--opt-remarks")))
+             (source    (handler-case (%read-file file)
                         (error (e)
                           (format *error-output* "Error reading ~A: ~A~%" file e)
                           (uiop:quit 1)))))
@@ -321,13 +347,25 @@ Calls (uiop:quit 2) on unrecognised values."
           (progn
             (cond
               ((and stdlib (eq language :lisp))
-               (run-string source :stdlib t))
+               (run-string source :stdlib t
+                          :pass-pipeline pass-pipeline
+                          :print-pass-timings print-pass-timings
+                          :print-opt-remarks (not (null opt-remarks-mode))
+                          :opt-remarks-mode (or opt-remarks-mode :all)))
               ((eq language :php)
-               (let* ((result  (compile-string source :target :vm :language :php))
-                      (program (compilation-result-program result)))
-                 (run-compiled program)))
+                (let* ((result  (compile-string source :target :vm :language :php
+                                                :pass-pipeline pass-pipeline
+                                                :print-pass-timings print-pass-timings
+                                                :print-opt-remarks (not (null opt-remarks-mode))
+                                                :opt-remarks-mode (or opt-remarks-mode :all)))
+                       (program (compilation-result-program result)))
+                  (run-compiled program)))
               (t
-               (run-string source)))
+               (run-string source
+                          :pass-pipeline pass-pipeline
+                          :print-pass-timings print-pass-timings
+                          :print-opt-remarks (not (null opt-remarks-mode))
+                          :opt-remarks-mode (or opt-remarks-mode :all))))
             (uiop:quit 0))
         (error (e)
           (format *error-output* "Error: ~A~%" e)
@@ -345,9 +383,12 @@ Calls (uiop:quit 2) on unrecognised values."
            (lang-flag (or (flag parsed "--lang") ""))
            (language  (let ((l (%detect-language file lang-flag)))
                         (if (string= lang-flag "") nil l)))
-           (dump-ir   (flag parsed "--dump-ir"))
-           (annotate  (flag parsed "--annotate-source"))
-           (verbose   (flag parsed "--verbose")))
+            (dump-ir   (flag parsed "--dump-ir"))
+            (annotate  (flag parsed "--annotate-source"))
+            (verbose   (flag parsed "--verbose"))
+            (pass-pipeline (flag parsed "--pass-pipeline"))
+            (print-pass-timings (flag parsed "--print-pass-timings"))
+            (opt-remarks-mode (%parse-opt-remarks-mode (flag parsed "--opt-remarks"))))
       (when verbose
         (format *error-output* "; cl-cc compile: ~A  arch=~A  output=~A~%"
                 file arch-str (or output "(auto)")))
@@ -359,13 +400,21 @@ Calls (uiop:quit 2) on unrecognised values."
                   (uiop:quit 2))
                 (let* ((source (%read-file file))
                        (result (compile-string source :target (%compile-target-keyword arch-str)
-                                               :language (or language :lisp))))
+                                               :language (or language :lisp)
+                                               :pass-pipeline pass-pipeline
+                                               :print-pass-timings print-pass-timings
+                                               :print-opt-remarks (not (null opt-remarks-mode))
+                                               :opt-remarks-mode (or opt-remarks-mode :all))))
                   (%dump-ir-phase phase result *standard-output* annotate)
                   (uiop:quit 0)))
-              (let ((result (compile-file-to-native file
-                                                    :arch arch
-                                                    :output-file output
-                                                    :language language)))
+                (let ((result (compile-file-to-native file
+                                                     :arch arch
+                                                     :output-file output
+                                                     :language language
+                                                     :pass-pipeline pass-pipeline
+                                                     :print-pass-timings print-pass-timings
+                                                     :print-opt-remarks (not (null opt-remarks-mode))
+                                                     :opt-remarks-mode (or opt-remarks-mode :all))))
                 (format t "~A~%" result)
                 (uiop:quit 0)))
         (error (e)
@@ -378,14 +427,25 @@ Calls (uiop:quit 2) on unrecognised values."
       (format *error-output* "Error: 'eval' requires an expression argument.~%")
       (%print-help "eval")
       (uiop:quit 2))
-    (let* ((stdlib  (flag parsed "--stdlib"))
-           (verbose (flag parsed "--verbose")))
+     (let* ((stdlib  (flag parsed "--stdlib"))
+            (verbose (flag parsed "--verbose"))
+            (pass-pipeline (flag parsed "--pass-pipeline"))
+            (print-pass-timings (flag parsed "--print-pass-timings"))
+            (opt-remarks-mode (%parse-opt-remarks-mode (flag parsed "--opt-remarks"))))
       (when verbose
         (format *error-output* "; cl-cc eval: ~S~%" expr))
       (handler-case
           (let ((result (if stdlib
-                            (run-string expr :stdlib t)
-                            (run-string expr))))
+                            (run-string expr :stdlib t
+                                       :pass-pipeline pass-pipeline
+                                       :print-pass-timings print-pass-timings
+                                       :print-opt-remarks (not (null opt-remarks-mode))
+                                       :opt-remarks-mode (or opt-remarks-mode :all))
+                            (run-string expr
+                                       :pass-pipeline pass-pipeline
+                                       :print-pass-timings print-pass-timings
+                                       :print-opt-remarks (not (null opt-remarks-mode))
+                                       :opt-remarks-mode (or opt-remarks-mode :all)))))
             (format t "~S~%" result)
             (uiop:quit 0))
         (error (e)

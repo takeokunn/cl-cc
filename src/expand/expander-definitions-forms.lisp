@@ -2,6 +2,10 @@
 
 ;;; Core definition forms: function/class/flow/type-definition expanders.
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (unless (boundp '*documentation-table*)
+    (defvar *documentation-table* (make-hash-table :test #'equal))))
+
 ;; defun — typed params get check-type assertions; untyped: expand defaults + body
 (define-expander-for defun (form)
   (let* ((fn-name   (second form))

@@ -623,7 +623,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: GCC `-fthread-jumps` / LLVM `JumpThreading`. -O1 相当の基本パス
 - **難易度**: Medium
 
-#### FR-604: If Conversion / CMOV Selection (if変換・条件移動命令選択)
+#### ✅ FR-604: If Conversion / CMOV Selection (if変換・条件移動命令選択)
 
 - **対象**: `src/optimize/optimizer.lisp`, `src/emit/x86-64-codegen.lisp`, `src/emit/aarch64-codegen.lisp`
 - **内容**:
@@ -1073,7 +1073,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 - **根拠**: Appel "Compiling with Continuations" / Flanagan "The Essence of Compiling with Continuations". CPS後の不要なクロージャ生成を除去
 - **難易度**: Hard
 
-#### FR-675: Purity Analysis / Effect Tracking (純粋性解析・作用追跡)
+#### ✅ FR-675: Purity Analysis / Effect Tracking (純粋性解析・作用追跡)
 
 - **対象**: `src/compile/pipeline.lisp`, `src/optimize/optimizer.lisp`
 - **内容**:
@@ -1111,7 +1111,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 ### Phase 108 — 標準最適化パス補完
 
-#### FR-680: PRE (Partial Redundancy Elimination) — 部分冗長除去
+#### ✅ FR-680: PRE (Partial Redundancy Elimination) — 部分冗長除去
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **内容**:
@@ -1190,7 +1190,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 - **根拠**: GCC `-fdelete-null-pointer-checks` 等の null 効果ループ除去 / LLVM `LoopDeletion`
 - **難易度**: Easy
 
-#### FR-687: Algebraic Simplification (代数的単純化)
+#### ✅ FR-687: Algebraic Simplification (代数的単純化)
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **内容**:
@@ -1375,7 +1375,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 - **根拠**: LLVM MLIR (2019, production 2021+). TensorFlow/PyTorch のバックエンドとして標準化
 - **難易度**: Very Hard
 
-#### FR-713: Critical Edge Splitting (クリティカルエッジ分割)
+#### ✅ FR-713: Critical Edge Splitting (クリティカルエッジ分割)
 
 - **対象**: `src/optimize/cfg.lisp`, `src/emit/mir.lisp`
 - **内容**:
@@ -1401,7 +1401,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 ### Phase 112 — コード品質最適化補完
 
-#### FR-720: Tail Merging / Cross-Jumping (末尾マージ・クロスジャンプ)
+#### ✅ FR-720: Tail Merging / Cross-Jumping (末尾マージ・クロスジャンプ)
 
 - **対象**: `src/optimize/optimizer.lisp`, `src/optimize/cfg.lisp`
 - **内容**:
@@ -1412,7 +1412,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 - **根拠**: GCC `-fcrossjumping` / LLVM `SimplifyCFG`. -O2 デフォルトパス
 - **難易度**: Medium
 
-#### FR-721: Macro-Fusion Awareness (マクロフュージョン認識)
+#### ✅ FR-721: Macro-Fusion Awareness (マクロフュージョン認識)
 
 - **対象**: `src/emit/x86-64-codegen.lisp`, FR-068（命令スケジューリング）と連携
 - **内容**:
@@ -1423,7 +1423,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 - **根拠**: Intel Optimization Reference Manual §2.4 / ARM Cortex-X4 optimization guide
 - **難易度**: Easy
 
-#### FR-722: Rotate Instruction Recognition (ローテート命令認識)
+#### ✅ FR-722: Rotate Instruction Recognition (ローテート命令認識)
 
 - **対象**: `src/optimize/optimizer.lisp`, `src/emit/x86-64-codegen.lisp`
 - **内容**:
@@ -1455,7 +1455,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 - **根拠**: LLD/GNU ld の `.rodata` merging / LLVM constant merging pass
 - **難易度**: Easy
 
-#### FR-725: Parallel Copy Sequentialization (並列コピー逐次化)
+#### ✅ FR-725: Parallel Copy Sequentialization (並列コピー逐次化)
 
 - **対象**: `src/emit/regalloc.lisp`
 - **内容**:
@@ -1465,7 +1465,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 - **根拠**: Braun et al. SSA deconstruction algorithm. 正しさに関わる基礎処理
 - **難易度**: Medium
 
-#### FR-726: Algebraic Simplification (代数的単純化)
+#### ✅ FR-726: Algebraic Simplification (代数的単純化)
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **内容**:

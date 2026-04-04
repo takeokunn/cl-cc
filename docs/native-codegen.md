@@ -71,7 +71,7 @@ Native backend, architecture integration, register allocation, instruction sched
 
 ### Phase 13 — レジスタ割り当て・命令スケジューリング
 
-#### FR-059: Register Coalescing
+#### ✅ FR-059: Register Coalescing
 
 - **対象**: `src/emit/regalloc.lisp`
 - **内容**: `vm-move` 命令のソースと宛先に同一物理レジスタを割り当て、move命令を消去
@@ -91,7 +91,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **内容**: 干渉グラフ彩色による最適レジスタ割り当て（線形スキャンより高品質）
 - **難易度**: Hard
 
-#### FR-062: Rematerialization
+#### ✅ FR-062: Rematerialization
 
 - **対象**: `src/emit/regalloc.lisp`
 - **内容**: スピルの代わりに `vm-const` 等の安価な命令を使用箇所で再計算
@@ -109,14 +109,14 @@ Native backend, architecture integration, register allocation, instruction sched
 - **内容**: 次の使用箇所が最も遠い区間を優先スピル（現状は最長末尾を選択）
 - **難易度**: Easy
 
-#### FR-065: Caller-Save/Callee-Save Aware Spilling
+#### ✅ FR-065: Caller-Save/Callee-Save Aware Spilling
 
 - **対象**: `src/emit/regalloc.lisp`
 - **内容**: call命令を跨ぐ長寿命値をcallee-savedレジスタに優先配置
 - **根拠**: `regalloc.lisp:274` 付近にTODOコメントあり
 - **難易度**: Medium
 
-#### FR-066: Two-Address Instruction Lowering
+#### ✅ FR-066: Two-Address Instruction Lowering
 
 - **対象**: `src/backend/x86-64-codegen.lisp`
 - **内容**: `dst==lhs` が必要なx86-64命令の前にcopyを挿入してRA時の混乱を防止
@@ -147,7 +147,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: CC構造体に `:return-register` 定義あるが割り当て時に未活用
 - **難易度**: Easy
 
-#### FR-071: Parameter Register Recycling
+#### ✅ FR-071: Parameter Register Recycling
 
 - **対象**: `src/emit/regalloc.lisp`
 - **内容**: 引数レジスタがdead後にローカル一時変数として再利用
@@ -170,13 +170,13 @@ Native backend, architecture integration, register allocation, instruction sched
 
 ### Phase 17 — ハードウェア命令活用
 
-#### FR-097: POPCNT / i64.popcnt for logcount
+#### ✅ FR-097: POPCNT / i64.popcnt for logcount
 
 - **対象**: `src/backend/x86-64-codegen.lisp`, `src/emit/wasm.lisp`
 - **内容**: ANSI CL `(logcount x)` を `POPCNT`(x86-64) / `i64.popcnt`(Wasm) に直接マッピング
 - **難易度**: Low
 
-#### FR-098: BSR/BSF / clz/ctz for integer-length
+#### ✅ FR-098: BSR/BSF / clz/ctz for integer-length
 
 - **対象**: `src/backend/x86-64-codegen.lisp`, `src/emit/wasm.lisp`
 - **内容**: `(integer-length x)` → `BSR+adjust`(x86) / `i64.clz`(Wasm)
@@ -668,7 +668,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: グローバル変数の効率的配置
 - **難易度**: Low
 
-#### FR-471: Byte Buffer Unification (バイトバッファ統一)
+#### ✅ FR-471: Byte Buffer Unification (バイトバッファ統一)
 
 - **対象**: `src/emit/binary/macho.lisp`, `src/emit/binary/elf.lisp`, `src/emit/wasm.lisp`
 - **現状**: `byte-buffer`クラス(`macho.lisp:126-156`)、`elf-make-buffer`/`elf-buf-*`(`elf.lisp:68-111`)、`make-wasm-buffer`/`wasm-buf-*`(`wasm.lisp:44-86`)が3つの独立したほぼ同一のバイトバッファAPI
@@ -676,7 +676,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: コード重複削減
 - **難易度**: Medium
 
-#### FR-472: Calling Convention FP Registers (呼び出し規約浮動小数点レジスタ)
+#### ✅ FR-472: Calling Convention FP Registers (呼び出し規約浮動小数点レジスタ)
 
 - **対象**: `src/emit/calling-convention.lisp`
 - **現状**: `calling-convention`構造体(`calling-convention.lisp:8-14`)がGPRプールのみ。XMM/NEONフロートレジスタフィールドなし

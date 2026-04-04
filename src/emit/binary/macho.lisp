@@ -150,6 +150,48 @@
 
 ;;; Byte Buffer - Pure Common Lisp Implementation
 
+(defun make-binary-buffer (&optional (initial-size 4096))
+  "Create a fresh shared binary buffer as an adjustable byte vector."
+  (make-array initial-size
+              :element-type '(unsigned-byte 8)
+              :adjustable t
+              :fill-pointer 0))
+
+(defun binary-buffer-write-u8 (buffer byte)
+  (declare (type (array (unsigned-byte 8) (*)) buffer)
+           (type (unsigned-byte 8) byte))
+  (vector-push-extend byte buffer))
+
+(defun binary-buffer-write-u16le (buffer value)
+  (binary-buffer-write-u8 buffer (logand value #xFF))
+  (binary-buffer-write-u8 buffer (logand (ash value -8) #xFF)))
+
+(defun binary-buffer-write-u32le (buffer value)
+  (binary-buffer-write-u8 buffer (logand value #xFF))
+  (binary-buffer-write-u8 buffer (logand (ash value -8) #xFF))
+  (binary-buffer-write-u8 buffer (logand (ash value -16) #xFF))
+  (binary-buffer-write-u8 buffer (logand (ash value -24) #xFF)))
+
+(defun binary-buffer-write-u64le (buffer value)
+  (binary-buffer-write-u32le buffer (logand value #xFFFFFFFF))
+  (binary-buffer-write-u32le buffer (logand (ash value -32) #xFFFFFFFF)))
+
+(defun binary-buffer-write-s64le (buffer value)
+  (binary-buffer-write-u64le buffer (logand value #xFFFFFFFFFFFFFFFF)))
+
+(defun binary-buffer-write-bytes (buffer bytes)
+  (etypecase bytes
+    (list (dolist (b bytes) (binary-buffer-write-u8 buffer b)))
+    (vector (loop for b across bytes do (binary-buffer-write-u8 buffer b)))))
+
+(defun binary-buffer-write-pad (buffer n)
+  (dotimes (_ n) (binary-buffer-write-u8 buffer 0)))
+
+(defun binary-buffer-to-array (buffer)
+  (make-array (length buffer)
+              :element-type '(unsigned-byte 8)
+              :initial-contents buffer))
+
 (defclass byte-buffer ()
   ((data :initarg :data
          :accessor byte-buffer-data
@@ -160,27 +202,23 @@
 (defun make-byte-buffer (&optional (initial-size 4096))
   "Create a new byte buffer with INITIAL-SIZE capacity."
   (make-instance 'byte-buffer
-                 :data (make-array initial-size
-                                   :element-type '(unsigned-byte 8)
-                                   :adjustable t
-                                   :fill-pointer 0)))
+                 :data (make-binary-buffer initial-size)))
 
 (defun buffer-write-byte (buffer byte)
   "Write a single BYTE to BUFFER."
   (declare (type byte-buffer buffer)
            (type (unsigned-byte 8) byte))
-  (vector-push-extend byte (byte-buffer-data buffer)))
+  (binary-buffer-write-u8 (byte-buffer-data buffer) byte))
 
 (defun buffer-write-bytes (buffer bytes)
   "Write a sequence of BYTES to BUFFER."
   (declare (type byte-buffer buffer))
-  (loop for b across bytes
-        do (vector-push-extend b (byte-buffer-data buffer))))
+  (binary-buffer-write-bytes (byte-buffer-data buffer) bytes))
 
 (defun buffer-get-bytes (buffer)
   "Get the contents of BUFFER as a simple-array of (unsigned-byte 8)."
   (declare (type byte-buffer buffer))
-  (map '(simple-array (unsigned-byte 8) (*)) #'identity (byte-buffer-data buffer)))
+  (binary-buffer-to-array (byte-buffer-data buffer)))
 
 ;;; Utilities
 

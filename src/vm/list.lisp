@@ -2,6 +2,25 @@
 
 ;;; VM List Operations
 
+(defparameter *vm-hash-cons-table* (make-hash-table :test #'equal)
+  "Runtime hash-cons table keyed by (car cdr).
+
+This is a conservative partial FR-255 implementation. It intentionally uses a
+normal hash table for now; weak-table GC integration remains future work.")
+
+(defun vm-clear-hash-cons-table ()
+  "Clear the runtime hash-cons table and return it."
+  (clrhash *vm-hash-cons-table*)
+  *vm-hash-cons-table*)
+
+(defun vm-hash-cons (car-value cdr-value)
+  "Return a shared cons cell for CAR-VALUE/CDR-VALUE."
+  (let* ((key (list car-value cdr-value))
+         (existing (gethash key *vm-hash-cons-table*)))
+    (or existing
+        (setf (gethash key *vm-hash-cons-table*)
+              (cons car-value cdr-value)))))
+
 ;;;
 ;;; This file extends the VM with list manipulation instructions including
 ;;; cons cell creation, list accessors, and common list operations.
@@ -226,7 +245,7 @@
   (declare (ignore labels))
   (let ((car-val (vm-reg-get state (vm-car-reg inst)))
         (cdr-val (vm-reg-get state (vm-cdr-reg inst))))
-    (vm-reg-set state (vm-dst inst) (cons car-val cdr-val))
+    (vm-reg-set state (vm-dst inst) (vm-hash-cons car-val cdr-val))
     (values (1+ pc) nil nil)))
 
 (define-simple-instruction vm-car :unary car)

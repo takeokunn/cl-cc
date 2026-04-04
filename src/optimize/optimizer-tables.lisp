@@ -63,6 +63,8 @@
     (setf (gethash 'vm-rotate ht) #'rotate-right)
     (setf (gethash 'vm-bswap ht) #'bswap)
     (setf (gethash 'vm-float-div ht) #'/)
+    (setf (gethash 'vm-gcd ht) #'gcd)
+    (setf (gethash 'vm-lcm ht) #'lcm)
     ht)
   "Maps binary VM instruction types to their CL fold functions.
    Used by opt-fold-binop-value for constant folding.")
@@ -93,6 +95,10 @@
     (setf (gethash 'vm-inc ht) #'1+)
     (setf (gethash 'vm-dec ht) #'1-)
     (setf (gethash 'vm-lognot ht) #'lognot)
+    (setf (gethash 'vm-rational ht) #'rational)
+    (setf (gethash 'vm-rationalize ht) #'rationalize)
+    (setf (gethash 'vm-numerator ht) #'numerator)
+    (setf (gethash 'vm-denominator ht) #'denominator)
     (setf (gethash 'vm-not ht) (lambda (x) (if (null x) t nil)))
     ht)
   "Maps unary VM instruction types to their CL fold functions.")
@@ -127,6 +133,7 @@
 
 (defparameter *opt-binary-lhs-rhs-types*
   '(vm-lt vm-gt vm-le vm-ge vm-num-eq vm-eq
+    vm-gcd vm-lcm
     vm-mod vm-rem vm-min vm-max
     vm-truncate vm-floor-inst vm-ceiling-inst vm-round-inst
     vm-logand vm-logior vm-logxor vm-logeqv vm-ash vm-rotate
@@ -137,6 +144,7 @@
 
 (defparameter *opt-unary-src-types*
   '(vm-neg vm-abs vm-inc vm-dec vm-lognot vm-bswap vm-not
+    vm-rational vm-rationalize vm-numerator vm-denominator
     vm-cons-p vm-null-p vm-symbol-p vm-number-p
     vm-integer-p vm-function-p)
   "Instruction types that have vm-src/vm-dst unary accessors.

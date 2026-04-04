@@ -201,6 +201,86 @@
       (assert-= 10 (cl-cc::vm2-reg-get s 1))
       (assert-= 20 (cl-cc::vm2-reg-get s 2)))))
 
+(deftest vm2-collect-opcode-bigrams-counts-adjacent-opcodes
+  "vm2-collect-opcode-bigrams counts opcode pairs across 4-word instructions."
+  (let* ((code (make-bytecode cl-cc::+op2-const+ 1 3 nil
+                              cl-cc::+op2-add-imm2+ 0 1 4
+                              cl-cc::+op2-halt2+ 0 nil nil
+                              cl-cc::+op2-const+ 1 5 nil
+                              cl-cc::+op2-add-imm2+ 0 1 6
+                              cl-cc::+op2-halt2+ 0 nil nil))
+         (counts (cl-cc::vm2-collect-opcode-bigrams code)))
+    (assert-= 2 (gethash '(cl-cc::const cl-cc::add-imm2) counts))
+    (assert-= 2 (gethash '(cl-cc::add-imm2 cl-cc::halt2) counts))))
+
+(deftest vm2-top-superoperator-candidates-sorts-by-frequency
+  "vm2-top-superoperator-candidates returns descending bigram counts."
+  (let* ((code (make-bytecode cl-cc::+op2-const+ 1 3 nil
+                              cl-cc::+op2-add-imm2+ 0 1 4
+                              cl-cc::+op2-halt2+ 0 nil nil
+                              cl-cc::+op2-const+ 1 5 nil
+                              cl-cc::+op2-add-imm2+ 0 1 6
+                              cl-cc::+op2-halt2+ 0 nil nil
+                              cl-cc::+op2-move+ 2 1 nil
+                              cl-cc::+op2-halt2+ 2 nil nil))
+         (top (cl-cc::vm2-top-superoperator-candidates code :limit 2)))
+    (assert-equal '(cl-cc::add-imm2 cl-cc::halt2) (first (first top)))
+    (assert-= 2 (second (first top)))))
+
+(deftest vm2-fuse-immediate-superinstructions-add
+  "const+add2 using a temporary immediate register fuses to add-imm2."
+  (let* ((code (make-bytecode cl-cc::+op2-const+ 2 4 nil
+                              cl-cc::+op2-add2+  0 1 2
+                              cl-cc::+op2-halt2+ 0 nil nil))
+         (fused (cl-cc::vm2-fuse-immediate-superinstructions code)))
+    (assert-= cl-cc::+op2-add-imm2+ (aref fused 0))
+    (assert-= 0 (aref fused 1))
+    (assert-= 1 (aref fused 2))
+    (assert-= 4 (aref fused 3))))
+
+(deftest vm2-fuse-immediate-superinstructions-sub
+  "const+sub2 with an immediate RHS fuses to sub-imm2."
+  (let* ((code (make-bytecode cl-cc::+op2-const+ 2 5 nil
+                              cl-cc::+op2-sub2+  0 1 2
+                              cl-cc::+op2-halt2+ 0 nil nil))
+         (fused (cl-cc::vm2-fuse-immediate-superinstructions code)))
+    (assert-= cl-cc::+op2-sub-imm2+ (aref fused 0))
+    (assert-= 5 (aref fused 3))))
+
+(deftest vm2-fuse-immediate-superinstructions-mul
+  "const+mul2 using a temporary immediate register fuses to mul-imm2."
+  (let* ((code (make-bytecode cl-cc::+op2-const+ 2 6 nil
+                              cl-cc::+op2-mul2+  0 2 1
+                              cl-cc::+op2-halt2+ 0 nil nil))
+         (fused (cl-cc::vm2-fuse-immediate-superinstructions code)))
+    (assert-= cl-cc::+op2-mul-imm2+ (aref fused 0))
+    (assert-= 0 (aref fused 1))
+    (assert-= 1 (aref fused 2))
+    (assert-= 6 (aref fused 3))))
+
+(deftest run-vm-uses-immediate-fusion-helper
+  "run-vm accepts unfused const+arith bytecode and still executes via fused code."
+  (let* ((code (make-bytecode cl-cc::+op2-const+ 2 4 nil
+                              cl-cc::+op2-add2+  0 1 2
+                              cl-cc::+op2-halt2+ 0 nil nil))
+         (fused (cl-cc::vm2-fuse-immediate-superinstructions code))
+         (s (cl-cc::make-vm2-state)))
+    (cl-cc::vm2-reg-set s 1 3)
+    (assert-= 7 (cl-cc::run-vm code s))
+    (assert-= 8 (length fused))))
+
+(deftest run-vm-specializes-hot-opcodes-with-fallback
+  "run-vm keeps the hot specialized opcodes fast while preserving generic fallback."
+  (let ((s (cl-cc::make-vm2-state)))
+    (assert-= 7 (cl-cc::run-vm (make-bytecode cl-cc::+op2-const+ 1 3 nil
+                                             cl-cc::+op2-add-imm2+ 0 1 4
+                                             cl-cc::+op2-halt2+ 0 nil nil)
+                               s))
+    (assert-= 1 (cl-cc::run-vm (make-bytecode cl-cc::+op2-const+ 1 7 nil
+                                             cl-cc::+op2-num-gt-imm2+ 0 1 5
+                                             cl-cc::+op2-halt2+ 0 nil nil)
+                               s))))
+
 (deftest vm2-state-globals-init
   "vm2-state pre-populates *active-restarts* (nil) and *standard-output* (non-nil)."
   (let ((s (cl-cc::make-vm2-state)))

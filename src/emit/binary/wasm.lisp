@@ -43,17 +43,15 @@
 
 (defun make-wasm-buffer ()
   "Create a fresh WASM byte buffer (adjustable byte array with fill pointer)."
-  (make-array 0 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0))
+  (make-binary-buffer 0))
 
 (defun wasm-buf-write-byte (buf byte)
   "Append a single byte to BUF (an adjustable byte array with fill-pointer)."
-  (vector-push-extend byte buf))
+  (binary-buffer-write-u8 buf byte))
 
 (defun wasm-buf-write-bytes (buf bytes)
   "Append a sequence of bytes (list or vector) to BUF."
-  (etypecase bytes
-    (list (dolist (b bytes) (vector-push-extend b buf)))
-    (vector (loop for b across bytes do (vector-push-extend b buf)))))
+  (binary-buffer-write-bytes buf bytes))
 
 (defun wasm-buf-write-uleb128 (buf value)
   "Write VALUE as unsigned LEB128 into BUF."
@@ -114,8 +112,7 @@
 
 (defun wasm-buffer-to-array (buf)
   "Convert a WASM byte buffer to a simple (unsigned-byte 8) array."
-  (make-array (length buf) :element-type '(unsigned-byte 8)
-              :initial-contents buf))
+  (binary-buffer-to-array buf))
 
 ;;; ------------------------------------------------------------
 ;;; Section 3: WASM Binary Format Constants

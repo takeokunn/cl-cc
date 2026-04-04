@@ -87,7 +87,7 @@
 (deftest-each optimizer-branch-fold
   "Constant-condition branches fold to the correct path."
   :cases (("const-true"  42 "(if 1 42 99)")
-          ("const-false" 99 "(if 0 42 99)")
+          ("const-false" 42 "(if 0 42 99)")
           ("t-true"      42 "(if t 42 99)"))
   (expected expr)
   (assert-run= expected expr))
@@ -177,6 +177,42 @@
                (list c p1 br then p2 ret1 else ret0))))
     (assert-equal 1 (count-if (lambda (i) (typep i 'cl-cc::vm-not)) out))
     (assert-true (some (lambda (i) (typep i 'cl-cc::vm-move)) out))))
+
+(deftest optimizer-branch-correlation-propagates-true-edge
+  "A repeated dominated predicate in the fallthrough block becomes vm-const 1."
+  (let* ((c    (make-vm-const :dst :r0 :value 1))
+         (p1   (cl-cc::make-vm-integer-p :dst :r1 :src :r0))
+         (br   (make-vm-jump-zero :reg :r1 :label "else"))
+         (then (make-vm-label :name "then"))
+         (p2   (cl-cc::make-vm-integer-p :dst :r2 :src :r0))
+         (ret1 (make-vm-ret :reg :r2))
+         (else (make-vm-label :name "else"))
+         (ret0 (make-vm-ret :reg :r1))
+         (out  (cl-cc::opt-pass-branch-correlation
+                (list c p1 br then p2 ret1 else ret0))))
+    (assert-true (some (lambda (i)
+                         (and (typep i 'cl-cc::vm-const)
+                              (eq :r2 (cl-cc::vm-dst i))
+                              (eql 1 (cl-cc::vm-value i))))
+                       out))))
+
+(deftest optimizer-branch-correlation-propagates-false-edge
+  "A repeated dominated predicate in the taken block becomes vm-const 0."
+  (let* ((c    (make-vm-const :dst :r0 :value 1))
+         (p1   (cl-cc::make-vm-integer-p :dst :r1 :src :r0))
+         (br   (make-vm-jump-zero :reg :r1 :label "else"))
+         (then (make-vm-label :name "then"))
+         (ret1 (make-vm-ret :reg :r1))
+         (else (make-vm-label :name "else"))
+         (p2   (cl-cc::make-vm-integer-p :dst :r2 :src :r0))
+         (ret0 (make-vm-ret :reg :r2))
+         (out  (cl-cc::opt-pass-branch-correlation
+                (list c p1 br then ret1 else p2 ret0))))
+    (assert-true (some (lambda (i)
+                         (and (typep i 'cl-cc::vm-const)
+                              (eq :r2 (cl-cc::vm-dst i))
+                              (eql 0 (cl-cc::vm-value i))))
+                       out))))
 
 ;;; ── End-to-End Correctness ───────────────────────────────────────────────
 
@@ -696,6 +732,22 @@
       (assert-equal :R0 (cl-cc::vm-lhs add-inst))
       (assert-equal :R0 (cl-cc::vm-rhs add-inst)))))
 
+(deftest heap-alias-oracle-tracks-must-alias-through-move
+  "Heap alias oracle preserves a fresh root across vm-move."
+  (let* ((alloc (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (copy  (make-vm-move :dst :r3 :src :r0))
+         (roots (cl-cc::opt-compute-heap-aliases (list alloc copy))))
+    (assert-true (cl-cc::opt-must-alias-p :r0 :r3 roots))
+    (assert-false (cl-cc::opt-must-alias-p :r0 :r9 roots))))
+
+(deftest heap-alias-oracle-may-alias-is-conservative-for-unknowns
+  "Unknown heap roots remain may-alias to preserve safety."
+  (let* ((alloc-a (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (alloc-b (make-vm-make-array :dst :r4 :size-reg :r5))
+         (roots   (cl-cc::opt-compute-heap-aliases (list alloc-a alloc-b))))
+    (assert-false (cl-cc::opt-may-alias-p :r0 :r4 roots))
+    (assert-true  (cl-cc::opt-may-alias-p :r0 :r9 roots))))
+
 ;;; ─── opt-inst-read-regs ──────────────────────────────────────────────────────
 
 (deftest-each opt-inst-read-regs-cases
@@ -944,11 +996,115 @@
                        cl-cc::*opt-convergence-passes*
                        :test #'eq)))
 
+(deftest global-dce-removes-unreachable-registered-function
+  "opt-pass-global-dce removes a registered function when nothing at top level reaches it."
+  (let* ((closure (make-vm-closure :dst :r0 :label "dead" :params '(:r1)
+                                   :captured nil :optional-params nil :rest-param nil :key-params nil))
+         (register (cl-cc::make-vm-register-function :name 'dead :src :r0))
+         (label (make-vm-label :name "dead"))
+         (body (make-vm-const :dst :r2 :value 7))
+         (ret (make-vm-ret :reg :r2))
+         (out (cl-cc::opt-pass-global-dce (list closure register label body ret))))
+    (assert-false (member closure out))
+    (assert-false (member register out))
+    (assert-false (member label out))
+    (assert-false (member body out))
+    (assert-false (member ret out))))
+
+(deftest global-dce-preserves-top-level-called-chain
+  "opt-pass-global-dce keeps functions reachable from top-level known calls."
+  (let* ((f-closure (make-vm-closure :dst :r0 :label "f" :params '(:r1)
+                                     :captured nil :optional-params nil :rest-param nil :key-params nil))
+         (f-register (cl-cc::make-vm-register-function :name 'f :src :r0))
+         (f-label (make-vm-label :name "f"))
+         (f-ref (make-vm-func-ref :dst :r2 :label "g"))
+         (f-call (make-vm-call :dst :r3 :func :r2 :args '(:r1)))
+         (f-ret (make-vm-ret :reg :r3))
+         (g-closure (make-vm-closure :dst :r4 :label "g" :params '(:r5)
+                                     :captured nil :optional-params nil :rest-param nil :key-params nil))
+         (g-label (make-vm-label :name "g"))
+         (g-body (make-vm-const :dst :r6 :value 9))
+         (g-ret (make-vm-ret :reg :r6))
+         (top-ref (make-vm-func-ref :dst :r7 :label "f"))
+         (top-arg (make-vm-const :dst :r8 :value 1))
+         (top-call (make-vm-call :dst :r9 :func :r7 :args '(:r8)))
+         (top-ret (make-vm-ret :reg :r9))
+         (out (cl-cc::opt-pass-global-dce
+               (list f-closure f-register f-label f-ref f-call f-ret
+                     g-closure g-label g-body g-ret
+                     top-ref top-arg top-call top-ret))))
+    (assert-true (member f-closure out))
+    (assert-true (member f-label out))
+    (assert-true (member g-closure out))
+    (assert-true (member g-label out))
+    (assert-true (member top-call out))))
+
+(deftest global-dce-is-in-convergence-passes
+  "opt-pass-global-dce is part of the convergence pass pipeline."
+  (assert-true (member #'cl-cc::opt-pass-global-dce
+                       cl-cc::*opt-convergence-passes*
+                       :test #'eq)))
+
 (deftest inline-is-in-convergence-passes
   "opt-pass-inline participates in the convergence pipeline via a named wrapper pass."
   (assert-true (member #'cl-cc::opt-pass-inline-iterative
                        cl-cc::*opt-convergence-passes*
                        :test #'eq)))
+
+(deftest optimizer-custom-pass-pipeline
+  "optimize-instructions accepts a custom keyword pass pipeline."
+  (let* ((instrs (list (make-vm-const :dst :r0 :value 1)
+                       (make-vm-const :dst :r1 :value 2)
+                       (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)))
+         (out (cl-cc::optimize-instructions instrs :pass-pipeline '(:fold :dce))))
+    (assert-equal 0 (length out))))
+
+(deftest optimizer-string-pass-pipeline
+  "optimize-instructions also accepts a comma-separated string pipeline."
+  (let* ((instrs (list (make-vm-const :dst :r0 :value 1)
+                       (make-vm-const :dst :r1 :value 2)
+                       (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)))
+         (out (cl-cc::optimize-instructions instrs :pass-pipeline "fold,dce")))
+    (assert-equal 0 (length out))))
+
+(deftest optimizer-pass-pipeline-timings-output
+  "optimize-instructions can print per-pass timing lines."
+  (let* ((instrs (list (make-vm-const :dst :r0 :value 1)))
+         (stream (make-string-output-stream)))
+    (cl-cc::optimize-instructions instrs
+                                  :pass-pipeline '(:fold)
+                                  :print-pass-timings t
+                                  :timing-stream stream)
+    (let ((text (get-output-stream-string stream)))
+      (assert-true (search "OPT-PASS-FOLD" (string-upcase text))))))
+
+(deftest optimizer-remarks-output-changed
+  "optimize-instructions can print a changed remark when a pass rewrites the program."
+  (let* ((instrs (list (make-vm-const :dst :r0 :value 1)
+                       (make-vm-const :dst :r1 :value 2)
+                       (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)))
+         (stream (make-string-output-stream)))
+    (cl-cc::optimize-instructions instrs
+                                  :pass-pipeline '(:fold)
+                                  :print-opt-remarks t
+                                  :opt-remarks-mode :changed
+                                  :opt-remarks-stream stream)
+    (let ((text (string-upcase (get-output-stream-string stream))))
+      (assert-true (search "OPT-PASS-FOLD" text))
+      (assert-true (search "CHANGED" text)))))
+
+(deftest optimizer-remarks-output-missed
+  "optimize-instructions can print a missed remark when a pass makes no change."
+  (let* ((instrs (list (make-vm-const :dst :r0 :value 1)))
+         (stream (make-string-output-stream)))
+    (cl-cc::optimize-instructions instrs
+                                  :pass-pipeline '(:fold)
+                                  :print-opt-remarks t
+                                  :opt-remarks-mode :missed
+                                  :opt-remarks-stream stream)
+    (let ((text (string-upcase (get-output-stream-string stream))))
+      (assert-true (search "OPT-PASS-FOLD" text))
+      (assert-true (search "MISSED" text)))))
 
 (deftest licm-does-not-hoist-loop-defined-value
   "opt-pass-licm keeps a pure instruction inside the loop when it reads a loop-defined register."
@@ -1017,6 +1173,23 @@
 (deftest bswap-recognition-is-in-convergence-passes
   "opt-pass-bswap-recognition is part of the convergence pass pipeline."
   (assert-true (member #'cl-cc::opt-pass-bswap-recognition
+                       cl-cc::*opt-convergence-passes*
+                       :test #'eq)))
+
+(deftest rotate-recognition-collapses-shift-or-tree
+  "opt-pass-rotate-recognition collapses a two-shift + OR idiom to vm-rotate."
+  (let* ((c0  (make-vm-const :dst :r1 :value 8))
+         (a0  (make-vm-ash   :dst :r2 :lhs :r0 :rhs :r1))
+         (c1  (make-vm-const :dst :r3 :value -56))
+         (a1  (make-vm-ash   :dst :r4 :lhs :r0 :rhs :r3))
+         (o0  (make-vm-logior :dst :r5 :lhs :r2 :rhs :r4))
+         (out (cl-cc::opt-pass-rotate-recognition (list c0 a0 c1 a1 o0))))
+    (assert-= 1 (count-if (lambda (i) (typep i 'cl-cc::vm-rotate)) out))
+    (assert-false (some (lambda (i) (typep i 'cl-cc::vm-logior)) out))))
+
+(deftest rotate-recognition-is-in-convergence-passes
+  "opt-pass-rotate-recognition is part of the convergence pass pipeline."
+  (assert-true (member #'cl-cc::opt-pass-rotate-recognition
                        cl-cc::*opt-convergence-passes*
                        :test #'eq)))
 
@@ -1132,6 +1305,22 @@
                                (eq (cl-cc::vm-move-dst i) :r1)
                                (eq (cl-cc::vm-move-src i) :r1)))
                         out))))
+
+(deftest store-to-load-forward-slot-through-moved-alias
+  "Alias-aware slot forwarding handles object registers copied by vm-move."
+  (let* ((obj  (make-vm-cons :dst :r0 :car-src :r8 :cdr-src :r9))
+         (obj2 (make-vm-move :dst :r3 :src :r0))
+         (val  (make-vm-const :dst :r1 :value 99))
+         (w    (cl-cc::make-vm-slot-write :obj-reg :r0 :slot-name 'x :value-reg :r1))
+         (r    (cl-cc::make-vm-slot-read :dst :r2 :obj-reg :r3 :slot-name 'x))
+         (ret  (make-vm-ret :reg :r2))
+         (out  (cl-cc::opt-pass-store-to-load-forward (list obj obj2 val w r ret))))
+    (assert-false (member r out))
+    (assert-true (some (lambda (i)
+                         (and (typep i 'cl-cc::vm-move)
+                              (eq (cl-cc::vm-move-dst i) :r2)
+                              (eq (cl-cc::vm-move-src i) :r1)))
+                       out))))
 
 ;;; ── opt-pass-strength-reduce: Strength Reduction ─────────────────────────
 

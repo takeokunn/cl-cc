@@ -273,6 +273,9 @@
                                     (wasm-fixnum-unbox reg-map (vm-lhs inst))
                                     (wasm-fixnum-unbox reg-map (vm-rhs inst))))))))
 
+(defmethod emit-instruction ((target wasm-target) (inst vm-integer-add) stream)
+  (emit-instruction target (make-vm-add :dst (vm-dst inst) :lhs (vm-lhs inst) :rhs (vm-rhs inst)) stream))
+
 (defmethod emit-instruction ((target wasm-target) (inst vm-sub) stream)
   (let ((reg-map (wasm-target-reg-map target)))
     (format stream "~%    ~A"
@@ -282,6 +285,9 @@
                                     (wasm-fixnum-unbox reg-map (vm-lhs inst))
                                     (wasm-fixnum-unbox reg-map (vm-rhs inst))))))))
 
+(defmethod emit-instruction ((target wasm-target) (inst vm-integer-sub) stream)
+  (emit-instruction target (make-vm-sub :dst (vm-dst inst) :lhs (vm-lhs inst) :rhs (vm-rhs inst)) stream))
+
 (defmethod emit-instruction ((target wasm-target) (inst vm-mul) stream)
   (let ((reg-map (wasm-target-reg-map target)))
     (format stream "~%    ~A"
@@ -290,6 +296,9 @@
                             (format nil "(i64.mul ~A ~A)"
                                     (wasm-fixnum-unbox reg-map (vm-lhs inst))
                                     (wasm-fixnum-unbox reg-map (vm-rhs inst))))))))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-integer-mul) stream)
+  (emit-instruction target (make-vm-mul :dst (vm-dst inst) :lhs (vm-lhs inst) :rhs (vm-rhs inst)) stream))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-rotate) stream)
   (let ((reg-map (wasm-target-reg-map target)))
@@ -396,8 +405,28 @@
     (format stream "~%    ~A"
             (reg-local-set reg-map (vm-dst inst)
                            (format nil
-                                   "(if (result eqref) (ref.is_null ~A) (then (ref.i31 (i32.const 1))) (else (ref.null eq)))"
-                                   (reg-local-ref reg-map (vm-src inst)))))))
+                                    "(if (result eqref) (ref.is_null ~A) (then (ref.i31 (i32.const 1))) (else (ref.null eq)))"
+                                    (reg-local-ref reg-map (vm-src inst)))))))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-logcount) stream)
+  (let ((reg-map (wasm-target-reg-map target)))
+    (format stream "~%    ~A"
+            (reg-local-set reg-map (vm-dst inst)
+                           (wasm-fixnum-box
+                            (format nil "(i64.popcnt ~A)"
+                                    (wasm-fixnum-unbox reg-map (vm-src inst))))))))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-integer-length) stream)
+  (let* ((reg-map (wasm-target-reg-map target))
+         (src (wasm-fixnum-unbox reg-map (vm-src inst))))
+    (format stream "~%    ~A"
+            (reg-local-set reg-map (vm-dst inst)
+                           (format nil
+                                   "(if (result eqref) (i64.eqz ~A) (then ~A) (else ~A))"
+                                   src
+                                   (wasm-fixnum-box "(i64.const 0)")
+                                   (wasm-fixnum-box
+                                    (format nil "(i64.sub (i64.const 64) (i64.clz ~A))" src)))))))
 
 ;;; Catch-all for unsupported instructions
 (defmethod emit-instruction ((target wasm-target) instruction stream)

@@ -23,14 +23,28 @@
   "values with one argument returns that argument."
   (assert-run= 42 "(values 42)"))
 
-(deftest codegen-mvb-compilation
-  "Compiling multiple-value-bind emits vm-mv-bind and returns a register."
+(deftest codegen-mvb-explicit-values-uses-direct-binding
+  "Compiling multiple-value-bind over explicit ast-values skips vm-values/vm-mv-bind."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast (cl-cc::make-ast-multiple-value-bind
+                              :vars '(a b)
+                              :values-form (cl-cc::make-ast-values
+                                            :forms (list (make-ast-int :value 1)
+                                                         (make-ast-int :value 2)))
+                              :body (list (make-ast-var :name 'a)))
+                            ctx)))
+    (assert-false (codegen-find-inst ctx 'cl-cc::vm-values))
+    (assert-false (codegen-find-inst ctx 'cl-cc::vm-mv-bind))
+    (assert-true (keywordp reg))))
+
+(deftest codegen-mvb-non-values-form-still-uses-vm-mv-bind
+  "Non-ast-values multiple-value-bind still uses the generic vm-mv-bind path."
   (let* ((ctx (make-codegen-ctx))
          (reg (compile-ast (cl-cc::make-ast-multiple-value-bind
                              :vars '(a b)
-                             :values-form (cl-cc::make-ast-values
-                                           :forms (list (make-ast-int :value 1)
-                                                        (make-ast-int :value 2)))
+                             :values-form (make-ast-call :func 'floor
+                                                         :args (list (make-ast-int :value 17)
+                                                                     (make-ast-int :value 5)))
                              :body (list (make-ast-var :name 'a)))
                            ctx)))
     (assert-true (codegen-find-inst ctx 'cl-cc::vm-mv-bind))
@@ -43,14 +57,42 @@
   (expected code)
   (assert-run= expected code))
 
-(deftest codegen-mv-call-compilation
-  "Compiling ast-multiple-value-call emits vm-apply and returns a register."
+(deftest codegen-mv-call-explicit-values-uses-direct-call
+  "Explicit ast-values arguments compile directly to vm-call without vm-apply."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast (cl-cc::make-ast-multiple-value-call
+                              :func (make-ast-function :name '+)
+                              :args (list (cl-cc::make-ast-values
+                                           :forms (list (make-ast-int :value 1)
+                                                        (make-ast-int :value 2)))))
+                            ctx)))
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-call))
+    (assert-false (codegen-find-inst ctx 'cl-cc::vm-apply))
+    (assert-false (codegen-find-inst ctx 'cl-cc::vm-values-to-list))
+    (assert-true (keywordp reg))))
+
+(deftest codegen-mv-call-no-args-uses-direct-call
+  "Zero-arg multiple-value-call compiles directly to vm-call."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast (cl-cc::make-ast-multiple-value-call
+                             :func (make-ast-function :name 'list)
+                             :args nil)
+                           ctx)))
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-call))
+    (assert-false (codegen-find-inst ctx 'cl-cc::vm-apply))
+    (assert-true (keywordp reg))))
+
+(deftest codegen-mv-call-mixed-args-still-uses-apply-path
+  "Non-ast-values arguments keep the generic multiple-value-call path."
   (let* ((ctx (make-codegen-ctx))
          (reg (compile-ast (cl-cc::make-ast-multiple-value-call
                              :func (make-ast-function :name '+)
                              :args (list (cl-cc::make-ast-values
                                           :forms (list (make-ast-int :value 1)
-                                                       (make-ast-int :value 2)))))
+                                                       (make-ast-int :value 2)))
+                                         (make-ast-call :func 'floor
+                                                        :args (list (make-ast-int :value 17)
+                                                                    (make-ast-int :value 5)))))
                            ctx)))
     (assert-true (codegen-find-inst ctx 'cl-cc::vm-apply))
     (assert-true (keywordp reg))))

@@ -1,4 +1,6 @@
 (in-package :cl-cc)
+
+(declaim (special *x86-64-calling-convention*))
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;; Codegen — Entry Points + Calls + Exception Handling + Multiple Values
 ;;;
@@ -377,7 +379,7 @@
   (vm-instructions nil)
   (optimized-instructions nil))
 
-(defun compile-toplevel-forms (forms &key (target :x86_64) type-check (safety 1))
+(defun compile-toplevel-forms (forms &key (target :x86_64) type-check (safety 1) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all))
   "Compile a list of top-level forms (e.g., from a source file).
 Handles defun, defvar, and expression forms.
   Returns a compilation-result struct with program, assembly, and globals."
@@ -447,8 +449,14 @@ Handles defun, defvar, and expression forms.
              (optimized nil)
              (leaf-p nil)
              (program nil))
-        (multiple-value-setq (optimized leaf-p)
-          (optimize-instructions instructions))
+         (multiple-value-setq (optimized leaf-p)
+           (optimize-instructions instructions
+                                  :pass-pipeline pass-pipeline
+                                  :print-pass-timings print-pass-timings
+                                  :timing-stream timing-stream
+                                  :print-opt-remarks print-opt-remarks
+                                  :opt-remarks-stream opt-remarks-stream
+                                  :opt-remarks-mode opt-remarks-mode))
         (setf program (make-vm-program
                        :instructions instructions
                        :result-register last-reg

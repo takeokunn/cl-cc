@@ -25,6 +25,14 @@
       (when result
         (compilation-result-assembly result)))))
 
+(defun %direct-wasm-emit (inst)
+  "Emit INST through the non-trampoline wasm target methods directly." 
+  (let ((s (make-string-output-stream))
+        (target (make-instance 'cl-cc::wasm-target
+                               :reg-map (cl-cc::make-wasm-reg-map-for-function 0))))
+    (cl-cc::emit-instruction target inst s)
+    (get-output-stream-string s)))
+
 ;;; ──────────────────────────────────────────────────────────────────────────
 ;;; Section 1-2: Module structure — always present in any WAT output
 ;;; ──────────────────────────────────────────────────────────────────────────
@@ -142,6 +150,34 @@
   (let ((wat (%wat-for "(let ((x 1)) x)")))
     (assert-true wat)
     (assert-output-contains wat "local.tee")))
+
+(deftest wasm-logcount-lowers-to-popcnt
+  "logcount lowering uses i64.popcnt in emitted WAT."
+  (let ((wat (%wat-for "(defun f (x) (logcount x))")))
+    (assert-true wat)
+    (assert-output-contains wat "i64.popcnt")))
+
+(deftest wasm-integer-length-lowers-to-clz
+  "integer-length lowering uses i64.clz-based emitted WAT."
+  (let ((wat (%wat-for "(defun f (x) (integer-length x))")))
+    (assert-true wat)
+    (assert-output-contains wat "i64.clz")))
+
+(deftest wasm-direct-logcount-emitter
+  "Direct wasm emitter lowers vm-logcount to i64.popcnt too."
+  (let ((wat (%direct-wasm-emit (cl-cc::make-vm-logcount :dst :r0 :src :r1))))
+    (assert-output-contains wat "i64.popcnt")))
+
+(deftest wasm-direct-integer-length-emitter
+  "Direct wasm emitter lowers vm-integer-length to i64.clz too."
+  (let ((wat (%direct-wasm-emit (cl-cc::make-vm-integer-length :dst :r0 :src :r1))))
+    (assert-output-contains wat "i64.clz")))
+
+(deftest wasm-direct-integer-arith-aliases
+  "Direct wasm emitter supports integer-specialized arithmetic via the same i64 ops."
+  (assert-output-contains (%direct-wasm-emit (cl-cc::make-vm-integer-add :dst :r0 :lhs :r1 :rhs :r2)) "i64.add")
+  (assert-output-contains (%direct-wasm-emit (cl-cc::make-vm-integer-sub :dst :r0 :lhs :r1 :rhs :r2)) "i64.sub")
+  (assert-output-contains (%direct-wasm-emit (cl-cc::make-vm-integer-mul :dst :r0 :lhs :r1 :rhs :r2)) "i64.mul"))
 
 (deftest wasm-elem-segment-present
   "Test that the WAT module includes an elem segment to populate the funcref table."

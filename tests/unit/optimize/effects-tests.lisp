@@ -30,6 +30,47 @@
   (assert-eq :unknown (cl-cc::vm-inst-effect-kind
                         (make-vm-call :dst :r0 :func :r1 :args nil))))
 
+(deftest opt-infer-transitive-function-purity-acyclic
+  "Known direct-call DAGs infer purity transitively, while impure callees block it."
+  (let* ((pure-leaf-closure (make-vm-closure :dst :r10 :label "pure-leaf" :params '(:r0)))
+         (pure-leaf-label   (make-vm-label :name "pure-leaf"))
+         (pure-leaf-body    (make-vm-add :dst :r1 :lhs :r0 :rhs :r0))
+         (pure-leaf-ret     (make-vm-ret :reg :r1))
+         (pure-wrapper-closure (make-vm-closure :dst :r11 :label "pure-wrapper" :params '(:r2)))
+         (pure-wrapper-label   (make-vm-label :name "pure-wrapper"))
+         (pure-wrapper-ref     (make-vm-func-ref :dst :r12 :label "pure-leaf"))
+         (pure-wrapper-call    (make-vm-call :dst :r13 :func :r12 :args '(:r2)))
+         (pure-wrapper-ret     (make-vm-ret :reg :r13))
+         (impure-leaf-closure  (make-vm-closure :dst :r20 :label "impure-leaf" :params '(:r3)))
+         (impure-leaf-label    (make-vm-label :name "impure-leaf"))
+         (impure-leaf-write    (make-vm-set-global :src :r3 :name 'x))
+         (impure-leaf-ret      (make-vm-ret :reg :r3))
+         (impure-wrapper-closure (make-vm-closure :dst :r21 :label "impure-wrapper" :params '(:r4)))
+         (impure-wrapper-label   (make-vm-label :name "impure-wrapper"))
+         (impure-wrapper-ref     (make-vm-func-ref :dst :r22 :label "impure-leaf"))
+         (impure-wrapper-call    (make-vm-call :dst :r23 :func :r22 :args '(:r4)))
+         (impure-wrapper-ret     (make-vm-ret :reg :r23))
+         (insts (list pure-leaf-closure pure-leaf-label pure-leaf-body pure-leaf-ret
+                      pure-wrapper-closure pure-wrapper-label pure-wrapper-ref pure-wrapper-call pure-wrapper-ret
+                      impure-leaf-closure impure-leaf-label impure-leaf-write impure-leaf-ret
+                      impure-wrapper-closure impure-wrapper-label impure-wrapper-ref impure-wrapper-call impure-wrapper-ret))
+         (pure (cl-cc::opt-infer-transitive-function-purity insts)))
+    (assert-true (gethash "pure-leaf" pure))
+    (assert-true (gethash "pure-wrapper" pure))
+    (assert-false (gethash "impure-leaf" pure))
+    (assert-false (gethash "impure-wrapper" pure))))
+
+(deftest opt-infer-transitive-function-purity-recursive-conservative
+  "Recursive functions remain conservative and are not inferred pure yet."
+  (let* ((loop-closure (make-vm-closure :dst :r30 :label "loop" :params '(:r0)))
+         (loop-label   (make-vm-label :name "loop"))
+         (self-ref     (make-vm-func-ref :dst :r31 :label "loop"))
+         (self-call    (make-vm-call :dst :r32 :func :r31 :args '(:r0)))
+         (loop-ret     (make-vm-ret :reg :r32))
+         (pure (cl-cc::opt-infer-transitive-function-purity
+                (list loop-closure loop-label self-ref self-call loop-ret))))
+    (assert-false (gethash "loop" pure))))
+
 ;;; ─── opt-inst-pure-p ─────────────────────────────────────────────────────
 
 (deftest-each opt-pure-arithmetic

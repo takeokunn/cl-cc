@@ -196,8 +196,189 @@
       (maphash (lambda (label _callees)
                  (when (reaches-self-p label label (make-hash-table :test #'equal))
                    (setf (gethash label recursive) t)))
-               graph))
+                graph))
     recursive))
+
+(defun opt-function-body-transitively-pure-p (body func-defs name-to-label pure-labels)
+  "Return T if BODY is transitively pure under PURE-LABELS.
+
+Known direct calls are allowed only when their callee label is already marked
+pure in PURE-LABELS. Unknown calls remain conservative and therefore impure."
+  (let ((reg-track (make-hash-table :test #'eq)))
+    (dolist (inst body t)
+      (typecase inst
+        ((or vm-closure vm-func-ref)
+         (let ((label (vm-label-name inst)))
+           (if (gethash label func-defs)
+               (setf (gethash (vm-dst inst) reg-track) label)
+               (remhash (vm-dst inst) reg-track))))
+        (vm-const
+         (let ((label (and (symbolp (vm-value inst))
+                           (gethash (vm-value inst) name-to-label))))
+           (if (and label (gethash label func-defs))
+               (setf (gethash (vm-dst inst) reg-track) label)
+               (remhash (vm-dst inst) reg-track))))
+        (vm-move
+         (multiple-value-bind (label present-p)
+             (gethash (vm-src inst) reg-track)
+           (if present-p
+               (setf (gethash (vm-dst inst) reg-track) label)
+               (remhash (vm-dst inst) reg-track))))
+        ((or vm-call vm-tail-call)
+         (let ((callee (gethash (vm-func-reg inst) reg-track)))
+           (unless (and callee (gethash callee pure-labels))
+             (return-from opt-function-body-transitively-pure-p nil))
+           (when (opt-inst-dst inst)
+             (remhash (opt-inst-dst inst) reg-track))))
+        (t
+         (unless (or (typep inst 'vm-ret)
+                     (typep inst 'vm-label)
+                     (opt-inst-pure-p inst))
+           (return-from opt-function-body-transitively-pure-p nil))
+         (let ((dst (opt-inst-dst inst)))
+           (when dst
+             (remhash dst reg-track))))))))
+
+(defun opt-infer-transitive-function-purity (instructions)
+  "Infer a conservative set of transitively pure function labels.
+
+The inference covers known direct-call edges between collected linear function
+bodies. Recursive SCCs remain conservative and are not marked pure."
+  (let* ((func-defs (opt-collect-function-defs instructions))
+         (name-to-label (opt-build-function-name-map instructions))
+         (graph (opt-build-call-graph instructions func-defs name-to-label))
+         (recursive-labels (opt-call-graph-recursive-labels graph))
+         (pure-labels (make-hash-table :test #'equal))
+         (changed t))
+    (loop while changed
+          do (setf changed nil)
+             (maphash (lambda (label def)
+                        (unless (or (gethash label pure-labels)
+                                    (gethash label recursive-labels))
+                          (when (opt-function-body-transitively-pure-p
+                                 (getf def :body) func-defs name-to-label pure-labels)
+                            (setf (gethash label pure-labels) t
+                                  changed t))))
+                      func-defs))
+    pure-labels))
+
+(defun opt-function-body-instruction-set (func-defs)
+  "Return EQ hash-table containing every instruction that belongs to a function body." 
+  (let ((body-inst-set (make-hash-table :test #'eq)))
+    (maphash (lambda (_label def)
+               (dolist (inst (getf def :body))
+                 (setf (gethash inst body-inst-set) t)))
+             func-defs)
+    body-inst-set))
+
+(defun opt-function-body-instruction-labels (func-defs)
+  "Return EQ hash-table mapping each function-body instruction to its label." 
+  (let ((inst->label (make-hash-table :test #'eq)))
+    (maphash (lambda (label def)
+               (dolist (inst (getf def :body))
+                 (setf (gethash inst inst->label) label)))
+             func-defs)
+    inst->label))
+
+(defun opt-top-level-function-roots (instructions func-defs name-to-label body-inst-set)
+  "Return an EQUAL hash-table of function labels reachable from top-level code.
+
+Only instructions outside collected function bodies are scanned. This keeps the
+analysis conservative and avoids treating nested function internals as roots."
+  (let ((roots (make-hash-table :test #'equal))
+        (reg-track (make-hash-table :test #'eq)))
+    (dolist (inst instructions roots)
+      (unless (gethash inst body-inst-set)
+        (typecase inst
+          ((or vm-closure vm-func-ref)
+           (let ((label (vm-label-name inst)))
+             (when (gethash label func-defs)
+               (setf (gethash (vm-dst inst) reg-track) label))))
+          (vm-const
+           (let ((label (and (symbolp (vm-value inst))
+                             (gethash (vm-value inst) name-to-label))))
+             (when (and label (gethash label func-defs))
+               (setf (gethash (vm-dst inst) reg-track) label))))
+          (vm-move
+           (multiple-value-bind (label present-p)
+               (gethash (vm-src inst) reg-track)
+             (if present-p
+                 (setf (gethash (vm-dst inst) reg-track) label)
+                 (remhash (vm-dst inst) reg-track))))
+          ((or vm-call vm-tail-call)
+           (let ((label (gethash (vm-func-reg inst) reg-track)))
+             (when label
+               (setf (gethash label roots) t)))
+           (let ((dst (opt-inst-dst inst)))
+             (when dst (remhash dst reg-track))))
+          (vm-set-global
+           (let ((label (gethash (vm-src inst) reg-track)))
+             (when label
+               (setf (gethash label roots) t))))
+          (t
+           (let ((dst (opt-inst-dst inst)))
+             (when dst (remhash dst reg-track)))))))))
+
+(defun opt-reachable-function-labels (graph roots)
+  "Return an EQUAL hash-table of function labels reachable in GRAPH from ROOTS." 
+  (let ((reachable (make-hash-table :test #'equal))
+        (worklist nil))
+    (maphash (lambda (label _)
+               (push label worklist))
+             roots)
+    (loop while worklist
+          do (let ((label (pop worklist)))
+               (unless (gethash label reachable)
+                 (setf (gethash label reachable) t)
+                 (dolist (callee (gethash label graph))
+                   (push callee worklist)))))
+    reachable))
+
+(defun opt-pass-global-dce (instructions)
+  "Remove unreachable linear function definitions conservatively.
+
+The pass only removes whole vm-closure/vm-register-function/function-body groups
+for labels that are unreachable from top-level function roots. Top-level code is
+preserved verbatim. Non-linear or otherwise uncollected functions are left in
+place by construction." 
+  (let* ((func-defs (opt-collect-function-defs instructions))
+         (name-to-label (opt-build-function-name-map instructions)))
+    (when (= 0 (hash-table-count func-defs))
+      (return-from opt-pass-global-dce instructions))
+    (let* ((body-inst-set (opt-function-body-instruction-set func-defs))
+           (body-inst-labels (opt-function-body-instruction-labels func-defs))
+           (graph (opt-build-call-graph instructions func-defs name-to-label))
+           (roots (opt-top-level-function-roots instructions func-defs name-to-label body-inst-set))
+           (reachable (opt-reachable-function-labels graph roots))
+           (closure-reg->label (make-hash-table :test #'eq))
+           (labels-to-drop (make-hash-table :test #'equal)))
+      (maphash (lambda (label _def)
+                 (unless (gethash label reachable)
+                   (setf (gethash label labels-to-drop) t)))
+               func-defs)
+      (when (= 0 (hash-table-count labels-to-drop))
+        (return-from opt-pass-global-dce instructions))
+      (dolist (inst instructions)
+        (when (vm-closure-p inst)
+          (setf (gethash (vm-dst inst) closure-reg->label) (vm-label-name inst))))
+      (remove-if (lambda (inst)
+                   (cond
+                     ((and (vm-closure-p inst)
+                           (gethash (vm-label-name inst) labels-to-drop))
+                      t)
+                     ((and (typep inst 'vm-label)
+                           (gethash (vm-name inst) labels-to-drop))
+                      t)
+                     ((and (gethash inst body-inst-set)
+                           (not (typep inst 'vm-label))
+                           (gethash (gethash inst body-inst-labels) labels-to-drop))
+                      t)
+                     ((and (typep inst 'vm-register-function)
+                           (let ((label (gethash (vm-src inst) closure-reg->label)))
+                             (and label (gethash label labels-to-drop))))
+                      t)
+                     (t nil)))
+                 instructions))))
 
 (defun opt-inline-inst-cost (inst)
   "Return the inline cost of INST using the shared e-graph opcode table.

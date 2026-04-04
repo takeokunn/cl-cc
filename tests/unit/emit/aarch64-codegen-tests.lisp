@@ -91,10 +91,22 @@ Returns the byte vector, or NIL on error."
   (assert-= 8 (gethash 'cl-cc::vm-min cl-cc::*a64-instruction-sizes*))
   (assert-= 8 (gethash 'cl-cc::vm-max cl-cc::*a64-instruction-sizes*)))
 
+(deftest aarch64-integer-arith-instruction-sizes
+  "Integer-specialized arithmetic aliases are accounted for in the AArch64 size table."
+  (assert-= 4 (gethash 'cl-cc::vm-integer-add cl-cc::*a64-instruction-sizes*))
+  (assert-= 4 (gethash 'cl-cc::vm-integer-sub cl-cc::*a64-instruction-sizes*))
+  (assert-= 4 (gethash 'cl-cc::vm-integer-mul cl-cc::*a64-instruction-sizes*)))
+
 (deftest aarch64-min-max-emitter-table-entries
   "vm-min and vm-max are present in the AArch64 emitter table."
   (assert-true (functionp (gethash 'cl-cc::vm-min cl-cc::*a64-emitter-table*)))
   (assert-true (functionp (gethash 'cl-cc::vm-max cl-cc::*a64-emitter-table*))))
+
+(deftest aarch64-integer-arith-emitter-table-entries
+  "Integer-specialized arithmetic aliases are present in the AArch64 emitter table."
+  (assert-true (functionp (gethash 'cl-cc::vm-integer-add cl-cc::*a64-emitter-table*)))
+  (assert-true (functionp (gethash 'cl-cc::vm-integer-sub cl-cc::*a64-emitter-table*)))
+  (assert-true (functionp (gethash 'cl-cc::vm-integer-mul cl-cc::*a64-emitter-table*))))
 
 (deftest aarch64-tail-call-emitter-encoding
   "vm-tail-call emits BR Xn on AArch64."
@@ -139,6 +151,34 @@ Returns the byte vector, or NIL on error."
     (assert-= #xC0 (nth 5 max-bytes))
     (assert-= #x82 (nth 6 max-bytes))
     (assert-= #x9A (nth 7 max-bytes))))
+
+(deftest aarch64-select-emitter-encoding
+  "emit-a64-vm-select emits MOV + CMP + CSEL on AArch64."
+  (let ((bytes (%a64-collect-bytes
+                (lambda (s)
+                  (cl-cc::emit-a64-vm-select
+                   (cl-cc::make-vm-select :dst :R0 :cond-reg :R1 :then-reg :R2 :else-reg :R3)
+                   s)))))
+    (assert-= 12 (length bytes))
+    ;; First instruction is MOV X0, X3; second is CMP X1, XZR; third is CSEL
+    (assert-= #xE0 (nth 0 bytes))
+    (assert-= #x03 (nth 1 bytes))
+    (assert-= #x1F (nth 6 bytes))
+    (assert-= #x9A (nth 11 bytes))))
+
+(deftest aarch64-jump-zero-uses-cbz
+  "emit-a64-vm-jump-zero emits a single CBZ instruction." 
+  (let ((bytes (%a64-collect-bytes
+                (lambda (s)
+                  (cl-cc::emit-a64-vm-jump-zero
+                   (cl-cc::make-vm-jump-zero :reg :R1 :label "L1")
+                   s 0 (let ((ht (make-hash-table :test #'equal)))
+                         (setf (gethash "L1" ht) 4)
+                         ht))))))
+    (assert-= 4 (length bytes))
+    ;; low byte and high opcode nibble are enough to prove CBZ path, not CMP+B.EQ
+    (assert-= #x01 (logand (nth 0 bytes) #x1F))
+    (assert-= #xB4 (nth 3 bytes))))
 
 (deftest aarch64-leaf-program-trims-prologue-through-pipeline
   "A real compiled leaf program reaches native codegen and trims the prologue."

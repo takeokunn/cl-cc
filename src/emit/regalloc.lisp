@@ -15,6 +15,9 @@
   (end nil)
   (use-positions nil)
   (parameter-index nil)
+  (coalesce-with nil)
+  (crosses-call-p nil)
+  (remat-const nil)
   (return-value-p nil)
   (phys-reg nil)
   (spill-slot nil))
@@ -276,7 +279,9 @@
                   (unless (gethash vreg intervals)
                     (setf (gethash vreg intervals)
                           (make-live-interval
-                                         :vreg vreg :start i :end i)))))
+                           :vreg vreg :start i :end i
+                           :coalesce-with (when (typep inst 'vm-move)
+                                            (vm-src inst)))))))
               (dolist (vreg (instruction-uses inst))
                 (when vreg
                   (let ((interval (gethash vreg intervals)))
@@ -320,8 +325,16 @@
                              (setf (interval-end interval)
                                    (max (interval-end interval) i))))
                          intervals)))
-    ;; Extend intervals across call sites for caller-saved awareness
-    ;; (handled at allocation time instead)
+    ;; Mark intervals that span over a call site.
+    (loop for inst in instructions
+          for i from 0
+          when (typep inst '(or vm-call vm-tail-call))
+          do (maphash (lambda (vreg interval)
+                        (declare (ignore vreg))
+                        (when (and (< (interval-start interval) i)
+                                   (> (interval-end interval) i))
+                          (setf (interval-crosses-call-p interval) t)))
+                      intervals))
 
     ;; Sort by start point
     (let ((result nil))
@@ -345,6 +358,9 @@
   (or (let ((preferred (and (interval-return-value-p interval)
                             (cc-return-register cc))))
         (and preferred (member preferred free-regs) preferred))
+      (when (interval-crosses-call-p interval)
+        (find-if (lambda (reg) (member reg free-regs :test #'eq))
+                 (cc-callee-saved cc)))
       (let* ((param-index (interval-parameter-index interval))
              (arg-regs (cc-arg-registers cc))
              (preferred (and (integerp param-index)
@@ -357,61 +373,70 @@
    INTERVALS: sorted list of live-interval objects.
    CC: calling-convention object.
    Returns (values assignment-ht spill-ht spill-count)."
-  (let ((assignment (make-hash-table :test #'eq))
-        (spill-map (make-hash-table :test #'eq))
+  (let ((assignment (make-hash-table :test 'eq))
+        (spill-map (make-hash-table :test 'eq))
         (spill-count 0)
         (free-regs (copy-list (cc-gpr-pool cc)))
-        (active nil))
-    ;; Remove scratch register from free pool
+        (active nil)
+        (interval-map (make-hash-table :test 'eq)))
+    (dolist (int intervals)
+      (setf (gethash (interval-vreg int) interval-map) int))
     (setf free-regs (remove (cc-scratch-register cc) free-regs))
     (dolist (interval intervals)
-      ;; Expire old intervals
       (setf active
             (remove-if (lambda (a)
                          (when (< (interval-end a) (interval-start interval))
                            (push (interval-phys-reg a) free-regs)
                            t))
                        active))
-      (if free-regs
-          ;; Allocate a physical register
-          (let* ((preferred (%preferred-register-for-interval interval cc free-regs))
-                 (phys (cond (preferred
-                              (setf free-regs (remove preferred free-regs :count 1))
-                              preferred)
-                             (t (pop free-regs)))))
-            (setf (interval-phys-reg interval) phys)
-            (setf (gethash (interval-vreg interval) assignment) phys)
-            (setf active (merge 'list (list interval) active #'< :key #'interval-end)))
-          ;; Spill: pick the interval whose next use is furthest away.
-          (let ((spill-candidate
-                   (reduce (lambda (best candidate)
-                             (let ((best-next (%interval-next-use-after best (interval-start interval)))
-                                   (cand-next (%interval-next-use-after candidate (interval-start interval))))
-                               (cond ((null best) candidate)
-                                     ((null cand-next) candidate)
-                                     ((null best-next) best)
-                                     ((> cand-next best-next) candidate)
-                                     (t best))))
-                           active
-                           :initial-value interval)))
-            (if (eq spill-candidate interval)
-                ;; Spill the current interval
-                (progn
-                  (incf spill-count)
-                  (setf (interval-spill-slot interval) spill-count)
-                  (setf (gethash (interval-vreg interval) spill-map) spill-count))
-                ;; Spill the existing interval and give its register to current
-                (let ((freed-reg (interval-phys-reg spill-candidate)))
-                  (incf spill-count)
-                  (setf (interval-spill-slot spill-candidate) spill-count)
-                  (setf (gethash (interval-vreg spill-candidate) spill-map) spill-count)
-                  (remhash (interval-vreg spill-candidate) assignment)
-                  (setf (interval-phys-reg spill-candidate) nil)
-                  (setf active (remove spill-candidate active))
-                  (setf (interval-phys-reg interval) freed-reg)
-                  (setf (gethash (interval-vreg interval) assignment) freed-reg)
-                  (setf active (merge 'list (list interval) active
-                                      #'< :key #'interval-end)))))))
+      (let ((coalesced nil))
+        (let* ((src-vreg (interval-coalesce-with interval))
+               (src-int (and src-vreg (gethash src-vreg interval-map))))
+          (when (and src-int
+                     (interval-phys-reg src-int)
+                     (<= (interval-end src-int) (interval-start interval)))
+            (let ((phys (interval-phys-reg src-int)))
+              (setf active (remove src-int active :test 'eq))
+              (setf (interval-phys-reg interval) phys)
+              (setf (gethash (interval-vreg interval) assignment) phys)
+              (setf active (merge 'list (list interval) active #'< :key #'interval-end))
+              (setf coalesced t))))
+        (unless coalesced
+          (if free-regs
+              (let* ((preferred (%preferred-register-for-interval interval cc free-regs))
+                     (phys (cond (preferred
+                                  (setf free-regs (remove preferred free-regs :count 1))
+                                  preferred)
+                                 (t (pop free-regs)))))
+                (setf (interval-phys-reg interval) phys)
+                (setf (gethash (interval-vreg interval) assignment) phys)
+                (setf active (merge 'list (list interval) active #'< :key #'interval-end)))
+              (let ((spill-candidate
+                      (reduce (lambda (best candidate)
+                                (let ((best-next (%interval-next-use-after best (interval-start interval)))
+                                      (cand-next (%interval-next-use-after candidate (interval-start interval))))
+                                  (cond ((null best) candidate)
+                                        ((null cand-next) candidate)
+                                        ((null best-next) best)
+                                        ((> cand-next best-next) candidate)
+                                        (t best))))
+                              active
+                              :initial-value interval)))
+                (if (eq spill-candidate interval)
+                    (progn
+                      (incf spill-count)
+                      (setf (interval-spill-slot interval) spill-count)
+                      (setf (gethash (interval-vreg interval) spill-map) spill-count))
+                    (let ((freed-reg (interval-phys-reg spill-candidate)))
+                      (incf spill-count)
+                      (setf (interval-spill-slot spill-candidate) spill-count)
+                      (setf (gethash (interval-vreg spill-candidate) spill-map) spill-count)
+                      (remhash (interval-vreg spill-candidate) assignment)
+                      (setf (interval-phys-reg spill-candidate) nil)
+                      (setf active (remove spill-candidate active))
+                      (setf (interval-phys-reg interval) freed-reg)
+                      (setf (gethash (interval-vreg interval) assignment) freed-reg)
+                      (setf active (merge 'list (list interval) active #'< :key #'interval-end)))))))))
     (values assignment spill-map spill-count)))
 
 ;;; Spill Code Insertion
@@ -451,7 +476,7 @@
                       (cc-gpr-pool cc))
               :test #'eq)))
 
-(defun insert-spill-code (instructions assignment spill-map cc)
+(defun insert-spill-code (instructions assignment spill-map cc &optional remat-map)
   "Insert spill loads/stores around instructions that use spilled registers.
    Returns a new instruction list with spill code inserted."
   (let ((result nil))
@@ -475,9 +500,12 @@
           (dolist (vreg (instruction-uses inst))
             (when (and vreg (gethash vreg spill-map))
               (let ((scratch (ensure-scratch vreg)))
-                (push (make-vm-spill-load :dst-reg scratch
-                                          :slot (gethash vreg spill-map))
-                      result))))
+                (let ((remat (and remat-map (gethash vreg remat-map))))
+                  (push (if remat
+                            (make-vm-const :dst scratch :value remat)
+                            (make-vm-spill-load :dst-reg scratch
+                                                :slot (gethash vreg spill-map)))
+                        result)))))
           ;; Rewrite the instruction itself to use per-vreg scratch registers.
           (let ((rewritten (if (zerop (hash-table-count reg-map))
                                inst
@@ -507,12 +535,17 @@
   (let ((intervals (compute-live-intervals instructions)))
     (multiple-value-bind (assignment spill-map spill-count)
         (linear-scan-allocate intervals cc)
-      (let ((final-instructions
+      (let* ((remat-map (let ((ht (make-hash-table :test #'eq)))
+                          (dolist (interval intervals ht)
+                            (when (interval-remat-const interval)
+                              (setf (gethash (interval-vreg interval) ht)
+                                    (interval-remat-const interval))))))
+             (final-instructions
               (if (> spill-count 0)
-                  (insert-spill-code instructions assignment spill-map cc)
+                  (insert-spill-code instructions assignment spill-map cc remat-map)
                   instructions)))
         (make-regalloc-result
-                       :assignment assignment
+                        :assignment assignment
                        :spill-map spill-map
                        :spill-count spill-count
                        :instructions final-instructions)))))

@@ -117,10 +117,24 @@
   (setf (ctx-tail-position ctx) nil)
   (let* ((vars (ast-mvb-vars node))
          (body (ast-mvb-body node))
-         (old-env (ctx-env ctx)))
-    (compile-ast (ast-mvb-values-form node) ctx)
-    (let ((var-regs (loop for v in vars collect (make-register ctx))))
-      (emit ctx (make-vm-mv-bind :dst-regs var-regs))
+         (old-env (ctx-env ctx))
+         (values-form (ast-mvb-values-form node)))
+    (let ((var-regs
+            (if (typep values-form 'ast-values)
+                (let ((src-regs (mapcar (lambda (form) (compile-ast form ctx))
+                                        (ast-values-forms values-form))))
+                  (loop for idx from 0
+                        for _v in vars
+                        collect (if (< idx (length src-regs))
+                                    (nth idx src-regs)
+                                    (let ((nil-reg (make-register ctx)))
+                                      (emit ctx (make-vm-const :dst nil-reg :value nil))
+                                      nil-reg))))
+                (progn
+                  (compile-ast values-form ctx)
+                  (let ((regs (loop for _v in vars collect (make-register ctx))))
+                    (emit ctx (make-vm-mv-bind :dst-regs regs))
+                    regs)))))
       (unwind-protect
            (progn
              (setf (ctx-env ctx)
@@ -160,27 +174,32 @@
          (args (ast-mv-call-args node))
          (result-reg (make-register ctx)))
     (if (null args)
-        (let ((empty-reg (make-register ctx)))
-          (emit ctx (make-vm-const :dst empty-reg :value nil))
-          (emit ctx (make-vm-apply :dst result-reg :func func-reg :args (list empty-reg))))
-        (let ((list-regs
-               (mapcar (lambda (arg)
-                         (emit ctx (make-vm-clear-values))
-                         (let ((primary-reg (compile-ast arg ctx)))
-                           (emit ctx (make-vm-ensure-values :src primary-reg))
-                           (let ((lr (make-register ctx)))
-                             (emit ctx (make-vm-values-to-list :dst lr))
-                             lr)))
-                       args)))
-          (let ((combined-reg
-                 (reduce (lambda (acc lr)
-                           (let ((new-reg (make-register ctx)))
-                             (emit ctx (make-vm-append :dst new-reg :src1 acc :src2 lr))
-                             new-reg))
-                         (cdr list-regs)
-                         :initial-value (car list-regs))))
-            (emit ctx (make-vm-apply :dst result-reg :func func-reg
-                                     :args (list combined-reg))))))
+        (emit ctx (make-vm-call :dst result-reg :func func-reg :args nil))
+        (if (every (lambda (arg) (typep arg 'ast-values)) args)
+            (let ((flat-arg-regs
+                    (mapcan (lambda (arg)
+                              (mapcar (lambda (form) (compile-ast form ctx))
+                                      (ast-values-forms arg)))
+                            args)))
+              (emit ctx (make-vm-call :dst result-reg :func func-reg :args flat-arg-regs)))
+            (let ((list-regs
+                   (mapcar (lambda (arg)
+                             (emit ctx (make-vm-clear-values))
+                             (let ((primary-reg (compile-ast arg ctx)))
+                               (emit ctx (make-vm-ensure-values :src primary-reg))
+                               (let ((lr (make-register ctx)))
+                                 (emit ctx (make-vm-values-to-list :dst lr))
+                                 lr)))
+                           args)))
+              (let ((combined-reg
+                     (reduce (lambda (acc lr)
+                               (let ((new-reg (make-register ctx)))
+                                 (emit ctx (make-vm-append :dst new-reg :src1 acc :src2 lr))
+                                 new-reg))
+                             (cdr list-regs)
+                             :initial-value (car list-regs))))
+                (emit ctx (make-vm-apply :dst result-reg :func func-reg
+                                         :args (list combined-reg)))))))
     result-reg))
 
 (defmethod compile-ast ((node ast-multiple-value-prog1) ctx)

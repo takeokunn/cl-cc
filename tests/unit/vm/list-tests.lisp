@@ -134,6 +134,34 @@
     (exec1 (cl-cc::make-vm-pop :dst 0 :list 1) s)
     (assert-eq 'first (cl-cc:vm-reg-get s 0))))
 
+(deftest vm-cons-uses-hash-cons-sharing
+  "vm-cons now routes through vm-hash-cons and reuses identical cells."
+  (let ((s (make-test-vm)))
+    (cl-cc::vm-clear-hash-cons-table)
+    (cl-cc:vm-reg-set s 1 'a)
+    (cl-cc:vm-reg-set s 2 'b)
+    (exec1 (cl-cc::make-vm-cons :dst 0 :car-src 1 :cdr-src 2) s)
+    (exec1 (cl-cc::make-vm-cons :dst 3 :car-src 1 :cdr-src 2) s)
+    (assert-true (eq (cl-cc:vm-reg-get s 0)
+                     (cl-cc:vm-reg-get s 3)))))
+
+(deftest vm-hash-cons-reuses-identical-cells
+  "vm-hash-cons returns the same cons cell for identical car/cdr pairs."
+  (cl-cc::vm-clear-hash-cons-table)
+  (let ((c1 (cl-cc::vm-hash-cons 'a 'b))
+        (c2 (cl-cc::vm-hash-cons 'a 'b)))
+    (assert-true (eq c1 c2))
+    (assert-equal '(a . b) c1)))
+
+(deftest vm-hash-cons-clear-drops-interning
+  "Clearing the hash-cons table forces subsequent allocations to be distinct."
+  (cl-cc::vm-clear-hash-cons-table)
+  (let ((c1 (cl-cc::vm-hash-cons 'x 'y)))
+    (cl-cc::vm-clear-hash-cons-table)
+    (let ((c2 (cl-cc::vm-hash-cons 'x 'y)))
+      (assert-false (eq c1 c2))
+      (assert-equal c1 c2))))
+
 ;;; ─── Association lists ──────────────────────────────────────────────────────
 
 (deftest vm-list-assoc-behavior

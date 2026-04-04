@@ -73,8 +73,8 @@
 (deftest pipeline-compile-toplevel-forms-records-defvar-type-without-type-check
   "compile-toplevel-forms still records inferred defvar types when type-check is off."
   (let ((result (cl-cc::compile-toplevel-forms
-                 '((defvar *typed-top-level-no-check* 42)
-                   *typed-top-level-no-check*)))))
+                  '((defvar *typed-top-level-no-check* 42)
+                    *typed-top-level-no-check*))))
     (multiple-value-bind (scheme found-p)
         (cl-cc/type::type-env-lookup '*typed-top-level-no-check*
                                      (cl-cc::compilation-result-type-env result))
@@ -133,6 +133,12 @@
   (let ((result (compile-string "(defun f (x) x) (f 42)")))
     (assert-true (typep result 'cl-cc::compilation-result))))
 
+(deftest pipeline-compile-string-custom-pass-pipeline
+  "compile-string forwards a string pass pipeline to optimizer core."
+  (let ((result (compile-string "(+ 1 2)" :pass-pipeline "fold,dce")))
+    (assert-true (typep result 'cl-cc::compilation-result))
+    (assert-equal 0 (length (cl-cc:compilation-result-optimized-instructions result)))))
+
 ;;; ─── run-string ─────────────────────────────────────────────────────────
 
 (deftest-each pipeline-run-string-forms
@@ -145,6 +151,12 @@
           (if-false    2  "(if nil 1 2)")
           (lambda      9  "((lambda (x) (* x x)) 3)"))
   (assert-= expected (run-string expr)))
+
+(deftest pipeline-run-string-pass-timings
+  "run-string forwards timing output options while preserving evaluation result."
+  (let ((stream (make-string-output-stream)))
+    (assert-= 3 (run-string "(+ 1 2)" :pass-pipeline "fold" :print-pass-timings t :timing-stream stream))
+    (assert-true (search "OPT-PASS-FOLD" (string-upcase (get-output-stream-string stream))))))
 
 ;;; ─── %prescan-in-package ────────────────────────────────────────────────
 

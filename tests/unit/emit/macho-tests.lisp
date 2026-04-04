@@ -317,6 +317,14 @@
       (assert-equal 20 (aref data 1))
       (assert-equal 30 (aref data 2)))))
 
+(deftest binary-buffer-common-roundtrip
+  "Shared binary-buffer helpers produce the expected little-endian byte stream."
+  (let ((buf (cl-cc/binary::make-binary-buffer 0)))
+    (cl-cc/binary::binary-buffer-write-u16le buf #x1234)
+    (cl-cc/binary::binary-buffer-write-u8 buf #x56)
+    (assert-equal '(#x34 #x12 #x56)
+                  (coerce (cl-cc/binary::binary-buffer-to-array buf) 'list))))
+
 ;;; ─── Additional Builder API Tests ───────────────────────────────────────
 
 (deftest-each macho-builder-cputypes

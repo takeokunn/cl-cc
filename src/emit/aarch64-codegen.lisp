@@ -257,8 +257,11 @@
   (let ((ht (make-hash-table :test #'eq)))
     (setf (gethash 'vm-move ht) 4)          ; encode-mov-rr
     (setf (gethash 'vm-add ht) 4)           ; encode-add
+    (setf (gethash 'vm-integer-add ht) 4)   ; encode-add
     (setf (gethash 'vm-sub ht) 4)           ; encode-sub
+    (setf (gethash 'vm-integer-sub ht) 4)   ; encode-sub
     (setf (gethash 'vm-mul ht) 4)           ; encode-mul
+    (setf (gethash 'vm-integer-mul ht) 4)   ; encode-mul
     (setf (gethash 'vm-min ht) 8)           ; encode-cmp + encode-csel
     (setf (gethash 'vm-max ht) 8)           ; encode-cmp + encode-csel
     (setf (gethash 'vm-select ht) 8)        ; encode-cmp + encode-csel
@@ -418,8 +421,11 @@
     (setf (gethash 'vm-const ht) #'emit-a64-vm-const)
     (setf (gethash 'vm-move ht) #'emit-a64-vm-move)
     (setf (gethash 'vm-add ht) #'emit-a64-vm-add)
+    (setf (gethash 'vm-integer-add ht) #'emit-a64-vm-add)
     (setf (gethash 'vm-sub ht) #'emit-a64-vm-sub)
+    (setf (gethash 'vm-integer-sub ht) #'emit-a64-vm-sub)
     (setf (gethash 'vm-mul ht) #'emit-a64-vm-mul)
+    (setf (gethash 'vm-integer-mul ht) #'emit-a64-vm-mul)
     (setf (gethash 'vm-min ht) #'emit-a64-vm-min)
     (setf (gethash 'vm-max ht) #'emit-a64-vm-max)
     (setf (gethash 'vm-select ht) #'emit-a64-vm-select)

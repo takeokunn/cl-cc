@@ -246,6 +246,23 @@
 
 (define-unary-mov-emitter emit-vm-lognot emit-not-r64 "vm-lognot: dst = ~src  (bitwise complement).")
 
+(defun emit-vm-logcount (inst stream)
+  "vm-logcount: dst = popcount(src)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (src (vm-reg-to-x86 (vm-src inst))))
+    (emit-popcnt-rr64 dst src stream)))
+
+(defun emit-vm-integer-length (inst stream)
+  "vm-integer-length: dst = integer-length(src).
+   Zero case returns 0; otherwise 1 + bsr(src)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (src (vm-reg-to-x86 (vm-src inst))))
+    (emit-xor-rr64 dst dst stream)     ; dst = 0 for zero case
+    (emit-test-rr64 src src stream)    ; set ZF when src = 0
+    (emit-je-short 8 stream)           ; skip BSR + ADD when zero
+    (emit-bsr-rr64 dst src stream)
+    (emit-add-ri8 dst 1 stream)))
+
 (defun emit-vm-bswap (inst stream)
   "vm-bswap: dst = byte-swap(low32(src))  (network-order byte reversal)."
   (let ((dst (vm-reg-to-x86 (vm-dst inst)))
@@ -481,8 +498,11 @@
     (setf (gethash 'vm-move ht) 3)         ; REX + opcode + ModR/M
     ;; Arithmetic: mov + op
     (setf (gethash 'vm-add ht) 6)          ; mov + add (3+3)
+    (setf (gethash 'vm-integer-add ht) 6)  ; mov + add
     (setf (gethash 'vm-sub ht) 6)          ; mov + sub (3+3)
+    (setf (gethash 'vm-integer-sub ht) 6)  ; mov + sub
     (setf (gethash 'vm-mul ht) 7)          ; mov + imul (3+4, 0F AF)
+    (setf (gethash 'vm-integer-mul ht) 7)  ; mov + imul
     ;; Control flow
     (setf (gethash 'vm-halt ht) 3)         ; mov result to RAX
     (setf (gethash 'vm-label ht) 0)        ; Labels emit no code
@@ -503,6 +523,8 @@
     ;; Logical NOT: TEST+SETE+MOVZX = 11→12; bitwise NOT: MOV+NOT = 7
     (setf (gethash 'vm-not ht) 12)
     (setf (gethash 'vm-lognot ht) 7)
+    (setf (gethash 'vm-logcount ht) 5)
+    (setf (gethash 'vm-integer-length ht) 16)
     (setf (gethash 'vm-bswap ht) 6)
     ;; Unary arithmetic: MOV(3) + op(3-4) = 7
     (setf (gethash 'vm-neg ht) 7)
@@ -648,8 +670,11 @@
     (vm-const        . emit-vm-const)
     (vm-move         . emit-vm-move)
     (vm-add          . emit-vm-add)
+    (vm-integer-add  . emit-vm-add)
     (vm-sub          . emit-vm-sub)
+    (vm-integer-sub  . emit-vm-sub)
     (vm-mul          . emit-vm-mul)
+    (vm-integer-mul  . emit-vm-mul)
     (vm-halt         . emit-vm-halt-inst)
      (vm-call         . emit-vm-call-like-inst)
      (vm-tail-call    . emit-vm-tail-call-inst)
@@ -665,9 +690,11 @@
     (vm-eq           . emit-vm-eq)
     ;; Unary arithmetic/logical
     (vm-neg          . emit-vm-neg)
-    (vm-not          . emit-vm-not)
-    (vm-lognot       . emit-vm-lognot)
-    (vm-bswap        . emit-vm-bswap)
+     (vm-not          . emit-vm-not)
+     (vm-lognot       . emit-vm-lognot)
+     (vm-logcount     . emit-vm-logcount)
+     (vm-integer-length . emit-vm-integer-length)
+     (vm-bswap        . emit-vm-bswap)
     (vm-inc          . emit-vm-inc)
     (vm-dec          . emit-vm-dec)
     (vm-abs          . emit-vm-abs)

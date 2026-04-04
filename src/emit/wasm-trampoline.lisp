@@ -132,8 +132,11 @@
 (defparameter *wasm-i64-binop-table*
   (let ((ht (make-hash-table :test #'eq)))
     (setf (gethash 'vm-add ht) "i64.add")
+    (setf (gethash 'vm-integer-add ht) "i64.add")
     (setf (gethash 'vm-sub ht) "i64.sub")
+    (setf (gethash 'vm-integer-sub ht) "i64.sub")
     (setf (gethash 'vm-mul ht) "i64.mul")
+    (setf (gethash 'vm-integer-mul ht) "i64.mul")
     (setf (gethash 'vm-div ht) "i64.div_s")
     (setf (gethash 'vm-mod ht) "i64.rem_s")   ; CL mod ≈ i64.rem_s for same-sign
     (setf (gethash 'vm-truncate ht) "i64.div_s")
@@ -162,6 +165,7 @@
     (setf (gethash 'vm-dec ht) "(i64.sub ~A (i64.const 1))")
     (setf (gethash 'vm-neg ht) "(i64.sub (i64.const 0) ~A)")
     (setf (gethash 'vm-lognot ht) "(i64.xor ~A (i64.const -1))")
+    (setf (gethash 'vm-logcount ht) "(i64.popcnt ~A)")
     ht)
   "Maps unary VM instruction types to WASM i64 format strings (~A = unboxed src).
    All entries use the unbox-op-box pattern.")
@@ -264,8 +268,20 @@
                               (format nil "(if (result eqref) (i64.ge_s ~A (i64.const 0)) (then ~A) (else ~A))"
                                       src
                                       (wasm-fixnum-box src)
+                                       (wasm-fixnum-box
+                                        (format nil "(i64.sub (i64.const 0) ~A)" src)))))
+       t))
+    ;; ── Integer length (zero-special cased clz lowering) ──
+    (vm-integer-length
+     (let ((src (wasm-fixnum-unbox reg-map (vm-src inst))))
+       (format stream "~%      ~A"
+               (reg-local-set reg-map (vm-dst inst)
+                              (format nil
+                                      "(if (result eqref) (i64.eqz ~A) (then ~A) (else ~A))"
+                                      src
+                                      (wasm-fixnum-box "(i64.const 0)")
                                       (wasm-fixnum-box
-                                       (format nil "(i64.sub (i64.const 0) ~A)" src)))))
+                                       (format nil "(i64.sub (i64.const 64) (i64.clz ~A))" src)))))
        t))
     ;; ── Min/max (unique: conditional select) ──
     (vm-min

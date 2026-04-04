@@ -45,7 +45,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: LLVM MemorySSA-based store-to-load forwarding / GCC tree-ssa-forwprop。ローカル変数の冗長なロード除去
 - **難易度**: Medium
 
-- **関連実装**: `src/optimize/optimizer.lisp` に `opt-pass-store-to-load-forward` を実装済み。現状は straight-line な `vm-set-global` / `vm-get-global` と `vm-slot-write` / `vm-slot-read` を対象とする保守的なパスで、`tests/unit/optimize/optimizer-tests.lisp` にグローバル・スロット両方の回帰テストがある。Memory SSA / alias analysis 連携は未実装。
+- **関連実装**: `src/optimize/optimizer.lisp` に `opt-pass-store-to-load-forward` を実装済み。現状は straight-line な `vm-set-global` / `vm-get-global` と `vm-slot-write` / `vm-slot-read` を対象とする保守的なパスで、軽量 alias helper（`opt-compute-heap-aliases` / `opt-must-alias-p`）により `vm-move` 経由の同一オブジェクト alias までは slot forwarding できる。`tests/unit/optimize/optimizer-tests.lisp` にグローバル・スロット・moved-alias の回帰テストがある。Memory SSA やより広い alias analysis 連携は未実装。
 
 #### FR-217: Memory SSA (メモリSSA)
 
@@ -103,11 +103,13 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: GCC switch lowering / LLVM SwitchInst→LookupTable。分岐数Nに対してO(N)→O(log N)またはO(1)
 - **難易度**: Medium
 
+- **関連実装**: `src/expand/macros-control-flow.lisp` では整数 `case` に対して疎集合の二分探索木展開（`%case-expand-integer-tree`）と密集合の table dispatch（`%case-expand-integer-table`）を実装済み。`typecase` 側は `%prune-typecase-clauses` による到達不能節の削減までで、クラス階層を使った完全な判定木化は未実装。
+
 ---
 
 ### Phase 54 — CL固有引数最適化（未実装）
 
-#### FR-248: &rest Parameter Stack Allocation (&restスタック割り当て)
+#### FR-248: &rest Parameter Stack Allocation (&restスタック割り当て) ✅
 
 - **対象**: `src/vm/vm.lisp`, `src/compile/codegen-functions.lisp`
 - **現状**: `vm.lisp:823-825` — `&rest`パラメータは常にヒープにリスト割り当て（`vm-build-list`呼び出し）。restリストがエスケープしない場合でもGC圧力を発生
@@ -130,6 +132,8 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **内容**: `simple-array`サブタイプ（`fixnum`, `single-float`, `double-float`, `character`, `bit`）毎に特殊化された配列表現（パックド要素）を実装。`aref`/`(setf aref)`を要素型に応じてインライン化し型チェック除去。NaN-boxing不要の直接メモリアクセス
 - **根拠**: SBCL specialized arrays / ANSI CL 15.1.2.2。数値計算・文字列処理の基盤
 - **難易度**: Hard
+
+- **関連実装**: `src/compile/codegen-core.lisp` には固定長 `make-array` の no-escape binding を `ctx-noescape-array-bindings` へ分解し、`aref` / `array-length` / `aset` の一部をレジスタ操作へ置換する保守的最適化がある。runtime 側 `src/runtime/runtime.lisp` の `rt-make-array` は `:element-type` を受け取るが、compile 時に `simple-array` 要素型ごとの packed representation へ完全特化する実装は未着手。
 
 ---
 
@@ -174,6 +178,8 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **内容**: `(hash-cons a b)` プリミティブを追加。同一`car`/`cdr`のconsセルをインターンテーブルで共有。構造的等価なリスト・ツリーのメモリ使用を大幅削減。弱ハッシュテーブル（FR-184/FR-246）でインターンテーブルのGC対応
 - **根拠**: Ershov (1958) / BDD (Bryant 1986) / Lisp memoization。S式ベースIRの共有で自己コンパイル時のメモリ削減
 - **難易度**: Medium
+
+- **関連実装**: `src/vm/list.lisp` に `*vm-hash-cons-table*` / `vm-hash-cons` / `vm-clear-hash-cons-table` を追加済み。現状は `(car cdr)` ペアを通常 hash table で intern する軽量 helper で、`vm-cons` 命令はこの helper を経由して cons 生成を共有化する。weak table 化やより広いランタイム割り当て経路への適用は未実装。
 
 #### FR-256: Pure Function Auto-Memoization (純関数自動メモ化)
 
@@ -251,7 +257,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: LLVM `LazyValueInfo` / GCC VRP (Value Range Propagation)。オーバーフロー検査除去で分岐を削減
 - **難易度**: Hard
 
-#### FR-305: Multiply by Constant via Shifts+Adds (定数乗算のシフト+加算変換)
+#### FR-305: Multiply by Constant via Shifts+Adds (定数乗算のシフト+加算変換) ✅
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **現状**: `opt-pass-strength-reduce`（`optimizer.lisp:869-897`）は`opt-power-of-2-p`チェックのみ。`(* x 3)` → `(+ x (ash x 1))`等の分解なし
@@ -542,6 +548,8 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: GHC known-call optimization。直接ジャンプはインダイレクト呼び出しより 1〜3 サイクル速く、インライン化の前提としても重要
 - **難易度**: Medium
 
+- **関連実装**: `src/compile/codegen.lisp` には self-tail recursion の loop 化、および zero-capture `flet` を `vm-func-ref` で束縛する fast path がある。一般の既知呼び出しを専用 direct-call 命令へ lower する完全版は未実装。
+
 #### FR-031: Function Cloning for Specialization (特化クローン生成)
 
 - **対象**: `src/compile/codegen.lisp`, `src/optimize/optimizer.lisp`
@@ -566,7 +574,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 17 — 呼び出し規約 & ABI（一部実装: callee-saved trim）
 
-#### FR-176: Custom Calling Convention (カスタム呼び出し規約)
+#### FR-176: Custom Calling Convention (カスタム呼び出し規約) ✅
 
 - **対象**: `src/emit/calling-convention.lisp`, `src/backend/x86-64-codegen.lisp`
 - **現状**: System V AMD64 ABI 固定 (RDI, RSI, RDX, RCX, R8, R9 引数レジスタ)。内部ローカル関数でも全 caller-saved レジスタをスタックに保存
@@ -580,6 +588,8 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **内容**: 複数値を返す `values` 呼び出しで、呼び出し元が即座に値を分解する場合 (`multiple-value-bind` / `nth-value`)、ヒープ上の多値オブジェクトを生成せず直接レジスタに展開。`(multiple-value-bind (a b) (values x y) ...)` → `a=x, b=y` のレジスタ直接バインド
 - **根拠**: C++ RVO / SBCL multiple values optimization。多値を多用する CL コードで有効
 - **難易度**: Medium
+
+- **関連実装**: `src/compile/codegen-control.lisp` では (1) `multiple-value-bind` の values-form が明示的な `ast-values` の場合、`vm-values` / `vm-mv-bind` を介さずに各値を直接レジスタ束縛し、(2) `multiple-value-call` の全引数が明示的な `ast-values` の場合、`vm-values-to-list` / `vm-apply` を介さずに flatten した引数列で直接 `vm-call` を行う fast path を実装済み。一般の複数値生成（例: `floor` など）に対する全面的な direct-bind / direct-call 最適化は未実装。
 
 - **完了済みFR**: FR-176
 
@@ -595,6 +605,8 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: SBCL `typecase` compilation / GCC `switch` with jump table。CLOS dispatch の内部でも型チェックチェーンを置き換え可能
 - **難易度**: Medium
 
+- **関連実装**: `src/expand/macros-control-flow.lisp` の `%prune-typecase-clauses` により、先行節に包含される後続節は展開前に削除される。さらに `src/type/exhaustiveness.lisp` に `check-typecase-exhaustiveness` / `check-etypecase-completeness` / `useful-typecase-arms` があり、型 case の冗長節・網羅性解析基盤は存在する。タグ値ベースの jump table lowering 自体は未実装。
+
 ---
 
 ### Phase 19 — 副作用・純粋性解析（未実装）
@@ -606,6 +618,8 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **内容**: コールグラフのボトムアップ走査で関数の副作用を推移的に計算。リーフ関数が pure と判定されれば呼び出し元も pure に。`(defun square (x) (* x x))` は自動的に `pure` マーク。純粋と判定された関数は (1) CSE の対象、(2) DCE の対象、(3) 自動メモ化 (FR-256) の対象
 - **根拠**: GHC purity analysis / LLVM `@llvm.readnone` / SBCL `sb-c:no-side-effects`. 純粋性はほぼ全最適化パスの精度向上に使える
 - **難易度**: Medium
+
+- **関連実装**: `src/optimize/optimizer-inline.lisp` に `opt-infer-transitive-function-purity` / `opt-function-body-transitively-pure-p` を追加済み。現状は `opt-collect-function-defs` と既知 direct-call グラフを再利用し、非再帰な線形関数本体についてボトムアップ固定点で純粋性を推論する保守的実装。未知 call / `vm-apply` / `vm-generic-call` / 再帰 SCC は引き続き impure 扱いのため、全面的な手続き間 purity inference は未完了。
 
 ---
 

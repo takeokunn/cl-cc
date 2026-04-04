@@ -69,48 +69,39 @@
 
 (defun elf-make-buffer ()
   "Create a fresh byte buffer."
-  (make-array 0 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0))
+  (make-binary-buffer 0))
 
 (defun elf-buf-u8 (buf val)
   "Write 1 byte to buffer."
-  (vector-push-extend (logand val #xff) buf))
+  (binary-buffer-write-u8 buf (logand val #xff)))
 
 (defun elf-buf-u16le (buf val)
   "Write 16-bit little-endian to buffer."
-  (elf-buf-u8 buf (logand val #xff))
-  (elf-buf-u8 buf (logand (ash val -8) #xff)))
+  (binary-buffer-write-u16le buf val))
 
 (defun elf-buf-u32le (buf val)
   "Write 32-bit little-endian to buffer."
-  (elf-buf-u8 buf (logand val #xff))
-  (elf-buf-u8 buf (logand (ash val -8) #xff))
-  (elf-buf-u8 buf (logand (ash val -16) #xff))
-  (elf-buf-u8 buf (logand (ash val -24) #xff)))
+  (binary-buffer-write-u32le buf val))
 
 (defun elf-buf-u64le (buf val)
   "Write 64-bit little-endian to buffer."
-  (elf-buf-u32le buf (logand val #xffffffff))
-  (elf-buf-u32le buf (logand (ash val -32) #xffffffff)))
+  (binary-buffer-write-u64le buf val))
 
 (defun elf-buf-s64le (buf val)
   "Write signed 64-bit little-endian to buffer."
-  (elf-buf-u64le buf (logand val #xffffffffffffffff)))
+  (binary-buffer-write-s64le buf val))
 
 (defun elf-buf-bytes (buf bytes)
   "Append sequence of bytes to buffer."
-  (etypecase bytes
-    (list   (dolist (b bytes) (vector-push-extend b buf)))
-    (vector (loop for b across bytes do (vector-push-extend b buf)))))
+  (binary-buffer-write-bytes buf bytes))
 
 (defun elf-buf-pad (buf n)
   "Append N zero bytes."
-  (dotimes (i n) (elf-buf-u8 buf 0)))
+  (binary-buffer-write-pad buf n))
 
 (defun elf-buf-to-array (buf)
   "Convert adjustable buffer to simple byte array."
-  (make-array (length buf)
-              :element-type '(unsigned-byte 8)
-              :initial-contents buf))
+  (binary-buffer-to-array buf))
 
 ;;; ------------------------------------------------------------
 ;;; String Table Builder

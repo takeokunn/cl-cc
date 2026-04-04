@@ -161,8 +161,8 @@
                    :then (cl-cc::make-ast-slot-value
                           :object (cl-cc::make-ast-var :name 'obj)
                           :slot 'name)
-                   :else (cl-cc::make-ast-int :value 0))))
-    
+                   :else (cl-cc::make-ast-int :value 0)))))
+
     (setf reg (compile-ast ast ctx))
     (setf insts (codegen-instructions ctx)
           jump-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-jump-zero)) insts)
@@ -172,7 +172,7 @@
     (assert-null (codegen-find-inst ctx 'cl-cc::vm-slot-read))
     (assert-true jump-pos)
     (assert-true cons-pos)
-    (assert-true (> cons-pos jump-pos)))))
+    (assert-true (> cons-pos jump-pos))))
 
 (deftest codegen-multibinding-branch-local-make-instance-sinks-initarg-evaluation
   "The generalized branch sink handles a non-escaping make-instance binding with sibling let bindings."
@@ -192,7 +192,7 @@
                             :then (cl-cc::make-ast-slot-value
                                    :object (cl-cc::make-ast-var :name 'obj)
                                    :slot 'name)
-                            :else (cl-cc::make-ast-int :value 0))))
+                            :else (cl-cc::make-ast-int :value 0)))))
          (reg (compile-ast ast ctx))
          (insts (codegen-instructions ctx))
          (jump-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-jump-zero)) insts))
@@ -202,7 +202,7 @@
     (assert-null (codegen-find-inst ctx 'cl-cc::vm-slot-read))
     (assert-true jump-pos)
     (assert-true cons-pos)
-    (assert-true (> cons-pos jump-pos)))))
+    (assert-true (> cons-pos jump-pos))))
 
 (deftest codegen-branch-local-make-instance-shadowed-binding-does-not-sink
   "Shadowed branch-local bindings must not count as uses of the outer make-instance binding."
@@ -236,7 +236,7 @@
                           :body (list (cl-cc::make-ast-slot-value
                                        :object (cl-cc::make-ast-var :name 'obj)
                                        :slot 'name)))
-                   :else (cl-cc::make-ast-int :value 0))))
+                   :else (cl-cc::make-ast-int :value 0)))))
 
     (setf reg (compile-ast ast ctx))
     (setf insts (codegen-instructions ctx)
@@ -247,7 +247,7 @@
     (assert-true cons-pos)
     (assert-true (< cons-pos jump-pos))
     (assert-null (codegen-find-inst ctx 'cl-cc::vm-make-obj))
-    (assert-null (codegen-find-inst ctx 'cl-cc::vm-slot-read)))))
+    (assert-null (codegen-find-inst ctx 'cl-cc::vm-slot-read))))
 
 ;;; ─── compile-ast: ast-set-slot-value ─────────────────────────────────────────
 

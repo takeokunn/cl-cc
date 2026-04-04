@@ -601,7 +601,55 @@
                             block
                             (or (gethash block in-envs)
                                 (make-hash-table :test #'eq))))))
-          (cfg-flatten cfg)))))
+           (cfg-flatten cfg)))))
+
+(defun opt-heap-root-inst-p (inst)
+  "Return T when INST produces a fresh heap-like object identity."
+  (typep inst '(or vm-cons vm-make-array vm-closure vm-make-closure)))
+
+(defun opt-compute-heap-aliases (instructions)
+  "Compute a conservative EQ hash-table reg -> canonical heap root.
+
+Fresh heap producers start a new alias root at their destination register.
+vm-move preserves the source root. Any other destination write kills alias info.
+This is a small FR-115 style oracle intended for downstream passes." 
+  (let ((roots (make-hash-table :test #'eq)))
+    (dolist (inst instructions roots)
+      (let ((dst (opt-inst-dst inst)))
+        (cond
+          ((and dst (opt-heap-root-inst-p inst))
+           (setf (gethash dst roots) dst))
+          ((typep inst 'vm-move)
+           (multiple-value-bind (root found-p)
+               (gethash (vm-move-src inst) roots)
+             (if found-p
+                 (setf (gethash dst roots) root)
+                 (remhash dst roots))))
+          (dst
+           (remhash dst roots)))))
+    roots))
+
+(defun opt-must-alias-p (reg-a reg-b alias-roots)
+  "Return T when REG-A and REG-B definitely alias under ALIAS-ROOTS."
+  (multiple-value-bind (root-a found-a) (gethash reg-a alias-roots)
+    (multiple-value-bind (root-b found-b) (gethash reg-b alias-roots)
+      (and found-a found-b (eq root-a root-b)))))
+
+(defun opt-may-alias-p (reg-a reg-b alias-roots)
+  "Return T when REG-A and REG-B may alias under ALIAS-ROOTS.
+
+Unknown roots remain conservative and therefore return T." 
+  (multiple-value-bind (root-a found-a) (gethash reg-a alias-roots)
+    (multiple-value-bind (root-b found-b) (gethash reg-b alias-roots)
+      (or (not found-a)
+          (not found-b)
+          (eq root-a root-b)))))
+
+(defun opt-slot-alias-key (obj-reg slot-name alias-roots)
+  "Return a canonical slot key for OBJ-REG/SLOT-NAME using ALIAS-ROOTS." 
+  (multiple-value-bind (root found-p) (gethash obj-reg alias-roots)
+    (list :slot (if found-p root obj-reg) slot-name)))
+
 (defun opt-rewrite-inst-regs (inst copies)
   "Return INST with all source registers replaced by their canonical copies.
    Uses sexp roundtrip: instruction->sexp rewrites all register-keyword leaves
@@ -791,6 +839,69 @@
    exists as a named optimizer pass in the pipeline."
   (opt-pass-dominated-type-check-elim instructions))
 
+(defun %opt-branch-predicate-fact-for-block (block)
+  "Return a branch fact plist for BLOCK, or NIL.
+
+The fact is inferred only when BLOCK has a single predecessor ending in a
+vm-jump-zero whose condition register is defined by a foldable type predicate
+or vm-not in that predecessor block. The returned plist contains:
+  :pred  instruction type
+  :src   predicate source register
+  :value replacement constant (1 on fallthrough, 0 on taken branch)."
+  (when (= 1 (length (bb-predecessors block)))
+    (let* ((pred (first (bb-predecessors block)))
+           (term (car (last (bb-instructions pred))))
+           (target-label (and (typep term 'vm-jump-zero)
+                              (vm-label-name term)))
+           (block-label (and (bb-label block) (vm-name (bb-label block)))))
+      (when target-label
+        (let ((cond-reg (vm-reg term)))
+          (loop for inst in (reverse (bb-instructions pred))
+                do (let ((dst (opt-inst-dst inst)))
+                     (when (eq dst cond-reg)
+                       (return
+                         (when (or (opt-foldable-type-pred-p inst)
+                                   (typep inst 'vm-not))
+                           (list :pred (type-of inst)
+                                 :src (vm-src inst)
+                                 :value (if (and block-label
+                                                 (equal block-label target-label))
+                                            0
+                                            1))))))))))))
+
+(defun opt-pass-branch-correlation (instructions)
+  "Propagate known predicate outcomes from a dominating conditional edge.
+
+This is a conservative FR-168 style pass: when a block has exactly one
+predecessor ending in vm-jump-zero over a foldable predicate, repeated tests of
+the same predicate on the same source register inside the successor block are
+replaced with vm-const 1/0." 
+  (let ((cfg (cfg-build instructions)))
+    (loop for block across (cfg-blocks cfg)
+          do (let ((fact (%opt-branch-predicate-fact-for-block block)))
+               (when fact
+                 (let ((live-fact fact)
+                       (new-insts nil))
+                   (dolist (inst (bb-instructions block))
+                     (let ((dst (opt-inst-dst inst)))
+                       (when (and live-fact dst
+                                  (eq dst (getf live-fact :src)))
+                         (setf live-fact nil)))
+                     (cond
+                       ((and live-fact
+                             (or (opt-foldable-type-pred-p inst)
+                                 (typep inst 'vm-not))
+                             (eq (type-of inst) (getf live-fact :pred))
+                             (eq (vm-src inst) (getf live-fact :src))
+                             (opt-inst-dst inst))
+                        (push (make-vm-const :dst (opt-inst-dst inst)
+                                             :value (getf live-fact :value))
+                              new-insts))
+                       (t
+                        (push inst new-insts))))
+                   (setf (bb-instructions block) (nreverse new-insts))))))
+    (cfg-flatten cfg)))
+
 (defun opt-pass-block-merge (instructions)
   "Merge linear CFG chains where a block has exactly one successor and that
    successor has exactly one predecessor. This removes redundant labels/jumps
@@ -955,8 +1066,9 @@
    - labels and non-pure instructions flush all pending stores
    - the store itself is still emitted later, preserving side effects"
   (let ((result nil)
-        (pending-order nil)
-        (pending-by-name (make-hash-table :test #'equal)))
+         (pending-order nil)
+         (pending-by-name (make-hash-table :test #'equal))
+         (alias-roots (opt-compute-heap-aliases instructions)))
     (labels ((emit (inst)
                (push inst result))
              (pending-store (key)
@@ -1010,7 +1122,9 @@
                     (flush-one key)
                     (emit inst)))))
             (vm-slot-read
-            (let* ((key (list :slot (vm-obj-reg inst) (vm-slot-name-sym inst)))
+            (let* ((key (opt-slot-alias-key (vm-obj-reg inst)
+                                            (vm-slot-name-sym inst)
+                                            alias-roots))
                    (store (pending-store key)))
               (if store
                   (progn
@@ -1024,9 +1138,12 @@
                     (emit inst)))))
             (vm-set-global
              (remember-store (list :global (vm-global-name inst)) inst))
-           (vm-slot-write
-            (remember-store (list :slot (vm-obj-reg inst) (vm-slot-name-sym inst)) inst))
-           (t
+            (vm-slot-write
+             (remember-store (opt-slot-alias-key (vm-obj-reg inst)
+                                                 (vm-slot-name-sym inst)
+                                                 alias-roots)
+                             inst))
+            (t
             (let ((dst (opt-inst-dst inst)))
               (when dst
                 (flush-dependent-on-reg dst)))
@@ -1984,16 +2101,101 @@
         #'opt-pass-dead-store-elim
         #'opt-pass-nil-check-elim
         #'opt-pass-dominated-type-check-elim
+        #'opt-pass-branch-correlation
         #'opt-pass-block-merge
         #'opt-pass-tail-merge
         #'opt-pass-pre
         #'opt-pass-egraph
         #'opt-pass-constant-hoist
+        #'opt-pass-global-dce
         #'opt-pass-dead-labels
         #'opt-pass-dce)
   "Ordered list of passes run to convergence in optimize-instructions.
     Each pass is a function (instructions) -> instructions.
     Add new passes here; the convergence loop requires no other changes.")
+
+(defparameter *opt-pass-registry*
+  (let ((ht (make-hash-table :test #'eq)))
+    (dolist (entry `((:inline . ,#'opt-pass-inline-iterative)
+                     (:fold . ,#'opt-pass-fold)
+                     (:sccp . ,#'opt-pass-sccp)
+                     (:strength-reduce . ,#'opt-pass-strength-reduce)
+                     (:bswap-recognition . ,#'opt-pass-bswap-recognition)
+                     (:rotate-recognition . ,#'opt-pass-rotate-recognition)
+                     (:reassociate . ,#'opt-pass-reassociate)
+                     (:copy-prop . ,#'opt-pass-copy-prop)
+                     (:gvn . ,#'opt-pass-gvn)
+                     (:batch-concatenate . ,#'opt-pass-batch-concatenate)
+                     (:cse . ,#'opt-pass-cse)
+                     (:jump . ,#'opt-pass-jump)
+                     (:unreachable . ,#'opt-pass-unreachable)
+                     (:dead-basic-blocks . ,#'opt-pass-dead-basic-blocks)
+                     (:store-to-load-forward . ,#'opt-pass-store-to-load-forward)
+                     (:dead-store-elim . ,#'opt-pass-dead-store-elim)
+                     (:nil-check-elim . ,#'opt-pass-nil-check-elim)
+                     (:dominated-type-check-elim . ,#'opt-pass-dominated-type-check-elim)
+                     (:block-merge . ,#'opt-pass-block-merge)
+                     (:tail-merge . ,#'opt-pass-tail-merge)
+                     (:pre . ,#'opt-pass-pre)
+                     (:egraph . ,#'opt-pass-egraph)
+                     (:constant-hoist . ,#'opt-pass-constant-hoist)
+                     (:dead-labels . ,#'opt-pass-dead-labels)
+                     (:dce . ,#'opt-pass-dce)))
+      (setf (gethash (car entry) ht) (cdr entry)))
+    ht)
+  "Keyword pass name -> optimizer function mapping for configurable pipelines.")
+
+(defun opt-parse-pass-pipeline-string (text)
+  "Parse a comma-separated optimizer pipeline string into keyword pass names."
+  (labels ((trim (s)
+             (string-trim '(#\Space #\Tab #\Newline #\Return) s)))
+    (remove nil
+            (mapcar (lambda (part)
+                      (let ((name (trim part)))
+                        (and (> (length name) 0)
+                             (intern (string-upcase name) :keyword))))
+                    (uiop:split-string text :separator '(#\,))))))
+
+(defun opt-resolve-pass-pipeline (pipeline)
+  "Resolve PIPELINE into a list of pass functions.
+PIPELINE may be NIL (use *opt-convergence-passes*), a list of functions,
+or a list of keyword pass names present in *opt-pass-registry*."
+  (cond
+    ((null pipeline) *opt-convergence-passes*)
+    ((stringp pipeline) (opt-resolve-pass-pipeline (opt-parse-pass-pipeline-string pipeline)))
+    ((every #'functionp pipeline) pipeline)
+    (t
+     (mapcar (lambda (entry)
+               (or (and (keywordp entry) (gethash entry *opt-pass-registry*))
+                   (error "Unknown optimizer pass ~S" entry)))
+             pipeline))))
+
+(defun opt-run-passes-once-with-timings (prog passes stream)
+  "Apply PASSES once, writing timing lines to STREAM."
+  (reduce (lambda (p f)
+            (let ((start (get-internal-real-time)))
+              (prog1 (funcall f p)
+                (let ((elapsed (/ (- (get-internal-real-time) start)
+                                  internal-time-units-per-second)))
+                  (format stream "~A: ~,6Fs~%" f elapsed)))))
+          passes
+          :initial-value prog))
+
+(defun opt-run-passes-once-with-remarks (prog passes stream &key (mode :all))
+  "Apply PASSES once, writing simple optimization remarks to STREAM.
+MODE is one of :all, :changed, or :missed."
+  (reduce (lambda (p f)
+            (let* ((next (funcall f p))
+                   (changed (not (opt-converged-p p next))))
+              (when (or (eq mode :all)
+                        (and changed (eq mode :changed))
+                        (and (not changed) (eq mode :missed)))
+                (format stream "~A: ~A~%"
+                        f
+                        (if changed "changed" "missed")))
+              next))
+          passes
+          :initial-value prog))
 
 (defun opt-run-passes-once (prog)
   "Apply every convergence pass in *opt-convergence-passes* once, left to right."
@@ -2004,13 +2206,22 @@
   (and (= (length prev) (length next))
        (every #'eq prev next)))
 
-(defun optimize-instructions (instructions &key (max-iterations 20))
+(defun optimize-instructions (instructions &key (max-iterations 20) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all))
   "Run the full multi-pass optimization pipeline on a VM instruction sequence.
    Runs until no changes or MAX-ITERATIONS reached."
-  (let ((prog instructions))
+  (let ((prog instructions)
+        (passes (opt-resolve-pass-pipeline pass-pipeline))
+        (timing-stream (or timing-stream *standard-output*))
+        (opt-remarks-stream (or opt-remarks-stream *standard-output*)))
     (loop for iteration from 0 below max-iterations
           for prev = prog
-          do (setf prog (opt-run-passes-once prog))
+          do (setf prog (cond
+                          (print-pass-timings
+                           (opt-run-passes-once-with-timings prog passes timing-stream))
+                          (print-opt-remarks
+                           (opt-run-passes-once-with-remarks prog passes opt-remarks-stream :mode opt-remarks-mode))
+                          (t
+                           (reduce (lambda (p f) (funcall f p)) passes :initial-value prog))))
           when (opt-converged-p prev prog)
           return prog)
     (when *enable-prolog-peephole*

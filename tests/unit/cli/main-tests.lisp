@@ -9,6 +9,7 @@
                      (*error-output* s))
                  (cl-cc/cli::%print-global-help)))))
     (assert-true (search "Usage: cl-cc <command>" out))
+    (assert-true (search "--opt-remarks <mode>" out))
     (assert-true (search "Version: 0.1.0" out))))
 
 (deftest cli-print-command-help
@@ -18,6 +19,7 @@
                      (*error-output* s))
                  (cl-cc/cli::%print-command-help "run")))))
     (assert-true (search "Usage: cl-cc run" out))
+    (assert-true (search "--opt-remarks <mode>" out))
     (assert-true (search "Prepend standard library" out))))
 
 (deftest cli-print-unknown-command-falls-back

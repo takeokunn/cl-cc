@@ -71,13 +71,13 @@
   "Build a CFG with one critical edge into the THEN block."
   (cl-cc::cfg-build
    (list (make-vm-const    :dst :r0 :value 0)
-         (make-vm-jump-zero :reg :r0 :label "then")
-         (make-vm-const    :dst :r1 :value 99)
-         (make-vm-jump     :label "merge")
-         (make-vm-label    :name "then")
-         (make-vm-const    :dst :r1 :value 42)
-         (make-vm-label    :name "merge")
-         (make-vm-ret      :reg :r1))))
+          (make-vm-jump-zero :reg :r0 :label "then")
+          (make-vm-const    :dst :r1 :value 99)
+          (make-vm-jump     :label "then")
+          (make-vm-label    :name "then")
+          (make-vm-const    :dst :r1 :value 42)
+          (make-vm-label    :name "merge")
+          (make-vm-ret      :reg :r1))))
 
 ;;; ─── Basic CFG Construction ──────────────────────────────────────────────
 

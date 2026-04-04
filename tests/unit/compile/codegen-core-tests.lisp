@@ -122,7 +122,7 @@
                             :cond (make-ast-int :value 1)
                             :then (make-ast-call :func 'car
                                                  :args (list (make-ast-var :name 'p)))
-                            :else (make-ast-int :value 0))))
+                            :else (make-ast-int :value 0)))))
          (reg (compile-ast ast ctx))
          (insts (codegen-instructions ctx))
          (jump-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-jump-zero)) insts))
@@ -130,7 +130,7 @@
     (assert-true (keywordp reg))
     (assert-true jump-pos)
     (assert-true cons-pos)
-    (assert-true (> cons-pos jump-pos)))))
+    (assert-true (> cons-pos jump-pos))))
 
 (deftest codegen-let-multibinding-branch-local-cons-use-delays-component-evaluation
   "The generalized branch sink handles a non-escaping cons binding even with sibling let bindings."
@@ -148,7 +148,7 @@
                             :cond (make-ast-var :name 'flag)
                             :then (make-ast-call :func 'car
                                                  :args (list (make-ast-var :name 'p)))
-                            :else (make-ast-int :value 0))))
+                            :else (make-ast-int :value 0)))))
          (reg (compile-ast ast ctx))
          (insts (codegen-instructions ctx))
          (jump-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-jump-zero)) insts))
@@ -156,7 +156,7 @@
     (assert-true (keywordp reg))
     (assert-true jump-pos)
     (assert-true cons-pos)
-    (assert-true (> cons-pos jump-pos)))))
+    (assert-true (> cons-pos jump-pos))))
 
 (deftest codegen-let-noescape-array-aref-bypasses-vm-make-array-and-vm-aref
   "A non-escaping fixed-size local array can serve constant-index aref from split registers."

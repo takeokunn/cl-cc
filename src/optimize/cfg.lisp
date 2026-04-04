@@ -369,13 +369,17 @@
                              (if (eq succ old) new succ))
                            (bb-successors block))))
            (replace-predecessor (block old new)
-             (setf (bb-predecessors block)
-                   (mapcar (lambda (pred)
-                             (if (eq pred old) new pred))
-                           (bb-predecessors block))))
-           (ensure-label (block cfg prefix)
-             (or (bb-label block)
-                 (let ((label (make-vm-label
+              (setf (bb-predecessors block)
+                    (mapcar (lambda (pred)
+                              (if (eq pred old) new pred))
+                            (bb-predecessors block))))
+           (replace-terminator (block old new)
+             (setf (bb-instructions block)
+                   (mapcar (lambda (inst) (if (eq inst old) new inst))
+                           (bb-instructions block))))
+            (ensure-label (block cfg prefix)
+              (or (bb-label block)
+                  (let ((label (make-vm-label
                                :name (format nil "~A~D" prefix (cfg-next-id cfg)))))
                    (setf (bb-label block) label
                          (gethash (vm-name label) (cfg-label->block cfg)) block)
@@ -403,10 +407,12 @@
                 (cond
                   ((and (typep term 'vm-jump-zero)
                         (equal (vm-label-name term) (vm-name (bb-label succ))))
-                   (let ((pad (split-edge pred succ target-label)))
-                     (setf (vm-label-name term) (vm-name (bb-label pad)))))
-                  (t
-                    (split-edge pred succ target-label)))))))))))
+                    (let ((pad (split-edge pred succ target-label)))
+                      (replace-terminator pred term
+                                          (make-vm-jump-zero :reg (vm-reg term)
+                                                             :label (vm-name (bb-label pad))))))
+                   (t
+                     (split-edge pred succ target-label)))))))))))
 
 ;;; ─── Dominance Frontiers ─────────────────────────────────────────────────
 

@@ -92,11 +92,14 @@
 (deftest-each x86-64-instruction-sizes-spot-checks
   "Known VM instruction types have correct byte sizes in the size table."
   :cases (("vm-const"     'cl-cc::vm-const    10)
-          ("vm-move"      'cl-cc::vm-move      3)
-          ("vm-add"       'cl-cc::vm-add       6)
-          ("vm-sub"       'cl-cc::vm-sub       6)
-          ("vm-mul"       'cl-cc::vm-mul       7)
-          ("vm-bswap"     'cl-cc::vm-bswap     6)
+           ("vm-move"      'cl-cc::vm-move      3)
+           ("vm-add"       'cl-cc::vm-add       6)
+           ("vm-integer-add" 'cl-cc::vm-integer-add 6)
+           ("vm-sub"       'cl-cc::vm-sub       6)
+           ("vm-integer-sub" 'cl-cc::vm-integer-sub 6)
+           ("vm-mul"       'cl-cc::vm-mul       7)
+           ("vm-integer-mul" 'cl-cc::vm-integer-mul 7)
+           ("vm-bswap"     'cl-cc::vm-bswap     6)
           ("vm-halt"      'cl-cc::vm-halt      3)
           ("vm-call"      'cl-cc::vm-call      6)
           ("vm-tail-call" 'cl-cc::vm-tail-call 3)
@@ -130,7 +133,7 @@
 
 (deftest x86-64-emitter-entries-count
   "*x86-64-emitter-entries* has 45 entries covering all supported instructions."
-  (assert-= 47 (length cl-cc::*x86-64-emitter-entries*)))
+  (assert-= 52 (length cl-cc::*x86-64-emitter-entries*)))
 
 (deftest x86-64-emitter-table-built-from-entries
   "*x86-64-emitter-table* contains an entry for each item in *x86-64-emitter-entries*."
@@ -158,9 +161,10 @@
 (deftest-each x86-64-emitter-table-spot-checks
   "Key instructions are present in *x86-64-emitter-table* and are functions."
   :cases (("vm-const"   'cl-cc::vm-const)
-          ("vm-add"     'cl-cc::vm-add)
-          ("vm-call"    'cl-cc::vm-call)
-          ("vm-tail-call" 'cl-cc::vm-tail-call)
+           ("vm-add"     'cl-cc::vm-add)
+           ("vm-integer-add" 'cl-cc::vm-integer-add)
+           ("vm-call"    'cl-cc::vm-call)
+           ("vm-tail-call" 'cl-cc::vm-tail-call)
           ("vm-lt"      'cl-cc::vm-lt)
           ("vm-neg"     'cl-cc::vm-neg)
           ("vm-bswap"   'cl-cc::vm-bswap)
@@ -169,6 +173,13 @@
           ("vm-null-p"  'cl-cc::vm-null-p))
   (sym)
   (assert-true (functionp (gethash sym cl-cc::*x86-64-emitter-table*))))
+
+;;; Helper: collect bytes emitted by a function (local copy; also defined in encoding-tests)
+(defun %x86-collect-bytes (emit-fn)
+  "Call EMIT-FN with a stream that collects bytes. Returns byte list."
+  (let ((bytes nil))
+    (funcall emit-fn (lambda (b) (push b bytes)))
+    (nreverse bytes)))
 
 (deftest x86-64-bswap-emitter-encoding
   "emit-vm-bswap emits a MOV followed by BSWAP r32."
@@ -181,6 +192,81 @@
     (assert-= #xC8 (third bytes))
     (assert-= #x0F (fourth bytes))
     (assert-= #xC8 (fifth bytes))))
+
+(deftest x86-64-add-emitter-two-address-lowering
+  "emit-vm-add lowers to MOV dst,lhs before ADD dst,rhs to satisfy x86 two-address form."
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s)
+                  (cl-cc::emit-vm-add
+                   (cl-cc::make-vm-add :dst :R0 :lhs :R1 :rhs :R2) s)))))
+    (assert-= 6 (length bytes))
+    ;; MOV rax,rcx / ADD rax,rdx
+    (assert-= #x48 (nth 0 bytes))
+    (assert-= #x89 (nth 1 bytes))
+    (assert-= #xC8 (nth 2 bytes))
+    (assert-= #x48 (nth 3 bytes))
+    (assert-= #x01 (nth 4 bytes))
+    (assert-= #xD0 (nth 5 bytes))))
+
+(deftest x86-64-select-emitter-encoding
+  "emit-vm-select uses MOV + TEST + CMOVNE branchless lowering."
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s)
+                  (cl-cc::emit-vm-select
+                   (cl-cc::make-vm-select :dst :R0 :cond-reg :R1 :then-reg :R2 :else-reg :R3)
+                   s)))))
+    (assert-= 10 (length bytes))
+    (assert-= #x48 (nth 0 bytes))
+    (assert-= #x89 (nth 1 bytes))
+    (assert-= #x48 (nth 3 bytes))
+    (assert-= #x85 (nth 4 bytes))
+    (assert-= #x48 (nth 6 bytes))
+    (assert-= #x0F (nth 7 bytes))
+    (assert-= #x45 (nth 8 bytes))))
+
+(deftest x86-64-jump-zero-test-je-adjacent
+  "emit-vm-jump-zero-inst emits TEST immediately followed by JE rel32." 
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s)
+                  (cl-cc::emit-vm-jump-zero-inst
+                   (cl-cc::make-vm-jump-zero :reg :R1 :label "L1")
+                   s 0 (let ((ht (make-hash-table :test #'equal)))
+                         (setf (gethash "L1" ht) 9)
+                         ht))))))
+    (assert-= 9 (length bytes))
+    (assert-= #x48 (nth 0 bytes))
+    (assert-= #x85 (nth 1 bytes))
+    (assert-= #x0F (nth 3 bytes))
+    (assert-= #x84 (nth 4 bytes))))
+
+(deftest x86-64-logcount-emitter-encoding
+  "emit-vm-logcount emits POPCNT with the expected opcode sequence."
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s)
+                  (cl-cc::emit-vm-logcount
+                   (cl-cc::make-vm-logcount :dst :R0 :src :R1) s)))))
+    (assert-= 5 (length bytes))
+    (assert-= #xF3 (nth 0 bytes))
+    (assert-= #x48 (nth 1 bytes))
+    (assert-= #x0F (nth 2 bytes))
+    (assert-= #xB8 (nth 3 bytes))))
+
+(deftest x86-64-integer-length-emitter-encoding
+  "emit-vm-integer-length emits xor/test/je/bsr/add sequence."
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s)
+                  (cl-cc::emit-vm-integer-length
+                   (cl-cc::make-vm-integer-length :dst :R0 :src :R1) s)))))
+    (assert-= 16 (length bytes))
+    ;; xor rax,rax / test rcx,rcx / je rel8 / bsr rax,rcx / add rax,1
+    (assert-= #x48 (nth 0 bytes))
+    (assert-= #x31 (nth 1 bytes))
+    (assert-= #x48 (nth 3 bytes))
+    (assert-= #x85 (nth 4 bytes))
+    (assert-= #x74 (nth 6 bytes))
+    (assert-= #x48 (nth 8 bytes))
+    (assert-= #x0F (nth 9 bytes))
+    (assert-= #xBD (nth 10 bytes))))
 
 (deftest x86-64-call-emitter-encoding
   "emit-vm-call-like-inst emits CALL r64 followed by MOV dst, rax."
@@ -206,13 +292,6 @@
     (assert-= #x48 (nth 0 bytes))
     (assert-= #xFF (nth 1 bytes))
     (assert-= #xE1 (nth 2 bytes))))
-
-;;; Helper: collect bytes emitted by a function (local copy; also defined in encoding-tests)
-(defun %x86-collect-bytes (emit-fn)
-  "Call EMIT-FN with a stream that collects bytes. Returns byte list."
-  (let ((bytes nil))
-    (funcall emit-fn (lambda (b) (push b bytes)))
-    (nreverse bytes)))
 
 ;;; ─── Comparison emitter byte content ────────────────────────────────────────
 ;;;
