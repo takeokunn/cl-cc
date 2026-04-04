@@ -225,3 +225,31 @@
                                (cl-cc::make-ast-var :name 'b))))))
     (assert-true (and (member 'a result) (member 'b result)))
     (assert-equal 2 (length result))))
+
+;;; ─── Conservative escape analysis helper ─────────────────────────────────
+
+(deftest binding-escapes-when-returned
+  "A binding escapes when it is returned directly from the body."
+  (assert-true
+   (cl-cc::binding-escapes-in-body-p
+    (list (cl-cc::make-ast-var :name 'p))
+    'p)))
+
+(deftest binding-does-not-escape-through-safe-consumer
+  "A binding does not escape when only consumed by a whitelisted safe call."
+  (assert-null
+   (cl-cc::binding-escapes-in-body-p
+    (list (cl-cc::make-ast-call
+           :func 'car
+           :args (list (cl-cc::make-ast-var :name 'p))))
+    'p
+    :safe-consumers '("CAR"))))
+
+(deftest binding-escapes-when-captured-by-inner-lambda
+  "A binding escapes when captured by a nested lambda."
+  (assert-true
+   (cl-cc::binding-escapes-in-body-p
+    (list (cl-cc::make-ast-lambda
+           :params '()
+           :body (list (cl-cc::make-ast-var :name 'p))))
+    'p)))

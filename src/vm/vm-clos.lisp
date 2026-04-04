@@ -213,8 +213,9 @@ Algorithm: L(C) = C + merge(L(C1), L(C2), ..., (C1, C2, ...))"
         (setf (gethash :__superclasses__ class-ht) supers)
         (setf (gethash :__slots__ class-ht) all-slots)
         (setf (gethash :__initargs__ class-ht) all-initargs)
-        (setf (gethash :__methods__ class-ht) (make-hash-table :test #'equal))
-        (setf (gethash :__initforms__ class-ht) initform-values)
+         (setf (gethash :__methods__ class-ht) (make-hash-table :test #'equal))
+         (setf (gethash :__eql-index__ class-ht) (make-hash-table :test #'equal))
+         (setf (gethash :__initforms__ class-ht) initform-values)
         (setf (gethash :__default-initargs__ class-ht) all-default-initargs)
         (setf (gethash :__class-slots__ class-ht) all-class-slots)
         ;; Initialize class-allocated slot values on the class HT itself
@@ -339,13 +340,18 @@ Algorithm: L(C) = C + merge(L(C1), L(C2), ..., (C1, C2, ...))"
   (declare (ignore labels))
   (let* ((gf-ht (vm-reg-get state (vm-gf-reg inst)))
          (methods-ht (when (hash-table-p gf-ht) (gethash :__methods__ gf-ht)))
+         (eql-index (when (hash-table-p gf-ht) (gethash :__eql-index__ gf-ht)))
          (specializer (vm-method-specializer inst))
          (qualifier (vm-method-qualifier inst))
          (method-closure (vm-reg-get state (vm-method-reg inst))))
     (when methods-ht
       (if (null qualifier)
           ;; Primary method — store directly (backward compatible)
-          (setf (gethash specializer methods-ht) method-closure)
+          (progn
+            (setf (gethash specializer methods-ht) method-closure)
+            (when eql-index
+              (dolist (eql-key (%vm-extract-eql-specializer-keys specializer))
+                (pushnew method-closure (gethash eql-key eql-index) :test #'eq))))
           ;; Qualified method (:before, :after, :around) — store in sub-table
           (let ((qual-key (intern (format nil "__~A__" (string-upcase (string qualifier)))
                                   :keyword)))

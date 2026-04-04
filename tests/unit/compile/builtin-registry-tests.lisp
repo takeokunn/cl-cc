@@ -9,6 +9,7 @@
   :cases (("car-unary"          "CAR"              :unary)
           ("cdr-unary"          "CDR"              :unary)
           ("not-unary"          "NOT"              :unary)
+          ("bswap-unary"        "BSWAP"            :unary)
           ("length-unary"       "LENGTH"           :unary)
           ("mod-binary"         "MOD"              :binary)
           ("ash-binary"         "ASH"              :binary)
@@ -31,6 +32,8 @@
   "Registry entries have correct constructor symbols."
   (let ((car-entry (gethash "CAR" cl-cc::*builtin-registry*)))
     (assert-true (eq 'cl-cc::make-vm-car (cl-cc::be-ctor car-entry))))
+  (let ((bswap-entry (gethash "BSWAP" cl-cc::*builtin-registry*)))
+    (assert-true (eq 'cl-cc::make-vm-bswap (cl-cc::be-ctor bswap-entry))))
   (let ((mod-entry (gethash "MOD" cl-cc::*builtin-registry*)))
     (assert-true (eq 'cl-cc::make-vm-mod (cl-cc::be-ctor mod-entry))))
   (let ((princ-entry (gethash "PRINC" cl-cc::*builtin-registry*)))

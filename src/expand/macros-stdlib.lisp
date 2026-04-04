@@ -284,12 +284,14 @@ Supports :start, :end, and :index keyword arguments."
 ;; WITH-OUTPUT-TO-STRING (FR-613: optional string argument ignored in cl-cc)
 (our-defmacro with-output-to-string (binding &body body)
   "Execute BODY with (first binding) bound to a string output stream.
- The optional second element of BINDING (string-to-fill) is accepted for
- ANSI CL compatibility but ignored — cl-cc always creates a fresh stream."
-  (let ((var (first binding)))
+ The optional second element of BINDING is written to the fresh stream first,
+ so the returned string preserves the ANSI-visible prefix behavior."
+  (let ((var (first binding))
+        (initial-string (second binding)))
     `(let ((,var (make-string-output-stream)))
-        ,@body
-        (get-output-stream-string ,var))))
+       ,@(when initial-string `((write-string ,initial-string ,var)))
+       ,@body
+       (get-output-stream-string ,var))))
 
 ;; WITH-STANDARD-IO-SYNTAX (FR-210) — bind all ANSI-standard I/O variables
 (our-defmacro with-standard-io-syntax (&body body)
@@ -348,7 +350,13 @@ Supports :start, :end, and :index keyword arguments."
 
 ;; DEFINE-COMPILER-MACRO (FR-212) — accepts and returns name (no compile-time expansion)
 (register-macro 'define-compiler-macro
-  (lambda (form env) (declare (ignore env)) `(quote ,(second form))))
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((name (second form))
+          (lambda-list (third form))
+          (body (cdddr form)))
+      (register-compiler-macro name (make-compiler-macro-expander lambda-list body))
+      `(quote ,name))))
 
 ;;; ─── List utilities: tailp, ldiff, copy-alist (FR-495, FR-496) ───────────────
 

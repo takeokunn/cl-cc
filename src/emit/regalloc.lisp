@@ -49,6 +49,13 @@
 (defmethod instruction-defs ((inst vm-binop)) (list (vm-dst inst)))
 (defmethod instruction-uses ((inst vm-binop)) (list (vm-lhs inst) (vm-rhs inst)))
 
+;; vm-select: dst = cond ? then : else
+(defmethod instruction-defs ((inst vm-select)) (list (vm-dst inst)))
+(defmethod instruction-uses ((inst vm-select))
+  (list (vm-select-cond-reg inst)
+        (vm-select-then-reg inst)
+        (vm-select-else-reg inst)))
+
 ;; Jump-zero: uses reg
 (defmethod instruction-uses ((inst vm-jump-zero)) (list (vm-reg inst)))
 
@@ -117,6 +124,7 @@
   (def-binop-like vm-max)
   ;; Arithmetic shift (inherit vm-instruction directly)
   (def-binop-like vm-ash)
+  (def-binop-like vm-rotate)
   ;; Integer division ops (inherit vm-instruction directly, not vm-binop)
   (def-binop-like vm-truncate)
   (def-binop-like vm-rem)
@@ -142,6 +150,7 @@
   (def-unary-like vm-not)
   ;; Bitwise complement (vm-instruction directly, not vm-binop)
   (def-unary-like vm-lognot)
+  (def-unary-like vm-bswap)
   ;; FR-648: simple-vector-p predicate
   (def-unary-like vm-simple-vector-p)
   ;; FR-563: sixth–tenth list accessors

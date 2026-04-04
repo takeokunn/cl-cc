@@ -326,6 +326,9 @@
     :compilation-result-type
     :compilation-result-type-env
     :compilation-result-cps
+    :compilation-result-ast
+    :compilation-result-vm-instructions
+    :compilation-result-optimized-instructions
 
    ;; AST Transformation Utilities
    :lower-sexp-to-ast
@@ -448,7 +451,8 @@
     :make-vm-file-position :make-vm-first :make-vm-floor-inst
     :make-vm-fmakunbound :make-vm-format-inst :make-vm-fourth
     :make-vm-fround :make-vm-fresh-line-inst :make-vm-ftruncate
-    :make-vm-func-ref :make-vm-function-p :make-vm-ge :make-vm-generic-call
+     :make-vm-func-ref :make-vm-function-p :make-vm-ge :make-vm-generic-call
+     :make-vm-select
     :make-vm-generic-add :make-vm-generic-sub :make-vm-generic-mul
     :make-vm-generic-div :make-vm-generic-eq :make-vm-generic-lt :make-vm-generic-gt
     :vm-generic-add :vm-generic-sub :vm-generic-mul
@@ -587,6 +591,10 @@
      :vm-number-p
      :vm-integer-p
      :vm-function-p
+     :vm-select
+     :vm-select-cond-reg
+     :vm-select-then-reg
+     :vm-select-else-reg
 
      ;; VM Primitive Instructions - Comparisons
      :vm-lt
@@ -970,9 +978,9 @@
        :cfg :make-cfg :cfg-p
        :cfg-blocks :cfg-entry :cfg-exit :cfg-label->block :cfg-next-id
        ;; CFG builder and algorithms
-       :cfg-build :cfg-block-count :cfg-get-block-by-label
-       :cfg-compute-rpo :cfg-compute-dominators :cfg-compute-dominance-frontiers
-       :cfg-dominates-p :cfg-idf :cfg-flatten
+        :cfg-build :cfg-block-count :cfg-get-block-by-label
+        :cfg-compute-rpo :cfg-compute-dominators :cfg-compute-dominance-frontiers
+        :cfg-dominates-p :cfg-idf :cfg-flatten :cfg-split-critical-edges
 
        ;; ── Optimizer Phase 1: SSA Construction + Destruction ────────────────
        ;; ssa-rename-state struct
@@ -982,9 +990,10 @@
        ;; ssa-phi struct
        :ssa-phi :make-ssa-phi :ssa-phi-p
        :phi-dst :phi-args :phi-reg
-       ;; SSA algorithms
-       :ssa-versioned-reg :ssa-construct :ssa-destroy :ssa-round-trip
-       :ssa-place-phis :ssa-rename :ssa-sequentialize-copies
+        ;; SSA algorithms
+        :ssa-versioned-reg :ssa-construct :ssa-destroy :ssa-round-trip
+        :ssa-place-phis :ssa-rename :ssa-sequentialize-copies
+        :ssa-eliminate-trivial-phis
 
        ;; ── Optimizer Phase 2: E-Graph Engine ────────────────────────────────
        ;; e-node struct
@@ -996,10 +1005,11 @@
        ;; e-graph struct
        :e-graph :make-e-graph :e-graph-p
        :eg-classes :eg-memo :eg-union-find :eg-worklist :eg-next-id
-       ;; E-graph operations
-       :egraph-find :egraph-add :egraph-merge :egraph-rebuild
-       :egraph-saturate :egraph-extract :egraph-default-cost
-       :egraph-stats :egraph-pattern-var-p :egraph-match-pattern
+        ;; E-graph operations
+        :egraph-find :egraph-add :egraph-merge :egraph-rebuild
+        :egraph-saturate :egraph-extract :egraph-default-cost
+        :egraph-stats :egraph-pattern-var-p :egraph-match-pattern
+        :optimize-with-egraph
 
        ;; ── Optimizer Phase 2: E-Graph Rules ─────────────────────────────────
        :defrule :egraph-rule-register :egraph-builtin-rules

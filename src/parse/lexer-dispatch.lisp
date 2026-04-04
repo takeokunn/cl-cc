@@ -227,6 +227,8 @@ Bound to a fresh HT by lex-all; nil outside lexing context.")
                    nil)))
         ;; #. read-time eval — must use host eval for access to host-defined constants
         (#\. (lex-advance state)
+             (unless *read-eval*
+               (error "Reader error: #. is not allowed when *read-eval* is NIL"))
              (let* ((text (lex-read-form-text state))
                     (form (read-from-string text))
                     (value (eval form)))

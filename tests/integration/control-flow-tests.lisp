@@ -53,6 +53,12 @@
   (assert-true (is-compile-string source :target :x86_64))
   (assert-= expected (run-string source)))
 
+(deftest boolean-predicate-branches
+  "Numeric predicate results still behave as false in branch forms."
+  (assert-= 20 (run-string "(if (= 1 2) 10 20)"))
+  (assert-= 42 (run-string "(cond ((= 1 2) 10) ((= 2 2) 42) (t 0))"))
+  (assert-= 1 (run-string "(labels ((f (n) (if (= n 0) 1 (f (- n 1))))) (f 0))")))
+
 ;; ----------------------------------------------------------------------------
 ;; block/return-from tests
 ;; ----------------------------------------------------------------------------

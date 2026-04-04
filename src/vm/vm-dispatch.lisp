@@ -102,8 +102,9 @@ Restores captured environment, then handles required, &optional, &rest, and &key
         (key-params (vm-closure-key-params closure))
         (captured   (vm-closure-captured-values closure)))
     ;; Restore captured environment into registers
-    (dolist (binding captured)
-      (vm-reg-set state (car binding) (cdr binding)))
+    (map nil (lambda (binding)
+               (vm-reg-set state (car binding) (cdr binding)))
+         captured)
     ;; Required parameters
     (loop for param in params
           for val   in arg-values
@@ -119,17 +120,34 @@ Restores captured environment, then handles required, &optional, &rest, and &key
                              (if (< i (length after-req))
                                  (nth i after-req)
                                  default))))
-      ;; &rest parameter
-      (when rest-param
-        (vm-reg-set state rest-param
-                    (vm-build-list state (nthcdr (+ n-req n-opt) arg-values))))
-      ;; &key parameters
-      (when key-params
-        (let ((kw-args (nthcdr (+ n-req n-opt) arg-values)))
-          (loop for (keyword reg default) in key-params
-                do (let ((pos (position keyword kw-args)))
-                     (vm-reg-set state reg
-                                 (if pos (nth (1+ pos) kw-args) default)))))))
+       ;; &rest parameter
+        (when rest-param
+          (vm-reg-set state rest-param
+                      (vm-build-list state (nthcdr (+ n-req n-opt) arg-values)
+                                     :stack-allocate-p (vm-closure-rest-stack-alloc-p closure))))
+       ;; &key parameters
+       (when key-params
+         (let ((kw-args (nthcdr (+ n-req n-opt) arg-values)))
+           (if (>= (length key-params) 4)
+               (let ((kw-table (make-hash-table :test #'eq)))
+                (loop for tail on kw-args by #'cddr
+                      while (consp (cdr tail))
+                      do (let ((keyword (first tail))
+                               (value (second tail)))
+                           (multiple-value-bind (existing foundp)
+                               (gethash keyword kw-table)
+                             (declare (ignore existing))
+                             (unless foundp
+                               (setf (gethash keyword kw-table) value)))))
+                (dolist (entry key-params)
+                  (destructuring-bind (keyword reg default) entry
+                    (multiple-value-bind (value foundp)
+                        (gethash keyword kw-table)
+                      (vm-reg-set state reg (if foundp value default))))))
+               (loop for (keyword reg default) in key-params
+                     do (let ((pos (position keyword kw-args)))
+                          (vm-reg-set state reg
+                                      (if pos (nth (1+ pos) kw-args) default))))))))
     ;; Activate closure environment for nested closures
     (when captured
       (setf (vm-closure-env state) captured))))
@@ -177,6 +195,28 @@ SPEC-KEY is (eql value) — matches if (eql arg value)."
   (and (%eql-specializer-p spec-key)
        (eql arg (second spec-key))))
 
+(defun %vm-extract-eql-specializer-keys (specializer)
+  "Return the eql specializer values embedded in SPECIALIZER.
+Only single-argument eql specializers are indexed for fast lookup."
+  (cond
+    ((%eql-specializer-p specializer)
+     (list (second specializer)))
+    ((and (consp specializer)
+          (= (length specializer) 1)
+          (%eql-specializer-p (car specializer)))
+     (list (second (car specializer))))
+    (t nil)))
+
+(defun %vm-gf-eql-methods (gf-ht first-arg)
+  "Return fast-path eql-specializer methods for FIRST-ARG, if indexed."
+  (let ((eql-index (and (hash-table-p gf-ht) (gethash :__eql-index__ gf-ht))))
+    (when eql-index
+      (let ((m (gethash first-arg eql-index)))
+        (cond
+          ((null m) nil)
+          ((listp m) m)
+          (t (list m)))))))
+
 (defun vm-get-all-applicable-methods (gf-ht state all-args)
   "Return list of all applicable method closures for GF-HT and ALL-ARGS, most-specific first.
 EQL specializers are checked first (most specific), then class-based dispatch via CPL."
@@ -189,16 +229,20 @@ EQL specializers are checked first (most specific), then class-based dispatch vi
                     (if (member t c) c (append c (list t))))
                   (list class-name t)))
          (result nil))
-    ;; 1. Check eql specializers first (most specific)
-    (maphash (lambda (key method)
-               (when (or (and (%eql-specializer-p key)
-                              (%eql-specializer-matches-p key first-arg))
-                         (and (consp key) (not (%eql-specializer-p key))
-                              (= 1 (length key))
-                              (%eql-specializer-p (car key))
-                              (%eql-specializer-matches-p (car key) first-arg)))
-                 (push method result)))
-             methods-ht)
+     ;; 1. Check eql specializers first (most specific)
+     (dolist (method (%vm-gf-eql-methods gf-ht first-arg))
+       (push method result))
+     ;; Fallback: linear scan for backwards compatibility / non-indexed tables
+     (unless result
+       (maphash (lambda (key method)
+                  (when (or (and (%eql-specializer-p key)
+                                 (%eql-specializer-matches-p key first-arg))
+                            (and (consp key) (not (%eql-specializer-p key))
+                                 (= 1 (length key))
+                                 (%eql-specializer-p (car key))
+                                 (%eql-specializer-matches-p (car key) first-arg)))
+                    (push method result)))
+                methods-ht))
     ;; 2. Collect class-based methods in CPL order (most-specific first)
     (dolist (ancestor cpl)
       (let ((m (or (gethash (list ancestor) methods-ht)
@@ -492,22 +536,24 @@ from all argument classes. Falls back to single dispatch on FIRST-ARG."
                  (or
                    ;; Exact match by class
                    (gethash arg-classes methods-ht)
-                   ;; Try eql specializer match: scan keys with eql specs
-                   (block eql-scan
-                     (maphash (lambda (key method)
-                                (when (and (listp key) (= (length key) (length all-args))
-                                           (every (lambda (spec arg)
-                                                    (or (eq spec t)
-                                                        (eq spec (vm-classify-arg arg state))
-                                                        (%eql-specializer-matches-p spec arg)))
-                                                  key all-args))
-                                  (return-from eql-scan method)))
-                              methods-ht)
-                     nil)
-                   ;; Try with inheritance on each position
-                   (vm-resolve-multi-dispatch methods-ht state arg-classes)
-                   ;; All-t fallback
-                   (gethash (make-list (length arg-classes) :initial-element t) methods-ht))))
+                    ;; Try eql specializer match: use indexed first-arg lookup when possible,
+                    ;; then fall back to a full scan for composite keys.
+                    (or (car (%vm-gf-eql-methods gf-ht first-arg))
+                        (block eql-scan
+                          (maphash (lambda (key method)
+                                     (when (and (listp key) (= (length key) (length all-args))
+                                                (every (lambda (spec arg)
+                                                         (or (eq spec t)
+                                                             (eq spec (vm-classify-arg arg state))
+                                                             (%eql-specializer-matches-p spec arg)))
+                                                       key all-args))
+                                       (return-from eql-scan method)))
+                                   methods-ht)
+                          nil))
+                    ;; Try with inheritance on each position
+                    (vm-resolve-multi-dispatch methods-ht state arg-classes)
+                    ;; All-t fallback
+                    (gethash (make-list (length arg-classes) :initial-element t) methods-ht))))
           (unless method-closure
             (error "No applicable method for generic function ~S on classes ~S"
                    (gethash :__name__ gf-ht) arg-classes))
@@ -516,13 +562,14 @@ from all argument classes. Falls back to single dispatch on FIRST-ARG."
         (let* ((class-name (vm-classify-arg first-arg state))
                (method-closure
                  (or
-                   ;; Try eql specializer match first
-                   (block eql-single
-                     (maphash (lambda (key method)
-                                (when (%eql-specializer-matches-p key first-arg)
-                                  (return-from eql-single method)))
-                              methods-ht)
-                     nil)
+                    ;; Try eql specializer match first via fast index
+                    (or (car (%vm-gf-eql-methods gf-ht first-arg))
+                        (block eql-single
+                          (maphash (lambda (key method)
+                                     (when (%eql-specializer-matches-p key first-arg)
+                                       (return-from eql-single method)))
+                                   methods-ht)
+                          nil))
                    (gethash class-name methods-ht)
                    (let ((class-ht (gethash class-name (vm-class-registry state))))
                      (when class-ht

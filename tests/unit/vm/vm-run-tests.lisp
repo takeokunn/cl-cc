@@ -41,15 +41,24 @@
   (assert-equal 'cl-cc::add2 (aref cl-cc::*opcode-name-table* cl-cc::+op2-add2+))
   (assert-= cl-cc::+op2-const+ (gethash 'cl-cc::const cl-cc::*opcode-encoder-table*))
   (assert-= cl-cc::+op2-move+  (gethash 'cl-cc::move  cl-cc::*opcode-encoder-table*))
-  (assert-= cl-cc::+op2-add2+  (gethash 'cl-cc::add2  cl-cc::*opcode-encoder-table*)))
+  (assert-= cl-cc::+op2-add2+  (gethash 'cl-cc::add2  cl-cc::*opcode-encoder-table*))
+  (assert-= cl-cc::+op2-add-imm2+ (gethash 'cl-cc::add-imm2 cl-cc::*opcode-encoder-table*)))
 
 (deftest vm2-opcode-distinct-values
   "Each defopcode gets a unique opcode number."
   (let ((ops (list cl-cc::+op2-const+
                    cl-cc::+op2-move+
                    cl-cc::+op2-add2+
+                   cl-cc::+op2-add-imm2+
                    cl-cc::+op2-sub2+
+                   cl-cc::+op2-sub-imm2+
                    cl-cc::+op2-mul2+
+                   cl-cc::+op2-mul-imm2+
+                   cl-cc::+op2-num-eq-imm2+
+                   cl-cc::+op2-num-lt-imm2+
+                   cl-cc::+op2-num-gt-imm2+
+                   cl-cc::+op2-num-le-imm2+
+                   cl-cc::+op2-num-ge-imm2+
                    cl-cc::+op2-halt2+)))
     (assert-= (length ops) (length (remove-duplicates ops)))))
 
@@ -111,7 +120,28 @@
                           cl-cc::+op2-const+ 2 7   nil
                           cl-cc::+op2-mul2+  0 1   2
                           cl-cc::+op2-halt2+ 0 nil nil)
-           42))
+            42))
+  (bytecode expected)
+  (let ((s (cl-cc::make-vm2-state)))
+    (assert-= expected (cl-cc::run-vm bytecode s))))
+
+(deftest-each run-vm-immediate-ops
+  "run-vm executes immediate arithmetic/comparison ops."
+  :cases (("add-imm"
+           (make-bytecode cl-cc::+op2-const+ 1 3   nil
+                          cl-cc::+op2-add-imm2+ 0 1   4
+                          cl-cc::+op2-halt2+ 0 nil nil)
+           7)
+          ("cmp-imm"
+           (make-bytecode cl-cc::+op2-const+ 1 7   nil
+                          cl-cc::+op2-num-gt-imm2+ 0 1   5
+                          cl-cc::+op2-halt2+ 0 nil nil)
+           1)
+          ("cmp-imm-false"
+           (make-bytecode cl-cc::+op2-const+ 1 2   nil
+                          cl-cc::+op2-num-eq-imm2+ 0 1   5
+                          cl-cc::+op2-halt2+ 0 nil nil)
+           0))
   (bytecode expected)
   (let ((s (cl-cc::make-vm2-state)))
     (assert-= expected (cl-cc::run-vm bytecode s))))

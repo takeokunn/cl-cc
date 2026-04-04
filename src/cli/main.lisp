@@ -32,6 +32,8 @@ Options:
   -o, --output <file>     Output file (compile only)
   --arch x86-64|arm64     Target architecture (default: x86-64)
   --lang lisp|php         Source language (auto-detect from file extension)
+  --dump-ir <phase>       Dump IR for phase: ast, cps, ssa, vm, opt, asm
+  --annotate-source       Add source-location comments when available
   --stdlib                Prepend standard library (run/eval only)
   --verbose               Show compilation details on stderr
   --strict                Treat type warnings as errors (check only)
@@ -45,6 +47,8 @@ Version: ~A~%" *version*))
 
 Options:
   --lang lisp|php   Source language (auto-detect from .php extension)
+  --dump-ir <phase>  Dump IR for phase: ast, cps, ssa, vm, opt, asm
+  --annotate-source  Add source-location comments when available
   --stdlib          Prepend standard library
   --verbose         Show compilation details on stderr
 ")
@@ -56,6 +60,8 @@ Options:
   -o, --output <file>   Output file (default: input without extension)
   --arch x86-64|arm64   Target architecture (default: x86-64)
   --lang lisp|php       Source language (auto-detect from .php extension)
+  --dump-ir <phase>     Dump IR for phase: ast, cps, ssa, vm, opt, asm
+  --annotate-source     Add source-location comments when available
   --verbose             Show compilation details on stderr
 ")
     ("eval" . "Usage: cl-cc eval [options] <expr>
@@ -143,6 +149,133 @@ Returns :lisp or :php."
        (and ext (string= ext "php"))) :php)
     (t :lisp)))
 
+(defun %dump-phase-label (phase)
+  (string-downcase (string phase)))
+
+(defun %parse-ir-phase (phase-str)
+  (let ((phase (string-downcase phase-str)))
+    (case (intern (string-upcase phase) :keyword)
+      (:ast :ast)
+      (:cps :cps)
+      (:ssa :ssa)
+      (:vm  :vm)
+      (:opt :opt)
+      (:asm :asm)
+      (t nil))))
+
+(defun %ensure-list (thing)
+  (cond
+    ((null thing) nil)
+    ((listp thing) thing)
+    (t (list thing))))
+
+(defun %source-location-comment (node)
+  (when (typep node 'cl-cc:ast-node)
+    (let ((loc (cl-cc:ast-location-string node)))
+      (unless (string= loc "<unknown location>")
+        loc))))
+
+(defun %print-source-comment (stream loc)
+  (when loc
+    (format stream "; source: ~A~%" loc)))
+
+(defun %ssa-block-name (blk)
+  (let ((label (cl-cc:bb-label blk)))
+    (string-downcase
+     (format nil "~A"
+             (or (and label (cl-cc:vm-name label))
+                 (format nil "block-~D" (cl-cc:bb-id blk)))))))
+
+(defparameter +ansi-esc+     (string (code-char 27)))
+(defparameter +ansi-reset+   (concatenate 'string +ansi-esc+ "[0m"))
+(defparameter +ansi-label+   (concatenate 'string +ansi-esc+ "[32m"))
+(defparameter +ansi-opcode+  (concatenate 'string +ansi-esc+ "[34m"))
+(defparameter +ansi-comment+ (concatenate 'string +ansi-esc+ "[90m"))
+
+(defun %dump-ast-phase (result stream annotate-source)
+  (let ((asts (%ensure-list (cl-cc:compilation-result-ast result))))
+    (when (null asts)
+      (format stream "; no AST available~%"))
+    (dolist (ast asts)
+      (when annotate-source
+        (%print-source-comment stream (%source-location-comment ast)))
+      (format stream "~S~%" (cl-cc:ast-to-sexp ast)))))
+
+(defun %dump-cps-phase (result stream annotate-source)
+  (declare (ignore annotate-source))
+  (let ((cps (cl-cc:compilation-result-cps result)))
+    (if cps
+        (format stream "~S~%" cps)
+        (format stream "; no CPS available~%"))))
+
+(defun %dump-vm-phase (result stream annotate-source)
+  (let ((insts (or (cl-cc:compilation-result-vm-instructions result)
+                   (cl-cc:vm-program-instructions (cl-cc:compilation-result-program result)))))
+    (when annotate-source
+      (%print-source-comment stream (%source-location-comment
+                                     (car (%ensure-list (cl-cc:compilation-result-ast result))))))
+    (dolist (inst insts)
+      (format stream "~S~%" (cl-cc:instruction->sexp inst)))))
+
+(defun %dump-opt-phase (result stream annotate-source)
+  (let ((insts (or (cl-cc:compilation-result-optimized-instructions result)
+                   (cl-cc:vm-program-instructions (cl-cc:compilation-result-program result)))))
+    (when annotate-source
+      (%print-source-comment stream (%source-location-comment
+                                     (car (%ensure-list (cl-cc:compilation-result-ast result))))))
+    (dolist (inst insts)
+      (format stream "~S~%" (cl-cc:instruction->sexp inst)))))
+
+(defun %dump-ssa-phase (result stream annotate-source)
+  (declare (ignore annotate-source))
+  (let ((insts (or (cl-cc:compilation-result-optimized-instructions result)
+                   (cl-cc:compilation-result-vm-instructions result)
+                   (cl-cc:vm-program-instructions (cl-cc:compilation-result-program result)))))
+    (multiple-value-bind (cfg phi-map renamed-map)
+        (cl-cc:ssa-construct insts)
+      (format stream "; SSA CFG (~D block~:P)~%" (length (cl-cc:cfg-blocks cfg)))
+      (dolist (blk (cl-cc:cfg-compute-rpo cfg))
+        (format stream "~A:~%" (%ssa-block-name blk))
+        (format stream "  ; preds: ~{~A~^, ~}~%"
+                (or (mapcar (lambda (p) (%ssa-block-name p))
+                            (cl-cc:bb-predecessors blk))
+                    (list "(none)")))
+        (dolist (phi (gethash blk phi-map))
+          (format stream "  ; phi ~A <- ~{~A~^, ~}~%"
+                  (cl-cc:phi-dst phi)
+                  (mapcar (lambda (arg)
+                            (format nil "~A:~A"
+                                    (%ssa-block-name (car arg))
+                                    (cdr arg)))
+                          (cl-cc:phi-args phi))))
+        (dolist (inst (gethash blk renamed-map))
+          (format stream "  ~S~%" (cl-cc:instruction->sexp inst)))))))
+
+(defun %dump-asm-phase (result stream annotate-source)
+  (declare (ignore annotate-source))
+  (format stream "~A~A~A~%"
+          +ansi-opcode+
+          (cl-cc:compilation-result-assembly result)
+          +ansi-reset+))
+
+(defun %string-suffix-p (suffix string)
+  (let ((suffix-len (length suffix))
+        (string-len (length string)))
+    (and (<= suffix-len string-len)
+         (string= suffix string :start1 0 :end1 suffix-len
+                           :start2 (- string-len suffix-len) :end2 string-len))))
+
+
+(defun %dump-ir-phase (phase result stream annotate-source)
+  (case phase
+    (:ast (%dump-ast-phase result stream annotate-source))
+    (:cps (%dump-cps-phase result stream annotate-source))
+    (:ssa (%dump-ssa-phase result stream annotate-source))
+    (:vm  (%dump-vm-phase result stream annotate-source))
+    (:opt (%dump-opt-phase result stream annotate-source))
+    (:asm (%dump-asm-phase result stream annotate-source))
+    (t (error "Unknown IR phase: ~S" phase))))
+
 (defun %arch-keyword (arch-str)
   "Convert ARCH-STR (\"x86-64\" or \"arm64\"/\"aarch64\") to a keyword.
 Calls (uiop:quit 2) on unrecognised values."
@@ -154,6 +287,14 @@ Calls (uiop:quit 2) on unrecognised values."
     (t
      (format *error-output* "Unknown architecture: ~A (use x86-64 or arm64)~%" arch-str)
      (uiop:quit 2))))
+
+(defun %compile-target-keyword (arch-str)
+  (cond
+    ((or (string= arch-str "x86-64")
+         (string= arch-str "x86_64")) :x86_64)
+    ((or (string= arch-str "arm64")
+         (string= arch-str "aarch64")) :aarch64)
+    (t (error "Unknown architecture for compilation: ~A" arch-str))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Subcommand handlers
@@ -204,17 +345,29 @@ Calls (uiop:quit 2) on unrecognised values."
            (lang-flag (or (flag parsed "--lang") ""))
            (language  (let ((l (%detect-language file lang-flag)))
                         (if (string= lang-flag "") nil l)))
+           (dump-ir   (flag parsed "--dump-ir"))
+           (annotate  (flag parsed "--annotate-source"))
            (verbose   (flag parsed "--verbose")))
       (when verbose
         (format *error-output* "; cl-cc compile: ~A  arch=~A  output=~A~%"
                 file arch-str (or output "(auto)")))
       (handler-case
-          (let ((result (compile-file-to-native file
-                                                :arch arch
-                                                :output-file output
-                                                :language language)))
-            (format t "~A~%" result)
-            (uiop:quit 0))
+          (if dump-ir
+              (let ((phase (%parse-ir-phase dump-ir)))
+                (unless phase
+                  (format *error-output* "Error: unknown IR phase ~A~%" dump-ir)
+                  (uiop:quit 2))
+                (let* ((source (%read-file file))
+                       (result (compile-string source :target (%compile-target-keyword arch-str)
+                                               :language (or language :lisp))))
+                  (%dump-ir-phase phase result *standard-output* annotate)
+                  (uiop:quit 0)))
+              (let ((result (compile-file-to-native file
+                                                    :arch arch
+                                                    :output-file output
+                                                    :language language)))
+                (format t "~A~%" result)
+                (uiop:quit 0)))
         (error (e)
           (format *error-output* "Error: ~A~%" e)
           (uiop:quit 1))))))

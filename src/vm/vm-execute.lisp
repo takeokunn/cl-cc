@@ -39,13 +39,26 @@
   (values (gethash (vm-label-name inst) labels) nil nil))
 
 (defun vm-falsep (value)
-  "Return T if VALUE is falsy (nil, 0, or false)."
-  (or (null value) (eql value 0)))
+  "Return T if VALUE is falsy (NIL or numeric zero).
+
+The VM encodes predicate results as 0/1, so branch instructions must treat
+0 as false in addition to NIL."
+  (or (null value)
+      (and (numberp value)
+           (zerop value))))
 
 (defmethod execute-instruction ((inst vm-jump-zero) state pc labels)
   (if (vm-falsep (vm-reg-get state (vm-reg inst)))
       (values (gethash (vm-label-name inst) labels) nil nil)
       (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-select) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst)
+              (if (vm-falsep (vm-reg-get state (vm-select-cond-reg inst)))
+                  (vm-reg-get state (vm-select-else-reg inst))
+                  (vm-reg-get state (vm-select-then-reg inst))))
+  (values (1+ pc) nil nil))
 
 (defmethod execute-instruction ((inst vm-print) state pc labels)
   (declare (ignore labels))
@@ -61,22 +74,26 @@
   ;; captured is a list of (symbol . register) pairs from the compiler
   ;; We store values keyed by REGISTER name so vm-call restores to the correct register
   (let* ((dst-reg (vm-dst inst))
-         (captured-vals (mapcar (lambda (binding)
-                                  (cons (cdr binding) (vm-reg-get state (cdr binding))))
-                                (vm-captured-vars inst)))
-         (closure (make-instance 'vm-closure-object
-                                 :entry-label (vm-label-name inst)
-                                 :params (vm-closure-params inst)
-                                 :optional-params (vm-closure-optional-params inst)
-                                 :rest-param (vm-closure-rest-param inst)
-                                 :key-params (vm-closure-key-params inst)
-                                 :captured-values captured-vals)))
+         (captured-vals (coerce
+                         (mapcar (lambda (binding)
+                                   (cons (cdr binding) (vm-reg-get state (cdr binding))))
+                                 (vm-captured-vars inst))
+                         'vector))
+          (closure (make-instance 'vm-closure-object
+                                  :entry-label (vm-label-name inst)
+                                  :params (vm-closure-params inst)
+                                  :optional-params (vm-closure-optional-params inst)
+                                  :rest-param (vm-closure-rest-param inst)
+                                  :key-params (vm-closure-key-params inst)
+                                  :rest-stack-alloc-p (vm-closure-rest-stack-alloc-p inst)
+                                  :captured-values captured-vals)))
     (vm-reg-set state dst-reg closure)
     ;; Fix self-references for recursive labels: if a captured register
     ;; is the same as dst-reg, the closure captures itself (not yet created at lookup time)
-    (dolist (cv-pair captured-vals)
-      (when (eql (car cv-pair) dst-reg)
-        (setf (cdr cv-pair) closure)))
+    (dotimes (i (length captured-vals))
+      (let ((cv-pair (aref captured-vals i)))
+        (when (eql (car cv-pair) dst-reg)
+          (setf (cdr cv-pair) closure))))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-call) state pc labels)
@@ -122,19 +139,21 @@
          (registered (when sym (gethash sym (vm-function-registry state)))))
     (vm-reg-set state (vm-dst inst)
                 (or registered
-                    (make-instance 'vm-closure-object
-                                   :entry-label label-str
-                                   :params nil
-                                   :captured-values nil))))
+          (make-instance 'vm-closure-object
+                         :entry-label label-str
+                         :params nil
+                         :rest-stack-alloc-p nil
+                         :captured-values nil))))
   (values (1+ pc) nil nil))
 
 (defmethod execute-instruction ((inst vm-make-closure) state pc labels)
   (declare (ignore labels))
-  (let* ((captured-values (mapcar (lambda (reg) (vm-reg-get state reg)) (vm-env-regs inst)))
-         (closure (make-instance 'vm-closure-object
-                                 :entry-label (vm-label-name inst)
-                                 :params (vm-make-closure-params inst)
-                                 :captured-values captured-values))
+  (let* ((captured-values (coerce (mapcar (lambda (reg) (vm-reg-get state reg)) (vm-env-regs inst)) 'vector))
+          (closure (make-instance 'vm-closure-object
+                                  :entry-label (vm-label-name inst)
+                                  :params (vm-make-closure-params inst)
+                                  :rest-stack-alloc-p nil
+                                  :captured-values captured-values))
          (addr (vm-heap-alloc state closure)))
     (vm-reg-set state (vm-dst inst) addr)
     (values (1+ pc) nil nil)))
@@ -144,13 +163,28 @@
   (let* ((addr (vm-reg-get state (vm-closure-reg inst)))
          (closure (vm-heap-get state addr))
          (idx (vm-closure-index inst))
-         (values-list (vm-closure-captured-values closure)))
-    (when (>= idx (length values-list))
-      (error "Closure ref index ~D out of bounds (captured ~D values)" idx (length values-list)))
-    (vm-reg-set state (vm-dst inst) (nth idx values-list))
+         (values-vec (vm-closure-captured-values closure)))
+    (when (>= idx (length values-vec))
+      (error "Closure ref index ~D out of bounds (captured ~D values)" idx (length values-vec)))
+    (vm-reg-set state (vm-dst inst) (aref values-vec idx))
     (values (1+ pc) nil nil)))
 
 ;;; ── Multiple Values and Apply ────────────────────────────────────────────
+
+(defun %vm-apply-spread-args (state arg-values)
+  "Return APPLIED arguments with the last VM argument spliced as a list."
+  (cond
+    ((null arg-values) nil)
+    ((null (cdr arg-values))
+     (vm-list-to-lisp-list state (car arg-values)))
+    (t
+     (let ((prefix nil)
+           (rest arg-values))
+       (loop while (cdr rest) do
+         (push (car rest) prefix)
+         (setf rest (cdr rest)))
+       (nconc (nreverse prefix)
+              (vm-list-to-lisp-list state (car rest)))))))
 
 (defmethod execute-instruction ((inst vm-values) state pc labels)
   (declare (ignore labels))
@@ -256,10 +290,7 @@
          (dst-reg   (vm-dst inst))
          ;; Spread the last argument: (apply fn a b list) → args are (a b . list)
          (arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs))
-         (spread-args (if arg-values
-                          (append (butlast arg-values)
-                                  (vm-list-to-lisp-list state (car (last arg-values))))
-                          nil)))
+         (spread-args (%vm-apply-spread-args state arg-values)))
     (cond
       ;; Host CL function — apply directly, no frame push
       ((functionp func)
@@ -281,10 +312,7 @@
          (dst-reg   (vm-dst inst))
          ;; Spread the last argument: (apply fn a b list) → args are (a b . list)
          (arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs))
-         (spread-args (if arg-values
-                          (append (butlast arg-values)
-                                  (vm-list-to-lisp-list state (car (last arg-values))))
-                          nil)))
+         (spread-args (%vm-apply-spread-args state arg-values)))
     (cond
       ;; Host CL function — apply directly, no frame push
       ((functionp func)

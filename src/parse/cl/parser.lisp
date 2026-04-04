@@ -246,6 +246,24 @@ in the stripped forms and declarations are extracted after it."
       (setf rest (cdr rest)))
     (values bindings (nconc (nreverse prefix) rest))))
 
+(defun %extract-leading-declarations (forms)
+  "Extract leading DECLARE forms from FORMS.
+
+Returns (values declarations stripped-forms), where DECLARATIONS is a list of
+the declaration clauses found inside leading DECLARE forms. Leading docstrings
+are preserved in the stripped forms and declarations are extracted after it."
+  (let ((decls nil)
+        (rest forms)
+        (prefix nil))
+    (when (and rest (stringp (first rest)))
+      (push (first rest) prefix)
+      (setf rest (rest rest)))
+    (loop while (and rest (consp (first rest)) (eq (caar rest) 'declare)) do
+      (dolist (spec (cdar rest))
+        (push spec decls))
+      (setf rest (cdr rest)))
+    (values (nreverse decls) (nconc (nreverse prefix) rest))))
+
 (defun %apply-type-bindings-to-params (params type-bindings)
   "Replace matching required PARAMS with typed parameter pairs."
   (mapcar (lambda (param)

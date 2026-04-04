@@ -20,14 +20,30 @@
                      :documentation "Hash table mapping global variable names to their registers")
    (global-classes :initform (make-hash-table :test #'eq) :accessor ctx-global-classes
                    :documentation "Hash table mapping class names to their class descriptor registers")
-   (global-generics :initform (make-hash-table :test #'eq) :accessor ctx-global-generics
-                    :documentation "Hash table mapping generic function names to their GF registers")
-   (top-level-p :initform t :accessor ctx-top-level-p
-                :documentation "Whether we are at top-level (not inside a function body)")
+    (global-generics :initform (make-hash-table :test #'eq) :accessor ctx-global-generics
+                     :documentation "Hash table mapping generic function names to their GF registers")
+    (current-function-name :initform nil :accessor ctx-current-function-name
+                           :documentation "Name of the function currently being compiled, if any")
+    (current-function-label :initform nil :accessor ctx-current-function-label
+                            :documentation "Entry label of the function currently being compiled")
+    (current-function-params :initform nil :accessor ctx-current-function-params
+                             :documentation "Required parameter symbols for the current function")
+    (current-function-simple-p :initform nil :accessor ctx-current-function-simple-p
+                               :documentation "Whether the current function has only required parameters")
+    (top-level-p :initform t :accessor ctx-top-level-p
+                 :documentation "Whether we are at top-level (not inside a function body)")
    (boxed-vars :initform nil :accessor ctx-boxed-vars
-               :documentation "List of variable names that are boxed (stored in cons cells for capture-by-reference)")
+                :documentation "List of variable names that are boxed (stored in cons cells for capture-by-reference)")
+   (noescape-cons-bindings :initform nil :accessor ctx-noescape-cons-bindings
+                           :documentation "Alist mapping local variable names to (car-reg . cdr-reg) for conservative non-escaping cons bindings.")
+   (noescape-array-bindings :initform nil :accessor ctx-noescape-array-bindings
+                            :documentation "Alist mapping local variable names to (size . element-regs) for conservative non-escaping fixed-size arrays.")
+   (noescape-instance-bindings :initform nil :accessor ctx-noescape-instance-bindings
+                               :documentation "Alist mapping local variable names to slot-name-string → register alists for conservative non-escaping make-instance bindings.")
+   (noescape-closure-bindings :initform nil :accessor ctx-noescape-closure-bindings
+                              :documentation "Alist mapping local variable names to directly inlinable non-escaping lambda ASTs.")
    (tail-position :initform nil :accessor ctx-tail-position
-                  :documentation "Whether the current compilation position is a tail position.")))
+                   :documentation "Whether the current compilation position is a tail position.")))
 
 
 

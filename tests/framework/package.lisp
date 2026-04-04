@@ -123,13 +123,17 @@
                  :make-vm-rplaca :make-vm-rplacd :make-vm-sub
                  :make-vm-closure :make-vm-jump :make-vm-ret :make-vm-func-ref
                  :make-vm-print :make-vm-spill-load :make-vm-spill-store
-                 ;; Additional constructors for effects/optimizer tests
-                 :make-vm-neg :make-vm-inc :make-vm-dec
-                 :make-vm-lt :make-vm-gt :make-vm-le :make-vm-ge
-                 :make-vm-null-p :make-vm-cons-p :make-vm-number-p
-                 :make-vm-set-global :make-vm-get-global
-                 :make-vm-not :make-vm-lognot
-                 :make-vm-format-inst :make-vm-make-string
+                  ;; Additional constructors for effects/optimizer tests
+                  :make-vm-neg :make-vm-inc :make-vm-dec
+                  :make-vm-lt :make-vm-gt :make-vm-le :make-vm-ge
+                  :make-vm-null-p :make-vm-cons-p :make-vm-number-p
+                  :make-vm-set-global :make-vm-get-global
+                  :make-vm-not :make-vm-lognot
+                  :make-vm-ash :make-vm-logand :make-vm-logior
+                  :make-vm-logxor :make-vm-logeqv :make-vm-logtest
+                  :make-vm-logbitp :make-vm-logcount :make-vm-integer-length
+                  :make-vm-bswap
+                  :make-vm-format-inst :make-vm-make-string
                  ;; VM Heap operations
                  :vm-cons
                  :vm-car

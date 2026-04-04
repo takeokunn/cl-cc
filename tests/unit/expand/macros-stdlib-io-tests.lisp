@@ -9,6 +9,8 @@
 
 (in-suite macros-stdlib-io-suite)
 
+(defparameter *load-time-value-hit* 0)
+
 (deftest export-is-not-a-macro
   "(export ...) is now a host-bridged function, not a macro"
   (multiple-value-bind (expansion expanded-p) (our-macroexpand-1 '(export '(foo bar)))
@@ -45,6 +47,19 @@
   (let ((result (our-macroexpand-1 '(load-time-value (+ 1 2)))))
     (assert-eq (car result) 'quote)
     (assert-= (second result) 3)))
+
+(deftest load-time-value-is-memoized-during-expansion
+  "LOAD-TIME-VALUE only evaluates identical forms once per compiler session."
+  (let ((*load-time-value-hit* 0))
+    (clrhash cl-cc::*load-time-value-cache*)
+    (let* ((form '(load-time-value (progn (incf *load-time-value-hit*) *load-time-value-hit*)))
+           (first (our-macroexpand-1 form))
+           (second (our-macroexpand-1 form)))
+      (assert-eq 'quote (car first))
+      (assert-eq 'quote (car second))
+      (assert-= 1 (second first))
+      (assert-= 1 (second second))
+      (assert-= 1 *load-time-value-hit*))))
 
 (deftest provide-expansion
   "PROVIDE: outer LET, body calls PUSHNEW to register the module."

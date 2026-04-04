@@ -37,6 +37,8 @@
            "(with-output-to-string (s) (write-string \"hello\" s))" "hello")
           ("with-output-to-string-multiple"
            "(with-output-to-string (s) (write-string \"a\" s) (write-string \"b\" s))" "ab")
+          ("with-output-to-string-initial-string"
+           "(with-output-to-string (s \"prefix:\") (write-string \"body\" s))" "prefix:body")
           ("with-input-from-string-read-char"
            "(with-input-from-string (s \"abc\") (read-char s))" #\a)
           ("with-input-from-string-read-line"

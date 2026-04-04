@@ -28,9 +28,9 @@
     (assert-true (search "FUNCALL" result))))
 
 (deftest cps-ast-sequence-and-if-are-recursive
-  "Sequence and if nodes recurse through cps-transform-sequence and cps-transform-ast."
+  "Sequence recurses through cps-transform-sequence and if deduplicates its continuation."
   (let ((seq (cl-cc::cps-transform-sequence (list (cl-cc:make-ast-int :value 1)
-                                                 (cl-cc:make-ast-int :value 2)) 'k))
+                                                  (cl-cc:make-ast-int :value 2)) 'k))
         (iff (cl-cc::cps-transform-ast
               (cl-cc:make-ast-if
                :cond (cl-cc:make-ast-int :value 1)
@@ -38,4 +38,5 @@
                :else (cl-cc:make-ast-int :value 20))
               'k)))
     (assert-eq 'funcall (car seq))
+    (assert-eq 'let (car iff))
     (assert-true (search "IF" (format nil "~S" iff)))))

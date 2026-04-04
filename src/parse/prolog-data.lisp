@@ -30,6 +30,52 @@
     ;; Copy-propagation through a move chain: ?mid still gets ?src (in case it
     ;; is read elsewhere), but ?dst now reads directly from ?src, enabling DCE
     ;; to later eliminate ?mid if it has no remaining readers.
-    ((:move ?mid ?src) (:move ?dst ?mid) ((:move ?mid ?src) (:move ?dst ?src)))))
+    ((:move ?mid ?src) (:move ?dst ?mid) ((:move ?mid ?src) (:move ?dst ?src)))
+
+    ;; Arithmetic and comparison identities that simplify the current
+    ;; instruction while preserving the following instruction unchanged.
+    ((:add ?dst ?src 0)   ?next ((:move ?dst ?src) ?next))
+    ((:add ?dst 0 ?src)   ?next ((:move ?dst ?src) ?next))
+    ((:sub ?dst ?src 0)   ?next ((:move ?dst ?src) ?next))
+    ((:sub ?dst 0 ?src)   ?next ((:neg ?dst ?src) ?next))
+    ((:sub ?dst ?src ?src) ?next ((:const ?dst 0) ?next))
+    ((:mul ?dst ?src 1)   ?next ((:move ?dst ?src) ?next))
+    ((:mul ?dst 1 ?src)   ?next ((:move ?dst ?src) ?next))
+    ((:mul ?dst ?src 0)   ?next ((:const ?dst 0) ?next))
+    ((:mul ?dst 0 ?src)   ?next ((:const ?dst 0) ?next))
+    ((:div ?dst ?src 1)   ?next ((:move ?dst ?src) ?next))
+    ((:logand ?dst ?src -1) ?next ((:move ?dst ?src) ?next))
+    ((:logand ?dst -1 ?src) ?next ((:move ?dst ?src) ?next))
+    ((:logand ?dst ?src 0) ?next ((:const ?dst 0) ?next))
+    ((:logior ?dst ?src 0) ?next ((:move ?dst ?src) ?next))
+    ((:logior ?dst 0 ?src) ?next ((:move ?dst ?src) ?next))
+    ((:logior ?dst ?src -1) ?next ((:const ?dst -1) ?next))
+    ((:logxor ?dst ?src 0) ?next ((:move ?dst ?src) ?next))
+    ((:eq ?dst ?src ?src)   ?next ((:const ?dst 1) ?next))
+    ((:gt ?dst ?src ?src)   ?next ((:const ?dst 0) ?next))
+    ((:le ?dst ?src ?src)   ?next ((:const ?dst 1) ?next))
+    ((:logand ?dst ?src ?src) ?next ((:move ?dst ?src) ?next))
+    ((:logior ?dst ?src ?src) ?next ((:move ?dst ?src) ?next))
+    ((:logxor ?dst ?src ?src) ?next ((:const ?dst 0) ?next))
+    ((:num-eq ?dst ?src ?src) ?next ((:const ?dst 1) ?next))
+    ((:lt ?dst ?src ?src)   ?next ((:const ?dst 0) ?next))
+    ((:ge ?dst ?src ?src)   ?next ((:const ?dst 1) ?next))
+
+    ;; Negated comparisons can be collapsed into the opposite comparison.
+    ((:lt ?tmp ?lhs ?rhs) (:not ?dst ?tmp) ((:ge ?dst ?lhs ?rhs)))
+    ((:gt ?tmp ?lhs ?rhs) (:not ?dst ?tmp) ((:le ?dst ?lhs ?rhs)))
+    ((:le ?tmp ?lhs ?rhs) (:not ?dst ?tmp) ((:gt ?dst ?lhs ?rhs)))
+    ((:ge ?tmp ?lhs ?rhs) (:not ?dst ?tmp) ((:lt ?dst ?lhs ?rhs)))
+
+    ;; Unconditional transfers make the immediately-following instruction dead.
+    ((:jump ?lbl1) (:jump ?lbl2) ((:jump ?lbl1)))
+    ((:jump ?lbl) (:ret ?reg) ((:jump ?lbl)))
+    ((:jump ?lbl) (:halt ?reg) ((:jump ?lbl)))
+    ((:ret ?reg) (:jump ?lbl) ((:ret ?reg)))
+    ((:halt ?reg) (:jump ?lbl) ((:halt ?reg)))
+    ((:ret ?reg1) (:ret ?reg2) ((:ret ?reg1)))
+    ((:halt ?reg1) (:halt ?reg2) ((:halt ?reg1)))
+    ((:ret ?reg1) (:halt ?reg2) ((:ret ?reg1)))
+    ((:halt ?reg1) (:ret ?reg2) ((:halt ?reg1)))))
 
 (defparameter *enable-prolog-peephole* t)

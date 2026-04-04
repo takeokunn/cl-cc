@@ -205,8 +205,8 @@
   "Test mutual tail recursion between two functions."
   (let ((result (run-string
                  "(labels ((even? (n)
-                     (if (= n 0) t (odd? (- n 1))))
-                   (odd? (n)
-                     (if (= n 0) nil (even? (- n 1)))))
-                   (even? 1000))")))
+                      (if (= n 0) t (odd? (- n 1))))
+                    (odd? (n)
+                      (if (= n 0) nil (even? (- n 1)))))
+                    (even? 100000))")))
     (assert-true (eq result t))))

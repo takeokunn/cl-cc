@@ -121,25 +121,27 @@
 ;;; ─── Section 6: FORMAT ──────────────────────────────────────────────────────
 
 (deftest codegen-phase2-format-nil-dest
-  "Compiling (format nil fmt arg): emits vm-format-inst but NOT vm-princ."
+  "Compiling (format nil \"fmt\") folds to a constant string."
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-ast-call :func 'format
                                 :args (list (make-ast-var :name nil)
-                                            (make-ast-quote :value "~A")
-                                            (make-ast-int :value 42)))
+                                            (make-ast-quote :value "hello")))
                  ctx)
-    (assert-true  (codegen-find-inst ctx 'cl-cc::vm-format-inst))
-    (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-princ)))))
+    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-const)))
+      (assert-true inst)
+      (assert-equal "hello" (cl-cc::vm-const-value inst))
+      (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-format-inst)))
+      (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-princ))))))
 
 (deftest codegen-phase2-format-t-dest-emits-format-and-princ
-  "Compiling (format t fmt) emits both vm-format-inst and vm-princ."
+  "Compiling (format t \"fmt\") emits vm-princ without vm-format-inst."
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-ast-call :func 'format
                                 :args (list (make-ast-var :name t)
-                                            (make-ast-quote :value "~A")))
+                                            (make-ast-quote :value "hello")))
                  ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-format-inst))
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-princ))))
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-princ))
+    (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-format-inst)))))
 
 (deftest codegen-phase2-format-requires-at-least-two-args
   "Compiling (format nil) with only 1 arg falls through — no vm-format-inst."
@@ -173,15 +175,29 @@
 
 ;;; ─── Section 8: CONCATENATE ─────────────────────────────────────────────────
 
-(deftest codegen-phase2-concatenate-string-type-emits-vm-concatenate
-  "Compiling (concatenate 'string a b) emits vm-concatenate."
+(deftest codegen-phase2-concatenate-constant-strings-fold-to-vm-const
+  "Compiling (concatenate 'string foo bar) folds to a single vm-const."
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-ast-call :func 'concatenate
                                 :args (list (make-ast-quote :value 'string)
                                             (make-ast-quote :value "foo")
                                             (make-ast-quote :value "bar")))
                  ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-concatenate))))
+    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-const)))
+      (assert-true inst)
+      (assert-equal "foobar" (cl-cc::vm-const-value inst))
+      (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-concatenate))))))
+
+(deftest codegen-phase2-concatenate-three-strings-emits-two-concats
+  "Compiling (concatenate 'string a b c) folds the chain with two vm-concatenate instructions."
+  (let ((ctx (make-ctx-with-vars 'a 'b 'c)))
+    (compile-ast (make-ast-call :func 'concatenate
+                                :args (list (make-ast-quote :value 'string)
+                                            (make-ast-var :name 'a)
+                                            (make-ast-var :name 'b)
+                                            (make-ast-var :name 'c)))
+                 ctx)
+    (assert-eql 2 (codegen-count-inst ctx 'cl-cc::vm-concatenate))))
 
 (deftest-each codegen-phase2-concatenate-non-string-falls-through
   "Compiling (concatenate TYPE ...) with non-string or unquoted type does NOT emit vm-concatenate."

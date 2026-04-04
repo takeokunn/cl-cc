@@ -55,10 +55,15 @@
 
 (defmethod execute-instruction ((inst vm-sync-handler-regs) state pc labels)
   (declare (ignore labels))
-  (dolist (entry (vm-handler-stack state))
-    (let ((saved-regs (fifth entry)))
-      (maphash (lambda (k v) (setf (gethash k saved-regs) v))
-               (vm-state-registers state))))
+  (let ((snapshot (let ((copy (make-hash-table :test (hash-table-test (vm-state-registers state)))))
+                    (maphash (lambda (k v) (setf (gethash k copy) v))
+                             (vm-state-registers state))
+                    copy)))
+    (dolist (entry (vm-handler-stack state))
+      (let ((saved-regs (fifth entry)))
+        (clrhash saved-regs)
+        (maphash (lambda (k v) (setf (gethash k saved-regs) v))
+                 snapshot))))
   (values (1+ pc) nil nil))
 
 (defun vm-error-type-matches-p (error-value handler-type)
@@ -300,6 +305,15 @@ OUTPUT-STREAM: stream for I/O."
       (setf (svref regs dst) (+ (svref regs src1) (svref regs src2))))
     (+ pc 4)))
 
+(defopcode add-imm2
+  (lambda (state code pc regs)
+    (declare (ignore state))
+    (let ((dst (svref code (+ pc 1)))
+          (src (svref code (+ pc 2)))
+          (imm (svref code (+ pc 3))))
+      (setf (svref regs dst) (+ (svref regs src) imm)))
+    (+ pc 4)))
+
 (defopcode sub2
   (lambda (state code pc regs)
     (declare (ignore state))
@@ -309,6 +323,15 @@ OUTPUT-STREAM: stream for I/O."
       (setf (svref regs dst) (- (svref regs src1) (svref regs src2))))
     (+ pc 4)))
 
+(defopcode sub-imm2
+  (lambda (state code pc regs)
+    (declare (ignore state))
+    (let ((dst (svref code (+ pc 1)))
+          (src (svref code (+ pc 2)))
+          (imm (svref code (+ pc 3))))
+      (setf (svref regs dst) (- (svref regs src) imm)))
+    (+ pc 4)))
+
 (defopcode mul2
   (lambda (state code pc regs)
     (declare (ignore state))
@@ -316,6 +339,60 @@ OUTPUT-STREAM: stream for I/O."
           (src1 (svref code (+ pc 2)))
           (src2 (svref code (+ pc 3))))
       (setf (svref regs dst) (* (svref regs src1) (svref regs src2))))
+    (+ pc 4)))
+
+(defopcode mul-imm2
+  (lambda (state code pc regs)
+    (declare (ignore state))
+    (let ((dst (svref code (+ pc 1)))
+          (src (svref code (+ pc 2)))
+          (imm (svref code (+ pc 3))))
+      (setf (svref regs dst) (* (svref regs src) imm)))
+    (+ pc 4)))
+
+(defopcode num-eq-imm2
+  (lambda (state code pc regs)
+    (declare (ignore state))
+    (let ((dst (svref code (+ pc 1)))
+          (src (svref code (+ pc 2)))
+          (imm (svref code (+ pc 3))))
+      (setf (svref regs dst) (if (= (svref regs src) imm) 1 0)))
+    (+ pc 4)))
+
+(defopcode num-lt-imm2
+  (lambda (state code pc regs)
+    (declare (ignore state))
+    (let ((dst (svref code (+ pc 1)))
+          (src (svref code (+ pc 2)))
+          (imm (svref code (+ pc 3))))
+      (setf (svref regs dst) (if (< (svref regs src) imm) 1 0)))
+    (+ pc 4)))
+
+(defopcode num-gt-imm2
+  (lambda (state code pc regs)
+    (declare (ignore state))
+    (let ((dst (svref code (+ pc 1)))
+          (src (svref code (+ pc 2)))
+          (imm (svref code (+ pc 3))))
+      (setf (svref regs dst) (if (> (svref regs src) imm) 1 0)))
+    (+ pc 4)))
+
+(defopcode num-le-imm2
+  (lambda (state code pc regs)
+    (declare (ignore state))
+    (let ((dst (svref code (+ pc 1)))
+          (src (svref code (+ pc 2)))
+          (imm (svref code (+ pc 3))))
+      (setf (svref regs dst) (if (<= (svref regs src) imm) 1 0)))
+    (+ pc 4)))
+
+(defopcode num-ge-imm2
+  (lambda (state code pc regs)
+    (declare (ignore state))
+    (let ((dst (svref code (+ pc 1)))
+          (src (svref code (+ pc 2)))
+          (imm (svref code (+ pc 3))))
+      (setf (svref regs dst) (if (>= (svref regs src) imm) 1 0)))
     (+ pc 4)))
 
 (defopcode halt2

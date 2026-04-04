@@ -133,7 +133,7 @@ Returns (values closure-data bindings non-constant-defaults supplied-p-entries).
 (defun allocate-extended-params (ctx optional-params rest-param key-params)
   "Allocate registers and build metadata for extended lambda list parameters.
 Returns (values opt-closure-data rest-reg key-closure-data opt-bindings
-                rest-binding key-bindings non-constant-defaults supplied-p-entries)."
+                 rest-binding key-bindings non-constant-defaults supplied-p-entries)."
   (let ((opt-closure-data nil) (opt-bindings nil)
         (rest-reg nil) (rest-binding nil)
         (key-closure-data nil) (key-bindings nil)
@@ -160,6 +160,32 @@ Returns (values opt-closure-data rest-reg key-closure-data opt-bindings
     (values opt-closure-data rest-reg key-closure-data
             opt-bindings rest-binding key-bindings non-constant-defaults
             supplied-p-entries)))
+
+(defparameter *rest-stack-alloc-safe-consumers*
+  '("CAR" "CDR" "CAAR" "CADR" "CDAR" "CDDR" "CAAAR" "CAADR" "CADAR" "CADDR"
+    "CDAAR" "CDADR" "CDDAR" "CDDDR" "FIRST" "SECOND" "THIRD" "FOURTH" "FIFTH"
+    "SIXTH" "SEVENTH" "EIGHTH" "NINTH" "TENTH" "CONS" "LIST" "LIST*" "LENGTH"
+    "NULL" "CONSP" "LISTP" "ATOM" "ENDP" "NOT" "EQ" "EQL" "EQUAL" "EQUALP"
+    "MEMBER" "ASSOC" "FIND" "POSITION" "COUNT" "REMOVE" "REMOVE-IF"
+    "REMOVE-IF-NOT" "REMOVE-DUPLICATES" "REVERSE" "NREVERSE" "SORT"
+    "STABLE-SORT" "REDUCE" "EVERY" "SOME" "NOTANY" "NOTEVERY"
+    "MAPCAR" "MAPC" "MAPCAN" "MAPL" "MAPLIST" "MAPCON")
+  "Functions that consume a &rest list without causing it to escape.")
+
+(defun rest-param-stack-alloc-p (body-forms rest-name)
+  "Return T when REST-NAME is only used in stack-safe contexts within BODY-FORMS.
+This is a conservative heuristic used to mark &rest lists dynamic-extent." 
+  (and (listp body-forms)
+       (not (binding-escapes-in-body-p body-forms rest-name
+                                       :safe-consumers *rest-stack-alloc-safe-consumers*))))
+
+(defun dynamic-extent-declared-p (declarations name)
+  "Return T when DECLARATIONS contain (dynamic-extent NAME)."
+  (some (lambda (decl)
+          (and (consp decl)
+               (eq (car decl) 'dynamic-extent)
+               (member name (cdr decl) :test #'eq)))
+        declarations))
 
 (defun emit-supplied-p-checks (ctx supplied-p-entries)
   "Emit code to set supplied-p registers based on sentinel comparison.
@@ -225,18 +251,31 @@ Falls back to NIL when NAME was not registered with a typed signature."
 
 (defun compile-function-body (ctx params param-regs opt-bindings rest-binding
                               key-bindings non-constant-defaults body
-                              &optional supplied-p-entries type-bindings)
+                              &optional supplied-p-entries type-bindings
+                              current-function-name current-function-label)
   "Bind parameters, emit supplied-p checks, non-constant defaults, compile BODY, emit vm-ret.
 Saves and restores the compiler environment around the body via unwind-protect."
   (let ((old-env (ctx-env ctx))
         (old-type-env (ctx-type-env ctx))
-        (old-tail (ctx-tail-position ctx)))
+        (old-tail (ctx-tail-position ctx))
+        (old-current-function-name (ctx-current-function-name ctx))
+        (old-current-function-label (ctx-current-function-label ctx))
+        (old-current-function-params (ctx-current-function-params ctx))
+        (old-current-function-simple-p (ctx-current-function-simple-p ctx)))
     (unwind-protect
          (progn
            (setf (ctx-env ctx)
                  (append (build-all-param-bindings params param-regs
                                                     opt-bindings rest-binding key-bindings)
                          (ctx-env ctx)))
+           (setf (ctx-current-function-name ctx) current-function-name
+                 (ctx-current-function-label ctx) current-function-label
+                 (ctx-current-function-params ctx) params
+                 (ctx-current-function-simple-p ctx)
+                 (and current-function-name
+                      (null opt-bindings)
+                      (null rest-binding)
+                      (null key-bindings)))
            (when type-bindings
              (setf (ctx-type-env ctx)
                    (cl-cc/type:type-env-extend* type-bindings (ctx-type-env ctx))))
@@ -251,22 +290,28 @@ Saves and restores the compiler environment around the body via unwind-protect."
                (setf last-reg (compile-ast form ctx)))
              (setf (ctx-tail-position ctx) nil)
              (emit ctx (make-vm-ret :reg last-reg))))
-       (setf (ctx-env ctx) old-env)
-       (setf (ctx-type-env ctx) old-type-env)
-       (setf (ctx-tail-position ctx) old-tail))))
+        (setf (ctx-env ctx) old-env)
+        (setf (ctx-type-env ctx) old-type-env)
+        (setf (ctx-tail-position ctx) old-tail)
+        (setf (ctx-current-function-name ctx) old-current-function-name
+              (ctx-current-function-label ctx) old-current-function-label
+              (ctx-current-function-params ctx) old-current-function-params
+              (ctx-current-function-simple-p ctx) old-current-function-simple-p))))
 
 ;;; ── Lambda and defun ─────────────────────────────────────────────────────
 
 (defun %emit-closure-body (ctx func-label end-label params param-regs
                            opt-bindings rest-binding key-bindings
                            non-constant-defaults body
-                           &optional supplied-p-entries type-bindings)
+                           &optional supplied-p-entries type-bindings
+                           current-function-name current-function-label)
   "Emit the jump-over + label + body + end-label pattern common to lambda and defun."
   (emit ctx (make-vm-jump :label end-label))
   (emit ctx (make-vm-label :name func-label))
   (compile-function-body ctx params param-regs opt-bindings rest-binding
-                         key-bindings non-constant-defaults body
-                         supplied-p-entries type-bindings)
+                          key-bindings non-constant-defaults body
+                          supplied-p-entries type-bindings
+                          current-function-name current-function-label)
   (emit ctx (make-vm-label :name end-label)))
 
 (defmethod compile-ast ((node ast-lambda) ctx)
@@ -278,13 +323,17 @@ Saves and restores the compiler environment around the body via unwind-protect."
          (closure-reg (make-register ctx))
          (free-vars (find-free-variables node))
          (captured-vars (mapcar (lambda (v) (cons v (lookup-var ctx v)))
-                                (remove-if-not (lambda (v) (assoc v (ctx-env ctx)))
-                                               free-vars)))
+                                 (remove-if-not (lambda (v) (assoc v (ctx-env ctx)))
+                                                free-vars)))
          (param-regs (loop for i from 0 below (length params)
-                           collect (make-register ctx))))
+                           collect (make-register ctx)))
+          (rest-stack-alloc-p (and (ast-lambda-rest-param node)
+                                   (or (rest-param-stack-alloc-p body (ast-lambda-rest-param node))
+                                       (dynamic-extent-declared-p (ast-lambda-declarations node)
+                                                                  (ast-lambda-rest-param node))))))
     (multiple-value-bind (opt-closure-data rest-reg key-closure-data
-                          opt-bindings rest-binding key-bindings
-                          non-constant-defaults supplied-p-entries)
+                           opt-bindings rest-binding key-bindings
+                           non-constant-defaults supplied-p-entries)
         (allocate-extended-params ctx
                                   (ast-lambda-optional-params node)
                                   (ast-lambda-rest-param node)
@@ -292,7 +341,8 @@ Saves and restores the compiler environment around the body via unwind-protect."
       (emit ctx (make-vm-closure
                  :dst closure-reg :label func-label :params param-regs
                  :optional-params opt-closure-data :rest-param rest-reg
-                 :key-params key-closure-data :captured captured-vars))
+                 :key-params key-closure-data :rest-stack-alloc-p rest-stack-alloc-p
+                 :captured captured-vars))
       (%emit-closure-body ctx func-label end-label params param-regs
                           opt-bindings rest-binding key-bindings
                           non-constant-defaults body supplied-p-entries)
@@ -310,13 +360,17 @@ Generates a closure at the function's label and registers it globally."
          (func-label (make-label ctx (format nil "DEFUN_~A" name)))
          (end-label (make-label ctx (format nil "DEFUN_~A_END" name)))
          (closure-reg (make-register ctx))
-         (free-vars (let ((temp-ast (make-ast-lambda :params params :body body)))
-                      (find-free-variables temp-ast)))
-         (captured-vars (mapcar (lambda (v) (cons v (lookup-var ctx v)))
-                                (remove-if-not (lambda (v) (assoc v (ctx-env ctx)))
-                                               free-vars)))
-         (param-regs (loop for i from 0 below (length params)
-                           collect (make-register ctx))))
+          (free-vars (let ((temp-ast (make-ast-lambda :params params :body body)))
+                       (find-free-variables temp-ast)))
+          (captured-vars (mapcar (lambda (v) (cons v (lookup-var ctx v)))
+                                 (remove-if-not (lambda (v) (assoc v (ctx-env ctx)))
+                                                free-vars)))
+          (param-regs (loop for i from 0 below (length params)
+                            collect (make-register ctx)))
+           (rest-stack-alloc-p (and (ast-defun-rest-param node)
+                                    (or (rest-param-stack-alloc-p body (ast-defun-rest-param node))
+                                        (dynamic-extent-declared-p (ast-defun-declarations node)
+                                                                   (ast-defun-rest-param node))))))
     ;; Pre-register for recursion support
       (setf (gethash name (ctx-global-functions ctx)) func-label)
       (multiple-value-bind (opt-closure-data rest-reg key-closure-data
@@ -329,15 +383,17 @@ Generates a closure at the function's label and registers it globally."
       (emit ctx (make-vm-closure
                  :dst closure-reg :label func-label :params param-regs
                  :optional-params opt-closure-data :rest-param rest-reg
-                 :key-params key-closure-data :captured captured-vars))
+                 :key-params key-closure-data :rest-stack-alloc-p rest-stack-alloc-p
+                 :captured captured-vars))
       (push (cons name closure-reg) (ctx-env ctx))
       (emit ctx (make-vm-register-function :name name :src closure-reg))
        (let ((*compiling-typed-fn* (or name t)))
-         (%emit-closure-body ctx func-label end-label params param-regs
-                             opt-bindings rest-binding key-bindings
-                             non-constant-defaults body supplied-p-entries
-                             type-bindings))
-       closure-reg)))
+          (%emit-closure-body ctx func-label end-label params param-regs
+                              opt-bindings rest-binding key-bindings
+                              non-constant-defaults body supplied-p-entries
+                              type-bindings
+                              name func-label))
+        closure-reg)))
 
 ;;; ── defvar / defparameter ────────────────────────────────────────────────
 

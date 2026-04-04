@@ -3,38 +3,47 @@
 
 (defun compile-expression (expr &key (target :x86_64) type-check (safety 1))
   (let* ((ctx (make-instance 'compiler-context :safety safety))
-         (expanded-expr (if (typep expr 'ast-node)
-                            expr
-                            (compiler-macroexpand-all expr)))
-         (ast (if (typep expanded-expr 'ast-node)
-                  expanded-expr
-                  (lower-sexp-to-ast expanded-expr)))
-         (inferred-type (when type-check
-                          (handler-case
-                              (type-check-ast ast)
-                            (error (e)
-                              (if (eq type-check :strict)
-                                  (error e)
-                                  (progn
-                                    (warn "Type check warning: ~A" e)
-                                    nil))))))
-         (result-reg (compile-ast ast ctx))
-         (instructions (nreverse (ctx-instructions ctx)))
-         (full-instructions (append instructions
-                                    (list (make-vm-halt
-                                           :reg result-reg))))
-         (optimized-instructions (optimize-instructions full-instructions))
-         (optimized-program (make-vm-program
-                             :instructions optimized-instructions
-                             :result-register result-reg)))
-    ;; Capture label counter for REPL continuity
-    (when *repl-capture-label-counter*
-      (setf *repl-capture-label-counter* (ctx-next-label ctx)))
-    (make-compilation-result :program optimized-program
-                              :assembly (emit-assembly optimized-program :target target)
-                              :type (when type-check inferred-type)
-                              :type-env (ctx-type-env ctx)
-                              :cps (maybe-cps-transform ast))))
+          (expanded-expr (if (typep expr 'ast-node)
+                             expr
+                             (compiler-macroexpand-all expr)))
+          (ast (if (typep expanded-expr 'ast-node)
+                   expanded-expr
+                   (lower-sexp-to-ast expanded-expr)))
+          (optimized-ast (optimize-ast ast))
+          (inferred-type (when type-check
+                           (handler-case
+                               (type-check-ast optimized-ast)
+                             (error (e)
+                               (if (eq type-check :strict)
+                                   (error e)
+                                   (progn
+                                     (warn "Type check warning: ~A" e)
+                                     nil))))))
+          (result-reg (compile-ast optimized-ast ctx))
+          (instructions (nreverse (ctx-instructions ctx)))
+          (full-instructions (append instructions
+                                     (list (make-vm-halt
+                                            :reg result-reg))))
+          (optimized-instructions nil)
+          (leaf-p nil)
+          (optimized-program nil))
+      (multiple-value-setq (optimized-instructions leaf-p)
+        (optimize-instructions full-instructions))
+      (setf optimized-program (make-vm-program
+                              :instructions full-instructions
+                              :result-register result-reg
+                              :leaf-p leaf-p))
+     ;; Capture label counter for REPL continuity
+     (when *repl-capture-label-counter*
+       (setf *repl-capture-label-counter* (ctx-next-label ctx)))
+     (make-compilation-result :program optimized-program
+                                :assembly (emit-assembly optimized-program :target target)
+                                :type (when type-check inferred-type)
+                                :type-env (ctx-type-env ctx)
+                                :cps (maybe-cps-transform optimized-ast)
+                                :ast optimized-ast
+                                :vm-instructions full-instructions
+                                :optimized-instructions optimized-instructions)))
 
 ;;; Standard Library (Higher-Order Functions)
 ;;; *standard-library-source* is defined in stdlib-source.lisp (loaded before this file).
@@ -175,31 +184,40 @@ Example:
          ;; Bind persistent globals so compiler-context picks them up
          (*repl-global-variables* *repl-global-vars-persistent*)
          ;; Enable label counter capture so we can persist it
-         (*repl-capture-label-counter* t)
-         (result (compile-string source :target :vm))
-         (program (compilation-result-program result))
-         (new-insts (vm-program-instructions program))
-         ;; PC where the new code will start in the global pool
-         (start-pc (fill-pointer *repl-pool-instructions*)))
-    ;; Persist the label counter for the next compilation
-    (when (integerp *repl-capture-label-counter*)
-      (setf *repl-label-counter* *repl-capture-label-counter*))
-    ;; Track any new global variables defined by this compilation
-    (dolist (inst new-insts)
-      (when (typep inst 'vm-set-global)
-        (setf (gethash (vm-global-name inst) *repl-global-vars-persistent*) t)))
-    ;; Append new instructions to the shared pool
-    (dolist (inst new-insts)
-      (vector-push-extend inst *repl-pool-instructions*))
-    ;; Merge new labels (with global offset) into the pool label table
-    (let ((new-labels (build-label-table new-insts)))
-      (maphash (lambda (label local-pc)
-                 (setf (gethash label *repl-pool-labels*)
-                       (+ start-pc local-pc)))
-               new-labels))
-    ;; Execute only the new slice, using the full pool for label resolution
-    (run-program-slice *repl-pool-instructions* *repl-pool-labels*
-                       start-pc *repl-vm-state*)))
+         (*repl-capture-label-counter* t))
+    (let ((forms (parse-source-for-language source :lisp)))
+      (when (and (= (length forms) 1)
+                 (consp (first forms))
+                 (eq (caar forms) 'in-package))
+        (let ((pkg (find-package (second (first forms)))))
+          (unless pkg
+            (error "Unknown package: ~S" (second (first forms))))
+          (setf *package* pkg)
+          (return-from run-string-repl (second (first forms)))))
+      (let* ((result (compile-string source :target :vm))
+             (program (compilation-result-program result))
+             (new-insts (vm-program-instructions program))
+             ;; PC where the new code will start in the global pool
+             (start-pc (fill-pointer *repl-pool-instructions*)))
+        ;; Persist the label counter for the next compilation
+        (when (integerp *repl-capture-label-counter*)
+          (setf *repl-label-counter* *repl-capture-label-counter*))
+        ;; Track any new global variables defined by this compilation
+        (dolist (inst new-insts)
+          (when (typep inst 'vm-set-global)
+            (setf (gethash (vm-global-name inst) *repl-global-vars-persistent*) t)))
+        ;; Append new instructions to the shared pool
+        (dolist (inst new-insts)
+          (vector-push-extend inst *repl-pool-instructions*))
+        ;; Merge new labels (with global offset) into the pool label table
+        (let ((new-labels (build-label-table new-insts)))
+          (maphash (lambda (label local-pc)
+                     (setf (gethash label *repl-pool-labels*)
+                           (+ start-pc local-pc)))
+                   new-labels))
+        ;; Execute only the new slice, using the full pool for label resolution
+        (run-program-slice *repl-pool-instructions* *repl-pool-labels*
+                           start-pc *repl-vm-state*)))))
 
 ;;; ─── Self-Hosting Load ──────────────────────────────────────────────────
 ;;;
@@ -250,29 +268,38 @@ EXTERNAL-FORMAT is accepted but ignored (UTF-8 assumed)."
         ;; Parse all forms and compile/run each through the REPL pipeline
         (let ((forms (parse-all-forms source))
               (last-result nil))
-          (flet ((%whitespace-symbol-p (form)
-                   (and (symbolp form)
-                        (not (null form))
-                        (not (keywordp form))
-                        (let ((name (symbol-name form)))
-                          (and (> (length name) 0)
-                               (not (find-if (lambda (c)
-                                               (and (graphic-char-p c)
-                                                    (not (eql c #\Space))))
-                                             name)))))))
-            (dolist (form forms last-result)
-              (unless (or (%whitespace-symbol-p form)
-                          ;; Skip unsupported top-level forms
-                          (and (consp form) (member (car form) '(deftype defopcode))))
-                (let ((form-str (write-to-string form)))
-                  (setf last-result
-                        (handler-case (run-string-repl form-str)
-                          (error (e)
-                            (format *error-output* "; Error loading ~A: ~A~%  Form: ~S~%"
-                                    path e form)
-                            nil)))
-                  (when print
-                    (format *standard-output* "~S~%" last-result)))))))))))
+          (dolist (form forms last-result)
+            (let* ((package-form-p (and (consp form) (eq (car form) 'in-package)))
+                   (whitespace-symbol-p (and (symbolp form)
+                                             (not (null form))
+                                             (not (keywordp form))
+                                             (let ((name (symbol-name form)))
+                                               (and (> (length name) 0)
+                                                    (not (find-if (lambda (c)
+                                                                    (and (graphic-char-p c)
+                                                                         (not (eql c #\Space))))
+                                                                  name))))))
+                   (unsupported-p (and (consp form)
+                                       (member (car form) '(deftype defopcode)))))
+              (cond
+                (package-form-p
+                 (let ((pkg (find-package (second form))))
+                   (unless pkg
+                     (error "Unknown package: ~S" (second form)))
+                   (setf *package* pkg)
+                   (setf last-result (second form))))
+                ((or whitespace-symbol-p unsupported-p)
+                 nil)
+                (t
+                 (let ((form-str (write-to-string form)))
+                   (setf last-result
+                         (handler-case (run-string-repl form-str)
+                           (error (e)
+                             (format *error-output* "; Error loading ~A: ~A~%  Form: ~S~%"
+                                     path e form)
+                             nil)))
+                   (when print
+                     (format *standard-output* "~S~%" last-result))))))))))))
 
 
 (defun run-string-typed (source &key (mode :warn))
@@ -292,6 +319,35 @@ EXTERNAL-FORMAT is accepted but ignored (UTF-8 assumed)."
     (cl-cc/binary:write-mach-o-file output-path mach-o-bytes))
   (uiop:run-program (list "chmod" "+x" (namestring output-path)) :ignore-error-status t)
   output-path)
+
+(defparameter *compile-cache-root*
+  (merge-pathnames #P".cache/cl-cc/native/"
+                   (user-homedir-pathname))
+  "Directory for cached native build outputs.")
+
+(defun %compile-cache-key (source arch language)
+  (format nil "~A-~A-~A"
+          (content-hash source)
+          arch
+          language))
+
+(defun %compile-cache-path (key output-file)
+  (merge-pathnames
+   (make-pathname :directory `(:relative ,key)
+                  :name (pathname-name output-file)
+                  :type (pathname-type output-file))
+   *compile-cache-root*))
+
+(defun %copy-file-bytes (from to)
+  (with-open-file (in from :direction :input :element-type '(unsigned-byte 8))
+    (with-open-file (out to :direction :output :if-exists :supersede
+                            :if-does-not-exist :create
+                            :element-type '(unsigned-byte 8))
+      (let ((buffer (make-array 4096 :element-type '(unsigned-byte 8))))
+        (loop for count = (read-sequence buffer in)
+              while (plusp count) do
+                (write-sequence buffer out :end count)))))
+  to)
 
 (defun compile-to-native (source &key (arch :x86-64) (output-file "a.out") (language :lisp))
   "Compile SOURCE to a native Mach-O executable.
@@ -323,7 +379,7 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
                      (make-pathname :type nil :defaults input-file)))
          (source (if (eq effective-language :php)
                      (with-open-file (in input-file :direction :input
-                                                    :element-type 'character)
+                                                     :element-type 'character)
                        (let ((buf (make-string (file-length in))))
                          (read-sequence buf in)
                          buf))
@@ -334,6 +390,8 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
                              (loop (push (read in) forms))
                            (end-of-file () nil))
                          (nreverse forms)))))
+         (cache-key (%compile-cache-key source arch effective-language))
+         (cache-path (%compile-cache-path cache-key output))
          (result (if (eq effective-language :php)
                      (compile-string source :target :vm :language :php)
                      (compile-toplevel-forms source :target :vm)))
@@ -342,7 +400,17 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
                        (:x86-64 (compile-to-x86-64-bytes program))
                        (:arm64  (compile-to-aarch64-bytes program))))
          (builder    (cl-cc/binary:make-mach-o-builder arch)))
-    (%write-native-binary builder code-bytes output)))
+    (ensure-directories-exist cache-path)
+    (if (probe-file cache-path)
+        (progn
+          (format *error-output* "; cache hit ~A~%" cache-path)
+          (%copy-file-bytes cache-path output)
+          (uiop:run-program (list "chmod" "+x" (namestring output)) :ignore-error-status t)
+          output)
+        (progn
+          (%write-native-binary builder code-bytes output)
+          (%copy-file-bytes output cache-path)
+          output))))
 
 ;;; Typeclass Macros (Phase 4) — registered here because cl-cc/type loads before compiler
 

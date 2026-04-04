@@ -483,7 +483,7 @@ most-specific-around
 | `call-next-method` with `:around` qualifier | ✅ FR-215 | ✅ | around の連鎖。primary chain とは別のスタック |
 | `next-method-p` | ✅ | ✅ | 次のメソッドが存在するか確認。`nil` なら `call-next-method` はエラー |
 | `no-next-method` GF | ✅ | ✅ | 次メソッドがない状態で `call-next-method` → この GF を呼ぶ |
-| メソッド外での `call-next-method` | — | ✅ エラー | `call-next-method` はメソッドボディ内でのみ有効 |
+| メソッド外での `call-next-method` | ✅ | ✅ エラー | `vm-execute.lisp` で明示的にエラーをシグナル |
 
 **意味論の詳細 (ANSI CL 7.6.6.2):**
 ```lisp
@@ -1548,7 +1548,7 @@ funcallable-standard-object  (MOP)
 | `(setf symbol-value)` | ✅ | `setq` 経由 |
 | `(setf symbol-function)` | ✅ | setf ハンドラ → `set-fdefinition` stdlib 経由; ホスト `(setf (symbol-function name) fn)` に委譲 |
 | `symbol-plist` / `get` / `remprop` | ✅ | |
-| `(setf get)` | ✅ | FR-622: `*setf-place-simple-rewrites*` で `%set-symbol-prop` → `vm-symbol-set` に展開済み |
+| `(setf get)` | ✅ | FR-622: expander + lowering/runtime の両経路で `symbol-plist` を更新 |
 | `symbol-package` | ✅ | FR-558: ホストブリッジ経由で `symbol-package` に委譲 |
 | `boundp` / `fboundp` | ✅ | |
 | `makunbound` / `fmakunbound` | ✅ | |

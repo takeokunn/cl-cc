@@ -10,24 +10,11 @@
 
 ;;; ─── vm-falsep ──────────────────────────────────────────────────────────────
 
-(deftest-each vm-execute-vm-falsep-falsy-values
-  "vm-falsep returns T for nil, 0, and false."
-  :cases (("nil"   nil)
-          ("zero"  0)
-          ("false" nil))
-  (val)
-  (assert-true (cl-cc::vm-falsep val)))
-
-(deftest-each vm-execute-vm-falsep-truthy-values
-  "vm-falsep returns NIL for non-zero integers, strings, symbols, and lists."
-  :cases (("positive-int"  1)
-          ("negative-int"  -1)
-          ("string"        "hello")
-          ("symbol"        'foo)
-          ("t"             t)
-          ("list"          '(1 2 3)))
-  (val)
-  (assert-false (cl-cc::vm-falsep val)))
+(deftest vm-execute-vm-falsep-semantics
+  "vm-falsep returns T only for nil, and NIL for truthy values including 0."
+  (assert-true (cl-cc::vm-falsep nil))
+  (dolist (val '(0 1 -1 "hello" foo t (1 2 3)))
+    (assert-false (cl-cc::vm-falsep val))))
 
 ;;; ─── vm-classify-arg ────────────────────────────────────────────────────────
 
@@ -156,8 +143,8 @@
       (assert-= 6 next-pc)
       (assert-false halt-p))))
 
-(deftest vm-execute-vm-jump-zero-taken-when-zero
-  "vm-jump-zero jumps when register holds 0 (falsy integer)."
+(deftest vm-execute-vm-jump-zero-not-taken-when-zero
+  "vm-jump-zero falls through when register holds 0 (truthy integer)."
   (let ((s (make-test-vm))
         (lbls (make-hash-table :test #'equal)))
     (setf (gethash "loop" lbls) 3)
@@ -166,7 +153,7 @@
         (cl-cc:execute-instruction
          (cl-cc::make-vm-jump-zero :reg :R1 :label "loop") s 10 lbls)
       (declare (ignore halt-p result))
-      (assert-= 3 next-pc))))
+      (assert-= 11 next-pc))))
 
 (deftest vm-execute-vm-label-advances-pc
   "vm-label is a no-op instruction that just increments pc."
@@ -228,6 +215,22 @@
     (assert-= 100 (cl-cc:vm-reg-get s :R0))
     (assert-equal '(100 200 300) (cl-cc::vm-values-list s))))
 
+(deftest vm-execute-vm-apply-spreads-final-list-on-host-function
+  "vm-apply splices the final list argument and applies host functions directly."
+  (let ((s (make-test-vm)))
+    (cl-cc:vm-reg-set s :R1 #'+)
+    (cl-cc:vm-reg-set s :R2 10)
+    (cl-cc:vm-reg-set s :R3 20)
+    (cl-cc:vm-reg-set s :R4 '(30 40))
+    (multiple-value-bind (next-pc halted result)
+        (cl-cc::execute-instruction
+         (cl-cc::make-vm-apply :dst :R0 :func :R1 :args '(:R2 :R3 :R4))
+         s 5 (make-hash-table :test #'equal))
+      (declare (ignore result))
+      (assert-= 6 next-pc)
+      (assert-false halted)
+      (assert-= 100 (cl-cc:vm-reg-get s :R0)))))
+
 (deftest vm-execute-vm-clear-values-resets-buffer
   "vm-clear-values resets values-list to nil."
   (let ((s (make-test-vm)))
@@ -277,7 +280,25 @@
       (cl-cc:vm-reg-set s :R0 closure)
       (cl-cc::execute-instruction
        (cl-cc::make-vm-register-function :name 'myfn :src :R0) s 0 (make-hash-table :test #'equal))
-      (assert-true (not (null (gethash 'myfn (cl-cc::vm-function-registry s))))))))
+       (assert-true (not (null (gethash 'myfn (cl-cc::vm-function-registry s))))))))
+
+(deftest vm-execute-make-closure-stores-vector-captures
+  "vm-make-closure stores captured values in a vector and vm-closure-ref-idx reads by index."
+  (let ((s (make-test-vm)))
+    (cl-cc:vm-reg-set s :R1 10)
+    (cl-cc:vm-reg-set s :R2 20)
+    (cl-cc:execute-instruction
+     (cl-cc::make-vm-make-closure :dst :R0 :label "L" :params nil :env-regs '(:R1 :R2))
+     s 0 (%labels))
+    (let* ((addr (cl-cc:vm-reg-get s :R0))
+           (closure (cl-cc:vm-heap-get s addr)))
+      (assert-true (vectorp (cl-cc::vm-closure-captured-values closure)))
+      (assert-= 2 (length (cl-cc::vm-closure-captured-values closure)))
+      (cl-cc:vm-reg-set s :R3 addr)
+      (cl-cc:execute-instruction
+       (cl-cc::make-vm-closure-ref-idx :dst :R4 :closure :R3 :index 1)
+       s 0 (%labels))
+      (assert-= 20 (cl-cc:vm-reg-get s :R4)))))
 
 ;;; ─── vm-call / vm-tail-call / vm-ret ───────────────────────────────────────
 

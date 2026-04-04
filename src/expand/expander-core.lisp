@@ -122,6 +122,16 @@ function is a host CL closure delegating to our-eval at each invocation."
                         (let* ,(generate-lambda-bindings lambda-list form-var)
                           ,@expanded-body))))))))
 
+(defun make-compiler-macro-expander (lambda-list body)
+  "Build a compiler-macro expander for a function LAMBDA-LIST and BODY."
+  (let ((expanded-body (mapcar #'our-macroexpand-all body)))
+    (let ((form-var (gensym "FORM"))
+          (env-var  (gensym "ENV")))
+      (eval `(lambda (,form-var ,env-var)
+               (declare (ignore ,env-var))
+               (let* ,(destructure-lambda-list lambda-list `(cdr ,form-var))
+                 ,@expanded-body))))))
+
 (defun expand-macrolet-form (bindings body)
   "Register local macro BINDINGS, expand BODY under them, then restore.
 Returns the expanded BODY wrapped in PROGN."

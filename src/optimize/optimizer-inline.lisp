@@ -133,12 +133,89 @@
       (let ((dst (opt-inst-dst inst)))
         (when dst (setf (gethash dst safe) t))))))
 
+(defun opt-build-function-name-map (instructions)
+  "Return symbol → function-label mapping for top-level function registrations."
+  (let ((reg-track (make-hash-table :test #'eq))
+        (name-to-label (make-hash-table :test #'eq)))
+    (dolist (inst instructions)
+      (typecase inst
+        ((or vm-closure vm-func-ref)
+         (let ((label (vm-label-name inst)))
+           (when label
+             (setf (gethash (vm-dst inst) reg-track) label))))
+        (vm-register-function
+         (let ((label (or (gethash (vm-src inst) reg-track)
+                          (dolist (i instructions)
+                            (when (and (vm-closure-p i)
+                                       (eq (vm-dst i) (vm-src inst)))
+                              (return (vm-label-name i)))))))
+           (when label
+             (setf (gethash (vm-func-name inst) name-to-label) label))))))
+    name-to-label))
+
+(defun opt-build-call-graph (instructions func-defs name-to-label)
+  "Return label → direct callees graph for the linear function bodies in FUNC-DEFS."
+  (let ((graph (make-hash-table :test #'equal)))
+    (maphash (lambda (label def)
+               (let ((body (getf def :body))
+                     (reg-track (make-hash-table :test #'eq))
+                     (callees nil))
+                 (dolist (inst body)
+                   (typecase inst
+                     ((or vm-closure vm-func-ref)
+                      (let ((callee (vm-label-name inst)))
+                        (when (gethash callee func-defs)
+                          (setf (gethash (vm-dst inst) reg-track) callee))))
+                     (vm-const
+                      (let ((callee (and (symbolp (vm-value inst))
+                                         (gethash (vm-value inst) name-to-label))))
+                        (when callee
+                          (setf (gethash (vm-dst inst) reg-track) callee))))
+                     (vm-call
+                      (let ((callee (gethash (vm-func-reg inst) reg-track)))
+                        (when callee
+                          (pushnew callee callees :test #'equal))))
+                     (t
+                      (let ((dst (opt-inst-dst inst)))
+                        (when dst (remhash dst reg-track))))))
+                 (setf (gethash label graph) callees)))
+             func-defs)
+    graph))
+
+(defun opt-call-graph-recursive-labels (graph)
+  "Return the set of labels that are in a recursive SCC of GRAPH."
+  (let ((recursive (make-hash-table :test #'equal)))
+    (labels ((reaches-self-p (start node seen)
+               (dolist (next (gethash node graph) nil)
+                 (cond
+                   ((equal next start) (return-from reaches-self-p t))
+                   ((not (gethash next seen))
+                    (setf (gethash next seen) t)
+                    (when (reaches-self-p start next seen)
+                      (return-from reaches-self-p t)))))))
+      (maphash (lambda (label _callees)
+                 (when (reaches-self-p label label (make-hash-table :test #'equal))
+                   (setf (gethash label recursive) t)))
+               graph))
+    recursive))
+
+(defun opt-inline-inst-cost (inst)
+  "Return the inline cost of INST using the shared e-graph opcode table.
+
+   This keeps inlining policy aligned with the optimizer's existing cost model
+   instead of relying on raw instruction count."
+  (egraph-default-cost (vm-inst-to-enode-op inst) nil))
+
+(defun opt-inline-body-cost (body)
+  "Return the total inline cost of BODY, excluding the final vm-ret."
+  (reduce #'+ (mapcar #'opt-inline-inst-cost (butlast body)) :initial-value 0))
+
 (defun opt-inline-eligible-p (def threshold)
   "Return T if the function definition DEF (a plist from opt-collect-function-defs)
    satisfies all inlining preconditions:
    1. Has a vm-closure with zero captured variables
    2. Has only required params (no &optional/&rest/&key)
-   3. Body size ≤ THRESHOLD (excluding the final vm-ret)
+   3. Body cost ≤ THRESHOLD (excluding the final vm-ret)
    4. All body instructions support lossless register renaming
    5. Body reads no 'global' registers (ones not defined by params or body)"
   (let ((ci   (getf def :closure))
@@ -148,33 +225,22 @@
          (null (vm-closure-optional-params ci))
          (null (vm-closure-rest-param ci))
          (null (vm-closure-key-params ci))
-         (<= (1- (length body)) threshold)
-         (opt-can-safely-rename-p body)
-         (not (opt-body-has-global-refs-p body (vm-closure-params ci))))))
+          (<= (opt-inline-body-cost body) threshold)
+          (opt-can-safely-rename-p body)
+          (not (opt-body-has-global-refs-p body (vm-closure-params ci))))))
 
 (defun opt-pass-inline (instructions &key (threshold 15))
   "Replace vm-call of a known small function with the inlined body.
-   The function must be: captured-var-free, linear, and have ≤ THRESHOLD
-   body instructions (not counting the final vm-ret)."
+   The function must be: captured-var-free, linear, and have body cost
+   ≤ THRESHOLD (not counting the final vm-ret)."
   (let* ((func-defs (opt-collect-function-defs instructions))
-         (base-idx  (1+ (opt-max-reg-index instructions)))
-         (reg-track (make-hash-table :test #'eq)) ; reg → label of known function
-         ;; Build name→label mapping from vm-register-function instructions
-         (name-to-label (let ((ht (make-hash-table :test #'eq)))
-                          (dolist (inst instructions ht)
-                            (when (vm-register-function-p inst)
-                              (let ((label (gethash (vm-src inst) reg-track)))
-                                ;; reg-track may not be populated yet; scan closures first
-                                (when (null label)
-                                  ;; Find the closure that the register came from
-                                  (dolist (i instructions)
-                                    (when (and (vm-closure-p i)
-                                               (eq (vm-dst i) (vm-src inst)))
-                                      (setf label (vm-label-name i))
-                                      (return))))
-                                (when label
-                                  (setf (gethash (vm-func-name inst) ht) label)))))))
-         (result nil))
+          (name-to-label (opt-build-function-name-map instructions))
+          (recursive-labels (opt-call-graph-recursive-labels
+                             (opt-build-call-graph instructions func-defs name-to-label)))
+          (base-idx  (1+ (opt-max-reg-index instructions)))
+          (reg-track (make-hash-table :test #'eq)) ; reg → label of known function
+          (const-track (make-hash-table :test #'eq)) ; reg → constant value
+           (result nil))
     (dolist (inst instructions)
       (typecase inst
         ;; Record which register now holds which function
@@ -182,36 +248,54 @@
          (let ((label (vm-label-name inst)))
            (when (gethash label func-defs)
              (setf (gethash (vm-dst inst) reg-track) label)))
-         (push inst result))
+          (let ((dst (opt-inst-dst inst)))
+            (when dst (remhash dst const-track)))
+          (push inst result))
         ;; Track vm-const loading a function name symbol
         (vm-const
          (let* ((val (vm-value inst))
                 (label (when (symbolp val) (gethash val name-to-label))))
            (when (and label (gethash label func-defs))
              (setf (gethash (vm-dst inst) reg-track) label)))
+          (setf (gethash (vm-dst inst) const-track) (vm-value inst))
+          (push inst result))
+        (vm-move
+         (multiple-value-bind (src-const present-p)
+             (gethash (vm-src inst) const-track)
+           (if present-p
+               (setf (gethash (vm-dst inst) const-track) src-const)
+               (remhash (vm-dst inst) const-track)))
          (push inst result))
-        ;; Attempt inlining
-        (vm-call
-         (let* ((label  (gethash (vm-func-reg inst) reg-track))
-                (def    (and label (gethash label func-defs))))
-           (if (and def (opt-inline-eligible-p def threshold))
-               ;; ── Inline ──
-               (let* ((body    (getf def :body))
-                      (ci      (getf def :closure))
-                      (params  (vm-closure-params ci))
-                      (rename  (opt-make-renaming body base-idx)))
-                 (incf base-idx (hash-table-count rename))
-                 ;; 1. Move call arguments into renamed parameter registers
-                 (loop for param in params
-                       for arg  in (vm-args inst)
-                       do (push (make-vm-move :dst (or (gethash param rename) param)
-                                              :src arg)
-                                result))
-                 ;; 2. Emit renamed body (all but the last vm-ret)
-                 (dolist (bi (butlast body))
-                   (push (opt-rename-regs-in-inst bi rename) result))
-                 ;; 3. Move renamed return register to call's dst
-                 (let* ((ret-inst (car (last body)))
+          ;; Attempt inlining
+          (vm-call
+           (let* ((label  (gethash (vm-func-reg inst) reg-track))
+                  (def    (and label (gethash label func-defs))))
+             (if (and def
+                     (not (gethash label recursive-labels))
+                     (opt-inline-eligible-p def threshold))
+                ;; ── Inline ──
+                (let* ((body    (getf def :body))
+                       (ci      (getf def :closure))
+                       (params  (vm-closure-params ci))
+                       (rename  (opt-make-renaming body base-idx)))
+                  (incf base-idx (hash-table-count rename))
+                  ;; 1. Move call arguments into renamed parameter registers
+                  (loop for param in params
+                        for arg  in (vm-args inst)
+                        do (let ((dst (or (gethash param rename) param))
+                                 (const-present nil)
+                                 (const-value nil))
+                             (multiple-value-setq (const-value const-present)
+                               (gethash arg const-track))
+                             (push (if const-present
+                                       (make-vm-const :dst dst :value const-value)
+                                       (make-vm-move :dst dst :src arg))
+                                   result)))
+                  ;; 2. Emit renamed body (all but the last vm-ret)
+                  (dolist (bi (butlast body))
+                    (push (opt-rename-regs-in-inst bi rename) result))
+                  ;; 3. Move renamed return register to call's dst
+                  (let* ((ret-inst (car (last body)))
                         (ret-src  (or (gethash (vm-reg ret-inst) rename)
                                       (vm-reg ret-inst))))
                    (push (make-vm-move :dst (vm-dst inst) :src ret-src) result))
@@ -222,6 +306,8 @@
         ;; Invalidate tracking for any overwritten register
         (t
          (let ((dst (opt-inst-dst inst)))
-           (when dst (remhash dst reg-track)))
-         (push inst result))))
+           (when dst
+             (remhash dst reg-track)
+             (remhash dst const-track)))
+          (push inst result))))
     (nreverse result)))

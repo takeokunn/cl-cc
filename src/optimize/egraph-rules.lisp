@@ -147,6 +147,10 @@
 (defrule mul-neg1-l  (mul (const -1) ?x)  (neg ?x))
 (defrule double-neg  (neg (neg ?x))        ?x)
 (defrule not-not     (not (not ?x))        ?x)
+(defrule not-lt      (not (lt ?x ?y))      (ge ?x ?y))
+(defrule not-gt      (not (gt ?x ?y))      (le ?x ?y))
+(defrule not-le      (not (le ?x ?y))      (gt ?x ?y))
+(defrule not-ge      (not (ge ?x ?y))      (lt ?x ?y))
 (defrule add-neg     (add ?x (neg ?y))     (sub ?x ?y))
 (defrule sub-neg     (sub ?x (neg ?y))     (add ?x ?y))
 
@@ -164,6 +168,12 @@
 (defrule logxor-self  (logxor ?x ?x)          (const 0))
 (defrule ash-zero     (ash ?x (const 0))      ?x)
 (defrule ash-zero-base (ash (const 0) ?x)     (const 0))
+
+;;; Min/max identities
+(defrule max-self     (max ?x ?x)             ?x)
+(defrule min-self     (min ?x ?x)             ?x)
+(defrule max-min-absorb (max ?x (min ?x ?y))  ?x)
+(defrule min-max-absorb (min ?x (max ?x ?y))  ?x)
 
 ;;; ─── Strength Reduction Rules ─────────────────────────────────────────────
 ;;;

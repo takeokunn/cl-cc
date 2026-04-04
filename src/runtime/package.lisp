@@ -94,7 +94,7 @@
    ;; CLOS
    #:rt-defclass #:rt-make-instance #:rt-slot-value #:rt-slot-set
    #:rt-slot-boundp #:rt-slot-makunbound #:rt-slot-exists-p
-   #:rt-class-of #:rt-find-class #:rt-register-method #:rt-call-generic
+    #:rt-class-name #:rt-class-of #:rt-find-class #:rt-register-method #:rt-call-generic
    #:rt-defclass-from-reg #:rt-make-instance-0
    ;; Conditions
    #:rt-signal-error #:rt-signal #:rt-warn-fn #:rt-cerror

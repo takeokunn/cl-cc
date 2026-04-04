@@ -13,6 +13,9 @@
   (count-if (lambda (i) (typep i (find-symbol (symbol-name type-sym) :cl-cc)))
             insts))
 
+(defun make-ssa-test-block (id)
+  (cl-cc::make-basic-block :id id))
+
 ;;; ─── SSA Value Naming ────────────────────────────────────────────────────
 
 (deftest-each ssa-versioned-reg-format
@@ -97,6 +100,28 @@
         (cl-cc::ssa-construct insts)
       (declare (ignore _phi _renamed))
       (assert-true (cl-cc::cfg-entry cfg)))))
+
+(deftest ssa-trivial-phi-elimination-rewrites-uses
+  "Trivial phi elimination removes dead phis and rewrites downstream uses."
+  (let* ((pred-a (make-ssa-test-block 1))
+         (pred-b (make-ssa-test-block 2))
+         (join   (make-ssa-test-block 3))
+         (phi    (cl-cc::make-ssa-phi
+                  :dst (cl-cc::ssa-versioned-reg :r1 0)
+                  :args (list (cons pred-a :r2)
+                              (cons pred-b :r2))
+                  :reg :r1))
+         (phi-map (make-hash-table :test #'eq))
+         (renamed (make-hash-table :test #'eq))
+         (inst    (make-vm-add :dst :r3 :lhs (cl-cc::phi-dst phi) :rhs :r4)))
+    (setf (gethash join phi-map) (list phi)
+          (gethash join renamed) (list inst))
+    (multiple-value-bind (new-phi-map new-renamed-map)
+        (cl-cc::ssa-eliminate-trivial-phis phi-map renamed)
+      (declare (ignore new-phi-map))
+      (let ((rewritten (first (gethash join new-renamed-map))))
+        (assert-eq :r2 (cl-cc::vm-lhs rewritten))
+        (assert-eq :r4 (cl-cc::vm-rhs rewritten))))))
 
 ;;; ─── Parallel Copy Sequentialization ─────────────────────────────────────
 

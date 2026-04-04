@@ -127,7 +127,8 @@
 (deftest-each effect-kind-bitwise-pure
   "Bitwise / boolean unary instructions are classified as :pure."
   :cases (("vm-not"    (make-vm-not    :dst :r0 :src :r1))
-          ("vm-lognot" (make-vm-lognot :dst :r0 :src :r1)))
+          ("vm-lognot" (make-vm-lognot :dst :r0 :src :r1))
+          ("vm-bswap"  (make-vm-bswap  :dst :r0 :src :r1)))
   (inst)
   (assert-eq :pure (cl-cc::vm-inst-effect-kind inst)))
 

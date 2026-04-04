@@ -171,6 +171,22 @@
    Encoding: C3"
   (emit-byte #xC3 stream))
 
+(defun emit-call-r64 (reg stream)
+  "CALL r/m64 (indirect call through register).
+
+   Encoding: REX.W + FF /2"
+  (emit-byte (rex-prefix :w 1 :b (ash reg -3)) stream)
+  (emit-byte #xFF stream)
+  (emit-byte (modrm 3 2 reg) stream))
+
+(defun emit-jmp-r64 (reg stream)
+  "JMP r/m64 (indirect jump through register).
+
+   Encoding: REX.W + FF /4"
+  (emit-byte (rex-prefix :w 1 :b (ash reg -3)) stream)
+  (emit-byte #xFF stream)
+  (emit-byte (modrm 3 4 reg) stream))
+
 (defun emit-jmp-rel32 (offset stream)
   "JMP rel32 (near jump).
 
@@ -273,6 +289,12 @@
   (emit-byte #xD3 stream)
   (emit-byte (modrm 3 7 reg) stream))
 
+(defun emit-ror-r64-cl (reg stream)
+  "ROR reg, CL (rotate right by CL). REX.W + D3 /1"
+  (emit-byte (rex-prefix :w 1 :b (ash reg -3)) stream)
+  (emit-byte #xD3 stream)
+  (emit-byte (modrm 3 1 reg) stream))
+
 ;;; Immediate Arithmetic (ADD/SUB/AND reg, imm8)
 
 (defun emit-add-ri8 (reg imm stream)
@@ -318,6 +340,13 @@
   (emit-byte #x4F stream)
   (emit-byte (modrm 3 dst src) stream))
 
+(defun emit-cmovne-rr64 (dst src stream)
+  "CMOVNE dst, src -- conditional move if not equal / non-zero. REX.W + 0F 45 /r"
+  (emit-byte (rex-prefix :w 1 :r (ash dst -3) :b (ash src -3)) stream)
+  (emit-byte #x0F stream)
+  (emit-byte #x45 stream)
+  (emit-byte (modrm 3 dst src) stream))
+
 ;;; Logical / Bitwise Operations
 
 (defun emit-and-rr64 (dst src stream)
@@ -343,6 +372,13 @@
   (emit-byte (rex-prefix :w 1 :b (ash reg -3)) stream)
   (emit-byte #xF7 stream)
   (emit-byte (modrm 3 2 reg) stream))
+
+(defun emit-bswap-r32 (reg stream)
+  "BSWAP reg32 (byte swap low 32 bits). 0F C8+rd with optional REX.B."
+  (when (>= reg 8)
+    (emit-byte (rex-prefix :b 1) stream))
+  (emit-byte #x0F stream)
+  (emit-byte (+ #xC8 (logand reg #x7)) stream))
 
 (defun emit-neg-r64 (reg stream)
   "NEG reg (two's complement negate 64-bit). REX.W + F7 /3"

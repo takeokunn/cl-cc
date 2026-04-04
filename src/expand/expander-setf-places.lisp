@@ -16,8 +16,21 @@
         (let ((v (gensym "V")))
           (compiler-macroexpand-all
            `(let ((,v ,value))
-              (setq ,(second place)
-                    (rt-plist-put ,(second place) ,(third place) ,v))
+               (setq ,(second place)
+                     (rt-plist-put ,(second place) ,(third place) ,v))
+               ,v)))))
+
+(setf (gethash 'get *setf-compound-place-handlers*)
+      (lambda (place value)
+        (let ((sym (gensym "SYM"))
+              (ind (gensym "IND"))
+              (v (gensym "V")))
+          (compiler-macroexpand-all
+           `(let* ((,sym ,(second place))
+                   (,ind ,(third place))
+                   (,v ,value))
+              (%set-symbol-plist ,sym
+                                 (rt-plist-put (symbol-plist ,sym) ,ind ,v))
               ,v)))))
 
 ;; All cons-cell accessors share the same expansion logic — hoist the closure once

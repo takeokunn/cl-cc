@@ -29,7 +29,8 @@
   "defconstant expands to defparameter."
   (let ((result (cl-cc::compiler-macroexpand-all '(defconstant +expander-def-constant+ 42))))
     (assert-eq 'defparameter (car result))
-    (assert-equal 42 (third result))))
+    (assert-equal 42 (third result))
+    (assert-equal 42 (gethash '+expander-def-constant+ cl-cc::*constant-table*))))
 
 (deftest expander-define-symbol-macro-and-get-decoded-time
   "define-symbol-macro populates the symbol macro table and get-decoded-time expands to decode-universal-time."

@@ -28,17 +28,19 @@
     vm-mul vm-integer-mul vm-float-mul
     vm-neg vm-abs vm-inc vm-dec
     vm-div vm-cl-div vm-mod vm-rem
+    vm-concatenate
     ;; (floor/ceiling/truncate/round moved to :write-global — they set the
     ;; vm-values-list side-channel, which DCE must not eliminate)
     ;; Integer comparison
     vm-lt vm-gt vm-le vm-ge vm-num-eq vm-eq
     ;; Bitwise / shift
-    vm-logand vm-logior vm-logxor vm-logeqv vm-ash vm-lognot
+    vm-logand vm-logior vm-logxor vm-logeqv vm-ash vm-rotate vm-lognot vm-bswap
     vm-logtest vm-logbitp vm-logcount vm-integer-length
     ;; Boolean
     vm-not vm-and vm-or
     ;; Extrema
     vm-min vm-max
+    vm-select
     ;; Numeric predicates
     vm-evenp vm-oddp
     ;; Type predicates

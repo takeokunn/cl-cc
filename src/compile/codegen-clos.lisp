@@ -247,22 +247,40 @@ Handles both dynamic class names (ast-var) and static names (ast-quote/symbol)."
 (defmethod compile-ast ((node ast-slot-value) ctx)
   "Compile slot-value access."
   (setf (ctx-tail-position ctx) nil)
-  (let* ((obj-reg (compile-ast (ast-slot-value-object node) ctx))
+  (let* ((obj-ast (ast-slot-value-object node))
+         (slot-name (ast-slot-value-slot node))
          (dst (make-register ctx)))
-    (emit ctx (make-vm-slot-read
-               :dst dst :obj-reg obj-reg :slot-name (ast-slot-value-slot node)))
-    dst))
+    (when (typep obj-ast 'ast-var)
+      (let* ((entry (assoc (ast-var-name obj-ast) (ctx-noescape-instance-bindings ctx)))
+             (slot-entry (and entry
+                              (assoc (symbol-name slot-name) (cdr entry) :test #'string=))))
+        (when slot-entry
+          (emit ctx (make-vm-move :dst dst :src (cdr slot-entry)))
+          (return-from compile-ast dst))))
+    (let ((obj-reg (compile-ast obj-ast ctx)))
+      (emit ctx (make-vm-slot-read
+                 :dst dst :obj-reg obj-reg :slot-name slot-name))
+      dst)))
 
 (defmethod compile-ast ((node ast-set-slot-value) ctx)
   "Compile (setf (slot-value obj 'slot) value)."
   (setf (ctx-tail-position ctx) nil)
-  (let* ((obj-reg (compile-ast (ast-set-slot-value-object node) ctx))
+  (let* ((obj-ast (ast-set-slot-value-object node))
+         (slot-name (ast-set-slot-value-slot node))
          (val-reg (compile-ast (ast-set-slot-value-value node) ctx)))
-    (emit ctx (make-vm-slot-write
-               :obj-reg obj-reg
-               :slot-name (ast-set-slot-value-slot node)
-               :value-reg val-reg))
-    val-reg))
+    (when (typep obj-ast 'ast-var)
+      (let* ((entry (assoc (ast-var-name obj-ast) (ctx-noescape-instance-bindings ctx)))
+             (slot-entry (and entry
+                              (assoc (symbol-name slot-name) (cdr entry) :test #'string=))))
+        (when slot-entry
+          (setf (cdr slot-entry) val-reg)
+          (return-from compile-ast val-reg))))
+    (let ((obj-reg (compile-ast obj-ast ctx)))
+      (emit ctx (make-vm-slot-write
+                 :obj-reg obj-reg
+                 :slot-name slot-name
+                 :value-reg val-reg))
+      val-reg)))
 
 (defmethod compile-ast ((node ast-set-gethash) ctx)
   "Compile (setf (gethash key table) value)."

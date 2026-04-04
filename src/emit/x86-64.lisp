@@ -8,6 +8,34 @@
 (defgeneric target-register (target virtual-register))
 (defgeneric emit-instruction (target instruction stream))
 
+(defparameter *x86-64-abi-arg-regs*
+  '("rdi" "rsi" "rdx" "rcx" "r8" "r9")
+  "System V AMD64 argument registers used for runtime helper calls.")
+
+(defun %x86-64-vm-register-p (x)
+  (and (symbolp x) (member x '(:R0 :R1 :R2 :R3 :R4 :R5 :R6 :R7) :test #'eq)))
+
+(defun %x86-64-emit-abi-arg (target stream abi-reg arg)
+  (if (%x86-64-vm-register-p arg)
+      (format stream "  mov ~A, ~A~%" abi-reg (target-register target arg))
+      (format stream "  mov ~A, ~A~%" abi-reg arg)))
+
+(defun %x86-64-emit-runtime-call (target stream callee args &optional result-reg)
+  (let* ((reg-args (subseq args 0 (min (length args) (length *x86-64-abi-arg-regs*))))
+         (extra-args (nthcdr (length *x86-64-abi-arg-regs*) args)))
+    (loop for arg in reg-args
+          for abi-reg in *x86-64-abi-arg-regs*
+          do (%x86-64-emit-abi-arg target stream abi-reg arg))
+    (loop for arg in (reverse extra-args)
+          do (if (%x86-64-vm-register-p arg)
+                 (format stream "  push ~A~%" (target-register target arg))
+                 (format stream "  push ~A~%" arg)))
+    (format stream "  call ~A~%" callee)
+    (when result-reg
+      (format stream "  mov ~A, rax~%" (target-register target result-reg)))
+    (when extra-args
+      (format stream "  add rsp, ~D~%" (* 8 (length extra-args))))))
+
 ;; Fallback: skip unsupported instructions silently (demo backends are partial).
 (defmethod emit-instruction (target (inst vm-instruction) stream)
   (declare (ignore target stream)))
@@ -89,6 +117,96 @@
   (format stream "  mov rax, ~A~%"
           (target-register target (vm-reg inst)))
   (format stream "  ret~%"))
+
+(defmethod emit-instruction ((target x86-64-target) (inst vm-call) stream)
+  (format stream "  call ~A~%"
+          (target-register target (vm-func-reg inst)))
+  (format stream "  mov ~A, rax~%"
+          (target-register target (vm-dst inst))))
+
+(defmethod emit-instruction ((target x86-64-target) (inst vm-tail-call) stream)
+  (format stream "  jmp ~A~%"
+          (target-register target (vm-func-reg inst))))
+
+(defmethod emit-instruction ((target x86-64-target) (inst vm-class-def) stream)
+  (%x86-64-emit-runtime-call target stream
+                             "rt-defclass"
+                             (list (vm-class-name-sym inst)
+                                   (vm-superclasses inst)
+                                   (vm-slot-names inst))
+                             (vm-dst inst)))
+
+(defmethod emit-instruction ((target x86-64-target) (inst vm-make-obj) stream)
+  (%x86-64-emit-runtime-call target stream
+                             (if (null (vm-initarg-regs inst))
+                                 "rt-make-instance-0"
+                                 "rt-make-instance")
+                             (append (list (vm-class-reg inst))
+                                     (loop for (key . reg) in (vm-initarg-regs inst)
+                                           append (list key reg)))
+                             (vm-dst inst)))
+
+(defmethod emit-instruction ((target x86-64-target) (inst vm-slot-read) stream)
+  (%x86-64-emit-runtime-call target stream
+                             "rt-slot-value"
+                             (list (vm-obj-reg inst) (vm-slot-name-sym inst))
+                             (vm-dst inst)))
+
+(defmethod emit-instruction ((target x86-64-target) (inst vm-slot-write) stream)
+  (%x86-64-emit-runtime-call target stream
+                             "rt-slot-set"
+                             (list (vm-obj-reg inst)
+                                   (vm-slot-name-sym inst)
+                                   (vm-value-reg inst))))
+
+(defmethod emit-instruction ((target x86-64-target) (inst vm-register-method) stream)
+  (%x86-64-emit-runtime-call target stream
+                             "rt-register-method"
+                             (list (vm-gf-reg inst)
+                                   (vm-method-specializer inst)
+                                   (vm-method-reg inst))))
+
+(defmethod emit-instruction ((target x86-64-target) (inst vm-generic-call) stream)
+  (%x86-64-emit-runtime-call target stream
+                             "rt-call-generic"
+                             (cons (vm-gf-reg inst) (vm-args inst))
+                             (vm-dst inst)))
+
+(defmethod emit-instruction ((target x86-64-target) (inst vm-slot-boundp) stream)
+  (%x86-64-emit-runtime-call target stream
+                             "rt-slot-boundp"
+                             (list (vm-obj-reg inst) (vm-slot-name-sym inst))
+                             (vm-dst inst)))
+
+(defmethod emit-instruction ((target x86-64-target) (inst vm-slot-makunbound) stream)
+  (%x86-64-emit-runtime-call target stream
+                             "rt-slot-makunbound"
+                             (list (vm-obj-reg inst) (vm-slot-name-sym inst))
+                             (vm-dst inst)))
+
+(defmethod emit-instruction ((target x86-64-target) (inst vm-slot-exists-p) stream)
+  (%x86-64-emit-runtime-call target stream
+                             "rt-slot-exists-p"
+                             (list (vm-obj-reg inst) (vm-slot-name-sym inst))
+                             (vm-dst inst)))
+
+(defmethod emit-instruction ((target x86-64-target) (inst vm-class-name-fn) stream)
+  (%x86-64-emit-runtime-call target stream
+                             "rt-class-name"
+                             (list (vm-src inst))
+                             (vm-dst inst)))
+
+(defmethod emit-instruction ((target x86-64-target) (inst vm-class-of-fn) stream)
+  (%x86-64-emit-runtime-call target stream
+                             "rt-class-of"
+                             (list (vm-src inst))
+                             (vm-dst inst)))
+
+(defmethod emit-instruction ((target x86-64-target) (inst vm-find-class) stream)
+  (%x86-64-emit-runtime-call target stream
+                             "rt-find-class"
+                             (list (vm-src inst))
+                             (vm-dst inst)))
 
 (defmethod emit-instruction ((target x86-64-target) (inst vm-spill-store) stream)
   (let* ((src-reg (vm-spill-src inst))

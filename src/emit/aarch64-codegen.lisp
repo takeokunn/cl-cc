@@ -84,6 +84,14 @@
           (ash (logand rn #x1F) 16)
           (logand rd #x1F)))
 
+;;; REV Wd, Wn (32-bit byte reverse)
+;;; Encoding: #x5AC00800 | (Rn << 5) | Rd
+(defun encode-rev32 (rd rn)
+  "REV Wd, Wn (reverse bytes in low 32 bits)."
+  (logior #x5AC00800
+          (ash (logand rn #x1F) 5)
+          (logand rd #x1F)))
+
 ;;; ADD Xd, Xn, Xm (64-bit, no shift)
 ;;; Encoding: #x8B000000 | (Xm << 16) | (Xn << 5) | Xd
 (defun encode-add (rd rn rm)
@@ -112,6 +120,33 @@
           (ash (logand rn #x1F) 5)
           (logand rd #x1F)))
 
+;;; CMP Xn, Xm (alias for SUBS XZR, Xn, Xm)
+;;; Encoding: #xEB00001F | (Rm << 16) | (Rn << 5)
+(defun encode-cmp (rn rm)
+  "CMP Xn, Xm (compare signed 64-bit registers)."
+  (logior #xEB00001F
+          (ash (logand rm #x1F) 16)
+          (ash (logand rn #x1F) 5)))
+
+;;; CSEL Xd, Xn, Xm, cond
+;;; Encoding: #x9A800000 | (Rm << 16) | (cond << 12) | (Rn << 5) | Rd
+(defun encode-csel (rd rn rm cond)
+  "CSEL Xd, Xn, Xm, cond (conditional select)."
+  (logior #x9A800000
+          (ash (logand rm #x1F) 16)
+          (ash (logand cond #xF) 12)
+          (ash (logand rn #x1F) 5)
+          (logand rd #x1F)))
+
+;;; RORV Xd, Xn, Xm (rotate right variable)
+;;; Encoding: #x9AC02C00 | (Rm << 16) | (Rn << 5) | Rd
+(defun encode-rorv (rd rn rm)
+  "RORV Xd, Xn, Xm (rotate right by bottom bits of Xm)."
+  (logior #x9AC02C00
+          (ash (logand rm #x1F) 16)
+          (ash (logand rn #x1F) 5)
+          (logand rd #x1F)))
+
 ;;; CBZ Xn, #imm (Compare and Branch if Zero)
 ;;; Encoding: #xB4000000 | (imm19 << 5) | Xn
 ;;; imm19 is PC-relative offset in units of 4 bytes (instructions)
@@ -134,6 +169,13 @@
 (defun encode-blr (rn)
   "BLR Xn (indirect call through register)."
   (logior #xD63F0000
+          (ash (logand rn #x1F) 5)))
+
+;;; BR Xn (Branch to Register - indirect tail call)
+;;; Encoding: #xD61F0000 | (Xn << 5)
+(defun encode-br (rn)
+  "BR Xn (indirect tail jump through register)."
+  (logior #xD61F0000
           (ash (logand rn #x1F) 5)))
 
 ;;; RET (Return using X30/LR)
@@ -217,12 +259,18 @@
     (setf (gethash 'vm-add ht) 4)           ; encode-add
     (setf (gethash 'vm-sub ht) 4)           ; encode-sub
     (setf (gethash 'vm-mul ht) 4)           ; encode-mul
+    (setf (gethash 'vm-min ht) 8)           ; encode-cmp + encode-csel
+    (setf (gethash 'vm-max ht) 8)           ; encode-cmp + encode-csel
+    (setf (gethash 'vm-select ht) 8)        ; encode-cmp + encode-csel
+    (setf (gethash 'vm-bswap ht) 4)         ; encode-rev32
+    (setf (gethash 'vm-rotate ht) 8)        ; MOV + RORV
     (setf (gethash 'vm-label ht) 0)         ; no code
     (setf (gethash 'vm-jump ht) 4)          ; encode-b
     (setf (gethash 'vm-jump-zero ht) 4)     ; encode-cbz
     (setf (gethash 'vm-halt ht) 4)          ; encode-mov-rr
     (setf (gethash 'vm-ret ht) 28)          ; 6x LDP + RET = 7 instructions
     (setf (gethash 'vm-call ht) 4)          ; encode-blr
+    (setf (gethash 'vm-tail-call ht) 4)     ; encode-br
     (setf (gethash 'vm-spill-store ht) 4)   ; STUR
     (setf (gethash 'vm-spill-load ht) 4)    ; LDUR
     (setf (gethash 'vm-print ht) 0)
@@ -279,6 +327,44 @@
         (rm (a64-reg (vm-rhs inst))))
     (emit-a64-instr (encode-mul rd rn rm) stream)))
 
+(defun emit-a64-vm-min (inst stream)
+  "vm-min: dst = min(lhs, rhs)  -- signed, branchless via CSEL LT."
+  (let ((rd (a64-reg (vm-dst inst)))
+        (rn (a64-reg (vm-lhs inst)))
+        (rm (a64-reg (vm-rhs inst))))
+    (emit-a64-instr (encode-cmp rn rm) stream)
+    (emit-a64-instr (encode-csel rd rn rm 11) stream)))
+
+(defun emit-a64-vm-max (inst stream)
+  "vm-max: dst = max(lhs, rhs)  -- signed, branchless via CSEL GT."
+  (let ((rd (a64-reg (vm-dst inst)))
+        (rn (a64-reg (vm-lhs inst)))
+        (rm (a64-reg (vm-rhs inst))))
+    (emit-a64-instr (encode-cmp rn rm) stream)
+    (emit-a64-instr (encode-csel rd rn rm 12) stream)))
+
+(defun emit-a64-vm-select (inst stream)
+  "vm-select: dst = cond ? then : else  (branchless via CSEL NE)."
+  (let ((rd (a64-reg (vm-dst inst)))
+        (cond (a64-reg (vm-select-cond-reg inst)))
+        (then (a64-reg (vm-select-then-reg inst)))
+        (else (a64-reg (vm-select-else-reg inst))))
+    (emit-a64-instr (encode-mov-rr rd else) stream)
+    (emit-a64-instr (encode-cmp cond 31) stream)
+    (emit-a64-instr (encode-csel rd then rd 1) stream)))
+
+(defun emit-a64-vm-bswap (inst stream)
+  (let ((rd (a64-reg (vm-dst inst)))
+        (rn (a64-reg (vm-src inst))))
+    (emit-a64-instr (encode-rev32 rd rn) stream)))
+
+(defun emit-a64-vm-rotate (inst stream)
+  (let ((rd (a64-reg (vm-dst inst)))
+        (rn (a64-reg (vm-lhs inst)))
+        (rm (a64-reg (vm-rhs inst))))
+    (emit-a64-instr (encode-mov-rr rd rn) stream)
+    (emit-a64-instr (encode-rorv rd rd rm) stream)))
+
 (defun emit-a64-vm-halt (inst stream)
   "Move result to X0 (return register). Always emits exactly one MOV instruction."
   (let ((result-reg (a64-reg (vm-reg inst))))
@@ -320,13 +406,9 @@
   "Emit inline epilogue (restore all callee-saved registers) then RET.
    Must stay in sync with emit-a64-prologue and a64-instruction-size for vm-ret."
   (declare (ignore inst))
-  ;; Restore in reverse push order (X27/X28 pushed last, popped first)
-  (emit-a64-instr (encode-ldp-post 27 28 +a64-sp+ 2) stream)
-  (emit-a64-instr (encode-ldp-post 25 26 +a64-sp+ 2) stream)
-  (emit-a64-instr (encode-ldp-post 23 24 +a64-sp+ 2) stream)
-  (emit-a64-instr (encode-ldp-post 21 22 +a64-sp+ 2) stream)
-  (emit-a64-instr (encode-ldp-post 19 20 +a64-sp+ 2) stream)
-  (emit-a64-instr (encode-ldp-post 29 30 +a64-sp+ 2) stream)
+  (dolist (pair (reverse (a64-used-callee-saved-pairs *current-a64-regalloc*)))
+    (destructuring-bind (rn rm) pair
+      (emit-a64-instr (encode-ldp-post rn rm +a64-sp+ 2) stream)))
   (emit-a64-instr +a64-ret+ stream))
 
 ;;; Main program emitter
@@ -338,6 +420,11 @@
     (setf (gethash 'vm-add ht) #'emit-a64-vm-add)
     (setf (gethash 'vm-sub ht) #'emit-a64-vm-sub)
     (setf (gethash 'vm-mul ht) #'emit-a64-vm-mul)
+    (setf (gethash 'vm-min ht) #'emit-a64-vm-min)
+    (setf (gethash 'vm-max ht) #'emit-a64-vm-max)
+    (setf (gethash 'vm-select ht) #'emit-a64-vm-select)
+    (setf (gethash 'vm-bswap ht) #'emit-a64-vm-bswap)
+    (setf (gethash 'vm-rotate ht) #'emit-a64-vm-rotate)
     (setf (gethash 'vm-halt ht) #'emit-a64-vm-halt)
     (setf (gethash 'vm-ret ht) #'emit-a64-vm-ret)
     (setf (gethash 'vm-spill-store ht) #'emit-a64-vm-spill-store)
@@ -356,6 +443,8 @@
        (emit-a64-vm-jump-zero inst stream current-pos label-offsets))
       ((eq tp 'vm-call)
        (emit-a64-instr (encode-blr (a64-reg (vm-func-reg inst))) stream))
+      ((eq tp 'vm-tail-call)
+       (emit-a64-instr (encode-br (a64-reg (vm-func-reg inst))) stream))
       (t (let ((emitter (gethash tp *a64-emitter-table*)))
            (if emitter
                (funcall emitter inst stream)
@@ -366,36 +455,30 @@
 ;;; Saved as pairs: (X29,X30), (X19,X20), (X21,X22), (X23,X24), (X25,X26), (X27,X28)
 ;;; Total prologue size: 6 STP x 4 bytes = 24 bytes
 
-(defun emit-a64-prologue (stream)
-  "Emit AArch64 function prologue: save FP, LR, and all callee-saved registers X19-X28."
-  ;; STP X29, X30, [SP, #-16]!  (imm7 = -16/8 = -2)
-  (emit-a64-instr (encode-stp-pre 29 30 +a64-sp+ -2) stream)
-  ;; STP X19, X20, [SP, #-16]!
-  (emit-a64-instr (encode-stp-pre 19 20 +a64-sp+ -2) stream)
-  ;; STP X21, X22, [SP, #-16]!
-  (emit-a64-instr (encode-stp-pre 21 22 +a64-sp+ -2) stream)
-  ;; STP X23, X24, [SP, #-16]!
-  (emit-a64-instr (encode-stp-pre 23 24 +a64-sp+ -2) stream)
-  ;; STP X25, X26, [SP, #-16]!
-  (emit-a64-instr (encode-stp-pre 25 26 +a64-sp+ -2) stream)
-  ;; STP X27, X28, [SP, #-16]!
-  (emit-a64-instr (encode-stp-pre 27 28 +a64-sp+ -2) stream))
+(defun a64-used-callee-saved-pairs (ra &key frame-pointer-p)
+  "Return callee-saved register pairs actually used by RA.
+   When FRAME-POINTER-P is true, include the FP/LR pair first.
+   Each pair is emitted as one STP/LDP."
+  (let ((phys-regs (loop for phys being the hash-values of (regalloc-assignment ra)
+                         collect phys)))
+    (append (when frame-pointer-p '((29 30)))
+            (remove-if-not (lambda (pair)
+                             (or (member (first pair) phys-regs :test #'eq)
+                                 (member (second pair) phys-regs :test #'eq)))
+                           '((19 20) (21 22) (23 24) (25 26) (27 28))))))
 
-(defun emit-a64-epilogue (stream)
-  "Emit AArch64 function epilogue: restore callee-saved registers and return.
-   Restores in reverse push order."
-  ;; LDP X27, X28, [SP], #16  (imm7 = 16/8 = 2)
-  (emit-a64-instr (encode-ldp-post 27 28 +a64-sp+ 2) stream)
-  ;; LDP X25, X26, [SP], #16
-  (emit-a64-instr (encode-ldp-post 25 26 +a64-sp+ 2) stream)
-  ;; LDP X23, X24, [SP], #16
-  (emit-a64-instr (encode-ldp-post 23 24 +a64-sp+ 2) stream)
-  ;; LDP X21, X22, [SP], #16
-  (emit-a64-instr (encode-ldp-post 21 22 +a64-sp+ 2) stream)
-  ;; LDP X19, X20, [SP], #16
-  (emit-a64-instr (encode-ldp-post 19 20 +a64-sp+ 2) stream)
-  ;; LDP X29, X30, [SP], #16
-  (emit-a64-instr (encode-ldp-post 29 30 +a64-sp+ 2) stream)
+(defun emit-a64-prologue (stream save-pairs)
+  "Emit AArch64 function prologue: save FP/LR and the callee-saved pairs in SAVE-PAIRS."
+  (dolist (pair save-pairs)
+    (destructuring-bind (rn rm) pair
+      ;; STP Xn, Xm, [SP, #-16]!
+      (emit-a64-instr (encode-stp-pre rn rm +a64-sp+ -2) stream))))
+
+(defun emit-a64-epilogue (stream save-pairs)
+  "Emit AArch64 function epilogue: restore callee-saved pairs and return."
+  (dolist (pair (reverse save-pairs))
+    (destructuring-bind (rn rm) pair
+      (emit-a64-instr (encode-ldp-post rn rm +a64-sp+ 2) stream)))
   ;; RET
   (emit-a64-instr +a64-ret+ stream))
 
@@ -403,18 +486,30 @@
   "Emit AArch64 machine code for the entire VM program.
    Uses two-pass approach for label resolution."
   (let* ((instructions (vm-program-instructions program))
-         ;; Prologue: 6 STP instructions x 4 bytes = 24 bytes
-         (prologue-size 24)
-         (label-offsets (build-a64-label-offsets instructions prologue-size)))
+         (cfg (cfg-build instructions))
+          (leaf-p (vm-program-leaf-p program))
+          (frame-pointer-p (or (not leaf-p)
+                               (plusp (regalloc-spill-count *current-a64-regalloc*))))
+          (save-pairs (a64-used-callee-saved-pairs *current-a64-regalloc*
+                                                   :frame-pointer-p frame-pointer-p))
+          ;; Each STP/LDP pair is one 4-byte instruction.
+          (prologue-size (* 4 (length save-pairs)))
+          (ordered-instructions (if (cfg-entry cfg)
+                                    (progn
+                                      (cfg-compute-dominators cfg)
+                                      (cfg-compute-loop-depths cfg)
+                                      (cfg-flatten-hot-cold cfg))
+                                    instructions))
+          (label-offsets (build-a64-label-offsets ordered-instructions prologue-size)))
     ;; Prologue
-    (emit-a64-prologue stream)
+    (emit-a64-prologue stream save-pairs)
     ;; Second pass: emit instructions
     (let ((pos prologue-size))
-      (dolist (inst instructions)
+      (dolist (inst ordered-instructions)
         (emit-a64-instruction inst stream pos label-offsets)
         (incf pos (a64-instruction-size inst))))
     ;; Epilogue
-    (emit-a64-epilogue stream)))
+    (emit-a64-epilogue stream save-pairs)))
 
 ;;; Public API
 
@@ -422,10 +517,11 @@
   "Compile VM program to AArch64 machine code bytes.
    Returns: (simple-array (unsigned-byte 8) (*))"
   (let* ((instructions (vm-program-instructions program))
-         (ra (allocate-registers instructions *aarch64-calling-convention*))
-         (allocated-program (make-vm-program
-                             :instructions (regalloc-instructions ra)
-                             :result-register (vm-program-result-register program))))
+          (ra (allocate-registers instructions *aarch64-calling-convention*))
+          (allocated-program (make-vm-program
+                              :instructions (regalloc-instructions ra)
+                              :result-register (vm-program-result-register program)
+                              :leaf-p (vm-program-leaf-p program))))
     (let ((*current-a64-regalloc* ra))
       (with-output-to-vector (stream)
         (emit-a64-program allocated-program stream)))))

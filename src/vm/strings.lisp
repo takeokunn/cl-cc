@@ -65,8 +65,9 @@
   (dst nil :reader vm-dst)
   (str1 nil :reader vm-str1)
   (str2 nil :reader vm-str2)
+  (parts nil :reader vm-parts)
   (:sexp-tag :concatenate)
-  (:sexp-slots dst str1 str2))
+  (:sexp-slots dst str1 str2 parts))
 
 (define-vm-unary-instruction vm-string-upcase    :string-upcase    "Uppercase conversion. DST = uppercase of SRC.")
 (define-vm-unary-instruction vm-string-downcase  :string-downcase  "Lowercase conversion. DST = lowercase of SRC.")
@@ -222,9 +223,10 @@
 
 (defmethod execute-instruction ((inst vm-concatenate) state pc labels)
   (declare (ignore labels))
-  (let ((result (concatenate 'string
-                              (vm-reg-get state (vm-str1 inst))
-                              (vm-reg-get state (vm-str2 inst)))))
+  (let* ((parts (or (vm-parts inst)
+                    (list (vm-str1 inst) (vm-str2 inst))))
+         (result (apply #'concatenate 'string
+                        (mapcar (lambda (reg) (vm-reg-get state reg)) parts))))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 

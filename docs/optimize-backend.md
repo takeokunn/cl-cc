@@ -2,8 +2,10 @@
 
 Partial evaluation, memory analysis, numeric optimization, string/control flow, CL-specific argument optimization, register allocation, PGO, LTO, JIT, security, WASM, debug info, concurrency, modern architecture, compiler quality, algebraic optimization, frontend optimization, CL declarations, CL runtime semantics, FFI, stack frame/ABI.
 
+**実装状況**: 進行中。完了済みの項目は各FR見出しの `✅` で明示する。
+
 ---
-### Phase 40 — 部分評価・特殊化
+### Phase 40 — 部分評価・特殊化（一部実装）
 
 #### FR-209: Partial Evaluation (部分評価)
 
@@ -29,9 +31,11 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: GHC SpecConstr / LLVM argument promotion。ホット関数の呼び出しパターンを分析して特殊化の利益を推定
 - **難易度**: Very Hard
 
+- **完了済みFR**: なし（関連実装: AST定数畳み込み）
+
 ---
 
-### Phase 43 — メモリ解析・ストア最適化
+### Phase 43 — メモリ解析・ストア最適化（未実装）
 
 #### FR-216: Store-to-Load Forwarding (ストア→ロード転送)
 
@@ -51,7 +55,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 44 — 数値演算高度化
+### Phase 44 — 数値演算高度化（未実装）
 
 #### FR-218: Karatsuba Multiplication / Fast Bignum Algorithms
 
@@ -71,7 +75,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 49 — 文字列・制御フロー高度化
+### Phase 49 — 文字列・制御フロー高度化（未実装）
 
 #### FR-234: String Builder / Batch Concatenation (文字列ビルダー)
 
@@ -99,7 +103,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 54 — CL固有引数最適化
+### Phase 54 — CL固有引数最適化（未実装）
 
 #### FR-248: &rest Parameter Stack Allocation (&restスタック割り当て)
 
@@ -127,7 +131,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 55 — 高度解析・メモリ最適化
+### Phase 55 — 高度解析・メモリ最適化（未実装）
 
 #### FR-251: Abstract Interpretation Framework (抽象解釈フレームワーク)
 
@@ -179,7 +183,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 62 — 数値演算最適化
+### Phase 62 — 数値演算最適化（未実装）
 
 #### FR-282: Division by Arbitrary Constant (任意定数除算最適化)
 
@@ -253,17 +257,18 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: GCC/LLVM multiply-by-constant optimization。IMUL(3cycles)→ADD+SHL(2cycles)で高速化
 - **難易度**: Medium
 
-#### FR-306: Optimizer Cost Model for Inlining (インライン化コストモデル)
+#### FR-306: Optimizer Cost Model for Inlining (インライン化コストモデル) ✅
 
 - **対象**: `src/optimize/optimizer.lisp`
-- **現状**: インライン閾値は生の命令数15（`optimizer.lisp:773`、`(1- (length body)) <= threshold`）。命令コスト/利益分析なし。E-graphにはコストモデル（`egraph.lisp:319-335`）があるがメインオプティマイザには無関係
-- **内容**: 命令別コストテーブル（call=10, add=1等、E-graphの`*egraph-op-base-costs*`を共有可能）。インラインコスト=本体コスト合計 vs 呼び出しオーバーヘッド。レジスタ圧力（呼び出し地点の生存レジスタ数）を考慮。ループ内呼び出しはbonus加算
+- **現状**: ✅ 完了 — インライナコストモデルがE-graphオペコードコストテーブルを再利用（`vm-inst-to-enode-op` + `egraph-default-cost`経由）。`opt-inline-eligible-p`は`opt-inline-body-cost`（最終`vm-ret`を除く命令コスト合計）をインライン閾値と比較し、生の命令数ではなくなった。安価な定数多用本体は15命令超過でもインライン可能に
+- **内容**: 命令別コストテーブル（call=10, add=1等、E-graphの`*egraph-op-base-costs*`を共有）。インラインコスト=本体コスト合計 vs 呼び出しオーバーヘッド
 - **根拠**: LLVM `InlineCost` / GCC `ipa-inline`。命令数だけでは判断が粗い
 - **難易度**: Medium
+- **検証**: SBCL QAで`cheap=T expensive=NIL`出力確認、テストレジストリの`opt-inline-eligible-p-cases`ラムダ合格
 
 ---
 
-### Phase 89 — オプティマイザ解析基盤
+### Phase 89 — オプティマイザ解析基盤（未実装）
 
 #### FR-516: 算術再結合 (Arithmetic Reassociation)
 
@@ -323,7 +328,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 88 — 多面体最適化 (Polyhedral Model)
+### Phase 88 — 多面体最適化 (Polyhedral Model)（未実装）
 
 #### FR-523: Affine Loop Analysis (アフィンループ解析)
 
@@ -359,7 +364,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 89 — ML駆動最適化
+### Phase 89 — ML駆動最適化（未実装）
 
 #### FR-527: ML-Guided Inlining / MLGO (機械学習によるインライン判定)
 
@@ -379,9 +384,9 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 2 — 末尾呼び出し最適化 (Tail Call Optimization)
+### Phase 2 — 末尾呼び出し最適化 (Tail Call Optimization)（一部実装: FR-004/005/006）
 
-#### FR-004: Proper Tail Call Elimination (TCE)
+#### FR-004: Proper Tail Call Elimination (TCE) ✅
 
 - **対象**: `src/compile/cps.lisp`, `src/compile/codegen.lisp`, `src/vm/vm-execute.lisp`
 - **現状**: CPS変換済み呼び出しの末尾位置検出はあるが、VM実行レベルでのフレーム再利用が未実装。末尾呼び出しが新規コールフレームを積む
@@ -389,14 +394,14 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: Proper tail calls は Scheme 規格の必須要件。CL ではコンパイラが自由に適用可。スタックオーバーフロー防止と `labels` の末尾再帰ループ変換に必須
 - **難易度**: Medium
 
-#### FR-005: Self-Tail-Call → ループ変換
+#### FR-005: Self-Tail-Call → ループ変換 ✅
 
 - **対象**: `src/compile/codegen.lisp`, `src/optimize/optimizer.lisp`
 - **内容**: 自己末尾再帰 `(defun f (x) ... (f x'))` を `(loop ...)` 形式のジャンプ＋変数更新に変換。コールフレームを一切生成しない完全ループ化。対象: 単一関数、引数→レジスタの直接更新
 - **根拠**: GHC strict worker-wrapper / LLVM TailCallElim。再帰カウンタ・リスト処理の慣用パターンで適用率が高い
 - **難易度**: Easy (self-recursive に限定)
 
-#### FR-006: 相互末尾再帰 Trampoline
+#### FR-006: 相互末尾再帰 Trampoline ✅
 
 - **対象**: `src/compile/codegen.lisp`
 - **内容**: `labels` 内で相互末尾再帰する関数群を trampoline ループ（`while (thunk) { thunk = thunk() }`）に変換。`(labels ((even? (n) (if (= n 0) t (odd? (- n 1)))) (odd? (n) ...))...)` が O(1) スタックで実行できる
@@ -405,7 +410,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 3 — エスケープ解析 & オブジェクト表現
+### Phase 3 — エスケープ解析 & オブジェクト表現（一部実装: &rest escape heuristic）
 
 #### FR-007: Escape Analysis (エスケープ解析)
 
@@ -414,6 +419,8 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **内容**: オブジェクト (cons, vector, closure, CLOS instance) がスコープ外に到達するかを解析。エスケープしない場合はスタック割り当てまたはスカラー置換 (FR-014) を適用。逃げ方の分類: (1) 戻り値、(2) グローバル変数への代入、(3) 別クロージャへのキャプチャ、(4) 外部関数呼び出し引数
 - **根拠**: Java HotSpot Escape Analysis / SBCL `(declare (dynamic-extent ...))` の自動化。ヒープ割り当て削減でGC圧力を大幅軽減
 - **難易度**: Hard
+
+- **関連実装**: `src/compile/closure.lisp` の `binding-escapes-in-body-p` により、束縛単位の保守的な手続き内 escape 判定を共有化。`src/compile/codegen-functions.lisp` ではこの判定を `&rest` リストのスタック安全再利用（`vm-closure-rest-stack-alloc-p` / `vm-build-list`）に使用し、`src/compile/codegen-core.lisp` + `src/compile/codegen.lisp` では単純な `let` 束縛 `cons` に対する no-escape `car`/`cdr` 分解、および固定長 `make-array` に対する no-escape 定数/変数添字 `aref` / `array-length` / `aset` 分解を行う。`src/compile/codegen-clos.lisp` では単純な `let` 束縛 `make-instance` に対して no-escape な `slot-value` / `set-slot-value` をスロットごとのレジスタへ分解し、`src/compile/codegen.lisp` では direct-call-only な `let` 束縛 `lambda` に対して `vm-closure` を作らずラムダ本体を直接展開する。一般オブジェクト（可変長/多次元 array、一般 closure 値、一般 CLOS instance の完全な stack allocation）は未実装。
 
 #### FR-014: SROA (Scalar Replacement of Aggregates)
 
@@ -431,7 +438,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 4 — メモリ依存解析 & デッドストア除去
+### Phase 4 — メモリ依存解析 & デッドストア除去（未実装）
 
 #### FR-016: Dead Store Elimination (DSE)
 
@@ -457,7 +464,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 5 — インラインキャッシュ & 動的ディスパッチ
+### Phase 5 — インラインキャッシュ & 動的ディスパッチ（未実装）
 
 #### FR-009: Monomorphic Inline Cache (MIC)
 
@@ -476,7 +483,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 9 — 型特化 & アンボクシング
+### Phase 9 — 型特化 & アンボクシング（未実装）
 
 #### FR-008: Float Unboxing (浮動小数点数アンボクシング)
 
@@ -502,7 +509,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 12 — ラムダ計算レベル最適化
+### Phase 12 — ラムダ計算レベル最適化（未実装）
 
 #### FR-027: Beta / Eta 簡約 (Beta/Eta Reduction)
 
@@ -521,7 +528,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 13 — インライン展開コア
+### Phase 13 — インライン展開コア（一部実装: インラインコストモデル）
 
 #### FR-030: Known-Call Optimization (既知呼び出し最適化)
 
@@ -538,9 +545,11 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: GHC SpecConstr pass / LLVM `-speculative-execution`
 - **難易度**: Hard
 
+- **完了済みFR**: FR-306
+
 ---
 
-### Phase 15 — アンボクシング拡張
+### Phase 15 — アンボクシング拡張（未実装）
 
 #### FR-045: Integer Tag Removal in Hot Loops (ホットループ整数タグ除去)
 
@@ -551,7 +560,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 17 — 呼び出し規約 & ABI
+### Phase 17 — 呼び出し規約 & ABI（一部実装: callee-saved trim）
 
 #### FR-176: Custom Calling Convention (カスタム呼び出し規約)
 
@@ -568,9 +577,11 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: C++ RVO / SBCL multiple values optimization。多値を多用する CL コードで有効
 - **難易度**: Medium
 
+- **完了済みFR**: FR-176
+
 ---
 
-### Phase 18 — Switch / Typecase 最適化
+### Phase 18 — Switch / Typecase 最適化（未実装）
 
 #### FR-128: typecase Jump Table (typecase ジャンプテーブル)
 
@@ -582,7 +593,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 19 — 副作用・純粋性解析
+### Phase 19 — 副作用・純粋性解析（未実装）
 
 #### FR-152: Transitive Function Purity Inference (推移的純粋性推論)
 
@@ -594,7 +605,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 20 — SIMD / ベクトル化
+### Phase 20 — SIMD / ベクトル化（未実装）
 
 #### FR-228: SSE/AVX Float Arithmetic (SIMD 浮動小数点演算)
 
@@ -635,7 +646,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 56 — レジスタ割り当て
+### Phase 56 — レジスタ割り当て（未実装）
 
 #### FR-290: Linear Scan Register Allocation (線形スキャン)
 
@@ -668,7 +679,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 57 — プロファイルガイド最適化 (PGO)
+### Phase 57 — プロファイルガイド最適化 (PGO)（未実装）
 
 #### FR-295: PGO Instrumentation (プロファイル計装)
 
@@ -702,7 +713,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 58 — リンク時最適化 (LTO)
+### Phase 58 — リンク時最適化 (LTO)（未実装）
 
 #### FR-300: Full LTO (全プログラム最適化)
 
@@ -720,7 +731,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 63 — JIT & 動的コンパイル
+### Phase 63 — JIT & 動的コンパイル（未実装）
 
 #### FR-310: Tiered Compilation (多段 JIT)
 
@@ -745,7 +756,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 64 — セキュリティ緩和策
+### Phase 64 — セキュリティ緩和策（未実装）
 
 #### FR-315: Control Flow Integrity (CFI)
 
@@ -777,7 +788,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 65 — WebAssembly モダン機能 (2024-2026)
+### Phase 65 — WebAssembly モダン機能 (2024-2026)（未実装）
 
 #### FR-320: Wasm Tail Calls (Wasm 末尾呼び出し)
 
@@ -818,7 +829,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 66 — デバッグ情報 & 観測性
+### Phase 66 — デバッグ情報 & 観測性（未実装）
 
 #### FR-330: DWARF Debug Info Generation (DWARF デバッグ情報生成)
 
@@ -851,7 +862,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 67 — 並行・並列最適化
+### Phase 67 — 並行・並列最適化（未実装）
 
 #### FR-335: Thread-Local Storage Optimization (スレッドローカルストレージ最適化)
 
@@ -884,7 +895,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 68 — 最新アーキテクチャ対応 (2025-2026)
+### Phase 68 — 最新アーキテクチャ対応 (2025-2026)（未実装）
 
 #### FR-340: Apple M シリーズ 最適化 (Apple Silicon)
 
@@ -909,7 +920,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 69 — コンパイラ自体の品質・保守性
+### Phase 69 — コンパイラ自体の品質・保守性（未実装）
 
 #### FR-345: Compiler Correctness Testing (正確性テスト)
 
@@ -934,7 +945,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 70 — 等価飽和 & 代数的最適化
+### Phase 70 — 等価飽和 & 代数的最適化（未実装）
 
 #### FR-350: E-graph Equality Saturation (等価飽和)
 
@@ -960,7 +971,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 71 — フロントエンド最適化
+### Phase 71 — フロントエンド最適化（未実装）
 
 #### FR-353: DFA 最小化 & 直接コード字句解析器
 
@@ -1000,7 +1011,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 72 — CL 宣言系最適化
+### Phase 72 — CL 宣言系最適化（未実装）
 
 #### FR-360: `declare (type ...)` / `the` による型ナローイング
 
@@ -1063,7 +1074,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 73 — CL ランタイム意味論
+### Phase 73 — CL ランタイム意味論（未実装）
 
 #### FR-370: 特殊変数の実装モデル選択
 
@@ -1144,7 +1155,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 74 — FFI 最適化
+### Phase 74 — FFI 最適化（未実装）
 
 #### FR-382: GC セーフポイントの FFI 境界配置
 
@@ -1183,7 +1194,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 75 — スタックフレーム & ABI
+### Phase 75 — スタックフレーム & ABI（未実装）
 
 #### FR-388: Frame Pointer Elimination (FPE)
 
@@ -1222,7 +1233,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 76 — クロージャ表現の選択
+### Phase 76 — クロージャ表現の選択（未実装）
 
 #### FR-394: クロージャ表現モデルの選択と文書化
 
@@ -1247,7 +1258,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 77 — パターンマッチングのコンパイル
+### Phase 77 — パターンマッチングのコンパイル（未実装）
 
 #### FR-398: 決定木方式のパターンマッチングコンパイル
 
@@ -1279,7 +1290,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 78 — Out-of-SSA & モダン IR 設計
+### Phase 78 — Out-of-SSA & モダン IR 設計（未実装）
 
 #### FR-403: Out-of-SSA — Parallel Copy 挿入
 
@@ -1318,7 +1329,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 79 — 命令スケジューリング
+### Phase 79 — 命令スケジューリング（未実装）
 
 #### FR-410: List Scheduling — PreRA
 
@@ -1358,7 +1369,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 80 — 命令選択 (ISEL)
+### Phase 80 — 命令選択 (ISEL)（未実装）
 
 #### FR-416: BURS — Bottom-Up Rewriting System
 
@@ -1390,7 +1401,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 81 — スーパーオプティマイゼーション
+### Phase 81 — スーパーオプティマイゼーション（未実装）
 
 #### FR-421: STOKE — 確率的スーパーオプティマイゼーション
 
@@ -1422,7 +1433,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 82 — 形式検証・証明支援
+### Phase 82 — 形式検証・証明支援（未実装）
 
 #### FR-426: Refinement Types / Liquid Types
 
@@ -1461,7 +1472,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 83 — 数値表現の多様性
+### Phase 83 — 数値表現の多様性（未実装）
 
 #### FR-432: BFLOAT16 / FP16 / TF32 サポート
 
@@ -1500,7 +1511,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 84 — 異種計算 (Heterogeneous Computing)
+### Phase 84 — 異種計算 (Heterogeneous Computing)（未実装）
 
 #### FR-438: GPU オフロードコンパイル (CUDA/ROCm)
 
@@ -1539,7 +1550,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 85 — 動的言語ランタイム技術
+### Phase 85 — 動的言語ランタイム技術（未実装）
 
 #### FR-444: Hidden Class / Shape 最適化
 
@@ -1571,7 +1582,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 86 — 並行プログラミングモデルのコンパイル
+### Phase 86 — 並行プログラミングモデルのコンパイル（未実装）
 
 #### FR-449: async/await → 状態機械変換
 
@@ -1610,7 +1621,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 87 — セキュリティ追加項目
+### Phase 87 — セキュリティ追加項目（未実装）
 
 #### FR-455: PIE — Position-Independent Executable 生成
 
@@ -1649,7 +1660,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 90 — ツーリング・IDE 統合
+### Phase 90 — ツーリング・IDE 統合（未実装）
 
 #### FR-461: Language Server Protocol (LSP) サポート
 
@@ -1688,7 +1699,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 91 — 未定義 FR の定義
+### Phase 91 — 未定義 FR の定義（未実装）
 
 #### FR-116: Flow-Sensitive Type Narrowing（フロー感受型ナローイング）
 
@@ -1724,7 +1735,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 92 — ゼロコスト例外処理
+### Phase 92 — ゼロコスト例外処理（未実装）
 
 #### FR-470: Table-Driven Unwinding — DWARF EH
 
@@ -1756,7 +1767,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 93 — Strictness / Demand Analysis
+### Phase 93 — Strictness / Demand Analysis（未実装）
 
 #### FR-475: Strictness Analysis（強制評価解析）
 
@@ -1781,7 +1792,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 94 — Join Points
+### Phase 94 — Join Points（未実装）
 
 #### FR-479: Join Points（結合点最適化）
 
@@ -1792,7 +1803,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 95 — GC 追加項目
+### Phase 95 — GC 追加項目（未実装）
 
 #### FR-481: Safepoint 最適化
 
@@ -1832,7 +1843,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 96 — Copy-and-Patch JIT
+### Phase 96 — Copy-and-Patch JIT（未実装）
 
 #### FR-487: Copy-and-Patch Compilation（テンプレートベース JIT）
 
@@ -1843,7 +1854,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 97 — サニタイザー
+### Phase 97 — サニタイザー（未実装）
 
 #### FR-489: AddressSanitizer (ASan)
 
@@ -1882,7 +1893,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 98 — Snapshot / AoT 起動最適化
+### Phase 98 — Snapshot / AoT 起動最適化（未実装）
 
 #### FR-495: Image/Snapshot シリアライゼーション
 
@@ -1907,7 +1918,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 99 — データレイアウト変換
+### Phase 99 — データレイアウト変換（未実装）
 
 #### FR-499: AoS → SoA 変換（Array of Structures → Structure of Arrays）
 

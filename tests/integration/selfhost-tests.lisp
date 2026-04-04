@@ -233,6 +233,13 @@
   (assert-eql 6
     (run-string "(+ 1 #.(+ 2 3))")))
 
+(deftest selfhost-read-eval-respects-special
+  "#.-reader evaluation is rejected when *read-eval* is nil."
+  (assert-true
+   (null
+    (ignore-errors
+      (run-string "(let ((*read-eval* nil)) (read-from-string \"#.(+ 2 3)\"))")))))
+
 ;;; ─── Self-Hosting: Meta-Circular Compilation ─────────────────────────────
 
 (deftest selfhost-meta-circular-eval

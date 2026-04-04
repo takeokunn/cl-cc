@@ -1,6 +1,6 @@
 ;;;; tests/unit/optimize/egraph-rules-tests.lisp — E-Graph Rewrite Rule Tests
 ;;;
-;;; Comprehensive tests for all 51 built-in e-graph rewrite rules defined in
+;;; Comprehensive tests for all 55 built-in e-graph rewrite rules defined in
 ;;; src/optimize/egraph-rules.lisp.  Each test is independent and creates its
 ;;; own fresh e-graph.
 ;;;
@@ -237,6 +237,22 @@
     (eg-saturate eg)
     (assert-true (eg-merged-p eg op2 x))))
 
+(deftest-each egraph-rule-negated-comparison-fires
+  "Negated comparisons merge with their dual comparison."
+  :cases (("not-lt" 'cl-cc::not 'cl-cc::lt 'cl-cc::ge)
+          ("not-gt" 'cl-cc::not 'cl-cc::gt 'cl-cc::le)
+          ("not-le" 'cl-cc::not 'cl-cc::le 'cl-cc::gt)
+          ("not-ge" 'cl-cc::not 'cl-cc::ge 'cl-cc::lt))
+  (not-op cmp-op dual-op)
+  (let* ((eg  (cl-cc::make-e-graph))
+         (x   (cl-cc::egraph-add eg 'cl-cc::var))
+         (y   (make-eg-const eg 7))
+         (cmp (cl-cc::egraph-add eg cmp-op x y))
+         (not (cl-cc::egraph-add eg not-op cmp))
+         (dual (cl-cc::egraph-add eg dual-op x y)))
+    (eg-saturate eg)
+    (assert-true (eg-merged-p eg not dual))))
+
 ;;; ─── Negation: add-neg ───────────────────────────────────────────────────
 ;;; add-neg: (add ?x (neg ?y)) → (sub ?x ?y)
 ;;; Use var for x and a const for y so x ≠ y (different memo keys).
@@ -467,11 +483,12 @@
                  cl-cc::mul-zero-r cl-cc::mul-zero-l cl-cc::div-one
                  cl-cc::sub-self cl-cc::eq-self
                  cl-cc::lt-self cl-cc::gt-self cl-cc::le-self cl-cc::ge-self
-                 cl-cc::mul-neg1-r cl-cc::mul-neg1-l
-                 cl-cc::double-neg cl-cc::not-not
-                 cl-cc::add-neg cl-cc::sub-neg
-                 cl-cc::logand-zero cl-cc::logand-zero-l
-                 cl-cc::logand-neg1 cl-cc::logand-neg1-l cl-cc::logand-self
+                  cl-cc::mul-neg1-r cl-cc::mul-neg1-l
+                  cl-cc::double-neg cl-cc::not-not
+                  cl-cc::not-lt cl-cc::not-gt cl-cc::not-le cl-cc::not-ge
+                  cl-cc::add-neg cl-cc::sub-neg
+                  cl-cc::logand-zero cl-cc::logand-zero-l
+                  cl-cc::logand-neg1 cl-cc::logand-neg1-l cl-cc::logand-self
                  cl-cc::logior-zero cl-cc::logior-zero-l cl-cc::logior-self
                  cl-cc::logxor-zero cl-cc::logxor-zero-l cl-cc::logxor-self
                  cl-cc::ash-zero cl-cc::ash-zero-base

@@ -32,12 +32,12 @@
     (assert-= 7 (cl-cc::vm-heap-address wrapped))
     (assert-null (cl-cc::vm-heap-address nil))))
 
-(deftest vm-build-list-copies-values
-  "vm-build-list returns a native list copy of the provided rest values."
+(deftest vm-build-list-stack-allocates-values
+  "vm-build-list reuses the provided rest tail when stack allocation is enabled."
   (let* ((values (list 1 2 3))
-         (result (cl-cc::vm-build-list nil values)))
+          (result (cl-cc::vm-build-list nil values :stack-allocate-p t)))
     (assert-equal values result)
-    (assert-true (not (eq values result)))))
+    (assert-true (eq values result))))
 
 (deftest vm-host-bridge-registration
   "vm-register-host-bridge marks a symbol as host-callable in the bridge table."
@@ -64,17 +64,20 @@
   (let ((c (make-instance 'cl-cc::vm-closure-object
                            :entry-label "my-fn"
                            :params (list :r1 :r2)
-                           :captured-values nil)))
+                           :captured-values #())))
     (assert-string= "my-fn" (cl-cc::vm-closure-entry-label c))
     (assert-equal (list :r1 :r2) (cl-cc::vm-closure-params c))
-    (assert-null (cl-cc::vm-closure-captured-values c))
+    (assert-true (vectorp (cl-cc::vm-closure-captured-values c)))
+    (assert-= 0 (length (cl-cc::vm-closure-captured-values c)))
     (assert-true (typep c 'cl-cc::vm-closure-object)))
   ;; captured variables
   (let ((c (make-instance 'cl-cc::vm-closure-object
                            :entry-label "adder"
                            :params (list :r1)
-                           :captured-values (list (cons :r0 10)))))
-    (assert-equal (list (cons :r0 10)) (cl-cc::vm-closure-captured-values c))))
+                           :captured-values (vector (cons :r0 10)))))
+    (assert-true (vectorp (cl-cc::vm-closure-captured-values c)))
+    (assert-= 1 (length (cl-cc::vm-closure-captured-values c)))
+    (assert-equal (cons :r0 10) (aref (cl-cc::vm-closure-captured-values c) 0))))
 
 (deftest vm-cons-cell
   "vm-cons-cell: stores car/cdr, car is setf-able, subtype of vm-heap-object."

@@ -591,9 +591,11 @@
   :cases (("basic"         7  "(defun key-add (&key x y) (+ x y)) (key-add :x 3 :y 4)")
           ("default"      10  "(defun key-def (&key (x 0) (y 0)) (+ x y)) (key-def :x 10)")
           ("reorder"       7  "(defun key-ord (&key x y) (+ x y)) (key-ord :y 4 :x 3)")
+          ("four-keys"   '(1 2 3 4) "(defun key-many (&key a b c d) (list a b c d)) (key-many :d 4 :b 2 :a 1 :c 3)")
+          ("four-defaults" '(1 20 3 4) "(defun key-many-def (&key (a 1) (b 2) (c 3) (d 4)) (list a b c d)) (key-many-def :b 20 :d 4)")
           ("with-required" 30 "(defun rk (a &key (b 0)) (+ a b)) (rk 10 :b 20)"))
   (expected form)
-  (assert-= expected (run-string form)))
+  (assert-equal expected (run-string form)))
 
 ;; lambda with extended params
 (deftest-each compile-lambda-params
@@ -2299,6 +2301,11 @@
   "write-to-string with keyword args ignores unknown keywords."
   (let ((r (run-string "(write-to-string 42 :base 10)")))
     (assert-equal "42" r)))
+
+(deftest compile-setf-get
+  "setf on GET updates a symbol property and returns the stored value."
+  (let ((r (run-string "(let ((sym 'hello)) (setf (get sym :answer) 42) (list (get sym :answer) (symbol-plist sym)))")))
+    (assert-equal '(42 (:answer 42)) r)))
 
 ;;; ─── FR-635: bit-nor / bit-nand / bit-eqv ────────────────────────────────────
 

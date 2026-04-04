@@ -291,6 +291,15 @@
                                     (wasm-fixnum-unbox reg-map (vm-lhs inst))
                                     (wasm-fixnum-unbox reg-map (vm-rhs inst))))))))
 
+(defmethod emit-instruction ((target wasm-target) (inst vm-rotate) stream)
+  (let ((reg-map (wasm-target-reg-map target)))
+    (format stream "~%    ~A"
+            (reg-local-set reg-map (vm-dst inst)
+                           (wasm-fixnum-box
+                            (format nil "(i64.rotr ~A ~A)"
+                                    (wasm-fixnum-unbox reg-map (vm-lhs inst))
+                                    (wasm-fixnum-unbox reg-map (vm-rhs inst))))))))
+
 (defmethod emit-instruction ((target wasm-target) (inst vm-label) stream)
   (format stream "~%    ;; label: ~A" (vm-name inst)))
 

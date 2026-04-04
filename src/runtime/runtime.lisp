@@ -466,6 +466,11 @@
 (defun rt-slot-exists-p (obj slot-name)
   (if (slot-exists-p obj slot-name) 1 0))
 
+(defun rt-class-name (class)
+  (if (hash-table-p class)
+      (gethash :__name__ class)
+      (class-name class)))
+
 (defun rt-class-of (obj) (class-of obj))
 (defun rt-find-class (name) (find-class name nil))
 (defun rt-register-method (gf specs method) (declare (ignore gf specs method)) nil)

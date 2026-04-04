@@ -126,6 +126,20 @@
     (assert-eq (cadr result) 'first-form)
     (assert-eq (caaddr result) 'let)))
 
+(deftest macroexpansion-memoization-reuses-cached-result
+  "Repeated macro expansion of the same form should hit the memoization cache."
+  (let ((count 0)
+        (name (gensym "CACHE-TEST-")))
+    (cl-cc::register-macro name
+                           (lambda (form env)
+                             (declare (ignore form env))
+                             (incf count)
+                             '(+ 1 2)))
+    (let ((form (list name 'x)))
+      (assert-equal '(+ 1 2) (our-macroexpand-all form nil))
+      (assert-equal '(+ 1 2) (our-macroexpand-all form nil))
+      (assert-= count 1))))
+
 (deftest-each dolist-expansion-is-block
   "DOLIST always expands to a (block ...) containing tagbody, regardless of arity."
   :cases (("basic"          '(dolist (item list) body))
@@ -184,6 +198,34 @@
     (assert-eq (car result) 'let)
     (assert-true (search "default-body" (string-downcase (format nil "~S" result))))))
 
+(deftest case-expands-sparse-integer-keys-into-binary-search
+  "CASE with sparse integer keys lowers to a binary-search-style decision tree."
+  (let ((result (our-macroexpand-1
+                 '(case key
+                    (1 body-1)
+                    (8 body-8)
+                    (16 body-16)
+                    (32 body-32)
+                    (otherwise default-body)))))
+    (let ((printed (string-downcase (format nil "~S" result))))
+      (assert-true (search "integerp" printed))
+      (assert-true (search "<" printed))
+      (assert-true (search "default-body" printed)))))
+
+(deftest case-expands-dense-integer-keys-into-table-dispatch
+  "CASE with dense integer keys lowers to a table dispatch."
+  (let ((result (our-macroexpand-1
+                 '(case key
+                    (1 body-1)
+                    (2 body-2)
+                    (3 body-3)
+                    (4 body-4)
+                    (otherwise default-body)))))
+    (let ((printed (string-downcase (format nil "~S" result))))
+      (assert-true (search "svref" printed))
+      (assert-true (search "vector" printed))
+      (assert-true (search "default-body" printed)))))
+
 (deftest-each typecase-expansion-is-let
   "TYPECASE expands to (let ...) with typep dispatch; body forms wrapped in progn."
   :cases (("basic"      '(typecase val (string body-string) (integer body-int)))
@@ -200,3 +242,14 @@
   (let ((result (our-macroexpand-1 form)))
     (assert-eq (car result) 'let)
     (assert-true (search "default-body" (string-downcase (format nil "~S" result))))))
+
+(deftest typecase-prunes-subsumed-later-clause
+  "TYPECASE drops later clauses already covered by an earlier supertype."
+  (let* ((result (our-macroexpand-1 '(typecase v
+                                      (number body-number)
+                                      (fixnum body-fixnum)
+                                      (otherwise default-body))))
+         (printed (string-downcase (format nil "~S" result))))
+    (assert-true (search "body-number" printed))
+    (assert-false (search "body-fixnum" printed))
+    (assert-true (search "default-body" printed))))

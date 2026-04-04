@@ -12,8 +12,8 @@
 ;;; ─── Classification Helpers ──────────────────────────────────────────────
 
 (defun opt-falsep (value)
-  "Compile-time analog of vm-falsep: T if VALUE is falsy (nil or 0)."
-  (or (null value) (eql value 0)))
+  "Compile-time analog of vm-falsep: T if VALUE is falsy (nil only)."
+  (null value))
 
 (defun opt-register-keyword-p (x)
   "T if X is a VM register keyword of the form :Rn (e.g. :R0, :R15).
@@ -60,6 +60,8 @@
     (setf (gethash 'vm-logxor ht) #'logxor)
     (setf (gethash 'vm-logeqv ht) #'logeqv)
     (setf (gethash 'vm-ash ht) #'ash)
+    (setf (gethash 'vm-rotate ht) #'rotate-right)
+    (setf (gethash 'vm-bswap ht) #'bswap)
     (setf (gethash 'vm-float-div ht) #'/)
     ht)
   "Maps binary VM instruction types to their CL fold functions.
@@ -91,7 +93,7 @@
     (setf (gethash 'vm-inc ht) #'1+)
     (setf (gethash 'vm-dec ht) #'1-)
     (setf (gethash 'vm-lognot ht) #'lognot)
-    (setf (gethash 'vm-not ht) (lambda (x) (if (or (null x) (eql x 0)) t nil)))
+    (setf (gethash 'vm-not ht) (lambda (x) (if (null x) t nil)))
     ht)
   "Maps unary VM instruction types to their CL fold functions.")
 
@@ -127,14 +129,14 @@
   '(vm-lt vm-gt vm-le vm-ge vm-num-eq vm-eq
     vm-mod vm-rem vm-min vm-max
     vm-truncate vm-floor-inst vm-ceiling-inst vm-round-inst
-    vm-logand vm-logior vm-logxor vm-logeqv vm-ash
+    vm-logand vm-logior vm-logxor vm-logeqv vm-ash vm-rotate
     vm-div vm-cl-div vm-ffloor vm-fceiling vm-ftruncate vm-fround)
   "Non-binop-subclass instruction types that have vm-lhs/vm-rhs accessors.
    vm-binop (parent of vm-add/vm-sub/vm-mul) is handled by typecase inheritance.
    Used by opt-inst-read-regs, opt-pass-fold, opt-pass-cse, and WASM register collection.")
 
 (defparameter *opt-unary-src-types*
-  '(vm-neg vm-abs vm-inc vm-dec vm-lognot vm-not
+  '(vm-neg vm-abs vm-inc vm-dec vm-lognot vm-bswap vm-not
     vm-cons-p vm-null-p vm-symbol-p vm-number-p
     vm-integer-p vm-function-p)
   "Instruction types that have vm-src/vm-dst unary accessors.
@@ -164,6 +166,11 @@
           (lambda (inst) (cons (vm-gf-reg inst) (vm-args inst))))
     ;; Multiple values
     (setf (gethash 'vm-values ht)       (lambda (inst) (vm-src-regs inst)))
+    ;; Variadic-ish concatenation packed by optimizer
+    (setf (gethash 'vm-concatenate ht)
+          (lambda (inst)
+            (remove nil (or (vm-parts inst)
+                            (list (vm-str1 inst) (vm-str2 inst))))))
     ;; Object operations
     (setf (gethash 'vm-closure-ref-idx ht) (lambda (inst) (list (vm-closure-reg inst))))
     (setf (gethash 'vm-slot-read ht)    (lambda (inst) (list (vm-obj-reg inst))))
@@ -271,8 +278,10 @@
                             (:same-reg . :move-lhs)))
       (reg 'vm-logxor    '(((:rconst 0) . :move-lhs) ((:lconst 0) . :move-rhs)
                             (:same-reg . (:const 0))))
-      (reg 'vm-ash       '(((:rconst 0) . :move-lhs) ((:lconst 0) . (:const 0)))))
-    ht)
+      (reg 'vm-rem       '(((:lconst 0) . (:const 0))))
+      (reg 'vm-ash       '(((:rconst 0) . :move-lhs) ((:lconst 0) . (:const 0))))
+      (reg 'vm-rotate    '(((:rconst 0) . :move-lhs) ((:lconst 0) . (:const 0))))
+    ht))
   "Maps VM binary instruction types to lists of algebraic identity rules.")
 
 ;;; ─── Classification Predicates ───────────────────────────────────────────

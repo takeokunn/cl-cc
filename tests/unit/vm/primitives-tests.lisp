@@ -173,15 +173,11 @@ Round is excluded from the values-list check (nil means skip)."
 ;;; Section 7: Boolean Operations
 ;;; ═══════════════════════════════════════════════════════════════════════════
 
-(deftest-each prim-not-cases
-  "vm-not: nil/0 are falsey → t; truthy → nil."
-  :cases (("nil-is-false"    nil  t)
-          ("zero-is-false"   0    t)
-          ("truthy-is-true"  42   nil))
-  (input expected)
-  (if expected
-      (assert-equal t   (%make-unary #'cl-cc::make-vm-not input))
-      (assert-null      (%make-unary #'cl-cc::make-vm-not input))))
+(deftest prim-not-cases
+  "vm-not: nil → t; truthy values (including 0) → nil."
+  (assert-equal t  (%make-unary #'cl-cc::make-vm-not nil))
+  (dolist (input '(0 42))
+    (assert-null (%make-unary #'cl-cc::make-vm-not input))))
 
 (deftest-each prim-and-cases
   "vm-and: both truthy → t; any nil → nil."

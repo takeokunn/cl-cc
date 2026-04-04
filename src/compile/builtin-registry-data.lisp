@@ -57,6 +57,7 @@
     (evenp            . make-vm-evenp)
     (oddp             . make-vm-oddp)
     ;; Bitwise
+    (bswap            . make-vm-bswap)
     (lognot           . make-vm-lognot)
     (logcount         . make-vm-logcount)
     (integer-length   . make-vm-integer-length)

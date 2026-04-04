@@ -109,3 +109,17 @@
   (let ((tgt (%make-aarch64-target)))
     (assert-signals error (%aarch64-emit tgt (make-vm-print :reg :r0)))
     (assert-equal "" (%aarch64-emit tgt (make-vm-ret :reg :r0)))))
+
+(deftest aarch64-emit-spill-operations
+  "vm-spill-store emits str [x29-N], reg; vm-spill-load emits ldr reg, [x29-N]."
+  (let ((tgt (%make-aarch64-target)))
+    (let ((asm (%aarch64-emit tgt (make-vm-spill-store :src-reg :x19 :slot 2))))
+      (assert-true (search "str" asm))
+      (assert-true (search "x29" asm))
+      (assert-true (search "16" asm))
+      (assert-true (search "x19" asm)))
+    (let ((asm (%aarch64-emit tgt (make-vm-spill-load :dst-reg :x20 :slot 3))))
+      (assert-true (search "ldr" asm))
+      (assert-true (search "x20" asm))
+      (assert-true (search "x29" asm))
+      (assert-true (search "24" asm)))))

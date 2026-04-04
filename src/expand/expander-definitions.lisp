@@ -63,7 +63,10 @@
 
 ;; defconstant — compile-time constants treated as defparameter
 (define-expander-for defconstant (form)
-  (compiler-macroexpand-all `(defparameter ,(second form) ,(third form))))
+  (let ((name (second form))
+        (value (third form)))
+    (setf (gethash name *constant-table*) value)
+    (compiler-macroexpand-all `(defparameter ,name ,value))))
 
 ;; setf — unified place dispatcher
 (define-expander-for setf (form)

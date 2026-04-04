@@ -3,6 +3,8 @@
 Safety-oriented types, development support, type-level programming, advanced type constructors, termination/totality, types and proofs, type system tooling, concurrency/distributed types, numeric/quantitative types, implementation techniques, dynamic language integration, advanced typeclasses, domain-specific types, types and semantics, type analysis for optimization.
 
 > 注: 本書は `type-core.md` の後続であり、コア型判断や codegen 連携の前提にはしない。ここにある要件は、前提条件が満たされた後に導入する拡張群として読むこと。
+> 本シリーズにおける FR 番号は型システム文書ローカルの参照名であり、他の設計文書に現れる同番号の FR とは無関係である。
+> Tier 表の `dep ref` は、この巻で定義していない前提 FR への参照を表す。この巻で本文定義を持つ FR には `dep ref` を付けない。
 
 ---
 ## 目次
@@ -509,7 +511,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ### Tier 1 — 近期実装 (実用価値 High / 依存少)
 
-> 注: 以下の Tier 表は計画上の依存関係を示す。FR-005/006/302/801 などの core FR は、advanced 側に移動したという意味ではなく、前提依存として参照している。
+> 注: 以下の Tier 表は計画上の依存関係を示す。FR-005/006/302/801 などの core FR は、advanced 側に移動したという意味ではなく、`type-core.md` または同シリーズの他章にある前提依存として参照している。
 
 | FR | 機能 | 難易度 | 実用価値 | 依存 |
 |---|---|---|---|---|
@@ -518,8 +520,8 @@ Safety-oriented types, development support, type-level programming, advanced typ
 | FR-302 (dep ref) | 出現型 / Flow-Sensitive Narrowing | Hard | High | FR-005 |
 | FR-105 (dep ref) | ファントム型 | Medium | Medium | — |
 | FR-1202 (dep ref) | ゼロコスト抽象 (Newtype) | Medium | Medium | — |
-| FR-1501 (dep ref) | Null 安全 / Optional 型 | Medium | High | — |
-| FR-1601 (dep ref) | 型付きホール | Medium | High | — |
+| FR-1501 | Null 安全 / Optional 型 | Medium | High | — |
+| FR-1601 | 型付きホール | Medium | High | — |
 | FR-1101 (dep ref) | 変性アノテーション | Hard | Medium | FR-003 |
 | FR-801 (dep ref) | subtypep 完全化 | Hard | High | — |
 
@@ -536,7 +538,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 | FR-1001 (dep ref) | 型クラス基盤 | Hard | High | FR-003 |
 | FR-1203 (dep ref) | 再帰型 / μ型 | Hard | Medium | FR-003 |
 | FR-1306 (dep ref) | 型ラムダ | Hard | Medium | FR-101 |
-| FR-1603 (dep ref) | エフェクト推論 | Hard | Medium | FR-401 |
+| FR-1603 | エフェクト推論 | Hard | Medium | FR-401 |
 
 ### Tier 3 — 長期実装 (研究的・基盤依存)
 
@@ -550,32 +552,32 @@ Safety-oriented types, development support, type-level programming, advanced typ
 | FR-103 (dep ref) | GADTs | Very Hard | Medium | FR-003 |
 | FR-1301 (dep ref) | カインド多相 | Very Hard | Medium | FR-101 |
 | FR-1404 (dep ref) | 集合論的型システム | Very Hard | Medium | FR-802 |
-| FR-1502 (dep ref) | 並行安全型 | Hard | High | FR-501 |
-| FR-1503 (dep ref) | 情報流型 | Very Hard | Medium | FR-003 |
+| FR-1502 | 並行安全型 | Hard | High | FR-501 |
+| FR-1503 | 情報流型 | Very Hard | Medium | FR-003 |
 
 ### Tier 2 追加 (新セクション由来)
 
 | FR | 機能 | 難易度 | 実用価値 | 依存 |
 |---|---|---|---|---|
-| FR-1903 (dep ref) | 網羅性検査 | Medium | High | — |
-| FR-2101 (dep ref) | 型指向テスト生成 | Medium | High | FR-1001 |
-| FR-2102 (dep ref) | 型安全シリアライゼーション | Medium | High | FR-1001 |
-| FR-1604 (dep ref) | 値制限 | Medium | High | FR-003 |
-| FR-1802 (dep ref) | 自由モナド | Hard | Medium | FR-1001 |
-| FR-2104 (dep ref) | 型融合 / デフォレスト化 | Hard | High | FR-1403 |
-| FR-2103 (dep ref) | 型安全 FFI | Hard | High | — |
+| FR-1903 | 網羅性検査 | Medium | High | — |
+| FR-2101 | 型指向テスト生成 | Medium | High | FR-1001 |
+| FR-2102 | 型安全シリアライゼーション | Medium | High | FR-1001 |
+| FR-1604 | 値制限 | Medium | High | FR-003 |
+| FR-1802 | 自由モナド | Hard | Medium | FR-1001 |
+| FR-2104 | 型融合 / デフォレスト化 | Hard | High | FR-1403 |
+| FR-2103 | 型安全 FFI | Hard | High | — |
 
 ### Tier 3 追加 (新セクション由来)
 
 | FR | 機能 | 難易度 | 実用価値 | 依存 |
 |---|---|---|---|---|
-| FR-1901 (dep ref) | 停止性検査 | Hard | Medium | FR-1203 |
-| FR-1904 (dep ref) | 正値性検査 | Hard | Medium | FR-103 |
-| FR-1703 (dep ref) | 多段階プログラミング | Very Hard | Medium | FR-003 |
-| FR-1801 (dep ref) | Lens / Optics | Very Hard | Medium | FR-101 |
-| FR-2005 (dep ref) | 正規化による評価 (NbE) | Very Hard | High | FR-303 |
-| FR-1704 (dep ref) | 型安全メタプログラミング | Very Hard | Medium | FR-1703 |
-| FR-1905 (dep ref) | サイズ型 | Very Hard | Medium | FR-1901 |
+| FR-1901 | 停止性検査 | Hard | Medium | FR-1203 |
+| FR-1904 | 正値性検査 | Hard | Medium | FR-103 |
+| FR-1703 | 多段階プログラミング | Very Hard | Medium | FR-003 |
+| FR-1801 | Lens / Optics | Very Hard | Medium | FR-101 |
+| FR-2005 | 正規化による評価 (NbE) | Very Hard | High | FR-303 |
+| FR-1704 | 型安全メタプログラミング | Very Hard | Medium | FR-1703 |
+| FR-1905 | サイズ型 | Very Hard | Medium | FR-1901 |
 
 ### Tier 4 — 研究フェーズ (Extremely Hard)
 
@@ -588,9 +590,9 @@ Safety-oriented types, development support, type-level programming, advanced typ
 | FR-1304 (dep ref) | 非述語的多相 | Extremely Hard | 型推論の決定不可能性と戦う |
 | FR-1205 (dep ref) | 商型 | Extremely Hard | 依存型 + cubical TT が必要 |
 | FR-1405 (dep ref) | 極性型理論 | Extremely Hard | フォーカシング証明の実装 |
-| FR-2002 (dep ref) | 証明付きコード | Extremely Hard | SMT + 証明チェッカーの統合 |
-| FR-2003 (dep ref) | タクティックベース型検査 | Extremely Hard | Lean 4 相当の証明エンジン |
-| FR-2004 (dep ref) | ホモトピー型理論 | Extremely Hard | Cubical Type Theory が必要 |
+| FR-2002 | 証明付きコード | Extremely Hard | SMT + 証明チェッカーの統合 |
+| FR-2003 | タクティックベース型検査 | Extremely Hard | Lean 4 相当の証明エンジン |
+| FR-2004 | ホモトピー型理論 | Extremely Hard | Cubical Type Theory が必要 |
 
 ---
 

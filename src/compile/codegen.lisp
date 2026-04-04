@@ -14,6 +14,357 @@
 
 ;;; ── Top-level compilation entry point ────────────────────────────────────
 
+(defun %ast-constant-number-value (node)
+  "Return NODE's integer value when NODE is a constant AST integer."
+  (typecase node
+    (ast-int (ast-int-value node))
+    (ast-quote (let ((value (ast-quote-value node)))
+                 (when (integerp value)
+                   value)))
+    (t nil)))
+
+(defun %same-ast-binop (node lhs rhs)
+  (make-ast-binop :op (ast-binop-op node)
+                  :lhs lhs
+                  :rhs rhs
+                  :source-file (ast-source-file node)
+                  :source-line (ast-source-line node)
+                  :source-column (ast-source-column node)))
+
+(defun %fold-ast-binop (node lhs rhs)
+  (let ((lv (%ast-constant-number-value lhs))
+        (rv (%ast-constant-number-value rhs)))
+    (if (and lv rv)
+        (let ((value (case (ast-binop-op node)
+                       (+ (+ lv rv))
+                       (- (- lv rv))
+                       (* (* lv rv))
+                       (/ (when (not (zerop rv))
+                            (let ((quot (/ lv rv)))
+                              (when (integerp quot) quot))))
+                       (otherwise nil))))
+          (if (integerp value)
+              (make-ast-int :value value
+                            :source-file (ast-source-file node)
+                            :source-line (ast-source-line node)
+                            :source-column (ast-source-column node))
+              (%same-ast-binop node lhs rhs)))
+        (%same-ast-binop node lhs rhs))))
+
+(defvar *compile-time-value-env* nil
+  "Alist of compile-time constant bindings available to optimize-ast.")
+
+(defvar *compile-time-function-env* nil
+  "Alist of compile-time known function definitions available to optimize-ast.")
+
+(defvar *compile-time-block-env* nil
+  "Alist of compile-time block tags available to optimize-ast.")
+
+(defvar *compile-time-eval-depth-limit* 64
+  "Maximum recursion depth for compile-time partial evaluation.")
+
+(defun %compile-time-falsep (value)
+  (opt-falsep value))
+
+(defun %ast-constant-node-p (node)
+  (or (typep node 'ast-int)
+      (typep node 'ast-quote)))
+
+(defun %ast->compile-time-value (node)
+  (typecase node
+    (ast-int (ast-int-value node))
+    (ast-quote (ast-quote-value node))
+    (t nil)))
+
+(defun %compile-time-value->ast (value node)
+  (cond
+    ((integerp value)
+     (make-ast-int :value value
+                   :source-file (ast-source-file node)
+                   :source-line (ast-source-line node)
+                   :source-column (ast-source-column node)))
+    (t
+     (make-ast-quote :value value
+                     :source-file (ast-source-file node)
+                     :source-line (ast-source-line node)
+                     :source-column (ast-source-column node)))))
+
+(defun %compile-time-lookup (name env)
+  (let ((entry (assoc name env)))
+    (when entry
+      (values (cdr entry) t))))
+
+(defun %compile-time-lookup-block (name env)
+  (let ((entry (assoc name env)))
+    (when entry
+      (values (cdr entry) t))))
+
+(defun %compile-time-eval-binop (op lhs rhs)
+  (case op
+    (+ (+ lhs rhs))
+    (- (- lhs rhs))
+    (* (* lhs rhs))
+    (/ (when (not (zerop rhs))
+         (let ((quot (/ lhs rhs)))
+           (when (integerp quot) quot))))
+    (1+ (when (and (integerp lhs) (null rhs)) (1+ lhs)))
+    (1- (when (and (integerp lhs) (null rhs)) (1- lhs)))
+    (otherwise nil)))
+
+(defun %compile-time-eval-call (func args depth)
+  (cond
+    ((and (typep func 'ast-var)
+           (= (length args) 1)
+           (string= (symbol-name (ast-var-name func)) "STRING-LENGTH")
+           (stringp (first args)))
+      (values (length (first args)) t))
+    ((and (typep func 'ast-var)
+          (let ((name (ast-var-name func)))
+            (member name '(+ - * / = < <= > >= not zerop plusp minusp oddp evenp
+                              numberp integerp consp null symbolp stringp functionp)
+                    :test #'eq)))
+      (let ((name (ast-var-name func)))
+        (case name
+          (+ (values (apply #'+ args) t))
+          (- (values (apply #'- args) t))
+          (* (values (apply #'* args) t))
+          (/ (let ((value (ignore-errors (apply #'/ args))))
+               (when value
+                 (values value t))))
+          (= (values (if (apply #'= args) t nil) t))
+          (< (values (if (apply #'< args) t nil) t))
+          (<= (values (if (apply #'<= args) t nil) t))
+          (> (values (if (apply #'> args) t nil) t))
+          (>= (values (if (apply #'>= args) t nil) t))
+          (not (values (not (first args)) t))
+          (zerop (values (zerop (first args)) t))
+          (plusp (values (plusp (first args)) t))
+          (minusp (values (minusp (first args)) t))
+          (oddp (values (oddp (first args)) t))
+          (evenp (values (evenp (first args)) t))
+          (numberp (values (numberp (first args)) t))
+          (integerp (values (integerp (first args)) t))
+          (consp (values (consp (first args)) t))
+          (null (values (null (first args)) t))
+          (symbolp (values (symbolp (first args)) t))
+          (stringp (values (stringp (first args)) t))
+          (functionp (values (functionp (first args)) t))
+          (otherwise nil))))
+    ((and (typep func 'ast-var)
+          (<= 0 depth)
+          (multiple-value-bind (entry found-p)
+              (%compile-time-lookup (ast-var-name func) *compile-time-function-env*)
+            (declare (ignore entry))
+            found-p))
+     (multiple-value-bind (defun-node found-p)
+         (%compile-time-lookup (ast-var-name func) *compile-time-function-env*)
+       (when (and found-p (typep defun-node 'ast-defun)
+                  (null (ast-defun-optional-params defun-node))
+                  (null (ast-defun-rest-param defun-node))
+                  (null (ast-defun-key-params defun-node)))
+         (let ((param-bindings (mapcar #'cons (ast-defun-params defun-node) args)))
+           (%evaluate-ast-sequence (ast-defun-body defun-node)
+                                   param-bindings
+                                   *compile-time-function-env*
+                                   (1- depth))))))
+    ((typep func 'ast-lambda)
+     (let ((param-bindings (mapcar #'cons (ast-lambda-params func) args)))
+       (%evaluate-ast-sequence (ast-lambda-body func)
+                               param-bindings
+                               *compile-time-function-env*
+                               (1- depth))))
+    (t nil)))
+
+(defun %evaluate-ast-sequence (forms value-env function-env depth)
+  (let ((*compile-time-value-env* value-env)
+        (*compile-time-function-env* function-env))
+    (loop with result = nil
+          for form in forms
+          do (multiple-value-bind (value ok)
+                 (%evaluate-ast form depth)
+               (unless ok
+                 (return-from %evaluate-ast-sequence (values nil nil)))
+               (setf result value))
+          finally (return (values result t)))))
+
+(defun %evaluate-ast (node depth)
+  (when (minusp depth)
+    (return-from %evaluate-ast (values nil nil)))
+  (typecase node
+    (ast-int (values (ast-int-value node) t))
+    (ast-quote (values (ast-quote-value node) t))
+    (ast-var
+     (multiple-value-bind (value found-p)
+         (%compile-time-lookup (ast-var-name node) *compile-time-value-env*)
+       (if found-p
+           (values value t)
+           (values nil nil))))
+    (ast-binop
+     (multiple-value-bind (lhs lhs-ok) (%evaluate-ast (ast-binop-lhs node) (1- depth))
+       (multiple-value-bind (rhs rhs-ok) (%evaluate-ast (ast-binop-rhs node) (1- depth))
+         (if (and lhs-ok rhs-ok)
+             (let ((value (%compile-time-eval-binop (ast-binop-op node) lhs rhs)))
+               (if (and value (integerp value))
+                   (values value t)
+                   (values nil nil)))
+             (values nil nil)))))
+    (ast-if
+     (multiple-value-bind (cond cond-ok) (%evaluate-ast (ast-if-cond node) (1- depth))
+       (if cond-ok
+           (%evaluate-ast (if (%compile-time-falsep cond)
+                              (ast-if-else node)
+                              (ast-if-then node))
+                          (1- depth))
+           (values nil nil))))
+    (ast-progn
+     (%evaluate-ast-sequence (ast-progn-forms node)
+                              *compile-time-value-env*
+                              *compile-time-function-env*
+                              (1- depth)))
+    (ast-block
+     (let ((tag (gensym "BLOCK-")))
+       (let ((*compile-time-block-env* (acons (ast-block-name node)
+                                              tag
+                                              *compile-time-block-env*)))
+         (catch tag
+           (%evaluate-ast-sequence (ast-block-body node)
+                                   *compile-time-value-env*
+                                   *compile-time-function-env*
+                                   (1- depth))))))
+    (ast-return-from
+     (multiple-value-bind (tag found-p)
+         (%compile-time-lookup-block (ast-return-from-name node) *compile-time-block-env*)
+       (if found-p
+           (multiple-value-bind (value ok)
+               (%evaluate-ast (ast-return-from-value node) (1- depth))
+             (if ok
+                 (throw tag value)
+                 (values nil nil)))
+           (values nil nil))))
+    (ast-let
+     (let ((bindings nil))
+       (dolist (binding (ast-let-bindings node))
+         (multiple-value-bind (value ok)
+             (%evaluate-ast (cdr binding) (1- depth))
+           (unless ok (return-from %evaluate-ast (values nil nil)))
+           (push (cons (car binding) value) bindings)))
+       (%evaluate-ast-sequence (ast-let-body node)
+                               (append (nreverse bindings) *compile-time-value-env*)
+                               *compile-time-function-env*
+                               (1- depth))))
+    (ast-the
+     (%evaluate-ast (ast-the-value node) (1- depth)))
+    (ast-call
+     (let ((func (ast-call-func node)))
+       (multiple-value-bind (args ok)
+           (loop for arg in (ast-call-args node)
+                 collect (multiple-value-list (%evaluate-ast arg (1- depth))) into results
+                 finally (return (values (mapcar #'first results)
+                                         (every #'second results))))
+         (if ok
+             (%compile-time-eval-call func args depth)
+             (values nil nil)))))
+    (t (values nil nil))))
+
+(defun optimize-ast (node)
+  "Fold small pure constant expressions before VM lowering."
+  (typecase node
+    (ast-binop
+     (%fold-ast-binop node
+                      (optimize-ast (ast-binop-lhs node))
+                      (optimize-ast (ast-binop-rhs node))))
+    (ast-call
+      (let* ((func (optimize-ast (ast-call-func node)))
+             (args (mapcar #'optimize-ast (ast-call-args node)))
+             (call-node (make-ast-call :func func
+                                       :args args
+                                       :source-file (ast-source-file node)
+                                       :source-line (ast-source-line node)
+                                       :source-column (ast-source-column node))))
+        (multiple-value-bind (value ok)
+            (let ((*compile-time-value-env* *compile-time-value-env*)
+                  (*compile-time-function-env* *compile-time-function-env*))
+              (%evaluate-ast call-node *compile-time-eval-depth-limit*))
+          (if ok
+              (%compile-time-value->ast value node)
+              call-node))))
+    (ast-progn
+     (make-ast-progn :forms (mapcar #'optimize-ast (ast-progn-forms node))
+                     :source-file (ast-source-file node)
+                     :source-line (ast-source-line node)
+                     :source-column (ast-source-column node)))
+    (ast-let
+     (make-ast-let :bindings (mapcar (lambda (binding)
+                                       (cons (car binding)
+                                             (optimize-ast (cdr binding))))
+                                     (ast-let-bindings node))
+                   :declarations (ast-let-declarations node)
+                   :body (mapcar #'optimize-ast (ast-let-body node))
+                   :source-file (ast-source-file node)
+                   :source-line (ast-source-line node)
+                   :source-column (ast-source-column node)))
+    (ast-if
+     (make-ast-if :cond (optimize-ast (ast-if-cond node))
+                  :then (optimize-ast (ast-if-then node))
+                  :else (optimize-ast (ast-if-else node))
+                  :source-file (ast-source-file node)
+                  :source-line (ast-source-line node)
+                  :source-column (ast-source-column node)))
+    (ast-lambda
+     (make-ast-lambda :params (ast-lambda-params node)
+                      :optional-params (ast-lambda-optional-params node)
+                      :rest-param (ast-lambda-rest-param node)
+                      :key-params (ast-lambda-key-params node)
+                      :declarations (ast-lambda-declarations node)
+                      :body (mapcar #'optimize-ast (ast-lambda-body node))
+                      :env (ast-lambda-env node)
+                      :source-file (ast-source-file node)
+                      :source-line (ast-source-line node)
+                      :source-column (ast-source-column node)))
+    (ast-defun
+     (make-ast-defun :name (ast-defun-name node)
+                     :params (ast-defun-params node)
+                     :optional-params (ast-defun-optional-params node)
+                     :rest-param (ast-defun-rest-param node)
+                     :key-params (ast-defun-key-params node)
+                     :declarations (ast-defun-declarations node)
+                     :body (mapcar #'optimize-ast (ast-defun-body node))
+                     :source-file (ast-source-file node)
+                     :source-line (ast-source-line node)
+                     :source-column (ast-source-column node)))
+    (ast-defvar
+     (make-ast-defvar :name (ast-defvar-name node)
+                      :value (optimize-ast (ast-defvar-value node))
+                      :kind (ast-defvar-kind node)
+                      :source-file (ast-source-file node)
+                      :source-line (ast-source-line node)
+                      :source-column (ast-source-column node)))
+    (ast-block
+     (make-ast-block :name (ast-block-name node)
+                     :body (mapcar #'optimize-ast (ast-block-body node))
+                     :source-file (ast-source-file node)
+                     :source-line (ast-source-line node)
+                     :source-column (ast-source-column node)))
+    (ast-return-from
+     (make-ast-return-from :name (ast-return-from-name node)
+                           :value (optimize-ast (ast-return-from-value node))
+                           :source-file (ast-source-file node)
+                           :source-line (ast-source-line node)
+                           :source-column (ast-source-column node)))
+    (ast-setq
+     (make-ast-setq :var (ast-setq-var node)
+                    :value (optimize-ast (ast-setq-value node))
+                    :source-file (ast-source-file node)
+                    :source-line (ast-source-line node)
+                    :source-column (ast-source-column node)))
+    (ast-the
+     (make-ast-the :type (ast-the-type node)
+                   :value (optimize-ast (ast-the-value node))
+                   :source-file (ast-source-file node)
+                   :source-line (ast-source-line node)
+                   :source-column (ast-source-column node)))
+    (t node)))
+
 (defstruct compilation-result
   "Result of compiling expressions or top-level forms."
   (program nil)
@@ -21,71 +372,96 @@
   (globals nil)
   (type nil)
   (type-env nil)
-  (cps nil))
+  (cps nil)
+  (ast nil)
+  (vm-instructions nil)
+  (optimized-instructions nil))
 
 (defun compile-toplevel-forms (forms &key (target :x86_64) type-check (safety 1))
   "Compile a list of top-level forms (e.g., from a source file).
 Handles defun, defvar, and expression forms.
-Returns a compilation-result struct with program, assembly, and globals."
+  Returns a compilation-result struct with program, assembly, and globals."
   (let* ((ctx (make-instance 'compiler-context :safety safety))
-         (last-reg nil)
-         (last-type nil)
-         (last-cps nil)
-         (type-env (cl-cc/type:type-env-empty)))
-    (labels ((best-effort-type (ast env)
-               (ignore-errors (type-check-ast ast env))))
-      (dolist (form forms)
-        (let* ((expanded (if (typep form 'ast-node)
-                             form
-                             (compiler-macroexpand-all form)))
-               (ast (if (typep expanded 'ast-node)
-                        expanded
-                        (lower-sexp-to-ast expanded))))
-          (setf last-cps (maybe-cps-transform ast))
-          (when type-check
-            (setf last-type
-                  (handler-case
-                      (type-check-ast ast type-env)
-                    (error (e)
-                      (if (eq type-check :strict)
-                          (error e)
-                          (progn
-                            (warn "Type check warning: ~A" e)
-                            nil))))))
-          (when (and (typep ast 'cl-cc:ast-defvar)
-                     (cl-cc:ast-defvar-value ast))
-            (let ((value-type (best-effort-type (cl-cc:ast-defvar-value ast) type-env)))
-              (when value-type
-                (setf type-env
-                      (cl-cc/type:type-env-extend
-                       (cl-cc:ast-defvar-name ast)
-                       (cl-cc/type:type-to-scheme value-type)
-                       type-env)))))
-          (when (typep ast 'cl-cc:ast-defun)
-            (let ((fn-type (best-effort-type ast type-env)))
-              (when fn-type
-                (setf type-env
-                      (cl-cc/type:type-env-extend
-                       (cl-cc:ast-defun-name ast)
-                       (cl-cc/type:type-to-scheme fn-type)
-                       type-env)))))
-          (setf last-reg (compile-ast ast ctx)))))
+          (last-reg nil)
+          (last-type nil)
+          (last-cps nil)
+          (compiled-asts nil)
+          (type-env (cl-cc/type:type-env-empty)))
+     (labels ((best-effort-type (ast env)
+                (ignore-errors (type-check-ast ast env))))
+       (let ((*compile-time-value-env* nil)
+             (*compile-time-function-env* nil))
+         (dolist (form forms)
+           (unless (and (consp form) (eq (car form) 'in-package))
+             (let* ((expanded (if (typep form 'ast-node)
+                                  form
+                                  (compiler-macroexpand-all form)))
+                    (ast (if (typep expanded 'ast-node)
+                             expanded
+                             (lower-sexp-to-ast expanded))))
+               (when (typep ast 'ast-defun)
+                 (push (cons (ast-defun-name ast) ast) *compile-time-function-env*))
+               (setf ast (optimize-ast ast))
+               (push ast compiled-asts)
+               (setf last-cps (maybe-cps-transform ast))
+               (when type-check
+                 (setf last-type
+                       (handler-case
+                          (type-check-ast ast type-env)
+                        (error (e)
+                          (if (eq type-check :strict)
+                              (error e)
+                              (progn
+                                (warn "Type check warning: ~A" e)
+                                nil))))))
+               (when (and (typep ast 'cl-cc:ast-defvar)
+                          (cl-cc:ast-defvar-value ast))
+                 (let ((value-type (best-effort-type (cl-cc:ast-defvar-value ast) type-env)))
+                   (when value-type
+                     (setf type-env
+                          (cl-cc/type:type-env-extend
+                           (cl-cc:ast-defvar-name ast)
+                           (cl-cc/type:type-to-scheme value-type)
+                           type-env)))))
+              (when (typep ast 'cl-cc:ast-defun)
+                (let ((fn-type (best-effort-type ast type-env)))
+                  (when fn-type
+                    (setf type-env
+                          (cl-cc/type:type-env-extend
+                           (cl-cc:ast-defun-name ast)
+                            (cl-cc/type:type-to-scheme fn-type)
+                            type-env)))))
+               (when (and (typep ast 'ast-defvar)
+                          (ast-defvar-value ast))
+                 (multiple-value-bind (value ok)
+                     (%evaluate-ast (ast-defvar-value ast) *compile-time-eval-depth-limit*)
+                   (when ok
+                     (push (cons (ast-defvar-name ast) value) *compile-time-value-env*))))
+               (setf last-reg (compile-ast ast ctx))))))
     (setf (ctx-type-env ctx) type-env)
     (when last-reg
       (emit ctx (make-vm-halt :reg last-reg)))
     (when *repl-capture-label-counter*
       (setf *repl-capture-label-counter* (ctx-next-label ctx)))
-    (let* ((instructions (nreverse (ctx-instructions ctx)))
-           (optimized (optimize-instructions instructions))
-           (program (make-vm-program
-                     :instructions optimized
-                     :result-register last-reg)))
-      (make-compilation-result :program program
-                               :assembly (emit-assembly program :target target)
-                               :globals (ctx-global-functions ctx)
-                               :type last-type
-                               :type-env (ctx-type-env ctx)
-                               :cps last-cps))))
+     (let* ((instructions (nreverse (ctx-instructions ctx)))
+             (optimized nil)
+             (leaf-p nil)
+             (program nil))
+        (multiple-value-setq (optimized leaf-p)
+          (optimize-instructions instructions))
+        (setf program (make-vm-program
+                       :instructions instructions
+                       :result-register last-reg
+                       :leaf-p leaf-p))
+        (make-compilation-result :program program
+                                 :assembly (emit-assembly program :target target)
+                                 :globals (ctx-global-functions ctx)
+                                 :type last-type
+                                 :type-env (ctx-type-env ctx)
+                                  :cps last-cps
+                                  :ast (nreverse compiled-asts)
+                                  :vm-instructions instructions
+                                  :optimized-instructions optimized)))))
 
 ;;; ── Function call compilation ────────────────────────────────────────────
 ;;; Phase 2 (*phase2-builtin-handlers*) is defined in codegen-phase2.lisp.
@@ -111,6 +487,62 @@ Returns a compilation-result struct with program, assembly, and globals."
                          (t nil)))
          (args (ast-call-args node))
          (result-reg (make-register ctx)))
+    (when (typep func-expr 'ast-var)
+      (let ((entry (assoc (ast-var-name func-expr) (ctx-noescape-closure-bindings ctx))))
+        (when entry
+          (return-from compile-ast
+            (%compile-inline-lambda-call (cdr entry) args tail ctx)))))
+    (when (and func-sym
+               (= (length args) 1)
+               (typep (first args) 'ast-var)
+               (member func-sym '(car cdr) :test #'eq))
+      (let* ((arg-name (ast-var-name (first args)))
+             (entry (assoc arg-name (ctx-noescape-cons-bindings ctx))))
+        (when entry
+          (emit ctx (make-vm-move :dst result-reg
+                                  :src (if (eq func-sym 'car)
+                                           (cadr entry)
+                                           (cddr entry))))
+          (return-from compile-ast result-reg))))
+    (when func-sym
+      (cond
+        ((and func-sym
+              (string= (symbol-name func-sym) "ARRAY-LENGTH")
+              (= (length args) 1)
+              (typep (first args) 'ast-var))
+         (let* ((arg-name (ast-var-name (first args)))
+                (entry (assoc arg-name (ctx-noescape-array-bindings ctx))))
+           (when entry
+             (emit ctx (make-vm-const :dst result-reg :value (cadr entry)))
+             (return-from compile-ast result-reg))))
+        ((and (eq func-sym 'aref)
+              (= (length args) 2)
+              (typep (first args) 'ast-var))
+         (let* ((arg-name (ast-var-name (first args)))
+                (entry (assoc arg-name (ctx-noescape-array-bindings ctx))))
+           (when entry
+             (if (typep (second args) 'ast-int)
+                 (let ((index (ast-int-value (second args))))
+                   (when (and (<= 0 index) (< index (cadr entry)))
+                     (emit ctx (make-vm-move :dst result-reg
+                                             :src (nth index (cddr entry))))))
+                 (%emit-noescape-array-read entry (second args) result-reg ctx))
+             (return-from compile-ast result-reg))))
+        ((and func-sym
+              (string= (symbol-name func-sym) "ASET")
+              (= (length args) 3)
+              (typep (first args) 'ast-var))
+         (let* ((arg-name (ast-var-name (first args)))
+                (entry (assoc arg-name (ctx-noescape-array-bindings ctx))))
+           (when entry
+             (if (typep (second args) 'ast-int)
+                 (let ((index (ast-int-value (second args))))
+                   (when (and (<= 0 index) (< index (cadr entry)))
+                     (let ((val-reg (compile-ast (third args) ctx)))
+                       (setf (nth index (cddr entry)) val-reg)
+                       (emit ctx (make-vm-move :dst result-reg :src val-reg)))))
+                 (%emit-noescape-array-write entry (second args) (third args) result-reg ctx))
+             (return-from compile-ast result-reg)))))
     ;; ── Phase 1: Table-driven builtin dispatch ──────────────────────────
     ;; ~160 calling conventions via a single hash-table lookup + generic emitter.
     (when func-sym
@@ -135,17 +567,38 @@ Returns a compilation-result struct with program, assembly, and globals."
                    (t (compile-ast func-expr ctx))))
            ;; Unbox labels functions: extract closure from cons cell box
            (func-reg (if (and func-sym (assoc func-sym *labels-boxed-fns*))
-                         (let ((unboxed (make-register ctx)))
-                           (emit ctx (make-vm-car :dst unboxed :src raw-func-reg))
-                           unboxed)
-                         raw-func-reg))
+                          (let ((unboxed (make-register ctx)))
+                            (emit ctx (make-vm-car :dst unboxed :src raw-func-reg))
+                            unboxed)
+                          raw-func-reg))
            (arg-regs (mapcar (lambda (arg) (compile-ast arg ctx)) args)))
-      (if (and func-sym (gethash func-sym (ctx-global-generics ctx)))
-          (emit ctx (make-vm-generic-call :dst result-reg :gf-reg func-reg :args arg-regs))
-          (if tail
-              (emit ctx (make-vm-tail-call :dst result-reg :func func-reg :args arg-regs))
-              (emit ctx (make-vm-call :dst result-reg :func func-reg :args arg-regs))))
-      result-reg)))
+        (cond
+          ;; Simple self-recursive tail calls lower to a loop: update the
+          ;; current function parameter registers and jump back to the entry
+          ;; label instead of emitting vm-tail-call.
+          ((and tail
+                (ctx-current-function-simple-p ctx)
+                (symbolp func-expr)
+                func-sym
+                (eq func-sym (ctx-current-function-name ctx))
+                (= (length args) (length (ctx-current-function-params ctx))))
+            (setf arg-regs
+                  (mapcar (lambda (arg-reg)
+                            (let ((temp-reg (make-register ctx)))
+                              (emit ctx (make-vm-move :dst temp-reg :src arg-reg))
+                              temp-reg))
+                          arg-regs))
+            (dolist (param (ctx-current-function-params ctx))
+              (let ((arg-reg (pop arg-regs)))
+                (emit ctx (make-vm-move :dst (lookup-var ctx param) :src arg-reg))))
+            (emit ctx (make-vm-jump :label (ctx-current-function-label ctx))))
+         ((and func-sym (gethash func-sym (ctx-global-generics ctx)))
+          (emit ctx (make-vm-generic-call :dst result-reg :gf-reg func-reg :args arg-regs)))
+         (tail
+          (emit ctx (make-vm-tail-call :dst result-reg :func func-reg :args arg-regs)))
+         (t
+          (emit ctx (make-vm-call :dst result-reg :func func-reg :args arg-regs))))
+        result-reg))))
 
 ;;; ── Function references and local function bindings ──────────────────────
 
@@ -157,6 +610,69 @@ Returns a compilation-result struct with program, assembly, and globals."
             (if (eq form (car (last body))) tail nil))
       (setf last-reg (compile-ast form ctx)))
     last-reg))
+
+(defun %compile-inline-lambda-call (lambda-node arg-asts tail ctx)
+  "Compile a direct call to a non-escaping lambda without emitting vm-closure."
+  (let ((old-env (ctx-env ctx))
+        (old-tail (ctx-tail-position ctx)))
+    (unwind-protect
+         (let ((arg-bindings (loop for param in (ast-lambda-params lambda-node)
+                                   for arg-ast in arg-asts
+                                   collect (cons param (compile-ast arg-ast ctx)))))
+           (setf (ctx-env ctx) (append arg-bindings old-env))
+            (%compile-body-with-tail (ast-lambda-body lambda-node) tail ctx))
+      (setf (ctx-env ctx) old-env)
+      (setf (ctx-tail-position ctx) old-tail))))
+
+(defun %emit-noescape-array-read (entry index-ast result-reg ctx)
+  (let* ((size (cadr entry))
+         (elements (cddr entry))
+         (index-reg (compile-ast index-ast ctx))
+         (end-label (make-label ctx "noescape_array_read_end"))
+         (error-label (make-label ctx "noescape_array_read_error"))
+         (err-reg (make-register ctx)))
+    (dotimes (i size)
+      (let ((idx-const (make-register ctx))
+            (eq-reg (make-register ctx))
+            (next-label (make-label ctx "noescape_array_read_next")))
+        (emit ctx (make-vm-const :dst idx-const :value i))
+        (emit ctx (make-vm-num-eq :dst eq-reg :lhs index-reg :rhs idx-const))
+        (emit ctx (make-vm-jump-zero :reg eq-reg :label next-label))
+        (emit ctx (make-vm-move :dst result-reg :src (nth i elements)))
+        (emit ctx (make-vm-jump :label end-label))
+        (emit ctx (make-vm-label :name next-label))))
+    (emit ctx (make-vm-jump :label error-label))
+    (emit ctx (make-vm-label :name error-label))
+    (emit ctx (make-vm-const :dst err-reg :value "no-escape array index out of bounds"))
+    (emit ctx (make-vm-signal-error :error-reg err-reg))
+    (emit ctx (make-vm-label :name end-label))
+    result-reg))
+
+(defun %emit-noescape-array-write (entry index-ast value-ast result-reg ctx)
+  (let* ((size (cadr entry))
+         (elements (cddr entry))
+         (index-reg (compile-ast index-ast ctx))
+         (val-reg (compile-ast value-ast ctx))
+         (end-label (make-label ctx "noescape_array_write_end"))
+         (error-label (make-label ctx "noescape_array_write_error"))
+         (err-reg (make-register ctx)))
+    (dotimes (i size)
+      (let ((idx-const (make-register ctx))
+            (eq-reg (make-register ctx))
+            (next-label (make-label ctx "noescape_array_write_next")))
+        (emit ctx (make-vm-const :dst idx-const :value i))
+        (emit ctx (make-vm-num-eq :dst eq-reg :lhs index-reg :rhs idx-const))
+        (emit ctx (make-vm-jump-zero :reg eq-reg :label next-label))
+        (setf (nth i elements) val-reg)
+        (emit ctx (make-vm-move :dst result-reg :src val-reg))
+        (emit ctx (make-vm-jump :label end-label))
+        (emit ctx (make-vm-label :name next-label))))
+    (emit ctx (make-vm-jump :label error-label))
+    (emit ctx (make-vm-label :name error-label))
+    (emit ctx (make-vm-const :dst err-reg :value "no-escape array index out of bounds"))
+    (emit ctx (make-vm-signal-error :error-reg err-reg))
+    (emit ctx (make-vm-label :name end-label))
+    result-reg))
 
 (defun %compile-closure-body (ctx params param-regs body-forms env)
   "Emit the body of a local function (flet/labels closure).
@@ -309,7 +825,8 @@ Returns a compilation-result struct with program, assembly, and globals."
         (setf (target-regalloc target-object) ra)
         (setf program (make-vm-program
                        :instructions (regalloc-instructions ra)
-                       :result-register (vm-program-result-register program)))))
+                       :result-register (vm-program-result-register program)
+                       :leaf-p (vm-program-leaf-p program)))))
     (with-output-to-string (s)
       (format s "; CL-CC bootstrap assembly (~A)~%" target)
       (format s "clcc_entry:~%")

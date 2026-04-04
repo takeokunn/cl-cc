@@ -61,3 +61,12 @@
   (let ((result (cl-cc::compiler-macroexpand-all '(setf (getf my-plist :foo) 42))))
     (assert-eq 'let (car result))
     (assert-true (search "RT-PLIST-PUT" (format nil "~S" result)))))
+
+(deftest expander-setf-get-place
+  "(setf (get sym indicator) v) expands via symbol-plist update and returns the value."
+  (let ((result (cl-cc::compiler-macroexpand-all '(setf (get my-sym :foo) 42))))
+    (assert-eq 'let* (car result))
+    (let ((str (format nil "~S" result)))
+      (assert-true (search "%SET-SYMBOL-PLIST" str))
+      (assert-true (search "SYMBOL-PLIST" str))
+      (assert-true (search "RT-PLIST-PUT" str)))))

@@ -34,10 +34,72 @@
   "Compiling defun registers the function name in global-functions."
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (cl-cc::make-ast-defun :name 'my-fn
-                                  :params '(x)
-                                  :body (list (make-ast-var :name 'x)))
+                                   :params '(x)
+                                   :body (list (make-ast-var :name 'x)))
                  ctx)
     (assert-true (gethash 'my-fn (cl-cc::ctx-global-functions ctx)))))
+
+(deftest codegen-defun-self-tail-call-loops
+  "A simple self-tail call in defun compiles to a jump back to the entry label."
+  (let ((ctx (make-codegen-ctx)))
+    (compile-ast
+     (cl-cc::make-ast-defun
+      :name 'loop-fn
+      :params '(x)
+      :body (list (make-ast-if
+                   :cond (make-ast-binop :op '=
+                                         :lhs (make-ast-var :name 'x)
+                                         :rhs (make-ast-int :value 0))
+                   :then (make-ast-var :name 'x)
+                   :else (make-ast-call
+                          :func 'loop-fn
+                          :args (list (make-ast-binop :op '-
+                                                      :lhs (make-ast-var :name 'x)
+                                                      :rhs (make-ast-int :value 1)))))))
+     ctx)
+    (let ((tail-call (codegen-find-inst ctx 'cl-cc::vm-tail-call))
+          (loop-label (format nil "DEFUN_~A_0" 'loop-fn))
+          (self-jump nil))
+      (dolist (inst (codegen-instructions ctx))
+        (when (and (typep inst 'cl-cc::vm-jump)
+                   (string= (cl-cc::vm-label-name inst) loop-label))
+          (setf self-jump inst)))
+       (assert-eq nil tail-call)
+       (assert-true self-jump))))
+
+(deftest codegen-defun-self-tail-call-loop-snapshots-args
+  "Self-tail loop lowering snapshots argument registers before rewriting params."
+  (let ((ctx (make-codegen-ctx)))
+    (compile-ast
+     (cl-cc::make-ast-defun
+      :name 'swap-loop
+      :params '(x y)
+      :body (list (make-ast-if
+                   :cond (make-ast-binop :op '=
+                                         :lhs (make-ast-var :name 'x)
+                                         :rhs (make-ast-int :value 0))
+                   :then (make-ast-var :name 'y)
+                   :else (make-ast-call
+                          :func 'swap-loop
+                          :args (list (make-ast-var :name 'y)
+                                      (make-ast-binop :op '-
+                                                      :lhs (make-ast-var :name 'x)
+                                                      :rhs (make-ast-int :value 1)))))))
+     ctx)
+    (let ((tail-call (codegen-find-inst ctx 'cl-cc::vm-tail-call))
+          (loop-label (format nil "DEFUN_~A_0" 'swap-loop))
+          (self-jump nil)
+          (move-count 0))
+      (dolist (inst (codegen-instructions ctx))
+        (when (typep inst 'cl-cc::vm-move)
+          (incf move-count))
+        (when (and (typep inst 'cl-cc::vm-jump)
+                   (string= (cl-cc::vm-label-name inst) loop-label))
+          (setf self-jump inst)))
+      (assert-eq nil tail-call)
+      (assert-true self-jump)
+      ;; Two snapshot moves + two parameter rewrite moves.
+      (assert-true (>= move-count 4)))))
 
 (deftest codegen-defvar-compilation
   "Compiling defvar registers in global-variables and emits vm-const for the value."
@@ -48,14 +110,25 @@
     (assert-true (gethash 'test-codegen-var (cl-cc::ctx-global-variables ctx)))
     (assert-true (codegen-find-inst ctx 'cl-cc::vm-const))))
 
+(deftest codegen-defconstant-inlines-symbol-reference
+  "Compiling a symbol bound by defconstant emits vm-const with the constant value."
+  (cl-cc::compiler-macroexpand-all '(defconstant codegen-inline-constant 123))
+  (let ((ctx (make-codegen-ctx)))
+    (compile-ast (make-ast-var :name 'codegen-inline-constant) ctx)
+    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-const)))
+      (assert-true inst)
+      (assert-equal 123 (cl-cc::vm-const-value inst)))
+    (assert-eq nil (codegen-find-inst ctx 'cl-cc::vm-get-global))))
+
 (deftest codegen-apply-compilation
-  "Compiling ast-apply emits vm-apply and returns a register."
+  "Compiling ast-apply with a constant spread list emits vm-call and returns a register."
   (let* ((ctx (make-codegen-ctx))
          (reg (compile-ast (cl-cc::make-ast-apply
-                              :func (make-ast-function :name '+)
-                              :args (list (make-ast-quote :value '(1 2 3))))
-                            ctx)))
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-apply))
+                               :func (make-ast-function :name '+)
+                               :args (list (make-ast-quote :value '(1 2 3))))
+                             ctx)))
+    (assert-true (codegen-find-inst ctx 'cl-cc::vm-call))
+    (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-apply)))
     (assert-true (keywordp reg))))
 
 (deftest-each codegen-apply-run
@@ -72,6 +145,37 @@
                                              :body (list (make-ast-int :value 1)))
                            ctx)))
     (assert-true (keywordp reg))))
+
+(deftest codegen-let-noescape-lambda-call-bypasses-vm-closure
+  "A non-escaping let-bound lambda used only at direct call sites avoids vm-closure."
+  (let ((ctx (make-codegen-ctx)))
+    (let ((reg (compile-ast
+                (make-ast-let
+                 :bindings (list (cons 'f (make-ast-lambda
+                                           :params '(x)
+                                           :body (list (make-ast-var :name 'x)))))
+                 :body (list (make-ast-call :func (make-ast-var :name 'f)
+                                            :args (list (make-ast-int :value 7)))))
+                ctx)))
+      (assert-true (keywordp reg))
+      (assert-null (codegen-find-inst ctx 'cl-cc::vm-closure))
+      (assert-null (codegen-find-inst ctx 'cl-cc::vm-call)))))
+
+(deftest codegen-let-escaped-lambda-call-falls-back-to-vm-closure
+  "Captured let-bound lambdas keep the normal vm-closure + vm-call path."
+  (let ((ctx (make-codegen-ctx)))
+    (let ((reg (compile-ast
+                (make-ast-let
+                 :bindings (list (cons 'f (make-ast-lambda
+                                           :params '(x)
+                                           :body (list (make-ast-var :name 'x)))))
+                 :body (list (make-ast-lambda :params '() :body (list (make-ast-var :name 'f)))
+                             (make-ast-call :func (make-ast-var :name 'f)
+                                            :args (list (make-ast-int :value 9)))))
+                ctx)))
+      (assert-true (keywordp reg))
+      (assert-true (codegen-find-inst ctx 'cl-cc::vm-closure))
+      (assert-true (codegen-find-inst ctx 'cl-cc::vm-call)))))
 
 (deftest codegen-call-known-function
   "Compiling a call to a known function emits instructions."
@@ -138,3 +242,56 @@
                                   (list (make-ast-int :value 1)) base-env)
     (assert-true (codegen-find-inst ctx 'cl-cc::vm-ret))
     (assert-true (assoc 'p (cl-cc::ctx-env ctx)))))
+
+(deftest codegen-rest-params-mark-stack-safe-closures
+  "&rest closures that only consume the list locally are marked stack-safe."
+  (let* ((ctx (make-codegen-ctx))
+         (ast (make-ast-lambda
+                :params '(x)
+                :rest-param 'args
+                :body (list (make-ast-call
+                              :func 'car
+                              :args (list (make-ast-var :name 'args)))))))
+    (compile-ast ast ctx)
+    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-closure)))
+      (assert-true inst)
+      (assert-true (cl-cc::vm-closure-rest-stack-alloc-p inst)))))
+
+(deftest codegen-rest-params-mark-escaping-closures
+  "&rest closures that return the list are not marked stack-safe."
+  (let* ((ctx (make-codegen-ctx))
+         (ast (make-ast-lambda
+                 :params '(x)
+                :rest-param 'args
+                :body (list (make-ast-var :name 'args)))))
+    (compile-ast ast ctx)
+    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-closure)))
+      (assert-true inst)
+      (assert-null (cl-cc::vm-closure-rest-stack-alloc-p inst)))))
+
+(deftest codegen-rest-params-dynamic-extent-forces-stack-safe
+  "&rest dynamic-extent declarations force stack-safe closures."
+  (let* ((ctx (make-codegen-ctx))
+         (ast (make-ast-lambda
+                 :params '(x)
+                :rest-param 'args
+                :declarations '((dynamic-extent args))
+                :body (list (make-ast-var :name 'args)))))
+    (compile-ast ast ctx)
+    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-closure)))
+      (assert-true inst)
+      (assert-true (cl-cc::vm-closure-rest-stack-alloc-p inst)))))
+
+(deftest codegen-rest-params-captured-by-inner-lambda-escape
+  "&rest lists captured by an inner lambda are not marked stack-safe."
+  (let* ((ctx (make-codegen-ctx))
+         (ast (make-ast-lambda
+                :params '(x)
+                :rest-param 'args
+                :body (list (make-ast-lambda
+                             :params '()
+                             :body (list (make-ast-var :name 'args)))))))
+    (compile-ast ast ctx)
+    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-closure)))
+      (assert-true inst)
+      (assert-null (cl-cc::vm-closure-rest-stack-alloc-p inst)))))

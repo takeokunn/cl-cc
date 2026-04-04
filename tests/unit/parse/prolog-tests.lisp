@@ -376,6 +376,53 @@
   (assert-prolog-peephole-not-contains '((:move :r0 :r0) (:const :r1 1)) '(:move :r0 :r0))
   (assert-prolog-peephole-equal '((:add :r2 :r0 :r1)) '((:add :r2 :r0 :r1))))
 
+(deftest prolog-peephole-arithmetic-identities
+  "Peephole: local arithmetic and comparison identities preserve the next instruction."
+  (assert-prolog-peephole-equal '((:add :r2 :r0 0) (:const :r3 1))
+                                '((:move :r2 :r0) (:const :r3 1)))
+  (assert-prolog-peephole-equal '((:sub :r4 0 :r1) (:const :r5 2))
+                                '((:neg :r4 :r1) (:const :r5 2)))
+  (assert-prolog-peephole-equal '((:sub :r4 :r1 :r1) (:const :r5 2))
+                                '((:const :r4 0) (:const :r5 2)))
+  (assert-prolog-peephole-equal '((:mul :r6 :r1 0) (:const :r7 3))
+                                '((:const :r6 0) (:const :r7 3)))
+  (assert-prolog-peephole-equal '((:div :r8 :r2 1) (:const :r9 4))
+                                '((:move :r8 :r2) (:const :r9 4)))
+  (assert-prolog-peephole-equal '((:logand :r10 :r3 -1) (:const :r11 5))
+                                '((:move :r10 :r3) (:const :r11 5)))
+  (assert-prolog-peephole-equal '((:logand :r10 :r3 0) (:const :r11 5))
+                                '((:const :r10 0) (:const :r11 5)))
+  (assert-prolog-peephole-equal '((:logior :r10 :r3 -1) (:const :r11 5))
+                                '((:const :r10 -1) (:const :r11 5)))
+  (assert-prolog-peephole-equal '((:num-eq :r12 :r4 :r4) (:const :r13 6))
+                                '((:const :r12 1) (:const :r13 6)))
+  (assert-prolog-peephole-equal '((:logxor :r14 :r5 :r5) (:const :r15 7))
+                                '((:const :r14 0) (:const :r15 7))))
+
+(deftest prolog-peephole-same-reg-identities
+  "Peephole: same-register comparison/bitwise identities collapse locally."
+  (assert-prolog-peephole-equal '((:eq :r0 :r1 :r1) (:const :r2 1))
+                                '((:const :r0 1) (:const :r2 1)))
+  (assert-prolog-peephole-equal '((:gt :r3 :r4 :r4) (:const :r5 2))
+                                '((:const :r3 0) (:const :r5 2)))
+  (assert-prolog-peephole-equal '((:le :r6 :r7 :r7) (:const :r8 3))
+                                '((:const :r6 1) (:const :r8 3)))
+  (assert-prolog-peephole-equal '((:logand :r9 :r10 :r10) (:const :r11 4))
+                                '((:move :r9 :r10) (:const :r11 4)))
+  (assert-prolog-peephole-equal '((:logior :r12 :r13 :r13) (:const :r14 5))
+                                '((:move :r12 :r13) (:const :r14 5))))
+
+(deftest prolog-peephole-negated-comparisons
+  "Peephole: compare followed by logical not collapses to the inverse comparison."
+  (assert-prolog-peephole-equal '((:lt :r0 :r1 :r2) (:not :r3 :r0))
+                                '((:ge :r3 :r1 :r2)))
+  (assert-prolog-peephole-equal '((:gt :r4 :r5 :r6) (:not :r7 :r4))
+                                '((:le :r7 :r5 :r6)))
+  (assert-prolog-peephole-equal '((:le :r8 :r9 :r10) (:not :r11 :r8))
+                                '((:gt :r11 :r9 :r10)))
+  (assert-prolog-peephole-equal '((:ge :r12 :r13 :r14) (:not :r15 :r12))
+                                '((:lt :r15 :r13 :r14))))
+
 (deftest prolog-peephole-empty-input
   "Peephole: empty instruction list returns empty"
   (assert-null (cl-cc:apply-prolog-peephole nil)))
@@ -402,6 +449,27 @@
 (deftest prolog-peephole-jump-to-different-label-kept
   "Peephole rule 2: (:jump L1)(:label L0) — label mismatch, no elimination"
   (assert-prolog-peephole-length= '((:jump "L1") (:label "L0")) 2))
+
+(deftest prolog-peephole-jump-chain-remains-shortest
+  "Peephole rule 5: consecutive jumps keep only the first jump."
+  (assert-prolog-peephole-equal '((:jump "L1") (:jump "L2")) '((:jump "L1"))))
+
+(deftest prolog-peephole-jump-before-ret-prunes-ret
+  "Peephole rule 5: jump before ret/halt keeps the jump."
+  (assert-prolog-peephole-equal '((:jump "L1") (:ret :r0)) '((:jump "L1")))
+  (assert-prolog-peephole-equal '((:jump "L1") (:halt :r0)) '((:jump "L1"))))
+
+(deftest prolog-peephole-ret-before-jump-kept
+  "Peephole rule 5: ret/halt before jump keeps the terminating instruction."
+  (assert-prolog-peephole-equal '((:ret :r0) (:jump "L1")) '((:ret :r0)))
+  (assert-prolog-peephole-equal '((:halt :r0) (:jump "L1")) '((:halt :r0))))
+
+(deftest prolog-peephole-terminal-chains-collapse
+  "Peephole rule 5: consecutive terminal instructions keep the first one."
+  (assert-prolog-peephole-equal '((:ret :r0) (:ret :r1)) '((:ret :r0)))
+  (assert-prolog-peephole-equal '((:halt :r0) (:halt :r1)) '((:halt :r0)))
+  (assert-prolog-peephole-equal '((:ret :r0) (:halt :r1)) '((:ret :r0)))
+  (assert-prolog-peephole-equal '((:halt :r0) (:ret :r1)) '((:halt :r0))))
 
 (deftest prolog-peephole-double-const-same-reg
   "Peephole rule 3: (:const ?r v1)(:const ?r v2) — second overwrites first"

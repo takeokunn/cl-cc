@@ -30,6 +30,18 @@ Returns a function that takes a continuation."
   (and (listp result)
        (eq 'lambda (car result))))
 
+(deftest cps-simplify-beta-reduces-immediate-funcall
+  "The CPS bootstrap simplifier beta-reduces trivial funcall/lambda pairs."
+  (assert-equal 42
+                (cl-cc::cps-simplify-form
+                 '(funcall (lambda (x) x) 42))))
+
+(deftest cps-simplify-eta-reduces-trivial-lambda
+  "The CPS bootstrap simplifier eta-reduces (lambda (k) (funcall f k))."
+  (assert-equal 'next
+                (cl-cc::cps-simplify-form
+                 '(lambda (k) (funcall next k)))))
+
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; S-expression CPS (bootstrap transformer)
 ;;; ─────────────────────────────────────────────────────────────────────────

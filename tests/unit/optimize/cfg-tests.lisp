@@ -33,6 +33,50 @@
          (make-vm-const    :dst :r1 :value 42)
          ;; exit
          (make-vm-label    :name "exit")
+          (make-vm-ret      :reg :r1))))
+
+(defun make-test-cfg-loop ()
+  "Build a CFG with a simple natural loop and a separate exit block."
+  (cl-cc::cfg-build
+   (list (make-vm-label    :name "head")
+          (make-vm-const    :dst :r0 :value 1)
+          (make-vm-jump-zero :reg :r0 :label "exit")
+          (make-vm-jump     :label "head")
+          (make-vm-label    :name "exit")
+          (make-vm-ret      :reg :r0))))
+
+(defun make-test-cfg-hot-cold ()
+  "Build a CFG with one loop-heavy hot block and one cold exit block."
+  (cl-cc::cfg-build
+   (list (make-vm-const    :dst :r0 :value 1)
+         (make-vm-jump-zero :reg :r0 :label "cold")
+         (make-vm-label    :name "hot")
+         (make-vm-const    :dst :r1 :value 2)
+         (make-vm-jump     :label "hot")
+          (make-vm-label    :name "cold")
+          (make-vm-ret      :reg :r0))))
+
+(defun make-test-cfg-cold-signal ()
+  "Build a CFG with a normal block and an explicit cold error block."
+  (cl-cc::cfg-build
+   (list (make-vm-const     :dst :r0 :value 0)
+         (make-vm-jump-zero :reg :r0 :label "hot")
+         (make-vm-label    :name "cold")
+          (cl-cc::make-vm-signal-error :error-reg :r0)
+          (make-vm-ret      :reg :r0)
+          (make-vm-label    :name "hot")
+          (make-vm-ret      :reg :r0))))
+
+(defun make-test-cfg-critical-edge ()
+  "Build a CFG with one critical edge into the THEN block."
+  (cl-cc::cfg-build
+   (list (make-vm-const    :dst :r0 :value 0)
+         (make-vm-jump-zero :reg :r0 :label "then")
+         (make-vm-const    :dst :r1 :value 99)
+         (make-vm-jump     :label "merge")
+         (make-vm-label    :name "then")
+         (make-vm-const    :dst :r1 :value 42)
+         (make-vm-label    :name "merge")
          (make-vm-ret      :reg :r1))))
 
 ;;; ─── Basic CFG Construction ──────────────────────────────────────────────
@@ -107,6 +151,87 @@
     (cl-cc::cfg-compute-dominance-frontiers cfg)
     ;; Just assert no error was signaled
     (assert-true t)))
+
+;;; ─── Post-Dominator Tree ────────────────────────────────────────────────
+
+(deftest cfg-post-dominators-computed
+  "Post-dominators are computed from the CFG exit block."
+  (let ((cfg (make-test-cfg-branch)))
+    (cl-cc::cfg-compute-post-dominators cfg)
+    (let ((exit (cl-cc::cfg-get-block-by-label cfg "exit"))
+          (entry (cl-cc::cfg-entry cfg)))
+      (assert-true exit)
+      (assert-eq exit (cl-cc::bb-post-idom exit))
+      (assert-true (cl-cc::cfg-post-dominates-p exit entry)))))
+
+(deftest cfg-loop-depths-computed
+  "Natural loops increment bb-loop-depth for the header and body blocks."
+  (let* ((cfg (make-test-cfg-loop))
+         (head (cl-cc::cfg-get-block-by-label cfg "head"))
+         (exit (cl-cc::cfg-get-block-by-label cfg "exit"))
+         (body (find-if (lambda (b)
+                          (some (lambda (i)
+                                  (and (typep i 'cl-cc::vm-jump)
+                                       (equal (cl-cc::vm-label-name i) "head")))
+                                (cl-cc::bb-instructions b)))
+                        (coerce (cl-cc::cfg-blocks cfg) 'list))))
+    (cl-cc::cfg-compute-dominators cfg)
+    (cl-cc::cfg-compute-loop-depths cfg)
+    (assert-true head)
+    (assert-true body)
+    (assert-= 1 (cl-cc::bb-loop-depth head))
+    (assert-= 1 (cl-cc::bb-loop-depth body))
+    (assert-= 0 (cl-cc::bb-loop-depth exit))))
+
+(deftest cfg-hot-cold-flatten-orders-hot-blocks-first
+  "Hot/cold flattening emits loop-heavy blocks before cold exit blocks."
+  (let* ((cfg (make-test-cfg-hot-cold)))
+    (cl-cc::cfg-compute-dominators cfg)
+    (cl-cc::cfg-compute-loop-depths cfg)
+    (let* ((flat (cl-cc::cfg-flatten-hot-cold cfg))
+           (labels (loop for inst in flat
+                         when (typep inst 'cl-cc::vm-label)
+                         collect (cl-cc::vm-name inst))))
+      (assert-true (member "hot" labels :test #'equal))
+      (assert-true (member "cold" labels :test #'equal))
+      (assert-true (< (position "hot" labels :test #'equal)
+                      (position "cold" labels :test #'equal))))))
+
+(deftest cfg-hot-cold-flatten-sends-signal-block-last
+  "Hot/cold flattening keeps an explicit signal-error block after normal code."
+  (let* ((cfg (make-test-cfg-cold-signal)))
+    (cl-cc::cfg-compute-dominators cfg)
+    (cl-cc::cfg-compute-loop-depths cfg)
+    (let* ((flat (cl-cc::cfg-flatten-hot-cold cfg))
+           (labels (loop for inst in flat
+                         when (typep inst 'cl-cc::vm-label)
+                         collect (cl-cc::vm-name inst))))
+      (assert-true (member "hot" labels :test #'equal))
+      (assert-true (member "cold" labels :test #'equal))
+      (assert-true (< (position "hot" labels :test #'equal)
+                       (position "cold" labels :test #'equal))))))
+
+(deftest cfg-critical-edge-splitting-inserts-landing-pad
+  "Critical edge splitting inserts a landing-pad block and rewires the edge."
+  (let* ((cfg (make-test-cfg-critical-edge))
+         (before (cl-cc::cfg-block-count cfg))
+         (entry (cl-cc::cfg-entry cfg))
+         (then  (cl-cc::cfg-get-block-by-label cfg "then")))
+    (cl-cc::cfg-split-critical-edges cfg)
+    (assert-= (1+ before) (cl-cc::cfg-block-count cfg))
+    (assert-true (not (member then (cl-cc::bb-successors entry) :test #'eq)))
+    (assert-true (not (member entry (cl-cc::bb-predecessors then) :test #'eq)))
+    (let ((pad (find-if (lambda (b)
+                          (and (= 1 (length (cl-cc::bb-successors b)))
+                               (eq then (first (cl-cc::bb-successors b)))
+                               (some (lambda (i)
+                                       (and (typep i 'cl-cc::vm-jump)
+                                            (equal (cl-cc::vm-label-name i)
+                                                   (cl-cc::vm-name (cl-cc::bb-label then)))))
+                                     (cl-cc::bb-instructions b))))
+                        (coerce (cl-cc::cfg-blocks cfg) 'list))))
+      (assert-true pad)
+      (assert-true (member pad (cl-cc::bb-successors entry) :test #'eq)))))
 
 ;;; ─── Flatten Round-Trip ──────────────────────────────────────────────────
 

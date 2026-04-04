@@ -16,40 +16,88 @@
 (defvar *macro-environment* (make-instance 'macro-env)
   "Global macro environment for macro definitions.")
 
+(defvar *macroexpansion-cache*
+  (make-hash-table :test #'eq :weakness :key)
+  "Weak cache mapping ENV → (equal-hash-table FORM → EXPANDED-FORM).")
+
+(defvar *macroexpansion-cache-lock*
+  #+sb-thread (sb-thread:make-mutex :name "macroexpansion-cache")
+  #-sb-thread nil)
+
+(defmacro %with-macroexpansion-cache-lock (&body body)
+  #+sb-thread `(sb-thread:with-mutex (*macroexpansion-cache-lock*) ,@body)
+  #-sb-thread `(progn ,@body))
+
+ (defun %macroexpansion-cache-table (env)
+  (or (gethash env *macroexpansion-cache*)
+      (setf (gethash env *macroexpansion-cache*)
+            (make-hash-table :test #'equal))))
+
+(defun %macroexpansion-cache-lookup (form env)
+  (%with-macroexpansion-cache-lock
+    (gethash form (%macroexpansion-cache-table env))))
+
+(defun %macroexpansion-cache-store (form env expanded)
+  (%with-macroexpansion-cache-lock
+    (setf (gethash form (%macroexpansion-cache-table env)) expanded)))
+
 (defun register-macro (name expander)
   "Register NAME as a macro with EXPANDER function in the global environment."
   (setf (gethash name (macro-env-table *macro-environment*)) expander))
+
+(defun register-compiler-macro (name expander)
+  "Register NAME as a compiler macro expander in the global environment."
+  (setf (gethash name *compiler-macro-table*) expander))
 
 (defun lookup-macro (name &optional env)
   "Look up macro NAME in the global macro environment."
   (declare (ignore env))
   (gethash name (macro-env-table *macro-environment*)))
 
+(defun lookup-compiler-macro (name &optional env)
+  "Look up compiler macro NAME in the global compiler-macro environment."
+  (declare (ignore env))
+  (gethash name *compiler-macro-table*))
+
 ;;; Macro Expansion
 
 (defun our-macroexpand-1 (form &optional env)
   "Perform a single macro expansion on FORM.
    Returns (VALUES expanded-form expanded-p)."
+  (let ((cached (%macroexpansion-cache-lookup form env)))
+    (when cached (return-from our-macroexpand-1 (values cached t))))
   (if (and (consp form) (symbolp (car form)))
       (let ((macro-fn (lookup-macro (car form) env)))
         (if macro-fn
             (let ((expanded (funcall macro-fn form env)))
               (if (equal expanded form)
-                  (values form nil)
-                  (values expanded t)))
-            (values form nil)))
-      (values form nil)))
+                  (progn (%macroexpansion-cache-store form env form)
+                         (values form nil))
+                  (progn (%macroexpansion-cache-store form env expanded)
+                         (values expanded t))))
+            (progn (%macroexpansion-cache-store form env form)
+                   (values form nil))))
+      (progn (%macroexpansion-cache-store form env form)
+             (values form nil))))
 
 (defun %our-macroexpand-all-recursive (form env)
   "Recursively expand FORM after a single expansion step."
+  (let ((cached (%macroexpansion-cache-lookup form env)))
+    (when cached (return-from %our-macroexpand-all-recursive cached)))
   (multiple-value-bind (expanded expanded-p)
       (our-macroexpand-1 form env)
     (if expanded-p
-        (%our-macroexpand-all-recursive expanded env)
+        (let ((result (%our-macroexpand-all-recursive expanded env)))
+          (%macroexpansion-cache-store form env result)
+          result)
         (typecase form
           (cons
-           (mapcar (lambda (x) (%our-macroexpand-all-recursive x env)) form))
-          (t form)))))
+            (let ((result (mapcar (lambda (x) (%our-macroexpand-all-recursive x env)) form)))
+              (%macroexpansion-cache-store form env result)
+              result))
+           (t
+            (%macroexpansion-cache-store form env form)
+            form)))))
 
 (defun our-macroexpand (form &optional env)
   "Fully expand FORM by repeatedly applying macroexpand-1.

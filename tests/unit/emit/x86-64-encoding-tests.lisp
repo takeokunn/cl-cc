@@ -151,6 +151,13 @@
     (assert-equal #x0F (first bytes))
     (assert-equal #x84 (second bytes))))
 
+(deftest x86-bswap-r32-encoding
+  "BSWAP r32 emits 0F C8+rd, with optional REX for high registers."
+  (let ((bytes (%x86-collect-bytes (lambda (s) (cl-cc::emit-bswap-r32 cl-cc::+rax+ s)))))
+    (assert-equal 2 (length bytes))
+    (assert-equal #x0F (first bytes))
+    (assert-equal #xC8 (second bytes))))
+
 ;;; ─── VM register mapping ─────────────────────────────────────────────────
 
 (deftest-each x86-vm-reg-map-spot-checks
@@ -751,6 +758,13 @@
          (prog (cl-cc::make-vm-program :instructions insts :result-register :R0))
          (bytes (%x86-collect-bytes (lambda (s) (cl-cc::emit-vm-program prog s)))))
     (assert-true (> (length bytes) 0))))
+
+(deftest x86-vm-program-trims-unused-callee-saved-regs
+  "emit-vm-program only saves the callee-saved registers actually used by regalloc."
+  (let* ((prog (cl-cc::make-vm-program :instructions nil :result-register :R0))
+         (bytes (cl-cc::compile-to-x86-64-bytes prog)))
+    ;; Empty programs now emit just PUSH RBP, POP RBP, RET.
+    (assert-equal 3 (length bytes))))
 
 ;;; ─── build-label-offsets with vm-add (6 bytes) ───────────────────────────
 

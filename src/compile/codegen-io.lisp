@@ -242,36 +242,57 @@ Returns register holding the printed object (ANSI: print returns its argument)."
 ;; format: destination dispatch — nil (string), t (stdout), stream
 (define-phase2-handler "FORMAT" (args result-reg ctx)
   (when (>= (length args) 2)
-    (let* ((dest-arg        (first args))
-           (fmt-reg         (compile-ast (second args) ctx))
+    (let* ((dest-arg (first args))
+           (fmt-arg (second args))
            (format-arg-regs (mapcar (lambda (a) (compile-ast a ctx)) (cddr args)))
            (dest-sym (cond ((and (typep dest-arg 'ast-var)
-                                  (member (ast-var-name dest-arg) '(nil t)))
-                             (ast-var-name dest-arg))
-                            ((typep dest-arg 'ast-quote)
-                             (ast-quote-value dest-arg))
-                            (t :stream))))
+                                 (member (ast-var-name dest-arg) '(nil t)))
+                            (ast-var-name dest-arg))
+                           ((typep dest-arg 'ast-quote)
+                            (ast-quote-value dest-arg))
+                           (t :stream))))
       (cond
+        ((and (null format-arg-regs)
+              (typep fmt-arg 'ast-quote)
+              (stringp (ast-quote-value fmt-arg)))
+         (let ((fmt-value (ast-quote-value fmt-arg)))
+           (cond
+             ((null dest-sym)
+              (emit ctx (make-vm-const :dst result-reg :value fmt-value)))
+             ((eq dest-sym t)
+              (let ((str-reg (make-register ctx)))
+                (emit ctx (make-vm-const :dst str-reg :value fmt-value))
+                (emit ctx (make-vm-princ :src str-reg))
+                (emit ctx (make-vm-const :dst result-reg :value nil))))
+             (t
+              (let ((str-reg (make-register ctx))
+                    (stream-reg (compile-ast dest-arg ctx)))
+                (emit ctx (make-vm-const :dst str-reg :value fmt-value))
+                (emit ctx (make-vm-stream-write-string-inst :stream-reg stream-reg :src str-reg))
+                (emit ctx (make-vm-const :dst result-reg :value nil)))))))
         ((null dest-sym)
          ;; (format nil ...) → return the string
-         (emit ctx (make-vm-format-inst :dst result-reg :fmt fmt-reg
-                                        :arg-regs format-arg-regs)))
+         (let ((fmt-reg (compile-ast fmt-arg ctx)))
+           (emit ctx (make-vm-format-inst :dst result-reg :fmt fmt-reg
+                                          :arg-regs format-arg-regs))))
         ((eq dest-sym t)
          ;; (format t ...) → print to stdout, return nil
-         (let ((str-reg (make-register ctx)))
+         (let ((fmt-reg (compile-ast fmt-arg ctx))
+               (str-reg (make-register ctx)))
            (emit ctx (make-vm-format-inst :dst str-reg :fmt fmt-reg
                                           :arg-regs format-arg-regs))
            (emit ctx (make-vm-princ :src str-reg))
            (emit ctx (make-vm-const :dst result-reg :value nil))))
         (t
          ;; (format stream ...) → write to stream, return nil
-         (let ((str-reg    (make-register ctx))
+         (let ((fmt-reg (compile-ast fmt-arg ctx))
+               (str-reg (make-register ctx))
                (stream-reg (compile-ast dest-arg ctx)))
            (emit ctx (make-vm-format-inst :dst str-reg :fmt fmt-reg
                                           :arg-regs format-arg-regs))
            (emit ctx (make-vm-stream-write-string-inst :stream-reg stream-reg :src str-reg))
            (emit ctx (make-vm-const :dst result-reg :value nil)))))
-       result-reg)))
+      result-reg)))
 
 ;; open: parse :direction keyword arg
 (define-phase2-handler "OPEN" (args result-reg ctx)
@@ -314,12 +335,29 @@ Returns register holding the printed object (ANSI: print returns its argument)."
       (emit ctx (make-vm-const :dst result-reg :value t))
       result-reg)))
 
-;; concatenate: only (concatenate 'string a b) → vm-concatenate
+;; concatenate: batch-fold constant strings; otherwise lower to vm-concatenate
 (define-phase2-handler "CONCATENATE" (args result-reg ctx)
   (when (and (>= (length args) 3)
              (typep (first args) 'ast-quote)
              (string= (symbol-name (ast-quote-value (first args))) "STRING"))
-    (let ((str1-reg (compile-ast (second args) ctx))
-          (str2-reg (compile-ast (third args)  ctx)))
-      (emit ctx (make-vm-concatenate :dst result-reg :str1 str1-reg :str2 str2-reg))
-      result-reg)))
+    (let ((string-args (rest args)))
+      (if (every (lambda (arg)
+                   (and (typep arg 'ast-quote)
+                        (stringp (ast-quote-value arg))))
+                 string-args)
+          (progn
+            (emit ctx (make-vm-const :dst result-reg
+                                     :value (apply #'concatenate 'string
+                                                   (mapcar #'ast-quote-value string-args))))
+            result-reg)
+          (let ((current-reg (compile-ast (second args) ctx))
+                (tail (cddr args)))
+            (loop while tail
+                  for next-arg = (first tail)
+                  for more = (rest tail)
+                  do (let* ((next-reg (compile-ast next-arg ctx))
+                            (dst-reg (if more (make-register ctx) result-reg)))
+                       (emit ctx (make-vm-concatenate :dst dst-reg :str1 current-reg :str2 next-reg))
+                       (setf current-reg dst-reg
+                             tail more)))
+            result-reg)))))

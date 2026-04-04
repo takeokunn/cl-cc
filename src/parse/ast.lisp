@@ -23,6 +23,7 @@
   (optional-params nil :type list)
   (rest-param nil)
   (key-params nil :type list)
+  (declarations nil :type list)
   (body nil :type list))
 
 (defstruct (ast-local-fns (:include ast-node))
@@ -66,6 +67,7 @@
 (defstruct (ast-let (:include ast-node))
   "Let binding AST node."
   (bindings nil :type list)
+  (declarations nil :type list)
   (body nil :type list))
 
 ;;; Function and Lambda AST Structs

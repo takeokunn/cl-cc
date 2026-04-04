@@ -246,6 +246,13 @@
 
 (define-unary-mov-emitter emit-vm-lognot emit-not-r64 "vm-lognot: dst = ~src  (bitwise complement).")
 
+(defun emit-vm-bswap (inst stream)
+  "vm-bswap: dst = byte-swap(low32(src))  (network-order byte reversal)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (src (vm-reg-to-x86 (vm-src inst))))
+    (emit-mov-rr64 dst src stream)
+    (emit-bswap-r32 dst stream)))
+
 ;;; Increment / Decrement
 
 (defun emit-vm-inc (inst stream)
@@ -315,12 +322,34 @@
     (emit-sal-r64-cl dst stream)                  ; 3 bytes
     (emit-pop-r64 +rcx+ stream)))                 ; 1 byte
 
+(defun emit-vm-rotate (inst stream)
+  "vm-rotate: dst = rotr(lhs, rhs)
+   RCX is saved/restored; CL carries the rotate count."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-push-r64 +rcx+ stream)
+    (emit-mov-rr64 +rcx+ rhs stream)
+    (emit-mov-rr64 dst lhs stream)
+    (emit-ror-r64-cl dst stream)
+    (emit-pop-r64 +rcx+ stream)))
+
 ;;; Min / Max via CMOVcc
 
 (define-cmov-emitter emit-vm-min emit-cmovg-rr64
   "vm-min: dst = min(lhs, rhs)  -- signed, branchless via CMOVG.")
 (define-cmov-emitter emit-vm-max emit-cmovl-rr64
   "vm-max: dst = max(lhs, rhs)  -- signed, branchless via CMOVL.")
+
+(defun emit-vm-select (inst stream)
+  "vm-select: dst = cond ? then : else  (branchless via TEST + CMOVNE)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (cond (vm-reg-to-x86 (vm-select-cond-reg inst)))
+        (then (vm-reg-to-x86 (vm-select-then-reg inst)))
+        (else (vm-reg-to-x86 (vm-select-else-reg inst))))
+    (emit-mov-rr64 dst else stream)
+    (emit-test-rr64 cond cond stream)
+    (emit-cmovne-rr64 dst then stream)))
 
 ;;; Type Predicate Instruction Emitters
 ;;;
@@ -463,7 +492,8 @@
     ;; No-ops in native codegen
     (setf (gethash 'vm-print ht) 0)
     (setf (gethash 'vm-closure ht) 0)
-    (setf (gethash 'vm-call ht) 0)
+    (setf (gethash 'vm-call ht) 6)
+    (setf (gethash 'vm-tail-call ht) 3)
     ;; Register spilling
     (setf (gethash 'vm-spill-store ht) 4)  ; MOV [rbp-disp8], reg
     (setf (gethash 'vm-spill-load ht) 4)   ; MOV reg, [rbp-disp8]
@@ -473,6 +503,7 @@
     ;; Logical NOT: TEST+SETE+MOVZX = 11→12; bitwise NOT: MOV+NOT = 7
     (setf (gethash 'vm-not ht) 12)
     (setf (gethash 'vm-lognot ht) 7)
+    (setf (gethash 'vm-bswap ht) 6)
     ;; Unary arithmetic: MOV(3) + op(3-4) = 7
     (setf (gethash 'vm-neg ht) 7)
     (setf (gethash 'vm-inc ht) 7)
@@ -482,8 +513,11 @@
     ;; Min/max: MOV + CMP + CMOV = 10
     (setf (gethash 'vm-min ht) 10)
     (setf (gethash 'vm-max ht) 10)
+    (setf (gethash 'vm-select ht) 10)
     ;; Ash: fixed 24-byte sequence
     (setf (gethash 'vm-ash ht) 24)
+    ;; Rotate: MOV + MOV + ROR + save/restore RCX = 11 bytes
+    (setf (gethash 'vm-rotate ht) 11)
     ;; IDIV-based: truncate/rem = 21, floor-div = 34, floor-mod = 37
     (setf (gethash 'vm-truncate ht) 21)
     (setf (gethash 'vm-rem ht) 21)
@@ -532,6 +566,27 @@
     (unless (= result-reg +rax+)
       (emit-mov-rr64 +rax+ result-reg stream))))
 
+(defun emit-vm-call-like-inst (inst stream)
+  "Emit code for VM CALL / VM TAIL-CALL instructions.
+
+   The function designator is already in a register. We perform an indirect
+   CALL through that register and then copy the return value from RAX into the
+   destination register."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (func (vm-reg-to-x86 (vm-func-reg inst))))
+    (emit-call-r64 func stream)
+    (emit-mov-rr64 dst +rax+ stream)))
+
+(defun emit-vm-tail-call-inst (inst stream)
+  "Emit code for VM TAIL-CALL instruction.
+
+   Tail calls transfer control directly to the callee so the current stack
+   frame is not extended. The callee returns to the original caller, so no
+   destination move is emitted here."
+  (let ((dst (vm-dst inst)))
+    (declare (ignore dst))
+    (emit-jmp-r64 (vm-reg-to-x86 (vm-func-reg inst)) stream)))
+
 (defun emit-vm-jump-inst (inst stream current-pos label-offsets)
   "Emit code for VM JUMP instruction (unconditional jump)."
   (let* ((target-label (vm-label-name inst))
@@ -557,6 +612,18 @@
   "Emit code for VM RET instruction."
   (declare (ignore inst))
   (emit-ret stream))
+
+(defun x86-64-used-callee-saved-regs (ra cc)
+  "Return the callee-saved physical registers used by RA, in ABI order.
+   RBP is always preserved separately as the frame pointer."
+  (let ((callee-saved (cc-callee-saved cc))
+        (used nil))
+    (loop for phys being the hash-values of (regalloc-assignment ra)
+          when (member phys callee-saved)
+          do (pushnew phys used :test #'eq))
+    (loop for reg in callee-saved
+          when (member reg used :test #'eq)
+          collect reg)))
 
 (defun emit-vm-spill-store-inst (inst stream)
   "Emit code for VM SPILL-STORE instruction: MOV [RBP - slot*8], src."
@@ -584,6 +651,8 @@
     (vm-sub          . emit-vm-sub)
     (vm-mul          . emit-vm-mul)
     (vm-halt         . emit-vm-halt-inst)
+     (vm-call         . emit-vm-call-like-inst)
+     (vm-tail-call    . emit-vm-tail-call-inst)
     (vm-ret          . emit-vm-ret-inst)
     (vm-spill-store  . emit-vm-spill-store-inst)
     (vm-spill-load   . emit-vm-spill-load-inst)
@@ -598,13 +667,16 @@
     (vm-neg          . emit-vm-neg)
     (vm-not          . emit-vm-not)
     (vm-lognot       . emit-vm-lognot)
+    (vm-bswap        . emit-vm-bswap)
     (vm-inc          . emit-vm-inc)
     (vm-dec          . emit-vm-dec)
     (vm-abs          . emit-vm-abs)
     ;; Min/max/ash
     (vm-min          . emit-vm-min)
     (vm-max          . emit-vm-max)
+    (vm-select       . emit-vm-select)
     (vm-ash          . emit-vm-ash)
+    (vm-rotate       . emit-vm-rotate)
     ;; Integer division (IDIV-based)
     (vm-truncate     . emit-vm-truncate)
     (vm-rem          . emit-vm-rem)
@@ -657,32 +729,38 @@
    Uses two-pass approach: first pass builds label offset table,
    second pass emits code with resolved jump targets."
   (let* ((instructions (vm-program-instructions program))
-         ;; Prologue: 6 PUSH instructions, 1 byte each
-         (prologue-size 6)
-         ;; First pass: build label offset table
-         (label-offsets (build-label-offsets instructions prologue-size)))
+         (cfg (cfg-build instructions))
+         (leaf-p (vm-program-leaf-p program))
+         (spill-count (regalloc-spill-count *current-regalloc*))
+         (callee-saved (x86-64-used-callee-saved-regs *current-regalloc*
+                                                        *x86-64-calling-convention*))
+         (save-regs (if (and leaf-p (zerop spill-count))
+                        callee-saved
+                        (cons +rbp+ callee-saved)))
+         ;; Each push/pop is 1 byte in the current encoder.
+         (prologue-size (length save-regs))
+          (ordered-instructions (if (cfg-entry cfg)
+                                    (progn
+                                      (cfg-compute-dominators cfg)
+                                      (cfg-compute-loop-depths cfg)
+                                      (cfg-flatten-hot-cold cfg))
+                                    instructions))
+          ;; First pass: build label offset table
+          (label-offsets (build-label-offsets ordered-instructions prologue-size)))
 
-    ;; Prologue: save callee-saved registers
-    (emit-push-r64 +rbx+ stream)
-    (emit-push-r64 +rbp+ stream)
-    (emit-push-r64 +r12+ stream)
-    (emit-push-r64 +r13+ stream)
-    (emit-push-r64 +r14+ stream)
-    (emit-push-r64 +r15+ stream)
+    ;; Prologue: save only the callee-saved registers actually used
+    (dolist (reg save-regs)
+      (emit-push-r64 reg stream))
 
     ;; Second pass: emit instructions with resolved jumps
     (let ((pos prologue-size))
-      (dolist (inst instructions)
+      (dolist (inst ordered-instructions)
         (emit-vm-instruction-with-labels inst stream pos label-offsets)
         (incf pos (instruction-size inst))))
 
-    ;; Epilogue: restore callee-saved registers
-    (emit-pop-r64 +r15+ stream)
-    (emit-pop-r64 +r14+ stream)
-    (emit-pop-r64 +r13+ stream)
-    (emit-pop-r64 +r12+ stream)
-    (emit-pop-r64 +rbp+ stream)
-    (emit-pop-r64 +rbx+ stream)
+    ;; Epilogue: restore callee-saved registers in reverse order
+    (dolist (reg (reverse save-regs))
+      (emit-pop-r64 reg stream))
 
     ;; Return
     (emit-ret stream)))
@@ -697,8 +775,9 @@
   (let* ((instructions (vm-program-instructions program))
          (ra (allocate-registers instructions *x86-64-calling-convention*))
          (allocated-program (make-vm-program
-                             :instructions (regalloc-instructions ra)
-                             :result-register (vm-program-result-register program))))
+                              :instructions (regalloc-instructions ra)
+                              :result-register (vm-program-result-register program)
+                              :leaf-p (vm-program-leaf-p program))))
     ;; Store the regalloc result for use during code generation
     (let ((*current-regalloc* ra))
       (with-output-to-vector (stream)

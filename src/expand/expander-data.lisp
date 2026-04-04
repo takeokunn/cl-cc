@@ -24,6 +24,13 @@ so macro expansion runs through cl-cc's own compiler — the key self-hosting st
   "Global symbol macro environment: maps symbol → expansion form.
 Used by define-symbol-macro. Local symbol-macrolet bindings shadow these.")
 
+(defvar *constant-table* (make-hash-table :test #'eq)
+  "Global constant environment: maps defconstant names to their values.
+Used by the compiler to inline constant symbol references.")
+
+(defvar *compiler-macro-table* (make-hash-table :test #'eq)
+  "Global compiler-macro environment: maps function names to compiler macro expanders.")
+
 ;;; ── Compiler special form grammar ────────────────────────────────────────
 ;;;
 ;;; Forms in this list are handled directly by the parser/compiler.
@@ -62,6 +69,7 @@ These recurse into subforms but their head is not macro-expanded.")
     string-not-equal string-not-greaterp string-not-lessp string-concat
     char min max floor ceiling truncate round ffloor fceiling ftruncate fround
     ash logand logior logxor logeqv logtest logbitp
+    bswap
     expt scale-float gcd lcm complex
     array-dimension row-major-aref svref vector-push
     bit sbit bit-and bit-or bit-xor adjust-array nreconc)

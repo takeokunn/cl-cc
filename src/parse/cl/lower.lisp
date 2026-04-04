@@ -103,21 +103,24 @@
   (let ((bindings (second node)))
     (unless (listp bindings)
       (error "let bindings must be a list"))
-    (make-ast-let
-     :bindings (mapcar (lambda (binding)
-                         (cond
-                           ((symbolp binding)
-                            (cons binding (make-ast-quote :value nil)))
-                           ((and (consp binding) (= (length binding) 2)
-                                 (symbolp (first binding)))
-                            (cons (first binding) (lower-sexp-to-ast (second binding))))
-                           ((and (consp binding) (= (length binding) 1)
-                                 (symbolp (first binding)))
-                            (cons (first binding) (make-ast-quote :value nil)))
-                           (t (error "Invalid let binding: ~S" binding))))
-                       bindings)
-     :body (mapcar #'lower-sexp-to-ast (cddr node))
-     :source-file sf :source-line sl :source-column sc)))
+    (multiple-value-bind (declarations body-forms)
+        (%extract-leading-declarations (cddr node))
+      (make-ast-let
+       :bindings (mapcar (lambda (binding)
+                           (cond
+                             ((symbolp binding)
+                              (cons binding (make-ast-quote :value nil)))
+                             ((and (consp binding) (= (length binding) 2)
+                                   (symbolp (first binding)))
+                              (cons (first binding) (lower-sexp-to-ast (second binding))))
+                             ((and (consp binding) (= (length binding) 1)
+                                   (symbolp (first binding)))
+                              (cons (first binding) (make-ast-quote :value nil)))
+                             (t (error "Invalid let binding: ~S" binding))))
+                         bindings)
+       :declarations declarations
+       :body (mapcar #'lower-sexp-to-ast body-forms)
+       :source-file sf :source-line sl :source-column sc))))
 
 ;;; ── Lambda expression ────────────────────────────────────────────────────────
 
@@ -129,21 +132,25 @@
       (error "lambda parameters must be a list"))
     (multiple-value-bind (type-bindings body-forms)
         (%extract-leading-type-declarations (cddr node))
-      (if (lambda-list-has-extended-p raw-params)
-          (multiple-value-bind (required optional rest-param key-params)
-              (%lower-extended-params raw-params)
-            (make-ast-lambda :params (%apply-type-bindings-to-params required type-bindings)
-                             :optional-params optional
-                             :rest-param rest-param
-                             :key-params key-params
-                             :body (mapcar #'lower-sexp-to-ast body-forms)
-                             :source-file sf :source-line sl :source-column sc))
-          (progn
-            (unless (every #'symbolp raw-params)
-              (error "lambda parameters must be symbols"))
-            (make-ast-lambda :params (%apply-type-bindings-to-params raw-params type-bindings)
-                             :body (mapcar #'lower-sexp-to-ast body-forms)
-                             :source-file sf :source-line sl :source-column sc))))))
+      (multiple-value-bind (declarations body-forms)
+          (%extract-leading-declarations body-forms)
+        (if (lambda-list-has-extended-p raw-params)
+            (multiple-value-bind (required optional rest-param key-params)
+                (%lower-extended-params raw-params)
+              (make-ast-lambda :params (%apply-type-bindings-to-params required type-bindings)
+                               :optional-params optional
+                               :rest-param rest-param
+                               :key-params key-params
+                               :declarations declarations
+                               :body (mapcar #'lower-sexp-to-ast body-forms)
+                               :source-file sf :source-line sl :source-column sc))
+            (progn
+              (unless (every #'symbolp raw-params)
+                (error "lambda parameters must be symbols"))
+              (make-ast-lambda :params (%apply-type-bindings-to-params raw-params type-bindings)
+                               :declarations declarations
+                               :body (mapcar #'lower-sexp-to-ast body-forms)
+                               :source-file sf :source-line sl :source-column sc)))))))
 
 ;;; ── Function reference ───────────────────────────────────────────────────────
 
@@ -323,22 +330,26 @@ Simple places dispatch via *setf-place-simple-rewrites*; complex places
     (unless (listp raw-params) (error "defun parameters must be a list"))
     (multiple-value-bind (type-bindings body-forms)
         (%extract-leading-type-declarations (cdddr node))
-      (let ((block-body (list (lower-sexp-to-ast (list* 'block name body-forms)))))
-        (if (lambda-list-has-extended-p raw-params)
-            (multiple-value-bind (required optional rest-param key-params)
-                (%lower-extended-params raw-params)
-              (make-ast-defun :name name
-                              :params (%apply-type-bindings-to-params required type-bindings)
-                              :optional-params optional :rest-param rest-param
-                              :key-params key-params   :body block-body
-                              :source-file sf :source-line sl :source-column sc))
-            (progn
-              (unless (every #'symbolp raw-params)
-                (error "defun parameters must be symbols"))
-              (make-ast-defun :name name
-                              :params (%apply-type-bindings-to-params raw-params type-bindings)
-                              :body block-body
-                              :source-file sf :source-line sl :source-column sc)))))))
+      (multiple-value-bind (declarations body-forms)
+          (%extract-leading-declarations body-forms)
+        (let ((block-body (list (lower-sexp-to-ast (list* 'block name body-forms)))))
+          (if (lambda-list-has-extended-p raw-params)
+              (multiple-value-bind (required optional rest-param key-params)
+                  (%lower-extended-params raw-params)
+                (make-ast-defun :name name
+                                :params (%apply-type-bindings-to-params required type-bindings)
+                                :optional-params optional :rest-param rest-param
+                                :key-params key-params   :body block-body
+                                :declarations declarations
+                                :source-file sf :source-line sl :source-column sc))
+              (progn
+                (unless (every #'symbolp raw-params)
+                  (error "defun parameters must be symbols"))
+                (make-ast-defun :name name
+                                :params (%apply-type-bindings-to-params raw-params type-bindings)
+                                :declarations declarations
+                                :body block-body
+                                :source-file sf :source-line sl :source-column sc))))))))
 
 ;;; ── Defvar / Defparameter ────────────────────────────────────────────────────
 

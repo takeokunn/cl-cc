@@ -96,7 +96,10 @@
           ("vm-add"       'cl-cc::vm-add       6)
           ("vm-sub"       'cl-cc::vm-sub       6)
           ("vm-mul"       'cl-cc::vm-mul       7)
+          ("vm-bswap"     'cl-cc::vm-bswap     6)
           ("vm-halt"      'cl-cc::vm-halt      3)
+          ("vm-call"      'cl-cc::vm-call      6)
+          ("vm-tail-call" 'cl-cc::vm-tail-call 3)
           ("vm-label"     'cl-cc::vm-label     0)
           ("vm-jump"      'cl-cc::vm-jump      5)
           ("vm-jump-zero" 'cl-cc::vm-jump-zero 9)
@@ -126,25 +129,83 @@
 ;;; ─── *x86-64-emitter-entries* / *x86-64-emitter-table* ─────────────────────
 
 (deftest x86-64-emitter-entries-count
-  "*x86-64-emitter-entries* has 42 entries covering all supported instructions."
-  (assert-= 42 (length cl-cc::*x86-64-emitter-entries*)))
+  "*x86-64-emitter-entries* has 45 entries covering all supported instructions."
+  (assert-= 45 (length cl-cc::*x86-64-emitter-entries*)))
 
 (deftest x86-64-emitter-table-built-from-entries
   "*x86-64-emitter-table* contains an entry for each item in *x86-64-emitter-entries*."
   (dolist (entry cl-cc::*x86-64-emitter-entries*)
     (assert-true (gethash (car entry) cl-cc::*x86-64-emitter-table*))))
 
+(deftest x86-64-empty-program-trims-unused-callee-saved-regs
+  "compile-to-x86-64-bytes emits only the frame-pointer save/restore for an empty program."
+  (let* ((prog (cl-cc::make-vm-program :instructions nil :result-register :R0))
+         (bytes (cl-cc::compile-to-x86-64-bytes prog)))
+    (assert-= 3 (length bytes))))
+
+(deftest x86-64-leaf-program-trims-prologue-through-pipeline
+  "A real compiled leaf program reaches native codegen and trims the prologue."
+  (let* ((result (compile-string "(+ 1 2)" :target :vm))
+         (prog (compilation-result-program result))
+         (base (cl-cc::make-vm-program :instructions (cl-cc::vm-program-instructions prog)
+                                       :result-register (cl-cc::vm-program-result-register prog)
+                                       :leaf-p nil))
+         (leaf-bytes (cl-cc::compile-to-x86-64-bytes prog))
+         (nonleaf-bytes (cl-cc::compile-to-x86-64-bytes base)))
+    (assert-true (cl-cc::vm-program-leaf-p prog))
+    (assert-true (< (length leaf-bytes) (length nonleaf-bytes)))))
+
 (deftest-each x86-64-emitter-table-spot-checks
   "Key instructions are present in *x86-64-emitter-table* and are functions."
   :cases (("vm-const"   'cl-cc::vm-const)
           ("vm-add"     'cl-cc::vm-add)
+          ("vm-call"    'cl-cc::vm-call)
+          ("vm-tail-call" 'cl-cc::vm-tail-call)
           ("vm-lt"      'cl-cc::vm-lt)
           ("vm-neg"     'cl-cc::vm-neg)
+          ("vm-bswap"   'cl-cc::vm-bswap)
           ("vm-and"     'cl-cc::vm-and)
           ("vm-logand"  'cl-cc::vm-logand)
           ("vm-null-p"  'cl-cc::vm-null-p))
   (sym)
   (assert-true (functionp (gethash sym cl-cc::*x86-64-emitter-table*))))
+
+(deftest x86-64-bswap-emitter-encoding
+  "emit-vm-bswap emits a MOV followed by BSWAP r32."
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s)
+                  (cl-cc::emit-vm-bswap (cl-cc::make-vm-bswap :dst :R0 :src :R1) s)))))
+    (assert-= 5 (length bytes))
+    (assert-= #x48 (first bytes))
+    (assert-= #x89 (second bytes))
+    (assert-= #xC8 (third bytes))
+    (assert-= #x0F (fourth bytes))
+    (assert-= #xC8 (fifth bytes))))
+
+(deftest x86-64-call-emitter-encoding
+  "emit-vm-call-like-inst emits CALL r64 followed by MOV dst, rax."
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s)
+                  (cl-cc::emit-vm-call-like-inst
+                   (cl-cc::make-vm-call :dst :R0 :func :R1 :args nil) s)))))
+    (assert-= 6 (length bytes))
+    (assert-= #x48 (nth 0 bytes))
+    (assert-= #xFF (nth 1 bytes))
+    (assert-= #xD1 (nth 2 bytes))
+    (assert-= #x48 (nth 3 bytes))
+    (assert-= #x89 (nth 4 bytes))
+    (assert-= #xC0 (nth 5 bytes))))
+
+(deftest x86-64-tail-call-emitter-encoding
+  "emit-vm-tail-call-inst emits JMP r64 with no destination move."
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s)
+                  (cl-cc::emit-vm-tail-call-inst
+                   (cl-cc::make-vm-tail-call :dst :R0 :func :R1 :args nil) s)))))
+    (assert-= 3 (length bytes))
+    (assert-= #x48 (nth 0 bytes))
+    (assert-= #xFF (nth 1 bytes))
+    (assert-= #xE1 (nth 2 bytes))))
 
 ;;; Helper: collect bytes emitted by a function (local copy; also defined in encoding-tests)
 (defun %x86-collect-bytes (emit-fn)

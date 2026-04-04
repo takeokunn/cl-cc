@@ -20,15 +20,17 @@ closures, and reader states."))
   ((entry-label :initarg :entry-label :reader vm-closure-entry-label
                 :documentation "Label where function code begins")
    (params :initarg :params :reader vm-closure-params
-           :documentation "List of required parameter register names")
+            :documentation "List of required parameter register names")
    (optional-params :initarg :optional-params :initform nil :reader vm-closure-optional-params
                     :documentation "List of (register default-value) for &optional")
    (rest-param :initarg :rest-param :initform nil :reader vm-closure-rest-param
-               :documentation "Register name for &rest parameter, or nil")
+                :documentation "Register name for &rest parameter, or nil")
    (key-params :initarg :key-params :initform nil :reader vm-closure-key-params
-               :documentation "List of (keyword register default-value) for &key")
-   (captured-values :initarg :captured-values :initform nil :reader vm-closure-captured-values
-        :documentation "Captured lexical environment values as alist"))
+                :documentation "List of (keyword register default-value) for &key")
+   (rest-stack-alloc-p :initarg :rest-stack-alloc-p :initform nil :reader vm-closure-rest-stack-alloc-p
+                       :documentation "T when the &rest list may be stack-allocated")
+   (captured-values :initarg :captured-values :initform #() :reader vm-closure-captured-values
+                    :documentation "Captured lexical environment values as a vector of (register . value) pairs"))
   (:documentation "Represents a closure with code and captured environment."))
 
 ;;; VM Cons Cell (Heap-based)
@@ -188,7 +190,8 @@ SHAPE is one of:
 
 (defstruct vm-program
   (instructions nil :type list)
-  (result-register nil))
+  (result-register nil)
+  (leaf-p nil :type boolean))
 
 (defclass vm-state ()
   ((registers :initform (make-hash-table :test #'equal) :reader vm-state-registers)
@@ -294,11 +297,14 @@ Used by call-next-method and next-method-p."))
   (setf (gethash address (vm-state-heap state)) object))
 
 
-(defun vm-build-list (state values)
+(defun vm-build-list (state values &key stack-allocate-p)
   "Build a native CL list from VALUES for use as a &rest parameter.
 Uses native cons cells (same as vm-cons instruction)."
-  (declare (ignore state))
-  (copy-list values))
+  (declare (ignore state)
+           (dynamic-extent values))
+  (if stack-allocate-p
+      values
+      (copy-list values)))
 
 
 (defun vm-heap-address (object)

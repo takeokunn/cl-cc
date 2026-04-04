@@ -62,14 +62,20 @@ Dispatch order: (1) atoms — symbol macros expanded, others pass through;
       (let ((handler (gethash (car form) *expander-head-table*)))
         (cond
           (handler
-           (let ((expanded (funcall handler form)))
+            (let ((expanded (funcall handler form)))
+              (if (equal expanded form)
+                  form
+                  expanded)))
+          ((and (symbolp (car form))
+                (lookup-compiler-macro (car form)))
+           (let ((expanded (funcall (lookup-compiler-macro (car form)) form nil)))
              (if (equal expanded form)
                  form
-                 expanded)))
+                 (compiler-macroexpand-all expanded))))
           ((member (car form) *compiler-special-forms*)
-           (cons (car form) (mapcar #'compiler-macroexpand-all (cdr form))))
+            (cons (car form) (mapcar #'compiler-macroexpand-all (cdr form))))
           (t
-          (multiple-value-bind (exp expanded-p) (our-macroexpand-1 form)
-            (if expanded-p
-                (compiler-macroexpand-all exp)
-                (mapcar #'compiler-macroexpand-all form)))))))))
+           (multiple-value-bind (exp expanded-p) (our-macroexpand-1 form)
+             (if expanded-p
+                 (compiler-macroexpand-all exp)
+                 (mapcar #'compiler-macroexpand-all form)))))))))

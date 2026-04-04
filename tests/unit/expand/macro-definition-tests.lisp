@@ -20,3 +20,9 @@
   "DEFINE-COMPILER-MACRO returns the macro name (no compile-time expansion)."
   (let ((result (our-macroexpand-1 '(define-compiler-macro foo (x) (+ x 1)))))
     (assert-equal result '(quote foo))))
+
+(deftest define-compiler-macro-expands-call
+  "DEFINE-COMPILER-MACRO registers a compiler macro used by compiler-macroexpand-all."
+  (our-macroexpand-1 '(define-compiler-macro foo (x) (+ x 1)))
+  (let ((result (cl-cc::compiler-macroexpand-all '(foo 2))))
+    (assert-equal result 3)))

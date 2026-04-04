@@ -151,3 +151,25 @@
     (registry-add-class reg 'w :superclasses '(y x))
     (let ((cpl (cl-cc::compute-class-precedence-list 'w reg)))
       (assert-equal '(w y x z) cpl))))
+
+;;; ------------------------------------------------------------
+;;; 4. EQL specializer dispatch index
+;;; ------------------------------------------------------------
+
+(deftest eql-specializer-dispatch-index
+  "vm-register-method populates the EQL dispatch index for fast lookup."
+  (let* ((state (make-instance 'cl-cc::vm-state))
+         (gf (make-hash-table :test #'equal))
+         (method 'read-method)
+         (inst (cl-cc::make-vm-register-method
+                :gf-reg :r0
+                :specializer '(eql :read)
+                :qualifier nil
+                :method-reg :r1)))
+    (setf (gethash :__methods__ gf) (make-hash-table :test #'equal)
+          (gethash :__eql-index__ gf) (make-hash-table :test #'equal))
+    (cl-cc:vm-reg-set state :r0 gf)
+    (cl-cc:vm-reg-set state :r1 method)
+    (cl-cc::execute-instruction inst state 0 nil)
+    (assert-equal (list method) (cl-cc::%vm-gf-eql-methods gf :read))
+    (assert-equal (list method) (gethash :read (gethash :__eql-index__ gf)))))

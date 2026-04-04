@@ -300,6 +300,12 @@
     (assert-= 2 (length (cl-cc::ast-let-bindings node)))
     (assert-= 1 (length (cl-cc::ast-let-body node)))))
 
+(deftest lower-let-preserves-declarations
+  "lower-sexp-to-ast: let declarations are preserved on ast-let."
+  (let ((node (lower '(let ((x 1)) (declare (ignore x)) 42))))
+    (assert-true (cl-cc::ast-let-p node))
+    (assert-equal '((ignore x)) (cl-cc::ast-let-declarations node))))
+
 (deftest lower-let-bare-symbol
   "lower-sexp-to-ast: (let (x) body) binds x to nil"
   (let ((node (lower '(let (x) x))))
@@ -457,6 +463,16 @@
                         (+ x 1)))))
     (assert-true (cl-cc::ast-lambda-p node))
     (assert-equal '((x fixnum)) (cl-cc::ast-lambda-params node))))
+
+(deftest lower-lambda-with-dynamic-extent-declare
+  "lower-sexp-to-ast: lambda leading dynamic-extent declaration is preserved."
+  (let ((node (lower '(lambda (&rest args)
+                        (declare (dynamic-extent args))
+                        args))))
+    (assert-true (cl-cc::ast-lambda-p node))
+    (assert-eq 'args (cl-cc::ast-lambda-rest-param node))
+    (assert-equal '((dynamic-extent args)) (cl-cc::ast-lambda-declarations node))
+    (assert-= 1 (length (cl-cc::ast-lambda-body node)))))
 
 (deftest lower-labels-form
   "lower-sexp-to-ast: labels form -> ast-labels"

@@ -100,6 +100,40 @@
       (assert-eq 'radius (cl-cc::vm-slot-name-sym inst))
       (assert-true (keywordp reg)))))
 
+(deftest codegen-noescape-make-instance-slot-value-bypasses-heap-object
+  "A non-escaping local make-instance binding can serve slot-value from split slot registers."
+  (let ((ctx (make-codegen-ctx)))
+    (let ((reg (compile-ast
+                (cl-cc::make-ast-let
+                 :bindings (list (cons 'obj (cl-cc::make-ast-make-instance
+                                            :class (cl-cc::make-ast-quote :value 'my-dog)
+                                            :initargs (list (cons :name (cl-cc::make-ast-quote :value 'rex))))))
+                 :body (list (cl-cc::make-ast-slot-value
+                              :object (cl-cc::make-ast-var :name 'obj)
+                              :slot 'name)))
+                ctx)))
+      (assert-true (keywordp reg))
+      (assert-null (codegen-find-inst ctx 'cl-cc::vm-make-obj))
+      (assert-null (codegen-find-inst ctx 'cl-cc::vm-slot-read))
+      (assert-true (codegen-find-inst ctx 'cl-cc::vm-move)))))
+
+(deftest codegen-escaped-make-instance-slot-value-falls-back
+  "Captured make-instance bindings keep the normal heap-backed slot path."
+  (let ((ctx (make-codegen-ctx)))
+    (let ((reg (compile-ast
+                (cl-cc::make-ast-let
+                 :bindings (list (cons 'obj (cl-cc::make-ast-make-instance
+                                            :class (cl-cc::make-ast-quote :value 'my-dog)
+                                            :initargs (list (cons :name (cl-cc::make-ast-quote :value 'rex))))))
+                 :body (list (cl-cc::make-ast-lambda :params '() :body (list (cl-cc::make-ast-var :name 'obj)))
+                             (cl-cc::make-ast-slot-value
+                              :object (cl-cc::make-ast-var :name 'obj)
+                              :slot 'name)))
+                ctx)))
+      (assert-true (keywordp reg))
+      (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-obj))
+      (assert-true (codegen-find-inst ctx 'cl-cc::vm-slot-read)))))
+
 ;;; ─── compile-ast: ast-set-slot-value ─────────────────────────────────────────
 
 (deftest codegen-set-slot-value
@@ -115,6 +149,28 @@
       (assert-true inst)
       (assert-eq 'weight (cl-cc::vm-slot-name-sym inst))
       (assert-true (keywordp reg)))))
+
+(deftest codegen-noescape-make-instance-set-slot-value-bypasses-slot-write
+  "A non-escaping local make-instance binding updates split slot registers directly." 
+  (let ((ctx (make-codegen-ctx)))
+    (let ((reg (compile-ast
+                (cl-cc::make-ast-let
+                 :bindings (list (cons 'obj (cl-cc::make-ast-make-instance
+                                            :class (cl-cc::make-ast-quote :value 'my-dog)
+                                            :initargs (list (cons :weight (cl-cc::make-ast-int :value 1))))))
+                 :body (list (cl-cc::make-ast-set-slot-value
+                              :object (cl-cc::make-ast-var :name 'obj)
+                              :slot 'weight
+                              :value (cl-cc::make-ast-int :value 42))
+                             (cl-cc::make-ast-slot-value
+                              :object (cl-cc::make-ast-var :name 'obj)
+                              :slot 'weight)))
+                ctx)))
+      (assert-true (keywordp reg))
+      (assert-null (codegen-find-inst ctx 'cl-cc::vm-make-obj))
+      (assert-null (codegen-find-inst ctx 'cl-cc::vm-slot-write))
+      (assert-null (codegen-find-inst ctx 'cl-cc::vm-slot-read))
+      (assert-true (codegen-find-inst ctx 'cl-cc::vm-move)))))
 
 ;;; ─── phase2 CLOS helpers ─────────────────────────────────────────────────────
 

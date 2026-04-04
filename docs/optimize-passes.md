@@ -2,11 +2,13 @@
 
 VM optimizer, loop optimization, control flow, range analysis, interprocedural optimization, higher-order function optimization, code size, CPS transformation, SSA construction, speculative JIT compilation.
 
+**実装状況**: 進行中。完了済みの項目は各FR見出しの `✅` で明示する。
+
 ---
 
-### Phase 1 — VM Optimizer Layer (Quick wins)
+### Phase 1 — VM Optimizer Layer (Quick wins)（実装済み）
 
-#### FR-001: ペアホール最適化ルール拡充
+#### FR-001: ペアホール最適化ルール拡充 ✅
 
 - **対象**: `src/parse/prolog.lisp` の `*peephole-rules*`
 - **現状**: 4ルール → 目標30+ルール
@@ -23,7 +25,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 | `(vm-const R1 X)(vm-const R1 Y)` | `(vm-const R1 Y)` | 上書き定数除去 |
 | `L1→L2→L3` | `L1→L3` | Jump chain短縮 |
 
-#### FR-002: 葉関数最適化 (Leaf Function Optimization)
+#### FR-002: 葉関数最適化 (Leaf Function Optimization) ✅
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **検出基準**: 命令列中に `vm-call` / `vm-generic-call` が存在しない関数
@@ -32,7 +34,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - フレームプッシュの軽量化フラグ付与
 - **実装**: 新パス `opt-pass-leaf-detect` → codegen側フラグ参照
 
-#### FR-003: Loop Invariant Code Motion (LICM)
+#### FR-003: Loop Invariant Code Motion (LICM) ✅
 
 - **対象**: `src/optimize/cfg.lisp` + `src/optimize/optimizer.lisp`
 - **前提**: `loop-depth` フィールドが `cfg.lisp` に存在するが未使用
@@ -43,7 +45,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   4. ループ前置ブロック (preheader) への移動
 - **活用**: 既存 `opt-inst-pure-p` 関数
 
-#### FR-010: Sparse Conditional Constant Propagation (SCCP)
+#### FR-010: Sparse Conditional Constant Propagation (SCCP) ✅
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **現状**: Constant Folding はある (`opt-pass-fold`) が、条件分岐を跨いだ伝播がない
@@ -52,7 +54,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - `opt-pass-fold` の拡張または独立パスとして実装
   - 効果: `(if (= x 0) ... ...)` で x=0 が証明可能なら片方の枝を除去
 
-#### FR-011: Global Value Numbering (GVN)
+#### FR-011: Global Value Numbering (GVN) ✅
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **現状**: CSE (`opt-pass-cse`) はローカルな値番号付け
@@ -61,7 +63,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - 支配木を利用した冗長計算除去
   - CSEより広いスコープで重複計算を除去
 
-#### FR-012: Partial Redundancy Elimination (PRE)
+#### FR-012: Partial Redundancy Elimination (PRE) ✅
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **内容**: LICM + CSE の一般化
@@ -70,7 +72,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 6 — ループ高度最適化
+### Phase 6 — ループ高度最適化（未実装）
 
 #### FR-021: Scalar Evolution (SCEV) / 帰納変数解析
 
@@ -103,7 +105,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 7 — 制御フロー最適化
+### Phase 7 — 制御フロー最適化（一部実装: FR-036）
 
 #### FR-032: Jump Threading
 
@@ -160,9 +162,11 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - LLVM `CallSiteSplittingPass` に相当
 - **難易度**: Medium
 
+- **完了済みFR**: FR-036
+
 ---
 
-### Phase 8 — 範囲解析・チェック除去
+### Phase 8 — 範囲解析・チェック除去（未実装）
 
 #### FR-038: Value Range / Interval Analysis
 
@@ -203,7 +207,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 10 — 手続き間最適化
+### Phase 10 — 手続き間最適化（未実装）
 
 #### FR-050: Interprocedural SCCP (IPSCCP)
 
@@ -248,7 +252,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 11 — 高階関数・ストリーム最適化
+### Phase 11 — 高階関数・ストリーム最適化（未実装）
 
 #### FR-054: Stream Fusion / Deforestation
 
@@ -282,7 +286,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 14 — コードサイズ・コード品質最適化
+### Phase 14 — コードサイズ・コード品質最適化（一部実装: FR-077）
 
 #### FR-074: Function Outlining
 
@@ -349,9 +353,11 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: 現状は割り当てのたびに関数呼び出しが発生
 - **難易度**: Medium
 
+- **完了済みFR**: FR-077
+
 ---
 
-### Phase 16 — 制御フロー・比較最適化
+### Phase 16 — 制御フロー・比較最適化（未実装）
 
 #### FR-092: EFLAGS Reuse After CMP (x86-64)
 
@@ -386,7 +392,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 25 — Fixnum / 整数最適化
+### Phase 25 — Fixnum / 整数最適化（未実装）
 
 #### FR-148: Fixnum演算整数範囲追跡 (VM全体)
 
@@ -414,7 +420,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 28 — CPS高度最適化
+### Phase 28 — CPS高度最適化（未実装）
 
 #### FR-159: Administrative Redex Elimination
 
@@ -450,7 +456,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 29 — 高度コードモーション
+### Phase 29 — 高度コードモーション（未実装）
 
 #### FR-163: Code Sinking (逆LICM)
 
@@ -502,7 +508,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 30 — ループ構造最適化
+### Phase 30 — ループ構造最適化（未実装）
 
 #### FR-169: Loop Rotation
 
@@ -522,7 +528,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 6 — CPS・継続特化最適化 (cl-cc固有・高効果)
+### Phase 6 — CPS・継続特化最適化 (cl-cc固有・高効果)（未実装）
 
 #### FR-026: Eta Reduction
 
@@ -581,7 +587,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 19 — VMディスパッチ・SSA改善
+### Phase 19 — VMディスパッチ・SSA改善（未実装）
 
 #### FR-109: Superoperator Synthesis (超命令合成)
 
@@ -653,7 +659,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 60 — SSA高度化・言語機能
+### Phase 60 — SSA高度化・言語機能（未実装）
 
 #### FR-271: Trivial Phi Elimination (自明Phi除去)
 
@@ -697,7 +703,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 69 — 呼び出し規約・VM高速化
+### Phase 69 — 呼び出し規約・VM高速化（一部実装: callee-saved trim）
 
 #### FR-326: Register Snapshot Elimination for Known Calls (既知呼び出しのレジスタスナップショット省略)
 
@@ -739,9 +745,11 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: V8 shared function info / Chez Scheme shared environments。兄弟クロージャの環境共有
 - **難易度**: Medium
 
+- **完了済みFR**: FR-329
+
 ---
 
-### Phase 74 — CPS/IR高度化
+### Phase 74 — CPS/IR高度化（未実装）
 
 #### FR-366: Selective CPS Transformation (選択的CPS変換)
 
@@ -809,7 +817,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 82 — VMアーキテクチャ効率化
+### Phase 82 — VMアーキテクチャ効率化（一部実装: vm-select load-order fix）
 
 #### FR-454: VM Dispatch Optimization (VMディスパッチ最適化)
 
@@ -893,7 +901,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 90 — Sea of Nodes IR & スケジュール自由IR
+### Phase 90 — Sea of Nodes IR & スケジュール自由IR（未実装）
 
 #### FR-530: Sea of Nodes IR (スケジュール自由IR)
 
@@ -913,7 +921,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 91 — SSA形式変換・破壊
+### Phase 91 — SSA形式変換・破壊（未実装）
 
 #### FR-532: Out-of-SSA / Phi Node Coalescing (SSA破壊・Phi合体)
 
@@ -949,7 +957,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 92 — 代数的エフェクト・限定継続
+### Phase 92 — 代数的エフェクト・限定継続（未実装）
 
 #### FR-536: Algebraic Effects / Effect Handlers (代数的エフェクト)
 
@@ -977,7 +985,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 93 — VMアーキテクチャ高度化
+### Phase 93 — VMアーキテクチャ高度化（未実装）
 
 #### FR-539: On-Stack Replacement (OSR — スタック上での差し替え)
 
@@ -1021,7 +1029,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 94 — CPS変換・継続表現高度化
+### Phase 94 — CPS変換・継続表現高度化（一部実装: CPS基盤）
 
 #### FR-544: CPS to Direct Style Transformation (CPS→直接スタイル逆変換)
 
@@ -1049,7 +1057,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 95 — 型付きIR・エフェクトシステム
+### Phase 95 — 型付きIR・エフェクトシステム（未実装）
 
 #### FR-547: Effect System in IR (IRエフェクトシステム)
 
@@ -1077,7 +1085,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 96 — 高度VM・JIT最適化
+### Phase 96 — 高度VM・JIT最適化（未実装）
 
 #### FR-550: Object Shape / Hidden Class Tracking (オブジェクトシェイプ追跡)
 
@@ -1113,7 +1121,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 97 — SSA高度化・末尾最適化補完
+### Phase 97 — SSA高度化・末尾最適化補完（未実装）
 
 #### FR-554: Tail Modulo Cons (TMC — 末尾Cons変換)
 
@@ -1142,7 +1150,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 ---
 ---
 
-### Phase 18 — LTO・PGO・コンパイラ速度
+### Phase 18 — LTO・PGO・コンパイラ速度（未実装）
 
 #### FR-102: LTO Whole-Program Call Graph
 
@@ -1191,7 +1199,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 46 — IC状態機械・型フィードバック高度化
+### Phase 46 — IC状態機械・型フィードバック高度化（未実装）
 
 #### FR-223: IC State Machine (Mono→Poly→Mega遷移)
 
@@ -1219,7 +1227,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 48 — 投機的最適化基盤
+### Phase 48 — 投機的最適化基盤（未実装）
 
 #### FR-231: Stack Map Construction (スタックマップ構築)
 
@@ -1247,7 +1255,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 52 — 動的コンパイル・トレース
+### Phase 52 — 動的コンパイル・トレース（未実装）
 
 #### FR-244: Trace-Based Dynamic JIT (トレースベースJIT)
 
@@ -1267,7 +1275,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 57 — プロファイル高度化
+### Phase 57 — プロファイル高度化（未実装）
 
 #### FR-261: Value Profiling (値プロファイリング)
 
@@ -1295,7 +1303,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 58 — 投機的JIT高度化
+### Phase 58 — 投機的JIT高度化（未実装）
 
 #### FR-267: ThinLTO (モジュール並行リンク時最適化)
 
@@ -1331,7 +1339,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 60 — デオプティマイゼーション・OSR
+### Phase 60 — デオプティマイゼーション・OSR（未実装）
 
 #### FR-280: Structured Deoptimization Framework (構造化デオプティマイゼーション)
 
@@ -1367,7 +1375,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 61 — オブジェクト形状・型特殊化
+### Phase 61 — オブジェクト形状・型特殊化（未実装）
 
 #### FR-284: Object Shape / Hidden Class Tracking (オブジェクト形状追跡)
 
@@ -1395,7 +1403,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 62 — ループ最適化
+### Phase 62 — ループ最適化（未実装）
 
 #### FR-287: Loop Invariant Code Motion (LICM — ループ不変コード移動)
 
@@ -1439,7 +1447,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 63 — コードレイアウト最適化
+### Phase 63 — コードレイアウト最適化（一部実装: hot-cold layout）
 
 #### FR-292: Hot/Cold Code Splitting (ホット/コールドコード分離)
 
@@ -1467,7 +1475,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 64 — 命令スケジューリング・レジスタ圧力
+### Phase 64 — 命令スケジューリング・レジスタ圧力（未実装）
 
 #### FR-295: Instruction Scheduling (命令スケジューリング)
 
@@ -1487,7 +1495,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 65 — ML誘導最適化
+### Phase 65 — ML誘導最適化（未実装）
 
 #### FR-297: ML-Guided Inlining (機械学習誘導インライン展開)
 
@@ -1507,7 +1515,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 66 — セキュリティ・サンドボックス
+### Phase 66 — セキュリティ・サンドボックス（未実装）
 
 #### FR-299: Spectre/Meltdown Mitigations in JIT (JITコードのSpectre対策)
 
@@ -1527,7 +1535,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 67 — WebAssembly JIT
+### Phase 67 — WebAssembly JIT（未実装）
 
 #### FR-301: Tiered Wasm Compilation (段階的Wasmコンパイル)
 
@@ -1547,7 +1555,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 68 — ガード精錬・コードキャッシュ管理・適応的再コンパイル
+### Phase 68 — ガード精錬・コードキャッシュ管理・適応的再コンパイル（未実装）
 
 #### FR-303: Guard Strength Reduction (ガード弱体化)
 

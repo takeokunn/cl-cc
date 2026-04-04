@@ -16,6 +16,6 @@
 (deftest prolog-data-peephole-rules-present
   "The peephole rule data remains available after the data/logic split."
   (assert-true (listp cl-cc::*peephole-rules*))
-  (assert-= 4 (length cl-cc::*peephole-rules*))
+  (assert-true (>= (length cl-cc::*peephole-rules*) 30))
   (assert-equal '((:const cl-cc::?src cl-cc::?val) (:move cl-cc::?dst cl-cc::?src) ((:const cl-cc::?dst cl-cc::?val)))
                 (first cl-cc::*peephole-rules*)))

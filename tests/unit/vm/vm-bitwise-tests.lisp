@@ -22,12 +22,13 @@
 
 (deftest-each vm-bitwise-unary
   "Bitwise unary operations compute correct results."
-  :cases (("lognot-0"    #'cl-cc::make-vm-lognot         0    -1)
-          ("lognot-ff"   #'cl-cc::make-vm-lognot         #xFF  (lognot #xFF))
-          ("logcount-7"  #'cl-cc::make-vm-logcount        7    3)
-          ("logcount-0"  #'cl-cc::make-vm-logcount        0    0)
-          ("intlen-0"    #'cl-cc::make-vm-integer-length  0    0)
-          ("intlen-255"  #'cl-cc::make-vm-integer-length  255  8))
+  :cases (("lognot-0"    #'cl-cc::make-vm-lognot         0          -1)
+          ("bswap-1234"  #'cl-cc::make-vm-bswap          #x12345678 #x78563412)
+          ("lognot-ff"   #'cl-cc::make-vm-lognot         #xFF       (lognot #xFF))
+          ("logcount-7"  #'cl-cc::make-vm-logcount        7          3)
+          ("logcount-0"  #'cl-cc::make-vm-logcount        0          0)
+          ("intlen-0"    #'cl-cc::make-vm-integer-length  0          0)
+          ("intlen-255"  #'cl-cc::make-vm-integer-length  255        8))
   (ctor src expected)
   (assert-= expected (%make-unary ctor src)))
 

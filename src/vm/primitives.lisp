@@ -64,6 +64,16 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
 
 (defun vm-typep-check (value type-sym)
   "Check if VALUE is of TYPE-SYM. Handles both host CL types and VM CLOS types."
+  (let* ((type-pkg (find-package "CL-CC/TYPE"))
+         (primitive-sym (and type-pkg (find-symbol "TYPE-PRIMITIVE" type-pkg)))
+         (name-sym (and type-pkg (find-symbol "NAME" type-pkg)))
+         (primitive-class (and primitive-sym (find-class primitive-sym nil))))
+    (when (and primitive-class name-sym (typep type-sym primitive-class))
+      (setf type-sym (slot-value type-sym name-sym))))
+  (when (symbolp type-sym)
+    (let ((cl-sym (find-symbol (symbol-name type-sym) :cl)))
+      (when cl-sym
+        (setf type-sym cl-sym))))
   (cond
     ((member type-sym '(integer fixnum)) (integerp value))
     ((member type-sym '(float single-float double-float short-float long-float)) (floatp value))
