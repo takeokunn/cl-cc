@@ -162,3 +162,15 @@
       (assert-true (search "rbx" asm))
       (assert-true (search "rbp" asm))
       (assert-true (search "24" asm)))))
+
+(deftest x86-emit-spill-operations-rsp-red-zone
+  "vm-spill-store/load use rsp in assembly when the target spill base is red-zone rsp."
+  (let ((tgt (make-instance 'cl-cc::x86-64-target :spill-base-reg :rsp)))
+    (let ((asm (%x86-emit tgt (make-vm-spill-store :src-reg :rax :slot 1))))
+      (assert-true (search "rsp" asm))
+      (assert-false (search "rbp" asm))
+      (assert-true (search "8" asm)))
+    (let ((asm (%x86-emit tgt (make-vm-spill-load :dst-reg :rbx :slot 1))))
+      (assert-true (search "rsp" asm))
+      (assert-false (search "rbp" asm))
+      (assert-true (search "rbx" asm)))))

@@ -12,20 +12,27 @@
     (let* ((name (second form))
            (options (cddr form))
            (use-list nil)
-           (export-list nil))
-      ;; Parse :use and :export options
+           (export-list nil)
+           (local-nicknames nil))
+      ;; Parse :use, :export, and :local-nicknames options
       (dolist (opt options)
         (when (consp opt)
           (case (first opt)
-            (:use (setf use-list (rest opt)))
-            (:export (setf export-list (rest opt))))))
+             (:use (setf use-list (rest opt)))
+             (:export (setf export-list (rest opt)))
+             (:local-nicknames (setf local-nicknames (rest opt))))))
       `(progn
          (let ((pkg (or (find-package ',name)
-                        (make-package ',name ,@(when use-list `(:use ',use-list))))))
-            ,@(when export-list
-                `((dolist (sym ',export-list)
-                    (export (intern (string sym) pkg) pkg))))
-            (quote ,name))))))
+                         (make-package ',name ,@(when use-list `(:use ',use-list))))))
+           ,@(when local-nicknames
+               `((dolist (entry ',local-nicknames)
+                   (destructuring-bind (nickname target) entry
+                     (ignore-errors (sb-ext:remove-package-local-nickname nickname pkg))
+                     (sb-ext:add-package-local-nickname nickname target pkg)))))
+           ,@(when export-list
+               `((dolist (sym ',export-list)
+                   (export (intern (string sym) pkg) pkg))))
+           (quote ,name))))))
 
 (defun %expand-package-iteration (binding-spec symbol-list-form-fn body)
   (let ((var (first binding-spec))
@@ -347,19 +354,34 @@ Removes old-only slots, adds new-only slots (nil), calls update-instance-for-dif
   (let ((c (gensym "C")))
     `(let ((,c ,class))
        (when (hash-table-p ,c)
-         (gethash :__slots__ ,c)))))
+         (%class-slot-definitions ,c)))))
 
 (our-defmacro class-slots (class)
   (let ((c (gensym "C")))
     `(let ((,c ,class))
        (when (hash-table-p ,c)
-         (gethash :__slots__ ,c)))))
+         (%class-slot-definitions ,c)))))
 
 (our-defmacro class-direct-default-initargs (class)
   (let ((c (gensym "C")))
     `(let ((,c ,class))
        (when (hash-table-p ,c)
          (gethash :__default-initargs__ ,c)))))
+
+(our-defmacro generic-function-methods (gf)
+  (let ((gf-v (gensym "GF"))
+        (ht-v (gensym "HT")))
+    `(let* ((,gf-v ,gf)
+            (,ht-v (and (hash-table-p ,gf-v) (gethash :__methods__ ,gf-v))))
+       (when ,ht-v
+         (hash-table-values ,ht-v)))))
+
+(our-defmacro generic-function-method-combination (gf)
+  (let ((gf-v (gensym "GF")))
+    `(let ((,gf-v ,gf))
+       (if (and (hash-table-p ,gf-v) (gethash :__method-combination__ ,gf-v))
+           (gethash :__method-combination__ ,gf-v)
+           'standard))))
 
 (register-macro 'class-precedence-list
   (lambda (form env)
@@ -389,7 +411,7 @@ Removes old-only slots, adds new-only slots (nil), calls update-instance-for-dif
                            (unless (member ,s-v ,seen-v)
                              (push ,s-v ,result-v)
                              (push ,s-v ,seen-v)))))))
-                 (nreverse ,result-v)))))))))
+                  (nreverse ,result-v)))))))))
 
 ;;; FR-302: parse-float — not in ANSI CL but requested; implemented via read-from-string
 
@@ -416,8 +438,8 @@ For our VM hash-table instances, iterates the class's initarg map."
             (,imap-v  (when (hash-table-p ,class-v)
                         (gethash :__initargs__ ,class-v))))
        (when (and ,imap-v ,args-v)
-         (let ((,pair-v ,args-v))
-           (tagbody
+          (let ((,pair-v ,args-v))
+            (tagbody
             reinit-loop
             (when (and ,pair-v (cdr ,pair-v))
               (let* ((k (car ,pair-v))
@@ -447,8 +469,8 @@ For our VM hash-table instances, like reinitialize-instance but slot-filtered."
             (,imap-v  (when (hash-table-p ,class-v)
                         (gethash :__initargs__ ,class-v))))
        (when (and ,imap-v ,args-v)
-         (let ((,pair-v ,args-v))
-           (tagbody
+          (let ((,pair-v ,args-v))
+            (tagbody
             si-loop
             (when (and ,pair-v (cdr ,pair-v))
               (let* ((k (car ,pair-v))

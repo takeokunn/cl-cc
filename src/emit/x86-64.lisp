@@ -3,7 +3,8 @@
 (defclass target () ())
 
 (defclass x86-64-target (target)
-  ((regalloc :initarg :regalloc :initform nil :accessor target-regalloc)))
+  ((regalloc :initarg :regalloc :initform nil :accessor target-regalloc)
+   (spill-base-reg :initarg :spill-base-reg :initform :rbp :accessor target-spill-base-reg)))
 
 (defgeneric target-register (target virtual-register))
 (defgeneric emit-instruction (target instruction stream))
@@ -214,14 +215,18 @@
 
 (defmethod emit-instruction ((target x86-64-target) (inst vm-spill-store) stream)
   (let* ((src-reg (vm-spill-src inst))
-         (asm-str (cdr (assoc src-reg *phys-reg-to-asm-string*))))
-    (format stream "  mov [rbp - ~A], ~A~%"
+         (asm-str (cdr (assoc src-reg *phys-reg-to-asm-string*)))
+         (base (string-downcase (symbol-name (target-spill-base-reg target)))))
+    (format stream "  mov [~A - ~A], ~A~%"
+            base
             (* (vm-spill-slot inst) 8)
             asm-str)))
 
 (defmethod emit-instruction ((target x86-64-target) (inst vm-spill-load) stream)
   (let* ((dst-reg (vm-spill-dst inst))
-         (asm-str (cdr (assoc dst-reg *phys-reg-to-asm-string*))))
-    (format stream "  mov ~A, [rbp - ~A]~%"
+         (asm-str (cdr (assoc dst-reg *phys-reg-to-asm-string*)))
+         (base (string-downcase (symbol-name (target-spill-base-reg target)))))
+    (format stream "  mov ~A, [~A - ~A]~%"
             asm-str
+            base
             (* (vm-spill-slot inst) 8))))

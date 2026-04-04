@@ -21,6 +21,50 @@ normal hash table for now; weak-table GC integration remains future work.")
         (setf (gethash key *vm-hash-cons-table*)
               (cons car-value cdr-value)))))
 
+;;; ─── Extensible Sequence Protocol (FR-274 partial) ───────────────────────
+
+(defgeneric vm-sequence-elt (sequence index)
+  (:documentation "Return element at INDEX in SEQUENCE."))
+
+(defgeneric vm-sequence-length (sequence)
+  (:documentation "Return the logical length of SEQUENCE."))
+
+(defgeneric vm-make-sequence-like (sequence size &key initial-element)
+  (:documentation "Create a new sequence like SEQUENCE with SIZE elements."))
+
+(defgeneric vm-adjust-sequence (sequence size &key initial-element)
+  (:documentation "Resize SEQUENCE to SIZE, preserving contents when possible."))
+
+(defmethod vm-sequence-elt ((sequence list) index)
+  (elt sequence index))
+
+(defmethod vm-sequence-length ((sequence list))
+  (length sequence))
+
+(defmethod vm-make-sequence-like ((sequence list) size &key (initial-element nil))
+  (declare (ignore sequence))
+  (make-list size :initial-element initial-element))
+
+(defmethod vm-adjust-sequence ((sequence list) size &key (initial-element nil))
+  (let ((prefix (subseq sequence 0 (min size (length sequence)))))
+    (if (< (length prefix) size)
+        (nconc (copy-list prefix)
+               (make-list (- size (length prefix)) :initial-element initial-element))
+        prefix)))
+
+(defmethod vm-sequence-elt ((sequence vector) index)
+  (aref sequence index))
+
+(defmethod vm-sequence-length ((sequence vector))
+  (length sequence))
+
+(defmethod vm-make-sequence-like ((sequence vector) size &key (initial-element nil))
+  (declare (ignore sequence))
+  (make-array size :initial-element initial-element))
+
+(defmethod vm-adjust-sequence ((sequence vector) size &key (initial-element nil))
+  (adjust-array sequence size :initial-element initial-element))
+
 ;;;
 ;;; This file extends the VM with list manipulation instructions including
 ;;; cons cell creation, list accessors, and common list operations.
@@ -261,7 +305,12 @@ normal hash table for now; weak-table GC integration remains future work.")
 
 ;;; Instruction Execution - List Accessors
 
-(define-simple-instruction vm-length :unary length)
+(defmethod execute-instruction ((inst vm-length) state pc labels)
+  (declare (ignore labels))
+  (let ((sequence (vm-reg-get state (vm-src inst))))
+    (vm-reg-set state (vm-dst inst) (vm-sequence-length sequence))
+    (values (1+ pc) nil nil)))
+
 (define-simple-instruction vm-reverse :unary reverse)
 (define-simple-instruction vm-append :binary append)
 
@@ -275,8 +324,8 @@ normal hash table for now; weak-table GC integration remains future work.")
 (defmethod execute-instruction ((inst vm-nth) state pc labels)
   (declare (ignore labels))
   (let ((index (vm-reg-get state (vm-index-reg inst)))
-        (list (vm-reg-get state (vm-list-reg inst))))
-    (vm-reg-set state (vm-dst inst) (nth index list))
+        (sequence (vm-reg-get state (vm-list-reg inst))))
+    (vm-reg-set state (vm-dst inst) (vm-sequence-elt sequence index))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-nthcdr) state pc labels)

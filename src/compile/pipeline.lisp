@@ -1,7 +1,7 @@
 ;;;; compile/pipeline.lisp - Top-Level Compilation API
 (in-package :cl-cc)
 
-(defun compile-expression (expr &key (target :x86_64) type-check (safety 1) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all))
+(defun compile-expression (expr &key (target :x86_64) type-check (safety 1) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   (let* ((ctx (make-instance 'compiler-context :safety safety))
           (expanded-expr (if (typep expr 'ast-node)
                              expr
@@ -32,6 +32,9 @@
                                :pass-pipeline pass-pipeline
                                :print-pass-timings print-pass-timings
                                :timing-stream timing-stream
+                               :print-pass-stats print-pass-stats
+                               :stats-stream stats-stream
+                               :trace-json-stream trace-json-stream
                                :print-opt-remarks print-opt-remarks
                                :opt-remarks-stream opt-remarks-stream
                                :opt-remarks-mode opt-remarks-mode))
@@ -70,15 +73,18 @@
     (:php (parse-php-source source))
     (t (error "Unknown language: ~S" language))))
 
-(defun compile-string (source &key (target :x86_64) type-check (language :lisp) (safety 1) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all))
+(defun compile-string (source &key (target :x86_64) type-check (language :lisp) (safety 1) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   (let ((forms (parse-source-for-language source language)))
     (if (and (eq language :lisp) (= (length forms) 1))
         (compile-expression (first forms)
                             :target target :type-check type-check :safety safety
                             :pass-pipeline pass-pipeline
-                            :print-pass-timings print-pass-timings
-                            :timing-stream timing-stream
-                            :print-opt-remarks print-opt-remarks
+                             :print-pass-timings print-pass-timings
+                             :timing-stream timing-stream
+                             :print-pass-stats print-pass-stats
+                             :stats-stream stats-stream
+                             :trace-json-stream trace-json-stream
+                             :print-opt-remarks print-opt-remarks
                             :opt-remarks-stream opt-remarks-stream
                             :opt-remarks-mode opt-remarks-mode)
         ;; Multiple forms (or non-lisp): use compile-toplevel-forms for sequential macro expansion
@@ -87,11 +93,14 @@
                                 :pass-pipeline pass-pipeline
                                 :print-pass-timings print-pass-timings
                                 :timing-stream timing-stream
+                                :print-pass-stats print-pass-stats
+                                :stats-stream stats-stream
+                                :trace-json-stream trace-json-stream
                                 :print-opt-remarks print-opt-remarks
                                 :opt-remarks-stream opt-remarks-stream
                                 :opt-remarks-mode opt-remarks-mode))))
 
-(defun run-string (source &key stdlib pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all))
+(defun run-string (source &key stdlib pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile and run SOURCE. When STDLIB is true, include standard library."
   (let* ((*package* (find-package :cl-cc))
          (*accessor-slot-map* (make-hash-table :test #'eq))
@@ -99,23 +108,29 @@
          (*labels-boxed-fns* nil)
          (result (if stdlib
                      (compile-string-with-stdlib source :target :vm
-                                                 :pass-pipeline pass-pipeline
-                                                 :print-pass-timings print-pass-timings
-                                                 :timing-stream timing-stream
-                                                 :print-opt-remarks print-opt-remarks
-                                                 :opt-remarks-stream opt-remarks-stream
-                                                 :opt-remarks-mode opt-remarks-mode)
+                                                  :pass-pipeline pass-pipeline
+                                                  :print-pass-timings print-pass-timings
+                                                   :timing-stream timing-stream
+                                                   :print-pass-stats print-pass-stats
+                                                   :stats-stream stats-stream
+                                                   :trace-json-stream trace-json-stream
+                                                   :print-opt-remarks print-opt-remarks
+                                                  :opt-remarks-stream opt-remarks-stream
+                                                  :opt-remarks-mode opt-remarks-mode)
                      (compile-string source :target :vm
-                                     :pass-pipeline pass-pipeline
-                                     :print-pass-timings print-pass-timings
-                                     :timing-stream timing-stream
-                                     :print-opt-remarks print-opt-remarks
-                                     :opt-remarks-stream opt-remarks-stream
-                                     :opt-remarks-mode opt-remarks-mode)))
+                                      :pass-pipeline pass-pipeline
+                                      :print-pass-timings print-pass-timings
+                                       :timing-stream timing-stream
+                                       :print-pass-stats print-pass-stats
+                                       :stats-stream stats-stream
+                                       :trace-json-stream trace-json-stream
+                                       :print-opt-remarks print-opt-remarks
+                                      :opt-remarks-stream opt-remarks-stream
+                                      :opt-remarks-mode opt-remarks-mode)))
          (program (compilation-result-program result)))
     (run-compiled program)))
 
-(defun compile-string-with-stdlib (source &key (target :x86_64) type-check (safety 1) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all))
+(defun compile-string-with-stdlib (source &key (target :x86_64) type-check (safety 1) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile SOURCE with standard library prepended."
   (let ((stdlib-forms (get-stdlib-forms))
         (user-forms (parse-all-forms source)))
@@ -126,6 +141,9 @@
                             :pass-pipeline pass-pipeline
                             :print-pass-timings print-pass-timings
                             :timing-stream timing-stream
+                            :print-pass-stats print-pass-stats
+                            :stats-stream stats-stream
+                            :trace-json-stream trace-json-stream
                             :print-opt-remarks print-opt-remarks
                             :opt-remarks-stream opt-remarks-stream
                             :opt-remarks-mode opt-remarks-mode)))
@@ -340,16 +358,19 @@ EXTERNAL-FORMAT is accepted but ignored (UTF-8 assumed)."
                      (format *standard-output* "~S~%" last-result))))))))))))
 
 
-(defun run-string-typed (source &key (mode :warn) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all))
+(defun run-string-typed (source &key (mode :warn) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile and run SOURCE with type checking enabled.
    MODE is :WARN (default, log warnings) or :STRICT (signal errors)."
   (let* ((result (compile-string source :target :vm :type-check mode
-                                 :pass-pipeline pass-pipeline
-                                 :print-pass-timings print-pass-timings
-                                 :timing-stream timing-stream
-                                 :print-opt-remarks print-opt-remarks
-                                 :opt-remarks-stream opt-remarks-stream
-                                 :opt-remarks-mode opt-remarks-mode))
+                                  :pass-pipeline pass-pipeline
+                                  :print-pass-timings print-pass-timings
+                                   :timing-stream timing-stream
+                                   :print-pass-stats print-pass-stats
+                                   :stats-stream stats-stream
+                                   :trace-json-stream trace-json-stream
+                                   :print-opt-remarks print-opt-remarks
+                                  :opt-remarks-stream opt-remarks-stream
+                                  :opt-remarks-mode opt-remarks-mode))
          (program (compilation-result-program result)))
     (values (run-compiled program) (compilation-result-type result))))
 
@@ -393,7 +414,7 @@ EXTERNAL-FORMAT is accepted but ignored (UTF-8 assumed)."
                 (write-sequence buffer out :end count)))))
   to)
 
-(defun compile-to-native (source &key (arch :x86-64) (output-file "a.out") (language :lisp) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all))
+(defun compile-to-native (source &key (arch :x86-64) (output-file "a.out") (language :lisp) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile SOURCE to a native Mach-O executable.
 SOURCE can be a string (single expression) or a list of forms.
 ARCH is :X86-64 or :ARM64.
@@ -405,15 +426,21 @@ Returns the output file path on success."
                      (compile-string source :target :vm :language language
                                      :pass-pipeline pass-pipeline
                                      :print-pass-timings print-pass-timings
-                                     :timing-stream timing-stream
-                                     :print-opt-remarks print-opt-remarks
+                                      :timing-stream timing-stream
+                                      :print-pass-stats print-pass-stats
+                                      :stats-stream stats-stream
+                                      :trace-json-stream trace-json-stream
+                                      :print-opt-remarks print-opt-remarks
                                      :opt-remarks-stream opt-remarks-stream
                                      :opt-remarks-mode opt-remarks-mode)
                      (compile-expression source :target :vm
                                          :pass-pipeline pass-pipeline
                                          :print-pass-timings print-pass-timings
-                                         :timing-stream timing-stream
-                                         :print-opt-remarks print-opt-remarks
+                                          :timing-stream timing-stream
+                                          :print-pass-stats print-pass-stats
+                                          :stats-stream stats-stream
+                                          :trace-json-stream trace-json-stream
+                                          :print-opt-remarks print-opt-remarks
                                          :opt-remarks-stream opt-remarks-stream
                                          :opt-remarks-mode opt-remarks-mode)))
          (program    (compilation-result-program result))
@@ -423,7 +450,7 @@ Returns the output file path on success."
          (builder    (cl-cc/binary:make-mach-o-builder arch)))
     (%write-native-binary builder code-bytes output-file)))
 
-(defun compile-file-to-native (input-file &key (arch :x86-64) (output-file nil) (language nil) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all))
+(defun compile-file-to-native (input-file &key (arch :x86-64) (output-file nil) (language nil) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile a CL-CC source file to a native Mach-O executable.
 INPUT-FILE is the path to the source file.
 OUTPUT-FILE defaults to INPUT-FILE with no extension.
@@ -452,17 +479,23 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
                      (compile-string source :target :vm :language :php
                                      :pass-pipeline pass-pipeline
                                      :print-pass-timings print-pass-timings
-                                     :timing-stream timing-stream
-                                     :print-opt-remarks print-opt-remarks
+                                      :timing-stream timing-stream
+                                      :print-pass-stats print-pass-stats
+                                      :stats-stream stats-stream
+                                      :trace-json-stream trace-json-stream
+                                      :print-opt-remarks print-opt-remarks
                                      :opt-remarks-stream opt-remarks-stream
                                      :opt-remarks-mode opt-remarks-mode)
                      (compile-toplevel-forms source :target :vm
-                                             :pass-pipeline pass-pipeline
-                                             :print-pass-timings print-pass-timings
-                                             :timing-stream timing-stream
-                                             :print-opt-remarks print-opt-remarks
-                                             :opt-remarks-stream opt-remarks-stream
-                                             :opt-remarks-mode opt-remarks-mode)))
+                                              :pass-pipeline pass-pipeline
+                                              :print-pass-timings print-pass-timings
+                                               :timing-stream timing-stream
+                                               :print-pass-stats print-pass-stats
+                                               :stats-stream stats-stream
+                                               :trace-json-stream trace-json-stream
+                                               :print-opt-remarks print-opt-remarks
+                                              :opt-remarks-stream opt-remarks-stream
+                                              :opt-remarks-mode opt-remarks-mode)))
          (program    (compilation-result-program result))
          (code-bytes (ecase arch
                        (:x86-64 (compile-to-x86-64-bytes program))

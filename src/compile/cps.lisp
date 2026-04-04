@@ -43,6 +43,23 @@
              (let ((,sym ,tmp))
                ,(%cps-sexp-let-bindings (cdr bindings) body k)))))))
 
+(defun %cps-sexp-if (node k)
+  "CPS-transform an IF form represented by NODE."
+  (let ((v (gensym "COND")))
+    (%cps-sexp-node (second node)
+      `(lambda (,v)
+         (if ,v
+             ,(%cps-sexp-node (third node) k)
+             ,(%cps-sexp-node (fourth node) k))))))
+
+(defun %cps-sexp-print (node k)
+  "CPS-transform a PRINT form represented by NODE."
+  (let ((v (gensym "PRINT")))
+    (%cps-sexp-node (second node)
+      `(lambda (,v)
+         (print ,v)
+         (funcall ,k ,v)))))
+
 (defun %cps-sexp-node (node k)
   "CPS-transform a single bootstrap S-expression NODE with continuation K."
   (cond
@@ -53,26 +70,17 @@
        ((+ - *)
         (%cps-sexp-binop (car node) (second node) (third node) k))
         (if
-         (let ((v (gensym "COND")))
-           (%cps-sexp-node (second node)
-             `(lambda (,v)
-                (if ,v
-                    ,(%cps-sexp-node (third node) k)
-                    ,(%cps-sexp-node (fourth node) k))))))
+         (%cps-sexp-if node k))
         (progn
          (%cps-sexp-progn (cdr node) k))
-       (let
-        (%cps-sexp-let-bindings (second node)
-                                `(progn ,@(cddr node))
-                                k))
-       (print
-        (let ((v (gensym "PRINT")))
-          (%cps-sexp-node (second node)
-            `(lambda (,v)
-               (print ,v)
-               (funcall ,k ,v)))))
-       (otherwise
-        (error "Unsupported form in CPS: ~S" (car node)))))
+        (let
+         (%cps-sexp-let-bindings (second node)
+                                 `(progn ,@(cddr node))
+                                 k))
+        (print
+         (%cps-sexp-print node k))
+        (otherwise
+         (error "Unsupported form in CPS: ~S" (car node)))))
     (t
       (error "Unsupported node in CPS: ~S" node))))
 

@@ -607,6 +607,14 @@
   "Return T when INST produces a fresh heap-like object identity."
   (typep inst '(or vm-cons vm-make-array vm-closure vm-make-closure)))
 
+(defun opt-heap-root-kind (inst)
+  "Return a symbolic heap kind for fresh heap-producing INST." 
+  (cond
+    ((typep inst 'vm-cons) :cons)
+    ((typep inst 'vm-make-array) :array)
+    ((typep inst '(or vm-closure vm-make-closure)) :closure)
+    (t nil)))
+
 (defun opt-compute-heap-aliases (instructions)
   "Compute a conservative EQ hash-table reg -> canonical heap root.
 
@@ -628,6 +636,127 @@ This is a small FR-115 style oracle intended for downstream passes."
           (dst
            (remhash dst roots)))))
     roots))
+
+(defun opt-compute-points-to (instructions)
+  "Compute a conservative flow-sensitive points-to map for heap-like registers.
+
+The result is an EQ hash-table reg -> canonical root register. Fresh heap
+allocators create a new root, vm-move propagates the source root, and any other
+destination write kills the current points-to fact." 
+  (let ((points-to (make-hash-table :test #'eq)))
+    (dolist (inst instructions points-to)
+      (let ((dst (opt-inst-dst inst)))
+        (cond
+          ((and dst (opt-heap-root-inst-p inst))
+           (setf (gethash dst points-to) dst))
+          ((typep inst 'vm-move)
+           (multiple-value-bind (root found-p)
+               (gethash (vm-move-src inst) points-to)
+             (if found-p
+                 (setf (gethash dst points-to) root)
+                 (remhash dst points-to))))
+          (dst
+           (remhash dst points-to)))))
+    points-to))
+
+(defun opt-points-to-root (reg points-to)
+  "Return the current root object for REG under POINTS-TO, or NIL." 
+  (gethash reg points-to))
+
+(defun opt-make-interval (lo hi)
+  "Construct a closed integer interval [LO, HI]." 
+  (cons lo hi))
+
+(defun opt-interval-lo (interval)
+  (car interval))
+
+(defun opt-interval-hi (interval)
+  (cdr interval))
+
+(defun opt-interval-add (a b)
+  "Add two intervals conservatively." 
+  (opt-make-interval (+ (opt-interval-lo a) (opt-interval-lo b))
+                     (+ (opt-interval-hi a) (opt-interval-hi b))))
+
+(defun opt-interval-sub (a b)
+  "Subtract interval B from A conservatively." 
+  (opt-make-interval (- (opt-interval-lo a) (opt-interval-hi b))
+                     (- (opt-interval-hi a) (opt-interval-lo b))))
+
+(defun opt-interval-mul (a b)
+  "Multiply two intervals conservatively." 
+  (let* ((p1 (* (opt-interval-lo a) (opt-interval-lo b)))
+         (p2 (* (opt-interval-lo a) (opt-interval-hi b)))
+         (p3 (* (opt-interval-hi a) (opt-interval-lo b)))
+         (p4 (* (opt-interval-hi a) (opt-interval-hi b))))
+    (opt-make-interval (min p1 p2 p3 p4)
+                       (max p1 p2 p3 p4))))
+
+(defun opt-compute-constant-intervals (instructions)
+  "Compute a conservative interval map from straight-line constant arithmetic.
+
+Handles vm-const and interval propagation through vm-add/vm-sub/vm-mul when
+both operands already have known intervals." 
+  (let ((intervals (make-hash-table :test #'eq)))
+    (dolist (inst instructions intervals)
+      (typecase inst
+        (vm-const
+         (when (integerp (vm-value inst))
+           (setf (gethash (vm-dst inst) intervals)
+                 (opt-make-interval (vm-value inst) (vm-value inst)))))
+        (vm-add
+         (let ((lhs (gethash (vm-lhs inst) intervals))
+               (rhs (gethash (vm-rhs inst) intervals)))
+           (if (and lhs rhs)
+               (setf (gethash (vm-dst inst) intervals)
+                     (opt-interval-add lhs rhs))
+               (remhash (vm-dst inst) intervals))))
+        (vm-sub
+         (let ((lhs (gethash (vm-lhs inst) intervals))
+               (rhs (gethash (vm-rhs inst) intervals)))
+           (if (and lhs rhs)
+               (setf (gethash (vm-dst inst) intervals)
+                     (opt-interval-sub lhs rhs))
+               (remhash (vm-dst inst) intervals))))
+        (vm-mul
+         (let ((lhs (gethash (vm-lhs inst) intervals))
+               (rhs (gethash (vm-rhs inst) intervals)))
+           (if (and lhs rhs)
+               (setf (gethash (vm-dst inst) intervals)
+                     (opt-interval-mul lhs rhs))
+               (remhash (vm-dst inst) intervals))))
+        (t
+         (let ((dst (opt-inst-dst inst)))
+           (when dst
+             (remhash dst intervals))))))))
+
+(defun opt-compute-heap-kinds (instructions)
+  "Compute a conservative root -> heap-kind table for TBAA-style checks." 
+  (let ((points-to (opt-compute-points-to instructions))
+        (kinds (make-hash-table :test #'eq)))
+    (dolist (inst instructions kinds)
+      (let ((dst (opt-inst-dst inst)))
+        (when (and dst (opt-heap-root-inst-p inst))
+          (let ((root (gethash dst points-to)))
+            (when root
+              (setf (gethash root kinds) (opt-heap-root-kind inst)))))))
+    kinds))
+
+(defun opt-may-alias-by-type-p (reg-a reg-b points-to heap-kinds)
+  "Return T if REG-A and REG-B may alias under type-based heap classification.
+
+If both roots and kinds are known and the kinds differ, return NIL. Otherwise
+stay conservative and return T." 
+  (let ((root-a (gethash reg-a points-to))
+        (root-b (gethash reg-b points-to)))
+    (cond
+      ((or (null root-a) (null root-b)) t)
+      ((eq root-a root-b) t)
+      (t (let ((kind-a (gethash root-a heap-kinds))
+               (kind-b (gethash root-b heap-kinds)))
+           (if (and kind-a kind-b)
+               (eq kind-a kind-b)
+               t))))))
 
 (defun opt-must-alias-p (reg-a reg-b alias-roots)
   "Return T when REG-A and REG-B definitely alias under ALIAS-ROOTS."
@@ -1001,45 +1130,46 @@ replaced with vm-const 1/0."
         (cfg-flatten cfg)))))
 
 (defun opt-pass-dead-store-elim (instructions)
-  "Eliminate overwritten vm-set-global stores in straight-line code.
+  "Eliminate overwritten stores in straight-line code.
 
    Conservative rules:
-   - a later store to the same global kills the earlier pending store
-   - vm-get-global forces the matching pending store to be emitted first
+   - a later store to the same global/slot kills the earlier pending store
+   - vm-get-global / vm-slot-read force the matching pending store to be emitted first
    - labels and non-pure instructions flush all pending stores"
   (let ((result nil)
-        (pending-order nil)
-        (pending-by-name (make-hash-table :test #'equal)))
+         (pending-order nil)
+         (pending-by-name (make-hash-table :test #'equal))
+         (alias-roots (opt-compute-heap-aliases instructions)))
     (labels ((emit (inst)
                (push inst result))
-             (pending-store (name)
-               (gethash name pending-by-name))
-             (remember-store (name inst)
-               (unless (gethash name pending-by-name)
-                 (push name pending-order))
-               (setf (gethash name pending-by-name) inst))
-             (drop-pending (name)
-               (remhash name pending-by-name)
-               (setf pending-order (remove name pending-order :test #'equal)))
-             (flush-one (name)
-               (let ((inst (pending-store name)))
+             (pending-store (key)
+               (gethash key pending-by-name))
+             (remember-store (key inst)
+               (unless (gethash key pending-by-name)
+                 (push key pending-order))
+               (setf (gethash key pending-by-name) inst))
+             (drop-pending (key)
+               (remhash key pending-by-name)
+               (setf pending-order (remove key pending-order :test #'equal)))
+             (flush-one (key)
+               (let ((inst (pending-store key)))
                  (when inst
                    (emit inst)
-                   (drop-pending name))))
+                   (drop-pending key))))
              (flush-all ()
-               (dolist (name (nreverse pending-order))
-                 (flush-one name))))
-       (dolist (inst instructions)
-         (let ((dst (opt-inst-dst inst)))
-           (when dst
-             (dolist (name (copy-list pending-order))
-               (let ((pending (pending-store name)))
-                 (when (and pending (eq (vm-src pending) dst))
-                   (flush-one name))))))
-         (typecase inst
-           (vm-label
-            (flush-all)
-            (emit inst))
+               (dolist (key (nreverse pending-order))
+                  (flush-one key))))
+      (dolist (inst instructions)
+        (let ((dst (opt-inst-dst inst)))
+          (when dst
+            (dolist (key (copy-list pending-order))
+              (let ((pending (pending-store key)))
+                (when (and pending (eq (vm-src pending) dst))
+                  (flush-one key))))))
+        (typecase inst
+          (vm-label
+           (flush-all)
+           (emit inst))
           ((or vm-jump vm-jump-zero vm-ret vm-halt)
            (flush-all)
            (emit inst))
@@ -1047,14 +1177,25 @@ replaced with vm-const 1/0."
            (let ((name (vm-global-name inst)))
              (flush-one name)
              (emit inst)))
+          (vm-slot-read
+           (let ((key (opt-slot-alias-key (vm-obj-reg inst)
+                                          (vm-slot-name-sym inst)
+                                          alias-roots)))
+             (flush-one key)
+             (emit inst)))
           (vm-set-global
            (remember-store (vm-global-name inst) inst))
+          (vm-slot-write
+           (remember-store (opt-slot-alias-key (vm-obj-reg inst)
+                                               (vm-slot-name-sym inst)
+                                               alias-roots)
+                           inst))
           (t
            (unless (opt-inst-pure-p inst)
              (flush-all))
            (emit inst))))
-       (flush-all)
-       (nreverse result))))
+      (flush-all)
+      (nreverse result))))
 
 (defun opt-pass-store-to-load-forward (instructions)
   "Forward pending vm-set-global values into matching vm-get-global loads.
@@ -2080,7 +2221,7 @@ replaced with vm-const 1/0."
 
 (defun opt-pass-inline-iterative (instructions)
   "Thresholded inline pass used inside the convergence loop."
-  (opt-pass-inline instructions :threshold 15))
+  (opt-pass-inline instructions :threshold :adaptive))
 
 (defparameter *opt-convergence-passes*
   (list #'opt-pass-inline-iterative
@@ -2197,6 +2338,75 @@ MODE is one of :all, :changed, or :missed."
           passes
           :initial-value prog))
 
+(defun opt-run-passes-once-with-stats (prog passes stream)
+  "Apply PASSES once, writing simple per-pass stats to STREAM.
+
+Each line reports the instruction count before/after the pass and whether the
+pass changed the IR."
+  (reduce (lambda (p f)
+            (let* ((before-count (length p))
+                   (next (funcall f p))
+                   (after-count (length next))
+                   (changed (not (opt-converged-p p next))))
+              (format stream "~A: before=~D after=~D delta=~D changed=~A~%"
+                      f before-count after-count (- after-count before-count)
+                      (if changed "yes" "no"))
+              next))
+          passes
+          :initial-value prog))
+
+(defun %opt-pass-name-string (f)
+  (string-upcase (format nil "~A" f)))
+
+(defun %opt-write-trace-json (stream events)
+  "Write Chrome-trace-compatible JSON EVENTS to STREAM."
+  (format stream "{\"traceEvents\":[")
+  (loop for event in events
+        for i from 0
+        do (when (> i 0) (format stream ","))
+           (format stream
+                   "{\"name\":~S,\"ph\":\"X\",\"pid\":1,\"tid\":1,\"ts\":~D,\"dur\":~D}"
+                   (getf event :name)
+                   (getf event :ts-us)
+                   (getf event :dur-us)))
+  (format stream "]}~%"))
+
+(defun opt-run-passes-once-with-reporting (prog passes &key print-pass-timings timing-stream print-pass-stats stats-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) trace-enabled trace-events initial-ts-us)
+  "Apply PASSES once while emitting any enabled reports.
+
+Returns three values: next program, updated TRACE-EVENTS list, and updated
+timestamp cursor in microseconds."
+  (let ((current prog)
+        (events trace-events)
+        (ts-us initial-ts-us))
+    (dolist (f passes)
+      (let* ((before current)
+             (before-count (length before))
+             (start (get-internal-real-time))
+             (next (funcall f current))
+             (elapsed-seconds (/ (- (get-internal-real-time) start)
+                                 internal-time-units-per-second))
+             (dur-us (round (* elapsed-seconds 1000000)))
+             (after-count (length next))
+             (changed (not (opt-converged-p before next)))
+             (name (%opt-pass-name-string f)))
+        (when print-pass-timings
+          (format timing-stream "~A: ~,6Fs~%" f elapsed-seconds))
+        (when print-pass-stats
+          (format stats-stream "~A: before=~D after=~D delta=~D changed=~A~%"
+                  f before-count after-count (- after-count before-count)
+                  (if changed "yes" "no")))
+        (when (and print-opt-remarks
+                   (or (eq opt-remarks-mode :all)
+                       (and changed (eq opt-remarks-mode :changed))
+                       (and (not changed) (eq opt-remarks-mode :missed))))
+          (format opt-remarks-stream "~A: ~A~%" f (if changed "changed" "missed")))
+        (when trace-enabled
+          (push (list :name name :ts-us ts-us :dur-us dur-us) events)
+          (incf ts-us dur-us))
+        (setf current next)))
+    (values current events ts-us)))
+
 (defun opt-run-passes-once (prog)
   "Apply every convergence pass in *opt-convergence-passes* once, left to right."
   (reduce (lambda (p f) (funcall f p)) *opt-convergence-passes* :initial-value prog))
@@ -2206,25 +2416,84 @@ MODE is one of :all, :changed, or :missed."
   (and (= (length prev) (length next))
        (every #'eq prev next)))
 
-(defun optimize-instructions (instructions &key (max-iterations 20) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all))
+(defun opt-adaptive-max-iterations (instructions &key (base-iterations 20) (min-iterations 6) (max-iterations 50))
+  "Return a conservative adaptive convergence budget for INSTRUCTIONS.
+
+Small instruction streams converge quickly and therefore use fewer iterations,
+while larger programs get a modestly larger budget. This is a helper-level
+slice of FR-150; it does not use runtime profile counters yet."
+  (let ((n (length instructions)))
+    (min max-iterations
+         (max min-iterations
+              (+ base-iterations
+                 (cond
+                   ((< n 50) -12)
+                   ((< n 150) -6)
+                   ((< n 400) 0)
+                   ((< n 800) 8)
+                   (t 15)))))))
+
+(defun opt-verify-instructions (instructions &key pass-name)
+  "Conservative VM-level verifier for optimizer/debugging use.
+Checks duplicate labels, unknown jump targets, and obvious use-before-defs in a
+single linear instruction stream. Returns T on success, signals ERROR on failure."
+  (let ((labels (make-hash-table :test #'equal))
+        (defined (make-hash-table :test #'eq))
+        (pass-name (or pass-name "<unknown-pass>")))
+    ;; Pass 1: label collection / duplicate detection.
+    (dolist (inst instructions)
+      (when (typep inst 'vm-label)
+        (let ((name (vm-name inst)))
+          (when (gethash name labels)
+            (error "~A verifier: duplicate label ~A" pass-name name))
+          (setf (gethash name labels) t))))
+    ;; Pass 2: reference + use-before-def checks.
+    (dolist (inst instructions)
+      (typecase inst
+        ((or vm-jump vm-jump-zero)
+         (unless (gethash (vm-label-name inst) labels)
+           (error "~A verifier: unknown label target ~A" pass-name (vm-label-name inst)))))
+      (dolist (reg (opt-inst-read-regs inst))
+        (unless (gethash reg defined)
+          (error "~A verifier: register ~A used before definition in ~S"
+                 pass-name reg (instruction->sexp inst))))
+      (let ((dst (opt-inst-dst inst)))
+        (when dst
+          (setf (gethash dst defined) t))))
+    t))
+
+(defun optimize-instructions (instructions &key (max-iterations 20) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Run the full multi-pass optimization pipeline on a VM instruction sequence.
    Runs until no changes or MAX-ITERATIONS reached."
   (let ((prog instructions)
-        (passes (opt-resolve-pass-pipeline pass-pipeline))
-        (timing-stream (or timing-stream *standard-output*))
-        (opt-remarks-stream (or opt-remarks-stream *standard-output*)))
+         (max-iterations (if (eq max-iterations :adaptive)
+                             (opt-adaptive-max-iterations instructions)
+                             max-iterations))
+         (passes (opt-resolve-pass-pipeline pass-pipeline))
+         (timing-stream (or timing-stream *standard-output*))
+         (opt-remarks-stream (or opt-remarks-stream *standard-output*))
+         (stats-stream (or stats-stream *standard-output*))
+         (trace-events nil)
+         (trace-ts-us 0))
     (loop for iteration from 0 below max-iterations
           for prev = prog
-          do (setf prog (cond
-                          (print-pass-timings
-                           (opt-run-passes-once-with-timings prog passes timing-stream))
-                          (print-opt-remarks
-                           (opt-run-passes-once-with-remarks prog passes opt-remarks-stream :mode opt-remarks-mode))
-                          (t
-                           (reduce (lambda (p f) (funcall f p)) passes :initial-value prog))))
+          do (multiple-value-setq (prog trace-events trace-ts-us)
+               (opt-run-passes-once-with-reporting prog passes
+                                                  :print-pass-timings print-pass-timings
+                                                  :timing-stream timing-stream
+                                                  :print-pass-stats print-pass-stats
+                                                  :stats-stream stats-stream
+                                                  :print-opt-remarks print-opt-remarks
+                                                  :opt-remarks-stream opt-remarks-stream
+                                                  :opt-remarks-mode opt-remarks-mode
+                                                  :trace-enabled (not (null trace-json-stream))
+                                                  :trace-events trace-events
+                                                  :initial-ts-us trace-ts-us))
           when (opt-converged-p prev prog)
           return prog)
     (when *enable-prolog-peephole*
       (setf prog (mapcar #'sexp->instruction
                          (apply-prolog-peephole (mapcar #'instruction->sexp prog)))))
+    (when trace-json-stream
+      (%opt-write-trace-json trace-json-stream (nreverse trace-events)))
     (opt-pass-leaf-detect prog)))

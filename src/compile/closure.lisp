@@ -205,3 +205,67 @@ of BINDING-ESCAPE-KINDS-IN-BODY. SAFE-CONSUMERS is a list of uppercase
 function names that are allowed to consume the binding without causing escape."
   (not (null (binding-escape-kinds-in-body body-forms binding-name
                                            :safe-consumers safe-consumers))))
+
+(defun closure-capture-key (captured-vars)
+  "Return a canonical key for CAPTURED-VARS.
+
+CAPTURED-VARS is an alist of (var . reg). The key ignores order and groups by
+captured variable names only, which is enough to detect sibling closures that
+could share one environment record." 
+  (sort (remove-duplicates (mapcar #'car captured-vars) :test #'eq)
+        #'string< :key #'symbol-name))
+
+(defun group-shared-sibling-captures (captured-var-lists)
+  "Group sibling closure captures that share the same captured variable set.
+
+Returns an EQUAL hash-table mapping canonical capture keys to the list of
+captured-var alists using that key. Singleton groups are omitted." 
+  (let ((all-groups (make-hash-table :test #'equal))
+        (shared-only (make-hash-table :test #'equal)))
+    (dolist (captures captured-var-lists)
+      (push captures (gethash (closure-capture-key captures) all-groups)))
+    (maphash (lambda (key group)
+               (when (> (length group) 1)
+                 (setf (gethash key shared-only) (nreverse group))))
+             all-groups)
+    shared-only))
+
+(defun binding-direct-call-count-in-body (body-forms binding-name)
+  "Count direct AST-CALL occurrences of BINDING-NAME in BODY-FORMS." 
+  (labels ((count-node (node)
+             (typecase node
+               (ast-call
+                (+ (if (eq (ast-call-func node) binding-name) 1 0)
+                   (reduce #'+ (mapcar #'count-node (ast-call-args node)) :initial-value 0)))
+               (t (reduce #'+ (mapcar #'count-node (ast-children node)) :initial-value 0)))))
+    (if (listp body-forms)
+        (reduce #'+ (mapcar #'count-node body-forms) :initial-value 0)
+        0)))
+
+(defun binding-one-shot-p (body-forms binding-name &key (safe-consumers nil))
+  "Return T when BINDING-NAME is a non-escaping direct call used exactly once." 
+  (and (= 1 (binding-direct-call-count-in-body body-forms binding-name))
+       (not (binding-escapes-in-body-p body-forms binding-name
+                                       :safe-consumers safe-consumers))))
+
+(defun closure-sharing-key (entry-label captured-vars)
+  "Return a canonical sharing key for closures with ENTRY-LABEL and CAPTURED-VARS." 
+  (list entry-label (closure-capture-key captured-vars)))
+
+(defun group-shareable-closures (closure-descriptors)
+  "Group closures that share both code label and capture set.
+
+CLOSURE-DESCRIPTORS is a list of plist-like records containing at least
+  :entry-label and :captured-vars.
+Singleton groups are omitted." 
+  (let ((all-groups (make-hash-table :test #'equal))
+        (shared-only (make-hash-table :test #'equal)))
+    (dolist (desc closure-descriptors)
+      (push desc (gethash (closure-sharing-key (getf desc :entry-label)
+                                               (getf desc :captured-vars))
+                          all-groups)))
+    (maphash (lambda (key group)
+               (when (> (length group) 1)
+                 (setf (gethash key shared-only) (nreverse group))))
+             all-groups)
+    shared-only))

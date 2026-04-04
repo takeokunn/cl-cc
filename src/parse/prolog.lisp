@@ -28,6 +28,39 @@
   "Return T if RESULT represents a unification failure (distinguished from empty env)."
   (eq result :unify-fail))
 
+(defun %logic-binding (var env)
+  "Return VAR's binding pair in ENV, or NIL when VAR is unbound."
+  (assoc var env))
+
+(defun %bind-logic-var (var term env)
+  "Extend ENV with VAR bound to TERM, unless that would create a cycle."
+  (if (occurs-check var term env)
+      :unify-fail
+      (acons var term env)))
+
+(defun %unify-bound-logic-var (var term env)
+  "Unify TERM with VAR's current binding in ENV, or bind VAR if unbound."
+  (let ((binding (%logic-binding var env)))
+    (if binding
+        (unify (cdr binding) term env)
+        (%bind-logic-var var term env))))
+
+(defun %unify-two-logic-vars (term1 term2 env)
+  "Unify two logic variables, preserving aliases already present in ENV."
+  (let ((v1 (%logic-binding term1 env))
+        (v2 (%logic-binding term2 env)))
+    (cond ((and v1 v2) (unify (cdr v1) (cdr v2) env))
+          (v1 (unify (cdr v1) term2 env))
+          (v2 (unify term1 (cdr v2) env))
+          (t (acons term1 term2 env)))))
+
+(defun %unify-cons-terms (term1 term2 env)
+  "Unify TERM1 and TERM2 component-wise when both are cons cells."
+  (let ((env1 (unify (car term1) (car term2) env)))
+    (if (unify-failed-p env1)
+        :unify-fail
+        (unify (cdr term1) (cdr term2) env1))))
+
 (defun unify (term1 term2 &optional (env nil))
   "Unify two terms, returning updated environment or :UNIFY-FAIL on failure.
    TERM1 and TERM2 can be atoms, logic variables (?x), or cons cells.
@@ -36,29 +69,16 @@
   (cond
     ;; Both are logic variables
     ((and (logic-var-p term1) (logic-var-p term2))
-     (let ((v1 (assoc term1 env))
-           (v2 (assoc term2 env)))
-       (cond ((and v1 v2) (unify (cdr v1) (cdr v2) env))
-             (v1 (unify (cdr v1) term2 env))
-             (v2 (unify term1 (cdr v2) env))
-             (t (acons term1 term2 env)))))
+     (%unify-two-logic-vars term1 term2 env))
     ;; term1 is logic variable
     ((logic-var-p term1)
-     (let ((binding (assoc term1 env)))
-       (if binding
-           (unify (cdr binding) term2 env)
-           (if (occurs-check term1 term2 env)
-               :unify-fail  ; Cycle detected
-               (acons term1 term2 env)))))
+     (%unify-bound-logic-var term1 term2 env))
     ;; term2 is logic variable
     ((logic-var-p term2)
      (unify term2 term1 env))
     ;; Both are cons cells — use unify-failed-p to distinguish nil-env from failure
     ((and (consp term1) (consp term2))
-     (let ((env1 (unify (car term1) (car term2) env)))
-       (if (unify-failed-p env1)
-           :unify-fail
-           (unify (cdr term1) (cdr term2) env1))))
+     (%unify-cons-terms term1 term2 env))
     ;; Both are equal atoms
     ((equal term1 term2) env)
     ;; Unification failure
@@ -179,6 +199,40 @@
   (when (eval-lisp-condition (first args) env)
     (funcall k env)))
 
+(defun %goal-predicate-and-args (goal)
+  "Return GOAL's predicate and arg list.
+GOAL may be a prolog-goal object or a raw list form."
+  (if (prolog-goal-p goal)
+      (values (goal-predicate goal) (goal-args goal))
+      (values (car goal) (cdr goal))))
+
+(defun %atomic-cut-goal-p (goal)
+  "Return true when GOAL denotes the cut operator as a bare atom."
+  (and (symbolp goal)
+       (not (prolog-goal-p goal))
+       (string= (symbol-name goal) "!")))
+
+(defun %invoke-builtin-goal (predicate args env k)
+  "Invoke the built-in predicate handler for PREDICATE, if one exists."
+  (let ((builtin (gethash predicate *builtin-predicates*)))
+    (when builtin
+      (funcall builtin args env k)
+      t)))
+
+(defun %solve-prolog-rule (rule args env k)
+  "Attempt to solve RULE against ARGS and call K for each matching environment."
+  (let* ((fresh-rule (rename-variables rule))
+         (head (rule-head fresh-rule))
+         (body (rule-body fresh-rule))
+         (new-env (unify args (cdr head) env)))
+    (unless (unify-failed-p new-env)
+      (handler-case
+          (if body
+              (solve-conjunction body new-env k)
+              (funcall k new-env))
+        (prolog-cut ()
+          (return-from %solve-prolog-rule :cut))))))
+
 (defun %make-builtin-predicates ()
   (let ((ht (make-hash-table :test 'eq)))
     (dolist (spec (if (boundp '*builtin-predicate-specs*)
@@ -207,34 +261,17 @@
    GOAL can be a prolog-goal object, a list (predicate arg1 arg2 ...), or a
    bare atom like ! (cut).
    K is a continuation function that receives the new environment."
-  ;; Handle bare atomic goals (e.g. ! used directly as a body element).
-  ;; Compare by symbol-name to be package-agnostic (rules may come from any package).
-  (when (and (symbolp goal) (not (prolog-goal-p goal)))
-    (when (string= (symbol-name goal) "!")
-      (funcall k env)
-      (signal 'prolog-cut))
+  (when (%atomic-cut-goal-p goal)
+    (funcall k env)
+    (signal 'prolog-cut)
     (return-from solve-goal))
-  (let* ((predicate (if (prolog-goal-p goal) (goal-predicate goal) (car goal)))
-         (args      (if (prolog-goal-p goal) (goal-args      goal) (cdr goal))))
-    ;; Dispatch to built-in handler first
-    (let ((builtin (gethash predicate *builtin-predicates*)))
-      (when builtin
-        (funcall builtin args env k)
-        (return-from solve-goal)))
-    ;; Regular predicate: try each matching rule in the database
+  (multiple-value-bind (predicate args)
+      (%goal-predicate-and-args goal)
+    (when (%invoke-builtin-goal predicate args env k)
+      (return-from solve-goal))
     (dolist (rule (gethash predicate *prolog-rules*))
-      (let* ((fresh-rule (rename-variables rule))
-             (head       (rule-head fresh-rule))
-             (body       (rule-body fresh-rule))
-             (new-env    (unify args (cdr head) env)))
-        (unless (unify-failed-p new-env)
-          (handler-case
-              (if body
-                  (solve-conjunction body new-env k)
-                  (funcall k new-env))
-            (prolog-cut ()
-              ;; Cut stops further alternatives for this goal
-              (return-from solve-goal))))))));; solve-conjunction is already CPS — passes accumulated env to k
+      (when (eq (%solve-prolog-rule rule args env k) :cut)
+        (return-from solve-goal)))));; solve-conjunction is already CPS — passes accumulated env to k
 
 (defun solve-conjunction (goals env k)
   "Solve a conjunction of goals (AND). Call K when all goals succeed."
@@ -294,6 +331,30 @@
          (when (and limit (>= count limit))
            (signal 'prolog-cut)))))
     (nreverse solutions)))
+
+(defun %remove-self-move-p (instruction)
+  "Return true when INSTRUCTION is a redundant self move."
+  (and (consp instruction)
+       (eq (car instruction) :move)
+       (eql (cadr instruction) (caddr instruction))))
+
+(defun %match-peephole-rule (rule current next)
+  "Return replacement instructions when RULE matches CURRENT and NEXT."
+  (destructuring-bind (cur-pat next-pat result-list) rule
+    (let ((env (unify cur-pat current nil)))
+      (unless (unify-failed-p env)
+        (let ((env2 (unify next-pat next env)))
+          (unless (unify-failed-p env2)
+            (mapcar (lambda (tmpl)
+                      (logic-substitute tmpl env2))
+                    result-list)))))))
+
+(defun %maybe-peephole-rewrite (current next)
+  "Try all peephole rules for CURRENT/NEXT and return replacements if one matches."
+  (dolist (rule *peephole-rules*)
+    (let ((replacements (%match-peephole-rule rule current next)))
+      (when replacements
+        (return replacements)))))
 
 (defun query-all (goal)
   "Return all solutions for GOAL as a list of substituted goals.
@@ -375,37 +436,19 @@
      (CURRENT-PATTERN NEXT-PATTERN REPLACEMENT-LIST)
    On a match, both instructions are consumed and REPLACEMENT-LIST sexps emitted.
    Self-moves (:move :Rx :Rx) are removed in a pre-pass."
-  (labels ((filter-self-moves (insns)
-             (remove-if (lambda (s)
-                          (and (consp s)
-                               (eq (car s) :move)
-                               (eql (cadr s) (caddr s))))
-                        insns))
-           (maybe-rewrite (current next)
-             (dolist (rule *peephole-rules* (values nil nil))
-               (destructuring-bind (cur-pat next-pat result-list) rule
-                 (let ((env (unify cur-pat current nil)))
-                   (unless (unify-failed-p env)
-                     (let ((env2 (unify next-pat next env)))
-                       (unless (unify-failed-p env2)
-                         (return (values (mapcar (lambda (tmpl)
-                                                   (logic-substitute tmpl env2))
-                                                 result-list)
-                                         t)))))))))
-           (walk (rest out)
-             (cond
-               ((null rest) (nreverse out))
-               ((null (cdr rest)) (nreverse (cons (car rest) out)))
-               (t
-                (let ((curr (car rest))
-                      (next (cadr rest)))
-                  (multiple-value-bind (replacements consumed-two)
-                      (maybe-rewrite curr next)
-                    (if consumed-two
-                        (walk (cddr rest)
-                              (let ((acc out))
-                                (dolist (r replacements acc)
-                                  (push r acc))
-                                acc))
-                        (walk (cdr rest) (cons curr out)))))))))
-    (walk (filter-self-moves instructions) nil)))
+  (labels ((walk (rest out)
+              (cond
+                ((null rest) (nreverse out))
+                ((null (cdr rest)) (nreverse (cons (car rest) out)))
+                (t
+                 (let ((curr (car rest))
+                       (next (cadr rest)))
+                   (let ((replacements (%maybe-peephole-rewrite curr next)))
+                     (if replacements
+                         (walk (cddr rest)
+                               (let ((acc out))
+                                 (dolist (r replacements acc)
+                                   (push r acc))
+                                 acc))
+                         (walk (cdr rest) (cons curr out)))))))))
+    (walk (remove-if #'%remove-self-move-p instructions) nil)))

@@ -119,6 +119,7 @@ not trigger VM conditional branches."
           ;; Pop method-call-stack in sync with call-stack
           (when (vm-method-call-stack state)
             (pop (vm-method-call-stack state)))
+          (vm-profile-return state)
           (vm-restore-registers state saved-regs)
           ;; Write the return value into the destination register
           (vm-reg-set state dst-reg result)

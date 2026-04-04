@@ -214,6 +214,31 @@
                               (eql 0 (cl-cc::vm-value i))))
                        out))))
 
+(deftest optimizer-folds-rational-unary-ops
+  "Constant folding reduces rational unary operations to vm-const."
+  (let* ((c1  (make-vm-const :dst :r0 :value 3/4))
+         (u1  (cl-cc::make-vm-numerator :dst :r1 :src :r0))
+         (ret (make-vm-ret :reg :r1))
+         (out (cl-cc::opt-pass-fold (list c1 u1 ret))))
+    (assert-true (some (lambda (i)
+                         (and (typep i 'cl-cc::vm-const)
+                              (eq :r1 (cl-cc::vm-dst i))
+                              (eql 3 (cl-cc::vm-value i))))
+                       out))))
+
+(deftest optimizer-folds-rational-binary-ops
+  "Constant folding reduces gcd/lcm over integer literals to vm-const."
+  (let* ((c1  (make-vm-const :dst :r0 :value 8))
+         (c2  (make-vm-const :dst :r1 :value 12))
+         (g   (cl-cc::make-vm-gcd :dst :r2 :lhs :r0 :rhs :r1))
+         (ret (make-vm-ret :reg :r2))
+         (out (cl-cc::opt-pass-fold (list c1 c2 g ret))))
+    (assert-true (some (lambda (i)
+                         (and (typep i 'cl-cc::vm-const)
+                              (eq :r2 (cl-cc::vm-dst i))
+                              (eql 4 (cl-cc::vm-value i))))
+                       out))))
+
 ;;; ── End-to-End Correctness ───────────────────────────────────────────────
 
 (deftest-each optimizer-e2e
@@ -748,6 +773,40 @@
     (assert-false (cl-cc::opt-may-alias-p :r0 :r4 roots))
     (assert-true  (cl-cc::opt-may-alias-p :r0 :r9 roots))))
 
+(deftest points-to-helper-tracks-moves-and-kills
+  "Flow-sensitive points-to propagates through vm-move and is killed by overwrite."
+  (let* ((alloc (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (copy  (make-vm-move :dst :r3 :src :r0))
+         (kill  (make-vm-const :dst :r3 :value 9))
+         (pt1   (cl-cc::opt-compute-points-to (list alloc copy)))
+         (pt2   (cl-cc::opt-compute-points-to (list alloc copy kill))))
+    (assert-eq :r0 (cl-cc::opt-points-to-root :r0 pt1))
+    (assert-eq :r0 (cl-cc::opt-points-to-root :r3 pt1))
+    (assert-false (cl-cc::opt-points-to-root :r3 pt2))))
+
+(deftest heap-kind-helper-distinguishes-object-classes
+  "TBAA helper can prove non-aliasing across different fresh heap object kinds."
+  (let* ((alloc-cons  (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
+         (alloc-array (make-vm-make-array :dst :r4 :size-reg :r5))
+         (points-to   (cl-cc::opt-compute-points-to (list alloc-cons alloc-array)))
+         (heap-kinds  (cl-cc::opt-compute-heap-kinds (list alloc-cons alloc-array))))
+    (assert-eq :cons (gethash :r0 heap-kinds))
+    (assert-eq :array (gethash :r4 heap-kinds))
+    (assert-false (cl-cc::opt-may-alias-by-type-p :r0 :r4 points-to heap-kinds))
+    (assert-true  (cl-cc::opt-may-alias-by-type-p :r0 :r9 points-to heap-kinds))))
+
+(deftest constant-interval-helper-propagates-basic-arithmetic
+  "Constant interval propagation handles add/sub/mul in straight-line code."
+  (let* ((c1 (make-vm-const :dst :r0 :value 3))
+         (c2 (make-vm-const :dst :r1 :value 5))
+         (a  (make-vm-add :dst :r2 :lhs :r0 :rhs :r1))
+         (s  (make-vm-sub :dst :r3 :lhs :r2 :rhs :r0))
+         (m  (make-vm-mul :dst :r4 :lhs :r3 :rhs :r1))
+         (intervals (cl-cc::opt-compute-constant-intervals (list c1 c2 a s m))))
+    (assert-equal '(8 . 8) (gethash :r2 intervals))
+    (assert-equal '(5 . 5) (gethash :r3 intervals))
+    (assert-equal '(25 . 25) (gethash :r4 intervals))))
+
 ;;; ─── opt-inst-read-regs ──────────────────────────────────────────────────────
 
 (deftest-each opt-inst-read-regs-cases
@@ -1045,6 +1104,18 @@
                        cl-cc::*opt-convergence-passes*
                        :test #'eq)))
 
+(deftest known-callee-labels-track-const-func-ref-and-move
+  "Known-callee helper resolves labels through closure/const/move chains."
+  (let* ((closure (make-vm-closure :dst :r0 :label "f" :params '(:r1)
+                                   :captured nil :optional-params nil :rest-param nil :key-params nil))
+         (regfun  (make-vm-register-function :name 'f :src :r0))
+         (const   (make-vm-const :dst :r2 :value 'f))
+         (move    (make-vm-move :dst :r3 :src :r2))
+         (known   (cl-cc::opt-known-callee-labels (list closure regfun const move))))
+    (assert-string= "f" (cl-cc::opt-known-callee-label :r0 known))
+    (assert-string= "f" (cl-cc::opt-known-callee-label :r2 known))
+    (assert-string= "f" (cl-cc::opt-known-callee-label :r3 known))))
+
 (deftest inline-is-in-convergence-passes
   "opt-pass-inline participates in the convergence pipeline via a named wrapper pass."
   (assert-true (member #'cl-cc::opt-pass-inline-iterative
@@ -1058,6 +1129,36 @@
                        (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)))
          (out (cl-cc::optimize-instructions instrs :pass-pipeline '(:fold :dce))))
     (assert-equal 0 (length out))))
+
+(deftest optimizer-ir-verify-valid
+  "opt-verify-instructions passes on a simple valid linear program."
+  (let ((instrs (list (make-vm-const :dst :r0 :value 1)
+                      (make-vm-const :dst :r1 :value 2)
+                      (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
+                      (make-vm-ret :reg :r2))))
+    (assert-true (cl-cc::opt-verify-instructions instrs :pass-name "test"))))
+
+(deftest optimizer-ir-verify-duplicate-label
+  "opt-verify-instructions rejects duplicate labels."
+  (let ((instrs (list (make-vm-label :name "L0")
+                      (make-vm-label :name "L0"))))
+    (assert-true
+     (handler-case (progn (cl-cc::opt-verify-instructions instrs :pass-name "test") nil)
+       (error () t)))))
+
+(deftest optimizer-ir-verify-missing-label-target
+  "opt-verify-instructions rejects unknown jump targets."
+  (let ((instrs (list (make-vm-jump :label "MISSING"))))
+    (assert-true
+     (handler-case (progn (cl-cc::opt-verify-instructions instrs :pass-name "test") nil)
+       (error () t)))))
+
+(deftest optimizer-ir-verify-use-before-def
+  "opt-verify-instructions rejects obvious use-before-def register reads."
+  (let ((instrs (list (make-vm-add :dst :r0 :lhs :r1 :rhs :r2))))
+    (assert-true
+     (handler-case (progn (cl-cc::opt-verify-instructions instrs :pass-name "test") nil)
+       (error () t)))))
 
 (deftest optimizer-string-pass-pipeline
   "optimize-instructions also accepts a comma-separated string pipeline."
@@ -1077,6 +1178,31 @@
                                   :timing-stream stream)
     (let ((text (get-output-stream-string stream)))
       (assert-true (search "OPT-PASS-FOLD" (string-upcase text))))))
+
+(deftest optimizer-pass-pipeline-stats-output
+  "optimize-instructions can print per-pass stats lines."
+  (let* ((instrs (list (make-vm-const :dst :r0 :value 1)))
+         (stream (make-string-output-stream)))
+    (cl-cc::optimize-instructions instrs
+                                  :pass-pipeline '(:fold)
+                                  :print-pass-stats t
+                                  :stats-stream stream)
+    (let ((text (string-upcase (get-output-stream-string stream))))
+      (assert-true (search "OPT-PASS-FOLD" text))
+      (assert-true (search "BEFORE=" text))
+      (assert-true (search "AFTER=" text)))))
+
+(deftest optimizer-trace-json-output
+  "optimize-instructions can write Chrome-trace-compatible JSON timing output."
+  (let* ((instrs (list (make-vm-const :dst :r0 :value 1)))
+         (stream (make-string-output-stream)))
+    (cl-cc::optimize-instructions instrs
+                                  :pass-pipeline '(:fold)
+                                  :trace-json-stream stream)
+    (let ((text (get-output-stream-string stream)))
+      (assert-true (search "\"traceEvents\"" text))
+      (assert-true (search "OPT-PASS-FOLD" text))
+      (assert-true (search "\"dur\"" text)))))
 
 (deftest optimizer-remarks-output-changed
   "optimize-instructions can print a changed remark when a pass rewrites the program."
@@ -1220,6 +1346,19 @@
     (assert-true  (member g1 out))
      (assert-true  (member s2 out))
     (assert-true  (member ret out))))
+
+(deftest dead-store-elim-slot-overwrite-through-moved-alias
+  "A later slot write through a moved alias kills the earlier pending write."
+  (let* ((obj  (make-vm-cons :dst :r0 :car :r8 :cdr :r9))
+         (obj2 (make-vm-move :dst :r3 :src :r0))
+         (c1   (make-vm-const :dst :r1 :value 10))
+         (w1   (cl-cc::make-vm-slot-write :obj-reg :r0 :slot-name 'x :value-reg :r1))
+         (c2   (make-vm-const :dst :r2 :value 20))
+         (w2   (cl-cc::make-vm-slot-write :obj-reg :r3 :slot-name 'x :value-reg :r2))
+         (ret  (make-vm-ret :reg :r2))
+         (out  (cl-cc::opt-pass-dead-store-elim (list obj obj2 c1 w1 c2 w2 ret))))
+    (assert-false (member w1 out))
+    (assert-true  (member w2 out))))
 
 (deftest sccp-eliminates-constant-branch-block
   "opt-pass-sccp removes the unreachable branch block after a constant condition."
@@ -1447,10 +1586,55 @@
   (let* ((ci   (make-vm-closure :dst :r0 :label "f"
                                  :params '(:r1) :captured nil
                                  :optional-params nil :rest-param nil :key-params nil))
-         (body (append (loop repeat 16 collect (make-vm-add :dst :r2 :lhs :r1 :rhs :r1))
+          (body (append (loop repeat 16 collect (make-vm-add :dst :r2 :lhs :r1 :rhs :r1))
                        (list (make-vm-ret :reg :r2))))
-         (def  (list :closure ci :params '(:r1) :body body)))
+          (def  (list :closure ci :params '(:r1) :body body)))
     (assert-false (cl-cc::opt-inline-eligible-p def 15))))
+
+(deftest opt-adaptive-inline-threshold-cases
+  "Cheap bodies get a higher threshold; call-heavy bodies get a tighter one."
+  (let* ((cheap-ci (make-vm-closure :dst :r0 :label "cheap"
+                                    :params '(:r1) :captured nil
+                                    :optional-params nil :rest-param nil :key-params nil))
+         (cheap-body (append (loop repeat 20 collect (make-vm-const :dst :r2 :value 0))
+                             (list (make-vm-ret :reg :r1))))
+         (cheap-def (list :closure cheap-ci :params '(:r1) :body cheap-body))
+         (call-ci (make-vm-closure :dst :r0 :label "callish"
+                                   :params '(:r1) :captured nil
+                                   :optional-params nil :rest-param nil :key-params nil))
+         (call-body (list (make-vm-call :dst :r2 :func :r3 :args '(:r1))
+                          (make-vm-ret :reg :r2)))
+         (call-def (list :closure call-ci :params '(:r1) :body call-body)))
+    (assert-true (> (cl-cc::opt-adaptive-inline-threshold cheap-def) 15))
+    (assert-true (< (cl-cc::opt-adaptive-inline-threshold call-def) 15))))
+
+(deftest opt-pass-inline-iterative-uses-adaptive-threshold
+  "The iterative inline wrapper runs with adaptive thresholds without error."
+  (let* ((ci   (make-vm-closure :dst :r0 :label "f"
+                                :params '(:r1) :captured nil
+                                :optional-params nil :rest-param nil :key-params nil))
+         (fref (make-vm-func-ref :dst :r3 :label "f"))
+         (body (append (loop repeat 18 collect (make-vm-const :dst :r2 :value 0))
+                       (list (make-vm-ret :reg :r1))))
+         (call (make-vm-call :dst :r4 :func :r3 :args '(:r5)))
+         (ret  (make-vm-ret :reg :r4))
+         (out  (cl-cc::opt-pass-inline-iterative
+                (append (list ci) body (list fref call ret)))))
+    (assert-true out)))
+
+(deftest opt-adaptive-max-iterations-cases
+  "Adaptive max-iterations shrinks for small programs and grows for larger ones."
+  (assert-true (< (cl-cc::opt-adaptive-max-iterations (loop repeat 10 collect (make-vm-const :dst :r0 :value 0))) 20))
+  (assert-true (> (cl-cc::opt-adaptive-max-iterations (loop repeat 900 collect (make-vm-const :dst :r0 :value 0))) 20)))
+
+(deftest optimize-instructions-accepts-adaptive-max-iterations
+  "optimize-instructions accepts :adaptive as the iteration budget selector."
+  (let ((out (cl-cc::optimize-instructions
+              (list (make-vm-const :dst :r0 :value 1)
+                    (make-vm-ret :reg :r0))
+              :max-iterations :adaptive
+              :pass-pipeline '(:fold :dce))))
+    (assert-true out)))
 
 ;;; ─── opt-falsep ──────────────────────────────────────────────────────────
 

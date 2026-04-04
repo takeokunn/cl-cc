@@ -12,6 +12,18 @@
 (defvar *current-regalloc* nil
   "When non-nil, the current regalloc-result used during code generation.")
 
+(defparameter *current-spill-base-reg* +rbp+
+  "Base register used for spill load/store emission in the current function.")
+
+(defvar *current-float-vregs* nil
+  "When non-nil, hash table of virtual registers currently known to hold unboxed floats.")
+
+(defun x86-64-red-zone-spill-p (leaf-p spill-count)
+  "Return true when a leaf function can keep spill slots in the SysV red zone."
+  (and leaf-p
+       (plusp spill-count)
+       (<= spill-count 16)))
+
 (defparameter *vm-reg-map*
   `((:R0 . ,+rax+)
     (:R1 . ,+rcx+)
@@ -23,16 +35,96 @@
     (:R7 . ,+r9+))
   "Mapping from VM keyword registers to x86-64 register codes.")
 
+(defparameter *vm-fp-reg-map*
+  `((:R0 . ,+xmm0+)
+    (:R1 . ,+xmm1+)
+    (:R2 . ,+xmm2+)
+    (:R3 . ,+xmm3+)
+    (:R4 . ,+xmm4+)
+    (:R5 . ,+xmm5+)
+    (:R6 . ,+xmm6+)
+    (:R7 . ,+xmm7+))
+  "Naive mapping from VM keyword registers to XMM register codes.")
+
+(declaim (special *phys-reg-to-x86-code* *phys-fp-reg-to-x86-code*))
+
 (defun vm-reg-to-x86 (vm-reg)
   "Map VM register to x86-64 register code.
    When *current-regalloc* is set, uses register allocation results.
    Otherwise falls back to naive mapping."
-  (if *current-regalloc*
-      (vm-reg-to-x86-with-alloc *current-regalloc* vm-reg)
-      (let ((entry (assoc vm-reg *vm-reg-map*)))
-        (unless entry
-          (error "VM register ~A has no x86-64 mapping (only R0-R7 supported)" vm-reg))
-        (cdr entry))))
+  (let ((phys-entry (assoc vm-reg *phys-reg-to-x86-code*)))
+    (if phys-entry
+        (cdr phys-entry)
+        (if *current-regalloc*
+            (vm-reg-to-x86-with-alloc *current-regalloc* vm-reg)
+            (let ((entry (assoc vm-reg *vm-reg-map*)))
+              (unless entry
+                (error "VM register ~A has no x86-64 mapping (only R0-R7 supported)" vm-reg))
+              (cdr entry))))))
+
+(defparameter *phys-fp-reg-to-x86-code*
+  '((:xmm0 . 0) (:xmm1 . 1) (:xmm2 . 2) (:xmm3 . 3)
+    (:xmm4 . 4) (:xmm5 . 5) (:xmm6 . 6) (:xmm7 . 7)
+    (:xmm8 . 8) (:xmm9 . 9) (:xmm10 . 10) (:xmm11 . 11)
+    (:xmm12 . 12) (:xmm13 . 13) (:xmm14 . 14) (:xmm15 . 15))
+  "Mapping from physical FP register keywords to XMM register codes.")
+
+(defun vm-reg-to-xmm (vm-reg)
+  "Map VM register to XMM register code for native float operations.
+Falls back to the naive R0..R7 -> XMM0..XMM7 mapping when regalloc has not
+assigned dedicated FP registers yet."
+  (let ((phys-entry (assoc vm-reg *phys-fp-reg-to-x86-code*)))
+    (if phys-entry
+        (cdr phys-entry)
+        (if *current-regalloc*
+            (let* ((phys (gethash vm-reg (regalloc-assignment *current-regalloc*)))
+                   (entry (and phys (assoc phys *phys-fp-reg-to-x86-code*))))
+              (if entry
+                  (cdr entry)
+                  (let ((fallback (assoc vm-reg *vm-fp-reg-map*)))
+                    (unless fallback
+                      (error "VM register ~A has no XMM mapping" vm-reg))
+                    (cdr fallback))))
+            (let ((entry (assoc vm-reg *vm-fp-reg-map*)))
+              (unless entry
+                (error "VM register ~A has no XMM mapping" vm-reg))
+              (cdr entry))))))
+
+(defun x86-64-float-vreg-p (vreg)
+  (and *current-float-vregs* (gethash vreg *current-float-vregs*)))
+
+(defun x86-64-compute-float-vregs (instructions)
+  "Conservatively mark VM virtual registers that hold unboxed floats." 
+  (let ((float-vregs (make-hash-table :test #'eq)))
+    (labels ((mark (reg)
+               (when reg
+                 (setf (gethash reg float-vregs) t))))
+      (dolist (inst instructions)
+        (typecase inst
+          (vm-const
+           (when (floatp (vm-value inst))
+             (mark (vm-dst inst))))
+          ((or vm-float-add vm-float-sub vm-float-mul vm-float-div)
+           (mark (vm-dst inst))
+           (mark (vm-lhs inst))
+           (mark (vm-rhs inst)))))
+      (loop with changed = t
+            while changed
+            do (setf changed nil)
+               (dolist (inst instructions)
+                 (when (typep inst 'vm-move)
+                   (let ((dst (vm-dst inst))
+                         (src (vm-src inst)))
+                     (cond
+                       ((and (gethash src float-vregs)
+                             (not (gethash dst float-vregs)))
+                        (setf (gethash dst float-vregs) t)
+                        (setf changed t))
+                       ((and (gethash dst float-vregs)
+                             (not (gethash src float-vregs)))
+                        (setf (gethash src float-vregs) t)
+                        (setf changed t))))))))
+    float-vregs))
 
 (defparameter *phys-reg-to-x86-code*
   `((:rax . ,+rax+) (:rcx . ,+rcx+) (:rdx . ,+rdx+) (:rbx . ,+rbx+)
@@ -60,6 +152,12 @@
         ((eq value t) 1)
         ((integerp value) value)
         (t 0)))
+
+(defun x86-64-double-float-bits (value)
+  "Return the IEEE754 bit pattern for VALUE as an unsigned 64-bit integer."
+  (logand #xFFFFFFFFFFFFFFFF
+          #+sbcl (sb-kernel:double-float-bits (float value 1.0d0))
+          #-sbcl (error "x86-64-double-float-bits currently requires SBCL")))
 
 (defmacro define-binary-alu-emitter (fn-name asm-op description)
   "Define an emitter for a binary VM instruction: MOV dst←lhs, then ASM-OP dst←rhs."
@@ -104,15 +202,55 @@
 
 (defun emit-vm-const (inst stream)
   "Emit code for VM CONST instruction."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (value (vm-const-to-integer (vm-value inst))))
-    (emit-mov-ri64 dst value stream)))
+  (let ((value (vm-value inst)))
+    (if (floatp value)
+        (let ((dst (vm-reg-to-xmm (vm-dst inst))))
+          (emit-mov-ri64 +r11+ (x86-64-double-float-bits value) stream)
+          (emit-movq-xmm-r64 dst +r11+ stream))
+        (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+              (int-value (vm-const-to-integer value)))
+          (emit-mov-ri64 dst int-value stream)))))
 
 (defun emit-vm-move (inst stream)
   "Emit code for VM MOVE instruction."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (src (vm-reg-to-x86 (vm-src inst))))
-    (emit-mov-rr64 dst src stream)))
+  (if (or (x86-64-float-vreg-p (vm-dst inst))
+          (x86-64-float-vreg-p (vm-src inst)))
+      (let ((dst (vm-reg-to-xmm (vm-dst inst)))
+            (src (vm-reg-to-xmm (vm-src inst))))
+        (unless (= dst src)
+          (emit-movsd-xx dst src stream)))
+      (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+            (src (vm-reg-to-x86 (vm-src inst))))
+        (unless (= dst src)
+          (emit-mov-rr64 dst src stream)))))
+
+(defun emit-vm-float-add (inst stream)
+  (let ((dst (vm-reg-to-xmm (vm-dst inst)))
+        (lhs (vm-reg-to-xmm (vm-lhs inst)))
+        (rhs (vm-reg-to-xmm (vm-rhs inst))))
+    (emit-movsd-xx dst lhs stream)
+    (emit-addsd-xx dst rhs stream)))
+
+(defun emit-vm-float-sub (inst stream)
+  (let ((dst (vm-reg-to-xmm (vm-dst inst)))
+        (lhs (vm-reg-to-xmm (vm-lhs inst)))
+        (rhs (vm-reg-to-xmm (vm-rhs inst))))
+    (emit-movsd-xx dst lhs stream)
+    (emit-subsd-xx dst rhs stream)))
+
+(defun emit-vm-float-mul (inst stream)
+  (let ((dst (vm-reg-to-xmm (vm-dst inst)))
+        (lhs (vm-reg-to-xmm (vm-lhs inst)))
+        (rhs (vm-reg-to-xmm (vm-rhs inst))))
+    (emit-movsd-xx dst lhs stream)
+    (emit-mulsd-xx dst rhs stream)))
+
+(defun emit-vm-float-div (inst stream)
+  (let ((dst (vm-reg-to-xmm (vm-dst inst)))
+        (lhs (vm-reg-to-xmm (vm-lhs inst)))
+        (rhs (vm-reg-to-xmm (vm-rhs inst))))
+    (emit-movsd-xx dst lhs stream)
+    (emit-divsd-xx dst rhs stream)))
 
 (define-binary-alu-emitter emit-vm-add    emit-add-rr64  "vm-add: dst = lhs + rhs.")
 (define-binary-alu-emitter emit-vm-sub    emit-sub-rr64  "vm-sub: dst = lhs - rhs.")
@@ -551,6 +689,9 @@
     ;; Binary logical: MOV + op = 6
     (dolist (tp '(vm-logand vm-logior vm-logxor))
       (setf (gethash tp ht) 6))
+    ;; Scalar float ops: MOVSD + op = 8
+    (dolist (tp '(vm-float-add vm-float-sub vm-float-mul vm-float-div))
+      (setf (gethash tp ht) 8))
     ;; XNOR = 9, logtest = 14, logbitp = 15
     (setf (gethash 'vm-logeqv ht) 9)
     (setf (gethash 'vm-logtest ht) 14)
@@ -566,7 +707,26 @@
 (defun instruction-size (inst)
   "Estimate the size in bytes of the x86-64 encoding for a VM instruction.
    Used in first pass to build label offset table."
-  (or (gethash (type-of inst) *x86-64-instruction-sizes*) 0))
+  (cond
+    ((typep inst 'vm-const)
+     (if (floatp (vm-value inst)) 15 10))
+    ((typep inst 'vm-move)
+     (if (or (x86-64-float-vreg-p (vm-dst inst))
+             (x86-64-float-vreg-p (vm-src inst)))
+         (let ((dst (vm-reg-to-xmm (vm-dst inst)))
+               (src (vm-reg-to-xmm (vm-src inst))))
+           (if (= dst src) 0 4))
+         (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+               (src (vm-reg-to-x86 (vm-src inst))))
+           (if (= dst src) 0 3))))
+    ((typep inst 'vm-halt)
+     (if (x86-64-float-vreg-p (vm-reg inst))
+         (let ((result-reg (vm-reg-to-xmm (vm-reg inst))))
+           (if (= result-reg +xmm0+) 0 4))
+         (let ((result-reg (vm-reg-to-x86 (vm-reg inst))))
+           (if (= result-reg +rax+) 0 3))))
+    (t
+     (or (gethash (type-of inst) *x86-64-instruction-sizes*) 0))))
 
 (defun build-label-offsets (instructions prologue-size)
   "Build a hash table mapping label names to byte offsets.
@@ -583,10 +743,14 @@
 
 (defun emit-vm-halt-inst (inst stream)
   "Emit code for VM HALT instruction.
-   Moves the result register to RAX for the return value."
-  (let ((result-reg (vm-reg-to-x86 (vm-reg inst))))
-    (unless (= result-reg +rax+)
-      (emit-mov-rr64 +rax+ result-reg stream))))
+   Moves the result register to RAX for the return value." 
+  (if (x86-64-float-vreg-p (vm-reg inst))
+      (let ((result-reg (vm-reg-to-xmm (vm-reg inst))))
+        (unless (= result-reg +xmm0+)
+          (emit-movsd-xx +xmm0+ result-reg stream)))
+      (let ((result-reg (vm-reg-to-x86 (vm-reg inst))))
+        (unless (= result-reg +rax+)
+          (emit-mov-rr64 +rax+ result-reg stream)))))
 
 (defun emit-vm-call-like-inst (inst stream)
   "Emit code for VM CALL / VM TAIL-CALL instructions.
@@ -648,22 +812,22 @@
           collect reg)))
 
 (defun emit-vm-spill-store-inst (inst stream)
-  "Emit code for VM SPILL-STORE instruction: MOV [RBP - slot*8], src."
+  "Emit code for VM SPILL-STORE instruction using the active spill base register."
   (let* ((src-reg (vm-spill-src inst))
          (src-code (let ((entry (assoc src-reg *phys-reg-to-x86-code*)))
                      (if entry (cdr entry)
-                         (error "Unknown physical register for spill store: ~A" src-reg))))
-         (offset (- (* (vm-spill-slot inst) 8))))
-    (emit-mov-mr64 +rbp+ offset src-code stream)))
+                          (error "Unknown physical register for spill store: ~A" src-reg))))
+          (offset (- (* (vm-spill-slot inst) 8))))
+    (emit-mov-mr64 *current-spill-base-reg* offset src-code stream)))
 
 (defun emit-vm-spill-load-inst (inst stream)
-  "Emit code for VM SPILL-LOAD instruction: MOV dst, [RBP - slot*8]."
+  "Emit code for VM SPILL-LOAD instruction using the active spill base register."
   (let* ((dst-reg (vm-spill-dst inst))
          (dst-code (let ((entry (assoc dst-reg *phys-reg-to-x86-code*)))
                      (if entry (cdr entry)
-                         (error "Unknown physical register for spill load: ~A" dst-reg))))
-         (offset (- (* (vm-spill-slot inst) 8))))
-    (emit-mov-rm64 dst-code +rbp+ offset stream)))
+                          (error "Unknown physical register for spill load: ~A" dst-reg))))
+          (offset (- (* (vm-spill-slot inst) 8))))
+    (emit-mov-rm64 dst-code *current-spill-base-reg* offset stream)))
 
 (defparameter *x86-64-emitter-entries*
   '(;; Core instructions
@@ -671,10 +835,14 @@
     (vm-move         . emit-vm-move)
     (vm-add          . emit-vm-add)
     (vm-integer-add  . emit-vm-add)
+    (vm-float-add    . emit-vm-float-add)
     (vm-sub          . emit-vm-sub)
     (vm-integer-sub  . emit-vm-sub)
+    (vm-float-sub    . emit-vm-float-sub)
     (vm-mul          . emit-vm-mul)
     (vm-integer-mul  . emit-vm-mul)
+    (vm-float-mul    . emit-vm-float-mul)
+    (vm-float-div    . emit-vm-float-div)
     (vm-halt         . emit-vm-halt-inst)
      (vm-call         . emit-vm-call-like-inst)
      (vm-tail-call    . emit-vm-tail-call-inst)
@@ -759,15 +927,18 @@
          (cfg (cfg-build instructions))
          (leaf-p (vm-program-leaf-p program))
          (spill-count (regalloc-spill-count *current-regalloc*))
+         (red-zone-spill-p (x86-64-red-zone-spill-p leaf-p spill-count))
          (callee-saved (x86-64-used-callee-saved-regs *current-regalloc*
-                                                        *x86-64-calling-convention*))
-         (save-regs (if (and leaf-p (zerop spill-count))
+                                                         *x86-64-calling-convention*))
+         (save-regs (if (or (and leaf-p (zerop spill-count))
+                            red-zone-spill-p)
                         callee-saved
-                        (cons +rbp+ callee-saved)))
+                         (cons +rbp+ callee-saved)))
+         (*current-spill-base-reg* (if red-zone-spill-p +rsp+ +rbp+))
          ;; Each push/pop is 1 byte in the current encoder.
          (prologue-size (length save-regs))
-          (ordered-instructions (if (cfg-entry cfg)
-                                    (progn
+           (ordered-instructions (if (cfg-entry cfg)
+                                     (progn
                                       (cfg-compute-dominators cfg)
                                       (cfg-compute-loop-depths cfg)
                                       (cfg-flatten-hot-cold cfg))
@@ -800,12 +971,14 @@
    Returns: (simple-array (unsigned-byte 8) (*))"
   ;; Run register allocation before emitting machine code
   (let* ((instructions (vm-program-instructions program))
-         (ra (allocate-registers instructions *x86-64-calling-convention*))
+         (float-vregs (x86-64-compute-float-vregs instructions))
+         (ra (allocate-registers instructions *x86-64-calling-convention* float-vregs))
          (allocated-program (make-vm-program
-                              :instructions (regalloc-instructions ra)
-                              :result-register (vm-program-result-register program)
-                              :leaf-p (vm-program-leaf-p program))))
+                               :instructions (regalloc-instructions ra)
+                               :result-register (vm-program-result-register program)
+                               :leaf-p (vm-program-leaf-p program))))
     ;; Store the regalloc result for use during code generation
-    (let ((*current-regalloc* ra))
+    (let ((*current-regalloc* ra)
+          (*current-float-vregs* float-vregs))
       (with-output-to-vector (stream)
         (emit-vm-program allocated-program stream)))))

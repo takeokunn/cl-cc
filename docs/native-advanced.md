@@ -1674,12 +1674,12 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 ### Phase 117 — セキュリティ補完
 
-#### FR-770: Shadow Call Stack (SCS) — AArch64
+#### ✅ FR-770: Shadow Call Stack (SCS) — AArch64
 
 - **対象**: `src/emit/aarch64-codegen.lisp`
 - **内容**:
   - リターンアドレスを通常スタックとは別の「シャドウスタック」（X18 レジスタが指す専用ページ）にも保存
-  - プロローグ: `STR LR, [X18], #8` / エピローグ: `LDR LR, [X18, #-8]!` + 通常スタックの LR と比較
+  - ✅ 実装済み: プロローグで `STR LR, [X18], #8`、エピローグで `LDR X17, [X18, #-8]!` → `CMP X17, LR` → `B.EQ` → `BRK` → `RET` を生成
   - ARM GCS（FR-531）が使えない ARMv8.0 デバイスでの代替
 - **根拠**: Clang Shadow Call Stack specification. Cortex-A55 等での ROP 防御
 - **難易度**: Easy

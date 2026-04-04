@@ -21,6 +21,8 @@
 (defconstant +a64-sp+ 31 "Stack pointer register number.")
 (defconstant +a64-fp+ 29 "Frame pointer / X29.")
 (defconstant +a64-lr+ 30 "Link register / X30.")
+(defconstant +a64-scs+ 18 "Shadow call stack pointer / X18.")
+(defconstant +a64-scs-tmp+ 17 "Scratch register used for shadow call stack checks / X17.")
 
 ;;; Dynamic variable holding current regalloc during code generation
 
@@ -202,6 +204,22 @@
           (ash (logand rn #x1F) 5)
           (logand rt #x1F)))
 
+;;; STR Xt, [Xn], #simm9 (post-indexed store)
+(defun encode-str-post (rt rn simm9)
+  "STR Xt, [Xn], #simm9 (post-indexed store with writeback)."
+  (logior #xF8000400
+          (ash (logand simm9 #x1FF) 12)
+          (ash (logand rn #x1F) 5)
+          (logand rt #x1F)))
+
+;;; LDR Xt, [Xn, #simm9]! (pre-indexed load)
+(defun encode-ldr-pre (rt rn simm9)
+  "LDR Xt, [Xn, #simm9]! (pre-indexed load with writeback)."
+  (logior #xF8400C00
+          (ash (logand simm9 #x1FF) 12)
+          (ash (logand rn #x1F) 5)
+          (logand rt #x1F)))
+
 ;;; STP Xt1, Xt2, [Xn, #imm7*8]! (pre-index store pair)
 ;;; Encoding: #xA9800000 | (imm7 << 15) | (Xt2 << 10) | (Xn << 5) | Xt1
 ;;; imm7 is a 7-bit signed value; actual offset = imm7 * 8
@@ -222,6 +240,19 @@
           (ash (logand rt2 #x1F) 10)
           (ash (logand rn #x1F) 5)
           (logand rt1 #x1F)))
+
+;;; B.cond #imm (conditional branch)
+(defun encode-b-cond (imm19 cond)
+  "B.cond #imm19 with condition code COND. imm19 is in instruction units."
+  (logior #x54000000
+          (ash (logand imm19 #x7FFFF) 5)
+          (logand cond #xF)))
+
+;;; BRK #imm16
+(defun encode-brk (&optional (imm16 0))
+  "BRK #imm16 exception instruction."
+  (logior #xD4200000
+          (ash (logand imm16 #xFFFF) 5)))
 
 ;;; 64-bit Immediate Loading
 
@@ -283,9 +314,15 @@
 (defun a64-instruction-size (inst)
   "Return size in bytes (multiple of 4) for an AArch64-encoded VM instruction."
   (let ((tp (type-of inst)))
-    (if (eq tp 'vm-const)
-        (* 4 (a64-imm64-size (logand (vm-value inst) #xFFFFFFFFFFFFFFFF)))
-        (or (gethash tp *a64-instruction-sizes*) 0))))
+    (cond
+      ((eq tp 'vm-const)
+       (* 4 (a64-imm64-size (logand (vm-value inst) #xFFFFFFFFFFFFFFFF))))
+      ((eq tp 'vm-move)
+       (let ((rd (a64-reg (vm-dst inst)))
+             (rn (a64-reg (vm-src inst))))
+         (if (= rd rn) 0 4)))
+      (t
+       (or (gethash tp *a64-instruction-sizes*) 0)))))
 
 ;;; Label offset table builder
 
@@ -310,7 +347,8 @@
 (defun emit-a64-vm-move (inst stream)
   (let ((rd (a64-reg (vm-dst inst)))
         (rn (a64-reg (vm-src inst))))
-    (emit-a64-instr (encode-mov-rr rd rn) stream)))
+    (unless (= rd rn)
+      (emit-a64-instr (encode-mov-rr rd rn) stream))))
 
 (defun emit-a64-vm-add (inst stream)
   (let ((rd (a64-reg (vm-dst inst)))
@@ -475,6 +513,8 @@
 
 (defun emit-a64-prologue (stream save-pairs)
   "Emit AArch64 function prologue: save FP/LR and the callee-saved pairs in SAVE-PAIRS."
+  ;; Shadow call stack: STR LR, [X18], #8
+  (emit-a64-instr (encode-str-post +a64-lr+ +a64-scs+ 8) stream)
   (dolist (pair save-pairs)
     (destructuring-bind (rn rm) pair
       ;; STP Xn, Xm, [SP, #-16]!
@@ -485,6 +525,15 @@
   (dolist (pair (reverse save-pairs))
     (destructuring-bind (rn rm) pair
       (emit-a64-instr (encode-ldp-post rn rm +a64-sp+ 2) stream)))
+  ;; Shadow call stack verification:
+  ;;   LDR X17, [X18, #-8]!
+  ;;   CMP X17, X30
+  ;;   B.EQ +2 instructions
+  ;;   BRK #0
+  (emit-a64-instr (encode-ldr-pre +a64-scs-tmp+ +a64-scs+ -8) stream)
+  (emit-a64-instr (encode-cmp +a64-scs-tmp+ +a64-lr+) stream)
+  (emit-a64-instr (encode-b-cond 2 0) stream)
+  (emit-a64-instr (encode-brk 0) stream)
   ;; RET
   (emit-a64-instr +a64-ret+ stream))
 
@@ -498,8 +547,8 @@
                                (plusp (regalloc-spill-count *current-a64-regalloc*))))
           (save-pairs (a64-used-callee-saved-pairs *current-a64-regalloc*
                                                    :frame-pointer-p frame-pointer-p))
-          ;; Each STP/LDP pair is one 4-byte instruction.
-          (prologue-size (* 4 (length save-pairs)))
+          ;; Shadow call stack prologue is 1 instruction; each STP/LDP pair is 1 instruction.
+          (prologue-size (* 4 (1+ (length save-pairs))))
           (ordered-instructions (if (cfg-entry cfg)
                                     (progn
                                       (cfg-compute-dominators cfg)

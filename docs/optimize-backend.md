@@ -189,6 +189,8 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: GHC `{-# RULES "memo" #-}` / Mathematica automatic memoization。再帰的数値計算で指数的高速化
 - **難易度**: Medium
 
+- **関連実装**: `src/optimize/optimizer-inline.lisp` に `opt-make-pure-function-memo-table` / `opt-pure-function-memo-key` / `opt-pure-function-memo-get` / `opt-pure-function-memo-put` を追加済み。現状は FR-152 の pure-label 集合を gate にした helper 層のみで、自動挿入や optimizer/runtime への透過的統合は未実装。
+
 ---
 
 ### Phase 62 — 数値演算最適化（未実装）
@@ -256,6 +258,8 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **内容**: 値範囲解析: 算術演算を通じて`[min, max]`区間を伝播。両オペランドがfixnum範囲内かつ結果が確実にfixnum範囲なら、オーバーフロー検査をスキップ（FR-303と相補的）。制御フロー合流点でのラティスベース解析
 - **根拠**: LLVM `LazyValueInfo` / GCC VRP (Value Range Propagation)。オーバーフロー検査除去で分岐を削減
 - **難易度**: Hard
+
+- **関連実装**: `src/optimize/optimizer.lisp` に `opt-make-interval` / `opt-interval-add` / `opt-interval-sub` / `opt-interval-mul` / `opt-compute-constant-intervals` を追加済み。現状は straight-line な `vm-const`・`vm-add`・`vm-sub`・`vm-mul` に対して区間を保守的に伝播する helper 層のみで、CFG 合流・ループ・型システムとの統合は未実装。
 
 #### FR-305: Multiply by Constant via Shifts+Adds (定数乗算のシフト+加算変換) ✅
 
@@ -471,6 +475,8 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **内容**: `setq` / `setf` による変数更新を追跡しながらポインタの指す先を解析 (flow-sensitive)。Anderson 法 (flow-insensitive) よりも精度が高く、nil チェック・型チェック除去の前提解析として活用。解析スコープは関数内 (intraprocedural) に限定
 - **根拠**: Andersen (1994) / Steensgaard (1996)。ポインタ解析精度は alias analysis・devirtualization の品質を直接左右する
 - **難易度**: Hard
+
+- **関連実装**: `src/optimize/optimizer.lisp` に `opt-compute-points-to` / `opt-points-to-root` を追加済み。現状は線形命令列上で fresh heap allocator と `vm-move` を追跡する single-root の flow-sensitive helper で、再定義時には facts を kill する。分岐合流や setf/slot 更新を含む完全な intraprocedural pointer analysis は未実装。
 
 ---
 
@@ -1170,6 +1176,8 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **内容**: `(apply f a b list)` で spread リストの長さがコンパイル時確定の場合（空リスト `nil`、定長リスト等）、`vm-apply` を `vm-call` に変換してスプレッド処理をゼロに。`(apply #'+ 1 2 nil)` → `(+ 1 2)` に静的変換。リスト長不明でも最初の N 引数が確定している場合の部分最適化
 - **根拠**: SBCL `apply` optimization / CMUCL apply transformation
 - **難易度**: Medium
+
+- **関連実装**: `src/compile/codegen-control.lisp` の `ast-apply` は、末尾 spread 引数が `ast-quote` の `nil` / 定長リストである場合に `vm-apply` ではなく `vm-call` を直接生成する。長さ不明の spread 引数や部分既知の引数列に対するより一般的な最適化は未実装。
 
 ---
 

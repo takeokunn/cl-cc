@@ -73,8 +73,11 @@
         (rhs-type (%ast-proven-type ctx rhs)))
     (labels ((fixnum-type-p (ty)
                (and ty (cl-cc/type::is-subtype-p ty +codegen-fixnum-type+)))
-             (float-type-p (ty)
-               (and ty (cl-cc/type::is-subtype-p ty +codegen-float-type+))))
+              (float-type-p (ty)
+               (and ty (cl-cc/type::is-subtype-p ty +codegen-float-type+)))
+             (float-literal-p (node)
+               (and (typep node 'ast-quote)
+                    (floatp (ast-quote-value node)))))
        (cond
          ((and (fixnum-type-p lhs-type) (fixnum-type-p rhs-type))
           (case op
@@ -87,10 +90,11 @@
             (<= 'make-vm-le)
             (>= 'make-vm-ge)
             (otherwise (binop-ctor op))))
-         ((and (float-type-p lhs-type) (float-type-p rhs-type))
-          (case op
-            (+ 'make-vm-float-add)
-            (- 'make-vm-float-sub)
+         ((or (and (float-type-p lhs-type) (float-type-p rhs-type))
+              (and (float-literal-p lhs) (float-literal-p rhs)))
+           (case op
+             (+ 'make-vm-float-add)
+             (- 'make-vm-float-sub)
            (* 'make-vm-float-mul)
            (/ 'make-vm-float-div)
            (otherwise (binop-ctor op))))

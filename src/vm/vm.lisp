@@ -221,10 +221,42 @@ Values here persist across function calls (not subject to register save/restore)
                   :documentation "Property lists for symbols: sym -> plist.
 Used for get/setf-get/remprop/symbol-plist operations.")
    (method-call-stack :initform nil :accessor vm-method-call-stack
-                      :documentation "Parallel stack to call-stack tracking CLOS method context.
+                       :documentation "Parallel stack to call-stack tracking CLOS method context.
 Each frame is either NIL (regular call) or (gf-ht methods-list all-args) for generic dispatch.
-Used by call-next-method and next-method-p."))
+Used by call-next-method and next-method-p.")
+   (profile-enabled-p :initform nil :accessor vm-profile-enabled-p
+                      :documentation "T when lightweight VM stack sampling is enabled.")
+   (profile-call-stack :initform nil :accessor vm-profile-call-stack
+                       :documentation "Current sampled call stack as a list of function labels, leaf first.")
+   (profile-samples :initform (make-hash-table :test #'equal) :accessor vm-profile-samples
+                    :documentation "Collapsed stack string -> sample count for lightweight flamegraphs."))
   (:documentation "VM execution state with registers, call stack, and heap."))
+
+(defun vm-profile-enter-call (state label &key tail-p)
+  "Record entry into LABEL for lightweight sampling.
+
+When TAIL-P is true, replace the current leaf frame instead of pushing a new one."
+  (when (and (vm-profile-enabled-p state) label)
+    (if tail-p
+        (if (vm-profile-call-stack state)
+            (setf (first (vm-profile-call-stack state)) label)
+            (push label (vm-profile-call-stack state)))
+        (push label (vm-profile-call-stack state)))))
+
+(defun vm-profile-return (state)
+  "Record return from the current sampled function frame."
+  (when (and (vm-profile-enabled-p state)
+             (vm-profile-call-stack state)
+             (> (length (vm-profile-call-stack state)) 1))
+    (pop (vm-profile-call-stack state))))
+
+(defun vm-profile-sample (state)
+  "Take one lightweight stack sample for STATE."
+  (when (vm-profile-enabled-p state)
+    (let* ((stack (or (reverse (vm-profile-call-stack state))
+                      (list "<toplevel>")))
+           (key (format nil "~{~A~^;~}" stack)))
+      (incf (gethash key (vm-profile-samples state) 0)))))
 
 ;;; VM State Initialization — pre-populate standard global variables
 
@@ -306,6 +338,24 @@ Uses native cons cells (same as vm-cons instruction)."
       values
       (copy-list values)))
 
+(defparameter +vm-arg-slot-count+ 8
+  "Number of reserved VM argument slots exposed by the helper API.")
+
+(defun vm-arg-slot-name (index)
+  "Return the reserved argument slot keyword for INDEX.
+
+Valid indices are 0 through +VM-ARG-SLOT-COUNT+-1." 
+  (check-type index (integer 0 7))
+  (intern (format nil "ARG~D" index) :keyword))
+
+(defun vm-bind-arg-slots (state args)
+  "Bind ARGS into reserved :ARG0.. slots on STATE and return the bound slot list." 
+  (loop for arg in args
+        for index from 0 below +vm-arg-slot-count+
+        for slot = (vm-arg-slot-name index)
+        do (vm-reg-set state slot arg)
+        collect slot))
+
 
 (defun vm-heap-address (object)
   "Get heap address from an object. For cons cells and closures."
@@ -340,6 +390,85 @@ lists of data) should be registered here.")
 (defun vm-register-host-bridge (sym)
   "Register SYM as a host-bridgeable function for the VM."
   (setf (gethash sym *vm-host-bridge-functions*) t))
+
+(defun hash-table-values (table)
+  "Return TABLE values as a list preserving host iteration order." 
+  (let ((result nil))
+    (maphash (lambda (k v)
+               (declare (ignore k))
+               (push v result))
+             table)
+    (nreverse result)))
+
+(defun %class-slot-initargs-for-slot (class slot-name)
+  "Return all initargs in CLASS that initialize SLOT-NAME." 
+  (let ((result nil)
+        (imap (and (hash-table-p class) (gethash :__initargs__ class))))
+    (dolist (entry imap)
+      (when (eq (cdr entry) slot-name)
+        (push (car entry) result)))
+    (nreverse result)))
+
+(defun %class-slot-metadata (class slot-name)
+  "Build a lightweight slot-definition object for SLOT-NAME in CLASS." 
+  (let ((slot (make-hash-table :test #'eq))
+        (initforms (and (hash-table-p class) (gethash :__initforms__ class)))
+        (class-slots (and (hash-table-p class) (gethash :__class-slots__ class))))
+    (setf (gethash :name slot) slot-name)
+    (let ((entry (assoc slot-name initforms)))
+      (when entry
+        (setf (gethash :initform slot) (cdr entry))))
+    (setf (gethash :initargs slot) (%class-slot-initargs-for-slot class slot-name))
+    (setf (gethash :allocation slot)
+          (if (member slot-name class-slots :test #'eq) :class :instance))
+    slot))
+
+(defun %class-slot-definitions (class)
+  "Return public slot-definition objects for CLASS." 
+  (let ((slots (and (hash-table-p class) (gethash :__slots__ class))))
+    (when slots
+      (mapcar (lambda (slot-name)
+                (%class-slot-metadata class slot-name))
+              slots))))
+
+(defun slot-definition-name (slot)
+  "Return the slot-definition name for SLOT.
+Current lightweight CLOS metadata may represent slots as symbols; future
+representations may use hash tables with structured metadata." 
+  (cond
+    ((symbolp slot) slot)
+    ((hash-table-p slot) (gethash :name slot))
+    (t nil)))
+
+(defun slot-definition-initform (slot)
+  "Return the initform metadata for SLOT when available."
+  (if (hash-table-p slot)
+      (gethash :initform slot)
+      nil))
+
+(defun slot-definition-initargs (slot)
+  "Return the initarg metadata for SLOT when available."
+  (if (hash-table-p slot)
+      (gethash :initargs slot)
+      nil))
+
+(defun slot-definition-allocation (slot)
+  "Return the allocation mode for SLOT, defaulting to :INSTANCE." 
+  (if (hash-table-p slot)
+      (or (gethash :allocation slot) :instance)
+      :instance))
+
+(defun generic-function-methods (gf)
+  "Return the registered method objects for GF." 
+  (let ((methods-ht (and (hash-table-p gf) (gethash :__methods__ gf))))
+    (when methods-ht
+      (hash-table-values methods-ht))))
+
+(defun generic-function-method-combination (gf)
+  "Return the method-combination metadata for GF, defaulting to STANDARD." 
+  (if (and (hash-table-p gf) (gethash :__method-combination__ gf))
+      (gethash :__method-combination__ gf)
+      'standard))
 
 ;;; Package introspection helpers for do-symbols/do-external-symbols/do-all-symbols
 (defun %package-symbols (package)
@@ -394,10 +523,15 @@ lists of data) should be registered here.")
               make-package rename-package delete-package
               export import unexport shadow shadowing-import
               use-package unuse-package
-              ;; FR-361: Package symbol iteration helpers
-              %package-symbols %package-external-symbols %all-symbols
-              ;; Runtime helpers for setf expansion
-              rt-plist-put
+               ;; FR-361: Package symbol iteration helpers
+               %package-symbols %package-external-symbols %all-symbols
+               %class-slot-definitions
+               ;; CLOS / MOP metadata helpers
+               slot-definition-name slot-definition-initform
+               slot-definition-initargs slot-definition-allocation
+               generic-function-methods generic-function-method-combination
+               ;; Runtime helpers for setf expansion
+               rt-plist-put
               ;; FR-479: File system operations
               probe-file rename-file delete-file file-write-date file-author
               directory ensure-directories-exist

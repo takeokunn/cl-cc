@@ -260,10 +260,10 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: 葉関数や短い関数では大半のcallee-savedレジスタが未使用。FR-002の葉関数検出と連携
 - **難易度**: Easy
 
-#### FR-178: Red Zone Usage (x86-64)
+#### ✅ FR-178: Red Zone Usage (x86-64)
 
-- **対象**: `src/emit/x86-64-codegen.lisp`
-- **現状**: RSP調整なしの一時領域利用なし。常にPUSH/POPまたはSUB RSPでスタックフレーム確保
+- **対象**: `src/emit/x86-64-codegen.lisp`, `src/emit/x86-64-encoding.lisp`
+- **現状**: ✅ 完了 — x86-64エンコーダが `RSP` ベースメモリオペランド用の SIB バイトを生成し、葉関数かつ小規模 spill（16 slot 以下）の場合は spill load/store を `RSP` 基準の red zone に配置して `RBP` フレームを省略する。
 - **内容**: 葉関数でRSP以下128バイトのred zone（System V AMD64 ABI保証）を活用。フレームポインタ・RSP調整を完全省略
 - **根拠**: x86-64 ABIがred zoneを保証。葉関数のプロローグ/エピローグを0命令化
 - **難易度**: Easy

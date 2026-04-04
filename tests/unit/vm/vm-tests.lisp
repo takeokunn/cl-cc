@@ -39,6 +39,33 @@
     (assert-equal values result)
     (assert-true (eq values result))))
 
+(deftest vm-arg-slot-name-helper
+  "vm-arg-slot-name maps 0..7 to :ARG0..:ARG7." 
+  (assert-eq :ARG0 (cl-cc::vm-arg-slot-name 0))
+  (assert-eq :ARG7 (cl-cc::vm-arg-slot-name 7)))
+
+(deftest vm-bind-arg-slots-binds-leading-args
+  "vm-bind-arg-slots stores the first 8 arguments into reserved slots."
+  (let ((state (make-instance 'cl-cc::vm-state)))
+    (let ((slots (cl-cc::vm-bind-arg-slots state '(10 20 30 40 50 60 70 80 90))))
+      (assert-equal '(:ARG0 :ARG1 :ARG2 :ARG3 :ARG4 :ARG5 :ARG6 :ARG7) slots)
+      (assert-= 10 (cl-cc:vm-reg-get state :ARG0))
+      (assert-= 80 (cl-cc:vm-reg-get state :ARG7)))))
+
+(deftest vm-bind-closure-args-populates-arg-slots
+  "vm-bind-closure-args also mirrors call arguments into reserved ARG slots."
+  (let ((state (make-instance 'cl-cc::vm-state))
+        (closure (make-instance 'cl-cc::vm-closure-object
+                                :entry-label "f"
+                                :params '(:R10 :R11)
+                                :captured-values #())))
+    (cl-cc::vm-bind-closure-args closure state '(1 2 3))
+    (assert-= 1 (cl-cc:vm-reg-get state :ARG0))
+    (assert-= 2 (cl-cc:vm-reg-get state :ARG1))
+    (assert-= 3 (cl-cc:vm-reg-get state :ARG2))
+    (assert-= 1 (cl-cc:vm-reg-get state :R10))
+    (assert-= 2 (cl-cc:vm-reg-get state :R11))))
+
 (deftest vm-host-bridge-registration
   "vm-register-host-bridge marks a symbol as host-callable in the bridge table."
   (let ((sym (gensym "VM-BRIDGE-")))

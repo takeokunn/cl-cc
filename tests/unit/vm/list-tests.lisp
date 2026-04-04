@@ -10,12 +10,10 @@
 
 (deftest vm-list-make-list
   "vm-make-list: N nils for size N; empty list for size 0."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 3)
+  (with-test-vm (s (1 3))
     (exec1 (cl-cc::make-vm-make-list :dst 0 :size 1) s)
     (assert-equal '(nil nil nil) (cl-cc:vm-reg-get s 0)))
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 0)
+  (with-test-vm (s (1 0))
     (exec1 (cl-cc::make-vm-make-list :dst 0 :size 1) s)
     (assert-null (cl-cc:vm-reg-get s 0))))
 
@@ -23,23 +21,19 @@
 
 (deftest vm-list-length-proper
   "vm-length returns length of a proper list."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 '(a b c d))
+  (with-test-vm (s (1 '(a b c d)))
     (exec1 (cl-cc::make-vm-length :dst 0 :src 1) s)
     (assert-= 4 (cl-cc:vm-reg-get s 0))))
 
 (deftest vm-list-reverse-list
   "vm-reverse returns a reversed copy."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 '(1 2 3))
+  (with-test-vm (s (1 '(1 2 3)))
     (exec1 (cl-cc::make-vm-reverse :dst 0 :src 1) s)
     (assert-equal '(3 2 1) (cl-cc:vm-reg-get s 0))))
 
 (deftest vm-list-append-two
   "vm-append concatenates two lists."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 '(a b))
-    (cl-cc:vm-reg-set s 2 '(c d))
+  (with-test-vm (s (1 '(a b)) (2 '(c d)))
     (exec1 (cl-cc::make-vm-append :dst 0 :src1 1 :src2 2) s)
     (assert-equal '(a b c d) (cl-cc:vm-reg-get s 0))))
 
@@ -47,30 +41,22 @@
 
 (deftest vm-list-member-behavior
   "vm-member returns tail on hit; nil on miss."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 2 '(a b c))
-    (cl-cc:vm-reg-set s 1 'b)
+  (with-test-vm (s (2 '(a b c)) (1 'b))
     (exec1 (cl-cc::make-vm-member :dst 0 :item 1 :list 2) s)
     (assert-equal '(b c) (cl-cc:vm-reg-get s 0)))
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 2 '(a b c))
-    (cl-cc:vm-reg-set s 1 'z)
+  (with-test-vm (s (2 '(a b c)) (1 'z))
     (exec1 (cl-cc::make-vm-member :dst 0 :item 1 :list 2) s)
     (assert-null (cl-cc:vm-reg-get s 0))))
 
 (deftest vm-list-nth-index
   "vm-nth retrieves element at given index."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 2)
-    (cl-cc:vm-reg-set s 2 '(a b c d))
+  (with-test-vm (s (1 2) (2 '(a b c d)))
     (exec1 (cl-cc::make-vm-nth :dst 0 :index 1 :list 2) s)
     (assert-eq 'c (cl-cc:vm-reg-get s 0))))
 
 (deftest vm-list-nthcdr-skips
   "vm-nthcdr returns the tail after N cdrs."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 2)
-    (cl-cc:vm-reg-set s 2 '(a b c d))
+  (with-test-vm (s (1 2) (2 '(a b c d)))
     (exec1 (cl-cc::make-vm-nthcdr :dst 0 :index 1 :list 2) s)
     (assert-equal '(c d) (cl-cc:vm-reg-get s 0))))
 
@@ -87,8 +73,7 @@
           ("last"    #'cl-cc::make-vm-last    '(a b c)          '(c))
           ("butlast" #'cl-cc::make-vm-butlast '(a b c)          '(a b)))
   (constructor input expected)
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 input)
+  (with-test-vm (s (1 input))
     (exec1 (funcall constructor :dst 0 :src 1) s)
     (assert-equal expected (cl-cc:vm-reg-get s 0))))
 
@@ -96,8 +81,7 @@
 
 (deftest vm-list-nreverse-destructive
   "vm-nreverse destructively reverses a list."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 (list 1 2 3))
+  (with-test-vm (s (1 (list 1 2 3)))
     (exec1 (cl-cc::make-vm-nreverse :dst 0 :src 1) s)
     (assert-equal '(3 2 1) (cl-cc:vm-reg-get s 0))))
 
@@ -105,8 +89,7 @@
 
 (deftest vm-list-list-length-proper
   "vm-list-length returns length for proper list."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 '(x y z))
+  (with-test-vm (s (1 '(x y z)))
     (exec1 (cl-cc::make-vm-list-length :dst 0 :src 1) s)
     (assert-= 3 (cl-cc:vm-reg-get s 0))))
 
@@ -117,20 +100,16 @@
           ("null/nil"       #'cl-cc::make-vm-null nil  1)
           ("null/non-nil"   #'cl-cc::make-vm-null 42   0))
   (constructor value expected)
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 value)
+  (with-test-vm (s (1 value))
     (exec1 (funcall constructor :dst 0 :src 1) s)
     (assert-= expected (cl-cc:vm-reg-get s 0))))
 
 (deftest vm-list-push-and-pop
   "vm-push conses item onto list; vm-pop extracts car."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 'x)
-    (cl-cc:vm-reg-set s 2 '(a b))
+  (with-test-vm (s (1 'x) (2 '(a b)))
     (exec1 (cl-cc::make-vm-push :dst 0 :item 1 :list 2) s)
     (assert-equal '(x a b) (cl-cc:vm-reg-get s 0)))
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 '(first second third))
+  (with-test-vm (s (1 '(first second third)))
     (exec1 (cl-cc::make-vm-pop :dst 0 :list 1) s)
     (assert-eq 'first (cl-cc:vm-reg-get s 0))))
 
@@ -161,6 +140,47 @@
     (let ((c2 (cl-cc::vm-hash-cons 'x 'y)))
       (assert-false (eq c1 c2))
       (assert-equal c1 c2))))
+
+(deftest vm-extensible-sequence-builtins
+  "The partial sequence protocol works for list and vector builtins."
+  (assert-equal 'b (cl-cc::vm-sequence-elt '(a b c) 1))
+  (assert-= 3 (cl-cc::vm-sequence-length #(1 2 3)))
+  (assert-equal '(x x) (cl-cc::vm-make-sequence-like '(a) 2 :initial-element 'x))
+  (assert-true (equalp #(1 2 0 0)
+                       (cl-cc::vm-adjust-sequence #(1 2) 4 :initial-element 0))))
+
+(defclass test-sequence ()
+  ((payload :initarg :payload :accessor test-sequence-payload)))
+
+(defmethod cl-cc::vm-sequence-elt ((sequence test-sequence) index)
+  (aref (test-sequence-payload sequence) index))
+
+(defmethod cl-cc::vm-sequence-length ((sequence test-sequence))
+  (length (test-sequence-payload sequence)))
+
+(defmethod cl-cc::vm-make-sequence-like ((sequence test-sequence) size &key (initial-element nil))
+  (declare (ignore sequence))
+  (make-instance 'test-sequence :payload (make-array size :initial-element initial-element)))
+
+(deftest vm-extensible-sequence-user-extension
+  "User-defined sequence types can extend the partial protocol via methods."
+  (let* ((seq (make-instance 'test-sequence :payload #(10 20 30)))
+         (like (cl-cc::vm-make-sequence-like seq 2 :initial-element 7)))
+    (assert-= 20 (cl-cc::vm-sequence-elt seq 1))
+    (assert-= 3 (cl-cc::vm-sequence-length seq))
+    (assert-= 2 (cl-cc::vm-sequence-length like))
+    (assert-= 7 (cl-cc::vm-sequence-elt like 0))))
+
+(deftest vm-instructions-use-extensible-sequence-protocol
+  "vm-length and vm-nth dispatch through the extensible sequence protocol."
+  (let ((s (make-test-vm))
+        (seq (make-instance 'test-sequence :payload #(10 20 30))))
+    (cl-cc:vm-reg-set s 1 seq)
+    (cl-cc:vm-reg-set s 2 1)
+    (exec1 (cl-cc::make-vm-length :dst 0 :src 1) s)
+    (exec1 (cl-cc::make-vm-nth :dst 3 :index 2 :list 1) s)
+    (assert-= 3 (cl-cc:vm-reg-get s 0))
+    (assert-= 20 (cl-cc:vm-reg-get s 3))))
 
 ;;; ─── Association lists ──────────────────────────────────────────────────────
 

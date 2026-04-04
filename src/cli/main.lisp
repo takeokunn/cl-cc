@@ -39,6 +39,11 @@ Options:
   --verbose               Show compilation details on stderr
   --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
   --print-pass-timings    Print per-pass optimizer timings
+  --time-passes          Alias for --print-pass-timings
+  --trace-json <file>     Write Chrome trace JSON for optimizer passes
+  --flamegraph <file>     Write a sampled VM flame graph SVG (run/eval only)
+  --stats                 Print per-pass optimizer stats
+  --trace-emit            Print VM/OPT/ASM compilation stages
   --strict                Treat type warnings as errors (check only)
 
 Version: ~A~%" *version*))
@@ -57,7 +62,11 @@ Options:
   --verbose         Show compilation details on stderr
   --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
   --print-pass-timings    Print per-pass optimizer timings
-")
+  --time-passes          Alias for --print-pass-timings
+  --trace-json <file>     Write Chrome trace JSON for optimizer passes
+  --stats                 Print per-pass optimizer stats
+  --trace-emit            Print VM/OPT/ASM compilation stages
+ ")
     ("compile" . "Usage: cl-cc compile [options] <file>
 
   Compile source to a native Mach-O binary.
@@ -72,7 +81,12 @@ Options:
   --verbose             Show compilation details on stderr
   --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
   --print-pass-timings    Print per-pass optimizer timings
-")
+  --time-passes          Alias for --print-pass-timings
+  --trace-json <file>     Write Chrome trace JSON for optimizer passes
+  --flamegraph <file>     Write a sampled VM flame graph SVG
+  --stats                 Print per-pass optimizer stats
+  --trace-emit            Print VM/OPT/ASM compilation stages
+ ")
     ("eval" . "Usage: cl-cc eval [options] <expr>
 
   Evaluate a CL-CC expression and print the result.
@@ -83,7 +97,12 @@ Options:
   --verbose  Show compilation details on stderr
   --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
   --print-pass-timings    Print per-pass optimizer timings
-")
+  --time-passes          Alias for --print-pass-timings
+  --trace-json <file>     Write Chrome trace JSON for optimizer passes
+  --flamegraph <file>     Write a sampled VM flame graph SVG
+  --stats                 Print per-pass optimizer stats
+  --trace-emit            Print VM/OPT/ASM compilation stages
+ ")
     ("repl" . "Usage: cl-cc repl [options]
 
   Start an interactive ANSI Common Lisp REPL.
@@ -191,6 +210,81 @@ Returns :lisp or :php."
   (when loc
     (format stream "; source: ~A~%" loc)))
 
+(defun %call-with-optional-output-file (path thunk)
+  "Call THUNK with an output stream for PATH, or NIL when PATH is NIL."
+  (if path
+      (with-open-file (out path :direction :output :if-exists :supersede :if-does-not-exist :create)
+        (funcall thunk out))
+      (funcall thunk nil)))
+
+(defun %svg-escape (text)
+  (with-output-to-string (out)
+    (loop for ch across (princ-to-string text)
+          do (case ch
+               (#\& (princ "&amp;" out))
+               (#\< (princ "&lt;" out))
+               (#\> (princ "&gt;" out))
+               (#\" (princ "&quot;" out))
+               (t (write-char ch out))))))
+
+(defun %flamegraph-color (name)
+  (let ((s (string-downcase (princ-to-string name))))
+    (cond ((search "gc" s) "rgb(90,140,255)")
+          ((search "jit" s) "rgb(255,165,0)")
+          (t (format nil "hsl(8,75%,~D%)" (+ 45 (mod (sxhash s) 20)))))))
+
+(defun %flamegraph-build-tree (samples)
+  (let ((root (list :name "root" :count 0 :children (make-hash-table :test #'equal))))
+    (maphash
+     (lambda (stack count)
+       (incf (getf root :count) count)
+       (let ((node root))
+         (dolist (name (uiop:split-string stack :separator '(#\;)))
+           (let* ((children (getf node :children))
+                  (child (or (gethash name children)
+                             (setf (gethash name children)
+                                   (list :name name :count 0 :children (make-hash-table :test #'equal))))))
+             (incf (getf child :count) count)
+             (setf node child)))))
+     samples)
+    root))
+
+(defun %flamegraph-children-list (node)
+  (let (children)
+    (maphash (lambda (_ child) (declare (ignore _)) (push child children)) (getf node :children))
+    (sort children #'string< :key (lambda (c) (princ-to-string (getf c :name))))))
+
+(defun %write-flamegraph-svg (path samples)
+  (let* ((tree (%flamegraph-build-tree samples))
+         (total (max 1 (getf tree :count)))
+         (frame-height 18)
+         (width 1200)
+         (max-depth 0))
+    (labels ((depth-of (node depth)
+               (setf max-depth (max max-depth depth))
+               (dolist (child (%flamegraph-children-list node))
+                 (depth-of child (1+ depth))))
+             (emit-node (stream node depth x scale)
+               (let ((children (%flamegraph-children-list node))
+                     (cursor x))
+                 (dolist (child children)
+                   (let* ((count (getf child :count))
+                          (w (* count scale))
+                          (y (- (+ 20 (* max-depth frame-height)) (* depth frame-height))))
+                     (format stream "<g><title>~A (~D samples)</title><rect x='~,2f' y='~,2f' width='~,2f' height='~D' fill='~A' stroke='white' stroke-width='0.5'/><text x='~,2f' y='~,2f' font-size='12' fill='black'>~A</text></g>~%"
+                             (%svg-escape (getf child :name)) count cursor y w (- frame-height 2)
+                             (%flamegraph-color (getf child :name)) (+ cursor 3) (+ y 13)
+                             (%svg-escape (getf child :name)))
+                     (emit-node stream child (1+ depth) cursor scale)
+                     (incf cursor w))))))
+      (depth-of tree 0)
+      (with-open-file (out path :direction :output :if-exists :supersede :if-does-not-exist :create)
+        (format out "<svg xmlns='http://www.w3.org/2000/svg' width='~D' height='~D'>~%" width (+ 40 (* (1+ max-depth) frame-height)))
+        (format out "<rect width='100%' height='100%' fill='rgb(250,250,250)'/>~%")
+        (emit-node out tree 0 0 (/ width total))
+        (format out "</svg>~%")))
+    path))
+
 (defun %ssa-block-name (blk)
   (let ((label (cl-cc:bb-label blk)))
     (string-downcase
@@ -288,6 +382,15 @@ Returns :lisp or :php."
     (:asm (%dump-asm-phase result stream annotate-source))
     (t (error "Unknown IR phase: ~S" phase))))
 
+(defun %trace-emit-stages (result stream &key annotate-source)
+  "Emit a simple VM/OPT/ASM trace for RESULT to STREAM."
+  (format stream ";; --trace-emit: vm --~%")
+  (%dump-vm-phase result stream annotate-source)
+  (format stream ";; --trace-emit: opt --~%")
+  (%dump-opt-phase result stream annotate-source)
+  (format stream ";; --trace-emit: asm --~%")
+  (%dump-asm-phase result stream annotate-source))
+
 (defun %arch-keyword (arch-str)
   "Convert ARCH-STR (\"x86-64\" or \"arm64\"/\"aarch64\") to a keyword.
 Calls (uiop:quit 2) on unrecognised values."
@@ -329,13 +432,18 @@ Calls (uiop:quit 2) on unrecognised values."
       (format *error-output* "Error: 'run' requires a file argument.~%")
       (%print-help "run")
       (uiop:quit 2))
-      (let* ((lang-flag (or (flag parsed "--lang") ""))
-             (language  (%detect-language file lang-flag))
-             (stdlib    (flag parsed "--stdlib"))
-             (verbose   (flag parsed "--verbose"))
-             (pass-pipeline (flag parsed "--pass-pipeline"))
-             (print-pass-timings (flag parsed "--print-pass-timings"))
-             (opt-remarks-mode (%parse-opt-remarks-mode (flag parsed "--opt-remarks")))
+       (let* ((lang-flag (or (flag parsed "--lang") ""))
+              (language  (%detect-language file lang-flag))
+              (stdlib    (flag parsed "--stdlib"))
+              (verbose   (flag parsed "--verbose"))
+               (pass-pipeline (flag parsed "--pass-pipeline"))
+               (print-pass-timings (or (flag parsed "--print-pass-timings")
+                                       (flag parsed "--time-passes")))
+               (trace-json-path (flag parsed "--trace-json"))
+               (flamegraph-path (flag parsed "--flamegraph"))
+               (print-pass-stats (flag parsed "--stats"))
+               (trace-emit (flag parsed "--trace-emit"))
+               (opt-remarks-mode (%parse-opt-remarks-mode (flag parsed "--opt-remarks")))
              (source    (handler-case (%read-file file)
                         (error (e)
                           (format *error-output* "Error reading ~A: ~A~%" file e)
@@ -344,29 +452,56 @@ Calls (uiop:quit 2) on unrecognised values."
         (format *error-output* "; cl-cc run: ~A  lang=~A  stdlib=~A~%"
                 file language (if stdlib "yes" "no")))
       (handler-case
-          (progn
-            (cond
-              ((and stdlib (eq language :lisp))
-               (run-string source :stdlib t
-                          :pass-pipeline pass-pipeline
-                          :print-pass-timings print-pass-timings
-                          :print-opt-remarks (not (null opt-remarks-mode))
-                          :opt-remarks-mode (or opt-remarks-mode :all)))
-              ((eq language :php)
-                (let* ((result  (compile-string source :target :vm :language :php
+          (%call-with-optional-output-file trace-json-path
+            (lambda (trace-json-stream)
+               (let ((vm-state (when flamegraph-path
+                                 (make-instance 'cl-cc::vm-io-state :output-stream *standard-output*))))
+                 (when vm-state
+                  (setf (cl-cc::vm-profile-enabled-p vm-state) t
+                        (cl-cc::vm-profile-call-stack vm-state) (list "<toplevel>")))
+                (progn
+                (cond
+                  ((and stdlib (eq language :lisp))
+                     (let ((result (cl-cc::compile-string-with-stdlib source :target :vm
+                                                                    :trace-json-stream trace-json-stream
+                                                                    :print-pass-stats print-pass-stats
+                                                                    :pass-pipeline pass-pipeline
+                                                                    :print-pass-timings print-pass-timings
+                                                                    :print-opt-remarks (not (null opt-remarks-mode))
+                                                                    :opt-remarks-mode (or opt-remarks-mode :all))))
+                     (when trace-emit
+                       (%trace-emit-stages result *standard-output*))
+                     (prog1 (run-compiled (compilation-result-program result) :state vm-state)
+                        (when flamegraph-path
+                          (%write-flamegraph-svg flamegraph-path (cl-cc::vm-profile-samples vm-state))))))
+                  ((eq language :php)
+                   (let* ((result  (compile-string source :target :vm :language :php
+                                                   :trace-json-stream trace-json-stream
+                                                   :print-pass-stats print-pass-stats
+                                                   :pass-pipeline pass-pipeline
+                                                  :print-pass-timings print-pass-timings
+                                                  :print-opt-remarks (not (null opt-remarks-mode))
+                                                  :opt-remarks-mode (or opt-remarks-mode :all)))
+                           (program (compilation-result-program result)))
+                     (when trace-emit
+                       (%trace-emit-stages result *standard-output*))
+                     (prog1 (run-compiled program :state vm-state)
+                        (when flamegraph-path
+                          (%write-flamegraph-svg flamegraph-path (cl-cc::vm-profile-samples vm-state))))))
+                  (t
+                   (let ((result (compile-string source :target :vm
+                                                :trace-json-stream trace-json-stream
+                                                :print-pass-stats print-pass-stats
                                                 :pass-pipeline pass-pipeline
                                                 :print-pass-timings print-pass-timings
                                                 :print-opt-remarks (not (null opt-remarks-mode))
-                                                :opt-remarks-mode (or opt-remarks-mode :all)))
-                       (program (compilation-result-program result)))
-                  (run-compiled program)))
-              (t
-               (run-string source
-                          :pass-pipeline pass-pipeline
-                          :print-pass-timings print-pass-timings
-                          :print-opt-remarks (not (null opt-remarks-mode))
-                          :opt-remarks-mode (or opt-remarks-mode :all))))
-            (uiop:quit 0))
+                                                :opt-remarks-mode (or opt-remarks-mode :all))))
+                     (when trace-emit
+                       (%trace-emit-stages result *standard-output*))
+                     (prog1 (run-compiled (compilation-result-program result) :state vm-state)
+                        (when flamegraph-path
+                          (%write-flamegraph-svg flamegraph-path (cl-cc::vm-profile-samples vm-state)))))))
+                (uiop:quit 0)))))
         (error (e)
           (format *error-output* "Error: ~A~%" e)
           (uiop:quit 1))))))
@@ -383,12 +518,16 @@ Calls (uiop:quit 2) on unrecognised values."
            (lang-flag (or (flag parsed "--lang") ""))
            (language  (let ((l (%detect-language file lang-flag)))
                         (if (string= lang-flag "") nil l)))
-            (dump-ir   (flag parsed "--dump-ir"))
-            (annotate  (flag parsed "--annotate-source"))
-            (verbose   (flag parsed "--verbose"))
-            (pass-pipeline (flag parsed "--pass-pipeline"))
-            (print-pass-timings (flag parsed "--print-pass-timings"))
-            (opt-remarks-mode (%parse-opt-remarks-mode (flag parsed "--opt-remarks"))))
+             (dump-ir   (flag parsed "--dump-ir"))
+             (annotate  (flag parsed "--annotate-source"))
+             (verbose   (flag parsed "--verbose"))
+             (pass-pipeline (flag parsed "--pass-pipeline"))
+             (print-pass-timings (or (flag parsed "--print-pass-timings")
+                                      (flag parsed "--time-passes")))
+             (trace-json-path (flag parsed "--trace-json"))
+             (print-pass-stats (flag parsed "--stats"))
+             (trace-emit (flag parsed "--trace-emit"))
+             (opt-remarks-mode (%parse-opt-remarks-mode (flag parsed "--opt-remarks"))))
       (when verbose
         (format *error-output* "; cl-cc compile: ~A  arch=~A  output=~A~%"
                 file arch-str (or output "(auto)")))
@@ -398,25 +537,43 @@ Calls (uiop:quit 2) on unrecognised values."
                 (unless phase
                   (format *error-output* "Error: unknown IR phase ~A~%" dump-ir)
                   (uiop:quit 2))
-                (let* ((source (%read-file file))
-                       (result (compile-string source :target (%compile-target-keyword arch-str)
-                                               :language (or language :lisp)
-                                               :pass-pipeline pass-pipeline
-                                               :print-pass-timings print-pass-timings
-                                               :print-opt-remarks (not (null opt-remarks-mode))
-                                               :opt-remarks-mode (or opt-remarks-mode :all))))
-                  (%dump-ir-phase phase result *standard-output* annotate)
-                  (uiop:quit 0)))
-                (let ((result (compile-file-to-native file
-                                                     :arch arch
-                                                     :output-file output
-                                                     :language language
-                                                     :pass-pipeline pass-pipeline
-                                                     :print-pass-timings print-pass-timings
-                                                     :print-opt-remarks (not (null opt-remarks-mode))
-                                                     :opt-remarks-mode (or opt-remarks-mode :all))))
-                (format t "~A~%" result)
-                (uiop:quit 0)))
+                 (let* ((source (%read-file file))
+                         (result (compile-string source :target (%compile-target-keyword arch-str)
+                                                 :language (or language :lisp)
+                                                 :trace-json-stream nil
+                                                 :print-pass-stats print-pass-stats
+                                                 :pass-pipeline pass-pipeline
+                                                 :print-pass-timings print-pass-timings
+                                                 :print-opt-remarks (not (null opt-remarks-mode))
+                                                 :opt-remarks-mode (or opt-remarks-mode :all))))
+                   (%dump-ir-phase phase result *standard-output* annotate)
+                   (uiop:quit 0)))
+                (%call-with-optional-output-file trace-json-path
+                  (lambda (trace-json-stream)
+                    (let* ((source (%read-file file))
+                           (trace-result (when trace-emit
+                                           (compile-string source :target (%compile-target-keyword arch-str)
+                                                           :language (or language :lisp)
+                                                           :trace-json-stream trace-json-stream
+                                                           :print-pass-stats print-pass-stats
+                                                           :pass-pipeline pass-pipeline
+                                                           :print-pass-timings print-pass-timings
+                                                           :print-opt-remarks (not (null opt-remarks-mode))
+                                                           :opt-remarks-mode (or opt-remarks-mode :all))))
+                           (result (compile-file-to-native file
+                                                           :arch arch
+                                                           :output-file output
+                                                           :language language
+                                                           :trace-json-stream trace-json-stream
+                                                           :print-pass-stats print-pass-stats
+                                                           :pass-pipeline pass-pipeline
+                                                           :print-pass-timings print-pass-timings
+                                                           :print-opt-remarks (not (null opt-remarks-mode))
+                                                           :opt-remarks-mode (or opt-remarks-mode :all))))
+                      (when trace-result
+                        (%trace-emit-stages trace-result *standard-output* :annotate-source annotate))
+                      (format t "~A~%" result)
+                      (uiop:quit 0)))))
         (error (e)
           (format *error-output* "Error: ~A~%" e)
           (uiop:quit 1))))))
@@ -430,24 +587,45 @@ Calls (uiop:quit 2) on unrecognised values."
      (let* ((stdlib  (flag parsed "--stdlib"))
             (verbose (flag parsed "--verbose"))
             (pass-pipeline (flag parsed "--pass-pipeline"))
-            (print-pass-timings (flag parsed "--print-pass-timings"))
+            (print-pass-timings (or (flag parsed "--print-pass-timings")
+                                    (flag parsed "--time-passes")))
+            (trace-json-path (flag parsed "--trace-json"))
+            (flamegraph-path (flag parsed "--flamegraph"))
+            (print-pass-stats (flag parsed "--stats"))
+            (trace-emit (flag parsed "--trace-emit"))
             (opt-remarks-mode (%parse-opt-remarks-mode (flag parsed "--opt-remarks"))))
       (when verbose
         (format *error-output* "; cl-cc eval: ~S~%" expr))
       (handler-case
-          (let ((result (if stdlib
-                            (run-string expr :stdlib t
-                                       :pass-pipeline pass-pipeline
-                                       :print-pass-timings print-pass-timings
-                                       :print-opt-remarks (not (null opt-remarks-mode))
-                                       :opt-remarks-mode (or opt-remarks-mode :all))
-                            (run-string expr
-                                       :pass-pipeline pass-pipeline
-                                       :print-pass-timings print-pass-timings
-                                       :print-opt-remarks (not (null opt-remarks-mode))
-                                       :opt-remarks-mode (or opt-remarks-mode :all)))))
-            (format t "~S~%" result)
-            (uiop:quit 0))
+          (%call-with-optional-output-file trace-json-path
+            (lambda (trace-json-stream)
+              (let* ((vm-state (when flamegraph-path
+                                 (make-instance 'cl-cc::vm-io-state :output-stream *standard-output*))))
+                (when vm-state
+                  (setf (cl-cc::vm-profile-enabled-p vm-state) t
+                        (cl-cc::vm-profile-call-stack vm-state) (list "<toplevel>")))
+                (let* ((compiled (if stdlib
+                                   (cl-cc::compile-string-with-stdlib expr :target :vm
+                                                                      :trace-json-stream trace-json-stream
+                                                                      :print-pass-stats print-pass-stats
+                                                                      :pass-pipeline pass-pipeline
+                                                                      :print-pass-timings print-pass-timings
+                                                                      :print-opt-remarks (not (null opt-remarks-mode))
+                                                                      :opt-remarks-mode (or opt-remarks-mode :all))
+                                   (compile-string expr :target :vm
+                                                   :trace-json-stream trace-json-stream
+                                                   :print-pass-stats print-pass-stats
+                                                   :pass-pipeline pass-pipeline
+                                                   :print-pass-timings print-pass-timings
+                                                   :print-opt-remarks (not (null opt-remarks-mode))
+                                                   :opt-remarks-mode (or opt-remarks-mode :all))))
+                       (result (run-compiled (compilation-result-program compiled) :state vm-state)))
+                  (when trace-emit
+                    (%trace-emit-stages compiled *standard-output*))
+                  (when flamegraph-path
+                    (%write-flamegraph-svg flamegraph-path (cl-cc::vm-profile-samples vm-state)))
+                  (format t "~S~%" result)
+                  (uiop:quit 0)))))
         (error (e)
           (format *error-output* "Error: ~A~%" e)
           (uiop:quit 1))))))

@@ -158,6 +158,22 @@
     (assert-= 3 (run-string "(+ 1 2)" :pass-pipeline "fold" :print-pass-timings t :timing-stream stream))
     (assert-true (search "OPT-PASS-FOLD" (string-upcase (get-output-stream-string stream))))))
 
+(deftest pipeline-run-string-pass-stats
+  "run-string forwards pass stats output options while preserving evaluation result."
+  (let ((stream (make-string-output-stream)))
+    (assert-= 3 (run-string "(+ 1 2)" :pass-pipeline "fold" :print-pass-stats t :stats-stream stream))
+    (let ((text (string-upcase (get-output-stream-string stream))))
+      (assert-true (search "OPT-PASS-FOLD" text))
+      (assert-true (search "BEFORE=" text)))))
+
+(deftest pipeline-run-string-trace-json
+  "run-string forwards trace-json output while preserving evaluation result."
+  (let ((stream (make-string-output-stream)))
+    (assert-= 3 (run-string "(+ 1 2)" :pass-pipeline "fold" :trace-json-stream stream))
+    (let ((text (get-output-stream-string stream)))
+      (assert-true (search "\"traceEvents\"" text))
+      (assert-true (search "OPT-PASS-FOLD" text)))))
+
 ;;; ─── %prescan-in-package ────────────────────────────────────────────────
 
 (deftest pipeline-prescan-in-package-behavior

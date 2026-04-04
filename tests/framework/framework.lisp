@@ -170,6 +170,19 @@ Returns (values docstring timeout depends-on tags body-forms)."
   "Create a fresh VM state for instruction-level testing."
   (make-instance 'cl-cc:vm-state))
 
+(defmacro with-test-vm ((state &rest bindings) &body body)
+  "Create a fresh VM STATE, preload register BINDINGS, then run BODY.
+
+Each binding has the shape (register value), for example:
+  (with-test-vm (vm (1 42) (2 '(a b))) ...)
+This keeps instruction-level tests focused on behavior instead of setup noise."
+  `(let ((,state (make-test-vm)))
+     ,@(mapcar (lambda (binding)
+                 (destructuring-bind (register value) binding
+                   `(cl-cc:vm-reg-set ,state ,register ,value)))
+               bindings)
+     ,@body))
+
 (defun vm-exec (inst state &optional (pc 0) (labels (make-hash-table :test #'equal)))
   "Execute one VM instruction and return the next program counter."
   (cl-cc:execute-instruction inst state pc labels))

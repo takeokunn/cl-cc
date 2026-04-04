@@ -97,6 +97,29 @@ Returns the byte vector, or NIL on error."
   (assert-= 4 (gethash 'cl-cc::vm-integer-sub cl-cc::*a64-instruction-sizes*))
   (assert-= 4 (gethash 'cl-cc::vm-integer-mul cl-cc::*a64-instruction-sizes*)))
 
+(deftest aarch64-vm-move-self-is-elided
+  "vm-move to the same physical register emits no bytes on AArch64."
+  (let ((bytes (%a64-collect-bytes
+                (lambda (s)
+                  (cl-cc::emit-a64-vm-move
+                   (cl-cc::make-vm-move :dst :R0 :src :R0) s)))))
+    (assert-= 0 (length bytes))))
+
+(deftest aarch64-scs-single-register-encodings
+  "Shadow call stack helper encodings for STR-post, LDR-pre, B.cond, and BRK are stable."
+  (let ((store (%a64-collect-bytes (lambda (s) (cl-cc::emit-a64-instr (cl-cc::encode-str-post 30 18 8) s))))
+        (load  (%a64-collect-bytes (lambda (s) (cl-cc::emit-a64-instr (cl-cc::encode-ldr-pre 17 18 -8) s))))
+        (beq   (%a64-collect-bytes (lambda (s) (cl-cc::emit-a64-instr (cl-cc::encode-b-cond 2 0) s))))
+        (brk   (%a64-collect-bytes (lambda (s) (cl-cc::emit-a64-instr (cl-cc::encode-brk 0) s)))))
+    (assert-equal '(94 134 0 248) store)
+    (assert-equal '(81 142 95 248) load)
+    (assert-equal '(64 0 0 84) beq)
+    (assert-equal '(0 0 32 212) brk)))
+
+(deftest aarch64-instruction-size-vm-move-self-is-zero
+  "a64-instruction-size returns 0 for self-moves elided at emit time."
+  (assert-= 0 (cl-cc::a64-instruction-size (cl-cc::make-vm-move :dst :R0 :src :R0))))
+
 (deftest aarch64-min-max-emitter-table-entries
   "vm-min and vm-max are present in the AArch64 emitter table."
   (assert-true (functionp (gethash 'cl-cc::vm-min cl-cc::*a64-emitter-table*)))
@@ -120,6 +143,14 @@ Returns the byte vector, or NIL on error."
     (assert-= #x00 (nth 1 bytes))
     (assert-= #x1F (nth 2 bytes))
     (assert-= #xD6 (nth 3 bytes))))
+
+(deftest aarch64-build-label-offsets-account-for-elided-self-move
+  "build-a64-label-offsets does not advance offsets for self-moves elided at emit time."
+  (let* ((insts (list (cl-cc::make-vm-move :dst :R0 :src :R0)
+                      (cl-cc::make-vm-label :name "after-self-move")
+                      (cl-cc::make-vm-halt :reg :R0)))
+         (offsets (cl-cc::build-a64-label-offsets insts 0)))
+    (assert-= 0 (gethash "after-self-move" offsets))))
 
 (deftest aarch64-min-max-emitter-encoding
   "emit-a64-vm-min/max emit CMP followed by CSEL on AArch64."
@@ -191,6 +222,31 @@ Returns the byte vector, or NIL on error."
          (nonleaf-bytes (compile-to-aarch64-bytes base)))
     (assert-true (cl-cc::vm-program-leaf-p program))
     (assert-true (< (length leaf-bytes) (length nonleaf-bytes)))))
+
+(deftest aarch64-empty-program-includes-shadow-call-stack
+  "Empty AArch64 programs include the shadow call stack prologue/epilogue sequence."
+  (let* ((program (cl-cc::make-vm-program :instructions nil :result-register :R0))
+         (bytes (compile-to-aarch64-bytes program)))
+    (assert-= 32 (length bytes))
+    ;; Prologue begins with STR LR, [X18], #8
+    (assert-= 94 (nth 0 bytes))
+    (assert-= 134 (nth 1 bytes))
+    (assert-= 0 (nth 2 bytes))
+    (assert-= 248 (nth 3 bytes))
+    ;; Normal FP/LR save and restore remain present.
+    (assert-= 253 (nth 4 bytes))
+    (assert-= 123 (nth 5 bytes))
+    (assert-= 191 (nth 6 bytes))
+    (assert-= 169 (nth 7 bytes))
+    ;; Epilogue contains BRK #0 just before final RET.
+    (assert-= 0 (nth 24 bytes))
+    (assert-= 0 (nth 25 bytes))
+    (assert-= 32 (nth 26 bytes))
+    (assert-= 212 (nth 27 bytes))
+    (assert-= #xC0 (nth 28 bytes))
+    (assert-= #x03 (nth 29 bytes))
+    (assert-= #x5F (nth 30 bytes))
+    (assert-= #xD6 (nth 31 bytes))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Variety of programs

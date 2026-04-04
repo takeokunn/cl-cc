@@ -129,11 +129,16 @@
                 cl-cc::vm-symbol-p cl-cc::vm-function-p))
     (assert-= 10 (gethash tp cl-cc::*x86-64-instruction-sizes*))))
 
+(deftest x86-64-instruction-size-vm-move-self-is-zero
+  "instruction-size returns 0 for a vm-move that maps to the same physical register."
+  (let ((cl-cc::*current-regalloc* nil))
+    (assert-= 0 (cl-cc::instruction-size (cl-cc::make-vm-move :dst :R0 :src :R0)))))
+
 ;;; ─── *x86-64-emitter-entries* / *x86-64-emitter-table* ─────────────────────
 
 (deftest x86-64-emitter-entries-count
   "*x86-64-emitter-entries* has 45 entries covering all supported instructions."
-  (assert-= 52 (length cl-cc::*x86-64-emitter-entries*)))
+  (assert-= 56 (length cl-cc::*x86-64-emitter-entries*)))
 
 (deftest x86-64-emitter-table-built-from-entries
   "*x86-64-emitter-table* contains an entry for each item in *x86-64-emitter-entries*."
@@ -163,16 +168,31 @@
   :cases (("vm-const"   'cl-cc::vm-const)
            ("vm-add"     'cl-cc::vm-add)
            ("vm-integer-add" 'cl-cc::vm-integer-add)
+           ("vm-float-add" 'cl-cc::vm-float-add)
+           ("vm-float-div" 'cl-cc::vm-float-div)
            ("vm-call"    'cl-cc::vm-call)
            ("vm-tail-call" 'cl-cc::vm-tail-call)
-          ("vm-lt"      'cl-cc::vm-lt)
-          ("vm-neg"     'cl-cc::vm-neg)
-          ("vm-bswap"   'cl-cc::vm-bswap)
+           ("vm-lt"      'cl-cc::vm-lt)
+           ("vm-neg"     'cl-cc::vm-neg)
+           ("vm-bswap"   'cl-cc::vm-bswap)
           ("vm-and"     'cl-cc::vm-and)
           ("vm-logand"  'cl-cc::vm-logand)
           ("vm-null-p"  'cl-cc::vm-null-p))
   (sym)
   (assert-true (functionp (gethash sym cl-cc::*x86-64-emitter-table*))))
+
+(deftest x86-64-float-const-add-program-uses-xmm-path
+  "Float const/add/halt emits MOVQ+scalar SSE opcodes instead of integer ALU bytes."
+  (let* ((prog (cl-cc::make-vm-program
+                :instructions (list (cl-cc::make-vm-const :dst :R0 :value 1.0d0)
+                                    (cl-cc::make-vm-const :dst :R1 :value 2.0d0)
+                                    (cl-cc::make-vm-float-add :dst :R2 :lhs :R0 :rhs :R1)
+                                    (cl-cc::make-vm-halt :reg :R2))
+                :result-register :R2))
+         (bytes (coerce (cl-cc::compile-to-x86-64-bytes prog) 'list)))
+    (assert-true (search '(#x66 #x49 #x0F #x6E) bytes :test #'eql))
+    (assert-true (search '(#xF2 #x0F #x10) bytes :test #'eql))
+    (assert-true (search '(#xF2 #x0F #x58) bytes :test #'eql))))
 
 ;;; Helper: collect bytes emitted by a function (local copy; also defined in encoding-tests)
 (defun %x86-collect-bytes (emit-fn)
@@ -436,3 +456,12 @@
          (lbl (cl-cc::make-vm-label :name "after-const"))
          (offsets (cl-cc::build-label-offsets (list const-inst lbl) 0)))
     (assert-= 10 (gethash "after-const" offsets))))
+
+(deftest x86-64-build-label-offsets-account-for-elided-self-move
+  "build-label-offsets does not advance offsets for self-moves elided at emit time."
+  (let* ((insts (list (cl-cc::make-vm-move :dst :R0 :src :R0)
+                      (cl-cc::make-vm-label :name "after-self-move")
+                      (cl-cc::make-vm-halt :reg :R0)))
+         (offsets (let ((cl-cc::*current-regalloc* nil))
+                    (cl-cc::build-label-offsets insts 0))))
+    (assert-= 0 (gethash "after-self-move" offsets))))

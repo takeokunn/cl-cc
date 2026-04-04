@@ -379,7 +379,7 @@
   (vm-instructions nil)
   (optimized-instructions nil))
 
-(defun compile-toplevel-forms (forms &key (target :x86_64) type-check (safety 1) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all))
+(defun compile-toplevel-forms (forms &key (target :x86_64) type-check (safety 1) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile a list of top-level forms (e.g., from a source file).
 Handles defun, defvar, and expression forms.
   Returns a compilation-result struct with program, assembly, and globals."
@@ -449,14 +449,17 @@ Handles defun, defvar, and expression forms.
              (optimized nil)
              (leaf-p nil)
              (program nil))
-         (multiple-value-setq (optimized leaf-p)
-           (optimize-instructions instructions
-                                  :pass-pipeline pass-pipeline
-                                  :print-pass-timings print-pass-timings
-                                  :timing-stream timing-stream
-                                  :print-opt-remarks print-opt-remarks
-                                  :opt-remarks-stream opt-remarks-stream
-                                  :opt-remarks-mode opt-remarks-mode))
+          (multiple-value-setq (optimized leaf-p)
+            (optimize-instructions instructions
+                                   :pass-pipeline pass-pipeline
+                                   :print-pass-timings print-pass-timings
+                                   :timing-stream timing-stream
+                                   :print-pass-stats print-pass-stats
+                                   :stats-stream stats-stream
+                                   :trace-json-stream trace-json-stream
+                                   :print-opt-remarks print-opt-remarks
+                                   :opt-remarks-stream opt-remarks-stream
+                                   :opt-remarks-mode opt-remarks-mode))
         (setf program (make-vm-program
                        :instructions instructions
                        :result-register last-reg
@@ -706,14 +709,16 @@ Handles defun, defvar, and expression forms.
          (dst (make-register ctx)))
     (cond
       ((symbolp name)
-       (let ((entry (assoc name (ctx-env ctx))))
-         (if entry
-             (if (assoc name *labels-boxed-fns*)
-                 (emit ctx (make-vm-car :dst dst :src (cdr entry)))
-                 (emit ctx (make-vm-move :dst dst :src (cdr entry))))
-             (emit ctx (make-vm-func-ref :dst dst :label (format nil "~A" name))))))
+        (let ((entry (assoc name (ctx-env ctx))))
+          (if entry
+              (if (assoc name *labels-boxed-fns*)
+                  (emit ctx (make-vm-car :dst dst :src (cdr entry)))
+                  (emit ctx (make-vm-move :dst dst :src (cdr entry))))
+              (if (gethash name (ctx-global-generics ctx))
+                  (emit ctx (make-vm-get-global :dst dst :name name))
+                  (emit ctx (make-vm-func-ref :dst dst :label (format nil "~A" name)))))))
       ((and (consp name) (eq (car name) 'setf))
-       (emit ctx (make-vm-func-ref :dst dst :label (format nil "SETF_~A" (second name)))))
+        (emit ctx (make-vm-func-ref :dst dst :label (format nil "SETF_~A" (second name)))))
       (t
        (error "Invalid function name: ~S" name)))
     dst))
@@ -833,6 +838,11 @@ Handles defun, defvar, and expression forms.
       (let* ((instructions (vm-program-instructions program))
              (ra (allocate-registers instructions *x86-64-calling-convention*)))
         (setf (target-regalloc target-object) ra)
+        (setf (target-spill-base-reg target-object)
+              (if (cl-cc::x86-64-red-zone-spill-p (vm-program-leaf-p program)
+                                                 (regalloc-spill-count ra))
+                  :rsp
+                  :rbp))
         (setf program (make-vm-program
                        :instructions (regalloc-instructions ra)
                        :result-register (vm-program-result-register program)

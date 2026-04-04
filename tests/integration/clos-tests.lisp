@@ -302,8 +302,43 @@
                 ((r :initarg :r)))
               (defmethod info ((s circle))
                 99)
-              (let ((c (make-instance 'circle :n 1 :r 5)))
-                (info c))")))
+               (let ((c (make-instance 'circle :n 1 :r 5)))
+                 (info c))")))
+
+(deftest clos-make-instance-invalid-initarg-signals-error
+  "make-instance rejects unknown initargs unless :allow-other-keys is true."
+  (assert-true
+   (handler-case
+       (progn
+         (run-string
+          "(defclass foo () ((x :initarg :x)))
+           (make-instance 'foo :y 1)")
+         nil)
+     (error () t))))
+
+(deftest clos-make-instance-allow-other-keys-bypasses-validation
+  "make-instance accepts unknown initargs when :allow-other-keys t is supplied."
+  (assert-= 10
+            (run-string
+             "(defclass foo () ((x :initarg :x)))
+              (let ((obj (make-instance 'foo :x 10 :y 1 :allow-other-keys t)))
+                (slot-value obj 'x))")))
+
+(deftest clos-generic-function-methods-returns-registered-methods
+  "generic-function-methods returns the registered methods for a generic function."
+  (assert-= 2
+            (run-string
+             "(defgeneric describe-it (x))
+              (defmethod describe-it ((x integer)) x)
+              (defmethod describe-it ((x string)) x)
+              (length (generic-function-methods #'describe-it))")))
+
+(deftest clos-generic-function-method-combination-defaults-to-standard
+  "generic-function-method-combination reports STANDARD when no custom combination is set."
+  (assert-eq 'standard
+             (run-string
+              "(defgeneric describe-it (x))
+               (generic-function-method-combination #'describe-it)")))
 
 (deftest clos-inherit-superclass-method-still-works
   "Superclass instances still use their own method after subclass override."

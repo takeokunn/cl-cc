@@ -75,6 +75,9 @@
   `(with-prolog-single-solution (env ,goal)
      (assert-= ,expected (cl-cc:substitute-variables ,var env))))
 
+(defmacro assert-prolog-peephole-case (input expected)
+  `(assert-prolog-peephole-equal ,input ,expected))
+
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; logic-var-p
 ;;; ─────────────────────────────────────────────────────────────────────────
@@ -376,52 +379,39 @@
   (assert-prolog-peephole-not-contains '((:move :r0 :r0) (:const :r1 1)) '(:move :r0 :r0))
   (assert-prolog-peephole-equal '((:add :r2 :r0 :r1)) '((:add :r2 :r0 :r1))))
 
-(deftest prolog-peephole-arithmetic-identities
+(deftest-each prolog-peephole-arithmetic-identities
   "Peephole: local arithmetic and comparison identities preserve the next instruction."
-  (assert-prolog-peephole-equal '((:add :r2 :r0 0) (:const :r3 1))
-                                '((:move :r2 :r0) (:const :r3 1)))
-  (assert-prolog-peephole-equal '((:sub :r4 0 :r1) (:const :r5 2))
-                                '((:neg :r4 :r1) (:const :r5 2)))
-  (assert-prolog-peephole-equal '((:sub :r4 :r1 :r1) (:const :r5 2))
-                                '((:const :r4 0) (:const :r5 2)))
-  (assert-prolog-peephole-equal '((:mul :r6 :r1 0) (:const :r7 3))
-                                '((:const :r6 0) (:const :r7 3)))
-  (assert-prolog-peephole-equal '((:div :r8 :r2 1) (:const :r9 4))
-                                '((:move :r8 :r2) (:const :r9 4)))
-  (assert-prolog-peephole-equal '((:logand :r10 :r3 -1) (:const :r11 5))
-                                '((:move :r10 :r3) (:const :r11 5)))
-  (assert-prolog-peephole-equal '((:logand :r10 :r3 0) (:const :r11 5))
-                                '((:const :r10 0) (:const :r11 5)))
-  (assert-prolog-peephole-equal '((:logior :r10 :r3 -1) (:const :r11 5))
-                                '((:const :r10 -1) (:const :r11 5)))
-  (assert-prolog-peephole-equal '((:num-eq :r12 :r4 :r4) (:const :r13 6))
-                                '((:const :r12 1) (:const :r13 6)))
-  (assert-prolog-peephole-equal '((:logxor :r14 :r5 :r5) (:const :r15 7))
-                                '((:const :r14 0) (:const :r15 7))))
+  :cases (("add-zero"      '((:add :r2 :r0 0) (:const :r3 1))    '((:move :r2 :r0) (:const :r3 1)))
+          ("sub-from-zero" '((:sub :r4 0 :r1) (:const :r5 2))    '((:neg :r4 :r1) (:const :r5 2)))
+          ("sub-same"      '((:sub :r4 :r1 :r1) (:const :r5 2))  '((:const :r4 0) (:const :r5 2)))
+          ("mul-zero"      '((:mul :r6 :r1 0) (:const :r7 3))    '((:const :r6 0) (:const :r7 3)))
+          ("div-one"       '((:div :r8 :r2 1) (:const :r9 4))    '((:move :r8 :r2) (:const :r9 4)))
+          ("logand-all"    '((:logand :r10 :r3 -1) (:const :r11 5)) '((:move :r10 :r3) (:const :r11 5)))
+          ("logand-zero"   '((:logand :r10 :r3 0) (:const :r11 5))  '((:const :r10 0) (:const :r11 5)))
+          ("logior-all"    '((:logior :r10 :r3 -1) (:const :r11 5)) '((:const :r10 -1) (:const :r11 5)))
+          ("num-eq-same"   '((:num-eq :r12 :r4 :r4) (:const :r13 6)) '((:const :r12 1) (:const :r13 6)))
+          ("logxor-same"   '((:logxor :r14 :r5 :r5) (:const :r15 7)) '((:const :r14 0) (:const :r15 7))))
+  (input expected)
+  (assert-prolog-peephole-case input expected))
 
-(deftest prolog-peephole-same-reg-identities
+(deftest-each prolog-peephole-same-reg-identities
   "Peephole: same-register comparison/bitwise identities collapse locally."
-  (assert-prolog-peephole-equal '((:eq :r0 :r1 :r1) (:const :r2 1))
-                                '((:const :r0 1) (:const :r2 1)))
-  (assert-prolog-peephole-equal '((:gt :r3 :r4 :r4) (:const :r5 2))
-                                '((:const :r3 0) (:const :r5 2)))
-  (assert-prolog-peephole-equal '((:le :r6 :r7 :r7) (:const :r8 3))
-                                '((:const :r6 1) (:const :r8 3)))
-  (assert-prolog-peephole-equal '((:logand :r9 :r10 :r10) (:const :r11 4))
-                                '((:move :r9 :r10) (:const :r11 4)))
-  (assert-prolog-peephole-equal '((:logior :r12 :r13 :r13) (:const :r14 5))
-                                '((:move :r12 :r13) (:const :r14 5))))
+  :cases (("eq"     '((:eq :r0 :r1 :r1) (:const :r2 1))         '((:const :r0 1) (:const :r2 1)))
+          ("gt"     '((:gt :r3 :r4 :r4) (:const :r5 2))         '((:const :r3 0) (:const :r5 2)))
+          ("le"     '((:le :r6 :r7 :r7) (:const :r8 3))         '((:const :r6 1) (:const :r8 3)))
+          ("logand" '((:logand :r9 :r10 :r10) (:const :r11 4))  '((:move :r9 :r10) (:const :r11 4)))
+          ("logior" '((:logior :r12 :r13 :r13) (:const :r14 5)) '((:move :r12 :r13) (:const :r14 5))))
+  (input expected)
+  (assert-prolog-peephole-case input expected))
 
-(deftest prolog-peephole-negated-comparisons
+(deftest-each prolog-peephole-negated-comparisons
   "Peephole: compare followed by logical not collapses to the inverse comparison."
-  (assert-prolog-peephole-equal '((:lt :r0 :r1 :r2) (:not :r3 :r0))
-                                '((:ge :r3 :r1 :r2)))
-  (assert-prolog-peephole-equal '((:gt :r4 :r5 :r6) (:not :r7 :r4))
-                                '((:le :r7 :r5 :r6)))
-  (assert-prolog-peephole-equal '((:le :r8 :r9 :r10) (:not :r11 :r8))
-                                '((:gt :r11 :r9 :r10)))
-  (assert-prolog-peephole-equal '((:ge :r12 :r13 :r14) (:not :r15 :r12))
-                                '((:lt :r15 :r13 :r14))))
+  :cases (("lt->ge" '((:lt :r0 :r1 :r2) (:not :r3 :r0))      '((:ge :r3 :r1 :r2)))
+          ("gt->le" '((:gt :r4 :r5 :r6) (:not :r7 :r4))      '((:le :r7 :r5 :r6)))
+          ("le->gt" '((:le :r8 :r9 :r10) (:not :r11 :r8))    '((:gt :r11 :r9 :r10)))
+          ("ge->lt" '((:ge :r12 :r13 :r14) (:not :r15 :r12)) '((:lt :r15 :r13 :r14))))
+  (input expected)
+  (assert-prolog-peephole-case input expected))
 
 (deftest prolog-peephole-empty-input
   "Peephole: empty instruction list returns empty"

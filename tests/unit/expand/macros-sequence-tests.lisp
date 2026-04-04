@@ -108,6 +108,19 @@
     (assert-true (search "FIND-PACKAGE" result-str))
     (assert-true (search "MAKE-PACKAGE" result-str))))
 
+(deftest defpackage-local-nicknames-expand-and-apply
+  "(defpackage ... (:local-nicknames ...)) expands to host local nickname registration."
+  (let* ((form '(defpackage :fr275-pkg
+                  (:use :cl)
+                  (:local-nicknames (:a :cl-user))))
+         (result (our-macroexpand-1 form))
+         (result-str (format nil "~S" result))
+         (pkg-name (eval result))
+         (pkg (find-package pkg-name)))
+    (assert-true (search "ADD-PACKAGE-LOCAL-NICKNAME" result-str))
+    (assert-true (equal (package-name pkg) "FR275-PKG"))
+    (assert-true (assoc "A" (sb-ext:package-local-nicknames pkg) :test #'string=)))))
+
 (deftest-each coerce-quoted-type-expansions
   "COERCE with quoted type dispatches to the right coerce-to-* primitive"
   :cases (("to-string"        '(coerce v 'string)        "COERCE-TO-STRING")

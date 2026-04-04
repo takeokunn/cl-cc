@@ -124,6 +124,22 @@
                 (cl-cc::cc-fp-arg-registers *aarch64-calling-convention*))
   (assert-eq :v0 (cl-cc::cc-fp-return-register *aarch64-calling-convention*)))
 
+(deftest regalloc-prefers-fp-registers-for-float-vregs
+  "Float virtual registers allocate from the FP register class when provided." 
+  (let* ((instructions (list (make-vm-const :dst :r0 :value 1.0d0)
+                             (make-vm-const :dst :r1 :value 2.0d0)
+                             (make-vm-float-add :dst :r2 :lhs :r0 :rhs :r1)
+                             (make-vm-halt :reg :r2)))
+         (float-vregs (let ((ht (make-hash-table :test #'eq)))
+                        (setf (gethash :r0 ht) t
+                              (gethash :r1 ht) t
+                              (gethash :r2 ht) t)
+                        ht))
+         (result (allocate-registers instructions *x86-64-calling-convention* float-vregs)))
+    (assert-eq :xmm0 (regalloc-lookup result :r0))
+    (assert-eq :xmm1 (regalloc-lookup result :r1))
+    (assert-eq :xmm2 (regalloc-lookup result :r2))))
+
 (deftest regalloc-tail-call-has-no-def
   "vm-tail-call does not reserve a destination register in regalloc."
   (let ((inst (cl-cc:make-vm-tail-call :dst :r9 :func :r0 :args '(:r1 :r2))))

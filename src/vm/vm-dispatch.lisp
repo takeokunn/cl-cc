@@ -39,6 +39,7 @@ Saves and restores call stack around the sub-invocation."
     ;; Push a call frame; return-pc is irrelevant since we detect return by stack depth
     (vm-push-call-frame state 0 result-reg)
     (push nil (vm-method-call-stack state))
+    (vm-profile-enter-call state (vm-closure-entry-label closure))
     (vm-bind-closure-args closure state args)
     ;; Mini execution loop — run until our frame is popped
     (loop with pc = entry-pc
@@ -97,10 +98,28 @@ check the host bridge whitelist."
              (vm-state-registers state))
     copy))
 
+(defun vm-save-registers-subset (state regs)
+  "Return a snapshot copy containing only REGS from STATE.
+
+Missing registers are omitted from the returned table. This is a conservative
+helper for known-call snapshot trimming experiments." 
+  (let ((copy (make-hash-table :test (hash-table-test (vm-state-registers state)))))
+    (dolist (reg regs copy)
+      (multiple-value-bind (value found-p)
+          (gethash reg (vm-state-registers state))
+        (when found-p
+          (setf (gethash reg copy) value))))))
+
 (defun vm-restore-registers (state saved-regs)
   "Replace the current register file with the SAVED-REGS snapshot."
   (when saved-regs
     (clrhash (vm-state-registers state))
+    (maphash (lambda (k v) (setf (gethash k (vm-state-registers state)) v))
+             saved-regs)))
+
+(defun vm-restore-registers-subset (state saved-regs)
+  "Restore only the bindings present in SAVED-REGS into STATE." 
+  (when saved-regs
     (maphash (lambda (k v) (setf (gethash k (vm-state-registers state)) v))
              saved-regs)))
 
@@ -117,6 +136,8 @@ Restores captured environment, then handles required, &optional, &rest, and &key
         (rest-param (vm-closure-rest-param closure))
         (key-params (vm-closure-key-params closure))
         (captured   (vm-closure-captured-values closure)))
+    ;; Reserved argument slots for fast-path experiments / known-call helpers.
+    (vm-bind-arg-slots state arg-values)
     ;; Restore captured environment into registers
     (map nil (lambda (binding)
                (vm-reg-set state (car binding) (cdr binding)))
@@ -377,8 +398,9 @@ and folds results using the combination's operator."
             (let ((method-closure (car methods)))
               (vm-push-call-frame state (1+ pc) dst-reg)
               (push (list gf-ht methods all-arg-values) (vm-method-call-stack state))
+              (vm-profile-enter-call state (vm-closure-entry-label method-closure))
               (vm-bind-closure-args method-closure state all-arg-values)
-         (values (vm-label-table-lookup labels (vm-closure-entry-label method-closure)) nil nil))))))
+          (values (vm-label-table-lookup labels (vm-closure-entry-label method-closure)) nil nil))))))
 
 (defun vm-dispatch-generic-call (gf-ht state pc arg-regs dst-reg labels)
   "Dispatch a generic function call. GF-HT is the generic function dispatch table.
@@ -405,6 +427,7 @@ Returns (values next-pc halt-p result) like execute-instruction."
         (progn
           (vm-push-call-frame state (1+ pc) dst-reg)
           (push (list gf-ht all-methods all-arg-values) (vm-method-call-stack state))
+          (vm-profile-enter-call state (vm-closure-entry-label method-closure))
           (vm-bind-closure-args method-closure state all-arg-values)
           (values (vm-label-table-lookup labels (vm-closure-entry-label method-closure)) nil nil))
         ;; Standard method combination with around/before/after
@@ -432,7 +455,8 @@ Returns (values next-pc halt-p result) like execute-instruction."
                       :phase (cond (has-around :around)
                                    (has-before :before)
                                    (t :primary)))
-                (vm-method-call-stack state))
+                 (vm-method-call-stack state))
+          (vm-profile-enter-call state (vm-closure-entry-label first-method))
           (vm-bind-closure-args first-method state all-arg-values)
           (values (vm-label-table-lookup labels (vm-closure-entry-label first-method)) nil nil)))))
 
@@ -452,11 +476,12 @@ Returns (values next-pc halt-p result) like execute-instruction."
     ;; Normal closure — optionally push frame (skipped for TCO), bind args, jump
     (t
      (let ((arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs)))
-       (unless tail-p
-         (vm-push-call-frame state (1+ pc) dst-reg)
-         (push nil (vm-method-call-stack state)))
-       (vm-bind-closure-args func state arg-values)
-          (values (vm-label-table-lookup labels (vm-closure-entry-label func)) nil nil)))))
+        (unless tail-p
+          (vm-push-call-frame state (1+ pc) dst-reg)
+          (push nil (vm-method-call-stack state)))
+        (vm-profile-enter-call state (vm-closure-entry-label func) :tail-p tail-p)
+        (vm-bind-closure-args func state arg-values)
+           (values (vm-label-table-lookup labels (vm-closure-entry-label func)) nil nil)))))
 
 (defun %vm-ret-qualified-dispatch (state result labels method-entry)
   "Handle return from a qualified method. Supports standard method combination:
@@ -477,8 +502,9 @@ value is the final result. call-next-method from around triggers before/primary/
          (if (vm-call-stack state)
              (destructuring-bind (return-pc dst-reg old-closure-env saved-regs)
                  (pop (vm-call-stack state))
-               (vm-restore-registers state saved-regs)
-               (vm-reg-set state dst-reg result)
+                (vm-profile-return state)
+                (vm-restore-registers state saved-regs)
+                (vm-reg-set state dst-reg result)
                (when old-closure-env
                  (setf (vm-closure-env state) old-closure-env))
                (values return-pc nil nil))
@@ -487,24 +513,27 @@ value is the final result. call-next-method from around triggers before/primary/
         (before-pending
          (let ((next-before (car before-pending)))
            (setf (getf (cdddr method-entry) :before-pending) (cdr before-pending))
+           (vm-profile-enter-call state (vm-closure-entry-label next-before) :tail-p t)
            (vm-bind-closure-args next-before state arg-values)
-      (values (vm-label-table-lookup labels (vm-closure-entry-label next-before)) nil nil)))
+       (values (vm-label-table-lookup labels (vm-closure-entry-label next-before)) nil nil)))
         ;; All befores done, call primary (only if we haven't called it yet)
         ((and primary (eq phase :before))
-         (setf (getf (cdddr method-entry) :primary) nil)
-         (setf (getf (cdddr method-entry) :phase) :primary)
-         (vm-bind-closure-args primary state arg-values)
-          (values (vm-label-table-lookup labels (vm-closure-entry-label primary)) nil nil))
+          (setf (getf (cdddr method-entry) :primary) nil)
+          (setf (getf (cdddr method-entry) :phase) :primary)
+          (vm-profile-enter-call state (vm-closure-entry-label primary) :tail-p t)
+          (vm-bind-closure-args primary state arg-values)
+           (values (vm-label-table-lookup labels (vm-closure-entry-label primary)) nil nil))
         ;; Primary done, call :after methods
         (after-pending
          (let ((next-after (car after-pending)))
            (setf (getf (cdddr method-entry) :after-pending) (cdr after-pending))
            ;; Save the primary result before calling after methods
-           (when (eq phase :primary)
-             (setf (getf (cdddr method-entry) :primary-result) result)
-             (setf (getf (cdddr method-entry) :phase) :after))
-           (vm-bind-closure-args next-after state arg-values)
-      (values (vm-label-table-lookup labels (vm-closure-entry-label next-after)) nil nil)))
+            (when (eq phase :primary)
+              (setf (getf (cdddr method-entry) :primary-result) result)
+              (setf (getf (cdddr method-entry) :phase) :after))
+           (vm-profile-enter-call state (vm-closure-entry-label next-after) :tail-p t)
+            (vm-bind-closure-args next-after state arg-values)
+       (values (vm-label-table-lookup labels (vm-closure-entry-label next-after)) nil nil)))
         ;; All before/primary/after done
         (t
          (let ((primary-result (if (eq phase :primary)
@@ -522,10 +551,11 @@ value is the final result. call-next-method from around triggers before/primary/
                (progn
                  (pop (vm-method-call-stack state))
                  (if (vm-call-stack state)
-                     (destructuring-bind (return-pc dst-reg old-closure-env saved-regs)
-                         (pop (vm-call-stack state))
-                       (vm-restore-registers state saved-regs)
-                       (vm-reg-set state dst-reg primary-result)
+                    (destructuring-bind (return-pc dst-reg old-closure-env saved-regs)
+                        (pop (vm-call-stack state))
+                      (vm-profile-return state)
+                      (vm-restore-registers state saved-regs)
+                      (vm-reg-set state dst-reg primary-result)
                        (when old-closure-env
                          (setf (vm-closure-env state) old-closure-env))
                        (values return-pc nil nil))

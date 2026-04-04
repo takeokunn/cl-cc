@@ -108,6 +108,24 @@
     (assert-equal #x0F (second bytes))
     (assert-equal #xAF (third bytes))))
 
+(deftest x86-movq-xmm-r64-encoding
+  "MOVQ XMM0, R11 emits 66 49 0F 6E C3." 
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s) (cl-cc::emit-movq-xmm-r64 cl-cc::+xmm0+ cl-cc::+r11+ s)))))
+    (assert-equal '(#x66 #x49 #x0F #x6E #xC3) bytes)))
+
+(deftest x86-addsd-xx-encoding
+  "ADDSD XMM0, XMM1 emits F2 0F 58 C1." 
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s) (cl-cc::emit-addsd-xx cl-cc::+xmm0+ cl-cc::+xmm1+ s)))))
+    (assert-equal '(#xF2 #x0F #x58 #xC1) bytes)))
+
+(deftest x86-movsd-xx-encoding
+  "MOVSD XMM0, XMM1 emits F2 0F 10 C1." 
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s) (cl-cc::emit-movsd-xx cl-cc::+xmm0+ cl-cc::+xmm1+ s)))))
+    (assert-equal '(#xF2 #x0F #x10 #xC1) bytes)))
+
 ;;; ─── emit-push-r64 / emit-pop-r64 ───────────────────────────────────────
 
 (deftest-each x86-push-pop-opcodes
@@ -534,6 +552,27 @@
     (assert-equal 4 (length bytes))
     (assert-equal 16 (fourth bytes))))
 
+(deftest x86-mov-rm64-indexed-with-disp8
+  "MOV RAX,[RBX+RCX*8+16] emits ModR/M+SIB+disp8."
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s)
+                  (cl-cc::emit-mov-rm64-indexed cl-cc::+rax+ cl-cc::+rbx+ cl-cc::+rcx+ 8 16 s)))))
+    (assert-equal '(#x48 #x8B #x44 #xCB #x10) bytes)))
+
+(deftest x86-mov-mr64-indexed-with-disp8
+  "MOV [RBX+RCX*4+8], RAX emits store ModR/M+SIB+disp8."
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s)
+                  (cl-cc::emit-mov-mr64-indexed cl-cc::+rbx+ cl-cc::+rcx+ 4 8 cl-cc::+rax+ s)))))
+    (assert-equal '(#x48 #x89 #x44 #x8B #x08) bytes)))
+
+(deftest x86-mov-rm64-indexed-scale-1-zero-disp
+  "MOV RAX,[RBX+RCX] emits zero-displacement indexed form."
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s)
+                  (cl-cc::emit-mov-rm64-indexed cl-cc::+rax+ cl-cc::+rbx+ cl-cc::+rcx+ 1 0 s)))))
+    (assert-equal '(#x48 #x8B #x04 #x0B) bytes)))
+
 ;;; ─── emit-mov-rr64 ModR/M correctness ──────────────────────────────────
 
 (deftest x86-mov-rr64-modrm-encoding
@@ -717,6 +756,13 @@
     (assert-equal 3 (length bytes))
     (assert-equal #x89 (second bytes))))
 
+(deftest x86-vm-move-self-is-elided
+  "vm-move to the same physical register emits no bytes."
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s) (cl-cc::emit-vm-move
+                             (cl-cc::make-vm-move :dst :R0 :src :R0) s)))))
+    (assert-equal 0 (length bytes))))
+
 ;;; ─── emit-vm-halt (emit-vm-halt-inst) ───────────────────────────────────
 
 (deftest x86-vm-halt-encoding
@@ -765,6 +811,37 @@
          (bytes (cl-cc::compile-to-x86-64-bytes prog)))
     ;; Empty programs now emit just PUSH RBP, POP RBP, RET.
     (assert-equal 3 (length bytes))))
+
+(deftest x86-mov-rm64-rsp-base-uses-sib
+  "emit-mov-rm64 encodes [rsp+disp8] using an explicit SIB byte."
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s)
+                  (cl-cc::emit-mov-rm64 cl-cc::+rax+ cl-cc::+rsp+ -8 s)))))
+    (assert-equal '(#x48 #x8B #x44 #x24 #xF8) bytes)))
+
+(deftest x86-mov-mr64-rsp-base-uses-sib
+  "emit-mov-mr64 encodes [rsp+disp8] stores using an explicit SIB byte."
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s)
+                  (cl-cc::emit-mov-mr64 cl-cc::+rsp+ -16 cl-cc::+rax+ s)))))
+    (assert-equal '(#x48 #x89 #x44 #x24 #xF0) bytes)))
+
+(deftest x86-vm-program-leaf-red-zone-spills-skip-rbp-frame
+  "Leaf programs with small spill counts use RSP-based red-zone spill slots and skip PUSH/POP RBP."
+  (let* ((prog (cl-cc::make-vm-program
+                :instructions (list (cl-cc::make-vm-spill-store :src-reg :rax :slot 1)
+                                    (cl-cc::make-vm-spill-load :dst-reg :rbx :slot 1))
+                :result-register :R0
+                :leaf-p t))
+         (ra (cl-cc::make-regalloc-result :assignment (make-hash-table :test #'eq)
+                                          :spill-count 1
+                                          :instructions (cl-cc::vm-program-instructions prog)))
+         (bytes (let ((cl-cc::*current-regalloc* ra))
+                  (%x86-collect-bytes (lambda (s) (cl-cc::emit-vm-program prog s))))))
+    (assert-false (= #x55 (first bytes)))
+    (assert-equal '(#x48 #x89 #x44 #x24 #xF8) (subseq bytes 0 5))
+    (assert-equal '(#x48 #x8B #x5C #x24 #xF8) (subseq bytes 5 10))
+    (assert-equal #xC3 (car (last bytes)))))
 
 ;;; ─── build-label-offsets with vm-add (6 bytes) ───────────────────────────
 

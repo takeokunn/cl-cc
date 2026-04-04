@@ -71,6 +71,27 @@
                 (list loop-closure loop-label self-ref self-call loop-ret))))
     (assert-false (gethash "loop" pure))))
 
+(deftest pure-function-memo-table-hits-only-for-pure-labels
+  "Memo helpers store and fetch results only for inferred pure labels."
+  (let ((memo (cl-cc::opt-make-pure-function-memo-table))
+        (pure (make-hash-table :test #'equal)))
+    (setf (gethash "pure-f" pure) t)
+    (cl-cc::opt-pure-function-memo-put memo pure "pure-f" '(1 2) 3)
+    (multiple-value-bind (value found-p)
+        (cl-cc::opt-pure-function-memo-get memo pure "pure-f" '(1 2))
+      (assert-true found-p)
+      (assert-equal 3 value))))
+
+(deftest pure-function-memo-table-ignores-impure-labels
+  "Impure/unknown labels never produce memo hits."
+  (let ((memo (cl-cc::opt-make-pure-function-memo-table))
+        (pure (make-hash-table :test #'equal)))
+    (cl-cc::opt-pure-function-memo-put memo pure "impure-f" '(1 2) 3)
+    (multiple-value-bind (value found-p)
+        (cl-cc::opt-pure-function-memo-get memo pure "impure-f" '(1 2))
+      (assert-false found-p)
+      (assert-false value))))
+
 ;;; ─── opt-inst-pure-p ─────────────────────────────────────────────────────
 
 (deftest-each opt-pure-arithmetic

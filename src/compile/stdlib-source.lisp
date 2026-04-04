@@ -199,15 +199,46 @@
 
     "(defun class-direct-slots (class)
   (when (hash-table-p class)
-    (gethash :__slots__ class)))"
+    (%class-slot-definitions class)))"
 
     "(defun class-slots (class)
   (when (hash-table-p class)
-    (gethash :__slots__ class)))"
+    (%class-slot-definitions class)))"
 
     "(defun class-direct-default-initargs (class)
   (when (hash-table-p class)
     (gethash :__default-initargs__ class)))"
+
+    "(defun generic-function-methods (gf)
+  (let ((methods-ht (and (hash-table-p gf) (gethash :__methods__ gf))))
+    (when methods-ht
+      (hash-table-values methods-ht)))"
+
+    "(defun generic-function-method-combination (gf)
+  (if (and (hash-table-p gf) (gethash :__method-combination__ gf))
+      (gethash :__method-combination__ gf)
+      'standard))"
+
+    "(defun slot-definition-name (slot)
+  (cond
+    ((symbolp slot) slot)
+    ((hash-table-p slot) (gethash :name slot))
+    (t nil)))"
+
+    "(defun slot-definition-initform (slot)
+  (if (hash-table-p slot)
+      (gethash :initform slot)
+      nil))"
+
+    "(defun slot-definition-initargs (slot)
+  (if (hash-table-p slot)
+      (gethash :initargs slot)
+      nil))"
+
+    "(defun slot-definition-allocation (slot)
+  (if (hash-table-p slot)
+      (or (gethash :allocation slot) :instance)
+      :instance))"
 
     "(defun class-precedence-list (class)
   (when (hash-table-p class)

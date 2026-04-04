@@ -119,6 +119,22 @@ Returns a list of slot names without duplicates, preserving order."
       (walk superclasses))
     (nreverse result)))
 
+(defun %vm-allow-other-keys-p (initarg-regs state)
+  "Return true when INITARG-REGS explicitly contains :ALLOW-OTHER-KEYS with a truthy value."
+  (let ((entry (assoc :allow-other-keys initarg-regs)))
+    (and entry (vm-reg-get state (cdr entry)) t)))
+
+(defun %vm-validate-initargs (initarg-regs initarg-map state)
+  "Signal an error for unknown initargs unless :ALLOW-OTHER-KEYS is true.
+INITARG-REGS is an alist of keyword to value register. INITARG-MAP maps accepted
+keywords to slot names."
+  (unless (%vm-allow-other-keys-p initarg-regs state)
+    (dolist (entry initarg-regs)
+      (let ((key (car entry)))
+        (unless (or (eq key :allow-other-keys)
+                    (assoc key initarg-map))
+          (error "Invalid initarg ~S" key))))))
+
 (defun %c3-merge (linearizations)
   "Merge a list of linearizations using C3 linearization.
 A 'good head' is a class that appears only in the head (first position)
@@ -239,9 +255,10 @@ Algorithm: L(C) = C + merge(L(C1), L(C2), ..., (C1, C2, ...))"
          (initform-values (gethash :__initforms__ class-ht))
          (default-initargs (gethash :__default-initargs__ class-ht))
          (class-slots (gethash :__class-slots__ class-ht))
-         ;; Collect explicitly provided initarg keys
-         (provided-keys (mapcar #'car (vm-initarg-regs inst))))
+          ;; Collect explicitly provided initarg keys
+         (provided-keys (remove :allow-other-keys (mapcar #'car (vm-initarg-regs inst)) :test #'eq)))
     (setf (gethash :__class__ obj-ht) class-ht)
+    (%vm-validate-initargs (vm-initarg-regs inst) initarg-map state)
     ;; Initialize instance-allocated slots from initforms (skip class-allocated)
     (dolist (slot-name slot-names)
       (unless (member slot-name class-slots :test #'eq)

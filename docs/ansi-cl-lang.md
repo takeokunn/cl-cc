@@ -590,7 +590,7 @@ ANSI CL 7.6.4 — `defmethod` のラムダリストは `defgeneric` と適合し
 | 機能 | cl-cc | SBCL | 備考 |
 |------|-------|------|------|
 | `method-combination` 相当の公開 MOP クラス | — | ✅ | cl-cc では同等クラスの公開 API 根拠は未確認 |
-| `generic-function-method-combination` | — | ✅ | cl-cc では accessor 根拠を確認できていない |
+| `generic-function-method-combination` | ✅ | ✅ | `macros-compat.lisp` / `stdlib-source.lisp` に accessor を追加。未設定時は `standard` を返す |
 
 ```lisp
 ;; SBCL での確認
@@ -765,7 +765,7 @@ t
 | 機能 | cl-cc | SBCL | 備考 |
 |------|-------|------|------|
 | slot definition 名の観測 | ✅ | ✅ | `class-direct-slots` / `class-slots` からスロット情報を読める |
-| slot definition の MOP accessor 群 | — | ✅ | `slot-definition-name` などの専用 accessor は cl-cc で未確認 |
+| slot definition の MOP accessor 群 | ✅ | ✅ | `slot-definition-name` / `slot-definition-initform` / `slot-definition-initargs` / `slot-definition-allocation` を公開 |
 
 ### 12.2b Effective Slot Definition マージ規則 (ANSI CL 7.5.3)
 
@@ -808,8 +808,8 @@ cl-cc 側では継承済みスロットの観測と通常の `slot-value` / acce
 | `ensure-generic-function` | ✅ | ✅ | 公開 API として利用可能 |
 | `compute-applicable-methods` | ✅ | ✅ | 基本 defmethod あり |
 | `find-method` / `add-method` / `remove-method` | ✅ | ✅ | 実行時メソッド操作を提供 |
-| `generic-function-method-combination` | — | ✅ | cl-cc で公開 accessor の根拠は未確認 |
-| `generic-function-methods` | — | ✅ | cl-cc ではメソッド集合の公開 MOP API は未文書化 |
+| `generic-function-method-combination` | ✅ | ✅ | GF の `:__method-combination__` を返し、未設定時は `standard` |
+| `generic-function-methods` | ✅ | ✅ | GF の `:__methods__` を `hash-table-values` 経由で公開 |
 
 ### 12.4b 継承矛盾の検出
 
@@ -828,10 +828,10 @@ cl-cc 側では継承済みスロットの観測と通常の `slot-value` / acce
 | 機能 | cl-cc | SBCL | 備考 |
 |------|-------|------|------|
 | 直接スロットの `:initarg` | ✅ | ✅ | そのクラスの direct slot に宣言されている |
-| 継承スロット由来の `:initarg` | — | ✅ | cl-cc で専用の検証経路を repo から直接確認できていない |
+| 継承スロット由来の `:initarg` | ✅ | ✅ | `collect-inherited-initargs` が superclass 由来の initarg を `:__initargs__` に統合 |
 | `:default-initargs` で供給される initarg | ✅ | ✅ | クラスオプションとして処理 |
-| 未知の initarg のエラー | — | ✅ | cl-cc では invalid initarg を明示拒否する根拠が未確認 |
-| `:allow-other-keys t` による検証スキップ | — | ✅ | cl-cc では initarg 検証自体の専用実装根拠が薄い |
+| 未知の initarg のエラー | ✅ | ✅ | `vm-clos.lisp` の `%vm-validate-initargs` が `Invalid initarg` をシグナル |
+| `:allow-other-keys t` による検証スキップ | ✅ | ✅ | `%vm-allow-other-keys-p` が明示的に検証をバイパス |
 
 ```lisp
 ;; SBCL での挙動
@@ -1247,7 +1247,7 @@ funcallable-standard-object  (MOP)
 |-------------|-------|------|------|
 | `ensure-generic-function` | ✅ | ✅ | 公開 API として利用可能 |
 | `find-method` | ✅ | ✅ | GF 上のメソッド検索 |
-| `generic-function-methods` | — | ✅ | cl-cc では同名の公開 accessor 根拠は未確認 |
+| `generic-function-methods` | ✅ | ✅ | `:__methods__` を公開する accessor を追加済み |
 
 ## 26. CLOS と多値・型宣言・その他の連携
 

@@ -7,9 +7,14 @@
   (let ((out (with-output-to-string (s)
                (let ((*standard-output* s)
                      (*error-output* s))
-                 (cl-cc/cli::%print-global-help)))))
+                  (cl-cc/cli::%print-global-help)))))
     (assert-true (search "Usage: cl-cc <command>" out))
     (assert-true (search "--opt-remarks <mode>" out))
+    (assert-true (search "--time-passes" out))
+    (assert-true (search "--trace-json <file>" out))
+    (assert-true (search "--flamegraph <file>" out))
+    (assert-true (search "--stats" out))
+    (assert-true (search "--trace-emit" out))
     (assert-true (search "Version: 0.1.0" out))))
 
 (deftest cli-print-command-help
@@ -17,9 +22,14 @@
   (let ((out (with-output-to-string (s)
                (let ((*standard-output* s)
                      (*error-output* s))
-                 (cl-cc/cli::%print-command-help "run")))))
+                  (cl-cc/cli::%print-command-help "run")))))
     (assert-true (search "Usage: cl-cc run" out))
     (assert-true (search "--opt-remarks <mode>" out))
+    (assert-true (search "--time-passes" out))
+    (assert-true (search "--trace-json <file>" out))
+    (assert-true (search "--flamegraph <file>" out))
+    (assert-true (search "--stats" out))
+    (assert-true (search "--trace-emit" out))
     (assert-true (search "Prepend standard library" out))))
 
 (deftest cli-print-unknown-command-falls-back

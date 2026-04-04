@@ -280,3 +280,59 @@
                    :params '()
                    :body (list (cl-cc::make-ast-var :name 'p))))
             'p))))
+
+(deftest closure-capture-key-normalizes-order
+  "closure-capture-key ignores pair order and groups by captured variable names."
+  (assert-equal '(x y)
+                (cl-cc::closure-capture-key '((y . :r2) (x . :r1) (x . :r9)))))
+
+(deftest group-shared-sibling-captures-groups-identical-capture-sets
+  "Sibling closures with the same capture set are grouped together."
+  (let ((groups (cl-cc::group-shared-sibling-captures
+                 '(((x . :r1) (y . :r2))
+                   ((y . :r8) (x . :r7))
+                   ((z . :r3))))))
+    (assert-equal 1 (hash-table-count groups))
+    (assert-equal 2 (length (gethash '(x y) groups)))
+    (assert-false (gethash '(z) groups))))
+
+(deftest binding-direct-call-count-in-body-counts-only-direct-calls
+  "Direct calls to the binding are counted, other references are ignored." 
+  (assert-equal 1
+                (cl-cc::binding-direct-call-count-in-body
+                 (list (cl-cc::make-ast-call :func 'f :args nil)
+                       (cl-cc::make-ast-var :name 'f))
+                 'f)))
+
+(deftest binding-one-shot-p-detects-single-use-non-escaping-binding
+  "A binding used by exactly one direct call and not escaping is one-shot." 
+  (assert-true
+   (cl-cc::binding-one-shot-p
+    (list (cl-cc::make-ast-call :func 'f :args (list (cl-cc::make-ast-int :value 1))))
+    'f)))
+
+(deftest binding-one-shot-p-rejects-captured-or-multi-use-binding
+  "Capture or multiple direct uses reject the one-shot predicate." 
+  (assert-false
+   (cl-cc::binding-one-shot-p
+    (list (cl-cc::make-ast-call :func 'f :args nil)
+          (cl-cc::make-ast-call :func 'f :args nil))
+    'f))
+  (assert-false
+   (cl-cc::binding-one-shot-p
+    (list (cl-cc::make-ast-lambda :params '() :body (list (cl-cc::make-ast-var :name 'f))))
+    'f)))
+
+(deftest closure-sharing-key-combines-label-and-captures
+  "closure-sharing-key uses both entry label and normalized capture set." 
+  (assert-equal '("L0" (x y))
+                (cl-cc::closure-sharing-key "L0" '((y . :r2) (x . :r1)))))
+
+(deftest group-shareable-closures-groups-by-label-and-captures
+  "Only closures with both identical label and capture sets are grouped." 
+  (let ((groups (cl-cc::group-shareable-closures
+                 '((:entry-label "L0" :captured-vars ((x . :r1) (y . :r2)))
+                   (:entry-label "L0" :captured-vars ((y . :r8) (x . :r7)))
+                   (:entry-label "L1" :captured-vars ((x . :r1) (y . :r2)))))))
+    (assert-equal 1 (hash-table-count groups))
+    (assert-equal 2 (length (gethash '("L0" (x y)) groups)))))

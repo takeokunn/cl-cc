@@ -60,6 +60,27 @@
       (cl-cc::vm-restore-registers s snap)
       (assert-= 42 (cl-cc:vm-reg-get s :R0)))))
 
+(deftest vm-execute-save-registers-subset
+  "vm-save-registers-subset captures only the requested registers."
+  (let ((s (make-test-vm)))
+    (cl-cc:vm-reg-set s :R0 42)
+    (cl-cc:vm-reg-set s :R1 99)
+    (let ((snap (cl-cc::vm-save-registers-subset s '(:R1))))
+      (assert-false (gethash :R0 snap))
+      (assert-= 99 (gethash :R1 snap)))))
+
+(deftest vm-execute-restore-registers-subset
+  "vm-restore-registers-subset updates only the saved bindings."
+  (let ((s (make-test-vm)))
+    (cl-cc:vm-reg-set s :R0 1)
+    (cl-cc:vm-reg-set s :R1 2)
+    (let ((snap (cl-cc::vm-save-registers-subset s '(:R1))))
+      (cl-cc:vm-reg-set s :R0 10)
+      (cl-cc:vm-reg-set s :R1 20)
+      (cl-cc::vm-restore-registers-subset s snap)
+      (assert-= 10 (cl-cc:vm-reg-get s :R0))
+      (assert-= 2 (cl-cc:vm-reg-get s :R1)))))
+
 ;;; ─── vm-list-to-lisp-list ───────────────────────────────────────────────────
 
 (deftest-each vm-execute-vm-list-to-lisp-list
