@@ -75,7 +75,12 @@
 
 (defun reg-local-set (reg-map reg value-wat)
   "Return WAT for setting a register's local variable."
-  (format nil "(local.set ~D ~A)" (wasm-reg-to-local reg-map reg) value-wat))
+  (let ((dst (wasm-reg-to-local reg-map reg)))
+    (if (and (stringp value-wat)
+             (search "(local.get " value-wat)
+             (= (position #\( value-wat) 0))
+        (format nil "(local.tee ~D ~A)" dst value-wat)
+        (format nil "(local.set ~D ~A)" dst value-wat))))
 
 (defun wasm-fixnum-unbox (reg-map reg)
   "Unbox a fixnum from i31ref to i64. Assumes reg holds an i31ref fixnum."

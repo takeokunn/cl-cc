@@ -59,7 +59,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 
 ## 1. 型推論エンジン
 
-### FR-001: Hindley-Milner 型推論 (基盤)
+### FR-001: ✅ Hindley-Milner 型推論 (基盤)
 
 - **対象**: `src/type/inference.lisp`
  - **現状**: HM 型推論の基盤は存在する。ここでは `infer` をコア入口として定義し、S 式から型スキームを返せることを要件とする
@@ -67,7 +67,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 - **スコープ**: let-polymorphism, 型変数の全称量化, unification による型変数束縛
 - **参考実装**: OCaml, SML/NJ, GHC Core の型推論基盤
 
-### FR-002: 双方向型検査 (Bidirectional Type Checking)
+### FR-002: ✅ 双方向型検査 (Bidirectional Type Checking)
 
 - **対象**: `src/type/bidirectional.lisp` / `src/type/checker.lisp`
   - **現状**: `synthesize` / `check` の入口は `bidirectional.lisp` と `checker.lisp` 側に整理されている。ここでは双方向検査をコア契約として固定し、文脈から期待型を伝播できることを要件とする
@@ -79,7 +79,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 - **根拠**: OCaml / Rust / GHC の型推論アーキテクチャの核心
 - **難易度**: Very Hard
 
-### FR-003: 制約ベース型推論 HM(X)
+### FR-003: ✅ 制約ベース型推論 HM(X)
 
 - **対象**: `src/type/inference.lisp`
 - **内容**: Sulzmann & Stuckey の HM(X) フレームワーク。型推論を制約生成と制約解消の 2 フェーズに分離
@@ -90,7 +90,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 - **参考**: GHC の OutsideIn(X) (Schrijvers et al. 2009)
 - **難易度**: Hard
 
-### FR-004: 多相再帰 (Polymorphic Recursion)
+### FR-004: ✅ 多相再帰 (Polymorphic Recursion)
 
 - **対象**: `src/type/inference.lisp`
 - **内容**: Milner 制限を超えて再帰関数に異なる型でのモノモーフィック呼び出しを許可
@@ -113,7 +113,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 - **内容**: `+`/`-`/`*`/`<`/`>`/`=` で両オペランドが fixnum と判明している場合、型チェック命令を生成しない
 - **効果**: SBCL の `(declare (type fixnum x))` 相当の効果をアノテーション由来で実現
 
-### FR-007: 型伝播による条件分岐特化
+### FR-007: ✅ 型伝播による条件分岐特化
 
 - **依存**: FR-005
 - **内容**: `(if (numberp x) ...)` の true ブランチ内で `x` を fixnum として扱う
@@ -134,7 +134,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 
 ## 3. サブタイピングと構造的型付け
 
-### FR-201: 公称サブタイピング (Nominal Subtyping)
+### FR-201: ✅ 公称サブタイピング (Nominal Subtyping)
 
 - **対象**: `src/vm/primitives.lisp`, `src/type/subtyping.lisp`
 - **内容**: 名前で同一性を判定するサブタイピング（Java/C#/CLOS 方式）
@@ -150,7 +150,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
   - CLOS との橋渡し: `(protocol drawable)` — `draw` メソッドを持つクラスはすべて準拠
 - **難易度**: Hard
 
-### FR-203: 行多相 (Row Polymorphism)
+### FR-203: ✅ 行多相 (Row Polymorphism)
 
 - **対象**: `src/type/inference.lisp`
 - **内容**: レコード（ハッシュテーブル / struct）の拡張可能なフィールド型

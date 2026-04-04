@@ -24,6 +24,10 @@
   "EM_X86_64 = #x3E."
   (assert-equal #x3E cl-cc/binary::+elf-machine-x86-64+))
 
+(deftest elf-machine-aarch64
+  "EM_AARCH64 = #xB7."
+  (assert-equal #xB7 cl-cc/binary::+elf-machine-aarch64+))
+
 (deftest elf-structure-sizes
   "ELF64 structure sizes are correct."
   (assert-equal 64 cl-cc/binary::+elf64-ehdr-size+)
@@ -134,8 +138,16 @@
   "Fresh ELF64 builder has empty text and no symbols."
   (let ((b (cl-cc/binary::make-elf64-object)))
     (assert-equal 0 (cl-cc/binary::elf64-text-size b))
+    (assert-equal 0 (cl-cc/binary::elf64-bss-size b))
     (assert-null (cl-cc/binary::elf64-symbols b))
     (assert-null (cl-cc/binary::elf64-rela-entries b))))
+
+(deftest elf64-add-bss
+  "add-bss accumulates reserved NOBITS size."
+  (let ((b (cl-cc/binary::make-elf64-object)))
+    (cl-cc/binary::elf64-add-bss b 16)
+    (cl-cc/binary::elf64-add-bss b 8)
+    (assert-equal 24 (cl-cc/binary::elf64-bss-size b))))
 
 (deftest elf64-add-text-bytes
   "add-text-bytes appends machine code."
@@ -261,7 +273,7 @@
       (assert-equal -4 (fourth entry)))))     ; addend
 
 (deftest elf64-finalize-header-fields
-  "ELF header: e_type=ET_REL at [16]; e_machine=EM_X86_64 at [18]; e_shnum=6 at [60]; e_shstrndx=5 at [62]."
+  "ELF header: e_type=ET_REL at [16]; e_machine=EM_X86_64 at [18]; e_shnum=7 at [60]; e_shstrndx=6 at [62]."
   (let* ((b (cl-cc/binary::make-elf64-object))
          (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
     (cl-cc/binary::elf64-add-text-bytes b code)
@@ -270,8 +282,68 @@
       (assert-equal 0    (aref result 17))
       (assert-equal #x3E (aref result 18))
       (assert-equal 0    (aref result 19))
-      (assert-equal 6    (aref result 60))
-      (assert-equal 5    (aref result 62)))))
+      (assert-equal 7    (aref result 60))
+      (assert-equal 6    (aref result 62)))))
+
+(deftest elf64-finalize-emits-bss-section-header
+  "Finalized ELF includes a .bss NOBITS section header with zero file offset payload and reserved size." 
+  (let* ((b (cl-cc/binary::make-elf64-object))
+         (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3)))
+         (result nil)
+         (shoff nil)
+         (bss-shoff nil))
+    (cl-cc/binary::elf64-add-text-bytes b code)
+    (cl-cc/binary::elf64-add-bss b 32)
+    (setf result (cl-cc/binary::elf64-finalize b))
+    (setf shoff (+ (aref result 40)
+                   (ash (aref result 41) 8)
+                   (ash (aref result 42) 16)
+                   (ash (aref result 43) 24)))
+    (setf bss-shoff (+ shoff (* 2 64)))
+    ;; sh_type = SHT_NOBITS
+    (assert-equal 8 (aref result (+ bss-shoff 4)))
+    ;; sh_size = 32
+    (assert-equal 32 (aref result (+ bss-shoff 32)))))
+
+(deftest elf64-finalize-aligns-text-and-sections
+  "ELF section offsets honor the declared 16-byte/8-byte alignments."
+  (let* ((b (cl-cc/binary::make-elf64-object))
+         (code (make-array 3 :element-type '(unsigned-byte 8) :initial-contents '(#x90 #x90 #xC3)))
+         (result nil)
+         (text-offset nil)
+         (shoff nil))
+    (cl-cc/binary::elf64-add-text-bytes b code)
+    (setf result (cl-cc/binary::elf64-finalize b))
+    (setf shoff (+ (aref result 40)
+                   (ash (aref result 41) 8)
+                   (ash (aref result 42) 16)
+                   (ash (aref result 43) 24)))
+    (setf text-offset (+ (aref result (+ shoff 64 24))
+                         (ash (aref result (+ shoff 64 25)) 8)
+                         (ash (aref result (+ shoff 64 26)) 16)
+                         (ash (aref result (+ shoff 64 27)) 24)))
+    (assert-equal 0 (mod text-offset 16))
+    (assert-equal 0 (mod shoff 8))))
+
+(deftest elf64-arm64-header-machine
+  "compile-to-elf64 can emit an AArch64 ELF header machine value."
+  (let* ((code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC0)))
+         (result (cl-cc/binary::compile-to-elf64 code nil :arch :arm64)))
+    (assert-equal #xB7 (aref result 18))
+    (assert-equal 0 (aref result 19))))
+
+(deftest elf64-compile-to-elf64-with-bss
+  "compile-to-elf64 can reserve .bss space without adding file payload bytes."
+  (let* ((code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3)))
+         (result (cl-cc/binary::compile-to-elf64 code nil :bss-size 64))
+         (shoff (+ (aref result 40)
+                   (ash (aref result 41) 8)
+                   (ash (aref result 42) 16)
+                   (ash (aref result 43) 24)))
+         (bss-shoff (+ shoff (* 2 64))))
+    (assert-true (typep result '(simple-array (unsigned-byte 8) (*))))
+    (assert-equal 8 (aref result (+ bss-shoff 4)))
+    (assert-equal 64 (aref result (+ bss-shoff 32)))))
 
 (deftest elf64-finalize-size-at-least-header
   "Finalized ELF is at least 64 bytes (ELF header alone)."

@@ -498,3 +498,73 @@
                         (cl-cc/type:type-mismatch-error-expected c)))
     (assert-eq 'string (cl-cc/type:type-primitive-name
                         (cl-cc/type:type-mismatch-error-actual c)))))
+
+;;; ─── FR-1604: Value Restriction ──────────────────────────────────────────
+
+(deftest-each infer-syntactic-value-p-positive
+  "syntactic-value-p returns T for syntactic values."
+  :cases (("integer"  '42)
+          ("quote"    ''hello)
+          ("lambda"   '(lambda (x) x))
+          ("function" '#'car))
+  (sexp)
+  (let ((ast (cl-cc:lower-sexp-to-ast sexp)))
+    (assert-true (cl-cc/type:syntactic-value-p ast))))
+
+(deftest-each infer-syntactic-value-p-negative
+  "syntactic-value-p returns NIL for non-value expressions."
+  :cases (("call"   '(foo 1))
+          ("binop"  '(+ x y))
+          ("if"     '(if t 1 2))
+          ("progn"  '(progn 1 2)))
+  (sexp)
+  (let ((ast (cl-cc:lower-sexp-to-ast sexp)))
+    (assert-false (cl-cc/type:syntactic-value-p ast))))
+
+(deftest infer-let-value-restriction-lambda-generalizes
+  "Value restriction: lambda binding is a syntactic value → generalized."
+  (reset-type-vars!)
+  ;; (let ((id (lambda (x) x))) (id 42)) should still work
+  (let ((ast (cl-cc:lower-sexp-to-ast '(let ((id (lambda (x) x))) (id 42)))))
+    (multiple-value-bind (ty subst) (infer-with-env ast)
+      (declare (ignore subst))
+      (assert-type-equal ty cl-cc/type:type-int))))
+
+(deftest infer-let-value-restriction-call-stays-mono
+  "Value restriction: call binding is NOT a syntactic value → monomorphic scheme."
+  (reset-type-vars!)
+  ;; (let ((x (identity 42))) x) — x bound to call, stays fixnum
+  (let* ((fn-ty (cl-cc/type:make-type-function-raw
+                 :params (list cl-cc/type:type-int)
+                 :return cl-cc/type:type-int))
+         (env (type-env-extend 'identity
+                               (type-to-scheme fn-ty)
+                               (type-env-empty)))
+         (ast (cl-cc:lower-sexp-to-ast '(let ((x (identity 42))) x))))
+    (multiple-value-bind (ty subst) (cl-cc/type:infer ast env)
+      (declare (ignore subst))
+      (assert-type-equal ty cl-cc/type:type-int))))
+
+;;; ─── FR-004: Polymorphic Recursion ──────────────────────────────────────
+
+(deftest infer-poly-recursion-helper-finds-decl
+  "%find-fn-type-declaration extracts a matching type declaration."
+  (let ((decls '((type (function (fixnum) fixnum) length)
+                 (optimize (speed 3)))))
+    (let ((spec (cl-cc/type::%find-fn-type-declaration 'length decls)))
+      (assert-equal '(function (fixnum) fixnum) spec))))
+
+(deftest infer-poly-recursion-helper-returns-nil-for-miss
+  "%find-fn-type-declaration returns nil when name not present."
+  (let ((decls '((type fixnum x) (type string y))))
+    (assert-null (cl-cc/type::%find-fn-type-declaration 'length decls))
+    (assert-null (cl-cc/type::%find-fn-type-declaration nil decls))))
+
+(deftest infer-defun-without-annotation-infers-normally
+  "defun without type declaration infers param/return types as before."
+  (reset-type-vars!)
+  (let ((ast (cl-cc:lower-sexp-to-ast '(defun f (x) (+ x 1)))))
+    (multiple-value-bind (ty subst) (infer-with-env ast)
+      (declare (ignore subst))
+      (assert-true (cl-cc/type:type-function-p ty))
+      (assert-type-equal (cl-cc/type:type-function-return ty) cl-cc/type:type-int))))

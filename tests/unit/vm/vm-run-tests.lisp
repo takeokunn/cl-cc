@@ -27,6 +27,30 @@
         (assert-true actual)
         (assert-false actual))))
 
+(deftest build-label-table-uses-integer-keyed-buckets
+  "build-label-table keeps string labels working while using integer outer keys."
+  (let* ((instructions (list (cl-cc::make-vm-label :name "entry")
+                             (cl-cc::make-vm-const :dst :r0 :value 1)
+                             (cl-cc::make-vm-label :name :done)
+                             (cl-cc::make-vm-halt :reg :r0)))
+         (labels (cl-cc::build-label-table instructions)))
+    (assert-eq #'eql (hash-table-test labels))
+    (assert-= 0 (cl-cc::vm-label-table-lookup labels "entry"))
+    (assert-= 2 (cl-cc::vm-label-table-lookup labels :done))))
+
+(deftest vm-jump-uses-label-table-lookup
+  "vm-jump resolves labels through the integer-keyed table produced by build-label-table."
+  (let* ((instructions (list (cl-cc::make-vm-jump :label "target")
+                             (cl-cc::make-vm-label :name "target")
+                             (cl-cc::make-vm-halt :reg :r0)))
+         (labels (cl-cc::build-label-table instructions))
+         (state (make-test-vm)))
+    (multiple-value-bind (next-pc halt-p result)
+        (cl-cc::execute-instruction (first instructions) state 0 labels)
+      (declare (ignore result))
+      (assert-= 1 next-pc)
+      (assert-false halt-p))))
+
 ;;; ─── VM2 defopcode / run-vm tests ───────────────────────────────────────────
 
 (defun make-bytecode (&rest words)

@@ -32,7 +32,8 @@ Saves and restores call stack around the sub-invocation."
     (error "No VM execution context for synchronous sub-call"))
   (let* ((result-reg (intern "R0" :keyword))
          (saved-stack-depth (length (vm-call-stack state)))
-         (entry-pc (gethash (vm-closure-entry-label closure) *vm-exec-labels*)))
+         (entry-pc (vm-label-table-lookup *vm-exec-labels*
+                                          (vm-closure-entry-label closure))))
     (unless entry-pc
       (error "Cannot resolve entry label ~A" (vm-closure-entry-label closure)))
     ;; Push a call frame; return-pc is irrelevant since we detect return by stack depth
@@ -67,10 +68,25 @@ check the host bridge whitelist."
          (entry entry)
          ;; Only bridge whitelisted host functions
          ((and (gethash value *vm-host-bridge-functions*)
-               (fboundp value))
-          (symbol-function value))
-         (t (error "Undefined function: ~S" value)))))
-    (t (error "Invalid function designator: ~S" value))))
+                (fboundp value))
+           (symbol-function value))
+          (t (error "Undefined function: ~S" value)))))
+     (t (error "Invalid function designator: ~S" value))))
+
+(defun vm-label-table-key (label)
+  "Return the integer hash key used by VM label tables for LABEL."
+  (sxhash label))
+
+(defun vm-label-table-store (table label pc)
+  "Store LABEL → PC in TABLE using an integer-keyed collision bucket."
+  (let* ((key (vm-label-table-key label))
+         (bucket (gethash key table)))
+    (setf (gethash key table)
+          (acons label pc (remove label bucket :key #'car :test #'equal)))))
+
+(defun vm-label-table-lookup (table label)
+  "Look up LABEL in integer-keyed VM label TABLE and return its PC or NIL."
+  (cdr (assoc label (gethash (vm-label-table-key label) table) :test #'equal)))
 
 ;;; ── Call-frame helpers ───────────────────────────────────────────────────
 
@@ -362,7 +378,7 @@ and folds results using the combination's operator."
               (vm-push-call-frame state (1+ pc) dst-reg)
               (push (list gf-ht methods all-arg-values) (vm-method-call-stack state))
               (vm-bind-closure-args method-closure state all-arg-values)
-              (values (gethash (vm-closure-entry-label method-closure) labels) nil nil))))))
+         (values (vm-label-table-lookup labels (vm-closure-entry-label method-closure)) nil nil))))))
 
 (defun vm-dispatch-generic-call (gf-ht state pc arg-regs dst-reg labels)
   "Dispatch a generic function call. GF-HT is the generic function dispatch table.
@@ -390,7 +406,7 @@ Returns (values next-pc halt-p result) like execute-instruction."
           (vm-push-call-frame state (1+ pc) dst-reg)
           (push (list gf-ht all-methods all-arg-values) (vm-method-call-stack state))
           (vm-bind-closure-args method-closure state all-arg-values)
-          (values (gethash (vm-closure-entry-label method-closure) labels) nil nil))
+          (values (vm-label-table-lookup labels (vm-closure-entry-label method-closure)) nil nil))
         ;; Standard method combination with around/before/after
         (let* ((has-around (not (null around-methods)))
                (has-before (not (null before-methods)))
@@ -418,7 +434,7 @@ Returns (values next-pc halt-p result) like execute-instruction."
                                    (t :primary)))
                 (vm-method-call-stack state))
           (vm-bind-closure-args first-method state all-arg-values)
-          (values (gethash (vm-closure-entry-label first-method) labels) nil nil)))))
+          (values (vm-label-table-lookup labels (vm-closure-entry-label first-method)) nil nil)))))
 
 (defun %vm-dispatch-call (func state pc labels arg-regs dst-reg tail-p)
   "Shared call dispatch for vm-call and vm-tail-call.
@@ -440,7 +456,7 @@ Returns (values next-pc halt-p result) like execute-instruction."
          (vm-push-call-frame state (1+ pc) dst-reg)
          (push nil (vm-method-call-stack state)))
        (vm-bind-closure-args func state arg-values)
-       (values (gethash (vm-closure-entry-label func) labels) nil nil)))))
+          (values (vm-label-table-lookup labels (vm-closure-entry-label func)) nil nil)))))
 
 (defun %vm-ret-qualified-dispatch (state result labels method-entry)
   "Handle return from a qualified method. Supports standard method combination:
@@ -472,13 +488,13 @@ value is the final result. call-next-method from around triggers before/primary/
          (let ((next-before (car before-pending)))
            (setf (getf (cdddr method-entry) :before-pending) (cdr before-pending))
            (vm-bind-closure-args next-before state arg-values)
-           (values (gethash (vm-closure-entry-label next-before) labels) nil nil)))
+      (values (vm-label-table-lookup labels (vm-closure-entry-label next-before)) nil nil)))
         ;; All befores done, call primary (only if we haven't called it yet)
         ((and primary (eq phase :before))
          (setf (getf (cdddr method-entry) :primary) nil)
          (setf (getf (cdddr method-entry) :phase) :primary)
          (vm-bind-closure-args primary state arg-values)
-         (values (gethash (vm-closure-entry-label primary) labels) nil nil))
+          (values (vm-label-table-lookup labels (vm-closure-entry-label primary)) nil nil))
         ;; Primary done, call :after methods
         (after-pending
          (let ((next-after (car after-pending)))
@@ -488,7 +504,7 @@ value is the final result. call-next-method from around triggers before/primary/
              (setf (getf (cdddr method-entry) :primary-result) result)
              (setf (getf (cdddr method-entry) :phase) :after))
            (vm-bind-closure-args next-after state arg-values)
-           (values (gethash (vm-closure-entry-label next-after) labels) nil nil)))
+      (values (vm-label-table-lookup labels (vm-closure-entry-label next-after)) nil nil)))
         ;; All before/primary/after done
         (t
          (let ((primary-result (if (eq phase :primary)

@@ -59,23 +59,30 @@ Dispatch order: (1) atoms — symbol macros expanded, others pass through;
          (compiler-macroexpand-all (gethash form *symbol-macro-table*))
          form))
     (t
-      (let ((handler (gethash (car form) *expander-head-table*)))
-        (cond
-          (handler
-            (let ((expanded (funcall handler form)))
-              (if (equal expanded form)
-                  form
-                  expanded)))
-          ((and (symbolp (car form))
-                (lookup-compiler-macro (car form)))
-           (let ((expanded (funcall (lookup-compiler-macro (car form)) form nil)))
-             (if (equal expanded form)
-                 form
-                 (compiler-macroexpand-all expanded))))
-          ((member (car form) *compiler-special-forms*)
-            (cons (car form) (mapcar #'compiler-macroexpand-all (cdr form))))
-          (t
-           (multiple-value-bind (exp expanded-p) (our-macroexpand-1 form)
-             (if expanded-p
-                 (compiler-macroexpand-all exp)
-                 (mapcar #'compiler-macroexpand-all form)))))))))
+     (let ((handler (gethash (car form) *expander-head-table*)))
+       (cond
+         (handler
+          (let ((expanded (funcall handler form)))
+            (if (equal expanded form)
+                form
+                expanded)))
+         ((and (symbolp (car form))
+               (lookup-compiler-macro (car form)))
+          (let ((expanded (funcall (lookup-compiler-macro (car form)) form nil)))
+            (if (equal expanded form)
+                form
+                (compiler-macroexpand-all expanded))))
+         ((member (car form) *compiler-special-forms*)
+          (cons (car form) (mapcar #'compiler-macroexpand-all (cdr form))))
+         (t
+          (multiple-value-bind (exp expanded-p) (our-macroexpand-1 form)
+            (if expanded-p
+                (compiler-macroexpand-all exp)
+                ;; FR-120: accessor read inlining — (accessor obj) → (slot-value obj 'slot)
+                (let ((mapping (when (and (symbolp (car form))
+                                          (= (length (cdr form)) 1))
+                                 (gethash (car form) *accessor-slot-map*))))
+                  (if mapping
+                      (compiler-macroexpand-all
+                       `(slot-value ,(second form) ',(cdr mapping)))
+                      (mapcar #'compiler-macroexpand-all form)))))))))))

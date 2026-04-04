@@ -69,9 +69,18 @@
                    (and (const-p lval) (eql lval (cadr cond)))))
             (return (apply-action action))))))))
 
-(defun %fold-vm-label (inst env emit)
-  "Flush all constant knowledge at a label: any path may arrive here."
-  (clrhash env)
+(defun %opt-branch-target-labels (instructions)
+  "Return a hash table of labels that are explicit branch targets."
+  (let ((targets (make-hash-table :test #'equal)))
+    (dolist (inst instructions targets)
+      (typecase inst
+        ((or vm-jump vm-jump-zero)
+         (setf (gethash (vm-label-name inst) targets) t))))))
+
+(defun %fold-vm-label (inst env emit target-labels)
+  "Flush constant knowledge only at labels that are explicit branch targets."
+  (when (gethash (vm-name inst) target-labels)
+    (clrhash env))
   (funcall emit inst))
 
 (defun %fold-vm-const (inst env emit)
@@ -160,6 +169,7 @@
 (defun opt-pass-fold (instructions)
   "Forward pass: constant folding, algebraic simplification, constant branch elimination."
   (let ((env (make-hash-table :test #'eq)) ; reg → known constant value
+        (target-labels (%opt-branch-target-labels instructions))
         (result nil))
     (flet ((emit (inst) (push inst result))
            (emit-const (dst val)
@@ -168,7 +178,7 @@
            (clear (reg) (remhash reg env)))
       (dolist (inst instructions)
         (cond
-          ((typep inst 'vm-label)         (%fold-vm-label      inst env #'emit))
+          ((typep inst 'vm-label)         (%fold-vm-label      inst env #'emit target-labels))
           ((typep inst 'vm-const)         (%fold-vm-const      inst env #'emit))
           ((typep inst 'vm-move)          (%fold-vm-move       inst env #'emit #'emit-const #'clear))
           ((opt-binary-lhs-rhs-p inst)    (%fold-binary-inst   inst env #'emit #'emit-const #'clear))
@@ -390,15 +400,77 @@
         do (setf (gethash current seen) t)
         finally (return current)))
 
-(defun %opt-copy-prop-kill (reg copies)
-  (remhash reg copies)
-  (let ((stale nil))
-    (maphash (lambda (k v)
-               (when (eq v reg)
-                 (push k stale)))
+(defun %opt-copy-prop-build-reverse (copies)
+  (let ((reverse (make-hash-table :test #'eq)))
+    (maphash (lambda (dst src)
+               (push dst (gethash src reverse)))
              copies)
-    (dolist (k stale)
-      (remhash k copies))))
+    reverse))
+
+(defun %opt-copy-prop-add (dst src copies reverse)
+  (setf (gethash dst copies) src)
+  (push dst (gethash src reverse)))
+
+(defun %opt-copy-prop-kill (reg copies reverse)
+  (multiple-value-bind (src found) (gethash reg copies)
+    (when found
+      (setf (gethash src reverse)
+            (delete reg (gethash src reverse) :test #'eq))
+      (remhash reg copies)))
+  (let ((dependents (copy-list (gethash reg reverse))))
+    (dolist (dst dependents)
+      (remhash dst copies))
+    (remhash reg reverse)))
+
+(defun %opt-value-rank (value)
+  (typecase value
+    (null 0)
+    (number 1)
+    (character 2)
+    (string 3)
+    (symbol 4)
+    (cons 5)
+    (vector 6)
+    (t 7)))
+
+(defun %opt-value< (a b)
+  "Deterministic structural ordering without printed-string allocation."
+  (let ((ra (%opt-value-rank a))
+        (rb (%opt-value-rank b)))
+    (cond
+      ((< ra rb) t)
+      ((> ra rb) nil)
+      ((null a) nil)
+      ((numberp a) (and (/= a b) (< a b)))
+      ((characterp a) (< (char-code a) (char-code b)))
+      ((stringp a) (string< a b))
+      ((symbolp a)
+       (let ((apkg (symbol-package a))
+             (bpkg (symbol-package b)))
+         (cond
+           ((and apkg bpkg
+                 (not (string= (package-name apkg) (package-name bpkg))))
+            (string< (package-name apkg) (package-name bpkg)))
+           ((and apkg (null bpkg)) nil)
+           ((and (null apkg) bpkg) t)
+           (t (string< (symbol-name a) (symbol-name b))))))
+      ((consp a)
+       (if (equal (car a) (car b))
+           (%opt-value< (cdr a) (cdr b))
+           (%opt-value< (car a) (car b))))
+      ((vectorp a)
+       (loop for av across a
+             for bv across b
+             do (unless (equal av bv)
+                  (return (%opt-value< av bv)))
+             finally (return (< (length a) (length b)))))
+      (t
+       (let ((ta (type-of a))
+             (tb (type-of b)))
+         (cond
+           ((not (eq ta tb)) (%opt-value< ta tb))
+           ((equal a b) nil)
+           (t (< (sxhash a) (sxhash b)))))))))
 
 (defun %opt-copy-prop-merge (envs)
   (cond
@@ -415,19 +487,20 @@
          merged))))
 
 (defun %opt-copy-prop-transfer-block (block in-env)
-  (let ((copies (%opt-copy-prop-env-copy in-env)))
+  (let ((copies (%opt-copy-prop-env-copy in-env))
+        (reverse (%opt-copy-prop-build-reverse in-env)))
     (dolist (inst (bb-instructions block))
       (typecase inst
         (vm-move
          (let* ((dst (vm-move-dst inst))
-                (src (%opt-copy-prop-canonical (vm-move-src inst) copies)))
-           (%opt-copy-prop-kill dst copies)
-           (unless (eq dst src)
-             (setf (gethash dst copies) src))))
+                 (src (%opt-copy-prop-canonical (vm-move-src inst) copies)))
+            (%opt-copy-prop-kill dst copies reverse)
+            (unless (eq dst src)
+              (%opt-copy-prop-add dst src copies reverse))))
         (t
-         (let ((dst (opt-inst-dst inst)))
-           (when dst
-             (%opt-copy-prop-kill dst copies))))))
+          (let ((dst (opt-inst-dst inst)))
+            (when dst
+              (%opt-copy-prop-kill dst copies reverse))))))
     copies))
 
 (defun %opt-copy-prop-rewrite-inst (inst copies)
@@ -449,25 +522,26 @@
 
 (defun %opt-copy-prop-rewrite-block (block in-env)
   (let ((copies (%opt-copy-prop-env-copy in-env))
+        (reverse (%opt-copy-prop-build-reverse in-env))
         (result nil))
     (dolist (inst (bb-instructions block))
       (typecase inst
         (vm-move
          (let* ((dst (vm-move-dst inst))
-                (src (%opt-copy-prop-canonical (vm-move-src inst) copies)))
-           (%opt-copy-prop-kill dst copies)
-           (unless (eq dst src)
-             (setf (gethash dst copies) src)
-             (push (if (eq src (vm-move-src inst))
-                       inst
-                       (make-vm-move :dst dst :src src))
-                   result))))
+                 (src (%opt-copy-prop-canonical (vm-move-src inst) copies)))
+            (%opt-copy-prop-kill dst copies reverse)
+            (unless (eq dst src)
+              (%opt-copy-prop-add dst src copies reverse)
+              (push (if (eq src (vm-move-src inst))
+                        inst
+                        (make-vm-move :dst dst :src src))
+                    result))))
         (t
-         (let ((rewritten (%opt-copy-prop-rewrite-inst inst copies))
-               (dst (opt-inst-dst inst)))
-           (when dst
-             (%opt-copy-prop-kill dst copies))
-           (push rewritten result)))))
+          (let ((rewritten (%opt-copy-prop-rewrite-inst inst copies))
+                (dst (opt-inst-dst inst)))
+            (when dst
+              (%opt-copy-prop-kill dst copies reverse))
+            (push rewritten result)))))
     (nreverse result)))
 
 (defun opt-pass-copy-prop (instructions)
@@ -1325,20 +1399,20 @@
            (setf (gethash (vm-dst inst) env) (vm-value inst))
            (push inst result))
           ((and result
-                (typep inst 'vm-binop)
-                (typep (car result) 'vm-binop))
-           (multiple-value-bind (new-prev new-cur)
-               (maybe-reassociate (car result) inst)
-             (if new-prev
-                 (progn
-                   (setf (car result) new-prev)
+                (opt-reassociate-commutative-p inst)
+                (opt-reassociate-commutative-p (car result)))
+            (multiple-value-bind (new-prev new-cur)
+                (maybe-reassociate (car result) inst)
+              (if new-prev
+                  (progn
+                    (setf (car result) new-prev)
                    (push new-cur result)
                    (remhash (vm-dst new-prev) env)
                    (remhash (vm-dst new-cur) env))
                  (progn
-                   (when (opt-inst-dst inst)
-                     (remhash (opt-inst-dst inst) env))
-                   (push inst result)))))
+                    (when (opt-inst-dst inst)
+                      (remhash (opt-inst-dst inst) env))
+                    (push inst result)))))
           (t
            (when (opt-inst-dst inst)
              (remhash (opt-inst-dst inst) env))
@@ -1401,6 +1475,7 @@
   (let ((gen      (make-hash-table :test #'eq))    ; reg → generation count
         (val-env  (make-hash-table :test #'eq))    ; reg → canonical-value
         (memo     (make-hash-table :test #'equal)) ; canonical-value → canonical-reg
+        (target-labels (%opt-branch-target-labels instructions))
         (result   nil))
     (labels ((get-val (reg)
                ;; Canonical value: from val-env if known, else (reg . gen)
@@ -1418,10 +1493,8 @@
                (setf (gethash dst val-env) key)
                (unless (gethash key memo)
                  (setf (gethash key memo) dst)))
-             (val< (a b)
-               (string< (format nil "~S" a) (format nil "~S" b)))
-             (commutative-p (inst)
-               (member (type-of inst) *opt-commutative-inst-types* :test #'eq))
+              (commutative-p (inst)
+                (member (type-of inst) *opt-commutative-inst-types* :test #'eq))
              (try-cse (key)
                ;; Return existing reg if key is memoized, else nil
                (gethash key memo))
@@ -1439,8 +1512,9 @@
       (dolist (inst instructions)
         (cond
           ((typep inst 'vm-label)
-           (clrhash gen) (clrhash val-env) (clrhash memo)
-           (push inst result))
+            (when (gethash (vm-name inst) target-labels)
+              (clrhash gen) (clrhash val-env) (clrhash memo))
+            (push inst result))
           ((typep inst 'vm-const)
            ;; Never replace vm-const with vm-move: doing so creates a
            ;; fold<->CSE oscillation that DCE can turn into a dangling
@@ -1466,10 +1540,10 @@
                   (lv  (get-val (vm-lhs inst)))
                   (rv  (get-val (vm-rhs inst)))
                   (op  (type-of inst))
-                  (key (if (commutative-p inst)
-                           (list op (if (val< lv rv) lv rv)
-                                    (if (val< lv rv) rv lv))
-                           (list op lv rv))))
+                   (key (if (commutative-p inst)
+                           (list op (if (%opt-value< lv rv) lv rv)
+                                    (if (%opt-value< lv rv) rv lv))
+                            (list op lv rv))))
              (emit-or-cse inst dst key)))
           ;; CSE for unary ops + type predicates: derived from opt-unary-src-p
           ((opt-unary-src-p inst)
@@ -1498,10 +1572,8 @@
                         (remhash k memo)))
                     memo)
            (setf (gethash reg gen) (1+ (or (gethash reg gen) 0))))
-         (val< (a b)
-           (string< (format nil "~S" a) (format nil "~S" b)))
-         (commutative-p (inst)
-           (member (type-of inst) *opt-commutative-inst-types* :test #'eq))
+          (commutative-p (inst)
+            (member (type-of inst) *opt-commutative-inst-types* :test #'eq))
          (get-val (reg gen val-env)
            (or (gethash reg val-env)
                (cons reg (or (gethash reg gen) 0))))
@@ -1519,12 +1591,12 @@
                 (get-val (vm-src inst) gen val-env))
                ((and (opt-inst-pure-p inst) reads)
                 (let ((vals (mapcar (lambda (reg) (get-val reg gen val-env)) reads)))
-                  (if (commutative-p inst)
-                      (destructuring-bind (a b) vals
-                        (if (val< a b)
+                   (if (commutative-p inst)
+                       (destructuring-bind (a b) vals
+                        (if (%opt-value< a b)
                             (list (type-of inst) a b)
                             (list (type-of inst) b a)))
-                      (cons (type-of inst) vals))))
+                       (cons (type-of inst) vals))))
                 (t nil)))))
     (let ((local-gen (copy-env gen))
           (local-val-env (copy-env val-env))
@@ -1889,8 +1961,13 @@
 
 ;;; ─── Top-Level Optimizer ─────────────────────────────────────────────────
 
+(defun opt-pass-inline-iterative (instructions)
+  "Thresholded inline pass used inside the convergence loop."
+  (opt-pass-inline instructions :threshold 15))
+
 (defparameter *opt-convergence-passes*
-  (list #'opt-pass-fold
+  (list #'opt-pass-inline-iterative
+        #'opt-pass-fold
         #'opt-pass-sccp
         #'opt-pass-strength-reduce
         #'opt-pass-bswap-recognition
@@ -1930,7 +2007,7 @@
 (defun optimize-instructions (instructions &key (max-iterations 20))
   "Run the full multi-pass optimization pipeline on a VM instruction sequence.
    Runs until no changes or MAX-ITERATIONS reached."
-  (let ((prog (opt-pass-inline instructions :threshold 15)))
+  (let ((prog instructions))
     (loop for iteration from 0 below max-iterations
           for prev = prog
           do (setf prog (opt-run-passes-once prog))

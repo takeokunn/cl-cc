@@ -35,15 +35,17 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 43 — メモリ解析・ストア最適化（未実装）
+### Phase 43 — メモリ解析・ストア最適化（一部実装: FR-216）
 
-#### FR-216: Store-to-Load Forwarding (ストア→ロード転送)
+#### FR-216: Store-to-Load Forwarding (ストア→ロード転送) ✅
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **現状**: DSE（`optimizer.lisp` FR-016）は死んだストアを除去するが、直前のストアと同一アドレスへのロードを検出してストア値を直接転送する最適化なし
 - **内容**: `vm-set-global` → `vm-get-global` の同一変数パターンでロードをストア値に置換。`vm-set-slot` → `vm-get-slot` の同一オブジェクト・同一スロットパターンも対象。alias analysis（FR-017）と連携
 - **根拠**: LLVM MemorySSA-based store-to-load forwarding / GCC tree-ssa-forwprop。ローカル変数の冗長なロード除去
 - **難易度**: Medium
+
+- **関連実装**: `src/optimize/optimizer.lisp` に `opt-pass-store-to-load-forward` を実装済み。現状は straight-line な `vm-set-global` / `vm-get-global` と `vm-slot-write` / `vm-slot-read` を対象とする保守的なパスで、`tests/unit/optimize/optimizer-tests.lisp` にグローバル・スロット両方の回帰テストがある。Memory SSA / alias analysis 連携は未実装。
 
 #### FR-217: Memory SSA (メモリSSA)
 
@@ -77,7 +79,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 49 — 文字列・制御フロー高度化（未実装）
 
-#### FR-234: String Builder / Batch Concatenation (文字列ビルダー)
+#### FR-234: String Builder / Batch Concatenation (文字列ビルダー) ✅
 
 - **対象**: `src/vm/strings.lisp`, `src/optimize/optimizer.lisp`
 - **現状**: `vm-string-concat`（`strings.lisp:156-162`）は毎回新規文字列を生成。`(concatenate 'string a b c d)`は3回の中間文字列生成
@@ -113,7 +115,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: SBCL dynamic-extent &rest / CCL stack-consed rest。CL固有の頻出パターン
 - **難易度**: Medium
 
-#### FR-249: &key Keyword Argument Hash Dispatch (&keyハッシュディスパッチ)
+#### FR-249: &key Keyword Argument Hash Dispatch (&keyハッシュディスパッチ) ✅
 
 - **対象**: `src/vm/vm.lisp`, `src/compile/codegen-functions.lisp`
 - **現状**: `vm.lisp:829-832` — 各キーワードパラメータに対して`(position keyword kw-args)`で線形探索。N個のキーワード引数でO(N²)
@@ -201,7 +203,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: x86-64 ISA / ARM Architecture Reference。定数除算・bignum演算の基盤命令
 - **難易度**: Medium
 
-#### FR-284: Rotate Instructions (ビット回転命令)
+#### FR-284: Rotate Instructions (ビット回転命令) ✅
 
 - **対象**: `src/optimize/optimizer.lisp`, `src/emit/x86-64-codegen.lisp`, `src/emit/aarch64-codegen.lisp`
 - **現状**: `x86-64-codegen.lisp`にシフト命令（`emit-vm-ash`）のみ。回転命令なし。`(logior (ash x k) (ash x (- 64 k)))` パターンの検出なし
@@ -209,7 +211,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: GCC/LLVM rotate idiom recognition。暗号・ハッシュ計算の標準最適化
 - **難易度**: Medium
 
-#### FR-285: Byte Swap Instruction (バイトスワップ命令)
+#### FR-285: Byte Swap Instruction (バイトスワップ命令) ✅
 
 - **対象**: `src/emit/x86-64-codegen.lisp`, `src/emit/aarch64-codegen.lisp`
 - **現状**: バイト順変換パターンの検出なし。`BSWAP`命令のエミッションなし
@@ -225,7 +227,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: SBCL `sb-vm::sqrtsd` / GCC `-ffast-math`。数値計算のVM解釈オーバーヘッド除去
 - **難易度**: Hard
 
-#### FR-302: Modulo Power-of-2 Strength Reduction (2のべき乗剰余最適化)
+#### FR-302: Modulo Power-of-2 Strength Reduction (2のべき乗剰余最適化) ✅
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **現状**: `opt-pass-strength-reduce`（`optimizer.lisp:853-898`）は`vm-mul`のみ処理。`vm-mod`/`vm-rem`分岐なし。代数恒等式テーブル（`optimizer.lisp:265`）に`(mod 0 x) -> 0`のみ
@@ -270,7 +272,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 89 — オプティマイザ解析基盤（未実装）
 
-#### FR-516: 算術再結合 (Arithmetic Reassociation)
+#### FR-516: 算術再結合 (Arithmetic Reassociation) ✅
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **現状**: `(+ (+ a b) c)` が `(+ a (+ b c))` に再結合されない
@@ -318,7 +320,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: Click & Cooper "Simple and Efficient Construction of SSA Form" VN algorithm
 - **難易度**: Medium
 
-#### FR-522: 手続き内コールグラフ (Intraprocedural Call Graph)
+#### FR-522: 手続き内コールグラフ (Intraprocedural Call Graph) ✅
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **現状**: インライン展開 (`opt-pass-inline`) が再帰/相互再帰を無制限に展開するリスク (ガードなし: `optimizer.lisp:504-576`)
@@ -438,15 +440,17 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 4 — メモリ依存解析 & デッドストア除去（未実装）
+### Phase 4 — メモリ依存解析 & デッドストア除去（一部実装: FR-016）
 
-#### FR-016: Dead Store Elimination (DSE)
+#### FR-016: Dead Store Elimination (DSE) ✅
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **現状**: `opt-pass-dce` は命令レベルのDCEのみ。後続ロードのないストア命令 (`vm-set-global`, `vm-set-slot`) の除去がない
 - **内容**: ストア命令 X のあとにXで定義した位置への後続ロードなく別のストアが来る場合、最初のストアを除去。グローバル変数・スロット・ローカルバインディングを対象。Memory SSA (FR-217) をバックエンドとして利用可能
 - **根拠**: LLVM `DeadStoreElimination` / GCC `tree-dse`。ローカル変数の初期化→即上書きパターンで頻出
 - **難易度**: Medium
+
+- **関連実装**: `src/optimize/optimizer.lisp` に `opt-pass-dead-store-elim` を実装済み。現状は straight-line な `vm-set-global` の上書き除去を対象とする保守的なパスで、`tests/unit/optimize/optimizer-tests.lisp` に回帰テストがある。Memory SSA やより広いメモリ位置（スロット/別名解析）連携は未実装。
 
 #### FR-017: Alias Analysis (型ベース別名解析, TBAA)
 

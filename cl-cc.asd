@@ -134,7 +134,8 @@
        (:file "inference-effects")
        (:file "bidirectional")
        (:file "checker")
-       (:file "printer")))
+       (:file "printer")
+       (:file "exhaustiveness")))
      ;; Stage 4: AST → VM IR (context/closure/cps/codegen — before optimize/emit)
      (:module "compile"
       :serial t
@@ -405,7 +406,9 @@
          (:file "representation-tests")
          (:file "typeclass-tests")
          (:file "printer-tests")
-         (:file "parser-tests")))
+         (:file "parser-tests")
+         (:file "inference-tests")
+         (:file "exhaustiveness-tests")))
         (:module "compile"
          :serial t
          :components

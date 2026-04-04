@@ -187,7 +187,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - ループ内の `aref` が最も恩恵を受ける
 - **難易度**: Medium
 
-#### FR-040: Nil Check Elimination
+#### FR-040: Nil Check Elimination ✅
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **内容**:
@@ -365,7 +365,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **内容**: CMP命令後のEFLAGSを直接分岐に使用し、bool値のレジスタ化+タグチェックを省略
 - **難易度**: Medium
 
-#### FR-093: Jump Table for Dense Integer Case
+#### FR-093: Jump Table for Dense Integer Case ✅
 
 - **対象**: `src/backend/x86-64-codegen.lisp`
 - **内容**: 密なinteger `case`/`ecase` を `JMP [rax*8+table]` の間接ジャンプに変換
@@ -378,13 +378,13 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: trampolineで既に `br_table` を使用、ユーザ向けへの拡張が自然
 - **難易度**: Low
 
-#### FR-095: Binary Search for Sparse Case
+#### FR-095: Binary Search for Sparse Case ✅
 
 - **対象**: `src/expand/expander.lisp`
 - **内容**: 疎なinteger集合の `case` を線形チェーンでなく二分探索木で生成
 - **難易度**: Low
 
-#### FR-096: Power-of-2 Divisor Strength Reduction
+#### FR-096: Power-of-2 Divisor Strength Reduction ✅
 
 - **対象**: `src/vm/primitives.lisp`, `src/optimize/optimizer.lisp`
 - **内容**: コンパイル時定数が2の冪の `floor`/`mod` を算術シフト/ビットANDに変換
@@ -474,7 +474,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: LLVMの`PartialDCE`。現行DCEでは`if`の片方でのみ使われる計算が両方のパスで実行される
 - **難易度**: Hard
 
-#### FR-165: Post-Dominator Analysis
+#### FR-165: Post-Dominator Analysis ✅
 
 - **対象**: `src/optimize/cfg.lisp`
 - **現状**: 支配木（dominator tree）は`cfg.lisp:210-243`に実装済みだが、逆支配木（post-dominator）は存在しない
@@ -596,7 +596,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: `defopcode` インフラが最適なフック。selfhostで頻度プロファイルを収集してターゲット列を特定
 - **難易度**: Medium
 
-#### FR-110: Inline Constant Arithmetic Opcodes
+#### FR-110: Inline Constant Arithmetic Opcodes ✅
 
 - **対象**: `src/vm/vm-run.lisp`
 - **内容**: `ADD-IMM`/`CMP-IMM-ZERO`等の即値バリアント命令を追加。ループカウンタ`(incf i)`, `(> i n)`の最頻出パターンを1ディスパッチサイクルに削減
@@ -609,7 +609,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: CPython 3.11+ adaptive interpreter と同様のアプローチ
 - **難易度**: Medium
 
-#### FR-112: Critical Edge Splitting
+#### FR-112: Critical Edge Splitting ✅
 
 - **対象**: `src/optimize/cfg.lisp`
 - **内容**: 後継が複数のブロックから前継が複数のブロックへのエッジに空のランディングパッドブロックを挿入
@@ -661,7 +661,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ### Phase 60 — SSA高度化・言語機能（未実装）
 
-#### FR-271: Trivial Phi Elimination (自明Phi除去)
+#### FR-271: Trivial Phi Elimination (自明Phi除去) ✅
 
 - **対象**: `src/optimize/ssa.lisp`
 - **現状**: `ssa.lisp:68-98` — `ssa-place-phis`が活性チェックなしで全支配フロンティアにPhiを挿入。冗長なPhi（全引数が同一値のPhi）の除去パスなし
@@ -843,7 +843,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: バイトコード実行エンジン完成
 - **難易度**: Hard
 
-#### FR-457: vm-falsep Correctness Fix (vm-falsep正当性修正)
+#### FR-457: vm-falsep Correctness Fix (vm-falsep正当性修正) ✅
 
 - **対象**: `src/vm/vm.lisp`
 - **現状**: `vm-falsep`(`vm.lisp:533-535`)が`nil`と整数`0`の両方をfalse扱い。CL仕様では`nil`のみがfalse
@@ -867,7 +867,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: CPython 3.12 superinstructions, LuaJIT
 - **難易度**: Hard
 
-#### FR-460: Label Table Integer Keys (ラベルテーブル整数キー)
+#### FR-460: Label Table Integer Keys (ラベルテーブル整数キー) ✅
 
 - **対象**: `src/vm/vm-run.lisp`
 - **現状**: `build-label-table`(`vm-run.lisp:102-109`)が`#'equal`テスト（文字列比較）のHTを生成。毎ジャンプで文字列ハッシュ計算
@@ -883,7 +883,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: クロージャ変数アクセス性能
 - **難易度**: Low
 
-#### FR-462: vm-apply Efficient Argument Spreading (vm-apply効率的引数展開)
+#### FR-462: vm-apply Efficient Argument Spreading (vm-apply効率的引数展開) ✅
 
 - **対象**: `src/vm/vm.lisp`
 - **現状**: `vm-apply`(`vm.lisp:965-968`)が`(append (butlast arg-values) ...)`で2回走査+新リスト割り当て

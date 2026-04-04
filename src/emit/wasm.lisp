@@ -260,7 +260,7 @@
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-move) stream)
   (let ((reg-map (wasm-target-reg-map target)))
-    (format stream "~%    (local.set ~D (local.get ~D))"
+    (format stream "~%    (local.tee ~D (local.get ~D))"
             (wasm-reg-to-local reg-map (vm-dst inst))
             (wasm-reg-to-local reg-map (vm-src inst)))))
 

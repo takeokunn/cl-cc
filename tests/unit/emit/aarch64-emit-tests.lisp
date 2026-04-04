@@ -79,6 +79,7 @@
   "vm-label emits label: format."
   (let* ((tgt (%make-aarch64-target))
          (asm (%aarch64-emit tgt (make-vm-label :name "loop"))))
+    (assert-true (search ".align 4" asm))
     (assert-true (search "loop:" asm))))
 
 (deftest aarch64-emit-jump
@@ -104,10 +105,12 @@
     (assert-true (search "mov x0" asm))
     (assert-true (search "ret" asm))))
 
-(deftest aarch64-emit-error-and-silent-cases
-  "vm-print signals error (not implemented); unsupported instructions emit empty string."
+(deftest aarch64-emit-print-and-silent-cases
+  "vm-print emits rt-print call; unsupported instructions still emit empty string."
   (let ((tgt (%make-aarch64-target)))
-    (assert-signals error (%aarch64-emit tgt (make-vm-print :reg :r0)))
+    (let ((asm (%aarch64-emit tgt (make-vm-print :reg :r0))))
+      (assert-true (search "bl rt-print" asm))
+      (assert-true (search "x0" asm)))
     (assert-equal "" (%aarch64-emit tgt (make-vm-ret :reg :r0)))))
 
 (deftest aarch64-emit-spill-operations

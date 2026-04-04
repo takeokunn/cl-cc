@@ -154,7 +154,8 @@
    #:effect-def  #:effect-def-p  #:make-effect-def
    #:effect-def-name  #:effect-def-type-params  #:effect-def-operations
    #:*effect-registry*  #:register-effect  #:lookup-effect
-   #:*effect-signature-table*
+   #:*effect-signature-table*  #:*constant-effect-table*
+   #:*pure-ast-effect-types*
    #:register-effect-signature  #:lookup-effect-signature
    #:effect-row-union  #:effect-row-subset-p
    #:infer-effects  #:infer-with-effects  #:check-body-effects
@@ -207,6 +208,8 @@
    #:*class-type-registry*  #:register-class-type
    #:lookup-class-type  #:lookup-slot-type
    #:*type-alias-registry*  #:register-type-alias  #:lookup-type-alias
+   #:*type-predicate-table*  #:register-type-predicate
+   #:syntactic-value-p
 
    ;; ─── Bidirectional checker ───────────────────────────────────────────
    #:synthesize  #:check  #:check-body
@@ -228,6 +231,12 @@
    #:parse-typed-defun  #:parse-typed-lambda  #:parse-typed-lambda-list
    #:make-type-function-from-spec  #:looks-like-type-specifier-p
    #:*lambda-list-keywords*
+
+   ;; ─── Exhaustiveness checking ─────────────────────────────────────────
+   #:check-typecase-exhaustiveness
+   #:check-etypecase-completeness
+   #:useful-typecase-arms
+   #:typecase-arm-subsumed-p
 
    ;; ─── Printer ─────────────────────────────────────────────────────────
    #:unparse-type

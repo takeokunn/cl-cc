@@ -15,6 +15,14 @@
   "AST node types whose evaluation produces no side effects.
    Any node whose type appears here is pure and returns +pure-effect-row+.")
 
+;;; Constant Effect Table — maps AST *type symbols* to their canonical effect row.
+;;; This is the data-driven version of the cond form in infer-effects.
+;;; Keys are the class-name symbols of AST node types (e.g., 'cl-cc:ast-int).
+
+(defvar *constant-effect-table* (make-hash-table :test #'eq)
+  "Maps AST node type symbols to their constant effect rows.
+   Used for data-driven effect lookup in infer-effects.")
+
 ;;; Effect Inference
 
 (defun infer-effects (ast env)
@@ -112,12 +120,18 @@
     (register-effect-signature op error-row))
   ;; State effects (global mutation)
   (dolist (op '(setq vm-setq setf vm-set-global))
-    (register-effect-signature op state-row)))
+    (register-effect-signature op state-row))
+  ;; Populate *constant-effect-table* with the per-AST-type defaults.
+  (dolist (node-type *pure-ast-effect-types*)
+    (setf (gethash node-type *constant-effect-table*) +pure-effect-row+))
+  (setf (gethash 'cl-cc:ast-print *constant-effect-table*) io-row)
+  (setf (gethash 'cl-cc:ast-setq  *constant-effect-table*) state-row))
 
 ;;; Exports
 
 (export '(;; Phase 5 effect type inference
           *pure-ast-effect-types*
+          *constant-effect-table*
           infer-effects
           infer-with-effects
           check-body-effects

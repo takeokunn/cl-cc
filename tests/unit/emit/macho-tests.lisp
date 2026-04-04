@@ -137,6 +137,17 @@
     (cl-cc/binary:add-symbol b "_main" :value 0 :sect 1)
     (assert-true b)))
 
+(deftest macho-data-segment-is-not-executable
+  "__DATA segments are emitted with rw- protections, not rwx."
+  (let* ((b (cl-cc/binary:make-mach-o-builder :x86-64))
+         (data (make-array 4 :element-type '(unsigned-byte 8) :initial-contents '(1 2 3 4))))
+    (cl-cc/binary:add-data-segment b data)
+    (let ((seg (find "__DATA" (cl-cc/binary::mach-o-builder-segments b)
+                     :key #'cl-cc/binary:segment-command-segname :test #'string=)))
+      (assert-false (null seg))
+      (assert-equal 6 (cl-cc/binary:segment-command-maxprot seg))
+      (assert-equal 6 (cl-cc/binary:segment-command-initprot seg)))))
+
 (deftest macho-build-produces-bytes
   "build-mach-o produces non-empty byte vector."
   (let ((b (cl-cc/binary:make-mach-o-builder :x86-64))
@@ -154,9 +165,67 @@
     (let ((result (cl-cc/binary:build-mach-o b code)))
       ;; FEEDFACF little-endian: CF FA ED FE
       (assert-equal #xCF (aref result 0))
-      (assert-equal #xFA (aref result 1))
-      (assert-equal #xED (aref result 2))
-      (assert-equal #xFE (aref result 3)))))
+       (assert-equal #xFA (aref result 1))
+       (assert-equal #xED (aref result 2))
+       (assert-equal #xFE (aref result 3)))))
+
+(deftest macho-build-adds-pagezero-segment
+  "build-mach-o includes a __PAGEZERO load command before loadable segments."
+  (let ((b (cl-cc/binary:make-mach-o-builder :x86-64))
+        (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
+    (cl-cc/binary:add-text-segment b code)
+    (cl-cc/binary:add-entry-point b 0)
+    (let ((result (cl-cc/binary:build-mach-o b code)))
+      ;; ncmds at header bytes 16..19 should be 3: __PAGEZERO, __TEXT, LC_MAIN
+      (assert-equal 3 (aref result 16))
+      (assert-equal 0 (aref result 17))
+      (assert-equal 0 (aref result 18))
+      (assert-equal 0 (aref result 19))
+      (let ((pagezero (map 'string #'code-char (subseq result 40 50))))
+        (assert-equal "__PAGEZERO" pagezero)))))
+
+(deftest macho-build-serializes-data-segment-payload
+  "build-mach-o includes __DATA payload bytes in the final binary output."
+  (let* ((b (cl-cc/binary:make-mach-o-builder :x86-64))
+         (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3)))
+         (data (make-array 4 :element-type '(unsigned-byte 8) :initial-contents '(1 2 3 4))))
+    (cl-cc/binary:add-text-segment b code)
+    (cl-cc/binary:add-data-segment b data)
+    (cl-cc/binary:add-entry-point b 0)
+    (let* ((result (cl-cc/binary:build-mach-o b code))
+           (data-seg (find "__DATA" (cl-cc/binary::mach-o-builder-segments b)
+                           :key #'cl-cc/binary:segment-command-segname :test #'string=))
+           (off (cl-cc/binary:segment-command-fileoff data-seg)))
+      (assert-equal 4 (cl-cc/binary:segment-command-filesize data-seg))
+      (assert-equal '(1 2 3 4) (coerce (subseq result off (+ off 4)) 'list)))))
+
+(deftest macho-build-serializes-symbol-table
+  "build-mach-o emits LC_SYMTAB and serialized nlist/string table bytes when symbols exist."
+  (let* ((b (cl-cc/binary:make-mach-o-builder :x86-64))
+         (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
+    (cl-cc/binary:add-text-segment b code)
+    (cl-cc/binary:add-symbol b "_main" :value 0 :sect 1)
+    (cl-cc/binary:add-entry-point b 0)
+    (let* ((result (cl-cc/binary:build-mach-o b code))
+           (symtab-cmd-off (+ 32 72 (+ 72 80)))
+           (symoff (+ (aref result (+ symtab-cmd-off 8))
+                      (ash (aref result (+ symtab-cmd-off 9)) 8)
+                      (ash (aref result (+ symtab-cmd-off 10)) 16)
+                      (ash (aref result (+ symtab-cmd-off 11)) 24)))
+           (nsyms (+ (aref result (+ symtab-cmd-off 12))
+                     (ash (aref result (+ symtab-cmd-off 13)) 8)
+                     (ash (aref result (+ symtab-cmd-off 14)) 16)
+                     (ash (aref result (+ symtab-cmd-off 15)) 24)))
+           (stroff (+ (aref result (+ symtab-cmd-off 16))
+                      (ash (aref result (+ symtab-cmd-off 17)) 8)
+                      (ash (aref result (+ symtab-cmd-off 18)) 16)
+                      (ash (aref result (+ symtab-cmd-off 19)) 24))))
+      (assert-equal 5 (aref result 16))
+      (assert-equal #x03 (aref result symtab-cmd-off))
+      (assert-equal 1 nsyms)
+      (assert-equal 18 (- stroff symoff))
+      (assert-equal (char-code #\_) (aref result (+ stroff 1)))
+      (assert-equal (char-code #\m) (aref result (+ stroff 2))))))
 
 (deftest macho-build-arm64-magic
   "ARM64 Mach-O also starts with FEEDFACF (same magic, different cputype)."

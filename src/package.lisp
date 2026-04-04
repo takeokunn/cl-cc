@@ -807,6 +807,7 @@
        ;; CLOS Compiler Context
        :ctx-global-classes
        :ctx-global-generics
+       :ctx-global-generic-params
 
        ;; Backend Code Generation
        :compile-to-x86-64-bytes

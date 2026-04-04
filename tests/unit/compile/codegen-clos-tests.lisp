@@ -130,9 +130,124 @@
                               :object (cl-cc::make-ast-var :name 'obj)
                               :slot 'name)))
                 ctx)))
-      (assert-true (keywordp reg))
-      (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-obj))
-      (assert-true (codegen-find-inst ctx 'cl-cc::vm-slot-read)))))
+       (assert-true (keywordp reg))
+       (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-obj))
+       (assert-true (codegen-find-inst ctx 'cl-cc::vm-slot-read)))))
+
+(deftest codegen-branch-local-make-instance-sinks-initarg-evaluation
+  "A branch-local non-escaping make-instance delays initarg evaluation into the used branch."
+  (let* ((ctx (make-codegen-ctx))
+         (ast nil)
+         (reg nil)
+         (insts nil)
+         (jump-pos nil)
+         (cons-pos nil))
+    (setf (cl-cc::ctx-env ctx) (list (cons 'flag :R10)))
+    (setf ast
+          (cl-cc::make-ast-let
+           :bindings
+           (list (cons 'obj
+                       (cl-cc::make-ast-make-instance
+                        :class (cl-cc::make-ast-quote :value 'my-dog)
+                        :initargs
+                        (list (cons :name
+                                    (cl-cc::make-ast-call
+                                     :func 'cons
+                                     :args (list (cl-cc::make-ast-int :value 1)
+                                                 (cl-cc::make-ast-int :value 2))))))))
+           :body
+           (list (cl-cc::make-ast-if
+                  :cond (cl-cc::make-ast-var :name 'flag)
+                   :then (cl-cc::make-ast-slot-value
+                          :object (cl-cc::make-ast-var :name 'obj)
+                          :slot 'name)
+                   :else (cl-cc::make-ast-int :value 0))))
+    
+    (setf reg (compile-ast ast ctx))
+    (setf insts (codegen-instructions ctx)
+          jump-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-jump-zero)) insts)
+          cons-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-cons)) insts))
+    (assert-true (keywordp reg))
+    (assert-null (codegen-find-inst ctx 'cl-cc::vm-make-obj))
+    (assert-null (codegen-find-inst ctx 'cl-cc::vm-slot-read))
+    (assert-true jump-pos)
+    (assert-true cons-pos)
+    (assert-true (> cons-pos jump-pos)))))
+
+(deftest codegen-multibinding-branch-local-make-instance-sinks-initarg-evaluation
+  "The generalized branch sink handles a non-escaping make-instance binding with sibling let bindings."
+  (let* ((ctx (make-codegen-ctx))
+         (ast (cl-cc::make-ast-let
+               :bindings (list (cons 'obj
+                                     (cl-cc::make-ast-make-instance
+                                      :class (cl-cc::make-ast-quote :value 'my-dog)
+                                      :initargs (list (cons :name
+                                                            (cl-cc::make-ast-call
+                                                             :func 'cons
+                                                             :args (list (cl-cc::make-ast-int :value 1)
+                                                                         (cl-cc::make-ast-int :value 2)))))))
+                               (cons 'flag (cl-cc::make-ast-int :value 1)))
+               :body (list (cl-cc::make-ast-if
+                            :cond (cl-cc::make-ast-var :name 'flag)
+                            :then (cl-cc::make-ast-slot-value
+                                   :object (cl-cc::make-ast-var :name 'obj)
+                                   :slot 'name)
+                            :else (cl-cc::make-ast-int :value 0))))
+         (reg (compile-ast ast ctx))
+         (insts (codegen-instructions ctx))
+         (jump-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-jump-zero)) insts))
+         (cons-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-cons)) insts)))
+    (assert-true (keywordp reg))
+    (assert-null (codegen-find-inst ctx 'cl-cc::vm-make-obj))
+    (assert-null (codegen-find-inst ctx 'cl-cc::vm-slot-read))
+    (assert-true jump-pos)
+    (assert-true cons-pos)
+    (assert-true (> cons-pos jump-pos)))))
+
+(deftest codegen-branch-local-make-instance-shadowed-binding-does-not-sink
+  "Shadowed branch-local bindings must not count as uses of the outer make-instance binding."
+  (let* ((ctx (make-codegen-ctx))
+         (ast nil)
+         (reg nil)
+         (insts nil)
+         (jump-pos nil)
+         (cons-pos nil))
+    (setf (cl-cc::ctx-env ctx) (list (cons 'flag :R10)))
+    (setf ast
+          (cl-cc::make-ast-let
+           :bindings
+           (list (cons 'obj
+                       (cl-cc::make-ast-make-instance
+                        :class (cl-cc::make-ast-quote :value 'my-dog)
+                        :initargs
+                        (list (cons :name
+                                    (cl-cc::make-ast-call
+                                     :func 'cons
+                                     :args (list (cl-cc::make-ast-int :value 1)
+                                                 (cl-cc::make-ast-int :value 2))))))))
+           :body
+           (list (cl-cc::make-ast-if
+                  :cond (cl-cc::make-ast-var :name 'flag)
+                  :then (cl-cc::make-ast-let
+                         :bindings (list (cons 'obj
+                                                (cl-cc::make-ast-make-instance
+                                                 :class (cl-cc::make-ast-quote :value 'my-dog)
+                                                 :initargs (list (cons :name (cl-cc::make-ast-quote :value "shadow"))))))
+                          :body (list (cl-cc::make-ast-slot-value
+                                       :object (cl-cc::make-ast-var :name 'obj)
+                                       :slot 'name)))
+                   :else (cl-cc::make-ast-int :value 0))))
+
+    (setf reg (compile-ast ast ctx))
+    (setf insts (codegen-instructions ctx)
+          jump-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-jump-zero)) insts)
+          cons-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-cons)) insts))
+    (assert-true (keywordp reg))
+    (assert-true jump-pos)
+    (assert-true cons-pos)
+    (assert-true (< cons-pos jump-pos))
+    (assert-null (codegen-find-inst ctx 'cl-cc::vm-make-obj))
+    (assert-null (codegen-find-inst ctx 'cl-cc::vm-slot-read)))))
 
 ;;; ─── compile-ast: ast-set-slot-value ─────────────────────────────────────────
 

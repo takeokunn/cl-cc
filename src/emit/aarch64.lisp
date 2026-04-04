@@ -71,6 +71,8 @@
           (target-register target (vm-rhs inst))))
 
 (defmethod emit-instruction ((target aarch64-target) (inst vm-label) stream)
+  (declare (ignore target))
+  (format stream "  .align 4~%")
   (format stream "~A:~%" (vm-name inst)))
 
 (defmethod emit-instruction ((target aarch64-target) (inst vm-jump) stream)
@@ -82,8 +84,10 @@
   (format stream "  b.eq ~A~%" (vm-label-name inst)))
 
 (defmethod emit-instruction ((target aarch64-target) (inst vm-print) stream)
-  (declare (ignore stream))
-  (error "print backend emission is not implemented yet (~A)" (vm-reg inst)))
+  (%aarch64-emit-runtime-call target stream
+                             "rt-print"
+                             (list (vm-reg inst))
+                             nil))
 
 (defmethod emit-instruction ((target aarch64-target) (inst vm-halt) stream)
   (format stream "  mov x0, ~A~%"

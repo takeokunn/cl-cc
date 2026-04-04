@@ -731,14 +731,16 @@ Handles defun, defvar, and expression forms.
                                                (remove-if-not
                                                 (lambda (v) (assoc v old-env))
                                                 (set-difference free-vars params)))))
-                   (let ((param-regs (loop for i from 0 below (length params)
-                                           collect (make-register ctx)))
-                         (skip-label (make-label ctx "flet_skip")))
-                     (emit ctx (make-vm-closure :dst closure-reg :label func-label
-                                                :params param-regs :captured captured-vars))
-                     (push (cons name closure-reg) func-bindings)
-                     (emit ctx (make-vm-jump :label skip-label))
-                     (emit ctx (make-vm-label :name func-label))
+                    (let ((param-regs (loop for i from 0 below (length params)
+                                            collect (make-register ctx)))
+                          (skip-label (make-label ctx "flet_skip")))
+                      (if captured-vars
+                          (emit ctx (make-vm-closure :dst closure-reg :label func-label
+                                                     :params param-regs :captured captured-vars))
+                          (emit ctx (make-vm-func-ref :dst closure-reg :label func-label)))
+                      (push (cons name closure-reg) func-bindings)
+                      (emit ctx (make-vm-jump :label skip-label))
+                      (emit ctx (make-vm-label :name func-label))
                      (%compile-closure-body ctx params param-regs body-forms old-env)
                      (emit ctx (make-vm-label :name skip-label))))))
              (setf (ctx-env ctx) (append (nreverse func-bindings) old-env)))

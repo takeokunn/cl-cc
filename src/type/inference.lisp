@@ -69,6 +69,20 @@
              (scheme  (generalize result-env fn-type)))
         (type-env-extend name scheme result-env)))))
 
+;;; FR-004: Polymorphic Recursion Helpers
+
+(defun %find-fn-type-declaration (fn-name declarations)
+  "Scan DECLARATIONS for (type type-spec fn-name ...) and return type-spec.
+   DECLARATIONS is the list from ast-callable-declarations.
+   Returns a type specifier s-expression, or nil if not found."
+  (when fn-name
+    (loop for decl in declarations
+          when (and (consp decl)
+                    (eq (car decl) 'type)
+                    (>= (length decl) 3)
+                    (member fn-name (cddr decl) :test #'eq))
+          return (second decl))))
+
 ;;; Type Inference (Algorithm W)
 
 (defun infer (ast env)
@@ -126,19 +140,32 @@
              (values val-type subst)))))
 
     (cl-cc:ast-defun
-     (let* ((param-types    (mapcar (lambda (p) (declare (ignore p)) (fresh-type-var))
-                                     (cl-cc:ast-defun-params ast)))
+     ;; FR-004: Polymorphic Recursion.
+     ;; If the defun has an explicit (declare (type fn-type name)) annotation,
+     ;; add the function's own name to body-env with a generalized scheme so
+     ;; the recursive call site may be instantiated at different monotypes.
+     (let* ((fn-name      (cl-cc:ast-defun-name ast))
+            (decls        (cl-cc::ast-defun-declarations ast))
+            (declared-spec (%find-fn-type-declaration fn-name decls))
+            (declared-type (when declared-spec (parse-type-specifier declared-spec)))
+            (param-types  (if (and declared-type (type-function-p declared-type))
+                              (type-function-params declared-type)
+                              (mapcar (lambda (p) (declare (ignore p)) (fresh-type-var))
+                                      (cl-cc:ast-defun-params ast))))
             (param-bindings (mapcar (lambda (name type)
                                       (cons name (make-type-scheme nil type)))
                                     (cl-cc:ast-defun-params ast) param-types))
-            (body-env (type-env-extend* param-bindings env)))
+            ;; Build body env: params + optional self-reference for poly recursion.
+            (body-env (let ((e (type-env-extend* param-bindings env)))
+                        (if (and fn-name declared-type)
+                            (type-env-extend fn-name (generalize env declared-type) e)
+                            e))))
        (multiple-value-bind (body-type subst)
            (infer-body (cl-cc:ast-defun-body ast) body-env)
-         (values (make-type-function-raw
-                  :params (mapcar (lambda (p)
-                                    (type-substitute p subst))
-                                  param-types)
-                  :return body-type)
+         (values (or declared-type
+                     (make-type-function-raw
+                      :params (mapcar (lambda (p) (type-substitute p subst)) param-types)
+                      :return body-type))
                  subst))))
 
     (cl-cc:ast-defvar
@@ -244,18 +271,30 @@
                      :expected expected
                      :actual op-type)))))))
 
+;;; Type Predicate Registry (data-driven, extensible)
+
+(defvar *type-predicate-table* (make-hash-table :test #'eq)
+  "Maps predicate name symbols to the type-node they test for.
+   E.g., 'integerp → type-int.  Extensible via register-type-predicate.")
+
+(defun register-type-predicate (predicate-name type-node)
+  "Register PREDICATE-NAME as testing for TYPE-NODE."
+  (setf (gethash predicate-name *type-predicate-table*) type-node))
+
 (defun type-predicate-to-type (predicate-name)
   "Map a type predicate name to the type it tests for.
-   Returns a type-node or nil if not a recognized predicate."
-  (case predicate-name
-    ((numberp integerp) type-int)
-    ((stringp) type-string)
-    ((symbolp) type-symbol)
-    ((consp) type-cons)
-    ((null) type-null)
-    ((characterp) (make-type-primitive :name 'character))
-    ((functionp) (make-type-primitive :name 'function))
-    (otherwise nil)))
+   Looks up *type-predicate-table*; returns nil if not registered."
+  (gethash predicate-name *type-predicate-table*))
+
+;; Bootstrap built-in predicates at load time.
+(register-type-predicate 'numberp   type-int)
+(register-type-predicate 'integerp  type-int)
+(register-type-predicate 'stringp   type-string)
+(register-type-predicate 'symbolp   type-symbol)
+(register-type-predicate 'consp     type-cons)
+(register-type-predicate 'null      type-null)
+(register-type-predicate 'characterp (make-type-primitive :name 'character))
+(register-type-predicate 'functionp  (make-type-primitive :name 'function))
 
 (defun extract-type-guard (cond-ast)
   "Extract type guard info from a condition AST.
@@ -335,15 +374,36 @@
               (declare (ignore final-ok))
               (values (type-substitute then-type final-subst) final-subst))))))))
 
+;;; FR-1604: Value Restriction
+;;; Only syntactic values (lambda, literal, variable, quote, #'fn) may be
+;;; generalized.  Applications and other impure expressions are kept monomorphic
+;;; to prevent unsound polymorphism with mutable state.
+
+(defun syntactic-value-p (ast)
+  "Return T if AST is a syntactic value safe to generalize (value restriction).
+   Values: integer/string literals, variable references, lambdas, quoted data,
+   function references, and typed holes.
+   Non-values: function calls, binary operations, let/if/progn, etc."
+  (typep ast '(or cl-cc:ast-int
+                  cl-cc:ast-var
+                  cl-cc:ast-lambda
+                  cl-cc:ast-quote
+                  cl-cc:ast-function
+                   cl-cc::ast-hole)))
+
 (defun infer-let (ast env)
-  "Infer type for let with polymorphism."
+  "Infer type for let with polymorphism (value restriction applied).
+   Only syntactic values are generalized; applications stay monomorphic."
   (let ((new-env env))
     (dolist (binding (cl-cc:ast-let-bindings ast))
       (let* ((name (car binding))
              (expr (cdr binding))
              (type (multiple-value-bind (result-type s) (infer expr new-env)
                      (type-substitute result-type s)))
-             (scheme (generalize new-env type)))
+             ;; Value restriction: generalize only syntactic values.
+             (scheme (if (syntactic-value-p expr)
+                         (generalize new-env type)
+                         (make-type-scheme nil type))))
         (setf new-env (type-env-extend name scheme new-env))))
     (infer-body (cl-cc:ast-let-body ast) new-env)))
 
@@ -525,6 +585,9 @@
           infer-args
           infer-with-env
           annotate-type
+          syntactic-value-p
+          *type-predicate-table*
+          register-type-predicate
 
           type-inference-error
           type-inference-error-message

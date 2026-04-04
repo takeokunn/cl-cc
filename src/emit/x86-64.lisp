@@ -99,6 +99,8 @@
     (format stream "  imul ~A, ~A~%" dst rhs)))
 
 (defmethod emit-instruction ((target x86-64-target) (inst vm-label) stream)
+  (declare (ignore target))
+  (format stream "  .align 4~%")
   (format stream "~A:~%" (vm-name inst)))
 
 (defmethod emit-instruction ((target x86-64-target) (inst vm-jump) stream)
@@ -110,8 +112,10 @@
   (format stream "  je ~A~%" (vm-label-name inst)))
 
 (defmethod emit-instruction ((target x86-64-target) (inst vm-print) stream)
-  (declare (ignore stream))
-  (error "print backend emission is not implemented yet (~A)" (vm-reg inst)))
+  (%x86-64-emit-runtime-call target stream
+                             "rt-print"
+                             (list (vm-reg inst))
+                             nil))
 
 (defmethod emit-instruction ((target x86-64-target) (inst vm-halt) stream)
   (format stream "  mov rax, ~A~%"

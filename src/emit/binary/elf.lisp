@@ -22,6 +22,7 @@
 (defconstant +elf-osabi-none+  0)   ; ELFOSABI_NONE
 (defconstant +elf-type-rel+    1)   ; ET_REL (relocatable)
 (defconstant +elf-machine-x86-64+ #x3e)  ; EM_X86_64
+(defconstant +elf-machine-aarch64+ #xB7) ; EM_AARCH64
 
 ;;; Section header types
 (defconstant +sht-null+     0)
@@ -29,6 +30,7 @@
 (defconstant +sht-symtab+   2)
 (defconstant +sht-strtab+   3)
 (defconstant +sht-rela+     4)
+(defconstant +sht-nobits+   8)
 
 ;;; Section header flags
 (defconstant +shf-write+      1)
@@ -149,8 +151,11 @@
 
 (defstruct (elf64-builder (:conc-name elf64-))
   "Accumulates sections for an ELF64 relocatable object file."
+  (machine +elf-machine-x86-64+ :type (unsigned-byte 16))
   ;; .text section data
   (text-buf    (elf-make-buffer))
+  ;; .bss section size in bytes (NOBITS, occupies memory only)
+  (bss-size 0 :type integer)
   ;; Relocation entries: list of (offset type sym-name addend)
   ;; offset = byte offset in .text; sym-name = string; addend = integer
   (rela-entries nil)
@@ -160,9 +165,9 @@
   ;; File symbol (index 0 in symtab is always STN_UNDEF)
   (symbol-count 0))
 
-(defun make-elf64-object ()
+(defun make-elf64-object (&key (machine +elf-machine-x86-64+))
   "Create a fresh ELF64 builder."
-  (make-elf64-builder))
+  (make-elf64-builder :machine machine))
 
 (defun elf64-add-text-bytes (builder bytes)
   "Append BYTES (vector or list of (unsigned-byte 8)) to .text section."
@@ -171,6 +176,11 @@
 (defun elf64-text-size (builder)
   "Return current .text section size in bytes."
   (length (elf64-text-buf builder)))
+
+(defun elf64-add-bss (builder size)
+  "Reserve SIZE bytes in the .bss section."
+  (incf (elf64-bss-size builder) size)
+  (elf64-bss-size builder))
 
 (defun elf64-add-reloc (builder offset sym-name &key (type +r-x86-64-plt32+) (addend -4))
   "Add a relocation entry for a CALL instruction at OFFSET in .text.
@@ -254,6 +264,7 @@
          (strtab   (make-strtab))
          ;; Section name offsets in shstrtab
          (sh-text-off     (strtab-add shstrtab ".text"))
+         (sh-bss-off      (strtab-add shstrtab ".bss"))
          (sh-rela-off     (strtab-add shstrtab ".rela.text"))
          (sh-symtab-off   (strtab-add shstrtab ".symtab"))
          (sh-strtab-off   (strtab-add shstrtab ".strtab"))
@@ -275,24 +286,25 @@
          (shstrtab-bytes (strtab-bytes shstrtab))
          ;; .text bytes
          (text-bytes (elf-buf-to-array (elf64-text-buf builder)))
+         (bss-size        (elf64-bss-size builder))
          ;; Layout: ELF header + sections + section headers
-         ;; Section ordering: NULL, .text, .rela.text, .symtab, .strtab, .shstrtab
-         ;; Number of sections: 6
-         (n-sections 6)
-         (shstrtab-idx 5)  ; index of .shstrtab
-         ;; Data starts immediately after ELF header
-         (text-offset     +elf64-ehdr-size+)
+         ;; Section ordering: NULL, .text, .bss, .rela.text, .symtab, .strtab, .shstrtab
+         ;; Number of sections: 7
+         (n-sections 7)
+         (shstrtab-idx 6)  ; index of .shstrtab
+         ;; Data starts after ELF header, honoring section alignment requirements.
+         (text-offset     (align-up +elf64-ehdr-size+ 16))
          (text-size       (length text-bytes))
-         (rela-offset     (+ text-offset text-size))
+         (rela-offset     (align-up (+ text-offset text-size) 8))
          (rela-size       (length rela-buf))
-         (symtab-offset   (+ rela-offset rela-size))
+         (symtab-offset   (align-up (+ rela-offset rela-size) 8))
          (symtab-size     (length sym-buf))
          (strtab-offset   (+ symtab-offset symtab-size))
          (strtab-size     (length strtab-bytes))
          (shstrtab-offset (+ strtab-offset strtab-size))
          (shstrtab-size   (length shstrtab-bytes))
          ;; Section headers start after all section data
-         (shoff           (+ shstrtab-offset shstrtab-size))
+         (shoff           (align-up (+ shstrtab-offset shstrtab-size) 8))
          ;; Output buffer
          (out (elf-make-buffer)))
 
@@ -309,8 +321,8 @@
     (elf-buf-pad out 8)                  ; EI_ABIVERSION + padding
     ;; e_type(2)
     (elf-buf-u16le out +elf-type-rel+)
-    ;; e_machine(2)
-    (elf-buf-u16le out +elf-machine-x86-64+)
+     ;; e_machine(2)
+     (elf-buf-u16le out (elf64-machine builder))
     ;; e_version(4)
     (elf-buf-u32le out +elf-version-cur+)
     ;; e_entry(8): 0 for .o
@@ -334,12 +346,18 @@
     ;; e_shstrndx(2)
     (elf-buf-u16le out shstrtab-idx)
 
-    ;; ---- Section Data ----
-    (elf-buf-bytes out text-bytes)
-    (elf-buf-bytes out rela-buf)
-    (elf-buf-bytes out sym-buf)
-    (elf-buf-bytes out strtab-bytes)
-    (elf-buf-bytes out shstrtab-bytes)
+     ;; ---- Section Data ----
+     (elf-buf-pad out (- text-offset (length out)))
+     (elf-buf-bytes out text-bytes)
+     (elf-buf-pad out (- rela-offset (length out)))
+     (elf-buf-bytes out rela-buf)
+     (elf-buf-pad out (- symtab-offset (length out)))
+     (elf-buf-bytes out sym-buf)
+     (elf-buf-pad out (- strtab-offset (length out)))
+     (elf-buf-bytes out strtab-bytes)
+     (elf-buf-pad out (- shstrtab-offset (length out)))
+     (elf-buf-bytes out shstrtab-bytes)
+     (elf-buf-pad out (- shoff (length out)))
 
     ;; ---- Section Headers ----
     ;; SHN 0: NULL
@@ -349,30 +367,35 @@
                       (logior +shf-alloc+ +shf-execinstr+)
                       text-offset text-size
                       0 0 16 0)
-    ;; SHN 2: .rela.text  (link=symtab-idx=3, info=text-idx=1)
-    ;; sh_flags must be 0 for relocation sections in relocatable .o files
-    ;; (SHF_ALLOC would incorrectly mark it as occupying memory at runtime)
-    (elf64-write-shdr out sh-rela-off +sht-rela+
-                      0
-                      rela-offset rela-size
-                      3 1  ; link=.symtab idx, info=.text idx
-                      8 +elf64-rela-size+)
-    ;; SHN 3: .symtab  (link=strtab-idx=4, info=first-global-idx)
-    (elf64-write-shdr out sh-symtab-off +sht-symtab+
-                      0
-                      symtab-offset symtab-size
-                      4 sym-local-count  ; link=.strtab, info=first-global
-                      8 +elf64-sym-size+)
-    ;; SHN 4: .strtab
-    (elf64-write-shdr out sh-strtab-off +sht-strtab+
-                      0
-                      strtab-offset strtab-size
-                      0 0 1 0)
-    ;; SHN 5: .shstrtab
-    (elf64-write-shdr out sh-shstrtab-off +sht-strtab+
-                      0
-                      shstrtab-offset shstrtab-size
-                      0 0 1 0)
+     ;; SHN 2: .bss (NOBITS; no file payload)
+     (elf64-write-shdr out sh-bss-off +sht-nobits+
+                       (logior +shf-alloc+ +shf-write+)
+                       0 bss-size
+                       0 0 8 0)
+     ;; SHN 3: .rela.text  (link=symtab-idx=4, info=text-idx=1)
+     ;; sh_flags must be 0 for relocation sections in relocatable .o files
+     ;; (SHF_ALLOC would incorrectly mark it as occupying memory at runtime)
+     (elf64-write-shdr out sh-rela-off +sht-rela+
+                       0
+                       rela-offset rela-size
+                       4 1  ; link=.symtab idx, info=.text idx
+                       8 +elf64-rela-size+)
+     ;; SHN 4: .symtab  (link=strtab-idx=5, info=first-global-idx)
+     (elf64-write-shdr out sh-symtab-off +sht-symtab+
+                       0
+                       symtab-offset symtab-size
+                       5 sym-local-count  ; link=.strtab, info=first-global
+                       8 +elf64-sym-size+)
+     ;; SHN 5: .strtab
+     (elf64-write-shdr out sh-strtab-off +sht-strtab+
+                       0
+                       strtab-offset strtab-size
+                       0 0 1 0)
+     ;; SHN 6: .shstrtab
+     (elf64-write-shdr out sh-shstrtab-off +sht-strtab+
+                       0
+                       shstrtab-offset shstrtab-size
+                       0 0 1 0)
 
     (elf-buf-to-array out)))
 
@@ -389,14 +412,19 @@
     (write-sequence bytes out))
   filename)
 
-(defun compile-to-elf64 (code-bytes reloc-entries &key (output-file nil))
+(defun compile-to-elf64 (code-bytes reloc-entries &key (output-file nil) (arch :x86-64) (bss-size 0))
   "Create an ELF64 relocatable object from CODE-BYTES and RELOC-ENTRIES.
    RELOC-ENTRIES is a list of (byte-offset . symbol-name) pairs from the
    x86-64 code generator.
    Returns the byte array; also writes to OUTPUT-FILE if provided."
-  (let ((builder (make-elf64-object)))
+  (let ((builder (make-elf64-object :machine (ecase arch
+                                               (:x86-64 +elf-machine-x86-64+)
+                                               (:arm64 +elf-machine-aarch64+)
+                                               (:aarch64 +elf-machine-aarch64+)))))
     ;; Add code
     (elf64-add-text-bytes builder code-bytes)
+    (when (plusp bss-size)
+      (elf64-add-bss builder bss-size))
     ;; Add relocations and collect unique symbols
     (let ((seen-syms (make-hash-table :test #'equal)))
       (dolist (reloc reloc-entries)

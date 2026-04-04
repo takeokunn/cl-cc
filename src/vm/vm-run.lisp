@@ -99,7 +99,7 @@ CL condition objects use typep."
               (maphash (lambda (k v) (setf (gethash k (vm-state-registers state)) v))
                        saved-regs)
               (vm-reg-set state result-reg error-value)
-              (values (gethash handler-label labels) nil nil)))
+              (values (vm-label-table-lookup labels handler-label) nil nil)))
           (error "Unhandled error in VM: ~S" error-value)))))
 
 ;;; ── Catch/Throw VM Instructions ────────────────────────────────────────
@@ -159,19 +159,22 @@ CL condition objects use typep."
               (clrhash (vm-state-registers state))
               (maphash (lambda (k v) (setf (gethash k (vm-state-registers state)) v))
                        saved-regs)
-              (vm-reg-set state result-reg throw-value)
-              (values (gethash handler-label labels) nil nil)))
+               (vm-reg-set state result-reg throw-value)
+               (values (vm-label-table-lookup labels handler-label) nil nil)))
           (error "No catch tag ~S is active" tag-value)))))
 
 ;;; ── Label table and CLOS-based execution loop ────────────────────────────
 
 (defun build-label-table (instructions)
-  "Build a hash-table mapping label-name → pc for fast jump resolution."
-  (let ((labels (make-hash-table :test #'equal)))
+  "Build an integer-keyed hash-table mapping label-name buckets → pc.
+
+The outer hash table uses EQL on integer hash keys, while collisions are kept
+in per-key buckets keyed by the original label object."
+  (let ((labels (make-hash-table :test #'eql)))
     (loop for inst in instructions
           for pc from 0
           do (when (typep inst 'vm-label)
-               (setf (gethash (vm-name inst) labels) pc)))
+               (vm-label-table-store labels (vm-name inst) pc)))
     labels))
 
 (defun run-program-slice (instructions labels start-pc state)

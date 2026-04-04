@@ -131,11 +131,17 @@
 
 (deftest wasm-funcall-dispatch
   "funcall via closure: emits call_indirect with $main_func_t type and global.set $cl_arg0 for arg-passing."
-  (let ((wat (%wat-for "(let ((f (lambda (x) (* x 2)))) (funcall f 5))")))
+  (let ((wat (%wat-for "(defparameter *f* (lambda (x) (* x 2))) (funcall *f* 5)")))
     (assert-true wat)
     (assert-output-contains wat "call_indirect")
     (assert-output-contains wat "$main_func_t")
     (assert-output-contains wat "(global.set $cl_arg0")))
+
+(deftest wasm-move-uses-local-tee
+  "vm-move WAT emission uses local.tee instead of local.set/local.get pair."
+  (let ((wat (%wat-for "(let ((x 1)) x)")))
+    (assert-true wat)
+    (assert-output-contains wat "local.tee")))
 
 (deftest wasm-elem-segment-present
   "Test that the WAT module includes an elem segment to populate the funcref table."
@@ -161,3 +167,18 @@
   (let ((wat (%wat-for "(let ((x 42)) (print x))")))
     (assert-true wat)
     (assert-output-contains wat "$host_print_val")))
+
+(deftest wasm-binary-write-f64-basic-patterns
+  "Binary f64 encoding is stable for representative values without implementation-specific APIs."
+  (let ((buf (cl-cc/binary::make-wasm-buffer)))
+    (cl-cc/binary::wasm-buf-write-f64 buf 1.0d0)
+    (assert-equal '(0 0 0 0 0 0 #xf0 #x3f) (coerce buf 'list)))
+  (let ((buf (cl-cc/binary::make-wasm-buffer)))
+    (cl-cc/binary::wasm-buf-write-f64 buf -2.5d0)
+    (assert-equal '(0 0 0 0 0 0 #x04 #xc0) (coerce buf 'list))))
+
+(deftest wasm-binary-write-f64-negative-zero
+  "Binary f64 encoding preserves the sign bit of -0.0."
+  (let ((buf (cl-cc/binary::make-wasm-buffer)))
+    (cl-cc/binary::wasm-buf-write-f64 buf -0.0d0)
+    (assert-equal '(0 0 0 0 0 0 0 #x80) (coerce buf 'list))))

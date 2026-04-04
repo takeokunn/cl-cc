@@ -37,6 +37,8 @@
   "64-bit segment load command.")
 (defconstant +lc-symtab+ #x03
   "Symbol table load command.")
+(defconstant +lc-dysymtab+ #x0B
+  "Dynamic symbol table load command.")
 (defconstant +lc-main+ #x80000028
   "Main entry point load command (LC_MAIN | LC_REQ_DYLD).")
 
@@ -80,6 +82,8 @@
   (initprot 5 :type (unsigned-byte 32))  ; rx
   (nsects 0 :type (unsigned-byte 32))
   (flags 0 :type (unsigned-byte 32))
+  (payload (make-array 0 :element-type '(unsigned-byte 8))
+           :type (simple-array (unsigned-byte 8) (*)))
   (sections nil :type list))
 
 (defstruct section
@@ -105,6 +109,29 @@
   (nsyms 0 :type (unsigned-byte 32))
   (stroff 0 :type (unsigned-byte 32))
   (strsize 0 :type (unsigned-byte 32)))
+
+(defstruct dysymtab-command
+  "Dynamic symbol table load command. Minimal zero-filled serialization."
+  (cmd +lc-dysymtab+ :type (unsigned-byte 32))
+  (cmdsize 80 :type (unsigned-byte 32))
+  (ilocalsym 0 :type (unsigned-byte 32))
+  (nlocalsym 0 :type (unsigned-byte 32))
+  (iextdefsym 0 :type (unsigned-byte 32))
+  (nextdefsym 0 :type (unsigned-byte 32))
+  (iundefsym 0 :type (unsigned-byte 32))
+  (nundefsym 0 :type (unsigned-byte 32))
+  (tocoff 0 :type (unsigned-byte 32))
+  (ntoc 0 :type (unsigned-byte 32))
+  (modtaboff 0 :type (unsigned-byte 32))
+  (nmodtab 0 :type (unsigned-byte 32))
+  (extrefsymoff 0 :type (unsigned-byte 32))
+  (nextrefsyms 0 :type (unsigned-byte 32))
+  (indirectsymoff 0 :type (unsigned-byte 32))
+  (nindirectsyms 0 :type (unsigned-byte 32))
+  (extreloff 0 :type (unsigned-byte 32))
+  (nextrel 0 :type (unsigned-byte 32))
+  (locreloff 0 :type (unsigned-byte 32))
+  (nlocrel 0 :type (unsigned-byte 32)))
 
 (defstruct entry-point-command
   "LC_MAIN entry point command."
@@ -277,6 +304,32 @@
   (serialize-uint32-le (symtab-command-stroff symtab) buffer)
   (serialize-uint32-le (symtab-command-strsize symtab) buffer))
 
+(defun serialize-dysymtab-command (dysymtab buffer)
+  "Serialize DYSYMTAB-COMMAND to BUFFER."
+  (declare (type dysymtab-command dysymtab)
+           (type byte-buffer buffer))
+  (dolist (field (list (dysymtab-command-cmd dysymtab)
+                       (dysymtab-command-cmdsize dysymtab)
+                       (dysymtab-command-ilocalsym dysymtab)
+                       (dysymtab-command-nlocalsym dysymtab)
+                       (dysymtab-command-iextdefsym dysymtab)
+                       (dysymtab-command-nextdefsym dysymtab)
+                       (dysymtab-command-iundefsym dysymtab)
+                       (dysymtab-command-nundefsym dysymtab)
+                       (dysymtab-command-tocoff dysymtab)
+                       (dysymtab-command-ntoc dysymtab)
+                       (dysymtab-command-modtaboff dysymtab)
+                       (dysymtab-command-nmodtab dysymtab)
+                       (dysymtab-command-extrefsymoff dysymtab)
+                       (dysymtab-command-nextrefsyms dysymtab)
+                       (dysymtab-command-indirectsymoff dysymtab)
+                       (dysymtab-command-nindirectsyms dysymtab)
+                       (dysymtab-command-extreloff dysymtab)
+                       (dysymtab-command-nextrel dysymtab)
+                       (dysymtab-command-locreloff dysymtab)
+                       (dysymtab-command-nlocrel dysymtab)))
+    (serialize-uint32-le field buffer)))
+
 (defun serialize-nlist (nlist buffer)
   "Serialize NLIST to BUFFER."
   (declare (type nlist nlist)
@@ -342,11 +395,26 @@ BASE-ADDR is the virtual memory address for the segment."
                         :segname "__TEXT"
                         :vmaddr base-addr
                         :vmsize (align-up code-size #x1000)
+                        :payload code-bytes
                         :nsects 1
                         :cmdsize (+ 72 (* 80 1))  ; segment header + 1 section
                         :sections (list text-section))))
     (push text-segment (mach-o-builder-segments builder))
     builder))
+
+(defun %make-pagezero-segment ()
+  "Create the __PAGEZERO segment required for Mach-O executables."
+  (make-segment-command
+   :segname "__PAGEZERO"
+   :vmaddr 0
+   :vmsize #x100000000
+   :fileoff 0
+   :filesize 0
+   :maxprot 0
+   :initprot 0
+   :nsects 0
+   :cmdsize 72
+   :sections nil))
 
 (defun add-data-segment (builder data-bytes &key (base-addr #x100001000))
   "Add __DATA segment to BUILDER.
@@ -361,15 +429,16 @@ BASE-ADDR is the virtual memory address for the segment."
                         :addr base-addr
                         :size data-size
                         :align 4))
-         (data-segment (make-segment-command
-                        :segname "__DATA"
-                        :vmaddr base-addr
-                        :vmsize (align-up data-size #x1000)
-                        :nsects 1
-                        :maxprot 7    ; rwx
-                        :initprot 6   ; rw
-                        :cmdsize (+ 72 (* 80 1))
-                        :sections (list data-section))))
+          (data-segment (make-segment-command
+                         :segname "__DATA"
+                         :vmaddr base-addr
+                         :vmsize (align-up data-size #x1000)
+                         :payload data-bytes
+                         :nsects 1
+                         :maxprot 6    ; rw-
+                         :initprot 6   ; rw
+                         :cmdsize (+ 72 (* 80 1))
+                         :sections (list data-section))))
     (push data-segment (mach-o-builder-segments builder))
     builder))
 
@@ -410,31 +479,58 @@ Returns a simple-array of (unsigned-byte 8)."
            (type (simple-array (unsigned-byte 8) (*)) code-bytes))
   ;; Create output buffer
   (let* ((buffer (make-byte-buffer 65536))
-         ;; Calculate sizes
-         (header-size 32)
-         (segments (nreverse (mach-o-builder-segments builder)))
-         ;; Segment command size: 72 bytes header + 80 bytes per section
-         (seg-cmd-sizes (loop for seg in segments
-                              sum (+ 72 (* 80 (segment-command-nsects seg)))))
-         (main-cmd-size 24)
-         (cmds-size (+ seg-cmd-sizes main-cmd-size))
-         ;; Align code to page boundary
-         (code-offset (align-up (+ header-size cmds-size) 4096)))
+          ;; Calculate sizes
+          (header-size 32)
+          (segments (cons (%make-pagezero-segment)
+                          (nreverse (mach-o-builder-segments builder))))
+          (symbols (nreverse (mach-o-builder-symbol-table builder)))
+          (string-table (subseq (mach-o-builder-string-table builder)
+                                0
+                                (fill-pointer (mach-o-builder-string-table builder))))
+          (has-symbols (plusp (length symbols)))
+          ;; Segment command size: 72 bytes header + 80 bytes per section
+          (seg-cmd-sizes (loop for seg in segments
+                               sum (+ 72 (* 80 (segment-command-nsects seg)))))
+          (main-cmd-size 24)
+          (symtab-cmd-size (if has-symbols 24 0))
+          (dysymtab-cmd-size (if has-symbols 80 0))
+          (cmds-size (+ seg-cmd-sizes main-cmd-size symtab-cmd-size dysymtab-cmd-size))
+          ;; Align code to page boundary
+          (code-offset (align-up (+ header-size cmds-size) 4096))
+          (payload-end (loop with off = code-offset
+                             for seg in segments
+                             do (incf off (align-up (length (if (and (string= (segment-command-segname seg) "__TEXT")
+                                                                     (zerop (length (segment-command-payload seg))))
+                                                                code-bytes
+                                                                (segment-command-payload seg)))
+                                                      #x1000))
+                             finally (return off)))
+          (symoff (if has-symbols payload-end 0))
+          (nsyms (length symbols))
+          (stroff (if has-symbols (+ symoff (* nsyms 18)) 0))
+          (strsize (length string-table)))
 
     ;; Update header
-    (let ((header (mach-o-builder-header builder)))
-      (setf (mach-header-ncmds header) (1+ (length segments))
-            (mach-header-sizeofcmds header) cmds-size
-            (mach-header-flags header) (logior +mh-noundefs+ +mh-pie+)))
+      (let ((header (mach-o-builder-header builder)))
+       (setf (mach-header-ncmds header) (+ 1 (length segments) (if has-symbols 2 0))
+             (mach-header-sizeofcmds header) cmds-size
+             (mach-header-flags header) (logior +mh-noundefs+ +mh-pie+)))
 
     ;; Update segment/section file offsets
     (let ((file-offset code-offset))
       (dolist (seg segments)
+        (let ((payload (if (and (string= (segment-command-segname seg) "__TEXT")
+                                (zerop (length (segment-command-payload seg))))
+                           code-bytes
+                           (segment-command-payload seg))))
         (setf (segment-command-fileoff seg) file-offset
-              (segment-command-filesize seg) (length code-bytes))
+              (segment-command-filesize seg)
+              (if (string= (segment-command-segname seg) "__PAGEZERO")
+                  0
+                  (length payload)))
         (dolist (sect (segment-command-sections seg))
           (setf (section-offset sect) file-offset))
-        (incf file-offset (align-up (segment-command-filesize seg) #x1000))))
+        (incf file-offset (align-up (segment-command-filesize seg) #x1000)))))
 
     ;; Update entry point
     (setf (entry-point-command-entryoff (mach-o-builder-entry-point builder))
@@ -449,6 +545,15 @@ Returns a simple-array of (unsigned-byte 8)."
       (dolist (sect (segment-command-sections seg))
         (serialize-section sect buffer)))
 
+    ;; Write LC_SYMTAB / LC_DYSYMTAB load commands when symbols exist.
+    (when has-symbols
+      (serialize-symtab-command
+       (make-symtab-command :symoff symoff :nsyms nsyms :stroff stroff :strsize strsize)
+       buffer)
+      (serialize-dysymtab-command
+       (make-dysymtab-command :iextdefsym 0 :nextdefsym 0 :iundefsym 0 :nundefsym nsyms)
+       buffer))
+
     ;; Write LC_MAIN
     (serialize-entry-point (mach-o-builder-entry-point builder) buffer)
 
@@ -457,8 +562,28 @@ Returns a simple-array of (unsigned-byte 8)."
       (loop repeat (- code-offset current-pos)
             do (buffer-write-byte buffer 0)))
 
-    ;; Write code
-    (serialize-bytes code-bytes buffer)
+    ;; Write segment payloads
+    (dolist (seg segments)
+      (unless (string= (segment-command-segname seg) "__PAGEZERO")
+        (let* ((payload (if (and (string= (segment-command-segname seg) "__TEXT")
+                                 (zerop (length (segment-command-payload seg))))
+                            code-bytes
+                            (segment-command-payload seg)))
+               (target-off (segment-command-fileoff seg))
+               (current-pos (length (byte-buffer-data buffer))))
+          (when (> target-off current-pos)
+            (loop repeat (- target-off current-pos)
+                  do (buffer-write-byte buffer 0)))
+          (serialize-bytes payload buffer)
+          (let ((aligned-end (align-up (+ target-off (length payload)) #x1000)))
+            (loop repeat (- aligned-end (length (byte-buffer-data buffer)))
+                  do (buffer-write-byte buffer 0))))))
+
+    ;; Write symbol table and string table payloads after segment data.
+    (when has-symbols
+      (dolist (sym symbols)
+        (serialize-nlist sym buffer))
+      (serialize-bytes (coerce string-table '(simple-array (unsigned-byte 8) (*))) buffer))
 
     ;; Return the result as a simple-array
     (buffer-get-bytes buffer)))

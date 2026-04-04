@@ -13,6 +13,9 @@
   (vreg nil)
   (start nil)
   (end nil)
+  (use-positions nil)
+  (parameter-index nil)
+  (return-value-p nil)
   (phys-reg nil)
   (spill-slot nil))
 
@@ -88,8 +91,8 @@
 (defmethod instruction-uses ((inst vm-call))
   (cons (vm-func-reg inst) (copy-list (vm-args inst))))
 
-;; Tail-call: defs dst, uses func + args (same as vm-call)
-(defmethod instruction-defs ((inst vm-tail-call)) (list (vm-dst inst)))
+;; Tail-call: does not define a live destination because control never returns.
+(defmethod instruction-defs ((inst vm-tail-call)) nil)
 (defmethod instruction-uses ((inst vm-tail-call))
   (cons (vm-func-reg inst) (copy-list (vm-args inst))))
 
@@ -263,67 +266,91 @@
   (let ((intervals (make-hash-table :test #'eq))
         (label-map (build-label-map instructions))
         (inst-vec (coerce instructions 'vector))
-        (n (length instructions)))
+        (parameter-counter 0))
     (declare (ignore inst-vec))
     ;; Forward pass to collect initial def/use info
     (loop for inst in instructions
           for i from 0
           do (dolist (vreg (instruction-defs inst))
                (when vreg
-                 (unless (gethash vreg intervals)
-                   (setf (gethash vreg intervals)
-                         (make-live-interval
-                                        :vreg vreg :start i :end i)))))
-             (dolist (vreg (instruction-uses inst))
-               (when vreg
-                 (let ((interval (gethash vreg intervals)))
-                   (if interval
-                       (setf (interval-end interval) (max (interval-end interval) i))
-                       (setf (gethash vreg intervals)
-                             (make-live-interval
-                                            :vreg vreg :start 0 :end i)))))))
+                  (unless (gethash vreg intervals)
+                    (setf (gethash vreg intervals)
+                          (make-live-interval
+                                         :vreg vreg :start i :end i)))))
+              (dolist (vreg (instruction-uses inst))
+                (when vreg
+                  (let ((interval (gethash vreg intervals)))
+                    (if interval
+                        (progn
+                          (setf (interval-end interval) (max (interval-end interval) i))
+                          (push i (interval-use-positions interval))
+                          (when (typep inst 'vm-ret)
+                            (setf (interval-return-value-p interval) t)))
+                        (setf (gethash vreg intervals)
+                              (make-live-interval
+                                             :vreg vreg :start 0 :end i
+                                             :use-positions (list i)
+                                             :parameter-index (prog1 parameter-counter
+                                                                (incf parameter-counter))
+                                             :return-value-p (typep inst 'vm-ret))))))))
     ;; Extend intervals across jumps (conservative)
     (loop for inst in instructions
           for i from 0
           when (and (typep inst 'vm-jump)
                     (gethash (vm-label-name inst) label-map))
-          do (let ((target (gethash (vm-label-name inst) label-map)))
-               (when (< target i)
-                 ;; Backward jump — extend all live intervals that overlap
-                 (maphash (lambda (vreg interval)
-                            (declare (ignore vreg))
-                            (when (and (<= (interval-start interval) i)
-                                       (>= (interval-end interval) target))
-                              (setf (interval-start interval)
-                                    (min (interval-start interval) target))
-                              (setf (interval-end interval)
-                                    (max (interval-end interval) i))))
-                          intervals)))
-          when (and (typep inst 'vm-jump-zero)
-                    (gethash (vm-label-name inst) label-map))
-          do (let ((target (gethash (vm-label-name inst) label-map)))
-               (when (< target i)
-                 (maphash (lambda (vreg interval)
-                            (declare (ignore vreg))
-                            (when (and (<= (interval-start interval) i)
-                                       (>= (interval-end interval) target))
-                              (setf (interval-start interval)
-                                    (min (interval-start interval) target))
-                              (setf (interval-end interval)
-                                    (max (interval-end interval) i))))
-                          intervals))))
+           do (let ((target (gethash (vm-label-name inst) label-map)))
+                (maphash (lambda (vreg interval)
+                           (declare (ignore vreg))
+                           (when (and (<= (interval-start interval) i)
+                                      (>= (interval-end interval) target))
+                             (setf (interval-start interval)
+                                   (min (interval-start interval) target))
+                             (setf (interval-end interval)
+                                   (max (interval-end interval) i))))
+                         intervals))
+           when (and (typep inst 'vm-jump-zero)
+                     (gethash (vm-label-name inst) label-map))
+           do (let ((target (gethash (vm-label-name inst) label-map)))
+                (maphash (lambda (vreg interval)
+                           (declare (ignore vreg))
+                           (when (and (<= (interval-start interval) i)
+                                      (>= (interval-end interval) target))
+                             (setf (interval-start interval)
+                                   (min (interval-start interval) target))
+                             (setf (interval-end interval)
+                                   (max (interval-end interval) i))))
+                         intervals)))
     ;; Extend intervals across call sites for caller-saved awareness
     ;; (handled at allocation time instead)
 
     ;; Sort by start point
     (let ((result nil))
       (maphash (lambda (vreg interval)
-                 (declare (ignore vreg))
-                 (push interval result))
-               intervals)
+                  (declare (ignore vreg))
+                  (setf (interval-use-positions interval)
+                        (sort (copy-list (interval-use-positions interval)) #'<))
+                  (push interval result))
+                intervals)
       (sort result #'< :key #'interval-start))))
 
 ;;; Linear Scan Allocation
+
+(defun %interval-next-use-after (interval position)
+  "Return the next use position of INTERVAL after POSITION, or NIL." 
+  (find-if (lambda (use-pos) (> use-pos position))
+           (interval-use-positions interval)))
+
+(defun %preferred-register-for-interval (interval cc free-regs)
+  "Return a preferred free physical register for INTERVAL, or NIL."
+  (or (let ((preferred (and (interval-return-value-p interval)
+                            (cc-return-register cc))))
+        (and preferred (member preferred free-regs) preferred))
+      (let* ((param-index (interval-parameter-index interval))
+             (arg-regs (cc-arg-registers cc))
+             (preferred (and (integerp param-index)
+                             (< param-index (length arg-regs))
+                             (nth param-index arg-regs))))
+        (and preferred (member preferred free-regs) preferred))))
 
 (defun linear-scan-allocate (intervals cc)
   "Perform linear scan register allocation.
@@ -347,16 +374,26 @@
                        active))
       (if free-regs
           ;; Allocate a physical register
-          (let ((phys (pop free-regs)))
+          (let* ((preferred (%preferred-register-for-interval interval cc free-regs))
+                 (phys (cond (preferred
+                              (setf free-regs (remove preferred free-regs :count 1))
+                              preferred)
+                             (t (pop free-regs)))))
             (setf (interval-phys-reg interval) phys)
             (setf (gethash (interval-vreg interval) assignment) phys)
             (setf active (merge 'list (list interval) active #'< :key #'interval-end)))
-          ;; Spill: pick the interval with the longest remaining range
-          (let ((spill-candidate (if (and active
-                                          (> (interval-end (car (last active)))
-                                             (interval-end interval)))
-                                     (car (last active))
-                                     interval)))
+          ;; Spill: pick the interval whose next use is furthest away.
+          (let ((spill-candidate
+                   (reduce (lambda (best candidate)
+                             (let ((best-next (%interval-next-use-after best (interval-start interval)))
+                                   (cand-next (%interval-next-use-after candidate (interval-start interval))))
+                               (cond ((null best) candidate)
+                                     ((null cand-next) candidate)
+                                     ((null best-next) best)
+                                     ((> cand-next best-next) candidate)
+                                     (t best))))
+                           active
+                           :initial-value interval)))
             (if (eq spill-candidate interval)
                 ;; Spill the current interval
                 (progn
@@ -389,30 +426,76 @@
   (dst-reg nil :reader vm-spill-dst)
   (slot nil :reader vm-spill-slot))
 
+(defun %regalloc-map-tree (fn tree)
+  (if (consp tree)
+      (cons (%regalloc-map-tree fn (car tree))
+            (%regalloc-map-tree fn (cdr tree)))
+      (funcall fn tree)))
+
+(defun %regalloc-rewrite-inst (inst reg-map)
+  "Return INST with register keywords substituted per REG-MAP."
+  (flet ((sub (x)
+           (if (and (keywordp x) (gethash x reg-map))
+               (gethash x reg-map)
+               x)))
+    (handler-case
+        (sexp->instruction (%regalloc-map-tree #'sub (instruction->sexp inst)))
+      (error () inst))))
+
+(defun %regalloc-scratch-candidates (cc used-phys)
+  (remove-if (lambda (reg) (or (null reg) (member reg used-phys :test #'eq)))
+             (remove-duplicates
+              (append (list (cc-scratch-register cc)
+                            (cc-return-register cc))
+                      (cc-caller-saved cc)
+                      (cc-gpr-pool cc))
+              :test #'eq)))
+
 (defun insert-spill-code (instructions assignment spill-map cc)
   "Insert spill loads/stores around instructions that use spilled registers.
    Returns a new instruction list with spill code inserted."
-  (let ((scratch (cc-scratch-register cc))
-        (result nil))
+  (let ((result nil))
     (dolist (inst instructions)
-      ;; Load spilled uses before the instruction
-      (dolist (vreg (instruction-uses inst))
-        (when (and vreg (gethash vreg spill-map))
-          (push (make-vm-spill-load :dst-reg scratch
-                               :slot (gethash vreg spill-map))
-                result)
-          ;; Temporarily map this vreg to scratch for the instruction
-          (setf (gethash vreg assignment) scratch)))
-      ;; The instruction itself
-      (push inst result)
-      ;; Store spilled defs after the instruction
-      (dolist (vreg (instruction-defs inst))
-        (when (and vreg (gethash vreg spill-map))
-          ;; Map def to scratch, then store
-          (setf (gethash vreg assignment) scratch)
-          (push (make-vm-spill-store :src-reg scratch
-                               :slot (gethash vreg spill-map))
-                result))))
+      (let* ((used-phys (remove nil
+                                (mapcar (lambda (vreg)
+                                          (and vreg
+                                               (not (gethash vreg spill-map))
+                                               (gethash vreg assignment)))
+                                        (append (instruction-uses inst)
+                                                (instruction-defs inst)))))
+             (available (%regalloc-scratch-candidates cc used-phys))
+             (reg-map (make-hash-table :test #'eq)))
+        (labels ((alloc-scratch ()
+                   (or (pop available)
+                       (error "insert-spill-code: no scratch register available for ~S" inst)))
+                 (ensure-scratch (vreg)
+                   (or (gethash vreg reg-map)
+                       (setf (gethash vreg reg-map) (alloc-scratch)))))
+          ;; Load spilled uses before the instruction.
+          (dolist (vreg (instruction-uses inst))
+            (when (and vreg (gethash vreg spill-map))
+              (let ((scratch (ensure-scratch vreg)))
+                (push (make-vm-spill-load :dst-reg scratch
+                                          :slot (gethash vreg spill-map))
+                      result))))
+          ;; Rewrite the instruction itself to use per-vreg scratch registers.
+          (let ((rewritten (if (zerop (hash-table-count reg-map))
+                               inst
+                               (%regalloc-rewrite-inst inst reg-map))))
+            ;; Ensure spilled defs get distinct scratch registers when needed.
+            (dolist (vreg (instruction-defs inst))
+              (when (and vreg (gethash vreg spill-map))
+                (ensure-scratch vreg)))
+            (setf rewritten (if (zerop (hash-table-count reg-map))
+                                inst
+                                (%regalloc-rewrite-inst inst reg-map)))
+            (push rewritten result))
+          ;; Store spilled defs after the instruction.
+          (dolist (vreg (instruction-defs inst))
+            (when (and vreg (gethash vreg spill-map))
+              (push (make-vm-spill-store :src-reg (gethash vreg reg-map)
+                                         :slot (gethash vreg spill-map))
+                    result))))))
     (nreverse result)))
 
 ;;; Public API

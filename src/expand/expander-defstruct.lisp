@@ -211,7 +211,8 @@ Supported options:
                                      :initform (second slot)
                                      acc-key (accessor-name (first slot)))))
                            own-slots))
-                 (superclasses (when parent-name (list parent-name)))
+                 ;; ANSI CL 8.1: structs inherit from structure-object unless :include
+                 (superclasses (if parent-name (list parent-name) '(structure-object)))
                  (defclass-form `(defclass ,name ,superclasses ,defclass-slots))
                  (ctor-form (when ctor-name
                               (%defstruct-make-constructor ctor-name name boa-args all-slots)))

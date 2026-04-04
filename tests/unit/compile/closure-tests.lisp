@@ -243,13 +243,40 @@
            :func 'car
            :args (list (cl-cc::make-ast-var :name 'p))))
     'p
-    :safe-consumers '("CAR"))))
+     :safe-consumers '("CAR"))))
+
+(deftest binding-escape-kinds-report-return
+  "The classifier reports :return when a binding flows out directly."
+  (assert-equal '(:return)
+                (cl-cc::binding-escape-kinds-in-body
+                 (list (cl-cc::make-ast-var :name 'p))
+                 'p)))
+
+(deftest binding-escape-kinds-report-external-call
+  "The classifier reports :external-call when a binding is passed to an unknown callee."
+  (assert-true
+   (member :external-call
+           (cl-cc::binding-escape-kinds-in-body
+            (list (cl-cc::make-ast-call
+                   :func 'list
+                   :args (list (cl-cc::make-ast-var :name 'p))))
+            'p))))
 
 (deftest binding-escapes-when-captured-by-inner-lambda
   "A binding escapes when captured by a nested lambda."
   (assert-true
    (cl-cc::binding-escapes-in-body-p
-    (list (cl-cc::make-ast-lambda
-           :params '()
-           :body (list (cl-cc::make-ast-var :name 'p))))
-    'p)))
+     (list (cl-cc::make-ast-lambda
+            :params '()
+            :body (list (cl-cc::make-ast-var :name 'p))))
+     'p)))
+
+(deftest binding-escape-kinds-report-capture
+  "The classifier reports :capture when a binding is captured by an inner lambda."
+  (assert-true
+   (member :capture
+           (cl-cc::binding-escape-kinds-in-body
+            (list (cl-cc::make-ast-lambda
+                   :params '()
+                   :body (list (cl-cc::make-ast-var :name 'p))))
+            'p))))

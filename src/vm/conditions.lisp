@@ -29,39 +29,41 @@ typically require intervention to continue execution."))
   (:documentation "Base class for VM warnings. These indicate potential issues
 but don't interrupt normal execution."))
 
-(define-condition vm-type-error (vm-error)
-  ((expected-type :initarg :expected-type :reader vm-expected-type
-                  :documentation "The type that was expected.")
-   (datum :initarg :datum :reader vm-datum
-          :documentation "The actual value that was received."))
+(define-condition vm-type-error (vm-error type-error)
+  ()
   (:documentation "Type mismatch error - raised when a value doesn't match
-the expected type.")
+the expected type.  Inherits from CL's TYPE-ERROR so user code can catch it
+via (handler-case ... (type-error (c) ...)).")
   (:report (lambda (condition stream)
              (format stream "VM Type Error: expected ~A, got ~S"
-                     (vm-expected-type condition)
-                     (vm-datum condition)))))
+                     (type-error-expected-type condition)
+                     (type-error-datum condition)))))
 
-(define-condition vm-unbound-variable (vm-error)
-  ((variable-name :initarg :variable-name :reader vm-variable-name
-                  :documentation "The name of the unbound variable."))
-  (:documentation "Error raised when accessing an undefined variable.")
+(define-condition vm-unbound-variable (vm-error unbound-variable)
+  ()
+  (:documentation "Error raised when accessing an undefined variable.
+Inherits from CL's UNBOUND-VARIABLE so user code can catch it via
+(handler-case ... (unbound-variable (c) ...)).")
   (:report (lambda (condition stream)
              (format stream "VM Unbound Variable: ~S"
-                     (vm-variable-name condition)))))
+                     (cell-error-name condition)))))
 
-(define-condition vm-undefined-function (vm-error)
-  ((function-name :initarg :function-name :reader vm-function-name
-                  :documentation "The name of the undefined function."))
-  (:documentation "Error raised when calling an undefined function.")
+(define-condition vm-undefined-function (vm-error undefined-function)
+  ()
+  (:documentation "Error raised when calling an undefined function.
+Inherits from CL's UNDEFINED-FUNCTION so user code can catch it via
+(handler-case ... (undefined-function (c) ...)).")
   (:report (lambda (condition stream)
              (format stream "VM Undefined Function: ~S"
-                     (vm-function-name condition)))))
+                     (cell-error-name condition)))))
 
 
-(define-condition vm-division-by-zero (vm-error)
+(define-condition vm-division-by-zero (vm-error division-by-zero)
   ((dividend :initarg :dividend :reader vm-dividend
-             :documentation "The value being divided."))
-  (:documentation "Error raised when attempting to divide by zero.")
+             :documentation "The value being divided (extra context beyond ANSI operands)."))
+  (:documentation "Error raised when attempting to divide by zero.
+Inherits from CL's DIVISION-BY-ZERO so user code can catch it via
+(handler-case ... (division-by-zero (c) ...)).")
   (:report (lambda (condition stream)
              (format stream "VM Division By Zero: attempted to divide ~S by zero"
                      (vm-dividend condition)))))
@@ -235,7 +237,7 @@ Returns (values handler-found-p handler-info) or signals error."
           ;; Store condition in result register for handler
           (vm-reg-set state result-reg condition)
           ;; Jump to handler
-          (values (gethash handler-label labels) nil nil))
+          (values (vm-label-table-lookup labels handler-label) nil nil))
         ;; No handler - continue execution
         (values (1+ pc) nil nil))))
 
@@ -247,7 +249,7 @@ Returns (values handler-found-p handler-info) or signals error."
                (handler-label (vm-handler-label handler))
                (result-reg (vm-handler-result-reg handler)))
           (vm-reg-set state result-reg condition)
-          (values (gethash handler-label labels) nil nil))
+          (values (vm-label-table-lookup labels handler-label) nil nil))
         ;; Error was already signaled by vm-signal-condition
         (values (1+ pc) nil nil))))
 
@@ -267,7 +269,7 @@ Returns (values handler-found-p handler-info) or signals error."
         (let* ((handler-info (vm-handler-handler-fn handler))
                (handler-label (getf handler-info :label))
                (result-reg (getf handler-info :result-reg))
-               (new-pc (gethash handler-label labels)))
+               (new-pc (vm-label-table-lookup labels handler-label)))
           (vm-reg-set state result-reg condition)
           (return-from execute-instruction
             (values new-pc nil nil))))
@@ -340,17 +342,16 @@ Returns (values handler-found-p handler-info) or signals error."
   "Construct a vm-unbound-variable condition."
   (make-condition 'vm-unbound-variable
                   :vm-state vm-state
-                  :variable-name variable-name))
+                  :name variable-name))
 
 (defun make-vm-undefined-function (vm-state function-name)
   "Construct a vm-undefined-function condition."
   (make-condition 'vm-undefined-function
                   :vm-state vm-state
-                  :function-name function-name))
+                  :name function-name))
 
 (defun make-vm-division-by-zero (vm-state dividend)
   "Construct a vm-division-by-zero condition."
   (make-condition 'vm-division-by-zero
                   :vm-state vm-state
                   :dividend dividend))
-

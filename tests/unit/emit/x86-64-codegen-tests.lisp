@@ -130,7 +130,7 @@
 
 (deftest x86-64-emitter-entries-count
   "*x86-64-emitter-entries* has 45 entries covering all supported instructions."
-  (assert-= 45 (length cl-cc::*x86-64-emitter-entries*)))
+  (assert-= 47 (length cl-cc::*x86-64-emitter-entries*)))
 
 (deftest x86-64-emitter-table-built-from-entries
   "*x86-64-emitter-table* contains an entry for each item in *x86-64-emitter-entries*."

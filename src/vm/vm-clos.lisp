@@ -284,14 +284,16 @@ Algorithm: L(C) = C + merge(L(C1), L(C2), ..., (C1, C2, ...))"
         (multiple-value-bind (value found-p) (gethash slot-name obj-ht)
           (if found-p
               (vm-reg-set state (vm-dst inst) value)
-              ;; FR-554: slot-missing protocol — try GF dispatch, fallback to error
+              ;; Slot key absent: distinguish unbound (was slot-makunbound'd) vs missing
               (let* ((class-ht (gethash :__class__ obj-ht))
                      (class-name (when (hash-table-p class-ht) (gethash :__name__ class-ht)))
-                     (sm-gf (gethash 'slot-missing (vm-global-vars state))))
-                (if (and sm-gf (vm-generic-function-p sm-gf))
-                    ;; Dispatch through slot-missing GF
-                    (error "The slot ~S is missing from object of class ~S (operation: SLOT-VALUE)"
-                           slot-name class-name)
+                     (all-slots  (when (hash-table-p class-ht) (gethash :__slots__ class-ht))))
+                (if (and all-slots (member slot-name all-slots :test #'eq))
+                    ;; FR-384: slot exists in class but is unbound in instance — signal unbound-slot
+                    (error (make-condition 'unbound-slot
+                                           :name slot-name
+                                           :instance obj-ht))
+                    ;; Slot not in class definition — slot-missing protocol (FR-554)
                     (error "The slot ~S is missing from the object~@[ of class ~S~]"
                            slot-name class-name))))
           (values (1+ pc) nil nil)))))

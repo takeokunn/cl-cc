@@ -49,9 +49,23 @@
                              (make-vm-halt :reg :r1)))
          (intervals (compute-live-intervals instructions)))
     (assert-= 2 (length intervals))
-    (let ((r0-int (find :r0 intervals :key #'interval-vreg))
-          (r1-int (find :r1 intervals :key #'interval-vreg)))
-      (assert-true (<= (interval-end r0-int) (interval-start r1-int))))))
+     (let ((r0-int (find :r0 intervals :key #'interval-vreg))
+           (r1-int (find :r1 intervals :key #'interval-vreg)))
+       (assert-true (<= (interval-end r0-int) (interval-start r1-int))))))
+
+(deftest regalloc-liveness-forward-branch
+  "Forward conditional branches extend intervals across the target gap."
+  (let* ((instructions (list (make-vm-const :dst :r0 :value 1)
+                             (make-vm-jump-zero :reg :r1 :label "L1")
+                             (make-vm-const :dst :r2 :value 2)
+                             (make-vm-label :name "L1")
+                             (make-vm-add :dst :r3 :lhs :r0 :rhs :r2)
+                             (make-vm-halt :reg :r3)))
+         (intervals (compute-live-intervals instructions))
+         (r0-int (find :r0 intervals :key #'interval-vreg)))
+    (assert-false (null r0-int))
+    (assert-= 0 (interval-start r0-int))
+    (assert-= 4 (interval-end r0-int))))
 
 ;;; Linear Scan Allocation Tests
 
@@ -92,8 +106,85 @@
   (assert-false (null *aarch64-calling-convention*))
   (assert-= 13 (length (cc-gpr-pool *x86-64-calling-convention*)))
   (assert-eq :rax (cc-return-register *x86-64-calling-convention*))
-  (assert-eq :r11 (cc-scratch-register *x86-64-calling-convention*))
-  (assert-eq :x0 (cc-return-register *aarch64-calling-convention*)))
+   (assert-eq :r11 (cc-scratch-register *x86-64-calling-convention*))
+   (assert-eq :x0 (cc-return-register *aarch64-calling-convention*)))
+
+(deftest regalloc-tail-call-has-no-def
+  "vm-tail-call does not reserve a destination register in regalloc."
+  (let ((inst (cl-cc:make-vm-tail-call :dst :r9 :func :r0 :args '(:r1 :r2))))
+    (assert-equal nil (instruction-defs inst))
+    (assert-equal '(:r0 :r1 :r2) (instruction-uses inst))))
+
+(deftest regalloc-prefers-return-register
+  "A value returned by vm-ret is preferentially allocated to the ABI return register."
+  (let* ((instructions (list (make-vm-const :dst :r0 :value 42)
+                             (make-vm-ret :reg :r0)))
+         (result (allocate-registers instructions *x86-64-calling-convention*)))
+    (assert-eq :rax (regalloc-lookup result :r0))))
+
+(deftest regalloc-prefers-argument-registers
+  "Live-in parameter-like virtual registers prefer ABI argument registers when available."
+  (let* ((instructions (list (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
+                             (make-vm-halt :reg :r2)))
+         (result (allocate-registers instructions *x86-64-calling-convention*)))
+    (assert-eq :rdi (regalloc-lookup result :r0))
+    (assert-eq :rsi (regalloc-lookup result :r1))))
+
+(deftest regalloc-biased-spill-selection
+  "When spilling is required, the allocator keeps the interval with the nearest next use."
+  (let* ((cc (cl-cc::make-calling-convention
+              :gpr-pool '(:rdi :rsi)
+              :caller-saved '(:rdi :rsi)
+              :callee-saved nil
+              :arg-registers '(:rdi :rsi)
+              :return-register :rax
+              :scratch-register :r11))
+         (instructions (list (make-vm-const :dst :r0 :value 1)
+                             (make-vm-const :dst :r1 :value 2)
+                             (make-vm-const :dst :r2 :value 3)
+                             (make-vm-move :dst :r3 :src :r0)
+                             (make-vm-move :dst :r4 :src :r2)
+                             (make-vm-const :dst :r5 :value 5)
+                             (make-vm-const :dst :r6 :value 6)
+                             (make-vm-move :dst :r7 :src :r1)
+                             (make-vm-halt :reg :r0)))
+         (result (allocate-registers instructions cc)))
+    (assert-false (null (regalloc-lookup result :r0)))
+    (assert-false (null (gethash :r1 (cl-cc::regalloc-spill-map result))))
+    (assert-false (null (gethash :r2 (cl-cc::regalloc-spill-map result))))))
+
+(deftest regalloc-spill-rewrite-uses-distinct-scratch-registers
+  "Two spilled source operands in one instruction are rewritten to distinct scratch registers."
+  (let* ((assignment (make-hash-table :test #'eq))
+         (spill-map (make-hash-table :test #'eq))
+         (inst (make-vm-add :dst :r3 :lhs :r1 :rhs :r2)))
+    (setf (gethash :r3 assignment) :rdi)
+    (setf (gethash :r1 spill-map) 1)
+    (setf (gethash :r2 spill-map) 2)
+    (let* ((out (cl-cc::insert-spill-code (list inst) assignment spill-map *x86-64-calling-convention*))
+           (loads (remove-if-not #'cl-cc::vm-spill-load-p out))
+           (rewritten (find-if #'cl-cc::vm-add-p out)))
+      (assert-equal 2 (length loads))
+      (assert-false (eq (cl-cc::vm-spill-dst (first loads)) (cl-cc::vm-spill-dst (second loads))))
+      (assert-false (eq (vm-lhs rewritten) (vm-rhs rewritten))))))
+
+(deftest regalloc-spill-rewrite-separates-src-and-dst-scratch
+  "A spilled source and spilled destination do not share the same scratch register."
+  (let* ((assignment (make-hash-table :test #'eq))
+         (spill-map (make-hash-table :test #'eq))
+         (inst (make-vm-move :dst :r2 :src :r1)))
+    (setf (gethash :r1 spill-map) 1)
+    (setf (gethash :r2 spill-map) 2)
+    (let* ((out (cl-cc::insert-spill-code (list inst) assignment spill-map *x86-64-calling-convention*))
+           (load (find-if #'cl-cc::vm-spill-load-p out))
+           (store (find-if #'cl-cc::vm-spill-store-p out))
+           (rewritten (find-if #'cl-cc::vm-move-p out)))
+      (assert-false (null load))
+      (assert-false (null store))
+      (assert-false (eq (cl-cc::vm-spill-dst load) (cl-cc::vm-spill-src store)))
+      (assert-eq (vm-src rewritten) (cl-cc::vm-spill-dst load))
+      (assert-eq (vm-dst rewritten) (cl-cc::vm-spill-src store)))))
+
 
 ;;; Integration Test: compile-expression through regalloc
 

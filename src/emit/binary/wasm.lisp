@@ -69,10 +69,42 @@
     (wasm-buf-write-uleb128 buf (length bytes))
     (wasm-buf-write-bytes buf bytes)))
 
+(defun portable-double-float-bits (value)
+  "Return VALUE as an IEEE754 double bit pattern using portable CL operations."
+  (let* ((x (float value 1.0d0))
+         (sign-bit (if (minusp (float-sign x 1.0d0)) 1 0)))
+    (cond
+      ((zerop x)
+       (ash sign-bit 63))
+      ((not (= x x))
+       ;; Quiet NaN with a minimal payload.
+       (logior (ash sign-bit 63)
+               (ash #x7ff 52)
+               #x0008000000000000))
+      ((and (= x (* x 2.0d0)) (not (zerop x)))
+       ;; Infinity.
+       (logior (ash sign-bit 63)
+               (ash #x7ff 52)))
+      (t
+       (multiple-value-bind (significand exponent sign) (integer-decode-float x)
+         (declare (ignore sign))
+         (let* ((abs-significand (abs significand))
+                (unbiased-exp (+ exponent 52))
+                (fraction
+                  (if (>= unbiased-exp -1022)
+                      (- abs-significand (ash 1 52))
+                      (ash abs-significand (+ exponent 1074))))
+                (exp-field
+                  (if (>= unbiased-exp -1022)
+                      (+ unbiased-exp 1023)
+                      0)))
+           (logior (ash sign-bit 63)
+                   (ash exp-field 52)
+                   (logand fraction #x000fffffffffffff))))))))
+
 (defun wasm-buf-write-f64 (buf value)
   "Write a 64-bit IEEE754 float VALUE into BUF (little-endian)."
-  (let* ((bits #+sbcl (sb-kernel:double-float-bits (float value 1.0d0))
-               #-sbcl (error "wasm-buf-write-f64: double-float-bits not available on this implementation"))
+  (let* ((bits (portable-double-float-bits value))
          (lo (logand bits #xffffffff))
          (hi (ash bits -32)))
     (loop for shift from 0 to 24 by 8

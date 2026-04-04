@@ -243,6 +243,33 @@
     (assert-true (codegen-find-inst ctx 'cl-cc::vm-ret))
     (assert-true (assoc 'p (cl-cc::ctx-env ctx)))))
 
+(deftest codegen-flet-noescape-function-uses-vm-func-ref
+  "Zero-capture flet bindings use vm-func-ref instead of vm-closure." 
+  (let ((ctx (make-codegen-ctx)))
+    (let ((reg (compile-ast
+                (make-ast-flet
+                 :bindings (list (list 'f '(x) (make-ast-var :name 'x)))
+                 :body (list (make-ast-call :func 'f
+                                            :args (list (make-ast-int :value 5)))))
+                ctx)))
+      (assert-true (keywordp reg))
+      (assert-true (codegen-find-inst ctx 'cl-cc::vm-func-ref))
+      (assert-null (codegen-find-inst ctx 'cl-cc::vm-closure)))))
+
+(deftest codegen-flet-capturing-function-falls-back-to-vm-closure
+  "Flet bindings that capture outer variables still allocate vm-closure." 
+  (let ((ctx (make-codegen-ctx)))
+    (let ((reg (compile-ast
+                (make-ast-let
+                 :bindings (list (cons 'y (make-ast-int :value 9)))
+                 :body (list (make-ast-flet
+                              :bindings (list (list 'f '(x) (make-ast-var :name 'y)))
+                              :body (list (make-ast-call :func 'f
+                                                         :args (list (make-ast-int :value 5)))))))
+                ctx)))
+      (assert-true (keywordp reg))
+      (assert-true (codegen-find-inst ctx 'cl-cc::vm-closure)))))
+
 (deftest codegen-rest-params-mark-stack-safe-closures
   "&rest closures that only consume the list locally are marked stack-safe."
   (let* ((ctx (make-codegen-ctx))

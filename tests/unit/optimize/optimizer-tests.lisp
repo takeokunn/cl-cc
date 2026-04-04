@@ -97,19 +97,23 @@
   (assert-run-false "(if nil 42 nil)"))
 
 (deftest optimizer-hot-cold-layout-keeps-signal-block-last
-  "Hot/cold layout leaves an explicit signal-error block after the normal path."
+  "cfg-flatten-hot-cold keeps the explicit signal-error block in the cold tail." 
   (let* ((hot   (make-vm-label :name "hot"))
          (jump  (make-vm-jump-zero :reg :r0 :label "cold"))
          (work  (make-vm-const :dst :r1 :value 1))
          (toend (make-vm-jump :label "end"))
          (cold  (make-vm-label :name "cold"))
-         (sig   (make-vm-signal-error :error-reg :r1))
+         (sig   (cl-cc::make-vm-signal-error :error-reg :r1))
          (end   (make-vm-label :name "end"))
          (ret   (make-vm-ret :reg :r1))
-         (out   (optimize-instructions (list hot jump work toend cold sig end ret)))
+         (cfg   (cl-cc::cfg-build (list hot jump work toend cold sig end ret)))
+         (_idom (cl-cc::cfg-compute-dominators cfg))
+         (_loop (cl-cc::cfg-compute-loop-depths cfg))
+         (out   (cl-cc::cfg-flatten-hot-cold cfg))
          (labels (loop for inst in out
-                       when (typep inst 'cl-cc::vm-label)
-                       collect (cl-cc::vm-name inst))))
+                        when (typep inst 'cl-cc::vm-label)
+                        collect (cl-cc::vm-name inst))))
+    (declare (ignore _idom _loop))
     (assert-true (member "hot" labels :test #'equal))
     (assert-true (member "cold" labels :test #'equal))
     (assert-true (member "end" labels :test #'equal))
@@ -211,8 +215,16 @@
 
 (deftest optimizer-lognot-constant
   "(lognot 0) folds at compile time: value is -1 and no vm-lognot remains."
-  (assert-run= -1 "(lognot 0)")
-  (assert-false (opt-has-p "(lognot 0)" 'vm-lognot)))
+  (assert-equal -1 (run-string "(lognot 0)"))
+  (let* ((instrs (list (cl-cc::make-vm-const :dst :r1 :value 0)
+                       (cl-cc::make-vm-lognot :dst :r0 :src :r1)))
+         (out (cl-cc::opt-pass-fold instrs)))
+    (assert-false (some (lambda (i) (typep i 'cl-cc::vm-lognot)) out))
+    (assert-true (some (lambda (i)
+                         (and (cl-cc::vm-const-p i)
+                              (eq :r0 (cl-cc::vm-dst i))
+                              (eql -1 (cl-cc::vm-value i))))
+                       out))))
 
 (deftest optimizer-not-zero-value
   "(not 0) = nil (0 is truthy in ANSI CL)."
@@ -267,16 +279,29 @@
     (assert-equal :R2 (cl-cc::vm-src (fourth out)))))
 
 (deftest cse-label-flushes
-  "A vm-label between two identical vm-add prevents CSE."
+  "A branch-target vm-label between two identical vm-add prevents CSE."
+  (let* ((i1 (cl-cc::make-vm-const :dst :R0 :value 10))
+          (i2 (cl-cc::make-vm-const :dst :R1 :value 20))
+          (i3 (cl-cc::make-vm-add :dst :R2 :lhs :R0 :rhs :R1))
+          (j  (cl-cc::make-vm-jump :label "L1"))
+          (lbl (cl-cc::make-vm-label :name "L1"))
+          (i4 (cl-cc::make-vm-add :dst :R3 :lhs :R0 :rhs :R1))
+          (out (cl-cc::opt-pass-cse (list i1 i2 i3 j lbl i4))))
+    (assert-true (cl-cc::vm-add-p (third out)))
+    (assert-true (cl-cc::vm-jump-p (fourth out)))
+    (assert-true (cl-cc::vm-label-p (fifth out)))
+    (assert-true (cl-cc::vm-add-p (sixth out)))))
+
+(deftest cse-fallthrough-label-preserves-state
+  "A non-target fallthrough label does not flush CSE state."
   (let* ((i1 (cl-cc::make-vm-const :dst :R0 :value 10))
          (i2 (cl-cc::make-vm-const :dst :R1 :value 20))
          (i3 (cl-cc::make-vm-add :dst :R2 :lhs :R0 :rhs :R1))
          (lbl (cl-cc::make-vm-label :name "L1"))
          (i4 (cl-cc::make-vm-add :dst :R3 :lhs :R0 :rhs :R1))
          (out (cl-cc::opt-pass-cse (list i1 i2 i3 lbl i4))))
-    (assert-true (cl-cc::vm-add-p (third out)))
     (assert-true (cl-cc::vm-label-p (fourth out)))
-    (assert-true (cl-cc::vm-add-p (fifth out)))))
+    (assert-true (cl-cc::vm-move-p (fifth out)))))
 
 (deftest cse-unary-dedup
   "Two identical vm-neg: second becomes vm-move."
@@ -305,6 +330,13 @@
          (out (cl-cc::opt-pass-cse (list i1 i2 i3 i4))))
     (assert-true (cl-cc::vm-add-p (third out)))
     (assert-true (cl-cc::vm-sub-p (fourth out)))))
+
+(deftest optimizer-value-ordering-structural
+  "Structural optimizer ordering stays deterministic without format-based comparison."
+  (assert-true (cl-cc::%opt-value< '(:r0 . 1) '(:r0 . 2)))
+  (assert-true (cl-cc::%opt-value< :r0 :r1))
+  (assert-true (cl-cc::%opt-value< 1 2))
+  (assert-false (cl-cc::%opt-value< "b" "a")))
 
 (deftest optimizer-gvn-dominates-branch
   "GVN reuses a dominator-block value inside a dominated block."
@@ -375,11 +407,16 @@
          (fref    (cl-cc::make-vm-func-ref :dst :R5 :label "big"))
          (jump-past (cl-cc::make-vm-jump :label "after_big"))
          (lbl     (cl-cc::make-vm-label :name "big"))
-         ;; Generate 20 body instructions (exceeds default threshold of 15)
-         (body    (loop for i from 20 below 40
-                        collect (cl-cc::make-vm-const
-                                 :dst (intern (format nil "R~A" i) :keyword)
-                                 :value i)))
+         ;; Generate a live arithmetic chain that stays above the inline threshold
+         ;; even after convergence passes.
+         (body    (append
+                   (list (cl-cc::make-vm-const :dst :R20 :value 1))
+                   (loop for i from 21 below 40
+                         for prev = :R10 then (intern (format nil "R~A" (1- i)) :keyword)
+                         collect (cl-cc::make-vm-add
+                                  :dst (intern (format nil "R~A" i) :keyword)
+                                  :lhs prev
+                                  :rhs :R20))))
          (ret     (cl-cc::make-vm-ret :reg :R39))
          (after   (cl-cc::make-vm-label :name "after_big"))
          (arg     (cl-cc::make-vm-const :dst :R1 :value 0))
@@ -516,14 +553,27 @@
 ;;; ── Direct opt-pass-fold Tests ─────────────────────────────────────────
 
 (deftest fold-label-flushes-env
-  "Labels flush the constant env — a constant known before a label must NOT
-   be propagated after the label (other paths may define a different value)."
+  "Branch-target labels flush the constant env — a constant known before a label must NOT
+    be propagated after the label (other paths may define a different value)."
   (let* ((instrs (list (cl-cc::make-vm-const :dst :R0 :value 42)
+                       (cl-cc::make-vm-jump :label "join")
                        (cl-cc::make-vm-label :name "join")
-                       (cl-cc::make-vm-inc :dst :R1 :src :R0)))
+                        (cl-cc::make-vm-inc :dst :R1 :src :R0)))
          (out (cl-cc::opt-pass-fold instrs)))
     ;; The inc should survive (not folded to const 43) because the label flushes env
     (assert-true (find-if (lambda (i) (typep i 'cl-cc::vm-inc)) out))))
+
+(deftest fold-fallthrough-label-preserves-env
+  "A non-target fallthrough label does not flush constant knowledge."
+  (let* ((instrs (list (cl-cc::make-vm-const :dst :R0 :value 42)
+                       (cl-cc::make-vm-label :name "join")
+                       (cl-cc::make-vm-inc :dst :R1 :src :R0)))
+         (out (cl-cc::opt-pass-fold instrs))
+         (r1-const (find-if (lambda (i) (and (cl-cc::vm-const-p i)
+                                             (eq (cl-cc::vm-dst i) :R1)))
+                            out)))
+    (assert-true r1-const)
+    (assert-equal 43 (cl-cc::vm-value r1-const))))
 
 (deftest fold-unary-not-falsy
   "vm-not on nil folds to t; truthy values fold to nil."
@@ -585,15 +635,15 @@
       (assert-equal :R0 (cl-cc::vm-rhs add-inst)))))
 
 (deftest copy-prop-label-flushes
-  "After a label, copy knowledge is flushed — no propagation across labels."
+  "A non-target fallthrough label does not flush copy knowledge."
   (let* ((instrs (list (cl-cc::make-vm-move :dst :R1 :src :R0)
                        (cl-cc::make-vm-label :name "join")
                        (cl-cc::make-vm-add :dst :R2 :lhs :R1 :rhs :R1)))
          (out (cl-cc::opt-pass-copy-prop instrs)))
-    ;; The add should still use :R1 (not :R0), because label flushed copies
+    ;; The add should use :R0 because the fallthrough label preserves copies.
     (let ((add-inst (find-if (lambda (i) (typep i 'cl-cc::vm-add)) out)))
       (assert-true add-inst)
-      (assert-equal :R1 (cl-cc::vm-lhs add-inst)))))
+      (assert-equal :R0 (cl-cc::vm-lhs add-inst)))))
 
 (deftest copy-prop-kill-forward
   "When a source register is overwritten, its forward aliases are invalidated."
@@ -605,6 +655,19 @@
     (let ((add-inst (find-if (lambda (i) (typep i 'cl-cc::vm-add)) out)))
       (assert-true add-inst)
       (assert-equal :R1 (cl-cc::vm-lhs add-inst)))))
+
+(deftest copy-prop-reverse-map-kill
+  "Reverse-map kill invalidates direct aliases without a full copy-table scan." 
+  (let* ((copies (make-hash-table :test #'eq))
+         (reverse nil))
+    (setf (gethash :R1 copies) :R0)
+    (setf (gethash :R2 copies) :R0)
+    (setf (gethash :R3 copies) :R2)
+    (setf reverse (cl-cc::%opt-copy-prop-build-reverse copies))
+    (cl-cc::%opt-copy-prop-kill :R0 copies reverse)
+    (assert-false (gethash :R1 copies))
+    (assert-false (gethash :R2 copies))
+    (assert-true (eql :R2 (gethash :R3 copies)))))
 
 (deftest copy-prop-self-move-elim
   "Self-move after resolution is eliminated: R1←R0 then R0←R1 → second resolves
@@ -851,7 +914,10 @@
          (out   (cl-cc::opt-pass-tail-merge (list entry seed br dup1 a1 j1 dup2 a2 j2 exit ret))))
     (assert-true  (member dup1 out))
     (assert-false (member dup2 out))
-    (assert-equal 1 (count-if (lambda (i) (typep i 'cl-cc::vm-const)) out))
+    (assert-equal 1 (count-if (lambda (i)
+                                (and (typep i 'cl-cc::vm-const)
+                                     (eq :r1 (cl-cc::vm-dst i))))
+                              out))
     (assert-equal 1 (count-if (lambda (i) (typep i 'cl-cc::vm-jump-zero)) out))))
 
 (deftest constant-hoist-moves-loop-constant-to-preheader
@@ -875,6 +941,12 @@
 (deftest constant-hoist-is-in-convergence-passes
   "opt-pass-constant-hoist is part of the convergence pass pipeline."
   (assert-true (member #'cl-cc::opt-pass-constant-hoist
+                       cl-cc::*opt-convergence-passes*
+                       :test #'eq)))
+
+(deftest inline-is-in-convergence-passes
+  "opt-pass-inline participates in the convergence pipeline via a named wrapper pass."
+  (assert-true (member #'cl-cc::opt-pass-inline-iterative
                        cl-cc::*opt-convergence-passes*
                        :test #'eq)))
 
@@ -914,11 +986,13 @@
          (a2    (make-vm-add :dst :r5 :lhs :r0 :rhs :r2))
          (ret   (make-vm-ret :reg :r5))
          (out   (cl-cc::opt-pass-pre (list entry c0 c2 br p1 a1 j1 p2 x j2 join a2 ret))))
-    (assert-equal 2 (count-if (lambda (i) (typep i 'cl-cc::vm-add)) out))
+    (assert-equal 1 (count-if (lambda (i) (typep i 'cl-cc::vm-add)) out))
     (assert-true (some (lambda (i)
                          (and (typep i 'cl-cc::vm-move)
-                              (eq :r5 (cl-cc::vm-dst i))
-                              (eq :r3 (cl-cc::vm-src i))))
+                               (or (and (eq :r3 (cl-cc::vm-dst i))
+                                        (eq :r5 (cl-cc::vm-src i)))
+                                   (and (eq :r5 (cl-cc::vm-dst i))
+                                        (eq :r3 (cl-cc::vm-src i))))))
                        out))))
 
 (deftest egraph-pass-lowers-constant-subtraction

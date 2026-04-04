@@ -22,6 +22,8 @@
                    :documentation "Hash table mapping class names to their class descriptor registers")
     (global-generics :initform (make-hash-table :test #'eq) :accessor ctx-global-generics
                      :documentation "Hash table mapping generic function names to their GF registers")
+    (global-generic-params :initform (make-hash-table :test #'eq) :accessor ctx-global-generic-params
+                           :documentation "Hash table mapping generic function names to their lambda-list params (for congruence checking)")
     (current-function-name :initform nil :accessor ctx-current-function-name
                            :documentation "Name of the function currently being compiled, if any")
     (current-function-label :initform nil :accessor ctx-current-function-label

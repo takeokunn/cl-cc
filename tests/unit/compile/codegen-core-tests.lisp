@@ -107,6 +107,57 @@
     (assert-true (codegen-find-inst ctx 'cl-cc::vm-cons))
     (assert-true (> (length cars) 0))))
 
+(deftest codegen-let-branch-local-cons-use-delays-component-evaluation
+  "A branch-local non-escaping cons delays component evaluation into the used branch." 
+  (let* ((ctx (make-codegen-ctx))
+         (ast (make-ast-let
+               :bindings (list (cons 'p (make-ast-call
+                                        :func 'cons
+                                        :args (list (make-ast-call
+                                                     :func 'cons
+                                                     :args (list (make-ast-int :value 1)
+                                                                 (make-ast-int :value 2)))
+                                                    (make-ast-int :value 3)))))
+               :body (list (make-ast-if
+                            :cond (make-ast-int :value 1)
+                            :then (make-ast-call :func 'car
+                                                 :args (list (make-ast-var :name 'p)))
+                            :else (make-ast-int :value 0))))
+         (reg (compile-ast ast ctx))
+         (insts (codegen-instructions ctx))
+         (jump-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-jump-zero)) insts))
+         (cons-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-cons)) insts)))
+    (assert-true (keywordp reg))
+    (assert-true jump-pos)
+    (assert-true cons-pos)
+    (assert-true (> cons-pos jump-pos)))))
+
+(deftest codegen-let-multibinding-branch-local-cons-use-delays-component-evaluation
+  "The generalized branch sink handles a non-escaping cons binding even with sibling let bindings."
+  (let* ((ctx (make-codegen-ctx))
+         (ast (make-ast-let
+               :bindings (list (cons 'p (make-ast-call
+                                        :func 'cons
+                                        :args (list (make-ast-call
+                                                     :func 'cons
+                                                     :args (list (make-ast-int :value 1)
+                                                                 (make-ast-int :value 2)))
+                                                    (make-ast-int :value 3))))
+                               (cons 'flag (make-ast-int :value 1)))
+               :body (list (make-ast-if
+                            :cond (make-ast-var :name 'flag)
+                            :then (make-ast-call :func 'car
+                                                 :args (list (make-ast-var :name 'p)))
+                            :else (make-ast-int :value 0))))
+         (reg (compile-ast ast ctx))
+         (insts (codegen-instructions ctx))
+         (jump-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-jump-zero)) insts))
+         (cons-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-cons)) insts)))
+    (assert-true (keywordp reg))
+    (assert-true jump-pos)
+    (assert-true cons-pos)
+    (assert-true (> cons-pos jump-pos)))))
+
 (deftest codegen-let-noescape-array-aref-bypasses-vm-make-array-and-vm-aref
   "A non-escaping fixed-size local array can serve constant-index aref from split registers."
   (let* ((ctx (make-codegen-ctx))
@@ -234,10 +285,20 @@
                                                   :args (list (make-ast-var :name 'arr)
                                                               (make-ast-var :name 'i)))
                              :else (make-ast-int :value 0))))
-               ctx)))
+                ctx))
+         (insts (codegen-instructions ctx))
+         (jump-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-jump-zero)) insts))
+         (const0-positions (loop for inst in insts
+                                 for idx from 0
+                                 when (and (typep inst 'cl-cc::vm-const)
+                                           (eql (cl-cc::vm-value inst) 0))
+                                 collect idx)))
     (assert-true (keywordp reg))
     (assert-null (codegen-find-inst ctx 'cl-cc::vm-make-array))
-    (assert-null (codegen-find-inst ctx 'cl-cc::vm-aref))))
+    (assert-null (codegen-find-inst ctx 'cl-cc::vm-aref))
+    (assert-true jump-pos)
+    (assert-true const0-positions)
+    (assert-true (every (lambda (idx) (> idx jump-pos)) const0-positions))))
 
 (deftest codegen-let-branch-array-escape-preserves-allocation
   "If a branch returns the array itself, the heap-backed make-array path is preserved."
@@ -254,9 +315,38 @@
                              :else (make-ast-call :func 'aref
                                                   :args (list (make-ast-var :name 'arr)
                                                               (make-ast-var :name 'i))))))
-               ctx)))
+                ctx)))
     (assert-true (keywordp reg))
     (assert-true (codegen-find-inst ctx 'cl-cc::vm-make-array))))
+
+(deftest codegen-let-branch-shadowed-array-binding-still-sinks-outer-use
+  "A shadowed inner array binding must not block sinking the outer array into its only real branch." 
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast
+               (make-ast-let
+                :bindings (list (cons 'arr (make-ast-call
+                                           :func 'make-array
+                                           :args (list (make-ast-int :value 2))))
+                                (cons 'i (make-ast-int :value 1)))
+                :body (list (make-ast-if
+                             :cond (make-ast-int :value 1)
+                             :then (make-ast-let
+                                    :bindings (list (cons 'arr (make-ast-call
+                                                               :func 'make-array
+                                                               :args (list (make-ast-int :value 1)))))
+                                    :body (list (make-ast-call :func 'aref
+                                                               :args (list (make-ast-var :name 'arr)
+                                                                           (make-ast-int :value 0)))))
+                             :else (make-ast-call :func 'aref
+                                                  :args (list (make-ast-var :name 'arr)
+                                                              (make-ast-var :name 'i))))))
+               ctx))
+         (insts (codegen-instructions ctx))
+         (jump-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-jump-zero)) insts)))
+    (assert-true (keywordp reg))
+    (assert-true jump-pos)
+    (assert-null (codegen-find-inst ctx 'cl-cc::vm-make-array))
+    (assert-null (codegen-find-inst ctx 'cl-cc::vm-aref))))
 
 (deftest codegen-setq-local-emits-move
   "Compiling setq on a local variable emits a vm-move."

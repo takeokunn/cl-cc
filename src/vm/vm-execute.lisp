@@ -36,20 +36,18 @@
 
 (defmethod execute-instruction ((inst vm-jump) state pc labels)
   (declare (ignore state pc))
-  (values (gethash (vm-label-name inst) labels) nil nil))
+  (values (vm-label-table-lookup labels (vm-label-name inst)) nil nil))
 
 (defun vm-falsep (value)
-  "Return T if VALUE is falsy (NIL or numeric zero).
+  "Return T if VALUE is falsy.
 
-The VM encodes predicate results as 0/1, so branch instructions must treat
-0 as false in addition to NIL."
-  (or (null value)
-      (and (numberp value)
-           (zerop value))))
+Common Lisp treats only NIL as false. Numeric zero remains truthy and must
+not trigger VM conditional branches."
+  (null value))
 
 (defmethod execute-instruction ((inst vm-jump-zero) state pc labels)
   (if (vm-falsep (vm-reg-get state (vm-reg inst)))
-      (values (gethash (vm-label-name inst) labels) nil nil)
+      (values (vm-label-table-lookup labels (vm-label-name inst)) nil nil)
       (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-select) state pc labels)
@@ -266,8 +264,8 @@ The VM encodes predicate results as 0/1, so branch instructions must treat
                   (if has-before (cdr before-methods) nil))
             (when has-before
               (setf (getf (cdddr ctx) :primary) primary))
-            (vm-bind-closure-args first-method state arg-values)
-            (values (gethash (vm-closure-entry-label first-method) labels) nil nil))
+             (vm-bind-closure-args first-method state arg-values)
+             (values (vm-label-table-lookup labels (vm-closure-entry-label first-method)) nil nil))
           ;; Normal call-next-method (non-around)
           (let* ((gf-ht (first ctx))
                  (methods-list (second ctx))
@@ -281,8 +279,8 @@ The VM encodes predicate results as 0/1, so branch instructions must treat
                                   orig-args)))
               (vm-push-call-frame state (1+ pc) (vm-dst inst))
               (push (list gf-ht (cdr methods-list) call-args) (vm-method-call-stack state))
-              (vm-bind-closure-args next-method state call-args)
-              (values (gethash (vm-closure-entry-label next-method) labels) nil nil)))))))
+               (vm-bind-closure-args next-method state call-args)
+               (values (vm-label-table-lookup labels (vm-closure-entry-label next-method)) nil nil)))))))
 
 (defmethod execute-instruction ((inst vm-apply) state pc labels)
   (let* ((func      (vm-resolve-function state (vm-reg-get state (vm-func-reg inst))))
@@ -304,7 +302,7 @@ The VM encodes predicate results as 0/1, so branch instructions must treat
          (vm-push-call-frame state (1+ pc) dst-reg)
          (push nil (vm-method-call-stack state))
          (vm-bind-closure-args closure state spread-args)
-         (values (gethash (vm-closure-entry-label closure) labels) nil nil))))))
+         (values (vm-label-table-lookup labels (vm-closure-entry-label closure)) nil nil))))))
 
 (defmethod execute-instruction ((inst vm-apply) state pc labels)
   (let* ((func      (vm-resolve-function state (vm-reg-get state (vm-func-reg inst))))
@@ -326,7 +324,7 @@ The VM encodes predicate results as 0/1, so branch instructions must treat
          (vm-push-call-frame state (1+ pc) dst-reg)
          (push nil (vm-method-call-stack state))
          (vm-bind-closure-args closure state spread-args)
-         (values (gethash (vm-closure-entry-label closure) labels) nil nil))))))
+         (values (vm-label-table-lookup labels (vm-closure-entry-label closure)) nil nil))))))
 
 (defmethod execute-instruction ((inst vm-register-function) state pc labels)
   (declare (ignore labels))

@@ -35,7 +35,7 @@ Native backend, architecture integration, register allocation, instruction sched
   - SBCLの Block Compilation (`sb-c:*block-compile*`) 相当
   - 効果: ローカル関数の呼び出しオーバーヘッド完全除去
 
-#### FR-016: Dead Store Elimination (DSE)
+#### ✅ FR-016: Dead Store Elimination (DSE)
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **内容**:
@@ -78,7 +78,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: 現状のregalloc は多数の `vm-move` を機械語レベルに残す
 - **難易度**: Medium
 
-#### FR-060: Register Hints / Preference-Based Allocation
+#### ✅ FR-060: Register Hints / Preference-Based Allocation
 
 - **対象**: `src/emit/regalloc.lisp`, `src/emit/calling-convention.lisp`
 - **内容**: `calling-convention` の `:arg-registers` を割り当て時に優先考慮
@@ -103,7 +103,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **内容**: 長いライブ区間を分割し、ホット領域のみスピルを最小化
 - **難易度**: Hard
 
-#### FR-064: Biased Spill Selection (Belady's OPT)
+#### ✅ FR-064: Biased Spill Selection (Belady's OPT)
 
 - **対象**: `src/emit/regalloc.lisp`
 - **内容**: 次の使用箇所が最も遠い区間を優先スピル（現状は最長末尾を選択）
@@ -140,7 +140,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **内容**: Read-after-Writeに基づく命令ペア/トリプルの局所的並べ替え
 - **難易度**: Medium
 
-#### FR-070: Return Value in Return Register (NRVO)
+#### ✅ FR-070: Return Value in Return Register (NRVO)
 
 - **対象**: `src/emit/regalloc.lisp`, `src/emit/calling-convention.lisp`
 - **内容**: 関数の戻り値をABIのリターンレジスタに直接配置し、post-call moveを除去
@@ -188,7 +188,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **内容**: `(+ (* a b) c)` パターンを単一 `VFMADD`/`FMADD` 命令に変換
 - **難易度**: Low-Medium
 
-#### FR-100: Wasm `local.tee` Fusion
+#### ✅ FR-100: Wasm `local.tee` Fusion
 
 - **対象**: `src/emit/wasm-trampoline.lisp`
 - **内容**: `local.set` + 即時 `local.get` ペアを `local.tee` 単命令に融合
@@ -252,7 +252,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: LLVMの`fastcc`/`coldcc`。内部関数は外部ABIに従う必要がない
 - **難易度**: Hard
 
-#### FR-177: Callee-Save Register Elimination
+#### ✅ FR-177: Callee-Save Register Elimination
 
 - **対象**: `src/emit/x86-64-codegen.lisp`, `src/emit/aarch64-codegen.lisp`
 - **現状**: x86-64は常に6レジスタPUSH（`x86-64-codegen.lisp:1105-1111`）、AArch64は常に6 STP（`aarch64-codegen.lisp:369-382`）
@@ -288,7 +288,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: GCCの`-fprefetch-loop-arrays`。`dolist`/`dotimes`等のループで効果大
 - **難易度**: Medium
 
-#### FR-188: NOP Padding / Alignment Directives
+#### ✅ FR-188: NOP Padding / Alignment Directives
 
 - **対象**: `src/emit/x86-64.lisp`, `src/emit/x86-64-codegen.lisp`, `src/emit/aarch64-codegen.lisp`
 - **現状**: アセンブリテキスト出力に`.align`ディレクティブなし（`x86-64.lisp:73-91`）。ループヘッダ・関数エントリにNOP paddingなし
@@ -472,7 +472,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: WebAssembly Specification / GC Proposal。ブラウザ・Edge環境での実行に必須
 - **難易度**: Very Hard
 
-#### FR-298: vm-print Backend Emission (vm-print バックエンドエミッション)
+#### ✅ FR-298: vm-print Backend Emission (vm-print バックエンドエミッション)
 
 - **対象**: `src/emit/x86-64.lisp`, `src/emit/aarch64.lisp`, `src/emit/wasm.lisp`
 - **現状**: `x86-64.lisp:84-86`・`aarch64.lisp:54-56`の両方で`(error "print backend emission is not implemented yet")`。ネイティブコンパイルされたプログラムが`print`/`format`を使用すると即クラッシュ
@@ -528,7 +528,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: LLVM LLD, GNU gold — compressed debug sections
 - **難易度**: Medium
 
-#### FR-407: Spill Register Clobber Fix (スピルレジスタ上書き修正)
+#### ✅ FR-407: Spill Register Clobber Fix (スピルレジスタ上書き修正)
 
 - **対象**: `src/emit/regalloc.lisp`
 - **現状**: `regalloc.lisp:358-364` — 全スピル済みvregが単一scratchレジスタを共有。同一命令内の2スピルオペランドが黙ってclobber
@@ -536,7 +536,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: 正当性バグ — サイレントデータ破壊
 - **難易度**: Medium
 
-#### FR-408: Copy Propagation Performance (コピー伝播性能改善)
+#### ✅ FR-408: Copy Propagation Performance (コピー伝播性能改善)
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **現状**: `optimizer.lisp:197-199` — `kill`が毎回`maphash`でコピーテーブル全走査。O(n×m) (n命令, mコピー数)
@@ -544,7 +544,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: 標準コンパイラ実装 — efficient copy propagation kill
 - **難易度**: Low-Medium
 
-#### FR-409: Label-Aware Optimization State (ラベル考慮最適化状態)
+#### ✅ FR-409: Label-Aware Optimization State (ラベル考慮最適化状態)
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **現状**: `optimizer.lisp:86,203,601,677-678` — 全`vm-label`で`clrhash`（env/copies/gen/val-env/memo全消去）。フォールスルーラベルでも最適化コンテキスト破棄
@@ -560,7 +560,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: GC圧力削減、最適化パス高速化
 - **難易度**: Medium
 
-#### FR-411: Recursive Inlining Guard (再帰インライニングガード)
+#### ✅ FR-411: Recursive Inlining Guard (再帰インライニングガード)
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **現状**: `opt-pass-inline`(`optimizer.lisp:504-576`)が再帰・相互再帰呼び出しを検出せず。ボディ閾値を満たせば自分自身にインライン可能
@@ -568,7 +568,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: 無限展開防止 — 正当性バグ
 - **難易度**: Low-Medium
 
-#### FR-412: Liveness Analysis Completeness (活性解析完全化)
+#### ✅ FR-412: Liveness Analysis Completeness (活性解析完全化)
 
 - **対象**: `src/emit/regalloc.lisp`
 - **現状**: `compute-live-intervals`(`regalloc.lisp:244-273`)が後方ジャンプのみ区間延長。前方`vm-jump-zero`のラベルへのジャンプでギャップ越しのレジスタ活性が未延長
@@ -584,7 +584,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: Poletto & Sarkar (1999) Linear Scan Register Allocation
 - **難易度**: Medium
 
-#### FR-414: Iterative Inlining (反復インライニング)
+#### ✅ FR-414: Iterative Inlining (反復インライニング)
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **現状**: `opt-pass-inline`(`optimizer.lisp:765`)が収束ループ外で1回のみ実行。インライン後のfold/DCEが新たなインライン機会を露出しても再発見不可
@@ -592,7 +592,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: LLVM CGSCC inline — iterative inlining
 - **難易度**: Low-Medium
 
-#### FR-415: CSE Key Efficiency (CSEキー効率化)
+#### ✅ FR-415: CSE Key Efficiency (CSEキー効率化)
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **現状**: `val<`比較(`optimizer.lisp:658`)が`(format nil "~S" ...)`で毎CSEキー比較にフレッシュ文字列生成。高GC圧力
@@ -600,7 +600,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: GC圧力削減
 - **難易度**: Low
 
-#### FR-416: Tail-Call Register Allocation (末尾呼び出しレジスタ割り当て)
+#### ✅ FR-416: Tail-Call Register Allocation (末尾呼び出しレジスタ割り当て)
 
 - **対象**: `src/emit/regalloc.lisp`
 - **現状**: `vm-tail-call`が`regalloc.lisp:85`でdstレジスタ定義。末尾呼び出しは復帰しないためdstは使用されず、物理レジスタを無駄に割り当て
@@ -612,7 +612,7 @@ Native backend, architecture integration, register allocation, instruction sched
 
 ### Phase 83 — バイナリ・リンカー完全化
 
-#### FR-464: Mach-O __PAGEZERO Segment (Mach-O __PAGEZEROセグメント)
+#### ✅ FR-464: Mach-O __PAGEZERO Segment (Mach-O __PAGEZEROセグメント)
 
 - **対象**: `src/emit/binary/macho.lisp`
 - **現状**: `build-mach-o`(`macho.lisp:406-464`)が`__PAGEZERO`ロードコマンド未出力。macOS実行可能形式の必須要件
@@ -620,7 +620,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: macOS ABI — 全実行可能形式に必須
 - **難易度**: Low
 
-#### FR-465: Mach-O Symbol Table Serialization (Mach-Oシンボルテーブルシリアライズ)
+#### ✅ FR-465: Mach-O Symbol Table Serialization (Mach-Oシンボルテーブルシリアライズ)
 
 - **対象**: `src/emit/binary/macho.lisp`
 - **現状**: `add-symbol`/`serialize-nlist`(`macho.lisp:376-396,280-288`)が定義済みだが`build-mach-o`から未呼び出し。LC_SYMTABロードコマンドもシリアライズされない(`macho.lisp:419-422`)
@@ -628,7 +628,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: macOS実行可能形式 — シンボルテーブルはデバッグ・リンクに必須
 - **難易度**: Medium
 
-#### FR-466: Mach-O Data Segment Serialization (Mach-Oデータセグメントシリアライズ)
+#### ✅ FR-466: Mach-O Data Segment Serialization (Mach-Oデータセグメントシリアライズ)
 
 - **対象**: `src/emit/binary/macho.lisp`
 - **現状**: `add-data-segment`(`macho.lisp:351-374`)が定義済みだが`build-mach-o`がcode-bytesのみ書き込み。データセグメント内容が出力バッファに反映されない
@@ -636,7 +636,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: グローバルデータの実行可能形式への配置
 - **難易度**: Medium
 
-#### FR-467: Mach-O W^X Security (Mach-O W^X セキュリティ)
+#### ✅ FR-467: Mach-O W^X Security (Mach-O W^X セキュリティ)
 
 - **対象**: `src/emit/binary/macho.lisp`
 - **現状**: `add-data-segment`(`macho.lisp:369-370`)が`maxprot=7`(rwx)設定。W^Xセキュリティポリシー違反
@@ -644,7 +644,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: macOSセキュリティ — W^X (Write XOR Execute)
 - **難易度**: Easy
 
-#### FR-468: ELF AArch64 Support (ELF AArch64対応)
+#### ✅ FR-468: ELF AArch64 Support (ELF AArch64対応)
 
 - **対象**: `src/emit/binary/elf.lisp`
 - **現状**: `elf.lisp:24,313`がx86-64(`+elf-machine-x86-64+` #x3e)ハードコード。AArch64 codegen存在にもかかわらず`EM_AARCH64`(#xB7)未対応
@@ -652,7 +652,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: AArch64ネイティブコンパイル完全化
 - **難易度**: Medium
 
-#### FR-469: ELF Section Alignment (ELFセクションアライメント)
+#### ✅ FR-469: ELF Section Alignment (ELFセクションアライメント)
 
 - **対象**: `src/emit/binary/elf.lisp`
 - **現状**: `.text`オフセットがELFヘッダ直後にパディングなしで開始(`elf.lisp:284`)。リンカが期待するページ/16バイトアライメント不足
@@ -660,7 +660,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **根拠**: ELF仕様 — セクションアライメント要件
 - **難易度**: Low
 
-#### FR-470: ELF .bss Section (ELF .bssセクション)
+#### ✅ FR-470: ELF .bss Section (ELF .bssセクション)
 
 - **対象**: `src/emit/binary/elf.lisp`
 - **現状**: `.text`のみ。未初期化データ用`.bss`セクションAPIなし(`elf.lisp:150-161`)
@@ -685,7 +685,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **依存**: FR-008 (float unboxing)
 - **難易度**: Medium
 
-#### FR-473: WASM Portability (WASMポータビリティ)
+#### ✅ FR-473: WASM Portability (WASMポータビリティ)
 
 - **対象**: `src/emit/wasm.lisp`
 - **現状**: `wasm-buf-write-f64`(`wasm.lisp:74-75`)がSBCL専用コード（`sb-kernel:double-float-bits`）。他CL実装でエラー
@@ -694,4 +694,3 @@ Native backend, architecture integration, register allocation, instruction sched
 - **難易度**: Low
 
 ---
-

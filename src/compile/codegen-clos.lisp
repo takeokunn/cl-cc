@@ -139,14 +139,25 @@ Returns the register holding the GF dispatch table."
   "Compile a generic function definition.
 Creates a dispatch table (hash table) that maps class names to method closures.
 Idempotent: if already defined at compile-time or runtime, reuse existing.
-If :method-combination is specified, stores it on the GF as :__method-combination__."
+If :method-combination is specified, stores it on the GF as :__method-combination__.
+ANSI CL 7.6.4: signals a warning if the lambda list is not congruent with an
+existing generic function in the same compilation unit."
   (setf (ctx-tail-position ctx) nil)
   (let* ((name (ast-defgeneric-name node))
          (combination (ast-defgeneric-combination node))
-         (existing (gethash name (ctx-global-generics ctx))))
+         (params (ast-defgeneric-params node))
+         (existing (gethash name (ctx-global-generics ctx)))
+         (existing-params (gethash name (ctx-global-generic-params ctx))))
+    ;; ANSI CL 7.6.4 lambda-list congruence check
+    (when (and existing existing-params
+               (not (equal (length params) (length existing-params))))
+      (warn "DEFGENERIC ~A: lambda list ~A has ~A required parameter(s) but existing definition has ~A"
+            name params (length params) (length existing-params)))
     (if existing
         existing
         (let ((dst (%ensure-generic-function ctx name)))
+          ;; Store params for future congruence checking
+          (setf (gethash name (ctx-global-generic-params ctx)) params)
           ;; Store method combination on the GF if specified
           (when combination
             (let ((combo-reg (make-register ctx))

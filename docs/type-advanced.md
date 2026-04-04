@@ -93,7 +93,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 16. 開発支援型機能
 
-### FR-1601: 型付きホール (Typed Holes)
+### FR-1601: ✅ 型付きホール (Typed Holes)
 
 - **対象**: `src/compile/codegen.lisp`, REPL (`src/cli/main.lisp`)
 - **内容**: 未実装部分を `_` (hole) で表し、型エラーとして期待型を報告
@@ -115,7 +115,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL の `mop:class-slots` + `slot-value` による反射的操作の型安全版として実装可能
 - **難易度**: Hard
 
-### FR-1603: エフェクト推論 (Effect Inference)
+### FR-1603: ✅ エフェクト推論 (Effect Inference)
 
 - **対象**: `src/type/effects.lisp` (FR-401 の拡張)
 - **内容**: プログラマがエフェクトアノテーションを書かなくても、コンパイラが自動推論
@@ -126,7 +126,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - HM 型推論と並行して実行可能（エフェクト変数を型変数と同様に unification で解く）
 - **難易度**: Hard
 
-### FR-1604: 値制限 (Value Restriction)
+### FR-1604: ✅ 値制限 (Value Restriction)
 
 - **対象**: `src/type/inference.lisp`
 - **内容**: 変更可能な参照と多相型の相互作用による健全性破壊を防ぐ
@@ -322,7 +322,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **Turing 完全性との関係**: 停止性は決定不可能 (Halting Problem)。実用的には「十分なクラス」で検査
 - **難易度**: Hard
 
-### FR-1903: 網羅性検査 (Exhaustiveness / Coverage Checking)
+### FR-1903: ✅ 網羅性検査 (Exhaustiveness / Coverage Checking)
 
 - **対象**: `src/compile/codegen.lisp`
 - **内容**: パターンマッチが全ケースをカバーしているかをコンパイル時検証
@@ -832,7 +832,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC 応用: シンボル命名規則を型で保証 (`with-slots` のスロット名検査)
 - **難易度**: Hard
 
-### FR-2504: 型ガードと型述語 (Type Guards / Type Predicates)
+### FR-2504: ✅ 型ガードと型述語 (Type Guards / Type Predicates)
 
 - **対象**: `src/type/inference.lisp`
 - **内容**: ランタイム型チェック関数の戻り値を型絞り込みに活用

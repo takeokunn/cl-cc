@@ -109,6 +109,7 @@
   "vm-label emits label: format."
   (let* ((tgt (%make-x86-target))
          (asm (%x86-emit tgt (make-vm-label :name "loop"))))
+    (assert-true (search ".align 4" asm))
     (assert-true (search "loop:" asm))))
 
 (deftest x86-emit-jump
@@ -133,10 +134,12 @@
     (assert-true (search "mov rax" asm))
     (assert-true (search "ret" asm))))
 
-(deftest x86-emit-print-signals-error
-  "vm-print signals error (not implemented)."
+(deftest x86-emit-print-runtime-call
+  "vm-print emits a runtime call to rt-print."
   (let ((tgt (%make-x86-target)))
-    (assert-signals error (%x86-emit tgt (make-vm-print :reg :r0)))))
+    (let ((asm (%x86-emit tgt (make-vm-print :reg :r0))))
+      (assert-true (search "call rt-print" asm))
+      (assert-true (search "rdi" asm)))))
 
 (deftest x86-emit-unsupported-silent
   "Unsupported instructions emit nothing (base method)."

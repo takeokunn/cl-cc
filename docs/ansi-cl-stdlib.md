@@ -936,17 +936,17 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 - **根拠**: ANSI CL 6.1.1 — named loop
 - **難易度**: Medium
 
-#### FR-639: asinh / acosh / atanh — 逆双曲線関数
+#### FR-639: asinh / acosh / atanh — ✅ COMPLETE
 
-- **対象**: `src/vm/primitives.lisp`, `src/compile/builtin-registry-data.lisp`
-- **内容**: CL の `asinh`/`acosh`/`atanh` を VM命令として追加し登録
+- **対象**: `src/vm/vm-transcendental.lisp`, `src/compile/builtin-registry-data.lisp`
+- **実装**: `vm-asinh-inst` / `vm-acosh-inst` / `vm-atanh-inst` は `define-vm-unary-instruction` + `define-simple-instruction` で定義済み。`builtin-registry-data.lisp:77-79` に登録済み。
 - **根拠**: ANSI CL 12.2.4 — asinh, acosh, atanh
 - **難易度**: Easy
 
-#### FR-640: nreconc
+#### FR-640: nreconc — ✅ COMPLETE
 
-- **対象**: `src/vm/list.lisp`, `src/compile/builtin-registry-data.lisp`
-- **内容**: `(nreconc list tail)` ≡ `(nconc (nreverse list) tail)` — 破壊的逆順追加
+- **対象**: `src/expand/macros-stdlib.lisp:997`
+- **実装**: `(nreconc list tail)` は `macros-stdlib.lisp` で実装済み。`(nconc (nreverse list) tail)` に展開。
 - **根拠**: ANSI CL 14.2.22 — nreconc
 - **難易度**: Easy
 
@@ -964,10 +964,10 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 - **根拠**: ANSI CL 1.5.2 — *features* must include :common-lisp
 - **難易度**: Trivial (1行修正)
 
-#### FR-643: #nR — 任意基数整数リテラル
+#### FR-643: #nR — 任意基数整数リテラル — ✅ COMPLETE
 
-- **対象**: `src/parse/lexer.lisp` (`lex-read-hash-dispatch`, line 548)
-- **内容**: `#` の後に数字が続く場合、基数 `n` を読み、`R`/`r` を確認し `lex-read-radix-integer state n` で整数をパース
+- **対象**: `src/parse/lexer-dispatch.lisp` (`lex-read-hash-dispatch`)
+- **実装**: `otherwise` ブランチで数字を読み、`R`/`r` を確認 → `(lex-read-radix-integer state radix)` で整数をパース。`lexer-dispatch.lisp:285-290`。radix 2-36 の範囲チェック付き。
 - **根拠**: ANSI CL 2.4.8 — #nR
 - **難易度**: Easy
 
@@ -1092,24 +1092,24 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 - **根拠**: ANSI CL 14.2.34/35 — subst-if / subst-if-not
 - **難易度**: Easy–Medium
 
-#### FR-682: `-` 単項否定バグ / 0引数エラー欠如
+#### FR-682: `-` 単項否定バグ / 0引数エラー欠如 — ✅ COMPLETE
 
-- **対象**: `src/expand/expander.lisp` (lines 393-397)
-- **内容**: 1引数特殊ケースを追加: `(1 (list '- 0 (first args)))` → `(- 0 x)`。0引数ケース: `(error "- requires at least one argument")`
+- **対象**: `src/expand/expander.lisp`
+- **実装**: `expander.lisp:430-431` で0引数→エラー、1引数→ `(- 0 x)` に展開。`(- x)` → `-x`、`(-)` → `error` が動作。
 - **根拠**: ANSI CL 12.2 — `(- x)` → `-x`; `(-)` is an error
-- **難易度**: Easy (1行の条件追加)
+- **難易度**: Easy
 
-#### FR-683: isqrt — 大整数で浮動小数点精度喪失
+#### FR-683: isqrt — ✅ COMPLETE
 
-- **対象**: `src/expand/macros-stdlib.lisp` (line 43)
-- **内容**: 整数算術の exact square root 実装 (Newton's method on integers)
+- **対象**: `src/expand/macros-stdlib.lisp`
+- **実装**: Newton 法による整数平方根。`(floor (sqrt (float n)))` + Newton 修正ループで浮動小数点精度喪失を回避。
 - **根拠**: ANSI CL 12.1.3 — isqrt returns the greatest integer ≤ exact positive square root
-- **難易度**: Medium (bignum 対応 FR-605 の後に完全化)
+- **難易度**: Medium
 
-#### FR-684: signum — 型非保存 (常に整数を返す)
+#### FR-684: signum — ✅ COMPLETE
 
-- **対象**: `src/expand/macros-stdlib.lisp` (lines 35-40)
-- **内容**: `(signum 2.5)` → `1.0`、`(signum -3.0d0)` → `-1.0d0`。入力型に対応した型の 1/-1/0 を返す
+- **対象**: `src/expand/macros-stdlib.lisp`
+- **実装**: `macros-stdlib.lisp` で型保存実装。`(signum 2.5)` → `1.0`、`(signum -3)` → `-1`。入力型を保存した戻り値。
 - **根拠**: ANSI CL 12.1.3 — signum preserves type
 - **難易度**: Medium
 
@@ -1128,12 +1128,12 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 - **難易度**: Medium (`:test`/`:key` は比較的容易; `:start`/`:end` はシーケンス型依存)
 
 
-#### FR-679: get-decoded-time — ビルトイン未登録
+#### FR-679: get-decoded-time — ✅ COMPLETE
 
-- **対象**: `src/compile/builtin-registry-data.lisp` (lines 270-278)
-- **内容**: `(get-decoded-time)` — 現在時刻を9値 (second minute hour date month year day-of-week daylight-p zone) で返す。`(decode-universal-time (get-universal-time))` との違いはタイムゾーン取得の一発性
+- **対象**: `src/compile/stdlib-source.lisp`
+- **実装**: `stdlib-source.lisp:358-359` で `(defun get-decoded-time () (decode-universal-time (get-universal-time)))` として定義済み。
 - **根拠**: ANSI CL 25.1.4 — get-decoded-time
-- **難易度**: Easy (nullary builtin + `(decode-universal-time (get-universal-time))` へのデシュガーで実装可)
+- **難易度**: Easy
 
 #### FR-680: provide / require — ✅ COMPLETE
 

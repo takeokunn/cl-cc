@@ -643,7 +643,7 @@
 
     "(defgeneric slot-unbound (class instance slot-name))"
     "(defmethod slot-unbound ((class t) (instance t) slot-name)
-       (error (format nil \"The slot ~A is unbound in ~A\" slot-name instance)))"
+       (error 'unbound-slot :name slot-name :instance instance))"
 
     "(defgeneric slot-missing (class object slot-name operation &optional new-value))"
     "(defmethod slot-missing ((class t) object slot-name operation &optional new-value)

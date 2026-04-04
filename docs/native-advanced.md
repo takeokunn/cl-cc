@@ -50,7 +50,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 ### Phase 91 — 高度な最適化パス
 
-#### FR-510: SCCP (Sparse Conditional Constant Propagation)
+#### ✅ FR-510: SCCP (Sparse Conditional Constant Propagation)
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **内容**:
@@ -61,7 +61,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: Wegman & Zadeck (1991) SCCP。基本的な定数畳み込みより格段に精密
 - **難易度**: Hard
 
-#### FR-511: GVN (Global Value Numbering)
+#### ✅ FR-511: GVN (Global Value Numbering)
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **内容**:
@@ -579,7 +579,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 現状の `optimizer.lisp` にはCSE・コピー伝播・定数畳み込み・DCE・インライン化があるが、以下の **-O2 相当の基礎パス** が欠落している。
 
-#### FR-600: LICM (Loop Invariant Code Motion) — ループ不変式移動
+#### ✅ FR-600: LICM (Loop Invariant Code Motion) — ループ不変式移動
 
 - **対象**: `src/optimize/optimizer.lisp`, `src/optimize/cfg.lisp`
 - **内容**:
@@ -612,7 +612,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: GCC `-floop-unswitch` / LLVM `LoopUnswitch`. 型チェック・NULL チェックを含む CL ループに特に有効
 - **難易度**: Medium
 
-#### FR-603: Jump Threading (ジャンプスレッディング)
+#### ✅ FR-603: Jump Threading (ジャンプスレッディング)
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **内容**:
@@ -634,7 +634,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: GCC `-fif-conversion2` / LLVM `IfConversion`. 分岐予測ミスペナルティ（10-20サイクル）を除去
 - **難易度**: Medium
 
-#### FR-605: Reassociation (再結合)
+#### ✅ FR-605: Reassociation (再結合)
 
 - **対象**: `src/optimize/optimizer.lisp`
 - **内容**:
@@ -703,7 +703,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: Java HotSpot BCE / JVM JIT. 型安全言語での最重要最適化の一つ; 配列アクセスを C 相当の速度に
 - **難易度**: Hard
 
-#### FR-612: Null / NIL Check Elimination (NILチェック除去)
+#### ✅ FR-612: Null / NIL Check Elimination (NILチェック除去)
 
 - **対象**: `src/vm/vm.lisp`, `src/optimize/optimizer.lisp`
 - **内容**:

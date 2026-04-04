@@ -429,7 +429,7 @@ ANSI CL の型システムは原子型だけでなく合成型指定子をサポ
 | `:method-combination` オプション | ✅ FR-382 | ✅ | `standard` / `+` / `append` 等 |
 | インラインメソッド `(:method ...)` | ✅ FR-382 | ✅ | `defgeneric` 内に直接 `defmethod` |
 | `ensure-generic-function` (公開) | ✅ FR-525 | ✅ | `%ensure-generic-function` は内部のみ |
-| GF 再定義セマンティクス | 🔧 | ✅ | 既存GFに `defgeneric` を再実行すると既存メソッドは保持。lambda-list 不一致なら `error` |
+| GF 再定義セマンティクス | ✅ | ✅ | 既存GFに `defgeneric` を再実行すると既存メソッドは保持 (`ctx-global-generics` 確認)。lambda-list 不一致は compile-time `warn` (`ctx-global-generic-params` に param 数を保存して比較) |
 
 ### 8.2 `defmethod` と特化子 (Specializers)
 
@@ -667,7 +667,7 @@ ANSI CL 7.6.4 — `defmethod` のラムダリストは `defgeneric` と適合し
 | `slot-unbound` GF | ✅ FR-384 | ✅ | 未束縛アクセス時のカスタマイズ。現在は直接 `error` |
 | `slot-missing` GF | ✅ | ✅ | **スロット名自体が存在しない**場合。`slot-unbound` とは別 (operation引数: `:slot-value`/`:setf`/`:slot-boundp`/`:slot-makunbound`) |
 | `:reader` / `:writer` / `:accessor` | ✅ | ✅ | `compile-slot-accessor` で closure 生成 |
-| accessor read inlining | 🔧 FR-120 | ✅ | `*accessor-slot-map*` あり。read 方向は未展開 |
+| accessor read inlining | ✅ FR-120 | ✅ | `compiler-macroexpand-all` で `(accessor obj)` → `(slot-value obj 'slot)` に展開 |
 | `with-slots` マクロ | ✅ | ✅ | `macros-stdlib.lisp` 実装済み |
 | `with-accessors` マクロ | ✅ | ✅ | `macros-stdlib.lisp` 実装済み |
 
@@ -726,7 +726,7 @@ t
 └── standard-object         ✅ FR-528 (VMレジストリに登録済み)
     └── (user classes)      ✅
 └── structure-object        ✅
-└── condition               🔧 (conditions.lisp で独自実装)
+└── condition               ✅ (vm-condition が host CL の condition を継承)
     └── serious-condition
         └── error
     └── warning
@@ -873,7 +873,7 @@ SBCL は別の `structure-class` メタクラスを使う点で異なる。
 | 内部表現 | `defclass` (ハッシュテーブル) | `sb-kernel:structure-object` (固定サイズベクタ) |
 | `copy-structure` | ✅ | ✅ |
 | `structure-object` 組み込みクラス | ✅ FR-528 | ✅ |
-| CLOS メソッド定義 (構造体への `defmethod`) | 🔧 | ✅ (CPL に `structure-object` が入る) |
+| CLOS メソッド定義 (構造体への `defmethod`) | ✅ | ✅ | `expander-defstruct.lisp` で `structure-object` を自動スーパークラスとして追加 (`:include` なし時); CPL に `structure-object` が入る |
 
 ---
 
@@ -964,13 +964,12 @@ make-instance class &rest initargs
 
 **cl-cc の実装 (`conditions.lisp`) — 実際に `:report` を使用中:**
 ```lisp
-(define-condition vm-type-error (vm-error)
-  ((expected-type :initarg :expected-type :reader vm-expected-type)
-   (datum         :initarg :datum         :reader vm-datum))
+(define-condition vm-type-error (vm-error type-error)
+  ()
   (:report (lambda (condition stream)
              (format stream "VM Type Error: expected ~A, got ~S"
-                     (vm-expected-type condition)
-                     (vm-datum condition)))))
+                     (type-error-expected-type condition)
+                     (type-error-datum condition)))))
 ```
 
 | 機能 | cl-cc | SBCL | 備考 |
@@ -987,11 +986,11 @@ SBCL の標準コンディション階層 (cl-cc での実装状況):
 
 ```
 │   ├── error                           ✅ (host CL の error)
-│   │   ├── type-error                  🔧 vm-type-error
-│   │   ├── unbound-variable            🔧 vm-unbound-variable
-│   │   ├── undefined-function          🔧 vm-undefined-function
-│   │   ├── unbound-slot               🔧 (slot-unbound GF が signal。FR-384)
-│   │   ├── division-by-zero            🔧 vm-division-by-zero
+│   │   ├── type-error                  ✅ vm-type-error が (vm-error type-error) を継承
+│   │   ├── unbound-variable            ✅ vm-unbound-variable が (vm-error unbound-variable) を継承
+│   │   ├── undefined-function          ✅ vm-undefined-function が (vm-error undefined-function) を継承
+│   │   ├── unbound-slot               ✅ vm-slot-read が `unbound-slot` condition をシグナル (FR-384)
+│   │   ├── division-by-zero            ✅ vm-division-by-zero が (vm-error division-by-zero) を継承
 ├── warning                             ✅ (host)
 ```
 
