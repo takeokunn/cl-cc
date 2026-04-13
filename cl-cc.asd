@@ -22,12 +22,14 @@
        ((:file "cst")
         (:file "diagnostics")
         (:file "ast")
+        (:file "ast-functions")   ; ast-children, ast-bound-names, source utilities, ast-error
         (:file "prolog-data")
         (:file "prolog")
         (:file "prolog-query") ; solve-goal + query-all/one + built-ins + peephole
         (:file "dcg")
         (:file "lexer")
         (:file "lexer-readers")   ; Token readers: number, string, character, symbol, keyword
+        (:file "lexer-skip")      ; Form-skipping helpers, feature conditionals, read-form-text
        (:file "lexer-dispatch")
        (:file "incremental")
        (:file "pratt")
@@ -36,8 +38,10 @@
          :serial t
          :components
          ((:file "parser")
+          (:file "parser-sexp-lowering") ; *list-lowering-table* + define-list-lowerer + shared helpers
           (:file "lower")
-          (:file "lower-definitions") ; definition forms: flet/defun/defclass/defmethod/etc.
+          (:file "lower-definitions") ; definition forms: flet/defun/defvar/defmacro/control
+          (:file "lower-clos")        ; CLOS lowerers: defclass/defgeneric/defmethod/make-instance/slot-value
           (:file "parser-roundtrip")
           (:file "grammar")))
        (:module "php"
@@ -45,7 +49,8 @@
         :components
         ((:file "lexer")
          (:file "lexer-ops")
-         (:file "parser")
+         (:file "parser")       ; grammar rules, loop lowering, token helpers
+         (:file "parser-expr")  ; expression parser: primary/postfix/unary/binop/expr/arglist
          (:file "parser-stmt")
          (:file "grammar")
          (:file "grammar-stmt")))
@@ -57,9 +62,11 @@
           ((:file "macro-lambda-list") ; shared lambda-list parsing + destructuring helpers
            (:file "macro")           ; core: macro-env, defmacro machinery, macroexpansion
            (:file "macros-basic")    ; bootstrap: check-type/setf/list + value helpers
-           (:file "macros-control-flow") ; bootstrap control-flow macros
+           (:file "macros-control-flow") ; bootstrap control-flow macros (when/unless/cond/do*)
+           (:file "macros-control-flow-case") ; case/typecase macro expansion
            (:file "macros-mutation") ; push/pop/incf/decf split from stdlib
            (:file "loop-data")       ; LOOP: grammar tables — the "Prolog database"
+           (:file "loop-parser-for") ; LOOP: token predicates, CPS utils, FOR sub-parsers
            (:file "loop-parser")     ; LOOP: CPS token parser → IR plist
            (:file "loop-emitters")   ; LOOP: IR → code-fragment tables
            (:file "loop")            ; LOOP: generator — assembles tagbody from IR
@@ -71,8 +78,10 @@
            (:file "macros-stdlib-ansi")  ; ANSI CL Phase 1 (psetf, assert, define-condition...)
            (:file "macros-stdlib-utils") ; list/tree/string/array utility macros
            (:file "macros-cxr")      ; algorithmic CXR accessor registration
-           (:file "macros-hof")      ; higher-order list/search helpers
+           (:file "macros-hof")         ; higher-order list/search helpers (map/find/remove)
+           (:file "macros-hof-search")  ; position/count/assoc search HOFs
            (:file "macros-filesystem") ; file/IO/runtime stubs split from stdlib
+           (:file "macros-filesystem-ext") ; pprint, readtable, debug/introspect, compile-file stubs
            (:file "macros-sequence")      ; sequences: copy/fill/replace/mismatch/delete/substitute
            (:file "macros-sequence-fold") ; sequences: reduce/nsubstitute/map-into/merge/last/search
            (:file "macros-list-compat") ; list/sequence compatibility helpers split from stdlib
@@ -102,6 +111,7 @@
         :components
         ((:file "package")
          (:file "vm")
+         (:file "vm-state-init")  ; profiling, *vm-initial-globals*, heap ops, execute-instruction generic
          (:file "vm-bridge")      ; host function bridge + CLOS slot-definition helpers
          (:file "vm-instructions") ; instruction set definitions
          (:file "vm-dispatch")    ; call-frame helpers + label table + execution context
@@ -113,20 +123,27 @@
          (:file "vm-clos-execute") ; execute-instruction methods for all CLOS instructions
         (:file "vm-run")     ; Handler-case, label table, CLOS-based run-compiled
         (:file "vm-opcodes")      ; Phase-A: defopcode engine, shape macros, vm2-state
-        (:file "vm-opcodes-defs") ; Phase-A: opcode registrations + %run-vm-core + compat shims
+        (:file "vm-opcodes-defs") ; Phase-A: defopcode registrations (const, nop, arith, jump, cons...)
+        (:file "vm-opcodes-run")  ; Phase-A: %run-vm-core + run-vm + vm2-state compat shims
        (:file "primitives")
+       (:file "primitives-typep")    ; vm-typep data tables + check + execute-instruction
        (:file "vm-bitwise")        ; FR-303: ash, logand, logior, logxor, logeqv, lognot, logtest, logbitp, logcount, integer-length
        (:file "vm-transcendental") ; FR-304: expt, sqrt, exp, log, trig, hyperbolic
        (:file "vm-numeric")
+       (:file "vm-numeric-ext")   ; FR-301 ffloor/fceiling/ftruncate/fround, FR-306 rational, FR-307 complex, FR-507 env queries
        (:file "vm-extensions")
         (:file "io")
-        (:file "io-execute")      ; execute-instruction methods + run-compiled-with-io
+        (:file "io-instructions") ; all define-vm-instruction forms for I/O (split from io.lisp)
+        (:file "io-execute")      ; execute-instruction methods for I/O instructions
+        (:file "io-runners")      ; run-compiled-with-io + run-string-with-io
         (:file "format")
         (:file "conditions")
+        (:file "conditions-instructions") ; VM instruction defstructs + execute-instruction + helpers
         (:file "list-coerce")
         (:file "list")
         (:file "list-execute")   ; execute-instruction methods + extended list instructions
         (:file "array")
+        (:file "array-bits")      ; bit arrays (FR-606), adjust-array/displacement (FR-605), simple-vector-p
         (:file "strings")
         (:file "symbols")
        (:file "hash")))
@@ -141,6 +158,7 @@
        (:file "types-extended")
        (:file "types-env")
        (:file "substitution")
+       (:file "substitution-schemes") ; backward-compat, occurs-check, generalize/instantiate
        (:file "unification")
        (:file "subtyping")
        (:file "effect")
@@ -149,10 +167,13 @@
        (:file "parser")         ; core type parsing: prim/compound/arrow/effect-row
        (:file "parser-typed")   ; row/constraint/lambda-list/typed-AST nodes/utilities
        (:file "typeclass")
-       (:file "typeclass-compat") ; instance registry + dict-env + backward-compat aliases
+       (:file "typeclass-compat")        ; instance registry + dict-env operations
+       (:file "typeclass-compat-legacy") ; backward-compat type-class/constraint/effect/skolem structs
        (:file "solver")
+       (:file "solver-collect")   ; collect-constraints: AST walker that generates equality constraints
        (:file "inference")
        (:file "inference-forms")    ; type-predicate registry + if/let/lambda/call handlers + entry points
+       (:file "inference-conditions") ; condition classes + exports
        (:file "inference-effects")
        (:file "bidirectional")
        (:file "checker")
@@ -173,26 +194,33 @@
        (:file "closure")
         (:file "cps")
         (:file "cps-ast")
-        (:file "cps-ast-extended") ; extended/imperative forms + entry points
+        (:file "cps-ast-extended")          ; OOP/mutation forms (setq, defvar, make-instance, defclass…)
+        (:file "cps-ast-functional")        ; functional forms + entry points (split from cps-ast-extended)
          (:file "builtin-registry-data") ; Core alists: unary/binary/string-cmp/char-cmp
          (:file "builtin-registry-data-ext") ; Extended alists: I/O, stream, custom, ternary
          (:file "builtin-registry")          ; Registry struct + *builtin-registry* + registration
-         (:file "builtin-registry-emitters") ; 27 emit-builtin-* fns + dispatcher table
+         (:file "builtin-registry-emitters") ; 27 emit-builtin-* emitter functions
+         (:file "builtin-registry-dispatch") ; *builtin-emitter-table* + *convention-arity* + emit-registered-builtin
          (:file "codegen-core")         ; binop table + primitive/if compilation
          (:file "codegen-core-control") ; block/return-from + tagbody/go + setq/quote/the
          (:file "codegen-core-let")      ; let-binding analysis: predicates + walkers
          (:file "codegen-core-let-emit") ; let-binding emitters + compile-ast (ast-let)
-         (:file "codegen-clos")
-         (:file "codegen-functions")       ; typed params + defmacro + parameter helpers
+         (:file "codegen-clos")    ; defclass + slot accessor compilation
+         (:file "codegen-gf")      ; defgeneric/defmethod/make-instance/slot-value
+         (:file "codegen-functions")        ; typed params + defmacro compilation
+         (:file "codegen-functions-params") ; parameter-list helpers + compile-function-body
          (:file "codegen-functions-emit")  ; lambda/defun/defvar compile-ast methods
          (:file "codegen-phase2")  ; Phase 2 AST-introspecting builtin handlers
          (:file "codegen-control") ; control-flow + multiple-values compiler methods
          (:file "codegen-io")      ; Phase 2 stream/reader/printer handlers split from phase 2
+         (:file "codegen-io-ext") ; Phase 2 array/string/format/file handlers split from codegen-io
          (:file "codegen-hash-table") ; hash-table handler cluster split from phase 2
          (:file "codegen-slot-predicates") ; CLOS slot predicate handlers split from phase 2
         (:file "codegen-string-kwargs") ; string comparison/case handlers split from phase 2
-        (:file "codegen-fold")       ; compile-time constant fold + optimize-ast (before codegen)
-        (:file "codegen")
+        (:file "codegen-fold")          ; compile-time constant fold + partial evaluator
+        (:file "codegen-fold-optimize") ; %loc macro + optimize-ast fold pass
+        (:file "codegen")       ; entry points + exception handling + multiple values
+        (:file "codegen-calls") ; function call compilation: %try-compile-* + ast-call method
         (:file "codegen-locals"))) ; local fn bindings: flet/labels/ast-function + emit-assembly
      ;; Stage 5: VM IR → optimized VM IR
      (:module "optimize"
@@ -206,14 +234,18 @@
        (:file "ssa-construction")  ; ssa-construct + ssa-destroy + round-trip
        (:file "egraph")             ; Phase 2: E-graph data + union-find + patterns + rules
        (:file "egraph-saturation")  ; saturation + extraction + VM instruction interface
-       (:file "egraph-rules")     ; Phase 2: defrule macro + built-in rewrite rules
+       (:file "egraph-rules")          ; Phase 2: defrule macro + core rewrite rules
+       (:file "egraph-rules-advanced") ; Advanced rules + egraph-builtin-rules + optimize-with-egraph
        (:file "optimizer-tables")   ; Data tables + predicates (loaded before passes)
+       (:file "optimizer-algebraic") ; Algebraic identity rules + classification predicates + dead-label table
        (:file "optimizer-inline")      ; Analysis: collect-function-defs, call-graph, rename helpers
        (:file "optimizer-inline-pass") ; Pass execution: global-dce, eligibility, opt-pass-inline
        (:file "optimizer-dataflow")  ; SCCP (sparse conditional constant propagation)
        (:file "optimizer-copyprop")  ; copy propagation pass + opt-map-tree utility
-       (:file "optimizer-memory")   ; Alias analysis + memory passes
-       (:file "optimizer-flow")     ; DCE + control flow passes
+       (:file "optimizer-memory")   ; Alias analysis helpers
+       (:file "optimizer-memory-passes") ; Dead-store-elim + store-to-load-forward passes
+       (:file "optimizer-flow")       ; DCE + jump threading + unreachable + type-check elim
+       (:file "optimizer-flow-passes") ; nil-check-elim + branch-correlation + block-merge + tail-merge
        (:file "optimizer-strength")     ; Core: strength-reduce + bswap/rotate recognition
        (:file "optimizer-strength-ext") ; Extended: reassociation + batch concatenation
        (:file "optimizer-cse-gvn") ; CSE + GVN + dead-label elimination + leaf-function detection
@@ -224,21 +256,27 @@
      (:module "emit"
       :serial t
       :components
-      ((:file "mir")                 ; Phase 1: MIR IR — SSA CFG intermediate — structs + builder API
+      ((:file "mir")                 ; Phase 1: MIR IR — SSA CFG intermediate — structs + generic ops
+       (:file "mir-builder")         ; Builder API: mir-new-value/block/function, mir-emit, SSA tracking
        (:file "mir-analysis")        ; RPO traversal, dominator analysis, printing
        (:file "target")              ; Phase 1: target-desc — unified target descriptors
        (:file "calling-convention")
        (:file "regalloc")
+       (:file "regalloc-defs-uses") ; instruction-defs/uses protocol implementations
        (:file "regalloc-allocate") ; linear scan allocation + spill code + public API
        (:file "x86-64")
-       (:file "x86-64-encoding")
+       (:file "x86-64-encoding")        ; register constants + REX/ModR/M/SIB primitives
+       (:file "x86-64-encoding-instrs") ; MOV/ADD/SUB/CMP/JMP instruction emitters
        (:file "x86-64-sequences") ; IDIV/shift/CMOVcc/bitwise/SETcc complex sequences
        (:file "x86-64-regs")
        (:file "x86-64-emit-ops")
+       (:file "x86-64-emit-ops-bits")    ; bit/shift/select emitters (not/lognot/logcount/bswap/ash/rotate/min/max/select)
        (:file "x86-64-emit-ops-logical") ; type predicates + boolean/bitwise logical emitters
        (:file "x86-64-codegen")
+       (:file "x86-64-codegen-dispatch") ; per-instruction emitters + dispatch table
        (:file "aarch64")
-       (:file "aarch64-codegen")  ; reg mapping + instruction encoders + label-offset builder
+       (:file "aarch64-codegen")  ; reg mapping + instruction encoders
+       (:file "aarch64-codegen-labels") ; 64-bit immediate + size estimation + label offsets
        (:file "aarch64-emitters") ; define-a64-*-emitter macros + emit-a64-vm-* functions
        (:file "aarch64-program")  ; emitter-table, prologue/epilogue, two-pass program emitter
        (:file "wasm-types")
@@ -274,11 +312,15 @@
       :components
       ((:file "package")
        (:file "runtime")
+       (:file "runtime-ops")     ; arrays, arithmetic, bitwise, comparisons, math rt-* wrappers
        (:file "runtime-math-io") ; strings, chars, symbols, hash-tables, CLOS, conditions, I/O
        (:file "value")
+       (:file "value-codec")  ; encode/decode codecs: fixnum/double/pointer/char/bool + CL interop
        (:file "frame")
        (:file "heap")
-       (:file "gc")          ; Sections 1-4: alloc, roots, minor GC (Cheney), write barrier
+       (:file "heap-trace") ; card table helpers + address predicates + rt-object-pointer-slots
+       (:file "gc")               ; Sections 1-3: alloc, roots, minor GC (Cheney)
+       (:file "gc-write-barrier") ; Section 4: rt-gc-write-barrier (SATB + card table)
        (:file "gc-major"))) ; Sections 5-6: major GC (tri-color mark-sweep) + stats
      ;; Stage 4 (pipeline): compile-expression, run-string, stdlib API
      ;; Loads last because it calls optimize-instructions + emit-assembly
@@ -288,6 +330,7 @@
       :components
       ((:file "stdlib-source")     ; *standard-library-source* core: mapcar→numeric constants
        (:file "stdlib-source-ext") ; *standard-library-source* ext: type predicates→control vars
+       (:file "pipeline-stdlib")   ; stdlib expanded-form cache: snapshot/restore/build/get/warm
        (:file "pipeline")
        (:file "pipeline-native") ; native code generation + typeclass macros
        (:file "pipeline-repl")   ; REPL persistent state + run-string-repl + our-load
@@ -309,7 +352,8 @@
        (:file "args")
        (:file "selfhost") ; Self-hosting verification data + phases (before main.lisp)
        (:file "main")       ; Help system (%print-global-help, %print-command-help)
-       (:file "main-utils") ; Utilities, dump functions, flamegraph, compile-opts
+       (:file "main-utils") ; Utilities, flamegraph, SSA block name helpers
+       (:file "main-dump")  ; ANSI colors, dump-*-phase functions, compile-opts struct
        (:file "handlers"))))))) ; Subcommand handlers + main dispatcher
 
 (asdf:defsystem :cl-cc/test
@@ -509,9 +553,11 @@
             (:file "ir-printer-tests")))
             (:file "cps-tests")
             (:file "cps-ast-tests")
-            (:file "cps-ast-extended-tests") ; setq/the/values/apply/call/defgeneric/entry-points
+            (:file "cps-ast-extended-tests") ; OOP/mutation: setq/defvar/make-instance/defclass/defgeneric/defmethod
+            (:file "cps-ast-functional-tests") ; functional: quote/the/values/mvb/apply/call/entry-points
               (:file "builtin-registry-tests")
              (:file "builtin-registry-data-tests")
+             (:file "builtin-registry-data-ext-tests")   ; extended calling-convention data tables
              (:file "closure-tests")
            (:file "context-tests")
              (:file "codegen-tests")
@@ -523,6 +569,7 @@
               (:file "codegen-runtime-tests")
                (:file "codegen-clos-tests")
               (:file "codegen-control-tests")
+              (:file "codegen-calls-tests")   ; %try-compile-funcall/apply/noescape, %compile-normal-call, GF dispatch
               (:file "codegen-locals-tests")  ; target-instance, %compile-body-with-tail, type-check-ast
               (:file "codegen-io-tests")
               (:file "codegen-hash-table-tests")
@@ -583,6 +630,8 @@
         :components
         ((:file "gc-tests")
          (:file "heap-tests")
+         (:file "heap-trace-tests")       ; Card table + address predicates (heap-trace.lisp)
+         (:file "gc-write-barrier-tests") ; SATB + card write barrier (gc-write-barrier.lisp)
          (:file "value-tests")
          (:file "frame-tests")))
        (:module "bytecode"

@@ -83,13 +83,12 @@
                     `(* (float-sign ,(second form)) (abs ,(third form)))))
       (t (error "float-sign takes 1 or 2 arguments")))))
 
-;; float (FR-604): 1-arg → builtin, 2-arg → ignore prototype, just convert
+;; float (FR-604): 1-or-2-arg → convert to float (prototype arg is discarded)
 (define-expander-for float (form)
   (let ((nargs (length (cdr form))))
-    (cond
-      ((= nargs 1) (list 'float (compiler-macroexpand-all (second form))))
-      ((= nargs 2) (list 'float (compiler-macroexpand-all (second form))))
-      (t (error "float takes 1 or 2 arguments")))))
+    (unless (<= 1 nargs 2)
+      (error "float takes 1 or 2 arguments"))
+    (list 'float (compiler-macroexpand-all (second form)))))
 
 ;; FR-667: logand/logior/logxor/logeqv — 0-arg → identity, 1-arg → value, N-arg → left fold
 ;; Identity elements: logand → -1 (all bits set), logior → 0, logxor → 0, logeqv → -1

@@ -499,19 +499,16 @@
 
 ;;; ─── I/O Wrappers ──────────────────────────────────────────────────────────
 
-(deftest rt-make-string-stream-input
-  "rt-make-string-stream creates an input stream."
+(deftest rt-string-stream-creation-and-io
+  "String stream creation: input-stream read-char, output-stream write+get, output-stream roundtrip."
+  ;; Input stream: read-char returns first character
   (let ((s (cl-cc/runtime:rt-make-string-stream "hello")))
-    (assert-equal #\h (cl-cc/runtime:rt-read-char s))))
-
-(deftest rt-make-string-stream-output
-  "rt-make-string-stream output and get-string roundtrip."
+    (assert-equal #\h (cl-cc/runtime:rt-read-char s)))
+  ;; Output stream via rt-make-string-stream: write then get-string
   (let ((s (cl-cc/runtime:rt-make-string-stream "" :direction :output)))
     (cl-cc/runtime:rt-write-string "world" s)
-    (assert-equal "world" (cl-cc/runtime:rt-get-string-from-stream s))))
-
-(deftest rt-string-output-stream-roundtrip
-  "rt-make-string-output-stream / rt-stream-write-string / rt-get-output-stream-string."
+    (assert-equal "world" (cl-cc/runtime:rt-get-string-from-stream s)))
+  ;; Output stream via rt-make-string-output-stream: stream-write-string + get-output
   (let ((s (cl-cc/runtime:rt-make-string-output-stream)))
     (cl-cc/runtime:rt-stream-write-string s "test")
     (assert-equal "test" (cl-cc/runtime:rt-get-output-stream-string s))))

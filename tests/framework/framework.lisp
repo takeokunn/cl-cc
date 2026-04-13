@@ -614,14 +614,6 @@ Each task is executed in its own short-lived sub-thread, and the worker
 waits for it with sb-thread:join-thread :timeout. If the sub-thread does
 not finish in time it is terminated and the test is recorded as a
 timeout fail, guaranteeing the runner can never wedge on a hanging test."
-  ;; Warm the stdlib AST cache BEFORE spawning any workers.  This closes
-  ;; two failure modes at once: (1) the cold-cache race where two workers
-  ;; simultaneously enter %build-stdlib-ast-cache and corrupt each other's
-  ;; view of *stdlib-ast-cache{-source,-eval-fn}*, and (2) the first test
-  ;; using :stdlib t paying the full parse+expand+lower cost inside the
-  ;; 10-second per-test budget (see %default-test-timeout).  A fulfilled
-  ;; cache is read-only from the workers' perspective, so no mutex needed.
-  (ignore-errors (cl-cc::warm-stdlib-cache))
   (let* ((*test-runner-mode* :parallel)
          (n (length tests))
          (results (make-array n :initial-element nil))
@@ -791,6 +783,13 @@ timeout fail, guaranteeing the runner can never wedge on a hanging test."
               (format t "1..~A~%" (* n repeat))
               (force-output)
 
+              ;; Warm the stdlib AST cache before any tests run — sequential
+              ;; or parallel.  This prevents (1) the cold-cache race in
+              ;; parallel mode and (2) the first pipeline-heavy test paying
+              ;; the full parse+expand+lower cost inside the 10-second
+              ;; per-test budget in sequential/coverage mode.
+              (ignore-errors (cl-cc::warm-stdlib-cache))
+
               ;; Run (with optional repeat for flaky detection)
               (let ((all-run-results '()))
                 (dotimes (r repeat)
@@ -884,14 +883,14 @@ any whose package is not yet loaded."
                     (tags nil)
                     (exclude-tags *default-slow-tags*)
                     (exclude-suites nil exclude-suites-p)
-                    (parallel nil)
+                    (parallel t)
                     (random nil))
-  "Run all tests in the main cl-cc-suite.
+  "Run a filtered subset of cl-cc-suite in parallel (4 workers by default).
 
-By default, excludes slow suites (selfhost, PBT) and slow tags (:slow :selfhost :pbt :fuzz)
-so that `make test` stays fast. Pass :exclude-suites '() :exclude-tags '() to run everything.
+By default, excludes slow suites (selfhost, PBT) and slow tags (:slow :selfhost :pbt :fuzz).
+Pass :exclude-suites '() :exclude-tags '() to run everything, or use `run-all-tests`.
 
-The ASDF 0-arg entry point (uiop:symbol-call :cl-cc/test 'run-tests) hits this fast path."
+Useful for REPL-based development when you want to skip the heaviest suites."
   (let ((effective-exclude-suites
           (if exclude-suites-p exclude-suites (%resolve-default-slow-suites))))
     (run-suite 'cl-cc-suite
@@ -902,10 +901,8 @@ The ASDF 0-arg entry point (uiop:symbol-call :cl-cc/test 'run-tests) hits this f
                :exclude-suites effective-exclude-suites)))
 
 (defun run-all-tests ()
-  "Run EVERY test including selfhost and PBT suites.
-Intended for local full-verification only (`make test-all`); expect minutes.
-Prefer `run-tests-extended` for day-to-day full runs — it excludes the
-heaviest suites but still covers everything else."
+  "Run the full test suite in parallel (4 workers, 10s per-test timeout).
+This is the primary entry point — used by `make test` and `asdf:test-system`."
   (run-suite 'cl-cc-suite :parallel t :random nil))
 
 (defun run-tests-extended ()
@@ -945,11 +942,11 @@ Honors CLCC_PBT_COUNT to bound per-property case counts."
 (defsuite cl-cc-suite :description "CL-CC Test - Main suite for all tests")
 
 ;; Integration tests that exercise the full compile pipeline via run-string.
-;; These are legitimately slow (seconds per test) because every case invokes
-;; parse → expand → cps → optimize → codegen → execute. Excluded from the
-;; default fast path; run via `make test-full` or (run-tests :exclude-suites '()).
+;; Each case invokes parse → expand → cps → optimize → codegen → execute.
+;; Heavy tests rely on *stdlib-expanded-cache* being pre-warmed by run-suite
+;; before the parallel workers start.
 (defsuite cl-cc-integration-suite
-  :description "Full-pipeline integration tests (slow; excluded from make test)"
+  :description "Full-pipeline integration tests"
   :parent cl-cc-suite)
 
 (in-suite cl-cc-suite)

@@ -72,88 +72,89 @@
 
 ;;; ─── ir-rpo ─────────────────────────────────────────────────────────────────
 
-(deftest ir-rpo-single-block
-  "RPO of a function with only entry returns one block."
-  (let ((fn (make-test-fn)))
+(deftest-each ir-rpo-cases
+  "ir-rpo: single block, linear chain, diamond, and unreachable block exclusion."
+  :cases (("single-block"
+           (lambda ()
+             (let* ((fn (make-test-fn)))
+               (list fn (cl-cc:irf-entry fn) 1 nil nil nil)))
+          )
+          ("linear-chain"
+           (lambda ()
+             (let* ((fn (make-test-fn))
+                    (entry (cl-cc:irf-entry fn))
+                    (a (cl-cc:ir-new-block fn :A))
+                    (b (cl-cc:ir-new-block fn :B)))
+               (cl-cc:ir-add-edge entry a)
+               (cl-cc:ir-add-edge a b)
+               (list fn entry 3 a b nil)))
+          )
+          ("diamond"
+           (lambda ()
+             (let* ((fn (make-test-fn))
+                    (entry (cl-cc:irf-entry fn))
+                    (left  (cl-cc:ir-new-block fn :left))
+                    (right (cl-cc:ir-new-block fn :right))
+                    (join  (cl-cc:ir-new-block fn :join)))
+               (cl-cc:ir-add-edge entry left)
+               (cl-cc:ir-add-edge entry right)
+               (cl-cc:ir-add-edge left join)
+               (cl-cc:ir-add-edge right join)
+               (list fn entry 4 nil nil nil)))
+          )
+          ("unreachable-excluded"
+           (lambda ()
+             (let* ((fn (make-test-fn))
+                    (orphan (cl-cc:ir-new-block fn :orphan)))
+               (declare (ignore orphan))
+               (list fn (cl-cc:irf-entry fn) 1 nil nil nil)))))
+  (make-cfg)
+  (destructuring-bind (fn entry expected-count second-blk third-blk _) (funcall make-cfg)
+    (declare (ignore _))
     (let ((rpo (cl-cc:ir-rpo fn)))
-      (assert-= 1 (length rpo))
-      (assert-eq (cl-cc:irf-entry fn) (first rpo)))))
-
-(deftest ir-rpo-linear-chain
-  "RPO of entry->A->B returns (entry A B)."
-  (let* ((fn (make-test-fn))
-         (entry (cl-cc:irf-entry fn))
-         (a (cl-cc:ir-new-block fn :A))
-         (b (cl-cc:ir-new-block fn :B)))
-    (cl-cc:ir-add-edge entry a)
-    (cl-cc:ir-add-edge a b)
-    (let ((rpo (cl-cc:ir-rpo fn)))
-      (assert-= 3 (length rpo))
+      (assert-= expected-count (length rpo))
       (assert-eq entry (first rpo))
-      (assert-eq a (second rpo))
-      (assert-eq b (third rpo)))))
-
-(deftest ir-rpo-diamond
-  "RPO of a diamond CFG visits all 4 blocks."
-  (let* ((fn (make-test-fn))
-         (entry (cl-cc:irf-entry fn))
-         (left (cl-cc:ir-new-block fn :left))
-         (right (cl-cc:ir-new-block fn :right))
-         (join (cl-cc:ir-new-block fn :join)))
-    (cl-cc:ir-add-edge entry left)
-    (cl-cc:ir-add-edge entry right)
-    (cl-cc:ir-add-edge left join)
-    (cl-cc:ir-add-edge right join)
-    (let ((rpo (cl-cc:ir-rpo fn)))
-      (assert-= 4 (length rpo))
-      ;; Entry is always first in RPO
-      (assert-eq entry (first rpo)))))
-
-(deftest ir-rpo-unreachable-block-excluded
-  "RPO excludes blocks unreachable from entry."
-  (let* ((fn (make-test-fn))
-         (orphan (cl-cc:ir-new-block fn :orphan)))
-    (declare (ignore orphan))
-    (let ((rpo (cl-cc:ir-rpo fn)))
-      (assert-= 1 (length rpo)))))
+      (when second-blk (assert-eq second-blk (second rpo)))
+      (when third-blk  (assert-eq third-blk  (third  rpo))))))
 
 ;;; ─── ir-dominators ──────────────────────────────────────────────────────────
 
-(deftest ir-dominators-single-block
-  "Entry block dominates itself."
-  (let* ((fn (make-test-fn))
-         (entry (cl-cc:irf-entry fn))
-         (idom (cl-cc:ir-dominators fn)))
-    (assert-eq entry (gethash entry idom))))
-
-(deftest ir-dominators-linear
-  "In linear chain entry->A->B, entry dominates A and A dominates B."
-  (let* ((fn (make-test-fn))
-         (entry (cl-cc:irf-entry fn))
-         (a (cl-cc:ir-new-block fn :A))
-         (b (cl-cc:ir-new-block fn :B)))
-    (cl-cc:ir-add-edge entry a)
-    (cl-cc:ir-add-edge a b)
-    (let ((idom (cl-cc:ir-dominators fn)))
-      (assert-eq entry (gethash a idom))
-      (assert-eq a (gethash b idom)))))
-
-(deftest ir-dominators-diamond
-  "In diamond CFG, join node is dominated by entry."
-  (let* ((fn (make-test-fn))
-         (entry (cl-cc:irf-entry fn))
-         (left (cl-cc:ir-new-block fn :left))
-         (right (cl-cc:ir-new-block fn :right))
-         (join (cl-cc:ir-new-block fn :join)))
-    (cl-cc:ir-add-edge entry left)
-    (cl-cc:ir-add-edge entry right)
-    (cl-cc:ir-add-edge left join)
-    (cl-cc:ir-add-edge right join)
-    (let ((idom (cl-cc:ir-dominators fn)))
-      (assert-eq entry (gethash left idom))
-      (assert-eq entry (gethash right idom))
-      ;; Join's immediate dominator is entry (the nearest common dom)
-      (assert-eq entry (gethash join idom)))))
+(deftest-each ir-dominators-cases
+  "ir-dominators: self-domination, linear chain idom, and diamond join idom."
+  :cases (("single-block"
+           (lambda ()
+             (let* ((fn (make-test-fn))
+                    (entry (cl-cc:irf-entry fn)))
+               ;; Returns (fn . list-of-(block . expected-idom) pairs)
+               (cons fn (list (cons entry entry))))))
+          ("linear-chain"
+           (lambda ()
+             (let* ((fn (make-test-fn))
+                    (entry (cl-cc:irf-entry fn))
+                    (a (cl-cc:ir-new-block fn :A))
+                    (b (cl-cc:ir-new-block fn :B)))
+               (cl-cc:ir-add-edge entry a)
+               (cl-cc:ir-add-edge a b)
+               (cons fn (list (cons a entry) (cons b a))))))
+          ("diamond"
+           (lambda ()
+             (let* ((fn (make-test-fn))
+                    (entry (cl-cc:irf-entry fn))
+                    (left  (cl-cc:ir-new-block fn :left))
+                    (right (cl-cc:ir-new-block fn :right))
+                    (join  (cl-cc:ir-new-block fn :join)))
+               (cl-cc:ir-add-edge entry left)
+               (cl-cc:ir-add-edge entry right)
+               (cl-cc:ir-add-edge left join)
+               (cl-cc:ir-add-edge right join)
+               (cons fn (list (cons left entry) (cons right entry) (cons join entry)))))))
+  (make-cfg)
+  (let* ((result (funcall make-cfg))
+         (fn     (car result))
+         (checks (cdr result))
+         (idom   (cl-cc:ir-dominators fn)))
+    (dolist (pair checks)
+      (assert-eq (cdr pair) (gethash (car pair) idom)))))
 
 ;;; ─── ir-collect-uses ────────────────────────────────────────────────────────
 
@@ -311,56 +312,30 @@
       (let ((resolved (cl-cc:ir-read-var fn 'x blk)))
         (assert-true (cl-cc:ir-value-p resolved))))))
 
-(deftest ir-ssa-trivial-elimination-same-value
-  "When all predecessors define the same value, the block arg is eliminated."
-  (let* ((fn (make-test-fn))
+(deftest-each ir-ssa-phi-elimination-cases
+  "ir-read-var at join: same value → trivially eliminated (0 params); distinct → kept (>0 params)."
+  :cases (("same-value"     t)
+          ("distinct-values" nil))
+  (same-value-p)
+  (let* ((fn    (make-test-fn))
          (entry (cl-cc:irf-entry fn))
-         (left (cl-cc:ir-new-block fn :left))
+         (left  (cl-cc:ir-new-block fn :left))
          (right (cl-cc:ir-new-block fn :right))
-         (join (cl-cc:ir-new-block fn :join))
-         (val (cl-cc:ir-new-value fn)))
-    (cl-cc:ir-add-edge entry left)
-    (cl-cc:ir-add-edge entry right)
-    (cl-cc:ir-add-edge left join)
-    (cl-cc:ir-add-edge right join)
-    (cl-cc:ir-seal-block fn entry)
-    (cl-cc:ir-seal-block fn left)
-    (cl-cc:ir-seal-block fn right)
-    (cl-cc:ir-seal-block fn join)
-    ;; Both predecessors define x as the SAME value
-    (cl-cc:ir-write-var fn 'x left val)
-    (cl-cc:ir-write-var fn 'x right val)
-    ;; Reading at join should return val directly (trivial elimination)
-    (let ((result (cl-cc:ir-read-var fn 'x join)))
-      (assert-eq val result)
-      ;; Block arg should be removed since it was trivially eliminated
-      (assert-= 0 (length (cl-cc:irb-params join))))))
-
-(deftest ir-ssa-no-trivial-elimination-distinct-values
-  "When predecessors define distinct values, the block arg is kept."
-  (let* ((fn (make-test-fn))
-         (entry (cl-cc:irf-entry fn))
-         (left (cl-cc:ir-new-block fn :left))
-         (right (cl-cc:ir-new-block fn :right))
-         (join (cl-cc:ir-new-block fn :join))
-         (v1 (cl-cc:ir-new-value fn))
-         (v2 (cl-cc:ir-new-value fn)))
-    (cl-cc:ir-add-edge entry left)
-    (cl-cc:ir-add-edge entry right)
-    (cl-cc:ir-add-edge left join)
-    (cl-cc:ir-add-edge right join)
-    (cl-cc:ir-seal-block fn entry)
-    (cl-cc:ir-seal-block fn left)
-    (cl-cc:ir-seal-block fn right)
-    (cl-cc:ir-seal-block fn join)
-    ;; Predecessors define x as DIFFERENT values
+         (join  (cl-cc:ir-new-block fn :join))
+         (v1    (cl-cc:ir-new-value fn))
+         (v2    (if same-value-p v1 (cl-cc:ir-new-value fn))))
+    (cl-cc:ir-add-edge entry left)  (cl-cc:ir-add-edge entry right)
+    (cl-cc:ir-add-edge left join)   (cl-cc:ir-add-edge right join)
+    (cl-cc:ir-seal-block fn entry)  (cl-cc:ir-seal-block fn left)
+    (cl-cc:ir-seal-block fn right)  (cl-cc:ir-seal-block fn join)
     (cl-cc:ir-write-var fn 'x left v1)
     (cl-cc:ir-write-var fn 'x right v2)
-    ;; Reading at join should keep the block arg (non-trivial phi)
     (let ((result (cl-cc:ir-read-var fn 'x join)))
       (assert-true (cl-cc:ir-value-p result))
-      ;; Block arg must remain
-      (assert-true (> (length (cl-cc:irb-params join)) 0)))))
+      (if same-value-p
+          (progn (assert-eq v1 result)
+                 (assert-= 0 (length (cl-cc:irb-params join))))
+          (assert-true (> (length (cl-cc:irb-params join)) 0))))))
 
 (deftest ir-ssa-loop-self-reference
   "A loop back-edge produces a block arg that refers to itself."

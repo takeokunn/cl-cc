@@ -123,3 +123,47 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
                       (make-vm-ret  :reg :r0))))
     (assert-signals error
       (cl-cc::opt-verify-instructions insts))))
+
+;;; ─── opt-resolve-pass-pipeline ───────────────────────────────────────────
+
+(deftest resolve-pass-pipeline-nil-returns-convergence-passes
+  "opt-resolve-pass-pipeline with nil returns *opt-convergence-passes*."
+  (assert-eq cl-cc::*opt-convergence-passes*
+             (cl-cc::opt-resolve-pass-pipeline nil)))
+
+(deftest resolve-pass-pipeline-function-list-is-identity
+  "opt-resolve-pass-pipeline with a list of functions returns it unchanged."
+  (let* ((fn (lambda (x) x))
+         (pipeline (list fn)))
+    (assert-eq fn (first (cl-cc::opt-resolve-pass-pipeline pipeline)))))
+
+(deftest resolve-pass-pipeline-keyword-list-resolves-from-registry
+  "opt-resolve-pass-pipeline resolves keyword names via *opt-pass-registry*."
+  (let ((result (cl-cc::opt-resolve-pass-pipeline (list :fold :dce))))
+    (assert-= 2 (length result))
+    (assert-true (every #'functionp result))))
+
+(deftest resolve-pass-pipeline-string-parses-and-resolves
+  "opt-resolve-pass-pipeline accepts a comma-separated string of pass names."
+  (let ((result (cl-cc::opt-resolve-pass-pipeline "fold,dce")))
+    (assert-= 2 (length result))
+    (assert-true (every #'functionp result))))
+
+(deftest resolve-pass-pipeline-unknown-keyword-signals-error
+  "opt-resolve-pass-pipeline signals an error for an unrecognized keyword."
+  (assert-signals error
+    (cl-cc::opt-resolve-pass-pipeline (list :nonexistent-pass))))
+
+;;; ─── *opt-convergence-passes* / *opt-pass-registry* data coverage ────────
+
+(deftest opt-convergence-passes-is-non-empty-function-list
+  "*opt-convergence-passes* is a non-empty list of functions."
+  (assert-true (listp cl-cc::*opt-convergence-passes*))
+  (assert-true (> (length cl-cc::*opt-convergence-passes*) 10))
+  (assert-true (every #'functionp cl-cc::*opt-convergence-passes*)))
+
+(deftest opt-pass-registry-contains-fold-dce-cse
+  "*opt-pass-registry* has entries for the core passes :fold, :dce, :cse."
+  (assert-true (gethash :fold cl-cc::*opt-pass-registry*))
+  (assert-true (gethash :dce  cl-cc::*opt-pass-registry*))
+  (assert-true (gethash :cse  cl-cc::*opt-pass-registry*)))

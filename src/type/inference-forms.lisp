@@ -276,84 +276,8 @@
     (declare (ignore subst))
     (values type ast)))
 
-;;; Condition Classes
-
-(define-condition type-inference-error (error)
-  ((message :initarg :message :reader type-inference-error-message))
-  (:report (lambda (condition stream)
-             (format stream "Type inference error: ~A"
-                     (type-inference-error-message condition)))))
-
-(define-condition typed-hole-error (type-inference-error)
-  ())
-
-(define-condition unbound-variable-error (type-inference-error)
-  ((name :initarg :name :initform nil :reader unbound-variable-error-name))
-  (:report (lambda (condition stream)
-             (format stream "Unbound variable: ~A"
-                     (unbound-variable-error-name condition)))))
-
-(define-condition type-mismatch-error (type-inference-error)
-  ((expected :initarg :expected :initform nil :reader type-mismatch-error-expected)
-   (actual :initarg :actual :initform nil :reader type-mismatch-error-actual))
-  (:report (lambda (condition stream)
-             (format stream "Type mismatch: expected ~A, got ~A"
-                     (type-to-string (type-mismatch-error-expected condition))
-                     (type-to-string (type-mismatch-error-actual condition))))))
-
-;;; NOTE: Effect inference (infer-effects, infer-with-effects, check-body-effects,
-;;;       *effect-signature-table*, register-effect-signature, lookup-effect-signature)
-;;;       are in inference-effects.lisp which loads after this file.
-
-;;; NOTE: Bidirectional type checking (synthesize, check, check-body,
-;;;       and skolem helpers) are in bidirectional.lisp which loads after this file.
-
-;;; NOTE: Constraint solving (make-constraint, solve-constraints, unify-constraint
-;;;       struct) are defined in solver.lisp which loads after this file.
-;;;       Do NOT define stubs here to avoid API mismatch.
-
-;;; NOTE: generalize-in-env and instantiate-scheme are in substitution.lisp.
-;;;       *typeclass-registry*, register-typeclass, lookup-typeclass,
-;;;       *typeclass-instance-registry*, register-typeclass-instance,
-;;;       lookup-typeclass-instance are all defined in typeclass.lisp.
-;;;       Do NOT redefine them here.
-
-;;; Exports
-
-(export '(infer
-          infer-binop
-          infer-if
-          infer-let
-          infer-lambda
-          infer-call
-          infer-progn
-          infer-args
-          infer-with-env
-          annotate-type
-          syntactic-value-p
-          *type-predicate-table*
-          register-type-predicate
-
-          type-inference-error
-          type-inference-error-message
-          unbound-variable-error
-          unbound-variable-error-name
-          type-mismatch-error
-          type-mismatch-error-expected
-          type-mismatch-error-actual
-
-          ;; Type class registries (Phase 4) — defined in typeclass.lisp, re-exported here
-          *typeclass-registry*
-          register-typeclass
-          lookup-typeclass
-          *typeclass-instance-registry*
-          register-typeclass-instance
-          lookup-typeclass-instance
-          has-typeclass-instance-p
-          check-typeclass-constraint
-          dict-env-extend
-          dict-env-lookup
-          check-qualified-constraints
-
-          ;; Phase 6 rank-N: check mode required for forall
-          ))
+;;; NOTE: Effect inference, bidirectional checking, constraint solving,
+;;;       typeclass registries are in their respective files (loaded after).
+;;;
+;;; Condition classes (type-inference-error, typed-hole-error, unbound-variable-error,
+;;; type-mismatch-error) and the export block are in inference-conditions.lisp (loaded next).

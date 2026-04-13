@@ -692,16 +692,15 @@
       (assert-equal :R0 (cl-cc::vm-lhs add-inst))
       (assert-equal :R0 (cl-cc::vm-rhs add-inst)))))
 
-(deftest heap-alias-oracle-tracks-must-alias-through-move
-  "Heap alias oracle preserves a fresh root across vm-move."
+(deftest heap-alias-oracle-cases
+  "Heap alias oracle: must-alias propagates through vm-move; may-alias is conservative for unknown roots."
+  ;; must-alias: fresh alloc copied to :r3 via move — :r0 and :r3 must-alias; :r0/:r9 don't
   (let* ((alloc (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (copy  (make-vm-move :dst :r3 :src :r0))
          (roots (cl-cc::opt-compute-heap-aliases (list alloc copy))))
-    (assert-true (cl-cc::opt-must-alias-p :r0 :r3 roots))
-    (assert-false (cl-cc::opt-must-alias-p :r0 :r9 roots))))
-
-(deftest heap-alias-oracle-may-alias-is-conservative-for-unknowns
-  "Unknown heap roots remain may-alias to preserve safety."
+    (assert-true  (cl-cc::opt-must-alias-p :r0 :r3 roots))
+    (assert-false (cl-cc::opt-must-alias-p :r0 :r9 roots)))
+  ;; may-alias: two distinct allocs are not may-alias to each other; unknown :r9 is
   (let* ((alloc-a (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (alloc-b (make-vm-make-array :dst :r4 :size-reg :r5))
          (roots   (cl-cc::opt-compute-heap-aliases (list alloc-a alloc-b))))
@@ -1189,46 +1188,40 @@
     (assert-= 1 (count-if (lambda (i) (typep i 'cl-cc::vm-rotate)) out))
     (assert-false (some (lambda (i) (typep i 'cl-cc::vm-logior)) out))))
 
-(deftest dead-store-elim-overwritten-global
-  "opt-pass-dead-store-elim removes a dead overwritten vm-set-global."
-  (let* ((c1  (make-vm-const :dst :r0 :value 1))
-         (s1  (make-vm-set-global :name "g" :src :r0))
-         (c2  (make-vm-const :dst :r1 :value 2))
-         (s2  (make-vm-set-global :name "g" :src :r1))
-         (ret (make-vm-ret :reg :r1))
-         (out (cl-cc::opt-pass-dead-store-elim (list c1 s1 c2 s2 ret))))
-    (assert-false (member s1 out))
-    (assert-true  (member s2 out))
-    (assert-true  (member c1 out))
-    (assert-true  (member c2 out))
-    (assert-true  (member ret out))))
-
-(deftest dead-store-elim-keeps-live-read
-  "A read from the same global keeps the latest pending store visible."
-  (let* ((c1  (make-vm-const :dst :r0 :value 1))
-         (s1  (make-vm-set-global :name "g" :src :r0))
-         (g1  (make-vm-get-global :dst :r2 :name "g"))
-         (c2  (make-vm-const :dst :r1 :value 2))
-         (s2  (make-vm-set-global :name "g" :src :r1))
-         (ret (make-vm-ret :reg :r2))
-         (out (cl-cc::opt-pass-dead-store-elim (list c1 s1 g1 c2 s2 ret))))
-    (assert-true  (member s1 out))
-    (assert-true  (member g1 out))
-     (assert-true  (member s2 out))
-    (assert-true  (member ret out))))
-
-(deftest dead-store-elim-slot-overwrite-through-moved-alias
-  "A later slot write through a moved alias kills the earlier pending write."
-  (let* ((obj  (make-vm-cons :dst :r0 :car-src :r8 :cdr-src :r9))
-         (obj2 (make-vm-move :dst :r3 :src :r0))
-         (c1   (make-vm-const :dst :r1 :value 10))
-         (w1   (cl-cc::make-vm-slot-write :obj-reg :r0 :slot-name 'x :value-reg :r1))
-         (c2   (make-vm-const :dst :r2 :value 20))
-         (w2   (cl-cc::make-vm-slot-write :obj-reg :r3 :slot-name 'x :value-reg :r2))
-         (ret  (make-vm-ret :reg :r2))
-         (out  (cl-cc::opt-pass-dead-store-elim (list obj obj2 c1 w1 c2 w2 ret))))
-    (assert-false (member w1 out))
-    (assert-true  (member w2 out))))
+(deftest-each dead-store-elim-cases
+  "opt-pass-dead-store-elim: overwritten stores removed, live-read stores kept, alias-tracked slot writes handled."
+  :cases (("overwritten-global"
+           (lambda ()
+             (let* ((c1  (make-vm-const :dst :r0 :value 1))
+                    (s1  (make-vm-set-global :name "g" :src :r0))
+                    (c2  (make-vm-const :dst :r1 :value 2))
+                    (s2  (make-vm-set-global :name "g" :src :r1))
+                    (ret (make-vm-ret :reg :r1)))
+               (list (list c1 s1 c2 s2 ret) (list s1) (list s2 c1 c2 ret)))))
+          ("keeps-live-read"
+           (lambda ()
+             (let* ((c1  (make-vm-const :dst :r0 :value 1))
+                    (s1  (make-vm-set-global :name "g" :src :r0))
+                    (g1  (make-vm-get-global :dst :r2 :name "g"))
+                    (c2  (make-vm-const :dst :r1 :value 2))
+                    (s2  (make-vm-set-global :name "g" :src :r1))
+                    (ret (make-vm-ret :reg :r2)))
+               (list (list c1 s1 g1 c2 s2 ret) nil (list s1 g1 s2 ret)))))
+          ("slot-overwrite-alias"
+           (lambda ()
+             (let* ((obj  (make-vm-cons :dst :r0 :car-src :r8 :cdr-src :r9))
+                    (obj2 (make-vm-move :dst :r3 :src :r0))
+                    (c1   (make-vm-const :dst :r1 :value 10))
+                    (w1   (cl-cc::make-vm-slot-write :obj-reg :r0 :slot-name 'x :value-reg :r1))
+                    (c2   (make-vm-const :dst :r2 :value 20))
+                    (w2   (cl-cc::make-vm-slot-write :obj-reg :r3 :slot-name 'x :value-reg :r2))
+                    (ret  (make-vm-ret :reg :r2)))
+               (list (list obj obj2 c1 w1 c2 w2 ret) (list w1) (list w2))))))
+  (make-case)
+  (destructuring-bind (instrs absent present) (funcall make-case)
+    (let ((out (cl-cc::opt-pass-dead-store-elim instrs)))
+      (dolist (inst absent)   (assert-false (member inst out)))
+      (dolist (inst present)  (assert-true  (member inst out))))))
 
 (deftest sccp-eliminates-constant-branch-block
   "opt-pass-sccp removes the unreachable branch block after a constant condition."

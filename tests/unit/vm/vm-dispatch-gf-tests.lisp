@@ -64,3 +64,70 @@
 (deftest vm-extract-eql-specializer-keys-nil-for-multi-element-list
   "%vm-extract-eql-specializer-keys returns nil for a multi-element specializer list."
   (assert-null (cl-cc::%vm-extract-eql-specializer-keys '(integer string))))
+
+;;; ─── *method-combination-operators* data table ───────────────────────────
+
+(deftest-each method-combination-operators-all-known-combinations
+  "*method-combination-operators* contains all standard combination symbols."
+  :cases (("plus"   '+)
+          ("times"  '*)
+          ("list"   'list)
+          ("append" 'append)
+          ("nconc"  'nconc)
+          ("max"    'max)
+          ("min"    'min)
+          ("and"    'and)
+          ("or"     'or)
+          ("progn"  'progn))
+  (combo)
+  (assert-true (assoc combo cl-cc::*method-combination-operators*)))
+
+;;; ─── %resolve-combination-operator ──────────────────────────────────────
+
+(deftest-each resolve-combination-operator-numeric-folds
+  "%resolve-combination-operator returns correct operator for numeric combinations."
+  :cases (("plus-folds-to-sum"    '+     '(1 2 3)  6)
+          ("times-folds-to-product" '*   '(2 3 4)  24)
+          ("max-picks-largest"    'max   '(1 7 3)  7)
+          ("min-picks-smallest"   'min   '(5 2 9)  2))
+  (combo args expected)
+  (let ((op (cl-cc::%resolve-combination-operator combo)))
+    (assert-equal expected (apply op args))))
+
+(deftest-each resolve-combination-operator-collection-folds
+  "%resolve-combination-operator returns correct operator for collection combinations."
+  :cases (("list-collects"   'list   '(1 2 3)     '(1 2 3))
+          ("append-merges"   'append '((a b) (c))  '(a b c)))
+  (combo args expected)
+  (let ((op (cl-cc::%resolve-combination-operator combo)))
+    (assert-equal expected (apply op args))))
+
+(deftest resolve-combination-operator-and-returns-t-for-truthy
+  "%resolve-combination-operator for AND returns true when all args are truthy."
+  (let ((op (cl-cc::%resolve-combination-operator 'and)))
+    (assert-true (funcall op 1 2 3))))
+
+(deftest resolve-combination-operator-and-returns-nil-for-falsy
+  "%resolve-combination-operator for AND returns nil when any arg is nil."
+  (let ((op (cl-cc::%resolve-combination-operator 'and)))
+    (assert-false (funcall op 1 nil 3))))
+
+(deftest resolve-combination-operator-or-returns-t-for-any-truthy
+  "%resolve-combination-operator for OR returns true when any arg is truthy."
+  (let ((op (cl-cc::%resolve-combination-operator 'or)))
+    (assert-true (funcall op nil 2 nil))))
+
+(deftest resolve-combination-operator-or-returns-nil-for-all-falsy
+  "%resolve-combination-operator for OR returns nil when all args are nil."
+  (let ((op (cl-cc::%resolve-combination-operator 'or)))
+    (assert-false (funcall op nil nil nil))))
+
+(deftest resolve-combination-operator-progn-returns-last
+  "%resolve-combination-operator for PROGN returns the last argument."
+  (let ((op (cl-cc::%resolve-combination-operator 'progn)))
+    (assert-equal 99 (funcall op 1 2 99))))
+
+(deftest resolve-combination-operator-unknown-signals-error
+  "%resolve-combination-operator signals an error for unknown combinations."
+  (assert-signals error
+    (cl-cc::%resolve-combination-operator 'unknown-combo)))

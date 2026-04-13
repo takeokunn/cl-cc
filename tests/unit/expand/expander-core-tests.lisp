@@ -62,3 +62,102 @@
           ("times" '(*) 1))
   (form expected)
   (assert-equal expected (cl-cc::compiler-macroexpand-all form)))
+
+;;; ─── define-expander-for (registration macro) ────────────────────────────
+
+(deftest define-expander-for-installs-handler-in-table
+  "define-expander-for registers a lambda in *expander-head-table* under HEAD.
+After registration, compiler-macroexpand-all dispatches to the new handler."
+  (let ((test-head (gensym "EXP-HEAD")))
+    ;; Simulate what define-expander-for does at macro expansion
+    (setf (gethash test-head cl-cc::*expander-head-table*)
+          (lambda (form) (list 'was-handled (second form))))
+    (unwind-protect
+        (let ((result (cl-cc::compiler-macroexpand-all (list test-head 42))))
+          (assert-equal 'was-handled (first result))
+          (assert-equal 42 (second result)))
+      (remhash test-head cl-cc::*expander-head-table*))))
+
+(deftest expander-handler-returning-same-form-does-not-recurse
+  "When a handler returns the identical form (equal), the expander stops recursion."
+  (let ((test-head (gensym "STABLE")))
+    (setf (gethash test-head cl-cc::*expander-head-table*)
+          (lambda (form) form))  ; idempotent — returns unchanged
+    (unwind-protect
+        (let ((form (list test-head 1 2)))
+          (assert-equal form (cl-cc::compiler-macroexpand-all form)))
+      (remhash test-head cl-cc::*expander-head-table*))))
+
+;;; ─── defmethod expander handler ──────────────────────────────────────────
+;;; The defmethod handler is registered by expander.lisp via define-expander-for.
+
+(deftest expander-defmethod-no-qualifier-expands-body
+  "The defmethod expander recurses into body forms when no qualifier is present."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(defmethod my-noq-method ((x integer)) (+ x 1)))))
+    (assert-equal 'defmethod (first result))
+    (assert-equal 'my-noq-method (second result))))
+
+(deftest expander-defmethod-with-qualifier-preserved-verbatim
+  "The defmethod expander preserves the qualifier symbol verbatim in position 3."
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 '(defmethod my-around-method :around ((x integer)) x))))
+    (assert-equal 'defmethod (first result))
+    (assert-equal 'my-around-method (second result))
+    (assert-equal :around (third result))))
+
+(deftest-each expander-defmethod-all-qualifiers-preserved
+  "All standard qualifiers (:before, :after, :around) are preserved by the expander."
+  :cases (("before" :before)
+          ("after"  :after)
+          ("around" :around))
+  (qualifier)
+  (let ((result (cl-cc::compiler-macroexpand-all
+                 (list 'defmethod 'my-qual-method qualifier '(x) 'x))))
+    (assert-equal qualifier (third result))))
+
+;;; ─── symbol-macro expansion path ─────────────────────────────────────────
+
+(deftest compiler-macroexpand-all-expands-registered-symbol-macro
+  "compiler-macroexpand-all expands symbols registered in *symbol-macro-table*."
+  (let ((key (gensym "SM")))
+    (setf (gethash key cl-cc::*symbol-macro-table*) 99)
+    (unwind-protect
+        (assert-equal 99 (cl-cc::compiler-macroexpand-all key))
+      (remhash key cl-cc::*symbol-macro-table*))))
+
+(deftest compiler-macroexpand-all-keywords-bypass-symbol-macro
+  "Keywords are not expanded even if coincidentally in *symbol-macro-table*."
+  ;; Keywords are excluded by (not (keywordp form)) guard
+  (let ((kw :test-keyword))
+    (setf (gethash kw cl-cc::*symbol-macro-table*) 'expanded)
+    (unwind-protect
+        (assert-equal kw (cl-cc::compiler-macroexpand-all kw))
+      (remhash kw cl-cc::*symbol-macro-table*))))
+
+;;; ─── accessor slot-map expansion path (FR-120) ───────────────────────────
+
+(deftest compiler-macroexpand-all-accessor-expands-to-slot-value
+  "compiler-macroexpand-all expands (accessor obj) to (slot-value obj 'slot)
+via *accessor-slot-map* when the accessor is registered."
+  (let ((accessor (gensym "ACC"))
+        (class-sym (gensym "CLS")))
+    (setf (gethash accessor cl-cc::*accessor-slot-map*) (cons class-sym 'my-slot))
+    (unwind-protect
+        (let ((result (cl-cc::compiler-macroexpand-all (list accessor 'my-obj))))
+          ;; Expected: (slot-value my-obj 'my-slot)
+          (assert-equal 'slot-value (first result))
+          (assert-equal 'my-obj (second result))
+          (assert-equal '(quote my-slot) (third result)))
+      (remhash accessor cl-cc::*accessor-slot-map*))))
+
+(deftest compiler-macroexpand-all-multi-arg-accessor-does-not-expand
+  "compiler-macroexpand-all does NOT expand (accessor obj extra) — 2 args required."
+  (let ((accessor (gensym "ACC2")))
+    (setf (gethash accessor cl-cc::*accessor-slot-map*) (cons 'cls 'slot))
+    (unwind-protect
+        (let ((result (cl-cc::compiler-macroexpand-all
+                       (list accessor 'obj 'extra))))
+          ;; Should NOT be slot-value (2-arg form only)
+          (assert-false (eq 'slot-value (first result))))
+      (remhash accessor cl-cc::*accessor-slot-map*))))

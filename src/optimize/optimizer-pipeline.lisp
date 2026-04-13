@@ -4,9 +4,9 @@
 ;;;
 ;;; Contains: opt-pass-inline-iterative, *opt-convergence-passes*,
 ;;; *opt-pass-registry*, opt-parse-pass-pipeline-string,
-;;; opt-resolve-pass-pipeline, opt-run-passes-once-with-{timings,remarks,stats},
-;;; opt-run-passes-once-with-reporting, opt-run-passes-once,
-;;; opt-converged-p, opt-adaptive-max-iterations, opt-verify-instructions,
+;;; opt-resolve-pass-pipeline, opt-run-passes-once-with-reporting,
+;;; *opt-iteration-budget-thresholds*, opt-converged-p,
+;;; opt-adaptive-max-iterations, opt-verify-instructions,
 ;;; and the public entry point optimize-instructions.
 ;;;
 ;;; Pass implementations (opt-pass-fold, opt-pass-dce, opt-pass-jump,
@@ -108,49 +108,6 @@ or a list of keyword pass names present in *opt-pass-registry*."
                    (error "Unknown optimizer pass ~S" entry)))
              pipeline))))
 
-(defun opt-run-passes-once-with-timings (prog passes stream)
-  "Apply PASSES once, writing timing lines to STREAM."
-  (reduce (lambda (p f)
-            (let ((start (get-internal-real-time)))
-              (prog1 (funcall f p)
-                (let ((elapsed (/ (- (get-internal-real-time) start)
-                                  internal-time-units-per-second)))
-                  (format stream "~A: ~,6Fs~%" f elapsed)))))
-          passes
-          :initial-value prog))
-
-(defun opt-run-passes-once-with-remarks (prog passes stream &key (mode :all))
-  "Apply PASSES once, writing simple optimization remarks to STREAM.
-MODE is one of :all, :changed, or :missed."
-  (reduce (lambda (p f)
-            (let* ((next (funcall f p))
-                   (changed (not (opt-converged-p p next))))
-              (when (or (eq mode :all)
-                        (and changed (eq mode :changed))
-                        (and (not changed) (eq mode :missed)))
-                (format stream "~A: ~A~%"
-                        f
-                        (if changed "changed" "missed")))
-              next))
-          passes
-          :initial-value prog))
-
-(defun opt-run-passes-once-with-stats (prog passes stream)
-  "Apply PASSES once, writing simple per-pass stats to STREAM.
-
-Each line reports the instruction count before/after the pass and whether the
-pass changed the IR."
-  (reduce (lambda (p f)
-            (let* ((before-count (length p))
-                   (next (funcall f p))
-                   (after-count (length next))
-                   (changed (not (opt-converged-p p next))))
-              (format stream "~A: before=~D after=~D delta=~D changed=~A~%"
-                      f before-count after-count (- after-count before-count)
-                      (if changed "yes" "no"))
-              next))
-          passes
-          :initial-value prog))
 
 (defun %opt-pass-name-string (f)
   (string-upcase (format nil "~A" f)))
@@ -204,14 +161,20 @@ timestamp cursor in microseconds."
         (setf current next)))
     (values current events ts-us)))
 
-(defun opt-run-passes-once (prog)
-  "Apply every convergence pass in *opt-convergence-passes* once, left to right."
-  (reduce (lambda (p f) (funcall f p)) *opt-convergence-passes* :initial-value prog))
 
 (defun opt-converged-p (prev next)
   "T if a pass-cycle produced no change (same length and all instructions eq)."
   (and (= (length prev) (length next))
        (every #'eq prev next)))
+
+(defparameter *opt-iteration-budget-thresholds*
+  '((50  . -12)
+    (150 . -6)
+    (400 . 0)
+    (800 . 8))
+  "Alist of (instruction-count-upper-bound . budget-delta) for opt-adaptive-max-iterations.
+   Entries are tested in order; the delta from the first matching threshold is used.
+   If no threshold matches (n >= 800), the fallback delta is 15.")
 
 (defun opt-adaptive-max-iterations (instructions &key (base-iterations 20) (min-iterations 6) (max-iterations 50))
   "Return a conservative adaptive convergence budget for INSTRUCTIONS.
@@ -219,16 +182,13 @@ timestamp cursor in microseconds."
 Small instruction streams converge quickly and therefore use fewer iterations,
 while larger programs get a modestly larger budget. This is a helper-level
 slice of FR-150; it does not use runtime profile counters yet."
-  (let ((n (length instructions)))
+  (let* ((n (length instructions))
+         (delta (or (cdr (find-if (lambda (entry) (< n (car entry)))
+                                  *opt-iteration-budget-thresholds*))
+                    15)))
     (min max-iterations
          (max min-iterations
-              (+ base-iterations
-                 (cond
-                   ((< n 50) -12)
-                   ((< n 150) -6)
-                   ((< n 400) 0)
-                   ((< n 800) 8)
-                   (t 15)))))))
+              (+ base-iterations delta)))))
 
 (defun opt-verify-instructions (instructions &key pass-name)
   "Conservative VM-level verifier for optimizer/debugging use.

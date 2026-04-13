@@ -172,6 +172,27 @@ Returns methods most-specific-first, deduplicated."
                     (push m result))))))))
     (nreverse result)))
 
+(defparameter *method-combination-operators*
+  `((+      . ,#'+)
+    (*      . ,#'*)
+    (list   . ,#'list)
+    (append . ,#'append)
+    (nconc  . ,#'nconc)
+    (max    . ,#'max)
+    (min    . ,#'min)
+    (and    . ,(lambda (&rest args) (every #'identity args)))
+    (or     . ,(lambda (&rest args) (some  #'identity args)))
+    (progn  . ,(lambda (&rest args) (car (last args)))))
+  "Alist mapping method combination names to their combining operator functions.
+Add entries here to support new combination types without touching dispatch logic.")
+
+(defun %resolve-combination-operator (combination)
+  "Return the operator function for COMBINATION, or signal an error."
+  (let ((entry (assoc combination *method-combination-operators*)))
+    (if entry
+        (cdr entry)
+        (error "Unknown method combination operator: ~S" combination))))
+
 (defun %vm-dispatch-custom-combination (gf-ht state pc arg-regs dst-reg labels combination)
   "Dispatch a generic function with custom method combination.
 COMBINATION is the combination name (e.g. +, LIST, APPEND).
@@ -183,19 +204,7 @@ and folds results using the combination's operator."
          ;; Also try primary methods as fallback (some users just define primary methods)
          (primary-methods (vm-get-all-applicable-methods gf-ht state all-arg-values))
          (methods (or combo-methods primary-methods))
-         ;; Resolve the operator function
-         (operator (cond
-                     ((eq combination '+) #'+)
-                     ((eq combination '*) #'* )
-                     ((eq combination 'list) #'list)
-                     ((eq combination 'append) #'append)
-                     ((eq combination 'nconc) #'nconc)
-                     ((eq combination 'and) (lambda (&rest args) (every #'identity args)))
-                     ((eq combination 'or) (lambda (&rest args) (some #'identity args)))
-                     ((eq combination 'progn) (lambda (&rest args) (car (last args))))
-                     ((eq combination 'max) #'max)
-                     ((eq combination 'min) #'min)
-                     (t (error "Unknown method combination operator: ~S" combination)))))
+         (operator (%resolve-combination-operator combination)))
     (if (null methods)
         (error "No applicable methods for ~S with combination ~S" gf-ht combination)
         (if *vm-exec-flat*

@@ -1,22 +1,23 @@
 (in-package :cl-cc)
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-;;; CPS — Extended and Imperative AST Node Transforms
+;;; CPS — OOP / Mutation AST Node Transforms
 ;;;
-;;; Contains: cps-transform-ast methods for extended/imperative forms:
-;;;   setq, defvar/defparameter, handler-case, make-instance, slot-value,
-;;;   set-slot-value, defclass, defgeneric, defmethod, set-gethash,
-;;;   quote, the, values, multiple-value-bind, apply, multiple-value-call,
-;;;   multiple-value-prog1, ast-call (general function calls);
-;;;   plus entry points: maybe-cps-transform, cps-transform-ast*,
-;;;   cps-transform*, cps-transform-eval.
+;;; Contains cps-transform-ast methods for imperative/OOP forms:
+;;;   setq, defvar/defparameter, handler-case, make-instance,
+;;;   slot-value, set-slot-value, defclass, defgeneric, defmethod,
+;;;   set-gethash.
+;;;
+;;; Functional forms (quote, the, values, mvb, apply, mvc, mvprog1, ast-call)
+;;; and entry points (cps-transform-ast*, cps-transform*, maybe-cps-transform,
+;;; cps-transform-eval) are in cps-ast-functional.lisp (loads after this file).
 ;;;
 ;;; Core structural CPS transforms (ast-int through ast-labels) are in
 ;;; cps-ast.lisp (loads before this file).
 ;;;
-;;; Load order: after cps-ast.lisp.
+;;; Load order: after cps-ast.lisp, before cps-ast-functional.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-;;; Additional AST Types
+;;; ─── Mutation Forms ──────────────────────────────────────────────────────────
 
 (defmethod cps-transform-ast ((node ast-setq) k)
   "Transform setq assignment."
@@ -136,167 +137,7 @@
                                       (setf (gethash ,key-v ,table-v) ,value-v)
                                       (funcall ,k ,value-v))))))))))
 
-(defmethod cps-transform-ast ((node ast-quote) k)
-  "Transform quoted literal."
-  `(funcall ,k ',(ast-quote-value node)))
-
-(defmethod cps-transform-ast ((node ast-the) k)
-  "Transform type declaration (preserves type info)."
-  (let* ((type (ast-the-type node))
-         (value (ast-the-value node))
-         (v (gensym "THE")))
-    (cps-transform-ast value
-                       `(lambda (,v)
-                          (funcall ,k (the ,type ,v))))))
-
-(defmethod cps-transform-ast ((node ast-values) k)
-  "Transform explicit VALUES conservatively through host multiple-value-call."
-  (let ((forms (ast-values-forms node)))
-    (if (null forms)
-        `(funcall ,k nil)
-        (let ((temps (loop repeat (length forms) collect (gensym "MV"))))
-          (labels ((transform-forms (remaining-forms remaining-temps)
-                     (if (null remaining-forms)
-                         `(multiple-value-call ,k (values ,@temps))
-                         (cps-transform-ast
-                          (car remaining-forms)
-                          `(lambda (,(car remaining-temps))
-                             ,(transform-forms (cdr remaining-forms)
-                                               (cdr remaining-temps)))))))
-            (transform-forms forms temps))))))
-
-(defmethod cps-transform-ast ((node ast-multiple-value-bind) k)
-  "Transform multiple-value-bind conservatively.
-
-When the values form is explicit AST-VALUES, preserve host multiple-value-bind.
-Otherwise bind only the primary value, which keeps the transformer total while
-remaining conservative for currently uncovered producers."
-  (let ((vars (ast-mvb-vars node))
-        (values-form (ast-mvb-values-form node))
-        (body (ast-mvb-body node)))
-    (if (typep values-form 'ast-values)
-        (let ((temps (loop repeat (length (ast-values-forms values-form))
-                           collect (gensym "MVB"))))
-          (labels ((transform-forms (remaining-forms remaining-temps)
-                     (if (null remaining-forms)
-                         `(multiple-value-bind ,vars (values ,@temps)
-                            ,(cps-transform-sequence body k))
-                         (cps-transform-ast
-                          (car remaining-forms)
-                          `(lambda (,(car remaining-temps))
-                             ,(transform-forms (cdr remaining-forms)
-                                               (cdr remaining-temps)))))))
-            (transform-forms (ast-values-forms values-form) temps)))
-        (let ((primary (gensym "MVB")))
-          (cps-transform-ast
-           values-form
-           `(lambda (,primary)
-              (let ((,(first vars) ,primary)
-                    ,@(mapcar (lambda (v) `(,v nil)) (rest vars)))
-                ,(cps-transform-sequence body k))))))))
-
-(defmethod cps-transform-ast ((node ast-apply) k)
-  "Transform apply conservatively via host APPLY."
-  (let* ((func (ast-apply-func node))
-         (args (ast-apply-args node))
-         (f-v (gensym "FUNC"))
-         (arg-vars (loop repeat (length args) collect (gensym "ARG"))))
-    (cps-transform-ast
-     func
-     `(lambda (,f-v)
-        ,(labels ((transform-args (remaining-args remaining-vars)
-                    (if (null remaining-args)
-                        `(funcall ,k (apply ,f-v ,@arg-vars))
-                        (cps-transform-ast
-                         (car remaining-args)
-                         `(lambda (,(car remaining-vars))
-                            ,(transform-args (cdr remaining-args)
-                                             (cdr remaining-vars)))))))
-           (transform-args args arg-vars))))))
-
-(defmethod cps-transform-ast ((node ast-multiple-value-call) k)
-  "Transform multiple-value-call.
-Each arg form is CPS-transformed in sequence, collected as a list, then spread
-to the function via apply.  This preserves multiple-values semantics because
-host CL's multiple-value-call is only usable when args are known sexps."
-  (let* ((func  (ast-mv-call-func node))
-         (args  (ast-mv-call-args node))
-         (f-v   (gensym "FUNC"))
-         (results-v (gensym "RESULTS")))
-    (cps-transform-ast func
-                       `(lambda (,f-v)
-                          ,(labels ((collect-args (remaining acc-var)
-                                     (if (null remaining)
-                                         `(funcall ,k (apply ,f-v (nreverse ,acc-var)))
-                                         (let ((av (gensym "ARG")))
-                                           (cps-transform-ast
-                                            (car remaining)
-                                            `(lambda (,av)
-                                               (push ,av ,acc-var)
-                                               ,(collect-args (cdr remaining) acc-var)))))))
-                             `(let ((,results-v nil))
-                                ,(collect-args args results-v)))))))
-
-(defmethod cps-transform-ast ((node ast-multiple-value-prog1) k)
-  "Transform multiple-value-prog1."
-  (let* ((first-form (ast-mv-prog1-first node))
-         (forms (ast-mv-prog1-forms node))
-         (v (gensym "MV")))
-    (cps-transform-ast first-form
-                       `(lambda (,v)
-                          ,@(mapcar (lambda (form)
-                                     (cps-transform-ast form `(lambda (ignored)
-                                                                (declare (ignore ignored))
-                                                                nil)))
-                                   forms)
-                          (funcall ,k ,v)))))
-
-(defmethod cps-transform-ast ((node ast-call) k)
-  "Transform function call (non-special operator calls)."
-  (let* ((func (ast-call-func node))
-         (args (ast-call-args node)))
-    (if (null args)
-        `(funcall ,k (,func))
-        (let ((arg-syms (loop for a in args collect (gensym "ARG"))))
-          (labels ((transform-args (remaining-args remaining-syms)
-                     (if (null remaining-args)
-                         `(funcall ,k (,func ,@remaining-syms))
-                         (cps-transform-ast (car remaining-args)
-                                            `(lambda (,(car remaining-syms))
-                                               ,(transform-args (cdr remaining-args)
-                                                               (cdr remaining-syms)))))))
-            (transform-args args arg-syms))))))
-
-;;; Entry points
-
-(defun maybe-cps-transform (thing)
-  "Best-effort CPS transform for THING.
-Returns a CPS form when supported, otherwise NIL."
-  (handler-case
-      (if (typep thing 'ast-node)
-          (cps-transform-ast* thing)
-          (cps-transform thing))
-    (error (e)
-      (declare (ignore e))
-      nil)))
-
-(defun cps-transform-ast* (node)
-  "Transform an AST node to CPS, wrapping in a lambda for the outer continuation.
-Returns (lambda (k) ...) form."
-  (let ((k (gensym "K")))
-    `(lambda (,k)
-       ,(cps-transform-ast node k))))
-
-(defun cps-transform* (expr)
-  "Transform EXPR to CPS. Works with both S-expressions and AST nodes.
-For S-expressions, uses the minimal bootstrap transformer.
-For AST nodes, uses the full AST-based transformer."
-  (typecase expr
-    (ast-node (cps-transform-ast* expr))
-    (t (cps-transform expr))))
-
-(defun cps-transform-eval (expr)
-  "CPS-transform an S-expression and evaluate it.
-Returns the result of calling the CPS-transformed form with identity continuation."
-  (let ((cps-form (cps-transform expr)))
-    (eval cps-form)))
+;;; Functional forms (ast-quote, ast-the, ast-values, ast-multiple-value-bind,
+;;; ast-apply, ast-multiple-value-call, ast-multiple-value-prog1, ast-call)
+;;; and entry points (cps-transform-ast*, cps-transform*, maybe-cps-transform,
+;;; cps-transform-eval) are in cps-ast-functional.lisp (loads after this file).

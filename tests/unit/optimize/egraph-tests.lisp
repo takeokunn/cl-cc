@@ -204,3 +204,160 @@
           ("call"   'call  nil   10))
   (op children expected)
   (assert-= expected (cl-cc::egraph-default-cost op children)))
+
+;;; ─── enode-memo-key ──────────────────────────────────────────────────────
+
+(deftest enode-memo-key-nullary
+  "enode-memo-key for a nullary node returns (op . nil)."
+  (let ((node (cl-cc::make-e-node :op 'const :children nil)))
+    (assert-equal '(const) (cl-cc::enode-memo-key node))))
+
+(deftest enode-memo-key-binary
+  "enode-memo-key includes child IDs in the key."
+  (let ((node (cl-cc::make-e-node :op 'add :children '(0 1))))
+    (assert-equal '(add 0 1) (cl-cc::enode-memo-key node))))
+
+;;; ─── egraph-canonical-enode ──────────────────────────────────────────────
+
+(deftest egraph-canonical-enode-updates-children
+  "egraph-canonical-enode returns a new e-node with children resolved via union-find."
+  (let* ((eg  (make-test-egraph))
+         (id0 (cl-cc::egraph-add eg 'const))
+         (id1 (cl-cc::egraph-add eg 'var))
+         ;; Force id1 -> id0 in union-find
+         (canon (cl-cc::egraph-merge eg id0 id1))
+         (node  (cl-cc::make-e-node :op 'add :children (list id1))))
+    (let ((cnode (cl-cc::egraph-canonical-enode eg node)))
+      (assert-eq 'add (cl-cc::en-op cnode))
+      (assert-= canon (first (cl-cc::en-children cnode))))))
+
+;;; ─── egraph-build-rhs ────────────────────────────────────────────────────
+
+(deftest egraph-build-rhs-pattern-variable
+  "egraph-build-rhs for a pattern variable looks up the binding."
+  (let* ((eg      (make-test-egraph))
+         (id      (cl-cc::egraph-add eg 'const))
+         (bindings (list (cons '?x id)))
+         (result  (cl-cc::egraph-build-rhs eg '?x bindings)))
+    (assert-= id result)))
+
+(deftest egraph-build-rhs-nullary-symbol
+  "egraph-build-rhs for a literal symbol adds a nullary e-node."
+  (let* ((eg     (make-test-egraph))
+         (result (cl-cc::egraph-build-rhs eg 'zero nil)))
+    (assert-true (integerp result))))
+
+(deftest egraph-build-rhs-compound
+  "egraph-build-rhs for a compound template builds the tree in the e-graph."
+  (let* ((eg      (make-test-egraph))
+         (id0     (cl-cc::egraph-add eg 'const))
+         (bindings (list (cons '?x id0)))
+         (result  (cl-cc::egraph-build-rhs eg '(neg ?x) bindings)))
+    (assert-true (integerp result))
+    (assert-true (cl-cc::egraph-class-has-op-p eg result 'neg))))
+
+(deftest egraph-build-rhs-numeric-constant
+  "egraph-build-rhs for a numeric literal creates a const e-class with data set."
+  (let* ((eg     (make-test-egraph))
+         (result (cl-cc::egraph-build-rhs eg 42 nil)))
+    (assert-true (integerp result))
+    (assert-= 42 (cl-cc::egraph-class-const-value eg result))))
+
+;;; ─── egraph-class-has-op-p / egraph-class-const-value ───────────────────
+
+(deftest egraph-class-has-op-p-true
+  "egraph-class-has-op-p is true when an e-class contains a node with the given op."
+  (let* ((eg (make-test-egraph))
+         (id (cl-cc::egraph-add eg 'const)))
+    (assert-true (cl-cc::egraph-class-has-op-p eg id 'const))))
+
+(deftest egraph-class-has-op-p-false
+  "egraph-class-has-op-p is false when no node in the e-class has the given op."
+  (let* ((eg (make-test-egraph))
+         (id (cl-cc::egraph-add eg 'const)))
+    (assert-false (cl-cc::egraph-class-has-op-p eg id 'add))))
+
+(deftest egraph-class-const-value-returns-data
+  "egraph-class-const-value returns ec-data when the class holds a const node."
+  (let* ((eg (make-test-egraph))
+         (id (cl-cc::egraph-add eg 'const)))
+    (let ((cls (gethash (cl-cc::egraph-find eg id) (cl-cc::eg-classes eg))))
+      (setf (cl-cc::ec-data cls) 99))
+    (assert-= 99 (cl-cc::egraph-class-const-value eg id))))
+
+(deftest egraph-class-const-value-nil-for-non-const
+  "egraph-class-const-value returns nil when the class has no const node."
+  (let* ((eg (make-test-egraph))
+         (id (cl-cc::egraph-add eg 'add)))
+    (assert-null (cl-cc::egraph-class-const-value eg id))))
+
+;;; ─── vm-inst-to-enode-op ─────────────────────────────────────────────────
+
+(deftest-each vm-inst-to-enode-op-strips-vm-prefix
+  "vm-inst-to-enode-op strips the VM- prefix from instruction type names."
+  :cases (("const" 'vm-const (cl-cc:make-vm-const :dst :r0 :value 1))
+          ("move"  'vm-move  (cl-cc:make-vm-move  :dst :r0 :src :r1))
+          ("add"   'vm-add   (cl-cc:make-vm-add   :dst :r0 :lhs :r1 :rhs :r2)))
+  (expected-op-prefix inst)
+  (let ((op (cl-cc::vm-inst-to-enode-op inst)))
+    (assert-true (symbolp op))
+    ;; The result op should NOT start with VM-
+    (assert-false (string= "VM-" (subseq (symbol-name op) 0 (min 3 (length (symbol-name op))))))))
+
+;;; ─── egraph-add-instructions ─────────────────────────────────────────────
+
+(deftest egraph-add-instructions-maps-dst-to-class
+  "egraph-add-instructions returns a hash table mapping destination registers to e-class IDs."
+  (let* ((eg    (make-test-egraph))
+         ;; Use add + two consts so the add node is structurally distinct
+         (insts (list (cl-cc:make-vm-const :dst :r0 :value 7)
+                      (cl-cc:make-vm-add   :dst :r1 :lhs :r0 :rhs :r0)))
+         (reg->class (cl-cc::egraph-add-instructions eg insts)))
+    ;; Both registers must have entries in the mapping
+    (assert-true (integerp (gethash :r0 reg->class)))
+    (assert-true (integerp (gethash :r1 reg->class)))
+    ;; The add node's class must differ from its operand's class
+    (assert-true (/= (gethash :r0 reg->class) (gethash :r1 reg->class)))))
+
+(deftest egraph-add-instructions-const-sets-ec-data
+  "egraph-add-instructions stores the vm-const value in ec-data."
+  (let* ((eg    (make-test-egraph))
+         (insts (list (cl-cc:make-vm-const :dst :r0 :value 42)))
+         (reg->class (cl-cc::egraph-add-instructions eg insts)))
+    (let* ((class-id (gethash :r0 reg->class))
+           (val (cl-cc::egraph-class-const-value eg class-id)))
+      (assert-= 42 val))))
+
+;;; ─── Compound pattern matching ───────────────────────────────────────────
+
+(deftest egraph-match-pattern-compound-op
+  "Compound pattern (add ?x ?y) matches an add e-node."
+  (let* ((eg  (make-test-egraph))
+         (c1  (cl-cc::egraph-add eg 'const))
+         (c2  (cl-cc::egraph-add eg 'var))
+         (add (cl-cc::egraph-add eg 'add c1 c2))
+         (matches (cl-cc::egraph-match-pattern eg '(add ?x ?y) add)))
+    (assert-true (>= (length matches) 1))
+    (let ((b (car matches)))
+      (assert-true (assoc '?x b))
+      (assert-true (assoc '?y b)))))
+
+(deftest egraph-match-pattern-literal-symbol
+  "A plain symbol pattern matches if the e-class has a nullary node with that op."
+  (let* ((eg  (make-test-egraph))
+         (id  (cl-cc::egraph-add eg 'zero))
+         (matches (cl-cc::egraph-match-pattern eg 'zero id)))
+    (assert-true (= 1 (length matches)))))
+
+;;; ─── *opt-iteration-budget-thresholds* data coverage ────────────────────
+
+(deftest-each opt-iteration-budget-thresholds-content
+  "*opt-iteration-budget-thresholds* contains all four expected threshold entries."
+  :cases (("tiny-threshold"   50  -12)
+          ("small-threshold"  150 -6)
+          ("medium-threshold" 400 0)
+          ("large-threshold"  800 8))
+  (threshold delta)
+  (let ((entry (assoc threshold cl-cc::*opt-iteration-budget-thresholds*)))
+    (assert-true entry)
+    (assert-= delta (cdr entry))))

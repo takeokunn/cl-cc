@@ -32,42 +32,21 @@
   (expected source)
   (assert-= expected (parse-one source)))
 
-(deftest parser-parse-source-string
-  "parse-source: string literal"
-  (assert-string= "hello" (parse-one "\"hello\"")))
-
-(deftest parser-parse-source-symbol
-  "parse-source: symbol is interned and uppercased"
-  (assert-equal "FOO" (symbol-name (parse-one "foo"))))
-
-(deftest-each parser-parse-source-null-values
-  "parse-source: forms that evaluate to nil/null."
-  :cases (("nil"        "nil")
-          ("empty-list" "()"))
-  (source)
-  (assert-null (parse-one source)))
-
-(deftest parser-parse-source-t
-  "parse-source: t literal"
-  (assert-true (eq t (parse-one "t"))))
-
-(deftest parser-parse-source-list
-  "parse-source: simple list"
-  (let ((result (parse-one "(+ 1 2)")))
-    (assert-equal '(+ 1 2) result)))
-
-(deftest parser-parse-source-nested-list
-  "parse-source: nested list"
-  (let ((result (parse-one "(if (> x 0) x (- x))")))
-    (assert-true (consp result))
-    (assert-eq 'if (first result))))
-
-(deftest parser-parse-source-quote-sugar
-  "parse-source: 'x expands to (quote x)"
-  (let ((result (parse-one "'foo")))
-    (assert-true (consp result))
-    (assert-eq 'quote (first result))
-    (assert-equal "FOO" (symbol-name (second result)))))
+(deftest-each parser-parse-source-atom-cases
+  "parse-source: string literals, symbols, t, nil, lists, and quote sugar."
+  :cases (("string"       "\"hello\"" (lambda (r) (string= "hello" r)))
+          ("symbol"       "foo"       (lambda (r) (string= "FOO" (symbol-name r))))
+          ("t-literal"    "t"         (lambda (r) (eq t r)))
+          ("nil-atom"     "nil"       (lambda (r) (null r)))
+          ("empty-list"   "()"        (lambda (r) (null r)))
+          ("simple-list"  "(+ 1 2)"   (lambda (r) (equal '(+ 1 2) r)))
+          ("nested-list"  "(if (> x 0) x (- x))"
+                          (lambda (r) (and (consp r) (eq 'if (first r)))))
+          ("quote-sugar"  "'foo"
+                          (lambda (r) (and (consp r) (eq 'quote (first r))
+                                           (string= "FOO" (symbol-name (second r)))))))
+  (source pred)
+  (assert-true (funcall pred (parse-one source))))
 
 (deftest parser-parse-source-empty-error
   "parse-source: empty input signals error"
@@ -75,30 +54,23 @@
 
 ;;; ─── parse-all-forms ────────────────────────────────────────────────────────
 
-(deftest parser-parse-all-forms-multiple
-  "parse-all-forms: parses multiple top-level forms"
-  (let ((forms (parse-many "(defun f (x) x) (defun g (y) y)")))
-    (assert-= 2 (length forms))
-    (assert-eq 'defun (first (first forms)))
-    (assert-eq 'defun (first (second forms)))))
-
-(deftest parser-parse-all-forms-single
-  "parse-all-forms: single form returns one-element list"
-  (let ((forms (parse-many "(+ 1 2)")))
-    (assert-= 1 (length forms))
-    (assert-equal '(+ 1 2) (first forms))))
-
-(deftest parser-parse-all-forms-empty
-  "parse-all-forms: empty source returns nil"
-  (assert-null (parse-many "")))
-
-(deftest parser-parse-all-forms-atoms
-  "parse-all-forms: sequence of atoms"
-  (let ((forms (parse-many "1 2 3")))
-    (assert-= 3 (length forms))
-    (assert-= 1 (first forms))
-    (assert-= 2 (second forms))
-    (assert-= 3 (third forms))))
+(deftest-each parser-parse-all-forms-cases
+  "parse-all-forms: multiple forms, single form, empty source, atom sequence."
+  :cases (("multiple"  "(defun f (x) x) (defun g (y) y)"
+                        (lambda (forms) (and (= 2 (length forms))
+                                             (eq 'defun (first (first forms)))
+                                             (eq 'defun (first (second forms))))))
+          ("single"    "(+ 1 2)"
+                        (lambda (forms) (and (= 1 (length forms))
+                                             (equal '(+ 1 2) (first forms)))))
+          ("empty"     ""
+                        (lambda (forms) (null forms)))
+          ("atoms-seq" "1 2 3"
+                        (lambda (forms) (and (= 3 (length forms))
+                                             (= 1 (first forms)) (= 2 (second forms))
+                                             (= 3 (third forms))))))
+  (source pred)
+  (assert-true (funcall pred (parse-many source))))
 
 ;;; ─── parse-cl-source ────────────────────────────────────────────────────────
 

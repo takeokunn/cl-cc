@@ -122,26 +122,24 @@
 
 ;;; ─── narrow-union-type ────────────────────────────────────────────────────
 
-(deftest infer-narrow-union-removes-member
-  "narrow-union-type removes the matching member from a union."
-  (let* ((union (cl-cc/type:make-type-union
-                 (list cl-cc/type:type-int cl-cc/type:type-string cl-cc/type:type-symbol)))
-         (result (cl-cc/type::narrow-union-type union cl-cc/type:type-int)))
-    (assert-true (cl-cc/type:type-union-p result))
-    (assert-= 2 (length (cl-cc/type:type-union-types result)))))
-
-(deftest infer-narrow-union-to-single
-  "narrow-union-type reduces to single type when two-member union."
-  (let* ((union (cl-cc/type:make-type-union
-                 (list cl-cc/type:type-int cl-cc/type:type-string)))
-         (result (cl-cc/type::narrow-union-type union cl-cc/type:type-int)))
-    (assert-true (cl-cc/type:type-primitive-p result))
-    (assert-eq 'string (cl-cc/type:type-primitive-name result))))
-
-(deftest infer-narrow-union-non-union-passthrough
-  "narrow-union-type returns non-union type unchanged."
-  (let ((result (cl-cc/type::narrow-union-type cl-cc/type:type-int cl-cc/type:type-string)))
-    (assert-eq 'fixnum (cl-cc/type:type-primitive-name result))))
+(deftest-each infer-narrow-union-cases
+  "narrow-union-type: removes member from union, collapses to single, passes through non-union."
+  :cases (("removes-member"  (cl-cc/type:make-type-union
+                               (list cl-cc/type:type-int cl-cc/type:type-string cl-cc/type:type-symbol))
+                              cl-cc/type:type-int
+                              (lambda (r) (and (cl-cc/type:type-union-p r)
+                                               (= 2 (length (cl-cc/type:type-union-types r))))))
+          ("collapses-to-single" (cl-cc/type:make-type-union
+                                  (list cl-cc/type:type-int cl-cc/type:type-string))
+                                 cl-cc/type:type-int
+                                 (lambda (r) (and (cl-cc/type:type-primitive-p r)
+                                                  (eq 'string (cl-cc/type:type-primitive-name r)))))
+          ("non-union-passthrough" cl-cc/type:type-int
+                                   cl-cc/type:type-string
+                                   (lambda (r) (eq 'fixnum (cl-cc/type:type-primitive-name r)))))
+  (union-type keep-type pred)
+  (let ((result (cl-cc/type::narrow-union-type union-type keep-type)))
+    (assert-true (funcall pred result))))
 
 ;;; ─── infer: ast-quote edge cases ──────────────────────────────────────────
 
@@ -520,18 +518,19 @@ via type-refinement-base before reading the primitive name."
 
 ;;; ─── FR-004: Polymorphic Recursion ──────────────────────────────────────
 
-(deftest infer-poly-recursion-helper-finds-decl
-  "%find-fn-type-declaration extracts a matching type declaration."
-  (let ((decls '((type (function (fixnum) fixnum) length)
-                 (optimize (speed 3)))))
-    (let ((spec (cl-cc/type::%find-fn-type-declaration 'length decls)))
-      (assert-equal '(function (fixnum) fixnum) spec))))
-
-(deftest infer-poly-recursion-helper-returns-nil-for-miss
-  "%find-fn-type-declaration returns nil when name not present."
-  (let ((decls '((type fixnum x) (type string y))))
-    (assert-null (cl-cc/type::%find-fn-type-declaration 'length decls))
-    (assert-null (cl-cc/type::%find-fn-type-declaration nil decls))))
+(deftest-each infer-poly-recursion-helper-cases
+  "%find-fn-type-declaration: finds matching declaration, returns nil on miss or nil name."
+  :cases (("found"      '((type (function (fixnum) fixnum) length) (optimize (speed 3)))
+                         'length  '(function (fixnum) fixnum))
+          ("miss-name"  '((type fixnum x) (type string y))
+                         'length  nil)
+          ("nil-name"   '((type fixnum x))
+                         nil      nil))
+  (decls name expected)
+  (let ((spec (cl-cc/type::%find-fn-type-declaration name decls)))
+    (if expected
+        (assert-equal expected spec)
+        (assert-null spec))))
 
 (deftest infer-defun-without-annotation-infers-normally
   "defun without type declaration infers param/return types as before."
