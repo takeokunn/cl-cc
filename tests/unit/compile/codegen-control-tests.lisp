@@ -48,3 +48,69 @@
     (let* ((insts (codegen-instructions ctx))
            (consts (remove-if-not (lambda (i) (typep i 'cl-cc::vm-const)) insts)))
       (assert-true (>= (length consts) 2)))))
+
+;;; ─── lookup-block ────────────────────────────────────────────────────────────
+
+(deftest lookup-block-returns-exit-label-and-result-reg
+  "lookup-block returns the (exit-label . result-reg) pair when the block is found."
+  (let ((ctx (make-instance 'cl-cc::compiler-context)))
+    (setf (cl-cc::ctx-block-env ctx)
+          (list (cons 'my-block (cons "exit_0" :R3))))
+    (let ((info (cl-cc::lookup-block ctx 'my-block)))
+      (assert-equal "exit_0" (car info))
+      (assert-eq :R3 (cdr info)))))
+
+(deftest lookup-block-multiple-blocks-returns-correct-one
+  "lookup-block finds the right entry when multiple blocks are registered."
+  (let ((ctx (make-instance 'cl-cc::compiler-context)))
+    (setf (cl-cc::ctx-block-env ctx)
+          (list (cons 'outer (cons "outer_exit" :R0))
+                (cons 'inner (cons "inner_exit" :R1))))
+    (let ((info (cl-cc::lookup-block ctx 'inner)))
+      (assert-equal "inner_exit" (car info))
+      (assert-eq :R1 (cdr info)))))
+
+(deftest lookup-block-signals-error-for-unknown-block
+  "lookup-block signals an error when the block name is not in block-env."
+  (let ((ctx (make-instance 'cl-cc::compiler-context)))
+    (assert-signals error
+      (cl-cc::lookup-block ctx 'nonexistent-block))))
+
+;;; ─── lookup-tag ──────────────────────────────────────────────────────────────
+
+(deftest lookup-tag-returns-label-when-found
+  "lookup-tag returns the label string for a registered tag."
+  (let ((ctx (make-instance 'cl-cc::compiler-context)))
+    (setf (cl-cc::ctx-tagbody-env ctx)
+          (list (cons 'loop-start "tag_0")
+                (cons 'loop-end   "tag_1")))
+    (assert-equal "tag_0" (cl-cc::lookup-tag ctx 'loop-start))
+    (assert-equal "tag_1" (cl-cc::lookup-tag ctx 'loop-end))))
+
+(deftest lookup-tag-signals-error-for-unknown-tag
+  "lookup-tag signals an error when the tag is not in tagbody-env."
+  (let ((ctx (make-instance 'cl-cc::compiler-context)))
+    (assert-signals error
+      (cl-cc::lookup-tag ctx 'missing-tag))))
+
+(deftest lookup-tag-shadowed-returns-innermost
+  "lookup-tag returns the first (innermost) binding when tags share a name."
+  (let ((ctx (make-instance 'cl-cc::compiler-context)))
+    (setf (cl-cc::ctx-tagbody-env ctx)
+          (list (cons 'retry "inner_tag_5")
+                (cons 'retry "outer_tag_1")))
+    (assert-equal "inner_tag_5" (cl-cc::lookup-tag ctx 'retry))))
+
+;;; ─── type-error-message-from-mismatch ────────────────────────────────────────
+
+(deftest type-error-message-contains-expected-and-got
+  "type-error-message-from-mismatch formats a string containing 'expected' and 'got'."
+  (let* ((expected-type (cl-cc/type:parse-type-specifier 'integer))
+         (actual-type   (cl-cc/type:parse-type-specifier 'string))
+         (err (make-condition 'cl-cc/type:type-mismatch-error
+                              :expected expected-type
+                              :actual   actual-type))
+         (msg (cl-cc::type-error-message-from-mismatch err)))
+    (assert-true (stringp msg))
+    (assert-true (search "expected" msg))
+    (assert-true (search "got" msg))))

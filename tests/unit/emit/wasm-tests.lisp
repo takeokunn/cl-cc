@@ -151,33 +151,24 @@
     (assert-true wat)
     (assert-output-contains wat "local.tee")))
 
-(deftest wasm-logcount-lowers-to-popcnt
-  "logcount lowering uses i64.popcnt in emitted WAT."
-  (let ((wat (%wat-for "(defun f (x) (logcount x))")))
+(deftest-each wasm-bitcount-lowers-to-wasm-op
+  "Bit-count operations lower to their corresponding WASM i64 instructions via %wat-for."
+  :cases (("logcount"       "(defun f (x) (logcount x))"        "i64.popcnt")
+          ("integer-length" "(defun f (x) (integer-length x))"  "i64.clz"))
+  (source expected-op)
+  (let ((wat (%wat-for source)))
     (assert-true wat)
-    (assert-output-contains wat "i64.popcnt")))
+    (assert-output-contains wat expected-op)))
 
-(deftest wasm-integer-length-lowers-to-clz
-  "integer-length lowering uses i64.clz-based emitted WAT."
-  (let ((wat (%wat-for "(defun f (x) (integer-length x))")))
-    (assert-true wat)
-    (assert-output-contains wat "i64.clz")))
-
-(deftest wasm-direct-logcount-emitter
-  "Direct wasm emitter lowers vm-logcount to i64.popcnt too."
-  (let ((wat (%direct-wasm-emit (cl-cc::make-vm-logcount :dst :r0 :src :r1))))
-    (assert-output-contains wat "i64.popcnt")))
-
-(deftest wasm-direct-integer-length-emitter
-  "Direct wasm emitter lowers vm-integer-length to i64.clz too."
-  (let ((wat (%direct-wasm-emit (cl-cc::make-vm-integer-length :dst :r0 :src :r1))))
-    (assert-output-contains wat "i64.clz")))
-
-(deftest wasm-direct-integer-arith-aliases
-  "Direct wasm emitter supports integer-specialized arithmetic via the same i64 ops."
-  (assert-output-contains (%direct-wasm-emit (cl-cc::make-vm-integer-add :dst :r0 :lhs :r1 :rhs :r2)) "i64.add")
-  (assert-output-contains (%direct-wasm-emit (cl-cc::make-vm-integer-sub :dst :r0 :lhs :r1 :rhs :r2)) "i64.sub")
-  (assert-output-contains (%direct-wasm-emit (cl-cc::make-vm-integer-mul :dst :r0 :lhs :r1 :rhs :r2)) "i64.mul"))
+(deftest-each wasm-direct-bitcount-and-arith-emitters
+  "Direct WASM emitter lowers bit-count and integer-specialized arithmetic to correct i64 ops."
+  :cases (("logcount"       "i64.popcnt" (cl-cc::make-vm-logcount :dst :r0 :src :r1))
+          ("integer-length" "i64.clz"    (cl-cc::make-vm-integer-length :dst :r0 :src :r1))
+          ("integer-add"    "i64.add"    (cl-cc::make-vm-integer-add :dst :r0 :lhs :r1 :rhs :r2))
+          ("integer-sub"    "i64.sub"    (cl-cc::make-vm-integer-sub :dst :r0 :lhs :r1 :rhs :r2))
+          ("integer-mul"    "i64.mul"    (cl-cc::make-vm-integer-mul :dst :r0 :lhs :r1 :rhs :r2)))
+  (expected-op inst)
+  (assert-output-contains (%direct-wasm-emit inst) expected-op))
 
 (deftest wasm-elem-segment-present
   "Test that the WAT module includes an elem segment to populate the funcref table."
@@ -204,17 +195,12 @@
     (assert-true wat)
     (assert-output-contains wat "$host_print_val")))
 
-(deftest wasm-binary-write-f64-basic-patterns
-  "Binary f64 encoding is stable for representative values without implementation-specific APIs."
+(deftest-each wasm-binary-write-f64
+  "Binary f64 encoding produces correct IEEE-754 little-endian bytes."
+  :cases (("pos-1.0"   1.0d0  '(0 0 0 0 0 0 #xf0 #x3f))
+          ("neg-2.5"  -2.5d0  '(0 0 0 0 0 0 #x04 #xc0))
+          ("neg-zero" -0.0d0  '(0 0 0 0 0 0 0 #x80)))
+  (value expected)
   (let ((buf (cl-cc/binary::make-wasm-buffer)))
-    (cl-cc/binary::wasm-buf-write-f64 buf 1.0d0)
-    (assert-equal '(0 0 0 0 0 0 #xf0 #x3f) (coerce buf 'list)))
-  (let ((buf (cl-cc/binary::make-wasm-buffer)))
-    (cl-cc/binary::wasm-buf-write-f64 buf -2.5d0)
-    (assert-equal '(0 0 0 0 0 0 #x04 #xc0) (coerce buf 'list))))
-
-(deftest wasm-binary-write-f64-negative-zero
-  "Binary f64 encoding preserves the sign bit of -0.0."
-  (let ((buf (cl-cc/binary::make-wasm-buffer)))
-    (cl-cc/binary::wasm-buf-write-f64 buf -0.0d0)
-    (assert-equal '(0 0 0 0 0 0 0 #x80) (coerce buf 'list))))
+    (cl-cc/binary::wasm-buf-write-f64 buf value)
+    (assert-equal expected (coerce buf 'list))))

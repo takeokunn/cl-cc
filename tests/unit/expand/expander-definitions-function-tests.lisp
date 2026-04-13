@@ -2,8 +2,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite expander-definitions-function-suite :description "Definition-form function unit tests")
+(defsuite expander-definitions-function-suite :description "Definition-form function unit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite expander-definitions-function-suite)
 (deftest-each expander-defun-lambda-preserve-structure
   "Plain defun and lambda preserve their structure after macro expansion."
   :cases (("defun"  '(defun triple (x) (* 3 x)) 'defun  2 '(x))

@@ -43,25 +43,28 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
           ("cl ext"    "foo.cl"   "" :lisp)
           ("txt ext"   "foo.txt"  "" :lisp))
   (file lang-flag expected)
-  (assert-eq expected (cl-cc/cli::%detect-language file lang-flag)))
+  (assert-eq expected (cl-cc::%detect-language file lang-flag)))
 
-(deftest cli-detect-language-no-extension
+(deftest-each cli-detect-language-no-extension
   ;; Regression test: (pathname-type \"Makefile\") returns NIL;
   ;; the old code called (string= nil \"php\") which was a type error.
   "detect-language: file with no extension defaults to :lisp (not a type error)"
-  (assert-eq :lisp (cl-cc/cli::%detect-language "Makefile" ""))
-  (assert-eq :lisp (cl-cc/cli::%detect-language "foo"      ""))
-  (assert-eq :lisp (cl-cc/cli::%detect-language "README"   "")))
+  :cases (("makefile" "Makefile")
+          ("no-ext"   "foo")
+          ("readme"   "README"))
+  (file)
+  (assert-eq :lisp (cl-cc::%detect-language file "")))
 
 (deftest cli-detect-language-nil-file
   "detect-language: nil file path with no lang flag defaults to :lisp"
-  (assert-eq :lisp (cl-cc/cli::%detect-language nil "")))
+  (assert-eq :lisp (cl-cc::%detect-language nil "")))
 
-(deftest cli-detect-language-case-sensitive
-  "detect-language: extension matching is case-sensitive (.PHP ≠ .php)"
-  ;; Uppercase extension is NOT recognised as PHP
-  (assert-eq :lisp (cl-cc/cli::%detect-language "foo.PHP" ""))
-  (assert-eq :lisp (cl-cc/cli::%detect-language "foo.Php" "")))
+(deftest-each cli-detect-language-case-sensitive
+  "detect-language: extension matching is case-sensitive (.PHP ≠ .php), non-lowercase defaults to :lisp."
+  :cases (("uppercase" "foo.PHP")
+          ("mixed"     "foo.Php"))
+  (file)
+  (assert-eq :lisp (cl-cc::%detect-language file "")))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; %detect-language — --lang flag overrides
@@ -73,14 +76,16 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
           ("lisp flag beats php ext"  "foo.php"  "lisp" :lisp)
           ("php flag with no ext"     "Makefile" "php"  :php))
   (file lang-flag expected)
-  (assert-eq expected (cl-cc/cli::%detect-language file lang-flag)))
+  (assert-eq expected (cl-cc::%detect-language file lang-flag)))
 
-(deftest cli-detect-language-unknown-flag-falls-through
-  "detect-language: unknown lang flag falls through to extension detection"
+(deftest-each cli-detect-language-unknown-flag-falls-through
+  "detect-language: unknown lang flag falls through to extension detection."
+  :cases (("php-ext"  "foo.php"  :php)
+          ("lisp-ext" "foo.lisp" :lisp)
+          ("no-ext"   "foo"      :lisp))
+  (file expected)
   ;; 'ruby' is not a known lang, so extension check runs next
-  (assert-eq :php  (cl-cc/cli::%detect-language "foo.php"  "ruby"))
-  (assert-eq :lisp (cl-cc/cli::%detect-language "foo.lisp" "ruby"))
-  (assert-eq :lisp (cl-cc/cli::%detect-language "foo"      "ruby")))
+  (assert-eq expected (cl-cc::%detect-language file "ruby")))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; %read-file — content correctness
@@ -95,7 +100,7 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
   (let ((content (or content-or-nil
                      (format nil "(defun f (x)~%  (+ x 1))~%"))))
     (%with-temp-file (path content)
-      (assert-string= content (cl-cc/cli::%read-file path)))))
+      (assert-string= content (cl-cc::%read-file path)))))
 
 (deftest cli-read-file-multibyte-no-nul
   ;; Regression test: file-length returns byte count (≥ char count for UTF-8).
@@ -106,7 +111,7 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
   ;; "テスト" = 3 chars but 9 bytes → old code appended 6 #\Nul chars
   (let ((content "(+ 1 2) ;; テスト"))
     (%with-temp-file (path content)
-      (let ((result (cl-cc/cli::%read-file path)))
+      (let ((result (cl-cc::%read-file path)))
         ;; No trailing nul character anywhere
         (assert-false (find #\Nul result))
         ;; Exact content match
@@ -120,11 +125,11 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
   ;; file-length returns 6; correct char count is 3.
   (let ((content "αβγ"))
     (%with-temp-file (path content)
-      (let ((result (cl-cc/cli::%read-file path)))
+      (let ((result (cl-cc::%read-file path)))
         (assert-= 3 (length result))
         (assert-string= "αβγ" result)))))
 
 (deftest cli-read-file-not-found
   "read-file: non-existent file signals a plain error"
   (assert-signals error
-    (cl-cc/cli::%read-file "/tmp/cl-cc-nonexistent-99999.lisp")))
+    (cl-cc::%read-file "/tmp/cl-cc-nonexistent-99999.lisp")))

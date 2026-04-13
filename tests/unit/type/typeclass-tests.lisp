@@ -7,7 +7,10 @@
 
 (in-package :cl-cc/test)
 
-(defsuite typeclass-suite :description "Multi-parameter typeclass system tests")
+(defsuite typeclass-suite :description "Multi-parameter typeclass system tests"
+  :parent cl-cc-suite)
+
+(in-suite typeclass-suite)
 (in-suite cl-cc-suite)
 
 ;;; ─── typeclass-def struct ──────────────────────────────────────────────────
@@ -186,15 +189,18 @@
 
 ;;; ─── Backward-compat: type-effect ──────────────────────────────────────────
 
-(deftest compat-type-effect-behavior
-  "make-type-effect: valid effect node; type-effect-name works on both type-effect and type-effect-op."
+(deftest compat-type-effect-creation
+  "make-type-effect creates a valid effect node with the given name."
   (let ((e (cl-cc/type::make-type-effect :name 'io)))
     (assert-true (cl-cc/type::type-effect-p e))
-    (assert-eq 'io (cl-cc/type::type-effect-name e)))
-  (let ((old (cl-cc/type::make-type-effect :name 'io))
-        (new (make-type-effect-op :name 'state :args nil)))
-    (assert-eq 'io    (cl-cc/type::type-effect-name old))
-    (assert-eq 'state (cl-cc/type::type-effect-name new))))
+    (assert-eq 'io (cl-cc/type::type-effect-name e))))
+
+(deftest-each compat-type-effect-name-dispatch
+  "type-effect-name works on both type-effect (old) and type-effect-op (new)."
+  :cases (("old-style" (cl-cc/type::make-type-effect :name 'io)              'io)
+          ("new-style" (make-type-effect-op          :name 'state :args nil) 'state))
+  (effect expected-name)
+  (assert-eq expected-name (cl-cc/type::type-effect-name effect)))
 
 ;;; ─── Backward-compat: type-effectful-function ──────────────────────────────
 

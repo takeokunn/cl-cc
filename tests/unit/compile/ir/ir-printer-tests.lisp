@@ -6,8 +6,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite ir-printer-suite :description "Extended IR printer tests")
+(defsuite ir-printer-suite :description "Extended IR printer tests"
+  :parent cl-cc-suite)
 
+
+(in-suite ir-printer-suite)
 ;;; ─── ir-format-value ──────────────────────────────────────────────────────────
 
 (deftest ir-fmt-value-cases

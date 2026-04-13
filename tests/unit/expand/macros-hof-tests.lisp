@@ -10,6 +10,8 @@
   :description "Tests for macros-hof.lisp"
   :parent cl-cc-suite)
 
+
+(in-suite macros-hof-suite)
 ;;; ── HOF macros ───────────────────────────────────────────────────────────────
 
 (deftest-each hof-macro-outer-is-let

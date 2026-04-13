@@ -7,88 +7,95 @@
 
 ;;; ─── Feature Conditionals & Read-Time Eval ─────────────────────────────────
 
+;;; ── Form-skipping helpers (used by both lex-skip-form and lex-read-form-text) ──
+
+(defun %lex-skip-string-chars (state)
+  "Advance STATE past a string body and its closing double-quote.
+Caller must have already consumed the opening quote."
+  (loop until (or (lex-at-end-p state) (char= (lex-peek state) #\"))
+        do (when (char= (lex-peek state) #\\) (lex-advance state))
+           (lex-advance state))
+  (unless (lex-at-end-p state) (lex-advance state)))
+
+(defun %lex-skip-list-body (state)
+  "Advance STATE past a balanced list, handling nested strings and line comments.
+Caller must have already consumed the opening '('."
+  (let ((depth 1))
+    (loop while (and (> depth 0) (not (lex-at-end-p state)))
+          do (let ((c (lex-peek state)))
+               (lex-advance state)
+               (cond ((char= c #\()  (incf depth))
+                     ((char= c #\))  (decf depth))
+                     ((char= c #\")  (%lex-skip-string-chars state))
+                     ((char= c #\;)  ; line comment — skip to newline
+                      (loop until (or (lex-at-end-p state)
+                                      (char= (lex-peek state) #\Newline))
+                            do (lex-advance state))))))))
+
+(defun %lex-skip-atom (state)
+  "Advance STATE past an atom (symbol, number, or keyword including leading colon)."
+  (when (and (not (lex-at-end-p state)) (char= (lex-peek state) #\:))
+    (lex-advance state))
+  (loop while (and (not (lex-at-end-p state)) (lex-constituent-p (lex-peek state)))
+        do (lex-advance state)))
+
+(defun %lex-skip-char-literal (state)
+  "Skip a #\\ character literal name. Caller must have already consumed the '#\\'."
+  (unless (lex-at-end-p state)
+    (lex-advance state)  ; consume first char (or start of long name like Space)
+    (loop while (and (not (lex-at-end-p state)) (lex-constituent-p (lex-peek state)))
+          do (lex-advance state))))
+
+(defun %lex-skip-two-forms (state)
+  "Skip two consecutive forms (used for #+/- feature conditionals)."
+  (lex-skip-form state)
+  (lex-skip-form state))
+
+(defparameter *lex-hash-dispatch-table*
+  ;; Keys: hash-dispatch characters. Values: function symbols (looked up at call time).
+  ;; Special case #\\ is handled outside this table (it needs an extra char advance).
+  '((#\(  . %lex-skip-list-body)      ; #(...) — vector literal
+    (#\'  . lex-skip-form)             ; #'fn  — function notation
+    (#\.  . lex-skip-form)             ; #.x   — read-time eval
+    (#\+  . %lex-skip-two-forms)       ; #+feat body
+    (#\-  . %lex-skip-two-forms)       ; #-feat body
+    (#\|  . lex-skip-block-comment))   ; #|...|# block comment
+  "Alist mapping hash-dispatch characters to handler function symbols.
+Uses symbol names so forward references resolve at call time via funcall.
+Does not include #\\ (character literals), which need special advance logic.")
+
+(defun %lex-skip-hash-form (state)
+  "Skip a #-dispatched form. Caller must have already consumed the '#'."
+  (unless (lex-at-end-p state)
+    (let* ((dispatch-ch (lex-peek state))
+           (handler (cdr (assoc dispatch-ch *lex-hash-dispatch-table*))))
+      (lex-advance state)
+      (cond
+        (handler (funcall handler state))
+        ((char= dispatch-ch #\\) (%lex-skip-char-literal state))
+        (t ; unknown dispatch — skip atom
+         (loop while (and (not (lex-at-end-p state)) (lex-constituent-p (lex-peek state)))
+               do (lex-advance state)))))))
+
 (defun lex-skip-form (state)
-  "Skip a single balanced form from STATE (for #+/- when feature test fails).
-   Handles atoms, lists, strings, and nested forms."
+  "Skip a single balanced form from STATE (for #+/- when feature test fails)."
   (lex-skip-trivia state)
   (when (lex-at-end-p state) (return-from lex-skip-form))
   (let ((ch (lex-peek state)))
     (cond
-      ;; Skip a list form
       ((char= ch #\()
-       (lex-advance state)
-       (let ((depth 1))
-         (loop while (and (> depth 0) (not (lex-at-end-p state)))
-               do (let ((c (lex-peek state)))
-                    (lex-advance state)
-                    (cond ((char= c #\() (incf depth))
-                          ((char= c #\)) (decf depth))
-                          ((char= c #\") ; skip string
-                           (loop until (or (lex-at-end-p state)
-                                           (char= (lex-peek state) #\"))
-                                 do (when (char= (lex-peek state) #\\)
-                                      (lex-advance state))
-                                    (lex-advance state))
-                           (unless (lex-at-end-p state) (lex-advance state)))
-                          ((char= c #\;) ; skip line comment
-                           (loop until (or (lex-at-end-p state)
-                                           (char= (lex-peek state) #\Newline))
-                                 do (lex-advance state))))))))
-      ;; Skip a string
+       (lex-advance state) (%lex-skip-list-body state))
       ((char= ch #\")
-       (lex-advance state)
-       (loop until (or (lex-at-end-p state) (char= (lex-peek state) #\"))
-             do (when (char= (lex-peek state) #\\) (lex-advance state))
-                (lex-advance state))
-       (unless (lex-at-end-p state) (lex-advance state)))
-      ;; Skip quote/backquote prefix + the following form
+       (lex-advance state) (%lex-skip-string-chars state))
       ((or (char= ch #\') (char= ch #\`) (char= ch #\,))
        (lex-advance state)
        (when (and (not (lex-at-end-p state)) (char= (lex-peek state) #\@))
          (lex-advance state))
        (lex-skip-form state))
-      ;; Skip #-dispatched form
       ((char= ch #\#)
-       (lex-advance state)
-       (unless (lex-at-end-p state)
-         (let ((dispatch-ch (lex-peek state)))
-           (lex-advance state)
-           (cond
-             ;; #( vector — skip balanced parens
-             ((char= dispatch-ch #\()
-              (let ((depth 1))
-                (loop while (and (> depth 0) (not (lex-at-end-p state)))
-                      do (let ((c (lex-peek state)))
-                           (lex-advance state)
-                           (cond ((char= c #\() (incf depth))
-                                 ((char= c #\)) (decf depth)))))))
-             ;; #' #. — skip the next form
-             ((or (char= dispatch-ch #\') (char= dispatch-ch #\.))
-              (lex-skip-form state))
-             ;; #\ character — skip one or more chars (e.g. #\Space)
-             ((char= dispatch-ch #\\)
-              (unless (lex-at-end-p state)
-                (lex-advance state)
-                (loop while (and (not (lex-at-end-p state))
-                                 (lex-constituent-p (lex-peek state)))
-                      do (lex-advance state))))
-             ;; #+ #- — skip feature + form
-             ((or (char= dispatch-ch #\+) (char= dispatch-ch #\-))
-              (lex-skip-form state) ; feature
-              (lex-skip-form state)) ; body
-             ;; #| block comment
-             ((char= dispatch-ch #\|)
-              (lex-skip-block-comment state))
-             ;; Other: skip an atom
-             (t (loop while (and (not (lex-at-end-p state))
-                                  (lex-constituent-p (lex-peek state)))
-                      do (lex-advance state)))))))
-      ;; Skip an atom (symbol, number, keyword)
+       (lex-advance state) (%lex-skip-hash-form state))
       (t
-       (when (char= ch #\:) (lex-advance state)) ; keyword colon
-       (loop while (and (not (lex-at-end-p state))
-                        (lex-constituent-p (lex-peek state)))
-             do (lex-advance state))))))
+       (%lex-skip-atom state)))))
 
 (defun lex-read-feature-expr (state)
   "Read a feature expression for #+/#-. Returns a keyword symbol or a list like (:or :sbcl :ccl)."
@@ -125,42 +132,16 @@
 
 (defun lex-read-form-text (state)
   "Read a single balanced form's raw text from STATE and return it as a string.
-   Advances STATE past the form."
+Advances STATE past the form."
   (lex-skip-trivia state)
   (when (lex-at-end-p state)
     (error "Lexer error: unexpected end in form"))
   (let ((start (lexer-state-pos state))
-        (ch (lex-peek state)))
+        (ch    (lex-peek state)))
     (cond
-      ;; Parenthesized form
-      ((char= ch #\()
-       (lex-advance state)
-       (let ((depth 1))
-         (loop while (and (> depth 0) (not (lex-at-end-p state)))
-               do (let ((c (lex-peek state)))
-                    (lex-advance state)
-                    (cond ((char= c #\() (incf depth))
-                          ((char= c #\)) (decf depth))
-                          ((char= c #\")
-                           (loop until (or (lex-at-end-p state)
-                                           (char= (lex-peek state) #\"))
-                                 do (when (char= (lex-peek state) #\\)
-                                      (lex-advance state))
-                                    (lex-advance state))
-                           (unless (lex-at-end-p state) (lex-advance state))))))))
-      ;; String
-      ((char= ch #\")
-       (lex-advance state)
-       (loop until (or (lex-at-end-p state) (char= (lex-peek state) #\"))
-             do (when (char= (lex-peek state) #\\) (lex-advance state))
-                (lex-advance state))
-       (unless (lex-at-end-p state) (lex-advance state)))
-      ;; Atom (symbol, number, keyword)
-      (t
-       (when (char= ch #\:) (lex-advance state))
-       (loop while (and (not (lex-at-end-p state))
-                        (lex-constituent-p (lex-peek state)))
-             do (lex-advance state))))
+      ((char= ch #\() (lex-advance state) (%lex-skip-list-body state))
+      ((char= ch #\") (lex-advance state) (%lex-skip-string-chars state))
+      (t              (%lex-skip-atom state)))
     (subseq (lexer-state-source state) start (lexer-state-pos state))))
 
 ;;; ─── Label Table for #n= / #n# (FR-599) ────────────────────────────────────

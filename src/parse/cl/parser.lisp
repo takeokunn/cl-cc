@@ -236,13 +236,17 @@ in the stripped forms and declarations are extracted after it."
       (push (first rest) prefix)
       (setf rest (rest rest)))
     (loop while (and rest (consp (first rest)) (eq (caar rest) 'declare)) do
-      (dolist (spec (cdar rest))
-        (when (and (consp spec)
+      (let ((preserved-specs nil))
+        (dolist (spec (cdar rest))
+          (if (and (consp spec)
                    (eq (car spec) 'type)
                    (>= (length spec) 3))
-          (let ((type-spec (second spec)))
-            (dolist (var (cddr spec))
-              (setf bindings (acons var type-spec bindings))))))
+              (let ((type-spec (second spec)))
+                (dolist (var (cddr spec))
+                  (setf bindings (acons var type-spec bindings))))
+              (push spec preserved-specs)))
+        (when preserved-specs
+          (push `(declare ,@(nreverse preserved-specs)) prefix)))
       (setf rest (cdr rest)))
     (values bindings (nconc (nreverse prefix) rest))))
 

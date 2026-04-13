@@ -5,8 +5,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite target-suite :description "Target descriptor and calling convention tests")
+(defsuite target-suite :description "Target descriptor and calling convention tests"
+  :parent cl-cc-suite)
 
+
+(in-suite target-suite)
 ;;; ─── Calling Convention Struct ──────────────────────────────────────────────
 
 (deftest cc-x86-64-registers
@@ -74,20 +77,28 @@
 
 ;;; ─── Target Utility Functions ───────────────────────────────────────────────
 
-(deftest target-64-bit-p-behavior
-  "target-64-bit-p: true for x86-64/aarch64/riscv64; false for wasm32."
-  (assert-true  (cl-cc::target-64-bit-p cl-cc::*x86-64-target*))
-  (assert-true  (cl-cc::target-64-bit-p cl-cc::*aarch64-target*))
-  (assert-true  (cl-cc::target-64-bit-p cl-cc::*riscv64-target*))
-  (assert-false (cl-cc::target-64-bit-p cl-cc::*wasm32-target*)))
+(deftest-each target-64-bit-p-classification
+  "target-64-bit-p: true for register ISAs, false for the wasm32 stack machine."
+  :cases (("x86-64"  t   cl-cc::*x86-64-target*)
+          ("aarch64" t   cl-cc::*aarch64-target*)
+          ("riscv64" t   cl-cc::*riscv64-target*)
+          ("wasm32"  nil cl-cc::*wasm32-target*))
+  (expected target)
+  (if expected
+      (assert-true  (cl-cc::target-64-bit-p target))
+      (assert-false (cl-cc::target-64-bit-p target))))
 
-(deftest target-has-feature-p-behavior
-  "target-has-feature-p: finds known features; returns nil for absent features."
-  (assert-true  (cl-cc::target-has-feature-p cl-cc::*x86-64-target* :sysv-abi))
-  (assert-true  (cl-cc::target-has-feature-p cl-cc::*aarch64-target* :aapcs64))
-  (assert-true  (cl-cc::target-has-feature-p cl-cc::*wasm32-target* :structured-control-flow))
-  (assert-false (cl-cc::target-has-feature-p cl-cc::*x86-64-target* :structured-control-flow))
-  (assert-false (cl-cc::target-has-feature-p cl-cc::*wasm32-target* :sysv-abi)))
+(deftest-each target-has-feature-p-cases
+  "target-has-feature-p finds architecture-specific features and rejects absent ones."
+  :cases (("x86-sysv"          t   cl-cc::*x86-64-target*  :sysv-abi)
+          ("arm-aapcs"         t   cl-cc::*aarch64-target* :aapcs64)
+          ("wasm-structured"   t   cl-cc::*wasm32-target*  :structured-control-flow)
+          ("x86-no-wasm-feat"  nil cl-cc::*x86-64-target*  :structured-control-flow)
+          ("wasm-no-sysv"      nil cl-cc::*wasm32-target*  :sysv-abi))
+  (expected target feature)
+  (if expected
+      (assert-true  (cl-cc::target-has-feature-p target feature))
+      (assert-false (cl-cc::target-has-feature-p target feature))))
 
 (deftest target-allocatable-regs-behavior
   "target-allocatable-regs: x86-64 excludes scratch (:rsp/:r11), includes :rax; wasm32 empty."
@@ -103,11 +114,13 @@
         (alloc  (cl-cc::target-allocatable-regs cl-cc::*x86-64-target*)))
     (assert-true (every (lambda (r) (member r alloc)) caller))))
 
-(deftest target-reg-index-behavior
-  "target-reg-index: correct index for known registers; nil for unknown."
-  (assert-equal 0 (cl-cc::target-reg-index cl-cc::*x86-64-target* :rax))
-  (assert-equal 7 (cl-cc::target-reg-index cl-cc::*x86-64-target* :rdi))
-  (assert-null    (cl-cc::target-reg-index cl-cc::*x86-64-target* :r99)))
+(deftest-each target-reg-index-lookup
+  "target-reg-index maps known x86-64 registers to indices; returns nil for unknown."
+  :cases (("rax"     0   :rax)
+          ("rdi"     7   :rdi)
+          ("unknown" nil :r99))
+  (expected reg)
+  (assert-equal expected (cl-cc::target-reg-index cl-cc::*x86-64-target* reg)))
 
 (deftest target-op-legal-default
   "Unregistered ops are legal by default (permissive)."

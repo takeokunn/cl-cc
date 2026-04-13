@@ -44,43 +44,35 @@
                     `(/ (log ,(second form)) (log ,(third form)))))
       (t (error "log takes 1 or 2 arguments")))))
 
-;; FR-662: min/max — 1-arg → identity, 2-arg → builtin, N-arg → left fold
-(define-expander-for min (form)
-  (let ((nargs (length (cdr form))))
-    (cond
-      ((= nargs 0) (error "min requires at least one argument"))
-      ((= nargs 1) (compiler-macroexpand-all (second form)))
-      ((= nargs 2) (list 'min (compiler-macroexpand-all (second form))
-                              (compiler-macroexpand-all (third form))))
-      (t (compiler-macroexpand-all (reduce-variadic-op 'min (cdr form) nil))))))
+;; FR-662: min/max — identical structure: 0→error, 1→identity, 2→builtin, N→fold
+;; Uses same dolist pattern as logand/logior/logxor/logeqv below.
+(dolist (op '(min max))
+  (let ((op op))
+    (setf (gethash op *expander-head-table*)
+          (lambda (form)
+            (let ((nargs (length (cdr form))))
+              (cond
+                ((= nargs 0) (error "~A requires at least one argument" op))
+                ((= nargs 1) (compiler-macroexpand-all (second form)))
+                ((= nargs 2) (list op (compiler-macroexpand-all (second form))
+                                      (compiler-macroexpand-all (third form))))
+                (t (compiler-macroexpand-all
+                    (reduce-variadic-op op (cdr form) nil)))))))))
 
-(define-expander-for max (form)
-  (let ((nargs (length (cdr form))))
-    (cond
-      ((= nargs 0) (error "max requires at least one argument"))
-      ((= nargs 1) (compiler-macroexpand-all (second form)))
-      ((= nargs 2) (list 'max (compiler-macroexpand-all (second form))
-                              (compiler-macroexpand-all (third form))))
-      (t (compiler-macroexpand-all (reduce-variadic-op 'max (cdr form) nil))))))
-
-;; FR-662: gcd/lcm — 0-arg → identity, 1-arg → abs, 2-arg → builtin, N-arg → fold
-(define-expander-for gcd (form)
-  (let ((nargs (length (cdr form))))
-    (cond
-      ((= nargs 0) 0)
-      ((= nargs 1) (list 'abs (compiler-macroexpand-all (second form))))
-      ((= nargs 2) (list 'gcd (compiler-macroexpand-all (second form))
-                               (compiler-macroexpand-all (third form))))
-      (t (compiler-macroexpand-all (reduce-variadic-op 'gcd (cdr form) 0))))))
-
-(define-expander-for lcm (form)
-  (let ((nargs (length (cdr form))))
-    (cond
-      ((= nargs 0) 1)
-      ((= nargs 1) (list 'abs (compiler-macroexpand-all (second form))))
-      ((= nargs 2) (list 'lcm (compiler-macroexpand-all (second form))
-                               (compiler-macroexpand-all (third form))))
-      (t (compiler-macroexpand-all (reduce-variadic-op 'lcm (cdr form) 1))))))
+;; FR-662: gcd/lcm — identical structure differing only in identity value (0 vs 1).
+;; 0-arg → identity, 1-arg → abs, 2-arg → builtin, N-arg → fold with identity.
+(dolist (entry '((gcd 0) (lcm 1)))
+  (let ((op (first entry)) (identity (second entry)))
+    (setf (gethash op *expander-head-table*)
+          (lambda (form)
+            (let ((nargs (length (cdr form))))
+              (cond
+                ((= nargs 0) identity)
+                ((= nargs 1) (list 'abs (compiler-macroexpand-all (second form))))
+                ((= nargs 2) (list op (compiler-macroexpand-all (second form))
+                                      (compiler-macroexpand-all (third form))))
+                (t (compiler-macroexpand-all
+                    (reduce-variadic-op op (cdr form) identity)))))))))
 
 ;; float-sign (FR-685): 1-arg → builtin, 2-arg → (* (float-sign x) (abs y))
 (define-expander-for float-sign (form)

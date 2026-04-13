@@ -2,8 +2,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite expander-setf-suite :description "Setf expander unit tests")
+(defsuite expander-setf-suite :description "Setf expander unit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite expander-setf-suite)
 ;;; ─── setf expansions ────────────────────────────────────────────────────────
 
 (deftest expander-setf-multi-var-progn

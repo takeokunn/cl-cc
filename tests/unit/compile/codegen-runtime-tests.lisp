@@ -1,7 +1,7 @@
 ;;;; tests/unit/compile/codegen-runtime-tests.lisp — Codegen runtime semantics tests
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-integration-suite)
 
 (deftest codegen-values-compilation
   "Compiling ast-values emits vm-values and returns a register."
@@ -57,30 +57,25 @@
   (expected code)
   (assert-run= expected code))
 
-(deftest codegen-mv-call-explicit-values-uses-direct-call
-  "Explicit ast-values arguments compile directly to vm-call without vm-apply."
+(deftest-each codegen-mv-call-direct-path
+  "multiple-value-call uses vm-call directly for explicit ast-values and zero-arg cases."
+  :cases (("explicit-values"
+           (cl-cc::make-ast-multiple-value-call
+             :func (make-ast-function :name '+)
+             :args (list (cl-cc::make-ast-values
+                          :forms (list (make-ast-int :value 1)
+                                       (make-ast-int :value 2))))))
+          ("no-args"
+           (cl-cc::make-ast-multiple-value-call
+             :func (make-ast-function :name 'list)
+             :args nil)))
+  (ast)
   (let* ((ctx (make-codegen-ctx))
-         (reg (compile-ast (cl-cc::make-ast-multiple-value-call
-                              :func (make-ast-function :name '+)
-                              :args (list (cl-cc::make-ast-values
-                                           :forms (list (make-ast-int :value 1)
-                                                        (make-ast-int :value 2)))))
-                            ctx)))
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-call))
+         (reg (compile-ast ast ctx)))
+    (assert-true  (codegen-find-inst ctx 'cl-cc::vm-call))
     (assert-false (codegen-find-inst ctx 'cl-cc::vm-apply))
     (assert-false (codegen-find-inst ctx 'cl-cc::vm-values-to-list))
-    (assert-true (keywordp reg))))
-
-(deftest codegen-mv-call-no-args-uses-direct-call
-  "Zero-arg multiple-value-call compiles directly to vm-call."
-  (let* ((ctx (make-codegen-ctx))
-         (reg (compile-ast (cl-cc::make-ast-multiple-value-call
-                             :func (make-ast-function :name 'list)
-                             :args nil)
-                           ctx)))
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-call))
-    (assert-false (codegen-find-inst ctx 'cl-cc::vm-apply))
-    (assert-true (keywordp reg))))
+    (assert-true  (keywordp reg))))
 
 (deftest codegen-mv-call-mixed-args-still-uses-apply-path
   "Non-ast-values arguments keep the generic multiple-value-call path."
@@ -144,13 +139,19 @@
     (compile-ast ast ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc::vm-establish-handler))))
 
-(deftest codegen-unwind-protect-returns-register
-  "Compiling ast-unwind-protect returns a register keyword."
+(deftest-each codegen-exception-form-returns-register
+  "Both unwind-protect and handler-case compilation return a register keyword."
+  :cases (("unwind-protect"
+           (cl-cc::make-ast-unwind-protect
+             :protected (make-ast-int :value 7)
+             :cleanup (list (make-ast-int :value 0))))
+          ("handler-case"
+           (cl-cc::make-ast-handler-case
+             :form (make-ast-int :value 10)
+             :clauses (list (list 'error nil (make-ast-int :value 0))))))
+  (ast)
   (let* ((ctx (make-codegen-ctx))
-         (reg (compile-ast (cl-cc::make-ast-unwind-protect
-                             :protected (make-ast-int :value 7)
-                             :cleanup (list (make-ast-int :value 0)))
-                           ctx)))
+         (reg (compile-ast ast ctx)))
     (assert-true (keywordp reg))))
 
 (deftest codegen-unwind-protect-normal-result-run
@@ -163,15 +164,6 @@
   (let ((output (with-output-to-string (*standard-output*)
                   (run-string "(unwind-protect 1 (print 99))"))))
     (assert-true (search "99" output))))
-
-(deftest codegen-handler-case-returns-register
-  "Compiling ast-handler-case returns a register keyword."
-  (let* ((ctx (make-codegen-ctx))
-         (reg (compile-ast (cl-cc::make-ast-handler-case
-                             :form (make-ast-int :value 10)
-                             :clauses (list (list 'error nil (make-ast-int :value 0))))
-                           ctx)))
-    (assert-true (keywordp reg))))
 
 (deftest codegen-handler-case-normal-result-run
   "handler-case returns the protected form value when no condition is signaled."

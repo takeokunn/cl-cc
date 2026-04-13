@@ -6,8 +6,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite closure-suite :description "Free variable analysis unit tests")
+(defsuite closure-suite :description "Free variable analysis unit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite closure-suite)
 ;;; ─── Literals ─────────────────────────────────────────────────────────────
 
 (deftest-each free-vars-atomic-forms
@@ -19,8 +22,8 @@
 
 ;;; ─── Simple references ────────────────────────────────────────────────────
 
-(deftest free-vars-single-var
-  "A single variable reference is free."
+(deftest ast-free-vars-single-var
+  "A single variable reference is free in find-free-variables."
   (assert-equal '(x)
     (cl-cc::find-free-variables (cl-cc::make-ast-var :name 'x))))
 
@@ -245,23 +248,6 @@
     'p
      :safe-consumers '("CAR"))))
 
-(deftest binding-escape-kinds-report-return
-  "The classifier reports :return when a binding flows out directly."
-  (assert-equal '(:return)
-                (cl-cc::binding-escape-kinds-in-body
-                 (list (cl-cc::make-ast-var :name 'p))
-                 'p)))
-
-(deftest binding-escape-kinds-report-external-call
-  "The classifier reports :external-call when a binding is passed to an unknown callee."
-  (assert-true
-   (member :external-call
-           (cl-cc::binding-escape-kinds-in-body
-            (list (cl-cc::make-ast-call
-                   :func 'list
-                   :args (list (cl-cc::make-ast-var :name 'p))))
-            'p))))
-
 (deftest binding-escapes-when-captured-by-inner-lambda
   "A binding escapes when captured by a nested lambda."
   (assert-true
@@ -271,20 +257,35 @@
             :body (list (cl-cc::make-ast-var :name 'p))))
      'p)))
 
-(deftest binding-escape-kinds-report-capture
-  "The classifier reports :capture when a binding is captured by an inner lambda."
-  (assert-true
-   (member :capture
-           (cl-cc::binding-escape-kinds-in-body
-            (list (cl-cc::make-ast-lambda
-                   :params '()
-                   :body (list (cl-cc::make-ast-var :name 'p))))
-            'p))))
+(deftest-each binding-escape-kinds-reports
+  "binding-escape-kinds-in-body classifies escapes as :return, :external-call, or :capture."
+  :cases (("direct-return"
+           :return
+           (list (cl-cc::make-ast-var :name 'p))
+           'p)
+          ("external-call"
+           :external-call
+           (list (cl-cc::make-ast-call :func 'list
+                                       :args (list (cl-cc::make-ast-var :name 'p))))
+           'p)
+          ("inner-capture"
+           :capture
+           (list (cl-cc::make-ast-lambda :params '()
+                                         :body (list (cl-cc::make-ast-var :name 'p))))
+           'p))
+  (expected-kind forms binding)
+  (assert-true (member expected-kind (cl-cc::binding-escape-kinds-in-body forms binding))))
 
-(deftest closure-capture-key-normalizes-order
-  "closure-capture-key ignores pair order and groups by captured variable names."
-  (assert-equal '(x y)
-                (cl-cc::closure-capture-key '((y . :r2) (x . :r1) (x . :r9)))))
+(deftest-each closure-key-normalization
+  "closure-capture-key and closure-sharing-key normalize captured-variable order."
+  :cases (("capture-key"
+           '(x y)
+           (cl-cc::closure-capture-key '((y . :r2) (x . :r1) (x . :r9))))
+          ("sharing-key"
+           '("L0" (x y))
+           (cl-cc::closure-sharing-key "L0" '((y . :r2) (x . :r1)))))
+  (expected actual)
+  (assert-equal expected actual))
 
 (deftest group-shared-sibling-captures-groups-identical-capture-sets
   "Sibling closures with the same capture set are grouped together."
@@ -322,11 +323,6 @@
    (cl-cc::binding-one-shot-p
     (list (cl-cc::make-ast-lambda :params '() :body (list (cl-cc::make-ast-var :name 'f))))
     'f)))
-
-(deftest closure-sharing-key-combines-label-and-captures
-  "closure-sharing-key uses both entry label and normalized capture set." 
-  (assert-equal '("L0" (x y))
-                (cl-cc::closure-sharing-key "L0" '((y . :r2) (x . :r1)))))
 
 (deftest group-shareable-closures-groups-by-label-and-captures
   "Only closures with both identical label and capture sets are grouped." 

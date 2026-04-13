@@ -58,7 +58,7 @@
     *trace-output* *debug-io* *query-io*
     *print-base* *print-radix* *print-circle* *print-pretty*
     *print-level* *print-length* *print-escape* *print-readably*
-    *print-gensym* *random-state* *readtable*
+    *print-gensym* *random-state* *readtable* *read-eval*
     internal-time-units-per-second
     *package* *%condition-handlers* *%active-restarts*)
   "Variables known to exist in the VM global environment at startup.")

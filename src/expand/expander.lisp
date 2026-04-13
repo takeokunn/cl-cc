@@ -39,6 +39,20 @@ Contract: handler receives the full form and returns a fully-expanded form."
 ;;; Prolog sense: head(Form) :- body(Form).  The inference engine
 ;;; (compiler-macroexpand-all) queries this database by head symbol.
 
+(define-expander-for defmethod (form)
+  "Expand only DEFMETHOD body forms, preserving qualifier metadata verbatim."
+  (let* ((name (second form))
+         (tail (cddr form))
+         (head (first tail))
+         (has-qualifier (and head (symbolp head) (not (listp head))))
+         (qualifier (and has-qualifier head))
+         (lambda-list (if has-qualifier (second tail) head))
+         (body (if has-qualifier (cddr tail) (cdr tail)))
+         (expanded-body (mapcar #'compiler-macroexpand-all body)))
+    (if has-qualifier
+        `(defmethod ,name ,qualifier ,lambda-list ,@expanded-body)
+        `(defmethod ,name ,lambda-list ,@expanded-body))))
+
 ;; Control-flow special forms moved to expander-control.lisp.
 
 ;;; ── Main dispatcher ──────────────────────────────────────────────────────

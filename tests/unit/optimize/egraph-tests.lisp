@@ -69,12 +69,16 @@
 
 ;;; ─── Pattern Matching ────────────────────────────────────────────────────
 
-(deftest egraph-pattern-var-p
-  "egraph-pattern-var-p recognizes ?-prefixed symbols."
-  (assert-true  (cl-cc::egraph-pattern-var-p '?x))
-  (assert-true  (cl-cc::egraph-pattern-var-p '?foo))
-  (assert-false (cl-cc::egraph-pattern-var-p 'x))
-  (assert-false (cl-cc::egraph-pattern-var-p 42)))
+(deftest-each egraph-pattern-var-p
+  "egraph-pattern-var-p recognizes ?-prefixed symbols and rejects non-variables."
+  :cases (("var-x"     t   '?x)
+          ("var-foo"   t   '?foo)
+          ("no-prefix" nil 'x)
+          ("number"    nil 42))
+  (expected sym)
+  (if expected
+      (assert-true  (cl-cc::egraph-pattern-var-p sym))
+      (assert-false (cl-cc::egraph-pattern-var-p sym))))
 
 (deftest egraph-match-pattern-variable
   "A pattern variable matches any e-class."

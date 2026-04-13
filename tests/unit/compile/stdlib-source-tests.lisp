@@ -17,13 +17,14 @@
   (assert-true (stringp cl-cc::*standard-library-source*))
   (assert-true (> (length cl-cc::*standard-library-source*) 0)))
 
-(deftest stdlib-source-contains-key-defuns
+(deftest-each stdlib-source-contains-key-defuns
   "The standard library source keeps representative top-level definitions."
-  (let ((source cl-cc::*standard-library-source*))
-    (assert-true (search "(defun mapcar" source))
-    (assert-true (search "(defun reduce" source))
-    (assert-true (search "(defun class-precedence-list" source))
-    (assert-true (search "(defun set-fdefinition" source))))
+  :cases (("mapcar"               "(defun mapcar")
+          ("reduce"               "(defun reduce")
+          ("class-precedence-list" "(defun class-precedence-list")
+          ("set-fdefinition"      "(defun set-fdefinition"))
+  (needle)
+  (assert-true (search needle cl-cc::*standard-library-source*)))
 
 (deftest stdlib-source-has-many-defun-forms
   "The source string still contains the bulk of the stdlib as defun forms."

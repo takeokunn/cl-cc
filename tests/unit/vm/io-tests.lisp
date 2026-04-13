@@ -6,7 +6,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite io-suite :description "VM I/O operations unit tests")
+(defsuite io-suite
+  :description "VM I/O operations unit tests"
+  :parent cl-cc-suite)
+
+(in-suite io-suite)
 
 ;;; ─── Helpers ──────────────────────────────────────────────────────────────
 

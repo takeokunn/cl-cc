@@ -4,7 +4,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite selfhost-suite :description "Self-hosting integration tests")
+(defsuite selfhost-suite
+  :description "Self-hosting integration tests"
+  :parent cl-cc-suite)
+
+(in-suite selfhost-suite)
 
 ;;; Helper: run multiple forms in a fresh REPL context, return last result.
 ;;; Each call creates isolated REPL state that doesn't interfere with other tests.
@@ -40,21 +44,18 @@
 
 ;;; ─── Self-Hosting: CPS Transformer ─────────────────────────────────────────
 
-(deftest selfhost-quasiquote
-  "quasiquote works in defun/macrolet bodies to build and evaluate forms."
-  (assert-= 9
-    (run-repl-forms
-     "(defun make-mul (a b) `(* ,a ,b))"
-     "(let ((form (make-mul 3 3))) (eval form))"))
+(deftest-each selfhost-quasiquote
+  "quasiquote works in self-hosted helper definitions and produces the expected result."
+  :cases (("defun-builds-form" 9
+           "(defun make-mul (a b) `(* ,a ,b))"
+           "(let ((form (make-mul 3 3))) (eval form))")
+          ("defun-builds-binding-form" t
+           "(defun wrap-in-let (var val body) `(let ((,var ,val)) ,body))"
+           "(equal (wrap-in-let 'x 5 '(+ x 1)) '(let ((x 5)) (+ x 1)))"))
+  (expected setup-form eval-form)
   (assert-true
-    (run-repl-forms
-     "(defun wrap-in-let (var val body) `(let ((,var ,val)) ,body))"
-     "(equal (wrap-in-let 'x 5 '(+ x 1)) '(let ((x 5)) (+ x 1)))"))
-  (assert-= 8
-    (run-repl-forms
-     "(macrolet ((square (x) `(* ,x ,x)))
-        (macrolet ((sq-plus-sq (a b) `(+ (square ,a) (square ,b))))
-          (sq-plus-sq 2 2)))")))
+    (equal expected
+           (run-repl-forms setup-form eval-form))))
 
 (deftest selfhost-cps-transformer
   "cl-cc compiles a CPS transformer using quasiquotes and recursion."

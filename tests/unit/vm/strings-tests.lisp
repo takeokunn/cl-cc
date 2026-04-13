@@ -5,7 +5,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite strings-suite :description "VM string and character operations unit tests")
+(defsuite strings-suite
+  :description "VM string and character operations unit tests"
+  :parent cl-cc-suite)
+
+(in-suite strings-suite)
 
 ;;; ─── Helpers ──────────────────────────────────────────────────────────────
 

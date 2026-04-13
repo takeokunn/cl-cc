@@ -5,8 +5,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite context-suite :description "Compiler context unit tests")
+(defsuite context-suite :description "Compiler context unit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite context-suite)
 ;;; ─── make-register ──────────────────────────────────────────────────────────
 
 (deftest ctx-make-register-behavior

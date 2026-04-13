@@ -5,8 +5,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite aarch64-emit-suite :description "AArch64 assembly emit tests")
+(defsuite aarch64-emit-suite :description "AArch64 assembly emit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite aarch64-emit-suite)
 ;;; ─── Helper ─────────────────────────────────────────────────────────────────
 
 (defun %aarch64-emit (target inst)

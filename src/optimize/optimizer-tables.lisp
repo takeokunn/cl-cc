@@ -12,8 +12,13 @@
 ;;; ─── Classification Helpers ──────────────────────────────────────────────
 
 (defun opt-falsep (value)
-  "Compile-time analog of vm-falsep: T if VALUE is falsy (nil only)."
-  (null value))
+  "Compile-time analog of vm-falsep: T if VALUE is falsy.
+
+The optimizer uses the same language-level truthiness as the VM and CPS layers:
+both NIL and numeric zero are false."
+  (or (null value)
+      (and (numberp value)
+           (zerop value))))
 
 (defun opt-register-keyword-p (x)
   "T if X is a VM register keyword of the form :Rn (e.g. :R0, :R15).
@@ -250,27 +255,19 @@
 
 (defparameter *opt-algebraic-identity-rules*
   (let ((ht (make-hash-table :test #'eq)))
-    (flet ((reg (tp rules) (setf (gethash tp ht) rules)))
-      ;; Arithmetic
-      (reg 'vm-add       '(((:rconst 0) . :move-lhs) ((:lconst 0) . :move-rhs)))
-      (reg 'vm-integer-add '(((:rconst 0) . :move-lhs) ((:lconst 0) . :move-rhs)))
-      (reg 'vm-float-add   '(((:rconst 0) . :move-lhs) ((:lconst 0) . :move-rhs)))
-      (reg 'vm-sub       '(((:rconst 0) . :move-lhs) (:same-reg . (:const 0))))
-      (reg 'vm-integer-sub '(((:rconst 0) . :move-lhs) (:same-reg . (:const 0))))
-      (reg 'vm-float-sub   '(((:rconst 0) . :move-lhs) (:same-reg . (:const 0))))
-      (reg 'vm-mul       '(((:rconst 1) . :move-lhs) ((:lconst 1) . :move-rhs)
-                            ((:rconst 0) . (:const 0)) ((:lconst 0) . (:const 0))
-                            ((:rconst -1) . (:neg :lhs)) ((:lconst -1) . (:neg :rhs))))
-      (reg 'vm-integer-mul '(((:rconst 1) . :move-lhs) ((:lconst 1) . :move-rhs)
-                             ((:rconst 0) . (:const 0)) ((:lconst 0) . (:const 0))
-                             ((:rconst -1) . (:neg :lhs)) ((:lconst -1) . (:neg :rhs))))
-      (reg 'vm-float-mul   '(((:rconst 1) . :move-lhs) ((:lconst 1) . :move-rhs)
-                             ((:rconst 0) . (:const 0)) ((:lconst 0) . (:const 0))
-                             ((:rconst -1) . (:neg :lhs)) ((:lconst -1) . (:neg :rhs))))
-      (reg 'vm-div       '(((:rconst 1) . :move-lhs)))
-      (reg 'vm-cl-div    '(((:rconst 1) . :move-lhs)))
-      (reg 'vm-float-div '(((:rconst 1) . :move-lhs)))
-      (reg 'vm-floor-inst '(((:rconst 1) . :move-lhs)))
+    (flet ((reg (tp rules) (setf (gethash tp ht) rules))
+           (reg-variants (types rules) (dolist (tp types) (setf (gethash tp ht) rules))))
+      ;; Arithmetic — variant groups share identical rules across generic/integer/float specializations
+      (reg-variants '(vm-add vm-integer-add vm-float-add)
+                    '(((:rconst 0) . :move-lhs) ((:lconst 0) . :move-rhs)))
+      (reg-variants '(vm-sub vm-integer-sub vm-float-sub)
+                    '(((:rconst 0) . :move-lhs) (:same-reg . (:const 0))))
+      (reg-variants '(vm-mul vm-integer-mul vm-float-mul)
+                    '(((:rconst 1) . :move-lhs) ((:lconst 1) . :move-rhs)
+                      ((:rconst 0) . (:const 0)) ((:lconst 0) . (:const 0))
+                      ((:rconst -1) . (:neg :lhs)) ((:lconst -1) . (:neg :rhs))))
+      (reg-variants '(vm-div vm-cl-div vm-float-div vm-floor-inst)
+                    '(((:rconst 1) . :move-lhs)))
       (reg 'vm-mod       '(((:lconst 0) . (:const 0))))
       ;; Comparisons
       (dolist (tp '(vm-num-eq vm-eq vm-le vm-ge))

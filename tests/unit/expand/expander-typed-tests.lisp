@@ -2,8 +2,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite expander-typed-suite :description "Typed-form expander unit tests")
+(defsuite expander-typed-suite :description "Typed-form expander unit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite expander-typed-suite)
 (deftest expand-typed-defun-plain-params-unchanged
   "expand-typed-defun-or-lambda with plain params produces a defun with same params."
   (let* ((result (cl-cc::expand-typed-defun-or-lambda

@@ -9,43 +9,35 @@
 
 ;;; ─── typecase-arm-subsumed-p ──────────────────────────────────────────────
 
-(deftest exhaustiveness-subsumed-by-t
-  "Any arm type is subsumed by T."
-  (assert-true (cl-cc/type:typecase-arm-subsumed-p 'integer '(t)))
-  (assert-true (cl-cc/type:typecase-arm-subsumed-p 'string  '(t)))
-  (assert-true (cl-cc/type:typecase-arm-subsumed-p 'fixnum  '(t))))
-
-(deftest exhaustiveness-subsumed-by-exact
-  "An arm type is subsumed by an identical type."
-  (assert-true (cl-cc/type:typecase-arm-subsumed-p 'integer '(integer)))
-  (assert-true (cl-cc/type:typecase-arm-subsumed-p 'string  '(symbol integer string))))
-
-(deftest exhaustiveness-subsumed-by-supertype
-  "fixnum is subsumed by integer (nominal subtype relation)."
-  (assert-true (cl-cc/type:typecase-arm-subsumed-p 'fixnum '(integer)))
-  (assert-true (cl-cc/type:typecase-arm-subsumed-p 'cons   '(list))))
-
-(deftest exhaustiveness-not-subsumed-when-unrelated
-  "string is not subsumed by integer."
-  (assert-false (cl-cc/type:typecase-arm-subsumed-p 'string  '(integer)))
-  (assert-false (cl-cc/type:typecase-arm-subsumed-p 'symbol  '(integer string)))
-  (assert-false (cl-cc/type:typecase-arm-subsumed-p 'integer nil)))
+(deftest-each exhaustiveness-arm-subsumed-p-cases
+  "typecase-arm-subsumed-p: T subsumes all; exact match; nominal supertype; unrelated fails."
+  :cases (("int-by-T"          'integer '(t)                     t)
+          ("string-by-T"       'string  '(t)                     t)
+          ("fixnum-by-T"       'fixnum  '(t)                     t)
+          ("integer-by-exact"  'integer '(integer)               t)
+          ("string-in-list"    'string  '(symbol integer string)  t)
+          ("fixnum-by-integer" 'fixnum  '(integer)               t)
+          ("cons-by-list"      'cons    '(list)                   t)
+          ("string-not-int"    'string  '(integer)               nil)
+          ("symbol-not-in"     'symbol  '(integer string)        nil)
+          ("int-no-arms"       'integer nil                       nil))
+  (arm-type covered expected)
+  (if expected
+      (assert-true  (cl-cc/type:typecase-arm-subsumed-p arm-type covered))
+      (assert-false (cl-cc/type:typecase-arm-subsumed-p arm-type covered))))
 
 ;;; ─── check-typecase-exhaustiveness ───────────────────────────────────────
 
-(deftest exhaustiveness-exhaustive-with-t
-  "A typecase with T at the end is exhaustive."
+(deftest-each exhaustiveness-basic-coverage-cases
+  "check-typecase-exhaustiveness: T at end → exhaustive; without T → not exhaustive."
+  :cases (("with-t"    '(integer string t) t)
+          ("without-t" '(integer string)   nil))
+  (arms expected-exhaustive)
   (multiple-value-bind (exhaustive-p unreachable warnings)
-      (cl-cc/type:check-typecase-exhaustiveness '(integer string t))
-    (assert-true exhaustive-p)
-    (assert-null unreachable)
-    (assert-null warnings)))
-
-(deftest exhaustiveness-not-exhaustive-without-t
-  "A typecase without T is not exhaustive."
-  (multiple-value-bind (exhaustive-p unreachable warnings)
-      (cl-cc/type:check-typecase-exhaustiveness '(integer string))
-    (assert-false exhaustive-p)
+      (cl-cc/type:check-typecase-exhaustiveness arms)
+    (if expected-exhaustive
+        (assert-true  exhaustive-p)
+        (assert-false exhaustive-p))
     (assert-null unreachable)
     (assert-null warnings)))
 
@@ -74,19 +66,16 @@
     (assert-true (member 2 unreachable))    ; second T (index 2) unreachable
     (assert-true (> (length warnings) 0))))
 
-(deftest exhaustiveness-single-t-is-exhaustive
-  "A single T arm alone is exhaustive with no warnings."
+(deftest-each exhaustiveness-boundary-cases
+  "check-typecase-exhaustiveness: single T arm → exhaustive; empty arms → not exhaustive."
+  :cases (("single-T" '(t)  t)
+          ("empty"    '()   nil))
+  (arms expected-exhaustive)
   (multiple-value-bind (exhaustive-p unreachable warnings)
-      (cl-cc/type:check-typecase-exhaustiveness '(t))
-    (assert-true exhaustive-p)
-    (assert-null unreachable)
-    (assert-null warnings)))
-
-(deftest exhaustiveness-empty-arms-not-exhaustive
-  "Empty arm list is not exhaustive."
-  (multiple-value-bind (exhaustive-p unreachable warnings)
-      (cl-cc/type:check-typecase-exhaustiveness '())
-    (assert-false exhaustive-p)
+      (cl-cc/type:check-typecase-exhaustiveness arms)
+    (if expected-exhaustive
+        (assert-true  exhaustive-p)
+        (assert-false exhaustive-p))
     (assert-null unreachable)
     (assert-null warnings)))
 

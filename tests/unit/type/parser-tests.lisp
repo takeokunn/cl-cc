@@ -7,23 +7,23 @@
 
 (in-package :cl-cc/test)
 
-(defsuite parser-suite :description "Type annotation parser tests")
+(defsuite parser-suite :description "Type annotation parser tests"
+  :parent cl-cc-suite)
 
+
+(in-suite parser-suite)
 ;;; ─── parse-type-specifier: atoms ─────────────────────────────────────────
 
 (deftest parse-nil-to-null
   "nil parses to type-null."
   (assert-true (type-equal-p type-null (cl-cc/type::parse-type-specifier nil))))
 
-(deftest parse-question-mark
-  "? parses to a type-error node (gradual hole)."
-  (let ((ty (cl-cc/type::parse-type-specifier '?)))
-    (assert-true (cl-cc/type::type-error-p ty))))
-
-(deftest parse-underscore-hole
-  "_ parses to a type-error node (gradual hole)."
-  (let ((ty (cl-cc/type::parse-type-specifier '_)))
-    (assert-true (cl-cc/type::type-error-p ty))))
+(deftest-each parse-hole-type-specifiers
+  "? and _ both parse to a type-error node (gradual hole)."
+  :cases (("question-mark" '?)
+          ("underscore"    '_))
+  (spec)
+  (assert-true (cl-cc/type::type-error-p (cl-cc/type::parse-type-specifier spec))))
 
 (deftest parse-option-type
   "(option T) parses to (or null T)."
@@ -61,82 +61,62 @@
 
 ;;; ─── parse-type-specifier: union / intersection ──────────────────────────
 
-(deftest parse-or-union
-  "(or fixnum string) produces a type-union."
-  (let ((ty (cl-cc/type::parse-type-specifier '(or fixnum string))))
-    (assert-true (type-union-p ty))
-    (assert-equal 2 (length (type-union-types ty)))))
+(deftest-each parse-set-type-ops
+  "(or ...) and (and ...) produce union/intersection nodes; empty args signal an error."
+  :cases (("or-two"          '(or fixnum string)  #'type-union-p        #'type-union-types        nil)
+          ("and-two"         '(and fixnum string) #'type-intersection-p #'type-intersection-types nil)
+          ("or-empty-error"  '(or)                nil                   nil                       t)
+          ("and-empty-error" '(and)               nil                   nil                       t))
+  (form pred accessor error-p)
+  (if error-p
+      (assert-signals cl-cc/type::type-parse-error
+        (cl-cc/type::parse-type-specifier form))
+      (let ((ty (cl-cc/type::parse-type-specifier form)))
+        (assert-true (funcall pred ty))
+        (assert-equal 2 (length (funcall accessor ty))))))
 
-(deftest-each parse-boolean-ops-empty-error
-  "(or) and (and) with no arguments each signal type-parse-error."
-  :cases (("or"  '(or))
-          ("and" '(and)))
+;;; ─── parse-type-specifier: function / values / cons ──────────────────────
+
+(deftest-each parse-function-type-cases
+  "(function (PARAMS...) RET) produces arrow with correct param count and return type."
+  :cases (("one-param"    '(function (fixnum) string)          1 type-string)
+          ("multi-param"  '(function (fixnum string) boolean)  2 type-bool))
+  (form expected-nparams expected-ret)
+  (let ((ty (cl-cc/type::parse-type-specifier form)))
+    (assert-true (type-arrow-p ty))
+    (assert-equal expected-nparams (length (type-arrow-params ty)))
+    (assert-true (type-equal-p expected-ret (type-arrow-return ty)))))
+
+(deftest-each parse-type-specifier-wrong-arity-errors
+  "function, cons, and list forms with wrong arity signal type-parse-error."
+  :cases (("function-no-param-list" '(function fixnum))
+          ("cons-one-arg"           '(cons fixnum))
+          ("list-two-args"          '(list fixnum string)))
   (form)
   (assert-signals cl-cc/type::type-parse-error
     (cl-cc/type::parse-type-specifier form)))
 
-(deftest parse-and-intersection
-  "(and fixnum string) produces a type-intersection."
-  (let ((ty (cl-cc/type::parse-type-specifier '(and fixnum string))))
-    (assert-true (type-intersection-p ty))
-    (assert-equal 2 (length (type-intersection-types ty)))))
-
-;;; ─── parse-type-specifier: function / values / cons ──────────────────────
-
-(deftest parse-function-type
-  "(function (fixnum) string) produces arrow."
-  (let ((ty (cl-cc/type::parse-type-specifier '(function (fixnum) string))))
-    (assert-true (type-arrow-p ty))
-    (assert-equal 1 (length (type-arrow-params ty)))
-    (assert-true (type-equal-p type-string (type-arrow-return ty)))))
-
-(deftest parse-function-type-multi-params
-  "(function (fixnum string) boolean) has 2 params."
-  (let ((ty (cl-cc/type::parse-type-specifier '(function (fixnum string) boolean))))
-    (assert-true (type-arrow-p ty))
-    (assert-equal 2 (length (type-arrow-params ty)))))
-
-(deftest parse-function-type-error
-  "(function fixnum) signals error (missing param list)."
-  (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-type-specifier '(function fixnum))))
-
-(deftest parse-values-product
-  "(values fixnum string) produces product."
-  (let ((ty (cl-cc/type::parse-type-specifier '(values fixnum string))))
+(deftest-each parse-product-type-forms
+  "(values T1 T2) and (cons T1 T2) both produce 2-element type-product."
+  :cases (("values" '(values fixnum string))
+          ("cons"   '(cons fixnum string)))
+  (form)
+  (let ((ty (cl-cc/type::parse-type-specifier form)))
     (assert-true (type-product-p ty))
     (assert-equal 2 (length (type-product-elems ty)))))
-
-(deftest parse-cons-compound
-  "(cons fixnum string) produces 2-element product."
-  (let ((ty (cl-cc/type::parse-type-specifier '(cons fixnum string))))
-    (assert-true (type-product-p ty))
-    (assert-equal 2 (length (type-product-elems ty)))))
-
-(deftest parse-cons-error-wrong-arity
-  "(cons fixnum) signals error."
-  (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-type-specifier '(cons fixnum))))
 
 ;;; ─── parse-type-specifier: list / vector / array ─────────────────────────
 
-(deftest parse-list-type-app
-  "(list fixnum) produces type-app."
-  (let ((ty (cl-cc/type::parse-type-specifier '(list fixnum))))
-    (assert-true (type-app-p ty))
-    (assert-true (type-equal-p type-int (type-app-arg ty)))))
-
-(deftest parse-list-error-wrong-arity
-  "(list fixnum string) signals error."
-  (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-type-specifier '(list fixnum string))))
-
 (deftest-each parse-collection-type-apps
-  "(vector T) and (array T) both produce type-app nodes."
-  :cases (("vector" '(vector fixnum))
-          ("array"  '(array string)))
-  (form)
-  (assert-true (type-app-p (cl-cc/type::parse-type-specifier form))))
+  "(list T), (vector T), and (array T) all produce type-app nodes."
+  :cases (("list"   '(list fixnum)   type-int  t)
+          ("vector" '(vector fixnum) type-int  nil)
+          ("array"  '(array string)  type-string nil))
+  (form expected-arg check-arg-p)
+  (let ((ty (cl-cc/type::parse-type-specifier form)))
+    (assert-true (type-app-p ty))
+    (when check-arg-p
+      (assert-true (type-equal-p expected-arg (type-app-arg ty))))))
 
 ;;; ─── Arrow types: ->, ->1, ->0 ──────────────────────────────────────────
 
@@ -179,12 +159,18 @@
 
 ;;; ─── Quantifiers: forall, exists, mu ─────────────────────────────────────
 
-(deftest parse-forall
-  "(forall a fixnum) produces type-forall."
-  (let ((ty (cl-cc/type::parse-type-specifier '(forall a fixnum))))
-    (assert-true (type-forall-p ty))
-    (assert-true (type-var-p (type-forall-var ty)))
-    (assert-true (type-equal-p type-int (cl-cc/type::type-forall-body ty)))))
+(deftest-each parse-quantifier-binding-types
+  "forall/exists/mu produce their respective type nodes with a type-var bound variable."
+  :cases (("forall" '(forall a fixnum) #'type-forall-p #'type-forall-var
+                    #'cl-cc/type::type-forall-body)
+          ("exists" '(exists a fixnum) #'type-exists-p #'cl-cc/type::type-exists-var nil)
+          ("mu"     '(mu a fixnum)     #'type-mu-p     #'cl-cc/type::type-mu-var     nil))
+  (form pred var-fn body-fn)
+  (let ((ty (cl-cc/type::parse-type-specifier form)))
+    (assert-true (funcall pred ty))
+    (assert-true (type-var-p (funcall var-fn ty)))
+    (when body-fn
+      (assert-true (type-equal-p type-int (funcall body-fn ty))))))
 
 (deftest-each parse-quantifier-arity-errors
   "forall, exists, and mu with only one argument each signal type-parse-error."
@@ -194,18 +180,6 @@
   (form)
   (assert-signals cl-cc/type::type-parse-error
     (cl-cc/type::parse-type-specifier form)))
-
-(deftest parse-exists
-  "(exists a fixnum) produces type-exists."
-  (let ((ty (cl-cc/type::parse-type-specifier '(exists a fixnum))))
-    (assert-true (type-exists-p ty))
-    (assert-true (type-var-p (cl-cc/type::type-exists-var ty)))))
-
-(deftest parse-mu-recursive
-  "(mu a fixnum) produces type-mu."
-  (let ((ty (cl-cc/type::parse-type-specifier '(mu a fixnum))))
-    (assert-true (type-mu-p ty))
-    (assert-true (type-var-p (cl-cc/type::type-mu-var ty)))))
 
 (deftest parse-type-lambda
   "(type-lambda a fixnum) produces type-lambda."
@@ -359,25 +333,25 @@
 
 ;;; ─── parse-typed-parameter ───────────────────────────────────────────────
 
-(deftest parse-typed-parameter-cases
+(deftest-each parse-typed-parameter-cases
   "parse-typed-parameter: (x fixnum)→int; bare x→any."
-  (let ((result (cl-cc/type::parse-typed-parameter '(x fixnum))))
+  :cases (("typed" '(x fixnum) type-int)
+          ("bare"  'x          type-any))
+  (param expected-type)
+  (let ((result (cl-cc/type::parse-typed-parameter param)))
     (assert-eq 'x (car result))
-    (assert-true (type-equal-p type-int (cdr result))))
-  (let ((result (cl-cc/type::parse-typed-parameter 'x)))
-    (assert-eq 'x (car result))
-    (assert-true (type-equal-p type-any (cdr result)))))
+    (assert-true (type-equal-p expected-type (cdr result)))))
 
 ;;; ─── parse-typed-optional-parameter ──────────────────────────────────────
 
-(deftest parse-optional-parameter-cases
+(deftest-each parse-optional-parameter-cases
   "parse-typed-optional-parameter: (x fixnum nil)→int; bare x→any."
-  (let ((result (cl-cc/type::parse-typed-optional-parameter '(x fixnum nil))))
+  :cases (("typed" '(x fixnum nil) type-int)
+          ("bare"  'x              type-any))
+  (param expected-type)
+  (let ((result (cl-cc/type::parse-typed-optional-parameter param)))
     (assert-eq 'x (car result))
-    (assert-true (type-equal-p type-int (cdr result))))
-  (let ((result (cl-cc/type::parse-typed-optional-parameter 'x)))
-    (assert-eq 'x (car result))
-    (assert-true (type-equal-p type-any (cdr result)))))
+    (assert-true (type-equal-p expected-type (cdr result)))))
 
 ;;; ─── extract-return-type ─────────────────────────────────────────────────
 

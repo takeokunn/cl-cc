@@ -7,14 +7,19 @@
 
 (in-package :cl-cc/test)
 
-(defsuite aarch64-encoding-suite :description "AArch64 instruction encoding unit tests")
+(defsuite aarch64-encoding-suite :description "AArch64 instruction encoding unit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite aarch64-encoding-suite)
 ;;; ─── encode-movz ─────────────────────────────────────────────────────────
 
-(deftest a64-movz-base-cases
-  "MOVZ X0, #0 and MOVZ X1, #0 encode to their expected fixed values."
-  (assert-equal #xD2800000 (cl-cc::encode-movz 0 0))
-  (assert-equal #xD2800001 (cl-cc::encode-movz 1 0)))
+(deftest-each a64-movz-base-cases
+  "MOVZ Xd, #0 encodes to its expected fixed value for different destination registers."
+  :cases (("x0" #xD2800000 0)
+          ("x1" #xD2800001 1))
+  (expected rd)
+  (assert-equal expected (cl-cc::encode-movz rd 0)))
 
 (deftest a64-movz-imm-to-x0
   "MOVZ X0, #42 encodes immediate in bits 20:5."
@@ -207,11 +212,14 @@
 
 ;;; ─── Register mapping ───────────────────────────────────────────────────
 
-(deftest a64-reg-number-table
-  "Register mapping table has expected entries."
-  (let ((table cl-cc::*aarch64-reg-number*))
-    (assert-equal 0 (cdr (assoc :x0 table)))
-    (assert-equal 7 (cdr (assoc :x7 table)))
-    (assert-equal 30 (cdr (assoc :x30 table)))
-    ;; x18 (platform register) should NOT be in the mapping
-    (assert-null (assoc :x18 table))))
+(deftest-each a64-reg-number-table
+  "Register mapping table has expected entries; x18 (platform register) is absent."
+  :cases (("x0"        :x0  0)
+          ("x7"        :x7  7)
+          ("x30"       :x30 30)
+          ("x18-absent" :x18 nil))
+  (reg expected-n)
+  (let ((entry (assoc reg cl-cc::*aarch64-reg-number*)))
+    (if expected-n
+        (assert-equal expected-n (cdr entry))
+        (assert-null entry))))

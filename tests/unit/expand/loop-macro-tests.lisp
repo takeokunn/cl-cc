@@ -14,11 +14,11 @@
 
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-suite)
+(in-suite cl-cc-integration-suite)
 
 (defsuite loop-macro-suite
   :description "LOOP macro expansion and runtime behaviour"
-  :parent cl-cc-suite)
+  :parent cl-cc-integration-suite)
 
 (in-suite loop-macro-suite)
 

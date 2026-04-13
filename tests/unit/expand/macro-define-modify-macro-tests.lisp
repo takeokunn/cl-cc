@@ -8,16 +8,6 @@
 
 (in-suite macro-define-modify-macro-suite)
 
-(deftest define-modify-macro-expands-to-our-defmacro
-  "DEFINE-MODIFY-MACRO expands to an OUR-DEFMACRO form"
-  (let ((result (our-macroexpand-1 '(define-modify-macro incf-by (delta) +))))
-    (assert-eq (car result) 'cl-cc:our-defmacro)))
-
-(deftest define-modify-macro-names-the-macro
-  "DEFINE-MODIFY-MACRO names the generated macro correctly"
-  (let ((result (our-macroexpand-1 '(define-modify-macro my-incf (n) +))))
-    (assert-eq (car result) 'cl-cc:our-defmacro)
-    (assert-eq (cadr result) 'my-incf)))
 
 (deftest define-modify-macro-lambda-list-has-place-first
   "DEFINE-MODIFY-MACRO generated macro takes PLACE as first parameter"
@@ -39,15 +29,12 @@
          (body (cadddr result)))
     (assert-true (not (null body)))))
 
-(deftest define-modify-macro-with-optional-arg
-  "DEFINE-MODIFY-MACRO with &optional in lambda list works"
-  (let ((result (our-macroexpand-1 '(define-modify-macro my-add (&optional (n 1)) +))))
-    (assert-eq (car result) 'cl-cc:our-defmacro)
-    (assert-eq (cadr result) 'my-add)))
-
-(deftest define-modify-macro-with-docstring
-  "DEFINE-MODIFY-MACRO accepts an optional docstring without error"
-  (let ((result (our-macroexpand-1
-                  '(define-modify-macro my-mul (factor) * "Multiply place by factor."))))
-    (assert-eq (car result) 'cl-cc:our-defmacro)
-    (assert-eq (cadr result) 'my-mul)))
+(deftest-each define-modify-macro-outer-form-shape
+  "DEFINE-MODIFY-MACRO expands to (our-defmacro NAME ...) for any lambda-list style."
+  :cases (("plain"     'my-incf '(define-modify-macro my-incf (n) +))
+          ("optional"  'my-add  '(define-modify-macro my-add (&optional (n 1)) +))
+          ("docstring" 'my-mul  '(define-modify-macro my-mul (factor) * "Multiply.")))
+  (expected-name form)
+  (let ((result (our-macroexpand-1 form)))
+    (assert-eq 'cl-cc:our-defmacro (car result))
+    (assert-eq expected-name (cadr result))))

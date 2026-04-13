@@ -125,39 +125,39 @@
 ;;; Rplaca/Rplacd Tests
 
 (deftest vm-rplaca-rplacd-mutate-pair
-  "Test that vm-rplaca modifies the car and vm-rplacd modifies the cdr of a cons cell."
+  "Test that vm-rplaca modifies the car and vm-rplacd modifies the cdr of a cons cell.
+Each block uses distinct (car . cdr) values so vm-hash-cons can't return a
+cached cell mutated by a prior block — ensures true per-block isolation."
+  ;; Block 1: rplaca on (10 . 20) → (99 . 20)
+  (cl-cc::vm-clear-hash-cons-table)
   (let* ((state (make-instance 'vm-state))
          (cons-inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
          (rplaca-inst (make-vm-rplaca :cons 0 :val 3)))
     (vm-reg-set state 1 10)
     (vm-reg-set state 2 20)
     (execute-instruction cons-inst state 0 (make-hash-table))
-    ;; Verify initial value
     (let ((cell (vm-reg-get state 0)))
-      (assert-= (car cell) 10))
-    ;; Modify car
+      (assert-= 10 (car cell)))
     (vm-reg-set state 3 99)
     (execute-instruction rplaca-inst state 1 (make-hash-table))
-    ;; Verify modification
     (let ((cell (vm-reg-get state 0)))
-      (assert-= (car cell) 99)
-      (assert-= (cdr cell) 20)))
+      (assert-= 99 (car cell))
+      (assert-= 20 (cdr cell))))
+  ;; Block 2: rplacd on (11 . 21) → (11 . 88), uses different key to avoid cache collision
+  (cl-cc::vm-clear-hash-cons-table)
   (let* ((state (make-instance 'vm-state))
          (cons-inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
          (rplacd-inst (make-vm-rplacd :cons 0 :val 3)))
-    (vm-reg-set state 1 10)
-    (vm-reg-set state 2 20)
+    (vm-reg-set state 1 11)
+    (vm-reg-set state 2 21)
     (execute-instruction cons-inst state 0 (make-hash-table))
-    ;; Verify initial value
     (let ((cell (vm-reg-get state 0)))
-      (assert-= (cdr cell) 20))
-    ;; Modify cdr
+      (assert-= 21 (cdr cell)))
     (vm-reg-set state 3 88)
     (execute-instruction rplacd-inst state 1 (make-hash-table))
-    ;; Verify modification
     (let ((cell (vm-reg-get state 0)))
-      (assert-= (car cell) 10)
-      (assert-= (cdr cell) 88))))
+      (assert-= 11 (car cell))
+      (assert-= 88 (cdr cell)))))
 
 (deftest vm-rplaca-and-rplacd-together
   "Test that rplaca and rplacd can both be used on the same cons."

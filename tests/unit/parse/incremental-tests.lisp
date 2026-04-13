@@ -6,11 +6,14 @@
 
 (in-package :cl-cc/test)
 
-(defsuite incremental-suite :description "Incremental parser unit tests")
+(defsuite incremental-suite :description "Incremental parser unit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite incremental-suite)
 ;;; ─── Helpers ──────────────────────────────────────────────────────────────
 
-(defun make-test-token (kind value start end)
+(defun make-test-cst-token (kind value start end)
   "Create a CST token with given byte range."
   (cl-cc::make-cst-token :kind kind :value value
                           :start-byte start :end-byte end))
@@ -43,7 +46,7 @@
    (5  15 t)
    (0  5  nil)
    (25 30 nil))
-  (let ((node (make-test-token :T-INT 1 node-start node-end))
+  (let ((node (make-test-cst-token :T-INT 1 node-start node-end))
         (edit (make-test-edit 10 20 25)))
     (assert-equal expected (cl-cc::cst-overlaps-edit-p node edit))))
 
@@ -54,7 +57,7 @@
    (cl-cc::cst-before-edit-p  0  15 nil)
    (cl-cc::cst-after-edit-p  20  30 t)
    (cl-cc::cst-after-edit-p  15  25 nil))
-  (let ((node (make-test-token :T-INT 1 node-start node-end))
+  (let ((node (make-test-cst-token :T-INT 1 node-start node-end))
         (edit (make-test-edit 10 20 25)))
     (assert-equal expected (funcall predicate node edit))))
 
@@ -63,7 +66,7 @@
   ((node-start node-end expected)
    (0  5 t)
    (5 15 nil))
-  (let ((node (make-test-token :T-INT 1 node-start node-end))
+  (let ((node (make-test-cst-token :T-INT 1 node-start node-end))
         (edit (make-test-edit 10 20 25)))
     (assert-equal expected (cl-cc::cst-reuse-p node edit))))
 
@@ -87,14 +90,14 @@
    (:negative))
   (ecase label
     (:token
-     (let* ((tok (make-test-token :T-INT 42 10 15))
+     (let* ((tok (make-test-cst-token :T-INT 42 10 15))
             (shifted (cl-cc::cst-shift-bytes tok 5)))
        (assert-true (cl-cc::cst-token-p shifted))
        (assert-equal 15 (cl-cc::cst-node-start-byte shifted))
        (assert-equal 20 (cl-cc::cst-node-end-byte shifted))
        (assert-equal 42 (cl-cc::cst-token-value shifted))))
     (:interior
-     (let* ((child (make-test-token :T-INT 1 5 10))
+     (let* ((child (make-test-cst-token :T-INT 1 5 10))
             (parent (make-test-interior :list 0 20 (list child)))
             (shifted (cl-cc::cst-shift-bytes parent 10)))
        (assert-true (cl-cc::cst-interior-p shifted))
@@ -111,7 +114,7 @@
        (assert-equal 15 (cl-cc::cst-node-start-byte shifted))
        (assert-equal 25 (cl-cc::cst-node-end-byte shifted))))
     (:negative
-     (let* ((tok (make-test-token :T-INT 1 20 30))
+     (let* ((tok (make-test-cst-token :T-INT 1 20 30))
             (shifted (cl-cc::cst-shift-bytes tok -5)))
        (assert-equal 15 (cl-cc::cst-node-start-byte shifted))
        (assert-equal 25 (cl-cc::cst-node-end-byte shifted))))))
@@ -120,17 +123,17 @@
 
 (deftest incr-find-minimal-reparse-leaf
   "find-minimal-reparse-node returns leaf node directly."
-  (let ((leaf (make-test-token :T-INT 1 0 10))
+  (let ((leaf (make-test-cst-token :T-INT 1 0 10))
         (edit (make-test-edit 0 5 5)))
     (assert-eq leaf (cl-cc::find-minimal-reparse-node leaf edit))))
 
 (deftest incr-find-minimal-reparse-single-child
   "find-minimal-reparse-node recurses into single overlapping child."
-  (let* ((child1 (make-test-token :T-INT 1 0 5))
+  (let* ((child1 (make-test-cst-token :T-INT 1 0 5))
          (child2 (make-test-interior :list 5 15
-                   (list (make-test-token :T-INT 2 5 10)
-                         (make-test-token :T-INT 3 10 15))))
-         (child3 (make-test-token :T-INT 4 15 20))
+                   (list (make-test-cst-token :T-INT 2 5 10)
+                         (make-test-cst-token :T-INT 3 10 15))))
+         (child3 (make-test-cst-token :T-INT 4 15 20))
          (root (make-test-interior :root 0 20 (list child1 child2 child3)))
          (edit (make-test-edit 7 12 12)))
     ;; Edit overlaps only child2 → should recurse into it
@@ -140,9 +143,9 @@
 (deftest incr-find-minimal-reparse-multiple-children
   "find-minimal-reparse-node returns parent when edit spans multiple children."
   (let* ((child1 (make-test-interior :a 0 10
-                   (list (make-test-token :T-INT 1 0 10))))
+                   (list (make-test-cst-token :T-INT 1 0 10))))
          (child2 (make-test-interior :b 10 20
-                   (list (make-test-token :T-INT 2 10 20))))
+                   (list (make-test-cst-token :T-INT 2 10 20))))
          (root (make-test-interior :root 0 20 (list child1 child2)))
          (edit (make-test-edit 5 15 15)))
     ;; Edit spans both children → root is the minimal node
@@ -152,11 +155,11 @@
 
 (deftest incr-rebuild-tree-basic
   "rebuild-tree combines before, new, and shifted-after nodes."
-  (let* ((before (make-test-token :T-INT 1 0 5))
-         (overlap (make-test-token :T-INT 2 5 15))
-         (after (make-test-token :T-INT 3 15 20))
+  (let* ((before (make-test-cst-token :T-INT 1 0 5))
+         (overlap (make-test-cst-token :T-INT 2 5 15))
+         (after (make-test-cst-token :T-INT 3 15 20))
          (edit (make-test-edit 5 15 20))  ; insert 5 bytes
-         (new-nodes (list (make-test-token :T-INT 99 5 20)))
+         (new-nodes (list (make-test-cst-token :T-INT 99 5 20)))
          (result (cl-cc::rebuild-tree (list before overlap after) edit 5 new-nodes)))
     ;; before + new + shifted-after
     (assert-equal 3 (length result))
@@ -173,7 +176,7 @@
 (deftest incr-cache-operations
   "cache-store, cache-lookup, and invalidate-parse-cache work correctly."
   (let ((cl-cc::*parse-cache* (make-hash-table :test 'equal)))
-    (let ((nodes (list (make-test-token :T-INT 42 0 2))))
+    (let ((nodes (list (make-test-cst-token :T-INT 42 0 2))))
       (cl-cc::cache-store "42" nodes)
       (assert-equal nodes (cl-cc::cache-lookup "42"))))
   (let ((cl-cc::*parse-cache* (make-hash-table :test 'equal)))
@@ -198,25 +201,25 @@
    (:T-INT   42 :T-INT   42 t)
    (:T-INT   42 :T-INT   99 nil)
    (:T-INT    1 :T-IDENT  1 nil))
-  (let ((a (make-test-token a-kind a-val 0 2))
-        (b (make-test-token b-kind b-val 0 2)))
+  (let ((a (make-test-cst-token a-kind a-val 0 2))
+        (b (make-test-cst-token b-kind b-val 0 2)))
     (assert-equal expected (cl-cc::cst-equal-p a b))))
 
 (deftest incr-cst-equal-interior
   "cst-equal-p returns true for structurally equal interior nodes."
   (let ((a (make-test-interior :list 0 10
-             (list (make-test-token :T-INT 1 0 5)
-                   (make-test-token :T-INT 2 5 10))))
+             (list (make-test-cst-token :T-INT 1 0 5)
+                   (make-test-cst-token :T-INT 2 5 10))))
         (b (make-test-interior :list 0 10
-             (list (make-test-token :T-INT 1 0 5)
-                   (make-test-token :T-INT 2 5 10)))))
+             (list (make-test-cst-token :T-INT 1 0 5)
+                   (make-test-cst-token :T-INT 2 5 10)))))
     (assert-true (cl-cc::cst-equal-p a b))))
 
 (deftest incr-cst-equal-nil
   "cst-equal-p returns true for nil/nil, false for nil/non-nil."
   (assert-true (cl-cc::cst-equal-p nil nil))
-  (assert-false (cl-cc::cst-equal-p nil (make-test-token :T-INT 1 0 1)))
-  (assert-false (cl-cc::cst-equal-p (make-test-token :T-INT 1 0 1) nil)))
+  (assert-false (cl-cc::cst-equal-p nil (make-test-cst-token :T-INT 1 0 1)))
+  (assert-false (cl-cc::cst-equal-p (make-test-cst-token :T-INT 1 0 1) nil)))
 
 (deftest-each incr-cst-equal-error-node-cases
   "cst-equal-p compares error nodes by message: equal messages → true, differing → false."

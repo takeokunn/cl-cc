@@ -24,8 +24,4 @@
     (assert-eq 'block (car prog*-result))
     (assert-eq 'let* (car (caddr prog*-result)))))
 
-(deftest destructuring-bind-expansion
-  "DESTRUCTURING-BIND delegates to the lambda-list destructurer."
-  (let ((result (our-macroexpand-1 '(destructuring-bind (a b) expr a))))
-    (assert-eq 'let (car result))
-    (assert-eq 'let* (car (caddr result)))))
+

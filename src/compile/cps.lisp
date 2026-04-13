@@ -43,14 +43,23 @@
              (let ((,sym ,tmp))
                ,(%cps-sexp-let-bindings (cdr bindings) body k)))))))
 
+(defun %cps-falsep (value)
+  "Return true when VALUE is falsy in the bootstrap CPS language.
+
+Bootstrap CPS follows the language-level truthiness used by compiled code:
+both NIL and numeric zero are false."
+  (or (null value)
+      (and (numberp value)
+           (zerop value))))
+
 (defun %cps-sexp-if (node k)
   "CPS-transform an IF form represented by NODE."
   (let ((v (gensym "COND")))
     (%cps-sexp-node (second node)
       `(lambda (,v)
-         (if ,v
-             ,(%cps-sexp-node (third node) k)
-             ,(%cps-sexp-node (fourth node) k))))))
+         (if (%cps-falsep ,v)
+             ,(%cps-sexp-node (fourth node) k)
+             ,(%cps-sexp-node (third node) k))))))
 
 (defun %cps-sexp-print (node k)
   "CPS-transform a PRINT form represented by NODE."
@@ -92,46 +101,65 @@
            (%cps-simplify-subtree (cdr tree) var replacement)))
     (t tree)))
 
+(defun %single-param-lambda-p (form)
+  "T if FORM is (lambda (x) body) with exactly one parameter."
+  (and (consp form)
+       (eq (car form) 'lambda)
+       (let ((params (second form)))
+         (and (consp params) (null (cdr params))))
+       (= (length form) 3)))
+
+(defun %funcall-of-single-lambda-p (form)
+  "T if FORM is (funcall (lambda (x) body) arg) — beta-reducible."
+  (and (consp form)
+       (eq (car form) 'funcall)
+       (%single-param-lambda-p (second form))
+       (not (null (cddr form)))
+       (null (cdddr form))))
+
+(defun %eta-reducible-lambda-p (form)
+  "T if FORM is (lambda (x) (funcall f x)) — eta-reducible."
+  (and (%single-param-lambda-p form)
+       (let ((body (third form)))
+         (and (consp body)
+              (eq (car body) 'funcall)
+              (consp (cddr body))
+              (null (cdddr body))
+              (eq (third body) (first (second form)))))))
+
 (defun %cps-beta-reduce (form)
-  (if (and (consp form)
-           (eq (car form) 'funcall)
-           (consp (second form))
-           (eq (car (second form)) 'lambda)
-           (consp (second (second form)))
-           (null (cddr (second (second form))))
-           (= (length (second form)) 3))
+  "Beta-reduce (funcall (lambda (x) body) arg) → body[x/arg]."
+  (if (%funcall-of-single-lambda-p form)
       (let* ((lambda-form (second form))
-             (params (second lambda-form))
-             (body (third lambda-form))
-             (arg (third form)))
-        (%cps-simplify-subtree body (first params) arg))
+             (param (first (second lambda-form)))
+             (body  (third lambda-form))
+             (arg   (third form)))
+        (%cps-simplify-subtree body param arg))
       form))
 
 (defun %cps-eta-reduce (form)
-  (if (and (consp form)
-           (eq (car form) 'lambda)
-           (consp (second form))
-           (null (cdr (second form)))
-           (consp (third form))
-           (eq (car (third form)) 'funcall)
-           (consp (cddr (third form)))
-           (null (cdddr (third form)))
-           (eq (third (third form)) (first (second form)))
-           )
+  "Eta-reduce (lambda (x) (funcall f x)) → f."
+  (if (%eta-reducible-lambda-p form)
       (second (third form))
       form))
 
+(defun %cps-simplify-once (form)
+  "Apply one recursive beta/eta simplification pass to FORM."
+  (labels ((walk (x)
+             (if (consp x)
+                 (%cps-eta-reduce
+                  (%cps-beta-reduce
+                   (mapcar #'walk x)))
+                 x)))
+    (walk form)))
+
 (defun cps-simplify-form (form)
-  (let ((reduced
-          (labels ((walk (x)
-                     (cond
-                       ((consp x)
-                        (walk (%cps-eta-reduce
-                               (%cps-beta-reduce
-                                (cons (walk (car x)) (walk (cdr x)))))))
-                       (t x))))
-            (walk form))))
-    (if (equal reduced form) reduced (cps-simplify-form reduced))))
+  "Repeatedly simplify FORM until a fixed point is reached."
+  (loop
+    for current = form then next
+    for next = (%cps-simplify-once current)
+    until (equal current next)
+    finally (return current)))
 
 (defun cps-transform (expr)
   "Minimal CPS conversion for bootstrap language. Produces (lambda (k) ...).

@@ -29,25 +29,14 @@
          (enter-call (second saved-binding)))
     (assert-eq (car enter-call) 'cl-cc::%progv-enter)))
 
-(deftest progv-uses-unwind-protect
-  "PROGV body is wrapped in UNWIND-PROTECT ensuring %progv-exit on exit"
-  (let* ((result (our-macroexpand-1 '(progv '(x) '(42) (print x))))
-         (body-form (caddr result)))
-    (assert-eq (car body-form) 'unwind-protect)))
-
-(deftest progv-cleanup-calls-progv-exit
-  "PROGV cleanup form calls %progv-exit with the saved bindings variable"
-  (let* ((result (our-macroexpand-1 '(progv '(x) '(1) body)))
-         (bindings (cadr result))
-         (saved-var (first (third bindings)))
+(deftest progv-body-unwind-structure
+  "PROGV body is UNWIND-PROTECT with PROGN body and %progv-exit cleanup."
+  (let* ((result      (our-macroexpand-1 '(progv '(x) '(1) form1 form2)))
+         (bindings    (cadr result))
+         (saved-var   (first (third bindings)))
          (unwind-form (caddr result))
-         (cleanup-form (caddr unwind-form)))
-    (assert-eq (car cleanup-form) 'cl-cc::%progv-exit)
-    (assert-eq (cadr cleanup-form) saved-var)))
-
-(deftest progv-body-wrapped-in-progn
-  "PROGV body forms are wrapped in a PROGN inside unwind-protect"
-  (let* ((result (our-macroexpand-1 '(progv '(x) '(1) form1 form2)))
-         (unwind-form (caddr result))
-         (protected-form (cadr unwind-form)))
-    (assert-eq (car protected-form) 'progn)))
+         (cleanup     (caddr unwind-form)))
+    (assert-eq 'unwind-protect       (car unwind-form))
+    (assert-eq 'progn                (car (cadr unwind-form)))
+    (assert-eq 'cl-cc::%progv-exit   (car cleanup))
+    (assert-eq saved-var             (cadr cleanup))))

@@ -2,8 +2,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite expander-setf-places-suite :description "Setf-place expander unit tests")
+(defsuite expander-setf-places-suite :description "Setf-place expander unit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite expander-setf-places-suite)
 (deftest expander-setf-slot-value-passthrough
   "compiler-macroexpand-all: (setf (slot-value obj 'slot) v) is a special form and recurses."
   (let ((result (cl-cc::compiler-macroexpand-all
@@ -48,11 +51,15 @@
     (assert-true (search "NTHCDR" str))))
 
 (deftest-each expander-setf-cxr-compound-places
-  "(setf (cadr/cddr x) v) expands via rplaca/rplacd applied to (cdr x)."
+  "(setf (cadr/cddr x) v) expands via rplaca/rplacd applied to (cdr x).
+Binds *print-circle* so format can print shared gensym vars compactly —
+the expansion shares the temp var multiple times, and without circle
+detection format can run the test-level 30s timeout."
   :cases (("cadr" '(setf (cadr x) newval) "RPLACA")
           ("cddr" '(setf (cddr x) newval) "RPLACD"))
   (form expected-op)
-  (let ((str (format nil "~S" (cl-cc::compiler-macroexpand-all form))))
+  (let* ((*print-circle* t)
+         (str (format nil "~S" (cl-cc::compiler-macroexpand-all form))))
     (assert-true (search expected-op str))
     (assert-true (search "CDR" str))))
 
@@ -65,7 +72,7 @@
 (deftest expander-setf-get-place
   "(setf (get sym indicator) v) expands via symbol-plist update and returns the value."
   (let ((result (cl-cc::compiler-macroexpand-all '(setf (get my-sym :foo) 42))))
-    (assert-eq 'let* (car result))
+    (assert-eq 'let (car result))
     (let ((str (format nil "~S" result)))
       (assert-true (search "%SET-SYMBOL-PLIST" str))
       (assert-true (search "SYMBOL-PLIST" str))

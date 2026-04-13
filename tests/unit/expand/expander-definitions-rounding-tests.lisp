@@ -2,8 +2,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite expander-definitions-rounding-suite :description "Definition-form rounding unit tests")
+(defsuite expander-definitions-rounding-suite :description "Definition-form rounding unit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite expander-definitions-rounding-suite)
 (deftest expander-rounding-one-arg-normalization
   "1-arg rounding forms are normalized to 2-arg (op n 1) for all *rounding-ops*."
   (let ((cases '((floor . (floor n))

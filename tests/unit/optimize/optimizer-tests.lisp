@@ -8,7 +8,7 @@
 
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-suite)
+(in-suite cl-cc-integration-suite)
 
 ;;; ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -133,110 +133,83 @@
 
 ;;; ── Dominated Predicate Elimination ─────────────────────────────────────
 
-(deftest optimizer-dominated-type-check-elim
-  "Redundant dominated type predicates are rewritten to vm-move."
-  (let* ((c   (make-vm-const :dst :r0 :value nil))
-         (p1  (make-vm-null-p :dst :r1 :src :r0))
-         (br  (make-vm-jump-zero :reg :r1 :label "else"))
-         (then (make-vm-label :name "then"))
-         (p2  (make-vm-null-p :dst :r2 :src :r0))
-         (ret1 (make-vm-ret :reg :r2))
-         (else (make-vm-label :name "else"))
-         (ret0 (make-vm-ret :reg :r1))
-         (out (cl-cc::opt-pass-dominated-type-check-elim
-                (list c p1 br then p2 ret1 else ret0))))
-    (assert-equal 1 (count-if (lambda (i) (typep i 'cl-cc::vm-null-p)) out))
-    (assert-true (some (lambda (i) (typep i 'cl-cc::vm-move)) out))))
-
-(deftest optimizer-dominated-nil-check-elim
-  "Redundant dominated nil checks via vm-not are rewritten to vm-move."
-  (let* ((c   (make-vm-const :dst :r0 :value nil))
-         (p1  (make-vm-not :dst :r1 :src :r0))
-         (br  (make-vm-jump-zero :reg :r1 :label "else"))
-         (then (make-vm-label :name "then"))
-         (p2  (make-vm-not :dst :r2 :src :r0))
-         (ret1 (make-vm-ret :reg :r2))
-         (else (make-vm-label :name "else"))
-         (ret0 (make-vm-ret :reg :r1))
-         (out (cl-cc::opt-pass-dominated-type-check-elim
-               (list c p1 br then p2 ret1 else ret0))))
-    (assert-equal 1 (count-if (lambda (i) (typep i 'cl-cc::vm-not)) out))
-    (assert-true (some (lambda (i) (typep i 'cl-cc::vm-move)) out))))
-
-(deftest optimizer-nil-check-elim
-  "FR-040: named nil-check elimination pass rewrites dominated vm-not checks."
-  (let* ((c   (make-vm-const :dst :r0 :value nil))
-         (p1  (make-vm-not :dst :r1 :src :r0))
-         (br  (make-vm-jump-zero :reg :r1 :label "else"))
-         (then (make-vm-label :name "then"))
-         (p2  (make-vm-not :dst :r2 :src :r0))
-         (ret1 (make-vm-ret :reg :r2))
-         (else (make-vm-label :name "else"))
-         (ret0 (make-vm-ret :reg :r1))
-         (out (cl-cc::opt-pass-nil-check-elim
-               (list c p1 br then p2 ret1 else ret0))))
-    (assert-equal 1 (count-if (lambda (i) (typep i 'cl-cc::vm-not)) out))
-    (assert-true (some (lambda (i) (typep i 'cl-cc::vm-move)) out))))
-
-(deftest optimizer-branch-correlation-propagates-true-edge
-  "A repeated dominated predicate in the fallthrough block becomes vm-const 1."
-  (let* ((c    (make-vm-const :dst :r0 :value 1))
-         (p1   (cl-cc::make-vm-integer-p :dst :r1 :src :r0))
+(deftest-each optimizer-dominated-check-elim
+  "Redundant dominated predicates are rewritten to vm-move by the relevant elimination pass."
+  :cases (("null-p via dominated-type-check-elim"
+           #'cl-cc::opt-pass-dominated-type-check-elim
+           (make-vm-null-p :dst :r1 :src :r0)
+           (make-vm-null-p :dst :r2 :src :r0)
+           'cl-cc::vm-null-p)
+          ("not via dominated-type-check-elim"
+           #'cl-cc::opt-pass-dominated-type-check-elim
+           (make-vm-not :dst :r1 :src :r0)
+           (make-vm-not :dst :r2 :src :r0)
+           'cl-cc::vm-not)
+          ("not via nil-check-elim"
+           #'cl-cc::opt-pass-nil-check-elim
+           (make-vm-not :dst :r1 :src :r0)
+           (make-vm-not :dst :r2 :src :r0)
+           'cl-cc::vm-not))
+  (pass-fn p1 p2 instr-type)
+  (let* ((c    (make-vm-const :dst :r0 :value nil))
          (br   (make-vm-jump-zero :reg :r1 :label "else"))
          (then (make-vm-label :name "then"))
-         (p2   (cl-cc::make-vm-integer-p :dst :r2 :src :r0))
          (ret1 (make-vm-ret :reg :r2))
          (else (make-vm-label :name "else"))
          (ret0 (make-vm-ret :reg :r1))
-         (out  (cl-cc::opt-pass-branch-correlation
-                (list c p1 br then p2 ret1 else ret0))))
-    (assert-true (some (lambda (i)
-                         (and (typep i 'cl-cc::vm-const)
-                              (eq :r2 (cl-cc::vm-dst i))
-                              (eql 1 (cl-cc::vm-value i))))
-                       out))))
+         (out  (funcall pass-fn (list c p1 br then p2 ret1 else ret0))))
+    (assert-equal 1 (count-if (lambda (i) (typep i instr-type)) out))
+    (assert-true (some (lambda (i) (typep i 'cl-cc::vm-move)) out))))
 
-(deftest optimizer-branch-correlation-propagates-false-edge
-  "A repeated dominated predicate in the taken block becomes vm-const 0."
-  (let* ((c    (make-vm-const :dst :r0 :value 1))
-         (p1   (cl-cc::make-vm-integer-p :dst :r1 :src :r0))
-         (br   (make-vm-jump-zero :reg :r1 :label "else"))
-         (then (make-vm-label :name "then"))
-         (ret1 (make-vm-ret :reg :r1))
-         (else (make-vm-label :name "else"))
-         (p2   (cl-cc::make-vm-integer-p :dst :r2 :src :r0))
-         (ret0 (make-vm-ret :reg :r2))
-         (out  (cl-cc::opt-pass-branch-correlation
+(deftest-each optimizer-pass-produces-const
+  "Optimization passes fold or correlate predicates to known vm-const values."
+  :cases (("branch-correlation-true-edge"
+           (lambda ()
+             (let* ((c    (make-vm-const :dst :r0 :value 1))
+                    (p1   (cl-cc::make-vm-integer-p :dst :r1 :src :r0))
+                    (br   (make-vm-jump-zero :reg :r1 :label "else"))
+                    (then (make-vm-label :name "then"))
+                    (p2   (cl-cc::make-vm-integer-p :dst :r2 :src :r0))
+                    (ret1 (make-vm-ret :reg :r2))
+                    (else (make-vm-label :name "else"))
+                    (ret0 (make-vm-ret :reg :r1)))
+               (cl-cc::opt-pass-branch-correlation
+                (list c p1 br then p2 ret1 else ret0))))
+           :r2 1)
+          ("branch-correlation-false-edge"
+           (lambda ()
+             (let* ((c    (make-vm-const :dst :r0 :value 1))
+                    (p1   (cl-cc::make-vm-integer-p :dst :r1 :src :r0))
+                    (br   (make-vm-jump-zero :reg :r1 :label "else"))
+                    (then (make-vm-label :name "then"))
+                    (ret1 (make-vm-ret :reg :r1))
+                    (else (make-vm-label :name "else"))
+                    (p2   (cl-cc::make-vm-integer-p :dst :r2 :src :r0))
+                    (ret0 (make-vm-ret :reg :r2)))
+               (cl-cc::opt-pass-branch-correlation
                 (list c p1 br then ret1 else p2 ret0))))
+           :r2 0)
+          ("fold-rational-unary"
+           (lambda ()
+             (let* ((c1  (make-vm-const :dst :r0 :value 3/4))
+                    (u1  (cl-cc::make-vm-numerator :dst :r1 :src :r0))
+                    (ret (make-vm-ret :reg :r1)))
+               (cl-cc::opt-pass-fold (list c1 u1 ret))))
+           :r1 3)
+          ("fold-rational-binary"
+           (lambda ()
+             (let* ((c1  (make-vm-const :dst :r0 :value 8))
+                    (c2  (make-vm-const :dst :r1 :value 12))
+                    (g   (cl-cc::make-vm-gcd :dst :r2 :lhs :r0 :rhs :r1))
+                    (ret (make-vm-ret :reg :r2)))
+               (cl-cc::opt-pass-fold (list c1 c2 g ret))))
+           :r2 4))
+  (make-out expected-dst expected-value)
+  (let ((out (funcall make-out)))
     (assert-true (some (lambda (i)
                          (and (typep i 'cl-cc::vm-const)
-                              (eq :r2 (cl-cc::vm-dst i))
-                              (eql 0 (cl-cc::vm-value i))))
-                       out))))
-
-(deftest optimizer-folds-rational-unary-ops
-  "Constant folding reduces rational unary operations to vm-const."
-  (let* ((c1  (make-vm-const :dst :r0 :value 3/4))
-         (u1  (cl-cc::make-vm-numerator :dst :r1 :src :r0))
-         (ret (make-vm-ret :reg :r1))
-         (out (cl-cc::opt-pass-fold (list c1 u1 ret))))
-    (assert-true (some (lambda (i)
-                         (and (typep i 'cl-cc::vm-const)
-                              (eq :r1 (cl-cc::vm-dst i))
-                              (eql 3 (cl-cc::vm-value i))))
-                       out))))
-
-(deftest optimizer-folds-rational-binary-ops
-  "Constant folding reduces gcd/lcm over integer literals to vm-const."
-  (let* ((c1  (make-vm-const :dst :r0 :value 8))
-         (c2  (make-vm-const :dst :r1 :value 12))
-         (g   (cl-cc::make-vm-gcd :dst :r2 :lhs :r0 :rhs :r1))
-         (ret (make-vm-ret :reg :r2))
-         (out (cl-cc::opt-pass-fold (list c1 c2 g ret))))
-    (assert-true (some (lambda (i)
-                         (and (typep i 'cl-cc::vm-const)
-                              (eq :r2 (cl-cc::vm-dst i))
-                              (eql 4 (cl-cc::vm-value i))))
+                              (eq expected-dst (cl-cc::vm-dst i))
+                              (eql expected-value (cl-cc::vm-value i))))
                        out))))
 
 ;;; ── End-to-End Correctness ───────────────────────────────────────────────
@@ -261,16 +234,12 @@
           ("logior-zero"      42 "(let ((x 42)) (logior x 0))"   'vm-logior)
           ("logxor-zero"      42 "(let ((x 42)) (logxor x 0))"   nil)
           ("logxor-self"       0 "(let ((x 42)) (logxor x x))"   'vm-logxor)
-          ("ash-zero"         42 "(let ((x 42)) (ash x 0))"      'vm-ash))
+          ("ash-zero"         42 "(let ((x 42)) (ash x 0))"      'vm-ash)
+          ("rem-zero"          0 "(let ((x 42)) (rem 0 x))"      'vm-rem))
   (expected expr instr)
   (assert-run= expected expr)
   (when instr
     (assert-false (opt-has-p expr instr))))
-
-(deftest optimizer-rem-zero
-  "(rem 0 x) folds to 0 and no vm-rem remains."
-  (assert-run= 0 "(let ((x 42)) (rem 0 x))")
-  (assert-false (opt-has-p "(let ((x 42)) (rem 0 x))" 'vm-rem)))
 
 ;;; ── Unary Constant Folding ────────────────────────────────────────────────
 
@@ -392,12 +361,16 @@
     (assert-true (cl-cc::vm-add-p (third out)))
     (assert-true (cl-cc::vm-sub-p (fourth out)))))
 
-(deftest optimizer-value-ordering-structural
+(deftest-each optimizer-value-ordering-structural
   "Structural optimizer ordering stays deterministic without format-based comparison."
-  (assert-true (cl-cc::%opt-value< '(:r0 . 1) '(:r0 . 2)))
-  (assert-true (cl-cc::%opt-value< :r0 :r1))
-  (assert-true (cl-cc::%opt-value< 1 2))
-  (assert-false (cl-cc::%opt-value< "b" "a")))
+  :cases (("pair-ascending"    t   '(:r0 . 1) '(:r0 . 2))
+          ("keyword-ascending" t   :r0        :r1)
+          ("integer-ascending" t   1          2)
+          ("string-descending" nil "b"        "a"))
+  (expected a b)
+  (if expected
+      (assert-true  (cl-cc::%opt-value< a b))
+      (assert-false (cl-cc::%opt-value< a b))))
 
 (deftest optimizer-gvn-dominates-branch
   "GVN reuses a dominator-block value inside a dominated block."
@@ -489,67 +462,57 @@
          (out     (cl-cc::opt-pass-inline instrs)))
     (assert-true (inline-has-call-p out))))
 
-(deftest inline-skip-closure
-  "A function created with captured vars (vm-closure with non-nil :captured)
-   is NOT inlined; the vm-call remains in the output."
-  (let* ((closure (cl-cc::make-vm-closure :dst :R0 :label "captured"
-                                          :params '(:R10)
-                                          :captured '(:R99)))
-         (fref    (cl-cc::make-vm-func-ref :dst :R5 :label "captured"))
-         (jump-past (cl-cc::make-vm-jump :label "after_cap"))
-         (lbl     (cl-cc::make-vm-label :name "captured"))
-         (body1   (cl-cc::make-vm-const :dst :R11 :value 1))
-         (body2   (cl-cc::make-vm-add :dst :R12 :lhs :R10 :rhs :R11))
-         (ret     (cl-cc::make-vm-ret :reg :R12))
-         (after   (cl-cc::make-vm-label :name "after_cap"))
-         (arg     (cl-cc::make-vm-const :dst :R1 :value 4))
-         (call    (cl-cc::make-vm-call :dst :R6 :func :R5 :args '(:R1)))
-         (halt    (cl-cc::make-vm-halt))
-         (instrs  (list closure fref jump-past lbl body1 body2 ret after arg call halt))
-         (out     (cl-cc::opt-pass-inline instrs)))
-    (assert-true (inline-has-call-p out))))
-
-(deftest inline-skip-recursive
-  "A function that calls itself via vm-func-ref + vm-call inside its body
-   is NOT inlined because it references a global register (the outer func-ref)."
-  (let* ((closure (cl-cc::make-vm-closure :dst :R0 :label "rec"
-                                          :params '(:R10)
-                                          :captured nil))
-         (fref    (cl-cc::make-vm-func-ref :dst :R5 :label "rec"))
-         (jump-past (cl-cc::make-vm-jump :label "after_rec"))
-         (lbl     (cl-cc::make-vm-label :name "rec"))
-         ;; Body: if (= x 0) ret 0, else call rec(x-1)
-         ;; The inner vm-call reads :R5 which is defined OUTSIDE the body
-         ;; -> opt-body-has-global-refs-p returns T -> no inline
-         (b1      (cl-cc::make-vm-const :dst :R11 :value 0))
-         (b2      (cl-cc::make-vm-sub :dst :R12 :lhs :R10 :rhs :R11))
-         (b3      (cl-cc::make-vm-call :dst :R13 :func :R5 :args '(:R12)))
-         (ret     (cl-cc::make-vm-ret :reg :R13))
-         (after   (cl-cc::make-vm-label :name "after_rec"))
-         (arg     (cl-cc::make-vm-const :dst :R1 :value 5))
-         (call    (cl-cc::make-vm-call :dst :R6 :func :R5 :args '(:R1)))
-         (halt    (cl-cc::make-vm-halt))
-          (instrs  (list closure fref jump-past lbl b1 b2 b3 ret after arg call halt))
-          (out     (cl-cc::opt-pass-inline instrs)))
-    (assert-true (inline-has-call-p out))))
-
-(deftest inline-skip-self-recursive-guard
-  "A self-recursive function is kept as a call site instead of being inlined."
-  (let* ((closure (cl-cc::make-vm-closure :dst :R0 :label "loop"
-                                          :params '(:R10)
-                                          :captured nil))
-         (fref    (cl-cc::make-vm-func-ref :dst :R5 :label "loop"))
-         (jump-past (cl-cc::make-vm-jump :label "after_loop"))
-         (lbl     (cl-cc::make-vm-label :name "loop"))
-         (self    (cl-cc::make-vm-func-ref :dst :R7 :label "loop"))
-         (body1   (cl-cc::make-vm-call :dst :R11 :func :R7 :args '(:R10)))
-         (ret     (cl-cc::make-vm-ret :reg :R11))
-         (after   (cl-cc::make-vm-label :name "after_loop"))
-         (arg     (cl-cc::make-vm-const :dst :R1 :value 5))
-         (call    (cl-cc::make-vm-call :dst :R6 :func :R5 :args '(:R1)))
-         (halt    (cl-cc::make-vm-halt))
-         (instrs  (list closure fref jump-past lbl self body1 ret after arg call halt))
-         (out     (cl-cc::opt-pass-inline instrs)))
+(deftest-each inline-skip-cases
+  "Functions with captured vars, recursive bodies, or self-references are NOT inlined."
+  :cases (("captured-vars"
+           (lambda ()
+             (let* ((closure (cl-cc::make-vm-closure :dst :R0 :label "captured"
+                                                     :params '(:R10) :captured '(:R99)))
+                    (fref    (cl-cc::make-vm-func-ref :dst :R5 :label "captured"))
+                    (jump-past (cl-cc::make-vm-jump :label "after_cap"))
+                    (lbl     (cl-cc::make-vm-label :name "captured"))
+                    (body1   (cl-cc::make-vm-const :dst :R11 :value 1))
+                    (body2   (cl-cc::make-vm-add :dst :R12 :lhs :R10 :rhs :R11))
+                    (ret     (cl-cc::make-vm-ret :reg :R12))
+                    (after   (cl-cc::make-vm-label :name "after_cap"))
+                    (arg     (cl-cc::make-vm-const :dst :R1 :value 4))
+                    (call    (cl-cc::make-vm-call :dst :R6 :func :R5 :args '(:R1)))
+                    (halt    (cl-cc::make-vm-halt)))
+               (list closure fref jump-past lbl body1 body2 ret after arg call halt))))
+          ("recursive-global-ref"
+           (lambda ()
+             (let* ((closure (cl-cc::make-vm-closure :dst :R0 :label "rec"
+                                                     :params '(:R10) :captured nil))
+                    (fref    (cl-cc::make-vm-func-ref :dst :R5 :label "rec"))
+                    (jump-past (cl-cc::make-vm-jump :label "after_rec"))
+                    (lbl     (cl-cc::make-vm-label :name "rec"))
+                    (b1      (cl-cc::make-vm-const :dst :R11 :value 0))
+                    (b2      (cl-cc::make-vm-sub :dst :R12 :lhs :R10 :rhs :R11))
+                    (b3      (cl-cc::make-vm-call :dst :R13 :func :R5 :args '(:R12)))
+                    (ret     (cl-cc::make-vm-ret :reg :R13))
+                    (after   (cl-cc::make-vm-label :name "after_rec"))
+                    (arg     (cl-cc::make-vm-const :dst :R1 :value 5))
+                    (call    (cl-cc::make-vm-call :dst :R6 :func :R5 :args '(:R1)))
+                    (halt    (cl-cc::make-vm-halt)))
+               (list closure fref jump-past lbl b1 b2 b3 ret after arg call halt))))
+          ("self-recursive-guard"
+           (lambda ()
+             (let* ((closure (cl-cc::make-vm-closure :dst :R0 :label "loop"
+                                                     :params '(:R10) :captured nil))
+                    (fref    (cl-cc::make-vm-func-ref :dst :R5 :label "loop"))
+                    (jump-past (cl-cc::make-vm-jump :label "after_loop"))
+                    (lbl     (cl-cc::make-vm-label :name "loop"))
+                    (self    (cl-cc::make-vm-func-ref :dst :R7 :label "loop"))
+                    (body1   (cl-cc::make-vm-call :dst :R11 :func :R7 :args '(:R10)))
+                    (ret     (cl-cc::make-vm-ret :reg :R11))
+                    (after   (cl-cc::make-vm-label :name "after_loop"))
+                    (arg     (cl-cc::make-vm-const :dst :R1 :value 5))
+                    (call    (cl-cc::make-vm-call :dst :R6 :func :R5 :args '(:R1)))
+                    (halt    (cl-cc::make-vm-halt)))
+               (list closure fref jump-past lbl self body1 ret after arg call halt)))))
+  (make-instrs)
+  (let* ((instrs (funcall make-instrs))
+         (out    (cl-cc::opt-pass-inline instrs)))
     (assert-true (inline-has-call-p out))))
 
 (deftest inline-register-rename
@@ -636,26 +599,14 @@
     (assert-true r1-const)
     (assert-equal 43 (cl-cc::vm-value r1-const))))
 
-(deftest fold-unary-not-falsy
-  "vm-not on nil folds to t; truthy values fold to nil."
-  (flet ((fold-result (input-val)
-           (let* ((instrs (list (cl-cc::make-vm-const :dst :R0 :value input-val)
-                                (cl-cc::make-vm-not :dst :R1 :src :R0)))
-                  (out (cl-cc::opt-pass-fold instrs))
-                  (r1-const (find-if (lambda (i) (and (cl-cc::vm-const-p i)
-                                                      (eq (cl-cc::vm-dst i) :R1)))
-                                     out)))
-             (assert-true r1-const)
-             (cl-cc::vm-value r1-const))))
-    (assert-equal t   (fold-result nil))
-    (assert-null      (fold-result 0))))
-
 (deftest-each fold-type-pred
-  "Type predicate instructions fold at compile time against a known constant."
-  :cases (("number-p" (cl-cc::make-vm-number-p :dst :R1 :src :R0) 1)
-          ("symbol-p" (cl-cc::make-vm-symbol-p :dst :R1 :src :R0) 0))
-  (pred-inst expected)
-  (let* ((instrs (list (cl-cc::make-vm-const :dst :R0 :value 42) pred-inst))
+  "Type predicate and vm-not instructions fold at compile time against a known constant."
+  :cases (("number-p" 42  (cl-cc::make-vm-number-p :dst :R1 :src :R0) 1)
+          ("symbol-p" 42  (cl-cc::make-vm-symbol-p :dst :R1 :src :R0) 0)
+          ("not-nil"  nil (cl-cc::make-vm-not       :dst :R1 :src :R0) t)
+          ("not-zero" 0   (cl-cc::make-vm-not       :dst :R1 :src :R0) nil))
+  (const-val pred-inst expected)
+  (let* ((instrs (list (cl-cc::make-vm-const :dst :R0 :value const-val) pred-inst))
          (out (cl-cc::opt-pass-fold instrs))
          (r1-const (find-if (lambda (i) (and (cl-cc::vm-const-p i)
                                              (eq (cl-cc::vm-dst i) :R1)))
@@ -663,59 +614,43 @@
     (assert-true r1-const)
     (assert-equal expected (cl-cc::vm-value r1-const))))
 
-(deftest fold-branch-known-true
-  "vm-jump-zero with a known non-zero value is dropped entirely."
-  (let* ((instrs (list (cl-cc::make-vm-const :dst :R0 :value 1)
-                       (cl-cc::make-vm-jump-zero :reg :R0 :label "skip")))
+(deftest-each fold-branch-known
+  "vm-jump-zero with a known constant is eliminated or replaced by an unconditional jump."
+  :cases (("known-true-no-branch"  1   nil)
+          ("known-false-jump"      nil t))
+  (const-val expected-has-jump)
+  (let* ((instrs (list (cl-cc::make-vm-const :dst :R0 :value const-val)
+                       (cl-cc::make-vm-jump-zero :reg :R0 :label "target")))
          (out (cl-cc::opt-pass-fold instrs)))
-    ;; No jump-zero or jump should remain (condition always true → branch never taken)
-    (assert-true (not (find-if (lambda (i) (or (cl-cc::vm-jump-zero-p i)
-                                               (cl-cc::vm-jump-p i)))
-                               out)))))
-
-(deftest fold-branch-known-false
-  "vm-jump-zero with a known nil value becomes unconditional vm-jump."
-  (let* ((instrs (list (cl-cc::make-vm-const :dst :R0 :value nil)
-                        (cl-cc::make-vm-jump-zero :reg :R0 :label "target")))
-         (out (cl-cc::opt-pass-fold instrs)))
-    (assert-true (find-if #'cl-cc::vm-jump-p out))
-    (assert-true (not (find-if #'cl-cc::vm-jump-zero-p out)))))
+    (if expected-has-jump
+        (assert-true  (find-if #'cl-cc::vm-jump-p out))
+        (assert-false (find-if #'cl-cc::vm-jump-p out)))
+    (assert-false (find-if #'cl-cc::vm-jump-zero-p out))))
 
 ;;; ── Direct opt-pass-copy-prop Tests ────────────────────────────────────
 
-(deftest copy-prop-chain
-  "Copy chain following: R1←R0, R2←R1 → add using R2 resolves to R0."
-  (let* ((instrs (list (cl-cc::make-vm-move :dst :R1 :src :R0)
-                       (cl-cc::make-vm-move :dst :R2 :src :R1)
-                       (cl-cc::make-vm-add :dst :R3 :lhs :R2 :rhs :R2)))
-         (out (cl-cc::opt-pass-copy-prop instrs)))
-    ;; The add's operands should both resolve to :R0
-    (let ((add-inst (find-if (lambda (i) (typep i 'cl-cc::vm-add)) out)))
-      (assert-true add-inst)
-      (assert-equal :R0 (cl-cc::vm-lhs add-inst))
-      (assert-equal :R0 (cl-cc::vm-rhs add-inst)))))
-
-(deftest copy-prop-label-flushes
-  "A non-target fallthrough label does not flush copy knowledge."
-  (let* ((instrs (list (cl-cc::make-vm-move :dst :R1 :src :R0)
-                       (cl-cc::make-vm-label :name "join")
-                       (cl-cc::make-vm-add :dst :R2 :lhs :R1 :rhs :R1)))
-         (out (cl-cc::opt-pass-copy-prop instrs)))
-    ;; The add should use :R0 because the fallthrough label preserves copies.
-    (let ((add-inst (find-if (lambda (i) (typep i 'cl-cc::vm-add)) out)))
-      (assert-true add-inst)
-      (assert-equal :R0 (cl-cc::vm-lhs add-inst)))))
-
-(deftest copy-prop-kill-forward
-  "When a source register is overwritten, its forward aliases are invalidated."
-  (let* ((instrs (list (cl-cc::make-vm-move :dst :R1 :src :R0)
-                       (cl-cc::make-vm-const :dst :R0 :value 99)
-                       (cl-cc::make-vm-add :dst :R2 :lhs :R1 :rhs :R1)))
-         (out (cl-cc::opt-pass-copy-prop instrs)))
-    ;; The add should use :R1 (not :R0), because :R0 was overwritten
-    (let ((add-inst (find-if (lambda (i) (typep i 'cl-cc::vm-add)) out)))
-      (assert-true add-inst)
-      (assert-equal :R1 (cl-cc::vm-lhs add-inst)))))
+(deftest-each copy-prop-operand-resolution
+  "opt-pass-copy-prop resolves add operands through copy chains, fallthrough labels, and kills."
+  :cases (("chain-follows-two-moves"
+           (list (cl-cc::make-vm-move :dst :R1 :src :R0)
+                 (cl-cc::make-vm-move :dst :R2 :src :R1)
+                 (cl-cc::make-vm-add :dst :R3 :lhs :R2 :rhs :R2))
+           :R0)
+          ("fallthrough-label-preserves-copies"
+           (list (cl-cc::make-vm-move :dst :R1 :src :R0)
+                 (cl-cc::make-vm-label :name "join")
+                 (cl-cc::make-vm-add :dst :R2 :lhs :R1 :rhs :R1))
+           :R0)
+          ("overwrite-kills-alias"
+           (list (cl-cc::make-vm-move :dst :R1 :src :R0)
+                 (cl-cc::make-vm-const :dst :R0 :value 99)
+                 (cl-cc::make-vm-add :dst :R2 :lhs :R1 :rhs :R1))
+           :R1))
+  (instrs expected-lhs)
+  (let* ((out (cl-cc::opt-pass-copy-prop instrs))
+         (add-inst (find-if (lambda (i) (typep i 'cl-cc::vm-add)) out)))
+    (assert-true add-inst)
+    (assert-equal expected-lhs (cl-cc::vm-lhs add-inst))))
 
 (deftest copy-prop-reverse-map-kill
   "Reverse-map kill invalidates direct aliases without a full copy-table scan." 
@@ -1049,11 +984,16 @@
     (assert-true (< (position hoist out :test #'eq)
                     (position loop out :test #'eq)))))
 
-(deftest constant-hoist-is-in-convergence-passes
-  "opt-pass-constant-hoist is part of the convergence pass pipeline."
-  (assert-true (member #'cl-cc::opt-pass-constant-hoist
-                       cl-cc::*opt-convergence-passes*
-                       :test #'eq)))
+(deftest-each opt-convergence-pass-membership
+  "All expected optimization passes are registered in *opt-convergence-passes*."
+  :cases (("constant-hoist" #'cl-cc::opt-pass-constant-hoist)
+          ("global-dce"     #'cl-cc::opt-pass-global-dce)
+          ("inline"         #'cl-cc::opt-pass-inline-iterative)
+          ("pre"            #'cl-cc::opt-pass-pre)
+          ("bswap"          #'cl-cc::opt-pass-bswap-recognition)
+          ("rotate"         #'cl-cc::opt-pass-rotate-recognition))
+  (pass-fn)
+  (assert-true (member pass-fn cl-cc::*opt-convergence-passes* :test #'eq)))
 
 (deftest global-dce-removes-unreachable-registered-function
   "opt-pass-global-dce removes a registered function when nothing at top level reaches it."
@@ -1098,36 +1038,29 @@
     (assert-true (member g-label out))
     (assert-true (member top-call out))))
 
-(deftest global-dce-is-in-convergence-passes
-  "opt-pass-global-dce is part of the convergence pass pipeline."
-  (assert-true (member #'cl-cc::opt-pass-global-dce
-                       cl-cc::*opt-convergence-passes*
-                       :test #'eq)))
-
-(deftest known-callee-labels-track-const-func-ref-and-move
+(deftest-each known-callee-labels-track-const-func-ref-and-move
   "Known-callee helper resolves labels through closure/const/move chains."
+  :cases (("direct-closure" :r0)
+          ("const-value"    :r2)
+          ("moved-copy"     :r3))
+  (reg)
   (let* ((closure (make-vm-closure :dst :r0 :label "f" :params '(:r1)
                                    :captured nil :optional-params nil :rest-param nil :key-params nil))
          (regfun  (make-vm-register-function :name 'f :src :r0))
          (const   (make-vm-const :dst :r2 :value 'f))
          (move    (make-vm-move :dst :r3 :src :r2))
          (known   (cl-cc::opt-known-callee-labels (list closure regfun const move))))
-    (assert-string= "f" (cl-cc::opt-known-callee-label :r0 known))
-    (assert-string= "f" (cl-cc::opt-known-callee-label :r2 known))
-    (assert-string= "f" (cl-cc::opt-known-callee-label :r3 known))))
+    (assert-string= "f" (cl-cc::opt-known-callee-label reg known))))
 
-(deftest inline-is-in-convergence-passes
-  "opt-pass-inline participates in the convergence pipeline via a named wrapper pass."
-  (assert-true (member #'cl-cc::opt-pass-inline-iterative
-                       cl-cc::*opt-convergence-passes*
-                       :test #'eq)))
-
-(deftest optimizer-custom-pass-pipeline
-  "optimize-instructions accepts a custom keyword pass pipeline."
+(deftest-each optimizer-pass-pipeline-forms
+  "optimize-instructions folds (+ 1 2) to nothing for both keyword-list and string pipeline forms."
+  :cases (("keyword-list" '(:fold :dce))
+          ("string"       "fold,dce"))
+  (pipeline)
   (let* ((instrs (list (make-vm-const :dst :r0 :value 1)
                        (make-vm-const :dst :r1 :value 2)
                        (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)))
-         (out (cl-cc::optimize-instructions instrs :pass-pipeline '(:fold :dce))))
+         (out (cl-cc::optimize-instructions instrs :pass-pipeline pipeline)))
     (assert-equal 0 (length out))))
 
 (deftest optimizer-ir-verify-valid
@@ -1138,99 +1071,54 @@
                       (make-vm-ret :reg :r2))))
     (assert-true (cl-cc::opt-verify-instructions instrs :pass-name "test"))))
 
-(deftest optimizer-ir-verify-duplicate-label
-  "opt-verify-instructions rejects duplicate labels."
-  (let ((instrs (list (make-vm-label :name "L0")
-                      (make-vm-label :name "L0"))))
-    (assert-true
-     (handler-case (progn (cl-cc::opt-verify-instructions instrs :pass-name "test") nil)
-       (error () t)))))
+(deftest-each optimizer-ir-verify-rejects-invalid
+  "opt-verify-instructions raises an error for invalid IR programs."
+  :cases (("duplicate-label"
+           (list (make-vm-label :name "L0")
+                 (make-vm-label :name "L0")))
+          ("missing-label-target"
+           (list (make-vm-jump :label "MISSING")))
+          ("use-before-def"
+           (list (make-vm-add :dst :r0 :lhs :r1 :rhs :r2))))
+  (instrs)
+  (assert-true
+   (handler-case (progn (cl-cc::opt-verify-instructions instrs :pass-name "test") nil)
+     (error () t))))
 
-(deftest optimizer-ir-verify-missing-label-target
-  "opt-verify-instructions rejects unknown jump targets."
-  (let ((instrs (list (make-vm-jump :label "MISSING"))))
-    (assert-true
-     (handler-case (progn (cl-cc::opt-verify-instructions instrs :pass-name "test") nil)
-       (error () t)))))
-
-(deftest optimizer-ir-verify-use-before-def
-  "opt-verify-instructions rejects obvious use-before-def register reads."
-  (let ((instrs (list (make-vm-add :dst :r0 :lhs :r1 :rhs :r2))))
-    (assert-true
-     (handler-case (progn (cl-cc::opt-verify-instructions instrs :pass-name "test") nil)
-       (error () t)))))
-
-(deftest optimizer-string-pass-pipeline
-  "optimize-instructions also accepts a comma-separated string pipeline."
-  (let* ((instrs (list (make-vm-const :dst :r0 :value 1)
-                       (make-vm-const :dst :r1 :value 2)
-                       (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)))
-         (out (cl-cc::optimize-instructions instrs :pass-pipeline "fold,dce")))
-    (assert-equal 0 (length out))))
-
-(deftest optimizer-pass-pipeline-timings-output
-  "optimize-instructions can print per-pass timing lines."
-  (let* ((instrs (list (make-vm-const :dst :r0 :value 1)))
-         (stream (make-string-output-stream)))
-    (cl-cc::optimize-instructions instrs
-                                  :pass-pipeline '(:fold)
-                                  :print-pass-timings t
-                                  :timing-stream stream)
-    (let ((text (get-output-stream-string stream)))
-      (assert-true (search "OPT-PASS-FOLD" (string-upcase text))))))
-
-(deftest optimizer-pass-pipeline-stats-output
-  "optimize-instructions can print per-pass stats lines."
-  (let* ((instrs (list (make-vm-const :dst :r0 :value 1)))
-         (stream (make-string-output-stream)))
-    (cl-cc::optimize-instructions instrs
-                                  :pass-pipeline '(:fold)
-                                  :print-pass-stats t
-                                  :stats-stream stream)
+(deftest-each optimizer-pass-pipeline-output-modes
+  "optimize-instructions diagnostic output modes: timings, stats, JSON trace, and remarks."
+  :cases (("timings"
+           (list (make-vm-const :dst :r0 :value 1))
+           (list :print-pass-timings t :timing-stream nil)
+           '("OPT-PASS-FOLD"))
+          ("stats"
+           (list (make-vm-const :dst :r0 :value 1))
+           (list :print-pass-stats t :stats-stream nil)
+           '("OPT-PASS-FOLD" "BEFORE=" "AFTER="))
+          ("json-trace"
+           (list (make-vm-const :dst :r0 :value 1))
+           (list :trace-json-stream nil)
+           '("\"traceEvents\"" "OPT-PASS-FOLD" "\"dur\""))
+          ("remarks-changed"
+           (list (make-vm-const :dst :r0 :value 1)
+                 (make-vm-const :dst :r1 :value 2)
+                 (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1))
+           (list :print-opt-remarks t :opt-remarks-mode :changed :opt-remarks-stream nil)
+           '("OPT-PASS-FOLD" "CHANGED"))
+          ("remarks-missed"
+           (list (make-vm-const :dst :r0 :value 1))
+           (list :print-opt-remarks t :opt-remarks-mode :missed :opt-remarks-stream nil)
+           '("OPT-PASS-FOLD" "MISSED")))
+  (instrs extra-opts expected-strings)
+  (let* ((stream (make-string-output-stream))
+         (patched-opts (loop for (k v) on extra-opts by #'cddr
+                             nconc (if (null v) (list k stream) (list k v)))))
+    (apply #'cl-cc::optimize-instructions instrs
+           :pass-pipeline '(:fold)
+           patched-opts)
     (let ((text (string-upcase (get-output-stream-string stream))))
-      (assert-true (search "OPT-PASS-FOLD" text))
-      (assert-true (search "BEFORE=" text))
-      (assert-true (search "AFTER=" text)))))
-
-(deftest optimizer-trace-json-output
-  "optimize-instructions can write Chrome-trace-compatible JSON timing output."
-  (let* ((instrs (list (make-vm-const :dst :r0 :value 1)))
-         (stream (make-string-output-stream)))
-    (cl-cc::optimize-instructions instrs
-                                  :pass-pipeline '(:fold)
-                                  :trace-json-stream stream)
-    (let ((text (get-output-stream-string stream)))
-      (assert-true (search "\"traceEvents\"" text))
-      (assert-true (search "OPT-PASS-FOLD" text))
-      (assert-true (search "\"dur\"" text)))))
-
-(deftest optimizer-remarks-output-changed
-  "optimize-instructions can print a changed remark when a pass rewrites the program."
-  (let* ((instrs (list (make-vm-const :dst :r0 :value 1)
-                       (make-vm-const :dst :r1 :value 2)
-                       (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)))
-         (stream (make-string-output-stream)))
-    (cl-cc::optimize-instructions instrs
-                                  :pass-pipeline '(:fold)
-                                  :print-opt-remarks t
-                                  :opt-remarks-mode :changed
-                                  :opt-remarks-stream stream)
-    (let ((text (string-upcase (get-output-stream-string stream))))
-      (assert-true (search "OPT-PASS-FOLD" text))
-      (assert-true (search "CHANGED" text)))))
-
-(deftest optimizer-remarks-output-missed
-  "optimize-instructions can print a missed remark when a pass makes no change."
-  (let* ((instrs (list (make-vm-const :dst :r0 :value 1)))
-         (stream (make-string-output-stream)))
-    (cl-cc::optimize-instructions instrs
-                                  :pass-pipeline '(:fold)
-                                  :print-opt-remarks t
-                                  :opt-remarks-mode :missed
-                                  :opt-remarks-stream stream)
-    (let ((text (string-upcase (get-output-stream-string stream))))
-      (assert-true (search "OPT-PASS-FOLD" text))
-      (assert-true (search "MISSED" text)))))
+      (dolist (s expected-strings)
+        (assert-true (search (string-upcase s) text))))))
 
 (deftest licm-does-not-hoist-loop-defined-value
   "opt-pass-licm keeps a pure instruction inside the loop when it reads a loop-defined register."
@@ -1245,12 +1133,6 @@
     (assert-true (member a1 out))
     (assert-true (> (position a1 out :test #'eq)
                     (position loop out :test #'eq)))))
-
-(deftest pre-is-in-convergence-passes
-  "opt-pass-pre is part of the convergence pass pipeline."
-  (assert-true (member #'cl-cc::opt-pass-pre
-                        cl-cc::*opt-convergence-passes*
-                        :test #'eq)))
 
 (deftest pre-hoists-partially-redundant-expression
   "opt-pass-pre removes a partially redundant join-point expression."
@@ -1296,12 +1178,6 @@
     (assert-false (some (lambda (i) (typep i 'cl-cc::vm-logior)) out))
     (assert-false (some (lambda (i) (typep i 'cl-cc::vm-ash)) out))))
 
-(deftest bswap-recognition-is-in-convergence-passes
-  "opt-pass-bswap-recognition is part of the convergence pass pipeline."
-  (assert-true (member #'cl-cc::opt-pass-bswap-recognition
-                       cl-cc::*opt-convergence-passes*
-                       :test #'eq)))
-
 (deftest rotate-recognition-collapses-shift-or-tree
   "opt-pass-rotate-recognition collapses a two-shift + OR idiom to vm-rotate."
   (let* ((c0  (make-vm-const :dst :r1 :value 8))
@@ -1312,12 +1188,6 @@
          (out (cl-cc::opt-pass-rotate-recognition (list c0 a0 c1 a1 o0))))
     (assert-= 1 (count-if (lambda (i) (typep i 'cl-cc::vm-rotate)) out))
     (assert-false (some (lambda (i) (typep i 'cl-cc::vm-logior)) out))))
-
-(deftest rotate-recognition-is-in-convergence-passes
-  "opt-pass-rotate-recognition is part of the convergence pass pipeline."
-  (assert-true (member #'cl-cc::opt-pass-rotate-recognition
-                       cl-cc::*opt-convergence-passes*
-                       :test #'eq)))
 
 (deftest dead-store-elim-overwritten-global
   "opt-pass-dead-store-elim removes a dead overwritten vm-set-global."
@@ -1349,7 +1219,7 @@
 
 (deftest dead-store-elim-slot-overwrite-through-moved-alias
   "A later slot write through a moved alias kills the earlier pending write."
-  (let* ((obj  (make-vm-cons :dst :r0 :car :r8 :cdr :r9))
+  (let* ((obj  (make-vm-cons :dst :r0 :car-src :r8 :cdr-src :r9))
          (obj2 (make-vm-move :dst :r3 :src :r0))
          (c1   (make-vm-const :dst :r1 :value 10))
          (w1   (cl-cc::make-vm-slot-write :obj-reg :r0 :slot-name 'x :value-reg :r1))
@@ -1380,171 +1250,99 @@
                                          (eql (cl-cc::vm-const-value i) 10)))
                         out))))
 
-(deftest store-to-load-forward-global
-  "opt-pass-store-to-load-forward replaces a matching vm-get-global with vm-move."
-  (let* ((c1  (make-vm-const :dst :r0 :value 1))
-         (s1  (make-vm-set-global :name "g" :src :r0))
-         (g1  (make-vm-get-global :dst :r1 :name "g"))
-         (ret (make-vm-ret :reg :r1))
-         (out (cl-cc::opt-pass-store-to-load-forward (list c1 s1 g1 ret))))
-    (assert-true  (member s1 out))
-    (assert-false (member g1 out))
-    (assert-true  (member c1 out))
-    (assert-true  (member ret out))
-    (assert-true  (some (lambda (i)
-                          (and (typep i 'cl-cc::vm-move)
-                               (eq (cl-cc::vm-move-dst i) :r1)
-                               (eq (cl-cc::vm-move-src i) :r0)))
-                        out))))
-
-(deftest store-to-load-forward-global-same-dst
-  "The forwarded global load still works when the load destination reuses the source register."
-  (let* ((c1  (make-vm-const :dst :r0 :value 1))
-         (s1  (make-vm-set-global :name "g" :src :r0))
-         (g1  (make-vm-get-global :dst :r0 :name "g"))
-         (ret (make-vm-ret :reg :r0))
-         (out (cl-cc::opt-pass-store-to-load-forward (list c1 s1 g1 ret))))
-    (assert-false (member g1 out))
-    (assert-true  (some (lambda (i)
-                          (and (typep i 'cl-cc::vm-move)
-                               (eq (cl-cc::vm-move-dst i) :r0)
-                               (eq (cl-cc::vm-move-src i) :r0)))
-                        out))))
-
-(deftest store-to-load-forward-slot
-  "opt-pass-store-to-load-forward replaces a matching vm-slot-read with vm-move."
-  (let* ((obj (make-vm-const :dst :r0 :value 42))
-         (val (make-vm-const :dst :r1 :value 99))
-         (w   (cl-cc::make-vm-slot-write :obj-reg :r0 :slot-name 'x :value-reg :r1))
-         (r   (cl-cc::make-vm-slot-read :dst :r2 :obj-reg :r0 :slot-name 'x))
-         (ret (make-vm-ret :reg :r2))
-         (out (cl-cc::opt-pass-store-to-load-forward (list obj val w r ret))))
-    (assert-true  (member w out))
-    (assert-false (member r out))
-    (assert-true  (member obj out))
-    (assert-true  (member val out))
-    (assert-true  (member ret out))
-    (assert-true  (some (lambda (i)
-                          (and (typep i 'cl-cc::vm-move)
-                               (eq (cl-cc::vm-move-dst i) :r2)
-                               (eq (cl-cc::vm-move-src i) :r1)))
-                        out))))
-
-(deftest store-to-load-forward-slot-same-dst
-  "The forwarded slot read still works when the load destination reuses the value register."
-  (let* ((obj (make-vm-const :dst :r0 :value 42))
-         (val (make-vm-const :dst :r1 :value 99))
-         (w   (cl-cc::make-vm-slot-write :obj-reg :r0 :slot-name 'x :value-reg :r1))
-         (r   (cl-cc::make-vm-slot-read :dst :r1 :obj-reg :r0 :slot-name 'x))
-         (ret (make-vm-ret :reg :r1))
-         (out (cl-cc::opt-pass-store-to-load-forward (list obj val w r ret))))
-    (assert-false (member r out))
-    (assert-true  (some (lambda (i)
-                          (and (typep i 'cl-cc::vm-move)
-                               (eq (cl-cc::vm-move-dst i) :r1)
-                               (eq (cl-cc::vm-move-src i) :r1)))
-                        out))))
-
-(deftest store-to-load-forward-slot-through-moved-alias
-  "Alias-aware slot forwarding handles object registers copied by vm-move."
-  (let* ((obj  (make-vm-cons :dst :r0 :car-src :r8 :cdr-src :r9))
-         (obj2 (make-vm-move :dst :r3 :src :r0))
-         (val  (make-vm-const :dst :r1 :value 99))
-         (w    (cl-cc::make-vm-slot-write :obj-reg :r0 :slot-name 'x :value-reg :r1))
-         (r    (cl-cc::make-vm-slot-read :dst :r2 :obj-reg :r3 :slot-name 'x))
-         (ret  (make-vm-ret :reg :r2))
-         (out  (cl-cc::opt-pass-store-to-load-forward (list obj obj2 val w r ret))))
-    (assert-false (member r out))
-    (assert-true (some (lambda (i)
-                         (and (typep i 'cl-cc::vm-move)
-                              (eq (cl-cc::vm-move-dst i) :r2)
-                              (eq (cl-cc::vm-move-src i) :r1)))
-                       out))))
+(deftest-each store-to-load-forward-cases
+  "opt-pass-store-to-load-forward replaces load instructions with vm-move (global and slot variants)."
+  :cases (("global-direct"
+           (lambda ()
+             (let* ((c1  (make-vm-const :dst :r0 :value 1))
+                    (s1  (make-vm-set-global :name "g" :src :r0))
+                    (g1  (make-vm-get-global :dst :r1 :name "g"))
+                    (ret (make-vm-ret :reg :r1)))
+               (list (list c1 s1 g1 ret) g1 :r1 :r0)))
+           )
+          ("global-same-dst"
+           (lambda ()
+             (let* ((c1  (make-vm-const :dst :r0 :value 1))
+                    (s1  (make-vm-set-global :name "g" :src :r0))
+                    (g1  (make-vm-get-global :dst :r0 :name "g"))
+                    (ret (make-vm-ret :reg :r0)))
+               (list (list c1 s1 g1 ret) g1 :r0 :r0))))
+          ("slot-direct"
+           (lambda ()
+             (let* ((obj (make-vm-const :dst :r0 :value 42))
+                    (val (make-vm-const :dst :r1 :value 99))
+                    (w   (cl-cc::make-vm-slot-write :obj-reg :r0 :slot-name 'x :value-reg :r1))
+                    (r   (cl-cc::make-vm-slot-read :dst :r2 :obj-reg :r0 :slot-name 'x))
+                    (ret (make-vm-ret :reg :r2)))
+               (list (list obj val w r ret) r :r2 :r1))))
+          ("slot-same-dst"
+           (lambda ()
+             (let* ((obj (make-vm-const :dst :r0 :value 42))
+                    (val (make-vm-const :dst :r1 :value 99))
+                    (w   (cl-cc::make-vm-slot-write :obj-reg :r0 :slot-name 'x :value-reg :r1))
+                    (r   (cl-cc::make-vm-slot-read :dst :r1 :obj-reg :r0 :slot-name 'x))
+                    (ret (make-vm-ret :reg :r1)))
+               (list (list obj val w r ret) r :r1 :r1))))
+          ("slot-through-moved-alias"
+           (lambda ()
+             (let* ((obj  (make-vm-cons :dst :r0 :car-src :r8 :cdr-src :r9))
+                    (obj2 (make-vm-move :dst :r3 :src :r0))
+                    (val  (make-vm-const :dst :r1 :value 99))
+                    (w    (cl-cc::make-vm-slot-write :obj-reg :r0 :slot-name 'x :value-reg :r1))
+                    (r    (cl-cc::make-vm-slot-read :dst :r2 :obj-reg :r3 :slot-name 'x))
+                    (ret  (make-vm-ret :reg :r2)))
+               (list (list obj obj2 val w r ret) r :r2 :r1)))))
+  (make-case)
+  (destructuring-bind (instrs read-instr expected-dst expected-src) (funcall make-case)
+    (let ((out (cl-cc::opt-pass-store-to-load-forward instrs)))
+      (assert-false (member read-instr out :test #'eq))
+      (assert-true (some (lambda (i)
+                           (and (typep i 'cl-cc::vm-move)
+                                (eq (cl-cc::vm-move-dst i) expected-dst)
+                                (eq (cl-cc::vm-move-src i) expected-src)))
+                         out)))))
 
 ;;; ── opt-pass-strength-reduce: Strength Reduction ─────────────────────────
 
 (deftest-each strength-reduce-cases
-  "opt-pass-strength-reduce: power-of-2 multiplies/divides become vm-ash; non-power-of-2 are left as-is."
-  :cases (("rhs-const-pow2"     8 (make-vm-mul :dst :r2 :lhs :r0 :rhs :r1) t)
-          ("lhs-const-pow2"     4 (make-vm-mul :dst :r2 :lhs :r1 :rhs :r0) t)
-          ("non-power-of-2"     7 (make-vm-mul :dst :r2 :lhs :r0 :rhs :r1) nil))
-  (const-val mul should-reduce-p)
+  "opt-pass-strength-reduce: power-of-2 mul/div become vm-ash; mod-by-power-of-2 becomes vm-logand."
+  :cases (("mul-rhs-pow2"      8 (make-vm-mul        :dst :r2 :lhs :r0 :rhs :r1) t   'cl-cc::vm-ash)
+          ("mul-lhs-pow2"      4 (make-vm-mul        :dst :r2 :lhs :r1 :rhs :r0) t   'cl-cc::vm-ash)
+          ("mul-non-power-of-2" 7 (make-vm-mul       :dst :r2 :lhs :r0 :rhs :r1) nil 'cl-cc::vm-ash)
+          ("div-rhs-pow2"      8 (cl-cc::make-vm-div :dst :r2 :lhs :r0 :rhs :r1) t   'cl-cc::vm-ash)
+          ("div-non-power-of-2" 7 (cl-cc::make-vm-div :dst :r2 :lhs :r0 :rhs :r1) nil 'cl-cc::vm-ash)
+          ("mod-pow2"          8 (cl-cc::make-vm-mod :dst :r2 :lhs :r0 :rhs :r1) t   'cl-cc::vm-logand)
+          ("mod-non-power-of-2" 7 (cl-cc::make-vm-mod :dst :r2 :lhs :r0 :rhs :r1) nil 'cl-cc::vm-logand))
+  (const-val op should-reduce-p target-type)
   (let* ((c   (make-vm-const :dst :r1 :value const-val))
          (ret (make-vm-ret   :reg :r2))
-         (out (cl-cc::opt-pass-strength-reduce (list c mul ret))))
+         (out (cl-cc::opt-pass-strength-reduce (list c op ret))))
     (if should-reduce-p
         (progn
-          (assert-false (member mul out))
-          (assert-true  (some (lambda (i) (typep i 'cl-cc::vm-ash)) out)))
+          (assert-false (member op out))
+          (assert-true  (some (lambda (i) (typep i target-type)) out)))
         (progn
-          (assert-true  (member mul out))
-          (assert-false (some (lambda (i) (typep i 'cl-cc::vm-ash)) out))))))
-
-(deftest-each strength-reduce-div-cases
-  "opt-pass-strength-reduce: divide-by-power-of-2 becomes vm-ash; other divisors stay as-is."
-   :cases (("rhs-const-pow2"     8 (cl-cc::make-vm-div :dst :r2 :lhs :r0 :rhs :r1) t)
-           ("non-power-of-2"     7 (cl-cc::make-vm-div :dst :r2 :lhs :r0 :rhs :r1) nil))
-  (const-val div should-reduce-p)
-  (let* ((c   (make-vm-const :dst :r1 :value const-val))
-         (ret (make-vm-ret   :reg :r2))
-         (out (cl-cc::opt-pass-strength-reduce (list c div ret))))
-    (if should-reduce-p
-        (progn
-          (assert-false (member div out))
-          (assert-true  (some (lambda (i) (typep i 'cl-cc::vm-ash)) out)))
-        (progn
-          (assert-true  (member div out))
-          (assert-false (some (lambda (i) (typep i 'cl-cc::vm-ash)) out))))))
-
-(deftest-each strength-reduce-mod-cases
-  "opt-pass-strength-reduce: mod-by-power-of-2 becomes vm-logand; other divisors stay as-is."
-  :cases (("rhs-const-pow2"     8 (cl-cc::make-vm-mod :dst :r2 :lhs :r0 :rhs :r1) t)
-          ("non-power-of-2"     7 (cl-cc::make-vm-mod :dst :r2 :lhs :r0 :rhs :r1) nil))
-  (const-val mod should-reduce-p)
-  (let* ((c   (make-vm-const :dst :r1 :value const-val))
-         (ret (make-vm-ret   :reg :r2))
-         (out (cl-cc::opt-pass-strength-reduce (list c mod ret))))
-    (if should-reduce-p
-        (progn
-          (assert-false (member mod out))
-          (assert-true  (some (lambda (i) (typep i 'cl-cc::vm-logand)) out)))
-        (progn
-          (assert-true  (member mod out))
-          (assert-false (some (lambda (i) (typep i 'cl-cc::vm-logand)) out))))))
+          (assert-true  (member op out))
+          (assert-false (some (lambda (i) (typep i target-type)) out))))))
 
 ;;; ── opt-pass-reassociate: Arithmetic Reassociation ──────────────────────
 
-(deftest reassociate-add-moves-constant-inward
-  "opt-pass-reassociate moves a constant toward the tail of a nested add chain."
-  (let* ((c    (make-vm-const :dst :r1 :value 1))
+(deftest-each reassociate-moves-constant-inward
+  "opt-pass-reassociate moves constants toward the tail of nested op chains (add and logand)."
+  :cases (("add"    1   (make-vm-add    :dst :r4 :lhs :r2 :rhs :r1) (make-vm-add    :dst :r5 :lhs :r4 :rhs :r3) 'cl-cc::vm-add)
+          ("logand" 255 (make-vm-logand :dst :r4 :lhs :r2 :rhs :r1) (make-vm-logand :dst :r5 :lhs :r4 :rhs :r3) 'cl-cc::vm-logand))
+  (const-val op1 op2 op-type)
+  (let* ((c    (make-vm-const :dst :r1 :value const-val))
          (a    (make-vm-move  :dst :r2 :src :r8))
          (b    (make-vm-move  :dst :r3 :src :r9))
-         (add1 (make-vm-add   :dst :r4 :lhs :r2 :rhs :r1))
-         (add2 (make-vm-add   :dst :r5 :lhs :r4 :rhs :r3))
          (ret  (make-vm-ret   :reg :r5))
-         (out  (cl-cc::opt-pass-reassociate (list c a b add1 add2 ret)))
-         (adds (remove-if-not (lambda (i) (typep i 'cl-cc::vm-add)) out)))
-    (assert-equal 2 (length adds))
-    (assert-eq :r3 (cl-cc::vm-lhs (first adds)))
-    (assert-eq :r1 (cl-cc::vm-rhs (first adds)))
-    (assert-eq :r2 (cl-cc::vm-lhs (second adds)))
-    (assert-eq :r4 (cl-cc::vm-rhs (second adds)))))
-
-(deftest reassociate-logand-moves-constant-inward
-  "opt-pass-reassociate applies the same normalization to bitwise ops."
-  (let* ((c     (make-vm-const :dst :r1 :value 255))
-         (a     (make-vm-move  :dst :r2 :src :r8))
-         (b     (make-vm-move  :dst :r3 :src :r9))
-         (and1  (make-vm-logand :dst :r4 :lhs :r2 :rhs :r1))
-         (and2  (make-vm-logand :dst :r5 :lhs :r4 :rhs :r3))
-         (ret   (make-vm-ret    :reg :r5))
-         (out   (cl-cc::opt-pass-reassociate (list c a b and1 and2 ret)))
-         (ands  (remove-if-not (lambda (i) (typep i 'cl-cc::vm-logand)) out)))
-    (assert-equal 2 (length ands))
-    (assert-eq :r3 (cl-cc::vm-lhs (first ands)))
-    (assert-eq :r1 (cl-cc::vm-rhs (first ands)))
-    (assert-eq :r2 (cl-cc::vm-lhs (second ands)))
-    (assert-eq :r4 (cl-cc::vm-rhs (second ands)))))
+         (out  (cl-cc::opt-pass-reassociate (list c a b op1 op2 ret)))
+         (ops  (remove-if-not (lambda (i) (typep i op-type)) out)))
+    (assert-equal 2 (length ops))
+    (assert-eq :r3 (cl-cc::vm-lhs (first ops)))
+    (assert-eq :r1 (cl-cc::vm-rhs (first ops)))
+    (assert-eq :r2 (cl-cc::vm-lhs (second ops)))
+    (assert-eq :r4 (cl-cc::vm-rhs (second ops)))))
 
 (deftest strength-reduce-mul-by-const-decomposes
   "opt-pass-strength-reduce: small non-power-of-2 constant multipliers are decomposed into shifts/adds."
@@ -1556,40 +1354,66 @@
     (assert-true (some (lambda (i) (typep i 'cl-cc::vm-ash)) out))
     (assert-true (some (lambda (i) (typep i 'cl-cc::vm-add)) out))))
 
+;;; ── %opt-mul-by-const-seq: Extracted Shift/Add Decomposition ────────────
+
+(defun make-test-new-reg ()
+  "Return a thunk that allocates fresh keyword registers :R1000, :R1001, ..."
+  (let ((n 1000))
+    (lambda () (prog1 (intern (format nil "R~A" n) :keyword) (incf n)))))
+
+(deftest-each mul-by-const-seq-cases
+  "%opt-mul-by-const-seq: correctly decomposes constant multipliers into shift/add sequences."
+  :cases (("zero"     0  'cl-cc::vm-const nil)
+          ("one"      1  'cl-cc::vm-move  nil)
+          ("neg-one" -1  'cl-cc::vm-move  'cl-cc::vm-neg)
+          ("two"      2  'cl-cc::vm-ash   nil)
+          ("three"    3  'cl-cc::vm-add   nil)
+          ("four"     4  'cl-cc::vm-ash   nil)
+          ("six"      6  'cl-cc::vm-add   nil))
+  (n expected-type-1 expected-type-2)
+  (let* ((seq (cl-cc::%opt-mul-by-const-seq :r0 :r1 n (make-test-new-reg))))
+    (assert-true (some (lambda (i) (typep i expected-type-1)) seq))
+    (when expected-type-2
+      (assert-true (some (lambda (i) (typep i expected-type-2)) seq)))))
+
+(deftest mul-by-const-seq-correctness
+  "%opt-mul-by-const-seq: emitted instructions have correct destination register."
+  ;; n=5 = 2^0 + 2^2: should result in a vm-add with dst :r0
+  (let* ((seq (cl-cc::%opt-mul-by-const-seq :r0 :r1 5 (make-test-new-reg)))
+         (add (find-if (lambda (i) (typep i 'cl-cc::vm-add)) seq)))
+    (assert-true add)
+    (assert-equal :r0 (cl-cc::vm-add-dst add))))
+
 ;;; ── opt-inline-eligible-p: Extracted Eligibility Predicate ──────────────
 
-(deftest opt-inline-eligible-p-cases
+(deftest-each opt-inline-eligible-p-cases
   "opt-inline-eligible-p: eligible when cheap+no-captures; rejects captured vars or over-budget."
-  ;; short, zero captures → eligible
-  (let* ((ci   (make-vm-closure :dst :r0 :label "f"
-                                 :params '(:r1) :captured nil
-                                 :optional-params nil :rest-param nil :key-params nil))
-         (body (list (make-vm-add :dst :r2 :lhs :r1 :rhs :r1) (make-vm-ret :reg :r2)))
-         (def  (list :closure ci :params '(:r1) :body body)))
-    (assert-true (cl-cc::opt-inline-eligible-p def 15)))
-  ;; captured variables → not eligible
-  (let* ((ci   (make-vm-closure :dst :r0 :label "f"
-                                 :params '(:r1) :captured (list (cons :x :r5))
-                                 :optional-params nil :rest-param nil :key-params nil))
-         (body (list (make-vm-ret :reg :r1)))
-         (def  (list :closure ci :params '(:r1) :body body)))
-    (assert-false (cl-cc::opt-inline-eligible-p def 15)))
-  ;; Many cheap constants → eligible even though the body is longer than 15 instructions.
-  (let* ((ci   (make-vm-closure :dst :r0 :label "f"
-                                 :params '(:r1) :captured nil
-                                 :optional-params nil :rest-param nil :key-params nil))
-          (body (append (loop repeat 17 collect (make-vm-const :dst :r2 :value 0))
-                        (list (make-vm-ret :reg :r1))))
-          (def  (list :closure ci :params '(:r1) :body body)))
-    (assert-true (cl-cc::opt-inline-eligible-p def 15)))
-  ;; Many actual arithmetic instructions → not eligible once the cost budget is exceeded.
-  (let* ((ci   (make-vm-closure :dst :r0 :label "f"
-                                 :params '(:r1) :captured nil
-                                 :optional-params nil :rest-param nil :key-params nil))
-          (body (append (loop repeat 16 collect (make-vm-add :dst :r2 :lhs :r1 :rhs :r1))
-                       (list (make-vm-ret :reg :r2))))
-          (def  (list :closure ci :params '(:r1) :body body)))
-    (assert-false (cl-cc::opt-inline-eligible-p def 15))))
+  :cases (("short-no-captures"
+           nil
+           (list (make-vm-add :dst :r2 :lhs :r1 :rhs :r1) (make-vm-ret :reg :r2))
+           t)
+          ("captured-vars-ineligible"
+           (list (cons :x :r5))
+           (list (make-vm-ret :reg :r1))
+           nil)
+          ("cheap-consts-eligible-over-threshold"
+           nil
+           (append (loop repeat 17 collect (make-vm-const :dst :r2 :value 0))
+                   (list (make-vm-ret :reg :r1)))
+           t)
+          ("arith-instrs-over-budget-ineligible"
+           nil
+           (append (loop repeat 16 collect (make-vm-add :dst :r2 :lhs :r1 :rhs :r1))
+                   (list (make-vm-ret :reg :r2)))
+           nil))
+  (captured body expected)
+  (let* ((ci  (make-vm-closure :dst :r0 :label "f"
+                                :params '(:r1) :captured captured
+                                :optional-params nil :rest-param nil :key-params nil))
+         (def (list :closure ci :params '(:r1) :body body)))
+    (if expected
+        (assert-true  (cl-cc::opt-inline-eligible-p def 15))
+        (assert-false (cl-cc::opt-inline-eligible-p def 15)))))
 
 (deftest opt-adaptive-inline-threshold-cases
   "Cheap bodies get a higher threshold; call-heavy bodies get a tighter one."
@@ -1622,10 +1446,14 @@
                 (append (list ci) body (list fref call ret)))))
     (assert-true out)))
 
-(deftest opt-adaptive-max-iterations-cases
+(deftest-each opt-adaptive-max-iterations-cases
   "Adaptive max-iterations shrinks for small programs and grows for larger ones."
-  (assert-true (< (cl-cc::opt-adaptive-max-iterations (loop repeat 10 collect (make-vm-const :dst :r0 :value 0))) 20))
-  (assert-true (> (cl-cc::opt-adaptive-max-iterations (loop repeat 900 collect (make-vm-const :dst :r0 :value 0))) 20)))
+  :cases (("small" 10  #'<  20)
+          ("large" 900 #'>  20))
+  (n-insts pred threshold)
+  (let ((iters (cl-cc::opt-adaptive-max-iterations
+                (loop repeat n-insts collect (make-vm-const :dst :r0 :value 0)))))
+    (assert-true (funcall pred iters threshold))))
 
 (deftest optimize-instructions-accepts-adaptive-max-iterations
   "optimize-instructions accepts :adaptive as the iteration budget selector."
@@ -1660,38 +1488,26 @@
 
 ;;; ─── opt-binary-lhs-rhs-p / opt-unary-src-p ─────────────────────────────
 
-(deftest-each opt-binary-lhs-rhs-p
-  "opt-binary-lhs-rhs-p is true for binary instructions, false for unary ones."
-  :cases (("add" (make-vm-add :dst :r0 :lhs :r1 :rhs :r2) t)
-          ("lt"  (make-vm-lt  :dst :r0 :lhs :r1 :rhs :r2) t)
-          ("neg" (make-vm-neg :dst :r0 :src :r1)           nil))
-  (inst expected)
+(deftest-each opt-instruction-shape-predicates
+  "opt-binary-lhs-rhs-p and opt-unary-src-p classify instruction shapes correctly."
+  :cases (("binary-add"    #'cl-cc::opt-binary-lhs-rhs-p (make-vm-add    :dst :r0 :lhs :r1 :rhs :r2) t)
+          ("binary-lt"     #'cl-cc::opt-binary-lhs-rhs-p (make-vm-lt     :dst :r0 :lhs :r1 :rhs :r2) t)
+          ("binary-neg"    #'cl-cc::opt-binary-lhs-rhs-p (make-vm-neg    :dst :r0 :src :r1)           nil)
+          ("unary-neg"     #'cl-cc::opt-unary-src-p      (make-vm-neg    :dst :r0 :src :r1)           t)
+          ("unary-null-p"  #'cl-cc::opt-unary-src-p      (make-vm-null-p :dst :r0 :src :r1)           t)
+          ("unary-add"     #'cl-cc::opt-unary-src-p      (make-vm-add    :dst :r0 :lhs :r1 :rhs :r2)  nil))
+  (pred-fn inst expected)
   (if expected
-      (assert-true  (cl-cc::opt-binary-lhs-rhs-p inst))
-      (assert-false (cl-cc::opt-binary-lhs-rhs-p inst))))
-
-(deftest-each opt-unary-src-p
-  "opt-unary-src-p is true for unary instructions, false for binary ones."
-  :cases (("neg"    (make-vm-neg    :dst :r0 :src :r1)           t)
-          ("null-p" (make-vm-null-p :dst :r0 :src :r1)           t)
-          ("add"    (make-vm-add    :dst :r0 :lhs :r1 :rhs :r2)  nil))
-  (inst expected)
-  (if expected
-      (assert-true  (cl-cc::opt-unary-src-p inst))
-      (assert-false (cl-cc::opt-unary-src-p inst))))
+      (assert-true  (funcall pred-fn inst))
+      (assert-false (funcall pred-fn inst))))
 
 ;;; ─── opt-foldable-unary-arith-p / opt-foldable-type-pred-p ──────────────
 
-(deftest-each opt-foldable-unary-arith-p
-  "opt-foldable-unary-arith-p is true for arithmetic unary ops, false for type predicates."
-  :cases (("neg"    (make-vm-neg    :dst :r0 :src :r1) t)
-          ("null-p" (make-vm-null-p :dst :r0 :src :r1) nil))
-  (inst expected)
-  (assert-equal expected (cl-cc::opt-foldable-unary-arith-p inst)))
-
-(deftest-each opt-foldable-type-pred-p
-  "opt-foldable-type-pred-p is true for type predicates, false for arithmetic ops."
-  :cases (("null-p" (make-vm-null-p :dst :r0 :src :r1) t)
-          ("neg"    (make-vm-neg    :dst :r0 :src :r1) nil))
-  (inst expected)
-  (assert-equal expected (cl-cc::opt-foldable-type-pred-p inst)))
+(deftest-each opt-foldable-predicates
+  "opt-foldable-unary-arith-p and opt-foldable-type-pred-p classify fold eligibility."
+  :cases (("arith-neg"    #'cl-cc::opt-foldable-unary-arith-p (make-vm-neg    :dst :r0 :src :r1) t)
+          ("arith-null-p" #'cl-cc::opt-foldable-unary-arith-p (make-vm-null-p :dst :r0 :src :r1) nil)
+          ("pred-null-p"  #'cl-cc::opt-foldable-type-pred-p   (make-vm-null-p :dst :r0 :src :r1) t)
+          ("pred-neg"     #'cl-cc::opt-foldable-type-pred-p   (make-vm-neg    :dst :r0 :src :r1) nil))
+  (pred-fn inst expected)
+  (assert-equal expected (funcall pred-fn inst)))

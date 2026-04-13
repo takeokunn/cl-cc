@@ -13,15 +13,15 @@
   (let ((s (make-substitution)))
     (assert-= 0 (substitution-generation s))))
 
-(deftest subst-lookup-empty-cases
+(deftest-each subst-lookup-empty-cases
   "Looking up in empty substitution or nil substitution both return nil/not-found."
+  :cases (("empty-subst" (make-substitution))
+          ("nil-subst"   nil))
+  (subst)
   (let ((v (cl-cc/type:make-type-variable 'a)))
-    (multiple-value-bind (v1 f1) (subst-lookup v (make-substitution))
-      (assert-null v1)
-      (assert-false f1))
-    (multiple-value-bind (v2 f2) (subst-lookup v nil)
-      (assert-null v2)
-      (assert-false f2))))
+    (multiple-value-bind (val found-p) (subst-lookup v subst)
+      (assert-null val)
+      (assert-false found-p))))
 
 (deftest subst-extend-functional-creates-new
   "subst-extend returns a new substitution, leaving original unchanged."
@@ -197,20 +197,17 @@
 
 ;;; ─── Generalize / Instantiate ───────────────────────────────────────────
 
-(deftest generalize-free-var-quantified
-  "Free vars in type but not in env are quantified."
+(deftest-each generalize-quantification-cases
+  "Free vars outside env are quantified (count=1); vars in env are not (count=0)."
+  :cases (("outside-env" 1 nil)
+          ("in-env"      0 t))
+  (expected-count var-in-env-p)
   (let* ((a (cl-cc/type:make-type-variable 'a))
-         (fn-ty (cl-cc/type:make-type-arrow-raw :params (list a) :return a))
-         (scheme (generalize nil fn-ty)))
-    (assert-= 1 (length (cl-cc/type:type-scheme-quantified-vars scheme)))))
-
-(deftest generalize-env-var-not-quantified
-  "Vars free in env are not quantified."
-  (let* ((a (cl-cc/type:make-type-variable 'a))
-         (env (list (cons 'x a)))
-         (fn-ty (cl-cc/type:make-type-arrow-raw :params (list a) :return cl-cc/type:type-int))
+         (env (if var-in-env-p (list (cons 'x a)) nil))
+         (ret (if var-in-env-p cl-cc/type:type-int a))
+         (fn-ty (cl-cc/type:make-type-arrow-raw :params (list a) :return ret))
          (scheme (generalize env fn-ty)))
-    (assert-= 0 (length (cl-cc/type:type-scheme-quantified-vars scheme)))))
+    (assert-= expected-count (length (cl-cc/type:type-scheme-quantified-vars scheme)))))
 
 (deftest instantiate-produces-fresh
   "Instantiate replaces quantified vars with fresh ones."

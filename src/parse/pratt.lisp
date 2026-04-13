@@ -47,8 +47,6 @@
 (defun pratt-peek-type (ctx)
   (pratt-tok-type ctx (pratt-peek ctx)))
 
-(defun pratt-peek-value (ctx)
-  (pratt-tok-value ctx (pratt-peek ctx)))
 
 (defun pratt-advance (ctx)
   "Consume and return current token."

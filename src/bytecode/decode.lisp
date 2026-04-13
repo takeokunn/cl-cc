@@ -62,82 +62,88 @@
 ;;; Opcode Name Table
 ;;; ------------------------------------------------------------
 
+;;; Declarative alist of (opcode-constant . mnemonic).
+;;; #. evaluates each constant at read time; dolist builds the lookup table.
+(defparameter *opcode-name-data*
+  '(;; Misc
+    (#.+op-nop+          . "NOP")
+    ;; Load / Move
+    (#.+op-load-const+   . "LOAD_CONST")
+    (#.+op-move+         . "MOVE")
+    (#.+op-load-nil+     . "LOAD_NIL")
+    (#.+op-load-true+    . "LOAD_TRUE")
+    (#.+op-load-fixnum+  . "LOAD_FIXNUM")
+    ;; Arithmetic
+    (#.+op-add+          . "ADD")
+    (#.+op-sub+          . "SUB")
+    (#.+op-mul+          . "MUL")
+    (#.+op-div+          . "DIV")
+    (#.+op-mod+          . "MOD")
+    (#.+op-neg+          . "NEG")
+    (#.+op-inc+          . "INC")
+    (#.+op-dec+          . "DEC")
+    ;; Comparison
+    (#.+op-eq+           . "EQ")
+    (#.+op-eql+          . "EQL")
+    (#.+op-equal+        . "EQUAL")
+    (#.+op-num-lt+       . "NUM_LT")
+    (#.+op-num-gt+       . "NUM_GT")
+    (#.+op-num-le+       . "NUM_LE")
+    (#.+op-num-ge+       . "NUM_GE")
+    (#.+op-num-eq+       . "NUM_EQ")
+    ;; Control Flow
+    (#.+op-jump+         . "JUMP")
+    (#.+op-jump-if-nil+  . "JUMP_IF_NIL")
+    (#.+op-jump-if-true+ . "JUMP_IF_TRUE")
+    (#.+op-call+         . "CALL")
+    (#.+op-tail-call+    . "TAIL_CALL")
+    (#.+op-return+       . "RETURN")
+    (#.+op-return-nil+   . "RETURN_NIL")
+    ;; Closure & Upvalue
+    (#.+op-make-closure+  . "MAKE_CLOSURE")
+    (#.+op-get-upvalue+   . "GET_UPVALUE")
+    (#.+op-set-upvalue+   . "SET_UPVALUE")
+    (#.+op-close-upvalue+ . "CLOSE_UPVALUE")
+    ;; Object Access
+    (#.+op-get-slot+      . "GET_SLOT")
+    (#.+op-set-slot+      . "SET_SLOT")
+    (#.+op-get-global+    . "GET_GLOBAL")
+    (#.+op-set-global+    . "SET_GLOBAL")
+    (#.+op-make-instance+ . "MAKE_INSTANCE")
+    ;; Collections
+    (#.+op-cons+          . "CONS")
+    (#.+op-car+           . "CAR")
+    (#.+op-cdr+           . "CDR")
+    (#.+op-make-vector+   . "MAKE_VECTOR")
+    (#.+op-vector-ref+    . "VECTOR_REF")
+    (#.+op-vector-set+    . "VECTOR_SET")
+    (#.+op-make-hash+     . "MAKE_HASH")
+    (#.+op-hash-ref+      . "HASH_REF")
+    (#.+op-hash-set+      . "HASH_SET")
+    ;; Type Check
+    (#.+op-type-check+    . "TYPE_CHECK")
+    (#.+op-fixnump+       . "FIXNUMP")
+    (#.+op-consp+         . "CONSP")
+    (#.+op-symbolp+       . "SYMBOLP")
+    (#.+op-functionp+     . "FUNCTIONP")
+    (#.+op-stringp+       . "STRINGP")
+    ;; Multiple Values
+    (#.+op-values+        . "VALUES")
+    (#.+op-recv-values+   . "RECV_VALUES")
+    ;; Exception Handling
+    (#.+op-push-handler+  . "PUSH_HANDLER")
+    (#.+op-pop-handler+   . "POP_HANDLER")
+    (#.+op-signal+        . "SIGNAL")
+    (#.+op-push-unwind+   . "PUSH_UNWIND")
+    (#.+op-pop-unwind+    . "POP_UNWIND")
+    ;; Wide prefix
+    (#.+op-wide+          . "WIDE"))
+  "Alist of (opcode-byte . mnemonic-string) for all known opcodes.")
+
 (defvar *opcode-names*
   (let ((ht (make-hash-table :test #'eql)))
-    ;; Misc
-    (setf (gethash +op-nop+          ht) "NOP")
-    ;; Load / Move
-    (setf (gethash +op-load-const+   ht) "LOAD_CONST")
-    (setf (gethash +op-move+         ht) "MOVE")
-    (setf (gethash +op-load-nil+     ht) "LOAD_NIL")
-    (setf (gethash +op-load-true+    ht) "LOAD_TRUE")
-    (setf (gethash +op-load-fixnum+  ht) "LOAD_FIXNUM")
-    ;; Arithmetic
-    (setf (gethash +op-add+          ht) "ADD")
-    (setf (gethash +op-sub+          ht) "SUB")
-    (setf (gethash +op-mul+          ht) "MUL")
-    (setf (gethash +op-div+          ht) "DIV")
-    (setf (gethash +op-mod+          ht) "MOD")
-    (setf (gethash +op-neg+          ht) "NEG")
-    (setf (gethash +op-inc+          ht) "INC")
-    (setf (gethash +op-dec+          ht) "DEC")
-    ;; Comparison
-    (setf (gethash +op-eq+           ht) "EQ")
-    (setf (gethash +op-eql+          ht) "EQL")
-    (setf (gethash +op-equal+        ht) "EQUAL")
-    (setf (gethash +op-num-lt+       ht) "NUM_LT")
-    (setf (gethash +op-num-gt+       ht) "NUM_GT")
-    (setf (gethash +op-num-le+       ht) "NUM_LE")
-    (setf (gethash +op-num-ge+       ht) "NUM_GE")
-    (setf (gethash +op-num-eq+       ht) "NUM_EQ")
-    ;; Control Flow
-    (setf (gethash +op-jump+         ht) "JUMP")
-    (setf (gethash +op-jump-if-nil+  ht) "JUMP_IF_NIL")
-    (setf (gethash +op-jump-if-true+ ht) "JUMP_IF_TRUE")
-    (setf (gethash +op-call+         ht) "CALL")
-    (setf (gethash +op-tail-call+    ht) "TAIL_CALL")
-    (setf (gethash +op-return+       ht) "RETURN")
-    (setf (gethash +op-return-nil+   ht) "RETURN_NIL")
-    ;; Closure & Upvalue
-    (setf (gethash +op-make-closure+  ht) "MAKE_CLOSURE")
-    (setf (gethash +op-get-upvalue+   ht) "GET_UPVALUE")
-    (setf (gethash +op-set-upvalue+   ht) "SET_UPVALUE")
-    (setf (gethash +op-close-upvalue+ ht) "CLOSE_UPVALUE")
-    ;; Object Access
-    (setf (gethash +op-get-slot+      ht) "GET_SLOT")
-    (setf (gethash +op-set-slot+      ht) "SET_SLOT")
-    (setf (gethash +op-get-global+    ht) "GET_GLOBAL")
-    (setf (gethash +op-set-global+    ht) "SET_GLOBAL")
-    (setf (gethash +op-make-instance+ ht) "MAKE_INSTANCE")
-    ;; Collections
-    (setf (gethash +op-cons+          ht) "CONS")
-    (setf (gethash +op-car+           ht) "CAR")
-    (setf (gethash +op-cdr+           ht) "CDR")
-    (setf (gethash +op-make-vector+   ht) "MAKE_VECTOR")
-    (setf (gethash +op-vector-ref+    ht) "VECTOR_REF")
-    (setf (gethash +op-vector-set+    ht) "VECTOR_SET")
-    (setf (gethash +op-make-hash+     ht) "MAKE_HASH")
-    (setf (gethash +op-hash-ref+      ht) "HASH_REF")
-    (setf (gethash +op-hash-set+      ht) "HASH_SET")
-    ;; Type Check
-    (setf (gethash +op-type-check+    ht) "TYPE_CHECK")
-    (setf (gethash +op-fixnump+       ht) "FIXNUMP")
-    (setf (gethash +op-consp+         ht) "CONSP")
-    (setf (gethash +op-symbolp+       ht) "SYMBOLP")
-    (setf (gethash +op-functionp+     ht) "FUNCTIONP")
-    (setf (gethash +op-stringp+       ht) "STRINGP")
-    ;; Multiple Values
-    (setf (gethash +op-values+        ht) "VALUES")
-    (setf (gethash +op-recv-values+   ht) "RECV_VALUES")
-    ;; Exception Handling
-    (setf (gethash +op-push-handler+  ht) "PUSH_HANDLER")
-    (setf (gethash +op-pop-handler+   ht) "POP_HANDLER")
-    (setf (gethash +op-signal+        ht) "SIGNAL")
-    (setf (gethash +op-push-unwind+   ht) "PUSH_UNWIND")
-    (setf (gethash +op-pop-unwind+    ht) "POP_UNWIND")
-    ;; Wide prefix
-    (setf (gethash +op-wide+          ht) "WIDE")
-    ht)
+    (dolist (pair *opcode-name-data* ht)
+      (setf (gethash (car pair) ht) (cdr pair))))
   "Hash table mapping opcode byte value to its mnemonic string.")
 
 ;;; ------------------------------------------------------------

@@ -35,13 +35,12 @@
     (let ((first-temp (first (caadr result))))
       (assert-eq (car (last result)) first-temp))))
 
-(deftest shiftf-one-arg-signals-error
-  "SHIFTF with only one argument (no place + newval) signals an error"
-  (assert-signals error (our-macroexpand-1 '(shiftf x))))
-
-(deftest shiftf-no-args-signals-error
-  "SHIFTF with no arguments signals an error"
-  (assert-signals error (our-macroexpand-1 '(shiftf))))
+(deftest-each shiftf-insufficient-args-signals-error
+  "SHIFTF signals an error when called with fewer than two arguments."
+  :cases (("no-args"  '(shiftf))
+          ("one-arg"  '(shiftf x)))
+  (form)
+  (assert-signals error (our-macroexpand-1 form)))
 
 (deftest integration-shiftf-full-expansion
   "Full expansion of SHIFTF does not contain the SHIFTF symbol"

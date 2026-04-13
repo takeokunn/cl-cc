@@ -118,21 +118,53 @@ The parser receives (VAR REMAINING) and must return (values spec-plist remaining
   (let ((fn-name (intern (format nil "%PARSE-FOR-~A" keyword))))
     `(%define-loop-for-parser ,keyword ,fn-name (,var ,remaining) ,@body)))
 
+;;; ── End-condition data tables ────────────────────────────────────────────
+;;;
+;;; Each entry is (keyword-string . (plist-key . set-downward-p)).
+;;; %loop-parse-end-condition uses these as Prolog-style facts:
+;;;   (end-kw . (place . direction)) → update spec accordingly.
+
+(defparameter *loop-from-end-conditions*
+  '(("TO"     . (:to    . nil))
+    ("BELOW"  . (:below . nil))
+    ("UPTO"   . (:to    . nil))
+    ("DOWNTO" . (:to    . t))
+    ("ABOVE"  . (:above . t)))
+  "End-condition keyword table for the FROM iterator.")
+
+(defparameter *loop-downfrom-end-conditions*
+  '(("TO"     . (:to    . nil))
+    ("DOWNTO" . (:to    . nil))
+    ("ABOVE"  . (:above . nil)))
+  "End-condition keyword table for the DOWNFROM iterator.
+DOWNFROM already sets :downward in the initial spec, so no entry needs it.")
+
+(defun %loop-parse-end-condition (spec remaining end-table)
+  "Optionally consume one end-condition keyword from REMAINING using END-TABLE.
+Returns (values spec remaining).  SPEC is modified in place when a match is found."
+  (let ((entry (and remaining
+                    (assoc (symbol-name (car remaining)) end-table
+                           :test #'string-equal))))
+    (if entry
+        (progn
+          (pop remaining)
+          (setf (getf spec (cadr entry)) (pop remaining))
+          (when (cddr entry)
+            (setf (getf spec :downward) t))
+          (values spec remaining))
+        (values spec remaining))))
+
 ;;; FR-695: FOR variant: var DOWNFROM expr [TO/DOWNTO/ABOVE expr] [BY expr]
 
 (define-loop-for-parser "DOWNFROM" (var remaining)
   "Parse: var DOWNFROM expr [TO/DOWNTO/ABOVE expr] [BY expr]"
   (let* ((from (pop remaining))
          (spec (list :for var :type :from :from from :downward t)))
-    (cond ((loop-kw-p (car remaining) "TO")
-           (pop remaining) (setf (getf spec :to) (pop remaining)))
-          ((loop-kw-p (car remaining) "DOWNTO")
-           (pop remaining) (setf (getf spec :to) (pop remaining)))
-          ((loop-kw-p (car remaining) "ABOVE")
-           (pop remaining) (setf (getf spec :above) (pop remaining))))
-    (multiple-value-bind (by rest) (%loop-opt-by remaining)
-      (when by (setf (getf spec :by) by))
-      (values spec rest))))
+    (multiple-value-bind (spec rest)
+        (%loop-parse-end-condition spec remaining *loop-downfrom-end-conditions*)
+      (multiple-value-bind (by rest2) (%loop-opt-by rest)
+        (when by (setf (getf spec :by) by))
+        (values spec rest2)))))
 
 ;;; FR-695: Also handle DOWNTO/ABOVE as end-condition keywords in FROM parser
 
@@ -140,21 +172,11 @@ The parser receives (VAR REMAINING) and must return (values spec-plist remaining
   "Parse: var FROM expr [TO/BELOW/UPTO/DOWNTO/ABOVE expr] [BY expr]"
   (let* ((from (pop remaining))
          (spec (list :for var :type :from :from from)))
-    (cond ((loop-kw-p (car remaining) "TO")
-           (pop remaining) (setf (getf spec :to)    (pop remaining)))
-          ((loop-kw-p (car remaining) "BELOW")
-           (pop remaining) (setf (getf spec :below) (pop remaining)))
-          ((loop-kw-p (car remaining) "UPTO")
-           (pop remaining) (setf (getf spec :to)    (pop remaining)))
-          ((loop-kw-p (car remaining) "DOWNTO")
-           (pop remaining) (setf (getf spec :to)    (pop remaining))
-           (setf (getf spec :downward) t))
-          ((loop-kw-p (car remaining) "ABOVE")
-           (pop remaining) (setf (getf spec :above) (pop remaining))
-           (setf (getf spec :downward) t)))
-    (multiple-value-bind (by rest) (%loop-opt-by remaining)
-      (when by (setf (getf spec :by) by))
-      (values spec rest))))
+    (multiple-value-bind (spec rest)
+        (%loop-parse-end-condition spec remaining *loop-from-end-conditions*)
+      (multiple-value-bind (by rest2) (%loop-opt-by rest)
+        (when by (setf (getf spec :by) by))
+        (values spec rest2)))))
 
 ;;; FOR variant: var IN expr [BY fn]
 
@@ -299,19 +321,35 @@ The parser receives (VAR REMAINING) and must return (values spec-plist remaining
       (push (list acc-type form into-var filter) (lps-accumulations state))
       (values state rest))))
 
-;;; ── 2f. Named wrappers for parameterised clause types ────────────────────
+;;; ── 2f. Parameterised clause wrappers ────────────────────────────────────
 ;;;
-;;; Each wrapper fixes the type argument so that *loop-top-clause-parsers*
-;;; remains a pure data table of (string . #'fn) with no inline lambdas.
+;;; Each row: (keyword-string base-fn type-keyword).
+;;; The macro generates a named defun for each, fixing the type argument.
+;;; Named functions (not lambdas) keep *loop-top-clause-parsers* a pure
+;;; (string . #'fn) alist and give readable backtraces.
+;;;
+;;; To add a clause: one row here → wrapper defun generated automatically.
 
-(defun %clause-when    (state remaining) (%clause-filter    state remaining :when))
-(defun %clause-if      (state remaining) (%clause-filter    state remaining :when))
-(defun %clause-unless  (state remaining) (%clause-filter    state remaining :unless))
-(defun %clause-while   (state remaining) (%clause-condition state remaining :while))
-(defun %clause-until   (state remaining) (%clause-condition state remaining :until))
-(defun %clause-always  (state remaining) (%clause-condition state remaining :always))
-(defun %clause-never   (state remaining) (%clause-condition state remaining :never))
-(defun %clause-thereis (state remaining) (%clause-condition state remaining :thereis))
+(defmacro define-parameterized-clauses (&rest specs)
+  "Generate named defuns from SPECS, each of form (keyword-string base-fn type).
+Produces: (defun %clause-<keyword> (state remaining) (base-fn state remaining type))"
+  `(progn
+     ,@(mapcar (lambda (spec)
+                 (destructuring-bind (keyword base-fn type) spec
+                   (let ((fn-name (intern (format nil "%CLAUSE-~A" keyword) :cl-cc)))
+                     `(defun ,fn-name (state remaining)
+                        (,base-fn state remaining ,type)))))
+               specs)))
+
+(define-parameterized-clauses
+  ("WHEN"    %clause-filter    :when)
+  ("IF"      %clause-filter    :when)    ; IF is a WHEN alias in LOOP
+  ("UNLESS"  %clause-filter    :unless)
+  ("WHILE"   %clause-condition :while)
+  ("UNTIL"   %clause-condition :until)
+  ("ALWAYS"  %clause-condition :always)
+  ("NEVER"   %clause-condition :never)
+  ("THEREIS" %clause-condition :thereis))
 
 ;;; ── 2g. Top-level clause dispatch table ──────────────────────────────────
 ;;;

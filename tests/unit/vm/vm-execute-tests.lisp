@@ -11,33 +11,25 @@
 ;;; ─── vm-falsep ──────────────────────────────────────────────────────────────
 
 (deftest vm-execute-vm-falsep-semantics
-  "vm-falsep returns T only for nil, and NIL for truthy values including 0."
+  "vm-falsep returns T for nil and numeric zero, and NIL for other truthy values."
   (assert-true (cl-cc::vm-falsep nil))
-  (dolist (val '(0 1 -1 "hello" foo t (1 2 3)))
+  (assert-true (cl-cc::vm-falsep 0))
+  (dolist (val '(1 -1 "hello" foo t (1 2 3)))
     (assert-false (cl-cc::vm-falsep val))))
 
 ;;; ─── vm-classify-arg ────────────────────────────────────────────────────────
 
-(deftest-each vm-execute-vm-classify-arg-primitives
-  "vm-classify-arg identifies primitive CL types for single dispatch."
-  :cases (("integer" 42      'integer)
-          ("string"  "hello" 'string)
-          ("symbol"  'foo    'symbol))
+(deftest-each vm-execute-vm-classify-arg
+  "vm-classify-arg identifies CL primitive types; returns T for unknown/composite values."
+  :cases (("integer"    42              'integer)
+          ("string"     "hello"         'string)
+          ("symbol"     'foo            'symbol)
+          ("list"       '(a b c)        't)
+          ("float"      3.14            't)
+          ("hash-table" (make-hash-table) 't))
   (arg expected)
   (let ((s (make-test-vm)))
     (assert-eq expected (cl-cc::vm-classify-arg arg s))))
-
-(deftest vm-execute-vm-classify-arg-unknown
-  "vm-classify-arg returns T for lists and other unrecognised values."
-  (let ((s (make-test-vm)))
-    (assert-eq t (cl-cc::vm-classify-arg '(a b c) s))
-    (assert-eq t (cl-cc::vm-classify-arg 3.14 s))))
-
-(deftest vm-execute-vm-classify-arg-plain-hash-table
-  "vm-classify-arg returns T for a plain hash-table with no :__class__ key."
-  (let ((s (make-test-vm))
-        (ht (make-hash-table)))
-    (assert-eq t (cl-cc::vm-classify-arg ht s))))
 
 ;;; ─── vm-save-registers / vm-restore-registers ───────────────────────────────
 
@@ -138,43 +130,21 @@
 
 ;;; ─── execute-instruction: vm-jump-zero ──────────────────────────────────────
 
-(deftest vm-execute-vm-jump-zero-taken-when-false
-  "vm-jump-zero jumps when register holds nil (falsy)."
+(deftest-each vm-execute-vm-jump-zero-branching
+  "vm-jump-zero jumps when register is falsy (nil or 0); falls through when truthy."
+  :cases (("taken-false"    nil 0  "target" 99 99)
+          ("not-taken-true" 1   5  "target" 99 6)
+          ("taken-zero"     0   10 "loop"   3  3))
+  (reg-val current-pc label label-pc expected-pc)
   (let ((s (make-test-vm))
-        (lbls (make-hash-table :test #'equal)))
-    (setf (gethash "target" lbls) 99)
-    (cl-cc:vm-reg-set s :R0 nil)
-    (multiple-value-bind (next-pc halt-p result)
+        (lbls (make-hash-table :test #'eql)))
+    (cl-cc::vm-label-table-store lbls label label-pc)
+    (cl-cc:vm-reg-set s :R0 reg-val)
+    (multiple-value-bind (next-pc halt-p)
         (cl-cc:execute-instruction
-         (cl-cc::make-vm-jump-zero :reg :R0 :label "target") s 0 lbls)
-      (declare (ignore result))
-      (assert-= 99 next-pc)
-      (assert-false halt-p))))
-
-(deftest vm-execute-vm-jump-zero-not-taken-when-true
-  "vm-jump-zero falls through when register holds a truthy value."
-  (let ((s (make-test-vm))
-        (lbls (make-hash-table :test #'equal)))
-    (setf (gethash "target" lbls) 99)
-    (cl-cc:vm-reg-set s :R0 1)
-    (multiple-value-bind (next-pc halt-p result)
-        (cl-cc:execute-instruction
-         (cl-cc::make-vm-jump-zero :reg :R0 :label "target") s 5 lbls)
-      (declare (ignore result))
-      (assert-= 6 next-pc)
-      (assert-false halt-p))))
-
-(deftest vm-execute-vm-jump-zero-not-taken-when-zero
-  "vm-jump-zero falls through when register holds 0 (truthy integer)."
-  (let ((s (make-test-vm))
-        (lbls (make-hash-table :test #'equal)))
-    (setf (gethash "loop" lbls) 3)
-    (cl-cc:vm-reg-set s :R1 0)
-    (multiple-value-bind (next-pc halt-p result)
-        (cl-cc:execute-instruction
-         (cl-cc::make-vm-jump-zero :reg :R1 :label "loop") s 10 lbls)
-      (declare (ignore halt-p result))
-      (assert-= 11 next-pc))))
+         (cl-cc::make-vm-jump-zero :reg :R0 :label label) s current-pc lbls)
+      (declare (ignore halt-p))
+      (assert-= expected-pc next-pc))))
 
 (deftest vm-execute-vm-label-advances-pc
   "vm-label is a no-op instruction that just increments pc."
@@ -187,10 +157,12 @@
       (assert-false halt-p))))
 
 (deftest vm-execute-vm-jump-taken
-  "vm-jump transfers control to the target label."
+  "vm-jump transfers control to the target label.
+Label tables are integer-keyed with collision buckets — use the store helper
+rather than raw gethash to produce a lookupable entry."
   (let ((s (make-test-vm))
         (lbls (make-hash-table :test #'equal)))
-    (setf (gethash "entry" lbls) 11)
+    (cl-cc::vm-label-table-store lbls "entry" 11)
     (multiple-value-bind (next-pc halt-p result)
         (cl-cc::execute-instruction
          (cl-cc::make-vm-jump :label "entry") s 2 lbls)
@@ -330,10 +302,13 @@
                  :params params))
 
 (defun %labels (&rest kv-pairs)
-  "Build a string-keyed labels hash table from alternating label/pc pairs."
+  "Build a labels hash table from alternating label/pc pairs.
+Uses vm-label-table-store so the internal sxhash-bucketed layout matches
+what vm-label-table-lookup expects — raw (setf gethash) produces entries
+that lookup can't find."
   (let ((ht (make-hash-table :test #'equal)))
     (loop for (label pc) on kv-pairs by #'cddr
-          do (setf (gethash label ht) pc))
+          do (cl-cc::vm-label-table-store ht label pc))
     ht))
 
 (deftest vm-call-host-fn-result-written-to-dst

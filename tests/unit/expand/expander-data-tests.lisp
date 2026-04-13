@@ -2,28 +2,27 @@
 
 (in-package :cl-cc/test)
 
-(defsuite expander-data-suite :description "Expander data table unit tests")
+(defsuite expander-data-suite :description "Expander data table unit tests"
+  :parent cl-cc-suite)
 
-(deftest variadic-fold-builtins-contents
-  "*variadic-fold-builtins* includes + * append nconc."
-  (assert-true (member '+ cl-cc::*variadic-fold-builtins*))
-  (assert-true (member '* cl-cc::*variadic-fold-builtins*))
-  (assert-true (member 'append cl-cc::*variadic-fold-builtins*))
-  (assert-true (member 'nconc cl-cc::*variadic-fold-builtins*)))
 
-(deftest binary-builtins-contents
-  "*binary-builtins* includes key entries."
-  (assert-true (member 'cons cl-cc::*binary-builtins*))
-  (assert-true (member '= cl-cc::*binary-builtins*))
-  (assert-true (member 'mod cl-cc::*binary-builtins*))
-  (assert-true (member 'ash cl-cc::*binary-builtins*)))
-
-(deftest unary-builtins-contents
-  "*unary-builtins* includes key entries."
-  (assert-true (member 'car cl-cc::*unary-builtins*))
-  (assert-true (member 'cdr cl-cc::*unary-builtins*))
-  (assert-true (member 'not cl-cc::*unary-builtins*))
-  (assert-true (member 'length cl-cc::*unary-builtins*)))
+(in-suite expander-data-suite)
+(deftest-each builtin-table-members
+  "Key symbols are present in their respective builtin tables."
+  :cases (("variadic-+"      '+      cl-cc::*variadic-fold-builtins*)
+          ("variadic-*"      '*      cl-cc::*variadic-fold-builtins*)
+          ("variadic-append" 'append cl-cc::*variadic-fold-builtins*)
+          ("variadic-nconc"  'nconc  cl-cc::*variadic-fold-builtins*)
+          ("binary-cons"     'cons   cl-cc::*binary-builtins*)
+          ("binary-="        '=      cl-cc::*binary-builtins*)
+          ("binary-mod"      'mod    cl-cc::*binary-builtins*)
+          ("binary-ash"      'ash    cl-cc::*binary-builtins*)
+          ("unary-car"       'car    cl-cc::*unary-builtins*)
+          ("unary-cdr"       'cdr    cl-cc::*unary-builtins*)
+          ("unary-not"       'not    cl-cc::*unary-builtins*)
+          ("unary-length"    'length cl-cc::*unary-builtins*))
+  (sym table)
+  (assert-true (member sym table)))
 
 (deftest cxr-builtins-completeness
   "*cxr-builtins* has all 28 compositions."
@@ -31,10 +30,12 @@
   (assert-true (member 'caar cl-cc::*cxr-builtins*))
   (assert-true (member 'cddddr cl-cc::*cxr-builtins*)))
 
-(deftest all-builtin-names-union
-  "*all-builtin-names* is the union of all sub-tables."
-  (assert-true (member '+ cl-cc::*all-builtin-names*))
-  (assert-true (member 'cons cl-cc::*all-builtin-names*))
-  (assert-true (member 'car cl-cc::*all-builtin-names*))
-  (assert-true (member 'caar cl-cc::*all-builtin-names*))
-  (assert-true (member 'list cl-cc::*all-builtin-names*)))
+(deftest-each all-builtin-names-members
+  "*all-builtin-names* is the union of all sub-tables and contains representative symbols."
+  :cases (("variadic-+"   '+    cl-cc::*all-builtin-names*)
+          ("binary-cons"  'cons cl-cc::*all-builtin-names*)
+          ("unary-car"    'car  cl-cc::*all-builtin-names*)
+          ("cxr-caar"     'caar cl-cc::*all-builtin-names*)
+          ("special-list" 'list cl-cc::*all-builtin-names*))
+  (sym table)
+  (assert-true (member sym table)))

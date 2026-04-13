@@ -68,6 +68,24 @@ Inherits from CL's DIVISION-BY-ZERO so user code can catch it via
              (format stream "VM Division By Zero: attempted to divide ~S by zero"
                      (vm-dividend condition)))))
 
+;;; Compatibility accessors used by VM-focused tests and callers.
+
+(defun vm-expected-type (condition)
+  "Return the expected type recorded in CONDITION."
+  (type-error-expected-type condition))
+
+(defun vm-datum (condition)
+  "Return the datum recorded in CONDITION."
+  (type-error-datum condition))
+
+(defun vm-variable-name (condition)
+  "Return the variable name recorded in CONDITION."
+  (cell-error-name condition))
+
+(defun vm-function-name (condition)
+  "Return the function name recorded in CONDITION."
+  (cell-error-name condition))
+
 ;;; VM Handler Stack
 ;;;
 ;;; Since we cannot modify vm-state, we use a hash table to associate
@@ -215,6 +233,14 @@ unless a handler explicitly handles them."
 
 ;;; Instruction Execution
 
+(defun %vm-jump-to-handler (state labels condition handler)
+  "Transfer control to HANDLER, storing CONDITION in the handler's result register."
+  (let* ((info       (vm-handler-handler-fn handler))
+         (label      (getf info :label))
+         (result-reg (getf info :result-reg)))
+    (vm-reg-set state result-reg condition)
+    (values (vm-label-table-lookup labels label) nil nil)))
+
 (defun vm-signal-condition (condition vm-state &key (error-p nil))
   "Signal a CONDITION in the context of VM-STATE.
 If ERROR-P is true, signal an error if no handler is found.
@@ -228,53 +254,33 @@ Returns (values handler-found-p handler-info) or signals error."
 
 (defmethod execute-instruction ((inst vm-signal) state pc labels)
   (let* ((condition (vm-reg-get state (vm-condition-reg inst)))
-         (handler-found (vm-signal-condition condition state)))
-    (if handler-found
-        ;; Handler found - transfer control to handler
-        (let* ((handler (vm-find-handler state condition))
-               (handler-label (vm-handler-label handler))
-               (result-reg (vm-handler-result-reg handler)))
-          ;; Store condition in result register for handler
-          (vm-reg-set state result-reg condition)
-          ;; Jump to handler
-          (values (vm-label-table-lookup labels handler-label) nil nil))
+         (handler   (vm-find-handler state condition)))
+    (if handler
+        (%vm-jump-to-handler state labels condition handler)
         ;; No handler - continue execution
         (values (1+ pc) nil nil))))
 
 (defmethod execute-instruction ((inst vm-error-instruction) state pc labels)
   (let* ((condition (vm-reg-get state (vm-condition-reg inst)))
-         (handler-found (vm-signal-condition condition state :error-p t)))
-    (if handler-found
-        (let* ((handler (vm-find-handler state condition))
-               (handler-label (vm-handler-label handler))
-               (result-reg (vm-handler-result-reg handler)))
-          (vm-reg-set state result-reg condition)
-          (values (vm-label-table-lookup labels handler-label) nil nil))
-        ;; Error was already signaled by vm-signal-condition
-        (values (1+ pc) nil nil))))
+         (handler   (vm-find-handler state condition)))
+    (if handler
+        (%vm-jump-to-handler state labels condition handler)
+        (progn (error condition) (values (1+ pc) nil nil)))))
 
 (defmethod execute-instruction ((inst vm-cerror) state pc labels)
   ;; Create a continue restart and signal the condition
   ;; The restart allows continuing after the error
-  (let ((condition (vm-reg-get state (vm-condition-reg inst))))
+  (let* ((condition (vm-reg-get state (vm-condition-reg inst)))
+         (handler   (vm-find-handler state condition)))
     ;; Add a continue restart
     (vm-add-restart state 'continue
                     (list :label nil
-                     :continue-message (vm-continue-message inst)))
+                          :continue-message (vm-continue-message inst)))
     ;; Signal the condition
-    (multiple-value-bind (handler-found handler)
-        (vm-signal-condition condition state :error-p t)
-      (declare (ignore handler-found))
-      (when handler
-        (let* ((handler-info (vm-handler-handler-fn handler))
-               (handler-label (getf handler-info :label))
-               (result-reg (getf handler-info :result-reg))
-               (new-pc (vm-label-table-lookup labels handler-label)))
-          (vm-reg-set state result-reg condition)
-          (return-from execute-instruction
-            (values new-pc nil nil))))
-    ;; If no handler, return to next instruction (continue restart)
-    (values (1+ pc) nil nil))))
+    (if handler
+        (%vm-jump-to-handler state labels condition handler)
+        ;; If no handler, return to next instruction (continue restart)
+        (values (1+ pc) nil nil))))
 
 (defmethod execute-instruction ((inst vm-warn) state pc labels)
   (declare (ignore labels))

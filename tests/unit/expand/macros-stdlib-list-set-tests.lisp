@@ -5,7 +5,7 @@
 
 (defsuite macros-stdlib-list-set-suite
   :description "Tests for macros-stdlib.lisp: list/set/sequence basics"
-  :parent cl-cc-suite)
+  :parent cl-cc-integration-suite)
 
 (in-suite macros-stdlib-list-set-suite)
 
@@ -14,28 +14,30 @@
   (assert-equal (our-macroexpand-1 '(concatenate 'list '(1 2) '(3 4)))
                 '(append '(1 2) '(3 4))))
 
-(deftest concatenate-vector-expands-to-coerce-to-vector
-  "CONCATENATE 'vector expands to (coerce-to-vector (append ...))."
-  (let ((result (our-macroexpand-1 '(concatenate 'vector '(1) '(2)))))
+(deftest-each concatenate-vector-types-expand-to-coerce-to-vector
+  "CONCATENATE 'vector and 'simple-vector both use the coerce-to-vector path."
+  :cases (("vector"        '(concatenate 'vector '(1) '(2)))
+          ("simple-vector" '(concatenate 'simple-vector '(1) '(2))))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
     (assert-equal (symbol-name (car result)) "COERCE-TO-VECTOR")
     (assert-eq (caadr result) 'append)))
 
-(deftest concatenate-simple-vector-expands-to-coerce-to-vector
-  "CONCATENATE 'simple-vector also uses coerce-to-vector path."
-  (let ((result (our-macroexpand-1 '(concatenate 'simple-vector '(1) '(2)))))
-    (assert-equal (symbol-name (car result)) "COERCE-TO-VECTOR")))
-
-(deftest concatenate-runtime-string
+(deftest-each concatenate-runtime-string
   "CONCATENATE runtime: string concatenation."
-  (assert-equal (run-string "(concatenate 'string \"hello\" \" \" \"world\")") "hello world")
-  (assert-equal (run-string "(concatenate 'string)") "")
-  (assert-equal (run-string "(concatenate 'string \"only\")") "only"))
+  :cases (("two-strings" "(concatenate 'string \"hello\" \" \" \"world\")" "hello world")
+          ("empty"       "(concatenate 'string)"                            "")
+          ("single"      "(concatenate 'string \"only\")"                  "only"))
+  (form expected)
+  (assert-equal expected (run-string form)))
 
-(deftest concatenate-runtime-list
-  "CONCATENATE runtime: list concatenation."
-  (assert-equal (run-string "(concatenate 'list '(1 2) '(3 4))") '(1 2 3 4))
-  (assert-= (run-string "(length (concatenate 'list '(1 2) '(3 4)))") 4)
-  (assert-= (run-string "(length (concatenate 'list '(1)))") 1))
+(deftest-each concatenate-runtime-list
+  "CONCATENATE runtime: list concatenation and length checks."
+  :cases (("two-lists"   "(concatenate 'list '(1 2) '(3 4))"          '(1 2 3 4))
+          ("four-length" "(length (concatenate 'list '(1 2) '(3 4)))"  4)
+          ("one-length"  "(length (concatenate 'list '(1)))"           1))
+  (form expected)
+  (assert-equal expected (run-string form)))
 
 (deftest-each notany-notevery-runtime
   "notany/notevery runtime behaviour mirrors (not (some/every ...))."
@@ -55,7 +57,9 @@
     (assert-eq (caadr result) 'nreverse)
     (assert-eq (caddr result) 'tail)))
 
-(deftest nreconc-runtime
+(deftest-each nreconc-runtime
   "NRECONC prepends reversed list onto tail."
-  (assert-equal (run-string "(nreconc (list 3 2 1) '(4 5))") '(1 2 3 4 5))
-  (assert-equal (run-string "(nreconc '() '(1 2))") '(1 2)))
+  :cases (("basic"      "(nreconc (list 3 2 1) '(4 5))" '(1 2 3 4 5))
+          ("empty-left" "(nreconc '() '(1 2))"          '(1 2)))
+  (form expected)
+  (assert-equal expected (run-string form)))

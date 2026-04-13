@@ -5,8 +5,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite macho-suite :description "Mach-O binary format tests")
+(defsuite macho-suite :description "Mach-O binary format tests"
+  :parent cl-cc-suite)
 
+
+(in-suite macho-suite)
 ;;; ─── Constants ──────────────────────────────────────────────────────────
 
 (deftest macho-constants
@@ -131,11 +134,6 @@
     (cl-cc/binary:add-entry-point b 0)
     (assert-true b)))
 
-(deftest macho-add-symbol
-  "add-symbol adds a symbol entry."
-  (let ((b (cl-cc/binary:make-mach-o-builder :x86-64)))
-    (cl-cc/binary:add-symbol b "_main" :value 0 :sect 1)
-    (assert-true b)))
 
 (deftest macho-data-segment-is-not-executable
   "__DATA segments are emitted with rw- protections, not rwx."
@@ -291,20 +289,18 @@
       (assert-equal 5 (aref data 0))
       (assert-equal 0 (aref data 1)))))
 
-(deftest macho-command-serialization-sizes
+(deftest-each macho-command-serialization-sizes
   "Serialized command sizes: entry-point=24, symtab=24, section=80 bytes."
-  (let ((buf (cl-cc/binary::make-byte-buffer))
-        (ep (cl-cc/binary::make-entry-point-command)))
-    (cl-cc/binary::serialize-entry-point ep buf)
-    (assert-equal 24 (length (cl-cc/binary::byte-buffer-data buf))))
-  (let ((buf (cl-cc/binary::make-byte-buffer))
-        (sc (cl-cc/binary::make-symtab-command)))
-    (cl-cc/binary::serialize-symtab-command sc buf)
-    (assert-equal 24 (length (cl-cc/binary::byte-buffer-data buf))))
-  (let ((buf (cl-cc/binary::make-byte-buffer))
-        (sect (cl-cc/binary::make-section :sectname "__text" :segname "__TEXT")))
-    (cl-cc/binary::serialize-section sect buf)
-    (assert-equal 80 (length (cl-cc/binary::byte-buffer-data buf)))))
+  :cases (("entry-point" 24 (cl-cc/binary::make-entry-point-command)
+                            #'cl-cc/binary::serialize-entry-point)
+          ("symtab"      24 (cl-cc/binary::make-symtab-command)
+                            #'cl-cc/binary::serialize-symtab-command)
+          ("section"     80 (cl-cc/binary::make-section :sectname "__text" :segname "__TEXT")
+                            #'cl-cc/binary::serialize-section))
+  (expected obj serializer)
+  (let ((buf (cl-cc/binary::make-byte-buffer)))
+    (funcall serializer obj buf)
+    (assert-equal expected (length (cl-cc/binary::byte-buffer-data buf)))))
 
 (deftest macho-buffer-write-bytes-sequence
   "buffer-write-bytes appends multiple bytes."
@@ -343,15 +339,15 @@
     (cl-cc/binary:add-text-segment b code)
     (assert-equal 1 (length (cl-cc/binary::mach-o-builder-segments b)))))
 
-(deftest macho-add-symbol-behavior
+(deftest-each macho-add-symbol-behavior
   "add-symbol inserts into symbol-table; multiple calls accumulate."
+  :cases (("one-symbol"  1 '("_main"))
+          ("two-symbols" 2 '("_start" "_exit")))
+  (expected names)
   (let ((b (cl-cc/binary:make-mach-o-builder :x86-64)))
-    (cl-cc/binary:add-symbol b "_main" :value 0 :sect 1)
-    (assert-equal 1 (length (cl-cc/binary::mach-o-builder-symbol-table b))))
-  (let ((b (cl-cc/binary:make-mach-o-builder :x86-64)))
-    (cl-cc/binary:add-symbol b "_start" :value 0 :sect 1)
-    (cl-cc/binary:add-symbol b "_exit"  :value 10 :sect 1)
-    (assert-equal 2 (length (cl-cc/binary::mach-o-builder-symbol-table b)))))
+    (dolist (name names)
+      (cl-cc/binary:add-symbol b name :value 0 :sect 1))
+    (assert-equal expected (length (cl-cc/binary::mach-o-builder-symbol-table b)))))
 
 (deftest macho-build-output-size-at-least-page
   "build-mach-o output is at least 4096 bytes (code is page-aligned)."

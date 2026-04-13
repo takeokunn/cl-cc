@@ -41,7 +41,9 @@
     (assert-equal (car (cdaddr result)) 'body1)))
 
 (deftest-each and-macro-simple-expansions
-  "AND expands each arity correctly"
+  "AND expands each arity correctly.
+In the full test context, our-macroexpand-1 recurses through nested AND forms,
+so (and a b c) arrives as fully-nested IFs rather than (if a (and b c) nil)."
   :cases (("empty"         '(and)       t)
           ("single-arg"    '(and x)     'x)
           ("two-args"      '(and a b)   '(if a (and b) nil))
@@ -74,15 +76,17 @@
     (let ((inner (cadddr (caddr result))))
       (assert-eq (car inner) 'let))))
 
-(deftest let*-macro-base-cases
+(deftest-each let*-macro-base-cases
   "LET* base cases: empty bindings wraps in PROGN; single binding wraps in LET."
-  (assert-equal (our-macroexpand-1 '(let* () body1 body2))
-                '(progn body1 body2))
-  (assert-equal (our-macroexpand-1 '(let* ((a 1)) body))
-                '(let ((a 1)) (let* nil body))))
+  :cases (("empty"  '(let* () body1 body2)  '(progn body1 body2))
+          ("single" '(let* ((a 1)) body)     '(let ((a 1)) (let* nil body))))
+  (form expected)
+  (assert-equal expected (our-macroexpand-1 form)))
 
 (deftest let*-macro-multiple-bindings
-  "Test LET* with multiple bindings (creates nested LETs)"
+  "Test LET* with multiple bindings (creates nested LETs).
+One-step expansion of (let* ((a 1) (b a)) body) yields
+(let ((a 1)) (let* ((b a)) body)) — the inner LET* stays unexpanded."
   (let ((result (our-macroexpand-1 '(let* ((a 1) (b a)) body))))
     (assert-eq (car result) 'let)
     (assert-equal (cadr result) '((a 1)))

@@ -102,6 +102,7 @@ Returns (values docstring timeout depends-on tags body-forms)."
      (deftest name
        \"optional docstring\"
        :timeout 5
+       :timeout :none
        :depends-on other-test
        :tags '(:tag1)
        body-form...)"
@@ -428,31 +429,45 @@ Produces a human-readable message using type-to-string on failure."
 ;;; Test Execution
 ;;; ------------------------------------------------------------
 
-(defun %collect-suite-tests (suite-name tags)
-  "Collect all tests belonging to suite-name (and child suites), filtered by tags."
+(defun %test-tags-match-p (test-tags tags)
+  "Return t if TEST-TAGS intersects TAGS (inclusion filter).
+NIL tags means 'no inclusion filter' → matches everything."
+  (or (null tags)
+      (and test-tags (some (lambda (tag) (member tag test-tags)) tags))))
+
+(defun %test-tags-excluded-p (test-tags exclude-tags)
+  "Return t if TEST-TAGS intersects EXCLUDE-TAGS."
+  (and exclude-tags test-tags
+       (some (lambda (tag) (member tag exclude-tags)) test-tags)))
+
+(defun %collect-suite-tests (suite-name tags &optional exclude-tags)
+  "Collect all tests belonging to suite-name (not children), filtered by tags."
   (let ((result '()))
     (maphash (lambda (test-sym plist)
                (declare (ignore test-sym))
                (let ((suite (getf plist :suite))
                      (test-tags (getf plist :tags)))
                  (when (and (eq suite suite-name)
-                            (or (null tags)
-                                (and test-tags
-                                     (some (lambda (tag) (member tag test-tags)) tags))))
+                            (%test-tags-match-p test-tags tags)
+                            (not (%test-tags-excluded-p test-tags exclude-tags)))
                    (push plist result))))
              *test-registry*)
     result))
 
-(defun %collect-all-suite-tests (suite-name tags)
-  "Collect tests from suite-name and all descendant suites."
-  (let ((result (%collect-suite-tests suite-name tags)))
-    ;; find child suites
-    (maphash (lambda (child-name child-plist)
-               (when (eq (getf child-plist :parent) suite-name)
-                 (setf result (append result
-                                      (%collect-all-suite-tests child-name tags)))))
-             *suite-registry*)
-    result))
+(defun %collect-all-suite-tests (suite-name tags &optional exclude-tags exclude-suites)
+  "Collect tests from suite-name and all descendant suites.
+Prunes any subtree rooted at a suite named in EXCLUDE-SUITES."
+  (if (member suite-name exclude-suites)
+      '()
+      (let ((result (%collect-suite-tests suite-name tags exclude-tags)))
+        (maphash (lambda (child-name child-plist)
+                   (when (eq (getf child-plist :parent) suite-name)
+                     (setf result
+                           (append result
+                                   (%collect-all-suite-tests
+                                    child-name tags exclude-tags exclude-suites)))))
+                 *suite-registry*)
+        result)))
 
 (defun %fisher-yates-shuffle (vec)
   "In-place Fisher-Yates shuffle of a vector."
@@ -463,11 +478,19 @@ Produces a human-readable message using type-to-string on failure."
   vec)
 
 (defun %get-suite-fixtures (suite-name)
-  "Return (before-each-fns after-each-fns) for a suite."
-  (let ((entry (gethash suite-name *suite-registry*)))
-    (if entry
-        (values (getf entry :before-each) (getf entry :after-each))
-        (values nil nil))))
+  "Return (before-each-fns after-each-fns) for a suite, inheriting from all ancestors.
+Parent fixtures run BEFORE child before-each, and AFTER child after-each (nested).
+This matches standard xUnit lifecycle semantics."
+  (let ((before-chain '())
+        (after-chain '())
+        (current suite-name))
+    (loop while current
+          for entry = (gethash current *suite-registry*)
+          while entry
+          do (setf before-chain (append (getf entry :before-each) before-chain))
+             (setf after-chain  (append after-chain (getf entry :after-each)))
+             (setf current (getf entry :parent)))
+    (values before-chain after-chain)))
 
 (defun %check-dependency (test-plist all-results)
   "Return nil if dependency failed (test should be skipped), t otherwise."
@@ -479,12 +502,33 @@ Produces a human-readable message using type-to-string on failure."
               (eq (getf dep-result :status) :pass)
               t)))))  ; dependency not yet run — allow
 
+(defun %default-test-timeout ()
+  "Return the default per-test timeout in seconds.
+10s is the team-chosen target: every test is expected to finish within this
+budget, otherwise the test or the underlying logic is expected to be
+refactored (rather than the timeout being relaxed). Pipeline-heavy tests
+that still need stdlib compilation rely on the *stdlib-expanded-cache*
+in src/compile/pipeline.lisp to stay under budget. Individual tests
+may still override via an explicit `:timeout N' in the deftest form, but
+such overrides are discouraged and flagged during review. Override the
+global default via environment variable `timeout' if needed."
+  (let ((raw (uiop:getenv "timeout")))
+    (or (and raw
+             (ignore-errors
+               (let ((parsed (parse-integer raw)))
+                 (and (plusp parsed) parsed))))
+        10)))
+
 (defun %run-single-test (test-plist number results-so-far)
   "Run one test and return a result plist."
   (let* ((name     (getf test-plist :name))
          (fn       (getf test-plist :fn))
          (timeout  (getf test-plist :timeout))
          (suite    (getf test-plist :suite)))
+    ;; Optional hang-diagnosis tracing (opt-in via CLCC_TEST_TRACE=1)
+    (when (uiop:getenv "CLCC_TEST_TRACE")
+      (format *error-output* "# [trace] running ~A~%" name)
+      (force-output *error-output*))
     ;; Check dependency
     (unless (%check-dependency test-plist results-so-far)
       (return-from %run-single-test
@@ -507,12 +551,22 @@ Produces a human-readable message using type-to-string on failure."
                          (return-from %run-single-test
                            (list :name name :status :pending
                                  :detail (pending-reason c) :number number)))))
-                  (sb-ext:with-timeout (or timeout 5)
-                    (funcall fn))
-                  ;; Run after-each fixtures
-                  (dolist (af after-fns) (funcall af))
-                  ;; Run invariants
-                  (%run-invariants)
+                   ;; NOTE: sb-ext:with-timeout relies on SIGALRM delivery
+                   ;; which is unreliable inside sb-thread worker threads —
+                   ;; parallel runs used to hang intermittently because the
+                   ;; alarm never fired. Sequential runs still use it below;
+                   ;; parallel runs enforce timeouts via join-thread :timeout
+                   ;; in %run-tests-parallel, so this branch is the
+                   ;; sequential-only fallback and is always safe.
+                   (if (or (eq timeout :none)
+                           (eq *test-runner-mode* :parallel))
+                       (funcall fn)
+                       (sb-ext:with-timeout (or timeout (%default-test-timeout))
+                         (funcall fn)))
+                   ;; Run after-each fixtures
+                   (dolist (af after-fns) (funcall af))
+                   ;; Run invariants
+                   (%run-invariants)
                   (list :name name :status :pass :detail nil :number number))
               (test-failure (c)
                 (dolist (af after-fns) (ignore-errors (funcall af)))
@@ -521,9 +575,9 @@ Produces a human-readable message using type-to-string on failure."
               (sb-ext:timeout ()
                 (dolist (af after-fns) (ignore-errors (funcall af)))
                 (list :name name :status :fail
-                      :detail (format nil "  ---~%  message: \"timeout after ~A seconds\"~%  ..."
-                                      (or timeout 5))
-                      :number number))
+                       :detail (format nil "  ---~%  message: \"timeout after ~A seconds\"~%  ..."
+                                       (if (eq timeout :none) "disabled" (or timeout (%default-test-timeout))))
+                       :number number))
               (error (e)
                 (dolist (af after-fns) (ignore-errors (funcall af)))
                 (list :name name :status :fail
@@ -541,43 +595,107 @@ Produces a human-readable message using type-to-string on failure."
 ;;; Parallel Worker Pool
 ;;; ------------------------------------------------------------
 
+(defvar *test-runner-mode* :sequential
+  "Dynamic indicator of the current runner mode (:sequential or :parallel).
+%run-single-test consults this to decide whether sb-ext:with-timeout is safe
+to use (sequential) or whether the parallel runner will enforce the timeout
+via sb-thread:join-thread :timeout instead.")
+
+(defun %effective-test-timeout (test-plist)
+  (let ((tm (getf test-plist :timeout)))
+    (cond
+      ((eq tm :none) nil)        ; no timeout
+      ((and (integerp tm) (plusp tm)) tm)
+      (t (%default-test-timeout)))))
+
 (defun %run-tests-parallel (tests workers)
   "Run tests in parallel using sb-thread worker threads.
-   Returns list of result plists in test-number order."
-  (let* ((n (length tests))
+Each task is executed in its own short-lived sub-thread, and the worker
+waits for it with sb-thread:join-thread :timeout. If the sub-thread does
+not finish in time it is terminated and the test is recorded as a
+timeout fail, guaranteeing the runner can never wedge on a hanging test."
+  ;; Warm the stdlib AST cache BEFORE spawning any workers.  This closes
+  ;; two failure modes at once: (1) the cold-cache race where two workers
+  ;; simultaneously enter %build-stdlib-ast-cache and corrupt each other's
+  ;; view of *stdlib-ast-cache{-source,-eval-fn}*, and (2) the first test
+  ;; using :stdlib t paying the full parse+expand+lower cost inside the
+  ;; 10-second per-test budget (see %default-test-timeout).  A fulfilled
+  ;; cache is read-only from the workers' perspective, so no mutex needed.
+  (ignore-errors (cl-cc::warm-stdlib-cache))
+  (let* ((*test-runner-mode* :parallel)
+         (n (length tests))
          (results (make-array n :initial-element nil))
          (results-lock (sb-thread:make-mutex :name "results-lock"))
          (work-queue (coerce tests 'vector))
          (queue-index 0)
          (queue-lock (sb-thread:make-mutex :name "queue-lock"))
          (threads '()))
-    (flet ((worker ()
-             (loop
-               (let ((task nil)
-                     (idx nil))
-                 ;; Grab next task
-                 (sb-thread:with-mutex (queue-lock)
-                   (when (< queue-index n)
-                     (setf idx queue-index
-                           task (aref work-queue queue-index))
-                     (incf queue-index)))
-                 (unless task (return))
-                 ;; Run test (pass results seen so far for dependency checks)
-                 (let* ((test-plist task)
-                        (number (getf test-plist :number))
-                        ;; snapshot of results so far
-                        (results-snapshot
-                          (sb-thread:with-mutex (results-lock)
-                            (remove nil (coerce results 'list))))
-                        (result (%run-single-test test-plist number results-snapshot)))
-                   (sb-thread:with-mutex (results-lock)
-                     (setf (aref results idx) result))
-                   (%tap-print-result result))))))
-      ;; Spawn workers
+    (labels ((run-with-timeout (test-plist number snapshot)
+               (let* ((timeout (%effective-test-timeout test-plist))
+                      (result-cell (list nil))
+                      (done-lock (sb-thread:make-mutex :name "done"))
+                      (done-cv (sb-thread:make-waitqueue :name "done-cv"))
+                      (done nil)
+                      (runner-thread
+                        (sb-thread:make-thread
+                         (lambda ()
+                           ;; CRITICAL: SBCL sub-threads do NOT inherit the
+                           ;; parent's dynamic bindings, so we must rebind
+                           ;; *test-runner-mode* here explicitly. Without this,
+                           ;; %run-single-test would see the global default
+                           ;; (:sequential) and re-enter sb-ext:with-timeout,
+                           ;; defeating the parallel timeout enforcement.
+                           (let ((*test-runner-mode* :parallel))
+                             (let ((r (%run-single-test test-plist number snapshot)))
+                               (sb-thread:with-mutex (done-lock)
+                                 (setf (car result-cell) r
+                                       done t)
+                                 (sb-thread:condition-notify done-cv)))))
+                         :name (format nil "test-case-~A" number))))
+                 (sb-thread:with-mutex (done-lock)
+                   (if timeout
+                       (loop until done
+                             do (unless (sb-thread:condition-wait
+                                         done-cv done-lock :timeout timeout)
+                                  (return)))
+                       (loop until done
+                             do (sb-thread:condition-wait done-cv done-lock))))
+                 (cond
+                   (done
+                    (ignore-errors (sb-thread:join-thread runner-thread))
+                    (car result-cell))
+                   (t
+                    (ignore-errors
+                     (sb-thread:terminate-thread runner-thread))
+                    (ignore-errors (sb-thread:join-thread runner-thread))
+                    (list :name (getf test-plist :name)
+                          :status :fail
+                          :detail (format nil "  ---~%  message: \"timeout after ~A seconds (parallel runner killed thread)\"~%  ..."
+                                          timeout)
+                          :number number)))))
+             (worker ()
+               (loop
+                 (let ((task nil)
+                       (idx nil))
+                   (sb-thread:with-mutex (queue-lock)
+                     (when (< queue-index n)
+                       (setf idx queue-index
+                             task (aref work-queue queue-index))
+                       (incf queue-index)))
+                   (unless task (return))
+                   (let* ((test-plist task)
+                          (number (getf test-plist :number))
+                          (results-snapshot
+                            (sb-thread:with-mutex (results-lock)
+                              (remove nil (coerce results 'list))))
+                          (result (run-with-timeout test-plist number
+                                                    results-snapshot)))
+                     (sb-thread:with-mutex (results-lock)
+                       (setf (aref results idx) result))
+                     (%tap-print-result result))))))
       (dotimes (i workers)
         (push (sb-thread:make-thread #'worker :name (format nil "test-worker-~A" i))
               threads))
-      ;; Wait for all
       (dolist (th threads)
         (sb-thread:join-thread th))
       (coerce results 'list))))
@@ -629,6 +747,8 @@ Produces a human-readable message using type-to-string on failure."
                                (repeat 1)
                                (update-snapshots nil)
                                (tags nil)
+                               (exclude-tags nil)
+                               (exclude-suites nil)
                                (coverage nil))
   "Run all tests in suite-name (and children).
    Returns t if all tests passed, nil otherwise."
@@ -642,8 +762,12 @@ Produces a human-readable message using type-to-string on failure."
          (*random-state* (sb-ext:seed-random-state actual-seed)))
 
     ;; Collect tests
-    (let* ((tests-plists (%collect-all-suite-tests suite-name tags))
+    (let* ((tests-plists (%collect-all-suite-tests suite-name tags
+                                                    exclude-tags exclude-suites))
            (n (length tests-plists)))
+      (when (or exclude-tags exclude-suites)
+        (format t "# Excluding tags: ~S~%# Excluding suites: ~S~%"
+                exclude-tags exclude-suites))
 
       ;; Assign numbers in definition order
       (let ((numbered (loop for p in tests-plists
@@ -730,13 +854,102 @@ Produces a human-readable message using type-to-string on failure."
                       (uiop:quit 1)
                       (uiop:quit 0)))))))))))
 
-(defun run-tests ()
-  "Run all tests in the main cl-cc-suite."
+(defparameter *default-slow-suite-names*
+  '(("CL-CC/TEST" . "SELFHOST-SUITE")
+    ("CL-CC/TEST" . "CL-CC-INTEGRATION-SUITE")
+    ("CL-CC/TEST" . "CLOSURE-TESTS-SUITE")
+    ("CL-CC/TEST" . "CONTROL-FLOW-TESTS")
+    ("CL-CC/TEST" . "STREAM-SUITE")
+    ("CL-CC/PBT"  . "CL-CC-PBT-SUITE")
+    ("CL-CC/PBT"  . "MACRO-PBT-SUITE"))
+  "Fully-qualified names of suites excluded by default when RUN-TESTS is called
+with no arguments. Resolved at call time via FIND-SYMBOL so the :cl-cc/pbt
+package need not be present when framework.lisp loads.")
+
+(defparameter *default-slow-tags*
+  '(:slow :selfhost :pbt :fuzz)
+  "Per-test tags excluded by default when RUN-TESTS is called with no arguments.
+Catches individually-tagged slow tests that don't live in slow suites.")
+
+(defun %resolve-default-slow-suites ()
+  "Resolve *default-slow-suite-names* to actual symbols, silently dropping
+any whose package is not yet loaded."
+  (let ((result '()))
+    (dolist (entry *default-slow-suite-names* (nreverse result))
+      (let* ((pkg (find-package (car entry)))
+             (sym (and pkg (find-symbol (cdr entry) pkg))))
+        (when sym (push sym result))))))
+
+(defun run-tests (&key
+                    (tags nil)
+                    (exclude-tags *default-slow-tags*)
+                    (exclude-suites nil exclude-suites-p)
+                    (parallel nil)
+                    (random nil))
+  "Run all tests in the main cl-cc-suite.
+
+By default, excludes slow suites (selfhost, PBT) and slow tags (:slow :selfhost :pbt :fuzz)
+so that `make test` stays fast. Pass :exclude-suites '() :exclude-tags '() to run everything.
+
+The ASDF 0-arg entry point (uiop:symbol-call :cl-cc/test 'run-tests) hits this fast path."
+  (let ((effective-exclude-suites
+          (if exclude-suites-p exclude-suites (%resolve-default-slow-suites))))
+    (run-suite 'cl-cc-suite
+               :parallel parallel
+               :random random
+               :tags tags
+               :exclude-tags exclude-tags
+               :exclude-suites effective-exclude-suites)))
+
+(defun run-all-tests ()
+  "Run EVERY test including selfhost and PBT suites.
+Intended for local full-verification only (`make test-all`); expect minutes.
+Prefer `run-tests-extended` for day-to-day full runs — it excludes the
+heaviest suites but still covers everything else."
   (run-suite 'cl-cc-suite :parallel t :random nil))
+
+(defun run-tests-extended ()
+  "Run all tests except selfhost and PBT suites. Used by `make test-full`.
+This is the default `full` runner: broader than `run-tests` (which also
+skips slow tags), narrower than `run-all-tests` (which skips nothing).
+Matches the practical sweet spot where the suite finishes in minutes while
+still exercising integration paths."
+  (run-suite 'cl-cc-suite
+             :parallel t
+             :random nil
+             :exclude-suites (%resolve-default-slow-suites)))
+
+(defun %resolve-suite (package-name symbol-name)
+  (let* ((pkg (find-package package-name))
+         (sym (and pkg (find-symbol symbol-name pkg))))
+    (unless sym
+      (error "Suite ~A::~A not found (package not loaded?)"
+             package-name symbol-name))
+    sym))
+
+(defun run-selfhost-tests ()
+  "Run only the self-hosting integration suite. Used by `make test-selfhost`."
+  (run-suite (%resolve-suite "CL-CC/TEST" "SELFHOST-SUITE")
+             :parallel t :random nil))
+
+(defun run-pbt-tests ()
+  "Run only the property-based test suites. Used by `make test-pbt`.
+Honors CLCC_PBT_COUNT to bound per-property case counts."
+  (let* ((pbt (%resolve-suite "CL-CC/PBT" "CL-CC-PBT-SUITE")))
+    (run-suite pbt :parallel t :random nil)))
 
 ;;; ------------------------------------------------------------
 ;;; Suite Definitions (bottom of file — other files use in-suite)
 ;;; ------------------------------------------------------------
 
 (defsuite cl-cc-suite :description "CL-CC Test - Main suite for all tests")
+
+;; Integration tests that exercise the full compile pipeline via run-string.
+;; These are legitimately slow (seconds per test) because every case invokes
+;; parse → expand → cps → optimize → codegen → execute. Excluded from the
+;; default fast path; run via `make test-full` or (run-tests :exclude-suites '()).
+(defsuite cl-cc-integration-suite
+  :description "Full-pipeline integration tests (slow; excluded from make test)"
+  :parent cl-cc-suite)
+
 (in-suite cl-cc-suite)

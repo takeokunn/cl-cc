@@ -4,15 +4,20 @@
 (in-suite cl-cc-suite)
 
 (deftest codegen-if-compilation
-  "Compiling a pure if-form uses vm-select and returns a register."
+  "Compiling a pure if-form emits a vm-jump-zero + labels sequence and returns
+a register. The codegen backend doesn't use vm-select for ordinary IF forms;
+it branches via jump-zero/jump/label. vm-select only appears in specialized
+sink/fold paths."
   (let* ((ctx (make-codegen-ctx))
-         (reg (compile-ast (make-ast-if :cond (make-ast-int :value 1)
-                                         :then (make-ast-int :value 1)
-                                         :else (make-ast-int :value 2))
-                            ctx)))
-    (assert-true (keywordp reg))
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-select))
-    (assert-null (codegen-find-inst ctx 'cl-cc::vm-jump-zero))))
+         (x-reg (cl-cc::make-register ctx)))
+    (setf (cl-cc::ctx-env ctx) (list (cons 'x x-reg)))
+    (let ((reg (compile-ast (make-ast-if :cond (make-ast-var :name 'x)
+                                          :then (make-ast-int :value 1)
+                                          :else (make-ast-int :value 2))
+                             ctx)))
+      (assert-true (keywordp reg))
+      (assert-true (codegen-find-inst ctx 'cl-cc::vm-jump-zero))
+      (assert-true (codegen-find-inst ctx 'cl-cc::vm-jump)))))
 
 (deftest codegen-progn-compilation
   "Compiling a progn returns a register and emits instructions for sub-forms."
@@ -107,49 +112,36 @@
     (assert-true (codegen-find-inst ctx 'cl-cc::vm-cons))
     (assert-true (> (length cars) 0))))
 
-(deftest codegen-let-branch-local-cons-use-delays-component-evaluation
-  "A branch-local non-escaping cons delays component evaluation into the used branch." 
-  (let* ((ctx (make-codegen-ctx))
-         (ast (make-ast-let
-               :bindings (list (cons 'p (make-ast-call
-                                        :func 'cons
-                                        :args (list (make-ast-call
-                                                     :func 'cons
-                                                     :args (list (make-ast-int :value 1)
-                                                                 (make-ast-int :value 2)))
-                                                    (make-ast-int :value 3)))))
-               :body (list (make-ast-if
-                            :cond (make-ast-int :value 1)
-                            :then (make-ast-call :func 'car
-                                                 :args (list (make-ast-var :name 'p)))
-                            :else (make-ast-int :value 0)))))
-         (reg (compile-ast ast ctx))
-         (insts (codegen-instructions ctx))
-         (jump-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-jump-zero)) insts))
-         (cons-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-cons)) insts)))
-    (assert-true (keywordp reg))
-    (assert-true jump-pos)
-    (assert-true cons-pos)
-    (assert-true (> cons-pos jump-pos))))
-
-(deftest codegen-let-multibinding-branch-local-cons-use-delays-component-evaluation
-  "The generalized branch sink handles a non-escaping cons binding even with sibling let bindings."
-  (let* ((ctx (make-codegen-ctx))
-         (ast (make-ast-let
-               :bindings (list (cons 'p (make-ast-call
-                                        :func 'cons
-                                        :args (list (make-ast-call
-                                                     :func 'cons
-                                                     :args (list (make-ast-int :value 1)
-                                                                 (make-ast-int :value 2)))
-                                                    (make-ast-int :value 3))))
-                               (cons 'flag (make-ast-int :value 1)))
-               :body (list (make-ast-if
-                            :cond (make-ast-var :name 'flag)
-                            :then (make-ast-call :func 'car
-                                                 :args (list (make-ast-var :name 'p)))
-                            :else (make-ast-int :value 0)))))
-         (reg (compile-ast ast ctx))
+(deftest-each codegen-let-branch-local-cons-sinks-allocation
+  "Branch-local non-escaping cons delays component evaluation past the branch test (cons-pos > jump-pos)."
+  :cases (("simple-cond"
+           (make-ast-let
+            :bindings (list (cons 'p (make-ast-call
+                                     :func 'cons
+                                     :args (list (make-ast-call :func 'cons
+                                                                :args (list (make-ast-int :value 1)
+                                                                            (make-ast-int :value 2)))
+                                                 (make-ast-int :value 3)))))
+            :body (list (make-ast-if
+                         :cond (make-ast-int :value 1)
+                         :then (make-ast-call :func 'car :args (list (make-ast-var :name 'p)))
+                         :else (make-ast-int :value 0)))))
+          ("multi-binding-cond"
+           (make-ast-let
+            :bindings (list (cons 'p (make-ast-call
+                                     :func 'cons
+                                     :args (list (make-ast-call :func 'cons
+                                                                :args (list (make-ast-int :value 1)
+                                                                            (make-ast-int :value 2)))
+                                                 (make-ast-int :value 3))))
+                            (cons 'flag (make-ast-int :value 1)))
+            :body (list (make-ast-if
+                         :cond (make-ast-var :name 'flag)
+                         :then (make-ast-call :func 'car :args (list (make-ast-var :name 'p)))
+                         :else (make-ast-int :value 0))))))
+  (ast)
+  (let* ((ctx   (make-codegen-ctx))
+         (reg   (compile-ast ast ctx))
          (insts (codegen-instructions ctx))
          (jump-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-jump-zero)) insts))
          (cons-pos (position-if (lambda (inst) (typep inst 'cl-cc::vm-cons)) insts)))

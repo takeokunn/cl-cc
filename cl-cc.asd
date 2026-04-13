@@ -24,8 +24,10 @@
         (:file "ast")
         (:file "prolog-data")
         (:file "prolog")
+        (:file "prolog-query") ; solve-goal + query-all/one + built-ins + peephole
         (:file "dcg")
         (:file "lexer")
+        (:file "lexer-readers")   ; Token readers: number, string, character, symbol, keyword
        (:file "lexer-dispatch")
        (:file "incremental")
        (:file "pratt")
@@ -35,14 +37,18 @@
          :components
          ((:file "parser")
           (:file "lower")
+          (:file "lower-definitions") ; definition forms: flet/defun/defclass/defmethod/etc.
           (:file "parser-roundtrip")
           (:file "grammar")))
        (:module "php"
         :serial t
         :components
         ((:file "lexer")
+         (:file "lexer-ops")
          (:file "parser")
-         (:file "grammar")))
+         (:file "parser-stmt")
+         (:file "grammar")
+         (:file "grammar-stmt")))
        (:file "cst-to-ast")))
       ;; Stage 2: S-expressions → macro-expanded S-expressions
       (:module "expand"
@@ -61,14 +67,18 @@
            (:file "macros-list-utils") ; ordering and list utility helpers
            (:file "macros-restarts") ; restart/condition protocol split from stdlib
            (:file "macros-introspection") ; equalp + implementation stubs
-           (:file "macros-stdlib")   ; stdlib: numeric shorthand + ANSI CL + core stubs
+           (:file "macros-stdlib")       ; stdlib: numeric/control macros (1+, ecase, rotatef...)
+           (:file "macros-stdlib-ansi")  ; ANSI CL Phase 1 (psetf, assert, define-condition...)
+           (:file "macros-stdlib-utils") ; list/tree/string/array utility macros
            (:file "macros-cxr")      ; algorithmic CXR accessor registration
            (:file "macros-hof")      ; higher-order list/search helpers
            (:file "macros-filesystem") ; file/IO/runtime stubs split from stdlib
-           (:file "macros-sequence") ; sequences: sort/reduce/substitute
+           (:file "macros-sequence")      ; sequences: copy/fill/replace/mismatch/delete/substitute
+           (:file "macros-sequence-fold") ; sequences: reduce/nsubstitute/map-into/merge/last/search
            (:file "macros-list-compat") ; list/sequence compatibility helpers split from stdlib
            (:file "macros-plist")      ; property list helpers
-           (:file "macros-compat")  ; ANSI CL compat: package no-ops, progv, coerce, CLOS, plist
+           (:file "macros-compat")      ; pkg/declare/IO/hash/coerce/LTV/feature macros
+           (:file "macros-compat-clos") ; CLOS protocol + MOP introspection + print macros
            (:file "macros-compat-array") ; array compat wrappers split from macros-compat
            (:file "expander-data")      ; expander: grammar tables + dispatch table declarations
            (:file "expander-defstruct") ; expander: defstruct expansion helpers
@@ -92,21 +102,30 @@
         :components
         ((:file "package")
          (:file "vm")
+         (:file "vm-bridge")      ; host function bridge + CLOS slot-definition helpers
          (:file "vm-instructions") ; instruction set definitions
-         (:file "vm-dispatch") ; dispatch protocol + call-frame helpers
-         (:file "vm-execute") ; Core execute-instruction methods + call-frame helpers
-         (:file "vm-clos")    ; CLOS instruction defstructs + execute-instruction methods
-        (:file "vm-run")     ; Handler-case, label table, run-vm, vm2-state
+         (:file "vm-dispatch")    ; call-frame helpers + label table + execution context
+         (:file "vm-dispatch-gf") ; generic function dispatch: classify, EQL, applicable-methods
+         (:file "vm-dispatch-gf-multi") ; qualified-return helpers + multi-dispatch resolution
+         (:file "vm-execute")    ; Core execute-instruction methods (const through closure-ref-idx)
+         (:file "vm-execute-mv") ; Multiple values + apply + globals execute-instruction methods
+         (:file "vm-clos")         ; CLOS instruction defstructs + MRO helpers
+         (:file "vm-clos-execute") ; execute-instruction methods for all CLOS instructions
+        (:file "vm-run")     ; Handler-case, label table, CLOS-based run-compiled
+        (:file "vm-opcodes")      ; Phase-A: defopcode engine, shape macros, vm2-state
+        (:file "vm-opcodes-defs") ; Phase-A: opcode registrations + %run-vm-core + compat shims
        (:file "primitives")
        (:file "vm-bitwise")        ; FR-303: ash, logand, logior, logxor, logeqv, lognot, logtest, logbitp, logcount, integer-length
        (:file "vm-transcendental") ; FR-304: expt, sqrt, exp, log, trig, hyperbolic
        (:file "vm-numeric")
        (:file "vm-extensions")
         (:file "io")
+        (:file "io-execute")      ; execute-instruction methods + run-compiled-with-io
         (:file "format")
         (:file "conditions")
         (:file "list-coerce")
         (:file "list")
+        (:file "list-execute")   ; execute-instruction methods + extended list instructions
         (:file "array")
         (:file "strings")
         (:file "symbols")
@@ -127,10 +146,13 @@
        (:file "effect")
        (:file "row")
        (:file "constraint")
-       (:file "parser")
+       (:file "parser")         ; core type parsing: prim/compound/arrow/effect-row
+       (:file "parser-typed")   ; row/constraint/lambda-list/typed-AST nodes/utilities
        (:file "typeclass")
+       (:file "typeclass-compat") ; instance registry + dict-env + backward-compat aliases
        (:file "solver")
        (:file "inference")
+       (:file "inference-forms")    ; type-predicate registry + if/let/lambda/call handlers + entry points
        (:file "inference-effects")
        (:file "bidirectional")
        (:file "checker")
@@ -151,54 +173,91 @@
        (:file "closure")
         (:file "cps")
         (:file "cps-ast")
-         (:file "builtin-registry-data") ; Entry alists — pure data, no logic
-         (:file "builtin-registry")
-         (:file "codegen-core")
+        (:file "cps-ast-extended") ; extended/imperative forms + entry points
+         (:file "builtin-registry-data") ; Core alists: unary/binary/string-cmp/char-cmp
+         (:file "builtin-registry-data-ext") ; Extended alists: I/O, stream, custom, ternary
+         (:file "builtin-registry")          ; Registry struct + *builtin-registry* + registration
+         (:file "builtin-registry-emitters") ; 27 emit-builtin-* fns + dispatcher table
+         (:file "codegen-core")         ; binop table + primitive/if compilation
+         (:file "codegen-core-control") ; block/return-from + tagbody/go + setq/quote/the
+         (:file "codegen-core-let")      ; let-binding analysis: predicates + walkers
+         (:file "codegen-core-let-emit") ; let-binding emitters + compile-ast (ast-let)
          (:file "codegen-clos")
-         (:file "codegen-functions")
+         (:file "codegen-functions")       ; typed params + defmacro + parameter helpers
+         (:file "codegen-functions-emit")  ; lambda/defun/defvar compile-ast methods
          (:file "codegen-phase2")  ; Phase 2 AST-introspecting builtin handlers
          (:file "codegen-control") ; control-flow + multiple-values compiler methods
          (:file "codegen-io")      ; Phase 2 stream/reader/printer handlers split from phase 2
          (:file "codegen-hash-table") ; hash-table handler cluster split from phase 2
          (:file "codegen-slot-predicates") ; CLOS slot predicate handlers split from phase 2
         (:file "codegen-string-kwargs") ; string comparison/case handlers split from phase 2
-        (:file "codegen")))
+        (:file "codegen-fold")       ; compile-time constant fold + optimize-ast (before codegen)
+        (:file "codegen")
+        (:file "codegen-locals"))) ; local fn bindings: flet/labels/ast-function + emit-assembly
      ;; Stage 5: VM IR → optimized VM IR
      (:module "optimize"
       :serial t
       :components
       ((:file "effects")          ; Phase 0: effect-kind bridge (type-effect-row → optimizer)
-       (:file "cfg")              ; Phase 1: CFG construction + dominator tree + DF
-       (:file "ssa")              ; Phase 1: SSA construction + destruction
-       (:file "egraph")           ; Phase 2: E-graph engine (union-find, saturation, extraction)
+       (:file "cfg")              ; CFG construction + RPO + forward dominators + loop depths
+       (:file "cfg-analysis")    ; post-dominators + critical edge split + dom frontiers + IDF
+       (:file "cfg-layout")      ; flat instruction layout + hot/cold block ordering
+       (:file "ssa")              ; Phase 1: SSA data structures + phi placement + renaming
+       (:file "ssa-construction")  ; ssa-construct + ssa-destroy + round-trip
+       (:file "egraph")             ; Phase 2: E-graph data + union-find + patterns + rules
+       (:file "egraph-saturation")  ; saturation + extraction + VM instruction interface
        (:file "egraph-rules")     ; Phase 2: defrule macro + built-in rewrite rules
-       (:file "optimizer-tables") ; Data tables + predicates (loaded before passes)
-       (:file "optimizer-inline") ; Function inlining pass (opt-pass-inline)
-       (:file "optimizer")))
+       (:file "optimizer-tables")   ; Data tables + predicates (loaded before passes)
+       (:file "optimizer-inline")      ; Analysis: collect-function-defs, call-graph, rename helpers
+       (:file "optimizer-inline-pass") ; Pass execution: global-dce, eligibility, opt-pass-inline
+       (:file "optimizer-dataflow")  ; SCCP (sparse conditional constant propagation)
+       (:file "optimizer-copyprop")  ; copy propagation pass + opt-map-tree utility
+       (:file "optimizer-memory")   ; Alias analysis + memory passes
+       (:file "optimizer-flow")     ; DCE + control flow passes
+       (:file "optimizer-strength")     ; Core: strength-reduce + bswap/rotate recognition
+       (:file "optimizer-strength-ext") ; Extended: reassociation + batch concatenation
+       (:file "optimizer-cse-gvn") ; CSE + GVN + dead-label elimination + leaf-function detection
+       (:file "optimizer-licm")     ; LICM + PRE + constant hoist
+       (:file "optimizer")
+       (:file "optimizer-pipeline"))) ; pass registry + convergence loop + optimize-instructions
      ;; Stage 7: VM IR → native code + binary formats
      (:module "emit"
       :serial t
       :components
-      ((:file "mir")                 ; Phase 1: MIR IR — SSA CFG intermediate
+      ((:file "mir")                 ; Phase 1: MIR IR — SSA CFG intermediate — structs + builder API
+       (:file "mir-analysis")        ; RPO traversal, dominator analysis, printing
        (:file "target")              ; Phase 1: target-desc — unified target descriptors
        (:file "calling-convention")
        (:file "regalloc")
+       (:file "regalloc-allocate") ; linear scan allocation + spill code + public API
        (:file "x86-64")
        (:file "x86-64-encoding")
+       (:file "x86-64-sequences") ; IDIV/shift/CMOVcc/bitwise/SETcc complex sequences
+       (:file "x86-64-regs")
+       (:file "x86-64-emit-ops")
+       (:file "x86-64-emit-ops-logical") ; type predicates + boolean/bitwise logical emitters
        (:file "x86-64-codegen")
        (:file "aarch64")
-       (:file "aarch64-codegen")
+       (:file "aarch64-codegen")  ; reg mapping + instruction encoders + label-offset builder
+       (:file "aarch64-emitters") ; define-a64-*-emitter macros + emit-a64-vm-* functions
+       (:file "aarch64-program")  ; emitter-table, prologue/epilogue, two-pass program emitter
        (:file "wasm-types")
        (:file "wasm-ir")
        (:file "wasm-extract")
        (:file "wasm-trampoline")
+       (:file "wasm-trampoline-emit")  ; data tables + emit-trampoline-instruction (per-inst dispatch)
+       (:file "wasm-trampoline-build") ; body builder + register collector + module assembler
        (:file "wasm")
+       (:file "wasm-emit")    ; emit-instruction methods + compile-to-wasm-wat entry point
        (:module "binary"
         :serial t
         :components
         ((:file "package")
-         (:file "macho")
-         (:file "elf")
+         (:file "macho")           ; constants + structs + buffer helpers + serialization primitives
+         (:file "macho-serialize") ; structure serializers + mach-o-builder class definition
+         (:file "macho-build")     ; builder API (make-mach-o-builder, add-*, build-mach-o)
+         (:file "elf")          ; constants + byte-buffer + strtab + builder struct + API
+         (:file "elf-emit")     ; serialization (symtab/rela/shdr/finalize) + public API
          (:file "wasm")))))
      ;; Bytecode ISA v2: 32-bit instruction encoding + disassembly
      (:module "bytecode"
@@ -206,6 +265,8 @@
       :components
       ((:file "package")
        (:file "encode")
+       (:file "encode-ops")         ; basic-op encoders (load/arith/cmp/branch/call/return)
+       (:file "encode-ops-objects") ; closure/object/hash/type/values/exception + builder API
        (:file "decode")))
      ;; Runtime support: GC + heap
      (:module "runtime"
@@ -213,18 +274,24 @@
       :components
       ((:file "package")
        (:file "runtime")
+       (:file "runtime-math-io") ; strings, chars, symbols, hash-tables, CLOS, conditions, I/O
        (:file "value")
        (:file "frame")
        (:file "heap")
-       (:file "gc")))
+       (:file "gc")          ; Sections 1-4: alloc, roots, minor GC (Cheney), write barrier
+       (:file "gc-major"))) ; Sections 5-6: major GC (tri-color mark-sweep) + stats
      ;; Stage 4 (pipeline): compile-expression, run-string, stdlib API
      ;; Loads last because it calls optimize-instructions + emit-assembly
      (:module "compile-pipeline"
       :pathname "compile"
       :serial t
       :components
-      ((:file "stdlib-source") ; *standard-library-source* string (separated for readability)
-       (:file "pipeline")))))))
+      ((:file "stdlib-source")     ; *standard-library-source* core: mapcar→numeric constants
+       (:file "stdlib-source-ext") ; *standard-library-source* ext: type predicates→control vars
+       (:file "pipeline")
+       (:file "pipeline-native") ; native code generation + typeclass macros
+       (:file "pipeline-repl")   ; REPL persistent state + run-string-repl + our-load
+       ))))))
 
 (asdf:defsystem :cl-cc/bin
   :description "CL-CC CLI tool"
@@ -240,7 +307,10 @@
       :components
       ((:file "package")
        (:file "args")
-       (:file "main")))))))
+       (:file "selfhost") ; Self-hosting verification data + phases (before main.lisp)
+       (:file "main")       ; Help system (%print-global-help, %print-command-help)
+       (:file "main-utils") ; Utilities, dump functions, flamegraph, compile-opts
+       (:file "handlers"))))))) ; Subcommand handlers + main dispatcher
 
 (asdf:defsystem :cl-cc/test
   :description "CL-CC tests"
@@ -284,9 +354,15 @@
             (:file "vm-numeric-tests") ; numeric tower + environment queries
             (:file "vm-extensions-tests") ; symbol plist + progv + generic arithmetic
             (:file "vm-bitwise-tests") ; bitwise integer instructions
-            (:file "vm-clos-tests")    ; execute-instruction for CLOS instructions
+            (:file "vm-clos-tests")    ; collect-inherited-slots, compute-CPL, eql-dispatch-index
+            (:file "vm-clos-execute-tests") ; execute-instruction for class-def/make-obj/slot-read/write/boundp
              (:file "vm-run-tests") ; vm-error-type-matches-p + vm2 run-vm tests
              (:file "vm-dispatch-tests") ; vm-classify-arg + vm-generic-function-p
+             (:file "vm-dispatch-gf-tests") ; EQL specializer helpers from vm-dispatch-gf.lisp
+             (:file "vm-dispatch-gf-multi-tests") ; %vm-gf-uses-composite-keys-p + vm-resolve-gf-method
+             (:file "vm-bridge-tests")  ; hash-table-values, slot-definition-*, rt-plist-put, etc.
+              (:file "vm-opcodes-tests")      ; vm2-state, vm2-reg-get/set, bigram analysis, fusion
+              (:file "vm-opcodes-defs-tests") ; make-vm-state, vm-reg-get/set, vm-state-registers, run-vm-with-bigrams
               (:file "vm-tests") ; vm.lisp core state + helper coverage
               (:file "package-tests") ; cl-cc package export smoke tests
               (:file "conditions-tests")
@@ -303,9 +379,14 @@
           (:module "cl"
            :serial t
            :components
-           ((:file "lower-tests")))
+           ((:file "lower-tests")
+            (:file "lower-arithmetic-tests")    ; n-ary arith, let, lambda, block, setf forms
+            (:file "parser-roundtrip-tests")    ; ast-to-sexp roundtrip for all node types
+            (:file "grammar-tokenstream-tests")  ; token-stream helpers + CST builders
+            (:file "grammar-parser-tests")))     ; parse-cl-atom/form/list-form + parse-cl-source
            (:file "cst-tests")
           (:file "lexer-tests")
+          (:file "lexer-dispatch-tests")  ; feature conditionals, hash dispatch, skip helpers
           (:file "grammar-tests")
            (:file "prolog-data-tests")
            (:file "prolog-tests")
@@ -338,6 +419,7 @@
               (:file "macros-basic-check-type-tests")
               (:file "macros-basic-list-tests")
               (:file "macros-basic-setf-tests")
+              (:file "macros-basic-mvb-tests")
               (:file "expander-setf-tests")
               (:file "expander-setf-places-tests")
               (:file "expander-control-tests")
@@ -382,15 +464,19 @@
              (:file "macros-stdlib-sequence-map-tests")
              (:file "macros-stdlib-list-set-tests")
              (:file "macros-stdlib-io-tests")
+             (:file "macros-stdlib-ansi-tests")   ; with-accessors, assert, define-condition, with-*-string, with-standard-io-syntax
+             (:file "macros-stdlib-utils-tests")  ; tailp/ldiff/copy-alist/tree-equal/get-properties/nunion/nsubst*/nstring*/array-*
              (:file "macros-filesystem-tests")
-              (:file "macros-compat-array-tests")   ; array compat wrappers
-              (:file "macros-compat-tests")         ; remaining ANSI CL compat macros
+              (:file "macros-compat-array-tests")      ; array compat wrappers
+              (:file "macros-compat-tests")            ; remaining ANSI CL compat macros
+              (:file "macros-compat-clos-tests")       ; CLOS protocol + MOP introspection macros
                (:file "macros-plist-tests")    ; getf/remf/%plist-put
               (:file "macros-list-compat-tests") ; subst/vector/member-if/maphash
                (:file "macros-hof-tests")      ; HOF macro expansions split from stdlib
                 (:file "predicate-tests")
                 (:file "macros-mutation-tests")
                 (:file "macros-sequence-tests")
+                (:file "macros-sequence-fold-tests")  ; reduce/last/butlast/merge/search/map-into/nsubstitute runtime behavior
               ))
        (:module "type"
         :serial t
@@ -404,6 +490,10 @@
          (:file "constraint-tests")
          (:file "solver-tests")
          (:file "representation-tests")
+         (:file "substitution-tests")          ; substitution data structure, zonk, composition
+         (:file "unification-tests")           ; product/intersection/constructor/effect-row unification
+         (:file "type-children-tests")         ; type-children / type-bound-var data layer
+         (:file "types-extended-coverage-tests")
          (:file "typeclass-tests")
          (:file "printer-tests")
          (:file "parser-tests")
@@ -419,28 +509,45 @@
             (:file "ir-printer-tests")))
             (:file "cps-tests")
             (:file "cps-ast-tests")
+            (:file "cps-ast-extended-tests") ; setq/the/values/apply/call/defgeneric/entry-points
               (:file "builtin-registry-tests")
              (:file "builtin-registry-data-tests")
              (:file "closure-tests")
            (:file "context-tests")
              (:file "codegen-tests")
+             (:file "codegen-fold-tests")       ; %fold-ast-binop, *compile-time-eval-fns*, %evaluate-ast
              (:file "codegen-phase2-helpers")
              (:file "codegen-core-tests")
+             (:file "codegen-core-let-tests")     ; %ast-let-binding-ignored-p, %ast-cons-call-p, %ast-lambda-bound-names, sink-if
              (:file "codegen-functions-tests")
               (:file "codegen-runtime-tests")
                (:file "codegen-clos-tests")
               (:file "codegen-control-tests")
+              (:file "codegen-locals-tests")  ; target-instance, %compile-body-with-tail, type-check-ast
               (:file "codegen-io-tests")
               (:file "codegen-hash-table-tests")
               (:file "codegen-slot-predicates-tests")
               (:file "codegen-string-kwargs-tests")
              (:file "phase2-handler-tests")
              (:file "codegen-phase2-tests")
-             (:file "stdlib-source-tests")))
+             (:file "stdlib-source-tests")
+             (:file "pipeline-native-tests")))
        (:module "optimize"
         :serial t
         :components
         ((:file "optimizer-tests")
+         (:file "optimizer-tables-tests")   ; fold tables, derived lists, opt-inst-read-regs/dst
+         (:file "optimizer-strength-tests") ; opt-power-of-2-p, opt-pass-strength-reduce, bswap/rotate
+         (:file "optimizer-licm-tests")    ; opt-inst-loop-invariant-p, %opt-pre-*, opt-pass-licm
+         (:file "optimizer-copyprop-tests")
+         (:file "optimizer-strength-ext-tests") ; reassociation pass + batch concatenate
+         (:file "optimizer-cse-gvn-tests")      ; CSE, GVN, dead labels, leaf detection
+         (:file "optimizer-dataflow-tests")     ; SCCP: env copy/equal/merge, fold-inst, pass-sccp
+         (:file "optimizer-memory-tests") ; alias analysis, interval arithmetic, DSE, store-to-load
+         (:file "optimizer-flow-tests")   ; DCE, jump threading, unreachable elim, block/tail merge
+         (:file "optimizer-pipeline-tests") ; parse-pipeline-string, converged-p, adaptive-iters, verify
+         (:file "optimizer-inline-tests")      ; opt-max-reg-index, opt-make-renaming, opt-collect-function-defs, call-graph
+         (:file "optimizer-inline-pass-tests") ; memo utils, body-inst-set/labels, reachability, eligible-p, global-dce, pass-inline
          (:file "effects-tests")
          (:file "cfg-tests")
          (:file "ssa-tests")
@@ -452,11 +559,24 @@
         ((:file "mir-tests")
          (:file "regalloc-tests")
          (:file "wasm-tests")
+         (:file "wasm-ir-tests")        ; wasm IR instruction structs
+         (:file "wasm-types-tests")     ; wasm type encoding helpers
          (:file "aarch64-codegen-tests")
+         (:file "aarch64-emit-tests")   ; aarch64 native emit target + regalloc
+         (:file "aarch64-encoding-tests") ; aarch64 instruction encoding
          (:file "target-tests")
          (:file "wasm-extract-tests")
          (:file "wasm-trampoline-tests")
+         (:file "wasm-trampoline-build-tests") ; collect-registers-from-instructions, build-trampoline-body, build-all-wasm-functions
+         (:file "x86-64-regs-tests")     ; red-zone-spill-p, vm-reg-to-x86/xmm, float-vregs, const-to-int
+         (:file "x86-64-sequences-tests") ; emit-idiv-r11/cqo/sequence, sal/sar/ror-cl, cmov, bool-ops
          (:file "x86-64-codegen-tests")
+         (:file "x86-64-encoding-tests") ; x86-64 rex/modrm/byte/dword/qword encoding
+         (:file "x86-64-emit-tests")     ; x86-64 emit target + instruction emit methods
+         (:file "x86-64-emit-logical-tests") ; logical/bitwise emitters + byte-count checks
+         (:file "x86-64-emit-ops-tests")    ; arithmetic/comparison/unary emitters + byte-count checks
+         (:file "elf-tests")             ; ELF binary format helpers
+         (:file "macho-tests")           ; Mach-O binary format helpers
          (:file "calling-convention-tests")))
        (:module "runtime"
         :serial t
@@ -469,6 +589,7 @@
         :serial t
         :components
         ((:file "encode-tests")
+         (:file "encode-ops-objects-tests")
          (:file "decode-tests")))))
      (:module "integration"
       :serial t
@@ -495,3 +616,29 @@
   :perform (asdf:test-op (op c)
               (declare (ignore op c))
               (uiop:symbol-call :cl-cc/test 'run-tests)))
+
+(asdf:defsystem :cl-cc/test-clos
+  :description "CL-CC isolated CLOS integration tests"
+  :author "CL-CC"
+  :license "MIT"
+  :version "0.1.0"
+  :depends-on (:cl-cc :cl-cc/bin)
+  :serial t
+  :components
+  ((:module "tests"
+    :serial t
+    :components
+    ((:module "framework"
+      :serial t
+      :components
+      ((:file "package")
+       (:file "framework")
+       (:file "framework-advanced")
+       (:file "framework-compiler")
+       (:file "framework-meta")
+       (:file "framework-fuzz")))
+     (:module "integration"
+       :serial t
+       :components
+       ((:file "clos-tests")))))))
+

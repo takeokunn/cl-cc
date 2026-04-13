@@ -83,151 +83,169 @@
                     (member fn-name (cddr decl) :test #'eq))
           return (second decl))))
 
-;;; Type Inference (Algorithm W)
+;;; ── infer-* handlers (one per AST node type) ────────────────────────────
+;;; Each function handles exactly one AST case; `infer` below is a pure
+;;; dispatcher.  New AST node support = add one infer-* function + one arm.
+
+(defun infer-var (ast env)
+  "Infer type of a variable reference; signals unbound-variable-error if missing."
+  (multiple-value-bind (scheme found-p) (type-env-lookup (cl-cc:ast-var-name ast) env)
+    (if found-p
+        (values (instantiate scheme) nil)
+        (error 'unbound-variable-error :name (cl-cc:ast-var-name ast)))))
+
+(defun infer-quote (ast)
+  "Infer type of a quoted literal from its CL type."
+  (values (typecase (cl-cc:ast-quote-value ast)
+            (integer type-int)
+            (string  type-string)
+            (symbol  type-symbol)
+            (cons    type-cons)
+            (t       +type-unknown+))
+          nil))
+
+(defun infer-the (ast env)
+  "Infer type of a type-assertion form, unifying declared and actual types."
+  (multiple-value-bind (body-type subst) (infer (cl-cc:ast-the-value ast) env)
+    (let ((declared (parse-type-specifier (cl-cc:ast-the-type ast))))
+      (multiple-value-bind (unified ok) (type-unify body-type declared subst)
+        (if ok
+            (values (type-substitute declared unified) unified)
+            (error 'type-mismatch-error :expected declared :actual body-type))))))
+
+(defun infer-setq (ast env)
+  "Infer type of a variable assignment; unifies with declared type when present."
+  (multiple-value-bind (val-type subst) (infer (cl-cc:ast-setq-value ast) env)
+    (multiple-value-bind (scheme found-p) (type-env-lookup (cl-cc:ast-setq-var ast) env)
+      (if found-p
+          (let ((declared (instantiate scheme)))
+            (multiple-value-bind (unified ok) (type-unify val-type declared subst)
+              (if ok
+                  (values (type-substitute val-type unified) unified)
+                  (error 'type-mismatch-error :expected declared :actual val-type))))
+          (values val-type subst)))))
+
+(defun infer-defun (ast env)
+  "Infer type of a function definition.
+FR-004 Polymorphic Recursion: an explicit (declare (type T name)) annotation
+seeds the function's own name in body-env so recursive call sites may be
+instantiated at different monotypes."
+  (let* ((fn-name       (cl-cc:ast-defun-name ast))
+         (decls         (cl-cc::ast-defun-declarations ast))
+         (declared-spec (%find-fn-type-declaration fn-name decls))
+         (declared-type (when declared-spec (parse-type-specifier declared-spec)))
+         (param-types   (if (and declared-type (type-function-p declared-type))
+                            (type-function-params declared-type)
+                            (mapcar (lambda (p) (declare (ignore p)) (fresh-type-var))
+                                    (cl-cc:ast-defun-params ast))))
+         (param-bindings (mapcar (lambda (name type)
+                                   (cons name (make-type-scheme nil type)))
+                                 (cl-cc:ast-defun-params ast) param-types))
+         (body-env (let ((e (type-env-extend* param-bindings env)))
+                     (if (and fn-name declared-type)
+                         (type-env-extend fn-name (generalize env declared-type) e)
+                         e))))
+    (multiple-value-bind (body-type subst) (infer-body (cl-cc:ast-defun-body ast) body-env)
+      (values (or declared-type
+                  (make-type-function-raw
+                   :params (mapcar (lambda (p) (type-substitute p subst)) param-types)
+                   :return body-type))
+              subst))))
+
+(defun infer-defvar (ast env)
+  "Infer type of a global variable definition; always returns type-symbol."
+  (when (cl-cc:ast-defvar-value ast)
+    (infer (cl-cc:ast-defvar-value ast) env))
+  (values type-symbol nil))
+
+(defun infer-function (ast env)
+  "Infer type of a #'name function reference; returns its scheme or unknown."
+  (multiple-value-bind (scheme found-p) (type-env-lookup (cl-cc:ast-function-name ast) env)
+    (if found-p
+        (values (instantiate scheme) nil)
+        (values +type-unknown+ nil))))
+
+(defun infer-flet (ast env)
+  "Infer type of an flet form; each binding is inferred against the parent env."
+  (let ((new-env env))
+    (dolist (binding (cl-cc:ast-flet-bindings ast))
+      (setf new-env (%infer-fn-binding binding env new-env)))
+    (infer-body (cl-cc:ast-flet-body ast) new-env)))
+
+(defun infer-labels (ast env)
+  "Infer type of a labels form using a two-pass strategy for mutual recursion.
+Pass 1: seed each name with a fresh type variable so recursive calls resolve.
+Pass 2: infer each binding in the fully-seeded mutual environment."
+  (let ((new-env env))
+    (dolist (binding (cl-cc:ast-labels-bindings ast))
+      (setf new-env (type-env-extend (first binding)
+                                     (make-type-scheme nil (fresh-type-var))
+                                     new-env)))
+    (dolist (binding (cl-cc:ast-labels-bindings ast))
+      (setf new-env (%infer-fn-binding binding new-env new-env)))
+    (infer-body (cl-cc:ast-labels-body ast) new-env)))
+
+(defun infer-defclass (ast)
+  "Register the class's slot types and return type-symbol."
+  (let ((slot-types (loop for slot in (cl-cc:ast-defclass-slots ast)
+                          for stype = (cl-cc:ast-slot-type slot)
+                          collect (cons (cl-cc:ast-slot-name slot)
+                                        (if stype
+                                            (parse-type-specifier stype)
+                                            +type-unknown+)))))
+    (register-class-type (cl-cc:ast-defclass-name ast) slot-types)
+    (values type-symbol nil)))
+
+(defun infer-make-instance (ast)
+  "Infer type of a make-instance call; uses the class name as a primitive type."
+  (let ((class-expr (cl-cc:ast-make-instance-class ast)))
+    (if (and (typep class-expr 'cl-cc:ast-quote)
+             (symbolp (cl-cc:ast-quote-value class-expr)))
+        (values (make-type-primitive :name (cl-cc:ast-quote-value class-expr)) nil)
+        (values +type-unknown+ nil))))
+
+(defun infer-slot-value (ast env)
+  "Infer type of a slot-value access; resolves slot type from class registry."
+  (multiple-value-bind (obj-type subst) (infer (cl-cc:ast-slot-value-object ast) env)
+    (let ((slot-type (if (typep obj-type 'type-primitive)
+                         (or (lookup-slot-type (type-primitive-name obj-type)
+                                               (cl-cc:ast-slot-value-slot ast))
+                             +type-unknown+)
+                         +type-unknown+)))
+      (values slot-type subst))))
+
+;;; Type Inference (Algorithm W) — pure dispatcher
+;;;
+;;; Each arm is a one-liner.  All logic lives in the infer-* helpers above.
 
 (defun infer (ast env)
   "Infer type of AST in environment.
-   Returns (values type substitution) or signals type-error."
+Returns (values type substitution) or signals a type-error condition."
   (typecase ast
-    (cl-cc:ast-int
-     (values type-int nil))
-
-    (cl-cc:ast-var
-     (multiple-value-bind (scheme found-p) (type-env-lookup (cl-cc:ast-var-name ast) env)
-       (if found-p
-           (values (instantiate scheme) nil)
-           (error 'unbound-variable-error :name (cl-cc:ast-var-name ast)))))
-
-    (cl-cc::ast-hole
-     (error 'typed-hole-error
-            :message (%typed-hole-message env)))
-
-    (cl-cc:ast-binop  (infer-binop  ast env))
-    (cl-cc:ast-if     (infer-if     ast env))
-    (cl-cc:ast-let    (infer-let    ast env))
-    (cl-cc:ast-lambda (infer-lambda ast env))
-    (cl-cc:ast-progn  (infer-progn  ast env))
-    (cl-cc:ast-call   (infer-call   ast env))
-    (cl-cc:ast-print  (infer-print  ast env))
-
-    (cl-cc:ast-quote
-     (let ((val (cl-cc:ast-quote-value ast)))
-       (values (typecase val
-                 (integer type-int)
-                 (string  type-string)
-                 (symbol  type-symbol)
-                 (cons    type-cons)
-                 (t       +type-unknown+))
-               nil)))
-
-    (cl-cc:ast-the
-     (multiple-value-bind (body-type subst) (infer (cl-cc:ast-the-value ast) env)
-       (let ((declared (parse-type-specifier (cl-cc:ast-the-type ast))))
-         (multiple-value-bind (unified ok) (type-unify body-type declared subst)
-           (if ok
-               (values (type-substitute declared unified) unified)
-               (error 'type-mismatch-error :expected declared :actual body-type))))))
-
-    (cl-cc:ast-setq
-     (multiple-value-bind (val-type subst) (infer (cl-cc:ast-setq-value ast) env)
-       (multiple-value-bind (scheme found-p) (type-env-lookup (cl-cc:ast-setq-var ast) env)
-         (if found-p
-             (let ((declared (instantiate scheme)))
-               (multiple-value-bind (unified ok) (type-unify val-type declared subst)
-                 (if ok
-                     (values (type-substitute val-type unified) unified)
-                     (error 'type-mismatch-error :expected declared :actual val-type))))
-             (values val-type subst)))))
-
-    (cl-cc:ast-defun
-     ;; FR-004: Polymorphic Recursion.
-     ;; If the defun has an explicit (declare (type fn-type name)) annotation,
-     ;; add the function's own name to body-env with a generalized scheme so
-     ;; the recursive call site may be instantiated at different monotypes.
-     (let* ((fn-name      (cl-cc:ast-defun-name ast))
-            (decls        (cl-cc::ast-defun-declarations ast))
-            (declared-spec (%find-fn-type-declaration fn-name decls))
-            (declared-type (when declared-spec (parse-type-specifier declared-spec)))
-            (param-types  (if (and declared-type (type-function-p declared-type))
-                              (type-function-params declared-type)
-                              (mapcar (lambda (p) (declare (ignore p)) (fresh-type-var))
-                                      (cl-cc:ast-defun-params ast))))
-            (param-bindings (mapcar (lambda (name type)
-                                      (cons name (make-type-scheme nil type)))
-                                    (cl-cc:ast-defun-params ast) param-types))
-            ;; Build body env: params + optional self-reference for poly recursion.
-            (body-env (let ((e (type-env-extend* param-bindings env)))
-                        (if (and fn-name declared-type)
-                            (type-env-extend fn-name (generalize env declared-type) e)
-                            e))))
-       (multiple-value-bind (body-type subst)
-           (infer-body (cl-cc:ast-defun-body ast) body-env)
-         (values (or declared-type
-                     (make-type-function-raw
-                      :params (mapcar (lambda (p) (type-substitute p subst)) param-types)
-                      :return body-type))
-                 subst))))
-
-    (cl-cc:ast-defvar
-     (when (cl-cc:ast-defvar-value ast)
-       (infer (cl-cc:ast-defvar-value ast) env))
-     (values type-symbol nil))
-
-    (cl-cc:ast-function
-     (multiple-value-bind (scheme found-p) (type-env-lookup (cl-cc:ast-function-name ast) env)
-       (if found-p
-           (values (instantiate scheme) nil)
-           (values +type-unknown+ nil))))
-
-    (cl-cc:ast-flet
-     (let ((new-env env))
-       (dolist (binding (cl-cc:ast-flet-bindings ast))
-         (setf new-env (%infer-fn-binding binding env new-env)))
-       (infer-body (cl-cc:ast-flet-body ast) new-env)))
-
-    (cl-cc:ast-labels
-     (let ((new-env env))
-       ;; First pass: seed all names so recursive calls resolve.
-       (dolist (binding (cl-cc:ast-labels-bindings ast))
-         (setf new-env (type-env-extend (first binding)
-                                        (make-type-scheme nil (fresh-type-var))
-                                        new-env)))
-       ;; Second pass: infer each binding in the mutually-recursive env.
-       (dolist (binding (cl-cc:ast-labels-bindings ast))
-         (setf new-env (%infer-fn-binding binding new-env new-env)))
-       (infer-body (cl-cc:ast-labels-body ast) new-env)))
-
-    (cl-cc:ast-block       (infer-body (cl-cc:ast-block-body ast) env))
-    (cl-cc:ast-return-from (infer (cl-cc:ast-return-from-value ast) env))
-
-    (cl-cc:ast-defclass
-     (let* ((class-name (cl-cc:ast-defclass-name ast))
-            (slot-types (loop for slot in (cl-cc:ast-defclass-slots ast)
-                              for stype = (cl-cc:ast-slot-type slot)
-                              collect (cons (cl-cc:ast-slot-name slot)
-                                            (if stype
-                                                (parse-type-specifier stype)
-                                                +type-unknown+)))))
-       (register-class-type class-name slot-types)
-       (values type-symbol nil)))
-
-    (cl-cc:ast-make-instance
-     (let ((class-expr (cl-cc:ast-make-instance-class ast)))
-       (if (and (typep class-expr 'cl-cc:ast-quote)
-                (symbolp (cl-cc:ast-quote-value class-expr)))
-           (values (make-type-primitive :name (cl-cc:ast-quote-value class-expr)) nil)
-           (values +type-unknown+ nil))))
-
-    (cl-cc:ast-slot-value
-     (multiple-value-bind (obj-type subst) (infer (cl-cc:ast-slot-value-object ast) env)
-       (let* ((slot-name (cl-cc:ast-slot-value-slot ast))
-              (slot-type (if (typep obj-type 'type-primitive)
-                             (or (lookup-slot-type (type-primitive-name obj-type) slot-name)
-                                 +type-unknown+)
-                             +type-unknown+)))
-         (values slot-type subst))))
-
-    ;; Unknown AST node — gradual typing fallback.
+    (cl-cc:ast-int           (values type-int nil))
+    (cl-cc:ast-var           (infer-var           ast env))
+    (cl-cc::ast-hole         (error 'typed-hole-error :message (%typed-hole-message env)))
+    (cl-cc:ast-quote         (infer-quote         ast))
+    (cl-cc:ast-binop         (infer-binop         ast env))
+    (cl-cc:ast-if            (infer-if            ast env))
+    (cl-cc:ast-the           (infer-the           ast env))
+    (cl-cc:ast-setq          (infer-setq          ast env))
+    (cl-cc:ast-let           (infer-let           ast env))
+    (cl-cc:ast-lambda        (infer-lambda        ast env))
+    (cl-cc:ast-progn         (infer-progn         ast env))
+    (cl-cc:ast-call          (infer-call          ast env))
+    (cl-cc:ast-print         (infer-print         ast env))
+    (cl-cc:ast-defun         (infer-defun         ast env))
+    (cl-cc:ast-defvar        (infer-defvar        ast env))
+    (cl-cc:ast-function      (infer-function      ast env))
+    (cl-cc:ast-flet          (infer-flet          ast env))
+    (cl-cc:ast-labels        (infer-labels        ast env))
+    (cl-cc:ast-block         (infer-body (cl-cc:ast-block-body ast) env))
+    (cl-cc:ast-return-from   (infer (cl-cc:ast-return-from-value ast) env))
+    (cl-cc:ast-defclass      (infer-defclass      ast))
+    (cl-cc:ast-make-instance (infer-make-instance ast))
+    (cl-cc:ast-slot-value    (infer-slot-value    ast env))
+    ;; Gradual typing: unknown AST nodes become the unknown type.
     (t (values +type-unknown+ nil))))
 
 (defun %typed-hole-message (env)
@@ -271,344 +289,3 @@
                      :expected expected
                      :actual op-type)))))))
 
-;;; Type Predicate Registry (data-driven, extensible)
-
-(defvar *type-predicate-table* (make-hash-table :test #'eq)
-  "Maps predicate name symbols to the type-node they test for.
-   E.g., 'integerp → type-int.  Extensible via register-type-predicate.")
-
-(defun register-type-predicate (predicate-name type-node)
-  "Register PREDICATE-NAME as testing for TYPE-NODE."
-  (setf (gethash predicate-name *type-predicate-table*) type-node))
-
-(defun type-predicate-to-type (predicate-name)
-  "Map a type predicate name to the type it tests for.
-   Looks up *type-predicate-table*; returns nil if not registered."
-  (gethash predicate-name *type-predicate-table*))
-
-;; Bootstrap built-in predicates at load time.
-(register-type-predicate 'numberp   type-int)
-(register-type-predicate 'integerp  type-int)
-(register-type-predicate 'stringp   type-string)
-(register-type-predicate 'symbolp   type-symbol)
-(register-type-predicate 'consp     type-cons)
-(register-type-predicate 'null      type-null)
-(register-type-predicate 'characterp (make-type-primitive :name 'character))
-(register-type-predicate 'functionp  (make-type-primitive :name 'function))
-
-(defun extract-type-guard (cond-ast)
-  "Extract type guard info from a condition AST.
-   If the condition is (predicate var) where predicate is a type predicate,
-   returns (values var-name narrowed-type) or (values nil nil).
-   Also handles (typep var 'classname) pattern."
-  (when (typep cond-ast 'cl-cc:ast-call)
-    (let ((func (cl-cc:ast-call-func cond-ast))
-          (args (cl-cc:ast-call-args cond-ast)))
-      (cond
-        ;; (predicate var) pattern
-        ((and (typep func 'cl-cc:ast-var)
-              (= (length args) 1)
-              (typep (first args) 'cl-cc:ast-var))
-         (let ((pred-type (type-predicate-to-type (cl-cc:ast-var-name func))))
-           (when pred-type
-             (values (cl-cc:ast-var-name (first args)) pred-type))))
-        ;; (typep var 'classname) pattern
-        ((and (typep func 'cl-cc:ast-var)
-              (eq (cl-cc:ast-var-name func) 'typep)
-              (= (length args) 2)
-              (typep (first args) 'cl-cc:ast-var)
-              (typep (second args) 'cl-cc:ast-quote)
-              (symbolp (cl-cc:ast-quote-value (second args))))
-         (let* ((class-name (cl-cc:ast-quote-value (second args)))
-                (prim-type (make-type-primitive :name class-name)))
-           (values (cl-cc:ast-var-name (first args)) prim-type)))
-        (t (values nil nil))))))
-
-(defun narrow-union-type (union-type keep-type)
-  "Remove KEEP-TYPE from UNION-TYPE, returning the remaining types.
-   If UNION-TYPE is (or A B C) and KEEP-TYPE is A, returns (or B C)."
-  (if (typep union-type 'type-union)
-      (let ((remaining (remove-if (lambda (t1) (type-equal-p t1 keep-type))
-                                  (type-union-types union-type))))
-        (cond
-          ((null remaining) +type-unknown+)
-          ((= (length remaining) 1) (first remaining))
-          (t (make-type-union remaining))))
-      union-type))
-
-(defun infer-if (ast env)
-  "Infer type for if expression.
-   Supports type narrowing: (if (numberp x) ...) narrows x in each branch."
-  (let ((subst1 nil))
-    ;; Infer condition type — allow failures for gradual typing
-    (handler-case
-        (multiple-value-bind (ct s1)
-            (infer (cl-cc:ast-if-cond ast) env)
-          (declare (ignore ct))
-          (setf subst1 s1))
-      (error () nil))
-    ;; Extract type guard info for narrowing
-    (multiple-value-bind (guard-var guard-type)
-        (extract-type-guard (cl-cc:ast-if-cond ast))
-      (let* ((base-env (apply-subst-env env subst1))
-             ;; Narrow environments for each branch
-             (then-env (if guard-var
-                           (type-env-extend guard-var
-                                            (make-type-scheme nil guard-type)
-                                            base-env)
-                           base-env))
-             (else-env (if guard-var
-                           (multiple-value-bind (scheme found-p) (type-env-lookup guard-var base-env)
-                             (let ((var-type (if found-p (instantiate scheme) nil)))
-                               (if (and var-type (typep var-type 'type-union))
-                                   (type-env-extend guard-var
-                                                    (make-type-scheme nil (narrow-union-type var-type guard-type))
-                                                    base-env)
-                                   base-env)))
-                           base-env)))
-        (multiple-value-bind (then-type subst2)
-            (infer (cl-cc:ast-if-then ast) then-env)
-          (multiple-value-bind (else-type subst3)
-              (infer (cl-cc:ast-if-else ast) (apply-subst-env else-env subst2))
-            (multiple-value-bind (final-subst final-ok) (type-unify then-type else-type subst3)
-              (declare (ignore final-ok))
-              (values (type-substitute then-type final-subst) final-subst))))))))
-
-;;; FR-1604: Value Restriction
-;;; Only syntactic values (lambda, literal, variable, quote, #'fn) may be
-;;; generalized.  Applications and other impure expressions are kept monomorphic
-;;; to prevent unsound polymorphism with mutable state.
-
-(defun syntactic-value-p (ast)
-  "Return T if AST is a syntactic value safe to generalize (value restriction).
-   Values: integer/string literals, variable references, lambdas, quoted data,
-   function references, and typed holes.
-   Non-values: function calls, binary operations, let/if/progn, etc."
-  (typep ast '(or cl-cc:ast-int
-                  cl-cc:ast-var
-                  cl-cc:ast-lambda
-                  cl-cc:ast-quote
-                  cl-cc:ast-function
-                   cl-cc::ast-hole)))
-
-(defun infer-let (ast env)
-  "Infer type for let with polymorphism (value restriction applied).
-   Only syntactic values are generalized; applications stay monomorphic."
-  (let ((new-env env))
-    (dolist (binding (cl-cc:ast-let-bindings ast))
-      (let* ((name (car binding))
-             (expr (cdr binding))
-             (type (multiple-value-bind (result-type s) (infer expr new-env)
-                     (type-substitute result-type s)))
-             ;; Value restriction: generalize only syntactic values.
-             (scheme (if (syntactic-value-p expr)
-                         (generalize new-env type)
-                         (make-type-scheme nil type))))
-        (setf new-env (type-env-extend name scheme new-env))))
-    (infer-body (cl-cc:ast-let-body ast) new-env)))
-
-(defun infer-lambda (ast env)
-  "Infer type for lambda."
-  (let* ((param-types (mapcar (lambda (p)
-                                (declare (ignore p))
-                                (fresh-type-var))
-                              (cl-cc:ast-lambda-params ast)))
-         (param-bindings (mapcar (lambda (name type)
-                                   (cons name (make-type-scheme nil type)))
-                                 (cl-cc:ast-lambda-params ast)
-                                 param-types))
-         (body-env (type-env-extend* param-bindings env)))
-    (multiple-value-bind (body-type subst)
-        (infer-body (cl-cc:ast-lambda-body ast) body-env)
-      (values (make-type-function-raw
-                             :params (mapcar (lambda (p)
-                                               (type-substitute p subst))
-                                             param-types)
-                             :return body-type)
-              subst))))
-
-(defun infer-progn (ast env)
-  "Infer type for progn (sequence of expressions)."
-  (infer-body (cl-cc:ast-progn-forms ast) env))
-
-(defun infer-print (ast env)
-  "Infer type for print (returns type of printed expression)."
-  (infer (cl-cc:ast-print-expr ast) env))
-
-(defun check-qualified-constraints (func-type subst env)
-  "If FUNC-TYPE is a qualified type (Eq a) => ..., verify each constraint
-   is satisfied for the instantiated type argument."
-  (when (typep func-type 'type-qualified)
-    (dolist (constraint (type-qualified-constraints func-type))
-      (let* ((class-name (type-class-constraint-class-name constraint))
-             (type-arg (type-substitute
-                        (type-class-constraint-type-arg constraint)
-                        subst)))
-        (unless (or (typep type-arg 'type-unknown)
-                    (typep type-arg 'type-variable)
-                    (and (type-env-p env)
-                         (dict-env-lookup class-name type-arg env))
-                    (has-typeclass-instance-p class-name type-arg))
-          (error 'type-inference-error
-                 :message (format nil "No instance of ~A for ~A"
-                                  class-name
-                                  (type-to-string type-arg))))))))
-
-
-(defun infer-call (ast env)
-  "Infer type for function call with typeclass constraint checking."
-  (multiple-value-bind (func-type subst1)
-      (infer (cl-cc:ast-call-func ast) env)
-    (let* ((result-type (fresh-type-var))
-           (arg-types (infer-args (cl-cc:ast-call-args ast)
-                                  (apply-subst-env env subst1)))
-           (expected-fn (make-type-function-raw
-                                       :params arg-types
-                                       :return result-type)))
-      (multiple-value-bind (subst ok)
-          (type-unify func-type expected-fn subst1)
-        (if ok
-            (progn
-              ;; Check typeclass constraints if callee has a qualified type
-              (check-qualified-constraints func-type subst env)
-              (values (type-substitute result-type subst) subst))
-            (error 'type-mismatch-error
-                   :expected expected-fn :actual func-type))))))
-
-(defun infer-args (asts env)
-  "Infer types for list of ASTs (function arguments).
-   Threads substitution through each argument so constraints from arg N
-   propagate to the environment for arg N+1."
-  (let ((subst nil)
-        (current-env env))
-    (mapcar (lambda (ast)
-              (multiple-value-bind (type new-subst)
-                  (infer ast current-env)
-                (setf subst (compose-subst new-subst subst))
-                (setf current-env (apply-subst-env current-env new-subst))
-                (type-substitute type subst)))
-            asts)))
-
-(defun infer-body (asts env)
-  "Infer type of sequence (return last type).
-   ASTS is a list of AST nodes. ENV must be a type-env object."
-  (if (null asts)
-      (values type-null nil)
-      (let ((subst nil)
-            (current-env env))
-        (dolist (ast asts)
-          (multiple-value-bind (type new-subst) (infer ast current-env)
-            (declare (ignore type))
-            (setf subst (compose-subst new-subst subst))
-            (setf current-env (apply-subst-env current-env subst))))
-        ;; Infer last element again to get final type
-        (let ((last-ast (car (last asts))))
-          (multiple-value-bind (final-type final-subst)
-              (infer last-ast current-env)
-            (values (type-substitute final-type (compose-subst final-subst subst))
-                    (compose-subst final-subst subst)))))))
-
-
-(defun infer-with-env (ast)
-  "Infer type of AST in empty environment (convenience function)."
-  (infer ast (type-env-empty)))
-
-(defun infer-with-constraints (ast env)
-  "Infer type by generating constraints and then solving them.
-   Returns (values type substitution residual-constraints)."
-  (multiple-value-bind (ty constraints)
-      (collect-constraints ast env)
-    (multiple-value-bind (subst residual)
-        (solve-constraints constraints nil)
-      (values (type-substitute ty subst) subst residual))))
-
-;;; Type Annotation
-
-(defun annotate-type (ast env)
-  "Annotate AST with inferred types (for debugging).
-   Returns (values type annotated-ast)."
-  (multiple-value-bind (type subst) (infer ast env)
-    (declare (ignore subst))
-    (values type ast)))
-
-;;; Condition Classes
-
-(define-condition type-inference-error (error)
-  ((message :initarg :message :reader type-inference-error-message))
-  (:report (lambda (condition stream)
-             (format stream "Type inference error: ~A"
-                     (type-inference-error-message condition)))))
-
-(define-condition typed-hole-error (type-inference-error)
-  ())
-
-(define-condition unbound-variable-error (type-inference-error)
-  ((name :initarg :name :initform nil :reader unbound-variable-error-name))
-  (:report (lambda (condition stream)
-             (format stream "Unbound variable: ~A"
-                     (unbound-variable-error-name condition)))))
-
-(define-condition type-mismatch-error (type-inference-error)
-  ((expected :initarg :expected :initform nil :reader type-mismatch-error-expected)
-   (actual :initarg :actual :initform nil :reader type-mismatch-error-actual))
-  (:report (lambda (condition stream)
-             (format stream "Type mismatch: expected ~A, got ~A"
-                     (type-to-string (type-mismatch-error-expected condition))
-                     (type-to-string (type-mismatch-error-actual condition))))))
-
-;;; NOTE: Effect inference (infer-effects, infer-with-effects, check-body-effects,
-;;;       *effect-signature-table*, register-effect-signature, lookup-effect-signature)
-;;;       are in inference-effects.lisp which loads after this file.
-
-;;; NOTE: Bidirectional type checking (synthesize, check, check-body,
-;;;       and skolem helpers) are in bidirectional.lisp which loads after this file.
-
-;;; NOTE: Constraint solving (make-constraint, solve-constraints, unify-constraint
-;;;       struct) are defined in solver.lisp which loads after this file.
-;;;       Do NOT define stubs here to avoid API mismatch.
-
-;;; NOTE: generalize-in-env and instantiate-scheme are in substitution.lisp.
-;;;       *typeclass-registry*, register-typeclass, lookup-typeclass,
-;;;       *typeclass-instance-registry*, register-typeclass-instance,
-;;;       lookup-typeclass-instance are all defined in typeclass.lisp.
-;;;       Do NOT redefine them here.
-
-;;; Exports
-
-(export '(infer
-          infer-binop
-          infer-if
-          infer-let
-          infer-lambda
-          infer-call
-          infer-progn
-          infer-args
-          infer-with-env
-          annotate-type
-          syntactic-value-p
-          *type-predicate-table*
-          register-type-predicate
-
-          type-inference-error
-          type-inference-error-message
-          unbound-variable-error
-          unbound-variable-error-name
-          type-mismatch-error
-          type-mismatch-error-expected
-          type-mismatch-error-actual
-
-          ;; Type class registries (Phase 4) — defined in typeclass.lisp, re-exported here
-          *typeclass-registry*
-          register-typeclass
-          lookup-typeclass
-          *typeclass-instance-registry*
-          register-typeclass-instance
-          lookup-typeclass-instance
-          has-typeclass-instance-p
-          check-typeclass-constraint
-          dict-env-extend
-          dict-env-lookup
-          check-qualified-constraints
-
-          ;; Phase 6 rank-N: check mode required for forall
-          ))

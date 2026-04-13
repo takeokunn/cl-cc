@@ -6,6 +6,8 @@
   :description "Macro assignment expansion tests"
   :parent cl-cc-suite)
 
+
+(in-suite macro-assignment-suite)
 (deftest setf-macro-simple-symbol
   "Test SETF with simple symbol"
   (assert-equal (our-macroexpand-1 '(setf x 10))

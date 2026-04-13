@@ -115,6 +115,22 @@
                  :vm-func-ref
                  :vm-push
                  :vm-pop
+                 ;; Additional VM instruction types used as hash keys in fold
+                 ;; tables and as defstruct type tags in emitter tests.
+                 :vm-lcm :vm-gcd :vm-ash :vm-rotate :vm-bswap
+                 :vm-logand :vm-logior :vm-logxor :vm-logeqv
+                 :vm-logtest :vm-logbitp :vm-logcount :vm-integer-length
+                 :vm-min :vm-max :vm-rem :vm-mod :vm-div :vm-truncate
+                 :vm-floor-inst :vm-ceiling-inst :vm-round-inst
+                 :vm-lognot :vm-rational :vm-rationalize :vm-numerator :vm-denominator
+                 :vm-make-array
+                 :vm-eq :vm-num-eq :vm-lt :vm-gt :vm-le :vm-ge
+                 :vm-and :vm-or :vm-abs :vm-inc :vm-dec :vm-not
+                 :vm-neg :vm-null-p
+                 :vm-concatenate :vm-select
+                 :vm-cons-p :vm-symbol-p :vm-number-p :vm-integer-p :vm-function-p
+                 :vm-integer-add :vm-integer-sub :vm-integer-mul
+                 :vm-float-add :vm-float-sub :vm-float-mul :vm-float-div
                  ;; VM Instruction constructors (defstruct)
                  :make-vm-add :make-vm-call :make-vm-car :make-vm-cdr
                  :make-vm-closure-ref-idx :make-vm-cons :make-vm-const
@@ -134,6 +150,14 @@
                   :make-vm-logbitp :make-vm-logcount :make-vm-integer-length
                   :make-vm-bswap
                   :make-vm-format-inst :make-vm-make-string
+                  ;; Additional VM constructors required by emitter/codegen tests
+                  :make-vm-abs :make-vm-and :make-vm-or
+                  :make-vm-eq :make-vm-num-eq
+                  :make-vm-div :make-vm-mod :make-vm-rem :make-vm-truncate
+                  :make-vm-min :make-vm-max :make-vm-rotate
+                  :make-vm-concatenate :make-vm-make-array
+                  :make-vm-float-add :make-vm-integer-add :make-vm-integer-mul
+                  :make-vm-register-function :make-vm-select
                  ;; VM Heap operations
                  :vm-cons
                  :vm-car
@@ -573,7 +597,9 @@
                  :make-constraint
                  ;; Constraint solver
                  :solve-constraints :collect-constraints)
-  (:export :run-tests :cl-cc-suite
+  (:export :run-tests :run-all-tests
+           :run-tests-extended :run-selfhost-tests :run-pbt-tests
+           :cl-cc-suite
            :run-suite
            :deftest
            :defsuite

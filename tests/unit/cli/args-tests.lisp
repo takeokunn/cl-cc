@@ -140,11 +140,6 @@
     (assert-string= "-" (cl-cc/cli:parsed-args-command p))
     (assert-null (cl-cc/cli:parsed-args-positional p))))
 
-(deftest cli-args-double-dash-signals-error
-  "parse-args: '--' alone is an unknown flag, not a separator"
-  (assert-signals cl-cc/cli:arg-parse-error
-    (cl-cc/cli:parse-args '("--"))))
-
 (deftest cli-args-empty-inline-value
   "parse-args: '--output=' stores the empty string as the value"
   (let ((p (cl-cc/cli:parse-args '("compile" "f.lisp" "--output="))))
@@ -175,30 +170,16 @@
 ;;; Error cases
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest cli-args-unknown-flag
-  "parse-args: unknown flag signals arg-parse-error"
-  (assert-signals cl-cc/cli:arg-parse-error
-    (cl-cc/cli:parse-args '("run" "--totally-unknown"))))
-
-(deftest cli-args-missing-value-for-output
-  "parse-args: --output without a value signals arg-parse-error"
-  (assert-signals cl-cc/cli:arg-parse-error
-    (cl-cc/cli:parse-args '("compile" "f.lisp" "--output"))))
-
-(deftest cli-args-missing-value-for-short
-  "parse-args: -o without a value signals arg-parse-error"
-  (assert-signals cl-cc/cli:arg-parse-error
-    (cl-cc/cli:parse-args '("compile" "f.lisp" "-o"))))
-
-(deftest cli-args-bool-with-inline-value-errors
-  "parse-args: --stdlib=true is invalid (bool flag takes no value)"
-  (assert-signals cl-cc/cli:arg-parse-error
-    (cl-cc/cli:parse-args '("run" "--stdlib=true"))))
-
-(deftest cli-args-triple-dash-is-unknown
-  "parse-args: '---foo' is not in the flag spec — signals arg-parse-error"
-  (assert-signals cl-cc/cli:arg-parse-error
-    (cl-cc/cli:parse-args '("run" "---foo"))))
+(deftest-each cli-args-error-cases
+  "Various invalid argv inputs signal arg-parse-error."
+  :cases (("unknown-flag"         '("run" "--totally-unknown"))
+          ("double-dash"          '("--"))
+          ("bool-with-value"      '("run" "--stdlib=true"))
+          ("triple-dash"          '("run" "---foo"))
+          ("missing-output-long"  '("compile" "f.lisp" "--output"))
+          ("missing-output-short" '("compile" "f.lisp" "-o")))
+  (argv)
+  (assert-signals cl-cc/cli:arg-parse-error (cl-cc/cli:parse-args argv)))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Combined invocations

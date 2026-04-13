@@ -199,7 +199,10 @@
     ;; Use CL's read-from-string to get both the value and the end position (FR-617)
     (multiple-value-bind (value end-pos)
         (if (stringp str)
-            (cl:read-from-string str nil nil)
+            (let ((*read-eval* (multiple-value-bind (flag foundp)
+                                   (gethash '*read-eval* (vm-global-vars state))
+                                 (if foundp flag t))))
+              (cl:read-from-string str nil nil))
             (values nil 0))
       (vm-reg-set state (vm-dst inst) value)
       ;; Store both values so (multiple-value-bind (obj pos) (read-from-string ...) ...) works

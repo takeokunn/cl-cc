@@ -6,8 +6,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite dcg-suite :description "DCG engine unit tests")
+(defsuite dcg-suite :description "DCG engine unit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite dcg-suite)
 ;;; ─── Helpers ──────────────────────────────────────────────────────────────
 
 (defun dcg-input (&rest type-value-pairs)
@@ -212,8 +215,10 @@
 
 ;;; ─── *dcg-sync-tokens* ─────────────────────────────────────────────────────
 
-(deftest dcg-sync-tokens-default
+(deftest-each dcg-sync-tokens-default
   "Default sync tokens include :T-RPAREN, :T-SEMI, :T-EOF."
-  (assert-true (member :T-RPAREN cl-cc::*dcg-sync-tokens*))
-  (assert-true (member :T-SEMI cl-cc::*dcg-sync-tokens*))
-  (assert-true (member :T-EOF cl-cc::*dcg-sync-tokens*)))
+  :cases (("rparen" :T-RPAREN)
+          ("semi"   :T-SEMI)
+          ("eof"    :T-EOF))
+  (tok)
+  (assert-true (member tok cl-cc::*dcg-sync-tokens*)))

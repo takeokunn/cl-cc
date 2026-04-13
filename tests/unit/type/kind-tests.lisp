@@ -5,8 +5,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite kind-suite :description "Kind system tests")
+(defsuite kind-suite :description "Kind system tests"
+  :parent cl-cc-suite)
 
+
+(in-suite kind-suite)
 ;;; ─── kind struct predicates ──────────────────────────────────────────────────
 
 (deftest-each kind-singleton-predicates

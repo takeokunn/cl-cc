@@ -27,18 +27,14 @@
 
 ;;; ─── Integer Tokens ──────────────────────────────────────────────────────────
 
-(deftest lexer-integer-simple
-  "Lexer: simple integer"
-  (assert-eq :T-INT (first-token-type "42"))
-  (assert-= 42 (first-token-value "42")))
-
-(deftest lexer-integer-zero
-  "Lexer: zero"
-  (assert-= 0 (first-token-value "0")))
-
-(deftest lexer-integer-negative
-  "Lexer: negative integer"
-  (assert-= -7 (first-token-value "-7")))
+(deftest-each lexer-integer-literals
+  "Lexer correctly tokenizes integer literals: type :T-INT and correct numeric value."
+  :cases (("simple"   "42"  42)
+          ("zero"     "0"   0)
+          ("negative" "-7"  -7))
+  (source expected-value)
+  (assert-eq :T-INT (first-token-type source))
+  (assert-= expected-value (first-token-value source)))
 
 ;;; ─── Float Tokens ────────────────────────────────────────────────────────────
 
@@ -84,13 +80,12 @@
   (let ((val (first-token-value "|MixedCase|")))
     (assert-string= "MixedCase" (symbol-name val))))
 
-(deftest lexer-bool-true
-  "Lexer: T is recognized as :T-BOOL-TRUE"
-  (assert-eq :T-BOOL-TRUE (first-token-type "t")))
-
-(deftest lexer-bool-false-nil
-  "Lexer: NIL is recognized as :T-BOOL-FALSE"
-  (assert-eq :T-BOOL-FALSE (first-token-type "nil")))
+(deftest-each lexer-bool-tokens
+  "Lexer: T is :T-BOOL-TRUE and NIL is :T-BOOL-FALSE."
+  :cases (("true"  "t"   :T-BOOL-TRUE)
+          ("false" "nil" :T-BOOL-FALSE))
+  (source expected-type)
+  (assert-eq expected-type (first-token-type source)))
 
 ;;; ─── Keyword Tokens ─────────────────────────────────────────────────────────
 
@@ -123,14 +118,13 @@
   "Lexer: #' function dispatch"
   (assert-eq :T-FUNCTION (first-token-type "#'foo")))
 
-(deftest lexer-hash-char
-  "Lexer: #\\a character literal"
-  (assert-eq :T-CHAR (first-token-type "#\\a"))
-  (assert-true (char= #\a (first-token-value "#\\a"))))
-
-(deftest lexer-hash-char-named
-  "Lexer: #\\Space named character"
-  (assert-true (char= #\Space (first-token-value "#\\Space"))))
+(deftest-each lexer-hash-char-dispatch
+  "Lexer: #\\char produces :T-CHAR tokens for regular and named character forms."
+  :cases (("letter" "#\\a"     #\a)
+          ("space"  "#\\Space" #\Space))
+  (source expected-char)
+  (assert-eq :T-CHAR (first-token-type source))
+  (assert-true (char= expected-char (first-token-value source))))
 
 (deftest lexer-hash-vector
   "Lexer: #( vector start"
@@ -148,15 +142,12 @@
 
 ;;; ─── Comments ───────────────────────────────────────────────────────────────
 
-(deftest lexer-line-comment
-  "Lexer: line comment is trivia, not a token"
-  (let ((types (token-types (format nil "; comment~%42"))))
-    (assert-equal '(:T-INT) types)))
-
-(deftest lexer-block-comment
-  "Lexer: block comment #|...|# is trivia"
-  (let ((types (token-types "#| block |# 99")))
-    (assert-equal '(:T-INT) types)))
+(deftest-each lexer-comment-forms
+  "Both line and block comments are stripped from the token stream."
+  :cases (("line"  (format nil "; comment~%42"))
+          ("block" "#| block |# 99"))
+  (source)
+  (assert-equal '(:T-INT) (token-types source)))
 
 ;;; ─── Position Tracking ──────────────────────────────────────────────────────
 

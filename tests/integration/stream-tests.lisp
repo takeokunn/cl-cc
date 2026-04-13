@@ -4,7 +4,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite stream-suite :description "Stream I/O integration tests")
+(defsuite stream-suite
+  :description "Stream I/O integration tests"
+  :parent cl-cc-suite)
+
+(in-suite stream-suite)
 
 ;;; ─── Stream Predicates ──────────────────────────────────────────────────
 

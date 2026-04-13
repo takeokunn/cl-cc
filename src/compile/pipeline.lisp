@@ -57,12 +57,158 @@
 ;;; Standard Library (Higher-Order Functions)
 ;;; *standard-library-source* is defined in stdlib-source.lisp (loaded before this file).
 
-(defparameter *stdlib-compiled* nil
-  "Cache for compiled standard library instructions.")
+(defparameter *stdlib-expanded-cache* nil
+  "Cached list of stdlib forms after parse + macro-expand, but BEFORE
+`lower-sexp-to-ast'.  Entries are s-expressions (or occasionally
+already-lowered AST nodes, whenever `compiler-macroexpand-all' short-circuits
+because a form was handed in pre-lowered).
+
+Rationale for caching at the sexp level rather than post-lower AST:
+AST nodes carry identity-sensitive state (gensym registers, slot writers
+via defstruct, label counters introduced during lowering) that must NOT
+be shared across independent compiler contexts.  The previous post-lower
+cache broke tests like OR-UNIQUE-GENSYM-PER-EXPANSION because the same
+AST node was handed to multiple compilations, yielding colliding gensyms.
+Sexps, by contrast, are plain reader data and are naturally immutable
+when treated as read-only — every call to `get-stdlib-forms' produces a
+fresh AST tree downstream via the standard lowering pipeline.
+
+Reused across every `:stdlib t' compile so the ~857-line stdlib is not
+re-parsed or re-expanded for every test.  The downstream
+`lower-sexp-to-ast' and `compile-ast' passes still run per-call, which
+is the semantically correct behaviour for a per-test compiler context.
+
+Cache is keyed jointly by *standard-library-source* identity AND the
+currently active *macro-eval-fn*, because macro expansion side effects
+depend on which evaluator ran them; rebinding *macro-eval-fn* transparently
+invalidates the cache.")
+
+(defparameter *stdlib-expanded-cache-source* nil
+  "Source-string object used to populate *stdlib-expanded-cache*.
+Compared by EQ to detect when the source has been rebound.")
+
+(defparameter *stdlib-expanded-cache-eval-fn* nil
+  "*macro-eval-fn* value active when *stdlib-expanded-cache* was populated.
+Compared by EQ to detect when the evaluator has been swapped
+(e.g. self-hosting bootstrap flipping from host eval to our-eval).")
+
+(defun %snapshot-macro-env-table ()
+  "Return a shallow copy of the current macro environment hash table.
+Used by `%build-stdlib-expanded-cache' to support rollback on non-local exit
+during macro expansion.
+
+SCOPE: snapshots ONLY the `macro-env-table' hash (name → expander).
+Does NOT cover `*compiler-macro-table*' or any macro-expansion memo
+caches.  A stdlib that calls `define-compiler-macro' and then throws
+mid-build will leave its compiler-macro entries behind.  Acceptable
+today because stdlib does not register compiler-macros; revisit if
+that changes."
+  (let* ((src (macro-env-table *macro-environment*))
+         (dst (make-hash-table :test (hash-table-test src)
+                               :size (hash-table-count src))))
+    (maphash (lambda (k v) (setf (gethash k dst) v)) src)
+    dst))
+
+(defun %restore-macro-env-table (snapshot)
+  "Replace the macro environment table contents with SNAPSHOT atomically
+from the caller's perspective.
+
+Strategy: build a FRESH replacement hash populated from SNAPSHOT first,
+THEN overwrite the live table's contents in one `clrhash'+`maphash' pair.
+If the fresh-build step throws, the live table is untouched (original
+torn state still observable, but no worse than pre-call).  The previous
+naive `clrhash'+re-populate approach would leave the live table EMPTY if
+`maphash' re-population threw (e.g., OOM), which is strictly worse than
+the torn state we were trying to recover from.
+
+Object identity of `*macro-environment*' and its backing hash table is
+preserved, so any code holding a reference sees the rollback."
+  (let* ((live (macro-env-table *macro-environment*))
+         (fresh (make-hash-table :test (hash-table-test live)
+                                 :size (hash-table-count snapshot))))
+    ;; Phase 1: build replacement completely. If this throws, live is untouched.
+    (maphash (lambda (k v) (setf (gethash k fresh) v)) snapshot)
+    ;; Phase 2: commit. clrhash + maphash on a pre-sized table is near-atomic.
+    (clrhash live)
+    (maphash (lambda (k v) (setf (gethash k live) v)) fresh)))
+
+(defun %build-stdlib-expanded-cache ()
+  "Parse and macro-expand *standard-library-source* into a list of forms.
+Returns a list of sexps (plain reader data, safely shareable).
+
+Side effect on success: any `defmacro' in the stdlib is installed in the
+global macro registry during macro-expansion.  This is the intended
+behaviour — later cache hits rely on those macros being globally
+available when user forms are expanded.
+
+On NON-LOCAL EXIT (error / throw / unwind) mid-build, we restore the
+pre-build macro registry snapshot so the runtime does not end up with a
+torn, partially-installed set of stdlib macros that would poison later
+compilation attempts (concrete failure: user compile would hit
+`undefined macro FOO' for a stdlib macro whose registration was rolled
+back mid-sequence but whose dependents remained registered).  Normal
+completion intentionally leaves the snapshot-less state in place — the
+registry is populated and stays so.
+
+INVARIANT: returned list contains ONLY sexps, never AST nodes.  The
+previous cache allowed AST nodes (for paths where `compiler-macroexpand-all'
+short-circuited on pre-lowered input) but shared AST nodes carry
+identity-sensitive gensym registers and re-introduce the
+OR-UNIQUE-GENSYM-PER-EXPANSION regression.  We assert this explicitly
+below as a tripwire against silent re-introduction of that bug."
+  (let ((snapshot (%snapshot-macro-env-table))
+        (success-p nil))
+    (unwind-protect
+         (let ((result (mapcar #'compiler-macroexpand-all
+                               (parse-all-forms *standard-library-source*))))
+           ;; Tripwire: stdlib source is plain text; every entry MUST be a sexp.
+           ;; If this ever fires, someone fed pre-lowered AST into the cache path
+           ;; and the gensym-sharing bug is about to resurface.
+           (dolist (form result)
+             (when (typep form 'ast-node)
+               (error "stdlib cache builder produced an AST node; only sexps allowed (would re-introduce gensym sharing bug)")))
+           (setf success-p t)
+           result)
+      (unless success-p
+        (%restore-macro-env-table snapshot)))))
 
 (defun get-stdlib-forms ()
-  "Parse the standard library source into forms."
-  (parse-all-forms *standard-library-source*))
+  "Return stdlib forms (sexps post-expand) ready to hand to
+`compile-toplevel-forms'.  On the first call — or whenever
+*standard-library-source* or *macro-eval-fn* has been rebound — this
+rebuilds the cache.  Subsequent calls are O(1) plus one copy-list.
+
+The returned spine is fresh (via copy-list) so downstream code walking
+destructively cannot corrupt the cache.  The form contents are sexps
+and therefore safely shared: `lower-sexp-to-ast' inside
+`compile-toplevel-forms' produces fresh AST nodes on every call."
+  (unless (and (eq *stdlib-expanded-cache-source*  *standard-library-source*)
+               (eq *stdlib-expanded-cache-eval-fn* *macro-eval-fn*))
+    ;; Snapshot the key values BEFORE running the build.  If macro
+    ;; expansion during build flips `*macro-eval-fn*' (the self-host
+    ;; bootstrap does exactly this), we must key the cache by the fn
+    ;; that was active at build ENTRY, not by whatever survives after
+    ;; `mapcar' completes.  Otherwise a mid-build flip would result in
+    ;; a cache stored under the post-flip fn but populated from
+    ;; pre-flip expansion — silently stale for every subsequent hit.
+    (let ((src-at-entry     *standard-library-source*)
+          (eval-fn-at-entry *macro-eval-fn*))
+      (setf *stdlib-expanded-cache*         (%build-stdlib-expanded-cache)
+            *stdlib-expanded-cache-source*  src-at-entry
+            *stdlib-expanded-cache-eval-fn* eval-fn-at-entry)))
+  (copy-list *stdlib-expanded-cache*))
+
+(defun warm-stdlib-cache ()
+  "Populate the stdlib expanded-form cache if it has not been built yet.
+Intended to be called once from the test runner BEFORE spawning parallel
+worker threads, so that:
+  (a) no worker pays the cold-miss cost (~full stdlib parse + expand)
+      inside the 10-second per-test budget, and
+  (b) multiple workers cannot race on the first miss, which would
+      otherwise cause duplicate macro registration and torn cache
+      reads between *stdlib-expanded-cache* and its key cells."
+  (get-stdlib-forms)
+  (values))
 
 (defun parse-source-for-language (source language)
   "Parse SOURCE according to LANGUAGE, returning a list of AST nodes or s-expressions.
@@ -165,198 +311,7 @@ instead of the host CL eval."
 
 (setf *macro-eval-fn* #'our-eval)
 
-;;; ─── REPL Persistent State ────────────────────────────────────────────────
-;;;
-;;; The REPL accumulates all compiled instructions into a shared pool so that
-;;; closures defined in one expression (with entry labels in that expression's
-;;; instruction range) remain callable in subsequent expressions.  Each new
-;;; compile-string result is appended to *repl-pool-instructions*, and its
-;;; labels are inserted into *repl-pool-labels* with a global offset.  Only
-;;; the newly-added slice is executed, but the full pool's label table is used
-;;; for all label lookups — so cross-call closure invocations work correctly.
-
-(defvar *repl-vm-state* nil
-  "Persistent VM state for the interactive REPL.
-Reused across form evaluations so that functions and variables defined
-in one expression remain accessible in subsequent ones.")
-
-(defvar *repl-accessor-map* nil
-  "Persistent accessor map for the REPL.
-Accumulates defstruct slot accessor mappings across form evaluations.")
-
-(defvar *repl-pool-instructions* nil
-  "Adjustable vector accumulating ALL instructions from the current REPL session.
-Enables cross-expression closure calls (body labels remain globally valid).")
-
-(defvar *repl-pool-labels* nil
-  "Hash table mapping label names to absolute PCs in *repl-pool-instructions*.")
-
-(defvar *repl-global-vars-persistent* nil
-  "Persistent hash table tracking global variable names defined across REPL calls.
-When non-nil, this is bound to *repl-global-variables* during compilation
-so that variables from (defvar ...) in one REPL call are visible in the next.")
-
-(defvar *repl-defstruct-registry* nil
-  "Persistent defstruct slot registry for the REPL.
-Accumulates slot info across form evaluations so :include works across calls.")
-
-(defun reset-repl-state ()
-  "Reset the REPL persistent state, starting a completely fresh session."
-  (setf *repl-vm-state* nil
-        *repl-accessor-map* nil
-        *repl-pool-instructions* nil
-        *repl-pool-labels* nil
-        *repl-global-vars-persistent* nil
-        *repl-defstruct-registry* nil
-        *repl-label-counter* nil))
-
-(defun run-string-repl (source)
-  "Compile and run SOURCE using the persistent REPL state.
-Unlike run-string, this reuses the VM state (function-registry, class-registry,
-heap) across calls so that top-level definitions persist into later expressions.
-Cross-expression closure calls work because all instructions share one pool.
-
-Example:
-  (run-string-repl \"(defun double (x) (* x 2))\")
-  (run-string-repl \"(double 21)\")  ; => 42"
-  (unless *repl-vm-state*
-    (setf *repl-vm-state*
-          (make-instance 'vm-io-state :output-stream *standard-output*)))
-  (unless *repl-accessor-map*
-    (setf *repl-accessor-map* (make-hash-table :test #'eq)))
-  (unless *repl-pool-instructions*
-    (setf *repl-pool-instructions*
-          (make-array 64 :adjustable t :fill-pointer 0 :element-type t)))
-  (unless *repl-pool-labels*
-    (setf *repl-pool-labels* (make-hash-table :test #'equal)))
-  (unless *repl-global-vars-persistent*
-    (setf *repl-global-vars-persistent* (make-hash-table :test #'eq)))
-  (unless *repl-defstruct-registry*
-    (setf *repl-defstruct-registry* (make-hash-table :test #'eq)))
-  (let* ((*package* (find-package :cl-cc))
-         (*accessor-slot-map* *repl-accessor-map*)
-         (*defstruct-slot-registry* *repl-defstruct-registry*)
-         (*labels-boxed-fns* nil)
-         ;; Bind persistent globals so compiler-context picks them up
-         (*repl-global-variables* *repl-global-vars-persistent*)
-         ;; Enable label counter capture so we can persist it
-         (*repl-capture-label-counter* t))
-    (let ((forms (parse-source-for-language source :lisp)))
-      (when (and (= (length forms) 1)
-                 (consp (first forms))
-                 (eq (caar forms) 'in-package))
-        (let ((pkg (find-package (second (first forms)))))
-          (unless pkg
-            (error "Unknown package: ~S" (second (first forms))))
-          (setf *package* pkg)
-          (return-from run-string-repl (second (first forms)))))
-      (let* ((result (compile-string source :target :vm))
-             (program (compilation-result-program result))
-             (new-insts (vm-program-instructions program))
-             ;; PC where the new code will start in the global pool
-             (start-pc (fill-pointer *repl-pool-instructions*)))
-        ;; Persist the label counter for the next compilation
-        (when (integerp *repl-capture-label-counter*)
-          (setf *repl-label-counter* *repl-capture-label-counter*))
-        ;; Track any new global variables defined by this compilation
-        (dolist (inst new-insts)
-          (when (typep inst 'vm-set-global)
-            (setf (gethash (vm-global-name inst) *repl-global-vars-persistent*) t)))
-        ;; Append new instructions to the shared pool
-        (dolist (inst new-insts)
-          (vector-push-extend inst *repl-pool-instructions*))
-        ;; Merge new labels (with global offset) into the pool label table
-        (let ((new-labels (build-label-table new-insts)))
-          (maphash (lambda (label local-pc)
-                     (setf (gethash label *repl-pool-labels*)
-                           (+ start-pc local-pc)))
-                   new-labels))
-        ;; Execute only the new slice, using the full pool for label resolution
-        (run-program-slice *repl-pool-instructions* *repl-pool-labels*
-                           start-pc *repl-vm-state*)))))
-
-;;; ─── Self-Hosting Load ──────────────────────────────────────────────────
-;;;
-;;; (our-load pathname) reads a file, parses all forms, and compiles+executes
-;;; them in the persistent REPL state. This is the key primitive for cl-cc to
-;;; load its own source files.
-
-(defun %prescan-in-package (source)
-  "Pre-scan SOURCE for an (in-package ...) form and return the package name string.
-   Returns nil if not found. Used to set *package* before full parsing so that
-   #. read-time eval resolves symbols in the correct package."
-  (let ((pos (search "(in-package " source :test #'char-equal)))
-    (when pos
-      (let* ((start (+ pos (length "(in-package ")))
-             (trimmed (string-trim '(#\Space #\Tab) (subseq source start))))
-        ;; Handle :pkg, :pkg), "pkg", 'pkg forms
-        (cond
-          ((and (> (length trimmed) 0) (char= (first (coerce trimmed 'list)) #\:))
-           (let ((end (position-if (lambda (c) (or (char= c #\)) (char= c #\Space))) trimmed)))
-             (when end (subseq trimmed 1 end))))
-          ((and (> (length trimmed) 0) (char= (first (coerce trimmed 'list)) #\"))
-           (let ((end (position #\" trimmed :start 1)))
-             (when end (subseq trimmed 1 end))))
-          (t nil))))))
-
-(defun our-load (pathname &key (verbose nil) (print nil) (if-does-not-exist :error)
-                                 (external-format :default))
-  "Load a Lisp source file by reading, compiling, and executing each form.
-Uses the persistent REPL state so definitions accumulate across forms.
-VERBOSE prints the file being loaded. PRINT prints each form's result.
-IF-DOES-NOT-EXIST controls behavior when file is missing (:error or nil).
-EXTERNAL-FORMAT is accepted but ignored (UTF-8 assumed)."
-  (declare (ignore external-format))
-  (when (and (eq if-does-not-exist nil) (not (probe-file pathname)))
-    (return-from our-load nil))
-  (let ((path (namestring (truename pathname))))
-    (when verbose
-      (format *standard-output* "; Loading ~A~%" path))
-    (let ((source (with-open-file (in path :direction :input)
-                    (let ((buf (make-string (file-length in))))
-                      (read-sequence buf in)
-                      buf))))
-      ;; Pre-scan for (in-package ...) to set *package* before parsing,
-      ;; so #. read-time eval resolves symbols in the correct package.
-      (let* ((pkg-name (%prescan-in-package source))
-             (pkg (when pkg-name (find-package (string-upcase pkg-name))))
-             (*package* (or pkg *package*)))
-        ;; Parse all forms and compile/run each through the REPL pipeline
-        (let ((forms (parse-all-forms source))
-              (last-result nil))
-          (dolist (form forms last-result)
-            (let* ((package-form-p (and (consp form) (eq (car form) 'in-package)))
-                   (whitespace-symbol-p (and (symbolp form)
-                                             (not (null form))
-                                             (not (keywordp form))
-                                             (let ((name (symbol-name form)))
-                                               (and (> (length name) 0)
-                                                    (not (find-if (lambda (c)
-                                                                    (and (graphic-char-p c)
-                                                                         (not (eql c #\Space))))
-                                                                  name))))))
-                   (unsupported-p (and (consp form)
-                                       (member (car form) '(deftype defopcode)))))
-              (cond
-                (package-form-p
-                 (let ((pkg (find-package (second form))))
-                   (unless pkg
-                     (error "Unknown package: ~S" (second form)))
-                   (setf *package* pkg)
-                   (setf last-result (second form))))
-                ((or whitespace-symbol-p unsupported-p)
-                 nil)
-                (t
-                 (let ((form-str (write-to-string form)))
-                   (setf last-result
-                         (handler-case (run-string-repl form-str)
-                           (error (e)
-                             (format *error-output* "; Error loading ~A: ~A~%  Form: ~S~%"
-                                     path e form)
-                             nil)))
-                   (when print
-                     (format *standard-output* "~S~%" last-result))))))))))))
-
+;;; REPL persistent state and run-string-repl/our-load are in pipeline-repl.lisp.
 
 (defun run-string-typed (source &key (mode :warn) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile and run SOURCE with type checking enabled.
@@ -374,203 +329,3 @@ EXTERNAL-FORMAT is accepted but ignored (UTF-8 assumed)."
          (program (compilation-result-program result)))
     (values (run-compiled program) (compilation-result-type result))))
 
-;;; Native Executable Generation (Mach-O)
-
-(defun %write-native-binary (builder code-bytes output-path)
-  "Finalize BUILDER with CODE-BYTES, write Mach-O to OUTPUT-PATH, and mark it executable."
-  (cl-cc/binary:add-text-segment builder code-bytes)
-  (cl-cc/binary:add-symbol builder "_main" :value 0 :type #x0F :sect 1)
-  (let ((mach-o-bytes (cl-cc/binary:build-mach-o builder code-bytes)))
-    (cl-cc/binary:write-mach-o-file output-path mach-o-bytes))
-  (uiop:run-program (list "chmod" "+x" (namestring output-path)) :ignore-error-status t)
-  output-path)
-
-(defparameter *compile-cache-root*
-  (merge-pathnames #P".cache/cl-cc/native/"
-                   (user-homedir-pathname))
-  "Directory for cached native build outputs.")
-
-(defun %compile-cache-key (source arch language)
-  (format nil "~A-~A-~A"
-          (content-hash source)
-          arch
-          language))
-
-(defun %compile-cache-path (key output-file)
-  (merge-pathnames
-   (make-pathname :directory `(:relative ,key)
-                  :name (pathname-name output-file)
-                  :type (pathname-type output-file))
-   *compile-cache-root*))
-
-(defun %copy-file-bytes (from to)
-  (with-open-file (in from :direction :input :element-type '(unsigned-byte 8))
-    (with-open-file (out to :direction :output :if-exists :supersede
-                            :if-does-not-exist :create
-                            :element-type '(unsigned-byte 8))
-      (let ((buffer (make-array 4096 :element-type '(unsigned-byte 8))))
-        (loop for count = (read-sequence buffer in)
-              while (plusp count) do
-                (write-sequence buffer out :end count)))))
-  to)
-
-(defun compile-to-native (source &key (arch :x86-64) (output-file "a.out") (language :lisp) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
-  "Compile SOURCE to a native Mach-O executable.
-SOURCE can be a string (single expression) or a list of forms.
-ARCH is :X86-64 or :ARM64.
-OUTPUT-FILE is the path for the executable.
-LANGUAGE is :LISP (default) or :PHP.
-
-Returns the output file path on success."
-  (let* ((result (if (stringp source)
-                     (compile-string source :target :vm :language language
-                                     :pass-pipeline pass-pipeline
-                                     :print-pass-timings print-pass-timings
-                                      :timing-stream timing-stream
-                                      :print-pass-stats print-pass-stats
-                                      :stats-stream stats-stream
-                                      :trace-json-stream trace-json-stream
-                                      :print-opt-remarks print-opt-remarks
-                                     :opt-remarks-stream opt-remarks-stream
-                                     :opt-remarks-mode opt-remarks-mode)
-                     (compile-expression source :target :vm
-                                         :pass-pipeline pass-pipeline
-                                         :print-pass-timings print-pass-timings
-                                          :timing-stream timing-stream
-                                          :print-pass-stats print-pass-stats
-                                          :stats-stream stats-stream
-                                          :trace-json-stream trace-json-stream
-                                          :print-opt-remarks print-opt-remarks
-                                         :opt-remarks-stream opt-remarks-stream
-                                         :opt-remarks-mode opt-remarks-mode)))
-         (program    (compilation-result-program result))
-         (code-bytes (ecase arch
-                       (:x86-64 (compile-to-x86-64-bytes program))
-                       (:arm64  (compile-to-aarch64-bytes program))))
-         (builder    (cl-cc/binary:make-mach-o-builder arch)))
-    (%write-native-binary builder code-bytes output-file)))
-
-(defun compile-file-to-native (input-file &key (arch :x86-64) (output-file nil) (language nil) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
-  "Compile a CL-CC source file to a native Mach-O executable.
-INPUT-FILE is the path to the source file.
-OUTPUT-FILE defaults to INPUT-FILE with no extension.
-LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
-  (let* ((effective-language (or language
-                                 (cond ((string= (pathname-type input-file) "php") :php)
-                                       (t :lisp))))
-         (output (or output-file
-                     (make-pathname :type nil :defaults input-file)))
-         (source (if (eq effective-language :php)
-                     (with-open-file (in input-file :direction :input
-                                                     :element-type 'character)
-                       (let ((buf (make-string (file-length in))))
-                         (read-sequence buf in)
-                         buf))
-                     (with-open-file (in input-file :direction :input)
-                       (let ((forms nil)
-                             (*read-eval* nil))
-                         (handler-case
-                             (loop (push (read in) forms))
-                           (end-of-file () nil))
-                         (nreverse forms)))))
-         (cache-key (%compile-cache-key source arch effective-language))
-         (cache-path (%compile-cache-path cache-key output))
-         (result (if (eq effective-language :php)
-                     (compile-string source :target :vm :language :php
-                                     :pass-pipeline pass-pipeline
-                                     :print-pass-timings print-pass-timings
-                                      :timing-stream timing-stream
-                                      :print-pass-stats print-pass-stats
-                                      :stats-stream stats-stream
-                                      :trace-json-stream trace-json-stream
-                                      :print-opt-remarks print-opt-remarks
-                                     :opt-remarks-stream opt-remarks-stream
-                                     :opt-remarks-mode opt-remarks-mode)
-                     (compile-toplevel-forms source :target :vm
-                                              :pass-pipeline pass-pipeline
-                                              :print-pass-timings print-pass-timings
-                                               :timing-stream timing-stream
-                                               :print-pass-stats print-pass-stats
-                                               :stats-stream stats-stream
-                                               :trace-json-stream trace-json-stream
-                                               :print-opt-remarks print-opt-remarks
-                                              :opt-remarks-stream opt-remarks-stream
-                                              :opt-remarks-mode opt-remarks-mode)))
-         (program    (compilation-result-program result))
-         (code-bytes (ecase arch
-                       (:x86-64 (compile-to-x86-64-bytes program))
-                       (:arm64  (compile-to-aarch64-bytes program))))
-         (builder    (cl-cc/binary:make-mach-o-builder arch)))
-    (ensure-directories-exist cache-path)
-    (if (probe-file cache-path)
-        (progn
-          (format *error-output* "; cache hit ~A~%" cache-path)
-          (%copy-file-bytes cache-path output)
-          (uiop:run-program (list "chmod" "+x" (namestring output)) :ignore-error-status t)
-          output)
-        (progn
-          (%write-native-binary builder code-bytes output)
-          (%copy-file-bytes output cache-path)
-          output))))
-
-;;; Typeclass Macros (Phase 4) — registered here because cl-cc/type loads before compiler
-
-(register-macro 'deftype-class
-  (lambda (form env)
-    (declare (ignore env))
-    ;; Syntax: (deftype-class Name [(:super S1 S2)] (type-param) method-specs...)
-    (let* ((class-name (second form))
-           (rest (cddr form))
-           ;; Check for optional superclass declaration
-           (superclasses (when (and (consp (first rest))
-                                    (eq (caar rest) :super))
-                           (cdar rest)))
-           (rest2 (if superclasses (cdr rest) rest))
-           (type-param-list (first rest2))
-           (type-param (first type-param-list))
-           (method-specs (rest rest2))
-           (methods-forms nil)
-           (default-forms nil))
-      (dolist (spec method-specs)
-        (let ((method-name (first spec))
-              (type-spec (second spec))
-              (rest-spec (cddr spec)))
-          (push `(cons ',method-name
-                       (cl-cc/type:parse-type-specifier ',type-spec))
-                methods-forms)
-          (when (and rest-spec (eq (first rest-spec) :default))
-            (push `(cons ',method-name ,(second rest-spec))
-                  default-forms))))
-      `(progn
-         (cl-cc/type:register-typeclass
-          ',class-name
-          (cl-cc/type:make-type-class
-           :name ',class-name
-           :type-param (cl-cc/type:make-type-variable ',type-param)
-           :methods (list ,@(nreverse methods-forms))
-           :defaults (list ,@(nreverse default-forms))
-           :superclasses ',superclasses))
-         ',class-name))))
-
-(register-macro 'deftype-instance
-  (lambda (form env)
-    (declare (ignore env))
-    (destructuring-bind (_ class-name type-spec &rest method-impls) form
-      (declare (ignore _))
-      (let* ((dict-var (intern (format nil "*~A-~A-DICT*"
-                                       class-name type-spec)
-                               :cl-cc))
-             (method-forms
-              (mapcar (lambda (impl)
-                        (destructuring-bind (name impl-form) impl
-                          `(cons ',name ,impl-form)))
-                      method-impls)))
-        `(progn
-           ;; Register in type inference registry
-           (cl-cc/type:register-typeclass-instance
-            ',class-name
-            (cl-cc/type:parse-type-specifier ',type-spec)
-            (list ,@method-forms))
-           ;; Store dictionary as global variable for VM access
-           (defvar ,dict-var (list ,@method-forms))
-           ',class-name)))))

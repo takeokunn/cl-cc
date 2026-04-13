@@ -2,8 +2,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite expander-binding-suite :description "Binding helper unit tests")
+(defsuite expander-binding-suite :description "Binding helper unit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite expander-binding-suite)
 (deftest let-binding-symbol-value
   "expand-let-binding expands the value form, preserves name."
   (let ((b (cl-cc::expand-let-binding '(x 42))))

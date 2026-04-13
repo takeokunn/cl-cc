@@ -2,8 +2,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite expander-defclass-suite :description "Defclass expander unit tests")
+(defsuite expander-defclass-suite :description "Defclass expander unit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite expander-defclass-suite)
 (deftest expand-defclass-slot-spec-bare-symbol
   "expand-defclass-slot-spec passes through a bare symbol unchanged."
   (assert-eq 'foo (cl-cc::expand-defclass-slot-spec 'foo)))

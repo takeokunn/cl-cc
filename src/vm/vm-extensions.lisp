@@ -9,20 +9,6 @@
 ;;; Load order: after vm-numeric.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-;;; FR-407: Case-insensitive char comparisons (remaining two)
-
-(define-vm-instruction vm-char-not-greaterp (vm-instruction)
-  "Case-insensitive CHAR<=: T if CHAR1 <= CHAR2 ignoring case."
-  (dst nil :reader vm-dst) (char1 nil :reader vm-char1) (char2 nil :reader vm-char2)
-  (:sexp-tag :char-not-greaterp) (:sexp-slots dst char1 char2))
-(define-simple-instruction vm-char-not-greaterp :pred2 char-not-greaterp :lhs vm-char1 :rhs vm-char2)
-
-(define-vm-instruction vm-char-not-lessp (vm-instruction)
-  "Case-insensitive CHAR>=: T if CHAR1 >= CHAR2 ignoring case."
-  (dst nil :reader vm-dst) (char1 nil :reader vm-char1) (char2 nil :reader vm-char2)
-  (:sexp-tag :char-not-lessp) (:sexp-slots dst char1 char2))
-(define-simple-instruction vm-char-not-lessp :pred2 char-not-lessp :lhs vm-char1 :rhs vm-char2)
-
 ;;; FR-1201: Symbol property list operations
 
 (define-vm-instruction vm-symbol-get (vm-instruction)

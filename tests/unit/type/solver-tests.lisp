@@ -5,7 +5,10 @@
 
 (in-package :cl-cc/test)
 
-(defsuite solver-suite :description "OutsideIn(X) constraint solver tests")
+(defsuite solver-suite :description "OutsideIn(X
+  :parent cl-cc-suite) 
+(in-suite solver-suite)
+constraint solver tests")
 
 ;;; ─── make-constraint backward compat ───────────────────────────────────────
 

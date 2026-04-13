@@ -28,22 +28,23 @@
     (assert-true entry)
     (assert-true (eq expected-conv (cl-cc::be-convention entry)))))
 
-(deftest builtin-registry-constructor-symbols
+(deftest-each builtin-registry-constructor-symbols
   "Registry entries have correct constructor symbols."
-  (let ((car-entry (gethash "CAR" cl-cc::*builtin-registry*)))
-    (assert-true (eq 'cl-cc::make-vm-car (cl-cc::be-ctor car-entry))))
-  (let ((bswap-entry (gethash "BSWAP" cl-cc::*builtin-registry*)))
-    (assert-true (eq 'cl-cc::make-vm-bswap (cl-cc::be-ctor bswap-entry))))
-  (let ((mod-entry (gethash "MOD" cl-cc::*builtin-registry*)))
-    (assert-true (eq 'cl-cc::make-vm-mod (cl-cc::be-ctor mod-entry))))
-  (let ((princ-entry (gethash "PRINC" cl-cc::*builtin-registry*)))
-    (assert-true (eq 'cl-cc::make-vm-princ (cl-cc::be-ctor princ-entry)))))
+  :cases (("car"   "CAR"   'cl-cc::make-vm-car)
+          ("bswap" "BSWAP" 'cl-cc::make-vm-bswap)
+          ("mod"   "MOD"   'cl-cc::make-vm-mod)
+          ("princ" "PRINC" 'cl-cc::make-vm-princ))
+  (name-str expected-ctor)
+  (let ((entry (gethash name-str cl-cc::*builtin-registry*)))
+    (assert-true (eq expected-ctor (cl-cc::be-ctor entry)))))
 
-(deftest builtin-registry-missing-returns-nil
-  "Looking up a non-builtin returns NIL."
-  (assert-true (null (gethash "NOT-A-BUILTIN" cl-cc::*builtin-registry*)))
-  (assert-true (null (gethash "DEFUN" cl-cc::*builtin-registry*)))
-  (assert-true (null (gethash "LET" cl-cc::*builtin-registry*))))
+(deftest-each builtin-registry-missing-returns-nil
+  "Looking up a non-builtin name returns NIL."
+  :cases (("not-a-builtin" "NOT-A-BUILTIN")
+          ("defun"         "DEFUN")
+          ("let"           "LET"))
+  (name-str)
+  (assert-true (null (gethash name-str cl-cc::*builtin-registry*))))
 
 (deftest builtin-registry-binary-needs-2-args
   "Binary convention entries have :binary convention."
@@ -96,7 +97,18 @@
           ("zero-compare"   :zero-compare)
           ("stream-input-opt"  :stream-input-opt)
           ("stream-void-opt"   :stream-void-opt)
-          ("stream-write-val"  :stream-write-val))
+          ("stream-write-val"  :stream-write-val)
+          ;; 2026 conventions
+          ("unary-custom"           :unary-custom)
+          ("unary-custom-void"      :unary-custom-void)
+          ("binary-move-first"      :binary-move-first)
+          ("binary-void"            :binary-void)
+          ("binary-synth-zero"      :binary-synth-zero)
+          ("unary-opt-nil"          :unary-opt-nil)
+          ("binary-opt-one"         :binary-opt-one)
+          ("binary-opt-nil-slot"    :binary-opt-nil-slot)
+          ("ternary-custom"         :ternary-custom)
+          ("ternary-opt-nil-custom" :ternary-opt-nil-custom))
   (conv)
   (assert-true (gethash conv cl-cc::*builtin-emitter-table*)))
 
@@ -129,19 +141,15 @@
     (assert-true slots-ok)
     (assert-true keywords-ok)))
 
-(deftest binary-custom-cons-entry
-  "cons is registered as binary-custom with :car-src/:cdr-src slots."
-  (let ((entry (gethash "CONS" cl-cc::*builtin-registry*)))
+(deftest-each binary-custom-entry-details
+  "CONS and NTH binary-custom slots are registered with the correct convention and slot names."
+  :cases (("cons" "CONS" '(:car-src :cdr-src))
+          ("nth"  "NTH"  '(:index :list)))
+  (name-str expected-slots)
+  (let ((entry (gethash name-str cl-cc::*builtin-registry*)))
     (assert-true entry)
     (assert-equal :binary-custom (cl-cc::be-convention entry))
-    (assert-equal '(:car-src :cdr-src) (cl-cc::be-slots entry))))
-
-(deftest binary-custom-nth-entry
-  "nth is registered as binary-custom with :index/:list slots."
-  (let ((entry (gethash "NTH" cl-cc::*builtin-registry*)))
-    (assert-true entry)
-    (assert-equal :binary-custom (cl-cc::be-convention entry))
-    (assert-equal '(:index :list) (cl-cc::be-slots entry))))
+    (assert-equal expected-slots (cl-cc::be-slots entry))))
 
 ;;; ─── Zero-Compare Convention Tests ────────────────────────────────────────
 
@@ -203,3 +211,35 @@
   (assert-equal #\A (cl-cc:run-string "(write-char #\\A)"))
   (assert-null (cl-cc:run-string "(force-output)"))
   (assert-null (cl-cc:run-string "(clear-input)")))
+
+;;; ─── *convention-arity* completeness ─────────────────────────────────────────
+
+(deftest convention-arity-all-conventions-in-emitter-table
+  "Every convention in *convention-arity* has an emitter registered."
+  (dolist (entry cl-cc::*convention-arity*)
+    (let ((conv (car entry)))
+      (assert-true (gethash conv cl-cc::*builtin-emitter-table*)))))
+
+(deftest-each convention-arity-arg-bounds
+  "Selected conventions have the expected (min . max) arg counts."
+  :cases (("unary"          :unary          1 1)
+          ("binary"         :binary         2 2)
+          ("unary-opt-nil"  :unary-opt-nil  0 1)
+          ("binary-opt-one" :binary-opt-one 1 2)
+          ("nullary"        :nullary        0 0)
+          ("ternary-custom" :ternary-custom 3 3))
+  (conv expected-min expected-max)
+  (let ((bounds (cdr (assoc conv cl-cc::*convention-arity* :test #'eq))))
+    (assert-true (not (null bounds)))
+    (assert-= expected-min (car bounds))
+    (assert-= expected-max (cdr bounds))))
+
+;;; ─── emit-registered-builtin arity validation ─────────────────────────────────
+
+(deftest emit-registered-builtin-returns-nil-for-wrong-arity
+  "emit-registered-builtin returns nil when arg count is outside convention bounds."
+  (let* ((entry (gethash "CAR" cl-cc::*builtin-registry*))  ; :unary, needs exactly 1 arg
+         (ctx   (make-codegen-ctx))
+         (reg   (cl-cc::make-register ctx)))
+    ;; Pass 0 args for a :unary convention (min=1, max=1) → should return nil
+    (assert-null (cl-cc::emit-registered-builtin entry nil reg ctx))))

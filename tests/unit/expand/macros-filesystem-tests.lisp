@@ -49,10 +49,13 @@
     (assert-eq (find-symbol "OUR-LOAD" :cl-cc) (car (third result)))
     (assert-eq 'values (car (fourth result)))))
 
-(deftest readtable-stub-expansion
-  "READTABLEP is a simple PROGN stub and SET-MACRO-CHARACTER returns T."
-  (let ((readtablep-result (our-macroexpand-1 '(readtablep rt)))
-        (set-macro-result (our-macroexpand-1 '(set-macro-character #\a fn))))
-    (assert-eq 'progn (car readtablep-result))
-    (assert-eq nil (third readtablep-result))
-    (assert-eq t (sixth set-macro-result))))
+(deftest readtablep-stub-expansion
+  "READTABLEP is a simple PROGN stub returning NIL."
+  (let ((result (our-macroexpand-1 '(readtablep rt))))
+    (assert-eq 'progn (car result))
+    (assert-eq nil (third result))))
+
+(deftest set-macro-character-stub-expansion
+  "SET-MACRO-CHARACTER stub returns T as its sixth form element."
+  (let ((result (our-macroexpand-1 '(set-macro-character #\a fn))))
+    (assert-eq t (sixth result))))

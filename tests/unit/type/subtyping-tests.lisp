@@ -6,8 +6,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite subtyping-suite :description "Subtyping relation and lattice operation tests")
+(defsuite subtyping-suite :description "Subtyping relation and lattice operation tests"
+  :parent cl-cc-suite)
 
+
+(in-suite subtyping-suite)
 ;;; ─── Helpers ─────────────────────────────────────────────────────────────────
 
 (defun prim (name) (make-type-primitive :name name))

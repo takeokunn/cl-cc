@@ -2,8 +2,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite expander-core-suite :description "Core expander helper unit tests")
+(defsuite expander-core-suite :description "Core expander helper unit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite expander-core-suite)
 (deftest-each reduce-variadic-op
   "reduce-variadic-op builds left-nested call trees for any arity."
   :cases (("zero-plus"  '+ nil       0 0)

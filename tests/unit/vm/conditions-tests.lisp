@@ -5,7 +5,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite conditions-suite :description "VM condition system unit tests")
+(defsuite conditions-suite
+  :description "VM condition system unit tests"
+  :parent cl-cc-suite)
+
+(in-suite conditions-suite)
 
 ;;; ─── Condition Construction ───────────────────────────────────────────────
 

@@ -378,6 +378,19 @@
     :vm-spread-values
     :vm-mv-bind
     :vm-dst-regs
+    ;; Additional VM instruction type symbols used by optimizer-tables-tests
+    ;; and x86-64 emitter tests (hash-table keys must be shared package symbols).
+    :vm-lcm :vm-gcd :vm-ash :vm-rotate :vm-bswap
+    :vm-logand :vm-logior :vm-logxor :vm-logeqv
+    :vm-logtest :vm-logbitp :vm-logcount :vm-integer-length
+    :vm-min :vm-max :vm-rem :vm-mod :vm-div :vm-truncate
+    :vm-floor-inst :vm-ceiling-inst :vm-round-inst
+    :vm-lognot :vm-rational :vm-rationalize :vm-numerator :vm-denominator
+    :vm-make-array
+    :vm-eq :vm-num-eq :vm-lt :vm-gt :vm-le :vm-ge
+    :vm-and :vm-or :vm-abs :vm-inc :vm-dec :vm-not
+    :vm-concatenate :vm-select
+    :vm-cons-p :vm-symbol-p :vm-number-p :vm-integer-p :vm-function-p
     :vm-apply
     :vm-register-function
     :vm-function-registry

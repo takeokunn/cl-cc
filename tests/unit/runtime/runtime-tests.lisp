@@ -204,15 +204,19 @@
   "rt-push-list conses value onto front."
   (assert-equal '(x a b) (cl-cc/runtime:rt-push-list 'x '(a b))))
 
-(deftest rt-endp-convention
-  "rt-endp returns 1 for end, 0 otherwise."
-  (assert-= 1 (cl-cc/runtime:rt-endp nil))
-  (assert-= 0 (cl-cc/runtime:rt-endp '(1))))
+(deftest-each rt-endp-convention
+  "rt-endp: 1 for nil (end of list); 0 for non-empty list."
+  :cases (("nil-end"   nil  1)
+          ("non-empty" '(1) 0))
+  (input expected)
+  (assert-= expected (cl-cc/runtime:rt-endp input)))
 
-(deftest rt-equal-convention
-  "rt-equal returns 1/0."
-  (assert-= 1 (cl-cc/runtime:rt-equal '(1 2) '(1 2)))
-  (assert-= 0 (cl-cc/runtime:rt-equal '(1 2) '(1 3))))
+(deftest-each rt-equal-convention
+  "rt-equal: 1 when structurally equal; 0 when not."
+  :cases (("equal"     '(1 2) '(1 2) 1)
+          ("not-equal" '(1 2) '(1 3) 0))
+  (a b expected)
+  (assert-= expected (cl-cc/runtime:rt-equal a b)))
 
 ;;; ─── Array Operations ─────────────────────────────────────────────────────
 
@@ -254,27 +258,33 @@
 
 ;;; ─── Arithmetic Helpers ────────────────────────────────────────────────────
 
-(deftest rt-basic-arithmetic
-  "rt-add/sub/mul/div/mod/rem."
-  (assert-= 7 (cl-cc/runtime:rt-add 3 4))
-  (assert-= -1 (cl-cc/runtime:rt-sub 3 4))
-  (assert-= 12 (cl-cc/runtime:rt-mul 3 4))
-  (assert-= 5/2 (cl-cc/runtime:rt-div 5 2))
-  (assert-= 1 (cl-cc/runtime:rt-mod 7 3))
-  (assert-= 1 (cl-cc/runtime:rt-rem 7 3)))
+(deftest-each rt-basic-arithmetic
+  "rt-add/sub/mul/div/mod/rem: binary arithmetic operations."
+  :cases (("add" #'cl-cc/runtime:rt-add 3  4   7)
+          ("sub" #'cl-cc/runtime:rt-sub 3  4  -1)
+          ("mul" #'cl-cc/runtime:rt-mul 3  4  12)
+          ("div" #'cl-cc/runtime:rt-div 5  2   5/2)
+          ("mod" #'cl-cc/runtime:rt-mod 7  3   1)
+          ("rem" #'cl-cc/runtime:rt-rem 7  3   1))
+  (fn a b expected)
+  (assert-= expected (funcall fn a b)))
 
-(deftest rt-unary-arithmetic
-  "rt-neg/abs/inc/dec."
-  (assert-= -5 (cl-cc/runtime:rt-neg 5))
-  (assert-= 5 (cl-cc/runtime:rt-abs -5))
-  (assert-= 6 (cl-cc/runtime:rt-inc 5))
-  (assert-= 4 (cl-cc/runtime:rt-dec 5)))
+(deftest-each rt-unary-arithmetic
+  "rt-neg/abs/inc/dec: unary arithmetic operations."
+  :cases (("neg" #'cl-cc/runtime:rt-neg  5  -5)
+          ("abs" #'cl-cc/runtime:rt-abs -5   5)
+          ("inc" #'cl-cc/runtime:rt-inc  5   6)
+          ("dec" #'cl-cc/runtime:rt-dec  5   4))
+  (fn input expected)
+  (assert-= expected (funcall fn input)))
 
-(deftest rt-not-convention
-  "rt-not returns 0 for truthy, 1 for falsy."
-  (assert-= 1 (cl-cc/runtime:rt-not nil))
-  (assert-= 0 (cl-cc/runtime:rt-not t))
-  (assert-= 0 (cl-cc/runtime:rt-not 42)))
+(deftest-each rt-not-convention
+  "rt-not: 1 for falsy (nil); 0 for truthy (t, integer)."
+  :cases (("nil"     nil  1)
+          ("true"    t    0)
+          ("integer" 42   0))
+  (input expected)
+  (assert-= expected (cl-cc/runtime:rt-not input)))
 
 (deftest-each rt-numeric-predicates
   "Numeric predicates return 1/0."
@@ -312,14 +322,19 @@
 
 ;;; ─── Bitwise ───────────────────────────────────────────────────────────────
 
-(deftest rt-bitwise-ops
-  "rt-logand/logior/logxor/lognot/ash."
-  (assert-= #b1010 (cl-cc/runtime:rt-logand #b1110 #b1011))
-  (assert-= #b1111 (cl-cc/runtime:rt-logior #b1010 #b0101))
-  (assert-= #b1111 (cl-cc/runtime:rt-logxor #b1010 #b0101))
-  (assert-= -43 (cl-cc/runtime:rt-lognot 42))
-  (assert-= 8 (cl-cc/runtime:rt-ash 2 2))
-  (assert-= 2 (cl-cc/runtime:rt-ash 8 -2)))
+(deftest-each rt-bitwise-ops
+  "rt-logand/logior/logxor/ash: binary bitwise and shift operations."
+  :cases (("and"   #'cl-cc/runtime:rt-logand #b1110  #b1011 #b1010)
+          ("or"    #'cl-cc/runtime:rt-logior #b1010  #b0101 #b1111)
+          ("xor"   #'cl-cc/runtime:rt-logxor #b1010  #b0101 #b1111)
+          ("ash-l" #'cl-cc/runtime:rt-ash    2       2      8)
+          ("ash-r" #'cl-cc/runtime:rt-ash    8      -2      2))
+  (fn a b expected)
+  (assert-= expected (funcall fn a b)))
+
+(deftest rt-lognot-inverts-bits
+  "rt-lognot inverts all bits (lognot 42 = -43)."
+  (assert-= -43 (cl-cc/runtime:rt-lognot 42)))
 
 (deftest-each rt-bitwise-predicate-conventions
   "rt-logtest and rt-logbitp return 1/0 (bit overlap and bit position tests)."
@@ -388,10 +403,12 @@
   (pred-fn input expected)
   (assert-= expected (funcall pred-fn input)))
 
-(deftest rt-char-case-ops
-  "rt-char-upcase/downcase."
-  (assert-equal #\A (cl-cc/runtime:rt-char-upcase #\a))
-  (assert-equal #\a (cl-cc/runtime:rt-char-downcase #\A)))
+(deftest-each rt-char-case-ops
+  "rt-char-upcase/downcase: convert character case."
+  :cases (("upcase"   #'cl-cc/runtime:rt-char-upcase   #\a #\A)
+          ("downcase" #'cl-cc/runtime:rt-char-downcase  #\A #\a))
+  (fn input expected)
+  (assert-equal expected (funcall fn input)))
 
 ;;; ─── Symbol Operations ─────────────────────────────────────────────────────
 
@@ -462,19 +479,23 @@
 
 ;;; ─── Misc ──────────────────────────────────────────────────────────────────
 
-(deftest rt-boundp-fboundp-convention
-  "rt-boundp/rt-fboundp return 1/0."
-  (assert-= 1 (cl-cc/runtime:rt-fboundp '+))
-  (assert-= 0 (cl-cc/runtime:rt-fboundp (gensym "UNBOUND"))))
+(deftest-each rt-fboundp-convention
+  "rt-fboundp returns 1 for bound function symbols, 0 for unbound."
+  :cases (("bound"   '+ 1)
+          ("unbound" (gensym "UNBOUND") 0))
+  (sym expected)
+  (assert-= expected (cl-cc/runtime:rt-fboundp sym)))
 
 (deftest rt-coerce-works
   "rt-coerce delegates to CL coerce."
   (assert-equal '(1 2 3) (cl-cc/runtime:rt-coerce #(1 2 3) 'list)))
 
-(deftest rt-parse-integer
+(deftest-each rt-parse-integer
   "rt-parse-integer: decimal and hex (with :radix) parsing."
-  (assert-= 42  (cl-cc/runtime:rt-parse-integer "42"))
-  (assert-= 255 (cl-cc/runtime:rt-parse-integer "FF" :radix 16)))
+  :cases (("decimal" "42"  10 42)
+          ("hex"     "FF"  16 255))
+  (input radix expected)
+  (assert-= expected (cl-cc/runtime:rt-parse-integer input :radix radix)))
 
 ;;; ─── I/O Wrappers ──────────────────────────────────────────────────────────
 
@@ -495,15 +516,18 @@
     (cl-cc/runtime:rt-stream-write-string s "test")
     (assert-equal "test" (cl-cc/runtime:rt-get-output-stream-string s))))
 
-(deftest rt-stream-predicates
+(deftest-each rt-stream-predicates
   "rt-input-stream-p / rt-output-stream-p / rt-open-stream-p return 1/0."
-  (let ((in (make-string-input-stream "x"))
-        (out (make-string-output-stream)))
-    (assert-= 1 (cl-cc/runtime:rt-input-stream-p in))
-    (assert-= 0 (cl-cc/runtime:rt-input-stream-p out))
-    (assert-= 1 (cl-cc/runtime:rt-output-stream-p out))
-    (assert-= 0 (cl-cc/runtime:rt-output-stream-p in))
-    (assert-= 1 (cl-cc/runtime:rt-open-stream-p in))))
+  :cases (("input-true"  #'cl-cc/runtime:rt-input-stream-p  :input  1)
+          ("input-false" #'cl-cc/runtime:rt-input-stream-p  :output 0)
+          ("output-true" #'cl-cc/runtime:rt-output-stream-p :output 1)
+          ("output-false" #'cl-cc/runtime:rt-output-stream-p :input 0)
+          ("open-true"   #'cl-cc/runtime:rt-open-stream-p   :input  1))
+  (pred-fn direction expected)
+  (let ((stream (ecase direction
+                  (:input  (make-string-input-stream "x"))
+                  (:output (make-string-output-stream)))))
+    (assert-= expected (funcall pred-fn stream))))
 
 (deftest rt-read-write-char-roundtrip
   "rt-write-char / rt-read-char via string streams."
@@ -512,8 +536,10 @@
     (let ((in (make-string-input-stream (get-output-stream-string out))))
       (assert-equal #\Z (cl-cc/runtime:rt-read-char in)))))
 
-(deftest rt-pathname-component-extraction
-  "rt-pathname-component extracts name, type."
+(deftest-each rt-pathname-component-extraction
+  "rt-pathname-component extracts :name and :type components."
+  :cases (("name" :name "test")
+          ("type" :type "lisp"))
+  (component expected)
   (let ((p (cl-cc/runtime:rt-make-pathname :name "test" :type "lisp")))
-    (assert-equal "test" (cl-cc/runtime:rt-pathname-component p :name))
-    (assert-equal "lisp" (cl-cc/runtime:rt-pathname-component p :type))))
+    (assert-equal expected (cl-cc/runtime:rt-pathname-component p component))))

@@ -34,7 +34,8 @@
                              (cl-cc::make-vm-label :name :done)
                              (cl-cc::make-vm-halt :reg :r0)))
          (labels (cl-cc::build-label-table instructions)))
-    (assert-eq #'eql (hash-table-test labels))
+    ;; SBCL's HASH-TABLE-TEST returns the symbol 'EQL, not the function object.
+    (assert-eq 'eql (hash-table-test labels))
     (assert-= 0 (cl-cc::vm-label-table-lookup labels "entry"))
     (assert-= 2 (cl-cc::vm-label-table-lookup labels :done))))
 
@@ -241,7 +242,7 @@
                           cl-cc::+op2-halt2+ 0 nil nil)
            1)
           ("symbolp"
-           (make-bytecode cl-cc::+op2-const+ 1 foo nil
+           (make-bytecode cl-cc::+op2-const+ 1 'foo nil
                           cl-cc::+op2-symbolp+ 0 1 nil
                           cl-cc::+op2-halt2+ 0 nil nil)
            1)
@@ -295,7 +296,7 @@
            55))
   (bytecode expected)
   (let ((s (cl-cc::make-vm2-state)))
-    (assert-= expected (cl-cc::run-vm bytecode s))))
+    (assert-equal expected (cl-cc::run-vm bytecode s))))
 
 (deftest-each run-vm-immediate-ops
   "run-vm executes immediate arithmetic/comparison ops."

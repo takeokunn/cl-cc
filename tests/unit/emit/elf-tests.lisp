@@ -5,35 +5,33 @@
 
 (in-package :cl-cc/test)
 
-(defsuite elf-suite :description "ELF64 binary format tests")
+(defsuite elf-suite :description "ELF64 binary format tests"
+  :parent cl-cc-suite)
 
+
+(in-suite elf-suite)
 ;;; ─── ELF Constants ──────────────────────────────────────────────────────
 
-(deftest elf-magic-bytes
-  "ELF magic bytes are 0x7F 'E' 'L' 'F'."
-  (assert-equal #x7f cl-cc/binary::+elf-magic-0+)
-  (assert-equal (char-code #\E) cl-cc/binary::+elf-magic-1+)
-  (assert-equal (char-code #\L) cl-cc/binary::+elf-magic-2+)
-  (assert-equal (char-code #\F) cl-cc/binary::+elf-magic-3+))
+(deftest-each elf-constants
+  "ELF64 constant values match the ELF specification."
+  :cases (("magic-0"       #x7f              cl-cc/binary::+elf-magic-0+)
+          ("magic-1"       (char-code #\E)   cl-cc/binary::+elf-magic-1+)
+          ("magic-2"       (char-code #\L)   cl-cc/binary::+elf-magic-2+)
+          ("magic-3"       (char-code #\F)   cl-cc/binary::+elf-magic-3+)
+          ("class-64"      2                 cl-cc/binary::+elf-class-64+)
+          ("machine-x86"   #x3E              cl-cc/binary::+elf-machine-x86-64+)
+          ("machine-arm64" #xB7              cl-cc/binary::+elf-machine-aarch64+))
+  (expected actual)
+  (assert-equal expected actual))
 
-(deftest elf-class-64-value
-  "ELFCLASS64 = 2."
-  (assert-equal 2 cl-cc/binary::+elf-class-64+))
-
-(deftest elf-machine-x86-64
-  "EM_X86_64 = #x3E."
-  (assert-equal #x3E cl-cc/binary::+elf-machine-x86-64+))
-
-(deftest elf-machine-aarch64
-  "EM_AARCH64 = #xB7."
-  (assert-equal #xB7 cl-cc/binary::+elf-machine-aarch64+))
-
-(deftest elf-structure-sizes
-  "ELF64 structure sizes are correct."
-  (assert-equal 64 cl-cc/binary::+elf64-ehdr-size+)
-  (assert-equal 64 cl-cc/binary::+elf64-shdr-size+)
-  (assert-equal 24 cl-cc/binary::+elf64-sym-size+)
-  (assert-equal 24 cl-cc/binary::+elf64-rela-size+))
+(deftest-each elf-structure-sizes
+  "ELF64 structure sizes match the ELF specification."
+  :cases (("ehdr" 64 cl-cc/binary::+elf64-ehdr-size+)
+          ("shdr" 64 cl-cc/binary::+elf64-shdr-size+)
+          ("sym"  24 cl-cc/binary::+elf64-sym-size+)
+          ("rela" 24 cl-cc/binary::+elf64-rela-size+))
+  (expected actual)
+  (assert-equal expected actual))
 
 ;;; ─── Buffer Helpers ─────────────────────────────────────────────────────
 
@@ -53,25 +51,17 @@
     (cl-cc/binary::elf-buf-u8 buf #x1FF)
     (assert-equal #xFF (aref buf 0))))
 
-(deftest elf-buf-little-endian-writes
+(deftest-each elf-buf-little-endian-writes
   "elf-buf-u16le/u32le/u64le write little-endian: low byte at index 0."
+  :cases (("u16le" #'cl-cc/binary::elf-buf-u16le #x1234             2 '((0 #x34) (1 #x12)))
+          ("u32le" #'cl-cc/binary::elf-buf-u32le #xDEADBEEF         4 '((0 #xEF) (1 #xBE) (2 #xAD) (3 #xDE)))
+          ("u64le" #'cl-cc/binary::elf-buf-u64le #x0102030405060708 8 '((0 #x08) (7 #x01))))
+  (writer value expected-len byte-checks)
   (let ((buf (cl-cc/binary::elf-make-buffer)))
-    (cl-cc/binary::elf-buf-u16le buf #x1234)
-    (assert-equal 2 (length buf))
-    (assert-equal #x34 (aref buf 0))
-    (assert-equal #x12 (aref buf 1)))
-  (let ((buf (cl-cc/binary::elf-make-buffer)))
-    (cl-cc/binary::elf-buf-u32le buf #xDEADBEEF)
-    (assert-equal 4 (length buf))
-    (assert-equal #xEF (aref buf 0))
-    (assert-equal #xBE (aref buf 1))
-    (assert-equal #xAD (aref buf 2))
-    (assert-equal #xDE (aref buf 3)))
-  (let ((buf (cl-cc/binary::elf-make-buffer)))
-    (cl-cc/binary::elf-buf-u64le buf #x0102030405060708)
-    (assert-equal 8 (length buf))
-    (assert-equal #x08 (aref buf 0))
-    (assert-equal #x01 (aref buf 7))))
+    (funcall writer buf value)
+    (assert-equal expected-len (length buf))
+    (loop for (idx expected) in byte-checks
+          do (assert-equal expected (aref buf idx)))))
 
 (deftest elf-buf-pad-zeros
   "elf-buf-pad writes N zero bytes."
@@ -362,18 +352,17 @@
     (assert-equal #x7F (aref result 0))
     (assert-equal (char-code #\E) (aref result 1))))
 
-(deftest elf64-symbol-binding-type-constants
-  "Symbol binding and type constants have correct ELF-spec values."
-  (assert-equal 0 cl-cc/binary::+stb-local+)
-  (assert-equal 1 cl-cc/binary::+stb-global+)
-  (assert-equal 2 cl-cc/binary::+stb-weak+)
-  (assert-equal 0 cl-cc/binary::+stt-notype+)
-  (assert-equal 2 cl-cc/binary::+stt-func+))
-
-(deftest elf64-reloc-type-constants
-  "Relocation type constants match x86-64 ABI values."
-  (assert-equal 0 cl-cc/binary::+r-x86-64-none+)
-  (assert-equal 1 cl-cc/binary::+r-x86-64-64+)
-  (assert-equal 2 cl-cc/binary::+r-x86-64-pc32+)
-  (assert-equal 4 cl-cc/binary::+r-x86-64-plt32+)
-  (assert-equal 10 cl-cc/binary::+r-x86-64-32+))
+(deftest-each elf64-symbol-and-reloc-type-constants
+  "Symbol binding, symbol type, and relocation type constants match the ELF-spec."
+  :cases (("stb-local"      0  cl-cc/binary::+stb-local+)
+          ("stb-global"     1  cl-cc/binary::+stb-global+)
+          ("stb-weak"       2  cl-cc/binary::+stb-weak+)
+          ("stt-notype"     0  cl-cc/binary::+stt-notype+)
+          ("stt-func"       2  cl-cc/binary::+stt-func+)
+          ("r-x86-64-none"  0  cl-cc/binary::+r-x86-64-none+)
+          ("r-x86-64-64"    1  cl-cc/binary::+r-x86-64-64+)
+          ("r-x86-64-pc32"  2  cl-cc/binary::+r-x86-64-pc32+)
+          ("r-x86-64-plt32" 4  cl-cc/binary::+r-x86-64-plt32+)
+          ("r-x86-64-32"    10 cl-cc/binary::+r-x86-64-32+))
+  (expected actual)
+  (assert-equal expected actual))

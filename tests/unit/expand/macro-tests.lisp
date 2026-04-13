@@ -8,6 +8,8 @@
   :description "Test suite for macro expansion"
   :parent cl-cc-suite)
 
+
+(in-suite macro-suite)
 ;;; ─── %expand-quasiquote ──────────────────────────────────────────────────
 
 (deftest-each expand-quasiquote-wraps-in-quote

@@ -5,7 +5,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite hash-suite :description "VM hash table operations unit tests")
+(defsuite hash-suite
+  :description "VM hash table operations unit tests"
+  :parent cl-cc-suite)
+
+(in-suite hash-suite)
 
 ;;; ─── resolve-hash-test ────────────────────────────────────────────────────
 

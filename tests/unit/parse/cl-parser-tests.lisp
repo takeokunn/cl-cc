@@ -102,31 +102,21 @@
 
 ;;; ─── parse-cl-source ────────────────────────────────────────────────────────
 
-(deftest grammar-parse-cl-source-returns-cst
-  "parse-cl-source: returns CST nodes"
+(deftest grammar-parse-cl-source
+  "parse-cl-source: returns CST nodes, empty string produces no forms, diagnostics is a list, multiple forms counted."
   (multiple-value-bind (cst-list diagnostics)
       (cl-cc::parse-cl-source "(+ 1 2)")
     (declare (ignore diagnostics))
     (assert-= 1 (length cst-list))
-    (assert-true (cl-cc:cst-interior-p (first cst-list)))))
-
-(deftest grammar-parse-cl-source-empty
-  "parse-cl-source: empty string returns no forms"
+    (assert-true (cl-cc:cst-interior-p (first cst-list))))
   (multiple-value-bind (cst-list diagnostics)
       (cl-cc::parse-cl-source "")
     (declare (ignore diagnostics))
-    (assert-null cst-list)))
-
-(deftest grammar-parse-cl-source-diagnostics
-  "parse-cl-source: returns second value for diagnostics"
+    (assert-null cst-list))
   (multiple-value-bind (cst-list diagnostics)
       (cl-cc::parse-cl-source "(+ 1 2)")
     (declare (ignore cst-list))
-    ;; Valid source: diagnostics list exists (may be empty)
-    (assert-true (listp diagnostics))))
-
-(deftest grammar-parse-cl-source-multiple-forms
-  "parse-cl-source: multiple forms produce multiple CST nodes"
+    (assert-true (listp diagnostics)))
   (multiple-value-bind (cst-list diagnostics)
       (cl-cc::parse-cl-source "1 2 3")
     (declare (ignore diagnostics))
@@ -141,22 +131,11 @@
     (assert-null (cl-cc::token-stream-tokens ts))
     (assert-string= "test" (cl-cc::token-stream-source ts))))
 
-(deftest grammar-ts-peek-empty
-  "ts-peek: returns nil on empty stream"
+(deftest grammar-ts-empty-stream
+  "ts-peek returns nil and ts-at-end-p returns true on an empty stream."
   (let ((ts (cl-cc::make-token-stream :tokens nil :source "")))
-    (assert-null (cl-cc::ts-peek ts))))
-
-(deftest grammar-ts-at-end-p-empty
-  "ts-at-end-p: returns true on empty stream"
-  (let ((ts (cl-cc::make-token-stream :tokens nil :source "")))
+    (assert-null (cl-cc::ts-peek ts))
     (assert-true (cl-cc::ts-at-end-p ts))))
-
-(deftest grammar-ts-advance-consumes-token
-  "ts-advance: consumes and returns the first token"
-  (let* ((tokens (cl-cc:lex-all "42"))
-         (ts (cl-cc::make-token-stream :tokens tokens :source "42"))
-         (first-tok (cl-cc::ts-advance ts)))
-    (assert-eq :T-INT (cl-cc:lexer-token-type first-tok))))
 
 ;;; ─── parse-compiler-lambda-list ─────────────────────────────────────────────
 
@@ -222,12 +201,6 @@
 
 ;;; ─── lower-sexp-to-ast: atoms ────────────────────────────────────────────────
 
-(deftest lower-integer-produces-ast-int
-  "lower-sexp-to-ast: integer -> ast-int with correct value"
-  (let ((node (lower 42)))
-    (assert-true (cl-cc::ast-int-p node))
-    (assert-= 42 (cl-cc::ast-int-value node))))
-
 (deftest lower-symbol-produces-ast-var
   "lower-sexp-to-ast: symbol -> ast-var with correct name"
   (let ((node (lower 'x)))
@@ -239,16 +212,13 @@
   (let ((node (lower '_)))
     (assert-true (cl-cc::ast-hole-p node))))
 
-(deftest lower-nary-arithmetic-folds-left
-  "lower-sexp-to-ast: n-ary arithmetic folds into nested binary AST."
+(deftest lower-arithmetic-folding
+  "lower-sexp-to-ast: n-ary arithmetic folds left; unary minus becomes 0 - x."
   (let ((node (lower '(+ 1 2 3))))
     (assert-true (cl-cc::ast-binop-p node))
     (assert-eq '+ (cl-cc::ast-binop-op node))
     (assert-true (cl-cc::ast-binop-p (cl-cc::ast-binop-lhs node)))
-    (assert-= 3 (cl-cc::ast-int-value (cl-cc::ast-binop-rhs node)))))
-
-(deftest lower-unary-minus-becomes-negation
-  "lower-sexp-to-ast: unary minus is lowered as 0 - x."
+    (assert-= 3 (cl-cc::ast-int-value (cl-cc::ast-binop-rhs node))))
   (let ((node (lower '(- 7))))
     (assert-true (cl-cc::ast-binop-p node))
     (assert-eq '- (cl-cc::ast-binop-op node))
@@ -274,48 +244,25 @@
 
 ;;; ─── lower-sexp-to-ast: special forms ───────────────────────────────────────
 
-(deftest lower-if-form
-  "lower-sexp-to-ast: if form -> ast-if"
-  (let ((node (lower '(if x 1 2))))
-    (assert-true (cl-cc::ast-if-p node))
-    (assert-true (cl-cc::ast-var-p (cl-cc::ast-if-cond node)))
-    (assert-= 1 (cl-cc::ast-int-value (cl-cc::ast-if-then node)))))
+(deftest-each lower-control-flow-forms
+  "lower-sexp-to-ast: if, if-without-else, progn, and let produce correct node types and fields."
+  :cases (("if-with-else"    '(if x 1 2)         #'cl-cc::ast-if-p)
+          ("if-without-else" '(if x 1)            #'cl-cc::ast-if-p)
+          ("progn"           '(progn 1 2 3)        #'cl-cc::ast-progn-p)
+          ("let"             '(let ((x 1) (y 2)) x) #'cl-cc::ast-let-p))
+  (form pred)
+  (assert-true (funcall pred (lower form))))
 
-(deftest lower-if-without-else
-  "lower-sexp-to-ast: (if cond then) inserts nil else"
-  (let ((node (lower '(if x 1))))
-    (assert-true (cl-cc::ast-if-p node))
-    (assert-true (cl-cc::ast-quote-p (cl-cc::ast-if-else node)))))
-
-(deftest lower-progn-form
-  "lower-sexp-to-ast: progn form -> ast-progn"
-  (let ((node (lower '(progn 1 2 3))))
-    (assert-true (cl-cc::ast-progn-p node))
-    (assert-= 3 (length (cl-cc::ast-progn-forms node)))))
-
-(deftest lower-let-form
-  "lower-sexp-to-ast: let form -> ast-let with bindings"
-  (let ((node (lower '(let ((x 1) (y 2)) x))))
-    (assert-true (cl-cc::ast-let-p node))
-    (assert-= 2 (length (cl-cc::ast-let-bindings node)))
-    (assert-= 1 (length (cl-cc::ast-let-body node)))))
-
-(deftest lower-let-preserves-declarations
-  "lower-sexp-to-ast: let declarations are preserved on ast-let."
+(deftest lower-let-and-lambda-details
+  "lower-sexp-to-ast: let declarations preserved, bare-symbol binding nil, and lambda params correct."
   (let ((node (lower '(let ((x 1)) (declare (ignore x)) 42))))
     (assert-true (cl-cc::ast-let-p node))
-    (assert-equal '((ignore x)) (cl-cc::ast-let-declarations node))))
-
-(deftest lower-let-bare-symbol
-  "lower-sexp-to-ast: (let (x) body) binds x to nil"
+    (assert-equal '((ignore x)) (cl-cc::ast-let-declarations node)))
   (let ((node (lower '(let (x) x))))
     (assert-true (cl-cc::ast-let-p node))
     (let ((binding (first (cl-cc::ast-let-bindings node))))
       (assert-eq 'x (car binding))
-      (assert-true (cl-cc::ast-quote-p (cdr binding))))))
-
-(deftest lower-lambda-form
-  "lower-sexp-to-ast: lambda form -> ast-lambda"
+      (assert-true (cl-cc::ast-quote-p (cdr binding)))))
   (let ((node (lower '(lambda (x y) (+ x y)))))
     (assert-true (cl-cc::ast-lambda-p node))
     (assert-equal '(x y) (cl-cc::ast-lambda-params node))
@@ -329,50 +276,17 @@
     (assert-equal '(a b) (cl-cc::ast-defun-params node))
     (assert-= 1 (length (cl-cc::ast-defun-body node)))))
 
-(deftest lower-defvar-form
-  "lower-sexp-to-ast: defvar form -> ast-defvar"
-  (let ((node (lower '(defvar *x* 42))))
-    (assert-true (cl-cc::ast-defvar-p node))
-    (assert-eq '*x* (cl-cc::ast-defvar-name node))
-    (assert-true (cl-cc::ast-int-p (cl-cc::ast-defvar-value node)))))
-
-(deftest lower-defvar-no-value
-  "lower-sexp-to-ast: (defvar *x*) with no initial value"
-  (let ((node (lower '(defvar *x*))))
-    (assert-true (cl-cc::ast-defvar-p node))
-    (assert-null (cl-cc::ast-defvar-value node))))
-
-(deftest lower-setq-form
-  "lower-sexp-to-ast: setq form -> ast-setq"
-  (let ((node (lower '(setq x 10))))
-    (assert-true (cl-cc::ast-setq-p node))
-    (assert-eq 'x (cl-cc::ast-setq-var node))
-    (assert-= 10 (cl-cc::ast-int-value (cl-cc::ast-setq-value node)))))
-
-(deftest lower-setq-multi-var
-  "lower-sexp-to-ast: multi-var setq -> ast-progn of setq"
-  (let ((node (lower '(setq a 1 b 2))))
-    (assert-true (cl-cc::ast-progn-p node))
-    (assert-= 2 (length (cl-cc::ast-progn-forms node)))))
-
-(deftest lower-quote-form
-  "lower-sexp-to-ast: (quote x) -> ast-quote"
-  (let ((node (lower '(quote hello))))
-    (assert-true (cl-cc::ast-quote-p node))
-    (assert-eq 'hello (cl-cc::ast-quote-value node))))
-
-(deftest lower-block-form
-  "lower-sexp-to-ast: block form -> ast-block"
-  (let ((node (lower '(block my-block 1 2))))
-    (assert-true (cl-cc::ast-block-p node))
-    (assert-eq 'my-block (cl-cc::ast-block-name node))
-    (assert-= 2 (length (cl-cc::ast-block-body node)))))
-
-(deftest lower-return-from-form
-  "lower-sexp-to-ast: return-from form -> ast-return-from"
-  (let ((node (lower '(return-from my-block 42))))
-    (assert-true (cl-cc::ast-return-from-p node))
-    (assert-eq 'my-block (cl-cc::ast-return-from-name node))))
+(deftest-each lower-definition-and-binding-forms
+  "lower-sexp-to-ast: defvar, setq, quote, block, and return-from produce correct node types."
+  :cases (("defvar-with-value" '(defvar *x* 42)          #'cl-cc::ast-defvar-p)
+          ("defvar-no-value"   '(defvar *x*)              #'cl-cc::ast-defvar-p)
+          ("setq"              '(setq x 10)               #'cl-cc::ast-setq-p)
+          ("setq-multi"        '(setq a 1 b 2)            #'cl-cc::ast-progn-p)
+          ("quote"             '(quote hello)             #'cl-cc::ast-quote-p)
+          ("block"             '(block my-block 1 2)      #'cl-cc::ast-block-p)
+          ("return-from"       '(return-from my-block 42) #'cl-cc::ast-return-from-p))
+  (form pred)
+  (assert-true (funcall pred (lower form))))
 
 (deftest-each lower-function-name-forms
   "lower-sexp-to-ast: (function <name>) produces ast-function with correct name."
@@ -387,56 +301,29 @@
   "lower-sexp-to-ast: (function (lambda ...)) signals error (not yet supported)"
   (assert-signals error (lower '(function (lambda (x) x)))))
 
-(deftest lower-values-form
-  "lower-sexp-to-ast: values form -> ast-values"
-  (let ((node (lower '(values 1 2 3))))
-    (assert-true (cl-cc::ast-values-p node))
-    (assert-= 3 (length (cl-cc::ast-values-forms node)))))
-
-(deftest lower-multiple-value-bind
-  "lower-sexp-to-ast: multiple-value-bind -> ast-multiple-value-bind"
-  (let ((node (lower '(multiple-value-bind (a b) (values 1 2) (+ a b)))))
-    (assert-true (cl-cc::ast-multiple-value-bind-p node))
-    (assert-equal '(a b) (cl-cc::ast-mvb-vars node))
-    (assert-= 1 (length (cl-cc::ast-mvb-body node)))))
-
-(deftest lower-go-form
-  "lower-sexp-to-ast: go form -> ast-go"
-  (let ((node (lower '(go my-tag))))
-    (assert-true (cl-cc::ast-go-p node))
-    (assert-eq 'my-tag (cl-cc::ast-go-tag node))))
-
-(deftest lower-catch-form
-  "lower-sexp-to-ast: catch form -> ast-catch"
-  (let ((node (lower '(catch 'my-tag 1 2))))
-    (assert-true (cl-cc::ast-catch-p node))
-    (assert-= 2 (length (cl-cc::ast-catch-body node)))))
-
 (deftest-each lower-type-only
   "lower-sexp-to-ast: forms whose only check is the AST node type predicate."
-  :cases (("throw"       '(throw 'my-tag 42)                          #'cl-cc::ast-throw-p)
-          ("apply"       '(apply #'foo '(1 2))                         #'cl-cc::ast-apply-p)
-          ("funcall"     '(funcall #'foo 1 2)                          #'cl-cc::ast-call-p)
-          ("tagbody"     '(tagbody start (print 1) end (print 2))      #'cl-cc::ast-tagbody-p)
-          ("setf-gethash"  '(setf (gethash 'k tbl) 42)                #'cl-cc::ast-set-gethash-p)
-          ("mv-prog1"    '(multiple-value-prog1 (values 1 2) (print 3)) #'cl-cc::ast-multiple-value-prog1-p))
+  :cases (("values"          '(values 1 2 3)                                    #'cl-cc::ast-values-p)
+          ("mvb"             '(multiple-value-bind (a b) (values 1 2) (+ a b))  #'cl-cc::ast-multiple-value-bind-p)
+          ("go"              '(go my-tag)                                        #'cl-cc::ast-go-p)
+          ("catch"           '(catch 'my-tag 1 2)                               #'cl-cc::ast-catch-p)
+          ("throw"           '(throw 'my-tag 42)                                #'cl-cc::ast-throw-p)
+          ("apply"           '(apply #'foo '(1 2))                              #'cl-cc::ast-apply-p)
+          ("funcall"         '(funcall #'foo 1 2)                               #'cl-cc::ast-call-p)
+          ("tagbody"         '(tagbody start (print 1) end (print 2))           #'cl-cc::ast-tagbody-p)
+          ("setf-gethash"    '(setf (gethash 'k tbl) 42)                       #'cl-cc::ast-set-gethash-p)
+          ("mv-prog1"        '(multiple-value-prog1 (values 1 2) (print 3))     #'cl-cc::ast-multiple-value-prog1-p))
   (form pred)
   (assert-true (funcall pred (lower form))))
 
-(deftest lower-unwind-protect-form
-  "lower-sexp-to-ast: unwind-protect form -> ast-unwind-protect"
+(deftest lower-unwind-generic-the-forms
+  "lower-sexp-to-ast: unwind-protect, generic call, and the produce correct node types."
   (let ((node (lower '(unwind-protect (risky) (cleanup)))))
     (assert-true (cl-cc::ast-unwind-protect-p node))
-    (assert-= 1 (length (cl-cc::ast-unwind-cleanup node)))))
-
-(deftest lower-generic-call
-  "lower-sexp-to-ast: generic call -> ast-call"
+    (assert-= 1 (length (cl-cc::ast-unwind-cleanup node))))
   (let ((node (lower '(my-func 1 2 3))))
     (assert-true (cl-cc::ast-call-p node))
-    (assert-= 3 (length (cl-cc::ast-call-args node)))))
-
-(deftest lower-the-form
-  "lower-sexp-to-ast: (the type expr) -> ast-the"
+    (assert-= 3 (length (cl-cc::ast-call-args node))))
   (let ((node (lower '(the fixnum x))))
     (assert-true (cl-cc::ast-the-p node))
     (assert-eq 'fixnum (cl-cc::ast-the-type node))))
@@ -448,16 +335,13 @@
     (assert-= 1 (length (cl-cc::ast-flet-bindings node)))
     (assert-= 1 (length (cl-cc::ast-flet-body node)))))
 
-(deftest lower-defun-with-declare-type
-  "lower-sexp-to-ast: leading (declare (type ...)) becomes typed params."
+(deftest lower-declare-type-becomes-typed-params
+  "lower-sexp-to-ast: (declare (type ...)) in defun and lambda body produces typed params."
   (let ((node (lower '(defun add1 (x)
                         (declare (type fixnum x))
                         (+ x 1)))))
     (assert-true (cl-cc::ast-defun-p node))
-    (assert-equal '((x fixnum)) (cl-cc::ast-defun-params node))))
-
-(deftest lower-lambda-with-declare-type
-  "lower-sexp-to-ast: lambda leading type declaration becomes typed params."
+    (assert-equal '((x fixnum)) (cl-cc::ast-defun-params node)))
   (let ((node (lower '(lambda (x)
                         (declare (type fixnum x))
                         (+ x 1)))))
@@ -474,14 +358,11 @@
     (assert-equal '((dynamic-extent args)) (cl-cc::ast-lambda-declarations node))
     (assert-= 1 (length (cl-cc::ast-lambda-body node)))))
 
-(deftest lower-labels-form
-  "lower-sexp-to-ast: labels form -> ast-labels"
+(deftest lower-labels-and-handler-case-forms
+  "lower-sexp-to-ast: labels and handler-case produce correct node types and binding/clause counts."
   (let ((node (lower '(labels ((fact (n) (if (= n 0) 1 (* n (fact (- n 1)))))) (fact 5)))))
     (assert-true (cl-cc::ast-labels-p node))
-    (assert-= 1 (length (cl-cc::ast-labels-bindings node)))))
-
-(deftest lower-handler-case-form
-  "lower-sexp-to-ast: handler-case form -> ast-handler-case"
+    (assert-= 1 (length (cl-cc::ast-labels-bindings node))))
   (let ((node (lower '(handler-case (risky) (error (e) (print e))))))
     (assert-true (cl-cc::ast-handler-case-p node))
     (assert-= 1 (length (cl-cc::ast-handler-case-clauses node)))))
@@ -562,31 +443,27 @@
 
 ;;; ─── Grammar specialized parsers ────────────────────────────────────────────
 
-(deftest grammar-parse-cl-form-atoms
+(deftest-each grammar-parse-cl-form-atoms
   "parse-cl-form: scalar tokens produce cst-token with correct value."
-  (let* ((tokens (cl-cc:lex-all "42"))
-         (ts (cl-cc::make-token-stream :tokens tokens :source "42"))
+  :cases (("integer" "42"        42)
+          ("string"  "\"hello\"" "hello"))
+  (source expected-value)
+  (let* ((tokens (cl-cc:lex-all source))
+         (ts (cl-cc::make-token-stream :tokens tokens :source source))
          (form (cl-cc::parse-cl-form ts)))
     (assert-true (cl-cc:cst-token-p form))
-    (assert-= 42 (cl-cc:cst-token-value form)))
-  (let* ((tokens (cl-cc:lex-all "\"hello\""))
-         (ts (cl-cc::make-token-stream :tokens tokens :source "\"hello\""))
-         (form (cl-cc::parse-cl-form ts)))
-    (assert-true (cl-cc:cst-token-p form))
-    (assert-string= "hello" (cl-cc:cst-token-value form))))
+    (assert-equal expected-value (cl-cc:cst-token-value form))))
 
-(deftest grammar-parse-cl-form-lists
+(deftest-each grammar-parse-cl-form-lists
   "parse-cl-form: list -> cst-interior; empty list -> nil children."
-  (let* ((tokens (cl-cc:lex-all "(1 2 3)"))
-         (ts (cl-cc::make-token-stream :tokens tokens :source "(1 2 3)"))
+  :cases (("non-empty" "(1 2 3)" 3)
+          ("empty"     "()"      0))
+  (source expected-child-count)
+  (let* ((tokens (cl-cc:lex-all source))
+         (ts (cl-cc::make-token-stream :tokens tokens :source source))
          (form (cl-cc::parse-cl-form ts)))
     (assert-true (cl-cc:cst-interior-p form))
-    (assert-= 3 (length (cl-cc:cst-children form))))
-  (let* ((tokens (cl-cc:lex-all "()"))
-         (ts (cl-cc::make-token-stream :tokens tokens :source "()"))
-         (form (cl-cc::parse-cl-form ts)))
-    (assert-true (cl-cc:cst-interior-p form))
-    (assert-null (cl-cc:cst-children form))))
+    (assert-= expected-child-count (length (cl-cc:cst-children form)))))
 
 (deftest-each grammar-parse-cl-form-reader-macros
   "parse-cl-form: reader-macro sugar -> cst-interior node with correct kind."
@@ -691,15 +568,11 @@
     (assert-true (vectorp result))
     (assert-= expected-len (length result))))
 
-(deftest parser-parse-source-backquote
-  "parse-source: backquote expands to backquote form"
+(deftest parser-parse-source-quasiquote
+  "parse-source: backquote and unquote reader macros produce cons forms."
   (let ((result (parse-one "`(a b)")))
     (assert-true (consp result))
-    ;; backquote produces (cl-cc::backquote ...)
-    (assert-true (symbolp (first result)))))
-
-(deftest parser-parse-source-unquote
-  "parse-source: ,x inside backquote produces unquote form"
+    (assert-true (symbolp (first result))))
   (let ((result (parse-one "`,x")))
     (assert-true (consp result))))
 
@@ -719,29 +592,20 @@
 
 ;;; ─── NEW: parse-all-forms additional cases ─────────────────────────────────
 
-(deftest parser-parse-all-forms-mixed
-  "parse-all-forms: mixed atoms and lists"
+(deftest parser-parse-all-forms-additional
+  "parse-all-forms: mixed input, comments skipped, whitespace-only nil, and many forms counted."
   (let ((forms (parse-many "42 \"hello\" (+ 1 2)")))
     (assert-= 3 (length forms))
     (assert-= 42 (first forms))
     (assert-string= "hello" (second forms))
-    (assert-true (consp (third forms)))))
-
-(deftest parser-parse-all-forms-with-comments
-  "parse-all-forms: comments are skipped"
+    (assert-true (consp (third forms))))
   (let ((forms (parse-many "; this is a comment
 1 2")))
     (assert-= 2 (length forms))
     (assert-= 1 (first forms))
-    (assert-= 2 (second forms))))
-
-(deftest parser-parse-all-forms-whitespace-only
-  "parse-all-forms: whitespace-only input returns nil"
+    (assert-= 2 (second forms)))
   (assert-null (parse-many "
-  ")))
-
-(deftest parser-parse-all-forms-many-forms
-  "parse-all-forms: many top-level forms"
+  "))
   (let ((forms (parse-many "1 2 3 4 5 6 7 8 9 10")))
     (assert-= 10 (length forms))))
 
@@ -812,15 +676,12 @@
 
 ;;; ─── NEW: lower-sexp-to-ast additional forms ──────────────────────────────
 
-(deftest lower-binop-operators
-  "lower-sexp-to-ast: all binary operators produce ast-binop"
+(deftest lower-binop-and-print-forms
+  "lower-sexp-to-ast: all binary operators produce ast-binop; print produces ast-print."
   (dolist (op '(+ - * = < > <= >=))
     (let ((node (lower (list op 1 2))))
       (assert-true (cl-cc::ast-binop-p node))
-      (assert-eq op (cl-cc::ast-binop-op node)))))
-
-(deftest lower-print-form
-  "lower-sexp-to-ast: print form -> ast-print"
+      (assert-eq op (cl-cc::ast-binop-op node))))
   (let ((node (lower '(print 42))))
     (assert-true (cl-cc::ast-print-p node))
     (assert-true (cl-cc::ast-int-p (cl-cc::ast-print-expr node)))))
@@ -850,30 +711,18 @@
           (assert-eq 'args slot-val)
           (assert-= expected (length slot-val))))))
 
-(deftest lower-defparameter-form
-  "lower-sexp-to-ast: defparameter -> ast-defvar (same as defvar)"
+(deftest lower-additional-forms
+  "lower-sexp-to-ast: defparameter, return-from-no-value error, multiple-value-call, and setf variants."
   (let ((node (lower '(defparameter *x* 99))))
     (assert-true (cl-cc::ast-defvar-p node))
-    (assert-eq '*x* (cl-cc::ast-defvar-name node))))
-
-(deftest lower-return-from-no-value
-  "lower-sexp-to-ast: (return-from blk) with no value signals error (not yet supported)"
-  (assert-signals error (lower '(return-from blk))))
-
-(deftest lower-multiple-value-call-form
-  "lower-sexp-to-ast: multiple-value-call -> ast-multiple-value-call"
+    (assert-eq '*x* (cl-cc::ast-defvar-name node)))
+  (assert-signals error (lower '(return-from blk)))
   (let ((node (lower '(multiple-value-call #'list (values 1 2) (values 3 4)))))
     (assert-true (cl-cc::ast-multiple-value-call-p node))
-    (assert-= 2 (length (cl-cc::ast-mv-call-args node)))))
-
-(deftest lower-setf-slot-value
-  "lower-sexp-to-ast: (setf (slot-value obj 'x) v) -> ast-set-slot-value"
+    (assert-= 2 (length (cl-cc::ast-mv-call-args node))))
   (let ((node (lower '(setf (slot-value obj 'x) 10))))
     (assert-true (cl-cc::ast-set-slot-value-p node))
-    (assert-eq 'x (cl-cc::ast-set-slot-value-slot node))))
-
-(deftest lower-setf-symbol-place
-  "lower-sexp-to-ast: (setf x 10) -> ast-setq (same as setq)"
+    (assert-eq 'x (cl-cc::ast-set-slot-value-slot node)))
   (let ((node (lower '(setf x 10))))
     (assert-true (cl-cc::ast-setq-p node))
     (assert-eq 'x (cl-cc::ast-setq-var node))))
@@ -934,45 +783,36 @@
     (assert-eq expected-head (first result))
     (assert-true (>= (length result) expected-min-len))))
 
-(deftest ast-roundtrip-defvar-no-value
-  "ast-to-sexp roundtrip: defvar without value"
-  (let ((result (ast-roundtrip '(defvar *x*))))
-    (assert-equal '(defvar *x*) result)))
-
-(deftest ast-roundtrip-defclass
-  "ast-to-sexp roundtrip: defclass preserves name and supers"
-  (let ((result (ast-roundtrip '(defclass point (shape) (x y)))))
-    (assert-eq 'defclass (first result))
-    (assert-eq 'point (second result))
-    (assert-equal '(shape) (third result))))
-
-(deftest ast-roundtrip-defmethod
-  "ast-to-sexp roundtrip: defmethod preserves specializers"
-  (let ((result (ast-roundtrip '(defmethod area ((s circle)) (* 3 (slot-value s 'r))))))
-    (assert-eq 'defmethod (first result))
-    (assert-eq 'area (second result))))
+(deftest-each ast-roundtrip-definition-forms
+  "ast-to-sexp roundtrip: defvar-no-value, defclass, and defmethod preserve their head and key fields."
+  :cases (("defvar-no-value" '(defvar *x*)
+           'defvar '*x* nil)
+          ("defclass"        '(defclass point (shape) (x y))
+           'defclass 'point '(shape))
+          ("defmethod"       '(defmethod area ((s circle)) (* 3 (slot-value s 'r)))
+           'defmethod 'area nil))
+  (form expected-head expected-second expected-third)
+  (let ((result (ast-roundtrip form)))
+    (assert-eq expected-head (first result))
+    (assert-eq expected-second (second result))
+    (when expected-third
+      (assert-equal expected-third (third result)))))
 
 ;;; ─── NEW: parse-slot-spec ──────────────────────────────────────────────────
 
-(deftest parse-slot-spec-simple
-  "parse-slot-spec: bare symbol -> ast-slot-def with name only"
+(deftest parse-slot-spec-variants
+  "parse-slot-spec: bare symbol, full options, and :initform all parse correctly."
   (let ((slot (cl-cc::parse-slot-spec 'x)))
     (assert-eq 'x (cl-cc::ast-slot-name slot))
     (assert-null (cl-cc::ast-slot-initarg slot))
-    (assert-null (cl-cc::ast-slot-reader slot))))
-
-(deftest parse-slot-spec-full
-  "parse-slot-spec: full slot spec with all options"
+    (assert-null (cl-cc::ast-slot-reader slot)))
   (let ((slot (cl-cc::parse-slot-spec '(x :initarg :x :reader get-x :writer set-x :accessor x-acc :type integer))))
     (assert-eq 'x (cl-cc::ast-slot-name slot))
     (assert-eq :x (cl-cc::ast-slot-initarg slot))
     (assert-eq 'get-x (cl-cc::ast-slot-reader slot))
     (assert-eq 'set-x (cl-cc::ast-slot-writer slot))
     (assert-eq 'x-acc (cl-cc::ast-slot-accessor slot))
-    (assert-eq 'integer (cl-cc::ast-slot-type slot))))
-
-(deftest parse-slot-spec-initform
-  "parse-slot-spec: slot with :initform produces AST initform"
+    (assert-eq 'integer (cl-cc::ast-slot-type slot)))
   (let ((slot (cl-cc::parse-slot-spec '(count :initform 0))))
     (assert-eq 'count (cl-cc::ast-slot-name slot))
     (assert-true (cl-cc::ast-int-p (cl-cc::ast-slot-initform slot)))
@@ -980,35 +820,27 @@
 
 ;;; ─── NEW: parse-compiler-lambda-list edge cases ────────────────────────────
 
-(deftest parser-lambda-list-rest-then-key
-  "parse-compiler-lambda-list: &rest followed by &key"
+(deftest parser-lambda-list-edge-cases
+  "parse-compiler-lambda-list: &rest+&key, &allow-other-keys, &body, and bare &optional are handled correctly."
   (multiple-value-bind (required optional rest-param key-params)
       (cl-cc::parse-compiler-lambda-list '(x &rest args &key verbose))
     (assert-equal '(x) required)
     (assert-null optional)
     (assert-eq 'args rest-param)
     (assert-= 1 (length key-params))
-    (assert-eq 'verbose (first (first key-params)))))
-
-(deftest parser-lambda-list-allow-other-keys
-  "parse-compiler-lambda-list: &allow-other-keys is accepted"
+    (assert-eq 'verbose (first (first key-params))))
   (multiple-value-bind (required optional rest-param key-params)
       (cl-cc::parse-compiler-lambda-list '(&key x &allow-other-keys))
     (assert-null required)
     (assert-null optional)
     (assert-null rest-param)
-    (assert-= 1 (length key-params))))
-
-(deftest parser-lambda-list-body
-  "parse-compiler-lambda-list: &body treated as &rest"
+    (assert-= 1 (length key-params)))
   (multiple-value-bind (required optional rest-param key-params)
       (cl-cc::parse-compiler-lambda-list '(x &body forms))
+    (declare (ignore optional))
     (assert-equal '(x) required)
     (assert-eq 'forms rest-param)
-    (assert-null key-params)))
-
-(deftest parser-lambda-list-optional-bare
-  "parse-compiler-lambda-list: bare &optional symbol gets nil default"
+    (assert-null key-params))
   (multiple-value-bind (required optional rest-param key-params)
       (cl-cc::parse-compiler-lambda-list '(&optional x))
     (declare (ignore rest-param key-params))

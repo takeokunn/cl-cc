@@ -5,7 +5,10 @@
 
 (in-package :cl-cc/test)
 
-(defsuite constraint-suite :description "OutsideIn(X) constraint language tests")
+(defsuite constraint-suite :description "OutsideIn(X
+  :parent cl-cc-suite) 
+(in-suite constraint-suite)
+constraint language tests")
 
 ;;; ─── Smart constructors ────────────────────────────────────────────────────
 

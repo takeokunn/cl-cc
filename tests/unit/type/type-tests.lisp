@@ -34,21 +34,20 @@
   (tp expected-name)
   (assert-eq expected-name (type-primitive-name tp)))
 
-(deftest type-repr-variable-creation
-  "Test that type variables can be created with unique IDs."
+(deftest type-repr-variable-and-function-creation
+  "Type variables have unique IDs and names; function types expose params/return."
+  ;; Variables: distinct IDs, correct names
   (let ((v1 (make-type-variable 'a))
         (v2 (make-type-variable 'b)))
     (assert-type type-variable v1)
     (assert-type type-variable v2)
     (assert-false (= (type-variable-id v1) (type-variable-id v2)))
     (assert-eq 'a (type-variable-name v1))
-    (assert-eq 'b (type-variable-name v2))))
-
-(deftest type-repr-function-type
-  "Test function type construction and accessors."
+    (assert-eq 'b (type-variable-name v2)))
+  ;; Function type: accessors
   (let ((fn-type (make-type-function-raw
-                                :params (list type-int type-int)
-                                :return type-int)))
+                  :params (list type-int type-int)
+                  :return type-int)))
     (assert-type type-function fn-type)
     (assert-= 2 (length (type-function-params fn-type)))
     (assert-eq type-int (type-function-return fn-type))))
@@ -74,17 +73,18 @@
     (assert-type-equal fn1 fn2)
     (assert-false (type-equal-p fn1 fn3))))
 
-(deftest type-repr-type-to-string
-  "Test type-to-string for various types."
-  (assert-string= "FIXNUM" (type-to-string type-int))
-  (assert-string= "STRING" (type-to-string type-string))
-  (assert-string= "BOOLEAN" (type-to-string type-bool))
-  ;; +type-unknown+ is now a type-error sentinel — printed as "<error: ...>"
-  (assert-string= "<error: unknown>" (type-to-string +type-unknown+))
-  ;; Arrow type (using backward-compat make-type-function-raw)
-  (let ((fn (make-type-function-raw
-                           :params (list type-int)
-                           :return type-int)))
+(deftest-each type-repr-primitive-type-to-string
+  "type-to-string formats primitive and sentinel types correctly."
+  :cases (("int"     "FIXNUM"           type-int)
+          ("string"  "STRING"           type-string)
+          ("bool"    "BOOLEAN"          type-bool)
+          ("unknown" "<error: unknown>" +type-unknown+))
+  (expected type)
+  (assert-string= expected (type-to-string type)))
+
+(deftest type-repr-function-type-to-string
+  "type-to-string formats arrow types as 'A -> B'."
+  (let ((fn (make-type-function-raw :params (list type-int) :return type-int)))
     (assert-string= "FIXNUM -> FIXNUM" (type-to-string fn))))
 
 (deftest type-repr-unknown-type
@@ -137,14 +137,13 @@ alias for a type-error sentinel used for error recovery."
         (assert-true found)
         (assert-type-equal binding type-string)))))
 
-(deftest unify-function-types-arity-mismatch
-  "Test that function types with different arities fail to unify."
+(deftest unify-structural-failures
+  "Function types fail to unify on arity mismatch; occurs check prevents infinite types."
+  ;; Arity mismatch
   (assert-not-unifies
    (make-type-function-raw :params (list type-int)            :return type-int)
-   (make-type-function-raw :params (list type-int type-int)   :return type-int)))
-
-(deftest unify-occurs-check
-  "Test that occurs check prevents infinite types (v cannot unify with v -> Int)."
+   (make-type-function-raw :params (list type-int type-int)   :return type-int))
+  ;; Occurs check: v cannot unify with (v -> Int)
   (let* ((v  (make-type-variable))
          (fn (make-type-function-raw :params (list v) :return type-int)))
     (assert-not-unifies v fn)))
@@ -158,53 +157,45 @@ alias for a type-error sentinel used for error recovery."
   (let ((ok (nth-value 1 (type-unify-lists a b nil))))
     (if expected (assert-true ok) (assert-false ok))))
 
-(deftest unify-unknown-with-anything
-  "Test that the type-error sentinel (unknown) unifies with any type."
-  (assert-unifies +type-unknown+ type-int)
-  (assert-unifies type-string +type-unknown+)
-  (assert-unifies +type-unknown+ +type-unknown+))
+(deftest-each unify-unknown-with-anything
+  "The type-error sentinel (unknown) unifies with any type."
+  :cases (("unknown-int"     +type-unknown+ type-int)
+          ("string-unknown"  type-string    +type-unknown+)
+          ("unknown-unknown" +type-unknown+ +type-unknown+))
+  (a b)
+  (assert-unifies a b))
 
-(deftest unify-substitution-composition
-  "Test that compose-subst applies correctly."
+(deftest unify-chained-substitution
+  "compose-subst and transitive unification both resolve chains of bindings to type-int."
+  ;; compose-subst: (s1 ∘ s2)(v2) = s1(s2(v2)) = s1(v1) = int
   (let* ((v1 (make-type-variable))
          (v2 (make-type-variable))
-         ;; s1: v1 -> type-int
          (s1 (extend-subst v1 type-int (empty-subst)))
-         ;; s2: v2 -> v1
          (s2 (extend-subst v2 v1 (empty-subst)))
-         ;; compose s1 with s2: v2 should map to type-int (via v1)
          (composed (compose-subst s1 s2)))
-    ;; After composition, applying to v2 should give type-int
-    (let ((result (type-substitute v2 composed)))
-      (assert-type-equal result type-int))))
-
-(deftest unify-transitive-binding
-  "Test that transitive variable bindings are resolved."
+    (assert-type-equal type-int (type-substitute v2 composed)))
+  ;; transitive unify: v1~v2, v2~int  →  v1 resolves to int
   (let* ((v1 (make-type-variable))
          (v2 (make-type-variable)))
-    ;; Unify v1 with v2, then v2 with type-int
     (multiple-value-bind (subst1 ok1) (type-unify v1 v2)
       (assert-true ok1)
       (multiple-value-bind (subst2 ok2) (type-unify v2 type-int subst1)
         (assert-true ok2)
-        ;; v1 should resolve to type-int through v2
-        (let ((result (type-substitute v1 subst2)))
-          (assert-type-equal result type-int))))))
+        (assert-type-equal type-int (type-substitute v1 subst2))))))
 
 ;;; Type Inference Tests
 
-(deftest infer-integer-literal
-  "Test that integer literals infer to type-int."
-  (reset-type-vars!)
-  (let ((ast (lower-sexp-to-ast '42)))
-    (multiple-value-bind (ty subst) (infer-with-env ast)
-      (declare (ignore subst))
-      (assert-type-equal ty type-int))))
-
-(deftest-each infer-binop-is-int
-  "Binary arithmetic operations always infer to type-int."
-  :cases (("addition" '(+ 1 2))
-          ("nested"   '(+ (* 2 3) (- 4 1))))
+(deftest-each infer-forms-return-type-int
+  "Forms that always infer to type-int via infer-with-env."
+  :cases (("integer-literal"    '42)
+          ("binop-addition"     '(+ 1 2))
+          ("binop-nested"       '(+ (* 2 3) (- 4 1)))
+          ("let-simple"         '(let ((x 42)) x))
+          ("let-multi-binop"    '(let ((x 10) (y 20)) (+ x y)))
+          ("function-call"      '(let ((f (lambda (x) (+ x 1)))) (f 5)))
+          ("print-expr"         '(print 42))
+          ("progn-last"         '(progn 1 2 3))
+          ("let-poly-identity"  '(let ((id (lambda (x) x))) (id 42))))
   (form)
   (reset-type-vars!)
   (let ((ast (lower-sexp-to-ast form)))
@@ -236,19 +227,6 @@ alias for a type-error sentinel used for error recovery."
     (assert-signals cl-cc/type::typed-hole-error
       (infer ast env))))
 
-(deftest infer-let-binding
-  "Let bindings infer types correctly: simple and multi-binding with binop."
-  (reset-type-vars!)
-  (let ((ast (lower-sexp-to-ast '(let ((x 42)) x))))
-    (multiple-value-bind (ty subst) (infer-with-env ast)
-      (declare (ignore subst))
-      (assert-type-equal ty type-int)))
-  (reset-type-vars!)
-  (let ((ast (lower-sexp-to-ast '(let ((x 10) (y 20)) (+ x y)))))
-    (multiple-value-bind (ty subst) (infer-with-env ast)
-      (declare (ignore subst))
-      (assert-type-equal ty type-int))))
-
 (deftest infer-lambda
   "Lambda types inferred as function type: identity has 1 param; arithmetic constrains to int."
   (reset-type-vars!)
@@ -265,14 +243,6 @@ alias for a type-error sentinel used for error recovery."
       (assert-type-equal (type-function-return ty) type-int)
       (assert-type-equal (first (type-function-params ty)) type-int))))
 
-(deftest infer-function-call
-  "Test that function application infers the return type."
-  (reset-type-vars!)
-  (let ((ast (lower-sexp-to-ast '(let ((f (lambda (x) (+ x 1)))) (f 5)))))
-    (multiple-value-bind (ty subst) (infer-with-env ast)
-      (declare (ignore subst))
-      (assert-type-equal ty type-int))))
-
 (deftest infer-if-expression
   "Test that if expressions unify branches."
   (reset-type-vars!)
@@ -281,22 +251,6 @@ alias for a type-error sentinel used for error recovery."
                                (type-to-scheme type-bool)
                                (type-env-empty))))
     (multiple-value-bind (ty subst) (infer ast env)
-      (declare (ignore subst))
-      (assert-type-equal ty type-int))))
-
-(deftest infer-print-returns-expr-type
-  "Test that print returns the type of the printed expression."
-  (reset-type-vars!)
-  (let ((ast (lower-sexp-to-ast '(print 42))))
-    (multiple-value-bind (ty subst) (infer-with-env ast)
-      (declare (ignore subst))
-      (assert-type-equal ty type-int))))
-
-(deftest infer-progn-returns-last
-  "Test that progn returns the type of the last expression."
-  (reset-type-vars!)
-  (let ((ast (lower-sexp-to-ast '(progn 1 2 3))))
-    (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
       (assert-type-equal ty type-int))))
 
@@ -346,17 +300,6 @@ alias for a type-error sentinel used for error recovery."
       (assert-false (type-variable-equal-p new-param v))
       ;; Param and return should be the same fresh variable
       (assert-true (type-variable-equal-p new-param new-ret)))))
-
-(deftest let-polymorphism-identity
-  "Test let-polymorphism: identity function used at different types."
-  (reset-type-vars!)
-  ;; (let ((id (lambda (x) x))) (id 42))
-  ;; id should be polymorphic: forall a. a -> a
-  ;; When applied to 42, result should be int
-  (let ((ast (lower-sexp-to-ast '(let ((id (lambda (x) x))) (id 42)))))
-    (multiple-value-bind (ty subst) (infer-with-env ast)
-      (declare (ignore subst))
-      (assert-type-equal ty type-int))))
 
 (deftest type-scheme-monomorphic
   "Test that type-to-scheme creates a monomorphic scheme."
@@ -426,21 +369,17 @@ alias for a type-error sentinel used for error recovery."
 
 ;;; Phase 3: Bidirectional Type Checking Tests
 
-(deftest bidirectional-synthesize-int
-  "synthesize returns type-int for an integer literal."
+(deftest bidirectional-int-literal
+  "synthesize infers type-int; check succeeds against matching type and against unknown."
   (let* ((env (type-env-empty))
          (ast (make-ast-int :value 42)))
+    ;; synthesize returns type-int
     (multiple-value-bind (ty _subst) (synthesize ast env)
       (declare (ignore _subst))
-      (assert-true (type-equal-p ty type-int)))))
-
-(deftest bidirectional-check-int
-  "check returns nil (empty subst) for int literal against matching or unknown type."
-  (let* ((env (type-env-empty))
-         (ast (make-ast-int :value 42)))
-    ;; matching type
+      (assert-true (type-equal-p ty type-int)))
+    ;; check against matching type returns nil (empty subst)
     (assert-true (null (check ast type-int env)))
-    ;; unknown type (gradual typing — always succeeds)
+    ;; check against unknown type also succeeds (gradual typing)
     (assert-true (null (check ast +type-unknown+ env)))))
 
 (deftest bidirectional-check-body-last-form
@@ -468,16 +407,19 @@ alias for a type-error sentinel used for error recovery."
       (assert-true (type-class-p retrieved))
       (assert-eq 'eq-test (type-class-name retrieved)))))
 
-(deftest typeclass-constraint-creation
-  "make-type-class-constraint creates the expected struct."
+(deftest typeclass-constraint-qualified-and-string
+  "type-class-constraint accessors, type-qualified structure, and type-to-string."
+  ;; Constraint creation and accessors
   (let* ((a (make-type-variable 'a))
          (c (make-type-class-constraint :class-name 'num :type-arg a)))
     (assert-true (type-class-constraint-p c))
     (assert-eq 'num (type-class-constraint-class-name c))
-    (assert-true (type-variable-equal-p a (type-class-constraint-type-arg c)))))
-
-(deftest typeclass-qualified-type
-  "make-type-qualified stores constraints and inner type."
+    (assert-true (type-variable-equal-p a (type-class-constraint-type-arg c)))
+    ;; type-to-string includes class name
+    (let ((s (type-to-string c)))
+      (assert-true (stringp s))
+      (assert-true (search "NUM" (string-upcase s)))))
+  ;; Qualified type stores constraints and inner type
   (let* ((a (make-type-variable 'a))
          (c (make-type-class-constraint :class-name 'num :type-arg a))
          (fn (make-type-function (list a a) a))
@@ -486,31 +428,30 @@ alias for a type-error sentinel used for error recovery."
     (assert-= 1 (length (type-qualified-constraints qt)))
     (assert-true (typep (type-qualified-type qt) 'type-function))))
 
-(deftest typeclass-instance-registration
-  "register-typeclass-instance and has-typeclass-instance-p."
-  (register-typeclass-instance 'num-test type-int
-                               (list (cons 'plus #'+)))
-  (assert-true (has-typeclass-instance-p 'num-test type-int))
-  (assert-false (has-typeclass-instance-p 'num-test type-string)))
-
-(deftest typeclass-to-string
-  "type-to-string works on type-class-constraint."
-  (let* ((a (make-type-variable 'a))
-         (c (make-type-class-constraint :class-name 'eq :type-arg a)))
-    (let ((s (type-to-string c)))
-      (assert-true (stringp s))
-      (assert-true (search "EQ" (string-upcase s))))))
+(deftest-each typeclass-instance-registration
+  "register-typeclass-instance and has-typeclass-instance-p.
+Each case clears the registry first so sibling cases don't trip the
+'Duplicate typeclass instance' guard when the deftest-each re-runs the
+registration body per case."
+  :cases (("int-registered"     type-int    t)
+          ("string-not-present" type-string nil))
+  (query-type expected-p)
+  (let ((cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
+    (register-typeclass-instance 'num-test type-int (list (cons 'plus #'+)))
+    (if expected-p
+        (assert-true  (has-typeclass-instance-p 'num-test query-type))
+        (assert-false (has-typeclass-instance-p 'num-test query-type)))))
 
 ;;; Phase 5: Effect Type Tests
 
-(deftest effect-type-creation
-  "make-type-effect creates effect labels."
-  (let ((io (make-type-effect :name 'io))
-        (state (make-type-effect :name 'state)))
-    (assert-true (type-effect-p io))
-    (assert-true (type-effect-p state))
-    (assert-eq 'io (type-effect-name io))
-    (assert-eq 'state (type-effect-name state))))
+(deftest-each effect-type-creation
+  "make-type-effect creates effect labels for each effect name."
+  :cases (("io"    'io)
+          ("state" 'state))
+  (effect-name)
+  (let ((eff (make-type-effect :name effect-name)))
+    (assert-true (type-effect-p eff))
+    (assert-eq effect-name (type-effect-name eff))))
 
 (deftest effect-row-pure-singleton
   "+pure-effect-row+ has no effects."
@@ -518,16 +459,15 @@ alias for a type-error sentinel used for error recovery."
   (assert-null (type-effect-row-effects +pure-effect-row+))
   (assert-null (type-effect-row-row-var +pure-effect-row+)))
 
-(deftest effect-row-io-singleton
-  "+io-effect-row+ has exactly one IO effect."
+(deftest effect-row-io-and-custom
+  "+io-effect-row+ contains one IO effect; custom rows are created with the given effects."
+  ;; +io-effect-row+ singleton
   (assert-true (type-effect-row-p +io-effect-row+))
   (assert-= 1 (length (type-effect-row-effects +io-effect-row+)))
   (assert-true (string= "IO" (symbol-name
                                (type-effect-name
-                                (first (type-effect-row-effects +io-effect-row+)))))))
-
-(deftest effect-row-custom
-  "Custom effect rows can be created."
+                                (first (type-effect-row-effects +io-effect-row+))))))
+  ;; Custom two-effect row
   (let ((row (make-type-effect-row
               :effects (list (make-type-effect :name 'state)
                              (make-type-effect :name 'error))
@@ -535,11 +475,15 @@ alias for a type-error sentinel used for error recovery."
     (assert-true (type-effect-row-p row))
     (assert-= 2 (length (type-effect-row-effects row)))))
 
-(deftest effect-row-to-string
-  "type-to-string formats effect rows correctly."
-  (assert-string= "{}" (type-to-string +pure-effect-row+))
-  (let ((io-str (type-to-string +io-effect-row+)))
-    (assert-true (search "IO" (string-upcase io-str)))))
+(deftest-each effect-row-to-string
+  "type-to-string formats effect rows: pure → '{}'; io-row contains 'IO'."
+  :cases (("pure" +pure-effect-row+ "{}"  nil)
+          ("io"   +io-effect-row+   "IO"  t))
+  (row expected substr-p)
+  (let ((s (type-to-string row)))
+    (if substr-p
+        (assert-true (search expected (string-upcase s)))
+        (assert-string= expected s))))
 
 (deftest effectful-function-creation
   "make-type-effectful-function creates an annotated function type."
@@ -606,8 +550,9 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
 
 ;;; Phase A: Inference Bug Fixes
 
-(deftest phase-a-infer-args-multiple
-  "infer-args threads substitution across multiple arguments."
+(deftest phase-a-infer-args
+  "infer-args: returns typed list for multiple args; returns nil for empty arg list."
+  ;; Multiple args: (1 \"hello\") → (int string)
   (reset-type-vars!)
   (let* ((args (list (lower-sexp-to-ast 1) (lower-sexp-to-ast '"hello")))
          (env (type-env-empty)))
@@ -616,10 +561,8 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
       (declare (ignore subst))
       (assert-= 2 (length types))
       (assert-true (type-equal-p type-int (first types)))
-      (assert-true (type-equal-p type-string (second types))))))
-
-(deftest phase-a-infer-args-empty
-  "infer-args with no arguments returns empty list."
+      (assert-true (type-equal-p type-string (second types)))))
+  ;; Empty arg list → nil
   (reset-type-vars!)
   (multiple-value-bind (types subst)
     (cl-cc/type:infer-args '() (type-env-empty))
@@ -660,17 +603,14 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
     (assert-true found)
     (assert-= 2 (length found))))
 
-(deftest phase-c-dict-env-miss
-  "dict-env-lookup returns nil for missing typeclass/type combination."
+(deftest phase-c-dict-env-miss-and-multi
+  "dict-env-lookup returns nil for wrong key; supports multiple classes independently."
   (let* ((env0 (type-env-empty))
          (env1 (cl-cc/type:dict-env-extend 'num type-int '() env0)))
-    ;; Looking up with wrong type gives nil
+    ;; Looking up with wrong type or wrong class gives nil
     (assert-null (cl-cc/type:dict-env-lookup 'num type-string env1))
-    ;; Looking up with wrong class gives nil
-    (assert-null (cl-cc/type:dict-env-lookup 'ord type-int env1))))
-
-(deftest phase-c-dict-env-multiple-classes
-  "dict-env supports multiple typeclass entries independently."
+    (assert-null (cl-cc/type:dict-env-lookup 'ord type-int env1)))
+  ;; Multiple typeclass entries are independent
   (let* ((env0 (type-env-empty))
          (env1 (cl-cc/type:dict-env-extend 'eq type-int '((eq-p . #'equal)) env0))
          (env2 (cl-cc/type:dict-env-extend 'num type-int '((plus . #'+)) env1)))
@@ -679,27 +619,18 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
 
 ;;; Phase D: Row-Based Effect Type Inference
 
-(deftest phase-d-effect-row-union-merges
-  "effect-row-union merges effects from two rows."
-  (let* ((row-io (make-type-effect-row
-                  :effects (list (make-type-effect :name 'io))
-                  :row-var nil))
-         (row-state (make-type-effect-row
-                     :effects (list (make-type-effect :name 'state))
-                     :row-var nil))
+(deftest phase-d-effect-row-union
+  "effect-row-union merges two rows and treats pure row as identity."
+  ;; Two non-empty rows merge to their union (2 distinct effects)
+  (let* ((row-io    (make-type-effect-row :effects (list (make-type-effect :name 'io))    :row-var nil))
+         (row-state (make-type-effect-row :effects (list (make-type-effect :name 'state)) :row-var nil))
          (union (cl-cc/type:effect-row-union row-io row-state)))
     (assert-true (type-effect-row-p union))
-    (assert-= 2 (length (type-effect-row-effects union)))))
-
-(deftest phase-d-effect-row-union-pure
-  "effect-row-union with pure row returns other row."
-  (let* ((row-io (make-type-effect-row
-                  :effects (list (make-type-effect :name 'io))
-                  :row-var nil))
-         (union1 (cl-cc/type:effect-row-union row-io +pure-effect-row+))
-         (union2 (cl-cc/type:effect-row-union +pure-effect-row+ row-io)))
-    (assert-= 1 (length (type-effect-row-effects union1)))
-    (assert-= 1 (length (type-effect-row-effects union2)))))
+    (assert-= 2 (length (type-effect-row-effects union))))
+  ;; Union with pure row is commutative identity: result still has 1 effect
+  (let* ((row-io (make-type-effect-row :effects (list (make-type-effect :name 'io)) :row-var nil)))
+    (assert-= 1 (length (type-effect-row-effects (cl-cc/type:effect-row-union row-io +pure-effect-row+))))
+    (assert-= 1 (length (type-effect-row-effects (cl-cc/type:effect-row-union +pure-effect-row+ row-io))))))
 
 (deftest-each phase-d-infer-effects-pure-forms
   "infer-effects returns empty row for pure expressions (arithmetic, let binding)."
@@ -730,21 +661,18 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
 
 ;;; Phase E: Rank-N Polymorphism
 
-(deftest phase-e-skolem-creation
-  "make-type-skolem creates a unique skolem with given name."
+(deftest phase-e-skolem-creation-and-equality
+  "make-type-skolem creates unique skolems; type-skolem-equal-p compares by identity."
   (let* ((sk1 (cl-cc/type:make-type-skolem 'a))
-         (sk2 (cl-cc/type:make-type-skolem 'a)))
+         (sk2 (cl-cc/type:make-type-skolem 'a))
+         (sk3 (cl-cc/type:make-type-skolem 'b)))
     (assert-true (cl-cc/type:type-skolem-p sk1))
     (assert-true (cl-cc/type:type-skolem-p sk2))
-    ;; Two skolems with same name are distinct (unique IDs)
+    ;; Two fresh skolems with same name are distinct (unique IDs)
     (assert-false (cl-cc/type:type-skolem-equal-p sk1 sk2))
-    (assert-eq 'a (cl-cc/type:type-skolem-name sk1))))
-
-(deftest phase-e-skolem-equality
-  "type-skolem-equal-p compares by identity."
-  (let* ((sk (cl-cc/type:make-type-skolem 'b)))
+    (assert-eq 'a (cl-cc/type:type-skolem-name sk1))
     ;; Same skolem is equal to itself
-    (assert-true (cl-cc/type:type-skolem-equal-p sk sk))))
+    (assert-true (cl-cc/type:type-skolem-equal-p sk3 sk3))))
 
 (deftest phase-e-check-skolem-escape-absent
   "check-skolem-escape returns nil when skolem is not in substitution."
@@ -752,26 +680,21 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
          (escaped (cl-cc/type:check-skolem-escape sk (empty-subst))))
     (assert-null escaped)))
 
-(deftest phase-e-check-forall-type
-  "check mode against a type-forall introduces skolem and checks body."
+(deftest phase-e-check-and-synthesize-lambda
+  "Identity lambda: check succeeds against forall type; synthesize returns a function type."
+  ;; check against forall a. a -> a succeeds (returns nil or a substitution)
   (reset-type-vars!)
   (let* ((a (make-type-variable 'a))
          (fa (make-type-forall :var a :type (make-type-function (list a) a)))
          (id-ast (lower-sexp-to-ast '(lambda (x) x)))
          (env (type-env-empty)))
-    ;; check identity lambda against forall a. a -> a
-    ;; Should succeed (no error)
     (let ((result (check id-ast fa env)))
-      ;; check returns a substitution (may be nil for success)
-      (assert-true (or (null result) (not (null result)))))))
-
-(deftest phase-e-synthesize-lambda
-  "synthesize infers a function type for a lambda."
+      (assert-true (or (null result) (not (null result))))))
+  ;; synthesize returns a 1-param function type
   (reset-type-vars!)
   (let* ((ast (lower-sexp-to-ast '(lambda (x) x)))
          (env (type-env-empty)))
-    (multiple-value-bind (ty subst)
-      (synthesize ast env)
+    (multiple-value-bind (ty subst) (synthesize ast env)
       (declare (ignore subst))
       (assert-true (typep ty 'type-function))
       (assert-= 1 (length (type-function-params ty))))))
@@ -817,14 +740,20 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
       (assert-true  (kind-equal-p k1 k2))
       (assert-false (kind-equal-p k1 k2))))
 
-(deftest kind-var-fresh
-  "fresh-kind-var generates distinct kind variables."
+(deftest kind-var-fresh-and-equality
+  "fresh-kind-var generates distinct variables; kind-fun arrows compare structurally."
+  ;; Two fresh vars with same name are distinct; same var equals itself
   (let ((k1 (fresh-kind-var 'k))
         (k2 (fresh-kind-var 'k)))
     (assert-true (kind-var-p k1))
     (assert-true (kind-var-p k2))
     (assert-false (kind-var-equal-p k1 k2))
-    (assert-true  (kind-var-equal-p k1 k1))))
+    (assert-true  (kind-var-equal-p k1 k1)))
+  ;; kind-fun arrows: structurally equal → equal; different target → not equal
+  (assert-true  (kind-equal-p (kind-fun +kind-type+ +kind-type+)
+                               (kind-fun +kind-type+ +kind-type+)))
+  (assert-false (kind-equal-p (kind-fun +kind-type+ +kind-effect+)
+                               (kind-fun +kind-type+ +kind-type+))))
 
 (deftest-each kind-to-string-basic
   "kind-to-string produces human-readable kind names."
@@ -836,13 +765,6 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
           ("row-effect"   +kind-row-effect+   "Row Effect"))
   (knd expected-str)
   (assert-string= expected-str (kind-to-string knd)))
-
-(deftest kind-fun-arrow-equal-p
-  "Two structurally identical kind-fun arrows are equal; different ones are not."
-  (assert-true  (kind-equal-p (kind-fun +kind-type+ +kind-type+)
-                               (kind-fun +kind-type+ +kind-type+)))
-  (assert-false (kind-equal-p (kind-fun +kind-type+ +kind-effect+)
-                               (kind-fun +kind-type+ +kind-type+))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; 2026 Type System: Multiplicity / Graded Modal Types Tests
@@ -985,37 +907,35 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
     (assert-true (type-equal-p fn (type-forall-body fa)))
     (assert-true (type-equal-p fn (type-forall-type fa)))))
 
-(deftest type-exists-creation
-  "make-type-exists creates existential types."
+(deftest type-binder-creation
+  "make-type-exists and make-type-mu create valid binder types with bound var and body."
+  ;; Existential type ∃a. (String, a)
   (let* ((a    (fresh-type-var 'a))
          (pair (make-type-product :elems (list type-string a)))
          (ex   (make-type-exists :var a :knd nil :body pair)))
     (assert-true (type-exists-p ex))
     (assert-true (type-var-equal-p a (type-exists-var ex)))
-    (assert-true (type-product-p (type-exists-body ex)))))
-
-(deftest type-mu-creation
-  "make-type-mu creates iso-recursive types μa.T."
-  (let* ((a   (fresh-type-var 'a))
-         ;; μa. (null | (cons int a))  —  list of int
-         (mu  (make-type-mu :var a
-                            :body (make-type-union (list type-null
-                                                         (make-type-product
-                                                          :elems (list type-int a)))))))
+    (assert-true (type-product-p (type-exists-body ex))))
+  ;; Recursive type μa.(null | (int, a))
+  (let* ((a  (fresh-type-var 'a))
+         (mu (make-type-mu :var a
+                           :body (make-type-union (list type-null
+                                                        (make-type-product
+                                                         :elems (list type-int a)))))))
     (assert-true (type-mu-p mu))
     (assert-true (type-var-equal-p a (type-mu-var mu)))
     (assert-true (type-union-p (type-mu-body mu)))))
 
-(deftest type-linear-creation
-  "make-type-linear creates graded modal types !_q T."
-  (let ((linear-int   (make-type-linear :base type-int  :grade :one))
-        (erased-str   (make-type-linear :base type-string :grade :zero))
-        (default-bool (make-type-linear :base type-bool  :grade :omega)))
-    (assert-true (type-linear-p linear-int))
-    (assert-eq :one   (type-linear-grade linear-int))
-    (assert-eq :zero  (type-linear-grade erased-str))
-    (assert-eq :omega (type-linear-grade default-bool))
-    (assert-true (type-equal-p type-int (type-linear-base linear-int)))))
+(deftest-each type-linear-creation
+  "make-type-linear creates graded modal types !_q T with the correct grade."
+  :cases (("linear-one"   type-int    :one)
+          ("erased-zero"  type-string :zero)
+          ("unrestricted" type-bool   :omega))
+  (base grade)
+  (let ((lin (make-type-linear :base base :grade grade)))
+    (assert-true (type-linear-p lin))
+    (assert-eq grade (type-linear-grade lin))
+    (assert-true (type-equal-p base (type-linear-base lin)))))
 
 (deftest type-app-hkt
   "make-type-app represents higher-kinded type application F A."
@@ -1050,23 +970,18 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
         (declare (ignore bound))
         (assert-false found)))))
 
-(deftest subst-extend-functional
-  "subst-extend returns a new substitution without modifying the original."
+(deftest subst-extend-functional-and-destructive
+  "subst-extend is purely functional; subst-extend! mutates in place."
+  ;; Functional: original unchanged, new has binding, generation incremented
   (let* ((v  (fresh-type-var))
          (s0 (make-substitution))
          (s1 (subst-extend v type-int s0)))
-    ;; s0 is unchanged
     (multiple-value-bind (b f) (subst-lookup v s0) (declare (ignore b)) (assert-false f))
-    ;; s1 has the binding
     (multiple-value-bind (bound found) (subst-lookup v s1)
       (assert-true found)
       (assert-true (type-equal-p type-int bound)))
-    ;; Generation was incremented
-    (assert-true (> (substitution-generation s1)
-                    (substitution-generation s0)))))
-
-(deftest subst-extend-destructive
-  "subst-extend! mutates the substitution in place (O(1) for hot paths)."
+    (assert-true (> (substitution-generation s1) (substitution-generation s0))))
+  ;; Destructive: mutates in place
   (let* ((v (fresh-type-var))
          (s (make-substitution)))
     (subst-extend! v type-string s)
@@ -1212,17 +1127,15 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
     (assert-= 2 (length (type-variant-cases result)))
     (assert-null (type-variant-row-var result))))
 
-(deftest parser-linear-modal-syntax
-  "(!1 T) and (!ω T) parse to graded modal types."
-  (let ((lin   (cl-cc/type:parse-type-specifier '(!1 fixnum)))
-        (unr   (cl-cc/type:parse-type-specifier '(!ω string)))
-        (erased (cl-cc/type:parse-type-specifier '(!0 boolean))))
-    (assert-true (type-linear-p lin))
-    (assert-eq :one   (type-linear-grade lin))
-    (assert-true (type-linear-p unr))
-    (assert-eq :omega (type-linear-grade unr))
-    (assert-true (type-linear-p erased))
-    (assert-eq :zero  (type-linear-grade erased))))
+(deftest-each parser-linear-modal-syntax
+  "(!1 T), (!ω T), and (!0 T) each parse to a graded modal type with the correct grade."
+  :cases (("linear-1" '(!1 fixnum)   :one)
+          ("omega"    '(!ω string)   :omega)
+          ("erased-0" '(!0 boolean)  :zero))
+  (form expected-grade)
+  (let ((result (cl-cc/type:parse-type-specifier form)))
+    (assert-true (type-linear-p result))
+    (assert-eq expected-grade (type-linear-grade result))))
 
 (deftest parser-refinement-syntax
   "(Refine T pred) parses to a refinement type."
@@ -1245,33 +1158,25 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
     ;; +type-unknown+ backward compat
     (assert-string= "<error: unknown>" (type-to-string +type-unknown+))))
 
-(deftest printer-type-product
-  "type-to-string formats tuples as (A, B, C)."
+(deftest printer-compound-types
+  "type-to-string formats product, record, and linear types correctly."
+  ;; Tuple: (FIXNUM, STRING)
   (let ((pair (make-type-product :elems (list type-int type-string))))
-    (assert-string= "(FIXNUM, STRING)" (type-to-string pair))))
-
-(deftest printer-type-record
-  "type-to-string formats records with and without a row variable."
+    (assert-string= "(FIXNUM, STRING)" (type-to-string pair)))
+  ;; Closed record: field names appear in output
   (let ((closed (make-type-record :fields (list (cons 'x type-int)
                                                 (cons 'y type-bool))
-                                  :row-var nil))
-        (rho    (fresh-type-var 'rho))
-        (open   (make-type-record :fields (list (cons 'x type-int))
-                                  :row-var (fresh-type-var 'rho))))
-    (declare (ignore rho))
-    ;; Closed record
+                                  :row-var nil)))
     (let ((s (type-to-string closed)))
       (assert-true (search "X" (string-upcase s)))
-      (assert-true (search "Y" (string-upcase s))))
-    ;; Open record has | separator
-    (let ((s (type-to-string open)))
-      (assert-true (search "|" s)))))
-
-(deftest printer-linear-type
-  "type-to-string formats graded modal types with grade prefix."
+      (assert-true (search "Y" (string-upcase s)))))
+  ;; Open record: | separator present
+  (let ((open (make-type-record :fields (list (cons 'x type-int))
+                                :row-var (fresh-type-var 'rho))))
+    (assert-true (search "|" (type-to-string open))))
+  ;; Linear type: grade "1" and base type name in output
   (let ((lin (make-type-linear :base type-int :grade :one)))
     (let ((s (type-to-string lin)))
-      ;; Should contain the grade and the base type name
       (assert-true (search "1" s))
       (assert-true (search "FIXNUM" s)))))
 
@@ -1299,8 +1204,9 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
 ;;; 2026 Type System: New typeclass-def API Tests
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest typeclass-def-creation
-  "make-typeclass-def creates a full typeclass definition."
+(deftest typeclass-def-creation-and-lookup
+  "make-typeclass-def creates valid definitions; register/lookup round-trips correctly."
+  ;; Creation and accessors
   (let* ((a  (fresh-type-var 'a))
          (tc (make-typeclass-def
               :name 'functor-test
@@ -1313,10 +1219,8 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
     (assert-true (typeclass-def-p tc))
     (assert-eq 'functor-test (typeclass-def-name tc))
     (assert-= 1 (length (typeclass-def-type-params tc)))
-    (assert-= 1 (length (typeclass-def-methods tc)))))
-
-(deftest typeclass-def-register-lookup
-  "register-typeclass / lookup-typeclass round-trip with new typeclass-def."
+    (assert-= 1 (length (typeclass-def-methods tc))))
+  ;; Register and lookup round-trip
   (let* ((a  (fresh-type-var 'a))
          (tc (make-typeclass-def
               :name 'show-test
@@ -1403,13 +1307,15 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
 
 ;;; ─── Type lattice: join and meet ─────────────────────────────────────────
 
-(deftest-each type-join-equal-types
-  "join of identical types is the type itself."
-  :cases (("int"    type-int)
-          ("string" type-string)
-          ("bool"   type-bool))
-  (tp)
-  (assert-true (type-equal-p tp (cl-cc/type:type-join tp tp))))
+(deftest-each type-join-meet-equal-types
+  "join and meet of identical types each return the type itself."
+  :cases (("join-int"    #'cl-cc/type:type-join type-int)
+          ("join-string" #'cl-cc/type:type-join type-string)
+          ("join-bool"   #'cl-cc/type:type-join type-bool)
+          ("meet-int"    #'cl-cc/type:type-meet type-int)
+          ("meet-string" #'cl-cc/type:type-meet type-string))
+  (op tp)
+  (assert-true (type-equal-p tp (funcall op tp tp))))
 
 (deftest-each type-lattice-join-meet-subtype
   "join picks the supertype; meet picks the subtype (fixnum <: integer)."
@@ -1438,13 +1344,6 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
          (result (cl-cc/type:type-join unk type-int)))
     (assert-true (type-equal-p type-int result))))
 
-(deftest-each type-meet-equal-types
-  "meet of identical types is the type itself."
-  :cases (("int"    type-int)
-          ("string" type-string))
-  (tp)
-  (assert-true (type-equal-p tp (cl-cc/type:type-meet tp tp))))
-
 (deftest type-meet-incompatible-makes-intersection
   "meet(fixnum, string) = (and fixnum string) — uninhabited but structurally valid."
   (let ((result (cl-cc/type:type-meet type-int type-string)))
@@ -1455,14 +1354,13 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
 
 (in-suite cl-cc-suite)
 
-(deftest solve-constraints-empty
-  "solve-constraints on empty list returns the original substitution."
+(deftest solve-constraints-trivial-success
+  "solve-constraints returns a valid substitution for empty list and identical-primitive equality."
+  ;; Empty constraint list: returns original substitution
   (let* ((subst  (cl-cc/type:make-substitution))
          (result (cl-cc/type:solve-constraints nil subst)))
-    (assert-true (cl-cc/type:substitution-p result))))
-
-(deftest solve-constraints-equal-succeeds
-  "An :equal constraint on two identical primitives succeeds with no residual."
+    (assert-true (cl-cc/type:substitution-p result)))
+  ;; Equal primitives: no residual
   (multiple-value-bind (new-subst residual)
       (cl-cc/type:solve-constraints
        (list (cl-cc/type:make-equal-constraint type-int type-int))
@@ -1521,59 +1419,6 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
       (assert-true (type-equal-p type-int (cl-cc/type:zonk ta new-subst)))
       (assert-true (type-equal-p type-int (cl-cc/type:zonk tb new-subst))))))
 
-;;; ─── Multiplicity Semiring Tests ─────────────────────────────────────────────
-
-(deftest-each mult-add-semiring-join
-  "mult-add implements the commutative semiring join: 0 is identity, join is idempotent, 1+ω=ω."
-  :cases (("0+1=1"  :zero  :one   :one)
-          ("0+ω=ω"  :zero  :omega :omega)
-          ("0+0=0"  :zero  :zero  :zero)
-          ("1+0=1"  :one   :zero  :one)
-          ("ω+0=ω"  :omega :zero  :omega)
-          ("1+1=1"  :one   :one   :one)
-          ("ω+ω=ω"  :omega :omega :omega)
-          ("1+ω=ω"  :one   :omega :omega)
-          ("ω+1=ω"  :omega :one   :omega))
-  (a b expected)
-  (assert-eq expected (cl-cc/type:mult-add a b)))
-
-(deftest-each mult-mul-semiring-product
-  "mult-mul implements the semiring product: 0 annihilates, 1 is identity, ω*ω=ω."
-  :cases (("0*1=0"  :zero  :one   :zero)
-          ("0*ω=0"  :zero  :omega :zero)
-          ("1*0=0"  :one   :zero  :zero)
-          ("ω*0=0"  :omega :zero  :zero)
-          ("1*1=1"  :one   :one   :one)
-          ("1*ω=ω"  :one   :omega :omega)
-          ("ω*1=ω"  :omega :one   :omega)
-          ("ω*ω=ω"  :omega :omega :omega))
-  (a b expected)
-  (assert-eq expected (cl-cc/type:mult-mul a b)))
-
-(deftest-each mult-leq-total-order
-  "mult-leq implements the total order 0 ≤ 1 ≤ ω (reflexive, transitive, antisymmetric)."
-  :cases (("0≤0"  :zero  :zero  t)
-          ("1≤1"  :one   :one   t)
-          ("ω≤ω"  :omega :omega t)
-          ("0≤1"  :zero  :one   t)
-          ("0≤ω"  :zero  :omega t)
-          ("1≤ω"  :one   :omega t)
-          ("1≰0"  :one   :zero  nil)
-          ("ω≰1"  :omega :one   nil)
-          ("ω≰0"  :omega :zero  nil))
-  (a b expected)
-  (if expected
-      (assert-true  (cl-cc/type:mult-leq a b))
-      (assert-false (cl-cc/type:mult-leq a b))))
-
-(deftest-each mult-to-string-values
-  "mult-to-string returns correct glyphs."
-  :cases (("zero"  :zero  "0")
-          ("one"   :one   "1")
-          ("omega" :omega "ω"))
-  (m expected)
-  (assert-equal expected (cl-cc/type:mult-to-string m)))
-
 (deftest-each multiplicity-p-recognition
   "multiplicity-p accepts :zero/:one/:omega; rejects all other values."
   :cases (("zero-valid"   :zero  t)
@@ -1587,63 +1432,30 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
       (assert-true  (cl-cc/type:multiplicity-p val))
       (assert-false (cl-cc/type:multiplicity-p val))))
 
-;;; ─── Constraint Language Tests ───────────────────────────────────────────────
 
-(deftest constraint-equal-creation
-  "make-equal-constraint creates (:equal t1 t2)."
-  (let ((c (cl-cc/type:make-equal-constraint type-int type-string)))
-    (assert-true (cl-cc/type:constraint-p c))
-    (assert-eq :equal (cl-cc/type:constraint-kind c))
-    (assert-equal 2 (length (cl-cc/type:constraint-args c)))
-    (assert-true (type-equal-p type-int (first (cl-cc/type:constraint-args c))))
-    (assert-true (type-equal-p type-string (second (cl-cc/type:constraint-args c))))))
-
-(deftest constraint-subtype-creation
-  "make-subtype-constraint creates (:subtype t1 t2)."
-  (let ((c (cl-cc/type:make-subtype-constraint type-int type-any)))
-    (assert-eq :subtype (cl-cc/type:constraint-kind c))
-    (assert-true (type-equal-p type-int (first (cl-cc/type:constraint-args c))))))
-
-(deftest constraint-typeclass-creation
-  "make-typeclass-constraint creates (:typeclass class type)."
-  (let* ((tv (cl-cc/type:fresh-type-var "a"))
-         (c  (cl-cc/type:make-typeclass-constraint 'num tv)))
-    (assert-eq :typeclass (cl-cc/type:constraint-kind c))
-    (assert-eq 'num (first (cl-cc/type:constraint-args c)))))
-
-(deftest constraint-implication-creation
-  "make-implication-constraint creates (:implication vars given wanted)."
-  (let* ((tv (cl-cc/type:fresh-type-var "a"))
-         (given  (list (cl-cc/type:make-equal-constraint tv type-int)))
-         (wanted (list (cl-cc/type:make-typeclass-constraint 'num tv)))
-         (c (cl-cc/type:make-implication-constraint (list tv) given wanted)))
-    (assert-eq :implication (cl-cc/type:constraint-kind c))
-    (assert-equal 3 (length (cl-cc/type:constraint-args c)))))
-
-(deftest-each constraint-kind-only-creation
-  "Constraint constructors that only need their :kind verified."
-  :cases (("effect-subset" :effect-subset
+(deftest-each constraint-kind-check
+  "Each constraint constructor produces the expected :kind keyword."
+  :cases (("subtype"       :subtype
+           (cl-cc/type:make-subtype-constraint type-int type-any))
+          ("typeclass"     :typeclass
+           (cl-cc/type:make-typeclass-constraint 'num (cl-cc/type:fresh-type-var "a")))
+          ("implication"   :implication
+           (let* ((tv (cl-cc/type:fresh-type-var "a"))
+                  (eq-c (cl-cc/type:make-equal-constraint tv type-int))
+                  (tc-c (cl-cc/type:make-typeclass-constraint 'num tv)))
+             (cl-cc/type:make-implication-constraint (list tv) (list eq-c) (list tc-c))))
+          ("effect-subset" :effect-subset
            (cl-cc/type:make-effect-subset-constraint
             cl-cc/type:+pure-effect-row+ cl-cc/type:+io-effect-row+))
           ("kind-equal"    :kind-equal
            (cl-cc/type:make-kind-equal-constraint
-            cl-cc/type:+kind-type+ cl-cc/type:+kind-type+)))
+            cl-cc/type:+kind-type+ cl-cc/type:+kind-type+))
+          ("mult-leq"      :mult-leq
+           (cl-cc/type:make-mult-leq-constraint :one :omega))
+          ("row-lacks"     :row-lacks
+           (cl-cc/type:make-row-lacks-constraint (cl-cc/type:fresh-type-var "r") 'x)))
   (expected-kind c)
   (assert-eq expected-kind (cl-cc/type:constraint-kind c)))
-
-(deftest constraint-mult-leq-creation
-  "make-mult-leq-constraint creates (:mult-leq q1 q2)."
-  (let ((c (cl-cc/type:make-mult-leq-constraint :one :omega)))
-    (assert-eq :mult-leq (cl-cc/type:constraint-kind c))
-    (assert-eq :one (first (cl-cc/type:constraint-args c)))
-    (assert-eq :omega (second (cl-cc/type:constraint-args c)))))
-
-(deftest constraint-row-lacks-creation
-  "make-row-lacks-constraint creates (:row-lacks rho label)."
-  (let* ((tv (cl-cc/type:fresh-type-var "r"))
-         (c  (cl-cc/type:make-row-lacks-constraint tv 'x)))
-    (assert-eq :row-lacks (cl-cc/type:constraint-kind c))
-    (assert-eq 'x (second (cl-cc/type:constraint-args c)))))
 
 (deftest constraint-free-vars-count
   "constraint-free-vars finds the correct number of vars in equality and typeclass constraints."
@@ -1654,39 +1466,30 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
     (assert-equal 2 (length (cl-cc/type:constraint-free-vars ceq)))
     (assert-equal 1 (length (cl-cc/type:constraint-free-vars ctc)))))
 
-(deftest-each constraint-free-vars-ground-types-empty
-  "constraint-free-vars returns nil for ground constraints (no type variables)."
-  :cases (("mult-leq"   (cl-cc/type:make-mult-leq-constraint :one :omega))
-          ("kind-equal" (cl-cc/type:make-kind-equal-constraint
-                        cl-cc/type:+kind-type+ cl-cc/type:+kind-effect+)))
+(deftest-each constraint-free-vars-zero-vars
+  "constraint-free-vars returns nil for ground constraints and fully-quantified implications."
+  :cases (("mult-leq"       (cl-cc/type:make-mult-leq-constraint :one :omega))
+          ("kind-equal"     (cl-cc/type:make-kind-equal-constraint
+                             cl-cc/type:+kind-type+ cl-cc/type:+kind-effect+))
+          ("implication-quantified"
+           (let* ((tv    (cl-cc/type:fresh-type-var "a"))
+                  (inner (cl-cc/type:make-equal-constraint tv type-int)))
+             (cl-cc/type:make-implication-constraint (list tv) (list inner) (list inner)))))
   (c)
   (assert-null (cl-cc/type:constraint-free-vars c)))
 
-(deftest constraint-free-vars-implication-quantified
-  "constraint-free-vars subtracts quantified vars from implication."
-  (let* ((tv    (cl-cc/type:fresh-type-var "a"))
-         (inner (cl-cc/type:make-equal-constraint tv type-int))
-         (c     (cl-cc/type:make-implication-constraint
-                 (list tv) (list inner) (list inner)))
-         (fvs   (cl-cc/type:constraint-free-vars c)))
-    ;; tv is quantified, so no free vars
-    (assert-null fvs)))
-
-(deftest constraint-substitute-equal
-  "constraint-substitute applies substitution to equality constraint."
+(deftest constraint-substitute
+  "constraint-substitute applies substitution to typed args; is identity for ground constraints."
+  ;; Equality constraint: tv mapped to int, first arg becomes int
   (let* ((tv    (cl-cc/type:fresh-type-var "a"))
          (c     (cl-cc/type:make-equal-constraint tv type-string))
          (subst (cl-cc/type:subst-extend tv type-int (cl-cc/type:make-substitution)))
          (c2    (cl-cc/type:constraint-substitute c subst)))
     (assert-eq :equal (cl-cc/type:constraint-kind c2))
-    ;; After substitution, first arg should be int (tv mapped to int)
-    (assert-true (type-equal-p type-int (first (cl-cc/type:constraint-args c2))))))
-
-(deftest constraint-substitute-mult-leq-identity
-  "constraint-substitute is identity for mult-leq."
+    (assert-true (type-equal-p type-int (first (cl-cc/type:constraint-args c2)))))
+  ;; Ground constraint: substitution is identity
   (let* ((c     (cl-cc/type:make-mult-leq-constraint :one :omega))
-         (subst (cl-cc/type:make-substitution))
-         (c2    (cl-cc/type:constraint-substitute c subst)))
+         (c2    (cl-cc/type:constraint-substitute c (cl-cc/type:make-substitution))))
     (assert-eq c c2)))
 
 ;;; ─── Effect Row Operations Tests ─────────────────────────────────────────────

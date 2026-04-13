@@ -289,11 +289,15 @@
 
 ;;; ─── phase2 CLOS helpers ─────────────────────────────────────────────────────
 
-(deftest phase2-slot-boundp-emits-instruction
-  "(slot-boundp obj 'slot) emits vm-slot-boundp"
+(deftest-each phase2-slot-ops-emit-instruction
+  "slot-boundp, slot-exists-p, and slot-makunbound each emit their respective VM instruction."
+  :cases (("slot-boundp"     'slot-boundp     'cl-cc::vm-slot-boundp)
+          ("slot-exists-p"   'slot-exists-p   'cl-cc::vm-slot-exists-p)
+          ("slot-makunbound" 'slot-makunbound 'cl-cc::vm-slot-makunbound))
+  (fn-name vm-type)
   (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'slot-boundp (make-int 0) (make-quoted 'name)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-slot-boundp))))
+    (compile-ast (make-call fn-name (make-int 0) (make-quoted 'name)) ctx)
+    (assert-true (codegen-find-inst ctx vm-type))))
 
 (deftest phase2-slot-boundp-stores-slot-name
   "(slot-boundp obj 'foo) stores the slot symbol in the instruction"
@@ -302,33 +306,18 @@
     (let ((inst (codegen-find-inst ctx 'cl-cc::vm-slot-boundp)))
       (assert-eq 'foo (cl-cc::vm-slot-name-sym inst)))))
 
-(deftest phase2-slot-exists-p-emits-instruction
-  "(slot-exists-p obj 'slot) emits vm-slot-exists-p"
+(deftest-each phase2-call-next-method-args-reg
+  "call-next-method: args-reg is nil with no arguments, non-nil when arguments are present."
+  :cases (("no-args"   (make-call 'call-next-method)           nil)
+          ("with-args" (make-call 'call-next-method (make-int 42)) t))
+  (ast args-reg-truthy-p)
   (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'slot-exists-p (make-int 0) (make-quoted 'name)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-slot-exists-p))))
-
-(deftest phase2-slot-makunbound-emits-instruction
-  "(slot-makunbound obj 'slot) emits vm-slot-makunbound"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'slot-makunbound (make-int 0) (make-quoted 'name)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-slot-makunbound))))
-
-(deftest phase2-call-next-method-no-args
-  "(call-next-method) with no args emits vm-call-next-method with nil args-reg"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'call-next-method) ctx)
+    (compile-ast ast ctx)
     (let ((inst (codegen-find-inst ctx 'cl-cc::vm-call-next-method)))
       (assert-true inst)
-      (assert-true (null (cl-cc::vm-call-next-method-args-reg inst))))))
-
-(deftest phase2-call-next-method-with-args
-  "(call-next-method x) with args emits vm-call-next-method with args-reg set"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'call-next-method (make-int 42)) ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-call-next-method)))
-      (assert-true inst)
-      (assert-true (cl-cc::vm-call-next-method-args-reg inst)))))
+      (if args-reg-truthy-p
+          (assert-true  (cl-cc::vm-call-next-method-args-reg inst))
+          (assert-false (cl-cc::vm-call-next-method-args-reg inst))))))
 
 (deftest phase2-call-next-method-args-is-cons-list
   "(call-next-method x y) builds cons list for args"

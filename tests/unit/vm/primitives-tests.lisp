@@ -174,10 +174,12 @@ Round is excluded from the values-list check (nil means skip)."
 ;;; ═══════════════════════════════════════════════════════════════════════════
 
 (deftest prim-not-cases
-  "vm-not: nil → t; truthy values (including 0) → nil."
-  (assert-equal t  (%make-unary #'cl-cc::make-vm-not nil))
-  (dolist (input '(0 42))
-    (assert-null (%make-unary #'cl-cc::make-vm-not input))))
+  "vm-not: falsy (nil, 0) → t; non-zero integers → nil.
+cl-cc's execution model treats 0 as false (see vm-falsep), so (vm-not 0) = t.
+This differs from standard CL where only NIL is false."
+  (assert-equal t (%make-unary #'cl-cc::make-vm-not nil))
+  (assert-equal t (%make-unary #'cl-cc::make-vm-not 0))
+  (assert-null    (%make-unary #'cl-cc::make-vm-not 42)))
 
 (deftest-each prim-and-cases
   "vm-and: both truthy → t; any nil → nil."
@@ -202,19 +204,47 @@ Round is excluded from the values-list check (nil means skip)."
 ;;; ═══════════════════════════════════════════════════════════════════════════
 
 (deftest-each prim-typep
-  "vm-typep checks various type names."
-  :cases (("integer"    42         'integer    1)
-          ("string"     "hello"    'string     1)
-          ("symbol"     'foo       'symbol     1)
-          ("cons"       '(a)       'cons       1)
-          ("null"       nil        'null       1)
-          ("list-cons"  '(a)       'list       1)
-          ("list-nil"   nil        'list       1)
-          ("char"       #\a        'character  1)
-          ("atom-num"   42         'atom       1)
-          ("int-wrong"  "hello"    'integer    0)
-          ("refine-true" 42        '(refine fixnum plusp) 1)
-          ("refine-false" -1       '(refine fixnum plusp) 0))
+  "vm-typep checks various type names including compound type specifiers."
+  :cases (;; Primitive types
+          ("integer"         42         'integer              1)
+          ("string"          "hello"    'string               1)
+          ("symbol"          'foo       'symbol               1)
+          ("cons"            '(a)       'cons                 1)
+          ("null"            nil        'null                 1)
+          ("list-cons"       '(a)       'list                 1)
+          ("list-nil"        nil        'list                 1)
+          ("char"            #\a        'character            1)
+          ("atom-num"        42         'atom                 1)
+          ("int-wrong"       "hello"    'integer              0)
+          ;; Compound: refine (base + predicate). 'refine' is cl-cc-specific; other
+          ;; compound heads (or/and/not/member/eql/values/function/satisfies) are
+          ;; CL symbols imported into :cl-cc/test, so they just work unqualified.
+          ("refine-true"     42         '(cl-cc::refine fixnum plusp) 1)
+          ("refine-false"    -1         '(cl-cc::refine fixnum plusp) 0)
+          ;; Compound: or
+          ("or-first"        42         '(or integer string)  1)
+          ("or-second"       "hi"       '(or integer string)  1)
+          ("or-none"         'x         '(or integer string)  0)
+          ;; Compound: and
+          ("and-both"        42         '(and integer number) 1)
+          ("and-fail"        42         '(and integer string) 0)
+          ;; Compound: not
+          ("not-true"        42         '(not string)         1)
+          ("not-false"       "hi"       '(not string)         0)
+          ;; Compound: member
+          ("member-hit"      2          '(member 1 2 3)       1)
+          ("member-miss"     5          '(member 1 2 3)       0)
+          ;; Compound: eql
+          ("eql-hit"         42         '(eql 42)             1)
+          ("eql-miss"        99         '(eql 42)             0)
+          ;; Compound: values (always t)
+          ("values-any"      42         '(values)             1)
+          ;; Compound: function
+          ("function-fn"     #'car      '(function)           1)
+          ("function-int"    42         '(function)           0)
+          ;; Compound: satisfies
+          ("satisfies-true"  4          '(satisfies evenp)    1)
+          ("satisfies-false" 3          '(satisfies evenp)    0))
   (src type-sym expected)
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 src)

@@ -2,8 +2,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite expander-control-suite :description "Control-form expander unit tests")
+(defsuite expander-control-suite :description "Control-form expander unit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite expander-control-suite)
 (deftest-each expand-eval-when-keeps-body
   "expand-eval-when-form with :execute or :load-toplevel returns a non-nil form."
   :cases (("execute"       '(:execute))

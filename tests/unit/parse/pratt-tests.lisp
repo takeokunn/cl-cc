@@ -87,10 +87,13 @@
       (assert-true (not (null tok)))
       (assert-eq :T-INT (cl-cc:lexer-token-type tok)))))
 
-(deftest pratt-expect-mismatch-adds-diagnostic
-  "pratt-expect pushes diagnostic on type mismatch"
-  (let ((ctx (make-test-ctx "42")))
-    (cl-cc::pratt-expect ctx :T-STRING "test")
+(deftest-each pratt-expect-adds-diagnostic-on-failure
+  "pratt-expect adds a diagnostic when the expected token type doesn't match or input is empty."
+  :cases (("type-mismatch" "42" :T-STRING "test")
+          ("eof"           ""   :T-INT    "eof-test"))
+  (source expected-type label)
+  (let ((ctx (make-test-ctx source)))
+    (cl-cc::pratt-expect ctx expected-type label)
     (assert-true (not (null (cl-cc::pratt-context-diagnostics ctx))))))
 
 (deftest pratt-expect-mismatch-returns-nil
@@ -98,12 +101,6 @@
   (let ((ctx (make-test-ctx "42")))
     (let ((result (cl-cc::pratt-expect ctx :T-STRING)))
       (assert-eq nil result))))
-
-(deftest pratt-expect-eof-adds-diagnostic
-  "pratt-expect on empty stream pushes end-of-input diagnostic"
-  (let ((ctx (make-test-ctx "")))
-    (cl-cc::pratt-expect ctx :T-INT "eof-test")
-    (assert-true (not (null (cl-cc::pratt-context-diagnostics ctx))))))
 
 ;;; ─── NUD Table Registration ──────────────────────────────────────────────────
 
@@ -126,29 +123,21 @@
 
 ;;; ─── parse-cl-source: CST Structure ─────────────────────────────────────────
 
-(deftest parse-integer-produces-cst-token
-  "Parsing an integer produces a cst-token"
-  (let ((node (parse-one-cst "42")))
-    (assert-true (cl-cc:cst-token-p node))
-    (assert-eq :T-INT (cl-cc:cst-node-kind node))
-    (assert-= 42 (cl-cc:cst-token-value node))))
-
 (deftest-each parse-literal-kind
-  "Parsing each literal type produces a cst-token with the correct kind"
-  :cases (("float"   "3.14" :T-FLOAT)
-          ("symbol"  "foo"  :T-IDENT)
-          ("keyword" ":foo" :T-KEYWORD))
-  (source expected-kind)
+  "Parsing each literal type produces a cst-token with the correct kind and value."
+  :cases (("integer"  "42"        :T-INT     42        nil)
+          ("float"    "3.14"      :T-FLOAT   nil       nil)
+          ("symbol"   "foo"       :T-IDENT   nil       nil)
+          ("keyword"  ":foo"      :T-KEYWORD nil       nil)
+          ("string"   "\"hello\"" :T-STRING  nil       "hello"))
+  (source expected-kind expected-num expected-str)
   (let ((node (parse-one-cst source)))
     (assert-true (cl-cc:cst-token-p node))
-    (assert-eq expected-kind (cl-cc:cst-node-kind node))))
-
-(deftest parse-string-produces-cst-token
-  "Parsing a string produces a cst-token with the correct value"
-  (let ((node (parse-one-cst "\"hello\"")))
-    (assert-true (cl-cc:cst-token-p node))
-    (assert-eq :T-STRING (cl-cc:cst-node-kind node))
-    (assert-string= "hello" (cl-cc:cst-token-value node))))
+    (assert-eq expected-kind (cl-cc:cst-node-kind node))
+    (when expected-num
+      (assert-= expected-num (cl-cc:cst-token-value node)))
+    (when expected-str
+      (assert-string= expected-str (cl-cc:cst-token-value node)))))
 
 (deftest parse-empty-list-produces-interior
   "Parsing () produces a cst-interior with :list kind"
@@ -172,30 +161,16 @@
       (assert-true (cl-cc:cst-interior-p inner))
       (assert-= 2 (length (cl-cc:cst-children inner))))))
 
-(deftest parse-quote-produces-quote-kind
-  "Parsing 'x produces a cst-interior with :quote kind"
-  (let ((node (parse-one-cst "'x")))
+(deftest-each parse-dispatch-interior-kind
+  "Reader dispatch shorthands produce cst-interior nodes with the correct kind."
+  :cases (("quote"       "'x"      :quote)
+          ("quasiquote"  "`x"      :quasiquote)
+          ("function"    "#'foo"   :function)
+          ("vector"      "#(1 2 3)" :vector))
+  (source expected-kind)
+  (let ((node (parse-one-cst source)))
     (assert-true (cl-cc:cst-interior-p node))
-    (assert-eq :quote (cl-cc:cst-node-kind node))))
-
-(deftest parse-quasiquote-produces-quasiquote-kind
-  "Parsing `x produces a cst-interior with :quasiquote kind"
-  (let ((node (parse-one-cst "`x")))
-    (assert-true (cl-cc:cst-interior-p node))
-    (assert-eq :quasiquote (cl-cc:cst-node-kind node))))
-
-(deftest parse-function-dispatch
-  "Parsing #'foo produces a cst-interior with :function kind"
-  (let ((node (parse-one-cst "#'foo")))
-    (assert-true (cl-cc:cst-interior-p node))
-    (assert-eq :function (cl-cc:cst-node-kind node))))
-
-(deftest parse-vector-dispatch
-  "Parsing #(1 2 3) produces a cst-interior with :vector kind"
-  (let ((node (parse-one-cst "#(1 2 3)")))
-    (assert-true (cl-cc:cst-interior-p node))
-    (assert-eq :vector (cl-cc:cst-node-kind node))
-    (assert-= 3 (length (cl-cc:cst-children node)))))
+    (assert-eq expected-kind (cl-cc:cst-node-kind node))))
 
 ;;; ─── CST Node Source Positions ───────────────────────────────────────────────
 
@@ -215,65 +190,39 @@
 
 ;;; ─── parse-cl-source: Multiple Forms ────────────────────────────────────────
 
-(deftest parse-cl-source-multiple-forms
-  "parse-cl-source returns all top-level forms"
+(deftest-each parse-cl-source-basic-behavior
+  "parse-cl-source: multiple forms, diagnostics return, and empty-string handling."
+  :cases (("multiple-forms"     "1 2 3" 3  nil)
+          ("returns-diagnostics" "42"   1  t)
+          ("empty-string"        ""     0  t))
+  (source expected-count check-diagnostics-listp)
   (multiple-value-bind (nodes diag)
-      (cl-cc:parse-cl-source "1 2 3")
-    (declare (ignore diag))
-    (assert-= 3 (length nodes))))
-
-(deftest parse-cl-source-returns-diagnostics
-  "parse-cl-source returns second value as diagnostics list"
-  (multiple-value-bind (nodes diag)
-      (cl-cc:parse-cl-source "42")
-    (declare (ignore nodes))
-    (assert-true (listp diag))))
-
-(deftest parse-cl-source-empty-string
-  "parse-cl-source on empty string returns empty list"
-  (multiple-value-bind (nodes _)
-      (cl-cc:parse-cl-source "")
-    (assert-= 0 (length nodes))))
+      (cl-cc:parse-cl-source source)
+    (assert-= expected-count (length nodes))
+    (when check-diagnostics-listp
+      (assert-true (listp diag)))))
 
 ;;; ─── parse-all-forms: S-expression Output ───────────────────────────────────
 
-(deftest-each parse-all-forms-literal-types
-  "parse-all-forms returns the correct value for each literal type"
-  :cases (("integer"  "42"       42)
-          ("string"   "\"hello\"" "hello")
-          ("nil-list" "()"       nil))
-  (source expected)
-  (assert-equal expected (parse-one-sexp source)))
-
-(deftest parse-all-forms-literal-types-symbol
-  "parse-all-forms returns a symbol named FOO for the source \"foo\""
-  (assert-string= "FOO" (symbol-name (parse-one-sexp "foo"))))
-
-(deftest parse-all-forms-simple-call
-  "parse-all-forms returns proper list for (f x)"
-  (let ((form (parse-one-sexp "(+ 1 2)")))
-    (assert-eq '+ (car form))
-    (assert-= 1 (cadr form))
-    (assert-= 2 (caddr form))))
-
-(deftest parse-all-forms-quoted-symbol
-  "parse-all-forms returns (quote x) for 'x"
-  (let ((form (parse-one-sexp "'foo")))
-    (assert-eq 'quote (car form))
-    (assert-string= "FOO" (symbol-name (cadr form)))))
+(deftest-each parse-all-forms-value-cases
+  "parse-all-forms returns the correct s-expression for various input forms."
+  :cases (("integer"    "42"        (lambda (f) (= f 42)))
+          ("string"     "\"hello\"" (lambda (f) (string= f "hello")))
+          ("nil-list"   "()"        (lambda (f) (null f)))
+          ("symbol"     "foo"       (lambda (f) (string= "FOO" (symbol-name f))))
+          ("call"       "(+ 1 2)"   (lambda (f) (and (eq '+ (car f)) (= 1 (cadr f)) (= 2 (caddr f)))))
+          ("quote"      "'foo"      (lambda (f) (and (eq 'quote (car f)) (string= "FOO" (symbol-name (cadr f))))))
+          ("nested"     "(let ((x (+ 1 2))) (* x x))"
+                        (lambda (f) (and (eq 'let (car f)) (string= "X" (symbol-name (caaadr f)))))))
+  (source pred)
+  (assert-true (funcall pred (parse-one-sexp source))))
 
 (deftest parse-all-forms-multiple
-  "parse-all-forms returns all top-level forms"
+  "parse-all-forms returns all top-level forms from multi-form input."
   (let ((forms (cl-cc:parse-all-forms "(defun f (x) x) (f 1)")))
     (assert-= 2 (length forms))
     (assert-eq 'defun (caar forms))
     (assert-string= "F" (symbol-name (cadar forms)))))
-
-(deftest parse-all-forms-nested
-  "parse-all-forms handles deeply nested forms"
-  (let ((form (parse-one-sexp "(let ((x (+ 1 2))) (* x x))")))
-    (assert-eq 'let (car form))
-    (assert-string= "X" (symbol-name (caaadr form)))))
 
 ;;; ─── parse-source: Single Form ───────────────────────────────────────────────
 
@@ -309,77 +258,42 @@
 
 ;;; ─── parse-and-lower: Full Pipeline ─────────────────────────────────────────
 
-(deftest parse-and-lower-returns-ast-list
-  "parse-and-lower returns a list of AST nodes"
-  (let ((asts (cl-cc:parse-and-lower "(+ 1 2)")))
-    (assert-true (not (null asts)))
-    (assert-true (listp asts))))
-
-(deftest parse-and-lower-integer-ast
-  "parse-and-lower on a number returns an ast-int node"
-  (let ((asts (cl-cc:parse-and-lower "42")))
-    (let ((node (first asts)))
-      (assert-true (cl-cc::ast-int-p node)))))
-
-(deftest parse-and-lower-multiple-forms
-  "parse-and-lower on multiple forms returns list of equal length"
-  (let ((asts (cl-cc:parse-and-lower "1 2 3")))
-    (assert-= 3 (length asts))))
+(deftest-each parse-and-lower-cases
+  "parse-and-lower: returns list, produces ast-int for integers, handles multiple forms."
+  :cases (("returns-list"      "(+ 1 2)" (lambda (asts) (and (listp asts) (not (null asts)))))
+          ("integer-ast-int"   "42"      (lambda (asts) (cl-cc::ast-int-p (first asts))))
+          ("multiple-3-forms"  "1 2 3"   (lambda (asts) (= 3 (length asts)))))
+  (source pred)
+  (assert-true (funcall pred (cl-cc:parse-and-lower source))))
 
 ;;; ─── pratt-parse-expr: Direct Tests ──────────────────────────────────────────
 
-(deftest pratt-parse-expr-integer
-  "pratt-parse-expr returns cst-token for integer."
-  (let ((ctx (make-test-ctx "42")))
-    (let ((node (cl-cc::pratt-parse-expr ctx)))
-      (assert-true (cl-cc:cst-token-p node))
-      (assert-equal 42 (cl-cc:cst-token-value node)))))
-
-(deftest pratt-parse-expr-symbol
-  "pratt-parse-expr returns cst-token for symbol."
-  (let ((ctx (make-test-ctx "foo")))
-    (let ((node (cl-cc::pratt-parse-expr ctx)))
-      (assert-true (cl-cc:cst-token-p node)))))
-
-(deftest pratt-parse-expr-list
-  "pratt-parse-expr returns cst-interior for list."
-  (let ((ctx (make-test-ctx "(+ 1 2)")))
-    (let ((node (cl-cc::pratt-parse-expr ctx)))
-      (assert-true (cl-cc:cst-interior-p node)))))
-
-(deftest pratt-parse-expr-error-on-eof
-  "pratt-parse-expr on empty stream returns error node."
-  (let ((ctx (make-test-ctx "")))
-    (let ((node (cl-cc::pratt-parse-expr ctx)))
-      (assert-true (cl-cc::cst-error-node-p node)))))
-
-(deftest pratt-parse-expr-quoted
-  "pratt-parse-expr handles quote syntax."
-  (let ((ctx (make-test-ctx "'x")))
-    (let ((node (cl-cc::pratt-parse-expr ctx)))
-      (assert-true (cl-cc:cst-interior-p node))
-      (assert-eq :quote (cl-cc:cst-node-kind node)))))
-
-(deftest pratt-parse-expr-nested-list
-  "pratt-parse-expr handles nested lists returning cst-interior."
-  (let ((ctx (make-test-ctx "(let ((x 1)) x)")))
-    (let ((node (cl-cc::pratt-parse-expr ctx)))
-      (assert-true (cl-cc:cst-interior-p node)))))
+(deftest-each pratt-parse-expr-node-type
+  "pratt-parse-expr returns the correct CST node type for each input shape."
+  :cases (("integer"     "42"               #'cl-cc:cst-token-p    nil)
+          ("symbol"      "foo"              #'cl-cc:cst-token-p    nil)
+          ("list"        "(+ 1 2)"          #'cl-cc:cst-interior-p nil)
+          ("eof-error"   ""                 #'cl-cc::cst-error-node-p nil)
+          ("quote"       "'x"               #'cl-cc:cst-interior-p :quote)
+          ("nested-list" "(let ((x 1)) x)"  #'cl-cc:cst-interior-p nil))
+  (source pred expected-kind)
+  (let* ((ctx  (make-test-ctx source))
+         (node (cl-cc::pratt-parse-expr ctx)))
+    (assert-true (funcall pred node))
+    (when expected-kind
+      (assert-eq expected-kind (cl-cc:cst-node-kind node)))))
 
 ;;; ─── pratt-add-diagnostic: Direct Tests ─────────────────────────────────────
 
-(deftest pratt-add-diagnostic-pushes
-  "pratt-add-diagnostic pushes a diagnostic to the context."
+(deftest-each pratt-add-diagnostic-count
+  "pratt-add-diagnostic accumulates the correct number of diagnostics."
+  :cases (("one"  1)
+          ("two"  2))
+  (n)
   (let ((ctx (make-test-ctx "42")))
-    (cl-cc::pratt-add-diagnostic ctx "test error" (cons 0 2))
-    (assert-equal 1 (length (cl-cc::pratt-context-diagnostics ctx)))))
-
-(deftest pratt-add-diagnostic-accumulates
-  "pratt-add-diagnostic accumulates multiple diagnostics."
-  (let ((ctx (make-test-ctx "42")))
-    (cl-cc::pratt-add-diagnostic ctx "error 1" (cons 0 1))
-    (cl-cc::pratt-add-diagnostic ctx "error 2" (cons 1 2))
-    (assert-equal 2 (length (cl-cc::pratt-context-diagnostics ctx)))))
+    (dotimes (i n)
+      (cl-cc::pratt-add-diagnostic ctx (format nil "error ~a" i) (cons i (1+ i))))
+    (assert-equal n (length (cl-cc::pratt-context-diagnostics ctx)))))
 
 (deftest pratt-add-diagnostic-records-message
   "pratt-add-diagnostic stores the error message."
@@ -390,23 +304,16 @@
 
 ;;; ─── pratt-parse-list-until: Direct Tests ───────────────────────────────────
 
-(deftest pratt-parse-list-until-empty
-  "pratt-parse-list-until on () returns empty list."
-  (let ((ctx (make-test-ctx "()")))
-    ;; Advance past the LPAREN
-    (cl-cc::pratt-advance ctx)
+(deftest-each pratt-parse-list-until-length
+  "pratt-parse-list-until returns the correct number of parsed elements."
+  :cases (("empty"    "()"      0)
+          ("elements" "(1 2 3)" 3))
+  (source expected-len)
+  (let ((ctx (make-test-ctx source)))
+    (cl-cc::pratt-advance ctx) ; consume LPAREN
     (let ((items (cl-cc::pratt-parse-list-until ctx :T-RPAREN
                    (lambda (c) (cl-cc::pratt-parse-expr c)))))
-      (assert-equal 0 (length items)))))
-
-(deftest pratt-parse-list-until-elements
-  "pratt-parse-list-until collects parsed elements."
-  (let ((ctx (make-test-ctx "(1 2 3)")))
-    ;; Advance past the LPAREN
-    (cl-cc::pratt-advance ctx)
-    (let ((items (cl-cc::pratt-parse-list-until ctx :T-RPAREN
-                   (lambda (c) (cl-cc::pratt-parse-expr c)))))
-      (assert-equal 3 (length items)))))
+      (assert-equal expected-len (length items)))))
 
 (deftest pratt-parse-list-until-consumes-terminator
   "pratt-parse-list-until consumes the end token."

@@ -524,3 +524,85 @@
                :expected ,recovered
                :actual   re-recovered
                :form     (list 'assert-roundtrip-preserves ',sexp)))))))))
+
+
+;;; ------------------------------------------------------------
+;;; Section N: Prolog Database Isolation (opt-in library)
+;;; ------------------------------------------------------------
+;;;
+;;; The compiler's Prolog fact DB (`cl-cc::*prolog-rules*`) is populated at
+;;; startup with baseline rules (type-of facts, peephole rules, etc.). Some
+;;; tests mutate it as part of their exercise and the state can leak into
+;;; subsequent tests under randomized ordering (see PROLOG-TYPE-OF-CMP flake
+;;; mentioned in MEMORY.md).
+;;;
+;;; We expose snapshot / restore as explicit helpers plus WITH-PROLOG-DB-ISOLATED
+;;; so individual tests can opt in. We deliberately DO NOT install this as a
+;;; blanket defafter :each fixture: the copy-list + clrhash pass runs in O(facts)
+;;; and, applied to every test, dominates the per-test budget for the compile-
+;;; heavy suites and blows through the default timeout.
+
+(defun %snapshot-prolog-db ()
+  "Deep-copy cl-cc::*prolog-rules* into a fresh hash table."
+  (let ((snap (make-hash-table :test 'eq)))
+    (maphash (lambda (k v) (setf (gethash k snap) (copy-list v)))
+             cl-cc::*prolog-rules*)
+    snap))
+
+(defun %restore-prolog-db (snap)
+  "Restore cl-cc::*prolog-rules* to the contents of SNAP."
+  (clrhash cl-cc::*prolog-rules*)
+  (maphash (lambda (k v)
+             (setf (gethash k cl-cc::*prolog-rules*) (copy-list v)))
+           snap))
+
+(defmacro with-prolog-db-isolated (&body body)
+  "Run BODY with the Prolog fact DB restored to its pre-BODY state afterwards.
+Use for tests that add rules and must not leak into siblings — cheaper than
+snapshotting at load time because most tests don't need this."
+  (let ((snap (gensym "SNAP")))
+    `(let ((,snap (%snapshot-prolog-db)))
+       (unwind-protect (progn ,@body)
+         (%restore-prolog-db ,snap)))))
+
+
+;;; ------------------------------------------------------------
+;;; Section N+1: VM Hash-Cons Cache Isolation
+;;; ------------------------------------------------------------
+;;;
+;;; vm-hash-cons memoizes cons cells by (car . cdr) value keys. When test A
+;;; mutates a cached cell via rplaca/rplacd, test B that hash-conses the same
+;;; pre-mutation key sees the mutated value. This violates test isolation and
+;;; produces puzzling failures like "expected 10, got 99" where the 99 came
+;;; from a prior rplaca test's mutation on a structurally-equal pair.
+;;;
+;;; Fix: clear the cache before every test. The table is small (<100 entries
+;;; typical), so clrhash overhead is well under 1 µs per test — negligible
+;;; compared to the prolog restore we removed in iter 2.
+
+(defbefore :each (cl-cc-suite)
+  (when (fboundp 'cl-cc::vm-clear-hash-cons-table)
+    (cl-cc::vm-clear-hash-cons-table)))
+
+;;; ------------------------------------------------------------
+;;; Section N+2: Macroexpansion Cache Isolation
+;;; ------------------------------------------------------------
+;;;
+;;; *macroexpansion-cache* memoizes macro expansions keyed on (env, form).
+;;; Under random test ordering, test A's expansion of (setf (cadr x) newval)
+;;; can land a cached entry whose expansion references shared gensym vars,
+;;; then test B running in an environment that has different macro bindings
+;;; triggers infinite expansion looking up the same cache entry. This
+;;; manifests as the 4 expander-test timeouts (EXPANDER-SETF-CXR-COMPOUND-
+;;; PLACES [cadr], EXPANDER-LAMBDA-EXPANDS-TYPED-PARAMS,
+;;; EXPAND-MAKE-ARRAY-ADJUSTABLE-PROMOTES, EXPAND-MAKE-ARRAY-FORM-FILL-
+;;; POINTER) that pass in isolation but hang in the full-run context.
+;;;
+;;; Fix: clear the cache before every test. The cache is :weakness :key
+;;; (weak on env), so clearing it only drops value entries — the envs stay
+;;; alive through their own references. clrhash is O(entries), which is
+;;; typically < 100 µs.
+
+(defbefore :each (cl-cc-suite)
+  (when (boundp 'cl-cc::*macroexpansion-cache*)
+    (clrhash cl-cc::*macroexpansion-cache*)))

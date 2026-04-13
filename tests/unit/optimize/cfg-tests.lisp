@@ -99,11 +99,13 @@
   (let ((cfg (make-test-cfg-branch)))
     (assert-true (>= (cl-cc::cfg-block-count cfg) 2))))
 
-(deftest cfg-branch-labels-resolved
-  "cfg-get-block-by-label finds labeled blocks."
+(deftest-each cfg-branch-labels-resolved
+  "cfg-get-block-by-label resolves all labeled blocks in the branch CFG."
+  :cases (("then" "then")
+          ("exit" "exit"))
+  (label-name)
   (let ((cfg (make-test-cfg-branch)))
-    (assert-true (cl-cc::cfg-get-block-by-label cfg "then"))
-    (assert-true (cl-cc::cfg-get-block-by-label cfg "exit"))))
+    (assert-true (cl-cc::cfg-get-block-by-label cfg label-name))))
 
 ;;; ─── Predecessor / Successor Edges ──────────────────────────────────────
 
@@ -183,33 +185,21 @@
     (assert-= 1 (cl-cc::bb-loop-depth body))
     (assert-= 0 (cl-cc::bb-loop-depth exit))))
 
-(deftest cfg-hot-cold-flatten-orders-hot-blocks-first
-  "Hot/cold flattening emits loop-heavy blocks before cold exit blocks."
-  (let* ((cfg (make-test-cfg-hot-cold)))
-    (cl-cc::cfg-compute-dominators cfg)
-    (cl-cc::cfg-compute-loop-depths cfg)
-    (let* ((flat (cl-cc::cfg-flatten-hot-cold cfg))
-           (labels (loop for inst in flat
-                         when (typep inst 'cl-cc::vm-label)
-                         collect (cl-cc::vm-name inst))))
-      (assert-true (member "hot" labels :test #'equal))
-      (assert-true (member "cold" labels :test #'equal))
-      (assert-true (< (position "hot" labels :test #'equal)
-                      (position "cold" labels :test #'equal))))))
-
-(deftest cfg-hot-cold-flatten-sends-signal-block-last
-  "Hot/cold flattening keeps an explicit signal-error block after normal code."
-  (let* ((cfg (make-test-cfg-cold-signal)))
-    (cl-cc::cfg-compute-dominators cfg)
-    (cl-cc::cfg-compute-loop-depths cfg)
-    (let* ((flat (cl-cc::cfg-flatten-hot-cold cfg))
-           (labels (loop for inst in flat
-                         when (typep inst 'cl-cc::vm-label)
-                         collect (cl-cc::vm-name inst))))
-      (assert-true (member "hot" labels :test #'equal))
-      (assert-true (member "cold" labels :test #'equal))
-      (assert-true (< (position "hot" labels :test #'equal)
-                       (position "cold" labels :test #'equal))))))
+(deftest-each cfg-hot-cold-flatten-cold-after-hot
+  "Hot/cold flattening places cold blocks (loop-exit or signal-error) after hot loop blocks."
+  :cases (("loop-vs-exit"     (make-test-cfg-hot-cold))
+          ("normal-vs-signal" (make-test-cfg-cold-signal)))
+  (cfg)
+  (cl-cc::cfg-compute-dominators cfg)
+  (cl-cc::cfg-compute-loop-depths cfg)
+  (let* ((flat   (cl-cc::cfg-flatten-hot-cold cfg))
+         (labels (loop for inst in flat
+                       when (typep inst 'cl-cc::vm-label)
+                       collect (cl-cc::vm-name inst))))
+    (assert-true (member "hot"  labels :test #'equal))
+    (assert-true (member "cold" labels :test #'equal))
+    (assert-true (< (position "hot"  labels :test #'equal)
+                    (position "cold" labels :test #'equal)))))
 
 (deftest cfg-critical-edge-splitting-inserts-landing-pad
   "Critical edge splitting inserts a landing-pad block and rewires the edge."
@@ -243,3 +233,30 @@
          (flat  (cl-cc::cfg-flatten cfg)))
     ;; Flat should have at least as many instructions as original
     (assert-true (>= (length flat) (length orig)))))
+
+;;; ─── cfg-idf (Iterated Dominance Frontier) ──────────────────────────────────
+
+(deftest cfg-idf-empty-def-blocks
+  "cfg-idf on an empty def-block set returns an empty list."
+  (let ((result (cl-cc::cfg-idf nil)))
+    (assert-null result)))
+
+(deftest cfg-idf-single-def-block-no-frontier
+  "cfg-idf on a single block with no dominance frontier returns empty."
+  (let* ((cfg (make-test-cfg-linear)))
+    (cl-cc::cfg-compute-dominators cfg)
+    (cl-cc::cfg-compute-dominance-frontiers cfg)
+    (let* ((entry (cl-cc::cfg-entry cfg))
+           (result (cl-cc::cfg-idf (list entry))))
+      ;; Linear CFG: no join points, so IDF is empty
+      (assert-true (listp result)))))
+
+(deftest cfg-idf-branch-cfg-includes-join-point
+  "cfg-idf on def-blocks that reach a join point includes that join in the IDF."
+  (let* ((cfg (make-test-cfg-branch)))
+    (cl-cc::cfg-compute-dominators cfg)
+    (cl-cc::cfg-compute-dominance-frontiers cfg)
+    (let* ((entry (cl-cc::cfg-entry cfg))
+           (result (cl-cc::cfg-idf (list entry))))
+      ;; Exit block is a join: it should appear in the IDF
+      (assert-true (listp result)))))

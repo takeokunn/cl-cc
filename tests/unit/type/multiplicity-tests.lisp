@@ -6,8 +6,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite multiplicity-suite :description "Graded multiplicity system tests")
+(defsuite multiplicity-suite :description "Graded multiplicity system tests"
+  :parent cl-cc-suite)
 
+
+(in-suite multiplicity-suite)
 ;;; ─── multiplicity-p ─────────────────────────────────────────────────────────
 
 (deftest-each mult-valid-grades

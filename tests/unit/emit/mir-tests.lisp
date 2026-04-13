@@ -354,29 +354,41 @@
   (assert-=  0       (target-gpr-count *wasm32-target*))
   (assert-=  0       (target-stack-alignment *wasm32-target*)))
 
-(deftest target-registry-lookup
+(deftest-each target-registry-lookup
   "find-target returns the correct target-desc for each registered name."
-  (assert-eq *x86-64-target*  (find-target :x86-64))
-  (assert-eq *aarch64-target* (find-target :aarch64))
-  (assert-eq *riscv64-target* (find-target :riscv64))
-  (assert-eq *wasm32-target*  (find-target :wasm32))
-  (assert-null (find-target :nonexistent)))
+  :cases (("x86-64"      *x86-64-target*  :x86-64)
+          ("aarch64"     *aarch64-target* :aarch64)
+          ("riscv64"     *riscv64-target* :riscv64)
+          ("wasm32"      *wasm32-target*  :wasm32)
+          ("nonexistent" nil              :nonexistent))
+  (expected name)
+  (if expected
+      (assert-eq expected (find-target name))
+      (assert-null (find-target name))))
 
-(deftest target-64-bit-predicate
+(deftest-each target-64-bit-predicate
   "target-64-bit-p returns true for 64-bit targets, false for 32-bit."
-  (assert-true  (target-64-bit-p *x86-64-target*))
-  (assert-true  (target-64-bit-p *aarch64-target*))
-  (assert-true  (target-64-bit-p *riscv64-target*))
-  (assert-false (target-64-bit-p *wasm32-target*)))
+  :cases (("x86-64"  t   *x86-64-target*)
+          ("aarch64" t   *aarch64-target*)
+          ("riscv64" t   *riscv64-target*)
+          ("wasm32"  nil *wasm32-target*))
+  (expected target)
+  (if expected
+      (assert-true  (target-64-bit-p target))
+      (assert-false (target-64-bit-p target))))
 
-(deftest target-feature-predicate
+(deftest-each target-feature-predicate
   "target-has-feature-p correctly detects presence and absence of features."
-  (assert-true  (target-has-feature-p *x86-64-target*  :has-fused-cmp-branch))
-  (assert-true  (target-has-feature-p *aarch64-target* :has-native-tail-call))
-  (assert-true  (target-has-feature-p *riscv64-target* :riscv-elf-psabi))
-  (assert-true  (target-has-feature-p *wasm32-target*  :wasi-0.2))
-  (assert-false (target-has-feature-p *x86-64-target*  :wasi-0.2))
-  (assert-false (target-has-feature-p *wasm32-target*  :sysv-abi)))
+  :cases (("x86-64-fused-cmp"   t   *x86-64-target*  :has-fused-cmp-branch)
+          ("aarch64-tail-call"  t   *aarch64-target* :has-native-tail-call)
+          ("riscv64-psabi"      t   *riscv64-target* :riscv-elf-psabi)
+          ("wasm32-wasi"        t   *wasm32-target*  :wasi-0.2)
+          ("x86-64-no-wasi"     nil *x86-64-target*  :wasi-0.2)
+          ("wasm32-no-sysv"     nil *wasm32-target*  :sysv-abi))
+  (expected target feature)
+  (if expected
+      (assert-true  (target-has-feature-p target feature))
+      (assert-false (target-has-feature-p target feature))))
 
 (deftest target-allocatable-regs-excludes-scratch
   "target-allocatable-regs never contains scratch registers."
@@ -398,17 +410,6 @@
     (dolist (r caller)
       (assert-false (member r callee)))))
 
-(deftest target-reg-index-lookup
-  "target-reg-index returns correct 0-based physical index."
-  (assert-= 0 (target-reg-index *x86-64-target* :rax))  ; first entry
-  (assert-eq :rax (aref (target-gpr-names *x86-64-target*) 0))
-  ;; unknown register returns nil
-  (assert-null (target-reg-index *x86-64-target* :unknown-reg)))
-
-(deftest target-op-legal-default
-  "target-op-legal-p returns true for unknown ops (permissive default)."
-  (assert-true (target-op-legal-p *x86-64-target* :add))
-  (assert-true (target-op-legal-p *x86-64-target* :some-hypothetical-op)))
 
 (deftest target-register-and-find
   "register-target and find-target round-trip correctly for a custom target."

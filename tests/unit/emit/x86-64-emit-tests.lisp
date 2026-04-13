@@ -6,8 +6,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite x86-64-emit-suite :description "x86-64 assembly emit tests")
+(defsuite x86-64-emit-suite :description "x86-64 assembly emit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite x86-64-emit-suite)
 ;;; ─── Helper: emit an instruction to string ─────────────────────────────────────
 
 (defun %x86-emit (target inst)

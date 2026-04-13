@@ -7,8 +7,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite diagnostics-suite :description "Parser diagnostic system tests")
+(defsuite diagnostics-suite :description "Parser diagnostic system tests"
+  :parent cl-cc-suite)
 
+
+(in-suite diagnostics-suite)
 ;;; ─── byte-offset-to-line-col ──────────────────────────────────────────────────
 
 (deftest-each diag-byte-offset-to-line-col-cases

@@ -49,26 +49,33 @@
     (t      (type-parse-error "Invalid type specifier: ~S" spec))))
 
 ;;; ─── Primitive types ──────────────────────────────────────────────────────
+;;; Data table maps groups of equivalent name strings to their type constants.
+;;; Package-independent: all comparisons use string= (symbol-name is always uppercase).
+
+(defvar *primitive-type-name-table*
+  `((("FIXNUM" "INTEGER" "INT")              . ,type-int)
+    (("FLOAT" "SINGLE-FLOAT" "DOUBLE-FLOAT") . ,type-float)
+    (("STRING" "SIMPLE-STRING")              . ,type-string)
+    (("BOOLEAN" "BOOL")                      . ,type-bool)
+    (("SYMBOL")                              . ,type-symbol)
+    (("CONS")                                . ,type-cons)
+    (("NULL" "NIL")                          . ,type-null)
+    (("T" "TOP")                             . ,type-any)
+    (("CHARACTER" "CHAR")                    . ,type-char))
+  "Alist of (name-strings . type-constant) for primitive type lookup.")
 
 (defun parse-primitive-type (name)
-  "Parse a symbol into a primitive type. Uses string= for package-independent matching."
-  (let ((sname (symbol-name name)))
-    (cond
-      ((member sname '("FIXNUM" "INTEGER" "INT") :test #'string=)       type-int)
-      ((member sname '("FLOAT" "SINGLE-FLOAT" "DOUBLE-FLOAT") :test #'string=) type-float)
-      ((member sname '("STRING" "SIMPLE-STRING") :test #'string=)       type-string)
-      ((member sname '("BOOLEAN" "BOOL") :test #'string=)               type-bool)
-      ((string= sname "SYMBOL")                                          type-symbol)
-      ((string= sname "CONS")                                            type-cons)
-      ((member sname '("NULL" "NIL") :test #'string=)                   type-null)
-      ((member sname '("T" "TOP") :test #'string=)                      type-any)
-      ((member sname '("CHARACTER" "CHAR") :test #'string=)             type-char)
-      (t
-       (let ((alias (and (boundp '*type-alias-registry*)
-                         (gethash name *type-alias-registry*))))
-         (if alias
-             (parse-type-specifier alias)
-             (make-type-primitive :name name)))))))
+  "Parse a symbol into a primitive type. Dispatches via *primitive-type-name-table*."
+  (let* ((sname (symbol-name name))
+         (entry (assoc sname *primitive-type-name-table*
+                       :test (lambda (s names) (member s names :test #'string=)))))
+    (if entry
+        (cdr entry)
+        (let ((alias (and (boundp '*type-alias-registry*)
+                          (gethash name *type-alias-registry*))))
+          (if alias
+              (parse-type-specifier alias)
+              (make-type-primitive :name name))))))
 
 ;;; ─── Compound types ───────────────────────────────────────────────────────
 
@@ -130,6 +137,29 @@
       (otherwise
         (parse-compound-type-extended head args)))))
 
+;;; ─── Arrow form multiplicities ────────────────────────────────────────────
+
+(defvar *arrow-mult-table*
+  '(("->"  . :omega)
+    ("->1" . :one)
+    ("->0" . :zero))
+  "Maps arrow syntax name strings to their multiplicity keywords.")
+
+;;; ─── Binding quantifiers: data-driven (forall/∀, exists/∃, mu/μ, type-lambda) ──────────
+;;; All share identical structure (var body) — only the constructor differs.
+
+(defvar *binding-quantifier-table*
+  `((("FORALL"      "∀") . ,#'make-type-forall)
+    (("EXISTS"      "∃") . ,#'make-type-exists)
+    (("MU"          "μ") . ,#'make-type-mu)
+    (("TYPE-LAMBDA")     . ,#'make-type-lambda))
+  "Maps lists of equivalent name strings to (var body) → type-node constructors.")
+
+(defun %binding-quantifier-ctor (hn)
+  "Return the constructor for quantifier name HN (case-sensitive), or nil."
+  (cdr (assoc hn *binding-quantifier-table*
+              :test (lambda (h names) (member h names :test #'string=)))))
+
 (defun parse-compound-type-extended (head args)
   "Handle all symbol-named compound forms using string comparison for package-independence."
   (let ((hn (and (symbolp head) (symbol-name head))))
@@ -141,42 +171,18 @@
         (make-type-union (list type-null (parse-type-specifier (first args)))
                          :constructor-name head))
 
-      ;; ─── Arrow forms ──────────────────────────────────────────────────
-      ((and hn (string= hn "->"))   (parse-arrow-type args :omega))
-      ((and hn (string= hn "->1"))  (parse-arrow-type args :one))
-      ((and hn (string= hn "->0"))  (parse-arrow-type args :zero))
+      ;; ─── Arrow forms (-> :omega, ->1 :one, ->0 :zero) ────────────────
+      ((and hn (assoc hn *arrow-mult-table* :test #'string=))
+       (parse-arrow-type args (cdr (assoc hn *arrow-mult-table* :test #'string=))))
 
-      ;; ─── Universal quantification: (forall a T) or (∀ a T) ───────────
-      ((and hn (or (string= hn "FORALL") (string= hn "∀")))
+      ;; ─── Binding quantifiers (forall/∀, exists/∃, mu/μ, type-lambda) ──
+      ((and hn (%binding-quantifier-ctor hn))
        (unless (= (length args) 2)
-         (type-parse-error "forall requires (forall var body)"))
-       (let* ((var  (fresh-type-var (first args)))
+         (type-parse-error "~A requires (~A var body)" hn (string-downcase hn)))
+       (let* ((ctor (%binding-quantifier-ctor hn))
+              (var  (fresh-type-var (first args)))
               (body (parse-type-specifier (second args))))
-         (make-type-forall :var var :body body)))
-
-      ;; ─── Existential: (exists a T) ────────────────────────────────────
-      ((and hn (or (string= hn "EXISTS") (string= hn "∃")))
-       (unless (= (length args) 2)
-         (type-parse-error "exists requires (exists var body)"))
-       (let* ((var  (fresh-type-var (first args)))
-              (body (parse-type-specifier (second args))))
-         (make-type-exists :var var :body body)))
-
-       ;; ─── Recursive: (mu a T) ──────────────────────────────────────────
-       ((and hn (or (string= hn "MU") (string= hn "μ")))
-        (unless (= (length args) 2)
-          (type-parse-error "mu requires (mu var body)"))
-        (let* ((var  (fresh-type-var (first args)))
-               (body (parse-type-specifier (second args))))
-          (make-type-mu :var var :body body)))
-
-       ;; ─── Type lambda: (type-lambda a T) ───────────────────────────────
-       ((and hn (string= hn "TYPE-LAMBDA"))
-        (unless (= (length args) 2)
-          (type-parse-error "type-lambda requires (type-lambda var body)"))
-        (let* ((var  (fresh-type-var (first args)))
-               (body (parse-type-specifier (second args))))
-          (make-type-lambda :var var :body body)))
+         (funcall ctor :var var :body body)))
 
        ;; ─── Qualified: (=> (C1 a) ... T) ────────────────────────────────
        ((and hn (string= hn "=>"))
@@ -277,149 +283,8 @@
          :effects (mapcar (lambda (n) (make-type-effect-op :name n)) eff-names)
          :row-var row-var))))
 
-;;; ─── Row type parsing ─────────────────────────────────────────────────────
 
-(defun parse-row-type (args kind)
-  "Parse (Record (l1 T1) ... | ρ) or (Variant (L1 T1) ... | ρ)."
-  (let* ((pipe-pos (position-if (lambda (x) (and (symbolp x)
-                                                   (string= (symbol-name x) "|")))
-                                 args))
-         (field-specs (if pipe-pos (subseq args 0 pipe-pos) args))
-         (row-var-spec (when pipe-pos (nth (1+ pipe-pos) args)))
-         (row-var (when row-var-spec (parse-type-specifier row-var-spec)))
-         (fields (mapcar (lambda (f)
-                           (unless (and (consp f) (= (length f) 2))
-                             (type-parse-error "Row field must be (label type), got ~S" f))
-                           (cons (first f) (parse-type-specifier (second f))))
-                         field-specs)))
-    (ecase kind
-      (:record  (make-type-record  :fields fields :row-var row-var))
-      (:variant (make-type-variant :cases  fields :row-var row-var)))))
+;;; (parse-row-type, parse-constraint-spec, lambda-list parsing,
+;;;  typed AST defstructs, and utilities are in parser-typed.lisp
+;;;  which loads after this file.)
 
-;;; ─── Constraint spec parsing ──────────────────────────────────────────────
-
-(defun parse-constraint-spec (spec)
-  "Parse a typeclass constraint spec like (Num a) into a type-class-constraint."
-  (unless (and (consp spec) (>= (length spec) 2) (symbolp (first spec)))
-    (type-parse-error "Constraint must be (ClassName type-arg), got ~S" spec))
-  (make-type-class-constraint :class-name (first spec)
-                               :type-arg   (parse-type-specifier (second spec))))
-
-;;; ─── Lambda-list parsing ──────────────────────────────────────────────────
-
-(defun parse-lambda-list-with-types (lambda-list)
-  "Parse a typed lambda list like ((x fixnum) y (z string)).
-Returns (values param-names param-types) where untyped params get type-any."
-  (let (names types)
-    (dolist (item lambda-list)
-      (cond
-        ((and (consp item) (= (length item) 2))
-         (push (first item) names)
-         (push (parse-type-specifier (second item)) types))
-        ((symbolp item)
-         (push item names)
-         (push type-any types))
-        (t (type-parse-error "Invalid lambda-list item: ~S" item))))
-    (values (nreverse names) (nreverse types))))
-
-(defun parse-typed-parameter (item)
-  "Parse a single possibly-typed parameter (x) or (x fixnum). Returns (name . type)."
-  (if (and (consp item) (= (length item) 2) (symbolp (first item)))
-      (cons (first item) (parse-type-specifier (second item)))
-      (cons item type-any)))
-
-(defun parse-typed-optional-parameter (item)
-  "Parse an &optional parameter possibly typed: (x fixnum default) → (name . type)."
-  (if (consp item)
-      (cons (first item)
-            (if (>= (length item) 2)
-                (parse-type-specifier (second item))
-                type-any))
-      (cons item type-any)))
-
-(defun parse-typed-rest-parameter (item)
-  "Parse an &rest parameter: x or (x type). Returns (name . type)."
-  (parse-typed-parameter item))
-
-;;; ─── Return type extraction ───────────────────────────────────────────────
-
-(defun extract-return-type (body)
-  "If BODY starts with a type annotation (declare (return-type T)), extract T."
-  (when (and (consp body)
-             (consp (first body))
-             (eq (caar body) 'declare))
-    (let ((decl (cdar body)))
-      (when (and decl (consp (car decl))
-                 (and (symbolp (caar decl))
-                      (string= (symbol-name (caar decl)) "RETURN-TYPE")))
-        (parse-type-specifier (cadar decl))))))
-
-(defun extract-return-type-from-body (body)
-  "Extract return type from (declare (return-type ...)) forms in BODY."
-  (extract-return-type body))
-
-;;; ─── Typed AST nodes ──────────────────────────────────────────────────────
-
-(defstruct (ast-defun-typed (:constructor make-ast-defun-typed))
-  "A defun node with type annotations."
-  (name nil :type symbol)
-  (params nil :type list)
-  (param-types nil :type list)
-  (return-type nil)
-  (body nil)
-  (source-location nil))
-
-(defstruct (ast-lambda-typed (:constructor make-ast-lambda-typed))
-  "A lambda node with type annotations."
-  (params nil :type list)
-  (param-types nil :type list)
-  (return-type nil)
-  (body nil)
-  (env nil)
-  (source-location nil))
-
-(defun parse-typed-defun (form)
-  "Parse (defun name ((x T) ...) return-type body...) into ast-defun-typed."
-  (destructuring-bind (name lambda-list . rest) (cdr form)
-    (multiple-value-bind (names types) (parse-lambda-list-with-types lambda-list)
-      (let ((return-type (and (not (null rest))
-                              (not (consp (first rest)))
-                              (not (eq (first rest) 'declare))
-                              (parse-type-specifier-maybe (first rest))))
-            (body (if (and rest (not (null (extract-return-type-maybe rest))))
-                      (cdr rest)
-                      rest)))
-        (make-ast-defun-typed
-         :name name :params names :param-types types
-         :return-type (or return-type type-any) :body body)))))
-
-(defun parse-typed-lambda (form)
-  "Parse (lambda ((x T) ...) body...) into ast-lambda-typed."
-  (destructuring-bind (lambda-list . body) (cdr form)
-    (multiple-value-bind (names types) (parse-lambda-list-with-types lambda-list)
-      (make-ast-lambda-typed
-       :params names :param-types types :return-type type-any :body body))))
-
-(defun parse-typed-lambda-list (lambda-list)
-  "Parse a typed lambda list. Returns (values names types)."
-  (parse-lambda-list-with-types lambda-list))
-
-(defun parse-type-specifier-maybe (x)
-  "Return a type-node if X looks like a type specifier, else nil."
-  (when (looks-like-type-specifier-p x)
-    (handler-case (parse-type-specifier x)
-      (type-parse-error () nil))))
-
-(defun extract-return-type-maybe (forms)
-  "Try to extract a return type from the front of FORMS list."
-  (extract-return-type forms))
-
-;;; ─── Utility ──────────────────────────────────────────────────────────────
-
-(defvar *lambda-list-keywords*
-  '(&optional &rest &key &allow-other-keys &aux)
-  "Lambda list keywords to skip during typed parameter parsing.")
-
-(defun make-type-function-from-spec (param-types return-type)
-  "Create an arrow type from a list of param types and a return type."
-  (make-type-arrow param-types return-type))

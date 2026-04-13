@@ -6,6 +6,8 @@
   :description "Macro multiple-value expansion tests"
   :parent cl-cc-suite)
 
+
+(in-suite macro-multiple-value-suite)
 (deftest multiple-value-list-expansion
   "MULTIPLE-VALUE-LIST: outer LET, body is multiple-value-call; fully expands away."
   ;; Any form: outer LET + multiple-value-call in body

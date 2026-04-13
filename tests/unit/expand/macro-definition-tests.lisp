@@ -6,6 +6,8 @@
   :description "Macro definition expansion tests"
   :parent cl-cc-suite)
 
+
+(in-suite macro-definition-suite)
 (deftest-each defun-macro-structure
   "DEFUN expands to (setf (fdefinition ...) (lambda ...)) regardless of docstring"
   :cases (("basic"          '(defun foo (x y) body1 body2))

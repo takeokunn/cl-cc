@@ -30,17 +30,47 @@ Returns a function that takes a continuation."
   (and (listp result)
        (eq 'lambda (car result))))
 
-(deftest cps-simplify-beta-reduces-immediate-funcall
-  "The CPS bootstrap simplifier beta-reduces trivial funcall/lambda pairs."
-  (assert-equal 42
-                (cl-cc::cps-simplify-form
-                 '(funcall (lambda (x) x) 42))))
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; Structure predicate tests (extracted for readability)
+;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest cps-simplify-eta-reduces-trivial-lambda
-  "The CPS bootstrap simplifier eta-reduces (lambda (k) (funcall f k))."
-  (assert-equal 'next
-                (cl-cc::cps-simplify-form
-                 '(lambda (k) (funcall next k)))))
+(deftest-each cps-single-param-lambda-p
+  "%single-param-lambda-p: recognizes exactly (lambda (x) body) forms."
+  :cases (("yes-single"     t   '(lambda (x) x))
+          ("yes-with-body"  t   '(lambda (k) (funcall f k)))
+          ("no-multi-param" nil '(lambda (x y) x))
+          ("no-zero-param"  nil '(lambda () 42))
+          ("no-not-lambda"  nil '(funcall f x))
+          ("no-atom"        nil 42))
+  (expected form)
+  (assert-equal expected (cl-cc::%single-param-lambda-p form)))
+
+(deftest-each cps-funcall-of-single-lambda-p
+  "%funcall-of-single-lambda-p: recognizes (funcall (lambda (x) body) arg)."
+  :cases (("yes"            t   '(funcall (lambda (x) x) 42))
+          ("no-multi-args"  nil '(funcall (lambda (x) x) 1 2))
+          ("no-plain-fn"    nil '(funcall f 42))
+          ("no-multi-param" nil '(funcall (lambda (x y) x) 1))
+          ("no-atom"        nil 42))
+  (expected form)
+  (assert-equal expected (cl-cc::%funcall-of-single-lambda-p form)))
+
+(deftest-each cps-eta-reducible-lambda-p
+  "%eta-reducible-lambda-p: recognizes (lambda (x) (funcall f x))."
+  :cases (("yes"              t   '(lambda (k) (funcall next k)))
+          ("no-wrong-param"   nil '(lambda (k) (funcall next x)))
+          ("no-extra-body"    nil '(lambda (k) (print k) (funcall next k)))
+          ("no-plain-lambda"  nil '(lambda (k) k))
+          ("no-multi-param"   nil '(lambda (k j) (funcall next k))))
+  (expected form)
+  (assert-equal expected (cl-cc::%eta-reducible-lambda-p form)))
+
+(deftest-each cps-simplify-form-reductions
+  "cps-simplify-form applies beta-reduction and eta-reduction."
+  :cases (("beta-reduce" 42    '(funcall (lambda (x) x) 42))
+          ("eta-reduce"  'next '(lambda (k) (funcall next k))))
+  (expected form)
+  (assert-equal expected (cl-cc::cps-simplify-form form)))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; S-expression CPS (bootstrap transformer)
@@ -53,7 +83,7 @@ Returns a function that takes a continuation."
           ("sub"               '(- 10 3)          7)
           ("mul"               '(* 3 4)          12)
           ("if-true"           '(if 1 10 20)     10)
-          ("if-false"          '(if 0 10 20)     20)
+          ("if-false"          '(if nil 10 20)   20)
           ("progn-returns-last" '(progn 1 2 3)    3)
           ("let-binding"       '(let ((x 1) (y 2)) (+ x y)) 3))
   (expr expected)
@@ -78,7 +108,7 @@ Returns a function that takes a continuation."
 (deftest-each cps-ast-if-branch
   "cps-transform-ast: if selects the correct branch based on condition truthiness"
   :cases (("truthy-takes-then" 1  10 20 10)
-          ("zero-takes-else"   0  10 20 20))
+          ("nil-takes-else"    nil 10 20 20))
   (cond-val then-val else-val expected)
   (let ((ast (cl-cc:make-ast-if :cond (cl-cc:make-ast-int :value cond-val)
                                 :then (cl-cc:make-ast-int :value then-val)
@@ -289,14 +319,14 @@ Returns a function that takes a continuation."
       (assert-eq 'b    (second lambda-list))
       (assert-eq 'my-k (third  lambda-list)))))
 
-(deftest cps-local-fns-outer-is-form-kw
-  "cps-transform-local-fns produces (flet ...) or (labels ...) as outer form."
-  (let* ((k (gensym "K"))
-         (body (list (cl-cc:make-ast-int :value 42)))
-         (result-flet   (cl-cc::cps-transform-local-fns 'flet   nil body k))
-         (result-labels (cl-cc::cps-transform-local-fns 'labels nil body k)))
-    (assert-eq 'flet   (first result-flet))
-    (assert-eq 'labels (first result-labels))))
+(deftest-each cps-local-fns-outer-is-form-kw
+  "cps-transform-local-fns produces (flet ...) or (labels ...) as the outer form."
+  :cases (("flet"   'flet)
+          ("labels" 'labels))
+  (form-kw)
+  (let* ((k    (gensym "K"))
+         (body (list (cl-cc:make-ast-int :value 42))))
+    (assert-eq form-kw (first (cl-cc::cps-transform-local-fns form-kw nil body k)))))
 
 (deftest cps-local-fns-bindings-transformed
   "cps-transform-local-fns applies cps-transform-fn-binding to each binding."

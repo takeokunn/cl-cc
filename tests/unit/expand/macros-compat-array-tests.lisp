@@ -8,16 +8,12 @@
 
 (in-suite macros-compat-array-suite)
 
-(deftest adjustable-array-p-expansion
-  "ADJUSTABLE-ARRAY-P expands to a LET that returns T."
-  (let* ((result (our-macroexpand-1 '(adjustable-array-p arr)))
+(deftest-each array-predicate-stub-expansion
+  "adjustable-array-p and array-has-fill-pointer-p are LET stubs returning T and NIL respectively."
+  :cases (("adjustable-array-p"       '(adjustable-array-p arr)       t)
+          ("array-has-fill-pointer-p" '(array-has-fill-pointer-p arr) nil))
+  (form expected-return)
+  (let* ((result (our-macroexpand-1 form))
          (body   (cddr result)))
     (assert-eq 'let (car result))
-    (assert-eq t (car (last body)))))
-
-(deftest array-has-fill-pointer-p-expansion
-  "ARRAY-HAS-FILL-POINTER-P expands to a LET that returns NIL."
-  (let* ((result (our-macroexpand-1 '(array-has-fill-pointer-p arr)))
-         (body   (cddr result)))
-    (assert-eq 'let (car result))
-    (assert-equal nil (car (last body)))))
+    (assert-equal expected-return (car (last body)))))

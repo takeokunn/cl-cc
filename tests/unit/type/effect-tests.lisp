@@ -5,8 +5,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite effect-suite :description "Algebraic effect system tests")
+(defsuite effect-suite :description "Algebraic effect system tests"
+  :parent cl-cc-suite)
 
+
+(in-suite effect-suite)
 ;;; ─── Helpers ─────────────────────────────────────────────────────────────────
 
 (defun make-effect-op (name)

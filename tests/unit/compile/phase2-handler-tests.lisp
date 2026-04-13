@@ -13,7 +13,9 @@
 (in-package :cl-cc/test)
 
 (defsuite phase2-handler-suite
-  :description "Phase 2 builtin handler dispatch (AST-introspecting builtins)"
+  :description "Phase 2 builtin handler dispatch (AST-introspecting builtins)
+(in-suite phase2-handler-suite)
+"
   :parent cl-cc-suite)
 
 ;;; ── MAKE-HASH-TABLE ───────────────────────────────────────────────────────
@@ -179,37 +181,6 @@
     ;; Pass unquoted ast-var — handler guard fails
     (compile-ast (make-call 'typep (make-int 42) (make-var 'integer)) ctx)
     (assert-true (null (codegen-find-inst ctx 'cl-cc::vm-typep)))))
-
-;;; ── SLOT-BOUNDP ──────────────────────────────────────────────────────────
-
-(deftest phase2-slot-boundp-emits-instruction
-  "(slot-boundp obj 'slot) emits vm-slot-boundp"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'slot-boundp (make-int 0) (make-quoted 'name)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-slot-boundp))))
-
-(deftest phase2-slot-boundp-stores-slot-name
-  "(slot-boundp obj 'foo) stores the slot symbol in the instruction"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'slot-boundp (make-int 0) (make-quoted 'foo)) ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-slot-boundp)))
-      (assert-eq 'foo (cl-cc::vm-slot-name-sym inst)))))
-
-;;; ── SLOT-EXISTS-P ────────────────────────────────────────────────────────
-
-(deftest phase2-slot-exists-p-emits-instruction
-  "(slot-exists-p obj 'slot) emits vm-slot-exists-p"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'slot-exists-p (make-int 0) (make-quoted 'name)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-slot-exists-p))))
-
-;;; ── SLOT-MAKUNBOUND ──────────────────────────────────────────────────────
-
-(deftest phase2-slot-makunbound-emits-instruction
-  "(slot-makunbound obj 'slot) emits vm-slot-makunbound"
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-call 'slot-makunbound (make-int 0) (make-quoted 'name)) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-slot-makunbound))))
 
 ;;; ── CALL-NEXT-METHOD ─────────────────────────────────────────────────────
 

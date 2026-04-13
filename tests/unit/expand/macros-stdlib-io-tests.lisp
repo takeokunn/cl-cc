@@ -61,16 +61,12 @@
       (assert-= 1 (second second))
       (assert-= 1 *load-time-value-hit*))))
 
-(deftest provide-expansion
-  "PROVIDE: outer LET, body calls PUSHNEW to register the module."
-  (let* ((result       (our-macroexpand-1 '(provide :my-lib)))
-         (pushnew-form (caddr result)))
+(deftest-each provide-require-expansion-structure
+  "PROVIDE expands to LET+PUSHNEW; REQUIRE expands to LET+UNLESS."
+  :cases (("provide" '(provide :my-lib) 'pushnew)
+          ("require" '(require :my-lib) 'unless))
+  (form expected-inner-op)
+  (let* ((result (our-macroexpand-1 form))
+         (inner  (caddr result)))
     (assert-eq 'let (car result))
-    (assert-eq 'pushnew (car pushnew-form))))
-
-(deftest require-expansion
-  "REQUIRE: outer LET, body is UNLESS+MEMBER guard."
-  (let* ((result      (our-macroexpand-1 '(require :my-lib)))
-         (unless-form (caddr result)))
-    (assert-eq 'let (car result))
-    (assert-eq 'unless (car unless-form))))
+    (assert-eq expected-inner-op (car inner))))

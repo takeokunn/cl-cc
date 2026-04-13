@@ -16,10 +16,12 @@
     (assert-eq 'setq (car (second result)))
     (assert-equal '(quote :cl-cc) (third result))))
 
-(deftest declare-declaim-expand-to-nil
+(deftest-each declare-declaim-expand-to-nil
   "DECLARE and DECLAIM are compatibility stubs that expand to NIL."
-  (assert-equal nil (our-macroexpand-1 '(declare (special x))))
-  (assert-equal nil (our-macroexpand-1 '(declaim (special x)))))
+  :cases (("declare" '(declare (special x)))
+          ("declaim" '(declaim (special x))))
+  (form)
+  (assert-equal nil (our-macroexpand-1 form)))
 
 (deftest locally-preserves-declarations
   "LOCALLY keeps declarations in a LET wrapper."
@@ -32,3 +34,24 @@
   (let ((result (our-macroexpand-1 '(progv syms vals (foo)))))
     (assert-eq 'let* (car result))
     (assert-eq 'unwind-protect (car (caddr result)))))
+
+(deftest defpackage-creates-package
+  "(defpackage :foo ...) expands to progn with find-package/make-package."
+  (let* ((result (our-macroexpand-1 '(defpackage :foo (:use :cl))))
+         (result-str (format nil "~S" result)))
+    (assert-eq (car result) 'progn)
+    (assert-true (search "FIND-PACKAGE" result-str))
+    (assert-true (search "MAKE-PACKAGE" result-str))))
+
+(deftest defpackage-local-nicknames-expand-and-apply
+  "(defpackage ... (:local-nicknames ...)) expands to host local nickname registration."
+  (let* ((form '(defpackage :fr275-pkg
+                  (:use :cl)
+                  (:local-nicknames (:a :cl-user))))
+         (result (our-macroexpand-1 form))
+         (result-str (format nil "~S" result))
+         (pkg-name (eval result))
+         (pkg (find-package pkg-name)))
+    (assert-true (search "ADD-PACKAGE-LOCAL-NICKNAME" result-str))
+    (assert-true (equal (package-name pkg) "FR275-PKG"))
+    (assert-true (assoc "A" (sb-ext:package-local-nicknames pkg) :test #'string=))))

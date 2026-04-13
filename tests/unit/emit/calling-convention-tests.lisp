@@ -5,8 +5,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite calling-convention-suite :description "Calling convention definition tests")
+(defsuite calling-convention-suite :description "Calling convention definition tests"
+  :parent cl-cc-suite)
 
+
+(in-suite calling-convention-suite)
 ;;; ─── x86-64 System V ABI ──────────────────────────────────────────────────
 
 (deftest cc-x86-64-basic-properties

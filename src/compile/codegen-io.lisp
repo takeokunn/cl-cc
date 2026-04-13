@@ -32,66 +32,47 @@
   (dolist (extra (cdr args))
     (compile-ast extra ctx)))
 
-;; read-char: (read-char &optional stream eof-error-p eof-value recursive-p) — FR-612
+(defun %compile-stream-read (args result-reg ctx emit-raw-fn)
+  "Common logic for stream reader handlers (read-char, read-line, read).
+   Acquires a handle register (arg 0 or default stdin handle 0), then:
+     3+ args → eof-value substitution path (args: stream eof-error-p eof-value [recursive-p])
+     0-2 args → simple path, returns :eof sentinel on EOF.
+   EMIT-RAW-FN is called as (emit-raw-fn dst-reg handle-reg ctx) to emit the VM read."
+  (let ((handle-reg (if args
+                        (compile-ast (first args) ctx)
+                        (let ((r (make-register ctx)))
+                          (emit ctx (make-vm-const :dst r :value 0)) r))))
+    (if (>= (length args) 3)
+        (progn
+          (compile-ast (second args) ctx)   ; eof-error-p — compile for side effects, discard
+          (let ((eof-val-reg (compile-ast (third args) ctx))
+                (raw-reg (make-register ctx)))
+            (when (fourth args) (compile-ast (fourth args) ctx)) ; recursive-p — discard
+            (funcall emit-raw-fn raw-reg handle-reg ctx)
+            (%emit-eof-value-check raw-reg eof-val-reg result-reg ctx)))
+        (progn
+          (%compile-and-discard-extra-args args ctx)
+          (funcall emit-raw-fn result-reg handle-reg ctx)
+          result-reg))))
+
+;; read-char / read-line / read — FR-612
+;; (fn &optional stream eof-error-p eof-value recursive-p)
+;; All three share identical argument structure; only the emitted VM instruction differs.
+
 (define-phase2-handler "READ-CHAR" (args result-reg ctx)
-  (let ((handle-reg (if args
-                        (compile-ast (first args) ctx)
-                        (let ((r (make-register ctx)))
-                          (emit ctx (make-vm-const :dst r :value 0)) r))))
-    (cond
-      ;; 3+ args: eof-value substitution enabled
-      ((>= (length args) 3)
-       (compile-ast (second args) ctx)   ; eof-error-p — compile for side effects, discard
-       (let ((eof-val-reg (compile-ast (third args) ctx))
-             (raw-reg (make-register ctx)))
-         (when (fourth args) (compile-ast (fourth args) ctx)) ; recursive-p — discard
-         (emit ctx (make-vm-read-char :dst raw-reg :handle handle-reg))
-         (%emit-eof-value-check raw-reg eof-val-reg result-reg ctx)))
-      ;; 0-2 args: compile and discard extra args; return :eof sentinel on EOF
-      (t
-       (%compile-and-discard-extra-args args ctx)
-       (emit ctx (make-vm-read-char :dst result-reg :handle handle-reg))
-       result-reg))))
+  (%compile-stream-read args result-reg ctx
+    (lambda (dst handle ctx)
+      (emit ctx (make-vm-read-char :dst dst :handle handle)))))
 
-;; read-line: (read-line &optional stream eof-error-p eof-value recursive-p) — FR-612
 (define-phase2-handler "READ-LINE" (args result-reg ctx)
-  (let ((handle-reg (if args
-                        (compile-ast (first args) ctx)
-                        (let ((r (make-register ctx)))
-                          (emit ctx (make-vm-const :dst r :value 0)) r))))
-    (cond
-      ;; 3+ args: eof-value substitution
-      ((>= (length args) 3)
-       (compile-ast (second args) ctx)   ; eof-error-p — discard
-       (let ((eof-val-reg (compile-ast (third args) ctx))
-             (raw-reg (make-register ctx)))
-         (when (fourth args) (compile-ast (fourth args) ctx))
-         (emit ctx (make-vm-read-line :dst raw-reg :handle handle-reg))
-         (%emit-eof-value-check raw-reg eof-val-reg result-reg ctx)))
-      (t
-       (%compile-and-discard-extra-args args ctx)
-       (emit ctx (make-vm-read-line :dst result-reg :handle handle-reg))
-       result-reg))))
+  (%compile-stream-read args result-reg ctx
+    (lambda (dst handle ctx)
+      (emit ctx (make-vm-read-line :dst dst :handle handle)))))
 
-;; read: (read &optional stream eof-error-p eof-value recursive-p) — FR-612
 (define-phase2-handler "READ" (args result-reg ctx)
-  (let ((handle-reg (if args
-                        (compile-ast (first args) ctx)
-                        (let ((r (make-register ctx)))
-                          (emit ctx (make-vm-const :dst r :value 0)) r))))
-    (cond
-      ;; 3+ args: eof-value substitution
-      ((>= (length args) 3)
-       (compile-ast (second args) ctx)   ; eof-error-p — discard
-       (let ((eof-val-reg (compile-ast (third args) ctx))
-             (raw-reg (make-register ctx)))
-         (when (fourth args) (compile-ast (fourth args) ctx))
-         (emit ctx (make-vm-read-sexp-inst :dst raw-reg :src handle-reg))
-         (%emit-eof-value-check raw-reg eof-val-reg result-reg ctx)))
-      (t
-       (%compile-and-discard-extra-args args ctx)
-       (emit ctx (make-vm-read-sexp-inst :dst result-reg :src handle-reg))
-       result-reg))))
+  (%compile-stream-read args result-reg ctx
+    (lambda (dst handle ctx)
+      (emit ctx (make-vm-read-sexp-inst :dst dst :src handle)))))
 
 ;; peek-char: (peek-char handle) or (peek-char nil handle)
 (define-phase2-handler "PEEK-CHAR" (args result-reg ctx)
@@ -142,7 +123,11 @@
 ;; FR-673: terpri / fresh-line — optional stream argument
 ;; 0-arg: existing vm-terpri-inst / vm-fresh-line-inst (default stdout)
 ;; 1-arg: emit vm-write-char #\Newline to given stream
-(define-phase2-handler "TERPRI" (args result-reg ctx)
+
+(defun %compile-newline-handler (args result-reg ctx default-inst-thunk)
+  "Common logic for TERPRI and FRESH-LINE.
+   1-arg: write #\\Newline to given stream.
+   0-arg: emit DEFAULT-INST-THUNK () → default-stdout instruction."
   (if args
       (let ((handle-reg (compile-ast (first args) ctx))
             (char-reg   (make-register ctx)))
@@ -150,25 +135,27 @@
         (emit ctx (make-vm-write-char :handle handle-reg :char char-reg))
         (emit ctx (make-vm-const :dst result-reg :value nil))
         result-reg)
-      (progn (emit ctx (make-vm-terpri-inst))
-             (emit ctx (make-vm-const :dst result-reg :value nil))
-             result-reg)))
+      (progn
+        (emit ctx (funcall default-inst-thunk))
+        (emit ctx (make-vm-const :dst result-reg :value nil))
+        result-reg)))
+
+(define-phase2-handler "TERPRI"    (args result-reg ctx)
+  (%compile-newline-handler args result-reg ctx #'make-vm-terpri-inst))
 
 (define-phase2-handler "FRESH-LINE" (args result-reg ctx)
-  (if args
-      (let ((handle-reg (compile-ast (first args) ctx))
-            (char-reg   (make-register ctx)))
-        (emit ctx (make-vm-const :dst char-reg :value #\Newline))
-        (emit ctx (make-vm-write-char :handle handle-reg :char char-reg))
-        (emit ctx (make-vm-const :dst result-reg :value nil))
-        result-reg)
-      (progn (emit ctx (make-vm-fresh-line-inst))
-             (emit ctx (make-vm-const :dst result-reg :value nil))
-             result-reg)))
+  (%compile-newline-handler args result-reg ctx #'make-vm-fresh-line-inst))
 
 ;; FR-666: print / prin1 / princ — optional stream argument
 ;; 1-arg: existing vm-print-inst / vm-prin1 / vm-princ (default stdout)
 ;; 2-arg: write-to-string then vm-stream-write-string-inst to given stream
+
+(defparameter *print-mode-stdout-constructors*
+  '((:print  . make-vm-print-inst)
+    (:prin1  . make-vm-prin1)
+    (:princ  . make-vm-princ))
+  "Alist mapping print mode keyword to its 1-arg (stdout) VM instruction constructor.")
+
 (defun %emit-print-to-stream (mode args result-reg ctx)
   "Emit print/prin1/princ to an optional stream.
 MODE is :print, :prin1, or :princ.  ARGS is (obj) or (obj stream).
@@ -180,25 +167,23 @@ Returns register holding the printed object (ANSI: print returns its argument)."
         (let* ((raw-str-reg (make-register ctx))
                (stream-reg  (compile-ast (second args) ctx))
                (out-str-reg (if (eq mode :print)
-                                ;; :print prepends newline to the repr
+                                ;; :print prepends newline before the repr
                                 (let ((nl-reg   (make-register ctx))
                                       (full-reg (make-register ctx)))
                                   (emit ctx (make-vm-write-to-string-inst :dst raw-str-reg :src obj-reg))
                                   (emit ctx (make-vm-const :dst nl-reg :value (string #\Newline)))
                                   (emit ctx (make-vm-concatenate :dst full-reg :str1 nl-reg :str2 raw-str-reg))
                                   full-reg)
-                                ;; :princ/:prin1: just the write-to-string repr
+                                ;; :princ/:prin1: bare write-to-string repr
                                 (progn
                                   (emit ctx (make-vm-write-to-string-inst :dst raw-str-reg :src obj-reg))
                                   raw-str-reg))))
           (emit ctx (make-vm-stream-write-string-inst :stream-reg stream-reg :src out-str-reg))
           obj-reg)   ; ANSI: print/prin1/princ return the object
-        ;; 1-arg form: existing instructions (return obj-reg)
-        (progn (ecase mode
-                 (:print  (emit ctx (make-vm-print-inst :src obj-reg)))
-                 (:prin1  (emit ctx (make-vm-prin1 :src obj-reg)))
-                 (:princ  (emit ctx (make-vm-princ :src obj-reg))))
-               obj-reg))))
+        ;; 1-arg form: table-driven constructor dispatch
+        (let ((ctor (cdr (assoc mode *print-mode-stdout-constructors*))))
+          (emit ctx (funcall ctor :src obj-reg))
+          obj-reg))))
 
 (define-phase2-handler "PRINT" (args result-reg ctx)
   (%emit-print-to-stream :print args result-reg ctx))
@@ -240,58 +225,64 @@ Returns register holding the printed object (ANSI: print returns its argument)."
     result-reg))
 
 ;; format: destination dispatch — nil (string), t (stdout), stream
+;;
+;; %emit-format-result-to-dest handles the output routing.
+;; GET-STR-REG is a continuation: (ctx) → str-reg, called to produce the string.
+;; This eliminates the repeated nil/t/stream cond in both the const and dynamic paths.
+(defun %emit-format-result-to-dest (dest-sym dest-arg get-str-reg result-reg ctx)
+  "Route a formatted string to its destination.
+DEST-SYM: nil (return string), t (print to stdout), or :stream (write to stream).
+GET-STR-REG: a (ctx) → str-reg continuation producing the string register.
+Emits instructions and returns RESULT-REG."
+  (cond
+    ((null dest-sym)
+     ;; (format nil ...) — return the string directly
+     (let ((str-reg (funcall get-str-reg ctx)))
+       (emit ctx (make-vm-move :dst result-reg :src str-reg))))
+    ((eq dest-sym t)
+     ;; (format t ...) — print to stdout, return nil
+     (let ((str-reg (funcall get-str-reg ctx)))
+       (emit ctx (make-vm-princ :src str-reg))
+       (emit ctx (make-vm-const :dst result-reg :value nil))))
+    (t
+     ;; (format stream ...) — write to named stream, return nil
+     (let ((str-reg    (funcall get-str-reg ctx))
+           (stream-reg (compile-ast dest-arg ctx)))
+       (emit ctx (make-vm-stream-write-string-inst :stream-reg stream-reg :src str-reg))
+       (emit ctx (make-vm-const :dst result-reg :value nil)))))
+  result-reg)
+
 (define-phase2-handler "FORMAT" (args result-reg ctx)
   (when (>= (length args) 2)
-    (let* ((dest-arg (first args))
-           (fmt-arg (second args))
+    (let* ((dest-arg        (first args))
+           (fmt-arg         (second args))
            (format-arg-regs (mapcar (lambda (a) (compile-ast a ctx)) (cddr args)))
-           (dest-sym (cond ((and (typep dest-arg 'ast-var)
-                                 (member (ast-var-name dest-arg) '(nil t)))
-                            (ast-var-name dest-arg))
-                           ((typep dest-arg 'ast-quote)
-                            (ast-quote-value dest-arg))
-                           (t :stream))))
-      (cond
-        ((and (null format-arg-regs)
-              (typep fmt-arg 'ast-quote)
-              (stringp (ast-quote-value fmt-arg)))
-         (let ((fmt-value (ast-quote-value fmt-arg)))
-           (cond
-             ((null dest-sym)
-              (emit ctx (make-vm-const :dst result-reg :value fmt-value)))
-             ((eq dest-sym t)
-              (let ((str-reg (make-register ctx)))
-                (emit ctx (make-vm-const :dst str-reg :value fmt-value))
-                (emit ctx (make-vm-princ :src str-reg))
-                (emit ctx (make-vm-const :dst result-reg :value nil))))
-             (t
-              (let ((str-reg (make-register ctx))
-                    (stream-reg (compile-ast dest-arg ctx)))
-                (emit ctx (make-vm-const :dst str-reg :value fmt-value))
-                (emit ctx (make-vm-stream-write-string-inst :stream-reg stream-reg :src str-reg))
-                (emit ctx (make-vm-const :dst result-reg :value nil)))))))
-        ((null dest-sym)
-         ;; (format nil ...) → return the string
-         (let ((fmt-reg (compile-ast fmt-arg ctx)))
-           (emit ctx (make-vm-format-inst :dst result-reg :fmt fmt-reg
-                                          :arg-regs format-arg-regs))))
-        ((eq dest-sym t)
-         ;; (format t ...) → print to stdout, return nil
-         (let ((fmt-reg (compile-ast fmt-arg ctx))
-               (str-reg (make-register ctx)))
-           (emit ctx (make-vm-format-inst :dst str-reg :fmt fmt-reg
-                                          :arg-regs format-arg-regs))
-           (emit ctx (make-vm-princ :src str-reg))
-           (emit ctx (make-vm-const :dst result-reg :value nil))))
-        (t
-         ;; (format stream ...) → write to stream, return nil
-         (let ((fmt-reg (compile-ast fmt-arg ctx))
-               (str-reg (make-register ctx))
-               (stream-reg (compile-ast dest-arg ctx)))
-           (emit ctx (make-vm-format-inst :dst str-reg :fmt fmt-reg
-                                          :arg-regs format-arg-regs))
-           (emit ctx (make-vm-stream-write-string-inst :stream-reg stream-reg :src str-reg))
-           (emit ctx (make-vm-const :dst result-reg :value nil)))))
+           (dest-sym        (cond ((and (typep dest-arg 'ast-var)
+                                        (member (ast-var-name dest-arg) '(nil t)))
+                                   (ast-var-name dest-arg))
+                                  ((typep dest-arg 'ast-quote)
+                                   (ast-quote-value dest-arg))
+                                  (t :stream))))
+      (if (and (null format-arg-regs)
+               (typep fmt-arg 'ast-quote)
+               (stringp (ast-quote-value fmt-arg)))
+          ;; Constant format string, no args — emit a string constant
+          (let ((fmt-value (ast-quote-value fmt-arg)))
+            (%emit-format-result-to-dest
+             dest-sym dest-arg
+             (lambda (ctx) (let ((r (make-register ctx)))
+                             (emit ctx (make-vm-const :dst r :value fmt-value))
+                             r))
+             result-reg ctx))
+          ;; Dynamic format — compile fmt + args, call vm-format-inst
+          (%emit-format-result-to-dest
+           dest-sym dest-arg
+           (lambda (ctx) (let ((fmt-reg (compile-ast fmt-arg ctx))
+                                (str-reg (make-register ctx)))
+                           (emit ctx (make-vm-format-inst :dst str-reg :fmt fmt-reg
+                                                          :arg-regs format-arg-regs))
+                           str-reg))
+           result-reg ctx))
       result-reg)))
 
 ;; open: parse :direction keyword arg

@@ -6,13 +6,15 @@
 
 (in-suite macros-restarts-suite)
 
-(deftest macros-restarts-lookup-expands
-  "FIND-RESTART and COMPUTE-RESTARTS expand to the active restart forms."
-  (assert-eq 'let (car (our-macroexpand-1 '(find-restart 'my-restart))))
-  (assert-eq 'cl-cc::*%active-restarts* (our-macroexpand-1 '(compute-restarts))))
+(deftest-each macros-restarts-control-expansion
+  "Restart control forms expand to their expected top-level operators."
+  :cases (("find-restart"    '(find-restart 'my-restart) 'let)
+          ("invoke-restart"  '(invoke-restart 'my-restart) 'let*)
+          ("abort"           '(abort)                      'let)
+          ("restart-name"    '(restart-name r)             'if))
+  (form expected-car)
+  (assert-eq expected-car (car (our-macroexpand-1 form))))
 
-(deftest macros-restarts-control-expands
-  "INVOKE-RESTART, ABORT, and RESTART-NAME expand to control forms."
-  (assert-eq 'let* (car (our-macroexpand-1 '(invoke-restart 'my-restart))))
-  (assert-eq 'let (car (our-macroexpand-1 '(abort))))
-  (assert-eq 'if (car (our-macroexpand-1 '(restart-name r)))))
+(deftest macros-restarts-compute-restarts-expands
+  "COMPUTE-RESTARTS expands to the active-restarts dynamic variable directly."
+  (assert-eq 'cl-cc::*%active-restarts* (our-macroexpand-1 '(compute-restarts))))

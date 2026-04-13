@@ -58,9 +58,11 @@
 
 ;;; ─── Pretty-printing ──────────────────────────────────────────────────────
 
+(defparameter *mult-to-string-table*
+  '((:zero . "0") (:one . "1") (:omega . "ω"))
+  "Alist mapping multiplicity keyword to its human-readable string.")
+
 (defun mult-to-string (q)
   "Human-readable grade."
-  (ecase q
-    (:zero  "0")
-    (:one   "1")
-    (:omega "ω")))
+  (or (cdr (assoc q *mult-to-string-table*))
+      (error "Invalid multiplicity: ~S" q)))

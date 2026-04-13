@@ -4,69 +4,67 @@
 
 (defsuite predicate-suite
   :description "Predicate macro expansion tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-integration-suite)
 
 (in-suite predicate-suite)
 
-(deftest find-if-not-delegates-to-find-if-complement
-  "FIND-IF-NOT expands to (find-if (complement pred) list)."
-  (let ((result (our-macroexpand-1 '(find-if-not pred lst))))
-    (assert-eq (car result) 'find-if)
-    (assert-eq (caadr result) 'complement)))
+(deftest-each predicate-not-delegates-via-complement
+  "Each -NOT predicate expands to the base form with (complement pred) as the first arg."
+  :cases (("find-if-not"     'find-if     '(find-if-not pred lst))
+          ("position-if-not" 'position-if '(position-if-not pred lst))
+          ("count-if-not"    'count-if    '(count-if-not pred lst))
+          ("rassoc-if-not"   'rassoc-if   '(rassoc-if-not pred alist))
+          ("assoc-if-not"    'assoc-if    '(assoc-if-not pred alist)))
+  (base-op form)
+  (let ((result (our-macroexpand-1 form)))
+    (assert-eq base-op (car result))
+    (assert-eq 'complement (caadr result))))
 
-(deftest find-if-not-runtime
-  "FIND-IF-NOT returns first element not satisfying predicate."
-  (assert-equal (run-string "(find-if-not #'oddp '(1 3 4 5 6))") 4)
-  (assert-eq    (run-string "(find-if-not #'numberp '(1 2 3))") nil))
+(deftest-each find-if-not-runtime
+  "FIND-IF-NOT returns first element not satisfying predicate; nil when all satisfy."
+  :cases (("found"     "(find-if-not #'oddp '(1 3 4 5 6))"  4)
+          ("not-found" "(find-if-not #'numberp '(1 2 3))"   nil))
+  (form expected)
+  (assert-equal expected (run-string form)))
 
-(deftest position-if-outer-is-let
-  "POSITION-IF expands to a LET binding the predicate."
-  (assert-eq (car (our-macroexpand-1 '(position-if pred lst))) 'let))
-
-(deftest position-if-body-is-block
-  "POSITION-IF body is a BLOCK NIL for early RETURN."
+(deftest position-if-expansion-structure
+  "POSITION-IF expands to LET; body is BLOCK NIL for early RETURN."
   (let* ((result (our-macroexpand-1 '(position-if pred lst)))
          (body   (caddr result)))
-    (assert-eq (car body) 'block)
-    (assert-eq (second body) nil)))
+    (assert-eq 'let   (car result))
+    (assert-eq 'block (car body))
+    (assert-eq nil    (second body))))
 
-(deftest position-if-runtime
-  "POSITION-IF returns the 0-based index of first matching element."
-  (assert-= (run-string "(position-if #'evenp '(1 3 4 7 8))") 2)
-  (assert-eq (run-string "(position-if #'evenp '(1 3 5))") nil))
+(deftest-each position-if-runtime
+  "POSITION-IF returns the 0-based index of first matching element; nil when not found."
+  :cases (("found"     "(position-if #'evenp '(1 3 4 7 8))"  2)
+          ("not-found" "(position-if #'evenp '(1 3 5))"       nil))
+  (form expected)
+  (assert-equal expected (run-string form)))
 
-(deftest position-if-not-delegates-to-position-if-complement
-  "POSITION-IF-NOT expands to (position-if (complement pred) list)."
-  (let ((result (our-macroexpand-1 '(position-if-not pred lst))))
-    (assert-eq (car result) 'position-if)
-    (assert-eq (caadr result) 'complement)))
 
-(deftest position-if-not-runtime
-  "POSITION-IF-NOT returns index of first element not satisfying predicate."
-  (assert-= (run-string "(position-if-not #'oddp '(1 3 4 5))") 2)
-  (assert-eq (run-string "(position-if-not #'oddp '(1 3 5))") nil))
+(deftest-each position-if-not-runtime
+  "POSITION-IF-NOT returns index of first element not satisfying predicate; nil when all satisfy."
+  :cases (("found"     "(position-if-not #'oddp '(1 3 4 5))"  2)
+          ("not-found" "(position-if-not #'oddp '(1 3 5))"    nil))
+  (form expected)
+  (assert-equal expected (run-string form)))
 
-(deftest count-if-not-delegates-to-count-if-complement
-  "COUNT-IF-NOT expands to (count-if (complement pred) list)."
-  (let ((result (our-macroexpand-1 '(count-if-not pred lst))))
-    (assert-eq (car result) 'count-if)
-    (assert-eq (caadr result) 'complement)))
 
-(deftest count-if-not-runtime
+(deftest-each count-if-not-runtime
   "COUNT-IF-NOT counts elements not satisfying predicate."
-  (assert-= (run-string "(count-if-not #'oddp '(1 2 3 4 5))") 2)
-  (assert-= (run-string "(count-if-not #'numberp '())") 0))
+  :cases (("some"  "(count-if-not #'oddp '(1 2 3 4 5))"   2)
+          ("empty" "(count-if-not #'numberp '())"           0))
+  (form expected)
+  (assert-= expected (run-string form)))
 
-(deftest remove-if-with-key
-  "REMOVE-IF with :key applies key before predicate."
-  (let ((result (our-macroexpand-1 '(remove-if #'oddp lst :key #'car))))
-    (assert-eq (car result) 'let)
-    (assert-true (> (length (cadr result)) 1))))
-
-(deftest remove-if-not-with-key
-  "REMOVE-IF-NOT with :key applies key before predicate."
-  (let ((result (our-macroexpand-1 '(remove-if-not #'evenp lst :key #'car))))
-    (assert-eq (car result) 'let)
+(deftest-each remove-if-key-expansion
+  "REMOVE-IF and REMOVE-IF-NOT with :key both expand to a multi-binding LET form."
+  :cases (("remove-if"     '(remove-if #'oddp lst :key #'car))
+          ("remove-if-not" '(remove-if-not #'evenp lst :key #'car)))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
+    (assert-eq 'let (car result))
     (assert-true (> (length (cadr result)) 1))))
 
 (deftest find-if-not-with-key
@@ -85,9 +83,12 @@
   (let ((result (our-macroexpand-1 '(count-if-not #'oddp lst :key #'car))))
     (assert-eq (car result) 'count-if)))
 
-(deftest rassoc-if-outer-is-let
-  "RASSOC-IF expands to a LET binding the predicate."
-  (assert-eq (car (our-macroexpand-1 '(rassoc-if pred alist))) 'let))
+(deftest-each predicate-if-outer-is-let
+  "RASSOC-IF and ASSOC-IF both expand to LET forms binding the predicate."
+  :cases (("rassoc-if" '(rassoc-if pred alist))
+          ("assoc-if"  '(assoc-if pred alist)))
+  (form)
+  (assert-eq 'let (car (our-macroexpand-1 form))))
 
 (deftest rassoc-if-body-checks-cdr
   "RASSOC-IF body DOLIST applies predicate to (cdr pair)."
@@ -101,25 +102,21 @@
     (assert-eq (car funcall-form) 'funcall)
     (assert-eq (car cdr-arg) 'cdr)))
 
-(deftest rassoc-if-not-delegates-to-rassoc-if-complement
-  "RASSOC-IF-NOT expands to (rassoc-if (complement pred) alist)."
-  (let ((result (our-macroexpand-1 '(rassoc-if-not pred alist))))
-    (assert-eq (car result) 'rassoc-if)
-    (assert-eq (caadr result) 'complement)))
 
-(deftest member-if-runtime
-  "MEMBER-IF returns the tail starting at first satisfying element."
-  (assert-equal (run-string "(member-if #'evenp '(1 3 4 5 6))") '(4 5 6))
-  (assert-eq (run-string "(member-if #'evenp '(1 3 5))") nil))
+(deftest-each member-if-runtime
+  "MEMBER-IF returns the tail starting at first satisfying element; nil when not found."
+  :cases (("found"     "(member-if #'evenp '(1 3 4 5 6))"  '(4 5 6))
+          ("not-found" "(member-if #'evenp '(1 3 5))"       nil))
+  (form expected)
+  (assert-equal expected (run-string form)))
 
-(deftest member-if-not-runtime
-  "MEMBER-IF-NOT returns tail starting at first non-matching element."
-  (assert-equal (run-string "(member-if-not #'oddp '(1 3 4 5))") '(4 5))
-  (assert-eq (run-string "(member-if-not #'oddp '(1 3 5))") nil))
+(deftest-each member-if-not-runtime
+  "MEMBER-IF-NOT returns tail starting at first non-matching element; nil when all satisfy."
+  :cases (("found"     "(member-if-not #'oddp '(1 3 4 5))"  '(4 5))
+          ("not-found" "(member-if-not #'oddp '(1 3 5))"    nil))
+  (form expected)
+  (assert-equal expected (run-string form)))
 
-(deftest assoc-if-outer-is-let
-  "ASSOC-IF expands to a LET binding the predicate."
-  (assert-eq (car (our-macroexpand-1 '(assoc-if pred alist))) 'let))
 
 (deftest assoc-if-body-is-dolist
   "ASSOC-IF body is a DOLIST (linear scan)."
@@ -127,33 +124,28 @@
          (body   (caddr result)))
     (assert-eq (car body) 'dolist)))
 
-(deftest assoc-if-not-delegates-to-assoc-if-complement
-  "ASSOC-IF-NOT expands to (assoc-if (complement pred) alist)."
-  (let ((result (our-macroexpand-1 '(assoc-if-not pred alist))))
-    (assert-eq (car result) 'assoc-if)
-    (assert-eq (caadr result) 'complement)))
 
-(deftest assoc-if-runtime
-  "ASSOC-IF returns first pair whose car satisfies predicate."
-  (assert-= (run-string "(car (assoc-if #'evenp '((1 . 10) (2 . 20) (3 . 30))))") 2)
-  (assert-eq (run-string "(assoc-if #'evenp '((1 . 10) (3 . 30)))") nil))
+(deftest-each assoc-if-runtime
+  "ASSOC-IF returns first pair whose car satisfies predicate; nil when not found."
+  :cases (("found"     "(car (assoc-if #'evenp '((1 . 10) (2 . 20) (3 . 30))))"  2)
+          ("not-found" "(assoc-if #'evenp '((1 . 10) (3 . 30)))"                  nil))
+  (form expected)
+  (assert-equal expected (run-string form)))
 
-(deftest assoc-if-not-runtime
-  "ASSOC-IF-NOT returns first pair whose car does NOT satisfy predicate."
-  (assert-= (run-string "(car (assoc-if-not #'evenp '((2 . 20) (3 . 30))))") 3)
-  (assert-eq (run-string "(assoc-if-not #'evenp '((2 . 20) (4 . 40)))") nil))
+(deftest-each assoc-if-not-runtime
+  "ASSOC-IF-NOT returns first pair whose car does NOT satisfy predicate; nil when all satisfy."
+  :cases (("found"     "(car (assoc-if-not #'evenp '((2 . 20) (3 . 30))))"  3)
+          ("not-found" "(assoc-if-not #'evenp '((2 . 20) (4 . 40)))"         nil))
+  (form expected)
+  (assert-equal expected (run-string form)))
 
-(deftest complement-outer-is-let
-  "COMPLEMENT expands to a LET binding the predicate, returning a lambda."
-  (let* ((result (our-macroexpand-1 '(complement pred)))
-         (body (caddr result)))
-    (assert-eq (car result) 'let)
-    (assert-eq (car body) 'lambda)))
-
-(deftest complement-lambda-applies-not
-  "COMPLEMENT lambda body applies NOT to the result of applying pred."
-  (let* ((result (our-macroexpand-1 '(complement pred)))
-         (lambda-body (caddr (caddr result)))
-         (not-form lambda-body))
-    (assert-eq (car not-form) 'not)
-    (assert-eq (caadr not-form) 'apply)))
+(deftest complement-expansion-structure
+  "COMPLEMENT expands to LET+lambda; the lambda body applies NOT to the pred via APPLY."
+  (let* ((result      (our-macroexpand-1 '(complement pred)))
+         (lambda-form (caddr result))
+         (lambda-body (caddr lambda-form))
+         (not-form    lambda-body))
+    (assert-eq 'let    (car result))
+    (assert-eq 'lambda (car lambda-form))
+    (assert-eq 'not    (car not-form))
+    (assert-eq 'apply  (caadr not-form))))

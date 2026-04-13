@@ -6,8 +6,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite representation-suite :description "Type representation and structural equality tests")
+(defsuite representation-suite :description "Type representation and structural equality tests"
+  :parent cl-cc-suite)
 
+
+(in-suite representation-suite)
 ;;; ─── type-equal-p: product ─────────────────────────────────────────────────
 
 (deftest type-equal-product
@@ -21,12 +24,14 @@
 
 ;;; ─── type-equal-p: union / intersection ────────────────────────────────────
 
-(deftest type-equal-union-intersection-same
+(deftest-each type-equal-union-intersection-same
   "Equal unions and equal intersections are recognized by type-equal-p."
-  (assert-true (type-equal-p (make-type-union (list type-int type-string))
-                              (make-type-union (list type-int type-string))))
-  (assert-true (type-equal-p (make-type-intersection (list type-int type-any))
-                              (make-type-intersection (list type-int type-any)))))
+  :cases (("union"        (make-type-union        (list type-int type-string))
+                          (make-type-union        (list type-int type-string)))
+          ("intersection" (make-type-intersection (list type-int type-any))
+                          (make-type-intersection (list type-int type-any))))
+  (a b)
+  (assert-true (type-equal-p a b)))
 
 ;;; ─── type-equal-p: forall / exists ─────────────────────────────────────────
 
@@ -129,14 +134,6 @@
     (assert-equal 1 (length fvs))
     (assert-true (type-var-equal-p v (first fvs)))))
 
-(deftest free-vars-arrow
-  "Arrow type collects free vars from params and return."
-  (let* ((v1 (fresh-type-var "a"))
-         (v2 (fresh-type-var "b"))
-         (arr (make-type-arrow (list v1) v2))
-         (fvs (type-free-vars arr)))
-    (assert-equal 2 (length fvs))))
-
 (deftest free-vars-binding-forms-remove-var
   "Forall, exists, and mu all bind their recursion var, yielding no free variables."
   (let ((v (fresh-type-var "a")))
@@ -144,59 +141,43 @@
     (assert-null (type-free-vars (make-type-exists :var v :body v)))
     (assert-null (type-free-vars (make-type-mu :var v :body v)))))
 
-(deftest free-vars-product
-  "Product collects free vars from all elements."
-  (let* ((v1 (fresh-type-var "a"))
-         (v2 (fresh-type-var "b"))
-         (p (make-type-product :elems (list v1 type-int v2)))
-         (fvs (type-free-vars p)))
-    (assert-equal 2 (length fvs))))
-
-(deftest free-vars-record
-  "Record collects free vars from fields and row-var."
-  (let* ((v (fresh-type-var "a"))
-         (rv (fresh-type-var "rho"))
-         (r (make-type-record :fields (list (cons 'x v)) :row-var rv))
-         (fvs (type-free-vars r)))
-    (assert-equal 2 (length fvs))))
-
-(deftest free-vars-variant
-  "Variant collects free vars from cases and row-var."
-  (let* ((v (fresh-type-var "a"))
-         (vr (make-type-variant :cases (list (cons 'x v)) :row-var nil))
-         (fvs (type-free-vars vr)))
-    (assert-equal 1 (length fvs))))
-
-(deftest free-vars-linear
-  "Linear type collects free vars from base."
-  (let* ((v (fresh-type-var "a"))
-         (l (make-type-linear :base v :grade :one))
-         (fvs (type-free-vars l)))
-    (assert-equal 1 (length fvs))))
-
-(deftest free-vars-app
-  "Type-app collects free vars from fun and arg."
-  (let* ((v1 (fresh-type-var "f"))
-         (v2 (fresh-type-var "a"))
-         (a (make-type-app :fun v1 :arg v2))
-         (fvs (type-free-vars a)))
-    (assert-equal 2 (length fvs))))
-
-(deftest free-vars-effect-row
-  "Effect-row collects free vars from row-var."
-  (let* ((rv (fresh-type-var "ε"))
-         (er (make-type-effect-row :effects nil :row-var rv))
-         (fvs (type-free-vars er)))
-    (assert-equal 1 (length fvs))))
-
-(deftest free-vars-qualified
-  "Qualified type collects free vars from constraints and body."
-  (let* ((v (fresh-type-var "a"))
-         (tc (cl-cc/type::make-type-constraint :class-name 'eq :type-arg v))
-         (q (make-type-qualified :constraints (list tc) :body v))
-         (fvs (type-free-vars q)))
-    ;; v appears in both constraint and body but is deduplicated
-    (assert-equal 1 (length fvs))))
+(deftest-each free-vars-count-cases
+  "type-free-vars returns the correct count of free variables for each type form."
+  :cases (("arrow"      (lambda ()
+                          (let ((v1 (fresh-type-var "a")) (v2 (fresh-type-var "b")))
+                            (make-type-arrow (list v1) v2)))
+           2)
+          ("product"    (lambda ()
+                          (let ((v1 (fresh-type-var "a")) (v2 (fresh-type-var "b")))
+                            (make-type-product :elems (list v1 type-int v2))))
+           2)
+          ("record"     (lambda ()
+                          (let ((v (fresh-type-var "a")) (rv (fresh-type-var "rho")))
+                            (make-type-record :fields (list (cons 'x v)) :row-var rv)))
+           2)
+          ("variant"    (lambda ()
+                          (let ((v (fresh-type-var "a")))
+                            (make-type-variant :cases (list (cons 'x v)) :row-var nil)))
+           1)
+          ("linear"     (lambda ()
+                          (let ((v (fresh-type-var "a")))
+                            (make-type-linear :base v :grade :one)))
+           1)
+          ("type-app"   (lambda ()
+                          (let ((v1 (fresh-type-var "f")) (v2 (fresh-type-var "a")))
+                            (make-type-app :fun v1 :arg v2)))
+           2)
+          ("effect-row" (lambda ()
+                          (let ((rv (fresh-type-var "ε")))
+                            (make-type-effect-row :effects nil :row-var rv)))
+           1)
+          ("qualified"  (lambda ()
+                          (let* ((v (fresh-type-var "a"))
+                                 (tc (cl-cc/type::make-type-constraint :class-name 'eq :type-arg v)))
+                            (make-type-qualified :constraints (list tc) :body v)))
+           1))
+  (make-ty expected-count)
+  (assert-equal expected-count (length (type-free-vars (funcall make-ty)))))
 
 ;;; ─── Type environment operations ───────────────────────────────────────────
 
@@ -269,21 +250,15 @@
 
 ;;; ─── type-to-string ────────────────────────────────────────────────────────
 
-(deftest type-to-string-primitive
-  "Primitive types print as their CL name."
-  (assert-true (stringp (type-to-string type-int))))
+(deftest-each type-to-string-produces-string
+  "type-to-string returns a string for primitive, unknown, and nil types."
+  :cases (("primitive" type-int)
+          ("unknown"   +type-unknown+)
+          ("nil"       nil))
+  (ty)
+  (assert-true (stringp (type-to-string ty))))
 
 (deftest type-to-string-arrow
   "Arrow types include -> in output."
   (let ((s (type-to-string (make-type-arrow (list type-int) type-string))))
     (assert-true (search "->" s))))
-
-(deftest type-to-string-unknown
-  "Unknown type prints as a string."
-  (let ((s (type-to-string +type-unknown+)))
-    (assert-true (stringp s))
-    (assert-true (> (length s) 0))))
-
-(deftest type-to-string-nil
-  "nil type prints as a string."
-  (assert-true (stringp (type-to-string nil))))

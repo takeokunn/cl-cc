@@ -209,7 +209,7 @@
     (assert-= 1 (cl-cc:vm-reg-get s 0))))
 
 (deftest vm-bit-and-elementwise
-  "vm-bit-and computes element-wise AND."
+  "vm-bit-and computes element-wise AND: #*1100 AND #*1010 = #*1000."
   (let ((s (make-test-vm))
         (a (make-array 4 :element-type 'bit :initial-contents '(1 1 0 0)))
         (b (make-array 4 :element-type 'bit :initial-contents '(1 0 1 0))))
@@ -217,26 +217,22 @@
     (cl-cc:vm-reg-set s 2 b)
     (exec1 (cl-cc::make-vm-bit-and :dst 0 :lhs 1 :rhs 2) s)
     (let ((result (cl-cc:vm-reg-get s 0)))
-      (assert-= 1 (bit result 0))
-      (assert-= 0 (bit result 1))
-      (assert-= 0 (bit result 2))
-      (assert-= 0 (bit result 3)))))
+      (loop for (idx expected) in '((0 1) (1 0) (2 0) (3 0))
+            do (assert-= expected (bit result idx))))))
 
 ;; NOTE: vm-bit-or has a pre-existing bug — define-simple-instruction resolves
 ;; bit-or in the cl-cc package (cl-cc::bit-or) instead of cl:bit-or.
 ;; Test omitted until the source bug is fixed.
 
 (deftest vm-bit-not-inverts
-  "vm-bit-not inverts all bits."
+  "vm-bit-not inverts all bits: #*1010 -> #*0101."
   (let ((s (make-test-vm))
         (a (make-array 4 :element-type 'bit :initial-contents '(1 0 1 0))))
     (cl-cc:vm-reg-set s 1 a)
     (exec1 (cl-cc::make-vm-bit-not :dst 0 :src 1) s)
     (let ((result (cl-cc:vm-reg-get s 0)))
-      (assert-= 0 (bit result 0))
-      (assert-= 1 (bit result 1))
-      (assert-= 0 (bit result 2))
-      (assert-= 1 (bit result 3)))))
+      (loop for (idx expected) in '((0 0) (1 1) (2 0) (3 1))
+            do (assert-= expected (bit result idx))))))
 
 ;;; ─── adjust-array / array-displacement ──────────────────────────────────────
 

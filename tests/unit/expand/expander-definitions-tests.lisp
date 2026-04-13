@@ -25,8 +25,8 @@
       (assert-eq updater (car result))
       (assert-equal '(obj arg value) (cdr result)))))
 
-(deftest expander-defconstant-to-defparameter
-  "defconstant expands to defparameter."
+(deftest expander-defconstant-populates-constant-table
+  "defconstant side-effect: value is stored in *constant-table* for constant folding."
   (let ((result (cl-cc::compiler-macroexpand-all '(defconstant +expander-def-constant+ 42))))
     (assert-eq 'defparameter (car result))
     (assert-equal 42 (third result))

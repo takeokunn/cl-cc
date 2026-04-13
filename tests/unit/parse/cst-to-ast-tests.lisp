@@ -5,8 +5,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite cst-to-ast-suite :description "CST-to-AST lowering unit tests")
+(defsuite cst-to-ast-suite :description "CST-to-AST lowering unit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite cst-to-ast-suite)
 ;;; ─── lower-cst-to-ast ──────────────────────────────────────────────────────
 
 (deftest cst-ast-nil-input

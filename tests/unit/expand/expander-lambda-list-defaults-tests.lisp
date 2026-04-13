@@ -4,8 +4,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite expander-lambda-list-defaults-suite :description "Lambda-list default expander unit tests")
+(defsuite expander-lambda-list-defaults-suite :description "Lambda-list default expander unit tests"
+  :parent cl-cc-suite)
 
+
+(in-suite expander-lambda-list-defaults-suite)
 (deftest lambda-list-no-defaults
   "expand-lambda-list-defaults passes through simple params."
   (assert-equal '(x y z) (cl-cc::expand-lambda-list-defaults '(x y z))))

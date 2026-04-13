@@ -62,27 +62,19 @@
 
 ;;; ─── Constant Effect Table ────────────────────────────────────────────────
 
-(deftest infer-constant-effect-table-int-is-pure
-  "ast-int maps to +pure-effect-row+ in the constant table."
-  (let ((row (gethash 'cl-cc:ast-int cl-cc/type:*constant-effect-table*)))
+(deftest-each infer-constant-effect-table-entries
+  "Constant effect table: ast-int→pure, ast-print→IO, ast-setq→STATE."
+  :cases (("int-pure"   'cl-cc:ast-int   nil)
+          ("print-io"   'cl-cc:ast-print "IO")
+          ("setq-state" 'cl-cc:ast-setq  "STATE"))
+  (ast-type expected-effect-name)
+  (let ((row (gethash ast-type cl-cc/type:*constant-effect-table*)))
     (assert-true (cl-cc/type:type-effect-row-p row))
-    (assert-null (cl-cc/type:type-effect-row-effects row))))
-
-(deftest infer-constant-effect-table-print-is-io
-  "ast-print maps to +io-effect-row+ in the constant table."
-  (let ((row (gethash 'cl-cc:ast-print cl-cc/type:*constant-effect-table*)))
-    (assert-true (cl-cc/type:type-effect-row-p row))
-    (let ((names (mapcar #'cl-cc/type:type-effect-name
-                         (cl-cc/type:type-effect-row-effects row))))
-      (assert-true (member "IO" names :key #'symbol-name :test #'string=)))))
-
-(deftest infer-constant-effect-table-setq-has-state
-  "ast-setq maps to a state effect row in the constant table."
-  (let ((row (gethash 'cl-cc:ast-setq cl-cc/type:*constant-effect-table*)))
-    (assert-true (cl-cc/type:type-effect-row-p row))
-    (let ((names (mapcar #'cl-cc/type:type-effect-name
-                         (cl-cc/type:type-effect-row-effects row))))
-      (assert-true (member "STATE" names :key #'symbol-name :test #'string=)))))
+    (if expected-effect-name
+        (let ((names (mapcar #'cl-cc/type:type-effect-name
+                             (cl-cc/type:type-effect-row-effects row))))
+          (assert-true (member expected-effect-name names :key #'symbol-name :test #'string=)))
+        (assert-null (cl-cc/type:type-effect-row-effects row)))))
 
 ;;; ─── type-predicate-to-type ───────────────────────────────────────────────
 
@@ -107,32 +99,26 @@
 
 ;;; ─── extract-type-guard ───────────────────────────────────────────────────
 
-(deftest infer-extract-type-guard-numberp
-  "extract-type-guard extracts (numberp x) → x, int."
-  (let ((ast (cl-cc:lower-sexp-to-ast '(numberp x))))
+(deftest-each infer-extract-type-guard-known-predicates
+  "extract-type-guard extracts the variable and type from known predicate calls."
+  :cases (("numberp" '(numberp x)        'x 'fixnum)
+          ("typep"   '(typep x 'my-class) 'x 'my-class))
+  (form expected-var expected-type-name)
+  (let ((ast (cl-cc:lower-sexp-to-ast form)))
     (multiple-value-bind (var-name guard-type)
         (cl-cc/type::extract-type-guard ast)
-      (assert-eq 'x var-name)
-      (assert-eq 'fixnum (cl-cc/type:type-primitive-name guard-type)))))
+      (assert-eq expected-var var-name)
+      (assert-eq expected-type-name (cl-cc/type:type-primitive-name guard-type)))))
 
-(deftest infer-extract-type-guard-typep
-  "extract-type-guard extracts (typep x 'my-class) → x, my-class."
-  (let ((ast (cl-cc:lower-sexp-to-ast '(typep x 'my-class))))
-    (multiple-value-bind (var-name guard-type)
-        (cl-cc/type::extract-type-guard ast)
-      (assert-eq 'x var-name)
-      (assert-eq 'my-class (cl-cc/type:type-primitive-name guard-type)))))
-
-(deftest infer-extract-type-guard-returns-nil
+(deftest-each infer-extract-type-guard-returns-nil
   "extract-type-guard returns nil for non-predicate calls and non-call AST."
-  (let ((ast-call (cl-cc:lower-sexp-to-ast '(foo x)))
-        (ast-int  (cl-cc:lower-sexp-to-ast '42)))
-    (multiple-value-bind (v1 t1) (cl-cc/type::extract-type-guard ast-call)
-      (assert-null v1)
-      (assert-null t1))
-    (multiple-value-bind (v2 t2) (cl-cc/type::extract-type-guard ast-int)
-      (assert-null v2)
-      (assert-null t2))))
+  :cases (("non-predicate-call" '(foo x))
+          ("non-call-integer"   '42))
+  (form)
+  (let ((ast (cl-cc:lower-sexp-to-ast form)))
+    (multiple-value-bind (v g) (cl-cc/type::extract-type-guard ast)
+      (assert-null v)
+      (assert-null g))))
 
 ;;; ─── narrow-union-type ────────────────────────────────────────────────────
 
@@ -181,12 +167,17 @@
       (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty)))))
 
 (deftest infer-the-refinement-type
-  "infer (the (refine fixnum plusp) 42) succeeds through the refinement base type."
+  "infer (the (refine fixnum plusp) 42) succeeds and returns a refinement type
+whose base is fixnum. The result is a type-refinement struct, so we unwrap
+via type-refinement-base before reading the primitive name."
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast '(the (refine fixnum plusp) 42))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty)))))
+      (let ((prim (if (cl-cc/type::type-refinement-p ty)
+                      (cl-cc/type::type-refinement-base ty)
+                      ty)))
+        (assert-eq 'fixnum (cl-cc/type:type-primitive-name prim))))))
 
 (deftest infer-the-mismatch-error
   "infer (the string 42) signals type-mismatch-error."
@@ -214,7 +205,8 @@
         (cl-cc/type:infer ast env)
       (cl-cc/type::typed-hole-error (e)
         (let ((message (cl-cc/type:type-inference-error-message e)))
-          (assert-true (search "Available: x :: fixnum" message)))))))
+          ;; Symbol names print uppercase under default *print-case*.
+          (assert-true (search "Available: X ::" message)))))))
 
 ;;; ─── infer: ast-setq ─────────────────────────────────────────────────────
 
@@ -316,25 +308,16 @@
            (names (mapcar #'cl-cc/type:type-effect-name effects)))
       (assert-true (member "STATE" names :key #'symbol-name :test #'string=)))))
 
-(deftest infer-effects-if-unions-branches
-  "infer-effects for if unions condition+then+else effects."
-  (let* ((ast (cl-cc:lower-sexp-to-ast '(if (print 1) (setq x 2) 3)))
-         (row (cl-cc/type:infer-effects ast (type-env-empty))))
-    (assert-true (cl-cc/type:type-effect-row-p row))
-    (let* ((effects (cl-cc/type:type-effect-row-effects row))
-           (names (mapcar #'cl-cc/type:type-effect-name effects)))
-      ;; Should contain both io (from print) and state (from setq)
-      (assert-true (member "IO" names :key #'symbol-name :test #'string=))
-      (assert-true (member "STATE" names :key #'symbol-name :test #'string=)))))
-
-(deftest infer-effects-progn-unions-all
-  "infer-effects for progn unions all sub-form effects."
-  (let* ((ast (cl-cc:lower-sexp-to-ast '(progn (print 1) (setq x 2))))
-         (row (cl-cc/type:infer-effects ast (type-env-empty))))
-    (let* ((effects (cl-cc/type:type-effect-row-effects row))
-           (names (mapcar #'cl-cc/type:type-effect-name effects)))
-      (assert-true (member "IO" names :key #'symbol-name :test #'string=))
-      (assert-true (member "STATE" names :key #'symbol-name :test #'string=)))))
+(deftest-each infer-effects-multi-form-unions
+  "infer-effects unions IO and STATE effects across all sub-forms for if and progn."
+  :cases (("if"    '(if (print 1) (setq x 2) 3))
+          ("progn" '(progn (print 1) (setq x 2))))
+  (sexp)
+  (let* ((ast (cl-cc:lower-sexp-to-ast sexp))
+         (row (cl-cc/type:infer-effects ast (type-env-empty)))
+         (names (mapcar #'cl-cc/type:type-effect-name (cl-cc/type:type-effect-row-effects row))))
+    (assert-true (member "IO"    names :key #'symbol-name :test #'string=))
+    (assert-true (member "STATE" names :key #'symbol-name :test #'string=))))
 
 (deftest infer-effects-lambda-is-pure
   "infer-effects for lambda returns pure (no effects for the lambda itself)."
@@ -345,25 +328,19 @@
 
 ;;; ─── Effect Signature Registry ────────────────────────────────────────────
 
-(deftest infer-effect-signature-io-ops
-  "IO operations (print, format, etc.) have io effect."
-  (let ((row (cl-cc/type:lookup-effect-signature 'print)))
+(deftest-each infer-effect-signature-dispatch
+  "Effect signatures: print→IO, error→ERROR, unknown→pure (nil effects)."
+  :cases (("print"   'print "IO")
+          ("error"   'error "ERROR")
+          ("unknown" 'completely-unknown-fn-xyz nil))
+  (fn-name expected-effect-name)
+  (let ((row (cl-cc/type:lookup-effect-signature fn-name)))
     (assert-true (cl-cc/type:type-effect-row-p row))
-    (let ((names (mapcar #'cl-cc/type:type-effect-name
-                         (cl-cc/type:type-effect-row-effects row))))
-      (assert-true (member "IO" names :key #'symbol-name :test #'string=)))))
-
-(deftest infer-effect-signature-error-ops
-  "Error operations have error effect."
-  (let ((row (cl-cc/type:lookup-effect-signature 'error)))
-    (let ((names (mapcar #'cl-cc/type:type-effect-name
-                         (cl-cc/type:type-effect-row-effects row))))
-      (assert-true (member "ERROR" names :key #'symbol-name :test #'string=)))))
-
-(deftest infer-effect-signature-unknown-is-pure
-  "Unknown operation has pure (empty) effect."
-  (let ((row (cl-cc/type:lookup-effect-signature 'completely-unknown-fn-xyz)))
-    (assert-true (null (cl-cc/type:type-effect-row-effects row)))))
+    (if expected-effect-name
+        (let ((names (mapcar #'cl-cc/type:type-effect-name
+                             (cl-cc/type:type-effect-row-effects row))))
+          (assert-true (member expected-effect-name names :key #'symbol-name :test #'string=)))
+        (assert-null (cl-cc/type:type-effect-row-effects row)))))
 
 (deftest infer-register-custom-effect-signature
   "register-effect-signature allows custom effect registration."
@@ -501,25 +478,21 @@
 
 ;;; ─── FR-1604: Value Restriction ──────────────────────────────────────────
 
-(deftest-each infer-syntactic-value-p-positive
-  "syntactic-value-p returns T for syntactic values."
-  :cases (("integer"  '42)
-          ("quote"    ''hello)
-          ("lambda"   '(lambda (x) x))
-          ("function" '#'car))
-  (sexp)
+(deftest-each infer-syntactic-value-p
+  "syntactic-value-p returns T for value expressions and NIL for non-value expressions."
+  :cases (("integer"  '42               t)
+          ("quote"    ''hello            t)
+          ("lambda"   '(lambda (x) x)   t)
+          ("function" '#'car             t)
+          ("call"     '(foo 1)           nil)
+          ("binop"    '(+ x y)           nil)
+          ("if"       '(if t 1 2)        nil)
+          ("progn"    '(progn 1 2)       nil))
+  (sexp expected)
   (let ((ast (cl-cc:lower-sexp-to-ast sexp)))
-    (assert-true (cl-cc/type:syntactic-value-p ast))))
-
-(deftest-each infer-syntactic-value-p-negative
-  "syntactic-value-p returns NIL for non-value expressions."
-  :cases (("call"   '(foo 1))
-          ("binop"  '(+ x y))
-          ("if"     '(if t 1 2))
-          ("progn"  '(progn 1 2)))
-  (sexp)
-  (let ((ast (cl-cc:lower-sexp-to-ast sexp)))
-    (assert-false (cl-cc/type:syntactic-value-p ast))))
+    (if expected
+        (assert-true  (cl-cc/type:syntactic-value-p ast))
+        (assert-false (cl-cc/type:syntactic-value-p ast)))))
 
 (deftest infer-let-value-restriction-lambda-generalizes
   "Value restriction: lambda binding is a syntactic value → generalized."

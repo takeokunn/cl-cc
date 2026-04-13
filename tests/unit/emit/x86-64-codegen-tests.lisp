@@ -7,8 +7,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite x86-64-codegen-suite :description "x86-64 machine code generation tests")
+(defsuite x86-64-codegen-suite :description "x86-64 machine code generation tests"
+  :parent cl-cc-suite)
 
+
+(in-suite x86-64-codegen-suite)
 ;;; ─── *vm-reg-map* ───────────────────────────────────────────────────────────
 
 (deftest x86-64-vm-reg-map-length

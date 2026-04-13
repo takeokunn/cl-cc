@@ -5,8 +5,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite combinator-suite :description "Parser combinator engine tests")
+(defsuite combinator-suite :description "Parser combinator engine tests"
+  :parent cl-cc-suite)
 
+
+(in-suite combinator-suite)
 ;;; ─── Helpers ──────────────────────────────────────────────────────────────
 
 (defun make-tok (type value)
@@ -21,10 +24,14 @@
 
 ;;; ─── Token Stream Protocol ──────────────────────────────────────────────────
 
-(deftest comb-stream-empty-p-behavior
-  "stream-empty-p returns true for nil and false for non-empty stream."
-  (assert-true (cl-cc::stream-empty-p nil))
-  (assert-false (cl-cc::stream-empty-p (toks :T-INT 1))))
+(deftest-each comb-stream-empty-p-behavior
+  "stream-empty-p: true for nil; false for non-empty stream."
+  :cases (("nil-stream"      nil          t)
+          ("non-empty-stream" (toks :T-INT 1) nil))
+  (stream expected)
+  (if expected
+      (assert-true  (cl-cc::stream-empty-p stream))
+      (assert-false (cl-cc::stream-empty-p stream))))
 
 (deftest comb-stream-peek
   "Peek returns first token without consuming."
@@ -66,15 +73,16 @@
 
 ;;; ─── parse-ok-p ─────────────────────────────────────────────────────────────
 
-(deftest comb-parse-ok-p-success
-  "parse-ok-p returns true for non-:fail values."
-  (assert-true (cl-cc::parse-ok-p 42))
-  (assert-true (cl-cc::parse-ok-p nil))
-  (assert-true (cl-cc::parse-ok-p '(1 2 3))))
-
-(deftest comb-parse-ok-p-fail
-  "parse-ok-p returns false for :fail."
-  (assert-false (cl-cc::parse-ok-p :fail)))
+(deftest-each comb-parse-ok-p-behavior
+  "parse-ok-p: true for non-:fail values (integer, nil, list); false for :fail."
+  :cases (("integer" 42       t)
+          ("nil"     nil      t)
+          ("list"    '(1 2 3) t)
+          ("fail"    :fail    nil))
+  (value expected)
+  (if expected
+      (assert-true  (cl-cc::parse-ok-p value))
+      (assert-false (cl-cc::parse-ok-p value))))
 
 ;;; ─── parse-token* ───────────────────────────────────────────────────────────
 
@@ -92,19 +100,15 @@
       (assert-equal "foo" ast)
       (assert-null rest))))
 
-(deftest comb-token-mismatch-cases
+(deftest-each comb-token-mismatch-cases
   "parse-token* returns :fail on type mismatch, value mismatch, and empty stream."
-  (let ((s (toks :T-INT 1)))
-    (multiple-value-bind (ast rest) (cl-cc::parse-token* :T-IDENT nil s)
-      (assert-equal :fail ast)
-      (assert-null rest)))
-  (let ((s (toks :T-IDENT "bar")))
-    (multiple-value-bind (ast rest) (cl-cc::parse-token* :T-IDENT "foo" s)
-      (declare (ignore rest))
-      (assert-equal :fail ast)))
-  (multiple-value-bind (ast rest) (cl-cc::parse-token* :T-INT nil nil)
-    (assert-equal :fail ast)
-    (assert-null rest)))
+  :cases (("type-mismatch"  (toks :T-INT 1)      :T-IDENT nil)
+          ("value-mismatch" (toks :T-IDENT "bar") :T-IDENT "foo")
+          ("empty-stream"   nil                    :T-INT   nil))
+  (stream tok-type tok-val)
+  (multiple-value-bind (ast rest) (cl-cc::parse-token* tok-type tok-val stream)
+    (declare (ignore rest))
+    (assert-equal :fail ast)))
 
 ;;; ─── parse-literal* ─────────────────────────────────────────────────────────
 
@@ -149,63 +153,43 @@
 
 ;;; ─── parse-alt* ─────────────────────────────────────────────────────────────
 
-(deftest comb-alt-first-matches
-  "parse-alt* returns first matching alternative."
-  (let ((s (toks :T-INT 42)))
-    (multiple-value-bind (ast rest)
-        (cl-cc::parse-alt* '((token :T-INT) (token :T-IDENT)) s)
-      (assert-equal 42 ast)
+(deftest-each comb-alt-matching-behavior
+  "parse-alt*: first-alternative match, second-alternative match, no-match (fail)."
+  :cases (("first-matches"  (toks :T-INT 42)    '((token :T-INT) (token :T-IDENT))  42    t)
+          ("second-matches" (toks :T-IDENT "x") '((token :T-INT) (token :T-IDENT)) "x"   t)
+          ("none-match"     (toks :T-IDENT "x") '((token :T-INT) (token :T-PLUS))   :fail nil))
+  (tokens alts expected-ast success-p)
+  (multiple-value-bind (ast rest) (cl-cc::parse-alt* alts tokens)
+    (assert-equal expected-ast ast)
+    (when success-p
       (assert-null rest))))
-
-(deftest comb-alt-second-matches
-  "parse-alt* falls through to second alternative."
-  (let ((s (toks :T-IDENT "x")))
-    (multiple-value-bind (ast rest)
-        (cl-cc::parse-alt* '((token :T-INT) (token :T-IDENT)) s)
-      (assert-equal "x" ast)
-      (assert-null rest))))
-
-(deftest comb-alt-none-match
-  "parse-alt* fails if no alternative matches."
-  (let ((s (toks :T-IDENT "x")))
-    (multiple-value-bind (ast _rest)
-        (cl-cc::parse-alt* '((token :T-INT) (token :T-PLUS)) s)
-      (declare (ignore _rest))
-      (assert-equal :fail ast))))
 
 ;;; ─── parse-many* ────────────────────────────────────────────────────────────
 
-(deftest comb-many-behavior
-  "parse-many* succeeds with zero matches, collects all matches, and stops at mismatch."
-  (let ((s (toks :T-IDENT "x")))
-    (multiple-value-bind (ast rest) (cl-cc::parse-many* '(token :T-INT) s)
-      (assert-equal nil ast)
-      (assert-equal 1 (length rest))))
-  (let ((s (toks :T-INT 1 :T-INT 2 :T-INT 3)))
-    (multiple-value-bind (ast rest) (cl-cc::parse-many* '(token :T-INT) s)
-      (assert-equal '(1 2 3) ast)
-      (assert-null rest)))
-  (let ((s (toks :T-INT 1 :T-INT 2 :T-IDENT "x")))
-    (multiple-value-bind (ast rest) (cl-cc::parse-many* '(token :T-INT) s)
-      (assert-equal '(1 2) ast)
-      (assert-equal 1 (length rest)))))
+(deftest-each comb-many-behavior
+  "parse-many*: zero matches leaves stream intact; all-INT collects list; stops at mismatch."
+  :cases (("zero"    (toks :T-IDENT "x")                    nil      1)
+          ("all"     (toks :T-INT 1 :T-INT 2 :T-INT 3)      '(1 2 3) 0)
+          ("partial" (toks :T-INT 1 :T-INT 2 :T-IDENT "x")  '(1 2)   1))
+  (tokens expected-ast expected-rest-len)
+  (multiple-value-bind (ast rest) (cl-cc::parse-many* '(token :T-INT) tokens)
+    (assert-equal expected-ast ast)
+    (assert-= expected-rest-len (length rest))))
 
 ;;; ─── parse-many1* ───────────────────────────────────────────────────────────
 
-(deftest comb-many1-behavior
-  "parse-many1* succeeds with one or more matches, fails with zero."
-  (let ((s (toks :T-INT 1 :T-IDENT "x")))
-    (multiple-value-bind (ast rest) (cl-cc::parse-many1* '(token :T-INT) s)
-      (assert-equal '(1) ast)
-      (assert-equal 1 (length rest))))
-  (let ((s (toks :T-INT 1 :T-INT 2)))
-    (multiple-value-bind (ast rest) (cl-cc::parse-many1* '(token :T-INT) s)
-      (assert-equal '(1 2) ast)
-      (assert-null rest)))
-  (let ((s (toks :T-IDENT "x")))
-    (multiple-value-bind (ast _rest) (cl-cc::parse-many1* '(token :T-INT) s)
-      (declare (ignore _rest))
-      (assert-equal :fail ast))))
+(deftest-each comb-many1-behavior
+  "parse-many1*: one match, multiple matches, and zero matches (fail)."
+  :cases (("one"      (toks :T-INT 1 :T-IDENT "x")  '(1)   1   t)
+          ("multiple" (toks :T-INT 1 :T-INT 2)        '(1 2) 0   t)
+          ("zero"     (toks :T-IDENT "x")             :fail  nil nil))
+  (tokens expected-ast expected-rest-len success-p)
+  (multiple-value-bind (ast rest) (cl-cc::parse-many1* '(token :T-INT) tokens)
+    (if success-p
+        (progn
+          (assert-equal expected-ast ast)
+          (assert-= expected-rest-len (length rest)))
+        (assert-equal :fail ast))))
 
 ;;; ─── parse-opt* ─────────────────────────────────────────────────────────────
 

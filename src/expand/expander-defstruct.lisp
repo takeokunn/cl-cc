@@ -211,8 +211,13 @@ Supported options:
                                      :initform (second slot)
                                      acc-key (accessor-name (first slot)))))
                            own-slots))
-                 ;; ANSI CL 8.1: structs inherit from structure-object unless :include
-                 (superclasses (if parent-name (list parent-name) '(structure-object)))
+                 ;; ANSI CL 8.1: structs conceptually inherit from structure-object,
+                 ;; but we expand to DEFCLASS (standard-class metaclass), which cannot
+                 ;; take cl:structure-object as a superclass under SBCL's strict
+                 ;; metaclass rules (SB-MOP:VALIDATE-SUPERCLASS signals a type error
+                 ;; during host-side defstruct deriving tests). Omit the default and
+                 ;; let defclass fall back to standard-object.
+                 (superclasses (if parent-name (list parent-name) '()))
                  (defclass-form `(defclass ,name ,superclasses ,defclass-slots))
                  (ctor-form (when ctor-name
                               (%defstruct-make-constructor ctor-name name boa-args all-slots)))

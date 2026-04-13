@@ -5,7 +5,7 @@
 ;;; run-string-repl, our-eval, and reset-repl-state.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-integration-suite)
 
 ;;; ─── compile-expression ─────────────────────────────────────────────────
 
@@ -123,15 +123,12 @@
 
 ;;; ─── compile-string ─────────────────────────────────────────────────────
 
-(deftest pipeline-compile-string-basic
-  "compile-string compiles a string expression."
-  (let ((result (compile-string "(+ 1 2)")))
-    (assert-true (typep result 'cl-cc::compilation-result))))
-
-(deftest pipeline-compile-string-multiple-forms
-  "compile-string handles multiple forms."
-  (let ((result (compile-string "(defun f (x) x) (f 42)")))
-    (assert-true (typep result 'cl-cc::compilation-result))))
+(deftest-each pipeline-compile-string-returns-result
+  "compile-string returns a compilation-result for simple and multi-form inputs."
+  :cases (("single-form"   "(+ 1 2)")
+          ("multiple-forms" "(defun f (x) x) (f 42)"))
+  (expr)
+  (assert-true (typep (compile-string expr) 'cl-cc::compilation-result)))
 
 (deftest pipeline-compile-string-custom-pass-pipeline
   "compile-string forwards a string pass pipeline to optimizer core."
@@ -176,30 +173,29 @@
 
 ;;; ─── %prescan-in-package ────────────────────────────────────────────────
 
-(deftest pipeline-prescan-in-package-behavior
-  "%prescan-in-package extracts package names in all supported forms."
-  (let ((kw-result (cl-cc::%prescan-in-package "(in-package :cl-cc)")))
-    (assert-true (stringp kw-result))
-    (assert-string= "CL-CC" (string-upcase kw-result)))
-  (assert-equal "CL-CC"
-    (cl-cc::%prescan-in-package "(in-package \"CL-CC\")"))
-  (assert-null (cl-cc::%prescan-in-package "(defun f (x) x)"))
-  (let ((result (cl-cc::%prescan-in-package
-                  (format nil ";;; header comment~%(in-package :cl-cc)"))))
-    (assert-true (stringp result))))
+(deftest-each pipeline-prescan-in-package-behavior
+  "%prescan-in-package extracts the package name from in-package forms; nil for others."
+  :cases (("keyword-form"  "(in-package :cl-cc)"                               "CL-CC")
+          ("string-form"   "(in-package \"CL-CC\")"                            "CL-CC")
+          ("non-package"   "(defun f (x) x)"                                    nil)
+          ("with-comment"  (format nil ";;; header comment~%(in-package :cl-cc)") :any))
+  (source expected)
+  (let ((result (cl-cc::%prescan-in-package source)))
+    (cond ((null expected)    (assert-null result))
+          ((eq expected :any) (assert-true (stringp result)))
+          (t (assert-string= expected (string-upcase result))))))
 
 ;;; ─── parse-source-for-language ──────────────────────────────────────────
 
-(deftest pipeline-parse-lisp-language
-  "parse-source-for-language returns forms for :lisp."
-  (let ((forms (cl-cc::parse-source-for-language "(+ 1 2)" :lisp)))
-    (assert-true (consp forms))
-    (assert-equal '(+ 1 2) (first forms))))
-
-(deftest pipeline-parse-lisp-multiple
-  "parse-source-for-language returns multiple forms."
-  (let ((forms (cl-cc::parse-source-for-language "(+ 1 2) (* 3 4)" :lisp)))
-    (assert-= 2 (length forms))))
+(deftest-each pipeline-parse-source-for-language
+  "parse-source-for-language: :lisp parses one/multiple forms; unknown signals error."
+  :cases (("single-form"    "(+ 1 2)"          :lisp   1  '(+ 1 2))
+          ("multiple-forms" "(+ 1 2) (* 3 4)"  :lisp   2  nil))
+  (source lang expected-count expected-first)
+  (let ((forms (cl-cc::parse-source-for-language source lang)))
+    (assert-= expected-count (length forms))
+    (when expected-first
+      (assert-equal expected-first (first forms)))))
 
 (deftest pipeline-parse-unknown-language-signals
   "parse-source-for-language signals error for unknown language."
@@ -280,3 +276,45 @@
           (reduce-sum  10
            "(reduce (lambda (a b) (+ a b)) '(1 2 3 4) 0 t)"))
   (assert-equal expected (run-string expr :stdlib t)))
+
+;;; ─── %whitespace-symbol-p ───────────────────────────────────────────────
+
+(deftest-each pipeline-whitespace-symbol-p
+  "%whitespace-symbol-p identifies symbols whose name is all whitespace."
+  :cases (("plain-symbol"      nil 'hello)
+          ("nil"               nil nil)
+          ("keyword"           nil :foo)
+          ("number"            nil 42)
+          ("empty-string"      nil ""))
+  (expected form)
+  (assert-equal expected (cl-cc::%whitespace-symbol-p form)))
+
+(deftest pipeline-whitespace-symbol-p-space-sym
+  "%whitespace-symbol-p returns T for a symbol named with only spaces."
+  ;; Intern a whitespace-only symbol to test the predicate directly.
+  (let ((ws-sym (intern " " (find-package :cl-cc))))
+    (assert-true (cl-cc::%whitespace-symbol-p ws-sym))))
+
+;;; ─── %ensure-repl-state ─────────────────────────────────────────────────
+
+(deftest pipeline-ensure-repl-state-initializes
+  "%ensure-repl-state lazily initializes all REPL state variables."
+  (with-reset-repl-state
+    ;; All state vars should be nil after reset
+    (assert-null cl-cc::*repl-vm-state*)
+    (assert-null cl-cc::*repl-pool-instructions*)
+    ;; Trigger lazy init
+    (cl-cc::%ensure-repl-state)
+    ;; All should now be initialized
+    (assert-true (not (null cl-cc::*repl-vm-state*)))
+    (assert-true (not (null cl-cc::*repl-pool-instructions*)))
+    (assert-true (not (null cl-cc::*repl-pool-labels*)))
+    (assert-true (not (null cl-cc::*repl-global-vars-persistent*)))))
+
+(deftest pipeline-ensure-repl-state-idempotent
+  "%ensure-repl-state is idempotent — second call does not reset existing state."
+  (with-reset-repl-state
+    (cl-cc::%ensure-repl-state)
+    (let ((first-state cl-cc::*repl-vm-state*))
+      (cl-cc::%ensure-repl-state)
+      (assert-eq first-state cl-cc::*repl-vm-state*))))

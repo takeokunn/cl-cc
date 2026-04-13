@@ -2,17 +2,18 @@
 (in-package :cl-cc/test)
 (in-suite cl-cc-suite)
 
-(deftest builtin-registry-data-table-sizes
+(deftest-each builtin-registry-data-table-sizes
   "The raw registry tables retain representative sizes."
-  (assert-true (> (length cl-cc::*builtin-unary-entries*) 100))
-  (assert-true (> (length cl-cc::*builtin-binary-entries*) 20))
-  (assert-true (> (length cl-cc::*builtin-string-cmp-entries*) 10)))
+  :cases (("unary"      cl-cc::*builtin-unary-entries*      100)
+          ("binary"     cl-cc::*builtin-binary-entries*     20)
+          ("string-cmp" cl-cc::*builtin-string-cmp-entries* 10))
+  (table min-size)
+  (assert-true (> (length table) min-size)))
 
-(deftest builtin-registry-data-representative-mappings
+(deftest-each builtin-registry-data-representative-mappings
   "Representative raw mappings stay wired to the expected constructors."
-  (assert-equal 'cl-cc::make-vm-car
-                (cdr (assoc 'car cl-cc::*builtin-unary-entries*)))
-  (assert-equal 'cl-cc::make-vm-mod
-                (cdr (assoc 'mod cl-cc::*builtin-binary-entries*)))
-  (assert-equal 'cl-cc::make-vm-string=
-                (cdr (assoc 'string= cl-cc::*builtin-string-cmp-entries*))))
+  :cases (("car"    'car    cl-cc::*builtin-unary-entries*      'cl-cc::make-vm-car)
+          ("mod"    'mod    cl-cc::*builtin-binary-entries*     'cl-cc::make-vm-mod)
+          ("string=" 'string= cl-cc::*builtin-string-cmp-entries* 'cl-cc::make-vm-string=))
+  (sym table expected-ctor)
+  (assert-equal expected-ctor (cdr (assoc sym table))))

@@ -7,8 +7,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite row-suite :description "Row polymorphism operation tests")
+(defsuite row-suite :description "Row polymorphism operation tests"
+  :parent cl-cc-suite)
 
+
+(in-suite row-suite)
 ;;; ─── Helpers ─────────────────────────────────────────────────────────────────
 
 (defun make-closed-record (&rest label-type-pairs)

@@ -28,11 +28,11 @@
       (assert-eq '= (car (second body)))
       (assert-eq '= (car (third body))))))
 
-(deftest expander-numeric-log-float-sign-and-float
-  "Log, float-sign, and float normalize their arities."
-  (assert-equal '(log x) (cl-cc::compiler-macroexpand-all '(log x)))
-  (assert-equal '(/ (log x) (log y))
-                (cl-cc::compiler-macroexpand-all '(log x y)))
-  (assert-equal '(* (float-sign x) (abs y))
-                (cl-cc::compiler-macroexpand-all '(float-sign x y)))
-  (assert-equal '(float x) (cl-cc::compiler-macroexpand-all '(float x y))))
+(deftest-each expander-numeric-arity-normalization
+  "log, float-sign, and float normalize their arities."
+  :cases (("log-1"        '(log x)         '(log x))
+          ("log-2"        '(log x y)        '(/ (log x) (log y)))
+          ("float-sign-2" '(float-sign x y) '(* (float-sign x) (abs y)))
+          ("float-2"      '(float x y)      '(float x)))
+  (form expected)
+  (assert-equal expected (cl-cc::compiler-macroexpand-all form)))

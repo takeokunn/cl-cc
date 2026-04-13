@@ -5,8 +5,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite wasm-extract-suite :description "WASM function extraction pass tests")
+(defsuite wasm-extract-suite :description "WASM function extraction pass tests"
+  :parent cl-cc-suite)
 
+
+(in-suite wasm-extract-suite)
 (defun make-entry-labels (&rest labels)
   (let ((entry-labels (make-hash-table :test #'equal)))
     (dolist (label labels entry-labels)

@@ -10,7 +10,7 @@
 
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-suite)
+(in-suite cl-cc-integration-suite)
 
 (defun %compiled-assembly (code target)
   (compilation-result-assembly (compile-string code :target target)))
@@ -39,43 +39,22 @@
 
 ;;; Basic Compiler Tests
 
-(deftest-each vm-exec-arithmetic
-  "Basic arithmetic expressions compile and evaluate correctly."
-  :cases (("add"        "(+ 3 4)"           7)
-          ("sub"        "(- 10 7)"           3)
-          ("mul"        "(* 6 7)"            42)
-          ("nested"     "(+ (* 2 3) 3)"      9))
-  (code expected)
-  (assert-run= expected code))
-
-;;; Conditional Compilation Tests
-
-(deftest-each vm-exec-if
-  "If expressions compile and branch correctly."
-  :cases (("false-cond"     "(if 0 10 20)"                    20)
-          ("true-cond"      "(if 1 10 20)"                    10)
-          ("nested"         "(if 1 (if 0 1 2) 3)"             2)
-          ("var-cond"       "(let ((x 0)) (if x 20 10))"      10))
-  (code expected)
-  (assert-run= expected code))
-
-;;; Let Binding Tests
-
-(deftest-each vm-exec-let
-  "Let binding forms compile and evaluate correctly."
-  :cases (("simple"      "(let ((x 42)) x)"                       42)
-          ("multi"       "(let ((x 2) (y 3)) (+ x y))"            5)
-          ("shadowing"   "(let ((x 10)) (let ((x 20)) x))"         20)
-          ("computed"    "(let ((x 5) (y 7)) (+ (* x 2) y))"      17))
-  (code expected)
-  (assert-run= expected code))
-
-;;; Progn Tests
-
-(deftest-each vm-exec-progn
-  "Progn sequences compile and return the last value."
-  :cases (("simple"    "(progn 1 2 3)"                               3)
-          ("with-let"  "(progn (let ((x 2)) x) (let ((y 3)) y))"    3))
+(deftest-each vm-exec-basic-forms
+  "Arithmetic, conditionals, let bindings, and progn sequences compile and evaluate correctly."
+  :cases (("arith-add"        "(+ 3 4)"                                7)
+          ("arith-sub"        "(- 10 7)"                               3)
+          ("arith-mul"        "(* 6 7)"                                42)
+          ("arith-nested"     "(+ (* 2 3) 3)"                          9)
+          ("if-false-cond"    "(if nil 10 20)"                         20)
+          ("if-true-cond"     "(if 1 10 20)"                           10)
+          ("if-nested"        "(if 1 (if 0 1 2) 3)"                   2)
+          ("if-var-cond"      "(let ((x 0)) (if x 20 10))"            10)
+          ("let-simple"       "(let ((x 42)) x)"                       42)
+          ("let-multi"        "(let ((x 2) (y 3)) (+ x y))"           5)
+          ("let-shadowing"    "(let ((x 10)) (let ((x 20)) x))"        20)
+          ("let-computed"     "(let ((x 5) (y 7)) (+ (* x 2) y))"     17)
+          ("progn-simple"     "(progn 1 2 3)"                          3)
+          ("progn-with-let"   "(progn (let ((x 2)) x) (let ((y 3)) y))" 3))
   (code expected)
   (assert-run= expected code))
 
@@ -274,51 +253,36 @@
 ;;; Function Call Tests
 
 (deftest-each compile-function-call-structure
-  "Lambda calls with simple, multi-argument, and nested forms produce a vm-program."
-  :cases (("simple"    "((lambda (x) x) 5)")
-          ("multi-arg" "((lambda (a b c) (+ a (+ b c))) 1 2 3)")
-          ("nested"    "((lambda (x) (+ x 1)) ((lambda (y) (* y 2)) 3))"))
+  "Lambda, flet, labels, and higher-order forms all compile to a valid vm-program."
+  :cases (("lambda-simple"       "((lambda (x) x) 5)")
+          ("lambda-multi-arg"    "((lambda (a b c) (+ a (+ b c))) 1 2 3)")
+          ("lambda-nested"       "((lambda (x) (+ x 1)) ((lambda (y) (* y 2)) 3))")
+          ("lambda-return-fn"    "((lambda (n) (lambda (x) (+ x n))) 5)")
+          ("flet-basic"          "(flet ((double (x) (* x 2))) (double 21))")
+          ("flet-multi"          "(flet ((add1 (x) (+ x 1)) (add2 (x) (+ x 2))) (add2 (add1 10)))")
+          ("labels-recursive"    "(labels ((count (n) (if (= n 0) 0 (+ 1 (count (- n 1)))))) (count 5))")
+          ("labels-mutual"       "(labels ((even? (n) (if (= n 0) 1 (odd? (- n 1)))) (odd? (n) (if (= n 0) 0 (even? (- n 1))))) (even? 10))")
+          ("labels-with-let"     "(let ((x 10)) (labels ((rec (n) (if (= n 0) x (+ 1 (rec (- n 1)))))) (rec 3)))"))
   (form)
   (let* ((result (compile-string form :target :vm))
          (program (compilation-result-program result)))
     (assert-false (null program))
     (assert-type vm-program program)))
 
-(deftest-each compile-flet-labels-structure
-  "flet, labels, and higher-order lambda forms all produce a vm-program."
-  :cases (("return-fn"         "((lambda (n) (lambda (x) (+ x n))) 5)")
-          ("flet-basic"        "(flet ((double (x) (* x 2))) (double 21))")
-          ("flet-multi"        "(flet ((add1 (x) (+ x 1)) (add2 (x) (+ x 2))) (add2 (add1 10)))")
-          ("labels-recursive"  "(labels ((count (n) (if (= n 0) 0 (+ 1 (count (- n 1)))))) (count 5))")
-          ("labels-mutual"     "(labels ((even? (n) (if (= n 0) 1 (odd? (- n 1)))) (odd? (n) (if (= n 0) 0 (even? (- n 1))))) (even? 10))")
-          ("labels-with-let"   "(let ((x 10)) (labels ((rec (n) (if (= n 0) x (+ 1 (rec (- n 1)))))) (rec 3)))"))
-  (form)
-  (let* ((result (compile-string form :target :vm))
-         (program (compilation-result-program result)))
-    (assert-false (null program))
-    (assert-type vm-program program)))
+;;; Multiple Top-Level Forms and Values Tests
 
-;;; Multiple Top-Level Forms Tests
-
-(deftest-each compile-multiple-forms
-  "Multiple top-level forms compile and execute in sequence correctly."
-  :cases (("simple"    6  "(defun foo (x) (+ x 1)) (foo 5)")
-          ("progn"     3  "1 2 3")
-          ("chain"     12 "(defun add1 (x) (+ x 1)) (defun add2 (x) (add1 (add1 x))) (add2 10)")
-          ("let-call"  15 "(defun triple (x) (* x 3)) (let ((y 5)) (triple y))")
-          ("recursion"  6 "(defun sum-to (n) (if (= n 0) 0 (+ n (sum-to (- n 1))))) (sum-to 3)"))
-  (expected form)
-  (assert-= expected (run-string form)))
-
-;;; Multiple Values and Apply Tests
-
-(deftest-each compile-values-numeric
-  "values and multiple-value-bind return correct numeric results."
-  :cases (("single"     42 "(values 42)")
-          ("primary"     1 "(values 1 2 3)")
-          ("mvb-basic"   3 "(multiple-value-bind (a b) (values 1 2) (+ a b))")
-          ("apply"       6 "(defun my-add (a b c) (+ a (+ b c))) (apply my-add (quote (1 2 3)))")
-          ("mvb-single" 42 "(multiple-value-bind (x) (values 42) x)"))
+(deftest-each compile-multiple-forms-and-values
+  "Multiple top-level forms, values, and multiple-value-bind all return expected numeric results."
+  :cases (("forms-simple"    6  "(defun foo (x) (+ x 1)) (foo 5)")
+          ("forms-progn"     3  "1 2 3")
+          ("forms-chain"     12 "(defun add1 (x) (+ x 1)) (defun add2 (x) (add1 (add1 x))) (add2 10)")
+          ("forms-let-call"  15 "(defun triple (x) (* x 3)) (let ((y 5)) (triple y))")
+          ("forms-recursion"  6 "(defun sum-to (n) (if (= n 0) 0 (+ n (sum-to (- n 1))))) (sum-to 3)")
+          ("values-single"   42 "(values 42)")
+          ("values-primary"   1 "(values 1 2 3)")
+          ("mvb-basic"        3 "(multiple-value-bind (a b) (values 1 2) (+ a b))")
+          ("apply-user"       6 "(defun my-add (a b c) (+ a (+ b c))) (apply my-add (quote (1 2 3)))")
+          ("mvb-single"      42 "(multiple-value-bind (x) (values 42) x)"))
   (expected form)
   (assert-= expected (run-string form)))
 
@@ -346,51 +310,52 @@
       (assert-true (run-string form))
       (assert-true (null (run-string form)))))
 
-(deftest-each compile-string-ops
-  "String length, upcase, downcase, and concatenate return the expected numeric length."
+(deftest-each compile-string-ops-and-type-predicates
+  "String ops (length/upcase/downcase/concatenate) and type predicates (symbolp/numberp) return expected integers."
   :cases (("length-hello"  5 "(string-length \"hello\")")
           ("length-empty"  0 "(string-length \"\")")
           ("upcase-len"    5 "(string-length (string-upcase \"hello\"))")
           ("downcase-len"  3 "(string-length (string-downcase \"ABC\"))")
-          ("concat-len"   10 "(string-length (concatenate 'string \"hello\" \"world\"))"))
-  (expected form)
-  (assert-= expected (run-string form)))
-
-(deftest-each compile-type-predicates
-  "Type predicates symbolp and numberp return 1/0 for matching/non-matching types."
-  :cases (("symbolp-sym"  1 "(symbolp 'foo)")
-          ("symbolp-num"  0 "(symbolp 42)")
-          ("numberp-num"  1 "(numberp 42)")
-          ("numberp-sym"  0 "(numberp 'foo)"))
+          ("concat-len"   10 "(string-length (concatenate 'string \"hello\" \"world\"))")
+          ("symbolp-sym"   1 "(symbolp 'foo)")
+          ("symbolp-num"   0 "(symbolp 42)")
+          ("numberp-num"   1 "(numberp 42)")
+          ("numberp-sym"   0 "(numberp 'foo)"))
   (expected form)
   (assert-= expected (run-string form)))
 
 ;;; Macro Expansion in Compiler Tests
 
-(deftest compile-control-macros
-  "cond/when/unless/and/or macros work in compiled code."
-  ;; cond
-  (assert-true (= 42 (run-string "(cond ((= 1 2) 10) ((= 1 1) 42) (t 0))")))
-  (assert-true (= 0 (run-string "(cond ((= 1 2) 10) ((= 2 3) 20) (t 0))")))
-  ;; when/unless
-  (assert-true (= 42 (run-string "(when (= 1 1) 42)")))
-  (assert-true (null (run-string "(when (= 1 2) 42)")))
-  (assert-true (= 99 (run-string "(unless (= 1 2) 99)")))
-  (assert-true (null (run-string "(unless (= 1 1) 99)")))
-  ;; and/or
-  (assert-true (= 3 (run-string "(and 1 2 3)")))
-  (assert-true (null (run-string "(and 1 nil 3)")))
-  (assert-true (= 5 (run-string "(or nil nil 5)")))
-  (assert-true (= 1 (run-string "(or 1 2 3)")))
-  (assert-true (null (run-string "(or nil nil nil)"))))
+(deftest-each compile-control-macros-valued
+  "cond/when/unless/and/or macros return the expected values."
+  :cases (("cond-match"    42  "(cond ((= 1 2) 10) ((= 1 1) 42) (t 0))")
+          ("cond-default"   0  "(cond ((= 1 2) 10) ((= 2 3) 20) (t 0))")
+          ("when-true"     42  "(when (= 1 1) 42)")
+          ("unless-false"  99  "(unless (= 1 2) 99)")
+          ("and-all"        3  "(and 1 2 3)")
+          ("or-find"        5  "(or nil nil 5)")
+          ("or-first"       1  "(or 1 2 3)"))
+  (expected form)
+  (assert-run= expected form))
 
-(deftest compile-t-nil-constants
+(deftest-each compile-control-macros-nil
+  "cond/when/unless/and/or return nil in the false cases."
+  :cases (("when-false"   "(when (= 1 2) 42)")
+          ("unless-true"  "(unless (= 1 1) 99)")
+          ("and-short"    "(and 1 nil 3)")
+          ("or-all-nil"   "(or nil nil nil)"))
+  (form)
+  (assert-run-false form))
+
+(deftest-each compile-t-nil-constants
   "t and nil are recognized as constants; not inverts truthiness."
-  (assert-false (null (run-string "t")))
-  (assert-null (run-string "nil"))
-  (assert-true (eq t (run-string "(not nil)")))
-  (assert-true (null (run-string "(not 1)")))
-  (assert-true (null (run-string "(not t)"))))
+  :cases (("t-is-true"    t   "t")
+          ("not-nil"      t   "(not nil)")
+          ("nil-is-nil"   nil "nil")
+          ("not-1"        nil "(not 1)")
+          ("not-t"        nil "(not t)"))
+  (expected form)
+  (assert-run= expected form))
 
 ;;; List Operation Builtin Tests
 
@@ -408,10 +373,12 @@
   (expected form)
   (assert-= expected (run-string form)))
 
-(deftest compile-list-builtins
+(deftest-each compile-list-builtins
   "append/reverse builtins work on lists."
-  (assert-true (= 4 (run-string "(length (append (list 1 2) (list 3 4)))")))
-  (assert-true (= 3 (run-string "(first (reverse (list 1 2 3)))"))))
+  :cases (("append-len" 4 "(length (append (list 1 2) (list 3 4)))")
+          ("reverse-first" 3 "(first (reverse (list 1 2 3)))"))
+  (expected form)
+  (assert-run= expected form))
 
 ;;; Handler-Case Tests
 
@@ -476,24 +443,19 @@
   (form)
   (assert-true (not (null (run-string form)))))
 
-(deftest-each compile-keywordp
-  "keywordp returns 1 for keywords and 0 for non-keywords."
-  :cases (("keyword"     1 "(keywordp :foo)")
-          ("non-keyword" 0 "(keywordp 'foo)"))
-  (expected form)
-  (assert-= expected (run-string form)))
-
 ;;; Extended List and Macro Tests
 
-(deftest-each compile-list-macros-numeric
-  "push/pop/incf/decf/nth/nthcdr/nreverse return the expected numeric values."
-  :cases (("push-front" 3  "(let ((lst nil)) (push 1 lst) (push 2 lst) (push 3 lst) (car lst))")
-          ("pop"        1  "(let ((lst (list 1 2 3))) (pop lst))")
-          ("incf"       5  "(let ((x 3)) (incf x 2) x)")
-          ("decf"       1  "(let ((x 3)) (decf x 2) x)")
-          ("nth"        30 "(nth 2 (list 10 20 30 40))")
-          ("nthcdr"     30 "(car (nthcdr 2 (list 10 20 30 40)))")
-          ("nreverse"   3  "(car (nreverse (list 1 2 3)))"))
+(deftest-each compile-keywordp-and-list-macros
+  "keywordp, push/pop/incf/decf/nth/nthcdr/nreverse return the expected numeric values."
+  :cases (("keyword"     1  "(keywordp :foo)")
+          ("non-keyword" 0  "(keywordp 'foo)")
+          ("push-front"  3  "(let ((lst nil)) (push 1 lst) (push 2 lst) (push 3 lst) (car lst))")
+          ("pop"         1  "(let ((lst (list 1 2 3))) (pop lst))")
+          ("incf"        5  "(let ((x 3)) (incf x 2) x)")
+          ("decf"        1  "(let ((x 3)) (decf x 2) x)")
+          ("nth"         30 "(nth 2 (list 10 20 30 40))")
+          ("nthcdr"      30 "(car (nthcdr 2 (list 10 20 30 40)))")
+          ("nreverse"    3  "(car (nreverse (list 1 2 3)))"))
   (expected form)
   (assert-= expected (run-string form)))
 
@@ -501,58 +463,43 @@
   "member finds element in list"
   (assert-true (not (null (run-string "(member 3 (list 1 2 3 4))")))))
 
-(deftest-each compile-numeric-predicates
-  "zerop/plusp/minusp/evenp/oddp return 1/0 for matching/non-matching values."
-  :cases (("zerop-0"    1 "(zerop 0)")
-          ("zerop-5"    0 "(zerop 5)")
-          ("plusp-5"    1 "(plusp 5)")
-          ("minusp-neg" 1 "(minusp (- 0 3))")
+(deftest-each compile-numeric-predicates-and-case
+  "zerop/plusp/minusp/evenp/oddp predicates and case macro dispatching return the expected values."
+  :cases (("zerop-0"    1  "(zerop 0)")
+          ("zerop-5"    0  "(zerop 5)")
+          ("plusp-5"    1  "(plusp 5)")
+          ("minusp-neg" 1  "(minusp (- 0 3))")
           ("evenp-true"  1 "(evenp 4)")
           ("evenp-false" 0 "(evenp 3)")
-          ("oddp-true"   1 "(oddp 3)"))
-  (expected form)
-  (assert-= expected (run-string form)))
-
-(deftest-each compile-case-macro
-  "case dispatches on key match and otherwise clause."
-  :cases (("match"     2  "(case 'b (a 1) (b 2) (c 3))")
-          ("otherwise" 99 "(case 'z (a 1) (otherwise 99))"))
+          ("oddp-true"   1 "(oddp 3)")
+          ("case-match"     2  "(case 'b (a 1) (b 2) (c 3))")
+          ("case-otherwise" 99 "(case 'z (a 1) (otherwise 99))"))
   (expected form)
   (assert-= expected (run-string form)))
 
 (deftest compile-keyword-self-eval
   "keywords evaluate to themselves; typecase dispatches on type."
   (assert-eq :test (run-string ":test"))
-  (assert-true (= 1 (run-string "(typecase 42 (integer 1) (string 2) (otherwise 3))"))))
+  (assert-run= 1 "(typecase 42 (integer 1) (string 2) (otherwise 3))"))
 
 ;;; Typep and Destructuring Tests
 
-(deftest-each compile-typep
-  "typep returns 1 for matching types and 0 for non-matching."
-  :cases (("integer"  1 "(typep 42 'integer)")
-          ("string"   1 "(typep \"hello\" 'string)")
-          ("symbol"   1 "(typep 'foo 'symbol)")
-          ("cons"     1 "(typep (cons 1 2) 'cons)")
-          ("null"     1 "(typep nil 'null)")
-          ("negative" 0 "(typep 42 'string)"))
-  (expected form)
-  (assert-= expected (run-string form)))
-
-(deftest-each compile-destructuring-bind
-  "destructuring-bind correctly binds list elements, including &rest patterns."
-  :cases (("basic" 6 "(destructuring-bind (a b c) (list 1 2 3) (+ a (+ b c)))")
-          ("rest"  2 "(destructuring-bind (a &rest b) (list 1 2 3) (length b))"))
-  (expected form)
-  (assert-= expected (run-string form)))
-
 ;;; Iteration Macro Tests
 
-(deftest-each compile-iteration-macros
-  "dolist/dotimes/do/loop each compute the correct numeric sum."
-  :cases (("dolist"  6  "(let ((sum 0)) (dolist (x (list 1 2 3)) (setq sum (+ sum x))) sum)")
-          ("dotimes" 10 "(let ((sum 0)) (dotimes (i 5) (setq sum (+ sum i))) sum)")
-          ("do"      10 "(do ((i 0 (+ i 1)) (sum 0 (+ sum i))) ((= i 5) sum))")
-          ("loop"    10 "(let ((sum 0) (i 0)) (loop (if (= i 5) (return sum)) (setq sum (+ sum i)) (setq i (+ i 1))))"))
+(deftest-each compile-typep-destructuring-iteration
+  "typep/destructuring-bind/iteration macros return the expected numeric result."
+  :cases (("typep-integer"   1 "(typep 42 'integer)")
+          ("typep-string"    1 "(typep \"hello\" 'string)")
+          ("typep-symbol"    1 "(typep 'foo 'symbol)")
+          ("typep-cons"      1 "(typep (cons 1 2) 'cons)")
+          ("typep-null"      1 "(typep nil 'null)")
+          ("typep-negative"  0 "(typep 42 'string)")
+          ("db-basic"        6 "(destructuring-bind (a b c) (list 1 2 3) (+ a (+ b c)))")
+          ("db-rest"         2 "(destructuring-bind (a &rest b) (list 1 2 3) (length b))")
+          ("dolist"          6 "(let ((sum 0)) (dolist (x (list 1 2 3)) (setq sum (+ sum x))) sum)")
+          ("dotimes"        10 "(let ((sum 0)) (dotimes (i 5) (setq sum (+ sum i))) sum)")
+          ("do"             10 "(do ((i 0 (+ i 1)) (sum 0 (+ sum i))) ((= i 5) sum))")
+          ("loop"           10 "(let ((sum 0) (i 0)) (loop (if (= i 5) (return sum)) (setq sum (+ sum i)) (setq i (+ i 1))))"))
   (expected form)
   (assert-= expected (run-string form)))
 
@@ -617,27 +564,24 @@
 ;;; Variadic Arithmetic and List Tests
 
 (deftest-each compile-variadic-arith
-  "Variadic +, *, - produce correct numeric results."
+  "Variadic +, *, - and car of list produce correct numeric results."
   :cases (("plus-3"    6  "(+ 1 2 3)")
           ("plus-5"   15  "(+ 1 2 3 4 5)")
           ("plus-1"   10  "(+ 10)")
           ("plus-0"    0  "(+)")
           ("times-3"  24  "(* 2 3 4)")
           ("times-0"   1  "(*)")
-          ("minus-3"   5  "(- 10 3 2)"))
+          ("minus-3"   5  "(- 10 3 2)")
+          ("list-car"  1  "(car (list 1 2 3))"))
   (expected form)
   (assert-= expected (run-string form)))
 
 (deftest-each compile-list-construction
-  "list builds proper lists; car of list returns first element."
+  "list builds proper lists."
   :cases (("basic" '(1 2 3) "(list 1 2 3)")
           ("single" '(42)   "(list 42)"))
   (expected form)
   (assert-equal expected (run-string form)))
-
-(deftest compile-list-car
-  "car of list"
-  (assert-= 1 (run-string "(car (list 1 2 3))")))
 
 ;;; Standard Library Set Operations Tests
 
@@ -707,30 +651,21 @@
   (expected form)
   (assert-true (equal expected (run-string form :stdlib t))))
 
-(deftest stdlib-find-with-key
-  "find with :key function"
-  (assert-true (string= "(2 . b)"
-                        (let ((*package* (find-package :cl-cc)) (*print-pretty* nil))
-                          (string-downcase (format nil "~S" (run-string "(find 2 (list (cons 1 'a) (cons 2 'b) (cons 3 'c)) :key (lambda (x) (car x)))" :stdlib t)))))))
+(deftest-each stdlib-cons-printing-forms
+  "Stdlib forms producing cons/alist structures render correctly as lowercase strings."
+  :cases (("find-with-key"   "(2 . b)"           "(find 2 (list (cons 1 'a) (cons 2 'b) (cons 3 'c)) :key (lambda (x) (car x)))")
+          ("pairlis"         "((b . 2) (a . 1))"  "(pairlis (list 'a 'b) (list 1 2))")
+          ("assoc-if"        "(2 . b)"            "(assoc-if (lambda (k) (= k 2)) (list (cons 1 'a) (cons 2 'b)))")
+          ("rassoc"          "(2 . b)"            "(rassoc 'b (list (cons 1 'a) (cons 2 'b) (cons 3 'c)))")
+          ("find-sharpsign-key" "(2 . b)"         "(find 2 (list (cons 1 'a) (cons 2 'b) (cons 3 'c)) :key #'car)"))
+  (expected form)
+  (assert-true (string= expected
+                         (let ((*package* (find-package :cl-cc)) (*print-pretty* nil))
+                           (string-downcase (format nil "~S" (run-string form :stdlib t)))))))
 
 (deftest stdlib-identity
   "identity returns its argument"
-  (assert-true (= 42 (run-string "(identity 42)" :stdlib t))))
-
-(deftest stdlib-pairlis
-  "pairlis creates alist from keys and values"
-  (assert-true (string= "((b . 2) (a . 1))"
-                        (let ((*package* (find-package :cl-cc)) (*print-pretty* nil))
-                          (string-downcase (format nil "~S" (run-string "(pairlis (list 'a 'b) (list 1 2))" :stdlib t)))))))
-
-(deftest stdlib-assoc-rassoc
-  "assoc-if finds by predicate; rassoc finds by value."
-  (assert-true (string= "(2 . b)"
-                        (let ((*package* (find-package :cl-cc)) (*print-pretty* nil))
-                          (string-downcase (format nil "~S" (run-string "(assoc-if (lambda (k) (= k 2)) (list (cons 1 'a) (cons 2 'b)))" :stdlib t))))))
-  (assert-true (string= "(2 . b)"
-                        (let ((*package* (find-package :cl-cc)) (*print-pretty* nil))
-                          (string-downcase (format nil "~S" (run-string "(rassoc 'b (list (cons 1 'a) (cons 2 'b) (cons 3 'c)))" :stdlib t)))))))
+  (assert-run= 42 "(identity 42)"))
 
 ;;; Setf Places Tests
 
@@ -756,21 +691,16 @@
 
 ;;; Macrolet Tests
 
-(deftest-each compile-macrolet
-  "macrolet defines scoped local macros with the correct numeric result."
-  :cases (("basic"    6  "(macrolet ((double (x) `(+ ,x ,x))) (double 3))")
-          ("multiple" 10 "(macrolet ((add1 (x) `(+ ,x 1)) (add2 (x) `(+ ,x 2))) (+ (add1 3) (add2 4)))")
-          ("scoped"   42 "(let ((x 42)) (macrolet ((get-x () 'x)) (get-x)))")
-          ("nested"    8 "(macrolet ((square (x) `(* ,x ,x))) (macrolet ((sq-plus-sq (a b) `(+ (square ,a) (square ,b)))) (sq-plus-sq 2 2)))"))
-  (expected form)
-  (assert-= expected (run-string form)))
+;;; Macrolet and Function Reference Tests (#'builtin)
 
-;;; Function Reference Tests (#'builtin)
-
-(deftest-each compile-function-ref-numeric
-  "#'builtin creates a callable that returns the expected numeric result."
-  :cases (("car"  1 "(funcall #'car (cons 1 2))")
-          ("plus" 7 "(funcall #'+ 3 4)"))
+(deftest-each compile-macrolet-and-funcall
+  "macrolet scoped macros and #'builtin funcall return the expected numeric results."
+  :cases (("macrolet-basic"    6  "(macrolet ((double (x) `(+ ,x ,x))) (double 3))")
+          ("macrolet-multiple" 10 "(macrolet ((add1 (x) `(+ ,x 1)) (add2 (x) `(+ ,x 2))) (+ (add1 3) (add2 4)))")
+          ("macrolet-scoped"   42 "(let ((x 42)) (macrolet ((get-x () 'x)) (get-x)))")
+          ("macrolet-nested"    8 "(macrolet ((square (x) `(* ,x ,x))) (macrolet ((sq-plus-sq (a b) `(+ (square ,a) (square ,b)))) (sq-plus-sq 2 2)))")
+          ("funcall-car"        1 "(funcall #'car (cons 1 2))")
+          ("funcall-plus"       7 "(funcall #'+ 3 4)"))
   (expected form)
   (assert-= expected (run-string form)))
 
@@ -780,12 +710,6 @@
           ("car-mapcar" '(1 2 3) "(mapcar #'car (list (cons 1 'a) (cons 2 'b) (cons 3 'c)))"))
   (expected form)
   (assert-true (equal expected (run-string form :stdlib t))))
-
-(deftest compile-function-find-key
-  "find with #'car as :key"
-  (assert-true (string= "(2 . b)"
-                        (let ((*package* (find-package :cl-cc)) (*print-pretty* nil))
-                          (string-downcase (format nil "~S" (run-string "(find 2 (list (cons 1 'a) (cons 2 'b) (cons 3 'c)) :key #'car)" :stdlib t)))))))
 
 ;;; Warn Test
 
@@ -802,11 +726,14 @@
 
 ;;; Check-Type Tests
 
-(deftest compile-check-type
+(deftest-each compile-check-type
   "check-type passes silently for correct type and signals error for wrong type."
-  (assert-true (eq nil (run-string "(let ((x 42)) (check-type x integer))")))
-  (assert-signals error
-    (run-string "(let ((x \"hello\")) (check-type x integer))")))
+  :cases (("passes" "(let ((x 42)) (check-type x integer))"        nil)
+          ("errors" "(let ((x \"hello\")) (check-type x integer))"  t))
+  (form should-error-p)
+  (if should-error-p
+      (assert-signals error (run-string form))
+      (assert-true (eq nil (run-string form)))))
 
 ;;; Eval-When Tests
 
@@ -824,20 +751,15 @@
 
 ;;; Property List and Set Operations Tests
 
-(deftest-each stdlib-getf
-  "getf returns the correct value for found keys, defaults, or nil."
-  :cases (("found"     2   "(getf (list :a 1 :b 2 :c 3) :b)")
-          ("default"   99  "(getf (list :a 1) :z 99)")
-          ("first"     1   "(getf (list :a 1 :b 2) :a)")
-          ("not-found" nil "(getf (list :a 1 :b 2) :z)"))
-  (expected form)
-  (assert-true (equal expected (run-string form :stdlib t))))
-
-(deftest-each stdlib-set-ops
-  "intersection and remove correctly filter list elements."
-  :cases (("intersection"       '(2 3) "(intersection (list 1 2 3) (list 2 3 4))")
-          ("intersection-empty" nil    "(intersection (list 1 2) (list 3 4))")
-          ("remove"             '(1 3 5) "(remove 2 (list 1 2 3 2 5))"))
+(deftest-each stdlib-getf-and-set-ops
+  "getf returns the correct value; intersection and remove filter list elements."
+  :cases (("getf-found"          2         "(getf (list :a 1 :b 2 :c 3) :b)")
+          ("getf-default"        99        "(getf (list :a 1) :z 99)")
+          ("getf-first"          1         "(getf (list :a 1 :b 2) :a)")
+          ("getf-not-found"      nil       "(getf (list :a 1 :b 2) :z)")
+          ("set-intersection"    '(2 3)    "(intersection (list 1 2 3) (list 2 3 4))")
+          ("set-intersection-empty" nil    "(intersection (list 1 2) (list 3 4))")
+          ("set-remove"          '(1 3 5)  "(remove 2 (list 1 2 3 2 5))"))
   (expected form)
   (assert-true (equal expected (run-string form :stdlib t))))
 
@@ -853,67 +775,38 @@
 
 ;;; Self-Hosting Eval Tests — verify macro expansion runs through our-eval
 
-(deftest selfhost-macro-eval-fn-is-function
-  "*macro-eval-fn* should be our-eval after system load (self-hosting)."
-  (assert-true (functionp cl-cc:*macro-eval-fn*)))
-
-(deftest selfhost-macro-eval-fn-is-our-eval
-  "*macro-eval-fn* is set to our-eval at load time by pipeline.lisp."
+(deftest selfhost-macro-eval-fn
+  "*macro-eval-fn* is a function and is bound to our-eval at load time."
+  (assert-true (functionp cl-cc:*macro-eval-fn*))
   (assert-true (eq cl-cc:*macro-eval-fn* #'cl-cc:our-eval)))
 
-(deftest-each selfhost-defmacro-via-our-eval
-  "defmacro bodies are expanded through our-eval (self-hosting)."
-  :cases (("basic"       49 "(progn (defmacro sh-sq (x) (list (quote *) x x)) (sh-sq 7))")
-          ("with-args"   10 "(progn (defmacro sh-add3 (a b c) (list (quote +) a b c)) (sh-add3 2 3 5))")
-          ("quasiquote"  42 "(progn (defmacro sh-unless (test &body body) (list (quote if) test nil (cons (quote progn) body))) (sh-unless nil 42))"))
-  (expected form)
-  (assert-= expected (run-string form)))
-
-(deftest-each selfhost-macrolet-via-our-eval
-  "macrolet bodies are expanded through our-eval (self-hosting)."
-  :cases (("basic"     42  "(macrolet ((add1 (x) (list (quote +) x 1))) (add1 41))")
-          ("nested"    8   "(macrolet ((dbl (x) (list (quote +) x x))) (macrolet ((quad (x) (list (quote dbl) (list (quote dbl) x)))) (quad 2)))")
-          ("body-form" 6   "(macrolet ((triple (x) (list (quote *) x 3))) (triple 2))"))
-  (expected form)
-  (assert-= expected (run-string form)))
-
-;;; Declare Tests
-
-(deftest-each compile-declare
-  "declare forms (ignore/type) are silently skipped and code runs correctly."
-  :cases (("ignore"  42 "(let ((x 42)) (declare (ignore x)) x)")
-          ("in-defun" 10 "(progn (defun my-decl-fn (x) (declare (type integer x)) x) (my-decl-fn 10))")
-          ("type"      3 "(let ((x 1) (y 2)) (declare (type integer x y)) (+ x y))"))
-  (expected form)
-  (assert-= expected (run-string form)))
-
-;;; Extended Arithmetic Tests
-
-(deftest-each compile-arithmetic-ops
-  "mod/rem/truncate/floor/ceiling/abs/min/max return the correct numeric results."
-  :cases (("mod"      1 "(mod 7 3)")
-          ("rem"      1 "(rem 7 3)")
-          ("truncate" 2 "(truncate 7 3)")
-          ("floor"    2 "(floor 7 3)")
-          ("ceiling"  3 "(ceiling 7 3)")
-          ("abs"      5 "(abs (- 0 5))")
-          ("min"      2 "(min 5 2)")
-          ("max"      5 "(max 5 2)"))
-  (expected form)
-  (assert-= expected (run-string form)))
-
-;;; Association List and Utility Tests
-
-(deftest-each compile-alist-and-list-ops
-  "assoc/acons/nconc/copy-list/listp/atom return correct numeric values."
-  :cases (("assoc-found"    2 "(cdr (assoc 'b (list (cons 'a 1) (cons 'b 2) (cons 'c 3))))")
-          ("acons"         42 "(cdr (car (acons 'x 42 nil)))")
-          ("nconc-len"      4 "(length (nconc (list 1 2) (list 3 4)))")
-          ("copy-list-len"  3 "(length (copy-list (list 1 2 3)))")
-          ("listp-list"     1 "(listp (list 1 2))")
-          ("listp-nil"      1 "(listp nil)")
-          ("atom-true"      1 "(atom 42)")
-          ("atom-false"     0 "(atom (cons 1 2))"))
+(deftest-each selfhost-macro-declare-arith-alist
+  "Self-hosting macros, declare forms, arithmetic ops, and alist/list ops return expected numeric results."
+  :cases (("defmacro-basic"      49 "(progn (defmacro sh-sq (x) (list (quote *) x x)) (sh-sq 7))")
+          ("defmacro-with-args"  10 "(progn (defmacro sh-add3 (a b c) (list (quote +) a b c)) (sh-add3 2 3 5))")
+          ("defmacro-quasiquote" 42 "(progn (defmacro sh-unless (test &body body) (list (quote if) test nil (cons (quote progn) body))) (sh-unless nil 42))")
+          ("macrolet-basic"      42 "(macrolet ((add1 (x) (list (quote +) x 1))) (add1 41))")
+          ("macrolet-nested"      8 "(macrolet ((dbl (x) (list (quote +) x x))) (macrolet ((quad (x) (list (quote dbl) (list (quote dbl) x)))) (quad 2)))")
+          ("macrolet-body-form"   6 "(macrolet ((triple (x) (list (quote *) x 3))) (triple 2))")
+          ("declare-ignore"      42 "(let ((x 42)) (declare (ignore x)) x)")
+          ("declare-in-defun"    10 "(progn (defun my-decl-fn (x) (declare (type integer x)) x) (my-decl-fn 10))")
+          ("declare-type"         3 "(let ((x 1) (y 2)) (declare (type integer x y)) (+ x y))")
+          ("arith-mod"            1 "(mod 7 3)")
+          ("arith-rem"            1 "(rem 7 3)")
+          ("arith-truncate"       2 "(truncate 7 3)")
+          ("arith-floor"          2 "(floor 7 3)")
+          ("arith-ceiling"        3 "(ceiling 7 3)")
+          ("arith-abs"            5 "(abs (- 0 5))")
+          ("arith-min"            2 "(min 5 2)")
+          ("arith-max"            5 "(max 5 2)")
+          ("alist-assoc-found"    2 "(cdr (assoc 'b (list (cons 'a 1) (cons 'b 2) (cons 'c 3))))")
+          ("alist-acons"         42 "(cdr (car (acons 'x 42 nil)))")
+          ("alist-nconc-len"      4 "(length (nconc (list 1 2) (list 3 4)))")
+          ("alist-copy-list-len"  3 "(length (copy-list (list 1 2 3)))")
+          ("alist-listp-list"     1 "(listp (list 1 2))")
+          ("alist-listp-nil"      1 "(listp nil)")
+          ("alist-atom-true"      1 "(atom 42)")
+          ("alist-atom-false"     0 "(atom (cons 1 2))"))
   (expected form)
   (assert-= expected (run-string form)))
 
@@ -953,18 +846,15 @@
   (expected form)
   (assert-= expected (run-string form)))
 
-(deftest compile-string-char-utils
-  "digit-char-p/nil, string-trim, and parse-integer work correctly."
-  (assert-true (equal nil (run-string "(digit-char-p #\\a)")))
-  (assert-true (equal "hello" (run-string "(string-trim \" \" \"  hello  \")")))
-  (assert-true (= 42 (run-string "(parse-integer \"42\")"))))
-
-(deftest-each compile-subseq
-  "subseq extracts substrings with optional end index."
-  :cases (("with-end" "ell" "(subseq \"hello\" 1 4)")
-          ("no-end"   "llo" "(subseq \"hello\" 2)"))
+(deftest-each compile-string-char-utils
+  "digit-char-p/nil, string-trim, parse-integer, and subseq work correctly."
+  :cases (("digit-char-non-digit" nil    "(digit-char-p #\\a)")
+          ("string-trim"         "hello" "(string-trim \" \" \"  hello  \")")
+          ("parse-integer"        42     "(parse-integer \"42\")")
+          ("subseq-with-end"     "ell"   "(subseq \"hello\" 1 4)")
+          ("subseq-no-end"       "llo"   "(subseq \"hello\" 2)"))
   (expected form)
-  (assert-true (equal expected (run-string form))))
+  (assert-run= expected form))
 
 (deftest-each compile-search
   "search returns the position of the pattern or nil when not found (ANSI CL)."
@@ -975,19 +865,14 @@
 
 ;;; I/O and Format Tests
 
-(deftest-each io-write-to-string
-  "write-to-string converts values to their string representations."
-  :cases (("integer" "42"    "(write-to-string 42)")
-          ("symbol"  "HELLO" "(write-to-string 'hello)"))
-  (expected form)
-  (assert-true (equal expected (run-string form))))
-
-(deftest-each io-format-nil
-  "format with nil destination returns the correctly formatted string."
-  :cases (("string"    "hello world" "(format nil \"hello ~A\" \"world\")")
-          ("number"    "x=42"        "(format nil \"x=~A\" 42)")
-          ("no-args"   "hello"       "(format nil \"hello\")")
-          ("multi"     "1 + 2 = 3"   "(format nil \"~A + ~A = ~A\" 1 2 3)"))
+(deftest-each io-string-format-equal
+  "write-to-string and format nil return the expected string representations."
+  :cases (("write-integer"   "42"          "(write-to-string 42)")
+          ("write-symbol"    "HELLO"       "(write-to-string 'hello)")
+          ("format-string"   "hello world" "(format nil \"hello ~A\" \"world\")")
+          ("format-number"   "x=42"        "(format nil \"x=~A\" 42)")
+          ("format-no-args"  "hello"       "(format nil \"hello\")")
+          ("format-multi"    "1 + 2 = 3"   "(format nil \"~A + ~A = ~A\" 1 2 3)"))
   (expected form)
   (assert-true (equal expected (run-string form))))
 
@@ -1053,17 +938,14 @@
 ;;; With-Output-To-String Tests
 
 (deftest-each compile-with-output-to-string
-  "with-output-to-string collects writes and format output into a string."
-  :cases (("empty"        ""            "(with-output-to-string (s))")
-          ("format"       "hello world" "(with-output-to-string (s) (format s \"hello ~A\" \"world\"))")
-          ("multi-write"  "ab"          "(with-output-to-string (s) (write-string \"a\" s) (write-string \"b\" s))")
-          ("multi-format" "x=1 y=2"     "(with-output-to-string (s) (format s \"x=~A\" 1) (format s \" y=~A\" 2))"))
+  "with-output-to-string, make-string-output-stream, and get-output-stream-string produce the expected string."
+  :cases (("empty"              ""            "(with-output-to-string (s))")
+          ("format"             "hello world" "(with-output-to-string (s) (format s \"hello ~A\" \"world\"))")
+          ("multi-write"        "ab"          "(with-output-to-string (s) (write-string \"a\" s) (write-string \"b\" s))")
+          ("multi-format"       "x=1 y=2"     "(with-output-to-string (s) (format s \"x=~A\" 1) (format s \" y=~A\" 2))")
+          ("string-output-stream" "foo"       "(let ((s (make-string-output-stream))) (write-string \"foo\" s) (get-output-stream-string s))"))
   (expected form)
   (assert-string= expected (run-string form)))
-
-(deftest compile-make-string-output-stream
-  "make-string-output-stream and get-output-stream-string work"
-  (assert-string= "foo" (run-string "(let ((s (make-string-output-stream))) (write-string \"foo\" s) (get-output-stream-string s))")))
 
 ;;; Array/Vector Tests
 
@@ -1199,11 +1081,13 @@
 
 ;;; Consp Fix / Type Predicates Tests
 
-(deftest consp-and
+(deftest-each consp-and
   "consp returns 1 for cons cells, 0 for non-cons; and works with consp."
-  (assert-true (= 1  (run-string "(consp (list 1 2))" :stdlib t)))
-  (assert-true (= 0  (run-string "(consp 42)"         :stdlib t)))
-  (assert-true (= 42 (run-string "(and (consp (list 1)) 42)" :stdlib t))))
+  :cases (("consp-list" 1  "(consp (list 1 2))")
+          ("consp-int"  0  "(consp 42)")
+          ("and-consp" 42  "(and (consp (list 1)) 42)"))
+  (expected form)
+  (assert-run= expected form))
 
 (deftest mini-compiler-self-host
   "Mini compiler can compile expression with pattern matching"
@@ -1401,43 +1285,29 @@
   (form)
   (assert-true (stringp (run-string form))))
 
-;;; Runtime Eval Tests
+;;; Runtime Eval and Setf Variable Tests
 
-(deftest-each compile-eval
-  "eval computes various form types correctly."
-  :cases (("constant"    42 "(eval 42)")
-          ("quoted"       3 "(eval '(+ 1 2))")
-          ("nested"      21 "(eval '(* (+ 1 2) (+ 3 4)))")
-          ("let-form"    15 "(eval '(let ((x 10)) (+ x 5)))")
-          ("constructed" 30 "(let ((op '+) (a 10) (b 20)) (eval (list op a b)))"))
-  (expected form)
-  (assert-= expected (run-string form)))
-
-;;; Setf Variable Tests
-
-(deftest-each compile-setf-variable
-  "setf on plain variables works like setq."
-  :cases (("plain"     10 "(let ((x 0)) (setf x 10) x)")
-          ("increment"  3 "(let ((counter 0)) (setf counter (+ counter 1)) (setf counter (+ counter 1)) (setf counter (+ counter 1)) counter)"))
+(deftest-each compile-eval-and-setf-variable
+  "eval and setf on plain variables return the expected numeric results."
+  :cases (("eval-constant"    42 "(eval 42)")
+          ("eval-quoted"       3 "(eval '(+ 1 2))")
+          ("eval-nested"      21 "(eval '(* (+ 1 2) (+ 3 4)))")
+          ("eval-let-form"    15 "(eval '(let ((x 10)) (+ x 5)))")
+          ("eval-constructed" 30 "(let ((op '+) (a 10) (b 20)) (eval (list op a b)))")
+          ("setf-plain"       10 "(let ((x 0)) (setf x 10) x)")
+          ("setf-increment"    3 "(let ((counter 0)) (setf counter (+ counter 1)) (setf counter (+ counter 1)) (setf counter (+ counter 1)) counter)"))
   (expected form)
   (assert-= expected (run-string form)))
 
 ;;; FR-603: (setf (values ...)) assigns to multiple places
 
-(deftest compile-setf-values
+(deftest-each compile-setf-values
   "(setf (values ...)) assigns multiple values to individual places."
-  (assert-= 10 (run-string
-             "(let ((a 0) (b 0))
-                (setf (values a b) (values 10 20))
-                a)"))
-  (assert-= 20 (run-string
-             "(let ((a 0) (b 0))
-                (setf (values a b) (values 10 20))
-                b)"))
-  (assert-= 30 (run-string
-             "(let ((x 0) (y 0))
-                (setf (values x y) (values 10 20))
-                (+ x y))")))
+  :cases (("reads-a"    10 "(let ((a 0) (b 0)) (setf (values a b) (values 10 20)) a)")
+          ("reads-b"    20 "(let ((a 0) (b 0)) (setf (values a b) (values 10 20)) b)")
+          ("reads-both" 30 "(let ((x 0) (y 0)) (setf (values x y) (values 10 20)) (+ x y))"))
+  (expected form)
+  (assert-= expected (run-string form)))
 
 ;;; Stdlib HOF Tests (with stdlib)
 
@@ -1449,22 +1319,15 @@
   (expected form)
   (assert-true (equal expected (run-string form :stdlib t))))
 
-;;; Let Alias Fix Tests
+;;; Let Alias Fix and Prog1/Prog2 Tests
 
-(deftest-each let-no-alias
-  "LET bindings are independent copies; mutating the original does not affect the copy."
-  :cases (("simple" 0 "(let ((x 0)) (let ((y x)) (setq x 10) y))")
-          ("nested" 5 "(let ((a 5)) (let ((b a)) (let ((c b)) (setq a 99) c))))"))
-  (expected form)
-  (assert-= expected (run-string form)))
-
-;;; Prog1/Prog2/Ignore-Errors Tests
-
-(deftest-each compile-prog1-prog2
-  "prog1 returns first form value; prog2 returns second form value."
-  :cases (("basic"       42 "(prog1 42 (+ 1 2))")
-          ("side-effect"  0 "(let ((x 0)) (prog1 x (setq x 10)))")
-          ("prog2"       42 "(prog2 1 42 3)"))
+(deftest-each let-no-alias-and-prog1-prog2
+  "LET bindings are independent copies; prog1 returns first value; prog2 returns second."
+  :cases (("let-simple"      0  "(let ((x 0)) (let ((y x)) (setq x 10) y))")
+          ("let-nested"      5  "(let ((a 5)) (let ((b a)) (let ((c b)) (setq a 99) c)))")
+          ("prog1-basic"     42 "(prog1 42 (+ 1 2))")
+          ("prog1-side-eff"   0 "(let ((x 0)) (prog1 x (setq x 10)))")
+          ("prog2"           42 "(prog2 1 42 3)"))
   (expected form)
   (assert-= expected (run-string form)))
 
@@ -2165,159 +2028,97 @@
 
 ;;; ANSI CL FR-400/FR-500 Tests (mismatch, make-string, float literals, string-not-equal)
 
-(deftest-each stdlib-mismatch
-  "mismatch returns the index of the first difference, or nil for equal sequences."
-  :cases (("index"  2   "(mismatch (list 1 2 3) (list 1 2 4))")
-          ("equal"  nil "(mismatch (list 1 2 3) (list 1 2 3))")
-          ("prefix" 0   "(mismatch nil (list 1 2))"))
+(deftest-each stdlib-mismatch-make-string-float
+  "mismatch, make-string, and float properties return the expected equal-comparable values."
+  :cases (("mismatch-index"     2      "(mismatch (list 1 2 3) (list 1 2 4))")
+          ("mismatch-equal"     nil    "(mismatch (list 1 2 3) (list 1 2 3))")
+          ("mismatch-prefix"    0      "(mismatch nil (list 1 2))")
+          ("make-string-fill"   "xxxx" "(make-string 4 :initial-element #\\x)")
+          ("make-string-len"    3      "(length (make-string 3))")
+          ("float-literal"      4.0    "(+ 1.5 2.5)")
+          ("float-precision"    53     "(float-precision 1.0d0)")
+          ("float-radix"        2      "(float-radix 1.0)"))
   (expected form)
   (assert-true (equal expected (run-string form :stdlib t))))
 
-(deftest-each compile-make-string
-  "make-string creates strings of the specified length and fill character."
-  :cases (("initial-element" "xxxx" "(make-string 4 :initial-element #\\x)")
-          ("default-len"     3      "(length (make-string 3))"))
-  (expected form)
-  (assert-true (equal expected (run-string form :stdlib t))))
-
-(deftest-each compile-float-properties
-  "Float literals and float-precision/radix return the expected values."
-  :cases (("literal"   4.0 "(+ 1.5 2.5)")
-          ("precision" 53  "(float-precision 1.0d0)")
-          ("radix"     2   "(float-radix 1.0)"))
-  (expected form)
-  (assert-true (equal expected (run-string form :stdlib t))))
-
-(deftest compile-string-not-equal
-  "string-not-equal returns true for different strings and false for case-insensitively equal strings."
-  (assert-true (run-string "(string-not-equal \"abc\" \"def\")" :stdlib t))
-  (assert-true (run-string "(if (string-not-equal \"abc\" \"ABC\") nil t)" :stdlib t)))
+(deftest-each compile-string-not-equal
+  "string-not-equal returns truthy for different strings and falsy for case-insensitively equal strings."
+  :cases (("different"      "(string-not-equal \"abc\" \"def\")")
+          ("case-insensitive" "(if (string-not-equal \"abc\" \"ABC\") nil t)"))
+  (form)
+  (assert-true (run-string form :stdlib t)))
 
 
 ;;; ─── New stdlib tests (FR-495, FR-496, FR-540, FR-547, FR-582, FR-596, etc.) ──
 
-(deftest compile-tailp
-  "tailp checks pointer identity of list tails."
-  (let ((r (run-string "(let* ((x '(1 2 3)) (tail (cddr x))) (tailp tail x))")))
-    (assert-true r)))
+(deftest-each compile-list-tree-predicates
+  "tailp, copy-alist, and tree-equal all return truthy results."
+  :cases (("tailp"      "(let* ((x '(1 2 3)) (tail (cddr x))) (tailp tail x))")
+          ("copy-alist" "(let ((al '((a . 1) (b . 2)))) (equal al (copy-alist al)))")
+          ("tree-equal" "(tree-equal '(1 (2 3)) '(1 (2 3)))"))
+  (form)
+  (assert-true (run-string form)))
 
-(deftest compile-ldiff
-  "ldiff returns list up to a given tail."
-  (let ((r (run-string "(let* ((x '(1 2 3 4)) (tail (cddr x))) (ldiff x tail))")))
-    (assert-equal '(1 2) r)))
+(deftest-each compile-list-tree-mutators
+  "ldiff, get-properties, nunion, nsubst, and nstring-upcase return expected values."
+  :cases (("ldiff"          '(1 2)           "(let* ((x '(1 2 3 4)) (tail (cddr x))) (ldiff x tail))")
+          ("get-properties"  :b              "(get-properties '(:a 1 :b 2 :c 3) '(:b :c))")
+          ("nunion"          '(1 2 3 4)      "(sort (nunion '(1 2 3) '(2 3 4)) #'<)")
+          ("nsubst"          '(99 2 (99 3))  "(nsubst 99 1 '(1 2 (1 3)))")
+          ("nstring-upcase"  "HELLO"         "(nstring-upcase \"hello\")"))
+  (expected form)
+  (assert-equal expected (run-string form)))
 
-(deftest compile-copy-alist
-  "copy-alist returns a fresh alist with the same content."
-  (let ((r (run-string "(let ((al '((a . 1) (b . 2)))) (equal al (copy-alist al)))")))
-    (assert-true r)))
+(deftest compile-array-predicates
+  "array-element-type returns T; array-in-bounds-p checks index validity."
+  (assert-equal t (run-string "(array-element-type (make-array 3))"))
+  (assert-true (run-string "(array-in-bounds-p (make-array 5) 3)"))
+  (assert-true (not (run-string "(array-in-bounds-p (make-array 5) 7)"))))
 
-(deftest compile-tree-equal
-  "tree-equal compares trees recursively."
-  (let ((r (run-string "(tree-equal '(1 (2 3)) '(1 (2 3)))")))
-    (assert-true r)))
-
-(deftest compile-get-properties
-  "get-properties finds first matching plist key."
-  (let ((r (run-string "(get-properties '(:a 1 :b 2 :c 3) '(:b :c))")))
-    (assert-equal :b r)))
-
-(deftest compile-nunion
-  "nunion returns union of two lists."
-  (let ((r (run-string "(sort (nunion '(1 2 3) '(2 3 4)) #'<)")))
-    (assert-equal '(1 2 3 4) r)))
-
-(deftest compile-nsubst
-  "nsubst substitutes numeric values in a tree."
-  (let ((r (run-string "(nsubst 99 1 '(1 2 (1 3)))")))
-    (assert-equal '(99 2 (99 3)) r)))
-
-(deftest compile-nstring-upcase
-  "nstring-upcase returns uppercased string."
-  (let ((r (run-string "(nstring-upcase \"hello\")")))
-    (assert-equal "HELLO" r)))
-
-(deftest compile-array-element-type
-  "array-element-type returns T for all arrays in cl-cc."
-  (let ((r (run-string "(array-element-type (make-array 3))")))
-    (assert-equal t r)))
-
-(deftest compile-array-in-bounds-p
-  "array-in-bounds-p checks index validity."
-  (let ((in  (run-string "(array-in-bounds-p (make-array 5) 3)"))
-        (out (run-string "(array-in-bounds-p (make-array 5) 7)")))
-    (assert-true in)
-    (assert-true (not out))))
-
-(deftest compile-equalp
+(deftest-each compile-equalp
   "equalp compares lists and strings case-insensitively."
-  (let ((r1 (run-string "(equalp '(1 2) '(1 2))"))
-        (r2 (run-string "(equalp \"hello\" \"HELLO\")"))
-        (r3 (run-string "(equalp '(1 2) '(1 3))")))
-    (assert-true r1)
-    (assert-true r2)
-    (assert-true (not r3))))
+  :cases (("lists-equal"   "(equalp '(1 2) '(1 2))"      t)
+          ("string-case"   "(equalp \"hello\" \"HELLO\")"  t)
+          ("lists-unequal" "(equalp '(1 2) '(1 3))"       nil))
+  (form expected-truthy)
+  (if expected-truthy
+      (assert-true (run-string form))
+      (assert-true (not (run-string form)))))
 
 (deftest compile-lisp-implementation-type
-  "lisp-implementation-type returns cl-cc."
-  (let ((r (run-string "(lisp-implementation-type)")))
-    (assert-equal "cl-cc" r)))
+  "lisp-implementation-type returns cl-cc; compiled-function-p returns true for lambdas."
+  (assert-equal "cl-cc" (run-string "(lisp-implementation-type)"))
+  (assert-true (run-string "(compiled-function-p (lambda (x) x))")))
 
-(deftest compile-compiled-function-p
-  "compiled-function-p returns true for lambdas."
-  (let ((r (run-string "(compiled-function-p (lambda (x) x))")))
-    (assert-true r)))
+(deftest-each compile-last-butlast-count
+  "last/butlast with count return the correct sublist."
+  :cases (("last"    '(4 5)   "(last '(1 2 3 4 5) 2)")
+          ("butlast" '(1 2 3) "(butlast '(1 2 3 4 5) 2)"))
+  (expected form)
+  (assert-equal expected (run-string form)))
 
-(deftest compile-last-with-count
-  "last with count returns last N conses."
-  (let ((r (run-string "(last '(1 2 3 4 5) 2)")))
-    (assert-equal '(4 5) r)))
-
-(deftest compile-butlast-with-count
-  "butlast with count returns all but last N conses."
-  (let ((r (run-string "(butlast '(1 2 3 4 5) 2)")))
-    (assert-equal '(1 2 3) r)))
-
-(deftest compile-make-array-initial-contents
-  "make-array with :initial-contents fills the array."
-  (let ((r (run-string "(let ((a (make-array 3 :initial-contents '(10 20 30)))) (aref a 1))")))
-    (assert-= 20 r)))
-
-(deftest compile-make-array-initial-element
-  "make-array with :initial-element fills with default."
-  (let ((r (run-string "(let ((a (make-array 4 :initial-element 7))) (aref a 3))")))
-    (assert-= 7 r)))
-
-(deftest compile-setf-bit
-  "setf bit mutates a vector element using the bit accessor."
-  (let ((r (run-string "(let ((bv (make-array 4))) (setf (bit bv 2) 1) (bit bv 2))")))
-    (assert-= 1 r)))
-
-(deftest compile-search-vector
-  "search finds a pattern in a vector."
-  (let ((r (run-string "(search '(2 3) '(1 2 3 4))")))
-    (assert-= 1 r)))
+(deftest-each compile-array-integer-results
+  "make-array, setf-bit, and search return integer results."
+  :cases (("initial-contents" 20 "(let ((a (make-array 3 :initial-contents '(10 20 30)))) (aref a 1))")
+          ("initial-element"   7 "(let ((a (make-array 4 :initial-element 7))) (aref a 3))")
+          ("setf-bit"          1 "(let ((bv (make-array 4))) (setf (bit bv 2) 1) (bit bv 2))")
+          ("search-vector"     1 "(search '(2 3) '(1 2 3 4))"))
+  (expected form)
+  (assert-= expected (run-string form)))
 
 (deftest compile-write-to-string-keywords
-  "write-to-string with keyword args ignores unknown keywords."
-  (let ((r (run-string "(write-to-string 42 :base 10)")))
-    (assert-equal "42" r)))
-
-(deftest compile-setf-get
-  "setf on GET updates a symbol property and returns the stored value."
-  (let ((r (run-string "(let ((sym 'hello)) (setf (get sym :answer) 42) (list (get sym :answer) (symbol-plist sym)))")))
-    (assert-equal '(42 (:answer 42)) r)))
+  "write-to-string with keyword args; setf on GET updates a symbol property."
+  (assert-equal "42" (run-string "(write-to-string 42 :base 10)"))
+  (assert-equal '(42 (:answer 42)) (run-string "(let ((sym 'hello)) (setf (get sym :answer) 42) (list (get sym :answer) (symbol-plist sym)))")))
 
 ;;; ─── FR-635: bit-nor / bit-nand / bit-eqv ────────────────────────────────────
 
-(deftest compile-bit-nor
-  "bit-nor computes element-wise NOR."
-  (let ((r (run-string "(bit-nor #*1010 #*1100)")))
-    (assert-true (vectorp r))))
-
-(deftest compile-bit-eqv
-  "bit-eqv computes element-wise XNOR."
-  (let ((r (run-string "(bit-eqv #*1010 #*0101)")))
-    (assert-true (vectorp r))))
+(deftest-each compile-bit-vector-ops
+  "bit-nor and bit-eqv produce bit-vector results."
+  :cases (("nor" "(bit-nor #*1010 #*1100)")
+          ("eqv" "(bit-eqv #*1010 #*0101)"))
+  (form)
+  (assert-true (vectorp (run-string form))))
 
 ;;; ─── FR-497: with-hash-table-iterator ────────────────────────────────────────
 
@@ -2344,16 +2145,12 @@
 
 ;;; ─── FR-637: string comparison with keyword bounds ───────────────────────────
 
-(deftest compile-string=-start-end
-  "string= with :start1/:end1 compares substrings."
-  (let ((r (run-string "(string= \"hello world\" \"world\" :start1 6)")))
-    (assert-true r)))
-
-(deftest compile-string<-start-end
-  "string< with :start2/:end2 compares substrings; equal substrings return NIL."
-  (let ((r (run-string "(string< \"ab\" \"abcde\" :start2 0 :end2 2)")))
-    ;; "ab" < "ab" is false — ANSI returns NIL
-    (assert-true (null r))))
+(deftest-each compile-string-comparison-bounds
+  "String comparison functions accept :start/:end bounds."
+  :cases (("equal-substring" t   "(string= \"hello world\" \"world\" :start1 6)")
+          ("less-equal-nil"  nil "(string< \"ab\" \"abcde\" :start2 0 :end2 2)"))
+  (expected form)
+  (assert-equal expected (run-string form)))
 
 ;;; ─── FR-608: with-input-from-string keyword args ─────────────────────────────
 
@@ -2363,69 +2160,42 @@
   (read s))")))
     (assert-equal 'cl-cc::world r)))
 
-;;; ─── FR-363: with-compilation-unit ───────────────────────────────────────────
+;;; ─── FR-363/FR-397/FR-439: compilation meta-forms ───────────────────────────
 
-(deftest compile-with-compilation-unit
-  "with-compilation-unit evaluates body."
-  (let ((r (run-string "(with-compilation-unit () (+ 1 2))")))
-    (assert-= 3 r)))
-
-;;; ─── FR-397: locally ─────────────────────────────────────────────────────────
-
-(deftest compile-locally
-  "locally evaluates forms and strips leading declare."
-  (let ((r (run-string "(locally (+ 10 20))")))
-    (assert-= 30 r)))
-
-;;; ─── FR-439: compiler-let ────────────────────────────────────────────────────
-
-(deftest compile-compiler-let
-  "compiler-let acts as let at runtime."
-  (let ((r (run-string "(compiler-let ((x 5) (y 3)) (+ x y))")))
-    (assert-= 8 r)))
+(deftest-each compile-meta-forms
+  "with-compilation-unit/locally/compiler-let evaluate body and return numeric result."
+  :cases (("with-compilation-unit" 3  "(with-compilation-unit () (+ 1 2))")
+          ("locally"              30  "(locally (+ 10 20))")
+          ("compiler-let"         8  "(compiler-let ((x 5) (y 3)) (+ x y))"))
+  (expected form)
+  (assert-= expected (run-string form)))
 
 ;;; ─── FR-566: pathname host bridges ───────────────────────────────────────────
 
-(deftest compile-pathname-name
-  "pathname-name returns filename without extension."
-  (let ((r (run-string "(pathname-name \"/tmp/foo.lisp\")")))
-    (assert-equal "foo" r)))
-
-(deftest compile-pathname-type
-  "pathname-type returns file extension."
-  (let ((r (run-string "(pathname-type \"/tmp/foo.lisp\")")))
-    (assert-equal "lisp" r)))
+(deftest-each compile-pathname-accessors
+  "pathname-name and pathname-type extract the basename and extension."
+  :cases (("name-string"    "foo"  "(pathname-name \"/tmp/foo.lisp\")")
+          ("type-string"    "lisp" "(pathname-type \"/tmp/foo.lisp\")")
+          ("name-hash-p"    "foo"  "(pathname-name #P\"/tmp/foo.lisp\")")
+          ("type-hash-p"    "txt"  "(pathname-type #P\"/tmp/bar.txt\")"))
+  (expected form)
+  (assert-equal expected (run-string form)))
 
 ;;; ─── FR-572: #nA multi-dimensional array literal ─────────────────────────────
 
-(deftest compile-hash-na-2d-array
-  "#2A creates a 2D array with correct dimensions."
+(deftest compile-hash-na-arrays
+  "#2A creates a 2D array; #1A creates a 1D array (same as #(...))."
   (let ((r (run-string "#2A((1 2 3) (4 5 6))")))
     (assert-true (arrayp r))
     (assert-= 2 (array-rank r))
     (assert-= 2 (array-dimension r 0))
     (assert-= 3 (array-dimension r 1))
     (assert-= 1 (aref r 0 0))
-    (assert-= 6 (aref r 1 2))))
-
-(deftest compile-hash-na-1d-array
-  "#1A creates a 1D array (same as #(...))."
+    (assert-= 6 (aref r 1 2)))
   (let ((r (run-string "#1A(10 20 30)")))
     (assert-true (vectorp r))
     (assert-= 3 (length r))
     (assert-= 20 (aref r 1))))
-
-;;; ─── FR-572: #P pathname literal ─────────────────────────────────────────────
-
-(deftest compile-hash-p-pathname-name
-  "#P pathname literal lexes and pathname-name extracts the basename."
-  (let ((r (run-string "(pathname-name #P\"/tmp/foo.lisp\")")))
-    (assert-equal "foo" r)))
-
-(deftest compile-hash-p-pathname-type
-  "#P pathname literal lexes and pathname-type extracts the extension."
-  (let ((r (run-string "(pathname-type #P\"/tmp/bar.txt\")")))
-    (assert-equal "txt" r)))
 
 ;;; ─── FR-612: read-char / read-line / read with eof args ──────────────────────
 
@@ -2480,32 +2250,25 @@
 
 ;;; ─── FR-579: string-to-octets / octets-to-string ─────────────────────────────
 
-(deftest compile-string-to-octets
-  "string-to-octets converts a string to a byte vector."
+(deftest compile-string-octets
+  "string-to-octets converts to byte vector; octets-to-string round-trips."
   (let ((r (run-string "(string-to-octets \"hello\")")))
     (assert-true (vectorp r))
     (assert-= 104 (aref r 0))  ; 'h' = ASCII 104
-    (assert-= 5 (length r))))
-
-(deftest compile-octets-to-string
-  "octets-to-string round-trips through string-to-octets."
-  (let ((r (run-string "(octets-to-string (string-to-octets \"hello\"))")))
-    (assert-string= "hello" r)))
+    (assert-= 5 (length r)))
+  (assert-string= "hello" (run-string "(octets-to-string (string-to-octets \"hello\"))")))
 
 ;;; ─── FR-502/507: fill/replace/copy-seq vector support ───────────────────────
 
 (deftest compile-fill-vector
-  "fill works on a vector, modifying elements in place."
+  "fill works on a vector; with :start/:end it modifies only the specified range."
   (let ((r (run-string "(let ((v (make-array 3 :initial-contents '(1 2 3))))
                            (fill v 0)
                            v)" :stdlib t)))
     (assert-true (vectorp r))
     (assert-= 0 (aref r 0))
     (assert-= 0 (aref r 1))
-    (assert-= 0 (aref r 2))))
-
-(deftest compile-fill-vector-start-end
-  "fill with :start/:end modifies only the specified range."
+    (assert-= 0 (aref r 2)))
   (let ((r (run-string "(let ((v (make-array 5 :initial-contents '(0 1 2 3 4))))
                            (fill v 9 :start 1 :end 4)
                            v)" :stdlib t)))
@@ -2516,8 +2279,8 @@
     (assert-= 9 (aref r 3))
     (assert-= 4 (aref r 4))))
 
-(deftest compile-replace-vectors
-  "replace copies elements from source vector into dest vector."
+(deftest compile-replace-and-copy-seq-vector
+  "replace copies elements into dest; copy-seq returns a fresh copy."
   (let ((r (run-string "(let ((d (make-array 3 :initial-contents '(0 0 0)))
                               (s (make-array 3 :initial-contents '(1 2 3))))
                            (replace d s)
@@ -2525,10 +2288,7 @@
     (assert-true (vectorp r))
     (assert-= 1 (aref r 0))
     (assert-= 2 (aref r 1))
-    (assert-= 3 (aref r 2))))
-
-(deftest compile-copy-seq-vector
-  "copy-seq on a vector returns a fresh copy."
+    (assert-= 3 (aref r 2)))
   (let ((r (run-string "(let ((v (make-array 3 :initial-contents '(1 2 3))))
                            (copy-seq v))" :stdlib t)))
     (assert-true (vectorp r))
@@ -2537,46 +2297,33 @@
 
 ;;; ─── FR-697: assoc/member with :test/:key keyword args ───────────────────────
 
-(deftest compile-member-test-keyword
-  "member with :test #'equal works for string elements."
-  (let ((r (run-string "(member \"b\" '(\"a\" \"b\" \"c\") :test #'equal)" :stdlib t)))
-    (assert-equal '("b" "c") r)))
+(deftest-each compile-sequence-test-keyword
+  "member and assoc accept :test/#'equal for string equality."
+  :cases (("member-test"   '("b" "c") "(member \"b\" '(\"a\" \"b\" \"c\") :test #'equal)")
+          ("assoc-test"    '("b" . 2) "(assoc \"b\" '((\"a\" . 1) (\"b\" . 2)) :test #'equal)"))
+  (expected form)
+  (assert-equal expected (run-string form :stdlib t)))
 
-(deftest compile-member-key-keyword
-  "member with :key extracts the correct field."
+(deftest compile-member-assoc-key-keyword
+  "member and assoc with :key extract or transform the correct field."
   (let ((r (run-string "(member 2 '((1 . a) (2 . b) (3 . c)) :key #'car)" :stdlib t)))
     (assert-true (consp r))
-    (assert-= 2 (caar r))))
-
-(deftest compile-assoc-test-keyword
-  "assoc with :test #'equal works for string keys."
-  (let ((r (run-string "(assoc \"b\" '((\"a\" . 1) (\"b\" . 2)) :test #'equal)" :stdlib t)))
-    (assert-equal '("b" . 2) r)))
-
-(deftest compile-assoc-key-keyword
-  "assoc with :key transforms the key before comparison."
+    (assert-= 2 (caar r)))
   ;; key squares each car: look for squared value 4 in ((1 . a) (2 . b) (3 . c))
-  ;; => 2^2=4 matches item 4, returns (2 . b)
+  ;; => 2^2=4 matches item (2 . b)
   (let ((r (run-string "(assoc 4 '((1 . a) (2 . b) (3 . c)) :key (lambda (x) (* x x)))" :stdlib t)))
     (assert-true (consp r))
     (assert-= 2 (car r))))
 
 ;;; ─── position/count/find-if with keyword args ────────────────────────────────
 
-(deftest compile-position-test-keyword
-  "position with :test #'equal works for strings."
-  (let ((r (run-string "(position \"b\" '(\"a\" \"b\" \"c\") :test #'equal)" :stdlib t)))
-    (assert-= 1 r)))
-
-(deftest compile-position-key-keyword
-  "position with :key extracts the right field."
-  (let ((r (run-string "(position 2 '((1 . a) (2 . b) (3 . c)) :key #'car)" :stdlib t)))
-    (assert-= 1 r)))
-
-(deftest compile-count-test-keyword
-  "count with :test #'equal counts strings correctly."
-  (let ((r (run-string "(count \"a\" '(\"a\" \"b\" \"a\") :test #'equal)" :stdlib t)))
-    (assert-= 2 r)))
+(deftest-each compile-sequence-position-count-keywords
+  "position and count accept :test and :key keyword args."
+  :cases (("position-test" 1 "(position \"b\" '(\"a\" \"b\" \"c\") :test #'equal)")
+          ("position-key"  1 "(position 2 '((1 . a) (2 . b) (3 . c)) :key #'car)")
+          ("count-test"    2 "(count \"a\" '(\"a\" \"b\" \"a\") :test #'equal)"))
+  (expected form)
+  (assert-= expected (run-string form :stdlib t)))
 
 (deftest compile-find-if-key-keyword
   "find-if with :key applies the key function."
@@ -2584,63 +2331,41 @@
     (assert-true (consp r))
     (assert-= 2 (car r))))
 
-;;; ─── remove-duplicates with :test keyword ────────────────────────────────────
+;;; ─── remove-duplicates and remove with :test keyword ────────────────────────
 
-(deftest compile-remove-duplicates-test-keyword
-  "remove-duplicates with :test #'equal handles string equality."
-  (let ((r (run-string "(remove-duplicates '(\"a\" \"b\" \"a\") :test #'equal)" :stdlib t)))
-    (assert-= 2 (length r))))
-
-;;; ─── remove with :test keyword ────────────────────────────────────────────────
-
-(deftest compile-remove-test-keyword
-  "remove with :test #'equal removes matching strings."
-  (let ((r (run-string "(remove \"a\" '(\"a\" \"b\" \"a\") :test #'equal)" :stdlib t)))
-    (assert-equal '("b") r)))
+(deftest compile-remove-test-keywords
+  "remove-duplicates and remove with :test #'equal handle string equality."
+  (assert-= 2 (length (run-string "(remove-duplicates '(\"a\" \"b\" \"a\") :test #'equal)" :stdlib t)))
+  (assert-equal '("b") (run-string "(remove \"a\" '(\"a\" \"b\" \"a\") :test #'equal)" :stdlib t)))
 
 ;;; ─── string-upcase/downcase with :start/:end ─────────────────────────────────
 
-(deftest compile-string-upcase-start-end
-  "string-upcase with :start/:end uppercases a substring."
-  (let ((r (run-string "(string-upcase \"hello\" :start 1 :end 3)")))
-    (assert-string= "hELlo" r)))
-
-(deftest compile-string-downcase-start-end
-  "string-downcase with :start/:end lowercases a substring."
-  (let ((r (run-string "(string-downcase \"HELLO\" :start 1 :end 4)")))
-    (assert-string= "HellO" r)))
+(deftest-each compile-string-case-bounds
+  "string-upcase and string-downcase accept :start/:end keyword args."
+  :cases (("upcase"   "hELlo" "(string-upcase \"hello\" :start 1 :end 3)")
+          ("downcase" "HellO" "(string-downcase \"HELLO\" :start 1 :end 4)"))
+  (expected form)
+  (assert-string= expected (run-string form)))
 
 ;;; ─── FR-599: #n= / #n# label and reference reader macros ────────────────────
 
-(deftest compile-hash-n-eq-label
-  "#n= labels a data object and #n# references it."
+(deftest compile-hash-n-eq
+  "#n= labels a data object and #n# references it; works with strings too."
   (let ((r (run-string "(list #0=(1 2 3) #0#)")))
     ;; Both elements are the same list (1 2 3)
     (assert-equal '(1 2 3) (first r))
-    (assert-equal '(1 2 3) (second r))))
-
-(deftest compile-hash-n-eq-string
-  "#0= with a string literal."
-  (let ((r (run-string "#0=\"hello\"")))
-    (assert-string= "hello" r)))
+    (assert-equal '(1 2 3) (second r)))
+  (assert-string= "hello" (run-string "#0=\"hello\"")))
 
 ;;; ─── FR-641: union/intersection/set-difference with :test ────────────────────
 
-(deftest compile-union-test-keyword
-  "union with :test #'equal works for string lists."
-  (let ((r (run-string "(sort (union '(\"a\" \"b\") '(\"b\" \"c\") :test #'equal) #'string<)" :stdlib t)))
-    (assert-= 3 (length r))
-    (assert-string= "a" (first r))))
-
-(deftest compile-set-difference-test-keyword
-  "set-difference with :test #'equal works for string lists."
-  (let ((r (run-string "(set-difference '(\"a\" \"b\" \"c\") '(\"b\") :test #'equal)" :stdlib t)))
-    (assert-= 2 (length r))))
-
-(deftest compile-intersection-test-keyword
-  "intersection with :test #'equal works for string lists."
-  (let ((r (run-string "(intersection '(\"a\" \"b\" \"c\") '(\"b\" \"c\" \"d\") :test #'equal)" :stdlib t)))
-    (assert-= 2 (length r))))
+(deftest-each compile-set-ops-test-keyword
+  "union and intersection accept :test #'equal for string equality."
+  :cases (("union"        3 "(length (union '(\"a\" \"b\") '(\"b\" \"c\") :test #'equal))")
+          ("intersection" 2 "(length (intersection '(\"a\" \"b\" \"c\") '(\"b\" \"c\" \"d\") :test #'equal))")
+          ("set-diff"     2 "(length (set-difference '(\"a\" \"b\" \"c\") '(\"b\") :test #'equal))"))
+  (expected form)
+  (assert-= expected (run-string form :stdlib t)))
 
 ;;; ─── FR-688: delete/substitute with :test keyword ────────────────────────────
 
@@ -2672,31 +2397,30 @@
 
 ;;; ─── FR-396: declaim macro stub ─────────────────────────────────────────────
 
-(deftest compile-declaim-toplevel
-  "declaim at top level is silently ignored."
-  (assert-true (null (run-string "(declaim (optimize (speed 3))) nil"))))
-
-(deftest compile-declaim-inline-noop
-  "declaim inline is a no-op — function still works."
-  (let ((r (run-string "(declaim (inline square)) (defun square (x) (* x x)) (square 5)" :stdlib t)))
-    (assert-= 25 r)))
+(deftest-each compile-declaim-forms
+  "declaim at top level is silently ignored; inline-declared functions still work."
+  :cases (("optimize-nil" nil "(declaim (optimize (speed 3))) nil")
+          ("inline-works" 25  "(declaim (inline square)) (defun square (x) (* x x)) (square 5)"))
+  (expected form)
+  (assert-equal expected (run-string form :stdlib t)))
 
 ;;; ─── FR-598: stream typep ────────────────────────────────────────────────────
 
-(deftest compile-typep-stream
-  "typep checks stream type correctly."
-  (assert-true (run-string "(typep *standard-output* 'stream)"))
-  (assert-true (run-string "(typep *standard-output* 'output-stream)"))
-  (assert-= 0 (run-string "(typep 42 'stream)")))
+(deftest-each compile-typep-stream-truthy
+  "typep returns truthy for various stream types."
+  :cases (("standard-output-stream" "(typep *standard-output* 'stream)"                              nil)
+          ("output-stream-type"     "(typep *standard-output* 'output-stream)"                       nil)
+          ("string-output-stream"   "(let ((s (make-string-output-stream))) (typep s 'string-stream))" t))
+  (form stdlib-p)
+  (assert-true (run-string form :stdlib stdlib-p)))
 
-(deftest compile-typep-string-stream
-  "typep checks string-stream type correctly."
-  (let ((r (run-string "(let ((s (make-string-output-stream))) (typep s 'string-stream))" :stdlib t)))
-    (assert-true r)))
+(deftest compile-typep-non-stream
+  "typep returns 0 for a non-stream value."
+  (assert-= 0 (run-string "(typep 42 'stream)")))
 
 ;;; ─── FR-603: (setf (values ...)) ────────────────────────────────────────────
 
-(deftest compile-setf-values
+(deftest compile-setf-values-floor
   "(setf (values a b) (floor 7 3)) destructures multiple values."
   (let ((r (run-string "(let (a b) (setf (values a b) (floor 7 3)) (list a b))" :stdlib t)))
     (assert-= 2 (first r))
@@ -2704,34 +2428,30 @@
 
 ;;; ─── FR-607: documentation storage ──────────────────────────────────────────
 
-(deftest compile-documentation-defun
-  "defun with docstring stores it in *documentation-table*."
-  (let ((r (run-string "(defun greet (x) \"Greet X.\" (format nil \"Hello ~A\" x)) (documentation 'greet 'function)" :stdlib t)))
-    (assert-string= "Greet X." r)))
-
-(deftest compile-documentation-no-docstring
-  "defun without docstring returns nil from documentation."
-  (let ((r (run-string "(defun add2 (x) (+ x 2)) (documentation 'add2 'function)" :stdlib t)))
-    (assert-true (null r))))
+(deftest-each compile-documentation
+  "defun with docstring stores it; without docstring returns nil."
+  :cases (("with-docstring"    "Greet X." "(defun greet (x) \"Greet X.\" (format nil \"Hello ~A\" x)) (documentation 'greet 'function)")
+          ("without-docstring" nil        "(defun add2 (x) (+ x 2)) (documentation 'add2 'function)"))
+  (expected form)
+  (assert-equal expected (run-string form :stdlib t)))
 
 ;;; FR-562: Unicode character names via lexer
-(deftest compile-unicode-char-name
-  "Lexer resolves Unicode character names via cl:name-char."
-  (assert-= 945 (run-string "(char-code #\\Greek_Small_Letter_Alpha)"))
-  (assert-= 9731 (run-string "(char-code #\\Snowman)")))
-
-(deftest compile-unicode-code-char
-  "code-char supports full Unicode range."
-  (assert-= 128512 (run-string "(char-code (code-char 128512))")))
+(deftest-each compile-unicode-char-code
+  "Lexer resolves Unicode character names and code-char supports full Unicode range."
+  :cases (("greek-alpha" 945    "(char-code #\\Greek_Small_Letter_Alpha)")
+          ("snowman"     9731   "(char-code #\\Snowman)")
+          ("emoji"       128512 "(char-code (code-char 128512))"))
+  (expected form)
+  (assert-= expected (run-string form)))
 
 ;;; FR-687: make-string :element-type with both keywords
-(deftest compile-make-string-element-type
-  "make-string accepts :element-type and ignores it."
-  (assert-= 5 (run-string "(length (make-string 5 :element-type 'character))")))
-
-(deftest compile-make-string-both-keywords
-  "make-string with both :initial-element and :element-type correctly fills."
-  (let ((r (run-string "(make-string 3 :initial-element #\\x :element-type 'character)")))
-    (assert-string= "xxx" r)))
+(deftest-each compile-make-string-element-type
+  "make-string accepts :element-type; with both keywords it fills correctly."
+  :cases (("length"  "(length (make-string 5 :element-type 'character))"               5     nil)
+          ("fill"    "(make-string 3 :initial-element #\\x :element-type 'character)"  "xxx" t))
+  (form expected string-p)
+  (if string-p
+      (assert-string= expected (run-string form))
+      (assert-= expected (run-string form))))
 
 ;;; (run-tests is defined in framework.lisp)

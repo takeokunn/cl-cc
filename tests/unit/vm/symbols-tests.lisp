@@ -7,6 +7,14 @@
 
 ;;; ─── Symbol Operations ───────────────────────────────────────────────────
 
+(defun str-vm ()
+  "Create a minimal vm-state for symbol tests."
+  (make-instance 'cl-cc::vm-state))
+
+(defun str-exec (inst state)
+  "Execute a single instruction against STATE."
+  (cl-cc::execute-instruction inst state 0 (make-hash-table :test #'equal)))
+
 (deftest sym-symbol-name
   "vm-symbol-name returns symbol's name string."
   (let ((s (str-vm)))

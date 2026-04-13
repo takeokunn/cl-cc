@@ -232,27 +232,22 @@
 
 ;;; ─── Section 10: OPEN ───────────────────────────────────────────────────────
 
-(deftest codegen-phase2-open-compilation
-  "Compiling (open path): emits vm-open-file defaulting to :input direction."
+(deftest-each codegen-phase2-open-direction
+  "(open path) defaults to :input; explicit :direction :output sets :output."
+  :cases (("default-input"
+           (list (make-ast-quote :value "/tmp/in.txt"))
+           :input)
+          ("explicit-output"
+           (list (make-ast-quote :value "/tmp/out.txt")
+                 (make-ast-var :name :direction)
+                 (make-ast-var :name :output))
+           :output))
+  (args expected-dir)
   (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'open
-                                :args (list (make-ast-quote :value "/tmp/in.txt")))
-                 ctx)
+    (compile-ast (make-ast-call :func 'open :args args) ctx)
     (let ((inst (codegen-find-inst ctx 'cl-cc::vm-open-file)))
       (assert-true inst)
-      (assert-eq :input (cl-cc::vm-open-file-direction inst)))))
-
-(deftest codegen-phase2-open-with-output-direction
-  "Compiling (open path :direction :output) sets direction to :output."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'open
-                                :args (list (make-ast-quote :value "/tmp/out.txt")
-                                            (make-ast-var :name :direction)
-                                            (make-ast-var :name :output)))
-                 ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc::vm-open-file)))
-      (assert-true inst)
-      (assert-eq :output (cl-cc::vm-open-file-direction inst)))))
+      (assert-eq expected-dir (cl-cc::vm-open-file-direction inst)))))
 
 ;;; ─── Section 11: PEEK-CHAR ──────────────────────────────────────────────────
 
@@ -269,20 +264,20 @@
 
 ;;; ─── Section 12: WRITE-STRING ───────────────────────────────────────────────
 
-(deftest codegen-phase2-write-string-one-arg-emits-vm-princ
-  "Compiling (write-string str) with no stream emits vm-princ."
+(deftest-each codegen-phase2-write-string-arg-dispatch
+  "write-string routes to vm-princ (no stream) or vm-stream-write-string-inst (with stream)."
+  :cases (("one-arg"
+           nil
+           (list (make-ast-quote :value "hello"))
+           'cl-cc::vm-princ)
+          ("two-args"
+           (list (cons 'out :R20))
+           (list (make-ast-quote :value "hello")
+                 (make-ast-var :name 'out))
+           'cl-cc::vm-stream-write-string-inst))
+  (env args inst-type)
   (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'write-string
-                                :args (list (make-ast-quote :value "hello")))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-princ))))
-
-(deftest codegen-phase2-write-string-two-args-emits-stream-write
-  "Compiling (write-string str stream) emits vm-stream-write-string-inst."
-  (let ((ctx (make-codegen-ctx)))
-    (setf (cl-cc::ctx-env ctx) (list (cons 'out :R20)))
-    (compile-ast (make-ast-call :func 'write-string
-                                :args (list (make-ast-quote :value "hello")
-                                            (make-ast-var :name 'out)))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-stream-write-string-inst))))
+    (when env
+      (setf (cl-cc::ctx-env ctx) env))
+    (compile-ast (make-ast-call :func 'write-string :args args) ctx)
+    (assert-true (codegen-find-inst ctx inst-type))))

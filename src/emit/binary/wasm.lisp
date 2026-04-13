@@ -221,12 +221,6 @@
       (encode-valtype type-spec buf)
       (wasm-buf-write-byte buf (if (eq mutability :immutable) 0 1)))))
 
-(defun encode-array-type (element-type mutability buf)
-  "Encode an array type (0x5e element-type mutability) into BUF."
-  (wasm-buf-write-byte buf #x5e)
-  (encode-valtype element-type buf)
-  (wasm-buf-write-byte buf (if (eq mutability :immutable) 0 1)))
-
 ;;; ------------------------------------------------------------
 ;;; Section 8: Code Section - Local Variable Encoding
 ;;; ------------------------------------------------------------
@@ -239,77 +233,6 @@
     (destructuring-bind (count type-spec) group
       (wasm-buf-write-uleb128 buf count)
       (encode-valtype type-spec buf))))
-
-;;; ------------------------------------------------------------
-;;; Section 9: Module Finalization
-;;; ------------------------------------------------------------
-
-(defun wasm-finalize-module (builder)
-  "Assemble the complete WASM binary module from BUILDER sections.
-   Returns a (simple-array (unsigned-byte 8) (*)) suitable for writing to disk."
-  (let ((out (make-wasm-buffer)))
-    ;; Magic bytes + version
-    (wasm-buf-write-bytes out +wasm-magic-bytes+)
-    (wasm-buf-write-bytes out +wasm-version-bytes+)
-    ;; Section 1: Type section
-    (when (plusp (wasm-bin-type-count builder))
-      (let ((payload (make-wasm-buffer)))
-        (wasm-buf-write-uleb128 payload (wasm-bin-type-count builder))
-        (wasm-buf-write-bytes payload (wasm-bin-type-buf builder))
-        (wasm-write-section out 1 payload)))
-    ;; Section 2: Import section
-    (when (plusp (wasm-bin-import-count builder))
-      (let ((payload (make-wasm-buffer)))
-        (wasm-buf-write-uleb128 payload (wasm-bin-import-count builder))
-        (wasm-buf-write-bytes payload (wasm-bin-import-buf builder))
-        (wasm-write-section out 2 payload)))
-    ;; Section 3: Function section (type indices)
-    (when (plusp (wasm-bin-func-count builder))
-      (let ((payload (make-wasm-buffer)))
-        (wasm-buf-write-uleb128 payload (wasm-bin-func-count builder))
-        (wasm-buf-write-bytes payload (wasm-bin-func-buf builder))
-        (wasm-write-section out 3 payload)))
-    ;; Section 4: Table section
-    (when (plusp (wasm-bin-table-count builder))
-      (let ((payload (make-wasm-buffer)))
-        (wasm-buf-write-uleb128 payload (wasm-bin-table-count builder))
-        (wasm-buf-write-bytes payload (wasm-bin-table-buf builder))
-        (wasm-write-section out 4 payload)))
-    ;; Section 5: Memory section (no count field in builder; emit raw buf if non-empty)
-    (when (and (wasm-bin-memory-buf builder)
-               (plusp (length (wasm-bin-memory-buf builder))))
-      (wasm-write-section out 5 (wasm-bin-memory-buf builder)))
-    ;; Section 6: Global section
-    (when (plusp (wasm-bin-global-count builder))
-      (let ((payload (make-wasm-buffer)))
-        (wasm-buf-write-uleb128 payload (wasm-bin-global-count builder))
-        (wasm-buf-write-bytes payload (wasm-bin-global-buf builder))
-        (wasm-write-section out 6 payload)))
-    ;; Section 7: Export section
-    (when (plusp (wasm-bin-export-count builder))
-      (let ((payload (make-wasm-buffer)))
-        (wasm-buf-write-uleb128 payload (wasm-bin-export-count builder))
-        (wasm-buf-write-bytes payload (wasm-bin-export-buf builder))
-        (wasm-write-section out 7 payload)))
-    ;; Section 9: Element section
-    (when (plusp (wasm-bin-element-count builder))
-      (let ((payload (make-wasm-buffer)))
-        (wasm-buf-write-uleb128 payload (wasm-bin-element-count builder))
-        (wasm-buf-write-bytes payload (wasm-bin-element-buf builder))
-        (wasm-write-section out 9 payload)))
-    ;; Section 10: Code section
-    (when (plusp (wasm-bin-code-count builder))
-      (let ((payload (make-wasm-buffer)))
-        (wasm-buf-write-uleb128 payload (wasm-bin-code-count builder))
-        (wasm-buf-write-bytes payload (wasm-bin-code-buf builder))
-        (wasm-write-section out 10 payload)))
-    ;; Section 11: Data section
-    (when (plusp (wasm-bin-data-count builder))
-      (let ((payload (make-wasm-buffer)))
-        (wasm-buf-write-uleb128 payload (wasm-bin-data-count builder))
-        (wasm-buf-write-bytes payload (wasm-bin-data-buf builder))
-        (wasm-write-section out 11 payload)))
-    (wasm-buffer-to-array out)))
 
 (defun write-wasm-file (filename bytes)
   "Write BYTES (a (simple-array (unsigned-byte 8) (*))) to FILENAME."

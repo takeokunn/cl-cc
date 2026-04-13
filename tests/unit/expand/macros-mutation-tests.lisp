@@ -5,7 +5,7 @@
 
 (defsuite macros-mutation-suite
   :description "Tests for mutation-style stdlib macros"
-  :parent cl-cc-suite)
+  :parent cl-cc-integration-suite)
 
 (in-suite macros-mutation-suite)
 
@@ -57,10 +57,9 @@
     (assert-= (length member-call) 5)
     (assert-equal last-arg '#'equal)))
 
-(deftest pushnew-runtime-adds-missing
-  "PUSHNEW adds item when not present in place."
-  (assert-= (run-string "(let ((lst (list 1 2 3))) (pushnew 4 lst) (length lst))") 4))
-
-(deftest pushnew-runtime-no-duplicate
-  "PUSHNEW does not add item already present."
-  (assert-= (run-string "(let ((lst (list 1 2 3))) (pushnew 2 lst) (length lst))") 3))
+(deftest-each pushnew-runtime-behavior
+  "PUSHNEW adds missing elements but skips duplicates."
+  :cases (("adds-missing"  4 "(let ((lst (list 1 2 3))) (pushnew 4 lst) (length lst))")
+          ("no-duplicate"  3 "(let ((lst (list 1 2 3))) (pushnew 2 lst) (length lst))"))
+  (expected code)
+  (assert-= expected (run-string code)))

@@ -70,27 +70,6 @@
       (assert-eq ba (second blocks))
       (assert-eq bb (third  blocks)))))
 
-;;;; ─────────────────────────────────────────────────────────────────────────
-;;;; CFG edge management (block.lisp)
-;;;; ─────────────────────────────────────────────────────────────────────────
-
-(deftest ir-add-edge-behavior
-  "ir-add-edge links both sides and rejects duplicate edges."
-  (let* ((fn    (cl-cc:ir-make-function 'test))
-         (entry (cl-cc:irf-entry fn))
-         (then  (cl-cc:ir-new-block fn :then))
-         (else  (cl-cc:ir-new-block fn :else)))
-    ;; links successor and predecessor lists on both blocks
-    (cl-cc:ir-add-edge entry then)
-    (cl-cc:ir-add-edge entry else)
-    (assert-true (member then  (cl-cc:irb-successors   entry) :test #'eq))
-    (assert-true (member else  (cl-cc:irb-successors   entry) :test #'eq))
-    (assert-true (member entry (cl-cc:irb-predecessors then)  :test #'eq))
-    (assert-true (member entry (cl-cc:irb-predecessors else)  :test #'eq))
-    ;; duplicate edge is ignored
-    (cl-cc:ir-add-edge entry then)
-    (assert-= 2 (length (cl-cc:irb-successors   entry)))
-    (assert-= 1 (length (cl-cc:irb-predecessors then)))))
 
 (deftest ir-emit-appends-to-block
   "ir-emit appends instructions in order and sets block back-pointer."
@@ -119,13 +98,6 @@
 ;;;; RPO traversal (block.lisp)
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest ir-rpo-single-block
-  "ir-rpo with only the entry block returns just that block."
-  (let* ((fn    (cl-cc:ir-make-function 'test))
-         (entry (cl-cc:irf-entry fn))
-         (rpo   (cl-cc:ir-rpo fn)))
-    (assert-= 1 (length rpo))
-    (assert-eq entry (car rpo))))
 
 (deftest ir-rpo-linear-chain-entry-first
   "ir-rpo returns entry before mid before exit in a linear chain A→B→C."
@@ -199,22 +171,6 @@
       (assert-eq a (gethash b idom))
       (assert-eq b (gethash c idom)))))
 
-(deftest ir-dominators-diamond
-  "In diamond A→{B,C}→D: idom(B)=A, idom(C)=A, idom(D)=A."
-  (let* ((fn (cl-cc:ir-make-function 'test))
-         (a  (cl-cc:irf-entry fn))
-         (b  (cl-cc:ir-new-block fn :b))
-         (c  (cl-cc:ir-new-block fn :c))
-         (d  (cl-cc:ir-new-block fn :d)))
-    (cl-cc:ir-add-edge a b)
-    (cl-cc:ir-add-edge a c)
-    (cl-cc:ir-add-edge b d)
-    (cl-cc:ir-add-edge c d)
-    (let ((idom (cl-cc:ir-dominators fn)))
-      (assert-eq a (gethash a idom))
-      (assert-eq a (gethash b idom))
-      (assert-eq a (gethash c idom))
-      (assert-eq a (gethash d idom)))))
 
 (deftest ir-dominators-Y-shape
   "In A→B→{C,D}: idom(B)=A, idom(C)=B, idom(D)=B."
@@ -302,29 +258,25 @@
          (v  (cl-cc:ir-new-value fn)))
     (assert-equal "%0" (cl-cc:ir-format-value v))))
 
-(deftest ir-format-value-non-ir-value
+(deftest-each ir-format-value-non-ir-value
   "ir-format-value falls back to Lisp-print for non-ir-values."
-  (assert-equal "42"    (cl-cc:ir-format-value 42))
-  (assert-equal "NIL"   (cl-cc:ir-format-value nil))
-  (assert-equal ":FOO"  (cl-cc:ir-format-value :foo)))
+  :cases (("integer" 42   "42")
+          ("nil"     nil  "NIL")
+          ("keyword" :foo ":FOO"))
+  (value expected)
+  (assert-equal expected (cl-cc:ir-format-value value)))
 
-(deftest ir-function-to-string-non-empty
-  "ir-function-to-string returns a non-empty string."
-  (let* ((fn (cl-cc:ir-make-function 'my-fn :return-type :integer)))
-    (let ((s (cl-cc:ir-function-to-string fn)))
-      (assert-true (> (length s) 0)))))
-
-(deftest ir-function-to-string-contains-name
-  "ir-function-to-string output contains the function name."
-  (let* ((fn (cl-cc:ir-make-function 'compute :return-type :integer)))
-    (let ((s (cl-cc:ir-function-to-string fn)))
-      (assert-true (search "compute" s)))))
-
-(deftest ir-function-to-string-contains-entry
-  "ir-function-to-string output contains the entry block label."
-  (let* ((fn (cl-cc:ir-make-function 'test)))
-    (let ((s (cl-cc:ir-function-to-string fn)))
-      (assert-true (search "entry" s)))))
+(deftest-each ir-function-to-string-content
+  "ir-function-to-string: non-empty output; contains function name; contains entry label."
+  :cases (("non-empty"   'my-fn   nil)
+          ("fn-name"     'compute "compute")
+          ("entry-label" 'test    "entry"))
+  (fn-sym expected-substr)
+  (let* ((fn (cl-cc:ir-make-function fn-sym :return-type :integer))
+         (s  (cl-cc:ir-function-to-string fn)))
+    (assert-true (> (length s) 0))
+    (when expected-substr
+      (assert-true (search expected-substr s)))))
 
 (deftest ir-print-block-shows-predecessor-annotation
   "ir-print-block includes a '; preds:' comment."

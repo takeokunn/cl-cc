@@ -5,8 +5,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite wasm-trampoline-suite :description "WASM trampoline builder tests")
+(defsuite wasm-trampoline-suite :description "WASM trampoline builder tests"
+  :parent cl-cc-suite)
 
+
+(in-suite wasm-trampoline-suite)
 ;;; ─── group-into-basic-blocks ──────────────────────────────────────────────────
 
 (deftest trampoline-bb-empty
@@ -114,3 +117,52 @@
     ;; Only the labeled block appears in the map
     (assert-equal 1 (hash-table-count m))
     (assert-equal 1 (gethash "loop" m))))
+
+;;; ─── %make-eq-hash-table ────────────────────────────────────────────────────
+
+(deftest-each trampoline-make-eq-hash-table
+  "%make-eq-hash-table builds a correct EQ hash-table from an alist."
+  :cases (("dotted-pair"  '((a . 1) (b . 2))  'a  1)
+          ("list-style"   '((x 10))            'x  10)
+          ("two-keys"     '((m . "v1") (n . "v2")) 'n "v2"))
+  (alist key expected)
+  (let ((ht (cl-cc::%make-eq-hash-table alist)))
+    (assert-equal expected (gethash key ht))))
+
+(deftest trampoline-make-eq-hash-table-size
+  "%make-eq-hash-table creates a table with the correct number of entries."
+  (let ((ht (cl-cc::%make-eq-hash-table '((a . 1) (b . 2) (c . 3)))))
+    (assert-equal 3 (hash-table-count ht))))
+
+;;; ─── WASM dispatch tables ───────────────────────────────────────────────────
+
+(deftest-each trampoline-binop-table-lookups
+  "*wasm-i64-binop-table* maps VM binary instruction types to i64 opcode strings."
+  :cases (("vm-add"    'vm-add         "i64.add")
+          ("vm-sub"    'vm-sub         "i64.sub")
+          ("vm-mul"    'vm-mul         "i64.mul")
+          ("vm-logand" 'vm-logand      "i64.and")
+          ("vm-logior" 'vm-logior      "i64.or")
+          ("vm-logxor" 'vm-logxor      "i64.xor"))
+  (type-sym expected-opcode)
+  (assert-equal expected-opcode (gethash type-sym cl-cc::*wasm-i64-binop-table*)))
+
+(deftest-each trampoline-cmp-table-lookups
+  "*wasm-i64-cmp-table* maps VM comparison instruction types to i64 opcode strings."
+  :cases (("vm-lt"     'vm-lt    "i64.lt_s")
+          ("vm-gt"     'vm-gt    "i64.gt_s")
+          ("vm-le"     'vm-le    "i64.le_s")
+          ("vm-ge"     'vm-ge    "i64.ge_s")
+          ("vm-eq"     'vm-eq    "i64.eq"))
+  (type-sym expected-opcode)
+  (assert-equal expected-opcode (gethash type-sym cl-cc::*wasm-i64-cmp-table*)))
+
+(deftest-each trampoline-unary-table-lookups
+  "*wasm-unary-fixnum-table* maps VM unary instruction types to i64 format strings."
+  :cases (("vm-inc"      'vm-inc      "(i64.add ~A (i64.const 1))")
+          ("vm-dec"      'vm-dec      "(i64.sub ~A (i64.const 1))")
+          ("vm-neg"      'vm-neg      "(i64.sub (i64.const 0) ~A)")
+          ("vm-lognot"   'vm-lognot   "(i64.xor ~A (i64.const -1))")
+          ("vm-logcount" 'vm-logcount "(i64.popcnt ~A)"))
+  (type-sym expected-fmt)
+  (assert-equal expected-fmt (gethash type-sym cl-cc::*wasm-unary-fixnum-table*)))

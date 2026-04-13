@@ -111,58 +111,55 @@
   (rule-name)
   (assert-true (eg-rule-registered-p rule-name)))
 
-;;; ─── Algebraic Identity: add-zero ───────────────────────────────────────
-;;; Pattern: (add ?x (const 0)) → ?x   and   (add (const 0) ?x) → ?x
+;;; ─── Algebraic Identity: bidirectional identity rules ───────────────────
+;;; Pattern: (op ?x (const N)) → ?x   and   (op (const N) ?x) → ?x
+;;; Both arg orders must merge the result class with x.
 
-(deftest egraph-rule-add-zero-fires
-  "add-zero: both (add x 0) and (add 0 x) merge with x."
+(deftest-each egraph-bidirectional-identity-fires
+  "Bidirectional identity rules fire in both argument orders: (op x const) and (op const x) both merge with x."
+  :cases (("add-zero"    'cl-cc::add    0)
+          ("mul-one"     'cl-cc::mul    1)
+          ("logand-neg1" 'cl-cc::logand -1))
+  (op identity-val)
+  ;; Right-identity: (op x const) → x
   (let* ((eg (cl-cc::make-e-graph))
          (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (c0 (make-eg-const eg 0))
-         (id (cl-cc::egraph-add eg 'cl-cc::add x c0)))
+         (c  (make-eg-const eg identity-val))
+         (id (cl-cc::egraph-add eg op x c)))
     (eg-saturate eg)
     (assert-true (eg-merged-p eg id x)))
+  ;; Left-identity: (op const x) → x
   (let* ((eg (cl-cc::make-e-graph))
          (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (c0 (make-eg-const eg 0))
-         (id (cl-cc::egraph-add eg 'cl-cc::add c0 x)))
+         (c  (make-eg-const eg identity-val))
+         (id (cl-cc::egraph-add eg op c x)))
     (eg-saturate eg)
     (assert-true (eg-merged-p eg id x))))
 
-;;; ─── Algebraic Identity: mul-one ────────────────────────────────────────
-
-(deftest egraph-rule-mul-one-fires
-  "mul-one: (mul ?x (const 1)) and (mul (const 1) ?x) both merge with ?x."
-  (let* ((eg (cl-cc::make-e-graph))
-         (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (c1 (make-eg-const eg 1))
-         (id (cl-cc::egraph-add eg 'cl-cc::mul x c1)))
-    (eg-saturate eg)
-    (assert-true (eg-merged-p eg id x)))
-  (let* ((eg (cl-cc::make-e-graph))
-         (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (c1 (make-eg-const eg 1))
-         (id (cl-cc::egraph-add eg 'cl-cc::mul c1 x)))
-    (eg-saturate eg)
-    (assert-true (eg-merged-p eg id x))))
-
-;;; ─── Algebraic Identity: mul-zero ───────────────────────────────────────
+;;; ─── Algebraic Identity: bidirectional annihilator rules ────────────────
 ;;; RHS is (const 0). egraph-build-rhs for the template (const 0) creates a
-;;; const-with-child node (a new class).  eg-all-nodes detects both the mul
-;;; and const nodes in the merged equivalence class.
+;;; const-with-child node (a new class).  eg-all-nodes detects both the
+;;; original op and const nodes in the merged equivalence class.
+;;;
+;;; Covered: mul-zero, logand-zero (both share the same structural test).
 
-(deftest egraph-rule-mul-zero-fires
-  "mul-zero: (mul ?x (const 0)) and (mul (const 0) ?x) merge to a const class."
+(deftest-each egraph-bidirectional-annihilator-fires
+  "Bidirectional annihilator rules: (op x (const 0)) and (op (const 0) x) saturate to a class containing a const node."
+  :cases (("mul-zero"    'cl-cc::mul    0)
+          ("logand-zero" 'cl-cc::logand 0))
+  (op annihilator-val)
+  ;; Right-annihilator: (op x const) → const class
   (let* ((eg (cl-cc::make-e-graph))
          (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (c0 (make-eg-const eg 0))
-         (id (cl-cc::egraph-add eg 'cl-cc::mul x c0)))
+         (c  (make-eg-const eg annihilator-val))
+         (id (cl-cc::egraph-add eg op x c)))
     (eg-saturate eg)
     (assert-true (eg-class-contains-op-p eg id 'cl-cc::const)))
+  ;; Left-annihilator: (op const x) → const class
   (let* ((eg (cl-cc::make-e-graph))
          (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (c0 (make-eg-const eg 0))
-         (id (cl-cc::egraph-add eg 'cl-cc::mul c0 x)))
+         (c  (make-eg-const eg annihilator-val))
+         (id (cl-cc::egraph-add eg op c x)))
     (eg-saturate eg)
     (assert-true (eg-class-contains-op-p eg id 'cl-cc::const))))
 
@@ -281,23 +278,6 @@
     (eg-saturate eg)
     (assert-true (eg-merged-p eg sub add))))
 
-;;; ─── Bitwise: logand-neg1 ────────────────────────────────────────────────
-
-(deftest egraph-rule-logand-neg1-fires
-  "logand-neg1: (logand ?x (const -1)) and (logand (const -1) ?x) → merge with ?x."
-  (let* ((eg  (cl-cc::make-e-graph))
-         (x   (cl-cc::egraph-add eg 'cl-cc::var))
-         (cn1 (make-eg-const eg -1))
-         (id  (cl-cc::egraph-add eg 'cl-cc::logand x cn1)))
-    (eg-saturate eg)
-    (assert-true (eg-merged-p eg id x)))
-  (let* ((eg  (cl-cc::make-e-graph))
-         (x   (cl-cc::egraph-add eg 'cl-cc::var))
-         (cn1 (make-eg-const eg -1))
-         (id  (cl-cc::egraph-add eg 'cl-cc::logand cn1 x)))
-    (eg-saturate eg)
-    (assert-true (eg-merged-p eg id x))))
-
 ;;; ─── Bitwise: self-identity (logand-self, logior-self) ──────────────────
 
 (deftest-each egraph-bitwise-self-identity-fires
@@ -331,22 +311,6 @@
     (eg-saturate eg)
     (assert-true (eg-merged-p eg id x))))
 
-;;; ─── Bitwise: logand-zero (bidirectional annihilator → const) ───────────
-
-(deftest egraph-rule-logand-zero-fires
-  "logand-zero: (logand ?x (const 0)) and (logand (const 0) ?x) → const class."
-  (let* ((eg (cl-cc::make-e-graph))
-         (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (c0 (make-eg-const eg 0))
-         (id (cl-cc::egraph-add eg 'cl-cc::logand x c0)))
-    (eg-saturate eg)
-    (assert-true (eg-class-contains-op-p eg id 'cl-cc::const)))
-  (let* ((eg (cl-cc::make-e-graph))
-         (x  (cl-cc::egraph-add eg 'cl-cc::var))
-         (c0 (make-eg-const eg 0))
-         (id (cl-cc::egraph-add eg 'cl-cc::logand c0 x)))
-    (eg-saturate eg)
-    (assert-true (eg-class-contains-op-p eg id 'cl-cc::const))))
 
 ;;; ─── Bitwise: logxor-self ────────────────────────────────────────────────
 ;;; logxor-self: (logxor ?x ?x) → (const 0).

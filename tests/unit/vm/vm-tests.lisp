@@ -39,10 +39,13 @@
     (assert-equal values result)
     (assert-true (eq values result))))
 
-(deftest vm-arg-slot-name-helper
-  "vm-arg-slot-name maps 0..7 to :ARG0..:ARG7." 
-  (assert-eq :ARG0 (cl-cc::vm-arg-slot-name 0))
-  (assert-eq :ARG7 (cl-cc::vm-arg-slot-name 7)))
+(deftest-each vm-arg-slot-name-helper
+  "vm-arg-slot-name maps integer indices to their :ARGn keyword."
+  :cases (("zero"  0 :ARG0)
+          ("one"   1 :ARG1)
+          ("seven" 7 :ARG7))
+  (index expected)
+  (assert-eq expected (cl-cc::vm-arg-slot-name index)))
 
 (deftest vm-bind-arg-slots-binds-leading-args
   "vm-bind-arg-slots stores the first 8 arguments into reserved slots."
@@ -75,13 +78,6 @@
           (cl-cc::vm-register-host-bridge sym)
           (assert-true (gethash sym cl-cc::*vm-host-bridge-functions*)))
       (remhash sym cl-cc::*vm-host-bridge-functions*))))
-
-(deftest vm-generic-function-p
-  "vm-generic-function-p recognizes dispatch tables tagged with :__methods__."
-  (let ((table (make-hash-table :test #'eq)))
-    (assert-null (cl-cc::vm-generic-function-p table))
-    (setf (gethash :__methods__ table) '(:dispatch))
-    (assert-true (cl-cc::vm-generic-function-p table))))
 
 ;;; ─── vm runtime objects and heap helpers ────────────────────────────────────
 

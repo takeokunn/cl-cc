@@ -6,8 +6,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite printer-suite :description "Type pretty-printer tests")
+(defsuite printer-suite :description "Type pretty-printer tests"
+  :parent cl-cc-suite)
 
+
+(in-suite printer-suite)
 ;;; ─── type-to-string: basic types ───────────────────────────────────────────
 
 (deftest printer-primitive
