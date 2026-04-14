@@ -573,8 +573,8 @@
 KNOWN COMPILER BUG: self-hosted CLOS dispatch recurses infinitely when an
 :around method omits call-next-method. ANSI semantics: the :around body
 should run to completion and its value be returned WITHOUT ever entering
-the primary methods. Tagged :slow so `make test` (fast path) skips it;
-`make test-full` runs it with a 5-second hard timeout so the hang is
+the primary methods. Tagged :slow so focused REPL runs can still filter it;
+the canonical `make test` plan runs it with a 5-second hard timeout so the hang is
 bounded. Remove the :slow tag once the CLOS dispatch bug is fixed."
   :tags '(:slow)
   :timeout 5
@@ -605,4 +605,3 @@ bounded. Remove the :slow tag once the CLOS dispatch bug is fixed."
         (call-next-method)
         *aba-log*)
       (aba-test 1)")))
-

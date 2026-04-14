@@ -5,7 +5,7 @@
 
 (defsuite macros-stdlib-sequence-map-suite
   :description "Tests for macros-stdlib.lisp: coerce/map/replace/merge"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-stdlib-sequence-map-suite)
 

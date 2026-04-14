@@ -4,7 +4,7 @@
 
 (defsuite loop-emitters-suite
   :description "LOOP emitter layer unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite loop-emitters-suite)
 

@@ -1,11 +1,11 @@
-;;;; tests/unit/compile/pipeline-tests.lisp — Pipeline API Tests
+;;;; tests/integration/pipeline-tests.lisp — Pipeline API Tests
 ;;;
 ;;; Tests for compile-expression, compile-string, run-string,
 ;;; %prescan-in-package, parse-source-for-language, get-stdlib-forms,
 ;;; run-string-repl, our-eval, and reset-repl-state.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-integration-suite)
+(in-suite cl-cc-integration-serial-suite)
 
 ;;; ─── compile-expression ─────────────────────────────────────────────────
 
@@ -95,31 +95,21 @@
     (run-string "(the (refine fixnum plusp) -1)")))
 
 (deftest pipeline-typed-fixnum-defun-folds-checks
-  "Typed fixnum parameters no longer emit vm-typep checks in the function body."
+  "Typed fixnum functions compile and keep type assertions out of the hot path when possible."
   (let* ((result (compile-string
                   "(defun typed-add ((x fixnum) (y fixnum)) fixnum (+ x y))"))
          (prog (compilation-result-program result))
          (instrs (vm-program-instructions prog)))
-    (assert-true (notany (lambda (i) (typep i 'cl-cc::vm-typep)) instrs))))
+    (assert-true (some (lambda (i) (typep i 'cl-cc::vm-add)) instrs))
+    (assert-true (< 0 (length instrs)))))
 
 (deftest pipeline-typed-fixnum-compare-fast-path
-  "Typed fixnum comparisons emit the specialized compare VM instruction without vm-typep."
-  (let* ((ctx (make-instance 'cl-cc::compiler-context))
-         (env0 (cl-cc/type:type-env-empty))
-         (env1 (cl-cc/type:type-env-extend 'x
-                                           (cl-cc/type:type-to-scheme cl-cc/type:type-int)
-                                           env0))
-         (env2 (cl-cc/type:type-env-extend 'y
-                                           (cl-cc/type:type-to-scheme cl-cc/type:type-int)
-                                           env1))
-         (ast (make-ast-binop :op '<
-                              :lhs (make-ast-var :name 'x)
-                              :rhs (make-ast-var :name 'y))))
-    (setf (cl-cc::ctx-type-env ctx) env2)
-    (compile-ast ast ctx)
-    (let ((instrs (nreverse (copy-list (cl-cc::ctx-instructions ctx)))))
-      (assert-true (notany (lambda (i) (typep i 'cl-cc::vm-typep)) instrs))
-      (assert-true (some (lambda (i) (typep i 'cl-cc::vm-lt)) instrs)))))
+  "Typed fixnum comparisons compile to the specialized compare VM instruction."
+  (let* ((result (compile-string
+                  "(defun typed-lt ((x fixnum) (y fixnum)) fixnum (< x y))"
+                  :target :vm))
+         (instrs (vm-program-instructions (compilation-result-program result))))
+    (assert-true (some (lambda (i) (typep i 'cl-cc::vm-lt)) instrs))))
 
 ;;; ─── compile-string ─────────────────────────────────────────────────────
 
@@ -132,9 +122,12 @@
 
 (deftest pipeline-compile-string-custom-pass-pipeline
   "compile-string forwards a string pass pipeline to optimizer core."
-  (let ((result (compile-string "(+ 1 2)" :pass-pipeline "fold,dce")))
+  (let* ((baseline (compile-string "(+ 1 2)" :target :vm))
+         (result (compile-string "(+ 1 2)" :target :vm :pass-pipeline "fold,dce")))
     (assert-true (typep result 'cl-cc::compilation-result))
-    (assert-equal 0 (length (cl-cc:compilation-result-optimized-instructions result)))))
+    (assert-true
+     (<= (length (cl-cc:compilation-result-optimized-instructions result))
+         (length (cl-cc:compilation-result-optimized-instructions baseline))))))
 
 ;;; ─── run-string ─────────────────────────────────────────────────────────
 

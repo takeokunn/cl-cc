@@ -5,7 +5,7 @@
 
 (defsuite macros-basic-check-type-suite
   :description "Tests for macros-basic.lisp: check-type"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-basic-check-type-suite)
 

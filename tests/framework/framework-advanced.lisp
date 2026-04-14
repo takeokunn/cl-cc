@@ -73,16 +73,19 @@ When *update-snapshots* is t, overwrites the saved file with the current value."
        (cond
          ;; First run: no snapshot yet — save and pass
          ((eq ,saved-var :snapshot-not-found)
-          (%write-snapshot ,path-var ,actual-var))
+          (%write-snapshot ,path-var ,actual-var)
+          t)
          ;; Update mode: overwrite snapshot unconditionally
          (*update-snapshots*
-          (%write-snapshot ,path-var ,actual-var))
-         ;; Normal run: compare
-         ((not (equal ,saved-var ,actual-var))
-          (%fail-test (format nil "assert-snapshot ~S mismatch" ,name)
-                      :expected ,saved-var
-                      :actual   ,actual-var
-                      :form     ',form))))))
+          (%write-snapshot ,path-var ,actual-var)
+          t)
+          ;; Normal run: compare
+          ((not (equal ,saved-var ,actual-var))
+           (%fail-test (format nil "assert-snapshot ~S mismatch" ,name)
+                       :expected ,saved-var
+                       :actual   ,actual-var
+                       :form     ',form))
+          (t t)))))
 
 ;;; ------------------------------------------------------------
 ;;; FR-014 — deftest-each: Parameterized Tests
@@ -389,14 +392,11 @@ Intended to be called from the REPL when you want to refresh all snapshots."
       (remhash serial-suite *suite-registry*)
       (remhash root *suite-registry*))))
 
-(deftest default-slow-suite-set-matches-runner-contract
-  "The documented default slow-suite set matches the runner's resolved exclusions."
-  (assert-equal '("SELFHOST-SUITE"
-                  "SELFHOST-SLOW-SUITE"
-                  "CL-CC-INTEGRATION-SUITE"
-                  "CLOSURE-TESTS-SUITE"
-                  "CONTROL-FLOW-TESTS"
-                  "STREAM-SUITE"
-                  "CL-CC-PBT-SUITE"
-                  "MACRO-PBT-SUITE")
-                (mapcar #'symbol-name (%resolve-default-slow-suites))))
+(deftest canonical-suite-taxonomy-matches-runner-contract
+  "The canonical runner exposes unit, integration, and e2e suites under the root taxonomy."
+  (assert-eq 'cl-cc-suite
+             (getf (gethash 'cl-cc-unit-suite *suite-registry*) :parent))
+  (assert-eq 'cl-cc-suite
+             (getf (gethash 'cl-cc-integration-suite *suite-registry*) :parent))
+  (assert-eq 'cl-cc-suite
+             (getf (gethash 'cl-cc-e2e-suite *suite-registry*) :parent)))

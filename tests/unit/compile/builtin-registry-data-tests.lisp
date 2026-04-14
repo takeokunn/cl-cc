@@ -1,6 +1,6 @@
 ;;;; tests/unit/compile/builtin-registry-data-tests.lisp — Builtin Registry Data tests
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 (deftest-each builtin-registry-data-table-sizes
   "The raw registry tables retain representative sizes."

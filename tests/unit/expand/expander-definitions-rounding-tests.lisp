@@ -3,7 +3,7 @@
 (in-package :cl-cc/test)
 
 (defsuite expander-definitions-rounding-suite :description "Definition-form rounding unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite expander-definitions-rounding-suite)

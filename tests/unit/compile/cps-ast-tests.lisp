@@ -4,7 +4,7 @@
 
 (defsuite cps-ast-suite
   :description "AST CPS transformer unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite cps-ast-suite)
 

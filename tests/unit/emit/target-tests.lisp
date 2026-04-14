@@ -6,7 +6,7 @@
 (in-package :cl-cc/test)
 
 (defsuite target-suite :description "Target descriptor and calling convention tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite target-suite)

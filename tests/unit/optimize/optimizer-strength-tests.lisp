@@ -5,7 +5,7 @@
 ;;;;   opt-pass-bswap-recognition (pass-through), opt-pass-rotate-recognition.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── opt-power-of-2-p ────────────────────────────────────────────────────
 

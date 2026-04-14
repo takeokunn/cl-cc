@@ -7,7 +7,7 @@
 (in-package :cl-cc/test)
 
 (defsuite ir-printer-suite :description "Extended IR printer tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite ir-printer-suite)

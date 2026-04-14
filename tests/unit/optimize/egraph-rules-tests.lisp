@@ -27,7 +27,7 @@
 ;;;      Those rules are registered correctly and tested for registration only.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── Shared Helpers ───────────────────────────────────────────────────────
 

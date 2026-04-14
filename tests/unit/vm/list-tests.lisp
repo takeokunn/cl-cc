@@ -4,7 +4,7 @@
 ;;; destructive ops, association lists, coercions, arrays, and bit arrays.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── make-list ──────────────────────────────────────────────────────────────
 

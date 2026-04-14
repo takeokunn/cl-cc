@@ -6,7 +6,7 @@
 (in-package :cl-cc/test)
 
 (defsuite effect-suite :description "Algebraic effect system tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite effect-suite)

@@ -8,7 +8,7 @@ cl-cc compiles ANSI Common Lisp to a register-based bytecode VM, and from there 
 
 ```bash
 nix develop
-make test          # run 2027 test cases
+make test          # run the canonical unit / integration / e2e test plan
 cl-cc repl         # interactive REPL
 cl-cc run file.lisp
 cl-cc eval "(+ 1 2)"
@@ -361,7 +361,7 @@ $ cl-cc repl
 # Enter development environment
 nix develop
 
-# Run all tests (2027 cases, 0 failures)
+# Run the canonical test plan (unit / integration / e2e)
 make test
 
 # Clear FASL cache if tests misbehave

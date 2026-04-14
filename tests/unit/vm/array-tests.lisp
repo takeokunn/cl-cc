@@ -3,7 +3,7 @@
 ;;;; Tests for array, vector, and bit-array instructions executed via the VM.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── Array operations ──────────────────────────────────────────────────────
 

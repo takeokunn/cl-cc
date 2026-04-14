@@ -4,7 +4,7 @@
 
 (defsuite expander-basic-suite
   :description "Basic expander unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite expander-basic-suite)
 

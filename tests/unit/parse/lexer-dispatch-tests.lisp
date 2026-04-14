@@ -10,7 +10,7 @@
 ;;;;   lex-read-form-text — reads balanced forms as raw strings
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── Helpers ────────────────────────────────────────────────────────────────
 

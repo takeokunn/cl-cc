@@ -1,6 +1,6 @@
 ;;;; tests/unit/compile/stdlib-source-tests.lisp — Standard Library Source tests
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 (defun %count-substring (needle haystack)
   (let ((count 0)

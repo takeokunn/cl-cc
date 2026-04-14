@@ -38,4 +38,4 @@
 
 ---
 
-**Status: 820/1078 tracked FRs complete (76%) | Self-hosting: 9/9 | Tests: 4033 pass, 0 fail**
+**Status: 820/1078 tracked FRs complete (76%) | Self-hosting: 9/9 | Tests: 6871 pass, 0 fail**

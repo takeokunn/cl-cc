@@ -6,7 +6,7 @@
 (in-package :cl-cc/test)
 
 (defsuite combinator-suite :description "Parser combinator engine tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite combinator-suite)

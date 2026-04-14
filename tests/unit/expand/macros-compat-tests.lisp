@@ -5,7 +5,7 @@
 
 (defsuite macros-compat-suite
   :description "Tests for macros-compat.lisp"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-compat-suite)
 

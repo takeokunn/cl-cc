@@ -10,7 +10,7 @@
 ;;;; evaluating it (which would require a full runtime environment).
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; Helper: transform a node with a fixed continuation symbol.
 (defun cps-with-k (node)

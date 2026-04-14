@@ -13,7 +13,7 @@
 
 (defsuite macros-compat-clos-suite
   :description "Tests for macros-compat-clos.lisp: CLOS protocol and MOP macros"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-compat-clos-suite)
 

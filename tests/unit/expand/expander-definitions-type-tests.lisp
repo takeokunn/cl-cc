@@ -3,7 +3,7 @@
 (in-package :cl-cc/test)
 
 (defsuite expander-definitions-type-suite :description "Definition-form type unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite expander-definitions-type-suite)

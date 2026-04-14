@@ -16,4 +16,4 @@ jobs:
         run: brew install sbcl
 
       - name: Run tests
-        run: sbcl --dynamic-space-size 4096 --non-interactive --eval '(require :asdf)' --load cl-cc.asd --eval '(asdf:load-system :cl-cc/test)' --eval '(asdf:test-system :cl-cc/test)'
+        run: make test

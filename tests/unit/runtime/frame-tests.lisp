@@ -11,7 +11,7 @@
 
 (defsuite frame-suite
   :description "vm-frame register file and frame pool tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite frame-suite)
 

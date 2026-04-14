@@ -4,7 +4,7 @@
 
 (defsuite macro-define-modify-macro-suite
   :description "DEFINE-MODIFY-MACRO expansion tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macro-define-modify-macro-suite)
 

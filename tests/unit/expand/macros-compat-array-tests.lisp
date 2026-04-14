@@ -4,7 +4,7 @@
 
 (defsuite macros-compat-array-suite
   :description "Tests for array wrappers in macros-compat.lisp"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-compat-array-suite)
 

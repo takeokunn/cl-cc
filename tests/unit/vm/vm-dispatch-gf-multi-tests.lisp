@@ -9,7 +9,7 @@
 
 (defsuite vm-dispatch-gf-multi-suite
   :description "Tests for vm-dispatch-gf-multi.lisp: composite-key detection and multi-dispatch resolution"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite vm-dispatch-gf-multi-suite)
 

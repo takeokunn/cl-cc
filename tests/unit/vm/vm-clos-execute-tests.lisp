@@ -8,7 +8,7 @@
 
 (defsuite vm-clos-execute-suite
   :description "execute-instruction tests for CLOS VM instructions"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite vm-clos-execute-suite)
 

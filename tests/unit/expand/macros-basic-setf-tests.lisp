@@ -5,7 +5,7 @@
 
 (defsuite macros-basic-setf-suite
   :description "Tests for macros-basic.lisp: setf places"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-basic-setf-suite)
 

@@ -5,7 +5,7 @@
 
 (defsuite macros-plist-suite
   :description "Tests for macros-plist.lisp"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-plist-suite)
 

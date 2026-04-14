@@ -5,7 +5,7 @@
 
 (defsuite macros-basic-list-suite
   :description "Tests for macros-basic.lisp: list"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-basic-list-suite)
 

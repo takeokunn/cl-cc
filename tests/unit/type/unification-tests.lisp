@@ -5,7 +5,7 @@
 ;;; type constructors, effect rows, and edge cases.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── Product Type Unification ───────────────────────────────────────────
 

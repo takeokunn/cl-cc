@@ -4,7 +4,7 @@
 
 (defsuite expander-numeric-suite
   :description "Numeric expander unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite expander-numeric-suite)
 

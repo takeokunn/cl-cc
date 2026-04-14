@@ -6,7 +6,7 @@
 ;;;;   opt-pass-constant-hoist (wrapper), opt-pass-egraph (wrapper).
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── opt-inst-loop-invariant-p ───────────────────────────────────────────
 

@@ -4,7 +4,7 @@
 
 (defsuite expander-definitions-forms-suite
   :description "Definition-form expander unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite expander-definitions-forms-suite)
 

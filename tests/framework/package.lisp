@@ -597,9 +597,11 @@
                  :make-constraint
                  ;; Constraint solver
                  :solve-constraints :collect-constraints)
-  (:export :run-tests :run-all-tests
-           :run-tests-extended :run-selfhost-tests :run-pbt-tests
+  (:export :run-tests
            :cl-cc-suite
+           :cl-cc-unit-suite
+           :cl-cc-integration-suite
+           :cl-cc-e2e-suite
            :run-suite
            :deftest
            :defsuite

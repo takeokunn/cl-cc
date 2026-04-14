@@ -13,25 +13,14 @@
 
 (in-package :cl-cc/test)
 
-;; Moved to cl-cc-integration-suite: these tests mutate the global Prolog DB
+;; Moved to cl-cc-integration-serial-suite: these tests mutate the global Prolog DB
 ;; via with-fresh-prolog / with-baseline-prolog and occasionally hang under
 ;; randomized scheduling (see MEMORY.md PROLOG-TYPE-OF-CMP flake note).
-(in-suite cl-cc-integration-suite)
+(in-suite cl-cc-integration-serial-suite)
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Helper: run body with a clean database, restore afterwards
 ;;; ─────────────────────────────────────────────────────────────────────────
-
-(defmacro with-fresh-prolog (&body body)
-  "Snapshot *prolog-rules*, clear the database, run BODY, then restore."
-  (let ((saved (gensym "SAVED")))
-    `(let ((,saved (make-hash-table :test 'eq)))
-       (maphash (lambda (k v) (setf (gethash k ,saved) v)) cl-cc:*prolog-rules*)
-       (cl-cc:clear-prolog-database)
-       (unwind-protect
-           (progn ,@body)
-         (cl-cc:clear-prolog-database)
-         (maphash (lambda (k v) (setf (gethash k cl-cc:*prolog-rules*) v)) ,saved)))))
 
 (defun copy-prolog-rules-table (table)
   (let ((copy (make-hash-table :test 'eq)))

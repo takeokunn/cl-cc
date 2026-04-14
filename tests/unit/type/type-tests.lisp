@@ -8,7 +8,7 @@
 
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; Type Representation Tests
 
@@ -1352,7 +1352,7 @@ In the 2026 type system, effectful functions are type-arrow nodes with a non-nil
 
 ;;; ─── Constraint solver ────────────────────────────────────────────────────
 
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 (deftest solve-constraints-trivial-success
   "solve-constraints returns a valid substitution for empty list and identical-primitive equality."

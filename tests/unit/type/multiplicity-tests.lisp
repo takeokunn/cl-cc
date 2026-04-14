@@ -7,7 +7,7 @@
 (in-package :cl-cc/test)
 
 (defsuite multiplicity-suite :description "Graded multiplicity system tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite multiplicity-suite)

@@ -4,7 +4,7 @@
 
 (defsuite macro-ecase-suite
   :description "ECASE expansion tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macro-ecase-suite)
 

@@ -5,7 +5,7 @@
 
 (defsuite macros-stdlib-bind-error-suite
   :description "Tests for macros-stdlib.lisp: bindings and error helpers"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-stdlib-bind-error-suite)
 

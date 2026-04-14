@@ -23,7 +23,7 @@
 
 (defsuite gc-write-barrier-suite
   :description "SATB pre-write barrier + card table write barrier tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite gc-write-barrier-suite)
 

@@ -9,7 +9,7 @@
 ;; UNIMPLEMENTED FEATURE: type-children / type-bound-var were planned in
 ;; MEMORY.md but never committed to src/. All tests in this file reference
 ;; `type-children` which is an undefined function. The suite is ORPHANED
-;; (no :parent) so it is unreachable from run-all-tests / run-tests-extended
+;; (no :parent) so it is unreachable from the canonical run-tests
 ;; traversal. Deftest forms still load, but they are never executed until
 ;; the underlying functions land AND a parent is restored.
 (defsuite type-children-suite

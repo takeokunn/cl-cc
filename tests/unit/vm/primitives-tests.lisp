@@ -6,7 +6,7 @@
 ;;; Relies on make-test-vm / exec1 helpers from list-tests.lisp.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
 ;;; Helpers: construct pred1/pred2 instructions from defstructs

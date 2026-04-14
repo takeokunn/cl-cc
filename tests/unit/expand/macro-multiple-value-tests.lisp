@@ -4,7 +4,7 @@
 
 (defsuite macro-multiple-value-suite
   :description "Macro multiple-value expansion tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite macro-multiple-value-suite)

@@ -5,7 +5,7 @@
 
 (defsuite macros-filesystem-suite
   :description "Tests for macros-filesystem.lisp"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-filesystem-suite)
 

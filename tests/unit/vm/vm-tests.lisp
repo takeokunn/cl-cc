@@ -4,7 +4,7 @@
 
 (defsuite vm-suite
   :description "VM core helper tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite vm-suite)
 

@@ -4,7 +4,7 @@
 
 (defsuite macros-introspection-suite
   :description "Introspection helper unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-introspection-suite)
 

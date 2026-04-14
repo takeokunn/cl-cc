@@ -1,7 +1,7 @@
 ;;;; tests/unit/compile/codegen-io-tests.lisp — Codegen I/O tests
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ── WRITE-STRING ─────────────────────────────────────────────────────────
 

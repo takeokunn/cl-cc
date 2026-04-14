@@ -4,7 +4,7 @@
 
 (defsuite loop-suite
   :description "LOOP generator layer unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite loop-suite)
 

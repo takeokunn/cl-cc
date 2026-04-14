@@ -6,7 +6,7 @@
 (in-package :cl-cc/test)
 
 (defsuite kind-suite :description "Kind system tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite kind-suite)

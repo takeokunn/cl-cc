@@ -20,7 +20,7 @@
 
 (defsuite gc-suite
   :description "Generational GC tests (heap, header, alloc, minor GC, write barrier, stats)"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite gc-suite)
 

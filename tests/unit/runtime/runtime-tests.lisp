@@ -6,7 +6,7 @@
 
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── Tagged Pointers ───────────────────────────────────────────────────────
 
@@ -109,8 +109,8 @@
 
 (deftest-each rt-call-fn-dispatch
   "rt-call-fn dispatches uniformly to closures and plain functions."
-  :cases (("closure"  (cl-cc/runtime:rt-make-closure (lambda (x) (* x 2)) nil) (5)   10)
-          ("plain-fn" #'+                                                        (3 4)  7))
+  :cases (("closure"  (cl-cc/runtime:rt-make-closure (lambda (x) (* x 2)) nil) '(5)   10)
+          ("plain-fn" #'+                                                         '(3 4)  7))
   (fn args expected)
   (assert-= expected (apply #'cl-cc/runtime:rt-call-fn fn args)))
 

@@ -4,7 +4,7 @@
 
 (defsuite vm-bitwise-suite
   :description "Unit tests for src/vm/vm-bitwise.lisp"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite vm-bitwise-suite)
 

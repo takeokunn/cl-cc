@@ -6,10 +6,11 @@
 (defpackage :cl-cc/pbt
   (:use :cl)
   (:import-from :cl-cc/test
-                #:cl-cc-suite
-                #:defsuite
-                #:in-suite
-                #:deftest
+                 #:cl-cc-suite
+                 #:cl-cc-integration-serial-suite
+                 #:defsuite
+                 #:in-suite
+                 #:deftest
                 #:run-suite
                 #:%fail-test
                 #:test-failure

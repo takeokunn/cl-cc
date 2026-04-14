@@ -8,7 +8,7 @@
 
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Helper: shared roundtrip combinator

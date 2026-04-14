@@ -184,6 +184,22 @@ Returns (values docstring timeout depends-on tags body-forms)."
          ,@body)
      (reset-repl-state)))
 
+(defmacro with-fresh-prolog (&body body)
+  "Run BODY with an isolated Prolog rule database and restore the prior state.
+Shared by unit-level DCG tests and integration-level Prolog tests."
+  (let ((saved (gensym "SAVED")))
+    `(let ((,saved (make-hash-table :test 'eq)))
+       (maphash (lambda (k v)
+                  (setf (gethash k ,saved) v))
+                cl-cc:*prolog-rules*)
+       (cl-cc:clear-prolog-database)
+       (unwind-protect
+           (progn ,@body)
+         (cl-cc:clear-prolog-database)
+         (maphash (lambda (k v)
+                    (setf (gethash k cl-cc:*prolog-rules*) v))
+                  ,saved)))))
+
 (defun make-test-vm ()
   "Create a fresh VM state for instruction-level testing."
   (make-instance 'cl-cc:vm-state))
@@ -272,7 +288,8 @@ This keeps instruction-level tests focused on behavior instead of setup noise."
          (%fail-test "assert-= failed"
                      :expected ,e
                      :actual ,a
-                     :form '(= ,expected ,actual))))))
+                     :form '(= ,expected ,actual)))
+       t)))
 
 (defmacro assert-eq (expected actual)
   "Assert pointer equality (eq)."
@@ -282,7 +299,8 @@ This keeps instruction-level tests focused on behavior instead of setup noise."
          (%fail-test "assert-eq failed"
                      :expected ,e
                      :actual ,a
-                     :form '(eq ,expected ,actual))))))
+                     :form '(eq ,expected ,actual)))
+       t)))
 
 (defmacro assert-eql (expected actual)
   "Assert eql equality."
@@ -292,7 +310,8 @@ This keeps instruction-level tests focused on behavior instead of setup noise."
          (%fail-test "assert-eql failed"
                      :expected ,e
                      :actual ,a
-                     :form '(eql ,expected ,actual))))))
+                     :form '(eql ,expected ,actual)))
+       t)))
 
 (defmacro assert-equal (expected actual)
   "Assert structural equality (equal)."
@@ -302,7 +321,8 @@ This keeps instruction-level tests focused on behavior instead of setup noise."
          (%fail-test "assert-equal failed"
                      :expected ,e
                      :actual ,a
-                     :form '(equal ,expected ,actual))))))
+                     :form '(equal ,expected ,actual)))
+       t)))
 
 (defmacro assert-string= (expected actual)
   "Assert string equality."
@@ -312,7 +332,8 @@ This keeps instruction-level tests focused on behavior instead of setup noise."
          (%fail-test "assert-string= failed"
                      :expected ,e
                      :actual ,a
-                     :form '(string= ,expected ,actual))))))
+                     :form '(string= ,expected ,actual)))
+       t)))
 
 (defmacro assert-null (form)
   "Assert form evaluates to nil."
@@ -322,7 +343,8 @@ This keeps instruction-level tests focused on behavior instead of setup noise."
          (%fail-test "assert-null failed"
                      :expected nil
                      :actual ,v
-                     :form ',form)))))
+                     :form ',form))
+       t)))
 
 (defmacro assert-true (form)
   "Assert form evaluates to a truthy value."
@@ -332,7 +354,8 @@ This keeps instruction-level tests focused on behavior instead of setup noise."
          (%fail-test "assert-true failed"
                      :expected t
                      :actual nil
-                     :form ',form)))))
+                     :form ',form))
+       t)))
 
 (defmacro assert-false (form)
   "Assert form evaluates to a falsy value."
@@ -342,7 +365,8 @@ This keeps instruction-level tests focused on behavior instead of setup noise."
          (%fail-test "assert-false failed"
                      :expected nil
                      :actual ,v
-                     :form ',form)))))
+                     :form ',form))
+       t)))
 
 (defmacro assert-type (type-name object)
   "Assert object is of type type-name. Note: type-name comes first."
@@ -352,7 +376,8 @@ This keeps instruction-level tests focused on behavior instead of setup noise."
          (%fail-test "assert-type failed"
                      :expected ',type-name
                      :actual (type-of ,o)
-                     :form '(typep ,object ,type-name))))))
+                     :form '(typep ,object ,type-name)))
+       t)))
 
 (defmacro assert-signals (condition-type form)
   "Assert that form signals a condition of condition-type."
@@ -377,7 +402,8 @@ This keeps instruction-level tests focused on behavior instead of setup noise."
            (%fail-test "assert-values failed"
                        :expected expected-list
                        :actual ,actuals
-                       :form ',form))))))
+                        :form ',form))
+          t))))
 
 (defmacro assert-type-equal (expected actual)
   "Assert that two type-nodes are structurally equal via type-equal-p.
@@ -388,7 +414,8 @@ Produces a human-readable message using type-to-string on failure."
          (%fail-test "assert-type-equal: types not equal"
                      :expected (type-to-string ,e)
                      :actual   (type-to-string ,a)
-                     :form '(type-equal-p ,expected ,actual))))))
+                     :form '(type-equal-p ,expected ,actual)))
+       t)))
 
 (defmacro assert-unifies (t1 t2)
   "Assert that types T1 and T2 unify successfully."
@@ -399,7 +426,8 @@ Produces a human-readable message using type-to-string on failure."
          (%fail-test "assert-unifies: types failed to unify"
                      :expected "unification success"
                      :actual   "unification failure"
-                     :form '(type-unify ,t1 ,t2))))))
+                     :form '(type-unify ,t1 ,t2)))
+       t)))
 
 (defmacro assert-not-unifies (t1 t2)
   "Assert that types T1 and T2 fail to unify."
@@ -410,7 +438,8 @@ Produces a human-readable message using type-to-string on failure."
          (%fail-test "assert-not-unifies: types unexpectedly unified"
                      :expected "unification failure"
                      :actual   "unification success"
-                     :form '(type-unify ,t1 ,t2))))))
+                     :form '(type-unify ,t1 ,t2)))
+       t)))
 
 ;;; ------------------------------------------------------------
 ;;; TAP Output
@@ -957,71 +986,32 @@ Serial runs, serial-only batches, and single-worker requests all collapse to 1."
                       (uiop:quit 1)
                       (uiop:quit 0)))))))))))
 
-(defparameter *default-slow-suite-names*
-  '(("CL-CC/TEST" . "SELFHOST-SUITE")
-    ("CL-CC/TEST" . "SELFHOST-SLOW-SUITE")
-    ("CL-CC/TEST" . "CL-CC-INTEGRATION-SUITE")
-    ("CL-CC/TEST" . "CLOSURE-TESTS-SUITE")
-    ("CL-CC/TEST" . "CONTROL-FLOW-TESTS")
-    ("CL-CC/TEST" . "STREAM-SUITE")
-    ("CL-CC/PBT"  . "CL-CC-PBT-SUITE")
-    ("CL-CC/PBT"  . "MACRO-PBT-SUITE"))
-  "Fully-qualified names of suites excluded by default when RUN-TESTS is called
-with no arguments. Resolved at call time via FIND-SYMBOL so the :cl-cc/pbt
-package need not be present when framework.lisp loads.")
-
-(defparameter *default-slow-tags*
-  '(:slow :selfhost :pbt :fuzz)
-  "Per-test tags excluded by default when RUN-TESTS is called with no arguments.
-Catches individually-tagged slow tests that don't live in slow suites.")
-
-(defun %resolve-default-slow-suites ()
-  "Resolve *default-slow-suite-names* to actual symbols, silently dropping
-any whose package is not yet loaded."
-  (let ((result '()))
-    (dolist (entry *default-slow-suite-names* (nreverse result))
-      (let* ((pkg (find-package (car entry)))
-             (sym (and pkg (find-symbol (cdr entry) pkg))))
-        (when sym (push sym result))))))
-
 (defun run-tests (&key
                     (tags nil)
-                    (exclude-tags *default-slow-tags*)
-                    (exclude-suites nil exclude-suites-p)
+                    (exclude-tags nil)
+                    (exclude-suites nil)
                     (parallel t)
                     (random nil))
-  "Run a filtered subset of cl-cc-suite in parallel (4 workers by default).
+  "Run the canonical CL-CC test plan.
 
-By default, excludes the default slow-suite set (selfhost, integration, closure,
-control-flow, stream, and PBT suites) plus slow tags (:slow :selfhost :pbt :fuzz).
-Pass :exclude-suites '() :exclude-tags '() to run everything, or use `run-all-tests`.
-
-Useful for REPL-based development when you want to skip the heaviest suites."
-  (let ((effective-exclude-suites
-          (if exclude-suites-p exclude-suites (%resolve-default-slow-suites))))
-    (run-suite 'cl-cc-suite
-               :parallel parallel
-               :random random
-               :warm-stdlib nil
-               :tags tags
-               :exclude-tags exclude-tags
-               :exclude-suites effective-exclude-suites)))
+This single entry point executes unit, integration, property-based, and e2e suites.
+Use the filtering keywords for focused debugging from the REPL, but the public
+automation workflow is always `make test`."
+  (run-suite 'cl-cc-suite
+             :parallel parallel
+             :random random
+             :warm-stdlib t
+             :tags tags
+             :exclude-tags exclude-tags
+             :exclude-suites exclude-suites))
 
 (defun run-all-tests ()
-  "Run the full test suite in parallel (4 workers, 10s per-test timeout).
-This is the primary entry point — used by `make test` and `asdf:test-system`."
-  (run-suite 'cl-cc-suite :parallel t :random nil :warm-stdlib t))
+  "Backward-compatible alias for the canonical test plan."
+  (run-tests))
 
 (defun run-tests-extended ()
-  "Run all tests except the default slow-suite set. Used by `make test-full`.
-The excluded suites are selfhost, integration, closure, control-flow, stream,
-and PBT suites. This runner is broader than `run-tests` (which also skips slow
-tags), and narrower than `run-all-tests` (which skips nothing)."
-  (run-suite 'cl-cc-suite
-             :parallel t
-             :random nil
-             :warm-stdlib nil
-             :exclude-suites (%resolve-default-slow-suites)))
+  "Backward-compatible alias for the canonical test plan."
+  (run-tests))
 
 (defun %resolve-suite (package-name symbol-name)
   (let* ((pkg (find-package package-name))
@@ -1032,12 +1022,12 @@ tags), and narrower than `run-all-tests` (which skips nothing)."
     sym))
 
 (defun run-selfhost-tests ()
-  "Run only the self-hosting integration suite. Used by `make test-selfhost`."
-  (run-suite (%resolve-suite "CL-CC/TEST" "SELFHOST-SUITE")
+  "Focused helper for running only the self-hosting e2e suite from the REPL."
+  (run-suite (%resolve-suite "CL-CC/TEST" "CL-CC-E2E-SUITE")
              :parallel t :random nil :warm-stdlib nil))
 
 (defun run-pbt-tests ()
-  "Run only the property-based test suites. Used by `make test-pbt`.
+  "Focused helper for running only the property-based integration suites.
 Honors CLCC_PBT_COUNT to bound per-property case counts."
   (let* ((pbt (%resolve-suite "CL-CC/PBT" "CL-CC-PBT-SUITE")))
     (run-suite pbt :parallel t :random nil :warm-stdlib nil)))
@@ -1046,7 +1036,11 @@ Honors CLCC_PBT_COUNT to bound per-property case counts."
 ;;; Suite Definitions (bottom of file — other files use in-suite)
 ;;; ------------------------------------------------------------
 
-(defsuite cl-cc-suite :description "CL-CC Test - Main suite for all tests")
+(defsuite cl-cc-suite :description "CL-CC test root suite")
+
+(defsuite cl-cc-unit-suite
+  :description "Unit tests"
+  :parent cl-cc-suite)
 
 ;; Integration tests that exercise the full compile pipeline via run-string.
 ;; Each case invokes parse → expand → cps → optimize → codegen → execute.
@@ -1061,9 +1055,13 @@ Honors CLCC_PBT_COUNT to bound per-property case counts."
   :parent cl-cc-integration-suite
   :parallel nil)
 
+(defsuite cl-cc-e2e-suite
+  :description "End-to-end tests"
+  :parent cl-cc-suite)
+
 (defsuite cl-cc-serial-suite
-  :description "Sequential-only non-integration tests"
-  :parent cl-cc-suite
+  :description "Sequential-only unit tests"
+  :parent cl-cc-unit-suite
   :parallel nil)
 
 (in-suite cl-cc-suite)

@@ -7,7 +7,7 @@
 ;;;;   opt-verify-instructions (success, duplicate-label, unknown-target).
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── opt-parse-pass-pipeline-string ─────────────────────────────────────────
 

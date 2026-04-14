@@ -2,7 +2,7 @@
 
 (defsuite macro-lambda-list-suite
   :description "Lambda list parser unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macro-lambda-list-suite)
 

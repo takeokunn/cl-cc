@@ -1,6 +1,6 @@
 ;;;; tests/unit/cli/main-tests.lisp — CLI main help tests
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 (deftest cli-print-global-help
   "Global help text includes the command usage banner and version."

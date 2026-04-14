@@ -6,7 +6,7 @@
 (in-package :cl-cc/test)
 
 (defsuite calling-convention-suite :description "Calling convention definition tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite calling-convention-suite)

@@ -1,7 +1,7 @@
 ;;;; tests/unit/compile/codegen-slot-predicates-tests.lisp — Slot-predicate codegen tests
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 (deftest-each codegen-slot-predicate-emits-instruction
   "slot-boundp, slot-exists-p, and slot-makunbound emit their dedicated VM instructions."

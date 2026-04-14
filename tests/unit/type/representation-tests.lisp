@@ -7,7 +7,7 @@
 (in-package :cl-cc/test)
 
 (defsuite representation-suite :description "Type representation and structural equality tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite representation-suite)

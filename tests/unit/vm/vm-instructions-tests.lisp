@@ -4,7 +4,7 @@
 
 (defsuite vm-instructions-suite
   :description "VM instruction definition unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite vm-instructions-suite)
 

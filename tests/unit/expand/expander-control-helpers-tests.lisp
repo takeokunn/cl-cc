@@ -4,7 +4,7 @@
 
 (defsuite expander-control-helpers-suite
   :description "Control-form helper unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite expander-control-helpers-suite)
 

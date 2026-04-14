@@ -5,7 +5,7 @@
 
 (defsuite macros-stdlib-core-suite
   :description "Tests for macros-stdlib.lisp: core arithmetic and return forms"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-stdlib-core-suite)
 

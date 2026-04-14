@@ -14,7 +14,7 @@
                      (and n (plusp n) n)))))
       10)
   "Default number of test cases to run for each property.
-Honors CLCC_PBT_COUNT environment variable so CI / `make test-fast` can
+Honors CLCC_PBT_COUNT environment variable so CI / `make test` can
 scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
 
 (defvar *max-list-length* 20
@@ -441,7 +441,7 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
    ARGS is a list of (variable generator) pairs.
    BODY is the property to test.
 
-   Returns T if all tests pass, NIL otherwise.
+   Returns T if all tests pass. On failure, fails the enclosing test immediately.
 
    Example:
      (for-all (a (gen-integer) b (gen-integer))
@@ -459,15 +459,11 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
                   (setf ,args-var (list ,@(mapcar #'car gen-bindings)))
                   (handler-case
                       (unless (progn ,@body)
-                        (format t "~&Property failed on iteration ~D with args: ~S~%"
-                                ,iteration-var ,args-var)
-                        (setf ,success-var nil)
-                        (return))
+                        (%fail-test (format nil "Property failed on iteration ~D with args ~S"
+                                            ,iteration-var ,args-var)))
                     (error (e)
-                      (format t "~&Property raised error ~A on iteration ~D with args: ~S~%"
-                              e ,iteration-var ,args-var)
-                      (setf ,success-var nil)
-                      (return)))))
+                      (%fail-test (format nil "Property raised error ~A on iteration ~D with args ~S"
+                                          e ,iteration-var ,args-var))))))
        ,success-var)))
 
 (defun check (property-fn &key (count *test-count*) (seed nil))
@@ -532,7 +528,7 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
 (defsuite cl-cc-pbt-suite
   :description "Property-Based Testing suite for CL-CC"
   :parallel nil
-  :parent cl-cc-suite)
+  :parent cl-cc-integration-serial-suite)
 
 ;;; Example Properties
 

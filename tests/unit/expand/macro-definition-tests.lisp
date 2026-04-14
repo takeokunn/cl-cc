@@ -4,7 +4,7 @@
 
 (defsuite macro-definition-suite
   :description "Macro definition expansion tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite macro-definition-suite)

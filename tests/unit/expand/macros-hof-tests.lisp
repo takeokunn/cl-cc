@@ -8,7 +8,7 @@
 
 (defsuite macros-hof-suite
   :description "Tests for macros-hof.lisp"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite macros-hof-suite)

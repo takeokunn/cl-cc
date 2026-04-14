@@ -4,7 +4,7 @@
 ;;; and opt-inst-cse-eligible-p (Phase 0 of optimizer modernization).
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── vm-inst-effect-kind ─────────────────────────────────────────────────
 

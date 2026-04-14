@@ -7,7 +7,7 @@
 ;;;;   and compile-ast(ast-call) dispatch — tail call and GF paths.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── %try-compile-funcall ─────────────────────────────────────────────────
 

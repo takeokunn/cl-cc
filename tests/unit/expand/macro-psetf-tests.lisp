@@ -4,7 +4,7 @@
 
 (defsuite macro-psetf-suite
   :description "PSETF expansion tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macro-psetf-suite)
 

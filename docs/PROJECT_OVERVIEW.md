@@ -208,32 +208,26 @@ tests/
 ├── integration/        # 統合テスト
 │   ├── compiler-tests.lisp
 │   ├── clos-tests.lisp
-│   └── selfhost-tests.lisp
-└── pbt/               # プロパティベーステスト
-    ├── vm-pbt-tests.lisp
-    └── cps-pbt-tests.lisp
+│   └── pbt/           # integration 内のプロパティベーステスト
+└── e2e/               # end-to-end / self-hosting tests
+    └── selfhost-tests.lisp
 ```
 
 ### テスト実行
 
 ```bash
-# 高速パス(デフォルト): selfhost / PBT / :slow タグを除外
-make test          # = make test-fast
-
-# 完全走行(selfhost・PBT含む、分単位かかる)
-make test-full
+# canonical test entrypoint
+make test
 
 # 特定suiteだけ手動実行
 nix run nixpkgs#sbcl -- --load cl-cc.asd \
   --eval '(ql:quickload :cl-cc/test)' \
-  --eval '(cl-cc/test:run-tests)'                  ;; 高速パス
-# or
-  --eval '(cl-cc/test:run-all-tests)'              ;; 全部
+  --eval '(cl-cc/test:run-tests)'                  ;; canonical plan
 # or
   --eval '(cl-cc/test:run-suite (quote selfhost-suite))'  ;; 個別
 ```
 
-ハング箇所を診断したい場合は `CLCC_TEST_TRACE=1 make test-full` で
+ハング箇所を診断したい場合は `CLCC_TEST_TRACE=1 make test` で
 各テスト名が `*error-output*` に出力されます。
 
 ## CLIリファレンス
@@ -312,7 +306,7 @@ rlwrap sbcl
 - **主要言語**: Common Lisp (SBCL 2.3.0+)
 - **ビルドシステム**: ASDF
 - **パッケージマネージャ**: Quicklisp
-- **テストフレームワーク**: FiveAM + プロパティベーステスト
+- **テストフレームワーク**: in-repo custom framework + プロパティベーステスト
 - **開発環境**: Nix Flakes
 
 ### 外部依存

@@ -6,7 +6,7 @@
 ;;;;   type-check-ast (integer literal type, unknown variable signals error).
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── target-instance ─────────────────────────────────────────────────────────
 

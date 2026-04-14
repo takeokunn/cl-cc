@@ -7,7 +7,7 @@
 
 (defsuite conditions-suite
   :description "VM condition system unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite conditions-suite)
 

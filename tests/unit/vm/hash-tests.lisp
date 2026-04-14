@@ -7,7 +7,7 @@
 
 (defsuite hash-suite
   :description "VM hash table operations unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite hash-suite)
 

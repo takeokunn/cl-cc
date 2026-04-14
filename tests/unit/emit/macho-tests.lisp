@@ -6,7 +6,7 @@
 (in-package :cl-cc/test)
 
 (defsuite macho-suite :description "Mach-O binary format tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite macho-suite)

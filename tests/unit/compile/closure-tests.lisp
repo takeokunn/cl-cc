@@ -7,7 +7,7 @@
 (in-package :cl-cc/test)
 
 (defsuite closure-suite :description "Free variable analysis unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite closure-suite)

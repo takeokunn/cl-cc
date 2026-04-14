@@ -433,7 +433,6 @@
           (:file "lexer-dispatch-tests")  ; feature conditionals, hash dispatch, skip helpers
           (:file "grammar-tests")
            (:file "prolog-data-tests")
-           (:file "prolog-tests")
            (:file "pratt-tests")
           (:file "php-tests")
         (:module "php"
@@ -442,6 +441,7 @@
          ((:file "parser-tests")
           (:file "grammar-tests")))
           (:file "combinator-tests")
+          (:file "parser-combinator-tests")
          (:file "dcg-tests")
          (:file "incremental-tests")
          (:file "cst-to-ast-tests")
@@ -463,7 +463,6 @@
               (:file "macros-basic-check-type-tests")
               (:file "macros-basic-list-tests")
               (:file "macros-basic-setf-tests")
-              (:file "macros-basic-mvb-tests")
               (:file "expander-setf-tests")
               (:file "expander-setf-places-tests")
               (:file "expander-control-tests")
@@ -486,7 +485,6 @@
                 (:file "expander-tail-tests")
                 (:file "defstruct-tests")
                 (:file "loop-tests")
-                (:file "loop-macro-tests")
                 (:file "loop-data-tests")
                 (:file "loop-parser-tests")
                 (:file "loop-emitters-tests")
@@ -506,7 +504,6 @@
              (:file "macros-stdlib-tests")
              (:file "macros-stdlib-bind-error-tests")
              (:file "macros-stdlib-sequence-map-tests")
-             (:file "macros-stdlib-list-set-tests")
              (:file "macros-stdlib-io-tests")
              (:file "macros-stdlib-ansi-tests")   ; with-accessors, assert, define-condition, with-*-string, with-standard-io-syntax
              (:file "macros-stdlib-utils-tests")  ; tailp/ldiff/copy-alist/tree-equal/get-properties/nunion/nsubst*/nstring*/array-*
@@ -517,32 +514,28 @@
                (:file "macros-plist-tests")    ; getf/remf/%plist-put
               (:file "macros-list-compat-tests") ; subst/vector/member-if/maphash
                (:file "macros-hof-tests")      ; HOF macro expansions split from stdlib
-                (:file "predicate-tests")
-                (:file "macros-mutation-tests")
                 (:file "macros-sequence-tests")
-                (:file "macros-sequence-fold-tests")  ; reduce/last/butlast/merge/search/map-into/nsubstitute runtime behavior
               ))
        (:module "type"
         :serial t
         :components
-        ((:file "type-tests")
-         (:file "kind-tests")
-         (:file "multiplicity-tests")
-         (:file "row-tests")
-         (:file "subtyping-tests")
-         (:file "effect-tests")
-         (:file "constraint-tests")
-         (:file "solver-tests")
-         (:file "representation-tests")
-         (:file "substitution-tests")          ; substitution data structure, zonk, composition
-         (:file "unification-tests")           ; product/intersection/constructor/effect-row unification
-         (:file "type-children-tests")         ; type-children / type-bound-var data layer
-         (:file "types-extended-coverage-tests")
-         (:file "typeclass-tests")
-         (:file "printer-tests")
-         (:file "parser-tests")
-         (:file "inference-tests")
-         (:file "exhaustiveness-tests")))
+         ((:file "type-tests")
+          (:file "kind-tests")
+          (:file "multiplicity-tests")
+          (:file "row-tests")
+          (:file "subtyping-tests")
+          (:file "effect-tests")
+          (:file "constraint-tests")
+          (:file "solver-tests")
+          (:file "representation-tests")
+          (:file "substitution-tests")          ; substitution data structure, zonk, composition
+          (:file "unification-tests")           ; product/intersection/constructor/effect-row unification
+          (:file "types-extended-coverage-tests")
+          (:file "typeclass-tests")
+          (:file "printer-tests")
+          (:file "parser-tests")
+          (:file "inference-tests")
+          (:file "exhaustiveness-tests")))
         (:module "compile"
          :serial t
          :components
@@ -550,7 +543,8 @@
            :serial t
            :components
            ((:file "ir-types-tests")
-            (:file "ir-printer-tests")))
+             (:file "ir-printer-tests")
+             (:file "ir-block-tests")))
             (:file "cps-tests")
             (:file "cps-ast-tests")
             (:file "cps-ast-extended-tests") ; OOP/mutation: setq/defvar/make-instance/defclass/defgeneric/defmethod
@@ -565,8 +559,7 @@
              (:file "codegen-phase2-helpers")
              (:file "codegen-core-tests")
              (:file "codegen-core-let-tests")     ; %ast-let-binding-ignored-p, %ast-cons-call-p, %ast-lambda-bound-names, sink-if
-             (:file "codegen-functions-tests")
-              (:file "codegen-runtime-tests")
+              (:file "codegen-functions-tests")
                (:file "codegen-clos-tests")
               (:file "codegen-control-tests")
               (:file "codegen-calls-tests")   ; %try-compile-funcall/apply/noescape, %compile-normal-call, GF dispatch
@@ -582,8 +575,7 @@
        (:module "optimize"
         :serial t
         :components
-        ((:file "optimizer-tests")
-         (:file "optimizer-tables-tests")   ; fold tables, derived lists, opt-inst-read-regs/dst
+        ((:file "optimizer-tables-tests")   ; fold tables, derived lists, opt-inst-read-regs/dst
          (:file "optimizer-strength-tests") ; opt-power-of-2-p, opt-pass-strength-reduce, bswap/rotate
          (:file "optimizer-licm-tests")    ; opt-inst-loop-invariant-p, %opt-pre-*, opt-pass-licm
          (:file "optimizer-copyprop-tests")
@@ -633,38 +625,52 @@
          (:file "heap-trace-tests")       ; Card table + address predicates (heap-trace.lisp)
          (:file "gc-write-barrier-tests") ; SATB + card write barrier (gc-write-barrier.lisp)
          (:file "value-tests")
-         (:file "frame-tests")))
+         (:file "frame-tests")
+         (:file "runtime-tests")))
        (:module "bytecode"
         :serial t
         :components
         ((:file "encode-tests")
          (:file "encode-ops-objects-tests")
          (:file "decode-tests")))))
-     (:module "integration"
-      :serial t
-      :components
-      ((:file "compiler-tests")
-       (:file "closure-tests")
-       (:file "call-conv-tests")
-       (:file "control-flow-tests")
-       (:file "clos-tests")
-       (:file "stream-tests")
-       (:file "selfhost-tests")
-       (:module "pbt"
-        :serial t
-        :components
-        ((:file "package")
-         (:file "framework")
-         (:file "generators")
-         (:file "vm-pbt-tests")
-         (:file "cps-pbt-tests")
-         (:file "ast-pbt-tests")
-         (:file "macro-pbt-tests")
-         (:file "prolog-pbt-tests")
-         (:file "vm-heap-pbt-tests"))))))))
+      (:module "integration"
+       :serial t
+       :components
+       ((:file "compiler-tests")
+        (:file "closure-tests")
+        (:file "call-conv-tests")
+        (:file "codegen-runtime-tests")
+        (:file "control-flow-tests")
+        (:file "clos-tests")
+        (:file "loop-macro-tests")
+        (:file "macros-basic-mvb-tests")
+        (:file "macros-mutation-tests")
+        (:file "macros-sequence-fold-tests")
+        (:file "macros-stdlib-list-set-tests")
+        (:file "optimizer-tests")
+        (:file "pipeline-tests")
+        (:file "predicate-tests")
+        (:file "prolog-tests")
+        (:file "stream-tests")
+        (:module "pbt"
+         :serial t
+         :components
+         ((:file "package")
+          (:file "framework")
+          (:file "generators")
+          (:file "vm-pbt-tests")
+          (:file "cps-pbt-tests")
+          (:file "ast-pbt-tests")
+          (:file "macro-pbt-tests")
+          (:file "prolog-pbt-tests")
+          (:file "vm-heap-pbt-tests")))))
+      (:module "e2e"
+       :serial t
+       :components
+       ((:file "selfhost-tests"))))))
   :perform (asdf:test-op (op c)
-              (declare (ignore op c))
-              (uiop:symbol-call :cl-cc/test 'run-tests)))
+                (declare (ignore op c))
+                (uiop:symbol-call :cl-cc/test 'run-tests)))
 
 (asdf:defsystem :cl-cc/test-clos
   :description "CL-CC isolated CLOS integration tests"
@@ -690,4 +696,3 @@
        :serial t
        :components
        ((:file "clos-tests")))))))
-

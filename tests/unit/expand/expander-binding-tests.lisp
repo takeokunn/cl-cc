@@ -3,7 +3,7 @@
 (in-package :cl-cc/test)
 
 (defsuite expander-binding-suite :description "Binding helper unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite expander-binding-suite)

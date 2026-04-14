@@ -10,7 +10,7 @@
 ;;;;   opt-known-callee-labels (register tracking through closures/moves).
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── opt-max-reg-index ───────────────────────────────────────────────────────
 

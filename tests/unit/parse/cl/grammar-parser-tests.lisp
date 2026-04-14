@@ -7,7 +7,7 @@
 ;;;;     generic calls), parse-cl-source (multi-form, nested).
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── Helpers ─────────────────────────────────────────────────────────────────
 

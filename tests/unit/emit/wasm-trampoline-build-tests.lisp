@@ -8,7 +8,7 @@
 
 (defsuite wasm-trampoline-build-suite
   :description "Tests for wasm-trampoline-build.lisp: body builder + module assembler"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite wasm-trampoline-build-suite)
 

@@ -11,7 +11,7 @@
 ;;;; rather than evaluating them (which would require a full runtime).
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 (defun %cps-k (node)
   "CPS-transform NODE with a fixed continuation symbol K."

@@ -4,7 +4,7 @@
 ;;; composition, occurs check, generalize/instantiate, and normalization.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── Substitution Structure ─────────────────────────────────────────────
 

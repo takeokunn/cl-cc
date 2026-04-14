@@ -10,7 +10,7 @@
 ;;;; codegen-core-tests.lisp; this file targets the internal data+logic layer.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── %ast-constant-number-value ───────────────────────────────────────────
 

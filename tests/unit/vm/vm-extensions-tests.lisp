@@ -4,7 +4,7 @@
 
 (defsuite vm-extensions-suite
   :description "Unit tests for src/vm/vm-extensions.lisp"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite vm-extensions-suite)
 

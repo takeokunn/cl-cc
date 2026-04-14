@@ -4,7 +4,7 @@
 ;;; cfg-compute-dominance-frontiers, and related utilities.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── Helpers ─────────────────────────────────────────────────────────────
 

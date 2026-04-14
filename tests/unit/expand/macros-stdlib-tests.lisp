@@ -5,7 +5,7 @@
 
 (defsuite macros-stdlib-suite
   :description "Tests for macros-stdlib.lisp: remaining forms"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-stdlib-suite)
 

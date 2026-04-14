@@ -6,7 +6,7 @@
 (in-package :cl-cc/test)
 
 (defsuite elf-suite :description "ELF64 binary format tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite elf-suite)

@@ -13,7 +13,7 @@
 
 (defsuite closure-tests-suite
   :description "Tests for closure and lambda expression compilation"
-  :parent cl-cc-suite)
+  :parent cl-cc-integration-suite)
 
 (in-suite closure-tests-suite)
 

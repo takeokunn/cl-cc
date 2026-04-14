@@ -4,7 +4,7 @@
 
 (defsuite macros-list-utils-suite
   :description "List utility macro tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-list-utils-suite)
 

@@ -11,7 +11,7 @@
 
 (defsuite value-suite
   :description "NaN-boxing value representation tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite value-suite)
 

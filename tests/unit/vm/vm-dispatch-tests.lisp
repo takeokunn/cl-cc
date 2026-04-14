@@ -4,7 +4,7 @@
 
 (defsuite vm-dispatch-suite
   :description "Unit tests for vm-dispatch helpers"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite vm-dispatch-suite)
 

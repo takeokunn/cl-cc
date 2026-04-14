@@ -4,7 +4,7 @@
 
 (defsuite macro-progv-suite
   :description "PROGV expansion tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macro-progv-suite)
 

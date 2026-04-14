@@ -5,7 +5,7 @@
 (in-package :cl-cc/test)
 
 (defsuite expander-lambda-list-defaults-suite :description "Lambda-list default expander unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite expander-lambda-list-defaults-suite)

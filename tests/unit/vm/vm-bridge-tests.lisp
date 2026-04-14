@@ -9,7 +9,7 @@
 ;;;;   generic-function-methods, generic-function-method-combination.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── hash-table-values ───────────────────────────────────────────────────
 

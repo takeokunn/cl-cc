@@ -8,7 +8,7 @@
 (in-package :cl-cc/test)
 
 (defsuite x86-64-encoding-suite :description "x86-64 instruction encoding unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite x86-64-encoding-suite)
 ;;; Helper: collect bytes emitted by a function

@@ -10,7 +10,7 @@
 ;;;;   run-vm-with-opcode-bigrams — bigram profiling variant of run-vm
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── Helper ─────────────────────────────────────────────────────────────────
 

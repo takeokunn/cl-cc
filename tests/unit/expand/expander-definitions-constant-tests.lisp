@@ -3,7 +3,7 @@
 (in-package :cl-cc/test)
 
 (defsuite expander-definitions-constant-suite :description "Definition-form constant unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite expander-definitions-constant-suite)

@@ -6,7 +6,7 @@
 (in-package :cl-cc/test)
 
 (defsuite context-suite :description "Compiler context unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite context-suite)

@@ -8,7 +8,7 @@
 ;;;;   parse-cl-source (simple integer, symbol, list).
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── Token construction helpers ──────────────────────────────────────────
 

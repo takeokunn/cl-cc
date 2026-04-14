@@ -4,7 +4,7 @@
 ;;; register mapping, and WAT name conversion.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── Struct Construction ──────────────────────────────────────────────────
 

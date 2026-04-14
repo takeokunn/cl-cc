@@ -11,7 +11,7 @@
 ;;;;   ast-make-instance), plus the slot-def-to-sexp helper.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── Leaf nodes ──────────────────────────────────────────────────────────
 

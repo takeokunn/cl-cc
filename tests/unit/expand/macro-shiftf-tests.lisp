@@ -4,7 +4,7 @@
 
 (defsuite macro-shiftf-suite
   :description "SHIFTF expansion tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macro-shiftf-suite)
 

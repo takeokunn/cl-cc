@@ -13,7 +13,7 @@
 
 (defsuite macros-stdlib-ansi-suite
   :description "Tests for macros-stdlib-ansi.lisp: ANSI CL Phase 1 macros"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-stdlib-ansi-suite)
 

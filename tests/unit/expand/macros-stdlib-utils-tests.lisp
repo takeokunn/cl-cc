@@ -11,7 +11,7 @@
 
 (defsuite macros-stdlib-utils-suite
   :description "Tests for macros-stdlib-utils.lisp: list/tree/string/array utilities"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-stdlib-utils-suite)
 

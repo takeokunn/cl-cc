@@ -4,7 +4,7 @@
 
 (defsuite cl-lower-suite
   :description "Lowering tests for parse/cl/lower.lisp"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite cl-lower-suite)
 

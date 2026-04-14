@@ -3,7 +3,7 @@
 ;;;; Coverage for the dispatch-table statement parsers in parser-stmt.lisp.
 ;;;; Each test exercises one *php-stmt-parsers* handler via parse-php-source.
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── Helper ───────────────────────────────────────────────────────────────
 

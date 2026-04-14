@@ -5,7 +5,7 @@
 
 (defsuite macros-sequence-suite
   :description "Tests for macros-sequence.lisp"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-sequence-suite)
 

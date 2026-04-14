@@ -8,7 +8,7 @@
 (in-package :cl-cc/test)
 
 (defsuite x86-64-codegen-suite :description "x86-64 machine code generation tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite x86-64-codegen-suite)

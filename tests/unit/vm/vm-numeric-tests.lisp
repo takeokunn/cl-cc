@@ -4,7 +4,7 @@
 
 (defsuite vm-numeric-suite
   :description "Unit tests for src/vm/vm-numeric.lisp"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite vm-numeric-suite)
 

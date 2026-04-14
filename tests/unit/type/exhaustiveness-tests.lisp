@@ -5,7 +5,7 @@
 ;;;; useful-typecase-arms, and typecase-arm-subsumed-p.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── typecase-arm-subsumed-p ──────────────────────────────────────────────
 

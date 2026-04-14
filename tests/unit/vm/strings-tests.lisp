@@ -7,7 +7,7 @@
 
 (defsuite strings-suite
   :description "VM string and character operations unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite strings-suite)
 

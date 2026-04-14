@@ -1,6 +1,6 @@
 ;;;; tests/unit/parse/php/grammar-tests.lisp — PHP grammar token-stream tests
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 (defun %php-ts (tokens)
   (cl-cc::make-php-token-stream :tokens tokens :source "" :diagnostics nil))

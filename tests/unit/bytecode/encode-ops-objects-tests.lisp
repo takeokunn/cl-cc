@@ -7,7 +7,7 @@
 
 (defsuite bytecode-encode-objects-suite
   :description "Bytecode encoder tests for closures, objects, collections, type checks, and exceptions"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite bytecode-encode-objects-suite)
 

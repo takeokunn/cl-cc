@@ -6,7 +6,7 @@
 (in-package :cl-cc/test)
 
 (defsuite cst-to-ast-suite :description "CST-to-AST lowering unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite cst-to-ast-suite)

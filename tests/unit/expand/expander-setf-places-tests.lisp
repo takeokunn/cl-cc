@@ -3,7 +3,7 @@
 (in-package :cl-cc/test)
 
 (defsuite expander-setf-places-suite :description "Setf-place expander unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite expander-setf-places-suite)

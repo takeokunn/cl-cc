@@ -11,7 +11,7 @@
 
 (defsuite bytecode-encode-suite
   :description "Bytecode ISA v2 encoder tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite bytecode-encode-suite)
 

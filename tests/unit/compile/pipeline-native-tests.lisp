@@ -4,7 +4,7 @@
 ;;;; %compile-cache-path, %copy-file-bytes, and typeclass macro registration.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── *compile-cache-root* ───────────────────────────────────────────────────
 

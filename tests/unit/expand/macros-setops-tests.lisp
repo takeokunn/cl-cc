@@ -4,7 +4,7 @@
 
 (defsuite macros-setops-suite
   :description "Set operation macro tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-setops-suite)
 

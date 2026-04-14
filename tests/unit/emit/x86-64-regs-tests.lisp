@@ -8,7 +8,7 @@
 
 (defsuite x86-64-regs-suite
   :description "Register map and translation tests for x86-64-regs.lisp"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite x86-64-regs-suite)
 

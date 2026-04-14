@@ -1,7 +1,7 @@
 ;;;; tests/unit/compile/codegen-functions-tests.lisp — Codegen function/call unit tests
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 (deftest codegen-function-ref-returns-register
   "Compiling #'fn returns a register."

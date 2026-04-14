@@ -4,7 +4,7 @@
 
 (defsuite vm-transcendental-suite
   :description "Unit tests for src/vm/vm-transcendental.lisp"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite vm-transcendental-suite)
 

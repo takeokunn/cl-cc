@@ -2,7 +2,7 @@
 
 (defsuite control-flow-tests
   :description "Tests for control flow forms: block, return-from, tagbody, go, catch, throw, unwind-protect, setq, quote, the."
-  :parent cl-cc-suite)
+  :parent cl-cc-integration-suite)
 
 (in-suite control-flow-tests)
 

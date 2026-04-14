@@ -4,7 +4,7 @@
 
 (defsuite package-suite
   :description "Package export smoke tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite package-suite)
 

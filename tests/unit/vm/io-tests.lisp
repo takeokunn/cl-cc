@@ -8,7 +8,7 @@
 
 (defsuite io-suite
   :description "VM I/O operations unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite io-suite)
 

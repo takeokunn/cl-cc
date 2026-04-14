@@ -4,7 +4,7 @@
 
 (defsuite macro-rotatef-suite
   :description "ROTATEF expansion tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macro-rotatef-suite)
 

@@ -8,7 +8,7 @@
 (in-package :cl-cc/test)
 
 (defsuite aarch64-encoding-suite :description "AArch64 instruction encoding unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite aarch64-encoding-suite)

@@ -4,7 +4,7 @@
 
 (defsuite vm-run-suite
   :description "Unit tests for vm-run.lisp error matching"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite vm-run-suite)
 

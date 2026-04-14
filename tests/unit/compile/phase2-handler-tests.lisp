@@ -16,7 +16,7 @@
   :description "Phase 2 builtin handler dispatch (AST-introspecting builtins)
 (in-suite phase2-handler-suite)
 "
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 ;;; ── MAKE-HASH-TABLE ───────────────────────────────────────────────────────
 

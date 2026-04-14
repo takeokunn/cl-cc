@@ -14,7 +14,7 @@
 
 (defsuite heap-trace-suite
   :description "Card table and address predicate tests (heap-trace.lisp)"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite heap-trace-suite)
 

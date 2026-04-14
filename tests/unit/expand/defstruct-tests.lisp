@@ -7,7 +7,7 @@
 (in-package :cl-cc/test)
 
 (defsuite defstruct-suite :description "expand-defstruct unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite defstruct-suite)

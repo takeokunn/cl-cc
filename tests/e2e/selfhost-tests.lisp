@@ -1,18 +1,18 @@
-;;;; tests/integration/selfhost-tests.lisp — Self-Hosting Integration Tests
+;;;; tests/e2e/selfhost-tests.lisp — Self-Hosting End-to-End Tests
 ;;;; Demonstrates that cl-cc can compile and run significant pieces of its own
 ;;;; compiler infrastructure: CPS transformer, optimizer, macro expander, etc.
 
 (in-package :cl-cc/test)
 
 (defsuite selfhost-suite
-  :description "Self-hosting integration tests"
+  :description "Self-hosting end-to-end tests"
   :parallel nil
-  :parent cl-cc-suite)
+  :parent cl-cc-e2e-suite)
 
 (defsuite selfhost-slow-suite
-  :description "Heavy self-hosting regression tests"
+  :description "Heavy self-hosting end-to-end regression tests"
   :parallel nil
-  :parent cl-cc-suite)
+  :parent cl-cc-e2e-suite)
 
 (in-suite selfhost-suite)
 

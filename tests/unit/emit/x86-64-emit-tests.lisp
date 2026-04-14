@@ -7,7 +7,7 @@
 (in-package :cl-cc/test)
 
 (defsuite x86-64-emit-suite :description "x86-64 assembly emit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite x86-64-emit-suite)

@@ -9,7 +9,7 @@
 ;;;; verify the byte count matches the byte-budget documented in the source.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── Test helpers ────────────────────────────────────────────────────────
 

@@ -6,7 +6,7 @@
 (in-package :cl-cc/test)
 
 (defsuite wasm-extract-suite :description "WASM function extraction pass tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite wasm-extract-suite)

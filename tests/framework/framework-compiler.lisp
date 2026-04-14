@@ -22,13 +22,14 @@
             (,found  (and ,instrs
                           (find-if (lambda (i)
                                      (typep i (find-symbol (symbol-name ,contains) :cl-cc)))
-                                   ,instrs))))
+                                    ,instrs))))
        (unless ,found
-         (%fail-test (format nil "assert-compiles-to: ~S does not contain instruction of type ~S"
-                             ,expr ,contains)
-                     :expected ,contains
-                     :actual   (and ,instrs (mapcar #'type-of ,instrs))
-                     :form     (list 'assert-compiles-to ,expr :contains ,contains))))))
+          (%fail-test (format nil "assert-compiles-to: ~S does not contain instruction of type ~S"
+                              ,expr ,contains)
+                      :expected ,contains
+                      :actual   (and ,instrs (mapcar #'type-of ,instrs))
+                      :form     (list 'assert-compiles-to ,expr :contains ,contains)))
+       t)))
 
 (defmacro assert-evaluates-to (expr expected &key stdlib)
   "Assert that running EXPR via run-string returns a value EQUAL to EXPECTED.
@@ -39,11 +40,12 @@
     `(let ((,exp ,expected)
            (,act (ignore-errors (run-string ,expr))))
        (unless (equal ,act ,exp)
-         (%fail-test (format nil "assert-evaluates-to: ~S evaluated to ~S, expected ~S"
-                             ,expr ,act ,exp)
-                     :expected ,exp
-                     :actual   ,act
-                     :form     (list 'assert-evaluates-to ,expr ,expected))))))
+          (%fail-test (format nil "assert-evaluates-to: ~S evaluated to ~S, expected ~S"
+                              ,expr ,act ,exp)
+                      :expected ,exp
+                      :actual   ,act
+                      :form     (list 'assert-evaluates-to ,expr ,expected)))
+       t)))
 
 (defmacro assert-macro-expands-to (form expected)
   "Assert that (our-macroexpand FORM) is EQUAL to EXPECTED."
@@ -52,11 +54,12 @@
     `(let ((,exp ,expected)
            (,act (ignore-errors (our-macroexpand ,form))))
        (unless (equal ,act ,exp)
-         (%fail-test (format nil "assert-macro-expands-to: ~S expanded to ~S, expected ~S"
-                             ,form ,act ,exp)
-                     :expected ,exp
-                     :actual   ,act
-                     :form     (list 'assert-macro-expands-to ,form ,expected))))))
+          (%fail-test (format nil "assert-macro-expands-to: ~S expanded to ~S, expected ~S"
+                              ,form ,act ,exp)
+                      :expected ,exp
+                      :actual   ,act
+                      :form     (list 'assert-macro-expands-to ,form ,expected)))
+       t)))
 
 (defmacro assert-infers-type (expr expected-type)
   "Assert that compiling EXPR with run-string-typed produces a type
@@ -71,11 +74,12 @@
                           (and (typep ,inferred 'cl-cc/type::type-primitive)
                                (equal (cl-cc/type::type-primitive-name ,inferred)
                                       ',expected-type)))))
-         (%fail-test (format nil "assert-infers-type: ~S inferred ~S, expected ~S"
-                             ,expr ,inferred ',expected-type)
-                     :expected ',expected-type
-                     :actual   ,inferred
-                     :form     (list 'assert-infers-type ,expr ',expected-type))))))
+          (%fail-test (format nil "assert-infers-type: ~S inferred ~S, expected ~S"
+                              ,expr ,inferred ',expected-type)
+                      :expected ',expected-type
+                      :actual   ,inferred
+                      :form     (list 'assert-infers-type ,expr ',expected-type)))
+       t)))
 
 ;;; ------------------------------------------------------------
 ;;; Section 2: Differential Testing (FR-022)

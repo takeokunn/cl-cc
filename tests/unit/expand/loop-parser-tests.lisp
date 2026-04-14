@@ -4,7 +4,7 @@
 
 (defsuite loop-parser-suite
   :description "LOOP parser helpers and clause dispatch"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite loop-parser-suite)
 

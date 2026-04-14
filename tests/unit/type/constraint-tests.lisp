@@ -6,7 +6,7 @@
 (in-package :cl-cc/test)
 
 (defsuite constraint-suite :description "OutsideIn(X
-  :parent cl-cc-suite) 
+  :parent cl-cc-unit-suite) 
 (in-suite constraint-suite)
 constraint language tests")
 

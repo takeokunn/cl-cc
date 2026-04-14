@@ -332,8 +332,8 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 #### FR-350: Line/Branch Coverage (行・分岐カバレッジ)
 
 - **対象**: `src/compile/codegen.lisp`, `tests/framework/framework.lisp`
-- **現状**: テストフレームワーク（FiveAM）にカバレッジ計測機構なし。`deftest-each`/`deftest`マクロにカバレッジフックなし
-- **内容**: `--coverage`コンパイルフラグでソース行・分岐ごとにカウンタ命令を埋め込み。`(cl-cc:with-coverage ...)` フォームで範囲指定計測。HTML/LCOVカバレッジレポート生成。`make test-coverage`ターゲット。`tests/`内の全ユニットテストへのカバレッジ統合
+- **現状**: 現行の in-repo テストフレームワークにカバレッジ計測機構なし。`deftest-each`/`deftest`マクロにカバレッジフックなし
+- **内容**: `--coverage`コンパイルフラグでソース行・分岐ごとにカウンタ命令を埋め込み。`(cl-cc:with-coverage ...)` フォームで範囲指定計測。HTML/LCOVカバレッジレポート生成。canonical `make test` フローと統合し、`tests/`内の全ユニットテストへカバレッジを結び付ける
 - **根拠**: GCC `--coverage` / LLVM source-based coverage / Istanbul。4322テストのカバレッジ計測でデッドパス特定
 - **難易度**: Medium
 
@@ -474,4 +474,3 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **難易度**: Hard
 
 ---
-

@@ -1,6 +1,6 @@
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 (deftest prolog-data-built-in-handler-specs
   "The built-in predicate table stays data-only and exposes the expected handlers."

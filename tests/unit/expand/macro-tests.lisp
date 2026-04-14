@@ -6,7 +6,7 @@
 
 (defsuite macro-suite
   :description "Test suite for macro expansion"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite macro-suite)

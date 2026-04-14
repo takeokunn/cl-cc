@@ -8,7 +8,7 @@
 (in-package :cl-cc/test)
 
 (defsuite diagnostics-suite :description "Parser diagnostic system tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite diagnostics-suite)

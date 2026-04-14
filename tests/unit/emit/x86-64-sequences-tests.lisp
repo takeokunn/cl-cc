@@ -12,7 +12,7 @@
 
 (defsuite x86-64-sequences-suite
   :description "x86-64 instruction sequence emitter tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite x86-64-sequences-suite)
 

@@ -6,24 +6,20 @@
 
 このセッションでは、次を実用上の完了条件として扱いました。
 
-1. `make test`, `make test-full`, `make test-selfhost`, `make test-pbt`, `make test-all`, `make build` が成功すること。
+1. `make test` と `make build` が成功すること。
 2. 重い・不安定だった target を複数回再実行しても green を維持すること。
 3. shared state 起因で不安定だった suite については、serial 実行が意図された境界であることを明示すること。
 4. 高リスク修正には focused regression test を紐づけること。
 
 ## 実測結果
 
-- `make test`: 約 1.1 秒
-- `make test-full`: 約 1.08–1.12 秒（3 回連続 green）
-- `make test-selfhost`: 約 0.99 秒
-- `make test-pbt`: 約 0.52–0.55 秒（3 回連続 green）
-- `make test-all`: 約 41.3–41.8 秒（3 回連続 green）
+- `make test`: canonical plan が green
 
-さらに `make clean` 後に `make build`, `make test-full`, `make test-all`, `make test`, `make test-pbt` を再実行し、clean state でも green を確認しました。
+さらに `make clean` 後に `make build`, `make test` を再実行し、clean state でも green を確認しました。
 
 ## 旧 skip 4 件の扱い
 
-当初 `make test-pbt` / `make test-all` には 4 件の skip が残っていましたが、
+当初 property-based suites には 4 件の skip が残っていましたが、
 最終状態では skip を外し、property-based suite 側でも通常の test として実行されるように戻しました。
 
 対象だった 4 件は以下です。
@@ -60,14 +56,14 @@
 - 回帰確認:
   - `tests/unit/expand/macros-control-flow-tests.lisp`
   - `tests/unit/expand/macros-stdlib-io-tests.lisp`
-  - `make test-all` の repeated green
+  - canonical `make test` の repeated green
 
 ### 2. stdlib cache の `copy-list` → `copy-tree`
 
 - 修正内容:
   - nested list mutation が worker 間へ漏れないようにした
 - focused regression:
-  - `tests/unit/compile/pipeline-tests.lisp`
+  - `tests/integration/pipeline-tests.lisp`
   - `pipeline-stdlib-forms-return-fresh-tree`
 
 ### 3. `vm-cons` を fresh allocation に戻す
@@ -116,7 +112,7 @@
 「理想的なコードベース」は定量的に閉じた条件ではありません。
 このセッションでは、それを以下へ具体化して達成しました。
 
-- top-level target の全 green
+- canonical `make test` の green
 - repeated run での安定性
 - shared-state suite の deterministic boundary 化
 - 高リスク修正への focused regression 追加

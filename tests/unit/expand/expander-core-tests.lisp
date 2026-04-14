@@ -3,7 +3,7 @@
 (in-package :cl-cc/test)
 
 (defsuite expander-core-suite :description "Core expander helper unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite expander-core-suite)

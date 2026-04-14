@@ -2,7 +2,7 @@
 
 (defsuite macros-restarts-suite
   :description "Restart protocol expansion tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-restarts-suite)
 

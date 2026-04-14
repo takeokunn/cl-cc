@@ -4,7 +4,7 @@
 
 (defsuite macros-cxr-suite
   :description "CXR accessor macro tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite macros-cxr-suite)
 

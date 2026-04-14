@@ -3,7 +3,7 @@
 (in-package :cl-cc/test)
 
 (defsuite expander-control-suite :description "Control-form expander unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite expander-control-suite)

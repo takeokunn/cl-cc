@@ -7,7 +7,7 @@
 ;;;;   opt-pass-branch-correlation, opt-pass-block-merge, opt-pass-tail-merge.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── opt-pass-dce ────────────────────────────────────────────────────────
 

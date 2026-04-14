@@ -4,7 +4,7 @@
 
 (defsuite expander-tail-suite
   :description "Tail-form expander unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite expander-tail-suite)
 

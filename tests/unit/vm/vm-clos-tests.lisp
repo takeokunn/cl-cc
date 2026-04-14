@@ -12,7 +12,7 @@
 
 (defsuite vm-clos-suite
   :description "Unit tests for CLOS registry helpers and generic-dispatch utilities"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite vm-clos-suite)
 

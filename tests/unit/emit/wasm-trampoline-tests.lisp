@@ -6,7 +6,7 @@
 (in-package :cl-cc/test)
 
 (defsuite wasm-trampoline-suite :description "WASM trampoline builder tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite wasm-trampoline-suite)

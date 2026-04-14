@@ -4,7 +4,7 @@
 
 (defsuite loop-data-suite
   :description "LOOP data layer unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite loop-data-suite)
 

@@ -7,7 +7,7 @@
 (in-package :cl-cc/test)
 
 (defsuite printer-suite :description "Type pretty-printer tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite printer-suite)

@@ -7,7 +7,7 @@
 (defsuite stream-suite
   :description "Stream I/O integration tests"
   :parallel nil
-  :parent cl-cc-suite)
+  :parent cl-cc-integration-serial-suite)
 
 (in-suite stream-suite)
 

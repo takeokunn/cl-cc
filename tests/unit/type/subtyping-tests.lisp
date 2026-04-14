@@ -7,7 +7,7 @@
 (in-package :cl-cc/test)
 
 (defsuite subtyping-suite :description "Subtyping relation and lattice operation tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 
 (in-suite subtyping-suite)

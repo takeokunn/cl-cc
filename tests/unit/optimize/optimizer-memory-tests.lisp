@@ -10,7 +10,7 @@
 ;;;;   opt-pass-dead-store-elim, opt-pass-store-to-load-forward.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── opt-heap-root-inst-p ───────────────────────────────────────────────
 

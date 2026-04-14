@@ -4,7 +4,7 @@
 
 (defsuite format-suite
   :description "VM formatted output and reader operation tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite format-suite)
 

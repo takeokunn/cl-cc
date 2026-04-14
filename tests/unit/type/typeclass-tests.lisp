@@ -8,10 +8,10 @@
 (in-package :cl-cc/test)
 
 (defsuite typeclass-suite :description "Multi-parameter typeclass system tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-unit-suite)
 
 (in-suite typeclass-suite)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── typeclass-def struct ──────────────────────────────────────────────────
 

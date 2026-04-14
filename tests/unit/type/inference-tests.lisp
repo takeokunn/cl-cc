@@ -9,7 +9,7 @@
 ;;;   ast-make-instance, ast-slot-value, ast-quote (cons/string)
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-suite)
+(in-suite cl-cc-unit-suite)
 
 ;;; ─── Class Type Registry ──────────────────────────────────────────────────
 
