@@ -16,9 +16,13 @@
 (defvar *macro-environment* (make-instance 'macro-env)
   "Global macro environment for macro definitions.")
 
-(defvar *macroexpansion-cache*
+(defvar *macroexpand-step-cache*
   (make-hash-table :test #'eq :weakness :key)
-  "Weak cache mapping ENV → (equal-hash-table FORM → EXPANDED-FORM).")
+  "Weak cache mapping ENV → (equal-hash-table FORM → (EXPANDED-P . VALUE)).")
+
+(defvar *macroexpand-all-cache*
+  (make-hash-table :test #'eq :weakness :key)
+  "Weak cache mapping ENV → (equal-hash-table FORM → recursively EXPANDED-FORM).")
 
 (defvar *macroexpansion-cache-lock*
   #+sb-thread (sb-thread:make-mutex :name "macroexpansion-cache")
@@ -28,18 +32,34 @@
   #+sb-thread `(sb-thread:with-mutex (*macroexpansion-cache-lock*) ,@body)
   #-sb-thread `(progn ,@body))
 
- (defun %macroexpansion-cache-table (env)
-  (or (gethash env *macroexpansion-cache*)
-      (setf (gethash env *macroexpansion-cache*)
+(defun %macroexpansion-cache-table (root env)
+  (or (gethash env root)
+      (setf (gethash env root)
             (make-hash-table :test #'equal))))
 
-(defun %macroexpansion-cache-lookup (form env)
+(defun %macroexpansion-cache-lookup (form env &optional (root *macroexpand-step-cache*))
   (%with-macroexpansion-cache-lock
-    (gethash form (%macroexpansion-cache-table env))))
+    (gethash form (%macroexpansion-cache-table root env))))
 
-(defun %macroexpansion-cache-store (form env expanded)
+(defun %macroexpansion-cache-store (form env expanded &optional (root *macroexpand-step-cache*))
   (%with-macroexpansion-cache-lock
-    (setf (gethash form (%macroexpansion-cache-table env)) expanded)))
+    (setf (gethash form (%macroexpansion-cache-table root env)) expanded)))
+
+(defun %contains-uninterned-symbol-p (form)
+  "Return T when FORM contains any uninterned symbol.
+We avoid caching such expansions so hygiene-related gensyms stay fresh across
+independent macroexpansions." 
+  (labels ((walk (node)
+             (typecase node
+               (symbol (null (symbol-package node)))
+               (cons (or (walk (car node))
+                         (walk (cdr node))))
+               (t nil))))
+    (walk form)))
+
+(defun %cacheable-macroexpansion-p (form)
+  "Return T when FORM is safe to reuse from the macroexpansion cache."
+  (not (%contains-uninterned-symbol-p form)))
 
 (defun register-macro (name expander)
   "Register NAME as a macro with EXPANDER function in the global environment."
@@ -64,40 +84,55 @@
 (defun our-macroexpand-1 (form &optional env)
   "Perform a single macro expansion on FORM.
    Returns (VALUES expanded-form expanded-p)."
-  (let ((cached (%macroexpansion-cache-lookup form env)))
-    (when cached (return-from our-macroexpand-1 (values cached t))))
+  (when (%cacheable-macroexpansion-p form)
+    (multiple-value-bind (cached hitp)
+        (%macroexpansion-cache-lookup form env *macroexpand-step-cache*)
+      (when hitp
+        (return-from our-macroexpand-1 (values (cdr cached) (car cached))))))
   (if (and (consp form) (symbolp (car form)))
       (let ((macro-fn (lookup-macro (car form) env)))
         (if macro-fn
             (let ((expanded (funcall macro-fn form env)))
               (if (equal expanded form)
-                  (progn (%macroexpansion-cache-store form env form)
-                         (values form nil))
-                  (progn (%macroexpansion-cache-store form env expanded)
-                         (values expanded t))))
-            (progn (%macroexpansion-cache-store form env form)
-                   (values form nil))))
-      (progn (%macroexpansion-cache-store form env form)
-             (values form nil))))
+                   (progn (when (%cacheable-macroexpansion-p form)
+                           (%macroexpansion-cache-store form env (cons nil form) *macroexpand-step-cache*))
+                          (values form nil))
+                   (progn (when (and (%cacheable-macroexpansion-p form)
+                                     (%cacheable-macroexpansion-p expanded))
+                           (%macroexpansion-cache-store form env (cons t expanded) *macroexpand-step-cache*))
+                          (values expanded t))))
+             (progn (when (%cacheable-macroexpansion-p form)
+                      (%macroexpansion-cache-store form env (cons nil form) *macroexpand-step-cache*))
+                    (values form nil))))
+      (progn (when (%cacheable-macroexpansion-p form)
+                (%macroexpansion-cache-store form env (cons nil form) *macroexpand-step-cache*))
+              (values form nil))))
 
 (defun %our-macroexpand-all-recursive (form env)
   "Recursively expand FORM after a single expansion step."
-  (let ((cached (%macroexpansion-cache-lookup form env)))
-    (when cached (return-from %our-macroexpand-all-recursive cached)))
+  (when (%cacheable-macroexpansion-p form)
+    (multiple-value-bind (cached hitp)
+        (%macroexpansion-cache-lookup form env *macroexpand-all-cache*)
+      (when hitp (return-from %our-macroexpand-all-recursive cached))))
   (multiple-value-bind (expanded expanded-p)
       (our-macroexpand-1 form env)
     (if expanded-p
         (let ((result (%our-macroexpand-all-recursive expanded env)))
-          (%macroexpansion-cache-store form env result)
+          (when (and (%cacheable-macroexpansion-p form)
+                     (%cacheable-macroexpansion-p result))
+             (%macroexpansion-cache-store form env result *macroexpand-all-cache*))
           result)
         (typecase form
           (cons
             (let ((result (mapcar (lambda (x) (%our-macroexpand-all-recursive x env)) form)))
-              (%macroexpansion-cache-store form env result)
+              (when (and (%cacheable-macroexpansion-p form)
+                         (%cacheable-macroexpansion-p result))
+                 (%macroexpansion-cache-store form env result *macroexpand-all-cache*))
               result))
            (t
-            (%macroexpansion-cache-store form env form)
-            form)))))
+            (when (%cacheable-macroexpansion-p form)
+               (%macroexpansion-cache-store form env form *macroexpand-all-cache*))
+             form)))))
 
 (defun our-macroexpand (form &optional env)
   "Fully expand FORM by repeatedly applying macroexpand-1.

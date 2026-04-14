@@ -54,10 +54,10 @@
 
 (deftest-each builtin-table-query-representative-entries
   "*builtin-table-query-entries* maps hash-table query fns to their constructors."
-  :cases (("hash-table-count"  'hash-table-count  'cl-cc::make-vm-hash-table-count)
-          ("hash-table-keys"   'hash-table-keys   'cl-cc::make-vm-hash-table-keys)
-          ("hash-table-values" 'hash-table-values 'cl-cc::make-vm-hash-table-values)
-          ("hash-table-test"   'hash-table-test   'cl-cc::make-vm-hash-table-test))
+  :cases (("hash-table-count"  'cl-cc::hash-table-count  'cl-cc::make-vm-hash-table-count)
+          ("hash-table-keys"   'cl-cc::hash-table-keys   'cl-cc::make-vm-hash-table-keys)
+          ("hash-table-values" 'cl-cc::hash-table-values 'cl-cc::make-vm-hash-table-values)
+          ("hash-table-test"   'cl-cc::hash-table-test   'cl-cc::make-vm-hash-table-test))
   (sym expected-ctor)
   (assert-equal expected-ctor (cdr (assoc sym cl-cc::*builtin-table-query-entries*))))
 
@@ -253,9 +253,9 @@
 
 (deftest-each builtin-ternary-custom-representative
   "*builtin-ternary-custom-entries* holds 6-element list entries."
-  :cases (("acons"  'acons  'cl-cc::make-vm-acons   :key       :value     :alist     :dst)
-          ("subst"  'subst  'cl-cc::make-vm-subst   :new-val   :old-val   :tree      :dst)
-          ("aset"   'aset   'cl-cc::make-vm-aset    :array-reg :index-reg :val-reg   :move-third))
+  :cases (("acons"  'cl-cc::acons  'cl-cc::make-vm-acons   :key       :value     :alist     :dst)
+          ("subst"  'cl-cc::subst  'cl-cc::make-vm-subst   :new-val   :old-val   :tree      :dst)
+          ("aset"   'cl-cc::aset   'cl-cc::make-vm-aset    :array-reg :index-reg :val-reg   :move-third))
   (sym expected-ctor slot1 slot2 slot3 return-style)
   (let ((entry (assoc sym cl-cc::*builtin-ternary-custom-entries*)))
     (assert-true entry)

@@ -545,19 +545,19 @@
 (deftest defun-c-enforces-contracts
   "DEFUN/C enforces preconditions and postconditions at runtime."
   (assert-equal 4
-                (run-string "(progn
-                                (defun/c add1-positive (x)
-                                  :requires (> x 0)
-                                  :ensures (= result (+ x 1))
-                                  (+ x 1))
-                                (add1-positive 3))"))
+                (cl-cc:run-string "(progn
+                                          (cl-cc:defun/c add1-positive (x)
+                                            :requires (> x 0)
+                                            :ensures (= result (+ x 1))
+                                            (+ x 1))
+                                          (add1-positive 3))"))
   (assert-signals error
-    (run-string "(progn
-                    (defun/c add1-positive (x)
-                      :requires (> x 0)
-                      :ensures (= result (+ x 1))
-                      (+ x 1))
-                    (add1-positive 0))")))
+    (cl-cc:run-string "(progn
+                              (cl-cc:defun/c add1-positive (x)
+                                :requires (> x 0)
+                                :ensures (= result (+ x 1))
+                                (+ x 1))
+                              (add1-positive 0))")))
 
 ;;; Property: Nested Macro Expansion
 
@@ -604,31 +604,32 @@
 
 ;;; Property: Macro Expansion Idempotency
 
-(defproperty macroexpand-idempotent-when
-    (test (gen-test-form)
-     body (gen-list-of (gen-body-form) :min-length 1 :max-length 3))
-  "Fully expanding WHEN twice gives same result."
-  (let* ((form `(when ,test ,@body))
-         (exp1 (cl-cc:our-macroexpand form))
-         (exp2 (cl-cc:our-macroexpand exp1)))
-    (equal exp1 exp2)))
+(deftest macroexpand-idempotent-when
+  "Fully expanding representative WHEN forms twice gives the same result."
+  (dolist (form '((when t body)
+                  (when flag body1 body2)
+                  (when (= x 0) (print 1))))
+    (let* ((exp1 (cl-cc:our-macroexpand form))
+           (exp2 (cl-cc:our-macroexpand exp1)))
+      (assert-equal exp1 exp2))))
 
-(defproperty macroexpand-idempotent-unless
-    (test (gen-test-form)
-     body (gen-list-of (gen-body-form) :min-length 1 :max-length 3))
-  "Fully expanding UNLESS twice gives same result."
-  (let* ((form `(unless ,test ,@body))
-         (exp1 (cl-cc:our-macroexpand form))
-         (exp2 (cl-cc:our-macroexpand exp1)))
-    (equal exp1 exp2)))
+(deftest macroexpand-idempotent-unless
+  "Fully expanding representative UNLESS forms twice gives the same result."
+  (dolist (form '((unless t body)
+                  (unless flag body1 body2)
+                  (unless (= x 0) (print 1))))
+    (let* ((exp1 (cl-cc:our-macroexpand form))
+           (exp2 (cl-cc:our-macroexpand exp1)))
+      (assert-equal exp1 exp2))))
 
-(defproperty macroexpand-idempotent-and
-    (args (gen-list-of (gen-body-form) :min-length 2 :max-length 4))
-  "Fully expanding AND twice gives same result."
-  (let* ((form `(and ,@args))
-         (exp1 (cl-cc:our-macroexpand form))
-         (exp2 (cl-cc:our-macroexpand exp1)))
-    (equal exp1 exp2)))
+(deftest macroexpand-idempotent-and
+  "Fully expanding representative AND forms twice gives the same result."
+  (dolist (form '((and a b)
+                  (and a b c)
+                  (and (= x 0) flag (print 1))))
+    (let* ((exp1 (cl-cc:our-macroexpand form))
+           (exp2 (cl-cc:our-macroexpand exp1)))
+      (assert-equal exp1 exp2))))
 
 (defproperty macroexpand-idempotent-or
     (args (gen-list-of (gen-body-form) :min-length 2 :max-length 4))

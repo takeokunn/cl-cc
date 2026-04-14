@@ -6,8 +6,10 @@
 
 (in-package :cl-cc/test)
 
+(in-suite cl-cc-serial-suite)
+
 (defsuite dcg-suite :description "DCG engine unit tests"
-  :parent cl-cc-suite)
+  :parent cl-cc-serial-suite)
 
 
 (in-suite dcg-suite)

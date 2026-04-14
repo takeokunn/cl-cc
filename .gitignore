@@ -1,5 +1,6 @@
 .claude/
 .direnv/
+.playwright-mcp/
 
 # Common Lisp compiled artifacts
 *.fasl

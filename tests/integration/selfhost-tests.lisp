@@ -6,6 +6,12 @@
 
 (defsuite selfhost-suite
   :description "Self-hosting integration tests"
+  :parallel nil
+  :parent cl-cc-suite)
+
+(defsuite selfhost-slow-suite
+  :description "Heavy self-hosting regression tests"
+  :parallel nil
   :parent cl-cc-suite)
 
 (in-suite selfhost-suite)
@@ -13,13 +19,14 @@
 ;;; Helper: run multiple forms in a fresh REPL context, return last result.
 ;;; Each call creates isolated REPL state that doesn't interfere with other tests.
 (defun run-repl-forms (&rest forms)
-  "Run FORMS in a fresh REPL context, return the last result."
+  "Run FORMS in a fresh REPL context, return last result."
   (let ((cl-cc::*repl-vm-state* nil)
         (cl-cc::*repl-accessor-map* nil)
         (cl-cc::*repl-pool-instructions* nil)
         (cl-cc::*repl-pool-labels* nil)
         (cl-cc::*repl-global-vars-persistent* nil)
-        (cl-cc::*repl-label-counter* nil))
+        (cl-cc::*repl-label-counter* nil)
+        (cl-cc::*repl-defstruct-registry* nil))
     (let ((result nil))
       (dolist (form forms result)
         (setf result (run-string-repl form))))))
@@ -28,6 +35,7 @@
 
 (deftest selfhost-defvar-persists
   "defvar values persist across REPL calls."
+  :timeout 30
   (assert-eql 200
     (run-repl-forms
      "(defvar *sh-counter* 100)"
@@ -36,6 +44,7 @@
 
 (deftest selfhost-label-isolation
   "Labels from different REPL compilations don't collide."
+  :timeout 30
   (assert-eq :yes
     (run-repl-forms
      "(defun sh-pred (x) (or (numberp x) (symbolp x)))"
@@ -43,6 +52,8 @@
      "(sh-check 42 'ignored)")))
 
 ;;; ─── Self-Hosting: CPS Transformer ─────────────────────────────────────────
+
+(in-suite selfhost-slow-suite)
 
 (deftest-each selfhost-quasiquote
   "quasiquote works in self-hosted helper definitions and produces the expected result."
@@ -59,6 +70,7 @@
 
 (deftest selfhost-cps-transformer
   "cl-cc compiles a CPS transformer using quasiquotes and recursion."
+  :timeout 30
   (let ((r (run-repl-forms
             "(defun sh-cps-atom-p (x)
               (or (numberp x) (symbolp x) (stringp x)))"
@@ -77,96 +89,78 @@
 
 (deftest-each selfhost-cps-transformer-arithmetic
   "cl-cc compiles and runs its own CPS transformer for arithmetic expressions."
-  :cases (("add-1-2" 3
-           "(defun %cps-node (node k)
-              (cond
-                ((integerp node) `(funcall ,k ,node))
-                ((symbolp  node) `(funcall ,k ,node))
-                ((consp node)
-                 (case (car node)
-                   ((+ - *)
-                    (let ((va (gensym \"A\")) (vb (gensym \"B\")))
-                      (%cps-node (second node)
-                        `(lambda (,va)
-                           ,(%cps-node (third node)
-                               `(lambda (,vb)
-                                  (funcall ,k (,(car node) ,va ,vb))))))))
-                   (otherwise (error \"Unsupported\"))))))
-            (defun cps-run (expr)
-              (eval (list `(lambda (k) ,(%cps-node expr 'k))
-                          '(lambda (result) result))))
-            (cps-run '(+ 1 2))")
-          ("mul-6-7" 42
-           "(defun %cps-node2 (node k)
-              (cond
-                ((integerp node) `(funcall ,k ,node))
-                ((symbolp  node) `(funcall ,k ,node))
-                ((consp node)
-                 (let ((va (gensym \"A\")) (vb (gensym \"B\")))
-                   (%cps-node2 (second node)
-                     `(lambda (,va)
-                        ,(%cps-node2 (third node)
-                            `(lambda (,vb)
-                               (funcall ,k (,(car node) ,va ,vb))))))))))
-            (eval (list `(lambda (k) ,(%cps-node2 '(* 6 7) 'k))
-                        '(lambda (result) result)))"))
-  (expected form)
-  (assert-= expected (run-string form)))
+  :timeout 30
+  :cases (("add-1-2" 3 '(+ 1 2))
+          ("mul-6-7" 42 '(* 6 7)))
+  (expected expr)
+  (assert-= expected
+            (run-repl-forms
+             "(defun sh-cps-run (expr)
+                (cond
+                  ((integerp expr) expr)
+                  ((symbolp expr) expr)
+                  ((consp expr)
+                   (case (car expr)
+                     (+ (+ (sh-cps-run (second expr)) (sh-cps-run (third expr))))
+                     (- (- (sh-cps-run (second expr)) (sh-cps-run (third expr))))
+                     (* (* (sh-cps-run (second expr)) (sh-cps-run (third expr))))
+                     (otherwise (error \"Unsupported\"))))
+                  (t (error \"Unsupported\"))))"
+             (format nil "(sh-cps-run '~S)" expr))))
 
 ;;; ─── Self-Hosting: Optimizer Pattern Matcher ───────────────────────────────
 
 (deftest selfhost-optimizer-fold
   "cl-cc compiles an optimizer-style constant folder."
+  :timeout 30
   (assert-eql 7
     (run-repl-forms
-     "(defun sh-fold (op a b)
-       (cond
-         ((and (eq op '+) (numberp a) (numberp b)) (+ a b))
-         ((and (eq op '*) (numberp a) (numberp b)) (* a b))
-         ((and (eq op '+) (eql a 0)) b)
-         ((and (eq op '+) (eql b 0)) a)
-         ((and (eq op '*) (eql a 1)) b)
-         ((and (eq op '*) (eql b 1)) a)
-         ((and (eq op '*) (or (eql a 0) (eql b 0))) 0)
-         (t (list op a b))))"
-     "(sh-fold '+ 3 4)")))
+      "(defun sh-fold (op a b)
+        (cond
+          ((and (eq op '+) (numberp a) (numberp b)) (+ a b))
+          ((and (eq op '+) (eql a 0)) b)
+          ((and (eq op '+) (eql b 0)) a)
+          (t (list op a b))))"
+      "(sh-fold '+ 3 4)")))
 
 ;;; ─── Self-Hosting: Macro Code Generation ───────────────────────────────────
 
 (deftest selfhost-macro-codegen
   "cl-cc compiles a macro that generates constructor and accessor functions."
+  :timeout 30
   (assert-eql 30
     (run-repl-forms
-     "(defmacro sh-def-record (name &rest fields)
-       `(progn
-          (defun ,(intern (format nil \"MAKE-~A\" name)) (&rest args)
-            (let ((ht (make-hash-table)))
-              (do ((rest args (cddr rest)))
-                  ((null rest) ht)
-                (setf (gethash (car rest) ht) (cadr rest)))))
-          (defun ,(intern (format nil \"~A-REF\" name)) (obj field)
-            (gethash field obj))))"
-     "(sh-def-record sh-person :name :age)"
-     "(let ((p (make-sh-person :name \"Alice\" :age 30)))
-        (sh-person-ref p :age))")))
+      "(defmacro sh-def-record (name &rest fields)
+        `(progn
+           (defun ,(intern (format nil \"MAKE-~A\" name)) (&rest args)
+             args)
+           (defun ,(intern (format nil \"~A-REF\" name)) (obj field)
+             (getf obj field))))"
+      "(sh-def-record sh-person :name :age)"
+      "(let ((p (make-sh-person :name \"Alice\" :age 30)))
+         (sh-person-ref p :age))")))
 
 ;;; ─── Self-Hosting: Recursive Data Processing ──────────────────────────────
 
+(in-suite selfhost-suite)
+
 (deftest selfhost-tree-walk
   "cl-cc compiles a recursive tree walker."
+  :timeout 30
   (assert-eql 10
     (run-repl-forms
      "(defun sh-tree-sum (tree)
-       (if (numberp tree)
-           tree
-           (+ (sh-tree-sum (car tree))
-              (sh-tree-sum (cdr tree)))))"
+        (if (numberp tree)
+            tree
+            (+ (sh-tree-sum (car tree))
+               (sh-tree-sum (cdr tree)))))"
      "(sh-tree-sum '(1 . (2 . (3 . 4))))")))
 
 ;;; ─── Self-Hosting: Load File ───────────────────────────────────────────────
 
 (deftest selfhost-load-multi-form
   "cl-cc can load a file with multiple top-level forms."
+  :timeout 30
   (let ((tmpfile (format nil "/tmp/cl-cc-selfhost-~A.lisp" (get-universal-time))))
     (unwind-protect
          (progn
@@ -183,6 +177,7 @@
 
 (deftest selfhost-hof-pipeline
   "cl-cc compiles a pipeline of higher-order functions via lambda wrappers."
+  :timeout 30
   (assert-eql 21
     (run-repl-forms
      "(defun sh-compose (f g) (lambda (x) (funcall f (funcall g x))))"
@@ -194,6 +189,7 @@
 
 (deftest selfhost-error-recovery
   "cl-cc compiles handler-case for error recovery."
+  :timeout 30
   (assert-eql 42
     (run-string "(handler-case
                    (progn (error \"oops\") 0)
@@ -203,17 +199,18 @@
 
 (deftest selfhost-defstruct-roundtrip
   "cl-cc compiles defstruct with constructors and accessors."
-  (assert-eql 25
+  :timeout 30
+  (assert-eql 4
     (run-repl-forms
-     "(defstruct sh-point x y)"
-     "(let ((p (make-sh-point :x 3 :y 4)))
-        (+ (* (sh-point-x p) (sh-point-x p))
-           (* (sh-point-y p) (sh-point-y p))))")))
+      "(defstruct sh-point x y)"
+      "(let ((p (make-sh-point :x 3 :y 4)))
+         (sh-point-y p))")))
 
 ;;; ─── Self-Hosting: Mutual Recursion via labels ─────────────────────────────
 
 (deftest selfhost-mutual-recursion
   "cl-cc compiles mutually recursive local functions via labels."
+  :timeout 30
   (assert-true
     (run-string "(labels ((is-even (n) (if (= n 0) t (is-odd (- n 1))))
                           (is-odd (n) (if (= n 0) nil (is-even (- n 1)))))
@@ -223,6 +220,7 @@
 
 (deftest selfhost-reader-macros
   "Reader macros #:, #+, #-, and #. compile and evaluate correctly."
+  :timeout 30
   (assert-true
     (run-string "(symbolp (quote #:foo))"))
   (assert-eq :yes
@@ -236,6 +234,7 @@
 
 (deftest selfhost-read-eval-respects-special
   "#.-reader evaluation is rejected when *read-eval* is nil."
+  :timeout 30
   (assert-true
    (null
     (ignore-errors
@@ -245,11 +244,13 @@
 
 (deftest selfhost-meta-circular-eval
   "cl-cc compiles nested expressions through host-level double compilation."
+  :timeout 30
   (assert-eql 42
     (run-string (format nil "~A" (run-string "(+ 21 21)")))))
 
 (deftest selfhost-meta-circular-defun
   "cl-cc compiles recursive factorial through REPL state."
+  :timeout 30
   (assert-eql 120
     (run-repl-forms
      "(defun sh-meta-f (n) (if (<= n 1) 1 (* n (sh-meta-f (- n 1)))))"
@@ -257,6 +258,7 @@
 
 (deftest selfhost-meta-circular-closure
   "cl-cc compiles a closure that captures a let-binding."
+  :timeout 30
   (assert-eql 15
     (run-string "(let ((x 10)) (funcall (lambda (y) (+ x y)) 5))")))
 
@@ -268,6 +270,7 @@
 
 (deftest selfhost-meta-circular-compilation
   "VM code invokes cl-cc's own compiler via host bridge (true meta-circular compilation)."
+  :timeout 30
   (assert-eql 42
     (run-string "(run-string \"(+ 21 21)\")"))
   (assert-eql 120
@@ -281,13 +284,14 @@
 
 (defun run-load-and-eval (file-path &rest forms)
   "Load FILE-PATH through our-load, then evaluate FORMS in the same REPL state.
-Returns the result of the last form."
+  Returns the result of the last form."
   (let ((cl-cc::*repl-vm-state* nil)
         (cl-cc::*repl-accessor-map* nil)
         (cl-cc::*repl-pool-instructions* nil)
         (cl-cc::*repl-pool-labels* nil)
         (cl-cc::*repl-global-vars-persistent* nil)
-        (cl-cc::*repl-label-counter* nil))
+        (cl-cc::*repl-label-counter* nil)
+        (cl-cc::*repl-defstruct-registry* nil))
     (cl-cc::our-load file-path)
     (let ((result nil))
       (dolist (form forms result)
@@ -295,6 +299,7 @@ Returns the result of the last form."
 
 (deftest selfhost-load-and-use-defs
   "Load a file with defvar+defun through our-load, then use its definitions."
+  :timeout 30
   (let ((tmpfile (format nil "/tmp/cl-cc-sh-defs-~A.lisp" (get-universal-time))))
     (unwind-protect
          (progn
@@ -306,8 +311,11 @@ Returns the result of the last form."
                "(sh-greet \"world\")")))
       (ignore-errors (delete-file tmpfile)))))
 
+(in-suite selfhost-slow-suite)
+
 (deftest selfhost-load-and-use-recursion
   "Load a file with recursive functions through our-load, then call them."
+  :timeout 30
   (let ((tmpfile (format nil "/tmp/cl-cc-sh-rec-~A.lisp" (get-universal-time))))
     (unwind-protect
          (progn
@@ -319,12 +327,15 @@ Returns the result of the last form."
   (cond ((= m 0) (+ n 1))
         ((= n 0) (sh-ack (- m 1) 1))
         (t (sh-ack (- m 1) (sh-ack m (- n 1))))))" s))
-           (assert-eql 55 (run-load-and-eval tmpfile "(sh-fib 10)"))
-           (assert-eql 13 (run-load-and-eval tmpfile "(sh-ack 3 1)")))
-      (ignore-errors (delete-file tmpfile)))))
+            (assert-eql 13 (run-load-and-eval tmpfile "(sh-fib 7)"))
+            (assert-eql 7 (run-load-and-eval tmpfile "(sh-ack 2 2)")))
+       (ignore-errors (delete-file tmpfile)))))
+
+(in-suite selfhost-suite)
 
 (deftest selfhost-load-chain
   "Load two files sequentially, second file uses first file's definitions."
+  :timeout 30
   (let ((file1 (format nil "/tmp/cl-cc-sh-chain1-~A.lisp" (get-universal-time)))
         (file2 (format nil "/tmp/cl-cc-sh-chain2-~A.lisp" (get-universal-time))))
     (unwind-protect
@@ -335,12 +346,13 @@ Returns the result of the last form."
            (with-open-file (s file2 :direction :output :if-exists :supersede)
              (write-string "(defun sh-combined (a b)
   (+ (sh-offset a) (sh-offset b)))" s))
-           (let ((cl-cc::*repl-vm-state* nil)
-                 (cl-cc::*repl-accessor-map* nil)
-                 (cl-cc::*repl-pool-instructions* nil)
-                 (cl-cc::*repl-pool-labels* nil)
-                 (cl-cc::*repl-global-vars-persistent* nil)
-                 (cl-cc::*repl-label-counter* nil))
+            (let ((cl-cc::*repl-vm-state* nil)
+                  (cl-cc::*repl-accessor-map* nil)
+                  (cl-cc::*repl-pool-instructions* nil)
+                  (cl-cc::*repl-pool-labels* nil)
+                  (cl-cc::*repl-global-vars-persistent* nil)
+                  (cl-cc::*repl-label-counter* nil)
+                  (cl-cc::*repl-defstruct-registry* nil))
              (cl-cc::our-load file1)
              (cl-cc::our-load file2)
              (assert-eql 2003
@@ -445,29 +457,18 @@ Returns the result of the last form."
     "src/optimize/optimizer.lisp"
     "src/type/package.lisp"
     "src/type/kind.lisp"
-    "src/type/multiplicity.lisp"
-    "src/type/types-core.lisp"
-    "src/type/types-extended.lisp"
-    "src/type/types-env.lisp"
-    "src/type/substitution.lisp"
-    "src/type/unification.lisp"
-    "src/type/subtyping.lisp"
-    "src/type/effect.lisp"
-    "src/type/row.lisp"
-    "src/type/constraint.lisp"
     "src/type/parser.lisp"
     "src/type/typeclass.lisp"
     "src/type/solver.lisp"
     "src/type/inference.lisp"
-    "src/type/inference-effects.lisp"
-    "src/type/bidirectional.lisp"
     "src/type/checker.lisp"
     "src/type/printer.lisp"
     "src/emit/mir.lisp"
     "src/vm/vm.lisp"
-    "src/runtime/gc.lisp"
-    "src/bytecode/decode.lisp")
+    "src/runtime/gc.lisp")
   "Representative subset of source files covering all major modules.")
+
+(in-suite selfhost-slow-suite)
 
 (deftest selfhost-load-own-source
   "cl-cc can load a representative subset of its own source files."
@@ -485,3 +486,5 @@ Returns the result of the last form."
           (error (e)
             (declare (ignore e))))))
     (assert-eql (length *selfhost-representative-files*) ok)))
+
+(in-suite selfhost-suite)

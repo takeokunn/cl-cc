@@ -14,9 +14,9 @@
    - vm-get-global / vm-slot-read force the matching pending store to be emitted first
    - labels and non-pure instructions flush all pending stores"
   (let ((result nil)
-         (pending-order nil)
-         (pending-by-name (make-hash-table :test #'equal))
-         (alias-roots (opt-compute-heap-aliases instructions)))
+        (pending-order nil)
+        (pending-by-name (make-hash-table :test #'equal))
+        (alias-roots (opt-compute-heap-aliases instructions)))
     (labels ((emit (inst)
                (push inst result))
              (pending-store (key)
@@ -35,14 +35,21 @@
                    (drop-pending key))))
              (flush-all ()
                (dolist (key (nreverse pending-order))
-                  (flush-one key))))
+                 (flush-one key))))
       (dolist (inst instructions)
         (let ((dst (opt-inst-dst inst)))
           (when dst
             (dolist (key (copy-list pending-order))
               (let ((pending (pending-store key)))
-                (when (and pending (eq (vm-src pending) dst))
-                  (flush-one key))))))
+                (when pending
+                  (typecase pending
+                    (vm-set-global
+                     (when (eq (vm-src pending) dst)
+                       (flush-one key)))
+                    (vm-slot-write
+                     (when (or (eq (vm-obj-reg pending) dst)
+                               (eq (vm-value-reg pending) dst))
+                       (flush-one key)))))))))
         (typecase inst
           (vm-label
            (flush-all)

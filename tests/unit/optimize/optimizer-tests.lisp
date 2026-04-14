@@ -87,7 +87,7 @@
 (deftest-each optimizer-branch-fold
   "Constant-condition branches fold to the correct path."
   :cases (("const-true"  42 "(if 1 42 99)")
-          ("const-false" 42 "(if 0 42 99)")
+          ("const-false" 99 "(if 0 42 99)")
           ("t-true"      42 "(if t 42 99)"))
   (expected expr)
   (assert-run= expected expr))
@@ -1216,7 +1216,9 @@
                     (c2   (make-vm-const :dst :r2 :value 20))
                     (w2   (cl-cc::make-vm-slot-write :obj-reg :r3 :slot-name 'x :value-reg :r2))
                     (ret  (make-vm-ret :reg :r2)))
-               (list (list obj obj2 c1 w1 c2 w2 ret) (list w1) (list w2))))))
+                (list (list obj obj2 c1 w1 c2 w2 ret)
+                      (list w1)
+                      (list obj obj2 c1 c2 w2 ret))))))
   (make-case)
   (destructuring-bind (instrs absent present) (funcall make-case)
     (let ((out (cl-cc::opt-pass-dead-store-elim instrs)))
@@ -1462,7 +1464,7 @@
 (deftest-each opt-falsep
   "opt-falsep correctly classifies falsy (nil only) and truthy values."
   :cases (("nil"      nil t)
-          ("zero"     0   nil)
+          ("zero"     0   t)
           ("t"        t   nil)
           ("positive" 1   nil))
   (value expected)

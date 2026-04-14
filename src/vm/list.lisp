@@ -13,13 +13,26 @@ normal hash table for now; weak-table GC integration remains future work.")
   (clrhash *vm-hash-cons-table*)
   *vm-hash-cons-table*)
 
+(defun %vm-hash-cons-shareable-p (car-value cdr-value)
+  "Return T when it is safe to intern the cons cell globally.
+
+We only intern flat atomic pairs. Reusing cons cells whose CAR or CDR already
+contains cons structure creates observable aliasing for ordinary Lisp list
+construction, which breaks destructive operators (for example NREVERSE/NUNION)
+and can accidentally form cyclic syntax trees during self-hosted list building.
+Fresh cons cells are therefore required for any nested/list-shaped pair."
+  (and (not (consp car-value))
+       (not (consp cdr-value))))
+
 (defun vm-hash-cons (car-value cdr-value)
   "Return a shared cons cell for CAR-VALUE/CDR-VALUE."
-  (let* ((key (list car-value cdr-value))
-         (existing (gethash key *vm-hash-cons-table*)))
-    (or existing
-        (setf (gethash key *vm-hash-cons-table*)
-              (cons car-value cdr-value)))))
+  (if (%vm-hash-cons-shareable-p car-value cdr-value)
+      (let* ((key (list car-value cdr-value))
+             (existing (gethash key *vm-hash-cons-table*)))
+        (or existing
+            (setf (gethash key *vm-hash-cons-table*)
+                  (cons car-value cdr-value))))
+      (cons car-value cdr-value)))
 
 ;;; ─── Extensible Sequence Protocol (FR-274 partial) ───────────────────────
 
@@ -282,4 +295,3 @@ normal hash table for now; weak-table GC integration remains future work.")
   (list nil :reader vm-list-reg)
   (:sexp-tag :pop)
   (:sexp-slots dst list))
-

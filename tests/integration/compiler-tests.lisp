@@ -311,18 +311,18 @@
       (assert-true (null (run-string form)))))
 
 (deftest-each compile-string-ops-and-type-predicates
-  "String ops (length/upcase/downcase/concatenate) and type predicates (symbolp/numberp) return expected integers."
+  "String ops return numeric results and type predicates return CL booleans."
   :cases (("length-hello"  5 "(string-length \"hello\")")
           ("length-empty"  0 "(string-length \"\")")
           ("upcase-len"    5 "(string-length (string-upcase \"hello\"))")
           ("downcase-len"  3 "(string-length (string-downcase \"ABC\"))")
           ("concat-len"   10 "(string-length (concatenate 'string \"hello\" \"world\"))")
-          ("symbolp-sym"   1 "(symbolp 'foo)")
-          ("symbolp-num"   0 "(symbolp 42)")
-          ("numberp-num"   1 "(numberp 42)")
-          ("numberp-sym"   0 "(numberp 'foo)"))
+          ("symbolp-sym"   t "(symbolp 'foo)")
+          ("symbolp-num"   nil "(symbolp 42)")
+          ("numberp-num"   t "(numberp 42)")
+          ("numberp-sym"   nil "(numberp 'foo)"))
   (expected form)
-  (assert-= expected (run-string form)))
+  (assert-equal expected (run-string form)))
 
 ;;; Macro Expansion in Compiler Tests
 
@@ -464,18 +464,18 @@
   (assert-true (not (null (run-string "(member 3 (list 1 2 3 4))")))))
 
 (deftest-each compile-numeric-predicates-and-case
-  "zerop/plusp/minusp/evenp/oddp predicates and case macro dispatching return the expected values."
-  :cases (("zerop-0"    1  "(zerop 0)")
-          ("zerop-5"    0  "(zerop 5)")
-          ("plusp-5"    1  "(plusp 5)")
-          ("minusp-neg" 1  "(minusp (- 0 3))")
-          ("evenp-true"  1 "(evenp 4)")
-          ("evenp-false" 0 "(evenp 3)")
-          ("oddp-true"   1 "(oddp 3)")
+  "Numeric predicates return CL booleans and case returns the selected value."
+  :cases (("zerop-0"    t  "(zerop 0)")
+          ("zerop-5"    nil  "(zerop 5)")
+          ("plusp-5"    t  "(plusp 5)")
+          ("minusp-neg" t  "(minusp (- 0 3))")
+          ("evenp-true"  t "(evenp 4)")
+          ("evenp-false" nil "(evenp 3)")
+          ("oddp-true"   t "(oddp 3)")
           ("case-match"     2  "(case 'b (a 1) (b 2) (c 3))")
           ("case-otherwise" 99 "(case 'z (a 1) (otherwise 99))"))
   (expected form)
-  (assert-= expected (run-string form)))
+  (assert-equal expected (run-string form)))
 
 (deftest compile-keyword-self-eval
   "keywords evaluate to themselves; typecase dispatches on type."
@@ -585,13 +585,15 @@
 
 ;;; Standard Library Set Operations Tests
 
+(in-suite cl-cc-integration-serial-suite)
+
 (deftest-each stdlib-list-ops
   "set-difference, union, append-lists, and last-cons work on lists."
   :cases (("set-diff"       '(1 3 5)     "(set-difference (list 1 2 3 4 5) (list 2 4))")
           ("set-diff-empty" '(1 2 3)     "(set-difference (list 1 2 3) (list))")
-          ("union"          '(1 2 3 4 5) "(union-lists (list 1 2 3) (list 3 4 5))")
-          ("append-lists"   '(1 2 3 4)   "(append-lists (list 1 2) (list 3 4))")
-          ("last-cons"      3            "(car (last-cons (list 1 2 3)))"))
+          ("union"          '(1 2 3 4 5) "(sort (union (list 1 2 3) (list 3 4 5)) #'<)")
+          ("append-lists"   '(1 2 3 4)   "(append (list 1 2) (list 3 4))")
+          ("last-cons"      3            "(car (last (list 1 2 3)))"))
   (expected form)
   (assert-true (equal expected (run-string form :stdlib t))))
 
@@ -607,9 +609,11 @@
 (deftest-each stdlib-reduce-edge
   "reduce edge cases: nil initial value, reduce-init accumulation."
   :cases (("init-nil"     nil      "(reduce (lambda (a b) (cons b a)) nil :initial-value nil)")
-          ("init-accum"   '(3 2 1) "(reduce-init (lambda (acc x) (cons x acc)) (list 1 2 3) nil)"))
+          ("init-accum"   '(3 2 1) "(reduce (lambda (acc x) (cons x acc)) (list 1 2 3) :initial-value nil)"))
   (expected form)
   (assert-true (equal expected (run-string form :stdlib t))))
+
+(in-suite cl-cc-integration-suite)
 
 (deftest compile-hash-table-keys
   "hash-table-keys returns list of keys"
@@ -833,18 +837,18 @@
   (assert-true (equal expected (run-string form))))
 
 (deftest-each compile-char-numeric
-  "char-code/char=/digit-char-p/alpha-char-p/upper-case-p/lower-case-p/stringp/characterp return numeric values."
+  "char-code/digit-char-p return numeric values; predicate results use CL booleans."
   :cases (("char-code"      65 "(char-code #\\A)")
           ("char=-true"      1 "(char= #\\a #\\a)")
           ("digit-char-p"    5 "(digit-char-p #\\5)")
           ("alpha-char-p"    1 "(alpha-char-p #\\z)")
           ("upper-case-p"    1 "(upper-case-p #\\A)")
           ("lower-case-p"    1 "(lower-case-p #\\a)")
-          ("stringp-true"    1 "(stringp \"hello\")")
-          ("stringp-false"   0 "(stringp 42)")
+          ("stringp-true"    t "(stringp \"hello\")")
+          ("stringp-false"   nil "(stringp 42)")
           ("characterp-true" 1 "(characterp #\\a)"))
   (expected form)
-  (assert-= expected (run-string form)))
+  (assert-equal expected (run-string form)))
 
 (deftest-each compile-string-char-utils
   "digit-char-p/nil, string-trim, parse-integer, and subseq work correctly."
@@ -1082,12 +1086,15 @@
 ;;; Consp Fix / Type Predicates Tests
 
 (deftest-each consp-and
-  "consp returns 1 for cons cells, 0 for non-cons; and works with consp."
-  :cases (("consp-list" 1  "(consp (list 1 2))")
-          ("consp-int"  0  "(consp 42)")
+  "consp returns CL booleans and composes correctly with and."
+  :cases (("consp-list" :truthy  "(consp (list 1 2))")
+          ("consp-int"  nil  "(consp 42)")
           ("and-consp" 42  "(and (consp (list 1)) 42)"))
   (expected form)
-  (assert-run= expected form))
+  (let ((result (run-string form)))
+    (if (eq expected :truthy)
+        (assert-true result)
+        (assert-equal expected result))))
 
 (deftest mini-compiler-self-host
   "Mini compiler can compile expression with pattern matching"
@@ -1947,12 +1954,12 @@
   (assert-true (run-string form)))
 
 (deftest-each numeric-predicates-false
-  "Numeric predicates return 0 (falsy) for non-matching values."
+  "Numeric predicates return NIL for non-matching values."
   :cases (("zerop-nonzero" "(zerop 5)")
           ("plusp-neg"     "(plusp -3)")
           ("minusp-pos"    "(minusp 5)"))
   (form)
-  (assert-true (= 0 (run-string form))))
+  (assert-false (run-string form)))
 
 ;;; Warn Compilation Tests
 

@@ -427,13 +427,13 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
                         (return)))))
          (when ,failure-var
            (destructuring-bind (type iteration args &optional error) ,failure-var
-             (case type
-               (:failed
-                (%fail-test (format nil "Property ~S failed on iteration ~D with args ~S"
-                                    ',name iteration args))
-               (:error
-                (%fail-test (format nil "Property ~S raised error ~A on iteration ~D with args ~S"
-                                    ',name error iteration args)))))))))))
+              (case type
+                (:failed
+                 (%fail-test (format nil "Property ~S failed on iteration ~D with args ~S"
+                                    ',name iteration args)))
+                (:error
+                 (%fail-test (format nil "Property ~S raised error ~A on iteration ~D with args ~S"
+                                     ',name error iteration args))))))))))
 
 (defmacro for-all (args &body body)
   "Run property tests inline without defining a named test.
@@ -531,6 +531,7 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
 
 (defsuite cl-cc-pbt-suite
   :description "Property-Based Testing suite for CL-CC"
+  :parallel nil
   :parent cl-cc-suite)
 
 ;;; Example Properties
@@ -567,3 +568,24 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
        c (gen-list :element-gen (gen-integer) :max-length 10))
   (equal (append (append a b) c)
          (append a (append b c))))
+
+(cl-cc/test:deftest defproperty-error-path-fails-test
+  "An erroring property must fail the enclosing test result."
+  (let ((name (gensym "PBT-ERROR-PROP-")))
+    (unwind-protect
+         (progn
+           (eval `(defproperty ,name (x (gen-integer))
+                    (let ((ignored x))
+                      (declare (ignore ignored)))
+                    (error "boom")))
+           (let ((result (cl-cc/test::%run-single-test
+                          (append (copy-list (gethash name cl-cc/test::*test-registry*))
+                                  (list :number 1))
+                          1
+                          nil)))
+             (cl-cc/test:assert-equal :fail (getf result :status))
+             (cl-cc/test:assert-true
+              (search "raised error" (or (getf result :detail) "")))
+             (cl-cc/test:assert-true
+              (search "boom" (or (getf result :detail) "")))))
+      (remhash name cl-cc/test::*test-registry*))))

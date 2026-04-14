@@ -133,17 +133,23 @@ The cl-cc execution model treats both NIL and numeric zero as false."
   (declare (ignore labels))
   ;; Try the function registry first — user-defined functions (defun) register
   ;; closures with proper entry-label, params, and captured-values.
-  ;; Fall back to a bare closure for local labels in the same compilation unit.
+  ;; Then honor the host bridge whitelist for CL functions like 1+/LENGTH.
+  ;; Fall back to a bare closure only for local labels in the same compilation unit.
   (let* ((label-str (vm-label-name inst))
-         (sym (find-symbol label-str :cl-cc))
-         (registered (when sym (gethash sym (vm-function-registry state)))))
+          (sym (or (find-symbol label-str :cl-cc)
+                   (find-symbol label-str :cl)))
+          (registered (when sym (gethash sym (vm-function-registry state)))))
     (vm-reg-set state (vm-dst inst)
                 (or registered
-          (make-instance 'vm-closure-object
-                         :entry-label label-str
-                         :params nil
-                         :rest-stack-alloc-p nil
-                         :captured-values nil))))
+                    (when (and sym
+                               (gethash sym *vm-host-bridge-functions*)
+                               (fboundp sym))
+                      (symbol-function sym))
+           (make-instance 'vm-closure-object
+                          :entry-label label-str
+                          :params nil
+                          :rest-stack-alloc-p nil
+                          :captured-values nil))))
   (values (1+ pc) nil nil))
 
 (defmethod execute-instruction ((inst vm-make-closure) state pc labels)
@@ -168,4 +174,3 @@ The cl-cc execution model treats both NIL and numeric zero as false."
       (error "Closure ref index ~D out of bounds (captured ~D values)" idx (length values-vec)))
     (vm-reg-set state (vm-dst inst) (aref values-vec idx))
     (values (1+ pc) nil nil)))
-

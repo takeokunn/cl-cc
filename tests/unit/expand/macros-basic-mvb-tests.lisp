@@ -137,5 +137,5 @@
 
 (deftest mvl-runtime-with-computation
   "multiple-value-list works with complex expressions."
-  (assert-equal '(5 6)
+  (assert-equal '(5 2)
                 (run-string "(multiple-value-list (floor 17 3))")))

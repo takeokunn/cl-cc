@@ -270,13 +270,13 @@
     (assert-eq '= (car (second result)))))
 
 (deftest expander-neq-nary-generates-let-with-pairs
-  "3-arg /= expands to a let-binding + all-pairs not-equal check."
+  "3-arg /= expands to nested IF checks over pairwise inequality."
   (let ((result (cl-cc::compiler-macroexpand-all '(/= a b c))))
     ;; Top level must be (let ...)
     (assert-eq 'let (first result))
-    ;; Body should contain an (and ...) of (not (= ...)) pairs
+    ;; Body should start with nested IF checks over pairwise (/=) expansion.
     (let ((body (third result)))
-      (assert-eq 'and (first body)))))
+      (assert-eq 'if (first body)))))
 
 ;;; ─── char comparison chaining ────────────────────────────────────────────
 

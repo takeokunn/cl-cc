@@ -217,6 +217,22 @@
                                  (eq (cadr f) 'reduce)))
                           forms))))
 
+(deftest pipeline-stdlib-forms-return-fresh-tree
+  "get-stdlib-forms returns a fresh nested tree on each call.
+
+Mutating a nested cons in one caller must not affect later callers, otherwise
+parallel stdlib-heavy compilation can leak state across workers."
+  (let* ((forms-a (cl-cc::get-stdlib-forms))
+         (forms-b (cl-cc::get-stdlib-forms))
+         (defun-a (cl:find-if (lambda (f) (and (consp f) (eq (car f) 'defun))) forms-a))
+         (defun-b (cl:find-if (lambda (f) (and (consp f) (eq (car f) 'defun))) forms-b)))
+    (assert-true (consp defun-a))
+    (assert-true (consp defun-b))
+    (assert-false (eq defun-a defun-b))
+    (let ((original-name (second defun-b)))
+      (setf (second defun-a) 'mutated-stdlib-name)
+      (assert-eq original-name (second defun-b)))))
+
 ;;; ─── our-eval ───────────────────────────────────────────────────────────
 
 (deftest-each pipeline-our-eval-forms

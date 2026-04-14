@@ -47,10 +47,10 @@
     (assert-eq 'let* (car result))))
 
 (deftest merge-expansion
-  "MERGE: outer LET with 4 bindings, body uses TAGBODY."
+  "MERGE expands to a LET that binds inputs/predicate and a LABELS recursive helper."
   (let* ((result   (our-macroexpand-1 '(merge 'list l1 l2 pred)))
          (bindings (second result))
          (body     (caddr result)))
     (assert-eq 'let (car result))
-    (assert-= 4 (length bindings))
-    (assert-eq 'tagbody (car body))))
+    (assert-= 3 (length bindings))
+    (assert-eq 'labels (car body))))

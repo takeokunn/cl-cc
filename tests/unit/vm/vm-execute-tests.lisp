@@ -170,6 +170,23 @@ rather than raw gethash to produce a lookupable entry."
       (assert-= 11 next-pc)
       (assert-false halt-p))))
 
+(deftest vm-execute-vm-func-ref-resolves-cl-host-function
+  "vm-func-ref resolves host-bridge function designators from the CL package.
+
+This guards the runtime path used by forms like #'1+ and #'length inside stdlib
+expansions, which previously fell back to bogus local closures."
+  (let ((s (make-test-vm))
+        (labels (make-hash-table :test #'equal)))
+    (multiple-value-bind (next-pc halt-p result)
+        (cl-cc::execute-instruction
+         (cl-cc::make-vm-func-ref :dst :R0 :label "1+") s 7 labels)
+      (declare (ignore result))
+      (assert-= 8 next-pc)
+      (assert-false halt-p))
+    (let ((fn (cl-cc:vm-reg-get s :R0)))
+      (assert-true (functionp fn))
+      (assert-= 42 (funcall fn 41)))))
+
 (deftest vm-execute-vm-values-stores-all-values
   "vm-values stores the primary value in dst and all values in values-list."
   (let ((s (make-test-vm)))

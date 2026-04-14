@@ -43,9 +43,11 @@
   (and (typep expr 'ast-make-instance)
        (not (member name mutated))
        (not (member name captured))
-       (%instance-binding-static-slot-only-p body-forms name)
-       (loop for (key . value-ast) in (ast-make-instance-initargs expr)
-             collect (cons (symbol-name key) (compile-ast value-ast ctx)))))
+       (let ((slot-names (loop for (key . _value-ast) in (ast-make-instance-initargs expr)
+                               collect (symbol-name key))))
+         (and (%instance-binding-static-slot-only-p body-forms name slot-names)
+              (loop for (key . value-ast) in (ast-make-instance-initargs expr)
+                    collect (cons (symbol-name key) (compile-ast value-ast ctx)))))))
 
 (defun %let-noescape-array-size (name expr mutated captured body-forms)
   "Return the array size integer when the binding can skip heap allocation, else NIL."

@@ -120,13 +120,15 @@
                                 (%array-binding-static-access-p else-forms name nil))
                            (return-from %ast-let-sink-if-candidate (sink-else)))))
                        ((typep expr 'ast-make-instance)
-                        (cond
-                          ((and then-uses (not else-uses)
-                                (%instance-binding-static-slot-only-p then-forms name))
-                           (return-from %ast-let-sink-if-candidate (sink-then)))
-                          ((and else-uses (not then-uses)
-                                (%instance-binding-static-slot-only-p else-forms name))
-                           (return-from %ast-let-sink-if-candidate (sink-else)))))
+                        (let ((slot-names (loop for (key . _value-ast) in (ast-make-instance-initargs expr)
+                                                collect (symbol-name key))))
+                          (cond
+                            ((and then-uses (not else-uses)
+                                  (%instance-binding-static-slot-only-p then-forms name slot-names))
+                             (return-from %ast-let-sink-if-candidate (sink-then)))
+                            ((and else-uses (not then-uses)
+                                  (%instance-binding-static-slot-only-p else-forms name slot-names))
+                             (return-from %ast-let-sink-if-candidate (sink-else))))))
                        ((%ast-cons-call-p expr)
                         (cond
                           ((and then-uses (not else-uses)
@@ -262,15 +264,18 @@ elements are extra parameters available in TERMINAL-CASES."
 
 ;;; Instance noescape: binding may only appear as the object arg to slot-value / set-slot-value.
 (%define-binding-walker %instance-binding-static-slot-only-p
-  (body-forms binding-name)
-  "True iff BINDING-NAME in BODY-FORMS is used only as the object in slot-value forms."
+  (body-forms binding-name allowed-slot-names)
+  "True iff BINDING-NAME in BODY-FORMS is used only as the object in slot-value forms
+for statically materialized slots in ALLOWED-SLOT-NAMES."
   (:shadow-let t :shadow-mvb t)
   (ast-slot-value
    (and (typep (ast-slot-value-object node) 'ast-var)
-        (eq (ast-var-name (ast-slot-value-object node)) binding-name)))
+        (eq (ast-var-name (ast-slot-value-object node)) binding-name)
+        (member (symbol-name (ast-slot-value-slot node)) allowed-slot-names :test #'string=)))
   (ast-set-slot-value
    (and (typep (ast-set-slot-value-object node) 'ast-var)
         (eq (ast-var-name (ast-set-slot-value-object node)) binding-name)
+        (member (symbol-name (ast-set-slot-value-slot node)) allowed-slot-names :test #'string=)
         (okp (ast-set-slot-value-value node)))))
 
 ;;; Closure noescape: binding may only appear as the called function with the correct arity.
@@ -293,4 +298,3 @@ elements are extra parameters available in TERMINAL-CASES."
 
 ;;; (Classification predicates, binding emitters, and compile-ast (ast-let)
 ;;;  are in codegen-core-let-emit.lisp which loads after this file.)
-

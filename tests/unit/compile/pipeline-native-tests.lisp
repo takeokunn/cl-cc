@@ -131,9 +131,7 @@
 (deftest pipeline-native-copy-file-bytes-destination-exists
   "%copy-file-bytes creates the destination file."
   (uiop:with-temporary-file (:pathname src :type "bin")
-    (let ((dst (uiop:tmpize-pathname (make-pathname :name "cl-cc-copy-test-dst"
-                                                    :type "bin"
-                                                    :defaults (uiop:temporary-directory)))))
+    (uiop:with-temporary-file (:pathname dst :type "bin" :keep t)
       (let ((data (make-array 3 :element-type '(unsigned-byte 8)
                                :initial-contents '(10 20 30))))
         (with-open-file (out src :direction :output
@@ -147,9 +145,7 @@
 (deftest pipeline-native-copy-file-bytes-same-contents
   "%copy-file-bytes produces a destination file with identical contents."
   (uiop:with-temporary-file (:pathname src :type "bin")
-    (let ((dst (merge-pathnames
-                (make-pathname :name "cl-cc-copy-verify" :type "bin")
-                (uiop:temporary-directory))))
+    (uiop:with-temporary-file (:pathname dst :type "bin" :keep t)
       (let ((data (make-array 8 :element-type '(unsigned-byte 8)
                                :initial-contents '(0 1 2 3 255 128 64 32))))
         (with-open-file (out src :direction :output
@@ -168,9 +164,7 @@
 (deftest pipeline-native-copy-file-bytes-empty-file
   "%copy-file-bytes handles empty source files."
   (uiop:with-temporary-file (:pathname src :type "bin")
-    (let ((dst (merge-pathnames
-                (make-pathname :name "cl-cc-copy-empty" :type "bin")
-                (uiop:temporary-directory))))
+    (uiop:with-temporary-file (:pathname dst :type "bin" :keep t)
       ;; Write empty file
       (with-open-file (out src :direction :output
                                :if-exists :supersede
@@ -188,9 +182,7 @@
   ;; buffer boundary inside %copy-file-bytes.  We use a text stream for
   ;; building the source, then copy it as bytes.
   (uiop:with-temporary-file (:pathname src :type "bin")
-    (let ((dst (merge-pathnames
-                (make-pathname :name "cl-cc-copy-large" :type "bin")
-                (uiop:temporary-directory))))
+    (uiop:with-temporary-file (:pathname dst :type "bin" :keep t)
       ;; Write the source: fill with printable ASCII repeated until >4096 bytes.
       (let ((chunk "ABCDEFGHIJ"))
         (with-open-file (out src :direction :output

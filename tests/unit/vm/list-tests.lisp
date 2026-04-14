@@ -113,16 +113,18 @@
     (exec1 (cl-cc::make-vm-pop :dst 0 :list 1) s)
     (assert-eq 'first (cl-cc:vm-reg-get s 0))))
 
-(deftest vm-cons-uses-hash-cons-sharing
-  "vm-cons now routes through vm-hash-cons and reuses identical cells."
+(deftest vm-cons-returns-fresh-cells
+  "vm-cons follows CL CONS semantics and returns a fresh cell for each allocation."
   (let ((s (make-test-vm)))
     (cl-cc::vm-clear-hash-cons-table)
     (cl-cc:vm-reg-set s 1 'a)
     (cl-cc:vm-reg-set s 2 'b)
     (exec1 (cl-cc::make-vm-cons :dst 0 :car-src 1 :cdr-src 2) s)
     (exec1 (cl-cc::make-vm-cons :dst 3 :car-src 1 :cdr-src 2) s)
-    (assert-true (eq (cl-cc:vm-reg-get s 0)
-                     (cl-cc:vm-reg-get s 3)))))
+    (assert-false (eq (cl-cc:vm-reg-get s 0)
+                      (cl-cc:vm-reg-get s 3)))
+    (assert-equal (cl-cc:vm-reg-get s 0)
+                  (cl-cc:vm-reg-get s 3))))
 
 (deftest vm-hash-cons-reuses-identical-cells
   "vm-hash-cons returns the same cons cell for identical car/cdr pairs."

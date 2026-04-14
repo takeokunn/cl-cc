@@ -136,12 +136,12 @@ below as a tripwire against silent re-introduction of that bug."
   "Return stdlib forms (sexps post-expand) ready to hand to
 `compile-toplevel-forms'.  On the first call — or whenever
 *standard-library-source* or *macro-eval-fn* has been rebound — this
-rebuilds the cache.  Subsequent calls are O(1) plus one copy-list.
+rebuilds the cache.  Subsequent calls are O(1) plus one copy-tree.
 
-The returned spine is fresh (via copy-list) so downstream code walking
-destructively cannot corrupt the cache.  The form contents are sexps
-and therefore safely shared: `lower-sexp-to-ast' inside
-`compile-toplevel-forms' produces fresh AST nodes on every call."
+The returned tree is fresh (via copy-tree) so downstream code cannot corrupt
+the shared cache by mutating nested cons structure. This matters under
+parallel test execution because macro/lowering paths may destructure and
+reuse sublists while compiling stdlib-heavy forms."
   (unless (and (eq *stdlib-expanded-cache-source*  *standard-library-source*)
                (eq *stdlib-expanded-cache-eval-fn* *macro-eval-fn*))
     ;; Snapshot the key values BEFORE running the build.  If macro
@@ -154,7 +154,7 @@ and therefore safely shared: `lower-sexp-to-ast' inside
       (setf *stdlib-expanded-cache*         (%build-stdlib-expanded-cache)
             *stdlib-expanded-cache-source*  src-at-entry
             *stdlib-expanded-cache-eval-fn* eval-fn-at-entry)))
-  (copy-list *stdlib-expanded-cache*))
+  (copy-tree *stdlib-expanded-cache*))
 
 (defun warm-stdlib-cache ()
   "Populate the stdlib expanded-form cache if it has not been built yet.

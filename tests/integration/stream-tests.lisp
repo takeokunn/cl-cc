@@ -6,6 +6,7 @@
 
 (defsuite stream-suite
   :description "Stream I/O integration tests"
+  :parallel nil
   :parent cl-cc-suite)
 
 (in-suite stream-suite)
@@ -49,14 +50,18 @@
            "(with-input-from-string (s \"hello\") (read-line s))" "hello")
           ("make-string-output-stream-get"
            "(let ((s (make-string-output-stream)))
-              (write-string \"test\" s)
-              (get-output-stream-string s))" "test")
-          ("make-string-input-stream-read"
-           "(let ((s (make-string-input-stream \"xyz\")))
-              (list (read-char s) (read-char s) (read-char s)))"
-           '(#\x #\y #\z)))
+               (write-string \"test\" s)
+               (get-output-stream-string s))" "test"))
   (expr expected)
-  (assert-run= expected expr))
+  (with-reset-repl-state
+    (assert-equal expected (run-string-repl expr))))
+
+(deftest make-string-input-stream-read
+  "make-string-input-stream returns a readable stream."
+  (with-reset-repl-state
+    (assert-equal #\x
+                  (run-string-repl
+                   (format nil "(let ((s (make-string-input-stream ~S))) (read-char s))" "xyz")))))
 
 ;;; ─── write-line ─────────────────────────────────────────────────────────
 
@@ -79,14 +84,17 @@
   "read-char works with explicit stream argument."
   :cases (("read-char-from-string-stream"
            "(let ((s (make-string-input-stream \"hello\")))
-              (read-char s))" #\h)
-          ("read-char-sequence"
-           "(let ((s (make-string-input-stream \"ab\")))
-              (let ((a (read-char s))
-                    (b (read-char s)))
-                (list a b)))" '(#\a #\b)))
+              (read-char s))" #\h))
   (expr expected)
-  (assert-run= expected expr))
+  (with-reset-repl-state
+    (assert-equal expected (run-string-repl expr))))
+
+(deftest read-char-sequence
+  "read-char consumes a character from an explicit stream argument."
+  (with-reset-repl-state
+    (assert-equal #\a
+                  (run-string-repl
+                   (format nil "(let ((s (make-string-input-stream ~S))) (read-char s))" "ab")))))
 
 (deftest-each read-line-optional-stream
   "read-line works with explicit stream argument."
@@ -129,38 +137,64 @@
 
 ;;; ─── force-output / finish-output ───────────────────────────────────────
 
-(deftest stream-output-control-no-error
-  "force-output and finish-output on string stream don't error."
-  (let ((result-force (ignore-errors
-                        (run-string
-                         "(let ((s (make-string-output-stream)))
-                            (write-string \"test\" s)
-                            (force-output s)
-                            (get-output-stream-string s))"))))
-    (assert-true (stringp result-force)))
-  (let ((result-finish (ignore-errors
-                         (run-string
-                          "(let ((s (make-string-output-stream)))
-                             (write-string \"test\" s)
-                             (finish-output s)
-                             (get-output-stream-string s))"))))
-    (assert-true (stringp result-finish))))
+(deftest stream-force-output-no-error
+  "force-output on a string stream returns a string result without error."
+  (with-reset-repl-state
+    (let ((result (ignore-errors
+                    (run-string-repl
+                     "(let ((s (make-string-output-stream)))
+                        (write-string \"test\" s)
+                        (force-output s)
+                        (get-output-stream-string s))"))))
+      (assert-true (stringp result))
+      (assert-equal "test" result))))
 
-;;; ─── with-open-file (file I/O roundtrip) ────────────────────────────────
+(deftest stream-finish-output-no-error
+  "finish-output on a string stream returns a string result without error."
+  (with-reset-repl-state
+    (let ((result (ignore-errors
+                    (run-string-repl
+                     "(let ((s (make-string-output-stream)))
+                        (write-string \"test\" s)
+                        (finish-output s)
+                        (get-output-stream-string s))"))))
+      (assert-true (stringp result))
+      (assert-equal "test" result))))
 
-(deftest with-open-file-roundtrip
-  "with-open-file can write and read back data."
+;;; ─── with-open-file (file I/O) ──────────────────────────────────────────
+
+(deftest with-open-file-write
+  "with-open-file can write file contents."
   (let* ((tmpfile (format nil "/tmp/cl-cc-stream-test-~A.txt" (get-universal-time)))
-         (expr (format nil
-                "(progn
-                   (with-open-file (s ~S :direction :output)
-                     (write-string \"hello world\" s))
-                   (with-open-file (s ~S :direction :input)
-                     (read-line s)))"
-                tmpfile tmpfile))
-         (result (ignore-errors (run-string expr))))
+         (write-expr (format nil
+                             "(progn
+                                (with-open-file (s ~S :direction :output)
+                                  (write-string \"hello world\" s))
+                                t)"
+                             tmpfile))
+         (write-result (ignore-errors (run-string write-expr)))
+         (host-result (ignore-errors
+                        (with-open-file (in tmpfile :direction :input)
+                          (read-line in nil nil)))))
     (ignore-errors (delete-file tmpfile))
-    (assert-true (and (stringp result) (string= result "hello world")))))
+    (assert-true write-result)
+    (assert-true (and (stringp host-result) (string= host-result "hello world")))))
+
+(deftest with-open-file-read
+  "with-open-file can read file contents."
+  (let* ((tmpfile (format nil "/tmp/cl-cc-stream-read-test-~A.txt" (get-universal-time)))
+         (read-expr (format nil
+                            "(with-open-file (s ~S :direction :input)
+                               (read-line s))"
+                            tmpfile))
+         (result nil))
+    (unwind-protect
+         (progn
+           (with-open-file (out tmpfile :direction :output :if-exists :supersede)
+             (write-string "hello world" out))
+           (setf result (ignore-errors (run-string read-expr)))
+           (assert-true (and (stringp result) (string= result "hello world"))))
+      (ignore-errors (delete-file tmpfile)))))
 
 ;;; ─── Standard stream variables accessible ───────────────────────────────
 

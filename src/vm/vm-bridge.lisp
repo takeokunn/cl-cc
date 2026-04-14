@@ -145,10 +145,12 @@ representations may use hash tables with structured metadata."
               parse-all-forms
               ;; Macro expansion support
               generate-lambda-bindings register-macro
-              ;; CL functions needed by self-hosting code
-              find-package symbol-function intern gensym
-              ;; FR-647/FR-655/FR-428/FR-558: symbol-value, find-symbol, macro-function, symbol-package
-              symbol-value find-symbol macro-function symbol-package
+               ;; CL functions needed by self-hosting code
+               find-package symbol-function intern gensym
+               ;; Pure function designators commonly passed as #'FN at runtime
+               1+ 1- + - * / < > <= >= max min length char-equal char= eql equal equalp
+               ;; FR-647/FR-655/FR-428/FR-558: symbol-value, find-symbol, macro-function, symbol-package
+               symbol-value find-symbol macro-function symbol-package
               ;; FR-624: subtypep — delegate to host CL for standard type hierarchy
               subtypep
               ;; FR-512: compile — delegate to host CL

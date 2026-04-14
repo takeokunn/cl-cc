@@ -67,12 +67,13 @@
 ;; Helper: fresh REPL state for each test
 (defmacro with-fresh-repl (&body body)
   `(let ((*repl-vm-state* nil)
-         (*repl-accessor-map* nil)
-         (*repl-pool-instructions* nil)
-         (*repl-pool-labels* nil)
-         (*repl-global-vars-persistent* nil)
-         (*repl-label-counter* nil))
-     ,@body))
+          (*repl-accessor-map* nil)
+          (*repl-pool-instructions* nil)
+          (*repl-pool-labels* nil)
+          (*repl-global-vars-persistent* nil)
+          (*repl-label-counter* nil)
+          (*repl-defstruct-registry* nil))
+      ,@body))
 
 ;; Test: Load a temp file with defvar+defun, then use them
 (let ((tmpfile "/tmp/cl-cc-selfhost-defs.lisp"))

@@ -8,7 +8,7 @@
 ;;;; Expansion-level tests are in macros-sequence-tests.lisp.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-integration-suite)
+(in-suite cl-cc-integration-serial-suite)
 
 ;;; ─── reduce ─────────────────────────────────────────────────────────────────
 
@@ -36,7 +36,7 @@
 (deftest reduce-with-key
   "reduce :key applies the key function to each element before folding."
   ;; Sum of lengths of strings
-  (assert-= 9 (run-string "(reduce #'+ '(\"foo\" \"ba\" \"quux\") :key #'length)")))
+  (assert-= 9 (run-string "(reduce #'+ '(\"foo\" \"ba\" \"quux\") :key #'length)" :stdlib t)))
 
 ;;; ─── last ───────────────────────────────────────────────────────────────────
 
@@ -47,12 +47,13 @@
           ("last-3"  "(last '(1 2 3) 3)"   "(1 2 3)")
           ("last-0"  "(last '(1 2 3) 0)"   "nil"))
   (form expected-str)
-  (let ((result (run-string form)))
-    (assert-equal (run-string expected-str) result)))
+  (let ((result (run-string form :stdlib t))
+        (expected (read-from-string expected-str)))
+    (assert-equal expected result)))
 
 (deftest last-singleton
   "last on a single-element list returns that list."
-  (assert-equal '(42) (run-string "(last '(42))")))
+  (assert-equal '(42) (run-string "(last '(42))" :stdlib t)))
 
 ;;; ─── butlast ────────────────────────────────────────────────────────────────
 
@@ -63,8 +64,9 @@
           ("all"        "(butlast '(1 2 3) 3)"  "nil")
           ("over"       "(butlast '(1 2 3) 5)"  "nil"))
   (form expected-str)
-  (let ((result (run-string form)))
-    (assert-equal (run-string expected-str) result)))
+  (let ((result (run-string form :stdlib t))
+        (expected (read-from-string expected-str)))
+    (assert-equal expected result)))
 
 ;;; ─── nbutlast ───────────────────────────────────────────────────────────────
 ;;; nbutlast delegates directly to butlast via macro expansion.
@@ -76,21 +78,21 @@
 (deftest nsubstitute-replaces-old-with-new
   "nsubstitute replaces matching elements (delegates to substitute)."
   (assert-equal '(1 99 3 99 5)
-                (run-string "(nsubstitute 99 2 '(1 2 3 2 5))")))
+                (run-string "(nsubstitute 99 2 '(1 2 3 2 5))" :stdlib t)))
 
 ;;; ─── nsubstitute-if ─────────────────────────────────────────────────────────
 
 (deftest nsubstitute-if-replaces-matching-elements
   "nsubstitute-if replaces elements satisfying predicate."
   (assert-equal '(0 2 0 4 0)
-                (run-string "(nsubstitute-if 0 #'oddp '(1 2 3 4 5))")))
+                (run-string "(nsubstitute-if 0 #'oddp '(1 2 3 4 5))" :stdlib t)))
 
 ;;; ─── nsubstitute-if-not ──────────────────────────────────────────────────────
 
 (deftest nsubstitute-if-not-replaces-non-matching
   "nsubstitute-if-not replaces elements NOT satisfying predicate."
   (assert-equal '(1 0 3 0 5)
-                (run-string "(nsubstitute-if-not 0 #'oddp '(1 2 3 4 5))")))
+                (run-string "(nsubstitute-if-not 0 #'oddp '(1 2 3 4 5))" :stdlib t)))
 
 ;;; ─── merge ──────────────────────────────────────────────────────────────────
 
@@ -101,8 +103,9 @@
           ("empty-l2" "(merge 'list '(1 2 3) '() #'<)"      "(1 2 3)")
           ("both-empty" "(merge 'list '() '() #'<)"          "nil"))
   (form expected-str)
-  (let ((result (run-string form)))
-    (assert-equal (run-string expected-str) result)))
+  (let ((result (run-string form :stdlib t))
+        (expected (read-from-string expected-str)))
+    (assert-equal expected result)))
 
 ;;; ─── search ─────────────────────────────────────────────────────────────────
 
@@ -113,16 +116,16 @@
           ("found-end"    "(search '(3 4) '(1 2 3 4))"      2)
           ("not-found"    "(search '(5 6) '(1 2 3 4))"      nil))
   (form expected)
-  (assert-equal expected (run-string form)))
+  (assert-equal expected (run-string form :stdlib t)))
 
 (deftest search-empty-pattern
   "search with an empty pattern returns 0 (match at start)."
-  (assert-= 0 (run-string "(search '() '(1 2 3))")))
+  (assert-= 0 (run-string "(search '() '(1 2 3))" :stdlib t)))
 
 (deftest search-with-test
   "search respects the :test keyword for element comparison."
   ;; Case-insensitive character search using char-equal
-  (assert-= 1 (run-string "(search '(#\\B) '(#\\a #\\B #\\c) :test #'char-equal)")))
+  (assert-= 1 (run-string "(search '(#\\B) '(#\\a #\\B #\\c) :test #'char-equal)" :stdlib t)))
 
 ;;; ─── map-into ───────────────────────────────────────────────────────────────
 
@@ -132,10 +135,10 @@
   (assert-equal '(2 4 6)
                 (run-string
                  "(let ((dest (list 0 0 0)))
-                    (map-into dest #'(lambda (x) (* x 2)) '(1 2 3)))")))
+                    (map-into dest #'(lambda (x) (* x 2)) '(1 2 3)))" :stdlib t)))
 
 (deftest map-into-returns-dest
   "map-into returns the destination sequence."
   (let ((result (run-string
-                 "(let ((d (list 0 0))) (map-into d #'1+ '(1 2)) d)")))
+                 "(let ((d (list 0 0))) (map-into d #'1+ '(1 2)) d)" :stdlib t)))
     (assert-equal '(2 3) result)))

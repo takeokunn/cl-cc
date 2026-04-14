@@ -47,9 +47,11 @@
         ;; No initial-value: acc starts at first element, cur at rest
         `(let ((,fn-var ,fn)
                (,cur-var ,seq-init))
-           (let ((,acc-var (car ,cur-var)))
-             (setq ,cur-var (cdr ,cur-var))
-             (tagbody
+           (let ((,acc-var ,(if key-fn
+                                `(funcall ,key-fn (car ,cur-var))
+                                `(car ,cur-var))))
+              (setq ,cur-var (cdr ,cur-var))
+              (tagbody
               ,start-lbl
               (if (null ,cur-var) (go ,end-lbl))
               (setq ,acc-var (funcall ,fn-var ,acc-var ,elem-form))
@@ -81,23 +83,19 @@
   "Fill DEST with (fn (elt seq1 i) ...) for each i."
   (if (= (length seqs) 1)
       (let ((d (gensym "DEST"))
-            (src (gensym "SRC"))
-            (dp (gensym "DP"))
-            (sp (gensym "SP"))
-            (fn-var (gensym "FN"))
-            (lbl (gensym "MAP-INTO-LOOP")))
+             (src (gensym "SRC"))
+             (dp (gensym "DP"))
+             (sp (gensym "SP"))
+             (fn-var (gensym "FN"))
+             (loop-fn (gensym "MAP-INTO-LOOP")))
         `(let ((,d ,dest)
                (,src ,(first seqs))
                (,fn-var ,fn))
-           (let ((,dp ,d)
-                 (,sp ,src))
-             (tagbody
-               ,lbl
-               (when (and ,dp ,sp)
-                 (setf (car ,dp) (funcall ,fn-var (car ,sp)))
-                 (setq ,dp (cdr ,dp))
-                 (setq ,sp (cdr ,sp))
-                 (go ,lbl))))
+           (labels ((,loop-fn (,dp ,sp)
+                      (when (and ,dp ,sp)
+                        (setf (car ,dp) (funcall ,fn-var (car ,sp)))
+                        (,loop-fn (cdr ,dp) (cdr ,sp)))))
+             (,loop-fn ,d ,src))
            ,d))
       `(progn ,dest)))
 
@@ -110,36 +108,19 @@
   (let ((l1 (gensym "L1"))
         (l2 (gensym "L2"))
         (fn-var (gensym "PRED"))
-        (acc (gensym "ACC"))
-        (lbl1 (gensym "MERGE-LOOP"))
-        (lbl2 (gensym "DRAIN1"))
-        (lbl3 (gensym "DRAIN2"))
-        (end (gensym "MERGE-END")))
+        (loop-fn (gensym "MERGE-LOOP")))
     `(let ((,l1 ,seq1)
            (,l2 ,seq2)
-           (,fn-var ,pred)
-           (,acc nil))
-       (tagbody
-         ,lbl1
-         (when (and ,l1 ,l2)
-           (if (funcall ,fn-var (car ,l1) (car ,l2))
-               (progn (setq ,acc (cons (car ,l1) ,acc))
-                      (setq ,l1 (cdr ,l1)))
-               (progn (setq ,acc (cons (car ,l2) ,acc))
-                      (setq ,l2 (cdr ,l2))))
-           (go ,lbl1))
-         ,lbl2
-         (when ,l1
-           (setq ,acc (cons (car ,l1) ,acc))
-           (setq ,l1 (cdr ,l1))
-           (go ,lbl2))
-         ,lbl3
-         (when ,l2
-           (setq ,acc (cons (car ,l2) ,acc))
-           (setq ,l2 (cdr ,l2))
-            (go ,lbl3))
-          ,end)
-        (nreverse ,acc))))
+           (,fn-var ,pred))
+       (labels ((,loop-fn (a b)
+                  (cond
+                    ((null a) b)
+                    ((null b) a)
+                    ((funcall ,fn-var (car a) (car b))
+                     (cons (car a) (,loop-fn (cdr a) b)))
+                    (t
+                     (cons (car b) (,loop-fn a (cdr b)))))))
+         (,loop-fn ,l1 ,l2)))))
 
 ;;; LAST/BUTLAST/SEARCH (FR-500 adjacent): sequence tail and subsequence helpers
 

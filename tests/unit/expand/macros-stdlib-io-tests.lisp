@@ -5,7 +5,7 @@
 
 (defsuite macros-stdlib-io-suite
   :description "Tests for macros-stdlib.lisp: host bridges and file/IO helpers"
-  :parent cl-cc-suite)
+  :parent cl-cc-serial-suite)
 
 (in-suite macros-stdlib-io-suite)
 

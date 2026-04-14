@@ -604,5 +604,7 @@ snapshotting at load time because most tests don't need this."
 ;;; typically < 100 µs.
 
 (defbefore :each (cl-cc-suite)
-  (when (boundp 'cl-cc::*macroexpansion-cache*)
-    (clrhash cl-cc::*macroexpansion-cache*)))
+  (when (boundp 'cl-cc::*macroexpand-step-cache*)
+    (clrhash cl-cc::*macroexpand-step-cache*))
+  (when (boundp 'cl-cc::*macroexpand-all-cache*)
+    (clrhash cl-cc::*macroexpand-all-cache*)))

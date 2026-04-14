@@ -18,7 +18,12 @@
   (declare (ignore labels))
   (let ((car-val (vm-reg-get state (vm-car-reg inst)))
         (cdr-val (vm-reg-get state (vm-cdr-reg inst))))
-    (vm-reg-set state (vm-dst inst) (vm-hash-cons car-val cdr-val))
+    ;; CL CONS must produce a fresh cell. Reusing globally interned cons cells
+    ;; breaks destructive operators (RPLACA/RPLACD/NREVERSE family) and can
+    ;; accidentally create cyclic/shared syntax structures in user programs.
+    ;; Keep VM-HASH-CONS available as an explicit utility, but ordinary VM-CONS
+    ;; follows ANSI CL allocation semantics.
+    (vm-reg-set state (vm-dst inst) (cons car-val cdr-val))
     (values (1+ pc) nil nil)))
 
 (define-simple-instruction vm-car :unary car)

@@ -244,3 +244,159 @@ Intended to be called from the REPL when you want to refresh all snapshots."
 (defun reset-snapshots! ()
   "Reset snapshot update mode to nil."
   (setf *update-snapshots* nil))
+
+;;; ------------------------------------------------------------
+;;; Runner Regression Tests
+;;; ------------------------------------------------------------
+
+(defsuite runner-regression-suite
+  :description "Serial regression tests for test runner orchestration"
+  :parallel nil
+  :parent cl-cc-suite)
+
+(in-suite runner-regression-suite)
+
+(deftest suite-parallel-policy-inherits-from-parent
+  "Child suites inherit serial execution policy from ancestors."
+  (let ((parent (gensym "ULW-PARENT-"))
+        (child (gensym "ULW-CHILD-")))
+    (unwind-protect
+         (progn
+           (setf (gethash parent *suite-registry*)
+                 (list :name parent :description "tmp" :parent nil :parallel nil
+                       :before-each '() :after-each '()))
+           (setf (gethash child *suite-registry*)
+                 (list :name child :description "tmp" :parent parent :parallel t
+                       :before-each '() :after-each '()))
+           (assert-false (%suite-parallel-p child))
+           (assert-false (%test-parallel-safe-p (list :suite child :depends-on nil))))
+      (remhash child *suite-registry*)
+      (remhash parent *suite-registry*))))
+
+(deftest mixed-runner-reorders-internal-dependencies
+  "Dependent tests are reordered behind their in-list prerequisite."
+  (let* ((dependency (list :name 'ulw-dependency :depends-on nil))
+         (dependent (list :name 'ulw-dependent :depends-on 'ulw-dependency))
+         (ordered (%order-tests-for-dependencies (list dependent dependency))))
+    (assert-equal '(ulw-dependency ulw-dependent)
+                  (mapcar (lambda (test) (getf test :name)) ordered))))
+
+(deftest dependency-ordering-fallback-preserves-confirmed-prefix
+  "If dependency ordering gets stuck, already-confirmed prefix order is preserved."
+  (let* ((ordered (%order-tests-for-dependencies
+                   (list (list :name 'ulw-a :depends-on 'ulw-b)
+                         (list :name 'ulw-x :depends-on nil)
+                         (list :name 'ulw-b :depends-on 'ulw-a)))))
+    (assert-equal '(ulw-x ulw-a ulw-b)
+                  (mapcar (lambda (test) (getf test :name)) ordered))))
+
+(deftest mixed-runner-keeps-serial-suites-out-of-parallel-pool
+  "Serial suites and dependent tests are excluded from the parallel worker batch."
+  (let ((serial-suite (gensym "ULW-SERIAL-SUITE-"))
+        (parallel-suite (gensym "ULW-PARALLEL-SUITE-")))
+    (unwind-protect
+         (progn
+           (setf (gethash serial-suite *suite-registry*)
+                 (list :name serial-suite :description "tmp" :parent nil :parallel nil
+                       :before-each '() :after-each '()))
+           (setf (gethash parallel-suite *suite-registry*)
+                 (list :name parallel-suite :description "tmp" :parent nil :parallel t
+                       :before-each '() :after-each '()))
+           (assert-false (%test-parallel-safe-p
+                          (list :name 'serial-test :suite serial-suite :depends-on nil)))
+           (assert-false (%test-parallel-safe-p
+                          (list :name 'dependent-test :suite parallel-suite
+                                :depends-on 'other-test)))
+            (assert-true (%test-parallel-safe-p
+                         (list :name 'parallel-test :suite parallel-suite :depends-on nil))))
+      (remhash parallel-suite *suite-registry*)
+      (remhash serial-suite *suite-registry*))))
+
+(deftest effective-worker-count-falls-back-to-one-for-serial-batches
+  "Worker reporting collapses to 1 when no test in the batch may run in parallel."
+  (let ((serial-suite (gensym "ULW-SERIAL-SUITE-")))
+    (unwind-protect
+         (progn
+           (setf (gethash serial-suite *suite-registry*)
+                 (list :name serial-suite :description "tmp" :parent nil :parallel nil
+                       :before-each '() :after-each '()))
+           (assert-= 1
+                     (%effective-worker-count
+                      (list (list :name 'serial-test :suite serial-suite :depends-on nil))
+                      t
+                      4))
+           (assert-= 1
+                     (%effective-worker-count
+                      (list (list :name 'serial-test :suite serial-suite :depends-on nil))
+                      nil
+                      4)))
+      (remhash serial-suite *suite-registry*))))
+
+(deftest effective-worker-count-keeps-requested-workers-for-parallel-safe-batches
+  "Worker reporting preserves the requested worker count when at least one test can run in parallel."
+  (let ((parallel-suite (gensym "ULW-PARALLEL-SUITE-")))
+    (unwind-protect
+         (progn
+           (setf (gethash parallel-suite *suite-registry*)
+                 (list :name parallel-suite :description "tmp" :parent nil :parallel t
+                       :before-each '() :after-each '()))
+           (assert-= 4
+                     (%effective-worker-count
+                      (list (list :name 'parallel-test :suite parallel-suite :depends-on nil))
+                      t
+                      4))
+            (assert-= 2
+                     (%effective-worker-count
+                      (list (list :name 'parallel-test :suite parallel-suite :depends-on nil))
+                      t
+                      2)))
+      (remhash parallel-suite *suite-registry*))))
+
+(deftest run-suite-reports-one-worker-for-serial-only-batch
+  "run-suite reports one worker when the selected batch has no parallel-safe tests."
+  (let ((root (gensym "ULW-ROOT-"))
+        (serial-suite (gensym "ULW-SERIAL-"))
+        (test-name (gensym "ULW-TEST-"))
+        (original-warm-stdlib-cache (symbol-function 'cl-cc::warm-stdlib-cache))
+        (original-quit (symbol-function 'uiop:quit)))
+    (unwind-protect
+         (progn
+           (setf (gethash root *suite-registry*)
+                 (list :name root :description "tmp" :parent nil :parallel t
+                       :before-each '() :after-each '()))
+           (setf (gethash serial-suite *suite-registry*)
+                 (list :name serial-suite :description "tmp" :parent root :parallel nil
+                       :before-each '() :after-each '()))
+           (setf (gethash test-name *test-registry*)
+                 (list :name test-name
+                       :suite serial-suite
+                       :fn (lambda () t)
+                       :skip nil
+                       :xfail nil
+                       :depends-on nil
+                       :timeout nil
+                       :tags nil))
+           (setf (symbol-function 'cl-cc::warm-stdlib-cache) (lambda () nil))
+           (setf (symbol-function 'uiop:quit) (lambda (&optional code) code))
+           (let ((output (with-output-to-string (s)
+                           (let ((*standard-output* s))
+                             (assert-equal 0
+                                           (run-suite root :parallel t :random nil :workers 4))))))
+             (assert-true (search "# Workers: 1" output))))
+      (setf (symbol-function 'cl-cc::warm-stdlib-cache) original-warm-stdlib-cache)
+      (setf (symbol-function 'uiop:quit) original-quit)
+      (remhash test-name *test-registry*)
+      (remhash serial-suite *suite-registry*)
+      (remhash root *suite-registry*))))
+
+(deftest default-slow-suite-set-matches-runner-contract
+  "The documented default slow-suite set matches the runner's resolved exclusions."
+  (assert-equal '("SELFHOST-SUITE"
+                  "SELFHOST-SLOW-SUITE"
+                  "CL-CC-INTEGRATION-SUITE"
+                  "CLOSURE-TESTS-SUITE"
+                  "CONTROL-FLOW-TESTS"
+                  "STREAM-SUITE"
+                  "CL-CC-PBT-SUITE"
+                  "MACRO-PBT-SUITE")
+                (mapcar #'symbol-name (%resolve-default-slow-suites))))

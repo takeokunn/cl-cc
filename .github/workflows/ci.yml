@@ -16,4 +16,4 @@ jobs:
         env:
           LISP: sbcl-bin
       - name: Run Test
-        run: ./test.ros
+        run: sbcl --dynamic-space-size 4096 --non-interactive --eval '(require :asdf)' --load cl-cc.asd --eval '(asdf:load-system :cl-cc/test)' --eval '(asdf:test-system :cl-cc/test)'
