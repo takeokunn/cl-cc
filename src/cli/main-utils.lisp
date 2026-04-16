@@ -1,22 +1,21 @@
-;;;; src/cli/main-utils.lisp — CLI Utilities, Dump Functions, and Compile Options
+;;;; src/cli/main-utils.lisp — CLI utilities and shared rendering helpers
 ;;;
-;;; Contains:
+;;; Contains shared CLI helpers that are reused by the command handlers and
+;;; dump/compile-option support modules:
 ;;;   - %read-file, %detect-language — I/O and language detection helpers
 ;;;   - %dump-phase-label, %parse-ir-phase — IR phase helpers
 ;;;   - %ensure-list, %source-location-comment, %print-source-comment
 ;;;   - %call-with-optional-output-file
 ;;;   - %svg-escape, %flamegraph-color, %flamegraph-build-tree,
 ;;;     %flamegraph-children-list, %write-flamegraph-svg — flamegraph rendering
-;;;   - %ssa-block-name, %dump-{ast,cps,vm,opt,ssa,asm}-phase,
-;;;     %string-suffix-p, %dump-ir-phase, %trace-emit-stages — dump helpers
-;;;   - %arch-keyword, %compile-target-keyword, %parse-opt-remarks-mode
-;;;   - %compile-opts struct + %parse-compile-opts + %compile-opts-kwargs
+;;;   - %ssa-block-name
 ;;;
+;;; Dump-specific helpers and compile-option parsing live in main-dump.lisp.
 ;;; Help system (%print-global-help, %print-command-help, %print-help)
-;;; is in main.lisp (loads before).
+;;; lives in main.lisp (loads before).
 ;;;
 ;;; Load order: after cli/main.lisp.
-(in-package :cl-cc)
+(in-package :cl-cc/cli)
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Utilities
@@ -150,11 +149,11 @@ Returns :lisp or :php."
     path))
 
 (defun %ssa-block-name (blk)
-  (let ((label (cl-cc:bb-label blk)))
+  (let ((label (cl-cc/optimize:bb-label blk)))
     (string-downcase
      (format nil "~A"
              (or (and label (cl-cc:vm-name label))
-                 (format nil "block-~D" (cl-cc:bb-id blk)))))))
+                 (format nil "block-~D" (cl-cc/optimize:bb-id blk)))))))
 
 ;; +ansi-*+ colors, %dump-*-phase, %dump-ir-phase, %trace-emit-stages,
 ;; %arch-keyword, %compile-target-keyword, %parse-opt-remarks-mode,

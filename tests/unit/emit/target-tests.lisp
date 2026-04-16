@@ -34,84 +34,84 @@
 
 (deftest target-x86-64-basics
   "x86-64 target has correct basic properties."
-  (let ((t1 cl-cc::*x86-64-target*))
-    (assert-eq :x86-64 (cl-cc::target-name t1))
-    (assert-equal 8 (cl-cc::target-word-size t1))
-    (assert-eq :little (cl-cc::target-endianness t1))
-    (assert-equal 16 (cl-cc::target-gpr-count t1))))
+  (let ((t1 cl-cc/mir::*x86-64-target*))
+    (assert-eq :x86-64 (cl-cc/mir::target-name t1))
+    (assert-equal 8 (cl-cc/mir::target-word-size t1))
+    (assert-eq :little (cl-cc/mir::target-endianness t1))
+    (assert-equal 16 (cl-cc/mir::target-gpr-count t1))))
 
 (deftest target-aarch64-basics
   "AArch64 target has correct basic properties."
-  (let ((t1 cl-cc::*aarch64-target*))
-    (assert-eq :aarch64 (cl-cc::target-name t1))
-    (assert-equal 31 (cl-cc::target-gpr-count t1))
-    (assert-eq :x0 (cl-cc::target-ret-reg t1))))
+  (let ((t1 cl-cc/mir::*aarch64-target*))
+    (assert-eq :aarch64 (cl-cc/mir::target-name t1))
+    (assert-equal 31 (cl-cc/mir::target-gpr-count t1))
+    (assert-eq :x0 (cl-cc/mir::target-ret-reg t1))))
 
 (deftest target-riscv64-basics
   "RISC-V 64 target has correct basic properties."
-  (let ((t1 cl-cc::*riscv64-target*))
-    (assert-eq :riscv64 (cl-cc::target-name t1))
-    (assert-equal 32 (cl-cc::target-gpr-count t1))
-    (assert-eq :a0 (cl-cc::target-ret-reg t1))))
+  (let ((t1 cl-cc/mir::*riscv64-target*))
+    (assert-eq :riscv64 (cl-cc/mir::target-name t1))
+    (assert-equal 32 (cl-cc/mir::target-gpr-count t1))
+    (assert-eq :a0 (cl-cc/mir::target-ret-reg t1))))
 
 (deftest target-wasm32-stack-machine
   "Wasm32 is a stack machine (0 GPRs, no arg/ret regs)."
-  (let ((t1 cl-cc::*wasm32-target*))
-    (assert-eq :wasm32 (cl-cc::target-name t1))
-    (assert-equal 4 (cl-cc::target-word-size t1))
-    (assert-equal 0 (cl-cc::target-gpr-count t1))
-    (assert-null (cl-cc::target-arg-regs t1))
-    (assert-null (cl-cc::target-ret-reg t1))))
+  (let ((t1 cl-cc/mir::*wasm32-target*))
+    (assert-eq :wasm32 (cl-cc/mir::target-name t1))
+    (assert-equal 4 (cl-cc/mir::target-word-size t1))
+    (assert-equal 0 (cl-cc/mir::target-gpr-count t1))
+    (assert-null (cl-cc/mir::target-arg-regs t1))
+    (assert-null (cl-cc/mir::target-ret-reg t1))))
 
 ;;; ─── Target Registry ────────────────────────────────────────────────────────
 
 (deftest target-registry-find
   "find-target: all 4 predefined targets found; unknown target returns nil."
-  (let ((x86 (cl-cc::find-target :x86-64)))
-    (assert-true (cl-cc::target-desc-p x86))
-    (assert-eq :x86-64 (cl-cc::target-name x86)))
-  (assert-true (cl-cc::target-desc-p (cl-cc::find-target :aarch64)))
-  (assert-true (cl-cc::target-desc-p (cl-cc::find-target :riscv64)))
-  (assert-true (cl-cc::target-desc-p (cl-cc::find-target :wasm32)))
-  (assert-null (cl-cc::find-target :pdp-11)))
+  (let ((x86 (cl-cc/mir::find-target :x86-64)))
+    (assert-true (cl-cc/mir::target-desc-p x86))
+    (assert-eq :x86-64 (cl-cc/mir::target-name x86)))
+  (assert-true (cl-cc/mir::target-desc-p (cl-cc/mir::find-target :aarch64)))
+  (assert-true (cl-cc/mir::target-desc-p (cl-cc/mir::find-target :riscv64)))
+  (assert-true (cl-cc/mir::target-desc-p (cl-cc/mir::find-target :wasm32)))
+  (assert-null (cl-cc/mir::find-target :pdp-11)))
 
 ;;; ─── Target Utility Functions ───────────────────────────────────────────────
 
 (deftest-each target-64-bit-p-classification
   "target-64-bit-p: true for register ISAs, false for the wasm32 stack machine."
-  :cases (("x86-64"  t   cl-cc::*x86-64-target*)
-          ("aarch64" t   cl-cc::*aarch64-target*)
-          ("riscv64" t   cl-cc::*riscv64-target*)
-          ("wasm32"  nil cl-cc::*wasm32-target*))
+  :cases (("x86-64"  t   cl-cc/mir::*x86-64-target*)
+          ("aarch64" t   cl-cc/mir::*aarch64-target*)
+          ("riscv64" t   cl-cc/mir::*riscv64-target*)
+          ("wasm32"  nil cl-cc/mir::*wasm32-target*))
   (expected target)
   (if expected
-      (assert-true  (cl-cc::target-64-bit-p target))
-      (assert-false (cl-cc::target-64-bit-p target))))
+      (assert-true  (cl-cc/mir::target-64-bit-p target))
+      (assert-false (cl-cc/mir::target-64-bit-p target))))
 
 (deftest-each target-has-feature-p-cases
   "target-has-feature-p finds architecture-specific features and rejects absent ones."
-  :cases (("x86-sysv"          t   cl-cc::*x86-64-target*  :sysv-abi)
-          ("arm-aapcs"         t   cl-cc::*aarch64-target* :aapcs64)
-          ("wasm-structured"   t   cl-cc::*wasm32-target*  :structured-control-flow)
-          ("x86-no-wasm-feat"  nil cl-cc::*x86-64-target*  :structured-control-flow)
-          ("wasm-no-sysv"      nil cl-cc::*wasm32-target*  :sysv-abi))
+  :cases (("x86-sysv"          t   cl-cc/mir::*x86-64-target*  :sysv-abi)
+          ("arm-aapcs"         t   cl-cc/mir::*aarch64-target* :aapcs64)
+          ("wasm-structured"   t   cl-cc/mir::*wasm32-target*  :structured-control-flow)
+          ("x86-no-wasm-feat"  nil cl-cc/mir::*x86-64-target*  :structured-control-flow)
+          ("wasm-no-sysv"      nil cl-cc/mir::*wasm32-target*  :sysv-abi))
   (expected target feature)
   (if expected
-      (assert-true  (cl-cc::target-has-feature-p target feature))
-      (assert-false (cl-cc::target-has-feature-p target feature))))
+      (assert-true  (cl-cc/mir::target-has-feature-p target feature))
+      (assert-false (cl-cc/mir::target-has-feature-p target feature))))
 
 (deftest target-allocatable-regs-behavior
   "target-allocatable-regs: x86-64 excludes scratch (:rsp/:r11), includes :rax; wasm32 empty."
-  (let ((alloc (cl-cc::target-allocatable-regs cl-cc::*x86-64-target*)))
+  (let ((alloc (cl-cc/mir::target-allocatable-regs cl-cc/mir::*x86-64-target*)))
     (assert-false (member :rsp alloc))
     (assert-false (member :r11 alloc))
     (assert-true  (member :rax alloc)))
-  (assert-null (cl-cc::target-allocatable-regs cl-cc::*wasm32-target*)))
+  (assert-null (cl-cc/mir::target-allocatable-regs cl-cc/mir::*wasm32-target*)))
 
 (deftest target-caller-saved-subset-of-allocatable
   "Caller-saved regs are a subset of allocatable regs."
-  (let ((caller (cl-cc::target-caller-saved cl-cc::*x86-64-target*))
-        (alloc  (cl-cc::target-allocatable-regs cl-cc::*x86-64-target*)))
+  (let ((caller (cl-cc/mir::target-caller-saved cl-cc/mir::*x86-64-target*))
+        (alloc  (cl-cc/mir::target-allocatable-regs cl-cc/mir::*x86-64-target*)))
     (assert-true (every (lambda (r) (member r alloc)) caller))))
 
 (deftest-each target-reg-index-lookup
@@ -120,8 +120,8 @@
           ("rdi"     7   :rdi)
           ("unknown" nil :r99))
   (expected reg)
-  (assert-equal expected (cl-cc::target-reg-index cl-cc::*x86-64-target* reg)))
+  (assert-equal expected (cl-cc/mir::target-reg-index cl-cc/mir::*x86-64-target* reg)))
 
 (deftest target-op-legal-default
   "Unregistered ops are legal by default (permissive)."
-  (assert-true (cl-cc::target-op-legal-p cl-cc::*x86-64-target* :add)))
+  (assert-true (cl-cc/mir::target-op-legal-p cl-cc/mir::*x86-64-target* :add)))

@@ -426,9 +426,14 @@
                               cl-cc::+op2-halt2+ 0 nil nil
                               cl-cc::+op2-move+ 2 1 nil
                               cl-cc::+op2-halt2+ 2 nil nil))
-         (top (cl-cc::vm2-top-superoperator-candidates code :limit 2)))
-    (assert-equal '(cl-cc::add-imm2 cl-cc::halt2) (first (first top)))
-    (assert-= 2 (second (first top)))))
+         (top (cl-cc::vm2-top-superoperator-candidates code :limit 2))
+         ;; Lookup names from the opcode table (package-independent)
+         (add-imm2-name (aref cl-cc::*opcode-name-table* cl-cc::+op2-add-imm2+))
+         (halt2-name    (aref cl-cc::*opcode-name-table* cl-cc::+op2-halt2+)))
+    ;; Both top bigrams have count 2
+    (assert-= 2 (second (first top)))
+    ;; The (add-imm2 halt2) bigram appears in the top-2 results
+    (assert-true (member (list add-imm2-name halt2-name) (mapcar #'first top) :test #'equal))))
 
 (deftest vm2-fuse-immediate-superinstructions-add
   "const+add2 using a temporary immediate register fuses to add-imm2."

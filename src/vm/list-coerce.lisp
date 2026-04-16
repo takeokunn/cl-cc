@@ -1,4 +1,4 @@
-(in-package :cl-cc)
+(in-package :cl-cc/vm)
 
 (define-vm-instruction vm-string-coerce (vm-instruction)
   "Coerce value to string (CL string function)."

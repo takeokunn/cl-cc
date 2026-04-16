@@ -46,27 +46,27 @@
    If the condition is (predicate var) where predicate is a type predicate,
    returns (values var-name narrowed-type) or (values nil nil).
    Also handles (typep var 'classname) pattern."
-  (when (typep cond-ast 'cl-cc:ast-call)
-    (let ((func (cl-cc:ast-call-func cond-ast))
-          (args (cl-cc:ast-call-args cond-ast)))
+  (when (typep cond-ast 'cl-cc/ast:ast-call)
+    (let ((func (cl-cc/ast:ast-call-func cond-ast))
+          (args (cl-cc/ast:ast-call-args cond-ast)))
       (cond
         ;; (predicate var) pattern
-        ((and (typep func 'cl-cc:ast-var)
+        ((and (typep func 'cl-cc/ast:ast-var)
               (= (length args) 1)
-              (typep (first args) 'cl-cc:ast-var))
-         (let ((pred-type (type-predicate-to-type (cl-cc:ast-var-name func))))
+              (typep (first args) 'cl-cc/ast:ast-var))
+         (let ((pred-type (type-predicate-to-type (cl-cc/ast:ast-var-name func))))
            (when pred-type
-             (values (cl-cc:ast-var-name (first args)) pred-type))))
+             (values (cl-cc/ast:ast-var-name (first args)) pred-type))))
         ;; (typep var 'classname) pattern
-        ((and (typep func 'cl-cc:ast-var)
-              (eq (cl-cc:ast-var-name func) 'typep)
+        ((and (typep func 'cl-cc/ast:ast-var)
+              (eq (cl-cc/ast:ast-var-name func) 'typep)
               (= (length args) 2)
-              (typep (first args) 'cl-cc:ast-var)
-              (typep (second args) 'cl-cc:ast-quote)
-              (symbolp (cl-cc:ast-quote-value (second args))))
-         (let* ((class-name (cl-cc:ast-quote-value (second args)))
+              (typep (first args) 'cl-cc/ast:ast-var)
+              (typep (second args) 'cl-cc/ast:ast-quote)
+              (symbolp (cl-cc/ast:ast-quote-value (second args))))
+         (let* ((class-name (cl-cc/ast:ast-quote-value (second args)))
                 (prim-type (make-type-primitive :name class-name)))
-           (values (cl-cc:ast-var-name (first args)) prim-type)))
+           (values (cl-cc/ast:ast-var-name (first args)) prim-type)))
         (t (values nil nil))))))
 
 (defun narrow-union-type (union-type keep-type)
@@ -88,13 +88,13 @@
     ;; Infer condition type — allow failures for gradual typing
     (handler-case
         (multiple-value-bind (ct s1)
-            (infer (cl-cc:ast-if-cond ast) env)
+            (infer (cl-cc/ast:ast-if-cond ast) env)
           (declare (ignore ct))
           (setf subst1 s1))
       (error () nil))
     ;; Extract type guard info for narrowing
     (multiple-value-bind (guard-var guard-type)
-        (extract-type-guard (cl-cc:ast-if-cond ast))
+        (extract-type-guard (cl-cc/ast:ast-if-cond ast))
       (let* ((base-env (apply-subst-env env subst1))
              ;; Narrow environments for each branch
              (then-env (if guard-var
@@ -112,9 +112,9 @@
                                    base-env)))
                            base-env)))
         (multiple-value-bind (then-type subst2)
-            (infer (cl-cc:ast-if-then ast) then-env)
+            (infer (cl-cc/ast:ast-if-then ast) then-env)
           (multiple-value-bind (else-type subst3)
-              (infer (cl-cc:ast-if-else ast) (apply-subst-env else-env subst2))
+              (infer (cl-cc/ast:ast-if-else ast) (apply-subst-env else-env subst2))
             (multiple-value-bind (final-subst final-ok) (type-unify then-type else-type subst3)
               (declare (ignore final-ok))
               (values (type-substitute then-type final-subst) final-subst))))))))
@@ -129,18 +129,18 @@
    Values: integer/string literals, variable references, lambdas, quoted data,
    function references, and typed holes.
    Non-values: function calls, binary operations, let/if/progn, etc."
-  (typep ast '(or cl-cc:ast-int
-                  cl-cc:ast-var
-                  cl-cc:ast-lambda
-                  cl-cc:ast-quote
-                  cl-cc:ast-function
-                   cl-cc::ast-hole)))
+  (typep ast '(or cl-cc/ast:ast-int
+                  cl-cc/ast:ast-var
+                  cl-cc/ast:ast-lambda
+                  cl-cc/ast:ast-quote
+                  cl-cc/ast:ast-function
+                   cl-cc/ast:ast-hole)))
 
 (defun infer-let (ast env)
   "Infer type for let with polymorphism (value restriction applied).
    Only syntactic values are generalized; applications stay monomorphic."
   (let ((new-env env))
-    (dolist (binding (cl-cc:ast-let-bindings ast))
+    (dolist (binding (cl-cc/ast:ast-let-bindings ast))
       (let* ((name (car binding))
              (expr (cdr binding))
              (type (multiple-value-bind (result-type s) (infer expr new-env)
@@ -150,21 +150,21 @@
                          (generalize new-env type)
                          (make-type-scheme nil type))))
         (setf new-env (type-env-extend name scheme new-env))))
-    (infer-body (cl-cc:ast-let-body ast) new-env)))
+    (infer-body (cl-cc/ast:ast-let-body ast) new-env)))
 
 (defun infer-lambda (ast env)
   "Infer type for lambda."
   (let* ((param-types (mapcar (lambda (p)
                                 (declare (ignore p))
                                 (fresh-type-var))
-                              (cl-cc:ast-lambda-params ast)))
+                              (cl-cc/ast:ast-lambda-params ast)))
          (param-bindings (mapcar (lambda (name type)
                                    (cons name (make-type-scheme nil type)))
-                                 (cl-cc:ast-lambda-params ast)
+                                 (cl-cc/ast:ast-lambda-params ast)
                                  param-types))
          (body-env (type-env-extend* param-bindings env)))
     (multiple-value-bind (body-type subst)
-        (infer-body (cl-cc:ast-lambda-body ast) body-env)
+        (infer-body (cl-cc/ast:ast-lambda-body ast) body-env)
       (values (make-type-function-raw
                              :params (mapcar (lambda (p)
                                                (type-substitute p subst))
@@ -174,11 +174,11 @@
 
 (defun infer-progn (ast env)
   "Infer type for progn (sequence of expressions)."
-  (infer-body (cl-cc:ast-progn-forms ast) env))
+  (infer-body (cl-cc/ast:ast-progn-forms ast) env))
 
 (defun infer-print (ast env)
   "Infer type for print (returns type of printed expression)."
-  (infer (cl-cc:ast-print-expr ast) env))
+  (infer (cl-cc/ast:ast-print-expr ast) env))
 
 (defun check-qualified-constraints (func-type subst env)
   "If FUNC-TYPE is a qualified type (Eq a) => ..., verify each constraint
@@ -203,9 +203,9 @@
 (defun infer-call (ast env)
   "Infer type for function call with typeclass constraint checking."
   (multiple-value-bind (func-type subst1)
-      (infer (cl-cc:ast-call-func ast) env)
+      (infer (cl-cc/ast:ast-call-func ast) env)
     (let* ((result-type (fresh-type-var))
-           (arg-types (infer-args (cl-cc:ast-call-args ast)
+           (arg-types (infer-args (cl-cc/ast:ast-call-args ast)
                                   (apply-subst-env env subst1)))
            (expected-fn (make-type-function-raw
                                        :params arg-types

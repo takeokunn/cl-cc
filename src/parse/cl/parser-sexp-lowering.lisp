@@ -15,7 +15,7 @@
 ;;;
 ;;; Depends on parser.lisp (parse-compiler-lambda-list, make-ast-*, lower-sexp-to-ast
 ;;; generic function declared there). Load order: after parser.lisp, before lower.lisp.
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; ── List-form lowering dispatch table ───────────────────────────────────────
 ;;;

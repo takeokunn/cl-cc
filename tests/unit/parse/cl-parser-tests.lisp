@@ -21,7 +21,7 @@
 
 (defun lower (sexp)
   "Lower an s-expression to an AST node."
-  (cl-cc::lower-sexp-to-ast sexp))
+  (cl-cc/parse::lower-sexp-to-ast sexp))
 
 ;;; ─── parse-source ───────────────────────────────────────────────────────────
 
@@ -77,20 +77,20 @@
 (deftest grammar-parse-cl-source
   "parse-cl-source: returns CST nodes, empty string produces no forms, diagnostics is a list, multiple forms counted."
   (multiple-value-bind (cst-list diagnostics)
-      (cl-cc::parse-cl-source "(+ 1 2)")
+      (cl-cc/parse::parse-cl-source "(+ 1 2)")
     (declare (ignore diagnostics))
     (assert-= 1 (length cst-list))
     (assert-true (cl-cc:cst-interior-p (first cst-list))))
   (multiple-value-bind (cst-list diagnostics)
-      (cl-cc::parse-cl-source "")
+      (cl-cc/parse::parse-cl-source "")
     (declare (ignore diagnostics))
     (assert-null cst-list))
   (multiple-value-bind (cst-list diagnostics)
-      (cl-cc::parse-cl-source "(+ 1 2)")
+      (cl-cc/parse::parse-cl-source "(+ 1 2)")
     (declare (ignore cst-list))
     (assert-true (listp diagnostics)))
   (multiple-value-bind (cst-list diagnostics)
-      (cl-cc::parse-cl-source "1 2 3")
+      (cl-cc/parse::parse-cl-source "1 2 3")
     (declare (ignore diagnostics))
     (assert-= 3 (length cst-list))))
 
@@ -98,23 +98,23 @@
 
 (deftest grammar-token-stream-creation
   "token-stream: make-token-stream creates struct with fields"
-  (let ((ts (cl-cc::make-token-stream :tokens nil :source "test")))
-    (assert-true (cl-cc::token-stream-p ts))
-    (assert-null (cl-cc::token-stream-tokens ts))
-    (assert-string= "test" (cl-cc::token-stream-source ts))))
+  (let ((ts (cl-cc/parse::make-token-stream :tokens nil :source "test")))
+    (assert-true (cl-cc/parse::token-stream-p ts))
+    (assert-null (cl-cc/parse::token-stream-tokens ts))
+    (assert-string= "test" (cl-cc/parse::token-stream-source ts))))
 
 (deftest grammar-ts-empty-stream
   "ts-peek returns nil and ts-at-end-p returns true on an empty stream."
-  (let ((ts (cl-cc::make-token-stream :tokens nil :source "")))
-    (assert-null (cl-cc::ts-peek ts))
-    (assert-true (cl-cc::ts-at-end-p ts))))
+  (let ((ts (cl-cc/parse::make-token-stream :tokens nil :source "")))
+    (assert-null (cl-cc/parse::ts-peek ts))
+    (assert-true (cl-cc/parse::ts-at-end-p ts))))
 
 ;;; ─── parse-compiler-lambda-list ─────────────────────────────────────────────
 
 (deftest parser-lambda-list-required-only
   "parse-compiler-lambda-list: required params only"
   (multiple-value-bind (required optional rest-param key-params)
-      (cl-cc::parse-compiler-lambda-list '(x y z))
+      (cl-cc/parse::parse-compiler-lambda-list '(x y z))
     (assert-equal '(x y z) required)
     (assert-null optional)
     (assert-null rest-param)
@@ -123,7 +123,7 @@
 (deftest parser-lambda-list-with-optional
   "parse-compiler-lambda-list: &optional params"
   (multiple-value-bind (required optional rest-param key-params)
-      (cl-cc::parse-compiler-lambda-list '(x &optional (y 10)))
+      (cl-cc/parse::parse-compiler-lambda-list '(x &optional (y 10)))
     (assert-equal '(x) required)
     (assert-= 1 (length optional))
     (assert-eq 'y (first (first optional)))
@@ -134,7 +134,7 @@
 (deftest parser-lambda-list-with-rest
   "parse-compiler-lambda-list: &rest param"
   (multiple-value-bind (required optional rest-param key-params)
-      (cl-cc::parse-compiler-lambda-list '(x &rest args))
+      (cl-cc/parse::parse-compiler-lambda-list '(x &rest args))
     (assert-equal '(x) required)
     (assert-null optional)
     (assert-eq 'args rest-param)
@@ -143,7 +143,7 @@
 (deftest parser-lambda-list-with-key
   "parse-compiler-lambda-list: &key params"
   (multiple-value-bind (required optional rest-param key-params)
-      (cl-cc::parse-compiler-lambda-list '(x &key (size 0)))
+      (cl-cc/parse::parse-compiler-lambda-list '(x &key (size 0)))
     (assert-equal '(x) required)
     (assert-null optional)
     (assert-null rest-param)
@@ -153,7 +153,7 @@
 (deftest parser-lambda-list-empty
   "parse-compiler-lambda-list: empty lambda list"
   (multiple-value-bind (required optional rest-param key-params)
-      (cl-cc::parse-compiler-lambda-list '())
+      (cl-cc/parse::parse-compiler-lambda-list '())
     (assert-null required)
     (assert-null optional)
     (assert-null rest-param)
@@ -169,7 +169,7 @@
           ("simple"   '(x y z)         nil)
           ("empty"    '()              nil))
   (lambda-list expected)
-  (assert-equal expected (if (cl-cc::lambda-list-has-extended-p lambda-list) t nil)))
+  (assert-equal expected (if (cl-cc/parse::lambda-list-has-extended-p lambda-list) t nil)))
 
 ;;; ─── lower-sexp-to-ast: atoms ────────────────────────────────────────────────
 
@@ -411,7 +411,7 @@
           ("defclass" 'defclass               :defclass)
           ("unknown" 'completely-unknown-symbol :call))
   (sym expected)
-  (assert-eq expected (cl-cc::sexp-head-to-kind sym)))
+  (assert-eq expected (cl-cc/parse::sexp-head-to-kind sym)))
 
 ;;; ─── Grammar specialized parsers ────────────────────────────────────────────
 
@@ -421,8 +421,8 @@
           ("string"  "\"hello\"" "hello"))
   (source expected-value)
   (let* ((tokens (cl-cc:lex-all source))
-         (ts (cl-cc::make-token-stream :tokens tokens :source source))
-         (form (cl-cc::parse-cl-form ts)))
+         (ts (cl-cc/parse::make-token-stream :tokens tokens :source source))
+         (form (cl-cc/parse::parse-cl-form ts)))
     (assert-true (cl-cc:cst-token-p form))
     (assert-equal expected-value (cl-cc:cst-token-value form))))
 
@@ -432,8 +432,8 @@
           ("empty"     "()"      0))
   (source expected-child-count)
   (let* ((tokens (cl-cc:lex-all source))
-         (ts (cl-cc::make-token-stream :tokens tokens :source source))
-         (form (cl-cc::parse-cl-form ts)))
+         (ts (cl-cc/parse::make-token-stream :tokens tokens :source source))
+         (form (cl-cc/parse::parse-cl-form ts)))
     (assert-true (cl-cc:cst-interior-p form))
     (assert-= expected-child-count (length (cl-cc:cst-children form)))))
 
@@ -444,15 +444,15 @@
           ("function" "#'foo" :function))
   (source expected-kind)
   (let* ((tokens (cl-cc:lex-all source))
-         (ts (cl-cc::make-token-stream :tokens tokens :source source))
-         (form (cl-cc::parse-cl-form ts)))
+         (ts (cl-cc/parse::make-token-stream :tokens tokens :source source))
+         (form (cl-cc/parse::parse-cl-form ts)))
     (assert-true (cl-cc:cst-interior-p form))
     (assert-eq expected-kind (cl-cc:cst-node-kind form))))
 
 (deftest grammar-parse-cl-form-at-end
   "parse-cl-form: returns nil at end of stream"
-  (let* ((ts (cl-cc::make-token-stream :tokens nil :source "")))
-    (assert-null (cl-cc::parse-cl-form ts))))
+  (let* ((ts (cl-cc/parse::make-token-stream :tokens nil :source "")))
+    (assert-null (cl-cc/parse::parse-cl-form ts))))
 
 ;;; ─── defmacro lowering ───────────────────────────────────────────────────────
 
@@ -774,18 +774,18 @@
 
 (deftest parse-slot-spec-variants
   "parse-slot-spec: bare symbol, full options, and :initform all parse correctly."
-  (let ((slot (cl-cc::parse-slot-spec 'x)))
+  (let ((slot (cl-cc/parse::parse-slot-spec 'x)))
     (assert-eq 'x (cl-cc::ast-slot-name slot))
     (assert-null (cl-cc::ast-slot-initarg slot))
     (assert-null (cl-cc::ast-slot-reader slot)))
-  (let ((slot (cl-cc::parse-slot-spec '(x :initarg :x :reader get-x :writer set-x :accessor x-acc :type integer))))
+  (let ((slot (cl-cc/parse::parse-slot-spec '(x :initarg :x :reader get-x :writer set-x :accessor x-acc :type integer))))
     (assert-eq 'x (cl-cc::ast-slot-name slot))
     (assert-eq :x (cl-cc::ast-slot-initarg slot))
     (assert-eq 'get-x (cl-cc::ast-slot-reader slot))
     (assert-eq 'set-x (cl-cc::ast-slot-writer slot))
     (assert-eq 'x-acc (cl-cc::ast-slot-accessor slot))
     (assert-eq 'integer (cl-cc::ast-slot-type slot)))
-  (let ((slot (cl-cc::parse-slot-spec '(count :initform 0))))
+  (let ((slot (cl-cc/parse::parse-slot-spec '(count :initform 0))))
     (assert-eq 'count (cl-cc::ast-slot-name slot))
     (assert-true (cl-cc::ast-int-p (cl-cc::ast-slot-initform slot)))
     (assert-= 0 (cl-cc::ast-int-value (cl-cc::ast-slot-initform slot)))))
@@ -795,26 +795,26 @@
 (deftest parser-lambda-list-edge-cases
   "parse-compiler-lambda-list: &rest+&key, &allow-other-keys, &body, and bare &optional are handled correctly."
   (multiple-value-bind (required optional rest-param key-params)
-      (cl-cc::parse-compiler-lambda-list '(x &rest args &key verbose))
+      (cl-cc/parse::parse-compiler-lambda-list '(x &rest args &key verbose))
     (assert-equal '(x) required)
     (assert-null optional)
     (assert-eq 'args rest-param)
     (assert-= 1 (length key-params))
     (assert-eq 'verbose (first (first key-params))))
   (multiple-value-bind (required optional rest-param key-params)
-      (cl-cc::parse-compiler-lambda-list '(&key x &allow-other-keys))
+      (cl-cc/parse::parse-compiler-lambda-list '(&key x &allow-other-keys))
     (assert-null required)
     (assert-null optional)
     (assert-null rest-param)
     (assert-= 1 (length key-params)))
   (multiple-value-bind (required optional rest-param key-params)
-      (cl-cc::parse-compiler-lambda-list '(x &body forms))
+      (cl-cc/parse::parse-compiler-lambda-list '(x &body forms))
     (declare (ignore optional))
     (assert-equal '(x) required)
     (assert-eq 'forms rest-param)
     (assert-null key-params))
   (multiple-value-bind (required optional rest-param key-params)
-      (cl-cc::parse-compiler-lambda-list '(&optional x))
+      (cl-cc/parse::parse-compiler-lambda-list '(&optional x))
     (declare (ignore rest-param key-params))
     (assert-null required)
     (assert-= 1 (length optional))

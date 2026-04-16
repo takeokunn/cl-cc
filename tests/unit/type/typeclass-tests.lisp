@@ -60,6 +60,46 @@
       (assert-eq 'custom-eq (cdr (assoc 'eq (typeclass-instance-methods inst))))
       (assert-eq 'default-show (cdr (assoc 'show (typeclass-instance-methods inst)))))))
 
+(deftest typeclass-def-creation-and-lookup
+  "make-typeclass-def creates valid definitions; register/lookup round-trips correctly."
+  (let* ((a  (fresh-type-var 'a))
+         (tc (make-typeclass-def
+              :name 'functor-test
+              :type-params (list a)
+              :superclasses nil
+              :methods (list (cons 'fmap
+                                   (make-type-arrow (list type-any) type-any)))
+              :associated-types nil
+              :functional-deps nil)))
+    (assert-true (typeclass-def-p tc))
+    (assert-eq 'functor-test (typeclass-def-name tc))
+    (assert-= 1 (length (typeclass-def-type-params tc)))
+    (assert-= 1 (length (typeclass-def-methods tc))))
+  (let* ((a  (fresh-type-var 'a))
+         (tc (make-typeclass-def
+              :name 'show-test
+              :type-params (list a)
+              :superclasses nil
+              :methods (list (cons 'show (make-type-arrow (list a) type-string)))
+              :associated-types nil
+              :functional-deps nil)))
+    (register-typeclass 'show-test tc)
+    (let ((retrieved (lookup-typeclass 'show-test)))
+      (assert-true retrieved)
+      (assert-true (typeclass-def-p retrieved))
+      (assert-eq 'show-test (typeclass-def-name retrieved)))))
+
+(deftest typeclass-instance-registration-new
+  "register-typeclass-instance and lookup-typeclass-instance work with new API."
+  (register-typeclass-instance 'show-int-test type-int
+                               (list (cons 'show (lambda (x) (format nil "~A" x)))))
+  (let ((inst (lookup-typeclass-instance 'show-int-test type-int)))
+    (assert-true inst)
+    (assert-true (typeclass-instance-p inst))
+    (assert-eq 'show-int-test (typeclass-instance-class-name inst)))
+  (assert-true (has-typeclass-instance-p 'show-int-test type-int))
+  (assert-false (has-typeclass-instance-p 'show-int-test type-string)))
+
 ;;; ─── typeclass-instance registry ───────────────────────────────────────────
 
 (deftest typeclass-instance-registry-operations

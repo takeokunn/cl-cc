@@ -1,4 +1,4 @@
-(in-package :cl-cc)
+(in-package :cl-cc/vm)
 
 ;;; VM Formatted Output and Reader Instructions
 ;;;
@@ -214,6 +214,9 @@
   (let* ((handle (vm-reg-get state (vm-src inst)))
          (stream (vm-get-stream state handle))
          (line (read-line stream nil nil))
-         (value (when line (first (parse-all-forms line)))))
+         (value (when line
+                  (if *vm-parse-forms-hook*
+                      (first (funcall *vm-parse-forms-hook* line))
+                      (cl:read-from-string line nil nil)))))
     (vm-reg-set state (vm-dst inst) value)
     (values (1+ pc) nil nil)))

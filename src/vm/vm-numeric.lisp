@@ -1,4 +1,4 @@
-(in-package :cl-cc)
+(in-package :cl-cc/vm)
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;; VM — Numeric Tower Extensions
 ;;;
@@ -135,6 +135,40 @@
     (remhash sym (vm-function-registry state))
     (vm-reg-set state (vm-dst inst) sym)
     (values (1+ pc) nil nil)))
+
+;; FR-1202: fdefinition — retrieve a function object by symbol
+(define-vm-instruction vm-fdefinition (vm-instruction)
+  "Return the function named by SYM from the VM function registry.
+Signals a VM-level error (catchable by handler-case/ignore-errors) if undefined."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :fdefinition)
+  (:sexp-slots dst src))
+
+(defmethod execute-instruction ((inst vm-fdefinition) state pc labels)
+  (let* ((sym (vm-reg-get state (vm-src inst)))
+         (fn  (gethash sym (vm-function-registry state))))
+    (if fn
+        (progn (vm-reg-set state (vm-dst inst) fn)
+               (values (1+ pc) nil nil))
+        (let ((error-value (format nil "The function ~S is undefined." sym))
+              (matching-handler nil)
+              (handlers-to-skip 0))
+          (dolist (entry (vm-handler-stack state))
+            (if (vm-error-type-matches-p error-value (third entry))
+                (progn (setf matching-handler entry) (return))
+                (incf handlers-to-skip)))
+          (if matching-handler
+              (progn
+                (dotimes (i (1+ handlers-to-skip)) (pop (vm-handler-stack state)))
+                (destructuring-bind (handler-label result-reg _type saved-call-stack saved-regs
+                                     &optional saved-method-call-stack)
+                    matching-handler
+                  (declare (ignore _type))
+                  (%vm-unwind-to-handler state labels handler-label result-reg
+                                         saved-call-stack saved-regs saved-method-call-stack
+                                         error-value)))
+              (error "Unhandled VM error: fdefinition: ~S is undefined" sym))))))
 
 ;; FR-1205: random — generate a random number
 (define-vm-instruction vm-random (vm-instruction)

@@ -3,7 +3,7 @@
 ;;;; All VM code lives in the :cl-cc package (defined in src/package.lisp).
 ;;;; This file exists for ASDF module ordering and switches to the correct package.
 
-(in-package :cl-cc)
+(in-package :cl-cc/vm)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun %type-package-function (name)

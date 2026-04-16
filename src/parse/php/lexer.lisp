@@ -27,7 +27,7 @@
 ;;;;   :T-COMMA          - ,
 ;;;;   :T-COLON          - :
 
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; PHP keyword sets
 

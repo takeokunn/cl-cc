@@ -148,19 +148,20 @@ independent macroexpansions."
 
 (defun %expand-quasiquote (template)
   "Transform a quasiquote template into list/cons/append calls.
-Handles (cl-cc::unquote x) and (cl-cc::unquote-splicing x) within template."
+Handles (unquote x) and (unquote-splicing x) within template.
+These symbols live in :cl-cc/bootstrap so both parse and expand share them."
   (cond
-    ;; (cl-cc::unquote x) at top level => just x
-    ((and (consp template) (eq (car template) 'cl-cc::unquote))
+    ;; (unquote x) at top level => just x
+    ((and (consp template) (eq (car template) 'unquote))
      (second template))
     ;; A list => process each element for unquote/splicing
     ((consp template)
      (let ((parts nil))
        (dolist (elem template)
          (cond
-           ((and (consp elem) (eq (car elem) 'cl-cc::unquote))
+           ((and (consp elem) (eq (car elem) 'unquote))
             (push (list 'list (second elem)) parts))
-           ((and (consp elem) (eq (car elem) 'cl-cc::unquote-splicing))
+           ((and (consp elem) (eq (car elem) 'unquote-splicing))
             (push (second elem) parts))
            (t
             (push (list 'list (%expand-quasiquote elem)) parts))))
@@ -175,7 +176,7 @@ Handles (cl-cc::unquote x) and (cl-cc::unquote-splicing x) within template."
   "Recursively expand all macros in FORM, including in subforms."
   (cond
     ;; Quasiquote — expand before further processing
-    ((and (consp form) (eq (car form) 'cl-cc::backquote))
+    ((and (consp form) (eq (car form) 'backquote))
       (our-macroexpand-all (%expand-quasiquote (second form)) env))
     ;; Quote — never recurse into quoted data
     ((and (consp form) (eq (car form) 'quote))
@@ -201,3 +202,10 @@ Handles (cl-cc::unquote x) and (cl-cc::unquote-splicing x) within template."
                              `((declare (ignore ,env-var))
                                (let* ,(generate-lambda-bindings lambda-list form-var)
                                  ,@body)))))))
+
+;;; Wire expand functions into VM hooks for runtime macroexpand support
+(eval-when (:load-toplevel :execute)
+  (when (find-package :cl-cc/vm)
+    (let ((pkg (find-package :cl-cc/vm)))
+      (setf (symbol-value (find-symbol "*VM-MACROEXPAND-1-HOOK*" pkg)) #'our-macroexpand-1)
+      (setf (symbol-value (find-symbol "*VM-MACROEXPAND-HOOK*" pkg)) #'our-macroexpand))))

@@ -247,7 +247,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 
 #### FR-240: Source Location Propagation (ソース位置伝播)
 
-- **対象**: `src/compile/codegen.lisp`, `src/parse/ast.lisp`
+- **対象**: `src/compile/codegen.lisp`, `src/ast/ast.lisp`
 - **現状**: `ast.lisp:14-16` — ASTノードに`source-file`, `source-line`, `source-column`フィールドが存在するがcodegenで一切参照されない。VM命令やネイティブコードにソース位置が紐づかない
 - **内容**: codegen各フェーズでAST→VM命令→MIR→機械語にソース位置情報を伝播。エラーメッセージ・スタックトレース・デバッガにファイル名:行番号を表示。FR-195（DWARF）の前提条件
 - **根拠**: 全モダンコンパイラの基本機能。デバッグ体験の根幹

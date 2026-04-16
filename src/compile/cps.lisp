@@ -69,27 +69,59 @@ both NIL and numeric zero are false."
          (print ,v)
          (funcall ,k ,v)))))
 
+(defun %cps-sexp-dispatch-binop (node k)
+  "Dispatch NODE as a bootstrap CPS binary operator."
+  (%cps-sexp-binop (car node) (second node) (third node) k))
+
+(defun %cps-sexp-dispatch-if (node k)
+  "Dispatch NODE as a bootstrap CPS IF form."
+  (%cps-sexp-if node k))
+
+(defun %cps-sexp-dispatch-progn (node k)
+  "Dispatch NODE as a bootstrap CPS PROGN form."
+  (%cps-sexp-progn (cdr node) k))
+
+(defun %cps-sexp-dispatch-let (node k)
+  "Dispatch NODE as a bootstrap CPS LET form."
+  (%cps-sexp-let-bindings (second node)
+                          `(progn ,@(cddr node))
+                          k))
+
+(defun %cps-sexp-dispatch-print (node k)
+  "Dispatch NODE as a bootstrap CPS PRINT form."
+  (%cps-sexp-print node k))
+
+(defparameter *cps-sexp-dispatch-specs*
+  '((+ . %cps-sexp-dispatch-binop)
+    (- . %cps-sexp-dispatch-binop)
+    (* . %cps-sexp-dispatch-binop)
+    (if . %cps-sexp-dispatch-if)
+    (progn . %cps-sexp-dispatch-progn)
+    (let . %cps-sexp-dispatch-let)
+    (print . %cps-sexp-dispatch-print))
+  "Data-driven bootstrap CPS dispatch from special form/operator symbol to handler.")
+
+(defun %make-cps-sexp-dispatch-table ()
+  "Build the bootstrap CPS special form dispatch table from *cps-sexp-dispatch-specs*."
+  (let ((table (make-hash-table :test 'eq)))
+    (dolist (spec *cps-sexp-dispatch-specs* table)
+      (setf (gethash (car spec) table)
+            (symbol-function (cdr spec))))))
+
+(defparameter *cps-sexp-dispatch-table*
+  (%make-cps-sexp-dispatch-table)
+  "Hash table mapping bootstrap CPS special forms/operators to dispatch functions.")
+
 (defun %cps-sexp-node (node k)
   "CPS-transform a single bootstrap S-expression NODE with continuation K."
   (cond
     ((integerp node) `(funcall ,k ,node))
     ((symbolp  node) `(funcall ,k ,node))
     ((consp node)
-     (case (car node)
-       ((+ - *)
-        (%cps-sexp-binop (car node) (second node) (third node) k))
-        (if
-         (%cps-sexp-if node k))
-        (progn
-         (%cps-sexp-progn (cdr node) k))
-        (let
-         (%cps-sexp-let-bindings (second node)
-                                 `(progn ,@(cddr node))
-                                 k))
-        (print
-         (%cps-sexp-print node k))
-        (otherwise
-         (error "Unsupported form in CPS: ~S" (car node)))))
+     (let ((handler (gethash (car node) *cps-sexp-dispatch-table*)))
+       (if handler
+           (funcall handler node k)
+           (error "Unsupported form in CPS: ~S" (car node)))))
     (t
       (error "Unsupported node in CPS: ~S" node))))
 

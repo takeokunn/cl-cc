@@ -154,7 +154,7 @@
 ;; cl-cc can load its own real source files
 (let ((ok 0)
       (files '("src/parse/cst.lisp"
-               "src/parse/prolog.lisp"
+               "src/prolog/prolog.lisp"
                "src/compile/cps.lisp"
                "src/optimize/optimizer.lisp"
                "src/type/inference.lisp"

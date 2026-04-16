@@ -13,7 +13,7 @@
 (defun make-test-ctx (source)
   "Create a CL pratt-context from SOURCE string."
   (let ((tokens (cl-cc:lex-all source)))
-    (cl-cc::make-cl-pratt-context tokens source nil)))
+    (cl-cc/parse::make-cl-pratt-context tokens source nil)))
 
 (defun parse-one-cst (source)
   "Parse SOURCE and return the first CST node."
@@ -28,21 +28,21 @@
 (deftest pratt-peek-behavior
   "pratt-peek returns the current token without advancing, and is idempotent"
   (let ((ctx (make-test-ctx "42")))
-    (let ((tok (cl-cc::pratt-peek ctx)))
+    (let ((tok (cl-cc/parse::pratt-peek ctx)))
       (assert-true (not (null tok)))
       (assert-eq :T-INT (cl-cc:lexer-token-type tok))))
   (let ((ctx (make-test-ctx "42")))
-    (let ((tok1 (cl-cc::pratt-peek ctx))
-          (tok2 (cl-cc::pratt-peek ctx)))
+    (let ((tok1 (cl-cc/parse::pratt-peek ctx))
+          (tok2 (cl-cc/parse::pratt-peek ctx)))
       (assert-eq tok1 tok2))))
 
 (deftest pratt-advance-consumes-token
   "pratt-advance returns current token and moves forward"
   (let ((ctx (make-test-ctx "1 2")))
-    (let ((tok1 (cl-cc::pratt-advance ctx)))
+    (let ((tok1 (cl-cc/parse::pratt-advance ctx)))
       (assert-eq :T-INT (cl-cc:lexer-token-type tok1))
       (assert-= 1 (cl-cc:lexer-token-value tok1)))
-    (let ((tok2 (cl-cc::pratt-advance ctx)))
+    (let ((tok2 (cl-cc/parse::pratt-advance ctx)))
       (assert-eq :T-INT (cl-cc:lexer-token-type tok2))
       (assert-= 2 (cl-cc:lexer-token-value tok2)))))
 
@@ -54,36 +54,36 @@
   (source expected advance-first)
   (let ((ctx (make-test-ctx source)))
     (when advance-first
-      (cl-cc::pratt-advance ctx))
+      (cl-cc/parse::pratt-advance ctx))
     (if expected
-        (assert-true (cl-cc::pratt-at-end-p ctx))
-        (assert-false (cl-cc::pratt-at-end-p ctx)))))
+        (assert-true (cl-cc/parse::pratt-at-end-p ctx))
+        (assert-false (cl-cc/parse::pratt-at-end-p ctx)))))
 
 ;;; ─── Token Accessors ─────────────────────────────────────────────────────────
 
 (deftest pratt-tok-type-via-context
   "pratt-tok-type returns type using context's accessor function"
   (let* ((ctx (make-test-ctx "hello"))
-         (tok (cl-cc::pratt-peek ctx)))
-    (assert-eq :T-IDENT (cl-cc::pratt-tok-type ctx tok))))
+         (tok (cl-cc/parse::pratt-peek ctx)))
+    (assert-eq :T-IDENT (cl-cc/parse::pratt-tok-type ctx tok))))
 
 (deftest pratt-tok-value-via-context
   "pratt-tok-value returns value using context's accessor function"
   (let* ((ctx (make-test-ctx "hello"))
-         (tok (cl-cc::pratt-peek ctx)))
-    (assert-string= "HELLO" (string (cl-cc::pratt-tok-value ctx tok)))))
+         (tok (cl-cc/parse::pratt-peek ctx)))
+    (assert-string= "HELLO" (string (cl-cc/parse::pratt-tok-value ctx tok)))))
 
 (deftest pratt-tok-type-nil-safe
   "pratt-tok-type returns nil when tok is nil"
   (let ((ctx (make-test-ctx "")))
-    (assert-eq nil (cl-cc::pratt-tok-type ctx nil))))
+    (assert-eq nil (cl-cc/parse::pratt-tok-type ctx nil))))
 
 ;;; ─── Diagnostics: pratt-expect ───────────────────────────────────────────────
 
 (deftest pratt-expect-matching-type
   "pratt-expect consumes token when type matches"
   (let ((ctx (make-test-ctx "42")))
-    (let ((tok (cl-cc::pratt-expect ctx :T-INT "test")))
+    (let ((tok (cl-cc/parse::pratt-expect ctx :T-INT "test")))
       (assert-true (not (null tok)))
       (assert-eq :T-INT (cl-cc:lexer-token-type tok)))))
 
@@ -93,25 +93,25 @@
           ("eof"           ""   :T-INT    "eof-test"))
   (source expected-type label)
   (let ((ctx (make-test-ctx source)))
-    (cl-cc::pratt-expect ctx expected-type label)
-    (assert-true (not (null (cl-cc::pratt-context-diagnostics ctx))))))
+    (cl-cc/parse::pratt-expect ctx expected-type label)
+    (assert-true (not (null (cl-cc/parse::pratt-context-diagnostics ctx))))))
 
 (deftest pratt-expect-mismatch-returns-nil
   "pratt-expect returns nil on type mismatch"
   (let ((ctx (make-test-ctx "42")))
-    (let ((result (cl-cc::pratt-expect ctx :T-STRING)))
+    (let ((result (cl-cc/parse::pratt-expect ctx :T-STRING)))
       (assert-eq nil result))))
 
 ;;; ─── NUD Table Registration ──────────────────────────────────────────────────
 
 (deftest cl-nud-table-not-nil
   "CL NUD table is populated"
-  (assert-true (not (null cl-cc::*cl-nud-table*)))
-  (assert-true (> (hash-table-count cl-cc::*cl-nud-table*) 0)))
+  (assert-true (not (null cl-cc/parse::*cl-nud-table*)))
+  (assert-true (> (hash-table-count cl-cc/parse::*cl-nud-table*) 0)))
 
 (deftest cl-led-table-empty
   "CL LED table is empty (CL has no infix operators)"
-  (assert-= 0 (hash-table-count cl-cc::*cl-led-table*)))
+  (assert-= 0 (hash-table-count cl-cc/parse::*cl-led-table*)))
 
 (deftest-each cl-nud-table-has-handler
   "NUD table has handler for each required token type"
@@ -119,7 +119,7 @@
           ("lparen" :T-LPAREN)
           ("quote"  :T-QUOTE))
   (token-type)
-  (assert-true (not (null (gethash token-type cl-cc::*cl-nud-table*)))))
+  (assert-true (not (null (gethash token-type cl-cc/parse::*cl-nud-table*)))))
 
 ;;; ─── parse-cl-source: CST Structure ─────────────────────────────────────────
 
@@ -273,12 +273,12 @@
   :cases (("integer"     "42"               #'cl-cc:cst-token-p    nil)
           ("symbol"      "foo"              #'cl-cc:cst-token-p    nil)
           ("list"        "(+ 1 2)"          #'cl-cc:cst-interior-p nil)
-          ("eof-error"   ""                 #'cl-cc::cst-error-node-p nil)
+          ("eof-error"   ""                 #'cl-cc/parse::cst-error-node-p nil)
           ("quote"       "'x"               #'cl-cc:cst-interior-p :quote)
           ("nested-list" "(let ((x 1)) x)"  #'cl-cc:cst-interior-p nil))
   (source pred expected-kind)
   (let* ((ctx  (make-test-ctx source))
-         (node (cl-cc::pratt-parse-expr ctx)))
+         (node (cl-cc/parse::pratt-parse-expr ctx)))
     (assert-true (funcall pred node))
     (when expected-kind
       (assert-eq expected-kind (cl-cc:cst-node-kind node)))))
@@ -292,14 +292,14 @@
   (n)
   (let ((ctx (make-test-ctx "42")))
     (dotimes (i n)
-      (cl-cc::pratt-add-diagnostic ctx (format nil "error ~a" i) (cons i (1+ i))))
-    (assert-equal n (length (cl-cc::pratt-context-diagnostics ctx)))))
+      (cl-cc/parse::pratt-add-diagnostic ctx (format nil "error ~a" i) (cons i (1+ i))))
+    (assert-equal n (length (cl-cc/parse::pratt-context-diagnostics ctx)))))
 
 (deftest pratt-add-diagnostic-records-message
   "pratt-add-diagnostic stores the error message."
   (let ((ctx (make-test-ctx "42")))
-    (cl-cc::pratt-add-diagnostic ctx "unexpected token" (cons 0 2))
-    (let ((diag (first (cl-cc::pratt-context-diagnostics ctx))))
+    (cl-cc/parse::pratt-add-diagnostic ctx "unexpected token" (cons 0 2))
+    (let ((diag (first (cl-cc/parse::pratt-context-diagnostics ctx))))
       (assert-true (not (null diag))))))
 
 ;;; ─── pratt-parse-list-until: Direct Tests ───────────────────────────────────
@@ -310,18 +310,18 @@
           ("elements" "(1 2 3)" 3))
   (source expected-len)
   (let ((ctx (make-test-ctx source)))
-    (cl-cc::pratt-advance ctx) ; consume LPAREN
-    (let ((items (cl-cc::pratt-parse-list-until ctx :T-RPAREN
-                   (lambda (c) (cl-cc::pratt-parse-expr c)))))
+    (cl-cc/parse::pratt-advance ctx) ; consume LPAREN
+    (let ((items (cl-cc/parse::pratt-parse-list-until ctx :T-RPAREN
+                   (lambda (c) (cl-cc/parse::pratt-parse-expr c)))))
       (assert-equal expected-len (length items)))))
 
 (deftest pratt-parse-list-until-consumes-terminator
   "pratt-parse-list-until consumes the end token."
   (let ((ctx (make-test-ctx "(1) 42")))
-    (cl-cc::pratt-advance ctx) ; consume LPAREN
-    (cl-cc::pratt-parse-list-until ctx :T-RPAREN
-      (lambda (c) (cl-cc::pratt-parse-expr c)))
+    (cl-cc/parse::pratt-advance ctx) ; consume LPAREN
+    (cl-cc/parse::pratt-parse-list-until ctx :T-RPAREN
+      (lambda (c) (cl-cc/parse::pratt-parse-expr c)))
     ;; Next token should be 42, not RPAREN
-    (let ((tok (cl-cc::pratt-peek ctx)))
+    (let ((tok (cl-cc/parse::pratt-peek ctx)))
       (assert-eq :T-INT (cl-cc:lexer-token-type tok))
       (assert-equal 42 (cl-cc:lexer-token-value tok)))))

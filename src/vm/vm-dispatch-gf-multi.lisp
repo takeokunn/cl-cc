@@ -1,4 +1,4 @@
-(in-package :cl-cc)
+(in-package :cl-cc/vm)
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;; VM — Qualified-Method Returns and Multi-Dispatch Resolution
 ;;;

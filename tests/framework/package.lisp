@@ -1,32 +1,54 @@
 (defpackage :cl-cc/test
   (:use :cl)
-  (:import-from :cl-cc
-                 ;; Compiler
+  (:import-from :cl-cc/compile
+                 ;; Compiler — moved from :cl-cc to :cl-cc/compile (Phase 2)
                  :compile-string
                  :run-string
                  :run-string-repl
                  :reset-repl-state
                  :run-string-typed
                  :compile-expression
-                 :compile-ast
-                 ;; Optimizer
-                 :optimize-instructions
-                 :%get-instructions
                  ;; CPS
                  :cps-transform
                  :cps-transform-ast
                  :cps-transform-ast*
                  :cps-transform-eval
+                 ;; Eval
+                 :our-eval
+                 ;; Compilation result
+                 :compilation-result
+                 :make-compilation-result
+                 :compilation-result-program
+                 :compilation-result-assembly
+                 :compilation-result-globals
+                 :compilation-result-type
+                 :compilation-result-cps)
+  (:import-from :cl-cc/parse
+                 ;; Parse — moved from :cl-cc to :cl-cc/parse (Phase 2)
+                 :ast-to-sexp
+                 :lower-sexp-to-ast
+                 :parse-slot-spec
+                 :slot-def-to-sexp
+                 ;; Grammar combinator engine
+                 :*grammar-rules*
+                 :def-grammar-rule
+                 :query-grammar
+                 :clear-grammar-rules
+                 :parse-combinator
+                 :parse-ok-p
+                 :parse-with-grammar
+                 ;; PHP frontend
+                 :tokenize-php-source
+                 :parse-php-source)
+  (:import-from :cl-cc
+                 :compile-ast
                  ;; VM Program
                  :vm-program
                  :vm-program-instructions
                  :vm-program-result-register
-                 ;; Macro System
-                 :our-macroexpand-1
-                 :our-macroexpand
-                 ;; AST
-                 :ast-to-sexp
-                 :lower-sexp-to-ast
+                 ;; Macro System — our-macroexpand-1/our-macroexpand moved to
+                 ;; :import-from :cl-cc/expand below
+                 ;; ast-to-sexp, lower-sexp-to-ast moved to :import-from :cl-cc/parse above
                  :ast-node
                  :ast-int
                  :ast-var
@@ -201,7 +223,7 @@
                  :unify
                  :substitute-variables
                  :logic-var-p
-                 :our-macroexpand-all
+                 ;; our-macroexpand-all moved to :import-from :cl-cc/expand below
                  ;; CLOS AST
                  :ast-defclass
                  :ast-defclass-name
@@ -232,56 +254,12 @@
                  :ast-set-slot-value-object
                  :ast-set-slot-value-slot
                  :ast-set-slot-value-value
-                 :parse-slot-spec
-                 :slot-def-to-sexp
-                 ;; Register Allocation
-                 :calling-convention
-                 :cc-gpr-pool
-                 :cc-return-register
-                 :cc-scratch-register
-                 :*x86-64-calling-convention*
-                 :*aarch64-calling-convention*
-                 :live-interval
-                 :make-live-interval
-                 :interval-vreg
-                 :interval-start
-                 :interval-end
-                 :interval-phys-reg
-                 :interval-spill-slot
-                 :regalloc-result
-                 :regalloc-spill-count
-                 :regalloc-lookup
-                 :instruction-defs
-                 :instruction-uses
-                 :compute-live-intervals
-                 :allocate-registers
-                 :vm-spill-store
-                 :vm-spill-load
-                 :our-eval
-                 ;; Native code generation
-                 :compile-to-x86-64-bytes
-                 :compile-to-aarch64-bytes
-                 :compile-to-native
-                 :compile-file-to-native
-                 ;; Compilation Result
-                 :compilation-result
-                 :make-compilation-result
-                 :compilation-result-program
-                 :compilation-result-assembly
-                 :compilation-result-globals
-                 :compilation-result-type
-                 :compilation-result-cps
-                 ;; Parser Combinator Engine
-                 :*grammar-rules*
-                 :def-grammar-rule
-                 :query-grammar
-                 :clear-grammar-rules
-                 :parse-combinator
-                 :parse-ok-p
-                 :parse-with-grammar
-                 ;; PHP Frontend
-                 :tokenize-php-source
-                 :parse-php-source
+                 ;; parse-slot-spec, slot-def-to-sexp moved to :import-from :cl-cc/parse above
+                 ;; Register Allocation — moved to :import-from :cl-cc/emit below
+                 ;; our-eval, compilation-result, make-compilation-result,
+                 ;; compilation-result-program/-assembly/-globals/-type/-cps
+                 ;; moved to :import-from :cl-cc/compile above
+                 ;; Parser Combinator Engine + PHP Frontend moved to :import-from :cl-cc/parse above
                  ;; AST predicates needed for PHP tests
                  :ast-int-p
                  :ast-int-value
@@ -298,6 +276,10 @@
                  :ast-defclass-name
                  :ast-call-p
                  :ast-binop-p
+                 ;; MIR + target descriptors moved to :shadowing-import-from :cl-cc/mir below
+                 ;; Prolog type-inference functor atoms
+                 :integer-type :boolean-type :const :binop :cmp)
+  (:import-from :cl-cc/mir
                  ;; MIR — SSA intermediate representation
                  :mir-value :make-mir-value :mir-value-p
                  :mirv-id :mirv-name :mirv-type :mirv-def-inst :mirv-use-count
@@ -330,9 +312,44 @@
                  :*target-registry* :register-target :find-target
                  :target-64-bit-p :target-has-feature-p
                  :target-allocatable-regs :target-caller-saved
-                 :target-reg-index :target-op-legal-p :target-op-expand
-                 ;; Prolog type-inference functor atoms
-                 :integer-type :boolean-type :const :binop :cmp)
+                 :target-reg-index :target-op-legal-p :target-op-expand)
+  (:import-from :cl-cc/optimize
+                 ;; Optimizer — top-level entry point
+                 :optimize-instructions)
+  (:import-from :cl-cc/emit
+                 ;; Register Allocation
+                 :calling-convention
+                 :cc-gpr-pool
+                 :cc-return-register
+                 :cc-scratch-register
+                 :*x86-64-calling-convention*
+                 :*aarch64-calling-convention*
+                 :live-interval
+                 :make-live-interval
+                 :interval-vreg
+                 :interval-start
+                 :interval-end
+                 :interval-phys-reg
+                 :interval-spill-slot
+                 :regalloc-result
+                 :regalloc-spill-count
+                 :regalloc-lookup
+                 :instruction-defs
+                 :instruction-uses
+                 :compute-live-intervals
+                 :allocate-registers
+                 :vm-spill-store
+                 :vm-spill-load
+                 ;; Native code generation
+                 :compile-to-x86-64-bytes
+                 :compile-to-aarch64-bytes
+                 :compile-to-native
+                 :compile-file-to-native)
+  (:import-from :cl-cc/expand
+                 ;; Macro System
+                 :our-macroexpand-1
+                 :our-macroexpand
+                 :our-macroexpand-all)
   (:shadowing-import-from :cl-cc/type
                   ;; Type classes
                   :type-node
@@ -625,21 +642,10 @@
            :assert-evaluates-to
            :assert-macro-expands-to
            :assert-infers-type
-           :assert-same-as-sbcl
-           :assert-instructions-match
-           :assert-ast-matches
-           :assert-faster-than
-           :assert-no-consing
-           :assert-backends-agree
-           :assert-deterministic
-           :assert-equivalent-execution
-           :assert-roundtrip-preserves
            :deftest-each
            :testing
            :deftest-combinatorial
            :deftest-pipeline
-           :deftest-differential
-           :deftest-cross-backend
            :defbefore
            :defafter
            :skip

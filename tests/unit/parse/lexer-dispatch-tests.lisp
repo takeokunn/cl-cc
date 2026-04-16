@@ -24,8 +24,8 @@
 
 (defun lexer-dispatch-read-form-text (source)
   "Use internal lex-read-form-text to extract the raw form text from SOURCE."
-  (let ((state (cl-cc::make-lexer source)))
-    (cl-cc::lex-read-form-text state)))
+  (let ((state (cl-cc/parse::make-lexer source)))
+    (cl-cc/parse::lex-read-form-text state)))
 
 ;;; ─── lex-feature-present-p ───────────────────────────────────────────────────
 
@@ -35,30 +35,30 @@
           ("absent"   :no-such-feature nil))
   (feature expected)
   (let ((*features* '(:sbcl :common-lisp)))
-    (assert-equal expected (if (cl-cc::lex-feature-present-p feature) t nil))))
+    (assert-equal expected (if (cl-cc/parse::lex-feature-present-p feature) t nil))))
 
 (deftest lex-feature-present-p-or-combinator
   "lex-feature-present-p :or succeeds when any member is present."
   (let ((*features* '(:sbcl)))
-    (assert-true  (cl-cc::lex-feature-present-p '(:or :sbcl :ccl)))
-    (assert-null  (cl-cc::lex-feature-present-p '(:or :ccl :ecl)))))
+    (assert-true  (cl-cc/parse::lex-feature-present-p '(:or :sbcl :ccl)))
+    (assert-null  (cl-cc/parse::lex-feature-present-p '(:or :ccl :ecl)))))
 
 (deftest lex-feature-present-p-and-combinator
   "lex-feature-present-p :and succeeds only when all members are present."
   (let ((*features* '(:sbcl :common-lisp)))
-    (assert-true  (cl-cc::lex-feature-present-p '(:and :sbcl :common-lisp)))
-    (assert-null  (cl-cc::lex-feature-present-p '(:and :sbcl :ccl)))))
+    (assert-true  (cl-cc/parse::lex-feature-present-p '(:and :sbcl :common-lisp)))
+    (assert-null  (cl-cc/parse::lex-feature-present-p '(:and :sbcl :ccl)))))
 
 (deftest lex-feature-present-p-not-combinator
   "lex-feature-present-p :not negates membership."
   (let ((*features* '(:sbcl)))
-    (assert-null  (cl-cc::lex-feature-present-p '(:not :sbcl)))
-    (assert-true  (cl-cc::lex-feature-present-p '(:not :ccl)))))
+    (assert-null  (cl-cc/parse::lex-feature-present-p '(:not :sbcl)))
+    (assert-true  (cl-cc/parse::lex-feature-present-p '(:not :ccl)))))
 
 (deftest lex-feature-present-p-unknown-returns-nil
   "lex-feature-present-p returns NIL for unrecognised feature forms."
-  (assert-null (cl-cc::lex-feature-present-p 42))
-  (assert-null (cl-cc::lex-feature-present-p '(:unknown :foo))))
+  (assert-null (cl-cc/parse::lex-feature-present-p 42))
+  (assert-null (cl-cc/parse::lex-feature-present-p '(:unknown :foo))))
 
 ;;; ─── lex-read-form-text ──────────────────────────────────────────────────────
 

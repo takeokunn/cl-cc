@@ -6,7 +6,7 @@
 ;;; rt-make-hash-table, rt-gethash/sethash/remhash/clrhash/maphash,
 ;;; rt-defclass, rt-make-instance, rt-slot-*, rt-class-*, rt-register-method,
 ;;; rt-signal-error, rt-signal, rt-warn-fn, rt-cerror, handler stubs,
-;;; rt-boundp/fboundp, rt-random, rt-eval, rt-read-*, rt-write-*,
+;;; rt-boundp/fboundp, rt-random, rt-read-*, rt-write-*,
 ;;; rt-open-file/close-file, rt-make-*-stream, rt-probe-file, etc.
 ;;;
 ;;; Tag constants, closure/cons structs, predicate macros, list/array, and
@@ -210,7 +210,6 @@
 (defun rt-get-universal-time () (get-universal-time))
 (defun rt-get-internal-real-time () (get-internal-real-time))
 (defun rt-get-internal-run-time () (get-internal-run-time))
-(defun rt-eval (x) (cl-cc:our-eval x))
 (defun rt-read-from-string (s) (read-from-string s))
 (defun rt-read-sexp (stream) (read stream))
 (defun rt-coerce (x type) (coerce x type))

@@ -1,4 +1,4 @@
-(in-package :cl-cc)
+(in-package :cl-cc/vm)
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;; VM — Host Function Bridge and CLOS Slot Metadata
 ;;;
@@ -126,27 +126,15 @@ representations may use hash tables with structured metadata."
     (nreverse result)))
 
 ;;; Runtime helpers for setf expansion
-(defun rt-plist-put (plist indicator value)
-  "Return a new plist with INDICATOR set to VALUE. Non-destructive."
-  (let ((result nil) (found nil) (p plist))
-    (loop while p do
-          (let ((k (car p)))
-            (if (eq k indicator)
-                (progn (push indicator result) (push value result) (setf found t))
-                (progn (push k result) (push (cadr p) result)))
-            (setf p (cddr p))))
-    (unless found
-      (push indicator result) (push value result))
-    (nreverse result)))
+;;; rt-plist-put is defined in :cl-cc/bootstrap (bootstrap/package.lisp)
+;;; and inherited here via (:use :cl-cc/bootstrap) in the defpackage.
 
 ;; Register self-hosting functions: these take strings/forms, not closures
-(dolist (sym '(run-string run-string-repl our-eval our-load
-              compile-expression compile-string
-              parse-all-forms
-              ;; Macro expansion support
-              generate-lambda-bindings register-macro
-               ;; CL functions needed by self-hosting code
-               find-package symbol-function intern gensym
+;; CL standard symbols and VM-local symbols are quoted directly.
+;; Cross-package cl-cc symbols are resolved via find-symbol to avoid
+;; interning fresh symbols that conflict when the umbrella :cl-cc uses both packages.
+(dolist (sym '(;; CL functions needed by self-hosting code
+               find-package symbol-function fboundp fmakunbound intern gensym
                ;; Pure function designators commonly passed as #'FN at runtime
                1+ 1- + - * / < > <= >= max min length char-equal char= eql equal equalp
                ;; FR-647/FR-655/FR-428/FR-558: symbol-value, find-symbol, macro-function, symbol-package
@@ -161,14 +149,14 @@ representations may use hash tables with structured metadata."
               make-package rename-package delete-package
               export import unexport shadow shadowing-import
               use-package unuse-package
-               ;; FR-361: Package symbol iteration helpers
+               ;; FR-361: Package symbol iteration helpers (defined in this file)
                %package-symbols %package-external-symbols %all-symbols
                %class-slot-definitions
-               ;; CLOS / MOP metadata helpers
+               ;; CLOS / MOP metadata helpers (defined in this file)
                slot-definition-name slot-definition-initform
                slot-definition-initargs slot-definition-allocation
                generic-function-methods generic-function-method-combination
-               ;; Runtime helpers for setf expansion
+               ;; Runtime helpers for setf expansion (defined in this file)
                rt-plist-put
               ;; FR-479: File system operations
               probe-file rename-file delete-file file-write-date file-author
@@ -203,6 +191,24 @@ representations may use hash tables with structured metadata."
               ;; FR-607: Documentation retrieval from CL-level table
               %get-documentation))
   (vm-register-host-bridge sym))
+
+;; Cross-package cl-cc symbols: resolve via find-symbol so we use the canonical
+;; symbol from each defining package (avoids interning cl-cc/vm:: duplicates).
+(dolist (entry '(;; cl-cc/compile pipeline entry points
+                 ("RUN-STRING"       . :cl-cc/compile)
+                 ("RUN-STRING-REPL"  . :cl-cc/compile)
+                 ("OUR-LOAD"         . :cl-cc/compile)
+                 ("COMPILE-EXPRESSION" . :cl-cc/compile)
+                 ("COMPILE-STRING"   . :cl-cc/compile)
+                 ;; our-eval is pre-interned in :cl-cc/bootstrap
+                 ("OUR-EVAL"         . :cl-cc/bootstrap)
+                 ;; cl-cc/parse entry points
+                 ("PARSE-ALL-FORMS"  . :cl-cc/parse)
+                 ;; cl-cc/expand macro support
+                 ("GENERATE-LAMBDA-BINDINGS" . :cl-cc/expand)
+                 ("REGISTER-MACRO"   . :cl-cc/expand)))
+  (let ((sym (find-symbol (car entry) (cdr entry))))
+    (when sym (vm-register-host-bridge sym))))
 
 ;;; FR-579: String encoding helpers (delegate to SBCL's sb-ext)
 (defun string-to-octets (string &key (encoding :utf-8) (external-format :default)

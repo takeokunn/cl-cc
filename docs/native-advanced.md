@@ -1588,7 +1588,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 - **内容**:
   - 短い命令列（3-5命令）に対して網羅的探索または確率的探索で最適な等価命令列を発見
   - **Stochastic Superoptimization** (Schkufza et al. 2013): MCMC でランダム変異し、SMT ソルバ（Z3）で等価性を検証
-  - 生成したルールを `src/parse/prolog.lisp` の Prolog ファクトとして登録
+  - 生成したルールを `src/prolog/prolog.lisp` の Prolog ファクトとして登録
 - **根拠**: GNU Superoptimizer (1992) / LLVM STOKE. 手書きでは発見できない命令削減を自動発見
 - **難易度**: Very Hard
 
@@ -1600,7 +1600,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
   - **interval domain**: 値範囲解析（FR-610 VRP の理論的基盤）
   - **sign domain**: 正/零/負の3値ドメイン
   - **type domain**: CL 型の格子（`fixnum ⊑ integer ⊑ number ⊑ t`）
-  - `src/parse/prolog.lisp` の Prolog エンジンを抽象解釈エンジンの基盤として流用可能
+  - `src/prolog/prolog.lisp` の Prolog エンジンを抽象解釈エンジンの基盤として流用可能
 - **根拠**: Cousot & Cousot. Astree (Airbus A380 コード検証). 型安全性・数値範囲の静的保証
 - **難易度**: Very Hard
 

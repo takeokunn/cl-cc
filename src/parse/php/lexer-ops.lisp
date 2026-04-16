@@ -7,7 +7,7 @@
 ;;;;
 ;;;; Load order: after lexer.lisp.
 
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; Operator / punctuation lexer
 

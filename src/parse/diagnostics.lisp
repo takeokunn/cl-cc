@@ -1,6 +1,6 @@
 ;;;; diagnostics.lisp — Rust-style diagnostic messages for the parser
 
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; Diagnostic struct
 

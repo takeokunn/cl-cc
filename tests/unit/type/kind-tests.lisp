@@ -107,3 +107,51 @@
     (assert-equal "(* -> *) -> *" (kind-to-string (kind-fun inner +kind-type+))))
   (let ((kv (fresh-kind-var "foo")))
     (assert-equal "kfoo" (kind-to-string kv))))
+
+(deftest kind-type-singleton
+  "+kind-type+ is the singleton * kind."
+  (assert-true (kind-type-p +kind-type+))
+  (assert-true (kind-node-p +kind-type+))
+  (assert-true (kind-equal-p +kind-type+ +kind-type+))
+  (assert-true (kind-equal-p (make-kind-type) (make-kind-type))))
+
+(deftest kind-arrow-creation
+  "kind-fun builds arrow kinds like * -> * for List."
+  (let ((list-kind (kind-fun +kind-type+ +kind-type+)))
+    (assert-true (kind-arrow-p list-kind))
+    (assert-true (kind-equal-p (kind-arrow-from list-kind) +kind-type+))
+    (assert-true (kind-equal-p (kind-arrow-to list-kind)   +kind-type+))
+    (let ((fix-kind (kind-fun list-kind +kind-type+)))
+      (assert-true (kind-arrow-p fix-kind))
+      (assert-true (kind-equal-p (kind-arrow-from fix-kind) list-kind)))))
+
+(deftest kind-effect-row-singletons
+  "+kind-effect+ and +kind-row-type+ are the Effect and Row * kinds."
+  (assert-true (kind-effect-p +kind-effect+))
+  (assert-true (kind-row-p +kind-row-type+))
+  (assert-true (kind-row-p +kind-row-effect+))
+  (assert-true (kind-equal-p (kind-row-elem +kind-row-type+)   +kind-type+))
+  (assert-true (kind-equal-p (kind-row-elem +kind-row-effect+) +kind-effect+)))
+
+(deftest-each kind-equal-p-basic
+  "kind-equal-p compares structural equality of kind constructors."
+  :cases (("*=*"          t   +kind-type+   +kind-type+)
+          ("Eff=Eff"      t   +kind-effect+ +kind-effect+)
+          ("*≠Eff"        nil +kind-type+   +kind-effect+))
+  (should-be-equal k1 k2)
+  (if should-be-equal
+      (assert-true  (kind-equal-p k1 k2))
+      (assert-false (kind-equal-p k1 k2))))
+
+(deftest kind-var-fresh-and-equality
+  "fresh-kind-var generates distinct variables; kind-fun arrows compare structurally."
+  (let ((k1 (fresh-kind-var 'k))
+        (k2 (fresh-kind-var 'k)))
+    (assert-true (kind-var-p k1))
+    (assert-true (kind-var-p k2))
+    (assert-false (kind-var-equal-p k1 k2))
+    (assert-true  (kind-var-equal-p k1 k1)))
+  (assert-true  (kind-equal-p (kind-fun +kind-type+ +kind-type+)
+                               (kind-fun +kind-type+ +kind-type+)))
+  (assert-false (kind-equal-p (kind-fun +kind-type+ +kind-effect+)
+                               (kind-fun +kind-type+ +kind-type+))))

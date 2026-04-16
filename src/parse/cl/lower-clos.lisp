@@ -13,7 +13,7 @@
 ;;;   parse-slot-spec, %lower-local-fn-bindings, make-ast-* constructors).
 ;;; Load order: immediately after lower-definitions.lisp.
 
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; ── Defclass ─────────────────────────────────────────────────────────────────
 

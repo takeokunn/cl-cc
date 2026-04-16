@@ -24,14 +24,14 @@
 (defun enable-coverage ()
   "Instrument code for coverage tracking."
   #+sbcl
-  (declaim (optimize (sb-cover:store-coverage-data 3)))
+  (proclaim '(optimize (sb-cover:store-coverage-data 3)))
   #-sbcl
   nil)
 
 (defun disable-coverage ()
   "Disable coverage instrumentation."
   #+sbcl
-  (declaim (optimize (sb-cover:store-coverage-data 0)))
+  (proclaim '(optimize (sb-cover:store-coverage-data 0)))
   #-sbcl
   nil)
 

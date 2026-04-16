@@ -366,9 +366,9 @@
   '("src/package.lisp"
     "src/parse/cst.lisp"
     "src/parse/diagnostics.lisp"
-    "src/parse/ast.lisp"
-    "src/parse/prolog.lisp"
-    "src/parse/dcg.lisp"
+    "src/ast/ast.lisp"
+    "src/prolog/prolog.lisp"
+    "src/prolog/dcg.lisp"
     "src/parse/lexer.lisp"
     "src/parse/incremental.lisp"
     "src/parse/pratt.lisp"
@@ -420,8 +420,9 @@
     "src/optimize/egraph.lisp"
     "src/optimize/egraph-rules.lisp"
     "src/optimize/optimizer.lisp"
-    "src/emit/mir.lisp"
-    "src/emit/target.lisp"
+    "src/mir/mir.lisp"
+    "src/mir/target.lisp"
+    "src/emit/package.lisp"
     "src/emit/calling-convention.lisp"
     "src/emit/regalloc.lisp"
     "src/emit/x86-64.lisp"
@@ -451,19 +452,25 @@
 
 (defvar *selfhost-representative-files*
   '("src/parse/cst.lisp"
-    "src/parse/prolog.lisp"
+    "src/prolog/prolog-data.lisp"  ; *builtin-predicate-specs* used by prolog.lisp
+    "src/prolog/prolog.lisp"
     "src/parse/lexer.lisp"
     "src/compile/cps.lisp"
     "src/optimize/optimizer.lisp"
     "src/type/package.lisp"
     "src/type/kind.lisp"
+    "src/type/multiplicity.lisp"   ; prerequisites for types-core
+    "src/type/types-core.lisp"     ; base type structs
+    "src/type/types-extended.lisp" ; type-null/type-int/+pure-effect-row+ etc.
+    "src/type/types-env.lisp"      ; +type-unknown+
     "src/type/parser.lisp"
     "src/type/typeclass.lisp"
+    "src/type/typeclass-compat.lisp" ; *default-numeric-type* used by solver.lisp
     "src/type/solver.lisp"
     "src/type/inference.lisp"
     "src/type/checker.lisp"
     "src/type/printer.lisp"
-    "src/emit/mir.lisp"
+    "src/mir/mir.lisp"
     "src/vm/vm.lisp"
     "src/runtime/gc.lisp")
   "Representative subset of source files covering all major modules.")

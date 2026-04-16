@@ -400,3 +400,137 @@ Intended to be called from the REPL when you want to refresh all snapshots."
              (getf (gethash 'cl-cc-integration-suite *suite-registry*) :parent))
   (assert-eq 'cl-cc-suite
              (getf (gethash 'cl-cc-e2e-suite *suite-registry*) :parent)))
+
+(deftest run-single-test-skips-when-dependency-failed
+  "A test with a failed dependency is reported as skipped without executing its body."
+  (let* ((called nil)
+         (test-plist (list :name 'needs-dep
+                           :fn (lambda () (setf called t))
+                           :suite 'cl-cc-unit-suite
+                           :timeout nil
+                           :depends-on 'upstream
+                           :tags nil))
+         (result (%run-single-test test-plist 1 (list (list :name 'upstream :status :fail)))))
+    (assert-false called)
+    (assert-eq :skip (getf result :status))))
+
+(deftest run-single-test-handles-pending-condition
+  "A pending condition becomes a :pending result rather than a failure."
+  (let* ((test-plist (list :name 'pending-demo
+                           :fn (lambda () (error 'pending-condition :reason "later"))
+                           :suite 'cl-cc-unit-suite
+                           :timeout nil
+                           :depends-on nil
+                           :tags nil))
+         (result (%run-single-test test-plist 1 '())))
+    (assert-eq :pending (getf result :status))
+    (assert-true (search "later" (getf result :detail)))))
+
+(deftest effective-test-timeout-cases
+  "%effective-test-timeout normalizes nil, :none, and positive integers."
+  (assert-null (%effective-test-timeout (list :timeout :none)))
+  (assert-equal 7 (%effective-test-timeout (list :timeout 7)))
+  (assert-equal (%default-test-timeout)
+                (%effective-test-timeout (list :timeout nil))))
+
+(deftest detect-flaky-reports-inconsistent-statuses
+  "%detect-flaky prints a summary when a test passes in only some repeated runs."
+  (let ((*standard-output* (make-string-output-stream)))
+    (%detect-flaky (list (list (list :name 'sometimes :status :pass)
+                               (list :name 'always :status :pass))
+                         (list (list :name 'sometimes :status :fail)
+                               (list :name 'always :status :pass)))
+                   2)
+    (let ((output (get-output-stream-string *standard-output*)))
+      (assert-true (search "Flaky tests detected" output))
+      (assert-true (search "SOMETIMES" (string-upcase output))))))
+
+(deftest detect-flaky-is-silent-for-consistent-results
+  "%detect-flaky emits nothing when every test is consistently pass or fail."
+  (let ((*standard-output* (make-string-output-stream)))
+    (%detect-flaky (list (list (list :name 'always-pass :status :pass)
+                               (list :name 'always-fail :status :fail))
+                         (list (list :name 'always-pass :status :pass)
+                               (list :name 'always-fail :status :fail)))
+                   2)
+    (assert-string= "" (get-output-stream-string *standard-output*))))
+
+(deftest run-single-test-handles-skip-condition
+  "A skip condition becomes a :skip result rather than a failure."
+  (let* ((test-plist (list :name 'skip-demo
+                           :fn (lambda () (error 'skip-condition :reason "not today"))
+                           :suite 'cl-cc-unit-suite
+                           :timeout nil
+                           :depends-on nil
+                           :tags nil))
+         (result (%run-single-test test-plist 1 '())))
+    (assert-eq :skip (getf result :status))
+    (assert-true (search "not today" (getf result :detail)))))
+
+(deftest run-single-test-reports-fixture-setup-errors
+  "A before-each fixture error is surfaced as a fixture error result."
+  (let ((fixture-suite (gensym "ULW-FIXTURE-SUITE-")))
+    (unwind-protect
+         (progn
+           (setf (gethash fixture-suite *suite-registry*)
+                 (list :name fixture-suite
+                       :description "tmp"
+                       :parent nil
+                       :parallel t
+                       :before-each (list (lambda () (error "fixture boom")))
+                       :after-each '()))
+           (let* ((test-plist (list :name 'fixture-demo
+                                    :fn (lambda () t)
+                                    :suite fixture-suite
+                                    :timeout nil
+                                    :depends-on nil
+                                    :tags nil))
+                  (result (%run-single-test test-plist 1 '())))
+             (assert-eq :fail (getf result :status))
+             (assert-true (search "fixture error" (getf result :detail)))
+             (assert-true (search "fixture boom" (getf result :detail)))))
+      (remhash fixture-suite *suite-registry*))))
+
+(deftest run-single-test-times-out-sequentially
+  "Sequential runner reports timeout failures when a test exceeds its budget."
+  (let* ((test-plist (list :name 'slow-demo
+                           :fn (lambda () (sleep 2))
+                           :suite 'cl-cc-unit-suite
+                           :timeout 1
+                           :depends-on nil
+                           :tags nil))
+         (result (%run-single-test test-plist 1 '())))
+    (assert-eq :fail (getf result :status))
+    (assert-true (search "timeout after 1 seconds" (getf result :detail)))))
+
+(deftest run-tests-sequential-returns-ordered-results
+  "%run-tests-sequential preserves input order and records pass statuses."
+  (let ((results (%run-tests-sequential
+                  (list (list :name 'first
+                              :fn (lambda () t)
+                              :suite 'cl-cc-unit-suite
+                              :timeout nil
+                              :depends-on nil
+                              :tags nil
+                              :number 1)
+                        (list :name 'second
+                              :fn (lambda () t)
+                              :suite 'cl-cc-unit-suite
+                              :timeout nil
+                              :depends-on nil
+                              :tags nil
+                              :number 2)))))
+    (assert-equal '(first second)
+                  (mapcar (lambda (result) (getf result :name)) results))
+    (assert-true (every (lambda (result) (eq :pass (getf result :status))) results))))
+
+(deftest resolve-suite-returns-symbol-and-signals-for-missing-suite
+  "%resolve-suite returns existing suites and errors on missing ones."
+  (assert-eq 'cl-cc-unit-suite (%resolve-suite :cl-cc/test "CL-CC-UNIT-SUITE"))
+  (handler-case
+      (progn
+        (%resolve-suite :cl-cc/test "MISSING-SUITE")
+        (assert-false t))
+    (error (e)
+      (assert-true (search "Suite CL-CC/TEST::MISSING-SUITE not found"
+                           (princ-to-string e))))))

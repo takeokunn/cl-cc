@@ -166,3 +166,60 @@ constraint language tests")
     (subst-extend! v +io-effect-row+ s)
     (let ((c2 (cl-cc/type::constraint-substitute c s)))
       (assert-eq :effect-subset (constraint-kind c2)))))
+
+(deftest-each constraint-kind-check
+  "Each constraint constructor produces the expected :kind keyword."
+  :cases (("subtype"       :subtype
+           (cl-cc/type:make-subtype-constraint type-int type-any))
+          ("typeclass"     :typeclass
+           (cl-cc/type:make-typeclass-constraint 'num (cl-cc/type:fresh-type-var "a")))
+          ("implication"   :implication
+           (let* ((tv (cl-cc/type:fresh-type-var "a"))
+                  (eq-c (cl-cc/type:make-equal-constraint tv type-int))
+                  (tc-c (cl-cc/type:make-typeclass-constraint 'num tv)))
+             (cl-cc/type:make-implication-constraint (list tv) (list eq-c) (list tc-c))))
+          ("effect-subset" :effect-subset
+           (cl-cc/type:make-effect-subset-constraint
+            cl-cc/type:+pure-effect-row+ cl-cc/type:+io-effect-row+))
+          ("kind-equal"    :kind-equal
+           (cl-cc/type:make-kind-equal-constraint
+            cl-cc/type:+kind-type+ cl-cc/type:+kind-type+))
+          ("mult-leq"      :mult-leq
+           (cl-cc/type:make-mult-leq-constraint :one :omega))
+          ("row-lacks"     :row-lacks
+           (cl-cc/type:make-row-lacks-constraint (cl-cc/type:fresh-type-var "r") 'x)))
+  (expected-kind c)
+  (assert-eq expected-kind (cl-cc/type:constraint-kind c)))
+
+(deftest constraint-free-vars-count
+  "constraint-free-vars finds the correct number of vars in equality and typeclass constraints."
+  (let* ((tv1   (cl-cc/type:fresh-type-var "a"))
+         (tv2   (cl-cc/type:fresh-type-var "b"))
+         (ceq   (cl-cc/type:make-equal-constraint tv1 tv2))
+         (ctc   (cl-cc/type:make-typeclass-constraint 'num tv1)))
+    (assert-equal 2 (length (cl-cc/type:constraint-free-vars ceq)))
+    (assert-equal 1 (length (cl-cc/type:constraint-free-vars ctc)))))
+
+(deftest-each constraint-free-vars-zero-vars
+  "constraint-free-vars returns nil for ground constraints and fully-quantified implications."
+  :cases (("mult-leq"       (cl-cc/type:make-mult-leq-constraint :one :omega))
+          ("kind-equal"     (cl-cc/type:make-kind-equal-constraint
+                             cl-cc/type:+kind-type+ cl-cc/type:+kind-effect+))
+          ("implication-quantified"
+           (let* ((tv    (cl-cc/type:fresh-type-var "a"))
+                  (inner (cl-cc/type:make-equal-constraint tv type-int)))
+             (cl-cc/type:make-implication-constraint (list tv) (list inner) (list inner)))))
+  (c)
+  (assert-null (cl-cc/type:constraint-free-vars c)))
+
+(deftest constraint-substitute
+  "constraint-substitute applies substitution to typed args; is identity for ground constraints."
+  (let* ((tv    (cl-cc/type:fresh-type-var "a"))
+         (c     (cl-cc/type:make-equal-constraint tv type-string))
+         (subst (cl-cc/type:subst-extend tv type-int (cl-cc/type:make-substitution)))
+         (c2    (cl-cc/type:constraint-substitute c subst)))
+    (assert-eq :equal (cl-cc/type:constraint-kind c2))
+    (assert-true (type-equal-p type-int (first (cl-cc/type:constraint-args c2)))))
+  (let* ((c     (cl-cc/type:make-mult-leq-constraint :one :omega))
+         (c2    (cl-cc/type:constraint-substitute c (cl-cc/type:make-substitution))))
+    (assert-eq c c2)))

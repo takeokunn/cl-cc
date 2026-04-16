@@ -17,7 +17,7 @@
 ;;;;   $o->m(args)     → ast-call
 ;;;;   $o?->m(args)    → ast-if (null check) + ast-call
 
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; ─── Grammar Rules (expression-level) ──────────────────────────────────────
 

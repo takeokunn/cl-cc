@@ -5,7 +5,7 @@
 ;;;; See lexer-dispatch.lisp for feature conditionals, hash dispatch, and the
 ;;;; main token reader / public API.
 
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; ─── Lexer Structs ───────────────────────────────────────────────────────────
 

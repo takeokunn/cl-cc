@@ -1,4 +1,4 @@
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 ;;;; lexer-readers.lisp — Token readers: number, string, character, symbol, keyword.
 ;;;;
 ;;;; Depends on lexer.lisp (structs, state ops, char classification, lex-make-token).

@@ -4,7 +4,26 @@
 ;;;; %compile-cache-path, %copy-file-bytes, and typeclass macro registration.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+
+(defsuite pipeline-native-suite
+  :description "Serial tests for native pipeline helpers that temporarily replace global functions."
+  :parent cl-cc-unit-suite
+  :parallel nil)
+
+(in-suite pipeline-native-suite)
+
+(defmacro with-replaced-function ((name replacement) &body body)
+  (let ((old (gensym "OLD-FN"))
+        (had (gensym "HAD-FN")))
+    `(let ((,had (fboundp ',name))
+           (,old (ignore-errors (symbol-function ',name))))
+       (unwind-protect
+            (progn
+              (setf (symbol-function ',name) ,replacement)
+              ,@body)
+         (if ,had
+             (setf (symbol-function ',name) ,old)
+             (fmakunbound ',name))))))
 
 ;;; ─── *compile-cache-root* ───────────────────────────────────────────────────
 
@@ -221,3 +240,35 @@
   (assert-true (functionp
                 (gethash 'cl-cc::deftype-instance
                           (cl-cc::macro-env-table cl-cc::*macro-environment*)))))
+
+(deftest pipeline-native-compile-file-cache-hit-copies-artifact
+  "compile-file-to-native reuses a cached native artifact when present."
+  (uiop:with-temporary-file (:pathname input :type "php" :keep t)
+    (uiop:with-temporary-file (:pathname output :type "bin" :keep t)
+      (uiop:with-temporary-file (:pathname cache :type "bin" :keep t)
+        (let ((copied nil)
+              (chmod-called nil))
+          (with-open-file (stream input :direction :output :if-exists :supersede)
+            (write-line "<?php echo 1;" stream))
+          (with-replaced-function (cl-cc::%compile-cache-key (lambda (&rest args)
+                                                               (declare (ignore args))
+                                                               "cache-key"))
+            (with-replaced-function (cl-cc::%compile-cache-path (lambda (key out)
+                                                                  (declare (ignore key out))
+                                                                  cache))
+              (with-replaced-function (cl-cc::%copy-file-bytes
+                                       (lambda (from to)
+                                         (setf copied (list from to))
+                                         to))
+                (with-replaced-function (uiop:run-program
+                                         (lambda (&rest args)
+                                           (declare (ignore args))
+                                           (setf chmod-called t)
+                                           nil))
+                  (assert-equal output
+                                (cl-cc::compile-file-to-native input :output-file output))
+                  (assert-equal (list cache output) copied)
+                  (assert-true chmod-called))))))
+        (ignore-errors (delete-file cache)))
+      (ignore-errors (delete-file output)))
+    (ignore-errors (delete-file input))))

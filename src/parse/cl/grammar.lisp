@@ -4,7 +4,7 @@
 ;;;; Provides backward-compatible redefinitions of parse-source and
 ;;;; parse-all-forms that route through the CST pipeline.
 
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; ─── Token Stream ────────────────────────────────────────────────────────────
 

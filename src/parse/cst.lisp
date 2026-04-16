@@ -4,7 +4,7 @@
 ;;;; exact byte positions. This replaces the old AST system and serves
 ;;;; as the foundation for incremental parsing and precise diagnostics.
 
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; Trivia (not a CST node — attached to tokens/interiors)
 
@@ -106,9 +106,9 @@
            (children (cst-interior-children node)))
        (case kind
          (:quote             (list 'quote (cst-to-sexp (first children))))
-         (:quasiquote        (list 'cl-cc::backquote (cst-to-sexp (first children))))
-         (:unquote           (list 'cl-cc::unquote (cst-to-sexp (first children))))
-         (:unquote-splicing  (list 'cl-cc::unquote-splicing (cst-to-sexp (first children))))
+         (:quasiquote        (list 'backquote (cst-to-sexp (first children))))
+         (:unquote           (list 'unquote (cst-to-sexp (first children))))
+         (:unquote-splicing  (list 'unquote-splicing (cst-to-sexp (first children))))
          (:function          (list 'function (cst-to-sexp (first children))))
          (:vector            (coerce (mapcar #'cst-to-sexp children) 'vector))
          (:dotted-list

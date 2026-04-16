@@ -1,4 +1,4 @@
-(in-package :cl-cc)
+(in-package :cl-cc/vm)
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;; VM — I/O Runner Convenience Functions
 ;;;
@@ -42,7 +42,7 @@ OUTPUT-STREAM and INPUT-STREAM can be specified to redirect I/O."
                                    (output-stream *standard-output*)
                                    (input-stream *standard-input*))
   "Parse, compile, and run a source string with I/O support."
-  (let ((program (compile-string source)))
+  (let ((program (funcall *vm-compile-string-hook* source)))
     (run-compiled-with-io program
                           :output-stream output-stream
                           :input-stream input-stream)))

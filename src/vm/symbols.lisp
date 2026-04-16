@@ -1,4 +1,4 @@
-(in-package :cl-cc)
+(in-package :cl-cc/vm)
 
 ;;; VM Symbol and Character Instructions
 ;;;

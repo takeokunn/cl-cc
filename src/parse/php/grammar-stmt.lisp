@@ -6,7 +6,7 @@
 ;;;;
 ;;;; Load order: after grammar.lisp.
 
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; ─── Statement Parsers ──────────────────────────────────────────────────────
 

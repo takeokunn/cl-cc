@@ -90,6 +90,7 @@
     (fboundp          . make-vm-fboundp)
     (makunbound       . make-vm-makunbound)
     (fmakunbound      . make-vm-fmakunbound)
+    (fdefinition      . make-vm-fdefinition)
     ;; Random
     (random           . make-vm-random)
     ;; Rational

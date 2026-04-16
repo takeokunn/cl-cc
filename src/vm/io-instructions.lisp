@@ -16,7 +16,7 @@
 ;;;; vm-io-state class, constants, and stream helpers remain in io.lisp.
 ;;;; Load order: after io.lisp, before io-execute.lisp.
 
-(in-package :cl-cc)
+(in-package :cl-cc/vm)
 
 ;;; ─── File Operations ─────────────────────────────────────────────────────────
 

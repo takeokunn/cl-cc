@@ -144,3 +144,65 @@ constraint solver tests")
       (assert-true (type-equal-p type-int (zonk v new-subst)))
       (assert-equal 1 (length residual))
       (assert-eq :subtype (constraint-kind (first residual))))))
+
+(deftest solve-constraints-trivial-success
+  "solve-constraints returns a valid substitution for empty list and identical-primitive equality."
+  (let* ((subst  (cl-cc/type:make-substitution))
+         (result (cl-cc/type:solve-constraints nil subst)))
+    (assert-true (cl-cc/type:substitution-p result)))
+  (multiple-value-bind (new-subst residual)
+      (cl-cc/type:solve-constraints
+       (list (cl-cc/type:make-equal-constraint type-int type-int))
+       (cl-cc/type:make-substitution))
+    (assert-true  (cl-cc/type:substitution-p new-subst))
+    (assert-null  residual)))
+
+(deftest solve-constraints-equal-binds-var
+  "An :equal constraint on (?a ~ int) binds ?a to int."
+  (let* ((tvar  (cl-cc/type:fresh-type-var "a"))
+         (subst (cl-cc/type:make-substitution)))
+    (multiple-value-bind (new-subst residual)
+        (cl-cc/type:solve-constraints
+         (list (cl-cc/type:make-equal-constraint tvar type-int))
+         subst)
+      (assert-null residual)
+      (let ((bound (cl-cc/type:zonk tvar new-subst)))
+        (assert-true (type-equal-p type-int bound))))))
+
+(deftest-each solve-constraints-produces-residual
+  "Unsolvable constraints (type mismatch and subtype violation) each produce exactly one residual."
+  :cases (("equal-mismatch"    (cl-cc/type:make-equal-constraint type-int type-string))
+          ("subtype-violation" (cl-cc/type:make-subtype-constraint type-string type-int)))
+  (c)
+  (multiple-value-bind (new-subst residual)
+      (cl-cc/type:solve-constraints (list c) (cl-cc/type:make-substitution))
+    (declare (ignore new-subst))
+    (assert-= 1 (length residual))))
+
+(deftest-each solve-constraints-subtype-ok
+  "Subtype constraints for valid relationships produce no residual."
+  :cases (("fixnum<integer" 'fixnum 'integer)
+          ("integer<number" 'integer 'number)
+          ("float<real"     'float   'real))
+  (sub-name super-name)
+  (let ((t1 (make-type-primitive :name sub-name))
+        (t2 (make-type-primitive :name super-name)))
+    (multiple-value-bind (new-subst residual)
+        (cl-cc/type:solve-constraints
+         (list (cl-cc/type:make-subtype-constraint t1 t2))
+         (cl-cc/type:make-substitution))
+      (declare (ignore new-subst))
+      (assert-null residual))))
+
+(deftest solve-constraints-multiple-sequential
+  "Multiple equality constraints are solved in sequence."
+  (let* ((ta    (cl-cc/type:fresh-type-var "a"))
+         (tb    (cl-cc/type:fresh-type-var "b")))
+    (multiple-value-bind (new-subst residual)
+        (cl-cc/type:solve-constraints
+         (list (cl-cc/type:make-equal-constraint ta type-int)
+               (cl-cc/type:make-equal-constraint tb ta))
+         (cl-cc/type:make-substitution))
+      (assert-null residual)
+      (assert-true (type-equal-p type-int (cl-cc/type:zonk ta new-subst)))
+      (assert-true (type-equal-p type-int (cl-cc/type:zonk tb new-subst))))))

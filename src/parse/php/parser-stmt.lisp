@@ -10,7 +10,7 @@
 ;;;;
 ;;;; Load order: after parser.lisp.
 
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; ─── Statement Dispatch Table ───────────────────────────────────────────────
 ;;;

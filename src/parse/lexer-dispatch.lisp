@@ -4,7 +4,7 @@
 ;;;; *lexer-label-table*) and lexer-readers.lisp (lex-read-string, lex-read-character,
 ;;;; lex-read-radix-integer, lex-read-keyword, lex-read-symbol-or-number, lex-read-symbol-name).
 
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; ─── Hash Dispatch ──────────────────────────────────────────────────────────
 

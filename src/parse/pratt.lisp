@@ -4,7 +4,7 @@
 ;;;; The pratt-context struct stores token-accessor functions so the same
 ;;;; engine works with lexer-token structs (CL) and token plists (PHP).
 
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; ─── Pratt Context ───────────────────────────────────────────────────────────
 

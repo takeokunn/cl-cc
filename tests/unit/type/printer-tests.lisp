@@ -2,7 +2,8 @@
 ;;;;
 ;;;; Tests for src/type/printer.lisp:
 ;;;; type-to-string for all type-node subtypes, unparse-type,
-;;;; list-interleave.
+;;;; list-interleave, looks-like-type-specifier-p.
+;;;; Coverage goal: every defmethod clause + every data table entry.
 
 (in-package :cl-cc/test)
 
@@ -182,6 +183,124 @@
   (assert-eq 'cl-cc/type::-> (first (cl-cc/type::unparse-type (make-type-arrow (list type-int) type-string))))
   (assert-eq 'or     (first (cl-cc/type::unparse-type (make-type-union (list type-int type-string)))))
   (assert-eq 'values (first (cl-cc/type::unparse-type (make-type-product :elems (list type-int))))))
+
+;;; ─── type-to-string: edge cases not covered above ────────────────────────
+
+(deftest printer-null-type
+  "Null object (not type-null) prints as NIL."
+  (assert-string= "NIL" (type-to-string nil)))
+
+(deftest printer-type-var-unnamed
+  "Unnamed, unlinked type-var prints as ?tN."
+  (let* ((v (fresh-type-var nil)))
+    (let ((s (type-to-string v)))
+      (assert-true (search "?t" s)))))
+
+(deftest printer-type-rigid-unnamed
+  "Unnamed rigid var prints as skN with no brackets."
+  (let* ((r (fresh-rigid-var nil))
+         (s (type-to-string r)))
+    (assert-true  (search "sk" s))
+    (assert-false (search "["  s))))
+
+(deftest printer-type-unknown
+  "type-unknown (a deftype alias over type-error) prints as ?."
+  ;; type-unknown-p checks (type-error-p x) && message == "unknown"
+  (assert-string= "?" (type-to-string (make-type-unknown)))
+  ;; A real type-error with a different message still shows <error: …>
+  (assert-true (search "error" (type-to-string (make-type-error :message "boom")))))
+
+(deftest printer-arrow-mult-zero
+  "Arrow with :zero multiplicity uses -0-> arrow."
+  (let ((arr (make-type-arrow (list type-int) type-string :mult :zero)))
+    (assert-true (search "-0->" (type-to-string arr)))))
+
+(deftest printer-arrow-mult-one
+  "Arrow with :one multiplicity uses -1-> arrow."
+  (let ((arr (make-type-arrow (list type-int) type-string :mult :one)))
+    (assert-true (search "-1->" (type-to-string arr)))))
+
+(deftest printer-fallback-unknown-type
+  "Fallback defmethod for unrecognised objects includes #<type ...>."
+  ;; Use a plain struct that is not a type-node subclass
+  (let ((s (type-to-string (make-hash-table))))
+    (assert-true (search "#<type" s))))
+
+(deftest printer-looks-like-type-specifier-primitives
+  "looks-like-type-specifier-p recognises CL primitive type symbols."
+  (assert-true  (cl-cc/type::looks-like-type-specifier-p 'fixnum))
+  (assert-true  (cl-cc/type::looks-like-type-specifier-p 'string))
+  (assert-false (cl-cc/type::looks-like-type-specifier-p 'frobnitz)))
+
+(deftest printer-looks-like-type-specifier-shorthand
+  "looks-like-type-specifier-p recognises shorthand type names INT and BOOL."
+  (assert-true (cl-cc/type::looks-like-type-specifier-p 'cl-cc/type::int))
+  (assert-true (cl-cc/type::looks-like-type-specifier-p 'cl-cc/type::bool)))
+
+(deftest printer-looks-like-type-specifier-composite-heads
+  "looks-like-type-specifier-p recognises composite type head symbols."
+  (assert-true  (cl-cc/type::looks-like-type-specifier-p '(or fixnum string)))
+  (assert-true  (cl-cc/type::looks-like-type-specifier-p '(and fixnum string)))
+  (assert-false (cl-cc/type::looks-like-type-specifier-p '(frobnitz fixnum))))
+
+(deftest printer-looks-like-type-specifier-bang-prefix
+  "looks-like-type-specifier-p recognises ! prefix as capability / linear head."
+  (assert-true (cl-cc/type::looks-like-type-specifier-p '(!linear fixnum))))
+
+(deftest-each printer-arrow-mult-table
+  "Each *arrow-mult-strings* entry maps to the expected arrow string."
+  :cases (("zero"  :zero  "-0->")
+          ("one"   :one   "-1->")
+          ("omega" :omega "->"))
+  (mult expected)
+  (let ((arr (make-type-arrow (list type-int) type-string :mult mult)))
+    (assert-true (search expected (type-to-string arr)))))
+
+(deftest printer-type-error-sentinel
+  "type-to-string formats unknown sentinels as ? and other errors as <error: message>."
+  (let ((e1 (make-type-error :message "unbound x"))
+        (e2 (make-type-error :message "unknown")))
+    (assert-string= "<error: unbound x>" (type-to-string e1))
+    (assert-string= "?"                  (type-to-string e2))
+    (assert-string= "?"                  (type-to-string +type-unknown+))))
+
+(deftest printer-compound-types
+  "type-to-string formats product, record, and linear types correctly."
+  (let ((pair (make-type-product :elems (list type-int type-string))))
+    (assert-string= "(FIXNUM, STRING)" (type-to-string pair)))
+  (let ((closed (make-type-record :fields (list (cons 'x type-int)
+                                                (cons 'y type-bool))
+                                  :row-var nil)))
+    (let ((s (type-to-string closed)))
+      (assert-true (search "X" (string-upcase s)))
+      (assert-true (search "Y" (string-upcase s)))))
+  (let ((open (make-type-record :fields (list (cons 'x type-int))
+                                :row-var (fresh-type-var 'rho))))
+    (assert-true (search "|" (type-to-string open))))
+  (let ((lin (make-type-linear :base type-int :grade :one)))
+    (let ((s (type-to-string lin)))
+      (assert-true (search "1" s))
+      (assert-true (search "FIXNUM" s)))))
+
+(deftest-each printer-unicode-type-operators
+  "type-to-string uses Unicode symbols ∀ and μ for quantifier and recursive types."
+  :cases (("forall" "∀" (let* ((a  (fresh-type-var 'a))
+                                 (fn (make-type-arrow (list a) a)))
+                            (make-type-forall :var a :body fn)))
+          ("mu"     "μ" (let* ((a (fresh-type-var 'a)))
+                            (make-type-mu :var a :body (make-type-union (list type-null a))))))
+  (glyph ty)
+  (assert-true (search glyph (type-to-string ty))))
+
+(deftest printer-effect-row-open
+  "type-to-string formats open effect rows with | separator."
+  (let* ((rv  (fresh-type-var 'epsilon))
+         (row (make-type-effect-row
+               :effects (list (make-type-effect-op :name 'io))
+               :row-var rv)))
+    (let ((s (type-to-string row)))
+      (assert-true (search "IO" (string-upcase s)))
+      (assert-true (search "|" s)))))
 
 ;;; ─── list-interleave ───────────────────────────────────────────────────────
 

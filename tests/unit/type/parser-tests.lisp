@@ -118,6 +118,69 @@
     (when check-arg-p
       (assert-true (type-equal-p expected-arg (type-app-arg ty))))))
 
+(deftest-each parser-graded-arrow-syntax
+  "Graded arrow syntax (->1, ->0) parses to type-arrow with the correct multiplicity."
+  :cases (("linear-1" '(->1 fixnum boolean) :one)
+          ("erased-0" '(->0 fixnum boolean) :zero))
+  (form expected-mult)
+  (let ((result (cl-cc/type:parse-type-specifier form)))
+    (assert-true (type-arrow-p result))
+    (assert-eq expected-mult (type-arrow-mult result))))
+
+(deftest parser-forall-body-keyword
+  "(forall a T) parses to type-forall with :body set."
+  (let* ((result (cl-cc/type:parse-type-specifier '(forall a (-> a a)))))
+    (assert-true (type-forall-p result))
+    (assert-eq 'a (type-var-name (type-forall-var result)))
+    (assert-true (type-arrow-p (type-forall-body result)))))
+
+(deftest-each parser-quantified-types
+  "exists and mu binders parse to their respective node types with correct var-name and body kind."
+  :cases (("exists" '(exists a (values string a)) #'type-exists-p #'type-exists-var #'type-exists-body #'type-product-p)
+          ("mu"     '(mu a (or null (values int a))) #'type-mu-p #'type-mu-var #'type-mu-body #'type-union-p))
+  (form pred-p get-var get-body body-pred-p)
+  (let ((result (cl-cc/type:parse-type-specifier form)))
+    (assert-true (funcall pred-p result))
+    (assert-eq 'a (type-var-name (funcall get-var result)))
+    (assert-true (funcall body-pred-p (funcall get-body result)))))
+
+(deftest-each parser-record
+  "Record type syntax parses to type-record with the correct field count and row-var."
+  :cases (("closed" '(record (name string) (age fixnum)) 2 nil)
+          ("open"   `(record (name string) ,(intern "|" :cl-cc/type) rho) 1 t))
+  (form n-fields open-p)
+  (let ((result (cl-cc/type:parse-type-specifier form)))
+    (assert-true (type-record-p result))
+    (assert-= n-fields (length (type-record-fields result)))
+    (if open-p
+        (assert-true  (type-record-row-var result))
+        (assert-null  (type-record-row-var result)))))
+
+(deftest parser-variant-syntax
+  "(Variant (L T) ...) parses to a closed variant type."
+  (let ((result (cl-cc/type:parse-type-specifier '(variant (some fixnum) (none null)))))
+    (assert-true (type-variant-p result))
+    (assert-= 2 (length (type-variant-cases result)))
+    (assert-null (type-variant-row-var result))))
+
+(deftest-each parser-linear-modal-syntax
+  "(!1 T), (!ω T), and (!0 T) each parse to a graded modal type with the correct grade."
+  :cases (("linear-1" '(!1 fixnum)   :one)
+          ("omega"    '(!ω string)   :omega)
+          ("erased-0" '(!0 boolean)  :zero))
+  (form expected-grade)
+  (let ((result (cl-cc/type:parse-type-specifier form)))
+    (assert-true (type-linear-p result))
+    (assert-eq expected-grade (type-linear-grade result))))
+
+(deftest parser-refinement-syntax
+  "(Refine T pred) parses to a refinement type."
+  (let ((result (cl-cc/type:parse-type-specifier
+                 '(refine fixnum (lambda (x) (> x 0))))))
+    (assert-true (type-refinement-p result))
+    (assert-true (type-equal-p type-int (type-refinement-base result)))
+    (assert-true (type-refinement-predicate result))))
+
 ;;; ─── Arrow types: ->, ->1, ->0 ──────────────────────────────────────────
 
 (deftest parse-arrow-pure

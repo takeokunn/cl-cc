@@ -115,7 +115,54 @@
 (deftest effect-row-member-p-behavior
   "effect-row-member-p: true for present effect; false for absent."
   (let ((row-with-io (make-type-effect-row :effects (list (cl-cc/type::make-type-effect-op :name :io :args nil))
-                                            :row-var nil))
+                                             :row-var nil))
         (empty-row   (make-type-effect-row :effects nil :row-var nil)))
     (assert-true  (cl-cc/type::effect-row-member-p :io row-with-io))
     (assert-false (cl-cc/type::effect-row-member-p :io empty-row))))
+
+(deftest row-extend-basic
+  "row-extend adds a label to an existing row."
+  (let* ((base (make-type-record :fields (list (cons 'x type-int)) :row-var nil))
+         (ext  (row-extend 'y type-string base)))
+    (assert-true (type-record-p ext))
+    (assert-= 2 (length (type-record-fields ext)))
+    (assert-true (assoc 'y (type-record-fields ext)))))
+
+(deftest row-restrict-basic
+  "row-restrict removes a label from a row."
+  (let* ((rec (make-type-record :fields (list (cons 'x type-int)
+                                              (cons 'y type-string))
+                                :row-var nil))
+         (r   (row-restrict 'x rec)))
+    (assert-true (type-record-p r))
+    (assert-= 1 (length (type-record-fields r)))
+    (assert-null (assoc 'x (type-record-fields r)))))
+
+(deftest row-select-basic
+  "row-select retrieves a field type by label."
+  (let ((rec (make-type-record :fields (list (cons 'name type-string)
+                                             (cons 'age  type-int))
+                               :row-var nil)))
+    (assert-true (type-equal-p type-string (row-select 'name rec)))
+    (assert-true (type-equal-p type-int    (row-select 'age  rec)))
+    (assert-null (row-select 'missing rec))))
+
+(deftest row-labels-basic
+  "row-labels returns all field labels in a record row."
+  (let ((rec (make-type-record :fields (list (cons 'a type-int)
+                                             (cons 'b type-bool))
+                               :row-var nil)))
+    (let ((labs (row-labels rec)))
+      (assert-= 2 (length labs))
+      (assert-true (member 'a labs))
+      (assert-true (member 'b labs)))))
+
+(deftest row-open-closed
+  "row-closed-p / row-open-p distinguish closed vs open rows."
+  (let* ((closed (make-type-record :fields (list (cons 'x type-int)) :row-var nil))
+         (rv     (fresh-type-var 'rho))
+         (open   (make-type-record :fields (list (cons 'x type-int)) :row-var rv)))
+    (assert-true  (row-closed-p closed))
+    (assert-false (row-open-p   closed))
+    (assert-false (row-closed-p open))
+    (assert-true  (row-open-p   open))))

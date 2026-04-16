@@ -4,7 +4,7 @@
 ;;;; operation and a previous CST, determine the minimal sub-tree that
 ;;;; needs re-parsing and reuse unchanged nodes.
 
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; ─── Edit Operations ─────────────────────────────────────────────────────────
 

@@ -236,64 +236,53 @@ Removes old-only slots, adds new-only slots (nil), calls update-instance-for-dif
 
 ;;; FR-1005: reinitialize-instance and shared-initialize
 
+(defun %apply-instance-initargs (instance class-initargs initargs &optional slot-names)
+  "Apply INITARGS to INSTANCE using CLASS-INITARGS.
+
+CLASS-INITARGS is the class descriptor's initarg association list mapping initarg
+keywords to slot names. When SLOT-NAMES is NIL, apply all matching initargs.
+When SLOT-NAMES is T, also apply all matching initargs. Otherwise only update
+slots explicitly listed in SLOT-NAMES. Returns INSTANCE."
+  (when (and class-initargs initargs)
+    (loop for (key value) on initargs by #'cddr
+          while value
+          for slot-binding = (assoc key class-initargs)
+          for slot-name = (cdr slot-binding)
+          when (and slot-binding
+                    (or (null slot-names)
+                        (eq slot-names t)
+                        (member slot-name slot-names)))
+            do (setf (gethash slot-name instance) value)))
+  instance)
+
 (our-defmacro reinitialize-instance (instance &rest initargs)
   "Reinitialize INSTANCE using INITARGS, applying any matching slot values.
 For our VM hash-table instances, iterates the class's initarg map."
   (let ((inst-v (gensym "INST"))
-        (args-v (gensym "ARGS"))
-        (class-v (gensym "CLASS"))
-        (imap-v (gensym "IMAP"))
-        (pair-v (gensym "PAIR"))
-        (slot-v (gensym "SLOT")))
+         (args-v (gensym "ARGS"))
+         (class-v (gensym "CLASS"))
+         (imap-v (gensym "IMAP")))
     `(let* ((,inst-v ,instance)
             (,args-v (list ,@initargs))
             (,class-v (gethash :__class__ ,inst-v))
             (,imap-v  (when (hash-table-p ,class-v)
                         (gethash :__initargs__ ,class-v))))
-       (when (and ,imap-v ,args-v)
-          (let ((,pair-v ,args-v))
-            (tagbody
-            reinit-loop
-            (when (and ,pair-v (cdr ,pair-v))
-              (let* ((k (car ,pair-v))
-                     (v (cadr ,pair-v))
-                     (,slot-v (assoc k ,imap-v)))
-                (when ,slot-v
-                  (setf (gethash (cdr ,slot-v) ,inst-v) v)))
-              (setf ,pair-v (cddr ,pair-v))
-              (go reinit-loop)))))
+       (%apply-instance-initargs ,inst-v ,imap-v ,args-v)
        ,inst-v)))
 
 (our-defmacro shared-initialize (instance slot-names &rest initargs)
   "Initialize SLOT-NAMES in INSTANCE from INITARGS; t means all slots.
 For our VM hash-table instances, like reinitialize-instance but slot-filtered."
   (let ((inst-v (gensym "INST"))
-        (slots-v (gensym "SLOTS"))
-        (args-v (gensym "ARGS"))
-        (class-v (gensym "CLASS"))
-        (imap-v (gensym "IMAP"))
-        (pair-v (gensym "PAIR"))
-        (slot-v (gensym "SLOT"))
-        (sn-v (gensym "SN")))
+         (slots-v (gensym "SLOTS"))
+         (args-v (gensym "ARGS"))
+         (class-v (gensym "CLASS"))
+         (imap-v (gensym "IMAP")))
     `(let* ((,inst-v ,instance)
             (,slots-v ,slot-names)
             (,args-v (list ,@initargs))
             (,class-v (gethash :__class__ ,inst-v))
             (,imap-v  (when (hash-table-p ,class-v)
                         (gethash :__initargs__ ,class-v))))
-       (when (and ,imap-v ,args-v)
-          (let ((,pair-v ,args-v))
-            (tagbody
-            si-loop
-            (when (and ,pair-v (cdr ,pair-v))
-              (let* ((k (car ,pair-v))
-                     (v (cadr ,pair-v))
-                     (,slot-v (assoc k ,imap-v)))
-                (when ,slot-v
-                  (let ((,sn-v (cdr ,slot-v)))
-                    (when (or (eq ,slots-v t)
-                              (member ,sn-v ,slots-v))
-                      (setf (gethash ,sn-v ,inst-v) v)))))
-              (setf ,pair-v (cddr ,pair-v))
-              (go si-loop)))))
+       (%apply-instance-initargs ,inst-v ,imap-v ,args-v ,slots-v)
        ,inst-v)))

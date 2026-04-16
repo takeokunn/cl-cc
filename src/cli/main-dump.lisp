@@ -12,7 +12,7 @@
 ;;;   %print-source-comment, %ssa-block-name).
 ;;; Load order: immediately after main-utils.lisp.
 
-(in-package :cl-cc)
+(in-package :cl-cc/cli)
 
 (defparameter +ansi-esc+     (string (code-char 27)))
 (defparameter +ansi-reset+   (concatenate 'string +ansi-esc+ "[0m"))
@@ -60,22 +60,22 @@
                    (cl-cc:compilation-result-vm-instructions result)
                    (cl-cc:vm-program-instructions (cl-cc:compilation-result-program result)))))
     (multiple-value-bind (cfg phi-map renamed-map)
-        (cl-cc:ssa-construct insts)
-      (format stream "; SSA CFG (~D block~:P)~%" (length (cl-cc:cfg-blocks cfg)))
-      (dolist (blk (cl-cc:cfg-compute-rpo cfg))
+        (cl-cc/optimize:ssa-construct insts)
+      (format stream "; SSA CFG (~D block~:P)~%" (length (cl-cc/optimize:cfg-blocks cfg)))
+      (dolist (blk (cl-cc/optimize:cfg-compute-rpo cfg))
         (format stream "~A:~%" (%ssa-block-name blk))
         (format stream "  ; preds: ~{~A~^, ~}~%"
                 (or (mapcar (lambda (p) (%ssa-block-name p))
-                            (cl-cc:bb-predecessors blk))
+                            (cl-cc/optimize:bb-predecessors blk))
                     (list "(none)")))
         (dolist (phi (gethash blk phi-map))
           (format stream "  ; phi ~A <- ~{~A~^, ~}~%"
-                  (cl-cc:phi-dst phi)
+                  (cl-cc/optimize:phi-dst phi)
                   (mapcar (lambda (arg)
                             (format nil "~A:~A"
                                     (%ssa-block-name (car arg))
                                     (cdr arg)))
-                          (cl-cc:phi-args phi))))
+                          (cl-cc/optimize:phi-args phi))))
         (dolist (inst (gethash blk renamed-map))
           (format stream "  ~S~%" (cl-cc:instruction->sexp inst)))))))
 

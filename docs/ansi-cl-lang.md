@@ -230,7 +230,7 @@ ANSI CL の型システムは原子型だけでなく合成型指定子をサポ
 
 #### FR-583: the による多値型宣言
 
-- **対象**: `src/compile/codegen.lisp`, `src/parse/ast.lisp`
+- **対象**: `src/compile/codegen.lisp`, `src/ast/ast.lisp`
 - **内容**: `(the (values integer float) (floor x y))` のような多値型宣言をコンパイラが認識してレジスタ割り当てを最適化
 - **根拠**: ANSI CL 3.4.3 — THE with values
 - **難易度**: Medium

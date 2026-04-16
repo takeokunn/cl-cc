@@ -1,4 +1,4 @@
-(in-package :cl-cc)
+(in-package :cl-cc/vm)
 
 ;;; VM Bit Array, adjust-array, and displacement Instructions (FR-605, FR-606, FR-648)
 ;;;

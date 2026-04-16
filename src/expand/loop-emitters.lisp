@@ -146,42 +146,52 @@ When VAR is a plain symbol, returns (values nil nil nil)."
                 (reverse setqs)
                 setqs))))
 
-(define-loop-iter-emitter :in (var iter)
+(defun %loop-next-list-form (cell-var by-fn)
+  "Return the form that advances CELL-VAR to the next list cell.
+If BY-FN is provided, advance with (FUNCALL BY-FN CELL-VAR); otherwise use CDR."
+  (if by-fn
+      (list 'funcall by-fn cell-var)
+      (list 'cdr cell-var)))
+
+(defun %loop-emit-sequence-iteration (var list-form by-fn &key bind-current-p)
+  "Emit the common list-iteration skeleton shared by :IN and :ON clauses.
+
+When BIND-CURRENT-P is true, the iteration cell is kept in a hidden CELL-VAR and
+the exposed REAL-VAR is initialized from (CAR CELL-VAR). This matches LOOP FOR x IN ...
+When false, REAL-VAR is itself the iteration cell, matching LOOP FOR x ON ..."
   (let* ((destructuring-p (consp var))
-         (real-var  (if destructuring-p (gensym "DVAR") var))
-         (list-var  (gensym (if destructuring-p "DLIST" (symbol-name var))))
-         (list-form (getf iter :in))
-         (by-fn     (getf iter :by))
-         (bindings nil) (end-tests nil) (pre-body nil) (step-forms nil))
-    (push (list list-var list-form)              bindings)
-    (push (list real-var (list 'car list-var))   bindings)
+         (real-var (if destructuring-p (gensym "DVAR") var))
+         (cell-var (if bind-current-p
+                       (gensym (if destructuring-p "DLIST" (symbol-name var)))
+                       real-var))
+         (bindings nil)
+         (end-tests nil)
+         (pre-body nil)
+         (step-forms nil))
+    (push (list cell-var list-form) bindings)
+    (when bind-current-p
+      (push (list real-var (list 'car cell-var)) bindings))
     (multiple-value-bind (extra pre step) (%loop-emit-destructuring var real-var)
-      (setf bindings   (nconc extra bindings))
-      (setf pre-body   (nconc pre   pre-body))
-      (setf step-forms (nconc step  step-forms)))
-    (push (list 'null list-var) end-tests)
-    (if by-fn
-        (push (list 'setq list-var (list 'funcall by-fn list-var)) step-forms)
-        (push (list 'setq list-var (list 'cdr list-var)) step-forms))
-    (push (list 'setq real-var (list 'car list-var)) step-forms)
+      (setf bindings   (nconc extra bindings)
+            pre-body   (nconc pre pre-body)
+            step-forms (nconc step step-forms)))
+    (push (list 'null cell-var) end-tests)
+    (push (list 'setq cell-var (%loop-next-list-form cell-var by-fn)) step-forms)
+    (when bind-current-p
+      (push (list 'setq real-var (list 'car cell-var)) step-forms))
     (values bindings end-tests pre-body step-forms)))
 
+(define-loop-iter-emitter :in (var iter)
+  (%loop-emit-sequence-iteration var
+                                 (getf iter :in)
+                                 (getf iter :by)
+                                 :bind-current-p t))
+
 (define-loop-iter-emitter :on (var iter)
-  (let* ((destructuring-p (consp var))
-         (real-var  (if destructuring-p (gensym "DVAR") var))
-         (list-form (getf iter :on))
-         (by-fn     (getf iter :by))
-         (bindings nil) (end-tests nil) (pre-body nil) (step-forms nil))
-    (push (list real-var list-form) bindings)
-    (multiple-value-bind (extra pre step) (%loop-emit-destructuring var real-var)
-      (setf bindings   (nconc extra bindings))
-      (setf pre-body   (nconc pre   pre-body))
-      (setf step-forms (nconc step  step-forms)))
-    (if by-fn
-        (push (list 'setq real-var (list 'funcall by-fn real-var)) step-forms)
-        (push (list 'setq real-var (list 'cdr real-var)) step-forms))
-    (push (list 'null real-var) end-tests)
-    (values bindings end-tests pre-body step-forms)))
+  (%loop-emit-sequence-iteration var
+                                 (getf iter :on)
+                                 (getf iter :by)
+                                 :bind-current-p nil))
 
 (define-loop-iter-emitter :across (var iter)
   (let* ((vec-var  (gensym "VEC"))

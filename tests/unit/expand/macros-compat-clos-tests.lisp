@@ -19,47 +19,49 @@
 
 ;;; ─── print-unreadable-object ──────────────────────────────────────────────
 
-(deftest print-unreadable-object-expands-to-let
-  "PRINT-UNREADABLE-OBJECT expands to a LET binding object and stream."
-  (let ((result (our-macroexpand-1
-                 '(print-unreadable-object (obj stream) body))))
-    (assert-eq 'let (car result))))
-
-(deftest print-unreadable-object-wraps-with-angle-brackets
-  "PRINT-UNREADABLE-OBJECT body includes FORMAT calls for #< and >."
-  (let* ((result (our-macroexpand-1
-                  '(print-unreadable-object (obj stream) body)))
-         (body (cddr result)))
-    (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'format)
-                                        (member "#<" f :test #'equal)))
-                       body))))
-
-(deftest print-unreadable-object-type-flag-emits-type-of
-  "PRINT-UNREADABLE-OBJECT with :type t emits a FORMAT call with TYPE-OF."
-  (let* ((result (our-macroexpand-1
-                  '(print-unreadable-object (obj stream :type t) body)))
-         (body (cddr result)))
-    (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'when))) body))))
+(deftest-each print-unreadable-object-basic-shape
+  "PRINT-UNREADABLE-OBJECT keeps its expected top-level expansion shape."
+  :cases (("base-form-expands-to-let"
+           '(print-unreadable-object (obj stream) body)
+           (lambda (result)
+             (assert-eq 'let (car result))))
+          ("body-wraps-with-angle-brackets"
+           '(print-unreadable-object (obj stream) body)
+           (lambda (result)
+             (let ((body (cddr result)))
+               (assert-true
+                (some (lambda (f)
+                        (and (consp f)
+                             (eq (car f) 'format)
+                             (member "#<" f :test #'equal)))
+                      body)))))
+          ("type-flag-emits-conditional-type-path"
+           '(print-unreadable-object (obj stream :type t) body)
+           (lambda (result)
+             (let ((body (cddr result)))
+               (assert-true
+                (some (lambda (f) (and (consp f) (eq (car f) 'when))) body))))))
+  (form verifier)
+  (funcall verifier (our-macroexpand-1 form)))
 
 ;;; ─── describe ─────────────────────────────────────────────────────────────
 
-(deftest describe-expands-to-let
-  "DESCRIBE expands to a LET binding the stream variable."
-  (let ((result (our-macroexpand-1 '(describe obj))))
-    (assert-eq 'let (car result))))
-
-(deftest describe-calls-describe-object
-  "DESCRIBE body calls DESCRIBE-OBJECT on the object."
-  (let* ((result (our-macroexpand-1 '(describe obj)))
-         (body (cddr result)))
-    (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'describe-object)))
-                       body))))
-
-(deftest describe-ends-with-values
-  "DESCRIBE returns (values) as its last form."
-  (let* ((result (our-macroexpand-1 '(describe obj)))
-         (last   (car (last result))))
-    (assert-equal '(values) last)))
+(deftest-each describe-expansion-shape
+  "DESCRIBE keeps its expected structural expansion contract."
+  :cases (("expands-to-let"
+           (lambda (result)
+             (assert-eq 'let (car result))))
+          ("calls-describe-object"
+           (lambda (result)
+             (let ((body (cddr result)))
+               (assert-true
+                (some (lambda (f) (and (consp f) (eq (car f) 'describe-object)))
+                      body)))))
+          ("ends-with-values"
+           (lambda (result)
+             (assert-equal '(values) (car (last result))))))
+  (verifier)
+  (funcall verifier (our-macroexpand-1 '(describe obj))))
 
 ;;; ─── ensure-class ─────────────────────────────────────────────────────────
 
@@ -80,19 +82,30 @@
 
 ;;; ─── update-instance-for-different-class / update-instance-for-changed-class
 
-(deftest update-instance-for-different-class-delegates-to-reinitialize
-  "UPDATE-INSTANCE-FOR-DIFFERENT-CLASS expands to a REINITIALIZE-INSTANCE call."
-  (let ((result (our-macroexpand-1
-                 '(cl-cc::update-instance-for-different-class prev curr :slot 1))))
+(deftest-each update-instance-compat-macros-delegate-to-reinitialize
+  "Legacy instance-update compatibility macros both expand to REINITIALIZE-INSTANCE."
+  :cases (("different-class"
+           '(cl-cc::update-instance-for-different-class prev curr :slot 1)
+           'curr)
+          ("changed-class"
+           '(cl-cc::update-instance-for-changed-class inst :slot 1)
+           'inst))
+  (form expected-target)
+  (let ((result (our-macroexpand-1 form)))
     (assert-eq 'reinitialize-instance (car result))
-    (assert-eq 'curr (second result))))
+    (assert-eq expected-target (second result))))
 
-(deftest update-instance-for-changed-class-delegates-to-reinitialize
-  "UPDATE-INSTANCE-FOR-CHANGED-CLASS expands to a REINITIALIZE-INSTANCE call."
-  (let ((result (our-macroexpand-1
-                 '(cl-cc::update-instance-for-changed-class inst :slot 1))))
-    (assert-eq 'reinitialize-instance (car result))
-    (assert-eq 'inst (second result))))
+(deftest-each instance-init-compat-macros-use-shared-helper
+  "REINITIALIZE-INSTANCE and SHARED-INITIALIZE both delegate to %APPLY-INSTANCE-INITARGS."
+  :cases (("reinitialize-instance"
+           '(cl-cc::reinitialize-instance inst :slot 1))
+          ("shared-initialize"
+           '(cl-cc::shared-initialize inst t :slot 1)))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
+    (assert-eq 'let* (car result))
+    (assert-true (search "%APPLY-INSTANCE-INITARGS"
+                         (string-upcase (format nil "~S" result))))))
 
 ;;; ─── MOP introspection macros ─────────────────────────────────────────────
 

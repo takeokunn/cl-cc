@@ -9,15 +9,15 @@
 ;;; Pure-AST type table (data-driven)
 
 (defparameter *pure-ast-effect-types*
-  '(cl-cc:ast-int cl-cc:ast-quote cl-cc:ast-var
-    cl-cc:ast-binop cl-cc:ast-lambda
-    cl-cc:ast-defun cl-cc:ast-defvar)
+  '(cl-cc/ast:ast-int cl-cc/ast:ast-quote cl-cc/ast:ast-var
+    cl-cc/ast:ast-binop cl-cc/ast:ast-lambda
+    cl-cc/ast:ast-defun cl-cc/ast:ast-defvar)
   "AST node types whose evaluation produces no side effects.
    Any node whose type appears here is pure and returns +pure-effect-row+.")
 
 ;;; Constant Effect Table — maps AST *type symbols* to their canonical effect row.
 ;;; This is the data-driven version of the cond form in infer-effects.
-;;; Keys are the class-name symbols of AST node types (e.g., 'cl-cc:ast-int).
+;;; Keys are the class-name symbols of AST node types (e.g., 'cl-cc/ast:ast-int).
 
 (defvar *constant-effect-table* (make-hash-table :test #'eq)
   "Maps AST node type symbols to their constant effect rows.
@@ -37,33 +37,33 @@
       ((some (lambda (type) (typep ast type)) *pure-ast-effect-types*)
        +pure-effect-row+)
 
-      ((typep ast 'cl-cc:ast-print) +io-effect-row+)
+      ((typep ast 'cl-cc/ast:ast-print) +io-effect-row+)
 
-      ((typep ast 'cl-cc:ast-setq)
+      ((typep ast 'cl-cc/ast:ast-setq)
        (make-type-effect-row :effects (list (make-type-effect :name 'state))
                              :row-var nil))
 
-      ((typep ast 'cl-cc:ast-if)
-       (effect-row-union (infer-effects (cl-cc:ast-if-cond ast) env)
+      ((typep ast 'cl-cc/ast:ast-if)
+       (effect-row-union (infer-effects (cl-cc/ast:ast-if-cond ast) env)
                          (effect-row-union
-                          (infer-effects (cl-cc:ast-if-then ast) env)
-                          (infer-effects (cl-cc:ast-if-else ast) env))))
+                          (infer-effects (cl-cc/ast:ast-if-then ast) env)
+                          (infer-effects (cl-cc/ast:ast-if-else ast) env))))
 
-      ((typep ast 'cl-cc:ast-let)
+      ((typep ast 'cl-cc/ast:ast-let)
        (effect-row-union
-        (union-list (mapcar #'cdr (cl-cc:ast-let-bindings ast)))
-        (union-list (cl-cc:ast-let-body ast))))
+        (union-list (mapcar #'cdr (cl-cc/ast:ast-let-bindings ast)))
+        (union-list (cl-cc/ast:ast-let-body ast))))
 
-      ((typep ast 'cl-cc:ast-progn)  (union-list (cl-cc:ast-progn-forms ast)))
-      ((typep ast 'cl-cc:ast-block)  (union-list (cl-cc:ast-block-body  ast)))
+      ((typep ast 'cl-cc/ast:ast-progn)  (union-list (cl-cc/ast:ast-progn-forms ast)))
+      ((typep ast 'cl-cc/ast:ast-block)  (union-list (cl-cc/ast:ast-block-body  ast)))
 
-      ((typep ast 'cl-cc:ast-call)
-       (let* ((func         (cl-cc:ast-call-func ast))
-              (base-effects (if (typep func 'cl-cc:ast-var)
-                                (lookup-effect-signature (cl-cc:ast-var-name func))
+      ((typep ast 'cl-cc/ast:ast-call)
+       (let* ((func         (cl-cc/ast:ast-call-func ast))
+              (base-effects (if (typep func 'cl-cc/ast:ast-var)
+                                (lookup-effect-signature (cl-cc/ast:ast-var-name func))
                                 +pure-effect-row+)))
          (effect-row-union base-effects
-                           (union-list (cl-cc:ast-call-args ast)))))
+                           (union-list (cl-cc/ast:ast-call-args ast)))))
 
       (t (make-type-effect-row :effects nil
                                :row-var (make-type-variable "eff"))))))
@@ -124,8 +124,8 @@
   ;; Populate *constant-effect-table* with the per-AST-type defaults.
   (dolist (node-type *pure-ast-effect-types*)
     (setf (gethash node-type *constant-effect-table*) +pure-effect-row+))
-  (setf (gethash 'cl-cc:ast-print *constant-effect-table*) io-row)
-  (setf (gethash 'cl-cc:ast-setq  *constant-effect-table*) state-row))
+  (setf (gethash 'cl-cc/ast:ast-print *constant-effect-table*) io-row)
+  (setf (gethash 'cl-cc/ast:ast-setq  *constant-effect-table*) state-row))
 
 ;;; Exports
 

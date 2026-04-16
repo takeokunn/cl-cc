@@ -1,4 +1,4 @@
-(in-package :cl-cc)
+(in-package :cl-cc/vm)
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;; VM — I/O Instruction Execution
 ;;;
@@ -266,12 +266,15 @@ PRED-FN nil means test stream existence only."
 
 ;;; Load File Execution
 ;;; our-load is defined in pipeline.lisp (loaded after this file).
-;;; Use funcall + symbol-function to avoid forward reference.
+;;; Use find-symbol + symbol-function to avoid forward reference and
+;;; to resolve the canonical symbol from :cl-cc/compile.
 
 (defmethod execute-instruction ((inst vm-load-file) state pc labels)
   (declare (ignore labels))
   (let* ((path (vm-reg-get state (vm-src inst)))
-         (result (funcall (symbol-function 'our-load) path)))
+         (our-load-sym (or (find-symbol "OUR-LOAD" :cl-cc/compile)
+                           (find-symbol "OUR-LOAD" :cl-cc)))
+         (result (funcall (symbol-function our-load-sym) path)))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 

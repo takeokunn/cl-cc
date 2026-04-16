@@ -6,7 +6,7 @@
 ;;;; Depends on lexer.lisp (structs, lex-advance, lex-peek, lex-at-end-p, lex-constituent-p,
 ;;;; lex-skip-trivia, lex-skip-block-comment, lex-read-symbol-name, lexer-state-{pos,source}).
 
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; ─── Form-Skipping Helpers ───────────────────────────────────────────────────
 ;;; Used by lex-skip-form (below) and lex-read-form-text.

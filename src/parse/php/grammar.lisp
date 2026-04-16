@@ -4,7 +4,7 @@
 ;;;; to the CL token-stream. Covers expressions, statements, and
 ;;;; class/function declarations.
 
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; ─── PHP Token Stream ────────────────────────────────────────────────────────
 

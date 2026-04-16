@@ -6,7 +6,7 @@
 ;;;;
 ;;;; This eliminates all read-from-string dependencies from the compilation path.
 
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; ─── Core CST → AST Lowering ────────────────────────────────────────────────
 

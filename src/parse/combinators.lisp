@@ -8,7 +8,7 @@
 ;;;;   :type  - keyword token type (e.g. :T-INT, :T-VAR)
 ;;;;   :value - the token's parsed value
 
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; Grammar Rule Database
 

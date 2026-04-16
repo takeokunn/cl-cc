@@ -120,3 +120,75 @@
           ("omega" "ω" :omega))
   (expected grade)
   (assert-equal expected (mult-to-string grade)))
+
+(deftest-each multiplicity-p-recognition
+  "multiplicity-p accepts :zero/:one/:omega; rejects all other values."
+  :cases (("zero-valid"   :zero  t)
+          ("one-valid"    :one   t)
+          ("omega-valid"  :omega t)
+          ("two-invalid"  :two   nil)
+          ("nil-invalid"  nil    nil)
+          ("int-invalid"  1      nil))
+  (val expected)
+  (if expected
+      (assert-true  (cl-cc/type:multiplicity-p val))
+      (assert-false (cl-cc/type:multiplicity-p val))))
+
+(deftest-each multiplicity-grade-constants
+  "The three multiplicity constants are valid grades with the correct keyword value."
+  :cases (("zero"  +mult-zero+  :zero)
+          ("one"   +mult-one+   :one)
+          ("omega" +mult-omega+ :omega))
+  (grade expected-kw)
+  (assert-true (multiplicity-p grade))
+  (assert-eq expected-kw grade))
+
+(deftest-each multiplicity-add
+  "mult-add implements the commutative semiring join: 0+q=q, 1+1=1, 1+ω=ω."
+  :cases (("0+0=0" :zero  :zero  :zero)
+          ("0+1=1" :zero  :one   :one)
+          ("1+0=1" :one   :zero  :one)
+          ("0+ω=ω" :zero  :omega :omega)
+          ("1+1=1" :one   :one   :one)
+          ("1+ω=ω" :one   :omega :omega)
+          ("ω+ω=ω" :omega :omega :omega))
+  (a b expected)
+  (assert-eq expected (mult-add a b)))
+
+(deftest-each multiplicity-mul
+  "mult-mul is semiring scaling: 0*q=0, 1*q=q, ω*ω=ω."
+  :cases (("0*0=0" :zero  :zero  :zero)
+          ("0*1=0" :zero  :one   :zero)
+          ("0*ω=0" :zero  :omega :zero)
+          ("1*0=0" :one   :zero  :zero)
+          ("1*1=1" :one   :one   :one)
+          ("1*ω=ω" :one   :omega :omega)
+          ("ω*0=0" :omega :zero  :zero)
+          ("ω*1=ω" :omega :one   :omega)
+          ("ω*ω=ω" :omega :omega :omega))
+  (a b expected)
+  (assert-eq expected (mult-mul a b)))
+
+(deftest-each multiplicity-leq
+  "mult-leq implements the partial order 0 ≤ 1 ≤ ω."
+  :cases (("0≤0"  :zero  :zero  t)
+          ("0≤1"  :zero  :one   t)
+          ("0≤ω"  :zero  :omega t)
+          ("1≤1"  :one   :one   t)
+          ("1≤ω"  :one   :omega t)
+          ("ω≤ω"  :omega :omega t)
+          ("1≰0"  :one   :zero  nil)
+          ("ω≰1"  :omega :one   nil)
+          ("ω≰0"  :omega :zero  nil))
+  (a b expected)
+  (if expected
+      (assert-true  (mult-leq a b))
+      (assert-false (mult-leq a b))))
+
+(deftest-each multiplicity-to-string
+  "mult-to-string renders each grade as its canonical symbol."
+  :cases (("zero"  :zero  "0")
+          ("one"   :one   "1")
+          ("omega" :omega "ω"))
+  (grade expected-str)
+  (assert-string= expected-str (mult-to-string grade)))

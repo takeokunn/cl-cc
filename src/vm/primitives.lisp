@@ -1,4 +1,4 @@
-(in-package :cl-cc)
+(in-package :cl-cc/vm)
 
 ;;; VM Primitive Instructions
 ;;;
@@ -208,7 +208,7 @@ This enables meta-circular self-hosting: compiled code can call eval.")
 (defmethod execute-instruction ((inst vm-eval) state pc labels)
   (declare (ignore labels))
   (let* ((form (vm-reg-get state (vm-src inst)))
-         (result (our-eval form)))
+         (result (funcall *vm-eval-hook* form)))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
@@ -220,7 +220,7 @@ This enables meta-circular self-hosting: compiled code can call eval.")
 (defmethod execute-instruction ((inst vm-macroexpand-1-inst) state pc labels)
   (declare (ignore labels))
   (let* ((form (vm-reg-get state (vm-src inst)))
-         (result (our-macroexpand-1 form)))
+         (result (funcall *vm-macroexpand-1-hook* form)))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
@@ -230,7 +230,7 @@ This enables meta-circular self-hosting: compiled code can call eval.")
 (defmethod execute-instruction ((inst vm-macroexpand-inst) state pc labels)
   (declare (ignore labels))
   (let* ((form (vm-reg-get state (vm-src inst)))
-         (result (our-macroexpand form)))
+         (result (funcall *vm-macroexpand-hook* form)))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 

@@ -1,4 +1,4 @@
-(in-package :cl-cc)
+(in-package :cl-cc/vm)
 
 ;;; VM — Bitwise Integer Operations (FR-303)
 ;;;

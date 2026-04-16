@@ -136,7 +136,7 @@ Native backend, architecture integration, register allocation, instruction sched
 
 #### FR-069: Dependency-Aware Peephole Scheduling
 
-- **対象**: `src/optimize/optimizer.lisp`, `src/parse/prolog.lisp`
+- **対象**: `src/optimize/optimizer.lisp`, `src/prolog/prolog.lisp`
 - **内容**: Read-after-Writeに基づく命令ペア/トリプルの局所的並べ替え
 - **難易度**: Medium
 

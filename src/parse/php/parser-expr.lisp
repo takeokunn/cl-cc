@@ -16,7 +16,7 @@
 ;;;; php-ident-sym (all loaded before this file).
 ;;;;
 ;;;; Load order: after parser.lisp, before parser-stmt.lisp.
-(in-package :cl-cc)
+(in-package :cl-cc/parse)
 
 ;;; ─── Expression Parser ──────────────────────────────────────────────────────
 

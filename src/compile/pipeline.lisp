@@ -160,6 +160,13 @@ instead of the host CL eval."
 
 (setf *macro-eval-fn* #'our-eval)
 
+;;; Wire compile functions into VM hooks for runtime EVAL/compile support
+(eval-when (:load-toplevel :execute)
+  (when (find-package :cl-cc/vm)
+    (let ((pkg (find-package :cl-cc/vm)))
+      (setf (symbol-value (find-symbol "*VM-EVAL-HOOK*" pkg)) #'our-eval)
+      (setf (symbol-value (find-symbol "*VM-COMPILE-STRING-HOOK*" pkg)) #'compile-string))))
+
 ;;; REPL persistent state and run-string-repl/our-load are in pipeline-repl.lisp.
 
 (defun run-string-typed (source &key (mode :warn) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)

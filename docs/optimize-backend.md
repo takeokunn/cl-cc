@@ -1452,7 +1452,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-424: ペアホールルール自動完備化
 
-- **対象**: `src/parse/prolog.lisp` (`*peephole-rules*`)
+- **対象**: `src/prolog/prolog.lisp` (`*peephole-rules*`)
 - **内容**: 既存のペアホールルール集合が「等価変換として完備か」を形式的に検証。Knuth-Bendix 完備化アルゴリズムを用いてルール間の重複・欠落を検出し新しいルールを自動生成。E-graph (FR-350) の rewrite rules と統合して適用
 - **根拠**: Knuth-Bendix completion / Metatheory.jl (Julia の項書き換え系)
 - **難易度**: Very Hard

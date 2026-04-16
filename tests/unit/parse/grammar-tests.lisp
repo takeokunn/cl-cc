@@ -11,7 +11,7 @@
 
 (defun make-grammar-token (type value &key (start 0) (end 1))
   "Create a lexer-token for grammar token-stream tests."
-  (cl-cc::make-lexer-token :type type :value value
+  (cl-cc/parse::make-lexer-token :type type :value value
                            :start-byte start :end-byte end
                            :line 1 :column 0))
 
@@ -20,7 +20,7 @@
   (let ((tokens (mapcar (lambda (spec)
                           (apply #'make-grammar-token spec))
                         token-specs)))
-    (cl-cc::make-token-stream :tokens tokens :source "" :source-file nil)))
+    (cl-cc/parse::make-token-stream :tokens tokens :source "" :source-file nil)))
 
 (defun parse-first-form (source)
   "Parse SOURCE and return the first CST node."
@@ -50,28 +50,28 @@
   (ecase scenario
     (:non-empty
      (let* ((ts (make-grammar-ts '(:T-INT 42) '(:T-INT 99)))
-            (tok (cl-cc::ts-peek ts)))
+            (tok (cl-cc/parse::ts-peek ts)))
        (assert-eq :T-INT (cl-cc::lexer-token-type tok))
        (assert-= 42 (cl-cc::lexer-token-value tok))
        ;; Peeking again returns the same token
-       (assert-= 42 (cl-cc::lexer-token-value (cl-cc::ts-peek ts)))))
+       (assert-= 42 (cl-cc::lexer-token-value (cl-cc/parse::ts-peek ts)))))
     (:empty
-     (let ((ts (cl-cc::make-token-stream :tokens nil :source "")))
-       (assert-null (cl-cc::ts-peek ts))))))
+     (let ((ts (cl-cc/parse::make-token-stream :tokens nil :source "")))
+       (assert-null (cl-cc/parse::ts-peek ts))))))
 
 ;;; ─── Token Stream: ts-advance ──────────────────────────────────────────────
 
 (deftest grammar-ts-advance-consumes-token
   "ts-advance consumes and returns current token, advances to next"
   (let ((ts (make-grammar-ts '(:T-INT 1) '(:T-INT 2) '(:T-INT 3))))
-    (let ((tok1 (cl-cc::ts-advance ts)))
+    (let ((tok1 (cl-cc/parse::ts-advance ts)))
       (assert-= 1 (cl-cc::lexer-token-value tok1)))
-    (let ((tok2 (cl-cc::ts-advance ts)))
+    (let ((tok2 (cl-cc/parse::ts-advance ts)))
       (assert-= 2 (cl-cc::lexer-token-value tok2)))
-    (let ((tok3 (cl-cc::ts-advance ts)))
+    (let ((tok3 (cl-cc/parse::ts-advance ts)))
       (assert-= 3 (cl-cc::lexer-token-value tok3)))
     ;; Stream now exhausted
-    (assert-null (cl-cc::ts-advance ts))))
+    (assert-null (cl-cc/parse::ts-advance ts))))
 
 ;;; ─── Token Stream: ts-peek-type ────────────────────────────────────────────
 
@@ -83,10 +83,10 @@
   (ecase scenario
     (:non-empty
      (let ((ts (make-grammar-ts '(:T-STRING "hello"))))
-       (assert-eq :T-STRING (cl-cc::ts-peek-type ts))))
+       (assert-eq :T-STRING (cl-cc/parse::ts-peek-type ts))))
     (:empty
-     (let ((ts (cl-cc::make-token-stream :tokens nil :source "")))
-       (assert-null (cl-cc::ts-peek-type ts))))))
+     (let ((ts (cl-cc/parse::make-token-stream :tokens nil :source "")))
+       (assert-null (cl-cc/parse::ts-peek-type ts))))))
 
 ;;; ─── Token Stream: ts-expect ───────────────────────────────────────────────
 
@@ -94,23 +94,23 @@
   "ts-expect: matching consumes token; mismatch and end-of-input add diagnostics"
   ;; Matching type consumes and returns the token
   (let* ((ts (make-grammar-ts '(:T-INT 42)))
-         (tok (cl-cc::ts-expect ts :T-INT)))
+         (tok (cl-cc/parse::ts-expect ts :T-INT)))
     (assert-true (not (null tok)))
     (assert-= 42 (cl-cc::lexer-token-value tok))
     ;; Stream is now empty
-    (assert-null (cl-cc::ts-peek ts)))
+    (assert-null (cl-cc/parse::ts-peek ts)))
   ;; Mismatch adds a diagnostic and returns nil without consuming
   (let* ((ts (make-grammar-ts '(:T-INT 42)))
-         (result (cl-cc::ts-expect ts :T-STRING)))
+         (result (cl-cc/parse::ts-expect ts :T-STRING)))
     (assert-null result)
-    (assert-true (not (null (cl-cc::token-stream-diagnostics ts))))
+    (assert-true (not (null (cl-cc/parse::token-stream-diagnostics ts))))
     ;; Token was NOT consumed
-    (assert-= 42 (cl-cc::lexer-token-value (cl-cc::ts-peek ts))))
+    (assert-= 42 (cl-cc::lexer-token-value (cl-cc/parse::ts-peek ts))))
   ;; At end of input adds a diagnostic
-  (let* ((ts (cl-cc::make-token-stream :tokens nil :source ""))
-         (result (cl-cc::ts-expect ts :T-RPAREN)))
+  (let* ((ts (cl-cc/parse::make-token-stream :tokens nil :source ""))
+         (result (cl-cc/parse::ts-expect ts :T-RPAREN)))
     (assert-null result)
-    (assert-true (not (null (cl-cc::token-stream-diagnostics ts))))))
+    (assert-true (not (null (cl-cc/parse::token-stream-diagnostics ts))))))
 
 ;;; ─── Token Stream: ts-at-end-p ─────────────────────────────────────────────
 
@@ -121,12 +121,12 @@
           ("eof-token" :eof       t))
   (scenario expected)
   (let ((ts (ecase scenario
-               (:empty     (cl-cc::make-token-stream :tokens nil :source ""))
+               (:empty     (cl-cc/parse::make-token-stream :tokens nil :source ""))
                (:non-empty (make-grammar-ts '(:T-INT 42)))
                (:eof       (make-grammar-ts '(:T-EOF nil))))))
     (if expected
-        (assert-true  (cl-cc::ts-at-end-p ts))
-        (assert-false (cl-cc::ts-at-end-p ts)))))
+        (assert-true  (cl-cc/parse::ts-at-end-p ts))
+        (assert-false (cl-cc/parse::ts-at-end-p ts)))))
 
 ;;; ─── Token Stream: ts-token-value ──────────────────────────────────────────
 
@@ -138,10 +138,10 @@
   (ecase scenario
     (:non-empty
      (let ((ts (make-grammar-ts '(:T-INT 42))))
-       (assert-= 42 (cl-cc::ts-token-value ts))))
+       (assert-= 42 (cl-cc/parse::ts-token-value ts))))
     (:empty
-     (let ((ts (cl-cc::make-token-stream :tokens nil :source "")))
-       (assert-null (cl-cc::ts-token-value ts))))))
+     (let ((ts (cl-cc/parse::make-token-stream :tokens nil :source "")))
+       (assert-null (cl-cc/parse::ts-token-value ts))))))
 
 ;;; ─── parse-cl-atom ─────────────────────────────────────────────────────────
 
@@ -156,8 +156,8 @@
   (declare (ignore kind))
   (let* ((ts (if tok-type
                  (make-grammar-ts (list tok-type value))
-                 (cl-cc::make-token-stream :tokens nil :source "")))
-         (node (cl-cc::parse-cl-atom ts)))
+                 (cl-cc/parse::make-token-stream :tokens nil :source "")))
+         (node (cl-cc/parse::parse-cl-atom ts)))
     (ecase scenario
       (:integer
        (assert-true (cl-cc:cst-token-p node))
@@ -293,19 +293,19 @@
 
 (deftest grammar-pratt-nud-table-has-entries
   "cl-nud-table has entries for atom token types"
-  (assert-true (not (null (gethash :T-INT cl-cc::*cl-nud-table*))))
-  (assert-true (not (null (gethash :T-IDENT cl-cc::*cl-nud-table*))))
-  (assert-true (not (null (gethash :T-STRING cl-cc::*cl-nud-table*)))))
+  (assert-true (not (null (gethash :T-INT cl-cc/parse::*cl-nud-table*))))
+  (assert-true (not (null (gethash :T-IDENT cl-cc/parse::*cl-nud-table*))))
+  (assert-true (not (null (gethash :T-STRING cl-cc/parse::*cl-nud-table*)))))
 
 (deftest grammar-pratt-led-table-empty
   "cl-led-table is empty (CL has no infix operators)"
-  (assert-= 0 (hash-table-count cl-cc::*cl-led-table*)))
+  (assert-= 0 (hash-table-count cl-cc/parse::*cl-led-table*)))
 
 (deftest grammar-pratt-context-creation
   "make-cl-pratt-context returns a valid pratt-context"
   (let* ((tokens (cl-cc:lex-all "42"))
-         (ctx (cl-cc::make-cl-pratt-context tokens "42" nil)))
-    (assert-true (cl-cc::pratt-context-p ctx))))
+         (ctx (cl-cc/parse::make-cl-pratt-context tokens "42" nil)))
+    (assert-true (cl-cc/parse::pratt-context-p ctx))))
 
 ;;; ─── CST byte positions ────────────────────────────────────────────────────
 

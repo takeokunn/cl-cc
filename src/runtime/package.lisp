@@ -104,7 +104,7 @@
    #:rt-boundp #:rt-fboundp #:rt-makunbound #:rt-fmakunbound
    #:rt-random #:rt-make-random-state
    #:rt-get-universal-time #:rt-get-internal-real-time #:rt-get-internal-run-time
-   #:rt-eval #:rt-read-from-string #:rt-read-sexp
+   #:rt-read-from-string #:rt-read-sexp
    #:rt-coerce
    ;; I/O
    #:rt-print #:rt-princ #:rt-prin1 #:rt-terpri #:rt-fresh-line

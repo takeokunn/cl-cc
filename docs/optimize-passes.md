@@ -10,7 +10,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-001: ペアホール最適化ルール拡充 ✅
 
-- **対象**: `src/parse/prolog.lisp` の `*peephole-rules*`
+- **対象**: `src/prolog/prolog.lisp` の `*peephole-rules*`
 - **現状**: 4ルール → 目標30+ルール
 - **エンジン変更不要**: ルール追加のみ
 
