@@ -430,7 +430,7 @@ AAPCS64:
       (funcall *macro-eval-fn*
                `(funcall ,expander ',form)))))
 
-;; pipeline/src/pipeline.lisp
+;; packages/umbrella/pipeline/pipeline.lisp
 (setf *macro-eval-fn* #'our-eval)  ; セルフホスティング有効化
 ```
 

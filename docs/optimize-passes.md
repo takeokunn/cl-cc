@@ -10,7 +10,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-001: ペアホール最適化ルール拡充 ✅
 
-- **対象**: `packages/prolog/prolog/src/prolog.lisp` の `*peephole-rules*`
+- **対象**: `packages/foundation/prolog/src/prolog.lisp` の `*peephole-rules*`
 - **現状**: 4ルール → 目標30+ルール
 - **エンジン変更不要**: ルール追加のみ
 
@@ -172,7 +172,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-038: Value Range / Interval Analysis
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp` + `packages/type/type/src/inference.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp` + `packages/foundation/type/src/inference.lisp`
 - **内容**:
   - 整数変数の値域 (`[lo, hi]`) をCFGを通じて伝播
   - SCCP (FR-010) が定数を伝播するのと同様に範囲を伝播
@@ -404,10 +404,10 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-148: Fixnum演算整数範囲追跡 (VM全体)
 
-- **対象**: `packages/type/type/src/inference.lisp`, `packages/engine/optimize/src/optimizer.lisp`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`, `packages/engine/optimize/src/optimizer.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **現状**: `type-int` は存在するが範囲情報なし。`infer-type` が `ast-int → type-int` を返すのみで区間情報ゼロ
 - **内容**: 型表現に `(integer lo hi)` 区間を追加。定数折り畳みで演算結果の区間を伝播し、オーバーフローしない演算を確認してタグチェックを省略
-- **根拠**: `packages/type/type/src/inference.lisp:74-100` — 整数リテラルに区間なし。SBCL の `sb-c:interval` に相当する機能が欠如
+- **根拠**: `packages/foundation/type/src/inference.lisp:74-100` — 整数リテラルに区間なし。SBCL の `sb-c:interval` に相当する機能が欠如
 - **難易度**: Hard
 
 #### FR-149: Fixnum→Bignum Overflow Trap分岐
@@ -661,7 +661,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-116: Flow-Sensitive Type Narrowing ✅
 
-- **対象**: `packages/type/type/src/checker.lisp`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/foundation/type/src/checker.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **内容**: `(if (typep x 'integer) ...)` のthenブランチで`x`をintegerに絞り込み、elseブランチで`(not integer)`に絞り込む
 - **根拠**: `type-meet`/`type-join`/`extract-type-guard` は存在するが条件分岐後の型環境伝播がない
 - **難易度**: Medium
@@ -676,7 +676,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-118: Polyvariant (k-CFA) Type Analysis
 
-- **対象**: `packages/type/type/src/inference.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`
 - **内容**: call-site感度付き型解析。`(funcall f 1)` と `(funcall f "a")` で`f`の型を独立して追跡
 - **根拠**: 現状のHMは高階関数引数が単一モノモーフィック型に束縛される
 - **難易度**: Hard
@@ -789,7 +789,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-366: Selective CPS Transformation (選択的CPS変換)
 
-- **対象**: `packages/engine/compile/src/cps.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/compile/src/cps.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: `cps.lisp:400-406` — `cps-transform*`が全式に一律CPS適用。直線コード（算術・データフロー）にも不要な継続ラムダを生成。`cps.lisp:106-107`で`ast-int`/`ast-var`も`(funcall ,k ...)`でラップ
 - **内容**: 事前パスでAST各ノードを「CPS必要」(非局所脱出・第一級継続含む) vs「直接スタイル安全」に分類。CPS変換は前者のみに適用。~80%の直線コードで継続ラムダ生成を回避
 - **根拠**: Kennedy (2007) "Compiling with Continuations, Continued" — selective CPS
@@ -983,7 +983,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-534: Interprocedural SSA / Function Summaries (手続き間SSA・関数サマリー)
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: SSAは関数内のみ。関数境界を越えたSSA値の追跡なし
 - **内容**: 関数ごとに「入力条件 → 出力特性」のサマリー（副作用集合・戻り値型・純粋性フラグ）を構築。サマリーを用いた手続き間定数伝播・エイリアス解析。IPSCCP（FR-050）の基盤
 - **根拠**: LLVM GlobalsModRef / Inliner function attrs。手続き間最適化の標準インフラ
@@ -991,7 +991,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-535: Gated SSA / E-SSA (述語付きSSA)
 
-- **対象**: `packages/engine/optimize/src/ssa.lisp`, `packages/type/type/src/inference.lisp`
+- **対象**: `packages/engine/optimize/src/ssa.lisp`, `packages/foundation/type/src/inference.lisp`
 - **現状**: SSAの Phi ノードに値条件の述語情報なし。分岐条件と Phi の関係が失われる
 - **内容**: Gated SSA (Tu & Padua 1995): `γ-node`（条件付き Phi）と `μ-node`（ループ帰納 Phi）を区別。E-SSA: Phi 引数に述語コンテキスト（`x > 0` のような条件）を付与。Flow-sensitive type narrowing（FR-116）の精度向上。配列範囲解析（FR-039）の基盤
 - **根拠**: LLVM LazyValueInfo / GCC VRP の述語追跡。Bourdoncle widening operator
@@ -1031,7 +1031,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-539: On-Stack Replacement (OSR — スタック上での差し替え)
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: 関数の再コンパイルは次の呼び出しから有効。実行中の関数を最適化版に切り替える OSR なし
 - **内容**: VMインタプリタのループバックエッジに OSR チェックポイントを挿入。ホットループ検出時に現在の実行状態（レジスタ・スタック・PC）を最適化コンテキストにマッピングしてネイティブコードに飛び込む「OSR-in」。最適化コードが投機的仮定を破った場合に VM に戻る「OSR-out」（deoptimization）
 - **根拠**: HotSpot C1/C2 OSR / V8 OSR。長時間実行ループの最適化に必須。FR-244（Trace JIT）と相補的
@@ -1111,7 +1111,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-548: Typed SSA / Bidirectional Type Checking in IR (型付きSSA・双方向型検査)
 
-- **対象**: `packages/foundation/mir/src/mir.lisp`, `packages/type/type/src/checker.lisp`
+- **対象**: `packages/foundation/mir/src/mir.lisp`, `packages/foundation/type/src/checker.lisp`
 - **現状**: MIR 命令に型注釈なし。型チェック（`checker.lisp`）は AST レベルで実行され IR に伝播しない
 - **内容**: MIR 命令の各引数と結果に ML 風型を付与。Phi 命令には合流型（join type）を付与。型伝播で SSA use-def 鎖に沿って型情報を伝播。双方向型検査（synthesis mode + checking mode）を `check/synth` モードで実装。不要な型チェック命令（`vm-integer-p` 等）を型証明で消去
 - **根拠**: LLVM typed IR / Typed Assembly Language (TAL)。型情報を IR に保持することで型ベース最適化の精度向上
@@ -1119,7 +1119,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-549: Multi-Level IR / Progressive Lowering (マルチレベルIR・段階的降下)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/foundation/mir/src/mir.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/foundation/mir/src/mir.lisp`
 - **現状**: コンパイルパイプラインは `parse → expand → CPS → codegen → VM命令 → [MIR] → native` の不連続なステージ。各ステージ間の変換が大きすぎてデバッグが困難
 - **内容**: MLIR スタイルの段階的降下: High-level IR（defun/let/if 等） → Mid-level IR（関数呼び出し・クロージャ展開済み） → Low-level IR（レジスタ・メモリ明示） → Machine IR（ターゲット命令）。各レベルで独立した検証・最適化が可能
 - **根拠**: MLIR (Lattner et al. 2020) / LLVM-IR → SelectionDAG → MachineIR。コンパイラの保守性・拡張性を大幅改善
@@ -1139,7 +1139,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-551: Tiered VM Interpreter (段階的VMインタプリタ)
 
-- **対象**: `packages/engine/vm/src/vm-run.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/vm/src/vm-run.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: 単一の VM インタプリタ（CLOS ベース `run-compiled` または defopcode `run-vm`）。バイトコード V2（FR-456）も独立実装。段階的コンパイルなし
 - **内容**: 3段階実行: (1) Tier-0 — CLOS インタプリタ（現行、起動コスト最小）。(2) Tier-1 — バイトコード JIT（FR-456 完成後、速度改善）。(3) Tier-2 — 型フィードバック付き最適化 JIT（FR-058/FR-244、最大性能）。呼び出し回数カウンタで昇格トリガー。V8 の Ignition→Maglev→TurboFan、HotSpot の C1→C2 に相当
 - **根拠**: V8 tiered compilation / HotSpot tiered compilation。起動時間とピーク性能の両立
@@ -1155,7 +1155,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-553: Bytecode AOT Serialization (バイトコードAOTシリアライズ)
 
-- **対象**: `packages/backend/bytecode/src/encode.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/backend/bytecode/src/encode.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: `encode.lisp`（50オペコード ISA 定義・エンコーダ・デコーダ）が実装済みだが、コンパイル済みバイトコードの永続化なし。毎起動時に全ソースを再コンパイル
 - **内容**: コンパイル済み VM 命令列をバイトコードフォーマット（encode.lisp の ISA を使用）にシリアライズして `.clcc` ファイルに保存。次回起動時はデシリアライズのみでソースコンパイルをスキップ。ソースハッシュ検証付き（変更時に再コンパイル）。`./cl-cc compile foo.lisp → foo.clcc`、`./cl-cc run foo.clcc`
 - **根拠**: Python `.pyc` / Java `.class` / Ruby `.rbc`。起動時間をソースコンパイルから分離。FR-405（Startup Optimization）と連携
@@ -1222,7 +1222,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-106: Parallel File Compilation
 
-- **対象**: `cli/src/main.lisp`
+- **対象**: `packages/cli/src/main.lisp`
 - **内容**: 依存関係のないソースファイルを並列コンパイル (`./cl-cc selfhost` 84ファイルの高速化)
 - **難易度**: Medium
 
@@ -1254,7 +1254,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-224: VM Sampling Profiler (VMサンプリングプロファイラ)
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `defopcode`実行時の統計収集なし。ホットスポット検出にはホストCLのprofilerを使用するしかない
 - **内容**: VMインタプリタループに定期的なPC（プログラムカウンタ）サンプリング挿入。命令カウンタまたは時間ベースでサンプリング。`./cl-cc run --profile` でフレームグラフ出力。FR-058（Type Feedback PGO）のデータソース
 - **根拠**: V8 --prof / perf / async-profiler。自前VMの性能分析基盤としてPGO（FR-104/FR-105）の前提条件
@@ -1302,7 +1302,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-244: Trace-Based Dynamic JIT (トレースベースJIT)
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: FR-154（Tiered Compilation）はAOT的な2段階コンパイル。実行時のホットパス記録・コンパイル基盤なし。FR-224（Sampling Profiler）はサンプリングであってトレース記録ではない
 - **内容**: VMインタプリタループにトレース記録モードを追加。ホットループのバックエッジでトレース記録開始、ループ出口・サイドイグジットでトレース終了。記録されたトレースを型特殊化してネイティブコードにコンパイル。サイドトレース（ガード失敗時の分岐パス）の遅延コンパイル
 - **根拠**: LuaJIT / TraceMonkey / PyPy。ループ中心のワークロードでインタプリタ比100x高速化の実績
@@ -1322,7 +1322,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-261: Value Profiling (値プロファイリング)
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: FR-058（Type Feedback PGO）は型頻度カウンタのみ。実際の値（定数、範囲）の収集なし。FR-224（Sampling Profiler）はPC位置のみ
 - **内容**: IC hit時に型だけでなく実際の値のヒストグラムを記録。頻出定数→定数畳み込み、値範囲→範囲解析（FR-038）にフィードバック。テーブルサイズ上限付きTop-K値記録
 - **根拠**: V8 value profiling / HotSpot -XX:+ProfileReturnOnly。型プロファイリングの精密化
@@ -1330,7 +1330,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-262: Call-Chain Profiling (コンテキスト感応プロファイリング)
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: FR-224（VM Sampling Profiler）はフラット（PC位置のみ）。呼び出し元コンテキストを区別しない
 - **内容**: サンプリング時にコールスタック上位N段（デフォルト8）を記録。呼び出しコンテキスト毎の型分布・実行頻度を収集。context-sensitive inlining（FR-053）の判定精度向上
 - **根拠**: Google AutoFDO / BOLT / HotSpot -XX:+CallChainProfiling。コンテキスト無視のフラットプロファイルでは見えない最適化機会を検出
@@ -1338,7 +1338,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-263: Allocation Site Profiling (割り当てサイトプロファイリング)
 
-- **対象**: `packages/backend/runtime/src/gc.lisp`, `packages/backend/runtime/src/heap.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/gc.lisp`, `packages/backend/runtime/src/heap.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `heap.lisp`にアロケーションサイトのトラッキングなし。どの関数/行がメモリ消費の主因か不明
 - **内容**: `rt-gc-alloc`にソース位置メタデータを付与。`./cl-cc run --alloc-profile`でアロケーションサイト毎のバイト数・回数・型を出力。GCチューニング・エスケープ解析（FR-007）の優先度決定に使用
 - **根拠**: Go runtime pprof alloc / Java Flight Recorder allocation profiling。メモリ最適化の起点
@@ -1350,7 +1350,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-267: ThinLTO (モジュール並行リンク時最適化)
 
-- **対象**: `pipeline/src/pipeline.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: FR-102（LTO Whole-Program Call Graph）は全モジュールを逐次処理するフル LTO のみ想定。モジュール数が増えるとコンパイル時間が O(N²) 増大
 - **内容**: LLVM ThinLTO（2015）に相当する 2 フェーズ並行 LTO。**Phase 1**: 全モジュールから要約（関数シグネチャ・エクスポート一覧・型サマリ）を並行抽出してグローバルサマリを構築。**Phase 2**: 各モジュールをサマリのみ参照しながら並行最適化（フル IR 読み込み不要）。呼び出しグラフのエッジを超えたインライン展開はサマリベースで対象を絞り込む。フル LTO の 1/10〜1/4 のコンパイル時間で 70〜90% の効果
 - **根拠**: LLVM ThinLTO paper (2016) / Swift コンパイラの標準 LTO モード。大規模プロジェクトでのフル LTO の現実的代替
@@ -1358,7 +1358,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-264: Background / Concurrent JIT Compilation (バックグラウンドJITコンパイル)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/engine/vm/src/vm-run.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/engine/vm/src/vm-run.lisp`
 - **現状**: JITコンパイル（FR-058/FR-244）はインタプリタ実行をブロックして行う。コンパイル中はVMが停止
 - **内容**: JITコンパイルをバックグラウンドスレッドで実行しつつ、インタプリタ（Tier-0）が継続して動作する並行コンパイル。コンパイル完了後にコードポインタをアトミック置換（`vm-call` のディスパッチテーブルエントリを CAS で更新）。コンパイル中の関数変更（再定義）に対するキャンセル機構も必要
 - **根拠**: V8 の並行コンパイラスレッド / HotSpot `-XX:+TieredCompilation` のC1/C2並行化 / JavaScriptCore DFG concurrent compilation。スループットを犠牲にしない JIT
@@ -1394,7 +1394,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-281: On-Stack Replacement — Interpreter→JIT (OSR昇格)
 
-- **対象**: `packages/engine/vm/src/vm-run.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/vm/src/vm-run.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: JITコンパイルされた関数への切り替えは関数エントリ時のみ。長時間実行中のホットループはインタプリタで動き続ける
 - **内容**: ループバックエッジのバックエッジカウンタが閾値を超えたとき、ループ途中で現在のVMフレームをJITフレームに**オンスタック置換**。OSR入口ブロック（ループヘッダに対応するJIT BBへの直接ジャンプ）を生成。VM変数→JITレジスタへの変数マッピングをOSR入口点で確立
 - **根拠**: HotSpot OSR / V8 OSR from Ignition / PyPy OSR。バッチ処理・数値計算系ループで最大の恩恵
@@ -1410,7 +1410,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-283: Speculation Log (投機ログ)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/engine/vm/src/vm.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/engine/vm/src/vm.lisp`
 - **現状**: 型ガード（FR-232）の失敗記録なし。同一ガードが毎回コンパイル時に同じ投機を行い、実行時に何度でも失敗し続ける可能性がある
 - **内容**: `*speculation-log*` — call-site IDをキーとして「この投機は過去に失敗した」フラグを保持するグローバルテーブル。再コンパイル時にログを参照し、失敗実績のある投機は採用しない。ログはプロセス間で `.prof` ファイルに永続化可能
 - **根拠**: GraalVM SpeculationLog / HotSpot replay compile。同一の有害な投機を繰り返すコンパイル・デコンパイルループ（deopt storm）を防ぐ
@@ -1432,14 +1432,14 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 - **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/engine/vm/src/primitives.lisp`
 - **現状**: 演算命令（`vm-add` 等）は実行時タグチェック→ボックス値unwrap→演算→ボックス化という手順。数値ループでボックス化コストが大きい
-- **内容**: 型推論（packages/type/type/src/inference.lisp）で fixnum と判定された変数は unboxed レジスタ（`reg-fixnum` タグ付きMIR値）で管理。`vm-add-fixnum`/`vm-add-float` の特殊化命令を生成し、タグチェックとボックス化を省略。オーバーフロー時は `overflow-trap` でboxed演算にフォールバック
+- **内容**: 型推論（packages/foundation/type/src/inference.lisp）で fixnum と判定された変数は unboxed レジスタ（`reg-fixnum` タグ付きMIR値）で管理。`vm-add-fixnum`/`vm-add-float` の特殊化命令を生成し、タグチェックとボックス化を省略。オーバーフロー時は `overflow-trap` でboxed演算にフォールバック
 - **根拠**: SBCL type-driven code generation / V8 Maglev unboxed Int32 / GraalVM primitive specialization。数値演算ループで2〜5x高速化
 - **難易度**: Hard
 
 #### FR-286: Tagged Integer Range Analysis (タグ付き整数範囲解析)
 
-- **対象**: `packages/type/type/src/inference.lisp`, `packages/engine/optimize/src/optimizer.lisp`
-- **現状**: 型システム（packages/type/type/src/）は fixnum/float/cons の区別はするが、整数の値範囲（0≤n<256等）を追跡しない
+- **対象**: `packages/foundation/type/src/inference.lisp`, `packages/engine/optimize/src/optimizer.lisp`
+- **現状**: 型システム（packages/foundation/type/src/）は fixnum/float/cons の区別はするが、整数の値範囲（0≤n<256等）を追跡しない
 - **内容**: SSA値に整数範囲アノテーション `[lo, hi]` を付与し、CFG上で前向き伝播。`(the (integer 0 255) x)` → `x ∈ [0,255]`。範囲が fixnum に収まると証明できればオーバーフローガード不要。ループインダクション変数の範囲をループ境界から導出（FR-038と統合）
 - **根拠**: LLVM ScalarEvolution / V8 TurboFan range analysis / HotSpot C2 range check elimination。配列境界チェック除去の前提条件
 - **難易度**: Medium
@@ -1494,7 +1494,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-292: Hot/Cold Code Splitting (ホット/コールドコード分離)
 
-- **対象**: `packages/backend/emit/src/x86-64-codegen.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/backend/emit/src/x86-64-codegen.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: 関数内の全基本ブロックが隣接配置。頻繁に実行されないエラー処理パスがホットパスのI$を汚染
 - **内容**: プロファイルデータ（FR-104）で実行頻度の低い基本ブロック（エラーハンドラ・rare-branch）を関数末尾または別セクションに移動。ホットパスのブロックを直線的に配置してI$ミス削減。`unlikely` アノテーション（Common LispのCMU CLスタイル）で静的ヒントも受け付ける
 - **根拠**: HotSpot `-XX:+ProfileCompiledMethods` / LLVM `-fprofile-use` cold section / V8 hot/cold block layout。I$利用率15〜30%改善
@@ -1502,7 +1502,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-293: Profile-Guided Code Layout (プロファイル誘導コードレイアウト)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/backend/binary/src/macho.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/backend/binary/src/macho.lisp`
 - **現状**: 関数の配置順はASDFロード順。呼び出し関係に基づく局所性最適化なし
 - **内容**: 実行プロファイルから関数呼び出しグラフ（コールグラフ）上のエッジ重みを収集し、頻繁に連続呼び出される関数群を隣接配置。Mach-Oの`__TEXT,__text` セクション内で関数の物理的順序を最適化。`clang -forder-file` / Facebook BOLTに相当するポストリンク最適化
 - **根拠**: Google AutoFDO / Meta BOLT / Apple PGO order file。大規模プログラムでのI$ミス20〜40%削減
@@ -1542,7 +1542,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-297: ML-Guided Inlining (機械学習誘導インライン展開)
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: インライン化判定はヒューリスティック（コード行数・呼び出し深度・FR-105プロファイル閾値）。最適な閾値の設定はブラックアート
 - **内容**: 関数ペア（呼び出し元・callee）の特徴量ベクトル（命令数、ループ深度、型特殊化度、呼び出し頻度、引数パターン）を入力に、インライン化の利益を予測する小規模 MLP モデル（隠れ層256次元、パラメータ数〜50K）。推論は `./cl-cc compile` 実行中に数μsで完了。モデルは cl-cc 自身の selfhost プロファイルで事前学習
 - **根拠**: Google MLGO (2021) / Meta Inliner ML / ARM NN-guided compiler。ヒューリスティックより10〜15%コードサイズ削減＋性能向上。2024〜2026年のLLVM/GCC本流に統合済み
@@ -1550,7 +1550,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-298: Feedback-Directed Optimization via Corpus PGO (コーパスPGO)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **現状**: PGO（FR-104/FR-105）はユーザー提供のプロファイルデータに依存。代表的な入力セットがない場合は効果なし
 - **内容**: cl-cc 自身の selfhost 実行（84ファイル）をコーパスとして自動プロファイル収集→最適化の **bootstrap PGO**。`make pgo-build`: (1) instrumented binary でselfhost実行してプロファイル生成、(2) プロファイルを使ってrelease build。CI に統合して毎ビルドでプロファイルを更新
 - **根拠**: Clang `-fprofile-generate` → `-fprofile-use` / GCC `-fprofile-generate` ワークフロー。Rustcも同様のbootstrap PGOを採用（2022〜）。通常5〜20%のコンパイル時間短縮
@@ -1582,7 +1582,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-301: Tiered Wasm Compilation (段階的Wasmコンパイル)
 
-- **対象**: `packages/backend/emit/src/wasm.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/backend/emit/src/wasm.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: Wasm バックエンドは1段階のAOTコンパイルのみ（FR-080）
 - **内容**: **Tier-0**: Wasm バイトコードを直接インタプリタ実行（低レイテンシ起動）。**Tier-1**: ホット関数を Cranelift / LLVM-MC ベースの Baseline JIT でコンパイル（最適化なし、1ms以下）。**Tier-2**: 実行頻度上位5%をオプティマイジングJIT（FR-105ベースPGO適用）でコンパイル。WasmGC（reference types, structs, arrays）に対応したGC統合
 - **根拠**: V8 Liftoff→TurboFan / Firefox Baseline→Ion / Wasmtime Cranelift。Wasm 起動時間をAOTコンパイル待ちなしで提供
@@ -1610,7 +1610,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-304: JIT Code Cache Eviction (JITコードキャッシュ退避)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/engine/vm/src/vm-run.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/engine/vm/src/vm-run.lisp`
 - **現状**: FR-300（JIT Code Region Isolation）でコードアリーナを確保するが、上限到達時の退避ポリシー未定義。コードキャッシュが満杯になると新規コンパイルが失敗する
 - **内容**: JITコードエントリに **warmth counter**（呼び出し回数の指数平滑移動平均）を付与。キャッシュ使用率が閾値（デフォルト80%）を超えたとき、warmthが最低のエントリからLRU退避。退避対象のコードポインタを `vm-call` ディスパッチテーブルから Interpreter stub に差し戻し（CAS）。退避後に再度ホットになれば再コンパイル。`./cl-cc run --jit-cache-stats` でヒット率・退避回数を出力
 - **根拠**: V8 code flushing / HotSpot `-XX:ReservedCodeCacheSize` + code cache sweeper / JavaScriptCore JIT memory pressure eviction。長時間稼働プロセスでのメモリリーク防止
@@ -1618,7 +1618,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-305: Adaptive Recompilation Thresholds (適応的再コンパイル閾値)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/engine/vm/src/vm-run.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/engine/vm/src/vm-run.lisp`
 - **現状**: Tier昇格の閾値（バックエッジカウンタ・呼び出し回数）はコンパイル時定数。コールドスタート時も安定稼働時も同じ閾値を使用するため、起動直後に必要以上にコンパイルが走るか、逆にホット関数の昇格が遅延する
 - **内容**: プロセス起動からの経過時間・総コンパイル時間・CPU 使用率をモニタし、Tier昇格閾値を動的に調整。**warm-up フェーズ**（起動後30秒）: 閾値を通常の1/3に下げて積極コンパイル。**安定フェーズ**: コードキャッシュ使用率が60%超なら閾値を2倍に引き上げてコンパイル抑制。**メモリ逼迫時**: Tier-2への昇格を停止しTier-1のみ稼働。閾値変更は `*jit-compilation-budget*` パラメータ経由で外部からも制御可能
 - **根拠**: HotSpot `-XX:CompileThreshold` 動的調整 / V8 compilation budget / GraalVM adaptive compilation policy。起動レイテンシとスループットのトレードオフを実行時に自動調整

@@ -166,7 +166,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-219: AOT モード — 静的 Wasm バイナリ生成
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
 - **現状**: `./cl-cc compile` はVM命令列を出力後、実行時JITでWasmに変換
 - **内容**: `./cl-cc compile --target wasm32 --aot` フラグで完全静的な `.wasm` バイナリを1パスで生成。`wasm-opt`（Binaryen）を自動起動してサイズ最適化（`-O3 --strip-debug`）。`wasm2wat` でテキスト形式を生成しデバッグ支援。dead export elimination でバイナリサイズを 20〜40% 削減
 - **根拠**: CDN配信・エッジ実行（Cloudflare Workers / Fastly Compute）向けの必須ビルドモード
@@ -182,7 +182,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-221: Wasm Import/Export リンク最適化 — Dead Import Elimination
 
-- **対象**: `packages/backend/emit/src/wasm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/emit/src/wasm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 全 VM ホストブリッジ関数（`*vm-host-bridge-functions*` の全エントリ）が無条件にWasm import として宣言される
 - **内容**: 依存グラフ解析で実際に呼び出される import のみを宣言。`--gc-sections` 相当のリンク時デッドコード除去をWasm レベルで実施。Binaryen `--remove-unused-module-elements` パスを AOT パイプラインに統合
 - **根拠**: 未使用 import はバイナリサイズ・JIT コンパイル時間両方に影響。最小 `.wasm` は CDN キャッシュヒット率に直結
@@ -194,7 +194,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-222: DWARF デバッグ情報 — Wasm カスタムセクション
 
-- **対象**: `packages/backend/emit/src/wasm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/emit/src/wasm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: デバッグ情報なし。Chrome DevTools でのステップ実行・変数インスペクト不可
 - **内容**: DWARF 5 形式のデバッグ情報を Wasm カスタムセクション（`.debug_info`/`.debug_line`/`.debug_abbrev`）に埋め込み。CL ソース行 → Wasm バイトオフセットのマッピングを生成。`--emit-debug-info` フラグで有効化。Chrome DevTools / LLDB の Wasm デバッガが CL ソースを直接表示
 - **根拠**: DWARF-in-Wasm は Chrome 90+（2021年）でサポート。Emscripten・Rust の実装が先行。開発体験の大幅改善
@@ -238,7 +238,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-227: Wasm Dynamic Linking — CL `load`/`require` のWasm実装
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`, `packages/engine/vm/src/vm.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`, `packages/engine/vm/src/vm.lisp`
 - **現状**: コンパイル出力は単一の monolithic `.wasm` バイナリ。CL の `(load "my-lib")` / `(require :my-system)` に相当するランタイム動的ロードなし
 - **内容**: Wasm Dynamic Linking（Emscripten の `SIDE_MODULE`/`MAIN_MODULE` 方式 + Wasmtime `component link` の2方式）に対応。メインモジュールが `__indirect_function_table` を export し、サイドモジュールが `__stack_pointer`/`__memory_base`/`__table_base` を import する規約に準拠。`./cl-cc compile --side-module my-lib.lisp` でサイドモジュール生成。CL の `(load "my-lib.wasm")` を `WebAssembly.instantiate` + テーブル更新にコード生成
 - **根拠**: Quicklisp スタイルの遅延ロード・ライブラリ分割ビルドに必須。ブラウザの code splitting（初期ロードサイズ削減）にも対応
@@ -262,7 +262,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-230: WebAssembly ESM Integration — `import` ネイティブ対応
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
 - **現状**: ブラウザでの Wasm ロードは `fetch` + `WebAssembly.instantiate` の手動ステップが必要
 - **内容**: Wasm ESM Integration Proposal（Chrome 89+、Safari 15+）に準拠した `.wasm` export を生成。JS から `import { myFn } from './module.wasm'` で直接インポート可能な形式。Top-level await との統合。`<script type="module">` での Wasm モジュール直接参照。`./cl-cc compile --esm` フラグで ESM 準拠バイナリ生成
 - **根拠**: CDN 経由の Wasm ライブラリ配布・ブラウザ CL REPL のバンドレス配信に必要
@@ -278,7 +278,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-232: Wasm Streaming Compilation / Module Caching
 
-- **対象**: `cli/src/main.lisp`
+- **対象**: `packages/cli/src/main.lisp`
 - **現状**: `WebAssembly.instantiate(buffer)` で全バイト受信後にコンパイル開始
 - **内容**: `WebAssembly.instantiateStreaming(fetch(url))` でダウンロードと並行コンパイルを有効化。`WebAssembly.compileStreaming` + IndexedDB でコンパイル済みモジュールを永続キャッシュ。`--streaming` フラグで生成コードを streaming API 使用に切り替え。Content-Hash ベースのキャッシュキー生成（バイナリ変更時のみ再コンパイル）
 - **根拠**: 大規模 CL システム（Quicklisp 全体）の初回ロード時間を最大 60% 削減。Progressive Web Apps での必須パターン
@@ -514,7 +514,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-258: Wasm Profiles — 機能プロファイル宣言
 
-- **対象**: `packages/backend/emit/src/wasm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/emit/src/wasm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: コンパイルターゲットに必要な Wasm 機能セットを宣言する手段なし。実行環境が必要な機能をサポートするか実行時まで不明
 - **内容**: Wasm Profiles Proposal（2024年提案）でモジュールが依存する機能プロファイルを宣言。`./cl-cc compile --profile gc,threads,tail-call` でプロファイルセクション生成。`wasmtime`/ブラウザが起動前に互換性チェック。`--profile minimal`（MVP のみ）から `--profile full`（全提案）まで段階的ターゲット指定
 - **根拠**: 機能検出の実行時コストを排除。デプロイ先環境の事前互換性検証で `WebAssembly.RuntimeError` を本番環境で踏むリスクを排除
@@ -538,7 +538,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-261: Wasm セキュリティ — CFI / CSP / Constant-Time
 
-- **対象**: `packages/backend/emit/src/wasm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/emit/src/wasm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: セキュリティ関連の考慮なし。CL の暗号ライブラリ（Ironclad 等）がタイミング攻撃に脆弱な可能性
 - **内容**: (1) **CFI**: `call_ref`（FR-212）に型シグネチャチェックを追加し間接呼び出しの型安全性を強化。(2) **CSP**: `'wasm-unsafe-eval'` CSP ディレクティブ不要なコード生成（動的コード生成を避けた静的 AOT バイナリ）。(3) **Constant-Time**: 暗号プリミティブの分岐を `select` 命令に変換してタイミングチャネルを排除。`--constant-time` フラグで有効化
 - **根拠**: ブラウザ上の CL は同一オリジンポリシー下で動作。CSP 準拠・CFI はセキュリティ審査の必須項目
@@ -562,7 +562,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-264: Lazy Function Bodies — 遅延関数コンパイル
 
-- **対象**: `packages/backend/emit/src/wasm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/emit/src/wasm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: AOT バイナリ（FR-219）は全関数のコード本体を含む。Quicklisp システム全体をロードすると数千関数のコードが一括コンパイルされ初回ロードが遅い
 - **内容**: コード本体をスタブ関数（`unreachable` 1命令）に置き換え、実際の実装を別の `.wasm` セクションまたは外部リソースとして遅延ロード。`WebAssembly.instantiate` の `importObject` 経由で動的パッチ。使用頻度に基づく関数本体の分割戦略（FR-220 PGO データを活用）。Dynamic Linking（FR-227）と組み合わせてホット関数のみ初回バイナリに含める
 - **根拠**: Quicklisp 全体（~1000パッケージ）をブラウザで動かす際の初回ロード時間削減。V8 の lazy compilation と同等のユーザー体験
@@ -570,7 +570,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-265: 決定論的ビルド — 再現可能バイナリ
 
-- **対象**: `packages/backend/emit/src/wasm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/emit/src/wasm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: コンパイル出力にタイムスタンプ・非決定論的なハッシュテーブル順序が混入する可能性がある。同じソースから異なるバイナリが生成され CDN キャッシュが無効化される
 - **内容**: `--deterministic` フラグで決定論的出力を保証。シンボルテーブル・型定義・エクスポートリストをソート済みで出力。タイムスタンプ・ファイルパス絶対表記をバイナリから除去。SHA-256 コンテントハッシュをカスタムセクションに埋め込み。Streaming Compilation（FR-232）の IndexedDB キャッシュキーとして使用
 - **根拠**: CDN キャッシュ・供給チェーンセキュリティ・`diff` によるリリース差分検査に必須。Rust/Zig のコンパイラが先行実装済み
@@ -594,7 +594,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-269: Wasm `call_stack` Inspection — スタックイントロスペクション
 
-- **対象**: `packages/engine/vm/src/conditions.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/conditions.lisp`, `packages/cli/src/main.lisp`
 - **現状**: CL の `(backtrace)` / `(sb-debug:print-backtrace)` 相当なし。例外発生時のスタックトレースが Wasm バイトオフセット表記のみ
 - **内容**: Wasm Stack Introspection Proposal（Phase 0、2024年提案開始）が標準化されるまでの橋渡しとして `Error.captureStackTrace` + DWARF（FR-222）/ Source Maps（FR-223）を組み合わせてCLスタックフレームを再構成。将来の `WebAssembly.StackTrace` API に対応した抽象レイヤーを実装。CL の `(print-backtrace)` が CL 関数名・引数・ファイル行番号を出力。REPL のデバッガコマンド `:backtrace`/`:frame` の Wasm 実装
 - **根拠**: デバッグ体験の基本。DWARF（FR-222）と Source Maps（FR-223）を実装しても `backtrace` がなければ CL プログラマは使い物にならないと感じる
@@ -638,7 +638,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-274: WASI Worlds 完全対応 — `wasi:nn` / `wasi:http` / `wasi:cli`
 
-- **対象**: `packages/backend/emit/src/wasm.lisp`, `packages/engine/vm/src/io.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/emit/src/wasm.lisp`, `packages/engine/vm/src/io.lisp`, `packages/cli/src/main.lisp`
 - **現状**: FR-207 は `wasi:filesystem`/`wasi:sockets`/`wasi:clocks` を列挙。`wasi:nn`（Neural Network）・`wasi:http`（HTTP クライアント）・`wasi:cli`（標準 CLI world）が未対応
 - **内容**: (1) **`wasi:nn`**: WASI Neural Network Interface（wasi-nn 0.2）の `load`/`init_execution_context`/`set_input`/`compute`/`get_output` を CL バインディングとして公開。`(wasi:nn-infer model inputs)` API。(2) **`wasi:http`**: HTTP/1.1・HTTP/2 クライアント（`wasi:http/outgoing-handler`）を `(http-request :get url)` として実装。(3) **`wasi:cli`**: argv・環境変数・stdin/stdout/stderr の標準 CLI world。`./cl-cc compile --world cli` で CLI アプリ生成
 - **根拠**: `wasi:nn` は ONNX モデルの CL 推論に必要。`wasi:http` は Quicklisp のパッケージダウンロードを WASI 環境で実現。`wasi:cli` は `wasmtime run` での標準実行形式
@@ -646,7 +646,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-275: `WebAssembly.Module` postMessage — Worker 間モジュール共有
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
 - **現状**: FR-227 の Dynamic Linking は `WebAssembly.instantiate` でモジュールをロード。複数 Worker が同一モジュールを使う場合、各 Worker が独立してコンパイルするため N 倍のコンパイル時間
 - **内容**: `WebAssembly.Module` は `postMessage` で `Transferable` として Worker に転送可能（Chrome 全バージョン対応）。コンパイル済みモジュールを `postMessage(module, [module])` で Worker に配布し `WebAssembly.instantiate(module, imports)` で即時インスタンス化。Streaming Compilation（FR-232）と組み合わせてメインスレッドで1回コンパイル→全 Worker に転送。CL の `bt:make-thread` がバックグラウンドで Worker を起動する際にモジュールを転送
 - **根拠**: 4 Worker でコンパイル4回→1回に削減。Shared Everything Threads（FR-224）の前提として Worker 間でモジュールを共有する必要がある
@@ -654,7 +654,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-276: Wasm Import Maps — ブラウザモジュール名前解決
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
 - **現状**: Wasm モジュールの import は文字列リテラル（`"wasi:filesystem/types"`）で固定。開発・本番・テスト環境でモジュール URL を切り替える手段がコード変更のみ
 - **内容**: HTML `<script type="importmap">` の Wasm 版（Wasm Import Maps 提案）で モジュール名 → URL のマッピングを外部設定として分離。`wasi:filesystem` → `https://cdn.example.com/wasi-fs-0.2.wasm` のような環境別マッピング。`./cl-cc compile --import-map prod.json` で本番用 URL を生成バイナリに埋め込まず外部設定に委譲。Dynamic Linking（FR-227）の URL 解決層として統合
 - **根拠**: Quicklisp パッケージの CDN 配布で開発版・本番版を切り替える標準パターン。Deploy パイプラインでコード変更なしにモジュール URL を差し替え可能
@@ -662,7 +662,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-277: CL ABI / シンボル名マングリング — クロス言語 FFI
 
-- **対象**: `packages/backend/emit/src/wasm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/emit/src/wasm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: CL 関数の Wasm export 名はシンボル名そのまま（例: `FOO:BAR-BAZ`）。C/Rust/JS からの呼び出しで特殊文字が問題になる。`defpackage`・`defun` の名前空間情報が export 名から失われる
 - **内容**: CL ABI マングリング規約を定義。`(export #'foo:bar-baz)` → `_ZN3FOO7BAR_BAZE`（C++ like）または `foo__bar_baz`（snake_case）。`--abi c` / `--abi rust` / `--abi js` フラグで対象言語別マングリングを選択。Component Model（FR-206）の WIT バインディングとの名前対応表を自動生成。`extern "cl" { fn foo_bar_baz(x: i64) -> i64; }` 形式の Rust バインディングを出力
 - **根拠**: ESM Integration（FR-230）・Dynamic Linking（FR-227）で他言語から CL 関数を呼ぶ際の名前衝突・特殊文字エスケープの標準化。C ABI 互換なしでは既存ライブラリとのリンクが困難
@@ -686,7 +686,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-280: Wasm 初期化順序 — `__wasm_call_ctors` / toplevel 実行
 
-- **対象**: `packages/backend/emit/src/wasm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/emit/src/wasm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: CL の `eval-when (:load-toplevel)` フォーム・`defvar`・`defparameter` の実行順序がWasm モジュール instantiation 後に保証されない。複数モジュールのコンストラクタ実行順序が未定義
 - **内容**: `__wasm_call_ctors` 関数（Emscripten/wasm-ld 慣習）を生成。モジュール instantiation 直後に embedder が `__wasm_call_ctors()` を呼び出す規約に準拠。ASDF の `component-depends-on` 順序を `__wasm_call_ctors` の呼び出しシーケンスに反映。Dynamic Linking（FR-227）でサイドモジュールのコンストラクタをメインモジュールの `__wasm_call_ctors` から順次呼び出し。`eval-when (:load-toplevel)` の逆順ファイナライザを `__wasm_call_dtors` として登録
 - **根拠**: ASDF の依存グラフに基づく初期化順序を Wasm で再現。`defvar *db* (make-hash-table)` の後に `(setf (gethash :key *db*) val)` が実行されることを保証
@@ -746,7 +746,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-287: Wasm Startup Snapshots — V8 ヒープスナップショット
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
 - **現状**: 毎回の起動時に全 `defvar`・`defparameter`・グローバル初期化（FR-280 `__wasm_call_ctors`）が実行される。Quicklisp システム全体のロードで数秒の起動コスト
 - **内容**: V8 の `--wasm-lazy-validation` + Wasm Snapshot API（Node.js `v8.serialize`/`v8.deserialize` のWasm版）を活用。初期化済みの Wasm GC ヒープ状態をシリアライズしてスナップショット `.wasm.snap` ファイルに保存。次回起動時はスナップショットから直接 resume。`./cl-cc compile --snapshot` で snapshot 付きバイナリを生成。Chrome の `WebAssembly.compileStreaming` + IndexedDB（FR-232）と連携してブラウザ側でも永続化
 - **根拠**: Node.js の startup snapshot（`node --build-snapshot`）と同等の機能。SBCL の `save-lisp-and-die` のWasm版。起動時間を数秒→数十ミリ秒に削減
@@ -754,7 +754,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-288: Wasm インクリメンタル REPL コンパイル
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **現状**: `./cl-cc repl` はVM上でインタープリタ実行。Wasm バックエンドへのコンパイルはモジュール単位で全体再コンパイルが必要
 - **内容**: REPL で入力された S 式を単一関数の Wasm モジュールとしてその場でコンパイル→`WebAssembly.instantiate` → Dynamic Linking（FR-227）で既存モジュールの関数テーブルにパッチ。`(defun f (x) ...)` REPL 入力 → 新関数を既存モジュールにリンク。Lazy Function Bodies（FR-264）と組み合わせてインクリメンタルビルドを実現。`*repl-pool-instructions*`（既存の REPL プール）をWasmバックエンドで置換
 - **根拠**: CL の REPL 体験の核心。現状の VM インタープリタ実行よりWasm JIT実行の方が高速。ブラウザ上での CL REPL に必須
@@ -830,7 +830,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-297: COOP / COEP — SharedArrayBuffer の前提条件
 
-- **対象**: `cli/src/main.lisp`, ドキュメント
+- **対象**: `packages/cli/src/main.lisp`, ドキュメント
 - **現状**: FR-203（Threads）は SharedArrayBuffer を前提とするが、Chrome 92+ でクロスオリジン分離なしに SharedArrayBuffer を使用すると `TypeError: SharedArrayBuffer is not defined` が発生
 - **内容**: `Cross-Origin-Opener-Policy: same-origin` と `Cross-Origin-Embedder-Policy: require-corp`（または `credentialless`）ヘッダを Wasm ホストサーバーに設定する要件をビルドパイプラインに統合。`./cl-cc serve --threads` で開発サーバーが自動的に COOP/COEP ヘッダを付与。デプロイガイドに Cloudflare Workers / Nginx / Apache の設定例を記載。`SharedArrayBuffer` 非対応環境では自動的に単一スレッドフォールバック（FR-258 Profiles と連携）
 - **根拠**: Threads（FR-203）・Shared Everything（FR-224）・Worker postMessage（FR-275）はすべて SharedArrayBuffer に依存するが、COOP/COEP なしでは Safari/Chrome で無効化される。最も見落とされやすいデプロイ時の落とし穴
@@ -870,7 +870,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-302: ServiceWorker + Wasm — オフライン CL Web アプリ
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
 - **現状**: Wasm モジュールのキャッシュは IndexedDB（FR-232）のみ。ネットワーク断絶時に `.wasm` の再フェッチが発生しアプリが動作しない
 - **内容**: Service Worker（`sw.js`）で `.wasm` バイナリを Cache Storage にキャッシュ。`./cl-cc compile --pwa` で Service Worker 登録コード + `manifest.json` を自動生成。オフライン時は Cache Storage から `.wasm` を配信。Streaming Compilation（FR-232）と組み合わせてキャッシュからのインスタンス化を高速化。WASI CLI world（FR-274）を利用した CL スクリプトをブラウザオフラインで実行
 - **根拠**: Progressive Web Apps の標準パターン。CL の REPL をオフライン対応にするには ServiceWorker が必須。CDN キャッシュとは独立して動作する
@@ -894,7 +894,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-305: `WebAssembly.validate()` — 静的検証 API
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
 - **現状**: Wasm バイナリの正当性は `WebAssembly.instantiate` 実行時に初めて検証。無効なバイナリが本番環境で `CompileError` を起こすまで検出できない
 - **内容**: `WebAssembly.validate(buffer)` JS API（全主要ブラウザ対応）をビルドパイプラインに統合。AOT ビルド（FR-219）後に `WebAssembly.validate` を自動実行して不正バイナリを CI で検出。`wasmtime validate` コマンドとのダブルチェック体制。`--validate` フラグで生成直後に検証を実行。型エラー・スタック不整合・GC 型循環を本番前に検出
 - **根拠**: Wasm バリデーションは線形時間で完了。CI パイプラインでの静的検証によりデプロイ後の `CompileError` を排除。Security（FR-261）の型安全検証の一環
@@ -910,7 +910,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-307: Subresource Integrity for Wasm — `.wasm` ファイルの完全性検証
 
-- **対象**: `cli/src/main.lisp`
+- **対象**: `packages/cli/src/main.lisp`
 - **現状**: `<script src="main.wasm">` や `fetch("main.wasm")` で読み込む `.wasm` ファイルにコンテンツ完全性チェックなし。CDN 改ざんや中間者攻撃で悪意ある Wasm が実行される可能性
 - **内容**: Wasm ファイルに Subresource Integrity（SRI）ハッシュを付与。`./cl-cc compile` が `main.wasm` の SHA-256/SHA-384 ハッシュを計算し `integrity="sha256-..."` 属性値を出力。`<link rel="preload" href="main.wasm" as="fetch" integrity="sha384-..." crossorigin>` を生成 HTML に自動挿入。`fetch` ベースのロードコードにも `{ integrity: "sha384-..." }` を付与。決定論的ビルド（FR-265）と組み合わせて再現可能なハッシュを保証
 - **根拠**: 供給チェーンセキュリティ（FR-261）の具体的実装。CDN キャッシュポイズニングや JS bundle 改ざんと同等の攻撃ベクタを防御。npm パッケージの `integrity` フィールドと同じ仕組み
@@ -946,7 +946,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-311: `wasm-c-api` — ネイティブ C 埋め込み API
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
 - **現状**: cl-cc の Wasm バイナリは JS/ブラウザまたは WASI ランタイム（wasmtime/wasmer）経由でのみ実行可能。ネイティブ C/C++ アプリケーションへの直接埋め込みパスなし
 - **内容**: `wasm-c-api`（W3C 標準 C API、`wasm.h`）を使用したホスト埋め込みコードを生成。`./cl-cc compile --emit-c-header` で `cl_module.h`（`wasm_func_t`/`wasm_instance_t` 型のバインディング）を出力。C から `cl_call_function(instance, "my-fn", args)` で CL 関数を呼び出し。FFI 境界の型変換（CL → `wasm_val_t`）を自動生成。iOS/Android への CL ライブラリ埋め込み・ゲームエンジン（Unity/Unreal）への CL スクリプト統合に対応
 - **根拠**: WASI なしの組み込み環境（マイコン・ゲーム・モバイル）では `wasm-c-api` が唯一の標準埋め込みパス。CL をネイティブアプリのスクリプト言語として使用するユースケース
@@ -954,7 +954,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-312: Wasm 実行時フィーチャー検出
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
 - **現状**: FR-258（Profiles）は静的なフィーチャー宣言のみ。デプロイ先ブラウザ/ランタイムが実際にどの Proposal を実装しているかを実行時に確認する手段が未記載
 - **内容**: `WebAssembly.featureDetect`（Chrome提案）または 小さな Wasm モジュールを `WebAssembly.validate` でテストするフィーチャー検出スニペットを生成。`(if (wasm-supports-p :gc :threads :tail-calls) ...)` で実行時に最適ビルドを選択。FR-258（Profiles）との連携：プロファイル別ビルドを用意し実行時に最適版を選択してロード。`./cl-cc compile --feature-detect` でフィーチャー検出コード付きローダーを生成
 - **根拠**: 2026年でも古いブラウザ（Safari 16以下）や組み込みランタイムでは GC/Threads が未実装の場合がある。静的プロファイル（FR-258）だけでは実行時の互換性エラーを防げない
@@ -994,7 +994,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-317: Hot Code Reloading — 実行中モジュールの関数パッチ
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/emit/src/wasm.lisp`
 - **現状**: FR-288（REPL インクリメンタルコンパイル）は新関数を Dynamic Linking で追加する。既存関数の実装を実行中に差し替える（hot swap）手段なし
 - **内容**: Dynamic Linking（FR-227）の `__indirect_function_table` への `table.set` を使用してホット関数パッチを実装。`(defun f (x) ...)` の再定義 → 新しいWasm関数コードを含むサイドモジュールをインスタンス化 → テーブルエントリを `table.set` で上書き。実行中の CL サーバー（`hunchentoot`/`clack`）のリクエストハンドラを再起動なしで更新。CLOS の `add-method` / `remove-method` を hot swap で実現
 - **根拠**: SBCL の `compile` + `load` によるホットリロードはCL開発の核心。Wasm 環境でもゼロダウンタイム更新・インタラクティブ開発を実現するために必須
@@ -1002,7 +1002,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-318: Wasm メモリプロファイラ / ヒープインスペクタ
 
-- **対象**: `packages/backend/runtime/src/gc.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/gc.lisp`, `packages/cli/src/main.lisp`
 - **現状**: FR-222（DWARF）・FR-223（Source Maps）はソースレベルデバッグを提供。GC ヒープの使用量・オブジェクト分布・リーク検出の可視化手段なし
 - **内容**: Chrome DevTools の "Memory" パネルと連携するヒープスナップショット API を実装。`./cl-cc run --heap-profile` で GC ヒープ状態を定期スナップショット。Wasm GC struct/array の型別サイズ分布・alive オブジェクト数を集計。`(heap-dump "/tmp/heap.json")` でヒープ状態を JSON 出力（Chrome DevTools ヒープスナップショット形式）。GC ルートからの参照グラフを DOT 形式で出力。メモリリーク（循環参照・キャッシュ肥大化）を検出する `(find-leaks)` ツール
 - **根拠**: Quicklisp 全体をロードすると GC ヒープが数百MBになる場合がある。ヒープインスペクタなしでは どのデータ構造がメモリを消費しているか分からない
@@ -1010,7 +1010,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-319: Component Model テスト基盤 — WIT インターフェース検証
 
-- **対象**: `packages/backend/emit/src/wasm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/emit/src/wasm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: FR-206（Component Model）は WIT バインディング生成を記載。生成した `.wasm` コンポーネントが WIT インターフェース仕様に準拠しているか検証するテストハーネスなし
 - **内容**: `wit-bindgen test` 相当のインターフェース適合テストを統合。`./cl-cc test --wit my-component.wit` で WIT 定義に対する自動テスト生成。型マッピング（CL `string` ↔ WIT `string`・CL `list` ↔ WIT `list<T>`）の正確性をラウンドトリップテストで検証。Rust / Python / JS の `wit-bindgen` 生成コードとの相互運用テスト。`wasmtime serve` で HTTP handler world（FR-274）の E2E テスト実行
 - **根拠**: Component Model（FR-206）は他言語との相互運用が目的だが、WIT 型マッピングのバグは実行時型エラーとして現れる。静的インターフェース検証により「CL と Rust が同じ WIT を読んでいる」ことを CI で保証
@@ -1030,7 +1030,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-321: WASI Preview 1 互換シム — 後方互換性レイヤー
 
-- **対象**: `packages/backend/emit/src/wasm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/emit/src/wasm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: FR-207（WASI 0.2）は WASI 0.1 との後方互換なしと明記。既存の `wasm32-wasi` ターゲット向けビルド（Quicklisp の一部パッケージ等）が WASI 0.2 環境で動作しない
 - **内容**: `wasm32-wasi-preview1` 互換シム（`wasip1-compat`）を提供。`fd_write`/`fd_read`/`proc_exit` 等の WASI 0.1 関数シグネチャを WASI 0.2 の `wasi:filesystem`/`wasi:cli` にマップするアダプタ層を生成。`./cl-cc compile --target wasm32-wasi` が自動的に互換シムを注入。Component Model（FR-206）の `wasm-tools component` が生成するアダプタと統合。WASI 0.1 バイナリを WASI 0.2 ランタイム上で実行可能に
 - **根拠**: WASI 0.2 移行期（2024〜2026年）に WASI 0.1 向けに書かれた CL ライブラリが多数存在。互換シムなしでは移行コストが高く Quicklisp エコシステムの利用が困難
@@ -1038,7 +1038,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-322: Wasm バイナリツール統合 — `wat2wasm` / `wasm-objdump`
 
-- **対象**: `cli/src/main.lisp`, `flake.nix`
+- **対象**: `packages/cli/src/main.lisp`, `flake.nix`
 - **現状**: FR-219 は `wasm2wat`（逆アセンブル）と `wasm-opt`（Binaryen 最適化）に言及。`wat2wasm`（テキスト→バイナリ）・`wasm-objdump`（セクション解析）・`wasm-decompile`（高水準逆コンパイル）がビルドパイプラインに未統合
 - **内容**: WABT（WebAssembly Binary Toolkit）の各ツールをビルドパイプラインに統合。`./cl-cc disasm --wat module.wasm` → `wasm2wat` 経由のテキスト出力。`./cl-cc inspect module.wasm` → `wasm-objdump -x -d` でセクション・型・インポート・エクスポート・コード解析。`./cl-cc decompile module.wasm` → `wasm-decompile` で擬似コード出力（デバッグ用）。`nix run nixpkgs#wabt` でツールが存在しない場合に自動取得
 - **根拠**: `wasm-opt`（FR-219）は最適化専用。コード解析・デバッグには `wasm-objdump` が不可欠。FR-265（決定論的ビルド）の検証・FR-222（DWARF）のセクション確認に使用
@@ -1228,7 +1228,7 @@ Modern Wasm compiler features (2026 coverage):
 
 #### FR-206: Wasm Component Model (コンポーネントモデル)
 
-- **対象**: `packages/backend/emit/src/wasm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/emit/src/wasm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 出力は単一の `.wasm` バイナリ（core module）。他言語コンポーネントとの型安全な相互運用インターフェースなし
 - **内容**: Wasm Component Model（W3C 2024 標準）対応の `.wasm` コンポーネント生成。WIT（WebAssembly Interface Types）ファイルから CL 型への自動マッピング（string/list/record → Wasm canonical types）。`wit-bindgen` 相当のバインディング自動生成
 - **根拠**: Wasm Component Model は 2024 年に W3C 勧告。WASI 0.2 の前提。他言語との相互運用の標準パス

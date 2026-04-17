@@ -36,7 +36,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-376: Parallel Compilation Pipeline (並列コンパイルパイプライン)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `cl-cc.asd`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `cl-cc.asd`
 - **現状**: コンパイルパイプラインはシングルスレッド逐次実行。ASDFの`:serial t`（`cl-cc.asd:16`）で全ファイルも直列
 - **内容**: **関数レベル並列化**: 相互依存のないトップレベルフォーム（`defun`/`defclass`等）をlparallel/bordeaux-threadsのワーカープールで並列コンパイル。`compile-expression`呼び出しをスレッドセーフ化（`*function-registry*`をCAS操作で保護）。`--jobs N`フラグ（デフォルト=CPUコア数）。独立ファイル間の並列ASDFビルド（FR-325との連携）
 - **根拠**: GCC `-j` / Ninja / Bazel並列実行。cl-ccのselfhost（84ファイル）をCPUコア数倍速化
@@ -44,7 +44,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-377: Remote Build Execution (リモートビルド実行)
 
-- **対象**: `pipeline/src/pipeline.lisp`, 新規`src/build/remote.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, 新規`src/build/remote.lisp`
 - **現状**: コンパイルはローカルマシンのみ
 - **内容**: Bazel Remote Execution API（REAPI v2）互換のビルドキャッシュプロトコル。コンテンツアドレス型リモートキャッシュ（Action Cache + CAS）。`--remote-cache=grpc://host:8980`でCI/CDサーバのキャッシュを共用。buildbuddy / engflow等のOSSバックエンドと互換
 - **根拠**: Bazel RBE / sccache --dist。CI環境での初回ビルド0秒（全ヒット）を実現
@@ -52,7 +52,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-378: Build Artifact Signing (ビルド成果物署名)
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/binary/src/macho.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/binary/src/macho.lisp`
 - **現状**: 生成バイナリに暗号署名なし
 - **内容**: ED25519秘密鍵によるバイナリ署名（`./cl-cc compile --sign-key=key.pem`）。Mach-O Code Signing（`LC_CODE_SIGNATURE`）。SLSA（Supply Chain Levels for Software Artifacts）Provenance記録。`sigstore` / `cosign`互換の署名形式
 - **根拠**: Apple notarization要件（macOS 13+）/ GitHub artifact attestations（2024〜）。SLSA Level 3達成に必要
@@ -64,7 +64,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-380: WASM Component Model / WIT (WASMコンポーネントモデル)
 
-- **対象**: `packages/backend/emit/src/wasm/`, `cli/src/main.lisp`
+- **対象**: `packages/backend/emit/src/wasm/`, `packages/cli/src/main.lisp`
 - **現状**: WASM32バイナリ出力は`target.lisp`に定義済みだが、コンポーネントモデル（`.wasm`コンポーネント）非対応
 - **内容**: **WIT（WebAssembly Interface Types）** IDLからCL型マッピングを自動生成。コンポーネントバイナリ形式（`.wasm` v2 + `component` section）エンコーダ。Canonical ABI（lift/lower関数）のコード生成。`wasm-tools compose`互換の出力
 - **根拠**: WASI Preview 2（2024安定化）/ WIT IDL（2025 W3C標準化）。WASMコンポーネント間でのCLコード再利用がFFIなしに可能
@@ -96,7 +96,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-384: Universal Binary / Fat Binary (ユニバーサルバイナリ)
 
-- **対象**: `packages/backend/binary/src/macho.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/binary/src/macho.lisp`, `packages/cli/src/main.lisp`
 - **現状**: Mach-Oバイナリは単一アーキテクチャのみ
 - **内容**: Mach-O Universal Binary（`FAT_MAGIC = 0xcafebabe`）エンコーダ。`./cl-cc compile --arch=universal input.lisp` でx86-64 + AArch64スライスを1ファイルに格納。スライスのアライメント（ページ境界）とオフセット計算。`lipo -info`互換の出力
 - **根拠**: macOS Monterey以降のApple Silicon/Intel両対応バイナリ要件。`/usr/bin`ツール群はすべてFat Binary
@@ -188,7 +188,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-398: Compiler Plugin / Extension API (コンパイラプラグインAPI)
 
-- **対象**: `packages/frontend/expand/src/expander.lisp`, `packages/engine/optimize/src/optimizer.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/frontend/expand/src/expander.lisp`, `packages/engine/optimize/src/optimizer.lisp`, `packages/cli/src/main.lisp`
 - **現状**: マクロ拡張は可能（`defmacro`）だが最適化パス・コード生成フックの外部登録API なし
 - **内容**: `(cl-cc:define-compiler-pass :after :fold-constants ...)` でユーザー定義最適化パスを登録。`(cl-cc:define-emit-hook :before :function-entry ...)` でコード生成フック。ダイナミックロード可能なプラグイン（`.so`）。GCC Plugin API / LLVM PassPlugin / Rust compiler plugins（rustc_private）相当
 - **根拠**: ドメイン特化最適化（DSL用）・プロファイルインストルメンテーション・独自ABI生成など、コンパイラ本体を変更せずに拡張できる
@@ -340,7 +340,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-417: Monomorphization (単相化)
 
-- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/type/type/src/inference.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/foundation/type/src/inference.lisp`
 - **現状**: ジェネリック関数は常に動的ディスパッチ（CLOSメソッドテーブル）。型特化版の静的生成なし
 - **内容**: `(declaim (ftype (function (fixnum fixnum) fixnum) +))` 等の型宣言がある関数呼び出しで、**型特化クローン**を生成（`add-fixnum-fixnum`等の命名規則）。型引数の組み合わせ数が閾値以内の場合に展開。ボックス化解除（fixnum引数のuntagging）と組み合わせて純粋整数演算に変換。Rust/C++テンプレートの動的言語版
 - **根拠**: 型情報を最大活用したコード特化。CLの`(the fixnum x)`宣言と組み合わせて効果的
@@ -404,7 +404,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-428: Occurrence Typing (オカレンス型付け)
 
-- **対象**: `packages/type/type/src/inference.lisp`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **現状**: 型推論はHindley-Milner（`inference.lisp`）。`(typep x 'fixnum)` 分岐後に型が絞り込まれない
 - **内容**: `(if (typep x 'fixnum) <then> <else>)` のthenブランチでxを`fixnum`型に絞り込み。`(if (null x) <then> <else>)` のelseブランチで`x`からnilを除く。typecase/cond-typeのパターンに対して**型環境の分岐**を管理。型絞り込み後のdevirt（FR-337）・unboxing（FR-417）に連携
 - **根拠**: TypeScript / Typed Racket / Flow。動的型チェックを静的最適化のヒントに変換する最重要機能
@@ -412,7 +412,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-429: Row Polymorphism (行多相性)
 
-- **対象**: `packages/type/type/src/inference.lisp`, `packages/type/type/src/types.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`, `packages/foundation/type/src/types.lisp`
 - **現状**: CLOSオブジェクトの型はclass名による公称型。構造的部分型なし
 - **内容**: `{:x fixnum, :y fixnum | r}` 形式のrow型変数。スロット`:x`と`:y`を持つ任意のオブジェクトを受け付ける多相型。OCaml object types / PureScript / Elm と同等。`(defun distance (p) (sqrt (+ (slot-value p :x)² (slot-value p :y)²)))` が任意のxy-スロット保持オブジェクトに機能
 - **根拠**: CLのCLOSは公称型だがrow多相を加えると構造的サブタイピングが可能。duck typingを型安全にする
@@ -436,7 +436,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-432: Null Safety Analysis (null安全性解析)
 
-- **対象**: `packages/type/type/src/inference.lisp`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **現状**: nilとnon-nilの型レベル区別なし。`(car nil)`等のnilデリファレンスが実行時まで検出されない
 - **内容**: 型に**nullable/non-null**修飾子を追加（`fixnum?`=nullable-fixnum, `fixnum`=non-null）。nilリテラルの型を`null`に。関数宣言で`(declaim (ftype (function (fixnum?) fixnum) safe-add))` が可能に。(if (null x) ...)ブランチ後の絞り込み（FR-428 Occurrence typingとの統合）。Kotlin `?` / Swift Optional / Rust `Option<T>` 相当
 - **根拠**: Lispでのnilバグは最頻出エラーのひとつ。型レベルでの検出は実行時コスト0で安全性向上
@@ -464,7 +464,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-437: Inlay Hints (インレイヒント)
 
-- **対象**: `src/lsp/`, `packages/type/type/src/inference.lisp`
+- **対象**: `src/lsp/`, `packages/foundation/type/src/inference.lisp`
 - **現状**: 型推論結果（FR-127等）はコンパイルメッセージでのみ確認可能
 - **内容**: LSP `textDocument/inlayHint`ハンドラ。**型ヒント**: `(let ((x (+ 1 2))) ...)` の `x` 隣に `: fixnum` を表示。**パラメータ名ヒント**: `(foo 1 2)` を `(foo a: 1 b: 2)` 表示。**戻り値型ヒント**: 関数定義の閉じ括弧後に推論された型を表示。VS Code で表示/非表示をトグル可能
 - **根拠**: LSP 3.17（2022〜）. Rust-analyzer のインレイヒントが好評を博し、Kotlin/C#/Java も追随。型推論結果の可視化でコードの理解が大幅に向上
@@ -500,7 +500,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-442: OpenTelemetry Integration (OpenTelemetry統合)
 
-- **対象**: `packages/engine/vm/src/vm-run.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/vm-run.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 実行トレース・メトリクス・ログの標準出力形式なし
 - **内容**: **OTLP（OpenTelemetry Protocol）**: コンパイルパイプライン各フェーズをspanとして記録（`parse` → `expand` → `cps` → `codegen` → `optimize` → `emit`）。VM関数呼び出しをspanとしてトレース。`--otlp-endpoint=http://localhost:4317`でJaeger/Tempo等に送信。`(cl-cc:with-span "my-operation" ...)` ユーザーAPIも提供
 - **根拠**: OpenTelemetry 1.0（2021〜）/ CNCF graduated（2023）。2026年時点で本番可観測性のデファクト標準
@@ -508,7 +508,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-443: eBPF Profiling Integration (eBPFプロファイリング統合)
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/binary/src/`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/binary/src/`
 - **現状**: プロファイリングはVM命令カウンタ（FR-316）のみ。カーネルレベルのサンプリングプロファイラなし
 - **内容**: **Linux perf_event + BPF**: `./cl-cc run --ebpf-profile` でLinux eBPFプローブを使ったオーバーヘッドほぼゼロのサンプリング。バイナリの`.debug_frame`（DWARF）を活用してJavaScript/Rustと同様にフレームを解決。bpftrace / bcc連携。macOS Instrumentsへの対応（DTrace）
 - **根拠**: perf + DWARF unwinding は2026年のLinux標準プロファイリング手法。プロダクション環境での継続プロファイリングが可能
@@ -516,7 +516,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-444: Flame Graph Generation (フレームグラフ生成)
 
-- **対象**: `cli/src/main.lisp`, FR-316（ベンチマークフレームワーク）
+- **対象**: `packages/cli/src/main.lisp`, FR-316（ベンチマークフレームワーク）
 - **現状**: ベンチマーク結果はテキスト/JSON出力のみ。可視化なし
 - **内容**: サンプリングプロファイラ出力（FR-443またはVM命令カウンタ）から**Brendan Gregg Flame Graph**形式（SVG）を生成。`./cl-cc run --profile foo.lisp | ./cl-cc flamegraph -o foo.svg`。折り畳み可能なインタラクティブSVG。`(cl-cc:profile-report :format :flamegraph)`
 - **根拠**: Flame Graph（Brendan Gregg, 2011〜）は2026年で最も普及したプロファイリング可視化形式。Rustperfなどすべての主要ツールが対応
@@ -524,7 +524,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-445: Hardware Performance Counters (ハードウェア性能カウンタ)
 
-- **対象**: `cli/src/main.lisp`, `packages/engine/vm/src/vm-run.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/engine/vm/src/vm-run.lisp`
 - **現状**: ウォールクロック時間のみ計測可能
 - **内容**: `perf_event_open`syscall（Linux）/ `kpc_set_config`（macOS）でCPUカウンタ取得。**IPC（Instruction Per Cycle）**: キャッシュミス（L1/L2/L3）数、分岐予測ミス数、TLBミス数をベンチマーク結果に併記。`./cl-cc bench --counters=cache-misses,branch-misses foo.lisp`。数値計算最適化のボトルネック同定に使用
 - **根拠**: `perf stat` / Google Benchmark の`--perf_counters` フラグ。「遅いがなぜか」を説明する最直接な情報
@@ -536,7 +536,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-447: C Header Generation (Cヘッダ生成)
 
-- **対象**: `packages/engine/compile/src/codegen.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/cli/src/main.lisp`
 - **現状**: Cコードからcl-cc関数を呼び出す方法なし。逆方向（cl-cc→C）はFFI（FR-194）で対応
 - **内容**: `./cl-cc compile --emit-header foo.lisp -o foo.h` でエクスポート関数の`.h`自動生成。`(export-to-c foo (fixnum fixnum) fixnum)` アノテーション。関数プロトタイプ・型定義（`typedef struct cl_object* cl_object_t;`）・初期化関数（`cl_cc_init()`）を生成。`extern "C"` ガード付き
 - **根拠**: CL関数をCから呼べると既存Cライブラリとの統合が可能。SBCL `sb-alien:alien-funcall` の逆方向
@@ -572,7 +572,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-453: Binary Compression / UPX-style Packing (バイナリ圧縮)
 
-- **対象**: `cli/src/main.lisp`
+- **対象**: `packages/cli/src/main.lisp`
 - **現状**: バイナリはアンパックのまま
 - **内容**: `./cl-cc compile --compress-binary` で出力バイナリにLZ4/Zstd圧縮+デコンプレッサスタブを付加（UPX方式）。`__TEXT`セグメントのread-only部分のみ圧縮（self-modifying防止）。起動時にページフォールトベースのオンデマンドデコンプレッション。組み込み向けに特に有効
 - **根拠**: UPX / elf-packer。フラッシュ容量が限られる組み込みデバイスでのバイナリサイズ削減
@@ -580,7 +580,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-454: Startup Time Optimization (起動時間最適化)
 
-- **対象**: `cli/src/main.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: `./cl-cc run`起動時にSBCLランタイム + ASDF + 全srcファイルのFASLロードが発生
 - **内容**: **Pre-linked stdlib**: 標準ライブラリの機械語を`__DATA_CONST`セグメントにpre-link（FR-364 Image-Based Developmentと連携）。**Lazy loading**: 未使用モジュールの初期化を初回呼び出しまで遅延（`__attribute__((constructor))` + guard変数）。**BOLT PGO layout**（FR-508）でコールドスタートパスを`.text.cold`に隔離
 - **根拠**: Clangのstartup 時間最適化。`cl-cc selfhost`の実行時間測定で起動が律速になっている可能性
@@ -616,7 +616,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-460: Information Flow Control / IFC (情報フロー制御)
 
-- **対象**: `packages/type/type/src/inference.lisp`, `src/analyze/`
+- **対象**: `packages/foundation/type/src/inference.lisp`, `src/analyze/`
 - **現状**: セキュリティラベルなし。高機密値から低機密チャネルへの情報漏洩を検出不可
 - **内容**: 型に**機密性ラベル** `(High)` / `(Low)` を付与。`High`ラベル付き値が`Low`チャネル（ログ出力・ネットワーク送信）に流れる場合にコンパイルエラー。**Declassification**: `(cl-cc:declassify val)` で意図的な降格を明示。SIF（Simple Information Flow）/ FlowCaml / IFDS algorithm
 - **根拠**: Jif（Java Information Flow）/ FlowCaml。暗号キー・個人情報の意図しない漏洩をコンパイル時に証明する
@@ -760,7 +760,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-480: Sample-Based PGO / AutoFDO (サンプルベースPGO)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **現状**: FR-508（BOLT）は後処理バイナリ最適化。フロントエンドへのプロファイルフィードバックなし
 - **内容**: `Linux perf record` の出力（`perf.data`）からコンパイラが利用できるプロファイルデータへの変換。**AutoFDO**: ソースコード行番号→サンプルカウントのマッピング（FDO profile format）。インライン閾値・ループ展開係数・アウトライン判定をプロファイルで調整。インストルメンテーション不要でプロダクション実行データを活用。Google AutoFDO / GCC `-fauto-profile`
 - **根拠**: Instrumentation PGOと異なりプロダクション環境での計測が可能。Google社内でChromeの5〜10%速度向上を達成
@@ -788,7 +788,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-485: Warnings as Errors / -Werror (警告をエラーに昇格)
 
-- **対象**: `packages/frontend/parse/src/diagnostics.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/frontend/parse/src/diagnostics.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 警告（`:warning` severity）と診断は分離されているが、ビルド失敗への変換機構なし
 - **内容**: `--Werror` フラグで全警告をエラーに昇格（ビルド失敗）。`--Werror=unused-variable` で特定カテゴリのみ昇格。`--Wno-error=deprecated` で特定カテゴリをエラー昇格から除外。CI環境での「警告ゼロポリシー」強制。FR-318（警告システム）・FR-317（構造化診断）との統合
 - **根拠**: GCC/Clang `-Werror`. CI/CDでの品質ゲートとして標準的。cl-ccのテストスイート自体にも適用すると品質向上
@@ -796,7 +796,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-486: Diagnostic Categories & Filtering (診断カテゴリ・フィルタリング)
 
-- **対象**: `packages/frontend/parse/src/diagnostics.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/frontend/parse/src/diagnostics.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 警告の種類を個別に有効/無効化できない
 - **内容**: 診断カテゴリ定義（`-Wunused-variable`/`-Wtype-mismatch`/`-Wshadowing`/`-Wdeprecated`等）。`--Wall`（全警告有効）/`--Wextra`（追加警告）/`--Wno-<category>`（個別無効化）。`diagnostic`構造体に`category`フィールド追加。ソース行コメント `;;; cl-cc:ignore-warning unused-variable` で行単位抑制。`clang-tidy` / `cargo clippy` スタイルの設定ファイル（`.cl-cc-lint.toml`）
 - **根拠**: GCC `-W` フラグ体系。ユーザーが自分のコードに適した警告レベルを設定できる
@@ -804,7 +804,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-487: Optimization Remarks (最適化説明レポート)
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 最適化が適用されたか失敗したかのフィードバックなし
 - **内容**: `--Rpass=inline` でインライン化の成否を報告（「function foo inlined at bar.lisp:42」「not inlined: too large (20 > 15)」）。`--Rpass-missed=vectorize` でベクトル化できなかった理由を報告（「loop has dependency on x」）。YAML/JSON形式での出力（CI統合用）。最適化レベル変更・`declare`追加のガイダンスを含む。Clang `-Rpass` / LLVM OptimizationRemarkEmitter相当
 - **根拠**: 「なぜこのコードが遅いのか」「どう書き直せば最適化されるか」をコンパイラが直接教えてくれる。Rust `-Copt-level` + `cargo-llvm-lines`の中間
@@ -812,7 +812,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-488: 3-Stage Bootstrap Verification (3段階ブートストラップ検証)
 
-- **対象**: `cli/src/main.lisp`, `tests/`, `flake.nix`
+- **対象**: `packages/cli/src/main.lisp`, `tests/`, `flake.nix`
 - **現状**: `./cl-cc selfhost`は1段階の自己ロード検証（9チェック）。コンパイラ出力の一致検証なし
 - **内容**: **Stage1**: ホストSBCLでcl-ccをビルド → バイナリA。**Stage2**: バイナリAでcl-ccをコンパイル → バイナリB。**Stage3**: バイナリBでcl-ccをコンパイル → バイナリC。**検証**: B == C（バイナリ一致）。差分があればコンパイラのバグ。`make bootstrap`ターゲット。GCC 3-stage bootstrap / Rust `./x.py test --stage 2` と同等の正しさ保証
 - **根拠**: セルフホスティングコンパイラの金標準テスト。バイナリB≠Cはコンパイラが自分自身を正確にコンパイルできていない証拠
@@ -820,7 +820,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-489: Differential Testing vs SBCL (SBCL差分テスト)
 
-- **対象**: `tests/integration/`, `tests/framework/`
+- **対象**: `tests/integration/`, `packages/testing/framework/src/`
 - **現状**: テストはcl-cc VMの出力のみ検証。SBCLとの結果比較なし
 - **内容**: `(deftest-differential (expr) ...)` マクロ: 同一式をSBCL `eval`とcl-cc VMの両方で実行し結果を比較。ランダム入力生成（FR-353 PBT）と組み合わせたファジング。差分発見時に最小化（shrinking）。コンパイラバグの**自動検出**。CSmith / CompCert differential testing手法
 - **根拠**: ANSI CL準拠の自動検証。cl-ccとSBCLで結果が違えばcl-ccのバグ。4322テストをdifferential化すると準拠性が定量評価できる
@@ -888,7 +888,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-499: Precompiled Modules / PCH (プリコンパイルモジュール)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `cl-cc.asd`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `cl-cc.asd`
 - **現状**: FASLキャッシュ（FR-151）はSBCLのもの。cl-ccのコンパイル済みIR（VM program）のヘッダプリコンパイルなし
 - **内容**: **PCH（Precompiled Header）形式**: よく使われるインポート群（`cl-cc:`, `cl:`の共通部分）を事前にコンパイル・バイナリにシリアライズ。`#include <stdcl.pcl>` 的な自動検出。ASDF `:defsystem-depends-on` との統合。コンパイル時の重複parse/expand工程をスキップ。clang PCH / GCC PCH相当
 - **根拠**: cl-cc標準ライブラリ（`packages/engine/vm/src/*.lisp`全体）の毎回再parseが省略でき、セルフホスト時間を大幅削減
@@ -896,7 +896,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-500: Whole-Program Type Inference (全プログラム型推論)
 
-- **対象**: `packages/type/type/src/inference.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: 型推論はファイル単位。`packages/engine/compile/src/cps.lisp`が`packages/engine/compile/src/codegen.lisp`の関数の型を知らない
 - **内容**: **Module-level type inference**: コールグラフ解析で呼び出し先の型シグネチャを呼び出し元に伝播。`(defun foo (x) (bar x))` でfoo引数の型はbarの引数型制約から推論。LTO（FR-335）と連携したリンク時型推論。Hindley-Milner + let-polymorphism のモジュール間拡張。OCaml cross-module inlining + 型推論と同等
 - **根拠**: 全プログラム型推論で単相化（FR-417）・devirt（FR-337）・BCE（FR-468）の精度が大幅向上
@@ -1032,7 +1032,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-525: Huge Pages / THP Support (ヒュージページサポート)
 
-- **対象**: `packages/backend/runtime/src/heap.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/heap.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 通常の4KBページでmalloc/mmap。TLBスラッシングの対策なし
 - **内容**: **madvise MADV_HUGEPAGE** をヒープ領域に設定（Linux THP）。**mmap(MAP_HUGETLB)** で2MBページを直接割り当て（`--huge-pages`フラグ）。macOS `VM_FLAGS_SUPERPAGE_SIZE_2MB` 対応。Javaヒープのような大規模ヒープでのTLBミス削減（通常4KB→2MB: TLBエントリ512倍の効率）
 - **根拠**: ヒープが数百MB以上になると4KBページのTLBカバレッジが不足。HotSpot `-XX:+UseLargePages` / jemalloc huge page arena相当
@@ -1060,7 +1060,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-530: Pattern Matching with Exhaustiveness (網羅性検査付きパターンマッチング)
 
-- **対象**: `packages/frontend/expand/src/macros-basic.lisp`, `packages/type/type/src/inference.lisp`
+- **対象**: `packages/frontend/expand/src/macros-basic.lisp`, `packages/foundation/type/src/inference.lisp`
 - **現状**: `cond`/`typecase`/`case`は網羅性検査なし。未ハンドルパターンが実行時エラー
 - **内容**: `(cl-cc:match x ((list a b) ...) ((cons h t) ...) (:else ...))` マクロ。**網羅性チェック**: 型情報からすべてのケースがカバーされているかをコンパイル時検証。**到達不能ケース検出**: 先行パターンが後続を包含する場合に警告。**Decision tree compilation**: ネストdecision treeに最適変換（ジャンプテーブル / switch lower）。Rust `match` / OCaml `match` / Haskell case exhaustiveness と同等
 - **根拠**: Lispのmatchは多数の実装（trivia / optima / etc.）があるがコンパイラ組み込みがない。網羅性はコンパイル時検証が安全の要
@@ -1068,7 +1068,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-531: Refinement Types (精緻型)
 
-- **対象**: `packages/type/type/src/inference.lisp`, `packages/type/type/src/types.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`, `packages/foundation/type/src/types.lisp`
 - **現状**: 型は集合論的基底型のみ（fixnum/string等）。述語付き部分型なし
 - **内容**: `(cl-cc:define-refinement-type positive-integer fixnum (> x 0))` で述語付き型定義。`(declare (type positive-integer n))` で使用。VRP（FR-390）・SMTソルバ（FR-392）との連携で精緻型の充足を検証。`(defun sqrt (x positive-integer) ...)` の戻り値型推論。LiquidHaskell / F\* / Stainless（Scala）相当
 - **根拠**: 配列インデックス型 `(and fixnum (>= 0) (< array-length))` で境界チェックを型レベルで除去できる。bcE（FR-468）の完全静的版
@@ -1076,7 +1076,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-532: Linear Types / Resource Types (線形型・リソース型)
 
-- **対象**: `packages/type/type/src/inference.lisp`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **現状**: ファイルハンドル・ネットワーク接続等のリソースの二重解放・未解放をコンパイル時に検出不可
 - **内容**: `(cl-cc:define-linear-type file-handle)` で「正確に1回使用」が型レベルで保証されるリソース型。`(cl-cc:consume handle)` で消費をマーク。**Drop checker**: スコープ終了時に未消費の線形値があればコンパイルエラー。`(cl-cc:move val)` で所有権移転。Rust `ownership` / Linear Haskell / Clean uniqueness typingの軽量版
 - **根拠**: CL条件システムでのリソースリーク（ファイル未close、ロック未解放）をコンパイル時に根絶。`with-open-file`マクロのより強力な代替
@@ -1100,7 +1100,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-535: Type Narrowing via Assert (アサートによる型絞り込み)
 
-- **対象**: `packages/type/type/src/inference.lisp`, `packages/frontend/expand/src/macros-stdlib.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`, `packages/frontend/expand/src/macros-stdlib.lisp`
 - **現状**: `(assert (typep x 'fixnum))` の後でもxの型が絞り込まれない
 - **内容**: `(assert (typep x 'fixnum))` → アサート後のパスでxを`fixnum`型として扱う（FR-428 Occurrence typingの拡張）。`(check-type x fixnum)` も同様。`(assert (> n 0))` → VRP（FR-390）にn∈[1,∞)を伝達。`(assert (not (null x)))` → xからnilを除く。ユーザー定義アサートへの適用は`(declare (cl-cc:asserts (> x 0)))` 形式
 - **根拠**: CLの`assert`/`check-type`は実行時検証専用。型絞り込みへの接続でdevirt・unboxingの追加機会を得る
@@ -1160,7 +1160,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 #### FR-544: Build Event Protocol / BEP (ビルドイベントプロトコル)
 
-- **対象**: `cli/src/main.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: ビルド進捗はstdoutへのフリーテキスト出力のみ。IDE/CI連携の構造化なし
 - **内容**: **Bazel Build Event Protocol**互換のJSON/Protobuf構造化イベントストリーム: `BuildStarted`/`SourceFileAdded`/`CompilationStarted`/`CompilationFinished`/`TestResult`/`BuildFinished`。`--build-event-json-file=events.json`でファイル出力。`--build-event-publish-all-actions`でCI連携。VS Code `tasks.json`のproblemMatcherと統合可能
 - **根拠**: Bazel BEP / Buck2 build events。IDE・CI・ダッシュボードとの統合標準プロトコル。2026年でBazel BEPがデファクト化

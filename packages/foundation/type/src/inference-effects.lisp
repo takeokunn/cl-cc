@@ -1,4 +1,4 @@
-;;;; packages/type/type/src/inference-effects.lisp - Effect Inference (Phase 5)
+;;;; packages/foundation/type/src/inference-effects.lisp - Effect Inference (Phase 5)
 ;;;
 ;;; Extracted from inference.lisp.
 ;;; infer-effects, infer-with-effects, check-body-effects,

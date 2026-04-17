@@ -1,4 +1,4 @@
-;;;; packages/type/type/src/typeclass-compat.lisp - Typeclass Instance Registry, dict-env, and Backward-Compat Aliases
+;;;; packages/foundation/type/src/typeclass-compat.lisp - Typeclass Instance Registry, dict-env, and Backward-Compat Aliases
 ;;;;
 ;;;; Contains:
 ;;;;   typeclass-instance defstruct + *typeclass-instance-registry*

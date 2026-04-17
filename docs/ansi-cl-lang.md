@@ -1538,7 +1538,7 @@ funcallable-standard-object  (MOP)
 
 #### FR-557: break / invoke-debugger / _debugger-hook_ / _break-on-signals_
 
-- **対象**: `cli/src/main.lisp`, `packages/engine/vm/src/conditions.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/engine/vm/src/conditions.lisp`
 - **実装**: `break` / `invoke-debugger` / `*debugger-hook*` / `*break-on-signals*` は利用可能
 - **内容**: `break` は `*debugger-hook*` を介したブレーク、`invoke-debugger` は条件付きデバッガ起動、`*break-on-signals*` は条件一致で自動ブレークを提供する
 - **根拠**: ANSI CL 9.1.5 — Debugger

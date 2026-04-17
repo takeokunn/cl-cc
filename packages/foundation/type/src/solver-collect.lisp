@@ -1,4 +1,4 @@
-;;;; packages/type/type/src/solver-collect.lisp — Constraint Collection Pass
+;;;; packages/foundation/type/src/solver-collect.lisp — Constraint Collection Pass
 ;;;
 ;;; Extracted from solver.lisp.
 ;;; Contains: collect-constraints — AST walker that generates equality

@@ -1,4 +1,4 @@
-;;;; packages/type/type/src/exhaustiveness.lisp — FR-1903: Pattern Exhaustiveness / Coverage Checking
+;;;; packages/foundation/type/src/exhaustiveness.lisp — FR-1903: Pattern Exhaustiveness / Coverage Checking
 ;;;;
 ;;;; Checks whether typecase/case/our-typecase arms are exhaustive and warns
 ;;;; about unreachable (subsumed) patterns.

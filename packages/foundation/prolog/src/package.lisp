@@ -1,6 +1,6 @@
 (cl:in-package :cl-user)
 
-;;;; packages/prolog/prolog/src/package.lisp - CL-CC Prolog Package
+;;;; packages/foundation/prolog/src/package.lisp - CL-CC Prolog Package
 ;;;;
 ;;;; Phase 1.1 of the package-by-feature monorepo migration. This package owns
 ;;;; the Prolog engine, DCG transformer, and peephole rule database. The facade

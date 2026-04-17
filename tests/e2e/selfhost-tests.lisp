@@ -364,24 +364,24 @@
 
 (defvar *selfhost-representative-files*
   '("packages/frontend/parse/src/cst.lisp"
-    "packages/prolog/prolog/src/prolog-data.lisp"  ; *builtin-predicate-specs* used by prolog.lisp
-    "packages/prolog/prolog/src/prolog.lisp"
+    "packages/foundation/prolog/src/prolog-data.lisp"  ; *builtin-predicate-specs* used by prolog.lisp
+    "packages/foundation/prolog/src/prolog.lisp"
     "packages/frontend/parse/src/lexer.lisp"
     "packages/engine/compile/src/cps.lisp"
     "packages/engine/optimize/src/optimizer.lisp"
-    "packages/type/type/src/package.lisp"
-    "packages/type/type/src/kind.lisp"
-    "packages/type/type/src/multiplicity.lisp"   ; prerequisites for types-core
-    "packages/type/type/src/types-core.lisp"     ; base type structs
-    "packages/type/type/src/types-extended.lisp" ; type-null/type-int/+pure-effect-row+ etc.
-    "packages/type/type/src/types-env.lisp"      ; +type-unknown+
-    "packages/type/type/src/parser.lisp"
-    "packages/type/type/src/typeclass.lisp"
-    "packages/type/type/src/typeclass-compat.lisp" ; *default-numeric-type* used by solver.lisp
-    "packages/type/type/src/solver.lisp"
-    "packages/type/type/src/inference.lisp"
-    "packages/type/type/src/checker.lisp"
-    "packages/type/type/src/printer.lisp"
+    "packages/foundation/type/src/package.lisp"
+    "packages/foundation/type/src/kind.lisp"
+    "packages/foundation/type/src/multiplicity.lisp"   ; prerequisites for types-core
+    "packages/foundation/type/src/types-core.lisp"     ; base type structs
+    "packages/foundation/type/src/types-extended.lisp" ; type-null/type-int/+pure-effect-row+ etc.
+    "packages/foundation/type/src/types-env.lisp"      ; +type-unknown+
+    "packages/foundation/type/src/parser.lisp"
+    "packages/foundation/type/src/typeclass.lisp"
+    "packages/foundation/type/src/typeclass-compat.lisp" ; *default-numeric-type* used by solver.lisp
+    "packages/foundation/type/src/solver.lisp"
+    "packages/foundation/type/src/inference.lisp"
+    "packages/foundation/type/src/checker.lisp"
+    "packages/foundation/type/src/printer.lisp"
     "packages/foundation/mir/src/mir.lisp"
     "packages/engine/vm/src/vm.lisp"
     "packages/backend/runtime/src/gc.lisp")

@@ -59,7 +59,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-941: Parallel Compilation Pipeline (並列コンパイルパイプライン)
 
-- **対象**: `cli/src/main.lisp`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **内容**:
   - ファイルレベル並列化: `(compile-files files :parallel t)` — 依存グラフ解析後に独立ファイルを並列コンパイル
   - 依存グラフ構築: `(build-compile-graph files)` → DAG (package定義・マクロ定義を追跡)
@@ -488,7 +488,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1002: save-lisp-and-die / Image Dump (イメージ保存)
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/runtime/src/runtime.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/runtime/src/runtime.lisp`
 - **内容**:
   - `(save-lisp-and-die path &key toplevel executable compression)` — SBCL互換イメージ保存
   - 全ヒープ・スタック・コードをシリアライズしてファイルに書き出す
@@ -503,7 +503,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1003: Core File Loading (コアファイルロード)
 
-- **対象**: `cli/src/main.lisp`
+- **対象**: `packages/cli/src/main.lisp`
 - **内容**:
   - `./cl-cc --core path.core` — 保存済みイメージからの高速起動
   - `mmap` でコアをメモリにマップ → ページフォルト駆動の遅延ロード
@@ -520,7 +520,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1006: Environment Variables / CLI Args (環境変数・コマンドライン引数)
 
-- **対象**: `cli/src/main.lisp`, `packages/engine/vm/src/io.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/engine/vm/src/io.lisp`
 - **内容**:
   - `(getenv name)` → string または nil (`getenv(3)` ラッパー)
   - `(setenv name value)` / `(unsetenv name)` — 環境変数設定・削除 (`setenv(3)`)
@@ -778,7 +778,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1039: System Dependency Resolution (システム依存解決)
 
-- **対象**: `cli/src/main.lisp`
+- **対象**: `packages/cli/src/main.lisp`
 - **内容**:
   - `(ql:quickload "system-name")` — Quicklisp互換ロード API
   - `*quicklisp-client-directory*` / `*local-project-directories*` — 検索パス

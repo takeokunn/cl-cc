@@ -18,7 +18,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-210: Binding-Time Analysis (束縛時解析)
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/type/type/src/inference.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/foundation/type/src/inference.lisp`
 - **現状**: 定数性判定は `vm-const` 命令の存在のみで判定。引数や中間値の定数伝播が関数境界を越えない
 - **内容**: 式の各部分を「静的」（コンパイル時既知）と「動的」（実行時のみ既知）に分類するBTA。部分評価（FR-209）の前段として動作し、特殊化対象の引数を自動選定
 - **根拠**: Mix/Similix方式のオフラインBTA。SCCP（FR-010）の結果をフィードして関数境界を越える定数伝播を実現
@@ -70,7 +70,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-219: Complex Number Unboxing (複素数アンボクシング)
 
-- **対象**: `packages/engine/vm/src/vm-numeric.lisp`, `packages/engine/compile/src/codegen.lisp`, `packages/type/type/src/inference.lisp`
+- **対象**: `packages/engine/vm/src/vm-numeric.lisp`, `packages/engine/compile/src/codegen.lisp`, `packages/foundation/type/src/inference.lisp`
 - **現状**: `vm-numeric.lisp:662-669` — `vm-complex`命令が存在しホストCLの`complex`関数を呼ぶ。複素数は常にboxed（cons/struct）で実部・虚部アクセスに毎回アンボクシング
 - **内容**: エスケープ解析（FR-007）で複素数がローカルにのみ使用される場合、実部と虚部を別レジスタに分離して保持。`(+ c1 c2)` → `(+ r1 r2)`, `(+ i1 i2)` の2命令に展開（SROA FR-014の特殊ケース）
 - **根拠**: SBCL complex-float unboxing / GHC unboxed complex。科学計算ワークロードで顕著な性能改善
@@ -128,7 +128,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-250: Specialized / Typed Array Compilation (型付き配列コンパイル)
 
-- **対象**: `packages/engine/vm/src/list.lisp`, `packages/engine/compile/src/codegen.lisp`, `packages/type/type/src/inference.lisp`
+- **対象**: `packages/engine/vm/src/list.lisp`, `packages/engine/compile/src/codegen.lisp`, `packages/foundation/type/src/inference.lisp`
 - **現状**: `list.lisp:458-777` — 配列操作は要素型に関わらず汎用パス。`(make-array 10 :element-type 'fixnum)`と`(make-array 10)`が同一コードを生成
 - **内容**: `simple-array`サブタイプ（`fixnum`, `single-float`, `double-float`, `character`, `bit`）毎に特殊化された配列表現（パックド要素）を実装。`aref`/`(setf aref)`を要素型に応じてインライン化し型チェック除去。NaN-boxing不要の直接メモリアクセス
 - **根拠**: SBCL specialized arrays / ANSI CL 15.1.2.2。数値計算・文字列処理の基盤
@@ -142,7 +142,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-251: Abstract Interpretation Framework (抽象解釈フレームワーク)
 
-- **対象**: `packages/type/type/src/inference.lisp`, `packages/engine/optimize/src/optimizer.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`, `packages/engine/optimize/src/optimizer.lisp`
 - **現状**: HM型推論（`inference.lisp`）にad-hocな型絞り込み（`extract-type-guard`）あり。FR-116（Flow-Sensitive Narrowing）、FR-038（Range Analysis）は個別定義だが統一的な抽象ドメイン・格子構造なし
 - **内容**: 抽象ドメイン（型格子、整数区間、定数、ポインタnull性）の統一フレームワーク。widening/narrowing演算子による固定点反復。SCCP（FR-010）・Range Analysis（FR-038）・Null Check Elimination（FR-040）を統一的に実装する基盤
 - **根拠**: Cousot & Cousot (1977)。Astrée / Frama-C。個別解析パスを統一して精度・保守性を向上
@@ -254,8 +254,8 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-304: Integer Range Analysis (整数範囲解析)
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/type/type/src/inference.lisp`
-- **現状**: `opt-pass-fold`（`optimizer.lisp:341-439`）は定数値のみ追跡。範囲/区間の伝播なし。型システム（`packages/type/type/src/`）にHM型推論はあるが整数範囲型（`(integer 0 255)`）なし
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/foundation/type/src/inference.lisp`
+- **現状**: `opt-pass-fold`（`optimizer.lisp:341-439`）は定数値のみ追跡。範囲/区間の伝播なし。型システム（`packages/foundation/type/src/`）にHM型推論はあるが整数範囲型（`(integer 0 255)`）なし
 - **内容**: 値範囲解析: 算術演算を通じて`[min, max]`区間を伝播。両オペランドがfixnum範囲内かつ結果が確実にfixnum範囲なら、オーバーフロー検査をスキップ（FR-303と相補的）。制御フロー合流点でのラティスベース解析
 - **根拠**: LLVM `LazyValueInfo` / GCC VRP (Value Range Propagation)。オーバーフロー検査除去で分岐を削減
 - **難易度**: Hard
@@ -381,7 +381,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-527: ML-Guided Inlining / MLGO (機械学習によるインライン判定)
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: インライン展開（FR-040）はヒューリスティック（命令数閾値・再帰チェック）のみ。コールサイト固有の文脈（ループネスト深度・呼び出し頻度・型プロファイル）を考慮していない
 - **内容**: コールサイトの特徴量（呼び出し回数・関数サイズ・ループ深度・型単態性スコア・引数定数率）をベクトル化し、学習済みモデル（決定木 / 線形回帰）でインライン化の有益スコアを予測。`./cl-cc collect-features --workload selfhost` で特徴量・実績データを収集。`./cl-cc train-model features.csv -o inline.model` でモデル学習。モデルは `.clcc-model` にシリアライズして再利用。**フォールバック**: モデル不在時はヒューリスティックに戻る
 - **根拠**: LLVM MLGO (Google 2020) — Inliner/RegAlloc に RL モデルを適用して 0.5〜2% のバイナリサイズ削減。cl-cc では `selfhost` が現実的なトレーニングワークロードとなる
@@ -504,7 +504,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-008: Float Unboxing (浮動小数点数アンボクシング)
 
-- **対象**: `packages/engine/vm/src/primitives.lisp`, `packages/engine/compile/src/codegen.lisp`, `packages/type/type/src/inference.lisp`
+- **対象**: `packages/engine/vm/src/primitives.lisp`, `packages/engine/compile/src/codegen.lisp`, `packages/foundation/type/src/inference.lisp`
 - **現状**: `vm-add-float` 等のVM命令はすべてboxed float (タグ付きポインタ) を操作。`vm-float-p` チェック→アンボクシング→演算→再ボクシングの4ステップが毎回発生
 - **内容**: 型推論で float と確定したローカル変数を SSE2 の XMM レジスタに保持。`double` を整数レジスタのタグ付き値として持ち回さず、`XMM0`..`XMM7` に直接格納。float-only の内部ループではボクシングコストがゼロ
 - **根拠**: SBCL float unboxing / GHC unboxed Double#。数値計算コードで 3〜10x の高速化。FR-056 (Worker/Wrapper) と連携して再帰関数への拡張
@@ -612,7 +612,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: SBCL `typecase` compilation / GCC `switch` with jump table。CLOS dispatch の内部でも型チェックチェーンを置き換え可能
 - **難易度**: Medium
 
-- **関連実装**: `packages/frontend/expand/src/macros-control-flow.lisp` の `%prune-typecase-clauses` により、先行節に包含される後続節は展開前に削除される。さらに `packages/type/type/src/exhaustiveness.lisp` に `check-typecase-exhaustiveness` / `check-etypecase-completeness` / `useful-typecase-arms` があり、型 case の冗長節・網羅性解析基盤は存在する。タグ値ベースの jump table lowering 自体は未実装。
+- **関連実装**: `packages/frontend/expand/src/macros-control-flow.lisp` の `%prune-typecase-clauses` により、先行節に包含される後続節は展開前に削除される。さらに `packages/foundation/type/src/exhaustiveness.lisp` に `check-typecase-exhaustiveness` / `check-etypecase-completeness` / `useful-typecase-arms` があり、型 case の冗長節・網羅性解析基盤は存在する。タグ値ベースの jump table lowering 自体は未実装。
 
 ---
 
@@ -708,7 +708,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-295: PGO Instrumentation (プロファイル計装)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **内容**: コンパイル時に基本ブロックごとのカウンタ (`__bb_count[]`) と分岐方向カウンタを挿入。トレーニング実行後にプロファイルデータを `.clcc-pgo` ファイルに出力。`./cl-cc compile --pgo-generate` / `./cl-cc compile --pgo-use file.clcc-pgo` の 2 フェーズビルド
 - **根拠**: GCC `-fprofile-generate/-fprofile-use` / LLVM IR-level PGO。実際の実行パターンを最適化の入力とする
 - **難易度**: Medium
@@ -742,7 +742,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-300: Full LTO (全プログラム最適化)
 
-- **対象**: `pipeline/src/pipeline.lisp`, コンパイルパイプライン
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, コンパイルパイプライン
 - **内容**: 全コンパイル単位をリンク時に一つの IR にまとめてグローバル最適化を適用。`./cl-cc compile --lto` でファイル単位ではなく全関数を一括最適化。呼び出しグラフが完全に見えるため Devirtualization・Global DCE・IPSCCP の精度が飛躍的に向上
 - **根拠**: GCC `-flto` / LLVM Full LTO。バイナリサイズ削減 20〜40%、速度向上 5〜20%
 - **難易度**: Hard
@@ -760,7 +760,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-310: Tiered Compilation (多段 JIT)
 
-- **対象**: `cli/src/main.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**: 実行頻度に応じた多段コンパイル: Tier 0 = VM インタープリタ、Tier 1 = ベースライン JIT (最適化なし・高速コンパイル)、Tier 2 = 最適化 JIT (PGO + 全最適化パス)。ホットスポット検出はコールカウンタ + バックエッジカウンタ
 - **根拠**: V8 Ignition/Maglev/TurboFan / JVM C1/C2。起動時間とピーク性能のトレードオフを解決する現代的アプローチ
 - **難易度**: Very Hard
@@ -956,7 +956,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-346: Compiler Driver & Build System Integration
 
-- **対象**: `cli/src/main.lisp`, `flake.nix`, `cl-cc.asd`
+- **対象**: `packages/cli/src/main.lisp`, `flake.nix`, `cl-cc.asd`
 - **内容**: (1) 依存性追跡: ファイル変更時に影響するコンパイルユニットのみ再コンパイル、(2) 並列コンパイル: 独立したモジュールを並列処理 (ASDF の `:parallel t` 拡張)、(3) Ninja / CMake 互換ビルドファイル生成、(4) `compile_commands.json` 生成による LSP / IDE 統合
 - **根拠**: LLVM 分散ビルド / Bazel / Buck。大規模プロジェクトでのビルド時間削減
 - **難易度**: Medium
@@ -989,7 +989,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-352: Bit-Width Analysis (ビット幅解析)
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/type/type/src/inference.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/foundation/type/src/inference.lisp`
 - **内容**: 整数演算の結果の有効ビット幅を追跡。`(logand x #xFF)` の結果は 8 ビットと確定。8-bit 値同士の加算は最大 9-bit。ビット幅が 63 bit 未満であればオーバーフローチェック (FR-303) を省略可能。`(= (logand x 1) 0)` → `(evenp x)` の認識
 - **根拠**: LLVM `computeKnownBits` / GCC VRP。ビット幅解析はオーバーフロー除去・型チェック除去・強度低減の精度向上に貢献
 - **難易度**: Hard
@@ -1040,7 +1040,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-360: `declare (type ...)` / `the` による型ナローイング
 
-- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/type/type/src/inference.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/foundation/type/src/inference.lisp`
 - **現状**: `(declare (type fixnum x))` / `(the fixnum expr)` がパースされるが型推論・コード生成に反映されていない
 - **内容**: `declare type` と `the` アノテーションを型推論の外部入力として登録。該当変数・式に型を付与し (1) 型チェック命令 (`vm-integer-p`) の除去、(2) fixnum 特化算術パスへの誘導、(3) CLOS ディスパッチの型特化を適用。`(the fixnum x)` は実行時アサーション (`vm-check-type`) + 型情報の 2 役
 - **根拠**: SBCL type declarations / GHC type signatures。コンパイラへの型ヒントは最も費用対効果が高い最適化
@@ -1063,7 +1063,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-363: `declare (optimize ...)` quality レベル処理
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/engine/optimize/src/optimizer.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/engine/optimize/src/optimizer.lisp`
 - **内容**: `(declare (optimize (speed N) (safety N) (debug N) (space N)))` の各 quality を 0〜3 の範囲でコンパイル設定に反映。`(speed 3)` → 型チェック除去・積極的インライン・全最適化パス有効。`(safety 3)` → 型チェック・配列境界チェック・オーバーフロー検出を維持。`(debug 3)` → インライン抑制・デバッグ情報最大化。`(space 2)` → インライン閾値を縮小
 - **根拠**: ANSI CL 3.3.4 / SBCL optimize policy。quality レベルは最適化・安全性トレードオフの主要制御機構
 - **難易度**: Medium
@@ -1085,7 +1085,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-366: `load-time-value` 最適化
 
-- **対象**: `packages/engine/compile/src/codegen.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**: `(load-time-value expr)` はロード時に 1 回だけ `expr` を評価してキャッシュする。コンパイル時に `expr` が副作用なし・定数と判明する場合は `defconstant` 相当にフォールバック。ロード時評価のスロットを `.fasl` に記録し重複評価を防止
 - **根拠**: ANSI CL 3.2.2.2 / SBCL `load-time-value` compilation。正規表現コンパイル・ハッシュテーブル初期化のイディオムで使用
 - **難易度**: Medium
@@ -1453,7 +1453,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-424: ペアホールルール自動完備化
 
-- **対象**: `packages/prolog/prolog/src/prolog.lisp` (`*peephole-rules*`)
+- **対象**: `packages/foundation/prolog/src/prolog.lisp` (`*peephole-rules*`)
 - **内容**: 既存のペアホールルール集合が「等価変換として完備か」を形式的に検証。Knuth-Bendix 完備化アルゴリズムを用いてルール間の重複・欠落を検出し新しいルールを自動生成。E-graph (FR-350) の rewrite rules と統合して適用
 - **根拠**: Knuth-Bendix completion / Metatheory.jl (Julia の項書き換え系)
 - **難易度**: Very Hard
@@ -1464,7 +1464,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-426: Refinement Types / Liquid Types
 
-- **対象**: `packages/type/type/src/inference.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`
 - **内容**: 値の述語を型に埋め込む Refinement Type: `{v:fixnum | v > 0}` (正の整数)、`{v:vector | length(v) = n}` (長さ n のベクタ)。SMT ソルバで述語の充足性を検証。配列境界チェック除去 (FR-039)・ゼロ除算除去・型チェック除去の精度を向上。`(declare (type (integer 0 255) x))` の ANSI CL 区間型とも統合
 - **根拠**: Rondon et al. "Liquid Types" (PLDI 2008) / Flux (Rust Refinement Types, 2022)
 - **難易度**: Very Hard
@@ -1485,7 +1485,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-429: 型安全性の形式証明
 
-- **対象**: `packages/type/type/src/inference.lisp`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **内容**: 型システムの健全性（Progress + Preservation）の形式証明。Progress: well-typed な式はスタックしない（値か評価可能）。Preservation: 評価ステップを踏んでも型が変わらない。証明は Coq / Agda / Lean で記述し定期的に更新。型推論アルゴリズムの完全性の証明
 - **根拠**: Wright & Felleisen (1994) "A Syntactic Approach to Type Soundness"
 - **難易度**: Very Hard
@@ -1705,7 +1705,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-463: Compiler Explorer 互換出力
 
-- **対象**: `cli/src/main.lisp`
+- **対象**: `packages/cli/src/main.lisp`
 - **内容**: `./cl-cc compile --dump-ir PHASE FILE` で各コンパイルフェーズの IR をテキストで出力。フェーズ: `ast`, `cps`, `ssa`, `vm`, `opt`, `asm`。Compiler Explorer（godbolt.org）互換の色付きアセンブリ出力。`./cl-cc compile --annotate-source FILE` でソース行と生成命令の対応を表示
 - **根拠**: Compiler Explorer / LLVM `-print-after-all`。コンパイラの透明性と教育的価値
 - **難易度**: Easy
@@ -1719,7 +1719,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-465: Build Cache（ccache 相当）
 
-- **対象**: `pipeline/src/pipeline.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**: コンパイル入力（ソースファイルのハッシュ + コンパイルオプション + 依存ファイルハッシュ）をキーとして、コンパイル結果（FASL / native object）をコンテンツアドレサブルキャッシュに格納。ヒット時はコンパイルをスキップ。`~/.cache/cl-cc/` 以下に格納。`nix develop` 環境での rebuild 削減
 - **根拠**: ccache / Bazel remote cache。selfhost のビルド時間削減に直結
 - **難易度**: Medium
@@ -1730,7 +1730,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-116: Flow-Sensitive Type Narrowing（フロー感受型ナローイング）
 
-- **対象**: `packages/type/type/src/inference.lisp`, `packages/engine/optimize/src/optimizer.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`, `packages/engine/optimize/src/optimizer.lisp`
 - **参照元**: FR-251 (Abstract Interpretation Framework)
 - **内容**: 条件分岐後の基本ブロックで型を絞り込む。`(if (typep x 'fixnum) THEN ELSE)` の THEN ブロックでは `x` を `fixnum` 型として扱う。`(if (null x) ELSE THEN)` の THEN ブロックでは `x` が non-nil と確定。TypeScript / Rust の型ナローイングに相当。FR-041 (Tag Check Elimination) の型システム統合版
 - **根拠**: TypeScript narrowing / Rust borrow checker。フロー感受型推論はLisp の型システムを大幅に強化
@@ -1798,14 +1798,14 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-475: Strictness Analysis（強制評価解析）
 
-- **対象**: `packages/type/type/src/inference.lisp`, `packages/engine/optimize/src/optimizer.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`, `packages/engine/optimize/src/optimizer.lisp`
 - **内容**: 関数の各引数が「必ず評価されるか」を後ろ向き解析で判定。`(defun f (x y) (if (> x 0) x y))` — `x` は strict（必ず評価）、`y` は lazy（条件付き評価）。Strict と判定された引数は呼び出し前に評価を強制（thunk 生成を回避）。CPS 変換済み継続の厳格性解析にも適用
 - **根拠**: Mycroft (1981) abstract interpretation for strictness / GHC demand analysis
 - **難易度**: Hard
 
 #### FR-476: Demand Analysis（需要解析）
 
-- **対象**: `packages/type/type/src/inference.lisp`, `packages/engine/optimize/src/optimizer.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`, `packages/engine/optimize/src/optimizer.lisp`
 - **内容**: 引数の「使われ方」を詳細に解析: (1) **Strictness**: 必ず評価されるか、(2) **Absence**: 全く使われないか（未使用引数の除去）、(3) **Usage count**: 0/1/多回の使用（1回のみなら inline 安全）、(4) **Projection**: タプルの特定フィールドのみ使用。CPS の継続引数への適用でクロージャ引数を削減
 - **根拠**: GHC demand analysis (Peyton Jones & Launchbury 1991)。Worker/Wrapper (FR-056) の前段として引数の strictness/absence を使用
 - **難易度**: Hard
@@ -1924,21 +1924,21 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-495: Image/Snapshot シリアライゼーション
 
-- **対象**: `cli/src/main.lisp`, コンパイルパイプライン
+- **対象**: `packages/cli/src/main.lisp`, コンパイルパイプライン
 - **内容**: SBCL `save-lisp-and-die` / Node.js V8 Snapshot に相当する CL ヒープのシリアライゼーション。コンパイル済み関数・マクロ・クラス定義を含む「起動イメージ」をファイルに保存。次回起動時はイメージをメモリにマップするだけで即座に実行可能な状態へ。起動時間 O(コード量) → O(1) に短縮
 - **根拠**: SBCL core dumps / Racket places / Node.js `--snapshot-blob`。大規模 CL アプリケーションの起動時間を 10〜100x 改善
 - **難易度**: Hard
 
 #### FR-496: Lazy Compilation（遅延コンパイル）
 
-- **対象**: `pipeline/src/pipeline.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**: `defun` 定義時に即座にコンパイルせず、最初の呼び出し時にコンパイルする遅延コンパイル戦略。「インタープリタ版」→「JIT コンパイル版」→「最適化 JIT 版」の多段移行（FR-310 Tiered Compilation と連携）。コンパイル時間をホットパスのみに集中させて起動時間を削減
 - **根拠**: SBCL lazy compilation / LuaJIT lazy compilation
 - **難易度**: Medium
 
 #### FR-497: Ahead-of-Time 完全コンパイル
 
-- **対象**: `cli/src/main.lisp`, コンパイルパイプライン
+- **対象**: `packages/cli/src/main.lisp`, コンパイルパイプライン
 - **内容**: `./cl-cc aot` コマンドでプログラム全体を事前に最適化コンパイルしてスタンドアロン実行バイナリを生成。依存関係の完全な静的リンク（Quicklisp ライブラリを含む）。LTO (FR-300/301) を適用した全体最適化。`ecl --compile` / `roswell build` に相当する cl-cc ネイティブ AoT
 - **根拠**: ECL native compilation / Roswell binary building。Lisp アプリケーションの配布に必須
 - **難易度**: Hard

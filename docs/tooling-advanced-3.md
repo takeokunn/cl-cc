@@ -32,7 +32,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-719: Epsilon GC / No-Op GC (ノーオプGC)
 
-- **対象**: `packages/backend/runtime/src/gc.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/gc.lisp`, `packages/cli/src/main.lisp`
 - **現状**: GCは常に有効。テスト・ベンチマーク時のGCオーバーヘッドがノイズになる場合がある
 - **内容**: `--gc epsilon` フラグでGC完全無効化（アロケートするだけで収集しない）。メモリ枯渇時に `Out of Memory` エラー終了。用途: (a) 短命プロセス（コンパイル1回実行）でGCオーバーヘッドゼロ、(b) GCなしのベンチマーク基準測定、(c) FR-606（No-Allocator Mode）との比較検証。OpenJDK Epsilon GC（JEP 318, 2018）/ .NET NoGC region と同等。ヒープ上限（`--max-heap 2g`）との組み合わせが前提
 - **根拠**: コンパイル時間ベンチマークにGCポーズのノイズが混入することを完全排除。単発コンパイルタスクで最高スループット達成
@@ -176,7 +176,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-743: Value Types / Inline Structs (値型・インライン構造体)
 
-- **対象**: `packages/type/type/src/`, `packages/engine/compile/src/codegen.lisp`, `packages/engine/vm/src/vm-execute.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/engine/compile/src/codegen.lisp`, `packages/engine/vm/src/vm-execute.lisp`
 - **現状**: 全オブジェクトはヒープ参照（ポインタ）。複合値（2D点・色・複素数）のフィールドがインライン格納できない
 - **内容**: `(defvalue-type point2d (x :type single-float) (y :type single-float))` でスタック/レジスタにインライン格納可能な値型を宣言。コンストラクタがヒープ割り当てなしで2レジスタを返す（FR-569 Multiple Return Values）。配列内では `(array point2d 100)` が200要素の連続float配列としてレイアウト（AoS→SoA不要）。同一性比較は値比較。Java Project Valhalla（JEP 401）/ Swift value types / .NET struct と同等
 - **根拠**: 座標・色・クォータニオン等の小さな複合値のヒープ割り当てゼロ。数値集中コードの根本的なメモリ効率改善
@@ -196,7 +196,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-747: Runtime Sandboxing / Seccomp (ランタイムサンドボックス)
 
-- **対象**: `cli/src/main.lisp`, `packages/engine/vm/src/vm-execute.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/engine/vm/src/vm-execute.lisp`
 - **現状**: cl-cc プロセスは全syscallにアクセス可能。ユーザー提供コードの実行時にsyscall制限なし
 - **内容**: `./cl-cc run --sandbox foo.lisp` で untrusted コードをサンドボックス内実行。Linux: `seccomp(SECCOMP_SET_MODE_FILTER)` で許可syscallをwhitelist（read/write/mmap/brk/exit のみ）。macOS: `sandbox_init(3)` / `pledge(2)` (OpenBSD互換レイヤ)。サンドボックス内でのネットワーク・ファイル書き込み・execveを禁止。違反時は`SIGKILL`ではなく`SIGSYS`でcontext情報付き終了。Seccomp-BPF / WASM sandbox / Deno の permission モデルを参考
 - **根拠**: cl-cc REPL・オンライン評価サービス・プラグインシステムでの安全なコード実行。Turing-complete言語の評価に不可欠
@@ -204,7 +204,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-748: Code Signing (コード署名)
 
-- **対象**: `packages/backend/binary/src/macho.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/binary/src/macho.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 生成バイナリに署名なし。macOS Gatekeeper・iOS / tvOSへのデプロイ不可
 - **内容**: `./cl-cc compile --sign "Developer ID: ..." foo.lisp` で生成バイナリにコード署名。**macOS**: `codesign --sign` ラッパー、Mach-Oの`LC_CODE_SIGNATURE`ロードコマンド埋め込み。**Apple Silicon**: `MAP_JIT` フラグ使用時はentitlements（`com.apple.security.cs.allow-jit`）必須。**Windows**: Authenticode署名（`signtool.exe`）の呼び出しラッパー。**Linux**: IMA（Integrity Measurement Architecture）署名サポート。署名検証モード（`--verify-signature`）でロード時チェック
 - **根拠**: macOS/iOS配布の必須要件。企業セキュリティポリシーへの準拠（署名なしバイナリの実行拒否）
@@ -240,7 +240,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-754: Ownership Inference / Borrow Checker (所有権推論・借用チェック)
 
-- **対象**: `packages/type/type/src/`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/engine/compile/src/codegen.lisp`
 - **現状**: メモリ管理はGCに依存（FR-GC系）。所有権・借用の概念なし。GCを使わない安全なメモリ管理の検証不可
 - **内容**: Rustスタイルの所有権型システムをオプトイン機能として追加。`(declare (cl-cc:owned x))` で所有権変数を宣言。`(cl-cc:borrow x)` で不変借用、`(cl-cc:borrow-mut x)` で可変借用（同時に1つのみ）。ライフタイムパラメータ: `(defun foo (x &lifetime 'a) (declare (cl-cc:lifetime x 'a)) ...)` で明示的ライフタイム。借用チェッカーはuse-after-free・double-freeをコンパイル時に検出。`--no-gc` モードと組み合わせてGCフリーモジュールを実現
 - **根拠**: ヒープGCに依存しないリアルタイム・組み込み（FR-605）コードの安全性保証。Rust の安全性モデルをLispに段階的に導入
@@ -248,7 +248,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-755: Region Inference (リージョン推論)
 
-- **対象**: `packages/type/type/src/`, `packages/backend/runtime/src/heap.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/backend/runtime/src/heap.lisp`
 - **現状**: FR-228（Arena Allocator）はスコープ単位の手動アリーナ管理。プログラム解析によるリージョン自動割り当て推論なし
 - **内容**: ML Kit（Tofte & Talpin 1994）のリージョン推論: 各割り当てサイトに **リージョン注釈** を自動付与。リージョンの生存区間を解析してスタックベースの割り当て/解放を生成。GCなしで安全なメモリ管理。`(cl-cc:with-region r1 r2 ...)` でリージョンを明示。自動推論: `let r = inferRegion(expr) in allocate(in=r) ...`。リージョンプロファイリング（実行時リージョンサイズ統計）で推論精度を改善
 - **根拠**: GCポーズなしの予測可能なメモリ管理。ML Kit実証: SMLプログラムの60〜80%でGCなし実行が可能
@@ -304,7 +304,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-765: Stack Overflow Detection / Guard Pages (スタックオーバーフロー検出)
 
-- **対象**: `packages/engine/vm/src/vm-execute.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/vm-execute.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 深い再帰でSEGFAULT（シグナルハンドラなし）。デバッグ情報なしにクラッシュ
 - **内容**: スタックの末尾に **ガードページ**（`mmap(PROT_NONE)`）を配置。アクセス時に`SIGSEGV` / `SIGBUS`を補足し、`(stack-overflow-error "Stack overflow at depth N: call chain ...")`に変換。バックトレース付きのエラーメッセージ生成。`--stack-size 8mb` でスタックサイズ設定。代替スタック（`sigaltstack`）でシグナルハンドラ自体がスタックオーバーフローしない設計。SBCL / JVM stack overflow handling と同等
 - **根拠**: 現状の即死クラッシュをデバッグ可能なエラーに変換。テスト中の無限再帰バグの診断を劇的に改善
@@ -376,7 +376,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-777: ABI Stability Manifest (ABI安定性マニフェスト)
 
-- **対象**: `packages/engine/compile/src/codegen.lisp`, `cli/src/main.lisp`, `packages/backend/binary/src/macho.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/cli/src/main.lisp`, `packages/backend/binary/src/macho.lisp`
 - **現状**: ライブラリの公開APIのABIが変更された場合でも自動検出なし。破壊的ABI変更がサイレントに発生する可能性
 - **内容**: `./cl-cc abi-dump foo.lisp > foo.abi` で公開関数のシグネチャ・struct レイアウト・enum値をABIダンプ。`./cl-cc abi-check foo.abi foo-new.lisp` でABI互換性検査: 関数シグネチャ変更・struct サイズ変更・enumの値変更を検出してエラー報告。セマンティックバージョン（SemVer）に対応: MAJOR変更 = ABI破壊、MINOR = ABI後方互換追加。`(declare (cl-cc:stable-abi))` で明示的ABI安定性宣言。libabigail / ABI Compliance Checker と同等
 - **根拠**: cl-ccをライブラリとして使うプロジェクトへのABI保証。major versionをまたぐアップグレードの安全性確認
@@ -384,7 +384,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-778: Debug Symbol Stripping Modes (デバッグシンボル除去モード)
 
-- **対象**: `packages/backend/binary/src/macho.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/binary/src/macho.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `--strip` フラグで全シンボル削除のみ。デバッグ情報の選択的保持・外部ファイル分離なし
 - **内容**: `--strip all`: 全シンボルとデバッグ情報削除（最小バイナリ）。`--strip debug`: デバッグ情報のみ削除（公開シンボル保持）。`--strip unneeded`: 未定義参照に不要なシンボルのみ削除。`--split-debug`: FR-583（Split Debug Info）でバイナリとデバッグ情報を分離し、本番デプロイ+後からデバッグ可能に。`dSYM` (macOS) / `.dwp` (Linux) 形式での出力。`--debuglink` でバイナリとdebug fileのリンクを埋め込み
 - **根拠**: 本番バイナリのサイズ最小化とデバッガビリティの両立。クラッシュレポートから後追いデバッグするワークフロー
@@ -428,7 +428,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-785: Uniqueness Types (一意型)
 
-- **対象**: `packages/type/type/src/`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/engine/compile/src/codegen.lisp`
 - **現状**: 参照共有は無制限。同一オブジェクトへの複数参照があると**インプレース更新**が安全に行えない（副作用が予期せず波及）
 - **内容**: `(: sort-unique! ((unique (array integer)) -> (unique (array integer))))` で `unique` 型アノテーション付き関数を定義。`unique` 値は最大1つの参照のみ許可（コンパイル時チェック）。`unique` 値への破壊的操作（`setf`・`aref=`）が安全（他の参照がない保証）。GCなしでインプレース更新を安全化。`copy-out`: 一意性を諦めて共有可能にする変換。Clean 言語の uniqueness types / Idris 2 linear types との比較
 - **根拠**: 配列ソート・文字列処理・バイトバッファ操作でコピー不要の破壊的更新を型安全に実現。FR-659（COW）の型システムレベルでの強化
@@ -464,7 +464,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-791: Interval Arithmetic (区間演算)
 
-- **対象**: 新規 `src/numeric/interval.lisp`, `packages/type/type/src/`
+- **対象**: 新規 `src/numeric/interval.lisp`, `packages/foundation/type/src/`
 - **現状**: 浮動小数点誤差の上界が不明。数値計算の信頼性保証なし
 - **内容**: `(cl-cc:interval lo hi)` で区間値を表現。演算: `(+ [a,b] [c,d]) = [a+c, b+d]`、`(* [a,b] [c,d]) = [min(ac,ad,bc,bd), max(...)]`。IEEE 754 丸め方向制御（`FLDCW` / `FRNDINT`）で厳密な上界・下界を計算。`(cl-cc:guaranteed-result expr)` で式の値の誤差上界を返す。MPFI / Arith ライブラリ相当を純CLで実装。`(declare (cl-cc:verified-fp))` で自動区間追跡モード
 - **根拠**: 数値検証・物理シミュレーション・金融計算での丸め誤差保証。「計算結果が真値の ε 以内」を証明可能に
@@ -476,7 +476,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-794: Compiler Fuzzing / Random Program Generation (コンパイラファジング)
 
-- **対象**: `cli/src/main.lisp`, 新規 `src/testing/fuzzer.lisp`
+- **対象**: `packages/cli/src/main.lisp`, 新規 `src/testing/fuzzer.lisp`
 - **現状**: コンパイラのバグ発見はユーザー報告・既存テストのみ。ランダム入力によるコンパイラクラッシュ・誤コード生成の体系的探索なし
 - **内容**: `./cl-cc fuzz --seed 42 --count 10000` でランダムなCL式を生成してコンパイル。生成戦略: 文法ベース生成（産生規則から再帰的に構築）+ 変異ベース（既存テストケースを変異）。**差分テスト**: 同じ式をSBCL・cl-ccの両方で実行し結果不一致を報告（FR-453 Differential Testingの強化版）。`--oss-fuzz` モードでGoogle OSS-Fuzz統合（libFuzzer ABI互換）。見つかったバグをminimize（FR-796 Creduce）して自動バグレポート生成
 - **根拠**: GCC/Clang は継続的なコンパイラファジングで年間数百のバグを発見。selfhosting後のコンパイラ正当性保証に不可欠
@@ -492,7 +492,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-796: Test Case Reduction / C-Reduce Style (テストケース縮小)
 
-- **対象**: `cli/src/main.lisp`, 新規 `src/testing/reducer.lisp`
+- **対象**: `packages/cli/src/main.lisp`, 新規 `src/testing/reducer.lisp`
 - **現状**: コンパイラバグ報告時、ユーザーが手動でテストケースを縮小。数百行のコードが最小化されないまま報告
 - **内容**: `./cl-cc reduce --crash bug.lisp` でバグを再現しつつソースを自動縮小。縮小戦略: トップレベルフォーム削除 → 式の単純化（`(complex-expr)` → `nil`）→ 識別子の短縮 → 定数の縮小。Δ-デバッグ（Andreas Zeller 1999）/ C-Reduce（PLDI 2012）のアルゴリズムを実装。`--property "crash"` / `--property "wrong-output"` で縮小目標を指定。縮小済みケースを `./cl-cc bug-report` で自動提出
 - **根拠**: コンパイラバグの再現コードが数百行→数行に縮小されることで修正速度が10倍向上。GCC / Clang での実証済み
@@ -548,7 +548,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-806: Statistical CPU Profiler (統計的CPUプロファイラ)
 
-- **対象**: `cli/src/main.lisp`, 新規 `src/profiling/cpu-profiler.lisp`
+- **対象**: `packages/cli/src/main.lisp`, 新規 `src/profiling/cpu-profiler.lisp`
 - **現状**: FR-693（Heap Profiler）はメモリ割り当て計測のみ。CPU時間の消費箇所不明
 - **内容**: `./cl-cc run --cpu-profile foo.lisp` でサンプリングベースCPUプロファイリング。シグナル `SIGPROF` / `SIGALRM`（100Hz）でスタックウォーク（`backtrace(3)` / libunwind）。関数ごとの自己時間（self time）と総時間（total time）集計。`./cl-cc profview foo.clcc-prof` でフレームグラフ（Brendan Gregg SVG形式）出力。`--callgrind` フラグでValgrind Callgrind互換フォーマット出力。`--perf` フラグでLinux `perf script` 互換出力（Firefox Profiler UIで閲覧可）
 - **根拠**: selfhostingコンパイルのCPUホットスポット特定。コード生成・最適化パスのどの関数が最も時間を消費するかを実測
@@ -556,7 +556,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-807: PMU / Performance Counter Access (PMUパフォーマンスカウンタアクセス)
 
-- **対象**: `cli/src/main.lisp`, 新規 `src/profiling/pmu.lisp`
+- **対象**: `packages/cli/src/main.lisp`, 新規 `src/profiling/pmu.lisp`
 - **現状**: プロファイリングは時間計測のみ。キャッシュミス・分岐予測失敗・TLBミスなどのハードウェアイベントカウンタ非対応
 - **内容**: `./cl-cc run --perf-events L1-dcache-miss,branch-misses,tlb-misses foo.lisp` でハードウェアカウンタを計測。Linux: `perf_event_open(2)` syscallで`perf_event_attr`を設定。macOS: `kpc_*` framework（`ktrace` / Instruments Instruments API）。カウンタ: サイクル数・命令数・CPI（Cycles Per Instruction）・L1/L2/L3キャッシュミス・分岐予測失敗率・TLBミス・メモリ帯域幅。`(cl-cc:with-perf-counters (cycles l1-miss) body)` でコード区間を計測
 - **根拠**: 「遅い」の原因がキャッシュミスなのか分岐予測失敗なのかを特定するための唯一の手段。最適化効果の定量的検証
@@ -564,7 +564,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-808: Binary Analysis Tools (バイナリ解析ツール)
 
-- **対象**: `packages/backend/binary/src/macho.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/binary/src/macho.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 生成バイナリの内部構造を検査するツールなし。`objdump`/`readelf`/`nm` 相当が外部依存
 - **内容**: `./cl-cc objdump foo` でMach-O/ELFセクション・シンボル・リロケーションを表示（`objdump -d` 相当）。`./cl-cc nm foo` でシンボルテーブル表示（型・サイズ・アドレス）。`./cl-cc size foo` でセクション別サイズ表示。`./cl-cc disasm --fn bar foo` で特定関数のx86-64逆アセンブル（Zydis/XED相当を純CLで実装）。`./cl-cc strings foo` で埋め込み文字列抽出。`./cl-cc headers foo` でロードコマンド・ELFヘッダ詳細表示
 - **根拠**: 生成コードの検証・最適化効果の確認・セキュリティ審査に外部ツール依存を排除。cl-cc自己完結型toolchainの完成
@@ -572,7 +572,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-809: Compiler Regression Bisection (コンパイラ回帰二分探索)
 
-- **対象**: `cli/src/main.lisp`, 新規 `src/testing/bisect.lisp`
+- **対象**: `packages/cli/src/main.lisp`, 新規 `src/testing/bisect.lisp`
 - **現状**: パフォーマンス回帰・バグ導入のコミットを特定するには手動の`git bisect`が必要
 - **内容**: `./cl-cc bisect --metric "compile-time" --threshold 20% HEAD~100 HEAD` で回帰を導入したコミットを自動二分探索。各コミットでcl-ccをビルドし計測を実行。`--metric "test-pass-rate"` で正当性回帰も検出。`git bisect run` スクリプトとして動作。回帰ポイント特定後に `--analyze` フラグでdiff・コミットログを表示。FR-695（Benchmarking Framework）と統合しベンチマーク結果を自動記録・比較
 - **根拠**: コンパイラ開発での性能回帰は発見が困難（数コミット前から蓄積）。自動二分探索で問題箇所を数分で特定
@@ -584,7 +584,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-812: Conditional Compilation / Feature Flags (条件付きコンパイル・機能フラグ)
 
-- **対象**: `cli/src/main.lisp`, `packages/frontend/expand/src/expander.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/frontend/expand/src/expander.lisp`
 - **現状**: CL標準の `#+`/`#-` リーダーマクロは基本的な機能フラグのみ。ビルド設定のスコープ・継承・検証なし
 - **内容**: `(cl-cc:feature-flag :jit-enabled :default t :type boolean :description "Enable JIT compilation")` で型付き機能フラグを宣言。`./cl-cc build --feature jit-enabled=false` でビルド時設定。`(cl-cc:when-feature :jit-enabled ...)` / `(cl-cc:unless-feature ...)` でコンパイル時分岐。フラグ依存グラフ（`(cl-cc:requires-feature :jit-enabled :x86-64)`）。`./cl-cc features list` で全フラグ・デフォルト値・説明を表示。Rust cargo features / C++ CMake options / Nix `enableJIT` と同等
 - **根拠**: JIT・GC種別・ターゲットアーキテクチャ・セキュリティ機能を同一ソースから条件ビルドで制御
@@ -592,7 +592,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-813: Package Lockfiles (パッケージロックファイル)
 
-- **対象**: `cli/src/main.lisp`, 新規 `src/build/lock.lisp`
+- **対象**: `packages/cli/src/main.lisp`, 新規 `src/build/lock.lisp`
 - **現状**: 依存関係の解決はビルド時に毎回実行。チーム内・CI環境で異なるバージョンが使われる可能性
 - **内容**: `./cl-cc build` 実行時に `cl-cc.lock` ファイルを生成。全直接・間接依存のバージョン・SHA256ハッシュ・ダウンロードURL を記録。次回ビルドはlockファイルを優先し完全再現性保証（FR-662 Reproducible Builds と統合）。`./cl-cc update [package]` で選択的更新とlockファイル更新。lockファイルはgit管理対象（変更がPRで可視化）。Cargo.lock / package-lock.json / poetry.lock / Nix flake.lock と同等設計
 - **根拠**: 「自分の環境では動く」問題の根絶。CIとローカルで完全同一の依存バージョンを保証
@@ -600,7 +600,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-814: Dependency Vulnerability Scanning (依存関係脆弱性スキャン)
 
-- **対ότ**: `cli/src/main.lisp`, 新規 `src/build/security-scan.lisp`
+- **対ότ**: `packages/cli/src/main.lisp`, 新規 `src/build/security-scan.lisp`
 - **現状**: 依存ライブラリにCVEが存在しても検出手段なし
 - **内容**: `./cl-cc audit` でFR-813 lockファイルの依存関係をOSV（Open Source Vulnerabilities）データベース / GitHub Advisory Database に照会。既知CVEが存在する依存を警告（CVSS スコア・影響範囲・修正バージョン情報付き）。`--deny high` で高リスクCVEをビルドエラーに。SBOM（FR-455 Software Bill of Materials）と統合しSPDX/CycloneDX形式でCVEマッピングを出力。Cargo audit / npm audit / pip-audit / OWASP Dependency-Check と同等
 - **根拠**: ソフトウェアサプライチェーン攻撃への対策。2026年以降の企業セキュリティ要件（SLSA / EO 14028）で義務化傾向
@@ -608,7 +608,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-815: Build-Time Source Code Generation (ビルド時ソースコード生成)
 
-- **対象**: `cli/src/main.lisp`, 新規 `src/build/codegen-step.lisp`
+- **対象**: `packages/cli/src/main.lisp`, 新規 `src/build/codegen-step.lisp`
 - **現状**: ソースコードは全て手書き。ビルド時に外部スキーマ・プロトコル定義から自動生成するパイプラインなし
 - **内容**: `cl-cc.build.lisp` ビルドスクリプトに `(generate-from-schema "schema.proto" :target "src/generated/proto.lisp")` を記述。生成ステップはFR-698（並列コンパイル）の依存グラフに統合。生成ファイルは再生成可能とマーク（gitignore推奨・手動編集禁止）。サポートソース: Protocol Buffers `.proto` / JSON Schema / OpenAPI YAML / DWARF type tables / SQL DDL。`./cl-cc generate` で明示的な生成実行。生成コードのFR-797（static_assert）での検証
 - **根拠**: プロトコル定義の変更時にFFIバインディング・シリアライザを手動更新する作業を自動化
@@ -636,7 +636,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-820: UNIX Signal Handling (UNIXシグナルハンドリング)
 
-- **対象**: `packages/engine/vm/src/conditions.lisp`, `packages/engine/vm/src/vm-execute.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/conditions.lisp`, `packages/engine/vm/src/vm-execute.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `SIGINT`（Ctrl-C）はSBCLのデフォルト処理。他のUNIXシグナルをLispのconditionとして扱う手段なし
 - **内容**: `(cl-cc:handle-signal SIGTERM (lambda (sig) (cleanup-and-exit)))` でシグナルハンドラを登録。`SIGINT` → `(cl-cc:keyboard-interrupt condition)`、`SIGHUP` → `(cl-cc:hangup condition)`、`SIGCHLD` → `(cl-cc:child-status-change condition)` として CL condition systemに統合。`SIGUSR1`/`SIGUSR2` でユーザー定義シグナルを使った動的ロギングレベル変更。`SA_RESTART` フラグ制御。`sigprocmask` / `sigwaitinfo` / `signalfd`（Linux）の高水準ラッパー
 - **根拠**: デーモンプロセス・長時間実行サーバー（LSP server / REPL server）でのグレースフルシャットダウン・設定リロードに必須
@@ -644,7 +644,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-821: Shared Memory IPC (共有メモリIPC)
 
-- **対象**: `packages/engine/vm/src/io.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/io.lisp`, `packages/cli/src/main.lisp`
 - **現状**: プロセス間通信はソケット/パイプのみ。同一マシン上の高速データ共有手段なし
 - **内容**: `(cl-cc:shm-open "/my-seg" :create :size (* 4 1024 1024))` → POSIX `shm_open(3)` + `ftruncate` + `mmap`。`(cl-cc:shm-open "/my-seg" :attach)` で既存セグメントに接続。`(cl-cc:with-spinlock (shm :offset 0) body)` で共有メモリ上のスピンロック（atomic CAS）。`(cl-cc:semaphore-post sem)` / `(cl-cc:semaphore-wait sem)` → POSIX `sem_post`/`sem_wait`。Sysv IPC 代替として POSIX IPC のみ実装。ユースケース: 並列コンパイル（FR-698）プロセス間の型情報共有・LSPクライアント/サーバー間高速通信
 - **根拠**: パイプ比100〜1000倍のIPC帯域幅（カーネル経由なし）。分散コンパイラキャッシュ（FR-699）のノード間通信
@@ -692,7 +692,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-830: Session Types (セッション型)
 
-- **対象**: `packages/type/type/src/`, `packages/engine/vm/src/conditions.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/engine/vm/src/conditions.lisp`
 - **現状**: チャネル（FR-599）は型なし。通信プロトコルの順序・双方向性の型安全保証なし
 - **内容**: `(defsession ClientProtocol (! (request string)) (? (response integer)) end)` でセッション型を定義。`!`=送信、`?`=受信、`&`=外部選択、`⊕`=内部選択、`end`=終了、`μ`=再帰。チャネル（FR-599）にセッション型を付与: `(cl-cc:open-channel ClientProtocol)` で型付きチャネルを取得。型検査がプロトコル違反（順序・方向・型不一致）をコンパイル時に検出。線形型（FR-linear）との統合でチャネルの使い捨て保証。Honda et al. / Vasconcelos / Frank Pfenning のセッション型理論の実装
 - **根拠**: 通信プロトコルのバグ（順序違反・デッドロック）をコンパイル時に検出。cl-ccのLSPサーバー（FR-070）のJSON-RPC通信をセッション型で安全化
@@ -700,7 +700,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-831: Singleton Types (シングルトン型)
 
-- **対象**: `packages/type/type/src/`, `packages/frontend/expand/src/expander.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/frontend/expand/src/expander.lisp`
 - **現状**: 型は値の集合を記述。特定の値1つだけを持つ型（singleton）なし
 - **内容**: `(cl-cc:the-value 42)` で値42だけを持つ型`(singleton 42)`を生成。`(defun f (x) (declare (type (singleton :ok) x)) ...)` でxが`:ok`であることを型レベルで保証。定数畳み込み（FR-002）との統合: `(singleton 42)`型の変数は定数として伝播。`eql-specializer` との統合: `(eql :ok)` CLOSスペシャライザと同型。TypeScript `"literal"` 型 / Haskell `Proxy n` / C++ `std::integral_constant` と同等
 - **根拠**: 状態機械の状態を値ではなく型で表現。関数の戻り値が特定定数のみであることを型で文書化・検証
@@ -708,7 +708,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-832: Liquid Type Inference (液体型推論)
 
-- **対象**: `packages/type/type/src/`, `packages/engine/optimize/src/optimizer.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/engine/optimize/src/optimizer.lisp`
 - **現状**: VRP（FR-245）は整数範囲を解析するがそれを型システムに反映しない。精緻化型（FR-225）は手動アノテーション必須
 - **内容**: **Liquid Haskell スタイルの自動精緻化型推論**: プログラムの制御フローから自動的に精緻化型を導出。`(if (> n 0) (sqrt n) ...)` → then分岐でnの型を`{n : integer | n > 0}`に自動精緻化。SMTソルバー（FR-246）に送出して検証。`(declare (cl-cc:liquid-types))` で関数単位有効化。境界検査除去（FR-037 BCE）の精度を大幅向上: 液体型推論で境界内と証明された配列アクセスのチェックを削除
 - **根拠**: Liquid Haskell実測: 配列境界検査の70〜90%を静的除去。実行時の安全性チェックを大幅削減
@@ -716,7 +716,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-833: Existential Types (存在型)
 
-- **対象**: `packages/type/type/src/`, `packages/frontend/expand/src/expander.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/frontend/expand/src/expander.lisp`
 - **現状**: 全称型（`forall a. ...`、FR-682 Rank-N）はあるが、存在型（`exists a. ...`）なし
 - **内容**: `(cl-cc:pack val (type a integer) (val show (lambda (x) (format t "~A" x))))` で存在型のパッキング。`(cl-cc:unpack (a val show) packed-val body)` でアンパッキング（`a`は本体内でのみ参照可能）。**実装**: 辞書渡し（dictionary passing）でモジュール/型クラスインスタンスとして表現。`(forall a. (Eq a) => ...)` の `a` をその場で存在型として局所化。OCaml `module type` の first-class 版 / Haskell `ExistentialQuantification` と同等
 - **根拠**: 動的ディスパッチ（CLOS）の型安全なエンコード。プラグイン（FR-700）のインターフェース型を存在型で表現し型安全なプラグインシステムを実現
@@ -728,7 +728,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-836: Macro Debugger / Expansion Stepper (マクロデバッガ・展開ステッパー)
 
-- **対象**: `packages/frontend/expand/src/expander.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/frontend/expand/src/expander.lisp`, `packages/cli/src/main.lisp`
 - **現状**: マクロ展開エラーのデバッグは`macroexpand-1`の手動呼び出しのみ。展開過程の可視化なし
 - **内容**: `./cl-cc macrostep foo.lisp` でマクロ展開を1ステップずつ可視化。各ステップで「適用されたマクロ名・入力フォーム・展開結果」を表示。`--max-depth 5` で展開深さを制限。DrRacket Macro Stepper / SLIME macroexpand-all との比較設計。LSP統合（FR-070）: `textDocument/macroExpand` カスタムリクエストでIDEからマクロ展開を段階表示。差分ハイライト（展開前後のdiff）でどの部分が変化したかを明示
 - **根拠**: cl-ccのマクロ（loop・dolist・define-vm-instruction等）のデバッグに直接効果。マクロ展開過程が不透明なのは開発者の最大の苦痛源
@@ -744,7 +744,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-838: Compile-Time Unit Tests (コンパイル時ユニットテスト)
 
-- **対象**: `packages/frontend/expand/src/expander.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/frontend/expand/src/expander.lisp`, `packages/cli/src/main.lisp`
 - **現状**: テストはビルド後に別途`nix run .#test`で実行。型チェック・定数評価結果のコンパイル時検証なし
 - **内容**: `(cl-cc:compile-time-test "fib-10 = 55" (= (cl-cc:eval-at-compile-time (fib 10)) 55))` でコンパイル中に評価・検証。失敗時はコンパイルエラー（テスト名・期待値・実際値付き）。型に関するcompile-time test: `(cl-cc:compile-time-test "add is pure" (cl-cc:static-assert-pure #'add))`。`--compile-tests` フラグで全compile-time testを実行（CI用）。D言語の `unittest` / Rust の `#[test]` (doctest) / Zig の `comptime testing` と同等
 - **根拠**: 定数テーブル・型推論結果・マクロ展開の正しさをビルド中に保証。「コンパイルが通れば一定の正しさが保証される」水準の向上
@@ -872,7 +872,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-860: Pass Pipeline Configuration (パスパイプライン設定)
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 最適化パスの実行順序はハードコード。特定パスの無効化・順序変更・パラメータ調整が困難
 - **内容**: `--pass-pipeline "licm,gvn,sccp,cse,dce"` でパス実行順を文字列指定。`--disable-pass licm` で特定パスを無効化（デバッグ用）。`--pass-param inlining:threshold=50` でパスパラメータを CLI から設定。`(cl-cc:define-pass-pipeline :O2 (licm gvn sccp cse dce inlining loop-unroll))` でプリセット定義。パスの実行ログ（`--print-passes`）で各パスの入出力を表示。LLVM `opt -passes="..."` / GCC `-fdump-tree-` と同等
 - **根拠**: 最適化バグの二分探索（FR-809 Bisection）でパス単位の有効/無効切り替えが必須。新パス追加時の順序依存性のデバッグに不可欠
@@ -888,7 +888,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-862: Value Profiling (値プロファイリング)
 
-- **対象**: `packages/engine/compile/src/codegen.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/cli/src/main.lisp`
 - **現状**: PGO（FR-508 AutoFDO）は関数呼び出し頻度・分岐頻度のみ計測。実際の引数値の分布不明
 - **内容**: `./cl-cc run --value-profile foo.lisp` で関数引数・分岐条件・インダイレクト呼び出し先の実際の値をサンプリング。「引数 x は90%の確率で 0」「間接呼び出しは85%が `foo`」などの値プロファイルを収集。FR-842（Function Versioning）: 高頻度値でのクローン生成の根拠として使用。FR-560（Speculative Inlining）: 高頻度呼び出し先への投機的インライン化の確率根拠。LLVM `InstrProfValueData` / JVM Value Profiling と同等
 - **根拠**: 型フィードバック（FR-559）の拡張。「この関数の引数は常に小さな整数」という情報を最適化の根拠にする
@@ -908,7 +908,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-866: Recursive Types / μ-Types (再帰型・μ型)
 
-- **対象**: `packages/type/type/src/`, `packages/frontend/expand/src/expander.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/frontend/expand/src/expander.lisp`
 - **現状**: 型定義に相互再帰（`list = nil | (cons value list)`）はCLOSで表現可能だが型推論システムの対象外
 - **内容**: `(deftype-rec (list a) (or nil (cons a (list a))))` で再帰型を宣言。型検査はμ型の展開（unrolling）で等価性判定。`μX.F[X]` 表現で型システム内部に保持。無限型（equi-recursive）と有限展開（iso-recursive）の両モード。`(cl-cc:fold val)` / `(cl-cc:unfold val)` でiso-recursive型の明示的コンバージョン。Amadio & Cardelli（1993）の再帰型等価アルゴリズム実装
 - **根拠**: 型推論が再帰型（リスト・ツリー・グラフ）に対して正確な型を導出できる。現在の「any」フォールバックを解消
@@ -916,7 +916,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-867: Codata / Coinductive Types (余データ・余帰納的型)
 
-- **対象**: `packages/type/type/src/`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/engine/compile/src/codegen.lisp`
 - **現状**: 帰納的型（有限データ構造）のみ型システムで表現。無限データ構造（無限ストリーム）の型安全な表現なし
 - **内容**: `(defcodata stream (head (-> stream a)) (tail (-> stream a (stream a))))` で余帰納的型を定義。コンストラクタは遅延（thunk化）。`(cl-cc:coiterate f seed)` で無限ストリームを生成。型チェックは **余帰納的等価** （bisimulation）で判定。停止性チェック（FR-713）の余データ版: **生産性チェック** で corecursive 関数が無限に要素を生産することを保証。Haskell lazy lists / Agda コパターンマッチ / Coq CoInductive と同等
 - **根拠**: 無限ストリーム・リアクティブシグナル（FR-601 FRP）・I/O チャネルの型安全な表現基盤
@@ -924,7 +924,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-868: Heterogeneous Lists / HList (異種リスト)
 
-- **対象**: `packages/type/type/src/`, `packages/frontend/expand/src/expander.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/frontend/expand/src/expander.lisp`
 - **現状**: `list` 型は全要素が同一型。異なる型の要素を持つ固定長リスト（タプル的）の型レベル表現なし
 - **内容**: `(deftype hlist () nil)` `(deftype (hlist a . rest) () (cons a (hlist . rest)))` で型レベルリストとして HList を定義。`(cl-cc:hnil)` / `(cl-cc:hcons x xs)` でコンストラクタ。`(cl-cc:hhead xs)` / `(cl-cc:htail xs)` で型安全アクセス（型が自動的に `integer` / `string` に特定）。型レベルプログラミング（FR-595）との統合: `(cl-cc:length-type hlist)` で HList の長さを型レベル自然数として取得。Haskell `HList` library / GHC `DataKinds` TypeLists と同等
 - **根拠**: 可変引数関数の型安全な実装基盤。`(cl-cc:zip hl1 hl2)` が要素ごとの型ペアを正確に推論できる
@@ -932,7 +932,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-869: Opaque Types / Abstract Type Boundaries (不透明型・抽象型境界)
 
-- **対象**: `packages/type/type/src/`, `src/package.lisp`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/foundation/type/src/`, `src/package.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **現状**: 型定義はパッケージ外から構造が見える。内部表現を隠蔽した「抽象型」の型システムレベル強制なし
 - **内容**: `(defopaque-type password string)` で`password`型を宣言。`password`の内部が`string`であることはモジュール外から不可視。型チェッカーが`(the string (the password x))`を型エラーにする（`password`と`string`は区別される）。`(cl-cc:coerce-opaque x password)` でモジュール内限定の変換。ML `abstype` / Haskell `newtype` + `module` export control / Java `private` の型システムレベル版。FR-710（Phantom Types）の強化: Phantomは実行時型消去、Opaqueは型システムレベル分離
 - **根拠**: APIの表現型（raw string）が意味型（password）と混同されない。型安全な設計によるセキュリティバグの防止
@@ -980,7 +980,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-878: REPL Tab Completion (REPLタブ補完)
 
-- **対象**: `cli/src/main.lisp`, `packages/engine/vm/src/symbols.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/engine/vm/src/symbols.lisp`
 - **現状**: REPL（FR-098）は基本的な読み込み・評価・印刷のループ。タブキーでの補完なし
 - **内容**: GNU Readline / libedit 統合でタブ補完を実装。補完対象: 現在の`*package*`の全シンボル・グローバル変数・マクロ名・CLOSクラス名・スロット名（`(slot-value obj <TAB>`→スロット名一覧）。S式文脈解析: `(defun <TAB>` → 関数名補完、`(make-instance '<TAB>` → クラス名補完。Fuzzy matching: `fcl` → `funcall`。補完候補はFR-725（Perfect Hash Symbol Table）から高速取得。LSP補完（FR-070）と同一ロジックを共有
 - **根拠**: 開発者がシンボル名・スロット名を記憶せずにインタラクティブ開発可能。SLIME/SLY の最重要機能の独立実装
@@ -988,7 +988,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-879: REPL Multiline Input Detection (REPL複数行入力検出)
 
-- **対象**: `cli/src/main.lisp`, `packages/frontend/parse/src/cl/parser.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/frontend/parse/src/cl/parser.lisp`
 - **現状**: REPLは1行ずつ読み取り。`(defun foo (x)\n  (+ x 1))` のような複数行入力が改行で即評価される
 - **内容**: パーサが**括弧の均衡**を追跡し、未閉じの括弧がある場合は継続プロンプト (`..>`) を表示して次行を読み込み。`(read-balanced-form)` が EOF / 完全なS式 / 不完全なS式を区別して返す。インデントヒント: 継続行の自動インデント（開き括弧の次列に揃える）。マルチライン入力のヒストリーは1エントリとして記録（FR-880）。Emacs SLIME / sbcl --interactive の動作を独立実装
 - **根拠**: 現状のREPLで複数行defunを入力するには特別な工夫が必要。基本的なインタラクティブ使用体験の向上
@@ -996,7 +996,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-880: REPL Syntax Highlighting (REPLシンタックスハイライト)
 
-- **対象**: `cli/src/main.lisp`, `packages/frontend/parse/src/lexer.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/frontend/parse/src/lexer.lisp`
 - **現状**: REPL出力は全て同一色。型エラー・シンボル・数値・文字列が視覚的に区別できない
 - **内容**: ANSI エスケープコード（`\x1b[...m`）でターミナル上のシンタックスハイライト。色スキーム: キーワード（青）・特殊フォーム（紫）・文字列（緑）・数値（シアン）・コメント（グレー）・エラー（赤太字）。Readline callbacks で**入力中**のハイライトもリアルタイム更新。`--no-color` / `NO_COLOR` 環境変数でオフ。REPL出力のプリティプリント（FR-657 Reflection APIと統合）でCLOSオブジェクトを構造的に表示
 - **根拠**: シンタックスハイライトは現代の開発ツールの最低限の要件。特にエラーメッセージの赤色強調で即座に問題箇所を認識
@@ -1004,7 +1004,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-881: REPL Undo / Side-Effect Journal (REPLアンドゥ・副作用ジャーナル)
 
-- **対象**: `packages/engine/vm/src/vm-execute.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/vm-execute.lisp`, `packages/cli/src/main.lisp`
 - **現状**: REPLでの`defun`/`defvar`/`setf`は不可逆。誤って実行した定義を取り消す手段なし
 - **内容**: REPLセッション中の全**グローバル状態変化**をジャーナルに記録: `(defun foo ...)` → 旧定義を保存、`(defvar x 10)` → 旧値を保存、`(setf (gethash :k ht) v)` → 旧エントリを保存。`(cl-cc:undo)` で直前の状態変化を逆適用。`(cl-cc:undo-to 5)` でREPL入力5番目の状態まで巻き戻し。ファイルI/O・外部プロセス呼び出しはジャーナル外（不可逆とマーク）。FR-507（Time-Travel Debugging）のREPL特化版
 - **根拠**: `(defun+` の誤タイプで関数を壊した後に `Ctrl-Z` で戻れる体験。REPLベースの探索的開発での試行錯誤コストを劇的に削減
@@ -1032,7 +1032,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-886: Platform-Specific API Integration (プラットフォーム固有API統合)
 
-- **対象**: `packages/engine/vm/src/io.lisp`, `cli/src/main.lisp`, 新規 `src/platform/`
+- **対象**: `packages/engine/vm/src/io.lisp`, `packages/cli/src/main.lisp`, 新規 `src/platform/`
 - **現状**: POSIX API のみ。macOS GCD・Windows IOCP・Linux BPF などのプラットフォーム固有の高性能APIへのアクセスなし
 - **内容**: **macOS**: `dispatch_queue_create` / `dispatch_async` (Grand Central Dispatch) のLispラッパー。`kern_return_t`型・Mach メッセージ。**Linux**: `io_uring`（FR-600 統合拡張）・`eBPF` プログラム作成/ロード・`netlink` ソケット。**Windows**: `CreateIoCompletionPort` / `GetQueuedCompletionStatusEx`（IOCP）。全プラットフォームで `(cl-cc:with-platform (:macos gcd-impl :linux epoll-impl :windows iocp-impl) ...)` で統一API
 - **根拠**: 高性能ネットワークサーバーや並行I/Oシステムでプラットフォーム固有APIへのアクセスが不可欠
@@ -1040,7 +1040,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-887: ABI-Stable C Public Interface Generation (ABI安定C公開インターフェース生成)
 
-- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/backend/binary/src/macho.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/backend/binary/src/macho.lisp`, `packages/cli/src/main.lisp`
 - **現状**: cl-ccはライブラリとして使えるが、公開するC APIのヘッダファイル・ABI保証なし
 - **内容**: `(cl-cc:export-c-api foo :sig (-> integer integer))` でC互換の公開関数を宣言。`./cl-cc build --emit-header foo.h` でC/C++ヘッダーを自動生成（型マッピング・`extern "C"` ラッパー・Doxygen コメント付き）。`--abi-version 2` でAPIバージョン管理（FR-777 ABI Stability Manifest統合）。FR-635（COMDAT）/ シンボルバージョニングとの統合で `.so` の `foo@@V2` 形式シンボルを生成。Rust `#[no_mangle] pub extern "C" fn` / Swift `@_cdecl` と同等
 - **根拠**: cl-ccを他言語（C/Python/Ruby）から動的ライブラリとして使用できるエコシステム基盤。selfhostingしつつCライブラリも提供
@@ -1088,7 +1088,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-896: Shared Library Compilation (.so / .dylib 生成)
 
-- **対象**: `packages/backend/binary/src/macho.lisp`, `cli/src/main.lisp`, `packages/backend/emit/src/x86-64-codegen.lisp`
+- **対象**: `packages/backend/binary/src/macho.lisp`, `packages/cli/src/main.lisp`, `packages/backend/emit/src/x86-64-codegen.lisp`
 - **現状**: `./cl-cc compile` は実行可能バイナリのみ生成。動的ライブラリ（`.so` / `.dylib`）形式での出力なし
 - **内容**: `./cl-cc compile --shared -o libfoo.so foo.lisp` で共有ライブラリを生成。ELF `.so`: PIC コード（FR-051 PIC）+ `.dynsym` / `.dynstr` / `DT_NEEDED` セクション。Mach-O `.dylib`: `LC_ID_DYLIB` / `LC_DYLD_INFO_ONLY` / `__DATA_CONST.__got` 生成。FR-887（ABI-Stable C API）と統合して公開シンボルのみexport。`--soname` / `--compatibility-version` オプション。`install_name_tool` 相当の rpath 操作機能
 - **根拠**: cl-ccコードをPython・Ruby・Node.jsから`ctypes`/`ffi`でロード可能に。組み込み・プラグイン配布の標準形式
@@ -1096,7 +1096,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-897: Static Library Compilation (.a 生成)
 
-- **対象**: `packages/backend/binary/src/macho.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/binary/src/macho.lisp`, `packages/cli/src/main.lisp`
 - **現状**: バイナリのみ生成。スタティックリンクのためのオブジェクトアーカイブなし
 - **内容**: `./cl-cc compile --static -o libfoo.a foo.lisp` で `.a` アーカイブを生成。各コンパイル単位を `.o`（ELF relocatable）として出力し `ar cr libfoo.a *.o` でまとめる。`--whole-archive` フラグ対応でLTO（FR-040）との統合。`./cl-cc ar` コマンドで `ar` 相当の操作（create/add/list/extract）。**Thin Archive**: `.a` に実オブジェクトを格納せずパスのみ記録（Xcode thin archive 相当）でビルド速度向上
 - **根拠**: 組み込み（FR-605 Bare Metal）・カーネル（FR-898）への静的リンクに必須。C/C++プロジェクトへのcl-ccコードの組み込み
@@ -1104,7 +1104,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-898: Kernel Module Support (カーネルモジュールサポート)
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/emit/src/x86-64-codegen.lisp`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/emit/src/x86-64-codegen.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **現状**: FR-605（Bare Metal）はOS不使用環境向け。Linuxカーネル空間でのコード実行未対応
 - **内容**: `./cl-cc compile --target linux-kernel-module foo.lisp` でLKM（Loadable Kernel Module）を生成。制約モード: GCなし（FR-719 Epsilon GC）・例外なし（代わりに`IS_ERR`スタイル）・動的割り当て制限（`kmalloc` ラッパーのみ）。`module_init` / `module_exit` エントリポイントを自動生成。`(cl-cc:kernel-func ...)` / `(cl-cc:kernel-printk ...)` のカーネルAPI高水準ラッパー。eBPF（FR-886の拡張）との連携でuserspace↔kernel通信
 - **根拠**: デバイスドライバ・ファイルシステム・ネットワークフィルタをLispで記述するニッチだが重要な用途
@@ -1112,7 +1112,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-899: Unikernel / Library OS Target (ユニカーネル・ライブラリOSターゲット)
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/emit/src/`, `packages/engine/vm/src/io.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/emit/src/`, `packages/engine/vm/src/io.lisp`
 - **現状**: Linux/macOS のOSサービスに依存した実行のみ。カーネルなし単独実行形式なし
 - **内容**: `./cl-cc compile --target unikernel-xen foo.lisp` でXen PVMハイパーバイザー上で直接起動するイメージを生成。MirageOS / Unikraft / HermiCore の設計に倣い OS サービス（ネットワーク / ファイルシステム / タイマー）をライブラリとして静的リンク。ネットワークスタック: `lwip` または minimalistic TCPスタック の静的リンク。不要なOSコード（プロセス管理・ユーザー権限）をゼロにし攻撃面を最小化。FR-605（Bare Metal）の拡張で仮想マシンサポートを追加
 - **根拠**: クラウドFaaS（Function as a Service）環境でコールドスタート時間が100ms→数ms に改善。セキュリティ分離をハイパーバイザーに委譲しTCBを最小化
@@ -1124,7 +1124,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-902: Docstring Extraction / API Doc Generation (ドキュメント文字列抽出・API文書生成)
 
-- **対象**: `cli/src/main.lisp`, 新規 `src/docs/extractor.lisp`
+- **対象**: `packages/cli/src/main.lisp`, 新規 `src/docs/extractor.lisp`
 - **現状**: `defun`のdocstringは`documentation`関数で取得可能。APIドキュメントの自動生成ツールなし
 - **内容**: `./cl-cc doc --format html src/` で全ソースからdocstringを抽出しHTML/Markdown APIドキュメントを生成。抽出対象: `defun` / `defmacro` / `defclass` / `defgeneric` / `defmethod` / `defconstant` の docstring。型アノテーション（FR-type系）・パラメータ説明・戻り値型を自動抽出。`(cl-cc:doc-example ...)` でインラインコード例（FR-903 Doctest用）。生成ドキュメントに FR-657（Reflection API）で取得したメソッド一覧・スロット情報を自動追記。Rustdoc / Haddock / JavaDoc と同等
 - **根拠**: cl-cc自身の~600エクスポートシンボルのAPIドキュメントが現在存在しない。セルフホスティング後の公開ライブラリとしての利用性向上
@@ -1132,7 +1132,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-903: Example Code Testing / Doctest (ドキュメントコード例のテスト)
 
-- **対象**: `cli/src/main.lisp`, `src/testing/`
+- **対象**: `packages/cli/src/main.lisp`, `src/testing/`
 - **現状**: docstringのコード例が正しいか検証する手段なし。ドキュメントとコードの乖離が発生する
 - **内容**: `./cl-cc doctest src/` でdocstring内の`(cl-cc:doc-example ...)`ブロックを抽出して実行・検証。書式: `(cl-cc:doc-example (fib 10) => 55)` → `(assert (equal (fib 10) 55))`に変換して実行。エラー時のコード例: `(cl-cc:doc-example (/ 1 0) => (cl-cc:signals division-by-zero))`。CIパイプラインでの`--doctest-fail-fast`でドキュメントバグを即座に検出。Python doctest / Haskell doctest / Rust `///` tests と同等
 - **根拠**: ドキュメントのコード例が古くなってバグを含むケースを自動検出。ドキュメントをテストとして扱い常に最新状態を保証
@@ -1140,7 +1140,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-904: Type Signature Documentation (型シグネチャ文書化)
 
-- **対象**: `cli/src/main.lisp`, `packages/type/type/src/`, `src/docs/extractor.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/foundation/type/src/`, `src/docs/extractor.lisp`
 - **現状**: 型推論（FR-type系）の結果はコンパイル時のみ利用。推論された型シグネチャの外部文書化・表示なし
 - **内容**: `./cl-cc show-types packages/engine/compile/src/codegen.lisp` で推論済み型シグネチャを一覧表示。`./cl-cc check-types src/` で型エラーのみを報告（コンパイルせず）。型シグネチャをFR-902（docstring抽出）に自動付加。`(cl-cc:print-inferred-type fn)` でREPLから型を確認。Haskell `:type` / TypeScript `--declaration` / mypy `--show-column-numbers` と同等
 - **根拠**: Lispの動的型付けで失われがちな型情報を文書化。API利用者が型シグネチャなしに関数を使う困難を解消
@@ -1148,7 +1148,7 @@ GC enhancements, string/symbol/numeric optimization, pattern matching, register 
 
 #### FR-905: Assertion Density Analysis (アサーション密度解析)
 
-- **対象**: `cli/src/main.lisp`, 新規 `src/analysis/assertion-density.lisp`
+- **対象**: `packages/cli/src/main.lisp`, 新規 `src/analysis/assertion-density.lisp`
 - **現状**: テスト品質評価はFR-694（Mutation Testing）のみ。ソースコード中のアサーション・契約の密度を測定しない
 - **内容**: `./cl-cc assert-density src/` でコードのアサーション密度を計測。対象: `assert`・`check-type`・`(cl-cc:require ...)`（FR-656 Contract Programming）・型アノテーション。密度指標: アサーション/関数数・アサーション/LOC・境界チェック/配列アクセス比。「アサーション密度が低いモジュール」を警告（テスト補強候補）。FR-692（Coverage）と組み合わせ: カバレッジ高×アサーション密度低 → 「テストは通るが検証が弱い」を発見。NASAの Assertion Density Metric（JPL コーディング標準）に準拠
 - **根拠**: カバレッジ100%でも各テストが何を検証しているかを定量化できない問題を解消。コードの「防御度」を数値化

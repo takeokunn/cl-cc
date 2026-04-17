@@ -5,7 +5,7 @@
 ;;;; Phase 2 prerequisite: the 12 symbols that must be interned before
 ;;;; cl-cc/prolog and cl-cc/compile load. Previously these lived in :cl-cc
 ;;;; (umbrella) and were pre-interned by a compile-time hack in
-;;;; packages/prolog/prolog/src/package.lisp. The bootstrap package is the canonical home.
+;;;; packages/foundation/prolog/src/package.lisp. The bootstrap package is the canonical home.
 ;;;;
 ;;;; Why a separate package?
 ;;;;   cl-cc/prolog uses binop/const/var/cmp/... as Prolog predicate atoms

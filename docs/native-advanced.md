@@ -8,7 +8,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-500: LTO (Link-Time Optimization) — モジュール間最適化基盤
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/backend/binary/src/macho.lisp`, `packages/backend/binary/src/elf.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/backend/binary/src/macho.lisp`, `packages/backend/binary/src/elf.lisp`
 - **内容**:
   - コンパイル済みモジュールを独立したIR（VMまたはMIR）形式でバイナリに埋め込み
   - リンク段階で全モジュールのIRを統合し、クロスモジュールインライン化・定数伝播・デッドコード除去を実行
@@ -18,7 +18,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-501: ThinLTO — スケーラブルな並列LTO
 
-- **対象**: `pipeline/src/pipeline.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**:
   - モジュールごとに軽量サマリ（関数シグネチャ・インライン候補・型情報）を生成
   - リンク時はサマリのみ読み込み、必要な関数のIRのみ選択的にインポート
@@ -28,7 +28,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-502: Interprocedural Constant Propagation (IPCP)
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**:
   - 呼び出しサイトで定数引数が渡される関数を検出し、その引数を定数として特化版を生成
   - 特化版にはIPCPサフィックスを付与し、元関数は汎用版として残す
@@ -139,7 +139,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-520: Tiered Compilation (段階的コンパイル)
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `pipeline/src/pipeline.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/umbrella/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - **Tier 0**: VM インタープリタで即実行（起動時間ゼロ）
   - **Tier 1**: 呼び出し回数カウンタが閾値（例: 100回）を超えたらベースラインJIT（最適化なし、高速コンパイル）
@@ -150,7 +150,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-521: On-Stack Replacement (OSR) — スタック上置換
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**:
   - ループ実行中にそのループがホットと判定された場合、現在実行中のインタープリタフレームをJITコンパイル済みフレームに動的置換
   - OSR エントリポイントを各ループヘッダに生成し、インタープリタの仮想レジスタを物理レジスタにマッピング
@@ -160,7 +160,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-522: Deoptimization (脱最適化)
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**:
   - 型推測に基づく最適化（例: 整数加算を `FIXNUM` と仮定してオーバーフローチェックを省略）が失敗した場合、インタープリタフレームへ安全に復帰
   - 各 deopt ポイントでの仮想レジスタマッピング（deopt マップ）をコンパイル時に生成
@@ -180,7 +180,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-524: Value Profiling (値プロファイリング)
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**:
   - 実行時に特定命令のオペランド値（整数定数、型タグ）の分布を記録
   - `vm-generic-call` の receiver 型頻度（ICと兼用）、整数値の頻度（IPCP特化のヒント）
@@ -190,7 +190,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-525: AutoFDO / Sample-Based PGO (サンプリングベースPGO)
 
-- **対象**: `pipeline/src/pipeline.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**:
   - `perf record` / `dtrace` 等のハードウェアサンプラーで収集したプロファイルを CL ソース行にマッピング
   - 特定のコンパイル時フラグなしに実運用バイナリからPGOデータを収集可能
@@ -339,7 +339,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-553: PerfMap / JIT Map File Output (perf 用マップファイル出力)
 
-- **対象**: `pipeline/src/pipeline.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**:
   - `/tmp/perf-<pid>.map` 形式でJITコンパイルされた関数のアドレス範囲とシンボル名を出力
   - `perf report` / `perf annotate` がCL関数名でホットスポットを表示可能に
@@ -349,7 +349,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-554: Sanitizer Instrumentation Integration (サニタイザ計装統合)
 
-- **対象**: `packages/backend/emit/src/x86-64-codegen.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/backend/emit/src/x86-64-codegen.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**:
   - **ASan (AddressSanitizer)**: ヒープ・スタックの境界外アクセス検出のためにメモリアクセスにシャドウチェックを挿入
   - **UBSan (UndefinedBehaviorSanitizer)**: 整数オーバーフロー・型ミスマッチ検出のためにガードを挿入
@@ -376,7 +376,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-561: SJLJ vs Table-Based Exception Selection (SJLJ vs テーブルEH選択)
 
-- **対象**: `packages/engine/vm/src/conditions.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/vm/src/conditions.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**:
   - 現状: `handler-case` の低コスト実装として `setjmp`/`longjmp` を選択可能
   - `--eh-model=sjlj` (デバッグ・低頻度例外向け) と `--eh-model=table` (ホットパス向け) の選択機構
@@ -523,7 +523,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-590: WASI Preview 2 / Component Model (WASI p2対応)
 
-- **対象**: `packages/backend/emit/src/wasm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/emit/src/wasm.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - WASI Preview 1 (`fd_read`, `fd_write` 等の syscall) から WASI Preview 2 (Component Model ベースのインターフェース型) へ移行
   - WIT (Wasm Interface Types) 定義から CL 型とのバインディングを自動生成
@@ -658,7 +658,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-607: Identical Code Folding / Function Merging (同一コード折り畳み)
 
-- **対象**: `packages/backend/binary/src/macho.lisp`, `packages/backend/binary/src/elf.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/backend/binary/src/macho.lisp`, `packages/backend/binary/src/elf.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**:
   - コンパイル済み関数のバイト列を比較し、完全一致する関数を単一エントリにマージ
   - テンプレート展開やコード生成で重複が生まれやすい数値特化関数が主な対象
@@ -795,7 +795,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-625: Arena Allocation for Compiler Phases (コンパイラ内アリーナ割り当て)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/engine/optimize/src/optimizer.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/engine/optimize/src/optimizer.lisp`
 - **内容**:
   - コンパイル1関数ごとに専用アリーナを確保し、最適化パス内の一時オブジェクトをアリーナから割り当て
   - 関数コンパイル完了時にアリーナを一括解放（個別 GC 不要）
@@ -833,7 +833,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-632: Parallel Compilation (並列コンパイル)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - ファイル間依存グラフ（`our-load` が構築するロード順）を解析し、依存関係のないファイルを並列コンパイル
   - `lparallel` / `bt:make-thread` を用いた worker スレッドプール（スレッド数 = CPU コア数）
@@ -859,7 +859,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-640: Incremental Compilation (インクリメンタルコンパイル)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - ファイルの内容ハッシュ（SHA-256）と依存ファイルのハッシュを記録し、変更がないファイルのコンパイルをスキップ
   - `.deps` ファイルに各ソースファイルが使うマクロ・型・グローバル変数の依存関係を記録
@@ -870,7 +870,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-641: Hot Reload / Live Patching (ホットリロード)
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `cli/src/main.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/cli/src/main.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**:
   - 実行中の CL プロセスに対して `(our-load "file.lisp")` で関数定義を上書き可能（現状は再起動が必要な場合あり）
   - JIT コンパイル済みコードの場合: 新バージョンをコンパイルし、古い `vm-func-ref` エントリをアトミックに差し替え
@@ -892,7 +892,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-643: Optimization Pass Pipeline Configuration (最適化パイプライン設定)
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - ユーザーが最適化パスの順序・有効/無効を設定可能にする
   - `--pass-pipeline="dce,cse,inline,sccp,gvn"` 形式のコマンドライン引数
@@ -903,7 +903,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-644: Compiler Diagnostics / Optimization Remarks (最適化レマーク)
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**:
   - 最適化の成功・失敗をソース位置付きで出力する仕組み
   - 例: `note: foo.lisp:42: inlined call to bar (3 instructions)` / `note: foo.lisp:55: loop not vectorized: data dependency`
@@ -991,7 +991,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-661: Propeller / Profile-Guided Layout (プロファイルガイドレイアウト)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/backend/binary/src/elf.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/backend/binary/src/elf.lisp`
 - **内容**:
   - BOLT はポストリンクのバイナリ書き換えだが、Propeller はコンパイル・リンク段階でレイアウトを最適化
   - `--propeller-profile=perf.data` でコンパイル時に関数・基本ブロックの配置を決定
@@ -1075,7 +1075,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### ✅ FR-675: Purity Analysis / Effect Tracking (純粋性解析・作用追跡)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/engine/optimize/src/optimizer.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/engine/optimize/src/optimizer.lisp`
 - **内容**:
   - 副作用のない関数（純粋関数）を静的に検出し、呼び出し間のCSEとモーションを許可
   - **効果アノテーション**: `no-side-effects`, `reads-only`, `writes-global` の3レベルを関数に付与
@@ -1282,7 +1282,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-700: Heap Profiler / Allocation Site Tracking (ヒーププロファイラ)
 
-- **対象**: `packages/backend/runtime/src/heap.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/backend/runtime/src/heap.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**:
   - すべてのヒープ割り当てにコールサイト情報（ソースファイル:行番号）を記録するプロファイリングモード
   - `--heap-profile` フラグで有効化。割り当てのサンプリングレート（1/N）を設定可能
@@ -1293,7 +1293,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-701: Continuous Profiling Integration (継続的プロファイリング統合)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - **eBPF ベース**: `perf_event_open` + eBPF でランタイムオーバーヘッドなしに本番環境でサンプリング
   - **Pyroscope / parca 互換**: OpenTelemetry Profiling Signal（OTEP-0239, 2024 draft）形式で継続的プロファイルを送信
@@ -1304,7 +1304,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-702: Flame Graph Generation (フレームグラフ生成)
 
-- **対象**: `cli/src/main.lisp`
+- **対象**: `packages/cli/src/main.lisp`
 - **内容**:
   - `perf script` 出力または独自サンプリングデータから Brendan Gregg フレームグラフ形式の SVG を生成
   - `--flamegraph=output.svg` フラグでワンコマンド生成
@@ -1315,7 +1315,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-703: Compiler Self-Profiling / Build Analytics (コンパイラ自己プロファイリング)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/engine/optimize/src/optimizer.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/engine/optimize/src/optimizer.lisp`
 - **内容**:
   - `--time-passes` フラグ: 各最適化パスの CPU 時間・GC 回数・IR 命令数変化を計測
   - `--stats` フラグ: 各パスの統計（インライン化回数、定数畳み込み回数、除去した命令数等）を集計出力
@@ -1326,7 +1326,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-704: SBOM (Software Bill of Materials) / Reproducible Build (再現可能ビルド)
 
-- **対象**: `packages/backend/binary/src/elf.lisp`, `packages/backend/binary/src/macho.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/binary/src/elf.lisp`, `packages/backend/binary/src/macho.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - **Reproducible Build**: 同一入力から常に同一バイナリを生成。タイムスタンプ・ランダム値・スタックアドレス等の非決定的要素を排除
   - **SBOM 生成**: SPDX / CycloneDX 形式でバイナリの依存関係（ソースファイル、stdlib バージョン）を出力
@@ -1365,7 +1365,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-712: MLIR Integration (MLIRマルチレベルIR統合)
 
-- **対象**: `packages/foundation/mir/src/mir.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/foundation/mir/src/mir.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**:
   - LLVM MLIR の dialect システム: 複数の抽象度レベルのIRを同一フレームワークで扱う
   - **cl-cc 用 dialect**: `cl-cc` dialect（高レベル CL 演算）→ `linalg` dialect（配列演算）→ `llvm` dialect（低レベル）の段階的 lowering
@@ -1588,19 +1588,19 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 - **内容**:
   - 短い命令列（3-5命令）に対して網羅的探索または確率的探索で最適な等価命令列を発見
   - **Stochastic Superoptimization** (Schkufza et al. 2013): MCMC でランダム変異し、SMT ソルバ（Z3）で等価性を検証
-  - 生成したルールを `packages/prolog/prolog/src/prolog.lisp` の Prolog ファクトとして登録
+  - 生成したルールを `packages/foundation/prolog/src/prolog.lisp` の Prolog ファクトとして登録
 - **根拠**: GNU Superoptimizer (1992) / LLVM STOKE. 手書きでは発見できない命令削減を自動発見
 - **難易度**: Very Hard
 
 #### FR-751: Abstract Interpretation Framework (抽象解釈フレームワーク)
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/type/type/src/` 型システム
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/foundation/type/src/` 型システム
 - **内容**:
   - Cousot & Cousot (1977) の抽象解釈: プログラムの意味を具体域からガロア接続で写した抽象域で近似
   - **interval domain**: 値範囲解析（FR-610 VRP の理論的基盤）
   - **sign domain**: 正/零/負の3値ドメイン
   - **type domain**: CL 型の格子（`fixnum ⊑ integer ⊑ number ⊑ t`）
-  - `packages/prolog/prolog/src/prolog.lisp` の Prolog エンジンを抽象解釈エンジンの基盤として流用可能
+  - `packages/foundation/prolog/src/prolog.lisp` の Prolog エンジンを抽象解釈エンジンの基盤として流用可能
 - **根拠**: Cousot & Cousot. Astree (Airbus A380 コード検証). 型安全性・数値範囲の静的保証
 - **難易度**: Very Hard
 
@@ -1652,7 +1652,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-762: REPL Enhanced (REPL高度化)
 
-- **対象**: `cli/src/main.lisp`
+- **対象**: `packages/cli/src/main.lisp`
 - **内容**:
   - Tab 補完・構文ハイライト・多行入力・ヒストリ永続化（`~/.cl-cc_history`）
   - `:inspect obj` コマンドでオブジェクト構造を対話的に探索
@@ -1662,7 +1662,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-763: Quicklisp / ASDF Integration (パッケージマネージャ統合)
 
-- **対象**: `cli/src/main.lisp`, `cl-cc.asd`
+- **対象**: `packages/cli/src/main.lisp`, `cl-cc.asd`
 - **内容**:
   - `./cl-cc install hunchentoot` → Quicklisp から依存関係を取得して cl-cc でコンパイル
   - ASDF システム定義（`.asd`）を解析して依存グラフを構築、インクリメンタルコンパイル（FR-640）と統合

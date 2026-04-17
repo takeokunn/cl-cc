@@ -82,7 +82,7 @@ Codegen → VM Bytecode
 | `hash.lisp`            | ハッシュテーブル             |
 | `format.lisp`          | format指令                   |
 
-### 4. 型システム (packages/type/type/src/)
+### 4. 型システム (packages/foundation/type/src/)
 
 | ファイル           | 機能                               |
 | ------------------ | ---------------------------------- |
@@ -195,12 +195,13 @@ CL-CCはメタ循環的な意味で自己ホスティングです:
 ### テスト構造
 
 ```
+packages/testing/framework/src/   # テストインフラ（:cl-cc/tests-framework）
+├── framework.lisp                 # 基本テストマクロ
+├── framework-compiler.lisp
+└── framework-fuzz.lisp
+
 tests/
-├── framework/           # テストインフラ
-│   ├── framework.lisp   # 基本テストマクロ
-│   ├── framework-compiler.lisp
-│   └── framework-fuzz.lisp
-├── unit/               # ユニットテスト
+├── unit/               # ユニットテスト（packages/**/tests/ に段階的に移行中）
 │   ├── vm/
 │   ├── compile/
 │   ├── type/

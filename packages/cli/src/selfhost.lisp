@@ -40,14 +40,14 @@ the base so Nix store hashes don't affect relative path computation."
    ;;   → parse → type → vm → optimize → emit → expand → compile
    (%asdf-source-files :cl-cc-bootstrap  "packages/foundation/bootstrap/")
    (%asdf-source-files :cl-cc-ast        "packages/foundation/ast/")
-   (%asdf-source-files :cl-cc-prolog     "packages/prolog/prolog/")
+   (%asdf-source-files :cl-cc-prolog     "packages/foundation/prolog/")
    (%asdf-source-files :cl-cc-ir         "packages/foundation/ir/")
    (%asdf-source-files :cl-cc-mir        "packages/foundation/mir/")
    (%asdf-source-files :cl-cc-binary     "packages/backend/binary/")
    (%asdf-source-files :cl-cc-runtime    "packages/backend/runtime/")
    (%asdf-source-files :cl-cc-bytecode   "packages/backend/bytecode/")
    (%asdf-source-files :cl-cc-parse      "packages/frontend/parse/")
-   (%asdf-source-files :cl-cc-type       "packages/type/type/")
+   (%asdf-source-files :cl-cc-type       "packages/foundation/type/")
    (%asdf-source-files :cl-cc-vm         "packages/engine/vm/")
    (%asdf-source-files :cl-cc-optimize   "packages/engine/optimize/")
    (%asdf-source-files :cl-cc-emit       "packages/backend/emit/")
@@ -55,12 +55,12 @@ the base so Nix store hashes don't affect relative path computation."
    (%asdf-source-files :cl-cc-compile    "packages/engine/compile/")
    ;; Umbrella package + compile-pipeline (use (in-package :cl-cc), load last)
    (list "packages/umbrella/src/package.lisp"
-         "packages/engine/pipeline/src/stdlib-source.lisp"
-         "packages/engine/pipeline/src/stdlib-source-ext.lisp"
-         "packages/engine/pipeline/src/pipeline-stdlib.lisp"
-         "packages/engine/pipeline/src/pipeline.lisp"
-         "packages/engine/pipeline/src/pipeline-native.lisp"
-         "packages/engine/pipeline/src/pipeline-repl.lisp"))
+         "packages/umbrella/pipeline/stdlib-source.lisp"
+         "packages/umbrella/pipeline/stdlib-source-ext.lisp"
+         "packages/umbrella/pipeline/pipeline-stdlib.lisp"
+         "packages/umbrella/pipeline/pipeline.lisp"
+         "packages/umbrella/pipeline/pipeline-native.lisp"
+         "packages/umbrella/pipeline/pipeline-repl.lisp"))
   "Ordered source files for self-hosting phase 4 verification.
 Computed dynamically from ASDF system definitions to stay current.")
 

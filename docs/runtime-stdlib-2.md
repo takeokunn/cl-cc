@@ -165,7 +165,7 @@ Algebraic effects, string builder/rope, structured logging, LSP/DAP, continuatio
 
 #### FR-808: Shebang / Script Mode (シェバン・スクリプトモード)
 
-- **対象**: `cli/src/main.lisp`, `packages/frontend/parse/src/cl/lexer.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/frontend/parse/src/cl/lexer.lisp`
 - **内容**:
   - `#!/usr/bin/env cl-cc` を含むファイルを `./script.lisp` として実行可能にする
   - レクサが行頭の `#!` を行コメントとして無視（ANSI CL外の拡張）
@@ -177,7 +177,7 @@ Algebraic effects, string builder/rope, structured logging, LSP/DAP, continuatio
 
 #### FR-809: Command-Line Arguments API (コマンドライン引数API)
 
-- **対象**: `cli/src/main.lisp`
+- **対象**: `packages/cli/src/main.lisp`
 - **内容**:
   - `(cl-cc:argv)` — コマンドライン引数リスト（スクリプト名以降）
   - `(cl-cc:getopt "my-script" '(:flag #\v "verbose" "Enable verbose output") argv)` — GNU getopt互換
@@ -363,7 +363,7 @@ Algebraic effects, string builder/rope, structured logging, LSP/DAP, continuatio
 
 #### FR-834: JIT Threshold Configuration (JIT閾値設定)
 
-- **対象**: `packages/engine/vm/src/vm-run.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/vm/src/vm-run.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**:
   - `*jit-tier1-threshold*` — Tier-0 → Tier-1 エスカレートの呼び出し回数（デフォルト100）
   - `*jit-trace-threshold*` — トレース記録開始の閾値（デフォルト100ループ反復）
@@ -865,7 +865,7 @@ Algebraic effects, string builder/rope, structured logging, LSP/DAP, continuatio
 
 #### FR-899: Demand-Paged FASL Loading (FASL需要ロード)
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - FASL ファイルをメモリマップ（`mmap`）してページング単位でロード
   - `fasl-toc` (Table of Contents): FASL先頭にトップレベルフォームのオフセット表を配置
@@ -882,7 +882,7 @@ Algebraic effects, string builder/rope, structured logging, LSP/DAP, continuatio
 
 #### FR-902: PGO Profile Persistence (PGOプロファイルデータ永続化)
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - プロファイルデータのシリアライズ: `(save-pgo-data path)` → MessagePack or CBOR 形式
   - デシリアライズ: `(load-pgo-data path)` — 関数名 + バージョンハッシュで照合
@@ -973,7 +973,7 @@ Algebraic effects, string builder/rope, structured logging, LSP/DAP, continuatio
 
 #### FR-917: Reproducible Build Support (再現可能ビルド)
 
-- **対象**: `cli/src/main.lisp`, `cl-cc.asd`
+- **対象**: `packages/cli/src/main.lisp`, `cl-cc.asd`
 - **内容**:
   - `*build-seed*` 固定: ハッシュテーブルのシード、gensym カウンタ、ランダム性のソース全て固定
   - ソートされたシンボル出力: パッケージの `do-symbols` を決定論的順序で実行

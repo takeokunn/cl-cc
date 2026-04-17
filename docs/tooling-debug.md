@@ -8,7 +8,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-310: Interactive VM Debugger (対話型VMデバッガ)
 
-- **対象**: `packages/engine/vm/src/vm-run.lisp`, `packages/engine/vm/src/vm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/vm-run.lisp`, `packages/engine/vm/src/vm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `run-compiled`（`vm-run.lisp:124`）と`run-vm`（`vm-run.lisp:265`）はタイトループでフック挿入点なし。ステップ実行・ブレークポイント・インスペクト不可
 - **内容**: `vm-step`（命令レベル単一ステップ）、`vm-break`（ブレークポイント命令）、`vm-inspect`（レジスタ/ヒープインスペクタ）。エラー時にインタラクティブデバッグREPLにドロップ。条件付きブレークポイント
 - **根拠**: GDB / LLDB / SBCL `(break)`。デバッグなしでの開発は非現実的
@@ -24,7 +24,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-312: REPL Enhancements (REPL拡張)
 
-- **対象**: `cli/src/main.lisp`
+- **対象**: `packages/cli/src/main.lisp`
 - **現状**: REPL（`main.lisp:256-302`）はベア`read-line`ループ。括弧バランス（`%count-parens`、`main.lisp:243`）のみ。履歴・タブ補完・readline統合なし
 - **内容**: コマンド履歴（上下矢印）、タブ補完（パッケージシンボル+関数レジストリ）、複数行編集、readline/linedit/pure-CLラインエディタ統合
 - **根拠**: SBCL + linedit / SLIME / rlwrap。対話型開発の基本機能
@@ -56,7 +56,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-316: Benchmark/Profiling Framework (ベンチマーク/プロファイリングフレームワーク)
 
-- **対象**: `tests/framework/framework-compiler.lisp`, `packages/engine/vm/src/vm-run.lisp`, 新規`benchmarks/`
+- **対象**: `packages/testing/framework/src/framework-compiler.lisp`, `packages/engine/vm/src/vm-run.lisp`, 新規`benchmarks/`
 - **現状**: `assert-faster-than`（`framework-compiler.lisp:238`）と`assert-no-consing`（`framework-compiler.lisp:257`）はテストアサーション用のみ。スタンドアロンベンチマークランナーなし。VM命令カウンタなし
 - **内容**: `defbenchmark`マクロ（ウォームアップ+計測反復+統計出力）。VM命令カウンタ/プロファイラ（opcode別頻度カウント）。関数別呼び出し回数+累積時間追跡。JSON結果出力によるリグレッション追跡
 - **根拠**: Criterion (Haskell/Rust) / Google Benchmark。性能回帰の定量検出
@@ -84,7 +84,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-319: LSP Server (Language Server Protocol サーバー)
 
-- **対象**: 新規`src/lsp/`モジュール, `cl-cc.asd`, `cli/src/main.lisp`
+- **対象**: 新規`src/lsp/`モジュール, `cl-cc.asd`, `packages/cli/src/main.lisp`
 - **現状**: LSP関連コードなし。JSON-RPCなし。CLIに`lsp`サブコマンドなし（`main.lisp:480-497`）
 - **内容**: JSON-RPC 2.0トランスポート。`textDocument/didOpen|didChange|completion|hover|definition|diagnostics`ハンドラ。既存インフラ活用: インクリメンタルパーサ（`incremental.lisp:1-177`）、CST（`cst.lisp`）、診断（`diagnostics.lisp`）、型推論（`inference.lisp:74-194`のAlgorithm W）
 - **根拠**: LSP Specification / rust-analyzer / clangd。モダンIDE統合の標準
@@ -116,7 +116,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-323: Compilation Cache (コンパイルキャッシュ)
 
-- **対象**: `pipeline/src/pipeline.lisp`, 新規`packages/engine/compile/src/cache.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, 新規`packages/engine/compile/src/cache.lisp`
 - **現状**: `compile-expression`（`pipeline.lisp:4-37`）は常にゼロからリコンパイル。パースキャッシュ（`incremental.lisp:132-150`、`*parse-cache*`）はsxhashベースのインメモリのみで永続化なし
 - **内容**: 永続コンパイルキャッシュ（コンテンツハッシュ→コンパイル済みVMプログラム）。依存関係対応無効化。`--incremental`フラグ
 - **根拠**: ccache / sccache / SBCL FASL。リビルド時間の大幅削減
@@ -124,8 +124,8 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-324: Static Analysis / Linting (静的解析/リンティング)
 
-- **対象**: 新規`src/analysis/`モジュール, `cli/src/main.lisp`
-- **現状**: 型チェッカー（`packages/type/type/src/`）、変数解析（`ast.lisp`の`find-free-variables`等）、診断インフラ（`diagnostics.lisp`）、DCE（オプティマイザ）が個別に存在。統合リンティングツールなし
+- **対象**: 新規`src/analysis/`モジュール, `packages/cli/src/main.lisp`
+- **現状**: 型チェッカー（`packages/foundation/type/src/`）、変数解析（`ast.lisp`の`find-free-variables`等）、診断インフラ（`diagnostics.lisp`）、DCE（オプティマイザ）が個別に存在。統合リンティングツールなし
 - **内容**: CLIの`lint`サブコマンド。未使用変数検出（`find-free-variables`拡張）、シャドウイングバインディング警告、到達不能コード検出（オプティマイザのDCEパス活用）、スタイル警告（`(if x y nil)` → `(when x y)`）。`format-diagnostic`経由で出力
 - **根拠**: ESLint / clippy / SBCL style-warnings。コード品質の自動保証
 - **難易度**: Medium
@@ -144,7 +144,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-502: our-load AST pipeline
 
-- **対象**: `pipeline/src/pipeline.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: `our-load`がソースを文字列→S式→`eval`のパスを取り、AST変換・最適化をバイパスする場合がある
 - **内容**: `our-load`を完全AST pipeline経由 (parse→expand→CPS→codegen→optimize) に統一
 - **根拠**: セルフホスティングの安定化。文字列roundtripによる情報消失を防ぐ
@@ -152,7 +152,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-503: declaim / deftype 処理
 
-- **対象**: `pipeline/src/pipeline.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: `declaim`がprescan時に無視され、`deftype`が型エイリアスとして機能しない
 - **内容**: `declaim`の主要なdeclaration (`ftype`, `type`, `inline`, `optimize`) をpipelineで処理。`deftype`をマクロとして展開可能にする
 - **根拠**: ANSI CL 3.3.4 — declaim, deftype
@@ -160,7 +160,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-504: prescan 多重パッケージ
 
-- **対象**: `pipeline/src/pipeline.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: `%prescan-in-package`が単一パッケージの切り替えのみ対応。同一ファイルに複数`in-package`が出現する場合に誤動作
 - **内容**: prescanループをパッケージスタックで管理。`in-package`の出現ごとに正しく切り替え
 - **根拠**: 複数パッケージを跨ぐソースファイルのセルフホスティング対応
@@ -168,7 +168,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-505: compile-file セルフホスト読み込み
 
-- **対象**: `pipeline/src/pipeline.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: `compile-file`相当の機能でセルフホスト読み込みが`#.`/`#+`/`#-`の一部リーダーマクロで誤動作する可能性
 - **内容**: リーダーマクロ処理の完全化と`compile-file`相当パスのセルフホスト対応テスト追加
 - **根拠**: `./cl-cc selfhost`の安定性向上
@@ -196,7 +196,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-331: Tiered Compilation (階層型コンパイル)
 
-- **対象**: 新規`src/jit/tiered.lisp`, `src/jit/baseline.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: 新規`src/jit/tiered.lisp`, `src/jit/baseline.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: コンパイルパスは1段階のみ（`our-eval`→`run-vm`）
 - **内容**: Tier-0 (インタープリタ) → Tier-1 (ベースラインJIT、FR-330) → Tier-2 (最適化JIT、既存optimizer+regalloc+x86-64backend) の3段階。関数呼び出しカウンタ（`*invocation-count-table*`）で閾値（例: 10回→Tier-1, 1000回→Tier-2）に達した時点で昇格。コンパイル非同期実行でダウンタイムゼロ
 - **根拠**: V8 Ignite→Maglev→Turbofan / HotSpot C1→C2。モダンランタイムのデファクト構成
@@ -232,7 +232,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-335: Link-Time Optimization / LTO (リンク時最適化)
 
-- **対象**: `packages/backend/binary/src/macho.lisp`, `pipeline/src/pipeline.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/binary/src/macho.lisp`, `packages/umbrella/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **現状**: コンパイル単位はファイル単位で独立。リンク時には機械語バイト列のみ接続（`macho.lisp`）
 - **内容**: コンパイル済みVMプログラム（IR形式）をbitcode相当の中間表現として`.o`に埋め込み。リンカ起動時に全コンパイル単位のIRをマージして**全プログラム最適化**（クロスモジュールインライン化・DCE・型特化）を適用後に機械語生成。`--lto=thin`（並列インデックスベース）と`--lto=full`の2モード
 - **根拠**: LLVM ThinLTO / GCC LTO / Rust LTO。モジュール境界を越えたインライン化でlibcall撤廃などの効果
@@ -250,7 +250,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 - **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/engine/optimize/src/optimizer.lisp`
 - **現状**: CLOS`defmethod`呼び出しは常にディスパッチテーブル検索（`vm-clos.lisp`）。型情報があっても直接呼び出しに変換されない
-- **内容**: 型推論（`packages/type/type/src/inference.lisp`）の結果でレシーバー型が単態の場合、`vm-generic-call`を`vm-call`に変換（確実なdevirt）。型が確率的に単態の場合は**投機的devirt**（PICガード+deoptバックエッジ）
+- **内容**: 型推論（`packages/foundation/type/src/inference.lisp`）の結果でレシーバー型が単態の場合、`vm-generic-call`を`vm-call`に変換（確実なdevirt）。型が確率的に単態の場合は**投機的devirt**（PICガード+deoptバックエッジ）
 - **根拠**: GCC `-fdevirtualize-speculatively` / LLVM devirt pass。CLOSのメソッド呼び出しが最大のオーバーヘッド源の一つ
 - **難易度**: Hard
 
@@ -292,7 +292,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-343: Effect System Integration (エフェクトシステム統合)
 
-- **対象**: `packages/type/type/src/inference.lisp`, `packages/engine/optimize/src/effects.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`, `packages/engine/optimize/src/effects.lisp`
 - **現状**: `effects.lisp`は命令レベルの副作用分類のみ。型システム（`inference.lisp`）と連携していない
 - **内容**: 関数型に**エフェクト行** `(→ (fixnum) fixnum ! (io))` を追加（Koka / OCaml 5.0 effects スタイル）。pure関数の自動識別・エフェクト封じ込め（`with-effect-handler`）によるCSE/並列化根拠の強化。段階的採用（既存型シグネチャへの影響なし）
 - **根拠**: OCaml 5.0 algebraic effects / Koka / Haskell IO monad。副作用の型レベル追跡はモダン型システムの主流
@@ -332,7 +332,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-350: Line/Branch Coverage (行・分岐カバレッジ)
 
-- **対象**: `packages/engine/compile/src/codegen.lisp`, `tests/framework/framework.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/testing/framework/src/framework.lisp`
 - **現状**: 現行の in-repo テストフレームワークにカバレッジ計測機構なし。`deftest-each`/`deftest`マクロにカバレッジフックなし
 - **内容**: `--coverage`コンパイルフラグでソース行・分岐ごとにカウンタ命令を埋め込み。`(cl-cc:with-coverage ...)` フォームで範囲指定計測。HTML/LCOVカバレッジレポート生成。canonical `nix run .#test` フローと統合し、`tests/`内の全ユニットテストへカバレッジを結び付ける
 - **根拠**: GCC `--coverage` / LLVM source-based coverage / Istanbul。4322テストのカバレッジ計測でデッドパス特定
@@ -348,7 +348,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-352: Mutation Testing (ミューテーションテスト)
 
-- **対象**: `tests/framework/framework-fuzz.lisp`, 新規`src/tools/mutator.lisp`
+- **対象**: `packages/testing/framework/src/framework-fuzz.lisp`, 新規`src/tools/mutator.lisp`
 - **現状**: PBT（`framework-fuzz.lisp`）はランダム入力生成。プログラム変異によるテスト有効性検証なし
 - **内容**: ソースASTへのミューテーション演算子適用（条件反転`not`、算術演算子交換`+→-`、定数変更）。各ミューテーントに対してテストスイートを実行し**殺傷率**（mutation score）を算出。Pitest (Java) / mutmut (Python) 相当
 - **根拠**: テストの質の定量指標。高カバレッジでも低mutation scoreならテストが弱い
@@ -356,7 +356,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-353: Property-Based Testing Integration (PBT深化)
 
-- **対象**: `tests/framework/framework-fuzz.lisp`
+- **対象**: `packages/testing/framework/src/framework-fuzz.lisp`
 - **現状**: `%gen-expr`（`framework-fuzz.lisp`）は文法ベース生成。`deftest-fuzz`マクロは実装済み
 - **内容**: **shrinking**: 失敗入力の最小化（バイナリサーチ型）。**stateful PBT**: コマンドシーケンス生成でVMステートマシンをテスト。**typeclass-based generators**: 型アノテーションから入力生成器を自動導出。QuickCheck-2.0 / Hypothesis スタイル
 - **根拠**: Hypothesis shrinking / Erlang QuickCheck stateful testing。現在のPBTにshrinkingがないため失敗デバッグが困難
@@ -368,7 +368,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-355: Heap Profiler (ヒーププロファイラ)
 
-- **対象**: `packages/backend/runtime/src/heap.lisp`, `packages/engine/vm/src/vm-run.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/heap.lisp`, `packages/engine/vm/src/vm-run.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `rt-alloc`（`heap.lisp`）でオブジェクト割り当てをカウントする仕組みなし。GCサイクル統計なし
 - **内容**: `--heap-profile`フラグで割り当てサイトごとのカウント/バイト記録。**アロケーションサイト**（スタックトレース付き）のホット順ランキング。Firefox DevTools/pprof形式でのレポート出力。SBCL `(sb-profile:report)` / Valgrind massif相当
 - **根拠**: GCプレッシャーのホットスポット特定。セルフホスティング時のコンパイラ自身のメモリ使用プロファイリング
@@ -396,7 +396,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-360: Built-in Package Manager (組み込みパッケージマネージャ)
 
-- **対象**: 新規`src/package-manager/`, `cli/src/main.lisp`
+- **対象**: 新規`src/package-manager/`, `packages/cli/src/main.lisp`
 - **現状**: 依存管理はASDFとQuicklispに完全依存。`cl-cc.asd`の`:depends-on`は手動管理
 - **内容**: `./cl-cc add <package>` / `./cl-cc remove` / `./cl-cc update`。依存ロックファイル（`cl-cc.lock`）によるSHA-256ピン留め。HTTP/HTTPS取得 + 署名検証。Quicklisp dist互換ダウンロード。`package.json` / `Cargo.toml` スタイルの`cl-cc.toml`マニフェスト
 - **根拠**: Cargo / npm / uv（Python）。パッケージ管理の内製化はコンパイラエコシステムの自立性に直結
@@ -416,7 +416,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-363: Hot Code Reload (ホットコードリロード)
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `pipeline/src/pipeline.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/umbrella/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 実行中VMへのコード変更には再起動が必要。REPL（`main.lisp:256-302`）は`compile-expression`→`run-vm`の逐次実行
 - **内容**: **関数テーブルのatomic更新**: `*function-registry*`（`vm.lisp`）のエントリをCAS操作で置き換え。実行中の古い関数インスタンスは完走させ、次回呼び出しから新実装を使用。ファイル変更をinotify/FSEventsで監視する`--watch`モード。Erlang hot code loading / Clojure `clojure.tools.namespace/refresh` スタイル
 - **根拠**: セルフホスティングコンパイラの開発サイクル加速。LispのREPL駆動開発の本質的機能
@@ -424,7 +424,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-364: Image-Based Development (イメージベース開発)
 
-- **対象**: `cli/src/main.lisp`, `packages/engine/vm/src/vm.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/engine/vm/src/vm.lisp`
 - **現状**: プロセス終了でVM状態（`*function-registry*`, `*class-registry*`, `*macro-env*`）は消失
 - **内容**: `./cl-cc save-image foo.image` でVMヒープ・レジストリをシリアライズ。`./cl-cc load-image foo.image` で即座に復元（コンパイルなし起動）。SBCL `save-lisp-and-die` / Smalltalk image 相当。セルフホスティングコンパイラのコールドスタート時間を大幅削減
 - **根拠**: Lisp imageはLisp開発の中核概念。コンパイラ自体がセルフホストなので起動時間問題が顕在化
@@ -432,7 +432,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 #### FR-365: REPL-in-Production / Remote REPL (本番環境REPL)
 
-- **対象**: `cli/src/main.lisp`, 新規`src/lsp/repl-server.lisp`
+- **対象**: `packages/cli/src/main.lisp`, 新規`src/lsp/repl-server.lisp`
 - **現状**: REPLはローカルstdin/stdoutのみ（`main.lisp:256-302`）
 - **内容**: `--remote-repl=:4005` でTCPソケットREPLサーバ。TLS + パスフレーズ認証。接続中の評価はサンドボックス化（read-only VMビュー）。SLIMEプロトコル互換。`(cl-cc:enable-remote-repl :port 4005 :tls t)` API
 - **根拠**: Clojure nREPL / Erlang remote shell / SBCL swank。本番障害のライブ診断に不可欠

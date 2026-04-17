@@ -1,4 +1,4 @@
-;;;; packages/type/type/src/inference.lisp - Hindley-Milner Type Inference
+;;;; packages/foundation/type/src/inference.lisp - Hindley-Milner Type Inference
 ;;;
 ;;; Implements Algorithm W with:
 ;;; - Prolog-style backtracking for constraint solving

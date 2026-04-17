@@ -73,11 +73,11 @@
               deps = [ ];
             };
             cl-cc-prolog = {
-              subdir = "packages/prolog/prolog";
+              subdir = "packages/foundation/prolog";
               deps = [ "cl-cc-bootstrap" ];
             };
             cl-cc-type = {
-              subdir = "packages/type/type";
+              subdir = "packages/foundation/type";
               deps = [ "cl-cc-ast" ];
             };
             cl-cc-parse = {

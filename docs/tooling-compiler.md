@@ -111,7 +111,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 
 #### FR-151: インクリメンタルコンパイル / ユーザーコードFASLキャッシュ
 
-- **対象**: `pipeline/src/pipeline.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `*stdlib-compiled*`（`pipeline.lisp:190`）で標準ライブラリのみキャッシュ。ユーザーコードは毎回フルリコンパイル
 - **内容**: ソースファイルのSHA-256ハッシュ+依存関係グラフに基づくFASLキャッシュ。変更なしファイルはキャッシュから復元、変更ファイルと依存ファイルのみ再コンパイル
 - **根拠**: `pipeline.lisp:258-348` — `*stdlib-compiled*`以外のキャッシュ機構ゼロ
@@ -191,7 +191,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 
 #### FR-206: Coverage-Guided Fuzzing
 
-- **対象**: `tests/framework/framework-fuzz.lisp`
+- **対象**: `packages/testing/framework/src/framework-fuzz.lisp`
 - **現状**: 文法ベースのfuzzing（`%gen-expr`によるランダムCLプログラム生成）。カバレッジフィードバックなし
 - **内容**: `(deftest-fuzz)`にカバレッジ計測（基本ブロック到達率）を追加。未到達パスへの入力生成を優先するフィードバックループ。AFL/libFuzzer方式のミューテーション
 - **根拠**: 既存PBT（72,000行）は充実しているがカバレッジ盲点あり。CSmith等のコンパイラfuzzerで発見される深いバグを検出
@@ -199,7 +199,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 
 #### FR-207: Reproducible / Deterministic Builds
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/backend/binary/src/macho.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/backend/binary/src/macho.lisp`
 - **現状**: REPLステートがmutable hash table（CLの反復順序非決定的）。`*pbt-random-state*`が`(make-random-state t)`で真乱数シード
 - **内容**: hash-table反復をソート済みキーリストに統一。タイムスタンプ・アドレス情報をバイナリに埋め込まない。定数シードでの決定的コンパイル
 - **根拠**: Reproducible builds projectの要件。同一ソースから常に同一バイナリを生成
@@ -207,7 +207,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 
 #### FR-208: Cross-Compilation Infrastructure
 
-- **対象**: `packages/foundation/mir/src/target.lisp`, `pipeline/src/pipeline.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/foundation/mir/src/target.lisp`, `packages/umbrella/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `target.lisp`に4ターゲット定義（x86-64, aarch64, riscv64, wasm32）があるがホスト≠ターゲットの分離なし。`compile-expression`に`:target`パラメータあるがビルドシステムは未対応
 - **内容**: `./cl-cc compile --target=aarch64 input.lisp -o output`形式のクロスコンパイル。ホストのランタイム定数（ポインタサイズ、エンディアン）をターゲット値で上書き
 - **根拠**: `target.lisp`のRISC-V定義（`*riscv64-target*`）は存在するがバックエンド未実装。クロスコンパイル基盤があれば段階的にバックエンド追加可能
@@ -255,7 +255,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 
 #### FR-241: Macro Expansion Tracing (マクロ展開トレース)
 
-- **対象**: `packages/frontend/expand/src/expander.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/frontend/expand/src/expander.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `compiler-macroexpand-all`がサイレントに全マクロを展開。中間段階の確認手段なし
 - **内容**: `./cl-cc compile --trace-macros input.lisp`で各マクロ展開ステップ（展開前→展開後）をインデント付きで出力。`macroexpand-1`のフック機構で展開深度・展開回数を計測
 - **根拠**: SBCL sb-ext:_macroexpand-hook_ / Clojure macroexpand-all。マクロデバッグの基本ツール
@@ -263,7 +263,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 
 #### FR-242: Compilation Time Profiling (コンパイル時間プロファイリング)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **現状**: コンパイルパイプライン各フェーズの実行時間計測なし。ボトルネック特定不可
 - **内容**: `./cl-cc compile --time-phases input.lisp`でparse→expand→CPS→codegen→optimize→regalloc→emit各フェーズの経過時間を表示。selfhost時のコンパイル時間分布を可視化
 - **根拠**: GCC -ftime-report / Clang -ftime-trace / Rust -Ztime-passes。コンパイラ自体の性能改善サイクルに必須
@@ -271,7 +271,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 
 #### FR-243: Incremental Parsing Integration (インクリメンタルパース統合)
 
-- **対象**: `packages/frontend/parse/src/incremental.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/frontend/parse/src/incremental.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: `incremental.lisp:1-176` — tree-sitterスタイルのインクリメンタルパーサが完全実装済みだがパイプライン未接続。`*parse-cache*`（`incremental.lisp:132-150`）のcache-lookup/cache-storeがexportされるが未呼び出し
 - **内容**: `pipeline.lisp`のコンパイルフローに`cache-lookup`を挿入し、ファイル変更部分のみ再パース。REPL/LSPモードでの差分コンパイルの基盤
 - **根拠**: 既存インフラの活用。tree-sitter / Roslyn incremental parsing。IDE連携の基盤
@@ -283,7 +283,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 
 #### FR-276: Optimization Levels (-O0 to -O3) (最適化レベル)
 
-- **対象**: `cli/src/main.lisp`, `packages/engine/optimize/src/optimizer.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/engine/optimize/src/optimizer.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: 全最適化が無条件実行。インライン閾値=15（`optimizer.lisp:1018`）、最大反復=20（`optimizer.lisp:1042`）がハードコード。CLIに最適化レベルオプションなし
 - **内容**: `-O0`（fold+DCEのみ、inline=0、iters=1）、`-O1`（fold+jump+DCE、inline=15、iters=5）、`-O2`（全パス、inline=30、iters=20）、`-O3`（全パス+E-graph飽和、inline=60、iters=40）の4段階。`(declare (optimize ...))`との連携
 - **根拠**: GCC/Clang/SBCL全てが`-O`フラグを提供。開発時の高速コンパイルと本番の積極的最適化の切り替えに必須
@@ -307,7 +307,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 
 #### FR-279: IR Dump CLI Integration (IRダンプCLI統合)
 
-- **対象**: `cli/src/main.lisp`, `packages/foundation/ir/src/printer.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/foundation/ir/src/printer.lisp`
 - **現状**: `ir/printer.lisp`にIRプリンタが実装済みだが、CLIからの呼び出し手段なし。パス間IRの比較不可
 - **内容**: `--dump-ir`（全パス後にIR出力）、`--dump-ir-before <pass>`・`--dump-ir-after <pass>`（特定パス前後のIR出力）。ファイル出力モード（`.ir`拡張子）。diff可能なテキスト形式
 - **根拠**: LLVM `-print-before-all`/`-print-after-all` / GCC `-fdump-tree-all`。最適化デバッグの標準手法

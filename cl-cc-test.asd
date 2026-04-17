@@ -9,22 +9,10 @@
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc :cl-cc/bin)
+  :depends-on (:cl-cc :cl-cc/bin :cl-cc/tests-framework)
   :serial t
   :components
-  ((:module "framework"
-    :pathname "tests/framework"
-    :serial t
-    :components
-    ((:file "package")
-     (:file "framework")
-     (:file "framework-advanced")
-     (:file "framework-compiler")
-     (:file "framework-meta")
-     (:file "framework-fuzz")
-     (:file "framework-runner")
-     (:file "framework-meta-tests")))
-   ;; Unit tests — each module now lives in its workspace's tests/ dir
+  (;; Unit tests — each module now lives in its workspace's tests/ dir
    (:module "cli-tests"
     :pathname "packages/cli/tests"
     :serial t
@@ -102,7 +90,7 @@
      (:file "cst-to-ast-tests")
      (:file "diagnostics-tests")))
    (:module "prolog-tests"
-    :pathname "packages/prolog/prolog/tests"
+    :pathname "packages/foundation/prolog/tests"
     :serial t
     :components
     ((:file "prolog-data-tests")
@@ -178,7 +166,7 @@
      (:file "macros-hof-tests")      ; HOF macro expansions split from stdlib
      (:file "macros-sequence-tests")))
    (:module "type-tests"
-    :pathname "packages/type/type/tests"
+    :pathname "packages/foundation/type/tests"
     :serial t
     :components
     ((:file "type-tests")
@@ -303,7 +291,7 @@
      (:file "encode-ops-objects-tests")
      (:file "decode-tests")))
    (:module "migration-safety"
-    :pathname "tests/unit"
+    :pathname "packages/umbrella/tests"
     :components
     ((:file "migration-safety-tests")))
    (:module "integration"
@@ -365,20 +353,10 @@
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc :cl-cc/bin)
+  :depends-on (:cl-cc :cl-cc/bin :cl-cc/tests-framework)
   :serial t
   :components
-  ((:module "framework"
-    :pathname "tests/framework"
-    :serial t
-    :components
-    ((:file "package")
-     (:file "framework")
-     (:file "framework-advanced")
-     (:file "framework-compiler")
-     (:file "framework-meta")
-     (:file "framework-fuzz")))
-   (:module "integration"
+  ((:module "integration"
     :pathname "tests/integration"
     :serial t
     :components

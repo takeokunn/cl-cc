@@ -13,7 +13,7 @@
 
 ;;; Ensure cl-cc/type package exists at compile time so that qualified symbols
 ;;; like cl-cc/type:looks-like-type-specifier-p can be read before type/ loads.
-;;; The full defpackage in packages/type/type/src/package.lisp will extend this stub later.
+;;; The full defpackage in packages/foundation/type/src/package.lisp will extend this stub later.
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (unless (find-package :cl-cc/type)
     (defpackage :cl-cc/type

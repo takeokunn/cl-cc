@@ -236,12 +236,12 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 | `file-write-date` / `file-author`                                                | ✅   | registered as host bridges in vm.lisp                                                                                                                            |
 | `directory`                                                                      | ✅   | registered as host bridge in vm.lisp                                                                                                                             |
 | `ensure-directories-exist`                                                       | ✅   | registered as host bridge in vm.lisp                                                                                                                             |
-| `load` `:verbose`/`:print`/`:if-does-not-exist`/`:external-format`               | ✅   | `pipeline/src/pipeline.lisp: our-load` / `packages/engine/vm/src/io.lisp: load ブリッジ`; keyword-bearing 形は pipeline 側にのみあり、builtin path は unary-only |
+| `load` `:verbose`/`:print`/`:if-does-not-exist`/`:external-format`               | ✅   | `packages/umbrella/pipeline/pipeline.lisp: our-load` / `packages/engine/vm/src/io.lisp: load ブリッジ`; keyword-bearing 形は pipeline 側にのみあり、builtin path は unary-only |
 | `compile-file` 3値返却 (output-truename, warnings-p, failure-p)                  | ✅   | macros-stdlib.lisp: `(values (probe-file pathname) nil nil)`                                                                                                     |
 
 #### FR-589: open/load/compile-file 完全キーワード引数
 
-- **対象**: `packages/engine/vm/src/io.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/vm/src/io.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**: ANSI CL 21.2 の `open` 全キーワード実装。`load` / `compile-file` の制御変数対応。`compile-file` の3値返却
 - **根拠**: ANSI CL 21.2.1 / 24.1
 - **難易度**: Medium
@@ -454,7 +454,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 #### FR-574: ロード・コンパイル制御変数
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/engine/vm/src/vm.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/engine/vm/src/vm.lisp`
 - **根拠**: ANSI CL 23.1.1 / 24.1
 - **難易度**: Easy
 
@@ -523,7 +523,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 #### FR-576: disassemble
 
-- **対象**: `cli/src/main.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **内容**: `(disassemble fn)` — VM 命令列を人間可読形式で出力。デバッグ・最適化確認に不可欠
 - **根拠**: ANSI CL 25.1.4 — disassemble
 - **難易度**: Medium
@@ -538,7 +538,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 #### FR-577: inspect
 
-- **対象**: `cli/src/main.lisp`
+- **対象**: `packages/cli/src/main.lisp`
 - **内容**: `(inspect object)` — オブジェクトの内部構造を再帰的に閲覧するインタラクティブツール。スロット・コンポーネント表示と編集
 - **根拠**: ANSI CL 25.1.4
 - **難易度**: Medium
@@ -1124,7 +1124,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-679: get-decoded-time — ✅ COMPLETE
 
-- **対象**: `pipeline/src/stdlib-source.lisp`
+- **対象**: `packages/umbrella/pipeline/stdlib-source.lisp`
 - **実装**: `stdlib-source.lisp:358-359` で `(defun get-decoded-time () (decode-universal-time (get-universal-time)))` として定義済み。
 - **根拠**: ANSI CL 25.1.4 — get-decoded-time
 - **難易度**: Easy

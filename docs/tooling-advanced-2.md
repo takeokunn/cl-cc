@@ -40,7 +40,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-554: JIT Code Cache Persistence (JITコードキャッシュ永続化)
 
-- **対象**: `src/jit/`, `cli/src/main.lisp`
+- **対象**: `src/jit/`, `packages/cli/src/main.lisp`
 - **現状**: JITコンパイル結果はプロセス終了時に消失。次回起動で再コンパイルが必要
 - **内容**: JITコンパイル済み機械語をファイルにシリアライズ（`~/.cache/cl-cc/jit/<hash>.jit`）。コンテンツハッシュ（ソースハッシュ + CPUフィーチャー + 最適化レベル）でキャッシュキー決定。次回起動時にキャッシュヒットすればJITコンパイルをスキップ。セキュリティ: キャッシュファイルに署名（FR-378）。Chromium V8 Code Cache / Android ART AOT compiler相当
 - **根拠**: JITウォームアップ時間の削減。セルフホスティングコンパイラのJIT起動を2回目以降でほぼゼロに
@@ -92,7 +92,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-562: JIT Warmup / AOT Pre-warming (JITウォームアップ最適化)
 
-- **対象**: `src/jit/`, `cli/src/main.lisp`
+- **対象**: `src/jit/`, `packages/cli/src/main.lisp`
 - **現状**: JIT（FR-330〜331）はcall countが閾値到達後に初めてコンパイル。最初の数千回呼び出しはインタープリタ
 - **内容**: **プロファイル付きAOTコンパイル**: 事前プロファイル実行（`./cl-cc run --warmup-profile app.lisp`）でホット関数を特定→`--aot-warm`でそれらをプロセス起動前にコンパイル済み状態にする。**Lazy compilation ordering**: 依存関係順にコンパイルして初期化シーケンスを最適化。JIT閾値を0に設定して即時Tier-2へのオプション（`--jit-threshold=0`）
 - **根拠**: サーバープロセスの「ウォームアップ期間」でのスループット低下問題（数分間の低速フェーズ）を解消。Javaの-server flagとAOTコンパイルの折衷案
@@ -164,7 +164,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-574: Compilation Database / compile_commands.json (コンパイルデータベース)
 
-- **対象**: `cli/src/main.lisp`, `cl-cc.asd`
+- **対象**: `packages/cli/src/main.lisp`, `cl-cc.asd`
 - **現状**: 各ファイルのコンパイルオプション・インクルードパスの構造化記録なし
 - **内容**: `./cl-cc compile --emit-compile-commands *.lisp` で **`compile_commands.json`** を生成（Clang tooling標準形式）。`[{"file": "packages/engine/vm/src/vm.lisp", "command": "cl-cc compile ...", "directory": "/..."}]` 形式。clangd / clang-tidy の代替ツール（lsp-mode / eglot）が参照可能。`ASDF:compile-system`フックで自動生成
 - **根拠**: IDE・静的解析ツール・フォーマッタが「どのオプションでコンパイルするか」を知るための標準インターフェース。2026年でClang tooling chainが標準化
@@ -172,7 +172,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-575: Core Dump / Crash Report Analysis (コアダンプ・クラッシュレポート解析)
 
-- **対象**: `packages/engine/vm/src/vm-run.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/vm-run.lisp`, `packages/cli/src/main.lisp`
 - **現状**: VM例外は`handler-case`でキャッチ。未捕捉例外でのクラッシュ情報が不十分
 - **内容**: **構造化クラッシュレポート**: 未捕捉conditionでのVM状態（レジスタ・スタックトレース・ヒープ統計）を`crash-TIMESTAMP.cl-cc-dump`に自動保存。`./cl-cc analyze-crash crash.cl-cc-dump` でインタラクティブなpost-mortem調査（FR-310デバッガの読み込みモード）。**シグナルハンドラ**: SIGSEGV/SIGABRTでCクラッシュをキャッチしてbacktrace収集。macOS CrashReporter / Sentry crash reporting形式での出力
 - **根拠**: 本番環境でのVMクラッシュは再現が困難。クラッシュ時の完全状態を保存することでデバッグを可能にする
@@ -204,7 +204,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-579: REPL Session Recording & Replay (REPLセッション記録・再生)
 
-- **対象**: `cli/src/main.lisp`, FR-312（REPL拡張）の拡張
+- **対象**: `packages/cli/src/main.lisp`, FR-312（REPL拡張）の拡張
 - **現状**: REPLの入力/出力は揮発性。セッションの再現不可
 - **内容**: `./cl-cc repl --record session.cl-cc-repl` でREPL入力・出力・VM状態差分を構造化JSON/Lispデータとして記録。`./cl-cc repl --replay session.cl-cc-repl` で再生（テスト化）。`(cl-cc:save-session "file.cl-cc-repl")` REPLコマンド。**REPLセッション→テストスクリプト変換**: 記録したセッションをFiveAMテストに自動変換（`--export-as-tests`）
 - **根拠**: SBCL REPLでの探索的開発の結果をテストに変換するワークフロー。バグ再現セッションの共有にも有効
@@ -276,7 +276,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-590: Algebraic Data Types / ADTs (代数的データ型)
 
-- **対象**: `packages/frontend/expand/src/macros-basic.lisp`, `packages/type/type/src/types.lisp`
+- **対象**: `packages/frontend/expand/src/macros-basic.lisp`, `packages/foundation/type/src/types.lisp`
 - **現状**: CLの型システムはCLOSクラス階層（積型）のみ。和型（tagged union / sum types）の組み込みサポートなし
 - **内容**: `(cl-cc:defdata shape (circle :radius float) (rect :width float :height float) (triangle :base float :height float))` マクロ。**タグ付きユニオン**として効率的に表現（最大バリアントサイズ + 1タグワード）。`(cl-cc:match)` との統合（FR-530 Pattern matchingとの連携）で**コンパイル時網羅性保証**。型推論で各バリアントを識別。Haskell ADT / Rust enum / OCaml variant
 - **根拠**: CLのdefclassはopen（後付けサブクラス可能）で網羅性保証が難しい。ADTはclosed（定義時に全バリアント固定）で網羅性をコンパイル時に検証できる
@@ -284,7 +284,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-591: Newtype / Zero-Cost Wrappers (ニュータイプ・ゼロコストラッパ)
 
-- **対象**: `packages/type/type/src/types.lisp`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/foundation/type/src/types.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **現状**: 型エイリアス（`(deftype positive-integer () ...)`)はコンパイル時に消去され名目型（nominal type）が使えない
 - **内容**: `(cl-cc:defnewtype user-id fixnum)` でfixnumと同一実装だが**型検査は別物**の新型定義。`(user-id 42)` が`fixnum`を取る関数に誤渡しされるとコンパイルエラー。**ゼロコスト**: ランタイム表現はラップ元と同一（ボックス化なし）。`(cl-cc:unwrap x)` で明示的にアンラップ。Haskell `newtype` / Rust newtype pattern / Kotlin value class
 - **根拠**: `user-id`と`product-id`が両方fixnumの場合に混同をコンパイル時に検出。API設計の安全性向上
@@ -292,7 +292,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-592: Higher-Kinded Types / HKT (高カインド型)
 
-- **対象**: `packages/type/type/src/inference.lisp`, `packages/type/type/src/types.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`, `packages/foundation/type/src/types.lisp`
 - **現状**: 型パラメータは具体型のみ（`(list fixnum)` 等）。型コンストラクタを型引数にできない
 - **内容**: `(cl-cc:definterface Functor (F) (fmap (fn (a) b) (F a) → (F b)))` のような**型コンストラクタ上の抽象**。`*` / `* → *` / `(* → *) → *` 等のカインドアノテーション。型推論にカインドチェックを統合。**型クラス/プロトコル**: 複数の型にわたる共通インターフェースをHKTで表現（FunctorをListにもMaybeにも適用）。Haskell type classes / Scala implicits / Rust traits の型システム基盤
 - **根拠**: `(map f (list 1 2 3))` と `(map f (maybe 5))` を同一プロトコルで書けるようになる。CLのCLOS generic functionとは別の静的なポリモーフィズム
@@ -300,7 +300,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-593: Bidirectional Type Checking (双方向型検査)
 
-- **対象**: `packages/type/type/src/inference.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`
 - **現状**: MEMORY.mdに「Bidirectional type inference (check mode vs synth mode)」が「Remaining Work」として記載。未実装
 - **内容**: **Check mode（下向き）**: 期待型が既知の文脈（`(the fixnum expr)` / `(declare (type fixnum x))` / 関数引数位置）でexpression typeを型に対してcheckする。**Synth mode（上向き）**: 型が不明な文脈でexpressionから型を合成する。現在の単方向HMより多くの型を推論できる（特に高階関数・ADT）。Dunfield-Krishnaswami ICFP 2013 Bidiretional Typing
 - **根拠**: MEMORY.mdに明記されたRemainingWork。双方向化によりアノテーション数が大幅に削減され、複雑なHOF・ADTパターンの型推論が可能に
@@ -308,7 +308,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-594: Gradual Typing Improvements (段階的型付け改善)
 
-- **対象**: `packages/type/type/src/inference.lisp`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **現状**: 型付きコードと非型付きコードの境界での型変換（キャスト）の最適化なし
 - **内容**: **Cast insertion optimization**: 型境界でのランタイムチェック(`typep`)挿入を最小化（隣接するキャストのキャンセル検出）。**Blame tracking**: 型違反が発生した場合の責任帰属（型付きコードが悪いか、非型付きコードが悪いか）を追跡してエラーメッセージに表示。**Concrete type propagation**: 型付き関数が非型付き関数を呼ぶ場合の型情報伝播の改善。Typed Racket / Reticulated Python / Transient semantics
 - **根拠**: CLの段階的型付けは`:type`宣言と`check-type`の組み合わせに依存。型境界の最適化なしではパフォーマンスペナルティが大きい
@@ -316,7 +316,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-595: Type-Level Computation (型レベル計算)
 
-- **対象**: `packages/type/type/src/inference.lisp`
+- **対象**: `packages/foundation/type/src/inference.lisp`
 - **現状**: 型は静的な集合論的記述のみ。型レベルの計算（条件・算術）なし
 - **内容**: **Type families**: `(cl-cc:deftype-family ElementType (T) ...)` で型パラメータから別の型を計算。`(ElementType (list fixnum))` → `fixnum`。**条件型**: `(cl-cc:if-type (subtype-p T fixnum) T float)` で型レベルのif式。**型レベル自然数**: `(array-length-type 5)` → `5-element-fixnum-array`の型。Haskell TypeFamilies / TypeLits / C++ `std::conditional_t`
 - **根拠**: ADT（FR-590）・HKT（FR-592）の実用的活用に型レベル計算が必要。配列長を型に埋め込んで境界チェックをゼロコスト化できる
@@ -344,7 +344,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-600: io_uring / kqueue Integration (非同期I/O統合)
 
-- **対象**: `packages/engine/vm/src/io.lisp`, `src/concurrent/`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/io.lisp`, `src/concurrent/`, `packages/cli/src/main.lisp`
 - **現状**: `packages/engine/vm/src/io.lisp` はSBCLのブロッキングI/O呼び出し。イベント駆動I/Oなし
 - **内容**: **Linux io_uring**: `io_uring_setup` / `io_uring_enter` syscallをFFI（FR-194）経由で呼び出し。`(cl-cc:async-read fd buffer callback)` → io_uring SQE投入。**macOS kqueue / kevent**: `kqueue()`+ `kevent()`でI/O多重化。`(cl-cc:async-accept socket callback)` でノンブロッキングacceptループ。async/await（FR-388）のバックエンドとしてio_uringを使用。**ゼロコピー**: `io_uring_prep_read_fixed` + registered buffers
 - **根拠**: Linux io_uring（Jens Axboe, 2019〜）は2026年でシステムコールオーバーヘッドを1/10に削減。Node.js libuv / Tokio（Rust）が採用。ネットワークサーバー性能の決定要因
@@ -372,7 +372,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-605: Bare Metal / No-OS Support (ベアメタル・OS不使用サポート)
 
-- **対象**: `packages/backend/runtime/src/`, `cli/src/main.lisp`, `cl-cc.asd`
+- **対象**: `packages/backend/runtime/src/`, `packages/cli/src/main.lisp`, `cl-cc.asd`
 - **現状**: ランタイムはSBCLのOSサービス（mmap/mprotect等）に依存
 - **内容**: `--target=x86-64-baremetal` / `--target=aarch64-none-elf` ターゲット追加。**POSIX依存ゼロ**: `write()`/`mmap()`/`pthread()`を使わない自己完結ランタイム。**ブートストラップコード**: x86-64向けMultiboot2ヘッダ + GDT/IDT初期化。**ページアロケータ**: 物理メモリマップからのヒープ初期化（E820/UEFI memory map）。`(declare (cl-cc:no-runtime-services))` で全OS依存をコンパイルエラー化
 - **根拠**: Lisp Machine的な「OS上ではなくLisp上で動く」環境の構築。IoT/組み込みデバイスへのCL展開
@@ -388,7 +388,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-607: Partial Evaluation / Futamura Projections (部分評価・フタムラ投影)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/frontend/expand/src/expander.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/frontend/expand/src/expander.lisp`
 - **現状**: 段階的コンパイル（FR-431）はユーザー記述のmulti-stageプログラム。自動部分評価なし
 - **内容**: `(cl-cc:specialize interpreter program)` でインタープリタをプログラムで**自動部分評価**し特化版を生成（Futamura第一投影）。静的値（コンパイル時定数）に関する全分岐・ループを展開。**混合計算解析（Binding-Time Analysis）**: 各変数が静的（コンパイル時既知）か動的かを自動分類。混合計算モナド（BTA）による変換。Jones-Gomard-Sestoft自動部分評価器の実装
 - **根拠**: cl-ccのVM（インタープリタ）+ CLプログラムでFutamura第一投影を実証できる。「cl-ccで書いたLISPをcl-ccがネイティブコードにコンパイルする」という再帰的な美しさ
@@ -404,7 +404,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-609: Compiler-as-a-Library API (コンパイラAPIライブラリ)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **現状**: cl-ccはCLIのみ。プログラムから呼び出せるAPIなし（`compile-expression`は内部用）
 - **内容**: **Public Compiler API**: `(cl-cc:compile-form form &key optimize-level target)` → `vm-program`。`(cl-cc:compile-file path &key ...)` → binary。`(cl-cc:parse-form str)` → `ast-node`。`(cl-cc:expand-macros form)` → expanded-form。**IR construction API**: `(cl-cc:make-ir-function name params body)` でプログラマティックなIR構築。LSP（FR-319）・IDEプラグイン（FR-398）・REPL（FR-312）のバックエンドとして統合。Clang libclang / LLVM C API / Roslyn API
 - **根拠**: 外部ツールがcl-ccの解析・変換能力を利用できるようにする。静的解析ツール・フォーマッタ・リンタのすべてがこのAPIを使える
@@ -412,7 +412,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-610: Adaptive Recompilation (適応的再コンパイル)
 
-- **対象**: `src/jit/`, `pipeline/src/pipeline.lisp`
+- **対象**: `src/jit/`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: 各関数は一度だけTier-1→Tier-2にコンパイルされ、以後変化なし
 - **内容**: **実行プロファイルの継続収集**: Tier-2でも型フィードバック（FR-559）を継続収集。型分布の**ドリフト検出**（初期プロファイルと現在の差異が閾値超過）。ドリフト検出時に新しいプロファイルに基づいてTier-2コードを**再コンパイル**（古いコードへのデオプトを経由）。long-running server processでのJVM C2最適化同様の動作。Graal/GraalVM Adaptive Compilation / JVM Adaptive Optimization
 - **根拠**: 長時間実行プロセスでは実行パターンが変化する（スタートアップvs安定稼働）。初期プロファイルに基づくJITコードが後に非最適になる問題を解決
@@ -440,7 +440,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-507: Time-Travel Debugging / Record-Replay (タイムトラベルデバッグ)
 
-- **対象**: `packages/engine/vm/src/vm-run.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/vm-run.lisp`, `packages/cli/src/main.lisp`
 - **現状**: VM 実行は前向きのみ。デバッガ（FR-319 LSP DAP）はステップ実行可能だが後退実行不可。セルフホスティング中のハイゼンバグを「発生直前まで巻き戻す」手段がない
 - **内容**: VM の全命令実行を **execution log** に記録（命令インデックス・レジスタ差分・ヒープ書き込みアドレス）。`./cl-cc run --record foo.lisp` でログを `foo.clcc-trace` に保存。デバッガで `step-back` / `reverse-continue` コマンドでログを逆走させて過去の VM 状態を再現。Debug Adapter Protocol（DAP）の `reverseContinue` / `stepBack` リクエストに対応することで VSCode 等から透過的に利用可能
 - **根拠**: Mozilla rr（Linux ptrace ベース）/ WinDbg TTD / UDB（Undo Software）。cl-cc 自身のセルフホスティングデバッグでの実用価値が高い。ハイゼンバグ解析の唯一の確実な手段
@@ -448,7 +448,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-508: Post-Link Binary Layout Optimization (プロファイル駆動バイナリ再配置)
 
-- **対象**: `packages/backend/binary/src/macho.lisp`, `packages/backend/emit/src/x86-64-codegen.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/binary/src/macho.lisp`, `packages/backend/emit/src/x86-64-codegen.lisp`, `packages/cli/src/main.lisp`
 - **現状**: FR-036（Hot/Cold レイアウト）と FR-186（関数並べ替え）は静的ヒューリスティック。実行プロファイルに基づくバイナリレイアウト最適化なし
 - **内容**: `./cl-cc compile --instrument` で関数・基本ブロック単位の実行カウンタを埋め込んだバイナリ生成。`./cl-cc run foo` でプロファイルデータ（`foo.clcc-profile`）を収集。`./cl-cc optimize foo.clcc-profile foo` でホット関数を `.text.hot` 先頭に集約・コールドコードを `.text.cold` に分離してリンク。TLB / I-cache スラッシングを削減。BOLT（Meta 2018）/ Google Propeller と同等の手法
 - **根拠**: BOLT paper: HHVM に適用して 7〜20% スループット向上。`./cl-cc selfhost` が現実的なプロファイルワークロードとなる
@@ -460,7 +460,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-615: Code Size Optimization Mode / -Os / -Oz (コードサイズ最適化モード)
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/engine/compile/src/codegen.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/engine/compile/src/codegen.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 最適化は速度優先。`-O2` 相当の最適化が唯一の選択肢。コードサイズを犠牲にする展開（ループアンローリング・インライン化・アウトライン抑制）の制御不可
 - **内容**: `--optimize-for size` フラグを追加。`-Os`モード: インライン化コスト閾値を大幅に引き下げ（≤8命令のみ）、ループアンローリングを無効化、重複コードをアウトライン化（FR-042逆適用）。`-Oz`モード: さらに圧縮命令優先（x86-64の短いエンコーディング: `xor rax, rax` vs `mov rax, 0`）、ホットパス外の定数畳み込みを抑制。`(declare (cl-cc:optimize-for :size))` で関数単位適用
 - **根拠**: 組み込みターゲット（FR-605 Bare Metal）や WASM バイナリサイズ削減に直結。LLVM -Os/-Oz / GCC -Os の標準的実践
@@ -476,7 +476,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-617: Energy-Aware Compilation (エネルギー認識コンパイル)
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 最適化目標は実行速度のみ。エネルギー消費・電力効率の観点なし
 - **内容**: `--optimize-for energy` モード追加。電力コストモデル（各命令の average power consumption 表を内蔵: 除算≫乗算≫加算）を参照した命令選択。高電力命令（64-bit IDIV, FP sqrt）の代替列への置換。P-coreとE-coreで異なるコードパスを生成するhybrid-CPU awareness。`(declare (cl-cc:power-budget 5))` で最大5ワット制約を宣言的に記述。ARM Neoverse N1 / Intel Hybrid architecture 対応
 - **根拠**: データセンター電力コスト削減（10%省電力 ≈ 数億円/年）。モバイル・IoT バッテリー寿命最大化。Green Software Foundation の2026年標準要件
@@ -540,7 +540,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-627: Formal Verification Integration / Coq-Lean Extraction (形式検証統合)
 
-- **対象**: `packages/type/type/src/`, `packages/engine/compile/src/codegen.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/engine/compile/src/codegen.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 型システム（FR-type系）は型安全性を保証するが、プログラムの機能的正しさは検証不可
 - **内容**: `(defun foo (x) (declare (cl-cc:spec (-> (and integer (>= 0)) integer))) ...)` で前後条件を宣言。コンパイラが仕様をSMTソルバー（FR-246 Z3統合）に送出して検証。検証失敗時はコンパイルエラー。`--emit-lean` フラグでLean 4証明ターゲットに変換（F\*スタイル）。副作用追跡（FR-244 Effect System）と統合してIOを型レベルで分離
 - **根拠**: CompCert（INRIA）: 検証済みCコンパイラ。セキュリティクリティカルコード（暗号・OS kernel）の信頼性向上。cl-ccコンパイラ自身の健全性検証
@@ -548,7 +548,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-628: Proof-Carrying Code / PCC (証明付きコード)
 
-- **対象**: `packages/backend/binary/src/macho.lisp`, `packages/engine/vm/src/vm-execute.lisp`, `packages/type/type/src/`
+- **対象**: `packages/backend/binary/src/macho.lisp`, `packages/engine/vm/src/vm-execute.lisp`, `packages/foundation/type/src/`
 - **現状**: 生成バイナリの安全性は動的チェック（境界検査・型タグ）に依存。ロード時の型安全性証明なし
 - **内容**: バイナリに型証明（proof term）を埋め込む。VM実行前に証明検証器（proof checker）が証明を検査し、メモリ安全性・型安全性・制御フロー整合性を静的に確認。`--emit-pcc` フラグでPCC付きバイナリ生成。Foundational PCC（Appel & Felten 1999）/ TAL（Typed Assembly Language）の手法。信頼ベースを最小化（証明検証器のみ信頼）
 - **根拠**: 動的チェックオーバーヘッドをゼロに近づけながら安全性を維持。プラグインシステムで未検証コードのロードを拒否するセキュリティモデル
@@ -568,7 +568,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-632: FFI Binding Generation / Bindgen (FFIバインディング自動生成)
 
-- **対象**: `cli/src/main.lisp`, 新規 `src/ffi/bindgen.lisp`
+- **対象**: `packages/cli/src/main.lisp`, 新規 `src/ffi/bindgen.lisp`
 - **現状**: C関数呼び出しは手動で`(cl-cc:foreign-call "printf" :int :string)` と記述。Cヘッダーからの自動生成なし
 - **内容**: `./cl-cc bindgen foo.h` でCヘッダーを解析し、cl-cc外部関数宣言を自動生成。C型→cl-cc型マッピング（`int*` → `(cl-cc:ptr cl-cc:int32)`）。`struct`定義 → `defstruct`生成。`enum` → `defconstant`群生成。libclang / tree-sitter-cで構文解析。`--with-header /usr/include/stdio.h` でシステムヘッダー対応。Rust bindgen / CFFI (Common Lisp) と同等
 - **根拠**: POSIX API・OpenSSL・GTK等のライブラリを手動FFI記述なしに利用可能。エコシステム拡張の加速
@@ -576,7 +576,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-633: Cross-Compilation Toolchain (クロスコンパイルツールチェーン)
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/emit/src/`, `packages/backend/binary/src/`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/emit/src/`, `packages/backend/binary/src/`
 - **現状**: ホスト環境（macOS/Linux x86-64）向けにのみコンパイル可能。`--target` フラグはアーキテクチャ切り替えのみ
 - **内容**: `--target triple` 形式（`aarch64-linux-musl`, `x86_64-windows-gnu`, `riscv64-linux-gnu`）で完全なクロスコンパイルを実現。Sysroot管理（`--sysroot /path/to/arm-sysroot`）。クロス用リンカスクリプト（ELF/PE/Mach-O）の自動選択。標準ライブラリのターゲット向けビルド済みアーカイブ配布。Nix flake との統合（`devenv.nix` の `cross.aarch64-linux`）
 - **根拠**: Raspberry Pi・組み込み Linux・Windows バイナリを開発機から直接生成。CI/CD での多ターゲットリリース自動化
@@ -692,7 +692,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-652: Polyglot Compilation / Multi-Language Interop (多言語コンパイル)
 
-- **対象**: `cli/src/main.lisp`, `src/ffi/`, 新規 `src/polyglot/`
+- **対象**: `packages/cli/src/main.lisp`, `src/ffi/`, 新規 `src/polyglot/`
 - **現状**: cl-ccソースのみ処理。他言語との相互運用はCFFI手動記述のみ
 - **内容**: `./cl-cc build --polyglot project.toml` で混合言語プロジェクトのビルド。サポート言語: C（clang経由）、Python（CPython C-API）、Rust（cargo build → `.a` リンク）。各言語の型 → cl-cc型の自動変換スキーム。GraalVM polyglot / Nix mkDerivation との統合。`(cl-cc:import-from :python "numpy" :as numpy)` のような高水準インポート構文
 - **根拠**: 実世界のシステムは単一言語で構成されない。科学計算（Python/NumPy）・システムライブラリ（C/Rust）との協調が必須
@@ -712,7 +712,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-656: Contract Programming / Design by Contract (契約プログラミング)
 
-- **対象**: `packages/frontend/expand/src/macros-stdlib.lisp`, `packages/engine/compile/src/codegen.lisp`, `packages/type/type/src/`
+- **対象**: `packages/frontend/expand/src/macros-stdlib.lisp`, `packages/engine/compile/src/codegen.lisp`, `packages/foundation/type/src/`
 - **現状**: `assert`マクロは実行時検査のみ。前提条件・事後条件・不変条件の宣言的記述と静的検証なし
 - **内容**: `(defun divide (x y) (require (not (zerop y)) "y≠0") (ensure (numberp result) "result is number") ...)` でEiffel/Racket-styleの契約を記述。**静的検証**: コンパイル時にSMTソルバー（FR-246）で検証試行。**動的検証**: `--contracts :check` で実行時検査有効化、`--contracts :none` で本番無効化。クラス不変条件: `(definvariant stack-class (>= (length items) 0))`。Racket Contracts / CLIM preconditions / Cofoja（Java）と同等
 - **根拠**: cl-ccコンパイラ内部の不変条件（CPS変換後の継続ノード構造など）を宣言的に検証可能。バグの早期発見
@@ -728,7 +728,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-658: Program Synthesis / CEGIS (プログラム合成・反例誘導合成)
 
-- **対象**: `cli/src/main.lisp`, 新規 `src/synthesis/cegis.lisp`
+- **対象**: `packages/cli/src/main.lisp`, 新規 `src/synthesis/cegis.lisp`
 - **現状**: プログラムは手動記述のみ。仕様から実装を自動導出する機能なし
 - **内容**: `(cl-cc:synthesize (fn (integer) integer) :spec (lambda (n result) (= result (* n n))))` で仕様から関数を合成。**CEGIS**: 候補プログラムを生成 → SMTで反例確認 → 反例を制約追加 → 再合成のループ。スケッチ（`cl-cc:??` でホール）: `(+ x (cl-cc:?? integer))` の `??` を合成。Sketching（Armando Solar-Lezama 2006）/ Rosette（Racket）/ SyGuS 競技形式と同等。合成スコープは純関数（副作用なし）に限定
 - **根拠**: テストケース（入出力例）から関数実装を自動生成。小規模ユーティリティ関数の自動記述
@@ -748,7 +748,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-662: Reproducible Builds (再現可能ビルド)
 
-- **対象**: `cli/src/main.lisp`, `packages/engine/compile/src/codegen.lisp`, `packages/backend/binary/src/macho.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/engine/compile/src/codegen.lisp`, `packages/backend/binary/src/macho.lisp`
 - **現状**: 生成バイナリにビルド時刻・ホスト情報が埋め込まれる。同一ソースから異なるバイナリが生成されサプライチェーン検証不可
 - **内容**: `--reproducible` フラグで完全決定論的ビルドを保証。タイムスタンプを固定値（`SOURCE_DATE_EPOCH`環境変数）に置換。ハッシュマップ・セットの反復順序を決定論的に固定（ソートキーを使用）。デバッグ情報のパスを `--remap-path-prefix` で正規化。コンパイル並列処理の順序をトポロジカルソートで固定。Reproducible Builds project（Debian/NixOS）との互換性。`./cl-cc build --check-reproducible` で2回ビルドしてSHA256比較
 - **根拠**: NixOS/Guix のコンテンツアドレス型ビルドシステムとの統合必須。サプライチェーン攻撃対策（SLSA Level 3要件）
@@ -756,7 +756,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-663: Build System Integration (ビルドシステム統合)
 
-- **対象**: `cli/src/main.lisp`, 新規 `src/build/integration.lisp`
+- **対象**: `packages/cli/src/main.lisp`, 新規 `src/build/integration.lisp`
 - **現状**: `cl-cc.asd`（ASDF）のみ。CMake/Meson/Bazel/Nix との統合なし
 - **内容**: **CMake**: `FindCL-CC.cmake` モジュール提供、`add_cl_cc_library(name SOURCES ...)` CMake関数。**Meson**: `cl_cc.dependency()` wrap。**Bazel**: `cl_cc_binary` / `cl_cc_library` Starlark ルール。**Nix**: `buildCLCCPackage` nixpkgsヘルパー（devenv.nix統合）。**Buck2**: `cl_cc_library()` target。全ビルドシステムが`compile_commands.json`（FR-574）を出力し、LSP/clangd-compatible
 - **根拠**: C/C++プロジェクトへのcl-ccコンポーネント組み込み。企業規模のモノレポ（Bazel/Buck2）でのcl-cc利用
@@ -856,7 +856,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-680: Algebraic Effects and Handlers (代数的エフェクト・ハンドラ)
 
-- **対象**: `packages/engine/vm/src/conditions.lisp`, `packages/type/type/src/`, `packages/frontend/expand/src/macros-stdlib.lisp`
+- **対象**: `packages/engine/vm/src/conditions.lisp`, `packages/foundation/type/src/`, `packages/frontend/expand/src/macros-stdlib.lisp`
 - **現状**: 副作用はCLOSのdynamic-wind/handler-bind で管理。エフェクトの型安全な合成・分離なし
 - **内容**: `(defeffect IO (read-char () char) (write-char (char) unit))` でエフェクト型を定義。`(with-handler (IO ...) body)` でハンドラを提供。コンパイラがエフェクトをFR-244（Effect System）の row polymorphism で型付け: `(-> unit char ! IO)`。`resume` でハンドラから継続を呼び出し（one-shot/multi-shot制御）。Koka（Microsoft Research）/ Eff / Frank / OCaml 5 effects と同等
 - **根拠**: モナドトランスフォーマーより合成しやすい副作用管理。IOとエラーと状態を直交的に型付け可能。cl-ccのVM実行エフェクト（I/O、例外、状態）の型安全な抽象
@@ -864,7 +864,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-681: GADTs / Generalized Algebraic Data Types (一般化代数的データ型)
 
-- **対象**: `packages/type/type/src/`, `packages/frontend/expand/src/expander.lisp`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/frontend/expand/src/expander.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **現状**: ADTs（FR-590）は全コンストラクタが同一型を返す。型インデックスによる精緻化なし
 - **内容**: `(defgadt expr (int) (lit-int () (expr integer)) (add () (expr integer) (expr integer) (expr integer)) (lit-bool () (expr boolean)) (if-expr () (expr boolean) (expr a) (expr a) (expr a)))` で型インデックス付きADTを定義。パターンマッチで型インデックスが精緻化され、`add`ブランチ内では`x`が`(expr integer)`と確定。HM型推論（FR-type系）のWAMへの拡張（型等式制約）。Haskell GHC GADTs / OCaml GADTs / Coq inductive types と同等
 - **根拠**: 型安全なASTを定義でき、型チェックの不変条件をコンパイル時に保証。Well-typed interpretersパターンのcl-cc実装
@@ -872,7 +872,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-682: Rank-N Polymorphism / Higher-Rank Types (高階ランク多相)
 
-- **対象**: `packages/type/type/src/`, `packages/frontend/expand/src/expander.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/frontend/expand/src/expander.lisp`
 - **現状**: HM型推論はRank-1多相（全称量化子はトップレベルのみ）。`(forall a. a -> a) -> int` のような型は表現不可
 - **内容**: System F スタイルのRank-N型を型アノテーションで受け付け。`(: run-st (forall s. (forall a. (st s a)) -> a))` のような型宣言。型推論はRank-1のままで、Rank-N箇所は明示アノテーション必須（GHC `RankNTypes` と同等の設計）。型チェックに双方向型検査（FR-593）を活用。`(declare (cl-cc:type (forall a. (-> (-> a a) a a)) twice))` で宣言
 - **根拠**: STモナド（可変状態の型安全なカプセル化）・CPS変換後の継続型・高階コールバックに必要
@@ -880,7 +880,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-683: Dependent Types / Pi Types (依存型・Pi型)
 
-- **対象**: `packages/type/type/src/`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/engine/compile/src/codegen.lisp`
 - **現状**: 型は値に依存しない。`(vector n)` の長さ`n`は型に反映されない
 - **内容**: `(: make-vector (Pi (n : Nat) -> (vector n)))` で型が値に依存する関数を宣言。`(: vzip (Pi (n : Nat) -> (vector n) -> (vector n) -> (vector n)))` で長さ整合性をコンパイル時保証。型検査はSMTソルバー（FR-246）に長さ制約を送出して解決。完全な依存型（CIC）ではなく **液体型（Liquid Types）** スタイルの部分的依存型（整数・長さ・非零に限定）。Agda / Idris2 / Coq / Liquid Haskell と比較してスコープ限定
 - **根拠**: 配列境界違反・整数オーバーフロー・ゼロ除算をコンパイル時に排除。証明支援システムへの橋渡し
@@ -928,7 +928,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-692: Code Coverage Instrumentation (コードカバレッジ計装)
 
-- **対象**: `packages/engine/compile/src/codegen.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/cli/src/main.lisp`
 - **現状**: テスト実行時のカバレッジ計測なし。どのコードパスがテストされているか不明
 - **内容**: `--coverage` フラグでライン/ブランチ/MC/DCカバレッジ計装を追加。各基本ブロックの先頭にカウンタインクリメント命令を挿入。実行後 `foo.clcc-cov` ファイルに集計データを出力。`./cl-cc coverage report` でHTML/LCOVレポート生成。LLVM `InstrProfiling` / gcov (GCC) / Istanbul (JS) と同等形式。`(declare (cl-cc:no-coverage))` で特定関数を除外。FiveAMとの統合でテスト実行時に自動収集
 - **根拠**: 4322テストのカバレッジ把握が困難。死んだコードの発見・テスト不足領域の特定に不可欠
@@ -936,7 +936,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-693: Heap Profiler (ヒーププロファイラ)
 
-- **対象**: `packages/backend/runtime/src/heap.lisp`, `packages/engine/vm/src/vm-execute.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/heap.lisp`, `packages/engine/vm/src/vm-execute.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `--verbose-gc` でGC統計のみ。どの関数・コードパスが最もメモリを消費するか不明
 - **内容**: `./cl-cc run --heap-profile foo.lisp` でサンプリングベースヒーププロファイリング。割り当て時にPC（プログラムカウンタ）をサンプリングしてコールスタック記録。`./cl-cc heapprof report foo.clcc-heap` でフレームグラフ（Brendan Gregg形式）/ allocation breakdown ツリー生成。型別割り当て量の集計。`(cl-cc:with-heap-profile ...)` スコープで特定区間をプロファイル。Heaptrack / jemalloc heap profiler / Go pprof と同等
 - **根拠**: selfhostingコンパイルの最大メモリ消費箇所の特定。GCチューニングの根拠データ収集
@@ -944,7 +944,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-694: Mutation Testing (ミューテーションテスト)
 
-- **対象**: `cli/src/main.lisp`, 新規 `src/testing/mutation.lisp`
+- **対象**: `packages/cli/src/main.lisp`, 新規 `src/testing/mutation.lisp`
 - **現状**: テストスイート（4322テスト）の品質はカバレッジ指標なし。テストが「通る」だけでなく「変更を検出できるか」不明
 - **内容**: `./cl-cc muttest packages/engine/compile/src/cps.lisp` でソースにミューテーション（`+`→`-`、`<`→`<=`、定数変更、ブランチ反転、関数呼び出し削除）を自動適用しテスト実行。**生き残ったミュータント**（テストが通るが実際は壊れたコード）を報告。ミューテーションスコア = 殺されたミュータント / 全ミュータント数。`--timeout 10s` で各ミュータントのテスト実行タイムアウト。PiTest（Java）/ Mutant（Ruby）/ cosmic-ray（Python）と同等
 - **根拠**: 高カバレッジでも検出力が低いテストを発見。テストスイートの実質的な強さを定量化
@@ -964,7 +964,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-698: Parallel Compilation (並列コンパイル)
 
-- **対象**: `cli/src/main.lisp`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **現状**: ファイルのコンパイルはシリアル。86ソースファイルの selfhosting が全て順次処理
 - **内容**: ASDF依存グラフを解析してトポロジカルソート後、独立コンパイル単位を並列実行。`./cl-cc build --jobs 8` で最大8並列コンパイル。ファイル間依存（パッケージ定義・マクロ）の依存追跡と並列安全性確認。共有マクロ環境の読み取りロック・書き込みロック（SBCL `bt:make-lock`）。`make -j` / Bazel 並列ビルド / Cargo `--jobs` と同等
 - **根拠**: selfhostingコンパイル時間の削減。8コアマシンで最大4〜6倍のビルド高速化（I/O待ちで線形にはならない）
@@ -972,7 +972,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-699: Distributed Build Cache (分散ビルドキャッシュ)
 
-- **対象**: `cli/src/main.lisp`, 新規 `src/build/cache.lisp`
+- **対象**: `packages/cli/src/main.lisp`, 新規 `src/build/cache.lisp`
 - **現状**: FR-452（コンパイルキャッシュ）はローカルディスクキャッシュのみ。CI/CDの並列ジョブ間でキャッシュ共有不可
 - **内容**: コンテンツアドレス型リモートキャッシュ（入力ハッシュ→コンパイル済み成果物）。バックエンド: HTTP(S) RESTful API / Redis / S3 互換ストレージ。`--remote-cache https://cache.example.com` で有効化。アップロード/ダウンロードの並列化。FR-662（Reproducible Builds）前提（非決定論的出力はキャッシュ不可）。Bazel Remote Cache API（REAPI）互換プロトコル。GitHub Actions / GitLab CI との統合例を文書化
 - **根拠**: CI/CDでPRごとに全ファイル再コンパイルを回避。大規模チームでのビルド時間を数十分→数秒に短縮
@@ -980,7 +980,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-700: Compiler Plugin API (コンパイラプラグインAPI)
 
-- **対象**: `cli/src/main.lisp`, `packages/engine/compile/src/codegen.lisp`, `packages/engine/optimize/src/optimizer.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/engine/compile/src/codegen.lisp`, `packages/engine/optimize/src/optimizer.lisp`
 - **現状**: コンパイラのパスは全て内部実装。外部からIR変換・最適化・診断を注入する拡張点なし
 - **内容**: `(cl-cc:define-compiler-plugin my-plugin (:after :cps-transform) (fn ir) ...)` でコンパイルパイプラインへのフックを定義。`--load-plugin my-plugin.lisp` でロード。プラグインがアクセスできるAPI: IR読み取り・変換・診断発行・新命令登録。プラグインのサンドボックス化（危険操作は別パーミッション）。GCC plugin API / LLVM pass plugin / rustc `proc-macro` の設計を参考
 - **根拠**: ドメイン固有最適化（DSPコード用ベクトル化ヒント、セキュリティポリシー強制）を外部から追加可能。cl-ccの拡張性の核心
@@ -988,7 +988,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-701: Live Code Update / Hot Patching (ライブコード更新・ホットパッチ)
 
-- **対象**: `packages/engine/vm/src/vm-execute.lisp`, `cli/src/main.lisp`, `packages/engine/vm/src/vm-run.lisp`
+- **対象**: `packages/engine/vm/src/vm-execute.lisp`, `packages/cli/src/main.lisp`, `packages/engine/vm/src/vm-run.lisp`
 - **現状**: コード変更にはプロセス再起動が必要。REPL（FR-098）はトップレベル式の評価のみ
 - **内容**: 実行中VMへの関数定義の動的差し替え。`./cl-cc live-update --pid 1234 new-fn.lisp` で実行中プロセスの関数テーブルを更新。`*function-table*` ハッシュの原子的更新（実行中フレームは旧版を完了、新呼び出しから新版使用）。インライン化済みJITコードの無効化（FR-060 JITキャッシュ連携）。Erlang Hot Code Loading / Clojure nREPL / Common Lisp image hot patch と同等
 - **根拠**: Webサービス・長時間デーモンのゼロダウンタイム更新。cl-cc自身のセルフホスティング開発サイクルの高速化（再起動なし）
@@ -1024,7 +1024,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-707: Dynamic Loading / dlopen (動的ローディング)
 
-- **対象**: `packages/engine/vm/src/vm-execute.lisp`, `cli/src/main.lisp`, `src/ffi/`
+- **対象**: `packages/engine/vm/src/vm-execute.lisp`, `packages/cli/src/main.lisp`, `src/ffi/`
 - **現状**: バイナリは静的リンクのみ。実行時の共有ライブラリロード・プラグイン機能なし
 - **内容**: `(cl-cc:load-library "libfoo.so")` → `dlopen`（Linux/macOS）/ `LoadLibraryA`（Windows）呼び出し。`(cl-cc:foreign-symbol lib "foo_init")` → `dlsym` でシンボル解決。アンロード: `(cl-cc:unload-library lib)` → `dlclose`。ライブラリのエラー処理（`dlerror`）。型安全なwrapper: `(cl-cc:define-foreign-callable lib "process" (-> integer integer))` でFFI型注釈付きロード。FR-632（Bindgen）との統合で型付きwrapperを自動生成
 - **根拠**: プラグインシステム・ゲームMOD・ライブラリの遅延ロードに必須。cl-ccのREPL（FR-098）でのライブラリ動的ロードに直結
@@ -1036,7 +1036,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-710: Phantom Types (ファントム型)
 
-- **対象**: `packages/type/type/src/`, `packages/frontend/expand/src/macros-stdlib.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/frontend/expand/src/macros-stdlib.lisp`
 - **現状**: 型パラメータは全て実行時値を持つ。コンパイル時専用の型マーカーなし
 - **内容**: `(deftype tagged (a) ...)` で型パラメータ`a`が実行時には消去される「ファントム型」を定義。`(: make-safe-ptr (-> raw-ptr (tagged :validated raw-ptr)))` で検証済みポインタを型レベルでマーク。`(: use-safe-ptr (-> (tagged :validated raw-ptr) result))` で検証済みのみ受け付け。状態機械をファントム型でエンコード: `(tagged :open file-handle)` / `(tagged :closed file-handle)`。Haskell phantom types / Rust zero-sized type markers と同等
 - **根拠**: SQLインジェクション防止（`(tagged :sanitized string)` のみSQL関数に渡せる）・未初期化データ保護・プロトコル状態の静的検証
@@ -1044,7 +1044,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-711: Type Classes / Coherent Overloading (型クラス・コヒーレントオーバーロード)
 
-- **対象**: `packages/type/type/src/`, `packages/frontend/expand/src/expander.lisp`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/frontend/expand/src/expander.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **現状**: CLOSのgeneric functionがアドホック多相を提供するが型推論との統合なし。型クラス制約の推論不可
 - **内容**: `(define-class (Eq a) (= (-> a a boolean)))` でHaskellスタイル型クラスを定義。`(define-instance (Eq integer) (= (lambda (a b) (cl:= a b))))` でインスタンス実装。型推論が型クラス制約を自動推論: `(defun member (x xs) ...)` → 型 `(forall a. (Eq a) => a -> (list a) -> boolean)` を導出。**コヒーレンス保証**: 同一型に複数の矛盾するインスタンスが存在しないことをコンパイル時検証。辞書渡し（dictionary passing）でコンパイル
 - **根拠**: CLOSよりも型安全なオーバーロード。型推論システムとの統合でアドホック多相の型エラーを早期検出
@@ -1060,7 +1060,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 #### FR-713: Termination Checking (停止性検査)
 
-- **対象**: `packages/type/type/src/`, `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/foundation/type/src/`, `packages/engine/compile/src/codegen.lisp`
 - **現状**: 全再帰関数は停止するかどうか不明。無限ループと意図的な非停止が区別不可
 - **内容**: **構造的再帰チェック**: 再帰呼び出しの引数が元の引数の「構造的に小さい」部分項であることを確認（`cdr`・`rest`・整数デクリメント）。`(declare (cl-cc:terminates))` で停止性を宣言しコンパイラが検証。停止性不明時は警告。**サイズ変化分析**: 整数引数の減少を追跡（`(> n 0)` ガード + `(- n 1)` 再帰）。Agda / Coq / Idris の termination checker と同等（簡易版）。`(declare (cl-cc:non-terminating))` でジェネレータ・サーバーループを明示
 - **根拠**: 型理論の健全性には停止性が必要。証明支援システム統合（FR-627）の前提条件

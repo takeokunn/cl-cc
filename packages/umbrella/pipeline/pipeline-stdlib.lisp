@@ -1,4 +1,4 @@
-;;;; pipeline/src/pipeline-stdlib.lisp — Standard Library Cache Infrastructure
+;;;; packages/umbrella/pipeline/pipeline-stdlib.lisp — Standard Library Cache Infrastructure
 ;;;
 ;;; Extracted from pipeline.lisp.
 ;;; Contains the stdlib expanded-form cache: snapshot/restore helpers,

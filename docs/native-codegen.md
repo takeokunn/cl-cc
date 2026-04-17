@@ -28,7 +28,7 @@ Native backend, architecture integration, register allocation, instruction sched
 
 #### FR-015: Block Compilation (モジュールレベルインライン化)
 
-- **対象**: `cli/src/main.lisp` + コンパイルパイプライン
+- **対象**: `packages/cli/src/main.lisp` + コンパイルパイプライン
 - **内容**:
   - ファイル単位でのクロス関数インライン化
   - `flet`/`labels` の呼び出しを関数境界を跨いでインライン展開
@@ -136,7 +136,7 @@ Native backend, architecture integration, register allocation, instruction sched
 
 #### FR-069: Dependency-Aware Peephole Scheduling
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/prolog/prolog/src/prolog.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/foundation/prolog/src/prolog.lisp`
 - **内容**: Read-after-Writeに基づく命令ペア/トリプルの局所的並べ替え
 - **難易度**: Medium
 
@@ -274,7 +274,7 @@ Native backend, architecture integration, register allocation, instruction sched
 
 #### FR-186: Function Reordering for Cache Locality
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/backend/binary/src/macho.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/backend/binary/src/macho.lisp`
 - **現状**: 関数はソース順に配置。コールグラフに基づく配置最適化なし
 - **内容**: コールグラフの頻度情報（PGO）またはトポロジカル順に基づいて、相互呼び出し頻度の高い関数をメモリ上で隣接配置。I-cache局所性を改善
 - **根拠**: LLVMの`-function-sections` + リンカの`--call-graph-profile-sort`。cl-ccでは関数間のジャンプ距離が非最適
@@ -506,7 +506,7 @@ Native backend, architecture integration, register allocation, instruction sched
 
 #### FR-404: Lazy Compilation / Compile-on-First-Call (遅延コンパイル)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/engine/vm/src/vm.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/engine/vm/src/vm.lisp`
 - **現状**: `compile-toplevel-forms`が全フォームを一括コンパイル。`our-load`(`pipeline.lisp:373`)がロード時に全フォームを順次コンパイル。スタブ/トランポリン機構なし
 - **内容**: `defun`コンパイルをソース記録の軽量スタブに置換。初回呼び出し時にフルコンパイルしスタブをパッチ。VM用スタブ命令型、自己書き換え呼び出しサイトパッチ
 - **根拠**: HotSpot/V8の標準手法 — lazy compilation
@@ -514,7 +514,7 @@ Native backend, architecture integration, register allocation, instruction sched
 
 #### FR-405: Startup Time Optimization / Image Dump (起動時間最適化)
 
-- **対象**: `cli/src/main.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: `*stdlib-compiled*`(`pipeline.lisp:191`)がnil（キャッシュ未使用）。`get-stdlib-forms`(`pipeline.lisp:193`)が毎回再パース。REPL stdlib読み込み(`main.lisp:263`)が最初のプロンプト前に全stdlibを同期コンパイル
 - **内容**: (a) プリコンパイルstdlibキャッシュ（FASL様シリアライズ）。(b) 遅延stdlibロード（初回参照時コンパイル）。(c) `--no-stdlib`デフォルト+未定義関数auto-require。(d) イメージダンプ(`save-lisp-and-die`相当)で全初期化スキップ
 - **根拠**: SBCL save-lisp-and-die, ECL image dump

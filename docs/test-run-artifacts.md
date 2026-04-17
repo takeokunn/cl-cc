@@ -6,7 +6,7 @@
 
 - `nix run .#test` -> `run-tests`
 
-`run-tests` は `tests/framework/framework.lisp` 上で `run-suite 'cl-cc-suite ...`
+`run-tests` は `packages/testing/framework/src/framework.lisp` 上で `run-suite 'cl-cc-suite ...`
 を呼び、unit / integration / e2e / PBT を含む canonical test plan を実行します。
 
 ## final run 結果

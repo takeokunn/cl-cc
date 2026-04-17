@@ -126,7 +126,7 @@ Runtime system, data structure operations, string/symbol handling, and sequence 
 
 #### FR-141: Self-Hosting Profile Feedback
 
-- **対象**: `cli/src/main.lisp`, `packages/engine/vm/src/vm-run.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/engine/vm/src/vm-run.lisp`
 - **内容**: `./cl-cc selfhost`実行時にVM命令頻度ヒストグラムを収集し、次回コンパイルの最適化優先度決定に活用
 - **根拠**: cl-cc固有の最適化機会 — selfhostが現実的なワークロードプロファイルを提供
 - **難易度**: Medium
@@ -137,7 +137,7 @@ Runtime system, data structure operations, string/symbol handling, and sequence 
 
 #### FR-154: Tiered Compilation基盤
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/engine/optimize/src/optimizer.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/engine/optimize/src/optimizer.lisp`
 - **現状**: 単一最適化パスのみ（フル最適化）。高頻度呼び出し前の起動コストが大きい
 - **内容**: Tier-0（最適化なし、高速コンパイル）とTier-1（フル最適化）の2段構成。初回呼び出しはTier-0で実行し、呼び出しカウンタが閾値超過でTier-1にエスカレート
 - **根拠**: V8・HotSpot・PyPy等の現代JITはすべてtiered。単一最適化パスは起動遅延を引き起こす
@@ -169,7 +169,7 @@ Runtime system, data structure operations, string/symbol handling, and sequence 
 
 #### FR-158: コールグラフベースインライン展開
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `opt-pass-inline`（`optimizer.lisp:729`）は単一命令列内の局所的定義のみ参照。モジュール境界を越えたインライン不可
 - **内容**: FR-102のLTOコールグラフを活用してモジュール境界を越えた小関数（≤30命令、非再帰）をインライン展開。呼び出しグラフの葉から順にボトムアップ処理
 - **根拠**: `optimizer.lisp:781` — インライン対象が同一命令列内の`vm-closure`定義のみに限定。外部defunは不可
@@ -197,7 +197,7 @@ Runtime system, data structure operations, string/symbol handling, and sequence 
 
 #### FR-181: Constant Pool / Literal Deduplication
 
-- **対象**: `packages/engine/compile/src/codegen-core.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/compile/src/codegen-core.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: 各リテラルが個別の`vm-const`命令として生成（`codegen-core.lisp:44`）。同一値の重複排除なし
 - **内容**: コンパイル単位ごとの定数プールを構築し、同一値のリテラル（整数、浮動小数点、文字列、シンボル）を共有。FR-137の文字列プールを汎化
 - **根拠**: JVM/CLR/Python VMはすべて定数プールを持つ。cl-ccでは`42`が10箇所で使われると10個の`vm-const`が生成される
@@ -209,7 +209,7 @@ Runtime system, data structure operations, string/symbol handling, and sequence 
 
 #### FR-182: Demand Analysis / Strictness Analysis
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/type/type/src/inference.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/foundation/type/src/inference.lisp`
 - **現状**: 値の使用パターン解析なし。すべての式が即時評価される前提
 - **内容**: 関数の各引数について「必ず使用される(strict)」「条件付き使用(lazy)」「未使用(absent)」を判定。strictな引数はunbox可能、absentな引数は計算省略可能
 - **根拠**: GHCのdemand analyzer。CPS形式のcl-ccでは特に継続の使用パターン解析が効果的
@@ -233,7 +233,7 @@ Runtime system, data structure operations, string/symbol handling, and sequence 
 
 #### FR-185: Optimization Reports
 
-- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 最適化は完全にサイレント。どの関数がインライン化されたか、どの定数が畳み込まれたかの情報出力なし
 - **内容**: `--optimization-report`フラグで最適化判断をレポート: インライン展開（関数名・命令数・判断理由）、定数畳み込み（元の式・結果）、DCE除去数、CSE統合数
 - **根拠**: LLVMの`-Rpass=.*`、GCCの`-fopt-info`。コンパイラ開発・デバッグに不可欠

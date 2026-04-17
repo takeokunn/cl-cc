@@ -247,7 +247,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-541: Sampling Profiler (サンプリングプロファイラ)
 
-- **対象**: `packages/engine/vm/src/vm-run.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/vm-run.lisp`, `packages/cli/src/main.lisp`
 - **現状**: プロファイリング機能なし。ホットスポット特定が不可能
 - **内容**:
   - `SIGPROF`シグナルハンドラでスタックトレースをサンプリング（macOS: `setitimer`）
@@ -352,7 +352,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-560: JIT Code Cache Management (JITコードキャッシュ管理)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **現状**: コンパイル済みVM命令列はメモリ上に保持されるが容量上限なし。再コンパイル時の古いコード回収なし
 - **内容**:
   - コードキャッシュサイズ上限（デフォルト256MB）を設定
@@ -363,7 +363,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-561: Lazy Module Loading (遅延モジュールロード)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - `(require "module")` を遅延実行：参照時点でコンパイル・ロード
   - モジュール依存グラフの構築と循環依存検出
@@ -373,7 +373,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-562: Hot Code Reload (ホットコードリロード)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/engine/vm/src/vm.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/engine/vm/src/vm.lisp`
 - **内容**:
   - `(reload-function 'foo)` — 実行中プロセスの関数定義を差し替え
   - 実行中フレームの古い定義への参照を新定義にリダイレクト（Erlang hot_code_replace相当）
@@ -383,7 +383,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-563: Image Snapshot / Heap Dump (イメージスナップショット)
 
-- **対象**: `packages/backend/runtime/src/heap.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/heap.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - `(save-image "myapp.img")` — 現在のヒープ状態をバイナリ化してディスクに保存
   - `./cl-cc --image myapp.img` — イメージをロードして実行再開
@@ -393,7 +393,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-564: Incremental Compilation Cache (増分コンパイルキャッシュ)
 
-- **対象**: `pipeline/src/pipeline.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: `./cl-cc selfhost`が毎回全84ファイルを再コンパイル（フルビルド）
 - **内容**:
   - ファイルレベルのコンテンツハッシュ（SHA-256）で変更検出
@@ -419,7 +419,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-571: Standalone Binary Bootstrap
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/binary/src/macho.lisp`, `flake.nix`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/binary/src/macho.lisp`, `flake.nix`
 - **依存**: FR-570
 - **内容**:
   - `./cl-cc compile --standalone foo.lisp -o foo` で依存ゼロのネイティブバイナリを生成
@@ -441,7 +441,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-573: Process/Environment Interface (プロセス・環境インターフェース)
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/runtime/src/runtime.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/runtime/src/runtime.lisp`
 - **現状**: `(uiop:getenv "PATH")` 等のホストCL経由。ネイティブバイナリでは使用不可
 - **内容**:
   - `(getenv "PATH")` — `environ`配列からの環境変数取得
@@ -511,7 +511,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-584: Profile-Guided Optimization (PGO)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/engine/optimize/src/optimizer.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/engine/optimize/src/optimizer.lisp`
 - **依存**: FR-541（サンプリングプロファイラ）, FR-503（TFV）
 - **内容**:
   - Tier-1コンパイル時にTFVのプロファイルデータを参照して最適化判断
@@ -522,7 +522,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-585: Concurrent Compilation (並列コンパイル)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **現状**: selfhostが84ファイルをシリアルにコンパイル
 - **内容**:
   - ASDF依存グラフのトポロジカルソートから並列化可能なファイルセットを抽出
@@ -766,7 +766,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-612: Environment Introspection API (環境内省API)
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - `lisp-implementation-type` → `"cl-cc"`
   - `lisp-implementation-version` → バージョン文字列
@@ -895,7 +895,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-627: READ-EVAL-PRINT Loop Completeness (REPL完全化)
 
-- **対象**: `cli/src/main.lisp`, `packages/engine/vm/src/vm.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/engine/vm/src/vm.lisp`
 - **現状**: 基本的なread-eval-printループ。`*` / `**` / `***` / `+` / `++` / `+++` なし
 - **内容**:
   - `*`/`**`/`***` — 直近3つの一次返却値
@@ -1071,7 +1071,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-645: Debugger Hook / Interactive Debugger (デバッガフック)
 
-- **対象**: `packages/engine/vm/src/conditions.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/conditions.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - `*debugger-hook*` — デバッガ起動時に呼ばれるフック関数 `(lambda (condition hook) ...)`
   - `invoke-debugger condition` — デバッガを明示的に起動
@@ -1450,7 +1450,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-362: Async Profiler Integration（非同期プロファイラー統合）
 
-- **対象**: `packages/backend/runtime/src/`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/`, `packages/cli/src/main.lisp`
 - **現状**: プロファイリング機構なし（FR-235 profiling定義済みだがCPU専用）
 - **内容**: 非同期タスクのウォールクロック時間計測。タスク生成/終了/ブロッキングイベントの記録。FlameGraph出力（`perf`互換）。チャネル待ち時間・ロック競合のヒートマップ。`cl-cc profile <file>`サブコマンド
 - **根拠**: async-profiler (Java) / Tokio Console / Go pprof。非同期コードのボトルネック特定
@@ -1510,7 +1510,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-350: Core Image Save/Restore (コアイメージ保存/復元)
 
-- **対象**: 新規`packages/backend/runtime/src/image.lisp`, `packages/engine/vm/src/vm.lisp`, `cli/src/main.lisp`
+- **対象**: 新規`packages/backend/runtime/src/image.lisp`, `packages/engine/vm/src/vm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: VM状態（`vm.lisp:342-373`）にハッシュテーブル・CLOSオブジェクト・ラベル付きクロージャが含まれるが全て非シリアライザブル。SBCL `save-lisp-and-die`相当の機能なし
 - **内容**: VM状態シリアライザ（レジスタ・ヒープ・関数レジストリ・グローバル変数・クラスレジストリ）。イメージファイルフォーマット定義。`cl-cc save-image`/`cl-cc load-image` CLIコマンド。起動高速化
 - **根拠**: SBCL `save-lisp-and-die` / ECL `ext:save-lisp-and-die`。デプロイ・配布の標準手法
@@ -1518,7 +1518,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-351: Sandboxing / Resource Limits (サンドボックス/リソース制限)
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: VM実行に命令数制限・メモリ上限・タイムアウトなし。`vm-heap-alloc`（`vm.lisp:408`）は枯渇時のみエラー。ソフトリミットなし
 - **内容**: 命令カウント制限、ウォールクロックタイムアウト、ヒープサイズ上限（設定可能）、ファイルI/Oホワイトリスト。ネイティブコード向け`setrlimit`
 - **根拠**: Cloudflare Workers / Deno / Lua sandbox。信頼されないコードの安全な実行
@@ -1526,7 +1526,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-352: Hot Code Reloading (ホットコードリロード)
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: `vm-register-function`（`vm.lisp:988`）はベアな`(setf (gethash ...))`で、バージョニング・ロールバック・アトミックスワップなし
 - **内容**: アトミック関数置換（旧バージョン保持）。実行中呼び出しの完了待ち後のスワップ。モジュールレベルのホットリロード（依存追跡付き）
 - **根拠**: Erlang hot code loading / SBCL interactive redefinition。ライブシステムの更新
@@ -1618,15 +1618,15 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-390: Ownership-Based Concurrency Safety（所有権ベース並行安全性）
 
-- **対象**: `packages/type/type/src/`, `packages/engine/compile/src/codegen.lisp`, `packages/frontend/expand/src/expander.lisp`
-- **現状**: 型システム（`packages/type/type/src/`）はHindley-Milner型推論だがSend/Sync相当の並行性マーカーなし。スレッド境界を跨ぐ値の型チェックなし
+- **対象**: `packages/foundation/type/src/`, `packages/engine/compile/src/codegen.lisp`, `packages/frontend/expand/src/expander.lisp`
+- **現状**: 型システム（`packages/foundation/type/src/`）はHindley-Milner型推論だがSend/Sync相当の並行性マーカーなし。スレッド境界を跨ぐ値の型チェックなし
 - **内容**: `Send`トレイト相当: 「別スレッドへ転送可能な型」マーカー（デフォルトは推論、ミュータブル共有参照は非Send）。`Sync`トレイト相当: 「複数スレッドから安全に共有参照可能な型」マーカー。`spawn`/`chan-send`のシグネチャに`Send`境界を要求。型エラーメッセージに「スレッド安全でない型をスレッド境界を跨いで使用」の診断
 - **根拠**: Rust `Send`/`Sync` / Pony reference capabilities。コンパイル時にデータ競合を証明可能に排除
 - **難易度**: Very Hard
 
 #### FR-391: Session Types for Channels（チャネルセッション型）
 
-- **対象**: `packages/type/type/src/`, `packages/engine/vm/src/vm.lisp`（FR-282チャネル依存）
+- **対象**: `packages/foundation/type/src/`, `packages/engine/vm/src/vm.lisp`（FR-282チャネル依存）
 - **現状**: FR-282のチャネルは型なし。通信プロトコルの順序保証がない
 - **内容**: セッション型: `!Int . ?String . End`（IntをSendしてStringをReceiveして終了）の型でチャネルを型付け。デュアル型: 送信端の型が受信端の型の双対になることを型チェッカーが検証。`session-new`が送受信ペアを生成。プロトコル違反はコンパイルエラー。型レベルでデッドロックフリーを部分的に保証
 - **根拠**: Frank Pfenning/Luís Caires Session Types / Rust `async-session`. プロトコル違反によるデッドロックをコンパイル時に防止
@@ -1694,7 +1694,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-420: Parallel Compilation（並列コンパイル）
 
-- **対象**: `pipeline/src/pipeline.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `our-load`によるファイルのシリアル処理（`pipeline.lisp`）。依存関係解析なし
 - **内容**: ASCFビルドグラフ解析でファイル間依存関係を抽出。依存のないファイルをワーカースレッドプールで並列コンパイル。`*compilation-mutex*`でグローバルレジストリへの書き込みを保護。`make -jN`相当: `--parallel N`フラグ。インクリメンタルビルドキャッシュ（タイムスタンプ+コンテンツハッシュ）
 - **根拠**: Rust cargo parallel codegen / GCC `make -j` / Bazel。中規模プロジェクトで壁時計時間を1/Nに短縮
@@ -1870,7 +1870,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 #### FR-481: Hardware Performance Counters（ハードウェアパフォーマンスカウンター）
 
-- **対象**: 新規`packages/backend/runtime/src/perf.lisp`, `cli/src/main.lisp`
+- **対象**: 新規`packages/backend/runtime/src/perf.lisp`, `packages/cli/src/main.lisp`
 - **現状**: FR-362（Async Profiler）はウォールクロック時間のみ。CPUサイクル・キャッシュミス・分岐予測ミス等のハードウェアイベント収集なし
 - **内容**: Linux `perf_event_open` syscall（FFI）。x86-64 `RDPMC`命令。カウンタ: サイクル、命令数、L1/L2/L3キャッシュミス、分岐予測ミス、TLBミス、メモリ帯域幅。`with-perf-counters counters body`マクロ（スコープ内の集計）。並行性固有カウンタ: CAS失敗回数・スピン待ち時間・コンテキストスイッチ回数
 - **根拠**: Linux perf / Intel VTune / Apple Instruments。並行プログラムのキャッシュ競合・False Sharing（FR-356）の定量的検出

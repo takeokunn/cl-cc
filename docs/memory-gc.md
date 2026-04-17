@@ -509,7 +509,7 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 
 #### FR-366: Sampling Heap Profiler (サンプリングヒーププロファイラ)
 
-- **対象**: `packages/backend/runtime/src/gc.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/gc.lisp`, `packages/cli/src/main.lisp`
 - **内容**: 割り当て毎に一定確率（デフォルト: 512KB毎に1回）でコールスタックをサンプリング。Poisson samplingで統計的に正確なオブジェクト割り当て量推定。`--heap-profile=output.pb`でpprof互換フォーマット出力。Flameグラフ生成対応
 - **根拠**: Go `pprof` heap profiler / Chromium v8 heap profiler / JVM JFR heap sampling。本番環境でも1%以下のオーバーヘッドで割り当てホットスポット特定
 - **難易度**: Medium
@@ -838,14 +838,14 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 
 #### FR-404: AOT Snapshot Heap (AOTスナップショットヒープ)
 
-- **対象**: `packages/backend/runtime/src/heap.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/heap.lisp`, `packages/cli/src/main.lisp`
 - **内容**: コンパイル時に確定するオブジェクト（組み込みシンボル・組み込みメソッドテーブル・コンパイル済みコード）を実行可能バイナリの読み取り専用データセクションに焼き込む。起動時にこれらのオブジェクトをヒープにコピーせず直接使用。GC対象外（immortal、FR-377と連携）。起動時間とメモリ使用量を大幅削減
 - **根拠**: GraalVM Native Image Heap / SBCL core image / CL `save-lisp-and-die`。AOTコンパイル後の起動をミリ秒以下に
 - **難易度**: Hard
 
 #### FR-405: GC Root Minimization for AOT (AOT向けGCルート最小化)
 
-- **対象**: `packages/backend/runtime/src/gc.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/gc.lisp`, `packages/cli/src/main.lisp`
 - **依存**: FR-377, FR-404
 - **内容**: AOTバイナリではスナップショットヒープ内オブジェクトがimmutable + immortalのためGCルート登録不要。ランタイム割り当てオブジェクトのみGC対象とするルートフィルタリング。AOTで確定したメソッドキャッシュ・クラス記述子もGCルートから除外。GCルートスキャン時間をランタイム生成オブジェクト数に比例させる
 - **根拠**: GraalVM Native Image GC roots / SubstrateVM GC。AOT後の初期GC停止時間を最小化
@@ -935,7 +935,7 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 
 #### FR-415: Heap Object Graph Visualizer (ヒープオブジェクトグラフ可視化)
 
-- **対象**: `packages/backend/runtime/src/gc.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/gc.lisp`, `packages/cli/src/main.lisp`
 - **内容**: ヒープスナップショット（FR-368）をDOT形式または`.hprof`形式でダンプするデバッグコマンド。オブジェクト参照グラフを可視化しメモリリークのルートパスを特定。`./cl-cc heap-dump --format=dot > heap.dot && dot -Tsvg heap.dot > heap.svg`
 - **根拠**: JVM `jmap -histo` / V8 heap snapshot / heaptrack。開発者向けメモリ問題診断ツール
 - **難易度**: Easy
@@ -998,7 +998,7 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 
 #### FR-422: GC Ergonomics / Auto-Configuration (GC自動設定)
 
-- **対象**: `packages/backend/runtime/src/heap.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/heap.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `*gc-young-size-words*` / `*gc-old-size-words*`をユーザーが手動設定する必要がある
 - **内容**: 起動時にシステムRAM量（`sysctl hw.memsize` / `/proc/meminfo`）を照会し自動設定。デフォルトヒープ上限 = システムRAMの25%。JVM `-XX:+UseAdaptiveSizePolicy`相当の自動チューニングを有効化。コンテナ環境ではcgroupのメモリ制限（`/sys/fs/cgroup/memory.limit_in_bytes`）を優先。`--heap-max=4g` CLI引数でオーバーライド可能
 - **根拠**: JVM ergonomics heuristics / Go `GOMEMLIMIT` (1.19+) / .NET GC auto-configuration。デフォルト設定でほとんどのワークロードが最適動作するように
@@ -1014,7 +1014,7 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 
 #### FR-424: GC Policy Selection (GCポリシー選択)
 
-- **対象**: `packages/backend/runtime/src/gc.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/gc.lisp`, `packages/cli/src/main.lisp`
 - **内容**: `--gc=throughput|latency|memory` CLI引数でGCポリシー選択。`throughput`: 大きなヒープ・少ないGC頻度（バッチ処理向け）。`latency`: 小さなナーサリ・増分GC・Concurrent GC（対話的・サービス向け）。`memory`: 積極的GC・小ヒープ（組み込み・メモリ制限環境向け）。各ポリシーはパラメータセット（`*gc-young-size-words*`等）の構成済みプリセット
 - **根拠**: JVM GC selector (`-XX:+UseG1GC` etc.) / .NET GC modes (workstation/server/background)。用途に合わせた一発設定
 - **難易度**: Easy
@@ -1173,7 +1173,7 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 
 #### FR-442: GC-Aware Type Inference Integration (GC-型推論統合)
 
-- **対象**: `packages/backend/runtime/src/gc.lisp`, `packages/type/type/src/` (HMシステム)
+- **対象**: `packages/backend/runtime/src/gc.lisp`, `packages/foundation/type/src/` (HMシステム)
 - **内容**: 型システム（FR: HM gradual typing）からの型情報をGCが活用。型が`fixnum`と確定したスロットはGCポインタとして追跡しない。`(cons fixnum fixnum)` 型のconsセルはcar/cdrスキャン不要。型情報→GCスキャンマップの自動生成でスキャン量を削減
 - **根拠**: GHC GC with type-based scavenging / MLton GC with type-precise heap。型情報とGCの統合で精確かつ高速なスキャン
 - **難易度**: Hard
@@ -1198,14 +1198,14 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 
 #### FR-445: Heap Walking API (ヒープWalking API)
 
-- **対象**: `packages/backend/runtime/src/gc.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/gc.lisp`, `packages/cli/src/main.lisp`
 - **内容**: `(do-heap-objects (obj &optional filter-type) &body body)` マクロ。GCルートから到達可能な全オブジェクトをトレースしながら`body`を実行。GCの tri-color マーキングを利用した安全な走査（走査中はSTW or GC協調）。`filter-type`で型絞り込み。ヒープ統計・メモリリーク検出・オブジェクトグラフ探索のための公開API
 - **根拠**: JVM `HeapWalker` (JVMTI) / SBCL `sb-vm::map-allocated-objects` / Python `gc.get_objects()`。全ライブオブジェクトへの反復アクセスはGCツーリングの基盤
 - **難易度**: Medium
 
 #### FR-446: room / heap-census (ヒープセンサス)
 
-- **対象**: `packages/backend/runtime/src/gc.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/gc.lisp`, `packages/cli/src/main.lisp`
 - **内容**: ANSI CL `room` 関数の実装: 各型・サイズクラス別のオブジェクト数・バイト数を集計して標準出力に表示。`(room)` = 概要、`(room t)` = 詳細（型別ブレークダウン）。ヒープウォーク（FR-445）を使って全オブジェクトを型タグ別に集計。`gc-census` コマンド: 型別ヒストグラムをJSON出力
 - **根拠**: ANSI CL spec `room` / SBCL `room` / Clojure `clojure.core/count-objects`。メモリ使用量の最初の診断ツールとして不可欠
 - **難易度**: Easy
@@ -1374,7 +1374,7 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 
 #### FR-464: Heap Image Save (ヒープイメージ保存)
 
-- **対象**: `packages/backend/runtime/src/heap.lisp`, `packages/backend/runtime/src/gc.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/heap.lisp`, `packages/backend/runtime/src/gc.lisp`, `packages/cli/src/main.lisp`
 - **現状**: FR-404でコンパイル時AOTスナップショットを定義。しかし**実行中のLispイメージ**（ライブオブジェクト・マクロ定義・ロード済みコード込み）をファイルに保存する`save-lisp-and-die`相当機能は未定義
 - **内容**: GCルートから到達可能な全オブジェクトをファイルにシリアライズ。ポインタをファイル内オフセットに変換（relocation table）。シンボル・パッケージ・クラス・メソッドテーブルを含む完全なランタイム状態を保存。`./cl-cc --save-image cl-cc.image` で実行可能イメージ生成
 - **根拠**: SBCL `save-lisp-and-die` / CLISP `saveinitmem` / Clozure CL `save-application`。CLにとって起動時間短縮の最重要機能。全ライブラリをロード済みのイメージをダンプして次回起動を数ms以下に
@@ -1382,7 +1382,7 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 
 #### FR-465: Heap Image Restore / Relocating Loader (ヒープイメージ復元・再配置ローダー)
 
-- **対象**: `packages/backend/runtime/src/heap.lisp`, `cli/src/main.lisp`
+- **対象**: `packages/backend/runtime/src/heap.lisp`, `packages/cli/src/main.lisp`
 - **依存**: FR-464
 - **内容**: 保存イメージをメモリにロードし、ポインタをロードアドレスに合わせて再配置（ASLR対応のrelocation）。シンボルテーブル・クラス階層・メソッドキャッシュをGCに再登録。JITコード（FR-379）のアドレスも再配置。イメージのマジックナンバー・バージョン・アーキテクチャ互換性チェック
 - **根拠**: SBCL core file relocating loader / ECL `.fas` image loading。イメージ保存とセットで完結する機能

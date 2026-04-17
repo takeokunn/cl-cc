@@ -478,7 +478,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-714: Terminal Detection and Control (ターミナル検出・制御)
 
-- **対象**: `cli/src/main.lisp`, `packages/backend/runtime/src/os.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/backend/runtime/src/os.lisp`
 - **現状**: 出力先がターミナルかファイルかを区別しない。パイプでもカラー出力が出る
 - **内容**:
   - `(isatty stream)` — OS の `isatty(fd)` 呼び出し。パイプ/ファイルと TTY を区別
@@ -491,7 +491,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-715: Readline / Line Editor (ライン入力エディタ)
 
-- **対象**: `cli/src/main.lisp`
+- **対象**: `packages/cli/src/main.lisp`
 - **現状**: REPL 入力が `read-line` のみ。カーソル移動・履歴・補完なし
 - **内容**:
   - GNU Readline / libedit へのFFI接続（FR-530）
@@ -503,7 +503,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-716: REPL Completion and Help (REPL補完・ヘルプ)
 
-- **対象**: `cli/src/main.lisp`
+- **対象**: `packages/cli/src/main.lisp`
 - **依存**: FR-715
 - **内容**:
   - `(describe sym)` — シンボルの文書・型・値・バインディングを表示
@@ -533,7 +533,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-720: Plugin Architecture (プラグインアーキテクチャ)
 
-- **対象**: `cli/src/main.lisp`
+- **対象**: `packages/cli/src/main.lisp`
 - **依存**: FR-719
 - **内容**:
   - `~/.cl-cc/plugins/` ディレクトリからの自動プラグインロード
@@ -707,7 +707,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-743: Whole-Program AOT Compilation (全プログラムAOTコンパイル)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/backend/emit/src/x86-64-codegen.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/backend/emit/src/x86-64-codegen.lisp`
 - **現状**: `./cl-cc compile foo.lisp` はVM命令列を生成するが最終的なネイティブ出力は未完成
 - **内容**:
   - 全ソースファイルを一度に読み込み、クロスモジュール最適化を適用
@@ -720,7 +720,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-744: Startup Time Optimization (起動時間最適化)
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `pipeline/src/pipeline.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
 - **現状**: `./cl-cc run foo.lisp` 起動時に全標準ライブラリをコンパイル・ロード
 - **内容**:
   - 標準ライブラリを事前コンパイルした FASL イメージとして data セグメントに埋め込む
@@ -732,7 +732,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-745: Dead Code Elimination at Link Time (リンク時デッドコード除去)
 
-- **対象**: `pipeline/src/pipeline.lisp`, `packages/backend/binary/src/macho.lisp`
+- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/backend/binary/src/macho.lisp`
 - **依存**: FR-743
 - **内容**:
   - エントリポイントからの到達可能性解析（関数コールグラフのDFS）
@@ -790,7 +790,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-753: Type Specifier Runtime (型指定子ランタイム)
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/type/type/src/inference.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/foundation/type/src/inference.lisp`
 - **現状**: `typep` は部分実装。`(satisfies pred)` / `(member ...)` / `(not t)` 等が未対応
 - **内容**:
   - 完全型指定子構文:
