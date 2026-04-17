@@ -10,8 +10,8 @@
 ;; quote — never recurse into quoted forms
 (define-expander-for quote (form) form)
 
-;; backquote — expand (cl-cc::backquote template) into list/cons/append
-(define-expander-for cl-cc::backquote (form)
+;; backquote — expand (backquote template) into list/cons/append
+(define-expander-for backquote (form)
   (compiler-macroexpand-all (%expand-quasiquote (second form))))
 
 ;; funcall — (funcall 'name ...) with quoted symbol → direct call

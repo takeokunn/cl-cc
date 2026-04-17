@@ -17,8 +17,9 @@
 ;;;;
 ;;;; Consumers:
 ;;;;   cl-cc/prolog   — (:use :cl :cl-cc/bootstrap)
-;;;;   cl-cc/compile  — (:use :cl ... :cl-cc/bootstrap)  [defines our-eval here]
+;;;;   cl-cc/compile  — (:use :cl ... :cl-cc/bootstrap)  [defines our-eval, our-load here]
 ;;;;   cl-cc/parse    — (:use :cl ... :cl-cc/bootstrap)  [defines lexer-token-* here]
+;;;;   cl-cc/expand   — (:use :cl :cl-cc/bootstrap)       [references our-eval, our-load, run-string-repl]
 ;;;;   cl-cc          — (:use ... :cl-cc/bootstrap)       [re-exports all]
 
 (defpackage :cl-cc/bootstrap
@@ -26,6 +27,10 @@
   (:export
    ;; Compiler re-entry point — defined in cl-cc/compile, called by cl-cc/prolog
    #:our-eval
+   ;; REPL entry points — defined in cl-cc/compile; referenced in cl-cc/expand macro templates
+   ;; Must live in bootstrap so expand can reference them before compile loads.
+   #:our-load
+   #:run-string-repl
    ;; Prolog type/relation predicate atoms (keys in *prolog-rules* fact DB)
    #:binop #:const #:var #:cmp
    #:integer-type #:boolean-type #:env-lookup

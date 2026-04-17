@@ -929,7 +929,7 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 #### FR-414: GC Stress Testing Mode (GCストレステストモード)
 
 - **対象**: `packages/backend/runtime/src/gc.lisp`
-- **内容**: `*gc-stress-mode*`フラグで全割り当て毎にGCを強制発動。テスト実行時に全てのGCフェーズを毎命令触れるため、GCセーフでないコードを即座に検出。「間違ったアドレスで動くが稀にしか壊れない」バグを確実に再現。fiveamテストスイートとの統合
+- **内容**: `*gc-stress-mode*`フラグで全割り当て毎にGCを強制発動。テスト実行時に全てのGCフェーズを毎命令触れるため、GCセーフでないコードを即座に検出。「間違ったアドレスで動くが稀にしか壊れない」バグを確実に再現。`nix run .#test` 経由の canonical テストスイートとの統合
 - **根拠**: JVM `-XX:+StressGC` / Go `GOGC=off` + `runtime.GC()` loops / Rust miri。GC協調バグの確実な検出
 - **難易度**: Easy
 

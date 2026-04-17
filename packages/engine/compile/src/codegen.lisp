@@ -41,10 +41,10 @@ Returns the inferred type, or NIL on failure (warning printed unless :strict)."
 
 (defun %extend-type-env-for-defvar (ast type-env best-effort-type)
   "If AST is a defvar with an initializer, extend TYPE-ENV with its inferred type."
-  (if (and (typep ast 'cl-cc:ast-defvar) (cl-cc:ast-defvar-value ast))
-      (let ((value-type (funcall best-effort-type (cl-cc:ast-defvar-value ast) type-env)))
+  (if (and (typep ast 'ast-defvar) (ast-defvar-value ast))
+      (let ((value-type (funcall best-effort-type (ast-defvar-value ast) type-env)))
         (if value-type
-            (cl-cc/type:type-env-extend (cl-cc:ast-defvar-name ast)
+            (cl-cc/type:type-env-extend (ast-defvar-name ast)
                                         (cl-cc/type:type-to-scheme value-type)
                                         type-env)
             type-env))
@@ -52,10 +52,10 @@ Returns the inferred type, or NIL on failure (warning printed unless :strict)."
 
 (defun %extend-type-env-for-defun (ast type-env best-effort-type)
   "If AST is a defun, extend TYPE-ENV with its inferred function type."
-  (if (typep ast 'cl-cc:ast-defun)
+  (if (typep ast 'ast-defun)
       (let ((fn-type (funcall best-effort-type ast type-env)))
         (if fn-type
-            (cl-cc/type:type-env-extend (cl-cc:ast-defun-name ast)
+            (cl-cc/type:type-env-extend (ast-defun-name ast)
                                         (cl-cc/type:type-to-scheme fn-type)
                                         type-env)
             type-env))
@@ -88,7 +88,7 @@ Returns a compilation-result struct with program, assembly, and globals."
           (unless (and (consp form) (eq (car form) 'in-package))
             (let* ((expanded (if (typep form 'ast-node)
                                  form
-                                 (compiler-macroexpand-all form)))
+                                 (cl-cc/expand:compiler-macroexpand-all form)))
                    (ast (if (typep expanded 'ast-node)
                             expanded
                             (lower-sexp-to-ast expanded))))

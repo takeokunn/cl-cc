@@ -367,7 +367,13 @@ nix run .#test
 # Build the standalone ./cl-cc binary
 nix run .#build
 
-# CI-equivalent check (includes flake evaluation + the test plan)
+# Verify self-hosting (builds ./cl-cc if absent, then runs `cl-cc selfhost`)
+nix run .#selfhost
+
+# Format Nix files with nixpkgs-fmt
+nix fmt
+
+# CI-equivalent check (includes flake evaluation + the test plan + selfhost)
 nix flake check
 
 # Clear FASL cache if tests misbehave

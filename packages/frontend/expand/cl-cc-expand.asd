@@ -1,22 +1,65 @@
 ;;;; cl-cc-expand.asd --- independent ASDF system for the macro expansion subsystem
 ;;;;
-;;;; Phase 2 leaf extraction. Files live in the :cl-cc/expand package
-;;;; (macro environment, defmacro machinery, macroexpansion, lambda-list
-;;;; parsing/destructuring, LOOP/DO/CASE/TYPECASE control-flow macros).
+;;;; Phase 3c extraction. All expand source files are now part of this system.
+;;;; Files use (in-package :cl-cc) and access VM instruction types via the
+;;;; umbrella package which uses both :cl-cc/expand and :cl-cc/vm.
 ;;;;
-;;;; The package facade is loaded as a dependency of :cl-cc; the actual
-;;;; expand source files remain in the umbrella :cl-cc system's component
-;;;; tree because they reference VM instruction types defined there.
-;;;; After the umbrella's defpackage sets up (use-package :cl-cc :cl-cc/expand),
-;;;; the expand source files can access all VM symbols unqualified.
+;;;; Dependency order: bootstrap → ast → prolog → parse → type → expand
 
 (asdf:defsystem :cl-cc-expand
   :description "Macro expansion subsystem: macro-env, defmacro, macroexpand, lambda-list, LOOP"
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on ()
+  :depends-on (:cl-cc-bootstrap :cl-cc-ast :cl-cc-prolog :cl-cc-parse :cl-cc-type)
   :pathname "src"
   :serial t
   :components
-  ((:file "package")))
+  ((:file "package")
+   (:file "macro-lambda-list")   ; shared lambda-list parsing + destructuring helpers
+   (:file "macro")               ; core: macro-env, defmacro machinery, macroexpansion
+   (:file "macros-basic")        ; bootstrap: check-type/setf/list + value helpers
+   (:file "macros-control-flow") ; bootstrap control-flow macros (when/unless/cond/do*)
+   (:file "macros-control-flow-case") ; case/typecase macro expansion
+   (:file "macros-mutation")     ; push/pop/incf/decf split from stdlib
+   (:file "loop-data")           ; LOOP: grammar tables — the "Prolog database"
+   (:file "loop-parser-for")     ; LOOP: token predicates, CPS utils, FOR sub-parsers
+   (:file "loop-parser")         ; LOOP: CPS token parser → IR plist
+   (:file "loop-emitters")       ; LOOP: IR → code-fragment tables
+   (:file "loop")                ; LOOP: generator — assembles tagbody from IR
+   (:file "macros-setops")       ; list/set operations split from stdlib
+   (:file "macros-list-utils")   ; ordering and list utility helpers
+   (:file "macros-restarts")     ; restart/condition protocol split from stdlib
+   (:file "macros-introspection") ; equalp + implementation stubs
+   (:file "macros-stdlib")       ; stdlib: numeric/control macros (1+, ecase, rotatef...)
+   (:file "macros-stdlib-ansi")  ; ANSI CL Phase 1 (psetf, assert, define-condition...)
+   (:file "macros-stdlib-utils") ; list/tree/string/array utility macros
+   (:file "macros-cxr")          ; algorithmic CXR accessor registration
+   (:file "macros-hof")          ; higher-order list/search helpers (map/find/remove)
+   (:file "macros-hof-search")   ; position/count/assoc search HOFs
+   (:file "macros-filesystem")   ; file/IO/runtime stubs split from stdlib
+   (:file "macros-filesystem-ext") ; pprint, readtable, debug/introspect, compile-file stubs
+   (:file "macros-sequence")     ; sequences: copy/fill/replace/mismatch/delete/substitute
+   (:file "macros-sequence-fold") ; sequences: reduce/nsubstitute/map-into/merge/last/search
+   (:file "macros-list-compat")  ; list/sequence compatibility helpers split from stdlib
+   (:file "macros-plist")        ; property list helpers
+   (:file "macros-compat")       ; pkg/declare/IO/hash/coerce/LTV/feature macros
+   (:file "macros-compat-clos")  ; CLOS protocol + MOP introspection + print macros
+   (:file "macros-compat-array") ; array compat wrappers split from macros-compat
+   (:file "expander-data")       ; expander: grammar tables + dispatch table declarations
+   (:file "expander-defstruct")  ; expander: defstruct expansion helpers
+   (:file "expander-typed-params") ; typed lambda-list helpers + *function-type-registry*
+   (:file "expander-core")
+   (:file "expander-helpers")    ; expander: shared helper functions extracted from expander.lisp
+   (:file "expander-definitions-helpers") ; expander: lambda-list default expansion helper
+   (:file "expander-control-helpers") ; expander: binding helpers for control forms
+   (:file "expander-setf-places-helpers") ; expander: setf-place cons access helper
+   (:file "expander-setf-places") ; expander: setf compound-place registration table
+   (:file "expander")
+   (:file "expander-definitions-forms")
+   (:file "expander-basic")      ; core application handlers split from expander.lisp
+   (:file "expander-definitions")
+   (:file "expander-control")
+   (:file "expander-tail")
+   (:file "expander-numeric")
+   (:file "expander-sequence")))

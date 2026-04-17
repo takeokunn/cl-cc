@@ -4,13 +4,12 @@
 ;;;; macroexpansion (our-macroexpand-1/-all), lambda-list parsing and
 ;;;; destructuring, and the LOOP/DO/CASE/TYPECASE control-flow macros.
 ;;;;
-;;;; Extracted as a Phase 2 sibling system (:cl-cc-expand). The package
-;;;; facade is loaded first (no dependencies); the umbrella :cl-cc system
-;;;; then sets up (use-package :cl-cc :cl-cc/expand) so the source files
-;;;; can access VM instruction types and accessors unqualified.
+;;;; Phase 3c: Real ASDF system (owns all source files).
+;;;; Uses cl-cc/bootstrap so source files can reference our-eval unqualified.
+;;;; cl-cc/type is accessed qualified (cl-cc/type:...) so not in :use.
 
 (defpackage :cl-cc/expand
-  (:use :cl)
+  (:use :cl :cl-cc/bootstrap)
   (:export
    ;; --- expander-data.lisp --- constant table + accessor/struct maps -----
    #:*constant-table*
@@ -47,6 +46,12 @@
    #:case
    #:typecase
    #:loop
+
+   ;; --- expander-typed-params.lisp --- typed lambda-list helpers ----------
+   #:*function-type-registry*
+   #:register-function-type
+   #:lambda-list-has-typed-p
+   #:strip-typed-params
 
    ;; --- macros used via run-string (need umbrella re-export) ---------
    #:defun/c

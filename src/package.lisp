@@ -3,10 +3,9 @@
 
 (in-package :cl-cc)
 
-;; Allow optimize source files (in-package :cl-cc/optimize) to access
-;; VM instruction types/accessors defined later in the umbrella.
-;; use-package establishes persistent inheritance; symbols exported from
-;; :cl-cc after this point become accessible in :cl-cc/optimize.
+;; Re-export all child-package symbols from :cl-cc umbrella, then wire
+;; use-package bridges so expand/compile source files can see each other's
+;; exports without qualification (Phase 3c/3d: now real ASDF systems).
 (eval-when (:compile-toplevel :load-toplevel :execute)
   ;; Re-export bootstrap symbols (our-eval, binop, make-cst-token, etc.)
   ;; so cl-cc:our-eval etc. continue to work for downstream consumers.
@@ -40,10 +39,27 @@
   ;; Re-export VM symbols from :cl-cc.
   (do-external-symbols (s :cl-cc/vm)
     (export s :cl-cc))
+  ;; Before bridging expand, resolve symbols that expand defines via our-defmacro
+  ;; but vm also owns as accessors/variables. We need to:
+  ;;  1. Move macro registrations to the vm symbol (so lookups find the macro)
+  ;;  2. Unintern the expand-specific symbol so use-package doesn't conflict.
+  ;; The conflicting names are known (discovered at Phase 3c migration).
+  (let ((conflict-names '("GENERIC-FUNCTION-METHOD-COMBINATION" "GENERIC-FUNCTION-METHODS"
+                          "%PACKAGE-EXTERNAL-SYMBOLS" "*DOCUMENTATION-TABLE*"
+                          "HASH-TABLE-VALUES" "BSWAP" "%CLASS-SLOT-DEFINITIONS"
+                          "%PACKAGE-SYMBOLS" "%ALL-SYMBOLS")))
+    (dolist (name conflict-names)
+      (let* ((vm-sym (find-symbol name :cl-cc/vm))
+             (exp-sym (find-symbol name :cl-cc/expand)))
+        (when (and vm-sym exp-sym (not (eq vm-sym exp-sym)))
+          ;; Transfer macro registration from exp-sym to vm-sym if present
+          (let ((macro-fn (cl-cc/expand:lookup-macro exp-sym)))
+            (when macro-fn
+              (cl-cc/expand:register-macro vm-sym macro-fn)))
+          ;; Unintern exp-sym so use-package won't conflict
+          (unintern exp-sym :cl-cc/expand)))))
   ;; NOW establish use-package bridges so child packages can see
   ;; ALL re-exported symbols from the umbrella (including cross-package deps).
   (use-package :cl-cc :cl-cc/parse)
-  (use-package :cl-cc :cl-cc/optimize)
-  (use-package :cl-cc :cl-cc/emit)
   (use-package :cl-cc :cl-cc/expand)
   (use-package :cl-cc :cl-cc/compile))

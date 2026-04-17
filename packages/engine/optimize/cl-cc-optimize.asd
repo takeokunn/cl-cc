@@ -1,21 +1,43 @@
-;;;; cl-cc-optimize.asd — independent ASDF system for the optimizer subsystem
-;;;;
-;;;; Phase 2 leaf extraction. Files live in the :cl-cc/optimize package
-;;;; (CFG, SSA, E-graph, optimizer passes, pipeline).
-;;;;
-;;;; The package facade is loaded as a dependency of :cl-cc; the actual
-;;;; optimizer source files remain in the umbrella :cl-cc system's component
-;;;; tree because they reference VM instruction types defined there.
-;;;; After the umbrella's defpackage sets up (use-package :cl-cc :cl-cc/optimize),
-;;;; the optimize source files can access all VM symbols unqualified.
+(eval-when (:load-toplevel :execute)
+  (let ((here (make-pathname :defaults (or *load-pathname* *compile-file-pathname*)
+                             :name nil :type nil)))
+    (asdf:load-asd (merge-pathnames "../../engine/vm/cl-cc-vm.asd" here))
+    (asdf:load-asd (merge-pathnames "../../prolog/prolog/cl-cc-prolog.asd" here))
+    (asdf:load-asd (merge-pathnames "../../type/type/cl-cc-type.asd" here))))
 
 (asdf:defsystem :cl-cc-optimize
   :description "Optimizer subsystem: CFG, SSA, E-graph, peephole, pipeline"
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on ()
+  :depends-on (:cl-cc-vm :cl-cc-prolog :cl-cc-type)
   :pathname "src"
   :serial t
   :components
-  ((:file "package")))
+  ((:file "package")
+   (:file "effects")
+   (:file "cfg")
+   (:file "cfg-analysis")
+   (:file "cfg-layout")
+   (:file "ssa")
+   (:file "ssa-construction")
+   (:file "egraph")
+   (:file "egraph-saturation")
+   (:file "egraph-rules")
+   (:file "egraph-rules-advanced")
+   (:file "optimizer-tables")
+   (:file "optimizer-algebraic")
+   (:file "optimizer-inline")
+   (:file "optimizer-inline-pass")
+   (:file "optimizer-dataflow")
+   (:file "optimizer-copyprop")
+   (:file "optimizer-memory")
+   (:file "optimizer-memory-passes")
+   (:file "optimizer-flow")
+   (:file "optimizer-flow-passes")
+   (:file "optimizer-strength")
+   (:file "optimizer-strength-ext")
+   (:file "optimizer-cse-gvn")
+   (:file "optimizer-licm")
+   (:file "optimizer")
+   (:file "optimizer-pipeline")))

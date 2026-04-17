@@ -4,13 +4,14 @@
 ;;;; builtin registry, pipeline entry points (compile-expression,
 ;;;; compile-string, run-string), REPL state, and our-eval/our-load.
 ;;;;
-;;;; Extracted as a Phase 2 sibling system (:cl-cc-compile). The package
-;;;; facade is loaded first (no dependencies); the umbrella :cl-cc system
-;;;; then sets up (use-package :cl-cc :cl-cc/compile) so the source files
-;;;; can access VM instruction types and accessors unqualified.
+;;;; Phase 3d: Real ASDF system (owns all source files).
+;;;; Uses cl-cc/bootstrap, cl-cc/ast, cl-cc/prolog, cl-cc/vm, cl-cc/optimize,
+;;;; cl-cc/expand so source files can reference all symbols unqualified.
+;;;; cl-cc/type is accessed qualified (cl-cc/type:...) so not in :use.
 
 (defpackage :cl-cc/compile
-  (:use :cl)
+  (:use :cl :cl-cc/bootstrap :cl-cc/ast :cl-cc/prolog :cl-cc/parse :cl-cc/vm
+        :cl-cc/optimize :cl-cc/emit)
   (:export
    ;; --- context.lisp --- compiler context class + helpers ---------------
    #:compiler-context
@@ -29,10 +30,6 @@
    #:*repl-label-counter* #:*repl-capture-label-counter*
    #:*labels-boxed-fns* #:*compiling-typed-fn*
    #:make-register #:make-label #:emit #:lookup-var
-
-   ;; --- codegen-functions.lisp --- lambda-list helpers for expand -------
-   #:lambda-list-has-typed-p #:strip-typed-params
-   #:register-function-type
 
    ;; --- codegen-fold-optimize.lisp --- AST optimizer ---------------------
    #:optimize-ast

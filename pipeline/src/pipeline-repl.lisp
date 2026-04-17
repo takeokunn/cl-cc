@@ -205,3 +205,9 @@ EXTERNAL-FORMAT is accepted but ignored (UTF-8 assumed)."
                              nil)))
                    (when print
                      (format *standard-output* "~S~%" last-result))))))))))))
+
+;;; Register run-string-repl and our-load in the VM host bridge.
+;;; (run-string and compile-* are registered in pipeline.lisp.)
+(eval-when (:load-toplevel :execute)
+  (dolist (sym '(run-string-repl our-load))
+    (vm-register-host-bridge sym)))

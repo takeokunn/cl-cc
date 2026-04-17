@@ -10,7 +10,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        sbclTestEnv = pkgs.sbcl.withPackages (ps: [ ps.fiveam ]);
+        sbclTestEnv = pkgs.sbcl.withPackages (ps: [ ]);
 
         # ─── Shared bootstrap strings ───────────────────────────────────────
         # Kept on a single line so shell line-continuation in app scripts
@@ -112,6 +112,18 @@
             --load scripts/build-cli.lisp
         '';
 
+        selfhostScript = ''
+          set -euo pipefail
+          ${cwdGuard}
+          if [ ! -x ./cl-cc ]; then
+            ${sbclCmd} \
+              --eval '(asdf:disable-output-translations)' \
+              --eval '(asdf:load-system :cl-cc/bin)' \
+              --load scripts/build-cli.lisp
+          fi
+          exec ./cl-cc selfhost
+        '';
+
         loadScript = ''
           set -euo pipefail
           ${cwdGuard}
@@ -160,10 +172,13 @@
           test     = mkApp "test"     testScript;
           coverage = mkApp "coverage" coverageScript;
           build    = mkApp "build"    buildScript;
+          selfhost = mkApp "selfhost" selfhostScript;
           load     = mkApp "load"     loadScript;
           repl     = mkApp "repl"     replScript;
           clean    = mkApp "clean"    cleanScript;
         };
+
+        formatter = pkgs.nixpkgs-fmt;
 
         # ─── Dev shell ──────────────────────────────────────────────────────
         devShells.default = pkgs.mkShell {

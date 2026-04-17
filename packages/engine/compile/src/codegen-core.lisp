@@ -139,7 +139,7 @@ Falls back to the generic binop-ctor when no specialization applies."
             (cdr local-entry))
            (t
             (multiple-value-bind (constant-value constant-present-p)
-                (gethash name *constant-table*)
+                (gethash name cl-cc/expand:*constant-table*)
               (cond
                 ;; Compile-time constant: inline the value directly.
                 (constant-present-p

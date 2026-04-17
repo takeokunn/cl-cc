@@ -3,13 +3,16 @@
 ;;;; Emit backend subsystem: calling conventions, register allocation,
 ;;;; x86-64 / AArch64 / WASM code generation, and native compilation.
 ;;;;
-;;;; Extracted as a Phase 2 sibling system (:cl-cc-emit). The package
-;;;; facade is loaded first (no dependencies); the umbrella :cl-cc system
-;;;; then sets up (use-package :cl-cc :cl-cc/emit) so the source files
-;;;; can access VM instruction types and accessors unqualified.
+;;;; Phase 3a: Real ASDF system (owns all source files).
+
+;;; cl-cc/vm provides all VM instruction types/accessors.
+;;; cl-cc/mir provides MIR types consumed by native code generators.
+;;; cl-cc/optimize provides cfg-build, cfg-compute-dominators (used by
+;;; x86-64-codegen and aarch64-program), opt-inst-dst/opt-inst-read-regs
+;;; (used by wasm-trampoline-build).
 
 (defpackage :cl-cc/emit
-  (:use :cl)
+  (:use :cl :cl-cc/vm :cl-cc/mir :cl-cc/optimize)
   (:export
    ;; ─── calling-convention.lisp — calling convention descriptors ──────
    #:calling-convention

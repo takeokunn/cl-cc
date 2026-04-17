@@ -7,13 +7,15 @@
 ;;;; SCCP, CSE/GVN, LICM/PRE, inlining, memory/alias analysis, DCE/jump
 ;;;; threading, flow passes, algebraic identities).
 ;;;;
-;;;; Extracted as a Phase 2 sibling system (:cl-cc-optimize). The package
-;;;; facade is loaded first (no dependencies); the umbrella :cl-cc system
-;;;; then sets up (use-package :cl-cc :cl-cc/optimize) so the source files
-;;;; can access VM instruction types and accessors unqualified.
+;;;; Phase 3b: Real ASDF system (owns all source files).
+
+;;; Bootstrap provides binop/const/var/cmp atoms used by egraph-rules as
+;;; Prolog predicate keys. cl-cc/vm provides all VM instruction types and
+;;; accessors. cl-cc/prolog provides def-fact and apply-prolog-peephole.
+;;; cl-cc/type is accessed qualified (cl-cc/type:...) so not in :use.
 
 (defpackage :cl-cc/optimize
-  (:use :cl)
+  (:use :cl :cl-cc/bootstrap :cl-cc/vm :cl-cc/prolog)
   (:export
    ;; ─── effects.lisp — effect-kind classification ─────────────────────
    #:vm-inst-effect-kind

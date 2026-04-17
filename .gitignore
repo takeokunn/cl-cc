@@ -1,15 +1,17 @@
 .claude/
+.claude/worktrees/
 .direnv/
 .playwright-mcp/
 
 # Common Lisp compiled artifacts
 *.fasl
+**/*.fasl
 *.fas
 *.lib
 *.o
 *.lx64fsl
 *.dx64fsl
-cl-cc
+/cl-cc
 
 # Native executables
 a.out

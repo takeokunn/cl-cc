@@ -179,7 +179,7 @@ For each (register . ast-node), emits: if register eq sentinel, register = compi
   "Return an alist of (param . type-scheme) for NAME's typed parameters.
 Falls back to NIL when NAME was not registered with a typed signature."
   (multiple-value-bind (signature found-p)
-      (gethash name *function-type-registry*)
+      (gethash name cl-cc/expand:*function-type-registry*)
     (when found-p
       (let ((param-types (car signature)))
         (loop for param in params

@@ -169,6 +169,18 @@ instead of the host CL eval."
 
 ;;; REPL persistent state and run-string-repl/our-load are in pipeline-repl.lisp.
 
+;;; Re-register cross-package symbols in the VM host bridge.
+;;; vm-bridge.lisp runs when :cl-cc-vm first loads; if :cl-cc-compile/:cl-cc-parse/
+;;; :cl-cc-expand packages don't exist yet (e.g. when :cl-cc-optimize depends on
+;;; :cl-cc-vm and loads before the facades), the registration is silently skipped.
+;;; This eval-when ensures registration completes once all packages are present.
+(eval-when (:load-toplevel :execute)
+  ;; NOTE: register-macro is intentionally excluded — it stores VM closures in
+  ;; macro-env, causing TYPE-ERROR when host CL funcalls them. See vm-bridge.lisp.
+  (dolist (sym '(run-string compile-expression compile-string our-eval
+                 parse-all-forms generate-lambda-bindings))
+    (vm-register-host-bridge sym)))
+
 (defun run-string-typed (source &key (mode :warn) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile and run SOURCE with type checking enabled.
    MODE is :WARN (default, log warnings) or :STRICT (signal errors)."

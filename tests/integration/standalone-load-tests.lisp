@@ -51,3 +51,31 @@ exists, and a representative exported symbol resolves as :external."
   (assert-true (%standalone-find-system system-name))
   (assert-true (find-package package-name))
   (assert-true (%standalone-symbol-external-p representative-symbol package-name)))
+
+(defun %bridge-registered-p (symbol-name)
+  "Return T when SYMBOL-NAME resolved via :cl-cc (as the VM does) is in the bridge table.
+The VM looks up function names via (find-symbol name :cl-cc), so this mirrors that path."
+  (let ((sym (find-symbol symbol-name :cl-cc)))
+    (and sym (gethash sym cl-cc/vm::*vm-host-bridge-functions*))))
+
+(deftest bridge-cross-package-symbols-registered
+  "All cross-package VM host bridge symbols are registered after full system load.
+Guards against load-order race where vm-bridge.lisp silently skips registration
+because :cl-cc-compile/:cl-cc-parse/:cl-cc-expand packages don't exist yet.
+The pipeline.lisp eval-when block re-registers these once all packages are present."
+  (assert-true (%bridge-registered-p "RUN-STRING"))
+  (assert-true (%bridge-registered-p "RUN-STRING-REPL"))
+  (assert-true (%bridge-registered-p "OUR-LOAD"))
+  (assert-true (%bridge-registered-p "COMPILE-EXPRESSION"))
+  (assert-true (%bridge-registered-p "COMPILE-STRING"))
+  (assert-true (%bridge-registered-p "OUR-EVAL"))
+  (assert-true (%bridge-registered-p "PARSE-ALL-FORMS"))
+  (assert-true (%bridge-registered-p "GENERATE-LAMBDA-BINDINGS"))
+  ;; REGISTER-MACRO is intentionally absent: stores VM closures in macro-env,
+  ;; causing TYPE-ERROR when host CL funcalls them during macroexpansion.
+  (assert-false (%bridge-registered-p "REGISTER-MACRO")))
+
+(deftest vm-eval-hooks-wired-after-load
+  "*vm-eval-hook* and *vm-compile-string-hook* are non-nil after pipeline.lisp loads."
+  (assert-true cl-cc/vm::*vm-eval-hook*)
+  (assert-true cl-cc/vm::*vm-compile-string-hook*))

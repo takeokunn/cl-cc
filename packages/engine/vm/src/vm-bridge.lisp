@@ -194,6 +194,14 @@ representations may use hash tables with structured metadata."
 
 ;; Cross-package cl-cc symbols: resolve via find-symbol so we use the canonical
 ;; symbol from each defining package (avoids interning cl-cc/vm:: duplicates).
+;;
+;; LOAD-ORDER GUARD: :cl-cc-vm loads before :cl-cc-compile/:cl-cc-parse/:cl-cc-expand
+;; when :cl-cc-optimize (which depends on :cl-cc-vm) is promoted to a real ASDF system.
+;; The find-package guard silently skips registration if a package doesn't exist yet.
+;; pipeline.lisp re-registers these symbols once all packages are guaranteed present.
+;;
+;; NOTE: register-macro is intentionally ABSENT — it stores VM closures in macro-env,
+;; causing TYPE-ERROR when host CL funcalls them during macroexpansion.
 (dolist (entry '(;; cl-cc/compile pipeline entry points
                  ("RUN-STRING"       . :cl-cc/compile)
                  ("RUN-STRING-REPL"  . :cl-cc/compile)
@@ -205,9 +213,9 @@ representations may use hash tables with structured metadata."
                  ;; cl-cc/parse entry points
                  ("PARSE-ALL-FORMS"  . :cl-cc/parse)
                  ;; cl-cc/expand macro support
-                 ("GENERATE-LAMBDA-BINDINGS" . :cl-cc/expand)
-                 ("REGISTER-MACRO"   . :cl-cc/expand)))
-  (let ((sym (find-symbol (car entry) (cdr entry))))
+                 ("GENERATE-LAMBDA-BINDINGS" . :cl-cc/expand)))
+  (let* ((pkg (find-package (cdr entry)))
+         (sym (when pkg (find-symbol (car entry) pkg))))
     (when sym (vm-register-host-bridge sym))))
 
 ;;; FR-579: String encoding helpers (delegate to SBCL's sb-ext)

@@ -58,7 +58,7 @@ and a method dispatch table.  The descriptor is registered globally."
           (compile-slot-accessor ctx dst name slot-name (ast-slot-writer slot) :writer))
         (when (ast-slot-accessor slot)
           (compile-slot-accessor ctx dst name slot-name (ast-slot-accessor slot) :reader)
-          (setf (gethash (ast-slot-accessor slot) *accessor-slot-map*)
+          (setf (gethash (ast-slot-accessor slot) cl-cc/expand:*accessor-slot-map*)
                 (cons name slot-name)))))
     dst))
 

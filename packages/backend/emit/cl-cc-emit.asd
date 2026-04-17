@@ -1,21 +1,44 @@
-;;;; cl-cc-emit.asd — independent ASDF system for the emit backend subsystem
-;;;;
-;;;; Phase 2 leaf extraction. Files live in the :cl-cc/emit package
-;;;; (calling conventions, register allocation, x86-64/AArch64/WASM codegen).
-;;;;
-;;;; The package facade is loaded as a dependency of :cl-cc; the actual
-;;;; emit source files remain in the umbrella :cl-cc system's component
-;;;; tree because they reference VM instruction types defined there.
-;;;; After the umbrella's defpackage sets up (use-package :cl-cc :cl-cc/emit),
-;;;; the emit source files can access all VM symbols unqualified.
+(eval-when (:load-toplevel :execute)
+  (let ((here (make-pathname :defaults (or *load-pathname* *compile-file-pathname*)
+                             :name nil :type nil)))
+    (asdf:load-asd (merge-pathnames "../../engine/vm/cl-cc-vm.asd" here))
+    (asdf:load-asd (merge-pathnames "../../foundation/mir/cl-cc-mir.asd" here))
+    (asdf:load-asd (merge-pathnames "../../engine/optimize/cl-cc-optimize.asd" here))))
 
 (asdf:defsystem :cl-cc-emit
   :description "Emit backend subsystem: calling conventions, regalloc, codegen"
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on ()
+  :depends-on (:cl-cc-vm :cl-cc-mir :cl-cc-optimize)
   :pathname "src"
   :serial t
   :components
-  ((:file "package")))
+  ((:file "package")
+   (:file "calling-convention")
+   (:file "regalloc")
+   (:file "regalloc-defs-uses")
+   (:file "regalloc-allocate")
+   (:file "x86-64")
+   (:file "x86-64-encoding")
+   (:file "x86-64-encoding-instrs")
+   (:file "x86-64-sequences")
+   (:file "x86-64-regs")
+   (:file "x86-64-emit-ops")
+   (:file "x86-64-emit-ops-bits")
+   (:file "x86-64-emit-ops-logical")
+   (:file "x86-64-codegen")
+   (:file "x86-64-codegen-dispatch")
+   (:file "aarch64")
+   (:file "aarch64-codegen")
+   (:file "aarch64-codegen-labels")
+   (:file "aarch64-emitters")
+   (:file "aarch64-program")
+   (:file "wasm-types")
+   (:file "wasm-ir")
+   (:file "wasm-extract")
+   (:file "wasm-trampoline")
+   (:file "wasm-trampoline-emit")
+   (:file "wasm-trampoline-build")
+   (:file "wasm")
+   (:file "wasm-emit")))
