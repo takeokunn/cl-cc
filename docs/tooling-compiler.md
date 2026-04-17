@@ -258,7 +258,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 - **対象**: `packages/frontend/expand/src/expander.lisp`, `cli/src/main.lisp`
 - **現状**: `compiler-macroexpand-all`がサイレントに全マクロを展開。中間段階の確認手段なし
 - **内容**: `./cl-cc compile --trace-macros input.lisp`で各マクロ展開ステップ（展開前→展開後）をインデント付きで出力。`macroexpand-1`のフック機構で展開深度・展開回数を計測
-- **根拠**: SBCL sb-ext:*macroexpand-hook* / Clojure macroexpand-all。マクロデバッグの基本ツール
+- **根拠**: SBCL sb-ext:_macroexpand-hook_ / Clojure macroexpand-all。マクロデバッグの基本ツール
 - **難易度**: Easy
 
 #### FR-242: Compilation Time Profiling (コンパイル時間プロファイリング)
@@ -330,4 +330,3 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 - **難易度**: Medium
 
 ---
-

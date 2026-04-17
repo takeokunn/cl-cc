@@ -3,6 +3,7 @@
 WebAssembly backend optimization and advanced features.
 
 Modern Wasm compiler features (2026 coverage):
+
 - **Phase 23**: Backend micro-optimizations (ref.cast, return_call, typed env, fixnum range)
 - **Phase 38**: SIMD128, Threads/Atomics, Exception Handling codegen
 - **Phase 39**: Stack Switching, Component Model, WASI 0.2, Multiple Memories
@@ -1090,130 +1091,130 @@ Modern Wasm compiler features (2026 coverage):
 
 **Phase 4 標準（MVP v1.1 / 全主要ブラウザ出荷済み）**
 
-| Proposal | Status | FR | 難易度 |
-|---|---|---|---|
-| Non-trapping Float-to-int | MVP v1.1 / 全主要ブラウザ | FR-233 | Easy |
-| Sign-extension Operators | MVP v1.1 / 全主要ブラウザ | FR-234 | Easy |
-| Bulk Memory + Bulk Tables | MVP v1.1 / 全主要ブラウザ | FR-228, FR-237 | Easy |
-| Multi-value Returns | MVP v1.1 / 全主要ブラウザ | FR-235 | Hard |
-| JS BigInt ↔ i64 | Chrome 85+ / Firefox 78+ | FR-236 | Easy |
-| Reference Types (`externref` + Abstract Types) | Chrome 91+ | FR-226, FR-282 | Medium / Hard |
-| SIMD128 完全版（shuffle / swizzle / dot / 型変換 / lane ops / reduction / load_zero） | 全主要ブラウザ | FR-202, FR-278, FR-298, FR-303, FR-304, FR-313 | Easy〜Hard |
-| Relaxed SIMD 拡張（Q15 / INT8 dot / BF16） | Chrome 114+ | FR-214, FR-314 | Medium |
-| Threads / Atomics + `atomic.fence` + `wait` timeout + sub-word CAS | 全主要ブラウザ | FR-203, FR-256, FR-306, FR-327 | Very Hard |
-| Exception Handling v1 + v2 (`try_table`/`throw_ref`/`exnref`/`catch_all_ref`) + tag import/export | Chrome 95+ / 123+ | FR-204, FR-252, FR-271, FR-310, FR-315 | Medium |
-| `WebAssembly.Exception` JS API | Chrome 95+ | FR-262 | Medium |
-| Multiple Memories | Chrome 92+ | FR-208 | Hard |
-| Typed Function References + `return_call_ref` | Chrome 113+ | FR-212, FR-253 | Medium |
-| Extended Const Expressions | Chrome 113+ | FR-215 | Easy |
-| Tail Calls | Chrome 112+ | FR-143 | Medium |
-| Relaxed SIMD | Chrome 114+ | FR-214 | Medium |
-| Memory64 | Chrome 119+ | FR-213 | Medium |
-| Wasm GC 完全版（i31ref / struct / array / rec / null safety / packed fields） | Chrome 119+ | FR-209〜211, FR-231, FR-254, FR-270, FR-279, FR-283 | Easy〜Hard |
-| `ref.eq` — eqref 同一性比較 | Chrome 119+ | FR-285 | Easy |
-| `any.convert_extern` / `extern.convert_any` | Chrome 119+ | FR-286 | Medium |
-| GC Bulk Array Ops（array.fill / init_data / init_elem） | Chrome 119+ | FR-284 | Easy |
-| `array.new_elem` + More Array Constructors | Chrome 119+ | FR-249, FR-281 | Easy |
-| Typed `select` for refs | Chrome 119+ | FR-279 | Easy |
-| GC Struct as Exception Payload | Chrome 123+ | FR-289 | Medium |
-| Passive Element / Data Segments | MVP v1.1 / 全主要ブラウザ | FR-294 | Easy |
-| JS Promise Integration | Chrome 123+ | FR-217 | Hard |
-| String Builtins + Iterator Views | Chrome 117+ | FR-218, FR-295, FR-320 | Medium |
-| ESM Integration | Chrome 89+ / Safari 15+ | FR-230 | Medium |
-| Component Model / WIT | WASI 0.2 / W3C 2024 | FR-206 | Very Hard |
-| WASI 0.2 + Preview 1 シム + WASI Worlds (`wasi:nn`/`wasi:http`/`wasi:cli`/`wasi:random`/`wasi:crypto`) | wasmtime / wasmer | FR-207, FR-274, FR-299, FR-321 | Hard |
+| Proposal                                                                                               | Status                    | FR                                                  | 難易度        |
+| ------------------------------------------------------------------------------------------------------ | ------------------------- | --------------------------------------------------- | ------------- |
+| Non-trapping Float-to-int                                                                              | MVP v1.1 / 全主要ブラウザ | FR-233                                              | Easy          |
+| Sign-extension Operators                                                                               | MVP v1.1 / 全主要ブラウザ | FR-234                                              | Easy          |
+| Bulk Memory + Bulk Tables                                                                              | MVP v1.1 / 全主要ブラウザ | FR-228, FR-237                                      | Easy          |
+| Multi-value Returns                                                                                    | MVP v1.1 / 全主要ブラウザ | FR-235                                              | Hard          |
+| JS BigInt ↔ i64                                                                                       | Chrome 85+ / Firefox 78+  | FR-236                                              | Easy          |
+| Reference Types (`externref` + Abstract Types)                                                         | Chrome 91+                | FR-226, FR-282                                      | Medium / Hard |
+| SIMD128 完全版（shuffle / swizzle / dot / 型変換 / lane ops / reduction / load_zero）                  | 全主要ブラウザ            | FR-202, FR-278, FR-298, FR-303, FR-304, FR-313      | Easy〜Hard    |
+| Relaxed SIMD 拡張（Q15 / INT8 dot / BF16）                                                             | Chrome 114+               | FR-214, FR-314                                      | Medium        |
+| Threads / Atomics + `atomic.fence` + `wait` timeout + sub-word CAS                                     | 全主要ブラウザ            | FR-203, FR-256, FR-306, FR-327                      | Very Hard     |
+| Exception Handling v1 + v2 (`try_table`/`throw_ref`/`exnref`/`catch_all_ref`) + tag import/export      | Chrome 95+ / 123+         | FR-204, FR-252, FR-271, FR-310, FR-315              | Medium        |
+| `WebAssembly.Exception` JS API                                                                         | Chrome 95+                | FR-262                                              | Medium        |
+| Multiple Memories                                                                                      | Chrome 92+                | FR-208                                              | Hard          |
+| Typed Function References + `return_call_ref`                                                          | Chrome 113+               | FR-212, FR-253                                      | Medium        |
+| Extended Const Expressions                                                                             | Chrome 113+               | FR-215                                              | Easy          |
+| Tail Calls                                                                                             | Chrome 112+               | FR-143                                              | Medium        |
+| Relaxed SIMD                                                                                           | Chrome 114+               | FR-214                                              | Medium        |
+| Memory64                                                                                               | Chrome 119+               | FR-213                                              | Medium        |
+| Wasm GC 完全版（i31ref / struct / array / rec / null safety / packed fields）                          | Chrome 119+               | FR-209〜211, FR-231, FR-254, FR-270, FR-279, FR-283 | Easy〜Hard    |
+| `ref.eq` — eqref 同一性比較                                                                            | Chrome 119+               | FR-285                                              | Easy          |
+| `any.convert_extern` / `extern.convert_any`                                                            | Chrome 119+               | FR-286                                              | Medium        |
+| GC Bulk Array Ops（array.fill / init_data / init_elem）                                                | Chrome 119+               | FR-284                                              | Easy          |
+| `array.new_elem` + More Array Constructors                                                             | Chrome 119+               | FR-249, FR-281                                      | Easy          |
+| Typed `select` for refs                                                                                | Chrome 119+               | FR-279                                              | Easy          |
+| GC Struct as Exception Payload                                                                         | Chrome 123+               | FR-289                                              | Medium        |
+| Passive Element / Data Segments                                                                        | MVP v1.1 / 全主要ブラウザ | FR-294                                              | Easy          |
+| JS Promise Integration                                                                                 | Chrome 123+               | FR-217                                              | Hard          |
+| String Builtins + Iterator Views                                                                       | Chrome 117+               | FR-218, FR-295, FR-320                              | Medium        |
+| ESM Integration                                                                                        | Chrome 89+ / Safari 15+   | FR-230                                              | Medium        |
+| Component Model / WIT                                                                                  | WASI 0.2 / W3C 2024       | FR-206                                              | Very Hard     |
+| WASI 0.2 + Preview 1 シム + WASI Worlds (`wasi:nn`/`wasi:http`/`wasi:cli`/`wasi:random`/`wasi:crypto`) | wasmtime / wasmer         | FR-207, FR-274, FR-299, FR-321                      | Hard          |
 
 **Phase 3（実装フェーズ）**
 
-| Proposal | FR | 難易度 |
-|---|---|---|
-| Wide Arithmetic (128bit) | FR-238 | Medium |
-| Custom Page Sizes | FR-239 | Medium |
-| Compact Import Section | FR-240 | Easy |
-| Custom Descriptors (externref 型付き拡張) | FR-241 | Hard |
+| Proposal                                  | FR     | 難易度 |
+| ----------------------------------------- | ------ | ------ |
+| Wide Arithmetic (128bit)                  | FR-238 | Medium |
+| Custom Page Sizes                         | FR-239 | Medium |
+| Compact Import Section                    | FR-240 | Easy   |
+| Custom Descriptors (externref 型付き拡張) | FR-241 | Hard   |
 
 **Phase 2（提案テキストあり）**
 
-| Proposal | FR | 難易度 |
-|---|---|---|
-| Branch Hinting | FR-216 | Easy |
-| Stack Switching + `cont.throw` + Algebraic Effect Handlers | FR-205, FR-272, FR-301 | Very Hard |
+| Proposal                                                                       | FR                     | 難易度    |
+| ------------------------------------------------------------------------------ | ---------------------- | --------- |
+| Branch Hinting                                                                 | FR-216                 | Easy      |
+| Stack Switching + `cont.throw` + Algebraic Effect Handlers                     | FR-205, FR-272, FR-301 | Very Hard |
 | Shared Everything Threads + `struct.atomic` / `array.atomic` / `global.atomic` | FR-224, FR-266, FR-273 | Very Hard |
-| `table64` | FR-229 | Easy |
-| Extended Name Section | FR-242 | Easy |
-| Relaxed Dead Code Validation | FR-308 | Easy |
-| Rounding Variants (`f64.nearest_int`) | FR-309 | Easy |
-| JS Primitive Builtins | FR-316 | Medium |
+| `table64`                                                                      | FR-229                 | Easy      |
+| Extended Name Section                                                          | FR-242                 | Easy      |
+| Relaxed Dead Code Validation                                                   | FR-308                 | Easy      |
+| Rounding Variants (`f64.nearest_int`)                                          | FR-309                 | Easy      |
+| JS Primitive Builtins                                                          | FR-316                 | Medium    |
 
 **Phase 1（フィーチャー提案）**
 
-| Proposal | FR | 難易度 |
-|---|---|---|
-| Memory Control (`memory.discard`) | FR-243 | Medium |
-| GC Finalization / WeakRef | FR-255 | Hard |
-| GC Precise Roots / Write Barriers | FR-267 | Hard |
-| Type Imports | FR-244 | Hard |
-| JIT Interface | FR-245 | Very Hard |
-| Flexible Vectors | FR-246 | Very Hard |
-| Frozen Values | FR-247 | Medium |
-| Half Precision (`f16`) | FR-248 | Medium |
-| Multibyte Array Access | FR-250 | Medium |
-| Reference-Typed Strings | FR-251 | Hard |
-| Custom Annotations | FR-225 | Medium |
-| Wasm Profiles | FR-258 | Easy |
-| Wasm Decimal (decimal64/128) | FR-268 | Hard |
-| `func.bind` — Wasm 部分適用 | FR-290 | Hard |
-| Extended Const `ref.func` | FR-291 | Easy |
-| WASI `wasi:keyvalue` / `wasi:messaging` / `wasi:sql` | FR-296 | Hard |
+| Proposal                                             | FR     | 難易度    |
+| ---------------------------------------------------- | ------ | --------- |
+| Memory Control (`memory.discard`)                    | FR-243 | Medium    |
+| GC Finalization / WeakRef                            | FR-255 | Hard      |
+| GC Precise Roots / Write Barriers                    | FR-267 | Hard      |
+| Type Imports                                         | FR-244 | Hard      |
+| JIT Interface                                        | FR-245 | Very Hard |
+| Flexible Vectors                                     | FR-246 | Very Hard |
+| Frozen Values                                        | FR-247 | Medium    |
+| Half Precision (`f16`)                               | FR-248 | Medium    |
+| Multibyte Array Access                               | FR-250 | Medium    |
+| Reference-Typed Strings                              | FR-251 | Hard      |
+| Custom Annotations                                   | FR-225 | Medium    |
+| Wasm Profiles                                        | FR-258 | Easy      |
+| Wasm Decimal (decimal64/128)                         | FR-268 | Hard      |
+| `func.bind` — Wasm 部分適用                          | FR-290 | Hard      |
+| Extended Const `ref.func`                            | FR-291 | Easy      |
+| WASI `wasi:keyvalue` / `wasi:messaging` / `wasi:sql` | FR-296 | Hard      |
 
 **Phase 0（初期探索）**
 
-| Proposal | FR | 難易度 |
-|---|---|---|
-| `call_stack` Inspection | FR-269 | Hard |
-| Wasm Startup Snapshots | FR-287 | Very Hard |
+| Proposal                | FR     | 難易度    |
+| ----------------------- | ------ | --------- |
+| `call_stack` Inspection | FR-269 | Hard      |
+| Wasm Startup Snapshots  | FR-287 | Very Hard |
 
 **コンパイラ実装（Wasm仕様外）**
 
-| 機能 | FR | 難易度 |
-|---|---|---|
-| ref.cast 除去 / `br_on_cast` 最適化 | FR-142, FR-231 | Medium |
-| Integer Range Annotation | FR-145 | Medium |
-| MVP Bit Ops (`clz`/`ctz`/`popcnt`) → `integer-length`/`logcount` | FR-323 | Easy |
-| `copysign` → `float-sign` | FR-324 | Easy |
-| SIMD NaN 意味論 / `--strict-nan` フラグ | FR-325 | Medium |
-| `memory.grow` OOM 検出 → `storage-condition` | FR-326 | Easy |
-| Typed Closure Environment Array | FR-144 | Hard |
-| AOT バイナリ生成 | FR-219 | Hard |
-| Profile-Guided Optimization | FR-220 | Very Hard |
-| Tiered Compilation ヒント (Liftoff / TurboFan) | FR-259 | Medium |
-| LTO / クロスモジュールインライン | FR-260 | Hard |
-| Dead Import Elimination | FR-221 | Medium |
-| Dynamic Linking (`dlopen` 相当) | FR-227 | Very Hard |
-| Lazy Function Bodies | FR-264 | Hard |
-| Streaming Compilation / Module Cache | FR-232 | Easy |
-| Worker 間 Module postMessage 転送 | FR-275 | Easy |
-| Wasm Import Maps | FR-276 | Medium |
-| CL ABI / シンボル名マングリング | FR-277 | Medium |
-| 初期化順序 (`__wasm_call_ctors`) | FR-280 | Medium |
-| `call_indirect` × `table64` 統合 | FR-292 | Medium |
-| Multi-memory Atomics + Multi-memory Bulk Copy | FR-293, FR-300 | Medium |
-| Wasm REPL インクリメンタルコンパイル + Hot Code Reloading | FR-288, FR-317 | Hard |
-| String Transcoding 全バリアント | FR-295 | Medium |
-| 決定論的ビルド + SRI ハッシュ | FR-265, FR-307 | Easy |
-| Security (CFI / CSP / Constant-Time) | FR-261 | Hard |
-| COOP / COEP ヘッダ（Threads 前提条件） | FR-297 | Easy |
-| `WebAssembly.validate()` 静的検証 | FR-305 | Easy |
-| Wasm バイナリツール統合（wat2wasm / wasm-objdump / wasm-decompile） | FR-322 | Easy |
-| ServiceWorker + PWA Wasm キャッシュ | FR-302 | Medium |
-| DWARF デバッグ情報 | FR-222 | Hard |
-| Source Maps | FR-223 | Medium |
-| Type Reflection JS API | FR-263 | Medium |
-| Wasm メモリプロファイラ / ヒープインスペクタ | FR-318 | Hard |
-| Component Model テスト基盤 (WIT 検証) | FR-319 | Medium |
-| `wasm-c-api` ネイティブ埋め込み | FR-311 | Hard |
-| 実行時フィーチャー検出 | FR-312 | Medium |
-| WASI 0.3 (Async-first) | FR-257 | Very Hard |
+| 機能                                                                | FR             | 難易度    |
+| ------------------------------------------------------------------- | -------------- | --------- |
+| ref.cast 除去 / `br_on_cast` 最適化                                 | FR-142, FR-231 | Medium    |
+| Integer Range Annotation                                            | FR-145         | Medium    |
+| MVP Bit Ops (`clz`/`ctz`/`popcnt`) → `integer-length`/`logcount`    | FR-323         | Easy      |
+| `copysign` → `float-sign`                                           | FR-324         | Easy      |
+| SIMD NaN 意味論 / `--strict-nan` フラグ                             | FR-325         | Medium    |
+| `memory.grow` OOM 検出 → `storage-condition`                        | FR-326         | Easy      |
+| Typed Closure Environment Array                                     | FR-144         | Hard      |
+| AOT バイナリ生成                                                    | FR-219         | Hard      |
+| Profile-Guided Optimization                                         | FR-220         | Very Hard |
+| Tiered Compilation ヒント (Liftoff / TurboFan)                      | FR-259         | Medium    |
+| LTO / クロスモジュールインライン                                    | FR-260         | Hard      |
+| Dead Import Elimination                                             | FR-221         | Medium    |
+| Dynamic Linking (`dlopen` 相当)                                     | FR-227         | Very Hard |
+| Lazy Function Bodies                                                | FR-264         | Hard      |
+| Streaming Compilation / Module Cache                                | FR-232         | Easy      |
+| Worker 間 Module postMessage 転送                                   | FR-275         | Easy      |
+| Wasm Import Maps                                                    | FR-276         | Medium    |
+| CL ABI / シンボル名マングリング                                     | FR-277         | Medium    |
+| 初期化順序 (`__wasm_call_ctors`)                                    | FR-280         | Medium    |
+| `call_indirect` × `table64` 統合                                    | FR-292         | Medium    |
+| Multi-memory Atomics + Multi-memory Bulk Copy                       | FR-293, FR-300 | Medium    |
+| Wasm REPL インクリメンタルコンパイル + Hot Code Reloading           | FR-288, FR-317 | Hard      |
+| String Transcoding 全バリアント                                     | FR-295         | Medium    |
+| 決定論的ビルド + SRI ハッシュ                                       | FR-265, FR-307 | Easy      |
+| Security (CFI / CSP / Constant-Time)                                | FR-261         | Hard      |
+| COOP / COEP ヘッダ（Threads 前提条件）                              | FR-297         | Easy      |
+| `WebAssembly.validate()` 静的検証                                   | FR-305         | Easy      |
+| Wasm バイナリツール統合（wat2wasm / wasm-objdump / wasm-decompile） | FR-322         | Easy      |
+| ServiceWorker + PWA Wasm キャッシュ                                 | FR-302         | Medium    |
+| DWARF デバッグ情報                                                  | FR-222         | Hard      |
+| Source Maps                                                         | FR-223         | Medium    |
+| Type Reflection JS API                                              | FR-263         | Medium    |
+| Wasm メモリプロファイラ / ヒープインスペクタ                        | FR-318         | Hard      |
+| Component Model テスト基盤 (WIT 検証)                               | FR-319         | Medium    |
+| `wasm-c-api` ネイティブ埋め込み                                     | FR-311         | Hard      |
+| 実行時フィーチャー検出                                              | FR-312         | Medium    |
+| WASI 0.3 (Async-first)                                              | FR-257         | Very Hard |
 
 ---
 

@@ -1192,7 +1192,6 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 - **根拠**: V8 type feedback + GC deopt / HotSpot C2 type assumptions invalidation。投機的最適化の安全性をGCが保証
 - **難易度**: Very Hard
 
-
 ---
 
 ### Phase 105 — ヒープ内省・Walking API
@@ -1369,7 +1368,6 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 - **根拠**: Linux `mremap` / QEMU memory ballooning / KVM virtio-mem。仮想アドレス空間フラグメンテーションの解消
 - **難易度**: Medium
 
-
 ---
 
 ### Phase 113 — ヒープイメージ保存・復元
@@ -1455,4 +1453,3 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 - **内容**: パッケージ（`defpackage`）とそのシンボルテーブルのGC処理。パッケージ自体が到達不能になった場合（`delete-package`後）にインターンシンボルを連鎖回収。シンボルへの弱参照でシンボルが「パッケージのみから到達可能」になったら回収（unintern不要化）。gensymで生成した一時シンボルの自動回収
 - **根拠**: SBCL package GC / Chicken Scheme symbol GC / gensym cleanup。大量gensymを使うマクロ展開後のシンボルテーブル肥大化防止
 - **難易度**: Medium
-

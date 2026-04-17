@@ -3,6 +3,7 @@
 GC enhancements, string/symbol/numeric optimization, pattern matching, register allocation, V8-style objects, security, static analysis, GHC-style transforms, stack/thread management, SIMD, ABI/symbol management, Lisp-specific optimization, compiler robustness, frontend extensions, debug/profiling, I/O/OS integration, macros/metaprogramming, REPL, FFI, library/distribution, documentation/quality tools.
 
 ---
+
 ### Phase 129 — GC高度化
 
 #### FR-716: Colored Pointer GC / ZGC-Style (カラードポインタGC)

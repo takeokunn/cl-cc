@@ -19,18 +19,18 @@ cl-cc compile file.lisp -o out --arch x86-64
 
 ### Core Special Forms
 
-| Form | Status |
-|---|---|
-| `if`, `progn`, `block`/`return-from` | ✓ |
-| `tagbody`/`go` | ✓ |
-| `catch`/`throw`, `unwind-protect` | ✓ |
-| `let`, `let*`, `setq`, `setf` | ✓ |
-| `flet`, `labels` (mutual recursion) | ✓ |
-| `lambda`, `defun`, `defvar`, `defparameter` | ✓ |
-| `defmacro`, `macrolet` | ✓ |
-| `quote`, `the`, `values` | ✓ |
-| `multiple-value-bind`, `multiple-value-call` | ✓ |
-| `eval-when` | ✓ |
+| Form                                         | Status |
+| -------------------------------------------- | ------ |
+| `if`, `progn`, `block`/`return-from`         | ✓      |
+| `tagbody`/`go`                               | ✓      |
+| `catch`/`throw`, `unwind-protect`            | ✓      |
+| `let`, `let*`, `setq`, `setf`                | ✓      |
+| `flet`, `labels` (mutual recursion)          | ✓      |
+| `lambda`, `defun`, `defvar`, `defparameter`  | ✓      |
+| `defmacro`, `macrolet`                       | ✓      |
+| `quote`, `the`, `values`                     | ✓      |
+| `multiple-value-bind`, `multiple-value-call` | ✓      |
+| `eval-when`                                  | ✓      |
 
 ### Closures & Higher-Order Functions
 
@@ -364,13 +364,13 @@ nix develop
 # Run the canonical test plan (unit / integration / e2e)
 nix run .#test
 
-# Build the standalone ./cl-cc binary
-nix run .#build
+# Build the standalone binary → ./result/bin/cl-cc
+nix build
 
-# Verify self-hosting (builds ./cl-cc if absent, then runs `cl-cc selfhost`)
+# Verify self-hosting (builds the binary if needed, then runs `cl-cc selfhost`)
 nix run .#selfhost
 
-# Format Nix files with nixpkgs-fmt
+# Format the repo (nixfmt + deadnix + statix + prettier) via treefmt
 nix fmt
 
 # CI-equivalent check (includes flake evaluation + the test plan + selfhost)

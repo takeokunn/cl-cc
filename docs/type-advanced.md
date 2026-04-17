@@ -7,6 +7,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 > Tier 表の `dep ref` は、この巻で定義していない前提 FR への参照を表す。この巻で本文定義を持つ FR には `dep ref` を付けない。
 
 ---
+
 ## 目次
 
 15. [安全性指向型](#15-安全性指向型)
@@ -31,6 +32,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 34. [型のエンコーディングと依存型の基盤](#34-型のエンコーディングと依存型の基盤)
 
 ---
+
 ## 15. 安全性指向型
 
 ### FR-1501: Null 安全 / Optional 型 (Null Safety)
@@ -513,86 +515,86 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 > 注: 以下の Tier 表は計画上の依存関係を示す。FR-005/006/302/801 などの core FR は、advanced 側に移動したという意味ではなく、`type-core.md` または同シリーズの他章にある前提依存として参照している。
 
-| FR | 機能 | 難易度 | 実用価値 | 依存 |
-|---|---|---|---|---|
-| FR-005 (dep ref) | 型アノテーション → Codegen 接続 | Hard | High | FR-002 |
-| FR-006 (dep ref) | Fixnum Fast Path | Medium | High | FR-005 |
-| FR-302 (dep ref) | 出現型 / Flow-Sensitive Narrowing | Hard | High | FR-005 |
-| FR-105 (dep ref) | ファントム型 | Medium | Medium | — |
-| FR-1202 (dep ref) | ゼロコスト抽象 (Newtype) | Medium | Medium | — |
-| FR-1501 | Null 安全 / Optional 型 | Medium | High | — |
-| FR-1601 | 型付きホール | Medium | High | — |
-| FR-1101 (dep ref) | 変性アノテーション | Hard | Medium | FR-003 |
-| FR-801 (dep ref) | subtypep 完全化 | Hard | High | — |
+| FR                | 機能                              | 難易度 | 実用価値 | 依存   |
+| ----------------- | --------------------------------- | ------ | -------- | ------ |
+| FR-005 (dep ref)  | 型アノテーション → Codegen 接続   | Hard   | High     | FR-002 |
+| FR-006 (dep ref)  | Fixnum Fast Path                  | Medium | High     | FR-005 |
+| FR-302 (dep ref)  | 出現型 / Flow-Sensitive Narrowing | Hard   | High     | FR-005 |
+| FR-105 (dep ref)  | ファントム型                      | Medium | Medium   | —      |
+| FR-1202 (dep ref) | ゼロコスト抽象 (Newtype)          | Medium | Medium   | —      |
+| FR-1501           | Null 安全 / Optional 型           | Medium | High     | —      |
+| FR-1601           | 型付きホール                      | Medium | High     | —      |
+| FR-1101 (dep ref) | 変性アノテーション                | Hard   | Medium   | FR-003 |
+| FR-801 (dep ref)  | subtypep 完全化                   | Hard   | High     | —      |
 
 ### Tier 2 — 中期実装 (基盤完成後)
 
-| FR | 機能 | 難易度 | 実用価値 | 依存 |
-|---|---|---|---|---|
-| FR-203 (dep ref) | 行多相 | Hard | Medium | FR-003 |
-| FR-601 (dep ref) | 段階的型付けと責任追跡 | Very Hard | High | FR-005 |
-| FR-602 (dep ref) | 設計による契約 | Hard | Medium | — |
-| FR-701 (dep ref) | エスケープ解析 | Hard | High | — |
-| FR-702 (dep ref) | SROA | Hard | High | FR-701 |
-| FR-104 (dep ref) | 存在型 | Hard | Medium | FR-003 |
-| FR-1001 (dep ref) | 型クラス基盤 | Hard | High | FR-003 |
-| FR-1203 (dep ref) | 再帰型 / μ型 | Hard | Medium | FR-003 |
-| FR-1306 (dep ref) | 型ラムダ | Hard | Medium | FR-101 |
-| FR-1603 | エフェクト推論 | Hard | Medium | FR-401 |
+| FR                | 機能                   | 難易度    | 実用価値 | 依存   |
+| ----------------- | ---------------------- | --------- | -------- | ------ |
+| FR-203 (dep ref)  | 行多相                 | Hard      | Medium   | FR-003 |
+| FR-601 (dep ref)  | 段階的型付けと責任追跡 | Very Hard | High     | FR-005 |
+| FR-602 (dep ref)  | 設計による契約         | Hard      | Medium   | —      |
+| FR-701 (dep ref)  | エスケープ解析         | Hard      | High     | —      |
+| FR-702 (dep ref)  | SROA                   | Hard      | High     | FR-701 |
+| FR-104 (dep ref)  | 存在型                 | Hard      | Medium   | FR-003 |
+| FR-1001 (dep ref) | 型クラス基盤           | Hard      | High     | FR-003 |
+| FR-1203 (dep ref) | 再帰型 / μ型           | Hard      | Medium   | FR-003 |
+| FR-1306 (dep ref) | 型ラムダ               | Hard      | Medium   | FR-101 |
+| FR-1603           | エフェクト推論         | Hard      | Medium   | FR-401 |
 
 ### Tier 3 — 長期実装 (研究的・基盤依存)
 
-| FR | 機能 | 難易度 | 実用価値 | 依存 |
-|---|---|---|---|---|
-| FR-401 (dep ref) | エフェクト型 | Very Hard | High | FR-003 |
-| FR-402 (dep ref) | 代数的エフェクト | Very Hard | High | FR-401 |
-| FR-501 (dep ref) | 線形型 / アフィン型 | Very Hard | Medium | FR-003 |
-| FR-301 (dep ref) | 精緻型 (Liquid Types) | Very Hard | High | FR-003, SMT |
-| FR-101 (dep ref) | 高カインド型 | Very Hard | Medium | FR-003 |
-| FR-103 (dep ref) | GADTs | Very Hard | Medium | FR-003 |
-| FR-1301 (dep ref) | カインド多相 | Very Hard | Medium | FR-101 |
-| FR-1404 (dep ref) | 集合論的型システム | Very Hard | Medium | FR-802 |
-| FR-1502 | 並行安全型 | Hard | High | FR-501 |
-| FR-1503 | 情報流型 | Very Hard | Medium | FR-003 |
+| FR                | 機能                  | 難易度    | 実用価値 | 依存        |
+| ----------------- | --------------------- | --------- | -------- | ----------- |
+| FR-401 (dep ref)  | エフェクト型          | Very Hard | High     | FR-003      |
+| FR-402 (dep ref)  | 代数的エフェクト      | Very Hard | High     | FR-401      |
+| FR-501 (dep ref)  | 線形型 / アフィン型   | Very Hard | Medium   | FR-003      |
+| FR-301 (dep ref)  | 精緻型 (Liquid Types) | Very Hard | High     | FR-003, SMT |
+| FR-101 (dep ref)  | 高カインド型          | Very Hard | Medium   | FR-003      |
+| FR-103 (dep ref)  | GADTs                 | Very Hard | Medium   | FR-003      |
+| FR-1301 (dep ref) | カインド多相          | Very Hard | Medium   | FR-101      |
+| FR-1404 (dep ref) | 集合論的型システム    | Very Hard | Medium   | FR-802      |
+| FR-1502           | 並行安全型            | Hard      | High     | FR-501      |
+| FR-1503           | 情報流型              | Very Hard | Medium   | FR-003      |
 
 ### Tier 2 追加 (新セクション由来)
 
-| FR | 機能 | 難易度 | 実用価値 | 依存 |
-|---|---|---|---|---|
-| FR-1903 | 網羅性検査 | Medium | High | — |
-| FR-2101 | 型指向テスト生成 | Medium | High | FR-1001 |
-| FR-2102 | 型安全シリアライゼーション | Medium | High | FR-1001 |
-| FR-1604 | 値制限 | Medium | High | FR-003 |
-| FR-1802 | 自由モナド | Hard | Medium | FR-1001 |
-| FR-2104 | 型融合 / デフォレスト化 | Hard | High | FR-1403 |
-| FR-2103 | 型安全 FFI | Hard | High | — |
+| FR      | 機能                       | 難易度 | 実用価値 | 依存    |
+| ------- | -------------------------- | ------ | -------- | ------- |
+| FR-1903 | 網羅性検査                 | Medium | High     | —       |
+| FR-2101 | 型指向テスト生成           | Medium | High     | FR-1001 |
+| FR-2102 | 型安全シリアライゼーション | Medium | High     | FR-1001 |
+| FR-1604 | 値制限                     | Medium | High     | FR-003  |
+| FR-1802 | 自由モナド                 | Hard   | Medium   | FR-1001 |
+| FR-2104 | 型融合 / デフォレスト化    | Hard   | High     | FR-1403 |
+| FR-2103 | 型安全 FFI                 | Hard   | High     | —       |
 
 ### Tier 3 追加 (新セクション由来)
 
-| FR | 機能 | 難易度 | 実用価値 | 依存 |
-|---|---|---|---|---|
-| FR-1901 | 停止性検査 | Hard | Medium | FR-1203 |
-| FR-1904 | 正値性検査 | Hard | Medium | FR-103 |
-| FR-1703 | 多段階プログラミング | Very Hard | Medium | FR-003 |
-| FR-1801 | Lens / Optics | Very Hard | Medium | FR-101 |
-| FR-2005 | 正規化による評価 (NbE) | Very Hard | High | FR-303 |
-| FR-1704 | 型安全メタプログラミング | Very Hard | Medium | FR-1703 |
-| FR-1905 | サイズ型 | Very Hard | Medium | FR-1901 |
+| FR      | 機能                     | 難易度    | 実用価値 | 依存    |
+| ------- | ------------------------ | --------- | -------- | ------- |
+| FR-1901 | 停止性検査               | Hard      | Medium   | FR-1203 |
+| FR-1904 | 正値性検査               | Hard      | Medium   | FR-103  |
+| FR-1703 | 多段階プログラミング     | Very Hard | Medium   | FR-003  |
+| FR-1801 | Lens / Optics            | Very Hard | Medium   | FR-101  |
+| FR-2005 | 正規化による評価 (NbE)   | Very Hard | High     | FR-303  |
+| FR-1704 | 型安全メタプログラミング | Very Hard | Medium   | FR-1703 |
+| FR-1905 | サイズ型                 | Very Hard | Medium   | FR-1901 |
 
 ### Tier 4 — 研究フェーズ (Extremely Hard)
 
-| FR | 機能 | 難易度 | 根拠 |
-|---|---|---|---|
-| FR-303 (dep ref) | 依存型 | Extremely Hard | Lean 4 / Idris 2 と同等の型理論が必要 |
-| FR-502 (dep ref) | 所有権型 / 借用検査 | Extremely Hard | Polonius アルゴリズム |
-| FR-505 (dep ref) | セッション型 | Extremely Hard | 線形型 + 双対性の完全実装 |
-| FR-1302 (dep ref) | 宇宙多相 | Extremely Hard | 依存型基盤が前提 |
-| FR-1304 (dep ref) | 非述語的多相 | Extremely Hard | 型推論の決定不可能性と戦う |
-| FR-1205 (dep ref) | 商型 | Extremely Hard | 依存型 + cubical TT が必要 |
-| FR-1405 (dep ref) | 極性型理論 | Extremely Hard | フォーカシング証明の実装 |
-| FR-2002 | 証明付きコード | Extremely Hard | SMT + 証明チェッカーの統合 |
-| FR-2003 | タクティックベース型検査 | Extremely Hard | Lean 4 相当の証明エンジン |
-| FR-2004 | ホモトピー型理論 | Extremely Hard | Cubical Type Theory が必要 |
+| FR                | 機能                     | 難易度         | 根拠                                  |
+| ----------------- | ------------------------ | -------------- | ------------------------------------- |
+| FR-303 (dep ref)  | 依存型                   | Extremely Hard | Lean 4 / Idris 2 と同等の型理論が必要 |
+| FR-502 (dep ref)  | 所有権型 / 借用検査      | Extremely Hard | Polonius アルゴリズム                 |
+| FR-505 (dep ref)  | セッション型             | Extremely Hard | 線形型 + 双対性の完全実装             |
+| FR-1302 (dep ref) | 宇宙多相                 | Extremely Hard | 依存型基盤が前提                      |
+| FR-1304 (dep ref) | 非述語的多相             | Extremely Hard | 型推論の決定不可能性と戦う            |
+| FR-1205 (dep ref) | 商型                     | Extremely Hard | 依存型 + cubical TT が必要            |
+| FR-1405 (dep ref) | 極性型理論               | Extremely Hard | フォーカシング証明の実装              |
+| FR-2002           | 証明付きコード           | Extremely Hard | SMT + 証明チェッカーの統合            |
+| FR-2003           | タクティックベース型検査 | Extremely Hard | Lean 4 相当の証明エンジン             |
+| FR-2004           | ホモトピー型理論         | Extremely Hard | Cubical Type Theory が必要            |
 
 ---
 
@@ -792,7 +794,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **反例生成**: 型エラー時にソルバが反例（型違反を引き起こす具体的な値）を生成
   - **量化制約**: `(forall x. P(x))` を SMT で自動証明
   - **線形算術**: `{v: Int | 0 <= v && v < n}` の `v + 1 < n` の証明を Presburger arithmetic で解く
-  - Liquid Haskell (GHC プラグイン)、F* (Microsoft Research)、Dafny (Microsoft)
+  - Liquid Haskell (GHC プラグイン)、F\* (Microsoft Research)、Dafny (Microsoft)
 - **難易度**: Very Hard
 
 ---
@@ -996,6 +998,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 - **難易度**: Hard
 
 ### 型推論・基礎理論
+
 - Damas & Milner (1982). Principal type-schemes for functional programs.
 - Dunfield & Krishnaswami (2013). Complete and Easy Bidirectional Typechecking.
 - Sulzmann, Chakravarty, Jones, Donnelly (2007). System F with Type Equality Coercions.
@@ -1003,6 +1006,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 - Garrigue (2004). Relaxing the value restriction.
 
 ### 多相性・型クラス
+
 - Girard (1972). Interprétation fonctionnelle et élimination des coupures.
 - Reynolds (1974). Towards a theory of type structure.
 - Wadler & Blott (1989). How to make ad-hoc polymorphism less ad hoc.
@@ -1010,17 +1014,20 @@ Safety-oriented types, development support, type-level programming, advanced typ
 - Peyton Jones et al. (2007). Practical type inference for arbitrary-rank types.
 
 ### 精緻型・依存型
+
 - Rondon, Kawaguchi, Jhala (2008). Liquid Types.
 - Tobin-Hochstadt & Felleisen (2008). The Design and Implementation of Typed Scheme.
 - The Idris Community (2021). Idris 2: Quantitative Type Theory in Practice.
 - de Moura et al. (2021). The Lean 4 Theorem Prover and Programming Language.
 
 ### エフェクト型
+
 - Plotkin & Pretnar (2009). Handlers of Algebraic Effects.
 - Leijen (2014). Koka: Programming with Row Polymorphic Effect Types.
 - Petricek, Orchard, Mycroft (2014). Coeffects: A calculus of context-dependent computation.
 
 ### リソース管理型
+
 - Wadler (1990). Linear types can change the world!
 - Bernardy et al. (2018). Linear Haskell: Practical Linearity in a Higher-Order Polymorphic Language.
 - Tofte & Talpin (1994). Implementation of the Typed Call-by-Value λ-calculus using a Stack of Regions.
@@ -1029,25 +1036,30 @@ Safety-oriented types, development support, type-level programming, advanced typ
 - Lindley & Morris (2016). Talking Bananas: Structural Recursion for Session Types.
 
 ### 集合論・変性・構造型
+
 - Benzaken, Castagna, Frisch (2003). CDuce: An XML-centric General-purpose Language.
 - Frisch, Castagna, Benzaken (2008). Semantic Subtyping.
 
 ### 安全性・セキュリティ
+
 - Volpano, Irvine, Smith (1996). A Sound Type System for Secure Flow Analysis.
 - Miller (2006). Robust composition: Towards a unified approach to access control.
 
 ### 停止性・全域性
+
 - Abel (2008). MiniAgda: Integrating Sized and Dependent Types.
 - Nakano (2000). A Modality for Recursion.
 - Clouston et al. (2015). Programming and Reasoning with Guarded Recursion for Coinductive Types.
 - Maranget (2007). Warnings for pattern matching.
 
 ### 型レベルプログラミング・メタプログラミング
+
 - Taha & Sheard (1997). Multi-Stage Programming with Explicit Annotations.
 - Jones, Gomard, Sestoft (1993). Partial Evaluation and Automatic Program Generation.
 - Kiselyov, Lämmel, Schupke (2004). Strongly typed heterogeneous collections.
 
 ### 型と証明・HoTT
+
 - Necula (1997). Proof-Carrying Code.
 - The Univalent Foundations Program (2013). Homotopy Type Theory.
 - Abel et al. (2017). Decidability of Conversion for Type Theory in Type Theory.
@@ -1055,15 +1067,18 @@ Safety-oriented types, development support, type-level programming, advanced typ
 - Zeilberger (2009). Focusing and Higher-Order Abstract Syntax.
 
 ### Optics・関数型パターン
+
 - Kiselyov & Ishii (2015). Freer Monads, More Extensible Effects.
 - Riley (2018). Categories of Optics.
 - Carette, Kiselyov, Shan (2009). Finally Tagless, Partially Evaluated.
 
 ### 型融合・最適化
+
 - Gill, Launchbury, Peyton Jones (1993). A Short Cut to Deforestation.
 - Claessen & Hughes (2000). QuickCheck: A Lightweight Tool for Random Testing.
 
 ### 開発ツール・実装
+
 - Wadler (1989). Theorems for free!
 - Reynolds (1983). Types, Abstraction and Parametric Polymorphism.
 - The Rust Reference (2024). The Rust Programming Language, 2024 Edition.
@@ -1071,21 +1086,25 @@ Safety-oriented types, development support, type-level programming, advanced typ
 - Danvy & Filinski (1990). Abstracting Control.
 
 ### 並行・非同期型
+
 - Wadler (2012). Propositions as Sessions.
 - Marlow (2013). Parallel and Concurrent Programming in Haskell.
 - Syme et al. (2011). The F# Asynchronous Programming Model.
 
 ### 数値・計量型
+
 - Kennedy (2009). Types for Units-of-Measure: Theory and Practice.
 - Rump (2010). Verification of Floating-Point Computations.
 
 ### 型システム実装技術
+
 - Robinson (1965). A Machine-Oriented Logic Based on the Resolution Principle.
 - Martelli & Montanari (1982). An Efficient Unification Algorithm.
 - Bottu et al. (2018). Quantified Class Constraints.
 - Blöndal, Löh, Scott (2018). Deriving Via: or, How to Turn Hand-Written Instances into an Anti-Pattern.
 
 ### 特殊ドメイン型
+
 - Green et al. (2013). Quipper: A Scalable Quantum Programming Language.
 - Elliott (2009). Beautiful Differentiation.
 - Baaij (2015). Digital Circuits in CλaSH.
@@ -1103,7 +1122,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **Separation Logic との統合**: ヒープ操作に分離論理 (`*` = ヒープ分離結合) を型で表現
   - **並行分離論理 (CSL)**: O'Hearn (2007). ロックや共有メモリを含む並行プログラムの型安全な推論
   - DBC (FR-602) との違い: DBC は実行時チェック指向。Hoare Logic は静的証明指向
-  - F* (Microsoft Research): Hoare 型理論の実用実装。`ST` エフェクトに事前/事後条件を付与
+  - F\* (Microsoft Research): Hoare 型理論の実用実装。`ST` エフェクトに事前/事後条件を付与
 - **難易度**: Extremely Hard
 
 ### FR-2802: 圏論的型意味論 (Categorical Semantics)
@@ -1327,6 +1346,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 - **難易度**: Very Hard
 
 ### 意味論・論理・圏論
+
 - Cousot & Cousot (1977). Abstract Interpretation: A Unified Lattice Model.
 - Abramsky, Jagadeesan, Malacaria (2000). Full Abstraction for PCF.
 - Mac Lane (1971). Categories for the Working Mathematician.
@@ -1335,11 +1355,13 @@ Safety-oriented types, development support, type-level programming, advanced typ
 - O'Hearn (2007). Resources, Concurrency and Local Reasoning.
 
 ### 線形論理
+
 - Girard (1987). Linear Logic.
 - Girard, Scedrov, Scott (1992). Bounded Linear Logic.
 - Walker (2005). Substructural Type Systems.
 
 ### 最適化解析
+
 - Peyton Jones & Lester (1992). Implementing Functional Languages (demand analysis).
 - Diwan, McKinley, Moss (1998). Type-Based Alias Analysis.
 - Polikarpova et al. (2016). Program Synthesis from Polymorphic Refinement Types.
@@ -1575,6 +1597,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 - **難易度**: Extremely Hard
 
 ### 代数的サブタイピング・依存型基盤
+
 - Dolan & Mycroft (2017). Polymorphism, Subtyping, and Type Inference in MLsub.
 - Amin, Rompf, Odersky (2016). Soundness of Dependent Object Types (DOT).
 - Atkey (2018). Syntax and Semantics of Quantitative Type Theory.

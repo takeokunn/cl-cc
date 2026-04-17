@@ -1158,7 +1158,6 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 
 ---
 
-
 ### Phase 35 — 並行性・スレッド基盤
 
 #### FR-190: Concurrent / Incremental GC

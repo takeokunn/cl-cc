@@ -48,116 +48,116 @@ Codegen → VM Bytecode
 
 ### 1. パーサ (packages/frontend/parse/src/)
 
-| ファイル | 機能 |
-|---------|------|
-| `cst.lisp` | Concrete Syntax Tree - 位置情報を保持する構文木 |
-| `lexer.lisp` | 字句解析器 |
-| `ast.lisp` | Abstract Syntax Tree基底クラス |
-| `prolog.lisp` | S式Prologエンジン |
-| `dcg.lisp` | Definite Clause Grammar |
-| `pratt.lisp` | Prattパーサ (演算子優先順位) |
-| `cl/parser.lisp` | Common Lispパーサ |
-| `cl/lower.lisp` | CSTからASTへの変換 |
+| ファイル         | 機能                                            |
+| ---------------- | ----------------------------------------------- |
+| `cst.lisp`       | Concrete Syntax Tree - 位置情報を保持する構文木 |
+| `lexer.lisp`     | 字句解析器                                      |
+| `ast.lisp`       | Abstract Syntax Tree基底クラス                  |
+| `prolog.lisp`    | S式Prologエンジン                               |
+| `dcg.lisp`       | Definite Clause Grammar                         |
+| `pratt.lisp`     | Prattパーサ (演算子優先順位)                    |
+| `cl/parser.lisp` | Common Lispパーサ                               |
+| `cl/lower.lisp`  | CSTからASTへの変換                              |
 
 ### 2. マクロ展開 (packages/frontend/expand/src/)
 
-| ファイル | 機能 |
-|---------|------|
-| `macro.lisp` | マクロ環境、defmacro機構 |
-| `expander.lisp` | フォーム展開ディスパッチ |
-| `loop.lisp` | LOOPマクロ (CPSベース) |
-| `expander-defstruct.lisp` | defstruct展開ヘルパー |
-| `macros-*.lisp` | 標準マクロ定義 |
+| ファイル                  | 機能                     |
+| ------------------------- | ------------------------ |
+| `macro.lisp`              | マクロ環境、defmacro機構 |
+| `expander.lisp`           | フォーム展開ディスパッチ |
+| `loop.lisp`               | LOOPマクロ (CPSベース)   |
+| `expander-defstruct.lisp` | defstruct展開ヘルパー    |
+| `macros-*.lisp`           | 標準マクロ定義           |
 
 ### 3. VM (packages/engine/vm/src/)
 
-| ファイル | 機能 |
-|---------|------|
-| `vm.lisp` | VM状態管理 |
-| `vm-instructions.lisp` | ~220命令の定義 |
-| `vm-execute.lisp` | 命令実行 |
-| `vm-clos.lisp` | CLOS命令 |
-| `vm-dispatch.lisp` | ジェネリック関数ディスパッチ |
-| `list.lisp` | リスト操作 |
-| `hash.lisp` | ハッシュテーブル |
-| `format.lisp` | format指令 |
+| ファイル               | 機能                         |
+| ---------------------- | ---------------------------- |
+| `vm.lisp`              | VM状態管理                   |
+| `vm-instructions.lisp` | ~220命令の定義               |
+| `vm-execute.lisp`      | 命令実行                     |
+| `vm-clos.lisp`         | CLOS命令                     |
+| `vm-dispatch.lisp`     | ジェネリック関数ディスパッチ |
+| `list.lisp`            | リスト操作                   |
+| `hash.lisp`            | ハッシュテーブル             |
+| `format.lisp`          | format指令                   |
 
 ### 4. 型システム (packages/type/type/src/)
 
-| ファイル | 機能 |
-|---------|------|
-| `types-core.lisp` | 基本型定義 |
-| `inference.lisp` | Hindley-Milner型推論 (Algorithm W) |
-| `unification.lisp` | 型単一化 |
-| `subtyping.lisp` | サブタイピング関係 |
-| `solver.lisp` | 制約解決 |
-| `effect.lisp` | 効果システム |
-| `typeclass.lisp` | 型クラス |
+| ファイル           | 機能                               |
+| ------------------ | ---------------------------------- |
+| `types-core.lisp`  | 基本型定義                         |
+| `inference.lisp`   | Hindley-Milner型推論 (Algorithm W) |
+| `unification.lisp` | 型単一化                           |
+| `subtyping.lisp`   | サブタイピング関係                 |
+| `solver.lisp`      | 制約解決                           |
+| `effect.lisp`      | 効果システム                       |
+| `typeclass.lisp`   | 型クラス                           |
 
 ### 5. コンパイラ (packages/engine/compile/src/)
 
-| ファイル | 機能 |
-|---------|------|
+| ファイル        | 機能                   |
+| --------------- | ---------------------- |
 | `pipeline.lisp` | コンパイルパイプライン |
-| `codegen.lisp` | AST→VM命令コンパイラ |
-| `cps.lisp` | CPS変換 |
-| `closure.lisp` | クロージャ変換 |
-| `context.lisp` | コンパイルコンテキスト |
-| `ir/*.lisp` | 中間表現 (SSA) |
+| `codegen.lisp`  | AST→VM命令コンパイラ   |
+| `cps.lisp`      | CPS変換                |
+| `closure.lisp`  | クロージャ変換         |
+| `context.lisp`  | コンパイルコンテキスト |
+| `ir/*.lisp`     | 中間表現 (SSA)         |
 
 ### 6. オプティマイザ (packages/engine/optimize/src/)
 
-| ファイル | 機能 |
-|---------|------|
-| `cfg.lisp` | CFG構築 + 支配木 |
-| `ssa.lisp` | SSA構築 + 破棄 |
-| `egraph.lisp` | E-graphエンジン (union-find, saturation) |
-| `egraph-rules.lisp` | 書き換え規則 |
-| `optimizer.lisp` | 最適化パス |
+| ファイル            | 機能                                     |
+| ------------------- | ---------------------------------------- |
+| `cfg.lisp`          | CFG構築 + 支配木                         |
+| `ssa.lisp`          | SSA構築 + 破棄                           |
+| `egraph.lisp`       | E-graphエンジン (union-find, saturation) |
+| `egraph-rules.lisp` | 書き換え規則                             |
+| `optimizer.lisp`    | 最適化パス                               |
 
 ### 7. バックエンド (packages/backend/emit/src/)
 
-| ファイル | 機能 |
-|---------|------|
-| `mir.lisp` | 中間表現 (MIR) |
-| `x86-64.lisp` | x86-64 コード生成 |
-| `aarch64.lisp` | AArch64 コード生成 |
-| `wasm.lisp` | WebAssembly生成 |
-| `regalloc.lisp` | レジスタ割り当て |
+| ファイル        | 機能                           |
+| --------------- | ------------------------------ |
+| `mir.lisp`      | 中間表現 (MIR)                 |
+| `x86-64.lisp`   | x86-64 コード生成              |
+| `aarch64.lisp`  | AArch64 コード生成             |
+| `wasm.lisp`     | WebAssembly生成                |
+| `regalloc.lisp` | レジスタ割り当て               |
 | `binary/*.lisp` | Mach-O, ELF, WASM バイナリ生成 |
 
 ## 実装状態
 
 ### 完了 (100%)
 
-| カテゴリ | 内容 |
-|---------|------|
+| カテゴリ               | 内容                                              |
+| ---------------------- | ------------------------------------------------- |
 | **パッケージシステム** | 8パッケージ (:cl-cc, :cl-cc/ast, :cl-cc/ir, etc.) |
-| **パーサ** | 字句解析、CST、AST、再帰下降パーサ |
-| **マクロシステム** | defmacro, macrolet, LOOP, defstruct→defclass |
-| **VM命令** | ~220命令 (レジスタベース) |
-| **CLOS** | defclass, defgeneric, defmethod, make-instance |
-| **型推論** | Hindley-Milner (Algorithm W) |
-| **最適化** | CFG, SSA, E-graph |
-| **ネイティブ生成** | x86-64, AArch64, WebAssembly |
-| **テスト** | 2027テストケース、0失敗 |
+| **パーサ**             | 字句解析、CST、AST、再帰下降パーサ                |
+| **マクロシステム**     | defmacro, macrolet, LOOP, defstruct→defclass      |
+| **VM命令**             | ~220命令 (レジスタベース)                         |
+| **CLOS**               | defclass, defgeneric, defmethod, make-instance    |
+| **型推論**             | Hindley-Milner (Algorithm W)                      |
+| **最適化**             | CFG, SSA, E-graph                                 |
+| **ネイティブ生成**     | x86-64, AArch64, WebAssembly                      |
+| **テスト**             | 2027テストケース、0失敗                           |
 
 ### 言語サポート
 
-| 機能 | 状態 |
-|-----|------|
-| `if`, `progn`, `block`/`return-from` | ✓ |
-| `tagbody`/`go` | ✓ |
-| `catch`/`throw`, `unwind-protect` | ✓ |
-| `let`, `let*`, `setq`, `setf` | ✓ |
-| `flet`, `labels` (相互再帰) | ✓ |
-| `lambda`, `defun`, `defvar`, `defparameter` | ✓ |
-| `defmacro`, `macrolet` | ✓ |
-| `quote`, `the`, `values` | ✓ |
-| `multiple-value-bind`, `multiple-value-call` | ✓ |
-| `eval-when` | ✓ |
-| CLOS (defclass, defgeneric, defmethod) | ✓ |
-| LOOP | ✓ |
+| 機能                                         | 状態 |
+| -------------------------------------------- | ---- |
+| `if`, `progn`, `block`/`return-from`         | ✓    |
+| `tagbody`/`go`                               | ✓    |
+| `catch`/`throw`, `unwind-protect`            | ✓    |
+| `let`, `let*`, `setq`, `setf`                | ✓    |
+| `flet`, `labels` (相互再帰)                  | ✓    |
+| `lambda`, `defun`, `defvar`, `defparameter`  | ✓    |
+| `defmacro`, `macrolet`                       | ✓    |
+| `quote`, `the`, `values`                     | ✓    |
+| `multiple-value-bind`, `multiple-value-call` | ✓    |
+| `eval-when`                                  | ✓    |
+| CLOS (defclass, defgeneric, defmethod)       | ✓    |
+| LOOP                                         | ✓    |
 
 ## セルフホスティング
 
@@ -246,27 +246,27 @@ cl-cc check <file>        Type-check without executing
 
 ## 既知の制限
 
-| 項目 | 制限 |
-|-----|------|
-| パッケージシステム | `defpackage`/`in-package`/`export`はランタイムでno-op。全シンボルが`:cl-cc`名前空間を共有 |
-| Restarts | `restart-case`, `abort`, `continue`等はスタブマクロ |
-| `format`指令 | VMインタプリタではホストSBCLに委譲。ネイティブバイナリでは利用不可 |
-| 数値タワー | `bignum`, `ratio`, `complex`はVMで動作。ネイティブx86-64バックエンドではfixnumのみ |
-| ストリーム | ファイルハンドルは整数。ファーストクラスストリームオブジェクトは未実装 |
-| `load`/`compile-file` | 未実装。`cl-cc run <file>`を使用 |
+| 項目                  | 制限                                                                                      |
+| --------------------- | ----------------------------------------------------------------------------------------- |
+| パッケージシステム    | `defpackage`/`in-package`/`export`はランタイムでno-op。全シンボルが`:cl-cc`名前空間を共有 |
+| Restarts              | `restart-case`, `abort`, `continue`等はスタブマクロ                                       |
+| `format`指令          | VMインタプリタではホストSBCLに委譲。ネイティブバイナリでは利用不可                        |
+| 数値タワー            | `bignum`, `ratio`, `complex`はVMで動作。ネイティブx86-64バックエンドではfixnumのみ        |
+| ストリーム            | ファイルハンドルは整数。ファーストクラスストリームオブジェクトは未実装                    |
+| `load`/`compile-file` | 未実装。`cl-cc run <file>`を使用                                                          |
 
 ## コード規約
 
 ### 命名規約
 
-| 種類 | 規約 | 例 |
-|-----|------|-----|
-| パッケージ | 小文字+ハイフン | `:cl-cc/ast`, `:cl-cc/ir` |
-| クラス | 小文字+ハイフン | `ast-node`, `compiler` |
-| 関数 | 小文字+ハイフン | `make-literal`, `tokenize` |
-| 定数 | `+`でラップ | `+default-lexer+`, `+log-level+` |
-| 特殊変数 | `*`でラップ | `*log-level*`, `*default-compiler*` |
-| 述語 | `-p`接尾辞 | `null-p`, `string-contains-p` |
+| 種類       | 規約            | 例                                  |
+| ---------- | --------------- | ----------------------------------- |
+| パッケージ | 小文字+ハイフン | `:cl-cc/ast`, `:cl-cc/ir`           |
+| クラス     | 小文字+ハイフン | `ast-node`, `compiler`              |
+| 関数       | 小文字+ハイフン | `make-literal`, `tokenize`          |
+| 定数       | `+`でラップ     | `+default-lexer+`, `+log-level+`    |
+| 特殊変数   | `*`でラップ     | `*log-level*`, `*default-compiler*` |
+| 述語       | `-p`接尾辞      | `null-p`, `string-contains-p`       |
 
 ### フォーマット
 

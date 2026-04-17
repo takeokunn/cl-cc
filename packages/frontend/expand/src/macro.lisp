@@ -25,12 +25,13 @@
   "Weak cache mapping ENV → (equal-hash-table FORM → recursively EXPANDED-FORM).")
 
 (defvar *macroexpansion-cache-lock*
-  #+sb-thread (sb-thread:make-mutex :name "macroexpansion-cache")
-  #-sb-thread nil)
+  #+(and sb-thread (not cl-cc-self-hosting)) (sb-thread:make-mutex :name "macroexpansion-cache")
+  #+cl-cc-self-hosting nil
+  #-(or sb-thread cl-cc-self-hosting) nil)
 
 (defmacro %with-macroexpansion-cache-lock (&body body)
-  #+sb-thread `(sb-thread:with-mutex (*macroexpansion-cache-lock*) ,@body)
-  #-sb-thread `(progn ,@body))
+  #+(and sb-thread (not cl-cc-self-hosting)) `(sb-thread:with-mutex (*macroexpansion-cache-lock*) ,@body)
+  #-(and sb-thread (not cl-cc-self-hosting)) `(progn ,@body))
 
 (defun %macroexpansion-cache-table (root env)
   (or (gethash env root)
@@ -204,6 +205,7 @@ These symbols live in :cl-cc/bootstrap so both parse and expand share them."
                                  ,@body)))))))
 
 ;;; Wire expand functions into VM hooks for runtime macroexpand support
+#-cl-cc-self-hosting
 (eval-when (:load-toplevel :execute)
   (when (find-package :cl-cc/vm)
     (let ((pkg (find-package :cl-cc/vm)))

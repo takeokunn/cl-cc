@@ -18,7 +18,7 @@
   :license "MIT"
   :version "0.1.0"
   :depends-on (:cl-cc-bootstrap :cl-cc-ast :cl-cc-prolog :cl-cc-parse :cl-cc-type
-               :cl-cc-optimize :cl-cc-vm :cl-cc-expand)
+               :cl-cc-optimize :cl-cc-vm :cl-cc-emit :cl-cc-expand)
   :pathname "src"
   :serial t
   :components

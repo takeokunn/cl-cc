@@ -385,7 +385,7 @@ Native backend, architecture integration, register allocation, instruction sched
 - **対象**: `packages/engine/optimize/src/optimizer.lisp`, `packages/backend/emit/src/x86-64-codegen.lisp`
 - **現状**: 全分岐が等確率として扱われる。エラーパス・例外パスも通常パスと同じコードレイアウト
 - **内容**: 静的ヒューリスティック: `signal`/`error`呼び出しを含むブロック→cold（unlikely）。ループバックエッジ→taken。`(declare (optimize ...))`と連携した分岐重みアノテーション。FR-036（Hot/Cold Layout）のメタデータソース
-- **根拠**: GCC __builtin_expect / LLVM branch_weights metadata。分岐予測ミス削減
+- **根拠**: GCC \_\_builtin_expect / LLVM branch_weights metadata。分岐予測ミス削減
 - **難易度**: Easy
 
 #### FR-268: AArch64 Constant Islands / Literal Pools (ARM定数プール)
@@ -612,7 +612,7 @@ Native backend, architecture integration, register allocation, instruction sched
 
 ### Phase 83 — バイナリ・リンカー完全化
 
-#### ✅ FR-464: Mach-O __PAGEZERO Segment (Mach-O __PAGEZEROセグメント)
+#### ✅ FR-464: Mach-O **PAGEZERO Segment (Mach-O **PAGEZEROセグメント)
 
 - **対象**: `packages/backend/binary/src/macho.lisp`
 - **現状**: `build-mach-o`(`macho.lisp:406-464`)が`__PAGEZERO`ロードコマンド未出力。macOS実行可能形式の必須要件

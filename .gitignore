@@ -12,6 +12,7 @@
 *.lx64fsl
 *.dx64fsl
 /cl-cc
+result*
 
 # Native executables
 a.out

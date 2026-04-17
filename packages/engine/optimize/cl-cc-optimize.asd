@@ -1,9 +1,10 @@
 (eval-when (:load-toplevel :execute)
-  (let ((here (make-pathname :defaults (or *load-pathname* *compile-file-pathname*)
-                             :name nil :type nil)))
-    (asdf:load-asd (merge-pathnames "../../engine/vm/cl-cc-vm.asd" here))
-    (asdf:load-asd (merge-pathnames "../../prolog/prolog/cl-cc-prolog.asd" here))
-    (asdf:load-asd (merge-pathnames "../../type/type/cl-cc-type.asd" here))))
+  (unless (asdf:find-system :cl-cc-vm nil)
+    (let ((here (make-pathname :defaults (or *load-pathname* *compile-file-pathname*)
+                               :name nil :type nil)))
+      (asdf:load-asd (merge-pathnames "../../engine/vm/cl-cc-vm.asd" here))
+      (asdf:load-asd (merge-pathnames "../../prolog/prolog/cl-cc-prolog.asd" here))
+      (asdf:load-asd (merge-pathnames "../../type/type/cl-cc-type.asd" here)))))
 
 (asdf:defsystem :cl-cc-optimize
   :description "Optimizer subsystem: CFG, SSA, E-graph, peephole, pipeline"

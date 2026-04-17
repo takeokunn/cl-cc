@@ -5,6 +5,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 **実装状況**: 進行中。完了済みの項目は各FR見出しの `✅` で明示する。
 
 ---
+
 ### Phase 40 — 部分評価・特殊化（一部実装）
 
 #### FR-209: Partial Evaluation (部分評価)

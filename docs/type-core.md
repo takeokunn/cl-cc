@@ -30,7 +30,6 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 > この文書は依存順に読むこと。第1-14章はコア型判断の基盤であり、第15-34章は `type-advanced.md` に続く。下の「続き」節は、後続文書の章立てを先読みするためのブリッジである。
 > 本シリーズにおける FR 番号は型システム文書ローカルの参照名であり、他の設計文書に現れる同番号の FR とは無関係である。
 
-
 ## 0. Requirements Contract
 
 ### 適用範囲
@@ -62,7 +61,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 ### FR-001: ✅ Hindley-Milner 型推論 (基盤)
 
 - **対象**: `packages/type/type/src/inference.lisp`
- - **現状**: HM 型推論の基盤は存在する。ここでは `infer` をコア入口として定義し、S 式から型スキームを返せることを要件とする
+- **現状**: HM 型推論の基盤は存在する。ここでは `infer` をコア入口として定義し、S 式から型スキームを返せることを要件とする
 - **アルゴリズム**: Algorithm W (Damas & Milner 1982) + unification (Robinson 1965)
 - **スコープ**: let-polymorphism, 型変数の全称量化, unification による型変数束縛
 - **参考実装**: OCaml, SML/NJ, GHC Core の型推論基盤

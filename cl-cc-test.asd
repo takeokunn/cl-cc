@@ -26,7 +26,7 @@
      (:file "framework-meta-tests")))
    ;; Unit tests — each module now lives in its workspace's tests/ dir
    (:module "cli-tests"
-    :pathname "cli/tests"
+    :pathname "packages/cli/tests"
     :serial t
     :components
     ((:file "test-support")      ; shared CLI test helpers (fake-quit, make-cli-parsed)

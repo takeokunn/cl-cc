@@ -6,6 +6,7 @@
 ;; Re-export all child-package symbols from :cl-cc umbrella, then wire
 ;; use-package bridges so expand/compile source files can see each other's
 ;; exports without qualification (Phase 3c/3d: now real ASDF systems).
+#-cl-cc-self-hosting
 (eval-when (:compile-toplevel :load-toplevel :execute)
   ;; Re-export bootstrap symbols (our-eval, binop, make-cst-token, etc.)
   ;; so cl-cc:our-eval etc. continue to work for downstream consumers.

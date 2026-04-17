@@ -54,10 +54,11 @@
                                 :vm-instructions full-instructions
                                 :optimized-instructions optimized-instructions)))
 
-;;; Stdlib cache (*stdlib-expanded-cache*, %snapshot-macro-env-table,
-;;; %restore-macro-env-table, %build-stdlib-expanded-cache,
-;;; get-stdlib-forms, warm-stdlib-cache)
+;;; Stdlib sexp cache (*stdlib-expanded-cache*, %snapshot-macro-env-table,
+;;; %restore-macro-env-table, %build-stdlib-expanded-cache, get-stdlib-forms)
 ;;; are in pipeline-stdlib.lisp (loaded before this file).
+;;; warm-stdlib-cache and %build-stdlib-vm-snapshot are defined below,
+;;; after compile-toplevel-forms, which they depend on.
 
 (defun parse-source-for-language (source language)
   "Parse SOURCE according to LANGUAGE, returning a list of AST nodes or s-expressions.
@@ -95,35 +96,56 @@
                                 :opt-remarks-stream opt-remarks-stream
                                 :opt-remarks-mode opt-remarks-mode))))
 
+(defun %copy-snapshot-ht (src)
+  (let ((dst (make-hash-table :test #'eq :size (+ (hash-table-count src) 8))))
+    (maphash (lambda (k v) (setf (gethash k dst) v)) src)
+    dst))
+
 (defun run-string (source &key stdlib pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile and run SOURCE. When STDLIB is true, include standard library."
-  (let* ((*package* (find-package :cl-cc))
-         (*accessor-slot-map* (make-hash-table :test #'eq))
-         (*defstruct-slot-registry* (make-hash-table :test #'eq))
-         (*labels-boxed-fns* nil)
-         (result (if stdlib
-                     (compile-string-with-stdlib source :target :vm
-                                                  :pass-pipeline pass-pipeline
-                                                  :print-pass-timings print-pass-timings
-                                                   :timing-stream timing-stream
-                                                   :print-pass-stats print-pass-stats
-                                                   :stats-stream stats-stream
-                                                   :trace-json-stream trace-json-stream
-                                                   :print-opt-remarks print-opt-remarks
-                                                  :opt-remarks-stream opt-remarks-stream
-                                                  :opt-remarks-mode opt-remarks-mode)
-                     (compile-string source :target :vm
-                                      :pass-pipeline pass-pipeline
-                                      :print-pass-timings print-pass-timings
+  (let ((*package* (find-package :cl-cc))
+        (*labels-boxed-fns* nil))
+    (if (and stdlib *stdlib-vm-snapshot*)
+        (let* ((*accessor-slot-map*       (%copy-snapshot-ht *stdlib-accessor-slot-map*))
+               (*defstruct-slot-registry* (%copy-snapshot-ht *stdlib-defstruct-slot-registry*))
+               (result (compile-string source :target :vm
+                                       :pass-pipeline pass-pipeline
+                                       :print-pass-timings print-pass-timings
                                        :timing-stream timing-stream
                                        :print-pass-stats print-pass-stats
                                        :stats-stream stats-stream
                                        :trace-json-stream trace-json-stream
                                        :print-opt-remarks print-opt-remarks
-                                      :opt-remarks-stream opt-remarks-stream
-                                      :opt-remarks-mode opt-remarks-mode)))
-         (program (compilation-result-program result)))
-    (run-compiled program)))
+                                       :opt-remarks-stream opt-remarks-stream
+                                       :opt-remarks-mode opt-remarks-mode))
+               (program (compilation-result-program result))
+               (state   (clone-vm-state *stdlib-vm-snapshot*)))
+          (run-compiled program :state state))
+        (let* ((*accessor-slot-map*       (make-hash-table :test #'eq))
+               (*defstruct-slot-registry* (make-hash-table :test #'eq))
+               (result (if stdlib
+                           (compile-string-with-stdlib source :target :vm
+                                                       :pass-pipeline pass-pipeline
+                                                       :print-pass-timings print-pass-timings
+                                                       :timing-stream timing-stream
+                                                       :print-pass-stats print-pass-stats
+                                                       :stats-stream stats-stream
+                                                       :trace-json-stream trace-json-stream
+                                                       :print-opt-remarks print-opt-remarks
+                                                       :opt-remarks-stream opt-remarks-stream
+                                                       :opt-remarks-mode opt-remarks-mode)
+                           (compile-string source :target :vm
+                                           :pass-pipeline pass-pipeline
+                                           :print-pass-timings print-pass-timings
+                                           :timing-stream timing-stream
+                                           :print-pass-stats print-pass-stats
+                                           :stats-stream stats-stream
+                                           :trace-json-stream trace-json-stream
+                                           :print-opt-remarks print-opt-remarks
+                                           :opt-remarks-stream opt-remarks-stream
+                                           :opt-remarks-mode opt-remarks-mode)))
+               (program (compilation-result-program result)))
+          (run-compiled program)))))
 
 (defun compile-string-with-stdlib (source &key (target :x86_64) type-check (safety 1) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile SOURCE with standard library prepended."
@@ -142,6 +164,36 @@
                             :print-opt-remarks print-opt-remarks
                             :opt-remarks-stream opt-remarks-stream
                             :opt-remarks-mode opt-remarks-mode)))
+
+(defun %build-stdlib-vm-snapshot ()
+  (let* ((*accessor-slot-map*       (make-hash-table :test #'eq))
+         (*defstruct-slot-registry* (make-hash-table :test #'eq))
+         (*labels-boxed-fns*        nil)
+         (stdlib-program
+           (compile-toplevel-forms (get-stdlib-forms) :target :vm))
+         (snapshot-state
+           (make-instance 'cl-cc/vm:vm-io-state
+                          :output-stream (make-broadcast-stream))))
+    (cl-cc/vm:run-compiled stdlib-program :state snapshot-state)
+    (setf *stdlib-accessor-slot-map*
+          (let ((dst (make-hash-table :test #'eq
+                                      :size (hash-table-count *accessor-slot-map*))))
+            (maphash (lambda (k v) (setf (gethash k dst) v)) *accessor-slot-map*)
+            dst))
+    (setf *stdlib-defstruct-slot-registry*
+          (let ((dst (make-hash-table :test #'eq
+                                      :size (hash-table-count *defstruct-slot-registry*))))
+            (maphash (lambda (k v) (setf (gethash k dst) v)) *defstruct-slot-registry*)
+            dst))
+    snapshot-state))
+
+(defun warm-stdlib-cache ()
+  (get-stdlib-forms)
+  (unless (and *stdlib-vm-snapshot*
+               (eq *stdlib-expanded-cache-source*  *standard-library-source*)
+               (eq *stdlib-expanded-cache-eval-fn* *macro-eval-fn*))
+    (setf *stdlib-vm-snapshot* (%build-stdlib-vm-snapshot)))
+  (values))
 
 (defun our-eval (form)
   "Evaluate FORM by compiling it and running it in the VM.
@@ -174,6 +226,7 @@ instead of the host CL eval."
 ;;; :cl-cc-expand packages don't exist yet (e.g. when :cl-cc-optimize depends on
 ;;; :cl-cc-vm and loads before the facades), the registration is silently skipped.
 ;;; This eval-when ensures registration completes once all packages are present.
+#-cl-cc-self-hosting
 (eval-when (:load-toplevel :execute)
   ;; NOTE: register-macro is intentionally excluded — it stores VM closures in
   ;; macro-env, causing TYPE-ERROR when host CL funcalls them. See vm-bridge.lisp.

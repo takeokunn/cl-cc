@@ -161,6 +161,7 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
                        :allocation allocation))))
 
 ;;; Wire parse-all-forms into VM hook for runtime READ support
+#-cl-cc-self-hosting
 (eval-when (:load-toplevel :execute)
   (when (find-package :cl-cc/vm)
     (let ((pkg (find-package :cl-cc/vm)))

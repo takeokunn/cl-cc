@@ -3,6 +3,7 @@
 ML-driven optimization, parallel/distributed compilation, WebAssembly targets, structured concurrency, formal verification, CHERI security, advanced optimization passes, ABI.
 
 ---
+
 ### Phase 79 — ML駆動最適化
 
 #### FR-372: ML-Guided Inlining (機械学習駆動インライン化)
@@ -154,7 +155,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **対象**: 新規`src/analyze/smt.lisp`
 - **現状**: 型チェックと最適化は構文的マッチングのみ。決定可能な論理式への還元なし
 - **内容**: Z3 / CVC5へのFFI経由呼び出し。`(declare (cl-cc:ensures (> result 0)))` → SMT検証条件生成。ループ不変条件の自動導出。配列境界の静的証明。`--verify`フラグでアサーション検証
-- **根拠**: Dafny / Why3 / F*。Critical systemsでのコードの部分正当性証明に向けた基盤
+- **根拠**: Dafny / Why3 / F\*。Critical systemsでのコードの部分正当性証明に向けた基盤
 - **難易度**: Very Hard
 
 ---
@@ -905,7 +906,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 - **対象**: `packages/engine/optimize/src/optimizer.lisp`, FR-387（グリーンスレッド）との連携
 - **現状**: ループは常にシングルスレッド実行
-- **内容**: データ依存解析（FR-342ポインタ解析）でループ反復間の依存がないと証明された場合に**並列ループに変換**。`(cl-cc:parallel-for i 0 n ...)` のランタイムディスパッチ生成。スレッドプール（FR-387）にタスク分割。並列オーバーヘッドが利益を上回る場合は直列化（閾値: トリップカウント * body命令数）。OpenMP `#pragma omp parallel for` の自動版
+- **内容**: データ依存解析（FR-342ポインタ解析）でループ反復間の依存がないと証明された場合に**並列ループに変換**。`(cl-cc:parallel-for i 0 n ...)` のランタイムディスパッチ生成。スレッドプール（FR-387）にタスク分割。並列オーバーヘッドが利益を上回る場合は直列化（閾値: トリップカウント \* body命令数）。OpenMP `#pragma omp parallel for` の自動版
 - **根拠**: GCC `-ftree-parallelize-loops` / Intel OpenMP auto-parallelization. 大規模配列処理で線形スケール達成
 - **難易度**: Very Hard
 
@@ -1069,7 +1070,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 - **対象**: `packages/type/type/src/inference.lisp`, `packages/type/type/src/types.lisp`
 - **現状**: 型は集合論的基底型のみ（fixnum/string等）。述語付き部分型なし
-- **内容**: `(cl-cc:define-refinement-type positive-integer fixnum (> x 0))` で述語付き型定義。`(declare (type positive-integer n))` で使用。VRP（FR-390）・SMTソルバ（FR-392）との連携で精緻型の充足を検証。`(defun sqrt (x positive-integer) ...)` の戻り値型推論。LiquidHaskell / F* / Stainless（Scala）相当
+- **内容**: `(cl-cc:define-refinement-type positive-integer fixnum (> x 0))` で述語付き型定義。`(declare (type positive-integer n))` で使用。VRP（FR-390）・SMTソルバ（FR-392）との連携で精緻型の充足を検証。`(defun sqrt (x positive-integer) ...)` の戻り値型推論。LiquidHaskell / F\* / Stainless（Scala）相当
 - **根拠**: 配列インデックス型 `(and fixnum (>= 0) (< array-length))` で境界チェックを型レベルで除去できる。bcE（FR-468）の完全静的版
 - **難易度**: Very Hard
 
@@ -1182,4 +1183,3 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **難易度**: Hard
 
 ---
-

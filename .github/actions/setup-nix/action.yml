@@ -1,0 +1,17 @@
+name: Setup Nix
+description: Set up Nix environment with Cachix for GitHub Actions
+inputs:
+  cachix-auth-token:
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: cachix/install-nix-action@v31
+      with:
+        nix_path: nixpkgs=channel:nixos-unstable
+        extra_nix_config: |
+          accept-flake-config = true
+    - uses: cachix/cachix-action@v16
+      with:
+        name: takeokunn-cl-cc
+        authToken: "${{ inputs.cachix-auth-token }}"

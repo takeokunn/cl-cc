@@ -16,14 +16,14 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 追加ルール例:
 
-| パターン | 変換後 | 説明 |
-|---------|--------|------|
-| `(vm-load R1 X)(vm-load R2 X)` | `(vm-move R2 R1)` | 重複ロード除去 |
-| `(vm-add R1 R2 0)` | `(vm-move R1 R2)` | 0加算除去 |
-| `(vm-mul R1 R2 1)` | `(vm-move R1 R2)` | 1乗算除去 |
-| `(vm-not R1 (vm-lt ...))` | `(vm-ge ...)` | 否定+比較融合 |
+| パターン                         | 変換後            | 説明           |
+| -------------------------------- | ----------------- | -------------- |
+| `(vm-load R1 X)(vm-load R2 X)`   | `(vm-move R2 R1)` | 重複ロード除去 |
+| `(vm-add R1 R2 0)`               | `(vm-move R1 R2)` | 0加算除去      |
+| `(vm-mul R1 R2 1)`               | `(vm-move R1 R2)` | 1乗算除去      |
+| `(vm-not R1 (vm-lt ...))`        | `(vm-ge ...)`     | 否定+比較融合  |
 | `(vm-const R1 X)(vm-const R1 Y)` | `(vm-const R1 Y)` | 上書き定数除去 |
-| `L1→L2→L3` | `L1→L3` | Jump chain短縮 |
+| `L1→L2→L3`                       | `L1→L3`           | Jump chain短縮 |
 
 #### FR-002: 葉関数最適化 (Leaf Function Optimization) ✅
 
@@ -1190,6 +1190,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **難易度**: Hard
 
 ---
+
 ---
 
 ### Phase 18 — LTO・PGO・コンパイラ速度（未実装）

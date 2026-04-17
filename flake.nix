@@ -1,283 +1,425 @@
 {
-  description = "CL-CC bootstrap compiler (zero dependency core)";
+  description = "CL-CC — self-hosting Common Lisp compiler";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
+
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    flake-parts.inputs.nixpkgs-lib.follows = "nixpkgs";
+
+    treefmt-nix.url = "github:numtide/treefmt-nix";
+    treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
-        pkgs = import nixpkgs { inherit system; };
-        sbclTestEnv = pkgs.sbcl.withPackages (ps: [ ]);
+  outputs =
+    inputs@{ self, flake-parts, ... }:
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      systems = [
+        "aarch64-darwin"
+        "x86_64-darwin"
+        "aarch64-linux"
+        "x86_64-linux"
+      ];
 
-        # ─── Shared bootstrap strings ───────────────────────────────────────
-        # Kept on a single line so shell line-continuation in app scripts
-        # concatenates cleanly. SBCL rule: C runtime flags (--dynamic-space-size)
-        # MUST precede Lisp flags (--non-interactive, --eval, --load).
-        sbclBin = "${sbclTestEnv}/bin/sbcl";
-        sbclRuntimeFlags = "--dynamic-space-size 4096";
-        sbclLispBootstrap = "--eval '(require :asdf)' --load cl-cc.asd";
-        sbclCmd = "${sbclBin} ${sbclRuntimeFlags} --non-interactive ${sbclLispBootstrap}";
-        sbclCmdInteractive = "${sbclBin} ${sbclRuntimeFlags} ${sbclLispBootstrap}";
+      imports = [ inputs.treefmt-nix.flakeModule ];
 
-        # Guard snippet: refuse to run outside the project root so destructive
-        # app scripts (clean) and loader scripts (everything using cl-cc.asd)
-        # can't traverse a user's $HOME.
-        cwdGuard = ''
-          if [ ! -f ./cl-cc.asd ]; then
-            echo "cl-cc: run from the project root (cl-cc.asd not found in $PWD)" >&2
-            exit 1
-          fi
-        '';
+      flake.overlays.default = final: _prev: {
+        cl-cc = self.packages.${final.system}.default;
+      };
 
-        # Slash-anchored FASL cache cleaner. Bare `index($p, $PWD)` was unsafe:
-        #  - empty $PWD matches everything (wiped the entire cache).
-        #  - $PWD=/work/cl falsely matches /work/cl-sibling.
-        # Fix: require $PWD non-empty, $HOME non-empty, cache dir extant, and
-        # match "$PWD/" (trailing slash) so /work/cl can't match /work/cl-foo.
-        faslCacheCleaner = ''
-          ${pkgs.perl}/bin/perl -e '
-            use strict;
-            use warnings;
-            use File::Path qw(remove_tree);
-            use File::Find;
-            my $pwd = $ENV{"PWD"} // "";
-            exit 0 unless length $pwd;
-            my $home = $ENV{"HOME"} // "";
-            exit 0 unless length $home;
-            my $root = $home . "/.cache/common-lisp";
-            exit 0 unless -d $root;
-            my $needle = $pwd . "/";
-            my @targets;
-            find(sub {
-              return unless -d $_;
-              my $p = $File::Find::name;
-              push @targets, $p if index($p, $needle) >= 0;
-            }, $root);
-            eval { remove_tree(@targets) if @targets; 1 } or warn $@;
-          ' || true
-        '';
+      perSystem =
+        { pkgs, self', ... }:
+        let
+          inherit (pkgs) sbcl lib;
 
-        # Bash-only CLCC_PBT_COUNT sanitizer: accept a non-negative integer,
-        # otherwise reset to the default.
-        pbtSanitize = ''
-          if [ -z "''${CLCC_PBT_COUNT:-}" ] || ! printf '%s' "$CLCC_PBT_COUNT" | grep -Eq '^[0-9]+$'; then
-            CLCC_PBT_COUNT=3
-          fi
-          export CLCC_PBT_COUNT
-        '';
+          # ── Common Lisp packages ─────────────────────────────────────────
+          # Each ASDF system is its own derivation so FASL caches are
+          # independent: touching `packages/engine/vm` never invalidates
+          # `packages/foundation/bootstrap`.
+          pkgSrc =
+            subdir:
+            lib.fileset.toSource {
+              root = ./.;
+              fileset = ./. + "/${subdir}";
+            };
 
-        mkApp = name: text: {
-          type = "app";
-          meta.description = "cl-cc ${name} app (run via `nix run .#${name}`)";
-          program = "${pkgs.writeShellScript "cl-cc-${name}" text}";
-        };
+          systemSpec = {
+            cl-cc-bootstrap = {
+              subdir = "packages/foundation/bootstrap";
+              deps = [ ];
+            };
+            cl-cc-ast = {
+              subdir = "packages/foundation/ast";
+              deps = [ ];
+            };
+            cl-cc-binary = {
+              subdir = "packages/backend/binary";
+              deps = [ ];
+            };
+            cl-cc-runtime = {
+              subdir = "packages/backend/runtime";
+              deps = [ ];
+            };
+            cl-cc-bytecode = {
+              subdir = "packages/backend/bytecode";
+              deps = [ ];
+            };
+            cl-cc-ir = {
+              subdir = "packages/foundation/ir";
+              deps = [ ];
+            };
+            cl-cc-mir = {
+              subdir = "packages/foundation/mir";
+              deps = [ ];
+            };
+            cl-cc-prolog = {
+              subdir = "packages/prolog/prolog";
+              deps = [ "cl-cc-bootstrap" ];
+            };
+            cl-cc-type = {
+              subdir = "packages/type/type";
+              deps = [ "cl-cc-ast" ];
+            };
+            cl-cc-parse = {
+              subdir = "packages/frontend/parse";
+              deps = [
+                "cl-cc-ast"
+                "cl-cc-bootstrap"
+              ];
+            };
+            cl-cc-vm = {
+              subdir = "packages/engine/vm";
+              deps = [ "cl-cc-bootstrap" ];
+            };
+            cl-cc-optimize = {
+              subdir = "packages/engine/optimize";
+              deps = [
+                "cl-cc-vm"
+                "cl-cc-prolog"
+                "cl-cc-type"
+              ];
+            };
+            cl-cc-emit = {
+              subdir = "packages/backend/emit";
+              deps = [
+                "cl-cc-vm"
+                "cl-cc-mir"
+                "cl-cc-optimize"
+              ];
+            };
+            cl-cc-expand = {
+              subdir = "packages/frontend/expand";
+              deps = [
+                "cl-cc-bootstrap"
+                "cl-cc-ast"
+                "cl-cc-prolog"
+                "cl-cc-parse"
+                "cl-cc-type"
+              ];
+            };
+            cl-cc-compile = {
+              subdir = "packages/engine/compile";
+              deps = [
+                "cl-cc-bootstrap"
+                "cl-cc-ast"
+                "cl-cc-prolog"
+                "cl-cc-parse"
+                "cl-cc-type"
+                "cl-cc-optimize"
+                "cl-cc-vm"
+                "cl-cc-emit"
+                "cl-cc-expand"
+              ];
+            };
+          };
 
-        # ─── App scripts ────────────────────────────────────────────────────
-        testScript = ''
-          set -euo pipefail
-          ${cwdGuard}
-          ${pbtSanitize}
-          exec ${sbclCmd} \
-            --eval '(asdf:disable-output-translations)' \
-            --eval '(asdf:load-system :cl-cc/test :force t)' \
-            --eval '(uiop:symbol-call :cl-cc/test (quote run-tests))'
-        '';
+          asdfSystems = lib.fix (
+            sys:
+            lib.mapAttrs (
+              name:
+              { subdir, deps }:
+              sbcl.buildASDFSystem {
+                pname = name;
+                version = "0.1.0";
+                src = pkgSrc subdir;
+                systems = [ name ];
+                lispLibs = map (n: sys.${n}) deps;
+              }
+            ) systemSpec
+          );
 
-        coverageScript = ''
-          set -euo pipefail
-          ${cwdGuard}
-          rm -rf /tmp/cl-cc-coverage
-          ${faslCacheCleaner}
-          find . -maxdepth 6 -name "*.fasl" -delete
-          exec ${sbclTestEnv}/bin/sbcl \
-            --dynamic-space-size 4096 \
-            --non-interactive \
-            --eval '(require :asdf)' \
-            --eval '(require :sb-cover)' \
-            --eval '(declaim (optimize (sb-cover:store-coverage-data 3)))' \
-            --load cl-cc.asd \
-            --eval '(asdf:load-system :cl-cc/test :force t)' \
-            --eval '(cl-cc/test:run-suite (quote cl-cc/test::cl-cc-suite) :parallel nil :random nil :warm-stdlib t :coverage t)'
-        '';
+          sbclWithCLCC = sbcl.withPackages (_: lib.attrValues asdfSystems);
 
-        buildScript = ''
-          set -euo pipefail
-          ${cwdGuard}
-          exec ${sbclCmd} \
-            --eval '(asdf:disable-output-translations)' \
-            --eval '(asdf:load-system :cl-cc/bin)' \
-            --load scripts/build-cli.lisp
-        '';
+          # ── App scaffolding ──────────────────────────────────────────────
+          sbclBin = "${sbclWithCLCC}/bin/sbcl";
+          sbclFlags = "--dynamic-space-size 4096";
+          sbclBootstrap = "--eval '(require :asdf)' --load cl-cc.asd";
+          sbclCmd = "${sbclBin} ${sbclFlags} --non-interactive ${sbclBootstrap}";
 
-        selfhostScript = ''
-          set -euo pipefail
-          ${cwdGuard}
-          if [ ! -x ./cl-cc ]; then
-            ${sbclCmd} \
-              --eval '(asdf:disable-output-translations)' \
-              --eval '(asdf:load-system :cl-cc/bin)' \
-              --load scripts/build-cli.lisp
-          fi
-          exec ./cl-cc selfhost
-        '';
-
-        loadScript = ''
-          set -euo pipefail
-          ${cwdGuard}
-          exec ${sbclCmdInteractive} \
-            --eval '(asdf:disable-output-translations)' \
-            --eval '(asdf:load-system :cl-cc)'
-        '';
-
-        replScript = ''
-          set -euo pipefail
-          ${cwdGuard}
-          exec ${pkgs.rlwrap}/bin/rlwrap ${sbclTestEnv}/bin/sbcl \
-            --dynamic-space-size 4096 \
-            --eval '(require :asdf)' \
-            --load cl-cc.asd \
-            --eval '(asdf:disable-output-translations)' \
-            --eval '(asdf:load-system :cl-cc)'
-        '';
-
-        cleanScript = ''
-          set -euo pipefail
-          ${cwdGuard}
-          rm -f ./*.fasl ./*.lib ./*.dex
-          find . -maxdepth 6 -name "*.fasl" -delete
-          ${faslCacheCleaner}
-          echo "cl-cc: cleaned FASL caches"
-        '';
-
-        # ─── Sandbox-side build helper (packages.default + checks.selfhost) ─
-        # `packages.default.buildPhase` and `checks.selfhost.buildPhase` are
-        # otherwise byte-identical. Shared helper keeps them in lockstep.
-        sandboxedBuildCli = ''
-          export HOME="$TMPDIR"
-          sbcl --dynamic-space-size 4096 \
-            --non-interactive \
-            --eval '(require :asdf)' \
-            --load "cl-cc.asd" \
-            --eval '(asdf:load-system :cl-cc/bin)' \
-            --load scripts/build-cli.lisp
-        '';
-
-      in {
-        # ─── Apps ───────────────────────────────────────────────────────────
-        # Invoke via `nix run .#<name>` from the project root.
-        apps = {
-          test     = mkApp "test"     testScript;
-          coverage = mkApp "coverage" coverageScript;
-          build    = mkApp "build"    buildScript;
-          selfhost = mkApp "selfhost" selfhostScript;
-          load     = mkApp "load"     loadScript;
-          repl     = mkApp "repl"     replScript;
-          clean    = mkApp "clean"    cleanScript;
-        };
-
-        formatter = pkgs.nixpkgs-fmt;
-
-        # ─── Dev shell ──────────────────────────────────────────────────────
-        devShells.default = pkgs.mkShell {
-          packages = [ sbclTestEnv pkgs.rlwrap ];
-          shellHook = ''
-            echo ""
-            echo "  CL-CC Development Shell"
-            echo "  ------------------------"
-            echo ""
-            echo "  Build & Test (run via 'nix run .#<app>'):"
-            echo "    nix run .#test        Run the canonical test plan"
-            echo "    nix run .#build       Build standalone binary ./cl-cc"
-            echo "    nix run .#coverage    Run tests with sb-cover instrumentation"
-            echo "    nix run .#load        Load :cl-cc non-interactively"
-            echo "    nix run .#repl        rlwrap'd SBCL with :cl-cc loaded"
-            echo "    nix run .#clean       Remove FASL caches"
-            echo ""
-            echo "  Nix workflows:"
-            echo "    nix flake check       Run checks.tests + checks.selfhost"
-            echo "    nix build             Build ./result/bin/cl-cc via packages.default"
-            echo "    nix flake show        List all flake outputs"
-            echo ""
-            echo "  CLI Commands (after 'nix run .#build'):"
-            echo "    ./cl-cc run example/hello.lisp            Hello world"
-            echo "    ./cl-cc run example/arithmetic.lisp       Arithmetic & let bindings"
-            echo "    ./cl-cc run example/factorial.lisp        Recursive functions"
-            echo "    ./cl-cc run example/fibonacci.lisp        Fibonacci"
-            echo "    ./cl-cc run example/closure.lisp          Closures & HOFs"
-            echo "    ./cl-cc run example/list.lisp --stdlib    List ops with stdlib"
-            echo "    ./cl-cc run example/clos.lisp             CLOS classes & methods"
-            echo "    ./cl-cc run example/control-flow.lisp     Block, tagbody, handler-case"
-            echo "    ./cl-cc run example/hello.php             PHP frontend"
-            echo "    ./cl-cc eval \"(+ 1 2)\"                    Evaluate an expression"
-            echo "    ./cl-cc check example/typecheck.lisp      Type inference"
-            echo "    ./cl-cc compile example/hello.lisp -o hello  Compile to binary"
-            echo "    ./cl-cc repl                              Interactive REPL"
-            echo "    ./cl-cc selfhost                          Verify self-hosting"
-            echo "    ./cl-cc help                              Show all commands"
-            echo ""
+          cwdGuard = ''
+            if [ ! -f ./cl-cc.asd ]; then
+              echo "cl-cc: run from the project root (cl-cc.asd not found in $PWD)" >&2
+              exit 1
+            fi
           '';
-        };
 
-        # ─── Package (standalone binary) ────────────────────────────────────
-        packages.default = pkgs.stdenvNoCC.mkDerivation {
-          pname = "cl-cc";
-          version = "0.1.0";
-          src = ./.;
-          nativeBuildInputs = [ sbclTestEnv ];
-          buildPhase = sandboxedBuildCli;
-          installPhase = ''
-            mkdir -p $out/bin
-            cp cl-cc $out/bin/cl-cc
+          faslCacheCleaner = ''
+            ${lib.getExe pkgs.perl} -e '
+              use strict;
+              use warnings;
+              use File::Path qw(remove_tree);
+              use File::Find;
+              my $pwd = $ENV{"PWD"} // "";
+              exit 0 unless length $pwd;
+              my $home = $ENV{"HOME"} // "";
+              exit 0 unless length $home;
+              my $root = $home . "/.cache/common-lisp";
+              exit 0 unless -d $root;
+              my $needle = $pwd . "/";
+              my @targets;
+              find(sub {
+                return unless -d $_;
+                my $p = $File::Find::name;
+                push @targets, $p if index($p, $needle) >= 0;
+              }, $root);
+              eval { remove_tree(@targets) if @targets; 1 } or warn $@;
+            ' || true
           '';
-          meta = {
-            description = "CL-CC self-hosting Common Lisp compiler (standalone binary)";
-            mainProgram = "cl-cc";
+
+          pbtSanitize = ''
+            if [ -z "''${CLCC_PBT_COUNT:-}" ] || ! printf '%s' "$CLCC_PBT_COUNT" | grep -Eq '^[0-9]+$'; then
+              CLCC_PBT_COUNT=3
+            fi
+            export CLCC_PBT_COUNT
+          '';
+
+          mkApp = name: text: {
+            type = "app";
+            meta.description = "cl-cc ${name} app (run via `nix run .#${name}`)";
+            program = "${pkgs.writeShellScript "cl-cc-${name}" text}";
+          };
+        in
+        {
+          # ── Packages ─────────────────────────────────────────────────────
+          packages = asdfSystems // {
+            default = pkgs.stdenvNoCC.mkDerivation {
+              pname = "cl-cc";
+              version = "0.1.0";
+              src = lib.fileset.toSource {
+                root = ./.;
+                fileset = lib.fileset.unions [
+                  ./packages
+                  ./cl-cc.asd
+                ];
+              };
+
+              strictDeps = true;
+              enableParallelBuilding = true;
+
+              nativeBuildInputs = [ sbclWithCLCC ];
+
+              dontConfigure = true;
+              dontPatch = true;
+              dontStrip = true;
+              dontPatchELF = true;
+              dontPatchShebangs = true;
+
+              buildPhase = ''
+                runHook preBuild
+                export HOME="$TMPDIR"
+                sbcl ${sbclFlags} \
+                  --non-interactive \
+                  --disable-debugger \
+                  --eval '(require :asdf)' \
+                  --load cl-cc.asd \
+                  --eval '(asdf:load-system :cl-cc/bin)' \
+                  --load packages/cli/scripts/build-cli.lisp
+                runHook postBuild
+              '';
+
+              installPhase = ''
+                runHook preInstall
+                install -Dm755 cl-cc $out/bin/cl-cc
+                runHook postInstall
+              '';
+
+              meta = {
+                description = "CL-CC self-hosting Common Lisp compiler (standalone binary)";
+                mainProgram = "cl-cc";
+                platforms = lib.platforms.unix;
+              };
+            };
+          };
+
+          # ── Apps ─────────────────────────────────────────────────────────
+          apps = rec {
+            default = repl;
+
+            test = mkApp "test" ''
+              set -euo pipefail
+              ${cwdGuard}
+              ${pbtSanitize}
+              exec ${sbclCmd} \
+                --load cl-cc-test.asd \
+                --eval '(asdf:disable-output-translations)' \
+                --eval '(asdf:load-system :cl-cc/test :force t)' \
+                --eval '(uiop:symbol-call :cl-cc/test (quote run-tests))'
+            '';
+
+            coverage = mkApp "coverage" ''
+              set -euo pipefail
+              ${cwdGuard}
+              rm -rf /tmp/cl-cc-coverage
+              ${faslCacheCleaner}
+              find . -maxdepth 6 -name "*.fasl" -delete
+              exec ${sbclBin} ${sbclFlags} \
+                --non-interactive \
+                --eval '(require :asdf)' \
+                --eval '(require :sb-cover)' \
+                --eval '(declaim (optimize (sb-cover:store-coverage-data 3)))' \
+                --load cl-cc.asd \
+                --load cl-cc-test.asd \
+                --eval '(asdf:load-system :cl-cc/test :force t)' \
+                --eval '(cl-cc/test:run-suite (quote cl-cc/test::cl-cc-suite) :parallel nil :random nil :warm-stdlib t :coverage t)'
+            '';
+
+            selfhost = mkApp "selfhost" ''
+              set -euo pipefail
+              ${cwdGuard}
+              exec ${self'.packages.default}/bin/cl-cc selfhost
+            '';
+
+            load = mkApp "load" ''
+              set -euo pipefail
+              ${cwdGuard}
+              exec ${sbclBin} ${sbclFlags} ${sbclBootstrap} \
+                --eval '(asdf:disable-output-translations)' \
+                --eval '(asdf:load-system :cl-cc)'
+            '';
+
+            repl = mkApp "repl" ''
+              set -euo pipefail
+              ${cwdGuard}
+              exec ${lib.getExe pkgs.rlwrap} ${sbclBin} ${sbclFlags} \
+                --eval '(require :asdf)' \
+                --load cl-cc.asd \
+                --eval '(asdf:disable-output-translations)' \
+                --eval '(asdf:load-system :cl-cc)'
+            '';
+          };
+
+          # ── Checks ───────────────────────────────────────────────────────
+          checks = {
+            tests = pkgs.stdenvNoCC.mkDerivation {
+              pname = "cl-cc-tests";
+              version = "0.1.0";
+              src = lib.fileset.toSource {
+                root = ./.;
+                fileset = lib.fileset.unions [
+                  ./packages
+                  ./tests
+                  ./cl-cc.asd
+                  ./cl-cc-test.asd
+                ];
+              };
+              nativeBuildInputs = [ sbclWithCLCC ];
+              buildPhase = ''
+                export HOME="$TMPDIR"
+                export CLCC_PBT_COUNT="''${CLCC_PBT_COUNT:-3}"
+                sbcl ${sbclFlags} \
+                  --non-interactive \
+                  --eval '(require :asdf)' \
+                  --load "cl-cc.asd" \
+                  --load "cl-cc-test.asd" \
+                  --eval '(asdf:disable-output-translations)' \
+                  --eval '(asdf:load-system :cl-cc/test :force t)' \
+                  --eval '(asdf:load-system :cl-cc/test-clos :force t)' \
+                  --eval '(uiop:symbol-call :cl-cc/test (quote run-tests))'
+              '';
+              installPhase = "mkdir -p $out && touch $out/passed";
+              meta.description = "cl-cc unit + integration test suite (checks.tests)";
+            };
+
+            selfhost = pkgs.stdenvNoCC.mkDerivation {
+              pname = "cl-cc-selfhost";
+              version = "0.1.0";
+              src = lib.fileset.toSource {
+                root = ./.;
+                fileset = lib.fileset.unions [
+                  ./packages
+                  ./cl-cc.asd
+                ];
+              };
+              nativeBuildInputs = [ self'.packages.default ];
+              buildPhase = "cl-cc selfhost";
+              installPhase = "mkdir -p $out && touch $out/selfhost-verified";
+              meta.description = "cl-cc self-hosting verification (checks.selfhost)";
+            };
+
+            build = self'.packages.default;
+          };
+
+          # ── Formatter ────────────────────────────────────────────────────
+          treefmt = {
+            projectRootFile = "flake.nix";
+            programs = {
+              nixfmt.enable = true;
+              deadnix.enable = true;
+              statix.enable = true;
+              prettier.enable = true;
+            };
+            settings = {
+              formatter.prettier.includes = [
+                "*.md"
+                "*.yml"
+                "*.yaml"
+                "*.json"
+              ];
+              global.excludes = [
+                "cl-cc"
+                "flake.lock"
+                ".direnv/**"
+                "*.fasl"
+                "LICENSE*"
+              ];
+            };
+          };
+
+          # ── Dev shell ────────────────────────────────────────────────────
+          devShells.default = pkgs.mkShell {
+            packages = [
+              sbclWithCLCC
+              pkgs.rlwrap
+            ];
+            shellHook = ''
+              cat <<'EOF'
+
+                CL-CC Development Shell
+                ------------------------
+
+                Apps:
+                  nix run .#test      Run the canonical test plan
+                  nix run .#coverage  Run tests with sb-cover instrumentation
+                  nix run .#selfhost  Build + verify self-hosting
+                  nix run .#load      Load :cl-cc non-interactively
+                  nix run .#repl      rlwrap'd SBCL with :cl-cc loaded  (nix run default)
+
+                Nix:
+                  nix flake check    Run checks.tests + .selfhost + .build + .treefmt
+                  nix build          Build the standalone binary at ./result/bin/cl-cc
+                  nix fmt            Format repo (nixfmt + deadnix + statix + prettier)
+                  nix flake show     List all flake outputs
+
+                CLI (after `nix build`, binary at ./result/bin/cl-cc):
+                  cl-cc run example/hello.lisp
+                  cl-cc eval "(+ 1 2)"
+                  cl-cc compile example/hello.lisp -o hello
+                  cl-cc selfhost
+                  cl-cc help
+
+              EOF
+            '';
           };
         };
-
-        # ─── Checks (runnable via `nix flake check`) ────────────────────────
-        # `apps.test` (force reload + explicit run-tests) and `checks.tests`
-        # must stay in lockstep — stale FASL cannot silently green-light CI.
-        checks.tests = pkgs.stdenvNoCC.mkDerivation {
-          pname = "cl-cc-tests";
-          version = "0.1.0";
-          src = ./.;
-          nativeBuildInputs = [ sbclTestEnv ];
-          buildPhase = ''
-            export HOME="$TMPDIR"
-            export CLCC_PBT_COUNT="''${CLCC_PBT_COUNT:-3}"
-            sbcl --dynamic-space-size 4096 \
-              --non-interactive \
-              --eval '(require :asdf)' \
-              --load "cl-cc.asd" \
-              --eval '(asdf:disable-output-translations)' \
-              --eval '(asdf:load-system :cl-cc/test :force t)' \
-              --eval '(uiop:symbol-call :cl-cc/test (quote run-tests))'
-          '';
-          installPhase = ''
-            mkdir -p $out
-            touch $out/passed
-          '';
-          meta.description = "cl-cc unit + integration test suite (checks.tests)";
-        };
-
-        checks.selfhost = pkgs.stdenvNoCC.mkDerivation {
-          pname = "cl-cc-selfhost";
-          version = "0.1.0";
-          src = ./.;
-          nativeBuildInputs = [ sbclTestEnv ];
-          buildPhase = ''
-            ${sandboxedBuildCli}
-            ./cl-cc selfhost
-          '';
-          installPhase = ''
-            mkdir -p $out
-            touch $out/selfhost-verified
-          '';
-          meta.description = "cl-cc self-hosting verification (checks.selfhost)";
-        };
-      });
+    };
 }

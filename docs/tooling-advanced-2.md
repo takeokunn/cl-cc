@@ -3,6 +3,7 @@
 Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, binary/linker, type system extensions, concurrency models, embedded targets, polyhedral/auto-parallelization, multi-level IR, FFI, build reliability, memory representation, function transforms, test instrumentation, build scalability, low-level control.
 
 ---
+
 ### Phase 104 — ランタイムインフラ基盤
 
 #### FR-550: Stack Map Generation (スタックマップ生成)
@@ -541,7 +542,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 - **対象**: `packages/type/type/src/`, `packages/engine/compile/src/codegen.lisp`, `cli/src/main.lisp`
 - **現状**: 型システム（FR-type系）は型安全性を保証するが、プログラムの機能的正しさは検証不可
-- **内容**: `(defun foo (x) (declare (cl-cc:spec (-> (and integer (>= 0)) integer))) ...)` で前後条件を宣言。コンパイラが仕様をSMTソルバー（FR-246 Z3統合）に送出して検証。検証失敗時はコンパイルエラー。`--emit-lean` フラグでLean 4証明ターゲットに変換（F*スタイル）。副作用追跡（FR-244 Effect System）と統合してIOを型レベルで分離
+- **内容**: `(defun foo (x) (declare (cl-cc:spec (-> (and integer (>= 0)) integer))) ...)` で前後条件を宣言。コンパイラが仕様をSMTソルバー（FR-246 Z3統合）に送出して検証。検証失敗時はコンパイルエラー。`--emit-lean` フラグでLean 4証明ターゲットに変換（F\*スタイル）。副作用追跡（FR-244 Effect System）と統合してIOを型レベルで分離
 - **根拠**: CompCert（INRIA）: 検証済みCコンパイラ。セキュリティクリティカルコード（暗号・OS kernel）の信頼性向上。cl-ccコンパイラ自身の健全性検証
 - **難易度**: Very Hard
 
@@ -1066,4 +1067,3 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **難易度**: Hard
 
 ---
-

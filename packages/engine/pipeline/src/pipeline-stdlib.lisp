@@ -54,6 +54,21 @@ Compared by EQ to detect when the source has been rebound.")
 Compared by EQ to detect when the evaluator has been swapped
 (e.g. self-hosting bootstrap flipping from host eval to our-eval).")
 
+(defparameter *stdlib-vm-snapshot* nil
+  "vm-io-state after compiling and executing *standard-library-source*.
+Cloned per run-string call that uses :stdlib t so each test gets an
+isolated VM with stdlib functions pre-loaded.")
+
+(defparameter *stdlib-accessor-slot-map* nil
+  "Snapshot of *accessor-slot-map* after stdlib compilation.
+Copied into each run-string :stdlib t call so defstruct accessors
+defined by the stdlib are available during user-form compilation.")
+
+(defparameter *stdlib-defstruct-slot-registry* nil
+  "Snapshot of *defstruct-slot-registry* after stdlib compilation.
+Copied into each run-string :stdlib t call so struct slot inheritance
+defined by the stdlib is available during user-form compilation.")
+
 (defun %snapshot-macro-env-table ()
   "Return a shallow copy of the current macro environment hash table.
 Used by `%build-stdlib-expanded-cache' to support rollback on non-local exit
@@ -151,6 +166,7 @@ reuse sublists while compiling stdlib-heavy forms."
     ;; `mapcar' completes.
     (let ((src-at-entry     *standard-library-source*)
           (eval-fn-at-entry *macro-eval-fn*))
+      (setf *stdlib-vm-snapshot* nil)
       (setf *stdlib-expanded-cache*         (%build-stdlib-expanded-cache)
             *stdlib-expanded-cache-source*  src-at-entry
             *stdlib-expanded-cache-eval-fn* eval-fn-at-entry)))

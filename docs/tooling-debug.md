@@ -3,6 +3,7 @@
 Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, code coverage, memory profiling, package management, hot reload, security.
 
 ---
+
 ### Phase 67 — デバッグ・診断
 
 #### FR-310: Interactive VM Debugger (対話型VMデバッガ)

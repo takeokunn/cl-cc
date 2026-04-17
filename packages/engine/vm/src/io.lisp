@@ -34,6 +34,28 @@
                    :documentation "Hash table for in-memory string streams"))
   (:documentation "Extended VM state with file I/O capabilities."))
 
+;;; ─── VM State Clone ──────────────────────────────────────────────────────────
+
+(defun clone-vm-state (source &key (output-stream *standard-output*))
+  "Create a new vm-io-state seeded with the runtime state from SOURCE.
+Copies function-registry, class-registry, global-vars, heap, heap-counter,
+and symbol-plists so user code can call stdlib functions and access stdlib
+globals without recompiling the stdlib.
+Registers, call-stack, handler-stack, method-call-stack start fresh so
+each test begins with a clean execution context."
+  (let ((clone (make-instance 'vm-io-state :output-stream output-stream)))
+    (flet ((copy-ht-into (src dst)
+             (clrhash dst)
+             (maphash (lambda (k v) (setf (gethash k dst) v)) src)))
+      (copy-ht-into (vm-function-registry source) (vm-function-registry clone))
+      (copy-ht-into (vm-class-registry    source) (vm-class-registry    clone))
+      (copy-ht-into (vm-global-vars       source) (vm-global-vars       clone))
+      (copy-ht-into (vm-state-heap        source) (vm-state-heap        clone))
+      (copy-ht-into (vm-symbol-plists     source) (vm-symbol-plists     clone)))
+    (setf (vm-heap-counter clone) (vm-heap-counter source))
+    (setf (vm-standard-output clone) output-stream)
+    clone))
+
 ;;; ─── File Handle Constants ───────────────────────────────────────────────────
 
 (defconstant +stdin-handle+  0    "File handle for standard input")

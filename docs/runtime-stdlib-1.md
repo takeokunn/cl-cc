@@ -3,6 +3,7 @@
 Lambda lists, dynamic variables, numeric I/O, regex, source location, serialization, debugger/SLIME, memory-mapped I/O, floating point, external formats, terminal/readline, dynamic library loading, GC finalization, CLOS dispatch cache, closure optimization, crypto/compression, AOT compilation, persistent data structures, type specifier runtime, function objects, environment API, async I/O, STM, CSP, pattern matching.
 
 ---
+
 ### Phase 111 — λリスト・関数プロトコル最適化
 
 #### FR-657: Efficient &key Argument Parsing (&key引数の高速パース)
@@ -1024,7 +1025,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 - **依存**: FR-779
 - **内容**:
   - `(match x (t body))` — ワイルドカードなしのパターンが型全体を網羅しているかコンパイル時検査
-  - 未網羅パターンの警告: `style-warning "match is not exhaustive; missing pattern (integer ...)"` 
+  - 未網羅パターンの警告: `style-warning "match is not exhaustive; missing pattern (integer ...)"`
   - CLOSクラス階層との統合: 全サブクラスのパターンがあれば網羅と判定
   - 到達不可能パターンの検出と警告
 - **根拠**: ML / Haskell / Rust の exhaustiveness analysis
@@ -1059,4 +1060,3 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 - **難易度**: Very Hard
 
 ---
-

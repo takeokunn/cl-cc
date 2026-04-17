@@ -3,6 +3,7 @@
 Algebraic effects, string builder/rope, structured logging, LSP/DAP, continuations, hygienic macros, script mode, C embedding API, memory pools, circular structure printing, transient collections, security hardening, runtime configuration, sequence protocol, numeric stability, thread synchronization, networking, lazy evaluation, numeric dispatch optimization, multiple values ABI, random access I/O, copy-on-write, green threads, custom hash tables, floor/truncate complete, CLOS fast path, load-time-value, symbol table, FASL paging, PGO persistence, tail call/exception interaction, backquote optimization, RISC-V backend, delimited continuations, reproducible builds, forward references, I/O buffering, pathname system.
 
 ---
+
 ### Phase 138 — 文字列ビルダ・Rope
 
 #### FR-787: String Builder (文字列ビルダ)
@@ -1091,4 +1092,3 @@ Algebraic effects, string builder/rope, structured logging, LSP/DAP, continuatio
 - **難易度**: Hard
 
 ---
-

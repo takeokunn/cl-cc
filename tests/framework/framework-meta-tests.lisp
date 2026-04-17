@@ -67,7 +67,7 @@
   (let ((*standard-output* (make-string-output-stream)))
     (%print-coverage-report nil)
     (let ((output (get-output-stream-string *standard-output*)))
-      (assert-true (search "/tmp/cl-cc-coverage/" output)))))
+      (assert-true (search "cl-cc-coverage" output)))))
 
 (deftest framework-meta-mutant-killed-by-compile-error
   "A mutant that fails to eval is counted as killed immediately."

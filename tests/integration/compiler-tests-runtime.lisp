@@ -111,33 +111,40 @@
 
 (deftest file-io
   "File I/O: write-char/read-char, with-open-file, read-from-string, and read."
-  ;; write-char + read-char via open/close
-  (let ((result (run-string "(let ((h (open \"/tmp/cl-cc-test-wr.txt\" :direction :output)))
+  (let* ((tmp-dir (namestring (uiop:temporary-directory)))
+         (wr-path  (concatenate 'string tmp-dir "cl-cc-test-wr.txt"))
+         (wof-path (concatenate 'string tmp-dir "cl-cc-test-wof2.txt"))
+         (rd-path  (concatenate 'string tmp-dir "cl-cc-test-rd.txt")))
+    ;; write-char + read-char via open/close
+    (let ((result (run-string
+                   (format nil "(let ((h (open ~S :direction :output)))
   (write-char #\\H h)
   (write-char #\\i h)
   (close h)
-  (let ((h2 (open \"/tmp/cl-cc-test-wr.txt\" :direction :input)))
+  (let ((h2 (open ~S :direction :input)))
     (let ((c1 (read-char h2)))
       (let ((c2 (read-char h2)))
         (close h2)
-        (list c1 c2)))))")))
-    (assert-true (equal result '(#\H #\i))))
-  ;; with-open-file
-  (let ((result (run-string "(with-open-file (out \"/tmp/cl-cc-test-wof2.txt\" :direction :output)
+        (list c1 c2)))))" wr-path wr-path))))
+      (assert-true (equal result '(#\H #\i))))
+    ;; with-open-file
+    (let ((result (run-string
+                   (format nil "(with-open-file (out ~S :direction :output)
   (write-char #\\X out))
-(with-open-file (in \"/tmp/cl-cc-test-wof2.txt\" :direction :input)
-  (read-char in))")))
-    (assert-eql result #\X))
-  ;; read-from-string
-  (let ((result (run-string "(read-from-string \"(+ 1 2)\")")))
-    (assert-true (listp result))
-    (assert-= 3 (length result)))
-  ;; read from file
-  (let ((result (run-string "(with-open-file (out \"/tmp/cl-cc-test-rd.txt\" :direction :output)
+(with-open-file (in ~S :direction :input)
+  (read-char in))" wof-path wof-path))))
+      (assert-eql result #\X))
+    ;; read-from-string
+    (let ((result (run-string "(read-from-string \"(+ 1 2)\")")))
+      (assert-true (listp result))
+      (assert-= 3 (length result)))
+    ;; read from file
+    (let ((result (run-string
+                   (format nil "(with-open-file (out ~S :direction :output)
   (write-char #\\( out) (write-char #\\a out) (write-char #\\) out))
-(with-open-file (in \"/tmp/cl-cc-test-rd.txt\" :direction :input)
-  (read in))")))
-    (assert-true (listp result))))
+(with-open-file (in ~S :direction :input)
+  (read in))" rd-path rd-path))))
+      (assert-true (listp result)))))
 
 ;;; Setf Accessor Tests
 

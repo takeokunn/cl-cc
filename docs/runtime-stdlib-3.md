@@ -3,6 +3,7 @@
 MOP extensions, compiler macros, GC tuning, parallel compilation, error messages, weak references, fixnum/bignum/rational/complex arithmetic, external formats, pretty printer, FORMAT/READ complete, eval-when, LOOP extensions, CLOS method combinations, dynamic binding optimization, tail calls, runtime type checking, compilation environment, character/string compliance, defstruct, type declarations, image save/load, OS interface, POSIX signals, finalizers, symbol macros, setf expanders, escape analysis, TRMC, package-local nicknames, bytecode layer, CLOS class changes, ASDF integration, serialization, class-allocated slots, inlining, printer/reader variables, numeric I/O, dynamic wind, interprocedural optimization, SBCL compatibility, block/tagbody, numeric comparison, sequence operations, hash table SIMD, source tracking, trace/step/break, numeric output, CLOS compile-time optimization, weak pointers, native threads, terminal control, circular printing, local declarations, code walker, numeric clamp, precise stack maps, typep dispatch, Gray streams, LOOP arithmetic.
 
 ---
+
 ### Phase 176 — コンパイラマクロ・宣言処理
 
 #### FR-934: compiler-macro-function (コンパイラマクロ)
@@ -63,7 +64,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
   - ファイルレベル並列化: `(compile-files files :parallel t)` — 依存グラフ解析後に独立ファイルを並列コンパイル
   - 依存グラフ構築: `(build-compile-graph files)` → DAG (package定義・マクロ定義を追跡)
   - ワーカープール: `(make-compile-worker-pool n)` — n個のCPUコアを利用
-  - フォームレベル並列化: 副作用なし判定後に `(mappar #'compile-form forms)` 
+  - フォームレベル並列化: 副作用なし判定後に `(mappar #'compile-form forms)`
   - 進捗報告: `*compile-progress-fn*` コールバック
   - ASDF並列: `(asdf:operate 'asdf:compile-op system :parallel t)`
   - キャッシュ活用: `(compile-with-cache file cache-dir)` — FASL変更なし時スキップ
@@ -119,7 +120,6 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
   - `:weakness :key` / `:weakness :value` / `:weakness :key-and-value` / `:weakness :key-or-value` の全モード
 - **根拠**: McCLIM / CLOCC ライブラリ。キャッシュ・メモ化でのメモリリーク防止に必須
 - **難易度**: Hard
-
 
 ---
 
@@ -481,7 +481,6 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
   - `(speed 3) (safety 0)` モード: Java HotSpot の -server フラグに相当する最速モード
 - **根拠**: SBCL の型宣言効果。`declare` は CL の主要最適化ヒント機構
 - **難易度**: Hard
-
 
 ---
 
@@ -1102,7 +1101,6 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 - **根拠**: ANSI CL §25.1 `trace`/`step`/`break`/`inspect`/`describe`。CL開発の必須デバッグツール
 - **難易度**: Medium
 
-
 ---
 
 ### Phase 223 — 数値出力アルゴリズム
@@ -1353,4 +1351,3 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
   - ネストループの最適化: 内側の i/j 反復変数をレジスタに保持
 - **根拠**: ANSI CL §6.1.2 LOOP の細かい最適化。数値集約ループの性能が重要
 - **難易度**: Medium
-

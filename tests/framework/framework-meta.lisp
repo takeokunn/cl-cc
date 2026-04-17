@@ -35,14 +35,22 @@
   #-sbcl
   nil)
 
+(defun %coverage-report-directory ()
+  "Return a writable directory for the sb-cover HTML report.
+Uses uiop:temporary-directory so sandboxed test builds (e.g. Nix)
+don't try to write to a read-only `/tmp`."
+  (uiop:ensure-directory-pathname
+   (merge-pathnames "cl-cc-coverage/" (uiop:temporary-directory))))
+
 (defun %print-coverage-report (covered-modules)
   "Print sb-cover coverage report for covered modules."
   (declare (ignore covered-modules))
   #+sbcl
-  (progn
-    (ensure-directories-exist "/tmp/cl-cc-coverage/")
-    (sb-cover:report "/tmp/cl-cc-coverage/")
-    (format t "# Coverage report written to /tmp/cl-cc-coverage/~%"))
+  (let ((dir (%coverage-report-directory)))
+    (ensure-directories-exist dir)
+    (sb-cover:report dir)
+    (format t "# Coverage report written to ~A (cl-cc-coverage)~%"
+            (namestring dir)))
   #-sbcl
   (format t "# Coverage: only available on SBCL~%"))
 

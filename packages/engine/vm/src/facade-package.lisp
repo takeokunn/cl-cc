@@ -1077,7 +1077,9 @@
    #:*vm-macroexpand-1-hook*
    #:*vm-macroexpand-hook*
    #:*vm-compile-string-hook*
-   #:*vm-parse-forms-hook*))
+   #:*vm-parse-forms-hook*
+   ;; io.lisp: vm state snapshot
+   #:clone-vm-state))
 
 (in-package :cl-cc/vm)
 
