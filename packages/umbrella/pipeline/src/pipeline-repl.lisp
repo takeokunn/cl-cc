@@ -80,7 +80,7 @@ Example:
   (run-string-repl \"(defun double (x) (* x 2))\")
   (run-string-repl \"(double 21)\")  ; => 42"
   (%ensure-repl-state)
-  (let* ((*package* (find-package :cl-cc))
+  (let* ((*package* *package*)
          (*accessor-slot-map* *repl-accessor-map*)
          (*defstruct-slot-registry* *repl-defstruct-registry*)
          (*labels-boxed-fns* nil)

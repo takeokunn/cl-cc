@@ -18,5 +18,4 @@
    (:file "framework-compiler")
    (:file "framework-meta")
    (:file "framework-fuzz")
-   (:file "framework-runner")
-   (:file "framework-meta-tests")))
+   (:file "framework-runner")))

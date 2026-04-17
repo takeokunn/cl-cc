@@ -171,6 +171,7 @@
    #:make-vm-car
    #:make-vm-cdr
    #:make-vm-ceiling-inst
+   #:make-vm-cerror
    #:make-vm-char
    #:make-vm-char-code
    #:make-vm-char-downcase

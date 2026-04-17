@@ -13,6 +13,11 @@
   :serial t
   :components
   (;; Unit tests — each module now lives in its workspace's tests/ dir
+   (:module "framework-meta-tests"
+    :pathname "packages/testing/framework/tests"
+    :serial t
+    :components
+    ((:file "framework-meta-tests")))
    (:module "cli-tests"
     :pathname "packages/cli/tests"
     :serial t
