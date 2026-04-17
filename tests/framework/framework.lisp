@@ -63,9 +63,9 @@
 
 (defun %copy-macro-environment ()
   "Return a fresh macro-env instance populated from the current global macro table."
-  (let* ((copy (make-instance 'cl-cc::macro-env))
-         (src  (cl-cc::macro-env-table cl-cc::*macro-environment*))
-         (dst  (cl-cc::macro-env-table copy)))
+  (let* ((copy (make-instance 'cl-cc/expand::macro-env))
+         (src  (cl-cc/expand::macro-env-table cl-cc/expand::*macro-environment*))
+         (dst  (cl-cc/expand::macro-env-table copy)))
     (maphash (lambda (k v) (setf (gethash k dst) v)) src)
     copy))
 

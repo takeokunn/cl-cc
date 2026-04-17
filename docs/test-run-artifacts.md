@@ -2,9 +2,9 @@
 
 ## canonical target と runner 対応
 
-`Makefile` の公開 test entrypoint は `make test` だけです。
+公開されている test entrypoint は `nix run .#test` だけです。
 
-- `make test` -> `run-tests`
+- `nix run .#test` -> `run-tests`
 
 `run-tests` は `tests/framework/framework.lisp` 上で `run-suite 'cl-cc-suite ...`
 を呼び、unit / integration / e2e / PBT を含む canonical test plan を実行します。
@@ -13,14 +13,14 @@
 
 ### 最終確認
 
-- `make test`
+- `nix run .#test`
   - canonical plan が green
-- `make build`
+- `nix run .#build`
   - succeeded
 
 ### repeatability
 
-- `make test`
+- `nix run .#test`
   - repeated green
 - `dcg-suite`
   - repeated green
@@ -29,10 +29,10 @@
 
 ### clean-state
 
-`make clean` 後に以下を再確認しました。
+`nix run .#clean` 後に以下を再確認しました。
 
-- `make build` green
-- `make test` green
+- `nix run .#build` green
+- `nix run .#test` green
 
 ## 備考
 

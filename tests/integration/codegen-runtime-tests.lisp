@@ -6,12 +6,12 @@
 (deftest codegen-values-compilation
   "Compiling ast-values emits vm-values and returns a register."
   (let* ((ctx (make-codegen-ctx))
-         (reg (compile-ast (cl-cc::make-ast-values
+         (reg (compile-ast (cl-cc/ast::make-ast-values
                              :forms (list (make-ast-int :value 1)
                                           (make-ast-int :value 2)
                                           (make-ast-int :value 3)))
                            ctx)))
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-values))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-values))
     (assert-true (keywordp reg))))
 
 (deftest codegen-values-basic-run
@@ -26,28 +26,28 @@
 (deftest codegen-mvb-explicit-values-uses-direct-binding
   "Compiling multiple-value-bind over explicit ast-values skips vm-values/vm-mv-bind."
   (let* ((ctx (make-codegen-ctx))
-         (reg (compile-ast (cl-cc::make-ast-multiple-value-bind
+         (reg (compile-ast (cl-cc/ast::make-ast-multiple-value-bind
                               :vars '(a b)
-                              :values-form (cl-cc::make-ast-values
+                              :values-form (cl-cc/ast::make-ast-values
                                             :forms (list (make-ast-int :value 1)
                                                          (make-ast-int :value 2)))
                               :body (list (make-ast-var :name 'a)))
                             ctx)))
-    (assert-false (codegen-find-inst ctx 'cl-cc::vm-values))
-    (assert-false (codegen-find-inst ctx 'cl-cc::vm-mv-bind))
+    (assert-false (codegen-find-inst ctx 'cl-cc/vm::vm-values))
+    (assert-false (codegen-find-inst ctx 'cl-cc/vm::vm-mv-bind))
     (assert-true (keywordp reg))))
 
 (deftest codegen-mvb-non-values-form-still-uses-vm-mv-bind
   "Non-ast-values multiple-value-bind still uses the generic vm-mv-bind path."
   (let* ((ctx (make-codegen-ctx))
-         (reg (compile-ast (cl-cc::make-ast-multiple-value-bind
+         (reg (compile-ast (cl-cc/ast::make-ast-multiple-value-bind
                              :vars '(a b)
                              :values-form (make-ast-call :func 'floor
                                                          :args (list (make-ast-int :value 17)
                                                                      (make-ast-int :value 5)))
                              :body (list (make-ast-var :name 'a)))
                            ctx)))
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-mv-bind))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-mv-bind))
     (assert-true (keywordp reg))))
 
 (deftest-each codegen-mvb-run
@@ -60,36 +60,36 @@
 (deftest-each codegen-mv-call-direct-path
   "multiple-value-call uses vm-call directly for explicit ast-values and zero-arg cases."
   :cases (("explicit-values"
-           (cl-cc::make-ast-multiple-value-call
+           (cl-cc/ast::make-ast-multiple-value-call
              :func (make-ast-function :name '+)
-             :args (list (cl-cc::make-ast-values
+             :args (list (cl-cc/ast::make-ast-values
                           :forms (list (make-ast-int :value 1)
                                        (make-ast-int :value 2))))))
           ("no-args"
-           (cl-cc::make-ast-multiple-value-call
+           (cl-cc/ast::make-ast-multiple-value-call
              :func (make-ast-function :name 'list)
              :args nil)))
   (ast)
   (let* ((ctx (make-codegen-ctx))
          (reg (compile-ast ast ctx)))
-    (assert-true  (codegen-find-inst ctx 'cl-cc::vm-call))
-    (assert-false (codegen-find-inst ctx 'cl-cc::vm-apply))
-    (assert-false (codegen-find-inst ctx 'cl-cc::vm-values-to-list))
+    (assert-true  (codegen-find-inst ctx 'cl-cc/vm::vm-call))
+    (assert-false (codegen-find-inst ctx 'cl-cc/vm::vm-apply))
+    (assert-false (codegen-find-inst ctx 'cl-cc/vm::vm-values-to-list))
     (assert-true  (keywordp reg))))
 
 (deftest codegen-mv-call-mixed-args-still-uses-apply-path
   "Non-ast-values arguments keep the generic multiple-value-call path."
   (let* ((ctx (make-codegen-ctx))
-         (reg (compile-ast (cl-cc::make-ast-multiple-value-call
+         (reg (compile-ast (cl-cc/ast::make-ast-multiple-value-call
                              :func (make-ast-function :name '+)
-                             :args (list (cl-cc::make-ast-values
+                             :args (list (cl-cc/ast::make-ast-values
                                           :forms (list (make-ast-int :value 1)
                                                        (make-ast-int :value 2)))
                                          (make-ast-call :func 'floor
                                                         :args (list (make-ast-int :value 17)
                                                                     (make-ast-int :value 5)))))
                            ctx)))
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-apply))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-apply))
     (assert-true (keywordp reg))))
 
 (deftest codegen-mv-call-basic-run
@@ -110,7 +110,7 @@
                                 :forms (list (make-ast-int :value 2)
                                              (make-ast-int :value 3)))
                               ctx))
-         (consts (remove-if-not (lambda (i) (typep i 'cl-cc::vm-const))
+         (consts (remove-if-not (lambda (i) (typep i 'cl-cc/vm::vm-const))
                                 (codegen-instructions ctx))))
     (assert-true (keywordp reg))
     (assert-true (>= (length consts) 3))))
@@ -128,25 +128,25 @@
 
 (deftest-each codegen-exception-form-emits-establish-handler
   "Both unwind-protect and handler-case emit vm-establish-handler."
-  :cases (("unwind-protect" (cl-cc::make-ast-unwind-protect
+  :cases (("unwind-protect" (cl-cc/ast::make-ast-unwind-protect
                               :protected (make-ast-int :value 42)
                               :cleanup (list (make-ast-int :value 0))))
-          ("handler-case"   (cl-cc::make-ast-handler-case
+          ("handler-case"   (cl-cc/ast::make-ast-handler-case
                               :form (make-ast-int :value 42)
                               :clauses (list (list 'error 'e (make-ast-int :value 0))))))
   (ast)
   (let ((ctx (make-codegen-ctx)))
     (compile-ast ast ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc::vm-establish-handler))))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-establish-handler))))
 
 (deftest-each codegen-exception-form-returns-register
   "Both unwind-protect and handler-case compilation return a register keyword."
   :cases (("unwind-protect"
-           (cl-cc::make-ast-unwind-protect
+           (cl-cc/ast::make-ast-unwind-protect
              :protected (make-ast-int :value 7)
              :cleanup (list (make-ast-int :value 0))))
           ("handler-case"
-           (cl-cc::make-ast-handler-case
+           (cl-cc/ast::make-ast-handler-case
              :form (make-ast-int :value 10)
              :clauses (list (list 'error nil (make-ast-int :value 0))))))
   (ast)

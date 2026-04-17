@@ -1,6 +1,6 @@
 ;;;; scripts/build-cli.lisp — Build the cl-cc standalone binary
 ;;;;
-;;;; Usage (called by 'make build'):
+;;;; Usage (called by 'nix run .#build'):
 ;;;;   sbcl --non-interactive \
 ;;;;        --eval '(require :asdf)' \
 ;;;;        --load cl-cc.asd \

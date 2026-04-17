@@ -46,7 +46,7 @@ Codegen → VM Bytecode
 
 ## 主要コンポーネント
 
-### 1. パーサ (src/parse/)
+### 1. パーサ (packages/frontend/parse/src/)
 
 | ファイル | 機能 |
 |---------|------|
@@ -59,7 +59,7 @@ Codegen → VM Bytecode
 | `cl/parser.lisp` | Common Lispパーサ |
 | `cl/lower.lisp` | CSTからASTへの変換 |
 
-### 2. マクロ展開 (src/expand/)
+### 2. マクロ展開 (packages/frontend/expand/src/)
 
 | ファイル | 機能 |
 |---------|------|
@@ -69,7 +69,7 @@ Codegen → VM Bytecode
 | `expander-defstruct.lisp` | defstruct展開ヘルパー |
 | `macros-*.lisp` | 標準マクロ定義 |
 
-### 3. VM (src/vm/)
+### 3. VM (packages/engine/vm/src/)
 
 | ファイル | 機能 |
 |---------|------|
@@ -82,7 +82,7 @@ Codegen → VM Bytecode
 | `hash.lisp` | ハッシュテーブル |
 | `format.lisp` | format指令 |
 
-### 4. 型システム (src/type/)
+### 4. 型システム (packages/type/type/src/)
 
 | ファイル | 機能 |
 |---------|------|
@@ -94,7 +94,7 @@ Codegen → VM Bytecode
 | `effect.lisp` | 効果システム |
 | `typeclass.lisp` | 型クラス |
 
-### 5. コンパイラ (src/compile/)
+### 5. コンパイラ (packages/engine/compile/src/)
 
 | ファイル | 機能 |
 |---------|------|
@@ -105,7 +105,7 @@ Codegen → VM Bytecode
 | `context.lisp` | コンパイルコンテキスト |
 | `ir/*.lisp` | 中間表現 (SSA) |
 
-### 6. オプティマイザ (src/optimize/)
+### 6. オプティマイザ (packages/engine/optimize/src/)
 
 | ファイル | 機能 |
 |---------|------|
@@ -115,7 +115,7 @@ Codegen → VM Bytecode
 | `egraph-rules.lisp` | 書き換え規則 |
 | `optimizer.lisp` | 最適化パス |
 
-### 7. バックエンド (src/emit/)
+### 7. バックエンド (packages/backend/emit/src/)
 
 | ファイル | 機能 |
 |---------|------|
@@ -217,7 +217,7 @@ tests/
 
 ```bash
 # canonical test entrypoint
-make test
+nix run .#test
 
 # 特定suiteだけ手動実行
 nix run nixpkgs#sbcl -- --load cl-cc.asd \
@@ -227,7 +227,7 @@ nix run nixpkgs#sbcl -- --load cl-cc.asd \
   --eval '(cl-cc/test:run-suite (quote selfhost-suite))'  ;; 個別
 ```
 
-ハング箇所を診断したい場合は `CLCC_TEST_TRACE=1 make test` で
+ハング箇所を診断したい場合は `CLCC_TEST_TRACE=1 nix run .#test` で
 各テスト名が `*error-output*` に出力されます。
 
 ## CLIリファレンス

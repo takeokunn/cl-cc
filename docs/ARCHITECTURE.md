@@ -420,7 +420,7 @@ AAPCS64:
 ### Macro評価のフック
 
 ```lisp
-;; src/expand/macro.lisp
+;; packages/frontend/expand/src/macro.lisp
 (defvar *macro-eval-fn* nil
   "マクロ展開時に使用する評価関数")
 
@@ -430,7 +430,7 @@ AAPCS64:
       (funcall *macro-eval-fn*
                `(funcall ,expander ',form)))))
 
-;; src/compile/pipeline.lisp
+;; pipeline/src/pipeline.lisp
 (setf *macro-eval-fn* #'our-eval)  ; セルフホスティング有効化
 ```
 

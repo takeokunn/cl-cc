@@ -7,7 +7,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-657: Efficient &key Argument Parsing (&key引数の高速パース)
 
-- **対象**: `src/compile/codegen.lisp`, `src/vm/vm-execute.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/engine/vm/src/vm-execute.lisp`
 - **現状**: `&key`引数を毎回`dolist`でリスト走査。キー数に比例するO(n)コスト
 - **内容**:
   - `&key`パラメータをコンパイル時にパーフェクトハッシュに変換
@@ -19,7 +19,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-658: &rest List Allocation Optimization (&restリスト割り当て最適化)
 
-- **対象**: `src/compile/codegen.lisp`, `src/vm/vm-execute.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/engine/vm/src/vm-execute.lisp`
 - **現状**: `&rest args`が毎回`(list ...)`でコンスセルリストを構築。GCプレッシャー大
 - **内容**:
   - `&rest`引数を`apply`に直接渡す場合（最終引数として使うだけ）: リスト構築をスキップ
@@ -30,7 +30,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-659: Optional Argument Default Evaluation (オプション引数デフォルト評価)
 
-- **対象**: `src/compile/codegen.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`
 - **現状**: `&optional`/`&key`のデフォルト形式が毎回評価される（`(make-array 10)`等の高コスト式）
 - **内容**:
   - デフォルト形式が定数の場合: コンパイル時に評価して`vm-const`に変換
@@ -41,7 +41,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-660: Dynamic-Extent Optimization (動的エクステント最適化)
 
-- **対象**: `src/compile/codegen.lisp`, `src/optimize/optimizer.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/engine/optimize/src/optimizer.lisp`
 - **内容**:
   - `(declare (dynamic-extent fn))` — クロージャのスタック割り当て（エスケープ不可と保証）
   - `(declare (dynamic-extent list))` — `(list ...)` のスタック割り当て
@@ -55,7 +55,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-663: Per-Thread Binding Stack (スレッド別バインディングスタック)
 
-- **対象**: `src/vm/vm.lisp`, `src/vm/vm-execute.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/engine/vm/src/vm-execute.lisp`
 - **現状**: スペシャル変数のバインディングが`vm-global-vars`ハッシュテーブルに格納。スレッドセーフでない
 - **内容**:
   - 各スレッドが独立したバインディングスタックを持つ: `((sym . old-val) ...)`のスタック
@@ -67,7 +67,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-664: Fluid-Let / LetDynamic Fast Path
 
-- **対象**: `src/vm/vm-execute.lisp`
+- **対象**: `packages/engine/vm/src/vm-execute.lisp`
 - **依存**: FR-663
 - **内容**:
   - バインディングスタックのpush/popを`vm-bind-special`/`vm-unbind-special`命令に特化
@@ -78,7 +78,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-665: Global Variable Type Specialization (グローバル変数型特化)
 
-- **対象**: `src/compile/codegen.lisp`, `src/vm/vm.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/engine/vm/src/vm.lisp`
 - **内容**:
   - `(defvar *count* 0)` の`*count*`が常にfixnumと判明している場合、アクセスを特化
   - `(declaim (type fixnum *count*))` → グローバル変数アクセス命令を型特化版に変換
@@ -92,7 +92,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-668: parse-integer / parse-float (数値文字列パーサ)
 
-- **対象**: `src/vm/strings.lisp`, `src/vm/primitives.lisp`
+- **対象**: `packages/engine/vm/src/strings.lisp`, `packages/engine/vm/src/primitives.lisp`
 - **現状**: `parse-float`はホストCL委譲のスタブ。`parse-integer`なし
 - **内容**:
   - `parse-integer string &key start end radix junk-allowed` → (integer, position)
@@ -105,7 +105,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-669: Float Decoding Functions (浮動小数点分解関数)
 
-- **対象**: `src/vm/primitives.lisp`
+- **対象**: `packages/engine/vm/src/primitives.lisp`
 - **現状**: 浮動小数点の内部構造へのアクセス関数なし
 - **内容**:
   - `decode-float float` → (significand, exponent, sign) — 仮数・指数・符号に分解
@@ -119,7 +119,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-670: Integer Bit Operations (整数ビット操作)
 
-- **対象**: `src/vm/primitives.lisp`
+- **対象**: `packages/engine/vm/src/primitives.lisp`
 - **現状**: `logand`/`logior`/`logxor`/`lognot`は実装済み。拡張操作なし
 - **内容**:
   - `logeqv`/`lognand`/`lognor`/`logandc1`/`logandc2`/`logorc1`/`logorc2` — 完全16論理演算
@@ -137,7 +137,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-672: Regular Expression Engine Core (正規表現エンジン中核)
 
-- **対象**: 新ファイル `src/vm/regex.lisp`
+- **対象**: 新ファイル `packages/engine/vm/src/regex.lisp`
 - **現状**: 正規表現機能なし。ホストCLの`cl-ppcre`に依存
 - **内容**:
   - NFA/DFA変換コンパイラ: 正規表現文字列 → NFA → DFA → VM命令列
@@ -151,7 +151,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-673: Regex JIT Compilation (正規表現JITコンパイル)
 
-- **対象**: `src/vm/regex.lisp`
+- **対象**: `packages/engine/vm/src/regex.lisp`
 - **依存**: FR-672
 - **内容**:
   - DFAをVM命令列ではなくx86-64機械語に直接コンパイル（FR-587トレースJITと同機構）
@@ -162,7 +162,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-674: Unicode-Aware Regex (Unicode対応正規表現)
 
-- **対象**: `src/vm/regex.lisp`
+- **対象**: `packages/engine/vm/src/regex.lisp`
 - **依存**: FR-672, FR-590
 - **内容**:
   - `\d` → Unicode `Decimal_Number`カテゴリ（ASCIIの0-9のみでなく全Unicode数字）
@@ -178,7 +178,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-677: Source Location Objects (ソースロケーションオブジェクト)
 
-- **対象**: `src/parse/cl/parser.lisp`, `src/compile/codegen.lisp`, `src/vm/conditions.lisp`
+- **対象**: `packages/frontend/parse/src/cl/parser.lisp`, `packages/engine/compile/src/codegen.lisp`, `packages/engine/vm/src/conditions.lisp`
 - **現状**: AST ノードにソース位置情報なし。エラーメッセージに行番号が出ない
 - **内容**:
   - `source-location` 構造体: `(file, line, column, offset)`
@@ -191,7 +191,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-678: Compiler Warning Infrastructure (コンパイラ警告インフラ)
 
-- **対象**: `src/compile/codegen.lisp`, `src/expand/expander.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/frontend/expand/src/expander.lisp`
 - **現状**: コンパイル時警告は標準エラー出力への文字列出力のみ。condition型でない
 - **内容**:
   - `compiler-note` / `compiler-warning` / `style-warning` condition型の定義
@@ -205,7 +205,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-679: Caret Diagnostics (キャレット診断)
 
-- **対象**: `src/vm/conditions.lisp`, エラー出力系
+- **対象**: `packages/engine/vm/src/conditions.lisp`, エラー出力系
 - **依存**: FR-677, FR-678
 - **内容**:
   - Rustスタイルのエラー表示:
@@ -227,7 +227,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-682: make-load-form Protocol
 
-- **対象**: `src/compile/codegen.lisp`, `src/vm/vm.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/engine/vm/src/vm.lisp`
 - **現状**: `ansi-cl.md` FR-550でスタブとして言及。定数CLOSインスタンスのFASL格納が不可能
 - **内容**:
   - `make-load-form object &optional environment` — オブジェクトの再構築フォームを返す
@@ -239,7 +239,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-683: Fast Binary Serialization (高速バイナリシリアライゼーション)
 
-- **対象**: 新ファイル `src/runtime/serialize.lisp`
+- **対象**: 新ファイル `packages/backend/runtime/src/serialize.lisp`
 - **内容**:
   - `serialize object stream` — Lispオブジェクトをバイナリ形式でストリームに書き込み
   - `deserialize stream` — バイナリ形式から復元
@@ -251,7 +251,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-684: JSON Reader/Writer (JSON読み書き)
 
-- **対象**: 新ファイル `src/vm/json.lisp`
+- **対象**: 新ファイル `packages/engine/vm/src/json.lisp`
 - **内容**:
   - `json:parse string` → Lispオブジェクト（object→hash-table, array→vector, string→string, number→number, bool→t/nil）
   - `json:stringify object` → JSON文字列
@@ -293,7 +293,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-689: Step Debugger (ステップデバッガ)
 
-- **対象**: `src/vm/vm-run.lisp`, `src/debug/`
+- **対象**: `packages/engine/vm/src/vm-run.lisp`, `src/debug/`
 - **内容**:
   - `step form` — フォームをステップ実行モードで評価
   - `*step-mode*` — `:into`（関数内に入る）/ `:over`（関数を飛ばす）/ `:out`（関数から出る）
@@ -304,7 +304,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-690: Backtrace Collection (バックトレース収集)
 
-- **対象**: `src/vm/vm-run.lisp`, `src/vm/conditions.lisp`
+- **対象**: `packages/engine/vm/src/vm-run.lisp`, `packages/engine/vm/src/conditions.lisp`
 - **現状**: エラー時のバックトレース表示なし。呼び出しスタックが不透明
 - **内容**:
   - `(backtrace n)` — 最大N個のスタックフレームを収集
@@ -321,7 +321,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-693: Memory-Mapped Files (メモリマップトファイル)
 
-- **対象**: `src/runtime/os.lisp` (FR-570)
+- **対象**: `packages/backend/runtime/src/os.lisp` (FR-570)
 - **内容**:
   - `(mmap-file path &key protection flags offset length)` — ファイルをアドレス空間にマップ
   - `mmap`/`munmap`/`msync` syscallの薄いラッパ
@@ -332,7 +332,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-694: Executable Memory Management (実行可能メモリ管理)
 
-- **対象**: `src/runtime/runtime.lisp`, `src/emit/x86-64-codegen.lisp`
+- **対象**: `packages/backend/runtime/src/runtime.lisp`, `packages/backend/emit/src/x86-64-codegen.lisp`
 - **現状**: JITコード（FR-587）やコールバック（FR-531）の実行可能メモリ確保の仕組みなし
 - **内容**:
   - `(alloc-exec-memory size)` — `mmap(PROT_READ|PROT_WRITE|PROT_EXEC)`
@@ -344,7 +344,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-695: Shared Memory IPC (プロセス間共有メモリ)
 
-- **対象**: `src/runtime/os.lisp`
+- **対象**: `packages/backend/runtime/src/os.lisp`
 - **内容**:
   - `shm-open name flags mode` / `shm-unlink name` — POSIX共有メモリオブジェクト
   - `ftruncate fd size` — 共有メモリサイズ設定
@@ -359,7 +359,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-700: Numeric Limit Constants (数値限界定数)
 
-- **対象**: `src/vm/vm.lisp`, `src/vm/primitives.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/engine/vm/src/primitives.lisp`
 - **現状**: `most-positive-fixnum` 等の定数がホストCL値をそのまま使用。cl-ccのVM固有の値で再定義すべき
 - **内容**:
   - Fixnum範囲: `most-positive-fixnum` = 2^62-1 (64bit NaN-boxing)、`most-negative-fixnum` = -2^62
@@ -374,7 +374,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-701: Rational Arithmetic Runtime (有理数算術ランタイム)
 
-- **対象**: `src/vm/primitives.lisp`
+- **対象**: `packages/engine/vm/src/primitives.lisp`
 - **現状**: `3/4` 等の有理数リテラルをパースした後のVM内計算が未実装。ホストCLに委譲
 - **内容**:
   - Rational オブジェクト: `(numerator . denominator)` 形式でヒープ割り当て
@@ -388,7 +388,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-702: Complex Arithmetic Runtime (複素数算術ランタイム)
 
-- **対象**: `src/vm/primitives.lisp`
+- **対象**: `packages/engine/vm/src/primitives.lisp`
 - **現状**: `#C(1.0 2.0)` パース後のVM内計算が未実装
 - **内容**:
   - Complex オブジェクト: `(real-part . imag-part)` のヒープ構造体
@@ -405,7 +405,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-705: Ryu Float-to-String Algorithm (Ryu最短十進変換)
 
-- **対象**: `src/vm/strings.lisp`, `src/vm/format.lisp`
+- **対象**: `packages/engine/vm/src/strings.lisp`, `packages/engine/vm/src/format.lisp`
 - **現状**: 浮動小数点の`princ`/`prin1`出力がホストCL委譲。round-trip保証なし
 - **内容**:
   - Ryu アルゴリズム (Ulf Adams 2018) の実装: 最短の十進表現で出力
@@ -418,7 +418,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-706: Bignum to String (Bignum文字列変換)
 
-- **対象**: `src/vm/primitives.lisp`
+- **対象**: `packages/engine/vm/src/primitives.lisp`
 - **内容**:
   - 分割統治法 (divide-and-conquer): `N` を `sqrt(N)` で分割して再帰変換
   - 大基数への変換: `10^k` (kはビット数の半分) を一度計算してキャッシュ
@@ -430,7 +430,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-707: Print-Object Default Methods (print-objectデフォルトメソッド)
 
-- **対象**: `src/vm/io.lisp`, `src/vm/vm-clos.lisp`
+- **対象**: `packages/engine/vm/src/io.lisp`, `packages/engine/vm/src/vm-clos.lisp`
 - **現状**: `print-object` の標準実装がない。`#<HASH-TABLE>` 等が出ない
 - **内容**:
   - `#<HASH-TABLE :TEST EQL :COUNT 3 {addr}>` — hash-table の print-object
@@ -448,7 +448,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-710: Stream External Format (ストリーム外部フォーマット)
 
-- **対象**: `src/vm/io.lisp`, `src/vm/stream.lisp`
+- **対象**: `packages/engine/vm/src/io.lisp`, `packages/engine/vm/src/stream.lisp`
 - **現状**: ストリームのエンコーディングはホストCL依存。`:external-format`キーワードを無視
 - **内容**:
   - `open` / `make-string-input-stream` / `make-string-output-stream` の `:external-format` 対応
@@ -460,7 +460,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-711: UTF-16 Codec (UTF-16コーデック)
 
-- **対象**: `src/vm/unicode.lisp` (FR-592)
+- **対象**: `packages/engine/vm/src/unicode.lisp` (FR-592)
 - **依存**: FR-592, FR-710
 - **内容**:
   - UTF-16 エンコード: BMP文字は2バイト、補助文字はサロゲートペア（4バイト）
@@ -477,7 +477,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-714: Terminal Detection and Control (ターミナル検出・制御)
 
-- **対象**: `src/cli/main.lisp`, `src/runtime/os.lisp`
+- **対象**: `cli/src/main.lisp`, `packages/backend/runtime/src/os.lisp`
 - **現状**: 出力先がターミナルかファイルかを区別しない。パイプでもカラー出力が出る
 - **内容**:
   - `(isatty stream)` — OS の `isatty(fd)` 呼び出し。パイプ/ファイルと TTY を区別
@@ -490,7 +490,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-715: Readline / Line Editor (ライン入力エディタ)
 
-- **対象**: `src/cli/main.lisp`
+- **対象**: `cli/src/main.lisp`
 - **現状**: REPL 入力が `read-line` のみ。カーソル移動・履歴・補完なし
 - **内容**:
   - GNU Readline / libedit へのFFI接続（FR-530）
@@ -502,7 +502,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-716: REPL Completion and Help (REPL補完・ヘルプ)
 
-- **対象**: `src/cli/main.lisp`
+- **対象**: `cli/src/main.lisp`
 - **依存**: FR-715
 - **内容**:
   - `(describe sym)` — シンボルの文書・型・値・バインディングを表示
@@ -532,7 +532,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-720: Plugin Architecture (プラグインアーキテクチャ)
 
-- **対象**: `src/cli/main.lisp`
+- **対象**: `cli/src/main.lisp`
 - **依存**: FR-719
 - **内容**:
   - `~/.cl-cc/plugins/` ディレクトリからの自動プラグインロード
@@ -548,7 +548,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-723: Ephemerons (エフェメロン)
 
-- **対象**: `src/runtime/gc.lisp`, `src/runtime/heap.lisp`
+- **対象**: `packages/backend/runtime/src/gc.lisp`, `packages/backend/runtime/src/heap.lisp`
 - **依存**: FR-184（Weak Reference）
 - **現状**: FR-184でweak pointerは追加予定だがエフェメロンなし
 - **内容**:
@@ -561,7 +561,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-724: GC Notification Hooks (GC通知フック)
 
-- **対象**: `src/runtime/gc.lisp`
+- **対象**: `packages/backend/runtime/src/gc.lisp`
 - **内容**:
   - `*before-gc-hooks*` — GC前に呼ばれる関数リスト（ハンドル解放等）
   - `*after-gc-hooks*` — GC後に呼ばれる関数リスト（キャッシュ更新等）
@@ -572,7 +572,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-725: Finalization Queue (フィナライゼーションキュー)
 
-- **対象**: `src/runtime/gc.lisp`
+- **対象**: `packages/backend/runtime/src/gc.lisp`
 - **依存**: FR-184
 - **内容**:
   - フィナライゼーションキュー: GC回収対象オブジェクトをキューに積む
@@ -589,7 +589,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-728: Effective Method Cache (有効メソッドキャッシュ)
 
-- **対象**: `src/vm/vm-clos.lisp`
+- **対象**: `packages/engine/vm/src/vm-clos.lisp`
 - **現状**: `vm-generic-call`が毎回`compute-applicable-methods`相当の処理を実行
 - **内容**:
   - 各ジェネリック関数に「引数型タプル → 有効メソッド」のキャッシュを添付
@@ -601,7 +601,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-729: Next-Method Chain Optimization (次メソッド連鎖最適化)
 
-- **対象**: `src/vm/vm-clos.lisp`
+- **対象**: `packages/engine/vm/src/vm-clos.lisp`
 - **内容**:
   - `call-next-method` の連鎖をコンパイル時に展開（静的に型が確定している場合）
   - `:before`/`:after` メソッドがない場合: primary のみの直接呼び出しにコンパイル
@@ -612,7 +612,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-730: Generic Function Sealing (ジェネリック関数シール)
 
-- **対象**: `src/vm/vm-clos.lisp`
+- **対象**: `packages/engine/vm/src/vm-clos.lisp`
 - **内容**:
   - `(seal-generic-function #'foo)` — 新メソッドの追加を禁止し、ディスパッチを静的化
   - シール後: FR-728のキャッシュが永続（無効化不要）、FR-501のPICが永続化
@@ -627,7 +627,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-733: Mutable Capture Cell (可変キャプチャセル)
 
-- **対象**: `src/compile/codegen.lisp`, `src/vm/vm.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/engine/vm/src/vm.lisp`
 - **現状**: 可変変数のキャプチャが毎回 `(register . value)` alist 全体を保存。変更時に非効率
 - **内容**:
   - 可変キャプチャ変数を `box` オブジェクト（1要素のヒープセル）としてラップ
@@ -639,7 +639,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-734: Cell Lifting / Unboxed Capture (セルリフティング・Unboxedキャプチャ)
 
-- **対象**: `src/compile/codegen.lisp`, `src/optimize/optimizer.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/engine/optimize/src/optimizer.lisp`
 - **依存**: FR-733
 - **内容**:
   - 単一のクロージャからしかアクセスされない可変変数はboxを不要にできる
@@ -651,7 +651,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-735: Closure Cloning (クロージャクローニング)
 
-- **対象**: `src/optimize/optimizer.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`
 - **内容**:
   - クロージャに定数環境が渡される呼び出しパターンを検出
   - `(mapcar (lambda (x) (+ x k)) list)` で `k` が定数の場合: `k` を埋め込んだ特化クロージャを生成
@@ -666,7 +666,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-738: SHA-256 / SHA-512 Implementation
 
-- **対象**: 新ファイル `src/runtime/crypto.lisp`
+- **対象**: 新ファイル `packages/backend/runtime/src/crypto.lisp`
 - **内容**:
   - SHA-256: FIPS 180-4準拠の純CL実装（fixnum演算のみ使用）
   - SHA-512: 64-bit ワードで実装（bignum利用）
@@ -679,7 +679,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-739: Base64 Codec (Base64コーデック)
 
-- **対象**: `src/runtime/crypto.lisp`
+- **対象**: `packages/backend/runtime/src/crypto.lisp`
 - **内容**:
   - `(base64-encode octets)` → 文字列
   - `(base64-decode string)` → byte vector
@@ -690,7 +690,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-740: zlib / Deflate (zlib圧縮)
 
-- **対象**: `src/runtime/compress.lisp`
+- **対象**: `packages/backend/runtime/src/compress.lisp`
 - **内容**:
   - DEFLATE アルゴリズム (RFC 1951) の実装: LZ77 + Huffman 符号化
   - `(zlib-compress octets &key level)` → 圧縮バイト列 (RFC 1950 zlib wrapper)
@@ -706,7 +706,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-743: Whole-Program AOT Compilation (全プログラムAOTコンパイル)
 
-- **対象**: `src/compile/pipeline.lisp`, `src/emit/x86-64-codegen.lisp`
+- **対象**: `pipeline/src/pipeline.lisp`, `packages/backend/emit/src/x86-64-codegen.lisp`
 - **現状**: `./cl-cc compile foo.lisp` はVM命令列を生成するが最終的なネイティブ出力は未完成
 - **内容**:
   - 全ソースファイルを一度に読み込み、クロスモジュール最適化を適用
@@ -719,7 +719,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-744: Startup Time Optimization (起動時間最適化)
 
-- **対象**: `src/vm/vm.lisp`, `src/compile/pipeline.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `pipeline/src/pipeline.lisp`
 - **現状**: `./cl-cc run foo.lisp` 起動時に全標準ライブラリをコンパイル・ロード
 - **内容**:
   - 標準ライブラリを事前コンパイルした FASL イメージとして data セグメントに埋め込む
@@ -731,7 +731,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-745: Dead Code Elimination at Link Time (リンク時デッドコード除去)
 
-- **対象**: `src/compile/pipeline.lisp`, `src/binary/macho.lisp`
+- **対象**: `pipeline/src/pipeline.lisp`, `packages/backend/binary/src/macho.lisp`
 - **依存**: FR-743
 - **内容**:
   - エントリポイントからの到達可能性解析（関数コールグラフのDFS）
@@ -747,7 +747,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-748: Hash Array Mapped Trie (HAMT - 永続ハッシュマップ)
 
-- **対象**: 新ファイル `src/vm/persistent.lisp`
+- **対象**: 新ファイル `packages/engine/vm/src/persistent.lisp`
 - **内容**:
   - 永続（不変）ハッシュマップ: `assoc`/`dissoc`/`get` が O(log₃₂ n)
   - 構造共有: 変更時に変更パス上のノードだけをコピー（コピーオンライト）
@@ -759,7 +759,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-749: Persistent Vector (永続ベクタ)
 
-- **対象**: `src/vm/persistent.lisp`
+- **対象**: `packages/engine/vm/src/persistent.lisp`
 - **内容**:
   - RRB-Tree (Relaxed Radix Balanced Tree): O(log₃₂ n) のランダムアクセス・更新・挿入
   - `(pvec 1 2 3)` — 構築
@@ -772,7 +772,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-750: Lazy Sequences (遅延シーケンス)
 
-- **対象**: `src/vm/persistent.lisp`
+- **対象**: `packages/engine/vm/src/persistent.lisp`
 - **内容**:
   - `(lazy-seq thunk)` — thunkが遅延評価されるシーケンス
   - `(force lazy-seq)` — 最初の要素を評価して通常のconspairを返す
@@ -789,7 +789,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-753: Type Specifier Runtime (型指定子ランタイム)
 
-- **対象**: `src/vm/vm.lisp`, `src/type/inference.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/type/type/src/inference.lisp`
 - **現状**: `typep` は部分実装。`(satisfies pred)` / `(member ...)` / `(not t)` 等が未対応
 - **内容**:
   - 完全型指定子構文:
@@ -807,7 +807,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-754: coerce Runtime (coerceランタイム)
 
-- **対象**: `src/vm/primitives.lisp`
+- **対象**: `packages/engine/vm/src/primitives.lisp`
 - **現状**: `coerce` がホストCL委譲のスタブ
 - **内容**:
   - `(coerce x 'single-float)` — integer/rational → float
@@ -826,7 +826,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-757: fdefinition / Function Cell Management
 
-- **対象**: `src/vm/vm.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`
 - **現状**: 関数定義はハッシュテーブル（`function-registry`）に格納。`fdefinition`/`fmakunbound`なし
 - **内容**:
   - `fdefinition name` — 関数名から関数オブジェクトを取得 (`symbol-function` と同等)
@@ -839,7 +839,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-758: function-lambda-expression (関数ラムダ式)
 
-- **対象**: `src/vm/vm.lisp`, `src/compile/codegen.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **内容**:
   - `function-lambda-expression function` → `(lambda-expression, closure-p, name)`
   - コンパイル済み関数からソースフォームを取得（デバッグビルド時のみ格納）
@@ -850,7 +850,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-759: Higher-Order Function Optimization (高階関数最適化)
 
-- **対象**: `src/optimize/optimizer.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`
 - **内容**:
   - `(funcall #'foo x)` → `(foo x)` に変換（`#'`は静的に解決可能）
   - `(mapcar #'car list)` → `#'car` をインライン展開
@@ -865,7 +865,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-762: Lexical Environment API (CLTL2環境API)
 
-- **対象**: `src/compile/codegen.lisp`, `src/expand/expander.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/frontend/expand/src/expander.lisp`
 - **現状**: レキシカル環境はコンパイラ内部のalistとして管理。外部APIなし
 - **内容**:
   - `variable-information symbol env` → `(kind, local-p, alist)` 。kindは `:lexical`/`:special`/`:symbol-macro`/`nil`
@@ -879,7 +879,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-763: Compiler Intrinsic Registry (コンパイライントリンシクスレジストリ)
 
-- **対象**: `src/compile/builtin-registry.lisp`
+- **対象**: `packages/engine/compile/src/builtin-registry.lisp`
 - **現状**: `builtin-registry.lisp`は呼び出し規約のみ。型情報・副作用・純粋性のDB不完全
 - **内容**:
   - 各関数に対する完全なアノテーション:
@@ -900,7 +900,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-766: Event Loop Infrastructure (イベントループ基盤)
 
-- **対象**: 新ファイル `src/runtime/event-loop.lisp`
+- **対象**: 新ファイル `packages/backend/runtime/src/event-loop.lisp`
 - **内容**:
   - `epoll`（Linux）/ `kqueue`（macOS）を使ったI/O多重化
   - `(event-loop:run)` — シングルスレッドの非同期イベントループ
@@ -912,7 +912,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-767: Async/Await Syntax (async/await構文)
 
-- **対象**: `src/expand/macros-stdlib.lisp`
+- **対象**: `packages/frontend/expand/src/macros-stdlib.lisp`
 - **依存**: FR-766, FR-552（グリーンスレッド）
 - **内容**:
   - `(async (&key name) &body body)` — 非同期タスクを生成（グリーンスレッド上で実行）
@@ -925,7 +925,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-768: Promise / Future (Promise・Future型)
 
-- **対象**: `src/runtime/event-loop.lisp`
+- **対象**: `packages/backend/runtime/src/event-loop.lisp`
 - **内容**:
   - `future` 型: 未完了/完了/エラーの3状態
   - `(then future callback)` — 完了時コールバック登録
@@ -942,7 +942,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-771: STM Core (STMコア)
 
-- **対象**: 新ファイル `src/runtime/stm.lisp`
+- **対象**: 新ファイル `packages/backend/runtime/src/stm.lisp`
 - **内容**:
   - `tvar` 型: トランザクショナル変数。`(make-tvar init)` で生成
   - `(tvar-read tv)` / `(tvar-write! tv val)` — トランザクション内での読み書き
@@ -954,7 +954,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-772: STM Retry / OrElse
 
-- **対象**: `src/runtime/stm.lisp`
+- **対象**: `packages/backend/runtime/src/stm.lisp`
 - **依存**: FR-771
 - **内容**:
   - `(retry)` — トランザクション内で呼ぶと、読んだ tvar のどれかが変わるまでブロック
@@ -970,7 +970,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-775: CSP Channels (CSPチャネル)
 
-- **対象**: 新ファイル `src/runtime/channel.lisp`
+- **対象**: 新ファイル `packages/backend/runtime/src/channel.lisp`
 - **依存**: FR-552（グリーンスレッド）
 - **内容**:
   - `(make-channel &key buffer-size)` — バッファ付き/なしチャネル
@@ -984,7 +984,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-776: Actor Model (Actorモデル)
 
-- **対象**: `src/runtime/channel.lisp`
+- **対象**: `packages/backend/runtime/src/channel.lisp`
 - **依存**: FR-552
 - **内容**:
   - `(spawn-actor fn &rest init-args)` — 独立したメッセージボックスを持つアクターを生成
@@ -1002,7 +1002,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-779: Structural Pattern Matching (構造的パターンマッチング)
 
-- **対象**: 新ファイル `src/expand/match.lisp`
+- **対象**: 新ファイル `packages/frontend/expand/src/match.lisp`
 - **内容**:
   - `(match expr (pattern1 body1) (pattern2 body2) ...)` マクロ
   - パターン種別:
@@ -1020,7 +1020,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-780: Match Exhaustiveness Checking (網羅性チェック)
 
-- **対象**: `src/expand/match.lisp`
+- **対象**: `packages/frontend/expand/src/match.lisp`
 - **依存**: FR-779
 - **内容**:
   - `(match x (t body))` — ワイルドカードなしのパターンが型全体を網羅しているかコンパイル時検査
@@ -1036,7 +1036,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-783: Effect System Runtime (エフェクトシステムランタイム)
 
-- **対象**: 新ファイル `src/runtime/effects.lisp`
+- **対象**: 新ファイル `packages/backend/runtime/src/effects.lisp`
 - **内容**:
   - `(define-effect effect-name ((op-name args...) result-type) ...)` — エフェクト定義
   - `(perform effect-name op-name args...)` — エフェクトの発動（条件システムに類似）
@@ -1048,7 +1048,7 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
 
 #### FR-784: Effect-based Coroutines (エフェクトベースのコルーチン)
 
-- **対象**: `src/runtime/effects.lisp`
+- **対象**: `packages/backend/runtime/src/effects.lisp`
 - **依存**: FR-783
 - **内容**:
   - `yield`/`next` をエフェクトとして定義し、ジェネレータを実装

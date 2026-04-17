@@ -14,7 +14,7 @@
                      (and n (plusp n) n)))))
       10)
   "Default number of test cases to run for each property.
-Honors CLCC_PBT_COUNT environment variable so CI / `make test` can
+Honors CLCC_PBT_COUNT environment variable so CI / `nix run .#test` can
 scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
 
 (defvar *max-list-length* 20

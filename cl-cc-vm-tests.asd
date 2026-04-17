@@ -8,7 +8,7 @@
   :license "MIT"
   :version "0.1.0"
   :depends-on (:cl-cc-vm :cl-cc-test-framework)
-  :pathname "tests/unit/vm"
+  :pathname "packages/engine/vm/tests"
   :serial t
   :components
   ((:file "vm-instructions-tests")

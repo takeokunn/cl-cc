@@ -19,14 +19,14 @@
         (%get-suite-fixtures suite)
       (handler-case
           (progn
-            (let ((cl-cc::*macro-environment* (%copy-macro-environment))
-                  (cl-cc::*symbol-macro-table*
-                    (%copy-hash-table-shallow cl-cc::*symbol-macro-table*))
-                  (cl-cc::*compiler-macro-table*
-                    (%copy-hash-table-shallow cl-cc::*compiler-macro-table*))
-                  (cl-cc::*macroexpand-step-cache*
+            (let ((cl-cc/expand::*macro-environment* (%copy-macro-environment))
+                  (cl-cc/expand::*symbol-macro-table*
+                    (%copy-hash-table-shallow cl-cc/expand::*symbol-macro-table*))
+                  (cl-cc/expand::*compiler-macro-table*
+                    (%copy-hash-table-shallow cl-cc/expand::*compiler-macro-table*))
+                  (cl-cc/expand::*macroexpand-step-cache*
                     (make-hash-table :test #'eq :weakness :key))
-                  (cl-cc::*macroexpand-all-cache*
+                  (cl-cc/expand::*macroexpand-all-cache*
                     (make-hash-table :test #'eq :weakness :key)))
               (dolist (bf before-fns) (funcall bf))
               (handler-case
@@ -391,7 +391,7 @@ Serial runs, serial-only batches, and single-worker requests all collapse to 1."
 
 This single entry point executes unit, integration, property-based, and e2e suites.
 Use the filtering keywords for focused debugging from the REPL, but the public
-automation workflow is always `make test`."
+automation workflow is always `nix run .#test`."
   (run-suite 'cl-cc-suite
              :parallel parallel
              :random random

@@ -16,8 +16,8 @@
          (instrs (vm-program-instructions prog))
          (asm    (compilation-result-assembly result))
          (cps    (compilation-result-cps result)))
-    (assert-true (typep result 'cl-cc::compilation-result))
-    (assert-true (typep prog 'cl-cc::vm-program))
+    (assert-true (typep result 'cl-cc/compile::compilation-result))
+    (assert-true (typep prog 'cl-cc/vm::vm-program))
     (assert-true (> (length instrs) 0))
     (assert-true (stringp asm))
     (assert-true (consp cps)))
@@ -25,59 +25,59 @@
          (instrs (vm-program-instructions (compilation-result-program result)))
          (cps (compilation-result-cps result)))
     (assert-true (consp cps))
-    (assert-true (typep (car (last instrs)) 'cl-cc::vm-halt))))
+    (assert-true (typep (car (last instrs)) 'cl-cc/vm::vm-halt))))
 
 (deftest pipeline-compile-toplevel-forms-captures-type-env
   "compile-toplevel-forms retains the inferred top-level type environment."
-  (let ((result (cl-cc::compile-toplevel-forms '((defvar *typed-top-level* 42))
+  (let ((result (cl-cc/compile::compile-toplevel-forms '((defvar *typed-top-level* 42))
                                                 :type-check t)))
-    (assert-true (typep (cl-cc::compilation-result-type-env result)
+    (assert-true (typep (cl-cc/compile::compilation-result-type-env result)
                         'cl-cc/type:type-env))
     (multiple-value-bind (scheme found-p)
         (cl-cc/type::type-env-lookup '*typed-top-level*
-                                     (cl-cc::compilation-result-type-env result))
+                                     (cl-cc/compile::compilation-result-type-env result))
       (assert-true found-p)
       (assert-eq 'fixnum (cl-cc/type:type-primitive-name
                           (cl-cc/type::type-scheme-type scheme))))))
 
 (deftest pipeline-compile-toplevel-forms-captures-cps
   "compile-toplevel-forms stores a CPS form for top-level input."
-  (let ((result (cl-cc::compile-toplevel-forms '((+ 1 2) (- 4 1)))))
-    (assert-true (consp (cl-cc::compilation-result-cps result)))))
+  (let ((result (cl-cc/compile::compile-toplevel-forms '((+ 1 2) (- 4 1)))))
+    (assert-true (consp (cl-cc/compile::compilation-result-cps result)))))
 
 (deftest pipeline-compile-toplevel-forms-captures-defun-type-env
   "compile-toplevel-forms records inferred defun types for later forms."
-  (let ((result (cl-cc::compile-toplevel-forms
+  (let ((result (cl-cc/compile::compile-toplevel-forms
                  '((defun typed-id (x) x)
                    (typed-id 42))
                  :type-check t)))
     (multiple-value-bind (scheme found-p)
         (cl-cc/type::type-env-lookup 'typed-id
-                                     (cl-cc::compilation-result-type-env result))
+                                     (cl-cc/compile::compilation-result-type-env result))
       (assert-true found-p)
       (assert-true (cl-cc/type:type-function-p
                     (cl-cc/type::type-scheme-type scheme))))))
 
 (deftest pipeline-compile-toplevel-forms-records-defun-type-without-type-check
   "compile-toplevel-forms still records inferred defun types when type-check is off."
-  (let ((result (cl-cc::compile-toplevel-forms
+  (let ((result (cl-cc/compile::compile-toplevel-forms
                  '((defun typed-id-no-check (x) x)
                    (typed-id-no-check 42)))))
     (multiple-value-bind (scheme found-p)
         (cl-cc/type::type-env-lookup 'typed-id-no-check
-                                     (cl-cc::compilation-result-type-env result))
+                                     (cl-cc/compile::compilation-result-type-env result))
       (assert-true found-p)
       (assert-true (cl-cc/type:type-function-p
                     (cl-cc/type::type-scheme-type scheme))))))
 
 (deftest pipeline-compile-toplevel-forms-records-defvar-type-without-type-check
   "compile-toplevel-forms still records inferred defvar types when type-check is off."
-  (let ((result (cl-cc::compile-toplevel-forms
+  (let ((result (cl-cc/compile::compile-toplevel-forms
                   '((defvar *typed-top-level-no-check* 42)
                     *typed-top-level-no-check*))))
     (multiple-value-bind (scheme found-p)
         (cl-cc/type::type-env-lookup '*typed-top-level-no-check*
-                                     (cl-cc::compilation-result-type-env result))
+                                     (cl-cc/compile::compilation-result-type-env result))
       (assert-true found-p)
       (assert-eq 'fixnum (cl-cc/type:type-primitive-name
                           (cl-cc/type::type-scheme-type scheme))))))
@@ -100,7 +100,7 @@
                   "(defun typed-add ((x fixnum) (y fixnum)) fixnum (+ x y))"))
          (prog (compilation-result-program result))
          (instrs (vm-program-instructions prog)))
-    (assert-true (some (lambda (i) (typep i 'cl-cc::vm-add)) instrs))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-add)) instrs))
     (assert-true (< 0 (length instrs)))))
 
 (deftest pipeline-typed-fixnum-compare-fast-path
@@ -109,7 +109,7 @@
                   "(defun typed-lt ((x fixnum) (y fixnum)) fixnum (< x y))"
                   :target :vm))
          (instrs (vm-program-instructions (compilation-result-program result))))
-    (assert-true (some (lambda (i) (typep i 'cl-cc::vm-lt)) instrs))))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-lt)) instrs))))
 
 ;;; ─── compile-string ─────────────────────────────────────────────────────
 
@@ -118,13 +118,13 @@
   :cases (("single-form"   "(+ 1 2)")
           ("multiple-forms" "(defun f (x) x) (f 42)"))
   (expr)
-  (assert-true (typep (compile-string expr) 'cl-cc::compilation-result)))
+  (assert-true (typep (compile-string expr) 'cl-cc/compile::compilation-result)))
 
 (deftest pipeline-compile-string-custom-pass-pipeline
   "compile-string forwards a string pass pipeline to optimizer core."
   (let* ((baseline (compile-string "(+ 1 2)" :target :vm))
          (result (compile-string "(+ 1 2)" :target :vm :pass-pipeline "fold,dce")))
-    (assert-true (typep result 'cl-cc::compilation-result))
+    (assert-true (typep result 'cl-cc/compile::compilation-result))
     (assert-true
      (<= (length (cl-cc:compilation-result-optimized-instructions result))
          (length (cl-cc:compilation-result-optimized-instructions baseline))))))
@@ -274,7 +274,7 @@ parallel stdlib-heavy compilation can leak state across workers."
 (deftest pipeline-compile-with-stdlib
   "compile-string-with-stdlib includes stdlib definitions."
   (let ((result (cl-cc::compile-string-with-stdlib "(+ 1 2)" :target :vm)))
-    (assert-true (typep result 'cl-cc::compilation-result))))
+    (assert-true (typep result 'cl-cc/compile::compilation-result))))
 
 ;;; ─── run-string with :stdlib ────────────────────────────────────────────
 

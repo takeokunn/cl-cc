@@ -8,7 +8,7 @@ cl-cc compiles ANSI Common Lisp to a register-based bytecode VM, and from there 
 
 ```bash
 nix develop
-make test          # run the canonical unit / integration / e2e test plan
+nix run .#test     # run the canonical unit / integration / e2e test plan
 cl-cc repl         # interactive REPL
 cl-cc run file.lisp
 cl-cc eval "(+ 1 2)"
@@ -239,7 +239,7 @@ cl-cc is self-hosting in the meta-circular sense:
 2. **Macro expansion via `our-eval`**: `defmacro` and `define-compiler-macro` expansion is handled by cl-cc compiling and running its own bytecode.
 3. **Compiler-in-the-compiler**: cl-cc can compile programs that themselves implement parsers, compilers, and evaluators — including CPS transformers and stack-machine compilers that mirror cl-cc's own internals.
 4. **REPL state persistence**: Function, class, and accessor definitions persist across `run-string-repl` calls, enabling incremental REPL-driven development.
-5. **Quasiquote in compiled code**: cl-cc correctly compiles `` ` `` and `,` in `defun` bodies, enabling it to run its own macro-generating functions — the same pattern used throughout `src/compile/cps.lisp`.
+5. **Quasiquote in compiled code**: cl-cc correctly compiles `` ` `` and `,` in `defun` bodies, enabling it to run its own macro-generating functions — the same pattern used throughout `packages/engine/compile/src/cps.lisp`.
 
 **Mini AST compiler** (run with `cl-cc run`):
 
@@ -262,10 +262,10 @@ cl-cc is self-hosting in the meta-circular sense:
 (eval-ast (parse-expr '(+ 1 (+ 2 (+ 3 4)))))  ; => 10
 ```
 
-**CPS transformer with quasiquotes** — cl-cc compiles its own CPS transformation logic, using quasiquotes identical to `src/compile/cps.lisp`:
+**CPS transformer with quasiquotes** — cl-cc compiles its own CPS transformation logic, using quasiquotes identical to `packages/engine/compile/src/cps.lisp`:
 
 ```lisp
-;; This is the actual code from src/compile/cps.lisp — compiled by cl-cc itself
+;; This is the actual code from packages/engine/compile/src/cps.lisp — compiled by cl-cc itself
 (defun %cps-sexp-binop (op a b k)
   (let ((va (gensym "A")) (vb (gensym "B")))
     (%cps-sexp-node a
@@ -362,9 +362,17 @@ $ cl-cc repl
 nix develop
 
 # Run the canonical test plan (unit / integration / e2e)
-make test
+nix run .#test
+
+# Build the standalone ./cl-cc binary
+nix run .#build
+
+# CI-equivalent check (includes flake evaluation + the test plan)
+nix flake check
 
 # Clear FASL cache if tests misbehave
+nix run .#clean
+# or manually:
 find ~/.cache/common-lisp/ -name "*.fasl" -delete
 ```
 

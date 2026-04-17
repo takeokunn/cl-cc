@@ -7,7 +7,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-934: compiler-macro-function (コンパイラマクロ)
 
-- **対象**: `src/expand/expander.lisp`
+- **対象**: `packages/frontend/expand/src/expander.lisp`
 - **内容**:
   - `(define-compiler-macro name lambda-list body)` — コンパイラマクロ定義
   - `(compiler-macro-function name &optional env)` — コンパイラマクロ取得
@@ -21,7 +21,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-935: proclamation / declaim 完全実装
 
-- **対象**: `src/expand/expander.lisp`, `src/compile/codegen.lisp`
+- **対象**: `packages/frontend/expand/src/expander.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **内容**:
   - `(declaim (type integer *counter*))` → グローバル変数の型宣言
   - `(declaim (ftype (function (integer integer) integer) gcd))` → 関数シグネチャ宣言
@@ -39,7 +39,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-938: GC Tuning Interface (GCチューニングインターフェース)
 
-- **対象**: `src/runtime/gc.lisp`
+- **対象**: `packages/backend/runtime/src/gc.lisp`
 - **内容**:
   - `(gc &key full)` — 明示的GC起動（`full=t` でフルGC）
   - `(gc-statistics)` → plist: `(:collections-minor N :collections-major N :bytes-allocated N :bytes-freed N :pause-ms-p99 F)`
@@ -58,7 +58,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-941: Parallel Compilation Pipeline (並列コンパイルパイプライン)
 
-- **対象**: `src/cli/main.lisp`, `src/compile/codegen.lisp`
+- **対象**: `cli/src/main.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **内容**:
   - ファイルレベル並列化: `(compile-files files :parallel t)` — 依存グラフ解析後に独立ファイルを並列コンパイル
   - 依存グラフ構築: `(build-compile-graph files)` → DAG (package定義・マクロ定義を追跡)
@@ -76,7 +76,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-944: Rich Error Messages (リッチエラーメッセージ)
 
-- **対象**: `src/vm/conditions.lisp`, `src/parse/cl/parser.lisp`
+- **対象**: `packages/engine/vm/src/conditions.lisp`, `packages/frontend/parse/src/cl/parser.lisp`
 - **内容**:
   - ソース位置の保持: 全AST ノードに `(source-location :file :line :column)` スロット
   - エラー表示: `"error at foo.lisp:42:10: undefined variable 'x'"`
@@ -90,7 +90,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-945: Condition Restart UI (条件リスタートUI)
 
-- **対象**: `src/vm/conditions.lisp`
+- **対象**: `packages/engine/vm/src/conditions.lisp`
 - **内容**:
   - `(describe-restart restart)` — リスタートの説明文取得
   - `(restart-interactive restart)` — 対話的リスタート起動（REPL でユーザーに入力を促す）
@@ -108,7 +108,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-948: Ephemeron (エフェメロン)
 
-- **対象**: `src/runtime/gc.lisp`, `src/vm/hash.lisp`
+- **対象**: `packages/backend/runtime/src/gc.lisp`, `packages/engine/vm/src/hash.lisp`
 - **内容**:
   - `(make-ephemeron key value)` → ephemeron オブジェクト
   - セマンティクス: key が到達不能になった場合、value も回収可能になる（通常の弱参照と異なる）
@@ -127,7 +127,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-951: Fixnum Fast Paths (Fixnum高速パス)
 
-- **対象**: `src/vm/primitives.lisp`, `src/emit/x86-64-codegen.lisp`
+- **対象**: `packages/engine/vm/src/primitives.lisp`, `packages/backend/emit/src/x86-64-codegen.lisp`
 - **内容**:
   - `(+f x y)` / `(-f x y)` / `(*f x y)` — fixnum専用演算（オーバーフローチェックなし）
   - `(logand x y)` / `(logior x y)` / `(logxor x y)` / `(lognot x)` — ビット演算
@@ -142,7 +142,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-952: Bignum Arithmetic (多倍長整数演算)
 
-- **対象**: `src/vm/primitives.lisp`
+- **対象**: `packages/engine/vm/src/primitives.lisp`
 - **内容**:
   - Bignum 表現: `limb-vector` (64ビット符号なし整数の配列) + sign フラグ
   - 加減算: schoolbook O(n)、繰り越し処理
@@ -162,7 +162,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-955: Rational Number Arithmetic (有理数演算)
 
-- **対象**: `src/vm/primitives.lisp`
+- **対象**: `packages/engine/vm/src/primitives.lisp`
 - **内容**:
   - `rational` 型: `numerator/denominator` ペア（bignum 対応）
   - `(/ 1 3)` → `#1/3`（自動正規化: GCDで約分）
@@ -177,7 +177,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-956: Complex Number Arithmetic (複素数演算)
 
-- **対象**: `src/vm/primitives.lisp`
+- **対象**: `packages/engine/vm/src/primitives.lisp`
 - **内容**:
   - `complex` 型: real + imaginary ペア（floatまたはrational）
   - `(complex 3 4)` → `#C(3 4)`; `(realpart c)` / `(imagpart c)`
@@ -196,7 +196,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-959: External Format / Encoding (外部形式・文字エンコーディング)
 
-- **対象**: `src/vm/io.lisp`, `src/vm/strings.lisp`
+- **対象**: `packages/engine/vm/src/io.lisp`, `packages/engine/vm/src/strings.lisp`
 - **内容**:
   - `(open path :external-format :utf-8)` — UTF-8 エンコードストリーム
   - サポート形式: `:utf-8`, `:utf-16le`, `:utf-16be`, `:utf-32le`, `:utf-32be`, `:latin-1`, `:ascii`
@@ -215,7 +215,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-962: XP Pretty Printer (整形出力システム)
 
-- **対象**: `src/vm/io.lisp`
+- **対象**: `packages/engine/vm/src/io.lisp`
 - **内容**:
   - `(pprint form &optional stream)` — 整形出力
   - `(pprint-indent :block n stream)` / `(pprint-indent :current n stream)` — インデント制御
@@ -235,7 +235,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-965: FORMAT Complete Directives (FORMAT完全実装)
 
-- **対象**: `src/vm/io.lisp`
+- **対象**: `packages/engine/vm/src/io.lisp`
 - **内容**:
   - `~A` / `~S` / `~W` — 基本出力
   - `~D` / `~B` / `~O` / `~X` — 整数（10進/2進/8進/16進）
@@ -258,7 +258,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-968: Readtable Complete Implementation (Readtable完全実装)
 
-- **対象**: `src/parse/lexer.lisp`
+- **対象**: `packages/frontend/parse/src/lexer.lisp`
 - **内容**:
   - `(make-readtable)` / `(copy-readtable &optional from to)` — readtable 管理
   - `(set-macro-character char function &optional non-terminating-p readtable)` — マクロ文字登録
@@ -278,7 +278,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-971: eval-when Full Semantics (eval-when完全セマンティクス)
 
-- **対象**: `src/expand/expander.lisp`, `src/compile/codegen.lisp`
+- **対象**: `packages/frontend/expand/src/expander.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **内容**:
   - `(eval-when (:compile-toplevel :load-toplevel :execute) body)` — 3段階制御
   - `:compile-toplevel`: `compile-file` 中にコンパイラが実行 (マクロ定義に使用)
@@ -297,7 +297,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-974: LOOP Extended Clauses (LOOPクローズ拡張)
 
-- **対象**: `src/expand/macros-sequence.lisp`
+- **対象**: `packages/frontend/expand/src/macros-sequence.lisp`
 - **内容**:
   - `(loop for x :from 0 :below 10 :by 2)` — `:by` ステップの完全サポート
   - `(loop for (a b) :in list)` — デストラクチャリングバインディング
@@ -317,7 +317,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-977: Method Combination Types (メソッドコンビネーション種別)
 
-- **対象**: `src/vm/vm-clos.lisp`
+- **対象**: `packages/engine/vm/src/vm-clos.lisp`
 - **内容**:
   - 標準コンビネーション: `standard` (call-next-method / :before :after :around)
   - `(define-method-combination + :identity-with-one-argument t)` — `+` コンビネーション
@@ -336,7 +336,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-980: Special Variable Lookup Optimization (スペシャル変数探索最適化)
 
-- **対象**: `src/vm/vm.lisp`, `src/compile/codegen.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **内容**:
   - 現状: `(symbol-value sym)` → `*dynamic-env*` ハッシュテーブル検索 O(1) avg
   - 最適化1: シャドウスタック方式 — `(let ((*x* val)) body)` で `*x*` のスタックに push/pop
@@ -354,7 +354,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-983: Proper Tail Calls (適切な末尾呼び出し)
 
-- **対象**: `src/compile/codegen.lisp`, `src/vm/vm-execute.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/engine/vm/src/vm-execute.lisp`
 - **内容**:
   - `(funcall fn args)` が末尾位置なら `vm-tail-call` 命令
   - `(apply fn args)` の末尾最適化
@@ -374,7 +374,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-986: Runtime Type Checking (実行時型チェック)
 
-- **対象**: `src/vm/vm-execute.lisp`, `src/compile/codegen.lisp`
+- **対象**: `packages/engine/vm/src/vm-execute.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **内容**:
   - `(the type form)` — 型宣言（`(safety 0)` でチェック除去、`(safety 3)` でランタイム検証）
   - `(check-type place type &optional string)` — 実行時型チェック + `type-error` 条件
@@ -393,7 +393,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-989: Compilation Environment (コンパイル環境オブジェクト)
 
-- **対象**: `src/compile/codegen.lisp`, `src/expand/expander.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/frontend/expand/src/expander.lisp`
 - **内容**:
   - `(compile-file-pathname src &key output-file)` → FASL パス
   - `(compiled-function-p fn)` → boolean
@@ -414,7 +414,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-992: Character Names and Predicates (文字名・述語)
 
-- **対象**: `src/parse/lexer.lisp`, `src/vm/strings.lisp`
+- **対象**: `packages/frontend/parse/src/lexer.lisp`, `packages/engine/vm/src/strings.lisp`
 - **内容**:
   - 標準文字名: `#\Space` / `#\Newline` / `#\Tab` / `#\Return` / `#\Backspace` / `#\Rubout` / `#\Delete` / `#\Escape` / `#\Null` / `#\Altmode` / `#\Page`
   - `(char-name char)` → 文字名文字列または `nil`; `(name-char string)` → 文字
@@ -429,7 +429,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-993: String Operations Complete (文字列操作完全実装)
 
-- **対象**: `src/vm/strings.lisp`
+- **対象**: `packages/engine/vm/src/strings.lisp`
 - **内容**:
   - `(string-upcase s)` / `(string-downcase s)` / `(string-capitalize s)` + `:start`/`:end`
   - `(string-trim chars s)` / `(string-left-trim chars s)` / `(string-right-trim chars s)`
@@ -448,7 +448,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-996: defstruct Complete Implementation (defstruct完全実装)
 
-- **対象**: `src/expand/macros-stdlib.lisp`, `src/vm/vm.lisp`
+- **対象**: `packages/frontend/expand/src/macros-stdlib.lisp`, `packages/engine/vm/src/vm.lisp`
 - **内容**:
   - `(defstruct point x y)` — 基本構造体定義
   - `(make-point :x 1 :y 2)` — コンストラクタ（デフォルト名: `make-NAME`）
@@ -469,7 +469,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-999: Type Declaration Optimization (型宣言最適化統合)
 
-- **対象**: `src/compile/codegen.lisp`, `src/optimize/optimizer.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/engine/optimize/src/optimizer.lisp`
 - **内容**:
   - `(declare (type fixnum i))` → ループ内の型チェック除去
   - `(declare (type (simple-array double-float (*)) v))` → 配列アクセスの境界チェック除去
@@ -489,7 +489,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1002: save-lisp-and-die / Image Dump (イメージ保存)
 
-- **対象**: `src/cli/main.lisp`, `src/runtime/runtime.lisp`
+- **対象**: `cli/src/main.lisp`, `packages/backend/runtime/src/runtime.lisp`
 - **内容**:
   - `(save-lisp-and-die path &key toplevel executable compression)` — SBCL互換イメージ保存
   - 全ヒープ・スタック・コードをシリアライズしてファイルに書き出す
@@ -504,7 +504,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1003: Core File Loading (コアファイルロード)
 
-- **対象**: `src/cli/main.lisp`
+- **対象**: `cli/src/main.lisp`
 - **内容**:
   - `./cl-cc --core path.core` — 保存済みイメージからの高速起動
   - `mmap` でコアをメモリにマップ → ページフォルト駆動の遅延ロード
@@ -521,7 +521,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1006: Environment Variables / CLI Args (環境変数・コマンドライン引数)
 
-- **対象**: `src/cli/main.lisp`, `src/vm/io.lisp`
+- **対象**: `cli/src/main.lisp`, `packages/engine/vm/src/io.lisp`
 - **内容**:
   - `(getenv name)` → string または nil (`getenv(3)` ラッパー)
   - `(setenv name value)` / `(unsetenv name)` — 環境変数設定・削除 (`setenv(3)`)
@@ -536,7 +536,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1007: Process Management (プロセス管理)
 
-- **対象**: `src/vm/io.lisp`
+- **対象**: `packages/engine/vm/src/io.lisp`
 - **内容**:
   - `(run-program command args &key input output error wait)` — 外部プロセス起動
   - `:input` / `:output` / `:error`: `:pipe` (ストリーム) / `:null` / `:inherit` / stream
@@ -556,7 +556,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1010: Signal Handling (シグナルハンドリング)
 
-- **対象**: `src/runtime/runtime.lisp`
+- **対象**: `packages/backend/runtime/src/runtime.lisp`
 - **内容**:
   - `(set-signal-handler signal function)` — シグナルハンドラ登録 (`sigaction(2)`)
   - `(get-signal-handler signal)` → function または `:default` / `:ignore`
@@ -571,7 +571,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1011: Timer / Alarm (タイマー・アラーム)
 
-- **対象**: `src/vm/io.lisp`, `src/runtime/runtime.lisp`
+- **対象**: `packages/engine/vm/src/io.lisp`, `packages/backend/runtime/src/runtime.lisp`
 - **内容**:
   - `(sleep seconds)` — ANSI CL §25.1.4（小数秒対応）; `nanosleep(2)` ベース
   - `(get-internal-real-time)` → 単調時刻 (ANSI §25.1.4)
@@ -590,7 +590,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1014: Finalizers (ファイナライザ)
 
-- **対象**: `src/runtime/gc.lisp`
+- **対象**: `packages/backend/runtime/src/gc.lisp`
 - **内容**:
   - `(finalize object function)` — obj が GC されるとき `(funcall function)` を実行
   - `(cancel-finalization object)` — ファイナライザの取り消し
@@ -609,7 +609,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1017: define-symbol-macro / symbol-macrolet (シンボルマクロ)
 
-- **対象**: `src/expand/expander.lisp`
+- **対象**: `packages/frontend/expand/src/expander.lisp`
 - **内容**:
   - `(define-symbol-macro name expansion)` — グローバルシンボルマクロ定義
   - `(symbol-macrolet ((name expansion) ...) body)` — ローカルシンボルマクロ
@@ -624,7 +624,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1018: define-setf-expander (setf展開器)
 
-- **対象**: `src/expand/expander.lisp`
+- **対象**: `packages/frontend/expand/src/expander.lisp`
 - **内容**:
   - `(define-setf-expander place-name lambda-list &body body)` — カスタムplace定義
   - 5値返却: `(get-setf-expansion place &optional env)` → `(vars vals stores store-form access-form)`
@@ -643,7 +643,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1021: Escape Analysis (エスケープ解析)
 
-- **対象**: `src/optimize/optimizer.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`
 - **内容**:
   - ヒープ割り当て不要の検出: `(let ((x (cons 1 2))) (car x))` → x は脱出しないのでスタック割り当て
   - 解析スコープ: 関数内ローカル + インライン済み呼び出し先
@@ -657,7 +657,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1022: Closure Conversion Optimization (クロージャ変換最適化)
 
-- **対象**: `src/compile/codegen.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`
 - **内容**:
   - フラットクロージャ: 捕捉変数を環境ベクタにコピー（閉包チェーンなし）— 現状実装
   - 最適化: 捕捉変数が1つなら box 不要 — クロージャ本体にインライン
@@ -675,7 +675,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1025: Tail Recursion Modulo Cons (末尾再帰Cons最適化)
 
-- **対象**: `src/compile/codegen.lisp`, `src/optimize/optimizer.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/engine/optimize/src/optimizer.lisp`
 - **内容**:
   - TRMC パターン: `(defun copy-list (l) (if l (cons (car l) (copy-list (cdr l))) nil))`
   - 変換: 末尾cons をループに変換 — スタック O(n) → O(1)
@@ -693,7 +693,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1028: Package-Local Nicknames (パッケージローカルニックネーム)
 
-- **対象**: `src/vm/vm.lisp`, `src/parse/lexer.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/frontend/parse/src/lexer.lisp`
 - **内容**:
   - `(defpackage :my-pkg (:local-nicknames (:a :alexandria) (:s :serapeum)))` — ローカル略称
   - `a:iota` → `alexandria:iota` (`:my-pkg` 内でのみ有効)
@@ -712,7 +712,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1031: Bytecode Interpreter Layer (バイトコードインタープリタ層)
 
-- **対象**: `src/vm/vm.lisp` (新規: `src/vm/bytecode.lisp`)
+- **対象**: `packages/engine/vm/src/vm.lisp` (新規: `packages/engine/vm/src/bytecode.lisp`)
 - **内容**:
   - コンパクトバイトコード形式: 1バイトオペコード + 可変長オペランド
   - 命令セット: `CONST u16` / `LOAD u8` / `STORE u8` / `CALL u8` / `TCALL u8` / `RET` / `JMP i16` / `JNIL i16` / `CLOSURE u16` / `MAKE-ENV u8`
@@ -731,7 +731,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1034: change-class (クラス変更)
 
-- **対象**: `src/vm/vm-clos.lisp`
+- **対象**: `packages/engine/vm/src/vm-clos.lisp`
 - **内容**:
   - `(change-class instance new-class &rest initargs)` — インスタンスのクラスを動的変更
   - AMOP 準拠: `update-instance-for-different-class` の呼び出し
@@ -745,7 +745,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1035: reinitialize-instance (インスタンス再初期化)
 
-- **対象**: `src/vm/vm-clos.lisp`
+- **対象**: `packages/engine/vm/src/vm-clos.lisp`
 - **内容**:
   - `(reinitialize-instance instance &rest initargs)` — 既存インスタンスを再初期化
   - `update-instance-for-redefined-class` との区別: 同一クラス内の再初期化
@@ -779,7 +779,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1039: System Dependency Resolution (システム依存解決)
 
-- **対象**: `src/cli/main.lisp`
+- **対象**: `cli/src/main.lisp`
 - **内容**:
   - `(ql:quickload "system-name")` — Quicklisp互換ロード API
   - `*quicklisp-client-directory*` / `*local-project-directories*` — 検索パス
@@ -798,7 +798,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1042: Object Serialization (オブジェクトシリアライズ)
 
-- **対象**: `src/vm/io.lisp`
+- **対象**: `packages/engine/vm/src/io.lisp`
 - **内容**:
   - `*print-readably*` = t でのオブジェクト出力: `write` が再読み取り可能な形式を生成
   - `(make-load-form object &optional environment)` — ロード可能フォームの生成 (ANSI §3.2.4.4)
@@ -817,7 +817,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1045: Class-Allocated Slots (クラス割当スロット)
 
-- **対象**: `src/vm/vm-clos.lisp`
+- **対象**: `packages/engine/vm/src/vm-clos.lisp`
 - **内容**:
   - `(defclass foo () ((counter :allocation :class :initform 0)))` — クラスレベルスロット
   - `:allocation :class`: 全インスタンスで共有される1つの値
@@ -836,7 +836,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1048: Inlining Policy and Expansion (インライン展開ポリシー)
 
-- **対象**: `src/compile/codegen.lisp`, `src/optimize/optimizer.lisp`
+- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/engine/optimize/src/optimizer.lisp`
 - **内容**:
   - `(declaim (inline fn))` — コンパイル時インライン宣言
   - `(declaim (notinline fn))` — インライン禁止（デバッグ・プロファイリング用）
@@ -855,7 +855,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1051: Print Control Variables (プリンタ制御変数完全実装)
 
-- **対象**: `src/vm/io.lisp`
+- **対象**: `packages/engine/vm/src/io.lisp`
 - **内容**:
   - `*print-case*` → `:upcase` / `:downcase` / `:capitalize` — シンボル出力の大文字小文字
   - `*print-base*` — 整数出力の基数 (2-36); `*print-radix*` — 基数接頭辞 `#b` 等
@@ -877,7 +877,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1054: READ Control Variables (READ制御変数)
 
-- **対象**: `src/parse/lexer.lisp`
+- **対象**: `packages/frontend/parse/src/lexer.lisp`
 - **内容**:
   - `*read-base*` — 整数のデフォルト読み取り基数 (デフォルト10)
   - `*read-eval*` — `#.` の有効化フラグ (セキュリティ: デフォルト `t`)
@@ -898,7 +898,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1057: Numeric Literal Reader (数値リテラルリーダー)
 
-- **対象**: `src/parse/lexer.lisp`
+- **対象**: `packages/frontend/parse/src/lexer.lisp`
 - **内容**:
   - `#b1010` — 2進数; `#o17` — 8進数; `#xFF` — 16進数
   - `#36rZZZ` — 任意基数 (2-36): `#nrNNN` 形式
@@ -918,7 +918,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1060: dynamic-wind Semantics (動的ウィンドセマンティクス)
 
-- **対象**: `src/vm/vm-execute.lisp`
+- **対象**: `packages/engine/vm/src/vm-execute.lisp`
 - **内容**:
   - `(dynamic-wind before thunk after)` — Scheme 相当の before/after フック
   - CL の `unwind-protect` との対応: `(dynamic-wind pre body post)` ≈ `(unwind-protect (progn (pre) (body)) (post))`
@@ -936,7 +936,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1063: Interprocedural Optimization (インタープロシージャ最適化)
 
-- **対象**: `src/optimize/optimizer.lisp`
+- **対象**: `packages/engine/optimize/src/optimizer.lisp`
 - **内容**:
   - 呼び出しグラフ構築: `(build-call-graph toplevel-fns)` → call-graph DAG
   - 呼び出し側への定数伝播: `(foo 42)` で `foo` の本体が `x=42` として最適化される
@@ -954,7 +954,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1066: SBCL-Compatible Extensions (SBCL互換拡張API)
 
-- **対象**: `src/vm/vm.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`
 - **内容**:
   - `sb-ext:without-package-locks` → `cl-cc:without-package-locks` エイリアス
   - `sb-ext:gc` → `cl-cc:gc` (Phase 177)
@@ -975,7 +975,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1069: block / return-from Across Closures (クロージャ越し非局所脱出)
 
-- **対象**: `src/vm/vm-execute.lisp`, `src/compile/codegen.lisp`
+- **対象**: `packages/engine/vm/src/vm-execute.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **内容**:
   - `(block name ...)` / `(return-from name value)` の完全セマンティクス
   - クロージャ越し `return-from`: `(block outer (let ((f (lambda () (return-from outer 42)))) (funcall f)))` → 42
@@ -989,7 +989,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1070: tagbody / go Complete Semantics (tagbody/go完全セマンティクス)
 
-- **対象**: `src/vm/vm-execute.lisp`, `src/compile/codegen.lisp`
+- **対象**: `packages/engine/vm/src/vm-execute.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **内容**:
   - `(tagbody tag1 form1 tag2 form2 ...)` — タグ付きステートメント
   - `(go tag)` — 非ローカルジャンプ（`tagbody` 内の任意のタグへ）
@@ -1008,7 +1008,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1073: Numeric Equality and Comparison (数値比較完全実装)
 
-- **対象**: `src/vm/primitives.lisp`
+- **対象**: `packages/engine/vm/src/primitives.lisp`
 - **内容**:
   - `(= a b)` / `(/= a b)` / `(< a b)` / `(> a b)` / `(<= a b)` / `(>= a b)` — 任意型間の比較
   - 多引数版: `(< a b c d)` = `(and (< a b) (< b c) (< c d))` のショートサーキット評価
@@ -1027,7 +1027,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1076: Sequence Operations Complete (シーケンス操作完全実装)
 
-- **対象**: `src/vm/list.lisp`
+- **対象**: `packages/engine/vm/src/list.lisp`
 - **内容**:
   - `(find item seq &key :key :test :test-not :start :end :from-end)` — 要素検索
   - `(position item seq &key ...)` → integer or nil
@@ -1049,7 +1049,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1079: Hash Table SIMD Lookup (ハッシュテーブルSIMD高速化)
 
-- **対象**: `src/vm/hash.lisp`
+- **対象**: `packages/engine/vm/src/hash.lisp`
 - **内容**:
   - 現状: オープンアドレス法 (linear probing)
   - 最適化: Swiss Table (Abseil) / F14 (Facebook) — SIMD による16スロット並列比較
@@ -1068,7 +1068,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1082: Source Location Tracking (ソース位置追跡)
 
-- **対象**: `src/parse/cl/parser.lisp`, `src/compile/codegen.lisp`
+- **対象**: `packages/frontend/parse/src/cl/parser.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **内容**:
   - `*load-pathname*` / `*load-truename*` — 現在ロード中のファイルパス (ANSI §23.1.2)
   - `*compile-file-pathname*` / `*compile-file-truename*` — コンパイル中ファイルパス
@@ -1088,7 +1088,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1085: trace / step / break (トレース・ステップ・ブレーク)
 
-- **対象**: `src/vm/conditions.lisp`
+- **対象**: `packages/engine/vm/src/conditions.lisp`
 - **内容**:
   - `(trace function-name ...)` — 関数呼び出しの自動ログ
   - `(untrace function-name ...)` / `(untrace)` — トレース解除
@@ -1109,7 +1109,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1088: Ryu Float-to-String (Ryu浮動小数点→文字列)
 
-- **対象**: `src/vm/io.lisp`, `src/vm/primitives.lisp`
+- **対象**: `packages/engine/vm/src/io.lisp`, `packages/engine/vm/src/primitives.lisp`
 - **内容**:
   - Ryu アルゴリズム (Ulf Adams, 2018): double → 最短の十進数表現
   - 性質: `(= (parse-float (float-to-string x)) x)` が常に成立する最短表現
@@ -1128,7 +1128,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1091: Monomorphic Inline Cache for slot-value (スロットアクセス単相インラインキャッシュ)
 
-- **対象**: `src/vm/vm-clos.lisp`, `src/compile/codegen.lisp`
+- **対象**: `packages/engine/vm/src/vm-clos.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **内容**:
   - `(slot-value obj 'name)` の呼び出しサイトに MIC (Monomorphic Inline Cache) を設置
   - キャッシュヒット: `class-of(obj) == cached-class` → スロットインデックス直接参照
@@ -1146,7 +1146,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1094: Weak Pointers (弱ポインタ完全実装)
 
-- **対象**: `src/runtime/gc.lisp`
+- **対象**: `packages/backend/runtime/src/gc.lisp`
 - **内容**:
   - `(make-weak-pointer object)` → weak-pointer
   - `(weak-pointer-value wp)` → `(values object valid-p)` — GC済みなら `(values nil nil)`
@@ -1167,7 +1167,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1097: Native Thread API (ネイティブスレッドAPI)
 
-- **対象**: `src/vm/vm.lisp`
+- **対象**: `packages/engine/vm/src/vm.lisp`
 - **内容**:
   - `(make-thread function &key name)` → thread オブジェクト
   - `(thread-join thread &optional timeout)` → 戻り値
@@ -1189,7 +1189,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1100: Terminal Control (ターミナル制御)
 
-- **対象**: `src/vm/io.lisp`
+- **対象**: `packages/engine/vm/src/io.lisp`
 - **内容**:
   - `(make-ansi-stream stream)` — ANSI エスケープシーケンス対応ストリーム
   - `(ansi-color stream :red)` / `(ansi-reset stream)` — 文字色・スタイル設定
@@ -1208,7 +1208,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1103: Circular Structure Printing (循環構造印字)
 
-- **対象**: `src/vm/io.lisp`
+- **対象**: `packages/engine/vm/src/io.lisp`
 - **内容**:
   - `*print-circle*` = t での循環・共有構造の検出と印字
   - 検出アルゴリズム: 2パス — 第1パスで共有オブジェクトを `#n=` でラベル付け、第2パスで印字
@@ -1226,7 +1226,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1106: Local Declarations Complete (ローカル宣言完全実装)
 
-- **対象**: `src/expand/expander.lisp`, `src/compile/codegen.lisp`
+- **対象**: `packages/frontend/expand/src/expander.lisp`, `packages/engine/compile/src/codegen.lisp`
 - **内容**:
   - `(declare (ignore x))` — 未使用変数の警告抑制
   - `(declare (ignorable x))` — 使用されなくても OK
@@ -1246,7 +1246,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1109: macroexpand-all / Code Walker (コードウォーカー)
 
-- **対象**: `src/expand/expander.lisp`
+- **対象**: `packages/frontend/expand/src/expander.lisp`
 - **内容**:
   - `(macroexpand form &optional env)` — ANSI CL `macroexpand` (再帰展開、マクロでなくなるまで)
   - `(macroexpand-1 form &optional env)` — 1ステップのみ展開
@@ -1265,7 +1265,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1112: Numeric Clamp / Range (数値クランプ・範囲)
 
-- **対象**: `src/vm/primitives.lisp`
+- **対象**: `packages/engine/vm/src/primitives.lisp`
 - **内容**:
   - `(clamp x min max)` = `(max min (min max x))` — 範囲クランプ（非ANSI拡張）
   - `(wrap x min max)` — 範囲外を折り返す: `(mod (- x min) (- max min)) + min`
@@ -1284,7 +1284,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1115: Precise Stack Maps (精密スタックマップ)
 
-- **対象**: `src/runtime/gc.lisp`, `src/backend/x86-64-codegen.lisp`
+- **対象**: `packages/backend/runtime/src/gc.lisp`, `packages/backend/emit/src/x86-64-codegen.lisp`
 - **内容**:
   - 各コールサイト/safepoint での「どのレジスタ・スタックスロットがポインタか」の情報
   - `.gc_map` セクション: PC → ポインタビットマップのテーブル
@@ -1302,7 +1302,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1118: typep Fast Dispatch (typep高速ディスパッチ)
 
-- **対象**: `src/vm/vm-execute.lisp`
+- **対象**: `packages/engine/vm/src/vm-execute.lisp`
 - **内容**:
   - `(typep x 'fixnum)` → NaN-boxing タグを1ビットマスクで確認 (1命令)
   - `(typep x 'cons)` / `(typep x 'null)` / `(typep x 'symbol)` — タグ直接比較
@@ -1321,7 +1321,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1121: Gray Streams Protocol (Grayストリームプロトコル)
 
-- **対象**: `src/vm/io.lisp`
+- **対象**: `packages/engine/vm/src/io.lisp`
 - **内容**:
   - Gray Streams: ユーザー定義ストリームの標準拡張プロトコル
   - `stream-read-char` / `stream-unread-char` / `stream-read-char-no-hang` / `stream-peek-char`
@@ -1341,7 +1341,7 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
 
 #### FR-1124: LOOP Arithmetic Sequence Optimization (LOOPシーケンス最適化)
 
-- **対象**: `src/expand/macros-sequence.lisp`
+- **対象**: `packages/frontend/expand/src/macros-sequence.lisp`
 - **内容**:
   - `(loop for i from 0 below n collect i)` → `(iota n)` への変換（最適化）
   - `(loop for i of-type fixnum from 0 below n ...)` — 型宣言付き反復変数

@@ -11,21 +11,21 @@
                        (cl-cc::make-vm-jump :label "join")
                        (cl-cc::make-vm-label :name "join")
                         (cl-cc::make-vm-inc :dst :R1 :src :R0)))
-         (out (cl-cc::opt-pass-fold instrs)))
+         (out (cl-cc/optimize::opt-pass-fold instrs)))
     ;; The inc should survive (not folded to const 43) because the label flushes env
-    (assert-true (find-if (lambda (i) (typep i 'cl-cc::vm-inc)) out))))
+    (assert-true (find-if (lambda (i) (typep i 'cl-cc/vm::vm-inc)) out))))
 
 (deftest fold-fallthrough-label-preserves-env
   "A non-target fallthrough label does not flush constant knowledge."
   (let* ((instrs (list (cl-cc::make-vm-const :dst :R0 :value 42)
                        (cl-cc::make-vm-label :name "join")
                        (cl-cc::make-vm-inc :dst :R1 :src :R0)))
-         (out (cl-cc::opt-pass-fold instrs))
+         (out (cl-cc/optimize::opt-pass-fold instrs))
          (r1-const (find-if (lambda (i) (and (cl-cc::vm-const-p i)
-                                             (eq (cl-cc::vm-dst i) :R1)))
+                                             (eq (cl-cc/vm::vm-dst i) :R1)))
                             out)))
     (assert-true r1-const)
-    (assert-equal 43 (cl-cc::vm-value r1-const))))
+    (assert-equal 43 (cl-cc/vm::vm-value r1-const))))
 
 (deftest-each fold-type-pred
   "Type predicate and vm-not instructions fold at compile time against a known constant."
@@ -35,12 +35,12 @@
           ("not-zero" 0   (cl-cc::make-vm-not       :dst :R1 :src :R0) nil))
   (const-val pred-inst expected)
   (let* ((instrs (list (cl-cc::make-vm-const :dst :R0 :value const-val) pred-inst))
-         (out (cl-cc::opt-pass-fold instrs))
+         (out (cl-cc/optimize::opt-pass-fold instrs))
          (r1-const (find-if (lambda (i) (and (cl-cc::vm-const-p i)
-                                             (eq (cl-cc::vm-dst i) :R1)))
+                                             (eq (cl-cc/vm::vm-dst i) :R1)))
                             out)))
     (assert-true r1-const)
-    (assert-equal expected (cl-cc::vm-value r1-const))))
+    (assert-equal expected (cl-cc/vm::vm-value r1-const))))
 
 (deftest-each fold-branch-known
   "vm-jump-zero with a known constant is eliminated or replaced by an unconditional jump."
@@ -49,11 +49,11 @@
   (const-val expected-has-jump)
   (let* ((instrs (list (cl-cc::make-vm-const :dst :R0 :value const-val)
                        (cl-cc::make-vm-jump-zero :reg :R0 :label "target")))
-         (out (cl-cc::opt-pass-fold instrs)))
+         (out (cl-cc/optimize::opt-pass-fold instrs)))
     (if expected-has-jump
         (assert-true  (find-if #'cl-cc::vm-jump-p out))
         (assert-false (find-if #'cl-cc::vm-jump-p out)))
-    (assert-false (find-if #'cl-cc::vm-jump-zero-p out))))
+    (assert-false (find-if (lambda (i) (typep i 'cl-cc/vm::vm-jump-zero)) out))))
 
 ;;; ── Direct opt-pass-copy-prop Tests ────────────────────────────────────
 
@@ -75,10 +75,10 @@
                  (cl-cc::make-vm-add :dst :R2 :lhs :R1 :rhs :R1))
            :R1))
   (instrs expected-lhs)
-  (let* ((out (cl-cc::opt-pass-copy-prop instrs))
-         (add-inst (find-if (lambda (i) (typep i 'cl-cc::vm-add)) out)))
+  (let* ((out (cl-cc/optimize::opt-pass-copy-prop instrs))
+         (add-inst (find-if (lambda (i) (typep i 'cl-cc/vm::vm-add)) out)))
     (assert-true add-inst)
-    (assert-equal expected-lhs (cl-cc::vm-lhs add-inst))))
+    (assert-equal expected-lhs (cl-cc/vm::vm-lhs add-inst))))
 
 (deftest copy-prop-reverse-map-kill
   "Reverse-map kill invalidates direct aliases without a full copy-table scan." 
@@ -87,8 +87,8 @@
     (setf (gethash :R1 copies) :R0)
     (setf (gethash :R2 copies) :R0)
     (setf (gethash :R3 copies) :R2)
-    (setf reverse (cl-cc::%opt-copy-prop-build-reverse copies))
-    (cl-cc::%opt-copy-prop-kill :R0 copies reverse)
+    (setf reverse (cl-cc/optimize::%opt-copy-prop-build-reverse copies))
+    (cl-cc/optimize::%opt-copy-prop-kill :R0 copies reverse)
     (assert-false (gethash :R1 copies))
     (assert-false (gethash :R2 copies))
     (assert-true (eql :R2 (gethash :R3 copies)))))
@@ -98,9 +98,9 @@
    to R0←R0 which is dropped."
   (let* ((instrs (list (cl-cc::make-vm-move :dst :R1 :src :R0)
                        (cl-cc::make-vm-move :dst :R0 :src :R1)))
-         (out (cl-cc::opt-pass-copy-prop instrs)))
+         (out (cl-cc/optimize::opt-pass-copy-prop instrs)))
     ;; Only one move should remain (the first one); the second is a self-move
-    (let ((moves (remove-if-not (lambda (i) (typep i 'cl-cc::vm-move)) out)))
+    (let ((moves (remove-if-not (lambda (i) (typep i 'cl-cc/vm::vm-move)) out)))
       (assert-equal 1 (length moves)))))
 
 (deftest copy-prop-join-point
@@ -114,48 +114,48 @@
                        (cl-cc::make-vm-move :dst :R1 :src :R0)
                        (cl-cc::make-vm-label :name "join")
                        (cl-cc::make-vm-add :dst :R2 :lhs :R1 :rhs :R1)))
-         (out (cl-cc::opt-pass-copy-prop instrs)))
-    (let ((add-inst (find-if (lambda (i) (typep i 'cl-cc::vm-add)) out)))
+         (out (cl-cc/optimize::opt-pass-copy-prop instrs)))
+    (let ((add-inst (find-if (lambda (i) (typep i 'cl-cc/vm::vm-add)) out)))
       (assert-true add-inst)
-      (assert-equal :R0 (cl-cc::vm-lhs add-inst))
-      (assert-equal :R0 (cl-cc::vm-rhs add-inst)))))
+      (assert-equal :R0 (cl-cc/vm::vm-lhs add-inst))
+      (assert-equal :R0 (cl-cc/vm::vm-rhs add-inst)))))
 
 (deftest heap-alias-oracle-cases
   "Heap alias oracle: must-alias propagates through vm-move; may-alias is conservative for unknown roots."
   ;; must-alias: fresh alloc copied to :r3 via move — :r0 and :r3 must-alias; :r0/:r9 don't
   (let* ((alloc (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (copy  (make-vm-move :dst :r3 :src :r0))
-         (roots (cl-cc::opt-compute-heap-aliases (list alloc copy))))
-    (assert-true  (cl-cc::opt-must-alias-p :r0 :r3 roots))
-    (assert-false (cl-cc::opt-must-alias-p :r0 :r9 roots)))
+         (roots (cl-cc/optimize::opt-compute-heap-aliases (list alloc copy))))
+    (assert-true  (cl-cc/optimize::opt-must-alias-p :r0 :r3 roots))
+    (assert-false (cl-cc/optimize::opt-must-alias-p :r0 :r9 roots)))
   ;; may-alias: two distinct allocs are not may-alias to each other; unknown :r9 is
   (let* ((alloc-a (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (alloc-b (make-vm-make-array :dst :r4 :size-reg :r5))
-         (roots   (cl-cc::opt-compute-heap-aliases (list alloc-a alloc-b))))
-    (assert-false (cl-cc::opt-may-alias-p :r0 :r4 roots))
-    (assert-true  (cl-cc::opt-may-alias-p :r0 :r9 roots))))
+         (roots   (cl-cc/optimize::opt-compute-heap-aliases (list alloc-a alloc-b))))
+    (assert-false (cl-cc/optimize::opt-may-alias-p :r0 :r4 roots))
+    (assert-true  (cl-cc/optimize::opt-may-alias-p :r0 :r9 roots))))
 
 (deftest points-to-helper-tracks-moves-and-kills
   "Flow-sensitive points-to propagates through vm-move and is killed by overwrite."
   (let* ((alloc (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (copy  (make-vm-move :dst :r3 :src :r0))
          (kill  (make-vm-const :dst :r3 :value 9))
-         (pt1   (cl-cc::opt-compute-points-to (list alloc copy)))
-         (pt2   (cl-cc::opt-compute-points-to (list alloc copy kill))))
-    (assert-eq :r0 (cl-cc::opt-points-to-root :r0 pt1))
-    (assert-eq :r0 (cl-cc::opt-points-to-root :r3 pt1))
-    (assert-false (cl-cc::opt-points-to-root :r3 pt2))))
+         (pt1   (cl-cc/optimize::opt-compute-points-to (list alloc copy)))
+         (pt2   (cl-cc/optimize::opt-compute-points-to (list alloc copy kill))))
+    (assert-eq :r0 (cl-cc/optimize::opt-points-to-root :r0 pt1))
+    (assert-eq :r0 (cl-cc/optimize::opt-points-to-root :r3 pt1))
+    (assert-false (cl-cc/optimize::opt-points-to-root :r3 pt2))))
 
 (deftest heap-kind-helper-distinguishes-object-classes
   "TBAA helper can prove non-aliasing across different fresh heap object kinds."
   (let* ((alloc-cons  (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (alloc-array (make-vm-make-array :dst :r4 :size-reg :r5))
-         (points-to   (cl-cc::opt-compute-points-to (list alloc-cons alloc-array)))
-         (heap-kinds  (cl-cc::opt-compute-heap-kinds (list alloc-cons alloc-array))))
+         (points-to   (cl-cc/optimize::opt-compute-points-to (list alloc-cons alloc-array)))
+         (heap-kinds  (cl-cc/optimize::opt-compute-heap-kinds (list alloc-cons alloc-array))))
     (assert-eq :cons (gethash :r0 heap-kinds))
     (assert-eq :array (gethash :r4 heap-kinds))
-    (assert-false (cl-cc::opt-may-alias-by-type-p :r0 :r4 points-to heap-kinds))
-    (assert-true  (cl-cc::opt-may-alias-by-type-p :r0 :r9 points-to heap-kinds))))
+    (assert-false (cl-cc/optimize::opt-may-alias-by-type-p :r0 :r4 points-to heap-kinds))
+    (assert-true  (cl-cc/optimize::opt-may-alias-by-type-p :r0 :r9 points-to heap-kinds))))
 
 (deftest constant-interval-helper-propagates-basic-arithmetic
   "Constant interval propagation handles add/sub/mul in straight-line code."
@@ -164,7 +164,7 @@
          (a  (make-vm-add :dst :r2 :lhs :r0 :rhs :r1))
          (s  (make-vm-sub :dst :r3 :lhs :r2 :rhs :r0))
          (m  (make-vm-mul :dst :r4 :lhs :r3 :rhs :r1))
-         (intervals (cl-cc::opt-compute-constant-intervals (list c1 c2 a s m))))
+         (intervals (cl-cc/optimize::opt-compute-constant-intervals (list c1 c2 a s m))))
     (assert-equal '(8 . 8) (gethash :r2 intervals))
     (assert-equal '(5 . 5) (gethash :r3 intervals))
     (assert-equal '(25 . 25) (gethash :r4 intervals))))
@@ -185,7 +185,7 @@
           ("lt"         (make-vm-lt         :dst :r0 :lhs :r1 :rhs :r2)    '(:r1 :r2))
           ("call"       (make-vm-call       :dst :r0 :func :r1 :args '(:r2 :r3)) '(:r1 :r2 :r3)))
   (inst expected-members)
-  (let ((regs (cl-cc::opt-inst-read-regs inst)))
+  (let ((regs (cl-cc/optimize::opt-inst-read-regs inst)))
     (assert-equal (length expected-members) (length regs))
     (dolist (r expected-members)
       (assert-true (member r regs)))))
@@ -198,7 +198,7 @@
   (let* ((i1  (make-vm-const :dst :r0 :value 42))
          (i2  (make-vm-const :dst :r1 :value 7))
          (ret (make-vm-ret :reg :r1))
-         (out (cl-cc::opt-pass-dce (list i1 i2 ret))))
+         (out (cl-cc/optimize::opt-pass-dce (list i1 i2 ret))))
     (assert-false (member i1 out))
     (assert-true  (member i2 out))
     (assert-true  (member ret out)))
@@ -206,14 +206,14 @@
   (let* ((i1  (make-vm-const :dst :r0 :value 5))
          (i2  (make-vm-add  :dst :r1 :lhs :r0 :rhs :r0))
          (ret (make-vm-ret :reg :r1))
-         (out (cl-cc::opt-pass-dce (list i1 i2 ret))))
+         (out (cl-cc/optimize::opt-pass-dce (list i1 i2 ret))))
     (assert-true (member i1 out))
     (assert-true (member i2 out)))
   ;; vm-move: r2 unused → removed; r0 read by ret → kept
   (let* ((c   (make-vm-const :dst :r0 :value 1))
          (m   (make-vm-move  :dst :r2 :src :r0))
          (ret (make-vm-ret :reg :r0))
-         (out (cl-cc::opt-pass-dce (list c m ret))))
+         (out (cl-cc/optimize::opt-pass-dce (list c m ret))))
     (assert-false (member m out))
     (assert-true  (member c out))))
 
@@ -223,7 +223,7 @@
          (c   (make-vm-call      :dst :r1 :func :r0 :args nil))
          (ret (make-vm-ret :reg :r0))
          ;; r1 is never read — but vm-call is impure
-         (out (cl-cc::opt-pass-dce (list fn c ret))))
+         (out (cl-cc/optimize::opt-pass-dce (list fn c ret))))
     (assert-true (member c out))))
 
 ;;; ── opt-pass-jump: Jump Threading ────────────────────────────────────────
@@ -233,7 +233,7 @@
   (let* ((j   (make-vm-jump  :label "end"))
          (lbl (make-vm-label :name "end"))
          (ret (make-vm-ret   :reg :r0))
-         (out (cl-cc::opt-pass-jump (list j lbl ret))))
+         (out (cl-cc/optimize::opt-pass-jump (list j lbl ret))))
     ;; The jump is a no-op (falls through) → should be removed
     (assert-false (member j out))
     (assert-true  (member lbl out))
@@ -247,11 +247,11 @@
          (j2   (make-vm-jump  :label "end"))
          (lbl2 (make-vm-label :name "end"))
          (ret  (make-vm-ret   :reg :r0))
-         (out  (cl-cc::opt-pass-jump (list j1 lbl1 j2 lbl2 ret))))
+         (out  (cl-cc/optimize::opt-pass-jump (list j1 lbl1 j2 lbl2 ret))))
     ;; j1 should be threaded to "end" directly
     (let ((j1-out (find-if #'cl-cc::vm-jump-p out)))
       (when j1-out
-        (assert-equal (cl-cc::vm-label-name j1-out) "end")))))
+        (assert-equal (cl-cc/vm::vm-label-name j1-out) "end")))))
 
 (deftest jump-threading-follows-long-acyclic-chain
   "opt-pass-jump fully threads long jump chains that exceed the old recursion cap."
@@ -260,10 +260,10 @@
       (push (make-vm-jump :label (format nil "L~D" (1+ i))) instructions)
       (push (make-vm-label :name (format nil "L~D" (1+ i))) instructions))
     (push (make-vm-ret :reg :r0) instructions)
-    (let* ((out (cl-cc::opt-pass-jump (nreverse instructions)))
+    (let* ((out (cl-cc/optimize::opt-pass-jump (nreverse instructions)))
            (j0  (find-if #'cl-cc::vm-jump-p out)))
       (assert-true j0)
-      (assert-equal (cl-cc::vm-label-name j0) "L25"))))
+      (assert-equal (cl-cc/vm::vm-label-name j0) "L25"))))
 
 (deftest jump-zero-threading-updates-label
   "opt-pass-jump threads vm-jump-zero target through a chain."
@@ -273,11 +273,11 @@
          (j2  (make-vm-jump      :label "end"))
          (end (make-vm-label     :name "end"))
          (ret (make-vm-ret       :reg :r0))
-         (out (cl-cc::opt-pass-jump (list c jz lbl j2 end ret))))
+         (out (cl-cc/optimize::opt-pass-jump (list c jz lbl j2 end ret))))
     ;; The jump-zero should now target "end" directly
-    (let ((jz-out (find-if #'cl-cc::vm-jump-zero-p out)))
+    (let ((jz-out (find-if (lambda (i) (typep i 'cl-cc/vm::vm-jump-zero)) out)))
       (when jz-out
-        (assert-equal (cl-cc::vm-label-name jz-out) "end")))))
+        (assert-equal (cl-cc/vm::vm-label-name jz-out) "end")))))
 
 ;;; ── opt-pass-unreachable: Unreachable Code Elimination ───────────────────
 
@@ -288,7 +288,7 @@
          (dead (make-vm-const :dst :r1 :value 99))
          (lbl  (make-vm-label :name "end"))
          (ret  (make-vm-ret   :reg :r0))
-         (out  (cl-cc::opt-pass-unreachable (list j dead lbl ret))))
+         (out  (cl-cc/optimize::opt-pass-unreachable (list j dead lbl ret))))
     (assert-false (member dead out))
     (assert-true  (member j    out))
     (assert-true  (member lbl  out))
@@ -298,7 +298,7 @@
          (dead (make-vm-const :dst :r1 :value 0))
          (lbl  (make-vm-label :name "after"))
          (ret2 (make-vm-ret   :reg :r0))
-         (out  (cl-cc::opt-pass-unreachable (list ret1 dead lbl ret2))))
+         (out  (cl-cc/optimize::opt-pass-unreachable (list ret1 dead lbl ret2))))
     (assert-false (member dead out))
     (assert-true  (member ret1 out))
     (assert-true  (member lbl  out))))
@@ -309,7 +309,7 @@
          (lbl (make-vm-label :name "lbl"))
          (c   (make-vm-const :dst :r0 :value 1))
          (ret (make-vm-ret   :reg :r0))
-         (out (cl-cc::opt-pass-unreachable (list j lbl c ret))))
+         (out (cl-cc/optimize::opt-pass-unreachable (list j lbl c ret))))
     ;; c is after the label — it's reachable
     (assert-true (member c out))))
 
@@ -320,7 +320,7 @@
   (let* ((lbl (make-vm-label :name "ghost"))
          (c   (make-vm-const :dst :r0 :value 1))
          (ret (make-vm-ret   :reg :r0))
-         (out (cl-cc::opt-pass-dead-labels (list lbl c ret))))
+         (out (cl-cc/optimize::opt-pass-dead-labels (list lbl c ret))))
     (assert-false (member lbl out))
     (assert-true  (member c   out))
     (assert-true  (member ret out))))
@@ -339,7 +339,7 @@
   (ref-inst lbl-name)
   (let* ((lbl (make-vm-label :name lbl-name))
          (ret (make-vm-ret   :reg :r0))
-         (out (cl-cc::opt-pass-dead-labels (list ref-inst lbl ret))))
+         (out (cl-cc/optimize::opt-pass-dead-labels (list ref-inst lbl ret))))
     (assert-true (member lbl out))))
 
 (deftest dead-basic-blocks-eliminated
@@ -349,7 +349,7 @@
          (dead (make-vm-const :dst :r1 :value 99))
          (lbl2 (make-vm-label :name "exit"))
          (ret  (make-vm-ret   :reg :r0))
-         (out  (cl-cc::opt-pass-dead-basic-blocks (list j lbl1 dead lbl2 ret))))
+         (out  (cl-cc/optimize::opt-pass-dead-basic-blocks (list j lbl1 dead lbl2 ret))))
     (assert-true  (member j out))
     (assert-false (member lbl1 out))
     (assert-false (member dead out))
@@ -364,9 +364,9 @@
          (mid   (make-vm-label :name "mid"))
          (c2    (make-vm-const :dst :r2 :value 2))
          (ret   (make-vm-ret :reg :r2))
-         (out   (cl-cc::opt-pass-block-merge (list start c1 jmp mid c2 ret))))
+         (out   (cl-cc/optimize::opt-pass-block-merge (list start c1 jmp mid c2 ret))))
     (assert-false (member mid out))
-     (assert-false (some (lambda (i) (typep i 'cl-cc::vm-jump)) out))
+     (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-jump)) out))
      (assert-true  (member c1 out))
      (assert-true  (member c2 out))
      (assert-true  (member ret out))))
@@ -384,14 +384,14 @@
          (j2    (make-vm-jump :label "exit"))
          (exit  (make-vm-label :name "exit"))
          (ret   (make-vm-ret :reg :r1))
-         (out   (cl-cc::opt-pass-tail-merge (list entry seed br dup1 a1 j1 dup2 a2 j2 exit ret))))
+         (out   (cl-cc/optimize::opt-pass-tail-merge (list entry seed br dup1 a1 j1 dup2 a2 j2 exit ret))))
     (assert-true  (member dup1 out))
     (assert-false (member dup2 out))
     (assert-equal 1 (count-if (lambda (i)
-                                (and (typep i 'cl-cc::vm-const)
-                                     (eq :r1 (cl-cc::vm-dst i))))
+                                (and (typep i 'cl-cc/vm::vm-const)
+                                     (eq :r1 (cl-cc/vm::vm-dst i))))
                               out))
-    (assert-equal 1 (count-if (lambda (i) (typep i 'cl-cc::vm-jump-zero)) out))))
+    (assert-equal 1 (count-if (lambda (i) (typep i 'cl-cc/vm::vm-jump-zero)) out))))
 
 (deftest constant-hoist-moves-loop-constant-to-preheader
   "opt-pass-constant-hoist hoists a loop-invariant constant before the loop header."
@@ -404,7 +404,7 @@
          (body  (make-vm-label :name "body"))
          (back  (make-vm-jump :label "loop"))
          (ret   (make-vm-ret :reg :r1))
-         (out   (cl-cc::opt-pass-constant-hoist
+         (out   (cl-cc/optimize::opt-pass-constant-hoist
                  (list start seed jmp1 loop hoist jmp2 body back ret))))
     (assert-true (member hoist out))
     (assert-true (member loop out))
@@ -413,14 +413,14 @@
 
 (deftest-each opt-convergence-pass-membership
   "All expected optimization passes are registered in *opt-convergence-passes*."
-  :cases (("constant-hoist" #'cl-cc::opt-pass-constant-hoist)
-          ("global-dce"     #'cl-cc::opt-pass-global-dce)
-          ("inline"         #'cl-cc::opt-pass-inline-iterative)
-          ("pre"            #'cl-cc::opt-pass-pre)
-          ("bswap"          #'cl-cc::opt-pass-bswap-recognition)
-          ("rotate"         #'cl-cc::opt-pass-rotate-recognition))
+  :cases (("constant-hoist" #'cl-cc/optimize::opt-pass-constant-hoist)
+          ("global-dce"     #'cl-cc/optimize::opt-pass-global-dce)
+          ("inline"         #'cl-cc/optimize::opt-pass-inline-iterative)
+          ("pre"            #'cl-cc/optimize::opt-pass-pre)
+          ("bswap"          #'cl-cc/optimize::opt-pass-bswap-recognition)
+          ("rotate"         #'cl-cc/optimize::opt-pass-rotate-recognition))
   (pass-fn)
-  (assert-true (member pass-fn cl-cc::*opt-convergence-passes* :test #'eq)))
+  (assert-true (member pass-fn cl-cc/optimize::*opt-convergence-passes* :test #'eq)))
 
 (deftest global-dce-removes-unreachable-registered-function
   "opt-pass-global-dce removes a registered function when nothing at top level reaches it."
@@ -430,7 +430,7 @@
          (label (make-vm-label :name "dead"))
          (body (make-vm-const :dst :r2 :value 7))
          (ret (make-vm-ret :reg :r2))
-         (out (cl-cc::opt-pass-global-dce (list closure register label body ret))))
+         (out (cl-cc/optimize::opt-pass-global-dce (list closure register label body ret))))
     (assert-false (member closure out))
     (assert-false (member register out))
     (assert-false (member label out))
@@ -455,7 +455,7 @@
          (top-arg (make-vm-const :dst :r8 :value 1))
          (top-call (make-vm-call :dst :r9 :func :r7 :args '(:r8)))
          (top-ret (make-vm-ret :reg :r9))
-         (out (cl-cc::opt-pass-global-dce
+         (out (cl-cc/optimize::opt-pass-global-dce
                (list f-closure f-register f-label f-ref f-call f-ret
                      g-closure g-label g-body g-ret
                      top-ref top-arg top-call top-ret))))
@@ -476,8 +476,8 @@
          (regfun  (make-vm-register-function :name 'f :src :r0))
          (const   (make-vm-const :dst :r2 :value 'f))
          (move    (make-vm-move :dst :r3 :src :r2))
-         (known   (cl-cc::opt-known-callee-labels (list closure regfun const move))))
-    (assert-string= "f" (cl-cc::opt-known-callee-label reg known))))
+         (known   (cl-cc/optimize::opt-known-callee-labels (list closure regfun const move))))
+    (assert-string= "f" (cl-cc/optimize::opt-known-callee-label reg known))))
 
 (deftest-each optimizer-pass-pipeline-forms
   "optimize-instructions folds (+ 1 2) to nothing for both keyword-list and string pipeline forms."
@@ -487,7 +487,7 @@
   (let* ((instrs (list (make-vm-const :dst :r0 :value 1)
                        (make-vm-const :dst :r1 :value 2)
                        (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)))
-         (out (cl-cc::optimize-instructions instrs :pass-pipeline pipeline)))
+         (out (cl-cc/optimize::optimize-instructions instrs :pass-pipeline pipeline)))
     (assert-equal 0 (length out))))
 
 (deftest optimizer-ir-verify-valid
@@ -496,7 +496,7 @@
                       (make-vm-const :dst :r1 :value 2)
                       (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
                       (make-vm-ret :reg :r2))))
-    (assert-true (cl-cc::opt-verify-instructions instrs :pass-name "test"))))
+    (assert-true (cl-cc/optimize::opt-verify-instructions instrs :pass-name "test"))))
 
 (deftest-each optimizer-ir-verify-rejects-invalid
   "opt-verify-instructions raises an error for invalid IR programs."
@@ -509,7 +509,7 @@
            (list (make-vm-add :dst :r0 :lhs :r1 :rhs :r2))))
   (instrs)
   (assert-true
-   (handler-case (progn (cl-cc::opt-verify-instructions instrs :pass-name "test") nil)
+   (handler-case (progn (cl-cc/optimize::opt-verify-instructions instrs :pass-name "test") nil)
      (error () t))))
 
 (deftest-each optimizer-pass-pipeline-output-modes
@@ -540,7 +540,7 @@
   (let* ((stream (make-string-output-stream))
          (patched-opts (loop for (k v) on extra-opts by #'cddr
                              nconc (if (null v) (list k stream) (list k v)))))
-    (apply #'cl-cc::optimize-instructions instrs
+    (apply #'cl-cc/optimize::optimize-instructions instrs
            :pass-pipeline '(:fold)
            patched-opts)
     (let ((text (string-upcase (get-output-stream-string stream))))
@@ -556,7 +556,7 @@
          (a1    (make-vm-add :dst :r2 :lhs :r1 :rhs :r1))
          (back  (make-vm-jump :label "loop"))
          (ret   (make-vm-ret :reg :r2))
-         (out   (cl-cc::opt-pass-licm (list start jmp1 loop c1 a1 back ret))))
+         (out   (cl-cc/optimize::opt-pass-licm (list start jmp1 loop c1 a1 back ret))))
     (assert-true (member a1 out))
     (assert-true (> (position a1 out :test #'eq)
                     (position loop out :test #'eq)))))
@@ -576,34 +576,34 @@
          (join  (make-vm-label :name "join"))
          (a2    (make-vm-add :dst :r5 :lhs :r0 :rhs :r2))
          (ret   (make-vm-ret :reg :r5))
-         (out   (cl-cc::opt-pass-pre (list entry c0 c2 br p1 a1 j1 p2 x j2 join a2 ret))))
-    (assert-equal 1 (count-if (lambda (i) (typep i 'cl-cc::vm-add)) out))
+         (out   (cl-cc/optimize::opt-pass-pre (list entry c0 c2 br p1 a1 j1 p2 x j2 join a2 ret))))
+    (assert-equal 1 (count-if (lambda (i) (typep i 'cl-cc/vm::vm-add)) out))
     (assert-true (some (lambda (i)
-                         (and (typep i 'cl-cc::vm-move)
-                               (or (and (eq :r3 (cl-cc::vm-dst i))
-                                        (eq :r5 (cl-cc::vm-src i)))
-                                   (and (eq :r5 (cl-cc::vm-dst i))
-                                        (eq :r3 (cl-cc::vm-src i))))))
+                         (and (typep i 'cl-cc/vm::vm-move)
+                               (or (and (eq :r3 (cl-cc/vm::vm-dst i))
+                                        (eq :r5 (cl-cc/vm::vm-src i)))
+                                   (and (eq :r5 (cl-cc/vm::vm-dst i))
+                                        (eq :r3 (cl-cc/vm::vm-src i))))))
                        out))))
 
 (deftest egraph-pass-lowers-constant-subtraction
   "opt-pass-egraph rewrites a simple constant subtraction to vm-const."
   (let* ((i1 (cl-cc:make-vm-const :dst :r0 :value 7))
          (i2 (cl-cc:make-vm-sub   :dst :r1 :lhs :r0 :rhs :r0))
-         (out (cl-cc::opt-pass-egraph (list i1 i2)))
+         (out (cl-cc/optimize::opt-pass-egraph (list i1 i2)))
          (r1  (find-if (lambda (inst)
-                         (eq :r1 (ignore-errors (cl-cc::vm-dst inst))))
+                         (eq :r1 (ignore-errors (cl-cc/vm::vm-dst inst))))
                        out)))
     (assert-true (cl-cc::vm-const-p r1))
-    (assert-equal 0 (cl-cc::vm-value r1))))
+    (assert-equal 0 (cl-cc/vm::vm-value r1))))
 
 (deftest bswap-recognition-collapses-byte-swap-tree
   "opt-pass-bswap-recognition collapses the canonical byte-swap tree to vm-bswap."
   (let* ((input (make-bswap-tree-instructions))
-         (out   (cl-cc::opt-pass-bswap-recognition input)))
-    (assert-= 1 (count-if (lambda (i) (typep i 'cl-cc::vm-bswap)) out))
-    (assert-false (some (lambda (i) (typep i 'cl-cc::vm-logior)) out))
-    (assert-false (some (lambda (i) (typep i 'cl-cc::vm-ash)) out))))
+         (out   (cl-cc/optimize::opt-pass-bswap-recognition input)))
+    (assert-= 1 (count-if (lambda (i) (typep i 'cl-cc/vm::vm-bswap)) out))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-logior)) out))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-ash)) out))))
 
 (deftest rotate-recognition-collapses-shift-or-tree
   "opt-pass-rotate-recognition collapses a two-shift + OR idiom to vm-rotate."
@@ -612,9 +612,9 @@
          (c1  (make-vm-const :dst :r3 :value -56))
          (a1  (make-vm-ash   :dst :r4 :lhs :r0 :rhs :r3))
          (o0  (make-vm-logior :dst :r5 :lhs :r2 :rhs :r4))
-         (out (cl-cc::opt-pass-rotate-recognition (list c0 a0 c1 a1 o0))))
-    (assert-= 1 (count-if (lambda (i) (typep i 'cl-cc::vm-rotate)) out))
-    (assert-false (some (lambda (i) (typep i 'cl-cc::vm-logior)) out))))
+         (out (cl-cc/optimize::opt-pass-rotate-recognition (list c0 a0 c1 a1 o0))))
+    (assert-= 1 (count-if (lambda (i) (typep i 'cl-cc/vm::vm-rotate)) out))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-logior)) out))))
 
 (deftest-each dead-store-elim-cases
   "opt-pass-dead-store-elim: overwritten stores removed, live-read stores kept, alias-tracked slot writes handled."
@@ -649,7 +649,7 @@
                       (list obj obj2 c1 c2 w2 ret))))))
   (make-case)
   (destructuring-bind (instrs absent present) (funcall make-case)
-    (let ((out (cl-cc::opt-pass-dead-store-elim instrs)))
+    (let ((out (cl-cc/optimize::opt-pass-dead-store-elim instrs)))
       (dolist (inst absent)   (assert-false (member inst out)))
       (dolist (inst present)  (assert-true  (member inst out))))))
 
@@ -665,12 +665,12 @@
          (elsev (make-vm-const :dst :r1 :value 20))
          (endl  (make-vm-label :name "end"))
          (ret   (make-vm-ret :reg :r1))
-         (out   (cl-cc::opt-pass-sccp (list start cond br thenl thenv jmp elsel elsev endl ret))))
+         (out   (cl-cc/optimize::opt-pass-sccp (list start cond br thenl thenv jmp elsel elsev endl ret))))
     (assert-false (member elsel out))
     (assert-false (member elsev out))
-    (assert-true  (some (lambda (i) (and (typep i 'cl-cc::vm-const)
-                                         (eq (cl-cc::vm-const-dst i) :r1)
-                                         (eql (cl-cc::vm-const-value i) 10)))
+    (assert-true  (some (lambda (i) (and (typep i 'cl-cc/vm::vm-const)
+                                         (eq (cl-cc/vm::vm-dst i) :r1)
+                                         (eql (cl-cc/vm::vm-value i) 10)))
                         out))))
 
 (deftest-each store-to-load-forward-cases
@@ -717,10 +717,10 @@
                (list (list obj obj2 val w r ret) r :r2 :r1)))))
   (make-case)
   (destructuring-bind (instrs read-instr expected-dst expected-src) (funcall make-case)
-    (let ((out (cl-cc::opt-pass-store-to-load-forward instrs)))
+    (let ((out (cl-cc/optimize::opt-pass-store-to-load-forward instrs)))
       (assert-false (member read-instr out :test #'eq))
       (assert-true (some (lambda (i)
-                           (and (typep i 'cl-cc::vm-move)
+                           (and (typep i 'cl-cc/vm::vm-move)
                                 (eq (cl-cc::vm-move-dst i) expected-dst)
                                 (eq (cl-cc::vm-move-src i) expected-src)))
                          out)))))
@@ -729,17 +729,17 @@
 
 (deftest-each strength-reduce-cases
   "opt-pass-strength-reduce: power-of-2 mul/div become vm-ash; mod-by-power-of-2 becomes vm-logand."
-  :cases (("mul-rhs-pow2"      8 (make-vm-mul        :dst :r2 :lhs :r0 :rhs :r1) t   'cl-cc::vm-ash)
-          ("mul-lhs-pow2"      4 (make-vm-mul        :dst :r2 :lhs :r1 :rhs :r0) t   'cl-cc::vm-ash)
-          ("mul-non-power-of-2" 7 (make-vm-mul       :dst :r2 :lhs :r0 :rhs :r1) nil 'cl-cc::vm-ash)
-          ("div-rhs-pow2"      8 (cl-cc::make-vm-div :dst :r2 :lhs :r0 :rhs :r1) t   'cl-cc::vm-ash)
-          ("div-non-power-of-2" 7 (cl-cc::make-vm-div :dst :r2 :lhs :r0 :rhs :r1) nil 'cl-cc::vm-ash)
-          ("mod-pow2"          8 (cl-cc::make-vm-mod :dst :r2 :lhs :r0 :rhs :r1) t   'cl-cc::vm-logand)
-          ("mod-non-power-of-2" 7 (cl-cc::make-vm-mod :dst :r2 :lhs :r0 :rhs :r1) nil 'cl-cc::vm-logand))
+  :cases (("mul-rhs-pow2"      8 (make-vm-mul        :dst :r2 :lhs :r0 :rhs :r1) t   'cl-cc/vm::vm-ash)
+          ("mul-lhs-pow2"      4 (make-vm-mul        :dst :r2 :lhs :r1 :rhs :r0) t   'cl-cc/vm::vm-ash)
+          ("mul-non-power-of-2" 7 (make-vm-mul       :dst :r2 :lhs :r0 :rhs :r1) nil 'cl-cc/vm::vm-ash)
+          ("div-rhs-pow2"      8 (cl-cc::make-vm-div :dst :r2 :lhs :r0 :rhs :r1) t   'cl-cc/vm::vm-ash)
+          ("div-non-power-of-2" 7 (cl-cc::make-vm-div :dst :r2 :lhs :r0 :rhs :r1) nil 'cl-cc/vm::vm-ash)
+          ("mod-pow2"          8 (cl-cc::make-vm-mod :dst :r2 :lhs :r0 :rhs :r1) t   'cl-cc/vm::vm-logand)
+          ("mod-non-power-of-2" 7 (cl-cc::make-vm-mod :dst :r2 :lhs :r0 :rhs :r1) nil 'cl-cc/vm::vm-logand))
   (const-val op should-reduce-p target-type)
   (let* ((c   (make-vm-const :dst :r1 :value const-val))
          (ret (make-vm-ret   :reg :r2))
-         (out (cl-cc::opt-pass-strength-reduce (list c op ret))))
+         (out (cl-cc/optimize::opt-pass-strength-reduce (list c op ret))))
     (if should-reduce-p
         (progn
           (assert-false (member op out))
@@ -752,30 +752,30 @@
 
 (deftest-each reassociate-moves-constant-inward
   "opt-pass-reassociate moves constants toward the tail of nested op chains (add and logand)."
-  :cases (("add"    1   (make-vm-add    :dst :r4 :lhs :r2 :rhs :r1) (make-vm-add    :dst :r5 :lhs :r4 :rhs :r3) 'cl-cc::vm-add)
-          ("logand" 255 (make-vm-logand :dst :r4 :lhs :r2 :rhs :r1) (make-vm-logand :dst :r5 :lhs :r4 :rhs :r3) 'cl-cc::vm-logand))
+  :cases (("add"    1   (make-vm-add    :dst :r4 :lhs :r2 :rhs :r1) (make-vm-add    :dst :r5 :lhs :r4 :rhs :r3) 'cl-cc/vm::vm-add)
+          ("logand" 255 (make-vm-logand :dst :r4 :lhs :r2 :rhs :r1) (make-vm-logand :dst :r5 :lhs :r4 :rhs :r3) 'cl-cc/vm::vm-logand))
   (const-val op1 op2 op-type)
   (let* ((c    (make-vm-const :dst :r1 :value const-val))
          (a    (make-vm-move  :dst :r2 :src :r8))
          (b    (make-vm-move  :dst :r3 :src :r9))
          (ret  (make-vm-ret   :reg :r5))
-         (out  (cl-cc::opt-pass-reassociate (list c a b op1 op2 ret)))
+         (out  (cl-cc/optimize::opt-pass-reassociate (list c a b op1 op2 ret)))
          (ops  (remove-if-not (lambda (i) (typep i op-type)) out)))
     (assert-equal 2 (length ops))
-    (assert-eq :r3 (cl-cc::vm-lhs (first ops)))
-    (assert-eq :r1 (cl-cc::vm-rhs (first ops)))
-    (assert-eq :r2 (cl-cc::vm-lhs (second ops)))
-    (assert-eq :r4 (cl-cc::vm-rhs (second ops)))))
+    (assert-eq :r3 (cl-cc/vm::vm-lhs (first ops)))
+    (assert-eq :r1 (cl-cc/vm::vm-rhs (first ops)))
+    (assert-eq :r2 (cl-cc/vm::vm-lhs (second ops)))
+    (assert-eq :r4 (cl-cc/vm::vm-rhs (second ops)))))
 
 (deftest strength-reduce-mul-by-const-decomposes
   "opt-pass-strength-reduce: small non-power-of-2 constant multipliers are decomposed into shifts/adds."
   (let* ((c   (make-vm-const :dst :r1 :value 3))
          (mul (make-vm-mul :dst :r2 :lhs :r0 :rhs :r1))
          (ret (make-vm-ret :reg :r2))
-         (out (cl-cc::opt-pass-strength-reduce (list c mul ret))))
+         (out (cl-cc/optimize::opt-pass-strength-reduce (list c mul ret))))
     (assert-false (member mul out))
-    (assert-true (some (lambda (i) (typep i 'cl-cc::vm-ash)) out))
-    (assert-true (some (lambda (i) (typep i 'cl-cc::vm-add)) out))))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-ash)) out))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-add)) out))))
 
 ;;; ── %opt-mul-by-const-seq: Extracted Shift/Add Decomposition ────────────
 
@@ -786,15 +786,15 @@
 
 (deftest-each mul-by-const-seq-cases
   "%opt-mul-by-const-seq: correctly decomposes constant multipliers into shift/add sequences."
-  :cases (("zero"     0  'cl-cc::vm-const nil)
-          ("one"      1  'cl-cc::vm-move  nil)
-          ("neg-one" -1  'cl-cc::vm-move  'cl-cc::vm-neg)
-          ("two"      2  'cl-cc::vm-ash   nil)
-          ("three"    3  'cl-cc::vm-add   nil)
-          ("four"     4  'cl-cc::vm-ash   nil)
-          ("six"      6  'cl-cc::vm-add   nil))
+  :cases (("zero"     0  'cl-cc/vm::vm-const nil)
+          ("one"      1  'cl-cc/vm::vm-move  nil)
+          ("neg-one" -1  'cl-cc/vm::vm-move  'cl-cc/vm::vm-neg)
+          ("two"      2  'cl-cc/vm::vm-ash   nil)
+          ("three"    3  'cl-cc/vm::vm-add   nil)
+          ("four"     4  'cl-cc/vm::vm-ash   nil)
+          ("six"      6  'cl-cc/vm::vm-add   nil))
   (n expected-type-1 expected-type-2)
-  (let* ((seq (cl-cc::%opt-mul-by-const-seq :r0 :r1 n (make-test-new-reg))))
+  (let* ((seq (cl-cc/optimize::%opt-mul-by-const-seq :r0 :r1 n (make-test-new-reg))))
     (assert-true (some (lambda (i) (typep i expected-type-1)) seq))
     (when expected-type-2
       (assert-true (some (lambda (i) (typep i expected-type-2)) seq)))))
@@ -802,10 +802,10 @@
 (deftest mul-by-const-seq-correctness
   "%opt-mul-by-const-seq: emitted instructions have correct destination register."
   ;; n=5 = 2^0 + 2^2: should result in a vm-add with dst :r0
-  (let* ((seq (cl-cc::%opt-mul-by-const-seq :r0 :r1 5 (make-test-new-reg)))
-         (add (find-if (lambda (i) (typep i 'cl-cc::vm-add)) seq)))
+  (let* ((seq (cl-cc/optimize::%opt-mul-by-const-seq :r0 :r1 5 (make-test-new-reg)))
+         (add (find-if (lambda (i) (typep i 'cl-cc/vm::vm-add)) seq)))
     (assert-true add)
-    (assert-equal :r0 (cl-cc::vm-add-dst add))))
+    (assert-equal :r0 (cl-cc/vm::vm-dst add))))
 
 ;;; ── opt-inline-eligible-p: Extracted Eligibility Predicate ──────────────
 
@@ -835,8 +835,8 @@
                                 :optional-params nil :rest-param nil :key-params nil))
          (def (list :closure ci :params '(:r1) :body body)))
     (if expected
-        (assert-true  (cl-cc::opt-inline-eligible-p def 15))
-        (assert-false (cl-cc::opt-inline-eligible-p def 15)))))
+        (assert-true  (cl-cc/optimize::opt-inline-eligible-p def 15))
+        (assert-false (cl-cc/optimize::opt-inline-eligible-p def 15)))))
 
 (deftest opt-adaptive-inline-threshold-cases
   "Cheap bodies get a higher threshold; call-heavy bodies get a tighter one."
@@ -852,8 +852,8 @@
          (call-body (list (make-vm-call :dst :r2 :func :r3 :args '(:r1))
                           (make-vm-ret :reg :r2)))
          (call-def (list :closure call-ci :params '(:r1) :body call-body)))
-    (assert-true (> (cl-cc::opt-adaptive-inline-threshold cheap-def) 15))
-    (assert-true (< (cl-cc::opt-adaptive-inline-threshold call-def) 15))))
+    (assert-true (> (cl-cc/optimize::opt-adaptive-inline-threshold cheap-def) 15))
+    (assert-true (< (cl-cc/optimize::opt-adaptive-inline-threshold call-def) 15))))
 
 (deftest opt-pass-inline-iterative-uses-adaptive-threshold
   "The iterative inline wrapper runs with adaptive thresholds without error."
@@ -865,7 +865,7 @@
                        (list (make-vm-ret :reg :r1))))
          (call (make-vm-call :dst :r4 :func :r3 :args '(:r5)))
          (ret  (make-vm-ret :reg :r4))
-         (out  (cl-cc::opt-pass-inline-iterative
+         (out  (cl-cc/optimize::opt-pass-inline-iterative
                 (append (list ci) body (list fref call ret)))))
     (assert-true out)))
 
@@ -874,13 +874,13 @@
   :cases (("small" 10  #'<  20)
           ("large" 900 #'>  20))
   (n-insts pred threshold)
-  (let ((iters (cl-cc::opt-adaptive-max-iterations
+  (let ((iters (cl-cc/optimize::opt-adaptive-max-iterations
                 (loop repeat n-insts collect (make-vm-const :dst :r0 :value 0)))))
     (assert-true (funcall pred iters threshold))))
 
 (deftest optimize-instructions-accepts-adaptive-max-iterations
   "optimize-instructions accepts :adaptive as the iteration budget selector."
-  (let ((out (cl-cc::optimize-instructions
+  (let ((out (cl-cc/optimize::optimize-instructions
               (list (make-vm-const :dst :r0 :value 1)
                     (make-vm-ret :reg :r0))
               :max-iterations :adaptive
@@ -896,7 +896,7 @@
           ("t"        t   nil)
           ("positive" 1   nil))
   (value expected)
-  (assert-equal expected (cl-cc::opt-falsep value)))
+  (assert-equal expected (cl-cc/optimize::opt-falsep value)))
 
 ;;; ─── opt-register-keyword-p ──────────────────────────────────────────────
 
@@ -907,18 +907,18 @@
           ("plain-symbol"  'r0  nil)
           ("plain-keyword" :foo nil))
   (value expected)
-  (assert-equal expected (cl-cc::opt-register-keyword-p value)))
+  (assert-equal expected (cl-cc/optimize::opt-register-keyword-p value)))
 
 ;;; ─── opt-binary-lhs-rhs-p / opt-unary-src-p ─────────────────────────────
 
 (deftest-each opt-instruction-shape-predicates
   "opt-binary-lhs-rhs-p and opt-unary-src-p classify instruction shapes correctly."
-  :cases (("binary-add"    #'cl-cc::opt-binary-lhs-rhs-p (make-vm-add    :dst :r0 :lhs :r1 :rhs :r2) t)
-          ("binary-lt"     #'cl-cc::opt-binary-lhs-rhs-p (make-vm-lt     :dst :r0 :lhs :r1 :rhs :r2) t)
-          ("binary-neg"    #'cl-cc::opt-binary-lhs-rhs-p (make-vm-neg    :dst :r0 :src :r1)           nil)
-          ("unary-neg"     #'cl-cc::opt-unary-src-p      (make-vm-neg    :dst :r0 :src :r1)           t)
-          ("unary-null-p"  #'cl-cc::opt-unary-src-p      (make-vm-null-p :dst :r0 :src :r1)           t)
-          ("unary-add"     #'cl-cc::opt-unary-src-p      (make-vm-add    :dst :r0 :lhs :r1 :rhs :r2)  nil))
+  :cases (("binary-add"    #'cl-cc/optimize::opt-binary-lhs-rhs-p (make-vm-add    :dst :r0 :lhs :r1 :rhs :r2) t)
+          ("binary-lt"     #'cl-cc/optimize::opt-binary-lhs-rhs-p (make-vm-lt     :dst :r0 :lhs :r1 :rhs :r2) t)
+          ("binary-neg"    #'cl-cc/optimize::opt-binary-lhs-rhs-p (make-vm-neg    :dst :r0 :src :r1)           nil)
+          ("unary-neg"     #'cl-cc/optimize::opt-unary-src-p      (make-vm-neg    :dst :r0 :src :r1)           t)
+          ("unary-null-p"  #'cl-cc/optimize::opt-unary-src-p      (make-vm-null-p :dst :r0 :src :r1)           t)
+          ("unary-add"     #'cl-cc/optimize::opt-unary-src-p      (make-vm-add    :dst :r0 :lhs :r1 :rhs :r2)  nil))
   (pred-fn inst expected)
   (if expected
       (assert-true  (funcall pred-fn inst))
@@ -928,9 +928,9 @@
 
 (deftest-each opt-foldable-predicates
   "opt-foldable-unary-arith-p and opt-foldable-type-pred-p classify fold eligibility."
-  :cases (("arith-neg"    #'cl-cc::opt-foldable-unary-arith-p (make-vm-neg    :dst :r0 :src :r1) t)
-          ("arith-null-p" #'cl-cc::opt-foldable-unary-arith-p (make-vm-null-p :dst :r0 :src :r1) nil)
-          ("pred-null-p"  #'cl-cc::opt-foldable-type-pred-p   (make-vm-null-p :dst :r0 :src :r1) t)
-          ("pred-neg"     #'cl-cc::opt-foldable-type-pred-p   (make-vm-neg    :dst :r0 :src :r1) nil))
+  :cases (("arith-neg"    #'cl-cc/optimize::opt-foldable-unary-arith-p (make-vm-neg    :dst :r0 :src :r1) t)
+          ("arith-null-p" #'cl-cc/optimize::opt-foldable-unary-arith-p (make-vm-null-p :dst :r0 :src :r1) nil)
+          ("pred-null-p"  #'cl-cc/optimize::opt-foldable-type-pred-p   (make-vm-null-p :dst :r0 :src :r1) t)
+          ("pred-neg"     #'cl-cc/optimize::opt-foldable-type-pred-p   (make-vm-neg    :dst :r0 :src :r1) nil))
   (pred-fn inst expected)
   (assert-equal expected (funcall pred-fn inst)))

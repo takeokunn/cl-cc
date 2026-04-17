@@ -161,7 +161,7 @@
 ;;; Section N: Prolog Database Isolation (opt-in library)
 ;;; ------------------------------------------------------------
 ;;;
-;;; The compiler's Prolog fact DB (`cl-cc::*prolog-rules*`) is populated at
+;;; The compiler's Prolog fact DB (`cl-cc/prolog::*prolog-rules*`) is populated at
 ;;; startup with baseline rules (type-of facts, peephole rules, etc.). Some
 ;;; tests mutate it as part of their exercise and the state can leak into
 ;;; subsequent tests under randomized ordering (see PROLOG-TYPE-OF-CMP flake
@@ -174,17 +174,17 @@
 ;;; heavy suites and blows through the default timeout.
 
 (defun %snapshot-prolog-db ()
-  "Deep-copy cl-cc::*prolog-rules* into a fresh hash table."
+  "Deep-copy cl-cc/prolog::*prolog-rules* into a fresh hash table."
   (let ((snap (make-hash-table :test 'eq)))
     (maphash (lambda (k v) (setf (gethash k snap) (copy-list v)))
-             cl-cc::*prolog-rules*)
+             cl-cc/prolog::*prolog-rules*)
     snap))
 
 (defun %restore-prolog-db (snap)
-  "Restore cl-cc::*prolog-rules* to the contents of SNAP."
-  (clrhash cl-cc::*prolog-rules*)
+  "Restore cl-cc/prolog::*prolog-rules* to the contents of SNAP."
+  (clrhash cl-cc/prolog::*prolog-rules*)
   (maphash (lambda (k v)
-             (setf (gethash k cl-cc::*prolog-rules*) (copy-list v)))
+             (setf (gethash k cl-cc/prolog::*prolog-rules*) (copy-list v)))
            snap))
 
 (defmacro with-prolog-db-isolated (&body body)
@@ -212,8 +212,8 @@ snapshotting at load time because most tests don't need this."
 ;;; compared to the prolog restore we removed in iter 2.
 
 (defbefore :each (cl-cc-suite)
-  (when (fboundp 'cl-cc::vm-clear-hash-cons-table)
-    (cl-cc::vm-clear-hash-cons-table)))
+  (when (fboundp 'cl-cc/vm::vm-clear-hash-cons-table)
+    (cl-cc/vm::vm-clear-hash-cons-table)))
 
 ;;; ------------------------------------------------------------
 ;;; Section N+2: Macroexpansion Cache Isolation
@@ -235,7 +235,7 @@ snapshotting at load time because most tests don't need this."
 ;;; typically < 100 µs.
 
 (defbefore :each (cl-cc-suite)
-  (when (boundp 'cl-cc::*macroexpand-step-cache*)
-    (clrhash cl-cc::*macroexpand-step-cache*))
-  (when (boundp 'cl-cc::*macroexpand-all-cache*)
-    (clrhash cl-cc::*macroexpand-all-cache*)))
+  (when (boundp 'cl-cc/expand::*macroexpand-step-cache*)
+    (clrhash cl-cc/expand::*macroexpand-step-cache*))
+  (when (boundp 'cl-cc/expand::*macroexpand-all-cache*)
+    (clrhash cl-cc/expand::*macroexpand-all-cache*)))

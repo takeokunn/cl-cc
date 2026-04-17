@@ -421,7 +421,7 @@
                                     ((x :initarg :x :initform 0))
                                     (:default-initargs :x 42)))))
     (assert-type ast-defclass ast)
-    (let ((di (cl-cc::ast-defclass-default-initargs ast)))
+    (let ((di (cl-cc/ast::ast-defclass-default-initargs ast)))
       (assert-= 1 (length di))
       (assert-eq :x (car (first di))))))
 
@@ -553,7 +553,7 @@
   (form expected-qualifier)
   (let ((ast (lower-sexp-to-ast form)))
     (assert-type ast-defmethod ast)
-    (assert-eq expected-qualifier (cl-cc::ast-defmethod-qualifier ast))))
+    (assert-eq expected-qualifier (cl-cc/ast::ast-defmethod-qualifier ast))))
 
 (deftest clos-defmethod-around-qualifier
   "defmethod :around wraps the primary method; around's return is the final result."
@@ -574,7 +574,7 @@ KNOWN COMPILER BUG: self-hosted CLOS dispatch recurses infinitely when an
 :around method omits call-next-method. ANSI semantics: the :around body
 should run to completion and its value be returned WITHOUT ever entering
 the primary methods. Tagged :slow so focused REPL runs can still filter it;
-the canonical `make test` plan runs it with a 5-second hard timeout so the hang is
+the canonical `nix run .#test` plan runs it with a 5-second hard timeout so the hang is
 bounded. Remove the :slow tag once the CLOS dispatch bug is fixed."
   :tags '(:slow)
   :timeout 5

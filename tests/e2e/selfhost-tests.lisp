@@ -25,7 +25,7 @@
         (cl-cc::*repl-pool-instructions* nil)
         (cl-cc::*repl-pool-labels* nil)
         (cl-cc::*repl-global-vars-persistent* nil)
-        (cl-cc::*repl-label-counter* nil)
+        (cl-cc/compile::*repl-label-counter* nil)
         (cl-cc::*repl-defstruct-registry* nil))
     (let ((result nil))
       (dolist (form forms result)
@@ -290,7 +290,7 @@
         (cl-cc::*repl-pool-instructions* nil)
         (cl-cc::*repl-pool-labels* nil)
         (cl-cc::*repl-global-vars-persistent* nil)
-        (cl-cc::*repl-label-counter* nil)
+        (cl-cc/compile::*repl-label-counter* nil)
         (cl-cc::*repl-defstruct-registry* nil))
     (cl-cc::our-load file-path)
     (let ((result nil))
@@ -351,7 +351,7 @@
                   (cl-cc::*repl-pool-instructions* nil)
                   (cl-cc::*repl-pool-labels* nil)
                   (cl-cc::*repl-global-vars-persistent* nil)
-                  (cl-cc::*repl-label-counter* nil)
+                  (cl-cc/compile::*repl-label-counter* nil)
                   (cl-cc::*repl-defstruct-registry* nil))
              (cl-cc::our-load file1)
              (cl-cc::our-load file2)
@@ -362,117 +362,29 @@
 
 ;;; ─── Self-Hosting: Source File Loading ────────────────────────────────────
 
-(defvar *selfhost-all-source-files*
-  '("src/package.lisp"
-    "src/parse/cst.lisp"
-    "src/parse/diagnostics.lisp"
-    "src/ast/ast.lisp"
-    "src/prolog/prolog.lisp"
-    "src/prolog/dcg.lisp"
-    "src/parse/lexer.lisp"
-    "src/parse/incremental.lisp"
-    "src/parse/pratt.lisp"
-    "src/parse/combinators.lisp"
-    "src/parse/cl/parser.lisp"
-    "src/parse/cl/grammar.lisp"
-    "src/parse/php/lexer.lisp"
-    "src/parse/php/parser.lisp"
-    "src/parse/php/grammar.lisp"
-    "src/parse/cst-to-ast.lisp"
-    "src/expand/macro.lisp"
-    "src/expand/expander.lisp"
-    "src/vm/package.lisp"
-    "src/vm/vm.lisp"
-    "src/vm/primitives.lisp"
-    "src/vm/io.lisp"
-    "src/vm/conditions.lisp"
-    "src/vm/list.lisp"
-    "src/vm/strings.lisp"
-    "src/vm/hash.lisp"
-    "src/type/package.lisp"
-    "src/type/kind.lisp"
-    "src/type/multiplicity.lisp"
-    "src/type/representation.lisp"
-    "src/type/substitution.lisp"
-    "src/type/unification.lisp"
-    "src/type/subtyping.lisp"
-    "src/type/effect.lisp"
-    "src/type/row.lisp"
-    "src/type/constraint.lisp"
-    "src/type/parser.lisp"
-    "src/type/typeclass.lisp"
-    "src/type/solver.lisp"
-    "src/type/inference.lisp"
-    "src/type/checker.lisp"
-    "src/type/printer.lisp"
-    "src/compile/ir/types.lisp"
-    "src/compile/ir/block.lisp"
-    "src/compile/ir/ssa.lisp"
-    "src/compile/ir/printer.lisp"
-    "src/compile/context.lisp"
-    "src/compile/closure.lisp"
-    "src/compile/cps.lisp"
-    "src/compile/builtin-registry.lisp"
-    "src/compile/codegen.lisp"
-    "src/optimize/effects.lisp"
-    "src/optimize/cfg.lisp"
-    "src/optimize/ssa.lisp"
-    "src/optimize/egraph.lisp"
-    "src/optimize/egraph-rules.lisp"
-    "src/optimize/optimizer.lisp"
-    "src/mir/mir.lisp"
-    "src/mir/target.lisp"
-    "src/emit/package.lisp"
-    "src/emit/calling-convention.lisp"
-    "src/emit/regalloc.lisp"
-    "src/emit/x86-64.lisp"
-    "src/emit/x86-64-codegen.lisp"
-    "src/emit/aarch64.lisp"
-    "src/emit/aarch64-codegen.lisp"
-    "src/emit/wasm-types.lisp"
-    "src/emit/wasm-ir.lisp"
-    "src/emit/wasm-extract.lisp"
-    "src/emit/wasm-trampoline.lisp"
-    "src/emit/wasm.lisp"
-    "src/emit/binary/package.lisp"
-    "src/emit/binary/macho.lisp"
-    "src/emit/binary/elf.lisp"
-    "src/emit/binary/wasm.lisp"
-    "src/bytecode/package.lisp"
-    "src/bytecode/encode.lisp"
-    "src/bytecode/decode.lisp"
-    "src/runtime/package.lisp"
-    "src/runtime/runtime.lisp"
-    "src/runtime/value.lisp"
-    "src/runtime/frame.lisp"
-    "src/runtime/heap.lisp"
-    "src/runtime/gc.lisp"
-    "src/compile/pipeline.lisp")
-  "All 84 source files in ASDF dependency order.")
-
 (defvar *selfhost-representative-files*
-  '("src/parse/cst.lisp"
-    "src/prolog/prolog-data.lisp"  ; *builtin-predicate-specs* used by prolog.lisp
-    "src/prolog/prolog.lisp"
-    "src/parse/lexer.lisp"
-    "src/compile/cps.lisp"
-    "src/optimize/optimizer.lisp"
-    "src/type/package.lisp"
-    "src/type/kind.lisp"
-    "src/type/multiplicity.lisp"   ; prerequisites for types-core
-    "src/type/types-core.lisp"     ; base type structs
-    "src/type/types-extended.lisp" ; type-null/type-int/+pure-effect-row+ etc.
-    "src/type/types-env.lisp"      ; +type-unknown+
-    "src/type/parser.lisp"
-    "src/type/typeclass.lisp"
-    "src/type/typeclass-compat.lisp" ; *default-numeric-type* used by solver.lisp
-    "src/type/solver.lisp"
-    "src/type/inference.lisp"
-    "src/type/checker.lisp"
-    "src/type/printer.lisp"
-    "src/mir/mir.lisp"
-    "src/vm/vm.lisp"
-    "src/runtime/gc.lisp")
+  '("packages/frontend/parse/src/cst.lisp"
+    "packages/prolog/prolog/src/prolog-data.lisp"  ; *builtin-predicate-specs* used by prolog.lisp
+    "packages/prolog/prolog/src/prolog.lisp"
+    "packages/frontend/parse/src/lexer.lisp"
+    "packages/engine/compile/src/cps.lisp"
+    "packages/engine/optimize/src/optimizer.lisp"
+    "packages/type/type/src/package.lisp"
+    "packages/type/type/src/kind.lisp"
+    "packages/type/type/src/multiplicity.lisp"   ; prerequisites for types-core
+    "packages/type/type/src/types-core.lisp"     ; base type structs
+    "packages/type/type/src/types-extended.lisp" ; type-null/type-int/+pure-effect-row+ etc.
+    "packages/type/type/src/types-env.lisp"      ; +type-unknown+
+    "packages/type/type/src/parser.lisp"
+    "packages/type/type/src/typeclass.lisp"
+    "packages/type/type/src/typeclass-compat.lisp" ; *default-numeric-type* used by solver.lisp
+    "packages/type/type/src/solver.lisp"
+    "packages/type/type/src/inference.lisp"
+    "packages/type/type/src/checker.lisp"
+    "packages/type/type/src/printer.lisp"
+    "packages/foundation/mir/src/mir.lisp"
+    "packages/engine/vm/src/vm.lisp"
+    "packages/backend/runtime/src/gc.lisp")
   "Representative subset of source files covering all major modules.")
 
 (in-suite selfhost-slow-suite)
@@ -486,7 +398,7 @@
           (cl-cc::*repl-pool-instructions* nil)
           (cl-cc::*repl-pool-labels* nil)
           (cl-cc::*repl-global-vars-persistent* nil)
-          (cl-cc::*repl-label-counter* nil))
+          (cl-cc/compile::*repl-label-counter* nil))
       (dolist (f *selfhost-representative-files*)
         (handler-case
           (progn (cl-cc::our-load f) (incf ok))

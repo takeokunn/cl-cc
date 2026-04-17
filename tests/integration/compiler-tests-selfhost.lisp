@@ -133,9 +133,9 @@
 
 (deftest typed-defun-type-registry
   "typed defun registers function type for type checking"
-  (let ((old-count (hash-table-count cl-cc:*function-type-registry*)))
+  (let ((old-count (hash-table-count cl-cc/compile::*function-type-registry*)))
     (run-string "(defun typed-reg-test ((x fixnum)) fixnum x)")
-    (assert-true (> (hash-table-count cl-cc:*function-type-registry*) old-count))))
+    (assert-true (> (hash-table-count cl-cc/compile::*function-type-registry*) old-count))))
 
 (deftest typed-multi-form-top-level
   "Type checking applies to multi-form top-level compilation as well."

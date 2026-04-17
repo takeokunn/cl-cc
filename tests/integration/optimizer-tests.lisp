@@ -106,13 +106,13 @@
          (sig   (cl-cc::make-vm-signal-error :error-reg :r1))
          (end   (make-vm-label :name "end"))
          (ret   (make-vm-ret :reg :r1))
-         (cfg   (cl-cc::cfg-build (list hot jump work toend cold sig end ret)))
-         (_idom (cl-cc::cfg-compute-dominators cfg))
-         (_loop (cl-cc::cfg-compute-loop-depths cfg))
-         (out   (cl-cc::cfg-flatten-hot-cold cfg))
+         (cfg   (cl-cc/optimize::cfg-build (list hot jump work toend cold sig end ret)))
+         (_idom (cl-cc/optimize::cfg-compute-dominators cfg))
+         (_loop (cl-cc/optimize::cfg-compute-loop-depths cfg))
+         (out   (cl-cc/optimize::cfg-flatten-hot-cold cfg))
          (labels (loop for inst in out
-                        when (typep inst 'cl-cc::vm-label)
-                        collect (cl-cc::vm-name inst))))
+                        when (typep inst 'cl-cc/vm::vm-label)
+                        collect (cl-cc/vm::vm-name inst))))
     (declare (ignore _idom _loop))
     (assert-true (member "hot" labels :test #'equal))
     (assert-true (member "cold" labels :test #'equal))
@@ -136,20 +136,20 @@
 (deftest-each optimizer-dominated-check-elim
   "Redundant dominated predicates are rewritten to vm-move by the relevant elimination pass."
   :cases (("null-p via dominated-type-check-elim"
-           #'cl-cc::opt-pass-dominated-type-check-elim
+           #'cl-cc/optimize::opt-pass-dominated-type-check-elim
            (make-vm-null-p :dst :r1 :src :r0)
            (make-vm-null-p :dst :r2 :src :r0)
-           'cl-cc::vm-null-p)
+           'cl-cc/vm::vm-null-p)
           ("not via dominated-type-check-elim"
-           #'cl-cc::opt-pass-dominated-type-check-elim
+           #'cl-cc/optimize::opt-pass-dominated-type-check-elim
            (make-vm-not :dst :r1 :src :r0)
            (make-vm-not :dst :r2 :src :r0)
-           'cl-cc::vm-not)
+           'cl-cc/vm::vm-not)
           ("not via nil-check-elim"
-           #'cl-cc::opt-pass-nil-check-elim
+           #'cl-cc/optimize::opt-pass-nil-check-elim
            (make-vm-not :dst :r1 :src :r0)
            (make-vm-not :dst :r2 :src :r0)
-           'cl-cc::vm-not))
+           'cl-cc/vm::vm-not))
   (pass-fn p1 p2 instr-type)
   (let* ((c    (make-vm-const :dst :r0 :value nil))
          (br   (make-vm-jump-zero :reg :r1 :label "else"))
@@ -159,7 +159,7 @@
          (ret0 (make-vm-ret :reg :r1))
          (out  (funcall pass-fn (list c p1 br then p2 ret1 else ret0))))
     (assert-equal 1 (count-if (lambda (i) (typep i instr-type)) out))
-    (assert-true (some (lambda (i) (typep i 'cl-cc::vm-move)) out))))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-move)) out))))
 
 (deftest-each optimizer-pass-produces-const
   "Optimization passes fold or correlate predicates to known vm-const values."
@@ -173,7 +173,7 @@
                     (ret1 (make-vm-ret :reg :r2))
                     (else (make-vm-label :name "else"))
                     (ret0 (make-vm-ret :reg :r1)))
-               (cl-cc::opt-pass-branch-correlation
+               (cl-cc/optimize::opt-pass-branch-correlation
                 (list c p1 br then p2 ret1 else ret0))))
            :r2 1)
           ("branch-correlation-false-edge"
@@ -186,7 +186,7 @@
                     (else (make-vm-label :name "else"))
                     (p2   (cl-cc::make-vm-integer-p :dst :r2 :src :r0))
                     (ret0 (make-vm-ret :reg :r2)))
-               (cl-cc::opt-pass-branch-correlation
+               (cl-cc/optimize::opt-pass-branch-correlation
                 (list c p1 br then ret1 else p2 ret0))))
            :r2 0)
           ("fold-rational-unary"
@@ -194,7 +194,7 @@
              (let* ((c1  (make-vm-const :dst :r0 :value 3/4))
                     (u1  (cl-cc::make-vm-numerator :dst :r1 :src :r0))
                     (ret (make-vm-ret :reg :r1)))
-               (cl-cc::opt-pass-fold (list c1 u1 ret))))
+               (cl-cc/optimize::opt-pass-fold (list c1 u1 ret))))
            :r1 3)
           ("fold-rational-binary"
            (lambda ()
@@ -202,14 +202,14 @@
                     (c2  (make-vm-const :dst :r1 :value 12))
                     (g   (cl-cc::make-vm-gcd :dst :r2 :lhs :r0 :rhs :r1))
                     (ret (make-vm-ret :reg :r2)))
-               (cl-cc::opt-pass-fold (list c1 c2 g ret))))
+               (cl-cc/optimize::opt-pass-fold (list c1 c2 g ret))))
            :r2 4))
   (make-out expected-dst expected-value)
   (let ((out (funcall make-out)))
     (assert-true (some (lambda (i)
-                         (and (typep i 'cl-cc::vm-const)
-                              (eq expected-dst (cl-cc::vm-dst i))
-                              (eql expected-value (cl-cc::vm-value i))))
+                         (and (typep i 'cl-cc/vm::vm-const)
+                              (eq expected-dst (cl-cc/vm::vm-dst i))
+                              (eql expected-value (cl-cc/vm::vm-value i))))
                        out))))
 
 ;;; ── End-to-End Correctness ───────────────────────────────────────────────
@@ -248,12 +248,12 @@
   (assert-equal -1 (run-string "(lognot 0)"))
   (let* ((instrs (list (cl-cc::make-vm-const :dst :r1 :value 0)
                        (cl-cc::make-vm-lognot :dst :r0 :src :r1)))
-         (out (cl-cc::opt-pass-fold instrs)))
-    (assert-false (some (lambda (i) (typep i 'cl-cc::vm-lognot)) out))
+         (out (cl-cc/optimize::opt-pass-fold instrs)))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-lognot)) out))
     (assert-true (some (lambda (i)
                          (and (cl-cc::vm-const-p i)
-                              (eq :r0 (cl-cc::vm-dst i))
-                              (eql -1 (cl-cc::vm-value i))))
+                              (eq :r0 (cl-cc/vm::vm-dst i))
+                              (eql -1 (cl-cc/vm::vm-value i))))
                        out))))
 
 (deftest optimizer-not-zero-value
@@ -285,11 +285,11 @@
   "compile-string preserves the optimizer leaf flag on a real compiled leaf program."
   (let* ((result (compile-string "(+ 1 2)" :target :vm))
          (program (compilation-result-program result)))
-    (assert-true (cl-cc::vm-program-leaf-p program))))
+    (assert-true (cl-cc/vm::vm-program-leaf-p program))))
 
 (deftest prolog-peephole-collapses-const-followed-by-move
   "The Prolog peephole rule set folds a const+move pair to a direct const."
-  (let ((out (cl-cc::apply-prolog-peephole
+  (let ((out (cl-cc/prolog::apply-prolog-peephole
               '((:const :r1 42) (:move :r2 :r1)))))
     (assert-equal '((:const :r2 42)) out)))
 
@@ -303,10 +303,10 @@
   (let* ((i1 (cl-cc::make-vm-const :dst :R0 :value 10))
          (i2 (cl-cc::make-vm-const :dst :R1 :value 20))
          (i3 (cl-cc::make-vm-add :dst :R2 :lhs :R0 :rhs :R1))
-         (out (cl-cc::opt-pass-cse (list i1 i2 i3 i4))))
+         (out (cl-cc/optimize::opt-pass-cse (list i1 i2 i3 i4))))
     (assert-true (cl-cc::vm-add-p (third out)))
     (assert-true (cl-cc::vm-move-p (fourth out)))
-    (assert-equal :R2 (cl-cc::vm-src (fourth out)))))
+    (assert-equal :R2 (cl-cc/vm::vm-src (fourth out)))))
 
 (deftest cse-label-flushes
   "A branch-target vm-label between two identical vm-add prevents CSE."
@@ -316,7 +316,7 @@
           (j  (cl-cc::make-vm-jump :label "L1"))
           (lbl (cl-cc::make-vm-label :name "L1"))
           (i4 (cl-cc::make-vm-add :dst :R3 :lhs :R0 :rhs :R1))
-          (out (cl-cc::opt-pass-cse (list i1 i2 i3 j lbl i4))))
+          (out (cl-cc/optimize::opt-pass-cse (list i1 i2 i3 j lbl i4))))
     (assert-true (cl-cc::vm-add-p (third out)))
     (assert-true (cl-cc::vm-jump-p (fourth out)))
     (assert-true (cl-cc::vm-label-p (fifth out)))
@@ -329,7 +329,7 @@
          (i3 (cl-cc::make-vm-add :dst :R2 :lhs :R0 :rhs :R1))
          (lbl (cl-cc::make-vm-label :name "L1"))
          (i4 (cl-cc::make-vm-add :dst :R3 :lhs :R0 :rhs :R1))
-         (out (cl-cc::opt-pass-cse (list i1 i2 i3 lbl i4))))
+         (out (cl-cc/optimize::opt-pass-cse (list i1 i2 i3 lbl i4))))
     (assert-true (cl-cc::vm-label-p (fourth out)))
     (assert-true (cl-cc::vm-move-p (fifth out)))))
 
@@ -338,16 +338,16 @@
   (let* ((i1 (cl-cc::make-vm-const :dst :R0 :value 42))
          (i2 (cl-cc::make-vm-neg :dst :R1 :src :R0))
          (i3 (cl-cc::make-vm-neg :dst :R2 :src :R0))
-         (out (cl-cc::opt-pass-cse (list i1 i2 i3))))
+         (out (cl-cc/optimize::opt-pass-cse (list i1 i2 i3))))
     (assert-true (cl-cc::vm-neg-p (second out)))
     (assert-true (cl-cc::vm-move-p (third out)))
-    (assert-equal :R1 (cl-cc::vm-src (third out)))))
+    (assert-equal :R1 (cl-cc/vm::vm-src (third out)))))
 
 (deftest cse-const-no-move
   "Two identical vm-const: second remains vm-const, not vm-move."
   (let* ((i1 (cl-cc::make-vm-const :dst :R0 :value 42))
          (i2 (cl-cc::make-vm-const :dst :R1 :value 42))
-         (out (cl-cc::opt-pass-cse (list i1 i2))))
+         (out (cl-cc/optimize::opt-pass-cse (list i1 i2))))
     (assert-true (cl-cc::vm-const-p (first out)))
     (assert-true (cl-cc::vm-const-p (second out)))))
 
@@ -357,7 +357,7 @@
          (i2 (cl-cc::make-vm-const :dst :R1 :value 20))
          (i3 (cl-cc::make-vm-add :dst :R2 :lhs :R0 :rhs :R1))
          (i4 (cl-cc::make-vm-sub :dst :R3 :lhs :R0 :rhs :R1))
-         (out (cl-cc::opt-pass-cse (list i1 i2 i3 i4))))
+         (out (cl-cc/optimize::opt-pass-cse (list i1 i2 i3 i4))))
     (assert-true (cl-cc::vm-add-p (third out)))
     (assert-true (cl-cc::vm-sub-p (fourth out)))))
 
@@ -369,8 +369,8 @@
           ("string-descending" nil "b"        "a"))
   (expected a b)
   (if expected
-      (assert-true  (cl-cc::%opt-value< a b))
-      (assert-false (cl-cc::%opt-value< a b))))
+      (assert-true  (cl-cc/optimize::%opt-value< a b))
+      (assert-false (cl-cc/optimize::%opt-value< a b))))
 
 (deftest optimizer-gvn-dominates-branch
   "GVN reuses a dominator-block value inside a dominated block."
@@ -381,11 +381,11 @@
          (l  (cl-cc::make-vm-label :name "L1"))
          (i4 (cl-cc::make-vm-add :dst :R3 :lhs :R0 :rhs :R1))
          (r  (cl-cc::make-vm-ret :reg :R3))
-         (out (cl-cc::opt-pass-gvn (list i1 i2 i3 j l i4 r))))
-    (assert-equal 1 (count-if (lambda (i) (typep i 'cl-cc::vm-add)) out))
+         (out (cl-cc/optimize::opt-pass-gvn (list i1 i2 i3 j l i4 r))))
+    (assert-equal 1 (count-if (lambda (i) (typep i 'cl-cc/vm::vm-add)) out))
     (assert-true (some (lambda (i)
-                         (and (typep i 'cl-cc::vm-move)
-                              (eq :R3 (cl-cc::vm-dst i))))
+                         (and (typep i 'cl-cc/vm::vm-move)
+                              (eq :R3 (cl-cc/vm::vm-dst i))))
                        out))))
 
 (deftest optimizer-batch-concatenate
@@ -395,12 +395,12 @@
          (i3 (cl-cc::make-vm-const :dst :R2 :value "c"))
          (c1 (cl-cc::make-vm-concatenate :dst :R3 :str1 :R0 :str2 :R1))
          (c2 (cl-cc::make-vm-concatenate :dst :R4 :str1 :R3 :str2 :R2))
-         (out (cl-cc::opt-pass-batch-concatenate (list i1 i2 i3 c1 c2)))
-         (inst (find-if (lambda (i) (typep i 'cl-cc::vm-concatenate)) out)))
-    (assert-equal 1 (count-if (lambda (i) (typep i 'cl-cc::vm-concatenate)) out))
+         (out (cl-cc/optimize::opt-pass-batch-concatenate (list i1 i2 i3 c1 c2)))
+         (inst (find-if (lambda (i) (typep i 'cl-cc/vm::vm-concatenate)) out)))
+    (assert-equal 1 (count-if (lambda (i) (typep i 'cl-cc/vm::vm-concatenate)) out))
     (assert-true inst)
-    (assert-equal '(:R0 :R1 :R2) (cl-cc::vm-parts inst))
-    (assert-equal :R4 (cl-cc::vm-dst inst))))
+    (assert-equal '(:R0 :R1 :R2) (cl-cc/vm::vm-parts inst))
+    (assert-equal :R4 (cl-cc/vm::vm-dst inst))))
 
 ;;; ── Inlining Pass: Unit Tests ──────────────────────────────────────────────
 
@@ -425,11 +425,11 @@
          (call    (cl-cc::make-vm-call :dst :R6 :func :R5 :args '(:R1)))
          (halt    (cl-cc::make-vm-halt))
          (instrs  (list closure fref jump-past lbl body1 body2 ret after arg call halt))
-         (out     (cl-cc::opt-pass-inline instrs)))
+         (out     (cl-cc/optimize::opt-pass-inline instrs)))
     (assert-true (not (inline-has-call-p out)))
     (assert-true (some (lambda (i)
                          (and (cl-cc::vm-move-p i)
-                              (eq :R6 (cl-cc::vm-dst i))))
+                              (eq :R6 (cl-cc/vm::vm-dst i))))
                        out))))
 
 (deftest inline-skip-large-function
@@ -459,7 +459,7 @@
          (instrs  (append (list closure fref jump-past lbl)
                           body
                           (list ret after arg call halt)))
-         (out     (cl-cc::opt-pass-inline instrs)))
+         (out     (cl-cc/optimize::opt-pass-inline instrs)))
     (assert-true (inline-has-call-p out))))
 
 (deftest-each inline-skip-cases
@@ -512,7 +512,7 @@
                (list closure fref jump-past lbl self body1 ret after arg call halt)))))
   (make-instrs)
   (let* ((instrs (funcall make-instrs))
-         (out    (cl-cc::opt-pass-inline instrs)))
+         (out    (cl-cc/optimize::opt-pass-inline instrs)))
     (assert-true (inline-has-call-p out))))
 
 (deftest inline-register-rename
@@ -537,7 +537,7 @@
          (halt    (cl-cc::make-vm-halt))
          (instrs  (list closure fref jump-past lbl body1 body2 ret
                         after site1 site2 arg call halt))
-         (out     (cl-cc::opt-pass-inline instrs)))
+         (out     (cl-cc/optimize::opt-pass-inline instrs)))
     ;; The call should be inlined (small body, no captures)
     (assert-true (not (inline-has-call-p out)))
     ;; The inlined body must use renamed registers (not the original :R11/:R12)
@@ -545,7 +545,7 @@
     ;; and before the halt — at least one must be > :R12 index
     (let ((inlined-dsts (loop for i in out
                               when (and (cl-cc::vm-move-p i)
-                                        (eq :R6 (cl-cc::vm-dst i)))
+                                        (eq :R6 (cl-cc/vm::vm-dst i)))
                               collect i)))
       ;; The final vm-move into :R6 must exist (proof of inlining)
       (assert-true (not (null inlined-dsts))))))
@@ -566,12 +566,12 @@
          (call    (cl-cc::make-vm-call :dst :R6 :func :R5 :args '(:R1)))
          (halt    (cl-cc::make-vm-halt))
          (instrs  (list closure fref jump-past lbl body1 body2 ret after arg call halt))
-         (out     (cl-cc::opt-pass-inline instrs)))
+         (out     (cl-cc/optimize::opt-pass-inline instrs)))
     (assert-true (not (inline-has-call-p out)))
     (assert-equal 2
                   (count-if (lambda (i)
                               (and (cl-cc::vm-const-p i)
-                                   (eql 4 (cl-cc::vm-value i))))
+                                   (eql 4 (cl-cc/vm::vm-value i))))
                             out))))
 
 

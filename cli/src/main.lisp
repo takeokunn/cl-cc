@@ -1,0 +1,161 @@
+;;;; cli/src/main.lisp — CL-CC CLI Entry Point
+;;;;
+;;;; Subcommands:
+;;;;   run     <file> [--lang lisp|php] [--stdlib] [--verbose]
+;;;;   compile <file> [-o out] [--arch x86-64|arm64] [--lang lisp|php] [--verbose]
+;;;;   eval    <expr> [--stdlib] [--verbose]
+;;;;   check   <file> [--lang lisp|php] [--strict] [--verbose]
+;;;;   help    [command]
+
+(in-package :cl-cc/cli)
+
+(defparameter *version* "0.1.0"
+  "CL-CC version string.")
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; Help text
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(defun %print-global-help ()
+  (format t "Usage: cl-cc <command> [options] [file]
+
+Commands:
+  run      <file>         Compile and run source file
+  compile  <file>         Compile to native binary
+  eval     <expr>         Evaluate an expression inline
+  repl                    Start interactive REPL
+  check    <file>         Type-check only, no execution
+  selfhost                Verify self-hosting capabilities
+  help     [command]      Show this help or command-specific help
+
+Options:
+  -o, --output <file>     Output file (compile only)
+  --arch x86-64|arm64     Target architecture (default: x86-64)
+  --lang lisp|php         Source language (auto-detect from file extension)
+  --dump-ir <phase>       Dump IR for phase: ast, cps, ssa, vm, opt, asm
+  --annotate-source       Add source-location comments when available
+  --stdlib                Prepend standard library (run/eval only)
+  --opt-remarks <mode>    Print optimizer remarks: all, changed, missed
+  --verbose               Show compilation details on stderr
+  --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
+  --print-pass-timings    Print per-pass optimizer timings
+  --time-passes          Alias for --print-pass-timings
+  --trace-json <file>     Write Chrome trace JSON for optimizer passes
+  --flamegraph <file>     Write a sampled VM flame graph SVG (run/eval only)
+  --stats                 Print per-pass optimizer stats
+  --trace-emit            Print VM/OPT/ASM compilation stages
+  --strict                Treat type warnings as errors (check only)
+
+Version: ~A~%" *version*))
+
+(defparameter *cli-help-strings*
+  '(("run" . "Usage: cl-cc run [options] <file>
+
+  Compile and run a source file using the CL-CC VM.
+
+Options:
+  --lang lisp|php   Source language (auto-detect from .php extension)
+  --dump-ir <phase>  Dump IR for phase: ast, cps, ssa, vm, opt, asm
+  --annotate-source  Add source-location comments when available
+  --stdlib          Prepend standard library
+  --opt-remarks <mode>  Print optimizer remarks: all, changed, missed
+  --verbose         Show compilation details on stderr
+  --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
+  --print-pass-timings    Print per-pass optimizer timings
+  --time-passes          Alias for --print-pass-timings
+  --trace-json <file>     Write Chrome trace JSON for optimizer passes
+  --flamegraph <file>     Write a sampled VM flame graph SVG
+  --stats                 Print per-pass optimizer stats
+  --trace-emit            Print VM/OPT/ASM compilation stages
+ ")
+    ("compile" . "Usage: cl-cc compile [options] <file>
+
+  Compile source to a native Mach-O binary.
+
+Options:
+  -o, --output <file>   Output file (default: input without extension)
+  --arch x86-64|arm64   Target architecture (default: x86-64)
+  --lang lisp|php       Source language (auto-detect from .php extension)
+  --dump-ir <phase>     Dump IR for phase: ast, cps, ssa, vm, opt, asm
+  --annotate-source     Add source-location comments when available
+  --opt-remarks <mode>  Print optimizer remarks: all, changed, missed
+  --verbose             Show compilation details on stderr
+  --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
+  --print-pass-timings    Print per-pass optimizer timings
+  --time-passes          Alias for --print-pass-timings
+  --trace-json <file>     Write Chrome trace JSON for optimizer passes
+  --flamegraph <file>     Write a sampled VM flame graph SVG
+  --stats                 Print per-pass optimizer stats
+  --trace-emit            Print VM/OPT/ASM compilation stages
+ ")
+    ("eval" . "Usage: cl-cc eval [options] <expr>
+
+  Evaluate a CL-CC expression and print the result.
+
+Options:
+  --stdlib   Prepend standard library
+  --opt-remarks <mode>  Print optimizer remarks: all, changed, missed
+  --verbose  Show compilation details on stderr
+  --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
+  --print-pass-timings    Print per-pass optimizer timings
+  --time-passes          Alias for --print-pass-timings
+  --trace-json <file>     Write Chrome trace JSON for optimizer passes
+  --flamegraph <file>     Write a sampled VM flame graph SVG
+  --stats                 Print per-pass optimizer stats
+  --trace-emit            Print VM/OPT/ASM compilation stages
+ ")
+    ("repl" . "Usage: cl-cc repl [options]
+
+  Start an interactive ANSI Common Lisp REPL.
+  Definitions persist across expressions within the session.
+
+Options:
+  --stdlib   Prepend standard library on startup
+
+Examples:
+  * (defun square (x) (* x x))
+  * (square 7)
+  => 49
+  * (exit) or Ctrl+D to quit
+")
+    ("check" . "Usage: cl-cc check [options] <file>
+
+  Run type inference on a source file without executing it.
+
+Options:
+  --lang lisp|php   Source language
+  --strict          Treat type warnings as errors (exit 1)
+  --verbose         Show type-inference details on stderr
+")
+    ("selfhost" . "Usage: cl-cc selfhost
+
+  Verify cl-cc's self-hosting capabilities.
+
+  Runs 9 checks:
+    1. Macro expansion through own VM (our-eval)
+    2-5. Basic compilation (arithmetic, recursion, closure, defmacro)
+    6-7. Meta-circular compilation (compiler compiles compiler)
+    8. Source file self-loading (87/87 files)
+    9. Host eval elimination (4/7 replaced)
+
+  Exit code 0 if all checks pass, 1 otherwise.
+"))
+  "Alist mapping command name strings to their help text strings.")
+
+(defun %print-command-help (command)
+  (let ((entry (assoc command *cli-help-strings* :test #'string=)))
+    (if entry
+        (format t "~A" (cdr entry))
+        (progn
+          (format *error-output* "Unknown command: ~A~%" command)
+          (%print-global-help)))))
+
+(defun %print-help (&optional command)
+  (if command
+      (%print-command-help command)
+      (%print-global-help)))
+
+
+;;; (Utilities, dump functions, and compile options
+;;;  are in main-utils.lisp which loads after this file.)
+

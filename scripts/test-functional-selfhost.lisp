@@ -153,13 +153,13 @@
 
 ;; cl-cc can load its own real source files
 (let ((ok 0)
-      (files '("src/parse/cst.lisp"
-               "src/prolog/prolog.lisp"
-               "src/compile/cps.lisp"
-               "src/optimize/optimizer.lisp"
-               "src/type/inference.lisp"
-               "src/vm/vm.lisp"
-               "src/runtime/gc.lisp")))
+      (files '("packages/frontend/parse/src/cst.lisp"
+               "packages/prolog/prolog/src/prolog.lisp"
+               "packages/engine/compile/src/cps.lisp"
+               "packages/engine/optimize/src/optimizer.lisp"
+               "packages/type/type/src/inference.lisp"
+               "packages/engine/vm/src/vm.lisp"
+               "packages/backend/runtime/src/gc.lisp")))
   (with-fresh-repl
     (dolist (f files)
       (handler-case

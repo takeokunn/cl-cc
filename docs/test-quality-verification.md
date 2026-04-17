@@ -6,16 +6,16 @@
 
 このセッションでは、次を実用上の完了条件として扱いました。
 
-1. `make test` と `make build` が成功すること。
+1. `nix run .#test` と `nix run .#build` が成功すること。
 2. 重い・不安定だった target を複数回再実行しても green を維持すること。
 3. shared state 起因で不安定だった suite については、serial 実行が意図された境界であることを明示すること。
 4. 高リスク修正には focused regression test を紐づけること。
 
 ## 実測結果
 
-- `make test`: canonical plan が green
+- `nix run .#test`: canonical plan が green
 
-さらに `make clean` 後に `make build`, `make test` を再実行し、clean state でも green を確認しました。
+さらに `nix run .#clean` 後に `nix run .#build`, `nix run .#test` を再実行し、clean state でも green を確認しました。
 
 ## 旧 skip 4 件の扱い
 
@@ -56,7 +56,7 @@
 - 回帰確認:
   - `tests/unit/expand/macros-control-flow-tests.lisp`
   - `tests/unit/expand/macros-stdlib-io-tests.lisp`
-  - canonical `make test` の repeated green
+  - canonical `nix run .#test` の repeated green
 
 ### 2. stdlib cache の `copy-list` → `copy-tree`
 
@@ -112,7 +112,7 @@
 「理想的なコードベース」は定量的に閉じた条件ではありません。
 このセッションでは、それを以下へ具体化して達成しました。
 
-- canonical `make test` の green
+- canonical `nix run .#test` の green
 - repeated run での安定性
 - shared-state suite の deterministic boundary 化
 - 高リスク修正への focused regression 追加
