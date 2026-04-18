@@ -55,6 +55,21 @@ Returns a function that takes a continuation."
   (expected form)
   (assert-equal expected (cl-cc/compile::%funcall-of-single-lambda-p form)))
 
+(deftest cps-single-param-lambda-parts
+  "%single-param-lambda-parts extracts the parameter and body of a one-arg lambda."
+  (multiple-value-bind (param body)
+      (cl-cc/compile::%single-param-lambda-parts '(lambda (k) (funcall next k)))
+    (assert-eq 'k param)
+    (assert-equal '(funcall next k) body)))
+
+(deftest cps-funcall-single-lambda-parts
+  "%funcall-single-lambda-parts extracts beta-reduction pieces from a funcall form."
+  (multiple-value-bind (param body arg)
+      (cl-cc/compile::%funcall-single-lambda-parts '(funcall (lambda (x) (+ x 1)) 41))
+    (assert-eq 'x param)
+    (assert-equal '(+ x 1) body)
+    (assert-= 41 arg)))
+
 (deftest-each cps-eta-reducible-lambda-p
   "%eta-reducible-lambda-p: recognizes (lambda (x) (funcall f x))."
   :cases (("yes"              t   '(lambda (k) (funcall next k)))
@@ -243,6 +258,17 @@ Returns a function that takes a continuation."
     ;; single form: delegates to cps-transform-ast (still a list)
     (let ((sexp (cl-cc:cps-transform-sequence (list (cl-cc:make-ast-int :value 5)) k-var)))
       (assert-true (listp sexp)))))
+
+(deftest cps-simplify-fixed-point-stops-on-stable-form
+  "%cps-simplify-fixed-point keeps applying a step until the form stabilizes."
+  (let ((calls 0))
+    (assert-equal 'done
+                  (cl-cc/compile::%cps-simplify-fixed-point
+                   'start
+                   (lambda (form)
+                     (incf calls)
+                     (if (eq form 'start) 'done 'done))))
+    (assert-= 2 calls)))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; CPS for block / return-from

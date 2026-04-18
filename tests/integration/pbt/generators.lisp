@@ -92,7 +92,7 @@
    - Variables: ?a, ?b (for polymorphism testing)"
   (let ((effective-depth (max 0 (min depth *max-type-depth*))))
     (if (or (zerop effective-depth)
-            (< (random 100 *pbt-random-state*)
+            (< (random 100 (%pbt-rng))
                (- 100 (* effective-depth 20))))
         ;; Generate terminal type
         (gen-bind
@@ -572,7 +572,7 @@
    - ast-call with function types"
   (let ((effective-depth (max 0 (min depth *max-type-depth*))))
     (if (or (zerop effective-depth)
-            (< (random 100 *pbt-random-state*)
+            (< (random 100 (%pbt-rng))
                (- 100 (* effective-depth 15))))
         ;; Generate terminal node
         (gen-typed-terminal)

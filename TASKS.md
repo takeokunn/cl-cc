@@ -9,12 +9,12 @@ Coding Agent 用逐次実装タスクリスト。
 
 ## Phase 1: Easy / Low (クイックウィン)
 
-- [ ] **FR-586** `set` 関数 (ANSI廃止予定だが必須)
+- [x] **FR-586** `set` 関数 (ANSI廃止予定だが必須)
   - 詳細: `docs/ansi-cl-stdlib.md` の FR-586 セクションを参照
   - 対象: `packages/engine/compile/src/builtin-registry-data.lisp`
   - 内容: `(set symbol value)` を `(setf (symbol-value symbol) value)` に等価な形でビルトイン登録
 
-- [ ] **FR-555** `copy-structure`
+- [x] **FR-555** `copy-structure`
   - 詳細: `docs/ansi-cl-lang.md` の FR-555 セクションを参照
   - 対象: `packages/frontend/expand/src/expander-defstruct.lisp`
   - 内容: `(copy-structure structure-object)` — 全スロットをシャローコピーした新インスタンスを返す

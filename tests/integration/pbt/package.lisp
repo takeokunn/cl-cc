@@ -7,6 +7,7 @@
   (:use :cl)
   (:import-from :cl-cc/test
                  #:cl-cc-suite
+                 #:cl-cc-integration-suite
                  #:cl-cc-integration-serial-suite
                  #:defsuite
                  #:in-suite
@@ -190,7 +191,7 @@
    #:*max-type-depth*
    #:*max-mach-o-sections*
    #:*size*
-   #:*pbt-random-state*
+   #:*pbt-rng-override*
 
    ;; Built-in generators
    #:gen-integer

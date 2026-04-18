@@ -15,6 +15,7 @@
    #:*constant-table*
    #:*accessor-slot-map*
    #:*defstruct-slot-registry*
+   #:*defstruct-type-registry*
 
    ;; --- expander-core.lisp --- macro expander construction -------------
    #:make-macro-expander

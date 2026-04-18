@@ -240,7 +240,6 @@
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Main dispatcher
-;;; (Selfhost verification is in selfhost.lisp, which loads before this file.)
 ;;; ─────────────────────────────────────────────────────────────────────────
 
 (defparameter *cli-command-dispatch*
@@ -248,8 +247,7 @@
     ("compile"  . %do-compile)
     ("eval"     . %do-eval)
     ("repl"     . %do-repl)
-    ("check"    . %do-check)
-    ("selfhost" . %do-selfhost))
+    ("check"    . %do-check))
   "Alist mapping command name strings to their handler functions.")
 
 (defun main ()

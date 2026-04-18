@@ -41,6 +41,16 @@
     (exec1 (cl-cc::make-vm-symbol-get :dst 5 :sym 1 :indicator 2 :default 4) s)
     (assert-equal 'red (cl-cc:vm-reg-get s 5))))
 
+(deftest vm-set-symbol-value
+  "vm-set-symbol-value updates the symbol value cell and returns the assigned value."
+  (let ((s (make-test-vm)))
+    (setf (symbol-value 'prim-test-global) 0)
+    (cl-cc:vm-reg-set s 1 'prim-test-global)
+    (cl-cc:vm-reg-set s 2 77)
+    (exec1 (cl-cc::make-vm-set-symbol-value :dst 0 :lhs 1 :rhs 2) s)
+    (assert-= 77 (cl-cc:vm-reg-get s 0))
+    (assert-= 77 (symbol-value 'prim-test-global))))
+
 (deftest vm-remprop
   "vm-remprop removes a property and returns t."
   (let ((s (make-test-vm)))

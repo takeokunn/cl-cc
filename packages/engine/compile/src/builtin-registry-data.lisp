@@ -231,6 +231,7 @@
     (bit-xor          . make-vm-bit-xor)
     ;; List
     (equal            . make-vm-equal)
+    (set              . make-vm-set-symbol-value)
     (nconc            . make-vm-nconc)
     (nreconc          . make-vm-nreconc)
     ;; Equality (both map to vm-eq)
@@ -276,4 +277,3 @@
 ;;; (Specialized tables: table-query, handle-input, side-effect, nullary,
 ;;;  stream I/O, binary-custom, ternary-custom, and opt/nil conventions
 ;;;  are in builtin-registry-data-ext.lisp which loads after this file.)
-

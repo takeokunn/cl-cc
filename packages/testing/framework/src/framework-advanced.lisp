@@ -168,19 +168,20 @@ or generates runtime expansion."
                   (test-name (intern (format nil "~A [~A]"
                                              ',(symbol-name base-name)
                                              label-str))))
-             (setf (gethash test-name *test-registry*)
-                   (let ((captured-combo combo))
-                     (list :name test-name
-                           :fn (let ,(loop for var in param-vars
-                                           for idx from 0
-                                           collect `(,var (nth ,idx captured-combo)))
-                                 (lambda () ,@body))
-                           :suite *current-suite*
-                           :timeout nil
-                           :depends-on nil
-                           :tags nil
-                           :docstring (format nil "~A combination ~A"
-                                              ',base-name label-str))))))))))
+             (setf *test-registry*
+                   (persist-assoc *test-registry* test-name
+                                  (let ((captured-combo combo))
+                                    (list :name test-name
+                                          :fn (let ,(loop for var in param-vars
+                                                          for idx from 0
+                                                          collect `(,var (nth ,idx captured-combo)))
+                                                (lambda () ,@body))
+                                          :suite *current-suite*
+                                          :timeout nil
+                                          :depends-on nil
+                                          :tags nil
+                                          :docstring (format nil "~A combination ~A"
+                                                             ',base-name label-str)))))))))))
 
 ;;; ------------------------------------------------------------
 ;;; FR-021 — deftest-pipeline: Pipeline Stage Testing
@@ -249,6 +250,146 @@ Intended to be called from the REPL when you want to refresh all snapshots."
   (setf *update-snapshots* nil))
 
 ;;; ------------------------------------------------------------
+;;; Flaky Detection + Timing Output Helpers
+;;; ------------------------------------------------------------
+
+(defun %detect-flaky (all-run-results repeat)
+  "Given a list of repeat result-lists, find tests with inconsistent status."
+  (let ((by-name (make-hash-table)))
+    (dolist (run-results all-run-results)
+      (dolist (r run-results)
+        (let ((name (getf r :name))
+              (status (getf r :status)))
+          (push status (gethash name by-name)))))
+    (let ((flaky '()))
+      (maphash (lambda (name statuses)
+                 (let ((pass-count (count :pass statuses))
+                       (total (length statuses)))
+                   (when (and (< pass-count total) (> pass-count 0))
+                     (push (list name pass-count total) flaky))))
+               by-name)
+      (when flaky
+        (format t "# Flaky tests detected (inconsistent across ~A runs):~%" repeat)
+        (dolist (f flaky)
+          (format t "#   ~A: passed ~A/~A runs~%"
+                  (first f) (second f) (third f)))))))
+
+(defun %status-keyword-to-string (status)
+  "Map an internal result status keyword to its frozen TSV token."
+  (case status
+    (:pass "passed")
+    (:fail "failed")
+    (:skip "skipped")
+    (:pending "pending")
+    (:errored "errored")
+    (:timed-out "timed-out")
+    (t (string-downcase (symbol-name status)))))
+
+(defun %path-contains-parent-segment-p (raw)
+  "Return T if RAW contains a `..` path segment delimited by / or \\."
+  (let ((len (length raw)))
+    (loop for i from 0 below (- len 1)
+          thereis
+          (and (char= (char raw i) #\.)
+               (char= (char raw (1+ i)) #\.)
+               (or (zerop i)
+                   (let ((prev (char raw (1- i))))
+                     (or (char= prev #\/) (char= prev #\\))))
+               (or (= (+ i 2) len)
+                   (let ((next (char raw (+ i 2))))
+                     (or (char= next #\/) (char= next #\\))))))))
+
+(defun %timings-output-path ()
+  "Resolve the TSV output path honoring CLCC_TIMINGS_FILE override."
+  (let ((raw (uiop:getenv "CLCC_TIMINGS_FILE"))
+        (default "./test-timings.tsv"))
+    (cond
+      ((or (null raw) (zerop (length raw)))
+       default)
+      ((%path-contains-parent-segment-p raw)
+       (warn "CLCC_TIMINGS_FILE rejected: contains `..` segment — falling back to default")
+       default)
+      (t
+       (let* ((cwd (ignore-errors (uiop:getcwd)))
+              (cwd-ns (and cwd (namestring (truename cwd))))
+              (abs-p (uiop:absolute-pathname-p raw)))
+         (if abs-p
+             (let* ((canon (ignore-errors (uiop:truenamize raw)))
+                    (canon-ns (and canon (namestring canon))))
+               (cond
+                 ((null canon-ns)
+                  (let* ((parent (make-pathname :defaults (pathname raw) :name nil :type nil))
+                         (parent-canon (ignore-errors (uiop:truenamize parent)))
+                         (parent-ns (and parent-canon (namestring parent-canon))))
+                    (if (and parent-ns cwd-ns
+                             (>= (length parent-ns) (length cwd-ns))
+                             (string= parent-ns cwd-ns :end1 (length cwd-ns)))
+                        raw
+                        (progn
+                          (warn "CLCC_TIMINGS_FILE rejected: not a descendant of cwd — falling back to default")
+                          default))))
+                 ((and cwd-ns
+                       (>= (length canon-ns) (length cwd-ns))
+                       (string= canon-ns cwd-ns :end1 (length cwd-ns)))
+                  raw)
+                 (t
+                  (warn "CLCC_TIMINGS_FILE rejected: not a descendant of cwd — falling back to default")
+                  default)))
+             raw))))))
+
+(defun %tsv-sanitize (s)
+  "Replace TSV-breaking characters (Tab/Newline/Return) with a single space."
+  (if (or (null s) (zerop (length s)))
+      (or s "")
+      (map 'string
+           (lambda (c)
+             (if (or (char= c #\Tab)
+                     (char= c #\Newline)
+                     (char= c #\Return))
+                 #\Space
+                 c))
+           s)))
+
+(defun %write-timings-tsv (results path)
+  "Write RESULTS (a flat list of test result plists) to PATH as TSV."
+  (with-open-file (stream path
+                          :direction :output
+                          :if-exists :supersede
+                          :if-does-not-exist :create)
+    (dolist (r results)
+      (let* ((suite      (getf r :suite))
+             (name       (getf r :name))
+             (duration   (or (getf r :duration-ns) 0))
+             (status     (getf r :status))
+             (batch-id   (getf r :batch-id))
+             (suite-str  (%tsv-sanitize (if suite (symbol-name suite) "")))
+             (name-str   (%tsv-sanitize (if name (symbol-name name) "")))
+             (status-str (%status-keyword-to-string status))
+             (batch-str  (if batch-id (format nil "~D" batch-id) "-")))
+        (format stream "~A~C~A~C~D~C~A~C~A~%"
+                suite-str #\Tab
+                name-str  #\Tab
+                duration  #\Tab
+                status-str #\Tab
+                batch-str)))))
+
+(defun %emit-slowest-summary (results &optional (n 20))
+  "Print the top N slowest tests by :duration-ns (descending)."
+  (let* ((timed (remove-if-not (lambda (r) (getf r :duration-ns)) results))
+         (sorted (sort (copy-list timed) #'>
+                       :key (lambda (r) (getf r :duration-ns))))
+         (top (subseq sorted 0 (min n (length sorted)))))
+    (format t "# Top ~A slowest tests:~%" n)
+    (dolist (r top)
+      (let* ((name (getf r :name))
+             (suite (getf r :suite))
+             (ns (getf r :duration-ns))
+             (ms (/ ns 1000000.0d0)))
+        (format t "#   ~A (~,3Fms) ~A~%"
+                name ms (or suite "-"))))
+    (force-output)))
+
+;;; ------------------------------------------------------------
 ;;; Runner Regression Tests
 ;;; ------------------------------------------------------------
 
@@ -265,16 +406,18 @@ Intended to be called from the REPL when you want to refresh all snapshots."
         (child (gensym "ULW-CHILD-")))
     (unwind-protect
          (progn
-           (setf (gethash parent *suite-registry*)
-                 (list :name parent :description "tmp" :parent nil :parallel nil
-                       :before-each '() :after-each '()))
-           (setf (gethash child *suite-registry*)
-                 (list :name child :description "tmp" :parent parent :parallel t
-                       :before-each '() :after-each '()))
+           (setf *suite-registry*
+                 (persist-assoc *suite-registry* parent
+                                (list :name parent :description "tmp" :parent nil :parallel nil
+                                      :before-each '() :after-each '())))
+           (setf *suite-registry*
+                 (persist-assoc *suite-registry* child
+                                (list :name child :description "tmp" :parent parent :parallel t
+                                      :before-each '() :after-each '())))
            (assert-false (%suite-parallel-p child))
            (assert-false (%test-parallel-safe-p (list :suite child :depends-on nil))))
-      (remhash child *suite-registry*)
-      (remhash parent *suite-registry*))))
+      (setf *suite-registry* (persist-remove *suite-registry* child))
+      (setf *suite-registry* (persist-remove *suite-registry* parent)))))
 
 (deftest mixed-runner-reorders-internal-dependencies
   "Dependent tests are reordered behind their in-list prerequisite."
@@ -299,12 +442,14 @@ Intended to be called from the REPL when you want to refresh all snapshots."
         (parallel-suite (gensym "ULW-PARALLEL-SUITE-")))
     (unwind-protect
          (progn
-           (setf (gethash serial-suite *suite-registry*)
-                 (list :name serial-suite :description "tmp" :parent nil :parallel nil
-                       :before-each '() :after-each '()))
-           (setf (gethash parallel-suite *suite-registry*)
-                 (list :name parallel-suite :description "tmp" :parent nil :parallel t
-                       :before-each '() :after-each '()))
+           (setf *suite-registry*
+                 (persist-assoc *suite-registry* serial-suite
+                                (list :name serial-suite :description "tmp" :parent nil :parallel nil
+                                      :before-each '() :after-each '())))
+           (setf *suite-registry*
+                 (persist-assoc *suite-registry* parallel-suite
+                                (list :name parallel-suite :description "tmp" :parent nil :parallel t
+                                      :before-each '() :after-each '())))
            (assert-false (%test-parallel-safe-p
                           (list :name 'serial-test :suite serial-suite :depends-on nil)))
            (assert-false (%test-parallel-safe-p
@@ -312,17 +457,18 @@ Intended to be called from the REPL when you want to refresh all snapshots."
                                 :depends-on 'other-test)))
             (assert-true (%test-parallel-safe-p
                          (list :name 'parallel-test :suite parallel-suite :depends-on nil))))
-      (remhash parallel-suite *suite-registry*)
-      (remhash serial-suite *suite-registry*))))
+      (setf *suite-registry* (persist-remove *suite-registry* parallel-suite))
+      (setf *suite-registry* (persist-remove *suite-registry* serial-suite)))))
 
 (deftest effective-worker-count-falls-back-to-one-for-serial-batches
   "Worker reporting collapses to 1 when no test in the batch may run in parallel."
   (let ((serial-suite (gensym "ULW-SERIAL-SUITE-")))
     (unwind-protect
          (progn
-           (setf (gethash serial-suite *suite-registry*)
-                 (list :name serial-suite :description "tmp" :parent nil :parallel nil
-                       :before-each '() :after-each '()))
+           (setf *suite-registry*
+                 (persist-assoc *suite-registry* serial-suite
+                                (list :name serial-suite :description "tmp" :parent nil :parallel nil
+                                      :before-each '() :after-each '())))
            (assert-= 1
                      (%effective-worker-count
                       (list (list :name 'serial-test :suite serial-suite :depends-on nil))
@@ -333,16 +479,17 @@ Intended to be called from the REPL when you want to refresh all snapshots."
                       (list (list :name 'serial-test :suite serial-suite :depends-on nil))
                       nil
                       4)))
-      (remhash serial-suite *suite-registry*))))
+      (setf *suite-registry* (persist-remove *suite-registry* serial-suite)))))
 
 (deftest effective-worker-count-keeps-requested-workers-for-parallel-safe-batches
   "Worker reporting preserves the requested worker count when at least one test can run in parallel."
   (let ((parallel-suite (gensym "ULW-PARALLEL-SUITE-")))
     (unwind-protect
          (progn
-           (setf (gethash parallel-suite *suite-registry*)
-                 (list :name parallel-suite :description "tmp" :parent nil :parallel t
-                       :before-each '() :after-each '()))
+           (setf *suite-registry*
+                 (persist-assoc *suite-registry* parallel-suite
+                                (list :name parallel-suite :description "tmp" :parent nil :parallel t
+                                      :before-each '() :after-each '())))
            (assert-= 4
                      (%effective-worker-count
                       (list (list :name 'parallel-test :suite parallel-suite :depends-on nil))
@@ -353,7 +500,7 @@ Intended to be called from the REPL when you want to refresh all snapshots."
                       (list (list :name 'parallel-test :suite parallel-suite :depends-on nil))
                       t
                       2)))
-      (remhash parallel-suite *suite-registry*))))
+      (setf *suite-registry* (persist-remove *suite-registry* parallel-suite)))))
 
 (deftest run-suite-reports-one-worker-for-serial-only-batch
   "run-suite reports one worker when the selected batch has no parallel-safe tests."
@@ -364,21 +511,24 @@ Intended to be called from the REPL when you want to refresh all snapshots."
         (original-quit (symbol-function 'uiop:quit)))
     (unwind-protect
          (progn
-           (setf (gethash root *suite-registry*)
-                 (list :name root :description "tmp" :parent nil :parallel t
-                       :before-each '() :after-each '()))
-           (setf (gethash serial-suite *suite-registry*)
-                 (list :name serial-suite :description "tmp" :parent root :parallel nil
-                       :before-each '() :after-each '()))
-           (setf (gethash test-name *test-registry*)
-                 (list :name test-name
-                       :suite serial-suite
-                       :fn (lambda () t)
-                       :skip nil
-                       :xfail nil
-                       :depends-on nil
-                       :timeout nil
-                       :tags nil))
+           (setf *suite-registry*
+                 (persist-assoc *suite-registry* root
+                                (list :name root :description "tmp" :parent nil :parallel t
+                                      :before-each '() :after-each '())))
+           (setf *suite-registry*
+                 (persist-assoc *suite-registry* serial-suite
+                                (list :name serial-suite :description "tmp" :parent root :parallel nil
+                                      :before-each '() :after-each '())))
+           (setf *test-registry*
+                 (persist-assoc *test-registry* test-name
+                                (list :name test-name
+                                      :suite serial-suite
+                                      :fn (lambda () t)
+                                      :skip nil
+                                      :xfail nil
+                                      :depends-on nil
+                                      :timeout nil
+                                      :tags nil)))
            (setf (symbol-function 'cl-cc::warm-stdlib-cache) (lambda () nil))
            (setf (symbol-function 'uiop:quit) (lambda (&optional code) code))
            (let ((output (with-output-to-string (s)
@@ -388,18 +538,18 @@ Intended to be called from the REPL when you want to refresh all snapshots."
              (assert-true (search "# Workers: 1" output))))
       (setf (symbol-function 'cl-cc::warm-stdlib-cache) original-warm-stdlib-cache)
       (setf (symbol-function 'uiop:quit) original-quit)
-      (remhash test-name *test-registry*)
-      (remhash serial-suite *suite-registry*)
-      (remhash root *suite-registry*))))
+      (setf *test-registry* (persist-remove *test-registry* test-name))
+      (setf *suite-registry* (persist-remove *suite-registry* serial-suite))
+      (setf *suite-registry* (persist-remove *suite-registry* root)))))
 
 (deftest canonical-suite-taxonomy-matches-runner-contract
   "The canonical runner exposes unit, integration, and e2e suites under the root taxonomy."
   (assert-eq 'cl-cc-suite
-             (getf (gethash 'cl-cc-unit-suite *suite-registry*) :parent))
+             (getf (persist-lookup *suite-registry* 'cl-cc-unit-suite) :parent))
   (assert-eq 'cl-cc-suite
-             (getf (gethash 'cl-cc-integration-suite *suite-registry*) :parent))
+             (getf (persist-lookup *suite-registry* 'cl-cc-integration-suite) :parent))
   (assert-eq 'cl-cc-suite
-             (getf (gethash 'cl-cc-e2e-suite *suite-registry*) :parent)))
+             (getf (persist-lookup *suite-registry* 'cl-cc-e2e-suite) :parent)))
 
 (deftest run-single-test-skips-when-dependency-failed
   "A test with a failed dependency is reported as skipped without executing its body."
@@ -472,13 +622,14 @@ Intended to be called from the REPL when you want to refresh all snapshots."
   (let ((fixture-suite (gensym "ULW-FIXTURE-SUITE-")))
     (unwind-protect
          (progn
-           (setf (gethash fixture-suite *suite-registry*)
-                 (list :name fixture-suite
-                       :description "tmp"
-                       :parent nil
-                       :parallel t
-                       :before-each (list (lambda () (error "fixture boom")))
-                       :after-each '()))
+           (setf *suite-registry*
+                 (persist-assoc *suite-registry* fixture-suite
+                                (list :name fixture-suite
+                                      :description "tmp"
+                                      :parent nil
+                                      :parallel t
+                                      :before-each (list (lambda () (error "fixture boom")))
+                                      :after-each '())))
            (let* ((test-plist (list :name 'fixture-demo
                                     :fn (lambda () t)
                                     :suite fixture-suite
@@ -489,7 +640,7 @@ Intended to be called from the REPL when you want to refresh all snapshots."
              (assert-eq :fail (getf result :status))
              (assert-true (search "fixture error" (getf result :detail)))
              (assert-true (search "fixture boom" (getf result :detail)))))
-      (remhash fixture-suite *suite-registry*))))
+      (setf *suite-registry* (persist-remove *suite-registry* fixture-suite)))))
 
 (deftest run-single-test-times-out-sequentially
   "Sequential runner reports timeout failures when a test exceeds its budget."

@@ -12,11 +12,8 @@
 ;;;; Section 2: FOR x IN list
 ;;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-(check-loop-equal loop-for-in-collect
-  "for x in list collect x"
-  "(loop for x in '(1 2 3) collect x)"
-  '(1 2 3))
-
+;; Consolidated: collect-transform subsumes plain `collect x` (same iteration/accum path;
+;; the transform exercises arbitrary body expressions too).
 (check-loop-equal loop-for-in-collect-transform
   "for x in list collect (* x 2) doubles each element"
   "(loop for x in '(1 2 3) collect (* x 2))"
@@ -87,11 +84,7 @@
 ;;;; Section 5: FOR x ACROSS vector
 ;;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-(check-loop-equal loop-across-collect
-  "for x across #(1 2 3) collect x"
-  "(loop for x across #(1 2 3) collect x)"
-  '(1 2 3))
-
+;; Consolidated: across-transform subsumes plain `collect x` across vector.
 (check-loop-equal loop-across-transform
   "for x across vector collect (* x 10)"
   "(loop for x across #(1 2 3) collect (* x 10))"
@@ -209,10 +202,8 @@
   "(loop for x in '(nil nil nil) count x)"
   0)
 
-(check-loop-= loop-count-all-true
-  "count over all-truthy list equals list length"
-  "(loop for x in '(1 2 3 4 5) count x)"
-  5)
+;; Removed loop-count-all-true: constant-variation duplicate of loop-count-truthy
+;; (same mechanism, just different list contents).
 
 (check-loop-= loop-minimize-basic
   "minimize returns minimum value"
@@ -655,15 +646,9 @@
   "(loop for x in '(-5 -2 -8 -1 -9) minimize x)"
   -9)
 
-(check-loop-= loop-maximize-two-element
-  "maximize over a two-element list returns the larger"
-  "(loop for x in '(3 7) maximize x)"
-  7)
-
-(check-loop-= loop-minimize-two-element
-  "minimize over a two-element list returns the smaller"
-  "(loop for x in '(7 3) minimize x)"
-  3)
+;; Removed loop-maximize-two-element / loop-minimize-two-element: subset of
+;; loop-maximize-basic / loop-minimize-basic which already exercise the
+;; compare-against-accum path on multi-element lists.
 
 ;;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;;; Section 30: Accumulation keyword synonyms
@@ -676,9 +661,12 @@
 ;;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ;;; Helper — generate a pair of tests (canonical + synonym) in one call.
+;;; Both arms runtime-check the produced value.
+;;; Rationale: -ING synonyms are resolved by the loop normalizer, so gensym-free
+;;; expansion equality is impossible. Two runtime checks is the minimal faithful
+;;; test.
 (defmacro check-loop-synonym-pair (base-name description canonical-code synonym-code expected)
-  "Generate two deftest calls: one for the canonical keyword and one for its -ING synonym.
-Both must produce EXPECTED under EQUAL comparison."
+  "Generate two deftest calls: canonical + -ING synonym, both runtime-checked."
   `(progn
      (check-loop-equal ,base-name
        ,(format nil "~A (canonical)" description)
@@ -708,7 +696,6 @@ Both must produce EXPECTED under EQUAL comparison."
 ;;; Numeric synonyms — use check-loop-= for correct equality predicate.
 
 (defmacro check-loop-=-synonym-pair (base-name description canonical-code synonym-code expected)
-  "Like check-loop-synonym-pair but compares with = (numeric equality)."
   `(progn
      (check-loop-= ,base-name
        ,(format nil "~A (canonical)" description)
@@ -877,50 +864,39 @@ Both must produce EXPECTED under EQUAL comparison."
 
 ;;; Loop Macro Tests
 
+;; Consolidated: the following deftest-each previously duplicated many of the
+;; individual check-loop-equal tests above (for-in, for-from-to, for-below,
+;; collect-expr, for-on, when-collect, unless-collect, if-collect, collect-into,
+;; append, hash-key-val). Removed those cases; kept only cases that exercise
+;; paths not covered by individual tests (for-in-do via push, unless-do via push,
+;; when-append, collect-into-when combining INTO + filter, from-by stepping).
 (deftest-each loop-collect-list
-  "LOOP collect/append/nconc/on/when/unless accumulations return the expected list."
-  :cases (("for-in"         '(1 2 3)           "(loop for x in (list 1 2 3) collect x)")
-          ("for-in-do"      '(1 2 3)           "(let ((r nil)) (loop for x in (list 1 2 3) do (push x r)) (nreverse r))")
-          ("for-from-to"    '(1 2 3 4 5)       "(loop for i from 1 to 5 collect i)")
-          ("for-below"      '(0 1 2 3 4)       "(loop for i from 0 below 5 collect i)")
-          ("collect-expr"   '(1 4 9)           "(loop for x in (list 1 2 3) collect (* x x))")
-          ("for-on"         '((1 2 3) (2 3) (3)) "(loop for x on (list 1 2 3) collect x)")
+  "LOOP collect/append/do/when/unless accumulations — paths not covered individually."
+  :cases (("for-in-do"      '(1 2 3)           "(let ((r nil)) (loop for x in (list 1 2 3) do (push x r)) (nreverse r))")
           ("empty"          nil                "(loop for x in nil collect x)")
           ("from-by"        '(0 2 4)           "(loop for i from 0 below 5 by 2 collect i)")
           ("on-by-cddr"     '((1 2 3 4) (3 4)) "(loop for x on (list 1 2 3 4) by (function cddr) collect x)")
-          ("when-collect"   '(4 16 36)         "(loop for x in (list 1 2 3 4 5 6) when (evenp x) collect (* x x))")
-          ("unless-collect" '(1 9 25)          "(loop for x in (list 1 2 3 4 5 6) unless (evenp x) collect (* x x))")
-          ("if-collect"     '(2 4 6)           "(loop for x in (list 1 2 3 4 5 6) if (evenp x) collect x)")
           ("unless-do"      '(1 3 5)           "(let ((r nil)) (loop for x in (list 1 2 3 4 5) unless (evenp x) do (push x r)) (nreverse r))")
           ("when-append"    '(2 2 4 4)         "(loop for x in (list 1 2 3 4) when (evenp x) append (list x x))")
-          ("collect-into"   '(1 2 3)           "(loop for x in (list 1 2 3) collect x into result finally (return (nreverse result)))")
-          ("append"         '(1 2 3 4)         "(loop for x in (list (list 1 2) (list 3 4)) append x)")
-          ("hash-key-val"   '(100)             "(let ((ht (make-hash-table))) (setf (gethash 'a ht) 100) (loop for k being the hash-keys of ht using (hash-value v) collect v))")
           ("collect-into-when" '((1 3 5 7 9) (2 4 6 8 10)) "(loop for i from 1 to 10 when (oddp i) collect i into odds when (evenp i) collect i into evens finally (return (list (nreverse odds) (nreverse evens))))"))
   (expected form)
   (assert-true (equal expected (run-string form :stdlib t))))
 
+;; Consolidated: removed cases covered individually above:
+;;   "repeat"/"sum"/"hash-keys" duplicate check-loop-= loop-repeat-sum /
+;;   loop-from-to-sum / check-loop-length loop-hash-keys-collect.
 (deftest-each loop-numeric
-  "LOOP sum/repeat/with-clause return the expected numeric value."
-  :cases (("repeat"       5  "(let ((n 0)) (loop repeat 5 do (setq n (+ n 1))) n)")
-          ("sum"         15  "(loop for i from 1 to 5 sum i)")
-          ("repeat-zero"  0  "(let ((n 0)) (loop repeat 0 do (setq n (+ n 1))) n)")
-          ("hash-keys"    2  "(let ((ht (make-hash-table))) (setf (gethash 'a ht) 1) (setf (gethash 'b ht) 2) (length (loop for k being the hash-keys of ht collect k)))")
+  "LOOP numeric accumulations — paths not covered individually."
+  :cases (("repeat-zero"  0  "(let ((n 0)) (loop repeat 0 do (setq n (+ n 1))) n)")
           ("hash-values" 30  "(let ((ht (make-hash-table))) (setf (gethash 'x ht) 10) (setf (gethash 'y ht) 20) (loop for v being the hash-values of ht sum v))")
           ("with-clause" 15  "(loop with sum = 0 for i from 1 to 5 do (setq sum (+ sum i)) finally (return sum))")
-          ("when-sum"    12  "(loop for i from 1 to 6 when (evenp i) sum i)")
           ("sum-into"    15  "(loop for i from 1 to 5 sum i into total finally (return total))"))
   (expected form)
   (assert-= expected (run-string form :stdlib t)))
 
-(deftest-each loop-always-never-thereis
-  "LOOP always/never/thereis return t, nil, or the first truthy value."
-  :cases (("always-true"  t   "(loop for i in (list 2 4 6) always (evenp i))")
-          ("always-false" nil "(loop for i in (list 2 3 6) always (evenp i))")
-          ("never-true"   t   "(loop for i in (list 1 3 5) never (evenp i))")
-          ("thereis"      1   "(loop for i in (list 1 2 3) thereis (evenp i))"))
-  (expected form)
-  (assert-true (equal expected (run-string form :stdlib t))))
+;; Removed deftest-each loop-always-never-thereis: every case is a direct
+;; duplicate of individual check-loop-* tests above
+;; (loop-always-true / loop-always-false / loop-never-true / loop-thereis-finds-value).
 
 (deftest loop-edge-cases
   "LOOP: empty hash-keys returns nil; nconc concatenates sublists."

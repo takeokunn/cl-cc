@@ -6,12 +6,10 @@
 
 (defsuite selfhost-suite
   :description "Self-hosting end-to-end tests"
-  :parallel nil
   :parent cl-cc-e2e-suite)
 
 (defsuite selfhost-slow-suite
   :description "Heavy self-hosting end-to-end regression tests"
-  :parallel nil
   :parent cl-cc-e2e-suite)
 
 (in-suite selfhost-suite)
@@ -20,13 +18,7 @@
 ;;; Each call creates isolated REPL state that doesn't interfere with other tests.
 (defun run-repl-forms (&rest forms)
   "Run FORMS in a fresh REPL context, return last result."
-  (let ((cl-cc::*repl-vm-state* nil)
-        (cl-cc::*repl-accessor-map* nil)
-        (cl-cc::*repl-pool-instructions* nil)
-        (cl-cc::*repl-pool-labels* nil)
-        (cl-cc::*repl-global-vars-persistent* nil)
-        (cl-cc/compile::*repl-label-counter* nil)
-        (cl-cc::*repl-defstruct-registry* nil))
+  (cl-cc:with-fresh-repl-state
     (let ((result nil))
       (dolist (form forms result)
         (setf result (run-string-repl form))))))
@@ -209,12 +201,14 @@
 ;;; ─── Self-Hosting: Mutual Recursion via labels ─────────────────────────────
 
 (deftest selfhost-mutual-recursion
-  "cl-cc compiles mutually recursive local functions via labels."
+  "cl-cc compiles mutually recursive local functions via labels using the
+selfhost REPL path (run-string-repl) to cover the REPL-specific code path."
   :timeout 30
   (assert-true
-    (run-string "(labels ((is-even (n) (if (= n 0) t (is-odd (- n 1))))
-                          (is-odd (n) (if (= n 0) nil (is-even (- n 1)))))
-                   (is-even 10))")))
+    (run-repl-forms
+     "(labels ((is-even (n) (if (= n 0) t (is-odd (- n 1))))
+               (is-odd (n) (if (= n 0) nil (is-even (- n 1)))))
+        (is-even 10))")))
 
 ;;; ─── Self-Hosting: Reader Macros ─────────────────────────────────────────
 
@@ -285,13 +279,7 @@
 (defun run-load-and-eval (file-path &rest forms)
   "Load FILE-PATH through our-load, then evaluate FORMS in the same REPL state.
   Returns the result of the last form."
-  (let ((cl-cc::*repl-vm-state* nil)
-        (cl-cc::*repl-accessor-map* nil)
-        (cl-cc::*repl-pool-instructions* nil)
-        (cl-cc::*repl-pool-labels* nil)
-        (cl-cc::*repl-global-vars-persistent* nil)
-        (cl-cc/compile::*repl-label-counter* nil)
-        (cl-cc::*repl-defstruct-registry* nil))
+  (cl-cc:with-fresh-repl-state
     (cl-cc::our-load file-path)
     (let ((result nil))
       (dolist (form forms result)
@@ -346,19 +334,62 @@
            (with-open-file (s file2 :direction :output :if-exists :supersede)
              (write-string "(defun sh-combined (a b)
   (+ (sh-offset a) (sh-offset b)))" s))
-            (let ((cl-cc::*repl-vm-state* nil)
-                  (cl-cc::*repl-accessor-map* nil)
-                  (cl-cc::*repl-pool-instructions* nil)
-                  (cl-cc::*repl-pool-labels* nil)
-                  (cl-cc::*repl-global-vars-persistent* nil)
-                  (cl-cc/compile::*repl-label-counter* nil)
-                  (cl-cc::*repl-defstruct-registry* nil))
+            (cl-cc:with-fresh-repl-state
              (cl-cc::our-load file1)
              (cl-cc::our-load file2)
              (assert-eql 2003
                (run-string-repl "(sh-combined 1 2)"))))
       (ignore-errors (delete-file file1))
       (ignore-errors (delete-file file2)))))
+
+;;; ─── All Source Files for Phase 4 ─────────────────────────────────────────
+
+(defun %asdf-source-files (sys-name project-prefix)
+  "Return project-relative CL source file paths for SYS-NAME, in ASDF load order.
+PROJECT-PREFIX is the path from project root to the system directory, e.g.
+\"packages/frontend/expand/\". Uses each system's own source directory as
+the base so Nix store hashes don't affect relative path computation."
+  (let ((sys (asdf:find-system sys-name nil)))
+    (when sys
+      (let ((sys-root (asdf:system-source-directory sys))
+            (result nil))
+        (labels ((walk (comp)
+                   (typecase comp
+                     (asdf:cl-source-file
+                      (let ((rel (enough-namestring (asdf:component-pathname comp) sys-root)))
+                        (push (concatenate 'string project-prefix rel) result)))
+                     (asdf:module
+                      (dolist (child (asdf:component-children comp))
+                        (walk child))))))
+          (dolist (comp (asdf:component-children sys))
+            (walk comp)))
+        (nreverse result)))))
+
+(defparameter *selfhost-all-source-files*
+  (append
+   (%asdf-source-files :cl-cc-bootstrap  "packages/foundation/bootstrap/")
+   (%asdf-source-files :cl-cc-ast        "packages/foundation/ast/")
+   (%asdf-source-files :cl-cc-prolog     "packages/foundation/prolog/")
+   (%asdf-source-files :cl-cc-ir         "packages/foundation/ir/")
+   (%asdf-source-files :cl-cc-mir        "packages/foundation/mir/")
+   (%asdf-source-files :cl-cc-binary     "packages/backend/binary/")
+   (%asdf-source-files :cl-cc-runtime    "packages/backend/runtime/")
+   (%asdf-source-files :cl-cc-bytecode   "packages/backend/bytecode/")
+   (%asdf-source-files :cl-cc-parse      "packages/frontend/parse/")
+   (%asdf-source-files :cl-cc-type       "packages/foundation/type/")
+   (%asdf-source-files :cl-cc-vm         "packages/engine/vm/")
+   (%asdf-source-files :cl-cc-optimize   "packages/engine/optimize/")
+   (%asdf-source-files :cl-cc-emit       "packages/backend/emit/")
+   (%asdf-source-files :cl-cc-expand     "packages/frontend/expand/")
+   (%asdf-source-files :cl-cc-compile    "packages/engine/compile/")
+   (list "packages/umbrella/src/package.lisp"
+         "packages/umbrella/pipeline/src/stdlib-source.lisp"
+         "packages/umbrella/pipeline/src/stdlib-source-ext.lisp"
+         "packages/umbrella/pipeline/src/pipeline-stdlib.lisp"
+         "packages/umbrella/pipeline/src/pipeline.lisp"
+         "packages/umbrella/pipeline/src/pipeline-native.lisp"
+         "packages/umbrella/pipeline/src/pipeline-repl.lisp"))
+  "All source files in dependency order for Phase 4 self-hosting verification.")
 
 ;;; ─── Self-Hosting: Source File Loading ────────────────────────────────────
 
@@ -393,12 +424,7 @@
   "cl-cc can load a representative subset of its own source files."
   :timeout 30
   (let ((ok 0))
-    (let ((cl-cc::*repl-vm-state* nil)
-          (cl-cc::*repl-accessor-map* nil)
-          (cl-cc::*repl-pool-instructions* nil)
-          (cl-cc::*repl-pool-labels* nil)
-          (cl-cc::*repl-global-vars-persistent* nil)
-          (cl-cc/compile::*repl-label-counter* nil))
+    (cl-cc:with-fresh-repl-state
       (dolist (f *selfhost-representative-files*)
         (handler-case
           (progn (cl-cc::our-load f) (incf ok))
@@ -407,3 +433,27 @@
     (assert-eql (length *selfhost-representative-files*) ok)))
 
 (in-suite selfhost-suite)
+
+;;; ─── Phase 1: Macro Eval Through Own VM ───────────────────────────────────
+
+(deftest selfhost-macro-eval-fn
+  "Macro expansion routes through own VM (our-eval), not host eval."
+  :timeout 10
+  (assert-true (eq cl-cc:*macro-eval-fn* #'cl-cc:our-eval)))
+
+;;; ─── Phase 4: All Source Files Self-Load ──────────────────────────────────
+
+(deftest selfhost-all-source-files
+  "cl-cc loads all its own source files through own compiler."
+  :timeout 300
+  (let ((n (length *selfhost-all-source-files*))
+        (ok 0))
+    (pushnew :cl-cc-self-hosting cl:*features*)
+    (unwind-protect
+        (cl-cc:with-fresh-repl-state
+          (let ((cl-cc:*skip-optimizer-passes* t))
+            (dolist (f *selfhost-all-source-files*)
+              (handler-case (progn (cl-cc::our-load f) (incf ok))
+                (error (e) (declare (ignore e)))))))
+      (setf cl:*features* (remove :cl-cc-self-hosting cl:*features*)))
+    (assert-eql n ok)))

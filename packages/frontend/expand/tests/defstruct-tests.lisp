@@ -21,6 +21,14 @@
   "Return the body forms of a (progn ...) expansion (cdr)."
   (rest expansion))
 
+(defun ds-assert-deriving-registers (typeclass-name)
+  "Assert that a :deriving defstruct registers TYPECLASS-NAME when evaluated."
+  (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
+        (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal))
+        (name (gensym "DERIVING-POINT-")))
+    (eval (ds-expand `(defstruct (,name (:deriving eq show ord)) x y)))
+    (assert-true (has-typeclass-instance-p typeclass-name name))))
+
 ;;; ─── Basic struct ─────────────────────────────────────────────────────────
 
 (deftest ds-basic-expansion
@@ -125,14 +133,10 @@
 (deftest-each ds-deriving-registers-typeclass-instances
   "defstruct :deriving emits the registration hook and registers instances on eval."
   :cases (("eq"   'eq)
-          ("show" 'show)
-          ("ord"  'ord))
+           ("show" 'show)
+           ("ord"  'ord))
   (tc-name)
-  (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
-        (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal))
-        (name (gensym "DERIVING-POINT-")))
-    (eval (ds-expand `(defstruct (,name (:deriving eq show ord)) x y)))
-    (assert-true (has-typeclass-instance-p tc-name name))))
+  (ds-assert-deriving-registers tc-name))
 
 ;;; ─── Empty struct ─────────────────────────────────────────────────────────
 

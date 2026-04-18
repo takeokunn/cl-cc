@@ -17,7 +17,10 @@
     :pathname "packages/testing/framework/tests"
     :serial t
     :components
-    ((:file "framework-meta-tests")))
+    ((:file "framework-meta-tests")
+     (:file "prolog-fixture-invariant-tests")
+     (:file "timing-tests")
+     (:file "persistent-tests")))
    (:module "cli-tests"
     :pathname "packages/cli/tests"
     :serial t
@@ -209,6 +212,7 @@
      (:file "cps-ast-functional-tests") ; functional: quote/the/values/mvb/apply/call/entry-points
      (:file "builtin-registry-tests")
      (:file "builtin-registry-data-tests")
+     (:file "fr-586-set-tests")
      (:file "builtin-registry-data-ext-tests")   ; extended calling-convention data tables
      (:file "closure-tests")
      (:file "context-tests")
@@ -307,6 +311,7 @@
      (:file "compiler-tests")
      (:file "compiler-tests-extended")   ; selfhost smoke: optimizer-pipeline, macro-system, type-checker
      (:file "compiler-tests-runtime")    ; destructuring-bind, append, consp, type predicates
+     (:file "fr-555-copy-structure-tests")
      (:file "compiler-tests-selfhost")   ; CLOS pipeline, generic functions, mapcar
      (:file "closure-tests")
      (:file "call-conv-tests")

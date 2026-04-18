@@ -79,3 +79,31 @@
     ((:halt ?reg1) (:ret ?reg2) ((:halt ?reg1)))))
 
 (defparameter *enable-prolog-peephole* t)
+
+;;; Prolog database state and clause-definition surface
+
+(defvar *prolog-rules* (make-hash-table :test 'eq)
+  "Hash table mapping predicate symbols to lists of rules.")
+
+(defun clear-prolog-database ()
+  "Clear all rules from the Prolog database."
+  (clrhash *prolog-rules*))
+
+(defun add-rule (predicate rule)
+  "Add RULE to the database under PREDICATE."
+  (setf (gethash predicate *prolog-rules*)
+        (cons rule (gethash predicate *prolog-rules*))))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defmacro %def-prolog-clause (head &key body)
+    `(add-rule ',(car head)
+               (make-prolog-rule :head ',head
+                                 ,@(when body `(:body ',body)))))
+
+  (defmacro def-fact (head)
+    "Define a Prolog fact. Usage: (def-fact (parent tom mary))"
+    `(%def-prolog-clause ,head))
+
+  (defmacro def-rule (head &body body)
+    "Define a Prolog rule. Usage: (def-rule (grandparent ?x ?z) (parent ?x ?y) (parent ?y ?z))"
+    `(%def-prolog-clause ,head :body ,body)))

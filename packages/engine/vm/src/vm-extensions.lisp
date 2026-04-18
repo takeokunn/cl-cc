@@ -41,6 +41,17 @@
          (plist (gethash sym (vm-symbol-plists state) nil)))
     (setf (getf plist indicator) val)
     (setf (gethash sym (vm-symbol-plists state)) plist)
+     (vm-reg-set state (vm-dst inst) val)
+     (values (1+ pc) nil nil)))
+
+(define-vm-binary-instruction vm-set-symbol-value :set-symbol-value
+  "Set the dynamic value cell of LHS to RHS and return RHS.")
+
+(defmethod execute-instruction ((inst vm-set-symbol-value) state pc labels)
+  (declare (ignore labels))
+  (let* ((sym (vm-reg-get state (vm-lhs inst)))
+         (val (vm-reg-get state (vm-rhs inst))))
+    (setf (symbol-value sym) val)
     (vm-reg-set state (vm-dst inst) val)
     (values (1+ pc) nil nil)))
 

@@ -442,6 +442,7 @@
    #:make-vm-symbol-p
    #:make-vm-symbol-plist
    #:make-vm-symbol-set
+   #:make-vm-set-symbol-value
    #:make-vm-sync-handler-regs
    #:make-vm-terpri-inst
    #:make-vm-third

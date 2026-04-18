@@ -144,10 +144,6 @@
                   ,ht-var)
          ,new-var))))
 
-;; FR-555: copy-structure — VM structs are hash-tables with :__class__
-(our-defmacro copy-structure (struct)
-  `(copy-hash-table ,struct))
-
 ;;; Type Coercion
 
 (our-defmacro coerce (value type-form)

@@ -1,85 +1,118 @@
 (in-package :cl-cc/test)
 
+(defun %compute-duration-ns (start-time end-time)
+  "Convert internal-time-units difference to integer nanoseconds.
+LC_ALL-independent integer arithmetic, never scientific notation."
+  (floor (* (- end-time start-time) 1000000000)
+         internal-time-units-per-second))
+
 (defun %run-single-test (test-plist number results-so-far)
-  "Run one test and return a result plist."
+  "Run one test and return a result plist.
+The plist includes :duration-ns — integer nanoseconds measured via
+get-internal-real-time. Duration is recorded regardless of terminal status
+(pass/fail/skip/pending/timeout) via unwind-protect, and attached to the
+result just before we return."
   (let* ((name     (getf test-plist :name))
          (fn       (getf test-plist :fn))
          (timeout  (getf test-plist :timeout))
-         (suite    (getf test-plist :suite)))
+         (suite    (getf test-plist :suite))
+         (start-time (get-internal-real-time))
+         (duration-ns 0)
+         (result nil))
     ;; Optional hang-diagnosis tracing (opt-in via CLCC_TEST_TRACE=1)
     (when (uiop:getenv "CLCC_TEST_TRACE")
       (format *error-output* "# [trace] running ~A~%" name)
       (force-output *error-output*))
-    ;; Check dependency
-    (unless (%check-dependency test-plist results-so-far)
-      (return-from %run-single-test
-        (list :name name :status :skip :detail "dependency failed" :number number)))
-    ;; Run before-each fixtures
-    (multiple-value-bind (before-fns after-fns)
-        (%get-suite-fixtures suite)
-      (handler-case
-          (progn
-            (let ((cl-cc/expand::*macro-environment* (%copy-macro-environment))
-                  (cl-cc/expand::*symbol-macro-table*
-                    (%copy-hash-table-shallow cl-cc/expand::*symbol-macro-table*))
-                  (cl-cc/expand::*compiler-macro-table*
-                    (%copy-hash-table-shallow cl-cc/expand::*compiler-macro-table*))
-                  (cl-cc/expand::*macroexpand-step-cache*
-                    (make-hash-table :test #'eq :weakness :key))
-                  (cl-cc/expand::*macroexpand-all-cache*
-                    (make-hash-table :test #'eq :weakness :key)))
-              (dolist (bf before-fns) (funcall bf))
-              (handler-case
-                  (handler-bind
-                      ((skip-condition
-                         (lambda (c)
-                           (return-from %run-single-test
-                             (list :name name :status :skip
-                                   :detail (skip-reason c) :number number))))
-                       (pending-condition
-                         (lambda (c)
-                           (return-from %run-single-test
-                             (list :name name :status :pending
-                                   :detail (pending-reason c) :number number)))))
-                    ;; NOTE: sb-ext:with-timeout relies on SIGALRM delivery
-                    ;; which is unreliable inside sb-thread worker threads —
-                    ;; parallel runs used to hang intermittently because the
-                    ;; alarm never fired. Sequential runs still use it below;
-                    ;; parallel runs enforce timeouts via join-thread :timeout
-                    ;; in %run-tests-parallel, so this branch is the
-                    ;; sequential-only fallback and is always safe.
-                    (if (or (eq timeout :none)
-                            (eq *test-runner-mode* :parallel))
-                        (funcall fn)
-                        (sb-ext:with-timeout (or timeout (%default-test-timeout))
-                          (funcall fn)))
-                    ;; Run after-each fixtures
-                    (dolist (af after-fns) (funcall af))
-                    ;; Run invariants
-                    (%run-invariants)
-                    (list :name name :status :pass :detail nil :number number))
-                (test-failure (c)
-                  (dolist (af after-fns) (ignore-errors (funcall af)))
-                  (list :name name :status :fail
-                        :detail (test-failure-message c) :number number))
-                (sb-ext:timeout ()
-                  (dolist (af after-fns) (ignore-errors (funcall af)))
-                  (list :name name :status :fail
-                        :detail (format nil "  ---~%  message: \"timeout after ~A seconds\"~%  ..."
-                                        (if (eq timeout :none) "disabled" (or timeout (%default-test-timeout))))
-                        :number number))
-                (error (e)
-                  (dolist (af after-fns) (ignore-errors (funcall af)))
-                  (list :name name :status :fail
-                        :detail (format nil "  ---~%  message: ~S~%  ..."
-                                        (princ-to-string e))
-                        :number number)))))
-        (error (e)
-          ;; fixture setup error
-          (list :name name :status :fail
-                :detail (format nil "  ---~%  message: \"fixture error: ~A\"~%  ..."
-                                (princ-to-string e))
-                :number number))))))
+    (unwind-protect
+         (setf result
+               (block %run-body
+                 ;; Check dependency
+                 (unless (%check-dependency test-plist results-so-far)
+                   (return-from %run-body
+                     (list :name name :status :skip :detail "dependency failed"
+                           :number number :suite suite)))
+                 ;; Run before-each fixtures
+                 (multiple-value-bind (before-fns after-fns)
+                     (%get-suite-fixtures suite)
+                   (handler-case
+                       (progn
+                         (let ((cl-cc/expand::*macro-environment* (%copy-macro-environment))
+                               (cl-cc/expand::*symbol-macro-table*
+                                 (%copy-hash-table-shallow cl-cc/expand::*symbol-macro-table*))
+                               (cl-cc/expand::*compiler-macro-table*
+                                 (%copy-hash-table-shallow cl-cc/expand::*compiler-macro-table*))
+                               (cl-cc/expand::*macroexpand-step-cache*
+                                 (make-hash-table :test #'eq :weakness :key))
+                               (cl-cc/expand::*macroexpand-all-cache*
+                                 (make-hash-table :test #'eq :weakness :key)))
+                           (dolist (bf before-fns) (funcall bf))
+                           (handler-case
+                               (handler-bind
+                                   ((skip-condition
+                                      (lambda (c)
+                                        (return-from %run-body
+                                          (list :name name :status :skip
+                                                :detail (skip-reason c) :number number
+                                                :suite suite))))
+                                    (pending-condition
+                                      (lambda (c)
+                                        (return-from %run-body
+                                          (list :name name :status :pending
+                                                :detail (pending-reason c) :number number
+                                                :suite suite)))))
+                                 ;; NOTE: sb-ext:with-timeout relies on SIGALRM delivery
+                                 ;; which is unreliable inside sb-thread worker threads —
+                                 ;; parallel runs used to hang intermittently because the
+                                 ;; alarm never fired. Sequential runs still use it below;
+                                 ;; parallel runs enforce timeouts via join-thread :timeout
+                                 ;; in %run-tests-parallel, so this branch is the
+                                 ;; sequential-only fallback and is always safe.
+                                 (if (or (eq timeout :none)
+                                         (eq *test-runner-mode* :parallel))
+                                     (funcall fn)
+                                     (sb-ext:with-timeout (or timeout (%default-test-timeout))
+                                       (funcall fn)))
+                                 ;; Run after-each fixtures
+                                 (dolist (af after-fns) (funcall af))
+                                 ;; Run invariants
+                                 (%run-invariants)
+                                 (list :name name :status :pass :detail nil
+                                       :number number :suite suite))
+                             (test-failure (c)
+                               (dolist (af after-fns) (ignore-errors (funcall af)))
+                               (list :name name :status :fail
+                                     :detail (test-failure-message c) :number number
+                                     :suite suite))
+                             (sb-ext:timeout ()
+                               (dolist (af after-fns) (ignore-errors (funcall af)))
+                               (list :name name :status :fail
+                                     :detail (format nil "  ---~%  message: \"timeout after ~A seconds\"~%  ..."
+                                                     (if (eq timeout :none) "disabled" (or timeout (%default-test-timeout))))
+                                     :number number :suite suite))
+                             (error (e)
+                               (dolist (af after-fns) (ignore-errors (funcall af)))
+                               (list :name name :status :fail
+                                     :detail (format nil "  ---~%  message: ~S~%  ..."
+                                                     (princ-to-string e))
+                                     :number number :suite suite)))))
+                     (error (e)
+                       ;; fixture setup error
+                       (list :name name :status :fail
+                             :detail (format nil "  ---~%  message: \"fixture error: ~A\"~%  ..."
+                                             (princ-to-string e))
+                             :number number :suite suite))))))
+      ;; Always record wall-clock duration, even on non-local exit.
+      (setf duration-ns
+            (%compute-duration-ns start-time (get-internal-real-time))))
+    ;; Attach duration to whatever plist was produced. If result is NIL
+    ;; (e.g. runtime aborted mid-body without establishing RESULT), fall back
+    ;; to a minimal errored plist.
+    (if result
+        (append result (list :duration-ns duration-ns))
+        (list :name name :status :fail
+              :detail (format nil "  ---~%  message: \"aborted before producing result\"~%  ...")
+              :number number :suite suite
+              :duration-ns duration-ns))))
 
 ;;; ------------------------------------------------------------
 ;;; Parallel Worker Pool
@@ -98,89 +131,209 @@ via sb-thread:join-thread :timeout instead.")
       ((and (integerp tm) (plusp tm)) tm)
       (t (%default-test-timeout)))))
 
-(defun %run-tests-parallel (tests workers)
-  "Run tests in parallel using sb-thread worker threads.
-Each task is executed in its own short-lived sub-thread, and the worker
-waits for it with sb-thread:join-thread :timeout. If the sub-thread does
-not finish in time it is terminated and the test is recorded as a
-timeout fail, guaranteeing the runner can never wedge on a hanging test."
-  (let* ((*test-runner-mode* :parallel)
+(defun %copy-prolog-rules (src)
+  "Return a shallow copy of the Prolog fact DB SRC (hash-table).
+Per-thread rebinding of `cl-cc/prolog:*prolog-rules*` needs a fresh
+table per worker so concurrent add-rule / clear-prolog-database calls
+do not race through the global binding."
+  (let ((dst (make-hash-table :test 'eq)))
+    (when src
+      (maphash (lambda (k v) (setf (gethash k dst) v)) src))
+    dst))
+
+(defun %load-prior-timings (&optional (path (%timings-output-path)))
+  "Return a hash-table mapping test-name-string to duration-ns from a prior TSV run.
+Returns nil when the file is absent. On parse errors logs to *error-output* and
+returns nil. Keeps the MAX duration per name so :repeat runs stay stable."
+  (when (probe-file path)
+    (handler-case
+        (let ((ht (make-hash-table :test #'equal :size 8192)))
+          (with-open-file (s path :direction :input)
+            (loop for line = (read-line s nil nil)
+                  while line
+                  unless (zerop (length line))
+                    do (let ((fields '())
+                             (start 0))
+                         (loop for pos = (position #\Tab line :start start)
+                               do (push (subseq line start (or pos (length line))) fields)
+                               while pos
+                               do (setf start (1+ pos)))
+                         (setf fields (nreverse fields))
+                         (when (>= (length fields) 3)
+                           (let ((name-str (second fields))
+                                 (dur (ignore-errors
+                                        (parse-integer (third fields)))))
+                             (when (and (plusp (length name-str)) dur (plusp dur))
+                               ;; Keep max duration per name: stable under :repeat N
+                               ;; (which writes N entries per test name to the TSV).
+                               (let ((existing (gethash name-str ht 0)))
+                                 (when (> dur existing)
+                                   (setf (gethash name-str ht) dur)))))))))
+          ht)
+      (error (e)
+        (format *error-output* "# WARN: could not load prior timings from ~A: ~A~%"
+                path e)
+        nil))))
+
+(defun %sort-parallel-slow-first (tests prior-timings)
+  "Return TESTS stable-sorted by descending prior duration.
+Tests absent from PRIOR-TIMINGS get 0 (sorted last — treated as fast or new)."
+  (stable-sort (copy-list tests) #'>
+               :key (lambda (test)
+                      (let ((name (getf test :name)))
+                        (or (and name (gethash (symbol-name name) prior-timings))
+                            0)))))
+
+(defun %run-tests-parallel (tests workers &optional prior-timings)
+  "Run tests in parallel using WORKERS persistent worker threads.
+A single watchdog thread monitors elapsed time per worker and fires a
+sb-ext:timeout interrupt when a test exceeds its timeout — eliminating
+the per-test sub-thread, mutex, and waitqueue that were previously created
+for every individual test (was O(n-tests) thread objects; now O(workers)).
+
+Correctness invariants:
+ - Epoch counter: each worker-slot registration captures worker-epochs[i] at
+   that moment. The interrupt lambda checks the current epoch before signalling,
+   making stale interrupts (fired after the test already completed) self-defusing.
+ - Interrupt outside lock: timed-out workers are collected inside watchdog-lock,
+   then interrupted OUTSIDE it so a slow interrupt delivery cannot block all
+   worker threads from registering their next test.
+ - sb-sys:without-interrupts around cleanup: prevents the watchdog interrupt from
+   landing inside the unwind-protect cleanup path where a second non-local exit
+   would leak watchdog-lock."
+  (let* ((tests (if prior-timings
+                    (%sort-parallel-slow-first tests prior-timings)
+                    tests))
          (n (length tests))
          (results (make-array n :initial-element nil))
          (results-lock (sb-thread:make-mutex :name "results-lock"))
          (work-queue (coerce tests 'vector))
          (queue-index 0)
          (queue-lock (sb-thread:make-mutex :name "queue-lock"))
+         (prolog-snapshot cl-cc/prolog:*prolog-rules*)
+         ;; watchdog-slots[i] = (thread epoch start-iticks timeout-secs) or nil.
+         (watchdog-slots (make-array workers :initial-element nil))
+         ;; worker-epochs[i] is incremented in the unwind-protect cleanup when a
+         ;; test ends. The interrupt lambda captures the epoch at registration and
+         ;; checks it before signalling, defusing stale interrupts.
+         (worker-epochs (make-array workers :initial-element 0))
+         (watchdog-lock (sb-thread:make-mutex :name "watchdog-lock"))
+         (watchdog-stop nil)
          (threads '()))
-    (labels ((run-with-timeout (test-plist number snapshot)
-               (let* ((timeout (%effective-test-timeout test-plist))
-                      (result-cell (list nil))
-                      (done-lock (sb-thread:make-mutex :name "done"))
-                      (done-cv (sb-thread:make-waitqueue :name "done-cv"))
-                      (done nil)
-                      (runner-thread
-                        (sb-thread:make-thread
-                         (lambda ()
-                           ;; CRITICAL: SBCL sub-threads do NOT inherit the
-                           ;; parent's dynamic bindings, so we must rebind
-                           ;; *test-runner-mode* here explicitly. Without this,
-                           ;; %run-single-test would see the global default
-                           ;; (:sequential) and re-enter sb-ext:with-timeout,
-                           ;; defeating the parallel timeout enforcement.
-                           (let ((*test-runner-mode* :parallel))
-                             (let ((r (%run-single-test test-plist number snapshot)))
-                               (sb-thread:with-mutex (done-lock)
-                                 (setf (car result-cell) r
-                                       done t)
-                                 (sb-thread:condition-notify done-cv)))))
-                         :name (format nil "test-case-~A" number))))
-                 (sb-thread:with-mutex (done-lock)
-                   (if timeout
-                       (loop until done
-                             do (unless (sb-thread:condition-wait
-                                         done-cv done-lock :timeout timeout)
-                                  (return)))
-                       (loop until done
-                             do (sb-thread:condition-wait done-cv done-lock))))
-                 (cond
-                   (done
-                    (ignore-errors (sb-thread:join-thread runner-thread))
-                    (car result-cell))
-                   (t
-                    (ignore-errors
-                     (sb-thread:terminate-thread runner-thread))
-                    (ignore-errors (sb-thread:join-thread runner-thread))
-                    (list :name (getf test-plist :name)
-                          :status :fail
-                          :detail (format nil "  ---~%  message: \"timeout after ~A seconds (parallel runner killed thread)\"~%  ..."
-                                          timeout)
-                          :number number)))))
-             (worker ()
+    (labels ((watchdog ()
                (loop
-                 (let ((task nil)
-                       (idx nil))
-                   (sb-thread:with-mutex (queue-lock)
-                     (when (< queue-index n)
-                       (setf idx queue-index
-                             task (aref work-queue queue-index))
-                       (incf queue-index)))
-                   (unless task (return))
-                   (let* ((test-plist task)
-                          (number (getf test-plist :number))
-                          (results-snapshot
-                            (sb-thread:with-mutex (results-lock)
-                              (remove nil (coerce results 'list))))
-                          (result (run-with-timeout test-plist number
-                                                    results-snapshot)))
-                     (sb-thread:with-mutex (results-lock)
-                       (setf (aref results idx) result))
-                     (%tap-print-result result))))))
-      (dotimes (i workers)
-        (push (sb-thread:make-thread #'worker :name (format nil "test-worker-~A" i))
-              threads))
-      (dolist (th threads)
-        (sb-thread:join-thread th))
-      (coerce results 'list))))
+                 ;; Read stop flag under lock for cross-thread visibility.
+                 (when (sb-thread:with-mutex (watchdog-lock) watchdog-stop) (return))
+                 (sleep 0.5)
+                 (let ((now (get-internal-real-time))
+                       (to-interrupt '()))
+                   ;; Collect timed-out workers inside the lock, interrupt outside.
+                   (sb-thread:with-mutex (watchdog-lock)
+                     (dotimes (i workers)
+                       (let ((slot (aref watchdog-slots i)))
+                         (when slot
+                           (let* ((thread      (first slot))
+                                  (epoch       (second slot))
+                                  (start-time  (third slot))
+                                  (timeout-sec (fourth slot))
+                                  (elapsed (/ (- now start-time)
+                                              (float internal-time-units-per-second))))
+                             (when (> elapsed timeout-sec)
+                               (setf (aref watchdog-slots i) nil)
+                               (push (list thread epoch i) to-interrupt)))))))
+                   ;; Fire interrupts outside the lock to avoid blocking worker
+                   ;; threads that need watchdog-lock to register their next test.
+                   (dolist (item to-interrupt)
+                     (let ((thread     (first item))
+                           (epoch      (second item))
+                           (worker-idx (third item)))
+                       (ignore-errors
+                         (sb-thread:interrupt-thread thread
+                           (lambda ()
+                             ;; Only signal if the worker is still in the same test.
+                             ;; worker-epochs[i] is incremented during cleanup before
+                             ;; the slot is cleared, so any mismatch means the test
+                             ;; already finished and this interrupt is stale.
+                             (when (= (aref worker-epochs worker-idx) epoch)
+                               (error 'sb-ext:timeout))))))))))
+             (make-worker (worker-idx)
+               ;; Each worker captures its own index and runs tests directly
+               ;; (no per-test sub-thread). SBCL worker threads do not inherit
+               ;; parent dynamic bindings, so *test-runner-mode* and
+               ;; *prolog-rules* are explicitly rebound here.
+               (lambda ()
+                 (let ((*test-runner-mode* :parallel)
+                       (cl-cc/prolog:*prolog-rules*
+                         (%copy-prolog-rules prolog-snapshot)))
+                   (loop
+                     (let ((task nil) (idx nil))
+                       (sb-thread:with-mutex (queue-lock)
+                         (when (< queue-index n)
+                           (setf idx queue-index
+                                 task (aref work-queue queue-index))
+                           (incf queue-index)))
+                       (unless task (return))
+                       (let* ((test-plist task)
+                              (number     (getf test-plist :number))
+                              (timeout    (%effective-test-timeout test-plist))
+                              (start-time (get-internal-real-time))
+                              (result
+                                (progn
+                                  (when timeout
+                                    ;; Capture epoch BEFORE registering in slot.
+                                    ;; Epoch is incremented at cleanup time so any
+                                    ;; interrupt fired after the test ends sees a
+                                    ;; stale epoch and becomes a no-op.
+                                    (let ((epoch (aref worker-epochs worker-idx)))
+                                      (sb-thread:with-mutex (watchdog-lock)
+                                        (setf (aref watchdog-slots worker-idx)
+                                              (list sb-thread:*current-thread*
+                                                    epoch
+                                                    start-time
+                                                    timeout)))))
+                                  (unwind-protect
+                                       ;; Parallel-safe tests have no :depends-on,
+                                       ;; so results-so-far (nil) is never consulted.
+                                       (handler-case
+                                           (%run-single-test test-plist number nil)
+                                         (sb-ext:timeout ()
+                                           (list :name   (getf test-plist :name)
+                                                 :status :fail
+                                                 :detail (format nil "  ---~%  message: \"timeout after ~A seconds (watchdog)\"~%  ..."
+                                                                 timeout)
+                                                 :number number
+                                                 :suite  (getf test-plist :suite)
+                                                 :duration-ns (%compute-duration-ns
+                                                               start-time
+                                                               (get-internal-real-time)))))
+                                    ;; Increment epoch first (invalidates the captured
+                                    ;; epoch in any pending interrupt lambda), then
+                                    ;; clear the slot. sb-sys:without-interrupts
+                                    ;; prevents a watchdog interrupt from landing
+                                    ;; inside this cleanup path.
+                                    (sb-sys:without-interrupts
+                                      (when timeout
+                                        (incf (aref worker-epochs worker-idx))
+                                        (sb-thread:with-mutex (watchdog-lock)
+                                          (setf (aref watchdog-slots worker-idx) nil))))))))
+                         ;; Tag each parallel result with its batch index for TSV output.
+                         (setf result (append result (list :batch-id idx)))
+                         (sb-thread:with-mutex (results-lock)
+                           (setf (aref results idx) result))
+                         (%tap-print-result result))))))))
+      (let ((watchdog-thread
+               (sb-thread:make-thread #'watchdog :name "test-watchdog")))
+        (dotimes (i workers)
+          (push (sb-thread:make-thread (make-worker i)
+                                       :name (format nil "test-worker-~A" i))
+                threads))
+        (dolist (th (nreverse threads))
+          (sb-thread:join-thread th))
+        ;; Signal watchdog to stop under lock for cross-thread visibility.
+        (sb-thread:with-mutex (watchdog-lock)
+          (setf watchdog-stop t))
+        (sb-thread:join-thread watchdog-thread)))
+    (coerce results 'list)))
 
 (defun %run-tests-sequential (tests &optional results-so-far)
   "Run tests sequentially and return result plists.
@@ -195,7 +348,7 @@ returned list."
         (%tap-print-result result)))
     (nreverse results)))
 
-(defun %run-tests-mixed (tests workers)
+(defun %run-tests-mixed (tests workers &optional prior-timings)
   "Run TESTS with a mixed strategy: parallel-safe tests use the worker pool,
 while tests from explicitly serial suites and tests with dependencies run
 sequentially in dependency-safe input order."
@@ -207,7 +360,7 @@ sequentially in dependency-safe input order."
                (setf results
                      (append results
                              (%run-tests-parallel (nreverse parallel-batch)
-                                                  workers)))
+                                                  workers prior-timings)))
                (setf parallel-batch '()))))
       (dolist (test tests)
         (if (%test-parallel-safe-p test)
@@ -220,39 +373,40 @@ sequentially in dependency-safe input order."
       (flush-parallel-batch)
       results)))
 
+(defun %detect-cpu-count ()
+  "Detect the host CPU count.
+Honours CL_CC_TEST_WORKERS (override), then shells out to sysctl (macOS)
+/ nproc (Linux). Falls back to 4 when everything else fails so the test
+runner still makes forward progress on exotic hosts."
+  (or (let ((env (uiop:getenv "CL_CC_TEST_WORKERS")))
+        (and env (ignore-errors
+                   (let ((n (parse-integer env :junk-allowed t)))
+                     (and n (plusp n) n)))))
+      (ignore-errors
+        (let* ((out (with-output-to-string (s)
+                      (uiop:run-program '("sysctl" "-n" "hw.ncpu")
+                                        :output s :ignore-error-status t)))
+               (n (parse-integer out :junk-allowed t)))
+          (and n (plusp n) n)))
+      (ignore-errors
+        (let* ((out (with-output-to-string (s)
+                      (uiop:run-program '("nproc")
+                                        :output s :ignore-error-status t)))
+               (n (parse-integer out :junk-allowed t)))
+          (and n (plusp n) n)))
+      4))
+
 (defun %effective-worker-count (ordered-tests parallel workers)
   "Return the effective worker count for ORDERED-TESTS.
-Serial runs, serial-only batches, and single-worker requests all collapse to 1."
-  (if (and parallel
-           (> (or workers 4) 1)
-           (some #'%test-parallel-safe-p ordered-tests))
-      (or workers 4)
-      1))
-
-;;; ------------------------------------------------------------
-;;; Flaky Detection
-;;; ------------------------------------------------------------
-
-(defun %detect-flaky (all-run-results repeat)
-  "Given a list of repeat result-lists, find tests with inconsistent status."
-  (let ((by-name (make-hash-table)))
-    (dolist (run-results all-run-results)
-      (dolist (r run-results)
-        (let ((name (getf r :name))
-              (status (getf r :status)))
-          (push status (gethash name by-name)))))
-    (let ((flaky '()))
-      (maphash (lambda (name statuses)
-                 (let ((pass-count (count :pass statuses))
-                       (total (length statuses)))
-                   (when (and (< pass-count total) (> pass-count 0))
-                     (push (list name pass-count total) flaky))))
-               by-name)
-      (when flaky
-        (format t "# Flaky tests detected (inconsistent across ~A runs):~%" repeat)
-        (dolist (f flaky)
-          (format t "#   ~A: passed ~A/~A runs~%"
-                  (first f) (second f) (third f)))))))
+Serial runs, serial-only batches, and single-worker requests all collapse to 1.
+When WORKERS is NIL, the host CPU count is auto-detected (overridable via
+CL_CC_TEST_WORKERS)."
+  (let ((w (or workers (%detect-cpu-count))))
+    (if (and parallel
+             (> w 1)
+             (some #'%test-parallel-safe-p ordered-tests))
+        w
+        1)))
 
 ;;; ------------------------------------------------------------
 ;;; run-suite
@@ -318,13 +472,14 @@ Serial runs, serial-only batches, and single-worker requests all collapse to 1."
                  (ignore-errors (cl-cc::warm-stdlib-cache)))
 
               ;; Run (with optional repeat for flaky detection)
-              (let ((all-run-results '()))
+              (let ((all-run-results '())
+                    (prior-timings (%load-prior-timings)))
                 (dotimes (r repeat)
                   (when (> repeat 1)
                     (format t "# Run ~A/~A~%" (1+ r) repeat))
                   (let ((run-results
                           (if (and parallel (> nworkers 1))
-                              (%run-tests-mixed ordered-tests nworkers)
+                              (%run-tests-mixed ordered-tests nworkers prior-timings)
                               (%run-tests-sequential ordered-tests))))
                     (push run-results all-run-results)))
 
@@ -377,6 +532,19 @@ Serial runs, serial-only batches, and single-worker requests all collapse to 1."
                       (format t "~A~%" bar))
                     (format t "#~%"))
 
+                  ;; Emit per-test timings TSV and the top-20 slowest digest.
+                  ;; Any failure is logged to *error-output* and swallowed so a
+                  ;; filesystem hiccup never flips a passing run into a failure,
+                  ;; but we no longer lose the error silently.
+                  (handler-case
+                      (%write-timings-tsv flat-results (%timings-output-path))
+                    (error (e)
+                      (format *error-output* "# WARN: test-timings emission failed: ~A~%" e)))
+                  (handler-case
+                      (%emit-slowest-summary flat-results 20)
+                    (error (e)
+                      (format *error-output* "# WARN: slowest-summary emission failed: ~A~%" e)))
+
                   (if any-fail
                       (uiop:quit 1)
                       (uiop:quit 0)))))))))))
@@ -407,37 +575,3 @@ automation workflow is always `nix run .#test`."
       (error "Suite ~A::~A not found (package not loaded?)"
              package-name symbol-name))
     sym))
-
-;;; ------------------------------------------------------------
-;;; Suite Definitions (bottom of file — other files use in-suite)
-;;; ------------------------------------------------------------
-
-(defsuite cl-cc-suite :description "CL-CC test root suite")
-
-(defsuite cl-cc-unit-suite
-  :description "Unit tests"
-  :parent cl-cc-suite)
-
-;; Integration tests that exercise the full compile pipeline via run-string.
-;; Each case invokes parse → expand → cps → optimize → codegen → execute.
-;; Heavy tests rely on *stdlib-expanded-cache* being pre-warmed by run-suite
-;; before the parallel workers start.
-(defsuite cl-cc-integration-suite
-  :description "Full-pipeline integration tests"
-  :parent cl-cc-suite)
-
-(defsuite cl-cc-integration-serial-suite
-  :description "Sequential-only integration tests"
-  :parent cl-cc-integration-suite
-  :parallel nil)
-
-(defsuite cl-cc-e2e-suite
-  :description "End-to-end tests"
-  :parent cl-cc-suite)
-
-(defsuite cl-cc-serial-suite
-  :description "Sequential-only unit tests"
-  :parent cl-cc-unit-suite
-  :parallel nil)
-
-(in-suite cl-cc-suite)

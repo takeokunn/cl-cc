@@ -286,12 +286,6 @@
                 --eval '(cl-cc/test:run-suite (quote cl-cc/test::cl-cc-suite) :parallel nil :random nil :warm-stdlib t :coverage t)'
             '';
 
-            selfhost = mkApp "selfhost" ''
-              set -euo pipefail
-              ${cwdGuard}
-              exec ${self'.packages.default}/bin/cl-cc selfhost
-            '';
-
             load = mkApp "load" ''
               set -euo pipefail
               ${cwdGuard}
@@ -343,22 +337,6 @@
               meta.description = "cl-cc unit + integration test suite (checks.tests)";
             };
 
-            selfhost = pkgs.stdenvNoCC.mkDerivation {
-              pname = "cl-cc-selfhost";
-              version = "0.1.0";
-              src = lib.fileset.toSource {
-                root = ./.;
-                fileset = lib.fileset.unions [
-                  ./packages
-                  ./cl-cc.asd
-                ];
-              };
-              nativeBuildInputs = [ self'.packages.default ];
-              buildPhase = "cl-cc selfhost";
-              installPhase = "mkdir -p $out && touch $out/selfhost-verified";
-              meta.description = "cl-cc self-hosting verification (checks.selfhost)";
-            };
-
             build = self'.packages.default;
           };
 
@@ -403,12 +381,11 @@
                 Apps:
                   nix run .#test      Run the canonical test plan
                   nix run .#coverage  Run tests with sb-cover instrumentation
-                  nix run .#selfhost  Build + verify self-hosting
                   nix run .#load      Load :cl-cc non-interactively
                   nix run .#repl      rlwrap'd SBCL with :cl-cc loaded  (nix run default)
 
                 Nix:
-                  nix flake check    Run checks.tests + .selfhost + .build + .treefmt
+                  nix flake check    Run checks.tests + .build + .treefmt
                   nix build          Build the standalone binary at ./result/bin/cl-cc
                   nix fmt            Format repo (nixfmt + deadnix + statix + prettier)
                   nix flake show     List all flake outputs
@@ -417,7 +394,6 @@
                   cl-cc run example/hello.lisp
                   cl-cc eval "(+ 1 2)"
                   cl-cc compile example/hello.lisp -o hello
-                  cl-cc selfhost
                   cl-cc help
 
               EOF

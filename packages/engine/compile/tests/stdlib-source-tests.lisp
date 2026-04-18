@@ -22,6 +22,7 @@
   :cases (("mapcar"               "(defun mapcar")
           ("reduce"               "(defun reduce")
           ("class-precedence-list" "(defun class-precedence-list")
+          ("set"                  "(defun set (sym val) (setf (symbol-value sym) val) val)")
           ("set-fdefinition"      "(defun set-fdefinition"))
   (needle)
   (assert-true (search needle cl-cc::*standard-library-source*)))

@@ -173,28 +173,14 @@
 ;;; and, applied to every test, dominates the per-test budget for the compile-
 ;;; heavy suites and blows through the default timeout.
 
-(defun %snapshot-prolog-db ()
-  "Deep-copy cl-cc/prolog::*prolog-rules* into a fresh hash table."
-  (let ((snap (make-hash-table :test 'eq)))
-    (maphash (lambda (k v) (setf (gethash k snap) (copy-list v)))
-             cl-cc/prolog::*prolog-rules*)
-    snap))
-
-(defun %restore-prolog-db (snap)
-  "Restore cl-cc/prolog::*prolog-rules* to the contents of SNAP."
-  (clrhash cl-cc/prolog::*prolog-rules*)
-  (maphash (lambda (k v)
-             (setf (gethash k cl-cc/prolog::*prolog-rules*) (copy-list v)))
-           snap))
-
 (defmacro with-prolog-db-isolated (&body body)
   "Run BODY with the Prolog fact DB restored to its pre-BODY state afterwards.
 Use for tests that add rules and must not leak into siblings — cheaper than
 snapshotting at load time because most tests don't need this."
   (let ((snap (gensym "SNAP")))
-    `(let ((,snap (%snapshot-prolog-db)))
+    `(let ((,snap (%snapshot-prolog-db :copy-value #'copy-list)))
        (unwind-protect (progn ,@body)
-         (%restore-prolog-db ,snap)))))
+         (%restore-prolog-db ,snap :copy-value #'copy-list)))))
 
 
 ;;; ------------------------------------------------------------

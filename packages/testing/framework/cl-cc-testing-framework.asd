@@ -13,7 +13,11 @@
   :serial t
   :components
   ((:file "package")
+   (:file "persistent")
    (:file "framework")
+   (:file "framework-fixtures")
+   (:file "framework-assertions")
+   (:file "framework-discovery")
    (:file "framework-advanced")
    (:file "framework-compiler")
    (:file "framework-meta")

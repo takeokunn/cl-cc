@@ -133,41 +133,59 @@ both NIL and numeric zero are false."
            (%cps-simplify-subtree (cdr tree) var replacement)))
     (t tree)))
 
+(defun %single-param-lambda-parts (form)
+  "Return (values param body) when FORM is a one-argument lambda, else NIL values."
+  (when (and (consp form)
+             (eq (car form) 'lambda)
+             (let ((params (second form)))
+               (and (consp params) (null (cdr params))))
+             (= (length form) 3))
+    (values (first (second form))
+            (third form))))
+
 (defun %single-param-lambda-p (form)
   "T if FORM is (lambda (x) body) with exactly one parameter."
-  (and (consp form)
-       (eq (car form) 'lambda)
-       (let ((params (second form)))
-         (and (consp params) (null (cdr params))))
-       (= (length form) 3)))
+  (multiple-value-bind (param body)
+      (%single-param-lambda-parts form)
+    (declare (ignore body))
+    (not (null param))))
+
+(defun %funcall-single-lambda-parts (form)
+  "Return (values param body arg) when FORM is a beta-reducible funcall, else NIL values."
+  (when (and (consp form)
+             (eq (car form) 'funcall)
+             (not (null (cddr form)))
+             (null (cdddr form)))
+    (multiple-value-bind (param body)
+        (%single-param-lambda-parts (second form))
+      (when param
+        (values param body (third form))))))
 
 (defun %funcall-of-single-lambda-p (form)
   "T if FORM is (funcall (lambda (x) body) arg) — beta-reducible."
-  (and (consp form)
-       (eq (car form) 'funcall)
-       (%single-param-lambda-p (second form))
-       (not (null (cddr form)))
-       (null (cdddr form))))
+  (multiple-value-bind (param body arg)
+      (%funcall-single-lambda-parts form)
+    (declare (ignore body arg))
+    (not (null param))))
 
 (defun %eta-reducible-lambda-p (form)
   "T if FORM is (lambda (x) (funcall f x)) — eta-reducible."
-  (and (%single-param-lambda-p form)
-       (let ((body (third form)))
-         (and (consp body)
-              (eq (car body) 'funcall)
-              (consp (cddr body))
-              (null (cdddr body))
-              (eq (third body) (first (second form)))))))
+  (multiple-value-bind (param body)
+      (%single-param-lambda-parts form)
+    (and param
+         (consp body)
+         (eq (car body) 'funcall)
+         (consp (cddr body))
+         (null (cdddr body))
+         (eq (third body) param))))
 
 (defun %cps-beta-reduce (form)
   "Beta-reduce (funcall (lambda (x) body) arg) → body[x/arg]."
-  (if (%funcall-of-single-lambda-p form)
-      (let* ((lambda-form (second form))
-             (param (first (second lambda-form)))
-             (body  (third lambda-form))
-             (arg   (third form)))
-        (%cps-simplify-subtree body param arg))
-      form))
+  (multiple-value-bind (param body arg)
+      (%funcall-single-lambda-parts form)
+    (if param
+        (%cps-simplify-subtree body param arg)
+        form)))
 
 (defun %cps-eta-reduce (form)
   "Eta-reduce (lambda (x) (funcall f x)) → f."
@@ -182,16 +200,20 @@ both NIL and numeric zero are false."
                  (%cps-eta-reduce
                   (%cps-beta-reduce
                    (mapcar #'walk x)))
-                 x)))
+                  x)))
     (walk form)))
+
+(defun %cps-simplify-fixed-point (form step-fn)
+  "Apply STEP-FN to FORM until a fixed point is reached."
+  (loop
+    for current = form then next
+    for next = (funcall step-fn current)
+    until (equal current next)
+    finally (return current)))
 
 (defun cps-simplify-form (form)
   "Repeatedly simplify FORM until a fixed point is reached."
-  (loop
-    for current = form then next
-    for next = (%cps-simplify-once current)
-    until (equal current next)
-    finally (return current)))
+  (%cps-simplify-fixed-point form #'%cps-simplify-once))
 
 (defun cps-transform (expr)
   "Minimal CPS conversion for bootstrap language. Produces (lambda (k) ...).

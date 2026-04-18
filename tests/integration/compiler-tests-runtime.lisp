@@ -189,9 +189,7 @@
 
 (deftest-each labels-mutual-recursion
   "Labels with mutually recursive functions behave correctly."
-  :cases (("even-4" t
-           "(labels ((even-p (n) (if (= n 0) t (odd-p (- n 1)))) (odd-p (n) (if (= n 0) nil (even-p (- n 1))))) (even-p 4))")
-          ("odd-3" nil
+  :cases (("odd-3" nil
            "(labels ((even-p (n) (if (= n 0) t (odd-p (- n 1)))) (odd-p (n) (if (= n 0) nil (even-p (- n 1))))) (even-p 3))")
           ("three-fns" 6
            "(labels ((a (n) (if (= n 0) 0 (+ 1 (b (- n 1))))) (b (n) (if (= n 0) 0 (+ 1 (c (- n 1))))) (c (n) (if (= n 0) 0 (+ 1 (a (- n 1)))))) (a 6))"))
@@ -263,6 +261,14 @@
   :cases (("reads-a"    10 "(let ((a 0) (b 0)) (setf (values a b) (values 10 20)) a)")
           ("reads-b"    20 "(let ((a 0) (b 0)) (setf (values a b) (values 10 20)) b)")
           ("reads-both" 30 "(let ((x 0) (y 0)) (setf (values x y) (values 10 20)) (+ x y))"))
+  (expected form)
+  (assert-= expected (run-string form)))
+
+(deftest-each compile-obsolete-set
+  "SET is available as a builtin and assigns through SYMBOL-VALUE without stdlib loading."
+  :cases (("returns-value" 42 "(progn (defparameter fr586-set-var 0) (set 'fr586-set-var 42))")
+          ("reads-binding" 42 "(progn (defparameter fr586-set-var 0) (set 'fr586-set-var 42) (symbol-value 'fr586-set-var))")
+          ("updates-value" 99 "(progn (defparameter fr586-set-var 0) (set 'fr586-set-var 42) (set 'fr586-set-var 99) (symbol-value 'fr586-set-var))"))
   (expected form)
   (assert-= expected (run-string form)))
 

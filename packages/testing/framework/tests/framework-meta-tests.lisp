@@ -70,8 +70,13 @@
       (assert-true (search "cl-cc-coverage" output)))))
 
 (deftest framework-meta-mutant-killed-by-compile-error
-  "A mutant that fails to eval is counted as killed immediately."
-  (assert-true (%mutant-killed-p '(defun broken (x) (+ x) ) 'cl-cc-unit-suite)))
+  "A mutant that fails to eval is counted as killed immediately.
+   Uses a form that signals at top-level eval so %eval-form-safely
+   returns NIL; otherwise %mutant-killed-p would fall through to
+   re-running every test in the suite — including this one —
+   causing unbounded recursion."
+  (assert-true (%mutant-killed-p '(error "synthetic eval failure")
+                                 'cl-cc-unit-suite)))
 
 ;;; P7: %print-mutation-report — unit test for the report printer
 

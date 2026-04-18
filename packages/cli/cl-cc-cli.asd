@@ -15,7 +15,6 @@
   :components
   ((:file "package")
    (:file "args")
-   (:file "selfhost")     ; Self-hosting verification data + phases (before main.lisp)
    (:file "main")         ; Help system (%print-global-help, %print-command-help)
    (:file "main-utils")   ; Utilities, flamegraph, SSA block name helpers
    (:file "main-dump")    ; ANSI colors, dump-*-phase functions, compile-opts struct

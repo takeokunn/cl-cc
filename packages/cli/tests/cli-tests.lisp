@@ -147,5 +147,5 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
 
 (deftest cli-command-dispatch-covers-all-public-subcommands
   "The CLI dispatch table still exposes the expected public commands."
-  (assert-equal '("run" "compile" "eval" "repl" "check" "selfhost")
+  (assert-equal '("run" "compile" "eval" "repl" "check")
                 (mapcar #'car cl-cc/cli::*cli-command-dispatch*)))

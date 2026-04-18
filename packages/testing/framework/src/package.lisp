@@ -655,4 +655,18 @@
            :assert-terminates
            :defmetamorphic
            :definvariant
-           :run-mutation-test))
+           :run-mutation-test
+           ;; Persistent map (phase 1 of immutable test framework)
+           :persistent-map
+           :persistent-map-p
+           :persist-empty
+           :persist-assoc
+           :persist-lookup
+           :persist-contains-p
+           :persist-remove
+           :persist-count
+           :persist-each
+           :persist-keys
+           :persist-values
+           :persist-to-alist
+           :persist-from-alist))

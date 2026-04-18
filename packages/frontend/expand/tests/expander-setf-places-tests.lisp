@@ -77,3 +77,12 @@ detection format can run the test-level 30s timeout."
       (assert-true (search "%SET-SYMBOL-PLIST" str))
       (assert-true (search "SYMBOL-PLIST" str))
       (assert-true (search "RT-PLIST-PUT" str)))))
+
+(deftest expander-setf-symbol-value-place
+  "(setf (symbol-value sym) v) expands via the runtime symbol-value setter."
+  (let ((result (cl-cc/expand::compiler-macroexpand-all '(setf (symbol-value my-sym) 42))))
+    (assert-eq 'let (car result))
+    (let ((str (format nil "~S" result)))
+      (assert-true (search "RT-SET-SYMBOL-VALUE" str))
+      (assert-true (search "FIND-SYMBOL" str))
+      (assert-true (search "MY-SYM" str)))))

@@ -15,6 +15,9 @@
 (defvar *defstruct-slot-registry* (make-hash-table :test #'eq)
   "Maps struct name to list of (slot-name default-value) for :include inheritance.")
 
+(defvar *defstruct-type-registry* (make-hash-table :test #'eq)
+  "Maps struct name to its defstruct representation type: NIL, LIST, or VECTOR.")
+
 (defvar *macro-eval-fn* #'eval
   "Function used to evaluate macro bodies at compile time.
 Initially #'eval for bootstrap.  After full pipeline loads, rebound to our-eval

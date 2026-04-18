@@ -219,9 +219,22 @@ single linear instruction stream. Returns T on success, signals ERROR on failure
           (setf (gethash dst defined) t))))
     t))
 
+(defvar *skip-optimizer-passes* nil
+  "When non-NIL, optimize-instructions returns its input unchanged (with
+   leaf-p = NIL) without running any passes. Used by Phase 4 selfhost
+   source-loading where we only care whether each file parses/compiles/loads,
+   not runtime efficiency — skipping the full multi-pass pipeline for every
+   form delivers a ~2-3x wall-time reduction. NOTE: opt-resolve-pass-pipeline
+   treats NIL as 'use default passes', so this short-circuit is required —
+   you cannot disable the optimizer by passing :pass-pipeline nil.")
+
 (defun optimize-instructions (instructions &key (max-iterations 20) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Run the full multi-pass optimization pipeline on a VM instruction sequence.
-   Runs until no changes or MAX-ITERATIONS reached."
+   Runs until no changes or MAX-ITERATIONS reached.
+   When *skip-optimizer-passes* is non-NIL, returns (values instructions nil)
+   immediately without running any passes."
+  (when *skip-optimizer-passes*
+    (return-from optimize-instructions (values instructions nil)))
   (let ((prog instructions)
          (max-iterations (if (eq max-iterations :adaptive)
                              (opt-adaptive-max-iterations instructions)

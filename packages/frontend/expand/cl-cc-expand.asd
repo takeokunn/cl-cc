@@ -46,12 +46,12 @@
    (:file "macros-compat")       ; pkg/declare/IO/hash/coerce/LTV/feature macros
    (:file "macros-compat-clos")  ; CLOS protocol + MOP introspection + print macros
    (:file "macros-compat-array") ; array compat wrappers split from macros-compat
-   (:file "expander-data")       ; expander: grammar tables + dispatch table declarations
-   (:file "expander-defstruct")  ; expander: defstruct expansion helpers
-   (:file "expander-typed-params") ; typed lambda-list helpers + *function-type-registry*
-   (:file "expander-core")
-   (:file "expander-helpers")    ; expander: shared helper functions extracted from expander.lisp
-   (:file "expander-definitions-helpers") ; expander: lambda-list default expansion helper
+    (:file "expander-data")       ; expander: grammar tables + dispatch table declarations
+    (:file "expander-helpers")    ; expander: shared helper functions extracted from expander.lisp
+    (:file "expander-defstruct")  ; expander: defstruct expansion helpers
+    (:file "expander-typed-params") ; typed lambda-list helpers + *function-type-registry*
+    (:file "expander-core")
+    (:file "expander-definitions-helpers") ; expander: lambda-list default expansion helper
    (:file "expander-control-helpers") ; expander: binding helpers for control forms
    (:file "expander-setf-places-helpers") ; expander: setf-place cons access helper
    (:file "expander-setf-places") ; expander: setf compound-place registration table

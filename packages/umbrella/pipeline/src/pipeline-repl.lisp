@@ -55,6 +55,25 @@ Accumulates slot info across form evaluations so :include works across calls.")
         *repl-defstruct-registry* nil
         *repl-label-counter* nil))
 
+(defmacro with-fresh-repl-state (&body body)
+  "Execute BODY with a dynamically-scoped fresh REPL state.
+Unlike reset-repl-state (setf-based, clobbers outer state), this binds
+each persistent REPL special to nil for the dynamic extent of BODY, so
+the outer REPL state is preserved after BODY returns.
+
+Use in tests and selfhost phases that need isolated REPL state without
+disturbing any enclosing REPL session."
+  `(let ((*repl-vm-state*               nil)
+         (*repl-accessor-map*           nil)
+         (*repl-pool-instructions*      nil)
+         (*repl-pool-labels*            nil)
+         (*repl-global-vars-persistent* nil)
+         (*repl-label-counter*          nil)
+         (*repl-defstruct-registry*     nil))
+     ,@body))
+
+(export 'with-fresh-repl-state :cl-cc)
+
 (defun %ensure-repl-state ()
   "Lazily initialise all persistent REPL state variables on first use."
   (unless *repl-vm-state*
@@ -69,6 +88,37 @@ Accumulates slot info across form evaluations so :include works across calls.")
     (setf *repl-global-vars-persistent* (make-hash-table :test #'eq)))
   (unless *repl-defstruct-registry*
     (setf *repl-defstruct-registry* (make-hash-table :test #'eq))))
+
+(defun %run-form-repl-impl (result)
+  "Finalize compilation RESULT into the REPL persistent pool and execute
+   the newly-added instruction slice.  Factors out the shared post-compile
+   machinery used by both run-string-repl and run-form-repl."
+  (let* ((program (compilation-result-program result))
+         (new-insts (vm-program-instructions program))
+         ;; PC where the new code will start in the global pool
+         (start-pc (fill-pointer *repl-pool-instructions*)))
+    ;; Persist the label counter for the next compilation
+    (when (integerp *repl-capture-label-counter*)
+      (setf *repl-label-counter* *repl-capture-label-counter*))
+    ;; Track any new global variables defined by this compilation
+    (dolist (inst new-insts)
+      (when (typep inst 'vm-set-global)
+        (setf (gethash (vm-global-name inst) *repl-global-vars-persistent*) t)))
+    ;; Append new instructions to the shared pool
+    (dolist (inst new-insts)
+      (vector-push-extend inst *repl-pool-instructions*))
+    ;; Merge new labels (with global offset) into the pool label table
+    (let ((new-labels (build-label-table new-insts)))
+      (maphash (lambda (_key bucket)
+                 (declare (ignore _key))
+                 (dolist (entry bucket)
+                   (vm-label-table-store *repl-pool-labels*
+                                         (car entry)
+                                         (+ start-pc (cdr entry)))))
+               new-labels))
+    ;; Execute only the new slice, using the full pool for label resolution
+    (run-program-slice *repl-pool-instructions* *repl-pool-labels*
+                       start-pc *repl-vm-state*)))
 
 (defun run-string-repl (source)
   "Compile and run SOURCE using the persistent REPL state.
@@ -97,33 +147,25 @@ Example:
             (error "Unknown package: ~S" (second (first forms))))
           (setf *package* pkg)
           (return-from run-string-repl (second (first forms)))))
-      (let* ((result (compile-string source :target :vm))
-             (program (compilation-result-program result))
-             (new-insts (vm-program-instructions program))
-             ;; PC where the new code will start in the global pool
-             (start-pc (fill-pointer *repl-pool-instructions*)))
-        ;; Persist the label counter for the next compilation
-        (when (integerp *repl-capture-label-counter*)
-          (setf *repl-label-counter* *repl-capture-label-counter*))
-        ;; Track any new global variables defined by this compilation
-        (dolist (inst new-insts)
-          (when (typep inst 'vm-set-global)
-            (setf (gethash (vm-global-name inst) *repl-global-vars-persistent*) t)))
-        ;; Append new instructions to the shared pool
-        (dolist (inst new-insts)
-          (vector-push-extend inst *repl-pool-instructions*))
-        ;; Merge new labels (with global offset) into the pool label table
-        (let ((new-labels (build-label-table new-insts)))
-          (maphash (lambda (_key bucket)
-                     (declare (ignore _key))
-                     (dolist (entry bucket)
-                       (vm-label-table-store *repl-pool-labels*
-                                             (car entry)
-                                             (+ start-pc (cdr entry)))))
-                    new-labels))
-        ;; Execute only the new slice, using the full pool for label resolution
-        (run-program-slice *repl-pool-instructions* *repl-pool-labels*
-                           start-pc *repl-vm-state*)))))
+      (%run-form-repl-impl (compile-string source :target :vm)))))
+
+(defun run-form-repl (form)
+  "Like run-string-repl, but accepts an already-parsed S-expression FORM
+   (or AST node).  Skips the parse-source-for-language round-trip so that
+   callers who already have a form (e.g. our-load) do not need to serialize
+   it back to a string and re-parse.  The single in-package shortcut is
+   NOT handled here — callers must handle in-package themselves when they
+   have the parsed form in hand (our-load already does)."
+  (when (and (consp form) (eq (car form) 'in-package))
+    (error "run-form-repl does not handle (in-package ...) forms; caller must dispatch before calling."))
+  (%ensure-repl-state)
+  (let* ((*package* *package*)
+         (*accessor-slot-map* *repl-accessor-map*)
+         (*defstruct-slot-registry* *repl-defstruct-registry*)
+         (*labels-boxed-fns* nil)
+         (*repl-global-variables* *repl-global-vars-persistent*)
+         (*repl-capture-label-counter* t))
+    (%run-form-repl-impl (compile-expression form :target :vm))))
 
 ;;; ─── Self-Hosting Load ──────────────────────────────────────────────────
 ;;;
@@ -196,15 +238,14 @@ EXTERNAL-FORMAT is accepted but ignored (UTF-8 assumed)."
                 ((or whitespace-symbol-p unsupported-p)
                  nil)
                 (t
-                 (let ((form-str (write-to-string form)))
-                   (setf last-result
-                         (handler-case (run-string-repl form-str)
-                           (error (e)
-                             (format *error-output* "; Error loading ~A: ~A~%  Form: ~S~%"
-                                     path e form)
-                             nil)))
-                   (when print
-                     (format *standard-output* "~S~%" last-result))))))))))))
+                 (setf last-result
+                       (handler-case (run-form-repl form)
+                         (error (e)
+                           (format *error-output* "; Error loading ~A: ~A~%  Form: ~S~%"
+                                   path e form)
+                           nil)))
+                 (when print
+                   (format *standard-output* "~S~%" last-result)))))))))))
 
 ;;; Register run-string-repl and our-load in the VM host bridge.
 ;;; (run-string and compile-* are registered in pipeline.lisp.)

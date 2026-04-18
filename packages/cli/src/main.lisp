@@ -25,7 +25,6 @@ Commands:
   eval     <expr>         Evaluate an expression inline
   repl                    Start interactive REPL
   check    <file>         Type-check only, no execution
-  selfhost                Verify self-hosting capabilities
   help     [command]      Show this help or command-specific help
 
 Options:
@@ -122,24 +121,12 @@ Examples:
 
   Run type inference on a source file without executing it.
 
-Options:
+ Options:
   --lang lisp|php   Source language
   --strict          Treat type warnings as errors (exit 1)
   --verbose         Show type-inference details on stderr
-")
-    ("selfhost" . "Usage: cl-cc selfhost
-
-  Verify cl-cc's self-hosting capabilities.
-
-  Runs 9 checks:
-    1. Macro expansion through own VM (our-eval)
-    2-5. Basic compilation (arithmetic, recursion, closure, defmacro)
-    6-7. Meta-circular compilation (compiler compiles compiler)
-    8. Source file self-loading (87/87 files)
-    9. Host eval elimination (4/7 replaced)
-
-  Exit code 0 if all checks pass, 1 otherwise.
-"))
+ ")
+  )
   "Alist mapping command name strings to their help text strings.")
 
 (defun %print-command-help (command)
@@ -158,4 +145,3 @@ Options:
 
 ;;; (Utilities, dump functions, and compile options
 ;;;  are in main-utils.lisp which loads after this file.)
-

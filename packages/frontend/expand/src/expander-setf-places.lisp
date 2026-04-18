@@ -84,6 +84,19 @@
         (compiler-macroexpand-all
          `(set-fdefinition ,value ,(second place)))))
 
+;;; FR-586: (setf (symbol-value name) value) → host bridge
+(setf (gethash 'symbol-value *setf-compound-place-handlers*)
+      (lambda (place value)
+        (let ((sym (gensym "SYM"))
+              (v (gensym "V")))
+          (compiler-macroexpand-all
+           `(let ((,sym ,(second place))
+                  (,v ,value))
+              (funcall (symbol-function (find-symbol "RT-SET-SYMBOL-VALUE" "CL-CC/RUNTIME"))
+                       ,sym
+                       ,v)
+              ,v)))))
+
 ;;; FR-428: (setf (macro-function name) fn) → host bridge
 (setf (gethash 'macro-function *setf-compound-place-handlers*)
       (lambda (place value)

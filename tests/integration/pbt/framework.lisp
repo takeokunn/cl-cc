@@ -26,8 +26,16 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
 (defvar *size* 0
   "Current size parameter for generators (0-100).")
 
-(defvar *pbt-random-state* (make-random-state t)
-  "Random state for reproducible PBT test runs.")
+(defvar *pbt-rng-override* nil
+  "Optional override random state for reproducible PBT runs.
+When NIL (the default) generators fall back to *RANDOM-STATE*, which SBCL
+scopes per-thread. Setting this to a fixed state forces all generators to
+draw from it — useful for reproduction but unsafe under parallel execution.")
+
+(defun %pbt-rng ()
+  "Return the active PBT random state (override, or the thread-local default).
+Kept as a function so callers never capture a stale binding of the override."
+  (or *pbt-rng-override* *random-state*))
 
 ;;; Generator Protocol
 
@@ -69,7 +77,7 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
   "Generate random integers between MIN and MAX (inclusive)."
   (make-generator
    (lambda ()
-     (+ min (random (1+ (- max min)) *pbt-random-state*)))
+     (+ min (random (1+ (- max min)) (%pbt-rng))))
    :shrink-fn (lambda (n)
                 (let ((shrinks '()))
                   (when (and (minusp n) (< min (floor n 2)))
@@ -86,13 +94,13 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
   "Generate random floating-point numbers between MIN and MAX."
   (make-generator
    (lambda ()
-     (+ min (random (- max min) *pbt-random-state*)))))
+     (+ min (random (- max min) (%pbt-rng))))))
 
 (defun gen-boolean ()
   "Generate random boolean values (T or NIL)."
   (make-generator
    (lambda ()
-     (zerop (random 2 *pbt-random-state*)))))
+     (zerop (random 2 (%pbt-rng))))))
 
 (defun gen-character (&key (alphanumeric-only t))
   "Generate random characters."
@@ -100,8 +108,8 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
    (lambda ()
      (if alphanumeric-only
          (let ((chars "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"))
-           (char chars (random (length chars) *pbt-random-state*)))
-         (code-char (random 256 *pbt-random-state*))))))
+           (char chars (random (length chars) (%pbt-rng))))
+         (code-char (random 256 (%pbt-rng)))))))
 
 (defun gen-symbol (&key (package nil) (prefix "SYM"))
   "Generate random symbols.
@@ -109,7 +117,7 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
    PREFIX is prepended to a random number."
   (make-generator
    (lambda ()
-     (let ((name (format nil "~A-~D" prefix (random 100000 *pbt-random-state*))))
+     (let ((name (format nil "~A-~D" prefix (random 100000 (%pbt-rng)))))
        (case package
          (:keyword (intern name :keyword))
          ((nil) (gensym prefix))
@@ -121,7 +129,7 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
   (make-generator
    (lambda ()
      (let* ((range (- max-length min-length))
-            (len (or length (+ min-length (if (zerop range) 0 (random range *pbt-random-state*)))))
+            (len (or length (+ min-length (if (zerop range) 0 (random range (%pbt-rng))))))
             (chars (loop repeat len
                          collect (generate (gen-character :alphanumeric-only alphanumeric-only)))))
        (coerce chars 'string)))))
@@ -132,7 +140,7 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
   (make-generator
    (lambda ()
      (let ((range (- max-length min-length)))
-       (loop repeat (+ min-length (if (zerop range) 0 (random range *pbt-random-state*)))
+       (loop repeat (+ min-length (if (zerop range) 0 (random range (%pbt-rng))))
              collect (generate element-gen))))
    :shrink-fn (lambda (lst)
                 (let ((shrinks '()))
@@ -168,7 +176,7 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
   "Generate one of the elements from CHOICES."
   (make-generator
    (lambda ()
-     (nth (random (length choices) *pbt-random-state*) choices))))
+     (nth (random (length choices) (%pbt-rng)) choices))))
 
 (defun gen-tuple (&rest generators)
   "Generate a tuple with one element from each generator."
@@ -325,7 +333,7 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
      (let ((effective-depth (max 0 (min max-depth (floor (- 100 *size*) 20)))))
        (if (or (zerop effective-depth)
                (and (> effective-depth 0)
-                    (< (random 100 *pbt-random-state*)
+                    (< (random 100 (%pbt-rng))
                        (- 100 (/ *size* 2)))))
            ;; Generate terminal node
            (generate (gen-one-of *ast-terminal-generators*))
@@ -527,8 +535,7 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
 
 (defsuite cl-cc-pbt-suite
   :description "Property-Based Testing suite for CL-CC"
-  :parallel nil
-  :parent cl-cc-integration-serial-suite)
+  :parent cl-cc-integration-suite)
 
 ;;; Example Properties
 
@@ -575,7 +582,8 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
                       (declare (ignore ignored)))
                     (error "boom")))
            (let ((result (cl-cc/test::%run-single-test
-                          (append (copy-list (gethash name cl-cc/test::*test-registry*))
+                          (append (copy-list (cl-cc/test:persist-lookup
+                                              cl-cc/test::*test-registry* name))
                                   (list :number 1))
                           1
                           nil)))
@@ -584,4 +592,5 @@ scale down (e.g. CLCC_PBT_COUNT=3) without touching test sources.")
               (search "raised error" (or (getf result :detail) "")))
              (cl-cc/test:assert-true
               (search "boom" (or (getf result :detail) "")))))
-      (remhash name cl-cc/test::*test-registry*))))
+      (setf cl-cc/test::*test-registry*
+            (cl-cc/test:persist-remove cl-cc/test::*test-registry* name)))))

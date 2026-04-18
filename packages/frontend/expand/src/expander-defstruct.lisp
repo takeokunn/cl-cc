@@ -5,10 +5,47 @@
 ;;; Translates (defstruct name slots...) to (progn defclass constructor predicate).
 ;;; Supports :conc-name, :constructor with BOA lambda list, :include inheritance.
 ;;;
-;;; All functions here are pure code generators: they return Lisp forms,
-;;; never evaluate them.  Only expand-defstruct calls compiler-macroexpand-all
-;;; (via the caller in expander.lisp) to recurse into the output.
+;;; Pure model/naming helpers now live in expander-helpers.lisp.
+;;; This file keeps the emitted DEFSTRUCT forms and the top-level dispatcher.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+;;; FR-555: copy-structure — VM structs are hash-tables with :__class__.
+;;; Typed defstructs (:type list/vector) are represented as sequences, so this
+;;; must preserve shallow-copy semantics across all registered defstruct
+;;; representations using expansion-time metadata.
+(our-defmacro copy-structure (struct)
+  (let ((s (gensym "STRUCT")))
+    `(let ((,s ,struct))
+       (cond
+         ,@(loop for name being the hash-keys of *defstruct-slot-registry*
+                 using (hash-value slots)
+                 for struct-type = (gethash name *defstruct-type-registry*)
+                 collect
+                 (if struct-type
+                     (if (eq struct-type 'list)
+                         `((and (listp ,s)
+                                (consp ,s)
+                                (eq (car ,s) ',name))
+                           (list ',name
+                                 ,@(loop for _slot in slots
+                                         for idx from 1
+                                         collect `(nth ,idx ,s))))
+                         `((and (vectorp ,s)
+                                (> (length ,s) 0)
+                                (eq (aref ,s 0) ',name))
+                           (vector ',name
+                                   ,@(loop for _slot in slots
+                                           for idx from 1
+                                           collect `(aref ,s ,idx)))))
+                     `((typep ,s ',name)
+                       (let ((copy (make-instance ',name)))
+                         ,@(loop for slot in slots
+                                 for slot-name = (first slot)
+                                 collect `(setf (slot-value copy ',slot-name)
+                                                (slot-value ,s ',slot-name)))
+                         copy))))
+         (t
+          (error "copy-structure: unsupported object ~S" ,s))))))
 
 ;;; ── BOA (By-Order-of-Arguments) lambda list helpers ──────────────────────
 
@@ -34,74 +71,60 @@
 
 (defun %defstruct-make-constructor (ctor-name class-name boa-args all-slots)
   "Generate a DEFUN form for a defstruct constructor.
-With BOA-ARGS: uses positional parameters.  Without: uses keyword parameters."
+With BOA-ARGS: uses positional parameters. Without: uses keyword parameters."
   (if boa-args
-      ;; BOA constructor: positional params + &aux bindings
-      (let* ((parts        (%defstruct-extract-boa-parts boa-args))
-             (normal-params (car parts))
-             (aux-bindings  (cdr parts))
-             (param-names   (%defstruct-boa-param-names normal-params))
-             (aux-names     (mapcar #'first aux-bindings))
-             (bound-names   (append param-names aux-names))
-             (initargs      (loop for (sname default) in all-slots
-                                  append (list (intern (symbol-name sname) "KEYWORD")
-                                               (if (member sname bound-names :test #'string=)
-                                                   sname
-                                                   default))))
-             (aux-lets      (mapcar (lambda (b) (list (first b) (second b))) aux-bindings)))
-        (list 'defun ctor-name normal-params
-              (list 'let* aux-lets
-                    (list* 'make-instance (list 'quote class-name) initargs))))
-      ;; Keyword constructor: all slots become &key params
-      (let ((key-params (mapcar (lambda (s) (list (first s) (second s))) all-slots))
-            (initargs   (mapcan (lambda (s)
-                                  (list (intern (symbol-name (first s)) "KEYWORD")
-                                        (first s)))
-                                all-slots)))
+      (multiple-value-bind (normal-params aux-bindings param-names bound-names aux-lets)
+          (%defstruct-boa-bindings boa-args)
+        (declare (ignore aux-bindings param-names))
+        (let ((initargs (loop for (slot-name default) in all-slots
+                              append (list (%defstruct-make-keyword slot-name)
+                                           (if (member slot-name bound-names :test #'string=)
+                                               slot-name
+                                               default)))))
+          (list 'defun ctor-name normal-params
+                (list 'let* aux-lets
+                      (list* 'make-instance (list 'quote class-name) initargs)))))
+      (let ((key-params (mapcar (lambda (slot) (list (first slot) (second slot))) all-slots))
+            (initargs (mapcan (lambda (slot)
+                                (list (%defstruct-make-keyword (first slot))
+                                      (first slot)))
+                              all-slots)))
         (list 'defun ctor-name (cons '&key key-params)
               (list* 'make-instance (list 'quote class-name) initargs)))))
 
-;;; ── List/Vector-based struct expansion (FR-546) ────────────────────────
+;;; ── List/Vector-based struct expansion (FR-546) ──────────────────────────
+
+(defun %defstruct-typed-container-form (struct-type struct-name slot-values)
+  "Build the concrete list/vector container form for a typed defstruct."
+  (if (eq struct-type 'list)
+      `(list ',struct-name ,@slot-values)
+      `(vector ',struct-name ,@slot-values)))
 
 (defun %defstruct-typed-constructor (ctor-name struct-name struct-type boa-args all-slots)
-  "Generate a constructor for :type list or :type vector defstruct.
-The first element is the type tag (struct name), followed by slot values."
-  (labels ((emit-container (slot-values)
-             (if (eq struct-type 'list)
-                 `(list ',struct-name ,@slot-values)
-                 `(vector ',struct-name ,@slot-values))))
-    (if boa-args
-        ;; BOA constructor
-        (let* ((parts (%defstruct-extract-boa-parts boa-args))
-               (normal-params (car parts))
-               (aux-bindings (cdr parts))
-               (param-names (%defstruct-boa-param-names normal-params))
-               (aux-names (mapcar #'first aux-bindings))
-               (bound-names (append param-names aux-names))
-               (aux-lets (mapcar (lambda (b) (list (first b) (second b))) aux-bindings))
-               (slot-values (mapcar (lambda (s)
-                                      (if (member (first s) bound-names :test #'string=)
-                                          (first s)
-                                          (second s)))
-                                    all-slots)))
+  "Generate a constructor for :type list or :type vector defstruct."
+  (if boa-args
+      (multiple-value-bind (normal-params aux-bindings param-names bound-names aux-lets)
+          (%defstruct-boa-bindings boa-args)
+        (declare (ignore aux-bindings param-names))
+        (let ((slot-values (mapcar (lambda (slot)
+                                     (if (member (first slot) bound-names :test #'string=)
+                                         (first slot)
+                                         (second slot)))
+                                   all-slots)))
           `(defun ,ctor-name ,normal-params
              (let* ,aux-lets
-               ,(emit-container slot-values))))
-        ;; Keyword constructor
-        (let ((key-params (mapcar (lambda (s) (list (first s) (second s))) all-slots))
-              (slot-values (mapcar #'first all-slots)))
-          `(defun ,ctor-name (&key ,@key-params)
-             ,(emit-container slot-values))))))
+               ,(%defstruct-typed-container-form struct-type struct-name slot-values)))))
+      (let ((key-params (mapcar (lambda (slot) (list (first slot) (second slot))) all-slots))
+            (slot-values (mapcar #'first all-slots)))
+        `(defun ,ctor-name (&key ,@key-params)
+           ,(%defstruct-typed-container-form struct-type struct-name slot-values)))))
 
 (defun %defstruct-typed-accessors (struct-type conc-name all-slots)
-  "Generate accessor functions for :type list or :type vector defstruct.
-Each slot is at offset (1+ index) since position 0 is the type tag."
+  "Generate accessor functions for :type list or :type vector defstruct."
   (loop for slot in all-slots
         for slot-name = (first slot)
         for idx from 1
-        for acc-name = (if conc-name
-                           (intern (concatenate 'string (symbol-name conc-name) (symbol-name slot-name)))
-                           slot-name)
+        for acc-name = (%defstruct-accessor-name conc-name slot-name)
         collect (if (eq struct-type 'list)
                     `(defun ,acc-name (obj) (nth ,idx obj))
                     `(defun ,acc-name (obj) (aref obj ,idx)))))
@@ -119,6 +142,95 @@ Each slot is at offset (1+ index) since position 0 is the type tag."
                   (eq (aref obj 0) ',struct-name)
                   (= (length obj) ,total-len)))))))
 
+(defun %defstruct-typed-expansion (model)
+  "Emit the full expansion for a :type list/vector defstruct MODEL."
+  (let* ((name (getf model :name))
+         (struct-type (getf model :struct-type))
+         (ctor-name (getf model :ctor-name))
+         (boa-args (getf model :boa-args))
+         (all-slots (getf model :all-slots))
+         (conc-name (getf model :conc-name))
+         (pred-name (getf model :pred-name))
+         (ctor-form (when ctor-name
+                      (%defstruct-typed-constructor ctor-name name struct-type boa-args all-slots)))
+         (accessor-forms (%defstruct-typed-accessors struct-type conc-name all-slots))
+         (pred-form (when pred-name
+                      (%defstruct-typed-predicate pred-name name struct-type (length all-slots)))))
+    `(progn ,@(when ctor-form (list ctor-form))
+            ,@accessor-forms
+            ,@(when pred-form (list pred-form))
+            (quote ,name))))
+
+;;; ── Standard CLOS-based defstruct expansion ───────────────────────────────
+
+(defun %defstruct-register-accessors (name conc-name own-slots)
+  "Register writable accessors for SETF expansion metadata."
+  (dolist (slot own-slots)
+    (unless (third slot)
+      (setf (gethash (%defstruct-accessor-name conc-name (first slot))
+                     *accessor-slot-map*)
+            (cons name (first slot))))))
+
+(defun %defstruct-defclass-slots (conc-name own-slots)
+  "Build DEFCLASS slot specs for own defstruct slots."
+  (mapcar (lambda (slot)
+            (let ((acc-key (if (third slot) :reader :accessor)))
+              (list (first slot)
+                    :initarg (%defstruct-make-keyword (first slot))
+                    :initform (second slot)
+                    acc-key (%defstruct-accessor-name conc-name (first slot)))))
+          own-slots))
+
+(defun %defstruct-print-form (name print-fn print-fn-opt)
+  "Emit an optional PRINT-OBJECT method for NAME."
+  (when print-fn
+    (let ((obj (gensym "OBJ"))
+          (stream (gensym "STR")))
+      (if print-fn-opt
+          `(defmethod print-object ((,obj ,name) ,stream)
+             (funcall (function ,print-fn) ,obj ,stream 0))
+          `(defmethod print-object ((,obj ,name) ,stream)
+             (funcall (function ,print-fn) ,obj ,stream))))))
+
+(defun %defstruct-derive-form (name derived-classes)
+  "Emit registration forms for :deriving classes."
+  (when derived-classes
+    `(eval-when (:load-toplevel :execute)
+       ,@(mapcar (lambda (class)
+                   `(funcall (find-symbol "REGISTER-TYPECLASS-INSTANCE" "CL-CC/TYPE")
+                             ',class ',name nil))
+                 derived-classes))))
+
+(defun %defstruct-clos-expansion (model)
+  "Emit the standard CLOS-based defstruct expansion for MODEL."
+  (let* ((name (getf model :name))
+         (conc-name (getf model :conc-name))
+         (ctor-name (getf model :ctor-name))
+         (boa-args (getf model :boa-args))
+         (parent-name (getf model :parent-name))
+         (own-slots (getf model :own-slots))
+         (all-slots (getf model :all-slots))
+         (pred-name (getf model :pred-name))
+         (print-fn (getf model :print-fn))
+         (print-fn-opt (getf model :print-fn-opt))
+         (derived-classes (getf model :derived-classes)))
+    (%defstruct-register-accessors name conc-name own-slots)
+    (let* ((defclass-form `(defclass ,name
+                             ,(if parent-name (list parent-name) '())
+                             ,(%defstruct-defclass-slots conc-name own-slots)))
+           (ctor-form (when ctor-name
+                        (%defstruct-make-constructor ctor-name name boa-args all-slots)))
+           (pred-form (when pred-name
+                        `(defun ,pred-name (obj) (typep obj ',name))))
+           (print-form (%defstruct-print-form name print-fn print-fn-opt))
+           (derive-form (%defstruct-derive-form name derived-classes)))
+      `(progn ,defclass-form
+              ,@(when ctor-form (list ctor-form))
+              ,@(when pred-form (list pred-form))
+              ,@(when print-form (list print-form))
+              ,@(when derive-form (list derive-form))
+              (quote ,name)))))
+
 ;;; ── Main defstruct expander ──────────────────────────────────────────────
 
 (defun expand-defstruct (form)
@@ -129,120 +241,14 @@ Supported options:
   (:constructor name lambda-list?) — constructor name and optional BOA list
   (:include parent)     — inherit parent slots
   (:type list/vector)   — use list/vector representation instead of CLOS"
-  (let* ((name-and-options (second form))
-         (slots-raw (cddr form))
-         ;; Parse name and option list
-         (name (if (listp name-and-options) (first name-and-options) name-and-options))
-         (options (when (listp name-and-options) (rest name-and-options)))
-         ;; :conc-name option
-         (conc-opt (find :conc-name options :key (lambda (o) (when (listp o) (first o)))))
-         (conc-name (if conc-opt
-                        (second conc-opt)
-                        (intern (concatenate 'string (symbol-name name) "-"))))
-         ;; :constructor option — (:constructor nil) suppresses
-         (ctor-opt (find :constructor options :key (lambda (o) (when (listp o) (first o)))))
-         (ctor-name (cond
-                      ((and ctor-opt (null (second ctor-opt))) nil)
-                      (ctor-opt (second ctor-opt))
-                      (t (intern (concatenate 'string "MAKE-" (symbol-name name))))))
-         (boa-args (when (and ctor-opt (cddr ctor-opt)) (third ctor-opt)))
-         ;; :include option
-         (incl-opt (find :include options :key (lambda (o) (when (listp o) (first o)))))
-         (parent-name (when incl-opt (second incl-opt)))
-         (parent-slots (when parent-name (gethash parent-name *defstruct-slot-registry*)))
-         ;; :type option — (:type list) or (:type vector)
-         (type-opt (find :type options :key (lambda (o) (when (listp o) (first o)))))
-         (struct-type (when type-opt (second type-opt)))
-         ;; Slot normalization: (slot-name default &key :read-only :type) or bare slot-name
-         ;; Returns (slot-name default read-only-p)
-         (own-slots (mapcar (lambda (s)
-                              (if (listp s)
-                                  (list (first s) (second s)
-                                        (getf (cddr s) :read-only nil))
-                                  (list s nil nil)))
-                            (remove-if #'stringp slots-raw)))
-         (all-slots (append (or parent-slots nil) own-slots))
-         ;; :predicate option — (:predicate nil) suppresses
-         (pred-opt (find :predicate options :key (lambda (o) (when (listp o) (first o)))))
-         (pred-name (cond
-                      ((and pred-opt (null (second pred-opt))) nil)
-                      (pred-opt (second pred-opt))
-                      (t (intern (concatenate 'string (symbol-name name) "-P")))))
-         ;; FR-544: :print-function / :print-object option
-         (print-fn-opt (find :print-function options :key (lambda (o) (when (listp o) (first o)))))
-         (print-obj-opt (find :print-object options :key (lambda (o) (when (listp o) (first o)))))
-         (print-fn (or (when print-fn-opt (second print-fn-opt))
-                       (when print-obj-opt (second print-obj-opt))))
-         ;; FR-1005: deriving support (minimal core implementation)
-         (deriving-opt (find :deriving options :key (lambda (o) (when (listp o) (first o)))))
-         (derived-classes (when deriving-opt (rest deriving-opt))))
-    ;; Register slot info for :include inheritance
+  (let* ((model (%defstruct-build-model form))
+         (name (getf model :name))
+         (all-slots (getf model :all-slots))
+         (struct-type (getf model :struct-type)))
+    ;; Register slot info for :include inheritance.
     (setf (gethash name *defstruct-slot-registry*) all-slots)
-    ;; Dispatch: :type list/vector → non-CLOS expansion; otherwise → CLOS expansion
+    (setf (gethash name *defstruct-type-registry*) struct-type)
+    ;; Dispatch: :type list/vector → non-CLOS expansion; otherwise → CLOS expansion.
     (if struct-type
-        ;; ── :type list or :type vector expansion (FR-546) ──
-        (let* ((ctor-form (when ctor-name
-                            (%defstruct-typed-constructor ctor-name name struct-type boa-args all-slots)))
-                (accessor-forms (%defstruct-typed-accessors struct-type conc-name all-slots))
-               (pred-form (when pred-name
-                            (%defstruct-typed-predicate pred-name name struct-type (length all-slots)))))
-          `(progn ,@(when ctor-form (list ctor-form))
-                  ,@accessor-forms
-                  ,@(when pred-form (list pred-form))
-                  (quote ,name)))
-        ;; ── Standard CLOS-based expansion ──
-        (flet ((accessor-name (slot-name)
-                 (if conc-name
-                     (intern (concatenate 'string (symbol-name conc-name) (symbol-name slot-name)))
-                     slot-name)))
-          ;; Register accessors for setf expansion — only own non-read-only slots.
-          ;; (parent accessors are already registered under the parent's conc-name; FR-545)
-          (dolist (slot own-slots)
-            (unless (third slot)
-              (setf (gethash (accessor-name (first slot)) *accessor-slot-map*)
-                    (cons name (first slot)))))
-          ;; Build DEFCLASS slot specs — only own slots; parent slots are inherited
-          ;; through the CLOS superclass chain (FR-545 fix).
-          (let* ((defclass-slots
-                   (mapcar (lambda (slot)
-                             (let ((acc-key (if (third slot) :reader :accessor)))
-                               (list (first slot)
-                                     :initarg (intern (symbol-name (first slot)) "KEYWORD")
-                                     :initform (second slot)
-                                     acc-key (accessor-name (first slot)))))
-                           own-slots))
-                 ;; ANSI CL 8.1: structs conceptually inherit from structure-object,
-                 ;; but we expand to DEFCLASS (standard-class metaclass), which cannot
-                 ;; take cl:structure-object as a superclass under SBCL's strict
-                 ;; metaclass rules (SB-MOP:VALIDATE-SUPERCLASS signals a type error
-                 ;; during host-side defstruct deriving tests). Omit the default and
-                 ;; let defclass fall back to standard-object.
-                 (superclasses (if parent-name (list parent-name) '()))
-                 (defclass-form `(defclass ,name ,superclasses ,defclass-slots))
-                 (ctor-form (when ctor-name
-                              (%defstruct-make-constructor ctor-name name boa-args all-slots)))
-                 (pred-form (when pred-name
-                              `(defun ,pred-name (obj) (typep obj ',name))))
-                 ;; FR-544: :print-function emits defmethod print-object
-                 (print-form (when print-fn
-                               (let ((o (gensym "OBJ")) (s (gensym "STR")))
-                                 (if print-fn-opt
-                                     ;; :print-function takes (obj stream depth)
-                                     `(defmethod print-object ((,o ,name) ,s)
-                                        (funcall (function ,print-fn) ,o ,s 0))
-                                     ;; :print-object takes (obj stream)
-                                     `(defmethod print-object ((,o ,name) ,s)
-                                        (funcall (function ,print-fn) ,o ,s))))))
-                 ;; FR-1005: deriving support (minimal core implementation)
-                 (derive-form (when derived-classes
-                                `(eval-when (:load-toplevel :execute)
-                                   ,@(mapcar (lambda (class)
-                                               `(funcall (find-symbol "REGISTER-TYPECLASS-INSTANCE" "CL-CC/TYPE")
-                                                         ',class ',name nil))
-                                             derived-classes)))))
-            `(progn ,defclass-form
-                    ,@(when ctor-form (list ctor-form))
-                    ,@(when pred-form (list pred-form))
-                    ,@(when print-form (list print-form))
-                    ,@(when derive-form (list derive-form))
-                    (quote ,name)))))))
+        (%defstruct-typed-expansion model)
+        (%defstruct-clos-expansion model))))

@@ -81,4 +81,5 @@
    #:opt-inst-dst #:opt-inst-read-regs #:opt-falsep
 
    ;; ─── optimizer-pipeline.lisp — top-level entry point ───────────────
-   #:optimize-instructions))
+   #:optimize-instructions
+   #:*skip-optimizer-passes*))

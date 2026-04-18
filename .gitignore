@@ -2,6 +2,7 @@
 .claude/worktrees/
 .direnv/
 .playwright-mcp/
+test-timings.tsv
 
 # Common Lisp compiled artifacts
 *.fasl
