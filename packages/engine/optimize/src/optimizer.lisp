@@ -177,15 +177,17 @@
              (push (make-vm-const :dst dst :value val) result))
            (clear (reg) (remhash reg env)))
       (dolist (inst instructions)
-        (cond
-          ((typep inst 'vm-label)         (%fold-vm-label      inst env #'emit target-labels))
-          ((typep inst 'vm-const)         (%fold-vm-const      inst env #'emit))
-          ((typep inst 'vm-move)          (%fold-vm-move       inst env #'emit #'emit-const #'clear))
-          ((opt-binary-lhs-rhs-p inst)    (%fold-binary-inst   inst env #'emit #'emit-const #'clear))
-          ((opt-foldable-unary-arith-p inst) (%fold-unary-inst inst env #'emit #'emit-const #'clear))
-          ((opt-foldable-type-pred-p inst)(%fold-type-pred-inst inst env #'emit #'emit-const #'clear))
-          ((typep inst 'vm-jump-zero)     (%fold-vm-jump-zero  inst env #'emit))
-          (t                              (%fold-default-inst  inst env #'emit #'clear)))))
-    (nreverse result)))
+        (typecase inst
+          (vm-label    (%fold-vm-label      inst env #'emit target-labels))
+          (vm-const    (%fold-vm-const      inst env #'emit))
+          (vm-move     (%fold-vm-move       inst env #'emit #'emit-const #'clear))
+          (vm-jump-zero (%fold-vm-jump-zero inst env #'emit))
+          (t
+           (cond
+             ((opt-binary-lhs-rhs-p inst)      (%fold-binary-inst    inst env #'emit #'emit-const #'clear))
+             ((opt-foldable-unary-arith-p inst) (%fold-unary-inst     inst env #'emit #'emit-const #'clear))
+             ((opt-foldable-type-pred-p inst)   (%fold-type-pred-inst inst env #'emit #'emit-const #'clear))
+             (t                                 (%fold-default-inst   inst env #'emit #'clear))))))
+    (nreverse result))))
 
 ;;; ─── Top-Level Optimizer ─────────────────────────────────────────────────

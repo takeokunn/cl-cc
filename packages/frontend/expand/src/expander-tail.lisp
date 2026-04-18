@@ -6,7 +6,7 @@
   (setf (gethash op *expander-head-table*)
         (lambda (form)
           (if (= (length form) 2)
-              (compiler-macroexpand-all `(,(car form) ,(second form) 1))
+              (compiler-macroexpand-all (list (car form) (second form) 1))
               (list (car form)
                     (compiler-macroexpand-all (second form))
                     (compiler-macroexpand-all (third form)))))))
@@ -24,6 +24,7 @@
           (if (and (> (length form) 2) (stringp (second form)))
               ;; (error "fmt" arg...) → (error (format nil "fmt" arg...))
               (compiler-macroexpand-all
-               `(,(car form) (format nil ,@(cdr form))))
+               (list (car form)
+                     (cons 'format (cons nil (cdr form)))))
               ;; 1-arg form or handler-case clause: pass through unchanged
               (mapcar #'compiler-macroexpand-all form)))))

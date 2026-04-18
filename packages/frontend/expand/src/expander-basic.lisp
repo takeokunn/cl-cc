@@ -29,11 +29,11 @@
     ;; (apply fn a1 a2 ... list) with spread args → cons-fold
     ((> (length form) 3)
      (let* ((fn         (second form))
-            (spread-args (butlast (cddr form)))
-            (last-arg    (car (last form)))
-            (combined    (reduce (lambda (a rest) `(cons ,a ,rest))
-                                 spread-args :from-end t :initial-value last-arg)))
-       (compiler-macroexpand-all `(apply ,fn ,combined))))
+             (spread-args (butlast (cddr form)))
+             (last-arg    (car (last form)))
+             (combined    (reduce (lambda (a rest) (list 'cons a rest))
+                                  spread-args :from-end t :initial-value last-arg)))
+       (compiler-macroexpand-all (list 'apply fn combined))))
     ;; (apply 'name list) or (apply #'name list)
     ((and (= (length form) 3)
           (consp (second form))
@@ -51,7 +51,8 @@
            (eq (car (third form)) 'function)
            (symbolp (second (third form))))
       (compiler-macroexpand-all
-       `(make-hash-table :test ',(second (third form)) ,@(cdddr form)))
+       (append (list 'make-hash-table :test (list 'quote (second (third form))))
+               (cdddr form)))
       (cons 'make-hash-table (mapcar #'compiler-macroexpand-all (cdr form)))))
 
 ;; function — wrap builtins in first-class lambda
@@ -66,6 +67,6 @@
 (define-expander-for multiple-value-list (form)
   (let ((tmp (gensym "MVL")))
     (compiler-macroexpand-all
-     `(let ((,tmp ,(second form)))
-        (declare (ignore ,tmp))
-        (%values-to-list)))))
+     (list 'let (list (list tmp (second form)))
+           (list 'declare (list 'ignore tmp))
+           '(%values-to-list)))))

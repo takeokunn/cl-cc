@@ -84,53 +84,74 @@ Options:
         ((consp form) (push form slots))
         (t (error "Invalid form in define-vm-instruction: ~S" form))))
     (setf slots (nreverse slots))
-    (unless sexp-slots
-      (setf sexp-slots (mapcar #'car slots)))
-    (let ((prefix (if conc-name-override
-                      (string conc-name-override)
-                      (concatenate 'string (symbol-name name) "-"))))
-      (labels ((struct-acc (slot)
-                 (intern (format nil "~A~A" prefix (symbol-name slot))))
-               (ctor ()
-                 (intern (format nil "MAKE-~A" (symbol-name name))))
-               (pos-form (n)
-                 (case n
-                   (1 '(second sexp)) (2 '(third sexp)) (3 '(fourth sexp))
-                   (4 '(fifth sexp)) (5 '(sixth sexp)) (6 '(seventh sexp))
-                   (t `(nth ,n sexp)))))
-        `(progn
-           (defstruct (,name (:include ,parent)
-                            ,@(when conc-name-override
-                                `((:conc-name ,conc-name-override))))
-             ,@(when docstring `(,docstring))
-             ,@(mapcar (lambda (slot)
-                         (let ((sname (car slot))
-                               (init (cadr slot))
-                               (type (getf (cddr slot) :type)))
-                           (if type `(,sname ,init :type ,type) `(,sname ,init))))
-                       slots))
-           ,@(loop for slot in slots
-                   for sname = (car slot)
-                   for reader = (getf (cddr slot) :reader)
-                   when (and reader (not (eq reader (struct-acc sname))))
-                   collect `(eval-when (:compile-toplevel :load-toplevel :execute)
-                              (unless (fboundp ',reader)
-                                (defgeneric ,reader (inst)))
-                              (defmethod ,reader ((inst ,name))
-                                (,(struct-acc sname) inst))))
-           ,@(when sexp-tag
-               `((defmethod instruction->sexp ((inst ,name))
-                   (list ,sexp-tag
-                         ,@(mapcar (lambda (s) `(,(struct-acc s) inst))
-                                   sexp-slots)))
-                 (setf (gethash ,sexp-tag *instruction-constructors*)
-                       (lambda (sexp)
-                         ,@(unless sexp-slots '((declare (ignore sexp))))
-                         (,(ctor)
-                          ,@(loop for s in sexp-slots
+     (unless sexp-slots
+       (setf sexp-slots (mapcar #'car slots)))
+     (let ((prefix (if conc-name-override
+                       (string conc-name-override)
+                       (concatenate 'string (symbol-name name) "-"))))
+       (labels ((struct-acc (slot)
+                  (intern (format nil "~A~A" prefix (symbol-name slot))))
+                (ctor ()
+                  (intern (format nil "MAKE-~A" (symbol-name name))))
+                (pos-form (n)
+                  (case n
+                    (1 '(second sexp)) (2 '(third sexp)) (3 '(fourth sexp))
+                    (4 '(fifth sexp)) (5 '(sixth sexp)) (6 '(seventh sexp))
+                    (t `(nth ,n sexp)))))
+         (let* ((struct-options (append (list name (list :include parent))
+                                        (when conc-name-override
+                                          (list (list :conc-name conc-name-override)))))
+                (struct-slots
+                  (mapcar (lambda (slot)
+                            (let ((sname (car slot))
+                                  (init (cadr slot))
+                                  (type (getf (cddr slot) :type)))
+                              (if type
+                                  (list sname init :type type)
+                                  (list sname init))))
+                          slots))
+                (struct-form
+                  (append (list 'defstruct struct-options)
+                          (when docstring (list docstring))
+                          struct-slots))
+                (reader-forms
+                  (loop for slot in slots
+                        for sname = (car slot)
+                        for reader = (getf (cddr slot) :reader)
+                        when (and reader (not (eq reader (struct-acc sname))))
+                        collect (list 'eval-when
+                                      '(:compile-toplevel :load-toplevel :execute)
+                                      (list 'unless
+                                            (list 'fboundp (list 'quote reader))
+                                            (list 'defgeneric reader '(inst)))
+                                      (list 'defmethod reader
+                                            (list (list 'inst name))
+                                            (list (struct-acc sname) 'inst)))))
+                (sexp-forms
+                  (when sexp-tag
+                    (let ((ctor-args
+                            (loop for s in sexp-slots
                                   for i from 1
-                                  append `(,(intern (symbol-name s) :keyword)
-                                           ,(pos-form i)))))))))))))
+                                  append (list (intern (symbol-name s) :keyword)
+                                               (pos-form i)))))
+                      (list
+                        (list 'defmethod 'instruction->sexp
+                              (list (list 'inst name))
+                              (cons 'list
+                                    (cons sexp-tag
+                                          (mapcar (lambda (s)
+                                                    (list (struct-acc s) 'inst))
+                                                  sexp-slots))))
+                        (list 'setf
+                              (list 'gethash sexp-tag '*instruction-constructors*)
+                              (append (list 'lambda '(sexp))
+                                      (unless sexp-slots
+                                        (list '(declare (ignore sexp))))
+                                      (list (cons (ctor) ctor-args)))))))))
+           (cons 'progn
+                 (append (list struct-form)
+                         reader-forms
+                         sexp-forms)))))))
 
 ;;; Simple Instruction Method Generator
 
@@ -144,18 +165,31 @@ SHAPE is one of:
   (let ((inst (gensym "INST"))
         (state (gensym "STATE"))
         (pc (gensym "PC")))
-    `(defmethod execute-instruction ((,inst ,name) ,state ,pc labels)
-       (declare (ignore labels))
-       (vm-reg-set ,state (,dst ,inst)
-                   ,(ecase shape
-                      (:unary `(,cl-func (vm-reg-get ,state (,src ,inst))))
-                      (:binary `(,cl-func (vm-reg-get ,state (,lhs ,inst))
-                                          (vm-reg-get ,state (,rhs ,inst))))
-                      (:pred1 `(if (,cl-func (vm-reg-get ,state (,src ,inst))) 1 0))
-                      (:pred2 `(if (,cl-func (vm-reg-get ,state (,lhs ,inst))
-                                             (vm-reg-get ,state (,rhs ,inst)))
-                                   1 0))))
-       (values (1+ ,pc) nil nil))))
+    (let ((value-form
+            (ecase shape
+              (:unary
+               (list cl-func (list 'vm-reg-get state (list src inst))))
+              (:binary
+               (list cl-func
+                     (list 'vm-reg-get state (list lhs inst))
+                     (list 'vm-reg-get state (list rhs inst))))
+              (:pred1
+               (list 'if
+                     (list cl-func (list 'vm-reg-get state (list src inst)))
+                     1
+                     0))
+              (:pred2
+               (list 'if
+                     (list cl-func
+                           (list 'vm-reg-get state (list lhs inst))
+                           (list 'vm-reg-get state (list rhs inst)))
+                     1
+                     0)))))
+      (list 'defmethod 'execute-instruction
+            (list (list inst name) state pc 'labels)
+            (list 'declare (list 'ignore 'labels))
+            (list 'vm-reg-set state (list dst inst) value-form)
+            (list 'values (list '1+ pc) nil nil)))))
 
 ;;; Instruction Structure Shorthand Macros
 

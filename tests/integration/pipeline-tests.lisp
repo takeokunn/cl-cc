@@ -255,6 +255,34 @@ parallel stdlib-heavy compilation can leak state across workers."
   (expected expr)
   (assert-equal expected (cl-cc::our-eval expr)))
 
+(deftest pipeline-our-eval-uses-cps-path-for-simple-expression
+  "our-eval evaluates simple expressions via the CPS host path without calling compile-expression." 
+  (let ((orig (symbol-function 'cl-cc::compile-expression)))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'cl-cc::compile-expression)
+                 (lambda (&rest args)
+                   (declare (ignore args))
+                   (error "compile-expression should not run for CPS-safe our-eval")))
+           (assert-= 3 (cl-cc::our-eval '(+ 1 2))))
+      (setf (symbol-function 'cl-cc::compile-expression) orig))))
+
+(deftest pipeline-our-eval-falls-back-to-vm-for-definitions
+  "our-eval still uses the compile→VM path for top-level definition forms." 
+  (let ((orig (symbol-function 'cl-cc::compile-expression))
+        (called nil))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'cl-cc::compile-expression)
+                 (lambda (&rest args)
+                   (setf called t)
+                   (apply orig args)))
+           (assert-eq '*pipeline-cps-fallback*
+                      (cl-cc::our-eval '(defvar *pipeline-cps-fallback* 7)))
+           (assert-true called))
+      (ignore-errors (makunbound '*pipeline-cps-fallback*))
+      (setf (symbol-function 'cl-cc::compile-expression) orig))))
+
 ;;; ─── run-string-repl (persistent state) ─────────────────────────────────
 
 (deftest pipeline-repl-simple-eval
@@ -276,6 +304,84 @@ parallel stdlib-heavy compilation can leak state across workers."
     (run-string-repl "(defvar *repl-test-val* 99)")
     (let ((result (run-string-repl "*repl-test-val*")))
       (assert-= 99 result))))
+
+(deftest pipeline-run-form-repl-registers-top-level-defmacro-on-host
+  "run-form-repl handles top-level defmacro by registering a host expander immediately." 
+  (let* ((*package* (find-package :cl-cc/compile))
+         (macro-name (intern "PIPELINE-REPL-TEMP-DEFMACRO" *package*))
+         (form (first (cl-cc/parse:parse-all-forms
+                       "(defmacro pipeline-repl-temp-defmacro (&body body) `(progn ,@body))")))
+         (table (cl-cc/expand::macro-env-table cl-cc/expand::*macro-environment*)))
+    (unwind-protect
+         (progn
+           (assert-eq macro-name (cl-cc::run-form-repl form))
+           (let ((expander (gethash macro-name table)))
+              (assert-true expander)
+              (assert-equal '(progn (print 1))
+                           (funcall expander '(pipeline-repl-temp-defmacro (print 1)) nil))))
+      (remhash macro-name table))))
+
+(deftest pipeline-run-form-repl-registers-destructuring-defmacro-on-host
+  "run-form-repl supports top-level defmacro lambda lists with nested destructuring." 
+  (let* ((*package* (find-package :cl-cc/compile))
+         (macro-name (intern "PIPELINE-REPL-TEMP-DESTRUCTURING-DEFMACRO" *package*))
+         (form (first (cl-cc/parse:parse-all-forms
+                       "(defmacro pipeline-repl-temp-destructuring-defmacro (name (parent) &body body) `(list ',name ',parent ',body))")))
+         (table (cl-cc/expand::macro-env-table cl-cc/expand::*macro-environment*)))
+    (unwind-protect
+         (progn
+           (assert-eq macro-name (cl-cc::run-form-repl form))
+           (let ((expander (gethash macro-name table)))
+             (assert-true expander)
+             (assert-equal '(cons 'foo
+                                  (cons 'bar
+                                        (cons '(baz quux) nil)))
+                           (funcall expander '(pipeline-repl-temp-destructuring-defmacro foo (bar) baz quux) nil))))
+      (remhash macro-name table))))
+
+(deftest pipeline-run-form-repl-normalizes-register-macro-lambda-body
+  "run-form-repl normalizes top-level register-macro lambda bodies before storing the host expander." 
+  (let* ((*package* (find-package :cl-cc/compile))
+         (macro-name (intern "PIPELINE-REPL-TEMP-REGISTER-MACRO" *package*))
+         (form (first (cl-cc/parse:parse-all-forms
+                       "(register-macro 'pipeline-repl-temp-register-macro (lambda (form env) (declare (ignore env)) (let ((x (second form))) `(progn ,x))))")))
+         (table (cl-cc/expand::macro-env-table cl-cc/expand::*macro-environment*)))
+    (unwind-protect
+         (progn
+           (assert-eq macro-name (cl-cc::run-form-repl form))
+           (let ((expander (gethash macro-name table)))
+             (assert-true expander)
+              (assert-equal '(progn 42)
+                            (funcall expander '(pipeline-repl-temp-register-macro 42) nil))))
+      (remhash macro-name table))))
+
+(deftest pipeline-run-string-uses-cps-fast-path-for-safe-single-form
+  "run-string uses the CPS fast path for a safe single-form Lisp expression." 
+  (let ((hook-called nil)
+        (hook-source nil)
+        (hook-form nil)
+        (hook-value nil))
+    (let ((cl-cc::*run-string-cps-fast-path-hook*
+            (lambda (source form value)
+              (setf hook-called t
+                    hook-source source
+                    hook-form form
+                    hook-value value))))
+      (assert-eql 3 (cl-cc:run-string "(+ 1 2)"))
+      (assert-true hook-called)
+      (assert-equal "(+ 1 2)" hook-source)
+      (assert-equal '(+ 1 2) hook-form)
+      (assert-eql 3 hook-value))))
+
+(deftest pipeline-run-string-skips-cps-fast-path-for-definition-forms
+  "run-string does not use the CPS fast path for definition-like top-level forms." 
+  (let ((hook-called nil))
+    (let ((cl-cc::*run-string-cps-fast-path-hook*
+            (lambda (&rest args)
+              (declare (ignore args))
+              (setf hook-called t))))
+      (assert-true (cl-cc:run-string "(defun pipeline-cps-fast-path-def () 42)"))
+      (assert-false hook-called))))
 
 ;;; ─── reset-repl-state ──────────────────────────────────────────────────
 

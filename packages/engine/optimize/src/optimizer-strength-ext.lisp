@@ -78,33 +78,35 @@
                                                          (first sorted)
                                                          dst))))))))
       (dolist (inst instructions)
-        (cond
-          ((typep inst 'vm-label)
+        (typecase inst
+          (vm-label
            (clrhash env)
            (push inst result))
-          ((typep inst 'vm-const)
+          (vm-const
            (setf (gethash (vm-dst inst) env) (vm-value inst))
            (push inst result))
-          ((and result
-                (opt-reassociate-commutative-p inst)
-                (opt-reassociate-commutative-p (car result)))
-            (multiple-value-bind (new-prev new-cur)
-                (maybe-reassociate (car result) inst)
-              (if new-prev
-                  (progn
-                    (setf (car result) new-prev)
-                   (push new-cur result)
-                   (remhash (vm-dst new-prev) env)
-                   (remhash (vm-dst new-cur) env))
-                 (progn
-                    (when (opt-inst-dst inst)
-                      (remhash (opt-inst-dst inst) env))
-                    (push inst result)))))
           (t
-           (when (opt-inst-dst inst)
-             (remhash (opt-inst-dst inst) env))
-           (push inst result)))))
-    (nreverse result)))
+           (cond
+             ((and result
+                   (opt-reassociate-commutative-p inst)
+                   (opt-reassociate-commutative-p (car result)))
+              (multiple-value-bind (new-prev new-cur)
+                  (maybe-reassociate (car result) inst)
+                (if new-prev
+                    (progn
+                      (setf (car result) new-prev)
+                      (push new-cur result)
+                      (remhash (vm-dst new-prev) env)
+                      (remhash (vm-dst new-cur) env))
+                    (progn
+                      (when (opt-inst-dst inst)
+                        (remhash (opt-inst-dst inst) env))
+                      (push inst result)))))
+             (t
+              (when (opt-inst-dst inst)
+                (remhash (opt-inst-dst inst) env))
+              (push inst result))))))
+    (nreverse result))))
 
 ;;; ─── Pass: Batch Concatenation Packing ───────────────────────────────────
 

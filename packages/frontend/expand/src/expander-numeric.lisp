@@ -21,7 +21,7 @@
       ((= (length args) 0)
        (error "- requires at least one argument"))
       ((= (length args) 1)
-       `(- 0 ,(compiler-macroexpand-all (second form))))
+       (list '- 0 (compiler-macroexpand-all (second form))))
       (t
        (reduce-variadic-op '- (mapcar #'compiler-macroexpand-all args) 0)))))
 
@@ -41,7 +41,9 @@
     (cond
       ((= nargs 1) (list 'log (compiler-macroexpand-all (second form))))
       ((= nargs 2) (compiler-macroexpand-all
-                    `(/ (log ,(second form)) (log ,(third form)))))
+                    (list '/
+                          (list 'log (second form))
+                          (list 'log (third form)))))
       (t (error "log takes 1 or 2 arguments")))))
 
 ;; float-sign (FR-685): 1-arg → builtin, 2-arg → (* (float-sign x) (abs y))
@@ -50,7 +52,9 @@
     (cond
       ((= nargs 1) (list 'float-sign (compiler-macroexpand-all (second form))))
       ((= nargs 2) (compiler-macroexpand-all
-                    `(* (float-sign ,(second form)) (abs ,(third form)))))
+                    (list '*
+                          (list 'float-sign (second form))
+                          (list 'abs (third form)))))
       (t (error "float-sign takes 1 or 2 arguments")))))
 
 ;; float (FR-604): 1-or-2-arg → convert to float (prototype arg is discarded)
@@ -123,13 +127,13 @@
       ((= nargs 0) (error "/= requires at least one argument"))
       ((= nargs 1) t)
       ((= nargs 2) (compiler-macroexpand-all
-                     `(not (= ,(second form) ,(third form)))))
+                     (list 'not (list '= (second form) (third form)))))
       (t (let* ((args (cdr form))
                 (temps (loop for i from 0 below nargs
                              collect (gensym (format nil "NE~D-" i))))
                 (bindings (mapcar #'list temps args))
                 (pairs (loop for (a . rest) on temps
-                             nconc (loop for b in rest
-                                         collect `(not (= ,a ,b))))))
+                              nconc (loop for b in rest
+                                          collect (list 'not (list '= a b))))))
            (compiler-macroexpand-all
-            `(let ,bindings (and ,@pairs))))))))
+            (list 'let bindings (cons 'and pairs))))))))

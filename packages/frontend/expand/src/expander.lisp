@@ -30,8 +30,9 @@
 (defmacro define-expander-for (head (form) &body body)
   "Register a handler in *expander-head-table* for forms whose head is HEAD.
 Contract: handler receives the full form and returns a fully-expanded form."
-  `(setf (gethash ',head *expander-head-table*)
-         (lambda (,form) ,@body)))
+  (list 'setf
+        (list 'gethash (list 'quote head) '*expander-head-table*)
+        (cons 'lambda (cons (list form) body))))
 
 ;;; ── Expander handler registrations ──────────────────────────────────────
 ;;;
@@ -50,8 +51,8 @@ Contract: handler receives the full form and returns a fully-expanded form."
          (body (if has-qualifier (cddr tail) (cdr tail)))
          (expanded-body (mapcar #'compiler-macroexpand-all body)))
     (if has-qualifier
-        `(defmethod ,name ,qualifier ,lambda-list ,@expanded-body)
-        `(defmethod ,name ,lambda-list ,@expanded-body))))
+        (append (list 'defmethod name qualifier lambda-list) expanded-body)
+        (append (list 'defmethod name lambda-list) expanded-body))))
 
 ;; Control-flow special forms moved to expander-control.lisp.
 
@@ -72,8 +73,14 @@ Dispatch order: (1) atoms — symbol macros expanded, others pass through;
               (gethash form *symbol-macro-table*))
          (compiler-macroexpand-all (gethash form *symbol-macro-table*))
          form))
+    ((and (symbolp (car form))
+          (string= (symbol-name (car form)) "BACKQUOTE"))
+     (compiler-macroexpand-all (%expand-quasiquote (second form))))
     (t
-     (let ((handler (gethash (car form) *expander-head-table*)))
+     (let ((handler (or (gethash (car form) *expander-head-table*)
+                        (and (symbolp (car form))
+                             (let* ((local (find-symbol (symbol-name (car form)) :cl-cc/expand)))
+                               (and local (gethash local *expander-head-table*)))))))
        (cond
          (handler
           (let ((expanded (funcall handler form)))

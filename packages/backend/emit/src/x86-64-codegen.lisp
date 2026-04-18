@@ -86,10 +86,10 @@
 (defun instruction-size (inst)
   "Estimate the size in bytes of the x86-64 encoding for a VM instruction.
    Used in first pass to build label offset table."
-  (cond
-    ((typep inst 'vm-const)
+  (typecase inst
+    (vm-const
      (if (floatp (vm-value inst)) 15 10))
-    ((typep inst 'vm-move)
+    (vm-move
      (if (or (x86-64-float-vreg-p (vm-dst inst))
              (x86-64-float-vreg-p (vm-src inst)))
          (let ((dst (vm-reg-to-xmm (vm-dst inst)))
@@ -98,7 +98,7 @@
          (let ((dst (vm-reg-to-x86 (vm-dst inst)))
                (src (vm-reg-to-x86 (vm-src inst))))
            (if (= dst src) 0 3))))
-    ((typep inst 'vm-halt)
+    (vm-halt
      (if (x86-64-float-vreg-p (vm-reg inst))
          (let ((result-reg (vm-reg-to-xmm (vm-reg inst))))
            (if (= result-reg +xmm0+) 0 4))

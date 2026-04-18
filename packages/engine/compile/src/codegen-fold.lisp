@@ -13,16 +13,17 @@
 
 ;;; ── CPS evaluation helper ────────────────────────────────────────────────────
 ;;;
-;;; %with-eval encodes the compile-time short-circuit: evaluate NODE at DEPTH-1,
-;;; bind VAR to the result, continue into BODY — or silently return (values nil nil).
-;;; This is the continuation-passing style of "evaluate or abandon".
+;;; %evaluate-ast-then encodes the compile-time short-circuit: evaluate NODE at
+;;; DEPTH-1, then pass the value to CONTINUATION — or silently return
+;;; (values nil nil). This keeps the compile-time partial evaluator in explicit
+;;; continuation-passing style without requiring a macro layer.
 
-(defmacro %with-eval ((var node depth) &body body)
-  (let ((ok-sym (gensym "OK")))
-    `(multiple-value-bind (,var ,ok-sym) (%evaluate-ast ,node (1- ,depth))
-       (if ,ok-sym
-           (progn ,@body)
-           (values nil nil)))))
+(defun %evaluate-ast-then (node depth continuation)
+  (multiple-value-bind (value ok)
+      (%evaluate-ast node (1- depth))
+    (if ok
+        (funcall continuation value)
+        (values nil nil))))
 
 ;;; ── Binop constant-fold helpers ──────────────────────────────────────────────
 
@@ -222,18 +223,24 @@ Uses loop's unless-return to avoid mid-body return-from."
            (values value t)
            (values nil nil))))
     (ast-binop
-     (%with-eval (lhs (ast-binop-lhs node) depth)
-       (%with-eval (rhs (ast-binop-rhs node) depth)
-         (let ((value (%compile-time-eval-binop (ast-binop-op node) lhs rhs)))
-           (if (and value (integerp value))
-               (values value t)
-               (values nil nil))))))
+     (%evaluate-ast-then
+      (ast-binop-lhs node) depth
+      (lambda (lhs)
+        (%evaluate-ast-then
+         (ast-binop-rhs node) depth
+         (lambda (rhs)
+           (let ((value (%compile-time-eval-binop (ast-binop-op node) lhs rhs)))
+             (if (and value (integerp value))
+                 (values value t)
+                 (values nil nil))))))))
     (ast-if
-     (%with-eval (cond-value (ast-if-cond node) depth)
-       (%evaluate-ast (if (%compile-time-falsep cond-value)
-                          (ast-if-else node)
-                          (ast-if-then node))
-                      (1- depth))))
+     (%evaluate-ast-then
+      (ast-if-cond node) depth
+      (lambda (cond-value)
+        (%evaluate-ast (if (%compile-time-falsep cond-value)
+                           (ast-if-else node)
+                           (ast-if-then node))
+                       (1- depth)))))
     (ast-progn
      (%evaluate-ast-sequence (ast-progn-forms node)
                               *compile-time-value-env*
@@ -253,8 +260,10 @@ Uses loop's unless-return to avoid mid-body return-from."
      (multiple-value-bind (tag found-p)
          (%compile-time-lookup-block (ast-return-from-name node) *compile-time-block-env*)
        (if found-p
-           (%with-eval (value (ast-return-from-value node) depth)
-             (throw tag value))
+           (%evaluate-ast-then
+            (ast-return-from-value node) depth
+            (lambda (value)
+              (throw tag value)))
            (values nil nil))))
     (ast-let
      (let ((bindings nil))

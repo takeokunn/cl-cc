@@ -19,8 +19,9 @@ Handler lambda-list: (args result-reg ctx) → result-reg-or-nil.")
 
 (defmacro define-phase2-handler (name (args result-reg ctx) &body body)
   "Register a Phase 2 handler for the builtin named NAME (uppercase string)."
-  `(setf (gethash ,name *phase2-builtin-handlers*)
-         (lambda (,args ,result-reg ,ctx) ,@body)))
+  (list 'setf
+        (list 'gethash name '*phase2-builtin-handlers*)
+        (cons 'lambda (cons (list args result-reg ctx) body))))
 
 ;;; ── Handler registrations ──────────────────────────────────────────────────
 

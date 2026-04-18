@@ -96,11 +96,12 @@
   "Save/restore a dynamic special binding, pushing the save to SPECIAL-RESTORES."
   (let ((old-reg (gensym "OLD-REG"))
         (new-reg (gensym "NEW-REG")))
-    `(let ((,old-reg (make-register ,ctx))
-           (,new-reg (compile-ast ,expr ,ctx)))
-       (emit ,ctx (make-vm-get-global :dst ,old-reg :name ,name))
-       (emit ,ctx (make-vm-set-global :name ,name :src ,new-reg))
-       (push (cons ,name ,old-reg) ,special-restores))))
+    (list 'let
+          (list (list old-reg (list 'make-register ctx))
+                (list new-reg (list 'compile-ast expr ctx)))
+          (list 'emit ctx (list 'make-vm-get-global :dst old-reg :name name))
+          (list 'emit ctx (list 'make-vm-set-global :name name :src new-reg))
+          (list 'push (list 'cons name old-reg) special-restores))))
 
 (defmacro %emit-let-boxed (ctx name expr new-bindings)
   "Compile EXPR and wrap it in a cons box for a mutable captured variable."
@@ -108,23 +109,25 @@
         (own-reg (gensym "OWN"))
         (box-reg (gensym "BOX"))
         (nil-reg (gensym "NIL-REG")))
-    `(let ((,val-reg (compile-ast ,expr ,ctx))
-           (,own-reg (make-register ,ctx))
-           (,box-reg (make-register ,ctx))
-           (,nil-reg (make-register ,ctx)))
-       (emit ,ctx (make-vm-move :dst ,own-reg :src ,val-reg))
-       (emit ,ctx (make-vm-const :dst ,nil-reg :value nil))
-       (emit ,ctx (make-vm-cons :dst ,box-reg :car-src ,own-reg :cdr-src ,nil-reg))
-       (push (cons ,name ,box-reg) ,new-bindings))))
+    (list 'let
+          (list (list val-reg (list 'compile-ast expr ctx))
+                (list own-reg (list 'make-register ctx))
+                (list box-reg (list 'make-register ctx))
+                (list nil-reg (list 'make-register ctx)))
+          (list 'emit ctx (list 'make-vm-move :dst own-reg :src val-reg))
+          (list 'emit ctx (list 'make-vm-const :dst nil-reg :value nil))
+          (list 'emit ctx (list 'make-vm-cons :dst box-reg :car-src own-reg :cdr-src nil-reg))
+          (list 'push (list 'cons name box-reg) new-bindings))))
 
 (defmacro %emit-let-normal (ctx name expr new-bindings)
   "Compile EXPR and copy it into a fresh owned register."
   (let ((val-reg (gensym "VAL"))
         (own-reg (gensym "OWN")))
-    `(let ((,val-reg (compile-ast ,expr ,ctx))
-           (,own-reg (make-register ,ctx)))
-       (emit ,ctx (make-vm-move :dst ,own-reg :src ,val-reg))
-       (push (cons ,name ,own-reg) ,new-bindings))))
+    (list 'let
+          (list (list val-reg (list 'compile-ast expr ctx))
+                (list own-reg (list 'make-register ctx)))
+          (list 'emit ctx (list 'make-vm-move :dst own-reg :src val-reg))
+          (list 'push (list 'cons name own-reg) new-bindings))))
 
 ;;; ── compile-ast (ast-let) ────────────────────────────────────────────────
 ;;;

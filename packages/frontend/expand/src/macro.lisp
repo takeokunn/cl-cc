@@ -48,6 +48,12 @@
   (%with-macroexpansion-cache-lock
     (setf (gethash form (%macroexpansion-cache-table root env)) expanded)))
 
+(defun %reset-macroexpansion-caches ()
+  "Drop cached macroexpansions after macro environment changes."
+  (%with-macroexpansion-cache-lock
+    (setf *macroexpand-step-cache* (make-hash-table :test #'eq :weakness :key)
+          *macroexpand-all-cache* (make-hash-table :test #'eq :weakness :key))))
+
 (defun %contains-uninterned-symbol-p (form)
   "Return T when FORM contains any uninterned symbol.
 We avoid caching such expansions so hygiene-related gensyms stay fresh across
@@ -66,11 +72,15 @@ independent macroexpansions."
 
 (defun register-macro (name expander)
   "Register NAME as a macro with EXPANDER function in the global environment."
-  (setf (gethash name (macro-env-table *macro-environment*)) expander))
+  (setf (gethash name (macro-env-table *macro-environment*)) expander)
+  (%reset-macroexpansion-caches)
+  name)
 
 (defun register-compiler-macro (name expander)
   "Register NAME as a compiler macro expander in the global environment."
-  (setf (gethash name *compiler-macro-table*) expander))
+  (setf (gethash name *compiler-macro-table*) expander)
+  (%reset-macroexpansion-caches)
+  name)
 
 (defun lookup-macro (name &optional env)
   "Look up macro NAME in the global macro environment."
@@ -153,33 +163,39 @@ independent macroexpansions."
   "Transform a quasiquote template into list/cons/append calls.
 Handles (unquote x) and (unquote-splicing x) within template.
 These symbols live in :cl-cc/bootstrap so both parse and expand share them."
+  (labels ((qq-head-p (form name)
+             (and (consp form)
+                  (symbolp (car form))
+                  (string= (symbol-name (car form)) name))))
   (cond
     ;; (unquote x) at top level => just x
-    ((and (consp template) (eq (car template) 'unquote))
+    ((qq-head-p template "UNQUOTE")
      (second template))
     ;; A list => process each element for unquote/splicing
     ((consp template)
      (let ((parts nil))
        (dolist (elem template)
-         (cond
-           ((and (consp elem) (eq (car elem) 'unquote))
-            (push (list 'list (second elem)) parts))
-           ((and (consp elem) (eq (car elem) 'unquote-splicing))
-            (push (second elem) parts))
-           (t
-            (push (list 'list (%expand-quasiquote elem)) parts))))
-       (let ((reversed (nreverse parts)))
-         (if (= (length reversed) 1)
-             (first reversed)
-             (cons 'append reversed)))))
+          (cond
+            ((qq-head-p elem "UNQUOTE")
+             (push (list 'list (second elem)) parts))
+            ((qq-head-p elem "UNQUOTE-SPLICING")
+             (push (second elem) parts))
+            (t
+             (push (list 'list (%expand-quasiquote elem)) parts))))
+        (let ((reversed (nreverse parts)))
+          (if (= (length reversed) 1)
+              (first reversed)
+              (cons 'append reversed)))))
     ;; Atom => quote it
-    (t (list 'quote template))))
+    (t (list 'quote template)))))
 
 (defun our-macroexpand-all (form &optional env)
   "Recursively expand all macros in FORM, including in subforms."
   (cond
     ;; Quasiquote — expand before further processing
-    ((and (consp form) (eq (car form) 'backquote))
+    ((and (consp form)
+          (symbolp (car form))
+          (string= (symbol-name (car form)) "BACKQUOTE"))
       (our-macroexpand-all (%expand-quasiquote (second form)) env))
     ;; Quote — never recurse into quoted data
     ((and (consp form) (eq (car form) 'quote))
@@ -195,16 +211,19 @@ These symbols live in :cl-cc/bootstrap so both parse and expand share them."
   (let* ((form-var (gensym "FORM"))
          (env-var (gensym "ENV"))
          (info (parse-lambda-list lambda-list))
-         (env-sym (lambda-list-info-environment info)))
-    `(register-macro ',name
-                     (lambda (,form-var ,env-var)
-                       ,@(if env-sym
-                             `((let ((,env-sym ,env-var))
-                                 (let* ,(generate-lambda-bindings lambda-list form-var)
-                                   ,@body)))
-                             `((declare (ignore ,env-var))
-                               (let* ,(generate-lambda-bindings lambda-list form-var)
-                                 ,@body)))))))
+         (env-sym (lambda-list-info-environment info))
+         (bindings (generate-lambda-bindings lambda-list form-var))
+         (expander-body
+           (if env-sym
+               (list (list 'let (list (list env-sym env-var))
+                           (cons 'let* (cons bindings body))))
+               (list (list 'declare (list 'ignore env-var))
+                     (cons 'let* (cons bindings body))))))
+    (list 'register-macro
+          (list 'quote name)
+          (cons 'lambda
+                (cons (list form-var env-var)
+                      expander-body)))))
 
 ;;; Wire expand functions into VM hooks for runtime macroexpand support
 #-cl-cc-self-hosting

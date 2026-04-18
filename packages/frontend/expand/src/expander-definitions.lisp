@@ -25,7 +25,7 @@
          (setf (gethash accessor *setf-compound-place-handlers*)
                (lambda (place value)
                  (compiler-macroexpand-all
-                  `(,updater ,@(cdr place) ,value))))))
+                  (cons updater (append (cdr place) (list value))))))))
       ;; Long form: (defsetf accessor (args...) (store-var) body...)
       ((and (>= (length form) 5) (listp (third form)) (listp (fourth form)))
        (let* ((lambda-list (third form))
@@ -36,11 +36,12 @@
                (let ((ll lambda-list) (sv store-var) (bd body))
                  (lambda (place value)
                    (let* ((arg-bindings (mapcar #'list ll (cdr place)))
-                          (store-binding `((,sv ,value))))
+                          (store-binding (list (list sv value))))
                      (compiler-macroexpand-all
-                      `(let (,@arg-bindings ,@store-binding)
-                         ,@bd)))))))))
-    `(quote ,accessor)))
+                      (cons 'let
+                            (cons (append arg-bindings store-binding)
+                                  bd))))))))))
+    (list 'quote accessor)))
 
 ;; define-setf-expander — register setf expansion function (FR-355)
 ;; (define-setf-expander accessor (lambda-list) body...)
@@ -48,7 +49,7 @@
   (let* ((accessor (second form))
          (lambda-list (third form))
          (body (cdddr form))
-         (expander-fn (eval `(lambda ,lambda-list ,@body))))
+         (expander-fn (eval (list* 'lambda lambda-list body))))
     (setf (gethash accessor *setf-compound-place-handlers*)
           (let ((fn expander-fn))
             (lambda (place value)
@@ -56,17 +57,18 @@
                   (funcall fn place)
                 (declare (ignore access-form))
                 (compiler-macroexpand-all
-                 `(let (,@(mapcar #'list temps vals)
-                        ,@(mapcar (lambda (s) (list s value)) stores))
-                    ,store-form)))))))
-  `(quote ,(second form)))
+                 (list 'let
+                       (append (mapcar #'list temps vals)
+                               (mapcar (lambda (s) (list s value)) stores))
+                       store-form)))))))
+  (list 'quote (second form)))
 
 ;; defconstant — compile-time constants treated as defparameter
 (define-expander-for defconstant (form)
   (let ((name (second form))
         (value (third form)))
     (setf (gethash name *constant-table*) value)
-    (compiler-macroexpand-all `(defparameter ,name ,value))))
+    (compiler-macroexpand-all (list 'defparameter name value))))
 
 ;; setf — unified place dispatcher
 (define-expander-for setf (form)
@@ -76,11 +78,12 @@
       ;; (setf a 1 b 2 ...) → (progn (setf a 1) (setf b 2) ...)
       ((and (> len 3) (evenp (1- len)))
        (compiler-macroexpand-all
-        `(progn ,@(loop for (place val) on (cdr form) by #'cddr
-                        collect `(setf ,place ,val)))))
+        (cons 'progn
+              (loop for (place val) on (cdr form) by #'cddr
+                    collect (list 'setf place val)))))
       ;; (setf var val) → (setq var val)
       ((and (= len 3) (symbolp (second form)))
-       (compiler-macroexpand-all `(setq ,(second form) ,(third form))))
+       (compiler-macroexpand-all (list 'setq (second form) (third form))))
       ;; compound place — table lookup first, then generic accessor, then passthrough
       ((and (= len 3) (consp (second form)))
        (let* ((place   (second form))
@@ -120,11 +123,12 @@
   (let ((name (second form))
         (expansion (third form)))
     (setf (gethash name *symbol-macro-table*) expansion)
-    `(quote ,name)))
+    (list 'quote name)))
 
 ;; vector — variadic vector constructor (vector a b c) → #(a b c)
 (define-expander-for vector (form)
-  (compiler-macroexpand-all `(coerce-to-vector (list ,@(cdr form)))))
+  (compiler-macroexpand-all
+   (list 'coerce-to-vector (cons 'list (cdr form)))))
 
 ;; get-decoded-time — 0-arg form, expands to decode-universal-time call
 (define-expander-for get-decoded-time (form)

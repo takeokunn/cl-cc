@@ -172,94 +172,122 @@ FN-NAME is compared case-insensitively via SYMBOL-NAME so both symbol and ast-va
 ;;;   SHADOW-MVB  — whether mvb vars that re-bind BINDING-NAME are safe
 ;;;   TERMINAL-CASES — unique typecase arms (ast-call / ast-slot-value / etc.)
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %binding-walker-every-okp (form)
+    (list 'every '(function okp) form))
+
+  (defun %binding-walker-captured-form (binding-name-var body-form)
+    (list 'find binding-name-var
+          (list 'find-captured-in-children body-form (list 'list binding-name-var))))
+
+  (defun %binding-walker-shadowed-body-form (binding-name-var shadow-p bound-form body-form)
+    (if shadow-p
+        (list 'or
+              (list 'member binding-name-var bound-form :test '(function eq))
+              (%binding-walker-every-okp body-form))
+        (%binding-walker-every-okp body-form)))
+
+  (defun %binding-walker-let-clause (binding-name-var shadow-let)
+    (if shadow-let
+        (list 'let '((bound-names (mapcar (function car) (ast-let-bindings node))))
+              (list 'and
+                    (%binding-walker-every-okp '(mapcar (function cdr) (ast-let-bindings node)))
+                    (list 'or
+                          (list 'member binding-name-var 'bound-names :test '(function eq))
+                          (%binding-walker-every-okp '(ast-let-body node)))))
+        (list 'and
+              (%binding-walker-every-okp '(mapcar (function cdr) (ast-let-bindings node)))
+              (%binding-walker-every-okp '(ast-let-body node)))))
+
+  (defun %binding-walker-mvb-clause (binding-name-var shadow-mvb)
+    (if shadow-mvb
+        (list 'and
+              '(okp (ast-mvb-values-form node))
+              (list 'or
+                    (list 'member binding-name-var '(ast-mvb-vars node) :test '(function eq))
+                    (%binding-walker-every-okp '(ast-mvb-body node))))
+        (list 'and
+              '(okp (ast-mvb-values-form node))
+              (%binding-walker-every-okp '(ast-mvb-body node)))))
+
+  (defun %binding-walker-noncapturing-clause (binding-name-var shadow-let bound-form body-form)
+    (list 'and
+          (list 'not (%binding-walker-captured-form binding-name-var body-form))
+          (%binding-walker-shadowed-body-form binding-name-var shadow-let bound-form body-form)))
+
+  (defun %binding-walker-base-clauses (binding-name-var shadow-let shadow-mvb terminal-cases)
+    (append
+     (list
+      (list 'ast-var (list 'not (list 'eq '(ast-var-name node) binding-name-var)))
+      (list '(or ast-int ast-quote ast-function ast-go ast-hole ast-defgeneric) t)
+      (list 'ast-progn (%binding-walker-every-okp '(ast-progn-forms node)))
+      (list 'ast-block (%binding-walker-every-okp '(ast-block-body node)))
+      (list 'ast-if (list 'and '(okp (ast-if-cond node))
+                          '(okp (ast-if-then node))
+                          '(okp (ast-if-else node))))
+      (list 'ast-let (%binding-walker-let-clause binding-name-var shadow-let))
+      (list 'ast-setq '(okp (ast-setq-value node)))
+      (list 'ast-return-from '(okp (ast-return-from-value node)))
+      (list 'ast-the '(okp (ast-the-value node)))
+      (list 'ast-values (%binding-walker-every-okp '(ast-values-forms node)))
+      (list 'ast-catch (list 'and '(okp (ast-catch-tag node))
+                             (%binding-walker-every-okp '(ast-catch-body node))))
+      (list 'ast-throw (list 'and '(okp (ast-throw-tag node))
+                             '(okp (ast-throw-value node))))
+      (list 'ast-unwind-protect (list 'and '(okp (ast-unwind-protected node))
+                                      (%binding-walker-every-okp '(ast-unwind-cleanup node))))
+      (list 'ast-handler-case
+            (list 'and
+                  '(okp (ast-handler-case-form node))
+                  (list 'every '(function (lambda (clause)
+                                            (every #'okp (cddr clause))))
+                        '(ast-handler-case-clauses node))))
+      (list 'ast-multiple-value-call
+            (list 'and '(okp (ast-mv-call-func node))
+                  (%binding-walker-every-okp '(ast-mv-call-args node))))
+      (list 'ast-multiple-value-prog1
+            (list 'and '(okp (ast-mv-prog1-first node))
+                  (%binding-walker-every-okp '(ast-mv-prog1-forms node))))
+      (list 'ast-multiple-value-bind (%binding-walker-mvb-clause binding-name-var shadow-mvb))
+      (list 'ast-apply
+            (list 'and '(okp (ast-apply-func node))
+                  (%binding-walker-every-okp '(ast-apply-args node))))
+      (list 'ast-lambda
+            (%binding-walker-noncapturing-clause binding-name-var shadow-let
+                                                 '(%ast-lambda-bound-names node)
+                                                 '(ast-lambda-body node)))
+      (list 'ast-defun
+            (%binding-walker-noncapturing-clause binding-name-var shadow-let
+                                                 '(ast-defun-params node)
+                                                 '(ast-defun-body node)))
+      (list 'ast-defmethod
+            (%binding-walker-noncapturing-clause binding-name-var shadow-let
+                                                 '(ast-defmethod-params node)
+                                                 '(ast-defmethod-body node)))
+      (list 'ast-local-fns
+            (list 'and
+                  (list 'not (%binding-walker-captured-form binding-name-var '(ast-local-fns-body node)))
+                  (%binding-walker-every-okp '(ast-local-fns-body node)))))
+     terminal-cases
+     (list (list 't (%binding-walker-every-okp '(ast-children node)))))))
+
 (defmacro %define-binding-walker (name args docstring
                                   (&key (shadow-let t) (shadow-mvb t))
                                   &body terminal-cases)
   "Generate a binding-walker defun.
 The first two elements of ARGS are (body-forms binding-name); remaining
 elements are extra parameters available in TERMINAL-CASES."
-  (let ((body-forms-var  (first  args))
+  (let ((body-forms-var (first args))
         (binding-name-var (second args)))
-    `(defun ,name ,args
-       ,docstring
-       (labels ((okp (node)
-                  (typecase node
-                    (ast-var (not (eq (ast-var-name node) ,binding-name-var)))
-                    ((or ast-int ast-quote ast-function ast-go ast-hole ast-defgeneric) t)
-                    (ast-progn  (every #'okp (ast-progn-forms node)))
-                    (ast-block  (every #'okp (ast-block-body node)))
-                    (ast-if     (and (okp (ast-if-cond node))
-                                     (okp (ast-if-then node))
-                                     (okp (ast-if-else node))))
-                    (ast-let
-                     ,(if shadow-let
-                          `(let ((bound-names (mapcar #'car (ast-let-bindings node))))
-                             (and (every #'okp (mapcar #'cdr (ast-let-bindings node)))
-                                  (or (member ,binding-name-var bound-names :test #'eq)
-                                      (every #'okp (ast-let-body node)))))
-                          `(and (every #'okp (mapcar #'cdr (ast-let-bindings node)))
-                                (every #'okp (ast-let-body node)))))
-                    (ast-setq          (okp (ast-setq-value node)))
-                    (ast-return-from   (okp (ast-return-from-value node)))
-                    (ast-the           (okp (ast-the-value node)))
-                    (ast-values        (every #'okp (ast-values-forms node)))
-                    (ast-catch         (and (okp (ast-catch-tag node))
-                                            (every #'okp (ast-catch-body node))))
-                    (ast-throw         (and (okp (ast-throw-tag node))
-                                            (okp (ast-throw-value node))))
-                    (ast-unwind-protect (and (okp (ast-unwind-protected node))
-                                             (every #'okp (ast-unwind-cleanup node))))
-                    (ast-handler-case  (and (okp (ast-handler-case-form node))
-                                            (every (lambda (clause)
-                                                     (every #'okp (cddr clause)))
-                                                   (ast-handler-case-clauses node))))
-                    (ast-multiple-value-call
-                     (and (okp (ast-mv-call-func node))
-                          (every #'okp (ast-mv-call-args node))))
-                    (ast-multiple-value-prog1
-                     (and (okp (ast-mv-prog1-first node))
-                          (every #'okp (ast-mv-prog1-forms node))))
-                    (ast-multiple-value-bind
-                     ,(if shadow-mvb
-                          `(and (okp (ast-mvb-values-form node))
-                                (or (member ,binding-name-var (ast-mvb-vars node) :test #'eq)
-                                    (every #'okp (ast-mvb-body node))))
-                          `(and (okp (ast-mvb-values-form node))
-                                (every #'okp (ast-mvb-body node)))))
-                    (ast-apply (and (okp (ast-apply-func node))
-                                   (every #'okp (ast-apply-args node))))
-                    (ast-lambda
-                     (and (not (find ,binding-name-var
-                                     (find-captured-in-children (ast-lambda-body node)
-                                                                (list ,binding-name-var))))
-                          ,(if shadow-let
-                               `(or (member ,binding-name-var (%ast-lambda-bound-names node) :test #'eq)
-                                    (every #'okp (ast-lambda-body node)))
-                               `(every #'okp (ast-lambda-body node)))))
-                    (ast-defun
-                     (and (not (find ,binding-name-var
-                                     (find-captured-in-children (ast-defun-body node)
-                                                                (list ,binding-name-var))))
-                          ,(if shadow-let
-                               `(or (member ,binding-name-var (ast-defun-params node) :test #'eq)
-                                    (every #'okp (ast-defun-body node)))
-                               `(every #'okp (ast-defun-body node)))))
-                    (ast-defmethod
-                     (and (not (find ,binding-name-var
-                                     (find-captured-in-children (ast-defmethod-body node)
-                                                                (list ,binding-name-var))))
-                          ,(if shadow-let
-                               `(or (member ,binding-name-var (ast-defmethod-params node) :test #'eq)
-                                    (every #'okp (ast-defmethod-body node)))
-                               `(every #'okp (ast-defmethod-body node)))))
-                    (ast-local-fns
-                     (and (not (find ,binding-name-var
-                                     (find-captured-in-children (ast-local-fns-body node)
-                                                                (list ,binding-name-var))))
-                          (every #'okp (ast-local-fns-body node))))
-                    ,@terminal-cases
-                    (t (every #'okp (ast-children node))))))
-         (and (listp ,body-forms-var) (every #'okp ,body-forms-var))))))
+    (list 'defun name args docstring
+          (list 'labels
+                (list (list 'okp '(node)
+                            (cons 'typecase
+                                  (cons 'node
+                                        (%binding-walker-base-clauses
+                                         binding-name-var shadow-let shadow-mvb terminal-cases)))))
+                (list 'and (list 'listp body-forms-var)
+                      (%binding-walker-every-okp body-forms-var))))))
 
 ;;; Array noescape: binding may only appear as the array arg to ARRAY-LENGTH, ASET, or AREF.
 (%define-binding-walker %array-binding-static-access-p

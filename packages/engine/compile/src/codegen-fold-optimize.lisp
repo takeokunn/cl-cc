@@ -10,18 +10,10 @@
 
 (in-package :cl-cc/compile)
 
-;;; ── Source-location macro ────────────────────────────────────────────────────
+;;; ── Source-location helpers ──────────────────────────────────────────────────
 
-;;; Usage: (%loc node (make-ast-foo :field val ...))
-;;; Expands to: (make-ast-foo :field val ... :source-file F :source-line L :source-column C)
-(defmacro %loc (node &rest make-form)
-  "Append source-location keyword args from NODE to MAKE-FORM constructor."
-  (let ((n (gensym "node")))
-    `(let ((,n ,node))
-       (,(first make-form) ,@(rest make-form)
-        :source-file   (ast-source-file   ,n)
-        :source-line   (ast-source-line   ,n)
-        :source-column (ast-source-column ,n)))))
+;;; This file reuses %clone-source from codegen-fold.lisp rather than defining a
+;;; local macro wrapper.
 
 ;;; ── AST constant fold pass ───────────────────────────────────────────────────
 
@@ -50,23 +42,23 @@ Special folding nodes like ast-binop and ast-call stay in optimize-ast directly.
           bindings))
 
 (defun %optimize-ast-progn-node (node)
-  (%loc node make-ast-progn
+  (%clone-source node #'make-ast-progn
     :forms (%optimize-ast-list (ast-progn-forms node))))
 
 (defun %optimize-ast-let-node (node)
-  (%loc node make-ast-let
+  (%clone-source node #'make-ast-let
     :bindings     (%optimize-ast-binding-alist (ast-let-bindings node))
     :declarations (ast-let-declarations node)
     :body         (%optimize-ast-list (ast-let-body node))))
 
 (defun %optimize-ast-if-node (node)
-  (%loc node make-ast-if
+  (%clone-source node #'make-ast-if
     :cond (optimize-ast (ast-if-cond node))
     :then (optimize-ast (ast-if-then node))
     :else (optimize-ast (ast-if-else node))))
 
 (defun %optimize-ast-lambda-node (node)
-  (%loc node make-ast-lambda
+  (%clone-source node #'make-ast-lambda
     :params          (ast-lambda-params node)
     :optional-params (ast-lambda-optional-params node)
     :rest-param      (ast-lambda-rest-param node)
@@ -76,7 +68,7 @@ Special folding nodes like ast-binop and ast-call stay in optimize-ast directly.
     :env             (ast-lambda-env node)))
 
 (defun %optimize-ast-defun-node (node)
-  (%loc node make-ast-defun
+  (%clone-source node #'make-ast-defun
     :name            (ast-defun-name node)
     :params          (ast-defun-params node)
     :optional-params (ast-defun-optional-params node)
@@ -86,28 +78,28 @@ Special folding nodes like ast-binop and ast-call stay in optimize-ast directly.
     :body            (%optimize-ast-list (ast-defun-body node))))
 
 (defun %optimize-ast-defvar-node (node)
-  (%loc node make-ast-defvar
+  (%clone-source node #'make-ast-defvar
     :name  (ast-defvar-name node)
     :value (optimize-ast (ast-defvar-value node))
     :kind  (ast-defvar-kind node)))
 
 (defun %optimize-ast-block-node (node)
-  (%loc node make-ast-block
+  (%clone-source node #'make-ast-block
     :name (ast-block-name node)
     :body (%optimize-ast-list (ast-block-body node))))
 
 (defun %optimize-ast-return-from-node (node)
-  (%loc node make-ast-return-from
+  (%clone-source node #'make-ast-return-from
     :name  (ast-return-from-name node)
     :value (optimize-ast (ast-return-from-value node))))
 
 (defun %optimize-ast-setq-node (node)
-  (%loc node make-ast-setq
+  (%clone-source node #'make-ast-setq
     :var   (ast-setq-var node)
     :value (optimize-ast (ast-setq-value node))))
 
 (defun %optimize-ast-the-node (node)
-  (%loc node make-ast-the
+  (%clone-source node #'make-ast-the
     :type  (ast-the-type node)
     :value (optimize-ast (ast-the-value node))))
 
@@ -127,9 +119,9 @@ Special folding nodes like ast-binop and ast-call stay in optimize-ast directly.
     (ast-call
      (let* ((func      (optimize-ast (ast-call-func node)))
             (args      (%optimize-ast-list (ast-call-args node)))
-            (call-node (%loc node make-ast-call :func func :args args)))
-       (multiple-value-bind (value ok)
-           (let ((*compile-time-value-env*    *compile-time-value-env*)
+            (call-node (%clone-source node #'make-ast-call :func func :args args)))
+        (multiple-value-bind (value ok)
+            (let ((*compile-time-value-env*    *compile-time-value-env*)
                  (*compile-time-function-env* *compile-time-function-env*))
              (%evaluate-ast call-node *compile-time-eval-depth-limit*))
          (if ok (%compile-time-value->ast value node) call-node))))

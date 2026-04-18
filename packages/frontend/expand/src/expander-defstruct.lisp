@@ -13,39 +13,47 @@
 ;;; Typed defstructs (:type list/vector) are represented as sequences, so this
 ;;; must preserve shallow-copy semantics across all registered defstruct
 ;;; representations using expansion-time metadata.
-(our-defmacro copy-structure (struct)
-  (let ((s (gensym "STRUCT")))
-    `(let ((,s ,struct))
-       (cond
-         ,@(loop for name being the hash-keys of *defstruct-slot-registry*
-                 using (hash-value slots)
-                 for struct-type = (gethash name *defstruct-type-registry*)
-                 collect
-                 (if struct-type
-                     (if (eq struct-type 'list)
-                         `((and (listp ,s)
-                                (consp ,s)
-                                (eq (car ,s) ',name))
-                           (list ',name
-                                 ,@(loop for _slot in slots
-                                         for idx from 1
-                                         collect `(nth ,idx ,s))))
-                         `((and (vectorp ,s)
-                                (> (length ,s) 0)
-                                (eq (aref ,s 0) ',name))
-                           (vector ',name
-                                   ,@(loop for _slot in slots
-                                           for idx from 1
-                                           collect `(aref ,s ,idx)))))
-                     `((typep ,s ',name)
-                       (let ((copy (make-instance ',name)))
-                         ,@(loop for slot in slots
-                                 for slot-name = (first slot)
-                                 collect `(setf (slot-value copy ',slot-name)
-                                                (slot-value ,s ',slot-name)))
-                         copy))))
-         (t
-          (error "copy-structure: unsupported object ~S" ,s))))))
+(register-macro 'copy-structure
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((struct (second form))
+          (s (gensym "STRUCT")))
+      (list 'let (list (list s struct))
+            (cons 'cond
+                  (append
+                   (loop for name being the hash-keys of *defstruct-slot-registry*
+                         using (hash-value slots)
+                         for struct-type = (gethash name *defstruct-type-registry*)
+                         collect
+                         (if struct-type
+                             (if (eq struct-type 'list)
+                                 (list (list 'and (list 'listp s)
+                                             (list 'consp s)
+                                             (list 'eq (list 'car s) (list 'quote name)))
+                                       (cons 'list
+                                             (cons (list 'quote name)
+                                                   (loop for _slot in slots
+                                                         for idx from 1
+                                                         collect (list 'nth idx s)))))
+                                 (list (list 'and (list 'vectorp s)
+                                             (list '> (list 'length s) 0)
+                                             (list 'eq (list 'aref s 0) (list 'quote name)))
+                                       (cons 'vector
+                                             (cons (list 'quote name)
+                                                   (loop for _slot in slots
+                                                         for idx from 1
+                                                         collect (list 'aref s idx))))))
+                             (list (list 'typep s (list 'quote name))
+                                   (cons 'let
+                                         (cons (list (list 'copy (list 'make-instance (list 'quote name))))
+                                               (append
+                                                (loop for slot in slots
+                                                      for slot-name = (first slot)
+                                                      collect (list 'setf
+                                                                    (list 'slot-value 'copy (list 'quote slot-name))
+                                                                    (list 'slot-value s (list 'quote slot-name))))
+                                                (list 'copy)))))))
+                   (list (list 't (list 'error "copy-structure: unsupported object ~S" s)))))))))
 
 ;;; ── BOA (By-Order-of-Arguments) lambda list helpers ──────────────────────
 
@@ -97,8 +105,8 @@ With BOA-ARGS: uses positional parameters. Without: uses keyword parameters."
 (defun %defstruct-typed-container-form (struct-type struct-name slot-values)
   "Build the concrete list/vector container form for a typed defstruct."
   (if (eq struct-type 'list)
-      `(list ',struct-name ,@slot-values)
-      `(vector ',struct-name ,@slot-values)))
+      (cons 'list (cons (list 'quote struct-name) slot-values))
+      (cons 'vector (cons (list 'quote struct-name) slot-values))))
 
 (defun %defstruct-typed-constructor (ctor-name struct-name struct-type boa-args all-slots)
   "Generate a constructor for :type list or :type vector defstruct."
@@ -110,14 +118,14 @@ With BOA-ARGS: uses positional parameters. Without: uses keyword parameters."
                                      (if (member (first slot) bound-names :test #'string=)
                                          (first slot)
                                          (second slot)))
-                                   all-slots)))
-          `(defun ,ctor-name ,normal-params
-             (let* ,aux-lets
-               ,(%defstruct-typed-container-form struct-type struct-name slot-values)))))
+                                    all-slots)))
+          (list 'defun ctor-name normal-params
+                (list 'let* aux-lets
+                      (%defstruct-typed-container-form struct-type struct-name slot-values)))))
       (let ((key-params (mapcar (lambda (slot) (list (first slot) (second slot))) all-slots))
             (slot-values (mapcar #'first all-slots)))
-        `(defun ,ctor-name (&key ,@key-params)
-           ,(%defstruct-typed-container-form struct-type struct-name slot-values)))))
+        (list 'defun ctor-name (cons '&key key-params)
+              (%defstruct-typed-container-form struct-type struct-name slot-values)))))
 
 (defun %defstruct-typed-accessors (struct-type conc-name all-slots)
   "Generate accessor functions for :type list or :type vector defstruct."
@@ -126,21 +134,23 @@ With BOA-ARGS: uses positional parameters. Without: uses keyword parameters."
         for idx from 1
         for acc-name = (%defstruct-accessor-name conc-name slot-name)
         collect (if (eq struct-type 'list)
-                    `(defun ,acc-name (obj) (nth ,idx obj))
-                    `(defun ,acc-name (obj) (aref obj ,idx)))))
+                    (list 'defun acc-name '(obj) (list 'nth idx 'obj))
+                    (list 'defun acc-name '(obj) (list 'aref 'obj idx)))))
 
 (defun %defstruct-typed-predicate (pred-name struct-name struct-type slot-count)
   "Generate a predicate for :type list or :type vector defstruct."
   (when pred-name
     (let ((total-len (1+ slot-count)))
       (if (eq struct-type 'list)
-          `(defun ,pred-name (obj)
-             (and (listp obj) (eq (car obj) ',struct-name)
-                  (= (length obj) ,total-len)))
-          `(defun ,pred-name (obj)
-             (and (vectorp obj) (> (length obj) 0)
-                  (eq (aref obj 0) ',struct-name)
-                  (= (length obj) ,total-len)))))))
+          (list 'defun pred-name '(obj)
+                (list 'and '(listp obj)
+                      (list 'eq '(car obj) (list 'quote struct-name))
+                      (list '= '(length obj) total-len)))
+          (list 'defun pred-name '(obj)
+                (list 'and '(vectorp obj)
+                      (list '> '(length obj) 0)
+                      (list 'eq '(aref obj 0) (list 'quote struct-name))
+                      (list '= '(length obj) total-len)))))))
 
 (defun %defstruct-typed-expansion (model)
   "Emit the full expansion for a :type list/vector defstruct MODEL."
@@ -156,10 +166,11 @@ With BOA-ARGS: uses positional parameters. Without: uses keyword parameters."
          (accessor-forms (%defstruct-typed-accessors struct-type conc-name all-slots))
          (pred-form (when pred-name
                       (%defstruct-typed-predicate pred-name name struct-type (length all-slots)))))
-    `(progn ,@(when ctor-form (list ctor-form))
-            ,@accessor-forms
-            ,@(when pred-form (list pred-form))
-            (quote ,name))))
+    (cons 'progn
+          (append (when ctor-form (list ctor-form))
+                  accessor-forms
+                  (when pred-form (list pred-form))
+                  (list (list 'quote name))))))
 
 ;;; ── Standard CLOS-based defstruct expansion ───────────────────────────────
 
@@ -187,19 +198,20 @@ With BOA-ARGS: uses positional parameters. Without: uses keyword parameters."
     (let ((obj (gensym "OBJ"))
           (stream (gensym "STR")))
       (if print-fn-opt
-          `(defmethod print-object ((,obj ,name) ,stream)
-             (funcall (function ,print-fn) ,obj ,stream 0))
-          `(defmethod print-object ((,obj ,name) ,stream)
-             (funcall (function ,print-fn) ,obj ,stream))))))
+          (list 'defmethod 'print-object (list (list obj name) stream)
+                (list 'funcall (list 'function print-fn) obj stream 0))
+          (list 'defmethod 'print-object (list (list obj name) stream)
+                (list 'funcall (list 'function print-fn) obj stream))))))
 
 (defun %defstruct-derive-form (name derived-classes)
   "Emit registration forms for :deriving classes."
   (when derived-classes
-    `(eval-when (:load-toplevel :execute)
-       ,@(mapcar (lambda (class)
-                   `(funcall (find-symbol "REGISTER-TYPECLASS-INSTANCE" "CL-CC/TYPE")
-                             ',class ',name nil))
-                 derived-classes))))
+    (cons 'eval-when
+          (cons '(:load-toplevel :execute)
+                (mapcar (lambda (class)
+                          (list 'funcall (list 'find-symbol "REGISTER-TYPECLASS-INSTANCE" "CL-CC/TYPE")
+                                (list 'quote class) (list 'quote name) nil))
+                        derived-classes)))))
 
 (defun %defstruct-clos-expansion (model)
   "Emit the standard CLOS-based defstruct expansion for MODEL."
@@ -215,21 +227,22 @@ With BOA-ARGS: uses positional parameters. Without: uses keyword parameters."
          (print-fn-opt (getf model :print-fn-opt))
          (derived-classes (getf model :derived-classes)))
     (%defstruct-register-accessors name conc-name own-slots)
-    (let* ((defclass-form `(defclass ,name
-                             ,(if parent-name (list parent-name) '())
-                             ,(%defstruct-defclass-slots conc-name own-slots)))
+    (let* ((defclass-form (list 'defclass name
+                                (if parent-name (list parent-name) '())
+                                (%defstruct-defclass-slots conc-name own-slots)))
            (ctor-form (when ctor-name
-                        (%defstruct-make-constructor ctor-name name boa-args all-slots)))
+                          (%defstruct-make-constructor ctor-name name boa-args all-slots)))
            (pred-form (when pred-name
-                        `(defun ,pred-name (obj) (typep obj ',name))))
-           (print-form (%defstruct-print-form name print-fn print-fn-opt))
-           (derive-form (%defstruct-derive-form name derived-classes)))
-      `(progn ,defclass-form
-              ,@(when ctor-form (list ctor-form))
-              ,@(when pred-form (list pred-form))
-              ,@(when print-form (list print-form))
-              ,@(when derive-form (list derive-form))
-              (quote ,name)))))
+                        (list 'defun pred-name '(obj) (list 'typep 'obj (list 'quote name)))))
+            (print-form (%defstruct-print-form name print-fn print-fn-opt))
+            (derive-form (%defstruct-derive-form name derived-classes)))
+      (cons 'progn
+            (append (list defclass-form)
+                    (when ctor-form (list ctor-form))
+                    (when pred-form (list pred-form))
+                    (when print-form (list print-form))
+                    (when derive-form (list derive-form))
+                    (list (list 'quote name)))))))
 
 ;;; ── Main defstruct expander ──────────────────────────────────────────────
 

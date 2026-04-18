@@ -37,45 +37,21 @@
              (multiple-value-bind (val found) (gethash reg env)
                (if found (values val t) (values nil nil)))))
     (let ((tp (type-of inst)))
-      (cond
-        ((typep inst 'vm-const) inst)
-        ((typep inst 'vm-label) inst)
-        ((typep inst 'vm-jump-zero)
+      (typecase inst
+        (vm-const inst)
+        (vm-label inst)
+        (vm-jump-zero
          (multiple-value-bind (val found) (known (vm-reg inst))
            (cond
              ((and found (opt-falsep val)) (make-vm-jump :label (vm-label-name inst)))
              (found nil)
              (t inst))))
-        ((typep inst 'vm-move)
+        (vm-move
          (multiple-value-bind (val found) (known (vm-src inst))
            (if found
                (make-vm-const :dst (vm-dst inst) :value val)
                inst)))
-        ;; Binary arithmetic/comparison — data-driven via *opt-binary-fold-table* + *opt-binary-cmp-fold-table*
-        ((or (gethash tp *opt-binary-fold-table*)
-             (gethash tp *opt-binary-cmp-fold-table*))
-         (multiple-value-bind (lval lfound) (known (vm-lhs inst))
-           (multiple-value-bind (rval rfound) (known (vm-rhs inst))
-             (if (and lfound rfound (numberp lval) (numberp rval))
-                 (multiple-value-bind (folded ok) (opt-fold-binop-value inst lval rval)
-                   (if ok (make-vm-const :dst (vm-dst inst) :value folded) inst))
-                 inst))))
-        ;; Unary arithmetic — data-driven via *opt-unary-fold-table*
-        ((gethash tp *opt-unary-fold-table*)
-         (multiple-value-bind (sval found) (known (vm-src inst))
-           (if (and found (numberp sval))
-               (make-vm-const :dst (vm-dst inst)
-                              :value (funcall (gethash tp *opt-unary-fold-table*) sval))
-               inst)))
-        ;; Type predicates — data-driven via *opt-type-pred-fold-table*
-        ((gethash tp *opt-type-pred-fold-table*)
-         (multiple-value-bind (sval found) (known (vm-src inst))
-           (if found
-               (make-vm-const :dst (vm-dst inst)
-                              :value (if (funcall (gethash tp *opt-type-pred-fold-table*) sval) 1 0))
-               inst)))
-        ;; vm-concatenate: fold if all string parts are known constants
-        ((typep inst 'vm-concatenate)
+        (vm-concatenate
          (let ((parts (or (vm-parts inst) (list (vm-str1 inst) (vm-str2 inst)))))
            (if (every (lambda (reg)
                         (multiple-value-bind (val found) (known reg)
@@ -85,7 +61,32 @@
                               :value (apply #'concatenate 'string
                                            (mapcar (lambda (reg) (gethash reg env)) parts)))
                inst)))
-        (t inst)))))
+        (t
+         (cond
+           ;; Binary arithmetic/comparison — data-driven via *opt-binary-fold-table* + *opt-binary-cmp-fold-table*
+           ((or (gethash tp *opt-binary-fold-table*)
+                (gethash tp *opt-binary-cmp-fold-table*))
+            (multiple-value-bind (lval lfound) (known (vm-lhs inst))
+              (multiple-value-bind (rval rfound) (known (vm-rhs inst))
+                (if (and lfound rfound (numberp lval) (numberp rval))
+                    (multiple-value-bind (folded ok) (opt-fold-binop-value inst lval rval)
+                      (if ok (make-vm-const :dst (vm-dst inst) :value folded) inst))
+                    inst))))
+           ;; Unary arithmetic — data-driven via *opt-unary-fold-table*
+           ((gethash tp *opt-unary-fold-table*)
+            (multiple-value-bind (sval found) (known (vm-src inst))
+              (if (and found (numberp sval))
+                  (make-vm-const :dst (vm-dst inst)
+                                 :value (funcall (gethash tp *opt-unary-fold-table*) sval))
+                  inst)))
+           ;; Type predicates — data-driven via *opt-type-pred-fold-table*
+           ((gethash tp *opt-type-pred-fold-table*)
+            (multiple-value-bind (sval found) (known (vm-src inst))
+              (if found
+                  (make-vm-const :dst (vm-dst inst)
+                                 :value (if (funcall (gethash tp *opt-type-pred-fold-table*) sval) 1 0))
+                  inst)))
+           (t inst)))))))
 
 (defun opt-pass-sccp (instructions)
   "Sparse conditional constant propagation over the CFG.
@@ -110,31 +111,31 @@
                  (merge-in-env (block)
                    (%sccp-env-merge (pred-out-envs block)))
                  (process-block (block in-env)
-                    (let ((env (%sccp-env-copy in-env))
-                          (new-insts nil))
-                      (dolist (inst (bb-instructions block))
-                        (let ((folded (%sccp-fold-inst inst env)))
-                          (cond
-                            ((and (typep inst 'vm-jump-zero) (null folded))
-                             (let ((succs (bb-successors block)))
-                               (redirect-successors block (if (second succs)
-                                                             (list (second succs))
-                                                             nil))))
-                            ((and (typep inst 'vm-jump-zero) (typep folded 'vm-jump))
-                             (let ((succs (bb-successors block)))
-                               (redirect-successors block (list (first succs))))
-                             (push folded new-insts)
-                             (let ((dst (opt-inst-dst folded)))
-                               (when dst
-                                 (typecase folded
-                                   (vm-const (setf (gethash dst env) (vm-value folded)))
-                                   (t (remhash dst env))))))
-                            ((null folded) nil)
-                            (t
-                             (push folded new-insts)
-                             (let ((dst (opt-inst-dst folded)))
-                               (when dst
-                                 (typecase folded
+                   (let ((env (%sccp-env-copy in-env))
+                         (new-insts nil))
+                     (dolist (inst (bb-instructions block))
+                       (let ((folded (%sccp-fold-inst inst env)))
+                         (cond
+                           ((and (typep inst 'vm-jump-zero) (null folded))
+                            (let ((succs (bb-successors block)))
+                              (redirect-successors block (if (second succs)
+                                                            (list (second succs))
+                                                            nil))))
+                           ((and (typep inst 'vm-jump-zero) (typep folded 'vm-jump))
+                            (let ((succs (bb-successors block)))
+                              (redirect-successors block (list (first succs))))
+                            (push folded new-insts)
+                            (let ((dst (opt-inst-dst folded)))
+                              (when dst
+                                (typecase folded
+                                  (vm-const (setf (gethash dst env) (vm-value folded)))
+                                  (t (remhash dst env))))))
+                           ((null folded) nil)
+                           (t
+                            (push folded new-insts)
+                            (let ((dst (opt-inst-dst folded)))
+                              (when dst
+                                (typecase folded
                                   (vm-const (setf (gethash dst env) (vm-value folded)))
                                   (t (remhash dst env)))))))))
                      (setf (bb-instructions block) (nreverse new-insts))
@@ -148,12 +149,12 @@
                                  (null (gethash block out-envs))
                                  (not (%sccp-env-equal-p old-in new-in)))
                          (setf (gethash block in-envs) new-in)
-                         (let ((new-out (process-block block new-in)))
-                           (let ((old-out (gethash block out-envs)))
-                             (unless (and old-out (%sccp-env-equal-p old-out new-out))
-                               (setf (gethash block out-envs) new-out)
-                               (dolist (succ (bb-successors block))
-                                 (pushnew succ worklist :test #'eq)))))))
+                         (let ((new-out (process-block block new-in))
+                               (old-out (gethash block out-envs)))
+                           (unless (and old-out (%sccp-env-equal-p old-out new-out))
+                             (setf (gethash block out-envs) new-out)
+                             (dolist (succ (bb-successors block))
+                               (pushnew succ worklist :test #'eq))))))
                      (process-worklist))))
           (process-worklist)))
       (let ((linear (loop for b across (cfg-blocks cfg)
@@ -164,4 +165,3 @@
 
 ;;; (opt-map-tree, %opt-copy-prop-* helpers, and opt-pass-copy-prop
 ;;;  are in optimizer-copyprop.lisp which loads after this file.)
-

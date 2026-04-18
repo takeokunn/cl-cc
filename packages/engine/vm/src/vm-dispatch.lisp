@@ -208,13 +208,13 @@ Restores captured environment, then handles required, &optional, &rest, and &key
 
 (defun vm-list-to-lisp-list (state value)
   "Convert a VM list (possibly using vm-cons-cell heap objects) to a Lisp list."
-  (cond
-    ((null value) nil)
-    ((consp value) value)
-    ((typep value 'vm-cons-cell)
+  (typecase value
+    (null nil)
+    (cons value)
+    (vm-cons-cell
      (cons (vm-cons-cell-car value)
            (vm-list-to-lisp-list state (vm-cons-cell-cdr value))))
-    ((integerp value)
+    (integer
      ;; Could be a heap address
      (let ((obj (vm-heap-get state value)))
        (if (typep obj 'vm-cons-cell)

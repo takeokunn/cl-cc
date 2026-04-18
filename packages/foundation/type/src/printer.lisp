@@ -127,21 +127,25 @@
 (defun %format-binder (fmt var body)
   (format nil fmt (type-to-string var) (type-to-string body)))
 
-(defmacro define-binder-printers (&rest specs)
-  "Generate type-to-string defmethods for binder types from SPECS.
-Each spec is (class-name var-accessor body-accessor format-string)."
-  `(progn
-     ,@(mapcar (lambda (spec)
-                 (destructuring-bind (class var-fn body-fn fmt) spec
-                   `(defmethod type-to-string ((ty ,class))
-                      (%format-binder ,fmt (,var-fn ty) (,body-fn ty)))))
-               specs)))
+(defmethod type-to-string ((ty type-forall))
+  (%format-binder "(∀~A. ~A)"
+                  (type-forall-var ty)
+                  (type-forall-body ty)))
 
-(define-binder-printers
-  (type-forall type-forall-var  type-forall-body  "(∀~A. ~A)")
-  (type-exists type-exists-var  type-exists-body  "(∃~A. ~A)")
-  (type-lambda type-lambda-var  type-lambda-body  "(λ~A. ~A)")
-  (type-mu     type-mu-var      type-mu-body      "(μ~A. ~A)"))
+(defmethod type-to-string ((ty type-exists))
+  (%format-binder "(∃~A. ~A)"
+                  (type-exists-var ty)
+                  (type-exists-body ty)))
+
+(defmethod type-to-string ((ty type-lambda))
+  (%format-binder "(λ~A. ~A)"
+                  (type-lambda-var ty)
+                  (type-lambda-body ty)))
+
+(defmethod type-to-string ((ty type-mu))
+  (%format-binder "(μ~A. ~A)"
+                  (type-mu-var ty)
+                  (type-mu-body ty)))
 
 (defmethod type-to-string ((ty type-app))
   (format nil "(~A ~A)"

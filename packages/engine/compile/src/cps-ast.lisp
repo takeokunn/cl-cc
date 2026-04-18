@@ -16,22 +16,22 @@ Returns a CPS-transformed S-expression."))
         (if (null (cdr forms))
             (cps-transform-ast (car forms) k)
             (cps-transform-ast (car forms)
-                               `(lambda (,tmp)
-                                  (declare (ignore ,tmp))
-                                  ,(%cps-transform-sequence-step
-                                    (cdr forms) k empty-result)))))))
+                               (list 'lambda (list tmp)
+                                     (list 'declare (list 'ignore tmp))
+                                     (%cps-transform-sequence-step
+                                      (cdr forms) k empty-result)))))))
 
 (defun cps-transform-sequence (forms k)
   "Transform a sequence of forms in CPS. Returns the value of the last form."
-  (%cps-transform-sequence-step forms k `(funcall ,k nil)))
+  (%cps-transform-sequence-step forms k (list 'funcall k nil)))
 
 ;;; Core AST Types
 
 (defmethod cps-transform-ast ((node ast-int) k)
-  `(funcall ,k ,(ast-int-value node)))
+  (list 'funcall k (ast-int-value node)))
 
 (defmethod cps-transform-ast ((node ast-var) k)
-  `(funcall ,k ,(ast-var-name node)))
+  (list 'funcall k (ast-var-name node)))
 
 (defmethod cps-transform-ast ((node ast-binop) k)
   (let ((op (ast-binop-op node))
@@ -49,12 +49,12 @@ Returns a CPS-transformed S-expression."))
 (defmethod cps-transform-ast ((node ast-if) k)
   (let ((v (gensym "COND"))
         (k-var (gensym "K")))
-    `(let ((,k-var ,k))
-       ,(cps-transform-ast (ast-if-cond node)
-                           (list 'lambda (list v)
-                                 (list 'if (list '%cps-falsep v)
-                                       (cps-transform-ast (ast-if-else node) k-var)
-                                       (cps-transform-ast (ast-if-then node) k-var)))))))
+    (list 'let (list (list k-var k))
+          (cps-transform-ast (ast-if-cond node)
+                             (list 'lambda (list v)
+                                   (list 'if (list '%cps-falsep v)
+                                         (cps-transform-ast (ast-if-else node) k-var)
+                                         (cps-transform-ast (ast-if-then node) k-var)))))))
 
 (defmethod cps-transform-ast ((node ast-progn) k)
   (cps-transform-sequence (ast-progn-forms node) k))
@@ -78,9 +78,9 @@ Returns a CPS-transformed S-expression."))
                           (val (cdr binding))
                           (tmp (gensym (symbol-name sym))))
                      (cps-transform-ast val
-                                        `(lambda (,tmp)
-                                           (let ((,sym ,tmp))
-                                             ,(expand-bindings (cdr rest) env-k))))))))
+                                        (list 'lambda (list tmp)
+                                              (list 'let (list (list sym tmp))
+                                                    (expand-bindings (cdr rest) env-k))))))))
       (expand-bindings bindings k))))
 
 ;;; Lambda and Closures
@@ -90,12 +90,13 @@ Returns a CPS-transformed S-expression."))
   (let* ((params (ast-lambda-params node))
          (body   (ast-lambda-body node))
          (k-var  (gensym "K")))
-    `(funcall ,k
-              (lambda (,@params ,k-var)
-                ,(cps-transform-sequence body k-var)))))
+    (list 'funcall k
+          (cons 'lambda
+                (cons (append params (list k-var))
+                      (list (cps-transform-sequence body k-var)))))))
 
 (defmethod cps-transform-ast ((node ast-function) k)
   "Transform #'var to CPS (function reference)."
-  `(funcall ,k (function ,(ast-function-name node))))
+  (list 'funcall k (list 'function (ast-function-name node))))
 
 ;;; Control-flow and non-local CPS transforms moved to cps-ast-control.lisp.

@@ -101,51 +101,86 @@
     (maphash (lambda (k v) (setf (gethash k dst) v)) src)
     dst))
 
+(defvar *run-string-cps-fast-path-hook* nil
+  "Optional test hook called with (SOURCE FORM VALUE) when RUN-STRING returns via the CPS fast path.")
+
+(defun %try-run-string-cps-fast-path (source stdlib pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream print-pass-stats stats-stream trace-json-stream)
+  "Return (values result t) when SOURCE can be executed through the CPS host fast path.
+The fast path is intentionally limited to single-form, non-stdlib Lisp inputs so
+definition forms and stdlib-dependent execution continue through the established VM pipeline."
+  (if (or stdlib
+          pass-pipeline
+          print-pass-timings
+          timing-stream
+          print-opt-remarks
+          opt-remarks-stream
+          print-pass-stats
+          stats-stream
+          trace-json-stream)
+      (values nil nil)
+      (let ((forms (parse-source-for-language source :lisp)))
+        (if (and (= (length forms) 1)
+                 (not (and (consp (first forms)) (eq (caar forms) 'in-package))))
+            (let ((form (first forms)))
+              (multiple-value-bind (value ok)
+                  (%try-cps-host-eval form)
+                (when (and ok *run-string-cps-fast-path-hook*)
+                  (funcall *run-string-cps-fast-path-hook* source form value))
+                (values value ok)))
+            (values nil nil)))))
+
 (defun run-string (source &key stdlib pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile and run SOURCE. When STDLIB is true, include standard library."
   (let ((*package* (find-package :cl-cc))
         (*labels-boxed-fns* nil))
-    (if (and stdlib *stdlib-vm-snapshot*)
-        (let* ((*accessor-slot-map*       (%copy-snapshot-ht *stdlib-accessor-slot-map*))
-               (*defstruct-slot-registry* (%copy-snapshot-ht *stdlib-defstruct-slot-registry*))
-               (result (compile-string source :target :vm
-                                       :pass-pipeline pass-pipeline
-                                       :print-pass-timings print-pass-timings
-                                       :timing-stream timing-stream
-                                       :print-pass-stats print-pass-stats
-                                       :stats-stream stats-stream
-                                       :trace-json-stream trace-json-stream
-                                       :print-opt-remarks print-opt-remarks
-                                       :opt-remarks-stream opt-remarks-stream
-                                       :opt-remarks-mode opt-remarks-mode))
-               (program (compilation-result-program result))
-               (state   (clone-vm-state *stdlib-vm-snapshot*)))
-          (run-compiled program :state state))
-        (let* ((*accessor-slot-map*       (make-hash-table :test #'eq))
-               (*defstruct-slot-registry* (make-hash-table :test #'eq))
-               (result (if stdlib
-                           (compile-string-with-stdlib source :target :vm
-                                                       :pass-pipeline pass-pipeline
-                                                       :print-pass-timings print-pass-timings
-                                                       :timing-stream timing-stream
-                                                       :print-pass-stats print-pass-stats
-                                                       :stats-stream stats-stream
-                                                       :trace-json-stream trace-json-stream
-                                                       :print-opt-remarks print-opt-remarks
-                                                       :opt-remarks-stream opt-remarks-stream
-                                                       :opt-remarks-mode opt-remarks-mode)
-                           (compile-string source :target :vm
-                                           :pass-pipeline pass-pipeline
-                                           :print-pass-timings print-pass-timings
-                                           :timing-stream timing-stream
-                                           :print-pass-stats print-pass-stats
-                                           :stats-stream stats-stream
-                                           :trace-json-stream trace-json-stream
-                                           :print-opt-remarks print-opt-remarks
-                                           :opt-remarks-stream opt-remarks-stream
-                                           :opt-remarks-mode opt-remarks-mode)))
-               (program (compilation-result-program result)))
-          (run-compiled program)))))
+    (multiple-value-bind (cps-value cps-ok)
+        (%try-run-string-cps-fast-path source stdlib
+                                       pass-pipeline print-pass-timings timing-stream
+                                       print-opt-remarks opt-remarks-stream
+                                       print-pass-stats stats-stream trace-json-stream)
+      (if cps-ok
+          cps-value
+          (if (and stdlib *stdlib-vm-snapshot*)
+              (let* ((*accessor-slot-map*       (%copy-snapshot-ht *stdlib-accessor-slot-map*))
+                     (*defstruct-slot-registry* (%copy-snapshot-ht *stdlib-defstruct-slot-registry*))
+                     (result (compile-string source :target :vm
+                                             :pass-pipeline pass-pipeline
+                                             :print-pass-timings print-pass-timings
+                                             :timing-stream timing-stream
+                                             :print-pass-stats print-pass-stats
+                                             :stats-stream stats-stream
+                                             :trace-json-stream trace-json-stream
+                                             :print-opt-remarks print-opt-remarks
+                                             :opt-remarks-stream opt-remarks-stream
+                                             :opt-remarks-mode opt-remarks-mode))
+                     (program (compilation-result-program result))
+                     (state   (clone-vm-state *stdlib-vm-snapshot*)))
+                (run-compiled program :state state))
+              (let* ((*accessor-slot-map*       (make-hash-table :test #'eq))
+                     (*defstruct-slot-registry* (make-hash-table :test #'eq))
+                     (result (if stdlib
+                                 (compile-string-with-stdlib source :target :vm
+                                                             :pass-pipeline pass-pipeline
+                                                             :print-pass-timings print-pass-timings
+                                                             :timing-stream timing-stream
+                                                             :print-pass-stats print-pass-stats
+                                                             :stats-stream stats-stream
+                                                             :trace-json-stream trace-json-stream
+                                                             :print-opt-remarks print-opt-remarks
+                                                             :opt-remarks-stream opt-remarks-stream
+                                                             :opt-remarks-mode opt-remarks-mode)
+                                 (compile-string source :target :vm
+                                                 :pass-pipeline pass-pipeline
+                                                 :print-pass-timings print-pass-timings
+                                                 :timing-stream timing-stream
+                                                 :print-pass-stats print-pass-stats
+                                                 :stats-stream stats-stream
+                                                 :trace-json-stream trace-json-stream
+                                                 :print-opt-remarks print-opt-remarks
+                                                 :opt-remarks-stream opt-remarks-stream
+                                                 :opt-remarks-mode opt-remarks-mode)))
+                     (program (compilation-result-program result)))
+                (run-compiled program)))))))
 
 (defun compile-string-with-stdlib (source &key (target :x86_64) type-check (safety 1) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile SOURCE with standard library prepended."
@@ -197,6 +232,46 @@
 
 (defvar *repl-vm-state*)
 
+(defun %cps-host-eval-safe-ast-p (ast)
+  "Return T when AST is safe to evaluate through the host CPS path.
+Definition-like top-level forms keep using the existing compile→VM route so
+registry/class/global side effects still flow through the established pipeline." 
+  (not (typecase ast
+          (cl-cc/ast::ast-defun t)
+          (cl-cc/ast::ast-defvar t)
+          (cl-cc/ast::ast-defclass t)
+          (cl-cc/ast::ast-defgeneric t)
+          (cl-cc/ast::ast-defmethod t)
+          (cl-cc/ast::ast-block t)
+          (cl-cc/ast::ast-return-from t)
+          (cl-cc/ast::ast-catch t)
+          (cl-cc/ast::ast-throw t)
+          (cl-cc/ast::ast-tagbody t)
+          (cl-cc/ast::ast-go t)
+          (cl-cc/ast::ast-unwind-protect t)
+          (cl-cc/ast::ast-handler-case t)
+          (t nil))))
+
+(defun %try-cps-host-eval (form)
+  "Best-effort CPS-backed host evaluation for ordinary expressions.
+Returns two values: the result and whether the CPS path succeeded." 
+  (handler-case
+      (let* ((expanded-form (if (typep form 'cl-cc/ast:ast-node)
+                                form
+                                (compiler-macroexpand-all form)))
+             (ast (if (typep expanded-form 'cl-cc/ast:ast-node)
+                      expanded-form
+                      (lower-sexp-to-ast expanded-form))))
+        (if (%cps-host-eval-safe-ast-p ast)
+            (let ((cps (maybe-cps-transform ast)))
+              (if cps
+                  (values (funcall (eval cps) #'identity) t)
+                  (values nil nil)))
+            (values nil nil)))
+    (error (_)
+      (declare (ignore _))
+      (values nil nil))))
+
 (defun our-eval (form)
   "Evaluate FORM by compiling it and running it in the VM.
 This is the self-hosting eval — used for compile-time macro expansion
@@ -204,9 +279,12 @@ instead of the host CL eval.
 When *repl-vm-state* is available, reuses it so the compiled code has
 access to all previously registered functions (essential for macro
 expansion during self-host loading)."
-  (let* ((result (compile-expression form :target :vm))
-         (program (compilation-result-program result)))
-    (run-compiled program :state cl-cc::*repl-vm-state*)))
+  (multiple-value-bind (cps-value cps-ok) (%try-cps-host-eval form)
+    (if cps-ok
+        cps-value
+        (let* ((result (compile-expression form :target :vm))
+               (program (compilation-result-program result)))
+          (run-compiled program :state cl-cc::*repl-vm-state*)))))
 
 ;;; ─── Self-Hosting Bootstrap ──────────────────────────────────────────────
 ;;;
@@ -214,6 +292,24 @@ expansion during self-host loading)."
 ;;; expansion from the host CL eval to our-eval.  From this point on, every
 ;;; defmacro/macrolet body is compiled and executed by cl-cc's own pipeline —
 ;;; the fundamental requirement for self-hosting.
+
+(defparameter *early-selfhost-macro-bridge-entries*
+  '(("PARSE-LAMBDA-LIST"            . :cl-cc/expand)
+    ("DESTRUCTURE-LAMBDA-LIST"      . :cl-cc/expand)
+    ("GENERATE-LAMBDA-BINDINGS"     . :cl-cc/expand)
+    ("LAMBDA-LIST-INFO-ENVIRONMENT" . :cl-cc/expand))
+  "Bridge helpers required before selfhost macro evaluation switches to OUR-EVAL.")
+
+(defun %register-host-bridge-entries (entries)
+  "Register every (NAME . PACKAGE) pair in ENTRIES when both package and symbol exist."
+  (dolist (entry entries)
+    (let* ((pkg (find-package (cdr entry)))
+           (sym (when pkg (find-symbol (car entry) pkg))))
+      (when sym
+        (vm-register-host-bridge sym)))))
+
+(eval-when (:load-toplevel :execute)
+  (%register-host-bridge-entries *early-selfhost-macro-bridge-entries*))
 
 (setf *macro-eval-fn* #'our-eval)
 
@@ -235,25 +331,22 @@ expansion during self-host loading)."
 (eval-when (:load-toplevel :execute)
   ;; NOTE: register-macro is intentionally excluded — it stores VM closures in
   ;; macro-env, causing TYPE-ERROR when host CL funcalls them. See vm-bridge.lisp.
-  (dolist (entry '(("RUN-STRING"                   . :cl-cc)
-                   ("COMPILE-EXPRESSION"           . :cl-cc)
-                   ("COMPILE-STRING"               . :cl-cc)
-                   ("OUR-EVAL"                     . :cl-cc)
-                   ("PARSE-ALL-FORMS"              . :cl-cc)
-                   ;; Register both umbrella-exported and package-local symbols.
-                   ;; Selfhosted expand files intern unqualified helper calls in :cl-cc/expand,
-                   ;; while bridge regression tests assert the public :cl-cc exports stay wired.
-                   ("PARSE-LAMBDA-LIST"            . :cl-cc)
-                   ("PARSE-LAMBDA-LIST"            . :cl-cc/expand)
-                   ("DESTRUCTURE-LAMBDA-LIST"      . :cl-cc)
-                   ("DESTRUCTURE-LAMBDA-LIST"      . :cl-cc/expand)
-                   ("GENERATE-LAMBDA-BINDINGS"     . :cl-cc)
-                   ("GENERATE-LAMBDA-BINDINGS"     . :cl-cc/expand)
-                   ("LAMBDA-LIST-INFO-ENVIRONMENT" . :cl-cc/expand)))
-    (let* ((pkg (find-package (cdr entry)))
-           (sym (when pkg (find-symbol (car entry) pkg))))
-      (when sym
-        (vm-register-host-bridge sym)))))
+  (%register-host-bridge-entries
+   '(("RUN-STRING"                   . :cl-cc)
+     ("COMPILE-EXPRESSION"           . :cl-cc)
+     ("COMPILE-STRING"               . :cl-cc)
+     ("OUR-EVAL"                     . :cl-cc)
+     ("PARSE-ALL-FORMS"              . :cl-cc)
+     ;; Register both umbrella-exported and package-local symbols.
+     ;; Selfhosted expand files intern unqualified helper calls in :cl-cc/expand,
+     ;; while bridge regression tests assert the public :cl-cc exports stay wired.
+     ("PARSE-LAMBDA-LIST"            . :cl-cc)
+     ("PARSE-LAMBDA-LIST"            . :cl-cc/expand)
+     ("DESTRUCTURE-LAMBDA-LIST"      . :cl-cc)
+     ("DESTRUCTURE-LAMBDA-LIST"      . :cl-cc/expand)
+     ("GENERATE-LAMBDA-BINDINGS"     . :cl-cc)
+     ("GENERATE-LAMBDA-BINDINGS"     . :cl-cc/expand)
+     ("LAMBDA-LIST-INFO-ENVIRONMENT" . :cl-cc/expand))))
 
 (defun run-string-typed (source &key (mode :warn) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile and run SOURCE with type checking enabled.

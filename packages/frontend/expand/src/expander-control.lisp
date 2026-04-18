@@ -56,13 +56,20 @@
               (ne-vars (second no-error-clause))
               (ne-body (cddr no-error-clause)))
           (compiler-macroexpand-all
-           `(block ,tag
-              (let ((,(if (and ne-vars (car ne-vars)) (car ne-vars) (gensym "R-"))
-                     (handler-case ,protected
-                       ,@(mapcar (lambda (c)
-                                   `(,(first c) ,(second c)
-                                     (return-from ,tag (progn ,@(cddr c)))))
-                                 error-clauses))))
-                ,@(or ne-body '(nil))))))
+           (let ((result-var (if (and ne-vars (car ne-vars)) (car ne-vars) (gensym "R-"))))
+             (list 'block tag
+                   (list 'let
+                         (list
+                          (list result-var
+                                (cons 'handler-case
+                                      (cons protected
+                                            (mapcar (lambda (c)
+                                                      (list (first c) (second c)
+                                                            (list 'return-from tag
+                                                                  (cons 'progn (cddr c)))))
+                                                    error-clauses)))))
+                         (if ne-body
+                             (cons 'progn ne-body)
+                             nil))))))
         ;; No :no-error clause — recurse into subforms normally
         (cons 'handler-case (mapcar #'compiler-macroexpand-all (cdr form))))))

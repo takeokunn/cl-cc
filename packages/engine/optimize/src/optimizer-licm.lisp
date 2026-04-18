@@ -152,9 +152,8 @@
 (defun %opt-pre-expression-key (inst)
   "Return a structural key for a pure instruction INST, or NIL."
   (when (opt-inst-pure-p inst)
-    (cond
-      ((typep inst 'vm-const)
-       (list :const (vm-value inst)))
+    (typecase inst
+      (vm-const (list :const (vm-value inst)))
       (t
        (let* ((reads (opt-inst-read-regs inst))
               (normalized (if (member (type-of inst) *opt-commutative-inst-types* :test #'eq)

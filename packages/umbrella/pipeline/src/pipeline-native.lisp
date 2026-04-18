@@ -36,7 +36,7 @@
 
 (defun %compile-cache-path (key output-file)
   (merge-pathnames
-   (make-pathname :directory `(:relative ,key)
+   (make-pathname :directory (list :relative key)
                   :name (pathname-name output-file)
                   :type (pathname-type output-file))
    *compile-cache-root*))
@@ -173,42 +173,46 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
         (let ((method-name (first spec))
               (type-spec (second spec))
               (rest-spec (cddr spec)))
-          (push `(cons ',method-name
-                       (cl-cc/type:parse-type-specifier ',type-spec))
+          (push (list 'cons
+                      (list 'quote method-name)
+                      (list 'cl-cc/type:parse-type-specifier
+                            (list 'quote type-spec)))
                 methods-forms)
           (when (and rest-spec (eq (first rest-spec) :default))
-            (push `(cons ',method-name ,(second rest-spec))
+            (push (list 'cons (list 'quote method-name) (second rest-spec))
                   default-forms))))
-      `(progn
-         (cl-cc/type:register-typeclass
-          ',class-name
-          (cl-cc/type:make-type-class
-           :name ',class-name
-           :type-param (cl-cc/type:make-type-variable ',type-param)
-           :methods (list ,@(nreverse methods-forms))
-           :defaults (list ,@(nreverse default-forms))
-           :superclasses ',superclasses))
-         ',class-name))))
+      (list 'progn
+            (list 'cl-cc/type:register-typeclass
+                  (list 'quote class-name)
+                  (list 'cl-cc/type:make-type-class
+                        :name (list 'quote class-name)
+                        :type-param (list 'cl-cc/type:make-type-variable (list 'quote type-param))
+                        :methods (cons 'list (nreverse methods-forms))
+                        :defaults (cons 'list (nreverse default-forms))
+                        :superclasses (list 'quote superclasses)))
+            (list 'quote class-name)))))
 
 (register-macro 'deftype-instance
   (lambda (form env)
     (declare (ignore env))
-    (destructuring-bind (_ class-name type-spec &rest method-impls) form
-      (declare (ignore _))
-      (let* ((dict-var (intern (format nil "*~A-~A-DICT*"
-                                       class-name type-spec)
-                               :cl-cc))
-             (method-forms
-              (mapcar (lambda (impl)
-                        (destructuring-bind (name impl-form) impl
-                          `(cons ',name ,impl-form)))
-                      method-impls)))
-        `(progn
-           ;; Register in type inference registry
-           (cl-cc/type:register-typeclass-instance
-            ',class-name
-            (cl-cc/type:parse-type-specifier ',type-spec)
-            (list ,@method-forms))
-           ;; Store dictionary as global variable for VM access
-           (defvar ,dict-var (list ,@method-forms))
-           ',class-name)))))
+    ;; Syntax: (deftype-instance Class TypeSpec (method impl) ...)
+    (let* ((class-name (second form))
+           (type-spec (third form))
+           (method-impls (cdddr form))
+           (dict-var (intern (format nil "*~A-~A-DICT*"
+                                     class-name type-spec)
+                             :cl-cc))
+           (method-forms nil))
+      (dolist (impl method-impls)
+        (let ((method-name (first impl))
+              (impl-form (second impl)))
+          (push (list 'cons (list 'quote method-name) impl-form)
+                method-forms)))
+      (setf method-forms (nreverse method-forms))
+      (list 'progn
+            (list 'cl-cc/type:register-typeclass-instance
+                  (list 'quote class-name)
+                  (list 'cl-cc/type:parse-type-specifier (list 'quote type-spec))
+                  (cons 'list method-forms))
+            (list 'defvar dict-var (cons 'list method-forms))
+            (list 'quote class-name)))))

@@ -7,10 +7,10 @@
 
 (defun opt-heap-root-kind (inst)
   "Return a symbolic heap kind for fresh heap-producing INST."
-  (cond
-    ((typep inst 'vm-cons) :cons)
-    ((typep inst 'vm-make-array) :array)
-    ((typep inst '(or vm-closure vm-make-closure)) :closure)
+  (typecase inst
+    (vm-cons :cons)
+    (vm-make-array :array)
+    ((or vm-closure vm-make-closure) :closure)
     (t nil)))
 
 (defun %opt-build-root-map (instructions)
@@ -21,17 +21,20 @@ vm-move propagates the source root. Any other destination write kills the root f
   (let ((roots (make-hash-table :test #'eq)))
     (dolist (inst instructions roots)
       (let ((dst (opt-inst-dst inst)))
-        (cond
-          ((and dst (opt-heap-root-inst-p inst))
-           (setf (gethash dst roots) dst))
-          ((typep inst 'vm-move)
-           (multiple-value-bind (root found-p)
-               (gethash (vm-move-src inst) roots)
-             (if found-p
-                 (setf (gethash dst roots) root)
-                 (remhash dst roots))))
-          (dst
-           (remhash dst roots)))))))
+        (typecase inst
+          (vm-move
+           (when dst
+             (multiple-value-bind (root found-p)
+                 (gethash (vm-move-src inst) roots)
+               (if found-p
+                   (setf (gethash dst roots) root)
+                   (remhash dst roots)))))
+          (t
+           (cond
+             ((and dst (opt-heap-root-inst-p inst))
+              (setf (gethash dst roots) dst))
+             (dst
+              (remhash dst roots)))))))))
 
 (defun opt-compute-heap-aliases (instructions)
   "Compute a conservative EQ hash-table reg -> canonical heap root.
