@@ -28,21 +28,17 @@
 
 ;;; Prog/With-Slots/Nth-Value Macro Tests
 
-(deftest compile-prog-and-friends
+(deftest-each compile-prog-and-friends
   "prog/prog*/with-slots/nth-value macros work in compiled code."
-  (let ((results (run-string "(list
-    (prog ((x 0)) loop (setq x (+ x 1)) (when (= x 10) (return x)) (go loop))
-    (prog* ((x 1) (y (+ x 2))) (return y))
-    (progn (defclass point () ((x :initarg :x) (y :initarg :y)))
-           (let ((p (make-instance (quote point) :x 10 :y 20)))
-             (with-slots (x y) p (+ x y))))
-    (nth-value 1 (floor 17 5))
-    (prog ((x 1)) (setq x 2)))" :stdlib t)))
-    (assert-= 10 (first results))
-    (assert-= 3 (second results))
-    (assert-= 30 (third results))
-    (assert-= 2 (fourth results))
-    (assert-false (fifth results))))
+  :cases (("prog-loop"        10  "(prog ((x 0)) loop (setq x (+ x 1)) (when (= x 10) (return x)) (go loop))")
+          ("prog*-sequential"  3  "(prog* ((x 1) (y (+ x 2))) (return y))")
+          ("with-slots"       30  "(progn (defclass point () ((x :initarg :x) (y :initarg :y)))
+                                          (let ((p (make-instance (quote point) :x 10 :y 20)))
+                                            (with-slots (x y) p (+ x y))))")
+          ("nth-value"         2  "(nth-value 1 (floor 17 5))")
+          ("prog-no-return"   nil "(prog ((x 1)) (setq x 2))"))
+  (expected form)
+  (assert-equal expected (run-string form :stdlib t)))
 
 ;;; ANSI CL FR-400/FR-500 Tests (mismatch, make-string, float literals, string-not-equal)
 
@@ -85,11 +81,13 @@
   (expected form)
   (assert-equal expected (run-string form)))
 
-(deftest compile-array-predicates
+(deftest-each compile-array-predicates
   "array-element-type returns T; array-in-bounds-p checks index validity."
-  (assert-equal t (run-string "(array-element-type (make-array 3))"))
-  (assert-true (run-string "(array-in-bounds-p (make-array 5) 3)"))
-  (assert-true (not (run-string "(array-in-bounds-p (make-array 5) 7)"))))
+  :cases (("element-type"      t   "(array-element-type (make-array 3))")
+          ("in-bounds-valid"   t   "(array-in-bounds-p (make-array 5) 3)")
+          ("in-bounds-invalid" nil "(array-in-bounds-p (make-array 5) 7)"))
+  (expected form)
+  (assert-equal expected (run-string form)))
 
 (deftest-each compile-equalp
   "equalp compares lists and strings case-insensitively."
@@ -97,9 +95,7 @@
           ("string-case"   "(equalp \"hello\" \"HELLO\")"  t)
           ("lists-unequal" "(equalp '(1 2) '(1 3))"       nil))
   (form expected-truthy)
-  (if expected-truthy
-      (assert-true (run-string form))
-      (assert-true (not (run-string form)))))
+  (assert-equal expected-truthy (not (null (run-string form)))))
 
 (deftest compile-lisp-implementation-type
   "lisp-implementation-type returns cl-cc; compiled-function-p returns true for lambdas."
@@ -447,11 +443,15 @@
 ;;; FR-687: make-string :element-type with both keywords
 (deftest-each compile-make-string-element-type
   "make-string accepts :element-type; with both keywords it fills correctly."
-  :cases (("length"  "(length (make-string 5 :element-type 'character))"               5     nil)
-          ("fill"    "(make-string 3 :initial-element #\\x :element-type 'character)"  "xxx" t))
-  (form expected string-p)
-  (if string-p
-      (assert-string= expected (run-string form))
-      (assert-= expected (run-string form))))
+  :cases (("length"
+           "(length (make-string 5 :element-type 'character))"
+           (lambda (result)
+             (assert-= 5 result)))
+          ("fill"
+           "(make-string 3 :initial-element #\\x :element-type 'character)"
+           (lambda (result)
+             (assert-string= "xxx" result))))
+  (form verify)
+  (funcall verify (run-string form)))
 
 ;;; (run-tests is defined in framework.lisp)

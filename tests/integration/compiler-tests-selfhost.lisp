@@ -112,17 +112,14 @@
 
 ;;; Typed Defun/Lambda Tests
 
-(deftest-each typed-defun-numeric
-  "Typed defun compiles and executes to the correct numeric result."
-  :cases (("basic"        7  "(progn (defun typed-add ((x fixnum) (y fixnum)) fixnum (+ x y)) (typed-add 3 4))")
-          ("no-return-type" 12 "(progn (defun typed-mul ((x fixnum) (y fixnum)) (* x y)) (typed-mul 3 4))")
-          ("mixed-params"  7  "(progn (defun typed-mixed ((x fixnum) y) (+ x y)) (typed-mixed 3 4))"))
+(deftest-each typed-defun-runtime
+  "Typed defun compiles and executes to the correct result."
+  :cases (("basic-add"      7             "(progn (defun typed-add ((x fixnum) (y fixnum)) fixnum (+ x y)) (typed-add 3 4))")
+          ("no-return-type" 12            "(progn (defun typed-mul ((x fixnum) (y fixnum)) (* x y)) (typed-mul 3 4))")
+          ("mixed-params"   7             "(progn (defun typed-mixed ((x fixnum) y) (+ x y)) (typed-mixed 3 4))")
+          ("string-return"  "Hello World" "(progn (defun typed-greet ((name string)) string (concatenate 'string \"Hello \" name)) (typed-greet \"World\"))"))
   (expected form)
-  (assert-= expected (run-string form)))
-
-(deftest typed-defun-string
-  "typed defun with string param and return type"
-  (assert-string= "Hello World" (run-string "(progn (defun typed-greet ((name string)) string (concatenate 'string \"Hello \" name)) (typed-greet \"World\"))")))
+  (assert-equal expected (run-string form)))
 
 (deftest-each typed-lambda
   "Typed lambda with parameter type annotations compiles correctly."
@@ -148,17 +145,18 @@
 
 ;;; CLOS Type Inference Tests
 
-(deftest clos-type-inference
-  "make-instance infers class type; slot-value infers slot type from defclass :type."
-  ;; make-instance infers class type
+(deftest clos-type-inference-make-instance
+  "make-instance infers the class name as the result type."
   (multiple-value-bind (result type)
       (run-string-typed "(progn
         (defclass point () ((x :initarg :x :type fixnum) (y :initarg :y :type fixnum)))
         (make-instance 'point :x 1 :y 2))")
     (declare (ignore result))
     (assert-type cl-cc/type:type-primitive type)
-    (assert-string= "POINT" (symbol-name (cl-cc/type:type-primitive-name type))))
-  ;; slot-value infers fixnum slot type
+    (assert-string= "POINT" (symbol-name (cl-cc/type:type-primitive-name type)))))
+
+(deftest clos-type-inference-slot-fixnum
+  "slot-value infers fixnum type from defclass slot :type fixnum."
   (multiple-value-bind (result type)
       (run-string-typed "(progn
         (defclass point () ((x :initarg :x :type fixnum) (y :initarg :y :type fixnum)))
@@ -166,8 +164,10 @@
           (slot-value p 'x)))")
     (assert-= 10 result)
     (assert-type cl-cc/type:type-primitive type)
-    (assert-string= "FIXNUM" (symbol-name (cl-cc/type:type-primitive-name type))))
-  ;; slot-value infers string slot type
+    (assert-string= "FIXNUM" (symbol-name (cl-cc/type:type-primitive-name type)))))
+
+(deftest clos-type-inference-slot-string
+  "slot-value infers string type from defclass slot :type string."
   (multiple-value-bind (result type)
       (run-string-typed "(progn
         (defclass person () ((name :initarg :name :type string)))
@@ -194,13 +194,16 @@
 
 ;;; Type Narrowing Tests
 
-(deftest type-narrowing
-  "numberp/stringp narrow types in then-branch."
+(deftest type-narrowing-numberp
+  "numberp narrows x to fixnum in the then-branch."
   (multiple-value-bind (result type)
       (run-string-typed "(let ((x 42)) (if (numberp x) (+ x 1) 0))")
     (assert-= 43 result)
     (assert-type cl-cc/type:type-primitive type)
-    (assert-string= "FIXNUM" (symbol-name (cl-cc/type:type-primitive-name type))))
+    (assert-string= "FIXNUM" (symbol-name (cl-cc/type:type-primitive-name type)))))
+
+(deftest type-narrowing-stringp
+  "stringp narrows x to string in the then-branch."
   (multiple-value-bind (result type)
       (run-string-typed "(let ((x \"hello\")) (if (stringp x) x \"default\"))")
     (assert-string= "hello" result)

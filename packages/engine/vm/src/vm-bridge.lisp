@@ -212,8 +212,12 @@ representations may use hash tables with structured metadata."
                  ("OUR-EVAL"         . :cl-cc/bootstrap)
                  ;; cl-cc/parse entry points
                  ("PARSE-ALL-FORMS"  . :cl-cc/parse)
-                 ;; cl-cc/expand macro support
-                 ("GENERATE-LAMBDA-BINDINGS" . :cl-cc/expand)))
+                 ;; cl-cc/expand macro/lambda-list support
+                 ("PARSE-LAMBDA-LIST"         . :cl-cc/expand)
+                 ("DESTRUCTURE-LAMBDA-LIST"   . :cl-cc/expand)
+                 ("GENERATE-LAMBDA-BINDINGS"  . :cl-cc/expand)
+                 ;; Internal accessor used by our-defmacro during selfhost macro expansion
+                 ("LAMBDA-LIST-INFO-ENVIRONMENT" . :cl-cc/expand)))
   (let* ((pkg (find-package (cdr entry)))
          (sym (when pkg (find-symbol (car entry) pkg))))
     (when sym (vm-register-host-bridge sym))))

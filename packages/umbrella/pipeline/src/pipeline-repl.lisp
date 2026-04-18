@@ -158,6 +158,15 @@ Example:
    have the parsed form in hand (our-load already does)."
   (when (and (consp form) (eq (car form) 'in-package))
     (error "run-form-repl does not handle (in-package ...) forms; caller must dispatch before calling."))
+  (when (and (consp form)
+             (symbolp (car form))
+             (string= (symbol-name (car form)) "OUR-DEFMACRO"))
+    ;; Top-level OUR-DEFMACRO must register a HOST macro expander, but through
+    ;; MAKE-MACRO-EXPANDER so bootstrap quasiquote markers are normalized before
+    ;; the expander is stored. Raw host EVAL leaks CL-CC/BOOTSTRAP:UNQUOTE forms.
+    (register-macro (second form)
+                    (make-macro-expander (third form) (cdddr form)))
+    (return-from run-form-repl (second form)))
   (%ensure-repl-state)
   (let* ((*package* *package*)
          (*accessor-slot-map* *repl-accessor-map*)

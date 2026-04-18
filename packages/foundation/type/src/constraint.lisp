@@ -71,93 +71,68 @@ WANTED: list of constraint (the goals to prove under the hypotheses)."
   "Build a kind equality constraint κ₁ ~ κ₂."
   (%make-constraint :kind :kind-equal :args (list k1 k2)))
 
+;;; ─── Binary constraint dispatch table ────────────────────────────────────
+;;;
+;;; :equal, :subtype, and :effect-subset all have two type arguments and share
+;;; the same free-variable and substitution logic.  A Prolog-style fact table
+;;; dispatches these uniformly; only the structurally distinct kinds are cased.
+
+(defparameter *binary-constraint-constructors*
+  (list (cons :equal          #'make-equal-constraint)
+        (cons :subtype        #'make-subtype-constraint)
+        (cons :effect-subset  #'make-effect-subset-constraint))
+  "Prolog-style fact table: constraint kind → two-type-arg smart constructor.")
+
+(defun %two-type-free-vars (args)
+  "Free vars in a constraint whose two arguments are both type nodes."
+  (remove-duplicates
+   (append (type-free-vars (first args))
+           (type-free-vars (second args)))
+   :test #'type-var-equal-p))
+
 ;;; ─── Free variables ───────────────────────────────────────────────────────
 
 (defun constraint-free-vars (c)
   "Return a deduplicated list of type-var nodes free in constraint C."
-  (ecase (constraint-kind c)
-    (:equal
-     (let ((args (constraint-args c)))
-       (remove-duplicates
-        (append (type-free-vars (first args))
-                (type-free-vars (second args)))
-        :test #'type-var-equal-p)))
-    (:subtype
-     (let ((args (constraint-args c)))
-       (remove-duplicates
-        (append (type-free-vars (first args))
-                (type-free-vars (second args)))
-        :test #'type-var-equal-p)))
-    (:typeclass
-     ;; class-name is a symbol; only the type argument carries type-vars
-     (type-free-vars (second (constraint-args c))))
-    (:implication
-     ;; ∀vars. given ⊃ wanted
-     ;; Free vars = free in given/wanted minus the quantified vars
-     (let* ((args    (constraint-args c))
-            (qvars   (first args))
-            (given   (second args))
-            (wanted  (third args))
-            (gfv     (mapcan #'constraint-free-vars given))
-            (wfv     (mapcan #'constraint-free-vars wanted))
-            (all-fv  (remove-duplicates (append gfv wfv) :test #'type-var-equal-p)))
-       (remove-if (lambda (v)
-                    (member v qvars :test #'type-var-equal-p))
-                  all-fv)))
-    (:effect-subset
-     (let ((args (constraint-args c)))
-       (remove-duplicates
-        (append (type-free-vars (first args))
-                (type-free-vars (second args)))
-        :test #'type-var-equal-p)))
-    (:mult-leq
-     ;; Multiplicity grades are keywords, not types — no type-vars
-     nil)
-    (:row-lacks
-     ;; RHO may be a type-var (open row variable)
-     (let ((rho (first (constraint-args c))))
-       (if (type-node-p rho)
-           (type-free-vars rho)
-           nil)))
-    (:kind-equal
-     ;; Kind nodes carry no type-vars
-     nil)))
+  (let ((kind (constraint-kind c))
+        (args (constraint-args c)))
+    (if (assoc kind *binary-constraint-constructors*)
+        (%two-type-free-vars args)
+        (ecase kind
+          (:typeclass
+           (type-free-vars (second args)))
+          (:implication
+           (let* ((qvars  (first args))
+                  (all-fv (remove-duplicates
+                           (append (mapcan #'constraint-free-vars (second args))
+                                   (mapcan #'constraint-free-vars (third args)))
+                           :test #'type-var-equal-p)))
+             (remove-if (lambda (v) (member v qvars :test #'type-var-equal-p))
+                        all-fv)))
+          (:mult-leq  nil)
+          (:row-lacks
+           (let ((rho (first args)))
+             (when (type-node-p rho) (type-free-vars rho))))
+          (:kind-equal nil)))))
 
 ;;; ─── Substitution ─────────────────────────────────────────────────────────
 
 (defun constraint-substitute (c subst)
   "Apply type substitution SUBST to constraint C, returning a new constraint."
-  (ecase (constraint-kind c)
-    (:equal
-     (let ((args (constraint-args c)))
-       (make-equal-constraint (zonk (first args) subst)
-                              (zonk (second args) subst))))
-    (:subtype
-     (let ((args (constraint-args c)))
-       (make-subtype-constraint (zonk (first args) subst)
-                                (zonk (second args) subst))))
-    (:typeclass
-     (let ((args (constraint-args c)))
-       ;; first arg is the class-name symbol — not a type
-       (make-typeclass-constraint (first args)
-                                  (zonk (second args) subst))))
-    (:implication
-     (let* ((args   (constraint-args c))
-            (qvars  (first args))
-            (given  (mapcar (lambda (g) (constraint-substitute g subst)) (second args)))
-            (wanted (mapcar (lambda (w) (constraint-substitute w subst)) (third args))))
-       (make-implication-constraint qvars given wanted)))
-    (:effect-subset
-     (let ((args (constraint-args c)))
-       (make-effect-subset-constraint (zonk (first args) subst)
-                                      (zonk (second args) subst))))
-    (:mult-leq
-     ;; Multiplicities are not types — substitution is identity
-     c)
-    (:row-lacks
-     (let ((args (constraint-args c)))
-       (make-row-lacks-constraint (zonk (first args) subst)
-                                  (second args))))
-    (:kind-equal
-     ;; Kind nodes are not types — substitution is identity
-     c)))
+  (let* ((kind  (constraint-kind c))
+         (args  (constraint-args c))
+         (ctor  (cdr (assoc kind *binary-constraint-constructors*))))
+    (if ctor
+        (funcall ctor (zonk (first args) subst) (zonk (second args) subst))
+        (ecase kind
+          (:typeclass
+           (make-typeclass-constraint (first args) (zonk (second args) subst)))
+          (:implication
+           (make-implication-constraint
+            (first args)
+            (mapcar (lambda (g) (constraint-substitute g subst)) (second args))
+            (mapcar (lambda (w) (constraint-substitute w subst)) (third args))))
+          (:mult-leq  c)
+          (:row-lacks
+           (make-row-lacks-constraint (zonk (first args) subst) (second args)))
+          (:kind-equal c)))))

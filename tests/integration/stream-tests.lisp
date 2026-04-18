@@ -51,17 +51,12 @@
           ("make-string-output-stream-get"
            "(let ((s (make-string-output-stream)))
                (write-string \"test\" s)
-               (get-output-stream-string s))" "test"))
+               (get-output-stream-string s))" "test")
+          ("make-string-input-stream-read-char"
+           "(let ((s (make-string-input-stream \"xyz\"))) (read-char s))" #\x))
   (expr expected)
   (with-reset-repl-state
     (assert-equal expected (run-string-repl expr))))
-
-(deftest make-string-input-stream-read
-  "make-string-input-stream returns a readable stream."
-  (with-reset-repl-state
-    (assert-equal #\x
-                  (run-string-repl
-                   (format nil "(let ((s (make-string-input-stream ~S))) (read-char s))" "xyz")))))
 
 ;;; ─── write-line ─────────────────────────────────────────────────────────
 
@@ -74,27 +69,19 @@
            "(let ((s (make-string-output-stream)))
               (write-line \"test\" s))" "test"))
   (expr expected)
-  (if (stringp expected)
-      (assert-run-string= expected expr)
-      (assert-run= expected expr)))
+  (assert-run-string= expected expr))
 
 ;;; ─── read-char / read-line with optional stream ─────────────────────────
 
 (deftest-each read-char-optional-stream
   "read-char works with explicit stream argument."
   :cases (("read-char-from-string-stream"
-           "(let ((s (make-string-input-stream \"hello\")))
-              (read-char s))" #\h))
+           "(let ((s (make-string-input-stream \"hello\"))) (read-char s))" #\h)
+          ("read-char-sequence"
+           "(let ((s (make-string-input-stream \"ab\"))) (read-char s))" #\a))
   (expr expected)
   (with-reset-repl-state
     (assert-equal expected (run-string-repl expr))))
-
-(deftest read-char-sequence
-  "read-char consumes a character from an explicit stream argument."
-  (with-reset-repl-state
-    (assert-equal #\a
-                  (run-string-repl
-                   (format nil "(let ((s (make-string-input-stream ~S))) (read-char s))" "ab")))))
 
 (deftest-each read-line-optional-stream
   "read-line works with explicit stream argument."
@@ -137,27 +124,18 @@
 
 ;;; ─── force-output / finish-output ───────────────────────────────────────
 
-(deftest stream-force-output-no-error
-  "force-output on a string stream returns a string result without error."
+(deftest-each stream-output-control
+  "force-output and finish-output flush without error; content is preserved."
+  :cases (("force-output"  "force-output")
+          ("finish-output" "finish-output"))
+  (flush-fn)
   (with-reset-repl-state
     (let ((result (ignore-errors
                     (run-string-repl
-                     "(let ((s (make-string-output-stream)))
+                     (format nil "(let ((s (make-string-output-stream)))
                         (write-string \"test\" s)
-                        (force-output s)
-                        (get-output-stream-string s))"))))
-      (assert-true (stringp result))
-      (assert-equal "test" result))))
-
-(deftest stream-finish-output-no-error
-  "finish-output on a string stream returns a string result without error."
-  (with-reset-repl-state
-    (let ((result (ignore-errors
-                    (run-string-repl
-                     "(let ((s (make-string-output-stream)))
-                        (write-string \"test\" s)
-                        (finish-output s)
-                        (get-output-stream-string s))"))))
+                        (~A s)
+                        (get-output-stream-string s))" flush-fn)))))
       (assert-true (stringp result))
       (assert-equal "test" result))))
 

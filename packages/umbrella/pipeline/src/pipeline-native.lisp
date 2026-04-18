@@ -25,8 +25,7 @@
   output-path)
 
 (defparameter *compile-cache-root*
-  (merge-pathnames #P".cache/cl-cc/native/"
-                   (user-homedir-pathname))
+  (merge-pathnames #P".cache/cl-cc/native/" (truename #P"./"))
   "Directory for cached native build outputs.")
 
 (defun %compile-cache-key (source arch language)

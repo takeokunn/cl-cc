@@ -59,23 +59,14 @@
         (k2 (cl-cc::%compile-cache-key "(defun f (x) x)" :x86-64 :lisp)))
     (assert-equal k1 k2)))
 
-(deftest pipeline-native-cache-key-differs-by-arch
-  "%compile-cache-key: different arch yields different keys."
-  (let ((k1 (cl-cc::%compile-cache-key "source" :x86-64 :lisp))
-        (k2 (cl-cc::%compile-cache-key "source" :arm64  :lisp)))
-    (assert-false (equal k1 k2))))
-
-(deftest pipeline-native-cache-key-differs-by-language
-  "%compile-cache-key: different language yields different keys."
-  (let ((k1 (cl-cc::%compile-cache-key "source" :x86-64 :lisp))
-        (k2 (cl-cc::%compile-cache-key "source" :x86-64 :php)))
-    (assert-false (equal k1 k2))))
-
-(deftest pipeline-native-cache-key-differs-by-source
-  "%compile-cache-key: different source content yields different keys."
-  (let ((k1 (cl-cc::%compile-cache-key "aaa" :x86-64 :lisp))
-        (k2 (cl-cc::%compile-cache-key "bbb" :x86-64 :lisp)))
-    (assert-false (equal k1 k2))))
+(deftest-each pipeline-native-cache-key-differs-by-dimension
+  "%compile-cache-key: varying arch, language, or source content each produces a distinct key."
+  :cases (("arch"     (lambda () (cl-cc::%compile-cache-key "source" :arm64  :lisp)))
+          ("language" (lambda () (cl-cc::%compile-cache-key "source" :x86-64 :php)))
+          ("content"  (lambda () (cl-cc::%compile-cache-key "bbb"    :x86-64 :lisp))))
+  (make-variant)
+  (let ((baseline (cl-cc::%compile-cache-key "source" :x86-64 :lisp)))
+    (assert-false (equal baseline (funcall make-variant)))))
 
 (deftest pipeline-native-cache-key-dash-separated
   "%compile-cache-key contains dashes separating hash, arch, and language."
@@ -104,11 +95,13 @@
                       (string= root-str
                                 (subseq path-str 0 (length root-str)))))))
 
-(deftest pipeline-native-cache-path-preserves-filename
-  "%compile-cache-path preserves the filename from the output-file argument."
+(deftest-each pipeline-native-cache-path-filename-components
+  "%compile-cache-path preserves the filename and extension from the output-file argument."
+  :cases (("filename"  "my-program" (lambda (p) (pathname-name p)))
+          ("extension" "out"        (lambda (p) (pathname-type p))))
+  (expected accessor)
   (let ((path (cl-cc::%compile-cache-path "somekey" #P"my-program.out")))
-    (assert-equal "my-program" (pathname-name path))
-    (assert-equal "out"        (pathname-type path))))
+    (assert-equal expected (funcall accessor path))))
 
 (deftest pipeline-native-cache-path-no-extension
   "%compile-cache-path works with output files that have no extension."

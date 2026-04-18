@@ -31,13 +31,20 @@
 
 (deftest-each vm-generic-function-p
   "vm-generic-function-p recognises generic functions and rejects non-gf values."
-  :cases (("plain-hash-table"   (make-hash-table :test #'eq)                          nil)
-          ("integer"            99                                                     nil)
-          ("hash-with-methods"  (let ((ht (make-hash-table :test #'eq)))
-                                  (setf (gethash :__methods__ ht)
-                                        (make-hash-table :test #'equal))
-                                  ht)                                                  t))
-  (value expected)
-  (if expected
-      (assert-true  (cl-cc/vm::vm-generic-function-p value))
-      (assert-false (cl-cc/vm::vm-generic-function-p value))))
+  :cases (("plain-hash-table"
+           (make-hash-table :test #'eq)
+           (lambda (value)
+             (assert-false (cl-cc/vm::vm-generic-function-p value))))
+          ("integer"
+           99
+           (lambda (value)
+             (assert-false (cl-cc/vm::vm-generic-function-p value))))
+          ("hash-with-methods"
+           (let ((ht (make-hash-table :test #'eq)))
+             (setf (gethash :__methods__ ht)
+                   (make-hash-table :test #'equal))
+             ht)
+           (lambda (value)
+             (assert-true (cl-cc/vm::vm-generic-function-p value)))))
+  (value verify)
+  (funcall verify value))

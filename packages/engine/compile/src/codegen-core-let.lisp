@@ -25,21 +25,21 @@
                (member name (cdr decl) :test #'eq)))
         declarations))
 
-(defun %ast-cons-call-p (node)
+(defun %ast-call-named-p (node fn-name nargs)
+  "True if NODE is an ast-call to a function named FN-NAME with exactly NARGS arguments.
+FN-NAME is compared case-insensitively via SYMBOL-NAME so both symbol and ast-var funcs match."
   (and (typep node 'ast-call)
+       (= (length (ast-call-args node)) nargs)
        (let ((func (ast-call-func node)))
-         (or (eq func 'cons)
-             (and (typep func 'ast-var)
-                  (eq (ast-var-name func) 'cons))))
-       (= (length (ast-call-args node)) 2)))
+         (flet ((name= (sym) (string= (symbol-name sym) fn-name)))
+           (or (and (symbolp func)             (name= func))
+               (and (typep func 'ast-var) (name= (ast-var-name func))))))))
+
+(defun %ast-cons-call-p (node)
+  (%ast-call-named-p node "CONS" 2))
 
 (defun %ast-make-array-call-p (node)
-  (and (typep node 'ast-call)
-       (let ((func (ast-call-func node)))
-         (or (eq func 'make-array)
-             (and (typep func 'ast-var)
-                  (eq (ast-var-name func) 'make-array))))
-       (= (length (ast-call-args node)) 1)))
+  (%ast-call-named-p node "MAKE-ARRAY" 1))
 
 (defun %ast-make-array-int-call-p (node)
   (and (%ast-make-array-call-p node)
@@ -73,6 +73,70 @@
           (first body)
           (make-ast-progn :forms body))))
 
+(defun %sink-if-branch-body (if-node branch)
+  (ecase branch
+    (:then (%ast-as-body-forms (ast-if-then if-node)))
+    (:else (%ast-as-body-forms (ast-if-else if-node)))))
+
+(defun %sink-if-wrap-branch (if-node branch binding branch-forms outer-bindings)
+  (let ((sunken (make-ast-let :bindings (list binding) :body branch-forms)))
+    (%ast-wrap-bindings
+     outer-bindings
+     (list (make-ast-if :cond (ast-if-cond if-node)
+                        :then (if (eq branch :then) sunken (ast-if-then if-node))
+                        :else (if (eq branch :else) sunken (ast-if-else if-node)))))))
+
+(defun %sink-if-branch-uses-p (then-uses else-uses branch)
+  (ecase branch
+    (:then (and then-uses (not else-uses)))
+    (:else (and else-uses (not then-uses)))))
+
+(defun %sink-if-build-branch (if-node binding branch outer-bindings)
+  (%sink-if-wrap-branch if-node
+                        branch
+                        binding
+                        (%sink-if-branch-body if-node branch)
+                        outer-bindings))
+
+(defun %sink-if-instance-slot-names (expr)
+  (loop for initarg in (ast-make-instance-initargs expr)
+        collect (symbol-name (car initarg))))
+
+(defun %sink-if-array-candidate-p (expr if-node branch name then-uses else-uses)
+  (and (%ast-make-array-call-p expr)
+       (%sink-if-branch-uses-p then-uses else-uses branch)
+       (%array-binding-static-access-p (%sink-if-branch-body if-node branch) name nil)))
+
+(defun %sink-if-instance-candidate-p (expr if-node branch name then-uses else-uses)
+  (and (typep expr 'ast-make-instance)
+       (%sink-if-branch-uses-p then-uses else-uses branch)
+       (%instance-binding-static-slot-only-p (%sink-if-branch-body if-node branch)
+                                             name
+                                             (%sink-if-instance-slot-names expr))))
+
+(defun %sink-if-cons-candidate-p (expr if-node branch name then-uses else-uses)
+  (and (%ast-cons-call-p expr)
+       (%sink-if-branch-uses-p then-uses else-uses branch)
+       (not (binding-escapes-in-body-p (%sink-if-branch-body if-node branch)
+                                       name
+                                       :safe-consumers '("CAR" "CDR")))))
+
+;;; Data table: predicates tried in order; each is tried for :then then :else.
+;;; Separating predicates from the branch axis eliminates the 3×2 Cartesian enumeration.
+(defparameter *sink-if-candidate-predicates*
+  (list #'%sink-if-array-candidate-p
+        #'%sink-if-instance-candidate-p
+        #'%sink-if-cons-candidate-p)
+  "Predicates for sinking a let binding into an if branch.")
+
+(defun %sink-if-binding-candidate (if-node binding outer-bindings then-uses else-uses)
+  (let ((name (car binding))
+        (expr (cdr binding)))
+    (loop for pred-fn in *sink-if-candidate-predicates*
+          thereis (loop for branch in '(:then :else)
+                        when (funcall pred-fn expr if-node branch name then-uses else-uses)
+                          return (%sink-if-build-branch if-node binding branch outer-bindings)))))
+
 ;;; ── Sink-if candidate analysis ───────────────────────────────────────────
 ;;;
 ;;; When a let has exactly one binding and exactly one body form that is an
@@ -80,66 +144,25 @@
 ;;; into that branch to reduce unnecessary allocation.
 
 (defun %ast-let-sink-if-candidate (node)
-  (let* ((bindings (ast-let-bindings node))
-         (body (ast-let-body node)))
-    (when (and (= (length body) 1)
-               (typep (first body) 'ast-if))
-      (let* ((if-node (first body))
-             (then-forms (%ast-as-body-forms (ast-if-then if-node)))
-             (else-forms (%ast-as-body-forms (ast-if-else if-node))))
-        (loop for binding in bindings
-              for idx from 0
-              for name = (car binding)
-              for expr = (cdr binding)
-              for then-uses = (%binding-mentioned-in-body-p then-forms name)
-              for else-uses = (%binding-mentioned-in-body-p else-forms name)
-              for outer-bindings = (append (subseq bindings 0 idx)
-                                           (subseq bindings (1+ idx)))
-               do (labels ((sink-then ()
-                             (%ast-wrap-bindings
-                              outer-bindings
-                              (list (make-ast-if :cond (ast-if-cond if-node)
-                                                :then (make-ast-let :bindings (list binding)
-                                                                    :body then-forms)
-                                                :else (ast-if-else if-node)))))
-                          (sink-else ()
-                            (%ast-wrap-bindings
-                             outer-bindings
-                             (list (make-ast-if :cond (ast-if-cond if-node)
-                                                :then (ast-if-then if-node)
-                                                :else (make-ast-let :bindings (list binding)
-                                                                    :body else-forms))))))
-                   (when (not (and then-uses else-uses))
-                     (cond
-                       ((%ast-make-array-call-p expr)
-                        (cond
-                          ((and then-uses (not else-uses)
-                                (%array-binding-static-access-p then-forms name nil))
-                           (return-from %ast-let-sink-if-candidate (sink-then)))
-                          ((and else-uses (not then-uses)
-                                (%array-binding-static-access-p else-forms name nil))
-                           (return-from %ast-let-sink-if-candidate (sink-else)))))
-                       ((typep expr 'ast-make-instance)
-                        (let ((slot-names (loop for (key . _value-ast) in (ast-make-instance-initargs expr)
-                                                collect (symbol-name key))))
-                          (cond
-                            ((and then-uses (not else-uses)
-                                  (%instance-binding-static-slot-only-p then-forms name slot-names))
-                             (return-from %ast-let-sink-if-candidate (sink-then)))
-                            ((and else-uses (not then-uses)
-                                  (%instance-binding-static-slot-only-p else-forms name slot-names))
-                             (return-from %ast-let-sink-if-candidate (sink-else))))))
-                       ((%ast-cons-call-p expr)
-                        (cond
-                          ((and then-uses (not else-uses)
-                                (not (binding-escapes-in-body-p then-forms name
-                                                                :safe-consumers '("CAR" "CDR"))))
-                           (return-from %ast-let-sink-if-candidate (sink-then)))
-                          ((and else-uses (not then-uses)
-                                (not (binding-escapes-in-body-p else-forms name
-                                                                :safe-consumers '("CAR" "CDR"))))
-                           (return-from %ast-let-sink-if-candidate (sink-else))))))))
-               finally (return nil))))))
+  (let ((bindings (ast-let-bindings node))
+        (body     (ast-let-body node)))
+    (unless (and (= (length body) 1) (typep (first body) 'ast-if))
+      (return-from %ast-let-sink-if-candidate nil))
+    (let* ((if-node    (first body))
+           (then-forms (%ast-as-body-forms (ast-if-then if-node)))
+           (else-forms (%ast-as-body-forms (ast-if-else if-node))))
+      (loop for binding in bindings
+            for idx from 0
+            for name = (car binding)
+            for then-uses = (%binding-mentioned-in-body-p then-forms name)
+            for else-uses = (%binding-mentioned-in-body-p else-forms name)
+            for outer-bindings = (append (subseq bindings 0 idx)
+                                         (subseq bindings (1+ idx)))
+            for candidate = (unless (and then-uses else-uses)
+                              (%sink-if-binding-candidate if-node binding outer-bindings
+                                                          then-uses else-uses))
+            when candidate
+              return candidate))))
 
 ;;; ── Binding noescape walkers ─────────────────────────────────────────────
 ;;;
@@ -244,23 +267,20 @@ elements are extra parameters available in TERMINAL-CASES."
   "True iff BINDING-NAME in BODY-FORMS is used only via array operations (aref/aset/array-length)."
   (:shadow-let t :shadow-mvb t)
   (ast-call
-   (let ((func (ast-call-func node))
-         (args (ast-call-args node)))
-     (flet ((array-fn-named-p (name)
-              (or (and (symbolp func) (string= (symbol-name func) name))
-                  (and (typep func 'ast-var) (string= (symbol-name (ast-var-name func)) name))))
-            (first-arg-is-binding-p ()
+   (let ((args (ast-call-args node)))
+     (flet ((first-arg-is-binding-p ()
               (and (typep (first args) 'ast-var)
-                   (eq (ast-var-name (first args)) binding-name))))
+                   (eq (ast-var-name (first args)) binding-name)))
+            (func-named-p (name n) (%ast-call-named-p node name n)))
        (cond
-         ((and (array-fn-named-p "ARRAY-LENGTH") (= (length args) 1) (first-arg-is-binding-p)) t)
-         ((and (array-fn-named-p "ASET") (= (length args) 3) (first-arg-is-binding-p)
+         ((and (func-named-p "ARRAY-LENGTH" 1) (first-arg-is-binding-p)) t)
+         ((and (func-named-p "ASET" 3)         (first-arg-is-binding-p)
                (okp (second args)) (okp (third args))) t)
-         ((and (or (eq func 'aref)
-                   (and (typep func 'ast-var) (eq (ast-var-name func) 'aref)))
-               (= (length args) 2) (first-arg-is-binding-p) (okp (second args))) t)
-         (t (and (if (typep func 'ast-node) (okp func) t)
-                 (every #'okp args))))))))
+         ((and (func-named-p "AREF" 2)         (first-arg-is-binding-p)
+               (okp (second args))) t)
+         (t (let ((func (ast-call-func node)))
+              (and (if (typep func 'ast-node) (okp func) t)
+                   (every #'okp args)))))))))
 
 ;;; Instance noescape: binding may only appear as the object arg to slot-value / set-slot-value.
 (%define-binding-walker %instance-binding-static-slot-only-p

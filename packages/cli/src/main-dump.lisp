@@ -93,15 +93,20 @@
          (string= suffix string :start1 0 :end1 suffix-len
                            :start2 (- string-len suffix-len) :end2 string-len))))
 
+(defparameter *ir-phase-dump-fns*
+  '((:ast . %dump-ast-phase)
+    (:cps . %dump-cps-phase)
+    (:ssa . %dump-ssa-phase)
+    (:vm  . %dump-vm-phase)
+    (:opt . %dump-opt-phase)
+    (:asm . %dump-asm-phase))
+  "Data table mapping IR phase keywords to their dump functions.")
+
 (defun %dump-ir-phase (phase result stream annotate-source)
-  (case phase
-    (:ast (%dump-ast-phase result stream annotate-source))
-    (:cps (%dump-cps-phase result stream annotate-source))
-    (:ssa (%dump-ssa-phase result stream annotate-source))
-    (:vm  (%dump-vm-phase result stream annotate-source))
-    (:opt (%dump-opt-phase result stream annotate-source))
-    (:asm (%dump-asm-phase result stream annotate-source))
-    (t (error "Unknown IR phase: ~S" phase))))
+  (let ((fn (cdr (assoc phase *ir-phase-dump-fns*))))
+    (if fn
+        (funcall (symbol-function fn) result stream annotate-source)
+        (error "Unknown IR phase: ~S" phase))))
 
 (defun %trace-emit-stages (result stream &key annotate-source)
   "Emit a simple VM/OPT/ASM trace for RESULT to STREAM."
@@ -112,36 +117,41 @@
   (format stream ";; --trace-emit: asm --~%")
   (%dump-asm-phase result stream annotate-source))
 
+(defparameter *arch-aliases*
+  '(("x86-64"  :x86-64 :x86_64)
+    ("x86_64"  :x86-64 :x86_64)
+    ("arm64"   :arm64  :aarch64)
+    ("aarch64" :arm64  :aarch64))
+  "Architecture string aliases: (input-string arch-keyword compile-target-keyword).")
+
 (defun %arch-keyword (arch-str)
-  "Convert ARCH-STR (\"x86-64\" or \"arm64\"/\"aarch64\") to a keyword.
-Calls (uiop:quit 2) on unrecognised values."
-  (cond
-    ((or (string= arch-str "x86-64")
-         (string= arch-str "x86_64"))  :x86-64)
-    ((or (string= arch-str "arm64")
-         (string= arch-str "aarch64")) :arm64)
-    (t
-     (format *error-output* "Unknown architecture: ~A (use x86-64 or arm64)~%" arch-str)
-     (uiop:quit 2))))
+  "Convert ARCH-STR to its canonical arch keyword. Calls (uiop:quit 2) on unknown values."
+  (let ((entry (assoc arch-str *arch-aliases* :test #'string=)))
+    (or (and entry (second entry))
+        (progn
+          (format *error-output* "Unknown architecture: ~A (use x86-64 or arm64)~%" arch-str)
+          (uiop:quit 2)))))
 
 (defun %compile-target-keyword (arch-str)
-  (cond
-    ((or (string= arch-str "x86-64")
-         (string= arch-str "x86_64")) :x86_64)
-    ((or (string= arch-str "arm64")
-         (string= arch-str "aarch64")) :aarch64)
-    (t (error "Unknown architecture for compilation: ~A" arch-str))))
+  "Convert ARCH-STR to its compilation target keyword. Signals error on unknown values."
+  (let ((entry (assoc arch-str *arch-aliases* :test #'string=)))
+    (or (and entry (third entry))
+        (error "Unknown architecture for compilation: ~A" arch-str))))
+
+(defparameter *opt-remarks-modes*
+  '(("all"     . :all)
+    ("changed" . :changed)
+    ("missed"  . :missed))
+  "Valid opt-remarks mode strings and their keyword equivalents.")
 
 (defun %parse-opt-remarks-mode (mode-str)
   (let ((s (string-downcase (or mode-str ""))))
-    (cond
-      ((string= s "") nil)
-      ((string= s "all") :all)
-      ((string= s "changed") :changed)
-      ((string= s "missed") :missed)
-      (t
-       (format *error-output* "Unknown opt-remarks mode: ~A (use all|changed|missed)~%" mode-str)
-       (uiop:quit 2)))))
+    (if (string= s "")
+        nil
+        (or (cdr (assoc s *opt-remarks-modes* :test #'string=))
+            (progn
+              (format *error-output* "Unknown opt-remarks mode: ~A (use all|changed|missed)~%" mode-str)
+              (uiop:quit 2))))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Compile options — shared pipeline/tracing flags

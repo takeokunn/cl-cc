@@ -166,31 +166,26 @@
 
 ;;; ─── lex-all Full Forms ─────────────────────────────────────────────────────
 
-(deftest lexer-full-form-simple-list
-  "Lexer: lex-all on (+ 1 2) produces correct token types"
-  (let ((types (token-types "(+ 1 2)")))
-    (assert-equal '(:T-LPAREN :T-IDENT :T-INT :T-INT :T-RPAREN) types)))
+(deftest-each lexer-full-form-token-types
+  "lex-all produces the correct token type sequence for complete forms."
+  :cases (("simple-list" "(+ 1 2)"  '(:T-LPAREN :T-IDENT :T-INT :T-INT :T-RPAREN))
+          ("quoted-list" "'(a b)"   '(:T-QUOTE :T-LPAREN :T-IDENT :T-IDENT :T-RPAREN)))
+  (source expected-types)
+  (assert-equal expected-types (token-types source)))
 
 (deftest lexer-full-form-defun
-  "Lexer: lex-all on (defun f (x) x) produces correct tokens"
+  "Lexer: lex-all on (defun f (x) x) produces 8 tokens wrapped in parens."
   (let ((types (token-types "(defun f (x) x)")))
     (assert-= 8 (length types))
     (assert-eq :T-LPAREN (first types))
     (assert-eq :T-RPAREN (car (last types)))))
 
-(deftest lexer-full-form-quoted
-  "Lexer: lex-all on '(a b) produces quote + list tokens"
-  (let ((types (token-types "'(a b)")))
-    (assert-eq :T-QUOTE (first types))))
-
-(deftest lexer-eof-token
-  "Lexer: lex-all always ends with :T-EOF"
-  (let* ((tokens (cl-cc:lex-all "42"))
-         (last-tok (car (last tokens))))
-    (assert-eq :T-EOF (cl-cc:lexer-token-type last-tok))))
-
-(deftest lexer-empty-input
-  "Lexer: empty input produces just :T-EOF"
-  (let ((tokens (cl-cc:lex-all "")))
-    (assert-= 1 (length tokens))
-    (assert-eq :T-EOF (cl-cc:lexer-token-type (first tokens)))))
+(deftest-each lexer-eof-always-present
+  "lex-all always terminates with a :T-EOF token."
+  :cases (("non-empty" "42" nil)
+          ("empty"     ""   1))
+  (source expected-count)
+  (let ((tokens (cl-cc:lex-all source)))
+    (assert-eq :T-EOF (cl-cc:lexer-token-type (car (last tokens))))
+    (when expected-count
+      (assert-= expected-count (length tokens)))))

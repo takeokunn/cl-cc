@@ -81,43 +81,42 @@
   (let ((edit (make-test-edit 10 old-end new-end)))
     (assert-equal expected (cl-cc/parse::edit-byte-delta edit))))
 
-(deftest-each incr-shift-bytes-cases
-  "cst-shift-bytes adjusts byte positions for tokens, interior nodes, error nodes, and negative deltas."
-  ((label)
-   (:token)
-   (:interior)
-   (:error-node)
-   (:negative))
-  (ecase label
-    (:token
-     (let* ((tok (make-test-cst-token :T-INT 42 10 15))
-            (shifted (cl-cc/parse::cst-shift-bytes tok 5)))
-       (assert-true (cl-cc/parse::cst-token-p shifted))
-       (assert-equal 15 (cl-cc/parse::cst-node-start-byte shifted))
-       (assert-equal 20 (cl-cc/parse::cst-node-end-byte shifted))
-       (assert-equal 42 (cl-cc/parse::cst-token-value shifted))))
-    (:interior
-     (let* ((child (make-test-cst-token :T-INT 1 5 10))
-            (parent (make-test-interior :list 0 20 (list child)))
-            (shifted (cl-cc/parse::cst-shift-bytes parent 10)))
-       (assert-true (cl-cc/parse::cst-interior-p shifted))
-       (assert-equal 10 (cl-cc/parse::cst-node-start-byte shifted))
-       (assert-equal 30 (cl-cc/parse::cst-node-end-byte shifted))
-       (let ((shifted-child (first (cl-cc/parse::cst-interior-children shifted))))
-         (assert-equal 15 (cl-cc/parse::cst-node-start-byte shifted-child))
-         (assert-equal 20 (cl-cc/parse::cst-node-end-byte shifted-child)))))
-    (:error-node
-     (let* ((err (cl-cc/parse::make-cst-error-node :kind :error :start-byte 10 :end-byte 20
-                                              :message "bad token"))
-            (shifted (cl-cc/parse::cst-shift-bytes err 5)))
-       (assert-true (cl-cc/parse::cst-error-p shifted))
-       (assert-equal 15 (cl-cc/parse::cst-node-start-byte shifted))
-       (assert-equal 25 (cl-cc/parse::cst-node-end-byte shifted))))
-    (:negative
-     (let* ((tok (make-test-cst-token :T-INT 1 20 30))
-            (shifted (cl-cc/parse::cst-shift-bytes tok -5)))
-       (assert-equal 15 (cl-cc/parse::cst-node-start-byte shifted))
-       (assert-equal 25 (cl-cc/parse::cst-node-end-byte shifted))))))
+(deftest incr-shift-bytes-token
+  "cst-shift-bytes on a token adjusts start/end by delta and preserves value."
+  (let* ((tok (make-test-cst-token :T-INT 42 10 15))
+         (shifted (cl-cc/parse::cst-shift-bytes tok 5)))
+    (assert-true (cl-cc/parse::cst-token-p shifted))
+    (assert-equal 15 (cl-cc/parse::cst-node-start-byte shifted))
+    (assert-equal 20 (cl-cc/parse::cst-node-end-byte shifted))
+    (assert-equal 42 (cl-cc/parse::cst-token-value shifted))))
+
+(deftest incr-shift-bytes-interior
+  "cst-shift-bytes on an interior node shifts the node and all its children."
+  (let* ((child (make-test-cst-token :T-INT 1 5 10))
+         (parent (make-test-interior :list 0 20 (list child)))
+         (shifted (cl-cc/parse::cst-shift-bytes parent 10)))
+    (assert-true (cl-cc/parse::cst-interior-p shifted))
+    (assert-equal 10 (cl-cc/parse::cst-node-start-byte shifted))
+    (assert-equal 30 (cl-cc/parse::cst-node-end-byte shifted))
+    (let ((shifted-child (first (cl-cc/parse::cst-interior-children shifted))))
+      (assert-equal 15 (cl-cc/parse::cst-node-start-byte shifted-child))
+      (assert-equal 20 (cl-cc/parse::cst-node-end-byte shifted-child)))))
+
+(deftest incr-shift-bytes-error-node
+  "cst-shift-bytes on an error node adjusts start/end while preserving error kind."
+  (let* ((err (cl-cc/parse::make-cst-error-node :kind :error :start-byte 10 :end-byte 20
+                                           :message "bad token"))
+         (shifted (cl-cc/parse::cst-shift-bytes err 5)))
+    (assert-true (cl-cc/parse::cst-error-p shifted))
+    (assert-equal 15 (cl-cc/parse::cst-node-start-byte shifted))
+    (assert-equal 25 (cl-cc/parse::cst-node-end-byte shifted))))
+
+(deftest incr-shift-bytes-negative-delta
+  "cst-shift-bytes with a negative delta moves byte positions backwards."
+  (let* ((tok (make-test-cst-token :T-INT 1 20 30))
+         (shifted (cl-cc/parse::cst-shift-bytes tok -5)))
+    (assert-equal 15 (cl-cc/parse::cst-node-start-byte shifted))
+    (assert-equal 25 (cl-cc/parse::cst-node-end-byte shifted))))
 
 ;;; ─── Minimal Reparse Detection ──────────────────────────────────────────────
 

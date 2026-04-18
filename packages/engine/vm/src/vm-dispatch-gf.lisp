@@ -2,22 +2,32 @@
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;; VM — Generic Function Dispatch
 ;;;
-;;; Contains: vm-classify-arg, EQL specializer helpers (%eql-specializer-p,
+;;; Contains: %gethash-multi-key (shared key-lookup helper),
+;;; vm-classify-arg, EQL specializer helpers (%eql-specializer-p,
 ;;; %eql-specializer-matches-p, %vm-extract-eql-specializer-keys,
 ;;; %vm-gf-eql-methods), vm-get-all-applicable-methods,
 ;;; %lookup-qualified-methods, %collect-combo-methods,
+;;; *method-combination-operators*, %resolve-combination-operator,
 ;;; %vm-dispatch-custom-combination, vm-dispatch-generic-call,
-;;; %vm-dispatch-call, qualified-return helpers (%vm-return-to-caller,
-;;; %vm-jump-to-next-method, %vm-ret-qualified-dispatch), and
-;;; multi-dispatch resolution (%vm-gf-uses-composite-keys-p,
+;;; %vm-dispatch-call.
+;;;
+;;; Multi-dispatch resolution (%vm-gf-uses-composite-keys-p,
 ;;; %vm-resolve-single-dispatch, %vm-resolve-composite-dispatch,
 ;;; vm-resolve-gf-method, vm-resolve-multi-dispatch,
-;;; vm-try-dispatch-combinations, vm-try-dispatch-sub).
+;;; vm-try-dispatch-combinations, vm-try-dispatch-sub) lives in
+;;; vm-dispatch-gf-multi.lisp.
 ;;;
 ;;; Load order: after vm-dispatch.lisp, before vm-execute.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ;;; ── Generic dispatch helpers ──────────────────────────────────────────────
+
+(defun %gethash-multi-key (ht keys)
+  "Try each key form in KEYS against HT; collect all matches into a flat list.
+Values stored as lists are spliced in; scalar values are wrapped in a list."
+  (loop for key in keys
+        for val = (gethash key ht)
+        when val nconc (if (listp val) (copy-list val) (list val))))
 
 (defun vm-classify-arg (arg state)
   "Determine the class name of an argument for generic dispatch."
@@ -103,41 +113,22 @@ EQL specializers are checked first (most specific), then class-based dispatch vi
     (nreverse result)))
 
 (defun %lookup-qualified-methods (gf-ht qual-key state all-arg-values)
-  "Look up qualified methods for QUAL-KEY (:__BEFORE__ or :__AFTER__) in GF-HT.
-Returns a list of applicable closures for the given argument values."
+  "Look up qualified methods for QUAL-KEY (:__BEFORE__, :__AFTER__, :__AROUND__) in GF-HT.
+Checks four key forms in priority order: (list class-name), (list t), class-name, t.
+Returns a flat list of applicable closures, most-specific first."
   (let ((qual-ht (gethash qual-key gf-ht)))
     (when qual-ht
-      (let ((first-arg (car all-arg-values))
-            (class-name (vm-classify-arg (car all-arg-values) state))
-            (result nil))
-        (declare (ignore first-arg))
-        ;; Collect matching methods: exact class match, then inheritance
-        (let ((direct (gethash (list class-name) qual-ht)))
-          (when direct
-            (if (listp direct)
-                (dolist (m direct) (push m result))
-                (push direct result))))
-        (let ((t-match (gethash (list t) qual-ht)))
-          (when t-match
-            (if (listp t-match)
-                (dolist (m t-match) (push m result))
-                (push t-match result))))
-        ;; Also check single-key entries for backward compat
-        (let ((direct-single (gethash class-name qual-ht)))
-          (when direct-single
-            (if (listp direct-single)
-                (dolist (m direct-single) (push m result))
-                (push direct-single result))))
-        (let ((t-single (gethash t qual-ht)))
-          (when t-single
-            (if (listp t-single)
-                (dolist (m t-single) (push m result))
-                (push t-single result))))
-        (nreverse result)))))
+      (let ((class-name (vm-classify-arg (car all-arg-values) state)))
+        ;; Keys tried in priority order: list-wrapped exact, list-wrapped t,
+        ;; bare exact, bare t (backward compat for single-key entries)
+        (%gethash-multi-key qual-ht
+                            (list (list class-name) (list t)
+                                  class-name t))))))
 
 (defun %collect-combo-methods (gf-ht qual-key state first-arg)
   "Collect all applicable methods for custom combination by walking the CPL.
-Returns methods most-specific-first, deduplicated."
+Returns methods most-specific-first, deduplicated across both plain and
+list-wrapped key forms (for multi-dispatch backward compat)."
   (let* ((qual-ht (gethash qual-key gf-ht))
          (class-name (vm-classify-arg first-arg state))
          (class-ht (gethash class-name (vm-class-registry state)))
@@ -148,28 +139,14 @@ Returns methods most-specific-first, deduplicated."
          (result nil)
          (seen nil))
     (when qual-ht
-      ;; Walk CPL (deduplicated) and collect methods from each level
+      ;; Walk CPL (deduplicated); for each ancestor try both plain and
+      ;; list-wrapped keys, adding newly seen methods to result.
       (dolist (ancestor cpl)
         (unless (member ancestor seen)
           (push ancestor seen)
-          ;; Check plain key
-          (let ((m (gethash ancestor qual-ht)))
-            (when m
-              (if (listp m)
-                  (dolist (method m)
-                    (unless (member method result)
-                      (push method result)))
-                  (unless (member m result)
-                    (push m result)))))
-          ;; Also check list-wrapped keys for multi-dispatch compat
-          (let ((m (gethash (list ancestor) qual-ht)))
-            (when m
-              (if (listp m)
-                  (dolist (method m)
-                    (unless (member method result)
-                      (push method result)))
-                  (unless (member m result)
-                    (push m result))))))))
+          (dolist (method (%gethash-multi-key qual-ht (list ancestor (list ancestor))))
+            (unless (member method result)
+              (push method result))))))
     (nreverse result)))
 
 (defparameter *method-combination-operators*

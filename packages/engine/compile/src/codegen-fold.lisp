@@ -11,6 +11,19 @@
 
 (in-package :cl-cc/compile)
 
+;;; ── CPS evaluation helper ────────────────────────────────────────────────────
+;;;
+;;; %with-eval encodes the compile-time short-circuit: evaluate NODE at DEPTH-1,
+;;; bind VAR to the result, continue into BODY — or silently return (values nil nil).
+;;; This is the continuation-passing style of "evaluate or abandon".
+
+(defmacro %with-eval ((var node depth) &body body)
+  (let ((ok-sym (gensym "OK")))
+    `(multiple-value-bind (,var ,ok-sym) (%evaluate-ast ,node (1- ,depth))
+       (if ,ok-sym
+           (progn ,@body)
+           (values nil nil)))))
+
 ;;; ── Binop constant-fold helpers ──────────────────────────────────────────────
 
 (defun %ast-constant-number-value (node)
@@ -22,13 +35,17 @@
                    value)))
     (t nil)))
 
+(defun %clone-source (node &rest make-args)
+  "Apply MAKE-ARGS to a constructor that accepts :source-file/:source-line/:source-column,
+filling those fields from NODE."
+  (apply (first make-args)
+         :source-file   (ast-source-file   node)
+         :source-line   (ast-source-line   node)
+         :source-column (ast-source-column node)
+         (rest make-args)))
+
 (defun %same-ast-binop (node lhs rhs)
-  (make-ast-binop :op (ast-binop-op node)
-                  :lhs lhs
-                  :rhs rhs
-                  :source-file (ast-source-file node)
-                  :source-line (ast-source-line node)
-                  :source-column (ast-source-column node)))
+  (%clone-source node #'make-ast-binop :op (ast-binop-op node) :lhs lhs :rhs rhs))
 
 (defun %fold-ast-binop (node lhs rhs)
   (let ((lv (%ast-constant-number-value lhs))
@@ -43,10 +60,7 @@
                               (when (integerp quot) quot))))
                        (otherwise nil))))
           (if (integerp value)
-              (make-ast-int :value value
-                            :source-file (ast-source-file node)
-                            :source-line (ast-source-line node)
-                            :source-column (ast-source-column node))
+              (%clone-source node #'make-ast-int :value value)
               (%same-ast-binop node lhs rhs)))
         (%same-ast-binop node lhs rhs))))
 
@@ -108,17 +122,9 @@
     (t nil)))
 
 (defun %compile-time-value->ast (value node)
-  (cond
-    ((integerp value)
-     (make-ast-int :value value
-                   :source-file (ast-source-file node)
-                   :source-line (ast-source-line node)
-                   :source-column (ast-source-column node)))
-    (t
-     (make-ast-quote :value value
-                     :source-file (ast-source-file node)
-                     :source-line (ast-source-line node)
-                     :source-column (ast-source-column node)))))
+  (if (integerp value)
+      (%clone-source node #'make-ast-int   :value value)
+      (%clone-source node #'make-ast-quote :value value)))
 
 (defun %compile-time-lookup (name env)
   "Look up NAME in ENV alist; return (values value t) when found, (values nil nil) otherwise.
@@ -127,9 +133,10 @@ Block environments use the same structure, so %compile-time-lookup-block is an a
     (when entry
       (values (cdr entry) t))))
 
-;;; Block environments have the same alist structure — share the implementation.
-(setf (symbol-function '%compile-time-lookup-block)
-      #'%compile-time-lookup)
+;;; Block environments have the same alist structure as value environments.
+(defun %compile-time-lookup-block (name env)
+  "Look up block NAME in ENV using the same alist protocol as values."
+  (%compile-time-lookup name env))
 
 (defparameter *compile-time-simple-binops*
   '((+ . +) (- . -) (* . *))
@@ -194,10 +201,13 @@ Uses loop's unless-return to avoid mid-body return-from."
     (return-from %evaluate-ast-sequence (values nil t)))
   (let ((*compile-time-value-env* value-env)
         (*compile-time-function-env* function-env))
-    (loop for form in forms
-          for (value ok) = (multiple-value-list (%evaluate-ast form depth))
-          unless ok return (values nil nil)
-          finally (return (values value t)))))
+    (let ((last-value nil))
+      (dolist (form forms (values last-value t))
+        (multiple-value-bind (value ok)
+            (%evaluate-ast form depth)
+          (unless ok
+            (return-from %evaluate-ast-sequence (values nil nil)))
+          (setf last-value value))))))
 
 (defun %evaluate-ast (node depth)
   (when (minusp depth)
@@ -212,22 +222,18 @@ Uses loop's unless-return to avoid mid-body return-from."
            (values value t)
            (values nil nil))))
     (ast-binop
-     (multiple-value-bind (lhs lhs-ok) (%evaluate-ast (ast-binop-lhs node) (1- depth))
-       (multiple-value-bind (rhs rhs-ok) (%evaluate-ast (ast-binop-rhs node) (1- depth))
-         (if (and lhs-ok rhs-ok)
-             (let ((value (%compile-time-eval-binop (ast-binop-op node) lhs rhs)))
-               (if (and value (integerp value))
-                   (values value t)
-                   (values nil nil)))
-             (values nil nil)))))
+     (%with-eval (lhs (ast-binop-lhs node) depth)
+       (%with-eval (rhs (ast-binop-rhs node) depth)
+         (let ((value (%compile-time-eval-binop (ast-binop-op node) lhs rhs)))
+           (if (and value (integerp value))
+               (values value t)
+               (values nil nil))))))
     (ast-if
-     (multiple-value-bind (cond cond-ok) (%evaluate-ast (ast-if-cond node) (1- depth))
-       (if cond-ok
-           (%evaluate-ast (if (%compile-time-falsep cond)
-                              (ast-if-else node)
-                              (ast-if-then node))
-                          (1- depth))
-           (values nil nil))))
+     (%with-eval (cond-value (ast-if-cond node) depth)
+       (%evaluate-ast (if (%compile-time-falsep cond-value)
+                          (ast-if-else node)
+                          (ast-if-then node))
+                      (1- depth))))
     (ast-progn
      (%evaluate-ast-sequence (ast-progn-forms node)
                               *compile-time-value-env*
@@ -247,11 +253,8 @@ Uses loop's unless-return to avoid mid-body return-from."
      (multiple-value-bind (tag found-p)
          (%compile-time-lookup-block (ast-return-from-name node) *compile-time-block-env*)
        (if found-p
-           (multiple-value-bind (value ok)
-               (%evaluate-ast (ast-return-from-value node) (1- depth))
-             (if ok
-                 (throw tag value)
-                 (values nil nil)))
+           (%with-eval (value (ast-return-from-value node) depth)
+             (throw tag value))
            (values nil nil))))
     (ast-let
      (let ((bindings nil))
@@ -267,15 +270,14 @@ Uses loop's unless-return to avoid mid-body return-from."
     (ast-the
      (%evaluate-ast (ast-the-value node) (1- depth)))
     (ast-call
-     (let ((func (ast-call-func node)))
-       (multiple-value-bind (args ok)
-           (loop for arg in (ast-call-args node)
-                 collect (multiple-value-list (%evaluate-ast arg (1- depth))) into results
-                 finally (return (values (mapcar #'first results)
-                                         (every #'second results))))
-         (if ok
-             (%compile-time-eval-call func args depth)
-             (values nil nil)))))
+     (let* ((func (ast-call-func node))
+            (args nil))
+       (dolist (arg (ast-call-args node))
+         (multiple-value-bind (value ok)
+             (%evaluate-ast arg (1- depth))
+           (unless ok (return-from %evaluate-ast (values nil nil)))
+           (push value args)))
+       (%compile-time-eval-call func (nreverse args) depth)))
     (t (values nil nil))))
 
 ;;; %loc macro and optimize-ast fold pass are in codegen-fold-optimize.lisp

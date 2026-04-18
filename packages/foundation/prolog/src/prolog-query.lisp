@@ -5,12 +5,11 @@
 ;;; Contains: solve-goal, solve-conjunction, subst-for-eval, eval-lisp-condition,
 ;;; %solve-goal-with-cut, %collect-query-solutions, peephole helpers
 ;;; (%remove-self-move-p, %match-peephole-rule, %maybe-peephole-rewrite),
-;;; query-all/one/first-n, built-in predicates (member/append/length/nth/last
-;;; /reverse/assoc/atomic/compound/functor/arg/=..), type inference Prolog rules
-;;; (infer-type, infer-expr-type, apply-prolog-peephole).
+;;; query-all/one/first-n, apply-prolog-peephole.
 ;;;
 ;;; Core engine (logic-var-p, unify, *prolog-rules*, add-rule, rename-variables,
 ;;; solve-conjunction internals, *builtin-predicates*) is in prolog.lisp (loads before).
+;;; Declarative rule sets live in prolog-builtins.lisp.
 ;;;
 ;;; Load order: after prolog.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -134,81 +133,6 @@
   "Return the first N solutions for GOAL."
   (%collect-query-solutions goal n))
 
-;;; Built-in Predicates
-;;;
-;;; NOTE: These predicates use the Prolog cons-functor term representation:
-;;;   (cons head tail) — NOT CL list notation.
-;;; To query member, pass e.g. (member ?x (cons 1 (cons 2 nil))).
-
-;; member/2: (member ?elem (cons head tail))
-(def-rule (member ?x (cons ?x ?rest)))
-(def-rule (member ?x (cons ?y ?rest))
-          (member ?x ?rest))
-
-;; append/3: (append list1 list2 ?result)
-(def-rule (append nil ?l ?l))
-(def-rule (append (cons ?x ?l1) ?l2 (cons ?x ?l3))
-          (append ?l1 ?l2 ?l3))
-
-;; reverse/2: (reverse list ?result)
-(def-rule (reverse nil nil))
-(def-rule (reverse (cons ?x ?xs) ?result)
-          (reverse ?xs ?rev-xs)
-          (append ?rev-xs (cons ?x nil) ?result))
-
-;; length/2: (length list ?n)
-(def-rule (length nil 0))
-(def-rule (length (cons ?x ?rest) (+ 1 ?n))
-          (length ?rest ?n))
-
-;;; Type Inference Rules for the Compiler
-
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defparameter *prolog-integer-binop-type-operators*
-    '(+ - * / mod)
-    "Arithmetic operators whose binop forms always infer INTEGER-TYPE in Prolog rules."))
-
-(defmacro define-prolog-integer-binop-type-rules ()
-  "Emit the repetitive integer binop type rules from
-*PROLOG-INTEGER-BINOP-TYPE-OPERATORS*.
-
-This keeps the Prolog rule set data-driven and avoids repeating nearly
-identical DEF-RULE forms for each arithmetic operator."
-  `(progn
-     ,@(mapcar (lambda (op)
-                 `(def-rule (type-of (binop ,op ?a ?b) ?env (integer-type))
-                            (type-of ?a ?env (integer-type))
-                            (type-of ?b ?env (integer-type))))
-               *prolog-integer-binop-type-operators*)))
-
-;; Integer constant
-(def-rule (type-of (const ?val) ?env (integer-type))
-          (when (integerp ?val)))
-
-;; Variable lookup
-(def-rule (type-of (var ?name) ?env ?type)
-          (env-lookup ?env ?name ?type))
-
-;; Binary operations
-(define-prolog-integer-binop-type-rules)
-
-;; Comparison operations
-(def-rule (type-of (cmp ?op ?a ?b) ?env (boolean-type))
-          (type-of ?a ?env (integer-type))
-          (type-of ?b ?env (integer-type))
-          (:when (cl:member ?op '(< > <= >= = /=))))
-
-;; If expression
-(def-rule (type-of (if ?cond ?then ?else) ?env ?type)
-          (type-of ?cond ?env (boolean-type))
-          (type-of ?then ?env ?type)
-          (type-of ?else ?env ?type))
-
-;; Environment lookup
-(def-rule (env-lookup (cons (cons ?name ?type) ?rest) ?name ?type))
-(def-rule (env-lookup (cons ?binding ?rest) ?name ?type)
-          (env-lookup ?rest ?name ?type))
-
 (defun apply-prolog-peephole (instructions)
   "Apply Prolog-unification peephole rules over two-instruction windows.
 
@@ -221,14 +145,8 @@ identical DEF-RULE forms for each arithmetic operator."
                 ((null rest) (nreverse out))
                 ((null (cdr rest)) (nreverse (cons (car rest) out)))
                 (t
-                 (let ((curr (car rest))
-                       (next (cadr rest)))
-                   (let ((replacements (%maybe-peephole-rewrite curr next)))
-                     (if replacements
-                         (walk (cddr rest)
-                               (let ((acc out))
-                                 (dolist (r replacements acc)
-                                   (push r acc))
-                                 acc))
-                         (walk (cdr rest) (cons curr out)))))))))
+                 (let ((replacements (%maybe-peephole-rewrite (car rest) (cadr rest))))
+                   (if replacements
+                       (walk (cddr rest) (revappend replacements out))
+                       (walk (cdr rest) (cons (car rest) out))))))))
     (walk (remove-if #'%remove-self-move-p instructions) nil)))

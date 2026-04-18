@@ -37,7 +37,7 @@ Returns the inferred type, or NIL on failure (warning printed unless :strict)."
     (error (e)
       (if (eq type-check :strict)
           (error e)
-          (progn (warn "Type check warning: ~A" e) nil)))))
+      (progn (warn "Type check warning: ~A" e) nil)))))
 
 (defun %extend-type-env-for-defvar (ast type-env best-effort-type)
   "If AST is a defvar with an initializer, extend TYPE-ENV with its inferred type."
@@ -94,15 +94,15 @@ Returns a compilation-result struct with program, assembly, and globals."
                             (lower-sexp-to-ast expanded))))
               (when (typep ast 'ast-defun)
                 (push (cons (ast-defun-name ast) ast) *compile-time-function-env*))
-              (setf ast      (optimize-ast ast))
-              (push ast compiled-asts)
-              (setf last-cps (maybe-cps-transform ast))
-              (when type-check
-                (setf last-type (%type-check-form ast type-env type-check)))
-              (setf type-env  (%extend-type-env-for-defvar ast type-env #'best-effort-type))
-              (setf type-env  (%extend-type-env-for-defun  ast type-env #'best-effort-type))
-              (%maybe-extend-ct-value-env ast)
-              (setf last-reg  (compile-ast ast ctx)))))))
+               (setf ast      (optimize-ast ast))
+               (push ast compiled-asts)
+               (setf last-cps (maybe-cps-transform ast))
+               (when type-check
+                 (setf last-type (%type-check-form ast type-env type-check)))
+               (setf type-env  (%extend-type-env-for-defvar ast type-env #'best-effort-type))
+               (setf type-env  (%extend-type-env-for-defun  ast type-env #'best-effort-type))
+               (%maybe-extend-ct-value-env ast)
+               (setf last-reg  (compile-ast ast ctx)))))))
     (setf (ctx-type-env ctx) type-env)
     (when last-reg
       (emit ctx (make-vm-halt :reg last-reg)))
@@ -138,4 +138,3 @@ Returns a compilation-result struct with program, assembly, and globals."
 
 ;;; Function call compilation (%resolve-func-sym-reg, %try-compile-*,
 ;;; %compile-normal-call, compile-ast (ast-call)) is in codegen-calls.lisp (loads next).
-

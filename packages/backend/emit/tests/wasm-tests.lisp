@@ -74,11 +74,17 @@
 ;;; Section 4: Nil constant representation
 ;;; ──────────────────────────────────────────────────────────────────────────
 
-(deftest wasm-nil-emits-ref-null-eq
-  "Test that nil compiles to (ref.null eq) in the WAT output."
-  (let ((wat (%wat-for "nil")))
+(deftest-each wasm-single-output-contains
+  "A compiled WASM form contains a specific expected WAT substring."
+  :cases (("nil-ref-null"    "nil"                           "(ref.null eq)")
+          ("closure-struct"  "(defun double (x) (* x 2))"   "struct.new $closure_t")
+          ("move-local-tee"  "(let ((x 1)) x)"              "local.tee")
+          ("elem-segment"    "(defun f (x) x)"              "(elem")
+          ("print-host-call" "(let ((x 42)) (print x))"     "$host_print_val"))
+  (source expected)
+  (let ((wat (%wat-for source)))
     (assert-true wat)
-    (assert-output-contains wat "(ref.null eq)")))
+    (assert-output-contains wat expected)))
 
 ;;; ──────────────────────────────────────────────────────────────────────────
 ;;; Section 5: compile-string integration
@@ -131,12 +137,6 @@
 ;;; Section 9: Closure creation and function call dispatch
 ;;; ──────────────────────────────────────────────────────────────────────────
 
-(deftest wasm-closure-emits-struct-new-closure
-  "Test that vm-closure emits struct.new $closure_t (not a stub comment)."
-  (let ((wat (%wat-for "(defun double (x) (* x 2))")))
-    (assert-true wat)
-    (assert-output-contains wat "struct.new $closure_t")))
-
 (deftest wasm-funcall-dispatch
   "funcall via closure: emits call_indirect with $main_func_t type and global.set $cl_arg0 for arg-passing."
   (let ((wat (%wat-for "(defparameter *f* (lambda (x) (* x 2))) (funcall *f* 5)")))
@@ -144,12 +144,6 @@
     (assert-output-contains wat "call_indirect")
     (assert-output-contains wat "$main_func_t")
     (assert-output-contains wat "(global.set $cl_arg0")))
-
-(deftest wasm-move-uses-local-tee
-  "vm-move WAT emission uses local.tee instead of local.set/local.get pair."
-  (let ((wat (%wat-for "(let ((x 1)) x)")))
-    (assert-true wat)
-    (assert-output-contains wat "local.tee")))
 
 (deftest-each wasm-bitcount-lowers-to-wasm-op
   "Bit-count operations lower to their corresponding WASM i64 instructions via %wat-for."
@@ -170,12 +164,6 @@
   (expected-op inst)
   (assert-output-contains (%direct-wasm-emit inst) expected-op))
 
-(deftest wasm-elem-segment-present
-  "Test that the WAT module includes an elem segment to populate the funcref table."
-  (let ((wat (%wat-for "(defun f (x) x)")))
-    (assert-true wat)
-    (assert-output-contains wat "(elem")))
-
 (deftest wasm-closure-table-index-nonzero-for-second-function
   "Test that a second defined function gets a non-zero table index in $closure_t."
   ;; When two functions are defined, the second has table index >= 1.
@@ -188,12 +176,6 @@
 ;;; ──────────────────────────────────────────────────────────────────────────
 ;;; Section 10: Print support
 ;;; ──────────────────────────────────────────────────────────────────────────
-
-(deftest wasm-print-emits-call-host-print-val
-  "Test that (print x) compiles to a call to $host_print_val."
-  (let ((wat (%wat-for "(let ((x 42)) (print x))")))
-    (assert-true wat)
-    (assert-output-contains wat "$host_print_val")))
 
 (deftest-each wasm-binary-write-f64
   "Binary f64 encoding produces correct IEEE-754 little-endian bytes."

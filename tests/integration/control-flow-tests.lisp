@@ -53,11 +53,13 @@
   (assert-true (is-compile-string source :target :x86_64))
   (assert-= expected (run-string source)))
 
-(deftest boolean-predicate-branches
+(deftest-each boolean-predicate-branches
   "Numeric predicate results still behave as false in branch forms."
-  (assert-= 20 (run-string "(if (= 1 2) 10 20)"))
-  (assert-= 42 (run-string "(cond ((= 1 2) 10) ((= 2 2) 42) (t 0))"))
-  (assert-= 1 (run-string "(labels ((f (n) (if (= n 0) 1 (f (- n 1))))) (f 0))")))
+  :cases (("if-false-branch"  20 "(if (= 1 2) 10 20)")
+          ("cond-second-arm"  42 "(cond ((= 1 2) 10) ((= 2 2) 42) (t 0))")
+          ("labels-base-case"  1 "(labels ((f (n) (if (= n 0) 1 (f (- n 1))))) (f 0))"))
+  (expected source)
+  (assert-= expected (run-string source)))
 
 ;; ----------------------------------------------------------------------------
 ;; block/return-from tests
@@ -83,20 +85,34 @@
 ;; catch/throw tests
 ;; ----------------------------------------------------------------------------
 
-(deftest control-flow-constructs
-  "catch, unwind-protect, and multiple-value-prog1 compile and evaluate to their primary value."
-  (assert-true (is-compile-string "(catch 'foo 42)" :target :vm))
-  (assert-= 42 (run-string "(catch 'foo 42)"))
-  ;; catch with throw
-  (assert-= 99 (run-string "(catch 'done (throw 'done 99) 42)"))
-  ;; nested catch — inner tag
-  (assert-= 10 (run-string "(catch 'outer (catch 'inner (throw 'inner 10)))"))
-  ;; nested catch — outer tag
-  (assert-= 20 (run-string "(catch 'outer (catch 'inner (throw 'outer 20)))"))
-  (assert-true (is-compile-string "(unwind-protect 42 (print 0))" :target :vm))
-  (assert-= 42 (run-string "(unwind-protect 42 (print 0))"))
-  (assert-true (is-compile-string "(multiple-value-prog1 42 (print 1) (print 2))" :target :vm))
-  (assert-= 42 (run-string "(multiple-value-prog1 42 (print 1) (print 2))")))
+(deftest-each compile-catch-forms
+  "catch compiles and evaluates to its body value."
+  :cases (("basic"     42 "(catch 'foo 42)")
+          ("with-throw" 99 "(catch 'done (throw 'done 99) 42)"))
+  (expected source)
+  (assert-true (is-compile-string source :target :vm))
+  (assert-= expected (run-string source)))
+
+(deftest-each compile-nested-catch
+  "Nested catch forms route throws to the matching tag."
+  :cases (("inner-tag" 10 "(catch 'outer (catch 'inner (throw 'inner 10)))")
+          ("outer-tag" 20 "(catch 'outer (catch 'inner (throw 'outer 20)))"))
+  (expected source)
+  (assert-= expected (run-string source)))
+
+(deftest-each compile-unwind-protect
+  "unwind-protect compiles and returns its protected form's value."
+  :cases (("primary-value" 42 "(unwind-protect 42 (print 0))"))
+  (expected source)
+  (assert-true (is-compile-string source :target :vm))
+  (assert-= expected (run-string source)))
+
+(deftest-each compile-multiple-value-prog1
+  "multiple-value-prog1 compiles and returns its first form's primary value."
+  :cases (("primary-value" 42 "(multiple-value-prog1 42 (print 1) (print 2))"))
+  (expected source)
+  (assert-true (is-compile-string source :target :vm))
+  (assert-= expected (run-string source)))
 
 ;; ----------------------------------------------------------------------------
 ;; Run control flow tests

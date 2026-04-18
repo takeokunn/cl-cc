@@ -14,45 +14,31 @@
 
 ;;; FR-301: Float rounding functions (ffloor, fceiling, ftruncate, fround)
 
-(define-vm-binary-instruction vm-ffloor :ffloor "Float floor: returns float quotient and float remainder.")
+(defmacro define-vm-float-rounding-executors ()
+  `(progn
+     ,@(loop for (inst-type host-fn) in '((vm-ffloor ffloor)
+                                          (vm-fceiling fceiling)
+                                          (vm-ftruncate ftruncate)
+                                          (vm-fround fround))
+             collect
+             `(defmethod execute-instruction ((inst ,inst-type) state pc labels)
+                (declare (ignore labels))
+                (multiple-value-bind (q r)
+                    (,host-fn (vm-reg-get state (vm-lhs inst))
+                              (vm-reg-get state (vm-rhs inst)))
+                  (vm-reg-set state (vm-dst inst) q)
+                  (setf (vm-values-list state) (list q r))
+                  (values (1+ pc) nil nil))))))
 
-(defmethod execute-instruction ((inst vm-ffloor) state pc labels)
-  (declare (ignore labels))
-  (multiple-value-bind (q r) (ffloor (vm-reg-get state (vm-lhs inst))
-                                      (vm-reg-get state (vm-rhs inst)))
-    (vm-reg-set state (vm-dst inst) q)
-    (setf (vm-values-list state) (list q r))
-    (values (1+ pc) nil nil)))
+(define-vm-binary-instruction vm-ffloor :ffloor "Float floor: returns float quotient and float remainder.")
 
 (define-vm-binary-instruction vm-fceiling :fceiling "Float ceiling: returns float quotient and float remainder.")
 
-(defmethod execute-instruction ((inst vm-fceiling) state pc labels)
-  (declare (ignore labels))
-  (multiple-value-bind (q r) (fceiling (vm-reg-get state (vm-lhs inst))
-                                        (vm-reg-get state (vm-rhs inst)))
-    (vm-reg-set state (vm-dst inst) q)
-    (setf (vm-values-list state) (list q r))
-    (values (1+ pc) nil nil)))
-
 (define-vm-binary-instruction vm-ftruncate :ftruncate "Float truncate: returns float quotient and float remainder.")
-
-(defmethod execute-instruction ((inst vm-ftruncate) state pc labels)
-  (declare (ignore labels))
-  (multiple-value-bind (q r) (ftruncate (vm-reg-get state (vm-lhs inst))
-                                         (vm-reg-get state (vm-rhs inst)))
-    (vm-reg-set state (vm-dst inst) q)
-    (setf (vm-values-list state) (list q r))
-    (values (1+ pc) nil nil)))
 
 (define-vm-binary-instruction vm-fround :fround "Float round: returns float quotient and float remainder.")
 
-(defmethod execute-instruction ((inst vm-fround) state pc labels)
-  (declare (ignore labels))
-  (multiple-value-bind (q r) (fround (vm-reg-get state (vm-lhs inst))
-                                      (vm-reg-get state (vm-rhs inst)))
-    (vm-reg-set state (vm-dst inst) q)
-    (setf (vm-values-list state) (list q r))
-    (values (1+ pc) nil nil)))
+(define-vm-float-rounding-executors)
 
 ;;; FR-306: Rational number functions
 

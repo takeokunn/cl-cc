@@ -33,21 +33,16 @@
 
 ;;; ─── Predicates ─────────────────────────────────────────────────────────────
 
-(deftest cst-token-p-true
-  "cst-token-p returns true for tokens"
-  (assert-true (cl-cc:cst-token-p (cl-cc:make-cst-token :kind :int :value 0))))
-
-(deftest cst-token-p-false
-  "cst-token-p returns false for interior nodes"
-  (assert-false (cl-cc:cst-token-p (cl-cc:make-cst-interior :kind :list))))
-
-(deftest cst-interior-p-true
-  "cst-interior-p returns true for interior nodes"
-  (assert-true (cl-cc:cst-interior-p (cl-cc:make-cst-interior :kind :list))))
-
-(deftest cst-error-p-true
-  "cst-error-p returns true for error nodes"
-  (assert-true (cl-cc:cst-error-p (cl-cc:make-cst-error-node :message "err"))))
+(deftest-each cst-type-predicates
+  "cst-token-p, cst-interior-p, and cst-error-p each recognize their own node type."
+  :cases (("token-p-true"    #'cl-cc:cst-token-p    (cl-cc:make-cst-token :kind :int :value 0)       t)
+          ("token-p-false"   #'cl-cc:cst-token-p    (cl-cc:make-cst-interior :kind :list)             nil)
+          ("interior-p-true" #'cl-cc:cst-interior-p (cl-cc:make-cst-interior :kind :list)             t)
+          ("error-p-true"    #'cl-cc:cst-error-p    (cl-cc:make-cst-error-node :message "err")        t))
+  (pred node expected)
+  (if expected
+      (assert-true  (funcall pred node))
+      (assert-false (funcall pred node))))
 
 ;;; ─── cst-child ──────────────────────────────────────────────────────────────
 

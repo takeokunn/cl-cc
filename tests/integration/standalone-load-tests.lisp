@@ -58,22 +58,22 @@ The VM looks up function names via (find-symbol name :cl-cc), so this mirrors th
   (let ((sym (find-symbol symbol-name :cl-cc)))
     (and sym (gethash sym cl-cc/vm::*vm-host-bridge-functions*))))
 
-(deftest bridge-cross-package-symbols-registered
+(deftest-each bridge-cross-package-symbols-registered
   "All cross-package VM host bridge symbols are registered after full system load.
 Guards against load-order race where vm-bridge.lisp silently skips registration
-because :cl-cc-compile/:cl-cc-parse/:cl-cc-expand packages don't exist yet.
-The pipeline.lisp eval-when block re-registers these once all packages are present."
-  (assert-true (%bridge-registered-p "RUN-STRING"))
-  (assert-true (%bridge-registered-p "RUN-STRING-REPL"))
-  (assert-true (%bridge-registered-p "OUR-LOAD"))
-  (assert-true (%bridge-registered-p "COMPILE-EXPRESSION"))
-  (assert-true (%bridge-registered-p "COMPILE-STRING"))
-  (assert-true (%bridge-registered-p "OUR-EVAL"))
-  (assert-true (%bridge-registered-p "PARSE-ALL-FORMS"))
-  (assert-true (%bridge-registered-p "GENERATE-LAMBDA-BINDINGS"))
-  ;; REGISTER-MACRO is intentionally absent: stores VM closures in macro-env,
-  ;; causing TYPE-ERROR when host CL funcalls them during macroexpansion.
-  (assert-false (%bridge-registered-p "REGISTER-MACRO")))
+because :cl-cc-compile/:cl-cc-parse/:cl-cc-expand packages don't exist yet."
+  :cases (("run-string"               t   "RUN-STRING")
+          ("run-string-repl"          t   "RUN-STRING-REPL")
+          ("our-load"                 t   "OUR-LOAD")
+          ("compile-expression"       t   "COMPILE-EXPRESSION")
+          ("compile-string"           t   "COMPILE-STRING")
+          ("our-eval"                 t   "OUR-EVAL")
+          ("parse-all-forms"          t   "PARSE-ALL-FORMS")
+          ("generate-lambda-bindings" t   "GENERATE-LAMBDA-BINDINGS")
+          ;; REGISTER-MACRO absent: stores VM closures in macro-env → TYPE-ERROR
+          ("register-macro-absent"    nil "REGISTER-MACRO"))
+  (expected symbol-name)
+  (assert-equal expected (not (null (%bridge-registered-p symbol-name)))))
 
 (deftest vm-eval-hooks-wired-after-load
   "*vm-eval-hook* and *vm-compile-string-hook* are non-nil after pipeline.lisp loads."

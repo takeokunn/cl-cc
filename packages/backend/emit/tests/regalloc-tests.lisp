@@ -85,14 +85,16 @@
     (assert-false (eq (regalloc-lookup result :r0)
                       (regalloc-lookup result :r1)))))
 
-(deftest regalloc-allocate-reuse
-  "Registers can be reused after last use."
-  (let* ((instructions (list (make-vm-const :dst :r0 :value 1)
-                             (make-vm-move :dst :r1 :src :r0)
-                             (make-vm-const :dst :r2 :value 2)
-                             (make-vm-add :dst :r3 :lhs :r1 :rhs :r2)
-                             (make-vm-halt :reg :r3)))
-         (result (allocate-registers instructions *x86-64-calling-convention*)))
+(deftest-each regalloc-zero-spill-cases
+  "Allocation produces zero spills for reuse and empty-instruction scenarios."
+  :cases (("reuse"    (list (make-vm-const :dst :r0 :value 1)
+                            (make-vm-move :dst :r1 :src :r0)
+                            (make-vm-const :dst :r2 :value 2)
+                            (make-vm-add :dst :r3 :lhs :r1 :rhs :r2)
+                            (make-vm-halt :reg :r3)))
+          ("no-insts" nil))
+  (instructions)
+  (let ((result (allocate-registers instructions *x86-64-calling-convention*)))
     (assert-= 0 (regalloc-spill-count result))))
 
 (deftest regalloc-coalesces-simple-move
@@ -103,11 +105,6 @@
          (result (allocate-registers instructions *x86-64-calling-convention*)))
     (assert-eq (regalloc-lookup result :r0)
                (regalloc-lookup result :r1))))
-
-(deftest regalloc-allocate-no-instructions
-  "Empty instruction list doesn't crash."
-  (let ((result (allocate-registers nil *x86-64-calling-convention*)))
-    (assert-= 0 (regalloc-spill-count result))))
 
 (deftest regalloc-calling-convention-exists
   "Calling conventions are properly defined."

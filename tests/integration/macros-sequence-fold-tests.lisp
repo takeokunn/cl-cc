@@ -41,19 +41,16 @@
 ;;; ─── last ───────────────────────────────────────────────────────────────────
 
 (deftest-each last-returns-last-n-conses
-  "last returns the last N conses of the list."
-  :cases (("last-1"  "(last '(1 2 3))"     "(3)")
-          ("last-2"  "(last '(1 2 3) 2)"   "(2 3)")
-          ("last-3"  "(last '(1 2 3) 3)"   "(1 2 3)")
-          ("last-0"  "(last '(1 2 3) 0)"   "nil"))
+  "last returns the last N conses of the list, including edge cases."
+  :cases (("last-1"    "(last '(1 2 3))"     "(3)")
+          ("last-2"    "(last '(1 2 3) 2)"   "(2 3)")
+          ("last-3"    "(last '(1 2 3) 3)"   "(1 2 3)")
+          ("last-0"    "(last '(1 2 3) 0)"   "nil")
+          ("singleton" "(last '(42))"         "(42)"))
   (form expected-str)
   (let ((result (run-string form :stdlib t))
         (expected (read-from-string expected-str)))
     (assert-equal expected result)))
-
-(deftest last-singleton
-  "last on a single-element list returns that list."
-  (assert-equal '(42) (run-string "(last '(42))" :stdlib t)))
 
 ;;; ─── butlast ────────────────────────────────────────────────────────────────
 
@@ -75,24 +72,13 @@
 
 ;;; ─── nsubstitute ────────────────────────────────────────────────────────────
 
-(deftest nsubstitute-replaces-old-with-new
-  "nsubstitute replaces matching elements (delegates to substitute)."
-  (assert-equal '(1 99 3 99 5)
-                (run-string "(nsubstitute 99 2 '(1 2 3 2 5))" :stdlib t)))
-
-;;; ─── nsubstitute-if ─────────────────────────────────────────────────────────
-
-(deftest nsubstitute-if-replaces-matching-elements
-  "nsubstitute-if replaces elements satisfying predicate."
-  (assert-equal '(0 2 0 4 0)
-                (run-string "(nsubstitute-if 0 #'oddp '(1 2 3 4 5))" :stdlib t)))
-
-;;; ─── nsubstitute-if-not ──────────────────────────────────────────────────────
-
-(deftest nsubstitute-if-not-replaces-non-matching
-  "nsubstitute-if-not replaces elements NOT satisfying predicate."
-  (assert-equal '(1 0 3 0 5)
-                (run-string "(nsubstitute-if-not 0 #'oddp '(1 2 3 4 5))" :stdlib t)))
+(deftest-each nsubstitute-family
+  "nsubstitute variants replace elements in place (delegate to substitute)."
+  :cases (("by-value"      '(1 99 3 99 5) "(nsubstitute 99 2 '(1 2 3 2 5))")
+          ("if-oddp"       '(0 2 0 4 0)   "(nsubstitute-if 0 #'oddp '(1 2 3 4 5))")
+          ("if-not-oddp"   '(1 0 3 0 5)   "(nsubstitute-if-not 0 #'oddp '(1 2 3 4 5))"))
+  (expected form)
+  (assert-equal expected (run-string form :stdlib t)))
 
 ;;; ─── merge ──────────────────────────────────────────────────────────────────
 
@@ -111,34 +97,21 @@
 
 (deftest-each search-finds-subsequence
   "search finds the starting position of a pattern in a sequence."
-  :cases (("found-start"  "(search '(1 2) '(1 2 3 4))"      0)
-          ("found-middle" "(search '(2 3) '(1 2 3 4))"      1)
-          ("found-end"    "(search '(3 4) '(1 2 3 4))"      2)
-          ("not-found"    "(search '(5 6) '(1 2 3 4))"      nil))
+  :cases (("found-start"    "(search '(1 2) '(1 2 3 4))"                             0)
+          ("found-middle"   "(search '(2 3) '(1 2 3 4))"                             1)
+          ("found-end"      "(search '(3 4) '(1 2 3 4))"                             2)
+          ("not-found"      "(search '(5 6) '(1 2 3 4))"                             nil)
+          ("empty-pattern"  "(search '() '(1 2 3))"                                  0)
+          ("with-test"      "(search '(#\\B) '(#\\a #\\B #\\c) :test #'char-equal)"  1))
   (form expected)
   (assert-equal expected (run-string form :stdlib t)))
 
-(deftest search-empty-pattern
-  "search with an empty pattern returns 0 (match at start)."
-  (assert-= 0 (run-string "(search '() '(1 2 3))" :stdlib t)))
-
-(deftest search-with-test
-  "search respects the :test keyword for element comparison."
-  ;; Case-insensitive character search using char-equal
-  (assert-= 1 (run-string "(search '(#\\B) '(#\\a #\\B #\\c) :test #'char-equal)" :stdlib t)))
-
 ;;; ─── map-into ───────────────────────────────────────────────────────────────
 
-(deftest map-into-fills-destination
-  "map-into applies fn to each src element and fills dest in place."
-  ;; map-into fills dest with (fn src-elt) for each element
-  (assert-equal '(2 4 6)
-                (run-string
-                 "(let ((dest (list 0 0 0)))
-                    (map-into dest #'(lambda (x) (* x 2)) '(1 2 3)))" :stdlib t)))
-
-(deftest map-into-returns-dest
-  "map-into returns the destination sequence."
-  (let ((result (run-string
-                 "(let ((d (list 0 0))) (map-into d #'1+ '(1 2)) d)" :stdlib t)))
-    (assert-equal '(2 3) result)))
+(deftest-each map-into-behavior
+  "map-into applies fn to each element and fills the destination in place."
+  :cases (("fills-dest"   '(2 4 6) "(let ((dest (list 0 0 0)))
+                                       (map-into dest #'(lambda (x) (* x 2)) '(1 2 3)))")
+          ("returns-dest" '(2 3)   "(let ((d (list 0 0))) (map-into d #'1+ '(1 2)) d)"))
+  (expected form)
+  (assert-equal expected (run-string form :stdlib t)))

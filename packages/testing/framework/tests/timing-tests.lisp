@@ -25,34 +25,16 @@
         :depends-on nil
         :tags nil))
 
-(deftest timing-pass-result-carries-non-negative-duration
-  "A passing test result carries an integer, non-negative :duration-ns."
-  (let* ((plist (%timing-test-plist 'timing-pass-case (lambda () t)))
+(deftest-each timing-result-carries-non-negative-duration
+  "Every terminal status (pass/fail/skip) carries a non-negative integer :duration-ns."
+  :cases (("pass" :pass (lambda () t))
+          ("fail" :fail (lambda () (error 'test-failure :message "boom")))
+          ("skip" :skip (lambda () (error 'skip-condition :reason "nope"))))
+  (expected-status thunk)
+  (let* ((plist  (%timing-test-plist 'timing-duration-case thunk))
          (result (%run-single-test plist 1 '()))
-         (ns (getf result :duration-ns)))
-    (assert-eq :pass (getf result :status))
-    (assert-true (integerp ns))
-    (assert-true (>= ns 0))))
-
-(deftest timing-fail-result-carries-duration
-  "A failing test still reports :duration-ns even though funcall threw."
-  (let* ((plist (%timing-test-plist
-                 'timing-fail-case
-                 (lambda () (error 'test-failure :message "boom"))))
-         (result (%run-single-test plist 1 '()))
-         (ns (getf result :duration-ns)))
-    (assert-eq :fail (getf result :status))
-    (assert-true (integerp ns))
-    (assert-true (>= ns 0))))
-
-(deftest timing-skip-result-carries-duration
-  "A test that signals skip-condition still reports :duration-ns."
-  (let* ((plist (%timing-test-plist
-                 'timing-skip-case
-                 (lambda () (error 'skip-condition :reason "nope"))))
-         (result (%run-single-test plist 1 '()))
-         (ns (getf result :duration-ns)))
-    (assert-eq :skip (getf result :status))
+         (ns     (getf result :duration-ns)))
+    (assert-eq expected-status (getf result :status))
     (assert-true (integerp ns))
     (assert-true (>= ns 0))))
 
@@ -190,11 +172,39 @@ the frozen order suite\\ttest-name\\tduration-ns\\tstatus\\tbatch-id."
                (assert-true (search "BAD SUITE" (first cols))))))
       (ignore-errors (delete-file tmp)))))
 
-(deftest timing-status-keyword-mapping
+(deftest-each timing-status-keyword-mapping
   "%status-keyword-to-string maps every framework-emitted status to its frozen TSV token."
-  (assert-string= "passed"   (%status-keyword-to-string :pass))
-  (assert-string= "failed"   (%status-keyword-to-string :fail))
-  (assert-string= "skipped"  (%status-keyword-to-string :skip))
-  (assert-string= "pending"  (%status-keyword-to-string :pending))
-  (assert-string= "errored"  (%status-keyword-to-string :errored))
-  (assert-string= "timed-out" (%status-keyword-to-string :timed-out)))
+  :cases (("pass"      "passed"    :pass)
+          ("fail"      "failed"    :fail)
+          ("skip"      "skipped"   :skip)
+          ("pending"   "pending"   :pending)
+          ("errored"   "errored"   :errored)
+          ("timed-out" "timed-out" :timed-out))
+  (expected kw)
+  (assert-string= expected (%status-keyword-to-string kw)))
+
+(deftest timing-load-prior-timings-keeps-maximum-duration-per-test
+  "%load-prior-timings keeps the max duration when the TSV contains repeated test names."
+  (let ((tmp (format nil "/tmp/cl-cc-prior-timings-~A.tsv" (get-universal-time))))
+    (unwind-protect
+         (progn
+           (with-open-file (out tmp :direction :output :if-exists :supersede :if-does-not-exist :create)
+             (format out "SUITE~CFOO~C10~Cpassed~C-~%" #\Tab #\Tab #\Tab #\Tab)
+             (format out "SUITE~CFOO~C25~Cpassed~C-~%" #\Tab #\Tab #\Tab #\Tab)
+             (format out "SUITE~CBAR~C7~Cfailed~C-~%" #\Tab #\Tab #\Tab #\Tab))
+           (let ((timings (%load-prior-timings tmp)))
+             (assert-= 25 (gethash "FOO" timings))
+             (assert-= 7 (gethash "BAR" timings))))
+      (ignore-errors (delete-file tmp)))))
+
+(deftest timing-print-result-summary-reports-failures-and-skips
+  "%print-result-summary prints aggregated counts and the failed test list."
+  (let* ((results (list (list :name 'alpha :status :pass :number 1)
+                        (list :name 'beta :status :skip :number 2)
+                        (list :name 'gamma :status :fail :number 3)))
+         (output (with-output-to-string (*standard-output*)
+                   (assert-true (%print-result-summary results)))))
+    (assert-true (search "PASS" output))
+    (assert-true (search "FAIL" output))
+    (assert-true (search "SKIP" output))
+    (assert-true (search "[   3] GAMMA" output))))

@@ -259,29 +259,23 @@
                             +pure-effect-row+)))
       (make-type-arrow params ret :effects effects :mult mult))))
 
+(defun %parse-effect-names-and-row-var (elts)
+  "Split ELTS at '|' into (effects . row-var-or-nil) and build a type-effect-row."
+  (let* ((pipe-pos  (position-if (lambda (x) (and (symbolp x) (string= (symbol-name x) "|")))
+                                  elts))
+         (eff-names (if pipe-pos (subseq elts 0 pipe-pos) elts))
+         (row-var   (when pipe-pos (parse-type-specifier (nth (1+ pipe-pos) elts)))))
+    (make-type-effect-row
+     :effects (mapcar (lambda (n) (make-type-effect-op :name n)) eff-names)
+     :row-var row-var)))
+
 (defun parse-effect-row-spec (specs)
   "Parse effect labels like (IO) or (IO State | ε) into a type-effect-row."
-  ;; specs may be a list of symbols or a single <...> form
   (if (and (= (length specs) 1) (consp (first specs)))
-      ;; Angle-bracket form: (<IO State | ε>) — treat as tagged list
-      (let* ((inner (first specs))
-             (pipe-pos (position-if (lambda (x) (and (symbolp x)
-                                                      (string= (symbol-name x) "|")))
-                                    inner))
-             (eff-names (if pipe-pos (subseq inner 0 pipe-pos) inner))
-             (row-var   (when pipe-pos (parse-type-specifier (nth (1+ pipe-pos) inner)))))
-        (make-type-effect-row
-         :effects (mapcar (lambda (n) (make-type-effect-op :name n)) eff-names)
-         :row-var row-var))
-      ;; Flat list of names: (IO State | ε)
-      (let* ((pipe-pos (position-if (lambda (x) (and (symbolp x)
-                                                      (string= (symbol-name x) "|")))
-                                    specs))
-             (eff-names (if pipe-pos (subseq specs 0 pipe-pos) specs))
-             (row-var   (when pipe-pos (parse-type-specifier (nth (1+ pipe-pos) specs)))))
-        (make-type-effect-row
-         :effects (mapcar (lambda (n) (make-type-effect-op :name n)) eff-names)
-         :row-var row-var))))
+      ;; Angle-bracket form: (<IO State | ε>)
+      (%parse-effect-names-and-row-var (first specs))
+      ;; Flat list: (IO State | ε)
+      (%parse-effect-names-and-row-var specs)))
 
 
 ;;; (parse-row-type, parse-constraint-spec, lambda-list parsing,

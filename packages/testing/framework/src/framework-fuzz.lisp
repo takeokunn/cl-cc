@@ -179,9 +179,10 @@
                     (handler-case
                         (sb-ext:with-timeout ,timeout-per-test
                           ,@body)
-                      (sb-ext:timeout ()
-                        ;; Timeout on an individual fuzz iteration is acceptable; skip it.
-                        nil))))))))
+                       (sb-ext:timeout ()
+                         ;; Timeout on an individual fuzz iteration is acceptable; skip it.
+                         nil))))))))
+
 
 ;;; ------------------------------------------------------------
 ;;; Built-in Fuzz Tests

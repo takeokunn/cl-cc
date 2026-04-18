@@ -9,8 +9,8 @@
 
 ;;; ─── compile-expression ─────────────────────────────────────────────────
 
-(deftest pipeline-compile-expression-properties
-  "compile-expression returns a well-formed compilation-result."
+(deftest pipeline-compile-expression-binop-structure
+  "compile-expression returns a well-formed compilation-result for a binop expression."
   (let* ((result (compile-expression '(+ 1 2)))
          (prog   (compilation-result-program result))
          (instrs (vm-program-instructions prog))
@@ -20,7 +20,10 @@
     (assert-true (typep prog 'cl-cc/vm::vm-program))
     (assert-true (> (length instrs) 0))
     (assert-true (stringp asm))
-    (assert-true (consp cps)))
+    (assert-true (consp cps))))
+
+(deftest pipeline-compile-expression-constant-halts
+  "compile-expression for a constant ends in vm-halt with a consp CPS form."
   (let* ((result (compile-expression 42))
          (instrs (vm-program-instructions (compilation-result-program result)))
          (cps (compilation-result-cps result)))
@@ -44,6 +47,7 @@
   "compile-toplevel-forms stores a CPS form for top-level input."
   (let ((result (cl-cc/compile::compile-toplevel-forms '((+ 1 2) (- 4 1)))))
     (assert-true (consp (cl-cc/compile::compilation-result-cps result)))))
+
 
 (deftest pipeline-compile-toplevel-forms-captures-defun-type-env
   "compile-toplevel-forms records inferred defun types for later forms."
@@ -140,6 +144,7 @@
           (if-true     1  "(if t 1 2)")
           (if-false    2  "(if nil 1 2)")
           (lambda      9  "((lambda (x) (* x x)) 3)"))
+  (expected expr)
   (assert-= expected (run-string expr)))
 
 (deftest pipeline-run-string-pass-timings
@@ -168,27 +173,41 @@
 
 (deftest-each pipeline-prescan-in-package-behavior
   "%prescan-in-package extracts the package name from in-package forms; nil for others."
-  :cases (("keyword-form"  "(in-package :cl-cc)"                               "CL-CC")
-          ("string-form"   "(in-package \"CL-CC\")"                            "CL-CC")
-          ("non-package"   "(defun f (x) x)"                                    nil)
-          ("with-comment"  (format nil ";;; header comment~%(in-package :cl-cc)") :any))
-  (source expected)
-  (let ((result (cl-cc::%prescan-in-package source)))
-    (cond ((null expected)    (assert-null result))
-          ((eq expected :any) (assert-true (stringp result)))
-          (t (assert-string= expected (string-upcase result))))))
+  :cases (("keyword-form"
+           "(in-package :cl-cc)"
+           (lambda (result)
+             (assert-string= "CL-CC" (string-upcase result))))
+          ("string-form"
+           "(in-package \"CL-CC\")"
+           (lambda (result)
+             (assert-string= "CL-CC" (string-upcase result))))
+          ("non-package"
+           "(defun f (x) x)"
+           (lambda (result)
+             (assert-null result)))
+          ("with-comment"
+           (format nil ";;; header comment~%(in-package :cl-cc)")
+           (lambda (result)
+             (assert-true (stringp result)))))
+  (source verify)
+  (funcall verify (cl-cc::%prescan-in-package source)))
 
 ;;; ─── parse-source-for-language ──────────────────────────────────────────
 
 (deftest-each pipeline-parse-source-for-language
   "parse-source-for-language: :lisp parses one/multiple forms; unknown signals error."
-  :cases (("single-form"    "(+ 1 2)"          :lisp   1  '(+ 1 2))
-          ("multiple-forms" "(+ 1 2) (* 3 4)"  :lisp   2  nil))
-  (source lang expected-count expected-first)
+  :cases (("single-form"
+           "(+ 1 2)" :lisp 1
+           (lambda (forms)
+             (assert-equal '(+ 1 2) (first forms))))
+          ("multiple-forms"
+           "(+ 1 2) (* 3 4)" :lisp 2
+           (lambda (_forms)
+             (declare (ignore _forms)))))
+  (source lang expected-count verify)
   (let ((forms (cl-cc::parse-source-for-language source lang)))
     (assert-= expected-count (length forms))
-    (when expected-first
-      (assert-equal expected-first (first forms)))))
+    (funcall verify forms)))
 
 (deftest pipeline-parse-unknown-language-signals
   "parse-source-for-language signals error for unknown language."
@@ -233,6 +252,7 @@ parallel stdlib-heavy compilation can leak state across workers."
   :cases ((arithmetic  6          '(* 2 3))
           (quote-data  '(a b c)   '(quote (a b c)))
           (if-form     10         '(if t 10 20)))
+  (expected expr)
   (assert-equal expected (cl-cc::our-eval expr)))
 
 ;;; ─── run-string-repl (persistent state) ─────────────────────────────────
@@ -284,6 +304,7 @@ parallel stdlib-heavy compilation can leak state across workers."
            "(mapcar (lambda (x) (+ x 1)) '(1 2 3))")
           (reduce-sum  10
            "(reduce (lambda (a b) (+ a b)) '(1 2 3 4) 0 t)"))
+  (expected expr)
   (assert-equal expected (run-string expr :stdlib t)))
 
 ;;; ─── %whitespace-symbol-p ───────────────────────────────────────────────

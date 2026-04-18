@@ -51,7 +51,7 @@
 
 (defun has-tail-call (program)
   "Check if program has tail call optimization (vm-tail-call instruction)."
-  (some (lambda (inst) (typep inst 'vm-tail-call))
+  (some (lambda (inst) (typep inst 'cl-cc/vm:vm-tail-call))
         (vm-program-instructions program)))
 
 ;;; Basic Call/Return Tests
@@ -85,57 +85,47 @@
 
 ;;; Nested Call Tests
 
-(deftest nested-calls
+(deftest-each nested-calls
   "Nested function calls: direct nesting, closure capture, triple depth, and shared environment."
-  (assert-= 11 (run-string "((lambda (x) (+ x ((lambda (y) (* y 2)) 3))) 5)"))
-  (assert-= 11 (run-string "(let ((add1 (lambda (x) (+ x 1)))
-                               (add2 (lambda (x) (+ x 2))))
-                           ((lambda (f n) (f n)) add1 10))"))
-  (assert-= 6  (run-string "((lambda (x)
-                             ((lambda (y)
-                               ((lambda (z) (+ x (+ y z))) 3))
-                              2))
-                           1)"))
-  (assert-= 23 (run-string "(let ((x 10))
-                           ((lambda (f) (+ (f 1) (f 2)))
-                            (lambda (y) (+ x y))))")))
+  :cases (("direct-nesting"     11 "((lambda (x) (+ x ((lambda (y) (* y 2)) 3))) 5)")
+          ("closure-capture"    11 "(let ((add1 (lambda (x) (+ x 1)))
+                                          (add2 (lambda (x) (+ x 2))))
+                                      ((lambda (f n) (f n)) add1 10))")
+          ("triple-depth"        6 "((lambda (x)
+                                      ((lambda (y)
+                                         ((lambda (z) (+ x (+ y z))) 3))
+                                       2))
+                                    1)")
+          ("shared-environment" 23 "(let ((x 10))
+                                     ((lambda (f) (+ (f 1) (f 2)))
+                                      (lambda (y) (+ x y))))"))
+  (expected source)
+  (assert-= expected (run-string source)))
 
 ;;; Higher-Order Function Tests
 
-(deftest higher-order-functions
-  "Higher-order functions: function as argument, function returning function, and composition."
-  (assert-= 10 (run-string "(let ((my-apply (lambda (f x) (f x))))
-                           (my-apply (lambda (y) (* y 2)) 5))"))
-  (assert-= 15 (run-string "(((lambda (x) (lambda (y) (+ x y))) 10) 5)"))
-  (assert-= 12 (run-string "(let ((compose (lambda (f g)
-                                     (lambda (x) (f (g x)))))
-                             (double (lambda (x) (* x 2)))
-                             (inc (lambda (x) (+ x 1))))
-                         ((compose double inc) 5))")))
+(deftest-each higher-order-functions
+  "Higher-order functions: function as argument, currying, and function composition."
+  :cases (("fn-as-arg"   10 "(let ((my-apply (lambda (f x) (f x))))
+                               (my-apply (lambda (y) (* y 2)) 5))")
+          ("currying"    15 "(((lambda (x) (lambda (y) (+ x y))) 10) 5)")
+          ("composition" 12 "(let ((compose (lambda (f g)
+                                              (lambda (x) (f (g x)))))
+                                   (double (lambda (x) (* x 2)))
+                                   (inc (lambda (x) (+ x 1))))
+                              ((compose double inc) 5))"))
+  (expected source)
+  (assert-= expected (run-string source)))
 
 ;;; Recursion Tests
 
-(deftest simple-recursion
-  "Test simple recursive function."
-  (let* ((source "(labels ((factorial (n)
-                     (if (= n 0)
-                         1
-                         (* n (factorial (- n 1))))))
-           (factorial 5))")
-         (result (handler-case (run-string source)
-                   (error () nil))))
-    (assert-true (or (and result (= result 120)) (null result)))))
-
-(deftest mutual-recursion
-  "Test mutually recursive functions."
-  (let* ((source "(labels ((even? (n)
-                     (if (= n 0) 1 (odd? (- n 1))))
-                    (odd? (n)
-                     (if (= n 0) 0 (even? (- n 1)))))
-           (even? 10))")
-         (result (handler-case (run-string source)
-                   (error () nil))))
-    (assert-true (or (and result (= result 1)) (null result)))))
+(deftest-each recursion-patterns
+  "Recursive labels bindings compute the correct result."
+  :cases (("factorial" 120 "(labels ((factorial (n) (if (= n 0) 1 (* n (factorial (- n 1)))))) (factorial 5))")
+          ("mutual"    1   "(labels ((even? (n) (if (= n 0) 1 (odd? (- n 1)))) (odd? (n) (if (= n 0) 0 (even? (- n 1))))) (even? 10))"))
+  (expected source)
+  (let ((result (handler-case (run-string source) (error () nil))))
+    (assert-true (or (and result (= result expected)) (null result)))))
 
 ;;; Property-Based Calling Convention Tests
 

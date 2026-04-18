@@ -66,16 +66,12 @@
 ;;; ------------------------------------------------------------
 
 (deftest gc-write-barrier-no-satb-during-normal-gc
-  "During :normal state, SATB queue stays empty regardless of object mark bit."
-  (let* ((heap (%make-wb-heap))
-         (obj  32)
-         (slot 1))
-    ;; Marked object, but gc-state is :normal (default)
-    (%wb-write-marked-header heap obj 3 7)
-    ;; Set slot to a young-space pointer
-    (cl-cc/runtime:rt-heap-set heap (+ obj slot) 5)
-    (cl-cc/runtime:rt-gc-write-barrier heap obj slot 99)
-    (assert-equal nil (cl-cc/runtime:rt-heap-satb-queue heap))))
+  "During :normal state, SATB queue stays empty regardless of mark bit."
+  (let* ((heap (%make-wb-heap)))
+    (%wb-write-marked-header heap 32 3 7)
+    (cl-cc/runtime:rt-heap-set heap 33 5)
+    (cl-cc/runtime:rt-gc-write-barrier heap 32 1 99)
+    (assert-null (cl-cc/runtime:rt-heap-satb-queue heap))))
 
 (deftest gc-write-barrier-satb-snapshot-major-gc-black-object
   "During :major-gc, writing over a heap pointer in a black object snapshots the old value."
@@ -118,34 +114,20 @@
 ;;; Card Table Tests
 ;;; ------------------------------------------------------------
 
-(deftest gc-write-barrier-card-marked-old-to-young
-  "Writing a young-space pointer into an old-space object marks the card dirty."
-  (let* ((heap     (%make-wb-heap))
-         (obj      32)   ; old-space
-         (slot     1)
-         (new-val  5))   ; young-space addr
+(deftest-each gc-write-barrier-card-table-behavior
+  ;; Card table truth table: old-obj × young-ptr → dirty.
+  "rt-gc-write-barrier marks card dirty only when writing a young ptr into old-space."
+  :cases (("old-to-young"   32 5
+           (lambda (heap)
+             (assert-true (cl-cc/runtime:rt-card-dirty-p heap 32)))) ; old obj + young ptr → dirty
+          ("old-to-old"     32 40
+           (lambda (heap)
+             (assert-false (cl-cc/runtime:rt-card-dirty-p heap 32)))) ; old obj + old ptr → clean
+          ("young-to-young"  0 5
+           (lambda (heap)
+             (assert-false (cl-cc/runtime:rt-card-dirty-p heap 32))))) ; young obj + young ptr → clean
+  (obj new-val verify)
+  (let* ((heap (%make-wb-heap)))
     (%wb-write-unmarked-header heap obj 3 7)
-    (cl-cc/runtime:rt-gc-write-barrier heap obj slot new-val)
-    (assert-true (cl-cc/runtime:rt-card-dirty-p heap obj))))
-
-(deftest gc-write-barrier-no-card-when-new-val-not-young
-  "Writing a non-young value into old-space does NOT mark the card dirty."
-  (let* ((heap    (%make-wb-heap))
-         (obj     32)    ; old-space
-         (slot    1)
-         (new-val 40))   ; old-space addr — not young
-    (%wb-write-unmarked-header heap obj 3 7)
-    (cl-cc/runtime:rt-gc-write-barrier heap obj slot new-val)
-    (assert-false (cl-cc/runtime:rt-card-dirty-p heap obj))))
-
-(deftest gc-write-barrier-no-card-when-obj-not-old
-  "Writing into a young-space object does NOT mark any card dirty."
-  (let* ((heap    (%make-wb-heap))
-         (obj     0)     ; young-space
-         (slot    1)
-         (new-val 5))    ; young-space addr
-    (%wb-write-unmarked-header heap obj 3 7)
-    ;; Card table is only indexed for old-space addrs; no card should be dirty
-    (cl-cc/runtime:rt-gc-write-barrier heap obj slot new-val)
-    ;; Check the only card (for old-base=32) is still clean
-    (assert-false (cl-cc/runtime:rt-card-dirty-p heap 32))))
+    (cl-cc/runtime:rt-gc-write-barrier heap obj 1 new-val)
+    (funcall verify heap)))

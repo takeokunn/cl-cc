@@ -5,6 +5,8 @@
 ;;; Each handler is (lambda (args env k)) — continuation-passing style:
 ;;; args = predicate arguments, env = current bindings, k = success continuation.
 
+(defvar *builtin-predicates*)
+
 (defun prolog-cut-handler (args env k)
   (declare (ignore args))
   (funcall k env)
@@ -71,13 +73,13 @@ GOAL may be a prolog-goal object or a raw list form."
 (defun %make-builtin-predicates ()
   "Build the built-in predicate dispatch hash table from *builtin-predicate-specs*.
 *builtin-predicate-specs* is defined in prolog-data.lisp, which loads before this file."
-  (let ((ht (make-hash-table :test 'eq)))
-    (dolist (spec *builtin-predicate-specs* ht)
-      (destructuring-bind (predicate handler) spec
-        (setf (gethash predicate ht) (symbol-function handler))))))
-
-(defvar *builtin-predicates* nil
-  "Hash table mapping built-in predicate symbols to CPS handler functions.")
+  (%make-symbol-dispatch-table *builtin-predicate-specs*))
 
 (eval-when (:load-toplevel :execute)
   (setf *builtin-predicates* (%make-builtin-predicates)))
+
+;;; Declarative built-in predicates and type rules.
+
+(define-prolog-declarative-rules)
+(define-prolog-integer-binop-type-rules)
+(define-prolog-comparison-type-rule)

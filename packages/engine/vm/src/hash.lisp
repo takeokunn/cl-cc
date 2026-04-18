@@ -134,14 +134,42 @@
 
 ;;; Helper Functions
 
+(defparameter *hash-test-function-alist*
+  '((eq     . eq)
+    (eql    . eql)
+    (equal  . equal)
+    (equalp . equalp))
+  "(designator-symbol . comparison-function) pairs for VM hash-table tests.")
+
+(defun hash-test-symbol (test-val)
+  "Convert TEST-VAL (symbol or function) back to the canonical hash-test symbol."
+  (let ((entry (or (assoc test-val *hash-test-function-alist* :test #'eq)
+                   (rassoc test-val *hash-test-function-alist*
+                           :test (lambda (fn fn-name)
+                                   (eq fn (symbol-function fn-name)))))))
+    (if entry
+        (car entry)
+        'eql)))
+
+(defmacro define-vm-hash-property-executors ()
+  `(progn
+     ,@(loop for (inst-type . accessor) in '((vm-hash-table-size             . hash-table-size)
+                                             (vm-hash-table-rehash-size      . hash-table-rehash-size)
+                                             (vm-hash-table-rehash-threshold . hash-table-rehash-threshold))
+             collect
+             `(defmethod execute-instruction ((inst ,inst-type) state pc labels)
+                (declare (ignore labels))
+                (let* ((table-obj (vm-reg-get state (vm-hash-table-reg inst)))
+                       (table (vm-hash-table-get-internal table-obj)))
+                  (vm-reg-set state (vm-dst inst) (,accessor table))
+                  (values (1+ pc) nil nil))))))
+
 (defun resolve-hash-test (test-symbol)
   "Convert a test symbol to the actual comparison function."
-  (case test-symbol
-    ((eq 'eq) #'eq)
-    ((eql 'eql nil) #'eql)
-    ((equal 'equal) #'equal)
-    ((equalp 'equalp) #'equalp)
-    (otherwise (error "Unknown hash table test: ~S" test-symbol))))
+  (or (and (null test-symbol) #'eql)
+      (let ((entry (assoc test-symbol *hash-test-function-alist* :test #'eq)))
+        (and entry (symbol-function (cdr entry))))
+      (error "Unknown hash table test: ~S" test-symbol)))
 
 (defun vm-hash-table-get-internal (table-obj)
   "Get the internal hash table from a VM hash table object or native CL hash table.
@@ -243,37 +271,8 @@ must handle both representations transparently."
   (let* ((table-obj (vm-reg-get state (vm-hash-table-reg inst)))
          (table (vm-hash-table-get-internal table-obj))
          (test-val (hash-table-test table))
-         ;; hash-table-test returns a symbol in most implementations
-         (test-sym (cond ((eq test-val 'eq) 'eq)
-                         ((eq test-val 'eql) 'eql)
-                         ((eq test-val 'equal) 'equal)
-                         ((eq test-val 'equalp) 'equalp)
-                         ;; Some implementations may return functions
-                         ((and (functionp test-val) (eq test-val #'eq)) 'eq)
-                         ((and (functionp test-val) (eq test-val #'eql)) 'eql)
-                         ((and (functionp test-val) (eq test-val #'equal)) 'equal)
-                         ((and (functionp test-val) (eq test-val #'equalp)) 'equalp)
-                         (t 'eql))))
+         (test-sym (hash-test-symbol test-val)))
     (vm-reg-set state (vm-dst inst) test-sym)
     (values (1+ pc) nil nil)))
 
-(defmethod execute-instruction ((inst vm-hash-table-size) state pc labels)
-  (declare (ignore labels))
-  (let* ((table-obj (vm-reg-get state (vm-hash-table-reg inst)))
-         (table (vm-hash-table-get-internal table-obj)))
-    (vm-reg-set state (vm-dst inst) (hash-table-size table))
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-hash-table-rehash-size) state pc labels)
-  (declare (ignore labels))
-  (let* ((table-obj (vm-reg-get state (vm-hash-table-reg inst)))
-         (table (vm-hash-table-get-internal table-obj)))
-    (vm-reg-set state (vm-dst inst) (hash-table-rehash-size table))
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-hash-table-rehash-threshold) state pc labels)
-  (declare (ignore labels))
-  (let* ((table-obj (vm-reg-get state (vm-hash-table-reg inst)))
-         (table (vm-hash-table-get-internal table-obj)))
-    (vm-reg-set state (vm-dst inst) (hash-table-rehash-threshold table))
-    (values (1+ pc) nil nil)))
+(define-vm-hash-property-executors)

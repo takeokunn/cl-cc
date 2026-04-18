@@ -29,13 +29,10 @@ The actual solving is done by solve-constraints."
          (emit= (t1 t2) (emit (make-equal-constraint t1 t2)))
 
          (gen (node env)
-           (cond
-             ;; Literals
-             ((typep node 'cl-cc/ast:ast-int)
-              type-int)
+           (typecase node
+             (cl-cc/ast:ast-int type-int)
 
-             ;; Variable reference
-             ((typep node 'cl-cc/ast:ast-var)
+             (cl-cc/ast:ast-var
               (multiple-value-bind (scheme found-p)
                   (type-env-lookup (cl-cc/ast:ast-var-name node) env)
                 (if found-p
@@ -45,8 +42,7 @@ The actual solving is done by solve-constraints."
                                             (cl-cc/ast:ast-var-name node))
                            :variable-name (cl-cc/ast:ast-var-name node)))))
 
-             ;; Quote
-             ((typep node 'cl-cc/ast:ast-quote)
+             (cl-cc/ast:ast-quote
               (let ((val (cl-cc/ast:ast-quote-value node)))
                 (cond ((integerp val) type-int)
                       ((stringp  val) type-string)
@@ -54,8 +50,7 @@ The actual solving is done by solve-constraints."
                       ((consp    val) type-cons)
                       (t +type-unknown+))))
 
-             ;; If expression
-             ((typep node 'cl-cc/ast:ast-if)
+             (cl-cc/ast:ast-if
               (let* ((then-ty (gen (cl-cc/ast:ast-if-then node) env))
                      (else-ty (gen (cl-cc/ast:ast-if-else node) env))
                      (result  (fresh-type-var "if")))
@@ -64,8 +59,7 @@ The actual solving is done by solve-constraints."
                 (emit= result else-ty)
                 result))
 
-             ;; Let binding
-             ((typep node 'cl-cc/ast:ast-let)
+             (cl-cc/ast:ast-let
               (let ((new-env env))
                 (dolist (binding (cl-cc/ast:ast-let-bindings node))
                   (let* ((name    (car binding))
@@ -78,8 +72,7 @@ The actual solving is done by solve-constraints."
                     (setf result (gen form new-env)))
                   result)))
 
-             ;; Lambda
-             ((typep node 'cl-cc/ast:ast-lambda)
+             (cl-cc/ast:ast-lambda
               (let* ((params (cl-cc/ast:ast-lambda-params node))
                      (p-types (mapcar (lambda (p)
                                         (declare (ignore p))
@@ -99,8 +92,7 @@ The actual solving is done by solve-constraints."
                                     last-ty))))
                 (make-type-arrow p-types body-ty)))
 
-             ;; Call
-             ((typep node 'cl-cc/ast:ast-call)
+             (cl-cc/ast:ast-call
               (let* ((fn-ty  (gen (cl-cc/ast:ast-call-func node) env))
                      (arg-tys (mapcar (lambda (a) (gen a env))
                                       (cl-cc/ast:ast-call-args node)))
@@ -108,8 +100,7 @@ The actual solving is done by solve-constraints."
                 (emit= fn-ty (make-type-arrow arg-tys ret-ty))
                 ret-ty))
 
-             ;; Progn
-             ((typep node 'cl-cc/ast:ast-progn)
+             (cl-cc/ast:ast-progn
               (let ((forms (cl-cc/ast:ast-progn-forms node)))
                 (if (null forms)
                     type-null
@@ -118,8 +109,7 @@ The actual solving is done by solve-constraints."
                         (setf result (gen f env)))
                       result))))
 
-             ;; Defun (body is a list)
-             ((typep node 'cl-cc/ast:ast-defun)
+             (cl-cc/ast:ast-defun
               (let* ((params (cl-cc/ast:ast-defun-params node))
                      (p-types (mapcar (lambda (p)
                                         (declare (ignore p))
@@ -135,13 +125,12 @@ The actual solving is done by solve-constraints."
                   (gen f body-env))
                 type-symbol))
 
-             ;; Defvar / setq
-             ((typep node 'cl-cc/ast:ast-defvar)
+             (cl-cc/ast:ast-defvar
               (when (cl-cc/ast:ast-defvar-value node)
                 (gen (cl-cc/ast:ast-defvar-value node) env))
               type-symbol)
 
-             ((typep node 'cl-cc/ast:ast-setq)
+             (cl-cc/ast:ast-setq
               (let ((val-ty (gen (cl-cc/ast:ast-setq-value node) env)))
                 (multiple-value-bind (scheme found-p)
                     (type-env-lookup (cl-cc/ast:ast-setq-var node) env)
@@ -149,9 +138,7 @@ The actual solving is done by solve-constraints."
                     (emit= val-ty (instantiate scheme))))
                 val-ty))
 
-             ;; Unknown: fresh variable (gradual typing)
-             (t
-              (fresh-type-var "?")))))
+             (t (fresh-type-var "?")))))
 
       (let ((ty (gen ast env)))
         (values ty (nreverse constraints))))))

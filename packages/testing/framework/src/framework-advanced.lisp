@@ -127,129 +127,6 @@ Generates tests named BASE-NAME [label] for each case."
         `(progn ,@expansions)))))
 
 ;;; ------------------------------------------------------------
-;;; FR-027 — deftest-combinatorial: All-Combinations Testing
-;;; ------------------------------------------------------------
-
-(defun %cross-product (lists)
-  "Return the cross-product of a list of lists as a list of lists."
-  (if (null lists)
-      '(())
-      (let ((head (car lists))
-            (rest-product (%cross-product (cdr lists))))
-        (loop for item in head
-              nconc (loop for combo in rest-product
-                          collect (cons item combo))))))
-
-(defmacro deftest-combinatorial (base-name &rest args)
-  "Define one test per combination of all parameter values.
-PARAMS is a list of (var form) pairs where form evaluates to a list of values.
-Each combination gets its own deftest named BASE-NAME [v1 v2 ...].
-
-Syntax:
-  (deftest-combinatorial base-name
-    :params ((var1 '(val...)) (var2 '(val...)) ...)
-    body...)
-
-Evaluates all param value forms at macro-expansion time (quoted lists)
-or generates runtime expansion."
-  ;; Extract :params keyword and the trailing body forms.
-  (let* ((params-pos  (position :params args))
-         (params      (if params-pos (nth (1+ params-pos) args) nil))
-         (body        (if params-pos (nthcdr (+ 2 params-pos) args) args))
-         (param-vars  (mapcar #'first  params))
-         (param-forms (mapcar #'second params))
-         (combo-gensym (gensym "COMBOS")))
-    `(let ((,combo-gensym (%cross-product (list ,@param-forms))))
-       (dolist (combo ,combo-gensym)
-         (let* ,(loop for var in param-vars
-                      for idx from 0
-                      collect `(,var (nth ,idx combo)))
-           (let* ((label-str (format nil "~{~A~^ ~}" combo))
-                  (test-name (intern (format nil "~A [~A]"
-                                             ',(symbol-name base-name)
-                                             label-str))))
-             (setf *test-registry*
-                   (persist-assoc *test-registry* test-name
-                                  (let ((captured-combo combo))
-                                    (list :name test-name
-                                          :fn (let ,(loop for var in param-vars
-                                                          for idx from 0
-                                                          collect `(,var (nth ,idx captured-combo)))
-                                                (lambda () ,@body))
-                                          :suite *current-suite*
-                                          :timeout nil
-                                          :depends-on nil
-                                          :tags nil
-                                          :docstring (format nil "~A combination ~A"
-                                                             ',base-name label-str)))))))))))
-
-;;; ------------------------------------------------------------
-;;; FR-021 — deftest-pipeline: Pipeline Stage Testing
-;;; ------------------------------------------------------------
-
-;; The _ symbol used in pipeline stage checks is simply bound to the
-;; stage output before each check form is evaluated.
-
-(defmacro deftest-pipeline (expr &rest stage-checks)
-  "Define a pipeline test that runs EXPR through compiler stages.
-Available stage keys: :parse :expand :compile :execute
-In each stage body, _ is bound to the output of that stage.
-
-  :parse    lower-sexp-to-ast
-  :expand   our-macroexpand
-  :compile  compile-expression
-  :execute  run-string
-
-Syntax:
-  (deftest-pipeline expr-string
-    :parse   check-form...
-    :compile check-form...
-    :execute check-form...)"
-  (let ((test-name (gensym "PIPELINE-TEST"))
-        (forms '()))
-    ;; Build up the stage forms in order of appearance.
-    (do ((rest stage-checks rest))
-        ((null rest))
-      (let ((key  (pop rest))
-            (chk  (pop rest)))
-        (push (list key chk) forms)))
-    (let ((stage-list (nreverse forms)))
-      `(deftest ,test-name
-         ,(format nil "pipeline test for ~S" expr)
-         ,@(loop for (stage-key check-form) in stage-list
-                 collect
-                 (ecase stage-key
-                   (:parse
-                    `(let ((_ (lower-sexp-to-ast
-                               (read-from-string ,expr))))
-                       ,check-form))
-                   (:expand
-                    `(let ((_ (our-macroexpand
-                               (read-from-string ,expr))))
-                       ,check-form))
-                   (:compile
-                    `(let ((_ (compile-expression
-                               (lower-sexp-to-ast
-                                (read-from-string ,expr)))))
-                       ,check-form))
-                   (:execute
-                    `(let ((_ (run-string ,expr)))
-                       ,check-form))))))))
-
-;;; ------------------------------------------------------------
-;;; Convenience: assert-snapshot update helper
-;;; ------------------------------------------------------------
-
-(defun update-snapshots! ()
-  "Bind *update-snapshots* to t for the dynamic extent of this call.
-Intended to be called from the REPL when you want to refresh all snapshots."
-  (setf *update-snapshots* t))
-
-(defun reset-snapshots! ()
-  "Reset snapshot update mode to nil."
-  (setf *update-snapshots* nil))
-
-;;; ------------------------------------------------------------
 ;;; Flaky Detection + Timing Output Helpers
 ;;; ------------------------------------------------------------
 
@@ -299,56 +176,51 @@ Intended to be called from the REPL when you want to refresh all snapshots."
                    (let ((next (char raw (+ i 2))))
                      (or (char= next #\/) (char= next #\\))))))))
 
+(defun %path-is-cwd-descendant-p (path-ns cwd-ns)
+  "Return T when PATH-NS is a path string that starts with CWD-NS."
+  (and path-ns cwd-ns
+       (>= (length path-ns) (length cwd-ns))
+       (string= path-ns cwd-ns :end1 (length cwd-ns))))
+
 (defun %timings-output-path ()
   "Resolve the TSV output path honoring CLCC_TIMINGS_FILE override."
-  (let ((raw (uiop:getenv "CLCC_TIMINGS_FILE"))
+  (let ((raw     (uiop:getenv "CLCC_TIMINGS_FILE"))
         (default "./test-timings.tsv"))
-    (cond
-      ((or (null raw) (zerop (length raw)))
-       default)
-      ((%path-contains-parent-segment-p raw)
-       (warn "CLCC_TIMINGS_FILE rejected: contains `..` segment — falling back to default")
-       default)
-      (t
-       (let* ((cwd (ignore-errors (uiop:getcwd)))
-              (cwd-ns (and cwd (namestring (truename cwd))))
-              (abs-p (uiop:absolute-pathname-p raw)))
-         (if abs-p
-             (let* ((canon (ignore-errors (uiop:truenamize raw)))
-                    (canon-ns (and canon (namestring canon))))
-               (cond
-                 ((null canon-ns)
-                  (let* ((parent (make-pathname :defaults (pathname raw) :name nil :type nil))
-                         (parent-canon (ignore-errors (uiop:truenamize parent)))
-                         (parent-ns (and parent-canon (namestring parent-canon))))
-                    (if (and parent-ns cwd-ns
-                             (>= (length parent-ns) (length cwd-ns))
-                             (string= parent-ns cwd-ns :end1 (length cwd-ns)))
-                        raw
-                        (progn
-                          (warn "CLCC_TIMINGS_FILE rejected: not a descendant of cwd — falling back to default")
-                          default))))
-                 ((and cwd-ns
-                       (>= (length canon-ns) (length cwd-ns))
-                       (string= canon-ns cwd-ns :end1 (length cwd-ns)))
-                  raw)
-                 (t
-                  (warn "CLCC_TIMINGS_FILE rejected: not a descendant of cwd — falling back to default")
-                  default)))
-             raw))))))
+    ;; Absent or empty → use default.
+    (when (or (null raw) (zerop (length raw)))
+      (return-from %timings-output-path default))
+    ;; Path-traversal guard: reject any path containing `..`.
+    (when (%path-contains-parent-segment-p raw)
+      (warn "CLCC_TIMINGS_FILE rejected: contains `..` segment — falling back to default")
+      (return-from %timings-output-path default))
+    ;; Relative paths are accepted as-is (relative to cwd, no traversal possible).
+    (unless (uiop:absolute-pathname-p raw)
+      (return-from %timings-output-path raw))
+    ;; Absolute path: verify it is a descendant of the current working directory.
+    (let* ((cwd-ns  (ignore-errors (namestring (truename (uiop:getcwd)))))
+           (canon   (ignore-errors (uiop:truenamize raw)))
+           (canon-ns (and canon (namestring canon))))
+      (cond
+        ;; File doesn't exist yet — check parent directory instead.
+        ((null canon-ns)
+         (let* ((parent    (make-pathname :defaults (pathname raw) :name nil :type nil))
+                (parent-ns (ignore-errors (namestring (uiop:truenamize parent)))))
+           (if (%path-is-cwd-descendant-p parent-ns cwd-ns)
+               raw
+               (progn
+                 (warn "CLCC_TIMINGS_FILE rejected: not a descendant of cwd — falling back to default")
+                 default))))
+        ;; File exists — check it directly.
+        ((%path-is-cwd-descendant-p canon-ns cwd-ns) raw)
+        (t
+         (warn "CLCC_TIMINGS_FILE rejected: not a descendant of cwd — falling back to default")
+         default)))))
 
 (defun %tsv-sanitize (s)
   "Replace TSV-breaking characters (Tab/Newline/Return) with a single space."
-  (if (or (null s) (zerop (length s)))
-      (or s "")
-      (map 'string
-           (lambda (c)
-             (if (or (char= c #\Tab)
-                     (char= c #\Newline)
-                     (char= c #\Return))
-                 #\Space
-                 c))
-           s)))
+  (if s
+      (substitute-if #\Space (lambda (c) (find c '(#\Tab #\Newline #\Return))) s)
+      ""))
 
 (defun %write-timings-tsv (results path)
   "Write RESULTS (a flat list of test result plists) to PATH as TSV."
@@ -386,302 +258,8 @@ Intended to be called from the REPL when you want to refresh all snapshots."
              (ns (getf r :duration-ns))
              (ms (/ ns 1000000.0d0)))
         (format t "#   ~A (~,3Fms) ~A~%"
-                name ms (or suite "-"))))
+                 name ms (or suite "-"))))
     (force-output)))
 
-;;; ------------------------------------------------------------
-;;; Runner Regression Tests
-;;; ------------------------------------------------------------
-
-(defsuite runner-regression-suite
-  :description "Serial regression tests for test runner orchestration"
-  :parallel nil
-  :parent cl-cc-suite)
-
-(in-suite runner-regression-suite)
-
-(deftest suite-parallel-policy-inherits-from-parent
-  "Child suites inherit serial execution policy from ancestors."
-  (let ((parent (gensym "ULW-PARENT-"))
-        (child (gensym "ULW-CHILD-")))
-    (unwind-protect
-         (progn
-           (setf *suite-registry*
-                 (persist-assoc *suite-registry* parent
-                                (list :name parent :description "tmp" :parent nil :parallel nil
-                                      :before-each '() :after-each '())))
-           (setf *suite-registry*
-                 (persist-assoc *suite-registry* child
-                                (list :name child :description "tmp" :parent parent :parallel t
-                                      :before-each '() :after-each '())))
-           (assert-false (%suite-parallel-p child))
-           (assert-false (%test-parallel-safe-p (list :suite child :depends-on nil))))
-      (setf *suite-registry* (persist-remove *suite-registry* child))
-      (setf *suite-registry* (persist-remove *suite-registry* parent)))))
-
-(deftest mixed-runner-reorders-internal-dependencies
-  "Dependent tests are reordered behind their in-list prerequisite."
-  (let* ((dependency (list :name 'ulw-dependency :depends-on nil))
-         (dependent (list :name 'ulw-dependent :depends-on 'ulw-dependency))
-         (ordered (%order-tests-for-dependencies (list dependent dependency))))
-    (assert-equal '(ulw-dependency ulw-dependent)
-                  (mapcar (lambda (test) (getf test :name)) ordered))))
-
-(deftest dependency-ordering-fallback-preserves-confirmed-prefix
-  "If dependency ordering gets stuck, already-confirmed prefix order is preserved."
-  (let* ((ordered (%order-tests-for-dependencies
-                   (list (list :name 'ulw-a :depends-on 'ulw-b)
-                         (list :name 'ulw-x :depends-on nil)
-                         (list :name 'ulw-b :depends-on 'ulw-a)))))
-    (assert-equal '(ulw-x ulw-a ulw-b)
-                  (mapcar (lambda (test) (getf test :name)) ordered))))
-
-(deftest mixed-runner-keeps-serial-suites-out-of-parallel-pool
-  "Serial suites and dependent tests are excluded from the parallel worker batch."
-  (let ((serial-suite (gensym "ULW-SERIAL-SUITE-"))
-        (parallel-suite (gensym "ULW-PARALLEL-SUITE-")))
-    (unwind-protect
-         (progn
-           (setf *suite-registry*
-                 (persist-assoc *suite-registry* serial-suite
-                                (list :name serial-suite :description "tmp" :parent nil :parallel nil
-                                      :before-each '() :after-each '())))
-           (setf *suite-registry*
-                 (persist-assoc *suite-registry* parallel-suite
-                                (list :name parallel-suite :description "tmp" :parent nil :parallel t
-                                      :before-each '() :after-each '())))
-           (assert-false (%test-parallel-safe-p
-                          (list :name 'serial-test :suite serial-suite :depends-on nil)))
-           (assert-false (%test-parallel-safe-p
-                          (list :name 'dependent-test :suite parallel-suite
-                                :depends-on 'other-test)))
-            (assert-true (%test-parallel-safe-p
-                         (list :name 'parallel-test :suite parallel-suite :depends-on nil))))
-      (setf *suite-registry* (persist-remove *suite-registry* parallel-suite))
-      (setf *suite-registry* (persist-remove *suite-registry* serial-suite)))))
-
-(deftest effective-worker-count-falls-back-to-one-for-serial-batches
-  "Worker reporting collapses to 1 when no test in the batch may run in parallel."
-  (let ((serial-suite (gensym "ULW-SERIAL-SUITE-")))
-    (unwind-protect
-         (progn
-           (setf *suite-registry*
-                 (persist-assoc *suite-registry* serial-suite
-                                (list :name serial-suite :description "tmp" :parent nil :parallel nil
-                                      :before-each '() :after-each '())))
-           (assert-= 1
-                     (%effective-worker-count
-                      (list (list :name 'serial-test :suite serial-suite :depends-on nil))
-                      t
-                      4))
-           (assert-= 1
-                     (%effective-worker-count
-                      (list (list :name 'serial-test :suite serial-suite :depends-on nil))
-                      nil
-                      4)))
-      (setf *suite-registry* (persist-remove *suite-registry* serial-suite)))))
-
-(deftest effective-worker-count-keeps-requested-workers-for-parallel-safe-batches
-  "Worker reporting preserves the requested worker count when at least one test can run in parallel."
-  (let ((parallel-suite (gensym "ULW-PARALLEL-SUITE-")))
-    (unwind-protect
-         (progn
-           (setf *suite-registry*
-                 (persist-assoc *suite-registry* parallel-suite
-                                (list :name parallel-suite :description "tmp" :parent nil :parallel t
-                                      :before-each '() :after-each '())))
-           (assert-= 4
-                     (%effective-worker-count
-                      (list (list :name 'parallel-test :suite parallel-suite :depends-on nil))
-                      t
-                      4))
-            (assert-= 2
-                     (%effective-worker-count
-                      (list (list :name 'parallel-test :suite parallel-suite :depends-on nil))
-                      t
-                      2)))
-      (setf *suite-registry* (persist-remove *suite-registry* parallel-suite)))))
-
-(deftest run-suite-reports-one-worker-for-serial-only-batch
-  "run-suite reports one worker when the selected batch has no parallel-safe tests."
-  (let ((root (gensym "ULW-ROOT-"))
-        (serial-suite (gensym "ULW-SERIAL-"))
-        (test-name (gensym "ULW-TEST-"))
-        (original-warm-stdlib-cache (symbol-function 'cl-cc::warm-stdlib-cache))
-        (original-quit (symbol-function 'uiop:quit)))
-    (unwind-protect
-         (progn
-           (setf *suite-registry*
-                 (persist-assoc *suite-registry* root
-                                (list :name root :description "tmp" :parent nil :parallel t
-                                      :before-each '() :after-each '())))
-           (setf *suite-registry*
-                 (persist-assoc *suite-registry* serial-suite
-                                (list :name serial-suite :description "tmp" :parent root :parallel nil
-                                      :before-each '() :after-each '())))
-           (setf *test-registry*
-                 (persist-assoc *test-registry* test-name
-                                (list :name test-name
-                                      :suite serial-suite
-                                      :fn (lambda () t)
-                                      :skip nil
-                                      :xfail nil
-                                      :depends-on nil
-                                      :timeout nil
-                                      :tags nil)))
-           (setf (symbol-function 'cl-cc::warm-stdlib-cache) (lambda () nil))
-           (setf (symbol-function 'uiop:quit) (lambda (&optional code) code))
-           (let ((output (with-output-to-string (s)
-                           (let ((*standard-output* s))
-                             (assert-equal 0
-                                           (run-suite root :parallel t :random nil :workers 4))))))
-             (assert-true (search "# Workers: 1" output))))
-      (setf (symbol-function 'cl-cc::warm-stdlib-cache) original-warm-stdlib-cache)
-      (setf (symbol-function 'uiop:quit) original-quit)
-      (setf *test-registry* (persist-remove *test-registry* test-name))
-      (setf *suite-registry* (persist-remove *suite-registry* serial-suite))
-      (setf *suite-registry* (persist-remove *suite-registry* root)))))
-
-(deftest canonical-suite-taxonomy-matches-runner-contract
-  "The canonical runner exposes unit, integration, and e2e suites under the root taxonomy."
-  (assert-eq 'cl-cc-suite
-             (getf (persist-lookup *suite-registry* 'cl-cc-unit-suite) :parent))
-  (assert-eq 'cl-cc-suite
-             (getf (persist-lookup *suite-registry* 'cl-cc-integration-suite) :parent))
-  (assert-eq 'cl-cc-suite
-             (getf (persist-lookup *suite-registry* 'cl-cc-e2e-suite) :parent)))
-
-(deftest run-single-test-skips-when-dependency-failed
-  "A test with a failed dependency is reported as skipped without executing its body."
-  (let* ((called nil)
-         (test-plist (list :name 'needs-dep
-                           :fn (lambda () (setf called t))
-                           :suite 'cl-cc-unit-suite
-                           :timeout nil
-                           :depends-on 'upstream
-                           :tags nil))
-         (result (%run-single-test test-plist 1 (list (list :name 'upstream :status :fail)))))
-    (assert-false called)
-    (assert-eq :skip (getf result :status))))
-
-(deftest run-single-test-handles-pending-condition
-  "A pending condition becomes a :pending result rather than a failure."
-  (let* ((test-plist (list :name 'pending-demo
-                           :fn (lambda () (error 'pending-condition :reason "later"))
-                           :suite 'cl-cc-unit-suite
-                           :timeout nil
-                           :depends-on nil
-                           :tags nil))
-         (result (%run-single-test test-plist 1 '())))
-    (assert-eq :pending (getf result :status))
-    (assert-true (search "later" (getf result :detail)))))
-
-(deftest effective-test-timeout-cases
-  "%effective-test-timeout normalizes nil, :none, and positive integers."
-  (assert-null (%effective-test-timeout (list :timeout :none)))
-  (assert-equal 7 (%effective-test-timeout (list :timeout 7)))
-  (assert-equal (%default-test-timeout)
-                (%effective-test-timeout (list :timeout nil))))
-
-(deftest detect-flaky-reports-inconsistent-statuses
-  "%detect-flaky prints a summary when a test passes in only some repeated runs."
-  (let ((*standard-output* (make-string-output-stream)))
-    (%detect-flaky (list (list (list :name 'sometimes :status :pass)
-                               (list :name 'always :status :pass))
-                         (list (list :name 'sometimes :status :fail)
-                               (list :name 'always :status :pass)))
-                   2)
-    (let ((output (get-output-stream-string *standard-output*)))
-      (assert-true (search "Flaky tests detected" output))
-      (assert-true (search "SOMETIMES" (string-upcase output))))))
-
-(deftest detect-flaky-is-silent-for-consistent-results
-  "%detect-flaky emits nothing when every test is consistently pass or fail."
-  (let ((*standard-output* (make-string-output-stream)))
-    (%detect-flaky (list (list (list :name 'always-pass :status :pass)
-                               (list :name 'always-fail :status :fail))
-                         (list (list :name 'always-pass :status :pass)
-                               (list :name 'always-fail :status :fail)))
-                   2)
-    (assert-string= "" (get-output-stream-string *standard-output*))))
-
-(deftest run-single-test-handles-skip-condition
-  "A skip condition becomes a :skip result rather than a failure."
-  (let* ((test-plist (list :name 'skip-demo
-                           :fn (lambda () (error 'skip-condition :reason "not today"))
-                           :suite 'cl-cc-unit-suite
-                           :timeout nil
-                           :depends-on nil
-                           :tags nil))
-         (result (%run-single-test test-plist 1 '())))
-    (assert-eq :skip (getf result :status))
-    (assert-true (search "not today" (getf result :detail)))))
-
-(deftest run-single-test-reports-fixture-setup-errors
-  "A before-each fixture error is surfaced as a fixture error result."
-  (let ((fixture-suite (gensym "ULW-FIXTURE-SUITE-")))
-    (unwind-protect
-         (progn
-           (setf *suite-registry*
-                 (persist-assoc *suite-registry* fixture-suite
-                                (list :name fixture-suite
-                                      :description "tmp"
-                                      :parent nil
-                                      :parallel t
-                                      :before-each (list (lambda () (error "fixture boom")))
-                                      :after-each '())))
-           (let* ((test-plist (list :name 'fixture-demo
-                                    :fn (lambda () t)
-                                    :suite fixture-suite
-                                    :timeout nil
-                                    :depends-on nil
-                                    :tags nil))
-                  (result (%run-single-test test-plist 1 '())))
-             (assert-eq :fail (getf result :status))
-             (assert-true (search "fixture error" (getf result :detail)))
-             (assert-true (search "fixture boom" (getf result :detail)))))
-      (setf *suite-registry* (persist-remove *suite-registry* fixture-suite)))))
-
-(deftest run-single-test-times-out-sequentially
-  "Sequential runner reports timeout failures when a test exceeds its budget."
-  (let* ((test-plist (list :name 'slow-demo
-                           :fn (lambda () (sleep 2))
-                           :suite 'cl-cc-unit-suite
-                           :timeout 1
-                           :depends-on nil
-                           :tags nil))
-         (result (%run-single-test test-plist 1 '())))
-    (assert-eq :fail (getf result :status))
-    (assert-true (search "timeout after 1 seconds" (getf result :detail)))))
-
-(deftest run-tests-sequential-returns-ordered-results
-  "%run-tests-sequential preserves input order and records pass statuses."
-  (let ((results (%run-tests-sequential
-                  (list (list :name 'first
-                              :fn (lambda () t)
-                              :suite 'cl-cc-unit-suite
-                              :timeout nil
-                              :depends-on nil
-                              :tags nil
-                              :number 1)
-                        (list :name 'second
-                              :fn (lambda () t)
-                              :suite 'cl-cc-unit-suite
-                              :timeout nil
-                              :depends-on nil
-                              :tags nil
-                              :number 2)))))
-    (assert-equal '(first second)
-                  (mapcar (lambda (result) (getf result :name)) results))
-    (assert-true (every (lambda (result) (eq :pass (getf result :status))) results))))
-
-(deftest resolve-suite-returns-symbol-and-signals-for-missing-suite
-  "%resolve-suite returns existing suites and errors on missing ones."
-  (assert-eq 'cl-cc-unit-suite (%resolve-suite :cl-cc/test "CL-CC-UNIT-SUITE"))
-  (handler-case
-      (progn
-        (%resolve-suite :cl-cc/test "MISSING-SUITE")
-        (assert-false t))
-    (error (e)
-      (assert-true (search "Suite CL-CC/TEST::MISSING-SUITE not found"
-                           (princ-to-string e))))))
+;;; Runner regression tests have been moved to:
+;;;   packages/testing/framework/tests/framework-runner-tests.lisp

@@ -216,3 +216,38 @@
          (result (cl-cc/optimize::opt-pass-tail-merge insts)))
     ;; Should produce a valid instruction list
     (assert-true (listp result))))
+
+;;; ─── %type-check-elim helpers ───────────────────────────────────────────────
+
+(deftest type-check-elim-copy-facts-independent-copy
+  "%type-check-elim-copy-facts returns a fresh list sharing elements."
+  (let* ((fact  (list :pred 'p :src :r0 :dst :r1))
+         (facts (list fact))
+         (copy  (cl-cc/optimize::%type-check-elim-copy-facts facts)))
+    (assert-equal facts copy)
+    (assert-false (eq facts copy))))
+
+(deftest type-check-elim-forget-def-removes-src-and-dst
+  "%type-check-elim-forget-def removes facts mentioning the killed register."
+  (let* ((f1 (list :pred 'p :src :r0 :dst :r1))
+         (f2 (list :pred 'q :src :r2 :dst :r3))
+         (facts (list f1 f2)))
+    (let ((after (cl-cc/optimize::%type-check-elim-forget-def facts :r0)))
+      (assert-false (member f1 after))
+      (assert-true  (member f2 after)))
+    (let ((after (cl-cc/optimize::%type-check-elim-forget-def facts :r1)))
+      (assert-false (member f1 after))
+      (assert-true  (member f2 after)))))
+
+(deftest-each type-check-elim-lookup-fact-cases
+  "%type-check-elim-lookup-fact finds matching pred+src or returns nil."
+  :cases (("match"     'p :r0 t)
+          ("wrong-src" 'p :r9 nil)
+          ("wrong-pred" 'q :r0 nil))
+  (pred src should-match)
+  (let* ((fact  (list :pred 'p :src :r0 :dst :r1))
+         (facts (list fact))
+         (result (cl-cc/optimize::%type-check-elim-lookup-fact facts pred src)))
+    (if should-match
+        (assert-true result)
+        (assert-null result))))

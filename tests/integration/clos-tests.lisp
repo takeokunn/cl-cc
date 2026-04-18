@@ -10,8 +10,8 @@
 
 ;;; AST Parsing Tests
 
-(deftest clos-parse-clos-forms
-  "AST parsing for defclass, defclass-with-superclass, defgeneric, defmethod, make-instance, and slot-value forms."
+(deftest clos-parse-defclass
+  "lower-sexp-to-ast parses defclass: name, nil superclasses, and slot metadata."
   (let ((ast (lower-sexp-to-ast '(defclass point ()
                                     ((x :initarg :x :reader point-x)
                                      (y :initarg :y :reader point-y))))))
@@ -22,32 +22,46 @@
     (let ((x-slot (first (ast-defclass-slots ast))))
       (assert-eq 'x (ast-slot-name x-slot))
       (assert-eq :x (ast-slot-initarg x-slot))
-      (assert-eq 'point-x (ast-slot-reader x-slot))))
+      (assert-eq 'point-x (ast-slot-reader x-slot)))))
+
+(deftest clos-parse-defclass-with-superclass
+  "lower-sexp-to-ast parses defclass: superclass list is preserved."
   (let ((ast (lower-sexp-to-ast '(defclass colored-point (point)
                                     ((color :initarg :color))))))
     (assert-type ast-defclass ast)
     (assert-eq 'colored-point (ast-defclass-name ast))
-    (assert-equal '(point) (ast-defclass-superclasses ast)))
+    (assert-equal '(point) (ast-defclass-superclasses ast))))
+
+(deftest clos-parse-defgeneric
+  "lower-sexp-to-ast parses defgeneric: name and parameter list."
   (let ((ast (lower-sexp-to-ast '(defgeneric area (shape)))))
     (assert-type ast-defgeneric ast)
     (assert-eq 'area (ast-defgeneric-name ast))
-    (assert-equal '(shape) (ast-defgeneric-params ast)))
+    (assert-equal '(shape) (ast-defgeneric-params ast))))
+
+(deftest clos-parse-defmethod
+  "lower-sexp-to-ast parses defmethod: name, params, body, and specializers."
   (let ((ast (lower-sexp-to-ast '(defmethod area ((s circle))
                                    (* 3 (slot-value s 'radius))))))
     (assert-type ast-defmethod ast)
     (assert-eq 'area (ast-defmethod-name ast))
     (assert-equal '(s) (ast-defmethod-params ast))
     (assert-= 1 (length (ast-defmethod-body ast)))
-    ;; Check specializer
     (let ((specs (ast-defmethod-specializers ast)))
       (assert-= 1 (length specs))
-      (assert-equal '(s . circle) (first specs))))
+      (assert-equal '(s . circle) (first specs)))))
+
+(deftest clos-parse-make-instance
+  "lower-sexp-to-ast parses make-instance: class and initarg pairs."
   (let ((ast (lower-sexp-to-ast '(make-instance 'point :x 10 :y 20))))
     (assert-type ast-make-instance ast)
     (assert-type ast-quote (ast-make-instance-class ast))
     (assert-= 2 (length (ast-make-instance-initargs ast)))
     (assert-eq :x (car (first (ast-make-instance-initargs ast))))
-    (assert-eq :y (car (second (ast-make-instance-initargs ast)))))
+    (assert-eq :y (car (second (ast-make-instance-initargs ast))))))
+
+(deftest clos-parse-slot-value
+  "lower-sexp-to-ast parses slot-value: object and slot name."
   (let ((ast (lower-sexp-to-ast '(slot-value obj 'x))))
     (assert-type ast-slot-value ast)
     (assert-eq 'x (ast-slot-value-slot ast))
@@ -108,49 +122,45 @@
 
 ;;; AST Roundtrip Tests
 
-(deftest clos-roundtrip-forms
-  "CLOS AST-to-sexp roundtrip for defclass, defgeneric, and slot-value forms."
-  (let* ((sexp '(defclass point nil
-                  ((x :initarg :x :reader point-x)
-                   (y :initarg :y :reader point-y))))
-         (ast (lower-sexp-to-ast sexp))
-         (result (ast-to-sexp ast)))
+(deftest clos-roundtrip-defclass
+  "ast-to-sexp roundtrip for defclass preserves name, nil superclasses, and slot count."
+  (let* ((sexp   '(defclass point nil
+                    ((x :initarg :x :reader point-x)
+                     (y :initarg :y :reader point-y))))
+         (result (ast-to-sexp (lower-sexp-to-ast sexp))))
     (assert-eq 'defclass (first result))
     (assert-eq 'point (second result))
     (assert-null (third result))
-    (assert-= 2 (length (fourth result))))
-  (let* ((sexp '(defgeneric compute (obj)))
-         (ast (lower-sexp-to-ast sexp))
-         (result (ast-to-sexp ast)))
-    (assert-equal '(defgeneric compute (obj)) result))
-  (let* ((ast (lower-sexp-to-ast '(slot-value obj 'x)))
-         (result (ast-to-sexp ast)))
+    (assert-= 2 (length (fourth result)))))
+
+(deftest clos-roundtrip-defgeneric
+  "ast-to-sexp roundtrip for defgeneric preserves the full form."
+  (let ((result (ast-to-sexp (lower-sexp-to-ast '(defgeneric compute (obj))))))
+    (assert-equal '(defgeneric compute (obj)) result)))
+
+(deftest clos-roundtrip-slot-value
+  "ast-to-sexp roundtrip for slot-value quotes the slot name."
+  (let ((result (ast-to-sexp (lower-sexp-to-ast '(slot-value obj 'x)))))
     (assert-eq 'slot-value (first result))
-    ;; The slot name is quoted in roundtrip: (slot-value obj 'x)
     (assert-equal '(quote x) (third result))))
 
 ;;; Compilation and Execution Tests
 
-(deftest clos-compile-slot-access
-  "Slot access (first, second, arithmetic) compiles and evaluates correctly."
-  (assert-= 10 (run-string
-             "(defclass point ()
-                ((x :initarg :x)
-                 (y :initarg :y)))
-              (let ((p (make-instance 'point :x 10 :y 20)))
-                (slot-value p 'x))"))
-  (assert-= 20 (run-string
-             "(defclass point ()
-                ((x :initarg :x)
-                 (y :initarg :y)))
-              (let ((p (make-instance 'point :x 10 :y 20)))
-                (slot-value p 'y))"))
-  (assert-= 8 (run-string
-            "(defclass rect ()
-               ((w :initarg :w)
-                (h :initarg :h)))
-             (let ((r (make-instance 'rect :w 5 :h 3)))
-               (+ (slot-value r 'w) (slot-value r 'h)))")))
+(deftest-each clos-compile-slot-access
+  "Slot access compiles and evaluates correctly."
+  :cases
+  (("slot-x"  10
+    "(defclass point () ((x :initarg :x) (y :initarg :y)))
+     (let ((p (make-instance 'point :x 10 :y 20))) (slot-value p 'x))")
+   ("slot-y"  20
+    "(defclass point () ((x :initarg :x) (y :initarg :y)))
+     (let ((p (make-instance 'point :x 10 :y 20))) (slot-value p 'y))")
+   ("slot-sum" 8
+    "(defclass rect () ((w :initarg :w) (h :initarg :h)))
+     (let ((r (make-instance 'rect :w 5 :h 3))) (+ (slot-value r 'w) (slot-value r 'h)))"))
+  (expected form)
+  (assert-= expected (run-string form)))
+
 
 (deftest-each clos-compile-reader-methods
   "Reader accessor methods work on first and second class slots."
@@ -167,78 +177,71 @@
   (expected form)
   (assert-= expected (run-string form)))
 
-(deftest clos-compile-generic-methods
+(deftest-each clos-compile-generic-methods
   "Generic function dispatch, slot-accessing methods, and formula methods compile correctly."
-  (assert-= 42 (run-string
-             "(defclass animal ()
-                ((name :initarg :name)))
-              (defgeneric speak (a))
-              (defmethod speak ((a animal))
-                42)
-              (let ((a (make-instance 'animal :name 'dog)))
-                (speak a))"))
-  (assert-= 20 (run-string
-             "(defclass pair ()
-                ((a :initarg :a)
-                 (b :initarg :b)))
-              (defgeneric pair-sum (p))
-              (defmethod pair-sum ((p pair))
-                (+ (slot-value p 'a) (slot-value p 'b)))
-              (let ((p (make-instance 'pair :a 7 :b 13)))
-                (pair-sum p))"))
-  (assert-= 15 (run-string
-             "(defclass rect ()
-                ((w :initarg :w)
-                 (h :initarg :h)))
-              (defgeneric area (shape))
-              (defmethod area ((r rect))
-                (* (slot-value r 'w) (slot-value r 'h)))
-              (let ((r (make-instance 'rect :w 3 :h 5)))
-                (area r))")))
+  :cases (("constant-method"
+           42
+           "(defclass animal () ((name :initarg :name)))
+            (defgeneric speak (a))
+            (defmethod speak ((a animal)) 42)
+            (let ((a (make-instance 'animal :name 'dog))) (speak a))")
+          ("slot-sum-method"
+           20
+           "(defclass pair () ((a :initarg :a) (b :initarg :b)))
+            (defgeneric pair-sum (p))
+            (defmethod pair-sum ((p pair)) (+ (slot-value p 'a) (slot-value p 'b)))
+            (let ((p (make-instance 'pair :a 7 :b 13))) (pair-sum p))")
+          ("formula-method"
+           15
+           "(defclass rect () ((w :initarg :w) (h :initarg :h)))
+            (defgeneric area (shape))
+            (defmethod area ((r rect)) (* (slot-value r 'w) (slot-value r 'h)))
+            (let ((r (make-instance 'rect :w 3 :h 5))) (area r))"))
+  (expected source)
+  (assert-= expected (run-string source)))
 
-(deftest clos-compile-instance-variations
-  "Multiple instances, uninitialized slots, conditional slot access, and three-slot classes compile correctly."
-  (assert-= 30 (run-string
-             "(defclass counter ()
-                ((val :initarg :val)))
-              (let ((c1 (make-instance 'counter :val 10))
-                    (c2 (make-instance 'counter :val 20)))
-                (+ (slot-value c1 'val) (slot-value c2 'val)))"))
-  (assert-null (run-string
-            "(defclass box ()
-               ((content :initarg :content)))
-             (let ((b (make-instance 'box)))
-               (slot-value b 'content))"))
-  (assert-= 1 (run-string
-            "(defclass flag ()
-               ((active :initarg :active)))
-             (let ((f (make-instance 'flag :active 1)))
-               (if (slot-value f 'active) 1 0))"))
-  (assert-= 60 (run-string
-             "(defclass color ()
-                ((r :initarg :r)
-                 (g :initarg :g)
-                 (b :initarg :b)))
-              (let ((c (make-instance 'color :r 10 :g 20 :b 30)))
-                (+ (slot-value c 'r)
-                   (+ (slot-value c 'g)
-                      (slot-value c 'b))))")))
+(deftest-each clos-compile-instance-variations
+  "Instance creation edge cases: multi-instance, uninitialized slot, conditional, three slots."
+  :cases
+  (("multi-instance"    30
+    "(defclass counter () ((val :initarg :val)))
+     (let ((c1 (make-instance 'counter :val 10))
+           (c2 (make-instance 'counter :val 20)))
+       (+ (slot-value c1 'val) (slot-value c2 'val)))")
+   ("uninitialized-nil" nil
+    "(defclass box () ((content :initarg :content)))
+     (let ((b (make-instance 'box))) (slot-value b 'content))")
+   ("conditional-slot"   1
+    "(defclass flag () ((active :initarg :active)))
+     (let ((f (make-instance 'flag :active 1))) (if (slot-value f 'active) 1 0))")
+   ("three-slots"       60
+    "(defclass color () ((r :initarg :r) (g :initarg :g) (b :initarg :b)))
+     (let ((c (make-instance 'color :r 10 :g 20 :b 30)))
+       (+ (slot-value c 'r) (+ (slot-value c 'g) (slot-value c 'b))))"))
+  (expected form)
+  (assert-equal expected (run-string form)))
 
 ;;; Slot Specification Parsing Tests
 
-(deftest clos-parse-slot-specs
-  "Slot specification parsing: bare symbol, full spec with all options, and sexp conversion."
+(deftest clos-parse-slot-spec-bare
+  "parse-slot-spec: a bare symbol produces a minimal slot-def with nil options."
   (let ((slot (parse-slot-spec 'x)))
     (assert-type ast-slot-def slot)
     (assert-eq 'x (ast-slot-name slot))
     (assert-null (ast-slot-initarg slot))
-    (assert-null (ast-slot-reader slot)))
+    (assert-null (ast-slot-reader slot))))
+
+(deftest clos-parse-slot-spec-full
+  "parse-slot-spec: a full spec with :initarg/:reader/:writer/:accessor is preserved."
   (let ((slot (parse-slot-spec '(x :initarg :x :reader get-x :writer set-x :accessor x-accessor))))
     (assert-eq 'x (ast-slot-name slot))
     (assert-eq :x (ast-slot-initarg slot))
     (assert-eq 'get-x (ast-slot-reader slot))
     (assert-eq 'set-x (ast-slot-writer slot))
-    (assert-eq 'x-accessor (ast-slot-accessor slot)))
+    (assert-eq 'x-accessor (ast-slot-accessor slot))))
+
+(deftest clos-parse-slot-spec-to-sexp
+  "slot-def-to-sexp preserves name, :initarg, and :reader in the output sexp."
   (let* ((slot (parse-slot-spec '(x :initarg :x :reader get-x)))
          (sexp (slot-def-to-sexp slot)))
     (assert-eq 'x (first sexp))

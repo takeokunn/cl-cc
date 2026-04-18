@@ -14,14 +14,12 @@
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-values))
     (assert-true (keywordp reg))))
 
-(deftest codegen-values-basic-run
-  "values returns all values accessible via multiple-value-list."
-  (assert-equal '(1 2 3)
-    (run-string "(multiple-value-list (values 1 2 3))")))
-
-(deftest codegen-values-single-run
-  "values with one argument returns that argument."
-  (assert-run= 42 "(values 42)"))
+(deftest-each codegen-values-run
+  "values returns correct results for varying argument counts."
+  :cases (("multi-values"  '(1 2 3) "(multiple-value-list (values 1 2 3))")
+          ("single-value"  42       "(values 42)"))
+  (expected form)
+  (assert-equal expected (run-string form)))
 
 (deftest codegen-mvb-explicit-values-uses-direct-binding
   "Compiling multiple-value-bind over explicit ast-values skips vm-values/vm-mv-bind."

@@ -199,25 +199,32 @@ Returns a list of vm instructions (may include vm-const, vm-ash, vm-add, vm-move
                          (eq (vm-rhs o2) (vm-dst o1)))
                 (values (make-vm-bswap :dst dst :src src) 19))))))))
 
+;;; Shared skeleton for single-pass recognition passes.
+;;; MATCH-FN: (instructions pos) → (values rewritten consumed) or (nil 0)
+;;; PUSH-FN:  (rewritten result) → new result with rewritten prepended
+(defun %opt-recognition-pass (instructions match-fn push-fn)
+  (loop with n      = (length instructions)
+        with result = nil
+        with i      = 0
+        while (< i n)
+        do (multiple-value-bind (rewritten consumed)
+               (funcall match-fn instructions i)
+             (if rewritten
+                 (progn (setf result (funcall push-fn rewritten result))
+                        (incf i consumed))
+                 (progn (push (nth i instructions) result)
+                        (incf i 1))))
+        finally (return (nreverse result))))
+
 (defun opt-pass-bswap-recognition (instructions)
   "Collapse explicit byte-swap bit-manipulation trees into vm-bswap.
 
    Recognizes the canonical 32-bit reverse-bytes tree built from four masked
    extracts, four shifts, and three logior nodes, matching the bswap pattern
    documented for the backend."
-  (let ((result nil)
-        (i 0)
-        (n (length instructions)))
-    (do () ((>= i n) (nreverse result))
-      (multiple-value-bind (rewritten consumed)
-          (opt-bswap-recognition-match-at instructions i)
-        (if rewritten
-            (progn
-              (push rewritten result)
-              (incf i consumed))
-              (progn
-                (push (nth i instructions) result)
-                 (incf i 1)))))))
+  (%opt-recognition-pass instructions
+                         #'opt-bswap-recognition-match-at
+                         (lambda (rewritten result) (cons rewritten result))))
 
 (defun opt-rotate-recognition-match-at (instructions pos)
   (let ((end (+ pos 5)))
@@ -269,20 +276,12 @@ Returns a list of vm instructions (may include vm-const, vm-ash, vm-add, vm-move
 
    Recognizes the classic two-shift + OR tree that implements a 64-bit rotate
    and replaces it with a single vm-rotate plus the normalized count constant."
-  (let ((result nil)
-        (i 0)
-        (n (length instructions)))
-    (do () ((>= i n) (nreverse result))
-        (multiple-value-bind (rewritten consumed)
-            (opt-rotate-recognition-match-at instructions i)
-        (if rewritten
-            (progn
-              (dolist (inst (reverse rewritten))
-                (push inst result))
-              (incf i consumed))
-            (progn
-              (push (nth i instructions) result)
-              (incf i 1)))))))
+  (%opt-recognition-pass instructions
+                         #'opt-rotate-recognition-match-at
+                         (lambda (rewritten result)
+                           (loop for inst in rewritten
+                                 do (push inst result)
+                                 finally (return result)))))
 
 ;;; (Arithmetic reassociation and batch concatenation passes are in
 ;;;  optimizer-strength-ext.lisp which loads after this file.)

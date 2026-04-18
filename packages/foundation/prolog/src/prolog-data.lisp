@@ -12,6 +12,45 @@
     (when prolog-when-handler))
   "Data table of built-in Prolog predicates and their CPS handlers.")
 
+(defparameter *prolog-declarative-rule-specs*
+  '((((member ?x (cons ?x ?rest))))
+    (((member ?x (cons ?y ?rest)))
+     ((member ?x ?rest)))
+    (((append nil ?l ?l)))
+    (((append (cons ?x ?l1) ?l2 (cons ?x ?l3)))
+     ((append ?l1 ?l2 ?l3)))
+    (((reverse nil nil)))
+    (((reverse (cons ?x ?xs) ?result))
+     ((reverse ?xs ?rev-xs)
+      (append ?rev-xs (cons ?x nil) ?result)))
+    (((length nil 0)))
+    (((length (cons ?x ?rest) (+ 1 ?n)))
+     ((length ?rest ?n)))
+    (((type-of (const ?val) ?env (integer-type)))
+     ((when (integerp ?val))))
+    (((type-of (var ?name) ?env ?type))
+     ((env-lookup ?env ?name ?type)))
+    (((type-of (if ?cond ?then ?else) ?env ?type))
+     ((type-of ?cond ?env (boolean-type))
+      (type-of ?then ?env ?type)
+      (type-of ?else ?env ?type)))
+    (((env-lookup (cons (cons ?name ?type) ?rest) ?name ?type)))
+    (((env-lookup (cons ?binding ?rest) ?name ?type))
+     ((env-lookup ?rest ?name ?type))))
+  "Declarative Prolog rules encoded as data.")
+
+(defun %make-symbol-dispatch-table (specs)
+  "Build an EQ hash table from SPECS of the shape (symbol handler-symbol).
+
+This keeps the dispatch description data-only while the runtime table remains a
+separate concern. Handler symbols are resolved via SYMBOL-FUNCTION at table
+construction time."
+  (let ((table (make-hash-table :test 'eq)))
+    (dolist (spec specs table)
+      (destructuring-bind (name handler) spec
+        (setf (gethash name table)
+              (symbol-function handler))))))
+
 (defparameter *peephole-rules*
   '(;; (:const :R1 42)(:move :R2 :R1) → (:const :R2 42)
     ;; Fires when copy-prop is blocked by a label reset but DCE kept the const alive.
@@ -80,6 +119,14 @@
 
 (defparameter *enable-prolog-peephole* t)
 
+(defparameter *prolog-integer-binop-type-operators*
+  '(+ - * / mod)
+  "Arithmetic operators whose binop forms always infer INTEGER-TYPE in Prolog rules.")
+
+(defparameter *prolog-comparison-type-operators*
+  '(< > <= >= = /=)
+  "Comparison operators whose cmp forms always infer BOOLEAN-TYPE in Prolog rules.")
+
 ;;; Prolog database state and clause-definition surface
 
 (defvar *prolog-rules* (make-hash-table :test 'eq)
@@ -99,6 +146,34 @@
     `(add-rule ',(car head)
                (make-prolog-rule :head ',head
                                  ,@(when body `(:body ',body)))))
+
+  (defmacro define-prolog-integer-binop-type-rules ()
+    "Emit the repetitive integer binop type rules from
+*PROLOG-INTEGER-BINOP-TYPE-OPERATORS*.
+
+This keeps the rule set data-driven and avoids repeating nearly identical
+DEF-RULE forms for each arithmetic operator."
+    `(progn
+       ,@(mapcar (lambda (op)
+                   `(def-rule (type-of (binop ,op ?a ?b) ?env (integer-type))
+                      (type-of ?a ?env (integer-type))
+                      (type-of ?b ?env (integer-type))))
+                 *prolog-integer-binop-type-operators*)))
+
+  (defmacro define-prolog-comparison-type-rule ()
+    "Emit the comparison type rule using the data table from prolog-data.lisp."
+    `(def-rule (type-of (cmp ?op ?a ?b) ?env (boolean-type))
+       (type-of ?a ?env (integer-type))
+       (type-of ?b ?env (integer-type))
+       (:when (cl:member ?op ',*prolog-comparison-type-operators*))))
+
+  (defmacro define-prolog-declarative-rules ()
+    "Emit `def-rule` forms from *PROLOG-DECLARATIVE-RULE-SPECS*."
+    `(progn
+       ,@(mapcar (lambda (spec)
+                   (destructuring-bind (head &optional body) spec
+                     `(def-rule ,@head ,@(or body '()))))
+                 *prolog-declarative-rule-specs*)))
 
   (defmacro def-fact (head)
     "Define a Prolog fact. Usage: (def-fact (parent tom mary))"

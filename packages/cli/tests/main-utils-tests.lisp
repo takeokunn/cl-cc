@@ -8,14 +8,17 @@
   (assert-string= "ast" (cl-cc/cli::%dump-phase-label :ast))
   (assert-string= "ssa" (cl-cc/cli::%dump-phase-label :SSA)))
 
-(deftest cli-parse-ir-phase-supported-values
-  (assert-eq :ast (cl-cc/cli::%parse-ir-phase "ast"))
-  (assert-eq :cps (cl-cc/cli::%parse-ir-phase "CPS"))
-  (assert-eq :ssa (cl-cc/cli::%parse-ir-phase "ssa"))
-  (assert-eq :vm  (cl-cc/cli::%parse-ir-phase "vm"))
-  (assert-eq :opt (cl-cc/cli::%parse-ir-phase "opt"))
-  (assert-eq :asm (cl-cc/cli::%parse-ir-phase "asm"))
-  (assert-null (cl-cc/cli::%parse-ir-phase "bogus")))
+(deftest-each cli-parse-ir-phase-supported-values
+  "Each recognized phase string maps to its keyword; unknown strings return nil."
+  :cases (("ast"   :ast "ast")
+          ("CPS"   :cps "CPS")
+          ("ssa"   :ssa "ssa")
+          ("vm"    :vm  "vm")
+          ("opt"   :opt "opt")
+          ("asm"   :asm "asm")
+          ("bogus" nil  "bogus"))
+  (expected input)
+  (assert-eq expected (cl-cc/cli::%parse-ir-phase input)))
 
 (deftest cli-ensure-list-normalizes-inputs
   (assert-null (cl-cc/cli::%ensure-list nil))

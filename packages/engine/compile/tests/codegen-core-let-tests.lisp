@@ -12,25 +12,16 @@
 
 ;;; ─── %ast-let-binding-ignored-p ───────────────────────────────────────────
 
-(deftest binding-ignored-by-ignore-declaration
-  "%ast-let-binding-ignored-p is true when the name appears in an (ignore name) declaration."
-  (assert-true
-   (cl-cc/compile::%ast-let-binding-ignored-p 'x '((ignore x)))))
-
-(deftest binding-ignored-by-ignorable-declaration
-  "%ast-let-binding-ignored-p is true for (ignorable name) as well."
-  (assert-true
-   (cl-cc/compile::%ast-let-binding-ignored-p 'x '((ignorable x)))))
-
-(deftest binding-not-ignored-when-absent
-  "%ast-let-binding-ignored-p is false when no matching declaration exists."
-  (assert-false
-   (cl-cc/compile::%ast-let-binding-ignored-p 'x '((ignore y)))))
-
-(deftest binding-not-ignored-in-empty-declarations
-  "%ast-let-binding-ignored-p is false with no declarations."
-  (assert-false
-   (cl-cc/compile::%ast-let-binding-ignored-p 'x nil)))
+(deftest-each ast-let-binding-ignored-p
+  "%ast-let-binding-ignored-p: true for ignore/ignorable declarations, false otherwise."
+  :cases (("ignore"    t   'x '((ignore x)))
+          ("ignorable" t   'x '((ignorable x)))
+          ("absent"    nil 'x '((ignore y)))
+          ("empty"     nil 'x nil))
+  (expected name decls)
+  (if expected
+      (assert-true  (cl-cc/compile::%ast-let-binding-ignored-p name decls))
+      (assert-false (cl-cc/compile::%ast-let-binding-ignored-p name decls))))
 
 ;;; ─── %ast-cons-call-p ─────────────────────────────────────────────────────
 

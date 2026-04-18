@@ -93,19 +93,8 @@ Fresh cons cells are therefore required for any nested/list-shaped pair."
   (:sexp-tag :cons)
   (:sexp-slots dst car-src cdr-src))
 
-(define-vm-instruction vm-car (vm-instruction)
-  "Extract the car of the cons cell in SRC, store in DST."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :car)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-cdr (vm-instruction)
-  "Extract the cdr of the cons cell in SRC, store in DST."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :cdr)
-  (:sexp-slots dst src))
+(define-vm-unary-instruction vm-car :car "Extract the car of the cons cell in SRC, store in DST.")
+(define-vm-unary-instruction vm-cdr :cdr "Extract the cdr of the cons cell in SRC, store in DST.")
 
 ;;; List Construction Instructions
 
@@ -118,19 +107,8 @@ Fresh cons cells are therefore required for any nested/list-shaped pair."
 
 ;;; List Accessor Instructions
 
-(define-vm-instruction vm-length (vm-instruction)
-  "Get the length of the list in SRC, store in DST."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :length)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-reverse (vm-instruction)
-  "Reverse the list in SRC, store result in DST."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :reverse)
-  (:sexp-slots dst src))
+(define-vm-unary-instruction vm-length  :length  "Get the length of the list in SRC, store in DST.")
+(define-vm-unary-instruction vm-reverse :reverse "Reverse the list in SRC, store result in DST.")
 
 (define-vm-instruction vm-append (vm-instruction)
   "Append lists in SRC1 and SRC2, store result in DST."
@@ -164,79 +142,24 @@ Fresh cons cells are therefore required for any nested/list-shaped pair."
   (:sexp-tag :nthcdr)
   (:sexp-slots dst index list))
 
-;;; Named Accessor Instructions
-
-(define-vm-instruction vm-first (vm-instruction)
-  "Get the first element of the list in SRC, store in DST."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :first)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-second (vm-instruction)
-  "Get the second element of the list in SRC, store in DST."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :second)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-third (vm-instruction)
-  "Get the third element of the list in SRC, store in DST."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :third)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-fourth (vm-instruction)
-  "Get the fourth element of the list in SRC, store in DST."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :fourth)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-fifth (vm-instruction)
-  "Get the fifth element of the list in SRC, store in DST."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :fifth)
-  (:sexp-slots dst src))
-
-;;; FR-563: sixth through tenth list accessors
+;;; Named Accessor Instructions (first–tenth, rest, last, butlast)
+(define-vm-unary-instruction vm-first   :first   "Get the first element of the list in SRC, store in DST.")
+(define-vm-unary-instruction vm-second  :second  "Get the second element of the list in SRC, store in DST.")
+(define-vm-unary-instruction vm-third   :third   "Get the third element of the list in SRC, store in DST.")
+(define-vm-unary-instruction vm-fourth  :fourth  "Get the fourth element of the list in SRC, store in DST.")
+(define-vm-unary-instruction vm-fifth   :fifth   "Get the fifth element of the list in SRC, store in DST.")
 (define-vm-unary-instruction vm-sixth   :sixth   "Get the sixth element of the list.")
 (define-vm-unary-instruction vm-seventh :seventh "Get the seventh element of the list.")
 (define-vm-unary-instruction vm-eighth  :eighth  "Get the eighth element of the list.")
 (define-vm-unary-instruction vm-ninth   :ninth   "Get the ninth element of the list.")
 (define-vm-unary-instruction vm-tenth   :tenth   "Get the tenth element of the list.")
-
-(define-vm-instruction vm-rest (vm-instruction)
-  "Get the cdr (rest) of the list in SRC, store in DST. Alias for vm-cdr."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :rest)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-last (vm-instruction)
-  "Get the last cons cell of the list in SRC, store in DST."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :last)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-butlast (vm-instruction)
-  "Get all but the last element of the list in SRC, store in DST."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :butlast)
-  (:sexp-slots dst src))
+(define-vm-unary-instruction vm-rest    :rest    "Get the cdr (rest) of the list in SRC, store in DST.")
+(define-vm-unary-instruction vm-last    :last    "Get the last cons cell of the list in SRC, store in DST.")
+(define-vm-unary-instruction vm-butlast :butlast "Get all but the last element of the list in SRC, store in DST.")
 
 ;;; Destructive Operations
 
-(define-vm-instruction vm-nreverse (vm-instruction)
-  "Destructively reverse the list in SRC, store in DST."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :nreverse)
-  (:sexp-slots dst src))
+(define-vm-unary-instruction vm-nreverse :nreverse "Destructively reverse the list in SRC, store in DST.")
 
 ;;; FR-596: nbutlast
 (define-vm-unary-instruction vm-nbutlast :nbutlast "Destructively remove last N elements from list.")
@@ -260,26 +183,9 @@ Fresh cons cells are therefore required for any nested/list-shaped pair."
 
 ;;; Extended List Operations
 
-(define-vm-instruction vm-list-length (vm-instruction)
-  "Get the length of a proper list in SRC, store in DST. Signals error for improper lists."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :list-length)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-endp (vm-instruction)
-  "Check if list in SRC is empty (nil). Returns 1 if empty, 0 otherwise."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :endp)
-  (:sexp-slots dst src))
-
-(define-vm-instruction vm-null (vm-instruction)
-  "Check if value in SRC is nil. Returns 1 if nil, 0 otherwise."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :null)
-  (:sexp-slots dst src))
+(define-vm-unary-instruction vm-list-length :list-length "Get the length of a proper list in SRC, store in DST.")
+(define-vm-unary-instruction vm-endp        :endp        "Check if list in SRC is empty (nil). Returns 1 if empty, 0 otherwise.")
+(define-vm-unary-instruction vm-null        :null        "Check if value in SRC is nil. Returns 1 if nil, 0 otherwise.")
 
 (define-vm-instruction vm-push (vm-instruction)
   "Create new cons with ITEM as car and LIST as cdr. Store result in DST."

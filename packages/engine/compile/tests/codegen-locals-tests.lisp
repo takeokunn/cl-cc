@@ -10,15 +10,12 @@
 
 ;;; ─── target-instance ─────────────────────────────────────────────────────────
 
-(deftest target-instance-x86-64-returns-correct-class
-  "target-instance :x86_64 returns an x86-64-target instance."
-  (let ((ti (cl-cc/compile::target-instance :x86_64)))
-    (assert-true (typep ti 'cl-cc/emit::x86-64-target))))
-
-(deftest target-instance-aarch64-returns-correct-class
-  "target-instance :aarch64 returns an aarch64-target instance."
-  (let ((ti (cl-cc/compile::target-instance :aarch64)))
-    (assert-true (typep ti 'cl-cc/emit::aarch64-target))))
+(deftest-each target-instance-returns-correct-class
+  "target-instance maps each target keyword to its backend class."
+  :cases (("x86-64"  :x86_64  'cl-cc/emit::x86-64-target)
+          ("aarch64" :aarch64 'cl-cc/emit::aarch64-target))
+  (target expected-class)
+  (assert-true (typep (cl-cc/compile::target-instance target) expected-class)))
 
 (deftest target-instance-vm-returns-nil
   "target-instance :vm returns nil (no native backend for VM)."

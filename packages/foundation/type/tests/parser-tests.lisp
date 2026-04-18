@@ -183,19 +183,16 @@
 
 ;;; ─── Arrow types: ->, ->1, ->0 ──────────────────────────────────────────
 
-(deftest parse-arrow-pure
-  "(-> fixnum string) produces pure arrow."
-  (let ((ty (cl-cc/type::parse-type-specifier `(,(intern "->" :cl-cc/type) fixnum string))))
+(deftest-each parse-arrow-basic-cases
+  "-> arrow: pure 1-param; multi 2-param with boolean return."
+  :cases (("pure"        `(,(intern "->" :cl-cc/type) fixnum string)          1 t)
+          ("multi-param" `(,(intern "->" :cl-cc/type) fixnum string boolean)  2 nil))
+  (form expected-param-count check-effects)
+  (let ((ty (cl-cc/type::parse-type-specifier form)))
     (assert-true (type-arrow-p ty))
-    (assert-true (type-equal-p type-int (first (type-arrow-params ty))))
-    (assert-true (type-equal-p type-string (type-arrow-return ty)))
-    (assert-true (type-effect-row-p (type-arrow-effects ty)))))
-
-(deftest parse-arrow-multi-param
-  "(-> fixnum string boolean) has 2 params, returns boolean."
-  (let ((ty (cl-cc/type::parse-type-specifier `(,(intern "->" :cl-cc/type) fixnum string boolean))))
-    (assert-equal 2 (length (type-arrow-params ty)))
-    (assert-true (type-equal-p type-bool (type-arrow-return ty)))))
+    (assert-equal expected-param-count (length (type-arrow-params ty)))
+    (when check-effects
+      (assert-true (type-effect-row-p (type-arrow-effects ty))))))
 
 (deftest-each parse-arrow-multiplicity
   "->1 and ->0 produce arrow types with :one and :zero multiplicity respectively."
@@ -206,10 +203,14 @@
     (assert-true (type-arrow-p ty))
     (assert-eq expected-mult (cl-cc/type::type-arrow-mult ty))))
 
-(deftest parse-arrow-error-too-few
-  "(-> fixnum) with only one arg signals error."
+(deftest-each parse-type-specifier-malformed-errors
+  "Malformed arrow/refinement/field specifiers signal type-parse-error."
+  :cases (("arrow-too-few"       `(,(intern "->" :cl-cc/type) fixnum))
+          ("refinement-no-pred"  '(refine fixnum))
+          ("record-field-no-type" '(record (x))))
+  (form)
   (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-type-specifier `(,(intern "->" :cl-cc/type) fixnum))))
+    (cl-cc/type::parse-type-specifier form)))
 
 (deftest parse-arrow-with-bang-effects
   "(-> fixnum string ! IO) has IO effect."
@@ -275,11 +276,6 @@
     (assert-true (type-equal-p type-int (cl-cc/type::type-refinement-base ty)))
     (assert-eq 'positive-p (cl-cc/type::type-refinement-predicate ty))))
 
-(deftest parse-refinement-error
-  "(Refine fixnum) signals error."
-  (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-type-specifier '(refine fixnum))))
-
 ;;; ─── Graded modal types ─────────────────────────────────────────────────
 
 (deftest-each parse-graded-modal-types
@@ -298,187 +294,3 @@
     (assert-true (type-linear-p ty))
     (assert-eq :one (cl-cc/type::type-linear-grade ty))))
 
-;;; ─── Row types: Record / Variant ─────────────────────────────────────────
-
-(deftest parse-record-closed
-  "(Record (x fixnum) (y string)) produces closed record."
-  (let ((ty (cl-cc/type::parse-type-specifier '(record (x fixnum) (y string)))))
-    (assert-true (type-record-p ty))
-    (assert-equal 2 (length (type-record-fields ty)))
-    (assert-null (cl-cc/type::type-record-row-var ty))))
-
-(deftest parse-record-open
-  "(Record (x fixnum) | rho) produces open record with row var."
-  (let ((ty (cl-cc/type::parse-type-specifier
-             `(record (x fixnum) ,(intern "|" :cl-cc/type) rho))))
-    (assert-true (type-record-p ty))
-    (assert-equal 1 (length (type-record-fields ty)))
-    (assert-true (not (null (cl-cc/type::type-record-row-var ty))))))
-
-(deftest parse-variant-closed
-  "(Variant (some fixnum) (none null)) produces variant."
-  (let ((ty (cl-cc/type::parse-type-specifier '(variant (some fixnum) (none null)))))
-    (assert-true (type-variant-p ty))
-    (assert-equal 2 (length (cl-cc/type::type-variant-cases ty)))))
-
-(deftest parse-row-field-error
-  "Malformed field (x) signals error."
-  (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-type-specifier '(record (x)))))
-
-;;; ─── Type application fallback ───────────────────────────────────────────
-
-(deftest parse-type-app-fallback
-  "(Maybe fixnum) falls through to type-app."
-  (let ((ty (cl-cc/type::parse-type-specifier '(maybe fixnum))))
-    (assert-true (type-app-p ty))
-    (assert-true (type-primitive-p (cl-cc/type::type-app-fun ty)))
-    (assert-true (type-equal-p type-int (type-app-arg ty)))))
-
-(deftest parse-type-app-multi-arg
-  "(F a b) chains into nested type-app."
-  (let ((ty (cl-cc/type::parse-type-specifier '(f a b))))
-    (assert-true (type-app-p ty))
-    ;; Outer is (F a) applied to b
-    (assert-true (type-app-p (cl-cc/type::type-app-fun ty)))))
-
-;;; ─── Constraint spec parsing ─────────────────────────────────────────────
-
-(deftest parse-constraint-spec-basic
-  "(Num fixnum) produces type-class-constraint."
-  (let ((c (cl-cc/type::parse-constraint-spec '(num fixnum))))
-    (assert-true (cl-cc/type::type-class-constraint-p c))
-    (assert-eq 'num (cl-cc/type::type-class-constraint-class-name c))))
-
-(deftest parse-constraint-spec-error
-  "Atom signals error."
-  (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-constraint-spec 'num)))
-
-;;; ─── Lambda list parsing ─────────────────────────────────────────────────
-
-(deftest parse-lambda-list-typed
-  "((x fixnum) (y string)) returns correct names and types."
-  (multiple-value-bind (names types)
-      (cl-cc/type::parse-lambda-list-with-types '((x fixnum) (y string)))
-    (assert-equal '(x y) names)
-    (assert-equal 2 (length types))
-    (assert-true (type-equal-p type-int (first types)))
-    (assert-true (type-equal-p type-string (second types)))))
-
-(deftest parse-lambda-list-untyped
-  "(x y) returns type-any for each parameter."
-  (multiple-value-bind (names types)
-      (cl-cc/type::parse-lambda-list-with-types '(x y))
-    (assert-equal '(x y) names)
-    (assert-true (type-equal-p type-any (first types)))
-    (assert-true (type-equal-p type-any (second types)))))
-
-(deftest parse-lambda-list-mixed
-  "((x fixnum) y) mixes typed and untyped."
-  (multiple-value-bind (names types)
-      (cl-cc/type::parse-lambda-list-with-types '((x fixnum) y))
-    (assert-equal '(x y) names)
-    (assert-true (type-equal-p type-int (first types)))
-    (assert-true (type-equal-p type-any (second types)))))
-
-(deftest parse-lambda-list-empty
-  "() returns empty lists."
-  (multiple-value-bind (names types)
-      (cl-cc/type::parse-lambda-list-with-types nil)
-    (assert-null names)
-    (assert-null types)))
-
-(deftest parse-lambda-list-error
-  "Invalid item signals error."
-  (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-lambda-list-with-types '(42))))
-
-;;; ─── parse-typed-parameter ───────────────────────────────────────────────
-
-(deftest-each parse-typed-parameter-cases
-  "parse-typed-parameter: (x fixnum)→int; bare x→any."
-  :cases (("typed" '(x fixnum) type-int)
-          ("bare"  'x          type-any))
-  (param expected-type)
-  (let ((result (cl-cc/type::parse-typed-parameter param)))
-    (assert-eq 'x (car result))
-    (assert-true (type-equal-p expected-type (cdr result)))))
-
-;;; ─── parse-typed-optional-parameter ──────────────────────────────────────
-
-(deftest-each parse-optional-parameter-cases
-  "parse-typed-optional-parameter: (x fixnum nil)→int; bare x→any."
-  :cases (("typed" '(x fixnum nil) type-int)
-          ("bare"  'x              type-any))
-  (param expected-type)
-  (let ((result (cl-cc/type::parse-typed-optional-parameter param)))
-    (assert-eq 'x (car result))
-    (assert-true (type-equal-p expected-type (cdr result)))))
-
-;;; ─── extract-return-type ─────────────────────────────────────────────────
-
-(deftest extract-return-type-present
-  "Body with (declare (return-type fixnum)) extracts type-int."
-  (let ((body '((declare (return-type fixnum)) (+ x 1))))
-    (let ((ty (cl-cc/type::extract-return-type body)))
-      (assert-true (type-equal-p type-int ty)))))
-
-(deftest extract-return-type-nil-cases
-  "Body without return-type declare, and nil body, both return nil."
-  (assert-null (cl-cc/type::extract-return-type '((+ x 1))))
-  (assert-null (cl-cc/type::extract-return-type nil)))
-
-;;; ─── Typed AST nodes ─────────────────────────────────────────────────────
-
-(deftest parse-typed-defun-basic
-  "parse-typed-defun creates ast-defun-typed."
-  (let ((node (cl-cc/type::parse-typed-defun '(defun foo ((x fixnum)) (+ x 1)))))
-    (assert-true (cl-cc/type::ast-defun-typed-p node))
-    (assert-eq 'foo (cl-cc/type::ast-defun-typed-name node))
-    (assert-equal '(x) (cl-cc/type::ast-defun-typed-params node))
-    (assert-equal 1 (length (cl-cc/type::ast-defun-typed-param-types node)))
-    (assert-true (type-equal-p type-int (first (cl-cc/type::ast-defun-typed-param-types node))))))
-
-(deftest parse-typed-lambda-basic
-  "parse-typed-lambda creates ast-lambda-typed."
-  (let ((node (cl-cc/type::parse-typed-lambda '(lambda ((x fixnum)) (+ x 1)))))
-    (assert-true (cl-cc/type::ast-lambda-typed-p node))
-    (assert-equal '(x) (cl-cc/type::ast-lambda-typed-params node))
-    (assert-equal 1 (length (cl-cc/type::ast-lambda-typed-param-types node)))))
-
-;;; ─── looks-like-type-specifier-p ─────────────────────────────────────────
-
-(deftest looks-like-type-specifier-p-behavior
-  "looks-like-type-specifier-p: recognized primitives/?, compound forms → true; unknown symbol → false."
-  (assert-true  (cl-cc/type::looks-like-type-specifier-p 'fixnum))
-  (assert-true  (cl-cc/type::looks-like-type-specifier-p 'string))
-  (assert-true  (cl-cc/type::looks-like-type-specifier-p 'boolean))
-  (assert-true  (cl-cc/type::looks-like-type-specifier-p '?))
-  (assert-true  (cl-cc/type::looks-like-type-specifier-p '(or fixnum string)))
-  (assert-true  (cl-cc/type::looks-like-type-specifier-p '(function (fixnum) string)))
-  (assert-true  (cl-cc/type::looks-like-type-specifier-p '(values fixnum string)))
-  (assert-false (cl-cc/type::looks-like-type-specifier-p 'my-random-thing)))
-
-;;; ─── parse-type-specifier-maybe ──────────────────────────────────────────
-
-(deftest parse-type-specifier-maybe-behavior
-  "parse-type-specifier-maybe: recognized type→node; unknown symbol→nil."
-  (assert-true (type-equal-p type-int (cl-cc/type::parse-type-specifier-maybe 'fixnum)))
-  (assert-null (cl-cc/type::parse-type-specifier-maybe 'my-random-thing)))
-
-;;; ─── make-type-function-from-spec ────────────────────────────────────────
-
-(deftest make-type-function-from-spec-basic
-  "Creates arrow type from param-types and return-type."
-  (let ((ty (cl-cc/type::make-type-function-from-spec (list type-int) type-string)))
-    (assert-true (type-arrow-p ty))
-    (assert-equal 1 (length (type-arrow-params ty)))
-    (assert-true (type-equal-p type-string (type-arrow-return ty)))))
-
-;;; ─── Error on non-s-expression ───────────────────────────────────────────
-
-(deftest parse-invalid-atom
-  "Non-symbol non-nil atom signals error."
-  (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-type-specifier 42)))

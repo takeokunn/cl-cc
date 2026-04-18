@@ -102,32 +102,19 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
     (%with-temp-file (path content)
   (assert-string= content (cl-cc/cli::%read-file path)))))
 
-(deftest cli-read-file-multibyte-no-nul
-  ;; Regression test: file-length returns byte count (≥ char count for UTF-8).
-  ;; The old code did (make-string (file-length in)) which over-allocated,
-  ;; leaving trailing #\Nul characters after read-sequence.
-  ;; Fixed by: (subseq buf 0 (read-sequence buf in)).
-  "read-file: multibyte UTF-8 file has no trailing nul characters"
-  ;; "テスト" = 3 chars but 9 bytes → old code appended 6 #\Nul chars
-  (let ((content "(+ 1 2) ;; テスト"))
-    (%with-temp-file (path content)
-  (let ((result (cl-cc/cli::%read-file path)))
-        ;; No trailing nul character anywhere
-        (assert-false (find #\Nul result))
-        ;; Exact content match
-        (assert-string= content result)
-        ;; Length matches character count, not byte count
-        (assert-= (length content) (length result))))))
-
-(deftest cli-read-file-multibyte-length-correct
-  "read-file: returned string length equals character count, not byte count"
-  ;; Greek letters: each 2 bytes UTF-8.  3 chars = 6 bytes.
-  ;; file-length returns 6; correct char count is 3.
-  (let ((content "αβγ"))
-    (%with-temp-file (path content)
-  (let ((result (cl-cc/cli::%read-file path)))
-        (assert-= 3 (length result))
-        (assert-string= "αβγ" result)))))
+(deftest-each cli-read-file-multibyte-correctness
+  ;; Regression: file-length returns byte count (≥ char count for UTF-8).
+  ;; Old code: (make-string (file-length in)) over-allocated → trailing #\Nul.
+  ;; Fix: (subseq buf 0 (read-sequence buf in)).
+  "read-file: returns exact content and character count for multibyte UTF-8 files."
+  :cases (("cjk-3chars"    "(+ 1 2) ;; テスト")  ; 3 CJK chars = 9 bytes
+          ("greek-3chars"  "αβγ"))                ; 3 Greek chars = 6 bytes
+  (content)
+  (%with-temp-file (path content)
+    (let ((result (cl-cc/cli::%read-file path)))
+      (assert-false (find #\Nul result))
+      (assert-string= content result)
+      (assert-= (length content) (length result)))))
 
 (deftest cli-read-file-not-found
   "read-file: non-existent file signals a plain error"
@@ -138,14 +125,55 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
 ;;; handlers.lisp — stable helper-level coverage
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest cli-count-parens-ignores-parens-inside-strings
-  "count-parens: only structural parentheses are counted."
-  (multiple-value-bind (open close)
-      (cl-cc/cli::%count-parens "(print \"(()\")")
-    (assert-= 1 open)
-    (assert-= 1 close)))
+(deftest-each cli-count-parens-ignores-parens-inside-strings
+  "count-parens: only structural parentheses are counted (strings excluded)."
+  :cases (("open-count"  1 0)
+          ("close-count" 1 1))
+  (expected value-index)
+  (assert-= expected (nth-value value-index (cl-cc/cli::%count-parens "(print \"(()\")"))))
 
 (deftest cli-command-dispatch-covers-all-public-subcommands
   "The CLI dispatch table still exposes the expected public commands."
   (assert-equal '("run" "compile" "eval" "repl" "check")
                 (mapcar #'car cl-cc/cli::*cli-command-dispatch*)))
+
+(deftest cli-maybe-make-profiled-vm-state-disabled
+  "No profiled VM state is created when flamegraph output is not requested."
+  (let ((opts (cl-cc/cli::make-compile-opts)))
+    (assert-null (cl-cc/cli::%maybe-make-profiled-vm-state opts))))
+
+(deftest cli-maybe-make-profiled-vm-state-enabled
+  "Flamegraph-enabled options create and prime a profiled VM state."
+  (let* ((opts (cl-cc/cli::make-compile-opts :flamegraph-path "/tmp/cl-cc-test.svg"))
+         (vm-state (cl-cc/cli::%maybe-make-profiled-vm-state opts)))
+    (assert-true vm-state)
+    (assert-true (cl-cc/vm::vm-profile-enabled-p vm-state))
+    (assert-equal '("<toplevel>") (cl-cc/vm::vm-profile-call-stack vm-state))))
+
+(deftest cli-read-command-source-roundtrip
+  "%read-command-source reuses the CLI read path for ordinary source files."
+  (let ((content "(print :ok)"))
+    (%with-temp-file (path content)
+      (assert-string= content (cl-cc/cli::%read-command-source path)))))
+
+(defun %capture-fake-quit-code (thunk)
+  (handler-case
+      (progn (funcall thunk) nil)
+    (fake-quit (e) (fake-quit-code e))))
+
+(deftest-each cli-do-command-missing-arg-exits-2
+  "Each command handler exits 2 and prints command-specific help when the required arg is absent."
+  :cases (("run"     "run"     'cl-cc/cli::%do-run)
+          ("compile" "compile" 'cl-cc/cli::%do-compile)
+          ("eval"    "eval"    'cl-cc/cli::%do-eval)
+          ("check"   "check"   'cl-cc/cli::%do-check))
+  (command fn-sym)
+  (let ((help-command nil))
+    (with-fake-quit
+      (with-replaced-function (cl-cc/cli::%print-help
+                               (lambda (cmd) (setf help-command cmd)))
+        (assert-= 2 (%capture-fake-quit-code
+                      (lambda ()
+                        (funcall (symbol-function fn-sym)
+                                 (make-cli-parsed :command command)))))))
+    (assert-string= command help-command)))

@@ -1,8 +1,11 @@
-;;;; cps.lisp - Continuation-Passing Style Transformation
+;;;; cps.lisp - Bootstrap Continuation-Passing Style Transformation
 ;;;;
 ;;;; This module provides:
 ;;;; - S-expression based CPS transformation (minimal, for bootstrap)
-;;;; - AST-based CPS transformation with full special form support
+;;;;
+;;;; CPS simplification helpers live in cps-simplify.lisp.
+;;;; AST-based CPS transformation with full special form support lives in
+;;;; cps-ast*.lisp.
 
 (in-package :cl-cc/compile)
 
@@ -69,48 +72,43 @@ both NIL and numeric zero are false."
          (print ,v)
          (funcall ,k ,v)))))
 
-(defun %cps-sexp-dispatch-binop (node k)
-  "Dispatch NODE as a bootstrap CPS binary operator."
+;;; Adapter functions: bridge the (node k) calling convention to each
+;;; implementation function's own argument shape.
+
+(defun %cps-sexp-binop-adapter (node k)
   (%cps-sexp-binop (car node) (second node) (third node) k))
 
-(defun %cps-sexp-dispatch-if (node k)
-  "Dispatch NODE as a bootstrap CPS IF form."
-  (%cps-sexp-if node k))
-
-(defun %cps-sexp-dispatch-progn (node k)
-  "Dispatch NODE as a bootstrap CPS PROGN form."
+(defun %cps-sexp-progn-adapter (node k)
   (%cps-sexp-progn (cdr node) k))
 
-(defun %cps-sexp-dispatch-let (node k)
-  "Dispatch NODE as a bootstrap CPS LET form."
+(defun %cps-sexp-let-adapter (node k)
   (%cps-sexp-let-bindings (second node)
                           `(progn ,@(cddr node))
                           k))
 
-(defun %cps-sexp-dispatch-print (node k)
-  "Dispatch NODE as a bootstrap CPS PRINT form."
-  (%cps-sexp-print node k))
-
-(defparameter *cps-sexp-dispatch-specs*
-  '((+ . %cps-sexp-dispatch-binop)
-    (- . %cps-sexp-dispatch-binop)
-    (* . %cps-sexp-dispatch-binop)
-    (if . %cps-sexp-dispatch-if)
-    (progn . %cps-sexp-dispatch-progn)
-    (let . %cps-sexp-dispatch-let)
-    (print . %cps-sexp-dispatch-print))
-  "Data-driven bootstrap CPS dispatch from special form/operator symbol to handler.")
+;;; Dispatch table: maps each recognised special form / operator to its adapter.
+;;; if and print share the (node k) signature with their impl fns — no adapter needed.
 
 (defun %make-cps-sexp-dispatch-table ()
-  "Build the bootstrap CPS special form dispatch table from *cps-sexp-dispatch-specs*."
+  "Build the bootstrap CPS dispatch table at load time.
+
+Keeping the source spec local here avoids carrying a second global spec object at
+runtime while preserving the data-driven dispatch shape."
   (let ((table (make-hash-table :test 'eq)))
-    (dolist (spec *cps-sexp-dispatch-specs* table)
+    (dolist (spec '((+     . %cps-sexp-binop-adapter)
+                    (-     . %cps-sexp-binop-adapter)
+                    (*     . %cps-sexp-binop-adapter)
+                    (if    . %cps-sexp-if)
+                    (progn . %cps-sexp-progn-adapter)
+                    (let   . %cps-sexp-let-adapter)
+                    (print . %cps-sexp-print))
+                  table)
       (setf (gethash (car spec) table)
             (symbol-function (cdr spec))))))
 
 (defparameter *cps-sexp-dispatch-table*
-  (%make-cps-sexp-dispatch-table)
-  "Hash table mapping bootstrap CPS special forms/operators to dispatch functions.")
+  (load-time-value (%make-cps-sexp-dispatch-table))
+  "Hash table mapping bootstrap CPS special forms/operators to handler functions.")
 
 (defun %cps-sexp-node (node k)
   "CPS-transform a single bootstrap S-expression NODE with continuation K."
@@ -124,6 +122,10 @@ both NIL and numeric zero are false."
            (error "Unsupported form in CPS: ~S" (car node)))))
     (t
       (error "Unsupported node in CPS: ~S" node))))
+
+;;; CPS simplification helpers live here because the bootstrap transform depends
+;;; on them immediately, and keeping them contiguous avoids hidden load-order
+;;; coupling in the compile subsystem.
 
 (defun %cps-simplify-subtree (tree var replacement)
   (cond
@@ -200,7 +202,7 @@ both NIL and numeric zero are false."
                  (%cps-eta-reduce
                   (%cps-beta-reduce
                    (mapcar #'walk x)))
-                  x)))
+                 x)))
     (walk form)))
 
 (defun %cps-simplify-fixed-point (form step-fn)
@@ -220,4 +222,4 @@ both NIL and numeric zero are false."
 The outer continuation parameter is always named K for inspection and tests."
   (cps-simplify-form `(lambda (k) ,(%cps-sexp-node expr 'k))))
 
-;;; AST-based CPS implementation moved to cps-ast.lisp.
+;;; AST-based CPS implementation moved to cps-ast*.lisp.

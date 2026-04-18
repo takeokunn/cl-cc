@@ -72,6 +72,7 @@
   :components
   ((:file "vm-instructions-tests")
    (:file "vm-execute-tests")
+   (:file "vm-call-tests")
    (:file "vm-transcendental-tests")
    (:file "vm-numeric-tests")
    (:file "vm-extensions-tests")
@@ -79,6 +80,7 @@
    (:file "vm-clos-tests")
    (:file "vm-clos-execute-tests")
    (:file "vm-run-tests")
+   (:file "vm-run-fusion-tests")
    (:file "vm-dispatch-tests")
    (:file "vm-dispatch-gf-tests")
    (:file "vm-dispatch-gf-multi-tests")

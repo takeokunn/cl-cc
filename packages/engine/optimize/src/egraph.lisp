@@ -79,28 +79,22 @@
   "Add an e-node with operation OP and CHILD-IDS to the e-graph.
    Returns the e-class ID.
    If a structurally identical node already exists (memo hit), returns its class."
-  ;; Canonicalize child IDs
   (let* ((canon-children (mapcar (lambda (c) (egraph-find eg c)) child-ids))
-         (node  (make-e-node :op op :children canon-children))
-         (key   (enode-memo-key node)))
-    ;; Memo check: if identical node exists, return its class
-    (let ((existing (gethash key (eg-memo eg))))
-      (if existing
-          existing
-          ;; Allocate new e-class
-          (let* ((id   (eg-next-id eg))
-                 (cls  (make-e-class :id id :nodes (list node))))
-            (incf (eg-next-id eg))
-            (setf (en-eclass node) id)
-            (setf (gethash id (eg-classes eg)) cls)
-            (setf (gethash id (eg-union-find eg)) id)
-            (setf (gethash key (eg-memo eg)) id)
-            ;; Register this node as a parent of each child e-class
-            (dolist (c canon-children)
-              (let ((child-cls (gethash (egraph-find eg c) (eg-classes eg))))
-                (when child-cls
-                  (push (cons node id) (ec-parents child-cls)))))
-            id)))))
+         (node (make-e-node :op op :children canon-children))
+         (key  (enode-memo-key node)))
+    (or (gethash key (eg-memo eg))
+        (let* ((id  (eg-next-id eg))
+               (cls (make-e-class :id id :nodes (list node))))
+          (incf (eg-next-id eg))
+          (setf (en-eclass node) id
+                (gethash id  (eg-classes eg))    cls
+                (gethash id  (eg-union-find eg)) id
+                (gethash key (eg-memo eg))        id)
+          (dolist (c canon-children)
+            (let ((child-cls (gethash (egraph-find eg c) (eg-classes eg))))
+              (when child-cls
+                (push (cons node id) (ec-parents child-cls)))))
+          id))))
 
 (defun egraph-merge (eg id1 id2)
   "Assert that e-classes ID1 and ID2 are equal.
@@ -110,61 +104,54 @@
         (r2 (egraph-find eg id2)))
     (if (= r1 r2)
         r1
-        (progn
+        ;; Union: smaller-ID class wins as canonical (keeps canonical ID stable)
+        (let ((canon     (min r1 r2))
+              (non-canon (max r1 r2)))
           (push (cons r1 r2) (eg-worklist eg))
-          ;; Union: always merge the smaller-ID class into the larger-ID class
-          ;; (arbitrary choice; keeps the canonical ID stable)
-          (let ((canon (min r1 r2))
-                (non-canon (max r1 r2)))
-            (setf (gethash non-canon (eg-union-find eg)) canon)
-            canon)))))
+          (setf (gethash non-canon (eg-union-find eg)) canon)
+          canon))))
+
+(defun %egraph-absorb-class (eg r1 r2)
+  "Destructively merge e-class R2 into R1: move all nodes and parents, then remove R2."
+  (let ((cls1 (gethash r1 (eg-classes eg)))
+        (cls2 (gethash r2 (eg-classes eg))))
+    (when (and cls1 cls2)
+      (dolist (n (ec-nodes cls2))
+        (setf (en-eclass n) r1)
+        (push n (ec-nodes cls1)))
+      (dolist (p (ec-parents cls2))
+        (push p (ec-parents cls1)))
+      (remhash r2 (eg-classes eg)))))
+
+(defun %egraph-repair-parent-node (eg pn)
+  "Re-canonicalize parent e-node PN after a class merge; apply congruence merge if needed."
+  (let* ((old-key (enode-memo-key pn))
+         (new-pn  (egraph-canonical-enode eg pn))
+         (new-key (enode-memo-key new-pn)))
+    (unless (equal old-key new-key)
+      (remhash old-key (eg-memo eg))
+      (let ((existing (gethash new-key (eg-memo eg))))
+        (if existing
+            (let ((pn-class (egraph-find eg (en-eclass pn))))
+              (unless (= pn-class existing)
+                (egraph-merge eg pn-class existing)))
+            (progn
+              (setf (en-children pn) (en-children new-pn))
+              (setf (gethash new-key (eg-memo eg)) (en-eclass pn))))))))
 
 (defun egraph-rebuild (eg)
-  "Process the worklist of pending merges to restore congruence invariant.
-   After merging two e-classes, any e-node whose children are now in the
-   same class as another e-node should also be merged (congruence closure)."
+  "Process the worklist of pending merges to restore the congruence invariant."
   (let ((worklist (eg-worklist eg)))
     (setf (eg-worklist eg) nil)
     (dolist (pair worklist)
-      (let* ((r1 (egraph-find eg (car pair)))
-             (r2 (egraph-find eg (cdr pair))))
+      (let ((r1 (egraph-find eg (car pair)))
+            (r2 (egraph-find eg (cdr pair))))
         (unless (= r1 r2)
-          ;; Merge e-class data
-          (let ((cls1 (gethash r1 (eg-classes eg)))
-                (cls2 (gethash r2 (eg-classes eg))))
-            (when (and cls1 cls2)
-              ;; Move all nodes from cls2 into cls1
-              (dolist (n (ec-nodes cls2))
-                (setf (en-eclass n) r1)
-                (push n (ec-nodes cls1)))
-              ;; Move all parents from cls2 into cls1
-              (dolist (p (ec-parents cls2))
-                (push p (ec-parents cls1)))
-              ;; Remove cls2
-              (remhash r2 (eg-classes eg))))
-          ;; Repair: re-canonicalize parent e-nodes of the merged classes
+          (%egraph-absorb-class eg r1 r2)
           (let ((cls1 (gethash r1 (eg-classes eg))))
             (when cls1
               (dolist (parent-pair (ec-parents cls1))
-                (let* ((pn      (car parent-pair))
-                       (old-key (enode-memo-key pn))
-                       (new-pn  (egraph-canonical-enode eg pn))
-                       (new-key (enode-memo-key new-pn)))
-                  (unless (equal old-key new-key)
-                    ;; Remove old memo entry
-                    (remhash old-key (eg-memo eg))
-                    ;; Check if new-key already exists (congruence merge needed)
-                    (let ((existing (gethash new-key (eg-memo eg))))
-                      (if existing
-                          ;; Merge this parent's class with the existing one
-                          (let ((pn-class (egraph-find eg (en-eclass pn))))
-                            (unless (= pn-class existing)
-                              (egraph-merge eg pn-class existing)))
-                          ;; Update memo with canonical key
-                          (progn
-                            (setf (en-children pn) (en-children new-pn))
-                            (setf (gethash new-key (eg-memo eg)) (en-eclass pn))))))))))
-          ;; Recurse if worklist grew
+                (%egraph-repair-parent-node eg (car parent-pair)))))
           (when (eg-worklist eg)
             (egraph-rebuild eg)))))))
 
@@ -197,18 +184,16 @@
 
       ;; Constant pattern: match if the class contains a const e-node with this value
       ((and (consp pattern) (eq (car pattern) 'const) (cdr pattern))
-       (let ((val (cadr pattern)))
-         (let ((cls (gethash cid (eg-classes eg))))
-           (when cls
-             (loop for n in (ec-nodes cls)
-                   when (and (eq (en-op n) 'const)
-                             (null (en-children n))
-                             ;; The constant value is stored in ec-data
-                             (let ((cls-data (ec-data cls)))
-                               (or (equal cls-data val)
-                                   (and (consp cls-data)
-                                        (equal (car cls-data) val)))))
-                   collect bindings)))))
+       (let* ((val (cadr pattern))
+              (cls (gethash cid (eg-classes eg))))
+         (when cls
+           (loop for n in (ec-nodes cls)
+                 when (and (eq (en-op n) 'const)
+                           (null (en-children n))
+                           (let ((cls-data (ec-data cls)))
+                             (or (equal cls-data val)
+                                 (and (consp cls-data) (equal (car cls-data) val)))))
+                 collect bindings))))
 
       ;; Compound pattern: (op arg1 arg2 ...)
       ((consp pattern)

@@ -77,29 +77,18 @@
 (define-vm-unary-instruction vm-nstring-downcase  :nstring-downcase  "Destructive lowercase. Modifies and returns SRC.")
 (define-vm-unary-instruction vm-nstring-capitalize :nstring-capitalize "Destructive capitalize. Modifies and returns SRC.")
 
-(define-vm-instruction vm-string-trim (vm-instruction)
-  "Trim characters from both ends. DST = STRING with CHAR-BAG chars trimmed from both ends."
-  (dst nil :reader vm-dst)
-  (char-bag nil :reader vm-char-bag)
-  (string nil :reader vm-string-reg)
-  (:sexp-tag :string-trim)
-  (:sexp-slots dst char-bag string))
+(defmacro define-vm-string-trim-instruction (name tag docstring)
+  `(define-vm-instruction ,name (vm-instruction)
+     ,docstring
+     (dst nil :reader vm-dst)
+     (char-bag nil :reader vm-char-bag)
+     (string nil :reader vm-string-reg)
+     (:sexp-tag ,tag)
+     (:sexp-slots dst char-bag string)))
 
-(define-vm-instruction vm-string-left-trim (vm-instruction)
-  "Trim characters from left. DST = STRING with CHAR-BAG chars trimmed from left."
-  (dst nil :reader vm-dst)
-  (char-bag nil :reader vm-char-bag)
-  (string nil :reader vm-string-reg)
-  (:sexp-tag :string-left-trim)
-  (:sexp-slots dst char-bag string))
-
-(define-vm-instruction vm-string-right-trim (vm-instruction)
-  "Trim characters from right. DST = STRING with CHAR-BAG chars trimmed from right."
-  (dst nil :reader vm-dst)
-  (char-bag nil :reader vm-char-bag)
-  (string nil :reader vm-string-reg)
-  (:sexp-tag :string-right-trim)
-  (:sexp-slots dst char-bag string))
+(define-vm-string-trim-instruction vm-string-trim       :string-trim       "Trim characters from both ends. DST = STRING with CHAR-BAG chars trimmed from both ends.")
+(define-vm-string-trim-instruction vm-string-left-trim  :string-left-trim  "Trim characters from left. DST = STRING with CHAR-BAG chars trimmed from left.")
+(define-vm-string-trim-instruction vm-string-right-trim :string-right-trim "Trim characters from right. DST = STRING with CHAR-BAG chars trimmed from right.")
 
 ;;; String Search Instructions
 
@@ -202,11 +191,10 @@
 
 (defmethod execute-instruction ((inst vm-make-string) state pc labels)
   (declare (ignore labels))
-  (let* ((size (vm-reg-get state (vm-src inst)))
-         (init-char (let ((c (vm-char inst)))
-                      (if c (vm-reg-get state c) #\Space)))
-         (result (make-string size :initial-element init-char)))
-    (vm-reg-set state (vm-dst inst) result)
+  (let* ((size      (vm-reg-get state (vm-src inst)))
+         (char-reg  (vm-char inst))
+         (init-char (if char-reg (vm-reg-get state char-reg) #\Space)))
+    (vm-reg-set state (vm-dst inst) (make-string size :initial-element init-char))
     (values (1+ pc) nil nil)))
 
 ;;; Instruction Execution - String Manipulation
@@ -237,26 +225,17 @@
 (define-simple-instruction vm-nstring-downcase :unary nstring-downcase)
 (define-simple-instruction vm-nstring-capitalize :unary nstring-capitalize)
 
-(defmethod execute-instruction ((inst vm-string-trim) state pc labels)
-  (declare (ignore labels))
-  (let ((result (string-trim (vm-reg-get state (vm-char-bag inst))
-                             (vm-reg-get state (vm-string-reg inst)))))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(defmacro define-vm-string-trim-executor (vm-class cl-fn)
+  `(defmethod execute-instruction ((inst ,vm-class) state pc labels)
+     (declare (ignore labels))
+     (vm-reg-set state (vm-dst inst)
+                 (,cl-fn (vm-reg-get state (vm-char-bag inst))
+                         (vm-reg-get state (vm-string-reg inst))))
+     (values (1+ pc) nil nil)))
 
-(defmethod execute-instruction ((inst vm-string-left-trim) state pc labels)
-  (declare (ignore labels))
-  (let ((result (string-left-trim (vm-reg-get state (vm-char-bag inst))
-                                  (vm-reg-get state (vm-string-reg inst)))))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-string-right-trim) state pc labels)
-  (declare (ignore labels))
-  (let ((result (string-right-trim (vm-reg-get state (vm-char-bag inst))
-                                   (vm-reg-get state (vm-string-reg inst)))))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+(define-vm-string-trim-executor vm-string-trim       string-trim)
+(define-vm-string-trim-executor vm-string-left-trim  string-left-trim)
+(define-vm-string-trim-executor vm-string-right-trim string-right-trim)
 
 ;;; Instruction Execution - String Search
 

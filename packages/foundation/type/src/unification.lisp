@@ -9,13 +9,20 @@
 
 (in-package :cl-cc/type)
 
-;;; ─── Helper ───────────────────────────────────────────────────────────────
+;;; ─── Helpers ──────────────────────────────────────────────────────────────
 
 (defun %effect-label (e)
   "Extract the name symbol from a type-effect or type-effect-op node."
   (cond ((type-effect-op-p e) (type-effect-op-name e))
         ((type-effect-p   e) (type-effect-name e))
         (t nil)))
+
+(defun %effects-from-names (names row-var)
+  "Build a type-effect-row containing effect nodes for each name in NAMES,
+with ROW-VAR as the tail."
+  (make-type-effect-row
+   :effects (mapcar (lambda (n) (make-type-effect :name n)) names)
+   :row-var row-var))
 
 ;;; ─── Type Unification ─────────────────────────────────────────────────────
 
@@ -153,27 +160,6 @@ Examples:
       ((and (type-effect-row-p t1) (type-effect-row-p t2))
        (unify-effect-rows t1 t2 subst))
 
-      ;; Both are effectful functions
-      ((and (typep t1 'type-effectful-function)
-            (typep t2 'type-effectful-function))
-       (let ((params1 (type-function-params t1))
-             (params2 (type-function-params t2)))
-         (unless (= (length params1) (length params2))
-           (return-from type-unify (fail)))
-         (multiple-value-bind (subst-params ok)
-             (type-unify-lists params1 params2 subst)
-           (if ok
-               (multiple-value-bind (subst-ret ok2)
-                   (type-unify (type-function-return t1)
-                               (type-function-return t2)
-                               subst-params)
-                 (if ok2
-                     (type-unify (type-effectful-function-effects t1)
-                                 (type-effectful-function-effects t2)
-                                 subst-ret)
-                     (fail)))
-                (fail)))))
-
       ;; Refinement types unify through their base type.
       ((type-refinement-p t1)
        (type-unify (type-refinement-base t1) t2 subst))
@@ -211,31 +197,19 @@ Examples:
         ;; row2 has effects not in row1 — bind rv1 if possible
         ((and (null only-in-1) only-in-2)
          (if rv1
-             (let ((extension (make-type-effect-row
-                               :effects (mapcar (lambda (n) (make-type-effect :name n))
-                                                only-in-2)
-                               :row-var rv2)))
-               (type-unify rv1 extension subst))
+             (type-unify rv1 (%effects-from-names only-in-2 rv2) subst)
              (fail)))
         ;; row1 has effects not in row2 — bind rv2 if possible
         ((and only-in-1 (null only-in-2))
          (if rv2
-             (let ((extension (make-type-effect-row
-                               :effects (mapcar (lambda (n) (make-type-effect :name n))
-                                                only-in-1)
-                               :row-var rv1)))
-               (type-unify rv2 extension subst))
+             (type-unify rv2 (%effects-from-names only-in-1 rv1) subst)
              (fail)))
         ;; Both have unique effects — need both row vars
         (t
          (if (and rv1 rv2)
              (let* ((fresh-var (fresh-type-var 'r))
-                    (ext1 (make-type-effect-row
-                           :effects (mapcar (lambda (n) (make-type-effect :name n)) only-in-2)
-                           :row-var fresh-var))
-                    (ext2 (make-type-effect-row
-                           :effects (mapcar (lambda (n) (make-type-effect :name n)) only-in-1)
-                           :row-var fresh-var)))
+                    (ext1 (%effects-from-names only-in-2 fresh-var))
+                    (ext2 (%effects-from-names only-in-1 fresh-var)))
                (multiple-value-bind (s1 ok1) (type-unify rv1 ext1 subst)
                  (if ok1
                      (type-unify rv2 ext2 s1)

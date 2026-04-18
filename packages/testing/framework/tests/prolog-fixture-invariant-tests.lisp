@@ -2,6 +2,57 @@
 
 (in-suite cl-cc-unit-suite)
 
+(defun copy-prolog-rules-table (table)
+  (let ((copy (make-hash-table :test 'eq)))
+    (maphash (lambda (k v) (setf (gethash k copy) (copy-list v))) table)
+    copy))
+
+(defparameter *baseline-prolog-rules*
+  (copy-prolog-rules-table cl-cc:*prolog-rules*)
+  "Baseline Prolog rule database captured for integration and fixture tests.")
+
+(defmacro with-baseline-prolog (&body body)
+  "Run BODY with the original built-in Prolog rule database restored."
+  (let ((saved (gensym "SAVED")))
+    `(let ((,saved (copy-prolog-rules-table cl-cc:*prolog-rules*)))
+       (cl-cc:clear-prolog-database)
+       (maphash (lambda (k v)
+                  (setf (gethash k cl-cc:*prolog-rules*) (copy-list v)))
+                *baseline-prolog-rules*)
+       (unwind-protect
+            (progn ,@body)
+         (cl-cc:clear-prolog-database)
+         (maphash (lambda (k v)
+                    (setf (gethash k cl-cc:*prolog-rules*) (copy-list v)))
+                  ,saved)))))
+
+(defun all-envs (goal)
+  "Collect all environments yielded while solving GOAL."
+  (let ((results nil))
+    (handler-case
+        (cl-cc:solve-goal goal nil (lambda (env) (push env results)))
+      (cl-cc::prolog-cut ()))
+    (nreverse results)))
+
+(defun prolog-solution-count (goal)
+  "Return the number of solutions for GOAL."
+  (length (all-envs goal)))
+
+(defmacro assert-prolog-query-count= (goal expected-count)
+  (let ((count (gensym "COUNT")))
+    `(let ((,count (prolog-solution-count ,goal)))
+       (assert-= ,expected-count ,count))))
+
+(defmacro with-prolog-single-solution ((env goal) &body body)
+  `(let ((solutions (all-envs ,goal)))
+     (assert-= 1 (length solutions))
+     (let ((,env (car solutions)))
+       ,@body)))
+
+(defmacro assert-prolog-binding= (goal var expected)
+  `(with-prolog-single-solution (env ,goal)
+     (assert-= ,expected (cl-cc:substitute-variables ,var env))))
+
 ;;;; Invariant tests for with-fresh-prolog (framework-fixtures.lisp).
 ;;;;
 ;;;; The fixture snapshots cl-cc/prolog::*prolog-rules*, clears the DB,

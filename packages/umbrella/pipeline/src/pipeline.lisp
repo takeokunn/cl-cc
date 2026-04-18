@@ -11,9 +11,9 @@
                    (lower-sexp-to-ast expanded-expr)))
           (optimized-ast (optimize-ast ast))
           (inferred-type (when type-check
-                           (handler-case
-                               (type-check-ast optimized-ast)
-                             (error (e)
+                            (handler-case
+                                (type-check-ast optimized-ast)
+                              (error (e)
                                (if (eq type-check :strict)
                                    (error e)
                                    (progn
@@ -45,14 +45,14 @@
      ;; Capture label counter for REPL continuity
      (when *repl-capture-label-counter*
        (setf *repl-capture-label-counter* (ctx-next-label ctx)))
-     (make-compilation-result :program optimized-program
-                                :assembly (emit-assembly optimized-program :target target)
-                                :type (when type-check inferred-type)
-                                :type-env (ctx-type-env ctx)
-                                :cps (maybe-cps-transform optimized-ast)
-                                :ast optimized-ast
-                                :vm-instructions full-instructions
-                                :optimized-instructions optimized-instructions)))
+      (make-compilation-result :program optimized-program
+                                 :assembly (emit-assembly optimized-program :target target)
+                                 :type (when type-check inferred-type)
+                                 :type-env (ctx-type-env ctx)
+                                 :cps (maybe-cps-transform optimized-ast)
+                                 :ast optimized-ast
+                                 :vm-instructions full-instructions
+                                 :optimized-instructions optimized-instructions)))
 
 ;;; Stdlib sexp cache (*stdlib-expanded-cache*, %snapshot-macro-env-table,
 ;;; %restore-macro-env-table, %build-stdlib-expanded-cache, get-stdlib-forms)
@@ -195,13 +195,18 @@
     (setf *stdlib-vm-snapshot* (%build-stdlib-vm-snapshot)))
   (values))
 
+(defvar *repl-vm-state*)
+
 (defun our-eval (form)
   "Evaluate FORM by compiling it and running it in the VM.
 This is the self-hosting eval — used for compile-time macro expansion
-instead of the host CL eval."
+instead of the host CL eval.
+When *repl-vm-state* is available, reuses it so the compiled code has
+access to all previously registered functions (essential for macro
+expansion during self-host loading)."
   (let* ((result (compile-expression form :target :vm))
          (program (compilation-result-program result)))
-    (run-compiled program)))
+    (run-compiled program :state cl-cc::*repl-vm-state*)))
 
 ;;; ─── Self-Hosting Bootstrap ──────────────────────────────────────────────
 ;;;
@@ -230,9 +235,25 @@ instead of the host CL eval."
 (eval-when (:load-toplevel :execute)
   ;; NOTE: register-macro is intentionally excluded — it stores VM closures in
   ;; macro-env, causing TYPE-ERROR when host CL funcalls them. See vm-bridge.lisp.
-  (dolist (sym '(run-string compile-expression compile-string our-eval
-                 parse-all-forms generate-lambda-bindings))
-    (vm-register-host-bridge sym)))
+  (dolist (entry '(("RUN-STRING"                   . :cl-cc)
+                   ("COMPILE-EXPRESSION"           . :cl-cc)
+                   ("COMPILE-STRING"               . :cl-cc)
+                   ("OUR-EVAL"                     . :cl-cc)
+                   ("PARSE-ALL-FORMS"              . :cl-cc)
+                   ;; Register both umbrella-exported and package-local symbols.
+                   ;; Selfhosted expand files intern unqualified helper calls in :cl-cc/expand,
+                   ;; while bridge regression tests assert the public :cl-cc exports stay wired.
+                   ("PARSE-LAMBDA-LIST"            . :cl-cc)
+                   ("PARSE-LAMBDA-LIST"            . :cl-cc/expand)
+                   ("DESTRUCTURE-LAMBDA-LIST"      . :cl-cc)
+                   ("DESTRUCTURE-LAMBDA-LIST"      . :cl-cc/expand)
+                   ("GENERATE-LAMBDA-BINDINGS"     . :cl-cc)
+                   ("GENERATE-LAMBDA-BINDINGS"     . :cl-cc/expand)
+                   ("LAMBDA-LIST-INFO-ENVIRONMENT" . :cl-cc/expand)))
+    (let* ((pkg (find-package (cdr entry)))
+           (sym (when pkg (find-symbol (car entry) pkg))))
+      (when sym
+        (vm-register-host-bridge sym)))))
 
 (defun run-string-typed (source &key (mode :warn) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile and run SOURCE with type checking enabled.
@@ -249,4 +270,3 @@ instead of the host CL eval."
                                   :opt-remarks-mode opt-remarks-mode))
          (program (compilation-result-program result)))
     (values (run-compiled program) (compilation-result-type result))))
-

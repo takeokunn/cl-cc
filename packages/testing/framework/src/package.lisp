@@ -644,8 +644,6 @@
            :assert-infers-type
            :deftest-each
            :testing
-           :deftest-combinatorial
-           :deftest-pipeline
            :defbefore
            :defafter
            :skip

@@ -174,17 +174,20 @@
 (defun %resolve-stream-val (state val)
   "Resolve VAL to a CL stream: if it's already a stream, return it;
 if it's an integer handle, look it up in STATE's stream tables."
-  (cond
-    ((streamp val) val)
-    ((integerp val)
-     (cond
-       ((eql val +stdin-handle+) (vm-standard-input state))
-       ((eql val +stdout-handle+) (vm-standard-output state))
-       ((typep state 'vm-io-state)
-        (or (gethash val (vm-open-files state))
-            (gethash val (vm-string-streams state))))
-       (t nil)))
-    (t nil)))
+  (labels ((resolve-stream-handle (handle)
+             (cond
+               ((eql handle +stdin-handle+) (vm-standard-input state))
+               ((eql handle +stdout-handle+) (vm-standard-output state))
+               ((typep state 'vm-io-state)
+                (or (gethash handle (vm-open-files state))
+                    (gethash handle (vm-string-streams state))))
+               (t nil))))
+    (let ((resolvers (list (lambda () (and (streamp val) val))
+                           (lambda () (and (integerp val) (resolve-stream-handle val))))))
+      (dolist (resolver resolvers nil)
+        (let ((resolved (funcall resolver)))
+          (when resolved
+            (return resolved)))))))
 
 ;;; Stream predicate dispatch — data table drives code generation.
 ;;; Each entry maps an instruction type to its CL predicate (or nil = just test existence).

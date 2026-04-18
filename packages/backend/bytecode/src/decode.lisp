@@ -10,7 +10,15 @@
 ;;; ------------------------------------------------------------
 
 (declaim (inline decode-opcode decode-dst decode-src1 decode-src2
-                 decode-imm16 decode-offset24))
+                 decode-imm16 decode-offset24 %sign-extend))
+
+(defun %sign-extend (raw bits)
+  "Sign-extend RAW from BITS-wide two's complement to a signed integer."
+  (declare (type fixnum raw bits)
+           (optimize (speed 3) (safety 1)))
+  (if (logbitp (1- bits) raw)
+      (- raw (ash 1 bits))
+      raw))
 
 (defun decode-opcode (word)
   "Extract opcode byte from bits [31:24]."
@@ -40,23 +48,13 @@
   "Extract signed 16-bit immediate from bits [15:0]."
   (declare (type (unsigned-byte 32) word)
            (optimize (speed 3) (safety 1)))
-  (let ((raw (ldb (byte 16 0) word)))
-    (declare (type (unsigned-byte 16) raw))
-    ;; Sign-extend: if bit 15 set, value is negative
-    (if (logbitp 15 raw)
-        (- raw 65536)
-        raw)))
+  (%sign-extend (ldb (byte 16 0) word) 16))
 
 (defun decode-offset24 (word)
   "Extract signed 24-bit branch offset from bits [23:0]."
   (declare (type (unsigned-byte 32) word)
            (optimize (speed 3) (safety 1)))
-  (let ((raw (ldb (byte 24 0) word)))
-    (declare (type (unsigned-byte 24) raw))
-    ;; Sign-extend: if bit 23 set, value is negative
-    (if (logbitp 23 raw)
-        (- raw 16777216)
-        raw)))
+  (%sign-extend (ldb (byte 24 0) word) 24))
 
 ;;; ------------------------------------------------------------
 ;;; Opcode Name Table
@@ -258,11 +256,11 @@
         (format stream ";   [~D] ~S~%" i (aref constants i))))
     (format stream ";~%")
     ;; Print instructions
-    (loop for i from 0 below (length code) do
-      (let* ((word (aref code i))
-             (info (disassemble-instruction word))
-             (name (getf info :opcode-name))
-             (fmt  (getf info :format)))
+    (loop for word across code
+          for i from 0
+          do (let* ((info (disassemble-instruction word))
+                    (name (getf info :opcode-name))
+                    (fmt  (getf info :format)))
         (format stream "~4D  ~8,'0X  ~A" i word name)
         (ecase fmt
           (:3op

@@ -26,21 +26,13 @@
 
 ;;; ─── ast-defvar ──────────────────────────────────────────────────────────────
 
-(deftest cps-defvar-with-value-contains-defvar-and-funcall-k
-  "ast-defvar with a value threads through the value then calls defvar."
-  (let* ((node (cl-cc/ast::make-ast-defvar
-                :name '*x* :kind 'defvar
-                :value (cl-cc/ast::make-ast-int :value 0)))
-         (result (%cps-k node)))
-    (assert-true (%form-contains-p result 'defvar))
-    (assert-true (%form-contains-p result 'funcall))))
-
-(deftest cps-defvar-without-value-immediate-defvar
-  "ast-defvar without a value emits (defvar name) + (funcall k name) directly."
-  (let* ((node (cl-cc/ast::make-ast-defvar :name '*y* :kind 'defvar :value nil))
-         (result (%cps-k node)))
-    ;; Top-level progn: (progn (defvar *y*) (funcall k *y*))
-    (assert-eq 'progn (car result))
+(deftest-each cps-defvar-emits-defvar-and-funcall
+  "ast-defvar always emits both defvar and funcall, with or without an initial value."
+  :cases (("with-value"    (cl-cc/ast::make-ast-defvar :name '*x* :kind 'defvar
+                             :value (cl-cc/ast::make-ast-int :value 0)))
+          ("without-value" (cl-cc/ast::make-ast-defvar :name '*y* :kind 'defvar :value nil)))
+  (node)
+  (let ((result (%cps-k node)))
     (assert-true (%form-contains-p result 'defvar))
     (assert-true (%form-contains-p result 'funcall))))
 

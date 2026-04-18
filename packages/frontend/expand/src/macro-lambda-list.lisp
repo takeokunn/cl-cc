@@ -101,30 +101,112 @@
      :aux (nreverse aux)
      :environment environment)))
 
+(defun %make-gensym-local ()
+  "Return a function that generates sequentially-numbered interned symbols."
+  (let ((counter 0))
+    (lambda (prefix)
+      (intern (format nil "~A-~D" prefix (incf counter))))))
+
+(defun %push-required-bindings (required current-arg bindings gensym-local)
+  "Accumulate binding forms for REQUIRED parameters.
+Returns the updated CURRENT-ARG cursor and BINDINGS list." 
+  (dolist (req required)
+    (let ((temp (funcall gensym-local "REQ")))
+      (push `(,temp (car ,current-arg)) bindings)
+      (push `(,req ,temp) bindings)
+      (setf current-arg `(cdr ,current-arg))))
+  (values current-arg bindings))
+
+(defun %push-optional-bindings (optional current-arg bindings gensym-local)
+  "Accumulate binding forms for OPTIONAL parameters.
+Returns the updated CURRENT-ARG cursor and BINDINGS list."
+  (dolist (opt optional)
+    (destructuring-bind (opt-name default supplied-p) opt
+      (let ((temp (funcall gensym-local "OPT"))
+            (supplied-temp (funcall gensym-local "SUPPLIED")))
+        (push `(,temp (if ,current-arg (car ,current-arg) ,default)) bindings)
+        (push `(,opt-name ,temp) bindings)
+        (when supplied-p
+          (push `(,supplied-temp (not (null ,current-arg))) bindings)
+          (push `(,supplied-p ,supplied-temp) bindings))
+        (setf current-arg `(cdr ,current-arg)))))
+  (values current-arg bindings))
+
+(defun %push-key-bindings (key-params current-arg bindings gensym-local)
+  "Accumulate binding forms for KEY-PARAMS against CURRENT-ARG."
+  (dolist (key-spec key-params)
+    (destructuring-bind ((keyword name) default supplied-p) key-spec
+      (let ((found (funcall gensym-local "FOUND"))
+            (val (funcall gensym-local "VAL")))
+        (push `(,val (getf ,current-arg ,keyword ,default)) bindings)
+        (push `(,name ,val) bindings)
+        (when supplied-p
+          (push `(,found (not (eq (getf ,current-arg ,keyword :not-found)
+                                  :not-found))) bindings)
+          (push `(,supplied-p ,found) bindings)))))
+  bindings)
+
+(defun %push-aux-bindings (aux-specs bindings)
+  "Accumulate binding forms for AUX-SPECS into BINDINGS."
+  (dolist (aux-spec aux-specs)
+    (destructuring-bind (aux-name init) aux-spec
+      (push `(,aux-name ,init) bindings)))
+  bindings)
+
+(defun %push-destructured-required-bindings (required current-arg bindings gensym-local)
+  "Accumulate binding forms for REQUIRED destructuring parameters."
+  (dolist (req required)
+    (let ((temp (funcall gensym-local "REQ")))
+      (push `(,temp (car ,current-arg)) bindings)
+      (if (listp req)
+          (let ((sub-bindings (destructure-lambda-list req temp)))
+            (dolist (b sub-bindings)
+              (push b bindings)))
+          (push `(,req ,temp) bindings))
+      (push `(,current-arg (cdr ,current-arg)) bindings)))
+  bindings)
+
+(defun %push-destructured-optional-bindings (optional opt-remaining bindings gensym-local)
+  "Accumulate binding forms for OPTIONAL destructuring parameters."
+  (dolist (opt optional)
+    (destructuring-bind (name default supplied-p) opt
+      (let ((temp (funcall gensym-local "OPT"))
+            (supplied-temp (funcall gensym-local "SUPPLIED")))
+        (push `(,temp (if ,opt-remaining (car ,opt-remaining) ,default)) bindings)
+        (push `(,name ,temp) bindings)
+        (when supplied-p
+          (push `(,supplied-temp (if ,opt-remaining t nil)) bindings)
+          (push `(,supplied-p ,supplied-temp) bindings))
+        (push `(,opt-remaining (cdr ,opt-remaining)) bindings))))
+  bindings)
+
+(defun %push-destructured-key-bindings (key-params key-remaining bindings gensym-local)
+  "Accumulate binding forms for KEY-PARAMS in destructuring mode."
+  (dolist (key-spec key-params)
+    (destructuring-bind ((keyword name) default supplied-p) key-spec
+      (let ((val-temp (funcall gensym-local "VAL")))
+        (push `(,val-temp (getf ,key-remaining ,keyword ,default)) bindings)
+        (push `(,name ,val-temp) bindings)
+        (when supplied-p
+          (let ((found-temp (funcall gensym-local "FOUND")))
+            (push `(,found-temp (not (eq (getf ,key-remaining ,keyword :not-found)
+                                         :not-found))) bindings)
+            (push `(,supplied-p ,found-temp) bindings))))))
+  bindings)
+
 (defun generate-lambda-bindings (lambda-list form-var)
   "Generate LET bindings from LAMBDA-LIST for the macro form in FORM-VAR."
   (let ((info (parse-lambda-list lambda-list))
         (bindings nil)
-        (temp-counter 0))
-    (labels ((gensym-local (prefix)
-               (intern (format nil "~A-~D" prefix (incf temp-counter)))))
-      (let ((current-arg `(cdr ,form-var)))
-        (dolist (req (lambda-list-info-required info))
-          (let ((temp (gensym-local "REQ")))
-            (push `(,temp (car ,current-arg)) bindings)
-            (push `(,req ,temp) bindings)
-            (setf current-arg `(cdr ,current-arg))))
+        (gensym-local (%make-gensym-local)))
+    (let ((current-arg `(cdr ,form-var)))
+        (multiple-value-setq (current-arg bindings)
+          (%push-required-bindings (lambda-list-info-required info)
+                                   current-arg bindings gensym-local))
 
-        (dolist (opt (lambda-list-info-optional info))
-          (destructuring-bind (opt-name default supplied-p) opt
-            (let ((temp (gensym-local "OPT"))
-                  (supplied-temp (gensym-local "SUPPLIED")))
-              (push `(,temp (if ,current-arg (car ,current-arg) ,default)) bindings)
-              (push `(,opt-name ,temp) bindings)
-              (when supplied-p
-                (push `(,supplied-temp (not (null ,current-arg))) bindings)
-                (push `(,supplied-p ,supplied-temp) bindings))
-              (setf current-arg `(cdr ,current-arg)))))
+        (multiple-value-setq (current-arg bindings)
+          (%push-optional-bindings (lambda-list-info-optional info)
+                                   current-arg bindings gensym-local))
 
         (when (or (lambda-list-info-rest info)
                   (lambda-list-info-body info))
@@ -133,22 +215,12 @@
             (push `(,rest-sym ,current-arg) bindings)))
 
         (when (lambda-list-info-key-params info)
-          (dolist (key-spec (lambda-list-info-key-params info))
-            (destructuring-bind ((keyword name) default supplied-p) key-spec
-              (let ((found (gensym-local "FOUND"))
-                    (val (gensym-local "VAL")))
-                (push `(,val (getf ,current-arg ,keyword ,default)) bindings)
-                (push `(,name ,val) bindings)
-                (when supplied-p
-                  (push `(,found (not (eq (getf ,current-arg ,keyword :not-found)
-                                         :not-found))) bindings)
-                  (push `(,supplied-p ,found) bindings))))))
+          (setf bindings (%push-key-bindings (lambda-list-info-key-params info)
+                                             current-arg bindings gensym-local)))
 
-        (dolist (aux-spec (lambda-list-info-aux info))
-          (destructuring-bind (aux-name init) aux-spec
-            (push `(,aux-name ,init) bindings))))
+        (setf bindings (%push-aux-bindings (lambda-list-info-aux info) bindings)))
 
-      (nreverse bindings))))
+      (nreverse bindings)))
 
 (defun destructure-lambda-list (pattern arg)
   "Destructure ARG according to PATTERN lambda list.
@@ -158,35 +230,20 @@
         (bindings nil)
         (arg-var (gensym "ARG"))
         (remaining-var (gensym "REMAINING"))
-        (temp-counter 0))
-    (labels ((gensym-local (prefix)
-               (intern (format nil "~A-~D" prefix (incf temp-counter)))))
-      (push (list arg-var arg) bindings)
+        (gensym-local (%make-gensym-local)))
+    (push (list arg-var arg) bindings)
 
       (let ((current-arg arg-var))
-        (dolist (req (lambda-list-info-required info))
-          (let ((temp (gensym-local "REQ")))
-            (push `(,temp (car ,current-arg)) bindings)
-            (if (listp req)
-                (let ((sub-bindings (destructure-lambda-list req temp)))
-                  (dolist (b sub-bindings)
-                    (push b bindings)))
-                (push `(,req ,temp) bindings))
-            (push `(,current-arg (cdr ,current-arg)) bindings)))
+        (setf bindings (%push-destructured-required-bindings
+                        (lambda-list-info-required info)
+                        current-arg bindings gensym-local))
 
         (push `(,remaining-var ,current-arg) bindings))
 
       (let ((opt-remaining remaining-var))
-        (dolist (opt (lambda-list-info-optional info))
-          (destructuring-bind (name default supplied-p) opt
-            (let ((temp (gensym-local "OPT"))
-                  (supplied-temp (gensym-local "SUPPLIED")))
-              (push `(,temp (if ,opt-remaining (car ,opt-remaining) ,default)) bindings)
-              (push `(,name ,temp) bindings)
-              (when supplied-p
-                (push `(,supplied-temp (if ,opt-remaining t nil)) bindings)
-                (push `(,supplied-p ,supplied-temp) bindings))
-              (push `(,opt-remaining (cdr ,opt-remaining)) bindings))))
+        (setf bindings (%push-destructured-optional-bindings
+                        (lambda-list-info-optional info)
+                        opt-remaining bindings gensym-local))
 
         (setf remaining-var opt-remaining))
 
@@ -198,21 +255,12 @@
 
       (when (lambda-list-info-key-params info)
         (let ((key-remaining remaining-var))
-          (dolist (key-spec (lambda-list-info-key-params info))
-            (destructuring-bind ((keyword name) default supplied-p) key-spec
-              (let ((val-temp (gensym-local "VAL")))
-                (push `(,val-temp (getf ,key-remaining ,keyword ,default)) bindings)
-                (push `(,name ,val-temp) bindings)
-                (when supplied-p
-                  (let ((found-temp (gensym-local "FOUND")))
-                    (push `(,found-temp (not (eq (getf ,key-remaining ,keyword :not-found)
-                                                 :not-found))) bindings)
-                    (push `(,supplied-p ,found-temp) bindings))))))))
+          (setf bindings (%push-destructured-key-bindings
+                          (lambda-list-info-key-params info)
+                          key-remaining bindings gensym-local))))
 
-      (dolist (aux-spec (lambda-list-info-aux info))
-        (destructuring-bind (name init) aux-spec
-          (push `(,name ,init) bindings)))
+      (setf bindings (%push-aux-bindings (lambda-list-info-aux info) bindings))
 
-      (nreverse bindings))))
+      (nreverse bindings)))
 
 ) ; end eval-when

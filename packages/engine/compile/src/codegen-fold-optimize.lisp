@@ -25,6 +25,98 @@
 
 ;;; ── AST constant fold pass ───────────────────────────────────────────────────
 
+(defparameter *optimize-ast-rebuilder-table*
+  '((ast-progn       . %optimize-ast-progn-node)
+    (ast-let         . %optimize-ast-let-node)
+    (ast-if          . %optimize-ast-if-node)
+    (ast-lambda      . %optimize-ast-lambda-node)
+    (ast-defun       . %optimize-ast-defun-node)
+    (ast-defvar      . %optimize-ast-defvar-node)
+    (ast-block       . %optimize-ast-block-node)
+    (ast-return-from . %optimize-ast-return-from-node)
+    (ast-setq        . %optimize-ast-setq-node)
+    (ast-the         . %optimize-ast-the-node))
+  "Type symbol → rebuilder function symbol for optimize-ast's simple recursive cases.
+Special folding nodes like ast-binop and ast-call stay in optimize-ast directly.")
+
+(defun %optimize-ast-list (nodes)
+  "Optimize every AST node in NODES, preserving list order."
+  (mapcar #'optimize-ast nodes))
+
+(defun %optimize-ast-binding-alist (bindings)
+  "Optimize the value side of an alist of lexical BINDINGS."
+  (mapcar (lambda (binding)
+            (cons (car binding) (optimize-ast (cdr binding))))
+          bindings))
+
+(defun %optimize-ast-progn-node (node)
+  (%loc node make-ast-progn
+    :forms (%optimize-ast-list (ast-progn-forms node))))
+
+(defun %optimize-ast-let-node (node)
+  (%loc node make-ast-let
+    :bindings     (%optimize-ast-binding-alist (ast-let-bindings node))
+    :declarations (ast-let-declarations node)
+    :body         (%optimize-ast-list (ast-let-body node))))
+
+(defun %optimize-ast-if-node (node)
+  (%loc node make-ast-if
+    :cond (optimize-ast (ast-if-cond node))
+    :then (optimize-ast (ast-if-then node))
+    :else (optimize-ast (ast-if-else node))))
+
+(defun %optimize-ast-lambda-node (node)
+  (%loc node make-ast-lambda
+    :params          (ast-lambda-params node)
+    :optional-params (ast-lambda-optional-params node)
+    :rest-param      (ast-lambda-rest-param node)
+    :key-params      (ast-lambda-key-params node)
+    :declarations    (ast-lambda-declarations node)
+    :body            (%optimize-ast-list (ast-lambda-body node))
+    :env             (ast-lambda-env node)))
+
+(defun %optimize-ast-defun-node (node)
+  (%loc node make-ast-defun
+    :name            (ast-defun-name node)
+    :params          (ast-defun-params node)
+    :optional-params (ast-defun-optional-params node)
+    :rest-param      (ast-defun-rest-param node)
+    :key-params      (ast-defun-key-params node)
+    :declarations    (ast-defun-declarations node)
+    :body            (%optimize-ast-list (ast-defun-body node))))
+
+(defun %optimize-ast-defvar-node (node)
+  (%loc node make-ast-defvar
+    :name  (ast-defvar-name node)
+    :value (optimize-ast (ast-defvar-value node))
+    :kind  (ast-defvar-kind node)))
+
+(defun %optimize-ast-block-node (node)
+  (%loc node make-ast-block
+    :name (ast-block-name node)
+    :body (%optimize-ast-list (ast-block-body node))))
+
+(defun %optimize-ast-return-from-node (node)
+  (%loc node make-ast-return-from
+    :name  (ast-return-from-name node)
+    :value (optimize-ast (ast-return-from-value node))))
+
+(defun %optimize-ast-setq-node (node)
+  (%loc node make-ast-setq
+    :var   (ast-setq-var node)
+    :value (optimize-ast (ast-setq-value node))))
+
+(defun %optimize-ast-the-node (node)
+  (%loc node make-ast-the
+    :type  (ast-the-type node)
+    :value (optimize-ast (ast-the-value node))))
+
+(defun %optimize-ast-rebuild-node (node)
+  "Rebuild NODE via the declarative rebuilder table when it is a simple recursive case." 
+  (let ((rebuilder (cdr (assoc (type-of node) *optimize-ast-rebuilder-table*))))
+    (when rebuilder
+      (funcall rebuilder node))))
+
 (defun optimize-ast (node)
   "Fold small pure constant expressions before VM lowering."
   (typecase node
@@ -34,64 +126,13 @@
                       (optimize-ast (ast-binop-rhs node))))
     (ast-call
      (let* ((func      (optimize-ast (ast-call-func node)))
-            (args      (mapcar #'optimize-ast (ast-call-args node)))
+            (args      (%optimize-ast-list (ast-call-args node)))
             (call-node (%loc node make-ast-call :func func :args args)))
        (multiple-value-bind (value ok)
            (let ((*compile-time-value-env*    *compile-time-value-env*)
                  (*compile-time-function-env* *compile-time-function-env*))
              (%evaluate-ast call-node *compile-time-eval-depth-limit*))
          (if ok (%compile-time-value->ast value node) call-node))))
-    (ast-progn
-     (%loc node make-ast-progn
-       :forms (mapcar #'optimize-ast (ast-progn-forms node))))
-    (ast-let
-     (%loc node make-ast-let
-       :bindings     (mapcar (lambda (b) (cons (car b) (optimize-ast (cdr b))))
-                             (ast-let-bindings node))
-       :declarations (ast-let-declarations node)
-       :body         (mapcar #'optimize-ast (ast-let-body node))))
-    (ast-if
-     (%loc node make-ast-if
-       :cond (optimize-ast (ast-if-cond node))
-       :then (optimize-ast (ast-if-then node))
-       :else (optimize-ast (ast-if-else node))))
-    (ast-lambda
-     (%loc node make-ast-lambda
-       :params          (ast-lambda-params node)
-       :optional-params (ast-lambda-optional-params node)
-       :rest-param      (ast-lambda-rest-param node)
-       :key-params      (ast-lambda-key-params node)
-       :declarations    (ast-lambda-declarations node)
-       :body            (mapcar #'optimize-ast (ast-lambda-body node))
-       :env             (ast-lambda-env node)))
-    (ast-defun
-     (%loc node make-ast-defun
-       :name            (ast-defun-name node)
-       :params          (ast-defun-params node)
-       :optional-params (ast-defun-optional-params node)
-       :rest-param      (ast-defun-rest-param node)
-       :key-params      (ast-defun-key-params node)
-       :declarations    (ast-defun-declarations node)
-       :body            (mapcar #'optimize-ast (ast-defun-body node))))
-    (ast-defvar
-     (%loc node make-ast-defvar
-       :name  (ast-defvar-name node)
-       :value (optimize-ast (ast-defvar-value node))
-       :kind  (ast-defvar-kind node)))
-    (ast-block
-     (%loc node make-ast-block
-       :name (ast-block-name node)
-       :body (mapcar #'optimize-ast (ast-block-body node))))
-    (ast-return-from
-     (%loc node make-ast-return-from
-       :name  (ast-return-from-name node)
-       :value (optimize-ast (ast-return-from-value node))))
-    (ast-setq
-     (%loc node make-ast-setq
-       :var   (ast-setq-var node)
-       :value (optimize-ast (ast-setq-value node))))
-    (ast-the
-     (%loc node make-ast-the
-       :type  (ast-the-type node)
-       :value (optimize-ast (ast-the-value node))))
-    (t node)))
+    (t
+     (or (%optimize-ast-rebuild-node node)
+         node))))

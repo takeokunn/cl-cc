@@ -189,3 +189,50 @@
          (table   (cl-cc/optimize::opt-known-callee-labels insts)))
     ;; After being overwritten by vm-const, :r0 should no longer track "fn-a"
     (assert-null (gethash :r0 table))))
+
+;;; ─── opt-can-safely-rename-p ─────────────────────────────────────────────────
+
+(deftest opt-can-safely-rename-p-simple-body
+  "opt-can-safely-rename-p returns T for a simple move+ret body."
+  (let* ((insts (list (make-vm-move :dst :R0 :src :R1)
+                      (make-vm-ret :reg :R0))))
+    (assert-true (cl-cc/optimize::opt-can-safely-rename-p insts))))
+
+(deftest opt-can-safely-rename-p-empty-body
+  "opt-can-safely-rename-p returns T for an empty instruction list."
+  (assert-true (cl-cc/optimize::opt-can-safely-rename-p nil)))
+
+;;; ─── opt-rename-regs-in-inst ─────────────────────────────────────────────────
+
+(deftest opt-rename-regs-in-inst-renames-dst
+  "opt-rename-regs-in-inst renames destination register via renaming table."
+  (let* ((inst     (make-vm-move :dst :R0 :src :R1))
+         (renaming (let ((ht (make-hash-table :test #'eq)))
+                     (setf (gethash :R0 ht) :R10
+                           (gethash :R1 ht) :R11)
+                     ht))
+         (renamed  (cl-cc/optimize::opt-rename-regs-in-inst inst renaming)))
+    (assert-eq :R10 (cl-cc::vm-dst renamed))
+    (assert-eq :R11 (cl-cc::vm-src renamed))))
+
+(deftest opt-rename-regs-in-inst-unchanged-on-missing-key
+  "opt-rename-regs-in-inst leaves registers not in renaming table unchanged."
+  (let* ((inst     (make-vm-move :dst :R0 :src :R1))
+         (renaming (make-hash-table :test #'eq))   ; empty — no mappings
+         (renamed  (cl-cc/optimize::opt-rename-regs-in-inst inst renaming)))
+    (assert-eq :R0 (cl-cc::vm-dst renamed))
+    (assert-eq :R1 (cl-cc::vm-src renamed))))
+
+;;; ─── opt-body-has-global-refs-p ──────────────────────────────────────────────
+
+(deftest opt-body-has-global-refs-p-no-global-refs
+  "opt-body-has-global-refs-p returns NIL when all reads are params or local dsts."
+  (let* ((insts (list (make-vm-add :dst :R2 :lhs :R0 :rhs :R1)
+                      (make-vm-ret :reg :R2))))
+    (assert-null (cl-cc/optimize::opt-body-has-global-refs-p insts '(:R0 :R1)))))
+
+(deftest opt-body-has-global-refs-p-detects-global
+  "opt-body-has-global-refs-p returns T when a register is read but not in params or prior dsts."
+  (let* ((insts (list (make-vm-move :dst :R2 :src :R99)  ; :R99 is not a param
+                      (make-vm-ret :reg :R2))))
+    (assert-true (cl-cc/optimize::opt-body-has-global-refs-p insts '(:R0)))))

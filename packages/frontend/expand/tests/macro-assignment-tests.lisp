@@ -30,14 +30,15 @@
     ;; Body forms are SETQ (not wrapped in PROGN)
     (assert-eq (car (caddr result)) 'setq)))
 
-(deftest psetq-macro-behavior
-  "PSETQ: empty expands to nil; 1-pair and N-pair forms produce outer LET with bindings, body starting with SETQ."
-  (assert-equal (our-macroexpand-1 '(psetq))
-                nil)
-  (let ((result (our-macroexpand-1 '(psetq a 1))))
-    (assert-eq 'let (car result))
-    (assert-true (consp (cadr result)))
-    (assert-eq 'setq (car (caddr result))))
-  (let ((result (our-macroexpand-1 '(psetq a 1 b 2 c 3))))
+(deftest psetq-macro-empty-returns-nil
+  "PSETQ with no args expands to nil."
+  (assert-null (our-macroexpand-1 '(psetq))))
+
+(deftest-each psetq-macro-nonzero-produces-let
+  "PSETQ with bindings expands to LET + SETQ body."
+  :cases (("one-pair"   '(psetq a 1))
+          ("three-pair" '(psetq a 1 b 2 c 3)))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
     (assert-eq 'let (car result))
     (assert-true (consp (cadr result)))))

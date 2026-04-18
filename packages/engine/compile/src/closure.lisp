@@ -95,55 +95,34 @@ binding without constituting an escape."
   (labels ((add-kind (kind acc)
              (if (member kind acc) acc (cons kind acc)))
            (merge-kinds (&rest kind-lists)
-             (reduce (lambda (acc kinds)
-                       (reduce (lambda (inner-acc kind)
-                                 (add-kind kind inner-acc))
-                               kinds
-                               :initial-value acc))
-                     kind-lists
-                     :initial-value nil))
+             (reduce (lambda (acc ks) (reduce (lambda (a k) (add-kind k a)) ks :initial-value acc))
+                     kind-lists :initial-value nil))
            (mentions-node-p (node)
              (typecase node
                (ast-var (eq (ast-var-name node) binding-name))
                (t (some #'mentions-node-p (ast-children node)))))
            (mentions-forms-p (forms)
              (and (listp forms) (some #'mentions-node-p forms)))
+           (classify-children (node)
+             (reduce #'merge-kinds (mapcar #'classify (ast-children node)) :initial-value nil))
+           (%capture-kinds (body)
+             ;; Returns (:capture) when binding appears in a closure body, plus
+             ;; any inner escapes found by recursing into the body forms.
+             (merge-kinds (when (mentions-forms-p body) (list :capture))
+                          (reduce #'merge-kinds (mapcar #'classify body) :initial-value nil)))
            (classify (node)
              (typecase node
-               (ast-var (if (eq (ast-var-name node) binding-name) '(:return) nil))
-               ((or ast-int ast-quote ast-function ast-go ast-hole ast-defgeneric) nil)
-               (ast-progn (reduce #'merge-kinds (mapcar #'classify (ast-progn-forms node)) :initial-value nil))
-               (ast-block (reduce #'merge-kinds (mapcar #'classify (ast-block-body node)) :initial-value nil))
-               (ast-if (merge-kinds (classify (ast-if-cond node))
-                                    (classify (ast-if-then node))
-                                    (classify (ast-if-else node))))
-               (ast-let (merge-kinds (reduce #'merge-kinds (mapcar #'classify (mapcar #'cdr (ast-let-bindings node))) :initial-value nil)
-                                     (reduce #'merge-kinds (mapcar #'classify (ast-let-body node)) :initial-value nil)))
-               (ast-setq (classify (ast-setq-value node)))
-               (ast-return-from (classify (ast-return-from-value node)))
-               (ast-the (classify (ast-the-value node)))
-               (ast-values (reduce #'merge-kinds (mapcar #'classify (ast-values-forms node)) :initial-value nil))
-               (ast-catch (merge-kinds (classify (ast-catch-tag node))
-                                       (reduce #'merge-kinds (mapcar #'classify (ast-catch-body node)) :initial-value nil)))
-               (ast-throw (merge-kinds (classify (ast-throw-tag node))
-                                       (classify (ast-throw-value node))))
-               (ast-unwind-protect (merge-kinds (classify (ast-unwind-protected node))
-                                                (reduce #'merge-kinds (mapcar #'classify (ast-unwind-cleanup node)) :initial-value nil)))
-               (ast-handler-case (merge-kinds (classify (ast-handler-case-form node))
-                                              (reduce #'merge-kinds
-                                                      (mapcar (lambda (clause)
-                                                                (reduce #'merge-kinds (mapcar #'classify (cddr clause)) :initial-value nil))
-                                                              (ast-handler-case-clauses node))
-                                                      :initial-value nil)))
-               (ast-multiple-value-call (merge-kinds (classify (ast-mv-call-func node))
-                                                     (reduce #'merge-kinds (mapcar #'classify (ast-mv-call-args node)) :initial-value nil)))
-               (ast-multiple-value-prog1 (merge-kinds (classify (ast-mv-prog1-first node))
-                                                      (reduce #'merge-kinds (mapcar #'classify (ast-mv-prog1-forms node)) :initial-value nil)))
-               (ast-multiple-value-bind (merge-kinds (classify (ast-mvb-values-form node))
-                                                     (reduce #'merge-kinds (mapcar #'classify (ast-mvb-body node)) :initial-value nil)))
-               (ast-apply (add-kind :external-call
-                                    (merge-kinds (classify (ast-apply-func node))
-                                                 (reduce #'merge-kinds (mapcar #'classify (ast-apply-args node)) :initial-value nil))))
+               ;; Leaf that triggers :return
+               (ast-var (when (eq (ast-var-name node) binding-name) (list :return)))
+               ;; Closures: add :capture when the binding appears in their specific body
+               (ast-lambda     (%capture-kinds (ast-lambda-body node)))
+               (ast-defun      (%capture-kinds (ast-defun-body node)))
+               (ast-defmethod  (%capture-kinds (ast-defmethod-body node)))
+               (ast-local-fns  (%capture-kinds (ast-local-fns-body node)))
+               ;; apply always escapes
+               (ast-apply
+                (add-kind :external-call (classify-children node)))
+               ;; call: safe-consumer, explicit apply/funcall, or unknown callee
                (ast-call
                 (let ((func (ast-call-func node))
                       (args (ast-call-args node)))
@@ -155,44 +134,15 @@ binding without constituting an escape."
                           (member (symbol-name func) '("APPLY" "FUNCALL") :test #'string=))
                      (add-kind :external-call
                                (reduce #'merge-kinds (mapcar #'classify args) :initial-value nil)))
-                    (t (let ((arg-kinds (reduce #'merge-kinds (mapcar #'classify args) :initial-value nil)))
-                         (if arg-kinds
-                             (add-kind :external-call
-                                       (merge-kinds (if (typep func 'ast-node) (classify func) nil)
-                                                    arg-kinds))
-                             (if (typep func 'ast-node) (classify func) nil)))))))
-                (ast-lambda
-                 (merge-kinds (if (mentions-forms-p (ast-lambda-body node))
-                                  '(:capture) nil)
-                              (reduce #'merge-kinds (mapcar #'classify (ast-lambda-body node)) :initial-value nil)))
-                (ast-defun
-                 (merge-kinds (if (mentions-forms-p (ast-defun-body node))
-                                  '(:capture) nil)
-                              (reduce #'merge-kinds (mapcar #'classify (ast-defun-body node)) :initial-value nil)))
-                (ast-defmethod
-                 (merge-kinds (if (mentions-forms-p (ast-defmethod-body node))
-                                  '(:capture) nil)
-                              (reduce #'merge-kinds (mapcar #'classify (ast-defmethod-body node)) :initial-value nil)))
-                (ast-local-fns
-                 (merge-kinds (if (mentions-forms-p (ast-local-fns-body node))
-                                  '(:capture) nil)
-                              (reduce #'merge-kinds (mapcar #'classify (ast-local-fns-body node)) :initial-value nil)))
-               (ast-defclass (reduce #'merge-kinds (mapcar #'classify (ast-defclass-slots node)) :initial-value nil))
-               (ast-defvar (classify (ast-defvar-value node)))
-               (ast-defmacro (reduce #'merge-kinds (mapcar #'classify (ast-defmacro-body node)) :initial-value nil))
-               (ast-make-instance
-                (reduce #'merge-kinds
-                        (mapcar #'classify
-                                (loop for (_ value) on (ast-make-instance-initargs node) by #'cddr
-                                      collect value))
-                        :initial-value nil))
-               (ast-slot-value (classify (ast-slot-value-object node)))
-               (ast-set-slot-value (merge-kinds (classify (ast-set-slot-value-object node))
-                                                (classify (ast-set-slot-value-value node))))
-               (ast-set-gethash (merge-kinds (classify (ast-set-gethash-key node))
-                                             (classify (ast-set-gethash-table node))
-                                             (classify (ast-set-gethash-value node))))
-               (t (reduce #'merge-kinds (mapcar #'classify (ast-children node)) :initial-value nil)))))
+                    (t
+                     (let ((arg-kinds (reduce #'merge-kinds (mapcar #'classify args) :initial-value nil)))
+                       (if arg-kinds
+                           (add-kind :external-call
+                                     (merge-kinds (when (typep func 'ast-node) (classify func))
+                                                  arg-kinds))
+                           (when (typep func 'ast-node) (classify func))))))))
+               ;; All other nodes: generic traversal via ast-children
+               (t (classify-children node)))))
     (if (listp body-forms)
         (reduce #'merge-kinds (mapcar #'classify body-forms) :initial-value nil)
         nil)))

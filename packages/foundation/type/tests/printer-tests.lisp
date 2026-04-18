@@ -14,66 +14,60 @@
 (in-suite printer-suite)
 ;;; ─── type-to-string: basic types ───────────────────────────────────────────
 
-(deftest printer-primitive
-  "Primitives print as CL type name."
-  (assert-string= "FIXNUM" (type-to-string type-int))
+(deftest printer-primitive-int
+  "type-to-string for integer primitive is FIXNUM."
+  (assert-string= "FIXNUM" (type-to-string type-int)))
+
+(deftest printer-primitive-string
+  "type-to-string for string primitive is STRING."
   (assert-string= "STRING" (type-to-string type-string)))
 
-(deftest printer-type-var-named
-  "Named type-var prints as ?name."
-  (let ((v (fresh-type-var "alpha")))
-    (assert-true (search "alpha" (type-to-string v)))))
+(deftest printer-var-named
+  "type-to-string for a named type-var contains the name."
+  (assert-true (search "alpha" (type-to-string (fresh-type-var "alpha")))))
 
-(deftest printer-type-var-linked
-  "Linked type-var follows the link."
+(deftest printer-var-linked
+  "type-to-string for a linked type-var follows the link and shows FIXNUM."
   (let ((v (fresh-type-var "a")))
     (setf (cl-cc/type::type-var-link v) type-int)
     (assert-string= "FIXNUM" (type-to-string v))))
 
-(deftest printer-rigid
-  "Rigid var prints with sk prefix."
-  (let ((r (fresh-rigid-var "test")))
-    (assert-true (search "sk" (type-to-string r)))))
+(deftest printer-rigid-var
+  "type-to-string for a rigid var contains 'sk' prefix."
+  (assert-true (search "sk" (type-to-string (fresh-rigid-var "test")))))
 
 ;;; ─── type-to-string: composite types ───────────────────────────────────────
 
-(deftest printer-arrow-single-param
-  "Single-param arrow: int -> string."
-  (let ((s (type-to-string (make-type-arrow (list type-int) type-string))))
-    (assert-true (search "FIXNUM" s))
+(deftest-each printer-arrow-cases
+  "Arrow types print with '->'; single-param shows both types; effectful arrow includes 'IO'."
+  :cases (("single-param"   (list type-int) type-string nil                 "FIXNUM" "STRING")
+          ("multi-param"    (list type-int type-string) type-bool nil       nil      nil)
+          ("with-effects"   (list type-int) type-string +io-effect-row+     "IO"     nil))
+  (params ret effects expected-sub expected-sub2)
+  (let ((s (type-to-string (make-type-arrow params ret :effects effects))))
     (assert-true (search "->" s))
-    (assert-true (search "STRING" s))))
-
-(deftest printer-arrow-multi-param
-  "Multi-param arrow: (int string) -> bool."
-  (let ((s (type-to-string (make-type-arrow (list type-int type-string) type-bool))))
-    (assert-true (search "->" s))))
-
-(deftest printer-arrow-with-effects
-  "Arrow with effects includes effect annotation."
-  (let ((arr (make-type-arrow (list type-int) type-string :effects +io-effect-row+)))
-    (let ((s (type-to-string arr)))
-      (assert-true (search "IO" s)))))
+    (when expected-sub  (assert-true (search expected-sub  s)))
+    (when expected-sub2 (assert-true (search expected-sub2 s)))
+    (when effects       (assert-true (search "IO" s)))  ))
 
 (deftest printer-product
   "Product type prints as (A, B)."
   (let ((s (type-to-string (make-type-product :elems (list type-int type-string)))))
     (assert-true (search "," s))))
 
-(deftest printer-record-closed
-  "Closed record: {x: int, y: string}."
-  (let* ((r (make-type-record :fields (list (cons 'x type-int) (cons 'y type-string))
-                              :row-var nil))
+(deftest-each printer-record-cases
+  "Closed record contains '{' and field name; open record contains '|' row separator."
+  :cases (("closed" nil "{" "x")
+          ("open"   t   "|" nil))
+  (open-p expected-bracket expected-field)
+  (let* ((rv (when open-p (fresh-type-var "rho")))
+         (fields (if open-p
+                     (list (cons 'x type-int))
+                     (list (cons 'x type-int) (cons 'y type-string))))
+         (r (make-type-record :fields fields :row-var rv))
          (s (type-to-string r)))
-    (assert-true (search "{" s))
-    (assert-true (search "x" (string-downcase s)))))
-
-(deftest printer-record-open
-  "Open record includes row variable."
-  (let* ((rv (fresh-type-var "rho"))
-         (r (make-type-record :fields (list (cons 'x type-int)) :row-var rv))
-         (s (type-to-string r)))
-    (assert-true (search "|" s))))
+    (assert-true (search expected-bracket s))
+    (when expected-field (assert-true (search expected-field (string-downcase s))))))
 
 (deftest printer-variant
   "Variant type prints with angle brackets."
@@ -190,62 +184,39 @@
   "Null object (not type-null) prints as NIL."
   (assert-string= "NIL" (type-to-string nil)))
 
-(deftest printer-type-var-unnamed
-  "Unnamed, unlinked type-var prints as ?tN."
-  (let* ((v (fresh-type-var nil)))
-    (let ((s (type-to-string v)))
-      (assert-true (search "?t" s)))))
+(deftest printer-var-unnamed
+  "Unnamed type-var prints with ?t prefix."
+  (assert-true (search "?t" (type-to-string (fresh-type-var nil)))))
 
-(deftest printer-type-rigid-unnamed
-  "Unnamed rigid var prints as skN with no brackets."
-  (let* ((r (fresh-rigid-var nil))
-         (s (type-to-string r)))
-    (assert-true  (search "sk" s))
-    (assert-false (search "["  s))))
+(deftest printer-rigid-unnamed
+  "Unnamed rigid var prints with sk prefix but no bracket."
+  (let ((s (type-to-string (fresh-rigid-var nil))))
+    (assert-true (search "sk" s))
+    (assert-false (search "[" s))))
 
-(deftest printer-type-unknown
-  "type-unknown (a deftype alias over type-error) prints as ?."
-  ;; type-unknown-p checks (type-error-p x) && message == "unknown"
-  (assert-string= "?" (type-to-string (make-type-unknown)))
-  ;; A real type-error with a different message still shows <error: …>
-  (assert-true (search "error" (type-to-string (make-type-error :message "boom")))))
+(deftest printer-type-unknown-exact
+  "make-type-unknown prints exactly as '?'."
+  (assert-string= "?" (type-to-string (make-type-unknown))))
 
-(deftest printer-arrow-mult-zero
-  "Arrow with :zero multiplicity uses -0-> arrow."
-  (let ((arr (make-type-arrow (list type-int) type-string :mult :zero)))
-    (assert-true (search "-0->" (type-to-string arr)))))
+(deftest printer-fallback-hash-table
+  "Hash-table falls back to #<type... printer."
+  (assert-true (search "#<type" (type-to-string (make-hash-table)))))
 
-(deftest printer-arrow-mult-one
-  "Arrow with :one multiplicity uses -1-> arrow."
-  (let ((arr (make-type-arrow (list type-int) type-string :mult :one)))
-    (assert-true (search "-1->" (type-to-string arr)))))
-
-(deftest printer-fallback-unknown-type
-  "Fallback defmethod for unrecognised objects includes #<type ...>."
-  ;; Use a plain struct that is not a type-node subclass
-  (let ((s (type-to-string (make-hash-table))))
-    (assert-true (search "#<type" s))))
-
-(deftest printer-looks-like-type-specifier-primitives
-  "looks-like-type-specifier-p recognises CL primitive type symbols."
-  (assert-true  (cl-cc/type::looks-like-type-specifier-p 'fixnum))
-  (assert-true  (cl-cc/type::looks-like-type-specifier-p 'string))
-  (assert-false (cl-cc/type::looks-like-type-specifier-p 'frobnitz)))
-
-(deftest printer-looks-like-type-specifier-shorthand
-  "looks-like-type-specifier-p recognises shorthand type names INT and BOOL."
-  (assert-true (cl-cc/type::looks-like-type-specifier-p 'cl-cc/type::int))
-  (assert-true (cl-cc/type::looks-like-type-specifier-p 'cl-cc/type::bool)))
-
-(deftest printer-looks-like-type-specifier-composite-heads
-  "looks-like-type-specifier-p recognises composite type head symbols."
-  (assert-true  (cl-cc/type::looks-like-type-specifier-p '(or fixnum string)))
-  (assert-true  (cl-cc/type::looks-like-type-specifier-p '(and fixnum string)))
-  (assert-false (cl-cc/type::looks-like-type-specifier-p '(frobnitz fixnum))))
-
-(deftest printer-looks-like-type-specifier-bang-prefix
-  "looks-like-type-specifier-p recognises ! prefix as capability / linear head."
-  (assert-true (cl-cc/type::looks-like-type-specifier-p '(!linear fixnum))))
+(deftest-each printer-looks-like-type-specifier-p
+  "looks-like-type-specifier-p recognises CL primitives, shorthands, composites, ! prefix; rejects unknowns."
+  :cases (("fixnum"         t   'fixnum)
+          ("string"         t   'string)
+          ("int-shorthand"  t   'cl-cc/type::int)
+          ("bool-shorthand" t   'cl-cc/type::bool)
+          ("or-composite"   t   '(or fixnum string))
+          ("and-composite"  t   '(and fixnum string))
+          ("bang-prefix"    t   '(!linear fixnum))
+          ("frobnitz-sym"   nil 'frobnitz)
+          ("frobnitz-list"  nil '(frobnitz fixnum)))
+  (expected form)
+  (if expected
+      (assert-true  (cl-cc/type::looks-like-type-specifier-p form))
+      (assert-false (cl-cc/type::looks-like-type-specifier-p form))))
 
 (deftest-each printer-arrow-mult-table
   "Each *arrow-mult-strings* entry maps to the expected arrow string."

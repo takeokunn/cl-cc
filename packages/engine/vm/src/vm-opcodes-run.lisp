@@ -11,6 +11,73 @@
 
 ;;; ── Flat-vector interpreter ───────────────────────────────────────────────
 
+(defun %vm2-fast-op-const (state code pc regs)
+  (declare (ignore state))
+  (let ((dst (svref code (+ pc 1)))
+        (imm (svref code (+ pc 2))))
+    (setf (svref regs dst) imm)
+    (+ pc 4)))
+
+(defun %vm2-fast-op-move (state code pc regs)
+  (declare (ignore state))
+  (let ((dst (svref code (+ pc 1)))
+        (src (svref code (+ pc 2))))
+    (setf (svref regs dst) (svref regs src))
+    (+ pc 4)))
+
+(defun %vm2-fast-op-add-imm2 (state code pc regs)
+  (declare (ignore state))
+  (let ((dst (svref code (+ pc 1)))
+        (src (svref code (+ pc 2)))
+        (imm (svref code (+ pc 3))))
+    (setf (svref regs dst) (+ (svref regs src) imm))
+    (+ pc 4)))
+
+(defun %vm2-fast-op-sub-imm2 (state code pc regs)
+  (declare (ignore state))
+  (let ((dst (svref code (+ pc 1)))
+        (src (svref code (+ pc 2)))
+        (imm (svref code (+ pc 3))))
+    (setf (svref regs dst) (- (svref regs src) imm))
+    (+ pc 4)))
+
+(defun %vm2-fast-op-mul-imm2 (state code pc regs)
+  (declare (ignore state))
+  (let ((dst (svref code (+ pc 1)))
+        (src (svref code (+ pc 2)))
+        (imm (svref code (+ pc 3))))
+    (setf (svref regs dst) (* (svref regs src) imm))
+    (+ pc 4)))
+
+(defun %vm2-fast-op-halt2 (state code pc regs)
+  (declare (ignore state pc))
+  (throw 'vm-halt (svref regs (svref code (+ pc 1)))))
+
+(defun %vm2-fast-op-const-halt2 (state code pc regs)
+  (declare (ignore state regs))
+  (throw 'vm-halt (svref code (+ pc 1))))
+
+(defparameter *vm2-fast-opcode-handler-symbols*
+  '((+op2-const+      . %vm2-fast-op-const)
+    (+op2-move+       . %vm2-fast-op-move)
+    (+op2-add-imm2+   . %vm2-fast-op-add-imm2)
+    (+op2-sub-imm2+   . %vm2-fast-op-sub-imm2)
+    (+op2-mul-imm2+   . %vm2-fast-op-mul-imm2)
+    (+op2-halt2+      . %vm2-fast-op-halt2)
+    (+op2-const-halt2+ . %vm2-fast-op-const-halt2))
+  "Opcode-constant symbol → fast handler function symbol for `%run-vm-core`.")
+
+(defun %make-vm2-fast-opcode-handler-table ()
+  "Build the numeric opcode → fast handler lookup table for `%run-vm-core`."
+  (let ((table (make-hash-table :test #'eql)))
+    (dolist (entry *vm2-fast-opcode-handler-symbols* table)
+      (setf (gethash (symbol-value (car entry)) table)
+            (symbol-function (cdr entry))))))
+
+(defparameter *vm2-fast-opcode-handler-table*
+  (%make-vm2-fast-opcode-handler-table)
+  "Numeric opcode → fast handler function for the hot-path VM2 interpreter.")
+
 (defun %run-vm-core (code state &key bigram-counts)
   "Shared VM2 interpreter core.
 
@@ -25,49 +92,18 @@ name symbol pairs."
       (loop while (< pc len)
             do (let ((op (svref code pc)))
                  (when (and bigram-counts prev-op)
-                   (let ((name-a (aref *opcode-name-table* prev-op))
-                         (name-b (aref *opcode-name-table* op)))
-                     (when (and name-a name-b)
-                       (incf (gethash (list name-a name-b) bigram-counts 0)))))
-                 (setf prev-op op)
-                 (setf pc
-                       (cond
-                         ((= op +op2-const+)
-                          (let ((dst (svref code (+ pc 1)))
-                                (imm (svref code (+ pc 2))))
-                            (setf (svref regs dst) imm)
-                            (+ pc 4)))
-                         ((= op +op2-move+)
-                          (let ((dst (svref code (+ pc 1)))
-                                (src (svref code (+ pc 2))))
-                            (setf (svref regs dst) (svref regs src))
-                            (+ pc 4)))
-                         ((= op +op2-add-imm2+)
-                          (let ((dst (svref code (+ pc 1)))
-                                (src (svref code (+ pc 2)))
-                                (imm (svref code (+ pc 3))))
-                            (setf (svref regs dst) (+ (svref regs src) imm))
-                            (+ pc 4)))
-                         ((= op +op2-sub-imm2+)
-                          (let ((dst (svref code (+ pc 1)))
-                                (src (svref code (+ pc 2)))
-                                (imm (svref code (+ pc 3))))
-                            (setf (svref regs dst) (- (svref regs src) imm))
-                            (+ pc 4)))
-                         ((= op +op2-mul-imm2+)
-                          (let ((dst (svref code (+ pc 1)))
-                                (src (svref code (+ pc 2)))
-                                (imm (svref code (+ pc 3))))
-                            (setf (svref regs dst) (* (svref regs src) imm))
-                            (+ pc 4)))
-                         ((= op +op2-halt2+)
-                          (throw 'vm-halt (svref regs (svref code (+ pc 1)))))
-                         ((= op +op2-const-halt2+)
-                          (throw 'vm-halt (svref code (+ pc 1))))
-                         (t
-                          (let ((handler (aref *opcode-dispatch-table* op)))
-                            (funcall handler state code pc regs))))))
-            finally (return nil)))))
+                    (let ((name-a (aref *opcode-name-table* prev-op))
+                          (name-b (aref *opcode-name-table* op)))
+                      (when (and name-a name-b)
+                        (incf (gethash (list name-a name-b) bigram-counts 0)))))
+                  (setf prev-op op)
+                  (let ((fast-handler (gethash op *vm2-fast-opcode-handler-table*)))
+                    (setf pc
+                          (if fast-handler
+                              (funcall fast-handler state code pc regs)
+                              (let ((handler (aref *opcode-dispatch-table* op)))
+                                (funcall handler state code pc regs))))))
+             finally (return nil)))))
 
 (defun run-vm (code state)
   "Run bytecode CODE (a simple-vector) using STATE (a vm2-state struct).

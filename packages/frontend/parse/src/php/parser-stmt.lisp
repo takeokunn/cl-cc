@@ -28,6 +28,23 @@ STREAM is positioned after the keyword token has been consumed."
   `(setf (gethash ,keyword *php-stmt-parsers*)
          (lambda (,stream ,known-vars) ,@body)))
 
+;;; ─── Shared Parsing Helpers ─────────────────────────────────────────────────
+
+(defun %php-consume-expected (token stream)
+  "Consume TOKEN from STREAM (signalling on mismatch); return the remaining stream."
+  (nth-value 1 (php-expect token stream)))
+
+(defun %php-parse-paren-expr (stream known-vars)
+  "Parse a parenthesised expression ( expr ). Returns (values expr rest known-vars)."
+  (let ((rest (%php-consume-expected :T-LPAREN stream)))
+    (multiple-value-bind (expr rest2 kv2) (php-parse-expr rest known-vars)
+      (values expr (%php-consume-expected :T-RPAREN rest2) kv2))))
+
+(defun %php-parse-expr-stmt (stream known-vars)
+  "Parse an expression statement; skip trailing semicolons."
+  (multiple-value-bind (expr rest kv) (php-parse-expr stream known-vars)
+    (values expr (php-skip-semis rest) kv)))
+
 ;;; ─── Block Parser ────────────────────────────────────────────────────────────
 
 (defun php-parse-block (stream known-vars)
@@ -109,56 +126,42 @@ Returns (values param-symbol-list remaining-stream)."
                 (php-skip-semis rest2) kv2))))
 
 (define-php-stmt-parser :if (rest known-vars)
-  (multiple-value-bind (tok rest2) (php-expect :T-LPAREN rest)
-    (declare (ignore tok))
-    (multiple-value-bind (cond-expr rest3 kv3) (php-parse-expr rest2 known-vars)
-      (multiple-value-bind (tok2 rest4) (php-expect :T-RPAREN rest3)
-        (declare (ignore tok2))
-        (multiple-value-bind (then-stmts rest5 kv5) (php-parse-block rest4 kv3)
-          (let ((else-ast (make-ast-quote :value nil)))
-            (when (and rest5 (eq (php-peek-type rest5) :T-KEYWORD)
-                       (eq (php-peek-value rest5) :else))
-              (setf rest5 (cdr rest5))
-              (multiple-value-bind (else-stmts rest6 kv6) (php-parse-block rest5 kv5)
-                (setf else-ast (make-ast-progn :forms else-stmts)
-                      rest5 rest6
-                      kv5 kv6)))
-            (values (make-ast-if :cond cond-expr
-                                 :then (make-ast-progn :forms then-stmts)
-                                 :else else-ast)
-                    rest5 kv5)))))))
+  (multiple-value-bind (cond-expr rest2 kv2) (%php-parse-paren-expr rest known-vars)
+    (multiple-value-bind (then-stmts rest3 kv3) (php-parse-block rest2 kv2)
+      (let ((else-ast (make-ast-quote :value nil)))
+        (when (and rest3 (eq (php-peek-type rest3) :T-KEYWORD)
+                   (eq (php-peek-value rest3) :else))
+          (setf rest3 (cdr rest3))
+          (multiple-value-bind (else-stmts rest4 kv4) (php-parse-block rest3 kv3)
+            (setf else-ast (make-ast-progn :forms else-stmts)
+                  rest3 rest4 kv3 kv4)))
+        (values (make-ast-if :cond cond-expr
+                             :then (make-ast-progn :forms then-stmts)
+                             :else else-ast)
+                rest3 kv3)))))
 
 (define-php-stmt-parser :while (rest known-vars)
-  (multiple-value-bind (tok rest2) (php-expect :T-LPAREN rest)
-    (declare (ignore tok))
-    (multiple-value-bind (cond-expr rest3 kv3) (php-parse-expr rest2 known-vars)
-      (multiple-value-bind (tok2 rest4) (php-expect :T-RPAREN rest3)
-        (declare (ignore tok2))
-        (multiple-value-bind (body-stmts rest5 kv5) (php-parse-block rest4 kv3)
-          (values (php-lower-while cond-expr body-stmts) rest5 kv5))))))
+  (multiple-value-bind (cond-expr rest2 kv2) (%php-parse-paren-expr rest known-vars)
+    (multiple-value-bind (body-stmts rest3 kv3) (php-parse-block rest2 kv2)
+      (values (php-lower-while cond-expr body-stmts) rest3 kv3))))
 
 (define-php-stmt-parser :for (rest known-vars)
-  (multiple-value-bind (tok rest2) (php-expect :T-LPAREN rest)
-    (declare (ignore tok))
-    (multiple-value-bind (init rest3 kv3) (php-parse-expr rest2 known-vars)
-      (multiple-value-bind (tok2 rest4) (php-expect :T-SEMI rest3)
-        (declare (ignore tok2))
-        (multiple-value-bind (cond-expr rest5 kv5) (php-parse-expr rest4 kv3)
-          (multiple-value-bind (tok3 rest6) (php-expect :T-SEMI rest5)
-            (declare (ignore tok3))
-            (multiple-value-bind (incr rest7 kv7) (php-parse-expr rest6 kv5)
-              (multiple-value-bind (tok4 rest8) (php-expect :T-RPAREN rest7)
-                (declare (ignore tok4))
-                (multiple-value-bind (body-stmts rest9 kv9) (php-parse-block rest8 kv7)
+  (let ((rest (%php-consume-expected :T-LPAREN rest)))
+    (multiple-value-bind (init rest kv) (php-parse-expr rest known-vars)
+      (let ((rest (%php-consume-expected :T-SEMI rest)))
+        (multiple-value-bind (cond-expr rest kv) (php-parse-expr rest kv)
+          (let ((rest (%php-consume-expected :T-SEMI rest)))
+            (multiple-value-bind (incr rest kv) (php-parse-expr rest kv)
+              (let ((rest (%php-consume-expected :T-RPAREN rest)))
+                (multiple-value-bind (body-stmts rest _) (php-parse-block rest kv)
+                  (declare (ignore _))
                   (values (make-ast-progn
-                           :forms (list init
-                                        (php-lower-while cond-expr
-                                                         (append body-stmts (list incr)))))
-                          rest9 kv9))))))))))
+                           :forms (list init (php-lower-while cond-expr
+                                                              (append body-stmts (list incr)))))
+                          rest kv))))))))))
 
 (define-php-stmt-parser :foreach (rest known-vars)
-  (multiple-value-bind (tok rest2) (php-expect :T-LPAREN rest)
-    (declare (ignore tok))
+  (let ((rest2 (%php-consume-expected :T-LPAREN rest)))
     (multiple-value-bind (arr-expr rest3 kv3) (php-parse-expr rest2 known-vars)
       (let ((rest4 (if (and rest3 (eq (php-peek-type rest3) :T-KEYWORD)
                             (eq (php-peek-value rest3) :as))
@@ -174,22 +177,19 @@ Returns (values param-symbol-list remaining-stream)."
               (multiple-value-bind (val-tok rest7) (php-expect :T-VAR rest6)
                 (setf var-sym (php-var-sym (php-tok-value val-tok)))
                 (setf rest6 rest7)))
-            (multiple-value-bind (tok2 rest7) (php-expect :T-RPAREN rest6)
-              (declare (ignore tok2))
-              (multiple-value-bind (body-stmts rest8 kv8) (php-parse-block rest7 kv3)
+            (multiple-value-bind (body-stmts rest8 kv8) (php-parse-block (%php-consume-expected :T-RPAREN rest6) kv3)
                 (values (php-lower-foreach arr-expr var-sym body-stmts)
-                        rest8 kv8)))))))))
+                        rest8 kv8))))))))
 
 (define-php-stmt-parser :function (rest known-vars)
-  (multiple-value-bind (name-tok rest2) (php-expect :T-IDENT rest)
+  (multiple-value-bind (name-tok rest) (php-expect :T-IDENT rest)
     (let ((fn-name (php-ident-sym (php-tok-value name-tok))))
-      (multiple-value-bind (params rest3) (php-parse-param-list rest2)
-        ;; Skip optional return type annotation
-        (let ((rest4 (%php-skip-return-type rest3)))
-          (multiple-value-bind (body-stmts rest5 _) (php-parse-block rest4 (append params known-vars))
+      (multiple-value-bind (params rest) (php-parse-param-list rest)
+        (let ((rest (%php-skip-return-type rest)))
+          (multiple-value-bind (body-stmts rest _) (php-parse-block rest (append params known-vars))
             (declare (ignore _))
             (values (make-ast-defun :name fn-name :params params :body body-stmts)
-                    rest5 known-vars)))))))
+                    rest known-vars)))))))
 
 (defun %php-skip-return-type (stream)
   "Consume an optional : type annotation after a function parameter list.
@@ -269,44 +269,37 @@ Returns (values superclass-list remaining-stream)."
     (values (nreverse supers) current)))
 
 (define-php-stmt-parser :class (rest known-vars)
-  (multiple-value-bind (name-tok rest2) (php-expect :T-IDENT rest)
+  (multiple-value-bind (name-tok rest) (php-expect :T-IDENT rest)
     (let ((class-name (php-ident-sym (php-tok-value name-tok))))
-      (multiple-value-bind (supers rest3) (%php-parse-class-superclasses rest2)
-        (multiple-value-bind (tok rest4) (php-expect :T-LBRACE rest3)
-          (declare (ignore tok))
-          (let ((slots nil) (current rest4))
-            (loop
-              (setf current (php-skip-semis current))
-              (when (or (php-at-eof-p current) (eq (php-peek-type current) :T-RBRACE))
-                (return))
-              (multiple-value-bind (slot rest5) (%php-parse-class-body-member current known-vars)
-                (when slot (push slot slots))
-                (setf current rest5)))
-            (multiple-value-bind (tok2 rest5) (php-expect :T-RBRACE current)
-              (declare (ignore tok2))
-              (values (make-ast-defclass :name class-name
-                                         :superclasses supers
-                                         :slots (nreverse slots))
-                      rest5 known-vars))))))))
+      (multiple-value-bind (supers rest) (%php-parse-class-superclasses rest)
+        (let ((current (%php-consume-expected :T-LBRACE rest))
+              (slots nil))
+          (loop
+            (setf current (php-skip-semis current))
+            (when (or (php-at-eof-p current) (eq (php-peek-type current) :T-RBRACE))
+              (return))
+            (multiple-value-bind (slot rest2) (%php-parse-class-body-member current known-vars)
+              (when slot (push slot slots))
+              (setf current rest2)))
+          (values (make-ast-defclass :name class-name
+                                     :superclasses supers
+                                     :slots (nreverse slots))
+                  (%php-consume-expected :T-RBRACE current)
+                  known-vars))))))
 
 ;;; ─── Statement Dispatcher ────────────────────────────────────────────────────
 
 (defun php-parse-statement (stream known-vars)
   "Parse a single PHP statement. Returns (values ast rest known-vars).
 Dispatches keyword statements through *php-stmt-parsers*; falls through
-to php-parse-expr for expression statements."
-  (if (eq (php-peek-type stream) :T-KEYWORD)
-      (let ((handler (gethash (php-peek-value stream) *php-stmt-parsers*)))
-        (if handler
-            (multiple-value-bind (tok rest) (php-consume stream)
-              (declare (ignore tok))
-              (funcall handler rest known-vars))
-            ;; Unrecognized keyword — treat as expression statement
-            (multiple-value-bind (expr rest kv) (php-parse-expr stream known-vars)
-              (values expr (php-skip-semis rest) kv))))
-      ;; Not a keyword — expression statement (assignment, call, etc.)
-      (multiple-value-bind (expr rest kv) (php-parse-expr stream known-vars)
-        (values expr (php-skip-semis rest) kv))))
+to %php-parse-expr-stmt for expression statements."
+  (let ((handler (when (eq (php-peek-type stream) :T-KEYWORD)
+                   (gethash (php-peek-value stream) *php-stmt-parsers*))))
+    (if handler
+        (multiple-value-bind (_ rest) (php-consume stream)
+          (declare (ignore _))
+          (funcall handler rest known-vars))
+        (%php-parse-expr-stmt stream known-vars))))
 
 ;;; ─── Top-Level Entry Point ───────────────────────────────────────────────────
 

@@ -101,18 +101,17 @@
            (case choice
              (0 (gen-primitive-type))
              (1 (gen-type-variable)))))
-        ;; Generate compound type with reduced depth
-        (let ((reduced-depth (1- effective-depth)))
-          (gen-bind
-           (gen-one-of (list 0 1 2 3 4 5))
-           (lambda (choice)
-              (case choice
-                (0 (gen-simple-compound-type))
-                (1 (gen-values-type))
-                (2 (gen-fn-type))
-                (3 (gen-array-type))
-                (4 (gen-cons-type))
-                (5 (gen-fn-type)))))))))
+        ;; Generate compound type
+        (gen-bind
+         (gen-one-of (list 0 1 2 3 4 5))
+         (lambda (choice)
+           (case choice
+             (0 (gen-simple-compound-type))
+             (1 (gen-values-type))
+             (2 (gen-fn-type))
+             (3 (gen-array-type))
+             (4 (gen-cons-type))
+             (5 (gen-fn-type))))))))
 
 (defun gen-type-specifier ()
   "Generate a full type specifier (alias for gen-type-expr)."
@@ -577,16 +576,15 @@
         ;; Generate terminal node
         (gen-typed-terminal)
         ;; Generate recursive node
-        (let ((reduced-depth (1- effective-depth)))
-          (gen-bind
-           (gen-one-of (list 0 1 2 3 4))
-           (lambda (choice)
-             (case choice
-               (0 (gen-typed-binop))
-               (1 (gen-typed-if))
-               (2 (gen-typed-lambda))
-               (3 (gen-typed-call))
-               (4 (gen-typed-terminal)))))))))
+        (gen-bind
+         (gen-one-of (list 0 1 2 3 4))
+         (lambda (choice)
+           (case choice
+             (0 (gen-typed-binop))
+             (1 (gen-typed-if))
+             (2 (gen-typed-lambda))
+             (3 (gen-typed-call))
+             (4 (gen-typed-terminal))))))))
 
 ;;; Utility Functions for Typed AST
 

@@ -30,93 +30,62 @@
 ;;; Core assertion macros
 ;;; ------------------------------------------------------------
 
-(defmacro assert-= (expected actual)
-  "Assert numeric equality."
-  (let ((e (gensym "E")) (a (gensym "A")))
-    `(let ((,e ,expected) (,a ,actual))
-       (unless (= ,e ,a)
-         (%fail-test "assert-= failed"
+(defmacro %assert-binary (predicate failure-message expected actual)
+  "Shared implementation for binary assertion macros."
+  (let ((e (gensym "E"))
+        (a (gensym "A")))
+    `(let ((,e ,expected)
+           (,a ,actual))
+       (unless (,predicate ,e ,a)
+         (%fail-test ,failure-message
                      :expected ,e
                      :actual ,a
-                     :form '(= ,expected ,actual)))
+                     :form '(,predicate ,expected ,actual)))
        t)))
 
-(defmacro assert-eq (expected actual)
-  "Assert pointer equality (eq)."
-  (let ((e (gensym "E")) (a (gensym "A")))
-    `(let ((,e ,expected) (,a ,actual))
-       (unless (eq ,e ,a)
-         (%fail-test "assert-eq failed"
-                     :expected ,e
-                     :actual ,a
-                     :form '(eq ,expected ,actual)))
-       t)))
-
-(defmacro assert-eql (expected actual)
-  "Assert eql equality."
-  (let ((e (gensym "E")) (a (gensym "A")))
-    `(let ((,e ,expected) (,a ,actual))
-       (unless (eql ,e ,a)
-         (%fail-test "assert-eql failed"
-                     :expected ,e
-                     :actual ,a
-                     :form '(eql ,expected ,actual)))
-       t)))
-
-(defmacro assert-equal (expected actual)
-  "Assert structural equality (equal)."
-  (let ((e (gensym "E")) (a (gensym "A")))
-    `(let ((,e ,expected) (,a ,actual))
-       (unless (equal ,e ,a)
-         (%fail-test "assert-equal failed"
-                     :expected ,e
-                     :actual ,a
-                     :form '(equal ,expected ,actual)))
-       t)))
-
-(defmacro assert-string= (expected actual)
-  "Assert string equality."
-  (let ((e (gensym "E")) (a (gensym "A")))
-    `(let ((,e ,expected) (,a ,actual))
-       (unless (string= ,e ,a)
-         (%fail-test "assert-string= failed"
-                     :expected ,e
-                     :actual ,a
-                     :form '(string= ,expected ,actual)))
-       t)))
-
-(defmacro assert-null (form)
-  "Assert form evaluates to nil."
+(defmacro %assert-unary (predicate failure-message expected-value form)
+  "Shared implementation for unary assertion macros."
   (let ((v (gensym "V")))
     `(let ((,v ,form))
-       (unless (null ,v)
-         (%fail-test "assert-null failed"
-                     :expected nil
+       (unless (,predicate ,v)
+         (%fail-test ,failure-message
+                     :expected ',expected-value
                      :actual ,v
                      :form ',form))
        t)))
 
-(defmacro assert-true (form)
-  "Assert form evaluates to a truthy value."
-  (let ((v (gensym "V")))
-    `(let ((,v ,form))
-       (unless ,v
-         (%fail-test "assert-true failed"
-                     :expected t
-                     :actual nil
-                     :form ',form))
-       t)))
+(defmacro %define-binary-assertion (name predicate failure-message docstring)
+  "Define a binary assertion macro backed by %ASSERT-BINARY."
+  (let ((expected (gensym "EXPECTED"))
+        (actual (gensym "ACTUAL")))
+    `(defmacro ,name (,expected ,actual)
+       ,docstring
+       (list '%assert-binary ',predicate ,failure-message ,expected ,actual))))
 
-(defmacro assert-false (form)
-  "Assert form evaluates to a falsy value."
-  (let ((v (gensym "V")))
-    `(let ((,v ,form))
-       (when ,v
-         (%fail-test "assert-false failed"
-                     :expected nil
-                     :actual ,v
-                     :form ',form))
-       t)))
+(defmacro %define-unary-assertion (name predicate failure-message expected-value docstring)
+  "Define a unary assertion macro backed by %ASSERT-UNARY."
+  (let ((form (gensym "FORM")))
+    `(defmacro ,name (,form)
+       ,docstring
+       (list '%assert-unary ',predicate ,failure-message ',expected-value ,form))))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (%define-binary-assertion assert-= = "assert-= failed"
+    "Assert numeric equality.")
+  (%define-binary-assertion assert-eq eq "assert-eq failed"
+    "Assert pointer equality (eq).")
+  (%define-binary-assertion assert-eql eql "assert-eql failed"
+    "Assert eql equality.")
+  (%define-binary-assertion assert-equal equal "assert-equal failed"
+    "Assert structural equality (equal).")
+  (%define-binary-assertion assert-string= string= "assert-string= failed"
+    "Assert string equality.")
+  (%define-unary-assertion assert-null null "assert-null failed" nil
+    "Assert form evaluates to nil.")
+  (%define-unary-assertion assert-true identity "assert-true failed" t
+    "Assert form evaluates to a truthy value.")
+  (%define-unary-assertion assert-false null "assert-false failed" nil
+    "Assert form evaluates to a falsy value."))
 
 (defmacro assert-type (type-name object)
   "Assert object is of type type-name. Note: type-name comes first."

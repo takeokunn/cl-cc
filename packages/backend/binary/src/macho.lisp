@@ -185,7 +185,8 @@
     (vector (loop for b across bytes do (binary-buffer-write-u8 buffer b)))))
 
 (defun binary-buffer-write-pad (buffer n)
-  (dotimes (_ n) (binary-buffer-write-u8 buffer 0)))
+  (loop repeat n
+        do (binary-buffer-write-u8 buffer 0)))
 
 (defun binary-buffer-to-array (buffer)
   (make-array (length buffer)
@@ -276,4 +277,3 @@
 
 ;;; (Structure serialization and builder class definition are in macho-serialize.lisp,
 ;;;  which loads after this file. Builder API is in macho-build.lisp.)
-

@@ -130,7 +130,7 @@
    #:type-env-to-alist  #:type-env-free-vars
 
    ;; ─── Structural utilities ────────────────────────────────────────────
-   #:type-equal-p  #:type-free-vars
+   #:type-equal-p  #:type-free-vars #:type-children #:type-bound-var
    #:type-to-string  #:normalize-type-variables
 
    ;; ─── Substitution ────────────────────────────────────────────────────

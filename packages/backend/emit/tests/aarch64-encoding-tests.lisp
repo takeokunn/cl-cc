@@ -214,12 +214,18 @@
 
 (deftest-each a64-reg-number-table
   "Register mapping table has expected entries; x18 (platform register) is absent."
-  :cases (("x0"        :x0  0)
-          ("x7"        :x7  7)
-          ("x30"       :x30 30)
-          ("x18-absent" :x18 nil))
-  (reg expected-n)
+  :cases (("x0"         :x0
+           (lambda (entry)
+             (assert-equal 0 (cdr entry))))
+          ("x7"         :x7
+           (lambda (entry)
+             (assert-equal 7 (cdr entry))))
+          ("x30"        :x30
+           (lambda (entry)
+             (assert-equal 30 (cdr entry))))
+          ("x18-absent" :x18
+           (lambda (entry)
+             (assert-null entry))))
+  (reg verify)
   (let ((entry (assoc reg cl-cc/emit::*aarch64-reg-number*)))
-    (if expected-n
-        (assert-equal expected-n (cdr entry))
-        (assert-null entry))))
+    (funcall verify entry)))

@@ -11,6 +11,12 @@
   "Extract the instruction list from a compilation-result."
   (vm-program-instructions (compilation-result-program compilation-result)))
 
+(defmacro %with-run-string-result ((result expr-string) &body body)
+  "Bind RESULT to the outcome of RUN-STRING on EXPR-STRING, swallowing host
+errors so assertion helpers can report readable failures."
+  `(let ((,result (ignore-errors (run-string ,expr-string))))
+     ,@body))
+
 (defmacro assert-compiles-to (expr &key contains)
   "Assert that compiling EXPR produces an instruction of type CONTAINS.
    CONTAINS should be a quoted type symbol like 'vm-add."
@@ -64,15 +70,16 @@
 (defmacro assert-infers-type (expr expected-type)
   "Assert that compiling EXPR with run-string-typed produces a type
    whose type-primitive-name (or type string) equals EXPECTED-TYPE."
-  (let ((result (gensym "RESULT"))
+  (let ((value (gensym "VALUE"))
         (inferred (gensym "INFERRED")))
-    `(let* ((,result   (ignore-errors (run-string-typed ,expr)))
-            (,inferred (when ,result (compilation-result-type ,result))))
-       (unless (and ,inferred
-                    (ignore-errors
-                      (or (equal ,inferred ',expected-type)
-                          (and (typep ,inferred 'cl-cc/type::type-primitive)
-                               (equal (cl-cc/type::type-primitive-name ,inferred)
+    `(multiple-value-bind (,value ,inferred)
+         (ignore-errors (run-string-typed ,expr))
+       (declare (ignore ,value))
+        (unless (and ,inferred
+                     (ignore-errors
+                       (or (equal ,inferred ',expected-type)
+                           (and (typep ,inferred 'cl-cc/type::type-primitive)
+                                (equal (cl-cc/type::type-primitive-name ,inferred)
                                       ',expected-type)))))
           (%fail-test (format nil "assert-infers-type: ~S inferred ~S, expected ~S"
                               ,expr ,inferred ',expected-type)
@@ -87,27 +94,23 @@
 (defmacro assert-run= (expected expr-string)
   "Compile and run EXPR-STRING in the CL-CC VM, assert result equals EXPECTED."
   (let ((result (gensym "RESULT")))
-    `(let ((,result (ignore-errors (run-string ,expr-string))))
+    `(%with-run-string-result (,result ,expr-string)
        (unless (equal ,result ,expected)
-         (%fail-test
-          (format nil "assert-run=: expected ~S, got ~S for ~S"
-                  ,expected ,result ,expr-string)
-          :expected ,expected
-          :actual   ,result
-          :form     (list 'assert-run= ,expected ,expr-string))))))
-
-(defmacro assert-run-equal (expected expr-string)
-  "Alias for assert-run=."
-  `(assert-run= ,expected ,expr-string))
+          (%fail-test
+           (format nil "assert-run=: expected ~S, got ~S for ~S"
+                   ,expected ,result ,expr-string)
+           :expected ,expected
+           :actual   ,result
+           :form     (list 'assert-run= ,expected ,expr-string))))))
 
 (defmacro assert-run-true (expr-string)
   "Compile and run EXPR-STRING, assert result is non-nil."
   (let ((result (gensym "RESULT")))
-    `(let ((,result (ignore-errors (run-string ,expr-string))))
+    `(%with-run-string-result (,result ,expr-string)
        (unless ,result
-         (%fail-test
-          (format nil "assert-run-true: expected non-nil, got ~S for ~S"
-                  ,result ,expr-string)
+          (%fail-test
+           (format nil "assert-run-true: expected non-nil, got ~S for ~S"
+                   ,result ,expr-string)
           :expected t
           :actual   ,result
           :form     (list 'assert-run-true ,expr-string))))))
@@ -115,33 +118,38 @@
 (defmacro assert-run-false (expr-string)
   "Compile and run EXPR-STRING, assert result is nil."
   (let ((result (gensym "RESULT")))
-    `(let ((,result (ignore-errors (run-string ,expr-string))))
+    `(%with-run-string-result (,result ,expr-string)
        (when ,result
-         (%fail-test
-          (format nil "assert-run-false: expected nil, got ~S for ~S"
-                  ,result ,expr-string)
+          (%fail-test
+           (format nil "assert-run-false: expected nil, got ~S for ~S"
+                   ,result ,expr-string)
           :expected nil
           :actual   ,result
           :form     (list 'assert-run-false ,expr-string))))))
 
 (defmacro assert-run-signals (condition-type expr-string)
   "Compile and run EXPR-STRING, assert it signals CONDITION-TYPE."
-  `(handler-case
-       (progn (run-string ,expr-string)
-              (%fail-test
-               (format nil "assert-run-signals: expected ~S but no condition for ~S"
-                       ',condition-type ,expr-string)
-               :form (list 'assert-run-signals ',condition-type ,expr-string)))
-     (,condition-type () t)))
+  (let ((signaledp (gensym "SIGNALEDP")))
+    `(let ((,signaledp nil))
+       (handler-case
+           (run-string ,expr-string)
+         (,condition-type ()
+           (setf ,signaledp t)))
+       (unless ,signaledp
+         (%fail-test
+          (format nil "assert-run-signals: expected ~S but no condition for ~S"
+                  ',condition-type ,expr-string)
+          :form (list 'assert-run-signals ',condition-type ,expr-string)))
+       t)))
 
 (defmacro assert-run-string= (expected expr-string)
   "Compile and run EXPR-STRING, assert result string= EXPECTED."
   (let ((result (gensym "RESULT")))
-    `(let ((,result (ignore-errors (run-string ,expr-string))))
+    `(%with-run-string-result (,result ,expr-string)
        (unless (and (stringp ,result) (string= ,result ,expected))
-         (%fail-test
-          (format nil "assert-run-string=: expected ~S, got ~S for ~S"
-                  ,expected ,result ,expr-string)
+          (%fail-test
+           (format nil "assert-run-string=: expected ~S, got ~S for ~S"
+                   ,expected ,result ,expr-string)
           :expected ,expected
           :actual   ,result
           :form     (list 'assert-run-string= ,expected ,expr-string))))))

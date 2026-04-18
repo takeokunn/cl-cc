@@ -34,6 +34,23 @@
     (assert-= 11 (cl-cc/bytecode:decode-src2 w5))))
 
 ;;; ------------------------------------------------------------
+;;; Field extraction: %sign-extend
+;;; ------------------------------------------------------------
+
+(deftest-each sign-extend-cases
+  "%%sign-extend converts unsigned raw values to signed integers for any bit width."
+  ((label raw bits expected)
+   ("8-bit-positive"  127   8   127)
+   ("8-bit-negative"  128   8  -128)
+   ("8-bit-max"       255   8    -1)
+   ("16-bit-positive" 32767 16  32767)
+   ("16-bit-negative" 32768 16 -32768)
+   ("16-bit-max"      65535 16     -1)
+   ("24-bit-zero"     0     24      0))
+  (declare (ignore label))
+  (assert-= expected (cl-cc/bytecode::%sign-extend raw bits)))
+
+;;; ------------------------------------------------------------
 ;;; Field extraction: decode-imm16
 ;;; ------------------------------------------------------------
 
@@ -161,3 +178,39 @@
   (declare (ignore label))
   (assert-equal expected-name
                 (gethash opcode cl-cc/bytecode:*opcode-names*)))
+
+;;; ------------------------------------------------------------
+;;; disassemble-chunk
+;;; ------------------------------------------------------------
+
+(deftest disassemble-chunk-empty
+  "disassemble-chunk runs without error on a zero-instruction chunk."
+  (let* ((chunk (cl-cc/bytecode:make-bytecode-chunk
+                 :code      (make-array 0 :element-type '(unsigned-byte 32))
+                 :constants (vector)))
+         (out   (with-output-to-string (s)
+                  (cl-cc/bytecode:disassemble-chunk chunk s))))
+    (assert-true (search "0 instruction" out))))
+
+(deftest disassemble-chunk-single-instruction
+  "disassemble-chunk prints the mnemonic for a single NOP instruction."
+  (let* ((chunk (cl-cc/bytecode:make-bytecode-chunk
+                 :code      (make-array 1
+                                        :element-type '(unsigned-byte 32)
+                                        :initial-contents (list (cl-cc/bytecode:encode-nop)))
+                  :constants (vector)))
+         (out   (with-output-to-string (s)
+                   (cl-cc/bytecode:disassemble-chunk chunk s))))
+    (assert-true (search "NOP" out))))
+
+(deftest disassemble-chunk-with-constants
+  "disassemble-chunk prints constant pool entries when present."
+  (let* ((chunk (cl-cc/bytecode:make-bytecode-chunk
+                 :code      (make-array 1
+                                        :element-type '(unsigned-byte 32)
+                                        :initial-contents (list (cl-cc/bytecode:encode-nop)))
+                  :constants (vector 42 :foo)))
+         (out   (with-output-to-string (s)
+                   (cl-cc/bytecode:disassemble-chunk chunk s))))
+    (assert-true (search "Constant pool" out))
+    (assert-true (search "42" out))))

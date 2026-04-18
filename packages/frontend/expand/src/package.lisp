@@ -35,6 +35,7 @@
    ;; --- macro-lambda-list.lisp --- lambda-list helpers ----------------
    #:parse-lambda-list
    #:destructure-lambda-list
+   #:generate-lambda-bindings
 
    ;; --- expander.lisp --- compiler macro expansion --------------------
    #:compiler-macroexpand-all

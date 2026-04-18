@@ -21,20 +21,22 @@
 
 (defproperty vm-move-roundtrip
     (dummy (gen-integer :min 0 :max 0))
-  (let* ((dummy dummy)  ; suppress unused warning
+  (let* ((ignored-dummy dummy)
          (original (make-vm-move :dst :r0 :src :r1))
          (sexp (instruction->sexp original))
          (restored (sexp->instruction sexp)))
+    (declare (ignore ignored-dummy))
     (and (typep restored 'vm-move)
          (eq (vm-dst restored) :r0)
          (eq (vm-src restored) :r1))))
 
 (defproperty vm-add-roundtrip
     (dummy (gen-integer :min 0 :max 0))
-  (let* ((dummy dummy)  ; suppress unused warning
+  (let* ((ignored-dummy dummy)
          (original (make-vm-add :dst :r0 :lhs :r1 :rhs :r2))
          (sexp (instruction->sexp original))
          (restored (sexp->instruction sexp)))
+    (declare (ignore ignored-dummy))
     (and (typep restored 'vm-add)
          (eq (vm-dst restored) :r0)
          (eq (vm-lhs restored) :r1)

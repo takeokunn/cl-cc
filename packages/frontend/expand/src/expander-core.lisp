@@ -106,21 +106,30 @@ specifier symbol, it is treated as the declared return type and wrapped in
 Quasiquotes in BODY are pre-expanded so the host eval can handle them.
 When *macro-eval-fn* is our-eval (self-hosting mode), the returned
 function is a host CL closure delegating to our-eval at each invocation."
-  (let ((expanded-body (mapcar #'our-macroexpand-all body)))
-    (if (eq *macro-eval-fn* #'eval)
-        (let ((form-var (gensym "FORM"))
-              (env-var  (gensym "ENV")))
-          (eval `(lambda (,form-var ,env-var)
-                   (declare (ignore ,env-var))
-                   (let* ,(generate-lambda-bindings lambda-list form-var)
-                     ,@expanded-body))))
-        (lambda (form env)
-          (declare (ignore env))
-          (let ((form-var (gensym "FORM")))
-            (funcall *macro-eval-fn*
-                     `(let ((,form-var ',form))
+  (labels ((contains-bootstrap-quasiquote-p (form)
+             (cond
+               ((atom form) nil)
+               ((member (car form) '(backquote unquote unquote-splicing) :test #'eq) t)
+               (t (or (contains-bootstrap-quasiquote-p (car form))
+                      (contains-bootstrap-quasiquote-p (cdr form))))))
+           (make-host-expander (expanded-body)
+             (let ((form-var (gensym "FORM"))
+                   (env-var  (gensym "ENV")))
+               (eval `(lambda (,form-var ,env-var)
+                        (declare (ignore ,env-var))
                         (let* ,(generate-lambda-bindings lambda-list form-var)
-                          ,@expanded-body))))))))
+                          ,@expanded-body))))))
+    (let* ((expanded-body (mapcar #'our-macroexpand-all body))
+           (needs-host-eval (some #'contains-bootstrap-quasiquote-p expanded-body)))
+      (if (or (eq *macro-eval-fn* #'eval) needs-host-eval)
+          (make-host-expander expanded-body)
+          (lambda (form env)
+            (declare (ignore env))
+            (let ((form-var (gensym "FORM")))
+              (funcall *macro-eval-fn*
+                       `(let ((,form-var ',form))
+                          (let* ,(generate-lambda-bindings lambda-list form-var)
+                            ,@expanded-body)))))))))
 
 (defun make-compiler-macro-expander (lambda-list body)
   "Build a compiler-macro expander for a function LAMBDA-LIST and BODY."
@@ -170,13 +179,18 @@ Each binding is (symbol expansion). Returns the expanded BODY wrapped in PROGN."
 later siblings can immediately use the new macro."
   (let ((out nil))
     (dolist (sub subforms)
+      (when (and (consp sub)
+                 (symbolp (car sub))
+                 (string= (symbol-name (car sub)) "OUR-DEFMACRO"))
+        ;; Register OUR-DEFMACRO eagerly using the same host macro environment as
+        ;; DEFMACRO, but via MAKE-MACRO-EXPANDER so bootstrap quasiquote forms in
+        ;; the body are normalized before the expander is stored.
+        (register-macro (second sub)
+                        (make-macro-expander (third sub) (cdddr sub))))
       (let ((exp (compiler-macroexpand-all sub)))
         (when (and (consp exp) (eq (car exp) 'defmacro))
           (register-macro (second exp)
                           (make-macro-expander (third exp) (cdddr exp))))
-        (when (and (consp exp) (eq (car exp) 'our-defmacro))
-          ;; Must use host eval — our-defmacro mutates the host macro environment.
-          (eval exp))
         (push exp out)))
     (cons 'progn (nreverse out))))
 

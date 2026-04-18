@@ -50,7 +50,35 @@ Saves and restores call stack around the sub-invocation."
                (when (<= (length (vm-call-stack state)) saved-stack-depth)
                  ;; Our frame was popped — method returned
                  (return (vm-reg-get state result-reg)))
-               (setf pc next-pc)))))
+                (setf pc next-pc)))))
+
+(defun %vm-closure-object-p (value)
+  "Return T when VALUE is a VM closure object." 
+  (typep value 'vm-closure-object))
+
+(defparameter *vm-direct-function-designator-resolvers*
+  '((%vm-closure-object-p . identity)
+    (vm-generic-function-p . identity)
+    (functionp . identity))
+  "Predicate/resolver pairs for non-symbol function designators accepted by `vm-resolve-function`."
+  )
+
+(defun %resolve-direct-function-designator (value)
+  "Resolve VALUE through the direct-function-designator table, or return NIL." 
+  (dolist (entry *vm-direct-function-designator-resolvers* nil)
+    (when (funcall (symbol-function (car entry)) value)
+      (return (funcall (symbol-function (cdr entry)) value)))))
+
+(defun %resolve-symbol-function-designator (state value)
+  "Resolve symbol VALUE through the VM function registry or host bridge." 
+  (let* ((registry (ignore-errors (vm-function-registry state)))
+         (entry (and registry (gethash value registry))))
+    (cond
+      (entry entry)
+      ((and (gethash value *vm-host-bridge-functions*)
+            (fboundp value))
+       (symbol-function value))
+      (t (error "Undefined function: ~S" value)))))
 
 (defun vm-resolve-function (state value)
   "Resolve VALUE to a closure, generic function, or host bridge function.
@@ -58,20 +86,10 @@ If VALUE is already a closure, return it.
 If VALUE is a hash table with :__methods__, return it (generic function).
 If VALUE is a symbol, look it up in the function registry first, then
 check the host bridge whitelist."
-  (cond
-    ((typep value 'vm-closure-object) value)
-    ((vm-generic-function-p value) value)
-    ((functionp value) value)
-    ((symbolp value)
-     (let ((entry (gethash value (vm-function-registry state))))
-       (cond
-         (entry entry)
-         ;; Only bridge whitelisted host functions
-         ((and (gethash value *vm-host-bridge-functions*)
-                (fboundp value))
-           (symbol-function value))
-          (t (error "Undefined function: ~S" value)))))
-     (t (error "Invalid function designator: ~S" value))))
+  (or (%resolve-direct-function-designator value)
+      (and (symbolp value)
+           (%resolve-symbol-function-designator state value))
+      (error "Invalid function designator: ~S" value)))
 
 (defun vm-label-table-key (label)
   "Return the integer hash key used by VM label tables for LABEL."

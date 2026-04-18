@@ -139,13 +139,11 @@
   (form expected)
   (assert-equal expected (run-string form)))
 
-(deftest complement-expansion-structure
+(deftest-each complement-expansion-structure
   "COMPLEMENT expands to LET+lambda; the lambda body applies NOT to the pred via APPLY."
-  (let* ((result      (our-macroexpand-1 '(complement pred)))
-         (lambda-form (caddr result))
-         (lambda-body (caddr lambda-form))
-         (not-form    lambda-body))
-    (assert-eq 'let    (car result))
-    (assert-eq 'lambda (car lambda-form))
-    (assert-eq 'not    (car not-form))
-    (assert-eq 'apply  (caadr not-form))))
+  :cases (("top-is-let"    'let    (lambda (r) (car r)))
+          ("inner-lambda"  'lambda (lambda (r) (car (caddr r))))
+          ("body-not-head" 'not    (lambda (r) (car (caddr (caddr r)))))
+          ("apply-in-not"  'apply  (lambda (r) (caadr (caddr (caddr r))))))
+  (expected accessor)
+  (assert-eq expected (funcall accessor (our-macroexpand-1 '(complement pred)))))

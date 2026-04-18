@@ -20,6 +20,8 @@
    (:file "framework-discovery")
    (:file "framework-advanced")
    (:file "framework-compiler")
+   (:file "framework-tap")
    (:file "framework-meta")
    (:file "framework-fuzz")
+   (:file "framework-parallel")
    (:file "framework-runner")))

@@ -2,7 +2,7 @@
 ;;;
 ;;; Extracted from pipeline.lisp.
 ;;; Contains the stdlib expanded-form cache: snapshot/restore helpers,
-;;; cache build, get-stdlib-forms entry point, and warm-stdlib-cache.
+;;; cache build, and get-stdlib-forms entry point.
 ;;;
 ;;; Why a separate file: the cache subsystem is a self-contained unit
 ;;; with its own rollback logic; keeping it separate lets pipeline.lisp
@@ -171,15 +171,3 @@ reuse sublists while compiling stdlib-heavy forms."
             *stdlib-expanded-cache-source*  src-at-entry
             *stdlib-expanded-cache-eval-fn* eval-fn-at-entry)))
   (copy-tree *stdlib-expanded-cache*))
-
-(defun warm-stdlib-cache ()
-  "Populate the stdlib expanded-form cache if it has not been built yet.
-Intended to be called once from the test runner BEFORE spawning parallel
-worker threads, so that:
-  (a) no worker pays the cold-miss cost (~full stdlib parse + expand)
-      inside the 10-second per-test budget, and
-  (b) multiple workers cannot race on the first miss, which would
-      otherwise cause duplicate macro registration and torn cache
-      reads between *stdlib-expanded-cache* and its key cells."
-  (get-stdlib-forms)
-  (values))

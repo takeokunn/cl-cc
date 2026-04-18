@@ -70,26 +70,37 @@
 
 (deftest-each slot-definition-initform
   "slot-definition-initform extracts :initform from a hash-table descriptor, or nil."
-  :cases (("stored-value"   0     (let ((s (make-hash-table :test #'eq)))
-                                    (setf (gethash :initform s) 0) s))
-          ("absent"         nil   (make-hash-table :test #'eq))
-          ("symbol-slot"    nil   'x))
-  (expected slot)
-  (if expected
-      (assert-= expected (cl-cc/vm::slot-definition-initform slot))
-      (assert-null (cl-cc/vm::slot-definition-initform slot))))
+  :cases (("stored-value"
+           (let ((s (make-hash-table :test #'eq)))
+             (setf (gethash :initform s) 0) s)
+           (lambda (slot)
+             (assert-= 0 (cl-cc/vm::slot-definition-initform slot))))
+          ("absent"
+           (make-hash-table :test #'eq)
+           (lambda (slot)
+             (assert-null (cl-cc/vm::slot-definition-initform slot))))
+          ("symbol-slot"
+           'x
+           (lambda (slot)
+             (assert-null (cl-cc/vm::slot-definition-initform slot)))))
+  (slot verify)
+  (funcall verify slot))
 
 ;;; ─── slot-definition-initargs ────────────────────────────────────────────
 
 (deftest-each slot-definition-initargs
   "slot-definition-initargs extracts :initargs list from a hash-table descriptor, or nil."
-  :cases (("stored-list"   '(:count)  (let ((s (make-hash-table :test #'eq)))
-                                        (setf (gethash :initargs s) '(:count)) s))
-          ("symbol-slot"   nil        'x))
-  (expected slot)
-  (if expected
-      (assert-equal expected (cl-cc/vm::slot-definition-initargs slot))
-      (assert-null (cl-cc/vm::slot-definition-initargs slot))))
+  :cases (("stored-list"
+           (let ((s (make-hash-table :test #'eq)))
+             (setf (gethash :initargs s) '(:count)) s)
+           (lambda (slot)
+             (assert-equal '(:count) (cl-cc/vm::slot-definition-initargs slot))))
+          ("symbol-slot"
+           'x
+           (lambda (slot)
+             (assert-null (cl-cc/vm::slot-definition-initargs slot)))))
+  (slot verify)
+  (funcall verify slot))
 
 ;;; ─── slot-definition-allocation ──────────────────────────────────────────
 

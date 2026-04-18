@@ -44,36 +44,6 @@
                     `(/ (log ,(second form)) (log ,(third form)))))
       (t (error "log takes 1 or 2 arguments")))))
 
-;; FR-662: min/max — identical structure: 0→error, 1→identity, 2→builtin, N→fold
-;; Uses same dolist pattern as logand/logior/logxor/logeqv below.
-(dolist (op '(min max))
-  (let ((op op))
-    (setf (gethash op *expander-head-table*)
-          (lambda (form)
-            (let ((nargs (length (cdr form))))
-              (cond
-                ((= nargs 0) (error "~A requires at least one argument" op))
-                ((= nargs 1) (compiler-macroexpand-all (second form)))
-                ((= nargs 2) (list op (compiler-macroexpand-all (second form))
-                                      (compiler-macroexpand-all (third form))))
-                (t (compiler-macroexpand-all
-                    (reduce-variadic-op op (cdr form) nil)))))))))
-
-;; FR-662: gcd/lcm — identical structure differing only in identity value (0 vs 1).
-;; 0-arg → identity, 1-arg → abs, 2-arg → builtin, N-arg → fold with identity.
-(dolist (entry '((gcd 0) (lcm 1)))
-  (let ((op (first entry)) (identity (second entry)))
-    (setf (gethash op *expander-head-table*)
-          (lambda (form)
-            (let ((nargs (length (cdr form))))
-              (cond
-                ((= nargs 0) identity)
-                ((= nargs 1) (list 'abs (compiler-macroexpand-all (second form))))
-                ((= nargs 2) (list op (compiler-macroexpand-all (second form))
-                                      (compiler-macroexpand-all (third form))))
-                (t (compiler-macroexpand-all
-                    (reduce-variadic-op op (cdr form) identity)))))))))
-
 ;; float-sign (FR-685): 1-arg → builtin, 2-arg → (* (float-sign x) (abs y))
 (define-expander-for float-sign (form)
   (let ((nargs (length (cdr form))))
@@ -90,53 +60,61 @@
       (error "float takes 1 or 2 arguments"))
     (list 'float (compiler-macroexpand-all (second form)))))
 
-;; FR-667: logand/logior/logxor/logeqv — 0-arg → identity, 1-arg → value, N-arg → left fold
-;; Identity elements: logand → -1 (all bits set), logior → 0, logxor → 0, logeqv → -1
-(dolist (entry '((logand -1) (logior 0) (logxor 0) (logeqv -1)))
-  (let ((op (first entry)) (id (second entry)))
-    (setf (gethash op *expander-head-table*)
-          (lambda (form)
-            (let ((nargs (length (cdr form))))
-              (cond
-                ((= nargs 0) id)
-                ((= nargs 1) (compiler-macroexpand-all (second form)))
-                ((= nargs 2) (list op
-                                   (compiler-macroexpand-all (second form))
-                                   (compiler-macroexpand-all (third form))))
-                (t (compiler-macroexpand-all
-                    (reduce-variadic-op op (cdr form) id)))))))))
+;;; ── Data-driven variadic expander registration ────────────────────────────
+;;; Declarative table: each entry describes 0-arg, 1-arg, and N-arg behavior.
+;;;   :zero      :error    → signal error
+;;;              :identity → return identity element
+;;;   :one       :expand   → macroexpand the single argument
+;;;              :abs      → (abs arg)
+;;;              :true     → return T
+;;;   :n-reducer  reduce-variadic-op   → left-fold with identity element (FR-661)
+;;;               chain-comparison-op  → pairwise AND-chain (FR-663, FR-645)
 
-;; FR-663: =/</>/<=/>= — 1-arg → T, 2-arg → builtin, N-arg → AND chain with gensyms
-(dolist (op '(= < > <= >=))
-  (let ((op op))
-    (setf (gethash op *expander-head-table*)
-          (lambda (form)
-            (let ((nargs (length (cdr form))))
-              (cond
-                ((= nargs 0) (error "~A requires at least one argument" op))
-                ((= nargs 1) t)
-                ((= nargs 2) (list op
-                                   (compiler-macroexpand-all (second form))
-                                   (compiler-macroexpand-all (third form))))
-                (t (compiler-macroexpand-all
-                    (chain-comparison-op op (cdr form))))))))))
+(defparameter *variadic-expander-specs*
+  (let ((cmp-ops '(= < > <= >=
+                   char= char< char> char<= char>= char/=
+                   char-equal char-lessp char-greaterp char-not-greaterp char-not-lessp)))
+    (append
+     '((min    :zero :error    :one :expand :identity nil  :n-reducer reduce-variadic-op)
+       (max    :zero :error    :one :expand :identity nil  :n-reducer reduce-variadic-op)
+       (gcd    :zero :identity :one :abs    :identity 0    :n-reducer reduce-variadic-op)
+       (lcm    :zero :identity :one :abs    :identity 1    :n-reducer reduce-variadic-op)
+       (logand :zero :identity :one :expand :identity -1   :n-reducer reduce-variadic-op)
+       (logior :zero :identity :one :expand :identity 0    :n-reducer reduce-variadic-op)
+       (logxor :zero :identity :one :expand :identity 0    :n-reducer reduce-variadic-op)
+       (logeqv :zero :identity :one :expand :identity -1   :n-reducer reduce-variadic-op))
+     (mapcar (lambda (op)
+               (list op :zero :error :one :true :identity nil :n-reducer 'chain-comparison-op))
+             cmp-ops)))
+  "Declarative dispatch table for N-ary operator expanders (FR-661–FR-667, FR-645).")
 
-;; FR-645: char=/char</char>/char<=/char>=/char/= — variadic comparison chaining
-;; Also case-insensitive: char-equal/char-lessp/char-greaterp/char-not-greaterp/char-not-lessp
-(dolist (op '(char= char< char> char<= char>= char/=
-              char-equal char-lessp char-greaterp char-not-greaterp char-not-lessp))
-  (let ((op op))
+(defun %register-variadic-expander (spec)
+  (destructuring-bind (op &key zero one identity n-reducer) spec
     (setf (gethash op *expander-head-table*)
           (lambda (form)
             (let ((nargs (length (cdr form))))
               (cond
-                ((= nargs 0) (error "~A requires at least one argument" op))
-                ((= nargs 1) t)
-                ((= nargs 2) (list op
-                                   (compiler-macroexpand-all (second form))
-                                   (compiler-macroexpand-all (third form))))
-                (t (compiler-macroexpand-all
-                    (chain-comparison-op op (cdr form))))))))))
+                ((= nargs 0)
+                 (ecase zero
+                   (:error    (error "~A requires at least one argument" op))
+                   (:identity identity)))
+                ((= nargs 1)
+                 (ecase one
+                   (:expand (compiler-macroexpand-all (second form)))
+                   (:abs    (list 'abs (compiler-macroexpand-all (second form))))
+                   (:true   t)))
+                ((= nargs 2)
+                 (list op
+                       (compiler-macroexpand-all (second form))
+                       (compiler-macroexpand-all (third form))))
+                (t
+                 (compiler-macroexpand-all
+                  (ecase n-reducer
+                    (reduce-variadic-op  (reduce-variadic-op op (cdr form) identity))
+                    (chain-comparison-op (chain-comparison-op op (cdr form))))))))))))
+
+(dolist (spec *variadic-expander-specs*)
+  (%register-variadic-expander spec))
 
 ;; /= (not-equal): 1-arg → T, 2-arg → (not (= a b)), N-arg → all-pairs distinct
 (define-expander-for /= (form)

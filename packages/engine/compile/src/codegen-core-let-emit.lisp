@@ -73,7 +73,9 @@
   (let* ((zero-reg (make-register ctx))
          (element-regs nil))
     (emit ctx (make-vm-const :dst zero-reg :value 0))
-    (dotimes (_ size) (push zero-reg element-regs))
+    (dotimes (index size)
+      (declare (ignore index))
+      (push zero-reg element-regs))
     (push (cons name (cons size (nreverse element-regs)))
           (ctx-noescape-array-bindings ctx))))
 

@@ -152,28 +152,6 @@
          (vm-bind-closure-args closure state spread-args)
          (values (vm-label-table-lookup labels (vm-closure-entry-label closure)) nil nil))))))
 
-(defmethod execute-instruction ((inst vm-apply) state pc labels)
-  (let* ((func      (vm-resolve-function state (vm-reg-get state (vm-func-reg inst))))
-         (arg-regs  (vm-args inst))
-         (dst-reg   (vm-dst inst))
-         ;; Spread the last argument: (apply fn a b list) → args are (a b . list)
-         (arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs))
-         (spread-args (%vm-apply-spread-args state arg-values)))
-    (cond
-      ;; Host CL function — apply directly, no frame push
-      ((functionp func)
-       (vm-reg-set state dst-reg (apply func spread-args))
-       (values (1+ pc) nil nil))
-      ;; Generic function or closure
-      (t
-       (let ((closure (if (vm-generic-function-p func)
-                          (vm-resolve-gf-method func state (car spread-args) spread-args)
-                          func)))
-         (vm-push-call-frame state (1+ pc) dst-reg)
-         (push nil (vm-method-call-stack state))
-         (vm-bind-closure-args closure state spread-args)
-         (values (vm-label-table-lookup labels (vm-closure-entry-label closure)) nil nil))))))
-
 (defmethod execute-instruction ((inst vm-register-function) state pc labels)
   (declare (ignore labels))
   (let ((name (vm-func-name inst))

@@ -143,5 +143,51 @@ Examples:
       (%print-global-help)))
 
 
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; Main dispatcher
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(defparameter *cli-command-dispatch*
+  '(("run"      . %do-run)
+    ("compile"  . %do-compile)
+    ("eval"     . %do-eval)
+    ("repl"     . %do-repl)
+    ("check"    . %do-check))
+  "Alist mapping command name strings to their handler functions.")
+
+(defun main ()
+  "CL-CC CLI entry point.
+Reads POSIX argv via UIOP:COMMAND-LINE-ARGUMENTS, parses flags and
+subcommands, then dispatches to the appropriate handler."
+  (let* ((argv   (uiop:command-line-arguments))
+         (parsed (handler-case (parse-args argv)
+                   (arg-parse-error (e)
+                     (format *error-output* "~A~%" (arg-parse-error-message e))
+                     (terpri *error-output*)
+                     (%print-global-help)
+                     (uiop:quit 2)))))
+    (when (or (flag parsed "--help") (flag parsed "-h"))
+      (%print-help (or (parsed-args-command parsed)
+                       (car (parsed-args-positional parsed))))
+      (uiop:quit 0))
+
+    (let ((command (parsed-args-command parsed)))
+      (cond
+        ((null command)
+         (%print-global-help)
+         (uiop:quit 0))
+        ((string= command "help")
+         (%print-help (car (parsed-args-positional parsed)))
+         (uiop:quit 0))
+        (t
+         (let ((entry (assoc command *cli-command-dispatch* :test #'string=)))
+           (if entry
+               (funcall (cdr entry) parsed)
+               (progn
+                 (format *error-output* "Unknown command: ~A~%~%" command)
+                 (%print-global-help)
+                 (uiop:quit 2)))))))))
+
+
 ;;; (Utilities, dump functions, and compile options
 ;;;  are in main-utils.lisp which loads after this file.)

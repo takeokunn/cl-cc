@@ -46,9 +46,7 @@
           ("notevery-all-pass"  "(notevery #'oddp '(1 3 5))"  nil)
           ("notevery-one-fails" "(notevery #'oddp '(1 2 3))"  t))
   (code expected)
-  (if expected
-      (assert-true (run-string code))
-      (assert-false (run-string code))))
+  (assert-equal expected (not (null (run-string code)))))
 
 (deftest nreconc-expands-to-nconc-nreverse
   "NRECONC expands to (nconc (nreverse list) tail)."

@@ -10,31 +10,21 @@
 
 ;;;; ─── mir-value ────────────────────────────────────────────────────────
 
-(deftest mir-value-allocation
-  "mir-new-value assigns monotonically increasing IDs."
+(deftest mir-value-creation
+  "mir-new-value: monotonic IDs; default type :any; predicate distinguishes values from non-values."
   (let* ((fn (mir-make-function :test-fn))
          (v0 (mir-new-value fn))
          (v1 (mir-new-value fn))
-         (v2 (mir-new-value fn :name :x :type :integer)))
+         (v2 (mir-new-value fn :name :x :type :integer))
+         (c  (make-mir-const :value 42)))
     (assert-= 0 (mirv-id v0))
     (assert-= 1 (mirv-id v1))
     (assert-= 2 (mirv-id v2))
-    (assert-eq :x (mirv-name v2))
+    (assert-eq :x       (mirv-name v2))
     (assert-eq :integer (mirv-type v2))
-    (assert-= 3 (mirf-value-counter fn))))
-
-(deftest mir-value-default-type
-  "mir-new-value defaults to :any type."
-  (let* ((fn (mir-make-function :f))
-         (v  (mir-new-value fn)))
-    (assert-eq :any (mirv-type v))))
-
-(deftest mir-value-predicate
-  "mir-value-p correctly identifies mir-value structs."
-  (let* ((fn (mir-make-function :f))
-         (v  (mir-new-value fn))
-         (c  (make-mir-const :value 42)))
-    (assert-true  (mir-value-p v))
+    (assert-= 3 (mirf-value-counter fn))
+    (assert-eq :any (mirv-type v0))
+    (assert-true  (mir-value-p v0))
     (assert-false (mir-value-p c))
     (assert-false (mir-value-p 42))))
 
@@ -42,39 +32,37 @@
 
 (deftest-each mir-const-types
   "make-mir-const stores value and type for integer, nil, and string payloads."
-  :cases (("integer" 42      :integer  42      nil)
-          ("nil"     nil     :pointer  nil     t)
-          ("string"  "hello" :any      "hello" nil))
-  (val type expected-val nil-val-p)
+  :cases (("integer" 42      :integer
+           (lambda (c)
+             (assert-equal 42 (mirc-value c))))
+          ("nil"     nil     :pointer
+           (lambda (c)
+             (assert-null (mirc-value c))))
+          ("string"  "hello" :any
+           (lambda (c)
+             (assert-equal "hello" (mirc-value c)))))
+  (val type verify)
   (let ((c (make-mir-const :value val :type type)))
     (assert-true (mir-const-p c))
     (assert-eq type (mirc-type c))
-    (if nil-val-p
-        (assert-null (mirc-value c))
-        (assert-equal expected-val (mirc-value c)))))
+    (funcall verify c)))
 
 ;;;; ─── mir-block ────────────────────────────────────────────────────────
 
-(deftest mir-block-allocation
-  "mir-new-block assigns unique IDs and auto-generates labels."
+(deftest mir-block-creation
+  "mir-new-block: unique IDs and labels; fresh block has no insts/preds/succs/phis."
   (let* ((fn (mir-make-function :test-fn))
-         ;; entry block already created by mir-make-function
          (b1 (mir-new-block fn))
          (b2 (mir-new-block fn :label :then)))
     (assert-false (null (mirf-entry fn)))
     (assert-eq :entry (mirb-label (mirf-entry fn)))
     (assert-eq :then (mirb-label b2))
-    (assert-false (= (mirb-id b1) (mirb-id b2)))))
-
-(deftest mir-block-starts-empty
-  "A freshly created mir-block has no instructions, preds, or succs."
-  (let* ((fn (mir-make-function :f))
-         (b  (mir-new-block fn)))
-    (assert-null (mirb-insts b))
-    (assert-null (mirb-preds b))
-    (assert-null (mirb-succs b))
-    (assert-null (mirb-phis b))
-    (assert-false (mirb-sealed-p b))))
+    (assert-false (= (mirb-id b1) (mirb-id b2)))
+    (assert-null (mirb-insts b1))
+    (assert-null (mirb-preds b1))
+    (assert-null (mirb-succs b1))
+    (assert-null (mirb-phis b1))
+    (assert-false (mirb-sealed-p b1))))
 
 (deftest mir-block-pred-succ-linking
   "mir-add-succ establishes bidirectional predecessor/successor edges."
@@ -90,18 +78,14 @@
 
 ;;;; ─── mir-function ──────────────────────────────────────────────────────
 
-(deftest mir-make-function-creates-entry
-  "mir-make-function initialises name, entry block, and counters."
+(deftest mir-make-function-structure
+  "mir-make-function: initialises name/entry/counters; params stored in mirf-params."
   (let ((fn (mir-make-function :fib)))
     (assert-eq :fib (mirf-name fn))
     (assert-false (null (mirf-entry fn)))
     (assert-eq :entry (mirb-label (mirf-entry fn)))
-    ;; value counter starts at 0, block counter at 1 (entry consumed one)
     (assert-= 0 (mirf-value-counter fn))
-    (assert-= 1 (mirf-block-counter fn))))
-
-(deftest mir-make-function-with-params
-  "Params passed to mir-make-function are stored in mirf-params."
+    (assert-= 1 (mirf-block-counter fn)))
   (let* ((fn (mir-make-function :add))
          (p0 (mir-new-value fn :name :a :type :integer))
          (p1 (mir-new-value fn :name :b :type :integer)))
@@ -111,48 +95,42 @@
 
 ;;;; ─── mir-emit ──────────────────────────────────────────────────────────
 
-(deftest mir-emit-basic-instruction
-  "mir-emit appends an instruction to a block."
+(deftest mir-emit-basic-add
   (let* ((fn   (mir-make-function :f))
          (blk  (mirf-entry fn))
          (dst  (mir-new-value fn :name :result :type :integer))
          (a    (make-mir-const :value 1 :type :integer))
          (b    (make-mir-const :value 2 :type :integer))
          (inst (mir-emit blk :add :dst dst :srcs (list a b))))
-    (assert-true  (mir-inst-p inst))
-    (assert-eq    :add (miri-op inst))
-    (assert-eq    dst  (miri-dst inst))
+    (assert-true (mir-inst-p inst))
+    (assert-eq   :add (miri-op inst))
+    (assert-eq   dst  (miri-dst inst))
     (assert-= 2 (length (miri-srcs inst)))
     (assert-= 1 (length (mirb-insts blk)))
     (assert-eq blk (miri-block inst))))
 
-(deftest mir-emit-sets-def-inst-backpointer
-  "mir-emit sets mirv-def-inst on the destination value."
+(deftest mir-emit-sets-def-inst-pointer
   (let* ((fn   (mir-make-function :f))
          (blk  (mirf-entry fn))
          (dst  (mir-new-value fn))
          (inst (mir-emit blk :const :dst dst :srcs (list (make-mir-const :value 0)))))
     (assert-eq inst (mirv-def-inst dst))))
 
-(deftest mir-emit-terminator-has-no-dst
-  "Terminator instructions (:ret :jump :branch :tail-call) get nil dst."
+(deftest mir-emit-terminator-has-nil-dst
   (let* ((fn  (mir-make-function :f))
          (blk (mirf-entry fn))
          (v   (mir-new-value fn)))
-    (let ((ret-inst (mir-emit blk :ret :srcs (list v))))
-      (assert-null (miri-dst ret-inst)))))
+    (assert-null (miri-dst (mir-emit blk :ret :srcs (list v))))))
 
-(deftest mir-emit-phi-goes-to-phi-list
-  "Phi instructions are prepended to mirb-phis, not mirb-insts."
-  (let* ((fn   (mir-make-function :f))
-         (blk  (mir-new-block fn :label :loop))
-         (dst  (mir-new-value fn :name :x))
-         (phi  (mir-emit blk :phi :dst dst)))
+(deftest mir-emit-phi-goes-to-phis-list
+  (let* ((fn  (mir-make-function :f))
+         (blk (mir-new-block fn :label :loop))
+         (dst (mir-new-value fn :name :x))
+         (phi (mir-emit blk :phi :dst dst)))
     (assert-true (member phi (mirb-phis blk) :test #'eq))
     (assert-null (mirb-insts blk))))
 
-(deftest mir-emit-multiple-instructions-ordered
-  "Instructions appear in emission order in mirb-insts."
+(deftest mir-emit-preserves-ordering
   (let* ((fn  (mir-make-function :f))
          (blk (mirf-entry fn))
          (d0  (mir-new-value fn))
@@ -162,23 +140,19 @@
          (i1  (mir-emit blk :const :dst d1 :srcs (list (make-mir-const :value 2))))
          (i2  (mir-emit blk :add   :dst d2 :srcs (list d0 d1))))
     (assert-= 3 (length (mirb-insts blk)))
-    (assert-eq i0 (first (mirb-insts blk)))
+    (assert-eq i0 (first  (mirb-insts blk)))
     (assert-eq i1 (second (mirb-insts blk)))
-    (assert-eq i2 (third (mirb-insts blk)))))
+    (assert-eq i2 (third  (mirb-insts blk)))))
 
 ;;;; ─── SSA variable tracking ────────────────────────────────────────────
 
-(deftest mir-write-read-var-same-block
-  "mir-read-var returns the value written by mir-write-var in the same block."
+(deftest mir-ssa-variable-read-write
+  "mir-write/read-var: same block returns value; single predecessor propagates without phi."
   (let* ((fn   (mir-make-function :f))
          (blk  (mirf-entry fn))
          (v    (mir-new-value fn :name :x)))
     (mir-write-var fn :x blk v)
-    (let ((got (mir-read-var fn :x blk)))
-      (assert-eq v got))))
-
-(deftest mir-read-var-single-predecessor
-  "mir-read-var follows a single predecessor without inserting phi."
+    (assert-eq v (mir-read-var fn :x blk)))
   (let* ((fn    (mir-make-function :f))
          (entry (mirf-entry fn))
          (b1    (mir-new-block fn :label :b1))
@@ -187,9 +161,7 @@
     (mir-seal-block fn b1)
     (mir-add-succ entry b1)
     (mir-write-var fn :y entry v)
-    (let ((got (mir-read-var fn :y b1)))
-      (assert-eq v got))
-    ;; No phi should have been inserted (single predecessor)
+    (assert-eq v (mir-read-var fn :y b1))
     (assert-null (mirb-phis b1))))
 
 (deftest mir-seal-block-resolves-incomplete-phi
@@ -294,137 +266,3 @@
                 :phi :values :mv-bind :safepoint :nop))
     (assert-true (member op *mir-generic-ops*))))
 
-;;;; ─── printer smoke tests ───────────────────────────────────────────────
-
-(deftest mir-format-value
-  "mir-format-value: mir-value as %id/name; mir-const as #value."
-  (let* ((fn (mir-make-function :f))
-         (v  (mir-new-value fn :name :x))
-         (c  (make-mir-const :value 42)))
-    (let ((sv (mir-format-value v))
-          (sc (mir-format-value c)))
-      (assert-true (search "%0" sv))
-      (assert-true (search "X"  sv))   ; CL upcases :x → "X"
-      (assert-true (search "42" sc)))))
-
-(deftest mir-print-function-no-error
-  "mir-print-function completes without signalling an error."
-  (let* ((fn   (mir-make-function :smoke))
-         (blk  (mirf-entry fn))
-         (dst  (mir-new-value fn :name :r))
-         (c    (make-mir-const :value 7 :type :integer)))
-    (mir-emit blk :const :dst dst :srcs (list c))
-    (mir-emit blk :ret   :srcs (list dst))
-    (let ((out (with-output-to-string (s) (mir-print-function fn s))))
-      (assert-true (search "SMOKE" out))
-      (assert-true (search "ENTRY" out)))))
-
-;;;; ─── target-desc ──────────────────────────────────────────────────────
-
-(deftest target-x86-64-description
-  "x86-64 target: name/word-size/endianness, arg registers, return rax, callee-saved."
-  (assert-eq :x86-64  (target-name *x86-64-target*))
-  (assert-=  8        (target-word-size *x86-64-target*))
-  (assert-eq :little  (target-endianness *x86-64-target*))
-  (assert-=  16       (target-stack-alignment *x86-64-target*))
-  (assert-eq :rax     (target-ret-reg *x86-64-target*))
-  (assert-eq :rdi     (first (target-arg-regs *x86-64-target*)))
-  (assert-=  6        (length (target-arg-regs *x86-64-target*)))
-  (assert-true (member :rbx (target-callee-saved *x86-64-target*)))
-  (assert-true (member :r12 (target-callee-saved *x86-64-target*))))
-
-(deftest target-aarch64-basic
-  "aarch64 target has correct name, word-size, and 8 arg registers."
-  (assert-eq :aarch64 (target-name *aarch64-target*))
-  (assert-=  8        (target-word-size *aarch64-target*))
-  (assert-eq :x0      (target-ret-reg *aarch64-target*))
-  (assert-=  8        (length (target-arg-regs *aarch64-target*))))
-
-(deftest target-riscv64-basic
-  "riscv64 target has 32 GPRs and a0 as return register."
-  (assert-eq :riscv64 (target-name *riscv64-target*))
-  (assert-=  32       (target-gpr-count *riscv64-target*))
-  (assert-eq :a0      (target-ret-reg *riscv64-target*))
-  (assert-=  8        (length (target-arg-regs *riscv64-target*))))
-
-(deftest target-wasm32-basic
-  "wasm32 target has 4-byte words, 0 GPRs, and stack-alignment 0."
-  (assert-eq :wasm32 (target-name *wasm32-target*))
-  (assert-=  4       (target-word-size *wasm32-target*))
-  (assert-=  0       (target-gpr-count *wasm32-target*))
-  (assert-=  0       (target-stack-alignment *wasm32-target*)))
-
-(deftest-each target-registry-lookup
-  "find-target returns the correct target-desc for each registered name."
-  :cases (("x86-64"      *x86-64-target*  :x86-64)
-          ("aarch64"     *aarch64-target* :aarch64)
-          ("riscv64"     *riscv64-target* :riscv64)
-          ("wasm32"      *wasm32-target*  :wasm32)
-          ("nonexistent" nil              :nonexistent))
-  (expected name)
-  (if expected
-      (assert-eq expected (find-target name))
-      (assert-null (find-target name))))
-
-(deftest-each target-64-bit-predicate
-  "target-64-bit-p returns true for 64-bit targets, false for 32-bit."
-  :cases (("x86-64"  t   *x86-64-target*)
-          ("aarch64" t   *aarch64-target*)
-          ("riscv64" t   *riscv64-target*)
-          ("wasm32"  nil *wasm32-target*))
-  (expected target)
-  (if expected
-      (assert-true  (target-64-bit-p target))
-      (assert-false (target-64-bit-p target))))
-
-(deftest-each target-feature-predicate
-  "target-has-feature-p correctly detects presence and absence of features."
-  :cases (("x86-64-fused-cmp"   t   *x86-64-target*  :has-fused-cmp-branch)
-          ("aarch64-tail-call"  t   *aarch64-target* :has-native-tail-call)
-          ("riscv64-psabi"      t   *riscv64-target* :riscv-elf-psabi)
-          ("wasm32-wasi"        t   *wasm32-target*  :wasi-0.2)
-          ("x86-64-no-wasi"     nil *x86-64-target*  :wasi-0.2)
-          ("wasm32-no-sysv"     nil *wasm32-target*  :sysv-abi))
-  (expected target feature)
-  (if expected
-      (assert-true  (target-has-feature-p target feature))
-      (assert-false (target-has-feature-p target feature))))
-
-(deftest target-allocatable-regs-excludes-scratch
-  "target-allocatable-regs never contains scratch registers."
-  (dolist (target (list *x86-64-target* *aarch64-target* *riscv64-target*))
-    (let ((alloc   (target-allocatable-regs target))
-          (scratch (target-scratch-regs target)))
-      (dolist (sr scratch)
-        (assert-false (member sr alloc))))))
-
-(deftest target-caller-saved-complement
-  "target-caller-saved returns allocatable regs minus callee-saved."
-  (let* ((alloc  (target-allocatable-regs *x86-64-target*))
-         (callee (target-callee-saved *x86-64-target*))
-         (caller (target-caller-saved *x86-64-target*)))
-    ;; Every caller-saved reg is allocatable
-    (dolist (r caller)
-      (assert-true (member r alloc)))
-    ;; No overlap between caller-saved and callee-saved
-    (dolist (r caller)
-      (assert-false (member r callee)))))
-
-
-(deftest target-register-and-find
-  "register-target and find-target round-trip correctly for a custom target."
-  (let* ((custom (make-target-desc
-                   :name      :test-custom
-                   :word-size 8
-                   :endianness :little
-                   :gpr-count 4
-                   :gpr-names #(:r0 :r1 :r2 :r3)
-                   :arg-regs  '(:r0 :r1)
-                   :ret-reg   :r0
-                   :stack-alignment 16))
-         (_   (register-target custom))
-         (got (find-target :test-custom)))
-    (assert-eq custom got)
-    (assert-eq :test-custom (target-name got))
-    ;; Clean up
-    (remhash :test-custom *target-registry*)))

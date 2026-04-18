@@ -61,29 +61,47 @@
            (funcall (svref dispatch idx))
            ,default-form))))
 
+(defun %case-build-eql-chain (cases key-var default-form)
+  "Recursively build a nested if-eql chain from raw CASES for non-integer CASE dispatch."
+  (if (null cases)
+      default-form
+      (destructuring-bind ((keys . body) &rest rest) cases
+        (cond
+          ((or (eq keys 'otherwise) (eq keys 't))
+           `(progn ,@body))
+          ((listp keys)
+           `(if (or ,@(mapcar (lambda (k) `(eql ,key-var ',k)) keys))
+                (progn ,@body)
+                ,(%case-build-eql-chain rest key-var default-form)))
+          (t
+           `(if (eql ,key-var ',keys)
+                (progn ,@body)
+                ,(%case-build-eql-chain rest key-var default-form)))))))
+
+(defun %case-collect-integer-pairs (cases)
+  "Collect (key . body) pairs and default-form from raw CASES.
+Returns (values default-form pairs integer-only-p)."
+  (let ((default-form nil) (pairs nil) (integer-only-p t))
+    (dolist (clause cases)
+      (let ((normalized (%case-clause->pairs clause)))
+        (if (eq normalized :default)
+            (setf default-form `(progn ,@(cdr clause)))
+            (dolist (pair normalized)
+              (unless (integerp (car pair)) (setf integer-only-p nil))
+              (push pair pairs)))))
+    (when integer-only-p
+      (setf pairs (sort pairs #'< :key #'car)))
+    (values default-form pairs integer-only-p)))
+
 (our-defmacro case (keyform &body cases)
   "Match KEYFORM against CASES.
    Each case is (key body...) or (otherwise body...) or (t body...).
    Keys are compared with EQL (not evaluated)."
   (let ((key-var (gensym "KEY")))
     `(let ((,key-var ,keyform))
-       ,(let ((default-form nil)
-              (pairs nil)
-              (integer-only-p t))
-          (dolist (clause cases)
-            (let ((normalized (%case-clause->pairs clause)))
-              (cond
-                ((eq normalized :default)
-                 (setf default-form `(progn ,@(cdr clause))))
-                (t
-                 (dolist (pair normalized)
-                   (unless (integerp (car pair))
-                     (setf integer-only-p nil))
-                   (push pair pairs))))))
-           (when integer-only-p
-             (setf pairs (sort pairs #'< :key #'car)))
-           (cond
-            ((and integer-only-p (>= (length pairs) 4))
+       ,(multiple-value-bind (default-form pairs integer-only-p)
+            (%case-collect-integer-pairs cases)
+          (if (and integer-only-p (>= (length pairs) 4))
               (let* ((min-key (caar pairs))
                      (max-key (car (car (last pairs))))
                      (span    (1+ (- max-key min-key))))
@@ -91,27 +109,8 @@
                     (%case-expand-integer-table key-var pairs default-form)
                     `(if (integerp ,key-var)
                          ,(%case-expand-integer-tree key-var pairs default-form)
-                         ,default-form))))
-            (t
-              (labels ((build-case (cases)
-                         (if (null cases)
-                             default-form
-                            (let ((case (car cases))
-                                  (rest (cdr cases)))
-                              (let ((keys (car case))
-                                    (body (cdr case)))
-                                (cond
-                                  ((or (eq keys 'otherwise) (eq keys 't))
-                                   `(progn ,@body))
-                                  ((listp keys)
-                                   `(if (or ,@(mapcar #'(lambda (k) `(eql ,key-var ',k)) keys))
-                                        (progn ,@body)
-                                        ,(build-case rest)))
-                                  (t
-                                   `(if (eql ,key-var ',keys)
-                                        (progn ,@body)
-                                        ,(build-case rest)))))))))
-               (build-case cases))))))))
+                         ,default-form)))
+              (%case-build-eql-chain cases key-var default-form))))))
 
 ;;; TYPECASE macro helpers
 
@@ -144,6 +143,17 @@ subtype of any earlier clause, it can never be reached and can be dropped."
       (subtypep type1 type2)
     (values subp surep)))
 
+(defun %typecase-build-typep-chain (cases key-var)
+  "Recursively build a nested if-typep chain from CASES for TYPECASE dispatch."
+  (if (null cases)
+      nil
+      (destructuring-bind ((type . body) &rest rest) cases
+        (if (or (eq type 'otherwise) (eq type 't))
+            `(progn ,@body)
+            `(if (typep ,key-var ',type)
+                 (progn ,@body)
+                 ,(%typecase-build-typep-chain rest key-var))))))
+
 (our-defmacro typecase (keyform &body cases)
   "Match KEYFORM against TYPE-CASES.
    Each case is (type body...) or (otherwise body...) or (t body...).
@@ -151,18 +161,4 @@ subtype of any earlier clause, it can never be reached and can be dropped."
   (let* ((key-var (gensym "KEY"))
          (pruned-cases (%prune-typecase-clauses cases)))
     `(let ((,key-var ,keyform))
-       ,(labels ((build-typecase (cases)
-                   (if (null cases)
-                       nil
-                       (let ((case (car cases))
-                             (rest (cdr cases)))
-                         (let ((type (car case))
-                               (body (cdr case)))
-                           (cond
-                             ((or (eq type 'otherwise) (eq type 't))
-                              `(progn ,@body))
-                             (t
-                              `(if (typep ,key-var ',type)
-                                   (progn ,@body)
-                                   ,(build-typecase rest)))))))))
-            (build-typecase pruned-cases)))))
+       ,(%typecase-build-typep-chain pruned-cases key-var))))

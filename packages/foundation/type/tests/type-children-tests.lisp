@@ -6,40 +6,32 @@
 
 (in-package :cl-cc/test)
 
-;; UNIMPLEMENTED FEATURE: type-children / type-bound-var were planned in
-;; MEMORY.md but never committed to src/. All tests in this file reference
-;; `type-children` which is an undefined function. The suite is ORPHANED
-;; (no :parent) so it is unreachable from the canonical run-tests
-;; traversal. Deftest forms still load, but they are never executed until
-;; the underlying functions land AND a parent is restored.
 (defsuite type-children-suite
-  :description "type-children / type-bound-var data layer tests (unimplemented, orphaned)")
+  :description "type-children / type-bound-var data layer tests"
+  :parent cl-cc-unit-suite)
 
 
 (in-suite type-children-suite)
 ;;; ─── type-children: leaf types return nil ──────────────────────────────────
 
-(deftest type-children-primitive
-  "Primitive types have no children."
-  (assert-null (type-children type-int))
-  (assert-null (type-children type-string))
-  (assert-null (type-children type-bool)))
-
 (deftest-each type-children-atomic-leaf-types
-  "Leaf types (variable, rigid, error, nil) have no children."
-  :cases (("var"   (fresh-type-var "a"))
-          ("rigid" (fresh-rigid-var "r"))
-          ("error" (make-type-error :message "test"))
-          ("nil"   nil))
+  "Leaf types (primitive, variable, rigid, error, nil) have no children."
+  :cases (("int"    type-int)
+          ("string" type-string)
+          ("bool"   type-bool)
+          ("var"    (fresh-type-var "a"))
+          ("rigid"  (fresh-rigid-var "r"))
+          ("error"  (make-type-error :message "test"))
+          ("nil"    nil))
   (leaf-type)
-  (assert-null (type-children leaf-type)))
+  (assert-null (cl-cc/type:type-children leaf-type)))
 
 ;;; ─── type-children: compound types ─────────────────────────────────────────
 
 (deftest type-children-arrow-pure
   "Arrow type returns params + return (no effects when nil)."
   (let* ((arr (make-type-arrow (list type-int type-string) type-bool))
-         (ch  (type-children arr)))
+         (ch  (cl-cc/type:type-children arr)))
     (assert-equal 3 (length ch))
     (assert-true (type-equal-p type-int (first ch)))
     (assert-true (type-equal-p type-string (second ch)))
@@ -48,14 +40,14 @@
 (deftest type-children-arrow-with-effects
   "Arrow type includes effect row when present."
   (let* ((arr (make-type-arrow (list type-int) type-bool :effects +io-effect-row+))
-         (ch  (type-children arr)))
+         (ch  (cl-cc/type:type-children arr)))
     (assert-equal 3 (length ch))
     (assert-true (type-effect-row-p (third ch)))))
 
 (deftest type-children-product
   "Product type returns its elements."
   (let* ((p  (make-type-product :elems (list type-int type-string type-bool)))
-         (ch (type-children p)))
+         (ch (cl-cc/type:type-children p)))
     (assert-equal 3 (length ch))
     (assert-true (type-equal-p type-int (first ch)))))
 
@@ -64,54 +56,52 @@
   :cases (("union"        (make-type-union (list type-int type-string)))
           ("intersection" (make-type-intersection (list type-int type-string))))
   (ty)
-  (assert-equal 2 (length (type-children ty))))
+  (assert-equal 2 (length (cl-cc/type:type-children ty))))
 
-(deftest type-children-record-closed
-  "Closed record returns field values."
-  (let* ((r  (make-type-record :fields (list (cons :x type-int) (cons :y type-string))
-                               :row-var nil))
-         (ch (type-children r)))
-    (assert-equal 2 (length ch))
+(deftest-each type-children-record-variants
+  "Record children: closed → field values; open → fields + row variable."
+  :cases (("closed" nil 2 type-string)
+          ("open"   t   2 nil))
+  (open-p expected-count second-type-or-nil)
+  (let* ((rv (when open-p (fresh-type-var "rho")))
+         (fields (if open-p
+                     (list (cons :x type-int))
+                     (list (cons :x type-int) (cons :y type-string))))
+         (r  (make-type-record :fields fields :row-var rv))
+         (ch (cl-cc/type:type-children r)))
+    (assert-equal expected-count (length ch))
     (assert-true (type-equal-p type-int (first ch)))
-    (assert-true (type-equal-p type-string (second ch)))))
+    (if open-p
+        (assert-true  (type-var-p (second ch)))
+        (assert-true  (type-equal-p second-type-or-nil (second ch))))))
 
-(deftest type-children-record-open
-  "Open record includes row variable."
-  (let* ((rv (fresh-type-var "rho"))
-         (r  (make-type-record :fields (list (cons :x type-int))
-                               :row-var rv))
-         (ch (type-children r)))
+(deftest-each type-children-variant-variants
+  "Variant children: closed → case values; open → cases + row variable."
+  :cases (("closed" nil)
+          ("open"   t))
+  (open-p)
+  (let* ((rv (when open-p (fresh-type-var "rho")))
+         (cases (if open-p
+                    (list (cons :ok type-int))
+                    (list (cons :some type-int) (cons :none type-null))))
+         (v  (make-type-variant :cases cases :row-var rv))
+         (ch (cl-cc/type:type-children v)))
     (assert-equal 2 (length ch))
-    (assert-true (type-var-p (second ch)))))
-
-(deftest type-children-variant-closed
-  "Closed variant returns case values."
-  (let* ((v  (make-type-variant :cases (list (cons :some type-int) (cons :none type-null))
-                                :row-var nil))
-         (ch (type-children v)))
-    (assert-equal 2 (length ch))))
-
-(deftest type-children-variant-open
-  "Open variant includes row variable."
-  (let* ((rv (fresh-type-var "rho"))
-         (v  (make-type-variant :cases (list (cons :ok type-int)) :row-var rv))
-         (ch (type-children v)))
-    (assert-equal 2 (length ch))
-    (assert-true (type-var-p (second ch)))))
+    (when open-p (assert-true (type-var-p (second ch))))))
 
 (deftest-each type-children-quantifier-return-body
   "Forall and exists return only the body (1 child)."
   :cases (("forall" (make-type-forall :var (fresh-type-var "a") :body type-int)  type-int)
           ("exists" (make-type-exists :var (fresh-type-var "a") :body type-string) type-string))
   (ty expected-body)
-  (let ((ch (type-children ty)))
+  (let ((ch (cl-cc/type:type-children ty)))
     (assert-equal 1 (length ch))
     (assert-true (type-equal-p expected-body (first ch)))))
 
 (deftest type-children-app
   "Type application returns fun and arg."
   (let* ((app (make-type-app :fun type-int :arg type-string))
-         (ch  (type-children app)))
+         (ch  (cl-cc/type:type-children app)))
     (assert-equal 2 (length ch))
     (assert-true (type-equal-p type-int (first ch)))
     (assert-true (type-equal-p type-string (second ch)))))
@@ -119,10 +109,10 @@
 (deftest type-children-lambda-and-mu
   "Type lambda and mu return only the body (1 child)."
   (let ((a (fresh-type-var "a")))
-    (let ((ch (type-children (cl-cc/type::make-type-lambda :var a :body type-int))))
+    (let ((ch (cl-cc/type:type-children (cl-cc/type::make-type-lambda :var a :body type-int))))
       (assert-equal 1 (length ch))
       (assert-true (type-equal-p type-int (first ch))))
-    (let ((ch (type-children (make-type-mu :var a :body type-int))))
+    (let ((ch (cl-cc/type:type-children (make-type-mu :var a :body type-int))))
       (assert-equal 1 (length ch)))))
 
 (deftest-each type-children-wrapper-types
@@ -131,51 +121,46 @@
           ("linear"      (make-type-linear :base type-int :grade :one))
           ("capability"  (cl-cc/type::make-type-capability :base type-int :cap 'read)))
   (ty)
-  (let ((ch (type-children ty)))
+  (let ((ch (cl-cc/type:type-children ty)))
     (assert-equal 1 (length ch))
     (assert-true (type-equal-p type-int (first ch)))))
 
-(deftest type-children-effect-row-closed
-  "Closed effect row returns its effects."
-  (let* ((eff (make-type-effect-op :name 'io :args nil))
-         (row (make-type-effect-row :effects (list eff) :row-var nil))
-         (ch  (type-children row)))
-    (assert-equal 1 (length ch))
-    (assert-true (cl-cc/type::type-effect-op-p (first ch)))))
-
-(deftest type-children-effect-row-open
-  "Open effect row includes row variable."
-  (let* ((rv  (fresh-type-var "rho"))
+(deftest-each type-children-effect-row-variants
+  "Effect row children: closed → effects only; open → effects + row variable."
+  :cases (("closed" nil 1)
+          ("open"   t   2))
+  (open-p expected-count)
+  (let* ((rv  (when open-p (fresh-type-var "rho")))
          (eff (make-type-effect-op :name 'io :args nil))
          (row (make-type-effect-row :effects (list eff) :row-var rv))
-         (ch  (type-children row)))
-    (assert-equal 2 (length ch))
-    (assert-true (type-var-p (second ch)))))
+         (ch  (cl-cc/type:type-children row)))
+    (assert-equal expected-count (length ch))
+    (assert-true (cl-cc/type::type-effect-op-p (first ch)))
+    (when open-p (assert-true (type-var-p (second ch))))))
 
-(deftest type-children-effect-op-no-args
-  "Effect op with no args returns nil."
-  (let* ((eff (make-type-effect-op :name 'io :args nil))
-         (ch  (type-children eff)))
-    (assert-null ch)))
-
-(deftest type-children-effect-op-with-args
-  "Effect op with args returns its args."
-  (let* ((eff (make-type-effect-op :name 'state :args (list type-int)))
-         (ch  (type-children eff)))
-    (assert-equal 1 (length ch))
-    (assert-true (type-equal-p type-int (first ch)))))
+(deftest-each type-children-effect-op-cases
+  "Effect op: no args → nil children; with args → children list matching the args."
+  :cases (("no-args"   'io    nil              nil)
+          ("with-args" 'state (list type-int)  1))
+  (name args expected-count)
+  (let* ((eff (make-type-effect-op :name name :args args))
+         (ch  (cl-cc/type:type-children eff)))
+    (if expected-count
+        (progn (assert-equal expected-count (length ch))
+               (assert-true (type-equal-p type-int (first ch))))
+        (assert-null ch))))
 
 (deftest type-children-handler
   "Handler returns effect, input, and output."
   (let* ((eff (make-type-effect-op :name 'io :args nil))
          (h   (cl-cc/type::make-type-handler :effect eff :input type-int :output type-string))
-         (ch  (type-children h)))
+         (ch  (cl-cc/type:type-children h)))
     (assert-equal 3 (length ch))))
 
 (deftest type-children-constraint
   "Constraint returns the type-arg."
   (let* ((c  (cl-cc/type::make-type-constraint :class-name 'eq :type-arg type-int))
-         (ch (type-children c)))
+         (ch (cl-cc/type:type-children c)))
     (assert-equal 1 (length ch))
     (assert-true (type-equal-p type-int (first ch)))))
 
@@ -183,7 +168,7 @@
   "Qualified returns constraints + body."
   (let* ((c  (cl-cc/type::make-type-constraint :class-name 'eq :type-arg type-int))
          (q  (make-type-qualified :constraints (list c) :body type-string))
-         (ch (type-children q)))
+         (ch (cl-cc/type:type-children q)))
     (assert-equal 2 (length ch))
     (assert-true (type-equal-p type-string (second ch)))))
 
@@ -196,15 +181,17 @@
           ("lambda" (let ((a (fresh-type-var "a"))) (cl-cc/type::make-type-lambda :var a :body type-int)))
           ("mu"     (let ((a (fresh-type-var "a"))) (make-type-mu :var a :body type-int))))
   (ty)
-  (assert-true (type-var-p (type-bound-var ty))))
+  (assert-true (type-var-p (cl-cc/type:type-bound-var ty))))
 
-(deftest type-bound-var-non-binding
-  "Non-binding types return nil."
-  (assert-null (type-bound-var type-int))
-  (assert-null (type-bound-var (fresh-type-var "a")))
-  (assert-null (type-bound-var (make-type-arrow (list type-int) type-bool)))
-  (assert-null (type-bound-var (make-type-product :elems (list type-int))))
-  (assert-null (type-bound-var (make-type-union (list type-int type-string)))))
+(deftest-each type-bound-var-non-binding-cases
+  "Non-binding types (primitive, var, arrow, product, union) return nil for type-bound-var."
+  :cases (("primitive" type-int)
+          ("var"       (fresh-type-var "a"))
+          ("arrow"     (make-type-arrow (list type-int) type-bool))
+          ("product"   (make-type-product :elems (list type-int)))
+          ("union"     (make-type-union (list type-int type-string))))
+  (ty)
+  (assert-null (cl-cc/type:type-bound-var ty)))
 
 ;;; ─── Integration: type-free-vars still works correctly ─────────────────────
 

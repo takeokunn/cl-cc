@@ -79,26 +79,49 @@
 
 (deftest-each target-64-bit-p-classification
   "target-64-bit-p: true for register ISAs, false for the wasm32 stack machine."
-  :cases (("x86-64"  t   cl-cc/mir::*x86-64-target*)
-          ("aarch64" t   cl-cc/mir::*aarch64-target*)
-          ("riscv64" t   cl-cc/mir::*riscv64-target*)
-          ("wasm32"  nil cl-cc/mir::*wasm32-target*))
-  (expected target)
-  (if expected
-      (assert-true  (cl-cc/mir::target-64-bit-p target))
-      (assert-false (cl-cc/mir::target-64-bit-p target))))
+  :cases (("x86-64"
+           cl-cc/mir::*x86-64-target*
+           (lambda (target)
+             (assert-true (cl-cc/mir::target-64-bit-p target))))
+          ("aarch64"
+           cl-cc/mir::*aarch64-target*
+           (lambda (target)
+             (assert-true (cl-cc/mir::target-64-bit-p target))))
+          ("riscv64"
+           cl-cc/mir::*riscv64-target*
+           (lambda (target)
+             (assert-true (cl-cc/mir::target-64-bit-p target))))
+          ("wasm32"
+           cl-cc/mir::*wasm32-target*
+           (lambda (target)
+             (assert-false (cl-cc/mir::target-64-bit-p target)))))
+  (target verify)
+  (funcall verify target))
 
 (deftest-each target-has-feature-p-cases
   "target-has-feature-p finds architecture-specific features and rejects absent ones."
-  :cases (("x86-sysv"          t   cl-cc/mir::*x86-64-target*  :sysv-abi)
-          ("arm-aapcs"         t   cl-cc/mir::*aarch64-target* :aapcs64)
-          ("wasm-structured"   t   cl-cc/mir::*wasm32-target*  :structured-control-flow)
-          ("x86-no-wasm-feat"  nil cl-cc/mir::*x86-64-target*  :structured-control-flow)
-          ("wasm-no-sysv"      nil cl-cc/mir::*wasm32-target*  :sysv-abi))
-  (expected target feature)
-  (if expected
-      (assert-true  (cl-cc/mir::target-has-feature-p target feature))
-      (assert-false (cl-cc/mir::target-has-feature-p target feature))))
+  :cases (("x86-sysv"
+           cl-cc/mir::*x86-64-target* :sysv-abi
+           (lambda (target feature)
+             (assert-true (cl-cc/mir::target-has-feature-p target feature))))
+          ("arm-aapcs"
+           cl-cc/mir::*aarch64-target* :aapcs64
+           (lambda (target feature)
+             (assert-true (cl-cc/mir::target-has-feature-p target feature))))
+          ("wasm-structured"
+           cl-cc/mir::*wasm32-target* :structured-control-flow
+           (lambda (target feature)
+             (assert-true (cl-cc/mir::target-has-feature-p target feature))))
+          ("x86-no-wasm-feat"
+           cl-cc/mir::*x86-64-target* :structured-control-flow
+           (lambda (target feature)
+             (assert-false (cl-cc/mir::target-has-feature-p target feature))))
+          ("wasm-no-sysv"
+           cl-cc/mir::*wasm32-target* :sysv-abi
+           (lambda (target feature)
+             (assert-false (cl-cc/mir::target-has-feature-p target feature)))))
+  (target feature verify)
+  (funcall verify target feature))
 
 (deftest target-allocatable-regs-behavior
   "target-allocatable-regs: x86-64 excludes scratch (:rsp/:r11), includes :rax; wasm32 empty."

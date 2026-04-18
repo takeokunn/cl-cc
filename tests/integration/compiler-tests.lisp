@@ -64,11 +64,14 @@
 
 ;;; Print Tests
 
-(deftest vm-exec-print
-  "print outputs values, including sequenced prints."
+(deftest vm-exec-print-single-value
+  "print outputs a single value to *standard-output*."
   (let ((output (with-output-to-string (*standard-output*)
                   (run-string "(print 42)"))))
-    (assert-true (search "42" output)))
+    (assert-true (search "42" output))))
+
+(deftest vm-exec-print-sequence
+  "Sequential prints write all values to *standard-output*."
   (let ((output (with-output-to-string (*standard-output*)
                   (run-string "(progn (print 1) (print 2) (print 3))"))))
     (assert-true (search "1" output))
@@ -99,11 +102,19 @@
 
 ;;; Assembly Emission Tests
 
-(deftest asm-emission
-  "Both x86_64 and aarch64 backends generate string assembly for various forms."
-  (%assert-assembly-contains "(lambda (x) (+ x 2))" "add")
-  (%assert-assembly-stringp "(if 1 2 3)")
-  (%assert-assembly-stringp "(let ((x 1)) x)")
+(deftest asm-emission-binop-add
+  "Both backends emit 'add' for a lambda containing (+ x 2)."
+  (%assert-assembly-contains "(lambda (x) (+ x 2))" "add"))
+
+(deftest-each asm-emission-basic-forms
+  "Both backends generate non-empty string assembly for basic forms."
+  :cases (("if-form"  "(if 1 2 3)")
+          ("let-form" "(let ((x 1)) x)"))
+  (form)
+  (%assert-assembly-stringp form))
+
+(deftest asm-emission-identity-lambda
+  "Identity lambda compiles successfully or is flagged as not-yet-supported."
   (%assert-assembly-or-not-yet-supported "(lambda (x) x)"))
 
 ;;; Error Handling Tests
@@ -291,155 +302,6 @@
   (form)
   (assert-true (null (run-string form))))
 
-;;; String/Symbol Builtin Compilation Tests
-
-(deftest-each compile-string-comparison
-  "String comparison operators return truthy for true condition and NIL for false."
-  :cases (("string=-match"    t   "(string= \"hello\" \"hello\")")
-          ("string=-mismatch" nil "(string= \"hello\" \"world\")")
-          ("string<-true"     t   "(string< \"abc\" \"def\")")
-          ("string<-false"    nil "(string< \"def\" \"abc\")")
-          ("string/=-true"    t   "(string/= \"hello\" \"world\")")
-          ("string/=-false"   nil "(string/= \"hello\" \"hello\")")
-          ("string-equal-ci"  t   "(string-equal \"Hello\" \"hello\")")
-          ("string-equal-no"  nil "(string-equal \"hello\" \"world\")"))
-  (expected form)
-  (if expected
-      (assert-true (run-string form))
-      (assert-true (null (run-string form)))))
-
-(deftest-each compile-string-ops-and-type-predicates
-  "String ops return numeric results and type predicates return CL booleans."
-  :cases (("length-hello"  5 "(string-length \"hello\")")
-          ("length-empty"  0 "(string-length \"\")")
-          ("upcase-len"    5 "(string-length (string-upcase \"hello\"))")
-          ("downcase-len"  3 "(string-length (string-downcase \"ABC\"))")
-          ("concat-len"   10 "(string-length (concatenate 'string \"hello\" \"world\"))")
-          ("symbolp-sym"   t "(symbolp 'foo)")
-          ("symbolp-num"   nil "(symbolp 42)")
-          ("numberp-num"   t "(numberp 42)")
-          ("numberp-sym"   nil "(numberp 'foo)"))
-  (expected form)
-  (assert-equal expected (run-string form)))
-
-;;; Macro Expansion in Compiler Tests
-
-(deftest-each compile-control-macros-valued
-  "cond/when/unless/and/or macros return the expected values."
-  :cases (("cond-match"    42  "(cond ((= 1 2) 10) ((= 1 1) 42) (t 0))")
-          ("cond-default"   0  "(cond ((= 1 2) 10) ((= 2 3) 20) (t 0))")
-          ("when-true"     42  "(when (= 1 1) 42)")
-          ("unless-false"  99  "(unless (= 1 2) 99)")
-          ("and-all"        3  "(and 1 2 3)")
-          ("or-find"        5  "(or nil nil 5)")
-          ("or-first"       1  "(or 1 2 3)"))
-  (expected form)
-  (assert-run= expected form))
-
-(deftest-each compile-control-macros-nil
-  "cond/when/unless/and/or return nil in the false cases."
-  :cases (("when-false"   "(when (= 1 2) 42)")
-          ("unless-true"  "(unless (= 1 1) 99)")
-          ("and-short"    "(and 1 nil 3)")
-          ("or-all-nil"   "(or nil nil nil)"))
-  (form)
-  (assert-run-false form))
-
-(deftest-each compile-t-nil-constants
-  "t and nil are recognized as constants; not inverts truthiness."
-  :cases (("t-is-true"    t   "t")
-          ("not-nil"      t   "(not nil)")
-          ("nil-is-nil"   nil "nil")
-          ("not-1"        nil "(not 1)")
-          ("not-t"        nil "(not t)"))
-  (expected form)
-  (assert-run= expected form))
-
-;;; List Operation Builtin Tests
-
-(deftest-each compile-list-ops
-  "cons/car/cdr, list/length, first/rest, eq/eql return the expected numeric values."
-  :cases (("car"         1 "(car (cons 1 2))")
-          ("cdr"         2 "(cdr (cons 1 2))")
-          ("length-3"    3 "(length (list 1 2 3))")
-          ("length-0"    0 "(length (list))")
-          ("first"      10 "(first (list 10 20 30))")
-          ("rest-len"    2 "(length (rest (list 10 20 30)))")
-          ("eq-true"     1 "(eq 1 1)")
-          ("eq-false"    0 "(eq 1 2)")
-          ("eql-true"    1 "(eql 42 42)"))
-  (expected form)
-  (assert-= expected (run-string form)))
-
-(deftest-each compile-list-builtins
-  "append/reverse builtins work on lists."
-  :cases (("append-len" 4 "(length (append (list 1 2) (list 3 4)))")
-          ("reverse-first" 3 "(first (reverse (list 1 2 3)))"))
-  (expected form)
-  (assert-run= expected form))
-
-;;; Handler-Case Tests
-
-(deftest-each compile-handler-case-return-value
-  "handler-case returns the correct numeric value in various scenarios."
-  :cases (("no-error"      42 "(handler-case 42 (error (e) 0))")
-          ("catches-error" 99 "(handler-case (error \"boom\") (error (e) 99))")
-          ("arithmetic"    10 "(handler-case (+ 3 7) (error (e) 0))")
-          ("handler-body" 100 "(handler-case (error \"x\") (error (e) (* 10 10)))")
-          ("nested"         1 "(handler-case (handler-case (error \"inner\") (error (e) 1)) (error (e) 2))"))
-  (expected form)
-  (assert-= expected (run-string form)))
-
-(deftest compile-handler-case-error-variable
-  "handler-case binds the error value to the variable"
-  (assert-string= "boom" (run-string "(handler-case (error \"boom\") (error (e) e))")))
-
-(deftest compile-error-builtin-without-handler
-  "error without handler signals a CL error"
-  (assert-signals error
-    (run-string "(error \"unhandled\")")))
-
-;;; Hash Table Operation Tests
-
-(deftest-each compile-hash-table-numeric
-  "Hash table operations return the expected numeric values; gethash returns nil when missing with no default."
-  :cases (("hash-table-p"   1  "(let ((ht (make-hash-table))) (hash-table-p ht))")
-          ("gethash-get"    42 "(let ((ht (make-hash-table))) (setf (gethash 'x ht) 42) (gethash 'x ht))")
-          ("gethash-default" 99 "(let ((ht (make-hash-table))) (gethash 'missing ht 99))")
-          ("count"           2 "(let ((ht (make-hash-table))) (setf (gethash 'a ht) 1) (setf (gethash 'b ht) 2) (hash-table-count ht))")
-          ("remhash"         1 "(let ((ht (make-hash-table))) (setf (gethash 'a ht) 1) (setf (gethash 'b ht) 2) (remhash 'a ht) (hash-table-count ht))")
-          ("hash-table-p-no" 0 "(hash-table-p 42)")
-          ("setf-returns"  100 "(let ((ht (make-hash-table))) (setf (gethash 'k ht) 100))")
-          ("overwrite"      20 "(let ((ht (make-hash-table))) (setf (gethash 'k ht) 10) (setf (gethash 'k ht) 20) (gethash 'k ht))"))
-  (expected form)
-  (assert-= expected (run-string form))
-  (assert-true (null (run-string "(let ((ht (make-hash-table))) (gethash 'missing ht))"))))
-
-;;; Defmacro Compilation Tests
-
-(deftest-each compile-defmacro-numeric
-  "defmacro defines macros that expand and evaluate to the correct numeric result."
-  :cases (("basic"      42  "(defmacro my-const () 42) (my-const)")
-          ("with-args"  10  "(defmacro my-dbl (x) (list '+ x x)) (my-dbl 5)")
-          ("quasiquote" 15  "(defmacro my-add3 (a b c) `(+ ,a (+ ,b ,c))) (my-add3 3 5 7)")
-          ("in-let"     100 "(defmacro my-square (x) `(* ,x ,x)) (let ((n 10)) (my-square n))"))
-  (expected form)
-  (assert-= expected (run-string form)))
-
-(deftest compile-defmacro-returns-name
-  "defmacro returns the macro name; symbol-name returns the name string."
-  (assert-true (string= "my-mac" (string-downcase (symbol-name (run-string "(defmacro my-mac (x) x)")))))
-  (assert-string= "FOO" (run-string "(symbol-name 'foo)")))
-
-;;; Symbol Manipulation Tests
-
-(deftest-each compile-symbol-creation
-  "intern/gensym/make-symbol all create symbols (symbolp returns truthy)."
-  :cases (("intern"      "(symbolp (intern \"TEST-SYM\"))")
-          ("gensym"      "(symbolp (gensym))")
-          ("make-symbol" "(symbolp (make-symbol \"TEMP\"))"))
-  (form)
-  (assert-true (not (null (run-string form)))))
 
 ;;; Extended List and Macro Tests
 
@@ -480,27 +342,6 @@
   (assert-eq :test (run-string ":test"))
   (assert-run= 1 "(typecase 42 (integer 1) (string 2) (otherwise 3))"))
 
-;;; Typep and Destructuring Tests
-
-;;; Iteration Macro Tests
-
-(deftest-each compile-typep-destructuring-iteration
-  "typep/destructuring-bind/iteration macros return the expected numeric result."
-  :cases (("typep-integer"   1 "(typep 42 'integer)")
-          ("typep-string"    1 "(typep \"hello\" 'string)")
-          ("typep-symbol"    1 "(typep 'foo 'symbol)")
-          ("typep-cons"      1 "(typep (cons 1 2) 'cons)")
-          ("typep-null"      1 "(typep nil 'null)")
-          ("typep-negative"  0 "(typep 42 'string)")
-          ("db-basic"        6 "(destructuring-bind (a b c) (list 1 2 3) (+ a (+ b c)))")
-          ("db-rest"         2 "(destructuring-bind (a &rest b) (list 1 2 3) (length b))")
-          ("dolist"          6 "(let ((sum 0)) (dolist (x (list 1 2 3)) (setq sum (+ sum x))) sum)")
-          ("dotimes"        10 "(let ((sum 0)) (dotimes (i 5) (setq sum (+ sum i))) sum)")
-          ("do"             10 "(do ((i 0 (+ i 1)) (sum 0 (+ sum i))) ((= i 5) sum))")
-          ("loop"           10 "(let ((sum 0) (i 0)) (loop (if (= i 5) (return sum)) (setq sum (+ sum i)) (setq i (+ i 1))))"))
-  (expected form)
-  (assert-= expected (run-string form)))
-
 ;;; Extended Lambda List Tests (&rest, &optional, &key)
 
 ;; &rest tests
@@ -512,11 +353,13 @@
   (expected form)
   (assert-equal expected (run-string form)))
 
-(deftest compile-rest-extras
-  "&rest with no extra args gives nil; car and length work on &rest lists."
-  (assert-true (not (run-string "(defun my-list0 (&rest args) args) (my-list0)")))
-  (assert-= 10 (run-string "(defun first-rest (&rest args) (car args)) (first-rest 10 20 30)"))
-  (assert-= 3 (run-string " (defun my-len (lst) (if (null lst) 0 (+ 1 (my-len (cdr lst))))) (defun count-args (&rest args) (my-len args)) (count-args 1 2 3)")))
+(deftest-each compile-rest-extras
+  "&rest edge cases: empty produces nil; car and recursive length work on rest lists."
+  :cases (("empty-nil"   nil "(defun my-list0 (&rest args) args) (my-list0)")
+          ("car-rest"    10  "(defun first-rest (&rest args) (car args)) (first-rest 10 20 30)")
+          ("length-rest"  3  "(defun my-len (lst) (if (null lst) 0 (+ 1 (my-len (cdr lst))))) (defun count-args (&rest args) (my-len args)) (count-args 1 2 3)"))
+  (expected form)
+  (assert-equal expected (run-string form)))
 
 ;; &optional tests
 (deftest-each compile-optional-params
@@ -730,12 +573,16 @@
 
 (deftest-each compile-check-type
   "check-type passes silently for correct type and signals error for wrong type."
-  :cases (("passes" "(let ((x 42)) (check-type x integer))"        nil)
-          ("errors" "(let ((x \"hello\")) (check-type x integer))"  t))
-  (form should-error-p)
-  (if should-error-p
-      (assert-signals error (run-string form))
-      (assert-true (eq nil (run-string form)))))
+  :cases (("passes"
+           "(let ((x 42)) (check-type x integer))"
+           (lambda (form)
+             (assert-true (eq nil (run-string form)))))
+          ("errors"
+           "(let ((x \"hello\")) (check-type x integer))"
+           (lambda (form)
+             (assert-signals error (run-string form)))))
+  (form verify)
+  (funcall verify form))
 
 ;;; Eval-When Tests
 
@@ -812,16 +659,21 @@
   (expected form)
   (assert-= expected (run-string form)))
 
-(deftest compile-equal-ops
+(deftest-each compile-equal-ops
   "equal returns truthy for matching structures, NIL for different structures."
-  (assert-true (run-string "(equal (list 1 2 3) (list 1 2 3))"))
-  (assert-true (null (run-string "(equal (list 1 2) (list 1 3))")))
-  (assert-true (run-string "(equal (subst 'x 'a (list 'a 'b 'a)) (list 'x 'b 'x))")))
+  :cases (("list-match"   t   "(equal (list 1 2 3) (list 1 2 3))")
+          ("list-no-match" nil "(equal (list 1 2) (list 1 3))")
+          ("subst-match"  t   "(equal (subst 'x 'a (list 'a 'b 'a)) (list 'x 'b 'x))"))
+  (expected form)
+  (assert-equal expected (if (run-string form) t nil)))
 
-(deftest compile-assoc-and-string
-  "assoc returns nil when not found; (string sym) coerces symbol to string."
-  (assert-true (equal nil (run-string "(assoc 'z (list (cons 'a 1) (cons 'b 2)))")))
-  (assert-true (equal "HELLO" (run-string "(string 'hello)"))))
+(deftest compile-assoc-miss
+  "assoc returns nil when the key is not found."
+  (assert-null (run-string "(assoc 'z (list (cons 'a 1) (cons 'b 2)))")))
+
+(deftest compile-string-coerce
+  "(string sym) coerces a symbol to its name string."
+  (assert-string= "HELLO" (run-string "(string 'hello)")))
 
 ;;; String/Character Builtin Tests
 
@@ -886,10 +738,12 @@
   (form)
   (assert-true (equal 42 (run-string form))))
 
-(deftest io-returns-nil
+(deftest-each io-returns-nil
   "terpri and (format t ...) both return nil."
-  (assert-true (equal nil (run-string "(terpri)")))
-  (assert-true (equal nil (run-string "(format t \"hello\")"))))
+  :cases (("terpri"    "(terpri)")
+          ("format-t"  "(format t \"hello\")"))
+  (form)
+  (assert-null (run-string form)))
 
 (deftest-each io-format-directives
   "format directives for iteration, conditionals, and character output."

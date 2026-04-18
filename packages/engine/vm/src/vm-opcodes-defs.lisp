@@ -13,48 +13,20 @@
 
 ;;; ── Opcode definitions ───────────────────────────────────────────────────
 
-(defopcode const
-  (lambda (state code pc regs)
-    (declare (ignore state))
-    (let ((dst (svref code (+ pc 1)))
-          (imm (svref code (+ pc 2))))
-      (setf (svref regs dst) imm))
-    (+ pc 4)))
+(defopcode-load-literal const (svref code (+ pc 2)))
 
 (defopcode nop
   (lambda (state code pc regs)
     (declare (ignore state code regs))
     (+ pc 4)))
 
-(defopcode load-const
-  (lambda (state code pc regs)
-    (declare (ignore state))
-    (let ((dst (svref code (+ pc 1)))
-          (literal (svref code (+ pc 2))))
-      (setf (svref regs dst) literal))
-    (+ pc 4)))
+(defopcode-load-literal load-const (svref code (+ pc 2)))
 
-(defopcode load-nil
-  (lambda (state code pc regs)
-    (declare (ignore state))
-    (let ((dst (svref code (+ pc 1))))
-      (setf (svref regs dst) nil))
-    (+ pc 4)))
+(defopcode-load-literal load-nil nil)
 
-(defopcode load-true
-  (lambda (state code pc regs)
-    (declare (ignore state))
-    (let ((dst (svref code (+ pc 1))))
-      (setf (svref regs dst) t))
-    (+ pc 4)))
+(defopcode-load-literal load-true t)
 
-(defopcode load-fixnum
-  (lambda (state code pc regs)
-    (declare (ignore state))
-    (let ((dst (svref code (+ pc 1)))
-          (imm (svref code (+ pc 2))))
-      (setf (svref regs dst) imm))
-    (+ pc 4)))
+(defopcode-load-literal load-fixnum (svref code (+ pc 2)))
 
 (defopcode const-halt2
   (lambda (state code pc regs)
@@ -81,37 +53,17 @@
 (defopcode-unary-pred functionp functionp)
 (defopcode-unary-pred stringp   stringp)
 
-(defopcode cons
-  (lambda (state code pc regs)
-    (declare (ignore state))
-    (let ((dst (svref code (+ pc 1)))
-          (car-reg (svref code (+ pc 2)))
-          (cdr-reg (svref code (+ pc 3))))
-      (setf (svref regs dst) (cons (svref regs car-reg) (svref regs cdr-reg))))
-    (+ pc 4)))
+(defopcode-binary-fn cons cons)
 
 (defopcode-unary-fn car car)
 (defopcode-unary-fn cdr cdr)
 
-(defopcode make-vector
-  (lambda (state code pc regs)
-    (declare (ignore state))
-    (let ((dst (svref code (+ pc 1)))
-          (size-reg (svref code (+ pc 2)))
-          (init-reg (svref code (+ pc 3))))
-      (setf (svref regs dst)
-            (make-array (svref regs size-reg) :initial-element (svref regs init-reg))))
-    (+ pc 4)))
+(defun %opcode-make-vector (size initial-element)
+  (make-array size :initial-element initial-element))
 
-(defopcode vector-ref
-  (lambda (state code pc regs)
-    (declare (ignore state))
-    (let ((dst (svref code (+ pc 1)))
-          (vec-reg (svref code (+ pc 2)))
-          (idx-reg (svref code (+ pc 3))))
-      (setf (svref regs dst)
-            (aref (svref regs vec-reg) (svref regs idx-reg))))
-    (+ pc 4)))
+(defopcode-binary-fn make-vector %opcode-make-vector)
+
+(defopcode-binary-fn vector-ref aref)
 
 (defopcode vector-set
   (lambda (state code pc regs)

@@ -67,24 +67,26 @@ All entries use the unbox-cmp-bool pattern via wasm-i64-cmp.")
   "Maps unary VM instruction types to WASM i64 format strings (~A = unboxed src).
 All entries use the unbox-op-box pattern.")
 
+;;; Table-dispatch helpers for emit-trampoline-instruction.
+;;; Each entry: (table . emit-fn) where emit-fn is called with (reg-map dst lhs rhs op).
+(defparameter *wasm-binop-dispatch*
+  (list (cons *wasm-i64-binop-table* #'wasm-i64-binop)
+        (cons *wasm-i64-cmp-table*   #'wasm-i64-cmp))
+  "Ordered list of (table . emit-fn) for binary instruction dispatch.")
+
 (defun emit-trampoline-instruction (inst label-pc-map reg-map num-blocks stream)
   "Emit WAT text for a single VM instruction to STREAM.
    Returns T if instruction was handled, NIL otherwise (emits warn comment)."
   (declare (ignore num-blocks))
   ;; Data-driven dispatch: check tables before falling through to typecase
   (let ((tp (type-of inst)))
-    ;; Binary i64 operations (9 instruction types)
-    (let ((binop (gethash tp *wasm-i64-binop-table*)))
-      (when binop
-        (format stream "~%      ~A"
-                (wasm-i64-binop reg-map (vm-dst inst) (vm-lhs inst) (vm-rhs inst) binop))
-        (return-from emit-trampoline-instruction t)))
-    ;; Comparison operations (6 instruction types)
-    (let ((cmpop (gethash tp *wasm-i64-cmp-table*)))
-      (when cmpop
-        (format stream "~%      ~A"
-                (wasm-i64-cmp reg-map (vm-dst inst) (vm-lhs inst) (vm-rhs inst) cmpop))
-        (return-from emit-trampoline-instruction t)))
+    ;; Binary i64 and comparison operations via shared dispatch
+    (loop for (table . emit-fn) in *wasm-binop-dispatch*
+          for op = (gethash tp table)
+          when op
+            do (format stream "~%      ~A"
+                        (funcall emit-fn reg-map (vm-dst inst) (vm-lhs inst) (vm-rhs inst) op))
+               (return-from emit-trampoline-instruction t))
     ;; Unary fixnum operations (4 instruction types)
     (let ((unary-fmt (gethash tp *wasm-unary-fixnum-table*)))
       (when unary-fmt

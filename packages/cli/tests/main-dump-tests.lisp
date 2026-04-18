@@ -4,17 +4,23 @@
 
 (in-suite cl-cc-unit-suite)
 
-(deftest cli-string-suffix-p-basic-cases
-  (assert-true (cl-cc/cli::%string-suffix-p ".php" "hello.php"))
-  (assert-true (cl-cc/cli::%string-suffix-p "out" "a.out"))
-  (assert-false (cl-cc/cli::%string-suffix-p ".lisp" "hello.php"))
-  (assert-false (cl-cc/cli::%string-suffix-p "longer" "short")))
+(deftest-each cli-string-suffix-p-basic-cases
+  "string-suffix-p returns t when the suffix matches, nil otherwise."
+  :cases (("php-match"     t   ".php"   "hello.php")
+          ("out-match"     t   "out"    "a.out")
+          ("lisp-mismatch" nil ".lisp"  "hello.php")
+          ("too-long"      nil "longer" "short"))
+  (expected suffix str)
+  (assert-eq expected (if (cl-cc/cli::%string-suffix-p suffix str) t nil)))
 
-(deftest cli-arch-keyword-parses-supported-architectures
-  (assert-eq :x86-64 (cl-cc/cli::%arch-keyword "x86-64"))
-  (assert-eq :x86-64 (cl-cc/cli::%arch-keyword "x86_64"))
-  (assert-eq :arm64  (cl-cc/cli::%arch-keyword "arm64"))
-  (assert-eq :arm64  (cl-cc/cli::%arch-keyword "aarch64")))
+(deftest-each cli-arch-keyword-parses-supported-architectures
+  "Each recognized architecture string maps to its canonical keyword."
+  :cases (("x86-64"  :x86-64 "x86-64")
+          ("x86_64"  :x86-64 "x86_64")
+          ("arm64"   :arm64  "arm64")
+          ("aarch64" :arm64  "aarch64"))
+  (expected input)
+  (assert-eq expected (cl-cc/cli::%arch-keyword input)))
 
 (deftest cli-arch-keyword-invalid-exits-2
   (let ((stderr (make-string-output-stream)))
@@ -27,11 +33,14 @@
           (assert-= 2 (fake-quit-code q)))))
     (assert-true (search "Unknown architecture" (get-output-stream-string stderr)))))
 
-(deftest cli-compile-target-keyword-parses-supported-architectures
-  (assert-eq :x86_64 (cl-cc/cli::%compile-target-keyword "x86-64"))
-  (assert-eq :x86_64 (cl-cc/cli::%compile-target-keyword "x86_64"))
-  (assert-eq :aarch64 (cl-cc/cli::%compile-target-keyword "arm64"))
-  (assert-eq :aarch64 (cl-cc/cli::%compile-target-keyword "aarch64")))
+(deftest-each cli-compile-target-keyword-parses-supported-architectures
+  "Each recognized architecture string maps to its compilation target keyword."
+  :cases (("x86-64"  :x86_64  "x86-64")
+          ("x86_64"  :x86_64  "x86_64")
+          ("arm64"   :aarch64 "arm64")
+          ("aarch64" :aarch64 "aarch64"))
+  (expected input)
+  (assert-eq expected (cl-cc/cli::%compile-target-keyword input)))
 
 (deftest cli-compile-target-keyword-invalid-signals-error
   (handler-case
@@ -42,12 +51,15 @@
       (assert-true (search "Unknown architecture for compilation"
                            (princ-to-string e))))))
 
-(deftest cli-parse-opt-remarks-mode-cases
-  (assert-null (cl-cc/cli::%parse-opt-remarks-mode nil))
-  (assert-null (cl-cc/cli::%parse-opt-remarks-mode ""))
-  (assert-eq :all (cl-cc/cli::%parse-opt-remarks-mode "all"))
-  (assert-eq :changed (cl-cc/cli::%parse-opt-remarks-mode "changed"))
-  (assert-eq :missed (cl-cc/cli::%parse-opt-remarks-mode "missed")))
+(deftest-each cli-parse-opt-remarks-mode-cases
+  "Each recognized mode string maps to its keyword; nil/empty returns nil."
+  :cases (("nil-input" nil      nil)
+          ("empty-str" nil      "")
+          ("all"       :all     "all")
+          ("changed"   :changed "changed")
+          ("missed"    :missed  "missed"))
+  (expected input)
+  (assert-eq expected (cl-cc/cli::%parse-opt-remarks-mode input)))
 
 (deftest cli-parse-opt-remarks-mode-invalid-exits-2
   (let ((stderr (make-string-output-stream)))

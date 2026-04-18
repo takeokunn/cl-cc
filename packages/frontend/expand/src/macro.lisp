@@ -24,6 +24,8 @@
   (make-hash-table :test #'eq :weakness :key)
   "Weak cache mapping ENV → (equal-hash-table FORM → recursively EXPANDED-FORM).")
 
+(defvar *compiler-macro-table*)
+
 (defvar *macroexpansion-cache-lock*
   #+(and sb-thread (not cl-cc-self-hosting)) (sb-thread:make-mutex :name "macroexpansion-cache")
   #+cl-cc-self-hosting nil

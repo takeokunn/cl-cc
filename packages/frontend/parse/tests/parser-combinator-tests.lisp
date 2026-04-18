@@ -25,28 +25,34 @@
 
 ;;; Token matching
 
-(deftest-each parse-token-cases
-  "Token matching: hit, miss, empty stream, value-constrained match"
-  :cases (("match"      (list (make-tok :T-INT 42))                          :match)
-          ("no-match"   (list (make-tok :T-IDENT "foo"))                     :no-match)
-          ("empty"      nil                                                   :no-match)
-          ("with-value" (list (make-tok :T-OP "+") (make-tok :T-INT 1))      :with-value))
-  (stream kind)
-  (ecase kind
-    (:match
-     (multiple-value-bind (ast rest) (parse-combinator '(token :T-INT) stream)
-       (assert-true (parse-ok-p ast))
-       (assert-= 42 ast)
-       (assert-null rest)))
-    (:no-match
-     (multiple-value-bind (ast rest) (parse-combinator '(token :T-INT) stream)
-       (declare (ignore rest))
-       (assert-false (parse-ok-p ast))))
-    (:with-value
-     (multiple-value-bind (ast rest) (parse-combinator '(token :T-OP "+") stream)
-       (assert-true (parse-ok-p ast))
-       (assert-equal "+" ast)
-       (assert-= 1 (length rest))))))
+(deftest parse-token-matches-correct-type
+  "Token combinator succeeds and returns value when type matches."
+  (let ((stream (list (make-tok :T-INT 42))))
+    (multiple-value-bind (ast rest) (parse-combinator '(token :T-INT) stream)
+      (assert-true (parse-ok-p ast))
+      (assert-= 42 ast)
+      (assert-null rest))))
+
+(deftest parse-token-fails-on-wrong-type
+  "Token combinator fails when stream head is the wrong type."
+  (let ((stream (list (make-tok :T-IDENT "foo"))))
+    (multiple-value-bind (ast rest) (parse-combinator '(token :T-INT) stream)
+      (declare (ignore rest))
+      (assert-false (parse-ok-p ast)))))
+
+(deftest parse-token-fails-on-empty-stream
+  "Token combinator fails on an empty stream."
+  (multiple-value-bind (ast rest) (parse-combinator '(token :T-INT) nil)
+    (declare (ignore rest))
+    (assert-false (parse-ok-p ast))))
+
+(deftest parse-token-with-value-constraint
+  "Token combinator with type and value constraint matches and leaves rest."
+  (let ((stream (list (make-tok :T-OP "+") (make-tok :T-INT 1))))
+    (multiple-value-bind (ast rest) (parse-combinator '(token :T-OP "+") stream)
+      (assert-true (parse-ok-p ast))
+      (assert-equal "+" ast)
+      (assert-= 1 (length rest)))))
 
 ;;; Sequence
 
@@ -65,72 +71,79 @@
 
 ;;; Alternation
 
-(deftest-each parse-alt-cases
-  "Alternation: first branch wins, second branch wins, both branches fail"
-  :cases (("first-succeeds"  (list (make-tok :T-INT 42))        :first)
-          ("second-succeeds" (list (make-tok :T-IDENT "foo"))   :second)
-          ("both-fail"       (list (make-tok :T-OP "+"))        :fail))
-  (stream kind)
+(deftest parse-alt-first-branch-wins
+  "alt returns the first branch's result when first token matches."
   (multiple-value-bind (ast rest)
-      (parse-combinator '(alt (token :T-INT) (token :T-IDENT)) stream)
+      (parse-combinator '(alt (token :T-INT) (token :T-IDENT)) (list (make-tok :T-INT 42)))
     (declare (ignore rest))
-    (ecase kind
-      (:first
-       (assert-true (parse-ok-p ast))
-       (assert-= 42 ast))
-      (:second
-       (assert-true (parse-ok-p ast))
-       (assert-equal "foo" ast))
-      (:fail
-       (assert-false (parse-ok-p ast))))))
+    (assert-true (parse-ok-p ast))
+    (assert-= 42 ast)))
+
+(deftest parse-alt-second-branch-wins
+  "alt falls through to second branch when first fails."
+  (multiple-value-bind (ast rest)
+      (parse-combinator '(alt (token :T-INT) (token :T-IDENT)) (list (make-tok :T-IDENT "foo")))
+    (declare (ignore rest))
+    (assert-true (parse-ok-p ast))
+    (assert-equal "foo" ast)))
+
+(deftest parse-alt-fails-when-both-branches-fail
+  "alt fails when neither branch matches."
+  (multiple-value-bind (ast rest)
+      (parse-combinator '(alt (token :T-INT) (token :T-IDENT)) (list (make-tok :T-OP "+")))
+    (declare (ignore rest))
+    (assert-false (parse-ok-p ast))))
 
 ;;; Repetition
 
-(deftest-each parse-many-cases
-  "many: zero matches succeed with nil, multiple matches collect all"
-  :cases (("zero"     (list (make-tok :T-IDENT "x"))                                          :zero)
-          ("multiple" (list (make-tok :T-INT 1) (make-tok :T-INT 2) (make-tok :T-INT 3)
-                            (make-tok :T-EOF nil))                                             :multiple))
-  (stream kind)
-  (multiple-value-bind (ast rest) (parse-combinator '(many (token :T-INT)) stream)
-    (assert-true (parse-ok-p ast))
-    (ecase kind
-      (:zero
-       (assert-null ast)
-       (assert-= 1 (length rest)))
-      (:multiple
-       (assert-equal '(1 2 3) ast)
-       (assert-= 1 (length rest))))))
+(deftest parse-many-zero-matches-succeed-with-nil
+  "many succeeds with nil result when no tokens match."
+  (let ((stream (list (make-tok :T-IDENT "x"))))
+    (multiple-value-bind (ast rest) (parse-combinator '(many (token :T-INT)) stream)
+      (assert-true (parse-ok-p ast))
+      (assert-null ast)
+      (assert-= 1 (length rest)))))
 
-(deftest-each parse-many1-cases
-  "many1: fails when no tokens match, succeeds with at least one"
-  :cases (("requires-one" (list (make-tok :T-IDENT "x"))                        :fail)
-          ("one-match"    (list (make-tok :T-INT 7) (make-tok :T-IDENT "x"))    :ok))
-  (stream kind)
-  (multiple-value-bind (ast rest) (parse-combinator '(many1 (token :T-INT)) stream)
+(deftest parse-many-collects-all-matches
+  "many collects all consecutive matching tokens into a list."
+  (let ((stream (list (make-tok :T-INT 1) (make-tok :T-INT 2) (make-tok :T-INT 3)
+                      (make-tok :T-EOF nil))))
+    (multiple-value-bind (ast rest) (parse-combinator '(many (token :T-INT)) stream)
+      (assert-true (parse-ok-p ast))
+      (assert-equal '(1 2 3) ast)
+      (assert-= 1 (length rest)))))
+
+(deftest parse-many1-fails-when-no-match
+  "many1 fails when no tokens match the pattern."
+  (multiple-value-bind (ast rest)
+      (parse-combinator '(many1 (token :T-INT)) (list (make-tok :T-IDENT "x")))
     (declare (ignore rest))
-    (ecase kind
-      (:fail  (assert-false (parse-ok-p ast)))
-      (:ok
-       (assert-true (parse-ok-p ast))
-       (assert-equal '(7) ast)))))
+    (assert-false (parse-ok-p ast))))
+
+(deftest parse-many1-succeeds-with-at-least-one
+  "many1 succeeds and collects the one matching token."
+  (multiple-value-bind (ast rest)
+      (parse-combinator '(many1 (token :T-INT)) (list (make-tok :T-INT 7) (make-tok :T-IDENT "x")))
+    (declare (ignore rest))
+    (assert-true (parse-ok-p ast))
+    (assert-equal '(7) ast)))
 
 ;;; Optional
 
-(deftest-each parse-opt-cases
-  "opt: returns value when token present, :opt-absent when absent"
-  :cases (("present" (list (make-tok :T-INT 5))      :present)
-          ("absent"  (list (make-tok :T-IDENT "x"))  :absent))
-  (stream kind)
-  (multiple-value-bind (ast rest) (parse-combinator '(opt (token :T-INT)) stream)
-    (ecase kind
-      (:present
-       (assert-true (parse-ok-p ast))
-       (assert-= 5 ast)
-       (assert-null rest))
-      (:absent
-       (assert-eq :opt-absent ast)
-       (assert-= 1 (length rest))))))
+(deftest parse-opt-returns-value-when-present
+  "opt returns the parsed value when the token is present."
+  (multiple-value-bind (ast rest)
+      (parse-combinator '(opt (token :T-INT)) (list (make-tok :T-INT 5)))
+    (assert-true (parse-ok-p ast))
+    (assert-= 5 ast)
+    (assert-null rest)))
+
+(deftest parse-opt-returns-absent-sentinel-when-missing
+  "opt returns :opt-absent and leaves the stream unchanged when token is absent."
+  (multiple-value-bind (ast rest)
+      (parse-combinator '(opt (token :T-INT)) (list (make-tok :T-IDENT "x")))
+    (assert-eq :opt-absent ast)
+    (assert-= 1 (length rest))))
 
 ;;; Named rule reference
 

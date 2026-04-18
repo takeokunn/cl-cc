@@ -182,6 +182,8 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
 
 ;;; Type-Of Instruction
 
+(defvar *vm-type-of-dispatch*)
+
 (define-vm-unary-instruction vm-type-of :type-of "Get the type of an object.")
 
 (defmethod execute-instruction ((inst vm-type-of) state pc labels)

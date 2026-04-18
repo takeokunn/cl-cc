@@ -54,12 +54,12 @@
                        (record dst key)
                        (push inst result))))))
       (dolist (inst instructions)
-        (cond
-          ((typep inst 'vm-label)
-            (when (gethash (vm-name inst) target-labels)
-              (clrhash gen) (clrhash val-env) (clrhash memo))
-            (push inst result))
-          ((typep inst 'vm-const)
+        (typecase inst
+          (vm-label
+           (when (gethash (vm-name inst) target-labels)
+             (clrhash gen) (clrhash val-env) (clrhash memo))
+           (push inst result))
+          (vm-const
            ;; Never replace vm-const with vm-move: doing so creates a
            ;; fold<->CSE oscillation that DCE can turn into a dangling
            ;; register reference (first canonical reg gets removed by
@@ -72,33 +72,35 @@
              (bump-gen dst)
              (record dst key)
              (push inst result)))
-          ((typep inst 'vm-move)
+          (vm-move
            (let* ((dst     (vm-move-dst inst))
                   (src-val (get-val (vm-move-src inst))))
              (bump-gen dst)
              (setf (gethash dst val-env) src-val)
              (push inst result)))
-          ;; CSE for binary ops: derived from opt-binary-lhs-rhs-p
-          ((opt-binary-lhs-rhs-p inst)
-           (let* ((dst (vm-dst inst))
-                  (lv  (get-val (vm-lhs inst)))
-                  (rv  (get-val (vm-rhs inst)))
-                  (op  (type-of inst))
-                   (key (if (commutative-p inst)
-                           (list op (if (%opt-value< lv rv) lv rv)
-                                    (if (%opt-value< lv rv) rv lv))
-                            (list op lv rv))))
-             (emit-or-cse inst dst key)))
-          ;; CSE for unary ops + type predicates: derived from opt-unary-src-p
-          ((opt-unary-src-p inst)
-           (let* ((dst (vm-dst inst))
-                  (sv  (get-val (vm-src inst)))
-                  (key (list (type-of inst) sv)))
-             (emit-or-cse inst dst key)))
           (t
-           (let ((dst (opt-inst-dst inst)))
-             (when dst (bump-gen dst)))
-            (push inst result)))))
+           (cond
+             ;; CSE for binary ops: derived from opt-binary-lhs-rhs-p
+             ((opt-binary-lhs-rhs-p inst)
+              (let* ((dst (vm-dst inst))
+                     (lv  (get-val (vm-lhs inst)))
+                     (rv  (get-val (vm-rhs inst)))
+                     (op  (type-of inst))
+                     (key (if (commutative-p inst)
+                              (list op (if (%opt-value< lv rv) lv rv)
+                                       (if (%opt-value< lv rv) rv lv))
+                              (list op lv rv))))
+                (emit-or-cse inst dst key)))
+             ;; CSE for unary ops + type predicates: derived from opt-unary-src-p
+             ((opt-unary-src-p inst)
+              (let* ((dst (vm-dst inst))
+                     (sv  (get-val (vm-src inst)))
+                     (key (list (type-of inst) sv)))
+                (emit-or-cse inst dst key)))
+             (t
+              (let ((dst (opt-inst-dst inst)))
+                (when dst (bump-gen dst)))
+              (push inst result)))))))
     (nreverse result)))
 
 ;;; ─── Pass: Global Value Numbering ────────────────────────────────────────
@@ -128,20 +130,18 @@
            (setf (gethash dst gen) (1+ (or (gethash dst gen) 0))))
          (gvn-key (inst gen val-env)
            (let ((reads (opt-inst-read-regs inst)))
-             (cond
-               ((typep inst 'vm-const)
-                (list :const (vm-value inst)))
-               ((typep inst 'vm-move)
-                (get-val (vm-src inst) gen val-env))
-               ((and (opt-inst-pure-p inst) reads)
-                (let ((vals (mapcar (lambda (reg) (get-val reg gen val-env)) reads)))
-                   (if (commutative-p inst)
-                       (destructuring-bind (a b) vals
-                        (if (%opt-value< a b)
-                            (list (type-of inst) a b)
-                            (list (type-of inst) b a)))
-                       (cons (type-of inst) vals))))
-                (t nil)))))
+             (typecase inst
+               (vm-const (list :const (vm-value inst)))
+               (vm-move  (get-val (vm-src inst) gen val-env))
+               (t
+                (when (and (opt-inst-pure-p inst) reads)
+                  (let ((vals (mapcar (lambda (reg) (get-val reg gen val-env)) reads)))
+                    (if (commutative-p inst)
+                        (destructuring-bind (a b) vals
+                          (if (%opt-value< a b)
+                              (list (type-of inst) a b)
+                              (list (type-of inst) b a)))
+                        (cons (type-of inst) vals)))))))))
     (let ((local-gen (copy-env gen))
           (local-val-env (copy-env val-env))
           (local-memo (copy-env memo :test #'equal))
@@ -150,13 +150,13 @@
         (let ((dst (opt-inst-dst inst)))
           (when dst
             (kill dst local-gen local-val-env local-memo)))
-        (cond
-          ((typep inst 'vm-const)
+        (typecase inst
+          (vm-const
            (let* ((dst (vm-dst inst))
                   (key (gvn-key inst local-gen local-val-env)))
              (record dst key local-gen local-val-env local-memo)
              (push inst new-insts)))
-          ((typep inst 'vm-move)
+          (vm-move
            (let* ((dst (vm-dst inst))
                   (key (gvn-key inst local-gen local-val-env))
                   (existing (gethash key local-memo)))
@@ -167,20 +167,22 @@
                  (progn
                    (record dst key local-gen local-val-env local-memo)
                    (push inst new-insts)))))
-          ((and (opt-inst-pure-p inst) (opt-inst-dst inst))
-           (let* ((dst (opt-inst-dst inst))
-                  (key (gvn-key inst local-gen local-val-env))
-                  (existing (and key (gethash key local-memo))))
-             (if existing
-                 (progn
-                   (record dst key local-gen local-val-env local-memo)
-                   (push (make-vm-move :dst dst :src existing) new-insts))
-                 (progn
-                   (when key
-                     (record dst key local-gen local-val-env local-memo))
-                   (push inst new-insts)))))
           (t
-           (push inst new-insts))))
+           (cond
+             ((and (opt-inst-pure-p inst) (opt-inst-dst inst))
+              (let* ((dst (opt-inst-dst inst))
+                     (key (gvn-key inst local-gen local-val-env))
+                     (existing (and key (gethash key local-memo))))
+                (if existing
+                    (progn
+                      (record dst key local-gen local-val-env local-memo)
+                      (push (make-vm-move :dst dst :src existing) new-insts))
+                    (progn
+                      (when key
+                        (record dst key local-gen local-val-env local-memo))
+                      (push inst new-insts)))))
+             (t
+              (push inst new-insts))))))
       (setf (bb-instructions block) (nreverse new-insts))
       (dolist (child (bb-dom-children block))
         (%gvn-process-block child local-gen local-val-env local-memo)))))

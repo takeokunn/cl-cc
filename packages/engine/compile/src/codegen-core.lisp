@@ -17,27 +17,38 @@
 
 ;;; ── Binary operator dispatch table (data layer) ──────────────────────────
 ;;;
-;;; Adding a new arithmetic/comparison operator requires exactly one entry
-;;; here — binop-ctor derives the constructor at runtime.
+;;; One table carries every constructor variant for a numeric/comparison operator.
+;;; This keeps the policy declarative: adding a new operator means adding one
+;;; entry, not updating 3 parallel tables plus dispatch code.
 
-(defparameter *typed-binop-ctors*
-  '((+  . make-vm-add)
-    (-  . make-vm-sub)
-    (*  . make-vm-mul)
-    (/  . make-vm-cl-div)
-    (=  . make-vm-num-eq)
-    (<  . make-vm-lt)
-    (>  . make-vm-gt)
-    (<= . make-vm-le)
-    (>= . make-vm-ge))
-  "Maps arithmetic/comparison operators to typed (fixnum) VM instruction constructors.")
+(defparameter *numeric-binop-ctor-specs*
+  '((+  :generic make-vm-add    :fixnum make-vm-integer-add :float make-vm-float-add)
+    (-  :generic make-vm-sub    :fixnum make-vm-integer-sub :float make-vm-float-sub)
+    (*  :generic make-vm-mul    :fixnum make-vm-integer-mul :float make-vm-float-mul)
+    (/  :generic make-vm-cl-div :float  make-vm-float-div)
+    (=  :generic make-vm-num-eq :fixnum make-vm-num-eq)
+    (<  :generic make-vm-lt     :fixnum make-vm-lt)
+    (>  :generic make-vm-gt     :fixnum make-vm-gt)
+    (<= :generic make-vm-le     :fixnum make-vm-le)
+    (>= :generic make-vm-ge     :fixnum make-vm-ge))
+  "(operator keyword constructor ...) specs for generic/fixnum/float binop codegen.")
+
+(defun %lookup-numeric-binop-ctor-symbol (op kind)
+  "Return the constructor symbol for OP/KIND, or NIL when no specialization exists."
+  (let ((entry (assoc op *numeric-binop-ctor-specs*)))
+    (when entry
+      (getf (cdr entry) kind))))
+
+(defun %numeric-binop-ctor-function (op kind)
+  "Return the constructor function for OP/KIND or NIL when absent."
+  (let ((symbol (%lookup-numeric-binop-ctor-symbol op kind)))
+    (when symbol
+      (symbol-function symbol))))
 
 (defun binop-ctor (op)
-  "Return the instruction constructor for OP."
-  (let ((entry (assoc op *typed-binop-ctors*)))
-    (unless entry
-      (error "Unknown binary operator: ~S" op))
-    (symbol-function (cdr entry))))
+  "Return the generic instruction constructor for OP."
+  (or (%numeric-binop-ctor-function op :generic)
+      (error "Unknown binary operator: ~S" op)))
 
 (defparameter +codegen-fixnum-type+
   (cl-cc/type:parse-type-specifier 'fixnum))
@@ -63,49 +74,30 @@
          (cl-cc/type::instantiate scheme))))
      (t nil)))
 
-(defparameter *fixnum-binop-ctors*
-  '((+  . make-vm-integer-add)
-    (-  . make-vm-integer-sub)
-    (*  . make-vm-integer-mul)
-    (<  . make-vm-lt)
-    (>  . make-vm-gt)
-    (=  . make-vm-num-eq)
-    (<= . make-vm-le)
-    (>= . make-vm-ge))
-  "Alist mapping operators to fixnum-specialized VM instruction constructors.
-Parallels *typed-binop-ctors* and *float-binop-ctors*.")
+(defun %proven-fixnum-type-p (ty)
+  "Return T if TY is a proven subtype of fixnum (or nil when type is unknown)."
+  (and ty (cl-cc/type::is-subtype-p ty +codegen-fixnum-type+)))
 
-(defparameter *float-binop-ctors*
-  '((+ . make-vm-float-add)
-    (- . make-vm-float-sub)
-    (* . make-vm-float-mul)
-    (/ . make-vm-float-div))
-  "Alist mapping operators to float-specialized VM instruction constructors.
-Parallels *typed-binop-ctors* and *fixnum-binop-ctors*.")
+(defun %proven-float-type-p (ty)
+  "Return T if TY is a proven subtype of float."
+  (and ty (cl-cc/type::is-subtype-p ty +codegen-float-type+)))
 
-(defun %lookup-specialized-ctor (op table)
-  "Look up OP in TABLE alist; return its function or nil."
-  (let ((entry (assoc op table)))
-    (when entry (symbol-function (cdr entry)))))
+(defun %float-literal-node-p (node)
+  "Return T if NODE is a quoted float literal."
+  (and (typep node 'ast-quote) (floatp (ast-quote-value node))))
 
 (defun %numeric-binop-constructor (op lhs rhs ctx)
   "Select a numeric-specialized constructor for OP/LHS/RHS when possible.
 Falls back to the generic binop-ctor when no specialization applies."
   (let ((lhs-type (%ast-proven-type ctx lhs))
         (rhs-type (%ast-proven-type ctx rhs)))
-    (labels ((fixnum-type-p (ty)
-               (and ty (cl-cc/type::is-subtype-p ty +codegen-fixnum-type+)))
-             (float-type-p (ty)
-               (and ty (cl-cc/type::is-subtype-p ty +codegen-float-type+)))
-             (float-literal-p (node)
-               (and (typep node 'ast-quote) (floatp (ast-quote-value node)))))
-      (cond
-        ((and (fixnum-type-p lhs-type) (fixnum-type-p rhs-type))
-         (or (%lookup-specialized-ctor op *fixnum-binop-ctors*) (binop-ctor op)))
-        ((or (and (float-type-p lhs-type) (float-type-p rhs-type))
-             (and (float-literal-p lhs) (float-literal-p rhs)))
-         (or (%lookup-specialized-ctor op *float-binop-ctors*) (binop-ctor op)))
-        (t (binop-ctor op))))))
+    (cond
+      ((and (%proven-fixnum-type-p lhs-type) (%proven-fixnum-type-p rhs-type))
+       (or (%numeric-binop-ctor-function op :fixnum) (binop-ctor op)))
+      ((or (and (%proven-float-type-p lhs-type) (%proven-float-type-p rhs-type))
+           (and (%float-literal-node-p lhs) (%float-literal-node-p rhs)))
+       (or (%numeric-binop-ctor-function op :float) (binop-ctor op)))
+      (t (binop-ctor op)))))
 
 ;;; ── Primitive literal forms ──────────────────────────────────────────────
 
@@ -271,4 +263,3 @@ exactly, preserving semantics for overlapping or reordered tests."
          (setf (ctx-type-env ctx) old-type-env)))
     (emit ctx (make-vm-label :name end-label))
     dst))
-

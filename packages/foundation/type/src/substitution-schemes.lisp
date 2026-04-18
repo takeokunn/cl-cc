@@ -37,36 +37,15 @@
 (defun type-occurs-p (var ty subst)
   "True iff type-var VAR appears free in TY (under SUBST)."
   (labels ((occ (t0)
-             (typecase t0
-               (type-var
-                (multiple-value-bind (bound found-p) (subst-lookup t0 subst)
-                  (if found-p (occ bound) (type-var-equal-p var t0))))
-               (type-arrow
-                (or (some #'occ (type-arrow-params t0))
-                    (occ (type-arrow-return t0))
-                    (and (type-arrow-effects t0) (occ (type-arrow-effects t0)))))
-               (type-product      (some #'occ (type-product-elems t0)))
-               (type-union        (some #'occ (type-union-types t0)))
-               (type-intersection (some #'occ (type-intersection-types t0)))
-               (type-record
-                (or (some (lambda (f) (occ (cdr f))) (type-record-fields t0))
-                    (and (type-record-row-var t0) (occ (type-record-row-var t0)))))
-               (type-variant
-                (or (some (lambda (c) (occ (cdr c))) (type-variant-cases t0))
-                    (and (type-variant-row-var t0) (occ (type-variant-row-var t0)))))
-               (type-forall  (occ (type-forall-body t0)))
-               (type-exists  (occ (type-exists-body t0)))
-               (type-app     (or (occ (type-app-fun t0)) (occ (type-app-arg t0))))
-               (type-mu      (occ (type-mu-body t0)))
-               (type-linear  (occ (type-linear-base t0)))
-               (type-effect-row
-                (or (some #'occ (type-effect-row-effects t0))
-                    (and (type-effect-row-row-var t0) (occ (type-effect-row-row-var t0)))))
-               (type-constraint (occ (type-constraint-type-arg t0)))
-               (type-qualified
-                (or (some #'occ (type-qualified-constraints t0))
-                    (occ (type-qualified-body t0))))
-               (t nil))))
+              (typecase t0
+                (type-var
+                 (multiple-value-bind (bound found-p) (subst-lookup t0 subst)
+                   (if found-p (occ bound) (type-var-equal-p var t0))))
+                (t
+                 (let ((bound-var (type-bound-var t0)))
+                   (if (and bound-var (type-var-equal-p var bound-var))
+                       nil
+                       (some #'occ (type-children t0))))))))
     (occ ty)))
 
 ;;; ─── Generalize / Instantiate ─────────────────────────────────────────────

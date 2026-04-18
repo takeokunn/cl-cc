@@ -221,37 +221,28 @@
                    :expected expected-fn :actual func-type))))))
 
 (defun infer-args (asts env)
-  "Infer types for list of ASTs (function arguments).
-   Threads substitution through each argument so constraints from arg N
-   propagate to the environment for arg N+1."
-  (let ((subst nil)
-        (current-env env))
-    (mapcar (lambda (ast)
-              (multiple-value-bind (type new-subst)
-                  (infer ast current-env)
-                (setf subst (compose-subst new-subst subst))
-                (setf current-env (apply-subst-env current-env new-subst))
-                (type-substitute type subst)))
-            asts)))
+  "Infer types for list of ASTs (function arguments), threading substitution."
+  (loop with subst = nil
+        with current-env = env
+        for ast in asts
+        collect (multiple-value-bind (type new-subst) (infer ast current-env)
+                  (setf subst (compose-subst new-subst subst)
+                        current-env (apply-subst-env current-env new-subst))
+                  (type-substitute type subst))))
 
 (defun infer-body (asts env)
-  "Infer type of sequence (return last type).
-   ASTS is a list of AST nodes. ENV must be a type-env object."
+  "Infer type of sequence (return last type); single-pass over ASTS."
   (if (null asts)
       (values type-null nil)
-      (let ((subst nil)
-            (current-env env))
-        (dolist (ast asts)
-          (multiple-value-bind (type new-subst) (infer ast current-env)
-            (declare (ignore type))
-            (setf subst (compose-subst new-subst subst))
-            (setf current-env (apply-subst-env current-env subst))))
-        ;; Infer last element again to get final type
-        (let ((last-ast (car (last asts))))
-          (multiple-value-bind (final-type final-subst)
-              (infer last-ast current-env)
-            (values (type-substitute final-type (compose-subst final-subst subst))
-                    (compose-subst final-subst subst)))))))
+      (loop with subst = nil
+            with current-env = env
+            with last-type = type-null
+            for ast in asts
+            do (multiple-value-bind (type new-subst) (infer ast current-env)
+                 (setf subst       (compose-subst new-subst subst)
+                       last-type   (type-substitute type subst)
+                       current-env (apply-subst-env current-env new-subst)))
+            finally (return (values last-type subst)))))
 
 
 (defun infer-with-env (ast)

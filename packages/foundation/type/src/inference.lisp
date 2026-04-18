@@ -250,21 +250,12 @@ Returns (values type substitution) or signals a type-error condition."
 
 (defun %typed-hole-message (env)
   "Build a typed-hole error message with available in-scope variables."
-  (let ((bindings (and (type-env-p env)
-                       (type-env-bindings env))))
+  (let ((bindings (and (type-env-p env) (type-env-bindings env))))
     (if bindings
-        (with-output-to-string (out)
-          (write-string "Typed hole '_' cannot be inferred; fill the hole with an expression. Available: " out)
-          (loop for entry in bindings
-                for first-p = t then nil
-                do (unless first-p (write-string ", " out))
-                   (let* ((name (car entry))
-                          (scheme (cdr entry))
-                          (ty (if (type-scheme-p scheme)
-                                  (type-scheme-type scheme)
-                                  scheme)))
-                     (format out "~A :: ~A" name (type-to-string ty))))
-          (write-char #\. out))
+        (format nil "Typed hole '_' cannot be inferred; fill the hole with an expression. Available: ~{~A :: ~A~^, ~}."
+                (loop for (name . scheme) in bindings
+                      for ty = (if (type-scheme-p scheme) (type-scheme-type scheme) scheme)
+                      nconc (list name (type-to-string ty))))
         "Typed hole '_' cannot be inferred; fill the hole with an expression. Available: none.")))
 
 (defun infer-binop (ast env)

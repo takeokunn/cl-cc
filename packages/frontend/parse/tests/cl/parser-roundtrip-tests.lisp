@@ -15,28 +15,15 @@
 
 ;;; ─── Leaf nodes ──────────────────────────────────────────────────────────
 
-(deftest ast-to-sexp-int-returns-integer
-  "ast-to-sexp for ast-int returns the integer value directly."
-  (assert-= 42 (cl-cc::ast-to-sexp (cl-cc::make-ast-int :value 42))))
-
-(deftest ast-to-sexp-var-returns-symbol
-  "ast-to-sexp for ast-var returns the variable name symbol."
-  (assert-eq 'x (cl-cc::ast-to-sexp (cl-cc::make-ast-var :name 'x))))
-
-(deftest ast-to-sexp-quote-wraps-in-quote
-  "ast-to-sexp for ast-quote returns (quote value)."
-  (let ((result (cl-cc::ast-to-sexp (cl-cc::make-ast-quote :value 'hello))))
-    (assert-equal '(quote hello) result)))
-
-(deftest ast-to-sexp-function-wraps-in-function
-  "ast-to-sexp for ast-function returns (function name)."
-  (assert-equal '(function foo)
-                (cl-cc::ast-to-sexp (cl-cc::make-ast-function :name 'foo))))
-
-(deftest ast-to-sexp-go-returns-go-tag
-  "ast-to-sexp for ast-go returns (go tag)."
-  (assert-equal '(go loop-top)
-                (cl-cc::ast-to-sexp (cl-cc::make-ast-go :tag 'loop-top))))
+(deftest-each ast-to-sexp-scalar-nodes
+  "ast-to-sexp for scalar AST nodes returns the appropriate sexp form."
+  :cases (("int"      42              (cl-cc::make-ast-int      :value 42))
+          ("var"      'x              (cl-cc::make-ast-var      :name 'x))
+          ("quote"    '(quote hello)  (cl-cc::make-ast-quote    :value 'hello))
+          ("function" '(function foo) (cl-cc::make-ast-function :name 'foo))
+          ("go"       '(go loop-top)  (cl-cc::make-ast-go       :tag 'loop-top)))
+  (expected node)
+  (assert-equal expected (cl-cc::ast-to-sexp node)))
 
 ;;; ─── Binary/conditional structure ────────────────────────────────────────
 
@@ -162,47 +149,28 @@
 
 ;;; ─── Block / return / tagbody / catch / throw ────────────────────────────
 
-(deftest ast-to-sexp-block-produces-block-form
-  "ast-to-sexp for ast-block returns (block name body...)."
-  (let ((node (cl-cc::make-ast-block
-               :name 'outer
-               :body (list (cl-cc::make-ast-int :value 0)))))
-    (assert-equal '(block outer 0) (cl-cc::ast-to-sexp node))))
-
-(deftest ast-to-sexp-return-from-produces-return-from-form
-  "ast-to-sexp for ast-return-from returns (return-from name value)."
-  (let ((node (cl-cc::make-ast-return-from
-               :name 'outer
-               :value (cl-cc::make-ast-int :value 42))))
-    (assert-equal '(return-from outer 42) (cl-cc::ast-to-sexp node))))
-
-(deftest ast-to-sexp-catch-produces-catch-form
-  "ast-to-sexp for ast-catch returns (catch tag body...)."
-  (let ((node (cl-cc::make-ast-catch
-               :tag (cl-cc::make-ast-quote :value :done)
-               :body (list (cl-cc::make-ast-int :value 1)))))
-    (assert-equal '(catch (quote :done) 1) (cl-cc::ast-to-sexp node))))
-
-(deftest ast-to-sexp-throw-produces-throw-form
-  "ast-to-sexp for ast-throw returns (throw tag value)."
-  (let ((node (cl-cc::make-ast-throw
-               :tag (cl-cc::make-ast-quote :value :done)
-               :value (cl-cc::make-ast-int :value 99))))
-    (assert-equal '(throw (quote :done) 99) (cl-cc::ast-to-sexp node))))
-
-(deftest ast-to-sexp-go-produces-go-form
-  "ast-to-sexp for ast-go returns (go tag-symbol)."
-  (assert-equal '(go top)
-                (cl-cc::ast-to-sexp (cl-cc::make-ast-go :tag 'top))))
-
-;;; ─── Multiple values ─────────────────────────────────────────────────────
-
-(deftest ast-to-sexp-values-produces-values-form
-  "ast-to-sexp for ast-values returns (values form1 form2)."
-  (let ((node (cl-cc::make-ast-values
-               :forms (list (cl-cc::make-ast-int :value 1)
-                            (cl-cc::make-ast-int :value 2)))))
-    (assert-equal '(values 1 2) (cl-cc::ast-to-sexp node))))
+(deftest-each ast-to-sexp-control-flow-nodes
+  "ast-to-sexp for block/jump/exception/values AST nodes returns the correct sexp."
+  :cases (("block"
+           '(block outer 0)
+           (cl-cc::make-ast-block :name 'outer :body (list (cl-cc::make-ast-int :value 0))))
+          ("return-from"
+           '(return-from outer 42)
+           (cl-cc::make-ast-return-from :name 'outer :value (cl-cc::make-ast-int :value 42)))
+          ("catch"
+           '(catch (quote :done) 1)
+           (cl-cc::make-ast-catch :tag (cl-cc::make-ast-quote :value :done)
+                                  :body (list (cl-cc::make-ast-int :value 1))))
+          ("throw"
+           '(throw (quote :done) 99)
+           (cl-cc::make-ast-throw :tag (cl-cc::make-ast-quote :value :done)
+                                  :value (cl-cc::make-ast-int :value 99)))
+          ("values"
+           '(values 1 2)
+           (cl-cc::make-ast-values :forms (list (cl-cc::make-ast-int :value 1)
+                                                (cl-cc::make-ast-int :value 2)))))
+  (expected node)
+  (assert-equal expected (cl-cc::ast-to-sexp node)))
 
 (deftest ast-to-sexp-multiple-value-bind-produces-mvb-form
   "ast-to-sexp for ast-mvb returns (multiple-value-bind vars form body...)."

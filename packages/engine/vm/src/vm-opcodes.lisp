@@ -58,16 +58,25 @@ Each result element is (pair count), sorted by descending count then name."
                                    (prin1-to-string (first b)))))))
             0 (min limit (length pairs)))))
 
+(defparameter *vm2-fusion-opcode-symbol-pairs*
+  '((+op2-add2+    . +op2-add-imm2+)
+    (+op2-sub2+    . +op2-sub-imm2+)
+    (+op2-mul2+    . +op2-mul-imm2+)
+    (+op2-num-eq2+ . +op2-num-eq-imm2+)
+    (+op2-num-lt2+ . +op2-num-lt-imm2+)
+    (+op2-num-gt2+ . +op2-num-gt-imm2+)
+    (+op2-num-le2+ . +op2-num-le-imm2+)
+    (+op2-num-ge2+ . +op2-num-ge-imm2+))
+  "Symbolic (binary-opcode . immediate-opcode) pairs resolved after opcode defs load.")
+
 (defun %vm2-build-fusion-table ()
-  "Build the const-fusion table from known opcode constant pairs."
-  (list (cons +op2-add2+    +op2-add-imm2+)
-        (cons +op2-sub2+    +op2-sub-imm2+)
-        (cons +op2-mul2+    +op2-mul-imm2+)
-        (cons +op2-num-eq2+ +op2-num-eq-imm2+)
-        (cons +op2-num-lt2+ +op2-num-lt-imm2+)
-        (cons +op2-num-gt2+ +op2-num-gt-imm2+)
-        (cons +op2-num-le2+ +op2-num-le-imm2+)
-        (cons +op2-num-ge2+ +op2-num-ge-imm2+)))
+  "Build the const-fusion table from symbolic opcode pairs.
+Resolves opcode constants lazily so this file does not depend on vm-opcodes-defs
+being loaded at compile time."
+  (mapcar (lambda (pair)
+            (cons (symbol-value (car pair))
+                  (symbol-value (cdr pair))))
+          *vm2-fusion-opcode-symbol-pairs*))
 
 (defvar *vm2-const-fusion-table* nil
   "Lazily initialized list of (binary-opcode . immediate-opcode) fusion rules.")
@@ -195,6 +204,17 @@ Used for predicates that lack a simple CL function form (e.g. fixnump)."
          (setf (svref regs dst) (if (,pred (svref regs src)) 1 0)))
        (+ pc 4))))
 
+(defmacro defopcode-load-literal (name value-form)
+  "Opcode: dst ← VALUE-FORM.
+VALUE-FORM may reference CODE/PC/REGS for immediate-bearing loads, or be a
+literal constant for fixed-value loads." 
+  `(defopcode ,name
+     (lambda (state code pc regs)
+       (declare (ignore state))
+       (let ((dst (svref code (+ pc 1))))
+         (setf (svref regs dst) ,value-form))
+       (+ pc 4))))
+
 (defmacro defopcode-binary-fn (name fn)
   "Opcode: dst ← fn(src1, src2)."
   `(defopcode ,name
@@ -214,8 +234,8 @@ Used for predicates that lack a simple CL function form (e.g. fixnump)."
        (let ((dst  (svref code (+ pc 1)))
              (src1 (svref code (+ pc 2)))
              (src2 (svref code (+ pc 3))))
-         (setf (svref regs dst) (if (,pred (svref regs src1) (svref regs src2)) 1 0)))
-       (+ pc 4))))
+          (setf (svref regs dst) (if (,pred (svref regs src1) (svref regs src2)) 1 0)))
+        (+ pc 4))))
 
 (defmacro defopcode-binary-fn-imm (name fn)
   "Opcode: dst ← fn(src, immediate)."

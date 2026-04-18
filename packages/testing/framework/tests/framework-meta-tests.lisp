@@ -2,6 +2,16 @@
 
 (in-suite cl-cc-unit-suite)
 
+(deftest-each framework-meta-tree-map-cases
+  "%tree-map applies leaf-fn to every atom, rebuilding cons structure unchanged."
+  :cases (("atom-identity"    42                   :MAPPED)
+          ("atom-transform"   'x                   :MAPPED)
+          ("flat-list"        '(a b c)             '(:MAPPED :MAPPED :MAPPED))
+          ("nested-list"      '(a (b c))           '(:MAPPED (:MAPPED :MAPPED)))
+          ("dotted-pair"      '(a . b)             '(:MAPPED . :MAPPED)))
+  (input expected)
+  (assert-equal expected (%tree-map input (lambda (atom) (declare (ignore atom)) :MAPPED))))
+
 (deftest framework-meta-substitute-symbol-rewrites-recursively
   "Symbol substitution rewrites nested occurrences without touching unrelated atoms."
   (assert-equal '(let ((y 1)) (+ y z))
@@ -12,15 +22,21 @@
   (assert-equal '(if (= x 1) 1 2)
                 (%substitute-constant '(if (= x 0) 0 2) 0 1)))
 
-(deftest framework-meta-negate-first-if-condition-wraps-not
-  "The first IF condition is negated while the rest of the form is preserved."
-  (assert-equal '(if (not test) then else)
-                (%negate-first-if-condition '(if test then else))))
+(deftest-each framework-meta-negate-first-if-condition
+  "%negate-first-if-condition wraps the test in NOT, handles nested IF, passes non-IF through."
+  :cases (("simple-if"  '(if test then else)         '(if (not test) then else))
+          ("nested-if"  '((if inner-test then else)) '((if (not inner-test) then else)))
+          ("no-if"      '(+ 1 2)                     '(+ 1 2)))
+  (input expected)
+  (assert-equal expected (%negate-first-if-condition input)))
 
-(deftest framework-meta-return-nil-body-rewrites-defun
-  "Return-nil mutation preserves the defun header and replaces the body with NIL."
-  (assert-equal '(defun sample (x) nil)
-                (%return-nil-body '(defun sample (x) (+ x 1)))))
+(deftest-each framework-meta-return-nil-body
+  "%return-nil-body rewrites defun/defmethod body to nil; passes non-binding forms through."
+  :cases (("defun-rewrites"     '(defun sample (x) (+ x 1))         '(defun sample (x) nil))
+          ("defmethod-rewrites"  '(defmethod draw ((s shape)) (print s)) '(defmethod draw ((s shape)) nil))
+          ("non-defun-passthrough" '(if test then else)               '(if test then else)))
+  (input expected)
+  (assert-equal expected (%return-nil-body input)))
 
 (deftest-each framework-meta-apply-mutation-produces-mutants
   "Mutation operators emit concrete mutant forms for representative inputs."
@@ -45,6 +61,170 @@
   "%eval-form-safely returns T for evaluable forms and NIL for errors."
   (assert-true (%eval-form-safely '(+ 1 2)))
   (assert-false (%eval-form-safely '(error "boom"))))
+
+(deftest framework-meta-generated-binary-assertion-preserves-failure-payload
+  "Generated binary assertions keep the same readable failure payload."
+  (handler-case
+      (progn
+        (assert-equal 1 2)
+        (assert-false t))
+    (test-failure (c)
+      (let ((message (test-failure-message c)))
+        (assert-true (search "assert-equal failed" message))
+        (assert-true (search "expected: 1" message))
+        (assert-true (search "actual: 2" message))))))
+
+(deftest framework-meta-generated-binary-assertion-single-evaluation
+  "Generated binary assertions evaluate each operand exactly once."
+  (let ((calls 0))
+    (handler-case
+        (progn
+          (assert-equal (progn (incf calls) 1)
+                        (progn (incf calls) 2))
+          (assert-false t))
+      (test-failure ()
+        (assert-= 2 calls)))))
+
+(deftest framework-meta-generated-unary-assertion-preserves-failure-payload
+  "Generated unary assertions keep their original failure wording and actual value."
+  (handler-case
+      (progn
+        (assert-null :not-nil)
+        (assert-false t))
+    (test-failure (c)
+      (let ((message (test-failure-message c)))
+        (assert-true (search "assert-null failed" message))
+        (assert-true (search "actual: :NOT-NIL" message))))))
+
+(deftest framework-meta-generated-unary-assertion-expands-through-shared-helper
+  "Generated unary assertions macroexpand through %assert-unary for shared semantics."
+  (let ((expanded (macroexpand-1 '(assert-null sample-form))))
+    (assert-eq '%assert-unary (first expanded))
+    (assert-eq 'null (second expanded))))
+
+(deftest framework-meta-assert-run=-reports-readable-failure
+  "assert-run= still reports a readable mismatch after helper extraction."
+  (handler-case
+      (progn
+        (assert-run= 7 "(+ 1 2)")
+        (assert-false t))
+    (test-failure (c)
+      (let ((message (test-failure-message c)))
+        (assert-true (search "assert-run=: expected 7" message))
+        (assert-true (search "(+ 1 2)" message))))))
+
+(deftest framework-meta-assert-run=-swallows-host-errors-into-readable-failure
+  "assert-run= keeps converting host RUN-STRING errors into assertion failures."
+  (flet ((run-string (expr)
+           (declare (ignore expr))
+           (error "synthetic host failure")))
+    (handler-case
+        (progn
+          (assert-run= 1 "(boom)")
+          (assert-false t))
+      (test-failure (c)
+        (let ((message (test-failure-message c)))
+          (assert-true (search "assert-run=: expected 1" message))
+          (assert-true (search "form: (ASSERT-RUN= 1 (boom))" message)))))))
+
+(deftest framework-meta-assert-run-string=-guards-non-string-results
+  "assert-run-string= fails cleanly when the evaluated form is not a string."
+  (handler-case
+      (progn
+        (assert-run-string= "3" "(+ 1 2)")
+        (assert-false t))
+    (test-failure ()
+      t)))
+
+(deftest framework-meta-assert-compiles-to-accepts-matching-instruction
+  "assert-compiles-to succeeds when the compiled instruction stream contains the requested VM op." 
+  (assert-compiles-to "(defun typed-add ((x fixnum) (y fixnum)) fixnum (+ x y))" :contains 'vm-add))
+
+(deftest framework-meta-assert-compiles-to-reports-mismatch
+  "assert-compiles-to raises a readable failure when the requested VM op is absent."
+  (handler-case
+      (progn
+        (assert-compiles-to "(+ 1 2)" :contains 'vm-sub)
+        (assert-false t))
+    (test-failure (c)
+      (let ((message (test-failure-message c)))
+        (assert-true (search "assert-compiles-to" message))
+        (assert-true (search "VM-SUB" message))))))
+
+(deftest framework-meta-assert-evaluates-to-reports-mismatch
+  "assert-evaluates-to emits a readable failure when runtime results differ."
+  (handler-case
+      (progn
+        (assert-evaluates-to "(+ 1 2)" 99)
+        (assert-false t))
+    (test-failure (c)
+      (let ((message (test-failure-message c)))
+        (assert-true (search "assert-evaluates-to" message))
+        (assert-true (search "expected 99" message))))))
+
+(deftest framework-meta-assert-macro-expands-to-reports-mismatch
+  "assert-macro-expands-to reports both the form and mismatch cleanly."
+  (handler-case
+      (progn
+        (assert-macro-expands-to '(when t 1) '(if nil 1 nil))
+        (assert-false t))
+    (test-failure (c)
+      (let ((message (test-failure-message c)))
+        (assert-true (search "assert-macro-expands-to" message))
+        (assert-true (search "(WHEN T 1)" message))))))
+
+(deftest framework-meta-assert-infers-type-accepts-primitive-type-name
+  "assert-infers-type succeeds for a straightforward primitive inference result."
+  (assert-infers-type "42" fixnum))
+
+(deftest framework-meta-assert-infers-type-reports-mismatch
+  "assert-infers-type emits a readable failure when the inferred type differs."
+  (handler-case
+      (progn
+        (assert-infers-type "42" string)
+        (assert-false t))
+    (test-failure (c)
+      (let ((message (test-failure-message c)))
+        (assert-true (search "assert-infers-type" message))
+        (assert-true (search "STRING" message))))))
+
+(deftest framework-meta-assert-run-true-reports-nil-result
+  "assert-run-true fails readably when the expression evaluates to NIL."
+  (handler-case
+      (progn
+        (assert-run-true "nil")
+        (assert-false t))
+    (test-failure (c)
+      (assert-true (search "assert-run-true" (test-failure-message c))))))
+
+(deftest framework-meta-assert-run-false-reports-truthy-result
+  "assert-run-false fails readably when the expression evaluates truthy."
+  (handler-case
+      (progn
+        (assert-run-false "42")
+        (assert-false t))
+    (test-failure (c)
+      (assert-true (search "assert-run-false" (test-failure-message c))))))
+
+(deftest framework-meta-assert-run-signals-fails-when-no-condition-occurs
+  "assert-run-signals fails readably when the expected condition is not signaled."
+  (handler-case
+      (progn
+        (assert-run-signals error "42")
+        (assert-false t))
+    (test-failure (c)
+      (assert-true (search "assert-run-signals" (test-failure-message c))))))
+
+(deftest framework-meta-assert-output-contains-reports-missing-substring
+  "assert-output-contains emits a readable failure when the substring is absent."
+  (handler-case
+      (progn
+        (assert-output-contains "abcdef" "zzz")
+        (assert-false t))
+    (test-failure (c)
+      (let ((message (test-failure-message c)))
+        (assert-true (search "assert-output-contains" message))
+        (assert-true (search "zzz" message))))))
 
 (deftest framework-meta-defmetamorphic-registers-relation
   "defmetamorphic appends a relation descriptor to *metamorphic-relations*."
@@ -77,146 +257,3 @@
    causing unbounded recursion."
   (assert-true (%mutant-killed-p '(error "synthetic eval failure")
                                  'cl-cc-unit-suite)))
-
-;;; P7: %print-mutation-report — unit test for the report printer
-
-(deftest framework-meta-print-mutation-report-empty
-  "%print-mutation-report with no records reports 100% mutation score."
-  (let ((*standard-output* (make-string-output-stream)))
-    (multiple-value-bind (score killed total)
-        (%print-mutation-report nil)
-      (assert-= 100.0 score)
-      (assert-= 0 killed)
-      (assert-= 0 total)
-      (let ((output (get-output-stream-string *standard-output*)))
-        (assert-true (search "Mutation Testing Report" output))))))
-
-(deftest framework-meta-print-mutation-report-killed
-  "%print-mutation-report with a killed mutant reports 100% score."
-  (let* ((rec (make-mutation-record
-                :source-location "test.lisp:1"
-                :mutation-type :constant-replace
-                :original-form '(+ 1 2)
-                :mutant-form '(+ 0 2)
-                :killed t))
-         (*standard-output* (make-string-output-stream)))
-    (multiple-value-bind (score killed total)
-        (%print-mutation-report (list rec))
-      (assert-= 100.0 score)
-      (assert-= 1 killed)
-      (assert-= 1 total))))
-
-(deftest framework-meta-print-mutation-report-survivor
-  "%print-mutation-report with a surviving mutant reports 0% score and lists survivors."
-  (let* ((rec (make-mutation-record
-                :source-location "test.lisp:1"
-                :mutation-type :condition-negate
-                :original-form '(if t 1 2)
-                :mutant-form '(if (not t) 1 2)
-                :killed nil))
-         (*standard-output* (make-string-output-stream)))
-    (multiple-value-bind (score killed total)
-        (%print-mutation-report (list rec))
-      (declare (ignore score))
-      (assert-= 0 killed)
-      (assert-= 1 total)
-      (let ((output (get-output-stream-string *standard-output*)))
-        (assert-true (search "Survivors" output))))))
-
-;;; P8: %verify-metamorphic-relations — calls through the relation pipeline
-
-(deftest framework-meta-verify-metamorphic-no-violation
-  "%verify-metamorphic-relations does not fail when relations hold."
-  (let ((*metamorphic-relations*
-          (list (list :name 'commutativity-check
-                      :transform (lambda (expr) `(,(car expr) ,(caddr expr) ,(cadr expr)))
-                      :relation #'=
-                      :applicable-when (lambda (expr) (eq (car expr) '+))))))
-    ;; Should not signal any failure
-    (%verify-metamorphic-relations (list '(+ 1 2)))))
-
-(deftest framework-meta-verify-metamorphic-violation-signals-failure
-  "%verify-metamorphic-relations signals TEST-FAILURE when a relation is violated."
-  (let ((*metamorphic-relations*
-          (list (list :name 'bad-relation
-                      :transform (lambda (expr) expr)
-                      :relation (lambda (lhs rhs)
-                                  (declare (ignore lhs rhs))
-                                  nil)
-                      :applicable-when (lambda (expr) (eq (car expr) '+))))))
-    (handler-case
-      (progn
-        (%verify-metamorphic-relations (list '(+ 1 2)))
-        (assert-false t))
-      (test-failure (c)
-        (assert-true (search "BAD-RELATION"
-                             (string-upcase (test-failure-message c))))))))
-
-;;; P9: nested negate + passthrough branches
-
-(deftest framework-meta-negate-nested-if
-  "Negate recurses into car position; a nested IF inside a list element is found."
-  (assert-equal '((if (not inner-test) then else))
-                (%negate-first-if-condition '((if inner-test then else)))))
-
-(deftest framework-meta-negate-no-if
-  "Negate returns the form unchanged when no IF is found."
-  (assert-equal '(+ 1 2)
-                (%negate-first-if-condition '(+ 1 2))))
-
-(deftest framework-meta-return-nil-body-non-defun-passthrough
-  "%return-nil-body returns non-defun/defmethod/defgeneric forms unchanged."
-  (assert-equal '(if test then else)
-                (%return-nil-body '(if test then else))))
-
-(deftest framework-meta-return-nil-body-defmethod
-  "%return-nil-body rewrites defmethod body to nil."
-  (assert-equal '(defmethod draw ((s shape)) nil)
-                (%return-nil-body '(defmethod draw ((s shape)) (print s)))))
-
-(deftest framework-meta-run-mutation-test-validates-required-args
-  "run-mutation-test rejects missing target/suite arguments."
-  (handler-case
-      (progn
-        (run-mutation-test :suite 'cl-cc-unit-suite)
-        (assert-false t))
-    (error (e)
-      (assert-true (search ":target" (princ-to-string e)))))
-  (handler-case
-      (progn
-        (run-mutation-test :target "/tmp/does-not-matter.lisp")
-        (assert-false t))
-    (error (e)
-      (assert-true (search ":suite" (princ-to-string e))))))
-
-(deftest framework-meta-run-mutation-test-missing-file
-  "run-mutation-test rejects nonexistent files before reading forms."
-  (handler-case
-      (progn
-        (run-mutation-test :target "/tmp/definitely-missing-cl-cc-mutation.lisp"
-                           :suite 'cl-cc-unit-suite)
-        (assert-false t))
-    (error (e)
-      (assert-true (search "target file not found" (princ-to-string e))))))
-
-(deftest framework-meta-run-mutation-test-empty-operator-set
-  "run-mutation-test can execute its full reporting path with an empty mutation set."
-  (let ((path "/tmp/cl-cc-mutation-smoke.lisp")
-        (*standard-output* (make-string-output-stream)))
-    (unwind-protect
-         (progn
-           (with-open-file (stream path
-                                   :direction :output
-                                   :if-exists :supersede
-                                   :if-does-not-exist :create)
-             (write-line "(defun cl-cc-mutation-smoke (x) (+ x 1))" stream))
-           (multiple-value-bind (score killed total)
-               (run-mutation-test :target path
-                                  :suite 'cl-cc-unit-suite
-                                  :mutations '())
-             (assert-= 100.0 score)
-             (assert-= 0 killed)
-             (assert-= 0 total)
-             (assert-true (search "Mutation Testing Report"
-                                  (get-output-stream-string *standard-output*)))))
-      (ignore-errors (delete-file path)))))

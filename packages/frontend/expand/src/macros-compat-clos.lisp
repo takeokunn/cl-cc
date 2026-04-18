@@ -1,4 +1,11 @@
 (in-package :cl-cc/expand)
+
+;;; Shared gensym helper used by CLOS protocol macros below.
+(defmacro with-gensyms (names &body body)
+  "Bind each NAME in NAMES to a fresh gensym named after the symbol, then evaluate BODY."
+  `(let ,(mapcar (lambda (n) `(,n (gensym ,(symbol-name n)))) names)
+     ,@body))
+
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;; Compat — CLOS Protocol, MOP Introspection, and Print Macros
 ;;;
@@ -50,10 +57,7 @@ SPEC is (object stream &key type identity)."
 (our-defmacro print-object (object stream)
   "Print OBJECT to STREAM using the object's class print method if defined,
 otherwise falling back to prin1."
-  (let ((obj-v (gensym "OBJ"))
-        (str-v (gensym "STR"))
-        (cls-v (gensym "CLS"))
-        (mth-v (gensym "MTH")))
+  (with-gensyms (obj-v str-v cls-v mth-v)
     `(let* ((,obj-v ,object)
             (,str-v ,stream)
             (,cls-v (when (hash-table-p ,obj-v) (gethash :__class__ ,obj-v)))
@@ -65,10 +69,7 @@ otherwise falling back to prin1."
 
 (our-defmacro describe-object (object stream)
   "Describe OBJECT to STREAM (default: type and slots for CLOS objects)."
-  (let ((obj-v (gensym "OBJ"))
-        (str-v (gensym "STR"))
-        (cls-v (gensym "CLS"))
-        (slots-v (gensym "SLS")))
+  (with-gensyms (obj-v str-v cls-v slots-v)
     `(let* ((,obj-v ,object)
             (,str-v ,stream)
             (,cls-v (when (hash-table-p ,obj-v) (gethash :__class__ ,obj-v))))
@@ -115,11 +116,7 @@ otherwise falling back to prin1."
 (our-defmacro change-class (instance new-class &rest initargs)
   "Change the class of INSTANCE to NEW-CLASS, preserving matching slots.
 Removes old-only slots, adds new-only slots (nil), calls update-instance-for-different-class."
-  (let ((inst-var (gensym "INST"))
-        (new-class-var (gensym "NC"))
-        (old-slots-var (gensym "OLD-SLOTS"))
-        (new-slots-var (gensym "NEW-SLOTS"))
-        (s-var (gensym "S")))
+  (with-gensyms (inst-var new-class-var old-slots-var new-slots-var s-var)
     `(let* ((,inst-var ,instance)
             (,new-class-var ,new-class)
             (,old-slots-var (when (hash-table-p (gethash :__class__ ,inst-var))
@@ -158,39 +155,38 @@ Removes old-only slots, adds new-only slots (nil), calls update-instance-for-dif
 ;;; These macros expand inline so user code doesn't need function dispatch.
 
 (our-defmacro class-direct-superclasses (class)
-  (let ((c (gensym "C")))
+  (with-gensyms (c)
     `(let ((,c ,class))
        (when (hash-table-p ,c)
          (gethash :__superclasses__ ,c)))))
 
 (our-defmacro class-direct-slots (class)
-  (let ((c (gensym "C")))
+  (with-gensyms (c)
     `(let ((,c ,class))
        (when (hash-table-p ,c)
          (%class-slot-definitions ,c)))))
 
 (our-defmacro class-slots (class)
-  (let ((c (gensym "C")))
+  (with-gensyms (c)
     `(let ((,c ,class))
        (when (hash-table-p ,c)
          (%class-slot-definitions ,c)))))
 
 (our-defmacro class-direct-default-initargs (class)
-  (let ((c (gensym "C")))
+  (with-gensyms (c)
     `(let ((,c ,class))
        (when (hash-table-p ,c)
          (gethash :__default-initargs__ ,c)))))
 
 (our-defmacro generic-function-methods (gf)
-  (let ((gf-v (gensym "GF"))
-        (ht-v (gensym "HT")))
+  (with-gensyms (gf-v ht-v)
     `(let* ((,gf-v ,gf)
             (,ht-v (and (hash-table-p ,gf-v) (gethash :__methods__ ,gf-v))))
        (when ,ht-v
          (hash-table-values ,ht-v)))))
 
 (our-defmacro generic-function-method-combination (gf)
-  (let ((gf-v (gensym "GF")))
+  (with-gensyms (gf-v)
     `(let ((,gf-v ,gf))
        (if (and (hash-table-p ,gf-v) (gethash :__method-combination__ ,gf-v))
            (gethash :__method-combination__ ,gf-v)
@@ -199,14 +195,8 @@ Removes old-only slots, adds new-only slots (nil), calls update-instance-for-dif
 (register-macro 'class-precedence-list
   (lambda (form env)
     (declare (ignore env))
-    (let ((class-form (second form))
-          (c (gensym "C"))
-          (name-v (gensym "NAME"))
-          (result-v (gensym "RES"))
-          (seen-v (gensym "SEEN"))
-          (queue-v (gensym "Q"))
-          (s-v (gensym "S"))
-          (sht-v (gensym "SHT")))
+    (let ((class-form (second form)))
+      (with-gensyms (c name-v result-v seen-v queue-v s-v sht-v)
       `(let ((,c ,class-form))
          (when (hash-table-p ,c)
            (let ((,name-v (gethash :__name__ ,c)))
@@ -224,7 +214,7 @@ Removes old-only slots, adds new-only slots (nil), calls update-instance-for-dif
                            (unless (member ,s-v ,seen-v)
                              (push ,s-v ,result-v)
                              (push ,s-v ,seen-v)))))))
-                  (nreverse ,result-v)))))))))
+                  (nreverse ,result-v))))))))))
 
 ;;; FR-302: parse-float — not in ANSI CL but requested; implemented via read-from-string
 

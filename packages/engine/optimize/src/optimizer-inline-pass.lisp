@@ -3,7 +3,7 @@
 ;;;
 ;;; Contains: opt-make-pure-function-memo-table, opt-pure-function-memo-key,
 ;;; opt-pure-function-memo-get, opt-pure-function-memo-put,
-;;; opt-function-body-instruction-set, opt-function-body-instruction-labels,
+;;; opt-function-body-instruction-tables,
 ;;; opt-top-level-function-roots, opt-reachable-function-labels,
 ;;; opt-pass-global-dce, opt-inline-inst-cost, opt-inline-body-cost,
 ;;; opt-adaptive-inline-threshold, opt-inline-eligible-p, opt-pass-inline.
@@ -42,23 +42,18 @@ Impure or unknown labels are ignored conservatively."
     (setf (gethash (opt-pure-function-memo-key label args) memo-table) result))
   result)
 
-(defun opt-function-body-instruction-set (func-defs)
-  "Return EQ hash-table containing every instruction that belongs to a function body."
-  (let ((body-inst-set (make-hash-table :test #'eq)))
-    (maphash (lambda (_label def)
-               (dolist (inst (getf def :body))
-                 (setf (gethash inst body-inst-set) t)))
-             func-defs)
-    body-inst-set))
-
-(defun opt-function-body-instruction-labels (func-defs)
-  "Return EQ hash-table mapping each function-body instruction to its label."
-  (let ((inst->label (make-hash-table :test #'eq)))
+(defun opt-function-body-instruction-tables (func-defs)
+  "Single-pass scan of FUNC-DEFS; returns (values body-inst-set inst->label).
+body-inst-set: EQ hash-table, every instruction that belongs to a function body.
+inst->label:   EQ hash-table, maps each such instruction to its owning label."
+  (let ((body-inst-set (make-hash-table :test #'eq))
+        (inst->label   (make-hash-table :test #'eq)))
     (maphash (lambda (label def)
                (dolist (inst (getf def :body))
-                 (setf (gethash inst inst->label) label)))
+                 (setf (gethash inst body-inst-set) t
+                       (gethash inst inst->label)   label)))
              func-defs)
-    inst->label))
+    (values body-inst-set inst->label)))
 
 (defun opt-top-level-function-roots (instructions func-defs name-to-label body-inst-set)
   "Return an EQUAL hash-table of function labels reachable from top-level code.
@@ -123,9 +118,9 @@ place by construction."
          (name-to-label (opt-build-function-name-map instructions)))
     (when (= 0 (hash-table-count func-defs))
       (return-from opt-pass-global-dce instructions))
-    (let* ((body-inst-set (opt-function-body-instruction-set func-defs))
-           (body-inst-labels (opt-function-body-instruction-labels func-defs))
-           (graph (opt-build-call-graph instructions func-defs name-to-label))
+    (multiple-value-bind (body-inst-set body-inst-labels)
+        (opt-function-body-instruction-tables func-defs)
+      (let* ((graph (opt-build-call-graph instructions func-defs name-to-label))
            (roots (opt-top-level-function-roots instructions func-defs name-to-label body-inst-set))
            (reachable (opt-reachable-function-labels graph roots))
            (closure-reg->label (make-hash-table :test #'eq))
@@ -156,7 +151,7 @@ place by construction."
                              (and label (gethash label labels-to-drop))))
                       t)
                      (t nil)))
-                 instructions))))
+                 instructions)))))
 
 (defun opt-inline-inst-cost (inst)
   "Return the inline cost of INST using the shared e-graph opcode table.
@@ -230,9 +225,9 @@ The function must be: captured-var-free, linear, and have body cost
          (let ((label (vm-label-name inst)))
            (when (gethash label func-defs)
              (setf (gethash (vm-dst inst) reg-track) label)))
-          (let ((dst (opt-inst-dst inst)))
-            (when dst (remhash dst const-track)))
-          (push inst result))
+         (let ((dst (opt-inst-dst inst)))
+           (when dst (remhash dst const-track)))
+         (push inst result))
         ;; Track vm-const loading a function name symbol
         (vm-const
          (let* ((val (vm-value inst))
@@ -292,5 +287,5 @@ The function must be: captured-var-free, linear, and have body cost
            (when dst
              (remhash dst reg-track)
              (remhash dst const-track)))
-          (push inst result))))
+         (push inst result))))
     (nreverse result)))

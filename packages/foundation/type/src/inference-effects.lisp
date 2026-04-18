@@ -32,39 +32,32 @@
            (reduce #'effect-row-union
                    (mapcar (lambda (f) (infer-effects f env)) forms)
                    :initial-value +pure-effect-row+)))
-    (cond
-      ;; Data-driven pure check: any type in *pure-ast-effect-types* → no effects
-      ((some (lambda (type) (typep ast type)) *pure-ast-effect-types*)
-       +pure-effect-row+)
-
-      ((typep ast 'cl-cc/ast:ast-print) +io-effect-row+)
-
-      ((typep ast 'cl-cc/ast:ast-setq)
+    ;; Data-driven pure check: extensible via *pure-ast-effect-types*
+    (when (some (lambda (type) (typep ast type)) *pure-ast-effect-types*)
+      (return-from infer-effects +pure-effect-row+))
+    (typecase ast
+      (cl-cc/ast:ast-print +io-effect-row+)
+      (cl-cc/ast:ast-setq
        (make-type-effect-row :effects (list (make-type-effect :name 'state))
                              :row-var nil))
-
-      ((typep ast 'cl-cc/ast:ast-if)
+      (cl-cc/ast:ast-if
        (effect-row-union (infer-effects (cl-cc/ast:ast-if-cond ast) env)
                          (effect-row-union
                           (infer-effects (cl-cc/ast:ast-if-then ast) env)
                           (infer-effects (cl-cc/ast:ast-if-else ast) env))))
-
-      ((typep ast 'cl-cc/ast:ast-let)
+      (cl-cc/ast:ast-let
        (effect-row-union
         (union-list (mapcar #'cdr (cl-cc/ast:ast-let-bindings ast)))
         (union-list (cl-cc/ast:ast-let-body ast))))
-
-      ((typep ast 'cl-cc/ast:ast-progn)  (union-list (cl-cc/ast:ast-progn-forms ast)))
-      ((typep ast 'cl-cc/ast:ast-block)  (union-list (cl-cc/ast:ast-block-body  ast)))
-
-      ((typep ast 'cl-cc/ast:ast-call)
+      (cl-cc/ast:ast-progn (union-list (cl-cc/ast:ast-progn-forms ast)))
+      (cl-cc/ast:ast-block (union-list (cl-cc/ast:ast-block-body  ast)))
+      (cl-cc/ast:ast-call
        (let* ((func         (cl-cc/ast:ast-call-func ast))
               (base-effects (if (typep func 'cl-cc/ast:ast-var)
                                 (lookup-effect-signature (cl-cc/ast:ast-var-name func))
                                 +pure-effect-row+)))
          (effect-row-union base-effects
                            (union-list (cl-cc/ast:ast-call-args ast)))))
-
       (t (make-type-effect-row :effects nil
                                :row-var (make-type-variable "eff"))))))
 

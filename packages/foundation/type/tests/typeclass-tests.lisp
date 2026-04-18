@@ -145,6 +145,22 @@
                                    (make-type-product :elems (list type-int type-bool))
                                    nil))))
 
+;;; ─── default-numeric-typeclass-p ──────────────────────────────────────────
+
+(deftest-each default-numeric-typeclass-p-cases
+  "default-numeric-typeclass-p: num/numeric → t; other symbols and non-symbols → nil."
+  :cases (("num"         t   'num)
+          ("numeric"     t   'numeric)
+          ("NUM"         t   'NUM)
+          ("NUMERIC"     t   'NUMERIC)
+          ("eq"          nil 'eq)
+          ("non-symbol"  nil 42)
+          ("nil-input"   nil nil))
+  (expected name)
+  (if expected
+      (assert-true  (cl-cc/type::default-numeric-typeclass-p name))
+      (assert-false (cl-cc/type::default-numeric-typeclass-p name))))
+
 ;;; ─── has-typeclass-instance-p ──────────────────────────────────────────────
 
 (deftest has-typeclass-instance-p-basic

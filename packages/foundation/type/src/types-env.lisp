@@ -179,34 +179,34 @@ DICT-BINDINGS: alist of ((class-name . type-key) . method-alist) for typeclass d
 (defun type-to-string (ty)
   "Convert a type to a human-readable string.
 This stub is overridden by the printer module when loaded."
-  (cond
-    ((null ty) "NIL")
-    ((type-primitive-p ty) (symbol-name (type-primitive-name ty)))
-    ((type-var-p ty)
+  (typecase ty
+    (null "NIL")
+    (type-primitive (symbol-name (type-primitive-name ty)))
+    (type-var
      (if (type-var-name ty)
          (format nil "?~A" (type-var-name ty))
          (format nil "?t~D" (type-var-id ty))))
-    ((type-rigid-p ty)
+    (type-rigid
      (if (type-rigid-name ty)
          (format nil "!~A" (type-rigid-name ty))
          (format nil "!r~D" (type-rigid-id ty))))
-    ((type-arrow-p ty)
+    (type-arrow
      (let ((ps (mapcar #'type-to-string (type-arrow-params ty)))
            (r  (type-to-string (type-arrow-return ty))))
        (if (null ps)
            (format nil "() -> ~A" r)
            (format nil "~{~A~^ ~} -> ~A" ps r))))
-    ((type-product-p ty)
+    (type-product
      (format nil "(~{~A~^, ~})" (mapcar #'type-to-string (type-product-elems ty))))
-    ((type-union-p ty)
+    (type-union
      (format nil "(~{~A~^ | ~})" (mapcar #'type-to-string (type-union-types ty))))
-    ((type-intersection-p ty)
+    (type-intersection
      (format nil "(~{~A~^ & ~})" (mapcar #'type-to-string (type-intersection-types ty))))
-    ((type-forall-p ty)
+    (type-forall
      (format nil "(forall ~A . ~A)"
              (type-to-string (type-forall-var ty))
              (type-to-string (type-forall-body ty))))
-    ((type-effect-row-p ty)
+    (type-effect-row
      (let ((effs (type-effect-row-effects ty))
            (rv   (type-effect-row-row-var ty)))
        (if (and (null effs) (null rv))
@@ -218,19 +218,19 @@ This stub is overridden by the printer module when loaded."
                                   "#<eff>"))
                            effs)
                    (if rv (format nil " | ~A" (type-to-string rv)) "")))))
-    ((type-effect-op-p ty)
+    (type-effect-op
      (symbol-name (type-effect-op-name ty)))
-    ((type-error-p ty)
+    (type-error
      (if (string= (type-error-message ty) "unknown") "?" (type-error-message ty)))
-    ((type-app-p ty)
+    (type-app
      (format nil "(~A ~A)"
              (type-to-string (type-app-fun ty))
              (type-to-string (type-app-arg ty))))
-    ((type-constraint-p ty)
+    (type-constraint
      (format nil "(~A ~A)"
              (type-constraint-class-name ty)
              (type-to-string (type-constraint-type-arg ty))))
-    ((type-qualified-p ty)
+    (type-qualified
      (format nil "(~{~A~^, ~} => ~A)"
              (mapcar #'type-to-string (type-qualified-constraints ty))
              (type-to-string (type-qualified-body ty))))

@@ -17,6 +17,10 @@
 ;;; Load order: after cli/main.lisp.
 (in-package :cl-cc/cli)
 
+;; `compile-opts` is defined later in main-dump.lisp. Keep early accessor calls
+;; non-inline so compile-file does not warn before the defstruct is seen.
+(declaim (notinline compile-opts-flamegraph-path))
+
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Utilities
 ;;; ─────────────────────────────────────────────────────────────────────────
@@ -33,29 +37,32 @@ Signals an error when the file does not exist."
            (n   (read-sequence buf in)))
       (subseq buf 0 n))))
 
+(defparameter *lang-flag-map*
+  '(("php" . :php) ("lisp" . :lisp))
+  "Alist mapping --lang flag strings to language keywords.")
+
+(defparameter *lang-ext-map*
+  '(("php" . :php))
+  "Alist mapping file extensions to non-default language keywords.")
+
 (defun %detect-language (file lang-flag)
   "Determine source language from LANG-FLAG string or FILE extension.
 Returns :lisp or :php."
-  (cond
-    ((string= lang-flag "php")  :php)
-    ((string= lang-flag "lisp") :lisp)
-    ((let ((ext (and file (pathname-type file))))
-       (and ext (string= ext "php"))) :php)
-    (t :lisp)))
+  (or (cdr (assoc lang-flag *lang-flag-map* :test #'string=))
+      (let ((ext (and file (pathname-type file))))
+        (and ext (cdr (assoc ext *lang-ext-map* :test #'string=))))
+      :lisp))
 
 (defun %dump-phase-label (phase)
   (string-downcase (string phase)))
 
+(defparameter *ir-phases* '(:ast :cps :ssa :vm :opt :asm)
+  "All recognized IR dump phases.")
+
 (defun %parse-ir-phase (phase-str)
-  (let ((phase (string-downcase phase-str)))
-    (case (intern (string-upcase phase) :keyword)
-      (:ast :ast)
-      (:cps :cps)
-      (:ssa :ssa)
-      (:vm  :vm)
-      (:opt :opt)
-      (:asm :asm)
-      (t nil))))
+  (let ((kw (intern (string-upcase (string-downcase phase-str)) :keyword)))
+    (when (member kw *ir-phases*)
+      kw)))
 
 (defun %ensure-list (thing)
   (cond
@@ -80,21 +87,53 @@ Returns :lisp or :php."
         (funcall thunk out))
       (funcall thunk nil)))
 
+(defun %quit-command-usage-error (command message)
+  "Print MESSAGE, show command help, and exit with usage status 2."
+  (format *error-output* "Error: ~A~%" message)
+  (%print-help command)
+  (uiop:quit 2))
+
+(defun %required-file-arg (parsed command)
+  "Return the first positional file argument or exit with command usage help."
+  (or (car (parsed-args-positional parsed))
+      (%quit-command-usage-error command
+                                 (format nil "'~A' requires a file argument." command))))
+
+(defun %read-command-source (file)
+  "Read FILE or print a consistent CLI read error and exit with status 1."
+  (handler-case (%read-file file)
+    (error (e)
+      (format *error-output* "Error reading ~A: ~A~%" file e)
+      (uiop:quit 1))))
+
+(defun %maybe-make-profiled-vm-state (opts)
+  "Create a profiled VM state when flamegraph output is requested."
+  (when (compile-opts-flamegraph-path opts)
+    (let ((vm-state (make-instance 'cl-cc/vm::vm-io-state
+                                   :output-stream *standard-output*)))
+      (setf (cl-cc/vm::vm-profile-enabled-p vm-state) t
+            (cl-cc/vm::vm-profile-call-stack vm-state) (list "<toplevel>"))
+      vm-state)))
+
+(defparameter *svg-char-entities*
+  '((#\& . "&amp;") (#\< . "&lt;") (#\> . "&gt;") (#\" . "&quot;"))
+  "Alist mapping special SVG/XML characters to their entity references.")
+
 (defun %svg-escape (text)
   (with-output-to-string (out)
     (loop for ch across (princ-to-string text)
-          do (case ch
-               (#\& (princ "&amp;" out))
-               (#\< (princ "&lt;" out))
-               (#\> (princ "&gt;" out))
-               (#\" (princ "&quot;" out))
-               (t (write-char ch out))))))
+          do (let ((entity (cdr (assoc ch *svg-char-entities*))))
+               (if entity (princ entity out) (write-char ch out))))))
+
+(defparameter *flamegraph-color-overrides*
+  '(("gc"  . "rgb(90,140,255)")
+    ("jit" . "rgb(255,165,0)"))
+  "Special-case frame colors keyed by substring match (first match wins).")
 
 (defun %flamegraph-color (name)
   (let ((s (string-downcase (princ-to-string name))))
-    (cond ((search "gc" s) "rgb(90,140,255)")
-          ((search "jit" s) "rgb(255,165,0)")
-          (t (format nil "hsl(8,75%,~D%)" (+ 45 (mod (sxhash s) 20)))))))
+    (or (cdr (assoc-if (lambda (k) (search k s)) *flamegraph-color-overrides*))
+        (format nil "hsl(8,75%,~D%)" (+ 45 (mod (sxhash s) 20))))))
 
 (defun %flamegraph-build-tree (samples)
   (let ((root (list :name "root" :count 0 :children (make-hash-table :test #'equal))))
@@ -156,6 +195,8 @@ Returns :lisp or :php."
                  (format nil "block-~D" (cl-cc/optimize:bb-id blk)))))))
 
 ;; +ansi-*+ colors, %dump-*-phase, %dump-ir-phase, %trace-emit-stages,
+;; %quit-command-usage-error, %required-file-arg, %read-command-source,
+;; %maybe-make-profiled-vm-state,
 ;; %arch-keyword, %compile-target-keyword, %parse-opt-remarks-mode,
 ;; compile-opts struct + %parse-compile-opts + %compile-opts-kwargs
 ;; are in main-dump.lisp (loaded next).

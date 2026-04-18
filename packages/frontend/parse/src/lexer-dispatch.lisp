@@ -8,6 +8,11 @@
 
 ;;; ─── Hash Dispatch ──────────────────────────────────────────────────────────
 
+(defun %lex-dispatch-radix-integer (state radix start)
+  "Advance past the radix-dispatch character and lex a RADIX integer token."
+  (lex-advance state)
+  (lex-make-token state :T-INT (lex-read-radix-integer state radix) start))
+
 (defun lex-read-hash-dispatch (state)
   "Handle # dispatch: #', #\\, #(, #b/B, #o/O, #x/X, #s/S, #t, #f, #|...|#, #:, #+, #-, #., #0-9."
   (let ((start (lexer-state-pos state)))
@@ -25,18 +30,10 @@
         ;; #( vector
         (#\( (lex-advance state)
              (lex-make-token state :T-VECTOR-START nil start))
-        ;; #b/#B binary
-        (#\b (lex-advance state)
-             (let ((val (lex-read-radix-integer state 2)))
-               (lex-make-token state :T-INT val start)))
-        ;; #o/#O octal
-        (#\o (lex-advance state)
-             (let ((val (lex-read-radix-integer state 8)))
-               (lex-make-token state :T-INT val start)))
-        ;; #x/#X hexadecimal
-        (#\x (lex-advance state)
-             (let ((val (lex-read-radix-integer state 16)))
-               (lex-make-token state :T-INT val start)))
+        ;; #b/#B binary, #o/#O octal, #x/#X hexadecimal
+        (#\b (%lex-dispatch-radix-integer state 2  start))
+        (#\o (%lex-dispatch-radix-integer state 8  start))
+        (#\x (%lex-dispatch-radix-integer state 16 start))
         ;; #| block comment
         (#\| (lex-advance state)
              (lex-skip-block-comment state)
