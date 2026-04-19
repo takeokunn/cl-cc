@@ -16,7 +16,7 @@
 ;;; ─── typeclass-def struct ──────────────────────────────────────────────────
 
 (deftest typeclass-def-creation
-  "typeclass-def stores all fields correctly; can declare superclasses."
+  "typeclass-def stores all fields; superclasses declared; functor/show creation and register/lookup."
   (let ((td (make-typeclass-def
              :name 'eq
              :type-params (list (fresh-type-var "a"))
@@ -33,7 +33,32 @@
              :type-params (list (fresh-type-var "a"))
              :superclasses '(eq)
              :methods '((%compare . nil)))))
-    (assert-equal '(eq) (cl-cc/type::typeclass-def-superclasses td))))
+    (assert-equal '(eq) (cl-cc/type::typeclass-def-superclasses td)))
+  (let* ((a  (fresh-type-var 'a))
+         (tc (make-typeclass-def
+              :name 'functor-test
+              :type-params (list a)
+              :superclasses nil
+              :methods (list (cons 'fmap (make-type-arrow (list type-any) type-any)))
+              :associated-types nil
+              :functional-deps nil)))
+    (assert-true (typeclass-def-p tc))
+    (assert-eq 'functor-test (typeclass-def-name tc))
+    (assert-= 1 (length (typeclass-def-type-params tc)))
+    (assert-= 1 (length (typeclass-def-methods tc))))
+  (let* ((a  (fresh-type-var 'a))
+         (tc (make-typeclass-def
+              :name 'show-test
+              :type-params (list a)
+              :superclasses nil
+              :methods (list (cons 'show (make-type-arrow (list a) type-string)))
+              :associated-types nil
+              :functional-deps nil)))
+    (register-typeclass 'show-test tc)
+    (let ((retrieved (lookup-typeclass 'show-test)))
+      (assert-true retrieved)
+      (assert-true (typeclass-def-p retrieved))
+      (assert-eq 'show-test (typeclass-def-name retrieved)))))
 
 ;;; ─── typeclass registry ────────────────────────────────────────────────────
 
@@ -60,34 +85,6 @@
       (assert-eq 'custom-eq (cdr (assoc 'eq (typeclass-instance-methods inst))))
       (assert-eq 'default-show (cdr (assoc 'show (typeclass-instance-methods inst)))))))
 
-(deftest typeclass-def-creation-and-lookup
-  "make-typeclass-def creates valid definitions; register/lookup round-trips correctly."
-  (let* ((a  (fresh-type-var 'a))
-         (tc (make-typeclass-def
-              :name 'functor-test
-              :type-params (list a)
-              :superclasses nil
-              :methods (list (cons 'fmap
-                                   (make-type-arrow (list type-any) type-any)))
-              :associated-types nil
-              :functional-deps nil)))
-    (assert-true (typeclass-def-p tc))
-    (assert-eq 'functor-test (typeclass-def-name tc))
-    (assert-= 1 (length (typeclass-def-type-params tc)))
-    (assert-= 1 (length (typeclass-def-methods tc))))
-  (let* ((a  (fresh-type-var 'a))
-         (tc (make-typeclass-def
-              :name 'show-test
-              :type-params (list a)
-              :superclasses nil
-              :methods (list (cons 'show (make-type-arrow (list a) type-string)))
-              :associated-types nil
-              :functional-deps nil)))
-    (register-typeclass 'show-test tc)
-    (let ((retrieved (lookup-typeclass 'show-test)))
-      (assert-true retrieved)
-      (assert-true (typeclass-def-p retrieved))
-      (assert-eq 'show-test (typeclass-def-name retrieved)))))
 
 (deftest typeclass-instance-registration-new
   "register-typeclass-instance and lookup-typeclass-instance work with new API."
@@ -111,19 +108,15 @@
       (assert-eq inst (lookup-typeclass-instance 'eq type-int)))
     (assert-null (lookup-typeclass-instance 'eq type-string))))
 
-(deftest typeclass-instance-registry-rejects-duplicates
-  "Instance registry rejects duplicate registrations for the same class/type pair."
+(deftest-each typeclass-instance-registry-rejection-cases
+  "Instance registry rejects both duplicate (same type) and overlapping (type-var) registrations."
+  :cases (("duplicate" type-int)
+          ("overlap"   (fresh-type-var "a")))
+  (second-type)
   (let ((cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
     (register-typeclass-instance 'eq type-int nil)
     (assert-signals type-inference-error
-      (register-typeclass-instance 'eq type-int nil))))
-
-(deftest typeclass-instance-registry-rejects-overlaps
-  "Instance registry rejects overlapping registrations for the same class."
-  (let ((cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
-    (register-typeclass-instance 'eq type-int nil)
-    (assert-signals type-inference-error
-      (register-typeclass-instance 'eq (fresh-type-var "a") nil))))
+      (register-typeclass-instance 'eq second-type nil))))
 
 (deftest typeclass-instance-registry-enforces-functional-dependencies
   "Functional dependencies reject conflicting instance families."
@@ -163,27 +156,21 @@
 
 ;;; ─── has-typeclass-instance-p ──────────────────────────────────────────────
 
-(deftest has-typeclass-instance-p-basic
-  "has-typeclass-instance-p: true after registration; false before."
+(deftest has-typeclass-instance-p-cases
+  "has-typeclass-instance-p: true after registration/false before; finds instances via superclass chain."
   (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
         (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
     (assert-false (has-typeclass-instance-p 'eq type-int))
     (register-typeclass-instance 'eq type-int nil)
-    (assert-true  (has-typeclass-instance-p 'eq type-int))))
-
-(deftest has-instance-via-superclass
-  "has-typeclass-instance-p finds instances via superclass chain."
+    (assert-true  (has-typeclass-instance-p 'eq type-int)))
   (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
         (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
-    ;; Register 'eq instance for int
     (register-typeclass-instance 'eq type-int nil)
-    ;; Register 'ord with superclass 'eq
     (register-typeclass 'ord (make-typeclass-def
                               :name 'ord
                               :superclasses '(eq)
                               :type-params nil
                               :methods nil))
-    ;; int has 'eq, and 'ord's superclass is 'eq, so 'ord should find it
     (assert-true (has-typeclass-instance-p 'ord type-int))))
 
 ;;; ─── check-typeclass-constraint ────────────────────────────────────────────
@@ -215,21 +202,23 @@
 ;;; ─── Backward-compat: type-class struct ────────────────────────────────────
 
 (deftest compat-type-class-struct-and-registry
-  "type-class backward-compat struct: correct fields; storable in typeclass registry."
-  (let ((tc (make-type-class :name 'show
+  "type-class compatibility still exposes the old struct shape, while the registry stores canonical typeclass-def values."
+  (let ((tc (cl-cc/type::make-type-class :name 'show
                              :type-param (fresh-type-var "a")
                              :methods '((show-method . nil))
                              :defaults '((show-method . default-show)))))
-    (assert-true   (type-class-p tc))
-    (assert-eq 'show (type-class-name tc))
+    (assert-true   (cl-cc/type::type-class-p tc))
+    (assert-eq 'show (cl-cc/type::type-class-name tc))
     (assert-true   (type-var-p (cl-cc/type::type-class-type-param tc)))
     (assert-equal 1 (length (cl-cc/type::type-class-methods tc)))
     (assert-equal '((show-method . default-show))
                   (cl-cc/type::type-class-defaults tc)))
   (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq)))
-    (let ((tc (make-type-class :name 'test-compat :type-param nil :methods nil)))
+    (let ((tc (cl-cc/type::make-type-class :name 'test-compat :type-param nil :methods nil)))
       (register-typeclass 'test-compat tc)
-      (assert-eq tc (lookup-typeclass 'test-compat)))))
+      (let ((stored (lookup-typeclass 'test-compat)))
+        (assert-true (typeclass-def-p stored))
+        (assert-eq 'test-compat (typeclass-def-name stored))))))
 
 ;;; ─── Backward-compat: type-skolem ──────────────────────────────────────────
 
@@ -245,17 +234,12 @@
 
 ;;; ─── Backward-compat: type-effect ──────────────────────────────────────────
 
-(deftest compat-type-effect-creation
-  "make-type-effect creates a valid effect node with the given name."
-  (let ((e (cl-cc/type::make-type-effect :name 'io)))
-    (assert-true (cl-cc/type::type-effect-p e))
-    (assert-eq 'io (cl-cc/type::type-effect-name e))))
-
 (deftest-each compat-type-effect-name-dispatch
-  "type-effect-name works on both type-effect (old) and type-effect-op (new)."
-  :cases (("old-style" (cl-cc/type::make-type-effect :name 'io)              'io)
-          ("new-style" (make-type-effect-op          :name 'state :args nil) 'state))
-  (effect expected-name)
+  "type-effect-name works on type-effect (old, satisfies type-effect-p) and type-effect-op (new)."
+  :cases (("old-style" (cl-cc/type::make-type-effect :name 'io)              'io    t)
+          ("new-style" (make-type-effect-op          :name 'state :args nil) 'state nil))
+  (effect expected-name check-effect-p)
+  (when check-effect-p (assert-true (cl-cc/type::type-effect-p effect)))
   (assert-eq expected-name (cl-cc/type::type-effect-name effect)))
 
 ;;; ─── Backward-compat: type-effectful-function ──────────────────────────────

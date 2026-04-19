@@ -19,17 +19,14 @@
 
 ;;; ─── length / reverse / append ──────────────────────────────────────────────
 
-(deftest vm-list-length-proper
-  "vm-length returns length of a proper list."
-  (with-test-vm (s (1 '(a b c d)))
-    (exec1 (cl-cc::make-vm-length :dst 0 :src 1) s)
-    (assert-= 4 (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-list-reverse-list
-  "vm-reverse returns a reversed copy."
-  (with-test-vm (s (1 '(1 2 3)))
-    (exec1 (cl-cc::make-vm-reverse :dst 0 :src 1) s)
-    (assert-equal '(3 2 1) (cl-cc:vm-reg-get s 0))))
+(deftest-each vm-list-unary-src-dst-ops
+  "Unary list operations: src-in-reg-1 → dst-in-reg-0."
+  :cases (("length"  #'cl-cc::make-vm-length  '(a b c d)  4)
+          ("reverse" #'cl-cc::make-vm-reverse '(1 2 3)    '(3 2 1)))
+  (constructor input expected)
+  (with-test-vm (s (1 input))
+    (exec1 (funcall constructor :dst 0 :src 1) s)
+    (assert-equal expected (cl-cc:vm-reg-get s 0))))
 
 (deftest vm-list-append-two
   "vm-append concatenates two lists."
@@ -39,26 +36,25 @@
 
 ;;; ─── member / nth / nthcdr ─────────────────────────────────────────────────
 
-(deftest vm-list-member-behavior
-  "vm-member returns tail on hit; nil on miss."
-  (with-test-vm (s (2 '(a b c)) (1 'b))
+(deftest-each vm-list-member-hit-miss
+  "vm-member returns tail on hit, nil on miss."
+  :cases (("hit"  'b '(a b c) '(b c))
+          ("miss" 'z '(a b c) nil))
+  (item lst expected)
+  (with-test-vm (s (1 item) (2 lst))
     (exec1 (cl-cc::make-vm-member :dst 0 :item 1 :list 2) s)
-    (assert-equal '(b c) (cl-cc:vm-reg-get s 0)))
-  (with-test-vm (s (2 '(a b c)) (1 'z))
-    (exec1 (cl-cc::make-vm-member :dst 0 :item 1 :list 2) s)
-    (assert-null (cl-cc:vm-reg-get s 0))))
+    (assert-equal expected (cl-cc:vm-reg-get s 0))))
 
-(deftest vm-list-nth-index
-  "vm-nth retrieves element at given index."
+(deftest-each vm-list-indexed-access-ops
+  "vm-nth and vm-nthcdr fetch element and tail at index respectively."
+  :cases (("nth"    #'cl-cc::make-vm-nth    'c
+           (lambda (expected actual) (assert-eq expected actual)))
+          ("nthcdr" #'cl-cc::make-vm-nthcdr '(c d)
+           (lambda (expected actual) (assert-equal expected actual))))
+  (constructor expected assert-fn)
   (with-test-vm (s (1 2) (2 '(a b c d)))
-    (exec1 (cl-cc::make-vm-nth :dst 0 :index 1 :list 2) s)
-    (assert-eq 'c (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-list-nthcdr-skips
-  "vm-nthcdr returns the tail after N cdrs."
-  (with-test-vm (s (1 2) (2 '(a b c d)))
-    (exec1 (cl-cc::make-vm-nthcdr :dst 0 :index 1 :list 2) s)
-    (assert-equal '(c d) (cl-cc:vm-reg-get s 0))))
+    (exec1 (funcall constructor :dst 0 :index 1 :list 2) s)
+    (funcall assert-fn expected (cl-cc:vm-reg-get s 0))))
 
 ;;; ─── Named accessors ───────────────────────────────────────────────────────
 
@@ -77,21 +73,18 @@
     (exec1 (funcall constructor :dst 0 :src 1) s)
     (assert-equal expected (cl-cc:vm-reg-get s 0))))
 
-;;; ─── Destructive operations ─────────────────────────────────────────────────
+;;; ─── Destructive + extended ops ─────────────────────────────────────────────
 
-(deftest vm-list-nreverse-destructive
-  "vm-nreverse destructively reverses a list."
-  (with-test-vm (s (1 (list 1 2 3)))
-    (exec1 (cl-cc::make-vm-nreverse :dst 0 :src 1) s)
-    (assert-equal '(3 2 1) (cl-cc:vm-reg-get s 0))))
-
-;;; ─── Extended list operations ───────────────────────────────────────────────
-
-(deftest vm-list-list-length-proper
-  "vm-list-length returns length for proper list."
-  (with-test-vm (s (1 '(x y z)))
-    (exec1 (cl-cc::make-vm-list-length :dst 0 :src 1) s)
-    (assert-= 3 (cl-cc:vm-reg-get s 0))))
+(deftest-each vm-list-extended-unary-ops
+  "Destructive and extended unary list operations: src-in-reg-1 → dst-in-reg-0."
+  :cases (("nreverse"    #'cl-cc::make-vm-nreverse    (list 1 2 3) '(3 2 1)
+           (lambda (expected actual) (assert-equal expected actual)))
+          ("list-length" #'cl-cc::make-vm-list-length '(x y z)     3
+           (lambda (expected actual) (assert-= expected actual))))
+  (constructor input expected assert-fn)
+  (with-test-vm (s (1 input))
+    (exec1 (funcall constructor :dst 0 :src 1) s)
+    (funcall assert-fn expected (cl-cc:vm-reg-get s 0))))
 
 (deftest-each vm-list-empty-predicates
   "vm-endp and vm-null both detect the empty list."
@@ -126,22 +119,19 @@
     (assert-equal (cl-cc:vm-reg-get s 0)
                   (cl-cc:vm-reg-get s 3))))
 
-(deftest vm-hash-cons-reuses-identical-cells
-  "vm-hash-cons returns the same cons cell for identical car/cdr pairs."
+(deftest-each vm-hash-cons-behavior
+  "hash-cons: same cell for identical pairs; clearing forces fresh allocations."
+  :cases (("reuses-identical"   nil)
+          ("clear-breaks-reuse" t))
+  (clear-between-p)
   (cl-cc/vm::vm-clear-hash-cons-table)
-  (let ((c1 (cl-cc/vm::vm-hash-cons 'a 'b))
-        (c2 (cl-cc/vm::vm-hash-cons 'a 'b)))
-    (assert-true (eq c1 c2))
-    (assert-equal '(a . b) c1)))
-
-(deftest vm-hash-cons-clear-drops-interning
-  "Clearing the hash-cons table forces subsequent allocations to be distinct."
-  (cl-cc/vm::vm-clear-hash-cons-table)
-  (let ((c1 (cl-cc/vm::vm-hash-cons 'x 'y)))
-    (cl-cc/vm::vm-clear-hash-cons-table)
-    (let ((c2 (cl-cc/vm::vm-hash-cons 'x 'y)))
-      (assert-false (eq c1 c2))
-      (assert-equal c1 c2))))
+  (let ((c1 (cl-cc/vm::vm-hash-cons 'a 'b)))
+    (when clear-between-p (cl-cc/vm::vm-clear-hash-cons-table))
+    (let ((c2 (cl-cc/vm::vm-hash-cons 'a 'b)))
+      (assert-equal c1 c2)
+      (if clear-between-p
+          (assert-false (eq c1 c2))
+          (assert-true  (eq c1 c2))))))
 
 (deftest vm-extensible-sequence-builtins
   "The partial sequence protocol works for list and vector builtins."
@@ -186,18 +176,16 @@
 
 ;;; ─── Association lists ──────────────────────────────────────────────────────
 
-(deftest vm-list-assoc-behavior
+(deftest-each vm-list-assoc-hit-miss
   "vm-assoc returns matching pair on hit; nil on miss."
+  :cases (("hit"  'b '((a . 1) (b . 2) (c . 3)) '(b . 2))
+          ("miss" 'z '((a . 1))                  nil))
+  (key alist expected)
   (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 'b)
-    (cl-cc:vm-reg-set s 2 '((a . 1) (b . 2) (c . 3)))
+    (cl-cc:vm-reg-set s 1 key)
+    (cl-cc:vm-reg-set s 2 alist)
     (exec1 (cl-cc::make-vm-assoc :dst 0 :key 1 :alist 2) s)
-    (assert-equal '(b . 2) (cl-cc:vm-reg-get s 0)))
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 'z)
-    (cl-cc:vm-reg-set s 2 '((a . 1)))
-    (exec1 (cl-cc::make-vm-assoc :dst 0 :key 1 :alist 2) s)
-    (assert-null (cl-cc:vm-reg-get s 0))))
+    (assert-equal expected (cl-cc:vm-reg-get s 0))))
 
 (deftest vm-list-acons-prepends-pair
   "vm-acons prepends (key . value) to alist."
@@ -212,18 +200,16 @@
 
 ;;; ─── equal / nconc / copy-list / copy-tree / subst ──────────────────────────
 
-(deftest vm-list-equal-behavior
-  "vm-equal returns truthy for structurally equal trees; NIL for different trees."
+(deftest-each vm-list-equal-cases
+  "vm-equal: truthy for structurally equal trees; nil for different trees."
+  :cases (("equal"     '(a (b c)) '(a (b c)) t)
+          ("not-equal" '(a b)     '(a c)     nil))
+  (lhs rhs expected-bool)
   (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 '(a (b c)))
-    (cl-cc:vm-reg-set s 2 '(a (b c)))
+    (cl-cc:vm-reg-set s 1 lhs)
+    (cl-cc:vm-reg-set s 2 rhs)
     (exec1 (cl-cc::make-vm-equal :dst 0 :lhs 1 :rhs 2) s)
-    (assert-true (cl-cc:vm-reg-get s 0)))
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 '(a b))
-    (cl-cc:vm-reg-set s 2 '(a c))
-    (exec1 (cl-cc::make-vm-equal :dst 0 :lhs 1 :rhs 2) s)
-    (assert-true (null (cl-cc:vm-reg-get s 0)))))
+    (assert-equal expected-bool (and (cl-cc:vm-reg-get s 0) t))))
 
 (deftest vm-list-nconc-joins
   "vm-nconc destructively concatenates two lists."
@@ -233,25 +219,19 @@
     (exec1 (cl-cc::make-vm-nconc :dst 0 :lhs 1 :rhs 2) s)
     (assert-equal '(a b c d) (cl-cc:vm-reg-get s 0))))
 
-(deftest vm-list-copy-list-shallow
-  "vm-copy-list creates a shallow copy."
-  (let ((s (make-test-vm))
-        (orig (list 1 2 3)))
+(deftest-each vm-list-copy-ops
+  "copy-list makes a shallow copy (outer distinct, nested refs shared); copy-tree makes deep copy."
+  :cases (("copy-list" #'cl-cc::make-vm-copy-list (list 1 2 3)                nil)
+          ("copy-tree" #'cl-cc::make-vm-copy-tree (list (list 1 2) (list 3 4)) t))
+  (constructor orig deep-p)
+  (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 orig)
-    (exec1 (cl-cc::make-vm-copy-list :dst 0 :src 1) s)
+    (exec1 (funcall constructor :dst 0 :src 1) s)
     (let ((copy (cl-cc:vm-reg-get s 0)))
       (assert-equal orig copy)
-      (assert-true (not (eq orig copy))))))
-
-(deftest vm-list-copy-tree-deep
-  "vm-copy-tree creates a deep copy of nested structure."
-  (let ((s (make-test-vm))
-        (orig (list (list 1 2) (list 3 4))))
-    (cl-cc:vm-reg-set s 1 orig)
-    (exec1 (cl-cc::make-vm-copy-tree :dst 0 :src 1) s)
-    (let ((copy (cl-cc:vm-reg-get s 0)))
-      (assert-equal orig copy)
-      (assert-true (not (eq (first orig) (first copy)))))))
+      (assert-true (not (eq orig copy)))
+      (when deep-p
+        (assert-true (not (eq (first orig) (first copy))))))))
 
 (deftest vm-list-subst-replaces
   "vm-subst substitutes new for old in tree."

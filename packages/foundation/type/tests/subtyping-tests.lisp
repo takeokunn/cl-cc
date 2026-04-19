@@ -89,16 +89,12 @@
 
 ;;; ─── Union subtyping ────────────────────────────────────────────────────────
 
-(deftest subtype-union-left-behavior
-  "(int | string) <: t (both members <: t); but NOT <: int (string is not <: int)."
+(deftest subtype-union-cases
+  "Union subtyping: (int|string)<:t; not <:int; int<:(int|string)."
   (let ((u (make-type-union (list type-int type-string))))
     (assert-true  (cl-cc/type::is-subtype-p u type-any))
-    (assert-false (cl-cc/type::is-subtype-p u type-int))))
-
-(deftest subtype-union-right
-  "int <: (int | string) — member of the union."
-  (let ((u (make-type-union (list type-int type-string))))
-    (assert-true (cl-cc/type::is-subtype-p type-int u))))
+    (assert-false (cl-cc/type::is-subtype-p u type-int))
+    (assert-true  (cl-cc/type::is-subtype-p type-int u))))
 
 ;;; ─── Intersection subtyping ─────────────────────────────────────────────────
 
@@ -140,7 +136,7 @@
 ;;; ─── Function subtyping (contravariant params, covariant return) ────────────
 
 (deftest subtype-function-variance
-  "Function subtyping: identical, covariant return, contravariant params."
+  "Function subtyping: identical, covariant return, contravariant params; params not covariant."
   (assert-true (cl-cc/type::is-subtype-p
                 (make-type-function (list type-int) type-string)
                 (make-type-function (list type-int) type-string)))
@@ -149,32 +145,25 @@
                 (make-type-function (list type-int) type-any)))
   (assert-true (cl-cc/type::is-subtype-p      ; contravariant params
                 (make-type-function (list type-any) type-int)
-                (make-type-function (list type-int) type-int))))
-
-(deftest subtype-function-not-covariant-param
-  "(int -> int) is NOT <: (t -> int) — params are contravariant."
-  (let ((f1 (make-type-function (list type-int) type-int))
-        (f2 (make-type-function (list type-any) type-int)))
-    (assert-false (cl-cc/type::is-subtype-p f1 f2))))
+                (make-type-function (list type-int) type-int)))
+  ;; params are NOT covariant: (int -> int) is NOT <: (t -> int)
+  (assert-false (cl-cc/type::is-subtype-p
+                 (make-type-function (list type-int) type-int)
+                 (make-type-function (list type-any) type-int))))
 
 ;;; ─── find-common-supertype ──────────────────────────────────────────────────
 
 (deftest-each common-supertype-numeric
-  "Common supertypes in the numeric hierarchy."
+  "Common supertypes in the numeric and list hierarchies."
   :cases (("fixnum-integer"  'fixnum   'integer   'integer)
           ("fixnum-float"    'fixnum   'float     'real)
           ("integer-string"  'integer  'string    't)
-          ("fixnum-fixnum"   'fixnum   'fixnum    'fixnum))
+          ("fixnum-fixnum"   'fixnum   'fixnum    'fixnum)
+          ("null-cons"       'null     'cons      'list))
   (n1 n2 expected)
   (let ((result (cl-cc/type::find-common-supertype n1 n2)))
     (assert-true result)
     (assert-eq expected (type-primitive-name result))))
-
-(deftest common-supertype-null-cons
-  "null and cons share supertype list."
-  (let ((result (cl-cc/type::find-common-supertype 'null 'cons)))
-    (assert-true result)
-    (assert-eq 'list (type-primitive-name result))))
 
 ;;; ─── type-join (LUB) ────────────────────────────────────────────────────────
 
@@ -188,49 +177,25 @@
                     (cl-cc/type::type-meet type-int type-int))))
     (assert-true (type-equal-p type-int result))))
 
-(deftest type-join-subtype
-  "Join of fixnum and integer is integer (fixnum <: integer)."
-  (let* ((fixnum-t (prim 'fixnum))
-         (int-t (prim 'integer))
-         (result (cl-cc/type::type-join fixnum-t int-t)))
-    (assert-true (type-equal-p int-t result))))
-
-(deftest type-join-unrelated-primitives
-  "Join of unrelated primitives finds common supertype."
-  (let* ((fixnum-t (prim 'fixnum))
-         (float-t (prim 'float))
-         (result (cl-cc/type::type-join fixnum-t float-t)))
-    ;; fixnum and float share 'real as common supertype
-    (assert-true (type-primitive-p result))
-    (assert-eq 'real (type-primitive-name result))))
-
-(deftest type-join-unknown-left
-  "Join with unknown returns the other type."
-  (let ((result (cl-cc/type::type-join +type-unknown+ type-string)))
-    (assert-true (type-equal-p type-string result))))
-
-(deftest type-join-no-common-supertype
-  "Join of truly unrelated types produces a union."
-  (let ((result (cl-cc/type::type-join type-int type-string)))
-    ;; integer and string → find-common-supertype returns t
-    (assert-true result)))
+(deftest type-join-cases
+  "type-join: subtype→larger; unrelated→common supertype; unknown→other type; int+str→result."
+  (let ((fixnum-t (prim 'fixnum))
+        (int-t    (prim 'integer))
+        (float-t  (prim 'float)))
+    (assert-true (type-equal-p int-t (cl-cc/type::type-join fixnum-t int-t)))
+    (let ((result (cl-cc/type::type-join fixnum-t float-t)))
+      (assert-true (type-primitive-p result))
+      (assert-eq 'real (type-primitive-name result)))
+    (assert-true (type-equal-p type-string (cl-cc/type::type-join +type-unknown+ type-string)))
+    (assert-true (cl-cc/type::type-join type-int type-string))))
 
 ;;; ─── type-meet (GLB) ────────────────────────────────────────────────────────
 
-(deftest type-meet-subtype
-  "Meet of fixnum and integer is fixnum (fixnum <: integer)."
-  (let* ((fixnum-t (prim 'fixnum))
-         (int-t (prim 'integer))
-         (result (cl-cc/type::type-meet fixnum-t int-t)))
-    (assert-true (type-equal-p fixnum-t result))))
-
-(deftest type-meet-unknown
-  "Meet with unknown returns unknown."
-  (let ((result (cl-cc/type::type-meet +type-unknown+ type-string)))
-    (assert-true (type-unknown-p result))))
-
-(deftest type-meet-unrelated
-  "Meet of unrelated types produces an intersection."
-  (let ((result (cl-cc/type::type-meet type-int type-string)))
-    (assert-true (type-intersection-p result))))
+(deftest type-meet-cases
+  "type-meet: subtype→smaller; unknown→unknown; unrelated→intersection."
+  (let ((fixnum-t (prim 'fixnum))
+        (int-t    (prim 'integer)))
+    (assert-true (type-equal-p fixnum-t (cl-cc/type::type-meet fixnum-t int-t)))
+    (assert-true (type-unknown-p (cl-cc/type::type-meet +type-unknown+ type-string)))
+    (assert-true (type-intersection-p (cl-cc/type::type-meet type-int type-string)))))
 

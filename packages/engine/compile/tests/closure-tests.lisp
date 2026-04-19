@@ -27,18 +27,15 @@
   (assert-equal '(x)
     (cl-cc/compile::find-free-variables (cl-cc/ast::make-ast-var :name 'x))))
 
-(deftest free-vars-binop-two-vars
-  "A binop with two different vars has both free."
+(deftest free-vars-binop-cases
+  "Binop free vars: two distinct vars → both free; same var twice → deduplicated to one."
   (let ((result (cl-cc/compile::find-free-variables
                  (cl-cc/ast::make-ast-binop
                   :op '+
                   :lhs (cl-cc/ast::make-ast-var :name 'x)
                   :rhs (cl-cc/ast::make-ast-var :name 'y)))))
     (assert-true (and (member 'x result) (member 'y result)))
-    (assert-equal 2 (length result))))
-
-(deftest free-vars-binop-same-var
-  "A binop referencing the same var twice returns it once (union)."
+    (assert-equal 2 (length result)))
   (let ((result (cl-cc/compile::find-free-variables
                  (cl-cc/ast::make-ast-binop
                   :op '+
@@ -189,26 +186,21 @@
 
 ;;; ─── Flet / Labels ───────────────────────────────────────────────────────
 
-(deftest free-vars-flet-shadows-func-name
-  "Flet function names are not free in body."
+(deftest free-vars-flet-labels-cases
+  "Flet: bound func name not free in body; Labels: outer vars referenced inside binding are free."
   (let ((result (cl-cc/compile::find-free-variables
                  (cl-cc/ast::make-ast-flet
                   :bindings (list (list 'my-fn '(a) (cl-cc/ast::make-ast-var :name 'a)))
                   :body (list (cl-cc/ast::make-ast-call
                                :func 'my-fn
                                :args (list (cl-cc/ast::make-ast-int :value 1))))))))
-    ;; my-fn is shadowed by flet, a is shadowed inside the binding body
-    (assert-equal nil result)))
-
-(deftest free-vars-labels-captures-outer
-  "Labels bodies with outer references mark them free."
+    (assert-equal nil result))
   (let ((result (cl-cc/compile::find-free-variables
                  (cl-cc/ast::make-ast-labels
                   :bindings (list (list 'rec '(n) (cl-cc/ast::make-ast-var :name 'limit)))
                   :body (list (cl-cc/ast::make-ast-call
                                :func 'rec
                                :args (list (cl-cc/ast::make-ast-int :value 0))))))))
-    ;; rec is bound by labels, n is param inside binding, limit is free
     (assert-equal '(limit) result)))
 
 ;;; ─── If / Progn ──────────────────────────────────────────────────────────

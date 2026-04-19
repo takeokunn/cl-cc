@@ -17,6 +17,21 @@ errors so assertion helpers can report readable failures."
   `(let ((,result (ignore-errors (run-string ,expr-string))))
      ,@body))
 
+(defmacro %with-run-string-assertion ((result expr-string)
+                                      (&key condition message expected actual form))
+  "Run EXPR-STRING once, bind RESULT, and signal a standardized assertion failure.
+
+This keeps the run-string-based assertion family (`assert-run=`,
+`assert-run-true`, `assert-run-false`, `assert-run-string=`) data-light and
+ensures host CL errors are still converted into readable `%fail-test` output."
+  `(%with-run-string-result (,result ,expr-string)
+     (unless ,condition
+       (%fail-test ,message
+                   :expected ,expected
+                   :actual ,actual
+                   :form ,form))
+     t))
+
 (defmacro assert-compiles-to (expr &key contains)
   "Assert that compiling EXPR produces an instruction of type CONTAINS.
    CONTAINS should be a quoted type symbol like 'vm-add."
@@ -94,38 +109,38 @@ errors so assertion helpers can report readable failures."
 (defmacro assert-run= (expected expr-string)
   "Compile and run EXPR-STRING in the CL-CC VM, assert result equals EXPECTED."
   (let ((result (gensym "RESULT")))
-    `(%with-run-string-result (,result ,expr-string)
-       (unless (equal ,result ,expected)
-          (%fail-test
-           (format nil "assert-run=: expected ~S, got ~S for ~S"
-                   ,expected ,result ,expr-string)
-           :expected ,expected
-           :actual   ,result
-           :form     (list 'assert-run= ,expected ,expr-string))))))
+    `(%with-run-string-assertion
+         (,result ,expr-string)
+         (:condition (equal ,result ,expected)
+          :message (format nil "assert-run=: expected ~S, got ~S for ~S"
+                           ,expected ,result ,expr-string)
+          :expected ,expected
+          :actual ,result
+          :form (list 'assert-run= ,expected ,expr-string)))))
 
 (defmacro assert-run-true (expr-string)
   "Compile and run EXPR-STRING, assert result is non-nil."
   (let ((result (gensym "RESULT")))
-    `(%with-run-string-result (,result ,expr-string)
-       (unless ,result
-          (%fail-test
-           (format nil "assert-run-true: expected non-nil, got ~S for ~S"
-                   ,result ,expr-string)
+    `(%with-run-string-assertion
+         (,result ,expr-string)
+         (:condition ,result
+          :message (format nil "assert-run-true: expected non-nil, got ~S for ~S"
+                           ,result ,expr-string)
           :expected t
-          :actual   ,result
-          :form     (list 'assert-run-true ,expr-string))))))
+          :actual ,result
+          :form (list 'assert-run-true ,expr-string)))))
 
 (defmacro assert-run-false (expr-string)
   "Compile and run EXPR-STRING, assert result is nil."
   (let ((result (gensym "RESULT")))
-    `(%with-run-string-result (,result ,expr-string)
-       (when ,result
-          (%fail-test
-           (format nil "assert-run-false: expected nil, got ~S for ~S"
-                   ,result ,expr-string)
+    `(%with-run-string-assertion
+         (,result ,expr-string)
+         (:condition (null ,result)
+          :message (format nil "assert-run-false: expected nil, got ~S for ~S"
+                           ,result ,expr-string)
           :expected nil
-          :actual   ,result
-          :form     (list 'assert-run-false ,expr-string))))))
+          :actual ,result
+          :form (list 'assert-run-false ,expr-string)))))
 
 (defmacro assert-run-signals (condition-type expr-string)
   "Compile and run EXPR-STRING, assert it signals CONDITION-TYPE."
@@ -145,14 +160,14 @@ errors so assertion helpers can report readable failures."
 (defmacro assert-run-string= (expected expr-string)
   "Compile and run EXPR-STRING, assert result string= EXPECTED."
   (let ((result (gensym "RESULT")))
-    `(%with-run-string-result (,result ,expr-string)
-       (unless (and (stringp ,result) (string= ,result ,expected))
-          (%fail-test
-           (format nil "assert-run-string=: expected ~S, got ~S for ~S"
-                   ,expected ,result ,expr-string)
+    `(%with-run-string-assertion
+         (,result ,expr-string)
+         (:condition (and (stringp ,result) (string= ,result ,expected))
+          :message (format nil "assert-run-string=: expected ~S, got ~S for ~S"
+                           ,expected ,result ,expr-string)
           :expected ,expected
-          :actual   ,result
-          :form     (list 'assert-run-string= ,expected ,expr-string))))))
+          :actual ,result
+          :form (list 'assert-run-string= ,expected ,expr-string)))))
 
 (defun assert-output-contains (output substring)
   "Assert that OUTPUT string contains SUBSTRING. Used by wasm-tests.lisp."
@@ -164,6 +179,8 @@ errors so assertion helpers can report readable failures."
      :expected substring
      :actual   output
      :form     (list 'assert-output-contains output substring))))
+
+;;; Property-based test DSL (assert-pbt, deftest-pbt) is in framework-pbt.lisp (loads after).
 
 ;;; ------------------------------------------------------------
 ;;; Section N: Prolog Database Isolation (opt-in library)

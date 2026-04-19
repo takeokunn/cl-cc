@@ -81,21 +81,15 @@
 
 ;;; ─── Basic CFG Construction ──────────────────────────────────────────────
 
-(deftest cfg-linear-cfg-structure
-  "A linear sequence: exactly 1 block; non-nil entry; entry has instructions."
+(deftest cfg-basic-structure-cases
+  "CFG structure: linear→1 block with entry+instructions; empty→1 block; branch→≥2 blocks."
   (let* ((cfg   (make-test-cfg-linear))
          (entry (cl-cc/optimize::cfg-entry cfg)))
     (assert-= 1 (cl-cc/optimize::cfg-block-count cfg))
     (assert-true entry)
-    (assert-true (cl-cc::bb-instructions entry))))
-
-(deftest cfg-empty-instructions
-  "An empty instruction list produces a CFG with one empty entry block."
+    (assert-true (cl-cc::bb-instructions entry)))
   (let ((cfg (cl-cc/optimize::cfg-build nil)))
-    (assert-true (cl-cc/optimize::cfg-entry cfg))))
-
-(deftest cfg-branch-block-count
-  "A conditional branch creates at least 2 basic blocks."
+    (assert-true (cl-cc/optimize::cfg-entry cfg)))
   (let ((cfg (make-test-cfg-branch)))
     (assert-true (>= (cl-cc/optimize::cfg-block-count cfg) 2))))
 
@@ -109,14 +103,11 @@
 
 ;;; ─── Predecessor / Successor Edges ──────────────────────────────────────
 
-(deftest cfg-branch-successors
-  "The entry block in a branch CFG has 2 successors."
+(deftest cfg-branch-edge-cases
+  "Branch CFG edges: entry has 2 successors; exit block has ≥1 predecessor."
   (let* ((cfg   (make-test-cfg-branch))
          (entry (cl-cc/optimize::cfg-entry cfg)))
-    (assert-= 2 (length (cl-cc::bb-successors entry)))))
-
-(deftest cfg-branch-predecessors
-  "The exit block has predecessors from both branches."
+    (assert-= 2 (length (cl-cc::bb-successors entry))))
   (let* ((cfg  (make-test-cfg-branch))
          (exit  (cl-cc/optimize::cfg-get-block-by-label cfg "exit")))
     (when exit
@@ -236,27 +227,18 @@
 
 ;;; ─── cfg-idf (Iterated Dominance Frontier) ──────────────────────────────────
 
-(deftest cfg-idf-empty-def-blocks
-  "cfg-idf on an empty def-block set returns an empty list."
-  (let ((result (cl-cc/optimize::cfg-idf nil)))
-    (assert-null result)))
-
-(deftest cfg-idf-single-def-block-no-frontier
-  "cfg-idf on a single block with no dominance frontier returns empty."
+(deftest cfg-idf-cases
+  "cfg-idf: empty set→nil; linear CFG entry→empty list; branch entry→list (join in IDF)."
+  (assert-null (cl-cc/optimize::cfg-idf nil))
   (let* ((cfg (make-test-cfg-linear)))
     (cl-cc/optimize::cfg-compute-dominators cfg)
     (cl-cc/optimize::cfg-compute-dominance-frontiers cfg)
     (let* ((entry (cl-cc/optimize::cfg-entry cfg))
            (result (cl-cc/optimize::cfg-idf (list entry))))
-      ;; Linear CFG: no join points, so IDF is empty
-      (assert-true (listp result)))))
-
-(deftest cfg-idf-branch-cfg-includes-join-point
-  "cfg-idf on def-blocks that reach a join point includes that join in the IDF."
+      (assert-true (listp result))))
   (let* ((cfg (make-test-cfg-branch)))
     (cl-cc/optimize::cfg-compute-dominators cfg)
     (cl-cc/optimize::cfg-compute-dominance-frontiers cfg)
     (let* ((entry (cl-cc/optimize::cfg-entry cfg))
            (result (cl-cc/optimize::cfg-idf (list entry))))
-      ;; Exit block is a join: it should appear in the IDF
       (assert-true (listp result)))))

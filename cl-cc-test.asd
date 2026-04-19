@@ -284,6 +284,7 @@
      (:file "optimizer-flow-tests")   ; DCE, jump threading, unreachable elim, block/tail merge
      (:file "optimizer-pipeline-tests") ; parse-pipeline-string, converged-p, adaptive-iters, verify
      (:file "optimizer-inline-tests")      ; opt-max-reg-index, opt-make-renaming, opt-collect-function-defs, call-graph
+     (:file "optimizer-purity-tests")      ; opt-function-body-transitively-pure-p, opt-infer-transitive-function-purity
      (:file "optimizer-inline-pass-tests")   ; memo utils, body-inst-set/labels, reachability
      (:file "optimizer-inline-pass-tests-2") ; inline cost/policy (inst-cost, body-cost, threshold, eligible-p), global-dce, pass-inline
      (:file "optimizer-inline-pass-ext-tests") ; extended inline policy + full pass tests
@@ -334,6 +335,7 @@
     ((:file "runtime-tests")
      (:file "runtime-tests-2")
      (:file "runtime-advanced-tests")
+     (:file "runtime-io-tests")          ; define-rt-stream-op, rt-format, rt-read-line, rt-write-line, rt-peek-char, string-output-stream, stream predicates, pathname utils
      (:file "gc-tests")
      (:file "gc-sweep-major-tests")    ; %gc-sweep-old-space (dead/live) + rt-gc-major-collect (counter/reclaim/preserve/stats)
      (:file "heap-tests")
@@ -357,20 +359,34 @@
     :pathname "tests/integration"
     :serial t
     :components
-    ((:file "compiler-selfhost-fixtures") ; defparameter fixtures for selfhost tests (no tests)
-     (:file "compiler-tests")
-     (:file "compiler-tests-extended")   ; selfhost smoke: optimizer-pipeline, macro-system, type-checker
-     (:file "compiler-tests-runtime")    ; destructuring-bind, append, consp, type predicates
+     ((:file "compiler-selfhost-fixtures")     ; core fixtures: optimizer, macro, type, CLOS pipeline
+      (:file "compiler-selfhost-fixtures-ext") ; extended fixtures: stack, CLOS compiler, register, mini, full CLOS
+      (:file "compiler-tests")                     ; basic, print, asm, integration, register-alloc, scoping, CPS, PBT
+      (:file "compiler-tests-call-forms")          ; function call, lambda lists, multiple values, variadic
+      (:file "compiler-tests-stdlib")             ; stdlib/io/array/sort/coerce integration split from compiler-tests
+      (:file "compiler-tests-stdlib-io")          ; selfhost-eval, string/char, I/O, HOF, array, sort, coerce
+      (:file "compiler-tests-extended")           ; selfhost smoke + prog/prog*/with-slots + early extended forms
+      (:file "compiler-tests-extended-stdlib")    ; later stdlib/keyword/reader integration split from compiler-tests-extended
+      (:file "compiler-tests-runtime")             ; destructuring-bind, append, consp, maphash, file-io, labels, new builtins
+      (:file "compiler-tests-runtime-string-tests") ; string/symbol, macro expand, list ops, handler-case, hash-table, defmacro, HOF
+      (:file "compiler-tests-runtime-selfhost")   ; runtime-heavy selfhost/CLOS/hash-table integration
      (:file "fr-555-copy-structure-tests")
-     (:file "compiler-tests-selfhost")   ; CLOS pipeline, generic functions, mapcar
+     (:file "compiler-tests-selfhost")        ; CLOS pipeline, generic functions, typed defun, type inference, HOF
+     (:file "compiler-tests-selfhost-types")  ; parametric types, defparameter, equal, numeric, warn, format
      (:file "closure-tests")
      (:file "call-conv-tests")
      (:file "control-flow-tests")
-     (:file "clos-tests")
+     (:file "clos-tests")             ; parse, AST structure, slot-spec roundtrip
+     (:file "clos-compile-tests")     ; compilation, execution, inheritance, generic dispatch, setf
+     (:file "clos-dispatch-tests")    ; :default-initargs, :allocation :class, EQL specializers, qualifiers
      (:file "stream-tests")
      ;; macros/expand integration tests (run VM; moved from unit/expand during migration)
-     (:file "loop-macro-tests")
-     (:file "loop-macro-runtime-tests")  ; extended LOOP: hash, initially, synonym pairs
+     (:file "loop-macro-tests")             ; LOOP: helpers, expansion structure, FOR IN/FROM
+     (:file "loop-macro-advanced-tests")    ; LOOP sections 4-11: ON/ACROSS/=/hash/WITH/destructuring/accumulation/filtering
+     (:file "loop-macro-runtime-tests")           ; LOOP sections 12-18: while/until, always/never, repeat, INTO, return
+     (:file "loop-macro-runtime-clauses-tests")   ; LOOP sections 19-27: hash/USING, parallel FOR, FOR=THEN, WITH, ACROSS, filter+accum
+     (:file "loop-macro-runtime-ext-tests")        ; LOOP sections 28-31: unbounded FROM, maximize/minimize, accumulation synonyms, coverage
+     (:file "loop-macro-runtime-edge-tests")       ; LOOP sections 32-36: error paths, dotted destructuring, implicit body, multiple accumulators
      (:file "macros-basic-mvb-tests")
      (:file "macros-mutation-tests")
      (:file "macros-sequence-fold-tests")
@@ -378,11 +394,19 @@
      (:file "predicate-tests")
      ;; compile/codegen integration test (runs VM; moved from unit/compile during migration)
      (:file "codegen-runtime-tests")
-     ;; optimizer integration tests (runs VM; moved from unit/optimize during migration)
-     (:file "optimizer-tests")
-     (:file "optimizer-lowlevel-tests")  ; direct opt-pass-fold, type predicates, strength-reduce
+      ;; optimizer integration tests (runs VM; moved from unit/optimize during migration)
+      (:file "optimizer-tests")             ; instruction-level pass tests: fold, algebraic, DCE, branch, dominated predicate
+      (:file "optimizer-e2e-tests")         ; e2e correctness, bitwise identities, unary folding, inlining, prolog peephole
+      (:file "optimizer-tests-lowlevel2")   ; extra low-level CSE/GVN/CFG/inlining split from optimizer-tests
+      (:file "optimizer-cfg-inline-tests")    ; CFG reachability, label cleanup, block merge
+      (:file "optimizer-inlining-tests")      ; inlining pass: small/large/skip/rename/propagate
+      (:file "optimizer-lowlevel-tests")           ; fold, copy-prop, heap-alias, inst-read-regs, DCE, jump threading
+      (:file "optimizer-dataflow-passes-tests")    ; global-DCE, pipeline, LICM, PRE
+      (:file "optimizer-store-analysis-tests")     ; egraph, bswap/rotate, dead-store, SCCP, store-to-load
+     (:file "optimizer-strength-inline-tests") ; strength-reduce, reassociate, inline, helper predicates
      ;; pipeline integration tests (parse pipeline, run-string, incremental)
-     (:file "pipeline-tests")
+     (:file "pipeline-tests")               ; compile-expression, compile-string, run-string, prescan, our-eval
+     (:file "pipeline-repl-tests")          ; run-string-repl, reset-repl-state, compile-with-stdlib, whitespace-symbol-p
       ;; prolog integration tests (queries, rules, goal solving)
       (:file "prolog-tests")
      ;; standalone system load verification
@@ -390,20 +414,33 @@
      (:module "pbt"
       :serial t
       :components
-      ((:file "package")
-       (:file "framework")
-       (:file "generators")
+       ((:file "package")
+        (:file "framework")
+        (:file "framework-dsl")
+        (:file "framework-ast-generators")
+        (:file "generators")
+        (:file "package-macho")
+        (:file "generators-macho")
+        (:file "generators-typed-ast")
+        (:file "generators-typed-ast-utils")
        (:file "vm-pbt-tests")
        (:file "cps-pbt-tests")
        (:file "ast-pbt-tests")
+       (:file "ast-pbt-extended-tests")
        (:file "macro-pbt-tests")
+       (:file "macro-pbt-props-tests")
+       (:file "macro-pbt-mv-tests")
+       (:file "macro-pbt-hygiene-tests")
+       (:file "macro-pbt-binding-tests")
+       (:file "macro-pbt-advanced-tests")
        (:file "prolog-pbt-tests")
        (:file "vm-heap-pbt-tests")))))
    (:module "e2e"
     :pathname "tests/e2e"
     :serial t
     :components
-    ((:file "selfhost-tests"))))
+    ((:file "selfhost-tests")       ; REPL state, CPS, optimizer, macro codegen, tree walk, file load, HOF, reader macros
+     (:file "selfhost-meta-tests")))) ; meta-circular compilation, our-load file chains, all-source-files
   :perform (asdf:test-op (op c)
               (declare (ignore op c))
               (uiop:symbol-call :cl-cc/test 'run-tests)))
@@ -420,4 +457,6 @@
     :pathname "tests/integration"
     :serial t
     :components
-    ((:file "clos-tests")))))
+    ((:file "clos-tests")
+     (:file "clos-compile-tests")
+     (:file "clos-dispatch-tests")))))

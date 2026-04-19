@@ -11,60 +11,44 @@
 
 ;;; ─── Saturation ──────────────────────────────────────────────────────────
 
-(deftest egraph-saturate-empty-graph
-  "Saturating an empty e-graph with any rules terminates immediately."
+(deftest egraph-saturate-cases
+  "Saturating an empty e-graph terminates immediately at iter 0; empty rules also saturate."
   (let* ((eg (make-test-egraph))
          (rules (cl-cc/optimize::egraph-builtin-rules)))
     (multiple-value-bind (saturated iter _fuel)
         (cl-cc/optimize::egraph-saturate eg rules :limit 10 :fuel 1000)
       (assert-true saturated)
-      (assert-= 0 iter))))
-
-(deftest egraph-saturate-respects-limit
-  "Saturation respects the iteration limit."
+      (assert-= 0 iter)))
   (let* ((eg (make-test-egraph)))
-    ;; Add some nodes
     (cl-cc/optimize::egraph-add eg 'const)
     (multiple-value-bind (saturated _iter _fuel)
         (cl-cc/optimize::egraph-saturate eg nil :limit 5 :fuel 1000)
-      ;; Empty rule set saturates immediately (0 merges)
       (assert-true saturated))))
 
 ;;; ─── Extraction ──────────────────────────────────────────────────────────
 
-(deftest egraph-extract-nullary
-  "Extracting a nullary e-node returns its op symbol."
+(deftest egraph-extract-cases
+  "Extraction: nullary e-node returns non-nil; binary (add c1 c2) returns compound."
   (let* ((eg (make-test-egraph))
          (id (cl-cc/optimize::egraph-add eg 'const)))
-    ;; Store constant data
     (let ((cls (gethash (cl-cc/optimize::egraph-find eg id) (cl-cc::eg-classes eg))))
       (when cls (setf (cl-cc::ec-data cls) 42)))
-    (let ((result (cl-cc/optimize::egraph-extract eg id)))
-      (assert-true result))))
-
-(deftest egraph-extract-binary
-  "Extraction on a (add c1 c2) returns a compound expression."
+    (assert-true (cl-cc/optimize::egraph-extract eg id)))
   (let* ((eg  (make-test-egraph))
          (c1  (cl-cc/optimize::egraph-add eg 'const))
          (c2  (cl-cc/optimize::egraph-add eg 'const))
          (add (cl-cc/optimize::egraph-add eg 'add c1 c2)))
-    (let ((result (cl-cc/optimize::egraph-extract eg add)))
-      ;; Should be (add ...) or similar compound
-      (assert-true result))))
+    (assert-true (cl-cc/optimize::egraph-extract eg add))))
 
 ;;; ─── Optimize-With-Egraph ────────────────────────────────────────────────
 
-(deftest optimize-with-egraph-identity
-  "optimize-with-egraph on a simple sequence returns a non-empty list."
+(deftest optimize-with-egraph-basic-cases
+  "optimize-with-egraph: simple sequence → non-empty; empty input → nil."
   (let* ((insts (list (make-vm-const :dst :r0 :value 42)
                       (make-vm-ret   :reg :r0)))
          (result (cl-cc/optimize::optimize-with-egraph insts)))
-    (assert-true (>= (length result) 1))))
-
-(deftest optimize-with-egraph-empty
-  "optimize-with-egraph on empty input returns empty."
-  (let ((result (cl-cc/optimize::optimize-with-egraph nil)))
-    (assert-null result)))
+    (assert-true (>= (length result) 1)))
+  (assert-null (cl-cc/optimize::optimize-with-egraph nil)))
 
 (deftest optimize-with-egraph-lowers-const
   "A class proven equal to a constant is rewritten as vm-const."
@@ -124,31 +108,20 @@
 
 ;;; ─── egraph-build-rhs ────────────────────────────────────────────────────
 
-(deftest egraph-build-rhs-pattern-variable
-  "egraph-build-rhs for a pattern variable looks up the binding."
+(deftest egraph-build-rhs-cases
+  "egraph-build-rhs: pattern-var looks up binding; symbol adds nullary node; compound builds tree; numeric sets ec-data."
   (let* ((eg      (make-test-egraph))
          (id      (cl-cc/optimize::egraph-add eg 'const))
-         (bindings (list (cons '?x id)))
-         (result  (cl-cc/optimize::egraph-build-rhs eg '?x bindings)))
-    (assert-= id result)))
-
-(deftest egraph-build-rhs-nullary-symbol
-  "egraph-build-rhs for a literal symbol adds a nullary e-node."
-  (let* ((eg     (make-test-egraph))
-         (result (cl-cc/optimize::egraph-build-rhs eg 'zero nil)))
-    (assert-true (integerp result))))
-
-(deftest egraph-build-rhs-compound
-  "egraph-build-rhs for a compound template builds the tree in the e-graph."
+         (bindings (list (cons '?x id))))
+    (assert-= id (cl-cc/optimize::egraph-build-rhs eg '?x bindings)))
+  (let* ((eg (make-test-egraph)))
+    (assert-true (integerp (cl-cc/optimize::egraph-build-rhs eg 'zero nil))))
   (let* ((eg      (make-test-egraph))
          (id0     (cl-cc/optimize::egraph-add eg 'const))
          (bindings (list (cons '?x id0)))
          (result  (cl-cc/optimize::egraph-build-rhs eg '(neg ?x) bindings)))
     (assert-true (integerp result))
-    (assert-true (cl-cc/optimize::egraph-class-has-op-p eg result 'neg))))
-
-(deftest egraph-build-rhs-numeric-constant
-  "egraph-build-rhs for a numeric literal creates a const e-class with data set."
+    (assert-true (cl-cc/optimize::egraph-class-has-op-p eg result 'neg)))
   (let* ((eg     (make-test-egraph))
          (result (cl-cc/optimize::egraph-build-rhs eg 42 nil)))
     (assert-true (integerp result))
@@ -196,32 +169,24 @@
 
 ;;; ─── egraph-add-instructions ─────────────────────────────────────────────
 
-(deftest egraph-add-instructions-maps-dst-to-class
-  "egraph-add-instructions returns a hash table mapping destination registers to e-class IDs."
+(deftest egraph-add-instructions-cases
+  "egraph-add-instructions: maps dst registers; add class differs from operand; const stores ec-data."
   (let* ((eg    (make-test-egraph))
-         ;; Use add + two consts so the add node is structurally distinct
          (insts (list (cl-cc:make-vm-const :dst :r0 :value 7)
                       (cl-cc:make-vm-add   :dst :r1 :lhs :r0 :rhs :r0)))
          (reg->class (cl-cc/optimize::egraph-add-instructions eg insts)))
-    ;; Both registers must have entries in the mapping
     (assert-true (integerp (gethash :r0 reg->class)))
     (assert-true (integerp (gethash :r1 reg->class)))
-    ;; The add node's class must differ from its operand's class
-    (assert-true (/= (gethash :r0 reg->class) (gethash :r1 reg->class)))))
-
-(deftest egraph-add-instructions-const-sets-ec-data
-  "egraph-add-instructions stores the vm-const value in ec-data."
+    (assert-true (/= (gethash :r0 reg->class) (gethash :r1 reg->class))))
   (let* ((eg    (make-test-egraph))
          (insts (list (cl-cc:make-vm-const :dst :r0 :value 42)))
          (reg->class (cl-cc/optimize::egraph-add-instructions eg insts)))
-    (let* ((class-id (gethash :r0 reg->class))
-           (val (cl-cc/optimize::egraph-class-const-value eg class-id)))
-      (assert-= 42 val))))
+    (assert-= 42 (cl-cc/optimize::egraph-class-const-value eg (gethash :r0 reg->class)))))
 
 ;;; ─── Compound pattern matching ───────────────────────────────────────────
 
-(deftest egraph-match-pattern-compound-op
-  "Compound pattern (add ?x ?y) matches an add e-node."
+(deftest egraph-match-pattern-cases
+  "egraph-match-pattern: compound (add ?x ?y) binds vars; literal symbol matches nullary node."
   (let* ((eg  (make-test-egraph))
          (c1  (cl-cc/optimize::egraph-add eg 'const))
          (c2  (cl-cc/optimize::egraph-add eg 'var))
@@ -230,14 +195,11 @@
     (assert-true (>= (length matches) 1))
     (let ((b (car matches)))
       (assert-true (assoc '?x b))
-      (assert-true (assoc '?y b)))))
-
-(deftest egraph-match-pattern-literal-symbol
-  "A plain symbol pattern matches if the e-class has a nullary node with that op."
+      (assert-true (assoc '?y b))))
   (let* ((eg  (make-test-egraph))
          (id  (cl-cc/optimize::egraph-add eg 'zero))
          (matches (cl-cc/optimize::egraph-match-pattern eg 'zero id)))
-    (assert-true (= 1 (length matches)))))
+    (assert-= 1 (length matches))))
 
 ;;; ─── *opt-iteration-budget-thresholds* data coverage ────────────────────
 

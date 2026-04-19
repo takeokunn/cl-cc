@@ -6,10 +6,13 @@
   "Construct a TYPE-ERROR condition with DATUM and EXPECTED-TYPE."
   (make-condition 'type-error :datum datum :expected-type expected-type))
 
-(our-defmacro check-type (place type &optional type-string)
-  (declare (ignore type-string))
-  `(unless (typep ,place ',type)
-     (error (%make-type-error ,place ',type))))
+(register-macro 'check-type
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((place (second form))
+          (type (third form)))
+      (list 'unless (list 'typep place (list 'quote type))
+            (list 'error (list '%make-type-error place (list 'quote type)))))))
 
 ;; SETF macro (simplified)
 (our-defmacro setf (place value)
@@ -52,48 +55,69 @@
      (error "SETF: Unsupported place ~S" place))))
 
 ;; PSETQ macro (parallel setq)
-(our-defmacro psetq (&rest pairs)
-  (when pairs
-    (let ((bindings (loop for (var val) on pairs by #'cddr
-                          collect (list (gensym (symbol-name var)) val)))
-          (vars (loop for (var) on pairs by #'cddr collect var)))
-      `(let ,bindings
-         ,@(mapcar (lambda (var binding)
-                     `(setq ,var ,(car binding)))
-                   vars bindings)
-         nil))))
+(register-macro 'psetq
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((pairs (cdr form)))
+      (if (null pairs)
+          nil
+          (let ((bindings (loop for (var val) on pairs by #'cddr
+                                collect (list (gensym (symbol-name var)) val)))
+                (vars (loop for (var) on pairs by #'cddr collect var)))
+            (append (list 'let bindings)
+                    (mapcar (lambda (var binding)
+                              (list 'setq var (car binding)))
+                            vars bindings)
+                    (list nil)))))))
 
 ;; MULTIPLE-VALUE-BIND macro
-(our-defmacro multiple-value-bind (vars form &body body)
-  `(multiple-value-call
-    (lambda ,vars ,@body)
-    ,form))
+(register-macro 'multiple-value-bind
+  (lambda (call-form env)
+    (declare (ignore env))
+    (let ((vars (second call-form))
+          (form (third call-form))
+          (body (cdddr call-form)))
+      (list 'multiple-value-call
+            (cons 'lambda (cons vars body))
+            form))))
 
 ;; MULTIPLE-VALUE-SETQ macro
-(our-defmacro multiple-value-setq (vars form)
-  (let ((temp (gensym "MVS")))
-    `(let ((,temp (multiple-value-list ,form)))
-       ,@(mapcar (lambda (var i)
-                   `(setq ,var (nth ,i ,temp)))
-                 vars
-                 (loop for i below (length vars) collect i))
-       (car ,temp))))
+(register-macro 'multiple-value-setq
+  (lambda (call-form env)
+    (declare (ignore env))
+    (let ((vars (second call-form))
+          (form (third call-form))
+          (temp (gensym "MVS")))
+      (cons 'let
+            (cons (list (list temp (list 'multiple-value-list form)))
+                  (append (mapcar (lambda (var i)
+                                    (list 'setq var (list 'nth i temp)))
+                                  vars
+                                  (loop for i below (length vars) collect i))
+                          (list (list 'car temp))))))))
 
 ;; MULTIPLE-VALUE-LIST macro
 ;; Evaluates FORM (capturing its values side-effect), then drains the internal
 ;; values buffer via %values-to-list (a VM intrinsic).
-(our-defmacro multiple-value-list (form)
-  "Collect all values of FORM into a list."
-  (let ((acc (gensym "MVL-ACC")))
-    `(let ((,acc nil))
-       (multiple-value-call (lambda (&rest vals)
-                              (dolist (v vals) (push v ,acc)))
-                            ,form)
-       (nreverse ,acc))))
+(register-macro 'multiple-value-list
+  (lambda (call-form env)
+    (declare (ignore env))
+    (let ((form (second call-form))
+          (acc (gensym "MVL-ACC")))
+      (list 'let (list (list acc nil))
+            (list 'multiple-value-call
+                  (list 'lambda '(&rest vals)
+                        (list 'dolist '(v vals)
+                              (list 'push 'v acc)))
+                  form)
+            (list 'nreverse acc)))))
 
 ;; LIST macro — expands to nested CONS calls; avoids a VM list instruction.
-(our-defmacro list (&rest args)
-  (if (null args)
-      nil
-      (reduce (lambda (x acc) `(cons ,x ,acc))
-              args :from-end t :initial-value nil)))
+(register-macro 'list
+  (lambda (call-form env)
+    (declare (ignore env))
+    (let ((args (cdr call-form)))
+      (if (null args)
+          nil
+          (reduce (lambda (x acc) (list 'cons x acc))
+                  args :from-end t :initial-value nil)))))

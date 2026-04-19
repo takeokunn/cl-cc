@@ -12,28 +12,13 @@
 
 ;;; ─── psetq ────────────────────────────────────────────────────────────────
 
-(deftest psetq-expands-to-let
-  "psetq expansion outer form is LET (parallel binding via gensyms)."
-  (let ((exp (our-macroexpand-1 '(psetq x 1 y 2))))
-    (assert-eq 'let (car exp))))
-
-(deftest psetq-let-has-two-bindings
-  "psetq with two vars produces two gensym bindings."
-  (let* ((exp      (our-macroexpand-1 '(psetq x 1 y 2)))
-         (bindings (second exp)))
-    (assert-= 2 (length bindings))))
-
-(deftest psetq-body-has-setq-forms
-  "psetq body contains SETQ forms to assign back from gensyms."
+(deftest psetq-expansion-structure
+  "psetq expansion: outer LET, 2 gensym bindings, setq forms in body, trailing nil."
   (let* ((exp  (our-macroexpand-1 '(psetq x 1 y 2)))
          (body (cddr exp)))
-    ;; Two setq forms + trailing nil
-    (assert-true (some (lambda (f) (and (consp f) (eq 'setq (car f)))) body))))
-
-(deftest psetq-body-returns-nil
-  "psetq expansion ends with NIL (parallel-setq returns nil)."
-  (let* ((exp  (our-macroexpand-1 '(psetq x 1 y 2)))
-         (body (cddr exp)))
+    (assert-eq 'let (car exp))
+    (assert-= 2 (length (second exp)))
+    (assert-true (some (lambda (f) (and (consp f) (eq 'setq (car f)))) body))
     (assert-null (car (last body)))))
 
 (deftest psetq-empty-is-nil
@@ -49,16 +34,12 @@
 
 ;;; ─── multiple-value-bind ──────────────────────────────────────────────────
 
-(deftest mvb-expands-to-multiple-value-call
-  "multiple-value-bind expands to multiple-value-call with a lambda."
-  (let ((exp (our-macroexpand-1 '(multiple-value-bind (a b) (values 1 2) (+ a b)))))
-    (assert-eq 'multiple-value-call (car exp))))
-
-(deftest mvb-lambda-has-correct-params
-  "multiple-value-bind lambda has the declared vars as params."
+(deftest mvb-expansion-structure
+  "multiple-value-bind: outer multiple-value-call with lambda having declared params."
   (let* ((exp    (our-macroexpand-1 '(multiple-value-bind (x y) (values 1 2) x)))
          (lambda (second exp))
          (params (second lambda)))
+    (assert-eq 'multiple-value-call (car exp))
     (assert-equal '(x y) params)))
 
 (deftest-each mvb-runtime
@@ -71,17 +52,12 @@
 
 ;;; ─── multiple-value-setq ──────────────────────────────────────────────────
 
-(deftest mvsq-expands-to-let
-  "multiple-value-setq expansion outer form is LET."
-  (let ((exp (our-macroexpand-1 '(multiple-value-setq (a b) (values 1 2)))))
-    (assert-eq 'let (car exp))))
-
-(deftest mvsq-body-contains-setq-for-each-var
-  "multiple-value-setq body contains SETQ forms for each variable."
+(deftest mvsq-expansion-structure
+  "multiple-value-setq: outer LET, body has SETQ for each variable."
   (let* ((exp  (our-macroexpand-1 '(multiple-value-setq (x y) (values 1 2))))
          (body (cddr exp)))
-    (let ((setq-forms (remove-if-not (lambda (f) (and (consp f) (eq 'setq (car f)))) body)))
-      (assert-= 2 (length setq-forms)))))
+    (assert-eq 'let (car exp))
+    (assert-= 2 (length (remove-if-not (lambda (f) (and (consp f) (eq 'setq (car f)))) body)))))
 
 (deftest-each mvsq-runtime-behavior
   "multiple-value-setq updates existing vars and returns the first value."
@@ -92,18 +68,12 @@
 
 ;;; ─── multiple-value-list ──────────────────────────────────────────────────
 
-(deftest mvl-expands-to-let
-  "multiple-value-list expansion outer form is LET."
-  (let ((exp (our-macroexpand-1 '(multiple-value-list (values 1 2 3)))))
-    (assert-eq 'let (car exp))))
-
-(deftest mvl-body-contains-multiple-value-call
-  "multiple-value-list body contains multiple-value-call."
+(deftest mvl-expansion-structure
+  "multiple-value-list: outer LET, body has multiple-value-call."
   (let* ((exp  (our-macroexpand-1 '(multiple-value-list (values 1 2 3))))
          (body (cddr exp)))
-    (assert-true (some (lambda (f) (and (consp f)
-                                        (eq 'multiple-value-call (car f))))
-                       body))))
+    (assert-eq 'let (car exp))
+    (assert-true (some (lambda (f) (and (consp f) (eq 'multiple-value-call (car f)))) body))))
 
 (deftest-each mvl-runtime
   "multiple-value-list collects all returned values into a list."

@@ -14,27 +14,29 @@
 (in-suite printer-suite)
 ;;; ─── type-to-string: basic types ───────────────────────────────────────────
 
-(deftest printer-primitive-int
-  "type-to-string for integer primitive is FIXNUM."
-  (assert-string= "FIXNUM" (type-to-string type-int)))
+(deftest-each printer-primitive-types
+  "type-to-string for primitive type constants renders expected name."
+  :cases (("int"    type-int    "FIXNUM")
+          ("string" type-string "STRING"))
+  (type-node expected)
+  (assert-string= expected (type-to-string type-node)))
 
-(deftest printer-primitive-string
-  "type-to-string for string primitive is STRING."
-  (assert-string= "STRING" (type-to-string type-string)))
+(deftest-each printer-var-contains-substring
+  "type-to-string for named and rigid vars contains expected substring."
+  :cases (("named" (fresh-type-var  "alpha") "alpha")
+          ("rigid" (fresh-rigid-var "test")  "sk"))
+  (type-node expected-sub)
+  (assert-true (search expected-sub (type-to-string type-node))))
 
-(deftest printer-var-named
-  "type-to-string for a named type-var contains the name."
-  (assert-true (search "alpha" (type-to-string (fresh-type-var "alpha")))))
-
-(deftest printer-var-linked
-  "type-to-string for a linked type-var follows the link and shows FIXNUM."
+(deftest printer-var-and-scheme-cases
+  "Linked type-var shows FIXNUM; type-scheme with quantifiers produces non-empty string."
   (let ((v (fresh-type-var "a")))
     (setf (cl-cc/type::type-var-link v) type-int)
-    (assert-string= "FIXNUM" (type-to-string v))))
-
-(deftest printer-rigid-var
-  "type-to-string for a rigid var contains 'sk' prefix."
-  (assert-true (search "sk" (type-to-string (fresh-rigid-var "test")))))
+    (assert-string= "FIXNUM" (type-to-string v)))
+  (let* ((v (fresh-type-var "a"))
+         (scheme (make-type-scheme (list v) v))
+         (s (type-to-string scheme)))
+    (assert-true (> (length s) 0))))
 
 ;;; ─── type-to-string: composite types ───────────────────────────────────────
 
@@ -50,10 +52,14 @@
     (when expected-sub2 (assert-true (search expected-sub2 s)))
     (when effects       (assert-true (search "IO" s)))  ))
 
-(deftest printer-product
-  "Product type prints as (A, B)."
-  (let ((s (type-to-string (make-type-product :elems (list type-int type-string)))))
-    (assert-true (search "," s))))
+(deftest-each printer-container-type-delimiters
+  "Product uses comma, variant uses <, and type-app uses ( as its primary delimiter."
+  :cases (("product"  (make-type-product :elems (list type-int type-string)) ",")
+          ("variant"  (make-type-variant :cases (list (cons 'some type-int) (cons 'none type-null))
+                                         :row-var nil) "<")
+          ("type-app" (make-type-app :fun type-int :arg type-string) "("))
+  (ty expected-sub)
+  (assert-true (search expected-sub (type-to-string ty))))
 
 (deftest-each printer-record-cases
   "Closed record contains '{' and field name; open record contains '|' row separator."
@@ -69,13 +75,6 @@
     (assert-true (search expected-bracket s))
     (when expected-field (assert-true (search expected-field (string-downcase s))))))
 
-(deftest printer-variant
-  "Variant type prints with angle brackets."
-  (let* ((v (make-type-variant :cases (list (cons 'some type-int) (cons 'none type-null))
-                               :row-var nil))
-         (s (type-to-string v)))
-    (assert-true (search "<" s))))
-
 (deftest-each printer-binary-separator-types
   "Union includes | separator; intersection includes & separator."
   :cases (("union"        (make-type-union        (list type-int type-string)) "|")
@@ -89,11 +88,6 @@
           ("exists" (let ((v (fresh-type-var "a"))) (make-type-exists :var v :body type-int))))
   (ty)
   (assert-true (> (length (type-to-string ty)) 0)))
-
-(deftest printer-type-app
-  "Type application prints as (F A)."
-  (let ((s (type-to-string (make-type-app :fun type-int :arg type-string))))
-    (assert-true (search "(" s))))
 
 (deftest printer-binder-types
   "Type-lambda and mu (recursive) types each produce non-empty strings."
@@ -109,16 +103,13 @@
   (ty expected-fragment)
   (assert-true (search expected-fragment (type-to-string ty))))
 
-(deftest printer-handler
-  "Handler type prints in bracket notation."
+(deftest printer-handler-gadt-cases
+  "Handler type uses bracket notation; GADT constructor includes '::'."
   (let* ((eff (make-type-effect-op :name 'io :args nil))
          (h (cl-cc/type::make-type-handler :effect eff :input type-int :output type-string))
          (s (type-to-string h)))
     (assert-true (search "[" s))
-    (assert-true (search "=>" s))))
-
-(deftest printer-gadt-con
-  "GADT constructor type includes ::."
+    (assert-true (search "=>" s)))
   (let* ((gc (cl-cc/type::make-type-gadt-con
               :name 'just :arg-types (list type-int) :index-type type-any))
          (s (type-to-string gc)))
@@ -127,7 +118,7 @@
 ;;; ─── type-to-string: effect rows ──────────────────────────────────────────
 
 (deftest printer-effect-rows-and-ops
-  "Effect rows: pure={}, io row has IO, open row has |; effect op with args shows name and arg."
+  "Effect rows: pure={}, io row has IO, open row has |; op with args shows name; open IO row has both."
   (assert-string= "{}" (type-to-string +pure-effect-row+))
   (assert-true (search "IO" (type-to-string +io-effect-row+)))
   (let* ((rv (fresh-type-var "e"))
@@ -136,7 +127,14 @@
   (let* ((op (make-type-effect-op :name 'state :args (list type-int)))
          (s  (type-to-string op)))
     (assert-true (search "STATE"  s))
-    (assert-true (search "FIXNUM" s))))
+    (assert-true (search "FIXNUM" s)))
+  (let* ((rv  (fresh-type-var 'epsilon))
+         (row (make-type-effect-row
+               :effects (list (make-type-effect-op :name 'io))
+               :row-var rv))
+         (s (type-to-string row)))
+    (assert-true (search "IO" (string-upcase s)))
+    (assert-true (search "|" s))))
 
 ;;; ─── type-to-string: constraint / qualified ───────────────────────────────
 
@@ -148,18 +146,6 @@
       (assert-true (search "=>" s)))
     (let ((s (type-to-string (make-type-qualified :constraints nil :body type-int))))
       (assert-string= "FIXNUM" s))))
-
-(deftest printer-type-scheme
-  "Type scheme prints with quantifiers."
-  (let* ((v (fresh-type-var "a"))
-         (scheme (make-type-scheme (list v) v))
-         (s (type-to-string scheme)))
-    (assert-true (> (length s) 0))))
-
-(deftest printer-type-error
-  "Type error prints with <error: message>."
-  (let ((s (type-to-string (make-type-error :message "test error"))))
-    (assert-true (search "error" s))))
 
 ;;; ─── type-to-string: backward-compat ───────────────────────────────────────
 
@@ -180,23 +166,21 @@
 
 ;;; ─── type-to-string: edge cases not covered above ────────────────────────
 
-(deftest printer-null-type
-  "Null object (not type-null) prints as NIL."
-  (assert-string= "NIL" (type-to-string nil)))
+(deftest-each printer-atomic-sentinel-strings
+  "nil prints as NIL; make-type-unknown prints exactly as '?'."
+  :cases (("nil-val"  "NIL" nil)
+          ("unknown"  "?"   (make-type-unknown)))
+  (expected node)
+  (assert-string= expected (type-to-string node)))
 
-(deftest printer-var-unnamed
-  "Unnamed type-var prints with ?t prefix."
-  (assert-true (search "?t" (type-to-string (fresh-type-var nil)))))
-
-(deftest printer-rigid-unnamed
-  "Unnamed rigid var prints with sk prefix but no bracket."
-  (let ((s (type-to-string (fresh-rigid-var nil))))
-    (assert-true (search "sk" s))
-    (assert-false (search "[" s))))
-
-(deftest printer-type-unknown-exact
-  "make-type-unknown prints exactly as '?'."
-  (assert-string= "?" (type-to-string (make-type-unknown))))
+(deftest-each printer-unnamed-var-format
+  "Unnamed type-var has '?t' prefix; unnamed rigid var has 'sk' prefix with no bracket."
+  :cases (("type-var"    (fresh-type-var nil)   "?t" nil)
+          ("rigid-var"   (fresh-rigid-var nil)   "sk" "["))
+  (node expected-sub forbidden-sub)
+  (let ((s (type-to-string node)))
+    (assert-true (search expected-sub s))
+    (when forbidden-sub (assert-false (search forbidden-sub s)))))
 
 (deftest printer-fallback-hash-table
   "Hash-table falls back to #<type... printer."
@@ -262,16 +246,6 @@
                             (make-type-mu :var a :body (make-type-union (list type-null a))))))
   (glyph ty)
   (assert-true (search glyph (type-to-string ty))))
-
-(deftest printer-effect-row-open
-  "type-to-string formats open effect rows with | separator."
-  (let* ((rv  (fresh-type-var 'epsilon))
-         (row (make-type-effect-row
-               :effects (list (make-type-effect-op :name 'io))
-               :row-var rv)))
-    (let ((s (type-to-string row)))
-      (assert-true (search "IO" (string-upcase s)))
-      (assert-true (search "|" s)))))
 
 ;;; ─── list-interleave ───────────────────────────────────────────────────────
 

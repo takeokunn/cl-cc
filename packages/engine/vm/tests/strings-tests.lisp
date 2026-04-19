@@ -62,16 +62,15 @@
 
 ;;; ─── String Length ────────────────────────────────────────────────────────
 
-(deftest str-length
-  "vm-string-length returns correct length for non-empty and empty strings."
+(deftest-each str-length
+  "vm-string-length returns correct length for strings."
+  :cases (("non-empty" "hello" 5)
+          ("empty"     ""      0))
+  (input expected)
   (let ((s (str-vm)))
-    (cl-cc/vm::vm-reg-set s :R1 "hello")
+    (cl-cc/vm::vm-reg-set s :R1 input)
     (str-exec (cl-cc::make-vm-string-length :dst :R0 :src :R1) s)
-    (assert-equal 5 (cl-cc/vm::vm-reg-get s :R0)))
-  (let ((s (str-vm)))
-    (cl-cc/vm::vm-reg-set s :R1 "")
-    (str-exec (cl-cc::make-vm-string-length :dst :R0 :src :R1) s)
-    (assert-equal 0 (cl-cc/vm::vm-reg-get s :R0))))
+    (assert-equal expected (cl-cc/vm::vm-reg-get s :R0))))
 
 ;;; ─── Character Access ─────────────────────────────────────────────────────
 
@@ -83,19 +82,15 @@
     (str-exec (cl-cc::make-vm-char :dst :R0 :string :R1 :index :R2) s)
     (assert-equal #\h (cl-cc/vm::vm-reg-get s :R0))))
 
-(deftest str-char-code-basic
-  "vm-char-code returns ASCII code."
+(deftest-each str-char-encoding
+  "vm-char-code and vm-code-char convert between characters and ASCII codes."
+  :cases (("char-code" #'cl-cc::make-vm-char-code #\A 65)
+          ("code-char" #'cl-cc::make-vm-code-char 65  #\A))
+  (ctor input expected)
   (let ((s (str-vm)))
-    (cl-cc/vm::vm-reg-set s :R1 #\A)
-    (str-exec (cl-cc::make-vm-char-code :dst :R0 :src :R1) s)
-    (assert-equal 65 (cl-cc/vm::vm-reg-get s :R0))))
-
-(deftest str-code-char-basic
-  "vm-code-char returns character from code."
-  (let ((s (str-vm)))
-    (cl-cc/vm::vm-reg-set s :R1 65)
-    (str-exec (cl-cc::make-vm-code-char :dst :R0 :src :R1) s)
-    (assert-equal #\A (cl-cc/vm::vm-reg-get s :R0))))
+    (cl-cc/vm::vm-reg-set s :R1 input)
+    (str-exec (funcall ctor :dst :R0 :src :R1) s)
+    (assert-equal expected (cl-cc/vm::vm-reg-get s :R0))))
 
 ;;; ─── Character Comparisons ────────────────────────────────────────────────
 
@@ -167,67 +162,45 @@
 
 ;;; ─── String Search ────────────────────────────────────────────────────────
 
-(deftest str-search-behavior
+(deftest-each str-search-hit-miss
   "vm-search-string returns index on hit; -1 on miss."
+  :cases (("hit"  "world" "hello world" 6)
+          ("miss" "xyz"   "hello world" -1))
+  (pattern string expected)
   (let ((s (str-vm)))
-    (cl-cc/vm::vm-reg-set s :R1 "world")
-    (cl-cc/vm::vm-reg-set s :R2 "hello world")
+    (cl-cc/vm::vm-reg-set s :R1 pattern)
+    (cl-cc/vm::vm-reg-set s :R2 string)
     (cl-cc/vm::vm-reg-set s :R3 0)
     (str-exec (cl-cc::make-vm-search-string :dst :R0 :pattern :R1 :string :R2 :start :R3) s)
-    (assert-equal 6 (cl-cc/vm::vm-reg-get s :R0)))
-  (let ((s (str-vm)))
-    (cl-cc/vm::vm-reg-set s :R1 "xyz")
-    (cl-cc/vm::vm-reg-set s :R2 "hello world")
-    (cl-cc/vm::vm-reg-set s :R3 0)
-    (str-exec (cl-cc::make-vm-search-string :dst :R0 :pattern :R1 :string :R2 :start :R3) s)
-    (assert-equal -1 (cl-cc/vm::vm-reg-get s :R0))))
+    (assert-equal expected (cl-cc/vm::vm-reg-get s :R0))))
 
 ;;; ─── Make String ──────────────────────────────────────────────────────────
 
-(deftest str-make-string-default
-  "vm-make-string creates string of spaces by default."
+(deftest-each str-make-string
+  "vm-make-string creates a string of given length with optional initial character."
+  :cases (("default-space" 3 nil   "   ")
+          ("with-char"     4 #\x "xxxx"))
+  (len init-char expected)
   (let ((s (str-vm)))
-    (cl-cc/vm::vm-reg-set s :R1 3)
-    (str-exec (cl-cc::make-vm-make-string :dst :R0 :src :R1 :char nil) s)
-    (assert-equal "   " (cl-cc/vm::vm-reg-get s :R0))))
-
-(deftest str-make-string-with-char
-  "vm-make-string uses provided initial character."
-  (let ((s (str-vm)))
-    (cl-cc/vm::vm-reg-set s :R1 4)
-    (cl-cc/vm::vm-reg-set s :R2 #\x)
-    (str-exec (cl-cc::make-vm-make-string :dst :R0 :src :R1 :char :R2) s)
-    (assert-equal "xxxx" (cl-cc/vm::vm-reg-get s :R0))))
+    (cl-cc/vm::vm-reg-set s :R1 len)
+    (when init-char
+      (cl-cc/vm::vm-reg-set s :R2 init-char))
+    (str-exec (cl-cc::make-vm-make-string :dst :R0 :src :R1 :char (if init-char :R2 nil)) s)
+    (assert-equal expected (cl-cc/vm::vm-reg-get s :R0))))
 
 ;;; ─── Character Predicates ─────────────────────────────────────────────────
 
-(deftest char-digit-char-p-true
-  "vm-digit-char-p returns digit weight for digit characters."
+(deftest-each char-predicates-true
+  "Character predicate instructions return expected value for matching inputs."
+  :cases (("digit"      #'cl-cc::make-vm-digit-char-p #\5 5)
+          ("alpha"      #'cl-cc::make-vm-alpha-char-p #\a 1)
+          ("upper-case" #'cl-cc::make-vm-upper-case-p #\A 1)
+          ("lower-case" #'cl-cc::make-vm-lower-case-p #\a 1))
+  (ctor input expected)
   (let ((s (str-vm)))
-    (cl-cc/vm::vm-reg-set s :R1 #\5)
-    (str-exec (cl-cc::make-vm-digit-char-p :dst :R0 :src :R1) s)
-    (assert-equal 5 (cl-cc/vm::vm-reg-get s :R0))))
-
-(deftest char-alpha-char-p-true
-  "vm-alpha-char-p returns 1 for alphabetic characters."
-  (let ((s (str-vm)))
-    (cl-cc/vm::vm-reg-set s :R1 #\a)
-    (str-exec (cl-cc::make-vm-alpha-char-p :dst :R0 :src :R1) s)
-    (assert-equal 1 (cl-cc/vm::vm-reg-get s :R0))))
-
-(deftest char-upper-case-p-true
-  "vm-upper-case-p returns 1 for uppercase characters."
-  (let ((s (str-vm)))
-    (cl-cc/vm::vm-reg-set s :R1 #\A)
-    (str-exec (cl-cc::make-vm-upper-case-p :dst :R0 :src :R1) s)
-    (assert-equal 1 (cl-cc/vm::vm-reg-get s :R0))))
-
-(deftest char-lower-case-p-true
-  "vm-lower-case-p returns 1 for lowercase characters."
-  (let ((s (str-vm)))
-    (cl-cc/vm::vm-reg-set s :R1 #\a)
-    (str-exec (cl-cc::make-vm-lower-case-p :dst :R0 :src :R1) s)
-    (assert-equal 1 (cl-cc/vm::vm-reg-get s :R0))))
+    (cl-cc/vm::vm-reg-set s :R1 input)
+    (str-exec (funcall ctor :dst :R0 :src :R1) s)
+    (assert-equal expected (cl-cc/vm::vm-reg-get s :R0))))
 
 (deftest-each char-case-conversion
   "vm-char-upcase/downcase convert character case."

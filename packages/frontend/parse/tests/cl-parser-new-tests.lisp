@@ -25,15 +25,12 @@
   (let ((result (parse-one source)))
     (assert-true (eql expected result))))
 
-(deftest parser-parse-source-dotted-pair
-  "parse-source: dotted pair produces a cons with the expected car and cdr symbols."
+(deftest parser-parse-source-structure-cases
+  "parse-source: dotted pair → cons with A/B; 6-deep nested → innermost is 1."
   (let ((result (parse-one "(a . b)")))
     (assert-true (consp result))
     (assert-equal "A" (symbol-name (car result)))
-    (assert-equal "B" (symbol-name (cdr result)))))
-
-(deftest parser-parse-source-deeply-nested
-  "parse-source: 6-deep nested list is a chain of conses with 1 at the innermost position."
+    (assert-equal "B" (symbol-name (cdr result))))
   (let ((result (parse-one "((((((1))))))")))
     (assert-true (consp result))
     (assert-= 1 (first (first (first (first (first (first result)))))))))
@@ -68,16 +65,13 @@
 
 ;;; ─── NEW: parse-all-forms additional cases ─────────────────────────────────
 
-(deftest parser-parse-all-forms-mixed-types
-  "parse-all-forms: int, string, and list forms are each parsed and typed correctly."
+(deftest parser-parse-all-forms-cases
+  "parse-all-forms: int/string/list parsed correctly; line comments stripped."
   (let ((forms (parse-many "42 \"hello\" (+ 1 2)")))
     (assert-= 3 (length forms))
     (assert-= 42 (first forms))
     (assert-string= "hello" (second forms))
-    (assert-true (consp (third forms)))))
-
-(deftest parser-parse-all-forms-skips-line-comments
-  "parse-all-forms: line comments are stripped and do not produce forms."
+    (assert-true (consp (third forms))))
   (let ((forms (parse-many (format nil "; comment~%1 2"))))
     (assert-= 2 (length forms))
     (assert-= 1 (first forms))
@@ -164,11 +158,14 @@
       (assert-true (cl-cc/ast::ast-binop-p node))
       (assert-eq op (cl-cc/ast::ast-binop-op node)))))
 
-(deftest lower-print-form-produces-ast-print
-  "lower-sexp-to-ast maps (print 42) to ast-print with an ast-int expr."
+(deftest lower-simple-form-cases
+  "lower-sexp-to-ast: (print 42) → ast-print with ast-int; defparameter → ast-defvar."
   (let ((node (lower '(print 42))))
     (assert-true (cl-cc/ast::ast-print-p node))
-    (assert-true (cl-cc/ast::ast-int-p (cl-cc/ast::ast-print-expr node)))))
+    (assert-true (cl-cc/ast::ast-int-p (cl-cc/ast::ast-print-expr node))))
+  (let ((node (lower '(defparameter *x* 99))))
+    (assert-true (cl-cc/ast::ast-defvar-p node))
+    (assert-eq '*x* (cl-cc/ast::ast-defvar-name node))))
 
 (deftest-each lower-extended-lambda-list-params
   "lower-sexp-to-ast: &optional, &rest, &key all populate the correct extended-params slot."
@@ -186,30 +183,18 @@
           (assert-eq 'args slot-val)
           (assert-= expected (length slot-val))))))
 
-(deftest lower-defparameter-produces-ast-defvar
-  "lower-sexp-to-ast maps defparameter to ast-defvar with the correct name."
-  (let ((node (lower '(defparameter *x* 99))))
-    (assert-true (cl-cc/ast::ast-defvar-p node))
-    (assert-eq '*x* (cl-cc/ast::ast-defvar-name node))))
-
-(deftest lower-return-from-without-value-signals-error
-  "lower-sexp-to-ast signals an error for return-from with no value argument."
-  (assert-signals error (lower '(return-from blk))))
-
-(deftest lower-multiple-value-call-produces-ast-mvc
-  "lower-sexp-to-ast maps multiple-value-call to ast-multiple-value-call with correct arg count."
+(deftest lower-special-form-cases
+  "lower-sexp-to-ast: return-from without value → error; multiple-value-call → ast-mvc with 2 args."
+  (assert-signals error (lower '(return-from blk)))
   (let ((node (lower '(multiple-value-call #'list (values 1 2) (values 3 4)))))
     (assert-true (cl-cc/ast::ast-multiple-value-call-p node))
     (assert-= 2 (length (cl-cc::ast-mv-call-args node)))))
 
-(deftest lower-setf-slot-value-produces-ast-set-slot
-  "lower-sexp-to-ast maps (setf (slot-value ...) ...) to ast-set-slot-value."
+(deftest lower-setf-cases
+  "lower-sexp-to-ast: (setf (slot-value obj 'x) 10) → ast-set-slot-value; (setf x 10) → ast-setq."
   (let ((node (lower '(setf (slot-value obj 'x) 10))))
     (assert-true (cl-cc/ast::ast-set-slot-value-p node))
-    (assert-eq 'x (cl-cc/ast::ast-set-slot-value-slot node))))
-
-(deftest lower-setf-symbol-produces-ast-setq
-  "lower-sexp-to-ast maps (setf x ...) to ast-setq."
+    (assert-eq 'x (cl-cc/ast::ast-set-slot-value-slot node)))
   (let ((node (lower '(setf x 10))))
     (assert-true (cl-cc/ast::ast-setq-p node))
     (assert-eq 'x (cl-cc/ast::ast-setq-var node))))

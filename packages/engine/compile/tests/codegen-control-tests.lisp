@@ -51,50 +51,38 @@
 
 ;;; ─── lookup-block ────────────────────────────────────────────────────────────
 
-(deftest lookup-block-returns-exit-label-and-result-reg
-  "lookup-block returns the (exit-label . result-reg) pair when the block is found."
+(deftest lookup-block-cases
+  "lookup-block: finds single block; finds correct in multi-block env; signals for unknown."
   (let ((ctx (make-instance 'cl-cc/compile::compiler-context)))
     (setf (cl-cc/compile::ctx-block-env ctx)
           (list (cons 'my-block (cons "exit_0" :R3))))
     (let ((info (cl-cc/compile::lookup-block ctx 'my-block)))
       (assert-equal "exit_0" (car info))
-      (assert-eq :R3 (cdr info)))))
-
-(deftest lookup-block-multiple-blocks-returns-correct-one
-  "lookup-block finds the right entry when multiple blocks are registered."
+      (assert-eq :R3 (cdr info))))
   (let ((ctx (make-instance 'cl-cc/compile::compiler-context)))
     (setf (cl-cc/compile::ctx-block-env ctx)
           (list (cons 'outer (cons "outer_exit" :R0))
                 (cons 'inner (cons "inner_exit" :R1))))
     (let ((info (cl-cc/compile::lookup-block ctx 'inner)))
       (assert-equal "inner_exit" (car info))
-      (assert-eq :R1 (cdr info)))))
-
-(deftest lookup-block-signals-error-for-unknown-block
-  "lookup-block signals an error when the block name is not in block-env."
+      (assert-eq :R1 (cdr info))))
   (let ((ctx (make-instance 'cl-cc/compile::compiler-context)))
     (assert-signals error
       (cl-cc/compile::lookup-block ctx 'nonexistent-block))))
 
 ;;; ─── lookup-tag ──────────────────────────────────────────────────────────────
 
-(deftest lookup-tag-returns-label-when-found
-  "lookup-tag returns the label string for a registered tag."
+(deftest lookup-tag-cases
+  "lookup-tag: returns label; signals for unknown; shadowed returns innermost."
   (let ((ctx (make-instance 'cl-cc/compile::compiler-context)))
     (setf (cl-cc/compile::ctx-tagbody-env ctx)
           (list (cons 'loop-start "tag_0")
                 (cons 'loop-end   "tag_1")))
     (assert-equal "tag_0" (cl-cc/compile::lookup-tag ctx 'loop-start))
-    (assert-equal "tag_1" (cl-cc/compile::lookup-tag ctx 'loop-end))))
-
-(deftest lookup-tag-signals-error-for-unknown-tag
-  "lookup-tag signals an error when the tag is not in tagbody-env."
+    (assert-equal "tag_1" (cl-cc/compile::lookup-tag ctx 'loop-end)))
   (let ((ctx (make-instance 'cl-cc/compile::compiler-context)))
     (assert-signals error
-      (cl-cc/compile::lookup-tag ctx 'missing-tag))))
-
-(deftest lookup-tag-shadowed-returns-innermost
-  "lookup-tag returns the first (innermost) binding when tags share a name."
+      (cl-cc/compile::lookup-tag ctx 'missing-tag)))
   (let ((ctx (make-instance 'cl-cc/compile::compiler-context)))
     (setf (cl-cc/compile::ctx-tagbody-env ctx)
           (list (cons 'retry "inner_tag_5")
@@ -117,22 +105,18 @@
 
 ;;; ─── compile-ast: ast-return-from ────────────────────────────────────────────
 
-(deftest codegen-return-from-emits-vm-move-and-vm-jump
-  "Compiling return-from emits vm-move (value into result-reg) and vm-jump (to exit label)."
+(deftest codegen-return-from-cases
+  "return-from emits vm-move+vm-jump; inside block exits at the correct label."
   (let* ((ctx (make-codegen-ctx))
          (exit-label "exit_test_0")
          (result-reg (cl-cc/compile::make-register ctx)))
-    ;; Manually register the block so lookup-block succeeds
     (setf (cl-cc/compile::ctx-block-env ctx)
           (list (cons 'outer (cons exit-label result-reg))))
     (compile-ast (make-ast-return-from :name 'outer
                                        :value (make-ast-int :value 99))
                  ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-move))
-    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-jump))))
-
-(deftest codegen-return-from-inside-block-exits-at-label
-  "A return-from compiled inside an ast-block emits a jump to the block's exit label."
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-jump)))
   (let* ((ctx (make-codegen-ctx))
          (reg (compile-ast
                (make-ast-block
@@ -141,24 +125,19 @@
                                                    :value (make-ast-int :value 42))))
                ctx)))
     (assert-true (keywordp reg))
-    ;; Both the return-from and block compilation emit vm-jump instructions
     (let ((jumps (remove-if-not (lambda (i) (typep i 'cl-cc/vm::vm-jump))
                                 (codegen-instructions ctx))))
       (assert-true (>= (length jumps) 1)))))
 
 ;;; ─── compile-ast: ast-go ─────────────────────────────────────────────────────
 
-(deftest codegen-go-emits-vm-jump
-  "Compiling go emits a vm-jump to the named tag's label."
-  (let* ((ctx (make-codegen-ctx)))
-    ;; Manually register a tag
+(deftest codegen-go-cases
+  "go emits vm-jump to named tag; inside tagbody multiple jumps are emitted."
+  (let ((ctx (make-codegen-ctx)))
     (setf (cl-cc/compile::ctx-tagbody-env ctx)
           (list (cons 'loop-start "tag_loop_start_0")))
     (compile-ast (make-ast-go :tag 'loop-start) ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-jump))))
-
-(deftest codegen-go-inside-tagbody-resolves-correct-label
-  "A go form inside an ast-tagbody emits vm-jump instructions (one per tag + one for go)."
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-jump)))
   (let* ((ctx (make-codegen-ctx))
          (reg (compile-ast
                (make-ast-tagbody
@@ -179,38 +158,25 @@
     (cl-cc/compile::%emit-the-runtime-assertion ctx value-reg 'integer)
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-typep))))
 
-(deftest emit-the-runtime-assertion-skips-t-type
-  "%emit-the-runtime-assertion emits nothing when declared type is T."
+(deftest-each emit-the-runtime-assertion-skip-cases
+  "%emit-the-runtime-assertion skips vm-typep for T type, nil type, or when safety=0."
+  :cases (("t-type"      't       nil)
+          ("nil-type"    nil      nil)
+          ("safety-zero" 'integer 0))
+  (ty safety-override)
   (let* ((ctx (make-codegen-ctx))
          (value-reg (cl-cc/compile::make-register ctx)))
-    (cl-cc/compile::%emit-the-runtime-assertion ctx value-reg 't)
+    (when safety-override (setf (cl-cc/compile::ctx-safety ctx) safety-override))
+    (cl-cc/compile::%emit-the-runtime-assertion ctx value-reg ty)
     (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-typep))))
 
-(deftest emit-the-runtime-assertion-skips-nil-type
-  "%emit-the-runtime-assertion emits nothing when declared type is nil."
-  (let* ((ctx (make-codegen-ctx))
-         (value-reg (cl-cc/compile::make-register ctx)))
-    (cl-cc/compile::%emit-the-runtime-assertion ctx value-reg nil)
-    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-typep))))
-
-(deftest emit-the-runtime-assertion-skips-when-safety-zero
-  "%emit-the-runtime-assertion emits nothing when ctx-safety is 0."
-  (let* ((ctx (make-codegen-ctx))
-         (value-reg (cl-cc/compile::make-register ctx)))
-    (setf (cl-cc/compile::ctx-safety ctx) 0)
-    (cl-cc/compile::%emit-the-runtime-assertion ctx value-reg 'integer)
-    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-typep))))
-
-(deftest emit-the-runtime-assertion-no-failure-block-when-emit-failure-p-nil
-  "%emit-the-runtime-assertion with :emit-failure-p nil emits vm-typep but not vm-signal-error."
+(deftest emit-the-runtime-assertion-failure-p-cases
+  ":emit-failure-p nil → typep only; :emit-failure-p t → typep + signal-error."
   (let* ((ctx (make-codegen-ctx))
          (value-reg (cl-cc/compile::make-register ctx)))
     (cl-cc/compile::%emit-the-runtime-assertion ctx value-reg 'string :emit-failure-p nil)
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-typep))
-    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-signal-error))))
-
-(deftest emit-the-runtime-assertion-full-mode-emits-signal-error
-  "%emit-the-runtime-assertion with :emit-failure-p t (default) emits vm-signal-error."
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-signal-error)))
   (let* ((ctx (make-codegen-ctx))
          (value-reg (cl-cc/compile::make-register ctx)))
     (cl-cc/compile::%emit-the-runtime-assertion ctx value-reg 'integer :emit-failure-p t)

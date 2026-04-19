@@ -42,10 +42,29 @@ FUNCTIONAL-DEPS:  list of (from-params . to-params) — functional dependencies.
   (make-hash-table :test #'eq)
   "Maps typeclass name symbol -> typeclass-def.")
 
+(defun %normalize-typeclass-definition (name tc-def)
+  "Normalize TC-DEF to the canonical TYPECLASS-DEF representation.
+Old `type-class` values are accepted for compatibility but are converted at
+registration time so the active registry only stores the modern form." 
+  (cond
+    ((typeclass-def-p tc-def) tc-def)
+    ((type-class-p tc-def)
+     (make-typeclass-def
+      :name (or (type-class-name tc-def) name)
+      :type-params (if (type-class-type-param tc-def)
+                       (list (type-class-type-param tc-def))
+                       nil)
+      :superclasses (type-class-superclasses tc-def)
+      :methods (type-class-methods tc-def)
+      :defaults (type-class-defaults tc-def)))
+    (t tc-def)))
+
 (defun register-typeclass (name tc-def)
   "Register TC-DEF under NAME in *typeclass-registry*.
-TC-DEF may be a typeclass-def or the old type-class struct — both are accepted."
-  (setf (gethash name *typeclass-registry*) tc-def)
+TC-DEF may be a typeclass-def or the old type-class struct — both are accepted.
+The registry stores only normalized TYPECLASS-DEF values."
+  (setf (gethash name *typeclass-registry*)
+        (%normalize-typeclass-definition name tc-def))
   name)
 
 (defun %typeclass-instance-overlaps-p (type-a type-b)
@@ -64,7 +83,6 @@ could both match the same concrete type, we reject the later registration."
   (let ((tc-def (lookup-typeclass class-name)))
     (cond
       ((typeclass-def-p tc-def) (typeclass-def-defaults tc-def))
-      ((type-class-p tc-def)    (type-class-defaults tc-def))
       (t nil))))
 
 (defun %typeclass-name-string (name)
@@ -134,7 +152,7 @@ relative to EXISTING-TYPE. Uses positional matching over type params."
                   (return t))))))))))
 
 (defun lookup-typeclass (name)
-  "Return the typeclass-def (or type-class) for NAME, or nil if not registered."
+  "Return the canonical typeclass-def for NAME, or nil if not registered."
   (gethash name *typeclass-registry*))
 
 ;;; (typeclass-instance, *typeclass-instance-registry*, dict-env, and backward-compat

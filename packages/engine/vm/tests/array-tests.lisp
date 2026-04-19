@@ -7,17 +7,14 @@
 
 ;;; ─── Array operations ──────────────────────────────────────────────────────
 
-(deftest vm-array-make-basic
-  "vm-make-array creates an array of given size."
+(deftest vm-array-make-cases
+  "vm-make-array: creates array of given size; with initial-element fills all slots."
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 5)
     (exec1 (cl-cc::make-vm-make-array :dst 0 :size-reg 1) s)
     (let ((arr (cl-cc:vm-reg-get s 0)))
       (assert-true (arrayp arr))
-      (assert-= 5 (length arr)))))
-
-(deftest vm-array-make-with-initial-element
-  "vm-make-array with initial-element fills the array."
+      (assert-= 5 (length arr))))
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 3)
     (cl-cc:vm-reg-set s 2 42)
@@ -77,22 +74,16 @@
     (exec1 (cl-cc::make-vm-array-rank :dst 0 :src 1) s)
     (assert-= expected (cl-cc:vm-reg-get s 0))))
 
-(deftest vm-array-total-size-2d
-  "vm-array-total-size returns total element count."
+(deftest vm-array-dim-queries
+  "vm-array-total-size, vm-array-dimensions, vm-array-dimension return correct values."
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 (make-array '(3 4)))
     (exec1 (cl-cc::make-vm-array-total-size :dst 0 :src 1) s)
-    (assert-= 12 (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-array-dimensions-list
-  "vm-array-dimensions returns dimension list."
+    (assert-= 12 (cl-cc:vm-reg-get s 0)))
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 (make-array '(2 5)))
     (exec1 (cl-cc::make-vm-array-dimensions :dst 0 :src 1) s)
-    (assert-equal '(2 5) (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-array-dimension-axis
-  "vm-array-dimension returns size of specific axis."
+    (assert-equal '(2 5) (cl-cc:vm-reg-get s 0)))
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 (make-array '(3 7)))
     (cl-cc:vm-reg-set s 2 1)
@@ -101,18 +92,15 @@
 
 ;;; ─── Row-major access ───────────────────────────────────────────────────────
 
-(deftest vm-array-row-major-aref-2d
-  "vm-row-major-aref accesses 2D array by flat index."
-  (let ((s (make-test-vm))
+(deftest vm-array-row-major-operations
+  "vm-row-major-aref accesses by flat index; vm-array-row-major-index computes flat index."
+  (let ((s   (make-test-vm))
         (arr (make-array '(2 3) :initial-contents '((10 20 30) (40 50 60)))))
     (cl-cc:vm-reg-set s 1 arr)
     (cl-cc:vm-reg-set s 2 4)
     (exec1 (cl-cc::make-vm-row-major-aref :dst 0 :lhs 1 :rhs 2) s)
-    (assert-= 50 (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-array-row-major-index-computes
-  "vm-array-row-major-index computes flat index from subscripts."
-  (let ((s (make-test-vm))
+    (assert-= 50 (cl-cc:vm-reg-get s 0)))
+  (let ((s   (make-test-vm))
         (arr (make-array '(2 3))))
     (cl-cc:vm-reg-set s 1 arr)
     (cl-cc:vm-reg-set s 2 '(1 2))
@@ -121,16 +109,13 @@
 
 ;;; ─── svref ──────────────────────────────────────────────────────────────────
 
-(deftest vm-array-svref-reads
-  "vm-svref reads from simple-vector."
+(deftest vm-array-svref-and-svset
+  "vm-svref reads from a simple-vector; vm-svset writes and returns new value."
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 #(a b c))
     (cl-cc:vm-reg-set s 2 1)
     (exec1 (cl-cc::make-vm-svref :dst 0 :lhs 1 :rhs 2) s)
-    (assert-eq 'b (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-array-svset-writes
-  "vm-svset writes to simple-vector."
+    (assert-eq 'b (cl-cc:vm-reg-get s 0)))
   (let ((s (make-test-vm))
         (v (vector 'a 'b 'c)))
     (cl-cc:vm-reg-set s 1 v)
@@ -153,18 +138,15 @@
     (exec1 (funcall ctor :dst 0 :src 1) s)
     (assert-= expected (cl-cc:vm-reg-get s 0))))
 
-(deftest vm-array-vector-push-basic
-  "vm-vector-push pushes value and returns new index."
+(deftest vm-array-vector-push-and-pop
+  "vm-vector-push pushes and returns new index; vm-vector-pop returns and removes last element."
   (let ((s (make-test-vm))
         (v (make-array 5 :fill-pointer 0)))
     (cl-cc:vm-reg-set s 1 'x)
     (cl-cc:vm-reg-set s 2 v)
     (exec1 (cl-cc::make-vm-vector-push :dst 0 :val-reg 1 :array-reg 2) s)
     (assert-= 0 (cl-cc:vm-reg-get s 0))
-    (assert-= 1 (fill-pointer v))))
-
-(deftest vm-array-vector-pop-returns-last
-  "vm-vector-pop returns and removes the last element."
+    (assert-= 1 (fill-pointer v)))
   (let ((s (make-test-vm))
         (v (make-array 5 :fill-pointer 2 :initial-contents '(a b 0 0 0))))
     (cl-cc:vm-reg-set s 1 v)
@@ -236,18 +218,14 @@
 
 ;;; ─── adjust-array / array-displacement ──────────────────────────────────────
 
-(deftest vm-array-adjust-grows
-  "vm-adjust-array grows an adjustable array."
+(deftest vm-array-adjust-displacement-cases
+  "vm-adjust-array grows array; vm-array-displacement returns nil for non-displaced."
   (let ((s (make-test-vm))
         (arr (make-array 3 :initial-element 0 :adjustable t)))
     (cl-cc:vm-reg-set s 1 arr)
     (cl-cc:vm-reg-set s 2 5)
     (exec1 (cl-cc::make-vm-adjust-array :dst 0 :arr 1 :dims 2) s)
-    (let ((result (cl-cc:vm-reg-get s 0)))
-      (assert-= 5 (length result)))))
-
-(deftest vm-array-displacement-non-displaced
-  "vm-array-displacement returns nil for non-displaced array."
+    (assert-= 5 (length (cl-cc:vm-reg-get s 0))))
   (let ((s (make-test-vm))
         (arr (make-array 3)))
     (cl-cc:vm-reg-set s 1 arr)

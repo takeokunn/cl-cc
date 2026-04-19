@@ -107,9 +107,10 @@
         (assert-false (cl-cc:unify-failed-p env))
         (assert-true  (cl-cc:unify-failed-p env)))))
 
-(deftest prolog-unify-var-binds-to-atom
-  "unify: logic variable binds to an atom."
-  (assert-= 42 (cl-cc:substitute-variables '?x (cl-cc:unify '?x 42 nil))))
+(deftest prolog-unify-variable-binding
+  "unify: logic variable binds to atom; occurs-check prevents circular unification."
+  (assert-= 42 (cl-cc:substitute-variables '?x (cl-cc:unify '?x 42 nil)))
+  (assert-true (cl-cc:unify-failed-p (cl-cc:unify '?x '(?x) nil))))
 
 (deftest prolog-unify-two-vars-aliased
   "unify: two distinct vars become aliased."
@@ -125,10 +126,6 @@
     (assert-= 1 (cl-cc:substitute-variables '?x (car solutions)))
     (assert-= 2 (cl-cc:substitute-variables '?y (car solutions)))))
 
-(deftest prolog-unify-cycle-rejected
-  "unify: occurs-check prevents ?x = f(?x)."
-  (assert-true (cl-cc:unify-failed-p (cl-cc:unify '?x '(?x) nil))))
-
 (deftest-each prolog-logic-substitute-cases
   "logic-substitute handles atoms, bound and unbound variables correctly."
   :cases (("atom-integer" 42        nil                    42)
@@ -138,30 +135,22 @@
   (input env expected)
   (assert-equal expected (cl-cc:logic-substitute input env)))
 
-(deftest prolog-substitute-traverses-structure
-  "substitute-variables traverses nested cons structure."
+(deftest prolog-substitute-traverses-structure-and-chains
+  "substitute-variables traverses nested cons structure and follows variable chains."
   (let ((env (cl-cc:unify '?x '(a b c) nil)))
-    (assert-equal '((a b c) ?y)
-                  (cl-cc:substitute-variables '(?x ?y) env))))
-
-(deftest prolog-substitute-follows-chain
-  "logic-substitute follows a chain of variable bindings."
+    (assert-equal '((a b c) ?y) (cl-cc:substitute-variables '(?x ?y) env)))
   (let* ((e1 (cl-cc:unify '?a '?b nil))
          (e2 (cl-cc:unify '?b 7 e1)))
     (assert-= 7 (cl-cc:substitute-variables '?a e2))))
 
-(deftest prolog-rename-variables-fresh-symbols
-  "rename-variables gives each logic var a fresh symbol."
-  (let* ((rule    (cl-cc:make-prolog-rule :head '(foo ?x ?y) :body '((bar ?x ?z))))
-         (renamed (cl-cc:rename-variables rule)))
-    (assert-false (eq '?x (second (cl-cc:rule-head renamed))))
-    (assert-true  (cl-cc:logic-var-p (second (cl-cc:rule-head renamed))))))
-
-(deftest prolog-rename-variables-consistent
-  "rename-variables keeps the same fresh name across head/body references."
-  (let* ((rule    (cl-cc:make-prolog-rule :head '(foo ?x) :body '((bar ?x))))
-         (renamed (cl-cc:rename-variables rule)))
-    (let ((head-x (second (cl-cc:rule-head renamed)))
-          (body-x (second (car (cl-cc:rule-body renamed)))))
-      (assert-eq head-x body-x))))
+(deftest prolog-rename-variables-behavior
+  "rename-variables produces fresh symbols distinct from originals and consistent across head/body."
+  (let* ((rule1  (cl-cc:make-prolog-rule :head '(foo ?x ?y) :body '((bar ?x ?z))))
+         (fresh1 (cl-cc:rename-variables rule1)))
+    (assert-false (eq '?x (second (cl-cc:rule-head fresh1))))
+    (assert-true  (cl-cc:logic-var-p (second (cl-cc:rule-head fresh1)))))
+  (let* ((rule2  (cl-cc:make-prolog-rule :head '(foo ?x) :body '((bar ?x))))
+         (fresh2 (cl-cc:rename-variables rule2)))
+    (assert-eq (second (cl-cc:rule-head fresh2))
+               (second (car (cl-cc:rule-body fresh2))))))
 

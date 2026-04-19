@@ -21,8 +21,8 @@
   (expected form)
   (assert-equal expected (run-string form)))
 
-(deftest codegen-mvb-explicit-values-uses-direct-binding
-  "Compiling multiple-value-bind over explicit ast-values skips vm-values/vm-mv-bind."
+(deftest codegen-mvb-compilation-cases
+  "ast-values mvb skips vm-values/vm-mv-bind; non-ast-values mvb uses generic vm-mv-bind path."
   (let* ((ctx (make-codegen-ctx))
          (reg (compile-ast (cl-cc/ast::make-ast-multiple-value-bind
                               :vars '(a b)
@@ -33,10 +33,7 @@
                             ctx)))
     (assert-false (codegen-find-inst ctx 'cl-cc/vm::vm-values))
     (assert-false (codegen-find-inst ctx 'cl-cc/vm::vm-mv-bind))
-    (assert-true (keywordp reg))))
-
-(deftest codegen-mvb-non-values-form-still-uses-vm-mv-bind
-  "Non-ast-values multiple-value-bind still uses the generic vm-mv-bind path."
+    (assert-true (keywordp reg)))
   (let* ((ctx (make-codegen-ctx))
          (reg (compile-ast (cl-cc/ast::make-ast-multiple-value-bind
                              :vars '(a b)
@@ -90,13 +87,10 @@
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-apply))
     (assert-true (keywordp reg))))
 
-(deftest codegen-mv-call-basic-run
-  "multiple-value-call spreads values as arguments to a user-defined function."
+(deftest codegen-mv-call-run-cases
+  "multiple-value-call spreads values to lambda; spreads to cons producing dotted pair."
   (assert-run= 3
-    "(multiple-value-call (lambda (a b) (+ a b)) (values 1 2))"))
-
-(deftest codegen-mv-call-cons-run
-  "multiple-value-call with cons spreads two values into car and cdr."
+    "(multiple-value-call (lambda (a b) (+ a b)) (values 1 2))")
   (assert-equal '(1 . 2)
     (run-string "(multiple-value-call #'cons (values 1 2))")))
 
@@ -113,13 +107,10 @@
     (assert-true (keywordp reg))
     (assert-true (>= (length consts) 3))))
 
-(deftest codegen-mv-prog1-preserves-first-run
-  "multiple-value-prog1 returns the value of the first form."
+(deftest codegen-mv-prog1-run-cases
+  "multiple-value-prog1 returns first form's value; evaluates subsequent forms for side effects."
   (assert-run= 1
-    "(multiple-value-prog1 1 2 3)"))
-
-(deftest codegen-mv-prog1-side-effects-run
-  "multiple-value-prog1 evaluates subsequent forms for side effects."
+    "(multiple-value-prog1 1 2 3)")
   (let ((output (with-output-to-string (*standard-output*)
                   (run-string "(multiple-value-prog1 42 (print 99))"))))
     (assert-true (search "99" output))))
@@ -152,23 +143,17 @@
          (reg (compile-ast ast ctx)))
     (assert-true (keywordp reg))))
 
-(deftest codegen-unwind-protect-normal-result-run
-  "unwind-protect returns the protected form value on normal exit."
+(deftest codegen-unwind-protect-run-cases
+  "unwind-protect returns protected value on normal exit; cleanup form executes."
   (assert-run= 42
-    "(unwind-protect 42 nil)"))
-
-(deftest codegen-unwind-protect-cleanup-runs-run
-  "unwind-protect cleanup form executes on normal exit."
+    "(unwind-protect 42 nil)")
   (let ((output (with-output-to-string (*standard-output*)
                   (run-string "(unwind-protect 1 (print 99))"))))
     (assert-true (search "99" output))))
 
-(deftest codegen-handler-case-normal-result-run
-  "handler-case returns the protected form value when no condition is signaled."
+(deftest codegen-handler-case-run-cases
+  "handler-case returns protected value when no condition signaled; catches error correctly."
   (assert-run= 42
-    "(handler-case 42 (error (e) -1))"))
-
-(deftest codegen-handler-case-catches-error-run
-  "handler-case invokes the matching handler when a condition is signaled."
+    "(handler-case 42 (error (e) -1))")
   (assert-run= 99
     "(handler-case (error \"boom\") (error (e) 99))"))

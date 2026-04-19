@@ -1,16 +1,17 @@
 ;;;; packages/backend/runtime/src/runtime-math-io.lisp - CL-CC Runtime: Strings, Chars, Symbols,
-;;;;   Hash Tables, CLOS, Conditions, I/O, and Misc Operations
+;;;;   Hash Tables, CLOS, Conditions, and Misc Operations
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;;
 ;;; Contains: rt-make-string, rt-string-*, rt-char-*, rt-symbol-*, rt-intern,
 ;;; rt-make-hash-table, rt-gethash/sethash/remhash/clrhash/maphash,
 ;;; rt-defclass, rt-make-instance, rt-slot-*, rt-class-*, rt-register-method,
 ;;; rt-signal-error, rt-signal, rt-warn-fn, rt-cerror, handler stubs,
-;;; rt-boundp/fboundp, rt-random, rt-read-*, rt-write-*,
-;;; rt-open-file/close-file, rt-make-*-stream, rt-probe-file, etc.
+;;; rt-boundp/fboundp, rt-random, rt-coerce, rt-read-from-string, rt-read-sexp,
+;;; rt-write-to-string, and other misc operations.
 ;;;
 ;;; Tag constants, closure/cons structs, predicate macros, list/array, and
 ;;; complex math (rt-conjugate etc.) are in runtime.lisp (loads before this).
+;;; I/O operations (streams, files, format) are in runtime-io.lisp (loads after this).
 ;;;
 ;;; Load order: after runtime.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -214,80 +215,3 @@
 (defun rt-read-sexp (stream) (read stream))
 (defun rt-coerce (x type) (coerce x type))
 (defun rt-write-to-string (x) (write-to-string x))
-
-;;; ------------------------------------------------------------
-;;; I/O
-;;; ------------------------------------------------------------
-
-;;; Macro for optional-stream I/O: (rt-foo args... &optional stream)
-;;; delegates to (cl-fn args... stream) or (cl-fn args...) for default stream.
-(defmacro define-rt-stream-op (rt-name cl-name (&rest fixed-args))
-  `(defun ,rt-name (,@fixed-args &optional stream)
-     (if stream (,cl-name ,@fixed-args stream) (,cl-name ,@fixed-args))))
-
-(defun rt-print (x) (print x))
-(defun rt-princ (x) (princ x))
-(defun rt-prin1 (x) (prin1 x))
-(defun rt-terpri () (terpri))
-(defun rt-fresh-line () (fresh-line))
-(define-rt-stream-op rt-write-char   write-char   (c))
-(define-rt-stream-op rt-write-string write-string (s))
-(define-rt-stream-op rt-write-line   write-line   (s))
-(define-rt-stream-op rt-unread-char  unread-char  (c))
-(define-rt-stream-op rt-read-char    read-char    ())
-(define-rt-stream-op rt-read-line    read-line    ())
-(define-rt-stream-op rt-finish-output finish-output ())
-(define-rt-stream-op rt-force-output  force-output  ())
-(define-rt-stream-op rt-clear-output  clear-output  ())
-(defun rt-write-byte (byte &optional stream)
-  (if stream (write-byte byte stream) (write-byte byte *standard-output*)))
-(defun rt-format (stream fmt &rest args)
-  (apply #'format stream fmt args))
-(defun rt-read-byte (&optional stream)
-  (if stream (read-byte stream) (read-byte *standard-input*)))
-(defun rt-peek-char (&optional stream)
-  (if stream (peek-char nil stream nil nil) (peek-char nil *standard-input* nil nil)))
-(defun rt-open-file (path &key (direction :input) if-exists)
-  (open path :direction direction :if-exists (or if-exists :supersede)))
-(defun rt-close-file (stream) (close stream))
-(defun rt-make-string-stream (s &key (direction :input))
-  (if (eq direction :input)
-      (make-string-input-stream s)
-      (make-string-output-stream)))
-(defun rt-get-string-from-stream (stream)
-  (get-output-stream-string stream))
-(defun rt-make-string-output-stream () (make-string-output-stream))
-(defun rt-get-output-stream-string (stream) (get-output-stream-string stream))
-(defun rt-stream-write-string (stream s) (write-string s stream))
-(define-rt-predicate rt-input-stream-p       input-stream-p)
-(define-rt-predicate rt-output-stream-p      output-stream-p)
-(define-rt-predicate rt-open-stream-p        open-stream-p)
-(define-rt-predicate rt-interactive-stream-p interactive-stream-p)
-(defun rt-stream-element-type (s) (stream-element-type s))
-(defun rt-make-broadcast-stream (&rest streams) (apply #'make-broadcast-stream streams))
-(defun rt-make-two-way-stream (in out) (make-two-way-stream in out))
-(defun rt-make-echo-stream (in out) (make-echo-stream in out))
-(defun rt-make-concatenated-stream (&rest streams) (apply #'make-concatenated-stream streams))
-(defun rt-probe-file (path) (probe-file path))
-(defun rt-truename (path) (truename path))
-(defun rt-rename-file (old new) (rename-file old new))
-(defun rt-delete-file (path) (delete-file path))
-(defun rt-directory (path) (directory path))
-(defun rt-make-pathname (&key host device directory name type version)
-  (make-pathname :host host :device device :directory directory
-                 :name name :type type :version version))
-(defun rt-namestring (path) (namestring path))
-(defparameter *pathname-component-accessors*
-  '((:host      . pathname-host)
-    (:device    . pathname-device)
-    (:directory . pathname-directory)
-    (:name      . pathname-name)
-    (:type      . pathname-type)
-    (:version   . pathname-version))
-  "Alist mapping pathname component keyword → accessor symbol.")
-
-(defun rt-pathname-component (path component)
-  (let ((accessor (cdr (assoc component *pathname-component-accessors*))))
-    (when accessor (funcall accessor path))))
-(defun rt-merge-pathnames (path defaults) (merge-pathnames path defaults))
-(defun rt-enough-namestring (path defaults) (enough-namestring path defaults))

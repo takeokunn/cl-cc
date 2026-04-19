@@ -163,29 +163,36 @@
 ;;;    typed counterparts (the fallback path stays correct)
 ;;;  - future passes can refine them to typed instructions once a type is known
 
-(define-vm-instruction vm-generic-add (vm-instruction)
-  "Polymorphic addition: dispatches to + at runtime."
-  (dst nil :reader vm-dst)
-  (lhs nil :reader vm-lhs)
-  (rhs nil :reader vm-rhs)
-  (:sexp-tag :generic-add)
-  (:sexp-slots dst lhs rhs))
+;;; Generic binary instructions: struct + executor generated from data table.
+;;; Each entry: (name sexp-tag result-form) where result-form may use L and R.
+;;; vm-generic-div is separate: it has a divide-by-zero guard.
 
-(define-vm-instruction vm-generic-sub (vm-instruction)
-  "Polymorphic subtraction."
-  (dst nil :reader vm-dst)
-  (lhs nil :reader vm-lhs)
-  (rhs nil :reader vm-rhs)
-  (:sexp-tag :generic-sub)
-  (:sexp-slots dst lhs rhs))
+(defmacro %define-generic-binop-table (&rest entries)
+  `(progn
+     ,@(loop for (name tag result-form) in entries
+             collect
+             `(progn
+                (define-vm-instruction ,name (vm-instruction)
+                  ,(format nil "Polymorphic ~(~A~)." tag)
+                  (dst nil :reader vm-dst)
+                  (lhs nil :reader vm-lhs)
+                  (rhs nil :reader vm-rhs)
+                  (:sexp-tag ,tag)
+                  (:sexp-slots dst lhs rhs))
+                (defmethod execute-instruction ((inst ,name) state pc labels)
+                  (declare (ignore labels))
+                  (let* ((l (vm-reg-get state (vm-lhs inst)))
+                         (r (vm-reg-get state (vm-rhs inst))))
+                    (vm-reg-set state (vm-dst inst) ,result-form)
+                    (values (1+ pc) nil nil)))))))
 
-(define-vm-instruction vm-generic-mul (vm-instruction)
-  "Polymorphic multiplication."
-  (dst nil :reader vm-dst)
-  (lhs nil :reader vm-lhs)
-  (rhs nil :reader vm-rhs)
-  (:sexp-tag :generic-mul)
-  (:sexp-slots dst lhs rhs))
+(%define-generic-binop-table
+  (vm-generic-add :generic-add (+ l r))
+  (vm-generic-sub :generic-sub (- l r))
+  (vm-generic-mul :generic-mul (* l r))
+  (vm-generic-eq  :generic-eq  (if (equal l r) t nil))
+  (vm-generic-lt  :generic-lt  (if (< l r) t nil))
+  (vm-generic-gt  :generic-gt  (if (> l r) t nil)))
 
 (define-vm-instruction vm-generic-div (vm-instruction)
   "Polymorphic division (floor)."
@@ -195,53 +202,6 @@
   (:sexp-tag :generic-div)
   (:sexp-slots dst lhs rhs))
 
-(define-vm-instruction vm-generic-eq (vm-instruction)
-  "Polymorphic equality: dispatches to EQUAL at runtime."
-  (dst nil :reader vm-dst)
-  (lhs nil :reader vm-lhs)
-  (rhs nil :reader vm-rhs)
-  (:sexp-tag :generic-eq)
-  (:sexp-slots dst lhs rhs))
-
-(define-vm-instruction vm-generic-lt (vm-instruction)
-  "Polymorphic less-than: dispatches to < at runtime."
-  (dst nil :reader vm-dst)
-  (lhs nil :reader vm-lhs)
-  (rhs nil :reader vm-rhs)
-  (:sexp-tag :generic-lt)
-  (:sexp-slots dst lhs rhs))
-
-(define-vm-instruction vm-generic-gt (vm-instruction)
-  "Polymorphic greater-than: dispatches to > at runtime."
-  (dst nil :reader vm-dst)
-  (lhs nil :reader vm-lhs)
-  (rhs nil :reader vm-rhs)
-  (:sexp-tag :generic-gt)
-  (:sexp-slots dst lhs rhs))
-
-;;; Execute methods for generic instructions
-
-(defmethod execute-instruction ((inst vm-generic-add) state pc labels)
-  (declare (ignore labels))
-  (let* ((l (vm-reg-get state (vm-lhs inst)))
-         (r (vm-reg-get state (vm-rhs inst))))
-    (vm-reg-set state (vm-dst inst) (+ l r))
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-generic-sub) state pc labels)
-  (declare (ignore labels))
-  (let* ((l (vm-reg-get state (vm-lhs inst)))
-         (r (vm-reg-get state (vm-rhs inst))))
-    (vm-reg-set state (vm-dst inst) (- l r))
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-generic-mul) state pc labels)
-  (declare (ignore labels))
-  (let* ((l (vm-reg-get state (vm-lhs inst)))
-         (r (vm-reg-get state (vm-rhs inst))))
-    (vm-reg-set state (vm-dst inst) (* l r))
-    (values (1+ pc) nil nil)))
-
 (defmethod execute-instruction ((inst vm-generic-div) state pc labels)
   (declare (ignore labels))
   (let* ((l (vm-reg-get state (vm-lhs inst)))
@@ -249,28 +209,4 @@
     (when (zerop r)
       (error "vm-generic-div: division by zero"))
     (vm-reg-set state (vm-dst inst) (floor l r))
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-generic-eq) state pc labels)
-  (declare (ignore labels))
-  (let* ((l (vm-reg-get state (vm-lhs inst)))
-         (r (vm-reg-get state (vm-rhs inst)))
-         (result (if (equal l r) t nil)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-generic-lt) state pc labels)
-  (declare (ignore labels))
-  (let* ((l (vm-reg-get state (vm-lhs inst)))
-         (r (vm-reg-get state (vm-rhs inst)))
-         (result (if (< l r) t nil)))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
-
-(defmethod execute-instruction ((inst vm-generic-gt) state pc labels)
-  (declare (ignore labels))
-  (let* ((l (vm-reg-get state (vm-lhs inst)))
-         (r (vm-reg-get state (vm-rhs inst)))
-         (result (if (> l r) t nil)))
-    (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))

@@ -23,17 +23,12 @@
 
 ;;; ─── emit-vm-const ───────────────────────────────────────────────────────
 
-(deftest x86-emit-const-integer-emits-bytes
-  "emit-vm-const with an integer value emits a non-empty byte sequence."
-  (let* ((inst (make-vm-const :dst :r0 :value 42))
-         (bytes (%collect-emit-ops-bytes #'cl-cc/emit::emit-vm-const inst)))
-    (assert-true (> (length bytes) 0))))
-
-(deftest x86-emit-const-float-emits-bytes
-  "emit-vm-const with a float value emits non-empty bytes (uses XMM path)."
-  (let* ((inst (make-vm-const :dst :r0 :value 3.14d0))
-         (bytes (%collect-emit-ops-bytes #'cl-cc/emit::emit-vm-const inst)))
-    (assert-true (> (length bytes) 0))))
+(deftest-each x86-emit-const-cases
+  "emit-vm-const emits non-empty bytes for both integer and float values."
+  :cases (("integer" (make-vm-const :dst :r0 :value 42))
+          ("float"   (make-vm-const :dst :r0 :value 3.14d0)))
+  (inst)
+  (assert-true (> (length (%collect-emit-ops-bytes #'cl-cc/emit::emit-vm-const inst)) 0)))
 
 ;;; ─── emit-vm-move ────────────────────────────────────────────────────────
 
@@ -63,17 +58,12 @@
 
 ;;; ─── Truncate / Rem ──────────────────────────────────────────────────────
 
-(deftest x86-emit-truncate-emits-bytes
-  "emit-vm-truncate emits a non-empty byte sequence."
-  (let* ((inst (make-vm-truncate :dst :r0 :lhs :r1 :rhs :r2))
-         (bytes (%collect-emit-ops-bytes #'cl-cc/emit::emit-vm-truncate inst)))
-    (assert-true (> (length bytes) 0))))
-
-(deftest x86-emit-rem-emits-bytes
-  "emit-vm-rem emits a non-empty byte sequence."
-  (let* ((inst (make-vm-rem :dst :r0 :lhs :r1 :rhs :r2))
-         (bytes (%collect-emit-ops-bytes #'cl-cc/emit::emit-vm-rem inst)))
-    (assert-true (> (length bytes) 0))))
+(deftest-each x86-emit-truncate-rem-cases
+  "emit-vm-truncate and emit-vm-rem each emit non-empty byte sequences."
+  :cases (("truncate" #'cl-cc/emit::emit-vm-truncate (make-vm-truncate :dst :r0 :lhs :r1 :rhs :r2))
+          ("rem"      #'cl-cc/emit::emit-vm-rem      (make-vm-rem      :dst :r0 :lhs :r1 :rhs :r2)))
+  (emit-fn inst)
+  (assert-true (> (length (%collect-emit-ops-bytes emit-fn inst)) 0)))
 
 ;;; ─── Floor Division / Mod (documented byte counts) ──────────────────────
 
@@ -105,59 +95,20 @@
 
 ;;; ─── Unary emitters ──────────────────────────────────────────────────────
 
-(deftest x86-emit-neg-emits-bytes
-  "emit-vm-neg emits non-empty bytes (MOV+NEG)."
-  (let* ((inst (make-vm-neg :dst :r0 :src :r1))
-         (bytes (%collect-emit-ops-bytes #'cl-cc/emit::emit-vm-neg inst)))
-    (assert-true (> (length bytes) 0))))
-
-(deftest x86-emit-not-emits-bytes
-  "emit-vm-not emits non-empty bytes (TEST+SETE+MOVZX)."
-  (let* ((inst (make-vm-not :dst :r0 :src :r1))
-         (bytes (%collect-emit-ops-bytes #'cl-cc/emit::emit-vm-not inst)))
-    (assert-true (> (length bytes) 0))))
-
-(deftest x86-emit-lognot-emits-bytes
-  "emit-vm-lognot emits non-empty bytes (MOV+NOT)."
-  (let* ((inst (make-vm-lognot :dst :r0 :src :r1))
-         (bytes (%collect-emit-ops-bytes #'cl-cc/emit::emit-vm-lognot inst)))
-    (assert-true (> (length bytes) 0))))
-
-(deftest x86-emit-logcount-emits-bytes
-  "emit-vm-logcount emits non-empty bytes (POPCNT)."
-  (let* ((inst (make-vm-logcount :dst :r0 :src :r1))
-         (bytes (%collect-emit-ops-bytes #'cl-cc/emit::emit-vm-logcount inst)))
-    (assert-true (> (length bytes) 0))))
-
-(deftest x86-emit-integer-length-emits-bytes
-  "emit-vm-integer-length emits non-empty bytes (XOR+TEST+JE+BSR+ADD)."
-  (let* ((inst (make-vm-integer-length :dst :r0 :src :r1))
-         (bytes (%collect-emit-ops-bytes #'cl-cc/emit::emit-vm-integer-length inst)))
-    (assert-true (> (length bytes) 0))))
-
-(deftest x86-emit-bswap-emits-bytes
-  "emit-vm-bswap emits non-empty bytes (MOV+BSWAP)."
-  (let* ((inst (make-vm-bswap :dst :r0 :src :r1))
-         (bytes (%collect-emit-ops-bytes #'cl-cc/emit::emit-vm-bswap inst)))
-    (assert-true (> (length bytes) 0))))
-
-(deftest x86-emit-inc-emits-bytes
-  "emit-vm-inc emits non-empty bytes (MOV+ADD imm8=1)."
-  (let* ((inst (make-vm-inc :dst :r0 :src :r1))
-         (bytes (%collect-emit-ops-bytes #'cl-cc/emit::emit-vm-inc inst)))
-    (assert-true (> (length bytes) 0))))
-
-(deftest x86-emit-dec-emits-bytes
-  "emit-vm-dec emits non-empty bytes (MOV+SUB imm8=1)."
-  (let* ((inst (make-vm-dec :dst :r0 :src :r1))
-         (bytes (%collect-emit-ops-bytes #'cl-cc/emit::emit-vm-dec inst)))
-    (assert-true (> (length bytes) 0))))
-
-(deftest x86-emit-abs-emits-bytes
-  "emit-vm-abs emits non-empty bytes (MOV+CMP+JGE+NEG, documented 15 bytes)."
-  (let* ((inst (make-vm-abs :dst :r0 :src :r1))
-         (bytes (%collect-emit-ops-bytes #'cl-cc/emit::emit-vm-abs inst)))
-    (assert-true (> (length bytes) 0))))
+(deftest-each x86-emit-unary-non-empty
+  "All unary vm emitters produce non-empty byte sequences."
+  :cases (("neg"            #'cl-cc/emit::emit-vm-neg            (make-vm-neg            :dst :r0 :src :r1))
+          ("not"            #'cl-cc/emit::emit-vm-not            (make-vm-not            :dst :r0 :src :r1))
+          ("lognot"         #'cl-cc/emit::emit-vm-lognot         (make-vm-lognot         :dst :r0 :src :r1))
+          ("logcount"       #'cl-cc/emit::emit-vm-logcount       (make-vm-logcount       :dst :r0 :src :r1))
+          ("integer-length" #'cl-cc/emit::emit-vm-integer-length (make-vm-integer-length :dst :r0 :src :r1))
+          ("bswap"          #'cl-cc/emit::emit-vm-bswap          (make-vm-bswap          :dst :r0 :src :r1))
+          ("inc"            #'cl-cc/emit::emit-vm-inc            (make-vm-inc            :dst :r0 :src :r1))
+          ("dec"            #'cl-cc/emit::emit-vm-dec            (make-vm-dec            :dst :r0 :src :r1))
+          ("abs"            #'cl-cc/emit::emit-vm-abs            (make-vm-abs            :dst :r0 :src :r1))
+          ("rotate"         #'cl-cc/emit::emit-vm-rotate         (make-vm-rotate         :dst :r0 :lhs :r1 :rhs :r2)))
+  (emit-fn inst)
+  (assert-true (> (length (%collect-emit-ops-bytes emit-fn inst)) 0)))
 
 ;;; ─── Arithmetic Shift (documented 24-byte layout) ────────────────────────
 
@@ -166,14 +117,6 @@
   (let* ((inst (make-vm-ash :dst :r0 :lhs :r1 :rhs :r2))
          (bytes (%collect-emit-ops-bytes #'cl-cc/emit::emit-vm-ash inst)))
     (assert-= 24 (length bytes))))
-
-;;; ─── Rotate ──────────────────────────────────────────────────────────────
-
-(deftest x86-emit-rotate-emits-bytes
-  "emit-vm-rotate emits non-empty bytes (PUSH+MOV+MOV+ROR+POP)."
-  (let* ((inst (make-vm-rotate :dst :r0 :lhs :r1 :rhs :r2))
-         (bytes (%collect-emit-ops-bytes #'cl-cc/emit::emit-vm-rotate inst)))
-    (assert-true (> (length bytes) 0))))
 
 ;;; ─── Min / Max (define-cmov-emitter) ────────────────────────────────────
 

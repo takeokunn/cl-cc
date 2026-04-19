@@ -10,10 +10,11 @@
 ;;; vm-try-dispatch-combinations, vm-try-dispatch-sub).
 ;;;
 ;;; Core dispatch (vm-classify-arg, EQL helpers, applicable-methods,
-;;; combo-collect, vm-dispatch-generic-call) is in vm-dispatch-gf.lisp
-;;; (loads before this file).
+;;; combo-collect) is in vm-dispatch-gf.lisp (loads before this file).
+;;; Call dispatch (vm-dispatch-generic-call, %vm-dispatch-call) is in
+;;; vm-dispatch-gf-call.lisp (loads after this file).
 ;;;
-;;; Load order: after vm-dispatch-gf.lisp, before vm-execute.lisp.
+;;; Load order: after vm-dispatch-gf.lisp, before vm-dispatch-gf-call.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ;;; ── Qualified-method return helpers ──────────────────────────────────────

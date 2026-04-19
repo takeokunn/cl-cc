@@ -29,10 +29,13 @@
     ((:file "parser")
      (:file "parser-sexp-lowering")
      (:file "lower")
+     (:file "lower-setf")
      (:file "lower-definitions")
      (:file "lower-clos")
      (:file "parser-roundtrip")
-     (:file "grammar")))
+      (:file "grammar-token-stream")
+      (:file "grammar")
+      (:file "grammar-entrypoints")))
    (:module "php"
     :serial t
     :components
@@ -41,6 +44,7 @@
      (:file "parser")
      (:file "parser-expr")
      (:file "parser-stmt")
+     (:file "parser-class")
      (:file "grammar")
      (:file "grammar-stmt")))
    (:file "cst-to-ast")))

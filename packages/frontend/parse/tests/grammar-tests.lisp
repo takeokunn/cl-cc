@@ -71,15 +71,15 @@
 
 ;;; ─── Token Stream: ts-peek-type ────────────────────────────────────────────
 
-(deftest grammar-ts-peek-type-returns-type-keyword
-  "ts-peek-type returns the token type keyword for a non-empty stream."
-  (let ((ts (make-grammar-ts '(:T-STRING "hello"))))
-    (assert-eq :T-STRING (cl-cc/parse::ts-peek-type ts))))
-
-(deftest grammar-ts-peek-type-empty-stream-returns-nil
-  "ts-peek-type returns nil for an empty token stream."
-  (let ((ts (cl-cc/parse::make-token-stream :tokens nil :source "")))
-    (assert-null (cl-cc/parse::ts-peek-type ts))))
+(deftest-each grammar-ts-peek-type-cases
+  "ts-peek-type: non-empty stream returns type keyword; empty stream returns nil."
+  :cases (("non-empty" :non-empty :T-STRING)
+          ("empty"     :empty     nil))
+  (scenario expected)
+  (let ((ts (ecase scenario
+               (:non-empty (make-grammar-ts '(:T-STRING "hello")))
+               (:empty     (cl-cc/parse::make-token-stream :tokens nil :source "")))))
+    (assert-equal expected (cl-cc/parse::ts-peek-type ts))))
 
 ;;; ─── Token Stream: ts-expect ───────────────────────────────────────────────
 
@@ -123,48 +123,37 @@
 
 ;;; ─── Token Stream: ts-token-value ──────────────────────────────────────────
 
-(deftest grammar-ts-token-value-returns-value
-  "ts-token-value returns the current token's value for a non-empty stream."
-  (let ((ts (make-grammar-ts '(:T-INT 42))))
-    (assert-= 42 (cl-cc/parse::ts-token-value ts))))
-
-(deftest grammar-ts-token-value-empty-stream-returns-nil
-  "ts-token-value returns nil for an empty token stream."
-  (let ((ts (cl-cc/parse::make-token-stream :tokens nil :source "")))
-    (assert-null (cl-cc/parse::ts-token-value ts))))
+(deftest-each grammar-ts-token-value-cases
+  "ts-token-value: non-empty stream returns token value; empty stream returns nil."
+  :cases (("non-empty" :non-empty 42)
+          ("empty"     :empty     nil))
+  (scenario expected)
+  (let ((ts (ecase scenario
+               (:non-empty (make-grammar-ts '(:T-INT 42)))
+               (:empty     (cl-cc/parse::make-token-stream :tokens nil :source "")))))
+    (assert-equal expected (cl-cc/parse::ts-token-value ts))))
 
 ;;; ─── parse-cl-atom ─────────────────────────────────────────────────────────
 
-(deftest grammar-parse-cl-atom-integer
-  "parse-cl-atom produces a cst-token with the integer value."
-  (let* ((ts (make-grammar-ts (list :T-INT 42)))
+(deftest-each grammar-parse-cl-atom-value-types
+  "parse-cl-atom produces cst-token nodes with correct values for integer, string, and keyword."
+  :cases (("integer" :T-INT     42        42)
+          ("string"  :T-STRING  "hello"   "hello")
+          ("keyword" :T-KEYWORD :foo      :foo))
+  (tok-type tok-value expected)
+  (let* ((ts (make-grammar-ts (list tok-type tok-value)))
          (node (cl-cc/parse::parse-cl-atom ts)))
     (assert-true (cl-cc:cst-token-p node))
-    (assert-= 42 (cl-cc:cst-token-value node))))
+    (assert-equal expected (cl-cc:cst-token-value node))))
 
-(deftest grammar-parse-cl-atom-string
-  "parse-cl-atom produces a cst-token with the string value."
-  (let* ((ts (make-grammar-ts (list :T-STRING "hello")))
-         (node (cl-cc/parse::parse-cl-atom ts)))
-    (assert-true (cl-cc:cst-token-p node))
-    (assert-string= "hello" (cl-cc:cst-token-value node))))
-
-(deftest grammar-parse-cl-atom-keyword
-  "parse-cl-atom produces a cst-token with the keyword value."
-  (let* ((ts (make-grammar-ts (list :T-KEYWORD :foo)))
-         (node (cl-cc/parse::parse-cl-atom ts)))
-    (assert-true (cl-cc:cst-token-p node))
-    (assert-eq :foo (cl-cc:cst-token-value node))))
-
-(deftest grammar-parse-cl-atom-non-atom-returns-nil
-  "parse-cl-atom returns nil for a non-atom token (LPAREN)."
-  (let* ((ts (make-grammar-ts (list :T-LPAREN nil)))
-         (node (cl-cc/parse::parse-cl-atom ts)))
-    (assert-null node)))
-
-(deftest grammar-parse-cl-atom-empty-stream-returns-nil
-  "parse-cl-atom returns nil on an empty token stream."
-  (let* ((ts (cl-cc/parse::make-token-stream :tokens nil :source ""))
+(deftest-each grammar-parse-cl-atom-nil-cases
+  "parse-cl-atom returns nil for a non-atom token and for an empty stream."
+  :cases (("non-atom" :non-atom)
+          ("empty"    :empty))
+  (scenario)
+  (let* ((ts (ecase scenario
+               (:non-atom (make-grammar-ts (list :T-LPAREN nil)))
+               (:empty    (cl-cc/parse::make-token-stream :tokens nil :source ""))))
          (node (cl-cc/parse::parse-cl-atom ts)))
     (assert-null node)))
 

@@ -37,7 +37,8 @@
    (:file "builtin-registry-dispatch") ; *builtin-emitter-table* + *convention-arity* + emit-registered-builtin
    (:file "codegen-core")             ; binop table + primitive/if compilation
    (:file "codegen-core-control")     ; block/return-from + tagbody/go + setq/quote/the
-   (:file "codegen-core-let")         ; let-binding analysis: predicates + walkers
+   (:file "codegen-core-let")         ; let-binding analysis: predicates + sink-if
+   (:file "codegen-core-let-walkers") ; binding walker generator + three walkers
    (:file "codegen-core-let-emit")    ; let-binding emitters + compile-ast (ast-let)
    (:file "codegen-clos")             ; defclass + slot accessor compilation
    (:file "codegen-gf")               ; defgeneric/defmethod/make-instance/slot-value
@@ -51,7 +52,8 @@
    (:file "codegen-hash-table")       ; hash-table handler cluster split from phase 2
    (:file "codegen-slot-predicates")  ; CLOS slot predicate handlers split from phase 2
    (:file "codegen-string-kwargs")    ; string comparison/case handlers split from phase 2
-   (:file "codegen-fold")             ; compile-time constant fold + partial evaluator
+   (:file "codegen-fold")             ; compile-time fold data + helpers
+   (:file "codegen-fold-eval")        ; compile-time partial evaluator engine
    (:file "codegen-fold-optimize")    ; %loc macro + optimize-ast fold pass
    (:file "codegen")                  ; entry points + exception handling + multiple values
    (:file "codegen-calls")            ; function call compilation: %try-compile-* + ast-call method

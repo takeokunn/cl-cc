@@ -59,7 +59,7 @@
          (effect-row-union base-effects
                            (union-list (cl-cc/ast:ast-call-args ast)))))
       (t (make-type-effect-row :effects nil
-                               :row-var (make-type-variable "eff"))))))
+                               :row-var (fresh-type-var "eff"))))))
 
 (defun infer-with-effects (ast env)
   "Infer type, substitution, AND effect row for AST.

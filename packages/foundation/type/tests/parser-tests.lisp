@@ -14,10 +14,6 @@
 (in-suite parser-suite)
 ;;; ─── parse-type-specifier: atoms ─────────────────────────────────────────
 
-(deftest parse-nil-to-null
-  "nil parses to type-null."
-  (assert-true (type-equal-p type-null (cl-cc/type::parse-type-specifier nil))))
-
 (deftest-each parse-hole-type-specifiers
   "? and _ both parse to a type-error node (gradual hole)."
   :cases (("question-mark" '?)
@@ -38,8 +34,9 @@
   (assert-true (cl-cc/type::looks-like-type-specifier-p '(option fixnum))))
 
 (deftest-each parse-primitive-symbols
-  "Primitive type symbols parse to their expected type nodes."
-  :cases (("fixnum"    'fixnum    type-int)
+  "Primitive type symbols (and nil) parse to their expected type nodes."
+  :cases (("nil"       nil        type-null)
+          ("fixnum"    'fixnum    type-int)
           ("integer"   'integer   type-int)
           ("string"    'string    type-string)
           ("boolean"   'boolean   type-bool)
@@ -173,13 +170,17 @@
     (assert-true (type-linear-p result))
     (assert-eq expected-grade (type-linear-grade result))))
 
-(deftest parser-refinement-syntax
-  "(Refine T pred) parses to a refinement type."
-  (let ((result (cl-cc/type:parse-type-specifier
-                 '(refine fixnum (lambda (x) (> x 0))))))
+(deftest-each parser-refinement-syntax
+  "(refine T pred) parses to a refinement type; pred may be a lambda or a symbol."
+  :cases (("lambda-pred" '(refine fixnum (lambda (x) (> x 0))) t)
+          ("symbol-pred" '(refine fixnum positive-p)           'positive-p))
+  (form expected-pred)
+  (let ((result (cl-cc/type:parse-type-specifier form)))
     (assert-true (type-refinement-p result))
     (assert-true (type-equal-p type-int (type-refinement-base result)))
-    (assert-true (type-refinement-predicate result))))
+    (if (eq expected-pred t)
+        (assert-true (type-refinement-predicate result))
+        (assert-eq expected-pred (cl-cc/type::type-refinement-predicate result)))))
 
 ;;; ─── Arrow types: ->, ->1, ->0 ──────────────────────────────────────────
 
@@ -254,43 +255,29 @@
 
 ;;; ─── Qualified types: => ─────────────────────────────────────────────────
 
-(deftest parse-qualified-type
-  "(=> (Num fixnum) string) produces type-qualified."
-  (let ((ty (cl-cc/type::parse-type-specifier
-             `(,(intern "=>" :cl-cc/type) (num fixnum) string))))
-    (assert-true (type-qualified-p ty))
-    (assert-equal 1 (length (type-qualified-constraints ty)))
-    (assert-true (type-equal-p type-string (cl-cc/type::type-qualified-body ty)))))
-
-(deftest parse-qualified-error-no-body
-  "(=>) signals error."
-  (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-type-specifier `(,(intern "=>" :cl-cc/type)))))
-
-;;; ─── Refinement types ───────────────────────────────────────────────────
-
-(deftest parse-refinement
-  "(Refine fixnum positive-p) produces type-refinement."
-  (let ((ty (cl-cc/type::parse-type-specifier '(refine fixnum positive-p))))
-    (assert-true (cl-cc/type::type-refinement-p ty))
-    (assert-true (type-equal-p type-int (cl-cc/type::type-refinement-base ty)))
-    (assert-eq 'positive-p (cl-cc/type::type-refinement-predicate ty))))
+(deftest-each parse-qualified-type-cases
+  "(=>) with body produces type-qualified; without body signals type-parse-error."
+  :cases (("valid"    `(,(intern "=>" :cl-cc/type) (num fixnum) string) nil)
+          ("no-body"  `(,(intern "=>" :cl-cc/type))                     t))
+  (form error-p)
+  (if error-p
+      (assert-signals cl-cc/type::type-parse-error
+        (cl-cc/type::parse-type-specifier form))
+      (let ((ty (cl-cc/type::parse-type-specifier form)))
+        (assert-true (type-qualified-p ty))
+        (assert-equal 1 (length (type-qualified-constraints ty)))
+        (assert-true (type-equal-p type-string (cl-cc/type::type-qualified-body ty))))))
 
 ;;; ─── Graded modal types ─────────────────────────────────────────────────
 
 (deftest-each parse-graded-modal-types
-  "!1, !0, and !W produce linear types with :one, :zero, :omega grades."
-  :cases (("one"   (intern "!1" :cl-cc/type) :one)
-          ("zero"  (intern "!0" :cl-cc/type) :zero)
-          ("omega" (intern "!W" :cl-cc/type) :omega))
-  (bang-sym expected-grade)
-  (let ((ty (cl-cc/type::parse-type-specifier `(,bang-sym fixnum))))
+  "!1, !0, !W shorthand and explicit (! N T) all produce linear types with correct grades."
+  :cases (("one"      `(,(intern "!1" :cl-cc/type) fixnum)    :one)
+          ("zero"     `(,(intern "!0" :cl-cc/type) fixnum)    :zero)
+          ("omega"    `(,(intern "!W" :cl-cc/type) fixnum)    :omega)
+          ("explicit" `(,(intern "!"  :cl-cc/type) 1 fixnum)  :one))
+  (form expected-grade)
+  (let ((ty (cl-cc/type::parse-type-specifier form)))
     (assert-true (type-linear-p ty))
     (assert-eq expected-grade (cl-cc/type::type-linear-grade ty))))
-
-(deftest parse-graded-bang-explicit
-  "(! 1 fixnum) produces linear type with grade :one."
-  (let ((ty (cl-cc/type::parse-type-specifier `(,(intern "!" :cl-cc/type) 1 fixnum))))
-    (assert-true (type-linear-p ty))
-    (assert-eq :one (cl-cc/type::type-linear-grade ty))))
 

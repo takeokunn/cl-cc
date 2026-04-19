@@ -30,8 +30,9 @@
   (let ((result (cl-cc/type:parse-type-specifier '(=> (num a) (function (a a) a)))))
     (assert-true (type-qualified-p result))
     (assert-= 1 (length (type-qualified-constraints result)))
-    (assert-eq 'num (type-class-constraint-class-name
-                     (first (type-qualified-constraints result))))))
+    (let ((constraint (first (type-qualified-constraints result))))
+      (assert-string= "NUM"
+                      (symbol-name (cl-cc/type:type-constraint-class-name constraint))))))
 
 ;;; Phase A: Inference Bug Fixes
 
@@ -177,4 +178,3 @@
       (declare (ignore subst))
       (assert-true (typep ty 'type-function))
       (assert-= 1 (length (type-function-params ty))))))
-

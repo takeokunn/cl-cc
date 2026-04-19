@@ -1,20 +1,15 @@
-;;;; optimizer-inline-pass.lisp — Function Inlining Pass Execution
+;;;; optimizer-inline-pass.lisp — Inlining Infrastructure (memo, DCE)
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;;
 ;;; Contains: opt-make-pure-function-memo-table, opt-pure-function-memo-key,
 ;;; opt-pure-function-memo-get, opt-pure-function-memo-put,
 ;;; opt-function-body-instruction-tables,
 ;;; opt-top-level-function-roots, opt-reachable-function-labels,
-;;; opt-pass-global-dce, opt-inline-inst-cost, opt-inline-body-cost,
-;;; opt-adaptive-inline-threshold, opt-inline-eligible-p, opt-pass-inline.
+;;; opt-pass-global-dce.
 ;;;
-;;; Analysis helpers (opt-collect-function-defs, opt-build-function-name-map,
-;;; opt-build-call-graph, opt-call-graph-recursive-labels, opt-make-renaming,
-;;; opt-rename-regs-in-inst, opt-can-safely-rename-p,
-;;; opt-body-has-global-refs-p, opt-max-reg-index) are in
-;;; optimizer-inline.lisp (loads before this file).
+;;; Cost model + main pass moved to optimizer-inline-cost.lisp.
 ;;;
-;;; Load order: after optimizer-inline.lisp, before optimizer-dataflow.lisp.
+;;; Load order: after optimizer-purity.lisp, before optimizer-inline-cost.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 (in-package :cl-cc/optimize)
@@ -153,139 +148,4 @@ place by construction."
                      (t nil)))
                  instructions)))))
 
-(defun opt-inline-inst-cost (inst)
-  "Return the inline cost of INST using the shared e-graph opcode table.
-This keeps inlining policy aligned with the optimizer's existing cost model
-instead of relying on raw instruction count."
-  (egraph-default-cost (vm-inst-to-enode-op inst) nil))
-
-(defun opt-inline-body-cost (body)
-  "Return the total inline cost of BODY, excluding the final vm-ret."
-  (reduce #'+ (mapcar #'opt-inline-inst-cost (butlast body)) :initial-value 0))
-
-(defun opt-adaptive-inline-threshold (def &key (base-threshold 15) (max-threshold 50))
-  "Compute a conservative adaptive inline threshold for DEF.
-Cheap bodies dominated by low-cost instructions get a larger threshold, while
-call-heavy bodies are kept near the base threshold. This is a small FR-150
-style heuristic without runtime profile counters."
-  (let* ((body (butlast (getf def :body)))
-         (inst-count (length body))
-         (cheap-count (count-if (lambda (inst)
-                                  (<= (opt-inline-inst-cost inst) 1))
-                                body))
-         (call-heavy-p (some (lambda (inst)
-                               (typep inst '(or vm-call vm-generic-call vm-apply)))
-                             body))
-         (cheap-ratio (if (zerop inst-count) 1.0 (/ cheap-count inst-count))))
-    (min max-threshold
-         (max 8
-              (+ base-threshold
-                 (if call-heavy-p -5 0)
-                 (cond
-                   ((>= cheap-ratio 0.90) 35)
-                   ((>= cheap-ratio 0.75) 20)
-                   ((>= cheap-ratio 0.50) 8)
-                   (t 0)))))))
-
-(defun opt-inline-eligible-p (def threshold)
-  "Return T if the function definition DEF (a plist from opt-collect-function-defs)
-satisfies all inlining preconditions:
-1. Has a vm-closure with zero captured variables
-2. Has only required params (no &optional/&rest/&key)
-3. Body cost ≤ THRESHOLD (excluding the final vm-ret)
-4. All body instructions support lossless register renaming
-5. Body reads no 'global' registers (ones not defined by params or body)"
-  (let ((ci   (getf def :closure))
-        (body (getf def :body)))
-    (and (vm-closure-p ci)
-         (null (vm-captured-vars ci))
-         (null (vm-closure-optional-params ci))
-         (null (vm-closure-rest-param ci))
-         (null (vm-closure-key-params ci))
-         (<= (opt-inline-body-cost body) threshold)
-         (opt-can-safely-rename-p body)
-         (not (opt-body-has-global-refs-p body (vm-closure-params ci))))))
-
-(defun opt-pass-inline (instructions &key (threshold 15))
-  "Replace vm-call of a known small function with the inlined body.
-The function must be: captured-var-free, linear, and have body cost
-≤ THRESHOLD (not counting the final vm-ret)."
-  (let* ((func-defs (opt-collect-function-defs instructions))
-         (name-to-label (opt-build-function-name-map instructions))
-         (recursive-labels (opt-call-graph-recursive-labels
-                            (opt-build-call-graph instructions func-defs name-to-label)))
-         (base-idx  (1+ (opt-max-reg-index instructions)))
-         (reg-track (make-hash-table :test #'eq))   ; reg → label of known function
-         (const-track (make-hash-table :test #'eq)) ; reg → constant value
-         (result nil))
-    (dolist (inst instructions)
-      (typecase inst
-        ;; Record which register now holds which function
-        ((or vm-closure vm-func-ref)
-         (let ((label (vm-label-name inst)))
-           (when (gethash label func-defs)
-             (setf (gethash (vm-dst inst) reg-track) label)))
-         (let ((dst (opt-inst-dst inst)))
-           (when dst (remhash dst const-track)))
-         (push inst result))
-        ;; Track vm-const loading a function name symbol
-        (vm-const
-         (let* ((val (vm-value inst))
-                (label (when (symbolp val) (gethash val name-to-label))))
-           (when (and label (gethash label func-defs))
-             (setf (gethash (vm-dst inst) reg-track) label)))
-          (setf (gethash (vm-dst inst) const-track) (vm-value inst))
-          (push inst result))
-        (vm-move
-         (multiple-value-bind (src-const present-p)
-             (gethash (vm-src inst) const-track)
-           (if present-p
-               (setf (gethash (vm-dst inst) const-track) src-const)
-               (remhash (vm-dst inst) const-track)))
-         (push inst result))
-        ;; Attempt inlining
-        (vm-call
-         (let* ((label (gethash (vm-func-reg inst) reg-track))
-                (def   (and label (gethash label func-defs)))
-                (effective-threshold (if (and def (eq threshold :adaptive))
-                                         (opt-adaptive-inline-threshold def)
-                                         threshold)))
-           (if (and def
-                    (not (gethash label recursive-labels))
-                    (opt-inline-eligible-p def effective-threshold))
-               ;; ── Inline ──
-               (let* ((body   (getf def :body))
-                      (ci     (getf def :closure))
-                      (params (vm-closure-params ci))
-                      (rename (opt-make-renaming body base-idx)))
-                 (incf base-idx (hash-table-count rename))
-                 ;; 1. Move call arguments into renamed parameter registers
-                 (loop for param in params
-                       for arg in (vm-args inst)
-                       do (let ((dst (or (gethash param rename) param))
-                                (const-present nil)
-                                (const-value nil))
-                            (multiple-value-setq (const-value const-present)
-                              (gethash arg const-track))
-                            (push (if const-present
-                                      (make-vm-const :dst dst :value const-value)
-                                      (make-vm-move :dst dst :src arg))
-                                  result)))
-                 ;; 2. Emit renamed body (all but the last vm-ret)
-                 (dolist (bi (butlast body))
-                   (push (opt-rename-regs-in-inst bi rename) result))
-                 ;; 3. Move renamed return register to call's dst
-                 (let* ((ret-inst (car (last body)))
-                        (ret-src (or (gethash (vm-reg ret-inst) rename)
-                                     (vm-reg ret-inst))))
-                   (push (make-vm-move :dst (vm-dst inst) :src ret-src) result)))
-               ;; ── Keep call as-is ──
-               (push inst result))))
-        ;; Invalidate tracking for any overwritten register
-        (t
-         (let ((dst (opt-inst-dst inst)))
-           (when dst
-             (remhash dst reg-track)
-             (remhash dst const-track)))
-         (push inst result))))
-    (nreverse result)))
+;;; Cost model + main inline pass → see optimizer-inline-cost.lisp

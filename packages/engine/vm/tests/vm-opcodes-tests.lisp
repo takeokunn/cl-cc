@@ -13,51 +13,34 @@
 
 ;;; ─── make-vm2-state ──────────────────────────────────────────────────────────
 
-(deftest vm2-state-registers-are-nil-on-creation
-  "make-vm2-state allocates 256 registers, all initialised to nil."
+(deftest vm2-state-creation-cases
+  "make-vm2-state: 256 nil registers; *features* in global-vars; output-stream is *standard-output*."
   (let ((s (cl-cc::make-vm2-state)))
     (assert-true (simple-vector-p (cl-cc::vm2-state-registers s)))
     (assert-= cl-cc/vm::+vm-register-count+ (length (cl-cc::vm2-state-registers s)))
     (assert-null (svref (cl-cc::vm2-state-registers s) 0))
-    (assert-null (svref (cl-cc::vm2-state-registers s) 255))))
-
-(deftest vm2-state-pre-populates-features
-  "make-vm2-state pre-populates *features* in the global-vars hash table."
-  (let ((s (cl-cc::make-vm2-state)))
+    (assert-null (svref (cl-cc::vm2-state-registers s) 255))
     (assert-true (hash-table-p (cl-cc::vm2-state-global-vars s)))
-    (assert-true (nth-value 1 (gethash '*features* (cl-cc::vm2-state-global-vars s))))))
-
-(deftest vm2-state-output-stream-default
-  "make-vm2-state sets output-stream to *standard-output* by default."
-  (let ((s (cl-cc::make-vm2-state)))
+    (assert-true (nth-value 1 (gethash '*features* (cl-cc::vm2-state-global-vars s))))
     (assert-eq *standard-output* (cl-cc::vm2-state-output-stream s))))
 
 ;;; ─── vm2-reg-get / vm2-reg-set ───────────────────────────────────────────────
 
-(deftest vm2-reg-get-returns-nil-initially
-  "vm2-reg-get returns nil for any fresh register."
+(deftest vm2-reg-ops-cases
+  "vm2-reg: fresh nil; set returns value and stores it; adjacent independent; overwrite takes last."
   (let ((s (cl-cc::make-vm2-state)))
     (assert-null (cl-cc/vm::vm2-reg-get s 0))
     (assert-null (cl-cc/vm::vm2-reg-get s 128))
-    (assert-null (cl-cc/vm::vm2-reg-get s 255))))
-
-(deftest vm2-reg-set-stores-and-returns-value
-  "vm2-reg-set stores VALUE in the register file and returns VALUE."
+    (assert-null (cl-cc/vm::vm2-reg-get s 255)))
   (let ((s (cl-cc::make-vm2-state)))
     (let ((ret (cl-cc/vm::vm2-reg-set s 0 42)))
       (assert-= 42 ret)
-      (assert-= 42 (cl-cc/vm::vm2-reg-get s 0)))))
-
-(deftest vm2-reg-set-different-registers-independent
-  "vm2-reg-set does not affect adjacent registers."
+      (assert-= 42 (cl-cc/vm::vm2-reg-get s 0))))
   (let ((s (cl-cc::make-vm2-state)))
     (cl-cc/vm::vm2-reg-set s 5 :foo)
     (cl-cc/vm::vm2-reg-set s 6 :bar)
     (assert-eq :foo (cl-cc/vm::vm2-reg-get s 5))
-    (assert-eq :bar (cl-cc/vm::vm2-reg-get s 6))))
-
-(deftest vm2-reg-set-overwrites-previous
-  "vm2-reg-set on the same slot overwrites the old value."
+    (assert-eq :bar (cl-cc/vm::vm2-reg-get s 6)))
   (let ((s (cl-cc::make-vm2-state)))
     (cl-cc/vm::vm2-reg-set s 10 'first)
     (cl-cc/vm::vm2-reg-set s 10 'second)
@@ -65,14 +48,11 @@
 
 ;;; ─── vm2-collect-opcode-bigrams ──────────────────────────────────────────────
 
-(deftest vm2-collect-bigrams-empty-returns-empty-table
-  "vm2-collect-opcode-bigrams on empty vector returns empty hash table."
+(deftest vm2-collect-bigrams-edge-cases
+  "vm2-collect-opcode-bigrams: empty vector → empty HT; single 4-word instr → 0 pairs."
   (let ((result (cl-cc/vm::vm2-collect-opcode-bigrams #())))
     (assert-true (hash-table-p result))
-    (assert-= 0 (hash-table-count result))))
-
-(deftest vm2-collect-bigrams-single-instruction-no-pairs
-  "vm2-collect-opcode-bigrams on a 4-element vector has no pairs to count."
+    (assert-= 0 (hash-table-count result)))
   (let ((result (cl-cc/vm::vm2-collect-opcode-bigrams #(0 0 0 0))))
     (assert-= 0 (hash-table-count result))))
 
@@ -91,13 +71,9 @@
 
 ;;; ─── vm2-top-superoperator-candidates ────────────────────────────────────────
 
-(deftest vm2-top-candidates-empty-returns-nil
-  "vm2-top-superoperator-candidates on empty vector returns nil."
-  (assert-null (cl-cc/vm::vm2-top-superoperator-candidates #())))
-
-(deftest vm2-top-candidates-limit-respected
-  "vm2-top-superoperator-candidates returns at most :limit entries."
-  ;; Build code with 2 known-opcode pairs so there are at most 1 distinct bigram
+(deftest vm2-top-candidates-cases
+  "vm2-top-superoperator-candidates: empty → nil; :limit 1 returns at most 1 entry."
+  (assert-null (cl-cc/vm::vm2-top-superoperator-candidates #()))
   (let* ((op-a cl-cc::+op2-const+)
          (op-b cl-cc::+op2-halt2+)
          (code (vector op-a 0 0 0 op-b 0 0 0)))

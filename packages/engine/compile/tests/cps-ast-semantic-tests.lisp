@@ -178,41 +178,28 @@
 ;;; CPS for block / return-from
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest cps-block-outer-is-block
-  (let* ((node (cl-cc:make-ast-block
-                :name 'nil
-                :body (list (cl-cc:make-ast-int :value 1))))
-         (k      (gensym "K"))
+(deftest-each cps-control-outer-car
+  "CPS-transformed block/catch nodes produce expected outer form keyword."
+  :cases (("block" (cl-cc:make-ast-block :name 'nil :body (list (cl-cc:make-ast-int :value 1))) 'block)
+          ("catch" (cl-cc:make-ast-catch :tag  (cl-cc:make-ast-quote :value :done)
+                                         :body (list (cl-cc:make-ast-int :value 0)))            'funcall))
+  (node expected-car)
+  (let* ((k      (gensym "K"))
          (result (cl-cc/compile::cps-transform-ast node k)))
-    (assert-eq 'block (car result))))
+    (assert-eq expected-car (car result))))
 
-(deftest cps-return-from-contains-token
-  (let* ((node (cl-cc:make-ast-return-from
-                :name 'nil
-                :value (cl-cc:make-ast-int :value 42)))
-         (k      (gensym "K"))
+(deftest-each cps-control-contains-token
+  "CPS-transformed return-from/throw contain expected operator tokens in printed output."
+  :cases (("return-from" (cl-cc:make-ast-return-from :name 'nil
+                                                     :value (cl-cc:make-ast-int :value 42))
+                         "RETURN-FROM")
+          ("throw"       (cl-cc:make-ast-throw :tag   (cl-cc:make-ast-quote :value :done)
+                                               :value (cl-cc:make-ast-int :value 99))
+                         "THROW"))
+  (node expected-token)
+  (let* ((k      (gensym "K"))
          (result (format nil "~S" (cl-cc/compile::cps-transform-ast node k))))
-    (assert-true (search "RETURN-FROM" result))))
-
-;;; ─────────────────────────────────────────────────────────────────────────
-;;; CPS for catch / throw
-;;; ─────────────────────────────────────────────────────────────────────────
-
-(deftest cps-catch-outer-is-funcall
-  (let* ((node (cl-cc:make-ast-catch
-                :tag  (cl-cc:make-ast-quote :value :done)
-                :body (list (cl-cc:make-ast-int :value 0))))
-         (k      (gensym "K"))
-         (result (cl-cc/compile::cps-transform-ast node k)))
-    (assert-eq 'funcall (car result))))
-
-(deftest cps-throw-contains-token
-  (let* ((node (cl-cc:make-ast-throw
-                :tag   (cl-cc:make-ast-quote :value :done)
-                :value (cl-cc:make-ast-int :value 99)))
-         (k      (gensym "K"))
-         (result (format nil "~S" (cl-cc/compile::cps-transform-ast node k))))
-    (assert-true (search "THROW" result))))
+    (assert-true (search expected-token result))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; CPS for tagbody-section

@@ -265,7 +265,7 @@
                 --eval '(dolist (f (list "packages/foundation/bootstrap/cl-cc-bootstrap.asd" "packages/foundation/ast/cl-cc-ast.asd" "packages/foundation/prolog/cl-cc-prolog.asd" "packages/backend/binary/cl-cc-binary.asd" "packages/backend/runtime/cl-cc-runtime.asd" "packages/backend/bytecode/cl-cc-bytecode.asd" "packages/foundation/ir/cl-cc-ir.asd" "packages/foundation/mir/cl-cc-mir.asd" "packages/foundation/type/cl-cc-type.asd" "packages/engine/optimize/cl-cc-optimize.asd" "packages/backend/emit/cl-cc-emit.asd" "packages/frontend/parse/cl-cc-parse.asd" "packages/frontend/expand/cl-cc-expand.asd" "packages/engine/compile/cl-cc-compile.asd" "packages/engine/vm/cl-cc-vm.asd")) (asdf:load-asd (merge-pathnames f (uiop:getcwd))))' \
                 --load cl-cc-test.asd \
                 --eval '(asdf:disable-output-translations)' \
-                --eval '(handler-case (asdf:load-system :cl-cc/test :force t) (error (e) (format *error-output* "~&FATAL: ~A~%" e) (uiop:quit 1)))' \
+                --eval '(handler-case (asdf:operate (quote asdf:load-source-op) :cl-cc/test) (error (e) (format *error-output* "~&FATAL: ~A~%" e) (uiop:quit 1)))' \
                 --eval '(uiop:symbol-call :cl-cc/test (quote run-tests))'
             '';
 
@@ -280,9 +280,11 @@
                 --eval '(require :asdf)' \
                 --eval '(require :sb-cover)' \
                 --eval '(declaim (optimize (sb-cover:store-coverage-data 3)))' \
+                --eval '(dolist (f (list "packages/foundation/bootstrap/cl-cc-bootstrap.asd" "packages/foundation/ast/cl-cc-ast.asd" "packages/foundation/prolog/cl-cc-prolog.asd" "packages/backend/binary/cl-cc-binary.asd" "packages/backend/runtime/cl-cc-runtime.asd" "packages/backend/bytecode/cl-cc-bytecode.asd" "packages/foundation/ir/cl-cc-ir.asd" "packages/foundation/mir/cl-cc-mir.asd" "packages/foundation/type/cl-cc-type.asd" "packages/engine/optimize/cl-cc-optimize.asd" "packages/backend/emit/cl-cc-emit.asd" "packages/frontend/parse/cl-cc-parse.asd" "packages/frontend/expand/cl-cc-expand.asd" "packages/engine/compile/cl-cc-compile.asd" "packages/engine/vm/cl-cc-vm.asd")) (asdf:load-asd (merge-pathnames f (uiop:getcwd))))' \
                 --load cl-cc.asd \
                 --load cl-cc-test.asd \
-                --eval '(asdf:load-system :cl-cc/test :force t)' \
+                --eval '(asdf:disable-output-translations)' \
+                --eval '(asdf:load-system :cl-cc/test)' \
                 --eval '(cl-cc/test:run-suite (quote cl-cc/test::cl-cc-suite) :parallel nil :random nil :warm-stdlib t :coverage t)'
             '';
 

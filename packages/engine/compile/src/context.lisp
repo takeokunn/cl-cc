@@ -52,26 +52,40 @@
 ;;; Pre-populate global-variables with ANSI CL special variables
 ;;; that the VM state initializes, so compiled code can access them
 ;;; without requiring explicit (defvar ...) forms.
+
+(defparameter *builtin-package-symbol-specs*
+  '(("CL-CC/PROLOG"  . "*BUILTIN-PREDICATES*")
+    ("CL-CC/MIR"     . "*X86-64-TARGET*")
+    ("CL-CC/MIR"     . "*AARCH64-TARGET*")
+    ("CL-CC/MIR"     . "*RISCV64-TARGET*")
+    ("CL-CC/MIR"     . "*WASM32-TARGET*")
+    ("CL-CC/PARSE"   . "*LIST-LOWERING-TABLE*")
+    ("CL-CC/EXPAND"  . "*%CONDITION-HANDLERS*")
+    ("CL-CC/VM"      . "*VM-HOST-BRIDGE-FUNCTIONS*")
+    ("CL-CC/VM"      . "*INSTRUCTION-CONSTRUCTORS*")
+    ("CL-CC/VM"      . "*OPCODE-DISPATCH-TABLE*")
+    ("CL-CC/VM"      . "*OPCODE-NAME-TABLE*")
+    ("CL-CC/VM"      . "*OPCODE-ENCODER-TABLE*"))
+  "Package-symbol pairs for variables that must exist in the VM global environment.
+Used both to build *builtin-special-variables* and to populate new compiler contexts.")
+
+(defun %resolve-package-symbol-specs (specs)
+  "Resolve (PACKAGE . NAME) pairs to live symbols, skipping missing packages/symbols."
+  (loop for (pkg-name . sym-name) in specs
+        for pkg = (find-package pkg-name)
+        for sym = (when pkg (find-symbol sym-name pkg))
+        when sym collect sym))
+
 (defparameter *builtin-special-variables*
-  (let ((base '(*features* *modules* *active-restarts*
-                *standard-output* *standard-input* *error-output*
-                *trace-output* *debug-io* *query-io*
-                *print-base* *print-radix* *print-circle* *print-pretty*
-                *print-level* *print-length* *print-escape* *print-readably*
-                *print-gensym* *random-state* *readtable* *read-eval*
-                internal-time-units-per-second
-                *package* *%condition-handlers* *%active-restarts*)))
-    (dolist (spec '(("CL-CC/PROLOG" . "*BUILTIN-PREDICATES*")
-                    ("CL-CC/MIR" . "*X86-64-TARGET*")
-                    ("CL-CC/MIR" . "*AARCH64-TARGET*")
-                    ("CL-CC/MIR" . "*RISCV64-TARGET*")
-                    ("CL-CC/MIR" . "*WASM32-TARGET*")
-                    ("CL-CC/PARSE" . "*LIST-LOWERING-TABLE*")))
-      (multiple-value-bind (sym status)
-          (find-symbol (cdr spec) (car spec))
-        (when (and sym status)
-          (pushnew sym base :test #'eq))))
-    base)
+  (append '(*features* *modules* *active-restarts*
+            *standard-output* *standard-input* *error-output*
+            *trace-output* *debug-io* *query-io*
+            *print-base* *print-radix* *print-circle* *print-pretty*
+            *print-level* *print-length* *print-escape* *print-readably*
+            *print-gensym* *random-state* *readtable* *read-eval*
+            internal-time-units-per-second
+            *package* *%condition-handlers* *%active-restarts*)
+          (%resolve-package-symbol-specs *builtin-package-symbol-specs*))
   "Variables known to exist in the VM global environment at startup.")
 
 (defvar *repl-global-variables* nil
@@ -94,17 +108,9 @@ Used by run-string-repl to persist the label counter across calls.")
   (let ((gv (ctx-global-variables ctx)))
     (dolist (name *builtin-special-variables*)
       (setf (gethash name gv) t))
-    (dolist (spec '(("CL-CC/EXPAND" . "*%CONDITION-HANDLERS*")
-                    ("CL-CC/PROLOG" . "*BUILTIN-PREDICATES*")
-                    ("CL-CC/MIR" . "*X86-64-TARGET*")
-                    ("CL-CC/MIR" . "*AARCH64-TARGET*")
-                    ("CL-CC/MIR" . "*RISCV64-TARGET*")
-                    ("CL-CC/MIR" . "*WASM32-TARGET*")
-                    ("CL-CC/PARSE" . "*LIST-LOWERING-TABLE*")))
-      (multiple-value-bind (sym status)
-          (find-symbol (cdr spec) (car spec))
-        (when (and sym status)
-          (setf (gethash sym gv) t))))
+    ;; Re-resolve at context creation time: new packages may have loaded since startup.
+    (dolist (sym (%resolve-package-symbol-specs *builtin-package-symbol-specs*))
+      (setf (gethash sym gv) t))
     ;; Merge persistent REPL globals
     (when *repl-global-variables*
       (maphash (lambda (k v) (setf (gethash k gv) v))

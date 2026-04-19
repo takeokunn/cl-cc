@@ -4,29 +4,21 @@
 
 (in-suite vm-run-suite)
 
-(deftest run-vm-chained-arithmetic
-  "run-vm correctly chains multiple arithmetic operations."
+(deftest run-vm-basic-execution-cases
+  "run-vm: chains arithmetic correctly; loads any CL object; preserves non-result registers."
   (let ((s (cl-cc::make-vm2-state)))
-    ;; (3 + 4) * 5 = 35: r1=3, r2=4, r3=r1+r2=7, r4=5, r0=r3*r4=35
     (let ((code (make-bytecode cl-cc::+op2-const+ 1 3   nil
                                cl-cc::+op2-const+ 2 4   nil
                                cl-cc::+op2-add2+  3 1   2
                                cl-cc::+op2-const+ 4 5   nil
                                cl-cc::+op2-mul2+  0 3   4
                                cl-cc::+op2-halt2+ 0 nil nil)))
-      (assert-= 35 (cl-cc/vm::run-vm code s)))))
-
-(deftest run-vm-const-any-cl-object
-  "OP2-CONST can load any CL object as an immediate value."
+      (assert-= 35 (cl-cc/vm::run-vm code s))))
   (let ((s (cl-cc::make-vm2-state)))
     (let ((code (make-bytecode cl-cc::+op2-const+ 0 :hello nil
                                cl-cc::+op2-halt2+ 0 nil    nil)))
-      (assert-equal :hello (cl-cc/vm::run-vm code s)))))
-
-(deftest run-vm-register-independence
-  "run-vm leaves non-result registers with their last computed values."
+      (assert-equal :hello (cl-cc/vm::run-vm code s))))
   (let ((s (cl-cc::make-vm2-state)))
-    ;; r1=10, r2=20; halt on r0 (which we set to 0 via sub2 of same reg)
     (let ((code (make-bytecode cl-cc::+op2-const+ 1 10  nil
                                cl-cc::+op2-const+ 2 20  nil
                                cl-cc::+op2-const+ 0 99  nil
@@ -35,8 +27,8 @@
       (assert-= 10 (cl-cc/vm::vm2-reg-get s 1))
       (assert-= 20 (cl-cc/vm::vm2-reg-get s 2)))))
 
-(deftest vm2-collect-opcode-bigrams-counts-adjacent-opcodes
-  "vm2-collect-opcode-bigrams counts opcode pairs across 4-word instructions."
+(deftest vm2-bigram-collection-cases
+  "vm2-collect-opcode-bigrams counts pairs; top-superoperator-candidates sorts by frequency."
   (let* ((code (make-bytecode cl-cc::+op2-const+ 1 3 nil
                               cl-cc::+op2-add-imm2+ 0 1 4
                               cl-cc::+op2-halt2+ 0 nil nil
@@ -45,10 +37,7 @@
                               cl-cc::+op2-halt2+ 0 nil nil))
          (counts (cl-cc/vm::vm2-collect-opcode-bigrams code)))
     (assert-= 2 (gethash '(cl-cc::const cl-cc::add-imm2) counts))
-    (assert-= 2 (gethash '(cl-cc::add-imm2 cl-cc::halt2) counts))))
-
-(deftest vm2-top-superoperator-candidates-sorts-by-frequency
-  "vm2-top-superoperator-candidates returns descending bigram counts."
+    (assert-= 2 (gethash '(cl-cc::add-imm2 cl-cc::halt2) counts)))
   (let* ((code (make-bytecode cl-cc::+op2-const+ 1 3 nil
                               cl-cc::+op2-add-imm2+ 0 1 4
                               cl-cc::+op2-halt2+ 0 nil nil
@@ -58,44 +47,21 @@
                               cl-cc::+op2-move+ 2 1 nil
                               cl-cc::+op2-halt2+ 2 nil nil))
          (top (cl-cc/vm::vm2-top-superoperator-candidates code :limit 2))
-         ;; Lookup names from the opcode table (package-independent)
          (add-imm2-name (aref cl-cc/vm::*opcode-name-table* cl-cc::+op2-add-imm2+))
          (halt2-name    (aref cl-cc/vm::*opcode-name-table* cl-cc::+op2-halt2+)))
-    ;; Both top bigrams have count 2
     (assert-= 2 (second (first top)))
-    ;; The (add-imm2 halt2) bigram appears in the top-2 results
     (assert-true (member (list add-imm2-name halt2-name) (mapcar #'first top) :test #'equal))))
 
-(deftest vm2-fuse-immediate-superinstructions-add
-  "const+add2 using a temporary immediate register fuses to add-imm2."
-  (let* ((code (make-bytecode cl-cc::+op2-const+ 2 4 nil
-                              cl-cc::+op2-add2+  0 1 2
-                              cl-cc::+op2-halt2+ 0 nil nil))
+(deftest-each vm2-fuse-immediate-superinstructions-arith
+  "const+arith2 pairs fuse to their immediate variants."
+  :cases (("add" cl-cc::+op2-const+ 2 4 nil  cl-cc::+op2-add2+ 0 1 2  cl-cc::+op2-add-imm2+ 4)
+          ("sub" cl-cc::+op2-const+ 2 5 nil  cl-cc::+op2-sub2+ 0 1 2  cl-cc::+op2-sub-imm2+ 5)
+          ("mul" cl-cc::+op2-const+ 2 6 nil  cl-cc::+op2-mul2+ 0 2 1  cl-cc::+op2-mul-imm2+ 6))
+  (c0 r0 v0 x0  c1 d1 s1 s2  expected-fused-op expected-imm)
+  (let* ((code  (make-bytecode c0 r0 v0 x0  c1 d1 s1 s2  cl-cc::+op2-halt2+ 0 nil nil))
          (fused (cl-cc/vm::vm2-fuse-immediate-superinstructions code)))
-    (assert-= cl-cc::+op2-add-imm2+ (aref fused 0))
-    (assert-= 0 (aref fused 1))
-    (assert-= 1 (aref fused 2))
-    (assert-= 4 (aref fused 3))))
-
-(deftest vm2-fuse-immediate-superinstructions-sub
-  "const+sub2 with an immediate RHS fuses to sub-imm2."
-  (let* ((code (make-bytecode cl-cc::+op2-const+ 2 5 nil
-                              cl-cc::+op2-sub2+  0 1 2
-                              cl-cc::+op2-halt2+ 0 nil nil))
-         (fused (cl-cc/vm::vm2-fuse-immediate-superinstructions code)))
-    (assert-= cl-cc::+op2-sub-imm2+ (aref fused 0))
-    (assert-= 5 (aref fused 3))))
-
-(deftest vm2-fuse-immediate-superinstructions-mul
-  "const+mul2 using a temporary immediate register fuses to mul-imm2."
-  (let* ((code (make-bytecode cl-cc::+op2-const+ 2 6 nil
-                              cl-cc::+op2-mul2+  0 2 1
-                              cl-cc::+op2-halt2+ 0 nil nil))
-         (fused (cl-cc/vm::vm2-fuse-immediate-superinstructions code)))
-    (assert-= cl-cc::+op2-mul-imm2+ (aref fused 0))
-    (assert-= 0 (aref fused 1))
-    (assert-= 1 (aref fused 2))
-    (assert-= 6 (aref fused 3))))
+    (assert-= expected-fused-op (aref fused 0))
+    (assert-= expected-imm      (aref fused 3))))
 
 (deftest vm2-fuse-immediate-superinstructions-const-halt
   "const followed by halt on the same register fuses to const-halt2."
@@ -129,8 +95,8 @@
     (assert-= cl-cc::+op2-num-le-imm2+ (aref (cl-cc/vm::vm2-fuse-immediate-superinstructions le-code) 0))
     (assert-= cl-cc::+op2-num-ge-imm2+ (aref (cl-cc/vm::vm2-fuse-immediate-superinstructions ge-code) 0))))
 
-(deftest run-vm-uses-immediate-fusion-helper
-  "run-vm accepts unfused const+arith bytecode and still executes via fused code."
+(deftest run-vm-fusion-execution-cases
+  "Fusion helpers execute const+arith and const+halt; specialized opcodes run correctly."
   (let* ((code (make-bytecode cl-cc::+op2-const+ 2 4 nil
                               cl-cc::+op2-add2+  0 1 2
                               cl-cc::+op2-halt2+ 0 nil nil))
@@ -138,16 +104,10 @@
          (s (cl-cc::make-vm2-state)))
     (cl-cc/vm::vm2-reg-set s 1 3)
     (assert-= 7 (cl-cc/vm::run-vm code s))
-    (assert-= 8 (length fused))))
-
-(deftest run-vm-uses-const-halt-fusion-helper
-  "run-vm accepts const+halt and returns via fused const-halt2."
+    (assert-= 8 (length fused)))
   (assert-= 42 (cl-cc/vm::run-vm (make-bytecode cl-cc::+op2-const+ 0 42 nil
-                                            cl-cc::+op2-halt2+ 0 nil nil)
-                              (cl-cc::make-vm2-state))))
-
-(deftest run-vm-specializes-hot-opcodes-with-fallback
-  "run-vm keeps the hot specialized opcodes fast while preserving generic fallback."
+                                                cl-cc::+op2-halt2+ 0 nil nil)
+                                 (cl-cc::make-vm2-state)))
   (let ((s (cl-cc::make-vm2-state)))
     (assert-= 7 (cl-cc/vm::run-vm (make-bytecode cl-cc::+op2-const+ 1 3 nil
                                              cl-cc::+op2-add-imm2+ 0 1 4
@@ -171,20 +131,20 @@
       (assert-= 1 (gethash '(cl-cc::const cl-cc::add-imm2) counts))
       (assert-= 1 (gethash '(cl-cc::add-imm2 cl-cc::halt2) counts)))))
 
-(deftest vm2-state-globals-init
-  "vm2-state pre-populates *active-restarts* (nil) and *standard-output* (non-nil)."
+(deftest vm2-state-init-cases
+  "vm2-state pre-populates globals; accepts :output-stream; vm-global-vars returns HT with *features*."
   (let ((s (cl-cc::make-vm2-state)))
     (multiple-value-bind (val found-p)
         (gethash 'cl-cc::*active-restarts* (cl-cc::vm2-state-global-vars s))
       (assert-true found-p)
       (assert-null val))
-    (assert-true (not (null (gethash '*standard-output* (cl-cc::vm2-state-global-vars s)))))))
-
-(deftest vm2-state-output-stream-writable
-  "vm2-state :output-stream slot can be set to a custom stream."
+    (assert-true (not (null (gethash '*standard-output* (cl-cc::vm2-state-global-vars s))))))
   (let* ((str (make-string-output-stream))
          (s   (cl-cc::make-vm2-state :output-stream str)))
-    (assert-eq str (cl-cc::vm2-state-output-stream s))))
+    (assert-eq str (cl-cc::vm2-state-output-stream s)))
+  (let ((s (cl-cc::make-vm2-state)))
+    (assert-true (hash-table-p (cl-cc/vm::vm-global-vars s)))
+    (assert-true (not (null (gethash '*features* (cl-cc/vm::vm-global-vars s)))))))
 
 (defclass vm2-test-instance ()
   ((x :initarg :x :reader vm2-test-instance-x)))
@@ -232,8 +192,3 @@
   (let ((s (cl-cc::make-vm2-state)))
     (assert-equal expected (cl-cc/vm::run-vm code s))))
 
-(deftest vm2-global-vars-shim
-  "vm-global-vars shim returns a hash table; vm2-state pre-populates *features*."
-  (let ((s (cl-cc::make-vm2-state)))
-    (assert-true (hash-table-p (cl-cc/vm::vm-global-vars s)))
-    (assert-true (not (null (gethash '*features* (cl-cc/vm::vm-global-vars s)))))))

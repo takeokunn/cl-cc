@@ -70,6 +70,7 @@ Returns the inferred type, or NIL on failure (warning printed unless :strict)."
       (when ok
         (push (cons (ast-defvar-name ast) value) *compile-time-value-env*)))))
 
+
 (defun compile-toplevel-forms (forms &key (target :x86_64) type-check (safety 1) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile a list of top-level forms (e.g., from a source file).
 Handles defun, defvar, and expression forms.
@@ -92,17 +93,17 @@ Returns a compilation-result struct with program, assembly, and globals."
                    (ast (if (typep expanded 'ast-node)
                             expanded
                             (lower-sexp-to-ast expanded))))
-              (when (typep ast 'ast-defun)
-                (push (cons (ast-defun-name ast) ast) *compile-time-function-env*))
+               (when (typep ast 'ast-defun)
+                 (push (cons (ast-defun-name ast) ast) *compile-time-function-env*))
                (setf ast      (optimize-ast ast))
                (push ast compiled-asts)
-               (setf last-cps (maybe-cps-transform ast))
-               (when type-check
-                 (setf last-type (%type-check-form ast type-env type-check)))
-               (setf type-env  (%extend-type-env-for-defvar ast type-env #'best-effort-type))
-               (setf type-env  (%extend-type-env-for-defun  ast type-env #'best-effort-type))
-               (%maybe-extend-ct-value-env ast)
-               (setf last-reg  (compile-ast ast ctx)))))))
+                (setf last-cps (maybe-cps-transform ast))
+                 (when type-check
+                   (setf last-type (%type-check-form ast type-env type-check)))
+                 (setf type-env  (%extend-type-env-for-defvar ast type-env #'best-effort-type))
+                 (setf type-env  (%extend-type-env-for-defun  ast type-env #'best-effort-type))
+                 (%maybe-extend-ct-value-env ast)
+                (setf last-reg  (compile-ast ast ctx)))))))
     (setf (ctx-type-env ctx) type-env)
     (when last-reg
       (emit ctx (make-vm-halt :reg last-reg)))
@@ -123,9 +124,9 @@ Returns a compilation-result struct with program, assembly, and globals."
                                :print-opt-remarks    print-opt-remarks
                                :opt-remarks-stream   opt-remarks-stream
                                :opt-remarks-mode     opt-remarks-mode))
-      (setf program (make-vm-program :instructions    instructions
-                                     :result-register last-reg
-                                     :leaf-p          leaf-p))
+      (setf program (make-vm-program :instructions    (or optimized instructions)
+                                      :result-register last-reg
+                                      :leaf-p          leaf-p))
       (make-compilation-result :program             program
                                :assembly            (emit-assembly program :target target)
                                :globals             (ctx-global-functions ctx)

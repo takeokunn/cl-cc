@@ -13,23 +13,20 @@
 
 ;;; ─── Class Type Registry ──────────────────────────────────────────────────
 
-(deftest infer-class-type-registry-register-and-lookup
+(deftest infer-class-type-registry-cases
+  "Class type registry: register+lookup returns slot list; lookup-slot finds slot type; unknowns return nil."
   (let ((slots (list (cons 'x cl-cc/type:type-int)
                      (cons 'y cl-cc/type:type-string))))
     (cl-cc/type:register-class-type 'test-class-7891 slots)
     (let ((result (cl-cc/type:lookup-class-type 'test-class-7891)))
       (assert-true result)
-      (assert-= 2 (length result)))))
-
-(deftest infer-class-type-registry-lookup-slot
+      (assert-= 2 (length result))))
   (cl-cc/type:register-class-type 'test-class-7892
     (list (cons 'name cl-cc/type:type-string)
           (cons 'age cl-cc/type:type-int)))
   (let ((ty (cl-cc/type:lookup-slot-type 'test-class-7892 'age)))
     (assert-true (cl-cc/type:type-primitive-p ty))
-    (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty))))
-
-(deftest infer-class-type-registry-unknowns-nil
+    (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty)))
   (cl-cc/type:register-class-type 'test-class-7893
     (list (cons 'x cl-cc/type:type-int)))
   (assert-null (cl-cc/type:lookup-slot-type 'test-class-7893 'nonexistent))
@@ -37,18 +34,15 @@
 
 ;;; ─── Type Alias Registry / Predicate Registry ────────────────────────────
 
-(deftest infer-registry-alias-roundtrip
+(deftest infer-registry-alias-and-pred-cases
+  "Alias registry roundtrip; custom predicate lookup; unknown predicate returns nil."
   (cl-cc/type:register-type-alias 'test-alias-7891 '(or fixnum string))
   (assert-equal '(or fixnum string) (cl-cc/type:lookup-type-alias 'test-alias-7891))
-  (assert-null (cl-cc/type:lookup-type-alias 'no-such-alias-xyz)))
-
-(deftest infer-registry-custom-predicate-lookup
+  (assert-null (cl-cc/type:lookup-type-alias 'no-such-alias-xyz))
   (cl-cc/type:register-type-predicate 'custom-pred-xyz-7891 cl-cc/type:type-int)
   (let ((ty (cl-cc/type::type-predicate-to-type 'custom-pred-xyz-7891)))
     (assert-true ty)
-    (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty))))
-
-(deftest infer-registry-unknown-pred-returns-nil
+    (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty)))
   (assert-null (cl-cc/type::type-predicate-to-type 'foobar-p)))
 
 (deftest-each infer-global-tables-are-hash-tables
@@ -150,14 +144,13 @@
 
 ;;; ─── infer: ast-the ───────────────────────────────────────────────────────
 
-(deftest infer-the-matching-type
+(deftest infer-the-cases
+  "ast-the: matching type→fixnum; refinement base→fixnum; type mismatch signals error."
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast '(the fixnum 42))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty)))))
-
-(deftest infer-the-refinement-base
+      (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty))))
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast '(the (refine fixnum plusp) 42))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
@@ -165,22 +158,19 @@
       (let ((prim (if (cl-cc/type::type-refinement-p ty)
                       (cl-cc/type::type-refinement-base ty)
                       ty)))
-        (assert-eq 'fixnum (cl-cc/type:type-primitive-name prim))))))
-
-(deftest infer-the-mismatch-signals
+        (assert-eq 'fixnum (cl-cc/type:type-primitive-name prim)))))
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast '(the string 42))))
     (assert-signals cl-cc/type:type-mismatch-error
       (infer-with-env ast))))
 
-(deftest infer-typed-hole-signals-error
+(deftest infer-typed-hole-cases
+  "Typed hole signals error; error message names in-scope variables."
   (reset-type-vars!)
   (let* ((env (type-env-extend 'x (type-to-scheme cl-cc/type:type-int) (type-env-empty)))
          (ast (cl-cc:lower-sexp-to-ast '(+ x _))))
     (assert-signals cl-cc/type::typed-hole-error
-      (cl-cc/type:infer ast env))))
-
-(deftest infer-typed-hole-message-names-in-scope
+      (cl-cc/type:infer ast env)))
   (reset-type-vars!)
   (let* ((env (type-env-extend 'x (type-to-scheme cl-cc/type:type-int) (type-env-empty)))
          (ast (cl-cc:lower-sexp-to-ast '(+ x _))))

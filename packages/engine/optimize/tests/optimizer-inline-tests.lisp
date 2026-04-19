@@ -14,28 +14,18 @@
 
 ;;; ─── opt-max-reg-index ───────────────────────────────────────────────────────
 
-(deftest opt-max-reg-index-empty-program
-  "opt-max-reg-index returns -1 for an empty instruction list."
-  (assert-= -1 (cl-cc/optimize::opt-max-reg-index nil)))
-
-(deftest opt-max-reg-index-single-register
-  "opt-max-reg-index finds the max N in a program using only :R0."
-  (let ((insts (list (make-vm-const :dst :r0 :value 1)
-                     (make-vm-ret   :reg :r0))))
-    (assert-= 0 (cl-cc/optimize::opt-max-reg-index insts))))
-
-(deftest opt-max-reg-index-multiple-registers
-  "opt-max-reg-index finds the highest index across all instructions."
-  (let ((insts (list (make-vm-const :dst :r0 :value 1)
-                     (make-vm-const :dst :r3 :value 2)
-                     (make-vm-move  :dst :r7 :src :r3)
-                     (make-vm-ret   :reg :r7))))
-    (assert-= 7 (cl-cc/optimize::opt-max-reg-index insts))))
-
-(deftest opt-max-reg-index-no-register-insts
-  "opt-max-reg-index returns -1 when no instructions use :RN registers."
-  (let ((insts (list (make-vm-label :name "L0"))))
-    (assert-= -1 (cl-cc/optimize::opt-max-reg-index insts))))
+(deftest-each opt-max-reg-index-cases
+  "opt-max-reg-index returns the highest :RN register index, or -1 if none present."
+  :cases (("empty"    nil                                                        -1)
+          ("label"    (list (make-vm-label :name "L0"))                         -1)
+          ("single"   (list (make-vm-const :dst :r0 :value 1)
+                            (make-vm-ret   :reg :r0))                            0)
+          ("multiple" (list (make-vm-const :dst :r0 :value 1)
+                            (make-vm-const :dst :r3 :value 2)
+                            (make-vm-move  :dst :r7 :src :r3)
+                            (make-vm-ret   :reg :r7))                            7))
+  (insts expected)
+  (assert-= expected (cl-cc/optimize::opt-max-reg-index insts)))
 
 ;;; ─── opt-make-renaming ───────────────────────────────────────────────────────
 
@@ -67,10 +57,15 @@
 
 ;;; ─── opt-collect-function-defs ───────────────────────────────────────────────
 
-(deftest opt-collect-function-defs-empty
-  "opt-collect-function-defs on empty instructions returns empty table."
-  (let ((ht (cl-cc/optimize::opt-collect-function-defs nil)))
-    (assert-= 0 (hash-table-count ht))))
+(deftest-each opt-collect-function-defs-empty-cases
+  "opt-collect-function-defs returns empty table for empty or jump-body inputs."
+  :cases (("empty" nil)
+          ("jump"  (list (make-vm-closure :dst :r0 :label "jmp-fn" :params '(:r0) :captured nil)
+                         (make-vm-label :name "jmp-fn")
+                         (make-vm-jump  :label "somewhere")
+                         (make-vm-ret   :reg :r0))))
+  (insts)
+  (assert-= 0 (hash-table-count (cl-cc/optimize::opt-collect-function-defs insts))))
 
 (deftest opt-collect-function-defs-linear-body
   "opt-collect-function-defs captures a linear function body."
@@ -87,18 +82,6 @@
     (let ((def (gethash "fn-label" ht)))
       (assert-true (not (null def)))
       (assert-true (not (null (getf def :body)))))))
-
-(deftest opt-collect-function-defs-rejects-jump-body
-  "opt-collect-function-defs excludes functions whose bodies contain jumps."
-  (let* ((closure (make-vm-closure :dst :r0 :label "jmp-fn"
-                                   :params '(:r0) :captured nil))
-         (lbl     (make-vm-label :name "jmp-fn"))
-         (jmp     (make-vm-jump  :label "somewhere"))
-         (ret     (make-vm-ret   :reg :r0))
-         (insts   (list closure lbl jmp ret))
-         (ht      (cl-cc/optimize::opt-collect-function-defs insts)))
-    ;; Jump inside body → not collected
-    (assert-= 0 (hash-table-count ht))))
 
 ;;; ─── opt-build-function-name-map ─────────────────────────────────────────────
 
@@ -163,76 +146,55 @@
 
 ;;; ─── opt-known-callee-labels ─────────────────────────────────────────────────
 
-(deftest opt-known-callee-labels-tracks-closure
-  "opt-known-callee-labels records reg→label for vm-closure instructions."
-  (let* ((closure (make-vm-closure :dst :r0 :label "my-fn"
-                                   :params nil :captured nil))
-         (insts   (list closure))
-         (table   (cl-cc/optimize::opt-known-callee-labels insts)))
-    (assert-equal "my-fn" (gethash :r0 table))))
-
-(deftest opt-known-callee-labels-propagates-through-move
-  "opt-known-callee-labels propagates label tracking through vm-move."
-  (let* ((closure (make-vm-closure :dst :r0 :label "fn-x"
-                                   :params nil :captured nil))
-         (mv      (make-vm-move :dst :r1 :src :r0))
-         (insts   (list closure mv))
-         (table   (cl-cc/optimize::opt-known-callee-labels insts)))
-    (assert-equal "fn-x" (gethash :r1 table))))
-
-(deftest opt-known-callee-labels-clears-on-overwrite
-  "opt-known-callee-labels clears a register when it gets a new definition."
-  (let* ((closure (make-vm-closure :dst :r0 :label "fn-a"
-                                   :params nil :captured nil))
-         (overwrite (make-vm-const :dst :r0 :value 99))
-         (insts   (list closure overwrite))
-         (table   (cl-cc/optimize::opt-known-callee-labels insts)))
-    ;; After being overwritten by vm-const, :r0 should no longer track "fn-a"
-    (assert-null (gethash :r0 table))))
+(deftest-each opt-known-callee-labels-cases
+  "opt-known-callee-labels: tracks closure reg→label, propagates through moves, clears on overwrite."
+  :cases (("closure"
+           (list (make-vm-closure :dst :r0 :label "my-fn" :params nil :captured nil))
+           :r0 "my-fn")
+          ("propagate"
+           (list (make-vm-closure :dst :r0 :label "fn-x" :params nil :captured nil)
+                 (make-vm-move :dst :r1 :src :r0))
+           :r1 "fn-x")
+          ("cleared"
+           (list (make-vm-closure :dst :r0 :label "fn-a" :params nil :captured nil)
+                 (make-vm-const :dst :r0 :value 99))
+           :r0 nil))
+  (insts reg expected)
+  (let ((table (cl-cc/optimize::opt-known-callee-labels insts)))
+    (assert-equal expected (gethash reg table))))
 
 ;;; ─── opt-can-safely-rename-p ─────────────────────────────────────────────────
 
-(deftest opt-can-safely-rename-p-simple-body
-  "opt-can-safely-rename-p returns T for a simple move+ret body."
-  (let* ((insts (list (make-vm-move :dst :R0 :src :R1)
-                      (make-vm-ret :reg :R0))))
-    (assert-true (cl-cc/optimize::opt-can-safely-rename-p insts))))
-
-(deftest opt-can-safely-rename-p-empty-body
-  "opt-can-safely-rename-p returns T for an empty instruction list."
-  (assert-true (cl-cc/optimize::opt-can-safely-rename-p nil)))
+(deftest-each opt-can-safely-rename-p-cases
+  "opt-can-safely-rename-p returns T for any safe instruction list."
+  :cases (("simple" (list (make-vm-move :dst :R0 :src :R1) (make-vm-ret :reg :R0)))
+          ("empty"  nil))
+  (insts)
+  (assert-true (cl-cc/optimize::opt-can-safely-rename-p insts)))
 
 ;;; ─── opt-rename-regs-in-inst ─────────────────────────────────────────────────
 
-(deftest opt-rename-regs-in-inst-renames-dst
-  "opt-rename-regs-in-inst renames destination register via renaming table."
+(deftest opt-rename-regs-in-inst-behavior
+  "opt-rename-regs-in-inst renames from table; leaves registers with no mapping unchanged."
   (let* ((inst     (make-vm-move :dst :R0 :src :R1))
          (renaming (let ((ht (make-hash-table :test #'eq)))
-                     (setf (gethash :R0 ht) :R10
-                           (gethash :R1 ht) :R11)
-                     ht))
+                     (setf (gethash :R0 ht) :R10 (gethash :R1 ht) :R11) ht))
          (renamed  (cl-cc/optimize::opt-rename-regs-in-inst inst renaming)))
     (assert-eq :R10 (cl-cc::vm-dst renamed))
-    (assert-eq :R11 (cl-cc::vm-src renamed))))
-
-(deftest opt-rename-regs-in-inst-unchanged-on-missing-key
-  "opt-rename-regs-in-inst leaves registers not in renaming table unchanged."
-  (let* ((inst     (make-vm-move :dst :R0 :src :R1))
-         (renaming (make-hash-table :test #'eq))   ; empty — no mappings
-         (renamed  (cl-cc/optimize::opt-rename-regs-in-inst inst renaming)))
+    (assert-eq :R11 (cl-cc::vm-src renamed)))
+  (let* ((renamed (cl-cc/optimize::opt-rename-regs-in-inst
+                   (make-vm-move :dst :R0 :src :R1)
+                   (make-hash-table :test #'eq))))
     (assert-eq :R0 (cl-cc::vm-dst renamed))
     (assert-eq :R1 (cl-cc::vm-src renamed))))
 
 ;;; ─── opt-body-has-global-refs-p ──────────────────────────────────────────────
 
-(deftest opt-body-has-global-refs-p-no-global-refs
-  "opt-body-has-global-refs-p returns NIL when all reads are params or local dsts."
-  (let* ((insts (list (make-vm-add :dst :R2 :lhs :R0 :rhs :R1)
-                      (make-vm-ret :reg :R2))))
-    (assert-null (cl-cc/optimize::opt-body-has-global-refs-p insts '(:R0 :R1)))))
-
-(deftest opt-body-has-global-refs-p-detects-global
-  "opt-body-has-global-refs-p returns T when a register is read but not in params or prior dsts."
-  (let* ((insts (list (make-vm-move :dst :R2 :src :R99)  ; :R99 is not a param
-                      (make-vm-ret :reg :R2))))
-    (assert-true (cl-cc/optimize::opt-body-has-global-refs-p insts '(:R0)))))
+(deftest-each opt-body-has-global-refs-p-cases
+  "opt-body-has-global-refs-p detects registers read outside params and prior dsts."
+  :cases (("no-globals" (list (make-vm-add :dst :R2 :lhs :R0 :rhs :R1) (make-vm-ret :reg :R2)) '(:R0 :R1) nil)
+          ("detects"    (list (make-vm-move :dst :R2 :src :R99) (make-vm-ret :reg :R2))         '(:R0)     t))
+  (insts params expected)
+  (if expected
+      (assert-true (cl-cc/optimize::opt-body-has-global-refs-p insts params))
+      (assert-null (cl-cc/optimize::opt-body-has-global-refs-p insts params))))

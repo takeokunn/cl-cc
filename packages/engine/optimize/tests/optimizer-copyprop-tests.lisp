@@ -32,23 +32,13 @@
   (expected tree fn)
   (assert-equal expected (cl-cc/optimize::opt-map-tree fn tree)))
 
-(deftest copyprop-map-tree-pair
-  "opt-map-tree doubles both leaves of a cons pair."
-  (let ((result (cl-cc/optimize::opt-map-tree (lambda (x) (if (numberp x) (* x 2) x))
-                                     '(1 . 2))))
-    (assert-equal '(2 . 4) result)))
-
-(deftest copyprop-map-tree-proper-list
-  "opt-map-tree doubles all elements of a proper list."
-  (let ((result (cl-cc/optimize::opt-map-tree (lambda (x) (if (numberp x) (* x 2) x))
-                                     '(1 2 3))))
-    (assert-equal '(2 4 6) result)))
-
-(deftest copyprop-map-tree-improper-list
-  "opt-map-tree handles an improper list (non-nil cdr of last pair)."
-  (let ((result (cl-cc/optimize::opt-map-tree (lambda (x) (if (numberp x) (* x 10) x))
-                                     '(1 2 . 3))))
-    (assert-equal '(10 20 . 30) result)))
+(deftest-each copyprop-map-tree-structured
+  "opt-map-tree doubles number leaves in cons pairs, proper lists, and improper lists."
+  :cases (("pair"     '(1 . 2)   '(2 . 4))
+          ("proper"   '(1 2 3)   '(2 4 6))
+          ("improper" '(1 2 . 3) '(2 4 . 6)))
+  (tree expected)
+  (assert-equal expected (cl-cc/optimize::opt-map-tree (lambda (x) (if (numberp x) (* x 2) x)) tree)))
 
 (deftest copyprop-map-tree-rewrite-register
   "opt-map-tree rewrites :r1 to :r0 everywhere inside a nested sexp."
@@ -98,18 +88,14 @@
   (let ((env (apply #'%make-copy-env pairs)))
     (assert-eq expected (cl-cc/optimize::%opt-copy-prop-canonical reg env))))
 
-(deftest copyprop-canonical-self-loop
-  "Canonical terminates when the chain loops back to itself."
-  (let* ((env    (%make-copy-env :r0 :r0))
+(deftest-each copyprop-canonical-termination-cases
+  "Canonical terminates on self-loops and mutual copy cycles."
+  :cases (("self-loop" '(:r0 :r0)        (lambda (r) (eq r :r0)))
+          ("cycle"     '(:r0 :r1 :r1 :r0) (lambda (r) (or (eq r :r0) (eq r :r1)))))
+  (pairs pred)
+  (let* ((env    (apply #'%make-copy-env pairs))
          (result (cl-cc/optimize::%opt-copy-prop-canonical :r0 env)))
-    (assert-eq :r0 result)))
-
-(deftest copyprop-canonical-cycle-terminates
-  "Canonical terminates on a mutual copy cycle without infinite looping."
-  (let* ((env    (%make-copy-env :r0 :r1 :r1 :r0))
-         (result (cl-cc/optimize::%opt-copy-prop-canonical :r0 env)))
-    ;; Exact root is implementation-defined; only termination matters.
-    (assert-true (or (eq result :r0) (eq result :r1)))))
+    (assert-true (funcall pred result))))
 
 ;;; ── %opt-copy-prop-add / %opt-copy-prop-kill ────────────────────────────────
 
@@ -121,29 +107,27 @@
     (assert-eq :r0 (gethash :r1 copies))
     (assert-true (member :r1 (gethash :r0 reverse)))))
 
-(deftest copyprop-kill-removes-copy
-  "kill removes the copy fact and all facts that depended on it."
+(deftest-each copyprop-kill-cases
+  "kill source removes all dependents; kill destination removes only that fact."
+  :cases (("kill-source" :r0 '(:r1 :r2) nil)
+          ("kill-dst"    :r1 '(:r1)     :r0))
+  (kill-reg removed-regs surviving-r2-val)
   (let* ((copies  (%make-copy-env :r1 :r0 :r2 :r0))
          (reverse (cl-cc/optimize::%opt-copy-prop-build-reverse copies)))
-    ;; Kill :r0 (the source) — should remove both :r1 and :r2
-    (cl-cc/optimize::%opt-copy-prop-kill :r0 copies reverse)
-    (assert-false (gethash :r1 copies))
-    (assert-false (gethash :r2 copies))))
-
-(deftest copyprop-kill-dst-only
-  "Killing a destination register removes just that one copy fact."
-  (let* ((copies  (%make-copy-env :r1 :r0 :r2 :r0))
-         (reverse (cl-cc/optimize::%opt-copy-prop-build-reverse copies)))
-    (cl-cc/optimize::%opt-copy-prop-kill :r1 copies reverse)
-    (assert-false (gethash :r1 copies))
-    (assert-eq    :r0 (gethash :r2 copies))))
+    (cl-cc/optimize::%opt-copy-prop-kill kill-reg copies reverse)
+    (dolist (r removed-regs)
+      (assert-false (gethash r copies)))
+    (when surviving-r2-val
+      (assert-eq surviving-r2-val (gethash :r2 copies)))))
 
 ;;; ── %opt-copy-prop-merge ────────────────────────────────────────────────────
 
-(deftest copyprop-merge-empty-list
-  "Merging an empty list yields an empty environment."
-  (let ((result (cl-cc/optimize::%opt-copy-prop-merge nil)))
-    (assert-equal 0 (hash-table-count result))))
+(deftest-each copyprop-merge-empty-result-cases
+  "Merging an empty list or two disjoint environments both yield an empty environment."
+  :cases (("empty-input" nil)
+          ("disjoint"    (list (%make-copy-env :r1 :r0) (%make-copy-env :r3 :r2))))
+  (envs)
+  (assert-equal 0 (hash-table-count (cl-cc/optimize::%opt-copy-prop-merge envs))))
 
 (deftest copyprop-merge-single
   "Merging a single-element list copies that environment."
@@ -151,27 +135,15 @@
          (result (cl-cc/optimize::%opt-copy-prop-merge (list env))))
     (assert-true (cl-cc/optimize::%opt-copy-prop-env-equal-p env result))))
 
-(deftest copyprop-merge-intersection-kept
-  "Merge keeps only bindings on which all environments agree."
-  (let* ((a      (%make-copy-env :r1 :r0 :r2 :r0))
-         (b      (%make-copy-env :r1 :r0 :r2 :r3))   ; :r2 disagrees
-         (result (cl-cc/optimize::%opt-copy-prop-merge (list a b))))
-    (assert-eq    :r0   (gethash :r1 result))  ; :r1→:r0 in both → kept
-    (assert-false (gethash :r2 result))))       ; :r2 disagrees → dropped
-
-(deftest copyprop-merge-disjoint-drops-all
-  "Merging environments with no common bindings yields empty environment."
-  (let* ((a      (%make-copy-env :r1 :r0))
-         (b      (%make-copy-env :r3 :r2))
-         (result (cl-cc/optimize::%opt-copy-prop-merge (list a b))))
-    (assert-equal 0 (hash-table-count result))))
-
-(deftest copyprop-merge-three-way
-  "Three-way merge keeps only bindings present in all three environments."
-  (let* ((a      (%make-copy-env :r1 :r0 :r2 :r0))
-         (b      (%make-copy-env :r1 :r0 :r2 :r3))   ; :r2 disagrees
-         (c      (%make-copy-env :r1 :r0))              ; :r2 absent
-         (result (cl-cc/optimize::%opt-copy-prop-merge (list a b c))))
+(deftest-each copyprop-merge-disagreement-cases
+  "Merge drops bindings where environments disagree; 2-way and 3-way."
+  :cases (("two-way"   (list (%make-copy-env :r1 :r0 :r2 :r0)
+                             (%make-copy-env :r1 :r0 :r2 :r3)))
+          ("three-way" (list (%make-copy-env :r1 :r0 :r2 :r0)
+                             (%make-copy-env :r1 :r0 :r2 :r3)
+                             (%make-copy-env :r1 :r0))))
+  (envs)
+  (let ((result (cl-cc/optimize::%opt-copy-prop-merge envs)))
     (assert-eq    :r0   (gethash :r1 result))
     (assert-false (gethash :r2 result))))
 

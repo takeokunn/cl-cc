@@ -17,5 +17,6 @@
    (:file "prolog-data")
    (:file "prolog")
    (:file "prolog-builtins")
-   (:file "prolog-query")
+   (:file "prolog-solver")
+   (:file "prolog-peephole")
    (:file "dcg")))

@@ -50,6 +50,14 @@
   (table)
   (assert-true (> (length table) 0)))
 
+(deftest-each builtin-table-minimum-sizes
+  "Key tables have minimum entry counts for their respective calling conventions."
+  :cases (("nullary"        cl-cc/compile::*builtin-nullary-entries*        10)
+          ("binary-custom"  cl-cc/compile::*builtin-binary-custom-entries*  10)
+          ("ternary-custom" cl-cc/compile::*builtin-ternary-custom-entries*  5))
+  (table min-size)
+  (assert-true (>= (length table) min-size)))
+
 ;;; ─── *builtin-table-query-entries* ──────────────────────────────────────
 
 (deftest-each builtin-table-query-representative-entries
@@ -102,10 +110,6 @@
   (sym expected-ctor)
   (assert-equal expected-ctor (cdr (assoc sym cl-cc/compile::*builtin-nullary-entries*))))
 
-(deftest builtin-nullary-table-size
-  "*builtin-nullary-entries* has at least 10 entries (env queries + core ops)."
-  (assert-true (>= (length cl-cc/compile::*builtin-nullary-entries*) 10)))
-
 ;;; ─── *builtin-string-trim-entries* ──────────────────────────────────────
 
 (deftest-each builtin-string-trim-all-variants
@@ -130,10 +134,6 @@
     (assert-equal expected-ctor (second entry))
     (assert-eq slot1 (third entry))
     (assert-eq slot2 (fourth entry))))
-
-(deftest builtin-binary-custom-table-size
-  "*builtin-binary-custom-entries* has at least 10 entries."
-  (assert-true (>= (length cl-cc/compile::*builtin-binary-custom-entries*) 10)))
 
 ;;; ─── *builtin-binary-move-first-entries* ────────────────────────────────
 
@@ -265,6 +265,3 @@
     (assert-eq slot3 (fifth entry))
     (assert-eq return-style (sixth entry))))
 
-(deftest builtin-ternary-custom-table-size
-  "*builtin-ternary-custom-entries* has at least 5 entries."
-  (assert-true (>= (length cl-cc/compile::*builtin-ternary-custom-entries*) 5)))

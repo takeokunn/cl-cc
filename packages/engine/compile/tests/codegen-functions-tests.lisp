@@ -227,32 +227,32 @@ test, which isn't worth the test-quality tradeoff."
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-ret))
     (assert-true (assoc 'p (cl-cc/compile::ctx-env ctx)))))
 
-(deftest codegen-flet-noescape-function-uses-vm-func-ref
-  "Zero-capture flet bindings use vm-func-ref instead of vm-closure." 
+(deftest-each codegen-flet-closure-vs-func-ref
+  "flet: zero-capture bindings use vm-func-ref; capturing bindings fall back to vm-closure."
+  :cases (("noescape"   :noescape)
+          ("capturing"  :capturing))
+  (scenario)
   (let ((ctx (make-codegen-ctx)))
     (let ((reg (compile-ast
-                (make-ast-flet
-                 :bindings (list (list 'f '(x) (make-ast-var :name 'x)))
-                 :body (list (make-ast-call :func 'f
-                                            :args (list (make-ast-int :value 5)))))
+                (ecase scenario
+                  (:noescape
+                   (make-ast-flet
+                    :bindings (list (list 'f '(x) (make-ast-var :name 'x)))
+                    :body (list (make-ast-call :func 'f :args (list (make-ast-int :value 5))))))
+                  (:capturing
+                   (make-ast-let
+                    :bindings (list (cons 'y (make-ast-int :value 9)))
+                    :body (list (make-ast-flet
+                                 :bindings (list (list 'f '(x) (make-ast-var :name 'y)))
+                                 :body (list (make-ast-call :func 'f :args (list (make-ast-int :value 5)))))))))
                 ctx)))
       (assert-true (keywordp reg))
-      (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-func-ref))
-      (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-closure)))))
-
-(deftest codegen-flet-capturing-function-falls-back-to-vm-closure
-  "Flet bindings that capture outer variables still allocate vm-closure." 
-  (let ((ctx (make-codegen-ctx)))
-    (let ((reg (compile-ast
-                (make-ast-let
-                 :bindings (list (cons 'y (make-ast-int :value 9)))
-                 :body (list (make-ast-flet
-                              :bindings (list (list 'f '(x) (make-ast-var :name 'y)))
-                              :body (list (make-ast-call :func 'f
-                                                         :args (list (make-ast-int :value 5)))))))
-                ctx)))
-      (assert-true (keywordp reg))
-      (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-closure)))))
+      (ecase scenario
+        (:noescape
+         (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-func-ref))
+         (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-closure)))
+        (:capturing
+         (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-closure)))))))
 
 (deftest-each codegen-rest-params-stack-alloc-classification
   "&rest param closures are marked stack-safe iff the rest list cannot escape."

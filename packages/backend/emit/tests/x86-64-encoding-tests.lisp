@@ -53,16 +53,14 @@
     (assert-equal 1 (length bytes))
     (assert-equal expected (first bytes))))
 
-(deftest x86-emit-multi-byte-le
-  "emit-dword writes 4 LE bytes; emit-qword writes 8 LE bytes."
-  (let ((dw (%x86-encoding-collect-bytes (lambda (s) (cl-cc/emit::emit-dword #xDEADBEEF s))))
-        (qw (%x86-encoding-collect-bytes (lambda (s) (cl-cc/emit::emit-qword #x0102030405060708 s)))))
-    (assert-equal 4 (length dw))
-    (assert-equal '(#xEF #xBE #xAD #xDE) dw)
-    (assert-equal 8 (length qw))
-    (assert-equal #x08 (first qw))
-    (assert-equal #x07 (second qw))
-    (assert-equal #x01 (eighth qw))))
+(deftest-each x86-emit-multi-byte-le
+  "emit-dword/emit-qword write little-endian bytes."
+  :cases (("dword" (lambda (s) (cl-cc/emit::emit-dword #xDEADBEEF s))
+                   '(#xEF #xBE #xAD #xDE))
+          ("qword" (lambda (s) (cl-cc/emit::emit-qword #x0102030405060708 s))
+                   '(#x08 #x07 #x06 #x05 #x04 #x03 #x02 #x01)))
+  (emit-fn expected-bytes)
+  (assert-equal expected-bytes (%x86-encoding-collect-bytes emit-fn)))
 
 ;;; ─── emit-add-rr64 / emit-sub-rr64 ──────────────────────────────────────
 

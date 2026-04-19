@@ -41,38 +41,39 @@ When TAIL-P is true, replace the current leaf frame instead of pushing a new one
 ;;; Data table: (symbol . initial-value-thunk-or-value)
 ;;; Thunks (lambdas) are called at init time so each vm-state gets a fresh value.
 (defparameter *vm-initial-globals*
-  `(;; Feature / module flags (FR-1206)
-    (*features*                    (:common-lisp :cl-cc))
-    (*modules*                     nil)
-    (*active-restarts*             nil)
-    ;; Time (FR-1204) and random state (FR-1205)
-    (internal-time-units-per-second internal-time-units-per-second)
-    (*random-state*                *random-state*)
-    ;; Standard I/O streams — bound to host streams at init
-    (*standard-output*  *standard-output*)
-    (*standard-input*   *standard-input*)
-    (*error-output*     *error-output*)
-    (*trace-output*     *trace-output*)
-    (*debug-io*         *debug-io*)
-    (*query-io*         *query-io*)
-    ;; Print-control variables (ANSI CL defaults)
-    (*print-base*       10)
-    (*print-radix*      nil)
-    (*print-circle*     nil)
-    (*print-pretty*     nil)
-    (*print-level*      nil)
-    (*print-length*     nil)
-    (*print-escape*     t)
-    (*print-readably*   nil)
-    (*print-gensym*     t)
-    (*readtable*        nil)
-    ;; Package system — bind *package* to host CL-USER
-    (*package*          ,(find-package :cl-user))
-    ;; Condition/restart system
-    (*%condition-handlers* nil)
-    (*%active-restarts*    nil)
-    ;; Documentation table (FR-607): (name . type) → docstring
-    (*documentation-table* nil))
+  (list
+   ;; Feature / module flags (FR-1206)
+   '(*features* (:common-lisp :cl-cc))
+   '(*modules* nil)
+   '(*active-restarts* nil)
+   ;; Time (FR-1204) and random state (FR-1205)
+   '(internal-time-units-per-second internal-time-units-per-second)
+   '(*random-state* *random-state*)
+   ;; Standard I/O streams — bound to host streams at init
+   '(*standard-output* *standard-output*)
+   '(*standard-input* *standard-input*)
+   '(*error-output* *error-output*)
+   '(*trace-output* *trace-output*)
+   '(*debug-io* *debug-io*)
+   '(*query-io* *query-io*)
+   ;; Print-control variables (ANSI CL defaults)
+   '(*print-base* 10)
+   '(*print-radix* nil)
+   '(*print-circle* nil)
+   '(*print-pretty* nil)
+   '(*print-level* nil)
+   '(*print-length* nil)
+   '(*print-escape* t)
+   '(*print-readably* nil)
+   '(*print-gensym* t)
+   '(*readtable* nil)
+   ;; Package system — bind *package* to host CL-USER
+   (list '*package* (find-package :cl-user))
+   ;; Condition/restart system
+   '(*%condition-handlers* nil)
+   '(*%active-restarts* nil)
+   ;; Documentation table (FR-607): (name . type) → docstring
+   '(*documentation-table* nil))
   "Initial bindings for standard ANSI CL global variables in each vm-state.")
 
 ;;; CL-level declaration so (boundp '*documentation-table*) is T in the compiler

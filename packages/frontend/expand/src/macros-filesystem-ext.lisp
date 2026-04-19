@@ -7,158 +7,177 @@
 ;;; See also: macros-filesystem.lisp (core I/O, bit-array, time/room/break)
 
 ;;; ─── pprint-related stubs (FR-357) ───────────────────────────────────────────
+;;;
+;;; All pprint stubs evaluate their args (for side effects) and delegate
+;;; the actual print to prin1. The data table below encodes:
+;;;   (name . extra-arg-count-before-object)
+;;; where extra args are flags like colon-p / tabsize.
 
-(our-defmacro pprint-fill (stream object &optional colon-p at-sign-p)
-  "Pretty-print list with fill style (stub — delegates to prin1)."
-  `(progn ,colon-p ,at-sign-p (prin1 ,object ,stream)))
+(defun %make-pprint-stub-handler (extra-arg-accessors)
+  "Build a pprint stub: eval extra args, then (prin1 object stream)."
+  (lambda (form env)
+    (declare (ignore env))
+    (cons 'progn
+          (append (mapcar (lambda (acc) (funcall acc form)) extra-arg-accessors)
+                  (list (list 'prin1 (third form) (second form)))))))
 
-(our-defmacro pprint-linear (stream object &optional colon-p at-sign-p)
-  "Pretty-print list with linear style (stub — delegates to prin1)."
-  `(progn ,colon-p ,at-sign-p (prin1 ,object ,stream)))
+(let ((with-two-flags  (list #'fourth #'fifth))
+      (with-two-flags+ (list #'fourth #'fifth #'sixth)))
+  ;; pprint-fill and pprint-linear share the same expansion
+  (let ((handler (%make-pprint-stub-handler with-two-flags)))
+    (register-macro 'pprint-fill   handler)
+    (register-macro 'pprint-linear handler))
+  (register-macro 'pprint-tabular (%make-pprint-stub-handler with-two-flags+)))
 
-(our-defmacro pprint-tabular (stream object &optional colon-p at-sign-p tabsize)
-  "Pretty-print list with tabular style (stub)."
-  `(progn ,colon-p ,at-sign-p ,tabsize (prin1 ,object ,stream)))
+;;; Stubs that evaluate N args and return nil (no print delegation needed)
+(dolist (spec '((pprint-newline  second third)
+                (pprint-tab      second third fourth fifth)
+                (pprint-indent   second third fourth)))
+  (let* ((name (first spec))
+         (accessors (mapcar #'symbol-function (rest spec))))
+    (register-macro name
+      (lambda (form env)
+        (declare (ignore env))
+        (cons 'progn (append (mapcar (lambda (f) (funcall f form)) accessors)
+                             (list nil)))))))
 
-(our-defmacro pprint-newline (kind &optional stream)
-  "Emit a conditional newline (stub — ignored in cl-cc)."
-  `(progn ,kind ,stream nil))
-
-(our-defmacro pprint-tab (kind column colinc &optional stream)
-  "Move to column for tabbing (stub — ignored in cl-cc)."
-  `(progn ,kind ,column ,colinc ,stream nil))
-
-(our-defmacro pprint-indent (relative-to n &optional stream)
-  "Set indentation (stub — ignored in cl-cc)."
-  `(progn ,relative-to ,n ,stream nil))
-
-(our-defmacro pprint-logical-block (spec &rest body)
-  "Execute BODY as a logical block for pretty printing (stub)."
-  (let* ((stream-symbol (car spec))
-         (rest-spec     (cddr spec))  ; skip stream-sym and list
-         (prefix        (getf rest-spec :prefix))
-         (per-line-prefix (getf rest-spec :per-line-prefix))
-         (suffix        (getf rest-spec :suffix)))
-    `(progn ,prefix ,per-line-prefix ,suffix ,stream-symbol ,@body)))
+(register-macro 'pprint-logical-block
+  (lambda (form env)
+    (declare (ignore env))
+    (let* ((spec (second form))
+           (body (cddr form))
+           (stream-symbol (car spec))
+           (rest-spec (cddr spec))
+           (prefix (getf rest-spec :prefix))
+           (per-line-prefix (getf rest-spec :per-line-prefix))
+           (suffix (getf rest-spec :suffix)))
+      (cons 'progn (append (list prefix per-line-prefix suffix stream-symbol) body)))))
 
 ;;; ─── file-string-length stub (FR-591) ────────────────────────────────────────
 
-(our-defmacro file-string-length (stream object)
-  "Return the number of UTF-8 octets needed to write OBJECT to STREAM."
-  (let ((obj-g (gensym "OBJ")))
-    `(progn ,stream
-       (let ((,obj-g ,object))
-         (if (characterp ,obj-g)
-             (length (string-to-octets (string ,obj-g) :encoding :utf-8))
-             (length (string-to-octets ,obj-g :encoding :utf-8)))))))
+(register-macro 'file-string-length
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((stream (second form))
+          (object (third form))
+          (obj-g (gensym "OBJ")))
+      (list 'progn stream
+            (list 'let (list (list obj-g object))
+                  (list 'if (list 'characterp obj-g)
+                        (list 'length (list 'string-to-octets (list 'string obj-g) :encoding :utf-8))
+                        (list 'length (list 'string-to-octets obj-g :encoding :utf-8))))))))
 
 ;;; ─── stream-external-format stub (FR-562) ────────────────────────────────────
 
-(our-defmacro stream-external-format (stream)
-  "Return the external format of STREAM (stub returns :default)."
-  `(progn ,stream :default))
+(register-macro 'stream-external-format
+  (lambda (form env)
+    (declare (ignore env))
+    (list 'progn (second form) :default)))
 
 ;;; ─── trace / untrace stubs (FR-432) ──────────────────────────────────────────
 
-(our-defmacro trace (&rest function-names)
-  "Enable tracing for FUNCTION-NAMES via the host SBCL runtime."
-  `(progn (cl:trace ,@function-names) nil))
+(register-macro 'trace
+  (lambda (form env)
+    (declare (ignore env))
+    (list 'progn (cons 'cl:trace (cdr form)) nil)))
 
-(our-defmacro untrace (&rest function-names)
-  "Disable tracing for FUNCTION-NAMES via the host SBCL runtime."
-  `(progn (cl:untrace ,@function-names) nil))
+(register-macro 'untrace
+  (lambda (form env)
+    (declare (ignore env))
+    (list 'progn (cons 'cl:untrace (cdr form)) nil)))
 
 ;;; ─── step stub (FR-433) ───────────────────────────────────────────────────────
 
-(our-defmacro step (form)
-  "Single-step through FORM via the host SBCL runtime."
-  `(cl:step ,form))
+(register-macro 'step
+  (lambda (form env)
+    (declare (ignore env))
+    (list 'cl:step (second form))))
 
 ;;; ─── disassemble stub (FR-576) ───────────────────────────────────────────────
 
-(our-defmacro disassemble (function)
-  "Print disassembly of FUNCTION via the host SBCL runtime."
-  `(progn (cl:disassemble ,function) nil))
+(register-macro 'disassemble
+  (lambda (form env)
+    (declare (ignore env))
+    (list 'progn (list 'cl:disassemble (second form)) nil)))
 
 ;;; ─── inspect stub (FR-577) ────────────────────────────────────────────────────
 
-(our-defmacro inspect (object)
-  "Inspect OBJECT via the host SBCL runtime."
-  `(progn (cl:inspect ,object) nil))
+(register-macro 'inspect
+  (lambda (form env)
+    (declare (ignore env))
+    (list 'progn (list 'cl:inspect (second form)) nil)))
 
 ;;; ─── apropos / apropos-list (FR-435) — registered as host bridges in vm.lisp ──
 
 ;;; ─── ed stub (FR-515) ─────────────────────────────────────────────────────────
 
-(our-defmacro ed (&optional x)
-  "Invoke editor on X (stub — no-op in cl-cc)."
-  `(progn ,x nil))
+(register-macro 'ed
+  (lambda (form env)
+    (declare (ignore env))
+    (list 'progn (second form) nil)))
 
 ;;; ─── invoke-debugger stub (FR-557) ───────────────────────────────────────────
 
-(our-defmacro invoke-debugger (condition)
-  "Invoke the debugger on CONDITION (stub — signals error in cl-cc)."
-  `(error ,condition))
+(register-macro 'invoke-debugger
+  (lambda (form env)
+    (declare (ignore env))
+    (list 'error (second form))))
 
 ;;; ─── compiler-let stub (FR-439) ───────────────────────────────────────────────
 
-(our-defmacro compiler-let (bindings &rest body)
-  "Bind variables at compile time (stub — acts as let at runtime in cl-cc)."
-  `(let ,bindings ,@body))
+(register-macro 'compiler-let
+  (lambda (form env)
+    (declare (ignore env))
+    (cons 'let (cons (second form) (cddr form)))))
 
 ;;; ─── read-char-no-hang (FR-568) ──────────────────────────────────────────────
 
-(our-defmacro read-char-no-hang (&optional (stream '*standard-input*)
-                                  (eof-error-p t) eof-value recursive-p)
-  "Return next char if available without waiting, else nil (stub — delegates to read-char)."
-  `(read-char ,stream ,eof-error-p ,eof-value ,recursive-p))
+(register-macro 'read-char-no-hang
+  (lambda (form env)
+    (declare (ignore env))
+    (list 'read-char
+          (or (second form) '*standard-input*)
+          (if (third form) (third form) t)
+          (fourth form)
+          (fifth form))))
 
 ;;; ─── FR-358: Readtable API stubs ─────────────────────────────────────────────
 ;;; cl-cc uses a fixed built-in lexer; readtables are not user-customizable.
-;;; These stubs accept args for ANSI CL compatibility without signaling errors.
+;;; All stubs evaluate their args (for side effects) then return a fixed value.
+;;;
+;;; Format: (macro-name nargs return-value)
+;;; NARGS is how many consecutive form args starting at (second form) to include.
 
-(our-defmacro readtablep (x)
-  "Return nil (cl-cc has no user-defined readtables)."
-  `(progn ,x nil))
+(defparameter *readtable-stub-specs*
+  '((readtablep                   1 nil)
+    (copy-readtable                2 nil)
+    (readtable-case                1 :upcase)
+    (get-macro-character           2 (values nil nil))
+    (get-dispatch-macro-character  3 nil)
+    (set-macro-character           4 t)
+    (set-dispatch-macro-character  4 t)
+    (make-dispatch-macro-character 3 t)
+    (set-syntax-from-char          4 t))
+  "ANSI CL readtable API stubs: (name nargs return-value).")
 
-(our-defmacro copy-readtable (&optional from to)
-  "Return nil (cl-cc readtable stub)."
-  `(progn ,from ,to nil))
-
-(our-defmacro readtable-case (readtable)
-  "Return :upcase (cl-cc always uses upcase)."
-  `(progn ,readtable :upcase))
-
-(our-defmacro set-macro-character (char fn &optional non-terminating-p readtable)
-  "No-op stub — cl-cc's reader is not user-extensible."
-  `(progn ,char ,fn ,non-terminating-p ,readtable t))
-
-(our-defmacro get-macro-character (char &optional readtable)
-  "Return (values nil nil) — no user-defined macro chars."
-  `(progn ,char ,readtable (values nil nil)))
-
-(our-defmacro set-dispatch-macro-character (disp-char sub-char fn &optional readtable)
-  "No-op stub."
-  `(progn ,disp-char ,sub-char ,fn ,readtable t))
-
-(our-defmacro get-dispatch-macro-character (disp-char sub-char &optional readtable)
-  "Return nil — no user-defined dispatch chars."
-  `(progn ,disp-char ,sub-char ,readtable nil))
-
-(our-defmacro make-dispatch-macro-character (char &optional non-terminating-p readtable)
-  "No-op stub."
-  `(progn ,char ,non-terminating-p ,readtable t))
-
-(our-defmacro set-syntax-from-char (to-char from-char &optional to-readtable from-readtable)
-  "No-op stub."
-  `(progn ,to-char ,from-char ,to-readtable ,from-readtable t))
+(dolist (spec *readtable-stub-specs*)
+  (let* ((name    (first  spec))
+         (nargs   (second spec))
+         (retval  (third  spec)))
+    (register-macro name
+      (lambda (form env)
+        (declare (ignore env))
+        (cons 'progn
+              (append (loop for i from 1 to nargs collect (nth i form))
+                      (list retval)))))))
 
 ;;; ─── FR-589: compile-file stub ───────────────────────────────────────────────
 
-(our-defmacro compile-file (pathname &rest keys)
-  ;; Load PATHNAME (cl-cc compiles by loading). Extra keyword args ignored.
-  (let ((path-var (gensym "PATH")))
-    (declare (ignore keys))
-    `(let ((,path-var ,pathname))
-       (our-load ,path-var)
-       (values (probe-file ,path-var) nil nil))))
+(register-macro 'compile-file
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((pathname (second form))
+          (path-var (gensym "PATH")))
+      (list 'let (list (list path-var pathname))
+            (list 'our-load path-var)
+            (list 'values (list 'probe-file path-var) nil nil)))))

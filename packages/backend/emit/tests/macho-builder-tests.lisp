@@ -16,11 +16,15 @@
   (target)
   (assert-true (cl-cc/binary:make-mach-o-builder target)))
 
-(deftest macho-add-entry-point
-  "add-entry-point sets offset in builder."
+(deftest macho-add-entry-point-cases
+  "add-entry-point succeeds; add-text-segment adds one segment to the builder."
   (let ((b (cl-cc/binary:make-mach-o-builder :x86-64)))
     (cl-cc/binary:add-entry-point b 0)
-    (assert-true b)))
+    (assert-true b))
+  (let* ((b (cl-cc/binary:make-mach-o-builder :x86-64))
+         (code (make-array 4 :element-type '(unsigned-byte 8) :initial-contents '(#xC3 0 0 0))))
+    (cl-cc/binary:add-text-segment b code)
+    (assert-equal 1 (length (cl-cc/binary::mach-o-builder-segments b)))))
 
 
 (deftest macho-data-segment-is-not-executable
@@ -34,41 +38,24 @@
       (assert-equal 6 (cl-cc/binary:segment-command-maxprot seg))
       (assert-equal 6 (cl-cc/binary:segment-command-initprot seg)))))
 
-(deftest macho-build-produces-bytes
-  "build-mach-o produces non-empty byte vector."
+(deftest macho-build-binary-cases
+  "build-mach-o: non-empty ub8 vector; starts with FEEDFACF; at least 4096 bytes (page-aligned)."
   (let ((b (cl-cc/binary:make-mach-o-builder :x86-64))
         (code (make-array 4 :element-type '(unsigned-byte 8) :initial-contents '(#xC3 0 0 0))))
     (cl-cc/binary:add-entry-point b 0)
     (let ((result (cl-cc/binary:build-mach-o b code)))
       (assert-true (> (length result) 0))
-      (assert-true (typep result '(simple-array (unsigned-byte 8) (*)))))))
-
-(deftest macho-build-starts-with-magic
-  "Built Mach-O starts with FEEDFACF magic."
+      (assert-true (typep result '(simple-array (unsigned-byte 8) (*))))
+      (assert-true (>= (length result) 4096))))
   (let ((b (cl-cc/binary:make-mach-o-builder :x86-64))
         (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
     (cl-cc/binary:add-entry-point b 0)
     (let ((result (cl-cc/binary:build-mach-o b code)))
-      ;; FEEDFACF little-endian: CF FA ED FE
       (assert-equal #xCF (aref result 0))
-       (assert-equal #xFA (aref result 1))
-       (assert-equal #xED (aref result 2))
-       (assert-equal #xFE (aref result 3)))))
+      (assert-equal #xFA (aref result 1))
+      (assert-equal #xED (aref result 2))
+      (assert-equal #xFE (aref result 3)))))
 
-(deftest macho-build-adds-pagezero-segment
-  "build-mach-o includes a __PAGEZERO load command before loadable segments."
-  (let ((b (cl-cc/binary:make-mach-o-builder :x86-64))
-        (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
-    (cl-cc/binary:add-text-segment b code)
-    (cl-cc/binary:add-entry-point b 0)
-    (let ((result (cl-cc/binary:build-mach-o b code)))
-      ;; ncmds at header bytes 16..19 should be 3: __PAGEZERO, __TEXT, LC_MAIN
-      (assert-equal 3 (aref result 16))
-      (assert-equal 0 (aref result 17))
-      (assert-equal 0 (aref result 18))
-      (assert-equal 0 (aref result 19))
-      (let ((pagezero (map 'string #'code-char (subseq result 40 50))))
-        (assert-equal "__PAGEZERO" pagezero)))))
 
 (deftest macho-build-serializes-data-segment-payload
   "build-mach-o includes __DATA payload bytes in the final binary output."
@@ -113,14 +100,24 @@
       (assert-equal (char-code #\_) (aref result (+ stroff 1)))
       (assert-equal (char-code #\m) (aref result (+ stroff 2))))))
 
-(deftest macho-build-arm64-magic
-  "ARM64 Mach-O also starts with FEEDFACF (same magic, different cputype)."
+(deftest macho-build-structural-cases
+  "build-mach-o includes __PAGEZERO; ARM64 starts with FEEDFACF but differs in cputype from x86-64."
+  (let ((b (cl-cc/binary:make-mach-o-builder :x86-64))
+        (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
+    (cl-cc/binary:add-text-segment b code)
+    (cl-cc/binary:add-entry-point b 0)
+    (let ((result (cl-cc/binary:build-mach-o b code)))
+      (assert-equal 3 (aref result 16))
+      (assert-equal 0 (aref result 17))
+      (assert-equal 0 (aref result 18))
+      (assert-equal 0 (aref result 19))
+      (let ((pagezero (map 'string #'code-char (subseq result 40 50))))
+        (assert-equal "__PAGEZERO" pagezero))))
   (let ((b (cl-cc/binary:make-mach-o-builder :arm64))
         (code (make-array 4 :element-type '(unsigned-byte 8) :initial-contents '(#xD6 #x5F #x03 #xC0))))
     (cl-cc/binary:add-entry-point b 0)
     (let ((result (cl-cc/binary:build-mach-o b code)))
       (assert-equal #xCF (aref result 0))
-      ;; CPU type at bytes 4-7 should differ from x86-64
       (let ((b2 (cl-cc/binary:make-mach-o-builder :x86-64)))
         (cl-cc/binary:add-entry-point b2 0)
         (let ((x64 (cl-cc/binary:build-mach-o b2 code)))
@@ -146,12 +143,9 @@
     (assert-equal 0 (cl-cc/binary:section-size sect))
     (assert-equal 0 (cl-cc/binary:section-addr sect))))
 
-(deftest macho-lc-main-constant
-  "LC_MAIN constant value includes the REQ_DYLD bit."
-  (assert-equal #x80000028 cl-cc/binary:+lc-main+))
-
-(deftest macho-extended-constants
-  "Header flag constants and CPU subtype constants."
+(deftest macho-constants-cases
+  "LC_MAIN includes REQ_DYLD bit; header flags and CPU subtype constants."
+  (assert-equal #x80000028 cl-cc/binary:+lc-main+)
   (assert-equal 1 cl-cc/binary:+mh-noundefs+)
   (assert-equal 4 cl-cc/binary:+mh-dyldlink+)
   (assert-equal #x200000 cl-cc/binary:+mh-pie+)
@@ -160,16 +154,12 @@
 
 ;;; ─── Additional Serialization Tests ─────────────────────────────────────
 
-(deftest macho-serialize-nlist-size
-  "Serialized nlist is 18 bytes: uint32(n-strx) + u8(n-type) + u8(n-sect) + uint32(n-desc) + uint64(n-value)."
-  ;; serialize-nlist: 4 + 1 + 1 + 4 + 8 = 18 bytes
+(deftest macho-serialize-nlist-cases
+  "Serialized nlist: 18 bytes total; first 4 bytes are n-strx in little-endian."
   (let ((buf (cl-cc/binary::make-byte-buffer))
         (nl (cl-cc/binary::make-nlist :n-strx 1 :n-type #x0f :n-sect 1 :n-desc 0 :n-value 0)))
     (cl-cc/binary::serialize-nlist nl buf)
-    (assert-equal 18 (length (cl-cc/binary::byte-buffer-data buf)))))
-
-(deftest macho-serialize-nlist-n-strx
-  "Serialized nlist first 4 bytes are n-strx in little-endian."
+    (assert-equal 18 (length (cl-cc/binary::byte-buffer-data buf))))
   (let ((buf (cl-cc/binary::make-byte-buffer))
         (nl (cl-cc/binary::make-nlist :n-strx #x00000005)))
     (cl-cc/binary::serialize-nlist nl buf)
@@ -190,8 +180,8 @@
     (funcall serializer obj buf)
     (assert-equal expected (length (cl-cc/binary::byte-buffer-data buf)))))
 
-(deftest macho-buffer-write-bytes-sequence
-  "buffer-write-bytes appends multiple bytes."
+(deftest macho-buffer-helpers-cases
+  "buffer-write-bytes appends bytes correctly; binary-buffer writes little-endian u16 and u8."
   (let ((buf (cl-cc/binary::make-byte-buffer))
         (bytes (make-array 3 :element-type '(unsigned-byte 8) :initial-contents '(10 20 30))))
     (cl-cc/binary::buffer-write-bytes buf bytes)
@@ -199,10 +189,7 @@
       (assert-equal 3 (length data))
       (assert-equal 10 (aref data 0))
       (assert-equal 20 (aref data 1))
-      (assert-equal 30 (aref data 2)))))
-
-(deftest binary-buffer-common-roundtrip
-  "Shared binary-buffer helpers produce the expected little-endian byte stream."
+      (assert-equal 30 (aref data 2))))
   (let ((buf (cl-cc/binary::make-binary-buffer 0)))
     (cl-cc/binary::binary-buffer-write-u16le buf #x1234)
     (cl-cc/binary::binary-buffer-write-u8 buf #x56)
@@ -220,13 +207,6 @@
          (hdr (cl-cc/binary::mach-o-builder-header b)))
     (assert-equal expected-cputype (cl-cc/binary:mach-header-cputype hdr))))
 
-(deftest macho-add-text-segment
-  "add-text-segment adds one segment to the builder."
-  (let* ((b (cl-cc/binary:make-mach-o-builder :x86-64))
-         (code (make-array 4 :element-type '(unsigned-byte 8) :initial-contents '(#xC3 0 0 0))))
-    (cl-cc/binary:add-text-segment b code)
-    (assert-equal 1 (length (cl-cc/binary::mach-o-builder-segments b)))))
-
 (deftest-each macho-add-symbol-behavior
   "add-symbol inserts into symbol-table; multiple calls accumulate."
   :cases (("one-symbol"  1 '("_main"))
@@ -237,10 +217,3 @@
       (cl-cc/binary:add-symbol b name :value 0 :sect 1))
     (assert-equal expected (length (cl-cc/binary::mach-o-builder-symbol-table b)))))
 
-(deftest macho-build-output-size-at-least-page
-  "build-mach-o output is at least 4096 bytes (code is page-aligned)."
-  (let ((b (cl-cc/binary:make-mach-o-builder :x86-64))
-        (code (make-array 4 :element-type '(unsigned-byte 8) :initial-contents '(#xC3 0 0 0))))
-    (cl-cc/binary:add-entry-point b 0)
-    (let ((result (cl-cc/binary:build-mach-o b code)))
-      (assert-true (>= (length result) 4096)))))

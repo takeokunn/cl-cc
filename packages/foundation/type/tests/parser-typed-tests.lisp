@@ -48,7 +48,7 @@
 ;;; ─── Constraint spec parsing ─────────────────────────────────────────────
 
 (deftest-each parse-constraint-spec-cases
-  "parse-constraint-spec: list → type-class-constraint; atom → type-parse-error."
+  "parse-constraint-spec: list → canonical type-constraint; atom → type-parse-error."
   :cases (("basic" '(num fixnum) nil)
           ("error" 'num          t))
   (input expect-error)
@@ -56,8 +56,8 @@
       (assert-signals cl-cc/type::type-parse-error
         (cl-cc/type::parse-constraint-spec input))
       (let ((c (cl-cc/type::parse-constraint-spec input)))
-        (assert-true (cl-cc/type::type-class-constraint-p c))
-        (assert-eq 'num (cl-cc/type::type-class-constraint-class-name c)))))
+        (assert-true (cl-cc/type::type-constraint-p c))
+        (assert-eq 'num (cl-cc/type::type-constraint-class-name c)))))
 
 ;;; ─── Lambda list parsing ─────────────────────────────────────────────────
 

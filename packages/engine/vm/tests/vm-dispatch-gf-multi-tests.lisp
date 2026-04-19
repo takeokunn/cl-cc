@@ -40,138 +40,86 @@ METHODS-PLIST is a list of (class-name . method-fn) pairs."
 
 ;;; ─── %vm-gf-uses-composite-keys-p ────────────────────────────────────────
 
-(deftest gf-multi-composite-keys-empty-table
-  "%vm-gf-uses-composite-keys-p returns nil for an empty hash table."
-  (let ((ht (make-hash-table :test #'equal)))
-    (assert-false (cl-cc/vm::%vm-gf-uses-composite-keys-p ht))))
-
-(deftest gf-multi-composite-keys-symbol-keys-only
-  "%vm-gf-uses-composite-keys-p returns nil when all keys are symbols (single dispatch)."
+(deftest gf-multi-composite-keys-cases
+  "%vm-gf-uses-composite-keys-p: nil for empty/symbol-only; T for list key or mixed."
+  (assert-false (cl-cc/vm::%vm-gf-uses-composite-keys-p (make-hash-table :test #'equal)))
   (let ((ht (make-hash-table :test #'equal)))
     (setf (gethash 'integer ht) #'identity)
     (setf (gethash 'string  ht) #'identity)
-    (assert-false (cl-cc/vm::%vm-gf-uses-composite-keys-p ht))))
-
-(deftest gf-multi-composite-keys-list-key-present
-  "%vm-gf-uses-composite-keys-p returns T when at least one list key exists."
+    (assert-false (cl-cc/vm::%vm-gf-uses-composite-keys-p ht)))
   (let ((ht (make-hash-table :test #'equal)))
     (setf (gethash '(integer string) ht) #'identity)
-    (assert-true (cl-cc/vm::%vm-gf-uses-composite-keys-p ht))))
-
-(deftest gf-multi-composite-keys-mixed-keys
-  "%vm-gf-uses-composite-keys-p returns T when symbol and list keys coexist."
+    (assert-true (cl-cc/vm::%vm-gf-uses-composite-keys-p ht)))
   (let ((ht (make-hash-table :test #'equal)))
-    (setf (gethash 'integer         ht) #'identity)
+    (setf (gethash 'integer          ht) #'identity)
     (setf (gethash '(integer string) ht) #'identity)
     (assert-true (cl-cc/vm::%vm-gf-uses-composite-keys-p ht))))
 
 ;;; ─── %vm-resolve-single-dispatch ──────────────────────────────────────────
 
-(deftest gf-multi-single-dispatch-integer-hit
-  "%vm-resolve-single-dispatch finds an integer method by class name."
+(deftest gf-multi-single-dispatch-cases
+  "%vm-resolve-single-dispatch: exact integer hit; exact string hit; T fallback; nil on no match."
   (let* ((s (make-test-vm))
          (my-fn #'identity)
          (gf-ht (make-single-dispatch-gf-ht (list (cons 'integer my-fn))))
-         (methods-ht (gethash :__methods__ gf-ht))
-         (result (cl-cc/vm::%vm-resolve-single-dispatch gf-ht methods-ht s 42)))
-    (assert-eq my-fn result)))
-
-(deftest gf-multi-single-dispatch-string-hit
-  "%vm-resolve-single-dispatch finds a string method."
+         (methods-ht (gethash :__methods__ gf-ht)))
+    (assert-eq my-fn (cl-cc/vm::%vm-resolve-single-dispatch gf-ht methods-ht s 42)))
   (let* ((s (make-test-vm))
          (my-fn #'string-upcase)
          (gf-ht (make-single-dispatch-gf-ht (list (cons 'string my-fn))))
-         (methods-ht (gethash :__methods__ gf-ht))
-         (result (cl-cc/vm::%vm-resolve-single-dispatch gf-ht methods-ht s "hello")))
-    (assert-eq my-fn result)))
-
-(deftest gf-multi-single-dispatch-t-fallback
-  "%vm-resolve-single-dispatch falls back to T method when no exact match."
+         (methods-ht (gethash :__methods__ gf-ht)))
+    (assert-eq my-fn (cl-cc/vm::%vm-resolve-single-dispatch gf-ht methods-ht s "hello")))
   (let* ((s (make-test-vm))
          (fallback-fn #'not)
          (gf-ht (make-single-dispatch-gf-ht (list (cons t fallback-fn))))
-         (methods-ht (gethash :__methods__ gf-ht))
-         (result (cl-cc/vm::%vm-resolve-single-dispatch gf-ht methods-ht s 99)))
-    (assert-eq fallback-fn result)))
-
-(deftest gf-multi-single-dispatch-no-match-returns-nil
-  "%vm-resolve-single-dispatch returns nil when no method applies."
+         (methods-ht (gethash :__methods__ gf-ht)))
+    (assert-eq fallback-fn (cl-cc/vm::%vm-resolve-single-dispatch gf-ht methods-ht s 99)))
   (let* ((s (make-test-vm))
          (gf-ht (make-single-dispatch-gf-ht (list (cons 'string #'identity))))
-         (methods-ht (gethash :__methods__ gf-ht))
-         (result (cl-cc/vm::%vm-resolve-single-dispatch gf-ht methods-ht s 42)))
-    (assert-null result)))
+         (methods-ht (gethash :__methods__ gf-ht)))
+    (assert-null (cl-cc/vm::%vm-resolve-single-dispatch gf-ht methods-ht s 42))))
 
 ;;; ─── vm-try-dispatch-combinations ────────────────────────────────────────
 
-(deftest gf-multi-try-dispatch-n-zero-nil-key
-  "vm-try-dispatch-combinations with n=0 looks up nil key in table."
-  (let ((ht (make-hash-table :test #'equal)))
-    ;; When n=0, it looks up nil — not typical, but tests boundary
-    (let ((result (cl-cc/vm::vm-try-dispatch-combinations ht '() 0)))
-      (assert-null result))))
-
-(deftest gf-multi-try-dispatch-n1-exact-match
-  "vm-try-dispatch-combinations with n=1 finds (class) key."
+(deftest gf-multi-try-dispatch-cases
+  "vm-try-dispatch-combinations: n=0 → nil; n=1 exact hit; n=1 T-fallback; n=1 no match → nil."
+  (assert-null (cl-cc/vm::vm-try-dispatch-combinations (make-hash-table :test #'equal) '() 0))
   (let ((ht (make-hash-table :test #'equal))
         (my-fn #'identity))
     (setf (gethash '(integer) ht) my-fn)
-    (let ((result (cl-cc/vm::vm-try-dispatch-combinations ht '((integer string)) 1)))
-      (assert-eq my-fn result))))
-
-(deftest gf-multi-try-dispatch-n1-fallback-to-t
-  "vm-try-dispatch-combinations with n=1 falls back to (t) key."
+    (assert-eq my-fn (cl-cc/vm::vm-try-dispatch-combinations ht '((integer string)) 1)))
   (let ((ht (make-hash-table :test #'equal))
         (fallback #'not))
     (setf (gethash '(t) ht) fallback)
-    (let ((result (cl-cc/vm::vm-try-dispatch-combinations ht '((symbol integer t)) 1)))
-      (assert-eq fallback result))))
-
-(deftest gf-multi-try-dispatch-no-match-returns-nil
-  "vm-try-dispatch-combinations returns nil when no combination matches."
+    (assert-eq fallback (cl-cc/vm::vm-try-dispatch-combinations ht '((symbol integer t)) 1)))
   (let ((ht (make-hash-table :test #'equal)))
     (setf (gethash '(string) ht) #'identity)
-    (let ((result (cl-cc/vm::vm-try-dispatch-combinations ht '((integer)) 1)))
-      (assert-null result))))
+    (assert-null (cl-cc/vm::vm-try-dispatch-combinations ht '((integer)) 1))))
 
 ;;; ─── vm-try-dispatch-sub ─────────────────────────────────────────────────
 
-(deftest gf-multi-try-dispatch-sub-null-cpls-finds-prefix
-  "vm-try-dispatch-sub with null cpls looks up the prefix directly."
+(deftest gf-multi-try-dispatch-sub-cases
+  "vm-try-dispatch-sub: null cpls finds prefix directly; missing key → nil."
   (let ((ht (make-hash-table :test #'equal))
         (my-fn #'identity))
     (setf (gethash '(integer string) ht) my-fn)
-    (let ((result (cl-cc/vm::vm-try-dispatch-sub ht nil '(integer string))))
-      (assert-eq my-fn result))))
-
-(deftest gf-multi-try-dispatch-sub-not-found-returns-nil
-  "vm-try-dispatch-sub returns nil when the prefix/key is not in the table."
+    (assert-eq my-fn (cl-cc/vm::vm-try-dispatch-sub ht nil '(integer string))))
   (let ((ht (make-hash-table :test #'equal)))
-    (let ((result (cl-cc/vm::vm-try-dispatch-sub ht nil '(integer string))))
-      (assert-null result))))
+    (assert-null (cl-cc/vm::vm-try-dispatch-sub ht nil '(integer string)))))
 
 ;;; ─── vm-resolve-gf-method (integration) ──────────────────────────────────
 
-(deftest gf-multi-resolve-gf-single-dispatch-integer
-  "vm-resolve-gf-method dispatches correctly on integer argument."
+(deftest gf-multi-resolve-gf-cases
+  "vm-resolve-gf-method: exact integer dispatch; no match → error; composite list-key dispatch."
   (let* ((s (make-test-vm))
          (int-fn #'1+)
          (gf-ht (make-single-dispatch-gf-ht (list (cons 'integer int-fn)))))
-    (let ((result (cl-cc/vm::vm-resolve-gf-method gf-ht s 42)))
-      (assert-eq int-fn result))))
-
-(deftest gf-multi-resolve-gf-single-dispatch-no-match-errors
-  "vm-resolve-gf-method signals an error when no method matches."
+    (assert-eq int-fn (cl-cc/vm::vm-resolve-gf-method gf-ht s 42)))
   (let* ((s (make-test-vm))
          (gf-ht (make-single-dispatch-gf-ht (list (cons 'string #'identity)))))
-    (assert-signals error
-      (cl-cc/vm::vm-resolve-gf-method gf-ht s 42))))
-
-(deftest gf-multi-resolve-gf-composite-dispatch-list-key
-  "vm-resolve-gf-method uses composite dispatch when all-args is provided and list keys exist."
+    (assert-signals error (cl-cc/vm::vm-resolve-gf-method gf-ht s 42)))
   (let* ((s (make-test-vm))
          (multi-fn #'cons)
          (gf-ht (make-composite-dispatch-gf-ht
                  (list (cons '(integer integer) multi-fn)))))
-    (let ((result (cl-cc/vm::vm-resolve-gf-method gf-ht s 1 '(1 2))))
-      (assert-eq multi-fn result))))
+    (assert-eq multi-fn (cl-cc/vm::vm-resolve-gf-method gf-ht s 1 '(1 2)))))

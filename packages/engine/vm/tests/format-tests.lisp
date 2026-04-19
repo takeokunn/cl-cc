@@ -57,28 +57,22 @@
     (fmt-exec (cl-cc::make-vm-princ :src :R1) s)
     (assert-equal expected (fmt-capture s))))
 
-(deftest fmt-prin1-string
-  "vm-prin1 prints strings with quotes."
+(deftest fmt-prin1-print-cases
+  "vm-prin1 prints strings with quotes; vm-print emits object to output stream."
   (let ((s (fmt-vm)))
     (cl-cc/vm::vm-reg-set s :R1 "hello")
     (fmt-exec (cl-cc::make-vm-prin1 :src :R1) s)
-    (assert-equal "\"hello\"" (fmt-capture s))))
-
-(deftest fmt-print-emits-output
-  "vm-print-inst emits the printed object to the output stream."
+    (assert-equal "\"hello\"" (fmt-capture s)))
   (let ((s (fmt-vm)))
     (cl-cc/vm::vm-reg-set s :R1 42)
     (fmt-exec (cl-cc::make-vm-print-inst :src :R1) s)
     (assert-true (search "42" (fmt-capture s)))))
 
-(deftest fmt-terpri
-  "vm-terpri-inst outputs a newline."
+(deftest fmt-newline-cases
+  "vm-terpri outputs newline; vm-fresh-line outputs newline after prior output."
   (let ((s (fmt-vm)))
     (fmt-exec (cl-cc::make-vm-terpri-inst) s)
-    (assert-equal (string #\Newline) (fmt-capture s))))
-
-(deftest fmt-fresh-line-after-output
-  "vm-fresh-line-inst outputs a newline after prior output."
+    (assert-equal (string #\Newline) (fmt-capture s)))
   (let ((s (fmt-vm)))
     (cl-cc/vm::vm-reg-set s :R1 "x")
     (fmt-exec (cl-cc::make-vm-princ :src :R1) s)
@@ -88,24 +82,18 @@
 
 ;;; ─── format ───────────────────────────────────────────────────────────────
 
-(deftest fmt-format-simple
-  "vm-format-inst formats string with no args."
+(deftest fmt-format-cases
+  "vm-format-inst: no args; ~A args; ~D directive."
   (let ((s (fmt-vm)))
     (cl-cc/vm::vm-reg-set s :R1 "hello world")
     (fmt-exec (cl-cc::make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs nil) s)
-    (assert-equal "hello world" (cl-cc/vm::vm-reg-get s :R0))))
-
-(deftest fmt-format-with-args
-  "vm-format-inst formats string with arguments."
+    (assert-equal "hello world" (cl-cc/vm::vm-reg-get s :R0)))
   (let ((s (fmt-vm)))
     (cl-cc/vm::vm-reg-set s :R1 "~A is ~A")
     (cl-cc/vm::vm-reg-set s :R2 "answer")
     (cl-cc/vm::vm-reg-set s :R3 42)
     (fmt-exec (cl-cc::make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs '(:R2 :R3)) s)
-    (assert-equal "answer is 42" (cl-cc/vm::vm-reg-get s :R0))))
-
-(deftest fmt-format-directive-d
-  "vm-format-inst handles ~D directive."
+    (assert-equal "answer is 42" (cl-cc/vm::vm-reg-get s :R0)))
   (let ((s (fmt-vm)))
     (cl-cc/vm::vm-reg-set s :R1 "count: ~D")
     (cl-cc/vm::vm-reg-set s :R2 99)
@@ -114,8 +102,8 @@
 
 ;;; ─── String Output Stream ────────────────────────────────────────────────
 
-(deftest fmt-string-output-stream-roundtrip
-  "Create string output stream, write to it, get result."
+(deftest fmt-string-output-stream-cases
+  "String output stream: roundtrip single write; multiple writes accumulate."
   (let ((s (fmt-vm)))
     (fmt-exec (cl-cc::make-vm-make-string-output-stream-inst :dst :R0) s)
     (let ((stream (cl-cc/vm::vm-reg-get s :R0)))
@@ -124,10 +112,7 @@
       (cl-cc/vm::vm-reg-set s :R2 "hello")
       (fmt-exec (cl-cc::make-vm-stream-write-string-inst :stream-reg :R1 :src :R2) s)
       (fmt-exec (cl-cc::make-vm-get-output-stream-string-inst :dst :R3 :src :R1) s)
-      (assert-equal "hello" (cl-cc/vm::vm-reg-get s :R3)))))
-
-(deftest fmt-string-output-stream-multiple-writes
-  "Multiple writes accumulate in string output stream."
+      (assert-equal "hello" (cl-cc/vm::vm-reg-get s :R3))))
   (let ((s (fmt-vm)))
     (fmt-exec (cl-cc::make-vm-make-string-output-stream-inst :dst :R0) s)
     (let ((stream (cl-cc/vm::vm-reg-get s :R0)))
@@ -141,32 +126,23 @@
 
 ;;; ─── Reader Instructions (use cl-cc's own lexer/parser) ──────────────────
 
-(deftest fmt-read-from-string-number
-  "vm-read-from-string reads a number."
+(deftest fmt-read-from-string-cases
+  "vm-read-from-string: number with values-list; symbol uppercased; list; empty string → nil."
   (let ((s (fmt-vm)))
     (cl-cc/vm::vm-reg-set s :R1 "42")
     (fmt-exec (cl-cc::make-vm-read-from-string-inst :dst :R0 :src :R1) s)
     (assert-equal 42 (cl-cc/vm::vm-reg-get s :R0))
-    (assert-equal '(42 2) (cl-cc/vm::vm-values-list s))))
-
-(deftest fmt-read-from-string-symbol
-  "vm-read-from-string reads a symbol."
+    (assert-equal '(42 2) (cl-cc/vm::vm-values-list s)))
   (let ((s (fmt-vm)))
     (cl-cc/vm::vm-reg-set s :R1 "hello")
     (fmt-exec (cl-cc::make-vm-read-from-string-inst :dst :R0 :src :R1) s)
-    (assert-equal "HELLO" (symbol-name (cl-cc/vm::vm-reg-get s :R0)))))
-
-(deftest fmt-read-from-string-list
-  "vm-read-from-string reads a list."
+    (assert-equal "HELLO" (symbol-name (cl-cc/vm::vm-reg-get s :R0))))
   (let ((s (fmt-vm)))
     (cl-cc/vm::vm-reg-set s :R1 "(1 2 3)")
     (fmt-exec (cl-cc::make-vm-read-from-string-inst :dst :R0 :src :R1) s)
     (let ((result (cl-cc/vm::vm-reg-get s :R0)))
       (assert-true (listp result))
-      (assert-equal 3 (length result)))))
-
-(deftest fmt-read-from-string-empty
-  "vm-read-from-string returns nil for empty string."
+      (assert-equal 3 (length result))))
   (let ((s (fmt-vm)))
     (cl-cc/vm::vm-reg-set s :R1 "")
     (fmt-exec (cl-cc::make-vm-read-from-string-inst :dst :R0 :src :R1) s)

@@ -31,39 +31,21 @@
 
 ;;; ─── %eql-specializer-matches-p ──────────────────────────────────────────
 
-(deftest eql-specializer-matches-p-true-for-eql-value
-  "%eql-specializer-matches-p is true when the arg is eql to the specializer value."
-  (assert-true (cl-cc/vm::%eql-specializer-matches-p '(eql 42) 42)))
-
-(deftest eql-specializer-matches-p-true-for-symbol
-  "%eql-specializer-matches-p is true for a matching symbol."
-  (assert-true (cl-cc/vm::%eql-specializer-matches-p '(eql foo) 'foo)))
-
-(deftest eql-specializer-matches-p-false-for-different-value
-  "%eql-specializer-matches-p is false when arg differs from the specializer value."
-  (assert-false (cl-cc/vm::%eql-specializer-matches-p '(eql 42) 99)))
-
-(deftest eql-specializer-matches-p-false-for-non-eql-form
-  "%eql-specializer-matches-p is false when given a non-eql specializer."
+(deftest eql-specializer-matches-p-cases
+  "%eql-specializer-matches-p: true for matching value/symbol; false for different value or non-eql form."
+  (assert-true  (cl-cc/vm::%eql-specializer-matches-p '(eql 42) 42))
+  (assert-true  (cl-cc/vm::%eql-specializer-matches-p '(eql foo) 'foo))
+  (assert-false (cl-cc/vm::%eql-specializer-matches-p '(eql 42) 99))
   (assert-false (cl-cc/vm::%eql-specializer-matches-p 'integer 42)))
 
 ;;; ─── %vm-extract-eql-specializer-keys ───────────────────────────────────
 
-(deftest vm-extract-eql-specializer-keys-direct-eql
-  "%vm-extract-eql-specializer-keys returns (value) for a direct (eql value) form."
-  (assert-equal '(42) (cl-cc/vm::%vm-extract-eql-specializer-keys '(eql 42))))
-
-(deftest vm-extract-eql-specializer-keys-wrapped-single
-  "%vm-extract-eql-specializer-keys returns (value) for a ((eql value)) list."
-  (assert-equal '(foo) (cl-cc/vm::%vm-extract-eql-specializer-keys '((eql foo)))))
-
-(deftest vm-extract-eql-specializer-keys-nil-for-plain-symbol
-  "%vm-extract-eql-specializer-keys returns nil for a plain class symbol."
-  (assert-null (cl-cc/vm::%vm-extract-eql-specializer-keys 'integer)))
-
-(deftest vm-extract-eql-specializer-keys-nil-for-multi-element-list
-  "%vm-extract-eql-specializer-keys returns nil for a multi-element specializer list."
-  (assert-null (cl-cc/vm::%vm-extract-eql-specializer-keys '(integer string))))
+(deftest vm-extract-eql-specializer-keys-cases
+  "%vm-extract-eql-specializer-keys: (eql v)→(v); ((eql v))→(v); symbol→nil; multi-list→nil."
+  (assert-equal '(42)  (cl-cc/vm::%vm-extract-eql-specializer-keys '(eql 42)))
+  (assert-equal '(foo) (cl-cc/vm::%vm-extract-eql-specializer-keys '((eql foo))))
+  (assert-null         (cl-cc/vm::%vm-extract-eql-specializer-keys 'integer))
+  (assert-null         (cl-cc/vm::%vm-extract-eql-specializer-keys '(integer string))))
 
 ;;; ─── *method-combination-operators* data table ───────────────────────────
 
@@ -102,30 +84,16 @@
   (let ((op (cl-cc/vm::%resolve-combination-operator combo)))
     (assert-equal expected (apply op args))))
 
-(deftest resolve-combination-operator-and-returns-t-for-truthy
-  "%resolve-combination-operator for AND returns true when all args are truthy."
-  (let ((op (cl-cc/vm::%resolve-combination-operator 'and)))
-    (assert-true (funcall op 1 2 3))))
-
-(deftest resolve-combination-operator-and-returns-nil-for-falsy
-  "%resolve-combination-operator for AND returns nil when any arg is nil."
-  (let ((op (cl-cc/vm::%resolve-combination-operator 'and)))
-    (assert-false (funcall op 1 nil 3))))
-
-(deftest resolve-combination-operator-or-returns-t-for-any-truthy
-  "%resolve-combination-operator for OR returns true when any arg is truthy."
-  (let ((op (cl-cc/vm::%resolve-combination-operator 'or)))
-    (assert-true (funcall op nil 2 nil))))
-
-(deftest resolve-combination-operator-or-returns-nil-for-all-falsy
-  "%resolve-combination-operator for OR returns nil when all args are nil."
-  (let ((op (cl-cc/vm::%resolve-combination-operator 'or)))
-    (assert-false (funcall op nil nil nil))))
-
-(deftest resolve-combination-operator-progn-returns-last
-  "%resolve-combination-operator for PROGN returns the last argument."
-  (let ((op (cl-cc/vm::%resolve-combination-operator 'progn)))
-    (assert-equal 99 (funcall op 1 2 99))))
+(deftest resolve-combination-operator-logic-cases
+  "AND: truthy-all→t, nil-any→nil; OR: any-truthy→t, all-nil→nil; PROGN: returns last arg."
+  (let ((and-op (cl-cc/vm::%resolve-combination-operator 'and)))
+    (assert-true  (funcall and-op 1 2 3))
+    (assert-false (funcall and-op 1 nil 3)))
+  (let ((or-op (cl-cc/vm::%resolve-combination-operator 'or)))
+    (assert-true  (funcall or-op nil 2 nil))
+    (assert-false (funcall or-op nil nil nil)))
+  (let ((progn-op (cl-cc/vm::%resolve-combination-operator 'progn)))
+    (assert-equal 99 (funcall progn-op 1 2 99))))
 
 (deftest resolve-combination-operator-unknown-signals-error
   "%resolve-combination-operator signals an error for unknown combinations."

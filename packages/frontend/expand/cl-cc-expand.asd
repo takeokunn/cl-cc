@@ -25,7 +25,8 @@
    (:file "loop-data")           ; LOOP: grammar tables — the "Prolog database"
    (:file "loop-parser-for")     ; LOOP: token predicates, CPS utils, FOR sub-parsers
    (:file "loop-parser")         ; LOOP: CPS token parser → IR plist
-   (:file "loop-emitters")       ; LOOP: IR → code-fragment tables
+   (:file "loop-emitters")       ; LOOP: registration macros + accumulation emitters
+   (:file "loop-iter-emitters")  ; LOOP: iteration + condition emitters
    (:file "loop")                ; LOOP: generator — assembles tagbody from IR
    (:file "macros-setops")       ; list/set operations split from stdlib
    (:file "macros-list-utils")   ; ordering and list utility helpers
@@ -39,12 +40,15 @@
    (:file "macros-hof-search")   ; position/count/assoc search HOFs
    (:file "macros-filesystem")   ; file/IO/runtime stubs split from stdlib
    (:file "macros-filesystem-ext") ; pprint, readtable, debug/introspect, compile-file stubs
-   (:file "macros-sequence")     ; sequences: copy/fill/replace/mismatch/delete/substitute
-   (:file "macros-sequence-fold") ; sequences: reduce/nsubstitute/map-into/merge/last/search
-   (:file "macros-list-compat")  ; list/sequence compatibility helpers split from stdlib
-   (:file "macros-plist")        ; property list helpers
-   (:file "macros-compat")       ; pkg/declare/IO/hash/coerce/LTV/feature macros
-   (:file "macros-compat-clos")  ; CLOS protocol + MOP introspection + print macros
+    (:file "macros-sequence")     ; sequences: copy/fill/replace/mismatch/delete/substitute
+    (:file "macros-sequence-fold") ; sequences: reduce/nsubstitute/map-into/merge/last/search
+    (:file "macros-list-compat")  ; list/sequence compatibility helpers split from stdlib
+    (:file "macros-plist")        ; property list helpers
+    (:file "macros-compat-package") ; pkg/declare/progv compatibility macros
+    (:file "macros-compat-runtime") ; IO/hash/coerce/LTV/feature compatibility macros
+    (:file "macros-compat")       ; compatibility shim
+   (:file "macros-compat-clos")  ; CLOS protocol: print-unreadable-object, describe, change-class
+   (:file "macros-compat-mop")   ; MOP introspection macros + parse-float + reinitialize-instance
    (:file "macros-compat-array") ; array compat wrappers split from macros-compat
     (:file "expander-data")       ; expander: grammar tables + dispatch table declarations
     (:file "expander-helpers")    ; expander: shared helper functions extracted from expander.lisp

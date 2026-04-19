@@ -40,11 +40,11 @@
 ;;; ─── Constraint spec parsing ──────────────────────────────────────────────
 
 (defun parse-constraint-spec (spec)
-  "Parse a typeclass constraint spec like (Num a) into a type-class-constraint."
+  "Parse a typeclass constraint spec like (Num a) into a canonical type-constraint."
   (unless (and (consp spec) (>= (length spec) 2) (symbolp (first spec)))
     (type-parse-error "Constraint must be (ClassName type-arg), got ~S" spec))
-  (make-type-class-constraint :class-name (first spec)
-                               :type-arg   (parse-type-specifier (second spec))))
+  (make-type-constraint :class-name (first spec)
+                        :type-arg   (parse-type-specifier (second spec))))
 
 ;;; ─── Lambda-list parsing ──────────────────────────────────────────────────
 

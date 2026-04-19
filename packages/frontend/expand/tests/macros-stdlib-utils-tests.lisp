@@ -17,42 +17,29 @@
 
 ;;; ─── tailp ────────────────────────────────────────────────────────────────
 
-(deftest tailp-expands-to-do
-  "TAILP wraps a DO loop that traverses the list until an atom."
-  (let ((result (our-macroexpand-1 '(tailp obj lst))))
-    (assert-eq 'do (car result))))
-
-(deftest tailp-do-terminates-at-atom
-  "TAILP DO termination clause ends with (eq tail obj) to check identity."
+(deftest tailp-expansion
+  "TAILP expands to a DO loop; termination clause is a cons (checks identity)."
   (let* ((result (our-macroexpand-1 '(tailp obj lst)))
-         (end-clause (third result)))   ; (atom tail) → (eq tail obj)
+         (end-clause (third result)))
+    (assert-eq 'do (car result))
     (assert-true (consp end-clause))))
 
 ;;; ─── ldiff ────────────────────────────────────────────────────────────────
 
-(deftest ldiff-expands-to-let
-  "LDIFF expands to a LET with a result accumulator and a DO loop."
-  (let ((result (our-macroexpand-1 '(ldiff lst obj))))
-    (assert-eq 'let (car result))))
-
-(deftest ldiff-result-has-nreverse
-  "LDIFF body reverses the accumulated result — NREVERSE should appear anywhere
-in the expansion body (use recursive tree-walk, not shallow member)."
+(deftest ldiff-expansion
+  "LDIFF expands to a LET; body contains NREVERSE to reverse accumulated result."
   (let* ((result (our-macroexpand-1 '(ldiff lst obj)))
          (body (cddr result)))
+    (assert-eq 'let (car result))
     (assert-true (%tree-contains-p 'nreverse body))))
 
 ;;; ─── copy-alist ───────────────────────────────────────────────────────────
 
-(deftest copy-alist-expands-to-let
-  "COPY-ALIST expands to a LET with a result accumulator."
-  (let ((result (our-macroexpand-1 '(copy-alist alist))))
-    (assert-eq 'let (car result))))
-
-(deftest copy-alist-body-has-dolist
-  "COPY-ALIST body iterates with DOLIST."
+(deftest copy-alist-expansion
+  "COPY-ALIST expands to a LET with a DOLIST body."
   (let* ((result (our-macroexpand-1 '(copy-alist alist)))
          (body (cddr result)))
+    (assert-eq 'let (car result))
     (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'dolist))) body))))
 
 ;;; ─── tree-equal ───────────────────────────────────────────────────────────
@@ -85,16 +72,11 @@ in the expansion body (use recursive tree-walk, not shallow member)."
 
 ;;; ─── get-properties ───────────────────────────────────────────────────────
 
-(deftest get-properties-expands-to-do
-  "GET-PROPERTIES expands to a DO loop over the plist."
-  (let ((result (our-macroexpand-1 '(get-properties plist '(:a :b)))))
-    (assert-eq 'do (car result))))
-
-(deftest get-properties-has-values-in-body
-  "GET-PROPERTIES returns three values via VALUES."
+(deftest get-properties-expansion
+  "GET-PROPERTIES expands to a DO loop; termination clause returns VALUES."
   (let* ((result (our-macroexpand-1 '(get-properties plist '(:a :b))))
-         ;; termination clause of DO returns (values nil nil nil)
          (end-clause (third result)))
+    (assert-eq 'do (car result))
     (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'values))) end-clause))))
 
 ;;; ─── Destructive set operations ───────────────────────────────────────────
@@ -111,15 +93,13 @@ in the expansion body (use recursive tree-walk, not shallow member)."
 
 ;;; ─── nsubst / nsubst-if / nsubst-if-not ──────────────────────────────────
 
-(deftest nsubst-without-test-delegates-to-subst
-  "NSUBST without :test delegates directly to SUBST."
-  (let ((result (our-macroexpand-1 '(nsubst new old tree))))
-    (assert-eq 'subst (car result))))
-
-(deftest nsubst-with-test-delegates-to-subst-if
-  "NSUBST with :test wraps into SUBST-IF with a lambda predicate."
-  (let ((result (our-macroexpand-1 '(nsubst new old tree :test #'equal))))
-    (assert-eq 'subst-if (car result))))
+(deftest-each nsubst-delegation-cases
+  "NSUBST delegates to SUBST (no :test) or SUBST-IF (with :test)."
+  :cases (("no-test"   '(nsubst new old tree)               'subst)
+          ("with-test" '(nsubst new old tree :test #'equal) 'subst-if))
+  (form expected-head)
+  (let ((result (our-macroexpand-1 form)))
+    (assert-eq expected-head (car result))))
 
 (deftest-each nsubst-if-variants-delegate
   "NSUBST-IF and NSUBST-IF-NOT delegate to their SUBST counterparts."
@@ -140,17 +120,14 @@ in the expansion body (use recursive tree-walk, not shallow member)."
   (let ((result (our-macroexpand-1 form)))
     (assert-eq expected-head (car result))))
 
-(deftest nstring-upcase-with-start-passes-keyword
-  "NSTRING-UPCASE with :start includes the :start keyword in the delegate call."
-  (let ((result (our-macroexpand-1 '(nstring-upcase s :start 2))))
-    (assert-eq 'string-upcase (car result))
-    (assert-true (member :start result))))
-
-(deftest nstring-upcase-with-end-passes-keyword
-  "NSTRING-UPCASE with :end includes both :start 0 and :end in the delegate call."
-  (let ((result (our-macroexpand-1 '(nstring-upcase s :end 5))))
-    (assert-eq 'string-upcase (car result))
-    (assert-true (member :end result))))
+(deftest nstring-upcase-with-bounds
+  "NSTRING-UPCASE with :start or :end passes the keyword through to STRING-UPCASE."
+  (let ((result-start (our-macroexpand-1 '(nstring-upcase s :start 2)))
+        (result-end   (our-macroexpand-1 '(nstring-upcase s :end 5))))
+    (assert-eq 'string-upcase (car result-start))
+    (assert-true (member :start result-start))
+    (assert-eq 'string-upcase (car result-end))
+    (assert-true (member :end result-end))))
 
 ;;; ─── Array predicate macros ───────────────────────────────────────────────
 
@@ -159,15 +136,13 @@ in the expansion body (use recursive tree-walk, not shallow member)."
   (let ((result (our-macroexpand-1 '(bit-vector-p x))))
     (assert-eq 'let (car result))))
 
-(deftest simple-string-p-delegates-to-stringp
-  "SIMPLE-STRING-P delegates directly to STRINGP."
-  (let ((result (our-macroexpand-1 '(simple-string-p x))))
-    (assert-eq 'stringp (car result))))
-
-(deftest simple-bit-vector-p-delegates-to-bit-vector-p
-  "SIMPLE-BIT-VECTOR-P delegates to BIT-VECTOR-P."
-  (let ((result (our-macroexpand-1 '(simple-bit-vector-p x))))
-    (assert-eq 'bit-vector-p (car result))))
+(deftest-each simple-predicate-delegation-cases
+  "SIMPLE-STRING-P and SIMPLE-BIT-VECTOR-P delegate to their non-simple counterparts."
+  :cases (("simple-string-p"     '(simple-string-p x)     'stringp)
+          ("simple-bit-vector-p" '(simple-bit-vector-p x) 'bit-vector-p))
+  (form expected-head)
+  (let ((result (our-macroexpand-1 form)))
+    (assert-eq expected-head (car result))))
 
 ;;; ─── Array utility macros ─────────────────────────────────────────────────
 

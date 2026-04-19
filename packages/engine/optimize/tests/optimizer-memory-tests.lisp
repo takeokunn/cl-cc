@@ -46,21 +46,15 @@
 
 ;;; ─── %opt-build-root-map / opt-compute-heap-aliases ────────────────────
 
-(deftest build-root-map-cons-sets-own-root
-  "A vm-cons instruction maps its dst to itself as root."
+(deftest build-root-map-cases
+  "Heap alias map: cons sets own root; move propagates root; non-heap write kills root."
   (let* ((inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (roots (cl-cc/optimize::opt-compute-heap-aliases (list inst))))
-    (assert-eq :r0 (gethash :r0 roots))))
-
-(deftest build-root-map-move-propagates-root
-  "vm-move propagates the source's root to the destination."
+    (assert-eq :r0 (gethash :r0 roots)))
   (let* ((cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (move-inst (make-vm-move :dst :r3 :src :r0))
          (roots (cl-cc/optimize::opt-compute-heap-aliases (list cons-inst move-inst))))
-    (assert-eq :r0 (gethash :r3 roots))))
-
-(deftest build-root-map-non-heap-write-kills-root
-  "A non-heap write to a register removes its root mapping."
+    (assert-eq :r0 (gethash :r3 roots)))
   (let* ((cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (add-inst  (make-vm-add  :dst :r0 :lhs :r1 :rhs :r2))
          (roots (cl-cc/optimize::opt-compute-heap-aliases (list cons-inst add-inst))))
@@ -68,13 +62,10 @@
 
 ;;; ─── opt-points-to-root ─────────────────────────────────────────────────
 
-(deftest points-to-root-returns-nil-for-unknown
-  "opt-points-to-root returns NIL for a register not in the points-to map."
+(deftest points-to-root-behavior
+  "opt-points-to-root returns NIL for unknown registers; returns canonical root when mapped."
   (let ((pt (make-hash-table :test #'eq)))
-    (assert-null (cl-cc/optimize::opt-points-to-root :r99 pt))))
-
-(deftest points-to-root-returns-canonical-root
-  "opt-points-to-root returns the canonical root stored in the map."
+    (assert-null (cl-cc/optimize::opt-points-to-root :r99 pt)))
   (let ((pt (make-hash-table :test #'eq)))
     (setf (gethash :r0 pt) :r0)
     (assert-eq :r0 (cl-cc/optimize::opt-points-to-root :r0 pt))))
@@ -87,67 +78,42 @@
     (assert-= 3 (cl-cc/optimize::opt-interval-lo iv))
     (assert-= 7 (cl-cc/optimize::opt-interval-hi iv))))
 
-(deftest interval-add-produces-correct-range
-  "[1,2] + [3,4] = [4,6]."
-  (let* ((a (cl-cc/optimize::opt-make-interval 1 2))
-         (b (cl-cc/optimize::opt-make-interval 3 4))
-         (r (cl-cc/optimize::opt-interval-add a b)))
-    (assert-= 4 (cl-cc/optimize::opt-interval-lo r))
-    (assert-= 6 (cl-cc/optimize::opt-interval-hi r))))
-
-(deftest interval-sub-produces-correct-range
-  "[5,8] - [1,3] = [2,7]."
-  (let* ((a (cl-cc/optimize::opt-make-interval 5 8))
-         (b (cl-cc/optimize::opt-make-interval 1 3))
-         (r (cl-cc/optimize::opt-interval-sub a b)))
-    (assert-= 2 (cl-cc/optimize::opt-interval-lo r))
-    (assert-= 7 (cl-cc/optimize::opt-interval-hi r))))
-
-(deftest interval-mul-positive-ranges
-  "[2,3] * [4,5] = [8,15]."
-  (let* ((a (cl-cc/optimize::opt-make-interval 2 3))
-         (b (cl-cc/optimize::opt-make-interval 4 5))
-         (r (cl-cc/optimize::opt-interval-mul a b)))
-    (assert-= 8  (cl-cc/optimize::opt-interval-lo r))
-    (assert-= 15 (cl-cc/optimize::opt-interval-hi r))))
-
-(deftest interval-mul-mixed-signs
-  "[-1,2] * [3,4] has min=-4, max=8 (conservative)."
-  (let* ((a (cl-cc/optimize::opt-make-interval -1 2))
-         (b (cl-cc/optimize::opt-make-interval  3 4))
-         (r (cl-cc/optimize::opt-interval-mul a b)))
-    (assert-= -4 (cl-cc/optimize::opt-interval-lo r))
-    (assert-= 8  (cl-cc/optimize::opt-interval-hi r))))
+(deftest-each interval-arithmetic-cases
+  "Interval arithmetic produces expected [lo, hi] bounds for add, sub, and mul."
+  :cases (("add"       #'cl-cc/optimize::opt-interval-add  1  2  3  4   4  6)
+          ("sub"       #'cl-cc/optimize::opt-interval-sub  5  8  1  3   2  7)
+          ("mul-pos"   #'cl-cc/optimize::opt-interval-mul  2  3  4  5   8 15)
+          ("mul-mixed" #'cl-cc/optimize::opt-interval-mul -1  2  3  4  -4  8))
+  (op a-lo a-hi b-lo b-hi expected-lo expected-hi)
+  (let* ((a (cl-cc/optimize::opt-make-interval a-lo a-hi))
+         (b (cl-cc/optimize::opt-make-interval b-lo b-hi))
+         (r (funcall op a b)))
+    (assert-= expected-lo (cl-cc/optimize::opt-interval-lo r))
+    (assert-= expected-hi (cl-cc/optimize::opt-interval-hi r))))
 
 ;;; ─── opt-compute-constant-intervals ─────────────────────────────────────
 
-(deftest constant-intervals-vm-const-integer
-  "vm-const with integer value produces a singleton interval."
+(deftest constant-intervals-vm-const-cases
+  "vm-const: integer produces singleton interval; float is ignored (no entry)."
   (let* ((insts (list (make-vm-const :dst :r0 :value 5)))
          (ivals (cl-cc/optimize::opt-compute-constant-intervals insts)))
     (let ((iv (gethash :r0 ivals)))
       (assert-true iv)
       (assert-= 5 (cl-cc/optimize::opt-interval-lo iv))
-      (assert-= 5 (cl-cc/optimize::opt-interval-hi iv)))))
-
-(deftest constant-intervals-vm-const-float-ignored
-  "vm-const with float value is ignored (no interval entry)."
+      (assert-= 5 (cl-cc/optimize::opt-interval-hi iv))))
   (let* ((insts (list (make-vm-const :dst :r0 :value 3.14)))
          (ivals (cl-cc/optimize::opt-compute-constant-intervals insts)))
     (assert-false (nth-value 1 (gethash :r0 ivals)))))
 
-(deftest constant-intervals-propagate-through-add
-  "vm-add on two known intervals produces their sum interval."
+(deftest constant-intervals-add-cases
+  "vm-add: two known intervals → sum; unknown operand → dst killed."
   (let* ((insts (list (make-vm-const :dst :r0 :value 2)
                       (make-vm-const :dst :r1 :value 3)
                       (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)))
          (ivals (cl-cc/optimize::opt-compute-constant-intervals insts)))
     (let ((iv (gethash :r2 ivals)))
       (assert-true iv)
-      (assert-= 5 (cl-cc/optimize::opt-interval-lo iv)))))
-
-(deftest constant-intervals-unknown-kills-result
-  "vm-add with an unknown operand removes the dst interval."
+      (assert-= 5 (cl-cc/optimize::opt-interval-lo iv))))
   (let* ((insts (list (make-vm-const :dst :r0 :value 2)
                       (make-vm-add   :dst :r2 :lhs :r0 :rhs :r99)))
          (ivals (cl-cc/optimize::opt-compute-constant-intervals insts)))
@@ -181,45 +147,31 @@
 
 ;;; ─── opt-slot-alias-key ─────────────────────────────────────────────────
 
-(deftest slot-alias-key-uses-known-root
-  "opt-slot-alias-key uses the canonical root when available."
+(deftest slot-alias-key-behavior
+  "opt-slot-alias-key uses canonical root when known; falls back to register when not."
   (let ((alias (make-hash-table :test #'eq)))
     (setf (gethash :r0 alias) :root0)
-    (let ((key (cl-cc/optimize::opt-slot-alias-key :r0 'x alias)))
-      (assert-equal '(:slot :root0 x) key))))
-
-(deftest slot-alias-key-falls-back-to-reg
-  "opt-slot-alias-key uses the register directly when no root is known."
+    (assert-equal '(:slot :root0 x) (cl-cc/optimize::opt-slot-alias-key :r0 'x alias)))
   (let ((alias (make-hash-table :test #'eq)))
-    (let ((key (cl-cc/optimize::opt-slot-alias-key :r5 'y alias)))
-      (assert-equal '(:slot :r5 y) key))))
+    (assert-equal '(:slot :r5 y) (cl-cc/optimize::opt-slot-alias-key :r5 'y alias))))
 
 ;;; ─── opt-rewrite-inst-regs ───────────────────────────────────────────────
 
-(deftest rewrite-inst-regs-replaces-source-register
-  "opt-rewrite-inst-regs substitutes copy-propagated source registers."
-  (let* ((inst (make-vm-add :dst :r2 :lhs :r0 :rhs :r1))
-         (copies (make-hash-table :test #'eq)))
+(deftest rewrite-inst-regs-behavior
+  "opt-rewrite-inst-regs substitutes source regs; never rewrites dst; no-op on empty copies."
+  (let* ((copies (make-hash-table :test #'eq)))
     (setf (gethash :r0 copies) :r5)
-    (let ((new-inst (cl-cc/optimize::opt-rewrite-inst-regs inst copies)))
-      ;; dst should be unchanged, lhs should be :r5
-      (assert-eq :r2 (cl-cc/vm::vm-dst new-inst))
-      (assert-eq :r5 (cl-cc/vm::vm-lhs new-inst)))))
-
-(deftest rewrite-inst-regs-preserves-dst
-  "opt-rewrite-inst-regs never rewrites the destination register."
-  (let* ((inst (make-vm-add :dst :r0 :lhs :r1 :rhs :r2))
-         (copies (make-hash-table :test #'eq)))
+    (let ((inst (cl-cc/optimize::opt-rewrite-inst-regs (make-vm-add :dst :r2 :lhs :r0 :rhs :r1) copies)))
+      (assert-eq :r2 (cl-cc/vm::vm-dst inst))
+      (assert-eq :r5 (cl-cc/vm::vm-lhs inst))))
+  (let* ((copies (make-hash-table :test #'eq)))
     (setf (gethash :r0 copies) :r99)
-    (let ((new-inst (cl-cc/optimize::opt-rewrite-inst-regs inst copies)))
-      (assert-eq :r0 (cl-cc/vm::vm-dst new-inst)))))
-
-(deftest rewrite-inst-regs-no-copies-unchanged
-  "opt-rewrite-inst-regs with empty copies returns structurally equivalent instruction."
-  (let* ((inst (make-vm-move :dst :r0 :src :r1))
-         (copies (make-hash-table :test #'eq))
-         (new-inst (cl-cc/optimize::opt-rewrite-inst-regs inst copies)))
-    (assert-eq :r1 (cl-cc/vm::vm-src new-inst))))
+    (let ((inst (cl-cc/optimize::opt-rewrite-inst-regs (make-vm-add :dst :r0 :lhs :r1 :rhs :r2) copies)))
+      (assert-eq :r0 (cl-cc/vm::vm-dst inst))))
+  (let ((inst (cl-cc/optimize::opt-rewrite-inst-regs
+               (make-vm-move :dst :r0 :src :r1)
+               (make-hash-table :test #'eq))))
+    (assert-eq :r1 (cl-cc/vm::vm-src inst))))
 
 ;;; ─── opt-pass-dead-store-elim ────────────────────────────────────────────
 

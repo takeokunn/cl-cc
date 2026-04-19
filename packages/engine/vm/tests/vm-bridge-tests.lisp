@@ -13,18 +13,12 @@
 
 ;;; ─── hash-table-values ───────────────────────────────────────────────────
 
-(deftest hash-table-values-empty-returns-nil
-  "hash-table-values returns nil for an empty hash table."
-  (assert-null (cl-cc/vm::hash-table-values (make-hash-table :test #'eq))))
-
-(deftest hash-table-values-single-entry
-  "hash-table-values returns a singleton list for a single-entry table."
+(deftest hash-table-values-cases
+  "hash-table-values: nil for empty; singleton for one entry; membership for multiple."
+  (assert-null (cl-cc/vm::hash-table-values (make-hash-table :test #'eq)))
   (let ((ht (make-hash-table :test #'eq)))
     (setf (gethash :k ht) 42)
-    (assert-equal '(42) (cl-cc/vm::hash-table-values ht))))
-
-(deftest hash-table-values-multiple-entries
-  "hash-table-values returns all values (order may vary; verify membership)."
+    (assert-equal '(42) (cl-cc/vm::hash-table-values ht)))
   (let ((ht (make-hash-table :test #'eq)))
     (setf (gethash :a ht) 1)
     (setf (gethash :b ht) 2)
@@ -37,14 +31,11 @@
 
 ;;; ─── vm-register-host-bridge ─────────────────────────────────────────────
 
-(deftest vm-register-host-bridge-adds-to-table
-  "vm-register-host-bridge registers a symbol in *vm-host-bridge-functions*."
+(deftest vm-register-host-bridge-behavior
+  "vm-register-host-bridge registers a symbol; registering twice is idempotent."
   (let ((sym (gensym "BRIDGE-TEST-")))
     (cl-cc/vm::vm-register-host-bridge sym)
-    (assert-true (gethash sym cl-cc/vm::*vm-host-bridge-functions*))))
-
-(deftest vm-register-host-bridge-idempotent
-  "Registering the same symbol twice does not cause an error."
+    (assert-true (gethash sym cl-cc/vm::*vm-host-bridge-functions*)))
   (let ((sym (gensym "BRIDGE-IDEM-")))
     (cl-cc/vm::vm-register-host-bridge sym)
     (cl-cc/vm::vm-register-host-bridge sym)
@@ -52,18 +43,12 @@
 
 ;;; ─── slot-definition-name ────────────────────────────────────────────────
 
-(deftest slot-definition-name-symbol-returns-self
-  "slot-definition-name returns the symbol when the slot is represented as a symbol."
-  (assert-eq 'my-slot (cl-cc/vm::slot-definition-name 'my-slot)))
-
-(deftest slot-definition-name-hash-table-returns-name
-  "slot-definition-name reads :name from a hash-table slot descriptor."
+(deftest slot-definition-name-cases
+  "slot-definition-name returns name from symbol/ht-descriptor, or nil for other types."
+  (assert-eq 'my-slot (cl-cc/vm::slot-definition-name 'my-slot))
   (let ((slot (make-hash-table :test #'eq)))
     (setf (gethash :name slot) 'count)
-    (assert-eq 'count (cl-cc/vm::slot-definition-name slot))))
-
-(deftest slot-definition-name-nil-for-other
-  "slot-definition-name returns nil for non-symbol, non-hash-table values."
+    (assert-eq 'count (cl-cc/vm::slot-definition-name slot)))
   (assert-null (cl-cc/vm::slot-definition-name 42)))
 
 ;;; ─── slot-definition-initform ────────────────────────────────────────────
@@ -115,27 +100,21 @@
 
 ;;; ─── %class-slot-initargs-for-slot ──────────────────────────────────────
 
-(deftest class-slot-initargs-for-slot-finds-matching-initarg
-  "%class-slot-initargs-for-slot returns initargs that initialise the named slot."
+(deftest class-slot-initargs-for-slot-cases
+  "%class-slot-initargs-for-slot: finds initarg; nil when absent; nil for non-ht class."
   (let ((class (make-hash-table :test #'eq)))
     (setf (gethash :__initargs__ class)
           '((:count . count) (:value . value)))
-    (assert-equal '(:count) (cl-cc/vm::%class-slot-initargs-for-slot class 'count))))
-
-(deftest class-slot-initargs-for-slot-nil-when-absent
-  "%class-slot-initargs-for-slot returns nil when no initarg maps to the slot."
+    (assert-equal '(:count) (cl-cc/vm::%class-slot-initargs-for-slot class 'count)))
   (let ((class (make-hash-table :test #'eq)))
     (setf (gethash :__initargs__ class) '((:x . x)))
-    (assert-null (cl-cc/vm::%class-slot-initargs-for-slot class 'y))))
-
-(deftest class-slot-initargs-for-slot-nil-for-non-ht-class
-  "%class-slot-initargs-for-slot returns nil for a non-hash-table class."
+    (assert-null (cl-cc/vm::%class-slot-initargs-for-slot class 'y)))
   (assert-null (cl-cc/vm::%class-slot-initargs-for-slot 'not-a-class 'slot)))
 
 ;;; ─── %class-slot-metadata ────────────────────────────────────────────────
 
-(deftest class-slot-metadata-returns-hash-table
-  "%class-slot-metadata returns a hash table descriptor for the named slot."
+(deftest class-slot-metadata-cases
+  "%class-slot-metadata: returns hash-table descriptor; marks class-allocated slots."
   (let ((class (make-hash-table :test #'eq)))
     (setf (gethash :__initargs__  class) '((:n . n)))
     (setf (gethash :__initforms__ class) '((n . 0)))
@@ -145,10 +124,7 @@
       (assert-eq 'n   (gethash :name slot))
       (assert-=  0    (gethash :initform slot))
       (assert-equal '(:n) (gethash :initargs slot))
-      (assert-eq :instance (gethash :allocation slot)))))
-
-(deftest class-slot-metadata-class-allocation-for-class-slot
-  "%class-slot-metadata marks slots listed in :__class-slots__ as :class allocation."
+      (assert-eq :instance (gethash :allocation slot))))
   (let ((class (make-hash-table :test #'eq)))
     (setf (gethash :__initargs__   class) nil)
     (setf (gethash :__initforms__  class) nil)
@@ -169,39 +145,27 @@
       (assert-= 2 (length defs))
       (assert-true (every #'hash-table-p defs)))))
 
-(deftest class-slot-definitions-nil-for-non-ht-class
-  "%class-slot-definitions returns nil for non-hash-table class."
-  (assert-null (cl-cc/vm::%class-slot-definitions 'symbol-class)))
-
-(deftest class-slot-definitions-nil-when-no-slots-key
-  "%class-slot-definitions returns nil when :__slots__ is absent."
-  (let ((class (make-hash-table :test #'eq)))
-    (assert-null (cl-cc/vm::%class-slot-definitions class))))
+(deftest-each class-slot-definitions-nil-cases
+  "%class-slot-definitions returns nil for a non-hash-table class or when :__slots__ is absent."
+  :cases (("non-ht"   'symbol-class)
+          ("no-slots" (make-hash-table :test #'eq)))
+  (class)
+  (assert-null (cl-cc/vm::%class-slot-definitions class)))
 
 ;;; ─── rt-plist-put ────────────────────────────────────────────────────────
 
-(deftest rt-plist-put-adds-new-key-to-empty-plist
-  "rt-plist-put inserts a key-value pair into an empty plist."
-  (let ((result (cl-cc/bootstrap::rt-plist-put nil :color 'red)))
-    (assert-equal '(:color red) result)))
-
-(deftest rt-plist-put-updates-existing-key
-  "rt-plist-put replaces the value for an existing key."
+(deftest rt-plist-put-cases
+  "rt-plist-put: inserts into empty; updates existing; preserves others; non-destructive."
+  (assert-equal '(:color red) (cl-cc/bootstrap::rt-plist-put nil :color 'red))
   (let* ((plist  '(:a 1 :b 2))
          (result (cl-cc/bootstrap::rt-plist-put plist :a 99)))
     (assert-= 99 (getf result :a))
-    (assert-= 2  (getf result :b))))
-
-(deftest rt-plist-put-preserves-other-keys
-  "rt-plist-put does not remove unrelated keys."
+    (assert-= 2  (getf result :b)))
   (let* ((plist  '(:x 10 :y 20 :z 30))
          (result (cl-cc/bootstrap::rt-plist-put plist :y 99)))
     (assert-= 10 (getf result :x))
     (assert-= 99 (getf result :y))
-    (assert-= 30 (getf result :z))))
-
-(deftest rt-plist-put-non-destructive
-  "rt-plist-put does not modify the original plist."
+    (assert-= 30 (getf result :z)))
   (let* ((plist '(:a 1))
          (result (cl-cc/bootstrap::rt-plist-put plist :a 2)))
     (declare (ignore result))
@@ -209,13 +173,9 @@
 
 ;;; ─── generic-function-methods ────────────────────────────────────────────
 
-(deftest generic-function-methods-nil-for-no-methods-key
-  "generic-function-methods returns nil when :__methods__ is absent."
-  (let ((gf (make-hash-table :test #'eq)))
-    (assert-null (cl-cc/vm::generic-function-methods gf))))
-
-(deftest generic-function-methods-returns-value-list
-  "generic-function-methods returns all registered methods as a list."
+(deftest generic-function-methods-cases
+  "generic-function-methods: nil when :__methods__ absent; returns all methods otherwise."
+  (assert-null (cl-cc/vm::generic-function-methods (make-hash-table :test #'eq)))
   (let ((gf (make-hash-table :test #'eq))
         (methods-ht (make-hash-table :test #'equal)))
     (setf (gethash '(integer) methods-ht) 'method-a)
@@ -228,13 +188,10 @@
 
 ;;; ─── generic-function-method-combination ─────────────────────────────────
 
-(deftest generic-function-method-combination-defaults-to-standard
-  "generic-function-method-combination returns STANDARD when not explicitly set."
+(deftest generic-function-method-combination-behavior
+  "generic-function-method-combination defaults to STANDARD; returns stored value when set."
   (let ((gf (make-hash-table :test #'eq)))
-    (assert-eq 'standard (cl-cc/vm::generic-function-method-combination gf))))
-
-(deftest generic-function-method-combination-returns-stored-value
-  "generic-function-method-combination returns the stored combination name."
+    (assert-eq 'standard (cl-cc/vm::generic-function-method-combination gf)))
   (let ((gf (make-hash-table :test #'eq)))
     (setf (gethash :__method-combination__ gf) '+)
     (assert-eq '+ (cl-cc/vm::generic-function-method-combination gf))))

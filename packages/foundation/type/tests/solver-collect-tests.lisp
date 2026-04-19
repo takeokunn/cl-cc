@@ -83,30 +83,25 @@
 
 ;;; ─── ast-let → extends env, body type is result ─────────────────────────────
 
-(deftest collect-let-body-type
-  "ast-let returns the type of the last body form."
+(deftest collect-let-behavior
+  "ast-let returns body type; binding is available to body forms."
   (multiple-value-bind (ty _cs)
-      (collect
-       (cl-cc/ast:make-ast-let
-        :bindings (list (cons 'n (cl-cc/ast:make-ast-int :value 5)))
-        :body (list (cl-cc/ast:make-ast-int :value 99))))
+      (collect (cl-cc/ast:make-ast-let
+                :bindings (list (cons 'n (cl-cc/ast:make-ast-int :value 5)))
+                :body (list (cl-cc/ast:make-ast-int :value 99))))
     (declare (ignore _cs))
-    (assert-true (type-equal-p type-int ty))))
-
-(deftest collect-let-binding-used-in-body
-  "ast-let makes the binding available to body forms."
+    (assert-true (type-equal-p type-int ty)))
   (multiple-value-bind (ty _cs)
-      (collect
-       (cl-cc/ast:make-ast-let
-        :bindings (list (cons 'n (cl-cc/ast:make-ast-int :value 5)))
-        :body (list (cl-cc/ast:make-ast-var :name 'n))))
+      (collect (cl-cc/ast:make-ast-let
+                :bindings (list (cons 'n (cl-cc/ast:make-ast-int :value 5)))
+                :body (list (cl-cc/ast:make-ast-var :name 'n))))
     (declare (ignore _cs))
     (assert-true (type-equal-p type-int ty))))
 
 ;;; ─── ast-lambda → type-arrow ─────────────────────────────────────────────────
 
-(deftest collect-lambda-zero-params
-  "ast-lambda with no params and an int body returns (→ () int)."
+(deftest collect-lambda-cases
+  "ast-lambda: no params→arrow with nil params and int return; 1 param→arrow with 1 param; empty body→null return."
   (multiple-value-bind (ty _cs)
       (collect
        (cl-cc/ast:make-ast-lambda
@@ -115,10 +110,7 @@
     (declare (ignore _cs))
     (assert-true (cl-cc/type::type-arrow-p ty))
     (assert-null (cl-cc/type::type-arrow-params ty))
-    (assert-true (type-equal-p type-int (cl-cc/type::type-arrow-return ty)))))
-
-(deftest collect-lambda-one-param
-  "ast-lambda with one param returns arrow with 1 fresh param type."
+    (assert-true (type-equal-p type-int (cl-cc/type::type-arrow-return ty))))
   (multiple-value-bind (ty _cs)
       (collect
        (cl-cc/ast:make-ast-lambda
@@ -126,10 +118,7 @@
         :body   (list (cl-cc/ast:make-ast-int :value 0))))
     (declare (ignore _cs))
     (assert-true (cl-cc/type::type-arrow-p ty))
-    (assert-= 1 (length (cl-cc/type::type-arrow-params ty)))))
-
-(deftest collect-lambda-empty-body
-  "ast-lambda with empty body has return type null."
+    (assert-= 1 (length (cl-cc/type::type-arrow-params ty))))
   (multiple-value-bind (ty _cs)
       (collect
        (cl-cc/ast:make-ast-lambda :params '() :body '()))
@@ -156,20 +145,16 @@
 
 ;;; ─── ast-progn → type of last form ──────────────────────────────────────────
 
-(deftest collect-progn-empty
-  "ast-progn with no forms returns type-null."
+(deftest collect-progn-behavior
+  "ast-progn: empty body returns type-null; non-empty body returns type of last form."
   (multiple-value-bind (ty _cs)
       (collect (cl-cc/ast:make-ast-progn :forms '()))
     (declare (ignore _cs))
-    (assert-true (type-equal-p type-null ty))))
-
-(deftest collect-progn-last-form-type
-  "ast-progn returns the type of the last form."
+    (assert-true (type-equal-p type-null ty)))
   (multiple-value-bind (ty _cs)
-      (collect
-       (cl-cc/ast:make-ast-progn
-        :forms (list (cl-cc/ast:make-ast-int :value 1)
-                     (cl-cc/ast:make-ast-int :value 2))))
+      (collect (cl-cc/ast:make-ast-progn
+                :forms (list (cl-cc/ast:make-ast-int :value 1)
+                             (cl-cc/ast:make-ast-int :value 2))))
     (declare (ignore _cs))
     (assert-true (type-equal-p type-int ty))))
 
@@ -188,47 +173,29 @@
 
 ;;; ─── ast-defvar ──────────────────────────────────────────────────────────────
 
-(deftest collect-defvar-with-value
-  "ast-defvar with value walks the value and returns type-symbol."
+(deftest collect-defvar-returns-symbol-type
+  "ast-defvar returns type-symbol with or without an initial value."
   (multiple-value-bind (ty _cs)
-      (collect
-       (cl-cc/ast:make-ast-defvar
-        :name '*x*
-        :value (cl-cc/ast:make-ast-int :value 0)))
+      (collect (cl-cc/ast:make-ast-defvar :name '*x* :value (cl-cc/ast:make-ast-int :value 0)))
     (declare (ignore _cs))
-    (assert-true (type-equal-p type-symbol ty))))
-
-(deftest collect-defvar-without-value
-  "ast-defvar with no value returns type-symbol without signaling."
+    (assert-true (type-equal-p type-symbol ty)))
   (multiple-value-bind (ty _cs)
-      (collect
-       (cl-cc/ast:make-ast-defvar :name '*x* :value nil))
+      (collect (cl-cc/ast:make-ast-defvar :name '*x* :value nil))
     (declare (ignore _cs))
     (assert-true (type-equal-p type-symbol ty))))
 
 ;;; ─── ast-setq ────────────────────────────────────────────────────────────────
 
-(deftest collect-setq-known-var-emits-constraint
-  "ast-setq for a bound var emits an equality constraint and returns the value type."
-  (let* ((env (cl-cc/type::type-env-extend
-               'n (cl-cc/type::type-to-scheme type-int) (empty-env))))
+(deftest collect-setq-behavior
+  "ast-setq: bound var emits equality constraint; unbound var emits no constraint."
+  (let* ((env (cl-cc/type::type-env-extend 'n (cl-cc/type::type-to-scheme type-int) (empty-env))))
     (multiple-value-bind (ty cs)
-        (collect-in
-         (cl-cc/ast:make-ast-setq
-          :var 'n
-          :value (cl-cc/ast:make-ast-int :value 99))
-         env)
+        (collect-in (cl-cc/ast:make-ast-setq :var 'n :value (cl-cc/ast:make-ast-int :value 99)) env)
       (assert-true (type-equal-p type-int ty))
       (assert-= 1 (length cs))
-      (assert-eq :equal (cl-cc/type::constraint-kind (first cs))))))
-
-(deftest collect-setq-unknown-var-no-constraint
-  "ast-setq for an unbound var emits no constraint but still returns the value type."
+      (assert-eq :equal (cl-cc/type::constraint-kind (first cs)))))
   (multiple-value-bind (ty cs)
-      (collect
-       (cl-cc/ast:make-ast-setq
-        :var 'unbound
-        :value (cl-cc/ast:make-ast-int :value 0)))
+      (collect (cl-cc/ast:make-ast-setq :var 'unbound :value (cl-cc/ast:make-ast-int :value 0)))
     (assert-true (type-equal-p type-int ty))
     (assert-null cs)))
 

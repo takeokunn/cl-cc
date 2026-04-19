@@ -57,10 +57,10 @@
    #:run-string
    #:run-string-typed
    ;; NOTE: our-eval is NOT exported here. It is pre-interned by
-   ;; :cl-cc/prolog (prolog-query.lisp uses it at compile time) and
+   ;; :cl-cc/prolog (the solver/query layer uses it at compile time) and
    ;; exported from :cl-cc via package-exports-1.lisp.
 
-   ;; --- pipeline-repl.lisp --- REPL state + our-load ------------------
+   ;; --- pipeline-repl-state/load.lisp --- REPL state + our-load -------
    #:run-string-repl
    #:reset-repl-state
    #:*repl-vm-state*

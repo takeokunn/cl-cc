@@ -562,6 +562,12 @@
                  :type-refinement-p
                  :type-refinement-base
                  :type-refinement-predicate
+                 ;; Backward-compat skolem helpers
+                 :make-type-skolem
+                 :type-skolem-p
+                 :type-skolem-id
+                 :type-skolem-name
+                 :type-skolem-equal-p
                  ;; Type-rigid (skolem)
                  :fresh-rigid-var
                  :type-rigid-p
@@ -639,6 +645,8 @@
            :assert-not-unifies
            :assert-snapshot
            :assert-compiles-to
+           :assert-pbt
+           :deftest-pbt
            :assert-evaluates-to
            :assert-macro-expands-to
            :assert-infers-type

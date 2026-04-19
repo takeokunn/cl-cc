@@ -62,7 +62,7 @@
   "dict-env-extend provides a constraint; missing env signals type-inference-error."
   (let* ((env0 (type-env-empty))
          (env1 (cl-cc/type:dict-env-extend 'local-num type-int '((plus . #'+)) env0))
-         (constraint (cl-cc/type:make-type-class-constraint
+         (constraint (cl-cc/type:make-type-constraint
                       :class-name 'local-num
                       :type-arg type-int))
          (q (cl-cc/type:make-type-qualified :constraints (list constraint)
@@ -88,22 +88,19 @@
                            (cl-cc/type:type-effect-row-effects effects))))
         (assert-true (member "IO" names :key #'symbol-name :test #'string=))))))
 
-(deftest infer-check-body-effects-passes-with-matching-row
-  "check-body-effects succeeds when IO effects are allowed."
+(deftest infer-check-body-effects-cases
+  "check-body-effects: IO row succeeds; pure row signals type-inference-error."
   (let ((asts (list (cl-cc:lower-sexp-to-ast '(print 42)))))
     (cl-cc/type:check-body-effects asts cl-cc/type:+io-effect-row+ (type-env-empty))
-    (assert-true t)))
-
-(deftest infer-check-body-effects-fails-with-pure-row
-  "check-body-effects signals type-inference-error when IO effect exceeds pure row."
+    (assert-true t))
   (let ((asts (list (cl-cc:lower-sexp-to-ast '(print 42)))))
     (assert-signals cl-cc/type:type-inference-error
       (cl-cc/type:check-body-effects asts cl-cc/type:+pure-effect-row+ (type-env-empty)))))
 
 ;;; ─── Skolem Helpers ───────────────────────────────────────────────────────
 
-(deftest infer-skolem-appears-in-type-and-subst
-  "skolem-appears-in-type-p detects presence in function types; skolem-appears-in-subst-p detects it in substitutions."
+(deftest infer-skolem-helpers-cases
+  "Skolem helpers: appears-in-type-p/subst-p detect presence; check-skolem-escape signals on escape."
   (let* ((sk (cl-cc/type:make-type-skolem "a"))
          (fn-with (cl-cc/type:make-type-function-raw
                    :params (list sk) :return cl-cc/type:type-int))
@@ -114,10 +111,7 @@
   (let* ((sk (cl-cc/type:make-type-skolem "a"))
          (v  (cl-cc/type:make-type-variable 'x)))
     (assert-true  (cl-cc/type::skolem-appears-in-subst-p sk (subst-extend v sk (make-substitution))))
-    (assert-false (cl-cc/type::skolem-appears-in-subst-p sk (subst-extend v cl-cc/type:type-int (make-substitution))))))
-
-(deftest infer-skolem-escape-signals-error
-  "check-skolem-escape signals type-inference-error when the skolem appears in the substitution."
+    (assert-false (cl-cc/type::skolem-appears-in-subst-p sk (subst-extend v cl-cc/type:type-int (make-substitution)))))
   (let* ((sk (cl-cc/type:make-type-skolem "a"))
          (v (cl-cc/type:make-type-variable 'x))
          (s (subst-extend v sk (make-substitution))))
@@ -126,8 +120,8 @@
 
 ;;; ─── Bidirectional check: forall ──────────────────────────────────────────
 
-(deftest infer-check-forall-skolemizes-and-succeeds
-  "check against a forall type skolemizes the variable and succeeds for a matching lambda."
+(deftest infer-check-mode-cases
+  "check: forall type skolemizes and succeeds; +type-unknown+ always returns nil subst."
   (reset-type-vars!)
   (let* ((a (cl-cc/type:make-type-variable 'a))
          (fn-body (cl-cc/type:make-type-function-raw :params (list a) :return a))
@@ -136,10 +130,7 @@
          (env (type-env-empty)))
     (let ((subst (cl-cc/type:check ast forall-ty env)))
       (declare (ignore subst))
-      (assert-true t))))
-
-(deftest infer-check-unknown-always-succeeds
-  "check against +type-unknown+ returns nil substitution without error."
+      (assert-true t)))
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast '42))
         (env (type-env-empty)))
@@ -148,17 +139,14 @@
 
 ;;; ─── annotate-type / defun-without-annotation ───────────────────────────
 
-(deftest infer-annotate-type-returns-type-and-ast
-  "annotate-type infers type-int for 42 and returns the original AST node unchanged."
+(deftest infer-annotation-cases
+  "annotate-type returns type-int + original ast for 42; defun infers function type with fixnum return."
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast '42)))
     (multiple-value-bind (ty result-ast)
         (cl-cc/type:annotate-type ast (type-env-empty))
       (assert-type-equal ty cl-cc/type:type-int)
-      (assert-eq ast result-ast))))
-
-(deftest infer-defun-without-annotation-infers-function-type
-  "defun without a type annotation infers a function type with fixnum return."
+      (assert-eq ast result-ast)))
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast '(defun f (x) (+ x 1)))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
@@ -168,20 +156,14 @@
 
 ;;; ─── Condition Classes ────────────────────────────────────────────────────
 
-(deftest infer-condition-base-error-message
-  "type-inference-error carries the message string."
+(deftest infer-condition-class-cases
+  "Condition hierarchy: base error message; unbound-variable carries name; type-mismatch carries expected/actual."
   (let ((c (make-condition 'cl-cc/type:type-inference-error :message "test")))
     (assert-true (typep c 'error))
-    (assert-equal "test" (cl-cc/type:type-inference-error-message c))))
-
-(deftest infer-condition-unbound-variable-carries-name
-  "unbound-variable-error is a type-inference-error and carries the unbound name."
+    (assert-equal "test" (cl-cc/type:type-inference-error-message c)))
   (let ((c (make-condition 'cl-cc/type:unbound-variable-error :name 'x)))
     (assert-true (typep c 'cl-cc/type:type-inference-error))
-    (assert-eq 'x (cl-cc/type:unbound-variable-error-name c))))
-
-(deftest infer-condition-type-mismatch-carries-expected-and-actual
-  "type-mismatch-error carries both expected and actual types."
+    (assert-eq 'x (cl-cc/type:unbound-variable-error-name c)))
   (let ((c (make-condition 'cl-cc/type:type-mismatch-error
                            :expected cl-cc/type:type-int
                            :actual cl-cc/type:type-string)))
@@ -209,16 +191,13 @@
         (assert-true  (cl-cc/type:syntactic-value-p ast))
         (assert-false (cl-cc/type:syntactic-value-p ast)))))
 
-(deftest infer-value-restriction-lambda-generalizes
-  "A let binding of a lambda (syntactic value) can be generalized and applied."
+(deftest infer-value-restriction-cases
+  "Value restriction: lambda binding generalizes to poly; call binding stays monomorphic."
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast '(let ((id (lambda (x) x))) (id 42)))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-type-equal ty cl-cc/type:type-int))))
-
-(deftest infer-value-restriction-call-binding-stays-monomorphic
-  "A let binding of a function call stays monomorphic under value restriction."
+      (assert-type-equal ty cl-cc/type:type-int)))
   (reset-type-vars!)
   (let* ((fn-ty (cl-cc/type:make-type-function-raw
                  :params (list cl-cc/type:type-int)

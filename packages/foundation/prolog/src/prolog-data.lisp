@@ -143,9 +143,11 @@ construction time."
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defmacro %def-prolog-clause (head &key body)
-    `(add-rule ',(car head)
-               (make-prolog-rule :head ',head
-                                 ,@(when body `(:body ',body)))))
+    (list 'add-rule
+          (list 'quote (car head))
+          (append (list 'make-prolog-rule :head (list 'quote head))
+                  (when body
+                    (list :body (list 'quote body))))))
 
   (defmacro define-prolog-integer-binop-type-rules ()
     "Emit the repetitive integer binop type rules from
@@ -153,32 +155,34 @@ construction time."
 
 This keeps the rule set data-driven and avoids repeating nearly identical
 DEF-RULE forms for each arithmetic operator."
-    `(progn
-       ,@(mapcar (lambda (op)
-                   `(def-rule (type-of (binop ,op ?a ?b) ?env (integer-type))
-                      (type-of ?a ?env (integer-type))
-                      (type-of ?b ?env (integer-type))))
-                 *prolog-integer-binop-type-operators*)))
+    (cons 'progn
+          (mapcar (lambda (op)
+                    (list 'def-rule
+                          (list 'type-of (list 'binop op '?a '?b) '?env '(integer-type))
+                          (list 'type-of '?a '?env '(integer-type))
+                          (list 'type-of '?b '?env '(integer-type))))
+                  *prolog-integer-binop-type-operators*)))
 
   (defmacro define-prolog-comparison-type-rule ()
     "Emit the comparison type rule using the data table from prolog-data.lisp."
-    `(def-rule (type-of (cmp ?op ?a ?b) ?env (boolean-type))
-       (type-of ?a ?env (integer-type))
-       (type-of ?b ?env (integer-type))
-       (:when (cl:member ?op ',*prolog-comparison-type-operators*))))
+    (list 'def-rule
+          (list 'type-of '(cmp ?op ?a ?b) '?env '(boolean-type))
+          (list 'type-of '?a '?env '(integer-type))
+          (list 'type-of '?b '?env '(integer-type))
+          (list :when (list 'cl:member '?op (list 'quote *prolog-comparison-type-operators*)))))
 
   (defmacro define-prolog-declarative-rules ()
     "Emit `def-rule` forms from *PROLOG-DECLARATIVE-RULE-SPECS*."
-    `(progn
-       ,@(mapcar (lambda (spec)
-                   (destructuring-bind (head &optional body) spec
-                     `(def-rule ,@head ,@(or body '()))))
-                 *prolog-declarative-rule-specs*)))
+    (cons 'progn
+          (mapcar (lambda (spec)
+                    (destructuring-bind (head &optional body) spec
+                      (append (list 'def-rule) head (or body '()))))
+                  *prolog-declarative-rule-specs*)))
 
   (defmacro def-fact (head)
     "Define a Prolog fact. Usage: (def-fact (parent tom mary))"
-    `(%def-prolog-clause ,head))
+    (list '%def-prolog-clause head))
 
   (defmacro def-rule (head &body body)
     "Define a Prolog rule. Usage: (def-rule (grandparent ?x ?z) (parent ?x ?y) (parent ?y ?z))"
-    `(%def-prolog-clause ,head :body ,body)))
+    (list '%def-prolog-clause head :body body)))

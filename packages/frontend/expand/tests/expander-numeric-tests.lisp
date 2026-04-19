@@ -40,55 +40,31 @@
 
 ;;; ─── - (subtraction / unary negation) ───────────────────────────────────
 
-(deftest expander-minus-zero-arg-signals-error
-  "0-arg - signals an error."
-  (assert-signals error (cl-cc/expand::compiler-macroexpand-all '(-))))
-
-(deftest expander-minus-unary-negation
-  "1-arg - expands to (- 0 x)."
-  (assert-equal '(- 0 7) (cl-cc/expand::compiler-macroexpand-all '(- 7))))
-
-(deftest expander-minus-binary-passthrough
-  "2-arg - produces the binary form unchanged."
-  (assert-equal '(- a b) (cl-cc/expand::compiler-macroexpand-all '(- a b))))
-
-(deftest expander-minus-nary-left-fold
-  "3-arg - produces left-nested subtraction."
+(deftest expander-minus-cases
+  "- : 0-arg→error; 1-arg→(- 0 x); 2-arg→passthrough; 3-arg→left-fold."
+  (assert-signals error (cl-cc/expand::compiler-macroexpand-all '(-)))
+  (assert-equal '(- 0 7)     (cl-cc/expand::compiler-macroexpand-all '(- 7)))
+  (assert-equal '(- a b)     (cl-cc/expand::compiler-macroexpand-all '(- a b)))
   (assert-equal '(- (- a b) c) (cl-cc/expand::compiler-macroexpand-all '(- a b c))))
 
 ;;; ─── / (division / reciprocal) ───────────────────────────────────────────
 
-(deftest expander-slash-zero-arg-signals-error
-  "0-arg / signals an error."
-  (assert-signals error (cl-cc/expand::compiler-macroexpand-all '(/))))
-
-(deftest expander-slash-unary-reciprocal
-  "1-arg / expands to (/ 1 x)."
-  (assert-equal '(/ 1 x) (cl-cc/expand::compiler-macroexpand-all '(/ x))))
-
-(deftest expander-slash-binary-passthrough
-  "2-arg / produces the binary form unchanged."
-  (assert-equal '(/ a b) (cl-cc/expand::compiler-macroexpand-all '(/ a b))))
-
-(deftest expander-slash-nary-left-fold
-  "3-arg / produces left-nested division."
+(deftest expander-slash-cases
+  "/ : 0-arg→error; 1-arg→(/ 1 x); 2-arg→passthrough; 3-arg→left-fold."
+  (assert-signals error (cl-cc/expand::compiler-macroexpand-all '(/)))
+  (assert-equal '(/ 1 x)       (cl-cc/expand::compiler-macroexpand-all '(/ x)))
+  (assert-equal '(/ a b)       (cl-cc/expand::compiler-macroexpand-all '(/ a b)))
   (assert-equal '(/ (/ a b) c) (cl-cc/expand::compiler-macroexpand-all '(/ a b c))))
 
 ;;; ─── log ─────────────────────────────────────────────────────────────────
 
-(deftest expander-log-unary-natural
-  "1-arg log passes through as the natural logarithm."
-  (assert-equal '(log x) (cl-cc/expand::compiler-macroexpand-all '(log x))))
-
-(deftest expander-log-binary-change-of-base
-  "2-arg log expands to (/ (log x) (log y))."
+(deftest expander-log-cases
+  "log: 1-arg passthrough; 2-arg→(/ (log x) (log y)); 3-arg→error."
+  (assert-equal '(log x) (cl-cc/expand::compiler-macroexpand-all '(log x)))
   (let ((result (cl-cc/expand::compiler-macroexpand-all '(log x y))))
     (assert-eq '/ (first result))
     (assert-equal '(log x) (second result))
-    (assert-equal '(log y) (third result))))
-
-(deftest expander-log-three-arg-signals-error
-  "3-arg log signals an error."
+    (assert-equal '(log y) (third result)))
   (assert-signals error (cl-cc/expand::compiler-macroexpand-all '(log x y z))))
 
 ;;; ─── min / max ────────────────────────────────────────────────────────────
@@ -149,33 +125,21 @@
 
 ;;; ─── float-sign ──────────────────────────────────────────────────────────
 
-(deftest expander-float-sign-unary
-  "1-arg float-sign passes through unchanged."
-  (assert-equal '(float-sign x) (cl-cc/expand::compiler-macroexpand-all '(float-sign x))))
-
-(deftest expander-float-sign-binary
-  "2-arg float-sign expands to (* (float-sign x) (abs y))."
+(deftest expander-float-sign-cases
+  "float-sign: 1-arg passthrough; 2-arg→(* (float-sign x) (abs y)); 3-arg→error."
+  (assert-equal '(float-sign x) (cl-cc/expand::compiler-macroexpand-all '(float-sign x)))
   (let ((result (cl-cc/expand::compiler-macroexpand-all '(float-sign x y))))
     (assert-eq '* (first result))
     (assert-equal '(float-sign x) (second result))
-    (assert-equal '(abs y) (third result))))
-
-(deftest expander-float-sign-three-arg-signals-error
-  "3-arg float-sign signals an error."
+    (assert-equal '(abs y) (third result)))
   (assert-signals error (cl-cc/expand::compiler-macroexpand-all '(float-sign x y z))))
 
 ;;; ─── float ───────────────────────────────────────────────────────────────
 
-(deftest expander-float-unary
-  "1-arg float passes through."
-  (assert-equal '(float x) (cl-cc/expand::compiler-macroexpand-all '(float x))))
-
-(deftest expander-float-binary-drops-prototype
-  "2-arg float drops the prototype and produces (float number)."
-  (assert-equal '(float x) (cl-cc/expand::compiler-macroexpand-all '(float x 1.0))))
-
-(deftest expander-float-three-arg-signals-error
-  "3-arg float signals an error."
+(deftest expander-float-cases
+  "float: 1-arg passthrough; 2-arg drops prototype; 3-arg→error."
+  (assert-equal '(float x) (cl-cc/expand::compiler-macroexpand-all '(float x)))
+  (assert-equal '(float x) (cl-cc/expand::compiler-macroexpand-all '(float x 1.0)))
   (assert-signals error (cl-cc/expand::compiler-macroexpand-all '(float x 1.0 extra))))
 
 ;;; ─── logand / logior / logxor / logeqv ──────────────────────────────────

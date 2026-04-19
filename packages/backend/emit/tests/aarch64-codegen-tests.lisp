@@ -61,15 +61,6 @@ Returns the byte vector, or NIL on error."
     (assert-true x64)
     (assert-false (equalp a64 x64))))
 
-(deftest aarch64-empty-program-trims-unused-callee-saved-regs
-  "compile-to-aarch64-bytes emits prologue/epilogue for an empty program.
-Current emitter produces 32 bytes total — 4 bytes shadow-call-stack store +
-4 bytes stp fp/lr + 4 bytes ldp fp/lr + 4 bytes shadow-call-stack restore +
-additional setup/teardown. Trimming further would require liveness analysis
-that is not yet implemented."
-  (let* ((program (cl-cc/vm::make-vm-program :instructions nil :result-register :R0))
-         (bytes (compile-to-aarch64-bytes program)))
-    (assert-= 32 (length bytes))))
 
 (deftest aarch64-bswap-emitter-encoding
   "emit-a64-vm-bswap emits a single REV Wd, Wn instruction."
@@ -94,13 +85,14 @@ that is not yet implemented."
   (expected instr-type)
   (assert-= expected (gethash instr-type cl-cc/emit::*a64-instruction-sizes*)))
 
-(deftest aarch64-vm-move-self-is-elided
-  "vm-move to the same physical register emits no bytes on AArch64."
+(deftest aarch64-vm-move-self-elision-cases
+  "Self-move emits no bytes; a64-instruction-size also returns 0 for self-moves."
   (let ((bytes (%a64-collect-bytes
                 (lambda (s)
                   (cl-cc/emit::emit-a64-vm-move
                    (cl-cc::make-vm-move :dst :R0 :src :R0) s)))))
-    (assert-= 0 (length bytes))))
+    (assert-= 0 (length bytes)))
+  (assert-= 0 (cl-cc/emit::a64-instruction-size (cl-cc::make-vm-move :dst :R0 :src :R0))))
 
 (deftest aarch64-scs-single-register-encodings
   "Shadow call stack helper encodings for STR-post, LDR-pre, B.cond, and BRK are stable."
@@ -112,10 +104,6 @@ that is not yet implemented."
     (assert-equal '(81 142 95 248) load)
     (assert-equal '(64 0 0 84) beq)
     (assert-equal '(0 0 32 212) brk)))
-
-(deftest aarch64-instruction-size-vm-move-self-is-zero
-  "a64-instruction-size returns 0 for self-moves elided at emit time."
-  (assert-= 0 (cl-cc/emit::a64-instruction-size (cl-cc::make-vm-move :dst :R0 :src :R0))))
 
 (deftest-each aarch64-emitter-table-entries
   "Instruction types are registered as functions in the AArch64 emitter table."
@@ -219,10 +207,8 @@ that is not yet implemented."
     (assert-true (cl-cc/vm::vm-program-leaf-p program))
     (assert-true (< (length leaf-bytes) (length nonleaf-bytes)))))
 
-(deftest aarch64-empty-program-includes-shadow-call-stack
-  "Empty AArch64 programs include the shadow call stack prologue/epilogue sequence.
-compile-to-aarch64-bytes returns a vector, so use ELT/AREF rather than NTH
-(which requires a list)."
+(deftest aarch64-empty-program-cases
+  "Empty AArch64 program emits exactly 32 bytes including shadow call stack prologue/epilogue."
   (let* ((program (cl-cc/vm::make-vm-program :instructions nil :result-register :R0))
          (bytes (compile-to-aarch64-bytes program)))
     (assert-= 32 (length bytes))

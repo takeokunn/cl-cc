@@ -25,39 +25,30 @@
   (expected node)
   (assert-equal expected (cl-cc::ast-to-sexp node)))
 
-;;; ─── Binary/conditional structure ────────────────────────────────────────
+;;; ─── Binary/conditional/sequencing nodes ────────────────────────────────
 
-(deftest ast-to-sexp-binop-produces-infix-list
-  "ast-to-sexp for ast-binop returns (op lhs rhs)."
-  (let ((node (cl-cc::make-ast-binop
-               :op '+
-               :lhs (cl-cc::make-ast-int :value 3)
-               :rhs (cl-cc::make-ast-int :value 4))))
-    (assert-equal '(+ 3 4) (cl-cc::ast-to-sexp node))))
-
-(deftest ast-to-sexp-if-produces-three-branch-if
-  "ast-to-sexp for ast-if returns (if cond then else)."
-  (let ((node (cl-cc::make-ast-if
-               :cond (cl-cc::make-ast-int :value 1)
-               :then (cl-cc::make-ast-var :name 'a)
-               :else (cl-cc::make-ast-var :name 'b))))
-    (assert-equal '(if 1 a b) (cl-cc::ast-to-sexp node))))
-
-(deftest ast-to-sexp-the-wraps-with-type
-  "ast-to-sexp for ast-the returns (the type value)."
-  (let ((node (cl-cc::make-ast-the
-               :type 'integer
-               :value (cl-cc::make-ast-var :name 'n))))
-    (assert-equal '(the integer n) (cl-cc::ast-to-sexp node))))
-
-;;; ─── Sequencing / binding ─────────────────────────────────────────────────
-
-(deftest ast-to-sexp-progn-collects-forms
-  "ast-to-sexp for ast-progn returns (progn form1 form2 ...)."
-  (let ((node (cl-cc::make-ast-progn
-               :forms (list (cl-cc::make-ast-int :value 1)
-                            (cl-cc::make-ast-int :value 2)))))
-    (assert-equal '(progn 1 2) (cl-cc::ast-to-sexp node))))
+(deftest ast-to-sexp-structural-nodes
+  "ast-to-sexp for binop/if/the/progn/setq returns the correct sexp."
+  (assert-equal '(+ 3 4)
+                (cl-cc::ast-to-sexp
+                 (cl-cc::make-ast-binop :op '+
+                  :lhs (cl-cc::make-ast-int :value 3)
+                  :rhs (cl-cc::make-ast-int :value 4))))
+  (assert-equal '(if 1 a b)
+                (cl-cc::ast-to-sexp
+                 (cl-cc::make-ast-if
+                  :cond (cl-cc::make-ast-int :value 1)
+                  :then (cl-cc::make-ast-var :name 'a)
+                  :else (cl-cc::make-ast-var :name 'b))))
+  (assert-equal '(the integer n)
+                (cl-cc::ast-to-sexp
+                 (cl-cc::make-ast-the :type 'integer
+                  :value (cl-cc::make-ast-var :name 'n))))
+  (assert-equal '(progn 1 2)
+                (cl-cc::ast-to-sexp
+                 (cl-cc::make-ast-progn
+                  :forms (list (cl-cc::make-ast-int :value 1)
+                               (cl-cc::make-ast-int :value 2))))))
 
 (deftest ast-to-sexp-let-produces-let-form
   "ast-to-sexp for ast-let returns (let ((x val)) body...)."
@@ -71,10 +62,10 @@
 
 (deftest ast-to-sexp-setq-produces-setq-form
   "ast-to-sexp for ast-setq returns (setq var value)."
-  (let ((node (cl-cc::make-ast-setq
-               :var 'x
-               :value (cl-cc::make-ast-int :value 0))))
-    (assert-equal '(setq x 0) (cl-cc::ast-to-sexp node))))
+  (assert-equal '(setq x 0)
+                (cl-cc::ast-to-sexp
+                 (cl-cc::make-ast-setq :var 'x
+                  :value (cl-cc::make-ast-int :value 0)))))
 
 ;;; ─── Lambda / function definitions ───────────────────────────────────────
 
@@ -107,45 +98,32 @@
 
 ;;; ─── defvar ───────────────────────────────────────────────────────────────
 
-(deftest ast-to-sexp-defvar-with-value
-  "ast-to-sexp for ast-defvar with a value returns (defvar name value)."
-  (let ((node (cl-cc::make-ast-defvar
-               :name '*count*
-               :value (cl-cc::make-ast-int :value 0)
-               :kind 'defvar)))
-    (assert-equal '(defvar *count* 0) (cl-cc::ast-to-sexp node))))
-
-(deftest ast-to-sexp-defvar-without-value
-  "ast-to-sexp for ast-defvar without a value returns (defvar name)."
-  (let ((node (cl-cc::make-ast-defvar
-               :name '*x*
-               :value nil
-               :kind 'defvar)))
-    (assert-equal '(defvar *x*) (cl-cc::ast-to-sexp node))))
+(deftest-each ast-to-sexp-defvar-cases
+  "ast-to-sexp for ast-defvar with and without a value."
+  :cases (("with-value"    '(defvar *count* 0) '*count* (cl-cc::make-ast-int :value 0))
+          ("without-value" '(defvar *x*)       '*x*     nil))
+  (expected name value-node)
+  (assert-equal expected
+                (cl-cc::ast-to-sexp
+                 (cl-cc::make-ast-defvar :name name :value value-node :kind 'defvar))))
 
 ;;; ─── Call sites ───────────────────────────────────────────────────────────
 
-(deftest ast-to-sexp-call-symbol-func
-  "ast-to-sexp for ast-call with a symbol func returns (func arg1 arg2)."
-  (let ((node (cl-cc::make-ast-call
-               :func 'foo
-               :args (list (cl-cc::make-ast-int :value 1)
-                           (cl-cc::make-ast-int :value 2)))))
-    (assert-equal '(foo 1 2) (cl-cc::ast-to-sexp node))))
-
-(deftest ast-to-sexp-call-ast-func
-  "ast-to-sexp for ast-call with an AST func node recursively roundtrips the func."
-  (let ((node (cl-cc::make-ast-call
-               :func (cl-cc::make-ast-var :name 'f)
-               :args (list (cl-cc::make-ast-int :value 3)))))
-    (assert-equal '(f 3) (cl-cc::ast-to-sexp node))))
-
-(deftest ast-to-sexp-apply-produces-apply-form
-  "ast-to-sexp for ast-apply returns (apply func args...)."
-  (let ((node (cl-cc::make-ast-apply
-               :func (cl-cc::make-ast-var :name 'f)
-               :args (list (cl-cc::make-ast-var :name 'args)))))
-    (assert-equal '(apply f args) (cl-cc::ast-to-sexp node))))
+(deftest ast-to-sexp-call-and-apply-cases
+  "ast-call with symbol func, ast-call with AST func, and ast-apply all roundtrip correctly."
+  (assert-equal '(foo 1 2)
+                (cl-cc::ast-to-sexp
+                 (cl-cc::make-ast-call :func 'foo
+                  :args (list (cl-cc::make-ast-int :value 1)
+                              (cl-cc::make-ast-int :value 2)))))
+  (assert-equal '(f 3)
+                (cl-cc::ast-to-sexp
+                 (cl-cc::make-ast-call :func (cl-cc::make-ast-var :name 'f)
+                  :args (list (cl-cc::make-ast-int :value 3)))))
+  (assert-equal '(apply f args)
+                (cl-cc::ast-to-sexp
+                 (cl-cc::make-ast-apply :func (cl-cc::make-ast-var :name 'f)
+                  :args (list (cl-cc::make-ast-var :name 'args))))))
 
 ;;; ─── Block / return / tagbody / catch / throw ────────────────────────────
 
@@ -184,17 +162,16 @@
 
 ;;; ─── CLOS nodes ───────────────────────────────────────────────────────────
 
-(deftest ast-to-sexp-defgeneric-produces-defgeneric-form
-  "ast-to-sexp for ast-defgeneric returns (defgeneric name params)."
-  (let ((node (cl-cc::make-ast-defgeneric :name 'area :params '(shape))))
-    (assert-equal '(defgeneric area (shape)) (cl-cc::ast-to-sexp node))))
-
-(deftest ast-to-sexp-slot-value-produces-slot-value-form
-  "ast-to-sexp for ast-slot-value returns (slot-value obj 'slot-name)."
-  (let ((node (cl-cc::make-ast-slot-value
-               :object (cl-cc::make-ast-var :name 'obj)
-               :slot 'count)))
-    (assert-equal '(slot-value obj 'count) (cl-cc::ast-to-sexp node))))
+(deftest ast-to-sexp-clos-nodes
+  "ast-to-sexp for defgeneric and slot-value produce the correct sexp."
+  (assert-equal '(defgeneric area (shape))
+                (cl-cc::ast-to-sexp
+                 (cl-cc::make-ast-defgeneric :name 'area :params '(shape))))
+  (assert-equal '(slot-value obj 'count)
+                (cl-cc::ast-to-sexp
+                 (cl-cc::make-ast-slot-value
+                  :object (cl-cc::make-ast-var :name 'obj)
+                  :slot 'count))))
 
 (deftest ast-to-sexp-set-gethash-produces-setf-gethash-form
   "ast-to-sexp for ast-set-gethash returns (setf (gethash key table) val)."
@@ -208,20 +185,15 @@
 
 ;;; ─── slot-def-to-sexp ────────────────────────────────────────────────────
 
-(deftest slot-def-to-sexp-plain-slot-returns-symbol
-  "slot-def-to-sexp with no options returns just the slot name symbol."
+(deftest slot-def-to-sexp-cases
+  "slot-def-to-sexp: plain slot returns symbol; slot with :initarg includes it in plist."
   (let ((slot (cl-cc::make-ast-slot-def
-               :name 'value
-               :initarg nil :initform nil
+               :name 'value :initarg nil :initform nil
                :reader nil :writer nil :accessor nil)))
-    (assert-eq 'value (cl-cc::slot-def-to-sexp slot))))
-
-(deftest slot-def-to-sexp-with-initarg-includes-initarg
-  "slot-def-to-sexp with :initarg returns a plist including :initarg."
-  (let ((slot (cl-cc::make-ast-slot-def
-               :name 'count
-               :initarg :count
-               :initform nil :reader nil :writer nil :accessor nil)))
-    (let ((result (cl-cc::slot-def-to-sexp slot)))
-      (assert-eq 'count (car result))
-      (assert-true (member :initarg result)))))
+    (assert-eq 'value (cl-cc::slot-def-to-sexp slot)))
+  (let* ((slot (cl-cc::make-ast-slot-def
+                :name 'count :initarg :count :initform nil
+                :reader nil :writer nil :accessor nil))
+         (result (cl-cc::slot-def-to-sexp slot)))
+    (assert-eq 'count (car result))
+    (assert-true (member :initarg result))))

@@ -12,29 +12,23 @@
 
 ;;; ─── Section 1: GETHASH ─────────────────────────────────────────────────────
 
-(deftest codegen-phase2-gethash-two-args
-  "Compiling (gethash key table): emits vm-gethash with nil default; returns register."
-  (let* ((ctx (make-codegen-ctx))
-         (reg (compile-ast (make-ast-call :func 'gethash
-                                          :args (list (make-ast-quote :value :k)
-                                                      (make-ast-quote :value :ht)))
-                           ctx))
-         (inst (codegen-find-inst ctx 'cl-cc:vm-gethash)))
-    (assert-true inst)
-    (assert-true (null (cl-cc::vm-gethash-default inst)))
-    (assert-true (keywordp reg))))
-
-(deftest codegen-phase2-gethash-three-args-default-register-set
-  "Compiling (gethash key table default) sets the default register in vm-gethash."
+(deftest-each codegen-phase2-gethash-cases
+  "gethash: 2-arg form has nil default slot; 3-arg form sets the default register."
+  :cases (("two-args"
+           (list (make-ast-quote :value :k) (make-ast-quote :value :ht))
+           nil)
+          ("three-args"
+           (list (make-ast-quote :value :k) (make-ast-quote :value :ht) (make-ast-int :value 0))
+           t))
+  (args default-set-p)
   (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'gethash
-                                :args (list (make-ast-quote :value :k)
-                                            (make-ast-quote :value :ht)
-                                            (make-ast-int :value 0)))
-                 ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc:vm-gethash)))
-      (assert-true inst)
-      (assert-true (cl-cc::vm-gethash-default inst)))))
+    (let ((reg (compile-ast (make-ast-call :func 'gethash :args args) ctx)))
+      (let ((inst (codegen-find-inst ctx 'cl-cc:vm-gethash)))
+        (assert-true inst)
+        (assert-true (keywordp reg))
+        (if default-set-p
+            (assert-true  (cl-cc::vm-gethash-default inst))
+            (assert-true  (null (cl-cc::vm-gethash-default inst))))))))
 
 
 ;;; ─── Section 2: MAPHASH ─────────────────────────────────────────────────────
@@ -120,58 +114,47 @@
 
 ;;; ─── Section 6: FORMAT ──────────────────────────────────────────────────────
 
-(deftest codegen-phase2-format-nil-dest
-  "Compiling (format nil \"fmt\") folds to a constant string."
+(deftest-each codegen-phase2-format-dispatch
+  "format: nil-dest folds to vm-const; t-dest emits vm-princ; 1-arg falls through."
+  :cases (("nil-dest"
+           (list (make-ast-var :name nil) (make-ast-quote :value "hello"))
+           :nil-dest)
+          ("t-dest"
+           (list (make-ast-var :name t) (make-ast-quote :value "hello"))
+           :t-dest)
+          ("one-arg"
+           (list (make-ast-var :name nil))
+           :one-arg))
+  (args scenario)
   (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'format
-                                :args (list (make-ast-var :name nil)
-                                            (make-ast-quote :value "hello")))
-                 ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-const)))
-      (assert-true inst)
-      (assert-equal "hello" (cl-cc::vm-const-value inst))
-      (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst)))
-      (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-princ))))))
-
-(deftest codegen-phase2-format-t-dest-emits-format-and-princ
-  "Compiling (format t \"fmt\") emits vm-princ without vm-format-inst."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'format
-                                :args (list (make-ast-var :name t)
-                                            (make-ast-quote :value "hello")))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-princ))
-    (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst)))))
-
-(deftest codegen-phase2-format-requires-at-least-two-args
-  "Compiling (format nil) with only 1 arg falls through — no vm-format-inst."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'format
-                                :args (list (make-ast-var :name nil)))
-                 ctx)
-    (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst)))))
+    (compile-ast (make-ast-call :func 'format :args args) ctx)
+    (ecase scenario
+      (:nil-dest
+       (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-const)))
+         (assert-true inst)
+         (assert-equal "hello" (cl-cc::vm-const-value inst))
+         (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst)))
+         (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-princ)))))
+      (:t-dest
+       (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-princ))
+       (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst))))
+      (:one-arg
+       (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst)))))))
 
 ;;; ─── Section 7: MAKE-HASH-TABLE ─────────────────────────────────────────────
 
-(deftest codegen-phase2-make-hash-table-no-args
-  "Compiling (make-hash-table): emits vm-make-hash-table with nil test slot."
+(deftest-each codegen-phase2-make-hash-table-cases
+  "make-hash-table: no-args has nil test slot; :test 'equal sets the test register."
+  :cases (("no-args"    '()  nil)
+          ("test-equal" (list (make-ast-var :name :test) (make-ast-quote :value 'equal)) t))
+  (args test-set-p)
   (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'make-hash-table :args '())
-                 ctx)
+    (compile-ast (make-ast-call :func 'make-hash-table :args args) ctx)
     (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-make-hash-table)))
       (assert-true inst)
-      (assert-true (null (cl-cc::vm-make-hash-table-test inst))))))
-
-(deftest codegen-phase2-make-hash-table-quoted-test-equal
-  "Compiling (make-hash-table :test 'equal) sets test register."
-  (let ((ctx (make-codegen-ctx)))
-    (compile-ast (make-ast-call :func 'make-hash-table
-                                :args (list (make-ast-var :name :test)
-                                            (make-ast-quote :value 'equal)))
-                 ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-make-hash-table)))
-      (assert-true inst)
-      (assert-true (cl-cc::vm-make-hash-table-test inst)))))
+      (if test-set-p
+          (assert-true  (cl-cc::vm-make-hash-table-test inst))
+          (assert-true  (null (cl-cc::vm-make-hash-table-test inst)))))))
 
 ;;; ─── Section 8: CONCATENATE ─────────────────────────────────────────────────
 

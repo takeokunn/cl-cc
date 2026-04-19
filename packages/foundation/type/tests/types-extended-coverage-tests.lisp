@@ -14,62 +14,46 @@
 
 ;;; ─── type-free-vars: capability ─────────────────────────────────────────────
 
-(deftest free-vars-capability-traverses-base
-  "type-free-vars on capability type traverses the base type."
+(deftest free-vars-capability-cases
+  "type-free-vars on capability: var base yields 1 fv; primitive base yields nil."
   (let* ((v   (cl-cc/type::fresh-type-var "cap-base"))
-         (cap (cl-cc/type::make-type-capability :base v :cap 'read)))
-    (let ((fvs (cl-cc/type::type-free-vars cap)))
-      (assert-= 1 (length fvs))
-      (assert-true (cl-cc/type::type-var-equal-p v (first fvs))))))
-
-(deftest free-vars-capability-closed-base-is-empty
-  "type-free-vars on capability with a primitive base returns nil."
-  (let ((cap (cl-cc/type::make-type-capability :base cl-cc/type::type-int :cap 'read)))
-    (assert-null (cl-cc/type::type-free-vars cap))))
+         (cap (cl-cc/type::make-type-capability :base v :cap 'read))
+         (fvs (cl-cc/type::type-free-vars cap)))
+    (assert-= 1 (length fvs))
+    (assert-true (cl-cc/type::type-var-equal-p v (first fvs))))
+  (assert-null (cl-cc/type::type-free-vars
+                (cl-cc/type::make-type-capability :base cl-cc/type::type-int :cap 'read))))
 
 ;;; ─── type-free-vars: refinement ─────────────────────────────────────────────
 
-(deftest free-vars-refinement-traverses-base
-  "type-free-vars on refinement type traverses the base type."
+(deftest free-vars-refinement-cases
+  "type-free-vars on refinement: var base yields 1 fv; primitive base yields nil."
   (let* ((v   (cl-cc/type::fresh-type-var "ref-base"))
-         (ref (cl-cc/type::make-type-refinement
-               :base v
-               :predicate (lambda (x) (> x 0)))))
-    (let ((fvs (cl-cc/type::type-free-vars ref)))
-      (assert-= 1 (length fvs))
-      (assert-true (cl-cc/type::type-var-equal-p v (first fvs))))))
-
-(deftest free-vars-refinement-with-closed-base
-  "Refinement on a primitive base has no free vars."
-  (let* ((pred (lambda (x) (> x 0)))
-         (ref  (cl-cc/type::make-type-refinement :base cl-cc/type::type-int :predicate pred)))
-    (assert-null (cl-cc/type::type-free-vars ref))))
+         (ref (cl-cc/type::make-type-refinement :base v :predicate (lambda (x) (> x 0))))
+         (fvs (cl-cc/type::type-free-vars ref)))
+    (assert-= 1 (length fvs))
+    (assert-true (cl-cc/type::type-var-equal-p v (first fvs))))
+  (assert-null (cl-cc/type::type-free-vars
+                (cl-cc/type::make-type-refinement
+                 :base cl-cc/type::type-int :predicate (lambda (x) (> x 0))))))
 
 ;;; ─── type-free-vars: handler ─────────────────────────────────────────────────
 
-(deftest free-vars-handler-collects-from-all-fields
-  "type-free-vars on handler traverses effect, input, and output."
-  (let* ((veff (cl-cc/type::fresh-type-var "eff"))
-         (vin  (cl-cc/type::fresh-type-var "in"))
-         (vout (cl-cc/type::fresh-type-var "out"))
-         (h    (cl-cc/type::make-type-handler :effect veff :input vin :output vout)))
-    (let ((fvs (cl-cc/type::type-free-vars h)))
-      (assert-= 3 (length fvs)))))
-
-(deftest free-vars-handler-deduplicates-shared-var
-  "type-free-vars deduplicates when the same var appears in multiple handler fields."
+(deftest free-vars-handler-cases
+  "type-free-vars on handler: 3 distinct vars→3; shared var→1; all primitives→nil."
+  (let* ((ve (cl-cc/type::fresh-type-var "eff"))
+         (vi (cl-cc/type::fresh-type-var "in"))
+         (vo (cl-cc/type::fresh-type-var "out"))
+         (h  (cl-cc/type::make-type-handler :effect ve :input vi :output vo)))
+    (assert-= 3 (length (cl-cc/type::type-free-vars h))))
   (let* ((v (cl-cc/type::fresh-type-var "shared"))
          (h (cl-cc/type::make-type-handler :effect v :input v :output cl-cc/type::type-int)))
-    (let ((fvs (cl-cc/type::type-free-vars h)))
-      (assert-= 1 (length fvs)))))
-
-(deftest free-vars-handler-with-closed-fields
-  "Handler with all-primitive fields has no free vars."
-  (let ((h (cl-cc/type::make-type-handler
-            :effect (cl-cc/type::make-type-effect-op :name 'io)
-            :input  cl-cc/type::type-int
-            :output cl-cc/type::type-string)))
-    (assert-null (cl-cc/type::type-free-vars h))))
+    (assert-= 1 (length (cl-cc/type::type-free-vars h))))
+  (assert-null (cl-cc/type::type-free-vars
+                (cl-cc/type::make-type-handler
+                 :effect (cl-cc/type::make-type-effect-op :name 'io)
+                 :input  cl-cc/type::type-int
+                 :output cl-cc/type::type-string))))
 
 ;;; ─── type-free-vars: gadt-con ────────────────────────────────────────────────
 
@@ -86,32 +70,23 @@
 
 ;;; ─── type-rigid-equal-p (types-core.lisp) ───────────────────────────────────
 
-(deftest rigid-var-equal-p-same-id
-  "Two rigid vars with the same ID are equal."
+(deftest rigid-var-equal-p-cases
+  "type-rigid-equal-p: same-id→T; different-ids→NIL; rigid-vs-var→NIL."
   (let* ((r1 (cl-cc/type::fresh-rigid-var "r"))
          (r2 (cl-cc/type::%make-type-rigid :id (cl-cc/type::type-rigid-id r1) :name "r")))
-    (assert-true (cl-cc/type::type-rigid-equal-p r1 r2))))
-
-(deftest rigid-var-equal-p-different-ids
-  "Rigid vars with different IDs are not equal."
+    (assert-true  (cl-cc/type::type-rigid-equal-p r1 r2)))
   (let ((r1 (cl-cc/type::fresh-rigid-var "a"))
         (r2 (cl-cc/type::fresh-rigid-var "b")))
-    (assert-false (cl-cc/type::type-rigid-equal-p r1 r2))))
-
-(deftest rigid-var-equal-p-mixed-types
-  "type-rigid-equal-p returns nil when comparing rigid to non-rigid."
+    (assert-false (cl-cc/type::type-rigid-equal-p r1 r2)))
   (let ((r (cl-cc/type::fresh-rigid-var "r"))
         (v (cl-cc/type::fresh-type-var  "v")))
     (assert-false (cl-cc/type::type-rigid-equal-p r v))))
 
 ;;; ─── type-env-to-alist (types-env.lisp) ─────────────────────────────────────
 
-(deftest type-env-to-alist-empty
-  "type-env-to-alist on empty env returns nil."
-  (assert-null (cl-cc/type::type-env-to-alist (cl-cc/type::type-env-empty))))
-
-(deftest type-env-to-alist-reflects-bindings
-  "type-env-to-alist returns alist of (name . scheme) pairs."
+(deftest type-env-to-alist-cases
+  "type-env-to-alist: empty env→nil; extended env→alist with (name . scheme)."
+  (assert-null (cl-cc/type::type-env-to-alist (cl-cc/type::type-env-empty)))
   (let* ((env  (cl-cc/type::type-env-empty))
          (sch  (cl-cc/type::type-to-scheme cl-cc/type::type-int))
          (env2 (cl-cc/type::type-env-extend 'x sch env))
@@ -119,32 +94,21 @@
     (assert-= 1 (length al))
     (assert-eq 'x (caar al))))
 
-;;; ─── type-equal-p: capability and refinement branches ───────────────────────
+;;; ─── type-equal-p: capability and error nodes ────────────────────────────────
 
-(deftest type-equal-p-capabilities-same-cap
-  "Two capability types with same cap and equal bases are type-equal."
-  (let ((c1 (cl-cc/type::make-type-capability :base cl-cc/type::type-int :cap 'read))
-        (c2 (cl-cc/type::make-type-capability :base cl-cc/type::type-int :cap 'read)))
-    ;; type-equal-p currently falls through to t nil for capability (not dispatched)
-    ;; Verify they are at least eq when same object:
-    (assert-true (cl-cc/type::type-equal-p c1 c1))))
-
-(deftest type-equal-p-error-nodes-always-false
-  "type-equal-p always returns nil for type-error nodes, even self."
+(deftest type-equal-p-capability-and-error-cases
+  "type-equal-p: capability self-identity is T; error nodes always return nil."
+  (let ((c (cl-cc/type::make-type-capability :base cl-cc/type::type-int :cap 'read)))
+    (assert-true (cl-cc/type::type-equal-p c c)))
   (let ((e (cl-cc/type::make-type-error :message "test")))
     (assert-false (cl-cc/type::type-equal-p e e))))
 
 ;;; ─── +pure-effect-row+ and +io-effect-row+ singletons ───────────────────────
 
-(deftest pure-effect-row-has-no-effects
-  "+pure-effect-row+ has empty effects and no row-var."
+(deftest effect-row-singletons
+  "+pure-effect-row+ is empty; +io-effect-row+ has one IO effect."
   (assert-null (cl-cc/type::type-effect-row-effects cl-cc/type::+pure-effect-row+))
-  (assert-null (cl-cc/type::type-effect-row-row-var cl-cc/type::+pure-effect-row+)))
-
-(deftest io-effect-row-has-io-effect
-  "+io-effect-row+ has one IO effect in its effects list.
-The effect name symbol lives in :cl-cc/type, not :cl-cc/test — compare
-by symbol-name to avoid cross-package symbol-identity mismatch."
+  (assert-null (cl-cc/type::type-effect-row-row-var cl-cc/type::+pure-effect-row+))
   (let ((effs (cl-cc/type::type-effect-row-effects cl-cc/type::+io-effect-row+)))
     (assert-= 1 (length effs))
     (assert-string= "IO" (symbol-name (cl-cc/type::type-effect-op-name (first effs))))))

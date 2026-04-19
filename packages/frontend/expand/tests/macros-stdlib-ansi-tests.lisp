@@ -19,43 +19,29 @@
 
 ;;; ─── with-accessors ───────────────────────────────────────────────────────
 
-(deftest with-accessors-expands-to-let
-  "WITH-ACCESSORS wraps the body in a LET that binds the instance."
-  (let ((result (our-macroexpand-1 '(with-accessors ((x x-val)) inst body))))
-    (assert-eq 'let (car result))))
-
-(deftest with-accessors-body-has-symbol-macrolet
-  "WITH-ACCESSORS inner form is SYMBOL-MACROLET binding local vars to accessor calls."
-  (let* ((result       (our-macroexpand-1 '(with-accessors ((v slot-v)) inst body)))
-         (inner        (caddr result)))
-    (assert-eq 'symbol-macrolet (car inner))))
-
-(deftest with-accessors-accessor-call-in-binding
-  "WITH-ACCESSORS symbol-macrolet entry maps each var to (accessor instance)."
+(deftest with-accessors-expansion-structure
+  "WITH-ACCESSORS: outer LET; inner SYMBOL-MACROLET; bindings map vars to accessor calls."
+  (assert-eq 'let (car (our-macroexpand-1 '(with-accessors ((x x-val)) inst body))))
+  (let* ((result (our-macroexpand-1 '(with-accessors ((v slot-v)) inst body)))
+         (inner  (caddr result)))
+    (assert-eq 'symbol-macrolet (car inner)))
   (let* ((result   (our-macroexpand-1 '(with-accessors ((v get-v)) obj body)))
-         (sm-form  (caddr result))        ; symbol-macrolet
+         (sm-form  (caddr result))
          (bindings (second sm-form))
          (entry    (first bindings)))
-    ;; entry is (V (GET-V <gensym>))
     (assert-eq 'v (car entry))
     (assert-eq 'get-v (car (second entry)))))
 
 ;;; ─── assert ───────────────────────────────────────────────────────────────
 
-(deftest assert-passing-test-expands-to-unless
-  "ASSERT expands to an UNLESS that guards a CERROR signal."
+(deftest assert-expansion-cases
+  "ASSERT: unless-guard; CERROR in failure body; datum forwarded to CERROR."
   (let ((result (our-macroexpand-1 '(assert (= x 1)))))
     (assert-eq 'unless (car result))
-    (assert-equal '(= x 1) (second result))))
-
-(deftest assert-cerror-on-failure
-  "ASSERT body on failure calls CERROR."
+    (assert-equal '(= x 1) (second result)))
   (let* ((result (our-macroexpand-1 '(assert (zerop n))))
          (body   (cddr result)))
-    (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'cerror))) body))))
-
-(deftest assert-with-datum-uses-datum
-  "ASSERT with a datum passes it to CERROR."
+    (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'cerror))) body)))
   (let* ((result (our-macroexpand-1 '(assert test nil "msg ~A" x)))
          (body   (cddr result))
          (cerror (find 'cerror body :key #'car)))
@@ -64,52 +50,35 @@
 
 ;;; ─── define-condition ─────────────────────────────────────────────────────
 
-(deftest define-condition-without-report-is-defclass
-  "DEFINE-CONDITION without :report expands to a plain DEFCLASS."
+(deftest define-condition-basic-structure
+  "DEFINE-CONDITION: expands to DEFCLASS; parent list propagated."
   (let ((result (our-macroexpand-1 '(define-condition my-err (error) ()))))
     (assert-eq 'defclass (car result))
-    (assert-eq 'my-err (second result))))
-
-(deftest define-condition-parent-list-propagated
-  "DEFINE-CONDITION parent list is passed through to DEFCLASS."
+    (assert-eq 'my-err (second result)))
   (let* ((result (our-macroexpand-1 '(define-condition my-err (simple-error) ())))
          (parents (third result)))
     (assert-true (member 'simple-error parents))))
 
-(deftest define-condition-with-string-report-wraps-in-progn
-  "DEFINE-CONDITION with a string :report wraps defclass + defmethod in PROGN."
-  (let ((result (our-macroexpand-1
-                 '(define-condition my-err (error) ()
-                    (:report "something went wrong")))))
-    (assert-eq 'progn (car result))
+(deftest-each define-condition-with-report-wraps-in-progn
+  "DEFINE-CONDITION with a string or lambda :report wraps defclass + defmethod in PROGN."
+  :cases (("string" '(define-condition my-err (error) () (:report "something went wrong")))
+          ("lambda" '(define-condition my-err (error) ()
+                       (:report (lambda (c s) (format s "err: ~A" c))))))
+  (form)
+  (let ((result (our-macroexpand-1 form)))
+    (assert-eq 'progn   (car result))
     (assert-eq 'defclass (car (second result)))
-    (assert-eq 'defmethod (car (third result)))))
-
-(deftest define-condition-with-lambda-report-wraps-in-progn
-  "DEFINE-CONDITION with a lambda :report also wraps in PROGN."
-  (let ((result (our-macroexpand-1
-                 '(define-condition my-err (error) ()
-                    (:report (lambda (c s) (format s "err: ~A" c)))))))
-    (assert-eq 'progn (car result))
     (assert-eq 'defmethod (car (third result)))))
 
 ;;; ─── with-input-from-string ───────────────────────────────────────────────
 
-(deftest with-input-from-string-expands-to-let
-  "WITH-INPUT-FROM-STRING expands to a LET* binding the stream var."
-  (let ((result (our-macroexpand-1 '(with-input-from-string (s "hello") body))))
-    (assert-eq 'let* (car result))))
-
-(deftest with-input-from-string-stream-is-make-string-input-stream
-  "WITH-INPUT-FROM-STRING inner binding calls MAKE-STRING-INPUT-STREAM."
+(deftest with-input-from-string-structure
+  "WITH-INPUT-FROM-STRING: LET*; MAKE-STRING-INPUT-STREAM binding; :start/:end uses SUBSEQ."
+  (assert-eq 'let* (car (our-macroexpand-1 '(with-input-from-string (s "hello") body))))
   (let* ((result   (our-macroexpand-1 '(with-input-from-string (s "hello") body)))
          (bindings (second result))
-         ;; second binding is (s (make-string-input-stream ...))
          (stream-binding (second bindings)))
-    (assert-eq 'make-string-input-stream (car (second stream-binding)))))
-
-(deftest with-input-from-string-start-end-uses-subseq
-  "WITH-INPUT-FROM-STRING with :start/:end wraps string in SUBSEQ."
+    (assert-eq 'make-string-input-stream (car (second stream-binding))))
   (let* ((result   (our-macroexpand-1
                     '(with-input-from-string (s "hello" :start 1 :end 3) body)))
          (bindings (second result))
@@ -118,55 +87,28 @@
 
 ;;; ─── with-output-to-string ────────────────────────────────────────────────
 
-(deftest with-output-to-string-expands-to-let
-  "WITH-OUTPUT-TO-STRING expands to a LET binding a string-output-stream."
-  (let ((result (our-macroexpand-1 '(with-output-to-string (s) body))))
-    (assert-eq 'let (car result))))
-
-(deftest with-output-to-string-makes-string-output-stream
-  "WITH-OUTPUT-TO-STRING binding calls MAKE-STRING-OUTPUT-STREAM."
+(deftest with-output-to-string-structure
+  "WITH-OUTPUT-TO-STRING: LET; MAKE-STRING-OUTPUT-STREAM; ends with GET-OUTPUT-STREAM-STRING; initial string uses WRITE-STRING."
+  (assert-eq 'let (car (our-macroexpand-1 '(with-output-to-string (s) body))))
   (let* ((result   (our-macroexpand-1 '(with-output-to-string (s) body)))
          (bindings (second result))
          (binding  (first bindings)))
-    (assert-eq 'make-string-output-stream (car (second binding)))))
-
-(deftest with-output-to-string-ends-with-get-output-stream-string
-  "WITH-OUTPUT-TO-STRING last form calls GET-OUTPUT-STREAM-STRING."
+    (assert-eq 'make-string-output-stream (car (second binding))))
   (let* ((result    (our-macroexpand-1 '(with-output-to-string (s) body)))
          (last-form (car (last result))))
-    (assert-eq 'get-output-stream-string (car last-form))))
-
-(deftest with-output-to-string-initial-string-writes-first
-  "WITH-OUTPUT-TO-STRING with an initial string emits a WRITE-STRING call."
+    (assert-eq 'get-output-stream-string (car last-form)))
   (let* ((result (our-macroexpand-1 '(with-output-to-string (s "prefix") body)))
          (body   (cddr result)))
     (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'write-string))) body))))
 
 ;;; ─── with-standard-io-syntax ──────────────────────────────────────────────
 
-(deftest with-standard-io-syntax-expands-to-let
-  "WITH-STANDARD-IO-SYNTAX expands to a LET with print/read variable bindings."
-  (let ((result (our-macroexpand-1 '(with-standard-io-syntax body))))
-    (assert-eq 'let (car result))))
-
-(deftest with-standard-io-syntax-binds-print-base
-  "WITH-STANDARD-IO-SYNTAX bindings include *PRINT-BASE* set to 10."
-  (let* ((result   (our-macroexpand-1 '(with-standard-io-syntax body)))
-         (bindings (second result))
-         (pb       (assoc '*print-base* bindings)))
-    (assert-true pb)
-    (assert-= 10 (second pb))))
-
-(deftest with-standard-io-syntax-binds-read-base
-  "WITH-STANDARD-IO-SYNTAX bindings include *READ-BASE* set to 10."
-  (let* ((result   (our-macroexpand-1 '(with-standard-io-syntax body)))
-         (bindings (second result))
-         (rb       (assoc '*read-base* bindings)))
-    (assert-true rb)
-    (assert-= 10 (second rb))))
-
-(deftest with-standard-io-syntax-body-included
-  "WITH-STANDARD-IO-SYNTAX passes the body through into the LET."
+(deftest with-standard-io-syntax-structure
+  "WITH-STANDARD-IO-SYNTAX: LET; *PRINT-BASE*/*READ-BASE* set to 10; body included."
+  (assert-eq 'let (car (our-macroexpand-1 '(with-standard-io-syntax body))))
+  (let ((bindings (second (our-macroexpand-1 '(with-standard-io-syntax body)))))
+    (assert-= 10 (second (assoc '*print-base* bindings)))
+    (assert-= 10 (second (assoc '*read-base*  bindings))))
   (let* ((result (our-macroexpand-1 '(with-standard-io-syntax body)))
          (body   (cddr result)))
     (assert-true (member 'body body))))

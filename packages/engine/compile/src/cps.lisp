@@ -19,10 +19,10 @@
   (let ((va (gensym "A"))
         (vb (gensym "B")))
     (%cps-sexp-node a
-      `(lambda (,va)
-         ,(%cps-sexp-node b
-             `(lambda (,vb)
-                (funcall ,k (,op ,va ,vb))))))))
+      (list 'lambda (list va)
+            (%cps-sexp-node b
+                            (list 'lambda (list vb)
+                                  (list 'funcall k (list op va vb))))))))
 
 (defun %cps-sexp-progn (forms k)
   "CPS-transform a sequence of forms, passing only the last result to K."
@@ -30,9 +30,9 @@
       (%cps-sexp-node (car forms) k)
       (let ((tmp (gensym "TMP")))
         (%cps-sexp-node (car forms)
-          `(lambda (,tmp)
-             (declare (ignore ,tmp))
-             ,(%cps-sexp-progn (cdr forms) k))))))
+          (list 'lambda (list tmp)
+                (list 'declare (list 'ignore tmp))
+                (%cps-sexp-progn (cdr forms) k))))))
 
 (defun %cps-sexp-let-bindings (bindings body k)
   "CPS-transform LET bindings left-to-right, then execute BODY with continuation K."
@@ -42,9 +42,9 @@
              (val (second (car bindings)))
              (tmp (gensym (symbol-name sym))))
         (%cps-sexp-node val
-          `(lambda (,tmp)
-             (let ((,sym ,tmp))
-               ,(%cps-sexp-let-bindings (cdr bindings) body k)))))))
+          (list 'lambda (list tmp)
+                (list 'let (list (list sym tmp))
+                      (%cps-sexp-let-bindings (cdr bindings) body k)))))))
 
 (defun %cps-falsep (value)
   "Return true when VALUE is falsy in the bootstrap CPS language.
@@ -59,18 +59,18 @@ both NIL and numeric zero are false."
   "CPS-transform an IF form represented by NODE."
   (let ((v (gensym "COND")))
     (%cps-sexp-node (second node)
-      `(lambda (,v)
-         (if (%cps-falsep ,v)
-             ,(%cps-sexp-node (fourth node) k)
-             ,(%cps-sexp-node (third node) k))))))
+      (list 'lambda (list v)
+            (list 'if (list '%cps-falsep v)
+                  (%cps-sexp-node (fourth node) k)
+                  (%cps-sexp-node (third node) k))))))
 
 (defun %cps-sexp-print (node k)
   "CPS-transform a PRINT form represented by NODE."
   (let ((v (gensym "PRINT")))
     (%cps-sexp-node (second node)
-      `(lambda (,v)
-         (print ,v)
-         (funcall ,k ,v)))))
+      (list 'lambda (list v)
+            (list 'print v)
+            (list 'funcall k v)))))
 
 ;;; Adapter functions: bridge the (node k) calling convention to each
 ;;; implementation function's own argument shape.
@@ -83,7 +83,7 @@ both NIL and numeric zero are false."
 
 (defun %cps-sexp-let-adapter (node k)
   (%cps-sexp-let-bindings (second node)
-                          `(progn ,@(cddr node))
+                          (cons 'progn (cddr node))
                           k))
 
 ;;; Dispatch table: maps each recognised special form / operator to its adapter.
@@ -113,8 +113,8 @@ runtime while preserving the data-driven dispatch shape."
 (defun %cps-sexp-node (node k)
   "CPS-transform a single bootstrap S-expression NODE with continuation K."
   (cond
-    ((integerp node) `(funcall ,k ,node))
-    ((symbolp  node) `(funcall ,k ,node))
+    ((integerp node) (list 'funcall k node))
+    ((symbolp  node) (list 'funcall k node))
     ((consp node)
      (let ((handler (gethash (car node) *cps-sexp-dispatch-table*)))
        (if handler
@@ -220,6 +220,6 @@ runtime while preserving the data-driven dispatch shape."
 (defun cps-transform (expr)
   "Minimal CPS conversion for bootstrap language. Produces (lambda (k) ...).
 The outer continuation parameter is always named K for inspection and tests."
-  (cps-simplify-form `(lambda (k) ,(%cps-sexp-node expr 'k))))
+  (cps-simplify-form (list 'lambda '(k) (%cps-sexp-node expr 'k))))
 
 ;;; AST-based CPS implementation moved to cps-ast*.lisp.

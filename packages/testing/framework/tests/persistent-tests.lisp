@@ -47,16 +47,13 @@
 ;;; Construction / count
 ;;; ------------------------------------------------------------
 
-(deftest persist-empty-has-zero-count
-  "persist-empty returns a persistent-map with count 0 and nil root."
+(deftest persist-empty-creation-cases
+  "persist-empty: default test=eql, count=0, nil root; custom :test='equal honored."
   (let ((pm (persist-empty)))
     (assert-true (persistent-map-p pm))
     (assert-= 0 (persist-count pm))
     (assert-null (persistent-map-root pm))
-    (assert-eq 'eql (persistent-map-test pm))))
-
-(deftest persist-empty-with-equal-test
-  "persist-empty honors a custom :test keyword."
+    (assert-eq 'eql (persistent-map-test pm)))
   (let ((pm (persist-empty :test 'equal)))
     (assert-eq 'equal (persistent-map-test pm))
     (assert-= 0 (persist-count pm))))
@@ -74,15 +71,12 @@
       (assert-= 1 v)
       (assert-true found-p))))
 
-(deftest persist-lookup-missing-returns-nil-nil
-  "Looking up an absent key returns (values nil nil)."
+(deftest persist-lookup-missing-cases
+  "Absent key returns (values nil nil); with default, returns (values default nil)."
   (let ((pm (persist-empty)))
     (multiple-value-bind (v found-p) (persist-lookup pm :missing)
       (assert-null v)
-      (assert-null found-p))))
-
-(deftest persist-lookup-missing-respects-default
-  "Default value is returned when the key is absent."
+      (assert-null found-p)))
   (let ((pm (persist-empty)))
     (multiple-value-bind (v found-p) (persist-lookup pm :missing :sentinel)
       (assert-eq :sentinel v)
@@ -102,18 +96,15 @@
 ;;; Immutability
 ;;; ------------------------------------------------------------
 
-(deftest persist-assoc-does-not-mutate-input
-  "persist-assoc produces a fresh map; the original count is unchanged."
+(deftest persist-immutability-cases
+  "persist-assoc and persist-remove both leave the original map unchanged."
   (let* ((pm0 (persist-empty))
          (pm1 (persist-assoc pm0 :a 1)))
     (declare (ignore pm1))
     (assert-= 0 (persist-count pm0))
     (multiple-value-bind (v found-p) (persist-lookup pm0 :a)
       (declare (ignore v))
-      (assert-null found-p))))
-
-(deftest persist-remove-does-not-mutate-input
-  "persist-remove produces a fresh map without mutating the original."
+      (assert-null found-p)))
   (let* ((pm0 (persist-assoc (persist-empty) :a 1))
          (pm1 (persist-remove pm0 :a)))
     (declare (ignore pm1))
@@ -184,15 +175,12 @@
     (assert-false (persist-contains-p pm1 :a))
     (assert-true (persist-contains-p pm1 :b))))
 
-(deftest persist-remove-missing-key-count-unchanged
-  "Removing an absent key returns an equivalent map."
+(deftest persist-remove-edge-cases
+  "persist-remove: missing key leaves map unchanged; removing last key yields empty map."
   (let* ((pm0 (persist-assoc (persist-empty) :a 1))
          (pm1 (persist-remove pm0 :missing)))
     (assert-= 1 (persist-count pm1))
-    (assert-true (persist-contains-p pm1 :a))))
-
-(deftest persist-remove-last-entry-returns-empty
-  "Removing the only key yields a map with count 0."
+    (assert-true (persist-contains-p pm1 :a)))
   (let* ((pm0 (persist-assoc (persist-empty) :a 1))
          (pm1 (persist-remove pm0 :a)))
     (assert-= 0 (persist-count pm1))

@@ -105,5 +105,5 @@ Dispatch order: (1) atoms — symbol macros expanded, others pass through;
                                  (gethash (car form) *accessor-slot-map*))))
                   (if mapping
                       (compiler-macroexpand-all
-                       `(slot-value ,(second form) ',(cdr mapping)))
+                        (list 'slot-value (second form) (list 'quote (cdr mapping))))
                       (mapcar #'compiler-macroexpand-all form)))))))))))

@@ -66,27 +66,25 @@
       (assert-false (cl-cc/runtime:header-gray-p h))
       (assert-false (cl-cc/runtime:header-gray-p hu)))))
 
-(deftest gc-header-forwarding-integer-is-not-forwarding
-  "An integer header is not a forwarding pointer."
-  (let ((h (cl-cc/runtime:make-header 3 1 0)))
-    (assert-false (cl-cc/runtime:header-forwarding-p h))))
+(deftest-each gc-header-forwarding-cases
+  "Forwarding pointer: regular header is not forwarding; make-forwarding-ptr round-trips address."
+  :cases (("not-forwarding" nil  nil (cl-cc/runtime:make-header 3 1 0) nil)
+          ("forwarding-ptr" t    nil nil                            42))
+  (expect-fwd fwd-ptr plain-header target-addr)
+  (if expect-fwd
+      (let ((fwd (cl-cc/runtime:header-make-forwarding-ptr target-addr)))
+        (assert-true (cl-cc/runtime:header-forwarding-p fwd))
+        (assert-= target-addr (cl-cc/runtime:header-forwarding-ptr fwd)))
+      (assert-false (cl-cc/runtime:header-forwarding-p plain-header))))
 
-(deftest gc-header-forwarding-ptr-roundtrip
-  "header-make-forwarding-ptr / header-forwarding-p / header-forwarding-ptr roundtrip."
-  (let ((fwd (cl-cc/runtime:header-make-forwarding-ptr 42)))
-    (assert-true (cl-cc/runtime:header-forwarding-p fwd))
-    (assert-= 42 (cl-cc/runtime:header-forwarding-ptr fwd))))
-
-(deftest gc-header-increment-age
-  "header-increment-age increments by 1; caps at 15."
-  ;; basic increment
-  (let* ((h  (cl-cc/runtime:make-header 3 1 2))
+(deftest-each gc-header-increment-age
+  "header-increment-age increments by 1 normally; caps at 15."
+  :cases (("increment" 2  3)
+          ("cap-at-15" 15 15))
+  (start-age expected)
+  (let* ((h  (cl-cc/runtime:make-header 3 1 start-age))
          (h2 (cl-cc/runtime:header-increment-age h)))
-    (assert-= 3 (cl-cc/runtime:header-age h2)))
-  ;; cap at 15
-  (let* ((h  (cl-cc/runtime:make-header 3 1 15))
-         (h2 (cl-cc/runtime:header-increment-age h)))
-    (assert-= 15 (cl-cc/runtime:header-age h2))))
+    (assert-= expected (cl-cc/runtime:header-age h2))))
 
 ;;; ------------------------------------------------------------
 ;;; Test 2: gc-heap-creation
@@ -269,4 +267,3 @@
     (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)
     (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)
     (assert-= 6 (getf (cl-cc/runtime:rt-gc-stats heap) :young-used))))
-

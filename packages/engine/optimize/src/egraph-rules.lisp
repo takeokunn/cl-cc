@@ -49,18 +49,19 @@
   "Define an e-graph rewrite rule and register it in *egraph-rules*.
    Also emits a Prolog fact for documentation/alternative-backend use."
   (let ((rule-sym (intern (format nil "ERULE-~A" name))))
-    `(progn
-       ;; Register in the CL rule table
-       (egraph-rule-register
-        ',name
-        ',pattern
-        ',replacement
-        ,(if when
-             `(lambda (bindings eg) (declare (ignorable bindings eg)) ,when)
-             nil))
-       ;; Register as a Prolog fact (for documentation and Prolog-backend use)
-       (def-fact (egraph-rule ,rule-sym ',pattern ',replacement))
-       ',name)))
+    (list 'progn
+          (list 'egraph-rule-register
+                (list 'quote name)
+                (list 'quote pattern)
+                (list 'quote replacement)
+                (if when
+                    (list 'lambda '(bindings eg)
+                          '(declare (ignorable bindings eg))
+                          when)
+                    nil))
+          (list 'def-fact (list 'egraph-rule (list 'quote rule-sym)
+                                (list 'quote pattern) (list 'quote replacement)))
+          (list 'quote name))))
 
 ;;; ─── Binding Helpers ─────────────────────────────────────────────────────
 

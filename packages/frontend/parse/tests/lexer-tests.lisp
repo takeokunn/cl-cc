@@ -38,14 +38,11 @@
 
 ;;; ─── Float Tokens ────────────────────────────────────────────────────────────
 
-(deftest lexer-float-simple
-  "Lexer: simple float"
+(deftest lexer-float-cases
+  "Lexer: simple float token type and value; float with exponent token type."
   (assert-eq :T-FLOAT (first-token-type "3.14"))
   (let ((val (first-token-value "3.14")))
-    (assert-true (< (abs (- val 3.14d0)) 0.001))))
-
-(deftest lexer-float-exponent
-  "Lexer: float with exponent"
+    (assert-true (< (abs (- val 3.14d0)) 0.001)))
   (assert-eq :T-FLOAT (first-token-type "1.0e5")))
 
 ;;; ─── Ratio Tokens ────────────────────────────────────────────────────────────
@@ -57,26 +54,20 @@
 
 ;;; ─── String Tokens ──────────────────────────────────────────────────────────
 
-(deftest lexer-string-simple
-  "Lexer: simple string"
+(deftest lexer-string-cases
+  "Lexer strings: simple string type/value; escape sequences produce correct chars."
   (assert-eq :T-STRING (first-token-type "\"hello\""))
-  (assert-string= "hello" (first-token-value "\"hello\"")))
-
-(deftest lexer-string-escapes
-  "Lexer: string with escape sequences"
+  (assert-string= "hello" (first-token-value "\"hello\""))
   (let ((val (first-token-value "\"a\\nb\"")))
     (assert-= 3 (length val))
     (assert-true (char= (char val 1) #\Newline))))
 
 ;;; ─── Symbol Tokens ──────────────────────────────────────────────────────────
 
-(deftest lexer-symbol-simple
-  "Lexer: simple symbol is uppercased"
+(deftest lexer-symbol-cases
+  "Lexer symbols: plain symbol uppercased; pipe-escaped symbol preserves case."
   (assert-eq :T-IDENT (first-token-type "foo"))
-  (assert-string= "FOO" (symbol-name (first-token-value "foo"))))
-
-(deftest lexer-symbol-pipe-escaped
-  "Lexer: pipe-escaped symbol preserves case"
+  (assert-string= "FOO" (symbol-name (first-token-value "foo")))
   (let ((val (first-token-value "|MixedCase|")))
     (assert-string= "MixedCase" (symbol-name val))))
 
@@ -114,9 +105,10 @@
 
 ;;; ─── Hash Dispatch ──────────────────────────────────────────────────────────
 
-(deftest lexer-hash-function
-  "Lexer: #' function dispatch"
-  (assert-eq :T-FUNCTION (first-token-type "#'foo")))
+(deftest lexer-hash-misc-cases
+  "Lexer hash dispatch: #' → :T-FUNCTION; #( → :T-VECTOR-START."
+  (assert-eq :T-FUNCTION    (first-token-type "#'foo"))
+  (assert-eq :T-VECTOR-START (first-token-type "#(1 2)")))
 
 (deftest-each lexer-hash-char-dispatch
   "Lexer: #\\char produces :T-CHAR tokens for regular and named character forms."
@@ -126,9 +118,6 @@
   (assert-eq :T-CHAR (first-token-type source))
   (assert-true (char= expected-char (first-token-value source))))
 
-(deftest lexer-hash-vector
-  "Lexer: #( vector start"
-  (assert-eq :T-VECTOR-START (first-token-type "#(1 2)")))
 
 ;;; ─── Radix Dispatch ─────────────────────────────────────────────────────────
 

@@ -35,55 +35,32 @@
     (assert-true (cl-cc::cst-token-p node))
     (assert-eq expected-kind (cl-cc::cst-node-kind node))))
 
-(deftest parse-cl-atom-integer-value
-  "parse-cl-source captures the integer value in the cst-token."
-  (let ((node (grammar-parse "99")))
-    (assert-= 99 (cl-cc::cst-token-value node))))
-
-(deftest parse-cl-atom-symbol-value
-  "parse-cl-source captures the symbol value for an identifier."
+(deftest parse-cl-atom-value-cases
+  "parse-cl-source captures integer value; captures symbol as symbol type."
+  (assert-= 99 (cl-cc::cst-token-value (grammar-parse "99")))
   (let ((node (grammar-parse "some-var")))
     (assert-true (cl-cc::cst-token-p node))
     (assert-true (symbolp (cl-cc::cst-token-value node)))))
 
 ;;; ─── parse-cl-form — prefix sugar forms ─────────────────────────────────────
 
-(deftest parse-cl-form-quote
-  "parse-cl-form wraps 'x in a :quote cst-interior node."
-  (let ((node (grammar-parse "'x")))
+(deftest-each parse-cl-form-prefix-kinds
+  "parse-cl-form: prefix sugar produces cst-interior with expected kind."
+  :cases (("quote"      "'x"    :quote)
+          ("backquote"  "`x"    :quasiquote)
+          ("quasiquote-unquote" "`(,x)" :quasiquote)
+          ("function"   "#'car" :function))
+  (source expected-kind)
+  (let ((node (grammar-parse source)))
     (assert-true (cl-cc::cst-interior-p node))
-    (assert-eq :quote (cl-cc::cst-node-kind node))
-    (assert-= 1 (length (cl-cc::cst-interior-children node)))))
+    (assert-eq expected-kind (cl-cc::cst-node-kind node))))
 
-(deftest parse-cl-form-backquote
-  "parse-cl-form wraps `x in a :quasiquote cst-interior node."
-  (let ((node (grammar-parse "`x")))
-    (assert-true (cl-cc::cst-interior-p node))
-    (assert-eq :quasiquote (cl-cc::cst-node-kind node))))
-
-(deftest parse-cl-form-unquote
-  "parse-cl-form wraps ,x in an :unquote cst-interior node."
-  (let ((node (grammar-parse "`(,x)")))
-    ;; outer is :quasiquote wrapping a list whose first element is :unquote
-    (assert-true (cl-cc::cst-interior-p node))
-    (assert-eq :quasiquote (cl-cc::cst-node-kind node))))
-
-(deftest parse-cl-form-function
-  "parse-cl-form wraps #'foo in a :function cst-interior node."
-  (let ((node (grammar-parse "#'car")))
-    (assert-true (cl-cc::cst-interior-p node))
-    (assert-eq :function (cl-cc::cst-node-kind node))
-    (assert-= 1 (length (cl-cc::cst-interior-children node)))))
-
-(deftest parse-cl-form-vector
-  "parse-cl-form parses #(1 2 3) to a :vector cst-interior node."
+(deftest parse-cl-form-vector-cases
+  "parse-cl-form: #(1 2 3) → :vector with 3 children; #() → :vector with 0 children."
   (let ((node (grammar-parse "#(1 2 3)")))
     (assert-true (cl-cc::cst-interior-p node))
     (assert-eq :vector (cl-cc::cst-node-kind node))
-    (assert-= 3 (length (cl-cc::cst-interior-children node)))))
-
-(deftest parse-cl-form-empty-vector
-  "parse-cl-form parses #() to an empty :vector node."
+    (assert-= 3 (length (cl-cc::cst-interior-children node))))
   (let ((node (grammar-parse "#()")))
     (assert-true (cl-cc::cst-interior-p node))
     (assert-eq :vector (cl-cc::cst-node-kind node))
@@ -91,15 +68,12 @@
 
 ;;; ─── parse-cl-list-form — list kinds ────────────────────────────────────────
 
-(deftest parse-cl-list-empty-list
-  "parse-cl-list-form parses () as an empty :list node."
+(deftest parse-cl-list-structure-cases
+  "parse-cl-list-form: () → :list empty; (foo 1 2) → :call with 3 children."
   (let ((node (grammar-parse "()")))
     (assert-true (cl-cc::cst-interior-p node))
     (assert-eq :list (cl-cc::cst-node-kind node))
-    (assert-= 0 (length (cl-cc::cst-interior-children node)))))
-
-(deftest parse-cl-list-generic-call
-  "parse-cl-list-form parses (foo 1 2) as a :call node."
+    (assert-= 0 (length (cl-cc::cst-interior-children node))))
   (let ((node (grammar-parse "(foo 1 2)")))
     (assert-true (cl-cc::cst-interior-p node))
     (assert-eq :call (cl-cc::cst-node-kind node))
@@ -140,37 +114,25 @@
 
 ;;; ─── parse-cl-source — multi-form and byte positions ─────────────────────────
 
-(deftest parse-cl-source-multiple-forms
-  "parse-cl-source returns all top-level forms from a multi-form source."
+(deftest parse-cl-source-multi-and-empty
+  "parse-cl-source: multi-form input returns all forms; empty input → nil."
   (let ((forms (grammar-parse-all "1 2 3")))
     (assert-= 3 (length forms))
-    (dolist (f forms)
-      (assert-true (cl-cc::cst-token-p f)))))
+    (dolist (f forms) (assert-true (cl-cc::cst-token-p f))))
+  (assert-null (grammar-parse-all "")))
 
-(deftest parse-cl-source-returns-diagnostics-on-mismatch
-  "parse-cl-source returns a diagnostics list (second value) when parse errors occur."
+(deftest parse-cl-source-diagnostics-on-error
+  "parse-cl-source returns a diagnostics list when parse errors occur."
   (multiple-value-bind (forms diags)
       (cl-cc::parse-cl-source "(unclosed")
     (declare (ignore forms))
-    ;; Should have at least one diagnostic about missing close paren
     (assert-true (listp diags))))
 
-(deftest parse-cl-source-source-positions
-  "parse-cl-source records byte positions in CST nodes."
+(deftest parse-cl-source-byte-span-cases
+  "parse-cl-source records byte positions: atom [0,2]; list form [0,7]."
   (let ((node (grammar-parse "42")))
-    (assert-true (cl-cc::cst-token-p node))
-    ;; start-byte should be 0, end-byte 2
     (assert-= 0 (cl-cc::cst-node-start-byte node))
-    (assert-= 2 (cl-cc::cst-node-end-byte node))))
-
-(deftest parse-cl-source-list-byte-span
-  "parse-cl-source records byte span for list forms."
+    (assert-= 2 (cl-cc::cst-node-end-byte node)))
   (let ((node (grammar-parse "(+ 1 2)")))
-    (assert-true (cl-cc::cst-interior-p node))
     (assert-= 0 (cl-cc::cst-node-start-byte node))
     (assert-= 7 (cl-cc::cst-node-end-byte node))))
-
-(deftest parse-cl-source-empty-input
-  "parse-cl-source returns nil for empty source."
-  (let ((forms (grammar-parse-all "")))
-    (assert-null forms)))

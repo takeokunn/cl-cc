@@ -12,17 +12,14 @@
 
 ;;; ─── Lexer Tests ────────────────────────────────────────────────────────────
 
-(deftest php-lex-empty
+(deftest php-lex-scalar-cases
+  "Empty source → :T-EOF; integer literal → :T-INT value; float literal → :T-FLOAT value."
   (let ((tokens (tokenize-php-source "<?php ")))
     (assert-= 1 (length tokens))
-    (assert-eq :T-EOF (php-tok-type (first tokens)))))
-
-(deftest php-lex-integer
+    (assert-eq :T-EOF (php-tok-type (first tokens))))
   (let ((tokens (tokenize-php-source "<?php 42;")))
     (assert-eq :T-INT (php-tok-type (first tokens)))
-    (assert-= 42 (php-tok-value (first tokens)))))
-
-(deftest php-lex-float
+    (assert-= 42 (php-tok-value (first tokens))))
   (let ((tokens (tokenize-php-source "<?php 3.14;")))
     (assert-eq :T-FLOAT (php-tok-type (first tokens)))
     (assert-true (< (abs (- 3.14 (php-tok-value (first tokens)))) 1e-6))))
@@ -36,10 +33,14 @@
     (assert-eq :T-STRING (php-tok-type tok))
     (assert-equal expected-val (php-tok-value tok))))
 
-(deftest php-lex-variable
+(deftest php-lex-identifier-cases
+  "Variable $x → :T-VAR; type keyword 'int' → :T-TYPE :int."
   (let ((tokens (tokenize-php-source "<?php $x;")))
     (assert-eq :T-VAR (php-tok-type (first tokens)))
-    (assert-true (string-equal "x" (symbol-name (php-tok-value (first tokens)))))))
+    (assert-true (string-equal "x" (symbol-name (php-tok-value (first tokens))))))
+  (let ((tokens (tokenize-php-source "<?php int")))
+    (assert-eq :T-TYPE (php-tok-type (first tokens)))
+    (assert-eq :int (php-tok-value (first tokens)))))
 
 (deftest-each php-lex-keywords
   "PHP reserved words lex as :T-KEYWORD with the correct value"
@@ -50,11 +51,6 @@
     (assert-eq :T-KEYWORD (php-tok-type tok))
     (assert-eq expected-kw (php-tok-value tok))))
 
-(deftest php-lex-type-int
-  (let ((tokens (tokenize-php-source "<?php int")))
-    (assert-eq :T-TYPE (php-tok-type (first tokens)))
-    (assert-eq :int (php-tok-value (first tokens)))))
-
 (deftest-each php-lex-punctuation
   "PHP punctuation tokens lex to the correct token type"
   :cases (("arrow"         "<?php ->"  :T-ARROW)
@@ -63,14 +59,12 @@
   (source expected-type)
   (assert-eq expected-type (php-tok-type (first (tokenize-php-source source)))))
 
-(deftest php-lex-comment-line
-  "Comments should be skipped."
+(deftest php-lex-comment-and-ops-cases
+  "Line comments are skipped; arithmetic operators lex as :T-OP."
   (let ((tokens (tokenize-php-source "<?php // this is a comment
 42;")))
     (assert-eq :T-INT (php-tok-type (first tokens)))
-    (assert-= 42 (php-tok-value (first tokens)))))
-
-(deftest php-lex-operators
+    (assert-= 42 (php-tok-value (first tokens))))
   (let ((tokens (tokenize-php-source "<?php + - * /")))
     (assert-true (every (lambda (tok) (eq :T-OP (php-tok-type tok)))
                         (butlast tokens)))))  ; exclude :T-EOF
@@ -90,28 +84,21 @@
   (let ((ast (first (parse-php-source "<?php if ($x) { echo 1; }"))))
     (assert-true (ast-if-p ast))))
 
-(deftest php-parse-function-def
-  "function f($x) { return $x; } produces ast-defun"
+(deftest php-parse-declaration-cases
+  "function f → ast-defun; class Foo → ast-defclass."
   (let ((ast (first (parse-php-source "<?php function f($x) { return $x; }"))))
     (assert-true (ast-defun-p ast))
-    (assert-string= "F" (symbol-name (ast-defun-name ast)))))
-
-(deftest php-parse-multiple-statements
-  (let ((asts (parse-php-source "<?php echo 1; echo 2;")))
-    (assert-= 2 (length asts))))
-
-(deftest php-parse-binary-op
-  "$a + $b produces ast-binop or ast-call"
-  (let ((ast (first (parse-php-source "<?php $a + $b;"))))
-    (assert-true (or (ast-binop-p ast) (ast-call-p ast)))))
-
-(deftest php-parse-string-literal
-  (let ((ast (first (parse-php-source "<?php \"hello\";"))))
-    (assert-true (ast-quote-p ast))
-    (assert-equal "hello" (ast-quote-value ast))))
-
-(deftest php-parse-class-def
-  "class Foo {} produces ast-defclass"
+    (assert-string= "F" (symbol-name (ast-defun-name ast))))
   (let ((ast (first (parse-php-source "<?php class Foo {}"))))
     (assert-true (ast-defclass-p ast))
     (assert-string= "FOO" (symbol-name (ast-defclass-name ast)))))
+
+(deftest php-parse-misc-cases
+  "Multiple statements counted; binary op → ast-binop or ast-call; string literal → ast-quote."
+  (let ((asts (parse-php-source "<?php echo 1; echo 2;")))
+    (assert-= 2 (length asts)))
+  (let ((ast (first (parse-php-source "<?php $a + $b;"))))
+    (assert-true (or (ast-binop-p ast) (ast-call-p ast))))
+  (let ((ast (first (parse-php-source "<?php \"hello\";"))))
+    (assert-true (ast-quote-p ast))
+    (assert-equal "hello" (ast-quote-value ast))))

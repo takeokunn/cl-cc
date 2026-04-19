@@ -20,26 +20,17 @@
 ;;; Command detection
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest cli-args-empty
-  "parse-args with empty argv yields nil command and nil positional"
+(deftest cli-args-command-detection-cases
+  "parse-args: empty→nil; command-only; command+file; multiple positionals after command."
   (let ((p (cl-cc/cli:parse-args '())))
     (assert-null (cl-cc/cli:parsed-args-command p))
-    (assert-null (cl-cc/cli:parsed-args-positional p))))
-
-(deftest cli-args-command-only
-  "parse-args with just a command stores it in :command"
+    (assert-null (cl-cc/cli:parsed-args-positional p)))
   (let ((p (cl-cc/cli:parse-args '("run"))))
     (assert-string= "run" (cl-cc/cli:parsed-args-command p))
-    (assert-null (cl-cc/cli:parsed-args-positional p))))
-
-(deftest cli-args-command-and-file
-  "parse-args: command followed by a file path"
+    (assert-null (cl-cc/cli:parsed-args-positional p)))
   (let ((p (cl-cc/cli:parse-args '("run" "foo.lisp"))))
     (assert-string= "run" (cl-cc/cli:parsed-args-command p))
-    (assert-equal '("foo.lisp") (cl-cc/cli:parsed-args-positional p))))
-
-(deftest cli-args-command-multiple-positionals
-  "parse-args: all tokens after the command become positionals"
+    (assert-equal '("foo.lisp") (cl-cc/cli:parsed-args-positional p)))
   (let ((p (cl-cc/cli:parse-args '("eval" "(+ 1 2)" "extra"))))
     (assert-string= "eval" (cl-cc/cli:parsed-args-command p))
     (assert-equal '("(+ 1 2)" "extra") (cl-cc/cli:parsed-args-positional p))))
@@ -120,13 +111,10 @@
     (assert-string= "x86-64" (cl-cc/cli:flag p "--arch"))
     (assert-null (cl-cc/cli:flag p "--output"))))
 
-(deftest cli-flag-or-long-wins
-  "flag-or: returns long form value when both long and short are present"
+(deftest cli-flag-or-cases
+  "flag-or: long form wins when present; falls back to short form when long absent."
   (let ((p (cl-cc/cli:parse-args '("compile" "f.lisp" "--output" "long-out"))))
-    (assert-string= "long-out" (cl-cc/cli:flag-or p "--output" "-o"))))
-
-(deftest cli-flag-or-short-fallback
-  "flag-or: falls back to short form when long form is absent"
+    (assert-string= "long-out" (cl-cc/cli:flag-or p "--output" "-o")))
   (let ((p (cl-cc/cli:parse-args '("compile" "f.lisp" "-o" "short-out"))))
     (assert-string= "short-out" (cl-cc/cli:flag-or p "--output" "-o"))))
 
@@ -185,29 +173,22 @@
 ;;; Combined invocations
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest cli-args-combined-compile
-  "parse-args: full compile invocation with multiple flags"
+(deftest cli-args-combined-cases
+  "parse-args: full compile invocation; run with PHP flags; flags before command."
   (let ((p (cl-cc/cli:parse-args
-            '("compile" "foo.lisp" "--arch" "arm64"
-              "--output=mybin" "--verbose"))))
+            '("compile" "foo.lisp" "--arch" "arm64" "--output=mybin" "--verbose"))))
     (assert-string= "compile" (cl-cc/cli:parsed-args-command p))
     (assert-equal  '("foo.lisp") (cl-cc/cli:parsed-args-positional p))
     (assert-string= "arm64"  (%flags p "--arch"))
     (assert-string= "mybin"  (%flags p "--output"))
-    (assert-true             (%flags p "--verbose"))))
-
-(deftest cli-args-combined-run-php
-  "parse-args: run with PHP language and stdlib flags"
+    (assert-true             (%flags p "--verbose")))
   (let ((p (cl-cc/cli:parse-args
             '("run" "script.php" "--lang=php" "--stdlib" "--verbose"))))
     (assert-string= "run" (cl-cc/cli:parsed-args-command p))
     (assert-equal  '("script.php") (cl-cc/cli:parsed-args-positional p))
     (assert-string= "php" (%flags p "--lang"))
     (assert-true           (%flags p "--stdlib"))
-    (assert-true           (%flags p "--verbose"))))
-
-(deftest cli-args-flags-before-command
-  "parse-args: flags that appear before the command are handled correctly"
+    (assert-true           (%flags p "--verbose")))
   (let ((p (cl-cc/cli:parse-args '("--verbose" "run" "foo.lisp"))))
     (assert-string= "run" (cl-cc/cli:parsed-args-command p))
     (assert-equal '("foo.lisp") (cl-cc/cli:parsed-args-positional p))

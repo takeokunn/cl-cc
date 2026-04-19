@@ -17,4 +17,5 @@
    (:file "encode")
    (:file "encode-ops")
    (:file "encode-ops-objects")
-   (:file "decode")))
+   (:file "decode")
+   (:file "decode-disasm")))

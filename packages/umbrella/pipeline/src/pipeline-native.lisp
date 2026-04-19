@@ -52,6 +52,47 @@
                 (write-sequence buffer out :end count)))))
   to)
 
+(defun %top-level-in-package-form-p (form)
+  "Return T when FORM is an in-package declaration ignored by top-level compilation." 
+  (and (consp form)
+       (eq (car form) 'in-package)))
+
+(defun %non-package-top-level-forms (forms)
+  "Return FORMS with in-package declarations removed, mirroring compile-toplevel-forms." 
+  (remove-if #'%top-level-in-package-form-p forms))
+
+(defun %cps-native-compile-safe-ast-p (ast)
+  "Return T when AST and all descendants stay within the narrow CPS-native allowlist."
+  (and (typep ast 'cl-cc/ast:ast-node)
+       (some (lambda (type) (typep ast type)) *cps-native-compile-safe-ast-types*)
+       (every #'%cps-native-compile-safe-ast-p (cl-cc/ast:ast-children ast))))
+
+(defun %native-cps-entry-form (cps-form)
+  "Wrap CPS-FORM with an identity continuation for executable compilation."
+  (list cps-form '(lambda (value) value)))
+
+(defun %maybe-compile-native-via-cps (form &key (target :x86_64) type-check (safety 1) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
+  "Try compiling FORM through a narrow CPS-backed native path.
+Returns two values: the compilation result and whether the CPS-native path was used."
+  (let ((ast (optimize-ast (%prepare-ast form))))
+    (if (%cps-native-compile-safe-ast-p ast)
+        (let ((cps (maybe-cps-transform ast)))
+          (if cps
+              (values (compile-expression (%native-cps-entry-form cps)
+                                          :target target :type-check type-check :safety safety
+                                          :pass-pipeline pass-pipeline
+                                          :print-pass-timings print-pass-timings
+                                          :timing-stream timing-stream
+                                          :print-pass-stats print-pass-stats
+                                          :stats-stream stats-stream
+                                          :trace-json-stream trace-json-stream
+                                          :print-opt-remarks print-opt-remarks
+                                          :opt-remarks-stream opt-remarks-stream
+                                          :opt-remarks-mode opt-remarks-mode)
+                      t)
+              (values nil nil)))
+        (values nil nil))))
+
 (defun compile-to-native (source &key (arch :x86-64) (output-file "a.out") (language :lisp) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile SOURCE to a native Mach-O executable.
 SOURCE can be a string (single expression) or a list of forms.
@@ -61,27 +102,78 @@ LANGUAGE is :LISP (default) or :PHP.
 
 Returns the output file path on success."
   (let* ((result (if (stringp source)
-                     (compile-string source :target :vm :language language
-                                     :pass-pipeline pass-pipeline
-                                     :print-pass-timings print-pass-timings
-                                      :timing-stream timing-stream
-                                      :print-pass-stats print-pass-stats
-                                      :stats-stream stats-stream
-                                      :trace-json-stream trace-json-stream
-                                      :print-opt-remarks print-opt-remarks
-                                     :opt-remarks-stream opt-remarks-stream
-                                     :opt-remarks-mode opt-remarks-mode)
-                     (compile-expression source :target :vm
+                     (if (eq language :lisp)
+                         (let ((forms (%non-package-top-level-forms (parse-all-forms source))))
+                           (if (= (length forms) 1)
+                               (multiple-value-bind (cps-result cps-used)
+                                   (%maybe-compile-native-via-cps (first forms)
+                                                                  :target :vm
+                                                                  :pass-pipeline pass-pipeline
+                                                                  :print-pass-timings print-pass-timings
+                                                                  :timing-stream timing-stream
+                                                                  :print-pass-stats print-pass-stats
+                                                                  :stats-stream stats-stream
+                                                                  :trace-json-stream trace-json-stream
+                                                                  :print-opt-remarks print-opt-remarks
+                                                                  :opt-remarks-stream opt-remarks-stream
+                                                                  :opt-remarks-mode opt-remarks-mode)
+                                 (if cps-used
+                                     cps-result
+                                     (compile-string source :target :vm :language language
+                                                     :pass-pipeline pass-pipeline
+                                                     :print-pass-timings print-pass-timings
+                                                     :timing-stream timing-stream
+                                                     :print-pass-stats print-pass-stats
+                                                     :stats-stream stats-stream
+                                                     :trace-json-stream trace-json-stream
+                                                     :print-opt-remarks print-opt-remarks
+                                                     :opt-remarks-stream opt-remarks-stream
+                                                     :opt-remarks-mode opt-remarks-mode)))
+                               (compile-string source :target :vm :language language
+                                               :pass-pipeline pass-pipeline
+                                               :print-pass-timings print-pass-timings
+                                               :timing-stream timing-stream
+                                               :print-pass-stats print-pass-stats
+                                               :stats-stream stats-stream
+                                               :trace-json-stream trace-json-stream
+                                               :print-opt-remarks print-opt-remarks
+                                               :opt-remarks-stream opt-remarks-stream
+                                               :opt-remarks-mode opt-remarks-mode)))
+                         (compile-string source :target :vm :language language
                                          :pass-pipeline pass-pipeline
                                          :print-pass-timings print-pass-timings
-                                          :timing-stream timing-stream
-                                          :print-pass-stats print-pass-stats
-                                          :stats-stream stats-stream
-                                          :trace-json-stream trace-json-stream
-                                          :print-opt-remarks print-opt-remarks
+                                         :timing-stream timing-stream
+                                         :print-pass-stats print-pass-stats
+                                         :stats-stream stats-stream
+                                         :trace-json-stream trace-json-stream
+                                         :print-opt-remarks print-opt-remarks
                                          :opt-remarks-stream opt-remarks-stream
-                                         :opt-remarks-mode opt-remarks-mode)))
-         (program    (compilation-result-program result))
+                                         :opt-remarks-mode opt-remarks-mode))
+                     (multiple-value-bind (cps-result cps-used)
+                         (%maybe-compile-native-via-cps source
+                                                        :target :vm
+                                                        :pass-pipeline pass-pipeline
+                                                        :print-pass-timings print-pass-timings
+                                                        :timing-stream timing-stream
+                                                        :print-pass-stats print-pass-stats
+                                                        :stats-stream stats-stream
+                                                        :trace-json-stream trace-json-stream
+                                                        :print-opt-remarks print-opt-remarks
+                                                        :opt-remarks-stream opt-remarks-stream
+                                                        :opt-remarks-mode opt-remarks-mode)
+                       (if cps-used
+                           cps-result
+                           (compile-expression source :target :vm
+                                               :pass-pipeline pass-pipeline
+                                               :print-pass-timings print-pass-timings
+                                               :timing-stream timing-stream
+                                               :print-pass-stats print-pass-stats
+                                               :stats-stream stats-stream
+                                               :trace-json-stream trace-json-stream
+                                               :print-opt-remarks print-opt-remarks
+                                               :opt-remarks-stream opt-remarks-stream
+                                               :opt-remarks-mode opt-remarks-mode)))))
+          (program    (compilation-result-program result))
          (code-bytes (ecase arch
                        (:x86-64 (compile-to-x86-64-bytes program))
                        (:arm64  (compile-to-aarch64-bytes program))))
@@ -117,24 +209,50 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
                      (compile-string source :target :vm :language :php
                                      :pass-pipeline pass-pipeline
                                      :print-pass-timings print-pass-timings
-                                      :timing-stream timing-stream
-                                      :print-pass-stats print-pass-stats
-                                      :stats-stream stats-stream
-                                      :trace-json-stream trace-json-stream
-                                      :print-opt-remarks print-opt-remarks
+                                     :timing-stream timing-stream
+                                     :print-pass-stats print-pass-stats
+                                     :stats-stream stats-stream
+                                     :trace-json-stream trace-json-stream
+                                     :print-opt-remarks print-opt-remarks
                                      :opt-remarks-stream opt-remarks-stream
                                      :opt-remarks-mode opt-remarks-mode)
-                     (compile-toplevel-forms source :target :vm
-                                              :pass-pipeline pass-pipeline
-                                              :print-pass-timings print-pass-timings
-                                               :timing-stream timing-stream
-                                               :print-pass-stats print-pass-stats
-                                               :stats-stream stats-stream
-                                               :trace-json-stream trace-json-stream
-                                               :print-opt-remarks print-opt-remarks
-                                              :opt-remarks-stream opt-remarks-stream
-                                              :opt-remarks-mode opt-remarks-mode)))
-         (program    (compilation-result-program result))
+                     (let ((forms (%non-package-top-level-forms source)))
+                       (if (= (length forms) 1)
+                           (multiple-value-bind (cps-result cps-used)
+                               (%maybe-compile-native-via-cps (first forms)
+                                                              :target :vm
+                                                              :pass-pipeline pass-pipeline
+                                                              :print-pass-timings print-pass-timings
+                                                              :timing-stream timing-stream
+                                                              :print-pass-stats print-pass-stats
+                                                              :stats-stream stats-stream
+                                                              :trace-json-stream trace-json-stream
+                                                              :print-opt-remarks print-opt-remarks
+                                                              :opt-remarks-stream opt-remarks-stream
+                                                              :opt-remarks-mode opt-remarks-mode)
+                             (if cps-used
+                                 cps-result
+                                 (compile-toplevel-forms source :target :vm
+                                                         :pass-pipeline pass-pipeline
+                                                         :print-pass-timings print-pass-timings
+                                                         :timing-stream timing-stream
+                                                         :print-pass-stats print-pass-stats
+                                                         :stats-stream stats-stream
+                                                         :trace-json-stream trace-json-stream
+                                                         :print-opt-remarks print-opt-remarks
+                                                         :opt-remarks-stream opt-remarks-stream
+                                                         :opt-remarks-mode opt-remarks-mode)))
+                           (compile-toplevel-forms source :target :vm
+                                                  :pass-pipeline pass-pipeline
+                                                  :print-pass-timings print-pass-timings
+                                                  :timing-stream timing-stream
+                                                  :print-pass-stats print-pass-stats
+                                                  :stats-stream stats-stream
+                                                  :trace-json-stream trace-json-stream
+                                                  :print-opt-remarks print-opt-remarks
+                                                  :opt-remarks-stream opt-remarks-stream
+                                                  :opt-remarks-mode opt-remarks-mode)))))
+          (program    (compilation-result-program result))
          (code-bytes (ecase arch
                        (:x86-64 (compile-to-x86-64-bytes program))
                        (:arm64  (compile-to-aarch64-bytes program))))
@@ -182,15 +300,15 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
             (push (list 'cons (list 'quote method-name) (second rest-spec))
                   default-forms))))
       (list 'progn
-            (list 'cl-cc/type:register-typeclass
-                  (list 'quote class-name)
-                  (list 'cl-cc/type:make-type-class
-                        :name (list 'quote class-name)
-                        :type-param (list 'cl-cc/type:make-type-variable (list 'quote type-param))
-                        :methods (cons 'list (nreverse methods-forms))
-                        :defaults (cons 'list (nreverse default-forms))
-                        :superclasses (list 'quote superclasses)))
-            (list 'quote class-name)))))
+             (list 'cl-cc/type:register-typeclass
+                   (list 'quote class-name)
+                    (list 'cl-cc/type:make-typeclass-def
+                          :name (list 'quote class-name)
+                          :type-params (list 'list (list 'cl-cc/type:fresh-type-var (list 'quote type-param)))
+                          :methods (cons 'list (nreverse methods-forms))
+                          :defaults (cons 'list (nreverse default-forms))
+                          :superclasses (list 'quote superclasses)))
+             (list 'quote class-name)))))
 
 (register-macro 'deftype-instance
   (lambda (form env)

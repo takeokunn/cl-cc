@@ -15,25 +15,19 @@
 
 ;;; Heap Allocation Tests
 
-(deftest vm-alloc-basic
-  "Test basic heap allocation."
+(deftest vm-heap-allocation-cases
+  "Basic alloc returns addr 1; multiple allocs yield unique addrs; get/set roundtrip works."
   (let* ((state (make-instance 'vm-state))
          (addr (vm-heap-alloc state nil)))
     (assert-= addr 1)
-    (assert-= (vm-heap-counter state) 1)))
-
-(deftest vm-alloc-multiple
-  "Test multiple heap allocations produce unique addresses."
+    (assert-= (vm-heap-counter state) 1))
   (let* ((state (make-instance 'vm-state))
          (addr1 (vm-heap-alloc state nil))
          (addr2 (vm-heap-alloc state nil))
          (addr3 (vm-heap-alloc state nil)))
     (assert-true (/= addr1 addr2))
     (assert-true (/= addr2 addr3))
-    (assert-= (vm-heap-counter state) 3)))
-
-(deftest vm-heap-get-and-set
-  "Test heap get and set operations."
+    (assert-= (vm-heap-counter state) 3))
   (let* ((state (make-instance 'vm-state))
          (addr (incf (vm-heap-counter state))))
     (vm-heap-set state addr :test-value)
@@ -41,8 +35,8 @@
 
 ;;; Cons Cell Tests
 
-(deftest vm-cons-creates-cell
-  "Test that vm-cons creates a cons cell."
+(deftest vm-cons-creation-cases
+  "vm-cons creates a cons cell with correct car/cdr; nil cdr works correctly."
   (let* ((state (make-instance 'vm-state))
          (inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2)))
     (vm-reg-set state 1 10)
@@ -51,10 +45,7 @@
     (let ((cell (vm-reg-get state 0)))
       (assert-true (consp cell))
       (assert-= (car cell) 10)
-      (assert-= (cdr cell) 20))))
-
-(deftest vm-cons-with-nil-cdr
-  "Test that vm-cons works with nil cdr."
+      (assert-= (cdr cell) 20)))
   (let* ((state (make-instance 'vm-state))
          (inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2)))
     (vm-reg-set state 1 42)
@@ -86,8 +77,8 @@
 
 ;;; Car/Cdr Tests
 
-(deftest vm-car-cdr-extract-values
-  "Test that vm-car and vm-cdr each extract the correct half of a cons cell."
+(deftest vm-car-cdr-cases
+  "vm-car/cdr extract correct half; car on nested cons traverses correctly."
   (let* ((state (make-instance 'vm-state))
          (cons-inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
          (car-inst (make-vm-car :dst 3 :src 0)))
@@ -103,18 +94,11 @@
     (vm-reg-set state 2 456)
     (execute-instruction cons-inst state 0 (make-hash-table))
     (execute-instruction cdr-inst state 1 (make-hash-table))
-    (assert-= (vm-reg-get state 3) 456)))
-
-(deftest vm-car-on-nested-cons
-  "Test car on nested cons cells."
+    (assert-= (vm-reg-get state 3) 456))
   (let* ((state (make-instance 'vm-state))
-         ;; Create (2 . 3)
          (inst1 (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
-         ;; Create ((2 . 3) . 4)
          (inst2 (make-vm-cons :dst 3 :car-src 0 :cdr-src 4))
-         ;; Get car of outer cons (should be address of inner cons)
          (car-inst (make-vm-car :dst 5 :src 3))
-         ;; Get car of inner cons (should be 2)
          (car-inst2 (make-vm-car :dst 6 :src 5)))
     (vm-reg-set state 1 2)
     (vm-reg-set state 2 3)
@@ -127,10 +111,8 @@
 
 ;;; Rplaca/Rplacd Tests
 
-(deftest vm-rplaca-rplacd-mutate-pair
-  "Test that vm-rplaca modifies the car and vm-rplacd modifies the cdr of a cons cell.
-Each block uses distinct (car . cdr) values so vm-hash-cons can't return a
-cached cell mutated by a prior block — ensures true per-block isolation."
+(deftest vm-rplaca-rplacd-cases
+  "rplaca/rplacd each mutate the correct half; both can be used on the same cons."
   ;; Block 1: rplaca on (10 . 20) → (99 . 20)
   (cl-cc/vm::vm-clear-hash-cons-table)
   (let* ((state (make-instance 'vm-state))
@@ -160,10 +142,7 @@ cached cell mutated by a prior block — ensures true per-block isolation."
     (execute-instruction rplacd-inst state 1 (make-hash-table))
     (let ((cell (vm-reg-get state 0)))
       (assert-= 11 (car cell))
-      (assert-= 88 (cdr cell)))))
-
-(deftest vm-rplaca-and-rplacd-together
-  "Test that rplaca and rplacd can both be used on the same cons."
+      (assert-= 88 (cdr cell))))
   (let* ((state (make-instance 'vm-state))
          (cons-inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
          (rplaca-inst (make-vm-rplaca :cons 0 :val 3))

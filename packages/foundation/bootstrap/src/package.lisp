@@ -9,7 +9,7 @@
 ;;;;
 ;;;; Why a separate package?
 ;;;;   cl-cc/prolog uses binop/const/var/cmp/... as Prolog predicate atoms
-;;;;   in type-inference rules (prolog-query.lisp) and as the DCG token
+;;;;   in the solver/query layer and as the DCG token
 ;;;;   bridge (dcg.lisp).  cl-cc/compile defines our-eval; cl-cc/prolog
 ;;;;   calls it back at runtime.  Without a common bootstrap both subsystems
 ;;;;   would need to import from :cl-cc, which loads *after* prolog —

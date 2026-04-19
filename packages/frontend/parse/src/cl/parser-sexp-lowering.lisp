@@ -31,9 +31,9 @@ Populated by DEFINE-LIST-LOWERER registrations below.")
 (defmacro define-list-lowerer (heads (node sf sl sc) &body body)
   "Register a lowering handler for each symbol in HEADS.
 Each handler is a lambda (node source-file source-line source-column)."
-  `(let ((fn (lambda (,node ,sf ,sl ,sc) ,@body)))
-     (dolist (head ',heads)
-       (setf (gethash head *list-lowering-table*) fn))))
+  (list 'let (list (list 'fn (cons 'lambda (cons (list node sf sl sc) body))))
+        (list 'dolist (list 'head (list 'quote heads))
+              (list 'setf (list 'gethash 'head '*list-lowering-table*) 'fn))))
 
 ;;; ── Setf simple-place rewrite table ─────────────────────────────────────────
 ;;;

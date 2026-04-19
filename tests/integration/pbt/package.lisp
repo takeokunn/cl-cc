@@ -189,9 +189,8 @@
    #:*max-list-length*
    #:*max-string-length*
    #:*max-type-depth*
-   #:*max-mach-o-sections*
-   #:*size*
-   #:*pbt-rng-override*
+    #:*size*
+    #:*pbt-rng-override*
 
    ;; Built-in generators
    #:gen-integer
@@ -246,157 +245,63 @@
    #:gen-type-expr
    #:gen-type-specifier
 
-   ;; Mach-O Constants
-   #:+mh-magic+
-   #:+mh-magic-64+
-   #:+mh-cigam+
-   #:+mh-cigam-64+
-   #:+cpu-type-x86+
-   #:+cpu-type-x86-64+
-   #:+cpu-type-arm+
-   #:+cpu-type-arm64+
-   #:+cpu-subtype-x86-all+
-   #:+cpu-subtype-arm-all+
-   #:+cpu-subtype-arm64-all+
-   #:+mh-object+
-   #:+mh-execute+
-   #:+mh-fvm+
-   #:+mh-core+
-   #:+mh-preload+
-   #:+mh-dylib+
-   #:+mh-dylinker+
-   #:+mh-bundle+
-   #:+mh-noundefs+
-   #:+mh-dyldlink+
-   #:+mh-pie+
-   #:+lc-segment+
-   #:+lc-segment-64+
-   #:+lc-symtab+
-   #:+lc-dysymtab+
-   #:+lc-load-dylib+
-   #:+lc-id-dylib+
-   #:+lc-load-weak-dylib+
-   #:+lc-uuid+
-   #:+lc-rpath+
-   #:+lc-code-signature+
-   #:+lc-reexport-dylib+
-   #:+lc-version-min-macosx+
-   #:+lc-build-version+
-   #:+vm-prot-read+
-   #:+vm-prot-write+
-   #:+vm-prot-execute+
+    ;; Typed AST Structures
+    #:typed-ast
+    #:make-typed-ast-raw
+    #:typed-ast-node-type
+    #:typed-ast-source-node
+    #:typed-ast-int
+    #:make-typed-ast-int-raw
+    #:typed-ast-int-value
+    #:typed-ast-float
+    #:make-typed-ast-float-raw
+    #:typed-ast-float-value
+    #:typed-ast-string
+    #:make-typed-ast-string-raw
+    #:typed-ast-string-value
+    #:typed-ast-boolean
+    #:make-typed-ast-boolean-raw
+    #:typed-ast-boolean-value
+    #:typed-ast-var
+    #:make-typed-ast-var-raw
+    #:typed-ast-var-name
+    #:typed-ast-binop
+    #:make-typed-ast-binop-raw
+    #:typed-ast-binop-op
+    #:typed-ast-binop-lhs
+    #:typed-ast-binop-rhs
+    #:typed-ast-if
+    #:make-typed-ast-if-raw
+    #:typed-ast-if-cond
+    #:typed-ast-if-then
+    #:typed-ast-if-else
+    #:typed-ast-lambda
+    #:make-typed-ast-lambda-raw
+    #:typed-ast-lambda-params
+    #:typed-ast-lambda-body
+    #:typed-ast-call
+    #:make-typed-ast-call-raw
+    #:typed-ast-call-func
+    #:typed-ast-call-func-type
+    #:typed-ast-call-args
+    #:typed-ast-let
+    #:make-typed-ast-let-raw
+    #:typed-ast-let-bindings
+    #:typed-ast-let-body
 
-   ;; Mach-O Structure Generators
-   #:gen-mach-magic
-   #:gen-mach-cpu-type
-   #:gen-mach-cpu-subtype
-   #:gen-mach-file-type
-   #:gen-mach-flags
-   #:gen-mach-header
-   #:gen-segment-permissions
-   #:gen-segment-name
-   #:gen-section-name
-   #:gen-mach-section
-   #:gen-mach-segment-command
-   #:gen-mach-load-command-type
+    ;; Typed AST Generators
+    #:gen-typed-primitive-value
+    #:gen-typed-terminal
+    #:gen-typed-binop
+    #:gen-typed-if
+    #:gen-typed-param
+    #:gen-typed-lambda
+    #:gen-typed-call
+    #:gen-typed-let
+    #:gen-typed-ast-node
 
-   ;; Mach-O Structures
-   #:mach-header
-   #:make-mach-header-raw
-   #:mach-header-magic
-   #:mach-header-cputype
-   #:mach-header-cpusubtype
-   #:mach-header-filetype
-   #:mach-header-ncmds
-   #:mach-header-sizeofcmds
-   #:mach-header-flags
-   #:mach-header-reserved
-   #:mach-segment-command
-   #:make-mach-segment-raw
-   #:mach-segment-command-cmd
-   #:mach-segment-command-cmdsize
-   #:mach-segment-command-segname
-   #:mach-segment-command-vmaddr
-   #:mach-segment-command-vmsize
-   #:mach-segment-command-fileoff
-   #:mach-segment-command-filesize
-   #:mach-segment-command-maxprot
-   #:mach-segment-command-initprot
-   #:mach-segment-command-nsects
-   #:mach-segment-command-flags
-   #:mach-segment-command-sections
-   #:mach-section
-   #:make-mach-section-raw
-   #:mach-section-sectname
-   #:mach-section-segname
-   #:mach-section-addr
-   #:mach-section-size
-   #:mach-section-offset
-   #:mach-section-align
-   #:mach-section-reloff
-   #:mach-section-nreloc
-   #:mach-section-flags
-   #:mach-section-reserved1
-   #:mach-section-reserved2
-   #:mach-section-reserved3
-
-   ;; Typed AST Structures
-   #:typed-ast
-   #:make-typed-ast-raw
-   #:typed-ast-node-type
-   #:typed-ast-source-node
-   #:typed-ast-int
-   #:make-typed-ast-int-raw
-   #:typed-ast-int-value
-   #:typed-ast-float
-   #:make-typed-ast-float-raw
-   #:typed-ast-float-value
-   #:typed-ast-string
-   #:make-typed-ast-string-raw
-   #:typed-ast-string-value
-   #:typed-ast-boolean
-   #:make-typed-ast-boolean-raw
-   #:typed-ast-boolean-value
-   #:typed-ast-var
-   #:make-typed-ast-var-raw
-   #:typed-ast-var-name
-   #:typed-ast-binop
-   #:make-typed-ast-binop-raw
-   #:typed-ast-binop-op
-   #:typed-ast-binop-lhs
-   #:typed-ast-binop-rhs
-   #:typed-ast-if
-   #:make-typed-ast-if-raw
-   #:typed-ast-if-cond
-   #:typed-ast-if-then
-   #:typed-ast-if-else
-   #:typed-ast-lambda
-   #:make-typed-ast-lambda-raw
-   #:typed-ast-lambda-params
-   #:typed-ast-lambda-body
-   #:typed-ast-call
-   #:make-typed-ast-call-raw
-   #:typed-ast-call-func
-   #:typed-ast-call-func-type
-   #:typed-ast-call-args
-   #:typed-ast-let
-   #:make-typed-ast-let-raw
-   #:typed-ast-let-bindings
-   #:typed-ast-let-body
-
-   ;; Typed AST Generators
-   #:gen-typed-primitive-value
-   #:gen-typed-terminal
-   #:gen-typed-binop
-   #:gen-typed-if
-   #:gen-typed-param
-   #:gen-typed-lambda
-   #:gen-typed-call
-   #:gen-typed-let
-   #:gen-typed-ast-node
-
-   ;; Typed AST Utilities
-   #:typed-ast-to-sexp
-   #:extract-type-from-ast))
+    ;; Typed AST Utilities
+    #:typed-ast-to-sexp
+    #:extract-type-from-ast))
 
 (in-package :cl-cc/pbt)

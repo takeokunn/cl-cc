@@ -165,11 +165,11 @@
          (body-env (type-env-extend* param-bindings env)))
     (multiple-value-bind (body-type subst)
         (infer-body (cl-cc/ast:ast-lambda-body ast) body-env)
-      (values (make-type-function-raw
-                             :params (mapcar (lambda (p)
-                                               (type-substitute p subst))
-                                             param-types)
-                             :return body-type)
+      (values (make-type-arrow
+               (mapcar (lambda (p)
+                         (type-substitute p subst))
+                       param-types)
+               body-type)
               subst))))
 
 (defun infer-progn (ast env)
@@ -185,12 +185,12 @@
    is satisfied for the instantiated type argument."
   (when (typep func-type 'type-qualified)
     (dolist (constraint (type-qualified-constraints func-type))
-      (let* ((class-name (type-class-constraint-class-name constraint))
+      (let* ((class-name (type-constraint-class-name constraint))
              (type-arg (type-substitute
-                        (type-class-constraint-type-arg constraint)
+                        (type-constraint-type-arg constraint)
                         subst)))
         (unless (or (typep type-arg 'type-unknown)
-                    (typep type-arg 'type-variable)
+                    (type-var-p type-arg)
                     (and (type-env-p env)
                          (dict-env-lookup class-name type-arg env))
                     (has-typeclass-instance-p class-name type-arg))
@@ -207,9 +207,7 @@
     (let* ((result-type (fresh-type-var))
            (arg-types (infer-args (cl-cc/ast:ast-call-args ast)
                                   (apply-subst-env env subst1)))
-           (expected-fn (make-type-function-raw
-                                       :params arg-types
-                                       :return result-type)))
+           (expected-fn (make-type-arrow arg-types result-type)))
       (multiple-value-bind (subst ok)
           (type-unify func-type expected-fn subst1)
         (if ok

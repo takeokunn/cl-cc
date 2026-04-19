@@ -242,12 +242,17 @@
       ;; The join block should have at least one param (the phi)
       (assert-true (> (length (cl-cc/ir:irb-params join)) 0)))))
 
-(deftest ir-ssa-seal-block-marks-sealed
-  "ir-seal-block sets sealed-p to T."
-  (let* ((fn (make-test-fn))
-         (blk (cl-cc/ir:irf-entry fn)))
+(deftest-each ir-ssa-sealed-block-behavior
+  "ir-seal-block marks block sealed; ir-read-var on sealed orphan with no def returns nil."
+  :cases (("marks-sealed"       :sealed)
+          ("no-def-returns-nil" :read-nil))
+  (scenario)
+  (let* ((fn  (make-test-fn))
+         (blk (cl-cc/ir:ir-new-block fn :orphan)))
     (cl-cc/ir:ir-seal-block fn blk)
-    (assert-true (cl-cc/ir:irb-sealed-p blk))))
+    (ecase scenario
+      (:sealed   (assert-true  (cl-cc/ir:irb-sealed-p blk)))
+      (:read-nil (assert-false (cl-cc/ir:ir-read-var fn 'x blk))))))
 
 ;;; ─── ir-new-value / ir-new-block ────────────────────────────────────────────
 
@@ -272,11 +277,3 @@
     (assert-true (cl-cc/ir:ir-block-p (cl-cc/ir:irf-entry fn)))
     (assert-eq :entry (cl-cc/ir:irb-label (cl-cc/ir:irf-entry fn)))))
 
-;;; ─── Braun SSA: advanced paths ────────────────────────────────────────────────
-
-(deftest ir-ssa-read-no-predecessors-returns-nil
-  "ir-read-var on a block with no predecessors and no local def returns NIL."
-  (let* ((fn (make-test-fn))
-         (orphan (cl-cc/ir:ir-new-block fn :orphan)))
-    (cl-cc/ir:ir-seal-block fn orphan)
-    (assert-false (cl-cc/ir:ir-read-var fn 'x orphan))))

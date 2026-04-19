@@ -21,17 +21,10 @@
   (expected node)
   (assert-= expected (cl-cc/compile::%ast-constant-number-value node)))
 
-(deftest ast-constant-number-value-nil-for-non-integer-quote
-  "%ast-constant-number-value returns nil for a quoted non-integer."
-  (assert-null
-   (cl-cc/compile::%ast-constant-number-value
-    (cl-cc/ast::make-ast-quote :value "hello"))))
-
-(deftest ast-constant-number-value-nil-for-var
-  "%ast-constant-number-value returns nil for a variable reference."
-  (assert-null
-   (cl-cc/compile::%ast-constant-number-value
-    (cl-cc/ast::make-ast-var :name 'x))))
+(deftest ast-constant-number-value-nil-cases
+  "%ast-constant-number-value returns nil for non-integer quotes and variable nodes."
+  (assert-null (cl-cc/compile::%ast-constant-number-value (cl-cc/ast::make-ast-quote :value "hello")))
+  (assert-null (cl-cc/compile::%ast-constant-number-value (cl-cc/ast::make-ast-var :name 'x))))
 
 ;;; ─── %ast-constant-node-p ─────────────────────────────────────────────────
 
@@ -49,38 +42,23 @@
 
 ;;; ─── %ast->compile-time-value ─────────────────────────────────────────────
 
-(deftest ast->compile-time-value-returns-int-value
-  "%ast->compile-time-value extracts the integer from an ast-int node."
-  (assert-= 99
-            (cl-cc/compile::%ast->compile-time-value
-             (cl-cc/ast::make-ast-int :value 99))))
-
-(deftest ast->compile-time-value-returns-quote-value
-  "%ast->compile-time-value returns the quoted datum from an ast-quote node."
-  (assert-equal '(a b)
-                (cl-cc/compile::%ast->compile-time-value
-                 (cl-cc/ast::make-ast-quote :value '(a b)))))
-
-(deftest ast->compile-time-value-nil-for-var
-  "%ast->compile-time-value returns nil for a non-constant node."
-  (assert-null
-   (cl-cc/compile::%ast->compile-time-value (cl-cc/ast::make-ast-var :name 'x))))
+(deftest ast->compile-time-value-cases
+  "%ast->compile-time-value extracts int/quote values; returns nil for non-constants."
+  (assert-= 99 (cl-cc/compile::%ast->compile-time-value (cl-cc/ast::make-ast-int :value 99)))
+  (assert-equal '(a b) (cl-cc/compile::%ast->compile-time-value (cl-cc/ast::make-ast-quote :value '(a b))))
+  (assert-null (cl-cc/compile::%ast->compile-time-value (cl-cc/ast::make-ast-var :name 'x))))
 
 ;;; ─── %compile-time-value->ast ─────────────────────────────────────────────
 
-(deftest compile-time-value->ast-integer-yields-ast-int
-  "%compile-time-value->ast wraps an integer as an ast-int node."
-  (let ((node (cl-cc/compile::%compile-time-value->ast
-               5 (cl-cc/ast::make-ast-int :value 0))))
-    (assert-true (typep node 'cl-cc::ast-int))
-    (assert-= 5 (cl-cc/ast::ast-int-value node))))
-
-(deftest compile-time-value->ast-non-integer-yields-ast-quote
-  "%compile-time-value->ast wraps a non-integer as an ast-quote node."
-  (let ((node (cl-cc/compile::%compile-time-value->ast
-               'hello (cl-cc/ast::make-ast-int :value 0))))
-    (assert-true (typep node 'cl-cc::ast-quote))
-    (assert-eq 'hello (cl-cc/ast::ast-quote-value node))))
+(deftest compile-time-value->ast-cases
+  "%compile-time-value->ast wraps integers as ast-int and other values as ast-quote."
+  (let* ((proto     (cl-cc/ast::make-ast-int :value 0))
+         (int-node  (cl-cc/compile::%compile-time-value->ast 5     proto))
+         (sym-node  (cl-cc/compile::%compile-time-value->ast 'hello proto)))
+    (assert-true (typep int-node 'cl-cc::ast-int))
+    (assert-= 5 (cl-cc/ast::ast-int-value int-node))
+    (assert-true (typep sym-node 'cl-cc::ast-quote))
+    (assert-eq 'hello (cl-cc/ast::ast-quote-value sym-node))))
 
 ;;; ─── %compile-time-eval-binop ─────────────────────────────────────────────
 
@@ -115,15 +93,12 @@
 
 ;;; ─── %compile-time-lookup ─────────────────────────────────────────────────
 
-(deftest compile-time-lookup-finds-existing-binding
-  "%compile-time-lookup returns (values value t) for a known name."
+(deftest compile-time-lookup-cases
+  "%compile-time-lookup: returns value+T for known names; nil+nil for absent names."
   (multiple-value-bind (value found-p)
       (cl-cc/compile::%compile-time-lookup 'x '((x . 42) (y . 7)))
     (assert-true found-p)
-    (assert-= 42 value)))
-
-(deftest compile-time-lookup-returns-nil-for-missing
-  "%compile-time-lookup returns nil (not two values) for an absent name."
+    (assert-= 42 value))
   (multiple-value-bind (value found-p)
       (cl-cc/compile::%compile-time-lookup 'z '((x . 1) (y . 2)))
     (assert-null value)
@@ -131,31 +106,21 @@
 
 ;;; ─── *compile-time-eval-fns* ──────────────────────────────────────────────
 
-(deftest compile-time-eval-fns-registered-for-arithmetic
-  "*compile-time-eval-fns* has + - * / registered."
-  (dolist (sym '(+ - * /))
+(deftest compile-time-eval-fns-registered
+  "*compile-time-eval-fns* has arithmetic (+, -, *, /) and predicate (not, zerop, null, etc.) entries."
+  (dolist (sym '(+ - * / not zerop null numberp integerp symbolp))
     (assert-true (gethash sym cl-cc/compile::*compile-time-eval-fns*))))
 
-(deftest compile-time-eval-fns-registered-for-predicates
-  "*compile-time-eval-fns* has not/zerop/null/numberp registered."
-  (dolist (sym '(not zerop null numberp integerp symbolp))
-    (assert-true (gethash sym cl-cc/compile::*compile-time-eval-fns*))))
-
-(deftest compile-time-eval-fns-plus-evaluates-sum
-  "The + entry in *compile-time-eval-fns* correctly sums a list of numbers."
-  (let ((fn (gethash '+ cl-cc/compile::*compile-time-eval-fns*)))
+(deftest-each compile-time-eval-fns-evaluation-cases
+  "Entries in *compile-time-eval-fns* correctly evaluate their arguments."
+  :cases (("plus-sum"  '+    '(3 4 5) 12)
+          ("null-nil"  'null '(nil)    t))
+  (fn-name args expected)
+  (let ((fn (gethash fn-name cl-cc/compile::*compile-time-eval-fns*)))
     (multiple-value-bind (result ok)
-        (funcall fn '(3 4 5))
+        (funcall fn args)
       (assert-true ok)
-      (assert-= 12 result))))
-
-(deftest compile-time-eval-fns-null-detects-nil
-  "The NULL entry in *compile-time-eval-fns* returns T for nil."
-  (let ((fn (gethash 'null cl-cc/compile::*compile-time-eval-fns*)))
-    (multiple-value-bind (result ok)
-        (funcall fn '(nil))
-      (assert-true ok)
-      (assert-true result))))
+      (assert-equal expected result))))
 
 ;;; ─── %fold-ast-binop ──────────────────────────────────────────────────────
 
@@ -184,23 +149,18 @@
 
 ;;; ─── %evaluate-ast ────────────────────────────────────────────────────────
 
-(deftest evaluate-ast-integer-literal
-  "%evaluate-ast evaluates an ast-int to its value."
-  (multiple-value-bind (value ok)
-      (let ((cl-cc/compile::*compile-time-value-env* nil)
-            (cl-cc/compile::*compile-time-function-env* nil))
-        (cl-cc/compile::%evaluate-ast (cl-cc/ast::make-ast-int :value 17) 10))
-    (assert-true ok)
-    (assert-= 17 value)))
-
-(deftest evaluate-ast-quote-symbol
-  "%evaluate-ast evaluates an ast-quote to its datum."
-  (multiple-value-bind (value ok)
-      (let ((cl-cc/compile::*compile-time-value-env* nil)
-            (cl-cc/compile::*compile-time-function-env* nil))
-        (cl-cc/compile::%evaluate-ast (cl-cc/ast::make-ast-quote :value 'hello) 10))
-    (assert-true ok)
-    (assert-eq 'hello value)))
+(deftest evaluate-ast-constants
+  "%evaluate-ast evaluates ast-int and ast-quote to their values."
+  (let ((cl-cc/compile::*compile-time-value-env* nil)
+        (cl-cc/compile::*compile-time-function-env* nil))
+    (multiple-value-bind (value ok)
+        (cl-cc/compile::%evaluate-ast (cl-cc/ast::make-ast-int :value 17) 10)
+      (assert-true ok)
+      (assert-= 17 value))
+    (multiple-value-bind (value ok)
+        (cl-cc/compile::%evaluate-ast (cl-cc/ast::make-ast-quote :value 'hello) 10)
+      (assert-true ok)
+      (assert-eq 'hello value))))
 
 (deftest evaluate-ast-var-found-in-env
   "%evaluate-ast resolves a bound variable from the compile-time env."
@@ -211,23 +171,18 @@
     (assert-true ok)
     (assert-= 42 value)))
 
-(deftest evaluate-ast-var-not-found-returns-nil
-  "%evaluate-ast returns (values nil nil) for an unbound variable."
-  (multiple-value-bind (value ok)
-      (let ((cl-cc/compile::*compile-time-value-env* nil)
-            (cl-cc/compile::*compile-time-function-env* nil))
-        (cl-cc/compile::%evaluate-ast (cl-cc/ast::make-ast-var :name 'x) 10))
-    (assert-null value)
-    (assert-null ok)))
-
-(deftest evaluate-ast-depth-limit-returns-nil
-  "%evaluate-ast returns (values nil nil) when depth runs out."
-  (multiple-value-bind (value ok)
-      (let ((cl-cc/compile::*compile-time-value-env* nil)
-            (cl-cc/compile::*compile-time-function-env* nil))
-        (cl-cc/compile::%evaluate-ast (cl-cc/ast::make-ast-int :value 5) -1))
-    (assert-null value)
-    (assert-null ok)))
+(deftest evaluate-ast-nil-cases
+  "%evaluate-ast returns (values nil nil) for unbound variables and exhausted depth."
+  (let ((cl-cc/compile::*compile-time-value-env* nil)
+        (cl-cc/compile::*compile-time-function-env* nil))
+    (multiple-value-bind (value ok)
+        (cl-cc/compile::%evaluate-ast (cl-cc/ast::make-ast-var :name 'x) 10)
+      (assert-null value)
+      (assert-null ok))
+    (multiple-value-bind (value ok)
+        (cl-cc/compile::%evaluate-ast (cl-cc/ast::make-ast-int :value 5) -1)
+      (assert-null value)
+      (assert-null ok))))
 
 (deftest evaluate-ast-arithmetic-binop
   "%evaluate-ast evaluates a constant arithmetic binop to an integer."

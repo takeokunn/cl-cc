@@ -228,6 +228,13 @@ single linear instruction stream. Returns T on success, signals ERROR on failure
    treats NIL as 'use default passes', so this short-circuit is required —
    you cannot disable the optimizer by passing :pass-pipeline nil.")
 
+(defun %maybe-apply-prolog-peephole (instructions)
+  "Apply the Prolog peephole adapter when enabled, preserving INSTRUCTIONS otherwise."
+  (if *enable-prolog-peephole*
+      (mapcar #'sexp->instruction
+              (apply-prolog-peephole (mapcar #'instruction->sexp instructions)))
+      instructions))
+
 (defun optimize-instructions (instructions &key (max-iterations 20) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Run the full multi-pass optimization pipeline on a VM instruction sequence.
    Runs until no changes or MAX-ITERATIONS reached.
@@ -235,7 +242,7 @@ single linear instruction stream. Returns T on success, signals ERROR on failure
    immediately without running any passes."
   (when *skip-optimizer-passes*
     (return-from optimize-instructions (values instructions nil)))
-  (let ((prog instructions)
+  (let ((prog (%maybe-apply-prolog-peephole instructions))
          (max-iterations (if (eq max-iterations :adaptive)
                              (opt-adaptive-max-iterations instructions)
                              max-iterations))
@@ -261,9 +268,7 @@ single linear instruction stream. Returns T on success, signals ERROR on failure
                                                   :initial-ts-us trace-ts-us))
           when (opt-converged-p prev prog)
           return prog)
-    (when *enable-prolog-peephole*
-      (setf prog (mapcar #'sexp->instruction
-                         (apply-prolog-peephole (mapcar #'instruction->sexp prog)))))
+    (setf prog (%maybe-apply-prolog-peephole prog))
     (when trace-json-stream
       (%opt-write-trace-json trace-json-stream (nreverse trace-events)))
     (opt-pass-leaf-detect prog)))

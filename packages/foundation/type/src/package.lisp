@@ -44,8 +44,8 @@
    ;; ─── Rigid (skolem) ───────────────────────────────────────────────────
    #:type-rigid    #:type-rigid-p    #:fresh-rigid-var
    #:type-rigid-id #:type-rigid-name  #:type-rigid-equal-p
-   #:type-skolem   #:type-skolem-p   #:make-type-skolem
-   #:type-skolem-id #:type-skolem-name #:type-skolem-equal-p
+    #:type-skolem   #:type-skolem-p   #:make-type-skolem
+    #:type-skolem-id #:type-skolem-name #:type-skolem-equal-p
 
    ;; ─── Arrow ───────────────────────────────────────────────────────────
    #:type-arrow    #:type-arrow-p    #:make-type-arrow  #:make-type-arrow-raw
@@ -70,7 +70,7 @@
 
    ;; ─── Forall / Exists ─────────────────────────────────────────────────
    #:type-forall   #:type-forall-p   #:make-type-forall
-   #:type-forall-var #:type-forall-knd #:type-forall-body #:type-forall-type
+    #:type-forall-var #:type-forall-knd #:type-forall-body #:type-forall-type
    #:type-exists   #:type-exists-p   #:make-type-exists
    #:type-exists-var #:type-exists-knd #:type-exists-body
 
@@ -98,9 +98,9 @@
    #:type-effect-op-name #:type-effect-op-args
    #:type-handler   #:type-handler-p   #:make-type-handler
    #:type-handler-effect #:type-handler-input #:type-handler-output
-   #:type-effect #:type-effect-p #:make-type-effect #:type-effect-name
-   #:type-effectful-function #:make-type-effectful-function
-   #:type-effectful-function-effects
+    #:type-effect #:type-effect-p #:make-type-effect #:type-effect-name
+    #:type-effectful-function #:make-type-effectful-function
+    #:type-effectful-function-effects
 
    ;; ─── GADT ────────────────────────────────────────────────────────────
    #:type-gadt-con   #:type-gadt-con-p   #:make-type-gadt-con
@@ -109,10 +109,8 @@
    ;; ─── Constraint / Qualified ──────────────────────────────────────────
    #:type-constraint   #:type-constraint-p   #:make-type-constraint
    #:type-constraint-class-name #:type-constraint-type-arg
-   #:type-class-constraint   #:type-class-constraint-p   #:make-type-class-constraint
-   #:type-class-constraint-class-name #:type-class-constraint-type-arg
-   #:type-qualified   #:type-qualified-p   #:make-type-qualified
-   #:type-qualified-constraints #:type-qualified-body #:type-qualified-type
+    #:type-qualified   #:type-qualified-p   #:make-type-qualified
+    #:type-qualified-constraints #:type-qualified-body #:type-qualified-type
 
    ;; ─── Error sentinel / unknown ────────────────────────────────────────
    #:type-error   #:type-error-p   #:make-type-error  #:type-error-message
@@ -190,12 +188,9 @@
      #:typeclass-instance  #:typeclass-instance-p  #:typeclass-instance-class-name
      #:typeclass-instance-methods
      #:*typeclass-instance-registry*
-    #:register-typeclass-instance  #:lookup-typeclass-instance
-    #:has-typeclass-instance-p  #:check-typeclass-constraint
-    #:dict-env-extend  #:dict-env-lookup
-    #:type-class   #:type-class-p   #:make-type-class
-    #:type-class-name  #:type-class-type-param  #:type-class-methods
-    #:type-class-defaults
+     #:register-typeclass-instance  #:lookup-typeclass-instance
+     #:has-typeclass-instance-p  #:check-typeclass-constraint
+     #:dict-env-extend  #:dict-env-lookup
 
    ;; ─── Constraint solver ───────────────────────────────────────────────
    #:collect-constraints  #:solve-constraints

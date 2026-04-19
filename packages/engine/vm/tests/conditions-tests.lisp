@@ -61,26 +61,17 @@
 
 ;;; ─── Handler Stack ────────────────────────────────────────────────────────
 
-(deftest handler-stack-initially-empty
-  "Fresh vm-state has empty handler stack."
+(deftest handler-stack-push-pop-cases
+  "Handler stack: fresh empty; push+pop round-trips; empty pop→nil; LIFO order."
   (let ((state (make-instance 'cl-cc/vm::vm-state)))
-    (assert-equal nil (cl-cc/vm::vm-get-handler-stack state))))
-
-(deftest push-pop-handler
-  "Push and pop handler round-trips correctly."
+    (assert-equal nil (cl-cc/vm::vm-get-handler-stack state)))
   (let ((state (make-instance 'cl-cc/vm::vm-state)))
     (cl-cc/vm::vm-push-handler-to-stack state 'cl-cc::vm-error #'identity)
     (let ((handler (cl-cc/vm::vm-pop-handler-from-stack state)))
       (assert-true (not (null handler)))
-      (assert-equal 'cl-cc::vm-error (cl-cc/vm::vm-handler-type handler)))))
-
-(deftest pop-empty-stack-returns-nil
-  "Popping empty handler stack returns nil."
+      (assert-equal 'cl-cc::vm-error (cl-cc/vm::vm-handler-type handler))))
   (let ((state (make-instance 'cl-cc/vm::vm-state)))
-    (assert-equal nil (cl-cc/vm::vm-pop-handler-from-stack state))))
-
-(deftest push-multiple-handlers-lifo
-  "Multiple pushed handlers are popped in LIFO order."
+    (assert-equal nil (cl-cc/vm::vm-pop-handler-from-stack state)))
   (let ((state (make-instance 'cl-cc/vm::vm-state)))
     (cl-cc/vm::vm-push-handler-to-stack state 'cl-cc::vm-error #'identity)
     (cl-cc/vm::vm-push-handler-to-stack state 'cl-cc::vm-warning #'identity)
@@ -103,13 +94,11 @@
 
 ;;; ─── Restart Bindings ─────────────────────────────────────────────────────
 
-(deftest restarts-initially-nil
-  "Fresh vm-state has no restarts."
-  (let ((state (make-instance 'cl-cc/vm::vm-state)))
-    (assert-equal nil (cl-cc/vm::vm-get-restarts state))))
 
 (deftest vm-restart-operations
-  "vm-add-restart makes restart findable by name; vm-find-restart returns nil for unknown name."
+  "Restarts: fresh state has none; add-restart makes findable by name; unknown name returns nil."
+  (let ((state (make-instance 'cl-cc/vm::vm-state)))
+    (assert-equal nil (cl-cc/vm::vm-get-restarts state)))
   (let ((state (make-instance 'cl-cc/vm::vm-state)))
     (cl-cc/vm::vm-add-restart state 'continue #'identity)
     (let ((restart (cl-cc/vm::vm-find-restart state 'continue)))
@@ -156,8 +145,8 @@
     (assert-equal nil (cl-cc/vm::vm-get-handler-stack state))
     (assert-equal nil (cl-cc/vm::vm-get-restarts state))))
 
-(deftest vm-sync-handler-regs-batches-handler-snapshots
-  "vm-sync-handler-regs reuses one register snapshot across all handler entries."
+(deftest vm-sync-handler-regs-cases
+  "vm-sync-handler-regs: reuses one snapshot across handler entries; updates catch frame's saved-regs."
   (let ((state (make-instance 'cl-cc/vm::vm-state)))
     (cl-cc/vm::vm-reg-set state :r1 10)
     (cl-cc/vm::execute-instruction
@@ -172,10 +161,7 @@
            (snapshot-a (cl-cc/vm::vm-handler-entry-saved-regs (first entries)))
            (snapshot-b (cl-cc/vm::vm-handler-entry-saved-regs (second entries))))
       (assert-true (eq snapshot-a snapshot-b))
-      (assert-= 42 (gethash :r1 snapshot-a)))))
-
-(deftest vm-sync-handler-regs-keeps-catch-frame-layout
-  "vm-sync-handler-regs updates catch entries via their saved-regs slot as well."
+      (assert-= 42 (gethash :r1 snapshot-a))))
   (let ((state (make-instance 'cl-cc/vm::vm-state)))
     (cl-cc/vm::vm-reg-set state :tag 7)
     (cl-cc/vm::vm-reg-set state :r1 99)
@@ -189,8 +175,8 @@
       (assert-true (hash-table-p snapshot))
       (assert-= 123 (gethash :r1 snapshot)))))
 
-(deftest vm-establish-handler-reuses-call-stack-snapshot
-  "vm-establish-handler keeps the current call stack by shared reference." 
+(deftest vm-establish-call-stack-cases
+  "vm-establish-handler and vm-establish-catch both retain call/method stacks by shared reference."
   (let ((state (make-instance 'cl-cc/vm::vm-state)))
     (setf (cl-cc/vm::vm-call-stack state) '((1 :r0 nil nil)))
     (setf (cl-cc/vm::vm-method-call-stack state) '((gf nil args)))
@@ -200,10 +186,7 @@
     (let ((entry (first (cl-cc/vm::vm-handler-stack state))))
       (assert-true (eq (fourth entry) (cl-cc/vm::vm-call-stack state)))
       (assert-true (eq (fifth entry) (cl-cc/vm::vm-handler-entry-saved-regs entry)))
-      (assert-true (eq (sixth entry) (cl-cc/vm::vm-method-call-stack state))))))
-
-(deftest vm-establish-catch-reuses-call-stack-snapshot
-  "vm-establish-catch keeps the current call and method stacks by shared reference." 
+      (assert-true (eq (sixth entry) (cl-cc/vm::vm-method-call-stack state)))))
   (let ((state (make-instance 'cl-cc/vm::vm-state)))
     (setf (cl-cc/vm::vm-call-stack state) '((7 :r1 nil nil)))
     (setf (cl-cc/vm::vm-method-call-stack state) '((gf2 nil args2)))

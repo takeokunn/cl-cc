@@ -193,6 +193,6 @@ read-char and read-line have optional stream args, so they use :stream-input-opt
     ;; no :dst — return third arg via move
     (aset              make-vm-aset       :array-reg :index-reg :val-reg   :move-third)
     ;; string/bit array mutation — return new value via :dst
-    (rt-string-set     make-vm-string-set :str       :idx       :val-reg   :dst)
+  (rt-string-set     make-vm-string-set :str       :idx       :val       :dst)
     (rt-bit-set        make-vm-bit-set    :arr       :idx       :val       :dst))
   "List of (cl-sym vm-ctor slot1 slot2 slot3 return-style) for ternary builtins.")

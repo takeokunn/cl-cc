@@ -95,7 +95,8 @@
 
 ;;;; ─── mir-emit ──────────────────────────────────────────────────────────
 
-(deftest mir-emit-basic-add
+(deftest mir-emit-cases
+  "mir-emit: op/dst/srcs/block wired; def-inst pointer set; ret has nil dst; phi→phis-list; ordering preserved."
   (let* ((fn   (mir-make-function :f))
          (blk  (mirf-entry fn))
          (dst  (mir-new-value fn :name :result :type :integer))
@@ -107,30 +108,22 @@
     (assert-eq   dst  (miri-dst inst))
     (assert-= 2 (length (miri-srcs inst)))
     (assert-= 1 (length (mirb-insts blk)))
-    (assert-eq blk (miri-block inst))))
-
-(deftest mir-emit-sets-def-inst-pointer
+    (assert-eq blk (miri-block inst)))
   (let* ((fn   (mir-make-function :f))
          (blk  (mirf-entry fn))
          (dst  (mir-new-value fn))
          (inst (mir-emit blk :const :dst dst :srcs (list (make-mir-const :value 0)))))
-    (assert-eq inst (mirv-def-inst dst))))
-
-(deftest mir-emit-terminator-has-nil-dst
+    (assert-eq inst (mirv-def-inst dst)))
   (let* ((fn  (mir-make-function :f))
          (blk (mirf-entry fn))
          (v   (mir-new-value fn)))
-    (assert-null (miri-dst (mir-emit blk :ret :srcs (list v))))))
-
-(deftest mir-emit-phi-goes-to-phis-list
+    (assert-null (miri-dst (mir-emit blk :ret :srcs (list v)))))
   (let* ((fn  (mir-make-function :f))
          (blk (mir-new-block fn :label :loop))
          (dst (mir-new-value fn :name :x))
          (phi (mir-emit blk :phi :dst dst)))
     (assert-true (member phi (mirb-phis blk) :test #'eq))
-    (assert-null (mirb-insts blk))))
-
-(deftest mir-emit-preserves-ordering
+    (assert-null (mirb-insts blk)))
   (let* ((fn  (mir-make-function :f))
          (blk (mirf-entry fn))
          (d0  (mir-new-value fn))
@@ -247,17 +240,12 @@
 
 ;;;; ─── mir-module ────────────────────────────────────────────────────────
 
-(deftest mir-module-basic
-  "make-mir-module initialises with empty function and globals lists."
+(deftest mir-module-and-ops-cases
+  "make-mir-module has empty fn/globals lists; all core ops are in *mir-generic-ops*."
   (let ((m (make-mir-module)))
     (assert-null (mirm-functions m))
     (assert-null (mirm-globals m))
-    (assert-false (null (mirm-string-table m)))))
-
-;;;; ─── mir generic ops vocabulary ──────────────────────────────────────
-
-(deftest mir-generic-ops-contains-core
-  "Core ops (:add :sub :call :ret :jump :branch :phi) are in *mir-generic-ops*."
+    (assert-false (null (mirm-string-table m))))
   (dolist (op '(:add :sub :mul :div :mod :neg
                 :band :bor :bxor :bnot
                 :lt :le :gt :ge :eq :ne

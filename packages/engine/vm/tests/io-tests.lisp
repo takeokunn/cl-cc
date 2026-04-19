@@ -58,35 +58,18 @@
 
 ;;; ─── read-from-string ─────────────────────────────────────────────────────
 
-(deftest io-read-from-string-number
-  "vm-read-from-string reads a number."
-  (let ((s (io-vm)))
-    (cl-cc/vm::vm-reg-set s :R1 "42")
-    (io-exec (cl-cc::make-vm-read-from-string-inst :dst :R0 :src :R1) s)
-    (assert-equal 42 (cl-cc/vm::vm-reg-get s :R0))))
-
-(deftest io-read-from-string-symbol
-  "vm-read-from-string reads a symbol."
-  (let ((s (io-vm)))
-    (cl-cc/vm::vm-reg-set s :R1 "hello")
-    (io-exec (cl-cc::make-vm-read-from-string-inst :dst :R0 :src :R1) s)
-    (assert-equal "HELLO" (symbol-name (cl-cc/vm::vm-reg-get s :R0)))))
-
-(deftest io-read-from-string-list
-  "vm-read-from-string reads a list."
-  (let ((s (io-vm)))
-    (cl-cc/vm::vm-reg-set s :R1 "(1 2 3)")
-    (io-exec (cl-cc::make-vm-read-from-string-inst :dst :R0 :src :R1) s)
-    (let ((result (cl-cc/vm::vm-reg-get s :R0)))
-      (assert-true (listp result))
-      (assert-equal 3 (length result)))))
-
-(deftest io-read-from-string-empty
-  "vm-read-from-string returns nil for empty string."
-  (let ((s (io-vm)))
-    (cl-cc/vm::vm-reg-set s :R1 "")
-    (io-exec (cl-cc::make-vm-read-from-string-inst :dst :R0 :src :R1) s)
-    (assert-equal nil (cl-cc/vm::vm-reg-get s :R0))))
+(deftest io-read-from-string-cases
+  "vm-read-from-string reads numbers, symbols, lists, and returns nil for empty string."
+  (flet ((read-str (src vm)
+           (cl-cc/vm::vm-reg-set vm :R1 src)
+           (io-exec (cl-cc::make-vm-read-from-string-inst :dst :R0 :src :R1) vm)
+           (cl-cc/vm::vm-reg-get vm :R0)))
+    (assert-equal 42 (read-str "42" (io-vm)))
+    (assert-equal "HELLO" (symbol-name (read-str "hello" (io-vm))))
+    (let ((list-result (read-str "(1 2 3)" (io-vm))))
+      (assert-true (listp list-result))
+      (assert-equal 3 (length list-result)))
+    (assert-equal nil (read-str "" (io-vm)))))
 
 ;;; ─── vm-allocate-file-handle ────────────────────────────────────────────────
 
@@ -116,20 +99,15 @@
         (stream (make-string-output-stream)))
     (assert-equal stream (cl-cc/vm::vm-get-stream s stream))))
 
-(deftest io-get-stream-open-files-lookup
-  "vm-get-stream resolves registered file handles."
-  (let* ((s (io-vm-full))
+(deftest-each io-get-stream-handle-map-lookup-cases
+  "vm-get-stream resolves handles from open-files and string-streams maps."
+  :cases (("open-files"    (lambda (s h stream) (setf (gethash h (cl-cc/vm::vm-open-files s)) stream)))
+          ("string-streams" (lambda (s h stream) (setf (gethash h (cl-cc/vm::vm-string-streams s)) stream))))
+  (register-fn)
+  (let* ((s      (io-vm-full))
          (stream (make-string-output-stream))
          (handle (cl-cc/vm::vm-allocate-file-handle s)))
-    (setf (gethash handle (cl-cc/vm::vm-open-files s)) stream)
-    (assert-equal stream (cl-cc/vm::vm-get-stream s handle))))
-
-(deftest io-get-stream-string-streams-lookup
-  "vm-get-stream resolves registered string stream handles."
-  (let* ((s (io-vm-full))
-         (stream (make-string-output-stream))
-         (handle (cl-cc/vm::vm-allocate-file-handle s)))
-    (setf (gethash handle (cl-cc/vm::vm-string-streams s)) stream)
+    (funcall register-fn s handle stream)
     (assert-equal stream (cl-cc/vm::vm-get-stream s handle))))
 
 (deftest io-get-stream-invalid-handle-error
@@ -147,14 +125,10 @@
   (let ((s (io-vm-full)))
     (assert-true (cl-cc/vm::vm-stream-open-p s handle))))
 
-(deftest io-stream-open-p-unknown
-  "vm-stream-open-p returns nil for unknown handle."
+(deftest io-stream-open-p-edge-cases
+  "vm-stream-open-p: nil for unknown handle; truthy for direct CL stream."
   (let ((s (io-vm-full)))
-    (assert-equal nil (cl-cc/vm::vm-stream-open-p s 999))))
-
-(deftest io-stream-open-p-cl-stream
-  "vm-stream-open-p returns truthy for direct CL stream."
-  (let ((s (io-vm-full)))
+    (assert-equal nil (cl-cc/vm::vm-stream-open-p s 999))
     (assert-true (cl-cc/vm::vm-stream-open-p s (make-string-output-stream)))))
 
 ;;; ─── stream predicate instructions ─────────────────────────────────────────

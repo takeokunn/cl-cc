@@ -16,15 +16,12 @@
   (ty)
   (assert-null (type-free-vars ty)))
 
-(deftest free-vars-single-variable
-  "type-free-vars on a single variable returns that variable."
+(deftest free-vars-cases
+  "type-free-vars: single variable returns itself; function type returns both param and return vars."
   (let* ((v  (make-type-variable))
          (fv (type-free-vars v)))
     (assert-= 1 (length fv))
-    (assert-true (type-variable-equal-p (first fv) v))))
-
-(deftest free-vars-function-type
-  "type-free-vars on a function type returns both param and return variables."
+    (assert-true (type-variable-equal-p (first fv) v)))
   (let* ((v1 (make-type-variable))
          (v2 (make-type-variable))
          (fn (make-type-function-raw :params (list v1) :return v2))
@@ -33,18 +30,12 @@
 
 ;;; Substitution Tests
 
-(deftest substitution-primitive-unchanged
-  "type-substitute returns a primitive type unchanged."
-  (assert-eq type-int (type-substitute type-int (empty-subst))))
-
-(deftest substitution-bound-var-replaced
-  "type-substitute maps a bound variable to the substituted type."
+(deftest substitution-cases
+  "type-substitute: primitive unchanged; bound var replaced; unbound var identity."
+  (assert-eq type-int (type-substitute type-int (empty-subst)))
   (let* ((v (make-type-variable))
          (result (type-substitute v (extend-subst v type-int (empty-subst)))))
-    (assert-type-equal result type-int)))
-
-(deftest substitution-unbound-var-identity
-  "type-substitute returns an unbound variable unchanged."
+    (assert-type-equal result type-int))
   (let* ((v (make-type-variable))
          (result (type-substitute v (empty-subst))))
     (assert-true (type-variable-equal-p result v))))
@@ -78,18 +69,15 @@
 
 ;;; Phase 3: Bidirectional Type Checking Tests
 
-(deftest bidirectional-synthesize
-  "synthesize infers type-int for ast-int 42; check succeeds for matching and unknown types."
+(deftest bidirectional-checking-cases
+  "Bidirectional checking: synthesize infers type-int; check succeeds; check-body verifies last form."
   (let* ((env (type-env-empty))
          (ast (make-ast-int :value 42)))
     (multiple-value-bind (ty _subst) (synthesize ast env)
       (declare (ignore _subst))
       (assert-true (type-equal-p ty type-int)))
     (assert-true (null (check ast type-int env)))
-    (assert-true (null (check ast +type-unknown+ env)))))
-
-(deftest bidirectional-check-body
-  "check-body verifies the last form in a sequence matches the expected type."
+    (assert-true (null (check ast +type-unknown+ env))))
   (let* ((env (type-env-empty))
          (ast1 (make-ast-int :value 1))
          (ast2 (make-ast-int :value 2)))
@@ -98,41 +86,39 @@
 ;;; Phase 4: Typeclass Tests
 
 (deftest typeclass-register-and-lookup
-  "register-typeclass and lookup-typeclass round-trip preserves class name."
-  (let* ((tc (make-type-class
+  "register-typeclass accepts old type-class values but stores canonical typeclass-defs."
+  (let* ((tc (cl-cc/type::make-type-class
               :name 'eq-test
               :type-param (make-type-variable 'a)
               :methods (list (cons 'equal-p
                                    (make-type-function
                                     (list (make-type-variable 'a)
                                           (make-type-variable 'a))
-                                    type-bool))))))
+                                     type-bool))))))
     (register-typeclass 'eq-test tc)
     (let ((retrieved (lookup-typeclass 'eq-test)))
       (assert-true retrieved)
-      (assert-true (type-class-p retrieved))
-      (assert-eq 'eq-test (type-class-name retrieved)))))
+      (assert-true (typeclass-def-p retrieved))
+      (assert-eq 'eq-test (typeclass-def-name retrieved))
+      (assert-= 1 (length (typeclass-def-type-params retrieved))))))
 
-(deftest typeclass-constraint-accessors
-  "make-type-class-constraint accessors return class name, type-arg, and printable string."
+(deftest typeclass-constraint-types-cases
+  "Constraint accessors return correct fields; qualified type stores constraints + function body."
   (let* ((a (make-type-variable 'a))
-         (c (make-type-class-constraint :class-name 'num :type-arg a)))
-    (assert-true (type-class-constraint-p c))
-    (assert-eq 'num (type-class-constraint-class-name c))
-    (assert-true (type-variable-equal-p a (type-class-constraint-type-arg c)))
+         (c (cl-cc/type::make-type-class-constraint :class-name 'num :type-arg a)))
+    (assert-true (cl-cc/type::type-class-constraint-p c))
+    (assert-eq 'num (cl-cc/type::type-class-constraint-class-name c))
+    (assert-true (type-variable-equal-p a (cl-cc/type::type-class-constraint-type-arg c)))
     (let ((s (type-to-string c)))
       (assert-true (stringp s))
-      (assert-true (search "NUM" (string-upcase s))))))
-
-(deftest typeclass-qualified-type-structure
-  "make-type-qualified stores constraints list and a function type body."
+      (assert-true (search "NUM" (string-upcase s)))))
   (let* ((a (make-type-variable 'a))
-         (c (make-type-class-constraint :class-name 'num :type-arg a))
+         (c (cl-cc/type::make-type-class-constraint :class-name 'num :type-arg a))
          (fn (make-type-function (list a a) a))
          (qt (make-type-qualified :constraints (list c) :type fn)))
     (assert-true (type-qualified-p qt))
     (assert-= 1 (length (type-qualified-constraints qt)))
-    (assert-true (typep (type-qualified-type qt) 'type-function))))
+    (assert-true (typep (cl-cc/type::type-qualified-type qt) 'type-function))))
 
 (deftest-each typeclass-instance-registration
   "register-typeclass-instance and has-typeclass-instance-p.
@@ -155,23 +141,23 @@ registration body per case."
   :cases (("io"    'io)
           ("state" 'state))
   (effect-name)
-  (let ((eff (make-type-effect :name effect-name)))
-    (assert-true (type-effect-p eff))
-    (assert-eq effect-name (type-effect-name eff))))
+  (let ((eff (cl-cc/type::make-type-effect :name effect-name)))
+    (assert-true (cl-cc/type::type-effect-p eff))
+    (assert-eq effect-name (cl-cc/type::type-effect-name eff))))
 
 (deftest-each effect-row-singleton-cases
   "Effect row singletons: pure has 0 effects; io has 1 IO effect; custom multi has N effects."
   :cases (("pure"   +pure-effect-row+  0 nil)
           ("io"     +io-effect-row+    1 "IO")
-          ("custom" (make-type-effect-row :effects (list (make-type-effect :name 'state)
-                                                         (make-type-effect :name 'error))
+          ("custom" (make-type-effect-row :effects (list (cl-cc/type::make-type-effect :name 'state)
+                                                         (cl-cc/type::make-type-effect :name 'error))
                                           :row-var nil) 2 nil))
   (row expected-count expected-name)
   (assert-true (type-effect-row-p row))
-  (assert-= expected-count (length (type-effect-row-effects row)))
-  (when expected-name
-    (assert-true (string= expected-name
-                          (symbol-name (type-effect-name (first (type-effect-row-effects row))))))))
+    (assert-= expected-count (length (type-effect-row-effects row)))
+    (when expected-name
+      (assert-true (string= expected-name
+                           (symbol-name (cl-cc/type::type-effect-name (first (type-effect-row-effects row))))))))
 
 (deftest-each effect-row-to-string
   "type-to-string formats effect rows: pure → '{}'; io-row contains 'IO'."
@@ -185,7 +171,7 @@ registration body per case."
 
 (deftest effectful-function-creation
   "make-type-effectful-function creates an annotated function type."
-  (let ((fn (make-type-effectful-function
+  (let ((fn (cl-cc/type::make-type-effectful-function
              :params (list type-int)
              :return type-int
              :effects +io-effect-row+)))
@@ -203,7 +189,7 @@ registration body per case."
          (fa (make-type-forall :var a :type fn)))
     (assert-true (type-forall-p fa))
     (assert-true (type-variable-equal-p a (type-forall-var fa)))
-    (assert-true (typep (type-forall-type fa) 'type-function))
+    (assert-true (typep (cl-cc/type::type-forall-type fa) 'type-function))
     (let ((s (type-to-string fa)))
       (assert-true (stringp s))
       (assert-true (search "A" (string-upcase s)))))

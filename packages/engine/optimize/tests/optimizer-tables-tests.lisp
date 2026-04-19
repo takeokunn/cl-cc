@@ -39,21 +39,14 @@
   (type-sym)
   (assert-true (gethash type-sym cl-cc/optimize::*opt-binary-fold-table*)))
 
-(deftest binary-fold-table-add-function-evaluates-correctly
-  "The vm-add entry in *opt-binary-fold-table* correctly sums two numbers."
-  (let ((fn (gethash 'vm-add cl-cc/optimize::*opt-binary-fold-table*)))
-    (assert-true fn)
-    (assert-= 7 (funcall fn 3 4))))
-
-(deftest binary-fold-table-sub-function-evaluates-correctly
-  "The vm-sub entry in *opt-binary-fold-table* correctly subtracts."
-  (let ((fn (gethash 'vm-sub cl-cc/optimize::*opt-binary-fold-table*)))
-    (assert-= 5 (funcall fn 9 4))))
-
-(deftest binary-fold-table-mul-function-evaluates-correctly
-  "The vm-mul entry in *opt-binary-fold-table* correctly multiplies."
-  (let ((fn (gethash 'vm-mul cl-cc/optimize::*opt-binary-fold-table*)))
-    (assert-= 42 (funcall fn 6 7))))
+(deftest-each binary-fold-table-function-evaluation-cases
+  "Functions in *opt-binary-fold-table* correctly evaluate arithmetic operations."
+  :cases (("add" 'vm-add 3 4  7)
+          ("sub" 'vm-sub 9 4  5)
+          ("mul" 'vm-mul 6 7 42))
+  (type-sym a b expected)
+  (let ((fn (gethash type-sym cl-cc/optimize::*opt-binary-fold-table*)))
+    (assert-= expected (funcall fn a b))))
 
 ;;; ─── *opt-binary-cmp-fold-table* ─────────────────────────────────────────
 
@@ -89,15 +82,13 @@
   (type-sym)
   (assert-true (gethash type-sym cl-cc/optimize::*opt-unary-fold-table*)))
 
-(deftest unary-fold-table-neg-evaluates-correctly
-  "The vm-neg entry in *opt-unary-fold-table* correctly negates."
-  (let ((fn (gethash 'vm-neg cl-cc/optimize::*opt-unary-fold-table*)))
-    (assert-= -7 (funcall fn 7))))
-
-(deftest unary-fold-table-abs-evaluates-correctly
-  "The vm-abs entry in *opt-unary-fold-table* returns absolute value."
-  (let ((fn (gethash 'vm-abs cl-cc/optimize::*opt-unary-fold-table*)))
-    (assert-= 5 (funcall fn -5))))
+(deftest-each unary-fold-table-function-evaluation-cases
+  "Functions in *opt-unary-fold-table* correctly evaluate unary operations."
+  :cases (("neg" 'vm-neg  7  -7)
+          ("abs" 'vm-abs -5   5))
+  (type-sym input expected)
+  (let ((fn (gethash type-sym cl-cc/optimize::*opt-unary-fold-table*)))
+    (assert-= expected (funcall fn input))))
 
 (deftest unary-fold-table-not-nil-returns-t
   "The vm-not entry in *opt-unary-fold-table* converts nil→t and t→nil."
@@ -170,43 +161,26 @@
 
 ;;; ─── opt-inst-dst ─────────────────────────────────────────────────────────
 
-(deftest opt-inst-dst-returns-dst-register
-  "opt-inst-dst returns the destination register for instructions that have one."
-  (let ((inst (make-vm-add :dst :r3 :lhs :r1 :rhs :r2)))
-    (assert-eq :r3 (cl-cc/optimize::opt-inst-dst inst))))
-
-(deftest opt-inst-dst-returns-nil-for-no-dst
-  "opt-inst-dst returns nil for instructions without a destination (e.g. vm-jump)."
-  (let ((inst (make-vm-jump :label "end")))
-    (assert-null (cl-cc/optimize::opt-inst-dst inst))))
+(deftest opt-inst-dst-cases
+  "opt-inst-dst returns :dst register when present; nil for instructions without one."
+  (assert-eq :r3 (cl-cc/optimize::opt-inst-dst (make-vm-add :dst :r3 :lhs :r1 :rhs :r2)))
+  (assert-null (cl-cc/optimize::opt-inst-dst (make-vm-jump :label "end"))))
 
 ;;; ─── opt-inst-read-regs ───────────────────────────────────────────────────
 
-(deftest opt-inst-read-regs-returns-nil-for-vm-const
-  "opt-inst-read-regs returns nil for vm-const (no registers read)."
-  (let ((inst (make-vm-const :dst :r0 :value 42)))
-    (assert-null (cl-cc/optimize::opt-inst-read-regs inst))))
+(deftest-each opt-inst-read-regs-single-src-cases
+  "opt-inst-read-regs returns nil for vm-const; (:r0) for vm-move and vm-neg."
+  :cases (("vm-const" (make-vm-const :dst :r0 :value 42) nil)
+          ("vm-move"  (make-vm-move  :dst :r1 :src :r0)  '(:r0))
+          ("vm-neg"   (make-vm-neg   :dst :r1 :src :r0)  '(:r0)))
+  (inst expected)
+  (assert-equal expected (cl-cc/optimize::opt-inst-read-regs inst)))
 
-(deftest opt-inst-read-regs-returns-src-for-vm-move
-  "opt-inst-read-regs returns (src) for vm-move."
-  (let ((inst (make-vm-move :dst :r1 :src :r0)))
-    (assert-equal '(:r0) (cl-cc/optimize::opt-inst-read-regs inst))))
-
-(deftest opt-inst-read-regs-returns-lhs-rhs-for-binop
-  "opt-inst-read-regs returns (lhs rhs) for vm-binop subclasses."
-  (let ((inst (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)))
-    (let ((regs (cl-cc/optimize::opt-inst-read-regs inst)))
-      (assert-true (member :r0 regs))
-      (assert-true (member :r1 regs)))))
-
-(deftest opt-inst-read-regs-returns-lhs-rhs-for-non-binop-binary
-  "opt-inst-read-regs returns (lhs rhs) for non-binop binary instructions (e.g. vm-lt)."
-  (let ((inst (make-vm-lt :dst :r2 :lhs :r0 :rhs :r1)))
-    (let ((regs (cl-cc/optimize::opt-inst-read-regs inst)))
-      (assert-true (member :r0 regs))
-      (assert-true (member :r1 regs)))))
-
-(deftest opt-inst-read-regs-returns-src-for-unary
-  "opt-inst-read-regs returns (src) for unary instruction types."
-  (let ((inst (make-vm-neg :dst :r1 :src :r0)))
-    (assert-equal '(:r0) (cl-cc/optimize::opt-inst-read-regs inst))))
+(deftest-each opt-inst-read-regs-lhs-rhs-cases
+  "opt-inst-read-regs returns (lhs rhs) for both vm-binop and non-binop binary instructions."
+  :cases (("vm-add" (make-vm-add :dst :r2 :lhs :r0 :rhs :r1))
+          ("vm-lt"  (make-vm-lt  :dst :r2 :lhs :r0 :rhs :r1)))
+  (inst)
+  (let ((regs (cl-cc/optimize::opt-inst-read-regs inst)))
+    (assert-true (member :r0 regs))
+    (assert-true (member :r1 regs))))

@@ -23,11 +23,19 @@
 
 ;;; ─── compile-ast: ast-int ───────────────────────────────────────────────
 
-(deftest codegen-int-returns-register
-  "Compiling an integer literal returns a register."
+(deftest codegen-basic-compilation-cases
+  "Integer literal returns a register; local var returns bound register; unbound signals error."
   (let* ((ctx (make-codegen-ctx))
          (reg (compile-ast (make-ast-int :value 42) ctx)))
-    (assert-true (keywordp reg))))
+    (assert-true (keywordp reg)))
+  (let* ((ctx (make-codegen-ctx))
+         (reg :R99))
+    (setf (cl-cc/compile::ctx-env ctx) (list (cons 'x reg)))
+    (let ((result (compile-ast (make-ast-var :name 'x) ctx)))
+      (assert-eq reg result)))
+  (let ((ctx (make-codegen-ctx)))
+    (assert-signals error
+      (compile-ast (make-ast-var :name 'nonexistent-var-xyz) ctx))))
 
 (deftest-each codegen-int-emits-const-value
   "Compiling an integer literal emits vm-const with the correct value."
@@ -55,19 +63,6 @@
       (assert-true inst)
       (assert-equal name (cl-cc::vm-const-value inst)))))
 
-(deftest codegen-var-local-returns-register
-  "Compiling a local variable returns its bound register."
-  (let* ((ctx (make-codegen-ctx))
-         (reg :R99))
-    (setf (cl-cc/compile::ctx-env ctx) (list (cons 'x reg)))
-    (let ((result (compile-ast (make-ast-var :name 'x) ctx)))
-      (assert-eq reg result))))
-
-(deftest codegen-var-unbound-signals-error
-  "Compiling an unbound variable signals an error."
-  (let ((ctx (make-codegen-ctx)))
-    (assert-signals error
-      (compile-ast (make-ast-var :name 'nonexistent-var-xyz) ctx))))
 
 ;;; ─── compile-ast: ast-quote ─────────────────────────────────────────────
 
@@ -106,23 +101,17 @@
 
 ;;; ─── codegen helpers ─────────────────────────────────────────────────────
 
-(deftest codegen-make-register-increments
-  "make-register returns incrementing registers."
+(deftest codegen-context-helpers-cases
+  "make-register returns unique keywords; emit appends one instruction; make-label returns unique strings."
   (let* ((ctx (make-codegen-ctx))
          (r1 (cl-cc/compile::make-register ctx))
          (r2 (cl-cc/compile::make-register ctx)))
     (assert-true (keywordp r1))
     (assert-true (keywordp r2))
-    (assert-false (eq r1 r2))))
-
-(deftest codegen-emit-appends
-  "emit adds instruction to context."
+    (assert-false (eq r1 r2)))
   (let ((ctx (make-codegen-ctx)))
     (cl-cc/compile::emit ctx (cl-cc::make-vm-const :dst :R0 :value 42))
-    (assert-= 1 (length (codegen-instructions ctx)))))
-
-(deftest codegen-make-label-unique
-  "make-label returns unique labels."
+    (assert-= 1 (length (codegen-instructions ctx))))
   (let* ((ctx (make-codegen-ctx))
          (l1 (cl-cc/compile::make-label ctx "TEST"))
          (l2 (cl-cc/compile::make-label ctx "TEST")))
@@ -163,8 +152,8 @@
 
 ;;; ─── optimize-ast / %loc macro ───────────────────────────────────────────
 
-(deftest optimize-ast-preserves-source-location
-  "optimize-ast (%loc macro) copies source location from the original node."
+(deftest optimize-ast-cases
+  "optimize-ast preserves source location; recursively folds ast-progn forms."
   (let* ((src (make-ast-if :cond (make-ast-int :value 1 :source-line 5)
                             :then (make-ast-int :value 1)
                             :else (make-ast-int :value 0)
@@ -174,16 +163,12 @@
          (result (cl-cc/compile::optimize-ast src)))
     (assert-equal "test.lisp" (cl-cc::ast-source-file result))
     (assert-=     5           (cl-cc::ast-source-line result))
-    (assert-=     2           (cl-cc::ast-source-column result))))
-
-(deftest optimize-ast-progn-recurses-on-forms
-  "optimize-ast recurses into ast-progn forms and returns an ast-progn."
+    (assert-=     2           (cl-cc::ast-source-column result)))
   (let* ((node (make-ast-progn :forms (list (make-ast-binop :op '+
                                                              :lhs (make-ast-int :value 2)
                                                              :rhs (make-ast-int :value 3)))))
          (result (cl-cc/compile::optimize-ast node)))
     (assert-true (typep result 'cl-cc::ast-progn))
-    ;; The arithmetic should be folded to an integer
     (assert-true (typep (first (cl-cc/ast::ast-progn-forms result)) 'cl-cc::ast-int))
     (assert-= 5 (cl-cc/ast::ast-int-value (first (cl-cc/ast::ast-progn-forms result))))))
 
@@ -202,8 +187,8 @@
 
 ;;; ─── %let-noescape-closure ──────────────────────────────────────────────
 
-(deftest let-noescape-closure-simple-lambda
-  "A simple lambda binding not mutated/captured is eligible for noescape."
+(deftest let-noescape-closure-cases
+  "Unmutated lambda is eligible for noescape; mutated binding returns nil."
   (let* ((lam  (make-ast-lambda :params '(x)
                                 :optional-params nil
                                 :rest-param nil
@@ -212,10 +197,7 @@
          (body (list (make-ast-call :func (make-ast-var :name 'f)
                                     :args (list (make-ast-int :value 1)))))
          (result (cl-cc/compile::%let-noescape-closure 'f lam nil nil body)))
-    (assert-eq lam result)))
-
-(deftest let-noescape-closure-mutated-is-nil
-  "A mutated binding is not eligible for noescape closure."
+    (assert-eq lam result))
   (let* ((lam (make-ast-lambda :params '(x)
                                :optional-params nil
                                :rest-param nil
@@ -226,15 +208,10 @@
 
 ;;; ─── %let-noescape-array-size ───────────────────────────────────────────
 
-(deftest let-noescape-array-size-returns-nil-for-non-array
-  "A non-make-array expression returns NIL from %let-noescape-array-size."
+(deftest let-noescape-non-matching-cases
+  "Non-make-array expr returns nil from array-size; non-cons expr returns nil from cons-p."
   (let ((expr (make-ast-int :value 5)))
-    (assert-null (cl-cc/compile::%let-noescape-array-size 'arr expr nil nil nil))))
-
-;;; ─── %let-noescape-cons-p ───────────────────────────────────────────────
-
-(deftest let-noescape-cons-p-not-a-cons-call
-  "A non-cons expression returns NIL from %let-noescape-cons-p."
+    (assert-null (cl-cc/compile::%let-noescape-array-size 'arr expr nil nil nil)))
   (let ((expr (make-ast-int :value 5)))
     (assert-null (cl-cc/compile::%let-noescape-cons-p 'c expr nil nil nil))))
 

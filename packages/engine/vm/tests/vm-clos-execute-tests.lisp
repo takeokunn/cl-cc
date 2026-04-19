@@ -38,40 +38,28 @@
 
 ;;; ─── vm-class-def ────────────────────────────────────────────────────────
 
-(deftest vm-clos-exec-class-def-registers-class
-  "vm-class-def registers the class in the VM class registry."
+(deftest vm-clos-exec-class-def-cases
+  "vm-class-def: registers class; stores HT in dst with :__name__/:__slots__; advances PC; computes CPL."
   (let ((s (make-clos-vm)))
     (exec-class-def s :R0 'my-class :slots '(x y))
-    (assert-true (gethash 'my-class (cl-cc/vm::vm-class-registry s)))))
-
-(deftest vm-clos-exec-class-def-stores-class-ht-in-dst
-  "vm-class-def stores the class hash table in DST register."
+    (assert-true (gethash 'my-class (cl-cc/vm::vm-class-registry s))))
   (let ((s (make-clos-vm)))
     (exec-class-def s :R0 'my-class :slots '(a b))
     (let ((class-ht (cl-cc:vm-reg-get s :R0)))
       (assert-true (hash-table-p class-ht))
-      (assert-eq 'my-class (gethash :__name__ class-ht)))))
-
-(deftest vm-clos-exec-class-def-slots-in-class-ht
-  "vm-class-def records slot names in :__slots__ of the class HT."
+      (assert-eq 'my-class (gethash :__name__ class-ht))))
   (let ((s (make-clos-vm)))
     (exec-class-def s :R0 'pt :slots '(x y))
     (let* ((class-ht (cl-cc:vm-reg-get s :R0))
            (slots (gethash :__slots__ class-ht)))
       (assert-true (member 'x slots))
-      (assert-true (member 'y slots)))))
-
-(deftest vm-clos-exec-class-def-advances-pc
-  "vm-class-def advances the PC by 1."
+      (assert-true (member 'y slots))))
   (let ((s (make-clos-vm)))
     (let ((new-pc (first (multiple-value-list
                           (cl-cc/vm::execute-instruction
                            (class-def-inst :R0 'foo :slots '())
                            s 5 nil)))))
-      (assert-= 6 new-pc))))
-
-(deftest vm-clos-exec-class-def-cpl-computed
-  "vm-class-def computes the CPL and stores it in :__cpl__."
+      (assert-= 6 new-pc)))
   (let ((s (make-clos-vm)))
     (exec-class-def s :R0 'base)
     (exec-class-def s :R1 'child :supers '(base))
@@ -82,8 +70,8 @@
 
 ;;; ─── vm-make-obj ─────────────────────────────────────────────────────────
 
-(deftest vm-clos-exec-make-obj-creates-instance-ht
-  "vm-make-obj creates an instance hash table with :__class__ pointer."
+(deftest vm-clos-exec-make-obj-cases
+  "vm-make-obj: creates instance HT with :__class__ pointer; initializes slots to nil."
   (let ((s (make-clos-vm)))
     (exec-class-def s :R0 'animal :slots '(name))
     (let ((class-ht (cl-cc:vm-reg-get s :R0)))
@@ -92,10 +80,7 @@
        s 0 nil)
       (let ((obj-ht (cl-cc:vm-reg-get s :R1)))
         (assert-true (hash-table-p obj-ht))
-        (assert-eq class-ht (gethash :__class__ obj-ht))))))
-
-(deftest vm-clos-exec-make-obj-slot-initialized-to-nil
-  "vm-make-obj initializes slots to nil when no initforms provided."
+        (assert-eq class-ht (gethash :__class__ obj-ht)))))
   (let ((s (make-clos-vm)))
     (exec-class-def s :R0 'pt :slots '(x y))
     (cl-cc/vm::execute-instruction
@@ -154,21 +139,16 @@
 
 ;;; ─── vm-slot-boundp ──────────────────────────────────────────────────────
 
-(deftest vm-clos-exec-slot-boundp-true-when-slot-has-value
-  "vm-slot-boundp returns T when the slot key exists in the object HT."
+(deftest vm-clos-exec-slot-boundp-cases
+  "vm-slot-boundp: T when slot key exists; nil after remhash (makunbound simulation)."
   (let ((s (make-clos-vm)))
     (make-test-instance s :R0 :R1 'car '(model))
-    ;; model was set to nil by make-obj, so it IS bound
     (cl-cc/vm::execute-instruction
      (cl-cc::make-vm-slot-boundp :dst :R2 :obj-reg :R1 :slot-name-sym 'model)
      s 0 nil)
-    (assert-true (cl-cc:vm-reg-get s :R2))))
-
-(deftest vm-clos-exec-slot-boundp-false-after-makunbound
-  "vm-slot-boundp returns nil after the slot has been removed."
+    (assert-true (cl-cc:vm-reg-get s :R2)))
   (let ((s (make-clos-vm)))
     (make-test-instance s :R0 :R1 'car '(model))
-    ;; Remove the slot
     (remhash 'model (cl-cc:vm-reg-get s :R1))
     (cl-cc/vm::execute-instruction
      (cl-cc::make-vm-slot-boundp :dst :R2 :obj-reg :R1 :slot-name-sym 'model)
@@ -177,39 +157,28 @@
 
 ;;; ─── vm-slot-makunbound ──────────────────────────────────────────────────
 
-(deftest vm-clos-exec-slot-makunbound-removes-key
-  "vm-slot-makunbound removes the slot from the object HT."
+(deftest vm-clos-exec-slot-makunbound-cases
+  "vm-slot-makunbound: removes key from object HT; stores object itself in DST."
   (let ((s (make-clos-vm)))
     (make-test-instance s :R0 :R1 'node '(data))
     (cl-cc/vm::execute-instruction
      (cl-cc::make-vm-slot-makunbound :dst :R2 :obj-reg :R1 :slot-name-sym 'data)
      s 0 nil)
     (let ((obj-ht (cl-cc:vm-reg-get s :R1)))
-      (assert-false (nth-value 1 (gethash 'data obj-ht))))))
-
-(deftest vm-clos-exec-slot-makunbound-returns-object
-  "vm-slot-makunbound stores the object itself in DST."
-  (let ((s (make-clos-vm)))
-    (make-test-instance s :R0 :R1 'node '(data))
-    (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-slot-makunbound :dst :R2 :obj-reg :R1 :slot-name-sym 'data)
-     s 0 nil)
+      (assert-false (nth-value 1 (gethash 'data obj-ht))))
     (assert-eq (cl-cc:vm-reg-get s :R1)
                (cl-cc:vm-reg-get s :R2))))
 
 ;;; ─── vm-slot-exists-p ────────────────────────────────────────────────────
 
-(deftest vm-clos-exec-slot-exists-p-true-for-class-slot
-  "vm-slot-exists-p returns T for a slot that the class defines."
+(deftest vm-clos-exec-slot-exists-p-cases
+  "vm-slot-exists-p: T for defined class slot; nil for unknown slot."
   (let ((s (make-clos-vm)))
     (make-test-instance s :R0 :R1 'rect '(width height))
     (cl-cc/vm::execute-instruction
      (cl-cc::make-vm-slot-exists-p :dst :R2 :obj-reg :R1 :slot-name-sym 'width)
      s 0 nil)
-    (assert-true (cl-cc:vm-reg-get s :R2))))
-
-(deftest vm-clos-exec-slot-exists-p-false-for-unknown-slot
-  "vm-slot-exists-p returns nil for a slot not in the class definition."
+    (assert-true (cl-cc:vm-reg-get s :R2)))
   (let ((s (make-clos-vm)))
     (make-test-instance s :R0 :R1 'rect '(width height))
     (cl-cc/vm::execute-instruction

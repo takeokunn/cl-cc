@@ -28,17 +28,14 @@
 
 ;;; ─── type-children: compound types ─────────────────────────────────────────
 
-(deftest type-children-arrow-pure
-  "Arrow type returns params + return (no effects when nil)."
+(deftest type-children-arrow-cases
+  "Arrow children: pure → params+return; with effects → includes effect row as 3rd child."
   (let* ((arr (make-type-arrow (list type-int type-string) type-bool))
          (ch  (cl-cc/type:type-children arr)))
     (assert-equal 3 (length ch))
     (assert-true (type-equal-p type-int (first ch)))
     (assert-true (type-equal-p type-string (second ch)))
-    (assert-true (type-equal-p type-bool (third ch)))))
-
-(deftest type-children-arrow-with-effects
-  "Arrow type includes effect row when present."
+    (assert-true (type-equal-p type-bool (third ch))))
   (let* ((arr (make-type-arrow (list type-int) type-bool :effects +io-effect-row+))
          (ch  (cl-cc/type:type-children arr)))
     (assert-equal 3 (length ch))
@@ -150,22 +147,16 @@
                (assert-true (type-equal-p type-int (first ch))))
         (assert-null ch))))
 
-(deftest type-children-handler
-  "Handler returns effect, input, and output."
+(deftest type-children-polymorphic-cases
+  "Handler (3 children); constraint (1 child = type-arg); qualified (constraints + body)."
   (let* ((eff (make-type-effect-op :name 'io :args nil))
          (h   (cl-cc/type::make-type-handler :effect eff :input type-int :output type-string))
          (ch  (cl-cc/type:type-children h)))
-    (assert-equal 3 (length ch))))
-
-(deftest type-children-constraint
-  "Constraint returns the type-arg."
+    (assert-equal 3 (length ch)))
   (let* ((c  (cl-cc/type::make-type-constraint :class-name 'eq :type-arg type-int))
          (ch (cl-cc/type:type-children c)))
     (assert-equal 1 (length ch))
-    (assert-true (type-equal-p type-int (first ch)))))
-
-(deftest type-children-qualified
-  "Qualified returns constraints + body."
+    (assert-true (type-equal-p type-int (first ch))))
   (let* ((c  (cl-cc/type::make-type-constraint :class-name 'eq :type-arg type-int))
          (q  (make-type-qualified :constraints (list c) :body type-string))
          (ch (cl-cc/type:type-children q)))
@@ -202,14 +193,11 @@
     (assert-equal 1 (length (type-free-vars arr)))
     (assert-true (type-var-equal-p a (first (type-free-vars arr))))))
 
-(deftest type-free-vars-via-children-forall-binds
-  "type-free-vars correctly excludes bound var in forall."
+(deftest type-free-vars-forall-cases
+  "type-free-vars: bound var excluded in (forall a a); only b free in (forall a (a→b))."
   (let* ((a (fresh-type-var "a"))
          (f (make-type-forall :var a :body a)))
-    (assert-null (type-free-vars f))))
-
-(deftest type-free-vars-via-children-forall-free
-  "type-free-vars finds free var in forall body."
+    (assert-null (type-free-vars f)))
   (let* ((a (fresh-type-var "a"))
          (b (fresh-type-var "b"))
          (f (make-type-forall :var a :body (make-type-arrow (list a) b))))
@@ -242,25 +230,19 @@
 
 ;;; ─── Integration: type-occurs-p still works correctly ──────────────────────
 
-(deftest type-occurs-p-via-children
-  "type-occurs-p finds var directly, in arrow params, and returns nil when absent."
+(deftest type-occurs-p-cases
+  "type-occurs-p: direct/arrow/absent; follows subst chains; finds var in nested union."
   (let ((a (fresh-type-var "a"))
         (b (fresh-type-var "b"))
         (s (make-substitution)))
     (assert-true  (type-occurs-p a a s))
     (assert-true  (type-occurs-p a (make-type-arrow (list a) type-int) s))
-    (assert-false (type-occurs-p b (make-type-arrow (list a) type-int) s))))
-
-(deftest type-occurs-p-via-children-through-subst
-  "type-occurs-p follows substitution chains."
+    (assert-false (type-occurs-p b (make-type-arrow (list a) type-int) s)))
   (let* ((a (fresh-type-var "a"))
          (b (fresh-type-var "b"))
          (subst (make-substitution)))
     (subst-extend! b a subst)
-    (assert-true (type-occurs-p a b subst))))
-
-(deftest type-occurs-p-via-children-nested
-  "type-occurs-p finds var in nested structure."
+    (assert-true (type-occurs-p a b subst)))
   (let* ((a (fresh-type-var "a"))
          (ty (make-type-union
               (list type-int

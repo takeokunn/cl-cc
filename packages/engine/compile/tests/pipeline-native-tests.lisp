@@ -27,21 +27,14 @@
 
 ;;; ─── *compile-cache-root* ───────────────────────────────────────────────────
 
-(deftest pipeline-native-cache-root-is-pathname
-  "*compile-cache-root* is a pathname."
-  (assert-true (pathnamep cl-cc::*compile-cache-root*)))
-
-(deftest pipeline-native-cache-root-contains-expected-path
-  "*compile-cache-root* namestring contains .cache/cl-cc/native/."
+(deftest pipeline-native-cache-root
+  "*compile-cache-root* is a pathname whose namestring contains .cache/cl-cc/native/."
   (let ((str (namestring cl-cc::*compile-cache-root*)))
+    (assert-true (pathnamep cl-cc::*compile-cache-root*))
     (assert-true (stringp str))
     (assert-true (search ".cache/cl-cc/native/" str))))
 
 ;;; ─── %compile-cache-key ─────────────────────────────────────────────────────
-
-(deftest pipeline-native-cache-key-returns-string
-  "%compile-cache-key returns a string."
-  (assert-true (stringp (cl-cc::%compile-cache-key "hello" :x86-64 :lisp))))
 
 (deftest-each pipeline-native-cache-key-contains-components
   "%compile-cache-key result contains the arch and language substrings (uppercased by ~A)."
@@ -53,11 +46,18 @@
     (assert-true (search arch-str key))
     (assert-true (search lang-str key))))
 
-(deftest pipeline-native-cache-key-deterministic
-  "%compile-cache-key: same source + arch + language always yields the same key."
+(deftest pipeline-native-cache-key-string-properties
+  "%compile-cache-key returns a string; same args are deterministic; result has >= 3 dash-separated parts."
+  (assert-true (stringp (cl-cc::%compile-cache-key "hello" :x86-64 :lisp)))
   (let ((k1 (cl-cc::%compile-cache-key "(defun f (x) x)" :x86-64 :lisp))
         (k2 (cl-cc::%compile-cache-key "(defun f (x) x)" :x86-64 :lisp)))
-    (assert-equal k1 k2)))
+    (assert-equal k1 k2))
+  (let* ((key (cl-cc::%compile-cache-key "test" :x86-64 :lisp))
+         (parts (cl:loop for start = 0 then (1+ pos)
+                         for pos = (position #\- key :start start)
+                         collect (subseq key start (or pos (length key)))
+                         while pos)))
+    (assert-true (>= (length parts) 3))))
 
 (deftest-each pipeline-native-cache-key-differs-by-dimension
   "%compile-cache-key: varying arch, language, or source content each produces a distinct key."
@@ -68,32 +68,25 @@
   (let ((baseline (cl-cc::%compile-cache-key "source" :x86-64 :lisp)))
     (assert-false (equal baseline (funcall make-variant)))))
 
-(deftest pipeline-native-cache-key-dash-separated
-  "%compile-cache-key contains dashes separating hash, arch, and language."
-  (let* ((key (cl-cc::%compile-cache-key "test" :x86-64 :lisp))
-         (parts (cl:loop for start = 0 then (1+ pos)
-                         for pos = (position #\- key :start start)
-                         collect (subseq key start (or pos (length key)))
-                         while pos)))
-    ;; At minimum 3 parts: hash, arch, language
-    (assert-true (>= (length parts) 3))))
-
 ;;; ─── %compile-cache-path ────────────────────────────────────────────────────
 
-(deftest pipeline-native-cache-path-returns-pathname
-  "%compile-cache-path returns a pathname."
-  (let ((path (cl-cc::%compile-cache-path "abc123" #P"a.out")))
-    (assert-true (pathnamep path))))
-
-(deftest pipeline-native-cache-path-is-below-cache-root
-  "%compile-cache-path result is rooted under *compile-cache-root*."
-  (let* ((key "mykey")
-         (path (cl-cc::%compile-cache-path key #P"a.out"))
+(deftest pipeline-native-cache-path-cases
+  "%compile-cache-path: rooted under *compile-cache-root*; embeds key; different keys differ; preserves name."
+  (let* ((path     (cl-cc::%compile-cache-path "mykey" #P"a.out"))
          (root-str (namestring cl-cc::*compile-cache-root*))
          (path-str (namestring path)))
+    (assert-true (pathnamep path))
     (assert-true (and (> (length path-str) (length root-str))
-                      (string= root-str
-                                (subseq path-str 0 (length root-str)))))))
+                      (string= root-str (subseq path-str 0 (length root-str))))))
+  (let* ((key "unique-cache-key-42")
+         (path (cl-cc::%compile-cache-path key #P"a.out")))
+    (assert-true (search key (namestring path))))
+  (let ((p1 (cl-cc::%compile-cache-path "key-one" #P"a.out"))
+        (p2 (cl-cc::%compile-cache-path "key-two" #P"a.out")))
+    (assert-false (equal (namestring p1) (namestring p2))))
+  (let ((path (cl-cc::%compile-cache-path "k" #P"a.out")))
+    (assert-true (pathnamep path))
+    (assert-equal "a" (pathname-name path))))
 
 (deftest-each pipeline-native-cache-path-filename-components
   "%compile-cache-path preserves the filename and extension from the output-file argument."
@@ -103,29 +96,10 @@
   (let ((path (cl-cc::%compile-cache-path "somekey" #P"my-program.out")))
     (assert-equal expected (funcall accessor path))))
 
-(deftest pipeline-native-cache-path-no-extension
-  "%compile-cache-path works with output files that have no extension."
-  (let ((path (cl-cc::%compile-cache-path "k" #P"a.out")))
-    (assert-true (pathnamep path))
-    (assert-equal "a" (pathname-name path))))
-
-(deftest pipeline-native-cache-path-includes-key
-  "%compile-cache-path embeds the key in the directory structure."
-  (let* ((key "unique-cache-key-42")
-         (path (cl-cc::%compile-cache-path key #P"a.out"))
-         (path-str (namestring path)))
-    (assert-true (search key path-str))))
-
-(deftest pipeline-native-cache-path-different-keys-differ
-  "%compile-cache-path: different keys produce different pathnames."
-  (let ((p1 (cl-cc::%compile-cache-path "key-one" #P"a.out"))
-        (p2 (cl-cc::%compile-cache-path "key-two" #P"a.out")))
-    (assert-false (equal (namestring p1) (namestring p2)))))
-
 ;;; ─── %copy-file-bytes ───────────────────────────────────────────────────────
 
-(deftest pipeline-native-copy-file-bytes-returns-to-path
-  "%copy-file-bytes returns the destination pathname."
+(deftest pipeline-native-copy-file-bytes-basic-cases
+  "%copy-file-bytes returns destination pathname and creates destination file."
   (uiop:with-temporary-file (:pathname src :type "bin")
     (uiop:with-temporary-file (:pathname dst :type "bin" :keep t)
       (let* ((data (make-array 4 :element-type '(unsigned-byte 8)
@@ -138,19 +112,6 @@
         (declare (ignore _))
         (assert-true (pathnamep result))
         (assert-equal (namestring dst) (namestring result))
-        (ignore-errors (delete-file dst))))))
-
-(deftest pipeline-native-copy-file-bytes-destination-exists
-  "%copy-file-bytes creates the destination file."
-  (uiop:with-temporary-file (:pathname src :type "bin")
-    (uiop:with-temporary-file (:pathname dst :type "bin" :keep t)
-      (let ((data (make-array 3 :element-type '(unsigned-byte 8)
-                               :initial-contents '(10 20 30))))
-        (with-open-file (out src :direction :output
-                                 :if-exists :supersede
-                                 :element-type '(unsigned-byte 8))
-          (write-sequence data out))
-        (cl-cc::%copy-file-bytes src dst)
         (assert-true (probe-file dst))
         (ignore-errors (delete-file dst))))))
 
@@ -212,27 +173,15 @@
 
 ;;; ─── Typeclass macro registration ───────────────────────────────────────────
 
-(deftest pipeline-native-deftype-class-registered
-  "deftype-class is registered in the global macro environment."
-  (assert-true (gethash 'cl-cc::deftype-class
-                         (cl-cc/expand::macro-env-table cl-cc/expand::*macro-environment*))))
-
-(deftest pipeline-native-deftype-instance-registered
-  "deftype-instance is registered in the global macro environment."
-  (assert-true (gethash 'cl-cc::deftype-instance
-                         (cl-cc/expand::macro-env-table cl-cc/expand::*macro-environment*))))
-
-(deftest pipeline-native-deftype-class-is-function
-  "The deftype-class macro expander is a function."
-  (assert-true (functionp
-                (gethash 'cl-cc::deftype-class
-                          (cl-cc/expand::macro-env-table cl-cc/expand::*macro-environment*)))))
-
-(deftest pipeline-native-deftype-instance-is-function
-  "The deftype-instance macro expander is a function."
-  (assert-true (functionp
-                (gethash 'cl-cc::deftype-instance
-                          (cl-cc/expand::macro-env-table cl-cc/expand::*macro-environment*)))))
+(deftest-each pipeline-native-typeclass-macros-registered-as-functions
+  "deftype-class and deftype-instance are each registered as a function-valued macro."
+  :cases (("deftype-class"    'cl-cc::deftype-class)
+          ("deftype-instance" 'cl-cc::deftype-instance))
+  (macro-name)
+  (let ((expander (gethash macro-name
+                            (cl-cc/expand::macro-env-table cl-cc/expand::*macro-environment*))))
+    (assert-true expander)
+    (assert-true (functionp expander))))
 
 (deftest pipeline-native-compile-file-cache-hit-copies-artifact
   "compile-file-to-native reuses a cached native artifact when present."
@@ -265,3 +214,158 @@
         (ignore-errors (delete-file cache)))
       (ignore-errors (delete-file output)))
     (ignore-errors (delete-file input))))
+
+(deftest pipeline-native-cps-safe-ast-p-allowlist
+  "%cps-native-compile-safe-ast-p accepts the narrow semantic-test-backed subset and rejects calls."
+  (let ((safe-ast (cl-cc:make-ast-let
+                   :bindings (list (cons 'x (cl-cc:make-ast-int :value 1)))
+                   :body (list (cl-cc:make-ast-binop
+                                :op '+
+                                :lhs (cl-cc:make-ast-var :name 'x)
+                                :rhs (cl-cc:make-ast-int :value 2)))))
+        (unsafe-ast (cl-cc:make-ast-call
+                     :func 'f
+                     :args (list (cl-cc:make-ast-int :value 1)))))
+    (assert-true (cl-cc::%cps-native-compile-safe-ast-p safe-ast))
+    (assert-false (cl-cc::%cps-native-compile-safe-ast-p unsafe-ast))))
+
+(deftest pipeline-native-maybe-compile-via-cps-wraps-identity-continuation
+  "%maybe-compile-native-via-cps compiles the CPS wrapper form for safe expressions."
+  (let ((compiled-form nil))
+    (with-replaced-function (cl-cc:compile-expression
+                             (lambda (form &rest args)
+                               (declare (ignore args))
+                               (setf compiled-form form)
+                               (cl-cc/compile::make-compilation-result :program :dummy)))
+      (multiple-value-bind (result used-cps)
+          (cl-cc::%maybe-compile-native-via-cps '(+ 1 2) :target :vm)
+        (assert-true used-cps)
+        (assert-eq :dummy (cl-cc/compile:compilation-result-program result))
+        (assert-true (consp compiled-form))
+        (assert-true (consp (first compiled-form)))
+        (assert-eq 'lambda (car (first compiled-form)))
+        (assert-eq 'lambda (car (second compiled-form)))
+        (assert-true (= 1 (length (second (second compiled-form)))))
+        (assert-eq (first (second (second compiled-form)))
+                   (third (second compiled-form)))))))
+
+(deftest pipeline-native-compile-to-native-string-single-form-prefers-cps-path
+  "compile-to-native routes single safe Lisp strings through the CPS-native helper before compile-string fallback."
+  (let ((helper-called nil)
+        (compile-string-called nil))
+    (with-replaced-function (cl-cc::%maybe-compile-native-via-cps
+                             (lambda (form &rest args)
+                               (declare (ignore form args))
+                               (setf helper-called t)
+                               (values (cl-cc/compile::make-compilation-result :program :dummy) t)))
+      (with-replaced-function (cl-cc:compile-string
+                               (lambda (&rest args)
+                                 (declare (ignore args))
+                                 (setf compile-string-called t)
+                                 (cl-cc/compile::make-compilation-result :program :fallback)))
+        (with-replaced-function (cl-cc:compile-to-x86-64-bytes
+                                 (lambda (program)
+                                   (declare (ignore program))
+                                   #(1 2 3)))
+          (with-replaced-function (cl-cc/binary:make-mach-o-builder
+                                   (lambda (&rest args)
+                                     (declare (ignore args))
+                                     :builder))
+            (with-replaced-function (cl-cc::%write-native-binary
+                                     (lambda (builder code-bytes output-path)
+                                       (declare (ignore builder code-bytes))
+                                       output-path))
+              (assert-equal #P"out.bin"
+                            (cl-cc::compile-to-native "(+ 1 2)"
+                                                      :output-file #P"out.bin"
+                                                      :language :lisp))
+              (assert-true helper-called)
+              (assert-false compile-string-called))))))))
+
+(deftest pipeline-native-compile-file-single-safe-form-prefers-cps-path
+  "compile-file-to-native routes a single safe Lisp top-level form through the CPS-native helper, ignoring in-package forms."
+  (uiop:with-temporary-file (:pathname input :type "lisp" :keep t)
+    (let ((helper-form nil)
+          (compile-toplevel-called nil))
+      (with-open-file (stream input :direction :output :if-exists :supersede)
+        (write-line "(in-package :cl-user)" stream)
+        (write-line "(+ 1 2)" stream))
+      (with-replaced-function (cl-cc::%maybe-compile-native-via-cps
+                               (lambda (form &rest args)
+                                 (declare (ignore args))
+                                 (setf helper-form form)
+                                 (values (cl-cc/compile::make-compilation-result :program :dummy) t)))
+        (with-replaced-function (cl-cc/compile:compile-toplevel-forms
+                                 (lambda (&rest args)
+                                   (declare (ignore args))
+                                   (setf compile-toplevel-called t)
+                                   (cl-cc/compile::make-compilation-result :program :fallback)))
+          (with-replaced-function (cl-cc:compile-to-x86-64-bytes
+                                   (lambda (program)
+                                     (declare (ignore program))
+                                     #(1 2 3)))
+            (with-replaced-function (cl-cc/binary:make-mach-o-builder
+                                     (lambda (&rest args)
+                                       (declare (ignore args))
+                                       :builder))
+              (with-replaced-function (cl-cc::%compile-cache-path
+                                       (lambda (&rest args)
+                                         (declare (ignore args))
+                                         #P"./tmp-native-cache.bin"))
+                (with-replaced-function (cl-cc::%copy-file-bytes
+                                         (lambda (from to)
+                                           (declare (ignore from))
+                                           to))
+                  (with-replaced-function (cl-cc::%write-native-binary
+                                           (lambda (builder code-bytes output-path)
+                                             (declare (ignore builder code-bytes))
+                                             output-path))
+                    (assert-equal #P"out.bin"
+                                  (cl-cc::compile-file-to-native input :output-file #P"out.bin" :language :lisp))
+                    (assert-equal '(+ 1 2) helper-form)
+                    (assert-false compile-toplevel-called))))))))
+      (ignore-errors (delete-file input)))))
+
+(deftest pipeline-native-compile-file-multi-form-falls-back-to-toplevel
+  "compile-file-to-native keeps multi-form Lisp files on the existing compile-toplevel-forms path."
+  (uiop:with-temporary-file (:pathname input :type "lisp" :keep t)
+    (let ((helper-called nil)
+          (compile-toplevel-called nil))
+      (with-open-file (stream input :direction :output :if-exists :supersede)
+        (write-line "(+ 1 2)" stream)
+        (write-line "(+ 3 4)" stream))
+      (with-replaced-function (cl-cc::%maybe-compile-native-via-cps
+                               (lambda (&rest args)
+                                 (declare (ignore args))
+                                 (setf helper-called t)
+                                 (values (cl-cc/compile::make-compilation-result :program :dummy) t)))
+        (with-replaced-function (cl-cc/compile:compile-toplevel-forms
+                                 (lambda (&rest args)
+                                   (declare (ignore args))
+                                   (setf compile-toplevel-called t)
+                                   (cl-cc/compile::make-compilation-result :program :fallback)))
+          (with-replaced-function (cl-cc:compile-to-x86-64-bytes
+                                   (lambda (program)
+                                     (declare (ignore program))
+                                     #(1 2 3)))
+            (with-replaced-function (cl-cc/binary:make-mach-o-builder
+                                     (lambda (&rest args)
+                                       (declare (ignore args))
+                                       :builder))
+              (with-replaced-function (cl-cc::%compile-cache-path
+                                       (lambda (&rest args)
+                                         (declare (ignore args))
+                                         #P"./tmp-native-cache.bin"))
+                (with-replaced-function (cl-cc::%copy-file-bytes
+                                         (lambda (from to)
+                                           (declare (ignore from))
+                                           to))
+                  (with-replaced-function (cl-cc::%write-native-binary
+                                           (lambda (builder code-bytes output-path)
+                                             (declare (ignore builder code-bytes))
+                                             output-path))
+                    (assert-equal #P"out.bin"
+                                  (cl-cc::compile-file-to-native input :output-file #P"out.bin" :language :lisp))
+                    (assert-false helper-called)
+                    (assert-true compile-toplevel-called))))))))
+      (ignore-errors (delete-file input)))))

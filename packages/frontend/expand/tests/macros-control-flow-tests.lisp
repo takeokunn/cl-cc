@@ -16,12 +16,18 @@
   (form expected)
   (assert-equal (our-macroexpand-1 form) expected))
 
-(deftest when-macroexpand-idempotent
-  "Fully expanding representative WHEN forms twice yields the same form."
+(deftest when-unless-idempotent-cases
+  "Fully expanding representative WHEN and UNLESS forms twice yields the same form."
   :timeout 30
   (dolist (form '((when t body)
                   (when flag body1 body2)
                   (when (= x 0) (print 1))))
+    (let* ((exp1 (our-macroexpand form))
+           (exp2 (our-macroexpand exp1)))
+      (assert-equal exp1 exp2)))
+  (dolist (form '((unless t body)
+                  (unless flag body1 body2)
+                  (unless (= x 0) (print 1))))
     (let* ((exp1 (our-macroexpand form))
            (exp2 (our-macroexpand exp1)))
       (assert-equal exp1 exp2))))
@@ -33,16 +39,6 @@
           ("no-body"      '(unless test)             '(if test nil (progn))))
   (form expected)
   (assert-equal (our-macroexpand-1 form) expected))
-
-(deftest unless-macroexpand-idempotent
-  "Fully expanding representative UNLESS forms twice yields the same form."
-  :timeout 30
-  (dolist (form '((unless t body)
-                  (unless flag body1 body2)
-                  (unless (= x 0) (print 1))))
-    (let* ((exp1 (our-macroexpand form))
-           (exp2 (our-macroexpand exp1)))
-      (assert-equal exp1 exp2))))
 
 (deftest-each cond-macro-simple-expansions
   "COND base cases expand correctly"
@@ -71,16 +67,13 @@ so (and a b c) arrives as fully-nested IFs rather than (if a (and b c) nil)."
   (form expected)
   (assert-equal (our-macroexpand-1 form) expected))
 
-(deftest and-macro-full-expansion
-  "Test full expansion of AND creates nested IFs"
+(deftest and-full-and-idempotent-cases
+  "Full AND expansion creates nested IFs; fully expanding twice yields the same form."
+  :timeout 30
   (let ((result (our-macroexpand-all '(and a b c))))
     (assert-eq 'if (car result))
     (assert-equal 'a (cadr result))
-    (assert-eq 'if (caaddr result))))
-
-(deftest and-macroexpand-idempotent
-  "Fully expanding representative AND forms twice yields the same form."
-  :timeout 30
+    (assert-eq 'if (caaddr result)))
   (dolist (form '((and a b)
                   (and a b c)
                   (and (= x 0) flag (print 1))))
@@ -113,31 +106,23 @@ so (and a b c) arrives as fully-nested IFs rather than (if a (and b c) nil)."
   (form expected)
   (assert-equal expected (our-macroexpand-1 form)))
 
-(deftest let*-macro-multiple-bindings
-  "Test LET* with multiple bindings (creates nested LETs).
-One-step expansion of (let* ((a 1) (b a)) body) yields
-(let ((a 1)) (let* ((b a)) body)) — the inner LET* stays unexpanded."
+(deftest let*-macro-nested-cases
+  "LET* multiple bindings nests via one-step expansion; full expansion flattens to nested LETs; dependency chain preserved."
   (let ((result (our-macroexpand-1 '(let* ((a 1) (b a)) body))))
     (assert-eq (car result) 'let)
     (assert-equal (cadr result) '((a 1)))
-    (assert-eq (car (caddr result)) 'let*)))
-
-(deftest let*-macro-full-expansion
-  "Test full expansion of LET* creates nested LETs"
+    (assert-eq (car (caddr result)) 'let*))
   (let ((result (our-macroexpand-all '(let* ((a 1) (b a)) body))))
     (assert-eq (car result) 'let)
     (assert-equal (cadr result) '((a 1)))
-    (assert-eq (caaddr result) 'let)))
-
-(deftest let*-macro-dependency-chain
-  "Test LET* where later bindings depend on earlier ones"
+    (assert-eq (caaddr result) 'let))
   (let ((result (our-macroexpand-all '(let* ((x 1) (y (+ x 1)) (z (* y 2))) body))))
     (assert-eq (car result) 'let)
     (let ((y-binding (caddr result)))
       (assert-eq (car y-binding) 'let))))
 
-(deftest prog1-macro-expansion
-  "PROG1 binds the first-form result via a gensym and returns it after executing body."
+(deftest prog1-prog2-expansion-cases
+  "PROG1 binds result via gensym and returns it; PROG2 wraps in progn with first-form then returns second-form."
   (let ((result (our-macroexpand-1 '(prog1 first-form body1 body2))))
     (assert-eq (car result) 'let)
     (assert-true (symbolp (caaadr result)))
@@ -145,10 +130,7 @@ One-step expansion of (let* ((a 1) (b a)) body) yields
     (assert-eq (car (last result)) (caaadr result)))
   (let ((result (our-macroexpand-1 '(prog1 first-form))))
     (assert-eq (car result) 'let)
-    (assert-= (length result) 3)))
-
-(deftest prog2-macro-expansion
-  "PROG2 wraps in progn: evaluates first-form, then returns second-form after body."
+    (assert-= (length result) 3))
   (let ((result (our-macroexpand-1 '(prog2 first-form second-form body1 body2))))
     (assert-eq (car result) 'progn)
     (assert-eq (cadr result) 'first-form)

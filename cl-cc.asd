@@ -57,11 +57,19 @@
     :pathname "packages/umbrella/pipeline/src"
     :serial t
     :components
-    ((:file "stdlib-source")
-     (:file "stdlib-source-ext")
-     (:file "pipeline-stdlib")
+     ((:file "stdlib-source-core")
+      (:file "stdlib-source")
+      (:file "stdlib-source-ext")
+      (:file "stdlib-source-clos")
+      (:file "pipeline-stdlib")
+     (:file "pipeline-data")
      (:file "pipeline")
+     (:file "pipeline-selfhost")
      (:file "pipeline-native")
+     (:file "pipeline-repl-state")
+     (:file "pipeline-repl-data")
+     (:file "pipeline-repl-load")
+     (:file "pipeline-repl-ourload")
      (:file "pipeline-repl")))))
 
 ;; :cl-cc/bin is defined in packages/cli/cl-cc-cli.asd.

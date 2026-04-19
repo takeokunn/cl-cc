@@ -23,15 +23,15 @@
   "Return T if SKOLEM appears free in TYPE."
   (typecase type
     (type-skolem      (type-skolem-equal-p skolem type))
-    (type-variable    nil)
-    (type-function    (or (some (lambda (p) (skolem-appears-in-type-p skolem p))
-                               (type-function-params type))
-                         (skolem-appears-in-type-p skolem (type-function-return type))))
+    (type-var         nil)
+    (type-arrow       (or (some (lambda (p) (skolem-appears-in-type-p skolem p))
+                                (type-arrow-params type))
+                          (skolem-appears-in-type-p skolem (type-arrow-return type))))
     (type-forall      (skolem-appears-in-type-p skolem (type-forall-body type)))
     (type-constructor (some (lambda (a) (skolem-appears-in-type-p skolem a))
-                            (type-constructor-args type)))
+                             (type-constructor-args type)))
     (type-tuple       (some (lambda (e) (skolem-appears-in-type-p skolem e))
-                            (type-tuple-elements type)))
+                             (type-tuple-elements type)))
     (t nil)))
 
 (defun skolem-appears-in-subst-p (skolem subst)
@@ -65,8 +65,8 @@
     ;; and checks the body under that skolem
     (type-forall
      (let* ((bound-var (type-forall-var expected-type))
-            (skolem (make-type-skolem (if (type-variable-name bound-var)
-                                          (type-variable-name bound-var)
+            (skolem (make-type-skolem (if (type-var-name bound-var)
+                                          (type-var-name bound-var)
                                           "a")))
             ;; Substitute the bound variable with the skolem in the body type
             ;; using a proper hash-table substitution struct

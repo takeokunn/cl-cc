@@ -49,6 +49,62 @@
         (php-ts-expect ts :T-RPAREN nil "parameter list")
         (nreverse params))))
 
+;;; ─── Statement sub-parsers ──────────────────────────────────────────────────
+
+(defun %parse-php-class-body-members (ts)
+  "Parse class member declarations until '}'. Returns list of CST nodes (reversed)."
+  (let ((members nil))
+    (loop
+      (php-ts-skip-semis ts)
+      (when (or (php-ts-at-end-p ts) (eq (php-ts-peek-type ts) :T-RBRACE)) (return))
+      (loop while (and (not (php-ts-at-end-p ts))
+                       (eq (php-ts-peek-type ts) :T-KEYWORD)
+                       (member (php-ts-peek-value ts)
+                               '(:public :private :protected :static
+                                 :abstract :final :readonly)))
+            do (php-ts-advance ts))
+      (cond
+        ((eq (php-ts-peek-type ts) :T-VAR)
+         (push (%php-tok-to-cst (php-ts-advance ts)) members)
+         (php-ts-skip-semis ts))
+        ((member (php-ts-peek-type ts) '(:T-TYPE :T-NULLABLE))
+         (php-ts-advance ts)
+         (when (member (php-ts-peek-type ts) '(:T-TYPE :T-IDENT)) (php-ts-advance ts))
+         (when (eq (php-ts-peek-type ts) :T-VAR)
+           (push (%php-tok-to-cst (php-ts-advance ts)) members))
+         (php-ts-skip-semis ts))
+        ((and (eq (php-ts-peek-type ts) :T-KEYWORD) (eq (php-ts-peek-value ts) :function))
+         (let ((method (php-cst-parse-statement ts)))
+           (when method (push method members))))
+        (t (php-ts-advance ts))))
+    members))
+
+(defun %parse-php-class-def (ts kw-tok)
+  "Parse `class Name [extends Base] [implements ...] { members }` starting after the 'class' keyword."
+  (let ((name-tok (php-ts-expect ts :T-IDENT nil "class name"))
+        (extends nil))
+    (when (and (not (php-ts-at-end-p ts))
+               (eq (php-ts-peek-type ts) :T-KEYWORD)
+               (eq (php-ts-peek-value ts) :extends))
+      (php-ts-advance ts)
+      (let ((super-tok (php-ts-expect ts :T-IDENT nil "superclass")))
+        (when super-tok (setf extends (%php-tok-to-cst super-tok)))))
+    (when (and (not (php-ts-at-end-p ts))
+               (eq (php-ts-peek-type ts) :T-KEYWORD)
+               (eq (php-ts-peek-value ts) :implements))
+      (php-ts-advance ts)
+      (loop (php-ts-expect ts :T-IDENT nil "interface")
+            (unless (eq (php-ts-peek-type ts) :T-COMMA) (return))
+            (php-ts-advance ts)))
+    (php-ts-expect ts :T-LBRACE nil "class body")
+    (let ((members (%parse-php-class-body-members ts)))
+      (php-ts-expect ts :T-RBRACE nil "class body")
+      (%php-cst-interior :class-def
+                         (append (list (%php-tok-to-cst kw-tok))
+                                 (when name-tok (list (%php-tok-to-cst name-tok)))
+                                 (when extends (list extends))
+                                 (nreverse members))))))
+
 (defun php-cst-parse-statement (ts)
   "Parse a single PHP statement."
   (let ((type (php-ts-peek-type ts))
@@ -121,10 +177,8 @@
        (let ((kw-tok (php-ts-advance ts)))
          (php-ts-expect ts :T-LPAREN nil "foreach")
          (let ((arr-expr (php-cst-parse-expr ts)))
-           ;; expect 'as'
            (php-ts-expect ts :T-KEYWORD :as "foreach")
            (let ((var-tok (php-ts-expect ts :T-VAR nil "foreach")))
-             ;; optional => $val
              (when (and (eq (php-ts-peek-type ts) :T-OP)
                         (equal "=>" (php-ts-peek-value ts)))
                (php-ts-advance ts)
@@ -141,9 +195,7 @@
       ((and (eq type :T-KEYWORD) (eq value :function))
        (let ((kw-tok (php-ts-advance ts))
              (name-tok (php-ts-expect ts :T-IDENT nil "function name")))
-         ;; params
          (let ((params (php-cst-parse-param-list ts)))
-           ;; Skip optional return type
            (when (eq (php-ts-peek-type ts) :T-COLON)
              (php-ts-advance ts)
              (when (member (php-ts-peek-type ts) '(:T-TYPE :T-IDENT :T-NULLABLE))
@@ -159,77 +211,13 @@
 
       ;; class Name [extends Base] [implements ...] { }
       ((and (eq type :T-KEYWORD) (eq value :class))
-       (let ((kw-tok (php-ts-advance ts))
-             (name-tok (php-ts-expect ts :T-IDENT nil "class name")))
-         ;; extends
-         (let ((extends nil))
-           (when (and (not (php-ts-at-end-p ts))
-                      (eq (php-ts-peek-type ts) :T-KEYWORD)
-                      (eq (php-ts-peek-value ts) :extends))
-             (php-ts-advance ts)
-             (let ((super-tok (php-ts-expect ts :T-IDENT nil "superclass")))
-               (when super-tok (setf extends (%php-tok-to-cst super-tok)))))
-           ;; implements (skip)
-           (when (and (not (php-ts-at-end-p ts))
-                      (eq (php-ts-peek-type ts) :T-KEYWORD)
-                      (eq (php-ts-peek-value ts) :implements))
-             (php-ts-advance ts)
-             (loop
-               (php-ts-expect ts :T-IDENT nil "interface")
-               (unless (eq (php-ts-peek-type ts) :T-COMMA) (return))
-               (php-ts-advance ts)))
-           ;; class body
-           (php-ts-expect ts :T-LBRACE nil "class body")
-           (let ((members nil))
-             (loop
-               (php-ts-skip-semis ts)
-               (when (or (php-ts-at-end-p ts) (eq (php-ts-peek-type ts) :T-RBRACE))
-                 (return))
-               ;; Skip visibility modifiers
-               (loop while (and (not (php-ts-at-end-p ts))
-                                (eq (php-ts-peek-type ts) :T-KEYWORD)
-                                (member (php-ts-peek-value ts)
-                                        '(:public :private :protected :static
-                                          :abstract :final :readonly)))
-                     do (php-ts-advance ts))
-               (cond
-                 ;; Property: $var
-                 ((eq (php-ts-peek-type ts) :T-VAR)
-                  (push (%php-tok-to-cst (php-ts-advance ts)) members)
-                  (php-ts-skip-semis ts))
-                 ;; Typed property
-                 ((member (php-ts-peek-type ts) '(:T-TYPE :T-NULLABLE))
-                  (php-ts-advance ts)
-                  (when (member (php-ts-peek-type ts) '(:T-TYPE :T-IDENT))
-                    (php-ts-advance ts))
-                  (when (eq (php-ts-peek-type ts) :T-VAR)
-                    (push (%php-tok-to-cst (php-ts-advance ts)) members))
-                  (php-ts-skip-semis ts))
-                 ;; Method
-                 ((and (eq (php-ts-peek-type ts) :T-KEYWORD)
-                       (eq (php-ts-peek-value ts) :function))
-                  (let ((method (php-cst-parse-statement ts)))
-                    (when method (push method members))))
-                 ;; Unknown: skip
-                 (t (php-ts-advance ts))))
-             (php-ts-expect ts :T-RBRACE nil "class body")
-             (%php-cst-interior :class-def
-                                (append (list (%php-tok-to-cst kw-tok))
-                                        (when name-tok (list (%php-tok-to-cst name-tok)))
-                                        (when extends (list extends))
-                                        (nreverse members)))))))
+       (%parse-php-class-def ts (php-ts-advance ts)))
 
-      ;; break;
-      ((and (eq type :T-KEYWORD) (eq value :break))
+      ;; break; / continue;
+      ((and (eq type :T-KEYWORD) (member value '(:break :continue)))
        (let ((tok (php-ts-advance ts)))
          (php-ts-skip-semis ts)
-         (%php-cst-interior :break (list (%php-tok-to-cst tok)))))
-
-      ;; continue;
-      ((and (eq type :T-KEYWORD) (eq value :continue))
-       (let ((tok (php-ts-advance ts)))
-         (php-ts-skip-semis ts)
-         (%php-cst-interior :continue (list (%php-tok-to-cst tok)))))
+         (%php-cst-interior value (list (%php-tok-to-cst tok)))))
 
       ;; try { } catch (Type $var) { }
       ((and (eq type :T-KEYWORD) (eq value :try))

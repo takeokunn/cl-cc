@@ -16,5 +16,5 @@
   "expand-flet-labels-binding expands only the body forms."
   (let ((result (cl-cc/expand::expand-flet-labels-binding '(foo (x) (1+ x) (1- x)))))
     (assert-eq 'foo (first result))
-    (assert-eq '(x) (second result))
+    (assert-equal '(x) (second result))
     (assert-equal '((+ x 1) (- x 1)) (cddr result))))

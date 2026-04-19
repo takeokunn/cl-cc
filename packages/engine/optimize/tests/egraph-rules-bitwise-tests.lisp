@@ -41,24 +41,15 @@
     (assert-true (eg-merged-p eg id x))))
 
 
-;;; ─── Bitwise: logxor-self ────────────────────────────────────────────────
-;;; logxor-self: (logxor ?x ?x) → (const 0).
-;;; RHS is (const 0) — compound template builds a const-with-child zombie.
+;;; ─── Bitwise: logxor-self / ash-zero-base ───────────────────────────────
 
-(deftest egraph-rule-logxor-self-fires
-  "logxor-self: (logxor ?x ?x) merges with a class containing a const node."
+(deftest egraph-rule-const-producing-rules-fire
+  "logxor-self and ash-zero-base each produce a const-class result."
   (let* ((eg (cl-cc/optimize::make-e-graph))
          (x  (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
          (id (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::logxor x x)))
     (eg-saturate eg)
-    (assert-true (eg-class-contains-op-p eg id 'cl-cc/optimize::const))))
-
-;;; ─── Bitwise: ash-zero-base ──────────────────────────────────────────────
-;;; ash-zero-base: (ash (const 0) ?x) → (const 0).
-;;; RHS is (const 0) — compound template.
-
-(deftest egraph-rule-ash-zero-base-fires
-  "ash-zero-base: (ash (const 0) ?x) merges with a class containing a const node."
+    (assert-true (eg-class-contains-op-p eg id 'cl-cc/optimize::const)))
   (let* ((eg (cl-cc/optimize::make-e-graph))
          (x  (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
          (c0 (make-eg-const eg 0))
@@ -78,15 +69,12 @@
   (rule-name)
   (assert-true (eg-rule-registered-p rule-name)))
 
-(deftest egraph-rule-mul-pow2-guard-check
-  "mul-pow2 :when guard is present (non-nil)."
+(deftest egraph-rule-mul-pow2-cases
+  "mul-pow2 has a :when guard; non-power-of-2 constant does not introduce ash."
   (let ((rule (find 'cl-cc/optimize::mul-pow2
                     (cl-cc/optimize::egraph-builtin-rules)
                     :key (lambda (r) (getf r :name)))))
-    (assert-true (not (null (getf rule :when))))))
-
-(deftest egraph-rule-mul-pow2-non-power-no-ash
-  "mul-pow2: (mul ?x (const 7)) — 7 is not a power of 2, no ash introduced."
+    (assert-true (not (null (getf rule :when)))))
   (let* ((eg (cl-cc/optimize::make-e-graph))
          (x  (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
          (c7 (make-eg-const eg 7))
@@ -110,8 +98,8 @@
 ;;; mul-neg-neg: (mul (neg ?x) (neg ?y)) → (mul ?x ?y).
 ;;; Use var for x and a const for y so they're in different classes.
 
-(deftest egraph-rule-mul-neg-neg-fires
-  "mul-neg-neg: (mul (neg ?x) (neg ?y)) merges with (mul ?x ?y)."
+(deftest egraph-rule-mul-neg-neg-cases
+  "mul-neg-neg: (mul (neg ?x) (neg ?y)) merges with (mul ?x ?y); same-var variant also fires."
   (let* ((eg   (cl-cc/optimize::make-e-graph))
          (x    (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
          (y    (make-eg-const eg 3))
@@ -120,10 +108,7 @@
          (mul1 (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::mul nx ny))
          (mul2 (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::mul x y)))
     (eg-saturate eg)
-    (assert-true (eg-merged-p eg mul1 mul2))))
-
-(deftest egraph-rule-mul-neg-neg-same-var
-  "mul-neg-neg: (mul (neg ?x) (neg ?x)) merges with (mul ?x ?x)."
+    (assert-true (eg-merged-p eg mul1 mul2)))
   (let* ((eg   (cl-cc/optimize::make-e-graph))
          (x    (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
          (nx   (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::neg x))
@@ -135,8 +120,8 @@
 ;;; ─── Advanced: neg-sub ───────────────────────────────────────────────────
 ;;; neg-sub: (neg (sub ?x ?y)) → (sub ?y ?x).
 
-(deftest egraph-rule-neg-sub-fires
-  "neg-sub: (neg (sub ?x ?y)) merges with (sub ?y ?x)."
+(deftest egraph-rule-neg-sub-cases
+  "neg-sub: (neg (sub ?x ?y)) merges with (sub ?y ?x); same-class reduces via sub-self first."
   (let* ((eg   (cl-cc/optimize::make-e-graph))
          (x    (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
          (y    (make-eg-const eg 11))
@@ -144,18 +129,13 @@
          (neg  (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::neg sub1))
          (sub2 (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::sub y x)))
     (eg-saturate eg)
-    (assert-true (eg-merged-p eg neg sub2))))
-
-(deftest egraph-rule-neg-sub-same-class
-  "neg-sub: (neg (sub ?x ?x)) — self-sub simplifies via sub-self first."
+    (assert-true (eg-merged-p eg neg sub2)))
   (let* ((eg   (cl-cc/optimize::make-e-graph))
          (x    (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
          (sub1 (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::sub x x))
          (neg  (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::neg sub1)))
+    (declare (ignore neg))
     (eg-saturate eg)
-    ;; sub-self fires first: sub(x,x) merges with (const 0) class.
-    ;; Then neg-sub might fire on the merged class.
-    ;; At minimum, sub1 should have a const node in its class.
     (assert-true (eg-class-contains-op-p eg sub1 'cl-cc/optimize::const))))
 
 ;;; ─── Rule Registry: All 51 Rules Present ────────────────────────────────

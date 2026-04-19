@@ -119,35 +119,3 @@ Returns the value in the result register when halt2 executes."
   (let ((counts (make-hash-table :test #'equal)))
     (values (%run-vm-core code state :bigram-counts counts)
             counts)))
-
-;;; ── vm2-state compatibility shims ────────────────────────────────────────
-;;;
-;;; These make vm2-state accessible via the same API as vm-state, allowing
-;;; tests to use make-vm-state, vm-state-registers, vm-reg-get, vm-reg-set,
-;;; vm-output-stream, and vm-global-vars uniformly.
-
-(defun make-vm-state (&key (output-stream *standard-output*))
-  "Create a vm2-state. Preferred constructor for new code; vm-io-state is
-for the legacy CLOS execute-instruction pipeline."
-  (make-vm2-state :output-stream output-stream))
-
-(defmethod vm-state-registers ((s vm2-state))
-  (vm2-state-registers s))
-
-(defmethod vm-output-stream ((s vm2-state))
-  (vm2-state-output-stream s))
-
-(defmethod vm-global-vars ((s vm2-state))
-  (vm2-state-global-vars s))
-
-;;; vm-reg-get/vm-reg-set dispatch on vm2-state (svref) vs vm-state (gethash)
-(defun vm-reg-get (state reg)
-  (if (vm2-state-p state)
-      (svref (vm2-state-registers state) reg)
-      (gethash reg (slot-value state 'registers) 0)))
-
-(defun vm-reg-set (state reg value)
-  (if (vm2-state-p state)
-      (setf (svref (vm2-state-registers state) reg) value)
-      (setf (gethash reg (slot-value state 'registers)) value))
-  value)

@@ -203,19 +203,17 @@
 ;;; RHS (neg ?x) is an actual neg-node, not a const.  Pre-add (neg x) so
 ;;; the rule can merge mul-id with the pre-existing neg class.
 
-(deftest egraph-rule-mul-neg1-fires
+(deftest-each egraph-rule-mul-neg1-fires
   "mul-neg1: (mul ?x (const -1)) and (mul (const -1) ?x) both merge with (neg ?x)."
+  :cases (("rhs-neg1" :rhs)
+          ("lhs-neg1" :lhs))
+  (side)
   (let* ((eg  (cl-cc/optimize::make-e-graph))
          (x   (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
          (cn1 (make-eg-const eg -1))
-         (mul (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::mul x cn1))
-         (neg (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::neg x)))
-    (eg-saturate eg)
-    (assert-true (eg-merged-p eg mul neg)))
-  (let* ((eg  (cl-cc/optimize::make-e-graph))
-         (x   (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
-         (cn1 (make-eg-const eg -1))
-         (mul (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::mul cn1 x))
+         (mul (if (eq side :rhs)
+                  (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::mul x cn1)
+                  (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::mul cn1 x)))
          (neg (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::neg x)))
     (eg-saturate eg)
     (assert-true (eg-merged-p eg mul neg))))
@@ -250,31 +248,22 @@
     (eg-saturate eg)
     (assert-true (eg-merged-p eg not dual))))
 
-;;; ─── Negation: add-neg ───────────────────────────────────────────────────
+;;; ─── Negation: add-neg / sub-neg ─────────────────────────────────────────
 ;;; add-neg: (add ?x (neg ?y)) → (sub ?x ?y)
+;;; sub-neg: (sub ?x (neg ?y)) → (add ?x ?y)
 ;;; Use var for x and a const for y so x ≠ y (different memo keys).
 
-(deftest egraph-rule-add-neg-fires
-  "add-neg: (add ?x (neg ?y)) merges with (sub ?x ?y)."
-  (let* ((eg  (cl-cc/optimize::make-e-graph))
-         (x   (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
-         (y   (make-eg-const eg 7))
-         (ny  (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::neg y))
-         (add (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::add x ny))
-         (sub (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::sub x y)))
+(deftest-each egraph-rule-neg-rewrites
+  "add-neg/sub-neg: outer(x, neg(y)) merges with the inverse-op(x, y)."
+  :cases (("add-neg" 7 'cl-cc/optimize::add 'cl-cc/optimize::sub)
+          ("sub-neg" 5 'cl-cc/optimize::sub 'cl-cc/optimize::add))
+  (const-val outer-op inverse-op)
+  (let* ((eg   (cl-cc/optimize::make-e-graph))
+         (x    (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
+         (y    (make-eg-const eg const-val))
+         (ny   (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::neg y))
+         (expr (cl-cc/optimize::egraph-add eg outer-op x ny))
+         (dual (cl-cc/optimize::egraph-add eg inverse-op x y)))
     (eg-saturate eg)
-    (assert-true (eg-merged-p eg add sub))))
-
-;;; ─── Negation: sub-neg ───────────────────────────────────────────────────
-
-(deftest egraph-rule-sub-neg-fires
-  "sub-neg: (sub ?x (neg ?y)) merges with (add ?x ?y)."
-  (let* ((eg  (cl-cc/optimize::make-e-graph))
-         (x   (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
-         (y   (make-eg-const eg 5))
-         (ny  (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::neg y))
-         (sub (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::sub x ny))
-         (add (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::add x y)))
-    (eg-saturate eg)
-    (assert-true (eg-merged-p eg sub add))))
+    (assert-true (eg-merged-p eg expr dual))))
 

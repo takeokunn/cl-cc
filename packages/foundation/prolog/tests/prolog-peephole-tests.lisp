@@ -93,12 +93,13 @@
     (assert-equal '(:const :r1 1) (first result))
     (assert-equal '(:add :r2 :r1 :r1) (second result))))
 
-(deftest prolog-peephole-jump-to-next-label-eliminated
-  "Peephole rule 2: (:jump L0)(:label L0) → (:label L0)."
-  (assert-prolog-peephole-length= '((:jump "L0") (:label "L0")) 1)
-  (assert-equal '(:label "L0")
-                (first (cl-cc:apply-prolog-peephole '((:jump "L0") (:label "L0"))))))
-
+(deftest-each prolog-peephole-single-pair-reduction
+  "Peephole rules that collapse a 2-instruction window into a single instruction."
+  :cases (("jump-to-label" '((:jump "L0") (:label "L0")) '(:label "L0"))
+          ("double-const"  '((:const :r0 1) (:const :r0 99)) '(:const :r0 99)))
+  (input expected-first)
+  (assert-prolog-peephole-length= input 1)
+  (assert-equal expected-first (first (cl-cc:apply-prolog-peephole input))))
 
 (deftest-each prolog-peephole-terminal-sequence-rules
   "Peephole rule 5: in any terminal-instruction pair, only the first instruction is kept."
@@ -112,12 +113,6 @@
           ("halt-before-ret"   '((:halt :r0) (:ret  :r1)) '((:halt :r0))))
   (input expected)
   (assert-prolog-peephole-equal input expected))
-
-(deftest prolog-peephole-double-const-same-reg
-  "Peephole rule 3: (:const ?r v1)(:const ?r v2) — second overwrites first."
-  (assert-prolog-peephole-length= '((:const :r0 1) (:const :r0 99)) 1)
-  (assert-equal '(:const :r0 99)
-                (first (cl-cc:apply-prolog-peephole '((:const :r0 1) (:const :r0 99))))))
 
 (deftest prolog-peephole-move-chain-propagates-source
   "Peephole rule 4: (:move :r1 :r0)(:move :r2 :r1) — source propagated to end of chain."

@@ -37,53 +37,32 @@
   (let ((*features* '(:sbcl :common-lisp)))
     (assert-equal expected (if (cl-cc/parse::lex-feature-present-p feature) t nil))))
 
-(deftest lex-feature-present-p-or-combinator
-  "lex-feature-present-p :or succeeds when any member is present."
+(deftest lex-feature-present-p-combinator-cases
+  "lex-feature-present-p: :or any-present; :and all-present; :not negates; unknown → nil."
   (let ((*features* '(:sbcl)))
-    (assert-true  (cl-cc/parse::lex-feature-present-p '(:or :sbcl :ccl)))
-    (assert-null  (cl-cc/parse::lex-feature-present-p '(:or :ccl :ecl)))))
-
-(deftest lex-feature-present-p-and-combinator
-  "lex-feature-present-p :and succeeds only when all members are present."
+    (assert-true (cl-cc/parse::lex-feature-present-p '(:or :sbcl :ccl)))
+    (assert-null (cl-cc/parse::lex-feature-present-p '(:or :ccl :ecl))))
   (let ((*features* '(:sbcl :common-lisp)))
-    (assert-true  (cl-cc/parse::lex-feature-present-p '(:and :sbcl :common-lisp)))
-    (assert-null  (cl-cc/parse::lex-feature-present-p '(:and :sbcl :ccl)))))
-
-(deftest lex-feature-present-p-not-combinator
-  "lex-feature-present-p :not negates membership."
+    (assert-true (cl-cc/parse::lex-feature-present-p '(:and :sbcl :common-lisp)))
+    (assert-null (cl-cc/parse::lex-feature-present-p '(:and :sbcl :ccl))))
   (let ((*features* '(:sbcl)))
-    (assert-null  (cl-cc/parse::lex-feature-present-p '(:not :sbcl)))
-    (assert-true  (cl-cc/parse::lex-feature-present-p '(:not :ccl)))))
-
-(deftest lex-feature-present-p-unknown-returns-nil
-  "lex-feature-present-p returns NIL for unrecognised feature forms."
+    (assert-null (cl-cc/parse::lex-feature-present-p '(:not :sbcl)))
+    (assert-true (cl-cc/parse::lex-feature-present-p '(:not :ccl))))
   (assert-null (cl-cc/parse::lex-feature-present-p 42))
   (assert-null (cl-cc/parse::lex-feature-present-p '(:unknown :foo))))
 
 ;;; ─── lex-read-form-text ──────────────────────────────────────────────────────
 
-(deftest-each lex-read-form-text-atoms
-  "lex-read-form-text captures atoms verbatim."
-  :cases (("integer"  "42"     "42")
-          ("symbol"   "foo"    "foo")
-          ("keyword"  ":bar"   ":bar"))
+(deftest-each lex-read-form-text-cases
+  "lex-read-form-text captures atoms, strings, and balanced lists verbatim."
+  :cases (("integer"     "42"          "42")
+          ("symbol"      "foo"         "foo")
+          ("keyword"     ":bar"        ":bar")
+          ("string"      "\"hello\""   "\"hello\"")
+          ("list"        "(+ 1 2)"     "(+ 1 2)")
+          ("nested-list" "(a (b c) d)" "(a (b c) d)"))
   (source expected)
   (assert-string= expected (lexer-dispatch-read-form-text source)))
-
-(deftest lex-read-form-text-string
-  "lex-read-form-text captures a string literal including quotes."
-  (let ((text (lexer-dispatch-read-form-text "\"hello\"")))
-    (assert-string= "\"hello\"" text)))
-
-(deftest lex-read-form-text-list
-  "lex-read-form-text captures a balanced list including parens."
-  (let ((text (lexer-dispatch-read-form-text "(+ 1 2)")))
-    (assert-string= "(+ 1 2)" text)))
-
-(deftest lex-read-form-text-nested-list
-  "lex-read-form-text handles nested balanced lists."
-  (let ((text (lexer-dispatch-read-form-text "(a (b c) d)")))
-    (assert-string= "(a (b c) d)" text)))
 
 (deftest lex-read-form-text-list-with-string
   "lex-read-form-text handles lists containing strings with parens inside."
@@ -112,65 +91,39 @@
 
 ;;; ─── Hash Dispatch: Bit Vector ───────────────────────────────────────────────
 
-(deftest lexer-dispatch-bit-vector
-  "Lexer tokenizes #*101 as a :T-INT with a bit-vector value."
+(deftest lexer-dispatch-bit-vector-cases
+  "Lexer: #*101 → bit-vector with bits 1,0,1; #* → empty bit-vector."
   (let ((val (lexer-dispatch-first-value "#*101")))
     (assert-true (bit-vector-p val))
     (assert-= 3 (length val))
     (assert-= 1 (sbit val 0))
     (assert-= 0 (sbit val 1))
-    (assert-= 1 (sbit val 2))))
-
-(deftest lexer-dispatch-bit-vector-empty
-  "Lexer tokenizes #* (empty bit-vector) as an empty bit-vector."
+    (assert-= 1 (sbit val 2)))
   (let ((val (lexer-dispatch-first-value "#*")))
     (assert-true (bit-vector-p val))
     (assert-= 0 (length val))))
 
 ;;; ─── Hash Dispatch: Block Comment ───────────────────────────────────────────
 
-(deftest lexer-dispatch-block-comment-skipped
-  "Lexer skips #| ... |# block comments entirely."
-  (let ((types (lexer-dispatch-lex-types "#| this is a comment |# 42")))
-    (assert-equal '(:t-int) types)))
-
-(deftest lexer-dispatch-block-comment-nested-skipped
-  "Lexer skips nested block comments."
-  ;; Note: nested #| |# may not be supported — we just verify the token after
-  (let ((types (lexer-dispatch-lex-types "#| comment |# symbol")))
-    (assert-equal '(:t-ident) types)))
+(deftest lexer-dispatch-block-comment-cases
+  "Lexer skips #| ... |# block comments; token after comment is returned."
+  (assert-equal '(:t-int)   (lexer-dispatch-lex-types "#| this is a comment |# 42"))
+  (assert-equal '(:t-ident) (lexer-dispatch-lex-types "#| comment |# symbol")))
 
 ;;; ─── Hash Dispatch: Feature Conditionals #+/# ──────────────────────────────
 
-(deftest lexer-dispatch-feature-include-present
-  "#+feature skips nothing when feature is present."
+(deftest lexer-dispatch-feature-conditional-cases
+  "#+/-: include when present; skip when absent (#+); skip when present (#-); include when absent (#-)."
   (let ((*features* '(:sbcl)))
-    (let ((types (lexer-dispatch-lex-types "#+sbcl 42")))
-      ;; Feature is present: 42 is included
-      (assert-equal '(:t-int) types))))
-
-(deftest lexer-dispatch-feature-skip-absent
-  "#+ skips the form when feature is absent."
+    (assert-equal '(:t-int) (lexer-dispatch-lex-types "#+sbcl 42")))
   (let ((*features* '()))
-    (let ((types (lexer-dispatch-lex-types "#+no-such-feature 42 99")))
-      ;; Feature absent: 42 is skipped, 99 is the first real token
-      (assert-equal '(:t-int) types)
-      (assert-= 99 (lexer-dispatch-first-value "#+no-such-feature 42 99")))))
-
-(deftest lexer-dispatch-feature-exclude-present
-  "#-feature skips the form when feature is present."
+    (assert-equal '(:t-int) (lexer-dispatch-lex-types "#+no-such-feature 42 99"))
+    (assert-= 99 (lexer-dispatch-first-value "#+no-such-feature 42 99")))
   (let ((*features* '(:sbcl)))
-    (let ((types (lexer-dispatch-lex-types "#-sbcl 42 99")))
-      ;; Feature present: 42 is skipped, 99 survives
-      (assert-equal '(:t-int) types)
-      (assert-= 99 (lexer-dispatch-first-value "#-sbcl 42 99")))))
-
-(deftest lexer-dispatch-feature-include-absent
-  "#- includes the form when feature is absent."
+    (assert-equal '(:t-int) (lexer-dispatch-lex-types "#-sbcl 42 99"))
+    (assert-= 99 (lexer-dispatch-first-value "#-sbcl 42 99")))
   (let ((*features* '()))
-    (let ((types (lexer-dispatch-lex-types "#-no-such-feature 42")))
-      ;; Feature absent: 42 is included
-      (assert-equal '(:t-int) types))))
+    (assert-equal '(:t-int) (lexer-dispatch-lex-types "#-no-such-feature 42"))))
 
 ;;; ─── Hash Dispatch: Arbitrary Radix #nR ─────────────────────────────────────
 
@@ -191,25 +144,14 @@
 ;; For #- skip tests: #-feature skips the form when feature IS PRESENT.
 ;; Bind *features* to contain :skip-me so #-skip-me actually skips.
 
-(deftest lex-skip-form-skips-list
-  "lex-skip-form (via #-) correctly skips a nested list form."
+(deftest-each lex-skip-form-cases
+  "lex-skip-form (via #-skip-me) correctly skips lists, strings, and atoms."
+  :cases (("list"   "#-skip-me (+ 1 2) 99"           99)
+          ("string" "#-skip-me \"hello (world)\" 42"  42)
+          ("atom"   "#-skip-me some-symbol 77"        77))
+  (source expected)
   (let ((*features* '(:skip-me)))
-    ;; :skip-me is present → #-skip-me skips (+ 1 2), then 99 is tokenized
-    (let ((val (lexer-dispatch-first-value "#-skip-me (+ 1 2) 99")))
-      (assert-= 99 val))))
-
-(deftest lex-skip-form-skips-string
-  "lex-skip-form (via #-) correctly skips a string with parens inside."
-  (let ((*features* '(:skip-me)))
-    ;; Parens and special chars inside the skipped string must not confuse the skip
-    (let ((val (lexer-dispatch-first-value "#-skip-me \"hello (world)\" 42")))
-      (assert-= 42 val))))
-
-(deftest lex-skip-form-skips-atom
-  "lex-skip-form (via #-) correctly skips a bare atom."
-  (let ((*features* '(:skip-me)))
-    (let ((val (lexer-dispatch-first-value "#-skip-me some-symbol 77")))
-      (assert-= 77 val))))
+    (assert-= expected (lexer-dispatch-first-value source))))
 
 (deftest lex-skip-list-with-comment
   "lex-skip-form handles lists containing ; line comments (body paren after comment)."

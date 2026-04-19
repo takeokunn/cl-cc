@@ -71,8 +71,8 @@
       (assert-eq bb (third  blocks)))))
 
 
-(deftest ir-emit-appends-to-block
-  "ir-emit appends instructions in order and sets block back-pointer."
+(deftest ir-emit-and-terminator-cases
+  "ir-emit appends in order with back-pointer; ir-set-terminator sets terminator + back-pointer."
   (let* ((fn    (cl-cc/ir:ir-make-function 'test))
          (entry (cl-cc/ir:irf-entry fn))
          (i1    (cl-cc/ir:make-ir-inst))
@@ -83,10 +83,7 @@
     (assert-eq i1 (first  (cl-cc/ir:irb-insts entry)))
     (assert-eq i2 (second (cl-cc/ir:irb-insts entry)))
     (assert-eq entry (cl-cc/ir:iri-block i1))
-    (assert-eq entry (cl-cc/ir:iri-block i2))))
-
-(deftest ir-set-terminator-sets-back-pointer
-  "ir-set-terminator sets the block terminator and its block back-pointer."
+    (assert-eq entry (cl-cc/ir:iri-block i2)))
   (let* ((fn    (cl-cc/ir:ir-make-function 'test))
          (entry (cl-cc/ir:irf-entry fn))
          (term  (cl-cc/ir:make-ir-inst)))
@@ -99,8 +96,8 @@
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
 
-(deftest ir-rpo-linear-chain-entry-first
-  "ir-rpo returns entry before mid before exit in a linear chain A→B→C."
+(deftest ir-rpo-traversal-cases
+  "ir-rpo: linear chain A→B→C in order; excludes unreachable; diamond includes all 4 with entry first."
   (let* ((fn  (cl-cc/ir:ir-make-function 'test))
          (a   (cl-cc/ir:irf-entry fn))
          (b   (cl-cc/ir:ir-new-block fn :mid))
@@ -111,24 +108,17 @@
       (assert-= 3 (length rpo))
       (assert-eq a (first  rpo))
       (assert-eq b (second rpo))
-      (assert-eq c (third  rpo)))))
-
-(deftest ir-rpo-excludes-unreachable-blocks
-  "ir-rpo excludes blocks that have no path from entry."
+      (assert-eq c (third  rpo))))
   (let* ((fn          (cl-cc/ir:ir-make-function 'test))
          (entry        (cl-cc/ir:irf-entry fn))
          (reachable    (cl-cc/ir:ir-new-block fn :reachable))
          (_unreachable (cl-cc/ir:ir-new-block fn :unreachable)))
     (declare (ignore _unreachable))
     (cl-cc/ir:ir-add-edge entry reachable)
-    ;; unreachable has no incoming edge from entry
     (let ((rpo (cl-cc/ir:ir-rpo fn)))
       (assert-= 2 (length rpo))
       (assert-true (member entry     rpo :test #'eq))
-      (assert-true (member reachable rpo :test #'eq)))))
-
-(deftest ir-rpo-diamond-all-blocks-reachable
-  "ir-rpo includes all 4 blocks of a diamond graph A→{B,C}→D."
+      (assert-true (member reachable rpo :test #'eq))))
   (let* ((fn (cl-cc/ir:ir-make-function 'test))
          (a  (cl-cc/ir:irf-entry fn))
          (b  (cl-cc/ir:ir-new-block fn :b))
@@ -140,9 +130,7 @@
     (cl-cc/ir:ir-add-edge c d)
     (let ((rpo (cl-cc/ir:ir-rpo fn)))
       (assert-= 4 (length rpo))
-      ;; Entry must be first
       (assert-eq a (first rpo))
-      ;; All blocks present
       (assert-true (member b rpo :test #'eq))
       (assert-true (member c rpo :test #'eq))
       (assert-true (member d rpo :test #'eq)))))
@@ -151,15 +139,12 @@
 ;;;; Dominator tree (block.lisp)
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest ir-dominators-entry-dominates-itself
-  "The entry block is its own immediate dominator."
+(deftest ir-dominators-cases
+  "Dominators: entry self-dominates; A→B→C: idom correct; A→B→{C,D}: idom(C/D)=B."
   (let* ((fn    (cl-cc/ir:ir-make-function 'test))
          (entry (cl-cc/ir:irf-entry fn))
          (idom  (cl-cc/ir:ir-dominators fn)))
-    (assert-eq entry (gethash entry idom))))
-
-(deftest ir-dominators-linear-chain
-  "In A→B→C: idom(A)=A, idom(B)=A, idom(C)=B."
+    (assert-eq entry (gethash entry idom)))
   (let* ((fn (cl-cc/ir:ir-make-function 'test))
          (a  (cl-cc/ir:irf-entry fn))
          (b  (cl-cc/ir:ir-new-block fn :b))
@@ -169,11 +154,7 @@
     (let ((idom (cl-cc/ir:ir-dominators fn)))
       (assert-eq a (gethash a idom))
       (assert-eq a (gethash b idom))
-      (assert-eq b (gethash c idom)))))
-
-
-(deftest ir-dominators-Y-shape
-  "In A→B→{C,D}: idom(B)=A, idom(C)=B, idom(D)=B."
+      (assert-eq b (gethash c idom))))
   (let* ((fn (cl-cc/ir:ir-make-function 'test))
          (a  (cl-cc/ir:irf-entry fn))
          (b  (cl-cc/ir:ir-new-block fn :b))
@@ -231,21 +212,18 @@
 ;;;; SSA verifier (block.lisp)
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest ir-verify-ssa-empty-function
-  "ir-verify-ssa passes on an empty function with no instructions."
-  (let ((fn (cl-cc/ir:ir-make-function 'test)))
-    (assert-true (cl-cc/ir:ir-verify-ssa fn))))
-
-(deftest ir-verify-ssa-unique-results
-  "ir-verify-ssa passes when all instruction results are distinct ir-values."
+(deftest-each ir-verify-ssa-valid-cases
+  "ir-verify-ssa passes on both empty functions and functions with unique result values."
+  :cases (("empty-function"  nil)
+          ("unique-results"  t))
+  (has-insts)
   (let* ((fn    (cl-cc/ir:ir-make-function 'test))
-         (entry (cl-cc/ir:irf-entry fn))
-         (v0    (cl-cc/ir:ir-new-value fn))
-         (v1    (cl-cc/ir:ir-new-value fn))
-         (i0    (cl-cc/ir:make-ir-inst :result v0))
-         (i1    (cl-cc/ir:make-ir-inst :result v1)))
-    (cl-cc/ir:ir-emit entry i0)
-    (cl-cc/ir:ir-emit entry i1)
+         (entry (cl-cc/ir:irf-entry fn)))
+    (when has-insts
+      (let ((v0 (cl-cc/ir:ir-new-value fn))
+            (v1 (cl-cc/ir:ir-new-value fn)))
+        (cl-cc/ir:ir-emit entry (cl-cc/ir:make-ir-inst :result v0))
+        (cl-cc/ir:ir-emit entry (cl-cc/ir:make-ir-inst :result v1))))
     (assert-true (cl-cc/ir:ir-verify-ssa fn))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────

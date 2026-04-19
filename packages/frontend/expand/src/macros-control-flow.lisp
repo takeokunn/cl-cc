@@ -2,46 +2,62 @@
 (in-package :cl-cc/expand)
 
 ;; WHEN macro
-(our-defmacro when (test &body body)
-  `(if ,test (progn ,@body) nil))
+(register-macro 'when
+  (lambda (form env)
+    (declare (ignore env))
+    (list 'if (second form) (cons 'progn (cddr form)) nil)))
 
 ;; UNLESS macro
-(our-defmacro unless (test &body body)
-  `(if ,test nil (progn ,@body)))
+(register-macro 'unless
+  (lambda (form env)
+    (declare (ignore env))
+    (list 'if (second form) nil (cons 'progn (cddr form)))))
 
 ;; COND macro
-(our-defmacro cond (&rest clauses)
-  (if (null clauses)
-      nil
-      (let ((clause (car clauses)))
-        (if (null (cdr clause))
-            ;; Single expression clause: (cond (x) ...) => (or x (cond ...))
-            `(or ,(car clause) (cond ,@(cdr clauses)))
-            `(if ,(car clause)
-                 (progn ,@(cdr clause))
-                 (cond ,@(cdr clauses)))))))
+(register-macro 'cond
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((clauses (cdr form)))
+      (if (null clauses)
+          nil
+          (let ((clause (car clauses)))
+            (if (null (cdr clause))
+                (cons 'or (list (car clause) (cons 'cond (cdr clauses))))
+                (list 'if (car clause)
+                      (cons 'progn (cdr clause))
+                      (cons 'cond (cdr clauses)))))))))
 
 ;; AND macro
-(our-defmacro and (&rest args)
-  (cond ((null args) t)
-        ((null (cdr args)) (car args))
-        (t `(if ,(car args) (and ,@(cdr args)) nil))))
+(register-macro 'and
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((args (cdr form)))
+      (cond ((null args) t)
+            ((null (cdr args)) (car args))
+            (t (list 'if (car args) (cons 'and (cdr args)) nil))))))
 
 ;; OR macro
-(our-defmacro or (&rest args)
-  (cond ((null args) nil)
-        ((null (cdr args)) (car args))
-        (t (let ((tmp (gensym "OR")))
-             `(let ((,tmp ,(car args)))
-                (if ,tmp ,tmp (or ,@(cdr args))))))))
+(register-macro 'or
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((args (cdr form)))
+      (cond ((null args) nil)
+            ((null (cdr args)) (car args))
+            (t (let ((tmp (gensym "OR")))
+                 (list 'let (list (list tmp (car args)))
+                       (list 'if tmp tmp (cons 'or (cdr args))))))))))
 
 ;; LET* macro (recursive let)
-(our-defmacro let* (bindings &body body)
-  (if (null bindings)
-      `(progn ,@body)
-      (let ((binding (car bindings)))
-        `(let (,binding)
-           (let* ,(cdr bindings) ,@body)))))
+(register-macro 'let*
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((bindings (second form))
+          (body (cddr form)))
+      (if (null bindings)
+          (cons 'progn body)
+          (let ((binding (car bindings)))
+            (list 'let (list binding)
+                  (cons 'let* (cons (cdr bindings) body))))))))
 
 ;; DEFUN macro
 (our-defmacro defun (name params &body body)
@@ -83,20 +99,29 @@
              ,result-sym))))))
 
 ;; PROG1 macro
-(our-defmacro prog1 (first-form &body body)
-  (let ((result (gensym "RESULT")))
-    `(let ((,result ,first-form))
-       ,@body
-       ,result)))
+(register-macro 'prog1
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((first-form (second form))
+          (body (cddr form))
+          (result (gensym "RESULT")))
+      (cons 'let
+            (cons (list (list result first-form))
+                  (append body (list result)))))))
 
 ;; PROG2 macro
-(our-defmacro prog2 (first-form second-form &body body)
-  (let ((result (gensym "RESULT")))
-    `(progn
-       ,first-form
-       (let ((,result ,second-form))
-         ,@body
-         ,result))))
+(register-macro 'prog2
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((first-form (second form))
+          (second-form (third form))
+          (body (cdddr form))
+          (result (gensym "RESULT")))
+      (list 'progn
+            first-form
+            (cons 'let
+                  (cons (list (list result second-form))
+                        (append body (list result))))))))
 
 ;; DOLIST macro
 (our-defmacro dolist (binding-spec &body body)
