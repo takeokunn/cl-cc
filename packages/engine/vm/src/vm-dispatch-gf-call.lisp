@@ -114,10 +114,19 @@ Returns (values next-pc halt-p result) like execute-instruction."
      (values (1+ pc) nil nil))
     ;; Normal closure — optionally push frame (skipped for TCO), bind args, jump
     (t
-     (let ((arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs)))
-        (unless tail-p
-          (vm-push-call-frame state (1+ pc) dst-reg)
-          (push nil (vm-method-call-stack state)))
-        (vm-profile-enter-call state (vm-closure-entry-label func) :tail-p tail-p)
-        (vm-bind-closure-args func state arg-values)
-           (values (vm-label-table-lookup labels (vm-closure-entry-label func)) nil nil)))))
+      (let ((arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs)))
+        (if (and (vm-closure-program-flat func)
+                 (vm-closure-label-table func)
+                 (or (not *vm-exec-flat*)
+                     (not (eq (vm-closure-program-flat func) *vm-exec-flat*))
+                     (not (eq (vm-closure-label-table func) *vm-exec-labels*))))
+            (progn
+              (vm-reg-set state dst-reg (%vm-call-closure-sync func state arg-values))
+              (values (1+ pc) nil nil))
+            (progn
+              (unless tail-p
+                (vm-push-call-frame state (1+ pc) dst-reg)
+                (push nil (vm-method-call-stack state)))
+              (vm-profile-enter-call state (vm-closure-entry-label func) :tail-p tail-p)
+              (vm-bind-closure-args func state arg-values)
+              (values (vm-label-table-lookup labels (vm-closure-entry-label func)) nil nil)))))))

@@ -1,7 +1,16 @@
 ;;;; pipeline-repl-tests.lisp — run-string-repl, reset-repl-state, compile-with-stdlib, whitespace-symbol-p tests
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-integration-suite)
+;; REPL integration tests intentionally mutate process-global compiler / VM state
+;; (`*repl-vm-state*`, label counters, current package, stdlib snapshots). Keep
+;; them in a dedicated serial child suite so randomized mixed-mode execution does
+;; not reintroduce order-dependent flakes.
+(defsuite cl-cc-pipeline-repl-serial-suite
+  :description "Serial pipeline REPL integration tests"
+  :parent cl-cc-integration-suite
+  :parallel nil)
+
+(in-suite cl-cc-pipeline-repl-serial-suite)
 
 ;;; ─── run-string-repl (persistent state) ─────────────────────────────────
 
@@ -10,6 +19,13 @@
   (with-reset-repl-state
     (let ((result (run-string-repl "42")))
       (assert-= 42 result))))
+
+(deftest pipeline-repl-policy-data-tables-are-populated
+  "REPL host-load policy tables include expected top-level forms, macros, and registration helpers."
+  (assert-true (member "DEFMETHOD" cl-cc::*host-only-top-level-form-names* :test #'string=))
+  (assert-true (member "DEFINE-PROLOG-DECLARATIVE-RULES" cl-cc::*host-only-top-level-macro-names* :test #'string=))
+  (assert-true (member "REGISTER-TARGET" cl-cc::*host-only-registration-helper-names* :test #'string=))
+  (assert-true (member "*SETF-COMPOUND-PLACE-HANDLERS*" cl-cc::*host-only-registration-symbol-names* :test #'string=)))
 
 (deftest-each pipeline-repl-persistence
   "run-string-repl persists defun and defvar definitions across REPL calls."

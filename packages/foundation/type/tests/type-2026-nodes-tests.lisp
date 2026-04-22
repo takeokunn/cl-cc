@@ -41,8 +41,7 @@
          (fa (make-type-forall :var a :body fn)))
     (assert-true (type-forall-p fa))
     (assert-true (type-var-equal-p a (type-forall-var fa)))
-    (assert-true (type-equal-p fn (type-forall-body fa)))
-    (assert-true (type-equal-p fn (type-forall-type fa)))))
+    (assert-true (type-equal-p fn (type-forall-body fa)))))
 
 (deftest type-exists-and-mu-creation
   "make-type-exists and make-type-mu store var and body correctly."

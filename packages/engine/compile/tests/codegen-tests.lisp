@@ -10,8 +10,17 @@
 ;;; ─── Helpers ────────────────────────────────────────────────────────────
 
 (defun make-codegen-ctx ()
-  "Create a fresh compiler context for codegen tests."
-  (make-instance 'cl-cc/compile::compiler-context))
+  "Create a fresh compiler context for codegen tests.
+
+Codegen unit tests assert on exact label names such as `DEFUN_FOO_0`. Those
+labels become order-dependent if a prior REPL-oriented test leaked
+`*repl-label-counter*` or related REPL globals into `compiler-context`
+initialization. Bind the REPL state hooks to NIL here so unit tests always get a
+stable, isolated context."
+  (let ((cl-cc/compile::*repl-label-counter* nil)
+        (cl-cc/compile::*repl-global-variables* nil)
+        (cl-cc/compile::*repl-capture-label-counter* nil))
+    (make-instance 'cl-cc/compile::compiler-context)))
 
 (defun codegen-instructions (ctx)
   "Return the emitted instructions from CTX (in order)."
@@ -214,5 +223,4 @@
     (assert-null (cl-cc/compile::%let-noescape-array-size 'arr expr nil nil nil)))
   (let ((expr (make-ast-int :value 5)))
     (assert-null (cl-cc/compile::%let-noescape-cons-p 'c expr nil nil nil))))
-
 

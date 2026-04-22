@@ -147,13 +147,14 @@
     (let ((s (type-to-string (make-type-qualified :constraints nil :body type-int))))
       (assert-string= "FIXNUM" s))))
 
-;;; ─── type-to-string: backward-compat ───────────────────────────────────────
+;;; ─── internal compatibility printer path ───────────────────────────────────
 
-(deftest printer-backward-compat-types
-  "Backward-compat printer: type-class-constraint shows class name; type-skolem shows 'sk'; type-effect shows name."
-  (assert-true  (search "NUM" (type-to-string (cl-cc/type::make-type-class-constraint :class-name 'num :type-arg type-int))))
-  (assert-true  (search "sk"  (type-to-string (cl-cc/type::make-type-skolem "a"))))
-  (assert-string= "IO"        (type-to-string (cl-cc/type::make-type-effect :name 'io))))
+(deftest printer-internal-type-class-constraint-node
+  "The retained internal type-class-constraint node still prints correctly for compatibility reads."
+  (assert-true (search "NUM"
+                       (type-to-string (cl-cc/type::make-type-class-constraint
+                                        :class-name 'num
+                                        :type-arg type-int)))))
 
 ;;; ─── unparse-type roundtrip ────────────────────────────────────────────────
 

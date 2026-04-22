@@ -53,10 +53,12 @@ Returns the byte vector, or NIL on error."
 
 (deftest aarch64-bytes-distinct-from-x86-64
   "AArch64 and x86-64 backends produce different byte sequences for the same program."
-  (let* ((program (compilation-result-program
-                   (compile-string "(+ 1 2)" :target :vm)))
-         (a64 (ignore-errors (compile-to-aarch64-bytes program)))
-         (x64 (ignore-errors (compile-to-x86-64-bytes program))))
+  (let* ((a64-program (compilation-result-program
+                       (compile-string "(+ 1 2)" :target :aarch64)))
+         (x64-program (compilation-result-program
+                       (compile-string "(+ 1 2)" :target :x86_64)))
+         (a64 (ignore-errors (compile-to-aarch64-bytes a64-program)))
+         (x64 (ignore-errors (compile-to-x86-64-bytes x64-program))))
     (assert-true a64)
     (assert-true x64)
     (assert-false (equalp a64 x64))))
@@ -197,11 +199,11 @@ Returns the byte vector, or NIL on error."
 
 (deftest aarch64-leaf-program-trims-prologue-through-pipeline
   "A real compiled leaf program reaches native codegen and trims the prologue."
-  (let* ((result (compile-string "(+ 1 2)" :target :vm))
+  (let* ((result (compile-string "(+ 1 2)" :target :aarch64))
          (program (compilation-result-program result))
          (base (cl-cc/vm::make-vm-program :instructions (cl-cc/vm::vm-program-instructions program)
-                                       :result-register (cl-cc/vm::vm-program-result-register program)
-                                       :leaf-p nil))
+                                        :result-register (cl-cc/vm::vm-program-result-register program)
+                                        :leaf-p nil))
          (leaf-bytes (compile-to-aarch64-bytes program))
          (nonleaf-bytes (compile-to-aarch64-bytes base)))
     (assert-true (cl-cc/vm::vm-program-leaf-p program))

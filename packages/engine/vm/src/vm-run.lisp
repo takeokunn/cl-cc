@@ -211,13 +211,20 @@ Otherwise a fresh state is created from OUTPUT-STREAM."
       (setf (vm-profile-call-stack state) (list "<toplevel>")))
     (let ((*vm-exec-flat* flat)
           (*vm-exec-labels* labels))
-      (loop with pc = 0
-            while (< pc (length flat))
-            do (progn
-                 (vm-profile-sample state)
-                 (multiple-value-bind (next-pc halted result)
-                    (execute-instruction (aref flat pc) state pc labels)
-                   (when halted
-                     (return result))
-                   (setf pc next-pc)))
-            finally (return nil)))))
+       (loop with pc = 0
+             while (< pc (length flat))
+             do (progn
+                  (vm-profile-sample state)
+                  (multiple-value-bind (next-pc halted result)
+                     (execute-instruction (aref flat pc) state pc labels)
+                    (when halted
+                      (return result))
+                    (when (null next-pc)
+                      ;; Some execution paths (notably cross-context returns and
+                      ;; top-level RET forms) use NIL to signal "no next pc".
+                      ;; Treat that as a graceful stop instead of falling into
+                      ;; the next loop iteration and crashing on (< NIL LEN).
+                      (return (or result
+                                  (vm-reg-get state (vm-program-result-register program)))))
+                    (setf pc next-pc)))
+             finally (return nil)))))

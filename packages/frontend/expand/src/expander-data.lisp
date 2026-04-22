@@ -138,6 +138,20 @@ These recurse into subforms but their head is not macro-expanded.")
   "Dispatch: compound-place head symbol → (lambda (place value) → expanded-form).
 Known entries: aref, getf, car, first, cdr, rest, nth, cadr, cddr.")
 
+;;; ── Query helpers for the data layer ─────────────────────────────────────
+
+(defun compiler-special-form-p (name)
+  "Return T when NAME is handled directly by the compiler/parser layer."
+  (member name *compiler-special-forms*))
+
+(defun builtin-name-p (name)
+  "Return T when NAME appears in the consolidated builtin registry." 
+  (member name *all-builtin-names*))
+
+(defun variadic-fold-identity (name)
+  "Return the identity element for a variadic fold builtin, or NIL if unknown."
+  (cdr (assoc name *variadic-fold-identities*)))
+
 ;;; ── Expander dispatch table ───────────────────────────────────────────────
 ;;;
 ;;; Populated by define-expander-for in expander.lisp.

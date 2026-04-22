@@ -15,6 +15,7 @@
   :components
   ((:file "package")
    (:file "macho")
+   (:file "macho-buffer")
    (:file "macho-serialize")
    (:file "macho-build")
    (:file "elf")

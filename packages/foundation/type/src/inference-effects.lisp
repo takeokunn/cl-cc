@@ -38,7 +38,7 @@
     (typecase ast
       (cl-cc/ast:ast-print +io-effect-row+)
       (cl-cc/ast:ast-setq
-       (make-type-effect-row :effects (list (make-type-effect :name 'state))
+       (make-type-effect-row :effects (list (make-type-effect-op :name 'state :args nil))
                              :row-var nil))
       (cl-cc/ast:ast-if
        (effect-row-union (infer-effects (cl-cc/ast:ast-if-cond ast) env)
@@ -98,10 +98,10 @@
 ;; Initialize built-in effect signatures
 (let ((io-row +io-effect-row+)
       (error-row (make-type-effect-row
-                  :effects (list (make-type-effect :name 'error))
+                  :effects (list (make-type-effect-op :name 'error :args nil))
                   :row-var nil))
       (state-row (make-type-effect-row
-                  :effects (list (make-type-effect :name 'state))
+                  :effects (list (make-type-effect-op :name 'state :args nil))
                   :row-var nil)))
   ;; IO effects
   (dolist (op '(print format read read-line read-char write-char

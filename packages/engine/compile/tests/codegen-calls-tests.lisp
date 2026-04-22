@@ -9,6 +9,46 @@
 (in-package :cl-cc/test)
 (in-suite cl-cc-unit-suite)
 
+;;; ─── helper functions extracted for readability ────────────────────────────
+
+(deftest compile-call-arg-registers-preserves-argument-order
+  "%compile-call-arg-registers compiles arguments left-to-right and returns one register per arg."
+  (let* ((ctx (make-codegen-ctx))
+         (regs (cl-cc/compile::%compile-call-arg-registers
+                (list (make-ast-int :value 10)
+                      (make-ast-int :value 20))
+                ctx))
+         (instructions (cl-cc/compile::ctx-instructions ctx)))
+    (assert-= 2 (length regs))
+    (assert-= 2 (length instructions))
+    (let ((first (first instructions))
+          (second (second instructions)))
+      (assert-type first 'cl-cc/vm::vm-const)
+      (assert-type second 'cl-cc/vm::vm-const)
+      (assert-= 10 (cl-cc::vm-const-value first))
+      (assert-= 20 (cl-cc::vm-const-value second))
+      (assert-eq (cl-cc/vm::vm-dst first) (first regs))
+      (assert-eq (cl-cc/vm::vm-dst second) (second regs)))))
+
+(deftest emit-call-like-instruction-selects-call-variant
+  "%emit-call-like-instruction emits vm-call normally and vm-tail-call in tail position."
+  (let* ((ctx (make-codegen-ctx))
+         (func-reg (cl-cc/compile::make-register ctx))
+         (arg-reg (cl-cc/compile::make-register ctx))
+         (result-reg (cl-cc/compile::make-register ctx)))
+    (assert-eq result-reg
+               (cl-cc/compile::%emit-call-like-instruction nil result-reg func-reg (list arg-reg) ctx))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-call))
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-tail-call)))
+  (let* ((ctx (make-codegen-ctx))
+         (func-reg (cl-cc/compile::make-register ctx))
+         (arg-reg (cl-cc/compile::make-register ctx))
+         (result-reg (cl-cc/compile::make-register ctx)))
+    (assert-eq result-reg
+               (cl-cc/compile::%emit-call-like-instruction t result-reg func-reg (list arg-reg) ctx))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-tail-call))
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-call))))
+
 ;;; ─── %try-compile-funcall ─────────────────────────────────────────────────
 
 (deftest-each try-compile-funcall-returns-nil-for-non-funcall-sym

@@ -30,7 +30,7 @@
 ;;; ─── opt-converged-p ─────────────────────────────────────────────────────────
 
 (deftest opt-converged-p-cases
-  "opt-converged-p: T for empty; T for same objects; NIL for distinct-equal; NIL for different length."
+  "opt-converged-p: T for empty; T for same objects; T for structurally equal streams; NIL for different length."
   (assert-true (cl-cc/optimize::opt-converged-p nil nil))
   (let* ((i1 (make-vm-const :dst :r0 :value 1))
          (i2 (make-vm-ret  :reg :r0))
@@ -38,7 +38,7 @@
     (assert-true (cl-cc/optimize::opt-converged-p prog prog)))
   (let* ((a (make-vm-const :dst :r0 :value 1))
          (b (make-vm-const :dst :r0 :value 1)))
-    (assert-false (cl-cc/optimize::opt-converged-p (list a) (list b))))
+    (assert-true (cl-cc/optimize::opt-converged-p (list a) (list b))))
   (let* ((i (make-vm-const :dst :r0 :value 1)))
     (assert-false (cl-cc/optimize::opt-converged-p (list i) (list i i)))))
 

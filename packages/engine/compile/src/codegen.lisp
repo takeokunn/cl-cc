@@ -70,6 +70,93 @@ Returns the inferred type, or NIL on failure (warning printed unless :strict)."
       (when ok
         (push (cons (ast-defvar-name ast) value) *compile-time-value-env*)))))
 
+(defun %maybe-compile-toplevel-form-via-cps (ast &key type-check safety pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
+  "Compile AST through the CPS entry path when the VM-safe subset allows it.
+Returns a compilation-result or NIL when AST should stay on the direct path."
+  (let ((cps (maybe-cps-transform ast)))
+    (when (and *enable-cps-vm-primary-path*
+               cps
+               (%cps-vm-compile-safe-ast-p ast))
+      (compile-expression (%cps-entry-form cps)
+                          :target :vm
+                          :type-check type-check
+                          :safety safety
+                          :pass-pipeline pass-pipeline
+                          :print-pass-timings print-pass-timings
+                          :timing-stream timing-stream
+                          :print-opt-remarks print-opt-remarks
+                          :opt-remarks-stream opt-remarks-stream
+                          :opt-remarks-mode opt-remarks-mode
+                          :print-pass-stats print-pass-stats
+                          :stats-stream stats-stream
+                          :trace-json-stream trace-json-stream))))
+
+(defun %result-vm-instructions-without-halt (result)
+  "Return RESULT's VM instructions without its terminal halt instruction."
+  (let ((instructions (copy-list (compilation-result-vm-instructions result))))
+    (if (and instructions
+             (typep (car (last instructions)) 'vm-halt))
+        (butlast instructions)
+        instructions)))
+
+(defun %lower-toplevel-form-to-ast (form)
+  "Expand FORM and lower it into an optimized AST node."
+  (let* ((expanded (if (typep form 'ast-node)
+                       form
+                       (cl-cc/expand:compiler-macroexpand-all form)))
+         (ast (if (typep expanded 'ast-node)
+                  expanded
+                  (lower-sexp-to-ast expanded))))
+    (optimize-ast ast)))
+
+(defun %record-toplevel-defun-for-ct-env (ast)
+  "Register top-level function ASTs for compile-time evaluation helpers."
+  (when (typep ast 'ast-defun)
+    (push (cons (ast-defun-name ast) ast) *compile-time-function-env*)))
+
+(defun %update-toplevel-type-state (ast type-env type-check best-effort-type)
+  "Return updated type metadata after visiting AST as a top-level form.
+Values: inferred-type, updated-type-env."
+  (let ((last-type nil)
+        (next-type-env type-env))
+    (when type-check
+      (setf last-type (%type-check-form ast type-env type-check)))
+    (setf next-type-env (%extend-type-env-for-defvar ast next-type-env best-effort-type))
+    (setf next-type-env (%extend-type-env-for-defun ast next-type-env best-effort-type))
+    (values last-type next-type-env)))
+
+(defun %compile-toplevel-ast-into-context (ast ctx target type-check safety
+                                           pass-pipeline print-pass-timings timing-stream
+                                           print-opt-remarks opt-remarks-stream
+                                           opt-remarks-mode print-pass-stats stats-stream
+                                           trace-json-stream)
+  "Compile AST into CTX, preferring the CPS VM path when allowed.
+Returns two values: result register and CPS form used for the AST."
+  (let* ((last-cps (maybe-cps-transform ast))
+         (cps-result (and (eq target :vm)
+                          (%maybe-compile-toplevel-form-via-cps ast
+                                                               :type-check type-check
+                                                               :safety safety
+                                                               :pass-pipeline pass-pipeline
+                                                               :print-pass-timings print-pass-timings
+                                                               :timing-stream timing-stream
+                                                               :print-opt-remarks print-opt-remarks
+                                                               :opt-remarks-stream opt-remarks-stream
+                                                               :opt-remarks-mode opt-remarks-mode
+                                                               :print-pass-stats print-pass-stats
+                                                               :stats-stream stats-stream
+                                                               :trace-json-stream trace-json-stream))))
+    (if cps-result
+        (progn
+          (setf (ctx-instructions ctx)
+                (append (reverse (%result-vm-instructions-without-halt cps-result))
+                        (ctx-instructions ctx)))
+          (values (vm-program-result-register
+                   (compilation-result-program cps-result))
+                  last-cps))
+        (values (compile-ast ast ctx)
+                last-cps))))
+
 
 (defun compile-toplevel-forms (forms &key (target :x86_64) type-check (safety 1) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile a list of top-level forms (e.g., from a source file).
@@ -87,55 +174,52 @@ Returns a compilation-result struct with program, assembly, and globals."
             (*compile-time-function-env* nil))
         (dolist (form forms)
           (unless (and (consp form) (eq (car form) 'in-package))
-            (let* ((expanded (if (typep form 'ast-node)
-                                 form
-                                 (cl-cc/expand:compiler-macroexpand-all form)))
-                   (ast (if (typep expanded 'ast-node)
-                            expanded
-                            (lower-sexp-to-ast expanded))))
-               (when (typep ast 'ast-defun)
-                 (push (cons (ast-defun-name ast) ast) *compile-time-function-env*))
-               (setf ast      (optimize-ast ast))
-               (push ast compiled-asts)
-                (setf last-cps (maybe-cps-transform ast))
-                 (when type-check
-                   (setf last-type (%type-check-form ast type-env type-check)))
-                 (setf type-env  (%extend-type-env-for-defvar ast type-env #'best-effort-type))
-                 (setf type-env  (%extend-type-env-for-defun  ast type-env #'best-effort-type))
-                 (%maybe-extend-ct-value-env ast)
-                (setf last-reg  (compile-ast ast ctx)))))))
-    (setf (ctx-type-env ctx) type-env)
-    (when last-reg
-      (emit ctx (make-vm-halt :reg last-reg)))
-    (when *repl-capture-label-counter*
-      (setf *repl-capture-label-counter* (ctx-next-label ctx)))
-    (let* ((instructions (nreverse (ctx-instructions ctx)))
-           (optimized    nil)
-           (leaf-p       nil)
-           (program      nil))
-      (multiple-value-setq (optimized leaf-p)
-        (optimize-instructions instructions
-                               :pass-pipeline        pass-pipeline
-                               :print-pass-timings   print-pass-timings
-                               :timing-stream        timing-stream
-                               :print-pass-stats     print-pass-stats
-                               :stats-stream         stats-stream
-                               :trace-json-stream    trace-json-stream
-                               :print-opt-remarks    print-opt-remarks
-                               :opt-remarks-stream   opt-remarks-stream
-                               :opt-remarks-mode     opt-remarks-mode))
-      (setf program (make-vm-program :instructions    (or optimized instructions)
-                                      :result-register last-reg
-                                      :leaf-p          leaf-p))
-      (make-compilation-result :program             program
-                               :assembly            (emit-assembly program :target target)
-                               :globals             (ctx-global-functions ctx)
-                               :type                last-type
-                               :type-env            (ctx-type-env ctx)
-                               :cps                 last-cps
-                               :ast                 (nreverse compiled-asts)
-                               :vm-instructions     instructions
-                               :optimized-instructions optimized))))
+            (let ((ast (%lower-toplevel-form-to-ast form)))
+              (%record-toplevel-defun-for-ct-env ast)
+              (push ast compiled-asts)
+              (multiple-value-setq (last-type type-env)
+                (%update-toplevel-type-state ast type-env type-check #'best-effort-type))
+              (%maybe-extend-ct-value-env ast)
+              (multiple-value-setq (last-reg last-cps)
+                (%compile-toplevel-ast-into-context ast ctx target type-check safety
+                                                   pass-pipeline print-pass-timings timing-stream
+                                                   print-opt-remarks opt-remarks-stream
+                                                   opt-remarks-mode print-pass-stats stats-stream
+                                                   trace-json-stream))))))
+      (setf (ctx-type-env ctx) type-env)
+      (when last-reg
+        (emit ctx (make-vm-halt :reg last-reg)))
+      (when *repl-capture-label-counter*
+        (setf *repl-capture-label-counter* (ctx-next-label ctx)))
+      (let* ((instructions (nreverse (ctx-instructions ctx)))
+             (optimized    nil)
+             (leaf-p       nil)
+             (program      nil))
+        (multiple-value-setq (optimized leaf-p)
+          (optimize-instructions instructions
+                                 :pass-pipeline        pass-pipeline
+                                 :print-pass-timings   print-pass-timings
+                                 :timing-stream        timing-stream
+                                 :print-pass-stats     print-pass-stats
+                                 :stats-stream         stats-stream
+                                 :trace-json-stream    trace-json-stream
+                                 :print-opt-remarks    print-opt-remarks
+                                 :opt-remarks-stream   opt-remarks-stream
+                                 :opt-remarks-mode     opt-remarks-mode))
+        (setf program (make-vm-program :instructions    (if (member target '(:vm :wasm))
+                                                            instructions
+                                                            (or optimized instructions))
+                                        :result-register last-reg
+                                        :leaf-p          leaf-p))
+        (make-compilation-result :program                program
+                                 :assembly               (emit-assembly program :target target)
+                                 :globals                (ctx-global-functions ctx)
+                                 :type                   last-type
+                                 :type-env               (ctx-type-env ctx)
+                                 :cps                    last-cps
+                                 :ast                    (nreverse compiled-asts)
+                                 :vm-instructions        instructions
+                                 :optimized-instructions optimized)))))
 
 ;;; Function call compilation (%resolve-func-sym-reg, %try-compile-*,
 ;;; %compile-normal-call, compile-ast (ast-call)) is in codegen-calls.lisp (loads next).

@@ -13,10 +13,10 @@
                   (,(find-symbol "WHEN" :cl) cl-cc/prolog::prolog-when-handler))
                 cl-cc/prolog::*builtin-predicate-specs*))
 
-(deftest prolog-data-builds-dispatch-table-from-specs
+(deftest prolog-builtins-builds-dispatch-table-from-specs
   "The symbol dispatch helper resolves handler symbols into callable functions."
   (let* ((table (cl-cc/prolog::%make-symbol-dispatch-table
-                 '((foo cl-cc/prolog::prolog-cut-handler))))
+                  '((foo cl-cc/prolog::prolog-cut-handler))))
          (handler (gethash 'foo table)))
     (assert-true handler)
     (assert-eq (symbol-function 'cl-cc/prolog::prolog-cut-handler) handler)))
@@ -153,4 +153,3 @@
          (fresh2 (cl-cc:rename-variables rule2)))
     (assert-eq (second (cl-cc:rule-head fresh2))
                (second (car (cl-cc:rule-body fresh2))))))
-

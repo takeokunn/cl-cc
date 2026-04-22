@@ -4,31 +4,28 @@
 
 (in-suite cl-cc-integration-serial-suite)
 
-(deftest-each stdlib-list-ops
+(deftest-compile-each stdlib-list-ops
   "set-difference, union, append-lists, and last-cons work on lists."
   :cases (("set-diff"       '(1 3 5)     "(set-difference (list 1 2 3 4 5) (list 2 4))")
           ("set-diff-empty" '(1 2 3)     "(set-difference (list 1 2 3) (list))")
           ("union"          '(1 2 3 4 5) "(sort (union (list 1 2 3) (list 3 4 5)) #'<)")
           ("append-lists"   '(1 2 3 4)   "(append (list 1 2) (list 3 4))")
           ("last-cons"      3            "(car (last (list 1 2 3)))"))
-  (expected form)
-  (assert-true (equal expected (run-string form :stdlib t))))
+  :stdlib t)
 
-(deftest-each stdlib-reduce
+(deftest-compile-each stdlib-reduce
   "reduce folds a list with a function and optional initial value."
   :cases (("basic"       10 "(reduce (lambda (a b) (+ a b)) (list 1 2 3 4))")
           ("single"      42 "(reduce (lambda (a b) (+ a b)) (list 42))")
           ("with-init"   10 "(reduce (lambda (a b) (+ a b)) (list 1 2 3 4) :initial-value 0)")
           ("empty-init"   0 "(reduce (lambda (a b) (+ a b)) nil :initial-value 0)"))
-  (expected form)
-  (assert-= expected (run-string form :stdlib t)))
+  :stdlib t)
 
-(deftest-each stdlib-reduce-edge
+(deftest-compile-each stdlib-reduce-edge
   "reduce edge cases: nil initial value, reduce-init accumulation."
   :cases (("init-nil"     nil      "(reduce (lambda (a b) (cons b a)) nil :initial-value nil)")
           ("init-accum"   '(3 2 1) "(reduce (lambda (acc x) (cons x acc)) (list 1 2 3) :initial-value nil)"))
-  (expected form)
-  (assert-true (equal expected (run-string form :stdlib t))))
+  :stdlib t)
 
 (in-suite cl-cc-integration-suite)
 
@@ -63,14 +60,13 @@
 
 ;;; Stdlib Find/Position Tests
 
-(deftest-each stdlib-find-position
+(deftest-compile-each stdlib-find-position
   "find and position return element/index, or nil when not found."
   :cases (("find"          3   "(find 3 (list 1 2 3 4 5))")
           ("find-miss"     nil "(find 9 (list 1 2 3))")
           ("position"      2   "(position 3 (list 1 2 3 4 5))")
           ("position-miss" nil "(position 9 (list 1 2 3))"))
-  (expected form)
-  (assert-true (equal expected (run-string form :stdlib t))))
+  :stdlib t)
 
 (deftest-each stdlib-cons-printing-forms
   "Stdlib forms producing cons/alist structures render correctly as lowercase strings."
@@ -176,7 +172,7 @@
 
 ;;; Property List and Set Operations Tests
 
-(deftest-each stdlib-getf-and-set-ops
+(deftest-compile-each stdlib-getf-and-set-ops
   "getf returns the correct value; intersection and remove filter list elements."
   :cases (("getf-found"          2         "(getf (list :a 1 :b 2 :c 3) :b)")
           ("getf-default"        99        "(getf (list :a 1) :z 99)")
@@ -185,8 +181,7 @@
           ("set-intersection"    '(2 3)    "(intersection (list 1 2 3) (list 2 3 4))")
           ("set-intersection-empty" nil    "(intersection (list 1 2) (list 3 4))")
           ("set-remove"          '(1 3 5)  "(remove 2 (list 1 2 3 2 5))"))
-  (expected form)
-  (assert-true (equal expected (run-string form :stdlib t))))
+  :stdlib t)
 
 ;;; Eval Tests
 

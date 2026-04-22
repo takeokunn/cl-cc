@@ -52,18 +52,34 @@ filling those fields from NODE."
 (defun %same-ast-binop (node lhs rhs)
   (%clone-source node #'make-ast-binop :op (ast-binop-op node) :lhs lhs :rhs rhs))
 
+;;; Data-driven constant folding for binary operations.
+;;; Each entry maps an operator symbol to a (lambda (lv rv) → (values result foldable-p)) function.
+;;; Adding new foldable operators requires one data entry, not a new case branch.
+
+(defparameter *fold-binop-specs*
+  (let ((ht (make-hash-table :test #'eq)))
+    (flet ((reg (sym fn) (setf (gethash sym ht) fn)))
+      (reg '+ (lambda (lv rv) (values (+ lv rv) t)))
+      (reg '- (lambda (lv rv) (values (- lv rv) t)))
+      (reg '* (lambda (lv rv) (values (* lv rv) t)))
+      (reg '/ (lambda (lv rv)
+                (when (not (zerop rv))
+                  (let ((q (/ lv rv)))
+                    (when (integerp q) (values q t))))))
+      (reg 'mod (lambda (lv rv)
+                  (when (not (zerop rv)) (values (mod lv rv) t))))
+      (reg 'rem (lambda (lv rv)
+                  (when (not (zerop rv)) (values (rem lv rv) t)))))
+    ht)
+  "Data table for constant-foldable binops: op → (lambda (lv rv) → (values result foldable-p)).")
+
 (defun %fold-ast-binop (node lhs rhs)
   (let ((lv (%ast-constant-number-value lhs))
         (rv (%ast-constant-number-value rhs)))
     (if (and lv rv)
-        (let ((value (case (ast-binop-op node)
-                       (+ (+ lv rv))
-                       (- (- lv rv))
-                       (* (* lv rv))
-                       (/ (when (not (zerop rv))
-                            (let ((quot (/ lv rv)))
-                              (when (integerp quot) quot))))
-                       (otherwise nil))))
+        (let* ((folder (gethash (ast-binop-op node) *fold-binop-specs*))
+               (value (and folder (multiple-value-bind (v ok) (funcall folder lv rv)
+                                    (and ok v)))))
           (if (integerp value)
               (%clone-source node #'make-ast-int :value value)
               (%same-ast-binop node lhs rhs)))

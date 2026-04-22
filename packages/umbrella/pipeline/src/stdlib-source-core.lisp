@@ -11,6 +11,9 @@
 
 (defparameter *standard-library-source-core*
   (concatenate 'string
+    "(defun %stdlib-truthy-p (value)
+   (not (or (null value) (eql value 0))))"
+
     "(defun mapcar (fn lst)
    (if (null lst) nil
      (cons (funcall fn (car lst))
@@ -29,32 +32,32 @@
 
     "(defun remove-if (pred lst)
    (if (null lst) nil
-     (if (funcall pred (car lst))
-         (remove-if pred (cdr lst))
-         (cons (car lst) (remove-if pred (cdr lst))))))"
+      (if (%stdlib-truthy-p (funcall pred (car lst)))
+          (remove-if pred (cdr lst))
+          (cons (car lst) (remove-if pred (cdr lst))))))"
 
     "(defun remove-if-not (pred lst)
    (if (null lst) nil
-     (if (funcall pred (car lst))
-         (cons (car lst) (remove-if-not pred (cdr lst)))
-         (remove-if-not pred (cdr lst)))))"
+      (if (%stdlib-truthy-p (funcall pred (car lst)))
+          (cons (car lst) (remove-if-not pred (cdr lst)))
+          (remove-if-not pred (cdr lst)))))"
 
     "(defun find-if (pred lst)
    (if (null lst) nil
-     (if (funcall pred (car lst))
-         (car lst)
-         (find-if pred (cdr lst)))))"
+      (if (%stdlib-truthy-p (funcall pred (car lst)))
+          (car lst)
+          (find-if pred (cdr lst)))))"
 
     "(defun every (pred lst)
    (if (null lst) t
-     (if (funcall pred (car lst))
-         (every pred (cdr lst))
-         nil)))"
+      (if (%stdlib-truthy-p (funcall pred (car lst)))
+          (every pred (cdr lst))
+          nil)))"
 
     "(defun some (pred lst)
    (if (null lst) nil
-     (let ((r (funcall pred (car lst))))
-       (if r r (some pred (cdr lst))))))"
+      (let ((r (funcall pred (car lst))))
+        (if (%stdlib-truthy-p r) r (some pred (cdr lst))))))"
 
     "(defun reduce-init (fn lst acc)
    (if (null lst) acc
@@ -69,15 +72,15 @@
 
     "(defun count-if (pred lst)
    (if (null lst) 0
-     (+ (if (funcall pred (car lst)) 1 0)
-        (count-if pred (cdr lst)))))"
+      (+ (if (%stdlib-truthy-p (funcall pred (car lst))) 1 0)
+         (count-if pred (cdr lst)))))"
 
     "(defun position-if (pred lst)
    (labels ((pos-helper (pred lst idx)
-              (if (null lst) nil
-                (if (funcall pred (car lst)) idx
-                  (pos-helper pred (cdr lst) (+ idx 1))))))
-     (pos-helper pred lst 0)))"
+               (if (null lst) nil
+                 (if (%stdlib-truthy-p (funcall pred (car lst))) idx
+                   (pos-helper pred (cdr lst) (+ idx 1))))))
+      (pos-helper pred lst 0)))"
 
     "(defun notevery (pred lst) (not (every pred lst)))"
 

@@ -104,19 +104,19 @@
 
     "(defun complement (fn) (lambda (&rest args) (not (apply fn args))))"
 
-    "(defun sort-impl (sequence predicate key)
+     "(defun sort-impl (sequence predicate key)
    (if (null sequence) nil
-     (let ((pivot (car sequence))
-           (less nil)
-           (greater nil))
-       (dolist (x (cdr sequence))
-         (let ((a (if key (funcall key x) x))
-               (b (if key (funcall key pivot) pivot)))
-           (if (funcall predicate a b)
-               (push x less)
-               (push x greater))))
-       (append (sort-impl less predicate key)
-               (cons pivot (sort-impl greater predicate key))))))"
+      (let ((pivot (car sequence))
+            (less nil)
+            (greater nil))
+        (dolist (x (cdr sequence))
+          (let ((a (if key (funcall key x) x))
+                (b (if key (funcall key pivot) pivot)))
+            (if (%stdlib-truthy-p (funcall predicate a b))
+                (push x less)
+                (push x greater))))
+        (append (sort-impl less predicate key)
+                (cons pivot (sort-impl greater predicate key))))))"
 
     "(defun sort (sequence predicate &key key)
    (sort-impl sequence predicate key))"
@@ -267,4 +267,3 @@
 )
   "Standard library source — core functions (mapcar through numeric constants).
    Extended by stdlib-source-ext.lisp which loads after this file.")
-

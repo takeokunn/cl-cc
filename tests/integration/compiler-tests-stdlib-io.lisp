@@ -148,13 +148,12 @@
   (expected form)
   (assert-equal expected (run-string form :stdlib t)))
 
-(deftest-each stdlib-hof-numeric
+(deftest-compile-each stdlib-hof-numeric
   "HOFs return numeric results for reduce, find-if, count-if."
   :cases (("reduce"   10 "(reduce (lambda (a b) (+ a b)) (list 1 2 3 4))")
-          ("find-if"   4 "(find-if (lambda (x) (> x 3)) (list 1 2 3 4 5))")
-          ("count-if"  2 "(count-if (lambda (x) (> x 2)) (list 1 2 3 4))"))
-  (expected form)
-  (assert-= expected (run-string form :stdlib t)))
+           ("find-if"   4 "(find-if (lambda (x) (> x 3)) (list 1 2 3 4 5))")
+           ("count-if"  2 "(count-if (lambda (x) (> x 2)) (list 1 2 3 4))"))
+  :stdlib t)
 
 (deftest-each stdlib-hof-truthy
   "every/some return truthy values when the predicate matches."
@@ -163,14 +162,13 @@
   (form)
   (assert-true (not (null (run-string form :stdlib t)))))
 
-(deftest-each stdlib-hof-nil
+(deftest-compile-each stdlib-hof-nil
   "every/some/find-if/mapcar return nil when there is no match or empty input."
-  :cases (("mapcar-empty"  "(mapcar (lambda (x) x) nil)")
-          ("find-if-miss"  "(find-if (lambda (x) (> x 10)) (list 1 2 3))")
-          ("every-fail"    "(every (lambda (x) (> x 2)) (list 1 2 3))")
-          ("some-miss"     "(some (lambda (x) (> x 10)) (list 1 2 3))"))
-  (form)
-  (assert-true (equal nil (run-string form :stdlib t))))
+  :cases (("mapcar-empty"  nil "(mapcar (lambda (x) x) nil)")
+           ("find-if-miss"  nil "(find-if (lambda (x) (> x 10)) (list 1 2 3))")
+           ("every-fail"    nil "(every (lambda (x) (> x 2)) (list 1 2 3))")
+           ("some-miss"     nil "(some (lambda (x) (> x 10)) (list 1 2 3))"))
+  :stdlib t)
 
 ;;; With-Output-To-String Tests
 
@@ -209,14 +207,13 @@
 
 ;;; Sort Tests
 
-(deftest-each compile-sort
+(deftest-compile-each compile-sort
   "sort produces the correctly ordered list."
   :cases (("ascending"  '(1 1 2 3 4 5 6 9) "(sort (list 3 1 4 1 5 9 2 6) (lambda (a b) (< a b)))")
-          ("descending" '(5 3 1)            "(sort (list 3 1 5) (lambda (a b) (> a b)))")
-          ("single"     '(42)               "(sort (list 42) (lambda (a b) (< a b)))")
-          ("empty"      nil                 "(sort nil (lambda (a b) (< a b)))"))
-  (expected form)
-  (assert-true (equal expected (run-string form :stdlib t))))
+           ("descending" '(5 3 1)            "(sort (list 3 1 5) (lambda (a b) (> a b)))")
+           ("single"     '(42)               "(sort (list 42) (lambda (a b) (< a b)))")
+           ("empty"      nil                 "(sort nil (lambda (a b) (< a b)))"))
+  :stdlib t)
 
 ;;; Coerce Tests
 

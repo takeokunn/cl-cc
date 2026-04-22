@@ -85,3 +85,15 @@
   (assert (fboundp 'make-type-skolem)
           nil
           "checker.lisp: make-type-skolem must be defined in typeclass.lisp"))
+
+(defun checker-interface-ready-p ()
+  "Return T when the bidirectional checker boundary is fully wired.
+This gives the checker entry module an explicit, testable contract instead of
+relying only on load-time assertions."
+  (every #'fboundp
+         '(synthesize
+           check
+           check-body
+           check-skolem-escape
+           skolem-appears-in-type-p
+           make-type-skolem)))

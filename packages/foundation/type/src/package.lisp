@@ -69,8 +69,8 @@
    #:make-type-intersection-raw  #:type-intersection-types
 
    ;; ─── Forall / Exists ─────────────────────────────────────────────────
-   #:type-forall   #:type-forall-p   #:make-type-forall
-    #:type-forall-var #:type-forall-knd #:type-forall-body #:type-forall-type
+    #:type-forall   #:type-forall-p   #:make-type-forall
+     #:type-forall-var #:type-forall-knd #:type-forall-body
    #:type-exists   #:type-exists-p   #:make-type-exists
    #:type-exists-var #:type-exists-knd #:type-exists-body
 
@@ -91,26 +91,24 @@
    #:type-capability-base #:type-capability-cap
 
    ;; ─── Effect types ────────────────────────────────────────────────────
-   #:type-effect-row   #:type-effect-row-p   #:make-type-effect-row
-   #:type-effect-row-effects #:type-effect-row-row-var
-   #:+pure-effect-row+ #:+io-effect-row+
-   #:type-effect-op   #:type-effect-op-p   #:make-type-effect-op
-   #:type-effect-op-name #:type-effect-op-args
-   #:type-handler   #:type-handler-p   #:make-type-handler
-   #:type-handler-effect #:type-handler-input #:type-handler-output
+    #:type-effect-row   #:type-effect-row-p   #:make-type-effect-row
+    #:type-effect-row-effects #:type-effect-row-row-var
+    #:+pure-effect-row+ #:+io-effect-row+
     #:type-effect #:type-effect-p #:make-type-effect #:type-effect-name
-    #:type-effectful-function #:make-type-effectful-function
-    #:type-effectful-function-effects
+    #:type-effect-op   #:type-effect-op-p   #:make-type-effect-op
+    #:type-effect-op-name #:type-effect-op-args
+     #:type-handler   #:type-handler-p   #:make-type-handler
+    #:type-handler-effect #:type-handler-input #:type-handler-output
 
    ;; ─── GADT ────────────────────────────────────────────────────────────
    #:type-gadt-con   #:type-gadt-con-p   #:make-type-gadt-con
    #:type-gadt-con-name #:type-gadt-con-arg-types #:type-gadt-con-index-type
 
    ;; ─── Constraint / Qualified ──────────────────────────────────────────
-   #:type-constraint   #:type-constraint-p   #:make-type-constraint
-   #:type-constraint-class-name #:type-constraint-type-arg
-    #:type-qualified   #:type-qualified-p   #:make-type-qualified
-    #:type-qualified-constraints #:type-qualified-body #:type-qualified-type
+    #:type-constraint   #:type-constraint-p   #:make-type-constraint
+    #:type-constraint-class-name #:type-constraint-type-arg
+     #:type-qualified   #:type-qualified-p   #:make-type-qualified
+     #:type-qualified-constraints #:type-qualified-body
 
    ;; ─── Error sentinel / unknown ────────────────────────────────────────
    #:type-error   #:type-error-p   #:make-type-error  #:type-error-message

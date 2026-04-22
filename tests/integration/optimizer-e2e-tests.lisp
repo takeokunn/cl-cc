@@ -97,17 +97,18 @@
     (assert-false leaf-p)))
 
 (deftest optimizer-leaf-flag-through-compile-pipeline
-  "compile-string preserves the optimizer leaf flag on a real compiled leaf program."
-  (let* ((result (compile-string "(+ 1 2)" :target :vm))
+  "compile-string preserves the optimizer leaf flag on a real compiled leaf program for native targets."
+  (let* ((result (compile-string "(+ 1 2)" :target :x86_64))
           (program (compilation-result-program result)))
      (assert-true (cl-cc/vm::vm-program-leaf-p program))))
 
 (deftest optimizer-pipeline-program-instructions-track-optimized-output
-  "compile-string exposes optimized instructions through the program object, not just the result metadata."
+  "compile-string keeps raw instructions executable in the VM program and stores optimized output separately in the result metadata."
   (let* ((result (compile-string "(+ 1 2)" :target :vm))
          (program (compilation-result-program result)))
     (assert-true (equal (vm-program-instructions program)
-                        (cl-cc:compilation-result-optimized-instructions result)))))
+                        (cl-cc:compilation-result-vm-instructions result)))
+    (assert-true (not (null (cl-cc:compilation-result-optimized-instructions result))))))
 
 (deftest prolog-peephole-collapses-const-followed-by-move
   "The Prolog peephole rule set folds a const+move pair to a direct const."

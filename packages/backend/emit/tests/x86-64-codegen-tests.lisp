@@ -145,7 +145,7 @@
 
 (deftest x86-64-leaf-program-smaller-than-nonleaf
   "Leaf program emits fewer bytes than the same program with leaf-p=nil."
-  (let* ((result (compile-string "(+ 1 2)" :target :vm))
+  (let* ((result (compile-string "(+ 1 2)" :target :x86_64))
          (prog (compilation-result-program result))
          (base (cl-cc/vm::make-vm-program
                 :instructions (cl-cc/vm::vm-program-instructions prog)

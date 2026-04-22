@@ -85,40 +85,7 @@
 
 ;;; Phase 4: Typeclass Tests
 
-(deftest typeclass-register-and-lookup
-  "register-typeclass accepts old type-class values but stores canonical typeclass-defs."
-  (let* ((tc (cl-cc/type::make-type-class
-              :name 'eq-test
-              :type-param (make-type-variable 'a)
-              :methods (list (cons 'equal-p
-                                   (make-type-function
-                                    (list (make-type-variable 'a)
-                                          (make-type-variable 'a))
-                                     type-bool))))))
-    (register-typeclass 'eq-test tc)
-    (let ((retrieved (lookup-typeclass 'eq-test)))
-      (assert-true retrieved)
-      (assert-true (typeclass-def-p retrieved))
-      (assert-eq 'eq-test (typeclass-def-name retrieved))
-      (assert-= 1 (length (typeclass-def-type-params retrieved))))))
-
-(deftest typeclass-constraint-types-cases
-  "Constraint accessors return correct fields; qualified type stores constraints + function body."
-  (let* ((a (make-type-variable 'a))
-         (c (cl-cc/type::make-type-class-constraint :class-name 'num :type-arg a)))
-    (assert-true (cl-cc/type::type-class-constraint-p c))
-    (assert-eq 'num (cl-cc/type::type-class-constraint-class-name c))
-    (assert-true (type-variable-equal-p a (cl-cc/type::type-class-constraint-type-arg c)))
-    (let ((s (type-to-string c)))
-      (assert-true (stringp s))
-      (assert-true (search "NUM" (string-upcase s)))))
-  (let* ((a (make-type-variable 'a))
-         (c (cl-cc/type::make-type-class-constraint :class-name 'num :type-arg a))
-         (fn (make-type-function (list a a) a))
-         (qt (make-type-qualified :constraints (list c) :type fn)))
-    (assert-true (type-qualified-p qt))
-    (assert-= 1 (length (type-qualified-constraints qt)))
-    (assert-true (typep (cl-cc/type::type-qualified-type qt) 'type-function))))
+;;; Legacy compatibility tests removed as part of public surface reduction.
 
 (deftest-each typeclass-instance-registration
   "register-typeclass-instance and has-typeclass-instance-p.
@@ -136,14 +103,7 @@ registration body per case."
 
 ;;; Phase 5: Effect Type Tests
 
-(deftest-each effect-type-creation
-  "make-type-effect creates effect labels for each effect name."
-  :cases (("io"    'io)
-          ("state" 'state))
-  (effect-name)
-  (let ((eff (cl-cc/type::make-type-effect :name effect-name)))
-    (assert-true (cl-cc/type::type-effect-p eff))
-    (assert-eq effect-name (cl-cc/type::type-effect-name eff))))
+;;; Legacy effect compatibility tests removed as part of public surface reduction.
 
 (deftest-each effect-row-singleton-cases
   "Effect row singletons: pure has 0 effects; io has 1 IO effect; custom multi has N effects."
@@ -169,16 +129,7 @@ registration body per case."
         (assert-true (search expected (string-upcase s)))
         (assert-string= expected s))))
 
-(deftest effectful-function-creation
-  "make-type-effectful-function creates an annotated function type."
-  (let ((fn (cl-cc/type::make-type-effectful-function
-             :params (list type-int)
-             :return type-int
-             :effects +io-effect-row+)))
-    (assert-true (typep fn 'type-effectful-function))
-    (assert-= 1 (length (type-function-params fn)))
-    (assert-true (type-equal-p type-int (type-function-return fn)))
-    (assert-true (type-effect-row-p (type-effectful-function-effects fn)))))
+;;; Legacy effect compatibility tests removed as part of public surface reduction.
 
 ;;; Phase 6: Rank-N Polymorphism Tests
 
@@ -189,7 +140,7 @@ registration body per case."
          (fa (make-type-forall :var a :type fn)))
     (assert-true (type-forall-p fa))
     (assert-true (type-variable-equal-p a (type-forall-var fa)))
-    (assert-true (typep (cl-cc/type::type-forall-type fa) 'type-function))
+    (assert-true (typep (type-forall-body fa) 'type-function))
     (let ((s (type-to-string fa)))
       (assert-true (stringp s))
       (assert-true (search "A" (string-upcase s)))))

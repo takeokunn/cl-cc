@@ -125,32 +125,26 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
 (define-simple-instruction vm-min :binary min)
 (define-simple-instruction vm-max :binary max)
 
-(defmethod execute-instruction ((inst vm-truncate) state pc labels)
-  (declare (ignore labels))
-  (multiple-value-bind (q r)
-      (truncate (vm-reg-get state (vm-lhs inst))
-                (vm-reg-get state (vm-rhs inst)))
-    (vm-reg-set state (vm-dst inst) q)
-    (setf (vm-values-list state) (list q r)))
-  (values (1+ pc) nil nil))
+;;; Division family: data-driven via macro (truncate, floor, ceiling share identical structure)
 
-(defmethod execute-instruction ((inst vm-floor-inst) state pc labels)
-  (declare (ignore labels))
-  (multiple-value-bind (q r)
-      (floor (vm-reg-get state (vm-lhs inst))
-             (vm-reg-get state (vm-rhs inst)))
-    (vm-reg-set state (vm-dst inst) q)
-    (setf (vm-values-list state) (list q r)))
-  (values (1+ pc) nil nil))
+(defmacro define-vm-division-executors (&rest specs)
+  "Generate execute-instruction methods for integer division variants.
+Each SPEC is (instruction-type host-function)."
+  `(progn
+     ,@(loop for (inst-type host-fn) in specs
+             collect `(defmethod execute-instruction ((inst ,inst-type) state pc labels)
+                        (declare (ignore labels))
+                        (multiple-value-bind (q r)
+                            (,host-fn (vm-reg-get state (vm-lhs inst))
+                                      (vm-reg-get state (vm-rhs inst)))
+                          (vm-reg-set state (vm-dst inst) q)
+                          (setf (vm-values-list state) (list q r)))
+                         (values (1+ pc) nil nil)))))
 
-(defmethod execute-instruction ((inst vm-ceiling-inst) state pc labels)
-  (declare (ignore labels))
-  (multiple-value-bind (q r)
-      (ceiling (vm-reg-get state (vm-lhs inst))
-               (vm-reg-get state (vm-rhs inst)))
-    (vm-reg-set state (vm-dst inst) q)
-    (setf (vm-values-list state) (list q r)))
-  (values (1+ pc) nil nil))
+(define-vm-division-executors
+  (vm-truncate     truncate)
+  (vm-floor-inst   floor)
+  (vm-ceiling-inst ceiling))
 
 (define-simple-instruction vm-rem   :binary rem)
 (define-simple-instruction vm-evenp :pred1  evenp)

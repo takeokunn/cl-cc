@@ -126,6 +126,15 @@ CL_CC_TEST_WORKERS)."
                                (warm-stdlib t))
   "Run all tests in suite-name (and children). Exits via uiop:quit."
   (when coverage
+    (unless *coverage-reload-in-progress*
+      (let ((*coverage-reload-in-progress* t))
+        (enable-coverage)
+        (ignore-errors
+          (when (find-package :cl-cc/prolog)
+            (cl-cc/prolog:clear-prolog-database)))
+        ;; Force a fresh local-system reload after instrumentation is enabled so
+        ;; sb-cover observes compiled definitions instead of reusing stale fasls.
+        (asdf:load-system :cl-cc/test :force t)))
     (setf parallel nil)
     (format t "# Coverage mode: parallel disabled~%"))
   (when (or exclude-tags exclude-suites)

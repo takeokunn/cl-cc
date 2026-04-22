@@ -70,6 +70,12 @@
       (assert-eq td (lookup-typeclass 'test-tc)))
     (assert-null (lookup-typeclass 'nonexistent))))
 
+(deftest typeclass-registry-rejects-noncanonical-input
+  "register-typeclass now rejects non-typeclass-def inputs instead of silently normalizing them."
+  (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq)))
+    (assert-signals type-inference-error
+      (register-typeclass 'bad-input '(legacy payload)))))
+
 (deftest typeclass-default-methods-merge-into-instance
   "Instance registration fills missing methods from class defaults."
   (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
@@ -199,67 +205,4 @@
     (assert-equal methods (cl-cc/type::dict-env-lookup 'eq type-int env2))
     (assert-null          (cl-cc/type::dict-env-lookup 'eq type-int env))))
 
-;;; ─── Backward-compat: type-class struct ────────────────────────────────────
-
-(deftest compat-type-class-struct-and-registry
-  "type-class compatibility still exposes the old struct shape, while the registry stores canonical typeclass-def values."
-  (let ((tc (cl-cc/type::make-type-class :name 'show
-                             :type-param (fresh-type-var "a")
-                             :methods '((show-method . nil))
-                             :defaults '((show-method . default-show)))))
-    (assert-true   (cl-cc/type::type-class-p tc))
-    (assert-eq 'show (cl-cc/type::type-class-name tc))
-    (assert-true   (type-var-p (cl-cc/type::type-class-type-param tc)))
-    (assert-equal 1 (length (cl-cc/type::type-class-methods tc)))
-    (assert-equal '((show-method . default-show))
-                  (cl-cc/type::type-class-defaults tc)))
-  (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq)))
-    (let ((tc (cl-cc/type::make-type-class :name 'test-compat :type-param nil :methods nil)))
-      (register-typeclass 'test-compat tc)
-      (let ((stored (lookup-typeclass 'test-compat)))
-        (assert-true (typeclass-def-p stored))
-        (assert-eq 'test-compat (typeclass-def-name stored))))))
-
-;;; ─── Backward-compat: type-skolem ──────────────────────────────────────────
-
-(deftest compat-type-skolem-behavior
-  "make-type-skolem: unique IDs; type-skolem-equal-p checks ID identity."
-  (let ((s1 (cl-cc/type::make-type-skolem "x"))
-        (s2 (cl-cc/type::make-type-skolem "y")))
-    (assert-true  (cl-cc/type::type-skolem-p s1))
-    (assert-true  (cl-cc/type::type-skolem-p s2))
-    (assert-false (= (cl-cc/type::type-skolem-id s1) (cl-cc/type::type-skolem-id s2)))
-    (assert-true  (cl-cc/type::type-skolem-equal-p s1 s1))
-    (assert-false (cl-cc/type::type-skolem-equal-p s1 s2))))
-
-;;; ─── Backward-compat: type-effect ──────────────────────────────────────────
-
-(deftest-each compat-type-effect-name-dispatch
-  "type-effect-name works on type-effect (old, satisfies type-effect-p) and type-effect-op (new)."
-  :cases (("old-style" (cl-cc/type::make-type-effect :name 'io)              'io    t)
-          ("new-style" (make-type-effect-op          :name 'state :args nil) 'state nil))
-  (effect expected-name check-effect-p)
-  (when check-effect-p (assert-true (cl-cc/type::type-effect-p effect)))
-  (assert-eq expected-name (cl-cc/type::type-effect-name effect)))
-
-;;; ─── Backward-compat: type-effectful-function ──────────────────────────────
-
-(deftest compat-type-effectful-function
-  "type-effectful-function extends type-arrow."
-  (let ((ef (cl-cc/type::make-type-effectful-function
-             :params (list type-int) :return type-string
-             :effects +io-effect-row+)))
-    (assert-true (type-arrow-p ef))
-    (assert-equal 1 (length (type-arrow-params ef)))
-    (assert-true (type-equal-p type-string (type-arrow-return ef)))
-    (assert-true (type-effect-row-p (type-arrow-effects ef)))))
-
-;;; ─── Backward-compat: type-forall-type / type-qualified-type ───────────────
-
-(deftest compat-type-accessor-aliases
-  "Accessor aliases: type-forall-type=type-forall-body; type-qualified-type=type-qualified-body."
-  (let* ((v (fresh-type-var "a"))
-         (f (make-type-forall :var v :body type-int)))
-    (assert-true (type-equal-p type-int (cl-cc/type::type-forall-type f))))
-  (let ((q (make-type-qualified :constraints nil :body type-int)))
-    (assert-true (type-equal-p type-int (cl-cc/type::type-qualified-type q)))))
+;;; Legacy compatibility tests removed as part of public surface reduction.

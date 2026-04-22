@@ -8,78 +8,87 @@
 
 ;;; Two-Pass Code Generation (Labels + Jumps)
 
-(defparameter *x86-64-instruction-sizes*
-  (let ((ht (make-hash-table :test #'eq)))
+;;; ============================================================
+;;; x86-64 Instruction Size Table — Data / Logic Separation
+;;; ============================================================
+;;;
+;;; Encoding DATA is declared in *X86-64-INSTRUCTION-SIZE-SPECS*.
+;;; The LOGIC that populates the hash table is in POPULATE-SIZE-TABLE.
+;;; Each spec entry: (type-spec size)
+;;;   type-spec = symbol   → single mapping
+;;;   type-spec = (s1 s2…) → group mapping (all get same size)
+
+(defparameter *x86-64-instruction-size-specs*
+  '(
     ;; Constants and copies
-    (setf (gethash 'vm-const ht) 10)       ; REX + opcode + 8-byte immediate
-    (setf (gethash 'vm-move ht) 3)         ; REX + opcode + ModR/M
+    (vm-const                          10)  ; REX + opcode + 8-byte immediate
+    (vm-move                            3)  ; REX + opcode + ModR/M
     ;; Arithmetic: mov + op
-    (setf (gethash 'vm-add ht) 6)          ; mov + add (3+3)
-    (setf (gethash 'vm-integer-add ht) 6)  ; mov + add
-    (setf (gethash 'vm-sub ht) 6)          ; mov + sub (3+3)
-    (setf (gethash 'vm-integer-sub ht) 6)  ; mov + sub
-    (setf (gethash 'vm-mul ht) 7)          ; mov + imul (3+4, 0F AF)
-    (setf (gethash 'vm-integer-mul ht) 7)  ; mov + imul
+    ((vm-add vm-integer-add)            6)  ; mov + add (3+3)
+    ((vm-sub vm-integer-sub)            6)  ; mov + sub
+    ((vm-mul vm-integer-mul)            7)  ; mov + imul (3+4, 0F AF)
     ;; Control flow
-    (setf (gethash 'vm-halt ht) 3)         ; mov result to RAX
-    (setf (gethash 'vm-label ht) 0)        ; Labels emit no code
-    (setf (gethash 'vm-jump ht) 5)         ; JMP rel32
-    (setf (gethash 'vm-jump-zero ht) 9)    ; TEST + JE rel32 (3 + 6)
-    (setf (gethash 'vm-ret ht) 1)          ; RET
+    (vm-halt                            3)  ; mov result to RAX
+    (vm-label                           0)  ; Labels emit no code
+    (vm-jump                            5)  ; JMP rel32
+    (vm-jump-zero                       9)  ; TEST + JE rel32 (3 + 6)
+    (vm-ret                             1)  ; RET
     ;; No-ops in native codegen
-    (setf (gethash 'vm-print ht) 0)
-    (setf (gethash 'vm-closure ht) 0)
-    (setf (gethash 'vm-call ht) 6)
-    (setf (gethash 'vm-tail-call ht) 3)
+    ((vm-print vm-closure)              0)
+    (vm-call                            6)
+    (vm-tail-call                       3)
     ;; Register spilling
-    (setf (gethash 'vm-spill-store ht) 4)  ; MOV [rbp-disp8], reg
-    (setf (gethash 'vm-spill-load ht) 4)   ; MOV reg, [rbp-disp8]
+    (vm-spill-store                     4)  ; MOV [rbp-disp8], reg
+    (vm-spill-load                      4)  ; MOV reg, [rbp-disp8]
     ;; Comparison: CMP(3) + SETcc(3-4) + MOVZX(4) = 12 max
-    (dolist (tp '(vm-lt vm-gt vm-le vm-ge vm-num-eq vm-eq))
-      (setf (gethash tp ht) 12))
-    ;; Logical NOT: TEST+SETE+MOVZX = 11→12; bitwise NOT: MOV+NOT = 7
-    (setf (gethash 'vm-not ht) 12)
-    (setf (gethash 'vm-lognot ht) 7)
-    (setf (gethash 'vm-logcount ht) 5)
-    (setf (gethash 'vm-integer-length ht) 16)
-    (setf (gethash 'vm-bswap ht) 6)
+    ((vm-lt vm-gt vm-le vm-ge vm-num-eq vm-eq) 12)
+    ;; Logical NOT / bitwise NOT
+    (vm-not                            12)  ; TEST+SETE+MOVZX
+    (vm-lognot                          7)  ; MOV+NOT
+    (vm-logcount                        5)
+    (vm-integer-length                 16)
+    (vm-bswap                           6)
     ;; Unary arithmetic: MOV(3) + op(3-4) = 7
-    (setf (gethash 'vm-neg ht) 7)
-    (setf (gethash 'vm-inc ht) 7)
-    (setf (gethash 'vm-dec ht) 7)
+    ((vm-neg vm-inc vm-dec)             7)
     ;; Abs: MOV + CMP-imm32 + JGE-short + NEG = 15
-    (setf (gethash 'vm-abs ht) 15)
-    ;; Min/max: MOV + CMP + CMOV = 10
-    (setf (gethash 'vm-min ht) 10)
-    (setf (gethash 'vm-max ht) 10)
-    (setf (gethash 'vm-select ht) 10)
+    (vm-abs                            15)
+    ;; Min/max/select: MOV + CMP + CMOV = 10
+    ((vm-min vm-max vm-select)         10)
     ;; Ash: fixed 24-byte sequence
-    (setf (gethash 'vm-ash ht) 24)
+    (vm-ash                            24)
     ;; Rotate: MOV + MOV + ROR + save/restore RCX = 11 bytes
-    (setf (gethash 'vm-rotate ht) 11)
+    (vm-rotate                         11)
     ;; IDIV-based: truncate/rem = 21, floor-div = 34, floor-mod = 37
-    (setf (gethash 'vm-truncate ht) 21)
-    (setf (gethash 'vm-rem ht) 21)
-    (setf (gethash 'vm-div ht) 34)
-    (setf (gethash 'vm-mod ht) 37)
+    ((vm-truncate vm-rem)              21)
+    (vm-div                            34)
+    (vm-mod                            37)
     ;; Boolean logical: XOR+TEST+JE+TEST+JE+ADD = 17
-    (setf (gethash 'vm-and ht) 17)
-    (setf (gethash 'vm-or ht) 17)
+    ((vm-and vm-or)                    17)
     ;; Binary logical: MOV + op = 6
-    (dolist (tp '(vm-logand vm-logior vm-logxor))
-      (setf (gethash tp ht) 6))
+    ((vm-logand vm-logior vm-logxor)    6)
     ;; Scalar float ops: MOVSD + op = 8
-    (dolist (tp '(vm-float-add vm-float-sub vm-float-mul vm-float-div))
-      (setf (gethash tp ht) 8))
-    ;; XNOR = 9, logtest = 14, logbitp = 15
-    (setf (gethash 'vm-logeqv ht) 9)
-    (setf (gethash 'vm-logtest ht) 14)
-    (setf (gethash 'vm-logbitp ht) 15)
+    ((vm-float-add vm-float-sub vm-float-mul vm-float-div) 8)
+    ;; Misc bitwise
+    (vm-logeqv                          9)
+    (vm-logtest                        14)
+    (vm-logbitp                        15)
     ;; Type predicates: null-p = 11; others = 10 (MOV imm64)
-    (setf (gethash 'vm-null-p ht) 11)
-    (dolist (tp '(vm-number-p vm-integer-p vm-cons-p vm-symbol-p vm-function-p))
-      (setf (gethash tp ht) 10))
-    ht)
+    (vm-null-p                         11)
+    ((vm-number-p vm-integer-p vm-cons-p vm-symbol-p vm-function-p) 10))
+  "Declarative spec: VM instruction types → x86-64 encoded byte sizes.
+   Each entry is (type-spec size) where type-spec is a symbol or list of symbols.")
+
+(defun populate-size-table (specs)
+  "Build an eq-hash-table from declarative size specifications."
+  (let ((ht (make-hash-table :test #'eq)))
+    (dolist (entry specs ht)
+      (destructuring-bind (types size) entry
+        (if (consp types)
+            (dolist (tp types) (setf (gethash tp ht) size))
+            (setf (gethash types ht) size))))))
+
+(defparameter *x86-64-instruction-sizes*
+  (populate-size-table *x86-64-instruction-size-specs*)
   "Maps VM instruction struct-type symbols to their x86-64 encoded byte sizes.
    Used by the first pass of two-pass code generation to build label offset tables.")
 

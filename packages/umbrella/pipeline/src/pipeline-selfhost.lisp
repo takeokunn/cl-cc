@@ -14,9 +14,10 @@
   (let* ((*accessor-slot-map*       (make-hash-table :test #'eq))
          (*defstruct-slot-registry* (make-hash-table :test #'eq))
          (*labels-boxed-fns*        nil)
-         (stdlib-program  (compile-toplevel-forms (get-stdlib-forms) :target :vm))
+         (stdlib-result   (compile-toplevel-forms (get-stdlib-forms) :target :vm))
+         (stdlib-program  (compilation-result-program stdlib-result))
          (snapshot-state  (make-instance 'cl-cc/vm:vm-io-state
-                                         :output-stream (make-broadcast-stream))))
+                                          :output-stream (make-broadcast-stream))))
     (cl-cc/vm:run-compiled stdlib-program :state snapshot-state)
     (setf *stdlib-accessor-slot-map*       (%copy-snapshot-ht *accessor-slot-map*)
           *stdlib-defstruct-slot-registry* (%copy-snapshot-ht *defstruct-slot-registry*))

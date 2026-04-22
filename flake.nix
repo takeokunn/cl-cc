@@ -260,12 +260,12 @@
               ${cwdGuard}
               ${pbtSanitize}
               ${faslCacheCleaner}
-              find . -maxdepth 8 -name "*.fasl" -delete
               exec ${sbclCmd} \
-                --eval '(dolist (f (list "packages/foundation/bootstrap/cl-cc-bootstrap.asd" "packages/foundation/ast/cl-cc-ast.asd" "packages/foundation/prolog/cl-cc-prolog.asd" "packages/backend/binary/cl-cc-binary.asd" "packages/backend/runtime/cl-cc-runtime.asd" "packages/backend/bytecode/cl-cc-bytecode.asd" "packages/foundation/ir/cl-cc-ir.asd" "packages/foundation/mir/cl-cc-mir.asd" "packages/foundation/type/cl-cc-type.asd" "packages/engine/optimize/cl-cc-optimize.asd" "packages/backend/emit/cl-cc-emit.asd" "packages/frontend/parse/cl-cc-parse.asd" "packages/frontend/expand/cl-cc-expand.asd" "packages/engine/compile/cl-cc-compile.asd" "packages/engine/vm/cl-cc-vm.asd")) (asdf:load-asd (merge-pathnames f (uiop:getcwd))))' \
                 --load cl-cc-test.asd \
                 --eval '(asdf:disable-output-translations)' \
-                --eval '(handler-case (asdf:operate (quote asdf:load-source-op) :cl-cc/test) (error (e) (format *error-output* "~&FATAL: ~A~%" e) (uiop:quit 1)))' \
+                --eval '(format t "# loading :cl-cc/test~%")' \
+                --eval '(handler-case (asdf:load-system :cl-cc/test) (error (e) (format *error-output* "~&FATAL: ~A~%" e) (uiop:quit 1)))' \
+                --eval '(format t "# starting canonical test plan~%")' \
                 --eval '(uiop:symbol-call :cl-cc/test (quote run-tests))'
             '';
 
@@ -275,7 +275,7 @@
               rm -rf /tmp/cl-cc-coverage
               ${faslCacheCleaner}
               find . -maxdepth 6 -name "*.fasl" -delete
-              exec ${sbclBin} ${sbclFlags} \
+              ${sbclBin} ${sbclFlags} \
                 --non-interactive \
                 --eval '(require :asdf)' \
                 --eval '(require :sb-cover)' \
@@ -286,6 +286,31 @@
                 --eval '(asdf:disable-output-translations)' \
                 --eval '(asdf:load-system :cl-cc/test)' \
                 --eval '(cl-cc/test:run-suite (quote cl-cc/test::cl-cc-suite) :parallel nil :random nil :warm-stdlib t :coverage t)'
+
+              perl -e '
+                use strict; use warnings;
+                my $path = q(/tmp/cl-cc-coverage/cover-index.html);
+                die "coverage index missing: $path\n" unless -f $path;
+                open my $fh, q(<), $path or die "open $path: $!\n";
+                local $/; my $html = <$fh>; close $fh;
+                die "coverage report is empty\n" if index($html, q(No code coverage data found)) >= 0;
+                my ($expr_sum, $expr_n, $branch_sum, $branch_n) = (0,0,0,0);
+                while ($html =~ m{<td class=.text-cell.><a [^>]+>[^<]+</a></td><td>([^<]+)</td><td>([^<]+)</td><td>\s*([^<]+)</td><td>([^<]+)</td><td>([^<]+)</td><td>\s*([^<]+|-)</td>}g) {
+                  my ($expr_pct, $branch_pct) = ($3, $6);
+                  if ($expr_pct ne q(-)) { $expr_sum += $expr_pct; $expr_n++; }
+                  if ($branch_pct ne q(-)) { $branch_sum += $branch_pct; $branch_n++; }
+                }
+                die "no coverage rows parsed\n" unless $expr_n;
+                my $expr_avg = $expr_sum / $expr_n;
+                my $branch_avg = $branch_n ? ($branch_sum / $branch_n) : 0;
+                my $min_expr = $ENV{CL_CC_MIN_EXPR_COVERAGE} // 80;
+                my $min_branch = $ENV{CL_CC_MIN_BRANCH_COVERAGE} // 50;
+                printf "# Coverage averages: expr=%.2f%% branch=%.2f%%\n", $expr_avg, $branch_avg;
+                die sprintf("expression coverage %.2f%% is below threshold %.2f%%\n", $expr_avg, $min_expr)
+                  if $expr_avg < $min_expr;
+                die sprintf("branch coverage %.2f%% is below threshold %.2f%%\n", $branch_avg, $min_branch)
+                  if $branch_n && $branch_avg < $min_branch;
+              '
             '';
 
             load = mkApp "load" ''

@@ -34,7 +34,7 @@
 
 ;;; Macro Expansion in Compiler Tests
 
-(deftest-each compile-control-macros-valued
+(deftest-compile-each compile-control-macros-valued
   "cond/when/unless/and/or macros return the expected values."
   :cases (("cond-match"    42  "(cond ((= 1 2) 10) ((= 1 1) 42) (t 0))")
           ("cond-default"   0  "(cond ((= 1 2) 10) ((= 2 3) 20) (t 0))")
@@ -42,9 +42,7 @@
           ("unless-false"  99  "(unless (= 1 2) 99)")
           ("and-all"        3  "(and 1 2 3)")
           ("or-find"        5  "(or nil nil 5)")
-          ("or-first"       1  "(or 1 2 3)"))
-  (expected form)
-  (assert-run= expected form))
+          ("or-first"       1  "(or 1 2 3)")))
 
 (deftest-each compile-control-macros-nil
   "cond/when/unless/and/or return nil in the false cases."
@@ -55,15 +53,13 @@
   (form)
   (assert-run-false form))
 
-(deftest-each compile-t-nil-constants
+(deftest-compile-each compile-t-nil-constants
   "t and nil are recognized as constants; not inverts truthiness."
   :cases (("t-is-true"    t   "t")
           ("not-nil"      t   "(not nil)")
           ("nil-is-nil"   nil "nil")
           ("not-1"        nil "(not 1)")
-          ("not-t"        nil "(not t)"))
-  (expected form)
-  (assert-run= expected form))
+          ("not-t"        nil "(not t)")))
 
 ;;; List Operation Builtin Tests
 
@@ -81,12 +77,10 @@
   (expected form)
   (assert-= expected (run-string form)))
 
-(deftest-each compile-list-builtins
+(deftest-compile-each compile-list-builtins
   "append/reverse builtins work on lists."
   :cases (("append-len" 4 "(length (append (list 1 2) (list 3 4)))")
-          ("reverse-first" 3 "(first (reverse (list 1 2 3)))"))
-  (expected form)
-  (assert-run= expected form))
+          ("reverse-first" 3 "(first (reverse (list 1 2 3)))")))
 
 ;;; Handler-Case Tests
 
@@ -127,14 +121,12 @@
 
 ;;; Defmacro Compilation Tests
 
-(deftest-each compile-defmacro-numeric
+(deftest-compile-each compile-defmacro-numeric
   "defmacro defines macros that expand and evaluate to the correct numeric result."
   :cases (("basic"      42  "(defmacro my-const () 42) (my-const)")
           ("with-args"  10  "(defmacro my-dbl (x) (list '+ x x)) (my-dbl 5)")
           ("quasiquote" 15  "(defmacro my-add3 (a b c) `(+ ,a (+ ,b ,c))) (my-add3 3 5 7)")
-          ("in-let"     100 "(defmacro my-square (x) `(* ,x ,x)) (let ((n 10)) (my-square n))"))
-  (expected form)
-  (assert-= expected (run-string form)))
+          ("in-let"     100 "(defmacro my-square (x) `(* ,x ,x)) (let ((n 10)) (my-square n))")))
 
 (deftest compile-defmacro-returns-name
   "defmacro returns the macro name; symbol-name returns the name string."
@@ -186,21 +178,17 @@
 
 ;;; FR-603: (setf (values ...)) assigns to multiple places
 
-(deftest-each compile-setf-values
+(deftest-compile-each compile-setf-values
   "(setf (values ...)) assigns multiple values to individual places."
   :cases (("reads-a"    10 "(let ((a 0) (b 0)) (setf (values a b) (values 10 20)) a)")
           ("reads-b"    20 "(let ((a 0) (b 0)) (setf (values a b) (values 10 20)) b)")
-          ("reads-both" 30 "(let ((x 0) (y 0)) (setf (values x y) (values 10 20)) (+ x y))"))
-  (expected form)
-  (assert-= expected (run-string form)))
+          ("reads-both" 30 "(let ((x 0) (y 0)) (setf (values x y) (values 10 20)) (+ x y))")))
 
-(deftest-each compile-obsolete-set
+(deftest-compile-each compile-obsolete-set
   "SET is available as a builtin and assigns through SYMBOL-VALUE without stdlib loading."
   :cases (("returns-value" 42 "(progn (defparameter fr586-set-var 0) (set 'fr586-set-var 42))")
           ("reads-binding" 42 "(progn (defparameter fr586-set-var 0) (set 'fr586-set-var 42) (symbol-value 'fr586-set-var))")
-          ("updates-value" 99 "(progn (defparameter fr586-set-var 0) (set 'fr586-set-var 42) (set 'fr586-set-var 99) (symbol-value 'fr586-set-var))"))
-  (expected form)
-  (assert-= expected (run-string form)))
+          ("updates-value" 99 "(progn (defparameter fr586-set-var 0) (set 'fr586-set-var 42) (set 'fr586-set-var 99) (symbol-value 'fr586-set-var))")))
 
 ;;; Stdlib HOF Tests (with stdlib)
 

@@ -153,9 +153,13 @@
          (values (vm-label-table-lookup labels (vm-closure-entry-label closure)) nil nil))))))
 
 (defmethod execute-instruction ((inst vm-register-function) state pc labels)
-  (declare (ignore labels))
   (let ((name (vm-func-name inst))
-        (closure (vm-reg-get state (vm-src inst))))
+         (closure (vm-reg-get state (vm-src inst))))
+    (when (typep closure 'vm-closure-object)
+      (unless (vm-closure-program-flat closure)
+        (setf (vm-closure-program-flat closure) *vm-exec-flat*))
+      (unless (vm-closure-label-table closure)
+        (setf (vm-closure-label-table closure) labels)))
     (setf (gethash name (vm-function-registry state)) closure)
     (values (1+ pc) nil nil)))
 

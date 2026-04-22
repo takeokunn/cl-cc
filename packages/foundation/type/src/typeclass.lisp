@@ -10,7 +10,8 @@
 ;;;;     %typeclass-instance-args, %typeclass-instance-arg-at,
 ;;;;     %typeclass-fundep-pairs, %typeclass-fundep-violation-p
 ;;;;
-;;;; Instance registry, dict-env, and backward-compat aliases are in typeclass-compat.lisp (loads after).
+;;;; Instance registry and dict-env helpers live here.
+;;;; Backward-compat aliases stay in typeclass-compat.lisp.
 ;;;;
 ;;;; Load order: after representation.lisp, before typeclass-compat.lisp.
 
@@ -44,24 +45,15 @@ FUNCTIONAL-DEPS:  list of (from-params . to-params) — functional dependencies.
 
 (defun %normalize-typeclass-definition (name tc-def)
   "Normalize TC-DEF to the canonical TYPECLASS-DEF representation.
-Old `type-class` values are accepted for compatibility but are converted at
-registration time so the active registry only stores the modern form." 
+The active registry stores only canonical TYPECLASS-DEF values."
   (cond
     ((typeclass-def-p tc-def) tc-def)
-    ((type-class-p tc-def)
-     (make-typeclass-def
-      :name (or (type-class-name tc-def) name)
-      :type-params (if (type-class-type-param tc-def)
-                       (list (type-class-type-param tc-def))
-                       nil)
-      :superclasses (type-class-superclasses tc-def)
-      :methods (type-class-methods tc-def)
-      :defaults (type-class-defaults tc-def)))
-    (t tc-def)))
+    (t (error 'type-inference-error
+              :message (format nil "register-typeclass expected TYPECLASS-DEF for ~A, got ~S"
+                               name tc-def)))))
 
 (defun register-typeclass (name tc-def)
   "Register TC-DEF under NAME in *typeclass-registry*.
-TC-DEF may be a typeclass-def or the old type-class struct — both are accepted.
 The registry stores only normalized TYPECLASS-DEF values."
   (setf (gethash name *typeclass-registry*)
         (%normalize-typeclass-definition name tc-def))
@@ -155,5 +147,122 @@ relative to EXISTING-TYPE. Uses positional matching over type params."
   "Return the canonical typeclass-def for NAME, or nil if not registered."
   (gethash name *typeclass-registry*))
 
-;;; (typeclass-instance, *typeclass-instance-registry*, dict-env, and backward-compat
-;;;  aliases are in typeclass-compat.lisp which loads after this file.)
+;;; ─── typeclass-instance registry / dictionary env ─────────────────────────
+
+(defstruct (typeclass-instance (:constructor %make-typeclass-instance))
+  "A typeclass instance declaration."
+  (class-name    nil :type symbol)
+  (instance-type nil)
+  (constraints   nil :type list)
+  (methods       nil :type list))
+
+(defvar *typeclass-instance-registry*
+  (make-hash-table :test #'equal)
+  "Maps (class-name . type-key-string) to typeclass-instance.")
+
+(defparameter *default-numeric-type* type-int
+  "Default concrete type for unresolved numeric constraints.")
+
+(defparameter *default-numeric-class-names* '("NUM" "NUMERIC")
+  "Typeclass names eligible for numeric defaulting.")
+
+(defun %type-instance-key (class-name type)
+  "Build the hash key for (CLASS-NAME, TYPE)."
+  (cons class-name (type-to-string type)))
+
+(defun register-typeclass-instance (class-name type method-impls)
+  "Register that TYPE implements CLASS-NAME with METHOD-IMPLS."
+  (when (lookup-typeclass-instance class-name type)
+    (error 'type-inference-error
+           :message (format nil "Duplicate typeclass instance for ~A / ~A"
+                            class-name (type-to-string type))))
+  (dolist (existing (loop for k being the hash-keys of *typeclass-instance-registry*
+                          using (hash-value inst)
+                          when (and (consp k) (eq (car k) class-name))
+                          collect inst))
+    (when (%typeclass-instance-overlaps-p (typeclass-instance-instance-type existing) type)
+      (error 'type-inference-error
+             :message (format nil
+                              "Overlapping typeclass instances for ~A: ~A and ~A"
+                              class-name
+                              (type-to-string (typeclass-instance-instance-type existing))
+                              (type-to-string type)))))
+  (let ((tc-def (lookup-typeclass class-name)))
+    (when (typeclass-def-p tc-def)
+      (dolist (existing (loop for k being the hash-keys of *typeclass-instance-registry*
+                              using (hash-value inst)
+                              when (and (consp k) (eq (car k) class-name))
+                              collect inst))
+        (when (%typeclass-fundep-violation-p tc-def
+                                             (typeclass-instance-instance-type existing)
+                                             type)
+          (error 'type-inference-error
+                 :message (format nil
+                                  "Functional dependency violation for ~A: ~A vs ~A"
+                                  class-name
+                                  (type-to-string (typeclass-instance-instance-type existing))
+                                  (type-to-string type)))))))
+  (let ((inst (%make-typeclass-instance
+               :class-name    class-name
+               :instance-type type
+               :constraints   nil
+               :methods       (%merge-default-methods class-name method-impls))))
+    (setf (gethash (%type-instance-key class-name type)
+                   *typeclass-instance-registry*)
+          inst)
+    inst))
+
+(defun lookup-typeclass-instance (class-name type)
+  "Return the typeclass-instance for (CLASS-NAME, TYPE), or nil."
+  (gethash (%type-instance-key class-name type)
+           *typeclass-instance-registry*))
+
+(defun has-typeclass-instance-p (class-name type)
+  "Return T if TYPE has a registered instance for CLASS-NAME."
+  (or (not (null (lookup-typeclass-instance class-name type)))
+      (let ((tc-def (lookup-typeclass class-name)))
+        (when tc-def
+          (let ((supers (and (typeclass-def-p tc-def)
+                             (typeclass-def-superclasses tc-def))))
+            (some (lambda (super)
+                    (has-typeclass-instance-p super type))
+                  supers))))))
+
+(defun default-numeric-typeclass-p (class-name)
+  "Return T if CLASS-NAME should default unresolved numeric type variables."
+  (and (symbolp class-name)
+       (member (symbol-name class-name)
+               *default-numeric-class-names*
+               :test #'string-equal)))
+
+(defun check-typeclass-constraint (class-name type env)
+  "Check if TYPE satisfies CLASS-NAME."
+  (declare (ignore env))
+  (unless (or (type-error-p type)
+              (type-var-p type)
+              (has-typeclass-instance-p class-name type))
+    (error 'type-inference-error
+           :message (format nil "No instance of ~A for ~A"
+                            class-name (type-to-string type)))))
+
+(defun dict-env-extend (class-name type methods env)
+  "Return a new type-env that extends ENV with a method dictionary for (CLASS-NAME, TYPE)."
+  (let ((key (cons class-name (type-to-string type))))
+    (make-type-env
+     :bindings      (type-env-bindings env)
+     :dict-bindings (acons key methods (type-env-dict-bindings env)))))
+
+(defun dict-env-lookup (class-name type env)
+  "Look up the method alist for (CLASS-NAME, TYPE) in ENV's dict-bindings."
+  (let ((key (cons class-name (type-to-string type))))
+    (let ((entry (assoc key (type-env-dict-bindings env) :test #'equal)))
+      (when entry (cdr entry)))))
+
+(eval-when (:load-toplevel :execute)
+  (unless (lookup-typeclass 'num)
+    (register-typeclass 'num (make-typeclass-def
+                              :name 'num
+                              :type-params nil
+                              :methods nil)))
+  (unless (lookup-typeclass-instance 'num type-int)
+    (register-typeclass-instance 'num type-int nil)))

@@ -1,7 +1,17 @@
 ;;;; tests/unit/compile/codegen-functions-tests.lisp — Codegen function/call unit tests
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+
+;; These tests exercise self-tail-loop lowering and closure/defun registration
+;; paths that consult process-global compiler state during compilation. They
+;; pass reliably in isolation but have shown parallel-only flakes in the full
+;; suite, so keep this file on a dedicated serial child suite.
+(defsuite cl-cc-codegen-functions-serial-suite
+  :description "Serial codegen function tests"
+  :parent cl-cc-unit-suite
+  :parallel nil)
+
+(in-suite cl-cc-codegen-functions-serial-suite)
 
 (deftest codegen-function-ref-returns-register
   "Compiling #'fn returns a register."

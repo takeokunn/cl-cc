@@ -32,18 +32,20 @@
 
 (deftest ctx-make-label-behavior
   "make-label: PREFIX_N format; successive calls increment; all prefixes share one counter."
-  (let ((ctx (make-instance 'cl-cc/compile::compiler-context)))
+  (let ((cl-cc/compile::*repl-label-counter* nil))
+    (let ((ctx (make-instance 'cl-cc/compile::compiler-context)))
     ;; format: string with prefix and index
-    (let ((lbl (cl-cc/compile::make-label ctx "IF")))
-      (assert-true (stringp lbl))
-      (assert-equal "IF_0" lbl))
+      (let ((lbl (cl-cc/compile::make-label ctx "IF")))
+        (assert-true (stringp lbl))
+        (assert-equal "IF_0" lbl))
     ;; same prefix increments
-    (assert-equal "IF_1" (cl-cc/compile::make-label ctx "IF")))
+      (assert-equal "IF_1" (cl-cc/compile::make-label ctx "IF"))))
   ;; different prefixes share counter
-  (let ((ctx (make-instance 'cl-cc/compile::compiler-context)))
-    (assert-equal "IF_0"   (cl-cc/compile::make-label ctx "IF"))
-    (assert-equal "ELSE_1" (cl-cc/compile::make-label ctx "ELSE"))
-    (assert-equal "END_2"  (cl-cc/compile::make-label ctx "END"))))
+  (let ((cl-cc/compile::*repl-label-counter* nil))
+    (let ((ctx (make-instance 'cl-cc/compile::compiler-context)))
+      (assert-equal "IF_0"   (cl-cc/compile::make-label ctx "IF"))
+      (assert-equal "ELSE_1" (cl-cc/compile::make-label ctx "ELSE"))
+      (assert-equal "END_2"  (cl-cc/compile::make-label ctx "END")))))
 
 ;;; ─── emit ───────────────────────────────────────────────────────────────────
 

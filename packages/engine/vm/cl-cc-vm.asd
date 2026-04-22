@@ -19,10 +19,18 @@
   :pathname "src"
   :serial t
   :components
-  ((:file "facade-package-defpackage")
+   ((:file "facade-package-defpackage")
+    (:file "exports-instructions")
+    (:file "exports-instructions-constructors-core")
+    (:file "exports-instructions-constructors-io")
+    (:file "exports-runtime")
+    (:file "exports-runtime-objects")
+    (:file "exports-opcodes")
+   (:file "exports-conditions")
    (:file "facade-package")
    (:file "package")
    (:file "vm")
+   (:file "vm-dsl")
    (:file "vm-state-init")
    (:file "vm-bridge")
    (:file "vm-instructions")
@@ -63,7 +71,8 @@
    (:file "array-bits")
    (:file "strings")
    (:file "symbols")
-   (:file "hash")))
+   (:file "hash")
+   (:file "hash-execute")))
 
 ;;;; ---------------------------------------------------------------------
 ;;;; Tests — run with (asdf:test-system :cl-cc-vm) or :cl-cc-vm/tests.

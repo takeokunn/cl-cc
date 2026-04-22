@@ -32,6 +32,17 @@
           (emit ctx (make-vm-const :dst reg :value sym))
           reg))))
 
+(defun %compile-call-arg-registers (args ctx)
+  "Compile ARGS left-to-right and return their result registers."
+  (mapcar (lambda (arg) (compile-ast arg ctx)) args))
+
+(defun %emit-call-like-instruction (tail result-reg func-reg arg-regs ctx)
+  "Emit either a normal call or a tail call and return RESULT-REG."
+  (if tail
+      (emit ctx (make-vm-tail-call :dst result-reg :func func-reg :args arg-regs))
+      (emit ctx (make-vm-call :dst result-reg :func func-reg :args arg-regs)))
+  result-reg)
+
 ;;; ── ast-call fast-path helpers ──────────────────────────────────────────────
 ;;; Each returns RESULT-REG on success, NIL to fall through to the next handler.
 ;;; This "try-each" pattern is the Lisp equivalent of Prolog's clause selection.
@@ -40,17 +51,14 @@
   "Handle (funcall FN ARG...) — emit call/tail-call on the fn value."
   (when (and func-sym (eq func-sym 'funcall) args)
     (let ((func-reg (compile-ast (first args) ctx))
-          (arg-regs (mapcar (lambda (a) (compile-ast a ctx)) (rest args))))
-      (if tail
-          (emit ctx (make-vm-tail-call :dst result-reg :func func-reg :args arg-regs))
-          (emit ctx (make-vm-call      :dst result-reg :func func-reg :args arg-regs)))
-      result-reg)))
+          (arg-regs (%compile-call-arg-registers (rest args) ctx)))
+      (%emit-call-like-instruction tail result-reg func-reg arg-regs ctx))))
 
 (defun %try-compile-apply (func-sym args result-reg ctx)
   "Handle (apply FN ARG...) — emit vm-apply."
   (when (and func-sym (eq func-sym 'apply) args)
     (let ((func-reg (compile-ast (first args) ctx))
-          (arg-regs (mapcar (lambda (a) (compile-ast a ctx)) (rest args))))
+          (arg-regs (%compile-call-arg-registers (rest args) ctx)))
       (emit ctx (make-vm-apply :dst result-reg :func func-reg :args arg-regs))
       result-reg)))
 
@@ -141,7 +149,7 @@
                          (emit ctx (make-vm-car :dst unboxed :src raw-func-reg))
                          unboxed)
                        raw-func-reg))
-         (arg-regs (mapcar (lambda (a) (compile-ast a ctx)) args)))
+         (arg-regs (%compile-call-arg-registers args ctx)))
     (cond
       ;; Self-recursive simple tail call → update params + jump (loop lowering)
       ((and tail

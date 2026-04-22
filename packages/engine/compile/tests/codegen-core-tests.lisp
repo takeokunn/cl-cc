@@ -238,4 +238,22 @@ sink/fold paths."
     (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-aref))
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-move))))
 
+(deftest codegen-result-vm-instructions-without-halt-strips-terminal-halt
+  "%result-vm-instructions-without-halt removes only the final vm-halt instruction."
+  (let* ((move (cl-cc:make-vm-move :dst :R1 :src :R0))
+         (halt (cl-cc:make-vm-halt :reg :R1))
+         (result (cl-cc/compile::make-compilation-result
+                  :program (cl-cc:make-vm-program :instructions (list move halt) :result-register :R1)
+                  :vm-instructions (list move halt))))
+    (assert-equal (list move)
+                  (cl-cc/compile::%result-vm-instructions-without-halt result))))
 
+(deftest-compile-each codegen-toplevel-cps-semantic-preservation
+  "Top-level CPS routing preserves common supported forms."
+  :cases (("two-safe-forms" 7 "(+ 1 2) (+ 3 4)")
+          ("defvar-then-use" 3 "(defvar *ulw-cps* 1) (+ *ulw-cps* 2)")
+          ("call-bearing-form" 6 "(defun add1 (x) (+ x 1)) (add1 5)")
+          ("apply" 6 "(apply + (list 1 2 3))")
+          ("values-primary" 1 "(values 1 2 3)")
+          ("multiple-value-bind" 3 "(multiple-value-bind (a b) (values 1 2) (+ a b))"))
+  :stdlib nil)

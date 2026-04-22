@@ -69,7 +69,8 @@
      (:file "symbols-tests")
      (:file "strings-tests")
      (:file "format-tests")
-     (:file "io-tests")))
+     (:file "io-tests")
+     (:file "io-runners-tests")))
    (:module "ast-tests"
     :pathname "packages/foundation/ast/tests"
     :serial t
@@ -217,6 +218,7 @@
      (:file "unification-tests")           ; product/intersection/constructor/effect-row unification
      (:file "type-children-tests")         ; type-children / type-bound-var data layer
      (:file "types-extended-coverage-tests")
+     (:file "checker-tests")
      (:file "typeclass-tests")
      (:file "printer-tests")
      (:file "parser-tests")
@@ -251,8 +253,8 @@
      (:file "codegen-tests")
      (:file "codegen-fold-tests")       ; %fold-ast-binop, *compile-time-eval-fns*, %evaluate-ast
      (:file "codegen-phase2-helpers")
-     (:file "codegen-core-tests")
-     (:file "codegen-core-array-sink-tests") ; array non-escape/sink: variable-aset, branch-local, escape/shadow scenarios + single-inst/the/hole/narrows
+      (:file "codegen-core-tests")
+      (:file "codegen-core-array-sink-tests") ; array non-escape/sink: variable-aset, branch-local, escape/shadow scenarios + single-inst/the/hole/narrows
      (:file "codegen-type-predicate-tests")
      (:file "codegen-core-let-tests")     ; %ast-let-binding-ignored-p, %ast-cons-call-p, %ast-lambda-bound-names, sink-if
      (:file "codegen-functions-tests")
@@ -267,8 +269,8 @@
      (:file "codegen-string-kwargs-tests")
      (:file "phase2-handler-tests")
      (:file "codegen-phase2-tests")
-     (:file "stdlib-source-tests")
-     (:file "pipeline-native-tests")))
+      (:file "stdlib-source-tests")
+      (:file "pipeline-native-tests")))
    (:module "optimize-tests"
     :pathname "packages/engine/optimize/tests"
     :serial t
@@ -405,8 +407,8 @@
       (:file "optimizer-store-analysis-tests")     ; egraph, bswap/rotate, dead-store, SCCP, store-to-load
      (:file "optimizer-strength-inline-tests") ; strength-reduce, reassociate, inline, helper predicates
      ;; pipeline integration tests (parse pipeline, run-string, incremental)
-     (:file "pipeline-tests")               ; compile-expression, compile-string, run-string, prescan, our-eval
-     (:file "pipeline-repl-tests")          ; run-string-repl, reset-repl-state, compile-with-stdlib, whitespace-symbol-p
+       (:file "pipeline-tests")               ; compile-expression, compile-string, run-string, prescan, stdlib, our-eval
+      (:file "pipeline-repl-tests")          ; run-string-repl, reset-repl-state, compile-with-stdlib, whitespace-symbol-p
       ;; prolog integration tests (queries, rules, goal solving)
       (:file "prolog-tests")
      ;; standalone system load verification
@@ -414,10 +416,10 @@
      (:module "pbt"
       :serial t
       :components
-       ((:file "package")
-        (:file "framework")
-        (:file "framework-dsl")
-        (:file "framework-ast-generators")
+        ((:file "package")
+         (:file "framework")
+         (:file "framework-dsl")
+         (:file "framework-ast-generators")
         (:file "generators")
         (:file "package-macho")
         (:file "generators-macho")

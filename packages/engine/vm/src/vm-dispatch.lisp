@@ -26,31 +26,35 @@ Used by custom method combination to do synchronous sub-calls.")
 (defun %vm-call-closure-sync (closure state args)
   "Call a VM closure synchronously, returning its result value.
 Requires *vm-exec-flat* and *vm-exec-labels* to be bound.
-Saves and restores call stack around the sub-invocation."
-  (unless (and *vm-exec-flat* *vm-exec-labels*)
-    (error "No VM execution context for synchronous sub-call"))
-  (let* ((result-reg (intern "R0" :keyword))
-         (saved-stack-depth (length (vm-call-stack state)))
-         (entry-pc (vm-label-table-lookup *vm-exec-labels*
-                                          (vm-closure-entry-label closure))))
-    (unless entry-pc
-      (error "Cannot resolve entry label ~A" (vm-closure-entry-label closure)))
-    ;; Push a call frame; return-pc is irrelevant since we detect return by stack depth
-    (vm-push-call-frame state 0 result-reg)
-    (push nil (vm-method-call-stack state))
-    (vm-profile-enter-call state (vm-closure-entry-label closure))
-    (vm-bind-closure-args closure state args)
-    ;; Mini execution loop — run until our frame is popped
-    (loop with pc = entry-pc
-          do (when (or (null pc) (>= pc (length *vm-exec-flat*)))
-               (return (vm-reg-get state result-reg)))
-             (multiple-value-bind (next-pc halt-p result)
-                 (execute-instruction (aref *vm-exec-flat* pc) state pc *vm-exec-labels*)
-               (when halt-p (return (or result (vm-reg-get state result-reg))))
-               (when (<= (length (vm-call-stack state)) saved-stack-depth)
-                 ;; Our frame was popped — method returned
-                 (return (vm-reg-get state result-reg)))
-                (setf pc next-pc)))))
+Saves and restores call stack around the sub-invocation." 
+  (let* ((flat (or (vm-closure-program-flat closure) *vm-exec-flat*))
+         (labels (or (vm-closure-label-table closure) *vm-exec-labels*)))
+    (unless (and flat labels)
+      (error "No VM execution context for synchronous sub-call"))
+    (let* ((result-reg (intern "R0" :keyword))
+           (saved-stack-depth (length (vm-call-stack state)))
+           (entry-pc (vm-label-table-lookup labels
+                                            (vm-closure-entry-label closure))))
+      (unless entry-pc
+        (error "Cannot resolve entry label ~A" (vm-closure-entry-label closure)))
+      ;; Push a call frame; return-pc is irrelevant since we detect return by stack depth
+      (vm-push-call-frame state 0 result-reg)
+      (push nil (vm-method-call-stack state))
+      (vm-profile-enter-call state (vm-closure-entry-label closure))
+      (vm-bind-closure-args closure state args)
+      (let ((*vm-exec-flat* flat)
+            (*vm-exec-labels* labels))
+        ;; Mini execution loop — run until our frame is popped
+        (loop with pc = entry-pc
+              do (when (or (null pc) (>= pc (length flat)))
+                   (return (vm-reg-get state result-reg)))
+                 (multiple-value-bind (next-pc halt-p result)
+                     (execute-instruction (aref flat pc) state pc labels)
+                   (when halt-p (return (or result (vm-reg-get state result-reg))))
+                   (when (<= (length (vm-call-stack state)) saved-stack-depth)
+                     ;; Our frame was popped — method returned
+                     (return (vm-reg-get state result-reg)))
+                   (setf pc next-pc)))))))
 
 (defun %vm-closure-object-p (value)
   "Return T when VALUE is a VM closure object." 

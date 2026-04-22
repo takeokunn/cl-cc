@@ -1,20 +1,7 @@
 (in-package :cl-cc/optimize)
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-;;; Optimizer — Pass Pipeline, Reporting, and Top-Level Driver
-;;;
-;;; Contains: opt-pass-inline-iterative, *opt-convergence-passes*,
-;;; *opt-pass-registry*, opt-parse-pass-pipeline-string,
-;;; opt-resolve-pass-pipeline, opt-run-passes-once-with-reporting,
-;;; *opt-iteration-budget-thresholds*, opt-converged-p,
-;;; opt-adaptive-max-iterations, opt-verify-instructions,
-;;; and the public entry point optimize-instructions.
-;;;
-;;; Pass implementations (opt-pass-fold, opt-pass-dce, opt-pass-jump,
-;;; opt-pass-unreachable) and their helpers are in optimizer.lisp (loads before).
-;;;
-;;; Load order: after optimizer.lisp.
+;;; Optimizer — Pass Pipeline, Reporting, and Public Driver
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 
 (defun opt-pass-inline-iterative (instructions)
   "Thresholded inline pass used inside the convergence loop."
@@ -48,9 +35,7 @@
         #'opt-pass-global-dce
         #'opt-pass-dead-labels
         #'opt-pass-dce)
-  "Ordered list of passes run to convergence in optimize-instructions.
-    Each pass is a function (instructions) -> instructions.
-    Add new passes here; the convergence loop requires no other changes.")
+  "Ordered list of passes run to convergence in optimize-instructions.")
 
 (defparameter *opt-pass-registry*
   (let ((ht (make-hash-table :test #'eq)))
@@ -95,9 +80,7 @@
                     (uiop:split-string text :separator '(#\,))))))
 
 (defun opt-resolve-pass-pipeline (pipeline)
-  "Resolve PIPELINE into a list of pass functions.
-PIPELINE may be NIL (use *opt-convergence-passes*), a list of functions,
-or a list of keyword pass names present in *opt-pass-registry*."
+  "Resolve PIPELINE into a list of pass functions."
   (cond
     ((null pipeline) *opt-convergence-passes*)
     ((stringp pipeline) (opt-resolve-pass-pipeline (opt-parse-pass-pipeline-string pipeline)))
@@ -107,7 +90,6 @@ or a list of keyword pass names present in *opt-pass-registry*."
                (or (and (keywordp entry) (gethash entry *opt-pass-registry*))
                    (error "Unknown optimizer pass ~S" entry)))
              pipeline))))
-
 
 (defun %opt-pass-name-string (f)
   (string-upcase (format nil "~A" f)))
@@ -126,10 +108,7 @@ or a list of keyword pass names present in *opt-pass-registry*."
   (format stream "]}~%"))
 
 (defun opt-run-passes-once-with-reporting (prog passes &key print-pass-timings timing-stream print-pass-stats stats-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) trace-enabled trace-events initial-ts-us)
-  "Apply PASSES once while emitting any enabled reports.
-
-Returns three values: next program, updated TRACE-EVENTS list, and updated
-timestamp cursor in microseconds."
+  "Apply PASSES once while emitting any enabled reports."
   (let ((current prog)
         (events trace-events)
         (ts-us initial-ts-us))
@@ -161,27 +140,27 @@ timestamp cursor in microseconds."
         (setf current next)))
     (values current events ts-us)))
 
+(defun %instruction-sequence-equal-p (prev next)
+  "Return T when PREV and NEXT are structurally equivalent instruction streams."
+  (and (= (length prev) (length next))
+       (loop for lhs in prev
+             for rhs in next
+             always (equal (instruction->sexp lhs)
+                           (instruction->sexp rhs)))))
 
 (defun opt-converged-p (prev next)
-  "T if a pass-cycle produced no change (same length and all instructions eq)."
-  (and (= (length prev) (length next))
-       (every #'eq prev next)))
+  "T if a pass-cycle produced no semantic change in the instruction stream."
+  (%instruction-sequence-equal-p prev next))
 
 (defparameter *opt-iteration-budget-thresholds*
   '((50  . -12)
     (150 . -6)
     (400 . 0)
     (800 . 8))
-  "Alist of (instruction-count-upper-bound . budget-delta) for opt-adaptive-max-iterations.
-   Entries are tested in order; the delta from the first matching threshold is used.
-   If no threshold matches (n >= 800), the fallback delta is 15.")
+  "Instruction-count thresholds used by opt-adaptive-max-iterations.")
 
 (defun opt-adaptive-max-iterations (instructions &key (base-iterations 20) (min-iterations 6) (max-iterations 50))
-  "Return a conservative adaptive convergence budget for INSTRUCTIONS.
-
-Small instruction streams converge quickly and therefore use fewer iterations,
-while larger programs get a modestly larger budget. This is a helper-level
-slice of FR-150; it does not use runtime profile counters yet."
+  "Return a conservative adaptive convergence budget for INSTRUCTIONS."
   (let* ((n (length instructions))
          (delta (or (cdr (find-if (lambda (entry) (< n (car entry)))
                                   *opt-iteration-budget-thresholds*))
@@ -191,20 +170,16 @@ slice of FR-150; it does not use runtime profile counters yet."
               (+ base-iterations delta)))))
 
 (defun opt-verify-instructions (instructions &key pass-name)
-  "Conservative VM-level verifier for optimizer/debugging use.
-Checks duplicate labels, unknown jump targets, and obvious use-before-defs in a
-single linear instruction stream. Returns T on success, signals ERROR on failure."
+  "Conservative VM-level verifier for optimizer/debugging use."
   (let ((labels (make-hash-table :test #'equal))
         (defined (make-hash-table :test #'eq))
         (pass-name (or pass-name "<unknown-pass>")))
-    ;; Pass 1: label collection / duplicate detection.
     (dolist (inst instructions)
       (when (typep inst 'vm-label)
         (let ((name (vm-name inst)))
           (when (gethash name labels)
             (error "~A verifier: duplicate label ~A" pass-name name))
           (setf (gethash name labels) t))))
-    ;; Pass 2: reference + use-before-def checks.
     (dolist (inst instructions)
       (typecase inst
         ((or vm-jump vm-jump-zero)
@@ -220,13 +195,7 @@ single linear instruction stream. Returns T on success, signals ERROR on failure
     t))
 
 (defvar *skip-optimizer-passes* nil
-  "When non-NIL, optimize-instructions returns its input unchanged (with
-   leaf-p = NIL) without running any passes. Used by Phase 4 selfhost
-   source-loading where we only care whether each file parses/compiles/loads,
-   not runtime efficiency — skipping the full multi-pass pipeline for every
-   form delivers a ~2-3x wall-time reduction. NOTE: opt-resolve-pass-pipeline
-   treats NIL as 'use default passes', so this short-circuit is required —
-   you cannot disable the optimizer by passing :pass-pipeline nil.")
+  "When non-NIL, optimize-instructions returns its input unchanged.")
 
 (defun %maybe-apply-prolog-peephole (instructions)
   "Apply the Prolog peephole adapter when enabled, preserving INSTRUCTIONS otherwise."
@@ -235,37 +204,50 @@ single linear instruction stream. Returns T on success, signals ERROR on failure
               (apply-prolog-peephole (mapcar #'instruction->sexp instructions)))
       instructions))
 
+(defun %opt-run-iteration (instructions passes print-pass-timings timing-stream
+                             print-pass-stats stats-stream print-opt-remarks
+                             opt-remarks-stream opt-remarks-mode trace-json-stream
+                             trace-events trace-ts-us)
+  "Run one optimizer iteration after a Prolog peephole normalization pass."
+  (let ((peepholed (%maybe-apply-prolog-peephole instructions)))
+    (opt-run-passes-once-with-reporting peepholed passes
+                                        :print-pass-timings print-pass-timings
+                                        :timing-stream timing-stream
+                                        :print-pass-stats print-pass-stats
+                                        :stats-stream stats-stream
+                                        :print-opt-remarks print-opt-remarks
+                                        :opt-remarks-stream opt-remarks-stream
+                                        :opt-remarks-mode opt-remarks-mode
+                                        :trace-enabled (not (null trace-json-stream))
+                                        :trace-events trace-events
+                                        :initial-ts-us trace-ts-us)))
+
 (defun optimize-instructions (instructions &key (max-iterations 20) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Run the full multi-pass optimization pipeline on a VM instruction sequence.
-   Runs until no changes or MAX-ITERATIONS reached.
-   When *skip-optimizer-passes* is non-NIL, returns (values instructions nil)
-   immediately without running any passes."
+Runs until no changes or MAX-ITERATIONS reached.
+When *skip-optimizer-passes* is non-NIL, returns (values instructions nil)
+immediately without running any passes."
   (when *skip-optimizer-passes*
     (return-from optimize-instructions (values instructions nil)))
   (let ((prog (%maybe-apply-prolog-peephole instructions))
-         (max-iterations (if (eq max-iterations :adaptive)
-                             (opt-adaptive-max-iterations instructions)
-                             max-iterations))
-         (passes (opt-resolve-pass-pipeline pass-pipeline))
-         (timing-stream (or timing-stream *standard-output*))
-         (opt-remarks-stream (or opt-remarks-stream *standard-output*))
-         (stats-stream (or stats-stream *standard-output*))
-         (trace-events nil)
-         (trace-ts-us 0))
+        (max-iterations (if (eq max-iterations :adaptive)
+                            (opt-adaptive-max-iterations instructions)
+                            max-iterations))
+        (passes (opt-resolve-pass-pipeline pass-pipeline))
+        (timing-stream (or timing-stream *standard-output*))
+        (opt-remarks-stream (or opt-remarks-stream *standard-output*))
+        (stats-stream (or stats-stream *standard-output*))
+        (trace-events nil)
+        (trace-ts-us 0))
     (loop for iteration from 0 below max-iterations
           for prev = prog
           do (multiple-value-setq (prog trace-events trace-ts-us)
-               (opt-run-passes-once-with-reporting prog passes
-                                                  :print-pass-timings print-pass-timings
-                                                  :timing-stream timing-stream
-                                                  :print-pass-stats print-pass-stats
-                                                  :stats-stream stats-stream
-                                                  :print-opt-remarks print-opt-remarks
-                                                  :opt-remarks-stream opt-remarks-stream
-                                                  :opt-remarks-mode opt-remarks-mode
-                                                  :trace-enabled (not (null trace-json-stream))
-                                                  :trace-events trace-events
-                                                  :initial-ts-us trace-ts-us))
+               (%opt-run-iteration prog passes
+                                   print-pass-timings timing-stream
+                                   print-pass-stats stats-stream
+                                   print-opt-remarks opt-remarks-stream
+                                   opt-remarks-mode trace-json-stream
+                                   trace-events trace-ts-us))
           when (opt-converged-p prev prog)
           return prog)
     (setf prog (%maybe-apply-prolog-peephole prog))

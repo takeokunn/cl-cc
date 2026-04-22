@@ -4,6 +4,20 @@
 ;;; Shared state-copy helpers
 ;;; ------------------------------------------------------------
 
+(defmacro with-replaced-function ((name replacement) &body body)
+  "Temporarily replace NAME's global function binding while BODY runs."
+  (let ((old (gensym "OLD-FN"))
+        (had (gensym "HAD-FN")))
+    `(let ((,had (fboundp ',name))
+           (,old (ignore-errors (symbol-function ',name))))
+       (unwind-protect
+            (progn
+              (setf (symbol-function ',name) ,replacement)
+              ,@body)
+         (if ,had
+             (setf (symbol-function ',name) ,old)
+             (fmakunbound ',name))))))
+
 (defun %copy-hash-table-shallow (table)
   "Return a shallow copy of TABLE preserving its test function."
   (let ((copy (make-hash-table :test (hash-table-test table)
@@ -41,12 +55,21 @@
 ;;; ------------------------------------------------------------
 
 (defmacro with-reset-repl-state (&body body)
-  "Run BODY with a clean REPL state, and always restore the REPL to empty."
-  `(unwind-protect
-       (progn
+  "Run BODY with a clean REPL state and restore the caller package afterwards.
+
+REPL-oriented tests reset the persistent VM/compiler state, but some test flows
+also switch `*package*` via `(in-package ...)`. Restoring the caller package
+here keeps REPL fixtures order-independent without widening the public fixture
+surface."
+  (let ((saved-package (gensym "SAVED-PACKAGE")))
+    `(let ((,saved-package *package*))
+       (unwind-protect
+            (progn
+              (reset-repl-state)
+              (setf *package* ,saved-package)
+              ,@body)
          (reset-repl-state)
-         ,@body)
-     (reset-repl-state)))
+         (setf *package* ,saved-package)))))
 
 (defun %snapshot-prolog-db (&key (copy-value #'identity))
   "Snapshot the Prolog rule database using COPY-VALUE for each rule bucket."

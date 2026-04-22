@@ -21,7 +21,7 @@
   "Build a type-effect-row containing effect nodes for each name in NAMES,
 with ROW-VAR as the tail."
   (make-type-effect-row
-   :effects (mapcar (lambda (n) (make-type-effect :name n)) names)
+   :effects (mapcar (lambda (n) (make-type-effect-op :name n :args nil)) names)
    :row-var row-var))
 
 ;;; ─── Type Unification ─────────────────────────────────────────────────────

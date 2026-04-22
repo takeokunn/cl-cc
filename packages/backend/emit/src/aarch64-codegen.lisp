@@ -56,206 +56,171 @@
                         0)))
         index)))
 
-;;; AArch64 Instruction Encodings
+;;; ============================================================
+;;; AArch64 Instruction Encoding — Data / Logic Separation
+;;; ============================================================
+;;;
+;;; The DEFENC macro separates encoding DATA (base opcode, field layout)
+;;; from encoding LOGIC (logior + ash + logand packing).
+;;;
+;;; Each call specifies:
+;;;   (mnemonic base-constant lambda-list docstring (param mask shift)...)
+;;;
+;;; The macro generates ENCODE-<MNEMONIC> functions that pack bit fields
+;;; into 32-bit instruction words.
 
-;;; MOVZ Xd, #imm16, LSL #(hw*16)
-;;; Encoding: 1_10_100101_hw_imm16_Rd
-;;; Base constant: #xD2800000 (sf=1, opc=MOVZ, fixed bits)
-(defun encode-movz (rd imm16 &optional (hw 0))
+(defmacro defenc (mnemonic base lambda-list docstring &rest fields)
+  "Define an AArch64 instruction encoder from a data specification.
+   MNEMONIC: symbol — generates ENCODE-<MNEMONIC>.
+   BASE:     base opcode constant (fixed bits).
+   FIELDS:   ((param mask shift)...) — each field is OR'd into BASE."
+  (let ((fname (intern (format nil "ENCODE-~A" (symbol-name mnemonic)))))
+    `(defun ,fname ,lambda-list
+       ,docstring
+       (logior ,base
+               ,@(loop for (param mask shift) in fields
+                       collect `(ash (logand ,param ,mask) ,shift))))))
+
+;;; --- Move Instructions ---
+
+;; MOVZ Xd, #imm16, LSL #(hw*16)
+;; Encoding: 1_10_100101_hw_imm16_Rd
+(defenc movz #xD2800000 (rd imm16 &optional (hw 0))
   "MOVZ Xd, #imm16, LSL #(hw*16). hw=0..3 for shifts 0,16,32,48."
-  (logior #xD2800000
-          (ash (logand hw 3) 21)
-          (ash (logand imm16 #xFFFF) 5)
-          (logand rd #x1F)))
+  (rd #x1F 0) (imm16 #xFFFF 5) (hw 3 21))
 
-;;; MOVK Xd, #imm16, LSL #(hw*16) - move with keep (preserves other bits)
-;;; Base constant: #xF2800000 (sf=1, opc=MOVK, fixed bits)
-(defun encode-movk (rd imm16 &optional (hw 0))
+;; MOVK Xd, #imm16, LSL #(hw*16)
+(defenc movk #xF2800000 (rd imm16 &optional (hw 0))
   "MOVK Xd, #imm16, LSL #(hw*16)."
-  (logior #xF2800000
-          (ash (logand hw 3) 21)
-          (ash (logand imm16 #xFFFF) 5)
-          (logand rd #x1F)))
+  (rd #x1F 0) (imm16 #xFFFF 5) (hw 3 21))
 
-;;; MOV Xd, Xn (register) = ORR Xd, XZR, Xn
-;;; Encoding: #xAA0003E0 | (Xn << 16) | Xd
-;;; (XZR=31 in Rn position at bits 9-5, already embedded in base)
-(defun encode-mov-rr (rd rn)
+;; MOV Xd, Xn (register) = ORR Xd, XZR, Xn
+;; Encoding: #xAA0003E0 | (Xn << 16) | Xd
+(defenc mov-rr #xAA0003E0 (rd rn)
   "MOV Xd, Xn (register copy via ORR Xd, XZR, Xn)."
-  (logior #xAA0003E0
-          (ash (logand rn #x1F) 16)
-          (logand rd #x1F)))
+  (rd #x1F 0) (rn #x1F 16))
 
-;;; REV Wd, Wn (32-bit byte reverse)
-;;; Encoding: #x5AC00800 | (Rn << 5) | Rd
-(defun encode-rev32 (rd rn)
+;;; --- Byte Manipulation ---
+
+;; REV Wd, Wn (32-bit byte reverse)
+(defenc rev32 #x5AC00800 (rd rn)
   "REV Wd, Wn (reverse bytes in low 32 bits)."
-  (logior #x5AC00800
-          (ash (logand rn #x1F) 5)
-          (logand rd #x1F)))
+  (rd #x1F 0) (rn #x1F 5))
 
-;;; ADD Xd, Xn, Xm (64-bit, no shift)
-;;; Encoding: #x8B000000 | (Xm << 16) | (Xn << 5) | Xd
-(defun encode-add (rd rn rm)
+;;; --- Arithmetic (3-register) ---
+
+;; ADD Xd, Xn, Xm (64-bit, no shift)
+(defenc add #x8B000000 (rd rn rm)
   "ADD Xd, Xn, Xm (64-bit)."
-  (logior #x8B000000
-          (ash (logand rm #x1F) 16)
-          (ash (logand rn #x1F) 5)
-          (logand rd #x1F)))
+  (rd #x1F 0) (rn #x1F 5) (rm #x1F 16))
 
-;;; SUB Xd, Xn, Xm (64-bit, no shift)
-;;; Encoding: #xCB000000 | (Xm << 16) | (Xn << 5) | Xd
-(defun encode-sub (rd rn rm)
+;; SUB Xd, Xn, Xm (64-bit, no shift)
+(defenc sub #xCB000000 (rd rn rm)
   "SUB Xd, Xn, Xm (64-bit)."
-  (logior #xCB000000
-          (ash (logand rm #x1F) 16)
-          (ash (logand rn #x1F) 5)
-          (logand rd #x1F)))
+  (rd #x1F 0) (rn #x1F 5) (rm #x1F 16))
 
-;;; MUL Xd, Xn, Xm = MADD Xd, Xn, Xm, XZR
-;;; Encoding: #x9B007C00 | (Xm << 16) | (Xn << 5) | Xd
-;;; (XZR=31 in Ra position at bits 14-10, already embedded as #x7C00)
-(defun encode-mul (rd rn rm)
+;; MUL Xd, Xn, Xm = MADD Xd, Xn, Xm, XZR
+(defenc mul #x9B007C00 (rd rn rm)
   "MUL Xd, Xn, Xm (via MADD Xd, Xn, Xm, XZR)."
-  (logior #x9B007C00
-          (ash (logand rm #x1F) 16)
-          (ash (logand rn #x1F) 5)
-          (logand rd #x1F)))
+  (rd #x1F 0) (rn #x1F 5) (rm #x1F 16))
 
-;;; CMP Xn, Xm (alias for SUBS XZR, Xn, Xm)
-;;; Encoding: #xEB00001F | (Rm << 16) | (Rn << 5)
-(defun encode-cmp (rn rm)
+;; CMP Xn, Xm (alias for SUBS XZR, Xn, Xm)
+(defenc cmp #xEB00001F (rn rm)
   "CMP Xn, Xm (compare signed 64-bit registers)."
-  (logior #xEB00001F
-          (ash (logand rm #x1F) 16)
-          (ash (logand rn #x1F) 5)))
+  (rn #x1F 5) (rm #x1F 16))
 
-;;; CSEL Xd, Xn, Xm, cond
-;;; Encoding: #x9A800000 | (Rm << 16) | (cond << 12) | (Rn << 5) | Rd
-(defun encode-csel (rd rn rm cond)
+;;; --- Conditional ---
+
+;; CSEL Xd, Xn, Xm, cond
+(defenc csel #x9A800000 (rd rn rm cond)
   "CSEL Xd, Xn, Xm, cond (conditional select)."
-  (logior #x9A800000
-          (ash (logand rm #x1F) 16)
-          (ash (logand cond #xF) 12)
-          (ash (logand rn #x1F) 5)
-          (logand rd #x1F)))
+  (rd #x1F 0) (rn #x1F 5) (rm #x1F 16) (cond #xF 12))
 
-;;; RORV Xd, Xn, Xm (rotate right variable)
-;;; Encoding: #x9AC02C00 | (Rm << 16) | (Rn << 5) | Rd
-(defun encode-rorv (rd rn rm)
+;;; --- Shift / Rotate ---
+
+;; RORV Xd, Xn, Xm (rotate right variable)
+(defenc rorv #x9AC02C00 (rd rn rm)
   "RORV Xd, Xn, Xm (rotate right by bottom bits of Xm)."
-  (logior #x9AC02C00
-          (ash (logand rm #x1F) 16)
-          (ash (logand rn #x1F) 5)
-          (logand rd #x1F)))
+  (rd #x1F 0) (rn #x1F 5) (rm #x1F 16))
 
-;;; CBZ Xn, #imm (Compare and Branch if Zero)
-;;; Encoding: #xB4000000 | (imm19 << 5) | Xn
-;;; imm19 is PC-relative offset in units of 4 bytes (instructions)
-(defun encode-cbz (rn imm19)
+;;; --- Branch ---
+
+;; CBZ Xn, #imm (Compare and Branch if Zero)
+(defenc cbz #xB4000000 (rn imm19)
   "CBZ Xn, #imm19 (branch if Xn == 0). imm19 in instruction units."
-  (logior #xB4000000
-          (ash (logand imm19 #x7FFFF) 5)
-          (logand rn #x1F)))
+  (rn #x1F 0) (imm19 #x7FFFF 5))
 
-;;; B #imm (Unconditional branch)
-;;; Encoding: #x14000000 | imm26
-;;; imm26 is PC-relative offset in units of 4 bytes
-(defun encode-b (imm26)
+;; B #imm (Unconditional branch)
+(defenc b #x14000000 (imm26)
   "B #imm26 (unconditional branch). imm26 in instruction units."
-  (logior #x14000000
-          (logand imm26 #x3FFFFFF)))
+  (imm26 #x3FFFFFF 0))
 
-;;; BLR Xn (Branch with Link to Register - indirect call)
-;;; Encoding: #xD63F0000 | (Xn << 5)
-(defun encode-blr (rn)
+;; BLR Xn (Branch with Link to Register - indirect call)
+(defenc blr #xD63F0000 (rn)
   "BLR Xn (indirect call through register)."
-  (logior #xD63F0000
-          (ash (logand rn #x1F) 5)))
+  (rn #x1F 5))
 
-;;; BR Xn (Branch to Register - indirect tail call)
-;;; Encoding: #xD61F0000 | (Xn << 5)
-(defun encode-br (rn)
+;; BR Xn (Branch to Register - indirect tail call)
+(defenc br #xD61F0000 (rn)
   "BR Xn (indirect tail jump through register)."
-  (logior #xD61F0000
-          (ash (logand rn #x1F) 5)))
+  (rn #x1F 5))
 
-;;; RET (Return using X30/LR)
-;;; Fixed encoding: #xD65F03C0
+;;; --- RET (fixed encoding, no variable fields) ---
+
 (defconstant +a64-ret+ #xD65F03C0
   "AArch64 RET instruction (return via X30).")
 
-;;; STUR Xt, [Xn, #simm9] (Store Unscaled - handles negative offsets)
-;;; Encoding: #xF8000000 | (simm9 << 12) | (Xn << 5) | Xt
-;;; simm9 is a 9-bit signed byte offset
-(defun encode-stur (rt rn simm9)
+;;; --- Memory: Unscaled ---
+
+;; STUR Xt, [Xn, #simm9] (handles negative offsets)
+(defenc stur #xF8000000 (rt rn simm9)
   "STUR Xt, [Xn, #simm9] (unscaled store, supports negative offsets)."
-  (logior #xF8000000
-          (ash (logand simm9 #x1FF) 12)
-          (ash (logand rn #x1F) 5)
-          (logand rt #x1F)))
+  (rt #x1F 0) (rn #x1F 5) (simm9 #x1FF 12))
 
-;;; LDUR Xt, [Xn, #simm9] (Load Unscaled - handles negative offsets)
-;;; Encoding: #xF8400000 | (simm9 << 12) | (Xn << 5) | Xt
-(defun encode-ldur (rt rn simm9)
+;; LDUR Xt, [Xn, #simm9] (handles negative offsets)
+(defenc ldur #xF8400000 (rt rn simm9)
   "LDUR Xt, [Xn, #simm9] (unscaled load, supports negative offsets)."
-  (logior #xF8400000
-          (ash (logand simm9 #x1FF) 12)
-          (ash (logand rn #x1F) 5)
-          (logand rt #x1F)))
+  (rt #x1F 0) (rn #x1F 5) (simm9 #x1FF 12))
 
-;;; STR Xt, [Xn], #simm9 (post-indexed store)
-(defun encode-str-post (rt rn simm9)
+;;; --- Memory: Indexed ---
+
+;; STR Xt, [Xn], #simm9 (post-indexed store)
+(defenc str-post #xF8000400 (rt rn simm9)
   "STR Xt, [Xn], #simm9 (post-indexed store with writeback)."
-  (logior #xF8000400
-          (ash (logand simm9 #x1FF) 12)
-          (ash (logand rn #x1F) 5)
-          (logand rt #x1F)))
+  (rt #x1F 0) (rn #x1F 5) (simm9 #x1FF 12))
 
-;;; LDR Xt, [Xn, #simm9]! (pre-indexed load)
-(defun encode-ldr-pre (rt rn simm9)
+;; LDR Xt, [Xn, #simm9]! (pre-indexed load)
+(defenc ldr-pre #xF8400C00 (rt rn simm9)
   "LDR Xt, [Xn, #simm9]! (pre-indexed load with writeback)."
-  (logior #xF8400C00
-          (ash (logand simm9 #x1FF) 12)
-          (ash (logand rn #x1F) 5)
-          (logand rt #x1F)))
+  (rt #x1F 0) (rn #x1F 5) (simm9 #x1FF 12))
 
-;;; STP Xt1, Xt2, [Xn, #imm7*8]! (pre-index store pair)
-;;; Encoding: #xA9800000 | (imm7 << 15) | (Xt2 << 10) | (Xn << 5) | Xt1
-;;; imm7 is a 7-bit signed value; actual offset = imm7 * 8
-(defun encode-stp-pre (rt1 rt2 rn imm7)
+;;; --- Memory: Pair ---
+
+;; STP Xt1, Xt2, [Xn, #imm7*8]! (pre-index store pair)
+(defenc stp-pre #xA9800000 (rt1 rt2 rn imm7)
   "STP Xt1, Xt2, [Xn, #imm7*8]! (pre-indexed). imm7 can be negative."
-  (logior #xA9800000
-          (ash (logand imm7 #x7F) 15)
-          (ash (logand rt2 #x1F) 10)
-          (ash (logand rn #x1F) 5)
-          (logand rt1 #x1F)))
+  (rt1 #x1F 0) (rn #x1F 5) (rt2 #x1F 10) (imm7 #x7F 15))
 
-;;; LDP Xt1, Xt2, [Xn], #imm7*8 (post-index load pair)
-;;; Encoding: #xA8C00000 | (imm7 << 15) | (Xt2 << 10) | (Xn << 5) | Xt1
-(defun encode-ldp-post (rt1 rt2 rn imm7)
+;; LDP Xt1, Xt2, [Xn], #imm7*8 (post-index load pair)
+(defenc ldp-post #xA8C00000 (rt1 rt2 rn imm7)
   "LDP Xt1, Xt2, [Xn], #imm7*8 (post-indexed). imm7 can be positive."
-  (logior #xA8C00000
-          (ash (logand imm7 #x7F) 15)
-          (ash (logand rt2 #x1F) 10)
-          (ash (logand rn #x1F) 5)
-          (logand rt1 #x1F)))
+  (rt1 #x1F 0) (rn #x1F 5) (rt2 #x1F 10) (imm7 #x7F 15))
 
-;;; B.cond #imm (conditional branch)
-(defun encode-b-cond (imm19 cond)
+;;; --- Conditional Branch ---
+
+;; B.cond #imm
+(defenc b-cond #x54000000 (imm19 cond)
   "B.cond #imm19 with condition code COND. imm19 is in instruction units."
-  (logior #x54000000
-          (ash (logand imm19 #x7FFFF) 5)
-          (logand cond #xF)))
+  (imm19 #x7FFFF 5) (cond #xF 0))
 
-;;; BRK #imm16
-(defun encode-brk (&optional (imm16 0))
+;;; --- Exception ---
+
+;; BRK #imm16
+(defenc brk #xD4200000 (&optional (imm16 0))
   "BRK #imm16 exception instruction."
-  (logior #xD4200000
-          (ash (logand imm16 #xFFFF) 5)))
+  (imm16 #xFFFF 5))
 
 ;; emit-a64-mov-imm64, a64-imm64-size, *a64-instruction-sizes*, a64-instruction-size,
 ;; and build-a64-label-offsets are in aarch64-codegen-labels.lisp (loaded next).
 
 ;;; VM Instruction Emitters
-

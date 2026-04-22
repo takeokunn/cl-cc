@@ -1,8 +1,11 @@
-;;;; packages/backend/binary/src/wasm.lisp - WASM Binary Format Encoder
+;;;; packages/backend/binary/src/wasm.lisp - WASM Binary Format Utilities
 ;;;
-;;; Implements the WebAssembly binary format encoder for cl-cc.
-;;; Supports the GC proposal (struct/array types), LEB128 encoding,
-;;; and incremental section building via wasm-binary-builder.
+;;; LEB128 encoding, byte buffer helpers, and IEEE754 double-float bit
+;;; manipulation used by the WASM emit pipeline and tests.
+;;;
+;;; Note: The WASM binary section encoder (wasm-binary-builder, type encoding,
+;;; section serialization) was removed as dead code — the emit pipeline uses
+;;; WAT text format instead (see wasm-trampoline-emit.lisp).
 ;;;
 ;;; Reference: https://webassembly.github.io/spec/core/binary/index.html
 
@@ -61,11 +64,7 @@
   "Write VALUE as signed LEB128 into BUF."
   (wasm-buf-write-bytes buf (encode-sleb128 value)))
 
-(defun wasm-buf-write-string-utf8 (buf str)
-  "Write STR as a UTF-8 length-prefixed string (LEB128 length + bytes)."
-  (let ((bytes (map 'list #'char-code str)))
-    (wasm-buf-write-uleb128 buf (length bytes))
-    (wasm-buf-write-bytes buf bytes)))
+;; Note: wasm-buf-write-string-utf8 removed (dead code — never called from production or tests).
 
 (defun portable-double-float-bits (value)
   "Return VALUE as an IEEE754 double bit pattern using portable CL operations."
@@ -110,134 +109,15 @@
     (loop for shift from 0 to 24 by 8
           do (wasm-buf-write-byte buf (logand (ash hi (- shift)) #xff)))))
 
-(defun wasm-buffer-to-array (buf)
-  "Convert a WASM byte buffer to a simple (unsigned-byte 8) array."
-  (binary-buffer-to-array buf))
+;; Note: wasm-buffer-to-array removed (dead code — never called from production or tests).
 
-;;; ------------------------------------------------------------
-;;; Section 3: WASM Binary Format Constants
-;;; ------------------------------------------------------------
-
-;;; SBCL: defvar for list-valued "constants" (lists are not eql-comparable)
-(defvar +wasm-magic-bytes+ '(0 #x61 #x73 #x6d))    ; "\0asm"
-(defvar +wasm-version-bytes+ '(1 0 0 0))
-
-;;; ------------------------------------------------------------
-;;; Section 4: WASM Module Binary Builder
-;;; ------------------------------------------------------------
-
-(defstruct (wasm-binary-builder (:conc-name wasm-bin-))
-  "Accumulates WASM module sections for binary serialization."
-  ;; Each section is an adjustable byte buffer; nil means not yet started
-  (type-buf nil)      ; type section payload
-  (import-buf nil)    ; import section payload
-  (func-buf nil)      ; function section payload (type indices)
-  (table-buf nil)     ; table section payload
-  (memory-buf nil)    ; memory section payload
-  (global-buf nil)    ; global section payload
-  (export-buf nil)    ; export section payload
-  (element-buf nil)   ; element section payload
-  (code-buf nil)      ; code section payload (function bodies)
-  (data-buf nil)      ; data section payload
-  ;; counts for vector headers
-  (type-count 0 :type integer)
-  (import-count 0 :type integer)
-  (func-count 0 :type integer)
-  (table-count 0 :type integer)
-  (global-count 0 :type integer)
-  (export-count 0 :type integer)
-  (element-count 0 :type integer)
-  (code-count 0 :type integer)
-  (data-count 0 :type integer))
-
-;;; ------------------------------------------------------------
-;;; Section 5: Section Serialization Helper
-;;; ------------------------------------------------------------
-
-(defun wasm-write-section (out section-id payload-buf)
-  "Write a WASM section with SECTION-ID and PAYLOAD-BUF content to OUT."
-  (when (plusp (length payload-buf))
-    (wasm-buf-write-byte out section-id)
-    (wasm-buf-write-uleb128 out (length payload-buf))
-    (wasm-buf-write-bytes out payload-buf)))
-
-;;; ------------------------------------------------------------
-;;; Section 6: Value Type Encoder
-;;; ------------------------------------------------------------
-
-(defun encode-valtype (type-spec buf)
-  "Write the binary encoding of a WASM value type into BUF.
-   TYPE-SPEC can be: :i32 :i64 :f32 :f64 :funcref :externref :anyref :eqref
-   :i31ref :structref :arrayref, or (:ref N) or (:ref-null N) where N is a
-   heap type index (signed LEB128)."
-  (etypecase type-spec
-    (keyword
-     (case type-spec
-       (:i32       (wasm-buf-write-byte buf #x7f))
-       (:i64       (wasm-buf-write-byte buf #x7e))
-       (:f32       (wasm-buf-write-byte buf #x7d))
-       (:f64       (wasm-buf-write-byte buf #x7c))
-       (:funcref   (wasm-buf-write-byte buf #x70))
-       (:externref (wasm-buf-write-byte buf #x6f))
-       (:anyref    (wasm-buf-write-byte buf #x6e))
-       (:eqref     (wasm-buf-write-byte buf #x6d))
-       (:i31ref    (wasm-buf-write-byte buf #x6c))
-       (:structref (wasm-buf-write-byte buf #x6b))
-       (:arrayref  (wasm-buf-write-byte buf #x6a))
-       (otherwise  (error "Unknown WASM value type keyword: ~S" type-spec))))
-    (list
-     (case (first type-spec)
-       (:ref
-        ;; Non-nullable ref: 0x64 <heap-type> (GC proposal)
-        (wasm-buf-write-byte buf #x64)
-        (wasm-buf-write-sleb128 buf (second type-spec)))
-       (:ref-null
-        ;; Nullable ref: 0x63 <heap-type>
-        (wasm-buf-write-byte buf #x63)
-        (wasm-buf-write-sleb128 buf (second type-spec)))
-       (otherwise (error "Unknown WASM type spec: ~S" type-spec))))))
-
-;;; ------------------------------------------------------------
-;;; Section 7: Type Section Encoding
-;;; ------------------------------------------------------------
-
-(defun encode-func-type (params results buf)
-  "Encode a function type signature (0x60 params results) into BUF.
-   PARAMS and RESULTS are lists of value type specs."
-  (wasm-buf-write-byte buf #x60)
-  (wasm-buf-write-uleb128 buf (length params))
-  (dolist (p params) (encode-valtype p buf))
-  (wasm-buf-write-uleb128 buf (length results))
-  (dolist (r results) (encode-valtype r buf)))
-
-(defun encode-struct-type (fields buf)
-  "Encode a struct type (0x5f [fields]) into BUF.
-   FIELDS is a list of (type-spec mutability) pairs where mutability is
-   :immutable or :mutable."
-  (wasm-buf-write-byte buf #x5f)
-  (wasm-buf-write-uleb128 buf (length fields))
-  (dolist (field fields)
-    (destructuring-bind (type-spec mutability) field
-      (encode-valtype type-spec buf)
-      (wasm-buf-write-byte buf (if (eq mutability :immutable) 0 1)))))
-
-;;; ------------------------------------------------------------
-;;; Section 8: Code Section - Local Variable Encoding
-;;; ------------------------------------------------------------
-
-(defun encode-locals (local-groups buf)
-  "Encode function locals as compressed groups into BUF.
-   LOCAL-GROUPS is a list of (count type-spec) pairs, e.g. ((3 :i32) (1 :f64))."
-  (wasm-buf-write-uleb128 buf (length local-groups))
-  (dolist (group local-groups)
-    (destructuring-bind (count type-spec) group
-      (wasm-buf-write-uleb128 buf count)
-      (encode-valtype type-spec buf))))
-
-(defun write-wasm-file (filename bytes)
-  "Write BYTES (a (simple-array (unsigned-byte 8) (*))) to FILENAME."
-  (with-open-file (out filename
-                       :direction :output
-                       :element-type '(unsigned-byte 8)
-                       :if-exists :supersede)
-    (write-sequence bytes out)))
+;;; Note: The following WASM binary format sections were removed as dead code
+;;; (never called from production or tests). The WASM emit pipeline uses WAT
+;;; text format instead (see packages/backend/emit/src/wasm-trampoline-emit.lisp).
+;;;
+;;; Removed functions:
+;;;   wasm-write-section, encode-func-type, encode-struct-type,
+;;;   encode-locals, write-wasm-file
+;;;
+;;; Removed data:
+;;;   +wasm-magic-bytes+, +wasm-version-bytes+, wasm-binary-builder struct

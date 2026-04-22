@@ -25,5 +25,6 @@
    (:file "heap")
    (:file "heap-trace")
    (:file "gc")
+   (:file "gc-minor")
    (:file "gc-write-barrier")
    (:file "gc-major")))

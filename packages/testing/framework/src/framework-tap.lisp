@@ -41,6 +41,15 @@ don't try to write to a read-only `/tmp`."
   (uiop:ensure-directory-pathname
    (merge-pathnames "cl-cc-coverage/" (uiop:temporary-directory))))
 
+(defun %coverage-report-empty-p (directory)
+  "Return T when sb-cover produced an empty HTML index for DIRECTORY."
+  (let ((index (merge-pathnames #P"cover-index.html" directory)))
+    (and (probe-file index)
+         (with-open-file (stream index :direction :input)
+           (let ((contents (make-string (file-length stream))))
+             (read-sequence contents stream)
+             (not (null (search "No code coverage data found" contents))))))))
+
 (defun %print-coverage-report (covered-modules)
   "Print sb-cover coverage report for covered modules."
   (declare (ignore covered-modules))
@@ -48,6 +57,9 @@ don't try to write to a read-only `/tmp`."
   (let ((dir (%coverage-report-directory)))
     (ensure-directories-exist dir)
     (sb-cover:report dir)
+    (when (%coverage-report-empty-p dir)
+      (error "Coverage report at ~A is empty; sb-cover instrumentation did not capture any executable code."
+             (namestring (merge-pathnames #P"cover-index.html" dir))))
     (format t "# Coverage report written to ~A (cl-cc-coverage)~%"
             (namestring dir)))
   #-sbcl

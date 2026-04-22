@@ -39,18 +39,6 @@
      ((env-lookup ?rest ?name ?type))))
   "Declarative Prolog rules encoded as data.")
 
-(defun %make-symbol-dispatch-table (specs)
-  "Build an EQ hash table from SPECS of the shape (symbol handler-symbol).
-
-This keeps the dispatch description data-only while the runtime table remains a
-separate concern. Handler symbols are resolved via SYMBOL-FUNCTION at table
-construction time."
-  (let ((table (make-hash-table :test 'eq)))
-    (dolist (spec specs table)
-      (destructuring-bind (name handler) spec
-        (setf (gethash name table)
-              (symbol-function handler))))))
-
 (defparameter *peephole-rules*
   '(;; (:const :R1 42)(:move :R2 :R1) → (:const :R2 42)
     ;; Fires when copy-prop is blocked by a label reset but DCE kept the const alive.
@@ -127,62 +115,15 @@ construction time."
   '(< > <= >= = /=)
   "Comparison operators whose cmp forms always infer BOOLEAN-TYPE in Prolog rules.")
 
-;;; Prolog database state and clause-definition surface
+;;; Data-driven type inference rule specifications.
+;;; Each entry is (RESULT-TYPE EXPR-KIND OPERATOR-LIST).
+;;; The macro DEFINE-PROLOG-TYPE-RULES-FROM-SPEC generates def-rule forms
+;;; from this table, keeping type rules data-only while the logic lives in
+;;; the macro expander.
 
-(defvar *prolog-rules* (make-hash-table :test 'eq)
-  "Hash table mapping predicate symbols to lists of rules.")
-
-(defun clear-prolog-database ()
-  "Clear all rules from the Prolog database."
-  (clrhash *prolog-rules*))
-
-(defun add-rule (predicate rule)
-  "Add RULE to the database under PREDICATE."
-  (setf (gethash predicate *prolog-rules*)
-        (cons rule (gethash predicate *prolog-rules*))))
-
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defmacro %def-prolog-clause (head &key body)
-    (list 'add-rule
-          (list 'quote (car head))
-          (append (list 'make-prolog-rule :head (list 'quote head))
-                  (when body
-                    (list :body (list 'quote body))))))
-
-  (defmacro define-prolog-integer-binop-type-rules ()
-    "Emit the repetitive integer binop type rules from
-*PROLOG-INTEGER-BINOP-TYPE-OPERATORS*.
-
-This keeps the rule set data-driven and avoids repeating nearly identical
-DEF-RULE forms for each arithmetic operator."
-    (cons 'progn
-          (mapcar (lambda (op)
-                    (list 'def-rule
-                          (list 'type-of (list 'binop op '?a '?b) '?env '(integer-type))
-                          (list 'type-of '?a '?env '(integer-type))
-                          (list 'type-of '?b '?env '(integer-type))))
-                  *prolog-integer-binop-type-operators*)))
-
-  (defmacro define-prolog-comparison-type-rule ()
-    "Emit the comparison type rule using the data table from prolog-data.lisp."
-    (list 'def-rule
-          (list 'type-of '(cmp ?op ?a ?b) '?env '(boolean-type))
-          (list 'type-of '?a '?env '(integer-type))
-          (list 'type-of '?b '?env '(integer-type))
-          (list :when (list 'cl:member '?op (list 'quote *prolog-comparison-type-operators*)))))
-
-  (defmacro define-prolog-declarative-rules ()
-    "Emit `def-rule` forms from *PROLOG-DECLARATIVE-RULE-SPECS*."
-    (cons 'progn
-          (mapcar (lambda (spec)
-                    (destructuring-bind (head &optional body) spec
-                      (append (list 'def-rule) head (or body '()))))
-                  *prolog-declarative-rule-specs*)))
-
-  (defmacro def-fact (head)
-    "Define a Prolog fact. Usage: (def-fact (parent tom mary))"
-    (list '%def-prolog-clause head))
-
-  (defmacro def-rule (head &body body)
-    "Define a Prolog rule. Usage: (def-rule (grandparent ?x ?z) (parent ?x ?y) (parent ?y ?z))"
-    (list '%def-prolog-clause head :body body)))
+(defparameter *prolog-type-rule-specs*
+  `((integer-type binop ,*prolog-integer-binop-type-operators*)
+    (boolean-type cmp   ,*prolog-comparison-type-operators*))
+  "Data table for generating Prolog type inference rules.
+Each entry: (RESULT-TYPE EXPR-KIND OPERATOR-LIST).
+The macro define-prolog-type-rules-from-spec expands this into def-rule forms.")

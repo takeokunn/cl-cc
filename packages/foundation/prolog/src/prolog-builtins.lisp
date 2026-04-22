@@ -7,6 +7,17 @@
 
 (defvar *builtin-predicates*)
 
+(defun %make-symbol-dispatch-table (specs)
+  "Build an EQ hash table from SPECS of the shape (symbol handler-symbol).
+
+The specs stay data-only in prolog-data.lisp; this helper resolves handler
+symbols into callable functions when the builtin table is constructed." 
+  (let ((table (make-hash-table :test 'eq)))
+    (dolist (spec specs table)
+      (destructuring-bind (name handler) spec
+        (setf (gethash name table)
+              (symbol-function handler))))))
+
 (defun prolog-cut-handler (args env k)
   (declare (ignore args))
   (funcall k env)
@@ -79,7 +90,7 @@ GOAL may be a prolog-goal object or a raw list form."
   (setf *builtin-predicates* (%make-builtin-predicates)))
 
 ;;; Declarative built-in predicates and type rules.
+;;; Each macro generates def-rule forms from data tables in prolog-data.lisp.
 
 (define-prolog-declarative-rules)
-(define-prolog-integer-binop-type-rules)
-(define-prolog-comparison-type-rule)
+(define-prolog-type-rules-from-spec)

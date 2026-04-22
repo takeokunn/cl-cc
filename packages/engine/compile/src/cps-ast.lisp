@@ -1,6 +1,21 @@
 (in-package :cl-cc/compile)
 
 ;;; AST-Based CPS Transformation
+;;;
+;;; The CPS transform converts AST nodes into continuation-passing style:
+;;; every expression evaluation is threaded through lambda continuations.
+;;; This enables proper handling of control flow (exceptions, blocks, go)
+;;; and is the foundation for tail-call optimization and advanced transforms.
+;;;
+;;; Architecture:
+;;;   cps-ast.lisp           — Generic function, sequence walker, core types
+;;;   cps-ast-control.lisp   — block/return-from, tagbody/go, catch/throw,
+;;;                             unwind-protect, flet/labels
+;;;   cps-ast-extended.lisp  — OOP/mutation: setq, defvar, handler-case,
+;;;                             make-instance, slot-value, defclass, defgeneric,
+;;;                             defmethod, set-gethash + helper functions
+;;;   cps-ast-functional.lisp — quote, the, values, mvb, apply, mvc, mvprog1,
+;;;                             ast-call, entry points
 
 (defgeneric cps-transform-ast (node k)
   (:documentation "Transform an AST node to continuation-passing style.
@@ -48,13 +63,16 @@ Returns a CPS-transformed S-expression."))
 
 (defmethod cps-transform-ast ((node ast-if) k)
   (let ((v (gensym "COND"))
-        (k-var (gensym "K")))
+         (k-var (gensym "K")))
     (list 'let (list (list k-var k))
           (cps-transform-ast (ast-if-cond node)
                              (list 'lambda (list v)
-                                   (list 'if (list '%cps-falsep v)
-                                         (cps-transform-ast (ast-if-else node) k-var)
-                                         (cps-transform-ast (ast-if-then node) k-var)))))))
+                                    (list 'if (list 'or
+                                                    (list 'null v)
+                                                    (list 'and (list 'numberp v)
+                                                          (list 'zerop v)))
+                                          (cps-transform-ast (ast-if-else node) k-var)
+                                          (cps-transform-ast (ast-if-then node) k-var)))))))
 
 (defmethod cps-transform-ast ((node ast-progn) k)
   (cps-transform-sequence (ast-progn-forms node) k))

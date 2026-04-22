@@ -115,6 +115,58 @@
   head        ; head of the rule (predicate with arguments)
   (body nil)) ; body (list of goals), nil for facts
 
+;;; Prolog database state
+
+(defvar *prolog-rules* (make-hash-table :test 'eq)
+  "Hash table mapping predicate symbols to lists of rules.")
+
+(defun clear-prolog-database ()
+  "Clear all rules from the Prolog database."
+  (clrhash *prolog-rules*))
+
+(defun add-rule (predicate rule)
+  "Add RULE to the database under PREDICATE."
+  (setf (gethash predicate *prolog-rules*)
+        (cons rule (gethash predicate *prolog-rules*))))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defmacro %def-prolog-clause (head &key body)
+    (list 'add-rule
+          (list 'quote (car head))
+          (append (list 'make-prolog-rule :head (list 'quote head))
+                  (when body
+                    (list :body (list 'quote body))))))
+
+  (defmacro define-prolog-type-rules-from-spec ()
+    "Generate all type inference rules from *PROLOG-TYPE-RULE-SPECS*.
+
+Each spec entry has the form (RESULT-TYPE EXPR-KIND OPERATOR-LIST) and expands
+to one `def-rule` per operator, keeping rule data and rule expansion separate."
+    (cons 'progn
+          (loop for (result-type expr-kind operators) in *prolog-type-rule-specs*
+                append (mapcar (lambda (op)
+                                 (list 'def-rule
+                                       (list 'type-of (list expr-kind op '?a '?b) '?env (list result-type))
+                                       (list 'type-of '?a '?env '(integer-type))
+                                       (list 'type-of '?b '?env '(integer-type))))
+                               operators))))
+
+  (defmacro define-prolog-declarative-rules ()
+    "Emit `def-rule` forms from *PROLOG-DECLARATIVE-RULE-SPECS*."
+    (cons 'progn
+          (mapcar (lambda (spec)
+                    (destructuring-bind (head &optional body) spec
+                      (append (list 'def-rule) head (or body '()))))
+                  *prolog-declarative-rule-specs*)))
+
+  (defmacro def-fact (head)
+    "Define a Prolog fact. Usage: (def-fact (parent tom mary))"
+    (list '%def-prolog-clause head))
+
+  (defmacro def-rule (head &body body)
+    "Define a Prolog rule. Usage: (def-rule (grandparent ?x ?z) (parent ?x ?y) (parent ?y ?z))"
+    (list '%def-prolog-clause head :body body)))
+
 ;;; Variable Renaming for Recursion
 
 (defun rename-variables (rule)
