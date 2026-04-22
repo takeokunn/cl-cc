@@ -8,8 +8,8 @@
   "checker.lisp exposes a testable readiness predicate for the bidirectional checker boundary."
   (assert-true (cl-cc/type::checker-interface-ready-p)))
 
-(deftest checker-skolem-constructor-available
-  "checker boundary still exposes the legacy skolem constructor path documented by checker.lisp."
-  (let ((sk (cl-cc/type:make-type-skolem 'alpha)))
-    (assert-true (cl-cc/type:type-skolem-p sk))
-    (assert-eq 'alpha (cl-cc/type:type-skolem-name sk))))
+(deftest checker-rigid-constructor-available
+  "checker boundary exposes the canonical rigid constructor path."
+  (let ((sk (cl-cc/type:fresh-rigid-var 'alpha)))
+    (assert-true (cl-cc/type:type-rigid-p sk))
+    (assert-eq 'alpha (cl-cc/type:type-rigid-name sk))))

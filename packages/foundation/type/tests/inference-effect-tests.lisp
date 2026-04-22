@@ -18,7 +18,7 @@
     (assert-true (cl-cc/type:type-effect-row-p row))
     (if expected-effect
         (let* ((effects (cl-cc/type:type-effect-row-effects row))
-               (names (mapcar #'cl-cc/type:type-effect-name effects)))
+               (names (mapcar #'cl-cc/type:type-effect-op-name effects)))
           (assert-true (member expected-effect names :key #'symbol-name :test #'string=)))
         (assert-null (cl-cc/type:type-effect-row-effects row)))))
 
@@ -29,7 +29,7 @@
   (sexp)
   (let* ((ast (cl-cc:lower-sexp-to-ast sexp))
          (row (cl-cc/type:infer-effects ast (type-env-empty)))
-         (names (mapcar #'cl-cc/type:type-effect-name (cl-cc/type:type-effect-row-effects row))))
+         (names (mapcar #'cl-cc/type:type-effect-op-name (cl-cc/type:type-effect-row-effects row))))
     (assert-true (member "IO"    names :key #'symbol-name :test #'string=))
     (assert-true (member "STATE" names :key #'symbol-name :test #'string=))))
 
@@ -44,7 +44,7 @@
   (let ((row (cl-cc/type:lookup-effect-signature fn-name)))
     (assert-true (cl-cc/type:type-effect-row-p row))
     (if expected-effect-name
-        (let ((names (mapcar #'cl-cc/type:type-effect-name
+        (let ((names (mapcar #'cl-cc/type:type-effect-op-name
                              (cl-cc/type:type-effect-row-effects row))))
           (assert-true (member expected-effect-name names :key #'symbol-name :test #'string=)))
         (assert-null (cl-cc/type:type-effect-row-effects row)))))
@@ -52,7 +52,7 @@
 (deftest infer-custom-effect-signature-register-and-lookup
   "register-effect-signature stores a row and lookup-effect-signature returns it."
   (let ((custom-row (cl-cc/type:make-type-effect-row
-                     :effects (list (cl-cc/type:make-type-effect :name 'network))
+                     :effects (list (cl-cc/type:make-type-effect-op :name 'network :args nil))
                      :row-var nil)))
     (cl-cc/type:register-effect-signature 'http-get-xyz custom-row)
     (let ((result (cl-cc/type:lookup-effect-signature 'http-get-xyz)))
@@ -84,7 +84,7 @@
       (declare (ignore subst))
       (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty))
       (assert-true (cl-cc/type:type-effect-row-p effects))
-      (let ((names (mapcar #'cl-cc/type:type-effect-name
+      (let ((names (mapcar #'cl-cc/type:type-effect-op-name
                            (cl-cc/type:type-effect-row-effects effects))))
         (assert-true (member "IO" names :key #'symbol-name :test #'string=))))))
 
@@ -101,19 +101,19 @@
 
 (deftest infer-skolem-helpers-cases
   "Skolem helpers: appears-in-type-p/subst-p detect presence; check-skolem-escape signals on escape."
-  (let* ((sk (cl-cc/type:make-type-skolem "a"))
-         (fn-with (cl-cc/type:make-type-function-raw
-                   :params (list sk) :return cl-cc/type:type-int))
-         (fn-without (cl-cc/type:make-type-function-raw
+  (let* ((sk (cl-cc/type:fresh-rigid-var "a"))
+         (fn-with (cl-cc/type:make-type-arrow-raw
+                    :params (list sk) :return cl-cc/type:type-int))
+         (fn-without (cl-cc/type:make-type-arrow-raw
                       :params (list cl-cc/type:type-int) :return cl-cc/type:type-int)))
     (assert-true  (cl-cc/type::skolem-appears-in-type-p sk fn-with))
     (assert-false (cl-cc/type::skolem-appears-in-type-p sk fn-without)))
-  (let* ((sk (cl-cc/type:make-type-skolem "a"))
-         (v  (cl-cc/type:make-type-variable 'x)))
+  (let* ((sk (cl-cc/type:fresh-rigid-var "a"))
+         (v  (cl-cc/type:fresh-type-var 'x)))
     (assert-true  (cl-cc/type::skolem-appears-in-subst-p sk (subst-extend v sk (make-substitution))))
     (assert-false (cl-cc/type::skolem-appears-in-subst-p sk (subst-extend v cl-cc/type:type-int (make-substitution)))))
-  (let* ((sk (cl-cc/type:make-type-skolem "a"))
-         (v (cl-cc/type:make-type-variable 'x))
+  (let* ((sk (cl-cc/type:fresh-rigid-var "a"))
+         (v (cl-cc/type:fresh-type-var 'x))
          (s (subst-extend v sk (make-substitution))))
     (assert-signals cl-cc/type:type-inference-error
       (cl-cc/type:check-skolem-escape sk s))))
@@ -123,8 +123,8 @@
 (deftest infer-check-mode-cases
   "check: forall type skolemizes and succeeds; +type-unknown+ always returns nil subst."
   (reset-type-vars!)
-  (let* ((a (cl-cc/type:make-type-variable 'a))
-         (fn-body (cl-cc/type:make-type-function-raw :params (list a) :return a))
+  (let* ((a (cl-cc/type:fresh-type-var 'a))
+         (fn-body (cl-cc/type:make-type-arrow-raw :params (list a) :return a))
          (forall-ty (cl-cc/type:make-type-forall :var a :body fn-body))
          (ast (cl-cc:lower-sexp-to-ast '(lambda (x) x)))
          (env (type-env-empty)))
@@ -151,8 +151,8 @@
   (let ((ast (cl-cc:lower-sexp-to-ast '(defun f (x) (+ x 1)))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-true (cl-cc/type:type-function-p ty))
-      (assert-type-equal (cl-cc/type:type-function-return ty) cl-cc/type:type-int))))
+      (assert-true (cl-cc/type:type-arrow-p ty))
+      (assert-type-equal (cl-cc/type:type-arrow-return ty) cl-cc/type:type-int))))
 
 ;;; ─── Condition Classes ────────────────────────────────────────────────────
 
@@ -199,7 +199,7 @@
       (declare (ignore subst))
       (assert-type-equal ty cl-cc/type:type-int)))
   (reset-type-vars!)
-  (let* ((fn-ty (cl-cc/type:make-type-function-raw
+  (let* ((fn-ty (cl-cc/type:make-type-arrow-raw
                  :params (list cl-cc/type:type-int)
                  :return cl-cc/type:type-int))
          (env (type-env-extend 'identity (type-to-scheme fn-ty) (type-env-empty)))

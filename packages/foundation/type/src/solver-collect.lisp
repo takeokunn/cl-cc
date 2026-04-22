@@ -4,7 +4,7 @@
 ;;; Contains: collect-constraints — AST walker that generates equality
 ;;;   constraints for the OutsideIn(X) solver.
 ;;;
-;;; Depends on solver.lisp (make-constraint, make-equal-constraint),
+;;; Depends on solver.lisp / constraint.lisp (make-equal-constraint),
 ;;;   substitution-schemes.lisp (instantiate, generalize, fresh-type-var),
 ;;;   representation.lisp (make-type-arrow, type-int, type-string, etc.),
 ;;;   environment.lisp (type-env-lookup, type-env-extend, type-env-extend*,

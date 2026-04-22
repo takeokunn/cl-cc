@@ -7,16 +7,8 @@
 ;;;;       -> (values new-subst residual-constraints)
 ;;;;   collect-constraints (ast env)
 ;;;;       -> (values type constraints)
-;;;;   make-constraint    — alias for %make-constraint (backward compat)
 
 (in-package :cl-cc/type)
-
-;;; ─── make-constraint backward compat alias ────────────────────────────────
-
-(defun make-constraint (left right)
-  "Backward-compat: build an equality constraint (left ~ right).
-Calls the real %make-constraint from constraint.lisp."
-  (%make-constraint :kind :equal :args (list left right)))
 
 ;;; ─── solve-constraints ────────────────────────────────────────────────────
 

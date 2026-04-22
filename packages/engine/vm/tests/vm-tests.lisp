@@ -10,7 +10,7 @@
 
 (deftest vm-state-initial-globals
   "vm-state seeds representative standard globals at initialization time."
-  (let ((state (make-instance 'cl-cc/vm::vm-state)))
+  (let ((state (make-instance 'cl-cc/vm::vm-io-state)))
     (assert-true (hash-table-p (cl-cc/vm::vm-global-vars state)))
     (multiple-value-bind (features found-p)
         (gethash 'cl-cc::*features* (cl-cc/vm::vm-global-vars state))
@@ -49,7 +49,7 @@
 
 (deftest vm-bind-arg-slots-binds-leading-args
   "vm-bind-arg-slots stores the first 8 arguments into reserved slots."
-  (let ((state (make-instance 'cl-cc/vm::vm-state)))
+  (let ((state (make-instance 'cl-cc/vm::vm-io-state)))
     (let ((slots (cl-cc/vm::vm-bind-arg-slots state '(10 20 30 40 50 60 70 80 90))))
       (assert-equal '(:ARG0 :ARG1 :ARG2 :ARG3 :ARG4 :ARG5 :ARG6 :ARG7) slots)
       (assert-= 10 (cl-cc:vm-reg-get state :ARG0))
@@ -57,7 +57,7 @@
 
 (deftest vm-bind-closure-args-populates-arg-slots
   "vm-bind-closure-args also mirrors call arguments into reserved ARG slots."
-  (let ((state (make-instance 'cl-cc/vm::vm-state))
+  (let ((state (make-instance 'cl-cc/vm::vm-io-state))
         (closure (make-instance 'cl-cc/vm::vm-closure-object
                                 :entry-label "f"
                                 :params '(:R10 :R11)
@@ -133,15 +133,15 @@
 
 (deftest vm-heap-alloc-operations
   "vm-heap-alloc returns a positive integer; get roundtrips; set overwrites; addresses are unique."
-  (let ((s (make-instance 'cl-cc/vm::vm-state)))
+  (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
     (let ((addr (cl-cc/vm::vm-heap-alloc s :some-object)))
       (assert-true (integerp addr))
       (assert-true (> addr 0))))
-  (let ((s (make-instance 'cl-cc/vm::vm-state)))
+  (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
     (let ((addr (cl-cc/vm::vm-heap-alloc s "original")))
       (cl-cc/vm::vm-heap-set s addr "replaced")
       (assert-string= "replaced" (cl-cc/vm::vm-heap-get s addr))))
-  (let ((s (make-instance 'cl-cc/vm::vm-state)))
+  (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
     (let ((a1 (cl-cc/vm::vm-heap-alloc s 1))
           (a2 (cl-cc/vm::vm-heap-alloc s 2))
           (a3 (cl-cc/vm::vm-heap-alloc s 3)))
@@ -154,6 +154,6 @@
   :cases (("string" "test-payload")
           ("list"   '(a b c)))
   (value)
-  (let* ((s    (make-instance 'cl-cc/vm::vm-state))
+  (let* ((s    (make-instance 'cl-cc/vm::vm-io-state))
          (addr (cl-cc/vm::vm-heap-alloc s value)))
     (assert-equal value (cl-cc/vm::vm-heap-get s addr))))

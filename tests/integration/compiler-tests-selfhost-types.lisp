@@ -41,13 +41,13 @@
 
 (deftest parametric-type-unify-with-var
   "Unifying (List ?a) with (List fixnum) binds ?a to fixnum"
-  (let* ((tv (cl-cc/type:make-type-variable 'a))
+  (let* ((tv (cl-cc/type:fresh-type-var 'a))
          (t1 (cl-cc/type:make-type-constructor 'list (list tv)))
          (t2 (cl-cc/type:parse-type-specifier '(list fixnum))))
     (multiple-value-bind (subst ok) (cl-cc/type:type-unify t1 t2)
       (assert-true ok)
       (assert-false (null subst))
-      (let ((resolved (cl-cc/type:type-substitute tv subst)))
+      (let ((resolved (cl-cc/type:zonk tv subst)))
         (assert-true (cl-cc/type:type-equal-p resolved cl-cc/type:type-int))))))
 
 (deftest parametric-type-unify-different-constructors
@@ -79,7 +79,7 @@
                (assert-false (cl-cc/type:type-equal-p t1 t3)))))
           ("free-vars"
            (lambda ()
-             (let* ((tv (cl-cc/type:make-type-variable 'x))
+             (let* ((tv (cl-cc/type:fresh-type-var 'x))
                     (ty (cl-cc/type:make-type-constructor 'list (list tv))))
                (assert-= 1 (length (cl-cc/type:type-free-vars ty)))))))
   (check)

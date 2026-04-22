@@ -151,9 +151,21 @@
      "(defgeneric aft-test (x))
       (defmethod aft-test ((x integer))
         42)
-      (defmethod aft-test :after ((x integer))
-        99)
-      (aft-test 1)")))
+       (defmethod aft-test :after ((x integer))
+         99)
+       (aft-test 1)")))
+
+(deftest clos-custom-method-combination-multi-dispatch
+  "Custom method-combination dispatch respects multi-argument specializers in specificity order."
+  :timeout 15
+  (assert-equal '(ii it ti tt)
+    (run-string
+     "(defgeneric combo-test (x y) (:method-combination list))
+      (defmethod combo-test list ((x integer) (y integer)) 'ii)
+      (defmethod combo-test list ((x integer) (y t)) 'it)
+      (defmethod combo-test list ((x t) (y integer)) 'ti)
+      (defmethod combo-test list ((x t) (y t)) 'tt)
+      (combo-test 1 2)")))
 
 (deftest-each clos-defmethod-qualifier-parse
   "defmethod with :before and :around qualifiers parse correctly."

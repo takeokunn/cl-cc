@@ -192,9 +192,9 @@
    Used when callee effect information is available from the HM type system.
    Compares effect names by string= to avoid cross-package symbol mismatch."
   (let* ((effects (cl-cc/type:type-effect-row-effects effect-row))
-         (names   (mapcar (lambda (e)
-                            (string-upcase (symbol-name (cl-cc/type:type-effect-name e))))
-                          effects)))
+          (names   (mapcar (lambda (e)
+                             (string-upcase (symbol-name (cl-cc/type:type-effect-op-name e))))
+                           effects)))
     (cond
       ((null effects)                          :pure)
       ((member "IO"    names :test #'string=)  :io)

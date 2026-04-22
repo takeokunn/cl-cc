@@ -1,9 +1,9 @@
 (in-package :cl-cc/vm)
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-;;; VM — Flat-Vector Interpreter and vm2-state Compatibility Shims
+;;; VM — Flat-Vector Interpreter and State Access Layer
 ;;;
 ;;; Contains: %run-vm-core (fused inner loop), run-vm, run-vm-with-opcode-bigrams,
-;;; and vm2-state compatibility shims (make-vm-state, vm-reg-get/set, etc.).
+;;; and the canonical VM state access surface (make-vm-state, vm-reg-get/set, etc.).
 ;;;
 ;;; Depends on vm-opcodes-defs.lisp (all defopcode registrations, +op2-* constants,
 ;;; *opcode-dispatch-table*, *opcode-name-table*, vm2-fuse-immediate-superinstructions).
@@ -77,6 +77,41 @@
 (defparameter *vm2-fast-opcode-handler-table*
   (%make-vm2-fast-opcode-handler-table)
   "Numeric opcode → fast handler function for the hot-path VM2 interpreter.")
+
+;;; ── Canonical VM state access surface ─────────────────────────────────────
+
+(defun make-vm-state (&key (output-stream *standard-output*))
+  "Create a vm-io-state as the canonical public VM execution state." 
+  (make-instance 'vm-io-state :output-stream output-stream))
+
+(defmethod vm-state-registers ((state vm2-state))
+  (vm2-state-registers state))
+
+(defmethod vm-output-stream ((state vm2-state))
+  (vm2-state-output-stream state))
+
+(defmethod vm-global-vars ((state vm2-state))
+  (vm2-state-global-vars state))
+
+(defgeneric vm-reg-get (state reg)
+  (:documentation "Read register REG from STATE."))
+
+(defgeneric vm-reg-set (state reg value)
+  (:documentation "Write VALUE into register REG of STATE and return VALUE."))
+
+(defmethod vm-reg-get ((state vm2-state) reg)
+  (svref (vm2-state-registers state) reg))
+
+(defmethod vm-reg-set ((state vm2-state) reg value)
+  (setf (svref (vm2-state-registers state) reg) value)
+  value)
+
+(defmethod vm-reg-get ((state vm-state) reg)
+  (gethash reg (slot-value state 'registers) 0))
+
+(defmethod vm-reg-set ((state vm-state) reg value)
+  (setf (gethash reg (slot-value state 'registers)) value)
+  value)
 
 (defun %run-vm-core (code state &key bigram-counts)
   "Shared VM2 interpreter core.

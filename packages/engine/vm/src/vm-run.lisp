@@ -205,7 +205,7 @@ Otherwise a fresh state is created from OUTPUT-STREAM."
   (let* ((instructions (vm-program-instructions program))
          (labels (build-label-table instructions))
          (flat (coerce instructions 'vector))
-         (state (or state (make-instance 'vm-io-state :output-stream output-stream))))
+         (state (or state (make-vm-state :output-stream output-stream))))
     (when (and (vm-profile-enabled-p state)
                (null (vm-profile-call-stack state)))
       (setf (vm-profile-call-stack state) (list "<toplevel>")))

@@ -11,9 +11,8 @@
 ;;;;     %typeclass-fundep-pairs, %typeclass-fundep-violation-p
 ;;;;
 ;;;; Instance registry and dict-env helpers live here.
-;;;; Backward-compat aliases stay in typeclass-compat.lisp.
 ;;;;
-;;;; Load order: after representation.lisp, before typeclass-compat.lisp.
+;;;; Load order: after representation.lisp.
 
 (in-package :cl-cc/type)
 

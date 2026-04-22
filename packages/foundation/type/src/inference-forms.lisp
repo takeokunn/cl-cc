@@ -95,7 +95,7 @@
     ;; Extract type guard info for narrowing
     (multiple-value-bind (guard-var guard-type)
         (extract-type-guard (cl-cc/ast:ast-if-cond ast))
-      (let* ((base-env (apply-subst-env env subst1))
+      (let* ((base-env (zonk-env env subst1))
              ;; Narrow environments for each branch
              (then-env (if guard-var
                            (type-env-extend guard-var
@@ -114,10 +114,10 @@
         (multiple-value-bind (then-type subst2)
             (infer (cl-cc/ast:ast-if-then ast) then-env)
           (multiple-value-bind (else-type subst3)
-              (infer (cl-cc/ast:ast-if-else ast) (apply-subst-env else-env subst2))
+              (infer (cl-cc/ast:ast-if-else ast) (zonk-env else-env subst2))
             (multiple-value-bind (final-subst final-ok) (type-unify then-type else-type subst3)
               (declare (ignore final-ok))
-              (values (type-substitute then-type final-subst) final-subst))))))))
+              (values (zonk then-type final-subst) final-subst))))))))
 
 ;;; FR-1604: Value Restriction
 ;;; Only syntactic values (lambda, literal, variable, quote, #'fn) may be
@@ -144,7 +144,7 @@
       (let* ((name (car binding))
              (expr (cdr binding))
              (type (multiple-value-bind (result-type s) (infer expr new-env)
-                     (type-substitute result-type s)))
+                     (zonk result-type s)))
              ;; Value restriction: generalize only syntactic values.
              (scheme (if (syntactic-value-p expr)
                          (generalize new-env type)
@@ -166,11 +166,11 @@
     (multiple-value-bind (body-type subst)
         (infer-body (cl-cc/ast:ast-lambda-body ast) body-env)
       (values (make-type-arrow
-               (mapcar (lambda (p)
-                         (type-substitute p subst))
-                       param-types)
-               body-type)
-              subst))))
+                (mapcar (lambda (p)
+                          (zonk p subst))
+                        param-types)
+                body-type)
+               subst))))
 
 (defun infer-progn (ast env)
   "Infer type for progn (sequence of expressions)."
@@ -186,7 +186,7 @@
   (when (typep func-type 'type-qualified)
     (dolist (constraint (type-qualified-constraints func-type))
       (let* ((class-name (type-constraint-class-name constraint))
-             (type-arg (type-substitute
+             (type-arg (zonk
                         (type-constraint-type-arg constraint)
                         subst)))
         (unless (or (typep type-arg 'type-unknown)
@@ -206,7 +206,7 @@
       (infer (cl-cc/ast:ast-call-func ast) env)
     (let* ((result-type (fresh-type-var))
            (arg-types (infer-args (cl-cc/ast:ast-call-args ast)
-                                  (apply-subst-env env subst1)))
+                                  (zonk-env env subst1)))
            (expected-fn (make-type-arrow arg-types result-type)))
       (multiple-value-bind (subst ok)
           (type-unify func-type expected-fn subst1)
@@ -214,7 +214,7 @@
             (progn
               ;; Check typeclass constraints if callee has a qualified type
               (check-qualified-constraints func-type subst env)
-              (values (type-substitute result-type subst) subst))
+              (values (zonk result-type subst) subst))
             (error 'type-mismatch-error
                    :expected expected-fn :actual func-type))))))
 
@@ -224,9 +224,9 @@
         with current-env = env
         for ast in asts
         collect (multiple-value-bind (type new-subst) (infer ast current-env)
-                  (setf subst (compose-subst new-subst subst)
-                        current-env (apply-subst-env current-env new-subst))
-                  (type-substitute type subst))))
+                  (setf subst (subst-compose new-subst subst)
+                        current-env (zonk-env current-env new-subst))
+                  (zonk type subst))))
 
 (defun infer-body (asts env)
   "Infer type of sequence (return last type); single-pass over ASTS."
@@ -237,9 +237,9 @@
             with last-type = type-null
             for ast in asts
             do (multiple-value-bind (type new-subst) (infer ast current-env)
-                 (setf subst       (compose-subst new-subst subst)
-                       last-type   (type-substitute type subst)
-                       current-env (apply-subst-env current-env new-subst)))
+                 (setf subst       (subst-compose new-subst subst)
+                       last-type   (zonk type subst)
+                       current-env (zonk-env current-env new-subst)))
             finally (return (values last-type subst)))))
 
 
@@ -254,7 +254,7 @@
       (collect-constraints ast env)
     (multiple-value-bind (subst residual)
         (solve-constraints constraints nil)
-      (values (type-substitute ty subst) subst residual))))
+      (values (zonk ty subst) subst residual))))
 
 ;;; Type Annotation
 

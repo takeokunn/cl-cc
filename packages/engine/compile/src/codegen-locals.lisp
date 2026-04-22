@@ -264,4 +264,4 @@
   (cl-cc/type:reset-type-vars!)
   (multiple-value-bind (type subst)
       (cl-cc/type:infer ast env)
-    (cl-cc/type:type-substitute type subst)))
+    (cl-cc/type:zonk type subst)))

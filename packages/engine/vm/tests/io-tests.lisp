@@ -15,12 +15,12 @@
 ;;; ─── Helpers ──────────────────────────────────────────────────────────────
 
 (defun io-vm (&optional (out (make-string-output-stream)))
-  "Create a vm-state with a string output stream for capture."
-  (make-instance 'cl-cc/vm::vm-state :output-stream out))
+  "Create a vm-io-state with a string output stream for capture."
+  (cl-cc/vm::make-vm-state :output-stream out))
 
 (defun io-vm-full (&optional (out (make-string-output-stream)))
   "Create a vm-io-state (with file handle management) for IO tests."
-  (make-instance 'cl-cc/vm::vm-io-state :output-stream out))
+  (cl-cc/vm::make-vm-state :output-stream out))
 
 (defun io-exec (inst state)
   "Execute a single instruction against STATE."

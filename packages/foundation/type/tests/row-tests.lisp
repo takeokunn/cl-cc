@@ -38,7 +38,7 @@
     (assert-equal 2 (length (type-record-fields r2))))
   (let* ((rv (fresh-type-var))
          (r2 (row-extend :y type-string (make-open-record rv :x type-int))))
-    (assert-true (type-variable-p (type-record-row-var r2))))
+    (assert-true (type-var-p (type-record-row-var r2))))
   (let* ((r (make-closed-record :x type-int))
          (r2 (row-extend :x type-string r)))
     (assert-equal 2 (length (type-record-fields r2)))
@@ -57,7 +57,7 @@
                              (row-restrict :z (make-closed-record :x type-int)))))
   (let* ((rv (fresh-type-var))
          (r2 (row-restrict :x (make-open-record rv :x type-int))))
-    (assert-true (type-variable-p (type-record-row-var r2)))))
+    (assert-true (type-var-p (type-record-row-var r2)))))
 
 ;;; ─── row-select ──────────────────────────────────────────────────────────────
 

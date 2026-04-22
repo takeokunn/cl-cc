@@ -44,9 +44,8 @@
     (:file "macros-sequence-fold") ; sequences: reduce/nsubstitute/map-into/merge/last/search
     (:file "macros-list-compat")  ; list/sequence compatibility helpers split from stdlib
     (:file "macros-plist")        ; property list helpers
-    (:file "macros-compat-package") ; pkg/declare/progv compatibility macros
-    (:file "macros-compat-runtime") ; IO/hash/coerce/LTV/feature compatibility macros
-    (:file "macros-compat")       ; compatibility shim
+   (:file "macros-compat-package") ; pkg/declare/progv compatibility macros
+   (:file "macros-compat-runtime") ; IO/hash/coerce/LTV/feature compatibility macros
    (:file "macros-compat-clos")  ; CLOS protocol: print-unreadable-object, describe, change-class
    (:file "macros-compat-mop")   ; MOP introspection macros + parse-float + reinitialize-instance
    (:file "macros-compat-array") ; array compat wrappers split from macros-compat

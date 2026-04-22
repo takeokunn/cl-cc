@@ -19,7 +19,7 @@ Calls all applicable methods with the matching qualifier synchronously
 and folds results using the combination's operator."
   (let* ((all-arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs))
          (qual-key (intern (format nil "__~A__" (string-upcase (string combination))) :keyword))
-         (combo-methods (%collect-combo-methods gf-ht qual-key state (car all-arg-values)))
+         (combo-methods (%collect-combo-methods gf-ht qual-key state all-arg-values))
          ;; Also try primary methods as fallback (some users just define primary methods)
          (primary-methods (vm-get-all-applicable-methods gf-ht state all-arg-values))
          (methods (or combo-methods primary-methods))

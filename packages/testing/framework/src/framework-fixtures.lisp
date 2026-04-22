@@ -90,8 +90,8 @@ surface."
          (%restore-prolog-db ,saved)))))
 
 (defun make-test-vm ()
-  "Create a fresh VM state for instruction-level testing."
-  (make-instance 'cl-cc:vm-state))
+  "Create a fresh VM I/O state for instruction-level testing."
+  (cl-cc:make-vm-state))
 
 (defmacro with-test-vm ((state &rest bindings) &body body)
   "Create a fresh VM STATE, preload register BINDINGS, then run BODY."

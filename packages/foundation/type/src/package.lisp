@@ -38,24 +38,17 @@
    #:type-var    #:type-var-p    #:fresh-type-var
    #:type-var-id #:type-var-name #:type-var-link  #:type-var-equal-p
    #:reset-type-vars!
-   #:make-type-variable #:type-variable-p #:type-variable-id
-   #:type-variable-name #:type-variable-equal-p
 
-   ;; ─── Rigid (skolem) ───────────────────────────────────────────────────
-   #:type-rigid    #:type-rigid-p    #:fresh-rigid-var
-   #:type-rigid-id #:type-rigid-name  #:type-rigid-equal-p
-    #:type-skolem   #:type-skolem-p   #:make-type-skolem
-    #:type-skolem-id #:type-skolem-name #:type-skolem-equal-p
+    ;; ─── Rigid variables ──────────────────────────────────────────────────
+    #:type-rigid    #:type-rigid-p    #:fresh-rigid-var
+    #:type-rigid-id #:type-rigid-name  #:type-rigid-equal-p
 
    ;; ─── Arrow ───────────────────────────────────────────────────────────
    #:type-arrow    #:type-arrow-p    #:make-type-arrow  #:make-type-arrow-raw
    #:type-arrow-params #:type-arrow-return #:type-arrow-effects #:type-arrow-mult
-   #:make-type-function #:make-type-function-raw #:type-function-p
-   #:type-function-params #:type-function-return
 
-   ;; ─── Product (tuple) ─────────────────────────────────────────────────
+   ;; ─── Product ─────────────────────────────────────────────────────────
    #:type-product  #:type-product-p  #:make-type-product  #:type-product-elems
-   #:type-tuple #:type-tuple-p #:make-type-tuple  #:make-type-tuple-raw  #:type-tuple-elements
 
    ;; ─── Record / Variant ────────────────────────────────────────────────
    #:type-record   #:type-record-p   #:make-type-record
@@ -80,7 +73,7 @@
    #:type-lambda-var #:type-lambda-knd #:type-lambda-body
    #:type-mu   #:type-mu-p   #:make-type-mu  #:type-mu-var #:type-mu-body
    #:type-constructor #:make-type-constructor #:type-constructor-p
-   #:type-constructor-name #:type-constructor-args  #:make-type-constructor-raw
+   #:type-constructor-name #:type-constructor-args
 
    ;; ─── Refinement / Linear / Capability ───────────────────────────────
    #:type-refinement   #:type-refinement-p   #:make-type-refinement
@@ -90,13 +83,12 @@
    #:type-capability   #:type-capability-p   #:make-type-capability
    #:type-capability-base #:type-capability-cap
 
-   ;; ─── Effect types ────────────────────────────────────────────────────
-    #:type-effect-row   #:type-effect-row-p   #:make-type-effect-row
-    #:type-effect-row-effects #:type-effect-row-row-var
-    #:+pure-effect-row+ #:+io-effect-row+
-    #:type-effect #:type-effect-p #:make-type-effect #:type-effect-name
-    #:type-effect-op   #:type-effect-op-p   #:make-type-effect-op
-    #:type-effect-op-name #:type-effect-op-args
+    ;; ─── Effect types ────────────────────────────────────────────────────
+     #:type-effect-row   #:type-effect-row-p   #:make-type-effect-row
+     #:type-effect-row-effects #:type-effect-row-row-var
+     #:+pure-effect-row+ #:+io-effect-row+
+     #:type-effect-op   #:type-effect-op-p   #:make-type-effect-op
+     #:type-effect-op-name #:type-effect-op-args
      #:type-handler   #:type-handler-p   #:make-type-handler
     #:type-handler-effect #:type-handler-input #:type-handler-output
 
@@ -118,7 +110,7 @@
    #:type-scheme   #:type-scheme-p
    #:type-scheme-quantified-vars #:type-scheme-type
    #:make-type-scheme  #:make-type-scheme-raw  #:type-to-scheme
-   #:generalize    #:generalize-in-env  #:instantiate   #:instantiate-scheme
+   #:generalize    #:instantiate
 
    ;; ─── Type environment ────────────────────────────────────────────────
    #:type-env  #:type-env-p  #:make-type-env #:type-env-bindings
@@ -134,11 +126,9 @@
    #:substitution-bindings  #:substitution-generation
    #:empty-subst
    #:subst-lookup  #:subst-extend  #:subst-extend!  #:subst-compose
-   #:extend-subst  #:compose-subst
+   #:zonk-env
    #:zonk
-   #:type-substitute  #:apply-subst  #:apply-subst-env
    #:type-occurs-p  #:apply-unification
-   #:environment-free-vars
 
    ;; ─── Unification ─────────────────────────────────────────────────────
    #:type-unify  #:type-unify-lists
@@ -167,13 +157,13 @@
    #:make-typeclass-constraint    #:make-implication-constraint
    #:make-effect-subset-constraint #:make-mult-leq-constraint
    #:make-row-lacks-constraint    #:make-kind-equal-constraint
-   #:constraint-free-vars  #:constraint-substitute  #:make-constraint
+   #:constraint-free-vars  #:constraint-substitute
 
    ;; ─── Subtyping ───────────────────────────────────────────────────────
    #:type-constructor-def  #:type-constructor-def-p
    #:*type-constructor-registry*
    #:register-type-constructor  #:lookup-type-constructor
-    #:subtypep  #:is-subtype-p  #:subtype-check
+   #:subtypep  #:is-subtype-p
     #:type-join  #:type-meet
     #:*subtype-table*  #:type-name-subtype-p  #:find-common-supertype
     #:upgraded-array-element-type  #:upgraded-complex-part-type

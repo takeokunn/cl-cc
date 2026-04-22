@@ -172,7 +172,6 @@ the base so Nix store hashes don't affect relative path computation."
     "packages/foundation/type/src/types-env.lisp"      ; +type-unknown+
     "packages/foundation/type/src/parser.lisp"
     "packages/foundation/type/src/typeclass.lisp"
-    "packages/foundation/type/src/typeclass-compat.lisp" ; backward-compat type nodes used by printer/tests
     "packages/foundation/type/src/solver.lisp"
     "packages/foundation/type/src/inference.lisp"
     "packages/foundation/type/src/checker.lisp"

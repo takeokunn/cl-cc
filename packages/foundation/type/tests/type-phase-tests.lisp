@@ -13,7 +13,7 @@
   "parse-type-specifier: forall form produces a type-forall binding the named variable."
   (let ((result (cl-cc/type:parse-type-specifier '(forall a (function (a) a)))))
     (assert-true (type-forall-p result))
-    (assert-eq 'a (type-variable-name (type-forall-var result)))))
+    (assert-eq 'a (type-var-name (type-forall-var result)))))
 
 (deftest parse-type-specifier-effectful-arrow
   "parse-type-specifier: effectful arrow (-> ! io) has one effect in the effects slot."
@@ -125,7 +125,7 @@
     (assert-null (type-effect-row-effects row))))
 
 (defun %make-effect-row (&rest names)
-  (make-type-effect-row :effects (mapcar (lambda (n) (make-type-effect :name n)) names) :row-var nil))
+  (make-type-effect-row :effects (mapcar (lambda (n) (make-type-effect-op :name n :args nil)) names) :row-var nil))
 
 (deftest-each phase-d-effect-row-subset
   "effect-row-subset-p: smaller ⊆ larger; larger ⊄ smaller; pure ⊆ any."
@@ -142,39 +142,39 @@
 ;;; Phase E: Rank-N Polymorphism
 
 (deftest phase-e-skolem-creation-and-equality
-  "make-type-skolem creates unique skolems; type-skolem-equal-p compares by identity."
-  (let* ((sk1 (cl-cc/type:make-type-skolem 'a))
-         (sk2 (cl-cc/type:make-type-skolem 'a))
-         (sk3 (cl-cc/type:make-type-skolem 'b)))
-    (assert-true (cl-cc/type:type-skolem-p sk1))
-    (assert-true (cl-cc/type:type-skolem-p sk2))
+  "fresh-rigid-var creates unique rigid variables; equality compares by identity."
+  (let* ((sk1 (cl-cc/type:fresh-rigid-var 'a))
+         (sk2 (cl-cc/type:fresh-rigid-var 'a))
+         (sk3 (cl-cc/type:fresh-rigid-var 'b)))
+    (assert-true (cl-cc/type:type-rigid-p sk1))
+    (assert-true (cl-cc/type:type-rigid-p sk2))
     ;; Two fresh skolems with same name are distinct (unique IDs)
-    (assert-false (cl-cc/type:type-skolem-equal-p sk1 sk2))
-    (assert-eq 'a (cl-cc/type:type-skolem-name sk1))
+    (assert-false (cl-cc/type:type-rigid-equal-p sk1 sk2))
+    (assert-eq 'a (cl-cc/type:type-rigid-name sk1))
     ;; Same skolem is equal to itself
-    (assert-true (cl-cc/type:type-skolem-equal-p sk3 sk3))))
+    (assert-true (cl-cc/type:type-rigid-equal-p sk3 sk3))))
 
 (deftest phase-e-skolem-escape-absent
   "A freshly created skolem does not escape an empty substitution."
-  (let* ((sk (cl-cc/type:make-type-skolem 'a))
+  (let* ((sk (cl-cc/type:fresh-rigid-var 'a))
          (escaped (cl-cc/type:check-skolem-escape sk (empty-subst))))
     (assert-null escaped)))
 
 (deftest phase-e-check-lambda-against-forall
   "Checking (lambda (x) x) against a forall type succeeds or returns nil without signaling."
   (reset-type-vars!)
-  (let* ((a      (make-type-variable 'a))
-         (fa     (make-type-forall :var a :type (make-type-function (list a) a)))
+  (let* ((a      (fresh-type-var 'a))
+         (fa     (make-type-forall :var a :type (make-type-arrow (list a) a)))
          (id-ast (lower-sexp-to-ast '(lambda (x) x)))
          (env    (type-env-empty)))
     (assert-true (or (null (check id-ast fa env)) t))))
 
 (deftest phase-e-synthesize-lambda-returns-function-type
-  "Synthesizing (lambda (x) x) returns a type-function with one parameter."
+  "Synthesizing (lambda (x) x) returns a canonical arrow type with one parameter."
   (reset-type-vars!)
   (let* ((ast (lower-sexp-to-ast '(lambda (x) x)))
          (env (type-env-empty)))
     (multiple-value-bind (ty subst) (synthesize ast env)
       (declare (ignore subst))
-      (assert-true (typep ty 'type-function))
-      (assert-= 1 (length (type-function-params ty))))))
+      (assert-true (typep ty 'type-arrow))
+      (assert-= 1 (length (type-arrow-params ty))))))

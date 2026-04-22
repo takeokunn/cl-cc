@@ -98,7 +98,7 @@
 
 (deftest build-list-of-three-elements
   "Test building a list of three elements using cons."
-  (let* ((state (make-instance 'vm-state))
+  (let* ((state (make-instance 'vm-io-state))
          ;; Create (3 . nil)
          (inst1 (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
          ;; Create (2 . <addr1>)
@@ -123,7 +123,7 @@
 
 (deftest traverse-list-with-car-cdr
   "Test traversing a list using car and cdr."
-  (let* ((state (make-instance 'vm-state))
+  (let* ((state (make-instance 'vm-io-state))
          ;; Build list (10 20 30)
          (inst1 (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
          (inst2 (make-vm-cons :dst 3 :car-src 4 :cdr-src 0))

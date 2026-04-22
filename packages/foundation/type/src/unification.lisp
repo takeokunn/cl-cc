@@ -12,10 +12,9 @@
 ;;; ─── Helpers ──────────────────────────────────────────────────────────────
 
 (defun %effect-label (e)
-  "Extract the name symbol from a type-effect or type-effect-op node."
-  (cond ((type-effect-op-p e) (type-effect-op-name e))
-        ((type-effect-p   e) (type-effect-name e))
-        (t nil)))
+  "Extract the name symbol from a canonical type-effect-op node."
+  (when (type-effect-op-p e)
+    (type-effect-op-name e)))
 
 (defun %effects-from-names (names row-var)
   "Build a type-effect-row containing effect nodes for each name in NAMES,
@@ -61,7 +60,7 @@ Examples:
                                              (type-to-string t2)))
                      (if (type-occurs-p t1 t2 subst)
                          (fail)
-                         (succeed (extend-subst t1 t2 subst))))))))
+                         (succeed (subst-extend t1 t2 subst))))))))
 
       ;; T2 is type variable
       ((type-var-p t2)
@@ -74,11 +73,11 @@ Examples:
                                          "Impredicative type: cannot unify ~A with ~A."
                                          (type-to-string t1)
                                          (type-to-string t2)))
-                 (if (type-occurs-p t2 t1 subst)
-                     (fail)
-                     (succeed (extend-subst t2 t1 subst)))))))
+                  (if (type-occurs-p t2 t1 subst)
+                      (fail)
+                      (succeed (subst-extend t2 t1 subst)))))))
 
-      ;; Arrow types — (deftype type-function () 'type-arrow) so this covers both APIs
+      ;; Arrow types
       ((and (type-arrow-p t1) (type-arrow-p t2))
        (let ((params1 (type-arrow-params t1))
              (params2 (type-arrow-params t2)))
@@ -92,7 +91,7 @@ Examples:
                            subst-params)
                (fail)))))
 
-      ;; Product types — (deftype type-tuple () 'type-product) so this covers both APIs
+      ;; Product types
       ((and (type-product-p t1) (type-product-p t2))
        (type-unify-lists (type-product-elems t1)
                          (type-product-elems t2)

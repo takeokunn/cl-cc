@@ -75,10 +75,10 @@
   (assert-true  (cl-cc/type::is-subtype-p type-string +type-unknown+))
   (assert-false (cl-cc/type::is-subtype-p type-string type-int)))
 
-(deftest subtype-check-alias
-  "subtype-check is a backward-compatible alias for is-subtype-p."
-  (assert-true (cl-cc/type::subtype-check type-int type-any))
-  (assert-false (cl-cc/type::subtype-check type-string type-int)))
+(deftest is-subtype-p-basic-wrapper
+  "is-subtype-p remains the direct structural subtyping entrypoint."
+  (assert-true (cl-cc/type::is-subtype-p type-int type-any))
+  (assert-false (cl-cc/type::is-subtype-p type-string type-int)))
 
 (deftest subtypep-wrapper-returns-two-values
   "subtypep accepts type specifiers and returns ANSI-style two values."
@@ -138,18 +138,18 @@
 (deftest subtype-function-variance
   "Function subtyping: identical, covariant return, contravariant params; params not covariant."
   (assert-true (cl-cc/type::is-subtype-p
-                (make-type-function (list type-int) type-string)
-                (make-type-function (list type-int) type-string)))
+                (make-type-arrow (list type-int) type-string)
+                (make-type-arrow (list type-int) type-string)))
   (assert-true (cl-cc/type::is-subtype-p      ; covariant return
-                (make-type-function (list type-int) type-int)
-                (make-type-function (list type-int) type-any)))
+                (make-type-arrow (list type-int) type-int)
+                (make-type-arrow (list type-int) type-any)))
   (assert-true (cl-cc/type::is-subtype-p      ; contravariant params
-                (make-type-function (list type-any) type-int)
-                (make-type-function (list type-int) type-int)))
+                (make-type-arrow (list type-any) type-int)
+                (make-type-arrow (list type-int) type-int)))
   ;; params are NOT covariant: (int -> int) is NOT <: (t -> int)
   (assert-false (cl-cc/type::is-subtype-p
-                 (make-type-function (list type-int) type-int)
-                 (make-type-function (list type-any) type-int))))
+                 (make-type-arrow (list type-int) type-int)
+                 (make-type-arrow (list type-any) type-int))))
 
 ;;; ─── find-common-supertype ──────────────────────────────────────────────────
 
@@ -198,4 +198,3 @@
     (assert-true (type-equal-p fixnum-t (cl-cc/type::type-meet fixnum-t int-t)))
     (assert-true (type-unknown-p (cl-cc/type::type-meet +type-unknown+ type-string)))
     (assert-true (type-intersection-p (cl-cc/type::type-meet type-int type-string)))))
-

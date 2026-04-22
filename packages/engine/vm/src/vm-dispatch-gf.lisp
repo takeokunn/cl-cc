@@ -72,79 +72,105 @@ Only single-argument eql specializers are indexed for fast lookup."
           ((listp m) m)
           (t (list m)))))))
 
+(defun %vm-key-has-eql-specializer-p (key)
+  "Return T when KEY includes at least one eql specializer." 
+  (cond
+    ((%eql-specializer-p key) t)
+    ((listp key) (some #'%eql-specializer-p key))
+    (t nil)))
+
+(defun %vm-specializer-key-matches-args-p (key all-args state)
+  "Return T when dispatch KEY applies to ALL-ARGS under STATE classification." 
+  (cond
+    ((%eql-specializer-p key)
+     (and (= (length all-args) 1)
+          (%eql-specializer-matches-p key (car all-args))))
+    ((listp key)
+     (and (= (length key) (length all-args))
+          (every (lambda (spec arg)
+                   (or (eq spec t)
+                       (%eql-specializer-matches-p spec arg)
+                       (eq spec (vm-classify-arg arg state))))
+                 key all-args)))
+    (t
+     (and (= (length all-args) 1)
+          (let ((class-name (vm-classify-arg (car all-args) state)))
+            (or (eq key t)
+                (eq key class-name)))))))
+
+(defun %vm-arg-cpls (state all-args)
+  "Return class-precedence lists for ALL-ARGS, each extended with T." 
+  (mapcar (lambda (arg)
+            (let* ((class-name (vm-classify-arg arg state))
+                   (class-ht (gethash class-name (vm-class-registry state)))
+                   (cpl (if class-ht
+                            (gethash :__cpl__ class-ht)
+                            (list class-name))))
+              (if (member t cpl) cpl (append cpl (list t)))))
+          all-args))
+
+(defun %vm-dispatch-key-combinations (cpls)
+  "Return dispatch-key combinations from CPLs, most-specific first." 
+  (labels ((collect (remaining prefix)
+             (if (null remaining)
+                 (list (nreverse prefix))
+                 (loop for class in (car remaining)
+                       nconc (collect (cdr remaining) (cons class prefix))))))
+    (collect cpls nil)))
+
+(defun %vm-canonical-dispatch-key (combo)
+  "Return the canonical dispatch-table key for COMBO." 
+  (if (= (length combo) 1)
+      (first combo)
+      combo))
+
+(defun %vm-method-value->list (value)
+  "Normalize dispatch-table VALUE to a flat method list." 
+  (cond
+    ((null value) nil)
+    ((listp value) (copy-list value))
+    (t (list value))))
+
+(defun %vm-collect-applicable-methods (methods-ht state all-args)
+  "Collect applicable methods from METHODS-HT in most-specific-first order." 
+  (let ((result nil)
+        (seen nil))
+    ;; EQL-specialized methods first.
+    (maphash (lambda (key value)
+               (when (and (%vm-key-has-eql-specializer-p key)
+                          (%vm-specializer-key-matches-args-p key all-args state))
+                 (dolist (method (%vm-method-value->list value))
+                   (unless (member method seen)
+                     (push method seen)
+                     (setf result (append result (list method)))))))
+             methods-ht)
+    ;; Then walk class-precedence combinations in canonical key form.
+    (dolist (combo (%vm-dispatch-key-combinations (%vm-arg-cpls state all-args)))
+      (dolist (method (%vm-method-value->list
+                       (gethash (%vm-canonical-dispatch-key combo) methods-ht)))
+        (unless (member method seen)
+          (push method seen)
+          (setf result (append result (list method))))))
+    result))
+
 (defun vm-get-all-applicable-methods (gf-ht state all-args)
   "Return list of all applicable method closures for GF-HT and ALL-ARGS, most-specific first.
 EQL specializers are checked first (most specific), then class-based dispatch via CPL."
-  (let* ((methods-ht (gethash :__methods__ gf-ht))
-         (first-arg (car all-args))
-         (class-name (vm-classify-arg first-arg state))
-         (class-ht (gethash class-name (vm-class-registry state)))
-         (cpl (if class-ht
-                  (let ((c (gethash :__cpl__ class-ht)))
-                    (if (member t c) c (append c (list t))))
-                  (list class-name t)))
-         (result nil))
-     ;; 1. Check eql specializers first (most specific)
-     (dolist (method (%vm-gf-eql-methods gf-ht first-arg))
-       (push method result))
-     ;; Fallback: linear scan for backwards compatibility / non-indexed tables
-     (unless result
-       (maphash (lambda (key method)
-                  (when (or (and (%eql-specializer-p key)
-                                 (%eql-specializer-matches-p key first-arg))
-                            (and (consp key) (not (%eql-specializer-p key))
-                                 (= 1 (length key))
-                                 (%eql-specializer-p (car key))
-                                 (%eql-specializer-matches-p (car key) first-arg)))
-                    (push method result)))
-                methods-ht))
-    ;; 2. Collect class-based methods in CPL order (most-specific first)
-    (dolist (ancestor cpl)
-      (let ((m (or (gethash (list ancestor) methods-ht)
-                   (gethash ancestor methods-ht))))
-        (when m (push m result))))
-    ;; 3. Fallback: t-specializer (if not already collected)
-    (let ((t-method (gethash t methods-ht)))
-      (when (and t-method (not (member t-method result)))
-        (push t-method result)))
-    (nreverse result)))
+  (%vm-collect-applicable-methods (gethash :__methods__ gf-ht) state all-args))
 
 (defun %lookup-qualified-methods (gf-ht qual-key state all-arg-values)
   "Look up qualified methods for QUAL-KEY (:__BEFORE__, :__AFTER__, :__AROUND__) in GF-HT.
-Checks four key forms in priority order: (list class-name), (list t), class-name, t.
 Returns a flat list of applicable closures, most-specific first."
   (let ((qual-ht (gethash qual-key gf-ht)))
     (when qual-ht
-      (let ((class-name (vm-classify-arg (car all-arg-values) state)))
-        ;; Keys tried in priority order: list-wrapped exact, list-wrapped t,
-        ;; bare exact, bare t (backward compat for single-key entries)
-        (%gethash-multi-key qual-ht
-                            (list (list class-name) (list t)
-                                  class-name t))))))
+      (%vm-collect-applicable-methods qual-ht state all-arg-values))))
 
-(defun %collect-combo-methods (gf-ht qual-key state first-arg)
+(defun %collect-combo-methods (gf-ht qual-key state all-arg-values)
   "Collect all applicable methods for custom combination by walking the CPL.
-Returns methods most-specific-first, deduplicated across both plain and
-list-wrapped key forms (for multi-dispatch backward compat)."
-  (let* ((qual-ht (gethash qual-key gf-ht))
-         (class-name (vm-classify-arg first-arg state))
-         (class-ht (gethash class-name (vm-class-registry state)))
-         (cpl (if class-ht
-                  (let ((c (gethash :__cpl__ class-ht)))
-                    (if (member t c) c (append c (list t))))
-                  (list class-name t)))
-         (result nil)
-         (seen nil))
+Returns methods most-specific-first using the canonical specializer key shape."
+  (let ((qual-ht (gethash qual-key gf-ht)))
     (when qual-ht
-      ;; Walk CPL (deduplicated); for each ancestor try both plain and
-      ;; list-wrapped keys, adding newly seen methods to result.
-      (dolist (ancestor cpl)
-        (unless (member ancestor seen)
-          (push ancestor seen)
-          (dolist (method (%gethash-multi-key qual-ht (list ancestor (list ancestor))))
-            (unless (member method result)
-              (push method result))))))
-    (nreverse result)))
+      (%vm-collect-applicable-methods qual-ht state all-arg-values))))
 
 (defparameter *method-combination-operators*
   `((+      . ,#'+)
@@ -166,4 +192,3 @@ Add entries here to support new combination types without touching dispatch logi
     (if entry
         (cdr entry)
         (error "Unknown method combination operator: ~S" combination))))
-

@@ -3,15 +3,13 @@
   (:shadowing-import-from :cl-cc/type
    :type-node
    :type-primitive
-   :type-variable
-   :type-function
    :type-unknown
    :type-scheme
    :type-primitive-name
-   :type-variable-id
-   :type-variable-name
-   :type-function-params
-   :type-function-return
+   :type-var-id
+   :type-var-name
+   :type-arrow-params
+   :type-arrow-return
    :type-scheme-quantified-vars
    :type-scheme-type
    :type-int
@@ -26,25 +24,23 @@
    :type-unit
    :+type-unknown+
    :make-type-primitive
-   :make-type-variable
-   :make-type-function-raw
+   :fresh-type-var
    :make-type-scheme
    :type-constructor
    :type-constructor-p
    :type-constructor-name
    :type-constructor-args
    :make-type-constructor
-   :make-type-constructor-raw
    :type-to-scheme
-   :type-variable-p
-   :type-variable-equal-p
+   :type-var-p
+   :type-var-equal-p
    :type-equal-p
    :type-to-string
    :empty-subst
    :subst-lookup
-   :extend-subst
-   :type-substitute
-   :compose-subst
+   :subst-extend
+   :zonk
+   :subst-compose
    :type-unify
    :type-unify-lists
    :type-occurs-p
@@ -55,14 +51,12 @@
    :type-env-empty
    :type-env-extend
    :type-env-lookup
-   :fresh-type-var
    :reset-type-vars!
    :infer
    :infer-with-env
    :type-inference-error
    :unbound-variable-error
    :type-mismatch-error
-   :make-type-function
    :synthesize
    :check
    :check-body
@@ -163,14 +157,9 @@
    :type-refinement-p
    :type-refinement-base
    :type-refinement-predicate
-   :make-type-skolem
-   :type-skolem-p
-   :type-skolem-id
-   :type-skolem-name
-   :type-skolem-equal-p
-   :fresh-rigid-var
-   :type-rigid-p
-   :type-rigid-name
+    :fresh-rigid-var
+    :type-rigid-p
+    :type-rigid-name
    :type-rigid-equal-p
    :type-unknown-p
    :upgraded-array-element-type
@@ -207,7 +196,6 @@
    :make-typeclass-constraint :make-implication-constraint
    :make-effect-subset-constraint :make-mult-leq-constraint
    :make-row-lacks-constraint :make-kind-equal-constraint
-   :make-constraint
    :solve-constraints :collect-constraints))
 
 ;;; Compiler/parser/backend imports and exports are split into adjacent helper

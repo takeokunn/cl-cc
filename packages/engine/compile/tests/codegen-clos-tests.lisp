@@ -55,7 +55,7 @@
                  ctx)
     (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-register-method)))
       (assert-true inst)
-      (assert-equal '(dog) (cl-cc/vm::vm-method-specializer inst)))
+      (assert-equal 'dog (cl-cc/vm::vm-method-specializer inst)))
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-closure))))
 
 ;;; ─── compile-ast: ast-make-instance ─────────────────────────────────────────
@@ -84,4 +84,3 @@
                   :initargs nil)
                  ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-get-global))))
-

@@ -11,8 +11,8 @@
 ;;; ─── Helpers ──────────────────────────────────────────────────────────────
 
 (defun fmt-vm (&optional (out (make-string-output-stream)))
-  "Create a vm-state with a string output stream for capture."
-  (make-instance 'cl-cc/vm::vm-state :output-stream out))
+  "Create a vm-io-state with a string output stream for capture."
+  (make-instance 'cl-cc/vm::vm-io-state :output-stream out))
 
 (defun fmt-exec (inst state)
   "Execute a single instruction against STATE."

@@ -68,12 +68,6 @@ Does not modify SUBST.  Handles NIL as the empty substitution."
   (incf (substitution-generation subst))
   subst)
 
-;;; ─── Backward-compat wrappers (alist API) ─────────────────────────────────
-
-(defun extend-subst (var ty subst)
-  "Functional extend — backward-compat alias for subst-extend."
-  (subst-extend var ty subst))
-
 ;;; ─── Composition ──────────────────────────────────────────────────────────
 
 (defun subst-compose (s1 s2)
@@ -98,10 +92,6 @@ Nil is treated as the empty substitution (identity element)."
                     (setf (gethash id (substitution-bindings result)) ty)))
                 (substitution-bindings s1))
        result))))
-
-(defun compose-subst (s1 s2)
-  "Alias — backward compat."
-  (subst-compose s1 s2))
 
 ;;; ─── Zonking ──────────────────────────────────────────────────────────────
 ;;;
@@ -207,9 +197,21 @@ Nil is treated as the empty substitution (identity element)."
       :constraints (mapcar (lambda (c) (zonk c subst))
                            (type-qualified-constraints ty))
       :body        (zonk (type-qualified-body ty) subst)))
-    (t ty)))
+     (t ty)))
 
-;; type-substitute, apply-subst, apply-subst-env (backward compat),
-;; type-occurs-p (occurs check), generalize, generalize-in-env, instantiate,
-;; instantiate-scheme, normalize-type-variables, apply-unification,
-;; environment-free-vars are in substitution-schemes.lisp (loaded next).
+(defun zonk-env (env subst)
+  "Return a type environment with SUBST eagerly applied to all bindings."
+  (make-type-env
+   :bindings (mapcar (lambda (entry)
+                       (cons (car entry)
+                             (let ((value (cdr entry)))
+                               (if (type-scheme-p value)
+                                   (make-type-scheme (type-scheme-quantified-vars value)
+                                                     (zonk (type-scheme-type value) subst))
+                                   (zonk value subst)))))
+                     (type-env-bindings env))
+   :dict-bindings (type-env-dict-bindings env)))
+
+;; type-occurs-p (occurs check), generalize, instantiate,
+;; normalize-type-variables, apply-unification are in substitution-schemes.lisp
+;; (loaded next).

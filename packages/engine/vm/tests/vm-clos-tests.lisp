@@ -158,7 +158,7 @@
 
 (deftest eql-specializer-dispatch-index
   "vm-register-method populates the EQL dispatch index for fast lookup."
-  (let* ((state (make-instance 'cl-cc/vm::vm-state))
+  (let* ((state (make-instance 'cl-cc/vm::vm-io-state))
          (gf (make-hash-table :test #'equal))
          (method 'read-method)
          (inst (cl-cc::make-vm-register-method

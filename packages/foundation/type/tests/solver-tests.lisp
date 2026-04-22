@@ -1,7 +1,7 @@
 ;;;; tests/unit/type/solver-tests.lisp — Constraint Solver Tests
 ;;;;
 ;;;; Tests for src/type/solver.lisp:
-;;;; solve-constraints, collect-constraints, make-constraint (compat alias).
+;;;; solve-constraints and collect-constraints.
 
 (in-package :cl-cc/test)
 
@@ -9,14 +9,6 @@
   :parent cl-cc-unit-suite) 
 (in-suite solver-suite)
 constraint solver tests")
-
-;;; ─── make-constraint backward compat ───────────────────────────────────────
-
-(deftest solver-make-constraint-compat
-  "make-constraint builds an equality constraint (backward compat)."
-  (let ((c (make-constraint type-int type-string)))
-    (assert-true (constraint-p c))
-    (assert-eq :equal (constraint-kind c))))
 
 ;;; ─── solve-constraints: equality ───────────────────────────────────────────
 

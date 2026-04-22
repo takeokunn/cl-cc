@@ -147,15 +147,6 @@
     (let ((s (type-to-string (make-type-qualified :constraints nil :body type-int))))
       (assert-string= "FIXNUM" s))))
 
-;;; ─── internal compatibility printer path ───────────────────────────────────
-
-(deftest printer-internal-type-class-constraint-node
-  "The retained internal type-class-constraint node still prints correctly for compatibility reads."
-  (assert-true (search "NUM"
-                       (type-to-string (cl-cc/type::make-type-class-constraint
-                                        :class-name 'num
-                                        :type-arg type-int)))))
-
 ;;; ─── unparse-type roundtrip ────────────────────────────────────────────────
 
 (deftest unparse-type-forms

@@ -115,7 +115,7 @@
         (cl-cc/type::type-env-lookup lookup-sym
                                      (cl-cc/compile::compilation-result-type-env result))
       (assert-true found-p)
-      (assert-true (cl-cc/type:type-function-p
+      (assert-true (cl-cc/type:type-arrow-p
                     (cl-cc/type::type-scheme-type scheme))))))
 
 ;;; Additional eval/prescan/stdlib integration tests live in pipeline-eval-tests.lisp.

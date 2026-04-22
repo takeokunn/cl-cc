@@ -95,7 +95,7 @@
 (deftest vm-execute-print-writes-to-stream
   "vm-print writes the register value followed by a newline to the output stream."
   (let* ((str (make-string-output-stream))
-         (s   (make-instance 'cl-cc/vm::vm-state :output-stream str)))
+         (s   (make-instance 'cl-cc/vm::vm-io-state :output-stream str)))
     (cl-cc:vm-reg-set s :R0 42)
     (cl-cc/vm::execute-instruction
      (cl-cc::make-vm-print :reg :R0) s 0 (make-hash-table :test #'equal))

@@ -147,10 +147,6 @@ Called as the fallback when no T1-driven rule matched."
              (%is-subtype-p-by-t2 t1 t2)))
         (t (%is-subtype-p-by-t2 t1 t2)))))
 
-(defun subtype-check (t1 t2)
-  "Backward-compatible alias for IS-SUBTYPE-P."
-  (is-subtype-p t1 t2))
-
 (defun subtypep (type1 type2 &optional environment)
   "ANSI-style subtype predicate for cl-cc/type.
 

@@ -6,7 +6,7 @@
 ;;; arithmetic, comparison, jump, call, cons, vector, hash, I/O, etc.).
 ;;;
 ;;; %run-vm-core, run-vm, run-vm-with-opcode-bigrams, and vm2-state
-;;; compatibility shims are in vm-opcodes-run.lisp.
+;;; state access helpers are in vm-opcodes-run.lisp.
 ;;;
 ;;; Load order: after vm-opcodes.lisp (infrastructure + shape macros).
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -219,5 +219,5 @@
     (let ((result-reg (svref code (+ pc 1))))
       (throw 'vm-halt (svref regs result-reg)))))
 
-;;; %run-vm-core, run-vm, run-vm-with-opcode-bigrams, and vm2-state compatibility
-;;; shims are in vm-opcodes-run.lisp (loaded immediately after this file).
+;;; %run-vm-core, run-vm, run-vm-with-opcode-bigrams, and the VM state access
+;;; layer are in vm-opcodes-run.lisp (loaded immediately after this file).

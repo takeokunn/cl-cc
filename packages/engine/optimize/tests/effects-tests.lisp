@@ -237,7 +237,7 @@
 (defun make-effect-row (&rest effect-names)
   "Helper: build a type-effect-row with the given effect name symbols."
   (cl-cc/type:make-type-effect-row
-   :effects (mapcar (lambda (n) (cl-cc/type:make-type-effect :name n)) effect-names)
+   :effects (mapcar (lambda (n) (cl-cc/type:make-type-effect-op :name n :args nil)) effect-names)
    :row-var nil))
 
 (deftest-each effect-row->kind

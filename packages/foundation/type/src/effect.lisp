@@ -51,21 +51,12 @@ OPERATIONS:  alist of (op-name . type-arrow) — the effect's operations."
 
 ;;; ─── Effect row operations ────────────────────────────────────────────────
 
-;;; Helper: extract effect name from either type-effect-op (new) or type-effect
-;;; (old backward-compat struct defined in typeclass.lisp which loads later).
-;;; We defer to type-effect-name when it becomes available (typeclass.lisp
-;;; defines a polymorphic type-effect-name).  At load time of this file,
-;;; only type-effect-op-p is available, so we default to that path.
+;;; Helper: extract effect name from canonical type-effect-op nodes.
 (defun %effect-node-name (e)
-  "Return the effect name symbol from E, handling both type-effect-op and
-old-style backward-compat effect objects.  After typeclass.lisp loads,
-type-effect-name handles the dispatch; we call it if bound."
-  (cond
-    ((type-effect-op-p e) (type-effect-op-name e))
-    ;; After typeclass.lisp loads, type-effect-name handles old-style nodes.
-    ((fboundp 'type-effect-name) (funcall 'type-effect-name e))
-    ;; Last resort: this shouldn't happen in a correctly ordered ASDF build.
-    (t (error "Cannot get effect name from ~S" e))))
+  "Return the effect name symbol from canonical effect node E."
+  (if (type-effect-op-p e)
+      (type-effect-op-name e)
+      (error "Cannot get effect name from ~S" e)))
 
 (defun effect-row-union (row1 row2)
   "Merge ROW1 and ROW2 into a new type-effect-row.

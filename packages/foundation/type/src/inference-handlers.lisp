@@ -38,7 +38,7 @@
     (let ((declared (parse-type-specifier (cl-cc/ast:ast-the-type ast))))
       (multiple-value-bind (unified ok) (type-unify body-type declared subst)
         (if ok
-            (values (type-substitute declared unified) unified)
+            (values (zonk declared unified) unified)
             (error 'type-mismatch-error :expected declared :actual body-type))))))
 
 (defun infer-setq (ast env)
@@ -49,7 +49,7 @@
           (let ((declared (instantiate scheme)))
             (multiple-value-bind (unified ok) (type-unify val-type declared subst)
               (if ok
-                  (values (type-substitute val-type unified) unified)
+                  (values (zonk val-type unified) unified)
                   (error 'type-mismatch-error :expected declared :actual val-type))))
           (values val-type subst)))))
 
@@ -75,8 +75,8 @@ instantiated at different monotypes."
                          e))))
     (multiple-value-bind (body-type subst) (infer-body (cl-cc/ast:ast-defun-body ast) body-env)
       (values (or declared-type
-                  (make-type-function-raw
-                   :params (mapcar (lambda (p) (type-substitute p subst)) param-types)
+                  (make-type-arrow-raw
+                   :params (mapcar (lambda (p) (zonk p subst)) param-types)
                    :return body-type))
               subst))))
 
@@ -189,18 +189,18 @@ Returns (values type substitution) or signals a type-error condition."
   (multiple-value-bind (lhs-type subst1) (infer (cl-cc/ast:ast-binop-lhs ast) env)
     (multiple-value-bind (rhs-type subst2)
         (infer (cl-cc/ast:ast-binop-rhs ast)
-               (apply-subst-env env subst1))
-      (let* ((subst (compose-subst subst2 subst1))
-             (result-type (fresh-type-var))
-             (op-type (make-type-function-raw
-                        :params (list lhs-type rhs-type)
-                        :return result-type))
-             (expected (make-type-function-raw
-                         :params (list type-int type-int)
-                         :return type-int)))
+               (zonk-env env subst1))
+      (let* ((subst (subst-compose subst2 subst1))
+               (result-type (fresh-type-var))
+               (op-type (make-type-arrow-raw
+                         :params (list lhs-type rhs-type)
+                         :return result-type))
+              (expected (make-type-arrow-raw
+                          :params (list type-int type-int)
+                          :return type-int)))
         (multiple-value-bind (unified ok) (type-unify op-type expected subst)
           (if ok
-              (values (type-substitute result-type unified) unified)
+              (values (zonk result-type unified) unified)
               (error 'type-mismatch-error
                      :expected expected
                      :actual op-type)))))))

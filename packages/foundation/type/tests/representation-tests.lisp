@@ -178,7 +178,7 @@
 
 (deftest type-compat-and-printing-cases
   "Backward-compat aliases work; type-to-string returns string for all forms."
-  (let ((v (cl-cc/type::make-type-variable 'x)))
+  (let ((v (cl-cc/type::fresh-type-var 'x)))
     (assert-true (type-var-p v))
     (assert-eq 'x (type-var-name v)))
   (let ((tc (cl-cc/type::make-type-constructor 'list (list type-int))))
@@ -191,7 +191,7 @@
     (assert-true (type-equal-p ty (cl-cc/type::parse-type-specifier spec))))
   (assert-true  (type-unknown-p +type-unknown+))
   (assert-false (type-unknown-p type-int))
-  (let ((f (make-type-function (list type-int) type-string)))
+  (let ((f (make-type-arrow (list type-int) type-string)))
     (assert-true (type-arrow-p f))
     (assert-eq :omega (type-arrow-mult f)))
   (assert-true (stringp (type-to-string type-int)))

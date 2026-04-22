@@ -48,14 +48,14 @@
 
 (defproperty vm-const-sets-register
     (val (gen-integer :min -1000 :max 1000))
-  (let* ((state (make-instance 'vm-state))
+  (let* ((state (make-instance 'vm-io-state))
          (inst (make-vm-const :dst :r0 :value val)))
     (execute-instruction inst state 0 (make-hash-table))
     (= (vm-reg-get state :r0) val)))
 
 (defproperty vm-move-copies-value
     (val (gen-integer :min -1000 :max 1000))
-  (let* ((state (make-instance 'vm-state))
+  (let* ((state (make-instance 'vm-io-state))
          (const-inst (make-vm-const :dst :r0 :value val))
          (move-inst (make-vm-move :dst :r1 :src :r0)))
     (execute-instruction const-inst state 0 (make-hash-table))
@@ -65,7 +65,7 @@
 (defproperty vm-add-computes-sum
     (a (gen-integer :min -500 :max 500)
      b (gen-integer :min -500 :max 500))
-  (let* ((state (make-instance 'vm-state))
+  (let* ((state (make-instance 'vm-io-state))
          (inst-a (make-vm-const :dst :r0 :value a))
          (inst-b (make-vm-const :dst :r1 :value b))
          (inst-add (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)))
@@ -77,7 +77,7 @@
 (defproperty vm-sub-computes-difference
     (a (gen-integer :min -500 :max 500)
      b (gen-integer :min -500 :max 500))
-  (let* ((state (make-instance 'vm-state))
+  (let* ((state (make-instance 'vm-io-state))
          (inst-a (make-vm-const :dst :r0 :value a))
          (inst-b (make-vm-const :dst :r1 :value b))
          (inst-sub (make-vm-sub :dst :r2 :lhs :r0 :rhs :r1)))
@@ -89,7 +89,7 @@
 (defproperty vm-mul-computes-product
     (a (gen-integer :min -100 :max 100)
      b (gen-integer :min -100 :max 100))
-  (let* ((state (make-instance 'vm-state))
+  (let* ((state (make-instance 'vm-io-state))
          (inst-a (make-vm-const :dst :r0 :value a))
          (inst-b (make-vm-const :dst :r1 :value b))
          (inst-mul (make-vm-mul :dst :r2 :lhs :r0 :rhs :r1)))

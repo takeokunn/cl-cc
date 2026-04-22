@@ -154,8 +154,78 @@ Returns two values: result register and CPS form used for the AST."
           (values (vm-program-result-register
                    (compilation-result-program cps-result))
                   last-cps))
-        (values (compile-ast ast ctx)
-                last-cps))))
+     (values (compile-ast ast ctx)
+                 last-cps))))
+
+(defun %top-level-in-package-form-p (form)
+  "Return T when FORM is an in-package declaration skipped by top-level compilation."
+  (and (consp form)
+       (eq (car form) 'in-package)))
+
+(defun %process-toplevel-form (form ctx target type-env type-check safety
+                              pass-pipeline print-pass-timings timing-stream
+                              print-opt-remarks opt-remarks-stream opt-remarks-mode
+                              print-pass-stats stats-stream trace-json-stream
+                              compiled-asts)
+  "Compile one top-level FORM and return updated compilation state.
+Values: last-reg, last-type, last-cps, updated-type-env."
+  (labels ((best-effort-type (ast env)
+             (ignore-errors (type-check-ast ast env))))
+    (let* ((ast (%lower-toplevel-form-to-ast form))
+           (last-reg nil)
+           (last-type nil)
+           (last-cps nil))
+      (%record-toplevel-defun-for-ct-env ast)
+      (push ast compiled-asts)
+      (multiple-value-setq (last-type type-env)
+        (%update-toplevel-type-state ast type-env type-check #'best-effort-type))
+      (%maybe-extend-ct-value-env ast)
+      (multiple-value-setq (last-reg last-cps)
+        (%compile-toplevel-ast-into-context ast ctx target type-check safety
+                                            pass-pipeline print-pass-timings timing-stream
+                                            print-opt-remarks opt-remarks-stream
+                                            opt-remarks-mode print-pass-stats stats-stream
+                                            trace-json-stream))
+      (values last-reg last-type last-cps type-env))))
+
+(defun %finalize-toplevel-compilation (ctx target last-reg last-type last-cps compiled-asts
+                                       pass-pipeline print-pass-timings timing-stream
+                                       print-opt-remarks opt-remarks-stream opt-remarks-mode
+                                       print-pass-stats stats-stream trace-json-stream)
+  "Finalize CTX after all top-level forms have been compiled."
+  (when last-reg
+    (emit ctx (make-vm-halt :reg last-reg)))
+  (when *repl-capture-label-counter*
+    (setf *repl-capture-label-counter* (ctx-next-label ctx)))
+  (let* ((instructions (nreverse (ctx-instructions ctx)))
+         (optimized    nil)
+         (leaf-p       nil)
+         (program      nil))
+    (multiple-value-setq (optimized leaf-p)
+      (optimize-instructions instructions
+                             :pass-pipeline        pass-pipeline
+                             :print-pass-timings   print-pass-timings
+                             :timing-stream        timing-stream
+                             :print-pass-stats     print-pass-stats
+                             :stats-stream         stats-stream
+                             :trace-json-stream    trace-json-stream
+                             :print-opt-remarks    print-opt-remarks
+                             :opt-remarks-stream   opt-remarks-stream
+                             :opt-remarks-mode     opt-remarks-mode))
+    (setf program (make-vm-program :instructions    (if (member target '(:vm :wasm))
+                                                        instructions
+                                                        (or optimized instructions))
+                                    :result-register last-reg
+                                    :leaf-p          leaf-p))
+    (make-compilation-result :program                program
+                             :assembly               (emit-assembly program :target target)
+                             :globals                (ctx-global-functions ctx)
+                             :type                   last-type
+                             :type-env               (ctx-type-env ctx)
+                             :cps                    last-cps
+                             :ast                    (nreverse compiled-asts)
+                             :vm-instructions        instructions
+                             :optimized-instructions optimized)))
 
 
 (defun compile-toplevel-forms (forms &key (target :x86_64) type-check (safety 1) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
@@ -168,58 +238,21 @@ Returns a compilation-result struct with program, assembly, and globals."
         (last-cps      nil)
         (compiled-asts nil)
         (type-env      (cl-cc/type:type-env-empty)))
-    (labels ((best-effort-type (ast env)
-               (ignore-errors (type-check-ast ast env))))
-      (let ((*compile-time-value-env*    nil)
-            (*compile-time-function-env* nil))
-        (dolist (form forms)
-          (unless (and (consp form) (eq (car form) 'in-package))
-            (let ((ast (%lower-toplevel-form-to-ast form)))
-              (%record-toplevel-defun-for-ct-env ast)
-              (push ast compiled-asts)
-              (multiple-value-setq (last-type type-env)
-                (%update-toplevel-type-state ast type-env type-check #'best-effort-type))
-              (%maybe-extend-ct-value-env ast)
-              (multiple-value-setq (last-reg last-cps)
-                (%compile-toplevel-ast-into-context ast ctx target type-check safety
-                                                   pass-pipeline print-pass-timings timing-stream
-                                                   print-opt-remarks opt-remarks-stream
-                                                   opt-remarks-mode print-pass-stats stats-stream
-                                                   trace-json-stream))))))
+    (let ((*compile-time-value-env*    nil)
+          (*compile-time-function-env* nil))
+      (dolist (form forms)
+        (unless (%top-level-in-package-form-p form)
+          (multiple-value-setq (last-reg last-type last-cps type-env)
+            (%process-toplevel-form form ctx target type-env type-check safety
+                                    pass-pipeline print-pass-timings timing-stream
+                                    print-opt-remarks opt-remarks-stream opt-remarks-mode
+                                    print-pass-stats stats-stream trace-json-stream
+                                    compiled-asts))))
       (setf (ctx-type-env ctx) type-env)
-      (when last-reg
-        (emit ctx (make-vm-halt :reg last-reg)))
-      (when *repl-capture-label-counter*
-        (setf *repl-capture-label-counter* (ctx-next-label ctx)))
-      (let* ((instructions (nreverse (ctx-instructions ctx)))
-             (optimized    nil)
-             (leaf-p       nil)
-             (program      nil))
-        (multiple-value-setq (optimized leaf-p)
-          (optimize-instructions instructions
-                                 :pass-pipeline        pass-pipeline
-                                 :print-pass-timings   print-pass-timings
-                                 :timing-stream        timing-stream
-                                 :print-pass-stats     print-pass-stats
-                                 :stats-stream         stats-stream
-                                 :trace-json-stream    trace-json-stream
-                                 :print-opt-remarks    print-opt-remarks
-                                 :opt-remarks-stream   opt-remarks-stream
-                                 :opt-remarks-mode     opt-remarks-mode))
-        (setf program (make-vm-program :instructions    (if (member target '(:vm :wasm))
-                                                            instructions
-                                                            (or optimized instructions))
-                                        :result-register last-reg
-                                        :leaf-p          leaf-p))
-        (make-compilation-result :program                program
-                                 :assembly               (emit-assembly program :target target)
-                                 :globals                (ctx-global-functions ctx)
-                                 :type                   last-type
-                                 :type-env               (ctx-type-env ctx)
-                                 :cps                    last-cps
-                                 :ast                    (nreverse compiled-asts)
-                                 :vm-instructions        instructions
-                                 :optimized-instructions optimized)))))
+      (%finalize-toplevel-compilation ctx target last-reg last-type last-cps compiled-asts
+                                      pass-pipeline print-pass-timings timing-stream
+                                      print-opt-remarks opt-remarks-stream opt-remarks-mode
+                                      print-pass-stats stats-stream trace-json-stream))))
 
 ;;; Function call compilation (%resolve-func-sym-reg, %try-compile-*,
 ;;; %compile-normal-call, compile-ast (ast-call)) is in codegen-calls.lisp (loads next).

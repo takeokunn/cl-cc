@@ -43,7 +43,7 @@ and symbol-plists so user code can call stdlib functions and access stdlib
 globals without recompiling the stdlib.
 Registers, call-stack, handler-stack, method-call-stack start fresh so
 each test begins with a clean execution context."
-  (let ((clone (make-instance 'vm-io-state :output-stream output-stream)))
+  (let ((clone (make-vm-state :output-stream output-stream)))
     (flet ((copy-ht-into (src dst)
              (clrhash dst)
              (maphash (lambda (k v) (setf (gethash k dst) v)) src)))

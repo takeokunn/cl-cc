@@ -26,7 +26,7 @@
 
 (deftest unify-product-with-vars
   "Unifying a product with variables binds them."
-  (let* ((a (cl-cc/type:make-type-variable 'a))
+  (let* ((a (cl-cc/type:fresh-type-var 'a))
          (p1 (cl-cc/type:make-type-product :elems (list a cl-cc/type:type-string)))
          (p2 (cl-cc/type:make-type-product :elems (list cl-cc/type:type-int cl-cc/type:type-string))))
     (multiple-value-bind (s ok) (type-unify p1 p2)
@@ -88,7 +88,7 @@
 
 (deftest unify-var-bound-in-subst
   "A variable already bound in subst is followed."
-  (let* ((a (cl-cc/type:make-type-variable 'a))
+  (let* ((a (cl-cc/type:fresh-type-var 'a))
          (s (subst-extend a cl-cc/type:type-int nil)))
     (multiple-value-bind (s2 ok) (type-unify a cl-cc/type:type-int s)
       (assert-true ok)
@@ -96,7 +96,7 @@
 
 (deftest unify-var-bound-conflicting-fails
   "A variable bound to int fails to unify with string."
-  (let* ((a (cl-cc/type:make-type-variable 'a))
+  (let* ((a (cl-cc/type:fresh-type-var 'a))
          (s (subst-extend a cl-cc/type:type-int nil)))
     (multiple-value-bind (s2 ok) (type-unify a cl-cc/type:type-string s)
       (declare (ignore s2))
@@ -121,8 +121,8 @@
 
 (deftest unify-lists-pairwise
   "Lists are unified element-wise."
-  (let* ((a (cl-cc/type:make-type-variable 'a))
-         (b (cl-cc/type:make-type-variable 'b)))
+  (let* ((a (cl-cc/type:fresh-type-var 'a))
+         (b (cl-cc/type:fresh-type-var 'b)))
     (multiple-value-bind (s ok)
         (type-unify-lists (list a b)
                           (list cl-cc/type:type-int cl-cc/type:type-string)
@@ -180,7 +180,7 @@
       (assert-true ok)
       (assert-true (cl-cc/type:substitution-p s))))
   ;; open-absorbs-extra
-  (let* ((rv (cl-cc/type:make-type-variable 'r))
+  (let* ((rv (cl-cc/type:fresh-type-var 'r))
          (e-io (cl-cc/type:make-type-effect-op :name 'io :args nil))
          (e-exn (cl-cc/type:make-type-effect-op :name 'exn :args nil))
          (r1 (cl-cc/type:make-type-effect-row :effects (list e-io) :row-var rv))
@@ -203,7 +203,7 @@
 
 (deftest unify-occurs-check-circular
   "Occurs check prevents circular type: a ~ (a -> int)."
-  (let* ((a (cl-cc/type:make-type-variable 'a))
+  (let* ((a (cl-cc/type:fresh-type-var 'a))
          (fn (cl-cc/type:make-type-arrow-raw :params (list a) :return cl-cc/type:type-int)))
     (multiple-value-bind (s ok) (type-unify a fn)
       (declare (ignore s))

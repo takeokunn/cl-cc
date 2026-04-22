@@ -92,9 +92,12 @@ dispatch table, keyed by the composite specializer list for multiple dispatch."
          (gf-reg (or (gethash name (ctx-global-generics ctx))
                      (cdr (assoc name (ctx-env ctx)))
                      (%ensure-generic-function ctx name)))
-         ;; Build composite dispatch key from ALL specializers
-         ;; For eql specializers: (param . (eql 'val)) → (eql val) with quote unwrapped
-         (dispatch-key (mapcar (lambda (spec)
+         ;; Build the canonical dispatch key from ALL specializers.
+         ;; Single-dispatch methods use a bare key; multi-dispatch methods use
+         ;; the full class tuple. EQL specializers keep their explicit (eql v)
+         ;; representation, with quote unwrapped from the source AST payload.
+         (dispatch-key
+           (let ((keys (mapcar (lambda (spec)
                                  (if (and spec (consp spec))
                                      (let ((raw (cdr spec)))
                                        (if (and (consp raw) (eq (car raw) 'eql))
@@ -104,7 +107,10 @@ dispatch table, keyed by the composite specializer list for multiple dispatch."
                                                             val)))
                                            raw))
                                      (or spec t)))
-                               specializers))
+                               specializers)))
+             (if (= (length keys) 1)
+                 (first keys)
+                 keys)))
          (qual-str (if qualifier (format nil "_~A" qualifier) ""))
          (label-suffix (format nil "~{~A~^_~}" dispatch-key))
          (func-label (make-label ctx (format nil "METHOD_~A~A_~A" name qual-str label-suffix)))

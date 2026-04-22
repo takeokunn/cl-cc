@@ -15,7 +15,7 @@
 
 (defun str-vm ()
   "Create a minimal vm-state for string tests."
-  (make-instance 'cl-cc/vm::vm-state))
+  (make-instance 'cl-cc/vm::vm-io-state))
 
 (defun str-exec (inst state)
   "Execute a single instruction against STATE."

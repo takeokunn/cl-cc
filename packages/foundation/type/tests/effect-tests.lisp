@@ -61,7 +61,7 @@
                 (cl-cc/type::effect-row-union (make-effect-row) (make-effect-row))))
   (let* ((rv (fresh-type-var))
          (result (cl-cc/type::effect-row-union (make-effect-row :io) (make-open-effect-row rv :state))))
-    (assert-true (type-variable-p (type-effect-row-row-var result)))))
+    (assert-true (type-var-p (type-effect-row-row-var result)))))
 
 ;;; ─── effect-row-subset-p ────────────────────────────────────────────────────
 

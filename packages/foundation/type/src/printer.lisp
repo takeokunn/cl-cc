@@ -10,8 +10,8 @@
 
 ;;; ─── Promote stub defun → defgeneric ─────────────────────────────────────
 ;;;
-;;; types-env.lisp and typeclass-compat-legacy.lisp define plain-function stubs
-;;; for early use during loading.  Here we promote to a generic function so that
+;;; types-env.lisp provides the remaining early stub for type-to-string.
+;;; Here we promote to a generic function so that
 ;;; each type-node class owns its own printing clause (Prolog-style dispatch).
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -221,19 +221,6 @@
                 (mapcar #'type-to-string vars)
                 (type-to-string (type-scheme-type ty))))))
 
-;;; ─── Backward-compat structs (defined in typeclass-compat-legacy.lisp) ───
-
-(defmethod type-to-string ((ty type-class-constraint))
-  (format nil "(~A ~A)"
-          (type-class-constraint-class-name ty)
-          (type-to-string (type-class-constraint-type-arg ty))))
-
-(defmethod type-to-string ((ty type-skolem))
-  (format nil "!sk~D" (type-skolem-id ty)))
-
-(defmethod type-to-string ((ty type-effect))
-  (symbol-name (%type-effect-name ty)))
-
 ;;; ─── Utilities ────────────────────────────────────────────────────────────
 
 (defun list-interleave (items sep)
@@ -243,4 +230,3 @@
       (loop for (item . rest) on items
             collect item
             when rest collect sep)))
-

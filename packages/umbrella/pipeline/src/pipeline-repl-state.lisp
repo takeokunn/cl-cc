@@ -83,7 +83,7 @@ disturbing any enclosing REPL session."
 (defun %ensure-repl-state ()
   "Lazily initialise all persistent REPL state variables on first use."
   (unless *repl-vm-state*
-    (setf *repl-vm-state* (make-instance 'vm-io-state :output-stream *standard-output*)))
+    (setf *repl-vm-state* (make-vm-state :output-stream *standard-output*)))
   (unless *repl-accessor-map*
     (setf *repl-accessor-map* (make-hash-table :test #'eq)))
   (unless *repl-pool-instructions*

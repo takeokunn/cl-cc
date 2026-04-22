@@ -121,17 +121,5 @@
    ;; ─── Register Count ────────────────────────────────────────────────────────
    +vm-register-count+
 
-   ;; ─── VM2 State ─────────────────────────────────────────────────────────────
-   make-vm2-state
-   vm2-state-p
-   vm2-state-registers
-   vm2-state-global-vars
-   vm2-state-output-stream
-   vm2-state-values-buffer
-   vm2-reg-get
-   vm2-reg-set
-   run-vm
-   run-vm-with-opcode-bigrams
-   vm2-collect-opcode-bigrams
-   vm2-fuse-immediate-superinstructions
-   vm2-top-superoperator-candidates))
+   ;; ─── Internal flat-vector VM2 helpers remain intentionally unexported ────
+   ))

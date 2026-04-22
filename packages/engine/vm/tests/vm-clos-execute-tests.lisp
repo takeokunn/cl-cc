@@ -16,7 +16,7 @@
 
 (defun make-clos-vm ()
   "Fresh vm-state for CLOS instruction tests."
-  (make-instance 'cl-cc/vm::vm-state))
+  (make-instance 'cl-cc/vm::vm-io-state))
 
 (defun class-def-inst (dst name &key (supers '()) (slots '()) (initargs '()))
   "Build a vm-class-def instruction for simple class registration."

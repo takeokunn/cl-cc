@@ -19,85 +19,125 @@
   "Rewrite safe top-level expression FORMS into CPS entry forms when possible.
 Definition and control-effect forms stay on the direct path; this only widens
 the existing CPS-primary-path behavior to multi-form top-level compilation."
-  (if (not (eq target :vm))
-      forms
-      (mapcar (lambda (form)
-                (if (and (consp form) (eq (car form) 'in-package))
-                    form
-                    (let* ((ast (%prepare-ast form))
-                           (optimized (optimize-ast ast))
-                           (cps (maybe-cps-transform optimized)))
-                      (if (and cps (%cps-vm-compile-safe-ast-p optimized))
-                          (%cps-entry-form cps)
-                          form))))
-              forms)))
+  (flet ((cps-safe-p (ast)
+           (case target
+             (:vm (%cps-vm-compile-safe-ast-p ast))
+             (:wasm nil)
+             (t (%cps-native-compile-safe-ast-p ast)))))
+    (mapcar (lambda (form)
+              (if (and (consp form) (eq (car form) 'in-package))
+                  form
+                  (let* ((ast (%prepare-ast form))
+                         (optimized (optimize-ast ast))
+                         (cps (maybe-cps-transform optimized)))
+                    (if (and cps (cps-safe-p optimized))
+                        (%cps-entry-form cps)
+                        form))))
+            forms)))
+
+(defun %maybe-compile-expression-via-cps (ast target type-check safety pass-pipeline print-pass-timings timing-stream print-pass-stats stats-stream trace-json-stream print-opt-remarks opt-remarks-stream opt-remarks-mode)
+  "Return a CPS-backed compilation-result for AST when the target-specific CPS path is safe." 
+  (let ((cps (maybe-cps-transform ast)))
+    (values cps
+            (when (and (not *compile-expression-cps-recursion-guard*)
+                       cps
+                       (case target
+                         (:vm (and *enable-cps-vm-primary-path*
+                                   (%cps-vm-compile-safe-ast-p ast)))
+                         (:wasm nil)
+                         (t (%cps-native-compile-safe-ast-p ast))))
+               (let ((*compile-expression-cps-recursion-guard* t))
+                 (compile-expression (%cps-entry-form cps)
+                                     :target target
+                                    :type-check type-check
+                                    :safety safety
+                                    :pass-pipeline pass-pipeline
+                                    :print-pass-timings print-pass-timings
+                                    :timing-stream timing-stream
+                                    :print-pass-stats print-pass-stats
+                                    :stats-stream stats-stream
+                                    :trace-json-stream trace-json-stream
+                                    :print-opt-remarks print-opt-remarks
+                                    :opt-remarks-stream opt-remarks-stream
+                                    :opt-remarks-mode opt-remarks-mode))))))
+
+(defun %make-direct-compilation-result (ctx result-reg target type-check inferred-type cps ast pass-pipeline print-pass-timings timing-stream print-pass-stats stats-stream trace-json-stream print-opt-remarks opt-remarks-stream opt-remarks-mode)
+  "Build the normal direct-path compilation result from CTX and RESULT-REG."
+  (let* ((instructions (nreverse (ctx-instructions ctx)))
+         (full-instrs (append instructions (list (make-vm-halt :reg result-reg)))))
+    (multiple-value-bind (optimized-instrs leaf-p)
+        (optimize-instructions full-instrs
+                               :pass-pipeline pass-pipeline
+                               :print-pass-timings print-pass-timings
+                               :timing-stream timing-stream
+                               :print-pass-stats print-pass-stats
+                               :stats-stream stats-stream
+                               :trace-json-stream trace-json-stream
+                               :print-opt-remarks print-opt-remarks
+                               :opt-remarks-stream opt-remarks-stream
+                               :opt-remarks-mode opt-remarks-mode)
+      (when *repl-capture-label-counter*
+        (setf *repl-capture-label-counter* (ctx-next-label ctx)))
+      (let* ((runtime-instructions (if (member target '(:vm :wasm))
+                                       full-instrs
+                                       (or optimized-instrs full-instrs)))
+             (program (make-vm-program :instructions runtime-instructions
+                                       :result-register result-reg
+                                       :leaf-p leaf-p)))
+        (make-compilation-result :program program
+                                 :assembly (emit-assembly program :target target)
+                                 :type (when type-check inferred-type)
+                                 :type-env (ctx-type-env ctx)
+                                 :cps cps
+                                 :ast ast
+                                 :vm-instructions full-instrs
+                                 :optimized-instructions optimized-instrs)))))
+
+(defun %compile-string-forms (forms target type-check safety pass-pipeline print-pass-timings timing-stream print-pass-stats stats-stream trace-json-stream print-opt-remarks opt-remarks-stream opt-remarks-mode)
+  "Compile already-parsed FORMS through the single-form or top-level path." 
+  (if (= (length forms) 1)
+      (compile-expression (first forms)
+                          :target target :type-check type-check :safety safety
+                          :pass-pipeline pass-pipeline
+                          :print-pass-timings print-pass-timings
+                          :timing-stream timing-stream
+                          :print-pass-stats print-pass-stats
+                          :stats-stream stats-stream
+                          :trace-json-stream trace-json-stream
+                          :print-opt-remarks print-opt-remarks
+                          :opt-remarks-stream opt-remarks-stream
+                          :opt-remarks-mode opt-remarks-mode)
+      (compile-toplevel-forms (%maybe-cps-toplevel-forms forms :target target)
+                              :target target :type-check type-check :safety safety
+                              :pass-pipeline pass-pipeline
+                              :print-pass-timings print-pass-timings
+                              :timing-stream timing-stream
+                              :print-pass-stats print-pass-stats
+                              :stats-stream stats-stream
+                              :trace-json-stream trace-json-stream
+                              :print-opt-remarks print-opt-remarks
+                              :opt-remarks-stream opt-remarks-stream
+                              :opt-remarks-mode opt-remarks-mode)))
 
 (defun compile-expression (expr &key (target :x86_64) type-check (safety 1) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   (let* ((ctx            (make-instance 'compiler-context :safety safety))
-          (ast            (optimize-ast (%prepare-ast expr)))
-          (cps            (maybe-cps-transform ast))
-          (inferred-type  (%type-check-safe ast type-check))
-          (cps-result     (when (and (eq target :vm)
-                                     *enable-cps-vm-primary-path*
-                                     (not *compile-expression-cps-recursion-guard*)
-                                     cps
-                                     (%cps-vm-compile-safe-ast-p ast))
-                            (let ((*compile-expression-cps-recursion-guard* t))
-                              (compile-expression (%cps-entry-form cps)
-                                                  :target target
-                                                  :type-check type-check
-                                                  :safety safety
-                                                  :pass-pipeline pass-pipeline
-                                                  :print-pass-timings print-pass-timings
-                                                  :timing-stream timing-stream
-                                                  :print-pass-stats print-pass-stats
-                                                  :stats-stream stats-stream
-                                                  :trace-json-stream trace-json-stream
-                                                  :print-opt-remarks print-opt-remarks
-                                                  :opt-remarks-stream opt-remarks-stream
-                                                  :opt-remarks-mode opt-remarks-mode))))
-          (result-reg     (unless cps-result (compile-ast ast ctx)))
-          (instructions   (nreverse (ctx-instructions ctx)))
-          (full-instrs    (append instructions (list (make-vm-halt :reg result-reg)))))
-    (if cps-result
-        (make-compilation-result
-         :program (compilation-result-program cps-result)
-         :assembly (compilation-result-assembly cps-result)
-         :type (or (and type-check inferred-type)
-                   (compilation-result-type cps-result))
-         :type-env (compilation-result-type-env cps-result)
-         :cps cps
-         :ast ast
-         :vm-instructions (compilation-result-vm-instructions cps-result)
-         :optimized-instructions (compilation-result-optimized-instructions cps-result))
-        (multiple-value-bind (optimized-instrs leaf-p)
-            (optimize-instructions full-instrs
-                                   :pass-pipeline pass-pipeline
-                                   :print-pass-timings print-pass-timings
-                                   :timing-stream timing-stream
-                                   :print-pass-stats print-pass-stats
-                                   :stats-stream stats-stream
-                                   :trace-json-stream trace-json-stream
-                                   :print-opt-remarks print-opt-remarks
-                                   :opt-remarks-stream opt-remarks-stream
-                                   :opt-remarks-mode opt-remarks-mode)
-          ;; Capture label counter for REPL continuity
-          (when *repl-capture-label-counter*
-            (setf *repl-capture-label-counter* (ctx-next-label ctx)))
-          (let* ((runtime-instructions (if (member target '(:vm :wasm))
-                                           full-instrs
-                                           (or optimized-instrs full-instrs)))
-                 (program (make-vm-program :instructions runtime-instructions
-                                           :result-register result-reg
-                                           :leaf-p leaf-p)))
-            (make-compilation-result :program              program
-                                     :assembly             (emit-assembly program :target target)
-                                     :type                 (when type-check inferred-type)
-                                     :type-env             (ctx-type-env ctx)
-                                     :cps                  cps
-                                     :ast                  ast
-                                     :vm-instructions      full-instrs
-                                     :optimized-instructions optimized-instrs))))))
+         (ast            (optimize-ast (%prepare-ast expr)))
+         (inferred-type  (%type-check-safe ast type-check)))
+    (multiple-value-bind (cps cps-result)
+        (%maybe-compile-expression-via-cps ast target type-check safety pass-pipeline print-pass-timings timing-stream print-pass-stats stats-stream trace-json-stream print-opt-remarks opt-remarks-stream opt-remarks-mode)
+      (let ((result-reg (unless cps-result (compile-ast ast ctx))))
+        (if cps-result
+            (make-compilation-result
+             :program (compilation-result-program cps-result)
+             :assembly (compilation-result-assembly cps-result)
+             :type (or (and type-check inferred-type)
+                       (compilation-result-type cps-result))
+             :type-env (compilation-result-type-env cps-result)
+             :cps cps
+             :ast ast
+             :vm-instructions (compilation-result-vm-instructions cps-result)
+             :optimized-instructions (compilation-result-optimized-instructions cps-result))
+            (%make-direct-compilation-result ctx result-reg target type-check inferred-type cps ast pass-pipeline print-pass-timings timing-stream print-pass-stats stats-stream trace-json-stream print-opt-remarks opt-remarks-stream opt-remarks-mode))))))
 
 ;;; Stdlib sexp cache (*stdlib-expanded-cache*, %snapshot-macro-env-table,
 ;;; %restore-macro-env-table, %build-stdlib-expanded-cache, get-stdlib-forms)
@@ -116,20 +156,9 @@ the existing CPS-primary-path behavior to multi-form top-level compilation."
 
 (defun compile-string (source &key (target :x86_64) type-check (language :lisp) (safety 1) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   (let ((forms (parse-source-for-language source language)))
-    (if (and (eq language :lisp) (= (length forms) 1))
-        (compile-expression (first forms)
-                            :target target :type-check type-check :safety safety
-                            :pass-pipeline pass-pipeline
-                             :print-pass-timings print-pass-timings
-                             :timing-stream timing-stream
-                             :print-pass-stats print-pass-stats
-                             :stats-stream stats-stream
-                             :trace-json-stream trace-json-stream
-                             :print-opt-remarks print-opt-remarks
-                            :opt-remarks-stream opt-remarks-stream
-                            :opt-remarks-mode opt-remarks-mode)
-        ;; Multiple forms (or non-lisp): use compile-toplevel-forms for sequential macro expansion
-        (compile-toplevel-forms (%maybe-cps-toplevel-forms forms :target target)
+    (if (eq language :lisp)
+        (%compile-string-forms forms target type-check safety pass-pipeline print-pass-timings timing-stream print-pass-stats stats-stream trace-json-stream print-opt-remarks opt-remarks-stream opt-remarks-mode)
+        (compile-toplevel-forms forms
                                 :target target :type-check type-check :safety safety
                                 :pass-pipeline pass-pipeline
                                 :print-pass-timings print-pass-timings

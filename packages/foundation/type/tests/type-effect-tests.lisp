@@ -18,54 +18,54 @@
 
 (deftest free-vars-cases
   "type-free-vars: single variable returns itself; function type returns both param and return vars."
-  (let* ((v  (make-type-variable))
+  (let* ((v  (fresh-type-var))
          (fv (type-free-vars v)))
     (assert-= 1 (length fv))
-    (assert-true (type-variable-equal-p (first fv) v)))
-  (let* ((v1 (make-type-variable))
-         (v2 (make-type-variable))
-         (fn (make-type-function-raw :params (list v1) :return v2))
+    (assert-true (type-var-equal-p (first fv) v)))
+  (let* ((v1 (fresh-type-var))
+         (v2 (fresh-type-var))
+         (fn (make-type-arrow-raw :params (list v1) :return v2))
          (fv (type-free-vars fn)))
     (assert-= 2 (length fv))))
 
 ;;; Substitution Tests
 
 (deftest substitution-cases
-  "type-substitute: primitive unchanged; bound var replaced; unbound var identity."
-  (assert-eq type-int (type-substitute type-int (empty-subst)))
-  (let* ((v (make-type-variable))
-         (result (type-substitute v (extend-subst v type-int (empty-subst)))))
+  "zonk: primitive unchanged; bound var replaced; unbound var identity."
+  (assert-eq type-int (zonk type-int (empty-subst)))
+  (let* ((v (fresh-type-var))
+         (result (zonk v (subst-extend v type-int (empty-subst)))))
     (assert-type-equal result type-int))
-  (let* ((v (make-type-variable))
-         (result (type-substitute v (empty-subst))))
-    (assert-true (type-variable-equal-p result v))))
+  (let* ((v (fresh-type-var))
+         (result (zonk v (empty-subst))))
+    (assert-true (type-var-equal-p result v))))
 
 (deftest substitution-through-function-type
   "Substitution distributes into function type params and return."
-  (let* ((v      (make-type-variable))
-         (fn     (make-type-function-raw :params (list v) :return v))
-         (result (type-substitute fn (extend-subst v type-int (empty-subst)))))
-    (assert-type type-function result)
-    (assert-type-equal (first (type-function-params result)) type-int)
-    (assert-type-equal (type-function-return result) type-int)))
+  (let* ((v      (fresh-type-var))
+         (fn     (make-type-arrow-raw :params (list v) :return v))
+         (result (zonk fn (subst-extend v type-int (empty-subst)))))
+    (assert-type type-arrow result)
+    (assert-type-equal (first (type-arrow-params result)) type-int)
+    (assert-type-equal (type-arrow-return result) type-int)))
 
 ;;; Normalize Type Variables Tests
 
 (deftest normalize-type-variables-canonical
   "Test that normalize produces canonical variable names."
-  (let* ((v1 (make-type-variable))
-         (v2 (make-type-variable))
-         (fn (make-type-function-raw
+  (let* ((v1 (fresh-type-var))
+         (v2 (fresh-type-var))
+         (fn (make-type-arrow-raw
                             :params (list v1)
                             :return v2))
          (normalized (normalize-type-variables fn)))
-    (assert-type type-function normalized)
+    (assert-type type-arrow normalized)
     ;; The param and return should be different canonical variables
-    (let ((p (first (type-function-params normalized)))
-          (r (type-function-return normalized)))
-      (assert-type type-variable p)
-      (assert-type type-variable r)
-      (assert-false (type-variable-equal-p p r)))))
+    (let ((p (first (type-arrow-params normalized)))
+          (r (type-arrow-return normalized)))
+      (assert-type type-var p)
+      (assert-type type-var r)
+      (assert-false (type-var-equal-p p r)))))
 
 ;;; Phase 3: Bidirectional Type Checking Tests
 
@@ -108,16 +108,16 @@ registration body per case."
 (deftest-each effect-row-singleton-cases
   "Effect row singletons: pure has 0 effects; io has 1 IO effect; custom multi has N effects."
   :cases (("pure"   +pure-effect-row+  0 nil)
-          ("io"     +io-effect-row+    1 "IO")
-          ("custom" (make-type-effect-row :effects (list (cl-cc/type::make-type-effect :name 'state)
-                                                         (cl-cc/type::make-type-effect :name 'error))
-                                          :row-var nil) 2 nil))
+           ("io"     +io-effect-row+    1 "IO")
+           ("custom" (make-type-effect-row :effects (list (cl-cc/type::make-type-effect-op :name 'state :args nil)
+                                                          (cl-cc/type::make-type-effect-op :name 'error :args nil))
+                                           :row-var nil) 2 nil))
   (row expected-count expected-name)
   (assert-true (type-effect-row-p row))
     (assert-= expected-count (length (type-effect-row-effects row)))
     (when expected-name
       (assert-true (string= expected-name
-                           (symbol-name (cl-cc/type::type-effect-name (first (type-effect-row-effects row))))))))
+                            (symbol-name (cl-cc/type::type-effect-op-name (first (type-effect-row-effects row))))))))
 
 (deftest-each effect-row-to-string
   "type-to-string formats effect rows: pure → '{}'; io-row contains 'IO'."
@@ -135,17 +135,17 @@ registration body per case."
 
 (deftest rankn-forall-creation-and-equality
   "make-type-forall creates well-formed forall types; foralls with distinct vars are not equal."
-  (let* ((a  (make-type-variable 'a))
-         (fn (make-type-function (list a) a))
+  (let* ((a  (fresh-type-var 'a))
+         (fn (make-type-arrow (list a) a))
          (fa (make-type-forall :var a :type fn)))
     (assert-true (type-forall-p fa))
-    (assert-true (type-variable-equal-p a (type-forall-var fa)))
-    (assert-true (typep (type-forall-body fa) 'type-function))
+    (assert-true (type-var-equal-p a (type-forall-var fa)))
+    (assert-true (typep (type-forall-body fa) 'type-arrow))
     (let ((s (type-to-string fa)))
       (assert-true (stringp s))
       (assert-true (search "A" (string-upcase s)))))
-  (let* ((a  (make-type-variable 'a))
-         (b  (make-type-variable 'b))
-         (fa (make-type-forall :var a :type (make-type-function (list a) a)))
-         (fb (make-type-forall :var b :type (make-type-function (list b) b))))
+  (let* ((a  (fresh-type-var 'a))
+         (b  (fresh-type-var 'b))
+         (fa (make-type-forall :var a :type (make-type-arrow (list a) a)))
+         (fb (make-type-forall :var b :type (make-type-arrow (list b) b))))
     (assert-false (type-equal-p fa fb))))

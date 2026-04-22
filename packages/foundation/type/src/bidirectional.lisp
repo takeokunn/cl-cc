@@ -22,16 +22,16 @@
 (defun skolem-appears-in-type-p (skolem type)
   "Return T if SKOLEM appears free in TYPE."
   (typecase type
-    (type-skolem      (type-skolem-equal-p skolem type))
+    (type-rigid       (type-rigid-equal-p skolem type))
     (type-var         nil)
     (type-arrow       (or (some (lambda (p) (skolem-appears-in-type-p skolem p))
                                 (type-arrow-params type))
                           (skolem-appears-in-type-p skolem (type-arrow-return type))))
     (type-forall      (skolem-appears-in-type-p skolem (type-forall-body type)))
     (type-constructor (some (lambda (a) (skolem-appears-in-type-p skolem a))
-                             (type-constructor-args type)))
-    (type-tuple       (some (lambda (e) (skolem-appears-in-type-p skolem e))
-                             (type-tuple-elements type)))
+                            (type-constructor-args type)))
+    (type-product     (some (lambda (e) (skolem-appears-in-type-p skolem e))
+                            (type-product-elems type)))
     (t nil)))
 
 (defun skolem-appears-in-subst-p (skolem subst)
@@ -65,9 +65,7 @@
     ;; and checks the body under that skolem
     (type-forall
      (let* ((bound-var (type-forall-var expected-type))
-            (skolem (make-type-skolem (if (type-var-name bound-var)
-                                          (type-var-name bound-var)
-                                          "a")))
+            (skolem (fresh-rigid-var (or (type-var-name bound-var) "a")))
             ;; Substitute the bound variable with the skolem in the body type
             ;; using a proper hash-table substitution struct
             (body-type (let ((sub (subst-extend bound-var skolem (make-substitution))))
@@ -79,13 +77,13 @@
        ;; the constraint solver phase.
        (check ast body-type env)))
 
-    ;; Default: synthesize and verify via unification
-    (t
-     (multiple-value-bind (actual-type subst) (synthesize ast env)
-       (let ((actual (type-substitute actual-type subst)))
-         (if (typep actual 'type-unknown)
-             ;; Actual unknown: gradual typing, always ok
-             subst
+     ;; Default: synthesize and verify via unification
+     (t
+      (multiple-value-bind (actual-type subst) (synthesize ast env)
+        (let ((actual (zonk actual-type subst)))
+          (if (typep actual 'type-unknown)
+              ;; Actual unknown: gradual typing, always ok
+              subst
              ;; Try unification (handles type variables)
              (multiple-value-bind (unified ok)
                  (type-unify actual expected-type subst)
@@ -107,8 +105,8 @@
         (dolist (ast (butlast asts))
           (multiple-value-bind (type new-subst) (synthesize ast current-env)
             (declare (ignore type))
-            (setf subst (compose-subst new-subst subst))
-            (setf current-env (apply-subst-env current-env subst))))
+            (setf subst (subst-compose new-subst subst))
+            (setf current-env (zonk-env current-env subst))))
         ;; Check the last form against expected type
         (check (car (last asts)) expected-type current-env))))
 

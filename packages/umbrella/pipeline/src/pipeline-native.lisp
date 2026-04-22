@@ -80,8 +80,126 @@ Returns two values: the compilation result and whether the CPS-native path was u
                                           :opt-remarks-stream opt-remarks-stream
                                           :opt-remarks-mode opt-remarks-mode)
                       t)
-              (values nil nil)))
-        (values nil nil))))
+               (values nil nil)))
+         (values nil nil))))
+
+(defun %compile-native-string (source target language pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream opt-remarks-mode print-pass-stats stats-stream trace-json-stream)
+  "Compile SOURCE through the generic string entrypoint for native codegen." 
+  (compile-string source :target target :language language
+                  :pass-pipeline pass-pipeline
+                  :print-pass-timings print-pass-timings
+                  :timing-stream timing-stream
+                  :print-pass-stats print-pass-stats
+                  :stats-stream stats-stream
+                  :trace-json-stream trace-json-stream
+                  :print-opt-remarks print-opt-remarks
+                  :opt-remarks-stream opt-remarks-stream
+                  :opt-remarks-mode opt-remarks-mode))
+
+(defun %compile-native-expression (form target pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream opt-remarks-mode print-pass-stats stats-stream trace-json-stream)
+  "Compile a single already-read FORM through the generic native entrypoint." 
+  (compile-expression form :target target
+                      :pass-pipeline pass-pipeline
+                      :print-pass-timings print-pass-timings
+                      :timing-stream timing-stream
+                      :print-pass-stats print-pass-stats
+                      :stats-stream stats-stream
+                      :trace-json-stream trace-json-stream
+                      :print-opt-remarks print-opt-remarks
+                      :opt-remarks-stream opt-remarks-stream
+                      :opt-remarks-mode opt-remarks-mode))
+
+(defun %compile-native-toplevel-forms (forms target pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream opt-remarks-mode print-pass-stats stats-stream trace-json-stream)
+  "Compile FORMS through the generic native top-level entrypoint after optional CPS rewriting." 
+  (compile-toplevel-forms (%maybe-cps-toplevel-forms forms :target target)
+                          :target target
+                          :pass-pipeline pass-pipeline
+                          :print-pass-timings print-pass-timings
+                          :timing-stream timing-stream
+                          :print-pass-stats print-pass-stats
+                          :stats-stream stats-stream
+                          :trace-json-stream trace-json-stream
+                          :print-opt-remarks print-opt-remarks
+                          :opt-remarks-stream opt-remarks-stream
+                          :opt-remarks-mode opt-remarks-mode))
+
+(defun %compile-native-lisp-forms (forms target pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream opt-remarks-mode print-pass-stats stats-stream trace-json-stream)
+  "Compile Lisp FORMS for native emission, preferring the CPS route for a single safe form." 
+  (let ((effective-forms (%non-package-top-level-forms forms)))
+    (if (= (length effective-forms) 1)
+        (multiple-value-bind (cps-result cps-used)
+            (%maybe-compile-native-via-cps (first effective-forms)
+                                           :target target
+                                           :pass-pipeline pass-pipeline
+                                           :print-pass-timings print-pass-timings
+                                           :timing-stream timing-stream
+                                           :print-pass-stats print-pass-stats
+                                           :stats-stream stats-stream
+                                           :trace-json-stream trace-json-stream
+                                           :print-opt-remarks print-opt-remarks
+                                           :opt-remarks-stream opt-remarks-stream
+                                           :opt-remarks-mode opt-remarks-mode)
+          (if cps-used
+              cps-result
+              (%compile-native-toplevel-forms forms target
+                                             pass-pipeline print-pass-timings timing-stream
+                                             print-opt-remarks opt-remarks-stream opt-remarks-mode
+                                             print-pass-stats stats-stream trace-json-stream)))
+        (%compile-native-toplevel-forms forms target
+                                        pass-pipeline print-pass-timings timing-stream
+                                        print-opt-remarks opt-remarks-stream opt-remarks-mode
+                                        print-pass-stats stats-stream trace-json-stream))))
+
+(defun %compile-native-source (source target language pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream opt-remarks-mode print-pass-stats stats-stream trace-json-stream)
+  "Compile SOURCE for native emission, choosing the narrowest readable entrypoint." 
+  (if (stringp source)
+      (if (eq language :lisp)
+          (let ((forms (parse-all-forms source)))
+            (if (= (length (%non-package-top-level-forms forms)) 1)
+                (multiple-value-bind (cps-result cps-used)
+                    (%maybe-compile-native-via-cps (first (%non-package-top-level-forms forms))
+                                                   :target target
+                                                   :pass-pipeline pass-pipeline
+                                                   :print-pass-timings print-pass-timings
+                                                   :timing-stream timing-stream
+                                                   :print-pass-stats print-pass-stats
+                                                   :stats-stream stats-stream
+                                                   :trace-json-stream trace-json-stream
+                                                   :print-opt-remarks print-opt-remarks
+                                                   :opt-remarks-stream opt-remarks-stream
+                                                   :opt-remarks-mode opt-remarks-mode)
+                  (if cps-used
+                      cps-result
+                      (%compile-native-string source target language
+                                              pass-pipeline print-pass-timings timing-stream
+                                              print-opt-remarks opt-remarks-stream opt-remarks-mode
+                                              print-pass-stats stats-stream trace-json-stream)))
+                (%compile-native-string source target language
+                                        pass-pipeline print-pass-timings timing-stream
+                                        print-opt-remarks opt-remarks-stream opt-remarks-mode
+                                        print-pass-stats stats-stream trace-json-stream)))
+          (%compile-native-string source target language
+                                  pass-pipeline print-pass-timings timing-stream
+                                  print-opt-remarks opt-remarks-stream opt-remarks-mode
+                                  print-pass-stats stats-stream trace-json-stream))
+      (multiple-value-bind (cps-result cps-used)
+          (%maybe-compile-native-via-cps source
+                                         :target target
+                                         :pass-pipeline pass-pipeline
+                                         :print-pass-timings print-pass-timings
+                                         :timing-stream timing-stream
+                                         :print-pass-stats print-pass-stats
+                                         :stats-stream stats-stream
+                                         :trace-json-stream trace-json-stream
+                                         :print-opt-remarks print-opt-remarks
+                                         :opt-remarks-stream opt-remarks-stream
+                                         :opt-remarks-mode opt-remarks-mode)
+         (if cps-used
+             cps-result
+            (%compile-native-expression source target
+                                        pass-pipeline print-pass-timings timing-stream
+                                        print-opt-remarks opt-remarks-stream opt-remarks-mode
+                                        print-pass-stats stats-stream trace-json-stream)))))
 
 (defun compile-to-native (source &key (arch :x86-64) (output-file "a.out") (language :lisp) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile SOURCE to a native Mach-O executable.
@@ -91,81 +209,16 @@ OUTPUT-FILE is the path for the executable.
 LANGUAGE is :LISP (default) or :PHP.
 
 Returns the output file path on success."
-  (let* ((result (if (stringp source)
-                     (if (eq language :lisp)
-                         (let ((forms (%non-package-top-level-forms (parse-all-forms source))))
-                           (if (= (length forms) 1)
-                               (multiple-value-bind (cps-result cps-used)
-                                   (%maybe-compile-native-via-cps (first forms)
-                                                                  :target :vm
-                                                                  :pass-pipeline pass-pipeline
-                                                                  :print-pass-timings print-pass-timings
-                                                                  :timing-stream timing-stream
-                                                                  :print-pass-stats print-pass-stats
-                                                                  :stats-stream stats-stream
-                                                                  :trace-json-stream trace-json-stream
-                                                                  :print-opt-remarks print-opt-remarks
-                                                                  :opt-remarks-stream opt-remarks-stream
-                                                                  :opt-remarks-mode opt-remarks-mode)
-                                 (if cps-used
-                                     cps-result
-                                     (compile-string source :target :vm :language language
-                                                     :pass-pipeline pass-pipeline
-                                                     :print-pass-timings print-pass-timings
-                                                     :timing-stream timing-stream
-                                                     :print-pass-stats print-pass-stats
-                                                     :stats-stream stats-stream
-                                                     :trace-json-stream trace-json-stream
-                                                     :print-opt-remarks print-opt-remarks
-                                                     :opt-remarks-stream opt-remarks-stream
-                                                     :opt-remarks-mode opt-remarks-mode)))
-                               (compile-string source :target :vm :language language
-                                               :pass-pipeline pass-pipeline
-                                               :print-pass-timings print-pass-timings
-                                               :timing-stream timing-stream
-                                               :print-pass-stats print-pass-stats
-                                               :stats-stream stats-stream
-                                               :trace-json-stream trace-json-stream
-                                               :print-opt-remarks print-opt-remarks
-                                               :opt-remarks-stream opt-remarks-stream
-                                               :opt-remarks-mode opt-remarks-mode)))
-                         (compile-string source :target :vm :language language
-                                         :pass-pipeline pass-pipeline
-                                         :print-pass-timings print-pass-timings
-                                         :timing-stream timing-stream
-                                         :print-pass-stats print-pass-stats
-                                         :stats-stream stats-stream
-                                         :trace-json-stream trace-json-stream
-                                         :print-opt-remarks print-opt-remarks
-                                         :opt-remarks-stream opt-remarks-stream
-                                         :opt-remarks-mode opt-remarks-mode))
-                     (multiple-value-bind (cps-result cps-used)
-                         (%maybe-compile-native-via-cps source
-                                                        :target :vm
-                                                        :pass-pipeline pass-pipeline
-                                                        :print-pass-timings print-pass-timings
-                                                        :timing-stream timing-stream
-                                                        :print-pass-stats print-pass-stats
-                                                        :stats-stream stats-stream
-                                                        :trace-json-stream trace-json-stream
-                                                        :print-opt-remarks print-opt-remarks
-                                                        :opt-remarks-stream opt-remarks-stream
-                                                        :opt-remarks-mode opt-remarks-mode)
-                       (if cps-used
-                           cps-result
-                           (compile-expression source :target :vm
-                                               :pass-pipeline pass-pipeline
-                                               :print-pass-timings print-pass-timings
-                                               :timing-stream timing-stream
-                                               :print-pass-stats print-pass-stats
-                                               :stats-stream stats-stream
-                                               :trace-json-stream trace-json-stream
-                                               :print-opt-remarks print-opt-remarks
-                                               :opt-remarks-stream opt-remarks-stream
-                                               :opt-remarks-mode opt-remarks-mode)))))
+  (let* ((native-target (ecase arch
+                          (:x86-64 :x86_64)
+                          (:arm64 :arm64)))
+         (result (%compile-native-source source native-target language
+                                         pass-pipeline print-pass-timings timing-stream
+                                         print-opt-remarks opt-remarks-stream opt-remarks-mode
+                                         print-pass-stats stats-stream trace-json-stream))
           (program    (compilation-result-program result))
-         (code-bytes (ecase arch
-                       (:x86-64 (compile-to-x86-64-bytes program))
+          (code-bytes (ecase arch
+                        (:x86-64 (compile-to-x86-64-bytes program))
                        (:arm64  (compile-to-aarch64-bytes program))))
          (builder    (cl-cc/binary:make-mach-o-builder arch)))
     (%write-native-binary builder code-bytes output-file)))
@@ -195,54 +248,19 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
                          (nreverse forms)))))
          (cache-key (%compile-cache-key source arch effective-language))
          (cache-path (%compile-cache-path cache-key output))
+         (native-target (ecase arch
+                          (:x86-64 :x86_64)
+                          (:arm64 :arm64)))
          (result (if (eq effective-language :php)
-                     (compile-string source :target :vm :language :php
-                                     :pass-pipeline pass-pipeline
-                                     :print-pass-timings print-pass-timings
-                                     :timing-stream timing-stream
-                                     :print-pass-stats print-pass-stats
-                                     :stats-stream stats-stream
-                                     :trace-json-stream trace-json-stream
-                                     :print-opt-remarks print-opt-remarks
-                                     :opt-remarks-stream opt-remarks-stream
-                                     :opt-remarks-mode opt-remarks-mode)
-                     (let ((forms (%non-package-top-level-forms source)))
-                       (if (= (length forms) 1)
-                           (multiple-value-bind (cps-result cps-used)
-                               (%maybe-compile-native-via-cps (first forms)
-                                                              :target :vm
-                                                              :pass-pipeline pass-pipeline
-                                                              :print-pass-timings print-pass-timings
-                                                              :timing-stream timing-stream
-                                                              :print-pass-stats print-pass-stats
-                                                              :stats-stream stats-stream
-                                                              :trace-json-stream trace-json-stream
-                                                              :print-opt-remarks print-opt-remarks
-                                                              :opt-remarks-stream opt-remarks-stream
-                                                              :opt-remarks-mode opt-remarks-mode)
-                             (if cps-used
-                                 cps-result
-                                  (compile-toplevel-forms (%maybe-cps-toplevel-forms source :target :vm) :target :vm
-                                                          :pass-pipeline pass-pipeline
-                                                          :print-pass-timings print-pass-timings
-                                                         :timing-stream timing-stream
-                                                         :print-pass-stats print-pass-stats
-                                                         :stats-stream stats-stream
-                                                         :trace-json-stream trace-json-stream
-                                                         :print-opt-remarks print-opt-remarks
-                                                         :opt-remarks-stream opt-remarks-stream
-                                                         :opt-remarks-mode opt-remarks-mode)))
-                            (compile-toplevel-forms (%maybe-cps-toplevel-forms source :target :vm) :target :vm
-                                                   :pass-pipeline pass-pipeline
-                                                   :print-pass-timings print-pass-timings
-                                                  :timing-stream timing-stream
-                                                  :print-pass-stats print-pass-stats
-                                                  :stats-stream stats-stream
-                                                  :trace-json-stream trace-json-stream
-                                                  :print-opt-remarks print-opt-remarks
-                                                  :opt-remarks-stream opt-remarks-stream
-                                                  :opt-remarks-mode opt-remarks-mode)))))
-          (program    (compilation-result-program result))
+                     (%compile-native-string source native-target :php
+                                             pass-pipeline print-pass-timings timing-stream
+                                             print-opt-remarks opt-remarks-stream opt-remarks-mode
+                                             print-pass-stats stats-stream trace-json-stream)
+                     (%compile-native-lisp-forms source native-target
+                                                pass-pipeline print-pass-timings timing-stream
+                                                print-opt-remarks opt-remarks-stream opt-remarks-mode
+                                                print-pass-stats stats-stream trace-json-stream)))
+         (program    (compilation-result-program result))
          (code-bytes (ecase arch
                        (:x86-64 (compile-to-x86-64-bytes program))
                        (:arm64  (compile-to-aarch64-bytes program))))

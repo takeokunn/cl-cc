@@ -262,15 +262,17 @@
      (:file "codegen-clos-slot-tests")  ; slot-value/set-slot-value/branch-local sink + phase2 CLOS helpers
      (:file "codegen-control-tests")
      (:file "codegen-calls-tests")   ; %try-compile-funcall/apply/noescape, %compile-normal-call, GF dispatch
-     (:file "codegen-locals-tests")  ; target-instance, %compile-body-with-tail, type-check-ast
-     (:file "codegen-io-tests")
-     (:file "codegen-hash-table-tests")
-     (:file "codegen-slot-predicates-tests")
-     (:file "codegen-string-kwargs-tests")
-     (:file "phase2-handler-tests")
-     (:file "codegen-phase2-tests")
-      (:file "stdlib-source-tests")
-      (:file "pipeline-native-tests")))
+      (:file "codegen-toplevel-cps-tests") ; top-level CPS routing and semantic preservation
+      (:file "codegen-locals-tests")  ; target-instance, %compile-body-with-tail, type-check-ast
+      (:file "codegen-io-tests")
+      (:file "codegen-hash-table-tests")
+      (:file "codegen-slot-predicates-tests")
+      (:file "codegen-string-kwargs-tests")
+      (:file "phase2-handler-tests")
+      (:file "codegen-phase2-tests")
+       (:file "stdlib-source-tests")
+       (:file "pipeline-native-tests")
+       (:file "pipeline-native-routing-tests")))
    (:module "optimize-tests"
     :pathname "packages/engine/optimize/tests"
     :serial t
@@ -406,9 +408,10 @@
       (:file "optimizer-dataflow-passes-tests")    ; global-DCE, pipeline, LICM, PRE
       (:file "optimizer-store-analysis-tests")     ; egraph, bswap/rotate, dead-store, SCCP, store-to-load
      (:file "optimizer-strength-inline-tests") ; strength-reduce, reassociate, inline, helper predicates
-     ;; pipeline integration tests (parse pipeline, run-string, incremental)
-       (:file "pipeline-tests")               ; compile-expression, compile-string, run-string, prescan, stdlib, our-eval
-      (:file "pipeline-repl-tests")          ; run-string-repl, reset-repl-state, compile-with-stdlib, whitespace-symbol-p
+      ;; pipeline integration tests (parse pipeline, run-string, incremental)
+        (:file "pipeline-tests")               ; compile-expression, compile-string, run-string, prescan, stdlib, our-eval
+       (:file "pipeline-eval-tests")          ; typed assertions, CPS host/vm eval routing, stdlib regression coverage
+       (:file "pipeline-repl-tests")          ; run-string-repl, reset-repl-state, compile-with-stdlib, whitespace-symbol-p
       ;; prolog integration tests (queries, rules, goal solving)
       (:file "prolog-tests")
      ;; standalone system load verification

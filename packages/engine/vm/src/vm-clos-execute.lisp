@@ -193,7 +193,7 @@
          (method-closure (vm-reg-get state (vm-method-reg inst))))
     (when methods-ht
       (if (null qualifier)
-          ;; Primary method — store directly (backward compatible)
+          ;; Primary method — store directly under its canonical specializer key
           (progn
             (setf (gethash specializer methods-ht) method-closure)
             (when eql-index

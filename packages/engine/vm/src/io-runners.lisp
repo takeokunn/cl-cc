@@ -21,7 +21,7 @@ OUTPUT-STREAM and INPUT-STREAM can be specified to redirect I/O."
   (let* ((instructions (vm-program-instructions program))
          (labels (build-label-table instructions))
          (flat (coerce instructions 'vector))
-         (state (make-instance 'vm-io-state :output-stream output-stream)))
+         (state (make-vm-state :output-stream output-stream)))
     ;; Set up standard streams
     (setf (vm-standard-input state) input-stream)
     (setf (vm-standard-output state) output-stream)

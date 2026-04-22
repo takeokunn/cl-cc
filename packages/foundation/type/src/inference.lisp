@@ -62,10 +62,10 @@
                                                  params param-types)
                                          lookup-env)))
     (multiple-value-bind (body-type subst) (infer-body body param-env)
-      (let* ((fn-type (make-type-function-raw
-                        :params (mapcar (lambda (p) (type-substitute p subst)) param-types)
-                        :return body-type))
-             (scheme  (generalize result-env fn-type)))
+      (let* ((fn-type (make-type-arrow-raw
+                       :params (mapcar (lambda (p) (zonk p subst)) param-types)
+                       :return body-type))
+        (scheme  (generalize result-env fn-type)))
         (type-env-extend name scheme result-env)))))
 
 ;;; FR-004: Polymorphic Recursion Helpers

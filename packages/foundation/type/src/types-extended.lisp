@@ -179,15 +179,13 @@ This is the shared data-layer hook used by traversal code like type-free-vars."
 The function is intentionally structural and side-effect free so traversal logic
 can live elsewhere (free vars, occurs check, zonking, printers, etc.)."
   (cond
-    ((or (null ty)
-         (type-primitive-p ty)
-         (type-var-p ty)
-         (type-rigid-p ty)
-         (type-error-p ty)
-         (type-unknown-p ty)
-         (and (fboundp 'type-skolem-p) (type-skolem-p ty))
-         (and (fboundp 'type-effect-p) (type-effect-p ty)))
-     nil)
+     ((or (null ty)
+          (type-primitive-p ty)
+          (type-var-p ty)
+          (type-rigid-p ty)
+          (type-error-p ty)
+          (type-unknown-p ty))
+      nil)
     ((type-arrow-p ty)
      (append (type-arrow-params ty)
              (list (type-arrow-return ty))

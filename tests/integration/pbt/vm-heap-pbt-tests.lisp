@@ -14,7 +14,7 @@
 (defproperty cons-creates-pair
     (car-val (gen-integer :min -1000 :max 1000)
      cdr-val (gen-integer :min -1000 :max 1000))
-  (let* ((state (make-instance 'vm-state))
+  (let* ((state (make-instance 'vm-io-state))
          (inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2)))
     (vm-reg-set state :r1 car-val)
     (vm-reg-set state :r2 cdr-val)
@@ -27,7 +27,7 @@
 (defproperty car-extracts-correct-value
     (car-val (gen-integer :min -1000 :max 1000)
      cdr-val (gen-integer :min -1000 :max 1000))
-  (let* ((state (make-instance 'vm-state))
+  (let* ((state (make-instance 'vm-io-state))
          (cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (car-inst (make-vm-car :dst :r3 :src :r0)))
     (vm-reg-set state :r1 car-val)
@@ -39,7 +39,7 @@
 (defproperty cdr-extracts-correct-value
     (car-val (gen-integer :min -1000 :max 1000)
      cdr-val (gen-integer :min -1000 :max 1000))
-  (let* ((state (make-instance 'vm-state))
+  (let* ((state (make-instance 'vm-io-state))
          (cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (cdr-inst (make-vm-cdr :dst :r3 :src :r0)))
     (vm-reg-set state :r1 car-val)
@@ -56,7 +56,7 @@
     (initial-car (gen-integer :min -1000 :max 1000)
      initial-cdr (gen-integer :min -1000 :max 1000)
      new-car (gen-integer :min -1000 :max 1000))
-  (let* ((state (make-instance 'vm-state))
+  (let* ((state (make-instance 'vm-io-state))
          (cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (rplaca-inst (make-vm-rplaca :cons :r0 :val :r3)))
     (vm-reg-set state :r1 initial-car)
@@ -72,7 +72,7 @@
     (initial-car (gen-integer :min -1000 :max 1000)
      initial-cdr (gen-integer :min -1000 :max 1000)
      new-cdr (gen-integer :min -1000 :max 1000))
-  (let* ((state (make-instance 'vm-state))
+  (let* ((state (make-instance 'vm-io-state))
          (cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (rplacd-inst (make-vm-rplacd :cons :r0 :val :r3)))
     (vm-reg-set state :r1 initial-car)
@@ -89,7 +89,7 @@
      val2 (gen-integer :min 0 :max 100)
      val3 (gen-integer :min 0 :max 100)
      val4 (gen-integer :min 0 :max 100))
-  (let* ((state (make-instance 'vm-state))
+  (let* ((state (make-instance 'vm-io-state))
          (cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (rplaca-inst (make-vm-rplaca :cons :r0 :val :r3))
          (rplacd-inst (make-vm-rplacd :cons :r0 :val :r4)))
@@ -112,7 +112,7 @@
     (val1 (gen-integer :min 0 :max 100)
      val2 (gen-integer :min 0 :max 100)
      val3 (gen-integer :min 0 :max 100))
-  (let* ((state (make-instance 'vm-state))
+  (let* ((state (make-instance 'vm-io-state))
          ;; Create inner cons (val3 . nil)
          (inst1 (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          ;; Create middle cons (val2 . inner)
@@ -140,7 +140,7 @@
 (defproperty make-closure-creates-closure
     (env-val1 (gen-integer :min 0 :max 100)
      env-val2 (gen-integer :min 0 :max 100))
-  (let* ((state (make-instance 'vm-state))
+  (let* ((state (make-instance 'vm-io-state))
          (labels (make-hash-table))
          (inst (make-vm-make-closure
                               :dst :r0
@@ -160,7 +160,7 @@
     (env-val1 (gen-integer :min 0 :max 100)
      env-val2 (gen-integer :min 0 :max 100)
      env-val3 (gen-integer :min 0 :max 100))
-  (let* ((state (make-instance 'vm-state))
+  (let* ((state (make-instance 'vm-io-state))
          (labels (make-hash-table))
          (make-inst (make-vm-make-closure
                                   :dst :r0

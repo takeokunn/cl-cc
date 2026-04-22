@@ -29,7 +29,7 @@
                                (setf compiled-form form)
                                (cl-cc/compile::make-compilation-result :program :dummy)))
       (multiple-value-bind (result used-cps)
-          (cl-cc::%maybe-compile-native-via-cps '(+ 1 2) :target :vm)
+          (cl-cc::%maybe-compile-native-via-cps '(+ 1 2) :target :x86_64)
         (assert-true used-cps)
         (assert-eq :dummy (cl-cc/compile:compilation-result-program result))
         (assert-true (consp compiled-form))
