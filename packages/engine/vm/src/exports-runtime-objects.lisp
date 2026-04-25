@@ -100,6 +100,10 @@
    run-program-slice
    make-vm-state
    make-vm2-state
+   vm2-state-p
+   vm2-state-registers
+   vm2-state-output-stream
+   vm2-state-global-vars
    vm-output-stream
    vm-global-vars
    vm-profile-enabled-p

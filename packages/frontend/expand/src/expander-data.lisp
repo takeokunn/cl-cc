@@ -18,10 +18,17 @@
 (defvar *defstruct-type-registry* (make-hash-table :test #'eq)
   "Maps struct name to its defstruct representation type: NIL, LIST, or VECTOR.")
 
-(defvar *macro-eval-fn* #'eval
+(defun %bootstrap-macro-eval (form)
+  "Bootstrap macro evaluator.
+Prefer `our-eval`; signal an explicit error if the selfhosted evaluator is not yet available." 
+  (if (fboundp 'our-eval)
+      (our-eval form)
+      (error "OUR-EVAL is unavailable during macro bootstrap for ~S" form)))
+
+(defvar *macro-eval-fn* #'%bootstrap-macro-eval
   "Function used to evaluate macro bodies at compile time.
-Initially #'eval for bootstrap.  After full pipeline loads, rebound to our-eval
-so macro expansion runs through cl-cc's own compiler — the key self-hosting step.")
+Initially a bootstrap wrapper that prefers our-eval and only falls back to host
+eval until the selfhosted compiler is fully available.")
 
 (defvar *symbol-macro-table* (make-hash-table :test #'eq)
   "Global symbol macro environment: maps symbol → expansion form.

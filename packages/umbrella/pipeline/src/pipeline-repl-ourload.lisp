@@ -46,7 +46,7 @@
                       (read-sequence buf in)
                       buf))))
       (let* ((pkg-name (%prescan-in-package source))
-             (pkg (when pkg-name (cl-cc/runtime:rt-find-package (string-upcase pkg-name))))
+             (pkg (when pkg-name (find-package (string-upcase pkg-name))))
              (*package* (or pkg *package*))
              (*our-load-host-definition-mode* (%project-source-load-p path)))
         (let ((forms (parse-all-forms source))
@@ -60,9 +60,9 @@
                                                :test #'string=))))
               (cond
                 (package-form-p
-                 (let ((pkg (cl-cc/runtime:rt-find-package (second form))))
-                    (unless pkg
-                      (error "Unknown package: ~S" (second form)))
+                 (let ((pkg (find-package (second form))))
+                     (unless pkg
+                       (error "Unknown package: ~S" (second form)))
                    (setf *package* pkg)
                    (setf last-result (second form))))
                 ((or whitespace-symbol-p unsupported-p)

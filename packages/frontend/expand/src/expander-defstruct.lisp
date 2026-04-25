@@ -196,8 +196,8 @@
     (cons 'eval-when
           (cons '(:load-toplevel :execute)
                 (mapcar (lambda (class)
-                          (list 'funcall (list 'find-symbol "REGISTER-TYPECLASS-INSTANCE" "CL-CC/TYPE")
-                                (list 'quote class) (list 'quote name) nil))
+                          (list 'cl-cc/type::register-typeclass-instance
+                                 (list 'quote class) (list 'quote name) nil))
                         derived-classes)))))
 
 (defun %defstruct-clos-expansion (model)

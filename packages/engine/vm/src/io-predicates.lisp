@@ -118,9 +118,7 @@ PRED-FN nil means test stream existence only."
 (defmethod execute-instruction ((inst vm-load-file) state pc labels)
   (declare (ignore labels))
   (let* ((path (vm-reg-get state (vm-src inst)))
-         (our-load-sym (or (find-symbol "OUR-LOAD" :cl-cc/compile)
-                           (find-symbol "OUR-LOAD" :cl-cc)))
-         (result (funcall (symbol-function our-load-sym) path)))
+         (result (cl-cc/bootstrap:our-load path)))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 

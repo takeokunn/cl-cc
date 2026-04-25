@@ -112,7 +112,7 @@ dispatch table, keyed by the composite specializer list for multiple dispatch."
                  (first keys)
                  keys)))
          (qual-str (if qualifier (format nil "_~A" qualifier) ""))
-         (label-suffix (format nil "~{~A~^_~}" dispatch-key))
+         (label-suffix (format nil "~{~A~^_~}" (if (listp dispatch-key) dispatch-key (list dispatch-key))))
          (func-label (make-label ctx (format nil "METHOD_~A~A_~A" name qual-str label-suffix)))
          (end-label (make-label ctx (format nil "METHOD_~A~A_~A_END" name qual-str label-suffix)))
          (closure-reg (make-register ctx))

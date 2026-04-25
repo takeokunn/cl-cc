@@ -107,6 +107,7 @@
    :mult-mul
    :mult-leq
    :mult-to-string
+   :type-arrow
    :make-type-arrow
    :make-type-arrow-raw
    :type-arrow-p

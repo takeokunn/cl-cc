@@ -121,7 +121,7 @@
       (list 'let (list (list sym (second place))
                        (list v value))
             (list 'funcall
-                  (list 'symbol-function (list 'find-symbol "RT-SET-SYMBOL-VALUE" "CL-CC/RUNTIME"))
+                  'cl-cc/bootstrap::*runtime-set-symbol-value-fn*
                   sym v)
             v)))))
 

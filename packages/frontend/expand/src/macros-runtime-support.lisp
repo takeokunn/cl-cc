@@ -132,8 +132,8 @@
       (declare (ignore read-only-p))
       (multiple-value-bind (cached present-p)
           (gethash form *load-time-value-cache*)
-    (unless present-p
-      (setf cached (eval form))
+     (unless present-p
+      (setf cached (our-eval form))
       (setf (gethash form *load-time-value-cache*) cached))
         (list 'quote cached)))))
 

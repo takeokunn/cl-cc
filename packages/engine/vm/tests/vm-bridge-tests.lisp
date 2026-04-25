@@ -47,9 +47,72 @@
     (unwind-protect
          (progn
            (cl-cc/vm::vm-register-runtime-callable name (lambda () :ok))
-           (assert-true (functionp (gethash name cl-cc/vm::*vm-runtime-callables*)))
-           (assert-eq :ok (funcall (cl-cc/vm::%vm-runtime-callable name))))
+            (assert-true (functionp (gethash name cl-cc/vm::*vm-runtime-callables*)))
+            (assert-eq :ok (funcall (cl-cc/vm::%vm-runtime-callable name))))
       (remhash name cl-cc/vm::*vm-runtime-callables*))))
+
+(deftest vm-bridge-runtime-registration-uses-bootstrap-hook
+  "vm-bridge can trigger runtime callable registration through the bootstrap hook without host package lookups." 
+  (let ((old-hook cl-cc/bootstrap::*runtime-vm-callable-register-hook*)
+        (called nil))
+    (unwind-protect
+         (progn
+           (setf cl-cc/bootstrap::*runtime-vm-callable-register-hook*
+                 (lambda () (setf called t)))
+           (when cl-cc/bootstrap::*runtime-vm-callable-register-hook*
+             (funcall cl-cc/bootstrap::*runtime-vm-callable-register-hook*))
+           (assert-true called))
+      (setf cl-cc/bootstrap::*runtime-vm-callable-register-hook* old-hook))))
+
+(deftest vm-install-eval-hooks-sets-hook-vars
+  "vm-install-eval-hooks stores the supplied eval/compile hooks directly in the VM hook vars." 
+  (let ((old-eval cl-cc/vm::*vm-eval-hook*)
+        (old-compile cl-cc/vm::*vm-compile-string-hook*)
+        (eval-hook (lambda (&rest _) (declare (ignore _)) :eval))
+        (compile-hook (lambda (&rest _) (declare (ignore _)) :compile)))
+    (unwind-protect
+         (progn
+           (cl-cc/vm::vm-install-eval-hooks eval-hook compile-hook)
+           (assert-eq eval-hook cl-cc/vm::*vm-eval-hook*)
+           (assert-eq compile-hook cl-cc/vm::*vm-compile-string-hook*))
+      (setf cl-cc/vm::*vm-eval-hook* old-eval)
+      (setf cl-cc/vm::*vm-compile-string-hook* old-compile))))
+
+(deftest vm-install-macroexpand-hooks-sets-hook-vars
+  "vm-install-macroexpand-hooks stores the supplied macroexpand hooks directly in the VM hook vars." 
+  (let ((old-1 cl-cc/vm::*vm-macroexpand-1-hook*)
+        (old-all cl-cc/vm::*vm-macroexpand-hook*)
+        (hook-1 (lambda (&rest _) (declare (ignore _)) :m1))
+        (hook-all (lambda (&rest _) (declare (ignore _)) :mall)))
+    (unwind-protect
+         (progn
+           (cl-cc/vm::vm-install-macroexpand-hooks hook-1 hook-all)
+           (assert-eq hook-1 cl-cc/vm::*vm-macroexpand-1-hook*)
+           (assert-eq hook-all cl-cc/vm::*vm-macroexpand-hook*))
+      (setf cl-cc/vm::*vm-macroexpand-1-hook* old-1)
+      (setf cl-cc/vm::*vm-macroexpand-hook* old-all))))
+
+(deftest vm-install-parse-forms-hook-sets-hook-var
+  "vm-install-parse-forms-hook stores the supplied parser hook directly in the VM hook var." 
+  (let ((old cl-cc/vm::*vm-parse-forms-hook*)
+        (hook (lambda (&rest _) (declare (ignore _)) :parse)))
+    (unwind-protect
+         (progn
+           (cl-cc/vm::vm-install-parse-forms-hook hook)
+            (assert-eq hook cl-cc/vm::*vm-parse-forms-hook*))
+      (setf cl-cc/vm::*vm-parse-forms-hook* old))))
+
+(deftest vm-runtime-package-registry-uses-bootstrap-provider
+  "%vm-runtime-package-registry reads runtime package metadata through the bootstrap provider hook." 
+  (let ((old-provider cl-cc/bootstrap::*runtime-package-registry-provider*)
+        (registry (make-hash-table :test #'equal)))
+    (unwind-protect
+         (progn
+           (setf (gethash "CL-CC/RUNTIME" registry) :runtime)
+           (setf cl-cc/bootstrap::*runtime-package-registry-provider*
+                 (lambda () registry))
+           (assert-eq registry (cl-cc/vm::%vm-runtime-package-registry)))
+      (setf cl-cc/bootstrap::*runtime-package-registry-provider* old-provider))))
 
 (deftest vm-bridge-does-not-keep-stale-pathname-entries
   "Bridge entries without runtime implementations are pruned instead of lingering as dead surface." 

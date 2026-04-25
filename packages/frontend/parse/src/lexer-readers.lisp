@@ -110,19 +110,15 @@
 (defun %lex-find-package (name)
   "Resolve package NAME through the runtime package layer when available.
 Returns NIL when the runtime package layer is unavailable."
-  (let* ((runtime-pkg (find-package :cl-cc/runtime))
-         (rt-find (and runtime-pkg (find-symbol "RT-FIND-PACKAGE" runtime-pkg))))
-    (when (and rt-find (fboundp rt-find))
-      (funcall (symbol-function rt-find) name))))
+  (when cl-cc/bootstrap::*runtime-find-package-fn*
+    (funcall cl-cc/bootstrap::*runtime-find-package-fn* name)))
 
 (defun %lex-runtime-intern (name package)
   "Intern NAME through the runtime package layer when available.
 Falls back to MAKE-SYMBOL semantics when runtime intern is unavailable." 
-  (let* ((runtime-pkg (find-package :cl-cc/runtime))
-         (rt-intern (and runtime-pkg (find-symbol "RT-INTERN" runtime-pkg))))
-    (if (and rt-intern (fboundp rt-intern))
-        (funcall (symbol-function rt-intern) name package)
-        (make-symbol (string name)))))
+  (if cl-cc/bootstrap::*runtime-intern-fn*
+      (funcall cl-cc/bootstrap::*runtime-intern-fn* name package)
+      (make-symbol (string name))))
 
 (defun lex-read-symbol-or-number (state)
   "Read a symbol, keyword, or number from the current position."

@@ -39,24 +39,22 @@
 
 ;;; Basic Compiler Tests
 
-(deftest-each vm-exec-basic-forms
+(deftest-compile-each vm-exec-basic-forms
   "Arithmetic, conditionals, let bindings, and progn sequences compile and evaluate correctly."
-  :cases (("arith-add"        "(+ 3 4)"                                7)
-          ("arith-sub"        "(- 10 7)"                               3)
-          ("arith-mul"        "(* 6 7)"                                42)
-          ("arith-nested"     "(+ (* 2 3) 3)"                          9)
-          ("if-false-cond"    "(if nil 10 20)"                         20)
-          ("if-true-cond"     "(if 1 10 20)"                           10)
-          ("if-nested"        "(if 1 (if 0 1 2) 3)"                   2)
-          ("if-var-cond"      "(let ((x 0)) (if x 20 10))"            10)
-          ("let-simple"       "(let ((x 42)) x)"                       42)
-          ("let-multi"        "(let ((x 2) (y 3)) (+ x y))"           5)
-          ("let-shadowing"    "(let ((x 10)) (let ((x 20)) x))"        20)
-          ("let-computed"     "(let ((x 5) (y 7)) (+ (* x 2) y))"     17)
-          ("progn-simple"     "(progn 1 2 3)"                          3)
-          ("progn-with-let"   "(progn (let ((x 2)) x) (let ((y 3)) y))" 3))
-  (code expected)
-  (assert-run= expected code))
+  :cases (("arith-add"        7  "(+ 3 4)")
+          ("arith-sub"        3  "(- 10 7)")
+          ("arith-mul"        42 "(* 6 7)")
+          ("arith-nested"     9  "(+ (* 2 3) 3)")
+          ("if-false-cond"    20 "(if nil 10 20)")
+          ("if-true-cond"     10 "(if 1 10 20)")
+          ("if-nested"        2  "(if 1 (if 0 1 2) 3)")
+          ("if-var-cond"      10 "(let ((x 0)) (if x 20 10))")
+          ("let-simple"       42 "(let ((x 42)) x)")
+          ("let-multi"        5  "(let ((x 2) (y 3)) (+ x y))")
+          ("let-shadowing"    20 "(let ((x 10)) (let ((x 20)) x))")
+          ("let-computed"     17 "(let ((x 5) (y 7)) (+ (* x 2) y))")
+          ("progn-simple"     3  "(progn 1 2 3)")
+          ("progn-with-let"   3  "(progn (let ((x 2)) x) (let ((y 3)) y))")))
 
 (deftest vm-exec-progn-empty
   "Empty progn signals an error (not yet supported)."
@@ -170,12 +168,10 @@
 
 ;;; Complex Scoping Tests
 
-(deftest-each compile-let-scoping
+(deftest-compile-each compile-let-scoping
   "Deeply nested let bindings and multi-level variable shadowing work correctly."
   :cases (("deep-nesting" 10 "(let ((a 1)) (let ((b 2)) (let ((c 3)) (let ((d 4)) (+ a (+ b (+ c d)))))))")
-          ("shadowing"     3 "(let ((x 1)) (let ((x 2)) (let ((x 3)) x)))"))
-  (expected form)
-  (assert-= expected (run-string form)))
+          ("shadowing"     3 "(let ((x 1)) (let ((x 2)) (let ((x 3)) x)))")))
 
 (deftest compile-closure-captures-correct-value
   "Test that closures capture the correct value from scope."

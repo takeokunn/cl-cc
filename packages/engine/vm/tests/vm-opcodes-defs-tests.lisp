@@ -46,11 +46,11 @@
 ;;; ─── vm-reg-get / vm-reg-set on public VM state ─────────────────────────────
 
 (deftest vm-opcodes-defs-reg-get-fresh-register-nil
-  "vm-reg-get returns nil for any fresh register in a new public VM state."
+  "vm-reg-get returns 0 for any fresh register in a new public vm-io-state (hash-table based)."
   (let ((s (cl-cc/vm::make-vm-state)))
-    (assert-null (cl-cc/vm::vm-reg-get s 0))
-    (assert-null (cl-cc/vm::vm-reg-get s 127))
-    (assert-null (cl-cc/vm::vm-reg-get s 255))))
+    (assert-= 0 (cl-cc/vm::vm-reg-get s 0))
+    (assert-= 0 (cl-cc/vm::vm-reg-get s 127))
+    (assert-= 0 (cl-cc/vm::vm-reg-get s 255))))
 
 (deftest vm-opcodes-defs-reg-set-cases
   "vm-reg-set: stores and returns value on the public VM state."

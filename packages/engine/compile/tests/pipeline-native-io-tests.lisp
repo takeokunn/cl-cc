@@ -96,24 +96,27 @@
 
 ;;; ─── Typeclass macro registration ───────────────────────────────────────────
 
-(deftest-each pipeline-native-typeclass-macros-registered-as-functions
-  "deftype-class and deftype-instance are each registered as a function-valued macro."
+(deftest-each pipeline-native-typeclass-macros-registered-as-expanders
+  "deftype-class and deftype-instance are each registered as invokable macro expanders."
   :cases (("deftype-class"    'cl-cc::deftype-class)
           ("deftype-instance" 'cl-cc::deftype-instance))
   (macro-name)
   (let ((expander (gethash macro-name
                             (cl-cc/expand::macro-env-table cl-cc/expand::*macro-environment*))))
     (assert-true expander)
-    (assert-true (functionp expander))))
+    (assert-true (or (functionp expander)
+                     (eq (getf expander :kind) :macro-expander)
+                     (eq (getf expander :kind) :register-macro-expander)))))
 
 (deftest pipeline-native-typeclass-class-expander-builds-register-form
   "deftype-class expander produces a register-typeclass form backed by make-typeclass-def data."
   (let* ((expander (gethash 'cl-cc::deftype-class
                             (cl-cc/expand::macro-env-table cl-cc/expand::*macro-environment*)))
-         (expanded (funcall expander
-                            '(deftype-class eq-like (a)
-                               (equals (-> a a bool)))
-                            nil)))
+         (expanded (cl-cc/expand::invoke-registered-expander
+                    expander
+                    '(deftype-class eq-like (a)
+                       (equals (-> a a bool)))
+                    nil)))
     (assert-eq 'progn (car expanded))
     (assert-true (search "REGISTER-TYPECLASS" (prin1-to-string expanded)))
     (assert-true (search "MAKE-TYPECLASS-DEF" (prin1-to-string expanded)))))
@@ -122,10 +125,11 @@
   "deftype-instance expander produces register-typeclass-instance plus a dictionary defvar."
   (let* ((expander (gethash 'cl-cc::deftype-instance
                             (cl-cc/expand::macro-env-table cl-cc/expand::*macro-environment*)))
-         (expanded (funcall expander
-                            '(deftype-instance eq-like integer
-                               (equals (lambda (x y) (= x y))))
-                            nil)))
+         (expanded (cl-cc/expand::invoke-registered-expander
+                    expander
+                    '(deftype-instance eq-like integer
+                       (equals (lambda (x y) (= x y))))
+                    nil)))
     (assert-eq 'progn (car expanded))
     (assert-true (search "REGISTER-TYPECLASS-INSTANCE" (prin1-to-string expanded)))
     (assert-true (search "DEFVAR" (prin1-to-string expanded)))))

@@ -28,3 +28,9 @@
   (our-macroexpand-1 '(define-compiler-macro foo (x) (+ x 1)))
   (let ((result (cl-cc/expand::compiler-macroexpand-all '(foo 2))))
     (assert-equal result 3)))
+
+(deftest invoke-registered-expander-supports-descriptor-backed-compiler-macros
+  "Descriptor-backed compiler macro expanders still execute through invoke-registered-expander."
+  (let ((expander (cl-cc/expand::make-compiler-macro-expander '(x) '((+ x 1)))))
+    (assert-equal 3
+                  (cl-cc/expand::invoke-registered-expander expander '(foo 2) nil))))

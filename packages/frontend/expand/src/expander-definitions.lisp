@@ -49,7 +49,11 @@
   (let* ((accessor (second form))
          (lambda-list (third form))
          (body (cdddr form))
-         (expander-fn (eval (list* 'lambda lambda-list body))))
+         (expander-fn (lambda (place)
+                        (values-list
+                         (funcall *macro-eval-fn*
+                                  `(multiple-value-list
+                                    ((lambda ,lambda-list ,@body) ',place)))))))
     (setf (gethash accessor *setf-compound-place-handlers*)
           (let ((fn expander-fn))
             (lambda (place value)

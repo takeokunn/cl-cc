@@ -66,8 +66,6 @@
 (defun rt-abs (a) (abs a))
 (defun rt-inc (a) (1+ a))
 (defun rt-dec (a) (1- a))
-(defun rt-min (a b) (min a b))
-(defun rt-max (a b) (max a b))
 (defun rt-cl-and (a b) (and a b))
 (defun rt-cl-or (a b) (or a b))
 (defun rt-not (x) (if x 0 1))

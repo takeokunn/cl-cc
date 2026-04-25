@@ -137,7 +137,7 @@ Example:
       (when (and (= (length forms) 1)
                  (consp (first forms))
                  (eq (caar forms) 'in-package))
-        (let ((pkg (cl-cc/runtime:rt-find-package (second (first forms)))))
+        (let ((pkg (find-package (second (first forms)))))
           (unless pkg
             (error "Unknown package: ~S" (second (first forms))))
           (setf *package* pkg)

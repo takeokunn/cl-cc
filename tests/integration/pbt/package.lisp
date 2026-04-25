@@ -51,7 +51,7 @@
                 :ast-throw-value :ast-unwind-protected :ast-unwind-cleanup :ast-call-func
                 :ast-call-args :ast-quote-value :ast-the-type :ast-the-value
                 :cps-transform
-                :vm-state :vm-heap-counter :vm-cons-cell :vm-closure-object
+                :vm-state :vm-io-state :vm-heap-counter :vm-cons-cell :vm-closure-object
                 :vm-closure-entry-label :vm-closure-params :vm-closure-captured-values
                 :vm-const :vm-move :vm-add :vm-sub :vm-mul :vm-cons :vm-car :vm-cdr
                 :vm-rplaca :vm-rplacd :vm-make-closure :vm-closure-ref-idx

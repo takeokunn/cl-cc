@@ -18,7 +18,7 @@
   (expected form)
   (assert-equal expected (not (null (run-string form)))))
 
-(deftest-each compile-string-ops-and-type-predicates
+(deftest-compile-each compile-string-ops-and-type-predicates
   "String ops return numeric results and type predicates return CL booleans."
   :cases (("length-hello"  5 "(string-length \"hello\")")
           ("length-empty"  0 "(string-length \"\")")
@@ -29,8 +29,7 @@
           ("symbolp-num"   nil "(symbolp 42)")
           ("numberp-num"   t "(numberp 42)")
           ("numberp-sym"   nil "(numberp 'foo)"))
-  (expected form)
-  (assert-equal expected (run-string form)))
+  )
 
 ;;; Macro Expansion in Compiler Tests
 
@@ -63,7 +62,7 @@
 
 ;;; List Operation Builtin Tests
 
-(deftest-each compile-list-ops
+(deftest-compile-each compile-list-ops
   "cons/car/cdr, list/length, first/rest, eq/eql return the expected numeric values."
   :cases (("car"         1 "(car (cons 1 2))")
           ("cdr"         2 "(cdr (cons 1 2))")
@@ -74,8 +73,7 @@
           ("eq-true"     1 "(eq 1 1)")
           ("eq-false"    0 "(eq 1 2)")
           ("eql-true"    1 "(eql 42 42)"))
-  (expected form)
-  (assert-= expected (run-string form)))
+  )
 
 (deftest-compile-each compile-list-builtins
   "append/reverse builtins work on lists."
@@ -84,15 +82,14 @@
 
 ;;; Handler-Case Tests
 
-(deftest-each compile-handler-case-return-value
+(deftest-compile-each compile-handler-case-return-value
   "handler-case returns the correct numeric value in various scenarios."
   :cases (("no-error"      42 "(handler-case 42 (error (e) 0))")
           ("catches-error" 99 "(handler-case (error \"boom\") (error (e) 99))")
           ("arithmetic"    10 "(handler-case (+ 3 7) (error (e) 0))")
           ("handler-body" 100 "(handler-case (error \"x\") (error (e) (* 10 10)))")
           ("nested"         1 "(handler-case (handler-case (error \"inner\") (error (e) 1)) (error (e) 2))"))
-  (expected form)
-  (assert-= expected (run-string form)))
+  )
 
 (deftest compile-handler-case-error-variable
   "handler-case binds the error value to the variable"
@@ -145,7 +142,7 @@
 
 ;;; Typep and Destructuring Tests
 
-(deftest-each compile-typep-destructuring-iteration
+(deftest-compile-each compile-typep-destructuring-iteration
   "typep/destructuring-bind/iteration macros return the expected numeric result."
   :cases (("typep-integer"   1 "(typep 42 'integer)")
           ("typep-string"    1 "(typep \"hello\" 'string)")
@@ -159,12 +156,11 @@
           ("dotimes"        10 "(let ((sum 0)) (dotimes (i 5) (setq sum (+ sum i))) sum)")
           ("do"             10 "(do ((i 0 (+ i 1)) (sum 0 (+ sum i))) ((= i 5) sum))")
           ("loop"           10 "(let ((sum 0) (i 0)) (loop (if (= i 5) (return sum)) (setq sum (+ sum i)) (setq i (+ i 1))))"))
-  (expected form)
-  (assert-= expected (run-string form)))
+  )
 
 ;;; Runtime Eval and Setf Variable Tests
 
-(deftest-each compile-eval-and-setf-variable
+(deftest-compile-each compile-eval-and-setf-variable
   "eval and setf on plain variables return the expected numeric results."
   :cases (("eval-constant"    42 "(eval 42)")
           ("eval-quoted"       3 "(eval '(+ 1 2))")
@@ -173,8 +169,7 @@
           ("eval-constructed" 30 "(let ((op '+) (a 10) (b 20)) (eval (list op a b)))")
           ("setf-plain"       10 "(let ((x 0)) (setf x 10) x)")
           ("setf-increment"    3 "(let ((counter 0)) (setf counter (+ counter 1)) (setf counter (+ counter 1)) (setf counter (+ counter 1)) counter)"))
-  (expected form)
-  (assert-= expected (run-string form)))
+  )
 
 ;;; FR-603: (setf (values ...)) assigns to multiple places
 

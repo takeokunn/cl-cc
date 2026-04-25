@@ -171,4 +171,4 @@
           ("string-unknown"  type-string    cl-cc/type::+type-unknown+)
           ("unknown-unknown" cl-cc/type::+type-unknown+ cl-cc/type::+type-unknown+))
   (a b)
-  (assert-unify-fails a b))
+  (assert-not-unifies a b))

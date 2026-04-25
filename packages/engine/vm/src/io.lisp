@@ -27,7 +27,8 @@
                  :documentation "Counter for generating unique file handles")
    (standard-input :initform *standard-input* :accessor vm-standard-input
                    :documentation "Standard input stream")
-   (standard-output :initform *standard-output* :accessor vm-standard-output
+   (standard-output :initform *standard-output* :initarg :output-stream
+                    :accessor vm-standard-output
                     :documentation "Standard output stream")
    (string-streams :initform (make-hash-table :test #'eql)
                    :reader vm-string-streams

@@ -28,7 +28,7 @@
 
 ;;; Prog/With-Slots/Nth-Value Macro Tests
 
-(deftest-each compile-prog-and-friends
+(deftest-compile-each compile-prog-and-friends
   "prog/prog*/with-slots/nth-value macros work in compiled code."
   :cases (("prog-loop"        10  "(prog ((x 0)) loop (setq x (+ x 1)) (when (= x 10) (return x)) (go loop))")
           ("prog*-sequential"  3  "(prog* ((x 1) (y (+ x 2))) (return y))")
@@ -37,12 +37,11 @@
                                             (with-slots (x y) p (+ x y))))")
           ("nth-value"         2  "(nth-value 1 (floor 17 5))")
           ("prog-no-return"   nil "(prog ((x 1)) (setq x 2))"))
-  (expected form)
-  (assert-equal expected (run-string form :stdlib t)))
+  :stdlib t)
 
 ;;; ANSI CL FR-400/FR-500 Tests (mismatch, make-string, float literals, string-not-equal)
 
-(deftest-each stdlib-mismatch-make-string-float
+(deftest-compile-each stdlib-mismatch-make-string-float
   "mismatch, make-string, and float properties return the expected equal-comparable values."
   ;; float-precision and float-radix removed: VM functions not implemented
   :cases (("mismatch-index"     2      "(mismatch (list 1 2 3) (list 1 2 4))")
@@ -51,8 +50,7 @@
           ("make-string-fill"   "xxxx" "(make-string 4 :initial-element #\\x)")
           ("make-string-len"    3      "(length (make-string 3))")
           ("float-literal"      4.0    "(+ 1.5 2.5)"))
-  (expected form)
-  (assert-true (equal expected (run-string form :stdlib t))))
+  :stdlib t)
 
 (deftest-each compile-string-not-equal
   "string-not-equal returns truthy for different strings and falsy for case-insensitively equal strings."
@@ -71,23 +69,21 @@
   (form)
   (assert-true (run-string form)))
 
-(deftest-each compile-list-tree-mutators
+(deftest-compile-each compile-list-tree-mutators
   "ldiff, get-properties, nunion, nsubst, and nstring-upcase return expected values."
   :cases (("ldiff"          '(1 2)           "(let* ((x '(1 2 3 4)) (tail (cddr x))) (ldiff x tail))")
           ("get-properties"  :b              "(get-properties '(:a 1 :b 2 :c 3) '(:b :c))")
           ("nunion"          '(1 2 3 4)      "(sort (nunion '(1 2 3) '(2 3 4)) #'<)")
           ("nsubst"          '(99 2 (99 3))  "(nsubst 99 1 '(1 2 (1 3)))")
           ("nstring-upcase"  "HELLO"         "(nstring-upcase \"hello\")"))
-  (expected form)
-  (assert-equal expected (run-string form)))
+  )
 
-(deftest-each compile-array-predicates
+(deftest-compile-each compile-array-predicates
   "array-element-type returns T; array-in-bounds-p checks index validity."
   :cases (("element-type"      t   "(array-element-type (make-array 3))")
           ("in-bounds-valid"   t   "(array-in-bounds-p (make-array 5) 3)")
           ("in-bounds-invalid" nil "(array-in-bounds-p (make-array 5) 7)"))
-  (expected form)
-  (assert-equal expected (run-string form)))
+  )
 
 (deftest-each compile-equalp
   "equalp compares lists and strings case-insensitively."
@@ -101,21 +97,19 @@
   "lisp-implementation-type returns cl-cc."
   (assert-equal "cl-cc" (run-string "(lisp-implementation-type)")))
 
-(deftest-each compile-last-butlast-count
+(deftest-compile-each compile-last-butlast-count
   "last/butlast with count return the correct sublist."
   :cases (("last"    '(4 5)   "(last '(1 2 3 4 5) 2)")
           ("butlast" '(1 2 3) "(butlast '(1 2 3 4 5) 2)"))
-  (expected form)
-  (assert-equal expected (run-string form)))
+  )
 
-(deftest-each compile-array-integer-results
+(deftest-compile-each compile-array-integer-results
   "make-array, setf-bit, and search return integer results."
   :cases (("initial-contents" 20 "(let ((a (make-array 3 :initial-contents '(10 20 30)))) (aref a 1))")
           ("initial-element"   7 "(let ((a (make-array 4 :initial-element 7))) (aref a 3))")
           ("setf-bit"          1 "(let ((bv (make-array 4))) (setf (bit bv 2) 1) (bit bv 2))")
           ("search-vector"     1 "(search '(2 3) '(1 2 3 4))"))
-  (expected form)
-  (assert-= expected (run-string form)))
+  )
 
 (deftest compile-write-to-string-keywords
   "write-to-string with keyword args; setf on GET updates a symbol property."
@@ -146,7 +140,7 @@
 
 ;;; ─── FR-617/FR-608: stream read forms ────────────────────────────────────────
 
-(deftest-each compile-stream-read-forms
+(deftest-compile-each compile-stream-read-forms
   "read-from-string returns (val pos); with-input-from-string :start skips prefix."
   :cases (("read-from-string-pos"
            '(42 3)
@@ -157,36 +151,31 @@
            'cl-cc::world
            "(with-input-from-string (s \"hello world\" :start 6)
               (read s))"))
-  (expected form)
-  (assert-equal expected (run-string form)))
+  )
 
 ;;; ─── FR-637: string comparison with keyword bounds ───────────────────────────
 
-(deftest-each compile-string-comparison-bounds
+(deftest-compile-each compile-string-comparison-bounds
   "String comparison functions accept :start/:end bounds."
   :cases (("equal-substring" t   "(string= \"hello world\" \"world\" :start1 6)")
           ("less-equal-nil"  nil "(string< \"ab\" \"abcde\" :start2 0 :end2 2)"))
-  (expected form)
-  (assert-equal expected (run-string form)))
+  )
 
 ;;; ─── FR-397: compilation local scope forms ───────────────────────────────────
 
-(deftest-each compile-meta-forms
+(deftest-compile-each compile-meta-forms
   "locally evaluates its body and returns the numeric result."
-  :cases (("locally"              30  "(locally (+ 10 20))"))
-  (expected form)
-  (assert-= expected (run-string form)))
+  :cases (("locally" 30 "(locally (+ 10 20))")))
 
 ;;; ─── FR-566: pathname host bridges ───────────────────────────────────────────
 
-(deftest-each compile-pathname-accessors
+(deftest-compile-each compile-pathname-accessors
   "pathname-name and pathname-type extract the basename and extension."
   :cases (("name-string"    "foo"  "(pathname-name \"/tmp/foo.lisp\")")
           ("type-string"    "lisp" "(pathname-type \"/tmp/foo.lisp\")")
           ("name-hash-p"    "foo"  "(pathname-name #P\"/tmp/foo.lisp\")")
           ("type-hash-p"    "txt"  "(pathname-type #P\"/tmp/bar.txt\")"))
-  (expected form)
-  (assert-equal expected (run-string form)))
+  )
 
 ;;; ─── FR-572: #nA multi-dimensional array literal ─────────────────────────────
 

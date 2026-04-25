@@ -93,41 +93,18 @@ specifier symbol, it is treated as the declared return type and wrapped in
 (defun make-macro-expander (lambda-list body)
   "Build a macro expander function for a LAMBDA-LIST and BODY.
 Quasiquotes in BODY are pre-expanded so the host eval can handle them.
-When *macro-eval-fn* is our-eval (self-hosting mode), the returned
-function is a host CL closure delegating to our-eval at each invocation."
-  (labels ((contains-bootstrap-quasiquote-p (form)
-             (cond
-               ((atom form) nil)
-               ((member (car form) '(backquote unquote unquote-splicing) :test #'eq) t)
-               (t (or (contains-bootstrap-quasiquote-p (car form))
-                      (contains-bootstrap-quasiquote-p (cdr form))))))
-           (make-host-expander (expanded-body)
-             (let ((form-var (gensym "FORM"))
-                   (env-var  (gensym "ENV")))
-               (eval `(lambda (,form-var ,env-var)
-                        (declare (ignore ,env-var))
-                        (let* ,(generate-lambda-bindings lambda-list form-var)
-                          ,@expanded-body))))))
-    (let ((expanded-body (mapcar #'our-macroexpand-all body)))
-      (if (eq *macro-eval-fn* #'eval)
-          (make-host-expander expanded-body)
-          (lambda (form env)
-            (declare (ignore env))
-            (let ((form-var (gensym "FORM")))
-              (funcall *macro-eval-fn*
-                       `(let ((,form-var ',form))
-                          (let* ,(generate-lambda-bindings lambda-list form-var)
-                            ,@expanded-body)))))))))
+When *macro-eval-fn* is our-eval (self-hosting mode), the returned value is
+a data descriptor interpreted through the selfhost evaluator instead of a
+host CL closure."
+  (list :kind :macro-expander
+        :lambda-list lambda-list
+        :body (mapcar #'our-macroexpand-all body)))
 
 (defun make-compiler-macro-expander (lambda-list body)
   "Build a compiler-macro expander for a function LAMBDA-LIST and BODY."
-  (let ((expanded-body (mapcar #'our-macroexpand-all body)))
-    (let ((form-var (gensym "FORM"))
-          (env-var  (gensym "ENV")))
-      (eval `(lambda (,form-var ,env-var)
-               (declare (ignore ,env-var))
-               (let* ,(destructure-lambda-list lambda-list `(cdr ,form-var))
-                 ,@expanded-body))))))
+  (list :kind :compiler-macro-expander
+        :lambda-list lambda-list
+        :body (mapcar #'our-macroexpand-all body)))
 
 (defun expand-macrolet-form (bindings body)
   "Register local macro BINDINGS, expand BODY under them, then restore.
@@ -189,9 +166,6 @@ Evaluate BODY immediately for :compile-toplevel; include in output for :execute/
     (dolist (b body)
       (handler-case
           (let ((expanded (compiler-macroexpand-all b)))
-            (when (and (consp expanded)
-                       (member (car expanded) '(defvar defparameter)))
-              (handler-case (eval expanded) (error () nil)))
             (if (fboundp 'run-string-repl)
                 (run-string-repl (write-to-string expanded))
                 (our-eval expanded)))
@@ -201,42 +175,44 @@ Evaluate BODY immediately for :compile-toplevel; include in output for :execute/
       (compiler-macroexpand-all (cons 'progn body))
       nil))
 
+(defun %build-variadic-fold-lambda (name)
+  (let ((args (gensym "ARGS")) (acc (gensym "ACC")) (x (gensym "X"))
+        (id   (variadic-fold-identity name)))
+    `(lambda (&rest ,args)
+       (let ((,acc ,id))
+         (dolist (,x ,args ,acc)
+           (setq ,acc (,name ,acc ,x)))))))
+
+(defun %build-subtract-lambda ()
+  (let ((args (gensym "ARGS")) (acc (gensym "ACC")) (x (gensym "X")))
+    `(lambda (&rest ,args)
+       (if (null (cdr ,args))
+           (- 0 (car ,args))
+           (let ((,acc (car ,args)))
+             (dolist (,x (cdr ,args) ,acc)
+               (setq ,acc (- ,acc ,x))))))))
+
 (defun expand-function-builtin (name)
   "Wrap a known builtin NAME in a first-class lambda for higher-order use."
-  (cond
-    ((member name *variadic-fold-builtins*)
-     (let ((args (gensym "ARGS")) (acc (gensym "ACC")) (x (gensym "X"))
-           (id   (cdr (assoc name *variadic-fold-identities*))))
-       (compiler-macroexpand-all
-        `(lambda (&rest ,args)
-           (let ((,acc ,id))
-             (dolist (,x ,args ,acc)
-               (setq ,acc (,name ,acc ,x))))))))
-    ((eq name '-)
-     (let ((args (gensym "ARGS")) (acc (gensym "ACC")) (x (gensym "X")))
-       (compiler-macroexpand-all
-        `(lambda (&rest ,args)
-           (if (null (cdr ,args))
-               (- 0 (car ,args))
-               (let ((,acc (car ,args)))
-                 (dolist (,x (cdr ,args) ,acc)
-                   (setq ,acc (- ,acc ,x)))))))))
-    ((eq name 'list)
-     (let ((args (gensym "ARGS")))
-       (compiler-macroexpand-all `(lambda (&rest ,args) ,args))))
-    ((member name *binary-builtins*)
-     (let ((a (gensym "A")) (b (gensym "B")))
-       (compiler-macroexpand-all `(lambda (,a ,b) (,name ,a ,b)))))
-    (t
-     (let ((x (gensym "X")))
-       (compiler-macroexpand-all `(lambda (,x) (,name ,x)))))))
+  (compiler-macroexpand-all
+   (cond
+     ((member name *variadic-fold-builtins*) (%build-variadic-fold-lambda name))
+     ((eq name '-)                           (%build-subtract-lambda))
+     ((eq name 'list)
+      (let ((args (gensym "ARGS")))
+        `(lambda (&rest ,args) ,args)))
+     ((member name *binary-builtins*)
+      (let ((a (gensym "A")) (b (gensym "B")))
+        `(lambda (,a ,b) (,name ,a ,b))))
+     (t
+      (let ((x (gensym "X")))
+        `(lambda (,x) (,name ,x)))))))
 
 (defun expand-apply-named-fn (fn-name args-form)
   "Expand (apply 'FN-NAME args-form) where FN-NAME is a known symbol.
 Variadic builtins get a dolist fold; others normalise to (apply #'fn args)."
   (if (member fn-name (list* '- 'list *variadic-fold-builtins*))
-      (let ((acc (gensym "ACC")) (x (gensym "X")) (lst (gensym "LST"))
-            (id  (cdr (assoc fn-name *variadic-fold-identities*))))
+      (let ((acc (gensym "ACC")) (x (gensym "X")) (lst (gensym "LST")))
         (if (eq fn-name '-)
             (compiler-macroexpand-all
              `(let ((,lst ,args-form))
@@ -246,8 +222,9 @@ Variadic builtins get a dolist fold; others normalise to (apply #'fn args)."
                       (dolist (,x (cdr ,lst) ,acc)
                         (setq ,acc (- ,acc ,x)))))))
             (compiler-macroexpand-all
-             `(let ((,acc ,id))
-                (dolist (,x ,args-form ,acc)
-                  (setq ,acc (,fn-name ,acc ,x)))))))
+             (let ((id (variadic-fold-identity fn-name)))
+               `(let ((,acc ,id))
+                  (dolist (,x ,args-form ,acc)
+                    (setq ,acc (,fn-name ,acc ,x))))))))
       (list 'apply (list 'function fn-name)
             (compiler-macroexpand-all args-form))))

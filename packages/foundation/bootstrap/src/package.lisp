@@ -31,6 +31,16 @@
    ;; Must live in bootstrap so expand can reference them before compile loads.
    #:our-load
    #:run-string-repl
+    ;; VM bootstrap installers — defined in cl-cc/vm, consumed by runtime/parse/expand/selfhost
+    #:*vm-runtime-callable-installer*
+    #:*runtime-vm-callable-register-hook*
+    #:*runtime-package-registry-provider*
+    #:*runtime-find-package-fn*
+    #:*runtime-intern-fn*
+    #:*runtime-set-symbol-value-fn*
+    #:*vm-eval-hook-installer*
+    #:*vm-macroexpand-hook-installer*
+    #:*vm-parse-forms-hook-installer*
    ;; Prolog type/relation predicate atoms (keys in *prolog-rules* fact DB)
    #:binop #:const #:var #:cmp
    #:integer-type #:boolean-type #:env-lookup
@@ -45,6 +55,16 @@
    #:rt-plist-put))
 
 (in-package :cl-cc/bootstrap)
+
+(defvar *vm-runtime-callable-installer* nil)
+(defvar *runtime-vm-callable-register-hook* nil)
+(defvar *runtime-package-registry-provider* nil)
+(defvar *runtime-find-package-fn* nil)
+(defvar *runtime-intern-fn* nil)
+(defvar *runtime-set-symbol-value-fn* nil)
+(defvar *vm-eval-hook-installer* nil)
+(defvar *vm-macroexpand-hook-installer* nil)
+(defvar *vm-parse-forms-hook-installer* nil)
 
 (defun rt-plist-put (plist indicator value)
   "Return a new plist with INDICATOR set to VALUE. Non-destructive."

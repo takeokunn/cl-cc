@@ -54,6 +54,19 @@
   (assert-false (cl-cc/expand::compiler-special-form-p 'not-a-special-form))
   (assert-true (cl-cc/expand::builtin-name-p 'append))
   (assert-false (cl-cc/expand::builtin-name-p 'not-a-builtin))
-  (assert-equal 0 (cl-cc/expand::variadic-fold-identity '+))
-  (assert-equal 1 (cl-cc/expand::variadic-fold-identity '*))
-  (assert-equal nil (cl-cc/expand::variadic-fold-identity 'length)))
+   (assert-equal 0 (cl-cc/expand::variadic-fold-identity '+))
+   (assert-equal 1 (cl-cc/expand::variadic-fold-identity '*))
+   (assert-equal nil (cl-cc/expand::variadic-fold-identity 'length)))
+
+(deftest bootstrap-macro-eval-errors-without-our-eval
+  "%bootstrap-macro-eval rejects host fallback when OUR-EVAL is unavailable."
+  (let ((original (when (fboundp 'cl-cc/expand::our-eval)
+                    (symbol-function 'cl-cc/expand::our-eval))))
+    (unwind-protect
+         (progn
+           (when original
+             (fmakunbound 'cl-cc/expand::our-eval))
+           (assert-signals error
+             (cl-cc/expand::%bootstrap-macro-eval '(+ 1 2))))
+      (when original
+        (setf (symbol-function 'cl-cc/expand::our-eval) original)))))

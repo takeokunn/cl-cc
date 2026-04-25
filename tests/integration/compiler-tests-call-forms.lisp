@@ -24,7 +24,7 @@
 
 ;;; Multiple Top-Level Forms and Values Tests
 
-(deftest-each compile-multiple-forms-and-values
+(deftest-compile-each compile-multiple-forms-and-values
   "Multiple top-level forms, values, and multiple-value-bind all return expected numeric results."
   :cases (("forms-simple"    6  "(defun foo (x) (+ x 1)) (foo 5)")
           ("forms-progn"     3  "1 2 3")
@@ -36,20 +36,17 @@
           ("mvb-basic"        3 "(multiple-value-bind (a b) (values 1 2) (+ a b))")
           ("apply-user"       6 "(defun my-add (a b c) (+ a (+ b c))) (apply my-add (quote (1 2 3)))")
           ("mvb-single"      42 "(multiple-value-bind (x) (values 42) x)"))
-  (expected form)
-  (assert-= expected (run-string form)))
+  )
 
-(deftest-each compile-values-nil
+(deftest-compile-each compile-values-nil
   "values and multiple-value-bind return nil in edge cases."
-  :cases (("empty"        "(values)")
-          ("mvb-missing"  "(multiple-value-bind (a b c) (values 1 2) c)"))
-  (form)
-  (assert-true (null (run-string form))))
+  :cases (("empty"        nil "(values)")
+          ("mvb-missing"  nil "(multiple-value-bind (a b c) (values 1 2) c)")))
 
 
 ;;; Extended List and Macro Tests
 
-(deftest-each compile-keywordp-and-list-macros
+(deftest-compile-each compile-keywordp-and-list-macros
   "keywordp, push/pop/incf/decf/nth/nthcdr/nreverse return the expected numeric values."
   :cases (("keyword"     1  "(keywordp :foo)")
           ("non-keyword" 0  "(keywordp 'foo)")
@@ -60,8 +57,7 @@
           ("nth"         30 "(nth 2 (list 10 20 30 40))")
           ("nthcdr"      30 "(car (nthcdr 2 (list 10 20 30 40)))")
           ("nreverse"    3  "(car (nreverse (list 1 2 3)))"))
-  (expected form)
-  (assert-= expected (run-string form)))
+  )
 
 (deftest compile-member-builtin
   "member finds element in list"
@@ -89,24 +85,22 @@
 ;;; Extended Lambda List Tests (&rest, &optional, &key)
 
 ;; &rest tests
-(deftest-each compile-rest-params
+(deftest-compile-each compile-rest-params
   "&rest collects remaining arguments into a list."
   :cases (("basic"     '(1 2 3) "(defun my-list (&rest args) args) (my-list 1 2 3)")
           ("required"  '(1 2 3) "(defun fr (a &rest r) (cons a r)) (fr 1 2 3)")
           ("single"    '(42)    "(defun my-list1 (&rest args) args) (my-list1 42)"))
-  (expected form)
-  (assert-equal expected (run-string form)))
+  )
 
-(deftest-each compile-rest-extras
+(deftest-compile-each compile-rest-extras
   "&rest edge cases: empty produces nil; car and recursive length work on rest lists."
   :cases (("empty-nil"   nil "(defun my-list0 (&rest args) args) (my-list0)")
           ("car-rest"    10  "(defun first-rest (&rest args) (car args)) (first-rest 10 20 30)")
           ("length-rest"  3  "(defun my-len (lst) (if (null lst) 0 (+ 1 (my-len (cdr lst))))) (defun count-args (&rest args) (my-len args)) (count-args 1 2 3)"))
-  (expected form)
-  (assert-equal expected (run-string form)))
+  )
 
 ;; &optional tests
-(deftest-each compile-optional-params
+(deftest-compile-each compile-optional-params
   "&optional parameters use provided values, defaults, or nil."
   :cases (("provided"          15 "(defun opt-add (a &optional b) (if b (+ a b) a)) (opt-add 10 5)")
           ("missing"           10 "(defun opt-add2 (a &optional b) (if b (+ a b) a)) (opt-add2 10)")
@@ -114,11 +108,10 @@
           ("default-overridden" 15 "(defun opt-def2 (a &optional (b 0)) (+ a b)) (opt-def2 10 5)")
           ("multiple"           6 "(defun opt-multi (a &optional (b 0) (c 0)) (+ (+ a b) c)) (opt-multi 1 2 3)")
           ("partial"            3 "(defun opt-part (a &optional (b 0) (c 0)) (+ (+ a b) c)) (opt-part 1 2)"))
-  (expected form)
-  (assert-= expected (run-string form)))
+  )
 
 ;; &key tests
-(deftest-each compile-key-params
+(deftest-compile-each compile-key-params
   "&key parameters support defaults, reordering, and combination with required args."
   :cases (("basic"         7  "(defun key-add (&key x y) (+ x y)) (key-add :x 3 :y 4)")
           ("default"      10  "(defun key-def (&key (x 0) (y 0)) (+ x y)) (key-def :x 10)")
@@ -126,29 +119,26 @@
           ("four-keys"   '(1 2 3 4) "(defun key-many (&key a b c d) (list a b c d)) (key-many :d 4 :b 2 :a 1 :c 3)")
           ("four-defaults" '(1 20 3 4) "(defun key-many-def (&key (a 1) (b 2) (c 3) (d 4)) (list a b c d)) (key-many-def :b 20 :d 4)")
           ("with-required" 30 "(defun rk (a &key (b 0)) (+ a b)) (rk 10 :b 20)"))
-  (expected form)
-  (assert-equal expected (run-string form)))
+  )
 
 ;; lambda with extended params
-(deftest-each compile-lambda-params
+(deftest-compile-each compile-lambda-params
   "lambda forms support &rest and &optional parameters."
   :cases (("rest"              '(10 20 30) "(funcall (lambda (&rest args) args) 10 20 30)")
           ("optional-default"  5           "(funcall (lambda (a &optional (b 0)) (+ a b)) 5)")
           ("optional-provided" 15          "(funcall (lambda (a &optional (b 0)) (+ a b)) 5 10)"))
-  (expected form)
-  (assert-true (equal expected (run-string form))))
+  )
 
 ;; combined features
-(deftest-each compile-rest-combined
+(deftest-compile-each compile-rest-combined
   "&rest combined with &optional and closure capture."
   :cases (("with-optional" '(3 4 5)     " (defun opt-rest (a &optional (b 0) &rest r) r) (opt-rest 1 2 3 4 5)")
           ("closure"       '(10 20 30)  " (defun make-lister () (lambda (&rest args) args)) (funcall (make-lister) 10 20 30)"))
-  (expected form)
-  (assert-equal expected (run-string form)))
+  )
 
 ;;; Variadic Arithmetic and List Tests
 
-(deftest-each compile-variadic-arith
+(deftest-compile-each compile-variadic-arith
   "Variadic +, *, - and car of list produce correct numeric results."
   :cases (("plus-3"    6  "(+ 1 2 3)")
           ("plus-5"   15  "(+ 1 2 3 4 5)")
@@ -158,14 +148,11 @@
           ("times-0"   1  "(*)")
           ("minus-3"   5  "(- 10 3 2)")
           ("list-car"  1  "(car (list 1 2 3))"))
-  (expected form)
-  (assert-= expected (run-string form)))
+  )
 
-(deftest-each compile-list-construction
+(deftest-compile-each compile-list-construction
   "list builds proper lists."
   :cases (("basic" '(1 2 3) "(list 1 2 3)")
-          ("single" '(42)   "(list 42)"))
-  (expected form)
-  (assert-equal expected (run-string form)))
+          ("single" '(42)   "(list 42)")))
 
 ;;; Stdlib / I/O / array/sort/coerce tests moved to compiler-tests-stdlib.lisp.

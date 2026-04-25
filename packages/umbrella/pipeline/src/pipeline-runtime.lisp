@@ -8,7 +8,7 @@
 
 (defun run-string (source &key stdlib pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile and run SOURCE. When STDLIB is true, include standard library."
-  (let ((*package*          (or (cl-cc/runtime:rt-find-package :cl-cc) *package*))
+  (let ((*package*          (or (find-package :cl-cc) *package*))
         (*labels-boxed-fns* nil)
         (compile-kwargs (list :target :vm
                               :pass-pipeline       pass-pipeline

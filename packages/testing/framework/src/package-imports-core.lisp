@@ -66,7 +66,8 @@
           cl-cc:ast-lambda-body
           cl-cc:ast-flet-bindings
           cl-cc:ast-labels-bindings
-          ;; VM State and heap operations
+          ;; VM State classes and heap operations
+          cl-cc:vm-io-state
           cl-cc:vm-state-heap
           cl-cc:vm-heap-counter
           cl-cc:vm-call-stack

@@ -159,7 +159,6 @@
 (defun rt-rplacd (cons val) (rplacd cons val) nil)
 (defun rt-make-list (n &optional (init nil)) (make-list n :initial-element init))
 (defun rt-list-length (l) (length l))
-(defun rt-append (a b) (append a b))
 (defun rt-nconc (a b) (nconc a b))
 (defun rt-reverse (l) (reverse l))
 (defun rt-nreverse (l) (nreverse l))

@@ -29,6 +29,10 @@ Uses the hand-written CL lexer and recursive-descent parser (no host reader)."
 (defgeneric lower-sexp-to-ast (node &key source-file source-line source-column)
   (:documentation "Convert an S-expression NODE to an AST node with optional source location."))
 
+(defmethod lower-sexp-to-ast ((node ast-node) &key source-file source-line source-column)
+  (declare (ignore source-file source-line source-column))
+  node)
+
 (defmethod lower-sexp-to-ast ((node integer) &key source-file source-line source-column)
   (make-ast-int :value node
                  :source-file source-file
@@ -162,10 +166,8 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
 
 ;;; Wire parse-all-forms into VM hook for runtime READ support
 (defun %vm-install-parse-forms-hook-if-available ()
-  (let* ((pkg (find-package :cl-cc/vm))
-         (sym (and pkg (find-symbol "VM-INSTALL-PARSE-FORMS-HOOK" pkg))))
-    (when (and sym (fboundp sym))
-      (funcall (symbol-function sym) #'parse-all-forms))))
+  (when cl-cc/bootstrap::*vm-parse-forms-hook-installer*
+    (funcall cl-cc/bootstrap::*vm-parse-forms-hook-installer* #'parse-all-forms)))
 
 #-cl-cc-self-hosting
 (eval-when (:load-toplevel :execute)

@@ -76,7 +76,14 @@ After registration, compiler-macroexpand-all dispatches to the new handler."
         (let ((result (cl-cc/expand::compiler-macroexpand-all (list test-head 42))))
           (assert-equal 'was-handled (first result))
           (assert-equal 42 (second result)))
-      (remhash test-head cl-cc/expand::*expander-head-table*))))
+       (remhash test-head cl-cc/expand::*expander-head-table*))))
+
+(deftest make-macro-expander-returns-descriptor
+  "make-macro-expander returns a descriptor instead of a host closure."
+  (let ((expander (cl-cc/expand::make-macro-expander '(&body body) '((cons 'progn body)))))
+    (assert-equal :macro-expander (getf expander :kind))
+    (assert-equal '(&body body) (getf expander :lambda-list))
+    (assert-true (listp (getf expander :body)))))
 
 (deftest expander-handler-returning-same-form-does-not-recurse
   "When a handler returns the identical form (equal), the expander stops recursion."

@@ -127,6 +127,16 @@
   (assert-true (find :cl cl-cc/runtime::*rt-bootstrap-package-names*))
   (assert-true (gethash "CL-CC/RUNTIME" cl-cc/runtime::*rt-package-registry*)))
 
+(deftest rt-runtime-callable-registration-publishes-bootstrap-hook
+  "runtime-io publishes its VM callable registration hook through cl-cc/bootstrap." 
+  (assert-true cl-cc/bootstrap::*runtime-vm-callable-register-hook*))
+
+(deftest rt-package-layer-publishes-bootstrap-function-hooks
+  "runtime-io publishes package/intern/symbol-value hooks through cl-cc/bootstrap." 
+  (assert-true cl-cc/bootstrap::*runtime-find-package-fn*)
+  (assert-true cl-cc/bootstrap::*runtime-intern-fn*)
+  (assert-true cl-cc/bootstrap::*runtime-set-symbol-value-fn*))
+
 (deftest rt-boundp-and-makunbound
   "rt-boundp detects runtime-registry bindings; rt-makunbound removes them."
   (let ((sym (gensym "RT-BOUND-TEST-")))

@@ -71,16 +71,70 @@ independent macroexpansions."
   (not (%contains-uninterned-symbol-p form)))
 
 (defun register-macro (name expander)
-  "Register NAME as a macro with EXPANDER function in the global environment."
+  "Register NAME as a macro with EXPANDER in the global environment.
+EXPANDER may be either a legacy host function or a descriptor consumed by
+`invoke-registered-expander'."
   (setf (gethash name (macro-env-table *macro-environment*)) expander)
   (%reset-macroexpansion-caches)
   name)
 
 (defun register-compiler-macro (name expander)
-  "Register NAME as a compiler macro expander in the global environment."
+  "Register NAME as a compiler macro expander in the global environment.
+EXPANDER may be either a legacy host function or a descriptor consumed by
+`invoke-registered-expander'."
   (setf (gethash name *compiler-macro-table*) expander)
   (%reset-macroexpansion-caches)
   name)
+
+(defun %expander-descriptor-p (object)
+  "Return T when OBJECT is a data-backed macro expander descriptor."
+  (and (listp object)
+       (member (getf object :kind)
+               '(:macro-expander :compiler-macro-expander :register-macro-expander)
+               :test #'eq)))
+
+(defun %invoke-expander-descriptor (descriptor form env)
+  "Evaluate DESCRIPTOR against FORM and ENV through `*macro-eval-fn*'."
+  (flet ((maybe-postprocess (result)
+           (case (getf descriptor :post-expand)
+             (:our-macroexpand-all (our-macroexpand-all result env))
+             (otherwise result))))
+    (case (getf descriptor :kind)
+      (:macro-expander
+       (let* ((lambda-list (getf descriptor :lambda-list))
+              (body (getf descriptor :body))
+              (form-var (gensym "FORM"))
+              (eval-form `(let ((,form-var ',form))
+                            (let* ,(generate-lambda-bindings lambda-list form-var)
+                              ,@body))))
+         (maybe-postprocess (funcall *macro-eval-fn* eval-form))))
+      (:compiler-macro-expander
+       (let* ((lambda-list (getf descriptor :lambda-list))
+              (body (getf descriptor :body))
+              (form-var (gensym "FORM"))
+              (eval-form `(let ((,form-var ',form))
+                            (let* ,(destructure-lambda-list lambda-list `(cdr ,form-var))
+                              ,@body))))
+         (funcall *macro-eval-fn* eval-form)))
+      (:register-macro-expander
+       (let* ((parameters (getf descriptor :parameters))
+              (body (getf descriptor :body))
+              (form-var (first parameters))
+              (env-var (second parameters))
+              (bindings (append (when form-var `((,form-var ',form)))
+                                (when env-var `((,env-var ',env)))))
+              (eval-form `(let ,bindings ,@body)))
+         (maybe-postprocess (funcall *macro-eval-fn* eval-form))))
+      (otherwise
+       (error "Unknown expander descriptor kind: ~S" descriptor)))))
+
+(defun invoke-registered-expander (expander form env)
+  "Invoke EXPANDER on FORM and ENV.
+Supports both legacy host functions and descriptor-backed expanders."
+  (cond
+    ((functionp expander) (funcall expander form env))
+    ((%expander-descriptor-p expander) (%invoke-expander-descriptor expander form env))
+    (t (error "Unsupported expander representation: ~S" expander))))
 
 (defun lookup-macro (name &optional env)
   "Look up macro NAME in the global macro environment."
@@ -105,7 +159,7 @@ independent macroexpansions."
   (if (and (consp form) (symbolp (car form)))
       (let ((macro-fn (lookup-macro (car form) env)))
         (if macro-fn
-            (let ((expanded (funcall macro-fn form env)))
+            (let ((expanded (invoke-registered-expander macro-fn form env)))
               (if (equal expanded form)
                    (progn (when (%cacheable-macroexpansion-p form)
                            (%macroexpansion-cache-store form env (cons nil form) *macroexpand-step-cache*))
@@ -227,10 +281,8 @@ These symbols live in :cl-cc/bootstrap so both parse and expand share them."
 
 ;;; Wire expand functions into VM hooks for runtime macroexpand support
 (defun %vm-install-macroexpand-hooks-if-available ()
-  (let* ((pkg (find-package :cl-cc/vm))
-         (sym (and pkg (find-symbol "VM-INSTALL-MACROEXPAND-HOOKS" pkg))))
-    (when (and sym (fboundp sym))
-      (funcall (symbol-function sym) #'our-macroexpand-1 #'our-macroexpand))))
+  (when cl-cc/bootstrap::*vm-macroexpand-hook-installer*
+    (funcall cl-cc/bootstrap::*vm-macroexpand-hook-installer* #'our-macroexpand-1 #'our-macroexpand)))
 
 #-cl-cc-self-hosting
 (eval-when (:load-toplevel :execute)

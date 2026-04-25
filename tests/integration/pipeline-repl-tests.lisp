@@ -39,10 +39,11 @@
     (unwind-protect
          (progn
            (assert-eq macro-name (cl-cc::run-form-repl form))
-           (let ((expander (gethash macro-name table)))
-              (assert-true expander)
-              (assert-equal '(progn (print 1))
-                           (funcall expander '(pipeline-repl-temp-defmacro (print 1)) nil))))
+            (let ((expander (gethash macro-name table)))
+               (assert-true expander)
+               (assert-equal '(progn (print 1))
+                            (cl-cc/expand::invoke-registered-expander
+                             expander '(pipeline-repl-temp-defmacro (print 1)) nil))))
       (remhash macro-name table))))
 
 (deftest pipeline-run-form-repl-registers-destructuring-defmacro
@@ -55,20 +56,26 @@
     (unwind-protect
          (progn
            (assert-eq macro-name (cl-cc::run-form-repl form))
-            (let ((expander (gethash macro-name table)))
-              (assert-true expander)
-              (assert-equal '(cons 'foo
-                                   (cons 'bar
-                                         (cons '(baz quux) nil)))
-                            (funcall expander '(pipeline-repl-temp-destructuring-defmacro foo (bar) baz quux) nil))))
+             (let ((expander (gethash macro-name table)))
+               (assert-true expander)
+               (assert-equal '(cons 'foo
+                                    (cons 'bar
+                                          (cons '(baz quux) nil)))
+                            (cl-cc/expand::invoke-registered-expander
+                             expander
+                             '(pipeline-repl-temp-destructuring-defmacro foo (bar) baz quux)
+                             nil))))
       (remhash macro-name table))))
 
 (deftest pipeline-repl-defun-is-no-longer-host-only-special-case
-  "The REPL host-load policy no longer treats plain DEFUN as a file-specific host-only form." 
-  (assert-false (cl-cc::%host-only-top-level-file-specific-form-p '(defun demo (x) x))))
+  "The REPL host-load policy no longer treats plain DEFUN as a host-only form."
+  (multiple-value-bind (result handled-p)
+      (cl-cc::%handle-host-only-top-level-form '(defun demo (x) x))
+    (assert-false handled-p)
+    (assert-null result)))
 
 (deftest pipeline-run-form-repl-normalizes-register-macro-lambda-body
-  "run-form-repl normalizes top-level register-macro lambda bodies before storing the host expander." 
+  "run-form-repl normalizes top-level register-macro lambda bodies before storing the expander descriptor." 
   (let* ((*package* (find-package :cl-cc/compile))
          (macro-name (intern "PIPELINE-REPL-TEMP-REGISTER-MACRO" *package*))
          (form (first (cl-cc/parse:parse-all-forms
@@ -77,11 +84,42 @@
     (unwind-protect
          (progn
            (assert-eq macro-name (cl-cc::run-form-repl form))
-           (let ((expander (gethash macro-name table)))
-             (assert-true expander)
-              (assert-equal '(progn 42)
-                            (funcall expander '(pipeline-repl-temp-register-macro 42) nil))))
+             (let ((expander (gethash macro-name table)))
+               (assert-true expander)
+                (assert-equal '(progn 42)
+                            (cl-cc/expand::invoke-registered-expander
+                             expander '(pipeline-repl-temp-register-macro 42) nil))))
       (remhash macro-name table))))
+
+(deftest pipeline-run-form-repl-register-macro-does-not-require-host-compile
+  "Top-level REGISTER-MACRO lambda registration no longer depends on host compile." 
+  (let* ((*package* (find-package :cl-cc/compile))
+         (macro-name (intern "PIPELINE-REPL-NO-COMPILE-REGISTER-MACRO" *package*))
+         (form (first (cl-cc/parse:parse-all-forms
+                       "(register-macro 'pipeline-repl-no-compile-register-macro (lambda (form env) (declare (ignore env)) (second form)))")))
+         (table (cl-cc/expand::macro-env-table cl-cc/expand::*macro-environment*))
+         (orig (symbol-function 'compile)))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'compile)
+                 (lambda (&rest args)
+                   (declare (ignore args))
+                   (error "host compile should not be called")))
+            (assert-eq macro-name (cl-cc::run-form-repl form))
+            (let ((expander (gethash macro-name table)))
+              (assert-true expander)
+              (assert-equal 42
+                            (cl-cc/expand::invoke-registered-expander
+                             expander '(pipeline-repl-no-compile-register-macro 42) nil))))
+       (setf (symbol-function 'compile) orig)
+       (remhash macro-name table))))
+
+(deftest pipeline-run-form-repl-rejects-non-lambda-register-macro
+  "run-form-repl rejects top-level REGISTER-MACRO forms whose expander is not a lambda." 
+  (let* ((*package* (find-package :cl-cc/compile))
+         (form (first (cl-cc/parse:parse-all-forms
+                       "(register-macro 'pipeline-repl-bad-register-macro 42)"))))
+    (assert-signals error (cl-cc::run-form-repl form))))
 
 (deftest pipeline-run-string-uses-vm-compile-path-for-safe-single-form
   "run-string executes safe single-form Lisp inputs through the normal VM compile path." 

@@ -51,8 +51,6 @@
 (defun rt-length (x) (length x))
 (defun rt-char= (&rest xs) (apply #'char= xs))
 (defun rt-char-equal (&rest xs) (apply #'char-equal xs))
-(defun rt-eql (a b) (eql a b))
-(defun rt-equal (a b) (equal a b))
 (defun rt-equalp (a b) (equalp a b))
 (defun rt-elt (sequence index) (elt sequence index))
 (defun rt-append (&rest lists) (apply #'append lists))

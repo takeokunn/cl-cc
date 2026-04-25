@@ -67,10 +67,8 @@ expansion during self-host loading)."
 
 ;;; Wire compile functions into VM hooks for runtime EVAL/compile support
 (defun %vm-install-eval-hooks-if-available ()
-  (let* ((pkg (cl-cc/runtime:rt-find-package :cl-cc/vm))
-         (sym (and pkg (find-symbol "VM-INSTALL-EVAL-HOOKS" pkg))))
-    (when (and sym (fboundp sym))
-      (funcall (symbol-function sym) #'our-eval #'compile-string))))
+  (when cl-cc/bootstrap::*vm-eval-hook-installer*
+    (funcall cl-cc/bootstrap::*vm-eval-hook-installer* #'our-eval #'compile-string)))
 
 (eval-when (:load-toplevel :execute)
   (%vm-install-eval-hooks-if-available))
@@ -96,7 +94,13 @@ expansion during self-host loading)."
      (cl-cc/expand::parse-lambda-list . ,#'cl-cc/expand::parse-lambda-list)
      (cl-cc/expand::destructure-lambda-list . ,#'cl-cc/expand::destructure-lambda-list)
      (cl-cc/expand::generate-lambda-bindings . ,#'cl-cc/expand::generate-lambda-bindings)
-     (cl-cc/expand::lambda-list-info-environment . ,#'cl-cc/expand::lambda-list-info-environment))))
+     (cl-cc/expand::lambda-list-info-environment . ,#'cl-cc/expand::lambda-list-info-environment)
+     ;; macros-package-system.lisp interns rt-* symbols in :cl-cc/expand; register
+     ;; them here (after :cl-cc/expand loads) so the VM bridge can resolve them.
+     (cl-cc/expand::rt-find-package . ,#'cl-cc/runtime:rt-find-package)
+     (cl-cc/expand::rt-make-package . ,#'cl-cc/runtime:rt-make-package)
+     (cl-cc/expand::rt-intern . ,#'cl-cc/runtime:rt-intern)
+     (cl-cc/expand::rt-export . ,#'cl-cc/runtime:rt-export))))
 
 (defun run-string-typed (source &key (mode :warn) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile and run SOURCE with type checking enabled.

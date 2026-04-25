@@ -72,10 +72,8 @@ Used both to build *builtin-special-variables* and to populate new compiler cont
 (defun %context-find-package (name)
   "Resolve package NAME through the runtime package layer when available.
 Returns NIL when the runtime package layer is unavailable." 
-  (let* ((runtime-pkg (find-package :cl-cc/runtime))
-         (rt-find (and runtime-pkg (find-symbol "RT-FIND-PACKAGE" runtime-pkg))))
-    (when (and rt-find (fboundp rt-find))
-      (funcall (symbol-function rt-find) name))))
+  (when cl-cc/bootstrap::*runtime-find-package-fn*
+    (funcall cl-cc/bootstrap::*runtime-find-package-fn* name)))
 
 (defun %resolve-package-symbol-specs (specs)
   "Resolve (PACKAGE . NAME) pairs to live symbols, skipping missing packages/symbols."
