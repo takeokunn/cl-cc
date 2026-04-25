@@ -133,7 +133,7 @@
 When EMIT-FAILURE-P is NIL, keep the lightweight type check but omit failure handling."
   (unless (or (null declared-spec)
               (eq declared-spec 't)
-              (typep declared-spec 'cl-cc/type:type-unknown))
+              (cl-cc/type::type-unknown-p declared-spec))
     (when (> (ctx-safety ctx) 0)
       (let ((check-reg (make-register ctx)))
         (emit ctx (make-vm-typep :dst check-reg :src value-reg :type-name declared-spec))

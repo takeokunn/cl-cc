@@ -86,6 +86,9 @@
    #:rt-symbol-name #:rt-intern #:rt-make-symbol #:rt-gensym
    #:rt-symbol-value #:rt-set-symbol-value
    #:rt-symbol-plist #:rt-get-prop #:rt-put-prop #:rt-remprop
+   #:rt-1+ #:rt-1- #:rt-+ #:rt-- #:rt-* #:rt-/ #:rt-< #:rt-> #:rt-<= #:rt->=
+   #:rt-max #:rt-min #:rt-length #:rt-char= #:rt-char-equal #:rt-eql #:rt-equal
+   #:rt-equalp #:rt-elt #:rt-append
    #:rt-keywordp #:rt-parse-integer
    ;; Hash tables
    #:rt-make-hash-table #:rt-gethash #:rt-sethash #:rt-remhash #:rt-clrhash
@@ -95,13 +98,13 @@
    #:rt-defclass #:rt-make-instance #:rt-slot-value #:rt-slot-set
    #:rt-slot-boundp #:rt-slot-makunbound #:rt-slot-exists-p
     #:rt-class-name #:rt-class-of #:rt-find-class #:rt-register-method #:rt-call-generic
-   #:rt-defclass-from-reg #:rt-make-instance-0
+    #:rt-make-instance-0
+    #:*rt-class-registry*
    ;; Conditions
    #:rt-signal-error #:rt-signal #:rt-warn-fn #:rt-cerror
-   #:rt-establish-handler #:rt-remove-handler
-   #:rt-push-handler #:rt-pop-handler #:rt-bind-restart #:rt-invoke-restart
-   ;; Misc
-   #:rt-boundp #:rt-fboundp #:rt-makunbound #:rt-fmakunbound
+   #:rt-invoke-restart
+    ;; Misc
+    #:rt-boundp #:rt-fboundp #:rt-makunbound
    #:rt-random #:rt-make-random-state
    #:rt-get-universal-time #:rt-get-internal-real-time #:rt-get-internal-run-time
    #:rt-read-from-string #:rt-read-sexp
@@ -114,15 +117,14 @@
    #:rt-open-file #:rt-close-file
    #:rt-make-string-stream #:rt-get-string-from-stream
    #:rt-make-string-output-stream #:rt-get-output-stream-string #:rt-stream-write-string
-   #:rt-finish-output #:rt-force-output #:rt-clear-output
-   #:rt-input-stream-p #:rt-output-stream-p #:rt-open-stream-p #:rt-interactive-stream-p
-   #:rt-stream-element-type
-   #:rt-make-broadcast-stream #:rt-make-two-way-stream
-   #:rt-make-echo-stream #:rt-make-concatenated-stream
-   #:rt-probe-file #:rt-truename #:rt-rename-file #:rt-delete-file #:rt-directory
-   #:rt-make-pathname #:rt-namestring #:rt-pathname-component
-   #:rt-merge-pathnames #:rt-enough-namestring
-   #:rt-write-to-string
+    #:rt-finish-output #:rt-force-output #:rt-clear-output
+    #:rt-input-stream-p #:rt-output-stream-p #:rt-open-stream-p #:rt-interactive-stream-p
+    #:rt-stream-element-type
+    #:rt-fboundp #:rt-intern #:rt-gensym
+    #:rt-symbol-value
+    #:rt-find-package #:rt-make-package #:rt-export
+    #:*rt-package-registry*
+    #:rt-write-to-string
    ;; ---------------------------------------------------------------
    ;; NaN-boxing value representation (value.lisp)
    ;; ---------------------------------------------------------------

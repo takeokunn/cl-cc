@@ -33,7 +33,7 @@
           (t nil))))))
 
 (defun our-load (pathname &key (verbose nil) (print nil) (if-does-not-exist :error)
-                                 (external-format :default))
+                                  (external-format :default))
   "Load a Lisp source file by reading, compiling, and executing each form."
   (declare (ignore external-format))
   (when (and (eq if-does-not-exist nil) (not (probe-file pathname)))
@@ -46,10 +46,9 @@
                       (read-sequence buf in)
                       buf))))
       (let* ((pkg-name (%prescan-in-package source))
-             (pkg (when pkg-name (find-package (string-upcase pkg-name))))
+             (pkg (when pkg-name (cl-cc/runtime:rt-find-package (string-upcase pkg-name))))
              (*package* (or pkg *package*))
-             (*our-load-host-definition-mode* (%project-source-load-p path))
-             (*our-load-current-path* path))
+             (*our-load-host-definition-mode* (%project-source-load-p path)))
         (let ((forms (parse-all-forms source))
               (last-result nil))
           (dolist (form forms last-result)
@@ -61,9 +60,9 @@
                                                :test #'string=))))
               (cond
                 (package-form-p
-                 (let ((pkg (find-package (second form))))
-                   (unless pkg
-                     (error "Unknown package: ~S" (second form)))
+                 (let ((pkg (cl-cc/runtime:rt-find-package (second form))))
+                    (unless pkg
+                      (error "Unknown package: ~S" (second form)))
                    (setf *package* pkg)
                    (setf last-result (second form))))
                 ((or whitespace-symbol-p unsupported-p)
@@ -79,5 +78,5 @@
                    (format *standard-output* "~S~%" last-result)))))))))))
 
 (eval-when (:load-toplevel :execute)
-  (dolist (sym '(run-string-repl our-load))
-    (vm-register-host-bridge sym)))
+  (vm-register-host-bridge 'run-string-repl #'run-string-repl)
+  (vm-register-host-bridge 'our-load #'our-load))

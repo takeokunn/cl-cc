@@ -145,8 +145,6 @@
     "(defvar *query-io* *query-io*)"
     ;; ── FR-573: *read-eval* ───────────────────────────────────────────────────
     "(defvar *read-eval* t)"
-    ;; ── FR-358: *readtable* (stub — full Readtable API not yet implemented) ───
-    "(defvar *readtable* nil)"
     ;; ── FR-570: Printer control variables ────────────────────────────────────
     "(defvar *print-circle* nil)"
     "(defvar *print-gensym* t)"
@@ -173,7 +171,5 @@
     "(defvar *compile-print* nil)"
     ;; ── FR-395: Compiler policy ───────────────────────────────────────────────
     "(defvar *compiler-policy* nil)"
-    ;; ── FR-358: Readtable variable ────────────────────────────────────────────
-    "(defvar *readtable* nil)"
 
       ))

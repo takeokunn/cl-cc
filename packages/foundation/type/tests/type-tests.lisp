@@ -86,23 +86,15 @@
   :cases (("int"     "FIXNUM"           type-int)
           ("string"  "STRING"           type-string)
           ("bool"    "BOOLEAN"          type-bool)
-          ("unknown" "?"                +type-unknown+))
+          ("unknown" "?"                cl-cc/type::+type-unknown+))
   (expected type)
   (assert-string= expected (type-to-string type)))
 
 
 (deftest type-repr-unknown-type
-  "Test that +type-unknown+ is a type-error sentinel (gradual typing removed).
-In the 2026 type system, there is no gradual typing; type-unknown is a backward-compat
-alias for a type-error sentinel used for error recovery."
-  ;; Backward-compat: typep via deftype alias still works
-  (assert-type type-unknown +type-unknown+)
-  ;; type-error nodes are intentionally never structurally equal (distinct error points)
-  (assert-false (type-equal-p +type-unknown+ +type-unknown+))
-  ;; The backward-compat predicate still works
-  (assert-true (type-unknown-p +type-unknown+))
-  ;; The underlying struct is type-error
-  (assert-true (type-error-p +type-unknown+)))
+  "type-unknown remains an error marker, not a structural type alias."
+  (assert-false (type-equal-p cl-cc/type::+type-unknown+ cl-cc/type::+type-unknown+))
+  (assert-true (type-error-p cl-cc/type::+type-unknown+)))
 
 ;;; Unification Tests
 
@@ -173,11 +165,10 @@ alias for a type-error sentinel used for error recovery."
   (let ((ok (nth-value 1 (type-unify-lists a b nil))))
     (assert-equal expected (not (null ok)))))
 
-(deftest-each unify-unknown-with-anything
-  "The type-error sentinel (unknown) unifies with any type."
-  :cases (("unknown-int"     +type-unknown+ type-int)
-          ("string-unknown"  type-string    +type-unknown+)
-          ("unknown-unknown" +type-unknown+ +type-unknown+))
+(deftest-each unify-type-error-fails
+  "type-error sentinels do not unify with concrete or unknown types."
+  :cases (("unknown-int"     cl-cc/type::+type-unknown+ type-int)
+          ("string-unknown"  type-string    cl-cc/type::+type-unknown+)
+          ("unknown-unknown" cl-cc/type::+type-unknown+ cl-cc/type::+type-unknown+))
   (a b)
-  (assert-unifies a b))
-
+  (assert-unify-fails a b))

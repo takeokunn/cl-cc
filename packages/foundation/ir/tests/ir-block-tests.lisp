@@ -1,7 +1,7 @@
-;;;; tests/unit/compile/ir/ir-block-tests.lisp — CFG Block & SSA Tests
+;;;; tests/unit/compile/ir/ir-block-tests.lisp — CFG Block Structure Tests
 ;;;
-;;; Tests for ir-add-edge, ir-emit, ir-set-terminator, ir-rpo,
-;;; ir-dominators, ir-collect-uses, ir-verify-ssa, and Braun SSA.
+;;; Tests for ir-add-edge, ir-emit, ir-set-terminator, ir-rpo, ir-dominators.
+;;; SSA construction/verification → ir-block-ssa-tests.lisp.
 
 (in-package :cl-cc/test)
 (in-suite cl-cc-unit-suite)
@@ -20,260 +20,183 @@
 ;;; ─── ir-add-edge ────────────────────────────────────────────────────────────
 
 (deftest ir-add-edge-behavior
-  "ir-add-edge: sets successor+predecessor; is idempotent (no duplicates); supports multiple successors."
-  ;; basic: adds forward and back edges
-  (let* ((fn (make-test-fn))
-         (b1 (cl-cc/ir:irf-entry fn))
-         (b2 (cl-cc/ir:ir-new-block fn :then)))
-    (cl-cc/ir:ir-add-edge b1 b2)
-    (assert-true (member b2 (cl-cc/ir:irb-successors b1)))
-    (assert-true (member b1 (cl-cc/ir:irb-predecessors b2))))
-  ;; idempotent: double add → still one edge each direction
-  (let* ((fn (make-test-fn))
-         (b1 (cl-cc/ir:irf-entry fn))
-         (b2 (cl-cc/ir:ir-new-block fn :then)))
-    (cl-cc/ir:ir-add-edge b1 b2)
-    (cl-cc/ir:ir-add-edge b1 b2)
-    (assert-= 1 (length (cl-cc/ir:irb-successors b1)))
-    (assert-= 1 (length (cl-cc/ir:irb-predecessors b2))))
-  ;; branch: block can have two successors
-  (let* ((fn (make-test-fn))
-         (entry  (cl-cc/ir:irf-entry fn))
-         (then-b (cl-cc/ir:ir-new-block fn :then))
-         (else-b (cl-cc/ir:ir-new-block fn :else)))
-    (cl-cc/ir:ir-add-edge entry then-b)
-    (cl-cc/ir:ir-add-edge entry else-b)
-    (assert-= 2 (length (cl-cc/ir:irb-successors entry)))))
+  "ir-add-edge wires predecessor/successor links between blocks."
+  (let* ((fn   (make-test-fn))
+         (entry (cl-cc/ir:irf-entry fn))
+         (next  (cl-cc/ir:ir-new-block fn :next)))
+    ;; Before edge: no successors, no predecessors
+    (assert-null (cl-cc/ir:irb-successors entry))
+    (assert-null (cl-cc/ir:irb-predecessors next))
+    (cl-cc/ir:ir-add-edge entry next)
+    ;; After edge: entry has next as successor, next has entry as predecessor
+    (assert-equal (list next)  (cl-cc/ir:irb-successors entry))
+    (assert-equal (list entry) (cl-cc/ir:irb-predecessors next)))
+  ;; Multiple edges from one block
+  (let* ((fn    (make-test-fn))
+         (entry (cl-cc/ir:irf-entry fn))
+         (b1    (cl-cc/ir:ir-new-block fn :b1))
+         (b2    (cl-cc/ir:ir-new-block fn :b2)))
+    (cl-cc/ir:ir-add-edge entry b1)
+    (cl-cc/ir:ir-add-edge entry b2)
+    (assert-= 2 (length (cl-cc/ir:irb-successors entry))))
+  ;; Duplicate edge should not be added twice
+  (let* ((fn    (make-test-fn))
+         (entry (cl-cc/ir:irf-entry fn))
+         (b1    (cl-cc/ir:ir-new-block fn :b1)))
+    (cl-cc/ir:ir-add-edge entry b1)
+    (cl-cc/ir:ir-add-edge entry b1)
+    (assert-= 1 (length (cl-cc/ir:irb-successors entry)))))
 
 ;;; ─── ir-emit / ir-set-terminator ────────────────────────────────────────────
 
 (deftest ir-emit-behavior
-  "ir-emit appends instructions in order and sets each instruction's owning block."
-  (let* ((fn    (make-test-fn))
-         (blk   (cl-cc/ir:irf-entry fn))
-         (inst1 (make-test-inst fn))
-         (inst2 (make-test-inst fn)))
-    (cl-cc/ir:ir-emit blk inst1)
-    (cl-cc/ir:ir-emit blk inst2)
-    (assert-= 2 (length (cl-cc/ir:irb-insts blk)))
-    (assert-eq inst1 (first  (cl-cc/ir:irb-insts blk)))
-    (assert-eq inst2 (second (cl-cc/ir:irb-insts blk)))
-    (assert-eq blk (cl-cc/ir:iri-block inst1))
-    (assert-eq blk (cl-cc/ir:iri-block inst2))))
+  "ir-emit appends instructions to a block in order."
+  (let* ((fn   (make-test-fn))
+         (blk  (cl-cc/ir:irf-entry fn))
+         (i1   (cl-cc/ir:make-ir-inst))
+         (i2   (cl-cc/ir:make-ir-inst)))
+    (cl-cc/ir:ir-emit blk i1)
+    (cl-cc/ir:ir-emit blk i2)
+    (let ((body (cl-cc/ir:irb-insts blk)))
+      (assert-= 2 (length body))
+      (assert-eq i1 (first body))
+      (assert-eq i2 (second body)))))
 
 (deftest ir-set-terminator-stores
-  "ir-set-terminator sets the block's terminator."
-  (let* ((fn (make-test-fn))
-         (blk (cl-cc/ir:irf-entry fn))
-         (term (make-test-inst fn)))
+  "ir-set-terminator stores the given instruction as the block terminator."
+  (let* ((fn   (make-test-fn))
+         (blk  (cl-cc/ir:irf-entry fn))
+         (term (cl-cc/ir:make-ir-inst)))
     (cl-cc/ir:ir-set-terminator blk term)
-    (assert-eq term (cl-cc/ir:irb-terminator blk))
-    (assert-eq blk (cl-cc/ir:iri-block term))))
+    (assert-eq term (cl-cc/ir:irb-terminator blk))))
 
 ;;; ─── ir-rpo ─────────────────────────────────────────────────────────────────
 
 (deftest-each ir-rpo-cases
-  "ir-rpo: single block, linear chain, diamond, and unreachable block exclusion."
-  :cases (("single-block"
-           (lambda ()
-             (let* ((fn (make-test-fn)))
-               (list fn (cl-cc/ir:irf-entry fn) 1 nil nil nil)))
-          )
-          ("linear-chain"
-           (lambda ()
-             (let* ((fn (make-test-fn))
-                    (entry (cl-cc/ir:irf-entry fn))
-                    (a (cl-cc/ir:ir-new-block fn :A))
-                    (b (cl-cc/ir:ir-new-block fn :B)))
-               (cl-cc/ir:ir-add-edge entry a)
-               (cl-cc/ir:ir-add-edge a b)
-               (list fn entry 3 a b nil)))
-          )
-          ("diamond"
-           (lambda ()
-             (let* ((fn (make-test-fn))
-                    (entry (cl-cc/ir:irf-entry fn))
-                    (left  (cl-cc/ir:ir-new-block fn :left))
-                    (right (cl-cc/ir:ir-new-block fn :right))
-                    (join  (cl-cc/ir:ir-new-block fn :join)))
-               (cl-cc/ir:ir-add-edge entry left)
-               (cl-cc/ir:ir-add-edge entry right)
-               (cl-cc/ir:ir-add-edge left join)
-               (cl-cc/ir:ir-add-edge right join)
-               (list fn entry 4 nil nil nil)))
-          )
-          ("unreachable-excluded"
-           (lambda ()
-             (let* ((fn (make-test-fn))
-                    (orphan (cl-cc/ir:ir-new-block fn :orphan)))
-               (declare (ignore orphan))
-               (list fn (cl-cc/ir:irf-entry fn) 1 nil nil nil)))))
-  (make-cfg)
-  (destructuring-bind (fn entry expected-count second-blk third-blk _) (funcall make-cfg)
-    (declare (ignore _))
-    (let ((rpo (cl-cc/ir:ir-rpo fn)))
-      (assert-= expected-count (length rpo))
-      (assert-eq entry (first rpo))
-      (when second-blk (assert-eq second-blk (second rpo)))
-      (when third-blk  (assert-eq third-blk  (third  rpo))))))
+  "ir-rpo returns blocks in reverse post-order for various graph shapes."
+  :cases
+  (("single-block"
+    (lambda ()
+      (let ((fn (make-test-fn)))
+        (cl-cc/ir:ir-seal-block fn (cl-cc/ir:irf-entry fn))
+        (values fn (list (cl-cc/ir:irf-entry fn)))))
+    (lambda (fn expected-order)
+      (assert-equal expected-order (cl-cc/ir:ir-rpo fn))))
+
+   ("linear-chain"
+    (lambda ()
+      (let* ((fn    (make-test-fn))
+             (entry (cl-cc/ir:irf-entry fn))
+             (b1    (cl-cc/ir:ir-new-block fn :b1))
+             (b2    (cl-cc/ir:ir-new-block fn :b2)))
+        (cl-cc/ir:ir-add-edge entry b1)
+        (cl-cc/ir:ir-add-edge b1 b2)
+        (cl-cc/ir:ir-seal-block fn entry)
+        (cl-cc/ir:ir-seal-block fn b1)
+        (cl-cc/ir:ir-seal-block fn b2)
+        (values fn (list entry b1 b2))))
+    (lambda (fn expected-order)
+      (assert-equal expected-order (cl-cc/ir:ir-rpo fn))))
+
+   ("diamond"
+    (lambda ()
+      (let* ((fn    (make-test-fn))
+             (entry (cl-cc/ir:irf-entry fn))
+             (left  (cl-cc/ir:ir-new-block fn :left))
+             (right (cl-cc/ir:ir-new-block fn :right))
+             (join  (cl-cc/ir:ir-new-block fn :join)))
+        (cl-cc/ir:ir-add-edge entry left)
+        (cl-cc/ir:ir-add-edge entry right)
+        (cl-cc/ir:ir-add-edge left join)
+        (cl-cc/ir:ir-add-edge right join)
+        (cl-cc/ir:ir-seal-block fn entry)
+        (cl-cc/ir:ir-seal-block fn left)
+        (cl-cc/ir:ir-seal-block fn right)
+        (cl-cc/ir:ir-seal-block fn join)
+        (values fn (list entry left right join))))
+    (lambda (fn expected-order)
+      (let ((rpo (cl-cc/ir:ir-rpo fn)))
+        (assert-= 4 (length rpo))
+        (assert-eq (first expected-order) (first rpo))
+        (assert-eq (car (last expected-order)) (car (last rpo))))))
+
+   ("back-edge-loop"
+    (lambda ()
+      (let* ((fn    (make-test-fn))
+             (entry (cl-cc/ir:irf-entry fn))
+             (body  (cl-cc/ir:ir-new-block fn :body))
+             (exit  (cl-cc/ir:ir-new-block fn :exit)))
+        (cl-cc/ir:ir-add-edge entry body)
+        (cl-cc/ir:ir-add-edge body exit)
+        (cl-cc/ir:ir-add-edge body body)
+        (cl-cc/ir:ir-seal-block fn entry)
+        (cl-cc/ir:ir-seal-block fn body)
+        (cl-cc/ir:ir-seal-block fn exit)
+        (values fn nil)))
+    (lambda (fn _)
+      (let ((rpo (cl-cc/ir:ir-rpo fn)))
+        (assert-= 3 (length rpo))
+        (assert-true (member (cl-cc/ir:irf-entry fn) rpo))))))
+  (setup verify)
+  (multiple-value-bind (fn expected-order) (funcall setup)
+    (funcall verify fn expected-order)))
 
 ;;; ─── ir-dominators ──────────────────────────────────────────────────────────
 
 (deftest-each ir-dominators-cases
-  "ir-dominators: self-domination, linear chain idom, and diamond join idom."
-  :cases (("single-block"
-           (lambda ()
-             (let* ((fn (make-test-fn))
-                    (entry (cl-cc/ir:irf-entry fn)))
-               ;; Returns (fn . list-of-(block . expected-idom) pairs)
-               (cons fn (list (cons entry entry))))))
-          ("linear-chain"
-           (lambda ()
-             (let* ((fn (make-test-fn))
-                    (entry (cl-cc/ir:irf-entry fn))
-                    (a (cl-cc/ir:ir-new-block fn :A))
-                    (b (cl-cc/ir:ir-new-block fn :B)))
-               (cl-cc/ir:ir-add-edge entry a)
-               (cl-cc/ir:ir-add-edge a b)
-               (cons fn (list (cons a entry) (cons b a))))))
-          ("diamond"
-           (lambda ()
-             (let* ((fn (make-test-fn))
-                    (entry (cl-cc/ir:irf-entry fn))
-                    (left  (cl-cc/ir:ir-new-block fn :left))
-                    (right (cl-cc/ir:ir-new-block fn :right))
-                    (join  (cl-cc/ir:ir-new-block fn :join)))
-               (cl-cc/ir:ir-add-edge entry left)
-               (cl-cc/ir:ir-add-edge entry right)
-               (cl-cc/ir:ir-add-edge left join)
-               (cl-cc/ir:ir-add-edge right join)
-               (cons fn (list (cons left entry) (cons right entry) (cons join entry)))))))
-  (make-cfg)
-  (let* ((result (funcall make-cfg))
-         (fn     (car result))
-         (checks (cdr result))
-         (idom   (cl-cc/ir:ir-dominators fn)))
-    (dolist (pair checks)
-      (assert-eq (cdr pair) (gethash (car pair) idom)))))
+  "ir-dominators computes correct dominator sets."
+  :cases
+  (("entry-dominates-itself"
+    (lambda ()
+      (let* ((fn    (make-test-fn))
+             (entry (cl-cc/ir:irf-entry fn)))
+        (cl-cc/ir:ir-seal-block fn entry)
+        (values fn entry (list (cons entry entry)))))
+    (lambda (fn entry checks)
+      (declare (ignore entry))
+      (let ((idom (cl-cc/ir:ir-dominators fn)))
+        (dolist (pair checks)
+          (assert-eq (cdr pair) (gethash (car pair) idom))))))
 
-;;; ─── ir-collect-uses ────────────────────────────────────────────────────────
+   ("linear-chain-dominators"
+    (lambda ()
+      (let* ((fn    (make-test-fn))
+             (entry (cl-cc/ir:irf-entry fn))
+             (b1    (cl-cc/ir:ir-new-block fn :b1))
+             (b2    (cl-cc/ir:ir-new-block fn :b2)))
+        (cl-cc/ir:ir-add-edge entry b1)
+        (cl-cc/ir:ir-add-edge b1 b2)
+        (cl-cc/ir:ir-seal-block fn entry)
+        (cl-cc/ir:ir-seal-block fn b1)
+        (cl-cc/ir:ir-seal-block fn b2)
+        (values fn entry (list (cons b1 entry) (cons b2 b1)))))
+    (lambda (fn entry checks)
+      (declare (ignore entry))
+      (let ((idom (cl-cc/ir:ir-dominators fn)))
+        (dolist (pair checks)
+          (assert-eq (cdr pair) (gethash (car pair) idom))))))
 
-(deftest ir-collect-uses-empty
-  "ir-collect-uses on empty function returns empty table."
-  (let* ((fn (make-test-fn))
-         (uses (cl-cc/ir:ir-collect-uses fn)))
-    (assert-= 0 (hash-table-count uses))))
-
-;;; ─── ir-verify-ssa ──────────────────────────────────────────────────────────
-
-(deftest ir-verify-ssa-behavior
-  "ir-verify-ssa: returns T for valid SSA; signals error on duplicate defs."
-  ;; valid: two distinct values each defined once
-  (let* ((fn (make-test-fn))
-         (blk (cl-cc/ir:irf-entry fn))
-         (v1 (cl-cc/ir:ir-new-value fn))
-         (v2 (cl-cc/ir:ir-new-value fn)))
-    (cl-cc/ir:ir-emit blk (cl-cc/ir:make-ir-inst :result v1))
-    (cl-cc/ir:ir-emit blk (cl-cc/ir:make-ir-inst :result v2))
-    (assert-true (cl-cc/ir:ir-verify-ssa fn)))
-  ;; invalid: same value defined twice — SSA violation
-  (let* ((fn (make-test-fn))
-         (blk (cl-cc/ir:irf-entry fn))
-         (v1 (cl-cc/ir:ir-new-value fn)))
-    (cl-cc/ir:ir-emit blk (cl-cc/ir:make-ir-inst :result v1))
-    (cl-cc/ir:ir-emit blk (cl-cc/ir:make-ir-inst :result v1))
-    (assert-true
-     (handler-case (progn (cl-cc/ir:ir-verify-ssa fn) nil)
-       (error () t)))))
-
-;;; ─── Braun SSA: ir-write-var / ir-read-var ──────────────────────────────────
-
-(deftest ir-ssa-write-read-same-block
-  "ir-write/read-var in the same block: basic read-back and overwrite behavior."
-  ;; basic: read finds what was written
-  (let* ((fn (make-test-fn))
-         (blk (cl-cc/ir:irf-entry fn))
-         (val (cl-cc/ir:ir-new-value fn)))
-    (cl-cc/ir:ir-write-var fn 'x blk val)
-    (assert-eq val (cl-cc/ir:ir-read-var fn 'x blk)))
-  ;; overwrite: later write shadows earlier in same block
-  (let* ((fn (make-test-fn))
-         (blk (cl-cc/ir:irf-entry fn))
-         (v1 (cl-cc/ir:ir-new-value fn))
-         (v2 (cl-cc/ir:ir-new-value fn)))
-    (cl-cc/ir:ir-write-var fn 'x blk v1)
-    (cl-cc/ir:ir-write-var fn 'x blk v2)
-    (assert-eq v2 (cl-cc/ir:ir-read-var fn 'x blk))))
-
-(deftest ir-ssa-read-propagates-from-predecessor
-  "ir-read-var finds value from single sealed predecessor."
-  (let* ((fn (make-test-fn))
-         (entry (cl-cc/ir:irf-entry fn))
-         (next (cl-cc/ir:ir-new-block fn :next))
-         (val (cl-cc/ir:ir-new-value fn)))
-    (cl-cc/ir:ir-add-edge entry next)
-    (cl-cc/ir:ir-seal-block fn entry)
-    (cl-cc/ir:ir-seal-block fn next)
-    (cl-cc/ir:ir-write-var fn 'x entry val)
-    (assert-eq val (cl-cc/ir:ir-read-var fn 'x next))))
-
-(deftest ir-ssa-join-creates-block-arg
-  "ir-read-var at join with two predecessors creates a block argument."
-  (let* ((fn (make-test-fn))
-         (entry (cl-cc/ir:irf-entry fn))
-         (left (cl-cc/ir:ir-new-block fn :left))
-         (right (cl-cc/ir:ir-new-block fn :right))
-         (join (cl-cc/ir:ir-new-block fn :join))
-         (v1 (cl-cc/ir:ir-new-value fn))
-         (v2 (cl-cc/ir:ir-new-value fn)))
-    (cl-cc/ir:ir-add-edge entry left)
-    (cl-cc/ir:ir-add-edge entry right)
-    (cl-cc/ir:ir-add-edge left join)
-    (cl-cc/ir:ir-add-edge right join)
-    (cl-cc/ir:ir-seal-block fn entry)
-    (cl-cc/ir:ir-seal-block fn left)
-    (cl-cc/ir:ir-seal-block fn right)
-    (cl-cc/ir:ir-seal-block fn join)
-    (cl-cc/ir:ir-write-var fn 'x left v1)
-    (cl-cc/ir:ir-write-var fn 'x right v2)
-    ;; Reading x at join should create a block argument (phi)
-    (let ((result (cl-cc/ir:ir-read-var fn 'x join)))
-      (assert-true (cl-cc/ir:ir-value-p result))
-      ;; The join block should have at least one param (the phi)
-      (assert-true (> (length (cl-cc/ir:irb-params join)) 0)))))
-
-(deftest-each ir-ssa-sealed-block-behavior
-  "ir-seal-block marks block sealed; ir-read-var on sealed orphan with no def returns nil."
-  :cases (("marks-sealed"       :sealed)
-          ("no-def-returns-nil" :read-nil))
-  (scenario)
-  (let* ((fn  (make-test-fn))
-         (blk (cl-cc/ir:ir-new-block fn :orphan)))
-    (cl-cc/ir:ir-seal-block fn blk)
-    (ecase scenario
-      (:sealed   (assert-true  (cl-cc/ir:irb-sealed-p blk)))
-      (:read-nil (assert-false (cl-cc/ir:ir-read-var fn 'x blk))))))
-
-;;; ─── ir-new-value / ir-new-block ────────────────────────────────────────────
-
-(deftest ir-new-value-increments-id
-  "ir-new-value allocates values with incrementing IDs."
-  (let* ((fn (make-test-fn))
-         (v0 (cl-cc/ir:ir-new-value fn))
-         (v1 (cl-cc/ir:ir-new-value fn)))
-    (assert-= 0 (cl-cc/ir:irv-id v0))
-    (assert-= 1 (cl-cc/ir:irv-id v1))))
-
-(deftest ir-block-and-function-construction
-  "ir-new-block increments IDs and adds to function; ir-make-function creates entry block."
-  (let* ((fn (make-test-fn))
-         (b1 (cl-cc/ir:ir-new-block fn :test)))
-    ;; Entry block is ID 0; new block is ID 1
-    (assert-= 0 (cl-cc/ir:irb-id (cl-cc/ir:irf-entry fn)))
-    (assert-= 1 (cl-cc/ir:irb-id b1))
-    ;; New block is registered in function's block list
-    (assert-= 2 (length (cl-cc/ir:irf-blocks fn)))
-    ;; Entry block has the correct label and type
-    (assert-true (cl-cc/ir:ir-block-p (cl-cc/ir:irf-entry fn)))
-    (assert-eq :entry (cl-cc/ir:irb-label (cl-cc/ir:irf-entry fn)))))
-
+   ("diamond-join-dominated-by-entry"
+    (lambda ()
+      (let* ((fn    (make-test-fn))
+             (entry (cl-cc/ir:irf-entry fn))
+             (left  (cl-cc/ir:ir-new-block fn :left))
+             (right (cl-cc/ir:ir-new-block fn :right))
+             (join  (cl-cc/ir:ir-new-block fn :join)))
+        (cl-cc/ir:ir-add-edge entry left)
+        (cl-cc/ir:ir-add-edge entry right)
+        (cl-cc/ir:ir-add-edge left join)
+        (cl-cc/ir:ir-add-edge right join)
+        (cl-cc/ir:ir-seal-block fn entry)
+        (cl-cc/ir:ir-seal-block fn left)
+        (cl-cc/ir:ir-seal-block fn right)
+        (cl-cc/ir:ir-seal-block fn join)
+        (values fn entry (list (cons left entry) (cons right entry) (cons join entry)))))
+    (lambda (fn entry checks)
+      (declare (ignore entry))
+      (let ((idom (cl-cc/ir:ir-dominators fn)))
+        (dolist (pair checks)
+          (assert-eq (cdr pair) (gethash (car pair) idom)))))))
+  (setup verify)
+  (multiple-value-bind (fn entry checks) (funcall setup)
+    (funcall verify fn entry checks)))

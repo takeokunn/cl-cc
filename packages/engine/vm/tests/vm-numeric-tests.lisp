@@ -33,8 +33,7 @@
           ("sym"    'foo           'symbol)
           ("cons"   '(a)           'cons)
           ("pathname" #p"/tmp"     'pathname)
-          ("random-state" (make-random-state t) 'random-state)
-          ("readtable" *readtable* 'readtable))
+          ("random-state" (make-random-state t) 'random-state))
   (src expected)
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 src)
@@ -107,61 +106,3 @@
   "vm-conjugate of #C(3 4) is #C(3 -4)."
   (assert-equal #C(3 -4) (%vm-num-unary #'cl-cc::make-vm-conjugate #C(3 4))))
 
-(deftest vm-boundp
-  "vm-boundp returns nil for unbound symbol and t after binding."
-  (assert-null (%vm-num-unary #'cl-cc::make-vm-boundp 'test-prim-var))
-  (let ((s (make-test-vm)))
-    (setf (gethash 'test-prim-var (cl-cc:vm-global-vars s)) 42)
-    (cl-cc:vm-reg-set s 1 'test-prim-var)
-    (exec1 (cl-cc::make-vm-boundp :dst 0 :src 1) s)
-    (assert-equal t (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-makunbound
-  "vm-makunbound removes global binding."
-  (let ((s (make-test-vm)))
-    (setf (gethash 'test-prim-var (cl-cc:vm-global-vars s)) 42)
-    (cl-cc:vm-reg-set s 1 'test-prim-var)
-    (exec1 (cl-cc::make-vm-makunbound :dst 0 :src 1) s)
-    (assert-false (nth-value 1 (gethash 'test-prim-var (cl-cc:vm-global-vars s))))))
-
-(deftest vm-fboundp-unbound
-  "vm-fboundp returns nil for unbound function."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 'test-prim-fn)
-    (exec1 (cl-cc::make-vm-fboundp :dst 0 :src 1) s)
-    (assert-null (cl-cc:vm-reg-get s 0))))
-
-(deftest vm-fmakunbound
-  "vm-fmakunbound removes function binding."
-  (let ((s (make-test-vm)))
-    (setf (gethash 'test-prim-fn (cl-cc:vm-function-registry s)) :some-closure)
-    (cl-cc:vm-reg-set s 1 'test-prim-fn)
-    (exec1 (cl-cc::make-vm-fmakunbound :dst 0 :src 1) s)
-    (assert-false (nth-value 1 (gethash 'test-prim-fn (cl-cc:vm-function-registry s))))))
-
-(deftest vm-random-in-range
-  "vm-random returns a number in [0, 100)."
-  (let ((result (%vm-num-unary #'cl-cc::make-vm-random 100)))
-    (assert-true (integerp result))
-    (assert-true (>= result 0))
-    (assert-true (< result 100))))
-
-(deftest vm-make-random-state
-  "vm-make-random-state with t creates a fresh random state."
-  (assert-true (random-state-p (%vm-num-unary #'cl-cc::make-vm-make-random-state t))))
-
-(deftest-each vm-get-time
-  "Time query instructions return non-negative integers."
-  :cases (("universal-time"    #'cl-cc::make-vm-get-universal-time     #'>)
-          ("internal-realtime" #'cl-cc::make-vm-get-internal-real-time #'>=))
-  (ctor cmp)
-  (let ((s (make-test-vm)))
-    (exec1 (funcall ctor :dst 0) s)
-    (assert-true (funcall cmp (cl-cc:vm-reg-get s 0) 0))))
-
-(deftest vm-decode-universal-time-values
-  "vm-decode-universal-time stores 9 values."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 (get-universal-time))
-    (exec1 (cl-cc::make-vm-decode-universal-time :dst 0 :src 1) s)
-    (assert-= 9 (length (cl-cc:vm-values-list s)))))

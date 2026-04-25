@@ -1,4 +1,4 @@
-;;;; macros-compat-mop.lisp — MOP introspection macros + parse-float + reinitialize-instance
+;;;; macros-mop-support.lisp — MOP introspection macros + parse-float + reinitialize-instance
 (in-package :cl-cc/expand)
 
 ;;; FR-523〜528: MOP Introspection Macros

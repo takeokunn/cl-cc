@@ -2,6 +2,29 @@
 
 (in-suite cl-cc-unit-suite)
 
+;;; ─── %make-compile-opts ──────────────────────────────────────────────────
+
+(deftest codegen-make-compile-opts-defaults
+  "%make-compile-opts: opt-remarks-mode defaults to :all; all other slots nil."
+  (let ((opts (cl-cc/compile::%make-compile-opts)))
+    (assert-true (listp opts))
+    (assert-null (getf opts :pass-pipeline))
+    (assert-null (getf opts :print-pass-timings))
+    (assert-null (getf opts :timing-stream))
+    (assert-eq :all (getf opts :opt-remarks-mode))
+    (assert-null (getf opts :trace-json-stream))))
+
+(deftest codegen-make-compile-opts-explicit-values
+  "%make-compile-opts captures explicit values into the plist."
+  (let ((opts (cl-cc/compile::%make-compile-opts :pass-pipeline '(:fold :dce)
+                                                 :opt-remarks-mode :pass
+                                                 :print-pass-stats t)))
+    (assert-equal '(:fold :dce) (getf opts :pass-pipeline))
+    (assert-eq :pass (getf opts :opt-remarks-mode))
+    (assert-true (getf opts :print-pass-stats))))
+
+;;; ─── %result-vm-instructions-without-halt ────────────────────────────────
+
 (deftest codegen-result-vm-instructions-without-halt-strips-terminal-halt
   "%result-vm-instructions-without-halt removes only the final vm-halt instruction."
   (let* ((move (cl-cc:make-vm-move :dst :R1 :src :R0))
@@ -34,8 +57,50 @@
     (assert-eq 'lambda (car captured-expr))
     (assert-false compile-ast-called)))
 
+(deftest-each codegen-toplevel-definitions-now-prefer-cps-primary-path
+  "VM CPS routing now covers simple DEFVAR and DEFUN top-level forms." 
+  :cases (("defvar" '(defvar *cps-safe-var* 1))
+          ("defun"  '(defun cps-safe-fn (x) x))
+          ("defun-rest" '(defun cps-safe-rest-fn (x &rest rest) x))
+          ("defun-optional" '(defun cps-safe-opt-fn (x &optional y) x))
+          ("defun-key" '(defun cps-safe-key-fn (&key x) x))
+          ("defclass" '(defclass cps-safe-class () ((slot :initarg :slot))))
+          ("defgeneric" '(defgeneric cps-safe-generic (x)))
+          ("defmethod" '(defmethod cps-safe-generic ((x integer)) x))
+          ("make-instance" '(make-instance 'cps-safe-class))
+          ("slot-value" '(slot-value obj 'slot))
+          ("set-slot-value" '(setf (slot-value obj 'slot) 1)))
+  (form)
+  (let ((captured-expr nil)
+        (compile-ast-called nil))
+    (with-replaced-function (cl-cc/compile:compile-expression
+                             (lambda (expr &rest args)
+                               (declare (ignore args))
+                               (setf captured-expr expr)
+                               (cl-cc/compile::make-compilation-result
+                                :program (cl-cc:make-vm-program :instructions nil :result-register :R-CPS)
+                                :vm-instructions (list (cl-cc:make-vm-halt :reg :R-CPS))
+                                :cps '(lambda (k) (funcall k ok)))))
+      (with-replaced-function (cl-cc/compile:compile-ast
+                               (lambda (&rest args)
+                                 (declare (ignore args))
+                                 (setf compile-ast-called t)
+                                 :R-DIRECT))
+        (cl-cc/compile::compile-toplevel-forms (list form) :target :vm)))
+    (assert-true captured-expr)
+    (assert-eq 'lambda (car captured-expr))
+    (assert-false compile-ast-called)))
+
+(deftest codegen-toplevel-variadic-lambda-is-now-cps-safe
+  "A variadic AST-LAMBDA is now accepted by the VM CPS-safe set through the conservative lambda path." 
+  (let ((lambda-ast (cl-cc/ast::make-ast-lambda
+                     :params '(x)
+                     :optional-params (list (list 'y nil nil))
+                     :body (list (cl-cc:make-ast-var :name 'x)))))
+    (assert-true (cl-cc::%cps-vm-compile-safe-ast-p lambda-ast))))
+
 (deftest codegen-toplevel-unsafe-form-stays-on-direct-path
-  "compile-toplevel-forms keeps CPS-unsafe forms on the direct compile-ast path."
+  "With CPS disabled, compile-toplevel-forms uses the direct compile-ast path."
   (let ((compile-expression-called nil)
         (compile-ast-called nil))
     (with-replaced-function (cl-cc/compile:compile-expression
@@ -50,7 +115,8 @@
                                  (declare (ignore args))
                                  (setf compile-ast-called t)
                                  :R-DIRECT))
-        (cl-cc/compile::compile-toplevel-forms '((make-instance 'point)) :target :vm)))
+        (let ((*enable-cps-vm-primary-path* nil))
+          (cl-cc/compile::compile-toplevel-forms '((+ 1 2)) :target :vm))))
     (assert-false compile-expression-called)
     (assert-true compile-ast-called)))
 

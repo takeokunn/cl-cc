@@ -99,6 +99,7 @@
    run-compiled
    run-program-slice
    make-vm-state
+   make-vm2-state
    vm-output-stream
    vm-global-vars
    vm-profile-enabled-p

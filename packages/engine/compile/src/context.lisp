@@ -69,6 +69,14 @@
   "Package-symbol pairs for variables that must exist in the VM global environment.
 Used both to build *builtin-special-variables* and to populate new compiler contexts.")
 
+(defun %context-find-package (name)
+  "Resolve package NAME through the runtime package layer when available.
+Returns NIL when the runtime package layer is unavailable." 
+  (let* ((runtime-pkg (find-package :cl-cc/runtime))
+         (rt-find (and runtime-pkg (find-symbol "RT-FIND-PACKAGE" runtime-pkg))))
+    (when (and rt-find (fboundp rt-find))
+      (funcall (symbol-function rt-find) name))))
+
 (defun %resolve-package-symbol-specs (specs)
   "Resolve (PACKAGE . NAME) pairs to live symbols, skipping missing packages/symbols."
   (loop for (pkg-name . sym-name) in specs
@@ -82,7 +90,7 @@ Used both to build *builtin-special-variables* and to populate new compiler cont
             *trace-output* *debug-io* *query-io*
             *print-base* *print-radix* *print-circle* *print-pretty*
             *print-level* *print-length* *print-escape* *print-readably*
-            *print-gensym* *random-state* *readtable* *read-eval*
+            *print-gensym* *random-state* *read-eval*
             internal-time-units-per-second
             *package* *%condition-handlers* *%active-restarts*)
           (%resolve-package-symbol-specs *builtin-package-symbol-specs*))
@@ -148,3 +156,41 @@ Used by run-string-repl to persist the label counter across calls.")
     (unless entry
       (error "Unbound variable: ~S" sym))
     (cdr entry)))
+
+;;; ─── CPS Safety Guards ───────────────────────────────────────────────────────
+
+(defparameter *cps-compile-unsupported-ast-types*
+  '(cl-cc/ast:ast-hole cl-cc/ast:ast-slot-def)
+  "AST node types excluded from CPS compilation.
+Definition forms and CLOS operations must run on the direct compile path.")
+
+(defparameter *cps-native-compile-unsupported-ast-types*
+  '(cl-cc/ast:ast-hole cl-cc/ast:ast-slot-def)
+  "AST node types excluded from native CPS compilation.
+Definition forms, control flow, and CLOS nodes require direct x86_64/aarch64 codegen.")
+
+(defvar *enable-cps-vm-primary-path* t
+  "When true, compile-expression prefers a CPS-backed VM compilation path for safe ASTs.")
+
+(defvar *compile-expression-cps-recursion-guard* nil
+  "Internal guard to prevent compile-expression from recursively re-entering the CPS primary path.")
+
+(defun %cps-compile-safe-ast-p (ast unsupported-types)
+  "Return T when AST and all descendants avoid UNSUPPORTED-TYPES."
+  (and (typep ast 'cl-cc/ast:ast-node)
+       (notany (lambda (type) (typep ast type)) unsupported-types)
+        (every (lambda (child)
+                 (%cps-compile-safe-ast-p child unsupported-types))
+               (cl-cc/ast:ast-children ast))))
+
+(defun %cps-vm-compile-safe-ast-p (ast)
+  "Return T when AST and all descendants are safe for VM CPS compilation."
+  (%cps-compile-safe-ast-p ast *cps-compile-unsupported-ast-types*))
+
+(defun %cps-native-compile-safe-ast-p (ast)
+  "Return T when AST and all descendants are safe for native (x86_64/aarch64) CPS compilation."
+  (%cps-compile-safe-ast-p ast *cps-native-compile-unsupported-ast-types*))
+
+(defun %cps-identity-entry-form (cps-form)
+  "Wrap CPS-FORM with an identity continuation for VM/native compilation."
+  (list cps-form '(lambda (value) value)))

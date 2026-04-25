@@ -166,3 +166,47 @@
           ("vm-logcount" 'vm-logcount "(i64.popcnt ~A)"))
   (type-sym expected-fmt)
   (assert-equal expected-fmt (gethash type-sym cl-cc/emit::*wasm-unary-fixnum-table*)))
+
+(deftest-each trampoline-minmax-table-lookups
+  "*wasm-minmax-table* maps min/max instruction types to WASM comparison opcodes."
+  :cases (("vm-min" 'vm-min "i64.le_s")
+          ("vm-max" 'vm-max "i64.ge_s"))
+  (type-sym expected-opcode)
+  (assert-equal expected-opcode (gethash type-sym cl-cc/emit::*wasm-minmax-table*)))
+
+(deftest trampoline-struct-get-table-entries
+  "*wasm-struct-get-table* covers vm-car and vm-cdr with struct.get format strings."
+  (assert-true (search "struct.get $cons_t 0"
+                       (gethash 'vm-car cl-cc/emit::*wasm-struct-get-table*)))
+  (assert-true (search "struct.get $cons_t 1"
+                       (gethash 'vm-cdr cl-cc/emit::*wasm-struct-get-table*))))
+
+;;; ─── %wasm-const-value-to-wat ─────────────────────────────────────────────
+
+(deftest-each wasm-const-value-to-wat-cases
+  "%wasm-const-value-to-wat maps CL constant values to WASM WAT strings."
+  :cases (("integer-42"  42    "(ref.i31")
+          ("nil"         nil   "(ref.null eq)")
+          ("true"        t     "(ref.i31 (i32.const 1))"))
+  (val expected-prefix)
+  (let ((result (cl-cc/emit::%wasm-const-value-to-wat val)))
+    (assert-true (stringp result))
+    (assert-true (or (string= result expected-prefix)
+                     (and (>= (length result) (length expected-prefix))
+                          (string= expected-prefix result :end2 (length expected-prefix)))))))
+
+(deftest wasm-const-value-to-wat-string-signals-error
+  "%wasm-const-value-to-wat signals error for unsupported string constants."
+  (assert-signals error (cl-cc/emit::%wasm-const-value-to-wat "unsupported")))
+
+;;; ─── %wasm-if-eqref ────────────────────────────────────────────────────────
+
+(deftest-each wasm-if-eqref-structure
+  "%wasm-if-eqref produces (if (result eqref) ...) WAT strings."
+  :cases (("basic" "(i64.ge_s x (i64.const 0))" "then-wat" "else-wat"))
+  (cond-wat then-wat else-wat)
+  (let ((result (cl-cc/emit::%wasm-if-eqref cond-wat then-wat else-wat)))
+    (assert-true (search "(if (result eqref)" result))
+    (assert-true (search cond-wat result))
+    (assert-true (search "(then" result))
+    (assert-true (search "(else" result))))

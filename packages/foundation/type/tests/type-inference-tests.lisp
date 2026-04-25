@@ -89,6 +89,55 @@
       (declare (ignore subst))
       (assert-type-equal ty expected-type))))
 
+;;; ─── syntactic-value-p (value restriction) ──────────────────────────────────
+
+(deftest-each infer-syntactic-value-p-truthy
+  "Syntactic values: int, var, lambda, quote, function-ref, typed-hole are generalizable."
+  :cases (("int"       (cl-cc/ast::make-ast-int      :value 42))
+          ("var"       (cl-cc/ast::make-ast-var       :name 'x))
+          ("lambda"    (cl-cc/ast::make-ast-lambda    :params '(x) :body nil))
+          ("quote"     (cl-cc/ast::make-ast-quote     :value 'foo))
+          ("function"  (cl-cc/ast::make-ast-function  :name 'f))
+          ("hole"      (cl-cc/ast::make-ast-hole)))
+  (ast)
+  (assert-true (cl-cc/type::syntactic-value-p ast)))
+
+(deftest-each infer-syntactic-value-p-falsy
+  "Non-syntactic values: call, binop, if, let, progn are not generalizable (value restriction)."
+  :cases (("call"   (cl-cc/ast::make-ast-call   :func 'f :args nil))
+          ("binop"  (cl-cc/ast::make-ast-binop  :op '+ :lhs (cl-cc/ast::make-ast-int :value 1)
+                                                        :rhs (cl-cc/ast::make-ast-int :value 2)))
+          ("if"     (cl-cc/ast::make-ast-if     :cond (cl-cc/ast::make-ast-var :name 'c)
+                                                 :then (cl-cc/ast::make-ast-int :value 1)
+                                                 :else (cl-cc/ast::make-ast-int :value 2)))
+          ("let"    (cl-cc/ast::make-ast-let    :bindings nil :body nil))
+          ("progn"  (cl-cc/ast::make-ast-progn  :forms nil)))
+  (ast)
+  (assert-false (cl-cc/type::syntactic-value-p ast)))
+
+;;; ─── infer-if type narrowing ──────────────────────────────────────────────────
+
+(deftest infer-if-narrows-type-in-then-branch
+  "infer-if narrows the guard variable's type to the predicate type in the then branch."
+  (reset-type-vars!)
+  (let* ((ast (lower-sexp-to-ast '(if (numberp x) (+ x 1) 0)))
+         (env (type-env-extend 'x
+               (make-type-scheme nil
+                 (make-type-union (list type-int type-string)))
+               (type-env-empty))))
+    (multiple-value-bind (ty subst) (infer ast env)
+      (declare (ignore subst))
+      (assert-true ty))))
+
+(deftest infer-if-no-narrowing-without-predicate
+  "infer-if with a plain boolean condition (no predicate call) leaves types unchanged."
+  (reset-type-vars!)
+  (let* ((ast (lower-sexp-to-ast '(if flag 1 2)))
+         (env (type-env-extend 'flag (type-to-scheme type-bool) (type-env-empty))))
+    (multiple-value-bind (ty subst) (infer ast env)
+      (declare (ignore subst))
+      (assert-type-equal ty type-int))))
+
 ;;; Generalization / Instantiation Tests
 
 (deftest-each generalize-and-scheme-ops

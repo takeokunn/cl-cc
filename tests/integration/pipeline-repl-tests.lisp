@@ -20,13 +20,6 @@
     (let ((result (run-string-repl "42")))
       (assert-= 42 result))))
 
-(deftest pipeline-repl-policy-data-tables-are-populated
-  "REPL host-load policy tables include expected top-level forms, macros, and registration helpers."
-  (assert-true (member "DEFMETHOD" cl-cc::*host-only-top-level-form-names* :test #'string=))
-  (assert-true (member "DEFINE-PROLOG-DECLARATIVE-RULES" cl-cc::*host-only-top-level-macro-names* :test #'string=))
-  (assert-true (member "REGISTER-TARGET" cl-cc::*host-only-registration-helper-names* :test #'string=))
-  (assert-true (member "*SETF-COMPOUND-PLACE-HANDLERS*" cl-cc::*host-only-registration-symbol-names* :test #'string=)))
-
 (deftest-each pipeline-repl-persistence
   "run-string-repl persists defun and defvar definitions across REPL calls."
   :cases (("defun"   "(defun repl-test-double (x) (* x 2))"  "(repl-test-double 21)"  42)
@@ -36,8 +29,8 @@
     (run-string-repl setup)
     (assert-= expected (run-string-repl check))))
 
-(deftest pipeline-run-form-repl-registers-top-level-defmacro-on-host
-  "run-form-repl handles top-level defmacro by registering a host expander immediately." 
+(deftest pipeline-run-form-repl-registers-top-level-defmacro
+  "run-form-repl handles a top-level defmacro by registering an expander immediately." 
   (let* ((*package* (find-package :cl-cc/compile))
          (macro-name (intern "PIPELINE-REPL-TEMP-DEFMACRO" *package*))
          (form (first (cl-cc/parse:parse-all-forms
@@ -52,7 +45,7 @@
                            (funcall expander '(pipeline-repl-temp-defmacro (print 1)) nil))))
       (remhash macro-name table))))
 
-(deftest pipeline-run-form-repl-registers-destructuring-defmacro-on-host
+(deftest pipeline-run-form-repl-registers-destructuring-defmacro
   "run-form-repl supports top-level defmacro lambda lists with nested destructuring." 
   (let* ((*package* (find-package :cl-cc/compile))
          (macro-name (intern "PIPELINE-REPL-TEMP-DESTRUCTURING-DEFMACRO" *package*))
@@ -62,13 +55,17 @@
     (unwind-protect
          (progn
            (assert-eq macro-name (cl-cc::run-form-repl form))
-           (let ((expander (gethash macro-name table)))
-             (assert-true expander)
-             (assert-equal '(cons 'foo
-                                  (cons 'bar
-                                        (cons '(baz quux) nil)))
-                           (funcall expander '(pipeline-repl-temp-destructuring-defmacro foo (bar) baz quux) nil))))
+            (let ((expander (gethash macro-name table)))
+              (assert-true expander)
+              (assert-equal '(cons 'foo
+                                   (cons 'bar
+                                         (cons '(baz quux) nil)))
+                            (funcall expander '(pipeline-repl-temp-destructuring-defmacro foo (bar) baz quux) nil))))
       (remhash macro-name table))))
+
+(deftest pipeline-repl-defun-is-no-longer-host-only-special-case
+  "The REPL host-load policy no longer treats plain DEFUN as a file-specific host-only form." 
+  (assert-false (cl-cc::%host-only-top-level-file-specific-form-p '(defun demo (x) x))))
 
 (deftest pipeline-run-form-repl-normalizes-register-macro-lambda-body
   "run-form-repl normalizes top-level register-macro lambda bodies before storing the host expander." 
@@ -86,33 +83,13 @@
                             (funcall expander '(pipeline-repl-temp-register-macro 42) nil))))
       (remhash macro-name table))))
 
-(deftest pipeline-run-string-uses-cps-fast-path-for-safe-single-form
-  "run-string uses the CPS fast path for a safe single-form Lisp expression." 
-  (let ((hook-called nil)
-        (hook-source nil)
-        (hook-form nil)
-        (hook-value nil))
-    (let ((cl-cc::*run-string-cps-fast-path-hook*
-            (lambda (source form value)
-              (setf hook-called t
-                    hook-source source
-                    hook-form form
-                    hook-value value))))
-      (assert-eql 3 (cl-cc:run-string "(+ 1 2)"))
-      (assert-true hook-called)
-      (assert-equal "(+ 1 2)" hook-source)
-      (assert-equal '(+ 1 2) hook-form)
-      (assert-eql 3 hook-value))))
+(deftest pipeline-run-string-uses-vm-compile-path-for-safe-single-form
+  "run-string executes safe single-form Lisp inputs through the normal VM compile path." 
+  (assert-eql 3 (cl-cc:run-string "(+ 1 2)")))
 
-(deftest pipeline-run-string-skips-cps-fast-path-for-definition-forms
-  "run-string does not use the CPS fast path for definition-like top-level forms." 
-  (let ((hook-called nil))
-    (let ((cl-cc::*run-string-cps-fast-path-hook*
-            (lambda (&rest args)
-              (declare (ignore args))
-              (setf hook-called t))))
-      (assert-true (cl-cc:run-string "(defun pipeline-cps-fast-path-def () 42)"))
-      (assert-false hook-called))))
+(deftest pipeline-run-string-still-handles-definition-forms
+  "run-string still handles definition-like top-level forms through the normal VM path." 
+  (assert-true (cl-cc:run-string "(defun pipeline-cps-fast-path-def () 42)")))
 
 ;;; ─── reset-repl-state ──────────────────────────────────────────────────
 

@@ -8,7 +8,6 @@
 (defun %effective-test-timeout (test-plist)
   (let ((tm (getf test-plist :timeout)))
     (cond
-      ((eq tm :none) nil)        ; no timeout
       ((and (integerp tm) (plusp tm)) tm)
       (t (%default-test-timeout)))))
 
@@ -72,9 +71,10 @@ sequentially in dependency-safe input order."
 (defun %parse-command-cpu-count (cmd)
   "Run CMD via uiop:run-program and parse the output as a positive integer, or NIL."
   (ignore-errors
-    (let ((n (parse-integer (with-output-to-string (s)
-                              (uiop:run-program cmd :output s :ignore-error-status t))
-                            :junk-allowed t)))
+    (let ((n (sb-ext:with-timeout *cpu-detect-command-timeout-seconds*
+               (parse-integer (with-output-to-string (s)
+                                (uiop:run-program cmd :output s :ignore-error-status t))
+                              :junk-allowed t))))
       (and n (plusp n) n))))
 
 ;;; CPU detection sources tried left-to-right; first positive integer wins.
@@ -123,8 +123,10 @@ CL_CC_TEST_WORKERS)."
                                (exclude-tags nil)
                                (exclude-suites nil)
                                (coverage nil)
-                               (warm-stdlib t))
-  "Run all tests in suite-name (and children). Exits via uiop:quit."
+                               (warm-stdlib t)
+                               (quit-p t))
+  "Run all tests in suite-name (and children).
+When QUIT-P is true, exits via uiop:quit; otherwise returns whether any test failed."
   (when coverage
     (unless *coverage-reload-in-progress*
       (let ((*coverage-reload-in-progress* t))
@@ -171,7 +173,9 @@ CL_CC_TEST_WORKERS)."
                (any-fail     (%print-result-summary flat-results)))
           (when coverage (%print-coverage-report flat-results))
           (%emit-postrun-artifacts flat-results)
-          (uiop:quit (if any-fail 1 0))))))))
+          (if quit-p
+              (uiop:quit (if any-fail 1 0))
+              any-fail)))))))
 
 (defun run-tests (&key
                     (tags nil)
@@ -199,3 +203,5 @@ automation workflow is always `nix run .#test`."
       (error "Suite ~A::~A not found (package not loaded?)"
              package-name symbol-name))
     sym))
+(defparameter *cpu-detect-command-timeout-seconds* 2
+  "Timeout in seconds for external CPU-count detection commands.")

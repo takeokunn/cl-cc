@@ -92,7 +92,7 @@ These recurse into subforms but their head is not macro-expanded.")
     sqrt exp log sin cos tan asin acos atan sinh cosh tanh asinh acosh atanh float float-sign
     list-length
     rational rationalize numerator denominator realpart imagpart conjugate phase
-    boundp fboundp makunbound fmakunbound
+    boundp fboundp makunbound
     array-rank array-total-size array-dimensions
     fill-pointer array-has-fill-pointer-p array-adjustable-p vector-pop
     bit-not array-displacement char-int

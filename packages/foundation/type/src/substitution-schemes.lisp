@@ -1,4 +1,4 @@
-;;;; substitution-schemes.lisp — Backward-compat, occurs-check, generalize/instantiate
+;;;; substitution-schemes.lisp — occurs-check, generalize/instantiate utilities
 ;;;
 ;;; Extracted from substitution.lisp.
 ;;; Contains: occurs check (type-occurs-p), generalize/instantiate operations,

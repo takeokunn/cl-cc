@@ -34,12 +34,27 @@
 (deftest vm-register-host-bridge-behavior
   "vm-register-host-bridge registers a symbol; registering twice is idempotent."
   (let ((sym (gensym "BRIDGE-TEST-")))
-    (cl-cc/vm::vm-register-host-bridge sym)
+    (cl-cc/vm::vm-register-host-bridge sym (lambda () :ok))
     (assert-true (gethash sym cl-cc/vm::*vm-host-bridge-functions*)))
   (let ((sym (gensym "BRIDGE-IDEM-")))
-    (cl-cc/vm::vm-register-host-bridge sym)
-    (cl-cc/vm::vm-register-host-bridge sym)
+    (cl-cc/vm::vm-register-host-bridge sym (lambda () :ok))
+    (cl-cc/vm::vm-register-host-bridge sym (lambda () :ok))
     (assert-true (gethash sym cl-cc/vm::*vm-host-bridge-functions*))))
+
+(deftest vm-register-runtime-callable-and-lookup
+  "vm-register-runtime-callable stores and resolves callables by runtime helper name." 
+  (let ((name "RT-UNIT-TEST-CALLABLE"))
+    (unwind-protect
+         (progn
+           (cl-cc/vm::vm-register-runtime-callable name (lambda () :ok))
+           (assert-true (functionp (gethash name cl-cc/vm::*vm-runtime-callables*)))
+           (assert-eq :ok (funcall (cl-cc/vm::%vm-runtime-callable name))))
+      (remhash name cl-cc/vm::*vm-runtime-callables*))))
+
+(deftest vm-bridge-does-not-keep-stale-pathname-entries
+  "Bridge entries without runtime implementations are pruned instead of lingering as dead surface." 
+  (dolist (sym '(ensure-directories-exist pathname-host pathname-device pathname-directory pathname-name pathname-type))
+    (assert-false (gethash sym cl-cc/vm::*vm-host-bridge-functions*))))
 
 ;;; ─── slot-definition-name ────────────────────────────────────────────────
 

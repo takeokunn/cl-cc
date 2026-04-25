@@ -1,9 +1,8 @@
 ;;;; cl-cc-testing-framework.asd
 ;;;; Extracted from tests/framework/ as part of the packages/ reorganization.
-;;;; System name :cl-cc/tests-framework matches existing references
-;;;; (e.g. packages/engine/vm/cl-cc-vm.asd test-op :depends-on).
+;;;; Canonical ASDF system for the CL-CC testing framework.
 
-(asdf:defsystem :cl-cc/tests-framework
+(asdf:defsystem :cl-cc-testing-framework
   :description "CL-CC testing framework — deftest, deftest-each, assert-*, fuzz, runner"
   :author "CL-CC"
   :license "MIT"

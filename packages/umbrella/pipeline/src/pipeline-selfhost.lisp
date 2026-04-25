@@ -3,7 +3,7 @@
 ;;; Pipeline — Self-Hosting, CPS Fast Path, and Bootstrap
 ;;;
 ;;; Contains: %build-stdlib-vm-snapshot, warm-stdlib-cache, our-eval,
-;;; %try-cps-host-eval, %register-host-bridge-entries, VM hook wiring,
+;;; %register-host-bridge-entries, VM hook wiring,
 ;;; and run-string-typed.
 ;;;
 ;;; Core compilation API (compile-expression, run-string, etc.)
@@ -33,30 +33,6 @@
 
 (defvar *repl-vm-state*)
 
-(defun %cps-host-eval-safe-ast-p (ast)
-  "Return T when AST is safe to evaluate through the host CPS fast path."
-  (notany (lambda (type) (typep ast type)) *cps-host-eval-unsafe-ast-types*))
-
-(defun %try-cps-host-eval (form)
-  "Best-effort CPS-backed host evaluation for ordinary expressions.
-Returns two values: the result and whether the CPS path succeeded."
-  (handler-case
-      (let* ((expanded-form (if (typep form 'cl-cc/ast:ast-node)
-                                form
-                                (compiler-macroexpand-all form)))
-             (ast (if (typep expanded-form 'cl-cc/ast:ast-node)
-                      expanded-form
-                      (lower-sexp-to-ast expanded-form))))
-        (if (%cps-host-eval-safe-ast-p ast)
-            (let ((cps (maybe-cps-transform ast)))
-              (if cps
-                  (values (funcall (eval cps) #'identity) t)
-                  (values nil nil)))
-            (values nil nil)))
-    (error (_)
-      (declare (ignore _))
-      (values nil nil))))
-
 (defun our-eval (form)
   "Evaluate FORM by compiling it and running it in the VM.
 This is the self-hosting eval — used for compile-time macro expansion
@@ -64,12 +40,9 @@ instead of the host CL eval.
 When *repl-vm-state* is available, reuses it so the compiled code has
 access to all previously registered functions (essential for macro
 expansion during self-host loading)."
-  (multiple-value-bind (cps-value cps-ok) (%try-cps-host-eval form)
-    (if cps-ok
-        cps-value
-        (let* ((result (compile-expression form :target :vm))
-               (program (compilation-result-program result)))
-          (run-compiled program :state cl-cc::*repl-vm-state*)))))
+  (let* ((result (compile-expression form :target :vm))
+         (program (compilation-result-program result)))
+    (run-compiled program :state cl-cc::*repl-vm-state*)))
 
 ;;; ─── Self-Hosting Bootstrap ──────────────────────────────────────────────
 ;;;
@@ -79,24 +52,28 @@ expansion during self-host loading)."
 ;;; the fundamental requirement for self-hosting.
 
 (defun %register-host-bridge-entries (entries)
-  "Register every (NAME . PACKAGE) pair in ENTRIES when both package and symbol exist."
+  "Register every (SYMBOL . FUNCTION) pair in ENTRIES directly into the VM bridge."
   (dolist (entry entries)
-    (let* ((pkg (find-package (cdr entry)))
-           (sym (when pkg (find-symbol (car entry) pkg))))
-      (when sym
-        (vm-register-host-bridge sym)))))
+    (vm-register-host-bridge (car entry) (cdr entry))))
 
 (eval-when (:load-toplevel :execute)
-  (%register-host-bridge-entries *early-selfhost-macro-bridge-entries*))
+  (%register-host-bridge-entries
+   `((cl-cc/expand::parse-lambda-list . ,#'cl-cc/expand::parse-lambda-list)
+     (cl-cc/expand::destructure-lambda-list . ,#'cl-cc/expand::destructure-lambda-list)
+     (cl-cc/expand::generate-lambda-bindings . ,#'cl-cc/expand::generate-lambda-bindings)
+     (cl-cc/expand::lambda-list-info-environment . ,#'cl-cc/expand::lambda-list-info-environment))))
 
 (setf *macro-eval-fn* #'our-eval)
 
 ;;; Wire compile functions into VM hooks for runtime EVAL/compile support
+(defun %vm-install-eval-hooks-if-available ()
+  (let* ((pkg (cl-cc/runtime:rt-find-package :cl-cc/vm))
+         (sym (and pkg (find-symbol "VM-INSTALL-EVAL-HOOKS" pkg))))
+    (when (and sym (fboundp sym))
+      (funcall (symbol-function sym) #'our-eval #'compile-string))))
+
 (eval-when (:load-toplevel :execute)
-  (when (find-package :cl-cc/vm)
-    (let ((pkg (find-package :cl-cc/vm)))
-      (setf (symbol-value (find-symbol "*VM-EVAL-HOOK*" pkg)) #'our-eval)
-      (setf (symbol-value (find-symbol "*VM-COMPILE-STRING-HOOK*" pkg)) #'compile-string))))
+  (%vm-install-eval-hooks-if-available))
 
 ;;; REPL persistent state and run-string-repl/our-load are split across
 ;;; pipeline-repl-state.lisp and pipeline-repl-load.lisp.
@@ -111,21 +88,15 @@ expansion during self-host loading)."
   ;; NOTE: register-macro is intentionally excluded — it stores VM closures in
   ;; macro-env, causing TYPE-ERROR when host CL funcalls them. See vm-bridge.lisp.
   (%register-host-bridge-entries
-   '(("RUN-STRING"                   . :cl-cc)
-     ("COMPILE-EXPRESSION"           . :cl-cc)
-     ("COMPILE-STRING"               . :cl-cc)
-     ("OUR-EVAL"                     . :cl-cc)
-     ("PARSE-ALL-FORMS"              . :cl-cc)
-     ;; Register both umbrella-exported and package-local symbols.
-     ;; Selfhosted expand files intern unqualified helper calls in :cl-cc/expand,
-     ;; while bridge regression tests assert the public :cl-cc exports stay wired.
-     ("PARSE-LAMBDA-LIST"            . :cl-cc)
-     ("PARSE-LAMBDA-LIST"            . :cl-cc/expand)
-     ("DESTRUCTURE-LAMBDA-LIST"      . :cl-cc)
-     ("DESTRUCTURE-LAMBDA-LIST"      . :cl-cc/expand)
-     ("GENERATE-LAMBDA-BINDINGS"     . :cl-cc)
-     ("GENERATE-LAMBDA-BINDINGS"     . :cl-cc/expand)
-     ("LAMBDA-LIST-INFO-ENVIRONMENT" . :cl-cc/expand))))
+   `((cl-cc::run-string . ,#'cl-cc::run-string)
+     (cl-cc::compile-expression . ,#'cl-cc::compile-expression)
+     (cl-cc::compile-string . ,#'cl-cc::compile-string)
+     (cl-cc::our-eval . ,#'cl-cc::our-eval)
+     (cl-cc::parse-all-forms . ,#'cl-cc::parse-all-forms)
+     (cl-cc/expand::parse-lambda-list . ,#'cl-cc/expand::parse-lambda-list)
+     (cl-cc/expand::destructure-lambda-list . ,#'cl-cc/expand::destructure-lambda-list)
+     (cl-cc/expand::generate-lambda-bindings . ,#'cl-cc/expand::generate-lambda-bindings)
+     (cl-cc/expand::lambda-list-info-environment . ,#'cl-cc/expand::lambda-list-info-environment))))
 
 (defun run-string-typed (source &key (mode :warn) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile and run SOURCE with type checking enabled.

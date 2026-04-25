@@ -112,10 +112,44 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
 ;;; ─── *opt-convergence-passes* / *opt-pass-registry* data coverage ────────
 
 (deftest opt-pass-data-integrity
-  "*opt-convergence-passes* is a non-empty function list; registry has :fold/:dce/:cse."
+  "*opt-convergence-passes* is a non-empty function list; registry includes early Prolog/egraph passes and core cleanup passes."
   (assert-true (listp cl-cc/optimize::*opt-convergence-passes*))
   (assert-true (> (length cl-cc/optimize::*opt-convergence-passes*) 10))
   (assert-true (every #'functionp cl-cc/optimize::*opt-convergence-passes*))
+  (assert-true (gethash :prolog-rewrite cl-cc/optimize::*opt-pass-registry*))
+  (assert-true (gethash :egraph cl-cc/optimize::*opt-pass-registry*))
   (assert-true (gethash :fold cl-cc/optimize::*opt-pass-registry*))
   (assert-true (gethash :dce  cl-cc/optimize::*opt-pass-registry*))
-  (assert-true (gethash :cse  cl-cc/optimize::*opt-pass-registry*)))
+  (assert-true (gethash :cse  cl-cc/optimize::*opt-pass-registry*))
+  (assert-eq #'cl-cc/optimize::%maybe-apply-prolog-rewrite (first cl-cc/optimize::*opt-convergence-passes*))
+  (assert-false (member #'cl-cc/optimize::opt-pass-egraph cl-cc/optimize::*opt-convergence-passes*))
+  (assert-false (member #'cl-cc/optimize::opt-pass-fold cl-cc/optimize::*opt-convergence-passes*))
+  (assert-false (member #'cl-cc/optimize::opt-pass-strength-reduce cl-cc/optimize::*opt-convergence-passes*))
+  (assert-equal '(:prolog-rewrite :inline :sccp)
+                (subseq cl-cc/optimize::*opt-default-convergence-pass-keys* 0 3)))
+
+;;; ─── Prolog rewrite stage ──────────────────────────────────────────────────
+
+(deftest prolog-rewrite-stage-disabled-is-identity
+  "%maybe-apply-prolog-rewrite returns the input unchanged when the Prolog hook is disabled."
+  (let ((cl-cc/optimize::*enable-prolog-peephole* nil)
+        (insts (list (make-vm-const :dst :r0 :value 1)
+                     (make-vm-ret :reg :r0))))
+    (assert-eq insts (cl-cc/optimize::%maybe-apply-prolog-rewrite insts))))
+
+(deftest prolog-rewrite-stage-invokes-prolog-backends
+  "%maybe-apply-prolog-rewrite calls apply-prolog-peephole when enabled."
+  (let ((cl-cc/optimize::*enable-prolog-peephole* t)
+        (peephole-called nil)
+        (insts (list (make-vm-const :dst :r0 :value 1)
+                     (make-vm-ret :reg :r0))))
+    (with-replaced-function (cl-cc/prolog:apply-prolog-peephole
+                             (lambda (sexps)
+                               (setf peephole-called sexps)
+                               sexps))
+      (let ((result (cl-cc/optimize::%maybe-apply-prolog-rewrite insts)))
+        (assert-true peephole-called)
+        (assert-= 2 (length peephole-called))
+        (assert-= 2 (length result))
+        (assert-equal (mapcar #'cl-cc/optimize::instruction->sexp insts)
+                      (mapcar #'cl-cc/optimize::instruction->sexp result))))))

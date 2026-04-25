@@ -71,8 +71,8 @@
   "is-subtype-p: reflexive, chain, unknown<:anything, anything<:unknown, non-subtype."
   (assert-true  (cl-cc/type::is-subtype-p type-int     type-int))
   (assert-true  (cl-cc/type::is-subtype-p type-int     type-any))
-  (assert-true  (cl-cc/type::is-subtype-p +type-unknown+ type-int))
-  (assert-true  (cl-cc/type::is-subtype-p type-string +type-unknown+))
+  (assert-true  (cl-cc/type::is-subtype-p cl-cc/type::+type-unknown+ type-int))
+  (assert-true  (cl-cc/type::is-subtype-p type-string cl-cc/type::+type-unknown+))
   (assert-false (cl-cc/type::is-subtype-p type-string type-int)))
 
 (deftest is-subtype-p-basic-wrapper
@@ -186,7 +186,7 @@
     (let ((result (cl-cc/type::type-join fixnum-t float-t)))
       (assert-true (type-primitive-p result))
       (assert-eq 'real (type-primitive-name result)))
-    (assert-true (type-equal-p type-string (cl-cc/type::type-join +type-unknown+ type-string)))
+    (assert-true (type-equal-p type-string (cl-cc/type::type-join cl-cc/type::+type-unknown+ type-string)))
     (assert-true (cl-cc/type::type-join type-int type-string))))
 
 ;;; ─── type-meet (GLB) ────────────────────────────────────────────────────────
@@ -196,5 +196,5 @@
   (let ((fixnum-t (prim 'fixnum))
         (int-t    (prim 'integer)))
     (assert-true (type-equal-p fixnum-t (cl-cc/type::type-meet fixnum-t int-t)))
-    (assert-true (type-unknown-p (cl-cc/type::type-meet +type-unknown+ type-string)))
+    (assert-true (cl-cc/type::type-unknown-p (cl-cc/type::type-meet cl-cc/type::+type-unknown+ type-string)))
     (assert-true (type-intersection-p (cl-cc/type::type-meet type-int type-string)))))

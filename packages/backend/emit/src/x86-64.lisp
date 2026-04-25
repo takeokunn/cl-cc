@@ -37,9 +37,9 @@
     (when extra-args
       (format stream "  add rsp, ~D~%" (* 8 (length extra-args))))))
 
-;; Fallback: skip unsupported instructions silently (demo backends are partial).
 (defmethod emit-instruction (target (inst vm-instruction) stream)
-  (declare (ignore target stream)))
+  (declare (ignore target stream))
+  (error "Unsupported x86-64 instruction: ~A" (type-of inst)))
 
 (defparameter *phys-reg-to-asm-string*
   '((:rax . "rax") (:rcx . "rcx") (:rdx . "rdx") (:rbx . "rbx")
@@ -48,10 +48,14 @@
     (:r14 . "r14") (:r15 . "r15"))
   "Mapping from physical register keywords to assembly strings.")
 
+(defparameter *fallback-register-pool*
+  '((:r0 . "rax") (:r1 . "rbx") (:r2 . "rcx") (:r3 . "rdx")
+    (:r4 . "r8")  (:r5 . "r9")  (:r6 . "r10") (:r7 . "r11"))
+  "Naive virtual→physical mapping used when no register allocator is present (R0..R7 only).")
+
 (defmethod target-register ((target x86-64-target) virtual-register)
   (let ((ra (target-regalloc target)))
     (if ra
-        ;; Use register allocation result
         (let ((phys (gethash virtual-register (regalloc-assignment ra))))
           (unless phys
             (error "Virtual register ~A not allocated (possibly spilled)" virtual-register))
@@ -59,14 +63,10 @@
             (unless entry
               (error "Unknown physical register: ~A" phys))
             (cdr entry)))
-        ;; Fallback: naive mapping for backward compatibility
-        (let* ((index (or (parse-integer (subseq (symbol-name virtual-register) 1)
-                                         :junk-allowed t)
-                          0))
-               (pool '("rax" "rbx" "rcx" "rdx" "r8" "r9" "r10" "r11")))
-          (when (>= index (length pool))
-            (error "Register spilling is not implemented yet (needed: ~A)" virtual-register))
-          (nth index pool)))))
+        (let ((entry (assoc virtual-register *fallback-register-pool*)))
+          (unless entry
+            (error "x86-64 emission requires register allocation before target-register (~A)" virtual-register))
+          (cdr entry)))))
 
 (defmethod emit-instruction ((target x86-64-target) (inst vm-const) stream)
   (format stream "  mov ~A, ~A~%"

@@ -30,7 +30,29 @@
       perSystem =
         { pkgs, self', ... }:
         let
-          inherit (pkgs) sbcl lib;
+          # Patch SBCL on Darwin to use Mach semaphores instead of dispatch_semaphore.
+          # macOS 26.4.1 has a libdispatch regression where dispatch_semaphore_signal
+          # fails to wake dispatch_semaphore_wait on ARM64, causing GC deadlocks.
+          # Mach semaphore_t goes directly to the XNU kernel and is not affected.
+          #
+          # pkgs.sbcl is a wrapLisp result: pkg // { withPackages; withOverrides; ... }
+          # overrideAttrs on it yields only the patched pkg (drops withPackages).
+          # We re-wrap using pkgs.wrapLisp to restore withPackages/buildASDFSystem.
+          sbcl =
+            if pkgs.stdenv.isDarwin then
+              pkgs.wrapLisp {
+                pkg = pkgs.sbcl.overrideAttrs (old: {
+                  patches = (old.patches or [ ]) ++ [ ./patches/sbcl-mach-semaphore.patch ];
+                });
+                faslExt = "fasl";
+                flags = [
+                  "--dynamic-space-size"
+                  "3000"
+                ];
+              }
+            else
+              pkgs.sbcl;
+          inherit (pkgs) lib;
 
           # ── Common Lisp packages ─────────────────────────────────────────
           # Each ASDF system is its own derivation so FASL caches are
@@ -167,7 +189,6 @@
             ${lib.getExe pkgs.perl} -e '
               use strict;
               use warnings;
-              use File::Path qw(remove_tree);
               use File::Find;
               my $pwd = $ENV{"PWD"} // "";
               exit 0 unless length $pwd;
@@ -176,14 +197,17 @@
               my $root = $home . "/.cache/common-lisp";
               exit 0 unless -d $root;
               my $needle = $pwd . "/";
-              my @targets;
+              my @tmp_fasls;
               find(sub {
-                return unless -d $_;
+                return unless -f $_;
                 my $p = $File::Find::name;
-                push @targets, $p if index($p, $needle) >= 0;
+                push @tmp_fasls, $p
+                  if /\-tmp[A-Z0-9]+\.fasl$/ && index($p, $needle) >= 0;
               }, $root);
-              eval { remove_tree(@targets) if @targets; 1 } or warn $@;
+              unlink @tmp_fasls if @tmp_fasls;
             ' || true
+            # Also clean temp fasls from the source tree (disable-output-translations target)
+            find . -name "*-tmp[A-Z0-9]*.fasl" -delete 2>/dev/null || true
           '';
 
           pbtSanitize = ''
@@ -232,7 +256,7 @@
                   --disable-debugger \
                   --eval '(require :asdf)' \
                   --load cl-cc.asd \
-                  --eval '(asdf:load-system :cl-cc/bin)' \
+                  --eval '(asdf:load-system :cl-cc-cli)' \
                   --load packages/cli/scripts/build-cli.lisp
                 runHook postBuild
               '';
@@ -262,9 +286,8 @@
               ${faslCacheCleaner}
               exec ${sbclCmd} \
                 --load cl-cc-test.asd \
-                --eval '(asdf:disable-output-translations)' \
-                --eval '(format t "# loading :cl-cc/test~%")' \
-                --eval '(handler-case (asdf:load-system :cl-cc/test) (error (e) (format *error-output* "~&FATAL: ~A~%" e) (uiop:quit 1)))' \
+                --eval '(format t "# loading :cl-cc-test~%")' \
+                --eval '(handler-case (asdf:load-system :cl-cc-test) (error (e) (format *error-output* "~&FATAL: ~A~%" e) (uiop:quit 1)))' \
                 --eval '(format t "# starting canonical test plan~%")' \
                 --eval '(uiop:symbol-call :cl-cc/test (quote run-tests))'
             '';
@@ -272,6 +295,7 @@
             coverage = mkApp "coverage" ''
               set -euo pipefail
               ${cwdGuard}
+              export CLCC_PBT_COUNT="''${CLCC_PBT_COUNT:-0}"
               rm -rf /tmp/cl-cc-coverage
               ${faslCacheCleaner}
               find . -maxdepth 6 -name "*.fasl" -delete
@@ -280,12 +304,34 @@
                 --eval '(require :asdf)' \
                 --eval '(require :sb-cover)' \
                 --eval '(declaim (optimize (sb-cover:store-coverage-data 3)))' \
-                --eval '(dolist (f (list "packages/foundation/bootstrap/cl-cc-bootstrap.asd" "packages/foundation/ast/cl-cc-ast.asd" "packages/foundation/prolog/cl-cc-prolog.asd" "packages/backend/binary/cl-cc-binary.asd" "packages/backend/runtime/cl-cc-runtime.asd" "packages/backend/bytecode/cl-cc-bytecode.asd" "packages/foundation/ir/cl-cc-ir.asd" "packages/foundation/mir/cl-cc-mir.asd" "packages/foundation/type/cl-cc-type.asd" "packages/engine/optimize/cl-cc-optimize.asd" "packages/backend/emit/cl-cc-emit.asd" "packages/frontend/parse/cl-cc-parse.asd" "packages/frontend/expand/cl-cc-expand.asd" "packages/engine/compile/cl-cc-compile.asd" "packages/engine/vm/cl-cc-vm.asd")) (asdf:load-asd (merge-pathnames f (uiop:getcwd))))' \
                 --load cl-cc.asd \
-                --load cl-cc-test.asd \
                 --eval '(asdf:disable-output-translations)' \
-                --eval '(asdf:load-system :cl-cc/test)' \
-                --eval '(cl-cc/test:run-suite (quote cl-cc/test::cl-cc-suite) :parallel nil :random nil :warm-stdlib t :coverage t)'
+                --eval '(asdf:load-system :cl-cc-test)' \
+                --eval '(let ((failed nil))
+                           (format t "# Coverage phase 1/4: unit~%") (finish-output)
+                           (setf failed (or (cl-cc/test:run-suite (quote cl-cc/test::cl-cc-unit-suite)
+                                                                  :parallel nil :random nil :warm-stdlib nil :coverage t :quit-p nil)
+                                            failed))
+                           (format t "# Coverage phase 1/4 complete~%") (finish-output)
+                           (format t "# Coverage phase 2/4: integration-serial~%") (finish-output)
+                           (setf failed (or (cl-cc/test:run-suite (quote cl-cc/test::cl-cc-integration-serial-suite)
+                                                                  :parallel nil :random nil :warm-stdlib nil :quit-p nil)
+                                            failed))
+                           (format t "# Coverage phase 2/4 complete~%") (finish-output)
+                           (format t "# Coverage phase 3/4: integration~%") (finish-output)
+                           (setf failed (or (cl-cc/test:run-suite (quote cl-cc/test::cl-cc-integration-suite)
+                                                                  :parallel nil :random nil :warm-stdlib nil
+                                                                  :exclude-suites (list (quote cl-cc-integration-serial-suite))
+                                                                  :quit-p nil)
+                                            failed))
+                           (format t "# Coverage phase 3/4 complete~%") (finish-output)
+                           (format t "# Coverage phase 4/4: e2e~%") (finish-output)
+                           (setf failed (or (cl-cc/test:run-suite (quote cl-cc/test::cl-cc-e2e-suite)
+                                                                  :parallel nil :random nil :warm-stdlib nil :quit-p nil)
+                                            failed))
+                           (format t "# Coverage phase 4/4 complete~%") (finish-output)
+                           (cl-cc/test::%print-coverage-report nil)
+                           (uiop:quit (if failed 1 0)))'
 
               perl -e '
                 use strict; use warnings;
@@ -303,8 +349,8 @@
                 die "no coverage rows parsed\n" unless $expr_n;
                 my $expr_avg = $expr_sum / $expr_n;
                 my $branch_avg = $branch_n ? ($branch_sum / $branch_n) : 0;
-                my $min_expr = $ENV{CL_CC_MIN_EXPR_COVERAGE} // 80;
-                my $min_branch = $ENV{CL_CC_MIN_BRANCH_COVERAGE} // 50;
+                my $min_expr = $ENV{CL_CC_MIN_EXPR_COVERAGE} // 100;
+                my $min_branch = $ENV{CL_CC_MIN_BRANCH_COVERAGE} // 100;
                 printf "# Coverage averages: expr=%.2f%% branch=%.2f%%\n", $expr_avg, $branch_avg;
                 die sprintf("expression coverage %.2f%% is below threshold %.2f%%\n", $expr_avg, $min_expr)
                   if $expr_avg < $min_expr;
@@ -356,8 +402,8 @@
                   --load "cl-cc.asd" \
                   --load "cl-cc-test.asd" \
                   --eval '(asdf:disable-output-translations)' \
-                  --eval '(asdf:load-system :cl-cc/test :force t)' \
-                  --eval '(asdf:load-system :cl-cc/test-clos :force t)' \
+                  --eval '(asdf:load-system :cl-cc-test :force t)' \
+                  --eval '(asdf:load-system :cl-cc-test/clos :force t)' \
                   --eval '(uiop:symbol-call :cl-cc/test (quote run-tests))'
               '';
               installPhase = "mkdir -p $out && touch $out/passed";

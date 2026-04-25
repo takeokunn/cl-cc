@@ -169,7 +169,7 @@ the base so Nix store hashes don't affect relative path computation."
     "packages/foundation/type/src/multiplicity.lisp"   ; prerequisites for types-core
     "packages/foundation/type/src/types-core.lisp"     ; base type structs
     "packages/foundation/type/src/types-extended.lisp" ; type-null/type-int/+pure-effect-row+ etc.
-    "packages/foundation/type/src/types-env.lisp"      ; +type-unknown+
+    "packages/foundation/type/src/types-env.lisp"      ; cl-cc/type::+type-unknown+
     "packages/foundation/type/src/parser.lisp"
     "packages/foundation/type/src/typeclass.lisp"
     "packages/foundation/type/src/solver.lisp"

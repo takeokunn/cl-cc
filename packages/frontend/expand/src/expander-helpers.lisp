@@ -111,6 +111,14 @@ or fall back to generic (setf (slot-value obj 'accessor-name) val)."
                            aux-bindings)))
     (values normal-params aux-bindings param-names bound-names aux-lets)))
 
+(defun %defstruct-resolve-slot-values (all-slots bound-names)
+  "Map ALL-SLOTS to effective constructor values: slot-name if bound, else default."
+  (mapcar (lambda (slot)
+             (if (member (first slot) bound-names :test #'string=)
+                 (first slot)
+                 (second slot)))
+           all-slots))
+
 (defun %defstruct-build-model (form)
   "Parse FORM into a plist consumed by defstruct emitters."
   (let* ((name-and-options (second form))

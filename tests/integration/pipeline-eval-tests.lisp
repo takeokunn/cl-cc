@@ -171,16 +171,24 @@
   (expected expr)
   (assert-equal expected (cl-cc::our-eval expr)))
 
-(deftest pipeline-our-eval-uses-cps-path-for-simple-expression
-  "our-eval evaluates simple expressions via the CPS host path without calling compile-expression."
+(deftest pipeline-our-eval-uses-vm-compile-path-for-simple-expression
+  "our-eval evaluates simple expressions via the VM compile path."
   (let ((orig (symbol-function 'cl-cc::compile-expression)))
     (unwind-protect
-         (progn
+         (let ((called nil))
            (setf (symbol-function 'cl-cc::compile-expression)
                  (lambda (&rest args)
                    (declare (ignore args))
-                   (error "compile-expression should not run for CPS-safe our-eval")))
-           (assert-= 3 (cl-cc::our-eval '(+ 1 2))))
+                   (setf called t)
+                   (make-compilation-result
+                    :program (make-vm-program :instructions (vector (make-vm-const :dst :r0 :value 3)
+                                                                     (make-vm-halt :reg :r0)))
+                    :assembly ""
+                    :cps '(identity 3)
+                    :vm-instructions nil
+                    :optimized-instructions nil)))
+           (assert-= 3 (cl-cc::our-eval '(+ 1 2)))
+           (assert-true called))
       (setf (symbol-function 'cl-cc::compile-expression) orig))))
 
 (deftest pipeline-our-eval-falls-back-to-vm-for-definitions

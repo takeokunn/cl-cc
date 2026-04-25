@@ -191,4 +191,4 @@
       (t (let ((emitter (gethash tp *x86-64-emitter-table*)))
            (if emitter
                (funcall emitter inst stream)
-               (warn "Skipping unsupported VM instruction: ~A" tp)))))))
+               (error "Unsupported x86-64 instruction: ~A" tp)))))))

@@ -104,7 +104,6 @@
 
    ;; ─── Error sentinel / unknown ────────────────────────────────────────
    #:type-error   #:type-error-p   #:make-type-error  #:type-error-message
-   #:type-unknown  #:type-unknown-p  #:make-type-unknown  #:+type-unknown+
 
    ;; ─── Type scheme ─────────────────────────────────────────────────────
    #:type-scheme   #:type-scheme-p
@@ -133,8 +132,9 @@
    ;; ─── Unification ─────────────────────────────────────────────────────
    #:type-unify  #:type-unify-lists
    #:type-inference-error  #:type-inference-error-message
-   #:type-mismatch-error
-   #:unbound-variable-error #:unbound-variable-name
+   #:type-mismatch-error  #:type-mismatch-error-expected  #:type-mismatch-error-actual
+   #:unbound-variable-error  #:unbound-variable-name  #:unbound-variable-error-name
+   #:check-qualified-constraints
 
    ;; ─── Effect system ───────────────────────────────────────────────────
    #:effect-def  #:effect-def-p  #:make-effect-def

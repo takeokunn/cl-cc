@@ -106,12 +106,22 @@ Returns a CPS-transformed S-expression."))
 (defmethod cps-transform-ast ((node ast-lambda) k)
   "Transform a lambda expression to CPS. The continuation becomes an extra parameter."
   (let* ((params (ast-lambda-params node))
+         (optional (ast-lambda-optional-params node))
+         (rest-param (ast-lambda-rest-param node))
+         (key-params (ast-lambda-key-params node))
+         (decls (ast-lambda-declarations node))
          (body   (ast-lambda-body node))
          (k-var  (gensym "K")))
-    (list 'funcall k
-          (cons 'lambda
-                (cons (append params (list k-var))
-                      (list (cps-transform-sequence body k-var)))))))
+    (if (or optional rest-param key-params)
+        (%cps-funcall k
+                      (append (list 'lambda
+                                    (%cps-extended-lambda-list params optional rest-param key-params))
+                              decls
+                              (mapcar #'ast-to-sexp body)))
+        (list 'funcall k
+              (cons 'lambda
+                    (cons (append params (list k-var))
+                          (list (cps-transform-sequence body k-var))))))))
 
 (defmethod cps-transform-ast ((node ast-function) k)
   "Transform #'var to CPS (function reference)."

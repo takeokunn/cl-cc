@@ -45,10 +45,31 @@
                  (ast-let-bindings node))
          (mapcar #'ast-to-sexp (ast-let-body node))))
 
+(defun %ast-param-slot-to-sexp (slot)
+  "Convert an optional/key param slot (name default-ast supplied-p) to lambda-list form."
+  (destructuring-bind (name default supplied-p) slot
+    (cond ((and default supplied-p) (list name (ast-to-sexp default) supplied-p))
+          (default                  (list name (ast-to-sexp default)))
+          (t                        name))))
+
+(defun %ast-callable-lambda-list (params optional-params rest-param key-params)
+  "Reconstruct a full lambda list from AST callable slot fields."
+  (append params
+          (when optional-params
+            (cons '&optional (mapcar #'%ast-param-slot-to-sexp optional-params)))
+          (when rest-param
+            (list '&rest rest-param))
+          (when key-params
+            (cons '&key (mapcar #'%ast-param-slot-to-sexp key-params)))))
+
 (defmethod ast-to-sexp ((node ast-lambda))
   (list* 'lambda
-         (ast-lambda-params node)
-         (mapcar #'ast-to-sexp (ast-lambda-body node))))
+         (%ast-callable-lambda-list (ast-lambda-params node)
+                                    (ast-lambda-optional-params node)
+                                    (ast-lambda-rest-param node)
+                                    (ast-lambda-key-params node))
+         (append (mapcar (lambda (d) (list 'declare d)) (ast-lambda-declarations node))
+                 (mapcar #'ast-to-sexp (ast-lambda-body node)))))
 
 (defmethod ast-to-sexp ((node ast-function))
   (list 'function (ast-function-name node)))
@@ -100,8 +121,12 @@
 (defmethod ast-to-sexp ((node ast-defun))
   (list* 'defun
          (ast-defun-name node)
-         (ast-defun-params node)
-         (mapcar #'ast-to-sexp (ast-defun-body node))))
+         (%ast-callable-lambda-list (ast-defun-params node)
+                                    (ast-defun-optional-params node)
+                                    (ast-defun-rest-param node)
+                                    (ast-defun-key-params node))
+         (append (ast-defun-declarations node)
+                 (mapcar #'ast-to-sexp (ast-defun-body node)))))
 
 (defmethod ast-to-sexp ((node ast-defvar))
   (if (ast-defvar-value node)

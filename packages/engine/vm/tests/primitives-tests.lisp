@@ -9,38 +9,46 @@
 (in-suite cl-cc-unit-suite)
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
-;;; Helpers: construct pred1/pred2 instructions from defstructs
+;;; Helpers: construct and execute unary/binary VM instructions
 ;;; ═══════════════════════════════════════════════════════════════════════════
 
-(defun %make-pred1 (ctor-fn src-val)
-  "Run a unary predicate instruction (pred1). Returns DST register value."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 src-val)
-    (exec1 (funcall ctor-fn :dst 0 :src 1) s)
-    (cl-cc:vm-reg-get s 0)))
+(defun %with-unary-vm-state (value thunk)
+  "Run THUNK with a fresh VM state whose unary source register is preloaded."
+  (let ((state (make-test-vm)))
+    (cl-cc:vm-reg-set state 1 value)
+    (funcall thunk state)))
 
-(defun %make-pred2 (ctor-fn lhs rhs)
-  "Run a binary predicate instruction (pred2). Returns DST register value."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 lhs)
-    (cl-cc:vm-reg-set s 2 rhs)
-    (exec1 (funcall ctor-fn :dst 0 :lhs 1 :rhs 2) s)
-    (cl-cc:vm-reg-get s 0)))
+(defun %with-binary-vm-state (lhs rhs thunk)
+  "Run THUNK with a fresh VM state whose binary operand registers are preloaded.
+This centralizes the repeated :R1/:R2 setup used by binary instruction tests."
+  (let ((state (make-test-vm)))
+    (cl-cc:vm-reg-set state 1 lhs)
+    (cl-cc:vm-reg-set state 2 rhs)
+    (funcall thunk state)))
 
-(defun %make-unary (ctor-fn src-val)
-  "Run a unary instruction. Returns DST register value."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 src-val)
-    (exec1 (funcall ctor-fn :dst 0 :src 1) s)
-    (cl-cc:vm-reg-get s 0)))
+(defun %run-unary-inst-with (instruction-thunk src-val)
+  "Run INSTRUCTION-THUNK against SRC-VAL and return the destination register.
+INSTRUCTION-THUNK receives the source register index and must build the VM instruction."
+  (%with-unary-vm-state
+   src-val
+   (lambda (state)
+     (exec1 (funcall instruction-thunk 1) state)
+     (cl-cc:vm-reg-get state 0))))
 
-(defun %make-binary (ctor-fn lhs rhs)
-  "Run a binary instruction. Returns DST register value."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 lhs)
-    (cl-cc:vm-reg-set s 2 rhs)
-    (exec1 (funcall ctor-fn :dst 0 :lhs 1 :rhs 2) s)
-    (cl-cc:vm-reg-get s 0)))
+(defun %run-unary-inst (ctor-fn src-val)
+  "Run a unary VM instruction constructor against SRC-VAL and return DST."
+  (%run-unary-inst-with
+   (lambda (src)
+     (funcall ctor-fn :dst 0 :src src))
+   src-val))
+
+(defun %run-binary-inst (ctor-fn lhs rhs)
+  "Run a binary VM instruction constructor against LHS/RHS and return DST."
+  (%with-binary-vm-state
+   lhs rhs
+   (lambda (state)
+     (exec1 (funcall ctor-fn :dst 0 :lhs 1 :rhs 2) state)
+     (cl-cc:vm-reg-get state 0))))
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
 ;;; Section 1: Type Predicates (pred1 pattern — return 1/0)
@@ -63,7 +71,7 @@
           ("oddp-true"       #'cl-cc::make-vm-oddp       3           1)
           ("oddp-false"      #'cl-cc::make-vm-oddp       4           0))
   (ctor src-val expected)
-  (assert-= expected (%make-pred1 ctor src-val)))
+  (assert-= expected (%run-unary-inst ctor src-val)))
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
 ;;; Section 2: EQL comparison (pred2 — return 1/0)
@@ -74,7 +82,7 @@
   :cases (("equal"     42 42 1)
           ("not-equal" 42 99 0))
   (lhs rhs expected)
-  (assert-= expected (%make-pred2 #'cl-cc::make-vm-eq lhs rhs)))
+  (assert-= expected (%run-binary-inst #'cl-cc::make-vm-eq lhs rhs)))
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
 ;;; Section 3: Numeric Comparisons (pred2 — return 1/0)
@@ -96,7 +104,7 @@
           ("num-eq-true"  #'cl-cc::make-vm-num-eq 7 7  1)
           ("num-eq-false" #'cl-cc::make-vm-num-eq 7 8  0))
   (ctor lhs rhs expected)
-  (assert-= expected (%make-pred2 ctor lhs rhs)))
+  (assert-= expected (%run-binary-inst ctor lhs rhs)))
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
 ;;; Section 4: Unary Arithmetic
@@ -115,7 +123,7 @@
           ("dec-pos"   #'cl-cc::make-vm-dec  5    4)
           ("dec-zero"  #'cl-cc::make-vm-dec  0    -1))
   (ctor src expected)
-  (assert-= expected (%make-unary ctor src)))
+  (assert-= expected (%run-unary-inst ctor src)))
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
 ;;; Section 5: Binary Arithmetic
@@ -134,7 +142,7 @@
           ("rem-10/3"  #'cl-cc::make-vm-rem  10 3  1)
           ("rem-neg"   #'cl-cc::make-vm-rem  -7 2  -1))
   (ctor lhs rhs expected)
-  (assert-= expected (%make-binary ctor lhs rhs)))
+  (assert-= expected (%run-binary-inst ctor lhs rhs)))
 
 ;;; Division by zero errors
 
@@ -143,11 +151,11 @@
   :cases (("div" #'cl-cc::make-vm-div)
           ("mod" #'cl-cc::make-vm-mod))
   (make-inst)
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 10)
-    (cl-cc:vm-reg-set s 2 0)
-    (assert-signals error
-      (exec1 (funcall make-inst :dst 0 :lhs 1 :rhs 2) s))))
+  (%with-binary-vm-state
+   10 0
+   (lambda (state)
+     (assert-signals error
+       (exec1 (funcall make-inst :dst 0 :lhs 1 :rhs 2) state)))))
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
 ;;; Section 6: Multiple-Value Division (truncate/floor/ceiling/round)
@@ -161,13 +169,13 @@ Round is excluded from the values-list check (nil means skip)."
           ("ceiling"  #'cl-cc::make-vm-ceiling-inst 4 '(4 -1))
           ("round"    #'cl-cc::make-vm-round-inst   4 nil))
   (make-inst expected-q expected-vals)
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 7)
-    (cl-cc:vm-reg-set s 2 2)
-    (exec1 (funcall make-inst :dst 0 :lhs 1 :rhs 2) s)
-    (assert-= expected-q (cl-cc:vm-reg-get s 0))
-    (when expected-vals
-      (assert-equal expected-vals (cl-cc:vm-values-list s)))))
+  (%with-binary-vm-state
+   7 2
+   (lambda (state)
+     (exec1 (funcall make-inst :dst 0 :lhs 1 :rhs 2) state)
+     (assert-= expected-q (cl-cc:vm-reg-get state 0))
+     (when expected-vals
+       (assert-equal expected-vals (cl-cc:vm-values-list state))))))
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
 ;;; Section 7: Boolean Operations
@@ -177,76 +185,21 @@ Round is excluded from the values-list check (nil means skip)."
   "vm-not: falsy (nil, 0) → t; non-zero integers → nil.
 cl-cc's execution model treats 0 as false (see vm-falsep), so (vm-not 0) = t.
 This differs from standard CL where only NIL is false."
-  (assert-equal t (%make-unary #'cl-cc::make-vm-not nil))
-  (assert-equal t (%make-unary #'cl-cc::make-vm-not 0))
-  (assert-null    (%make-unary #'cl-cc::make-vm-not 42)))
+  (assert-equal t (%run-unary-inst #'cl-cc::make-vm-not nil))
+  (assert-equal t (%run-unary-inst #'cl-cc::make-vm-not 0))
+  (assert-null    (%run-unary-inst #'cl-cc::make-vm-not 42)))
 
 (deftest-each prim-and-cases
   "vm-and: both truthy → t; any nil → nil."
   :cases (("both-true"  1   2   t)
           ("one-false"  1   nil nil))
   (lhs rhs expected)
-  (if expected
-      (assert-equal t (%make-binary #'cl-cc::make-vm-and lhs rhs))
-      (assert-null    (%make-binary #'cl-cc::make-vm-and lhs rhs))))
+  (assert-equal expected (%run-binary-inst #'cl-cc::make-vm-and lhs rhs)))
 
 (deftest-each prim-or-cases
   "vm-or: both nil → nil; any truthy → t."
   :cases (("both-false"  nil nil nil)
           ("one-true"    nil 42  t))
   (lhs rhs expected)
-  (if expected
-      (assert-equal t (%make-binary #'cl-cc::make-vm-or lhs rhs))
-      (assert-null    (%make-binary #'cl-cc::make-vm-or lhs rhs))))
+  (assert-equal expected (%run-binary-inst #'cl-cc::make-vm-or lhs rhs)))
 
-;;; ═══════════════════════════════════════════════════════════════════════════
-;;; Section 9: Typep General Predicate
-;;; ═══════════════════════════════════════════════════════════════════════════
-
-(deftest-each prim-typep
-  "vm-typep checks various type names including compound type specifiers."
-  :cases (;; Primitive types
-          ("integer"         42         'integer              1)
-          ("string"          "hello"    'string               1)
-          ("symbol"          'foo       'symbol               1)
-          ("cons"            '(a)       'cons                 1)
-          ("null"            nil        'null                 1)
-          ("list-cons"       '(a)       'list                 1)
-          ("list-nil"        nil        'list                 1)
-          ("char"            #\a        'character            1)
-          ("atom-num"        42         'atom                 1)
-          ("int-wrong"       "hello"    'integer              0)
-          ;; Compound: refine (base + predicate). 'refine' is cl-cc-specific; other
-          ;; compound heads (or/and/not/member/eql/values/function/satisfies) are
-          ;; CL symbols imported into :cl-cc/test, so they just work unqualified.
-          ("refine-true"     42         '(cl-cc::refine fixnum plusp) 1)
-          ("refine-false"    -1         '(cl-cc::refine fixnum plusp) 0)
-          ;; Compound: or
-          ("or-first"        42         '(or integer string)  1)
-          ("or-second"       "hi"       '(or integer string)  1)
-          ("or-none"         'x         '(or integer string)  0)
-          ;; Compound: and
-          ("and-both"        42         '(and integer number) 1)
-          ("and-fail"        42         '(and integer string) 0)
-          ;; Compound: not
-          ("not-true"        42         '(not string)         1)
-          ("not-false"       "hi"       '(not string)         0)
-          ;; Compound: member
-          ("member-hit"      2          '(member 1 2 3)       1)
-          ("member-miss"     5          '(member 1 2 3)       0)
-          ;; Compound: eql
-          ("eql-hit"         42         '(eql 42)             1)
-          ("eql-miss"        99         '(eql 42)             0)
-          ;; Compound: values (always t)
-          ("values-any"      42         '(values)             1)
-          ;; Compound: function
-          ("function-fn"     #'car      '(function)           1)
-          ("function-int"    42         '(function)           0)
-          ;; Compound: satisfies
-          ("satisfies-true"  4          '(satisfies evenp)    1)
-          ("satisfies-false" 3          '(satisfies evenp)    0))
-  (src type-sym expected)
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 src)
-    (exec1 (cl-cc::make-vm-typep :dst 0 :src 1 :type-name type-sym) s)
-    (assert-= expected (cl-cc:vm-reg-get s 0))))

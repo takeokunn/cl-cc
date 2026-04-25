@@ -233,24 +233,6 @@
     (declare (ignore forms))
     (assert-= 0 (length diags))))
 
-;;; ─── Pratt Bridge ──────────────────────────────────────────────────────────
-
-(deftest grammar-pratt-nud-table-has-entries
-  "cl-nud-table has entries for atom token types"
-  (assert-true (not (null (gethash :T-INT cl-cc/parse::*cl-nud-table*))))
-  (assert-true (not (null (gethash :T-IDENT cl-cc/parse::*cl-nud-table*))))
-  (assert-true (not (null (gethash :T-STRING cl-cc/parse::*cl-nud-table*)))))
-
-(deftest grammar-pratt-led-table-empty
-  "cl-led-table is empty (CL has no infix operators)"
-  (assert-= 0 (hash-table-count cl-cc/parse::*cl-led-table*)))
-
-(deftest grammar-pratt-context-creation
-  "make-cl-pratt-context returns a valid pratt-context"
-  (let* ((tokens (cl-cc:lex-all "42"))
-         (ctx (cl-cc/parse::make-cl-pratt-context tokens "42" nil)))
-    (assert-true (cl-cc/parse::pratt-context-p ctx))))
-
 ;;; ─── CST byte positions ────────────────────────────────────────────────────
 
 (deftest-each grammar-byte-positions-cases

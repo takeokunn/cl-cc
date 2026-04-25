@@ -121,7 +121,7 @@
 ;;; ─── Bidirectional check: forall ──────────────────────────────────────────
 
 (deftest infer-check-mode-cases
-  "check: forall type skolemizes and succeeds; +type-unknown+ always returns nil subst."
+  "check: forall type skolemizes and succeeds; cl-cc/type::+type-unknown+ always returns nil subst."
   (reset-type-vars!)
   (let* ((a (cl-cc/type:fresh-type-var 'a))
          (fn-body (cl-cc/type:make-type-arrow-raw :params (list a) :return a))
@@ -134,7 +134,7 @@
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast '42))
         (env (type-env-empty)))
-    (let ((subst (cl-cc/type:check ast cl-cc/type:+type-unknown+ env)))
+    (let ((subst (cl-cc/type:check ast cl-cc/type::+type-unknown+ env)))
       (assert-null subst))))
 
 ;;; ─── annotate-type / defun-without-annotation ───────────────────────────
@@ -212,8 +212,8 @@
 
 (deftest-each infer-poly-recursion-helper-cases
   "%find-fn-type-declaration: finds matching declaration, returns nil on miss or nil name."
-  :cases (("found"      '((type (function (fixnum) fixnum) length) (optimize (speed 3)))
-                         'length  '(function (fixnum) fixnum))
+  :cases (("found"      '((type (-> fixnum fixnum) length) (optimize (speed 3)))
+                         'length  '(-> fixnum fixnum))
           ("miss-name"  '((type fixnum x) (type string y))
                          'length  nil)
           ("nil-name"   '((type fixnum x))

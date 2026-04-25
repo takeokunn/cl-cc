@@ -61,14 +61,13 @@ When TAIL-P is true, replace the current leaf frame instead of pushing a new one
    '(*print-radix* nil)
    '(*print-circle* nil)
    '(*print-pretty* nil)
-   '(*print-level* nil)
-   '(*print-length* nil)
-   '(*print-escape* t)
-   '(*print-readably* nil)
-   '(*print-gensym* t)
-   '(*readtable* nil)
-   ;; Package system — bind *package* to host CL-USER
-   (list '*package* (find-package :cl-user))
+    '(*print-level* nil)
+    '(*print-length* nil)
+    '(*print-escape* t)
+    '(*print-readably* nil)
+    '(*print-gensym* t)
+    ;; Package system — bind *package* to host CL-USER
+    (list '*package* (find-package :cl-user))
    ;; Condition/restart system
    '(*%condition-handlers* nil)
    '(*%active-restarts* nil)

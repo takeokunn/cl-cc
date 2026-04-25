@@ -24,12 +24,5 @@ Definition forms, non-local exits, and condition handling must not short-circuit
 through the host CPS fast path.")
 
 
-(defparameter *early-selfhost-macro-bridge-entries*
-  '(("PARSE-LAMBDA-LIST"            . :cl-cc/expand)
-    ("DESTRUCTURE-LAMBDA-LIST"      . :cl-cc/expand)
-    ("GENERATE-LAMBDA-BINDINGS"     . :cl-cc/expand)
-    ("LAMBDA-LIST-INFO-ENVIRONMENT" . :cl-cc/expand))
-  "Bridge helpers required before selfhost macro evaluation switches to OUR-EVAL.")
-
 ;;; NOTE: CPS compile allowlists now live in pipeline-cps.lisp so the shared
 ;;; VM/native policy surface stays in one place.

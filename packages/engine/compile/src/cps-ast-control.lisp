@@ -102,14 +102,13 @@ The cleanup forms always run, even on non-local exit."
 ;;; Flet and Labels (Local Function Bindings)
 
 (defun cps-transform-fn-binding (binding k-var)
-  "Transform a function binding (name params . body) to CPS form."
+  "Transform a function binding (name params . body) to CPS form.
+Produces valid FLET/LABELS syntax: (name (params... k-var) body-cps)."
   (let* ((name (first binding))
          (params (second binding))
          (body (cddr binding)))
-    (list name
-          (cons 'lambda
-                (cons (append params (list k-var))
-                      (list (cps-transform-sequence body k-var)))))))
+    (list* name (append params (list k-var))
+           (list (cps-transform-sequence body k-var)))))
 
 (defun cps-transform-local-fns (form-kw bindings body k)
   "Transform a flet/labels binding group to CPS.

@@ -31,24 +31,22 @@
    (:file "macros-setops")       ; list/set operations split from stdlib
    (:file "macros-list-utils")   ; ordering and list utility helpers
    (:file "macros-restarts")     ; restart/condition protocol split from stdlib
-   (:file "macros-introspection") ; equalp + implementation stubs
+   (:file "macros-introspection") ; equalp and introspection helpers
    (:file "macros-stdlib")       ; stdlib: numeric/control macros (1+, ecase, rotatef...)
    (:file "macros-stdlib-ansi")  ; ANSI CL Phase 1 (psetf, assert, define-condition...)
    (:file "macros-stdlib-utils") ; list/tree/string/array utility macros
    (:file "macros-cxr")          ; algorithmic CXR accessor registration
    (:file "macros-hof")          ; higher-order list/search helpers (map/find/remove)
    (:file "macros-hof-search")   ; position/count/assoc search HOFs
-   (:file "macros-filesystem")   ; file/IO/runtime stubs split from stdlib
-   (:file "macros-filesystem-ext") ; pprint, readtable, debug/introspect, compile-file stubs
+   (:file "macros-filesystem")   ; file/IO/runtime helpers split from stdlib
     (:file "macros-sequence")     ; sequences: copy/fill/replace/mismatch/delete/substitute
     (:file "macros-sequence-fold") ; sequences: reduce/nsubstitute/map-into/merge/last/search
-    (:file "macros-list-compat")  ; list/sequence compatibility helpers split from stdlib
+    (:file "macros-sequence-helpers")  ; list/sequence helper macros split from stdlib
     (:file "macros-plist")        ; property list helpers
-   (:file "macros-compat-package") ; pkg/declare/progv compatibility macros
-   (:file "macros-compat-runtime") ; IO/hash/coerce/LTV/feature compatibility macros
-   (:file "macros-compat-clos")  ; CLOS protocol: print-unreadable-object, describe, change-class
-   (:file "macros-compat-mop")   ; MOP introspection macros + parse-float + reinitialize-instance
-   (:file "macros-compat-array") ; array compat wrappers split from macros-compat
+   (:file "macros-package-system") ; package system and symbol-iteration macros
+   (:file "macros-runtime-support") ; declarations, IO/hash/coerce/LTV/feature runtime macros
+   (:file "macros-clos-protocol")  ; CLOS protocol: print-unreadable-object, describe, change-class
+   (:file "macros-mop-support")   ; MOP introspection macros + parse-float + reinitialize-instance
     (:file "expander-data")       ; expander: grammar tables + dispatch table declarations
     (:file "expander-helpers")    ; expander: shared helper functions extracted from expander.lisp
     (:file "expander-defstruct")  ; expander: defstruct expansion helpers

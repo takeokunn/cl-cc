@@ -1,6 +1,6 @@
 (in-package :cl-cc/expand)
 
-;;; List / sequence compatibility macros split from macros-stdlib.lisp
+;;; List / sequence helper macros split from macros-stdlib.lisp
 
 ;;; ─── SUBST-IF / SUBST-IF-NOT (FR-657) ───────────────────────────────────────
 

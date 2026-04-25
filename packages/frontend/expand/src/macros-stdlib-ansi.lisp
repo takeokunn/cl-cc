@@ -167,10 +167,10 @@ Supports :start, :end, and :index keyword arguments."
          (*read-default-float-format* 'single-float)
          (*read-eval*                t)
          (*read-suppress*            nil)
-         (*package*                  (find-package "COMMON-LISP-USER")))
+         (*package*                  (rt-find-package "COMMON-LISP-USER")))
      ,@body))
 
-;; WITH-PACKAGE-ITERATOR (FR-211) — real implementation via host bridge
+;; WITH-PACKAGE-ITERATOR (FR-211) — runtime-backed package iteration helper
 (register-macro 'with-package-iterator
   (lambda (form env)
     (declare (ignore env))
@@ -183,14 +183,14 @@ Supports :start, :end, and :index keyword arguments."
            (idx-var (gensym "IDX"))
            (len-var (gensym "LEN")))
       (declare (ignore symbol-types))
-      ;; Collect external symbols from the given packages
-      `(let* ((,syms-var (let ((acc nil))
-                           (dolist (p (if (listp ,packages) ,packages (list ,packages)))
-                             (let ((pkg (find-package p)))
-                               (when pkg
-                                 (dolist (s (%package-external-symbols pkg))
-                                   (push (list s :external pkg) acc)))))
-                           (nreverse acc)))
+       ;; Collect external symbols from the given packages
+       `(let* ((,syms-var (let ((acc nil))
+                            (dolist (p (if (listp ,packages) ,packages (list ,packages)))
+                              (let ((pkg (rt-find-package p)))
+                                 (when pkg
+                                   (dolist (s (%package-external-symbols pkg))
+                                     (push (list s :external pkg) acc)))))
+                            (nreverse acc)))
               (,idx-var 0)
               (,len-var (length ,syms-var)))
          (let ((,name (lambda ()
@@ -210,4 +210,3 @@ Supports :start, :end, and :index keyword arguments."
           (body (cdddr form)))
       (register-compiler-macro name (make-compiler-macro-expander lambda-list body))
       `(quote ,name))))
-

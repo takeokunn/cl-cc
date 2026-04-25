@@ -57,6 +57,5 @@
 
    ;; --- macros used via run-string (need umbrella re-export) ---------
    #:defun/c
-   #:compiler-let
    #:copy-hash-table
    #:copy-structure))

@@ -1,14 +1,49 @@
 ;;;; compile/builtin-registry-data-ext.lisp — Extended builtin entry alist tables
 ;;;
-;;; Specialized calling-convention tables: handle I/O, stream operations,
-;;; void side-effects, nullary, string-trim, binary-custom, ternary-custom,
-;;; and all the opt/nil/move-first/synth conventions added in 2026.
+;;; Comparison tables (string-cmp, char-cmp) and all specialized calling-convention
+;;; tables: handle I/O, stream operations, void side-effects, nullary, string-trim,
+;;; binary-custom, ternary-custom, and opt/nil/move-first/synth conventions (2026).
 ;;;
-;;; Core tables (unary, binary, string-cmp, char-cmp) are in
-;;; builtin-registry-data.lisp (loads before this file).
+;;; Core unary/binary entry tables are in builtin-registry-data.lisp (loads before).
 ;;;
 ;;; Load order: after builtin-registry-data.lisp, before builtin-registry.lisp.
 (in-package :cl-cc/compile)
+
+;;; ─── Comparison Tables ──────────────────────────────────────────────────────
+
+(defparameter *builtin-string-cmp-entries*
+  '((string=            . make-vm-string=)
+    (string<            . make-vm-string<)
+    (string>            . make-vm-string>)
+    (string<=           . make-vm-string<=)
+    (string>=           . make-vm-string>=)
+    (string-equal       . make-vm-string-equal)
+    (string-lessp       . make-vm-string-lessp)
+    (string-greaterp    . make-vm-string-greaterp)
+    (string/=           . make-vm-string-not-equal)
+    (string-not-equal   . make-vm-string-not-equal)
+    (string-not-greaterp . make-vm-string-not-greaterp)
+    (string-not-lessp   . make-vm-string-not-lessp)
+    ;; String concatenation shares string-cmp slot layout
+    (string-concat      . make-vm-concatenate))
+  "Alist of (cl-symbol . vm-constructor) for string comparison builtins: (fn s1 s2) → (:dst :str1 :str2).")
+
+(defparameter *builtin-char-cmp-entries*
+  '((char=             . make-vm-char=)
+    (char<             . make-vm-char<)
+    (char>             . make-vm-char>)
+    (char<=            . make-vm-char<=)
+    (char>=            . make-vm-char>=)
+    (char/=            . make-vm-char/=)
+    (char-equal        . make-vm-char-equal)
+    (char-not-equal    . make-vm-char-not-equal)
+    (char-lessp        . make-vm-char-lessp)
+    (char-greaterp     . make-vm-char-greaterp)
+    (char-not-greaterp . make-vm-char-not-greaterp)
+    (char-not-lessp    . make-vm-char-not-lessp))
+  "Alist of (cl-symbol . vm-constructor) for char comparison builtins: (fn c1 c2) → (:dst :char1 :char2).")
+
+;;; ─── Specialized Convention Tables ─────────────────────────────────────────
 
 (defparameter *builtin-table-query-entries*
   '((hash-table-count              . make-vm-hash-table-count)

@@ -2,8 +2,8 @@
 ;;;; Unit tests for src/compile/cps-ast-extended.lisp
 ;;;;
 ;;;; Covers: cps-transform-ast for ast-quote, ast-setq, ast-the, ast-values,
-;;;;   ast-apply, ast-call (general calls), ast-defclass, ast-defgeneric,
-;;;;   ast-defmethod; entry points maybe-cps-transform, cps-transform-ast*,
+;;;;   ast-apply, ast-call (general calls), ast-defun, ast-defmacro,
+;;;;   ast-defclass, ast-defgeneric, ast-defmethod; entry points cps-transform-ast*,
 ;;;;   cps-transform*, cps-transform-eval.
 ;;;;
 ;;;; Tests inspect the *structure* of the produced S-expression rather than
@@ -107,22 +107,63 @@
     (assert-eq 'k (second result))
     (assert-equal '(compute) (third result))))
 
-(deftest cps-call-with-args-threads-args-through-lambdas
-  "CPS transform of a call with args wraps each arg evaluation in a lambda."
+(deftest cps-call-with-args-threads-args-into-call
+  "CPS transform of a 2-arg call threads both arg symbols into the final (add G1 G2) form."
   (let* ((node (cl-cc/ast::make-ast-call
                 :func 'add
                 :args (list (cl-cc/ast::make-ast-int :value 1)
                             (cl-cc/ast::make-ast-int :value 2))))
          (result (cps-with-k node)))
-    ;; Should contain (funcall k (add ...)) nested in lambdas
-    (labels ((contains-funcall-k-p (form)
-               (if (consp form)
-                   (or (and (eq (car form) 'funcall) (eq (second form) 'k))
-                       (some #'contains-funcall-k-p (cdr form)))
-                   nil)))
-      (assert-true (contains-funcall-k-p result)))))
+    ;; Walk the CPS tree to find the innermost (funcall k <call-form>)
+    (labels ((find-funcall-k (form)
+               (cond
+                 ((atom form) nil)
+                 ((and (eq (car form) 'funcall) (eq (second form) 'k))
+                  form)
+                 (t (loop for sub in form
+                          for found = (find-funcall-k sub)
+                          when found return found)))))
+      (let* ((funcall-k (find-funcall-k result))
+             (call-form (third funcall-k)))
+        ;; The call form must be (add G1 G2) — head is 'add, exactly 2 args
+        (assert-true (consp call-form))
+        (assert-eq 'add (car call-form))
+        (assert-= 2 (length (cdr call-form)))
+        ;; Both arg symbols must be distinct gensyms (not NIL, not ADD)
+        (assert-true (symbolp (second call-form)))
+        (assert-true (symbolp (third call-form)))
+        (assert-false (eq (second call-form) (third call-form)))))))
 
 ;;; ─── ast-defgeneric ───────────────────────────────────────────────────────
+
+(deftest cps-defun-produces-progn-defun-funcall-k
+  "CPS transform of ast-defun produces (progn (defun ...) (funcall k 'name))."
+  (let* ((node (cl-cc/ast::make-ast-defun
+                :name 'square
+                :params '(x)
+                :body (list (cl-cc/ast::make-ast-binop
+                             :op '*
+                             :lhs (cl-cc/ast::make-ast-var :name 'x)
+                             :rhs (cl-cc/ast::make-ast-var :name 'x)))))
+         (result (cps-with-k node)))
+    (assert-eq 'progn (car result))
+    (assert-eq 'defun (caadr result))
+    (let ((last-form (car (last result))))
+      (assert-eq 'funcall (car last-form))
+      (assert-eq 'k (second last-form)))))
+
+(deftest cps-defmacro-produces-progn-defmacro-funcall-k
+  "CPS transform of ast-defmacro produces (progn (defmacro ...) (funcall k 'name))."
+  (let* ((node (cl-cc/ast::make-ast-defmacro
+                :name 'when1
+                :lambda-list '(test &body body)
+                :body '((list 'if test (cons 'progn body) nil))))
+         (result (cps-with-k node)))
+    (assert-eq 'progn (car result))
+    (assert-eq 'defmacro (caadr result))
+    (let ((last-form (car (last result))))
+      (assert-eq 'funcall (car last-form))
+      (assert-eq 'k (second last-form)))))
 
 (deftest cps-defgeneric-produces-progn-defgeneric-funcall-k
   "CPS transform of ast-defgeneric produces (progn (defgeneric ...) (funcall k 'name))."
@@ -154,12 +195,54 @@
     (assert-eq 'lambda (car result))
     (assert-= 1 (length (second result)))))
 
-;;; ─── maybe-cps-transform ──────────────────────────────────────────────────
+;;; ─── %cps-lower-lambda-param ─────────────────────────────────────────────────
 
-(deftest maybe-cps-transform-cases
-  "maybe-cps-transform: non-nil for AST node; non-nil for S-expression."
-  (assert-true (cl-cc/compile::maybe-cps-transform (cl-cc/ast::make-ast-int :value 1)))
-  (assert-true (cl-cc/compile::maybe-cps-transform '42)))
+(deftest-each cps-lower-lambda-param-cases
+  "%cps-lower-lambda-param: no-default → symbol; default-only → (name default); both → (name default svar)."
+  (("no-default"       (list 'x nil nil)
+    'x)
+   ("default-only"     (list 'y (cl-cc/ast::make-ast-int :value 42) nil)
+    '(y 42))
+   ("default-and-svar" (list 'z (cl-cc/ast::make-ast-int :value 0) 'z-p)
+    '(z 0 z-p)))
+  (slot expected)
+  (assert-equal expected (cl-cc/compile::%cps-lower-lambda-param slot)))
+
+;;; ─── %cps-extended-lambda-list ───────────────────────────────────────────────
+;;; Verifies that keyword markers (&optional, &rest, &key) are preserved — this
+;;; was a latent bug where (when optional (list '&optional) (mapcar ...)) discarded
+;;; the marker because `when` returns only its last form.
+
+(deftest-each cps-extended-lambda-list-cases
+  "Lambda-list reconstruction preserves &optional, &rest, and &key markers."
+  (("required-only"
+    '(a b) nil nil nil
+    '(a b))
+   ("with-optional"
+    '(x) (list (list 'y nil nil)) nil nil
+    '(x &optional y))
+   ("with-optional-default"
+    '(x) (list (list 'y (cl-cc/ast::make-ast-int :value 0) nil)) nil nil
+    '(x &optional (y 0)))
+   ("with-rest"
+    '(x) nil 'rest nil
+    '(x &rest rest))
+   ("with-key"
+    '() nil nil (list (list 'k nil nil))
+    '(&key k))
+   ("combined"
+    '(a) (list (list 'b nil nil)) 'r (list (list 'c nil nil))
+    '(a &optional b &rest r &key c)))
+  (required optional rest key expected)
+  (assert-equal expected
+                (cl-cc/compile::%cps-extended-lambda-list required optional rest key)))
+
+;;; ─── cps-transform* shared entrypoint ──────────────────────────────────────
+
+(deftest cps-transform*-shared-entrypoint-cases
+  "cps-transform* remains the shared entrypoint for AST nodes and s-expressions."
+  (assert-true (cl-cc/compile::cps-transform* (cl-cc/ast::make-ast-int :value 1)))
+  (assert-true (cl-cc/compile::cps-transform* '42)))
 
 ;;; ─── cps-transform-eval ───────────────────────────────────────────────────
 

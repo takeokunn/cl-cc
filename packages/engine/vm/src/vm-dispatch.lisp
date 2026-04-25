@@ -79,9 +79,8 @@ Saves and restores call stack around the sub-invocation."
          (entry (and registry (gethash value registry))))
     (cond
       (entry entry)
-      ((and (gethash value *vm-host-bridge-functions*)
-            (fboundp value))
-       (symbol-function value))
+      ((vm-bridge-callable value)
+       (vm-bridge-callable value))
       (t (error "Undefined function: ~S" value)))))
 
 (defun vm-resolve-function (state value)

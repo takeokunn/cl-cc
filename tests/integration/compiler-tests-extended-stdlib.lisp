@@ -75,7 +75,7 @@
 
 (deftest compile-remove-test-keywords
   "remove-duplicates and remove with :test #'equal handle string equality."
-  :timeout :none
+  :timeout 30
   (assert-= 2 (length (run-string "(remove-duplicates '(\"a\" \"b\" \"a\") :test #'equal)" :stdlib t)))
   (assert-equal '("b") (run-string "(remove \"a\" '(\"a\" \"b\" \"a\") :test #'equal)" :stdlib t)))
 

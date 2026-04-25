@@ -222,44 +222,37 @@ exactly, preserving semantics for overlapping or reordered tests."
                  node)))
     (collapse branch)))
 
+(defun %compile-if-branch (ast ctx dst tail guard-var guard-type branch &optional jump-label)
+  "Compile one branch of an IF into CTX with type-env narrowing.
+Emits a move from the branch result into DST; optionally emits a jump to JUMP-LABEL."
+  (setf (ctx-tail-position ctx) tail)
+  (let ((saved-type-env (ctx-type-env ctx)))
+    (unwind-protect
+         (progn
+           (setf (ctx-type-env ctx) (%branch-type-env ctx guard-var guard-type branch))
+           (let ((result-reg (compile-ast ast ctx)))
+             (setf (ctx-tail-position ctx) nil)
+             (emit ctx (make-vm-move :dst dst :src result-reg))
+             (when jump-label
+               (emit ctx (make-vm-jump :label jump-label)))))
+      (setf (ctx-type-env ctx) saved-type-env))))
+
 (defmethod compile-ast ((node ast-if) ctx)
-  (let* ((tail (ctx-tail-position ctx))
-         (cond-ast (ast-if-cond node))
-         (then-ast (%case-of-case-collapse-branch cond-ast
-                                                  (ast-if-then node)
-                                                  t))
-         (else-ast (%case-of-case-collapse-branch cond-ast
-                                                  (ast-if-else node)
-                                                  nil))
-         (guard-info (multiple-value-list
-                      (cl-cc/type::extract-type-guard cond-ast)))
-         (guard-var (first guard-info))
+  (let* ((tail       (ctx-tail-position ctx))
+         (cond-ast   (ast-if-cond node))
+         (then-ast   (%case-of-case-collapse-branch cond-ast (ast-if-then node) t))
+         (else-ast   (%case-of-case-collapse-branch cond-ast (ast-if-else node) nil))
+         (guard-info (multiple-value-list (cl-cc/type::extract-type-guard cond-ast)))
+         (guard-var  (first guard-info))
          (guard-type (second guard-info))
-         (cond-reg (progn (setf (ctx-tail-position ctx) nil)
-                           (compile-ast cond-ast ctx)))
-         (dst (make-register ctx))
+         (cond-reg   (progn (setf (ctx-tail-position ctx) nil)
+                            (compile-ast cond-ast ctx)))
+         (dst        (make-register ctx))
          (else-label (make-label ctx "else"))
-         (end-label (make-label ctx "ifend")))
-      (emit ctx (make-vm-jump-zero :reg cond-reg :label else-label))
-     (setf (ctx-tail-position ctx) tail)
-    (let ((old-type-env (ctx-type-env ctx)))
-      (unwind-protect
-           (progn
-             (setf (ctx-type-env ctx) (%branch-type-env ctx guard-var guard-type :then))
-              (let ((then-reg (compile-ast then-ast ctx)))
-                (setf (ctx-tail-position ctx) nil)
-                (emit ctx (make-vm-move :dst dst :src then-reg))
-                (emit ctx (make-vm-jump :label end-label))))
-         (setf (ctx-type-env ctx) old-type-env)))
+         (end-label  (make-label ctx "ifend")))
+    (emit ctx (make-vm-jump-zero :reg cond-reg :label else-label))
+    (%compile-if-branch then-ast ctx dst tail guard-var guard-type :then end-label)
     (emit ctx (make-vm-label :name else-label))
-    (setf (ctx-tail-position ctx) tail)
-    (let ((old-type-env (ctx-type-env ctx)))
-      (unwind-protect
-           (progn
-             (setf (ctx-type-env ctx) (%branch-type-env ctx guard-var guard-type :else))
-              (let ((else-reg (compile-ast else-ast ctx)))
-                (setf (ctx-tail-position ctx) nil)
-                (emit ctx (make-vm-move :dst dst :src else-reg))))
-         (setf (ctx-type-env ctx) old-type-env)))
+    (%compile-if-branch else-ast ctx dst tail guard-var guard-type :else nil)
     (emit ctx (make-vm-label :name end-label))
     dst))

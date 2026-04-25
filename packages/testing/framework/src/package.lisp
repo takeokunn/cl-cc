@@ -2,9 +2,7 @@
   (:use :cl)
   (:shadowing-import-from :cl-cc/type
    :type-node
-   :type-primitive
-   :type-unknown
-   :type-scheme
+   :type-primitive   :type-scheme
    :type-primitive-name
    :type-var-id
    :type-var-name
@@ -21,9 +19,7 @@
    :type-null
    :type-any
    :type-char
-   :type-unit
-   :+type-unknown+
-   :make-type-primitive
+   :type-unit   :make-type-primitive
    :fresh-type-var
    :make-type-scheme
    :type-constructor
@@ -149,7 +145,6 @@
    :make-type-intersection
    :type-intersection-p
    :type-intersection-types
-   :make-type-unknown
    :make-type-variant
    :type-variant-p
    :type-variant-cases
@@ -160,9 +155,7 @@
     :fresh-rigid-var
     :type-rigid-p
     :type-rigid-name
-   :type-rigid-equal-p
-   :type-unknown-p
-   :upgraded-array-element-type
+   :type-rigid-equal-p   :upgraded-array-element-type
    :upgraded-complex-part-type
    :type-primitive-p
    :type-var-p

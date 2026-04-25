@@ -2,14 +2,14 @@
 ;;;; CL-CC test systems.
 ;;;;
 ;;;; Loaded by cl-cc.asd's eval-when block so that `--load cl-cc.asd`
-;;;; makes :cl-cc/test and :cl-cc/test-clos available.
+;;;; makes :cl-cc-test and :cl-cc-test/clos available.
 
-(asdf:defsystem :cl-cc/test
+(asdf:defsystem :cl-cc-test
   :description "CL-CC tests"
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc :cl-cc/bin :cl-cc/tests-framework)
+  :depends-on (:cl-cc :cl-cc-cli :cl-cc-testing-framework)
   :serial t
   :components
   (;; Unit tests — each module now lives in its workspace's tests/ dir
@@ -29,7 +29,7 @@
     :pathname "packages/cli/tests"
     :serial t
     :components
-    ((:file "test-support")      ; shared CLI test helpers (fake-quit, make-cli-parsed)
+    ((:file "test-support")
      (:file "args-tests")
      (:file "cli-tests")
      (:file "main-tests")
@@ -40,30 +40,31 @@
     :serial t
     :components
     ((:file "vm-instructions-tests")
-     (:file "list-tests")       ; defines make-test-vm / exec1 helpers
+     (:file "list-tests")
      (:file "list-coerce-tests")
      (:file "array-tests")
      (:file "vm-execute-tests")
      (:file "vm-execute-tests-2")
      (:file "vm-call-tests")
-     (:file "primitives-tests") ; execute-instruction for type predicates + arithmetic
-     (:file "vm-transcendental-tests") ; transcendental math ops
-     (:file "vm-numeric-tests") ; numeric tower + environment queries
-     (:file "vm-extensions-tests") ; symbol plist + progv + generic arithmetic
-     (:file "vm-bitwise-tests") ; bitwise integer instructions
-     (:file "vm-clos-tests")    ; collect-inherited-slots, compute-CPL, eql-dispatch-index
-     (:file "vm-clos-execute-tests") ; execute-instruction for class-def/make-obj/slot-read/write/boundp
-     (:file "vm-run-tests") ; vm-error-type-matches-p + vm2 state/reg structure
-     (:file "vm-run-vm2-tests") ; vm2 run-vm execution: basic ops, immediate ops, compare ops
-     (:file "vm-run-fusion-tests") ; chained arithmetic, superinstruction fusion, extended run-vm
-     (:file "vm-dispatch-tests") ; vm-classify-arg + vm-generic-function-p
-     (:file "vm-dispatch-gf-tests") ; EQL specializer helpers from vm-dispatch-gf.lisp
-     (:file "vm-dispatch-gf-multi-tests") ; %vm-gf-uses-composite-keys-p + vm-resolve-gf-method
-     (:file "vm-bridge-tests")  ; hash-table-values, slot-definition-*, rt-plist-put, etc.
-     (:file "vm-opcodes-tests")      ; vm2-state, vm2-reg-get/set, bigram analysis, fusion
-     (:file "vm-opcodes-defs-tests") ; make-vm-state, vm-reg-get/set, vm-state-registers, run-vm-with-bigrams
-     (:file "vm-tests") ; vm.lisp core state + helper coverage
-     (:file "package-tests") ; cl-cc package export smoke tests
+     (:file "primitives-tests")
+     (:file "vm-transcendental-tests")
+     (:file "vm-numeric-tests")
+     (:file "vm-extensions-tests")
+     (:file "vm-bitwise-tests")
+     (:file "vm-clos-tests")
+     (:file "vm-clos-execute-tests")
+     (:file "vm-run-tests")
+     (:file "vm-run-vm2-tests")
+     (:file "vm-run-fusion-tests")
+     (:file "vm-dispatch-tests")
+     (:file "vm-dispatch-gf-tests")
+     (:file "vm-dispatch-gf-multi-tests")
+     (:file "vm-bridge-tests")
+     (:file "vm-opcodes-tests")
+     (:file "vm-opcodes-defs-tests")
+     (:file "vm-tests")
+     (:file "package-tests")
+     (:file "vm-environment-tests")
      (:file "conditions-tests")
      (:file "hash-tests")
      (:file "symbols-tests")
@@ -82,25 +83,25 @@
     :serial t
     :components
     ((:file "cl-parser-tests")
-     (:file "cl-parser-error-tests")        ; lower-sexp special forms + arity error cases
+     (:file "cl-parser-error-tests")
      (:file "cl-parser-ast-tests")
      (:file "cl-parser-new-tests")
-     (:file "cl-parser-new-extended-tests") ; ast-to-sexp roundtrip, slot-spec, lambda edge cases, pipeline
+     (:file "cl-parser-new-extended-tests")
      (:module "cl"
       :serial t
       :components
       ((:file "lower-tests")
-       (:file "lower-arithmetic-tests")    ; n-ary arith, let, lambda, block, setf forms
-       (:file "parser-roundtrip-tests")    ; ast-to-sexp roundtrip for all node types
-       (:file "grammar-tokenstream-tests")  ; token-stream helpers + CST builders
-       (:file "grammar-parser-tests")))     ; parse-cl-atom/form/list-form + parse-cl-source
+       (:file "lower-arithmetic-tests")
+       (:file "parser-roundtrip-tests")
+       (:file "grammar-tokenstream-tests")
+       (:file "grammar-parser-tests")))
      (:file "cst-tests")
      (:file "lexer-tests")
-     (:file "lexer-dispatch-tests")  ; feature conditionals, hash dispatch, skip helpers
+     (:file "lexer-dispatch-tests")
      (:file "grammar-tests")
      (:file "grammar-special-form-tests")
      (:file "pratt-tests")
-     (:file "pratt-pipeline-tests") ; CST positions, parse-cl-source/all-forms/source, parse-and-lower, pratt-parse-expr/list-until
+     (:file "pratt-pipeline-tests")
      (:file "php-tests")
      (:module "php"
       :serial t
@@ -145,7 +146,7 @@
      (:file "expander-control-tests")
      (:file "expander-array-tests")
      (:file "expander-typed-tests")
-     (:file "expander-typed-params-tests") ; lambda-list-has-typed-p, strip-typed-params, register-function-type
+     (:file "expander-typed-params-tests")
      (:file "expander-defclass-tests")
      (:file "expander-binding-tests")
      (:file "expander-control-helpers-tests")
@@ -156,7 +157,7 @@
      (:file "expander-definitions-constant-tests")
      (:file "expander-definitions-tests")
      (:file "expander-numeric-tests")
-     (:file "expander-comparison-tests")  ; = < > <= >= /= and char comparison chaining
+     (:file "expander-comparison-tests")
      (:file "expander-definitions-helpers-tests")
      (:file "expander-helpers-tests")
      (:file "expander-sequence-tests")
@@ -184,16 +185,16 @@
      (:file "macros-stdlib-bind-error-tests")
      (:file "macros-stdlib-sequence-map-tests")
      (:file "macros-stdlib-io-tests")
-     (:file "macros-stdlib-ansi-tests")   ; with-accessors, assert, define-condition, with-*-string, with-standard-io-syntax
-     (:file "macros-stdlib-utils-tests")  ; tailp/ldiff/copy-alist/tree-equal/get-properties/nunion/nsubst*/nstring*/array-*
+     (:file "macros-stdlib-ansi-tests")
+     (:file "macros-stdlib-utils-tests")
      (:file "macros-filesystem-tests")
-     (:file "macros-compat-array-tests")      ; array compat wrappers
-     (:file "macros-compat-tests")            ; remaining ANSI CL compat macros
-     (:file "macros-compat-clos-tests")       ; CLOS protocol + MOP introspection macros
-     (:file "macros-plist-tests")    ; getf/remf/%plist-put
-     (:file "macros-list-compat-tests") ; subst/vector/member-if/maphash
-     (:file "macros-hof-tests")      ; HOF macro expansions split from stdlib
-     (:file "macros-hof-search-tests") ; position-if, count-if, assoc, rassoc-if variants
+     (:file "array-predicate-expansion-tests")
+     (:file "macros-runtime-support-tests")
+     (:file "macros-clos-protocol-tests")
+     (:file "macros-plist-tests")
+     (:file "macros-sequence-helpers-tests")
+     (:file "macros-hof-tests")
+     (:file "macros-hof-search-tests")
      (:file "macros-sequence-tests")))
    (:module "type-tests"
     :pathname "packages/foundation/type/tests"
@@ -203,27 +204,29 @@
      (:file "type-inference-tests")
      (:file "type-effect-tests")
      (:file "type-phase-tests")
-     (:file "type-2026-nodes-tests")    ; 2026 type nodes (rigid/product/variant/exists/mu/HKT) + substitution API
+     (:file "type-2026-nodes-tests")
      (:file "kind-tests")
      (:file "multiplicity-tests")
      (:file "row-tests")
      (:file "subtyping-tests")
-     (:file "subtyping-extended-tests")  ; extended is-subtype-p, type-join/meet lattice coverage
+     (:file "subtyping-extended-tests")
      (:file "effect-tests")
      (:file "constraint-tests")
      (:file "solver-tests")
-     (:file "solver-collect-tests")           ; collect-constraints: all typecase arms + gradual fallback
+     (:file "solver-collect-tests")
      (:file "representation-tests")
-     (:file "substitution-tests")          ; substitution data structure, zonk, composition
-     (:file "unification-tests")           ; product/intersection/constructor/effect-row unification
-     (:file "type-children-tests")         ; type-children / type-bound-var data layer
+     (:file "substitution-tests")
+     (:file "unification-tests")
+     (:file "type-children-tests")
      (:file "types-extended-coverage-tests")
      (:file "checker-tests")
      (:file "typeclass-tests")
      (:file "printer-tests")
      (:file "parser-tests")
+     (:file "parser-arrow-quantifier-tests")
      (:file "parser-typed-tests")
      (:file "inference-tests")
+     (:file "inference-forms-tests")
      (:file "inference-effect-tests")
      (:file "exhaustiveness-tests")))
    (:module "ir-tests"
@@ -232,7 +235,9 @@
     :components
     ((:file "ir-types-tests")
      (:file "ir-block-tests")
+     (:file "ir-block-ssa-tests")
      (:file "ir-ssa-advanced-tests")
+     (:file "ir-ssa-dominator-tests")
      (:file "ir-printer-tests")))
    (:module "compile-tests"
     :pathname "packages/engine/compile/tests"
@@ -240,97 +245,106 @@
     :components
     ((:file "cps-tests")
      (:file "cps-ast-tests")
-     (:file "cps-ast-semantic-tests") ; semantic eval: binop/if/evaluable-forms/setq + structural/dispatch/sequence/block/catch/flet/unwind-protect
-     (:file "cps-ast-extended-tests") ; OOP/mutation: setq/defvar/make-instance/defclass/defgeneric/defmethod
-     (:file "cps-ast-functional-tests") ; functional: quote/the/values/mvb/apply/call/entry-points
+     (:file "cps-ast-semantic-tests")
+     (:file "cps-ast-transform-tests")
+     (:file "cps-ast-extended-tests")
+     (:file "cps-ast-functional-tests")
      (:file "builtin-registry-tests")
      (:file "builtin-registry-data-tests")
      (:file "fr-586-set-tests")
-     (:file "builtin-registry-data-ext-tests")   ; extended calling-convention data tables
+     (:file "builtin-registry-data-ext-tests")
+     (:file "builtin-registry-stream-tests")
      (:file "closure-tests")
-     (:file "closure-escape-tests")  ; escape analysis + closure-sharing utilities
+     (:file "closure-escape-tests")
      (:file "context-tests")
      (:file "codegen-tests")
-     (:file "codegen-fold-tests")       ; %fold-ast-binop, *compile-time-eval-fns*, %evaluate-ast
+     (:file "codegen-fold-tests")
      (:file "codegen-phase2-helpers")
-      (:file "codegen-core-tests")
-      (:file "codegen-core-array-sink-tests") ; array non-escape/sink: variable-aset, branch-local, escape/shadow scenarios + single-inst/the/hole/narrows
+     (:file "codegen-core-tests")
+     (:file "codegen-core-array-sink-tests")
      (:file "codegen-type-predicate-tests")
-     (:file "codegen-core-let-tests")     ; %ast-let-binding-ignored-p, %ast-cons-call-p, %ast-lambda-bound-names, sink-if
+     (:file "codegen-core-let-tests")
      (:file "codegen-functions-tests")
+     (:file "codegen-functions-callsite-tests")
+     (:file "codegen-functions-params-tests")
      (:file "codegen-clos-tests")
-     (:file "codegen-clos-slot-tests")  ; slot-value/set-slot-value/branch-local sink + phase2 CLOS helpers
+     (:file "codegen-clos-slot-tests")
      (:file "codegen-control-tests")
-     (:file "codegen-calls-tests")   ; %try-compile-funcall/apply/noescape, %compile-normal-call, GF dispatch
-      (:file "codegen-toplevel-cps-tests") ; top-level CPS routing and semantic preservation
-      (:file "codegen-locals-tests")  ; target-instance, %compile-body-with-tail, type-check-ast
-      (:file "codegen-io-tests")
-      (:file "codegen-hash-table-tests")
-      (:file "codegen-slot-predicates-tests")
-      (:file "codegen-string-kwargs-tests")
-      (:file "phase2-handler-tests")
-      (:file "codegen-phase2-tests")
-       (:file "stdlib-source-tests")
-       (:file "pipeline-native-tests")
-       (:file "pipeline-native-routing-tests")))
+     (:file "codegen-calls-tests")
+     (:file "codegen-toplevel-cps-tests")
+     (:file "codegen-locals-tests")
+     (:file "codegen-io-tests")
+     (:file "codegen-io-read-tests")
+     (:file "codegen-hash-table-tests")
+     (:file "codegen-slot-predicates-tests")
+     (:file "codegen-string-kwargs-tests")
+     (:file "phase2-handler-tests")
+     (:file "codegen-phase2-tests")
+     (:file "codegen-phase2-io-tests")
+     (:file "stdlib-source-tests")
+     (:file "pipeline-native-tests")
+     (:file "pipeline-native-io-tests")
+     (:file "pipeline-native-routing-tests")))
    (:module "optimize-tests"
     :pathname "packages/engine/optimize/tests"
     :serial t
     :components
-    ((:file "optimizer-tables-tests")   ; fold tables, derived lists, opt-inst-read-regs/dst
-     (:file "optimizer-strength-tests") ; opt-power-of-2-p, opt-pass-strength-reduce, bswap/rotate
-     (:file "optimizer-licm-tests")    ; opt-inst-loop-invariant-p, %opt-pre-*, opt-pass-licm
+    ((:file "optimizer-tables-tests")
+     (:file "optimizer-strength-tests")
+     (:file "optimizer-licm-tests")
      (:file "optimizer-copyprop-tests")
-     (:file "optimizer-strength-ext-tests") ; reassociation pass + batch concatenate
-     (:file "optimizer-cse-gvn-tests")      ; CSE, GVN, dead labels, leaf detection
-     (:file "optimizer-dataflow-tests")     ; SCCP: env copy/equal/merge, fold-inst, pass-sccp
-     (:file "optimizer-memory-tests") ; alias analysis, interval arithmetic, DSE, store-to-load
-     (:file "optimizer-flow-tests")   ; DCE, jump threading, unreachable elim, block/tail merge
-     (:file "optimizer-pipeline-tests") ; parse-pipeline-string, converged-p, adaptive-iters, verify
-     (:file "optimizer-inline-tests")      ; opt-max-reg-index, opt-make-renaming, opt-collect-function-defs, call-graph
-     (:file "optimizer-purity-tests")      ; opt-function-body-transitively-pure-p, opt-infer-transitive-function-purity
-     (:file "optimizer-inline-pass-tests")   ; memo utils, body-inst-set/labels, reachability
-     (:file "optimizer-inline-pass-tests-2") ; inline cost/policy (inst-cost, body-cost, threshold, eligible-p), global-dce, pass-inline
-     (:file "optimizer-inline-pass-ext-tests") ; extended inline policy + full pass tests
+     (:file "optimizer-strength-ext-tests")
+     (:file "optimizer-cse-gvn-tests")
+     (:file "optimizer-dataflow-tests")
+     (:file "optimizer-memory-tests")
+     (:file "optimizer-flow-tests")
+     (:file "optimizer-pipeline-tests")
+     (:file "optimizer-inline-tests")
+     (:file "optimizer-purity-tests")
+     (:file "optimizer-inline-pass-tests")
+     (:file "optimizer-inline-pass-tests-2")
+     (:file "optimizer-inline-pass-ext-tests")
      (:file "effects-tests")
      (:file "cfg-tests")
      (:file "ssa-tests")
      (:file "egraph-tests")
      (:file "egraph-extraction-tests")
      (:file "egraph-rules-tests")
+     (:file "egraph-negation-tests")
      (:file "egraph-rules-bitwise-tests")))
    (:module "emit-tests"
     :pathname "packages/backend/emit/tests"
     :serial t
     :components
     ((:file "mir-tests")
-     (:file "mir-target-tests")          ; printer smoke tests + target-desc (x86-64/aarch64/riscv64/wasm32)
+     (:file "mir-target-tests")
      (:file "regalloc-tests")
      (:file "wasm-tests")
-     (:file "wasm-ir-tests")        ; wasm IR instruction structs
-     (:file "wasm-types-tests")     ; wasm type encoding helpers: section IDs, primitives, GC refs, heap types, type defs, mutability, core opcodes
-     (:file "wasm-opcodes-tests")   ; wasm opcode tests: i32/i64/f64 ops, conversion, reference, GC opcodes, named type indices, uniqueness
+     (:file "wasm-ir-tests")
+     (:file "wasm-types-tests")
+     (:file "wasm-opcodes-tests")
      (:file "aarch64-codegen-tests")
-     (:file "aarch64-emit-tests")   ; aarch64 native emit target + regalloc
-     (:file "aarch64-encoding-tests") ; aarch64 instruction encoding
+     (:file "aarch64-emit-tests")
+     (:file "aarch64-encoding-tests")
      (:file "target-tests")
      (:file "wasm-extract-tests")
      (:file "wasm-trampoline-tests")
-     (:file "wasm-trampoline-build-tests") ; collect-registers-from-instructions, build-trampoline-body, build-all-wasm-functions
-     (:file "x86-64-regs-tests")     ; red-zone-spill-p, vm-reg-to-x86/xmm, float-vregs, const-to-int
-     (:file "x86-64-sequences-tests") ; emit-idiv-r11/cqo/sequence, sal/sar/ror-cl, cmov, bool-ops
+     (:file "wasm-trampoline-build-tests")
+     (:file "x86-64-regs-tests")
+     (:file "x86-64-sequences-tests")
      (:file "x86-64-codegen-tests")
      (:file "x86-64-codegen-emitter-tests")
-     (:file "x86-64-codegen-insn-tests") ; bswap/add/select/jump-zero/logcount/integer-length/call emitters
-     (:file "x86-64-encoding-tests") ; x86-64 rex/modrm/byte/dword/qword encoding
-     (:file "x86-64-encoding-size-tests") ; x86-64 instruction size, label offsets, program output
-     (:file "x86-64-emit-tests")     ; x86-64 emit target + instruction emit methods
-     (:file "x86-64-emit-logical-tests") ; logical/bitwise emitters + byte-count checks
-     (:file "x86-64-emit-ops-tests")    ; arithmetic/comparison/unary emitters + byte-count checks
-     (:file "elf-tests")             ; ELF binary format helpers: constants, buffer, strtab, builder
-     (:file "elf-extended-tests")    ; ELF extended: additional buffer, strtab, builder, finalize tests
-     (:file "macho-tests")           ; Mach-O binary format helpers: constants, structures, buffer, serialization
-     (:file "macho-builder-tests")   ; Mach-O builder API, binary output, extended structures and serialization
+     (:file "x86-64-codegen-insn-tests")
+     (:file "x86-64-encoding-tests")
+     (:file "x86-64-vm-emitter-tests")
+     (:file "x86-64-encoding-size-tests")
+     (:file "x86-64-emit-tests")
+     (:file "x86-64-emit-logical-tests")
+     (:file "x86-64-emit-ops-tests")
+     (:file "elf-tests")
+     (:file "elf-extended-tests")
+     (:file "macho-tests")
+     (:file "macho-builder-tests")
      (:file "calling-convention-tests")))
    (:module "runtime-tests"
     :pathname "packages/backend/runtime/tests"
@@ -338,14 +352,17 @@
     :components
     ((:file "runtime-tests")
      (:file "runtime-tests-2")
+     (:file "runtime-strings-chars-tests")
+     (:file "runtime-clos-tests")
      (:file "runtime-advanced-tests")
-     (:file "runtime-io-tests")          ; define-rt-stream-op, rt-format, rt-read-line, rt-write-line, rt-peek-char, string-output-stream, stream predicates, pathname utils
+     (:file "runtime-io-tests")
      (:file "gc-tests")
-     (:file "gc-sweep-major-tests")    ; %gc-sweep-old-space (dead/live) + rt-gc-major-collect (counter/reclaim/preserve/stats)
+     (:file "gc-stats-tests")
+     (:file "gc-sweep-major-tests")
      (:file "heap-tests")
-     (:file "heap-gc-tests")          ; Instruction serialization, roundtrip, integration list-building
-     (:file "heap-trace-tests")       ; Card table + address predicates (heap-trace.lisp)
-     (:file "gc-write-barrier-tests") ; SATB + card write barrier (gc-write-barrier.lisp)
+     (:file "heap-gc-tests")
+     (:file "heap-trace-tests")
+     (:file "gc-write-barrier-tests")
      (:file "value-tests")
      (:file "frame-tests")))
    (:module "bytecode-tests"
@@ -363,71 +380,68 @@
     :pathname "tests/integration"
     :serial t
     :components
-     ((:file "compiler-selfhost-fixtures")     ; core fixtures: optimizer, macro, type, CLOS pipeline
-      (:file "compiler-selfhost-fixtures-ext") ; extended fixtures: stack, CLOS compiler, register, mini, full CLOS
-      (:file "compiler-tests")                     ; basic, print, asm, integration, register-alloc, scoping, CPS, PBT
-      (:file "compiler-tests-call-forms")          ; function call, lambda lists, multiple values, variadic
-      (:file "compiler-tests-stdlib")             ; stdlib/io/array/sort/coerce integration split from compiler-tests
-      (:file "compiler-tests-stdlib-io")          ; selfhost-eval, string/char, I/O, HOF, array, sort, coerce
-      (:file "compiler-tests-extended")           ; selfhost smoke + prog/prog*/with-slots + early extended forms
-      (:file "compiler-tests-extended-stdlib")    ; later stdlib/keyword/reader integration split from compiler-tests-extended
-      (:file "compiler-tests-runtime")             ; destructuring-bind, append, consp, maphash, file-io, labels, new builtins
-      (:file "compiler-tests-runtime-string-tests") ; string/symbol, macro expand, list ops, handler-case, hash-table, defmacro, HOF
-      (:file "compiler-tests-runtime-selfhost")   ; runtime-heavy selfhost/CLOS/hash-table integration
+    ((:file "compiler-selfhost-fixtures")
+     (:file "compiler-selfhost-fixtures-ext")
+     (:file "compiler-tests")
+     (:file "compiler-tests-pbt-tests")
+     (:file "compiler-tests-call-forms")
+     (:file "compiler-tests-stdlib")
+     (:file "compiler-tests-stdlib-io")
+     (:file "compiler-tests-extended")
+     (:file "compiler-tests-extended-stdlib")
+     (:file "compiler-tests-runtime")
+     (:file "compiler-tests-runtime-string-tests")
+     (:file "compiler-tests-runtime-hof-tests")
+     (:file "compiler-tests-runtime-selfhost")
      (:file "fr-555-copy-structure-tests")
-     (:file "compiler-tests-selfhost")        ; CLOS pipeline, generic functions, typed defun, type inference, HOF
-     (:file "compiler-tests-selfhost-types")  ; parametric types, defparameter, equal, numeric, warn, format
+     (:file "compiler-tests-selfhost")
+     (:file "compiler-tests-selfhost-types")
      (:file "closure-tests")
      (:file "call-conv-tests")
      (:file "control-flow-tests")
-     (:file "clos-tests")             ; parse, AST structure, slot-spec roundtrip
-     (:file "clos-compile-tests")     ; compilation, execution, inheritance, generic dispatch, setf
-     (:file "clos-dispatch-tests")    ; :default-initargs, :allocation :class, EQL specializers, qualifiers
+     (:file "clos-tests")
+     (:file "clos-compile-tests")
+     (:file "clos-dispatch-tests")
      (:file "stream-tests")
-     ;; macros/expand integration tests (run VM; moved from unit/expand during migration)
-     (:file "loop-macro-tests")             ; LOOP: helpers, expansion structure, FOR IN/FROM
-     (:file "loop-macro-advanced-tests")    ; LOOP sections 4-11: ON/ACROSS/=/hash/WITH/destructuring/accumulation/filtering
-     (:file "loop-macro-runtime-tests")           ; LOOP sections 12-18: while/until, always/never, repeat, INTO, return
-     (:file "loop-macro-runtime-clauses-tests")   ; LOOP sections 19-27: hash/USING, parallel FOR, FOR=THEN, WITH, ACROSS, filter+accum
-     (:file "loop-macro-runtime-ext-tests")        ; LOOP sections 28-31: unbounded FROM, maximize/minimize, accumulation synonyms, coverage
-     (:file "loop-macro-runtime-edge-tests")       ; LOOP sections 32-36: error paths, dotted destructuring, implicit body, multiple accumulators
+     (:file "loop-macro-tests")
+     (:file "loop-macro-advanced-tests")
+     (:file "loop-macro-runtime-tests")
+     (:file "loop-macro-runtime-clauses-tests")
+     (:file "loop-macro-runtime-ext-tests")
+     (:file "loop-macro-runtime-edge-tests")
      (:file "macros-basic-mvb-tests")
      (:file "macros-mutation-tests")
      (:file "macros-sequence-fold-tests")
      (:file "macros-stdlib-list-set-tests")
      (:file "predicate-tests")
-     ;; compile/codegen integration test (runs VM; moved from unit/compile during migration)
      (:file "codegen-runtime-tests")
-      ;; optimizer integration tests (runs VM; moved from unit/optimize during migration)
-      (:file "optimizer-tests")             ; instruction-level pass tests: fold, algebraic, DCE, branch, dominated predicate
-      (:file "optimizer-e2e-tests")         ; e2e correctness, bitwise identities, unary folding, inlining, prolog peephole
-      (:file "optimizer-tests-lowlevel2")   ; extra low-level CSE/GVN/CFG/inlining split from optimizer-tests
-      (:file "optimizer-cfg-inline-tests")    ; CFG reachability, label cleanup, block merge
-      (:file "optimizer-inlining-tests")      ; inlining pass: small/large/skip/rename/propagate
-      (:file "optimizer-lowlevel-tests")           ; fold, copy-prop, heap-alias, inst-read-regs, DCE, jump threading
-      (:file "optimizer-dataflow-passes-tests")    ; global-DCE, pipeline, LICM, PRE
-      (:file "optimizer-store-analysis-tests")     ; egraph, bswap/rotate, dead-store, SCCP, store-to-load
-     (:file "optimizer-strength-inline-tests") ; strength-reduce, reassociate, inline, helper predicates
-      ;; pipeline integration tests (parse pipeline, run-string, incremental)
-        (:file "pipeline-tests")               ; compile-expression, compile-string, run-string, prescan, stdlib, our-eval
-       (:file "pipeline-eval-tests")          ; typed assertions, CPS host/vm eval routing, stdlib regression coverage
-       (:file "pipeline-repl-tests")          ; run-string-repl, reset-repl-state, compile-with-stdlib, whitespace-symbol-p
-      ;; prolog integration tests (queries, rules, goal solving)
-      (:file "prolog-tests")
-     ;; standalone system load verification
+     (:file "optimizer-tests")
+     (:file "optimizer-e2e-tests")
+     (:file "optimizer-tests-lowlevel2")
+     (:file "optimizer-cfg-inline-tests")
+     (:file "optimizer-inlining-tests")
+     (:file "optimizer-lowlevel-tests")
+     (:file "optimizer-lowlevel-dce-tests")
+     (:file "optimizer-dataflow-passes-tests")
+     (:file "optimizer-store-analysis-tests")
+     (:file "optimizer-strength-inline-tests")
+     (:file "pipeline-tests")
+     (:file "pipeline-eval-tests")
+     (:file "pipeline-repl-tests")
+     (:file "prolog-tests")
      (:file "standalone-load-tests")
      (:module "pbt"
       :serial t
       :components
-        ((:file "package")
-         (:file "framework")
-         (:file "framework-dsl")
-         (:file "framework-ast-generators")
-        (:file "generators")
-        (:file "package-macho")
-        (:file "generators-macho")
-        (:file "generators-typed-ast")
-        (:file "generators-typed-ast-utils")
+      ((:file "package")
+       (:file "framework")
+       (:file "framework-dsl")
+       (:file "framework-ast-generators")
+       (:file "generators")
+       (:file "package-macho")
+       (:file "generators-macho")
+       (:file "generators-typed-ast")
+       (:file "generators-typed-ast-utils")
        (:file "vm-pbt-tests")
        (:file "cps-pbt-tests")
        (:file "ast-pbt-tests")
@@ -444,18 +458,18 @@
     :pathname "tests/e2e"
     :serial t
     :components
-    ((:file "selfhost-tests")       ; REPL state, CPS, optimizer, macro codegen, tree walk, file load, HOF, reader macros
-     (:file "selfhost-meta-tests")))) ; meta-circular compilation, our-load file chains, all-source-files
+     ((:file "selfhost-tests")
+      (:file "selfhost-meta-tests"))))
   :perform (asdf:test-op (op c)
               (declare (ignore op c))
               (uiop:symbol-call :cl-cc/test 'run-tests)))
 
-(asdf:defsystem :cl-cc/test-clos
+(asdf:defsystem :cl-cc-test/clos
   :description "CL-CC isolated CLOS integration tests"
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc :cl-cc/bin :cl-cc/tests-framework)
+  :depends-on (:cl-cc :cl-cc-cli :cl-cc-testing-framework)
   :serial t
   :components
   ((:module "integration"

@@ -76,6 +76,37 @@
     (cl-cc/runtime:rt-write-line "test" s)
     (assert-equal (format nil "test~%") (get-output-stream-string s))))
 
+;;; ─── Package wrappers ───────────────────────────────────────────────────────
+
+(deftest rt-make-package-creates-package
+  "rt-make-package creates a runtime package descriptor and records it in the registry." 
+  (let* ((pkg-name (gensym "RT-PKG-"))
+         (pkg (cl-cc/runtime:rt-make-package pkg-name :use '(:cl))))
+    (assert-true (hash-table-p pkg))
+    (assert-equal (string pkg-name) (gethash :name pkg))
+    (assert-eq pkg (gethash (string pkg-name) cl-cc/runtime:*rt-package-registry*))))
+
+(deftest rt-find-package-locates-created-package
+  "rt-find-package returns the descriptor created through rt-make-package." 
+  (let* ((pkg-name (gensym "RT-PKG-"))
+         (pkg (cl-cc/runtime:rt-make-package pkg-name :use '(:cl))))
+    (assert-eq pkg (cl-cc/runtime:rt-find-package pkg-name))))
+
+(deftest rt-find-package-prefers-runtime-registry
+  "rt-find-package resolves through runtime registry metadata once seeded." 
+  (let* ((pkg-name (gensym "RT-PKG-"))
+         (pkg (cl-cc/runtime:rt-make-package pkg-name :use '(:cl))))
+    (assert-eq pkg (gethash (string pkg-name) cl-cc/runtime:*rt-package-registry*))
+    (assert-eq pkg (cl-cc/runtime:rt-find-package pkg-name))))
+
+(deftest rt-export-records-symbol
+  "rt-export records the symbol in runtime package metadata." 
+  (let* ((pkg-name (gensym "RT-PKG-"))
+         (pkg (cl-cc/runtime:rt-make-package pkg-name :use '(:cl)))
+         (sym (cl-cc/runtime:rt-intern "FOO" pkg)))
+    (cl-cc/runtime:rt-export sym pkg)
+    (assert-true (member sym (gethash :exports pkg) :test #'eq))))
+
 ;;; ─── rt-peek-char ───────────────────────────────────────────────────────────
 
 (deftest rt-peek-char-does-not-advance
@@ -101,30 +132,3 @@
   (assert-equal 'character (cl-cc/runtime:rt-stream-element-type *standard-input*))
   (let ((s (make-string-input-stream "x")))
     (assert-= 0 (cl-cc/runtime:rt-interactive-stream-p s))))
-
-;;; ─── Pathname utilities ─────────────────────────────────────────────────────
-
-(deftest rt-pathname-cases
-  "rt-make-pathname: creates pathname; namestring contains name; components :name/:type/:unknown; merge-pathnames."
-  (assert-true (pathnamep (cl-cc/runtime:rt-make-pathname :name "foo" :type "lisp")))
-  (let ((ns (cl-cc/runtime:rt-namestring
-             (cl-cc/runtime:rt-make-pathname :name "foo" :type "lisp"))))
-    (assert-true (search "foo" ns)))
-  (let ((p (cl-cc/runtime:rt-make-pathname :name "bar" :type "txt")))
-    (assert-equal "bar" (cl-cc/runtime:rt-pathname-component p :name))
-    (assert-equal "txt" (cl-cc/runtime:rt-pathname-component p :type))
-    (assert-false (cl-cc/runtime:rt-pathname-component p :unknown-key)))
-  (assert-true (pathnamep (cl-cc/runtime:rt-merge-pathnames "foo.lisp" "/tmp/"))))
-
-(deftest rt-stream-constructor-cases
-  "Broadcast, two-way, echo, and concatenated stream helpers construct CL streams."
-  (let ((out1 (make-string-output-stream))
-        (out2 (make-string-output-stream)))
-    (assert-true (streamp (cl-cc/runtime:rt-make-broadcast-stream out1 out2))))
-  (let ((in (make-string-input-stream "x"))
-        (out (make-string-output-stream)))
-    (assert-true (streamp (cl-cc/runtime:rt-make-two-way-stream in out)))
-    (assert-true (streamp (cl-cc/runtime:rt-make-echo-stream in out))))
-  (let ((a (make-string-input-stream "a"))
-        (b (make-string-input-stream "b")))
-    (assert-true (streamp (cl-cc/runtime:rt-make-concatenated-stream a b)))))

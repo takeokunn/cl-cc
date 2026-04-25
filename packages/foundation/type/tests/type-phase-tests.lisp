@@ -11,7 +11,7 @@
 
 (deftest parse-type-specifier-forall
   "parse-type-specifier: forall form produces a type-forall binding the named variable."
-  (let ((result (cl-cc/type:parse-type-specifier '(forall a (function (a) a)))))
+  (let ((result (cl-cc/type:parse-type-specifier '(forall a (-> a a)))))
     (assert-true (type-forall-p result))
     (assert-eq 'a (type-var-name (type-forall-var result)))))
 
@@ -27,7 +27,7 @@
 
 (deftest parse-type-specifier-qualified
   "parse-type-specifier: => form produces a type-qualified with one named constraint."
-  (let ((result (cl-cc/type:parse-type-specifier '(=> (num a) (function (a a) a)))))
+  (let ((result (cl-cc/type:parse-type-specifier '(=> (num a) (-> a a a)))))
     (assert-true (type-qualified-p result))
     (assert-= 1 (length (type-qualified-constraints result)))
     (let ((constraint (first (type-qualified-constraints result))))
@@ -69,7 +69,7 @@
       (multiple-value-bind (ty subst) (infer-with-env ast)
         (declare (ignore subst))
         (assert-true (or (type-equal-p ty type-null)
-                         (typep ty 'type-unknown)
+                         (cl-cc/type::type-unknown-p ty)
                          (not (null ty))))))
     (error () (assert-true t))))
 
@@ -164,7 +164,7 @@
   "Checking (lambda (x) x) against a forall type succeeds or returns nil without signaling."
   (reset-type-vars!)
   (let* ((a      (fresh-type-var 'a))
-         (fa     (make-type-forall :var a :type (make-type-arrow (list a) a)))
+         (fa     (make-type-forall :var a :body (make-type-arrow (list a) a)))
          (id-ast (lower-sexp-to-ast '(lambda (x) x)))
          (env    (type-env-empty)))
     (assert-true (or (null (check id-ast fa env)) t))))

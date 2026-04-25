@@ -196,7 +196,7 @@ Macro Expander (defstruct→defclass, defconstant→defparameter, etc.)
 AST (CLOS defstructs: ast-defun, ast-let, ast-defclass, …)
     │
     ▼
-CPS Transform (optional)
+CPS Transform (preferred lowering path for supported forms)
     │
     ▼
 Codegen → VM Bytecode
@@ -215,15 +215,15 @@ Codegen → VM Bytecode
 Optimizations:
   - Multi-pass: CSE, constant folding, copy propagation
   - Dead code elimination, strength reduction, jump threading
-  - Prolog-based peephole optimizer
-  - E-graph equality saturation
+  - Prolog-backed rewrite stage (peephole + e-graph rule discovery)
+  - E-graph equality saturation integrated into the main optimizer pipeline
   - CFG construction + SSA form
 
 Type System:
-  - Hindley–Milner (Algorithm W) with gradual typing
+  - Hindley–Milner (Algorithm W) with error-sentinel recovery paths
   - Union type narrowing on conditionals
   - Parametric types: (List T), (Option T)
-  - Typeclass stubs
+  - Typeclasses (partial implementation)
 
 Runtime:
   - 2-generation GC: Young (Cheney semi-space) + Old (tri-color mark-sweep)
@@ -348,12 +348,12 @@ $ cl-cc repl
 
 ## Known Limitations
 
-- **Package system**: `defpackage`/`in-package`/`export` are no-ops at runtime. All symbols share the `:cl-cc` namespace. Multi-package programs are not yet supported.
-- **Restarts**: `restart-case`, `abort`, `continue`, `muffle-warning` etc. are stub macros.
+- **Package system**: runtime package operations now maintain internal registry metadata and use host Common Lisp only as a bootstrap fallback. Multi-package programs are not yet fully self-hosted.
+- **Restarts**: Support is partial. Core restart forms exist, but some advanced helpers are still missing.
 - **`format` directives**: Delegated to the host SBCL in the VM interpreter. Not available in native binaries.
 - **Number tower**: `bignum`, `ratio`, `complex` work in the VM interpreter (host SBCL handles the arithmetic). Not represented in the native x86-64 backend (fixnum only).
 - **Streams**: File handles are integers; first-class stream objects and stream predicates (`streamp`, `stream-element-type`) are not implemented.
-- **`load` / `compile-file`**: Not yet implemented. Use `cl-cc run <file>` to execute files.
+- **`load`**: Not yet implemented. Use `cl-cc run <file>` to execute files.
 
 ## Building & Testing
 

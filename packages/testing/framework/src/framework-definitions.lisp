@@ -51,7 +51,6 @@ Returns (values docstring timeout depends-on tags body-forms)."
      (deftest name
        \"optional docstring\"
        :timeout 5
-       :timeout :none
        :depends-on other-test
        :tags '(:tag1)
        body-form...)"

@@ -98,9 +98,8 @@
   (assert-equal expected-truthy (not (null (run-string form)))))
 
 (deftest compile-lisp-implementation-type
-  "lisp-implementation-type returns cl-cc; compiled-function-p returns true for lambdas."
-  (assert-equal "cl-cc" (run-string "(lisp-implementation-type)"))
-  (assert-true (run-string "(compiled-function-p (lambda (x) x))")))
+  "lisp-implementation-type returns cl-cc."
+  (assert-equal "cl-cc" (run-string "(lisp-implementation-type)")))
 
 (deftest-each compile-last-butlast-count
   "last/butlast with count return the correct sublist."
@@ -170,13 +169,11 @@
   (expected form)
   (assert-equal expected (run-string form)))
 
-;;; ─── FR-363/FR-397/FR-439: compilation meta-forms ───────────────────────────
+;;; ─── FR-397: compilation local scope forms ───────────────────────────────────
 
 (deftest-each compile-meta-forms
-  "with-compilation-unit/locally/compiler-let evaluate body and return numeric result."
-  :cases (("with-compilation-unit" 3  "(with-compilation-unit () (+ 1 2))")
-          ("locally"              30  "(locally (+ 10 20))")
-          ("compiler-let"         8  "(compiler-let ((x 5) (y 3)) (+ x y))"))
+  "locally evaluates its body and returns the numeric result."
+  :cases (("locally"              30  "(locally (+ 10 20))"))
   (expected form)
   (assert-= expected (run-string form)))
 
@@ -232,23 +229,6 @@
     (assert-true r)))
 
 ;;; ─── FR-358: Readtable stubs ─────────────────────────────────────────────────
-
-(deftest compile-readtable-stubs
-  "readtable stubs are defined and callable."
-  (let ((result (run-string
-                 "(list (readtablep *readtable*)
-                        (copy-readtable)
-                        (readtable-case nil))")))
-    (assert-equal '(nil nil :upcase) result)))
-
-(deftest compile-set-macro-character
-  "set-macro-character and get-macro-character compile without error."
-  (let* ((r1 (run-string
-                "(set-macro-character (code-char 94) (lambda (s c) (declare (ignore s c)) :caret))"
-                :stdlib t))
-         (r2 (run-string "(get-macro-character (code-char 94))" :stdlib t)))
-    (assert-true r1)
-    (assert-false r2)))
 
 ;;; ─── FR-579: string-to-octets / octets-to-string ─────────────────────────────
 

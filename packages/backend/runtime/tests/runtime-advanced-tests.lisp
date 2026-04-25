@@ -1,7 +1,10 @@
 ;;;; tests/unit/runtime/runtime-advanced-tests.lisp — Runtime Advanced Unit Tests
 ;;;;
-;;;; Tests for src/runtime/runtime.lisp: bitwise ops, string/char ops,
-;;;; symbol ops, hash table ops, conditions, misc, and I/O wrappers.
+;;;; Tests for runtime.lisp (bitwise), runtime-math-io.lisp (symbols/hash/conditions/misc),
+;;;; and runtime-io.lisp (I/O wrappers).
+;;;;
+;;;; String/char ops → runtime-strings-chars-tests.lisp
+;;;; CLOS/generic ops → runtime-clos-tests.lisp
 
 (in-package :cl-cc/test)
 
@@ -28,71 +31,6 @@
   (pred-fn a b expected)
   (assert-= expected (funcall pred-fn a b)))
 
-;;; ─── String Operations ─────────────────────────────────────────────────────
-
-(deftest rt-string-basic
-  "rt-make-string, rt-string-length, rt-string-ref, rt-string-set."
-  (let ((s (cl-cc/runtime:rt-make-string 3 #\x)))
-    (assert-= 3 (cl-cc/runtime:rt-string-length s))
-    (assert-equal #\x (cl-cc/runtime:rt-string-ref s 0))
-    (cl-cc/runtime:rt-string-set s 1 #\y)
-    (assert-equal #\y (cl-cc/runtime:rt-string-ref s 1))))
-
-(deftest-each rt-string-comparisons
-  "String comparison wrappers return 1/0."
-  :cases (("=-t"    #'cl-cc/runtime:rt-string=    "abc" "abc" 1)
-          ("=-f"    #'cl-cc/runtime:rt-string=    "abc" "abd" 0)
-          ("<-t"    #'cl-cc/runtime:rt-string<    "abc" "abd" 1)
-          ("<-f"    #'cl-cc/runtime:rt-string<    "abd" "abc" 0)
-          (">-t"    #'cl-cc/runtime:rt-string>    "abd" "abc" 1)
-          (">-f"    #'cl-cc/runtime:rt-string>    "abc" "abd" 0))
-  (cmp-fn a b expected)
-  (assert-= expected (funcall cmp-fn a b)))
-
-(deftest-each rt-string-transform-ops
-  "String case and trim operations produce correct output."
-  :cases (("upcase"      #'cl-cc/runtime:rt-string-upcase                        "hello"    "HELLO")
-          ("downcase"    #'cl-cc/runtime:rt-string-downcase                       "HELLO"    "hello")
-          ("capitalize"  #'cl-cc/runtime:rt-string-capitalize                     "hello world" "Hello World")
-          ("trim"        (lambda (s) (cl-cc/runtime:rt-string-trim " " s))        " hello "  "hello")
-          ("left-trim"   (lambda (s) (cl-cc/runtime:rt-string-left-trim " " s))  " hello "  "hello ")
-          ("right-trim"  (lambda (s) (cl-cc/runtime:rt-string-right-trim " " s)) " hello "  " hello"))
-  (fn input expected)
-  (assert-equal expected (funcall fn input)))
-
-(deftest rt-search-string-and-subseq
-  "rt-search-string and rt-subseq."
-  (assert-= 3 (cl-cc/runtime:rt-search-string "lo" "hello world"))
-  (assert-equal "llo" (cl-cc/runtime:rt-subseq "hello" 2)))
-
-;;; ─── Character Operations ──────────────────────────────────────────────────
-
-(deftest rt-char-code-roundtrip
-  "rt-char-code and rt-code-char roundtrip."
-  (assert-equal #\A (cl-cc/runtime:rt-code-char (cl-cc/runtime:rt-char-code #\A))))
-
-(deftest-each rt-char-predicates
-  "Character predicates return 1/0."
-  :cases (("alpha-t"   #'cl-cc/runtime:rt-alpha-char-p   #\a  1)
-          ("alpha-f"   #'cl-cc/runtime:rt-alpha-char-p   #\1  0)
-          ("digit-t"   #'cl-cc/runtime:rt-digit-char-p   #\5  1)
-          ("digit-f"   #'cl-cc/runtime:rt-digit-char-p   #\a  0)
-          ("alnum-t"   #'cl-cc/runtime:rt-alphanumericp  #\a  1)
-          ("alnum-f"   #'cl-cc/runtime:rt-alphanumericp  #\!  0)
-          ("upper-t"   #'cl-cc/runtime:rt-upper-case-p   #\A  1)
-          ("upper-f"   #'cl-cc/runtime:rt-upper-case-p   #\a  0)
-          ("lower-t"   #'cl-cc/runtime:rt-lower-case-p   #\a  1)
-          ("lower-f"   #'cl-cc/runtime:rt-lower-case-p   #\A  0))
-  (pred-fn input expected)
-  (assert-= expected (funcall pred-fn input)))
-
-(deftest-each rt-char-case-ops
-  "rt-char-upcase/downcase: convert character case."
-  :cases (("upcase"   #'cl-cc/runtime:rt-char-upcase   #\a #\A)
-          ("downcase" #'cl-cc/runtime:rt-char-downcase  #\A #\a))
-  (fn input expected)
-  (assert-equal expected (funcall fn input)))
-
 ;;; ─── Symbol Operations ─────────────────────────────────────────────────────
 
 (deftest rt-symbol-operations
@@ -110,6 +48,15 @@
     (assert-eq 'red (cl-cc/runtime:rt-get-prop sym :color))
     (cl-cc/runtime:rt-remprop sym :color)
     (assert-false (cl-cc/runtime:rt-get-prop sym :color))))
+
+(deftest rt-intern-in-package
+  "rt-intern interns through the runtime package registry and preserves identity per package/name."
+  (let* ((pkg (find-package :cl-cc/test))
+         (sym (cl-cc/runtime:rt-intern "RT-INTERN-TEST-SYM" pkg))
+         (sym2 (cl-cc/runtime:rt-intern "RT-INTERN-TEST-SYM" pkg)))
+    (assert-true (symbolp sym))
+    (assert-equal "RT-INTERN-TEST-SYM" (symbol-name sym))
+    (assert-eq sym sym2)))
 
 ;;; ─── Hash Table Operations ─────────────────────────────────────────────────
 
@@ -132,75 +79,108 @@
     (cl-cc/runtime:rt-clrhash ht)
     (assert-= 0 (cl-cc/runtime:rt-hash-count ht))))
 
+(deftest rt-maphash-and-hash-test
+  "rt-maphash iterates all entries; rt-hash-test returns the test function."
+  (let ((ht (cl-cc/runtime:rt-make-hash-table :test #'equal)))
+    (cl-cc/runtime:rt-sethash "a" ht 1)
+    (cl-cc/runtime:rt-sethash "b" ht 2)
+    (let ((collected nil))
+      (cl-cc/runtime:rt-maphash (lambda (k v) (push (cons k v) collected)) ht)
+      (assert-= 2 (length collected)))
+    (assert-equal 'equal (cl-cc/runtime:rt-hash-test ht))))
+
 ;;; ─── Conditions ────────────────────────────────────────────────────────────
 
 (deftest rt-signal-error-signals
   "rt-signal-error signals the given condition."
   (assert-signals error (cl-cc/runtime:rt-signal-error "test error")))
 
-(deftest rt-bind-restart-calls-thunk
-  "rt-bind-restart just calls the thunk (minimal stub)."
-  (let ((called nil))
-    (cl-cc/runtime:rt-bind-restart 'continue nil (lambda () (setf called t)))
-    (assert-true called)))
+(deftest rt-signal-conditions
+  "rt-signal signals a condition (not an error); rt-warn-fn issues a warning."
+  (let ((got nil))
+    (handler-bind ((simple-condition (lambda (c) (setf got c))))
+      (cl-cc/runtime:rt-signal
+        (make-condition 'simple-condition :format-control "test")))
+    (assert-true got))
+  (assert-signals warning (cl-cc/runtime:rt-warn-fn "a warning")))
 
 ;;; ─── Misc ──────────────────────────────────────────────────────────────────
 
-(deftest-each rt-fboundp-convention
-  "rt-fboundp returns 1 for bound function symbols, 0 for unbound."
-  :cases (("bound"   '+ 1)
-          ("unbound" (gensym "UNBOUND") 0))
-  (sym expected)
-  (assert-= expected (cl-cc/runtime:rt-fboundp sym)))
+(deftest rt-fboundp-uses-runtime-function-registry
+  "rt-fboundp reflects the explicit runtime function registry rather than scanning the host namespace on demand." 
+  (let ((sym (gensym "RT-FBOUNDP-TEST-")))
+    (setf (gethash sym cl-cc/runtime::*rt-function-registry*) t)
+    (assert-= 1 (cl-cc/runtime:rt-fboundp sym))
+    (remhash sym cl-cc/runtime::*rt-function-registry*)
+    (assert-= 0 (cl-cc/runtime:rt-fboundp sym))))
+
+(deftest rt-bootstrap-function-registry-uses-explicit-seed-list
+  "%rt-bootstrap-function-registry registers the explicit seed list without consulting host function cells." 
+  (let ((cl-cc/runtime::*rt-function-registry* (make-hash-table :test #'eq)))
+    (cl-cc/runtime::%rt-bootstrap-function-registry)
+    (dolist (sym cl-cc/runtime::*rt-bootstrap-function-symbols*)
+      (assert-true (gethash sym cl-cc/runtime::*rt-function-registry*)))))
+
+(deftest rt-package-registry-is-seeded-conservatively
+  "The runtime package registry is seeded from an explicit package list, not the full host universe." 
+  (assert-true (find :cl-cc/runtime cl-cc/runtime::*rt-bootstrap-package-names*))
+  (assert-true (find :cl cl-cc/runtime::*rt-bootstrap-package-names*))
+  (assert-true (gethash "CL-CC/RUNTIME" cl-cc/runtime::*rt-package-registry*)))
+
+(deftest rt-boundp-and-makunbound
+  "rt-boundp detects runtime-registry bindings; rt-makunbound removes them."
+  (let ((sym (gensym "RT-BOUND-TEST-")))
+    (assert-= 0 (cl-cc/runtime:rt-boundp sym))
+    (cl-cc/runtime:rt-set-symbol-value sym 42)
+    (assert-= 1 (cl-cc/runtime:rt-boundp sym))
+    (cl-cc/runtime:rt-makunbound sym)
+    (assert-= 0 (cl-cc/runtime:rt-boundp sym))))
 
 (deftest rt-coerce-works
   "rt-coerce delegates to CL coerce."
   (assert-equal '(1 2 3) (cl-cc/runtime:rt-coerce #(1 2 3) 'list)))
 
-(deftest-each rt-parse-integer
-  "rt-parse-integer: decimal and hex (with :radix) parsing."
-  :cases (("decimal" "42"  10 42)
-          ("hex"     "FF"  16 255))
-  (input radix expected)
-  (assert-= expected (cl-cc/runtime:rt-parse-integer input :radix radix)))
+(deftest rt-read-write-to-string
+  "rt-read-from-string and rt-write-to-string roundtrip."
+  (assert-= 42 (cl-cc/runtime:rt-read-from-string "42"))
+  (assert-equal "(1 2 3)" (cl-cc/runtime:rt-write-to-string '(1 2 3))))
+
+(deftest rt-random-and-time
+  "rt-random returns integer in range; rt-get-universal-time returns an integer."
+  (let ((r (cl-cc/runtime:rt-random 100)))
+    (assert-true (integerp r))
+    (assert-true (and (>= r 0) (< r 100))))
+  (assert-true (integerp (cl-cc/runtime:rt-get-universal-time))))
 
 ;;; ─── I/O Wrappers ──────────────────────────────────────────────────────────
 
 (deftest rt-string-stream-creation-and-io
   "String stream creation: input-stream read-char, output-stream write+get, output-stream roundtrip."
-  ;; Input stream: read-char returns first character
   (let ((s (cl-cc/runtime:rt-make-string-stream "hello")))
     (assert-equal #\h (cl-cc/runtime:rt-read-char s)))
-  ;; Output stream via rt-make-string-stream: write then get-string
   (let ((s (cl-cc/runtime:rt-make-string-stream "" :direction :output)))
     (cl-cc/runtime:rt-write-string "world" s)
     (assert-equal "world" (cl-cc/runtime:rt-get-string-from-stream s)))
-  ;; Output stream via rt-make-string-output-stream: stream-write-string + get-output
   (let ((s (cl-cc/runtime:rt-make-string-output-stream)))
     (cl-cc/runtime:rt-stream-write-string s "test")
     (assert-equal "test" (cl-cc/runtime:rt-get-output-stream-string s))))
 
 (deftest-each rt-stream-predicates
   "rt-input-stream-p / rt-output-stream-p / rt-open-stream-p return 1/0."
-  :cases (("input-true"  #'cl-cc/runtime:rt-input-stream-p  :input
-           (lambda (pred-fn stream)
-             (assert-= 1 (funcall pred-fn stream))))
-          ("input-false" #'cl-cc/runtime:rt-input-stream-p  :output
-           (lambda (pred-fn stream)
-             (assert-= 0 (funcall pred-fn stream))))
-          ("output-true" #'cl-cc/runtime:rt-output-stream-p :output
-           (lambda (pred-fn stream)
-             (assert-= 1 (funcall pred-fn stream))))
+  :cases (("input-true"   #'cl-cc/runtime:rt-input-stream-p  :input
+           (lambda (pred-fn stream) (assert-= 1 (funcall pred-fn stream))))
+          ("input-false"  #'cl-cc/runtime:rt-input-stream-p  :output
+           (lambda (pred-fn stream) (assert-= 0 (funcall pred-fn stream))))
+          ("output-true"  #'cl-cc/runtime:rt-output-stream-p :output
+           (lambda (pred-fn stream) (assert-= 1 (funcall pred-fn stream))))
           ("output-false" #'cl-cc/runtime:rt-output-stream-p :input
-           (lambda (pred-fn stream)
-             (assert-= 0 (funcall pred-fn stream))))
-          ("open-true"   #'cl-cc/runtime:rt-open-stream-p   :input
-           (lambda (pred-fn stream)
-             (assert-= 1 (funcall pred-fn stream)))))
+           (lambda (pred-fn stream) (assert-= 0 (funcall pred-fn stream))))
+          ("open-true"    #'cl-cc/runtime:rt-open-stream-p   :input
+           (lambda (pred-fn stream) (assert-= 1 (funcall pred-fn stream)))))
   (pred-fn direction verify)
   (let ((stream (ecase direction
-                   (:input  (make-string-input-stream "x"))
-                   (:output (make-string-output-stream)))))
+                  (:input  (make-string-input-stream "x"))
+                  (:output (make-string-output-stream)))))
     (funcall verify pred-fn stream)))
 
 (deftest rt-read-write-char-roundtrip
@@ -209,11 +189,3 @@
     (cl-cc/runtime:rt-write-char #\Z out)
     (let ((in (make-string-input-stream (get-output-stream-string out))))
       (assert-equal #\Z (cl-cc/runtime:rt-read-char in)))))
-
-(deftest-each rt-pathname-component-extraction
-  "rt-pathname-component extracts :name and :type components."
-  :cases (("name" :name "test")
-          ("type" :type "lisp"))
-  (component expected)
-  (let ((p (cl-cc/runtime:rt-make-pathname :name "test" :type "lisp")))
-    (assert-equal expected (cl-cc/runtime:rt-pathname-component p component))))

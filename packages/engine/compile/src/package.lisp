@@ -30,6 +30,14 @@
    #:*repl-label-counter* #:*repl-capture-label-counter*
    #:*labels-boxed-fns* #:*compiling-typed-fn*
    #:make-register #:make-label #:emit #:lookup-var
+   #:*cps-compile-unsupported-ast-types*
+   #:*cps-native-compile-unsupported-ast-types*
+   #:*enable-cps-vm-primary-path*
+   #:*compile-expression-cps-recursion-guard*
+   #:%cps-compile-safe-ast-p
+   #:%cps-vm-compile-safe-ast-p
+   #:%cps-native-compile-safe-ast-p
+   #:%cps-identity-entry-form
 
    ;; --- codegen-fold-optimize.lisp --- AST optimizer ---------------------
    #:optimize-ast
@@ -39,9 +47,6 @@
 
    ;; --- codegen-core.lisp --- AST compilation generic function ---------
    #:compile-ast
-
-   ;; --- cps-ast-functional.lisp --- CPS transform entry point ----------
-   #:maybe-cps-transform
 
    ;; --- cps.lisp / cps-ast.lisp --- CPS transformation ----------------
    #:cps-transform

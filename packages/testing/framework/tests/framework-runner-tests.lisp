@@ -70,8 +70,8 @@
     (assert-true (search "later" (getf result :detail))))
 
 (deftest effective-test-timeout-cases
-  "%effective-test-timeout normalizes nil, :none, and positive integers."
-  (assert-null (%effective-test-timeout (list :timeout :none)))
+  "%effective-test-timeout normalizes nil, invalid values, and positive integers."
+(assert-= (%default-test-timeout) (%effective-test-timeout (list :timeout :bogus)))
   (assert-equal 7 (%effective-test-timeout (list :timeout 7)))
   (assert-equal (%default-test-timeout)
                 (%effective-test-timeout (list :timeout nil))))
@@ -170,11 +170,13 @@
     (assert-string= "oops" (getf r :detail))))
 
 (deftest-each format-timeout-detail-rendering
-  "%format-timeout-detail renders :none as 'disabled' and a number as '<N> seconds'."
-  :cases (("none-keyword" :none "disabled")
-          ("numeric"      5     "5 seconds"))
+  "%format-timeout-detail renders the configured timeout or the default timeout."
+  :cases (("defaulted" nil nil)
+          ("numeric"   5   "5 seconds"))
   (timeout expected-substr)
-  (assert-true (search expected-substr (%format-timeout-detail timeout))))
+  (assert-true (search (or expected-substr
+                           (format nil "~A seconds" (%default-test-timeout)))
+                       (%format-timeout-detail timeout))))
 
 (deftest count-results-by-status-counts-correctly
   "%count-results-by-status filters by exact status keyword."
@@ -213,3 +215,11 @@
       (declare (ignore tmp)))
     (let ((result (funcall env-source)))
       (assert-true (or (null result) (and (integerp result) (plusp result)))))))
+
+(deftest cpu-count-command-timeout-yields-nil
+  "%parse-command-cpu-count returns NIL when the command runner times out."
+  (with-replaced-function (uiop:run-program
+                           (lambda (&rest args)
+                             (declare (ignore args))
+                             (error 'sb-ext:timeout)))
+    (assert-null (%parse-command-cpu-count '("fake-cpu-count")))))

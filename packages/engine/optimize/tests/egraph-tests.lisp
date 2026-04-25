@@ -109,3 +109,17 @@
     (assert-true (find rule-name rules
                         :key (lambda (r) (getf r :name))))))
 
+(deftest egraph-builtin-rules-consults-prolog-facts
+  "egraph-builtin-rules consults the Prolog egraph-rule facts when they are available." 
+  (let ((called nil))
+    (with-replaced-function (cl-cc/prolog:query-all
+                             (lambda (goal)
+                               (setf called goal)
+                               '((egraph-rule fold-add (add (const ?a) (const ?b)) (const)))))
+      (let ((rules (cl-cc/optimize::egraph-builtin-rules)))
+        (assert-true called)
+        (let ((rule (find 'cl-cc/optimize::fold-add rules
+                          :key (lambda (r) (getf r :name)))))
+          (assert-true rule)
+          (assert-equal '(add (const ?a) (const ?b)) (getf rule :lhs))
+          (assert-equal '(const) (getf rule :rhs)))))))

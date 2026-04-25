@@ -1,7 +1,8 @@
 ;;;; tests/unit/compile/pipeline-native-tests.lisp — Pipeline Native tests
 ;;;;
 ;;;; Tests for pipeline-native.lisp: *compile-cache-root*, %compile-cache-key,
-;;;; %compile-cache-path, %copy-file-bytes, and typeclass macro registration.
+;;;; %compile-cache-path, and %make-native-opts.
+;;;; File I/O + typeclass + integration → pipeline-native-io-tests.lisp.
 
 (in-package :cl-cc/test)
 
@@ -11,6 +12,39 @@
   :parallel nil)
 
 (in-suite pipeline-native-suite)
+
+;;; ─── %make-native-opts ──────────────────────────────────────────────────────
+
+(deftest pipeline-native-make-opts-defaults
+  "%make-native-opts returns a plist with :opt-remarks-mode defaulting to :all; other slots nil."
+  (let ((opts (cl-cc::%make-native-opts)))
+    (assert-true (listp opts))
+    (assert-null (getf opts :pass-pipeline))
+    (assert-null (getf opts :print-pass-timings))
+    (assert-null (getf opts :timing-stream))
+    (assert-eq :all (getf opts :opt-remarks-mode))
+    (assert-null (getf opts :trace-json-stream))))
+
+(deftest pipeline-native-make-opts-explicit-values
+  "%make-native-opts captures explicit keyword values into the plist."
+  (let ((opts (cl-cc::%make-native-opts :pass-pipeline '(:fold :dce)
+                                        :print-pass-timings t
+                                        :opt-remarks-mode :pass)))
+    (assert-equal '(:fold :dce) (getf opts :pass-pipeline))
+    (assert-true (getf opts :print-pass-timings))
+    (assert-eq :pass (getf opts :opt-remarks-mode))))
+
+(deftest pipeline-native-make-opts-applyable-to-compile-expression
+  "%make-native-opts plist can be APPLYed directly as compile-expression keyword args."
+  (let ((captured-args nil))
+    (with-replaced-function (cl-cc:compile-expression
+                             (lambda (form &rest args)
+                               (declare (ignore form))
+                               (setf captured-args args)
+                               (cl-cc/compile::make-compilation-result :program nil)))
+      (let ((opts (cl-cc::%make-native-opts :pass-pipeline '(:fold))))
+        (apply #'cl-cc:compile-expression '(+ 1 2) :target :x86_64 opts)
+        (assert-equal '(:fold) (getf captured-args :pass-pipeline))))))
 
 ;;; ─── *compile-cache-root* ───────────────────────────────────────────────────
 
@@ -82,159 +116,3 @@
   (expected accessor)
   (let ((path (cl-cc::%compile-cache-path "somekey" #P"my-program.out")))
     (assert-equal expected (funcall accessor path))))
-
-;;; ─── %copy-file-bytes ───────────────────────────────────────────────────────
-
-(deftest pipeline-native-copy-file-bytes-basic-cases
-  "%copy-file-bytes returns destination pathname and creates destination file."
-  (uiop:with-temporary-file (:pathname src :type "bin")
-    (uiop:with-temporary-file (:pathname dst :type "bin" :keep t)
-      (let* ((data (make-array 4 :element-type '(unsigned-byte 8)
-                                :initial-contents '(1 2 3 4)))
-             (_ (with-open-file (out src :direction :output
-                                        :if-exists :supersede
-                                        :element-type '(unsigned-byte 8))
-                  (write-sequence data out)))
-             (result (cl-cc::%copy-file-bytes src dst)))
-        (declare (ignore _))
-        (assert-true (pathnamep result))
-        (assert-equal (namestring dst) (namestring result))
-        (assert-true (probe-file dst))
-        (ignore-errors (delete-file dst))))))
-
-(deftest pipeline-native-copy-file-bytes-same-contents
-  "%copy-file-bytes produces a destination file with identical contents."
-  (uiop:with-temporary-file (:pathname src :type "bin")
-    (uiop:with-temporary-file (:pathname dst :type "bin" :keep t)
-      (let ((data (make-array 8 :element-type '(unsigned-byte 8)
-                               :initial-contents '(0 1 2 3 255 128 64 32))))
-        (with-open-file (out src :direction :output
-                                 :if-exists :supersede
-                                 :element-type '(unsigned-byte 8))
-          (write-sequence data out))
-        (cl-cc::%copy-file-bytes src dst)
-        (let ((read-back (make-array 8 :element-type '(unsigned-byte 8))))
-          (with-open-file (in dst :direction :input
-                                  :element-type '(unsigned-byte 8))
-            (read-sequence read-back in))
-          (assert-equal (coerce data 'list)
-                        (coerce read-back 'list)))
-        (ignore-errors (delete-file dst))))))
-
-(deftest pipeline-native-copy-file-bytes-empty-file
-  "%copy-file-bytes handles empty source files."
-  (uiop:with-temporary-file (:pathname src :type "bin")
-    (uiop:with-temporary-file (:pathname dst :type "bin" :keep t)
-      ;; Write empty file
-      (with-open-file (out src :direction :output
-                               :if-exists :supersede
-                               :element-type '(unsigned-byte 8)))
-      (cl-cc::%copy-file-bytes src dst)
-      (assert-true (probe-file dst))
-      (assert-= 0 (with-open-file (in dst :direction :input
-                                          :element-type '(unsigned-byte 8))
-                    (file-length in)))
-      (ignore-errors (delete-file dst)))))
-
-(deftest pipeline-native-copy-file-bytes-large-buffer
-  "%copy-file-bytes handles files larger than the 4096-byte internal buffer."
-  ;; Write a large file by repeating a small chunk to cross the 4096-byte
-  ;; buffer boundary inside %copy-file-bytes.  We use a text stream for
-  ;; building the source, then copy it as bytes.
-  (uiop:with-temporary-file (:pathname src :type "bin")
-    (uiop:with-temporary-file (:pathname dst :type "bin" :keep t)
-      ;; Write the source: fill with printable ASCII repeated until >4096 bytes.
-      (let ((chunk "ABCDEFGHIJ"))
-        (with-open-file (out src :direction :output
-                                 :if-exists :supersede
-                                 :element-type 'character)
-          (loop repeat 450 do (write-string chunk out))))
-      (let ((src-size (with-open-file (s src :element-type '(unsigned-byte 8))
-                        (file-length s))))
-        (assert-true (> src-size 4096))
-        (cl-cc::%copy-file-bytes src dst)
-        (let ((dst-size (with-open-file (s dst :element-type '(unsigned-byte 8))
-                          (file-length s))))
-          (assert-= src-size dst-size)))
-      (ignore-errors (delete-file dst)))))
-
-;;; ─── Typeclass macro registration ───────────────────────────────────────────
-
-(deftest-each pipeline-native-typeclass-macros-registered-as-functions
-  "deftype-class and deftype-instance are each registered as a function-valued macro."
-  :cases (("deftype-class"    'cl-cc::deftype-class)
-          ("deftype-instance" 'cl-cc::deftype-instance))
-  (macro-name)
-  (let ((expander (gethash macro-name
-                            (cl-cc/expand::macro-env-table cl-cc/expand::*macro-environment*))))
-    (assert-true expander)
-    (assert-true (functionp expander))))
-
-(deftest pipeline-native-typeclass-class-expander-builds-register-form
-  "deftype-class expander produces a register-typeclass form backed by make-typeclass-def data." 
-  (let* ((expander (gethash 'cl-cc::deftype-class
-                            (cl-cc/expand::macro-env-table cl-cc/expand::*macro-environment*)))
-         (expanded (funcall expander
-                            '(deftype-class eq-like (a)
-                               (equals (-> a a bool)))
-                            nil)))
-    (assert-eq 'progn (car expanded))
-    (assert-true (search "REGISTER-TYPECLASS" (prin1-to-string expanded)))
-    (assert-true (search "MAKE-TYPECLASS-DEF" (prin1-to-string expanded)))))
-
-(deftest pipeline-native-typeclass-instance-expander-builds-register-form
-  "deftype-instance expander produces register-typeclass-instance plus a dictionary defvar." 
-  (let* ((expander (gethash 'cl-cc::deftype-instance
-                            (cl-cc/expand::macro-env-table cl-cc/expand::*macro-environment*)))
-         (expanded (funcall expander
-                            '(deftype-instance eq-like integer
-                               (equals (lambda (x y) (= x y))))
-                            nil)))
-    (assert-eq 'progn (car expanded))
-    (assert-true (search "REGISTER-TYPECLASS-INSTANCE" (prin1-to-string expanded)))
-    (assert-true (search "DEFVAR" (prin1-to-string expanded)))))
-
-(deftest pipeline-native-compile-file-cache-hit-copies-artifact
-  "compile-file-to-native reuses a cached native artifact when present."
-  (uiop:with-temporary-file (:pathname input :type "php" :keep t)
-    (uiop:with-temporary-file (:pathname output :type "bin" :keep t)
-      (uiop:with-temporary-file (:pathname cache :type "bin" :keep t)
-        (let ((copied nil)
-              (chmod-called nil))
-          (with-open-file (stream input :direction :output :if-exists :supersede)
-            (write-line "<?php echo 1;" stream))
-          (with-replaced-function (cl-cc::%compile-cache-key (lambda (&rest args)
-                                                               (declare (ignore args))
-                                                               "cache-key"))
-            (with-replaced-function (cl-cc::%compile-cache-path (lambda (key out)
-                                                                  (declare (ignore key out))
-                                                                  cache))
-              (with-replaced-function (cl-cc::%copy-file-bytes
-                                       (lambda (from to)
-                                         (setf copied (list from to))
-                                         to))
-                (with-replaced-function (uiop:run-program
-                                         (lambda (&rest args)
-                                           (declare (ignore args))
-                                           (setf chmod-called t)
-                                           nil))
-                  (assert-equal output
-                                (cl-cc::compile-file-to-native input :output-file output))
-                  (assert-equal (list cache output) copied)
-                  (assert-true chmod-called))))))
-        (ignore-errors (delete-file cache)))
-      (ignore-errors (delete-file output)))
-    (ignore-errors (delete-file input))))
-
-(deftest pipeline-native-cps-safe-ast-p-allowlist
-  "%cps-native-compile-safe-ast-p accepts call and multiple-value CPS-backed forms and rejects unsupported object forms."
-  (let ((safe-ast (cl-cc:make-ast-call :func 'f :args (list (cl-cc:make-ast-int :value 1))))
-        (mv-ast (cl-cc::make-ast-multiple-value-prog1
-                 :first (cl-cc:make-ast-int :value 1)
-                 :forms (list (cl-cc:make-ast-int :value 2))))
-        (unsafe-ast (cl-cc/ast::make-ast-make-instance
-                     :class (cl-cc:make-ast-quote :value 'point)
-                     :initargs nil)))
-    (assert-true (cl-cc::%cps-native-compile-safe-ast-p safe-ast))
-    (assert-true (cl-cc::%cps-native-compile-safe-ast-p mv-ast))
-    (assert-false (cl-cc::%cps-native-compile-safe-ast-p unsafe-ast))))

@@ -63,9 +63,10 @@ Returns (values new-subst residual-constraints).
                             (setf current-subst new-subst)
                             (push c residual)))
                       (push c residual)))
-                ;; Gradual typing / error: accept
-                ((or (type-error-p tau) (type-unknown-p tau))
-                 nil)
+                ;; Type errors do not satisfy constraints; keep them residual so
+                ;; callers can surface the failure instead of silently accepting.
+                ((type-error-p tau)
+                 (push c residual))
                ;; Check instance
                ((has-typeclass-instance-p class-name tau)
                 nil)

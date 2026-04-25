@@ -45,6 +45,5 @@
    (:file "optimizer-strength-ext")
      (:file "optimizer-cse-gvn")
      (:file "optimizer-licm")
-     (:file "optimizer")
-     (:file "optimizer-pipeline-support")
-     (:file "optimizer-pipeline")))
+      (:file "optimizer")
+      (:file "optimizer-pipeline")))

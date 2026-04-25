@@ -1,17 +1,17 @@
-;;;; tests/unit/expand/macros-list-compat-tests.lisp
-;;;; Coverage tests for src/expand/macros-list-compat.lisp
+;;;; tests/unit/expand/macros-sequence-helpers-tests.lisp
+;;;; Coverage tests for src/expand/macros-sequence-helpers.lisp
 
 (in-package :cl-cc/test)
 
-(defsuite macros-list-compat-suite
-  :description "Tests for macros-list-compat.lisp"
+(defsuite macros-sequence-helpers-suite
+  :description "Tests for macros-sequence-helpers.lisp"
   :parent cl-cc-unit-suite)
 
-(in-suite macros-list-compat-suite)
+(in-suite macros-sequence-helpers-suite)
 
 ;;; ── SUBST-IF / SUBST-IF-NOT ────────────────────────────────────────────────
 
-(deftest-each macros-list-compat-let-body-structure
+(deftest-each macros-sequence-helpers-let-body-structure
   "subst-if, member-if, and maphash each expand to a LET whose body begins with a specific inner operator."
   :cases (("subst-if"  '(subst-if new pred tree)  'labels)
           ("member-if" '(member-if pred lst)       'do)
@@ -21,7 +21,7 @@
     (assert-eq 'let (car result))
     (assert-eq inner-op (car (caddr result)))))
 
-(deftest-each macros-list-compat-complement-delegation
+(deftest-each macros-sequence-helpers-complement-delegation
   "subst-if-not and member-if-not delegate to their non-not counterparts via COMPLEMENT.
 For member-if-not the (complement pred) cons sits at position 2 (cadr), not
 cadar — caadr would extract the CAR of that cons (the symbol 'complement) and

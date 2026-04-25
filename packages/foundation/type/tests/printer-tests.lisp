@@ -159,9 +159,9 @@
 ;;; ─── type-to-string: edge cases not covered above ────────────────────────
 
 (deftest-each printer-atomic-sentinel-strings
-  "nil prints as NIL; make-type-unknown prints exactly as '?'."
+  "nil prints as NIL; the unknown sentinel prints exactly as '?'."
   :cases (("nil-val"  "NIL" nil)
-          ("unknown"  "?"   (make-type-unknown)))
+          ("unknown"  "?"   cl-cc/type::+type-unknown+))
   (expected node)
   (assert-string= expected (type-to-string node)))
 
@@ -209,7 +209,7 @@
         (e2 (make-type-error :message "unknown")))
     (assert-string= "<error: unbound x>" (type-to-string e1))
     (assert-string= "?"                  (type-to-string e2))
-    (assert-string= "?"                  (type-to-string +type-unknown+))))
+    (assert-string= "?"                  (type-to-string cl-cc/type::+type-unknown+))))
 
 (deftest printer-compound-types
   "type-to-string formats product, record, and linear types correctly."

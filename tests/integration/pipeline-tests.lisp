@@ -37,7 +37,10 @@
   (assert-true (member 'cl-cc/ast:ast-setq cl-cc::*cps-native-compile-safe-ast-types*))
   (assert-true (member 'cl-cc/ast:ast-setq cl-cc::*cps-vm-compile-safe-ast-types*))
   (assert-true (equal '("PARSE-LAMBDA-LIST" . :cl-cc/expand)
-                      (first cl-cc::*early-selfhost-macro-bridge-entries*))))
+                      (first '(("PARSE-LAMBDA-LIST"            . :cl-cc/expand)
+                               ("DESTRUCTURE-LAMBDA-LIST"      . :cl-cc/expand)
+                               ("GENERATE-LAMBDA-BINDINGS"     . :cl-cc/expand)
+                               ("LAMBDA-LIST-INFO-ENVIRONMENT" . :cl-cc/expand))))))
 
 (deftest pipeline-policy-data-host-eval-unsafe-forms-cover-control-and-definitions
   "The host-eval unsafe policy keeps definition and non-local-control AST nodes out of the fast CPS host path."

@@ -151,9 +151,9 @@ Examples:
            (succeed subst)
            (fail)))
 
-      ;; type-error (error sentinel / backward-compat unknown) — unifies with anything
+      ;; type-error values are not unifiable placeholders.
       ((or (type-error-p t1) (type-error-p t2))
-       (succeed subst))
+       (fail))
 
       ;; Both are effect rows
       ((and (type-effect-row-p t1) (type-effect-row-p t2))

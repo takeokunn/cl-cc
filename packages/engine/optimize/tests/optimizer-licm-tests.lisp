@@ -78,6 +78,23 @@
     (assert-= 2 (length result))
     (assert-true (typep (second result) 'cl-cc/vm::vm-const))))
 
+;;; ─── %opt-pre-env-evict-dst ──────────────────────────────────────────────
+
+(deftest-each licm-pre-env-evict-dst-cases
+  "%opt-pre-env-evict-dst removes all entries whose value equals DST."
+  :cases (("evicts-matching"  :r0 '((:a . :r0) (:b . :r1)) '((:b . :r1)))
+          ("noop-no-match"    :r9 '((:a . :r0) (:b . :r1)) '((:a . :r0) (:b . :r1)))
+          ("evicts-all"       :r0 '((:a . :r0) (:b . :r0)) nil))
+  (dst initial-alist expected-alist)
+  (let ((env (make-hash-table :test #'equal)))
+    (dolist (pair initial-alist)
+      (setf (gethash (car pair) env) (cdr pair)))
+    (cl-cc/optimize::%opt-pre-env-evict-dst env dst)
+    (let ((result (loop for k being the hash-keys of env using (hash-value v) collect (cons k v))))
+      (assert-= (length expected-alist) (length result))
+      (dolist (pair expected-alist)
+        (assert-equal (cdr pair) (gethash (car pair) env))))))
+
 ;;; ─── opt-pass-licm (trivial paths) ───────────────────────────────────────
 
 (deftest licm-pass-returns-nil-for-empty-input

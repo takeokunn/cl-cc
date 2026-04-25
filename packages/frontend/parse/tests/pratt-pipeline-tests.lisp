@@ -106,17 +106,27 @@
 
 ;;; ─── pratt-parse-expr: Direct Tests ──────────────────────────────────────────
 
+(deftest pratt-parse-expr-empty-nud-table-returns-error
+  "pratt-parse-expr with an empty NUD table returns cst-error-node for any non-empty input."
+  (let* ((ctx  (make-test-ctx "42"))
+         (node (cl-cc/parse::pratt-parse-expr ctx)))
+    (assert-true (cl-cc/parse::cst-error-node-p node))))
+
+(deftest pratt-parse-expr-eof-returns-error
+  "pratt-parse-expr on empty input returns cst-error-node even with empty NUD table."
+  (let* ((ctx  (make-test-ctx ""))
+         (node (cl-cc/parse::pratt-parse-expr ctx)))
+    (assert-true (cl-cc/parse::cst-error-node-p node))))
+
 (deftest-each pratt-parse-expr-node-type
-  "pratt-parse-expr returns the correct CST node type for each input shape."
+  "parse-cl-source returns the correct CST node type for each CL grammar input shape."
   :cases (("integer"     "42"               #'cl-cc:cst-token-p    nil)
           ("symbol"      "foo"              #'cl-cc:cst-token-p    nil)
           ("list"        "(+ 1 2)"          #'cl-cc:cst-interior-p nil)
-          ("eof-error"   ""                 #'cl-cc/parse::cst-error-node-p nil)
           ("quote"       "'x"               #'cl-cc:cst-interior-p :quote)
           ("nested-list" "(let ((x 1)) x)"  #'cl-cc:cst-interior-p nil))
   (source pred expected-kind)
-  (let* ((ctx  (make-test-ctx source))
-         (node (cl-cc/parse::pratt-parse-expr ctx)))
+  (let ((node (parse-one-cst source)))
     (assert-true (funcall pred node))
     (when expected-kind
       (assert-eq expected-kind (cl-cc:cst-node-kind node)))))

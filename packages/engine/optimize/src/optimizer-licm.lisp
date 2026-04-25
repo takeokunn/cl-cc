@@ -163,19 +163,18 @@
                               reads)))
          (and normalized (cons (type-of inst) normalized)))))))
 
+(defun %opt-pre-env-evict-dst (env dst)
+  "Remove all entries in ENV whose value is DST (dst was overwritten)."
+  (let ((stale nil))
+    (maphash (lambda (k v) (when (eq v dst) (push k stale))) env)
+    (dolist (k stale) (remhash k env))))
+
 (defun %opt-pre-block-out-env (block)
   "Return key→dst availability after BLOCK for PRE join-point analysis."
   (let ((env (make-hash-table :test #'equal)))
     (dolist (inst (bb-instructions block) env)
       (let ((dst (opt-inst-dst inst)))
-        (when dst
-          (let ((stale nil))
-            (maphash (lambda (k v)
-                       (when (eq v dst)
-                         (push k stale)))
-                     env)
-            (dolist (k stale)
-              (remhash k env)))))
+        (when dst (%opt-pre-env-evict-dst env dst)))
       (let ((key (%opt-pre-expression-key inst)))
         (when key
           (setf (gethash key env) (opt-inst-dst inst)))))))
@@ -205,11 +204,7 @@
                               (key (%opt-pre-expression-key inst)))
                          (when dst
                            (dolist (pair pred-envs)
-                             (let ((env (cdr pair)))
-                               (maphash (lambda (k v)
-                                          (when (eq v dst)
-                                            (remhash k env)))
-                                        env))))
+                             (%opt-pre-env-evict-dst (cdr pair) dst)))
                          (if (and dst key)
                              (let ((available nil))
                                (dolist (pair pred-envs)

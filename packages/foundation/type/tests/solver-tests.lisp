@@ -59,7 +59,7 @@ constraint solver tests")
   "Each constraint kind: satisfying case produces no residual; violating case produces 1."
   :cases (("subtype"       (make-subtype-constraint type-int type-any)
                            (make-subtype-constraint type-string type-int))
-          ("typeclass"     (make-typeclass-constraint 'eq +type-unknown+)
+          ("typeclass"     (make-typeclass-constraint 'eq cl-cc/type::+type-unknown+)
                            (make-typeclass-constraint 'eq (fresh-type-var "a")))
           ("effect-subset" (make-effect-subset-constraint +pure-effect-row+ +io-effect-row+)
                            (make-effect-subset-constraint +io-effect-row+ +pure-effect-row+))

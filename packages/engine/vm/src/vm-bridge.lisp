@@ -19,13 +19,36 @@
 ;;; `mapcar` to host CL (which would receive vm-closure-objects it can't handle).
 
 (defvar *vm-host-bridge-functions* (make-hash-table :test #'eq)
-  "Set of symbols whose host CL functions may be called directly from the VM.
-Only functions that accept non-closure arguments (strings, numbers, symbols,
-lists of data) should be registered here.")
+  "Map of bridgeable symbols to their callable implementation.
+All entries must store an explicit function object.")
 
-(defun vm-register-host-bridge (sym)
-  "Register SYM as a host-bridgeable function for the VM."
-  (setf (gethash sym *vm-host-bridge-functions*) t))
+(defvar *vm-runtime-callables* (make-hash-table :test #'equal)
+  "Runtime callable registry keyed by exported runtime helper name string.")
+
+(defun vm-register-host-bridge (sym &optional callable)
+  "Register SYM as a bridgeable function for the VM.
+CALLABLE must be an explicit function object."
+  (unless callable
+    (error "Cannot register host bridge symbol without explicit callable: ~S" sym))
+  (setf (gethash sym *vm-host-bridge-functions*) callable))
+
+(defun vm-register-runtime-callable (name callable)
+  "Register a runtime helper CALLABLE under NAME for VM bridge use."
+  (unless callable
+    (error "Cannot register runtime callable without a function: ~S" name))
+  (setf (gethash name *vm-runtime-callables*) callable))
+
+(defun vm-bridge-callable (sym)
+  "Return the callable registered for SYM, or NIL if none is available."
+  (let ((entry (gethash sym *vm-host-bridge-functions*)))
+    (cond
+      ((functionp entry) entry)
+      (t nil))))
+
+(defun %vm-runtime-callable (runtime-symbol-name)
+  "Resolve a callable from the VM runtime-callable registry by symbol name."
+  (or (gethash runtime-symbol-name *vm-runtime-callables*)
+      (error "CL-CC/RUNTIME:~A is unavailable" runtime-symbol-name)))
 
 (defun hash-table-values (table)
   "Return TABLE values as a list preserving host iteration order."
@@ -107,23 +130,57 @@ representations may use hash tables with structured metadata."
       'standard))
 
 ;;; Package introspection helpers for do-symbols/do-external-symbols/do-all-symbols
+(defun %vm-runtime-package-registry ()
+  "Return the runtime package registry when available, else NIL." 
+  (let* ((pkg (find-package :cl-cc/runtime))
+         (sym (and pkg (find-symbol "*RT-PACKAGE-REGISTRY*" pkg))))
+    (when (and sym (boundp sym))
+      (symbol-value sym))))
+
 (defun %package-symbols (package)
-  "Return a list of all symbols accessible in PACKAGE."
-  (let ((result nil))
-    (do-symbols (s package) (push s result))
-    (nreverse result)))
+  "Return a list of all symbols accessible in PACKAGE." 
+  (when (hash-table-p package)
+    (sort (loop for sym being the hash-values of (gethash :symbols package)
+                collect sym)
+          #'string< :key #'symbol-name)))
 
 (defun %package-external-symbols (package)
-  "Return a list of all external symbols in PACKAGE."
-  (let ((result nil))
-    (do-external-symbols (s package) (push s result))
-    (nreverse result)))
+  "Return a list of all external symbols in PACKAGE." 
+  (when (hash-table-p package)
+    (copy-list (gethash :exports package))))
 
 (defun %all-symbols ()
   "Return a list of all symbols in all packages."
-  (let ((result nil))
-    (do-all-symbols (s) (push s result))
-    (nreverse result)))
+  (let ((registry (%vm-runtime-package-registry)))
+    (if (hash-table-p registry)
+        (sort (loop for descriptor being the hash-values of registry
+                    append (loop for sym being the hash-values of (gethash :symbols descriptor)
+                                 collect sym))
+              #'string< :key #'symbol-name)
+        nil)))
+
+(defun vm-install-eval-hooks (eval-hook compile-string-hook)
+  "Install the VM eval and compile-string hooks."
+  (setf *vm-eval-hook* eval-hook)
+  (setf *vm-compile-string-hook* compile-string-hook)
+  t)
+
+(defun vm-install-macroexpand-hooks (macroexpand-1-hook macroexpand-hook)
+  "Install the VM macroexpansion hooks."
+  (setf *vm-macroexpand-1-hook* macroexpand-1-hook)
+  (setf *vm-macroexpand-hook* macroexpand-hook)
+  t)
+
+(defun vm-install-parse-forms-hook (parse-hook)
+  "Install the VM parse-forms hook."
+  (setf *vm-parse-forms-hook* parse-hook)
+  t)
+
+;;; FR-607: Documentation retrieval (CL-level, registered by defun expander)
+(defun %get-documentation (name doc-type)
+  "Return documentation string for (NAME DOC-TYPE) from *documentation-table*, or nil."
+  (when (hash-table-p *documentation-table*)
+    (gethash (list name doc-type) *documentation-table*)))
 
 ;;; Runtime helpers for setf expansion
 ;;; rt-plist-put is defined in :cl-cc/bootstrap (bootstrap/package.lisp)
@@ -133,64 +190,49 @@ representations may use hash tables with structured metadata."
 ;; CL standard symbols and VM-local symbols are quoted directly.
 ;; Cross-package cl-cc symbols are resolved via find-symbol to avoid
 ;; interning fresh symbols that conflict when the umbrella :cl-cc uses both packages.
-(dolist (sym '(;; CL functions needed by self-hosting code
-               find-package symbol-function fboundp fmakunbound intern gensym
-               ;; Pure function designators commonly passed as #'FN at runtime
-               1+ 1- + - * / < > <= >= max min length char-equal char= eql equal equalp
-               ;; FR-647/FR-655/FR-428/FR-558: symbol-value, find-symbol, macro-function, symbol-package
-               symbol-value find-symbol macro-function symbol-package
-              ;; FR-624: subtypep — delegate to host CL for standard type hierarchy
-              subtypep
-              ;; FR-512: compile — delegate to host CL
-              compile
-              ;; FR-437/FR-438: Package introspection — delegate to host CL
-              list-all-packages package-name package-nicknames
-              package-use-list package-used-by-list package-shadowing-symbols
-              make-package rename-package delete-package
-              export import unexport shadow shadowing-import
-              use-package unuse-package
-               ;; FR-361: Package symbol iteration helpers (defined in this file)
-               %package-symbols %package-external-symbols %all-symbols
-               %class-slot-definitions
-               ;; CLOS / MOP metadata helpers (defined in this file)
-               slot-definition-name slot-definition-initform
-               slot-definition-initargs slot-definition-allocation
-               generic-function-methods generic-function-method-combination
-               ;; Runtime helpers for setf expansion (defined in this file)
-               rt-plist-put
-              ;; FR-479: File system operations
-              probe-file rename-file delete-file file-write-date file-author
-              directory ensure-directories-exist
-              ;; FR-566: Pathname constructors + accessors
-              make-pathname
-              pathname pathname-name pathname-type pathname-host
-              pathname-device pathname-directory pathname-version
-              truename parse-namestring merge-pathnames namestring
-              file-namestring directory-namestring host-namestring
-              enough-namestring wild-pathname-p pathname-match-p
-              translate-pathname
-              ;; FR-659: Reader — read-delimited-list
-              read-delimited-list
-              ;; FR-435: Apropos
-              apropos apropos-list
-              ;; FR-393: Composite streams
-              make-synonym-stream make-broadcast-stream
-              make-two-way-stream make-echo-stream
-              make-concatenated-stream
-              ;; FR-567: Composite stream accessors
-              broadcast-stream-streams two-way-stream-input-stream
-              two-way-stream-output-stream echo-stream-input-stream
-              echo-stream-output-stream concatenated-stream-streams
-              synonym-stream-symbol
-               ;; Generic sequence access (used by search, write-sequence, etc.)
-               elt append
-               ;; FR-566: compile-file-pathname
-               compile-file-pathname
-              ;; FR-579: Encoding/decoding (SBCL sb-ext wrappers)
-              string-to-octets octets-to-string
-              ;; FR-607: Documentation retrieval from CL-level table
-              %get-documentation))
-  (vm-register-host-bridge sym))
+(dolist (entry `((%package-symbols . ,#'%package-symbols)
+                 (%package-external-symbols . ,#'%package-external-symbols)
+                 (%all-symbols . ,#'%all-symbols)
+                 (%class-slot-definitions . ,#'%class-slot-definitions)
+                 (slot-definition-name . ,#'slot-definition-name)
+                 (slot-definition-initform . ,#'slot-definition-initform)
+                 (slot-definition-initargs . ,#'slot-definition-initargs)
+                 (slot-definition-allocation . ,#'slot-definition-allocation)
+                 (generic-function-methods . ,#'generic-function-methods)
+                 (generic-function-method-combination . ,#'generic-function-method-combination)
+                 (rt-plist-put . ,#'rt-plist-put)
+                 (%get-documentation . ,#'%get-documentation)))
+  (vm-register-host-bridge (car entry) (cdr entry)))
+
+(dolist (entry '((1+              . "RT-1+")
+                 (1-              . "RT-1-")
+                 (+               . "RT-+")
+                 (-               . "RT--")
+                 (*               . "RT-*")
+                 (/               . "RT-/")
+                 (<               . "RT-<")
+                 (>               . "RT->")
+                 (<=              . "RT-<=")
+                 (>=              . "RT->=")
+                 (max             . "RT-MAX")
+                 (min             . "RT-MIN")
+                 (length          . "RT-LENGTH")
+                 (char-equal      . "RT-CHAR-EQUAL")
+                 (char=           . "RT-CHAR=")
+                 (eql             . "RT-EQL")
+                 (equal           . "RT-EQUAL")
+                 (equalp          . "RT-EQUALP")
+                 (elt             . "RT-ELT")
+                 (append          . "RT-APPEND")
+                 (fboundp         . "RT-FBOUNDP")
+                 (intern          . "RT-INTERN")
+                 (gensym          . "RT-GENSYM")
+                 (symbol-value    . "RT-SYMBOL-VALUE")))
+  (vm-register-host-bridge
+   (car entry)
+   (let ((runtime-name (cdr entry)))
+     (lambda (&rest args)
+       (apply (%vm-runtime-callable runtime-name) args)))))
 
 ;; Cross-package cl-cc symbols: resolve via find-symbol so we use the canonical
 ;; symbol from each defining package (avoids interning cl-cc/vm:: duplicates).
@@ -198,49 +240,3 @@ representations may use hash tables with structured metadata."
 ;; LOAD-ORDER GUARD: :cl-cc-vm loads before :cl-cc-compile/:cl-cc-parse/:cl-cc-expand
 ;; when :cl-cc-optimize (which depends on :cl-cc-vm) is promoted to a real ASDF system.
 ;; The find-package guard silently skips registration if a package doesn't exist yet.
-;; pipeline.lisp re-registers these symbols once all packages are guaranteed present.
-;;
-;; NOTE: register-macro is intentionally ABSENT — it stores VM closures in macro-env,
-;; causing TYPE-ERROR when host CL funcalls them during macroexpansion.
-(dolist (entry '(;; cl-cc/compile pipeline entry points
-                 ("RUN-STRING"       . :cl-cc/compile)
-                 ("RUN-STRING-REPL"  . :cl-cc/compile)
-                 ("OUR-LOAD"         . :cl-cc/compile)
-                 ("COMPILE-EXPRESSION" . :cl-cc/compile)
-                 ("COMPILE-STRING"   . :cl-cc/compile)
-                 ;; our-eval is pre-interned in :cl-cc/bootstrap
-                 ("OUR-EVAL"         . :cl-cc/bootstrap)
-                 ;; cl-cc/parse entry points
-                 ("PARSE-ALL-FORMS"  . :cl-cc/parse)
-                 ;; cl-cc/expand macro/lambda-list support
-                 ("PARSE-LAMBDA-LIST"         . :cl-cc/expand)
-                 ("DESTRUCTURE-LAMBDA-LIST"   . :cl-cc/expand)
-                 ("GENERATE-LAMBDA-BINDINGS"  . :cl-cc/expand)
-                 ;; Internal accessor used by our-defmacro during selfhost macro expansion
-                 ("LAMBDA-LIST-INFO-ENVIRONMENT" . :cl-cc/expand)))
-  (let* ((pkg (find-package (cdr entry)))
-         (sym (when pkg (find-symbol (car entry) pkg))))
-    (when sym (vm-register-host-bridge sym))))
-
-;;; FR-579: String encoding helpers (delegate to SBCL's sb-ext)
-(defun string-to-octets (string &key (encoding :utf-8) (external-format :default)
-                                      (start 0) end)
-  "Convert STRING to a byte vector using ENCODING (default UTF-8)."
-  (declare (ignore external-format))
-  (let ((format (case encoding (:utf-8 :utf-8) (:ascii :ascii) (t :utf-8))))
-    (sb-ext:string-to-octets string :external-format format
-                                    :start start :end (or end (length string)))))
-
-(defun octets-to-string (octets &key (encoding :utf-8) (external-format :default)
-                                       (start 0) end)
-  "Convert byte vector OCTETS to a string using ENCODING (default UTF-8)."
-  (declare (ignore external-format))
-  (let ((format (case encoding (:utf-8 :utf-8) (:ascii :ascii) (t :utf-8))))
-    (sb-ext:octets-to-string octets :external-format format
-                                    :start start :end (or end (length octets)))))
-
-;;; FR-607: Documentation retrieval (CL-level, registered by defun expander)
-(defun %get-documentation (name doc-type)
-  "Return documentation string for (NAME DOC-TYPE) from *documentation-table*, or nil."
-  (when (hash-table-p *documentation-table*)
-    (gethash (list name doc-type) *documentation-table*)))

@@ -16,9 +16,10 @@
   (setf *macro-eval-fn* #'our-eval))
 
 (defun %normalize-register-macro-form (form)
-  "Register a host macro expander from a top-level REGISTER-MACRO FORM.
-If the expander is a lambda, normalize the expansion result through
-COMPILER-MACROEXPAND-ALL before storing the host callable in macro-env."
+  "Register a top-level REGISTER-MACRO lambda expander.
+Lambda bodies are normalized through COMPILER-MACROEXPAND-ALL before storing the
+host callable in macro-env. Non-lambda register-macro forms are now rejected so
+the loader no longer host-evals arbitrary expander forms."
   (destructuring-bind (_ name-form expander-form) form
     (declare (ignore _))
     (let ((name (if (and (consp name-form) (eq (car name-form) 'quote))
@@ -32,12 +33,10 @@ COMPILER-MACROEXPAND-ALL before storing the host callable in macro-env."
                  (expanded    (if (some #'%form-contains-bootstrap-quasiquote-p body)
                                   (mapcar #'compiler-macroexpand-all body)
                                   body))
-                 (host-fn     (eval (list* 'lambda lambda-list expanded))))
+                 (host-fn     (compile nil (list* 'lambda lambda-list expanded))))
             (register-macro name host-fn)
             name)
-          (progn
-            (eval form)
-            name)))))
+          (error "Top-level REGISTER-MACRO requires a lambda expander: ~S" form)))))
 
 (defun %path-prefix-p (prefix path)
   "Return T when PATH starts with PREFIX."
@@ -63,12 +62,10 @@ COMPILER-MACROEXPAND-ALL before storing the host callable in macro-env."
                :test #'string=)))
 
 (defun %host-only-top-level-file-specific-form-p (form)
-  "Return T for project-source top-level forms that are better handled by host EVAL.
-At this stage, ordinary top-level DEFUN forms in repo source are more reliable
-through host CL than through the VM compile path during OUR-LOAD selfhost runs."
-  (and (consp form)
-       (symbolp (car form))
-       (string= (symbol-name (car form)) "DEFUN")))
+  "Return T for project-source top-level forms that still require a file-specific host path.
+The current selfhost load path no longer treats plain DEFUN as a special host-only case."
+  (declare (ignore form))
+  nil)
 
 (defun %skip-redundant-defpackage-p (form)
   "Return T when FORM is a DEFPACKAGE for a package that already exists."
@@ -76,7 +73,7 @@ through host CL than through the VM compile path during OUR-LOAD selfhost runs."
        (symbolp (car form))
        (string= (symbol-name (car form)) "DEFPACKAGE")
        (second form)
-       (find-package (second form))))
+       (cl-cc/runtime:rt-find-package (second form))))
 
 (defun %top-level-project-macro-p (symbol)
   "Return T when SYMBOL names a registered project macro rather than a core bootstrap macro."
@@ -87,13 +84,6 @@ through host CL than through the VM compile path during OUR-LOAD selfhost runs."
                       :test #'string=))
          (or (cl-cc/expand::lookup-macro symbol)
              (macro-function symbol)))))
-
-(defun %host-only-top-level-macro-name-p (symbol)
-  "Return T when SYMBOL names a project macro that is safe and preferable to execute directly on the host during source loads."
-  (and (symbolp symbol)
-       (member (symbol-name symbol)
-               *host-only-top-level-macro-names*
-               :test #'string=)))
 
 (defun %coerce-host-macro-head (form)
   "Replace FORM's head with the current package's symbol of the same name when available.
@@ -130,27 +120,16 @@ This avoids evaluating top-level project macros through stale bootstrap-package 
   "Return T when FORM still contains bootstrap quasiquote operators."
   (%form-contains-symbol-name-p form '("BACKQUOTE" "UNQUOTE" "UNQUOTE-SPLICING")))
 
-(defun %host-only-top-level-registration-form-p (form)
-  "Return T when FORM is a top-level project registration/mutation form better handled by host EVAL."
-  (and (consp form)
-       (or (%form-contains-symbol-name-p
-            form
-            *host-only-registration-symbol-names*)
-           (%form-contains-symbol-name-p
-            form
-            *host-only-registration-helper-names*))))
-
 (defun %make-top-level-host-macro-expander (form)
-  "Build the host expander for a top-level DEFMACRO/OUR-DEFMACRO form.
+  "Build the expander for a top-level DEFMACRO/OUR-DEFMACRO form.
 MAKE-MACRO-EXPANDER already normalizes bootstrap quasiquote markers for the
 returned expansion. Re-expanding that result with COMPILER-MACROEXPAND-ALL is
 too aggressive and can macroexpand inside quasiquoted templates, breaking forms
 such as PUSH over an UNQUOTE place during selfhost loading.
 
-Also force MAKE-MACRO-EXPANDER to build a pure host closure here. If it keeps
-delegating each invocation back through OUR-EVAL, macros like LIST can recurse
-through their own quasiquote-expanded helper forms during selfhost loading."
-  (let ((*macro-eval-fn* #'eval))
+Build this closure through OUR-EVAL so top-level macro definitions stay on the
+selfhost path instead of forcing host-eval execution."
+  (let ((*macro-eval-fn* #'our-eval))
     (let ((base-expander (make-macro-expander (third form) (cdddr form))))
       (lambda (call-form env)
         (our-macroexpand-all (funcall base-expander call-form env))))))
@@ -179,6 +158,34 @@ OUR-DEFMACRO macro itself."
                   (cons (list form-var env-var)
                         lambda-body))))))
 
+(defun %handle-top-level-defmacro-form (form)
+  "Handle a top-level DEFMACRO form for REPL/source loading and return its name."
+  (register-macro (second form)
+                  (%make-top-level-host-macro-expander form))
+  (second form))
+
+(defun %handle-top-level-our-defmacro-form (form)
+  "Handle a top-level OUR-DEFMACRO form for REPL/source loading and return its name."
+  (if (not (%form-contains-bootstrap-quasiquote-p (cdddr form)))
+      (%normalize-register-macro-form (%our-defmacro->register-macro-form form))
+      (register-macro (second form)
+                      (%make-top-level-host-macro-expander form)))
+  (second form))
+
+(defun %handle-host-only-top-level-form (form)
+  "Handle host-only top-level forms during project-source loading.
+Returns two values: result and handled-p." 
+  (cond
+    ((and *our-load-host-definition-mode* (%skip-redundant-defpackage-p form))
+     (values (second form) t))
+    ((and *our-load-host-definition-mode* (%host-only-top-level-file-specific-form-p form))
+     (values (eval form) t))
+    ((and *our-load-host-definition-mode* (%host-only-top-level-form-p form))
+     (let ((result (eval form)))
+       (%remember-host-global-definition form)
+       (values result t)))
+    (t (values nil nil))))
+
 (defun run-form-repl (form)
   "Like run-string-repl, but accepts an already-parsed S-expression FORM."
   (when (and (consp form) (eq (car form) 'in-package))
@@ -187,28 +194,15 @@ OUR-DEFMACRO macro itself."
   (when (and (consp form)
              (symbolp (car form))
              (string= (symbol-name (car form)) "DEFMACRO"))
-    (if (and *our-load-host-definition-mode*
-             (not (%form-contains-bootstrap-quasiquote-p (cdddr form))))
-        (eval form)
-        (register-macro (second form)
-                        (%make-top-level-host-macro-expander form)))
-    (return-from run-form-repl (second form)))
+    (return-from run-form-repl (%handle-top-level-defmacro-form form)))
   (when (and (consp form)
              (symbolp (car form))
              (string= (symbol-name (car form)) "OUR-DEFMACRO"))
-    (if (not (%form-contains-bootstrap-quasiquote-p (cdddr form)))
-        (%normalize-register-macro-form (%our-defmacro->register-macro-form form))
-        (register-macro (second form)
-                        (%make-top-level-host-macro-expander form)))
-    (return-from run-form-repl (second form)))
+    (return-from run-form-repl (%handle-top-level-our-defmacro-form form)))
   (when (and (consp form)
              (symbolp (car form))
              (string= (symbol-name (car form)) "REGISTER-MACRO"))
     (return-from run-form-repl (%normalize-register-macro-form form)))
-  (when (and *our-load-host-definition-mode*
-             (consp form)
-             (%host-only-top-level-macro-name-p (car form)))
-    (return-from run-form-repl (eval (%coerce-host-macro-head form))))
   (when (and (consp form)
              (symbolp (car form))
              (%top-level-project-macro-p (car form)))
@@ -218,20 +212,9 @@ OUR-DEFMACRO macro itself."
             (macroexpand-1 form))
       (when expanded-p
         (return-from run-form-repl (run-form-repl expanded)))))
-  (when (and *our-load-host-definition-mode*
-             (%skip-redundant-defpackage-p form))
-    (return-from run-form-repl (second form)))
-  (when (and *our-load-host-definition-mode*
-             (%host-only-top-level-registration-form-p form))
-    (return-from run-form-repl (eval form)))
-  (when (and *our-load-host-definition-mode*
-             (%host-only-top-level-file-specific-form-p form))
-    (return-from run-form-repl (eval form)))
-  (when (and *our-load-host-definition-mode*
-             (%host-only-top-level-form-p form))
-    (let ((result (eval form)))
-      (%remember-host-global-definition form)
-      (return-from run-form-repl result)))
+  (multiple-value-bind (host-result handled-p) (%handle-host-only-top-level-form form)
+    (when handled-p
+      (return-from run-form-repl host-result)))
   (let* ((*package* *package*)
          (*accessor-slot-map* *repl-accessor-map*)
          (*defstruct-slot-registry* *repl-defstruct-registry*)

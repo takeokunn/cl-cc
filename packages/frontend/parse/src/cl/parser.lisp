@@ -161,11 +161,15 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
                        :allocation allocation))))
 
 ;;; Wire parse-all-forms into VM hook for runtime READ support
+(defun %vm-install-parse-forms-hook-if-available ()
+  (let* ((pkg (find-package :cl-cc/vm))
+         (sym (and pkg (find-symbol "VM-INSTALL-PARSE-FORMS-HOOK" pkg))))
+    (when (and sym (fboundp sym))
+      (funcall (symbol-function sym) #'parse-all-forms))))
+
 #-cl-cc-self-hosting
 (eval-when (:load-toplevel :execute)
-  (when (find-package :cl-cc/vm)
-    (let ((pkg (find-package :cl-cc/vm)))
-      (setf (symbol-value (find-symbol "*VM-PARSE-FORMS-HOOK*" pkg)) #'parse-all-forms))))
+  (%vm-install-parse-forms-hook-if-available))
 
 ;;; *list-lowering-table*, define-list-lowerer, *setf-place-simple-rewrites*,
 ;;; shared helpers (%lower-extended-params, %extract-leading-*,

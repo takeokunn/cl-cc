@@ -92,6 +92,18 @@
 
 ;;; ─── REPL state ─────────────────────────────────────────────────────────────
 
+(deftest-each ctx-context-find-package-resolution
+  "%context-find-package resolves runtime package descriptors and returns NIL for unknowns."
+  :cases (("cl"       :cl       t)
+          ("cl-user"  :cl-user  t)
+          ("keyword"  :keyword  t)
+          ("unknown"  :totally-nonexistent-package-xyz nil))
+  (name expect-p)
+  (let ((result (cl-cc/compile::%context-find-package name)))
+    (if expect-p
+        (assert-true (hash-table-p result))
+        (assert-false result))))
+
 (deftest ctx-repl-state-persistence
   "REPL state: *repl-label-counter* continues label numbering; *repl-global-variables* are merged into context."
   (let ((cl-cc/compile::*repl-label-counter* 100))

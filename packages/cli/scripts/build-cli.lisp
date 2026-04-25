@@ -4,7 +4,7 @@
 ;;;;   sbcl --non-interactive \
 ;;;;        --eval '(require :asdf)' \
 ;;;;        --load cl-cc.asd \
-;;;;        --eval '(asdf:load-system :cl-cc/bin)' \
+;;;;        --eval '(asdf:load-system :cl-cc-cli)' \
 ;;;;        --load scripts/build-cli.lisp
 
 (format t "~&; Building cl-cc standalone binary...~%")

@@ -12,7 +12,7 @@
 (defparameter *load-time-value-hit* 0)
 
 (deftest export-is-not-a-macro
-  "(export ...) is now a host-bridged function, not a macro"
+  "(export ...) is handled as a function call, not an expander macro."
   (multiple-value-bind (expansion expanded-p) (our-macroexpand-1 '(export '(foo bar)))
     (declare (ignore expansion))
     (assert-true (not expanded-p))))

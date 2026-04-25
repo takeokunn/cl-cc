@@ -55,12 +55,8 @@
 (defun check (ast expected-type env)
   "Check that AST conforms to EXPECTED-TYPE in ENV (top-down).
    Returns substitution on success, signals type-mismatch-error on failure.
-   Gradual typing: unknown expected type always succeeds.
    Rank-N: forall in expected position introduces skolem constants."
   (typecase expected-type
-    ;; Gradual typing escape hatch: unknown expected type always succeeds
-    (type-unknown nil)
-
     ;; Rank-N: checking against (forall a T) introduces a skolem for a
     ;; and checks the body under that skolem
     (type-forall
@@ -81,17 +77,14 @@
      (t
       (multiple-value-bind (actual-type subst) (synthesize ast env)
         (let ((actual (zonk actual-type subst)))
-          (if (typep actual 'type-unknown)
-              ;; Actual unknown: gradual typing, always ok
-              subst
-             ;; Try unification (handles type variables)
-             (multiple-value-bind (unified ok)
-                 (type-unify actual expected-type subst)
-               (if ok
-                   unified
-                   (error 'type-mismatch-error
-                          :expected expected-type
-                          :actual actual)))))))))
+          ;; Try unification (handles type variables)
+          (multiple-value-bind (unified ok)
+              (type-unify actual expected-type subst)
+            (if ok
+                unified
+                (error 'type-mismatch-error
+                       :expected expected-type
+                       :actual actual))))))))
 
 (defun check-body (asts expected-type env)
   "Check that the last form in ASTS has EXPECTED-TYPE in ENV.

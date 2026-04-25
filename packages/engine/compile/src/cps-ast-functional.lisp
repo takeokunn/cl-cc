@@ -8,7 +8,7 @@
 ;;;   ast-apply, ast-multiple-value-call, ast-multiple-value-prog1,
 ;;;   ast-call (general function calls)
 ;;; Plus entry points:
-;;;   maybe-cps-transform, cps-transform-ast*, cps-transform*, cps-transform-eval
+;;;   cps-transform-ast*, cps-transform*, cps-transform-eval
 ;;;
 ;;; OOP/mutation transforms (setq, defvar, handler-case, make-instance,
 ;;; slot-value, set-slot-value, defclass, defgeneric, defmethod, set-gethash)
@@ -117,43 +117,45 @@ collect results, then spread to the function via apply."
         (list 'let (list (list results-v nil))
               (collect-args (ast-mv-call-args node) results-v)))))))
 
+;;; ─── Shared CPS argument threading ──────────────────────────────────────────
+
+(defun %cps-thread-args (arg-asts arg-syms k-thunk)
+  "CPS-thread ARG-ASTS, binding each result to the corresponding symbol in ARG-SYMS.
+When all args are processed, calls K-THUNK (a zero-argument closure) to produce
+the continuation form."
+  (if (null arg-asts)
+      (funcall k-thunk)
+      (cps-transform-ast
+       (car arg-asts)
+       (%cps-lambda (list (car arg-syms))
+                    (%cps-thread-args (cdr arg-asts) (cdr arg-syms) k-thunk)))))
+
 ;;; ─── Function Call Forms ─────────────────────────────────────────────────────
 
 (defmethod cps-transform-ast ((node ast-apply) k)
   "Transform apply: CPS-thread function and all args, then deliver via host APPLY."
   (let ((f-v      (gensym "FUNC"))
         (arg-vars (loop repeat (length (ast-apply-args node)) collect (gensym "ARG"))))
-    (labels ((thread-args (remaining-args remaining-vars)
-               (if (null remaining-args)
-                   (%cps-funcall k (cons 'apply (cons f-v arg-vars)))
-                   (cps-transform-ast
-                    (car remaining-args)
-                    (%cps-lambda (list (car remaining-vars))
-                                 (thread-args (cdr remaining-args)
-                                              (cdr remaining-vars)))))))
-      (cps-transform-ast
-       (ast-apply-func node)
-       (%cps-lambda
-        (list f-v)
-        (thread-args (ast-apply-args node) arg-vars))))))
+    (cps-transform-ast
+     (ast-apply-func node)
+     (%cps-lambda
+      (list f-v)
+      (%cps-thread-args (ast-apply-args node) arg-vars
+                        (lambda ()
+                          (%cps-funcall k (cons 'apply (cons f-v arg-vars)))))))))
 
 (defmethod cps-transform-ast ((node ast-call) k)
   "Transform a general function call: CPS-thread each argument in order,
 then call the function with all evaluated arguments."
-  (let ((func (ast-call-func node))
-        (args (ast-call-args node)))
-    (if (null args)
-        (%cps-funcall k (list func))
-        (let ((arg-syms (loop for a in args collect (gensym "ARG"))))
-          (labels ((thread-args (remaining-args remaining-syms)
-                     (if (null remaining-args)
-                         (%cps-funcall k (cons func remaining-syms))
-                          (cps-transform-ast
-                           (car remaining-args)
-                           (%cps-lambda (list (car remaining-syms))
-                                        (thread-args (cdr remaining-args)
-                                                     (cdr remaining-syms)))))))
-            (thread-args args arg-syms))))))
+  (let ((func     (ast-call-func node))
+        (args     (ast-call-args node))
+        (arg-syms (loop repeat (length (ast-call-args node)) collect (gensym "ARG"))))
+    (%cps-thread-args args arg-syms
+                      (lambda ()
+                        (%cps-funcall k (cons (if (typep func 'ast-node)
+                                                  (ast-to-sexp func)
+                                                  func)
+                                              arg-syms))))))
 
 ;;; ─── Entry Points ────────────────────────────────────────────────────────────
 
@@ -171,16 +173,6 @@ Returns a (lambda (k) ...) form ready for evaluation."
   (typecase expr
     (ast-node (cps-transform-ast* expr))
     (t (cps-transform expr))))
-
-(defun maybe-cps-transform (thing)
-  "Best-effort CPS transform. Returns the CPS form on success, NIL on failure."
-  (handler-case
-      (if (typep thing 'ast-node)
-          (cps-transform-ast* thing)
-          (cps-transform thing))
-    (error (e)
-      (declare (ignore e))
-      nil)))
 
 (defun cps-transform-eval (expr)
   "CPS-transform EXPR (an S-expression) and evaluate it with an identity continuation."

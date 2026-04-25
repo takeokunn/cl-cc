@@ -226,9 +226,12 @@ These symbols live in :cl-cc/bootstrap so both parse and expand share them."
                       expander-body)))))
 
 ;;; Wire expand functions into VM hooks for runtime macroexpand support
+(defun %vm-install-macroexpand-hooks-if-available ()
+  (let* ((pkg (find-package :cl-cc/vm))
+         (sym (and pkg (find-symbol "VM-INSTALL-MACROEXPAND-HOOKS" pkg))))
+    (when (and sym (fboundp sym))
+      (funcall (symbol-function sym) #'our-macroexpand-1 #'our-macroexpand))))
+
 #-cl-cc-self-hosting
 (eval-when (:load-toplevel :execute)
-  (when (find-package :cl-cc/vm)
-    (let ((pkg (find-package :cl-cc/vm)))
-      (setf (symbol-value (find-symbol "*VM-MACROEXPAND-1-HOOK*" pkg)) #'our-macroexpand-1)
-      (setf (symbol-value (find-symbol "*VM-MACROEXPAND-HOOK*" pkg)) #'our-macroexpand))))
+  (%vm-install-macroexpand-hooks-if-available))

@@ -47,7 +47,7 @@
     (:file "vm-opcodes-defs")
     (:file "vm-opcodes-run")
     (:file "primitives")
-   (:file "primitives-typep")
+    (:file "primitives-typep")
    (:file "vm-bitwise")
    (:file "vm-transcendental")
    (:file "vm-numeric")
@@ -68,6 +68,7 @@
    (:file "array")
    (:file "array-bits")
    (:file "strings")
+   (:file "strings-char-instrs")
    (:file "symbols")
    (:file "hash")
    (:file "hash-execute")))
@@ -79,7 +80,7 @@
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc-vm :cl-cc/tests-framework)
+  :depends-on (:cl-cc-vm :cl-cc-testing-framework)
   :pathname "tests"
   :serial t
   :components
@@ -88,6 +89,7 @@
    (:file "vm-call-tests")
    (:file "vm-transcendental-tests")
    (:file "vm-numeric-tests")
+   (:file "vm-environment-tests")
    (:file "vm-extensions-tests")
    (:file "vm-bitwise-tests")
    (:file "vm-clos-tests")
@@ -103,10 +105,12 @@
    (:file "vm-tests")
    (:file "package-tests")
    (:file "primitives-tests")
+   (:file "primitives-typep-tests")
    (:file "conditions-tests")
    (:file "io-tests")
    (:file "format-tests")
    (:file "list-tests")
+   (:file "list-alist-tests")
    (:file "list-coerce-tests")
    (:file "array-tests")
    (:file "strings-tests")

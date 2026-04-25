@@ -7,12 +7,11 @@
 ;;;;   - Type predicates (FR-386): rationalp, complexp, realp, floatp
 ;;;;   - Boole constants + boole-* (FR-493)
 ;;;;   - Byte manipulation: byte, ldb, dpb, etc. (FR-492/532/494)
-;;;;   - digit-char (FR-477), break/invoke-debugger (FR-557)
+;;;;   - digit-char (FR-477)
 ;;;;   - Restart + handler-bind protocol (FR-421/201)
 ;;;;   - Method error functions (FR-584)
 ;;;;   - random-state-p, gensym-counter, macroexpand-hook (FR-509/510/429)
 ;;;;   - function-lambda-expression, upgraded-array-element-type (FR-549/553)
-;;;;   - copy-symbol, compiler-macro-function stubs (FR-536/365)
 ;;;;   - make-load-form, make-condition, parse-integer, parse-number (FR-550/427/478/391)
 ;;;;   - Sequence utilities: concatenate variants
 ;;;;
@@ -104,7 +103,7 @@
            (code-char (+ weight 55)))
        nil))"
 
-    ;; ── FR-557: break / invoke-debugger ──────────────────────────────────────
+    ;; ── debugger-related dynamic vars ───────────────────────────────────────
     "(defvar *debugger-hook* nil)"
     "(defvar *break-on-signals* nil)"
 
@@ -115,19 +114,6 @@
     "(defvar *%condition-handlers* nil)"
 
     ;; signal is defined as a macro in macros-stdlib.lisp for correct symbol resolution
-
-    "(defun invoke-debugger (condition)
-   (if *debugger-hook*
-       (let ((hook *debugger-hook*))
-         (setq *debugger-hook* nil)
-         (funcall hook condition hook))
-       (error condition)))"
-
-    "(defun break (&optional format-control)
-   (when format-control
-     (format *error-output* format-control)
-     (terpri *error-output*))
-   nil)"
 
     ;; ── FR-584: Method error functions ───────────────────────────────────────
     "(defun invalid-method-error (method format-control)
@@ -165,16 +151,6 @@
     "(defun upgraded-complex-part-type (typespec &optional environment)
    (declare (ignore typespec environment))
    'real)"
-
-    ;; ── FR-536: copy-symbol (basic — no property copying) ──────────────────
-    "(defun copy-symbol (symbol &optional copy-properties)
-   (declare (ignore copy-properties))
-   (make-symbol (symbol-name symbol)))"
-
-    ;; ── FR-365: compiler-macro-function (stub) ──────────────────────────────
-    "(defun compiler-macro-function (name &optional environment)
-   (declare (ignore name environment))
-   nil)"
 
     ;; ── FR-550: make-load-form / make-load-form-saving-slots ────────────────
     "(defgeneric make-load-form (object &optional environment))"

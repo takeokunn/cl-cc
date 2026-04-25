@@ -2,8 +2,7 @@
 ;;;;
 ;;;; Tests for src/type/typeclass.lisp:
 ;;;; typeclass-def, typeclass-instance, registries, dict-env,
-;;;; has-typeclass-instance-p, check-typeclass-constraint,
-;;;; backward-compat structs.
+;;;; has-typeclass-instance-p, and check-typeclass-constraint.
 
 (in-package :cl-cc/test)
 
@@ -187,7 +186,7 @@
         (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
     (register-typeclass-instance 'eq type-int nil)
     (cl-cc/type::check-typeclass-constraint 'eq type-int       (type-env-empty))
-    (cl-cc/type::check-typeclass-constraint 'eq +type-unknown+ (type-env-empty))
+    (cl-cc/type::check-typeclass-constraint 'eq cl-cc/type::+type-unknown+ (type-env-empty))
     (cl-cc/type::check-typeclass-constraint 'eq (fresh-type-var "a") (type-env-empty))
     (assert-true t))
   (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))

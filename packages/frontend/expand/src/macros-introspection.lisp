@@ -36,24 +36,4 @@
                   (t nil))))
        (,fn ,x ,y))))
 
-;;; ─── Implementation-identification stubs (FR-507) ────────────────────────────
-
-(our-defmacro lisp-implementation-type   () '"cl-cc")
-(our-defmacro lisp-implementation-version () '"0.1.0")
-(our-defmacro machine-type     () '"unknown")
-(our-defmacro machine-version  () '"unknown")
-(our-defmacro machine-instance () '"unknown")
-(our-defmacro software-type    () '"unknown")
-(our-defmacro software-version () '"unknown")
-(our-defmacro short-site-name  () '"unknown")
-(our-defmacro long-site-name   () '"unknown")
-
-;;; ─── compiled-function-p / proclaim ──────────────────────────────────────────
-
-(our-defmacro compiled-function-p (object)
-  "Return true if OBJECT is a compiled function (all functions are compiled in cl-cc)."
-  `(functionp ,object))
-
-(our-defmacro proclaim (declaration)
-  "Process a global proclamation (stub — ignored in cl-cc)."
-  `(progn ,declaration nil))
+;;; Introspection queries are provided as runtime builtins in the VM/native pipeline.

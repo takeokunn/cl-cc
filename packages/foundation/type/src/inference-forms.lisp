@@ -152,25 +152,22 @@
         (setf new-env (type-env-extend name scheme new-env))))
     (infer-body (cl-cc/ast:ast-let-body ast) new-env)))
 
+(defun %make-lambda-param-env (params env)
+  "Assign fresh type vars to PARAMS, extend ENV, return (values types body-env)."
+  (loop for p in params
+        for tv = (fresh-type-var)
+        collect tv into types
+        collect (cons p (make-type-scheme nil tv)) into bindings
+        finally (return (values types (type-env-extend* bindings env)))))
+
 (defun infer-lambda (ast env)
   "Infer type for lambda."
-  (let* ((param-types (mapcar (lambda (p)
-                                (declare (ignore p))
-                                (fresh-type-var))
-                              (cl-cc/ast:ast-lambda-params ast)))
-         (param-bindings (mapcar (lambda (name type)
-                                   (cons name (make-type-scheme nil type)))
-                                 (cl-cc/ast:ast-lambda-params ast)
-                                 param-types))
-         (body-env (type-env-extend* param-bindings env)))
+  (multiple-value-bind (param-types body-env)
+      (%make-lambda-param-env (cl-cc/ast:ast-lambda-params ast) env)
     (multiple-value-bind (body-type subst)
         (infer-body (cl-cc/ast:ast-lambda-body ast) body-env)
-      (values (make-type-arrow
-                (mapcar (lambda (p)
-                          (zonk p subst))
-                        param-types)
-                body-type)
-               subst))))
+      (values (make-type-arrow (mapcar (lambda (p) (zonk p subst)) param-types) body-type)
+              subst))))
 
 (defun infer-progn (ast env)
   "Infer type for progn (sequence of expressions)."
@@ -189,7 +186,7 @@
              (type-arg (zonk
                         (type-constraint-type-arg constraint)
                         subst)))
-        (unless (or (typep type-arg 'type-unknown)
+        (unless (or (type-unknown-p type-arg)
                     (type-var-p type-arg)
                     (and (type-env-p env)
                          (dict-env-lookup class-name type-arg env))

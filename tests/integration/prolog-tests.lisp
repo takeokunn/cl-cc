@@ -157,7 +157,7 @@
 
 ;;; Repeated SBCL with-timeout wrappers over this file's PROLOG-* tests can leave
 ;;; later queries in a bad state under full-suite execution. Keep the tests
-;;; enabled, but run this file's PROLOG-* cases without the framework timeout.
+;;; enabled, but give this file's PROLOG-* cases a larger bounded timeout.
 (persist-each *test-registry*
               (lambda (name plist)
                 (when (and (symbolp name)
@@ -165,6 +165,6 @@
                              (and (<= 7 (length name-str))
                                   (string= "PROLOG-" name-str :end2 7))))
                   (let ((new-plist (copy-list plist)))
-                    (setf (getf new-plist :timeout) :none)
+                    (setf (getf new-plist :timeout) 30)
                     (setf *test-registry*
                           (persist-assoc *test-registry* name new-plist))))))

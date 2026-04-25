@@ -179,15 +179,3 @@
      (if r
          (invoke-restart 'store-value ,value)
          ,value)))
-
-;; WITH-SIMPLE-RESTART (FR-422) — stub: just executes body
-(register-macro 'with-simple-restart
-  (lambda (form env)
-    (declare (ignore env))
-    ;; (with-simple-restart (name fmt args...) body...)
-    `(progn ,@(cddr form))))
-
-;; WITH-CONDITION-RESTARTS (FR-423) — stub: just executes body
-(our-defmacro with-condition-restarts (condition restarts &body body)
-  (declare (ignore condition restarts))
-  `(progn ,@body))

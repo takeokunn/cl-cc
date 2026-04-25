@@ -8,59 +8,10 @@
 
 (in-package :cl-cc/type)
 
-;;; ─── Promote stub defun → defgeneric ─────────────────────────────────────
-;;;
-;;; types-env.lisp provides the remaining early stub for type-to-string.
-;;; Here we promote to a generic function so that
-;;; each type-node class owns its own printing clause (Prolog-style dispatch).
-
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  ;; Guard for upgrade from DEFUN stub (types-env.lisp) to DEFGENERIC.
-  ;; ignore-errors on fdefinition makes this safe in both SBCL and the
-  ;; self-hosting VM (where fdefinition bridges to SBCL's host namespace
-  ;; but fboundp checks the VM's own registry, causing a mismatch).
-  (when (and (fboundp 'type-to-string)
-             (not (ignore-errors
-                    (typep (fdefinition 'type-to-string) 'generic-function))))
-    (ignore-errors (fmakunbound 'type-to-string))))
-
 ;;; ─── Primary protocol ─────────────────────────────────────────────────────
 ;;;
 ;;; type-to-string acts as a Prolog predicate: each defmethod is a clause.
 ;;; New type nodes add new methods rather than editing a monolithic typecase.
-
-(defgeneric type-to-string (ty)
-  (:documentation "Convert a type-node TY to a human-readable string.")
-  (:method (ty)
-    "Fallback: unknown type-node subclass."
-    (format nil "#<type ~A>" (type-of ty))))
-
-;;; ─── Leaf / atomic types ──────────────────────────────────────────────────
-
-(defmethod type-to-string ((ty null))
-  "NIL")
-
-(defmethod type-to-string ((ty type-primitive))
-  (symbol-name (type-primitive-name ty)))
-
-(defmethod type-to-string ((ty type-var))
-  (let ((link (type-var-link ty)))
-    (cond
-      (link              (type-to-string link))
-      ((type-var-name ty) (format nil "?~A" (type-var-name ty)))
-      (t                 (format nil "?t~D" (type-var-id ty))))))
-
-(defmethod type-to-string ((ty type-rigid))
-  (if (type-rigid-name ty)
-      (format nil "sk~D[~A]" (type-rigid-id ty) (type-rigid-name ty))
-      (format nil "sk~D"     (type-rigid-id ty))))
-
-(defmethod type-to-string ((ty type-error))
-  ;; type-unknown is a deftype alias over type-error with message "unknown".
-  ;; PCL cannot specialise on deftype aliases, so we dispatch here.
-  (if (type-unknown-p ty)
-      "?"
-      (format nil "<error: ~A>" (type-error-message ty))))
 
 ;;; ─── Arrow / function types ───────────────────────────────────────────────
 

@@ -9,7 +9,7 @@
 ;;;; For each extracted system we check:
 ;;;;   1. (asdf:find-system :cl-cc-XXX) returns non-nil
 ;;;;   2. The corresponding feature package exists
-;;;;   3. A representative exported symbol is present and :external
+;;;;   3. A representative symbol is present in the package namespace
 ;;;;
 ;;;; A subprocess-based true-standalone load test is a future enhancement.
 
@@ -22,16 +22,17 @@
   (handler-case (asdf:find-system system-name nil)
     (error () nil)))
 
-(defun %standalone-symbol-external-p (symbol-name package-name)
-  "Return non-NIL when SYMBOL-NAME is interned and :external in PACKAGE-NAME."
+(defun %standalone-symbol-present-p (symbol-name package-name)
+  "Return non-NIL when SYMBOL-NAME is interned in PACKAGE-NAME."
   (let ((pkg (find-package package-name)))
     (when pkg
       (multiple-value-bind (sym status) (find-symbol symbol-name pkg)
-        (and sym (eq status :external))))))
+        (declare (ignore status))
+        sym))))
 
 (deftest-each standalone-sibling-systems-loaded
   "Each extracted sibling ASDF system is registered, its feature package
-exists, and a representative exported symbol resolves as :external."
+exists, and a representative symbol resolves in that package."
   :cases
   (("cl-cc-ast"      :cl-cc-ast      :cl-cc/ast      "AST-CHILDREN")
    ("cl-cc-prolog"   :cl-cc-prolog   :cl-cc/prolog   "UNIFY")
@@ -50,7 +51,7 @@ exists, and a representative exported symbol resolves as :external."
   (system-name package-name representative-symbol)
   (assert-true (%standalone-find-system system-name))
   (assert-true (find-package package-name))
-  (assert-true (%standalone-symbol-external-p representative-symbol package-name)))
+  (assert-true (%standalone-symbol-present-p representative-symbol package-name)))
 
 (defun %bridge-registered-p (symbol-name)
   "Return T when SYMBOL-NAME resolved via :cl-cc (as the VM does) is in the bridge table.

@@ -52,30 +52,138 @@
 (define-rt-predicate rt-open-stream-p        open-stream-p)
 (define-rt-predicate rt-interactive-stream-p interactive-stream-p)
 (defun rt-stream-element-type (s) (stream-element-type s))
-(defun rt-make-broadcast-stream (&rest streams) (apply #'make-broadcast-stream streams))
-(defun rt-make-two-way-stream (in out) (make-two-way-stream in out))
-(defun rt-make-echo-stream (in out) (make-echo-stream in out))
-(defun rt-make-concatenated-stream (&rest streams) (apply #'make-concatenated-stream streams))
-(defun rt-probe-file (path) (probe-file path))
-(defun rt-truename (path) (truename path))
-(defun rt-rename-file (old new) (rename-file old new))
-(defun rt-delete-file (path) (delete-file path))
-(defun rt-directory (path) (directory path))
-(defun rt-make-pathname (&key host device directory name type version)
-  (make-pathname :host host :device device :directory directory
-                 :name name :type type :version version))
-(defun rt-namestring (path) (namestring path))
-(defparameter *pathname-component-accessors*
-  '((:host      . pathname-host)
-    (:device    . pathname-device)
-    (:directory . pathname-directory)
-    (:name      . pathname-name)
-    (:type      . pathname-type)
-    (:version   . pathname-version))
-  "Alist mapping pathname component keyword → accessor symbol.")
 
-(defun rt-pathname-component (path component)
-  (let ((accessor (cdr (assoc component *pathname-component-accessors*))))
-    (when accessor (funcall accessor path))))
-(defun rt-merge-pathnames (path defaults) (merge-pathnames path defaults))
-(defun rt-enough-namestring (path defaults) (enough-namestring path defaults))
+(defvar *rt-gensym-counter* 0
+  "Runtime-local gensym counter used by `rt-gensym`."
+  )
+
+(defvar *rt-function-registry* (make-hash-table :test #'eq)
+  "Runtime function registry used by `rt-fboundp` and related symbol/meta helpers.")
+
+(defparameter *rt-bootstrap-function-symbols*
+  '(+ - * / 1+ 1- < > <= >= eql equal equalp char= char-equal
+    boundp makunbound fboundp fdefinition intern gensym symbol-value
+    make-string-output-stream get-output-stream-string write-string)
+  "Conservative bootstrap function seed for the runtime registry.
+This avoids scanning every host package while still covering the small guest-facing
+surface that currently relies on `rt-fboundp` during bootstrapping and tests.")
+
+(defparameter *rt-bootstrap-package-names*
+  '(:cl :cl-user :keyword :cl-cc/runtime :cl-cc :cl-cc/vm :cl-cc/compile :cl-cc/expand
+    :cl-cc/parse :cl-cc/type :cl-cc/prolog :cl-cc/optimize :cl-cc/emit :cl-cc/ast)
+  "Conservative bootstrap package seed for the runtime package registry.
+This avoids importing the full host package universe while preserving the packages
+the compiler/runtime currently names directly during selfhost and test flows.")
+
+(defun %rt-bootstrap-function-registry ()
+  "Seed the runtime function registry from a conservative explicit symbol set."
+  (clrhash *rt-function-registry*)
+  (dolist (sym *rt-bootstrap-function-symbols*)
+    (setf (gethash sym *rt-function-registry*) t))
+  *rt-function-registry*)
+
+(defun rt-fboundp (sym)
+  (if (gethash sym *rt-function-registry*) 1 0))
+(defun rt-gensym (&optional (prefix "G"))
+  (let ((name (format nil "~A~D" prefix *rt-gensym-counter*)))
+    (incf *rt-gensym-counter*)
+    (make-symbol name)))
+
+
+(defvar *rt-package-registry* (make-hash-table :test #'equal)
+  "Runtime package metadata keyed by package designator name.")
+
+(defun %rt-package-key (name-or-package)
+  (etypecase name-or-package
+    (hash-table (gethash :name name-or-package))
+    (package (package-name name-or-package))
+    (string name-or-package)
+    (symbol (string name-or-package))))
+
+(defun %rt-package-metadata (package)
+  (if (hash-table-p package)
+      package
+      (let ((key (%rt-package-key package)))
+        (or (gethash key *rt-package-registry*)
+            (let ((descriptor (make-hash-table :test #'eq)))
+              (setf (gethash :name descriptor) key)
+              (setf (gethash :exports descriptor) nil)
+              (setf (gethash :symbols descriptor) (make-hash-table :test #'equal))
+              (setf (gethash key *rt-package-registry*) descriptor)
+              descriptor)))))
+
+(defun %rt-register-package (package)
+  "Ensure PACKAGE designator is present in the runtime package registry and return its descriptor."
+  (when package
+    (%rt-package-metadata package)))
+
+(defun %rt-bootstrap-package-registry ()
+  "Seed the runtime package registry from a conservative explicit package set.
+This keeps runtime lookup centered on the registry without importing the full
+host package universe." 
+  (clrhash *rt-package-registry*)
+  (dolist (pkg-name *rt-bootstrap-package-names*)
+    (%rt-register-package pkg-name))
+  *rt-package-registry*)
+
+(defun %rt-register-vm-runtime-callables ()
+  "Register runtime helper callables into the VM bridge registry when VM is loaded."
+  (let* ((vm-pkg (find-package :cl-cc/vm))
+         (vm-register (and vm-pkg (find-symbol "VM-REGISTER-RUNTIME-CALLABLE" vm-pkg))))
+    (when (and vm-register (fboundp vm-register))
+      (dolist (entry '(("RT-1+" . rt-1+)
+                       ("RT-1-" . rt-1-)
+                       ("RT-+" . rt-+)
+                       ("RT--" . rt--)
+                       ("RT-*" . rt-*)
+                       ("RT-/" . rt-/)
+                       ("RT-<" . rt-<)
+                       ("RT->" . rt->)
+                       ("RT-<=" . rt-<=)
+                       ("RT->=" . rt->=)
+                       ("RT-MAX" . rt-max)
+                       ("RT-MIN" . rt-min)
+                       ("RT-LENGTH" . rt-length)
+                       ("RT-CHAR-EQUAL" . rt-char-equal)
+                       ("RT-CHAR=" . rt-char=)
+                       ("RT-EQL" . rt-eql)
+                       ("RT-EQUAL" . rt-equal)
+                       ("RT-EQUALP" . rt-equalp)
+                       ("RT-ELT" . rt-elt)
+                       ("RT-APPEND" . rt-append)
+                       ("RT-FBOUNDP" . rt-fboundp)
+                       ("RT-INTERN" . rt-intern)
+                       ("RT-GENSYM" . rt-gensym)
+                       ("RT-SYMBOL-VALUE" . rt-symbol-value)))
+        (funcall (symbol-function vm-register) (car entry) (symbol-function (cdr entry)))))))
+
+(defun rt-find-package (name)
+  (gethash (%rt-package-key name) *rt-package-registry*))
+
+(defun rt-intern (name &optional package)
+  (let* ((pkg (or (and package (%rt-package-metadata package))
+                  (and *package* (%rt-package-metadata *package*))))
+         (table (gethash :symbols pkg))
+         (key (string name)))
+    (or (gethash key table)
+        (setf (gethash key table) (make-symbol key)))))
+
+(defun rt-make-package (name &key use)
+  (let ((pkg (or (rt-find-package name)
+                 (%rt-register-package name))))
+    (when use
+      (setf (gethash :use-list pkg)
+            (mapcar #'%rt-package-metadata use)))
+    pkg))
+
+(defun rt-export (symbols package)
+  (let* ((pkg (%rt-package-metadata package))
+         (syms (if (listp symbols) symbols (list symbols))))
+    (setf (gethash :exports pkg)
+          (union syms (gethash :exports pkg) :test #'eq))
+    syms))
+
+(eval-when (:load-toplevel :execute)
+  (%rt-bootstrap-package-registry)
+  (%rt-bootstrap-function-registry)
+  (%rt-register-vm-runtime-callables))

@@ -126,7 +126,6 @@
    make-vm-first
    make-vm-floor-inst
    make-vm-fdefinition
-   make-vm-fmakunbound
    make-vm-format-inst
    make-vm-fourth
    make-vm-fround

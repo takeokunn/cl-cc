@@ -77,28 +77,27 @@
 
 ;;; ── Constructor generation ───────────────────────────────────────────────
 
-(defun %defstruct-make-constructor (ctor-name class-name boa-args all-slots)
-  "Generate a DEFUN form for a defstruct constructor.
-With BOA-ARGS: uses positional parameters. Without: uses keyword parameters."
+(defun %defstruct-build-constructor (ctor-name boa-args all-slots body-fn)
+  "Build a DEFUN constructor form. BODY-FN receives the effective slot-value forms."
   (if boa-args
-      (multiple-value-bind (normal-params aux-bindings param-names bound-names aux-lets)
+      (multiple-value-bind (normal-params _aux _pnames bound-names aux-lets)
           (%defstruct-boa-bindings boa-args)
-        (declare (ignore aux-bindings param-names))
-        (let ((initargs (loop for (slot-name default) in all-slots
-                              append (list (%defstruct-make-keyword slot-name)
-                                           (if (member slot-name bound-names :test #'string=)
-                                               slot-name
-                                               default)))))
-          (list 'defun ctor-name normal-params
-                (list 'let* aux-lets
-                      (list* 'make-instance (list 'quote class-name) initargs)))))
-      (let ((key-params (mapcar (lambda (slot) (list (first slot) (second slot))) all-slots))
-            (initargs (mapcan (lambda (slot)
-                                (list (%defstruct-make-keyword (first slot))
-                                      (first slot)))
-                              all-slots)))
-        (list 'defun ctor-name (cons '&key key-params)
-              (list* 'make-instance (list 'quote class-name) initargs)))))
+        (declare (ignore _aux _pnames))
+        (list 'defun ctor-name normal-params
+              (list 'let* aux-lets
+                    (funcall body-fn (%defstruct-resolve-slot-values all-slots bound-names)))))
+      (list 'defun ctor-name
+            (cons '&key (mapcar (lambda (s) (list (first s) (second s))) all-slots))
+            (funcall body-fn (mapcar #'first all-slots)))))
+
+(defun %defstruct-make-constructor (ctor-name class-name boa-args all-slots)
+  "Generate a DEFUN form for a defstruct constructor using CLOS make-instance."
+  (%defstruct-build-constructor
+   ctor-name boa-args all-slots
+   (lambda (slot-values)
+     (list* 'make-instance (list 'quote class-name)
+            (mapcan (lambda (slot sv) (list (%defstruct-make-keyword (first slot)) sv))
+                    all-slots slot-values)))))
 
 ;;; ── List/Vector-based struct expansion (FR-546) ──────────────────────────
 
@@ -110,22 +109,10 @@ With BOA-ARGS: uses positional parameters. Without: uses keyword parameters."
 
 (defun %defstruct-typed-constructor (ctor-name struct-name struct-type boa-args all-slots)
   "Generate a constructor for :type list or :type vector defstruct."
-  (if boa-args
-      (multiple-value-bind (normal-params aux-bindings param-names bound-names aux-lets)
-          (%defstruct-boa-bindings boa-args)
-        (declare (ignore aux-bindings param-names))
-        (let ((slot-values (mapcar (lambda (slot)
-                                     (if (member (first slot) bound-names :test #'string=)
-                                         (first slot)
-                                         (second slot)))
-                                    all-slots)))
-          (list 'defun ctor-name normal-params
-                (list 'let* aux-lets
-                      (%defstruct-typed-container-form struct-type struct-name slot-values)))))
-      (let ((key-params (mapcar (lambda (slot) (list (first slot) (second slot))) all-slots))
-            (slot-values (mapcar #'first all-slots)))
-        (list 'defun ctor-name (cons '&key key-params)
-              (%defstruct-typed-container-form struct-type struct-name slot-values)))))
+  (%defstruct-build-constructor
+   ctor-name boa-args all-slots
+   (lambda (slot-values)
+     (%defstruct-typed-container-form struct-type struct-name slot-values))))
 
 (defun %defstruct-typed-accessors (struct-type conc-name all-slots)
   "Generate accessor functions for :type list or :type vector defstruct."

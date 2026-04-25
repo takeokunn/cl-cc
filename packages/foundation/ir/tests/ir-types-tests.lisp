@@ -1,9 +1,10 @@
 ;;;; tests/unit/compile/ir/ir-types-tests.lisp — Compile IR Foundation Tests
 ;;;;
-;;;; Tests for src/compile/ir/{types,block,ssa,printer}.lisp
+;;;; Tests for src/compile/ir/{types,block,ssa}.lisp
 ;;;; Covers: ir-value allocation, ir-block construction, CFG edge management,
 ;;;;         ir-rpo, ir-dominators (linear + diamond), SSA write/read/seal,
-;;;;         ir-verify-ssa, and the printer.
+;;;;         ir-verify-ssa.
+;;;; Printer tests → ir-printer-tests.lisp.
 
 (in-package :cl-cc/test)
 
@@ -225,41 +226,3 @@
         (cl-cc/ir:ir-emit entry (cl-cc/ir:make-ir-inst :result v0))
         (cl-cc/ir:ir-emit entry (cl-cc/ir:make-ir-inst :result v1))))
     (assert-true (cl-cc/ir:ir-verify-ssa fn))))
-
-;;;; ─────────────────────────────────────────────────────────────────────────
-;;;; IR Printer (printer.lisp)
-;;;; ─────────────────────────────────────────────────────────────────────────
-
-(deftest ir-format-value-produces-percent-id
-  "ir-format-value returns %<id> for ir-values."
-  (let* ((fn (cl-cc/ir:ir-make-function 'test))
-         (v  (cl-cc/ir:ir-new-value fn)))
-    (assert-equal "%0" (cl-cc/ir:ir-format-value v))))
-
-(deftest-each ir-format-value-non-ir-value
-  "ir-format-value falls back to Lisp-print for non-ir-values."
-  :cases (("integer" 42   "42")
-          ("nil"     nil  "NIL")
-          ("keyword" :foo ":FOO"))
-  (value expected)
-  (assert-equal expected (cl-cc/ir:ir-format-value value)))
-
-(deftest-each ir-function-to-string-content
-  "ir-function-to-string: non-empty output; contains function name; contains entry label."
-  :cases (("non-empty"   'my-fn   nil)
-          ("fn-name"     'compute "compute")
-          ("entry-label" 'test    "entry"))
-  (fn-sym expected-substr)
-  (let* ((fn (cl-cc/ir:ir-make-function fn-sym :return-type :integer))
-         (s  (cl-cc/ir:ir-function-to-string fn)))
-    (assert-true (> (length s) 0))
-    (when expected-substr
-      (assert-true (search expected-substr s)))))
-
-(deftest ir-print-block-shows-predecessor-annotation
-  "ir-print-block includes a '; preds:' comment."
-  (let* ((fn  (cl-cc/ir:ir-make-function 'test))
-         (blk (cl-cc/ir:irf-entry fn))
-         (s   (with-output-to-string (stream)
-                (cl-cc/ir:ir-print-block blk stream))))
-    (assert-true (search "preds" s))))

@@ -8,10 +8,9 @@
               body)))
 
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-;;; Compat — CLOS Protocol, MOP Introspection, and Print Macros
+;;; CLOS Protocol, object printing, and method-combination macros
 ;;;
 ;;; Contains: print-unreadable-object, print-object, describe-object, describe,
-;;; update-instance-for-different-class, update-instance-for-changed-class,
 ;;; ensure-class, change-class, define-method-combination,
 ;;; MOP introspection macros (class-direct-superclasses, class-direct-slots,
 ;;; class-slots, class-direct-default-initargs, generic-function-methods,
@@ -19,9 +18,9 @@
 ;;; parse-float, reinitialize-instance, shared-initialize.
 ;;;
 ;;; Package/declaration/file-IO/hash-table/coerce/load-time-value/feature system
-;;; macros are in macros-compat.lisp (loads before).
+;;; macros are in macros-runtime-support.lisp (loads before).
 ;;;
-;;; Load order: after macros-compat.lisp.
+;;; Load order: after macros-runtime-support.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
@@ -106,18 +105,6 @@
             (list 'describe-object object str-v)
             '(values)))))
 
-;;; FR-1005: update-instance-for-different-class / update-instance-for-changed-class
-
-(register-macro 'update-instance-for-different-class
-  (lambda (form env)
-    (declare (ignore env))
-    (cons 'reinitialize-instance (cons (third form) (cdddr form)))))
-
-(register-macro 'update-instance-for-changed-class
-  (lambda (form env)
-    (declare (ignore env))
-    (cons 'reinitialize-instance (cons (second form) (cddr form)))))
-
 ;;; FR-1005: ensure-class — create or update a class definition
 
 (register-macro 'ensure-class
@@ -155,9 +142,9 @@
                                  (list 'unless (list 'member s-var old-slots-var :test '(function equal))
                                        (list 'setf (list 'gethash s-var inst-var) nil)))
                            (list 'setf (list 'gethash :__class__ inst-var) new-class-var))
-                     (when initargs
-                       (list (cons 'update-instance-for-different-class
-                                   (cons nil (cons inst-var initargs)))))
+                      (when initargs
+                        (list (cons 'reinitialize-instance
+                                    (cons inst-var initargs))))
                      (list inst-var))))))))
 
 ;;; FR-376: define-method-combination (short form)
@@ -169,4 +156,3 @@
   (lambda (form env)
     (declare (ignore env))
     (list 'quote (second form))))
-

@@ -4,14 +4,14 @@
 ;;;; All subsystems live in packages/**/. This file wires them together:
 ;;;;   eval-when: pre-load 15 package .asd files + cl-cc-test.asd (16 total)
 ;;;;   :cl-cc: umbrella package (src/package.lisp) + compile-pipeline
-;;;;   :cl-cc/bin: CLI tool
+;;;;   :cl-cc-cli: CLI tool
 ;;;;
-;;;; Test systems (:cl-cc/test, :cl-cc/test-clos) are in cl-cc-test.asd (loaded below).
+;;;; Test systems (:cl-cc-test, :cl-cc-test/clos) are in cl-cc-test.asd (loaded below).
 
 (eval-when (:load-toplevel :execute)
   (let ((here (make-pathname :defaults (or *load-pathname* *compile-file-pathname*)
                              :name nil :type nil)))
-    ;; :cl-cc/bin and :cl-cc/tests-framework are NOT pre-built by Nix — always
+;; :cl-cc-cli and :cl-cc-testing-framework are NOT pre-built by Nix — always
     ;; register them so ASDF can find them by name regardless of the Nix fast
     ;; path. They live under packages/ and are always in the build sandbox.
     (asdf:load-asd (merge-pathnames "packages/cli/cl-cc-cli.asd" here))
@@ -74,5 +74,5 @@
       (:file "pipeline-repl-load")
       (:file "pipeline-repl-ourload")))))
 
-;; :cl-cc/bin is defined in packages/cli/cl-cc-cli.asd.
+;; :cl-cc-cli is defined in packages/cli/cl-cc-cli.asd.
 ;; :cl-cc/tests-framework is defined in packages/testing/framework/cl-cc-testing-framework.asd.

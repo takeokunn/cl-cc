@@ -196,7 +196,8 @@
 
 ;;; Catch-all for unsupported instructions
 (defmethod emit-instruction ((target wasm-target) instruction stream)
-  (format stream "~%    ;; WASM: unsupported ~A" (type-of instruction)))
+  (declare (ignore target stream))
+  (error "Unsupported WASM instruction: ~A" (type-of instruction)))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Primary entry points

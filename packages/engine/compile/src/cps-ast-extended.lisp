@@ -8,7 +8,7 @@
 ;;;   set-gethash.
 ;;;
 ;;; Functional forms (quote, the, values, mvb, apply, mvc, mvprog1, ast-call)
-;;; and entry points (cps-transform-ast*, cps-transform*, maybe-cps-transform,
+;;; and entry points (cps-transform-ast*, cps-transform*,
 ;;; cps-transform-eval) are in cps-ast-functional.lisp (loads after this file).
 ;;;
 ;;; Core structural CPS transforms (ast-int through ast-labels) are in
@@ -27,6 +27,24 @@
 
 (defun %cps-progn (&rest forms)
   (cons 'progn forms))
+
+(defun %cps-lower-lambda-param (slot)
+  "Lower a single optional/key parameter slot (name default supplied-p) to lambda-list form."
+  (destructuring-bind (name default supplied-p) slot
+    (cond
+      ((and default supplied-p) (list name (ast-to-sexp default) supplied-p))
+      (default                  (list name (ast-to-sexp default)))
+      (t                        name))))
+
+(defun %cps-extended-lambda-list (required optional rest-param key-params)
+  "Rebuild a defun-style lambda list from lowered parameter slots."
+  (append required
+          (when optional
+            (cons '&optional (mapcar #'%cps-lower-lambda-param optional)))
+          (when rest-param
+            (list '&rest rest-param))
+          (when key-params
+            (cons '&key (mapcar #'%cps-lower-lambda-param key-params)))))
 
 (defmethod cps-transform-ast ((node ast-setq) k)
   "Transform setq assignment."
@@ -54,6 +72,28 @@
         (%cps-progn
          (list kind name)
          (%cps-funcall k name)))))
+
+(defmethod cps-transform-ast ((node ast-defun) k)
+  "Transform defun conservatively through host DEFUN."
+  (%cps-progn
+   (append (list 'defun
+                 (ast-defun-name node)
+                 (%cps-extended-lambda-list (ast-defun-params node)
+                                            (ast-defun-optional-params node)
+                                            (ast-defun-rest-param node)
+                                            (ast-defun-key-params node)))
+           (ast-defun-declarations node)
+           (mapcar #'ast-to-sexp (ast-defun-body node)))
+   (%cps-funcall k (list 'quote (ast-defun-name node)))))
+
+(defmethod cps-transform-ast ((node ast-defmacro) k)
+  "Transform defmacro conservatively through host DEFMACRO."
+  (%cps-progn
+   (append (list 'defmacro
+                 (ast-defmacro-name node)
+                 (ast-defmacro-lambda-list node))
+           (ast-defmacro-body node))
+   (%cps-funcall k (list 'quote (ast-defmacro-name node)))))
 
 (defmethod cps-transform-ast ((node ast-handler-case) k)
   "Transform handler-case conservatively through host handler-case."
@@ -119,7 +159,7 @@
   (%cps-progn
    (list 'defclass (ast-defclass-name node)
          (ast-defclass-superclasses node)
-         (ast-defclass-slots node))
+         (mapcar #'slot-def-to-sexp (ast-defclass-slots node)))
    (%cps-funcall k (list 'quote (ast-defclass-name node)))))
 
 (defmethod cps-transform-ast ((node ast-defgeneric) k)
@@ -157,5 +197,5 @@
 
 ;;; Functional forms (ast-quote, ast-the, ast-values, ast-multiple-value-bind,
 ;;; ast-apply, ast-multiple-value-call, ast-multiple-value-prog1, ast-call)
-;;; and entry points (cps-transform-ast*, cps-transform*, maybe-cps-transform,
+;;; and entry points (cps-transform-ast*, cps-transform*,
 ;;; cps-transform-eval) are in cps-ast-functional.lisp (loads after this file).

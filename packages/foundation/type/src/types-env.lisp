@@ -68,10 +68,6 @@ DICT-BINDINGS: alist of ((class-name . type-key) . method-alist) for typeclass d
 
 ;;; ─── Unknown sentinel ─────────────────────────────────────────────────────
 
-(defun make-type-unknown ()
-  "Create the canonical unknown/error-recovery sentinel."
-  (make-type-error :message "unknown"))
-
 (defun type-unknown-p (value)
   (and (type-error-p value)
        (string= (type-error-message value) "unknown")))
@@ -123,70 +119,35 @@ DICT-BINDINGS: alist of ((class-name . type-key) . method-alist) for typeclass d
 
 ;;; ─── Deftype names used in tests / structural assertions ─────────────────
 
-(deftype type-unknown ()
-  '(and type-error (satisfies type-unknown-p)))
-
 (deftype type-constructor ()
   '(or type-app (and type-union (satisfies %option-type-constructor-p))))
 
-;;; ─── Early type printer stub ──────────────────────────────────────────────
+;;; ─── Type printer protocol ────────────────────────────────────────────────
 
-(defun type-to-string (ty)
-  "Convert a type to a human-readable string.
-This stub is overridden by the printer module when loaded."
-  (typecase ty
-    (null "NIL")
-    (type-primitive (symbol-name (type-primitive-name ty)))
-    (type-var
-     (if (type-var-name ty)
-         (format nil "?~A" (type-var-name ty))
-         (format nil "?t~D" (type-var-id ty))))
-    (type-rigid
-     (if (type-rigid-name ty)
-         (format nil "!~A" (type-rigid-name ty))
-         (format nil "!r~D" (type-rigid-id ty))))
-    (type-arrow
-     (let ((ps (mapcar #'type-to-string (type-arrow-params ty)))
-           (r  (type-to-string (type-arrow-return ty))))
-       (if (null ps)
-           (format nil "() -> ~A" r)
-           (format nil "~{~A~^ ~} -> ~A" ps r))))
-    (type-product
-     (format nil "(~{~A~^, ~})" (mapcar #'type-to-string (type-product-elems ty))))
-    (type-union
-     (format nil "(~{~A~^ | ~})" (mapcar #'type-to-string (type-union-types ty))))
-    (type-intersection
-     (format nil "(~{~A~^ & ~})" (mapcar #'type-to-string (type-intersection-types ty))))
-    (type-forall
-     (format nil "(forall ~A . ~A)"
-             (type-to-string (type-forall-var ty))
-             (type-to-string (type-forall-body ty))))
-    (type-effect-row
-     (let ((effs (type-effect-row-effects ty))
-           (rv   (type-effect-row-row-var ty)))
-       (if (and (null effs) (null rv))
-           "{}"
-           (format nil "{~{~A~^, ~}~A}"
-                   (mapcar (lambda (e)
-                             (if (type-effect-op-p e)
-                                 (symbol-name (type-effect-op-name e))
-                                 "#<eff>"))
-                           effs)
-                   (if rv (format nil " | ~A" (type-to-string rv)) "")))))
-    (type-effect-op
-     (symbol-name (type-effect-op-name ty)))
-    (type-error
-     (if (string= (type-error-message ty) "unknown") "?" (type-error-message ty)))
-    (type-app
-     (format nil "(~A ~A)"
-             (type-to-string (type-app-fun ty))
-             (type-to-string (type-app-arg ty))))
-    (type-constraint
-     (format nil "(~A ~A)"
-             (type-constraint-class-name ty)
-             (type-to-string (type-constraint-type-arg ty))))
-    (type-qualified
-     (format nil "(~{~A~^, ~} => ~A)"
-             (mapcar #'type-to-string (type-qualified-constraints ty))
-             (type-to-string (type-qualified-body ty))))
-    (t (format nil "#<~A>" (type-of ty)))))
+(defgeneric type-to-string (ty)
+  (:documentation "Convert a type-node TY to a human-readable string.")
+  (:method (ty)
+    (format nil "#<type ~A>" (type-of ty))))
+
+(defmethod type-to-string ((ty null))
+  "NIL")
+
+(defmethod type-to-string ((ty type-primitive))
+  (symbol-name (type-primitive-name ty)))
+
+(defmethod type-to-string ((ty type-var))
+  (let ((link (type-var-link ty)))
+    (cond
+      (link              (type-to-string link))
+      ((type-var-name ty) (format nil "?~A" (type-var-name ty)))
+      (t                 (format nil "?t~D" (type-var-id ty))))))
+
+(defmethod type-to-string ((ty type-rigid))
+  (if (type-rigid-name ty)
+      (format nil "sk~D[~A]" (type-rigid-id ty) (type-rigid-name ty))
+      (format nil "sk~D"     (type-rigid-id ty))))
+
+(defmethod type-to-string ((ty type-error))
+  (if (string= (type-error-message ty) "unknown")
+      "?"
+      (type-error-message ty)))

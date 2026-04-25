@@ -77,7 +77,6 @@
     (,#'symbolp                             . symbol)
     (,#'pathnamep                           . pathname)
     (,(lambda (v) (typep v 'random-state))  . random-state)
-    (,#'readtablep                          . readtable)
     (,#'packagep                            . package)
     (,#'consp                               . cons)
     (,#'complexp                            . complex)
@@ -109,7 +108,33 @@
     ((and (consp predicate) (eq (car predicate) 'lambda))
      (let ((fn (ignore-errors (eval predicate))))
        (and fn (ignore-errors (funcall fn value)))))
-    (t nil)))
+      (t nil)))
+
+(defun %vm-type-refinement-accessor (name)
+  "Resolve exported cl-cc/type refinement accessors when the type subsystem is available."
+  (let ((pkg (find-package :cl-cc/type)))
+    (when pkg
+      (let ((sym (find-symbol name pkg)))
+        (when (and sym (fboundp sym))
+          (symbol-function sym))))))
+
+(defun %vm-call-type-refinement-accessor (name value)
+  "Call the exported cl-cc/type accessor NAME on VALUE when available.
+Returns NIL when the type subsystem or accessor is unavailable."
+  (let ((fn (%vm-type-refinement-accessor name)))
+    (when fn
+      (funcall fn value))))
+
+(defun %vm-type-refinement-components (type-sym)
+  "Return structural refinement data for TYPE-SYM when available.
+Values are: refinement-p, base-type, predicate. When TYPE-SYM is not a
+cl-cc/type refinement object, returns NIL for all values."
+  (let ((refinement-p (%vm-call-type-refinement-accessor "TYPE-REFINEMENT-P" type-sym)))
+    (if refinement-p
+        (values t
+                (%vm-call-type-refinement-accessor "TYPE-REFINEMENT-BASE" type-sym)
+                (%vm-call-type-refinement-accessor "TYPE-REFINEMENT-PREDICATE" type-sym))
+        (values nil nil nil))))
 
 ;;; Data table: maps compound type-specifier head symbols to handler functions.
 ;;; Each handler is (value type-sym) → boolean.
@@ -148,17 +173,21 @@ Used by vm-typep-check for compound forms: (or ...), (and ...), (not ...), etc."
              (funcall handler value type-sym)
              (ignore-errors (typep value type-sym)))))
       ;; Structural refinement type objects
-      ((type-refinement-p type-sym)
-       (and (vm-typep-check value (type-refinement-base type-sym))
-            (%vm-typep-call-predicate value (type-refinement-predicate type-sym))))
-      ;; VM CLOS instances — check class name / CPL
-      ((and (hash-table-p value) (gethash :__class__ value))
-       (let* ((class-ht   (gethash :__class__ value))
-              (class-name (and (hash-table-p class-ht) (gethash :__name__ class-ht)))
-              (cpl        (and (hash-table-p class-ht) (gethash :__cpl__ class-ht))))
-         (or (eq class-name type-sym) (member type-sym cpl))))
-      ;; Fallback to host typep
-      (t (ignore-errors (typep value type-sym))))))
+      (t
+       (multiple-value-bind (refinement-p base-type predicate)
+           (%vm-type-refinement-components type-sym)
+         (cond
+           (refinement-p
+            (and (vm-typep-check value base-type)
+                 (%vm-typep-call-predicate value predicate)))
+       ;; VM CLOS instances — check class name / CPL
+           ((and (hash-table-p value) (gethash :__class__ value))
+            (let* ((class-ht   (gethash :__class__ value))
+                   (class-name (and (hash-table-p class-ht) (gethash :__name__ class-ht)))
+                   (cpl        (and (hash-table-p class-ht) (gethash :__cpl__ class-ht))))
+              (or (eq class-name type-sym) (member type-sym cpl))))
+           ;; Fallback to host typep
+           (t (ignore-errors (typep value type-sym)))))))))
 
 (defmethod execute-instruction ((inst vm-typep) state pc labels)
   (declare (ignore labels))

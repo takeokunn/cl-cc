@@ -58,7 +58,7 @@
     (assert-null cs)))
 
 (deftest collect-quote-unknown
-  "ast-quote with unrecognized value type returns +type-unknown+."
+  "ast-quote with unrecognized value type returns cl-cc/type::+type-unknown+."
   (multiple-value-bind (ty cs)
       (collect (cl-cc/ast:make-ast-quote :value #\a))
     (assert-true (type-equal-p cl-cc/type::+type-unknown+ ty))

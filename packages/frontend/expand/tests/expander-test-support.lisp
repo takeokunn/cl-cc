@@ -20,5 +20,8 @@
      (assert-true (search ,needle (format nil "~S" result)))
      result))
 
+(defmacro assert-no-expansion (form)
+  `(assert-equal ,form (our-macroexpand-1 ,form)))
+
 (defmacro assert-printed-contains (form needle)
   `(assert-true (search ,needle (format nil "~S" ,form))))

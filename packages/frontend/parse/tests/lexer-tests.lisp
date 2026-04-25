@@ -55,12 +55,26 @@
 ;;; ─── String Tokens ──────────────────────────────────────────────────────────
 
 (deftest lexer-string-cases
-  "Lexer strings: simple string type/value; escape sequences produce correct chars."
+  "Lexer strings: simple string type/value."
   (assert-eq :T-STRING (first-token-type "\"hello\""))
-  (assert-string= "hello" (first-token-value "\"hello\""))
-  (let ((val (first-token-value "\"a\\nb\"")))
+  (assert-string= "hello" (first-token-value "\"hello\"")))
+
+(deftest-each lexer-string-escape-sequences
+  "All *lex-string-escape-table* entries produce the correct middle character."
+  :cases (("newline"   "\"a\\nb\""   #\Newline)
+          ("tab"       "\"a\\tb\""   #\Tab)
+          ("return"    "\"a\\rb\""   #\Return)
+          ("backslash" "\"a\\\\b\""  #\\)
+          ("nul"       "\"a\\0b\""   #\Nul)
+          ("unknown"   "\"a\\xb\""   #\x))
+  (input expected-middle)
+  (let ((val (first-token-value input)))
     (assert-= 3 (length val))
-    (assert-true (char= (char val 1) #\Newline))))
+    (assert-true (char= (char val 1) expected-middle))))
+
+(deftest lexer-string-escape-table-has-six-entries
+  "*lex-string-escape-table* has exactly 6 entries (\\n \\t \\r \\\\ \\\" \\0)."
+  (assert-= 6 (length cl-cc/parse::*lex-string-escape-table*)))
 
 ;;; ─── Symbol Tokens ──────────────────────────────────────────────────────────
 

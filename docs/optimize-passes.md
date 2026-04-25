@@ -827,7 +827,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: CPS変換の完全性要件
 - **難易度**: Medium
 
-- **関連実装**: `packages/engine/compile/src/cps-ast.lisp` に `ast-values` / `ast-multiple-value-bind` / `ast-apply` / `ast-defvar` / `ast-handler-case` / `ast-make-instance` / `ast-slot-value` / `ast-set-slot-value` / `ast-defclass` / `ast-defgeneric` / `ast-defmethod` / `ast-set-gethash` の保守的 CPS メソッドを追加済み。現状は host `multiple-value-call` / `multiple-value-bind` / `apply` / `defparameter` / `handler-case` / `make-instance` / `slot-value` / `setf` / `defclass` / `defgeneric` / `defmethod` / `gethash` を用いた total な fallback coverage を提供し、残りの未対応 AST ノードを減らしている。全 13 ノード網羅や高精度な多値意味保存の完成版は未実装。
+- **関連実装**: `packages/engine/compile/src/cps-ast.lisp` に `ast-values` / `ast-multiple-value-bind` / `ast-apply` / `ast-defvar` / `ast-handler-case` / `ast-make-instance` / `ast-slot-value` / `ast-set-slot-value` / `ast-defclass` / `ast-defgeneric` / `ast-defmethod` / `ast-set-gethash` の保守的 CPS メソッドを追加済み。現状は host `multiple-value-call` / `multiple-value-bind` / `apply` / `defparameter` / `handler-case` / `make-instance` / `slot-value` / `setf` / `defclass` / `defgeneric` / `defmethod` / `gethash` を用いて対応 AST 範囲を広げている。全 13 ノード網羅や高精度な多値意味保存の完成版は未実装。
 
 #### FR-371: CPS Host Control Flow Elimination (CPSホスト制御フロー除去)
 

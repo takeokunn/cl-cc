@@ -7,66 +7,91 @@
   "Thresholded inline pass used inside the convergence loop."
   (opt-pass-inline instructions :threshold :adaptive))
 
-(defparameter *opt-convergence-passes*
-  (list #'opt-pass-inline-iterative
-        #'opt-pass-fold
-        #'opt-pass-sccp
-        #'opt-pass-strength-reduce
-        #'opt-pass-bswap-recognition
-        #'opt-pass-rotate-recognition
-        #'opt-pass-reassociate
-        #'opt-pass-copy-prop
-        #'opt-pass-gvn
-        #'opt-pass-batch-concatenate
-        #'opt-pass-cse
-        #'opt-pass-jump
-        #'opt-pass-unreachable
-        #'opt-pass-dead-basic-blocks
-        #'opt-pass-store-to-load-forward
-        #'opt-pass-dead-store-elim
-        #'opt-pass-nil-check-elim
-        #'opt-pass-dominated-type-check-elim
-        #'opt-pass-branch-correlation
-        #'opt-pass-block-merge
-        #'opt-pass-tail-merge
-        #'opt-pass-pre
-        #'opt-pass-egraph
-        #'opt-pass-constant-hoist
-        #'opt-pass-global-dce
-        #'opt-pass-dead-labels
-        #'opt-pass-dce)
-  "Ordered list of passes run to convergence in optimize-instructions.")
+(defun %maybe-apply-prolog-rewrite (instructions)
+  "Apply the Prolog rewrite stage when enabled, preserving INSTRUCTIONS otherwise.
+The stage first applies the instruction-level Prolog peephole rules and then runs
+the e-graph rewrite engine whose builtin rule set is also sourced from Prolog facts." 
+  (if *enable-prolog-peephole*
+      (opt-pass-egraph
+       (mapcar #'sexp->instruction
+               (apply-prolog-peephole (mapcar #'instruction->sexp instructions))))
+      instructions))
+
+;;; Single source of truth: ordered keyword → function pairs.
+;;; *opt-convergence-passes* and *opt-pass-registry* are both derived from this.
+(defparameter *opt-pass-table*
+  `((:prolog-rewrite            . ,#'%maybe-apply-prolog-rewrite)
+    (:egraph                    . ,#'opt-pass-egraph)
+    (:inline                    . ,#'opt-pass-inline-iterative)
+    (:fold                      . ,#'opt-pass-fold)
+    (:sccp                      . ,#'opt-pass-sccp)
+    (:strength-reduce           . ,#'opt-pass-strength-reduce)
+    (:bswap-recognition         . ,#'opt-pass-bswap-recognition)
+    (:rotate-recognition        . ,#'opt-pass-rotate-recognition)
+    (:reassociate               . ,#'opt-pass-reassociate)
+    (:copy-prop                 . ,#'opt-pass-copy-prop)
+    (:gvn                       . ,#'opt-pass-gvn)
+    (:batch-concatenate         . ,#'opt-pass-batch-concatenate)
+    (:cse                       . ,#'opt-pass-cse)
+    (:jump                      . ,#'opt-pass-jump)
+    (:unreachable               . ,#'opt-pass-unreachable)
+    (:dead-basic-blocks         . ,#'opt-pass-dead-basic-blocks)
+    (:store-to-load-forward     . ,#'opt-pass-store-to-load-forward)
+    (:dead-store-elim           . ,#'opt-pass-dead-store-elim)
+    (:nil-check-elim            . ,#'opt-pass-nil-check-elim)
+    (:dominated-type-check-elim . ,#'opt-pass-dominated-type-check-elim)
+    (:branch-correlation        . ,#'opt-pass-branch-correlation)
+    (:block-merge               . ,#'opt-pass-block-merge)
+    (:tail-merge                . ,#'opt-pass-tail-merge)
+    (:pre                       . ,#'opt-pass-pre)
+    (:constant-hoist            . ,#'opt-pass-constant-hoist)
+    (:global-dce                . ,#'opt-pass-global-dce)
+    (:dead-labels               . ,#'opt-pass-dead-labels)
+    (:dce                       . ,#'opt-pass-dce))
+  "Ordered (keyword . function) pairs — single source for pipeline and registry.")
 
 (defparameter *opt-pass-registry*
-  (let ((ht (make-hash-table :test #'eq)))
-    (dolist (entry `((:inline . ,#'opt-pass-inline-iterative)
-                     (:fold . ,#'opt-pass-fold)
-                     (:sccp . ,#'opt-pass-sccp)
-                     (:strength-reduce . ,#'opt-pass-strength-reduce)
-                     (:bswap-recognition . ,#'opt-pass-bswap-recognition)
-                     (:rotate-recognition . ,#'opt-pass-rotate-recognition)
-                     (:reassociate . ,#'opt-pass-reassociate)
-                     (:copy-prop . ,#'opt-pass-copy-prop)
-                     (:gvn . ,#'opt-pass-gvn)
-                     (:batch-concatenate . ,#'opt-pass-batch-concatenate)
-                     (:cse . ,#'opt-pass-cse)
-                     (:jump . ,#'opt-pass-jump)
-                     (:unreachable . ,#'opt-pass-unreachable)
-                     (:dead-basic-blocks . ,#'opt-pass-dead-basic-blocks)
-                     (:store-to-load-forward . ,#'opt-pass-store-to-load-forward)
-                     (:dead-store-elim . ,#'opt-pass-dead-store-elim)
-                     (:nil-check-elim . ,#'opt-pass-nil-check-elim)
-                     (:dominated-type-check-elim . ,#'opt-pass-dominated-type-check-elim)
-                     (:block-merge . ,#'opt-pass-block-merge)
-                     (:tail-merge . ,#'opt-pass-tail-merge)
-                     (:pre . ,#'opt-pass-pre)
-                     (:egraph . ,#'opt-pass-egraph)
-                     (:constant-hoist . ,#'opt-pass-constant-hoist)
-                     (:dead-labels . ,#'opt-pass-dead-labels)
-                     (:dce . ,#'opt-pass-dce)))
-      (setf (gethash (car entry) ht) (cdr entry)))
-    ht)
-  "Keyword pass name -> optimizer function mapping for configurable pipelines.")
+  (loop with ht = (make-hash-table :test #'eq)
+        for (k . v) in *opt-pass-table*
+        do (setf (gethash k ht) v)
+        finally (return ht))
+  "Keyword → pass function mapping derived from *opt-pass-table*.")
+
+(defparameter *opt-default-convergence-pass-keys*
+  '(:prolog-rewrite
+    :inline
+    :sccp
+    :bswap-recognition
+    :rotate-recognition
+    :reassociate
+    :copy-prop
+    :gvn
+    :batch-concatenate
+    :cse
+    :jump
+    :unreachable
+    :dead-basic-blocks
+    :store-to-load-forward
+    :dead-store-elim
+    :nil-check-elim
+    :dominated-type-check-elim
+    :branch-correlation
+    :block-merge
+    :tail-merge
+    :pre
+    :constant-hoist
+    :global-dce
+    :dead-labels
+    :dce)
+  "Default convergence pipeline keys.
+`:egraph` remains available as an explicit pass, but the default rewrite stage is
+`:prolog-rewrite`, which already composes both the Prolog peephole backend and
+the e-graph engine.")
+
+(defparameter *opt-convergence-passes*
+  (mapcar (lambda (k) (gethash k *opt-pass-registry*))
+          *opt-default-convergence-pass-keys*)
+  "Ordered default pass functions derived from `*opt-default-convergence-pass-keys*`." )
 
 (defun opt-parse-pass-pipeline-string (text)
   "Parse a comma-separated optimizer pipeline string into keyword pass names."
@@ -197,30 +222,22 @@
 (defvar *skip-optimizer-passes* nil
   "When non-NIL, optimize-instructions returns its input unchanged.")
 
-(defun %maybe-apply-prolog-peephole (instructions)
-  "Apply the Prolog peephole adapter when enabled, preserving INSTRUCTIONS otherwise."
-  (if *enable-prolog-peephole*
-      (mapcar #'sexp->instruction
-              (apply-prolog-peephole (mapcar #'instruction->sexp instructions)))
-      instructions))
-
 (defun %opt-run-iteration (instructions passes print-pass-timings timing-stream
-                             print-pass-stats stats-stream print-opt-remarks
-                             opt-remarks-stream opt-remarks-mode trace-json-stream
-                             trace-events trace-ts-us)
-  "Run one optimizer iteration after a Prolog peephole normalization pass."
-  (let ((peepholed (%maybe-apply-prolog-peephole instructions)))
-    (opt-run-passes-once-with-reporting peepholed passes
-                                        :print-pass-timings print-pass-timings
-                                        :timing-stream timing-stream
-                                        :print-pass-stats print-pass-stats
-                                        :stats-stream stats-stream
-                                        :print-opt-remarks print-opt-remarks
-                                        :opt-remarks-stream opt-remarks-stream
-                                        :opt-remarks-mode opt-remarks-mode
-                                        :trace-enabled (not (null trace-json-stream))
-                                        :trace-events trace-events
-                                        :initial-ts-us trace-ts-us)))
+                               print-pass-stats stats-stream print-opt-remarks
+                               opt-remarks-stream opt-remarks-mode trace-json-stream
+                              trace-events trace-ts-us)
+  "Run one optimizer iteration through the configured pass list."
+  (opt-run-passes-once-with-reporting instructions passes
+                                      :print-pass-timings print-pass-timings
+                                      :timing-stream timing-stream
+                                      :print-pass-stats print-pass-stats
+                                      :stats-stream stats-stream
+                                      :print-opt-remarks print-opt-remarks
+                                      :opt-remarks-stream opt-remarks-stream
+                                      :opt-remarks-mode opt-remarks-mode
+                                      :trace-enabled (not (null trace-json-stream))
+                                      :trace-events trace-events
+                                      :initial-ts-us trace-ts-us))
 
 (defun optimize-instructions (instructions &key (max-iterations 20) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Run the full multi-pass optimization pipeline on a VM instruction sequence.
@@ -229,7 +246,7 @@ When *skip-optimizer-passes* is non-NIL, returns (values instructions nil)
 immediately without running any passes."
   (when *skip-optimizer-passes*
     (return-from optimize-instructions (values instructions nil)))
-  (let ((prog (%maybe-apply-prolog-peephole instructions))
+  (let ((prog instructions)
         (max-iterations (if (eq max-iterations :adaptive)
                             (opt-adaptive-max-iterations instructions)
                             max-iterations))
@@ -250,7 +267,6 @@ immediately without running any passes."
                                    trace-events trace-ts-us))
           when (opt-converged-p prev prog)
           return prog)
-    (setf prog (%maybe-apply-prolog-peephole prog))
     (when trace-json-stream
       (%opt-write-trace-json trace-json-stream (nreverse trace-events)))
     (opt-pass-leaf-detect prog)))

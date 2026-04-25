@@ -11,9 +11,18 @@
 ;;; ─── Helpers ─────────────────────────────────────────────────────────────────
 
 (defun make-test-ctx (source)
-  "Create a CL pratt-context from SOURCE string."
+  "Create a generic pratt-context from SOURCE string for parser-engine tests."
   (let ((tokens (cl-cc:lex-all source)))
-    (cl-cc/parse::make-cl-pratt-context tokens source nil)))
+    (cl-cc/parse::make-pratt-context
+     :tokens tokens
+     :source source
+     :source-file nil
+     :tok-type-fn #'cl-cc:lexer-token-type
+     :tok-value-fn #'cl-cc:lexer-token-value
+     :tok-start-fn #'cl-cc:lexer-token-start-byte
+     :tok-end-fn #'cl-cc:lexer-token-end-byte
+     :nud-table (make-hash-table :test #'eq)
+     :led-table (make-hash-table :test #'eq))))
 
 (defun parse-one-cst (source)
   "Parse SOURCE and return the first CST node."
@@ -102,25 +111,6 @@
     (let ((result (cl-cc/parse::pratt-expect ctx :T-STRING)))
       (assert-eq nil result))))
 
-;;; ─── NUD Table Registration ──────────────────────────────────────────────────
-
-(deftest cl-nud-table-not-nil
-  "CL NUD table is populated"
-  (assert-true (not (null cl-cc/parse::*cl-nud-table*)))
-  (assert-true (> (hash-table-count cl-cc/parse::*cl-nud-table*) 0)))
-
-(deftest cl-led-table-empty
-  "CL LED table is empty (CL has no infix operators)"
-  (assert-= 0 (hash-table-count cl-cc/parse::*cl-led-table*)))
-
-(deftest-each cl-nud-table-has-handler
-  "NUD table has handler for each required token type"
-  :cases (("int"    :T-INT)
-          ("lparen" :T-LPAREN)
-          ("quote"  :T-QUOTE))
-  (token-type)
-  (assert-true (not (null (gethash token-type cl-cc/parse::*cl-nud-table*)))))
-
 ;;; ─── parse-cl-source: CST Structure ─────────────────────────────────────────
 
 (deftest-each parse-literal-kind
@@ -171,4 +161,3 @@
   (let ((node (parse-one-cst source)))
     (assert-true (cl-cc:cst-interior-p node))
     (assert-eq expected-kind (cl-cc:cst-node-kind node))))
-

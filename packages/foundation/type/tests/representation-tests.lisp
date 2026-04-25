@@ -2,7 +2,7 @@
 ;;;;
 ;;;; Tests for src/type/representation.lisp:
 ;;;; Advanced type nodes, type-equal-p branches, type-free-vars,
-;;;; type-env operations, backward-compat aliases, type-constructor encoding.
+;;;; type-env operations, and type-constructor encoding.
 
 (in-package :cl-cc/test)
 
@@ -174,10 +174,10 @@
          (fvs (cl-cc/type::type-env-free-vars env)))
     (assert-equal 1 (length fvs))))
 
-;;; ─── Backward-compat aliases ───────────────────────────────────────────────
+;;; ─── Constructor and printing cases ────────────────────────────────────────
 
-(deftest type-compat-and-printing-cases
-  "Backward-compat aliases work; type-to-string returns string for all forms."
+(deftest type-constructor-and-printing-cases
+  "Constructor helpers and type-to-string return stable values for representative forms."
   (let ((v (cl-cc/type::fresh-type-var 'x)))
     (assert-true (type-var-p v))
     (assert-eq 'x (type-var-name v)))
@@ -189,12 +189,10 @@
          (spec (cl-cc/type::unparse-type ty)))
     (assert-eq 'Option (first spec))
     (assert-true (type-equal-p ty (cl-cc/type::parse-type-specifier spec))))
-  (assert-true  (type-unknown-p +type-unknown+))
-  (assert-false (type-unknown-p type-int))
   (let ((f (make-type-arrow (list type-int) type-string)))
     (assert-true (type-arrow-p f))
     (assert-eq :omega (type-arrow-mult f)))
   (assert-true (stringp (type-to-string type-int)))
-  (assert-true (stringp (type-to-string +type-unknown+)))
+  (assert-true (stringp (type-to-string cl-cc/type::+type-unknown+)))
   (assert-true (stringp (type-to-string nil)))
   (assert-true (search "->" (type-to-string (make-type-arrow (list type-int) type-string)))))

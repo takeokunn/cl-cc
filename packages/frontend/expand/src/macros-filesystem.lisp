@@ -7,12 +7,6 @@
 ;;; ─── Pathname accessors (FR-566) — host bridge ────────────────────────────────
 ;;; These delegate to host CL pathname functions via vm-host-bridge.
 
-;;; ─── with-compilation-unit (FR-363) ──────────────────────────────────────────
-
-(our-defmacro with-compilation-unit (options &rest body)
-  "Execute BODY as a compilation unit (stub — no special behavior in cl-cc)."
-  `(progn ,@body))
-
 ;;; ─── time (FR-431) ────────────────────────────────────────────────────────────
 
 (our-defmacro time (form)
@@ -31,12 +25,6 @@
   (if detail
       `(sb-ext::room ,detail)
       '(sb-ext::room)))
-
-;;; ─── break (FR-557) ──────────────────────────────────────────────────────────
-
-(our-defmacro break (&optional (format-str "") &rest args)
-  "Signal a breakpoint (stub — prints message and continues in cl-cc)."
-  `(progn (format t ,(concatenate 'string "~&BREAK: " format-str "~%") ,@args) nil))
 
 ;;; ─── dribble (FR-514) ─────────────────────────────────────────────────────────
 
@@ -78,13 +66,6 @@
              (*print-length* ,len-g))
          (write-string (write-to-string ,obj-g) ,str-g))
        ,obj-g)))
-
-;;; ─── formatter macro (FR-698) ────────────────────────────────────────────────
-
-(our-defmacro formatter (control-string)
-  "Return a function that formats using CONTROL-STRING (cl-cc stub)."
-  `(lambda (stream &rest args)
-     (apply #'format stream ,control-string args)))
 
 ;;; ─── locally (FR-397) ─────────────────────────────────────────────────────────
 
@@ -130,7 +111,7 @@
   "Read a form, preserving terminal whitespace (delegates to read in cl-cc)."
   `(read ,stream ,eof-error-p ,eof-value ,recursive-p))
 
-;;; ─── write-sequence / read-sequence stubs (FR-590) ───────────────────────────
+;;; ─── write-sequence / read-sequence helpers (FR-590) ─────────────────────────
 
 (our-defmacro write-sequence (sequence stream &key (start 0) end)
   "Write elements of SEQUENCE to STREAM."
@@ -170,36 +151,45 @@
 ;; read-delimited-list is registered in *vm-host-bridge-functions* — no macro needed.
 ;; Calls with an optional stream arg default to *standard-input* via host CL.
 
+;;; ─── read-char-no-hang (FR-568) ──────────────────────────────────────────────
+
+(register-macro 'read-char-no-hang
+  (lambda (form env)
+    (declare (ignore env))
+    (list 'read-char
+          (or (second form) '*standard-input*)
+          (if (third form) (third form) t)
+          (fourth form)
+          (fifth form))))
+
 ;;; ─── bit-nor / bit-nand / bit-eqv / bit-andc1 / bit-andc2 / bit-orc1 / bit-orc2 (FR-635) ──
 
-;; Note: The optional result-bit-array arg is accepted for ANSI compatibility
-;; but ignored — cl-cc's bit-and/bit-or/bit-xor are binary-only builtins.
-(our-defmacro bit-nor (bit-array1 bit-array2 &optional result-bit-array)
+(our-defmacro bit-nor (bit-array1 bit-array2)
   "Element-wise NOR of two bit arrays."
-  `(progn ,result-bit-array (bit-not (bit-ior ,bit-array1 ,bit-array2))))
+  `(bit-not (bit-ior ,bit-array1 ,bit-array2)))
 
-(our-defmacro bit-nand (bit-array1 bit-array2 &optional result-bit-array)
+(our-defmacro bit-nand (bit-array1 bit-array2)
   "Element-wise NAND of two bit arrays."
-  `(progn ,result-bit-array (bit-not (bit-and ,bit-array1 ,bit-array2))))
+  `(bit-not (bit-and ,bit-array1 ,bit-array2)))
 
-(our-defmacro bit-eqv (bit-array1 bit-array2 &optional result-bit-array)
+(our-defmacro bit-eqv (bit-array1 bit-array2)
   "Element-wise XNOR (equivalence) of two bit arrays."
-  `(progn ,result-bit-array (bit-not (bit-xor ,bit-array1 ,bit-array2))))
+  `(bit-not (bit-xor ,bit-array1 ,bit-array2)))
 
-(our-defmacro bit-andc1 (bit-array1 bit-array2 &optional result-bit-array)
+(our-defmacro bit-andc1 (bit-array1 bit-array2)
   "Element-wise AND of (NOT bit-array1) and bit-array2."
-  `(progn ,result-bit-array (bit-and (bit-not ,bit-array1) ,bit-array2)))
+  `(bit-and (bit-not ,bit-array1) ,bit-array2))
 
-(our-defmacro bit-andc2 (bit-array1 bit-array2 &optional result-bit-array)
+(our-defmacro bit-andc2 (bit-array1 bit-array2)
   "Element-wise AND of bit-array1 and (NOT bit-array2)."
-  `(progn ,result-bit-array (bit-and ,bit-array1 (bit-not ,bit-array2))))
+  `(bit-and ,bit-array1 (bit-not ,bit-array2)))
 
-(our-defmacro bit-orc1 (bit-array1 bit-array2 &optional result-bit-array)
+(our-defmacro bit-orc1 (bit-array1 bit-array2)
   "Element-wise OR of (NOT bit-array1) and bit-array2."
-  `(progn ,result-bit-array (bit-ior (bit-not ,bit-array1) ,bit-array2)))
+  `(bit-ior (bit-not ,bit-array1) ,bit-array2))
 
-(our-defmacro bit-orc2 (bit-array1 bit-array2 &optional result-bit-array)
+(our-defmacro bit-orc2 (bit-array1 bit-array2)
   "Element-wise OR of bit-array1 and (NOT bit-array2)."
-  `(progn ,result-bit-array (bit-ior ,bit-array1 (bit-not ,bit-array2))))
+  `(bit-ior ,bit-array1 (bit-not ,bit-array2)))
 
-;;; pprint stubs, readtable stubs, debug/introspect, compile-file → macros-filesystem-ext.lisp
+;;; end of filesystem/runtime helpers

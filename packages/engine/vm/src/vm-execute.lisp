@@ -139,15 +139,12 @@ The cl-cc execution model treats both NIL and numeric zero as false."
           (sym (or (find-symbol label-str :cl-cc)
                    (find-symbol label-str :cl)))
           (registered (when sym (gethash sym (vm-function-registry state)))))
-    (vm-reg-set state (vm-dst inst)
-                (or registered
-                    (when (and sym
-                               (gethash sym *vm-host-bridge-functions*)
-                               (fboundp sym))
-                      (symbol-function sym))
-           (make-instance 'vm-closure-object
-                          :entry-label label-str
-                          :params nil
+      (vm-reg-set state (vm-dst inst)
+                  (or registered
+                      (and sym (vm-bridge-callable sym))
+            (make-instance 'vm-closure-object
+                           :entry-label label-str
+                           :params nil
                           :rest-stack-alloc-p nil
                           :captured-values nil))))
   (values (1+ pc) nil nil))

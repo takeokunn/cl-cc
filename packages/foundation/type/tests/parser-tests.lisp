@@ -1,9 +1,9 @@
-;;;; tests/unit/type/parser-tests.lisp — Type Parser Tests
+;;;; tests/unit/type/parser-tests.lisp — Type Parser Tests (primitive/compound/structural)
 ;;;;
 ;;;; Tests for src/type/parser.lisp:
 ;;;; parse-type-specifier, parse-primitive-type, parse-compound-type,
-;;;; arrow/row/constraint parsing, lambda-list parsing, return-type extraction,
 ;;;; typed AST nodes, looks-like-type-specifier-p.
+;;;; Arrow/quantifier/modal tests → parser-arrow-quantifier-tests.lisp.
 
 (in-package :cl-cc/test)
 
@@ -72,12 +72,12 @@
         (assert-true (funcall pred ty))
         (assert-equal 2 (length (funcall accessor ty))))))
 
-;;; ─── parse-type-specifier: function / values / cons ──────────────────────
+;;; ─── parse-type-specifier: function / values ──────────────────────────────
 
 (deftest-each parse-function-type-cases
-  "(function (PARAMS...) RET) produces arrow with correct param count and return type."
-  :cases (("one-param"    '(function (fixnum) string)          1 type-string)
-          ("multi-param"  '(function (fixnum string) boolean)  2 type-bool))
+  "(-> PARAMS... RET) produces arrow with correct param count and return type."
+  :cases (("one-param"    '(-> fixnum string)          1 type-string)
+          ("multi-param"  '(-> fixnum string boolean)  2 type-bool))
   (form expected-nparams expected-ret)
   (let ((ty (cl-cc/type::parse-type-specifier form)))
     (assert-true (type-arrow-p ty))
@@ -85,35 +85,50 @@
     (assert-true (type-equal-p expected-ret (type-arrow-return ty)))))
 
 (deftest-each parse-type-specifier-wrong-arity-errors
-  "function, cons, and list forms with wrong arity signal type-parse-error."
-  :cases (("function-no-param-list" '(function fixnum))
-          ("cons-one-arg"           '(cons fixnum))
+  "arrow and list forms with wrong arity signal type-parse-error."
+  :cases (("arrow-no-param-list" '(-> fixnum))
           ("list-two-args"          '(list fixnum string)))
   (form)
   (assert-signals cl-cc/type::type-parse-error
     (cl-cc/type::parse-type-specifier form)))
 
-(deftest-each parse-product-type-forms
-  "(values T1 T2) and (cons T1 T2) both produce 2-element type-product."
-  :cases (("values" '(values fixnum string))
-          ("cons"   '(cons fixnum string)))
-  (form)
-  (let ((ty (cl-cc/type::parse-type-specifier form)))
+(deftest parse-product-type-forms
+  "(values T1 T2) produces a 2-element type-product."
+  (let ((ty (cl-cc/type::parse-type-specifier '(values fixnum string))))
     (assert-true (type-product-p ty))
     (assert-equal 2 (length (type-product-elems ty)))))
 
 ;;; ─── parse-type-specifier: list / vector / array ─────────────────────────
 
 (deftest-each parse-collection-type-apps
-  "(list T), (vector T), and (array T) all produce type-app nodes."
-  :cases (("list"   '(list fixnum)   type-int  t)
-          ("vector" '(vector fixnum) type-int  nil)
-          ("array"  '(array string)  type-string nil))
-  (form expected-arg check-arg-p)
+  "(list/vector/array/simple-vector/simple-array T) produce type-app nodes."
+  :cases (("list"          '(list fixnum)          'list   type-int)
+          ("vector"        '(vector fixnum)         'vector type-int)
+          ("simple-vector" '(simple-vector fixnum)  'vector type-int)
+          ("array"         '(array string)          'array  type-string)
+          ("simple-array"  '(simple-array string)   'array  type-string))
+  (form expected-fun-name expected-arg)
   (let ((ty (cl-cc/type::parse-type-specifier form)))
     (assert-true (type-app-p ty))
-    (when check-arg-p
-      (assert-true (type-equal-p expected-arg (type-app-arg ty))))))
+    (assert-eq expected-fun-name (type-primitive-name (type-app-fun ty)))
+    (assert-true (type-equal-p expected-arg (type-app-arg ty)))))
+
+(deftest parse-compound-type-app-table-covers-five-aliases
+  "*parse-compound-type-app-table* has exactly 5 entries: list + 2 vector forms + 2 array forms."
+  (let ((table cl-cc/type::*parse-compound-type-app-table*))
+    (assert-= 5 (length table))
+    (assert-true (assoc 'list          table))
+    (assert-true (assoc 'vector        table))
+    (assert-true (assoc 'simple-vector table))
+    (assert-true (assoc 'array         table))
+    (assert-true (assoc 'simple-array  table))))
+
+(deftest parse-compound-multi-arg-table-covers-or-and
+  "*parse-compound-multi-arg-table* drives (or) and (and) dispatch."
+  (let ((table cl-cc/type::*parse-compound-multi-arg-table*))
+    (assert-= 2 (length table))
+    (assert-true (assoc 'or  table))
+    (assert-true (assoc 'and table))))
 
 (deftest-each parser-graded-arrow-syntax
   "Graded arrow syntax (->1, ->0) parses to type-arrow with the correct multiplicity."
@@ -181,103 +196,3 @@
     (if (eq expected-pred t)
         (assert-true (type-refinement-predicate result))
         (assert-eq expected-pred (cl-cc/type::type-refinement-predicate result)))))
-
-;;; ─── Arrow types: ->, ->1, ->0 ──────────────────────────────────────────
-
-(deftest-each parse-arrow-basic-cases
-  "-> arrow: pure 1-param; multi 2-param with boolean return."
-  :cases (("pure"        `(,(intern "->" :cl-cc/type) fixnum string)          1 t)
-          ("multi-param" `(,(intern "->" :cl-cc/type) fixnum string boolean)  2 nil))
-  (form expected-param-count check-effects)
-  (let ((ty (cl-cc/type::parse-type-specifier form)))
-    (assert-true (type-arrow-p ty))
-    (assert-equal expected-param-count (length (type-arrow-params ty)))
-    (when check-effects
-      (assert-true (type-effect-row-p (type-arrow-effects ty))))))
-
-(deftest-each parse-arrow-multiplicity
-  "->1 and ->0 produce arrow types with :one and :zero multiplicity respectively."
-  :cases (("linear" (intern "->1" :cl-cc/type) :one)
-          ("erased" (intern "->0" :cl-cc/type) :zero))
-  (arrow-sym expected-mult)
-  (let ((ty (cl-cc/type::parse-type-specifier `(,arrow-sym fixnum string))))
-    (assert-true (type-arrow-p ty))
-    (assert-eq expected-mult (cl-cc/type::type-arrow-mult ty))))
-
-(deftest-each parse-type-specifier-malformed-errors
-  "Malformed arrow/refinement/field specifiers signal type-parse-error."
-  :cases (("arrow-too-few"       `(,(intern "->" :cl-cc/type) fixnum))
-          ("refinement-no-pred"  '(refine fixnum))
-          ("record-field-no-type" '(record (x))))
-  (form)
-  (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-type-specifier form)))
-
-(deftest parse-arrow-with-bang-effects
-  "(-> fixnum string ! IO) has IO effect."
-  (let ((ty (cl-cc/type::parse-type-specifier
-             `(,(intern "->" :cl-cc/type) fixnum string ,(intern "!" :cl-cc/type) io))))
-    (assert-true (type-arrow-p ty))
-    (let ((eff (type-arrow-effects ty)))
-      (assert-true (type-effect-row-p eff))
-      (assert-true (> (length (type-effect-row-effects eff)) 0)))))
-
-;;; ─── Quantifiers: forall, exists, mu ─────────────────────────────────────
-
-(deftest-each parse-quantifier-binding-types
-  "forall/exists/mu produce their respective type nodes with a type-var bound variable."
-  :cases (("forall" '(forall a fixnum) #'type-forall-p #'type-forall-var
-                    #'cl-cc/type::type-forall-body)
-          ("exists" '(exists a fixnum) #'type-exists-p #'cl-cc/type::type-exists-var nil)
-          ("mu"     '(mu a fixnum)     #'type-mu-p     #'cl-cc/type::type-mu-var     nil))
-  (form pred var-fn body-fn)
-  (let ((ty (cl-cc/type::parse-type-specifier form)))
-    (assert-true (funcall pred ty))
-    (assert-true (type-var-p (funcall var-fn ty)))
-    (when body-fn
-      (assert-true (type-equal-p type-int (funcall body-fn ty))))))
-
-(deftest-each parse-quantifier-arity-errors
-  "forall, exists, and mu with only one argument each signal type-parse-error."
-  :cases (("forall" '(forall a))
-          ("exists" '(exists a))
-          ("mu"     '(mu a)))
-  (form)
-  (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-type-specifier form)))
-
-(deftest parse-type-lambda
-  "(type-lambda a fixnum) produces type-lambda."
-  (let ((ty (cl-cc/type::parse-type-specifier '(type-lambda a fixnum))))
-    (assert-true (type-lambda-p ty))
-    (assert-true (type-var-p (type-lambda-var ty)))
-    (assert-true (type-equal-p type-int (type-lambda-body ty)))))
-
-;;; ─── Qualified types: => ─────────────────────────────────────────────────
-
-(deftest-each parse-qualified-type-cases
-  "(=>) with body produces type-qualified; without body signals type-parse-error."
-  :cases (("valid"    `(,(intern "=>" :cl-cc/type) (num fixnum) string) nil)
-          ("no-body"  `(,(intern "=>" :cl-cc/type))                     t))
-  (form error-p)
-  (if error-p
-      (assert-signals cl-cc/type::type-parse-error
-        (cl-cc/type::parse-type-specifier form))
-      (let ((ty (cl-cc/type::parse-type-specifier form)))
-        (assert-true (type-qualified-p ty))
-        (assert-equal 1 (length (type-qualified-constraints ty)))
-        (assert-true (type-equal-p type-string (cl-cc/type::type-qualified-body ty))))))
-
-;;; ─── Graded modal types ─────────────────────────────────────────────────
-
-(deftest-each parse-graded-modal-types
-  "!1, !0, !W shorthand and explicit (! N T) all produce linear types with correct grades."
-  :cases (("one"      `(,(intern "!1" :cl-cc/type) fixnum)    :one)
-          ("zero"     `(,(intern "!0" :cl-cc/type) fixnum)    :zero)
-          ("omega"    `(,(intern "!W" :cl-cc/type) fixnum)    :omega)
-          ("explicit" `(,(intern "!"  :cl-cc/type) 1 fixnum)  :one))
-  (form expected-grade)
-  (let ((ty (cl-cc/type::parse-type-specifier form)))
-    (assert-true (type-linear-p ty))
-    (assert-eq expected-grade (cl-cc/type::type-linear-grade ty))))
-

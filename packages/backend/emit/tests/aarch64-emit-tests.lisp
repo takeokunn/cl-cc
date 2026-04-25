@@ -108,13 +108,13 @@
     (assert-true (search "mov x0" asm))
     (assert-true (search "ret" asm))))
 
-(deftest aarch64-emit-print-and-silent-cases
-  "vm-print emits rt-print call; unsupported instructions still emit empty string."
+(deftest aarch64-emit-print-and-unsupported-cases
+  "vm-print emits rt-print call; unsupported instructions now signal errors."
   (let ((tgt (%make-aarch64-target)))
     (let ((asm (%aarch64-emit tgt (make-vm-print :reg :r0))))
       (assert-true (search "bl rt-print" asm))
       (assert-true (search "x0" asm)))
-    (assert-equal "" (%aarch64-emit tgt (make-vm-ret :reg :r0)))))
+    (assert-signals error (%aarch64-emit tgt (make-vm-ret :reg :r0)))))
 
 (deftest aarch64-emit-spill-operations
   "vm-spill-store emits str [x29-N], reg; vm-spill-load emits ldr reg, [x29-N]."

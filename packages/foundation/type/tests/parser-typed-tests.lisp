@@ -159,7 +159,7 @@
           ("boolean"        t   'boolean)
           ("question-mark"  t   '?)
           ("or-composite"   t   '(or fixnum string))
-          ("function-type"  t   '(function (fixnum) string))
+          ("function-type"  t   '(-> fixnum string))
           ("values-type"    t   '(values fixnum string))
           ("unknown-symbol" nil 'my-random-thing))
   (expected form)

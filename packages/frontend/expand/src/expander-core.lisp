@@ -1,16 +1,5 @@
 (in-package :cl-cc/expand)
 
-;;; Ensure cl-cc/type package exists at compile time so that qualified symbols
-;;; can be read before type/ loads.
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (unless (find-package :cl-cc/type)
-    (defpackage :cl-cc/type
-      (:use :cl)
-      (:export #:looks-like-type-specifier-p
-               #:parse-type-specifier
-               #:+type-unknown+
-               #:register-type-alias))))
-
 (defun chain-comparison-op (op args)
   "Chain a comparison (OP a b c) → (AND (OP a b) (OP b c)).
 Uses gensyms for intermediate values to avoid double evaluation.
@@ -84,7 +73,7 @@ specifier symbol, it is treated as the declared return type and wrapped in
                                      type-alist))
            (return-type      (if return-type-spec
                                  (cl-cc/type:parse-type-specifier return-type-spec)
-                                 cl-cc/type:+type-unknown+))
+                                 cl-cc/type::+type-unknown+))
            (typed-return-spec (and return-type-spec
                                    (or (cl-cc/type::lookup-type-alias return-type-spec)
                                        return-type-spec)))

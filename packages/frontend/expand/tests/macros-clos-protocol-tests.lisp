@@ -1,8 +1,7 @@
-;;;; tests/unit/expand/macros-compat-clos-tests.lisp
-;;;; Coverage tests for src/expand/macros-compat-clos.lisp
+;;;; tests/unit/expand/macros-clos-protocol-tests.lisp
+;;;; Coverage tests for src/expand/macros-clos-protocol.lisp and macros-mop-support.lisp
 ;;;;
 ;;;; Covers: print-unreadable-object, print-object, describe-object, describe,
-;;;; update-instance-for-different-class, update-instance-for-changed-class,
 ;;;; ensure-class, change-class, define-method-combination,
 ;;;; class-direct-superclasses, class-direct-slots, class-slots,
 ;;;; class-direct-default-initargs, generic-function-methods,
@@ -11,11 +10,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite macros-compat-clos-suite
-  :description "Tests for macros-compat-clos.lisp: CLOS protocol and MOP macros"
+(defsuite macros-clos-protocol-suite
+  :description "Tests for CLOS protocol and MOP support macros"
   :parent cl-cc-unit-suite)
 
-(in-suite macros-compat-clos-suite)
+(in-suite macros-clos-protocol-suite)
 
 ;;; ─── print-unreadable-object ──────────────────────────────────────────────
 
@@ -79,21 +78,6 @@
                  '(cl-cc::define-method-combination append :identity-with-one-argument t))))
     (assert-eq 'quote (car result))
     (assert-eq 'append (second result))))
-
-;;; ─── update-instance-for-different-class / update-instance-for-changed-class
-
-(deftest-each update-instance-compat-macros-delegate-to-reinitialize
-  "Legacy instance-update compatibility macros both expand to REINITIALIZE-INSTANCE."
-  :cases (("different-class"
-           '(cl-cc/expand::update-instance-for-different-class prev curr :slot 1)
-           'curr)
-          ("changed-class"
-           '(cl-cc/expand::update-instance-for-changed-class inst :slot 1)
-           'inst))
-  (form expected-target)
-  (let ((result (our-macroexpand-1 form)))
-    (assert-eq 'reinitialize-instance (car result))
-    (assert-eq expected-target (second result))))
 
 (deftest-each instance-init-compat-macros-use-shared-helper
   "REINITIALIZE-INSTANCE and SHARED-INITIALIZE both delegate to %APPLY-INSTANCE-INITARGS."

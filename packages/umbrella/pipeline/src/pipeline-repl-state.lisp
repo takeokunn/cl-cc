@@ -39,9 +39,6 @@ Accumulates slot info across form evaluations so :include works across calls.")
 (defvar *our-load-host-definition-mode* nil
   "When true, OUR-LOAD may evaluate host-only top-level definition forms directly.")
 
-(defvar *our-load-current-path* nil
-  "Current source pathname being processed by OUR-LOAD, when available.")
-
 (eval-when (:load-toplevel :execute)
   ;; Keep selfhost macro expansion pinned to OUR-EVAL even when this file is
   ;; loaded or instrumented separately from pipeline.lisp (for example under
@@ -140,7 +137,7 @@ Example:
       (when (and (= (length forms) 1)
                  (consp (first forms))
                  (eq (caar forms) 'in-package))
-        (let ((pkg (find-package (second (first forms)))))
+        (let ((pkg (cl-cc/runtime:rt-find-package (second (first forms)))))
           (unless pkg
             (error "Unknown package: ~S" (second (first forms))))
           (setf *package* pkg)

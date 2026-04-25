@@ -145,9 +145,9 @@ BODY: the body type."
   (knd  nil)
   (body nil))
 
-(defun make-type-forall (&key var knd body type)
-  "Constructor for type-forall. Accepts :body (canonical) or :type (alias for :body)."
-  (%make-type-forall-raw :var var :knd knd :body (or body type)))
+(defun make-type-forall (&key var knd body)
+  "Constructor for type-forall using the canonical :body slot."
+  (%make-type-forall-raw :var var :knd knd :body body))
 
 ;;; ─── type-exists ──────────────────────────────────────────────────────────
 

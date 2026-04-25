@@ -11,7 +11,7 @@
 
 ;;; Bootstrap provides binop/const/var/cmp atoms used by egraph-rules as
 ;;; Prolog predicate keys. cl-cc/vm provides all VM instruction types and
-;;; accessors. cl-cc/prolog provides def-fact and apply-prolog-peephole.
+;;; accessors. cl-cc/prolog provides def-fact, query-all, and apply-prolog-peephole.
 ;;; cl-cc/type is accessed qualified (cl-cc/type:...) so not in :use.
 
 (defpackage :cl-cc/optimize

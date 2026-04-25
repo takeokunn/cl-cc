@@ -5,7 +5,7 @@
 ;;; Defines the rewrite rule macro `defrule` and all built-in rules.
 ;;; Rules are compiled to:
 ;;;   1. A Prolog fact (`def-fact`) for pattern-matching via the Prolog engine
-;;;   2. A plist entry (:lhs :rhs :when :name) in *egraph-rules*
+;;;   2. A guard-table entry keyed by rule name for host-side `:when` predicates
 ;;;
 ;;; The use of the existing Prolog unification engine for pattern matching
 ;;; is the unique contribution of this compiler: no other compiler uses a
@@ -20,16 +20,15 @@
 
 ;;; ─── Rule Registry ───────────────────────────────────────────────────────
 
-(defparameter *egraph-rules* nil
-  "All registered e-graph rewrite rules.
-   Each entry is a plist: (:name name :lhs pattern :rhs template :when guard).")
+(defparameter *egraph-rule-guards* (make-hash-table :test #'eq)
+  "Rule-name → guard function mapping used when reconstructing rules from Prolog facts.")
 
 (defun egraph-rule-register (name lhs rhs when-fn)
-  "Register a rewrite rule with NAME, LHS pattern, RHS template, WHEN-FN guard.
-   Replaces any existing rule with the same NAME."
-  (setq *egraph-rules*
-        (cons (list :name name :lhs lhs :rhs rhs :when when-fn)
-              (remove-if (lambda (r) (eq (getf r :name) name)) *egraph-rules*))))
+  "Register the guard function for NAME.
+Rule structure itself is sourced from the Prolog fact database emitted by `defrule`."
+  (declare (ignore lhs rhs))
+  (setf (gethash name *egraph-rule-guards*) when-fn)
+  name)
 
 ;;; ─── defrule Macro ───────────────────────────────────────────────────────
 ;;;
@@ -46,22 +45,20 @@
 ;;;            :when (lambda (b _) (numberp (egraph-binding-value b '?a))))
 
 (defmacro defrule (name pattern replacement &key when)
-  "Define an e-graph rewrite rule and register it in *egraph-rules*.
-   Also emits a Prolog fact for documentation/alternative-backend use."
-  (let ((rule-sym (intern (format nil "ERULE-~A" name))))
-    (list 'progn
-          (list 'egraph-rule-register
-                (list 'quote name)
-                (list 'quote pattern)
-                (list 'quote replacement)
-                (if when
-                    (list 'lambda '(bindings eg)
-                          '(declare (ignorable bindings eg))
-                          when)
-                    nil))
-          (list 'def-fact (list 'egraph-rule (list 'quote rule-sym)
-                                (list 'quote pattern) (list 'quote replacement)))
-          (list 'quote name))))
+  "Define an e-graph rewrite rule guard and emit a matching Prolog fact." 
+  (list 'progn
+        (list 'egraph-rule-register
+              (list 'quote name)
+              (list 'quote pattern)
+              (list 'quote replacement)
+              (if when
+                  (list 'lambda '(bindings eg)
+                        '(declare (ignorable bindings eg))
+                        when)
+                  nil))
+        (list 'def-fact (list 'egraph-rule (list 'quote name)
+                              (list 'quote pattern) (list 'quote replacement)))
+        (list 'quote name)))
 
 ;;; ─── Binding Helpers ─────────────────────────────────────────────────────
 

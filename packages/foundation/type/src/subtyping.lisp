@@ -99,7 +99,6 @@ Called as the fallback when no T1-driven rule matched."
 
    Key rules:
    - Reflexivity: T <: T
-   - Gradual: ? <: T and T <: ? (gradual typing escape hatch)
    - Top: T <: t for any T
    - Primitives: follows CL type hierarchy via *subtype-table*
    - Union (left): T1|T2 <: T3 iff T1 <: T3 and T2 <: T3
@@ -109,8 +108,6 @@ Called as the fallback when no T1-driven rule matched."
    - Arrow: contravariant params, covariant return
    - Constructor: same name + covariant args (simplified)"
   (or (type-equal-p t1 t2)
-      (type-unknown-p t1)
-      (type-unknown-p t2)
       (and (typep t2 'type-primitive) (eq (type-primitive-name t2) 't))
       ;; T1-driven rules take priority; each terminal arm falls through to T2 rules.
       ;; T1 union/intersection/refinement recurse — their recursion handles T2 structure.
@@ -147,12 +144,11 @@ Called as the fallback when no T1-driven rule matched."
              (%is-subtype-p-by-t2 t1 t2)))
         (t (%is-subtype-p-by-t2 t1 t2)))))
 
-(defun subtypep (type1 type2 &optional environment)
-  "ANSI-style subtype predicate for cl-cc/type.
+(defun subtypep (type1 type2)
+  "Subtype predicate for cl-cc/type.
 
 Returns (values subtype-p sure-p). TYPE1 and TYPE2 may be type nodes or
-type specifiers; ENVIRONMENT is accepted for API compatibility and ignored."
-  (declare (ignore environment))
+type specifiers."
   (let ((t1 (if (typep type1 'type-node) type1 (parse-type-specifier type1)))
         (t2 (if (typep type2 'type-node) type2 (parse-type-specifier type2))))
     (values (is-subtype-p t1 t2) t)))
@@ -180,8 +176,6 @@ type specifiers; ENVIRONMENT is accepted for API compatibility and ignored."
      (type-join fixnum fixnum)   => fixnum"
   (cond
     ((type-equal-p t1 t2) t1)
-    ((type-unknown-p t1) t2)
-    ((type-unknown-p t2) t1)
     ((is-subtype-p t1 t2) t2)
     ((is-subtype-p t2 t1) t1)
     (t
@@ -210,8 +204,6 @@ type specifiers; ENVIRONMENT is accepted for API compatibility and ignored."
      (type-meet fixnum string)   => (and fixnum string)  ; uninhabited"
   (cond
     ((type-equal-p t1 t2) t1)
-    ((type-unknown-p t1) t1)
-    ((type-unknown-p t2) t2)
     ((is-subtype-p t1 t2) t1)
     ((is-subtype-p t2 t1) t2)
     (t

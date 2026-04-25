@@ -83,7 +83,7 @@
 
    Generates:
    - Primitives: fixnum, single-float, string, boolean, symbol
-   - Compound: (function (T1 T2) R), (or T1 T2), (values T1 T2)
+   - Compound: (-> T1 T2 R), (or T1 T2), (values T1 T2)
    - Variables: ?a, ?b (for polymorphism testing)"
   (let ((effective-depth (max 0 (min depth *max-type-depth*))))
     (if (or (zerop effective-depth)

@@ -24,10 +24,19 @@
 ;;; ─── All Built-In Rules ──────────────────────────────────────────────────
 
 (defun egraph-builtin-rules ()
-  "Return the list of all built-in e-graph rewrite rules.
-   These are registered in *egraph-rules* at load time by the defrule forms
-   above.  This function returns the current registry for inspection."
-  *egraph-rules*)
+  "Return the list of built-in e-graph rewrite rules.
+The primary source of truth is the Prolog `egraph-rule` fact set emitted by
+`defrule`; the in-memory guard table is consulted only to attach existing `:when`
+predicates to the fact-backed rule records." 
+  (mapcar (lambda (fact)
+            (let ((name (second fact))
+                  (lhs  (third fact))
+                  (rhs  (fourth fact)))
+              (list :name name
+                    :lhs lhs
+                    :rhs rhs
+                    :when (gethash name *egraph-rule-guards*))))
+          (cl-cc/prolog:query-all '(egraph-rule ?name ?lhs ?rhs))))
 
 ;;; ─── E-Graph Optimization Entry Point ────────────────────────────────────
 
@@ -44,8 +53,8 @@
       2. Saturate with RULES until fixed-point or resource limit
       3. Lower destination classes proven equal to constants or register aliases
 
-   This is NOT yet wired as the main optimizer (Phase 2.6 task).
-   Currently callable for testing and benchmarking."
+   This pass is wired into the main optimizer pipeline via `:egraph` and also
+   participates in the broader `:prolog-rewrite` stage."
   (declare (ignore cost-fn))
   (when (null instructions) (return-from optimize-with-egraph instructions))
   (let* ((eg      (make-e-graph))

@@ -17,6 +17,7 @@
    (:file "cst")
    (:file "diagnostics")
    (:file "lexer")
+   (:file "lexer-number")
    (:file "lexer-readers")
    (:file "lexer-skip")
    (:file "lexer-dispatch")

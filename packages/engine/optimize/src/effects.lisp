@@ -111,7 +111,7 @@
 (defparameter *opt-write-global-inst-types*
   '(;; Global state mutation
     vm-set-global vm-register-function vm-register-method
-    vm-makunbound vm-fmakunbound
+    vm-makunbound
     vm-progv-enter vm-progv-exit
     vm-symbol-set vm-remprop vm-set-symbol-plist
     ;; Heap mutation

@@ -6,7 +6,7 @@
 ;;;;   fixnum, string, boolean, symbol, etc.     primitive types
 ;;;;   (or T1 T2 ...)                            union
 ;;;;   (and T1 T2 ...)                           intersection
-;;;;   (function (PARAMS...) RETURN)             arrow (pure, ω)
+;;;;   (-> PARAMS... RETURN)                     arrow (pure, ω)
 ;;;;   (-> A B)                                  pure arrow (ω)
 ;;;;   (->1 A B)                                 linear arrow (1)
 ;;;;   (->0 A B)                                 erased arrow (0)
@@ -78,64 +78,55 @@
               (make-type-primitive :name name))))))
 
 ;;; ─── Compound types ───────────────────────────────────────────────────────
+;;; Data tables drive the two common structural forms before falling through
+;;; to the extended parser (arrow, quantifiers, row types, graded modals).
+
+(defparameter *parse-compound-multi-arg-table*
+  '((or     . make-type-union)
+    (and    . make-type-intersection))
+  "Compound heads that map multiple args through parse-type-specifier.")
+
+(defparameter *parse-compound-type-app-table*
+  '((list          . list)
+    (vector        . vector)
+    (simple-vector . vector)
+    (array         . array)
+    (simple-array  . array))
+  "Single-arg heads that wrap one parsed type in a type-app node.
+Value is the base type name passed to make-type-primitive.")
+
+(defun %parse-compound-multi-arg (head args)
+  "Build a multi-arg compound type from a registered HEAD."
+  (let ((ctor (cdr (assoc head *parse-compound-multi-arg-table*))))
+    (when ctor
+      (unless args (type-parse-error "~A requires at least one type" head))
+      (funcall (symbol-function ctor) (mapcar #'parse-type-specifier args)))))
+
+(defun %parse-compound-type-app (head args)
+  "Build a type-app node for a registered single-arg HEAD."
+  (let ((base (cdr (assoc head *parse-compound-type-app-table*))))
+    (when base
+      (unless (= (length args) 1) (type-parse-error "~A requires exactly 1 type" head))
+      (make-type-app :fun (make-type-primitive :name base)
+                     :arg (parse-type-specifier (first args))))))
 
 (defun parse-compound-type (spec)
   (let ((head (car spec))
         (args (cdr spec)))
-    (case head
-      ;; (or T1 T2 ...) — union
-      ((or)
-       (unless args (type-parse-error "or requires at least one type"))
-       (make-type-union (mapcar #'parse-type-specifier args)))
-
-      ;; (and T1 T2 ...) — intersection
-      ((and)
-       (unless args (type-parse-error "and requires at least one type"))
-       (make-type-intersection (mapcar #'parse-type-specifier args)))
-
-      ;; (function (PARAMS...) RETURN) — backward-compat function type
-      ((function)
-       (unless (and (= (length args) 2) (listp (first args)))
-         (type-parse-error "function type: (function (PARAMS...) RETURN)"))
-       (make-type-arrow (mapcar #'parse-type-specifier (first args))
-                        (parse-type-specifier (second args))))
-
-      ;; (values T1 T2 ...) — product / tuple
-      ((values)
-       (make-type-product :elems (mapcar #'parse-type-specifier args)))
-
-      ;; (cons T1 T2) — backward compat: cons pair as 2-tuple
-      ((cons)
-       (unless (= (length args) 2)
-         (type-parse-error "cons requires 2 types"))
-       (make-type-product :elems (mapcar #'parse-type-specifier args)))
-
-      ;; (list T) → (type-app List T)
-      ((list)
-       (unless (= (length args) 1)
-         (type-parse-error "list requires exactly 1 type"))
-       (make-type-app :fun  (make-type-primitive :name 'list)
-                      :arg  (parse-type-specifier (first args))))
-
-      ;; (vector T) / (array T)
-      ((vector simple-vector)
-       (unless (= (length args) 1) (type-parse-error "vector requires 1 type"))
-       (make-type-app :fun (make-type-primitive :name 'vector)
-                      :arg (parse-type-specifier (first args))))
-      ((array simple-array)
-        (unless (= (length args) 1) (type-parse-error "array requires 1 type"))
-        (make-type-app :fun (make-type-primitive :name 'array)
-                       :arg (parse-type-specifier (first args))))
-
-       ;; (option T) → (or null T) — nullable/optional type sugar
-       ((option)
-        (unless (= (length args) 1)
-          (type-parse-error "option requires exactly 1 type"))
-        (make-type-union (list type-null (parse-type-specifier (first args)))
-                         :constructor-name head))
-
-      (otherwise
-        (parse-compound-type-extended head args)))))
+    (or (%parse-compound-multi-arg head args)
+        (%parse-compound-type-app head args)
+        (case head
+          ;; (values T1 T2 ...) — product/tuple; variadic, distinct from multi-arg table
+          ((values)
+           (make-type-product :elems (mapcar #'parse-type-specifier args)))
+          ;; (option T) → (or null T) — nullable sugar; constructs union, not type-app
+          ((option)
+           (unless (= (length args) 1)
+             (type-parse-error "option requires exactly 1 type"))
+           (make-type-union (list type-null (parse-type-specifier (first args)))
+                            :constructor-name head))
+          (otherwise
+           (parse-compound-type-extended head args))))))
 
 ;;; Extended compound type parsing (arrow forms, quantifiers, effects,
 ;;; row types, graded modals) is in parser-extended.lisp (loads after this file).
@@ -143,4 +134,3 @@
 ;;; (parse-row-type, parse-constraint-spec, lambda-list parsing,
 ;;;  typed AST defstructs, and utilities are in parser-typed.lisp
 ;;;  which loads after parser-extended.)
-

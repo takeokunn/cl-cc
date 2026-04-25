@@ -1,8 +1,7 @@
 ;;;; cl/grammar.lisp — CL grammar using recursive descent on token stream
 ;;;;
 ;;;; Parses lexer-token streams into CST nodes. Covers all CL special forms.
-;;;; Provides backward-compatible redefinitions of parse-source and
-;;;; parse-all-forms that route through the CST pipeline.
+;;;; Provides the token-stream primitives used by the CST-first CL parser.
 
 (in-package :cl-cc/parse)
 
@@ -81,4 +80,3 @@
                      :children children
                      :start-byte start-byte
                      :end-byte end-byte))
-

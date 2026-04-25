@@ -9,7 +9,7 @@
 
 (defun %format-timeout-detail (timeout)
   (format nil "  ---~%  message: \"timeout after ~A seconds\"~%  ..."
-          (if (eq timeout :none) "disabled" (or timeout (%default-test-timeout)))))
+          (or timeout (%default-test-timeout))))
 
 (defun %fail-result (name number suite detail)
   (%make-test-result name number suite :fail detail))
@@ -55,10 +55,10 @@ via sb-thread:join-thread :timeout instead.")
                (lambda (c)
                  (return-from %run-body
                    (%make-test-result name number suite :pending (pending-reason c))))))
-          (if (or (eq timeout :none) (eq *test-runner-mode* :parallel))
-              (funcall fn)
-              (sb-ext:with-timeout (or timeout (%default-test-timeout))
-                (funcall fn)))
+          (if (eq *test-runner-mode* :parallel)
+               (funcall fn)
+               (sb-ext:with-timeout (or timeout (%default-test-timeout))
+                 (funcall fn)))
           (dolist (af after-fns) (funcall af))
           (%run-invariants)
           (%make-test-result name number suite :pass nil))
@@ -83,7 +83,7 @@ LC_ALL-independent integer arithmetic, never scientific notation."
   "Run one test and return a result plist with :duration-ns attached."
   (let* ((name       (getf test-plist :name))
          (fn         (getf test-plist :fn))
-         (timeout    (getf test-plist :timeout))
+         (timeout    (%effective-test-timeout test-plist))
          (suite      (getf test-plist :suite))
          (start-time (get-internal-real-time))
          (duration-ns 0)
@@ -113,4 +113,3 @@ LC_ALL-independent integer arithmetic, never scientific notation."
         (append (%fail-result name number suite
                               "  ---~%  message: \"aborted before producing result\"~%  ...")
                 (list :duration-ns duration-ns)))))
-

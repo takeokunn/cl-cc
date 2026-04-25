@@ -89,7 +89,6 @@
     (boundp           . make-vm-boundp)
     (fboundp          . make-vm-fboundp)
     (makunbound       . make-vm-makunbound)
-    (fmakunbound      . make-vm-fmakunbound)
     (fdefinition      . make-vm-fdefinition)
     ;; Random
     (random           . make-vm-random)
@@ -242,38 +241,5 @@
   "Alist of (cl-symbol . vm-constructor) for binary builtins: (fn a b) → (:dst :lhs :rhs).
    Binary builtins require exactly 2 args (checked at dispatch time).")
 
-(defparameter *builtin-string-cmp-entries*
-  '((string=            . make-vm-string=)
-    (string<            . make-vm-string<)
-    (string>            . make-vm-string>)
-    (string<=           . make-vm-string<=)
-    (string>=           . make-vm-string>=)
-    (string-equal       . make-vm-string-equal)
-    (string-lessp       . make-vm-string-lessp)
-    (string-greaterp    . make-vm-string-greaterp)
-    (string/=           . make-vm-string-not-equal)
-    (string-not-equal   . make-vm-string-not-equal)
-    (string-not-greaterp . make-vm-string-not-greaterp)
-    (string-not-lessp   . make-vm-string-not-lessp)
-    ;; String concatenation shares string-cmp slot layout
-    (string-concat      . make-vm-concatenate))
-  "Alist of (cl-symbol . vm-constructor) for string comparison builtins: (fn s1 s2) → (:dst :str1 :str2).")
-
-(defparameter *builtin-char-cmp-entries*
-  '((char=             . make-vm-char=)
-    (char<             . make-vm-char<)
-    (char>             . make-vm-char>)
-    (char<=            . make-vm-char<=)
-    (char>=            . make-vm-char>=)
-    (char/=            . make-vm-char/=)
-    (char-equal        . make-vm-char-equal)
-    (char-not-equal    . make-vm-char-not-equal)
-    (char-lessp        . make-vm-char-lessp)
-    (char-greaterp     . make-vm-char-greaterp)
-    (char-not-greaterp . make-vm-char-not-greaterp)
-    (char-not-lessp    . make-vm-char-not-lessp))
-  "Alist of (cl-symbol . vm-constructor) for char comparison builtins: (fn c1 c2) → (:dst :char1 :char2).")
-
-;;; (Specialized tables: table-query, handle-input, side-effect, nullary,
-;;;  stream I/O, binary-custom, ternary-custom, and opt/nil conventions
+;;; (Comparison tables: string-cmp, char-cmp, and all specialized conventions
 ;;;  are in builtin-registry-data-ext.lisp which loads after this file.)

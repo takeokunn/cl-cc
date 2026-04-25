@@ -195,3 +195,38 @@
                          forms)))
     (assert-true (not (null pred)))
     (assert-true (%ds-tree-member 'listp pred))))
+
+;;; ─── %defstruct-resolve-slot-values ──────────────────────────────────────
+
+(deftest-each ds-resolve-slot-values-cases
+  "%defstruct-resolve-slot-values: uses slot name when bound, default when unbound."
+  :cases (("all-bound"    '((x 0) (y 0)) '(x y)    '(x y))
+          ("none-bound"   '((x 0) (y 1)) '()        '(0 1))
+          ("partial"      '((x 0) (y 1)) '(x)       '(x 1)))
+  (all-slots bound-names expected)
+  (assert-equal expected
+                (cl-cc/expand::%defstruct-resolve-slot-values all-slots bound-names)))
+
+;;; ─── %defstruct-build-constructor ────────────────────────────────────────
+
+(deftest ds-build-constructor-keyword-form
+  "%defstruct-build-constructor with no BOA args builds (defun ctor (&key ...) body)."
+  (let* ((slots '((x 0) (y 1)))
+         (result (cl-cc/expand::%defstruct-build-constructor
+                  'make-pt nil slots
+                  (lambda (svs) (cons 'list svs)))))
+    (assert-equal 'defun (first result))
+    (assert-equal 'make-pt (second result))
+    (assert-equal '(&key (x 0) (y 1)) (third result))
+    (assert-equal '(list x y) (fourth result))))
+
+(deftest ds-build-constructor-boa-form
+  "%defstruct-build-constructor with BOA args builds (defun ctor params (let* aux body))."
+  (let* ((slots '((x 0) (y 0)))
+         (result (cl-cc/expand::%defstruct-build-constructor
+                  'make-pt '(a b) slots
+                  (lambda (svs) (cons 'list svs)))))
+    (assert-equal 'defun (first result))
+    (assert-equal 'make-pt (second result))
+    (assert-equal '(a b) (third result))
+    (assert-equal 'let* (car (fourth result)))))

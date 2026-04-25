@@ -39,6 +39,7 @@
    (:file "wasm-ir")
    (:file "wasm-extract")
    (:file "wasm-trampoline")
+   (:file "wasm-trampoline-tables")
    (:file "wasm-trampoline-emit")
    (:file "wasm-trampoline-build")
    (:file "wasm")

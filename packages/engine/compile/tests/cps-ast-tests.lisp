@@ -42,7 +42,7 @@
     (assert-true (search "IF" (format nil "~S" iff)))))
 
 (deftest-each cps-ast-conservative-coverage
-  "All previously uncovered AST nodes produce host-backed CPS forms with the expected keyword."
+  "Representative extended AST nodes lower to CPS forms with the expected keyword markers."
   :cases (("values"
            (cl-cc/ast::make-ast-values
              :forms (list (cl-cc:make-ast-int :value 1) (cl-cc:make-ast-int :value 2)))
@@ -100,4 +100,3 @@
            "GETHASH"))
   (ast expected-keyword)
   (assert-true (search expected-keyword (format nil "~S" (cl-cc/compile::cps-transform-ast ast 'k)))))
-

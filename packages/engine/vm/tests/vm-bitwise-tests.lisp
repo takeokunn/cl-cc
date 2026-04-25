@@ -8,6 +8,26 @@
 
 (in-suite vm-bitwise-suite)
 
+(defun %make-unary (ctor src)
+  (let ((s (make-test-vm)))
+    (cl-cc:vm-reg-set s 1 src)
+    (exec1 (funcall ctor :dst 0 :src 1) s)
+    (cl-cc:vm-reg-get s 0)))
+
+(defun %make-binary (ctor lhs rhs)
+  (let ((s (make-test-vm)))
+    (cl-cc:vm-reg-set s 1 lhs)
+    (cl-cc:vm-reg-set s 2 rhs)
+    (exec1 (funcall ctor :dst 0 :lhs 1 :rhs 2) s)
+    (cl-cc:vm-reg-get s 0)))
+
+(defun %make-pred2 (ctor lhs rhs)
+  (let ((s (make-test-vm)))
+    (cl-cc:vm-reg-set s 1 lhs)
+    (cl-cc:vm-reg-set s 2 rhs)
+    (exec1 (funcall ctor :dst 0 :lhs 1 :rhs 2) s)
+    (cl-cc:vm-reg-get s 0)))
+
 (deftest-each vm-bitwise-binary
   "Bitwise binary operations compute correct results."
   :cases (("logand"    #'cl-cc::make-vm-logand  #xFF #x0F  #x0F)

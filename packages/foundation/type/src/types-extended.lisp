@@ -68,9 +68,9 @@ BODY:        the underlying type."
   (constraints nil :type list)
   (body        nil))
 
-(defun make-type-qualified (&key constraints body type)
-  "Constructor for type-qualified. Accepts :body (canonical) or :type (alias for :body)."
-  (%make-type-qualified-raw :constraints constraints :body (or body type)))
+(defun make-type-qualified (&key constraints body)
+  "Constructor for type-qualified using the canonical :body slot."
+  (%make-type-qualified-raw :constraints constraints :body body))
 
 ;;; ─── type-error ───────────────────────────────────────────────────────────
 

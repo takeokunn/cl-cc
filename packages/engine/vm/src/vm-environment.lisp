@@ -1,6 +1,6 @@
 ;;;; vm-environment.lisp — VM Runtime Environment Access Instructions
 ;;;;
-;;;; Contains: vm-boundp, vm-fboundp, vm-makunbound, vm-fmakunbound, vm-fdefinition
+;;;; Contains: vm-boundp, vm-fboundp, vm-makunbound, vm-fdefinition
 ;;;; (FR-1202), vm-random, vm-make-random-state (FR-1205),
 ;;;; encode-universal-time, %define-nullary-env-query macro (FR-507 hook).
 ;;;;
@@ -55,21 +55,6 @@
   (declare (ignore labels))
   (let ((sym (vm-reg-get state (vm-src inst))))
     (remhash sym (vm-global-vars state))
-    (vm-reg-set state (vm-dst inst) sym)
-    (values (1+ pc) nil nil)))
-
-;; FR-1202: fmakunbound — remove a function binding
-(define-vm-instruction vm-fmakunbound (vm-instruction)
-  "Remove function binding for SYM. Returns SYM."
-  (dst nil :reader vm-dst)
-  (src nil :reader vm-src)
-  (:sexp-tag :fmakunbound)
-  (:sexp-slots dst src))
-
-(defmethod execute-instruction ((inst vm-fmakunbound) state pc labels)
-  (declare (ignore labels))
-  (let ((sym (vm-reg-get state (vm-src inst))))
-    (remhash sym (vm-function-registry state))
     (vm-reg-set state (vm-dst inst) sym)
     (values (1+ pc) nil nil)))
 

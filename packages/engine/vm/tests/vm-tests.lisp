@@ -75,7 +75,7 @@
     (unwind-protect
         (progn
           (assert-null (gethash sym cl-cc/vm::*vm-host-bridge-functions*))
-          (cl-cc/vm::vm-register-host-bridge sym)
+          (cl-cc/vm::vm-register-host-bridge sym (lambda () :ok))
           (assert-true (gethash sym cl-cc/vm::*vm-host-bridge-functions*)))
       (remhash sym cl-cc/vm::*vm-host-bridge-functions*))))
 

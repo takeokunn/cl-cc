@@ -1,10 +1,8 @@
 ;;;; cl-cc-cli.asd
 ;;;; Extracted from cl-cc.asd as part of the packages/ reorganization.
-;;;; System name :cl-cc/bin preserved for backward compatibility with the
-;;;; build-cli.lisp script (packages/cli/scripts/build-cli.lisp) and
-;;;; cl-cc-test.asd dependencies.
+;;;; Canonical ASDF system for the CLI package.
 
-(asdf:defsystem :cl-cc/bin
+(asdf:defsystem :cl-cc-cli
   :description "CL-CC CLI tool"
   :author "CL-CC"
   :license "MIT"

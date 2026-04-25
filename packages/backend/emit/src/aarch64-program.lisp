@@ -54,7 +54,7 @@
       (t (let ((emitter (gethash tp *a64-emitter-table*)))
            (if emitter
                (funcall emitter inst stream)
-               (warn "Skipping unsupported AArch64 instruction: ~A" tp)))))))
+               (error "Unsupported AArch64 instruction: ~A" tp)))))))
 
 ;;; AArch64 callee-saved registers to save/restore (X19-X28, X29, X30)
 ;;; X29 = frame pointer (FP), X30 = link register (LR)
