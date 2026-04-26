@@ -14,17 +14,19 @@
 (defvar *rt-class-registry* (make-hash-table :test #'eq)
   "Runtime class registry for native/self-hosted CLOS descriptors.")
 
+(defun %rt-cpl-walk (name seen)
+  "Accumulate class precedence list starting from NAME with SEEN already visited."
+  (if (member name seen :test #'eq)
+      seen
+      (let* ((class-ht (gethash name *rt-class-registry*))
+             (supers (and class-ht (gethash :__superclasses__ class-ht))))
+        (reduce (lambda (acc super) (%rt-cpl-walk super acc))
+                supers
+                :initial-value (append seen (list name))))))
+
 (defun %rt-compute-class-precedence-list (class-name)
   "Compute a simple class precedence list from *rt-class-registry*."
-  (labels ((walk (name seen)
-             (if (member name seen :test #'eq)
-                 seen
-                 (let* ((class-ht (gethash name *rt-class-registry*))
-                        (supers (and class-ht (gethash :__superclasses__ class-ht))))
-                   (reduce (lambda (acc super) (walk super acc))
-                           supers
-                           :initial-value (append seen (list name)))))))
-    (walk class-name '())))
+  (%rt-cpl-walk class-name '()))
 
 (defun rt-defclass (name direct-supers slots)
   (let ((class-ht (or (gethash name *rt-class-registry*)

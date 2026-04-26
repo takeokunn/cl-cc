@@ -25,7 +25,7 @@
 
 ;;; ─── %result-vm-instructions-without-halt ────────────────────────────────
 
-(deftest codegen-result-vm-instructions-without-halt-strips-terminal-halt
+(deftest codegen-result-vm-instructions-without-halt-strips-terminal-halt-toplevel
   "%result-vm-instructions-without-halt removes only the final vm-halt instruction."
   (let* ((move (cl-cc:make-vm-move :dst :R1 :src :R0))
          (halt (cl-cc:make-vm-halt :reg :R1))

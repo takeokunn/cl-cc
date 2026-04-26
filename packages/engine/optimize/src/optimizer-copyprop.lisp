@@ -69,16 +69,15 @@
       (remhash dst copies))
     (remhash reg reverse)))
 
+(defparameter *opt-type-rank-table*
+  '((null . 0) (number . 1) (character . 2) (string . 3) (symbol . 4) (cons . 5) (vector . 6))
+  "Type → rank mapping for deterministic structural ordering; unlisted types rank as 7.")
+
 (defun %opt-value-rank (value)
-  (typecase value
-    (null 0)
-    (number 1)
-    (character 2)
-    (string 3)
-    (symbol 4)
-    (cons 5)
-    (vector 6)
-    (t 7)))
+  (loop for (type . rank) in *opt-type-rank-table*
+        when (typep value type)
+        return rank
+        finally (return 7)))
 
 (defun %opt-value< (a b)
   "Deterministic structural ordering without printed-string allocation."
@@ -151,21 +150,15 @@
     copies))
 
 (defun %opt-copy-prop-rewrite-inst (inst copies)
-  (let ((sexp (instruction->sexp inst)))
-    (flet ((rewrite (x)
-             (if (opt-register-keyword-p x)
-                 (%opt-copy-prop-canonical x copies)
-                 x)))
-      (handler-case
-          (let* ((has-dst (not (null (opt-inst-dst inst))))
-                 (new-sexp (if has-dst
-                               (list* (first sexp)
-                                      (second sexp)
-                                      (opt-map-tree #'rewrite (cddr sexp)))
-                               (cons (first sexp)
-                                     (opt-map-tree #'rewrite (cdr sexp))))))
-            (if (equal sexp new-sexp) inst (sexp->instruction new-sexp)))
-        (error () inst)))))
+  (let* ((sexp    (instruction->sexp inst))
+         (rewrite (lambda (x) (if (opt-register-keyword-p x) (%opt-copy-prop-canonical x copies) x))))
+    (handler-case
+        (let* ((has-dst  (not (null (opt-inst-dst inst))))
+               (new-sexp (if has-dst
+                             (list* (first sexp) (second sexp) (opt-map-tree rewrite (cddr sexp)))
+                             (cons (first sexp) (opt-map-tree rewrite (cdr sexp))))))
+          (if (equal sexp new-sexp) inst (sexp->instruction new-sexp)))
+      (error () inst))))
 
 (defun %opt-copy-prop-rewrite-block (block in-env)
   (let ((copies (%opt-copy-prop-env-copy in-env))
@@ -191,6 +184,51 @@
             (push rewritten result)))))
     (nreverse result)))
 
+;;; ─── Copy propagation pass state ────────────────────────────────────────
+
+(defstruct (copyprop-pass-state (:conc-name cpps-))
+  "Mutable worklist state for the global copy propagation pass."
+  (in-envs  (make-hash-table :test #'eq) :type hash-table)
+  (out-envs (make-hash-table :test #'eq) :type hash-table)
+  (worklist nil                          :type list)
+  (queued   (make-hash-table :test #'eq) :type hash-table))
+
+(defun %copyprop-enqueue (block state)
+  "Add BLOCK to the STATE worklist if not already queued."
+  (unless (gethash block (cpps-queued state))
+    (setf (gethash block (cpps-queued state)) t)
+    (push block (cpps-worklist state))))
+
+(defun %copyprop-process-block (block state)
+  "Compute the in/out copy environments for BLOCK, enqueue changed successors."
+  (let* ((preds (bb-predecessors block))
+         (incoming
+           (cond
+             ((null preds) (make-hash-table :test #'eq))
+             ((null (cdr preds))
+              (let ((pred-out (gethash (first preds) (cpps-out-envs state))))
+                (if pred-out
+                    (%opt-copy-prop-env-copy pred-out)
+                    (make-hash-table :test #'eq))))
+             (t (%opt-copy-prop-merge
+                 (mapcar (lambda (pred)
+                           (or (gethash pred (cpps-out-envs state))
+                               (make-hash-table :test #'eq)))
+                         preds)))))
+         (old-in  (gethash block (cpps-in-envs state)))
+         (changed nil))
+    (unless (and old-in (%opt-copy-prop-env-equal-p old-in incoming))
+      (setf (gethash block (cpps-in-envs state)) incoming
+            changed t))
+    (let ((new-out (%opt-copy-prop-transfer-block block incoming))
+          (old-out (gethash block (cpps-out-envs state))))
+      (unless (and old-out (%opt-copy-prop-env-equal-p old-out new-out))
+        (setf (gethash block (cpps-out-envs state)) new-out
+              changed t)
+        (dolist (succ (bb-successors block))
+          (%copyprop-enqueue succ state))))
+    changed))
+
 ;;; ─── Pass: Copy Propagation ──────────────────────────────────────────────
 
 (defun opt-pass-copy-prop (instructions)
@@ -202,52 +240,16 @@
   (let ((cfg (cfg-build instructions)))
     (if (null (cfg-entry cfg))
         instructions
-        (progn
-          (let ((in-envs (make-hash-table :test #'eq))
-                (out-envs (make-hash-table :test #'eq))
-                (worklist (list (cfg-entry cfg)))
-                (queued (make-hash-table :test #'eq)))
-            (setf (gethash (cfg-entry cfg) queued) t)
-            (labels ((enqueue (block)
-                       (unless (gethash block queued)
-                         (setf (gethash block queued) t)
-                         (push block worklist)))
-                     (process-block (block)
-                       (let* ((preds (bb-predecessors block))
-                              (incoming (cond
-                                         ((null preds) (make-hash-table :test #'eq))
-                                         ((null (cdr preds))
-                                          (let ((pred-out (gethash (first preds) out-envs)))
-                                            (if pred-out
-                                                (%opt-copy-prop-env-copy pred-out)
-                                                (make-hash-table :test #'eq))))
-                                         (t (%opt-copy-prop-merge
-                                             (mapcar (lambda (pred)
-                                                       (or (gethash pred out-envs)
-                                                           (make-hash-table :test #'eq)))
-                                                     preds)))))
-                              (old-in (gethash block in-envs))
-                              (changed nil))
-                         (unless (and old-in (%opt-copy-prop-env-equal-p old-in incoming))
-                           (setf (gethash block in-envs) incoming
-                                 changed t))
-                         (let ((new-out (%opt-copy-prop-transfer-block block incoming))
-                               (old-out (gethash block out-envs)))
-                           (unless (and old-out (%opt-copy-prop-env-equal-p old-out new-out))
-                             (setf (gethash block out-envs) new-out
-                                   changed t)
-                             (dolist (succ (bb-successors block))
-                               (enqueue succ))))
-                         changed)))
-              (loop while worklist
-                    for block = (pop worklist)
-                    do (remhash block queued)
-                       (process-block block)))
-
-            (loop for block across (cfg-blocks cfg)
-                  do (setf (bb-instructions block)
-                           (%opt-copy-prop-rewrite-block
-                            block
-                            (or (gethash block in-envs)
-                                (make-hash-table :test #'eq))))))
-           (cfg-flatten cfg)))))
+        (let ((state (make-copyprop-pass-state :worklist (list (cfg-entry cfg)))))
+          (setf (gethash (cfg-entry cfg) (cpps-queued state)) t)
+          (loop while (cpps-worklist state)
+                for block = (pop (cpps-worklist state))
+                do (remhash block (cpps-queued state))
+                   (%copyprop-process-block block state))
+          (loop for block across (cfg-blocks cfg)
+                do (setf (bb-instructions block)
+                         (%opt-copy-prop-rewrite-block
+                          block
+                          (or (gethash block (cpps-in-envs state))
+                              (make-hash-table :test #'eq)))))
+          (cfg-flatten cfg)))))

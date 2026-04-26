@@ -108,27 +108,30 @@
                                   (cps-transform-sequence body k))))
                         (ast-handler-case-clauses node))))))
 
+(defun %cps-transform-make-instance-initargs (remaining init-pairs class-v k)
+  "CPS-thread each value in REMAINING init-pair triples.
+When done, constructs the (make-instance class-v ...) call and delivers it to K."
+  (if (null remaining)
+      (let ((make-form (append (list 'make-instance class-v)
+                               (mapcan (lambda (triple) (list (first triple) (third triple)))
+                                       init-pairs))))
+        (%cps-funcall k make-form))
+      (destructuring-bind (_key value-form tmp) (car remaining)
+        (declare (ignore _key))
+        (cps-transform-ast value-form
+                           (%cps-lambda (list tmp)
+                                        (%cps-transform-make-instance-initargs
+                                         (cdr remaining) init-pairs class-v k))))))
+
 (defmethod cps-transform-ast ((node ast-make-instance) k)
   "Transform make-instance conservatively through host MAKE-INSTANCE."
-  (let* ((class-v (gensym "CLASS"))
+  (let* ((class-v   (gensym "CLASS"))
          (init-pairs (loop for (key value) on (ast-make-instance-initargs node) by #'cddr
                            collect (list key value (gensym "INIT")))))
-    (labels ((transform-initargs (remaining)
-               (if (null remaining)
-                   (let ((make-form
-                           (append (list 'make-instance class-v)
-                                   (mapcan (lambda (triple)
-                                             (list (first triple) (third triple)))
-                                           init-pairs))))
-                     (%cps-funcall k make-form))
-                   (destructuring-bind (_key value-form tmp) (car remaining)
-                     (declare (ignore _key))
-                     (cps-transform-ast value-form
-                                        (%cps-lambda (list tmp)
-                                                     (transform-initargs (cdr remaining))))))))
-      (cps-transform-ast (ast-make-instance-class node)
-                         (%cps-lambda (list class-v)
-                                      (transform-initargs init-pairs))))))
+    (cps-transform-ast (ast-make-instance-class node)
+                       (%cps-lambda (list class-v)
+                                    (%cps-transform-make-instance-initargs
+                                     init-pairs init-pairs class-v k)))))
 
 (defmethod cps-transform-ast ((node ast-slot-value) k)
   "Transform slot-value conservatively through host SLOT-VALUE."

@@ -12,7 +12,7 @@
 The stage first applies the instruction-level Prolog peephole rules and then runs
 the e-graph rewrite engine whose builtin rule set is also sourced from Prolog facts." 
   (if *enable-prolog-peephole*
-      (opt-pass-egraph
+      (optimize-with-egraph
        (mapcar #'sexp->instruction
                (apply-prolog-peephole (mapcar #'instruction->sexp instructions))))
       instructions))
@@ -21,7 +21,7 @@ the e-graph rewrite engine whose builtin rule set is also sourced from Prolog fa
 ;;; *opt-convergence-passes* and *opt-pass-registry* are both derived from this.
 (defparameter *opt-pass-table*
   `((:prolog-rewrite            . ,#'%maybe-apply-prolog-rewrite)
-    (:egraph                    . ,#'opt-pass-egraph)
+    (:egraph                    . ,#'optimize-with-egraph)
     (:inline                    . ,#'opt-pass-inline-iterative)
     (:fold                      . ,#'opt-pass-fold)
     (:sccp                      . ,#'opt-pass-sccp)
@@ -38,13 +38,13 @@ the e-graph rewrite engine whose builtin rule set is also sourced from Prolog fa
     (:dead-basic-blocks         . ,#'opt-pass-dead-basic-blocks)
     (:store-to-load-forward     . ,#'opt-pass-store-to-load-forward)
     (:dead-store-elim           . ,#'opt-pass-dead-store-elim)
-    (:nil-check-elim            . ,#'opt-pass-nil-check-elim)
+    (:nil-check-elim            . ,#'opt-pass-dominated-type-check-elim)
     (:dominated-type-check-elim . ,#'opt-pass-dominated-type-check-elim)
     (:branch-correlation        . ,#'opt-pass-branch-correlation)
     (:block-merge               . ,#'opt-pass-block-merge)
     (:tail-merge                . ,#'opt-pass-tail-merge)
     (:pre                       . ,#'opt-pass-pre)
-    (:constant-hoist            . ,#'opt-pass-constant-hoist)
+    (:constant-hoist            . ,#'opt-pass-licm)
     (:global-dce                . ,#'opt-pass-global-dce)
     (:dead-labels               . ,#'opt-pass-dead-labels)
     (:dce                       . ,#'opt-pass-dce))
@@ -93,16 +93,17 @@ the e-graph engine.")
           *opt-default-convergence-pass-keys*)
   "Ordered default pass functions derived from `*opt-default-convergence-pass-keys*`." )
 
+(defun %opt-trim-whitespace (s)
+  (string-trim '(#\Space #\Tab #\Newline #\Return) s))
+
 (defun opt-parse-pass-pipeline-string (text)
   "Parse a comma-separated optimizer pipeline string into keyword pass names."
-  (labels ((trim (s)
-             (string-trim '(#\Space #\Tab #\Newline #\Return) s)))
-    (remove nil
-            (mapcar (lambda (part)
-                      (let ((name (trim part)))
-                        (and (> (length name) 0)
-                             (intern (string-upcase name) :keyword))))
-                    (uiop:split-string text :separator '(#\,))))))
+  (remove nil
+          (mapcar (lambda (part)
+                    (let ((name (%opt-trim-whitespace part)))
+                      (and (> (length name) 0)
+                           (intern (string-upcase name) :keyword))))
+                  (uiop:split-string text :separator '(#\,)))))
 
 (defun opt-resolve-pass-pipeline (pipeline)
   "Resolve PIPELINE into a list of pass functions."
@@ -165,17 +166,13 @@ the e-graph engine.")
         (setf current next)))
     (values current events ts-us)))
 
-(defun %instruction-sequence-equal-p (prev next)
-  "Return T when PREV and NEXT are structurally equivalent instruction streams."
+(defun opt-converged-p (prev next)
+  "T if a pass-cycle produced no semantic change in the instruction stream."
   (and (= (length prev) (length next))
        (loop for lhs in prev
              for rhs in next
              always (equal (instruction->sexp lhs)
                            (instruction->sexp rhs)))))
-
-(defun opt-converged-p (prev next)
-  "T if a pass-cycle produced no semantic change in the instruction stream."
-  (%instruction-sequence-equal-p prev next))
 
 (defparameter *opt-iteration-budget-thresholds*
   '((50  . -12)
@@ -222,23 +219,6 @@ the e-graph engine.")
 (defvar *skip-optimizer-passes* nil
   "When non-NIL, optimize-instructions returns its input unchanged.")
 
-(defun %opt-run-iteration (instructions passes print-pass-timings timing-stream
-                               print-pass-stats stats-stream print-opt-remarks
-                               opt-remarks-stream opt-remarks-mode trace-json-stream
-                              trace-events trace-ts-us)
-  "Run one optimizer iteration through the configured pass list."
-  (opt-run-passes-once-with-reporting instructions passes
-                                      :print-pass-timings print-pass-timings
-                                      :timing-stream timing-stream
-                                      :print-pass-stats print-pass-stats
-                                      :stats-stream stats-stream
-                                      :print-opt-remarks print-opt-remarks
-                                      :opt-remarks-stream opt-remarks-stream
-                                      :opt-remarks-mode opt-remarks-mode
-                                      :trace-enabled (not (null trace-json-stream))
-                                      :trace-events trace-events
-                                      :initial-ts-us trace-ts-us))
-
 (defun optimize-instructions (instructions &key (max-iterations 20) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Run the full multi-pass optimization pipeline on a VM instruction sequence.
 Runs until no changes or MAX-ITERATIONS reached.
@@ -251,20 +231,25 @@ immediately without running any passes."
                             (opt-adaptive-max-iterations instructions)
                             max-iterations))
         (passes (opt-resolve-pass-pipeline pass-pipeline))
-        (timing-stream (or timing-stream *standard-output*))
-        (opt-remarks-stream (or opt-remarks-stream *standard-output*))
-        (stats-stream (or stats-stream *standard-output*))
+        (timing-stream       (or timing-stream *standard-output*))
+        (opt-remarks-stream  (or opt-remarks-stream *standard-output*))
+        (stats-stream        (or stats-stream *standard-output*))
         (trace-events nil)
         (trace-ts-us 0))
-    (loop for iteration from 0 below max-iterations
+    (loop repeat max-iterations
           for prev = prog
           do (multiple-value-setq (prog trace-events trace-ts-us)
-               (%opt-run-iteration prog passes
-                                   print-pass-timings timing-stream
-                                   print-pass-stats stats-stream
-                                   print-opt-remarks opt-remarks-stream
-                                   opt-remarks-mode trace-json-stream
-                                   trace-events trace-ts-us))
+               (opt-run-passes-once-with-reporting prog passes
+                                                   :print-pass-timings print-pass-timings
+                                                   :timing-stream timing-stream
+                                                   :print-pass-stats print-pass-stats
+                                                   :stats-stream stats-stream
+                                                   :print-opt-remarks print-opt-remarks
+                                                   :opt-remarks-stream opt-remarks-stream
+                                                   :opt-remarks-mode opt-remarks-mode
+                                                   :trace-enabled (not (null trace-json-stream))
+                                                   :trace-events trace-events
+                                                   :initial-ts-us trace-ts-us))
           when (opt-converged-p prev prog)
           return prog)
     (when trace-json-stream

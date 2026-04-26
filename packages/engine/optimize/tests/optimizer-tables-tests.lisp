@@ -184,3 +184,105 @@
   (let ((regs (cl-cc/optimize::opt-inst-read-regs inst)))
     (assert-true (member :r0 regs))
     (assert-true (member :r1 regs))))
+
+;;; ─── %opt-branch-target-labels ───────────────────────────────────────────
+
+(deftest-each branch-target-labels-cases
+  "%opt-branch-target-labels collects labels from vm-jump and vm-jump-zero; ignores others."
+  :cases (("jump-only"       (list (make-vm-jump      :label "a"))          '("a"))
+          ("jump-zero-only"  (list (make-vm-jump-zero :reg :r0 :label "b")) '("b"))
+          ("both-kinds"      (list (make-vm-jump      :label "a")
+                                   (make-vm-jump-zero :reg :r0 :label "b")) '("a" "b"))
+          ("no-jumps"        (list (make-vm-const :dst :r0 :value 1)
+                                   (make-vm-ret   :reg :r0))                '()))
+  (insts expected-labels)
+  (let ((targets (cl-cc/optimize::%opt-branch-target-labels insts)))
+    (assert-= (length expected-labels) (hash-table-count targets))
+    (dolist (lbl expected-labels)
+      (assert-true (gethash lbl targets)))))
+
+;;; ─── %fold-vm-jump-zero ──────────────────────────────────────────────────
+
+(deftest fold-vm-jump-zero-known-false-becomes-unconditional-jump
+  "%fold-vm-jump-zero: known-false condition → unconditional vm-jump."
+  (let ((env (make-hash-table :test #'eq))
+        (emitted nil))
+    (setf (gethash :r0 env) nil) ; nil is the canonical false value
+    (cl-cc/optimize::%fold-vm-jump-zero
+     (make-vm-jump-zero :reg :r0 :label "target")
+     env
+     (lambda (i) (push i emitted)))
+    (assert-= 1 (length emitted))
+    (assert-true (typep (first emitted) 'cl-cc/vm::vm-jump))
+    (assert-equal "target" (cl-cc/vm::vm-label-name (first emitted)))))
+
+(deftest fold-vm-jump-zero-known-true-eliminates-branch
+  "%fold-vm-jump-zero: known-truthy condition → branch is never taken → emits nothing."
+  (let ((env (make-hash-table :test #'eq))
+        (emitted nil))
+    (setf (gethash :r0 env) 1) ; truthy value
+    (cl-cc/optimize::%fold-vm-jump-zero
+     (make-vm-jump-zero :reg :r0 :label "target")
+     env
+     (lambda (i) (push i emitted)))
+    (assert-= 0 (length emitted))))
+
+(deftest fold-vm-jump-zero-unknown-condition-emits-unchanged
+  "%fold-vm-jump-zero: unknown condition → emits the original instruction unchanged."
+  (let ((env (make-hash-table :test #'eq))
+        (emitted nil))
+    (cl-cc/optimize::%fold-vm-jump-zero
+     (make-vm-jump-zero :reg :r0 :label "target")
+     env
+     (lambda (i) (push i emitted)))
+    (assert-= 1 (length emitted))
+    (assert-true (typep (first emitted) 'cl-cc/vm::vm-jump-zero))))
+
+;;; ─── %opt-known-constant-p ───────────────────────────────────────────────
+
+(deftest-each opt-known-constant-p-cases
+  "%opt-known-constant-p: numbers are known, :unknown sentinel and symbols are not."
+  :cases (("integer"  42       t)
+          ("zero"     0        t)
+          ("float"    1.5      t)
+          ("unknown"  :unknown nil)
+          ("symbol"   :r0      nil)
+          ("nil"      nil      nil))
+  (val expected)
+  (if expected
+      (assert-true  (cl-cc/optimize::%opt-known-constant-p val))
+      (assert-false (cl-cc/optimize::%opt-known-constant-p val))))
+
+;;; ─── %opt-apply-algebraic-action ─────────────────────────────────────────
+
+(deftest opt-apply-algebraic-action-move-lhs
+  "%opt-apply-algebraic-action :move-lhs produces vm-move from lhs register."
+  (let ((result (cl-cc/optimize::%opt-apply-algebraic-action :move-lhs :r2 :r0 :r1)))
+    (assert-true (typep result 'cl-cc/vm::vm-move))
+    (assert-eq :r2 (vm-dst result))
+    (assert-eq :r0 (vm-src result))))
+
+(deftest opt-apply-algebraic-action-move-rhs
+  "%opt-apply-algebraic-action :move-rhs produces vm-move from rhs register."
+  (let ((result (cl-cc/optimize::%opt-apply-algebraic-action :move-rhs :r2 :r0 :r1)))
+    (assert-true (typep result 'cl-cc/vm::vm-move))
+    (assert-eq :r2 (vm-dst result))
+    (assert-eq :r1 (vm-src result))))
+
+(deftest opt-apply-algebraic-action-const
+  "%opt-apply-algebraic-action (:const V) produces vm-const with value V."
+  (let ((result (cl-cc/optimize::%opt-apply-algebraic-action '(:const 0) :r2 :r0 :r1)))
+    (assert-true (typep result 'cl-cc/vm::vm-const))
+    (assert-eq :r2 (vm-dst result))
+    (assert-= 0 (vm-value result))))
+
+(deftest opt-apply-algebraic-action-neg-lhs
+  "%opt-apply-algebraic-action (:neg :lhs) produces vm-neg on lhs register."
+  (let ((result (cl-cc/optimize::%opt-apply-algebraic-action '(:neg :lhs) :r2 :r0 :r1)))
+    (assert-true (typep result 'cl-cc/vm::vm-neg))
+    (assert-eq :r2 (vm-dst result))
+    (assert-eq :r0 (vm-src result))))
+
+(deftest opt-apply-algebraic-action-unknown-returns-nil
+  "%opt-apply-algebraic-action returns NIL for unrecognized actions."
+  (assert-null (cl-cc/optimize::%opt-apply-algebraic-action :unknown-action :r2 :r0 :r1)))

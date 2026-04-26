@@ -1,11 +1,3 @@
-(eval-when (:load-toplevel :execute)
-  (unless (asdf:find-system :cl-cc-vm nil)
-    (let ((here (make-pathname :defaults (or *load-pathname* *compile-file-pathname*)
-                               :name nil :type nil)))
-      (asdf:load-asd (merge-pathnames "../../engine/vm/cl-cc-vm.asd" here))
-      (asdf:load-asd (merge-pathnames "../../foundation/mir/cl-cc-mir.asd" here))
-      (asdf:load-asd (merge-pathnames "../../engine/optimize/cl-cc-optimize.asd" here)))))
-
 (asdf:defsystem :cl-cc-emit
   :description "Emit backend subsystem: calling conventions, regalloc, codegen"
   :author "CL-CC"

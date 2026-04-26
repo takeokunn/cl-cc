@@ -204,4 +204,39 @@
     (assert-equal methods (cl-cc/type::dict-env-lookup 'eq type-int env2))
     (assert-null          (cl-cc/type::dict-env-lookup 'eq type-int env))))
 
+;;; ─── %typeclass-instance-overlaps-p ─────────────────────────────────────────
+
+(deftest typeclass-instance-overlaps-p-cases
+  "%typeclass-instance-overlaps-p: type-var overlaps any concrete type; two different concretes don't."
+  (assert-true  (cl-cc/type::%typeclass-instance-overlaps-p
+                 (fresh-type-var "a") type-int))
+  (assert-false (cl-cc/type::%typeclass-instance-overlaps-p
+                 type-int type-string))
+  (assert-false (cl-cc/type::%typeclass-instance-overlaps-p
+                 type-int type-int)))
+
+;;; ─── %typeclass-instance-args ────────────────────────────────────────────────
+
+(deftest typeclass-instance-args-cases
+  "%typeclass-instance-args: wraps single type in list; unpacks type-product elems."
+  (let ((args (cl-cc/type::%typeclass-instance-args type-int)))
+    (assert-= 1 (length args))
+    (assert-eq type-int (first args)))
+  (let* ((prod (make-type-product :elems (list type-int type-string)))
+         (args (cl-cc/type::%typeclass-instance-args prod)))
+    (assert-= 2 (length args))
+    (assert-eq type-int    (first args))
+    (assert-eq type-string (second args))))
+
+;;; ─── %typeclass-param-name ────────────────────────────────────────────────
+
+(deftest-each typeclass-param-name-cases
+  "%typeclass-param-name: type-var→var name string; symbol→symbol-name; other→string-upcase."
+  :cases (("type-var" nil)
+          ("symbol"   'foo)
+          ("string"   "bar"))
+  (param-val)
+  (let ((param (or param-val (fresh-type-var "TestVar"))))
+    (assert-true (stringp (cl-cc/type::%typeclass-param-name param)))))
+
 ;;; Legacy compatibility tests removed as part of public surface reduction.

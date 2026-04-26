@@ -42,6 +42,14 @@
         (dolist (r (opt-inst-read-regs inst)) (add r))))
     renaming))
 
+(defun %opt-collect-sexp-regs (form cell)
+  "Recursively push register keywords from sexp FORM onto (car CELL)."
+  (cond ((and (keywordp form) (opt-register-keyword-p form))
+         (push form (car cell)))
+        ((consp form)
+         (%opt-collect-sexp-regs (car form) cell)
+         (%opt-collect-sexp-regs (cdr form) cell))))
+
 (defun opt-can-safely-rename-p (body-instructions)
   "T if all instructions in BODY can be safely register-renamed via sexp roundtrip.
    An instruction is safe when instruction->sexp captures all its registers —
@@ -52,25 +60,23 @@
     (let ((explicit-regs (remove nil
                                  (cons (opt-inst-dst inst)
                                        (opt-inst-read-regs inst))))
-          (sexp-regs nil))
-      (labels ((visit (x)
-                 (cond ((and (keywordp x) (opt-register-keyword-p x)) (push x sexp-regs))
-                       ((consp x) (visit (car x)) (visit (cdr x))))))
-        (handler-case (visit (instruction->sexp inst))
-          (error () (return-from opt-can-safely-rename-p nil))))
-      (unless (every (lambda (r) (member r sexp-regs)) explicit-regs)
-        (return-from opt-can-safely-rename-p nil)))))
+          (sexp-regs-cell (list nil)))
+      (handler-case (%opt-collect-sexp-regs (instruction->sexp inst) sexp-regs-cell)
+        (error () (return-from opt-can-safely-rename-p nil)))
+      (let ((sexp-regs (car sexp-regs-cell)))
+        (unless (every (lambda (r) (member r sexp-regs)) explicit-regs)
+          (return-from opt-can-safely-rename-p nil))))))
 
 (defun opt-rename-regs-in-inst (inst renaming)
   "Return INST with all VM register keywords substituted per RENAMING.
    Uses instruction→sexp roundtrip; returns INST unchanged on any error."
-  (flet ((sub (x)
-           (if (and (keywordp x) (opt-register-keyword-p x))
-               (or (gethash x renaming) x)
-               x)))
-    (handler-case
-        (sexp->instruction (opt-map-tree #'sub (instruction->sexp inst)))
-      (error () inst))))
+  (handler-case
+      (sexp->instruction
+       (opt-map-tree (lambda (x) (if (and (keywordp x) (opt-register-keyword-p x))
+                                     (or (gethash x renaming) x)
+                                     x))
+                     (instruction->sexp inst)))
+    (error () inst)))
 
 (defun opt-collect-function-defs (instructions)
   "Return hash-table label → (:params params :body body-insts).
@@ -178,7 +184,4 @@
            (when dst
              (remhash dst reg-track))))))))
 
-(defun opt-known-callee-label (reg known-callee-labels)
-  "Return the known callee label tracked for REG, or NIL." 
-  (gethash reg known-callee-labels))
 

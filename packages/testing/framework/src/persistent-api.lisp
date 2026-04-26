@@ -27,7 +27,7 @@
    the count is unchanged."
   (let ((test (persistent-map-test pm)))
     (multiple-value-bind (new-root added-p)
-        (%tree-insert (persistent-map-root pm) (%hash key) key value test)
+        (%tree-insert (persistent-map-root pm) (sxhash key) key value test)
       (%make-persistent-map new-root
                             (if added-p
                                 (1+ (persistent-map-count pm))
@@ -39,7 +39,7 @@
    FOUND-P is NIL."
   (multiple-value-bind (v found-p)
       (%tree-lookup (persistent-map-root pm)
-                    (%hash key)
+                    (sxhash key)
                     key
                     (persistent-map-test pm))
     (if found-p
@@ -57,7 +57,7 @@
    absent, returns a map equivalent to PM with count unchanged."
   (let ((test (persistent-map-test pm)))
     (multiple-value-bind (new-root removed-p)
-        (%tree-remove (persistent-map-root pm) (%hash key) key test)
+        (%tree-remove (persistent-map-root pm) (sxhash key) key test)
       (%make-persistent-map new-root
                             (if removed-p
                                 (1- (persistent-map-count pm))

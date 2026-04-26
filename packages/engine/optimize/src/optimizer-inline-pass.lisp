@@ -1,7 +1,7 @@
 ;;;; optimizer-inline-pass.lisp — Inlining Infrastructure (memo, DCE)
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;;
-;;; Contains: opt-make-pure-function-memo-table, opt-pure-function-memo-key,
+;;; Contains: opt-make-pure-function-memo-table,
 ;;; opt-pure-function-memo-get, opt-pure-function-memo-put,
 ;;; opt-function-body-instruction-tables,
 ;;; opt-top-level-function-roots, opt-reachable-function-labels,
@@ -18,15 +18,11 @@
   "Create a memo table for pure-function result caching."
   (make-hash-table :test #'equal))
 
-(defun opt-pure-function-memo-key (label args)
-  "Build the memoization key for LABEL applied to ARGS."
-  (list label args))
-
 (defun opt-pure-function-memo-get (memo-table pure-labels label args)
   "Return cached result for pure LABEL/ARGS, or NIL with a miss flag."
   (if (gethash label pure-labels)
       (multiple-value-bind (value found-p)
-          (gethash (opt-pure-function-memo-key label args) memo-table)
+          (gethash (list label args) memo-table)
         (values value found-p))
       (values nil nil)))
 
@@ -34,7 +30,7 @@
   "Store RESULT for pure LABEL/ARGS in MEMO-TABLE.
 Impure or unknown labels are ignored conservatively."
   (when (gethash label pure-labels)
-    (setf (gethash (opt-pure-function-memo-key label args) memo-table) result))
+    (setf (gethash (list label args) memo-table) result))
   result)
 
 (defun opt-function-body-instruction-tables (func-defs)

@@ -114,7 +114,7 @@
    ;; ─── Type environment ────────────────────────────────────────────────
    #:type-env  #:type-env-p  #:make-type-env #:type-env-bindings
    #:type-env-empty  #:type-env-lookup  #:type-env-extend  #:type-env-extend*
-   #:type-env-to-alist  #:type-env-free-vars
+   #:type-env-free-vars
 
    ;; ─── Structural utilities ────────────────────────────────────────────
    #:type-equal-p  #:type-free-vars #:type-children #:type-bound-var
@@ -123,7 +123,6 @@
    ;; ─── Substitution ────────────────────────────────────────────────────
    #:substitution  #:substitution-p  #:make-substitution
    #:substitution-bindings  #:substitution-generation
-   #:empty-subst
    #:subst-lookup  #:subst-extend  #:subst-extend!  #:subst-compose
    #:zonk-env
    #:zonk
@@ -203,16 +202,16 @@
    #:parse-type-specifier  #:parse-primitive-type  #:parse-compound-type
    #:parse-function-type
    #:parse-lambda-list-with-types  #:parse-typed-parameter
-   #:parse-typed-optional-parameter  #:parse-typed-rest-parameter
-   #:extract-return-type  #:extract-return-type-from-body
+   #:parse-typed-optional-parameter
+   #:extract-return-type
    #:ast-defun-typed  #:ast-defun-typed-name  #:ast-defun-typed-params
    #:ast-defun-typed-param-types  #:ast-defun-typed-return-type
    #:ast-defun-typed-body  #:ast-defun-typed-source-location  #:make-ast-defun-typed
    #:ast-lambda-typed  #:ast-lambda-typed-params  #:ast-lambda-typed-param-types
    #:ast-lambda-typed-return-type  #:ast-lambda-typed-body
    #:ast-lambda-typed-env  #:ast-lambda-typed-source-location  #:make-ast-lambda-typed
-   #:parse-typed-defun  #:parse-typed-lambda  #:parse-typed-lambda-list
-   #:make-type-function-from-spec  #:looks-like-type-specifier-p
+   #:parse-typed-defun  #:parse-typed-lambda
+   #:looks-like-type-specifier-p
    #:*lambda-list-keywords*
 
    ;; ─── Exhaustiveness checking ─────────────────────────────────────────

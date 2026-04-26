@@ -137,3 +137,67 @@
   (let* ((result (cl-cc/optimize::ssa-sequentialize-copies '((:r0 . :r1) (:r1 . :r0)))))
     (assert-true (>= (length result) 2))
     (assert-true (every (lambda (i) (typep i 'cl-cc/vm::vm-move)) result))))
+
+;;; ─── %ssa-resolve-reg ────────────────────────────────────────────────────
+
+(deftest ssa-resolve-reg-follows-chain
+  "%ssa-resolve-reg follows the replacement chain to its terminal value."
+  (let ((r (make-hash-table :test #'eq)))
+    (setf (gethash :r0 r) :r1
+          (gethash :r1 r) :r2)
+    (assert-eq :r2 (cl-cc/optimize::%ssa-resolve-reg :r0 r))))
+
+(deftest ssa-resolve-reg-identity-when-not-mapped
+  "%ssa-resolve-reg returns the register itself when it has no replacement."
+  (let ((r (make-hash-table :test #'eq)))
+    (assert-eq :r5 (cl-cc/optimize::%ssa-resolve-reg :r5 r))))
+
+;;; ─── %ssa-rewrite-tree ───────────────────────────────────────────────────
+
+(deftest ssa-rewrite-tree-replaces-symbol
+  "%ssa-rewrite-tree replaces a mapped symbol with its resolved replacement."
+  (let ((r (make-hash-table :test #'eq)))
+    (setf (gethash :r0 r) :r9)
+    (assert-eq :r9 (cl-cc/optimize::%ssa-rewrite-tree :r0 r))))
+
+(deftest ssa-rewrite-tree-passthrough-unmapped
+  "%ssa-rewrite-tree passes through atoms that have no mapping."
+  (let ((r (make-hash-table :test #'eq)))
+    (assert-eq :r3  (cl-cc/optimize::%ssa-rewrite-tree :r3 r))
+    (assert-= 42    (cl-cc/optimize::%ssa-rewrite-tree 42  r))
+    (assert-eq 'foo (cl-cc/optimize::%ssa-rewrite-tree 'foo r))))
+
+(deftest ssa-rewrite-tree-walks-cons
+  "%ssa-rewrite-tree recursively rewrites both car and cdr of a cons."
+  (let ((r (make-hash-table :test #'eq)))
+    (setf (gethash :r0 r) :r1)
+    (assert-equal '(:r1 :r2) (cl-cc/optimize::%ssa-rewrite-tree '(:r0 :r2) r))))
+
+;;; ─── ssa-rewrite-dst ─────────────────────────────────────────────────────
+
+(deftest ssa-rewrite-dst-changes-destination
+  "ssa-rewrite-dst returns an instruction with the new destination register."
+  (let* ((inst   (make-vm-const :dst :r0 :value 42))
+         (result (cl-cc/optimize::ssa-rewrite-dst inst :r0 :r9)))
+    (assert-true (typep result 'cl-cc/vm::vm-const))
+    (assert-eq :r9 (cl-cc/vm::vm-dst result))
+    (assert-= 42 (cl-cc/vm::vm-value result))))
+
+(deftest ssa-rewrite-dst-noop-when-no-match
+  "ssa-rewrite-dst returns INST unchanged when old-dst does not appear in the sexp."
+  (let* ((inst (make-vm-const :dst :r1 :value 7)))
+    (assert-eq inst (cl-cc/optimize::ssa-rewrite-dst inst :r99 :r0))))
+
+;;; ─── %ssa-collect-uses ───────────────────────────────────────────────────
+
+(deftest ssa-collect-uses-records-instruction-reads
+  "%ssa-collect-uses collects registers read by instructions in renamed-map."
+  (let* ((phi-map    (make-hash-table :test #'eq))
+         (renamed    (make-hash-table :test #'eq))
+         (blk        (make-ssa-test-block 1))
+         (inst       (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)))
+    (setf (gethash blk renamed) (list inst))
+    (let ((uses (cl-cc/optimize::%ssa-collect-uses phi-map renamed)))
+      (assert-true (gethash :r0 uses))
+      (assert-true (gethash :r1 uses))
+      (assert-false (gethash :r2 uses)))))

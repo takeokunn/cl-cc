@@ -37,21 +37,23 @@
              func-defs)
     graph))
 
+(defun %opt-call-graph-reaches-self-p (graph start node seen)
+  "Return T if NODE can reach START via GRAPH edges, using SEEN to avoid cycles."
+  (dolist (next (gethash node graph) nil)
+    (cond
+      ((equal next start) (return-from %opt-call-graph-reaches-self-p t))
+      ((not (gethash next seen))
+       (setf (gethash next seen) t)
+       (when (%opt-call-graph-reaches-self-p graph start next seen)
+         (return-from %opt-call-graph-reaches-self-p t))))))
+
 (defun opt-call-graph-recursive-labels (graph)
   "Return the set of labels that are in a recursive SCC of GRAPH."
   (let ((recursive (make-hash-table :test #'equal)))
-    (labels ((reaches-self-p (start node seen)
-               (dolist (next (gethash node graph) nil)
-                 (cond
-                   ((equal next start) (return-from reaches-self-p t))
-                   ((not (gethash next seen))
-                    (setf (gethash next seen) t)
-                    (when (reaches-self-p start next seen)
-                      (return-from reaches-self-p t)))))))
-      (maphash (lambda (label _callees)
-                 (when (reaches-self-p label label (make-hash-table :test #'equal))
-                   (setf (gethash label recursive) t)))
-                graph))
+    (maphash (lambda (label _callees)
+               (when (%opt-call-graph-reaches-self-p graph label label (make-hash-table :test #'equal))
+                 (setf (gethash label recursive) t)))
+             graph)
     recursive))
 
 (defun opt-function-body-transitively-pure-p (body func-defs name-to-label pure-labels)

@@ -58,42 +58,43 @@
          (base   (if entry (cdr entry) 2)))
     (+ base (reduce #'+ children-costs :initial-value 0))))
 
+(defun %egraph-extract-class (cid eg cache cost-fn)
+  "Recursively extract the minimum-cost term for e-class CID from EG."
+  (let ((canon (egraph-find eg cid)))
+    (or (gethash canon cache)
+        (let ((cls (gethash canon (eg-classes eg))))
+          (if (null cls)
+              (progn (setf (gethash canon cache) (cons most-positive-fixnum cid)) nil)
+              (let ((best-cost most-positive-fixnum)
+                    (best-sexp nil))
+                (setf (gethash canon cache) (cons most-positive-fixnum nil))
+                (dolist (n (ec-nodes cls))
+                  (let* ((child-results (mapcar (lambda (c) (%egraph-extract-class c eg cache cost-fn))
+                                               (en-children n)))
+                         (child-costs   (mapcar (lambda (r) (if r (car r) most-positive-fixnum))
+                                               child-results))
+                         (child-sexps   (mapcar (lambda (r) (when r (cdr r))) child-results))
+                         (total-cost    (funcall cost-fn (en-op n) child-costs)))
+                    (when (< total-cost best-cost)
+                      (setf best-cost total-cost)
+                      (setf best-sexp
+                            (if (null (en-children n))
+                                (let ((data (ec-data (gethash canon (eg-classes eg)))))
+                                  (or data (en-op n)))
+                                (cons (en-op n) child-sexps))))))
+                (let ((result (cons best-cost best-sexp)))
+                  (setf (gethash canon cache) result)
+                  result)))))))
+
 (defun egraph-extract (eg root-id &optional (cost-fn #'egraph-default-cost))
   "Bottom-up extraction: for each e-class reachable from ROOT-ID,
    pick the e-node with the minimum cost.
    Returns an s-expression (nested list) representing the cheapest term.
 
    COST-FN: (op children-costs) → numeric cost."
-  (let ((cache (make-hash-table))) ; class-id → (cost . sexp)
-    (labels ((extract-class (cid)
-               (let ((canon (egraph-find eg cid)))
-                 (or (gethash canon cache)
-                     (let ((cls (gethash canon (eg-classes eg))))
-                       (if (null cls)
-                           (progn (setf (gethash canon cache) (cons most-positive-fixnum cid)) nil)
-                           (let ((best-cost most-positive-fixnum)
-                                 (best-sexp nil))
-                             ;; Temporarily record a high-cost sentinel to handle cycles
-                             (setf (gethash canon cache) (cons most-positive-fixnum nil))
-                             (dolist (n (ec-nodes cls))
-                               (let* ((child-results (mapcar #'extract-class (en-children n)))
-                                      (child-costs   (mapcar (lambda (r) (if r (car r) most-positive-fixnum))
-                                                             child-results))
-                                      (child-sexps   (mapcar (lambda (r) (when r (cdr r)))
-                                                             child-results))
-                                      (total-cost    (funcall cost-fn (en-op n) child-costs)))
-                                 (when (< total-cost best-cost)
-                                   (setf best-cost total-cost)
-                                   (setf best-sexp
-                                         (if (null (en-children n))
-                                             (let ((data (ec-data (gethash canon (eg-classes eg)))))
-                                               (or data (en-op n)))
-                                             (cons (en-op n) child-sexps))))))
-                             (let ((result (cons best-cost best-sexp)))
-                               (setf (gethash canon cache) result)
-                               result))))))))
-      (let ((result (extract-class root-id)))
-        (when result (cdr result))))))
+  (let ((cache (make-hash-table)))
+    (let ((result (%egraph-extract-class root-id eg cache cost-fn)))
+      (when result (cdr result)))))
 
 ;;; ─── VM Instruction ↔ E-graph ────────────────────────────────────────────
 

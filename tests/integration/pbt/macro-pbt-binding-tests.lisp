@@ -3,7 +3,7 @@
 
 (in-suite macro-pbt-suite)
 
-(defproperty let-star-empty-is-progn
+(defproperty let-star-empty-is-progn-binding-pbt
     (body (gen-list-of (gen-body-form) :min-length 1 :max-length 3))
   "LET* with empty bindings is just PROGN."
   (let ((expanded (cl-cc:our-macroexpand-1 `(let* () ,@body))))
@@ -11,7 +11,7 @@
          (eq (car expanded) 'progn)
          (equal (cdr expanded) body))))
 
-(defproperty let-star-single-is-let
+(defproperty let-star-single-is-let-binding-pbt
     (binding (gen-binding-pair)
      body (gen-body-form))
   "LET* with single binding expands to LET."
@@ -20,7 +20,7 @@
          (eq (car expanded) 'let)
          (equal (second expanded) (list binding)))))
 
-(defproperty let-star-multiple-nested
+(defproperty let-star-multiple-nested-binding-pbt
     (bindings (gen-binding-list :min-length 2 :max-length 4)
      body (gen-body-form))
   "LET* with multiple bindings creates nested LETs."
@@ -31,7 +31,7 @@
                    depth)))
       (= (count-nested-lets expanded 0) (length bindings)))))
 
-(defproperty let-star-preserves-binding-order
+(defproperty let-star-preserves-binding-order-binding-pbt
     (bindings (gen-binding-list :min-length 2 :max-length 3)
      body (gen-body-form))
   "LET* preserves binding order (first binding is outermost LET)."
@@ -42,7 +42,7 @@
 
 ;;; Property: PROG1 and PROG2 Macro Expansion
 
-(defproperty prog1-introduces-result-variable
+(defproperty prog1-introduces-result-variable-binding-pbt
     (first-form (gen-body-form)
      body (gen-list-of (gen-body-form) :min-length 0 :max-length 3))
   "PROG1 introduces a result variable."
@@ -53,7 +53,7 @@
          (= (length (second expanded)) 1)
          (symbolp (caar (second expanded))))))
 
-(defproperty prog1-returns-first-value
+(defproperty prog1-returns-first-value-binding-pbt
     (first-form (gen-body-form)
      body (gen-list-of (gen-body-form) :min-length 0 :max-length 2))
   "PROG1 expansion returns the saved result variable."
@@ -63,7 +63,7 @@
          (let ((result-var (caar (second expanded))))
            (eq (car (last expanded)) result-var)))))
 
-(defproperty prog2-structure
+(defproperty prog2-structure-binding-pbt
     (first-form (gen-body-form)
      second-form (gen-body-form)
      body (gen-list-of (gen-body-form) :min-length 0 :max-length 2))
@@ -75,7 +75,7 @@
          (consp (third expanded))
          (eq (car (third expanded)) 'let))))
 
-(defproperty prog2-returns-second-value
+(defproperty prog2-returns-second-value-binding-pbt
     (first-form (gen-body-form)
      second-form (gen-body-form)
      body (gen-list-of (gen-body-form) :min-length 0 :max-length 2))
@@ -89,7 +89,7 @@
 
 ;;; Property: SETF Macro Expansion
 
-(defproperty setf-symbol-is-setq
+(defproperty setf-symbol-is-setq-binding-pbt
     (var (gen-symbol :prefix "VAR" :package nil)
      val (gen-integer :min -100 :max 100))
   "SETF with symbol place expands to SETQ."
@@ -101,12 +101,12 @@
 
 ;;; Property: PSETQ Macro Expansion
 
-(defproperty psetq-empty-is-nil
+(defproperty psetq-empty-is-nil-binding-pbt
     ()
   "Empty PSETQ returns NIL."
   (null (cl-cc:our-macroexpand-1 '(psetq))))
 
-(defproperty psetq-introduces-temps
+(defproperty psetq-introduces-temps-binding-pbt
     (pairs (gen-list-of (gen-binding-pair) :min-length 1 :max-length 4))
   "PSETQ introduces temporary variables for parallel evaluation."
   (let* ((flat-pairs (apply #'append pairs))
@@ -116,7 +116,7 @@
          ;; Number of temp bindings should equal number of pairs
          (= (length (second expanded)) (length pairs)))))
 
-(defproperty psetq-preserves-values
+(defproperty psetq-preserves-values-binding-pbt
     (pairs (gen-list-of (gen-binding-pair) :min-length 1 :max-length 3))
   "PSETQ expansion preserves all values in correct order."
   (let* ((flat-pairs (apply #'append pairs))
@@ -129,7 +129,7 @@
 
 ;;; Property: MULTIPLE-VALUE-BIND Macro Expansion
 
-(defproperty mvb-uses-multiple-value-call
+(defproperty mvb-uses-multiple-value-call-binding-pbt
     (vars (gen-variable-list :min-length 1 :max-length 5)
      form (gen-body-form)
      body (gen-list-of (gen-body-form) :min-length 0 :max-length 3))
@@ -138,7 +138,7 @@
     (and (consp expanded)
          (eq (car expanded) 'multiple-value-call))))
 
-(defproperty mvb-preserves-variables
+(defproperty mvb-preserves-variables-binding-pbt
     (vars (gen-variable-list :min-length 1 :max-length 5)
      form (gen-body-form)
      body (gen-body-form))
@@ -149,7 +149,7 @@
            (eq (car lambda-form) 'lambda)
            (equal (second lambda-form) vars)))))
 
-(defproperty mvb-preserves-form
+(defproperty mvb-preserves-form-binding-pbt
     (vars (gen-variable-list :min-length 1 :max-length 3)
      form (gen-body-form))
   "MULTIPLE-VALUE-BIND preserves the values form."
@@ -158,7 +158,7 @@
 
 ;;; Property: MULTIPLE-VALUE-SETQ Macro Expansion
 
-(defproperty mvsq-uses-multiple-value-list
+(defproperty mvsq-uses-multiple-value-list-binding-pbt
     (vars (gen-variable-list :min-length 1 :max-length 5)
      form (gen-body-form))
   "MULTIPLE-VALUE-SETQ uses MULTIPLE-VALUE-LIST."
@@ -170,7 +170,7 @@
                 (consp (second binding))
                 (eq (car (second binding)) 'multiple-value-list))))))
 
-(defproperty mvsq-has-setq-for-each-var
+(defproperty mvsq-has-setq-for-each-var-binding-pbt
     (vars (gen-variable-list :min-length 1 :max-length 4)
      form (gen-body-form))
   "MULTIPLE-VALUE-SETQ has SETQ for each variable."
@@ -180,13 +180,13 @@
 
 ;;; Property: MULTIPLE-VALUE-LIST Macro Expansion
 
-(defproperty mvl-uses-multiple-value-call
+(defproperty mvl-uses-multiple-value-call-binding-pbt
     (form (gen-body-form))
   "MULTIPLE-VALUE-LIST uses MULTIPLE-VALUE-CALL."
   (let ((expanded (cl-cc:our-macroexpand-1 `(multiple-value-list ,form))))
     (form-contains-symbol-p 'multiple-value-call expanded)))
 
-(defproperty mvl-accumulates-into-list
+(defproperty mvl-accumulates-into-list-binding-pbt
     (form (gen-body-form))
   "MULTIPLE-VALUE-LIST accumulates results into a list via NREVERSE."
   (let ((expanded (cl-cc:our-macroexpand-1 `(multiple-value-list ,form))))
@@ -194,7 +194,7 @@
 
 ;;; Property: DEFUN Macro Expansion
 
-(defproperty defun-uses-setf-fdefinition
+(defproperty defun-uses-setf-fdefinition-binding-pbt
     (name (gen-symbol :prefix "FN" :package nil)
      params (gen-variable-list :min-length 0 :max-length 4)
      body (gen-list-of (gen-body-form) :min-length 1 :max-length 3))
@@ -205,7 +205,7 @@
          (and (consp (second expanded))
               (eq (car (second expanded)) 'fdefinition)))))
 
-(defproperty defun-creates-lambda
+(defproperty defun-creates-lambda-binding-pbt
     (name (gen-symbol :prefix "FN" :package nil)
      params (gen-variable-list :min-length 0 :max-length 4)
      body (gen-list-of (gen-body-form) :min-length 1 :max-length 3))
@@ -216,7 +216,7 @@
            (eq (car lambda-form) 'lambda)
            (equal (second lambda-form) params)))))
 
-(deftest defun-c-enforces-contracts
+(deftest defun-c-enforces-contracts-binding-pbt
   "DEFUN/C enforces preconditions and postconditions at runtime."
   (assert-equal 4
                 (cl-cc:run-string "(progn
@@ -232,4 +232,3 @@
                                 :ensures (= result (+ x 1))
                                 (+ x 1))
                               (add1-positive 0))")))
-

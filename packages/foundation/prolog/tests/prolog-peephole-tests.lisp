@@ -128,3 +128,27 @@
           ("move-different-source" '((:move :r1 :r0) (:move :r3 :r2))))
   (insts)
   (assert-prolog-peephole-length= insts 2))
+
+;;; %peephole-walk unit tests (internal helper)
+
+(deftest-each peephole-walk-direct-cases
+  "%peephole-walk: nil→nil; singleton→singleton; non-matching pair passes through."
+  :cases (("nil"       nil                              nil)
+          ("singleton" '((:const :r0 1))                '((:const :r0 1)))
+          ("no-match"  '((:add :r1 :r0 :r0) (:sub :r2 :r1 :r1))
+                       '((:add :r1 :r0 :r0) (:sub :r2 :r1 :r1))))
+  (input expected)
+  (assert-equal expected (cl-cc/prolog::%peephole-walk input nil)))
+
+(deftest peephole-walk-matching-pair-fused
+  "%peephole-walk: a matching const→move pair is fused into a single const."
+  (let ((result (cl-cc/prolog::%peephole-walk '((:const :r0 99) (:move :r1 :r0)) nil)))
+    (assert-= 1 (length result))
+    (assert-equal '(:const :r1 99) (first result))))
+
+(deftest peephole-walk-out-accumulator-is-prepended
+  "%peephole-walk: instructions in OUT are prepended (reversed) to the result."
+  (let ((result (cl-cc/prolog::%peephole-walk '((:const :r0 1)) '((:add :r2 :r1 :r1)))))
+    (assert-= 2 (length result))
+    (assert-equal '(:add :r2 :r1 :r1) (first result))
+    (assert-equal '(:const :r0 1)     (second result))))

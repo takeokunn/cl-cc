@@ -146,3 +146,22 @@
          (result (cl-cc/optimize::opt-pass-batch-concatenate insts)))
     ;; Should have at least 2 vm-concatenate (no merging since r2 used twice)
     (assert-true (>= (count-if (lambda (i) (typep i 'cl-cc/vm::vm-concatenate)) result) 2))))
+
+;;; ─── *opt-commutative-binop-table* / opt-reassociate-commutative-p ───────
+
+(deftest commutative-binop-table-coverage
+  "*opt-commutative-binop-table* covers all 7 commutative instruction types."
+  (assert-= 7 (length cl-cc/optimize::*opt-commutative-binop-table*))
+  (dolist (type '(vm-add vm-integer-add vm-mul vm-integer-mul
+                  vm-logand vm-logior vm-logxor))
+    (assert-true (assoc type cl-cc/optimize::*opt-commutative-binop-table* :test #'eq))))
+
+(deftest-each opt-copy-commutative-binop-cases
+  "opt-copy-commutative-binop returns correct constructor type for each commutative op."
+  :cases (("add"  (make-vm-add  :dst :r0 :lhs :r1 :rhs :r2) 'cl-cc/vm::vm-add)
+          ("mul"  (make-vm-mul  :dst :r0 :lhs :r1 :rhs :r2) 'cl-cc/vm::vm-mul)
+          ("logand" (make-vm-logand :dst :r0 :lhs :r1 :rhs :r2) 'cl-cc/vm::vm-logand))
+  (inst expected-type)
+  (let ((result (cl-cc/optimize::opt-copy-commutative-binop inst :r9 :r1 :r2)))
+    (assert-true (typep result expected-type))
+    (assert-eq :r9 (cl-cc/vm::vm-dst result))))

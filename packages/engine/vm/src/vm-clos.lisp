@@ -88,36 +88,40 @@
 
 ;;; ── MRO and inheritance helpers ──────────────────────────────────────────
 
+(defun %cis-walk (class-names registry seen result-cell)
+  "Post-order DFS: accumulate unique slot names into (car RESULT-CELL), skipping SEEN."
+  (dolist (cname class-names)
+    (let ((super-ht (gethash cname registry)))
+      (when super-ht
+        (%cis-walk (gethash :__superclasses__ super-ht) registry seen result-cell)
+        (dolist (slot (gethash :__slots__ super-ht))
+          (unless (gethash slot seen)
+            (setf (gethash slot seen) t)
+            (push slot (car result-cell))))))))
+
 (defun collect-inherited-slots (superclasses registry)
   "Collect slot names from superclasses in MRO order (depth-first, left-to-right).
 Returns a list of slot names without duplicates, preserving order."
-  (let ((seen (make-hash-table :test #'eq))
-        (result nil))
-    (labels ((walk (class-names)
-               (dolist (cname class-names)
-                 (let ((super-ht (gethash cname registry)))
-                   (when super-ht
-                     (walk (gethash :__superclasses__ super-ht))
-                     (dolist (slot (gethash :__slots__ super-ht))
-                       (unless (gethash slot seen)
-                         (setf (gethash slot seen) t)
-                         (push slot result))))))))
-      (walk superclasses))
-    (nreverse result)))
+  (let ((seen        (make-hash-table :test #'eq))
+        (result-cell (list nil)))
+    (%cis-walk superclasses registry seen result-cell)
+    (nreverse (car result-cell))))
+
+(defun %cia-walk (class-names registry result-cell)
+  "Post-order DFS: accumulate unique initarg entries into (car RESULT-CELL)."
+  (dolist (cname class-names)
+    (let ((super-ht (gethash cname registry)))
+      (when super-ht
+        (%cia-walk (gethash :__superclasses__ super-ht) registry result-cell)
+        (dolist (entry (gethash :__initargs__ super-ht))
+          (unless (assoc (car entry) (car result-cell))
+            (push entry (car result-cell))))))))
 
 (defun collect-inherited-initargs (superclasses registry)
   "Collect initarg mappings from superclasses. Later entries override earlier ones."
-  (let ((result nil))
-    (labels ((walk (class-names)
-               (dolist (cname class-names)
-                 (let ((super-ht (gethash cname registry)))
-                   (when super-ht
-                     (walk (gethash :__superclasses__ super-ht))
-                     (dolist (entry (gethash :__initargs__ super-ht))
-                       (unless (assoc (car entry) result)
-                         (push entry result))))))))
-      (walk superclasses))
-    (nreverse result)))
+  (let ((result-cell (list nil)))
+    (%cia-walk superclasses registry result-cell)
+    (nreverse (car result-cell))))
 
 (defun %vm-allow-other-keys-p (initarg-regs state)
   "Return true when INITARG-REGS explicitly contains :ALLOW-OTHER-KEYS with a truthy value."
@@ -167,23 +171,22 @@ of all linearizations where it occurs — never in any tail."
                             lin))
                       linearizations))))))
 
-(defun compute-class-precedence-list (class-name registry)
-  "Compute the class precedence list for CLASS-NAME using C3 linearization.
-Returns a list of class names including CLASS-NAME itself.
-Signals an error if the hierarchy has inconsistent orderings.
+(defun %cpl-linearize (name registry)
+  "C3 linearization for NAME: list NAME then merge linearizations of its supers.
 Algorithm: L(C) = C + merge(L(C1), L(C2), ..., (C1, C2, ...))"
-  (labels ((linearize (name)
-             (let ((class-ht (gethash name registry)))
-               (if (null class-ht)
-                   (list name)
-                   (let ((supers (gethash :__superclasses__ class-ht)))
-                     (if (null supers)
-                         (list name)
-                         (cons name
-                               (%c3-merge
-                                (append
-                                 (mapcar #'linearize supers)
-                                 (list (copy-list supers)))))))))))
-    (linearize class-name)))
+  (let ((class-ht (gethash name registry)))
+    (if (null class-ht)
+        (list name)
+        (let ((supers (gethash :__superclasses__ class-ht)))
+          (if (null supers)
+              (list name)
+              (cons name
+                    (%c3-merge
+                     (append (mapcar (lambda (s) (%cpl-linearize s registry)) supers)
+                             (list (copy-list supers))))))))))
+
+(defun compute-class-precedence-list (class-name registry)
+  "Compute the C3 class precedence list for CLASS-NAME using REGISTRY."
+  (%cpl-linearize class-name registry))
 
 ;;; ── CLOS instruction execution ───────────────────────────────────────────

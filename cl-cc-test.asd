@@ -453,16 +453,25 @@
        (:file "macro-pbt-binding-tests")
        (:file "macro-pbt-advanced-tests")
        (:file "prolog-pbt-tests")
-       (:file "vm-heap-pbt-tests")))))
-   (:module "e2e"
-    :pathname "tests/e2e"
-    :serial t
-    :components
-     ((:file "selfhost-tests")
-      (:file "selfhost-meta-tests"))))
+       (:file "vm-heap-pbt-tests"))))))
   :perform (asdf:test-op (op c)
               (declare (ignore op c))
               (uiop:symbol-call :cl-cc/test 'run-tests)))
+
+(asdf:defsystem :cl-cc-test/slow
+  :description "CL-CC heavy self-hosting end-to-end regression tests"
+  :author "CL-CC"
+  :license "MIT"
+  :version "0.1.0"
+  :depends-on (:cl-cc-test)
+  :serial t
+  :components
+  ((:module "e2e"
+    :pathname "tests/e2e"
+    :serial t
+    :components
+    ((:file "selfhost-tests")
+     (:file "selfhost-meta-tests")))))
 
 (asdf:defsystem :cl-cc-test/clos
   :description "CL-CC isolated CLOS integration tests"

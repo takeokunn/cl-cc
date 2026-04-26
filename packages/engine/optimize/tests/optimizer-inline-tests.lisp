@@ -188,6 +188,47 @@
     (assert-eq :R0 (cl-cc::vm-dst renamed))
     (assert-eq :R1 (cl-cc::vm-src renamed))))
 
+;;; ─── %opt-collect-sexp-regs ──────────────────────────────────────────────────
+
+(deftest-each opt-collect-sexp-regs-cases
+  "%opt-collect-sexp-regs accumulates register keywords from sexp into the cell."
+  :cases (("empty-atom"     42               nil)
+          ("register-kw"    :r0              '(:r0))
+          ("non-reg-kw"     :not-a-reg       nil)
+          ("nested-list"    '(:r0 :r1 (:r2)) '(:r2 :r1 :r0)))
+  (form expected-set)
+  (let ((cell (list nil)))
+    (cl-cc/optimize::%opt-collect-sexp-regs form cell)
+    (let ((regs (car cell)))
+      (assert-= (length expected-set) (length regs))
+      (dolist (r expected-set)
+        (assert-true (member r regs))))))
+
+(deftest opt-collect-sexp-regs-registers-from-inst-sexp
+  "%opt-collect-sexp-regs collects :r0 and :r1 from a vm-move sexp."
+  (let* ((inst (make-vm-move :dst :r0 :src :r1))
+         (sexp (cl-cc/optimize::instruction->sexp inst))
+         (cell (list nil)))
+    (cl-cc/optimize::%opt-collect-sexp-regs sexp cell)
+    (let ((regs (car cell)))
+      (assert-true (member :r0 regs))
+      (assert-true (member :r1 regs)))))
+
+;;; ─── opt-can-safely-rename-p ─────────────────────────────────────────────────
+
+(deftest-each opt-can-safely-rename-p-cases
+  "opt-can-safely-rename-p: T for simple instructions with sexp-visible regs; NIL for instructions that suppress regs in their sexp form."
+  :cases (("const-trivially-safe" (list (make-vm-const :dst :r0 :value 42)
+                                        (make-vm-ret   :reg :r0))
+                                  t)
+          ("move-safe"            (list (make-vm-move :dst :r0 :src :r1)
+                                        (make-vm-ret  :reg :r0))
+                                  t))
+  (insts expected)
+  (if expected
+      (assert-true  (cl-cc/optimize::opt-can-safely-rename-p insts))
+      (assert-false (cl-cc/optimize::opt-can-safely-rename-p insts))))
+
 ;;; ─── opt-body-has-global-refs-p ──────────────────────────────────────────────
 
 (deftest-each opt-body-has-global-refs-p-cases

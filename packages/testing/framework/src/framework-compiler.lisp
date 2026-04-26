@@ -7,10 +7,10 @@
 ;;; High-Level Test Macros (requirement #7)
 ;;; ------------------------------------------------------------
 ;;;
-;;; These macros reduce boilerplate in the three most common test patterns:
+;;; These macros reduce boilerplate in the most common test patterns:
 ;;;   1. deftest-compile / deftest-compile-each  — compile-and-run tests (~200+ tests)
-;;;   2. deftest-codegen / deftest-codegen-each  — AST codegen instruction checks (~80+ tests)
-;;;   3. deftest-vm / deftest-vm-each            — VM instruction execute-and-check (~70+ tests)
+;;;   2. deftest-codegen                         — AST codegen instruction checks
+;;;   3. deftest-vm                              — VM instruction execute-and-check
 
 ;;; --- Compile-and-Run ---
 
@@ -89,19 +89,6 @@ Syntax:
            (declare (ignorable ,reg-var))
            ,@(mapcar #'expand-check checks))))))
 
-(defmacro deftest-codegen-each (name docstring &key cases)
-  "Define parameterized codegen tests.
-Each case compiles an AST form in a fresh context and checks for instruction presence.
-
-Syntax:
-  (deftest-codegen-each name \"doc\"
-    :cases ((\"label\" ast-form (:emits inst-type) ...) ...))"
-  (let ((expansions
-          (loop for (label ast-form . checks) in cases
-                for test-name = (intern (format nil "~A [~A]" (symbol-name name) label))
-                collect `(deftest-codegen ,test-name ,docstring ,ast-form ,@checks))))
-    `(progn ,@expansions)))
-
 ;;; --- VM Instruction Execute-and-Check ---
 
 (defmacro deftest-vm (name docstring instruction-form &body checks)
@@ -146,16 +133,3 @@ Syntax:
                (exec1 ,instruction-form ,s-var)
              (declare (ignorable ,halt-var ,res-var))
              ,@(mapcar #'expand-check checks)))))))
-
-(defmacro deftest-vm-each (name docstring &key cases)
-  "Define parameterized VM instruction tests.
-Each case creates a fresh VM, executes one instruction, and checks register values.
-
-Syntax:
-  (deftest-vm-each name \"doc\"
-    :cases ((\"label\" instruction-form (:reg dst = expected)) ...))"
-  (let ((expansions
-          (loop for (label inst-form . checks) in cases
-                for test-name = (intern (format nil "~A [~A]" (symbol-name name) label))
-                collect `(deftest-vm ,test-name ,docstring ,inst-form ,@checks))))
-    `(progn ,@expansions)))

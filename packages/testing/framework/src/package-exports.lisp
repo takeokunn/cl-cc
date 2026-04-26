@@ -39,9 +39,7 @@
           deftest-compile
           deftest-compile-each
           deftest-codegen
-          deftest-codegen-each
           deftest-vm
-          deftest-vm-each
           testing
           defbefore
           defafter

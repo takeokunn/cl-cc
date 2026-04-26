@@ -93,15 +93,15 @@ Options:
      (let ((prefix (if conc-name-override
                        (string conc-name-override)
                        (concatenate 'string (symbol-name name) "-"))))
-       (labels ((struct-acc (slot)
-                  (intern (format nil "~A~A" prefix (symbol-name slot))))
-                (ctor ()
-                  (intern (format nil "MAKE-~A" (symbol-name name))))
-                (pos-form (n)
-                  (case n
-                    (1 '(second sexp)) (2 '(third sexp)) (3 '(fourth sexp))
-                    (4 '(fifth sexp)) (5 '(sixth sexp)) (6 '(seventh sexp))
-                    (t `(nth ,n sexp)))))
+       (flet ((struct-acc (slot)
+                (intern (format nil "~A~A" prefix (symbol-name slot))))
+              (ctor ()
+                (intern (format nil "MAKE-~A" (symbol-name name))))
+              (pos-form (n)
+                (case n
+                  (1 '(second sexp)) (2 '(third sexp)) (3 '(fourth sexp))
+                  (4 '(fifth sexp)) (5 '(sixth sexp)) (6 '(seventh sexp))
+                  (t `(nth ,n sexp)))))
          (let* ((struct-options (append (list name (list :include parent))
                                         (when conc-name-override
                                           (list (list :conc-name conc-name-override)))))

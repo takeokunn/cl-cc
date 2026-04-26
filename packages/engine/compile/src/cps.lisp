@@ -195,15 +195,13 @@ runtime while preserving the data-driven dispatch shape."
       (second (third form))
       form))
 
-(defun %cps-simplify-once (form)
-  "Apply one recursive beta/eta simplification pass to FORM."
-  (labels ((walk (x)
-             (if (consp x)
-                 (%cps-eta-reduce
-                  (%cps-beta-reduce
-                   (mapcar #'walk x)))
-                 x)))
-    (walk form)))
+(defun %cps-simplify-walk (x)
+  "Recursively apply beta/eta reduction bottom-up to sexp X."
+  (if (consp x)
+      (%cps-eta-reduce
+       (%cps-beta-reduce
+        (mapcar #'%cps-simplify-walk x)))
+      x))
 
 (defun %cps-simplify-fixed-point (form step-fn)
   "Apply STEP-FN to FORM until a fixed point is reached."
@@ -215,7 +213,7 @@ runtime while preserving the data-driven dispatch shape."
 
 (defun cps-simplify-form (form)
   "Repeatedly simplify FORM until a fixed point is reached."
-  (%cps-simplify-fixed-point form #'%cps-simplify-once))
+  (%cps-simplify-fixed-point form #'%cps-simplify-walk))
 
 (defun cps-transform (expr)
   "Minimal CPS conversion for bootstrap language. Produces (lambda (k) ...).

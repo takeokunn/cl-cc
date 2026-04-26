@@ -4,7 +4,7 @@
 (in-suite macro-pbt-suite)
 ;;; Property: Nested Macro Expansion
 
-(defproperty nested-when-in-let-star
+(defproperty nested-when-in-let-star-advanced-pbt
     (var (gen-symbol :prefix "X" :package nil)
      val (gen-integer :min -10 :max 10)
      test (gen-test-form)
@@ -17,7 +17,7 @@
          (not (form-contains-symbol-p 'when expanded))
          (not (form-contains-symbol-p 'let* expanded)))))
 
-(defproperty nested-cond-in-and
+(defproperty nested-cond-in-and-advanced-pbt
     (test1 (gen-test-form)
      test2 (gen-test-form)
      body (gen-body-form))
@@ -26,7 +26,7 @@
     (and (not (form-contains-symbol-p 'cond expanded))
          (not (form-contains-symbol-p 'and expanded)))))
 
-(defproperty nested-let-star-in-let-star
+(defproperty nested-let-star-in-let-star-advanced-pbt
     (bindings1 (gen-binding-list :min-length 1 :max-length 2)
      bindings2 (gen-binding-list :min-length 1 :max-length 2)
      body (gen-body-form))
@@ -36,7 +36,7 @@
          ;; Should have nested LETs
          (eq (car expanded) 'let))))
 
-(defproperty nested-or-in-prog1
+(defproperty nested-or-in-prog1-advanced-pbt
     (args1 (gen-list-of (gen-body-form) :min-length 2 :max-length 3)
      args2 (gen-list-of (gen-body-form) :min-length 2 :max-length 3))
   "Nested OR in PROG1 fully expands."

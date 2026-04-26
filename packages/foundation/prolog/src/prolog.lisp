@@ -28,10 +28,6 @@
   "Return T if RESULT represents a unification failure (distinguished from empty env)."
   (eq result :unify-fail))
 
-(defun %logic-binding (var env)
-  "Return VAR's binding pair in ENV, or NIL when VAR is unbound."
-  (assoc var env))
-
 (defun %bind-logic-var (var term env)
   "Extend ENV with VAR bound to TERM, unless that would create a cycle."
   (if (occurs-check var term env)
@@ -40,15 +36,15 @@
 
 (defun %unify-bound-logic-var (var term env)
   "Unify TERM with VAR's current binding in ENV, or bind VAR if unbound."
-  (let ((binding (%logic-binding var env)))
+  (let ((binding (assoc var env)))
     (if binding
         (unify (cdr binding) term env)
         (%bind-logic-var var term env))))
 
 (defun %unify-two-logic-vars (term1 term2 env)
   "Unify two logic variables, preserving aliases already present in ENV."
-  (let ((v1 (%logic-binding term1 env))
-        (v2 (%logic-binding term2 env)))
+  (let ((v1 (assoc term1 env))
+        (v2 (assoc term2 env)))
     (cond ((and v1 v2) (unify (cdr v1) (cdr v2) env))
           (v1 (unify (cdr v1) term2 env))
           (v2 (unify term1 (cdr v2) env))
@@ -100,7 +96,7 @@
     (t template)))
 
 (defun substitute-variables (term env)
-  "Substitute all bound logic variables in TERM (alias for logic-substitute)."
+  "Substitute all bound logic variables in TERM using ENV."
   (logic-substitute term env))
 
 ;;; Goal and Rule Representation
@@ -169,19 +165,22 @@ to one `def-rule` per operator, keeping rule data and rule expansion separate."
 
 ;;; Variable Renaming for Recursion
 
+(defun %rename-prolog-term (term renaming)
+  "Rename TERM's logic variables via RENAMING hash table (creating new gensyms as needed)."
+  (cond ((logic-var-p term)
+         (or (gethash term renaming)
+             (setf (gethash term renaming) (gensym (symbol-name term)))))
+        ((consp term)
+         (cons (%rename-prolog-term (car term) renaming)
+               (%rename-prolog-term (cdr term) renaming)))
+        (t term)))
+
 (defun rename-variables (rule)
   "Rename all logic variables in RULE to fresh ones (for recursive calls)."
   (let ((renaming (make-hash-table :test 'eq)))
-    (labels ((rename-term (term)
-               (cond ((logic-var-p term)
-                      (or (gethash term renaming)
-                          (setf (gethash term renaming)
-                              (gensym (symbol-name term)))))
-                     ((consp term)
-                      (cons (rename-term (car term)) (rename-term (cdr term))))
-                     (t term))))
-      (make-prolog-rule :head (rename-term (rule-head rule))
-                        :body (mapcar #'rename-term (rule-body rule))))))
+    (make-prolog-rule :head (%rename-prolog-term (rule-head rule) renaming)
+                      :body (mapcar (lambda (b) (%rename-prolog-term b renaming))
+                                    (rule-body rule)))))
 
 (declaim (ftype function solve-goal solve-conjunction eval-lisp-condition))
 

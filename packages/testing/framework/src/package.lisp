@@ -32,7 +32,6 @@
    :type-var-equal-p
    :type-equal-p
    :type-to-string
-   :empty-subst
    :subst-lookup
    :subst-extend
    :zonk

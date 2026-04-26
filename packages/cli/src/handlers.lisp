@@ -24,6 +24,15 @@
        (format *error-output* "Error: ~A~%" e)
        (uiop:quit 1))))
 
+(defun %run-compiled-result (result vm-state opts)
+  "Execute RESULT's program in VM-STATE, emitting trace/flamegraph when opts request it."
+  (when (compile-opts-trace-emit opts)
+    (%trace-emit-stages result *standard-output*))
+  (prog1 (run-compiled (compilation-result-program result) :state vm-state)
+    (when (compile-opts-flamegraph-path opts)
+      (%write-flamegraph-svg (compile-opts-flamegraph-path opts)
+                             (cl-cc/vm::vm-profile-samples vm-state)))))
+
 (defun %do-run (parsed)
   (let* ((file (%required-file-arg parsed "run"))
          (lang-flag (or (flag parsed "--lang") ""))
@@ -35,30 +44,23 @@
     (when verbose
       (format *error-output* "; cl-cc run: ~A  lang=~A  stdlib=~A~%"
               file language (if stdlib "yes" "no")))
-    (flet ((run-result (result vm-state)
-             (when (compile-opts-trace-emit opts)
-               (%trace-emit-stages result *standard-output*))
-             (prog1 (run-compiled (compilation-result-program result) :state vm-state)
-               (when (compile-opts-flamegraph-path opts)
-                 (%write-flamegraph-svg (compile-opts-flamegraph-path opts)
-                                        (cl-cc/vm::vm-profile-samples vm-state))))))
-      (%with-cli-error-handler
-        (%call-with-optional-output-file
-         (compile-opts-trace-json-path opts)
-         (lambda (stream)
-           (let* ((vm-state (%maybe-make-profiled-vm-state opts))
-                  (kwargs (%compile-opts-kwargs opts stream)))
-             (cond
-               ((and stdlib (eq language :lisp))
-                (run-result (apply #'cl-cc::compile-string-with-stdlib source :target :vm kwargs)
-                            vm-state))
-               ((eq language :php)
-                (run-result (apply #'compile-string source :target :vm :language :php kwargs)
-                            vm-state))
-               (t
-                (run-result (apply #'compile-string source :target :vm kwargs)
-                            vm-state)))
-             (uiop:quit 0))))))))
+    (%with-cli-error-handler
+      (%call-with-optional-output-file
+       (compile-opts-trace-json-path opts)
+       (lambda (stream)
+         (let* ((vm-state (%maybe-make-profiled-vm-state opts))
+                (kwargs (%compile-opts-kwargs opts stream)))
+           (cond
+             ((and stdlib (eq language :lisp))
+              (%run-compiled-result (apply #'cl-cc::compile-string-with-stdlib source :target :vm kwargs)
+                                    vm-state opts))
+             ((eq language :php)
+              (%run-compiled-result (apply #'compile-string source :target :vm :language :php kwargs)
+                                    vm-state opts))
+             (t
+              (%run-compiled-result (apply #'compile-string source :target :vm kwargs)
+                                    vm-state opts)))
+           (uiop:quit 0)))))))
 
 (defun %do-compile (parsed)
   (let* ((file (%required-file-arg parsed "compile"))

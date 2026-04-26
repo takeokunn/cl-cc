@@ -14,23 +14,21 @@
 ;;; Values can be either direct CL stream objects or integer handles.
 ;;; We resolve handles to streams before applying predicates.
 
+(defun %resolve-integer-stream-handle (handle state)
+  "Resolve integer HANDLE to a CL stream via STATE's stream tables."
+  (cond
+    ((eql handle +stdin-handle+)  (vm-standard-input state))
+    ((eql handle +stdout-handle+) (vm-standard-output state))
+    ((typep state 'vm-io-state)
+     (or (gethash handle (vm-open-files state))
+         (gethash handle (vm-string-streams state))))
+    (t nil)))
+
 (defun %resolve-stream-val (state val)
   "Resolve VAL to a CL stream: if it's already a stream, return it;
 if it's an integer handle, look it up in STATE's stream tables."
-  (labels ((resolve-stream-handle (handle)
-             (cond
-               ((eql handle +stdin-handle+) (vm-standard-input state))
-               ((eql handle +stdout-handle+) (vm-standard-output state))
-               ((typep state 'vm-io-state)
-                (or (gethash handle (vm-open-files state))
-                    (gethash handle (vm-string-streams state))))
-               (t nil))))
-    (let ((resolvers (list (lambda () (and (streamp val) val))
-                           (lambda () (and (integerp val) (resolve-stream-handle val))))))
-      (dolist (resolver resolvers nil)
-        (let ((resolved (funcall resolver)))
-          (when resolved
-            (return resolved)))))))
+  (or (and (streamp val) val)
+      (and (integerp val) (%resolve-integer-stream-handle val state))))
 
 ;;; Stream predicate dispatch — data table drives code generation.
 ;;; Each entry maps an instruction type to its CL predicate (or nil = just test existence).

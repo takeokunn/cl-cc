@@ -92,9 +92,9 @@ assigned dedicated FP registers yet."
 (defun x86-64-compute-float-vregs (instructions)
   "Conservatively mark VM virtual registers that hold unboxed floats."
   (let ((float-vregs (make-hash-table :test #'eq)))
-    (labels ((mark (reg)
-               (when reg
-                 (setf (gethash reg float-vregs) t))))
+    (flet ((mark (reg)
+             (when reg
+               (setf (gethash reg float-vregs) t))))
       (dolist (inst instructions)
         (typecase inst
           (vm-const

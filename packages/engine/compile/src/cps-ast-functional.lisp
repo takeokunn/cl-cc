@@ -33,6 +33,18 @@
 
 ;;; ─── Multiple-Value Forms ────────────────────────────────────────────────────
 
+(defun %cps-thread-values-forms (remaining-forms remaining-temps k temps)
+  "Thread CPS through REMAINING-FORMS, binding each result to REMAINING-TEMPS.
+When done, delivers all TEMPS via (multiple-value-call k (values ...))."
+  (if (null remaining-forms)
+      (list 'multiple-value-call k (cons 'values temps))
+      (cps-transform-ast
+       (car remaining-forms)
+       (%cps-lambda (list (car remaining-temps))
+                    (%cps-thread-values-forms (cdr remaining-forms)
+                                              (cdr remaining-temps)
+                                              k temps)))))
+
 (defmethod cps-transform-ast ((node ast-values) k)
   "Transform explicit VALUES through host multiple-value-call.
 CPS-threads each sub-form in sequence, then delivers all via (values ...)."
@@ -40,15 +52,20 @@ CPS-threads each sub-form in sequence, then delivers all via (values ...)."
     (if (null forms)
         (%cps-funcall k nil)
         (let ((temps (loop repeat (length forms) collect (gensym "MV"))))
-          (labels ((thread-forms (remaining-forms remaining-temps)
-                     (if (null remaining-forms)
-                         (list 'multiple-value-call k (cons 'values temps))
-                          (cps-transform-ast
-                           (car remaining-forms)
-                           (%cps-lambda (list (car remaining-temps))
-                                        (thread-forms (cdr remaining-forms)
-                                                      (cdr remaining-temps)))))))
-            (thread-forms forms temps))))))
+          (%cps-thread-values-forms forms temps k temps)))))
+
+(defun %cps-thread-mvb-forms (remaining-forms remaining-temps vars body k temps)
+  "Thread CPS through REMAINING-FORMS for a multiple-value-bind.
+When done, binds VARS to TEMPS and transforms BODY with continuation K."
+  (if (null remaining-forms)
+      (list 'multiple-value-bind vars (cons 'values temps)
+            (cps-transform-sequence body k))
+      (cps-transform-ast
+       (car remaining-forms)
+       (%cps-lambda (list (car remaining-temps))
+                    (%cps-thread-mvb-forms (cdr remaining-forms)
+                                           (cdr remaining-temps)
+                                           vars body k temps)))))
 
 (defmethod cps-transform-ast ((node ast-multiple-value-bind) k)
   "Transform multiple-value-bind.
@@ -60,16 +77,7 @@ Otherwise, bind the primary value and default remaining vars to NIL."
     (if (typep values-form 'ast-values)
         (let ((temps (loop repeat (length (ast-values-forms values-form))
                            collect (gensym "MVB"))))
-          (labels ((thread-forms (remaining-forms remaining-temps)
-                     (if (null remaining-forms)
-                         (list 'multiple-value-bind vars (cons 'values temps)
-                               (cps-transform-sequence body k))
-                          (cps-transform-ast
-                           (car remaining-forms)
-                           (%cps-lambda (list (car remaining-temps))
-                                        (thread-forms (cdr remaining-forms)
-                                                      (cdr remaining-temps)))))))
-            (thread-forms (ast-values-forms values-form) temps)))
+          (%cps-thread-mvb-forms (ast-values-forms values-form) temps vars body k temps))
         (let ((primary (gensym "MVB")))
           (cps-transform-ast
            values-form
@@ -95,27 +103,30 @@ then deliver the first form's result."
                                    (ast-mv-prog1-forms node))
                            (list (%cps-funcall k v))))))))
 
+(defun %cps-collect-mv-call-args (remaining acc f-v k)
+  "CPS-thread REMAINING arg-forms, pushing each result onto ACC.
+When all args are processed, applies F-V to (nreverse acc) and delivers to K."
+  (if (null remaining)
+      (%cps-funcall k (list 'apply f-v (list 'nreverse acc)))
+      (let ((av (gensym "ARG")))
+        (cps-transform-ast
+         (car remaining)
+         (%cps-lambda (list av)
+                      (%cps-progn
+                       (list 'push av acc)
+                       (%cps-collect-mv-call-args (cdr remaining) acc f-v k)))))))
+
 (defmethod cps-transform-ast ((node ast-multiple-value-call) k)
   "Transform multiple-value-call: CPS-thread each arg form sequentially,
 collect results, then spread to the function via apply."
   (let ((f-v       (gensym "FUNC"))
         (results-v (gensym "RESULTS")))
-    (labels ((collect-args (remaining acc)
-               (if (null remaining)
-                   (%cps-funcall k (list 'apply f-v (list 'nreverse acc)))
-                   (let ((av (gensym "ARG")))
-                     (cps-transform-ast
-                      (car remaining)
-                      (%cps-lambda (list av)
-                                   (%cps-progn
-                                    (list 'push av acc)
-                                    (collect-args (cdr remaining) acc))))))))
-      (cps-transform-ast
-       (ast-mv-call-func node)
-       (%cps-lambda
-        (list f-v)
-        (list 'let (list (list results-v nil))
-              (collect-args (ast-mv-call-args node) results-v)))))))
+    (cps-transform-ast
+     (ast-mv-call-func node)
+     (%cps-lambda
+      (list f-v)
+      (list 'let (list (list results-v nil))
+            (%cps-collect-mv-call-args (ast-mv-call-args node) results-v f-v k))))))
 
 ;;; ─── Shared CPS argument threading ──────────────────────────────────────────
 

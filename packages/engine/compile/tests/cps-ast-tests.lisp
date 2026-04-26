@@ -100,3 +100,40 @@
            "GETHASH"))
   (ast expected-keyword)
   (assert-true (search expected-keyword (format nil "~S" (cl-cc/compile::cps-transform-ast ast 'k)))))
+
+;;; ─── %cps-expand-let-bindings (extracted recursive helper) ──────────────
+
+(deftest cps-expand-let-bindings-empty-bindings
+  "%cps-expand-let-bindings with no bindings delegates to cps-transform-sequence."
+  (let* ((body (list (cl-cc:make-ast-int :value 99)))
+         (result (cl-cc/compile::%cps-expand-let-bindings nil body 'k)))
+    (assert-true (consp result))
+    (assert-eq 'funcall (car result))
+    (assert-eq 'k (second result))
+    (assert-= 99 (third result))))
+
+(deftest cps-expand-let-bindings-single-binding
+  "%cps-expand-let-bindings with one binding wraps in a lambda continuation."
+  (let* ((binding (cons 'x (cl-cc:make-ast-int :value 1)))
+         (body    (list (cl-cc:make-ast-var :name 'x)))
+         (result  (format nil "~S"
+                          (cl-cc/compile::%cps-expand-let-bindings
+                           (list binding) body 'k))))
+    (assert-true (search "LAMBDA" result))
+    (assert-true (search "LET"    result))))
+
+(deftest cps-expand-let-bindings-two-bindings-nest
+  "%cps-expand-let-bindings with two bindings produces doubly-nested lambda."
+  (let* ((b1     (cons 'x (cl-cc:make-ast-int :value 1)))
+         (b2     (cons 'y (cl-cc:make-ast-int :value 2)))
+         (body   (list (cl-cc:make-ast-var :name 'x)))
+         (result (format nil "~S"
+                         (cl-cc/compile::%cps-expand-let-bindings
+                          (list b1 b2) body 'k)))
+         (lambda-count (let ((count 0) (pos 0))
+                         (loop
+                           (let ((found (search "LAMBDA" result :start2 pos)))
+                             (if found
+                                 (progn (incf count) (setf pos (1+ found)))
+                                 (return count)))))))
+    (assert-true (>= lambda-count 2))))

@@ -54,17 +54,14 @@
     (setf *macroexpand-step-cache* (make-hash-table :test #'eq :weakness :key)
           *macroexpand-all-cache* (make-hash-table :test #'eq :weakness :key))))
 
-(defun %contains-uninterned-symbol-p (form)
-  "Return T when FORM contains any uninterned symbol.
-We avoid caching such expansions so hygiene-related gensyms stay fresh across
-independent macroexpansions." 
-  (labels ((walk (node)
-             (typecase node
-               (symbol (null (symbol-package node)))
-               (cons (or (walk (car node))
-                         (walk (cdr node))))
-               (t nil))))
-    (walk form)))
+(defun %contains-uninterned-symbol-p (node)
+  "Return T when NODE or any subtree contains an uninterned symbol.
+Gensym-hygienic expansions are never cached."
+  (typecase node
+    (symbol (null (symbol-package node)))
+    (cons   (or (%contains-uninterned-symbol-p (car node))
+                (%contains-uninterned-symbol-p (cdr node))))
+    (t nil)))
 
 (defun %cacheable-macroexpansion-p (form)
   "Return T when FORM is safe to reuse from the macroexpansion cache."
@@ -93,40 +90,42 @@ EXPANDER may be either a legacy host function or a descriptor consumed by
                '(:macro-expander :compiler-macro-expander :register-macro-expander)
                :test #'eq)))
 
+(defun %maybe-postprocess-expansion (result descriptor env)
+  "Apply post-expansion processing to RESULT if the descriptor requests it."
+  (case (getf descriptor :post-expand)
+    (:our-macroexpand-all (our-macroexpand-all result env))
+    (otherwise result)))
+
 (defun %invoke-expander-descriptor (descriptor form env)
   "Evaluate DESCRIPTOR against FORM and ENV through `*macro-eval-fn*'."
-  (flet ((maybe-postprocess (result)
-           (case (getf descriptor :post-expand)
-             (:our-macroexpand-all (our-macroexpand-all result env))
-             (otherwise result))))
-    (case (getf descriptor :kind)
-      (:macro-expander
-       (let* ((lambda-list (getf descriptor :lambda-list))
-              (body (getf descriptor :body))
-              (form-var (gensym "FORM"))
-              (eval-form `(let ((,form-var ',form))
+  (case (getf descriptor :kind)
+    (:macro-expander
+     (let* ((lambda-list (getf descriptor :lambda-list))
+            (body        (getf descriptor :body))
+            (form-var    (gensym "FORM"))
+            (eval-form   `(let ((,form-var ',form))
                             (let* ,(generate-lambda-bindings lambda-list form-var)
                               ,@body))))
-         (maybe-postprocess (funcall *macro-eval-fn* eval-form))))
-      (:compiler-macro-expander
-       (let* ((lambda-list (getf descriptor :lambda-list))
-              (body (getf descriptor :body))
-              (form-var (gensym "FORM"))
-              (eval-form `(let ((,form-var ',form))
+       (%maybe-postprocess-expansion (funcall *macro-eval-fn* eval-form) descriptor env)))
+    (:compiler-macro-expander
+     (let* ((lambda-list (getf descriptor :lambda-list))
+            (body        (getf descriptor :body))
+            (form-var    (gensym "FORM"))
+            (eval-form   `(let ((,form-var ',form))
                             (let* ,(destructure-lambda-list lambda-list `(cdr ,form-var))
                               ,@body))))
-         (funcall *macro-eval-fn* eval-form)))
-      (:register-macro-expander
-       (let* ((parameters (getf descriptor :parameters))
-              (body (getf descriptor :body))
-              (form-var (first parameters))
-              (env-var (second parameters))
-              (bindings (append (when form-var `((,form-var ',form)))
-                                (when env-var `((,env-var ',env)))))
-              (eval-form `(let ,bindings ,@body)))
-         (maybe-postprocess (funcall *macro-eval-fn* eval-form))))
-      (otherwise
-       (error "Unknown expander descriptor kind: ~S" descriptor)))))
+       (funcall *macro-eval-fn* eval-form)))
+    (:register-macro-expander
+     (let* ((parameters (getf descriptor :parameters))
+            (body       (getf descriptor :body))
+            (form-var   (first parameters))
+            (env-var    (second parameters))
+            (bindings   (append (when form-var `((,form-var ',form)))
+                                (when env-var  `((,env-var  ',env)))))
+            (eval-form  `(let ,bindings ,@body)))
+       (%maybe-postprocess-expansion (funcall *macro-eval-fn* eval-form) descriptor env)))
+    (otherwise
+     (error "Unknown expander descriptor kind: ~S" descriptor))))
 
 (defun invoke-registered-expander (expander form env)
   "Invoke EXPANDER on FORM and ENV.
@@ -148,6 +147,13 @@ Supports both legacy host functions and descriptor-backed expanders."
 
 ;;; Macro Expansion
 
+(defun %step-cache-and-return (form env result expanded-p)
+  "Store (expanded-p . result) in the step cache for FORM/ENV and return (values result expanded-p)."
+  (when (and (%cacheable-macroexpansion-p form)
+             (or (not expanded-p) (%cacheable-macroexpansion-p result)))
+    (%macroexpansion-cache-store form env (cons expanded-p result) *macroexpand-step-cache*))
+  (values result expanded-p))
+
 (defun our-macroexpand-1 (form &optional env)
   "Perform a single macro expansion on FORM.
    Returns (VALUES expanded-form expanded-p)."
@@ -161,19 +167,17 @@ Supports both legacy host functions and descriptor-backed expanders."
         (if macro-fn
             (let ((expanded (invoke-registered-expander macro-fn form env)))
               (if (equal expanded form)
-                   (progn (when (%cacheable-macroexpansion-p form)
-                           (%macroexpansion-cache-store form env (cons nil form) *macroexpand-step-cache*))
-                          (values form nil))
-                   (progn (when (and (%cacheable-macroexpansion-p form)
-                                     (%cacheable-macroexpansion-p expanded))
-                           (%macroexpansion-cache-store form env (cons t expanded) *macroexpand-step-cache*))
-                          (values expanded t))))
-             (progn (when (%cacheable-macroexpansion-p form)
-                      (%macroexpansion-cache-store form env (cons nil form) *macroexpand-step-cache*))
-                    (values form nil))))
-      (progn (when (%cacheable-macroexpansion-p form)
-                (%macroexpansion-cache-store form env (cons nil form) *macroexpand-step-cache*))
-              (values form nil))))
+                  (%step-cache-and-return form env form nil)
+                  (%step-cache-and-return form env expanded t)))
+            (%step-cache-and-return form env form nil)))
+      (%step-cache-and-return form env form nil)))
+
+(defun %cache-all-result (form env result)
+  "Store RESULT in the all-cache for FORM/ENV when both are safe to cache, then return RESULT."
+  (when (and (%cacheable-macroexpansion-p form)
+             (%cacheable-macroexpansion-p result))
+    (%macroexpansion-cache-store form env result *macroexpand-all-cache*))
+  result)
 
 (defun %our-macroexpand-all-recursive (form env)
   "Recursively expand FORM after a single expansion step."
@@ -184,22 +188,11 @@ Supports both legacy host functions and descriptor-backed expanders."
   (multiple-value-bind (expanded expanded-p)
       (our-macroexpand-1 form env)
     (if expanded-p
-        (let ((result (%our-macroexpand-all-recursive expanded env)))
-          (when (and (%cacheable-macroexpansion-p form)
-                     (%cacheable-macroexpansion-p result))
-             (%macroexpansion-cache-store form env result *macroexpand-all-cache*))
-          result)
+        (%cache-all-result form env (%our-macroexpand-all-recursive expanded env))
         (typecase form
-          (cons
-            (let ((result (mapcar (lambda (x) (%our-macroexpand-all-recursive x env)) form)))
-              (when (and (%cacheable-macroexpansion-p form)
-                         (%cacheable-macroexpansion-p result))
-                 (%macroexpansion-cache-store form env result *macroexpand-all-cache*))
-              result))
-           (t
-            (when (%cacheable-macroexpansion-p form)
-               (%macroexpansion-cache-store form env form *macroexpand-all-cache*))
-             form)))))
+          (cons (%cache-all-result form env
+                                   (mapcar (lambda (x) (%our-macroexpand-all-recursive x env)) form)))
+          (t    (%cache-all-result form env form))))))
 
 (defun our-macroexpand (form &optional env)
   "Fully expand FORM by repeatedly applying macroexpand-1.
@@ -213,48 +206,43 @@ Supports both legacy host functions and descriptor-backed expanders."
         (setf form expanded
               expanded-p t)))))
 
+(defun %qq-head-p (form name)
+  "Return T when FORM is a list headed by a symbol named NAME."
+  (and (consp form) (symbolp (car form)) (string= (symbol-name (car form)) name)))
+
 (defun %expand-quasiquote (template)
   "Transform a quasiquote template into list/cons/append calls.
 Handles (unquote x) and (unquote-splicing x) within template.
 These symbols live in :cl-cc/bootstrap so both parse and expand share them."
-  (labels ((qq-head-p (form name)
-             (and (consp form)
-                  (symbolp (car form))
-                  (string= (symbol-name (car form)) name))))
   (cond
     ;; (unquote x) at top level => just x
-    ((qq-head-p template "UNQUOTE")
+    ((%qq-head-p template "UNQUOTE")
      (second template))
     ;; A list => process each element for unquote/splicing
     ((consp template)
      (let ((parts nil))
        (dolist (elem template)
-          (cond
-            ((qq-head-p elem "UNQUOTE")
-             (push (list 'list (second elem)) parts))
-            ((qq-head-p elem "UNQUOTE-SPLICING")
-             (push (second elem) parts))
-            (t
-             (push (list 'list (%expand-quasiquote elem)) parts))))
-        (let ((reversed (nreverse parts)))
-          (if (= (length reversed) 1)
-              (first reversed)
-              (cons 'append reversed)))))
+         (cond
+           ((%qq-head-p elem "UNQUOTE")
+            (push (list 'list (second elem)) parts))
+           ((%qq-head-p elem "UNQUOTE-SPLICING")
+            (push (second elem) parts))
+           (t
+            (push (list 'list (%expand-quasiquote elem)) parts))))
+       (let ((reversed (nreverse parts)))
+         (if (= (length reversed) 1)
+             (first reversed)
+             (cons 'append reversed)))))
     ;; Atom => quote it
-    (t (list 'quote template)))))
+    (t (list 'quote template))))
 
 (defun our-macroexpand-all (form &optional env)
   "Recursively expand all macros in FORM, including in subforms."
   (cond
-    ;; Quasiquote — expand before further processing
-    ((and (consp form)
-          (symbolp (car form))
-          (string= (symbol-name (car form)) "BACKQUOTE"))
-      (our-macroexpand-all (%expand-quasiquote (second form)) env))
-    ;; Quote — never recurse into quoted data
+    ((%qq-head-p form "BACKQUOTE")
+     (our-macroexpand-all (%expand-quasiquote (second form)) env))
     ((and (consp form) (eq (car form) 'quote))
-      form)
-    ;; General: try macro expansion first, then recurse
+     form)
     (t (%our-macroexpand-all-recursive form env))))
 
 ;;; Macro Definition Macro

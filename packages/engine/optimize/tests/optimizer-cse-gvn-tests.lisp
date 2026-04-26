@@ -147,3 +147,120 @@
         (cl-cc/optimize::opt-pass-leaf-detect insts)
       (declare (ignore _leaf))
       (assert-equal insts result-insts))))
+
+;;; ─── cse-state struct helpers ────────────────────────────────────────────
+
+(deftest cse-state-get-val-unknown-reg-uses-generation
+  "%cse-get-val for an unknown register returns (reg . 0) as the synthetic key."
+  (let* ((state (cl-cc/optimize::make-cse-state))
+         (key   (cl-cc/optimize::%cse-get-val state :r0)))
+    (assert-equal (cons :r0 0) key)))
+
+(deftest cse-state-bump-gen-increments-generation
+  "%cse-bump-gen increments the generation counter for a register."
+  (let ((state (cl-cc/optimize::make-cse-state)))
+    (cl-cc/optimize::%cse-bump-gen state :r0)
+    (assert-= 1 (gethash :r0 (cl-cc/optimize::cse-gen state)))))
+
+(deftest cse-state-record-then-try-find-roundtrip
+  "%cse-record followed by %cse-try-find retrieves the canonical register."
+  (let ((state (cl-cc/optimize::make-cse-state))
+        (key   '(vm-add (:r0 . 0) (:r1 . 0))))
+    (cl-cc/optimize::%cse-record state :r2 key)
+    (assert-eq :r2 (cl-cc/optimize::%cse-try-find state key))))
+
+(deftest cse-state-flush-clears-all-tables
+  "%cse-flush empties gen, val-env, and memo tables."
+  (let ((state (cl-cc/optimize::make-cse-state)))
+    (cl-cc/optimize::%cse-bump-gen state :r0)
+    (cl-cc/optimize::%cse-record state :r0 '(:const 1))
+    (cl-cc/optimize::%cse-flush state)
+    (assert-= 0 (hash-table-count (cl-cc/optimize::cse-gen     state)))
+    (assert-= 0 (hash-table-count (cl-cc/optimize::cse-val-env state)))
+    (assert-= 0 (hash-table-count (cl-cc/optimize::cse-memo    state)))))
+
+(deftest cse-state-bump-gen-evicts-memo
+  "%cse-bump-gen removes the memo entry whose value is the overwritten register."
+  (let ((state (cl-cc/optimize::make-cse-state))
+        (key   '(:const 5)))
+    (cl-cc/optimize::%cse-record state :r0 key)
+    (cl-cc/optimize::%cse-bump-gen state :r0)
+    (assert-null (cl-cc/optimize::%cse-try-find state key))))
+
+;;; ─── GVN helpers: %gvn-kill, %gvn-get-val, %gvn-record, %gvn-key ────────
+
+(deftest gvn-kill-removes-reg-from-val-env
+  "%gvn-kill removes reg from val-env and its reverse-memo entries."
+  (let ((gen     (make-hash-table :test #'eq))
+        (val-env (make-hash-table :test #'eq))
+        (memo    (make-hash-table :test #'equal)))
+    (setf (gethash :r0 val-env) '(:const 1)
+          (gethash '(:const 1) memo) :r0)
+    (cl-cc/optimize::%gvn-kill :r0 gen val-env memo)
+    (assert-false (nth-value 1 (gethash :r0 val-env)))
+    (assert-false (nth-value 1 (gethash '(:const 1) memo)))))
+
+(deftest gvn-get-val-returns-val-env-entry-when-present
+  "%gvn-get-val returns the val-env entry when the register is mapped."
+  (let ((gen     (make-hash-table :test #'eq))
+        (val-env (make-hash-table :test #'eq)))
+    (setf (gethash :r0 val-env) '(:const 42))
+    (assert-equal '(:const 42) (cl-cc/optimize::%gvn-get-val :r0 gen val-env))))
+
+(deftest gvn-get-val-returns-reg-generation-pair-when-absent
+  "%gvn-get-val returns (reg . generation) when the register is not in val-env."
+  (let ((gen     (make-hash-table :test #'eq))
+        (val-env (make-hash-table :test #'eq)))
+    (setf (gethash :r0 gen) 3)
+    (let ((result (cl-cc/optimize::%gvn-get-val :r0 gen val-env)))
+      (assert-equal :r0 (car result))
+      (assert-= 3 (cdr result)))))
+
+(deftest gvn-record-binds-dst-to-key
+  "%gvn-record stores dst→key in val-env and key→dst in memo."
+  (let ((gen     (make-hash-table :test #'eq))
+        (val-env (make-hash-table :test #'eq))
+        (memo    (make-hash-table :test #'equal)))
+    (cl-cc/optimize::%gvn-record :r0 '(:const 7) gen val-env memo)
+    (assert-equal '(:const 7) (gethash :r0 val-env))
+    (assert-eq :r0 (gethash '(:const 7) memo))))
+
+(deftest gvn-key-returns-const-key-for-vm-const
+  "%gvn-key returns (:const value) for a vm-const instruction."
+  (let ((gen     (make-hash-table :test #'eq))
+        (val-env (make-hash-table :test #'eq)))
+    (let ((key (cl-cc/optimize::%gvn-key (make-vm-const :dst :r0 :value 5) gen val-env)))
+      (assert-equal '(:const 5) key))))
+
+(deftest gvn-key-returns-nil-for-impure-non-move
+  "%gvn-key returns nil for an impure instruction with no recognized key form."
+  (let ((gen     (make-hash-table :test #'eq))
+        (val-env (make-hash-table :test #'eq)))
+    (assert-null (cl-cc/optimize::%gvn-key (make-vm-halt :reg :r0) gen val-env))))
+
+;;; ─── %cse-emit-or-cse ────────────────────────────────────────────────────
+
+(deftest cse-emit-or-cse-emits-new-inst-when-no-prior-entry
+  "%cse-emit-or-cse pushes the original instruction when the key is not memoized."
+  (let* ((state  (cl-cc/optimize::make-cse-state))
+         (inst   (make-vm-add :dst :r2 :lhs :r0 :rhs :r1))
+         (key    '(vm-add (:r0 . 0) (:r1 . 0)))
+         (result (cl-cc/optimize::%cse-emit-or-cse inst :r2 key state nil)))
+    (assert-= 1 (length result))
+    (assert-true (typep (car result) 'cl-cc/vm::vm-add))))
+
+(deftest cse-emit-or-cse-replaces-duplicate-with-vm-move
+  "%cse-emit-or-cse returns a vm-move when the key was already memoized."
+  (let* ((state  (cl-cc/optimize::make-cse-state))
+         (key    '(vm-add (:r0 . 0) (:r1 . 0)))
+         (inst1  (make-vm-add :dst :r2 :lhs :r0 :rhs :r1))
+         (inst2  (make-vm-add :dst :r3 :lhs :r0 :rhs :r1)))
+    ;; Record first occurrence
+    (cl-cc/optimize::%cse-bump-gen state :r2)
+    (cl-cc/optimize::%cse-record state :r2 key)
+    ;; Second occurrence should produce a vm-move
+    (let ((result (cl-cc/optimize::%cse-emit-or-cse inst2 :r3 key state nil)))
+      (assert-= 1 (length result))
+      (assert-true (typep (car result) 'cl-cc/vm::vm-move))
+      (assert-eq :r3 (vm-dst (car result)))
+      (assert-eq :r2 (vm-src (car result))))))

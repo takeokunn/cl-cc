@@ -134,20 +134,18 @@
   "True iff BINDING-NAME in BODY-FORMS is used only via array operations (aref/aset/array-length)."
   (:shadow-let t :shadow-mvb t)
   (ast-call
-   (let ((args (ast-call-args node)))
-     (flet ((first-arg-is-binding-p ()
-              (and (typep (first args) 'ast-var)
-                   (eq (ast-var-name (first args)) binding-name)))
-            (func-named-p (name n) (%ast-call-named-p node name n)))
-       (cond
-         ((and (func-named-p "ARRAY-LENGTH" 1) (first-arg-is-binding-p)) t)
-         ((and (func-named-p "ASET" 3)         (first-arg-is-binding-p)
-               (okp (second args)) (okp (third args))) t)
-         ((and (func-named-p "AREF" 2)         (first-arg-is-binding-p)
-               (okp (second args))) t)
-         (t (let ((func (ast-call-func node)))
-              (and (if (typep func 'ast-node) (okp func) t)
-                   (every #'okp args)))))))))
+   (let* ((args            (ast-call-args node))
+          (first-arg-match (and (typep (first args) 'ast-var)
+                                (eq (ast-var-name (first args)) binding-name))))
+     (cond
+       ((and (%ast-call-named-p node "ARRAY-LENGTH" 1) first-arg-match) t)
+       ((and (%ast-call-named-p node "ASET" 3)         first-arg-match
+             (okp (second args)) (okp (third args))) t)
+       ((and (%ast-call-named-p node "AREF" 2)         first-arg-match
+             (okp (second args))) t)
+       (t (let ((func (ast-call-func node)))
+            (and (if (typep func 'ast-node) (okp func) t)
+                 (every #'okp args))))))))
 
 (%define-binding-walker %instance-binding-static-slot-only-p
   (body-forms binding-name allowed-slot-names)

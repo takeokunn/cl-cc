@@ -26,6 +26,24 @@
         (push inst result)))
     (nreverse result)))
 
+(defparameter *cfg-cold-inst-types*
+  '(vm-signal-error vm-establish-handler vm-remove-handler vm-establish-catch vm-throw)
+  "Instruction types that mark a basic block as a cold (exception/handler) path.")
+
+(defun %cfg-block-cold-p (block)
+  "Return T when BLOCK contains any cold-path instruction."
+  (some (lambda (inst) (member (type-of inst) *cfg-cold-inst-types* :test #'eq))
+        (bb-instructions block)))
+
+(defun %cfg-block-hotter-p (a b)
+  "Return T when block A is hotter than B (loop-depth + RPO tie-break)."
+  (cond
+    ((and (%cfg-block-cold-p a) (not (%cfg-block-cold-p b))) nil)
+    ((and (%cfg-block-cold-p b) (not (%cfg-block-cold-p a))) t)
+    ((> (bb-loop-depth a) (bb-loop-depth b)) t)
+    ((< (bb-loop-depth a) (bb-loop-depth b)) nil)
+    (t (< (bb-rpo-index a) (bb-rpo-index b)))))
+
 (defun cfg-flatten-hot-cold (cfg)
   "Emit a flat instruction list using loop depth as a hot/cold heuristic.
 
@@ -33,29 +51,15 @@
    descending bb-loop-depth, with RPO used as the stable tie-breaker. This
    keeps loop bodies and error/condition blocks in a better layout without
    changing control-flow semantics."
-  (labels ((block-cold-p (block)
-             (some (lambda (inst)
-                     (member (type-of inst)
-                             '(vm-signal-error vm-establish-handler vm-remove-handler
-                               vm-establish-catch vm-throw)
-                             :test #'eq))
-                   (bb-instructions block)))
-           (hotter-p (a b)
-             (cond
-               ((and (block-cold-p a) (not (block-cold-p b))) nil)
-               ((and (block-cold-p b) (not (block-cold-p a))) t)
-               ((> (bb-loop-depth a) (bb-loop-depth b)) t)
-               ((< (bb-loop-depth a) (bb-loop-depth b)) nil)
-               (t (< (bb-rpo-index a) (bb-rpo-index b))))))
-    (let* ((rpo (cfg-compute-rpo cfg))
-           (ordered (stable-sort (copy-list rpo) #'hotter-p))
-           (result nil))
-      (dolist (b ordered)
-        (when (bb-label b)
-          (push (bb-label b) result))
-        (dolist (inst (bb-instructions b))
-          (push inst result)))
-      (nreverse result))))
+  (let* ((rpo     (cfg-compute-rpo cfg))
+         (ordered (stable-sort (copy-list rpo) #'%cfg-block-hotter-p))
+         (result  nil))
+    (dolist (b ordered)
+      (when (bb-label b)
+        (push (bb-label b) result))
+      (dolist (inst (bb-instructions b))
+        (push inst result)))
+    (nreverse result)))
 
 ;;; ─── Accessors / Utilities ───────────────────────────────────────────────
 

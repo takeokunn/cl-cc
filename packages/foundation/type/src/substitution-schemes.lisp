@@ -13,17 +13,18 @@
 
 (defun type-occurs-p (var ty subst)
   "True iff type-var VAR appears free in TY (under SUBST)."
-  (labels ((occ (t0)
-              (typecase t0
-                (type-var
-                 (multiple-value-bind (bound found-p) (subst-lookup t0 subst)
-                   (if found-p (occ bound) (type-var-equal-p var t0))))
-                (t
-                 (let ((bound-var (type-bound-var t0)))
-                   (if (and bound-var (type-var-equal-p var bound-var))
-                       nil
-                       (some #'occ (type-children t0))))))))
-    (occ ty)))
+  (typecase ty
+    (type-var
+     (multiple-value-bind (bound found-p) (subst-lookup ty subst)
+       (if found-p
+           (type-occurs-p var bound subst)
+           (type-var-equal-p var ty))))
+    (t
+     (let ((bound-var (type-bound-var ty)))
+       (if (and bound-var (type-var-equal-p var bound-var))
+           nil
+           (some (lambda (child) (type-occurs-p var child subst))
+                 (type-children ty)))))))
 
 ;;; ─── Generalize / Instantiate ─────────────────────────────────────────────
 
@@ -47,30 +48,34 @@ ENV may be a type-env struct or nil (empty env)."
       (subst-extend! v (fresh-type-var (type-var-name v)) subst))
     (zonk body subst)))
 
+(defun %nv-canonical (v mapping counter-cell)
+  "Return or create the canonical renamed type variable for V."
+  (or (gethash (type-var-id v) mapping)
+      (let* ((name (aref "abcdefghijklmnopqrstuvwxyz" (mod (car counter-cell) 26)))
+             (nv   (fresh-type-var name)))
+        (incf (car counter-cell))
+        (setf (gethash (type-var-id v) mapping) nv)
+        nv)))
+
+(defun %nv-norm (t0 mapping counter-cell)
+  "Recursively rename type variables in T0 using MAPPING and COUNTER-CELL."
+  (typecase t0
+    (type-var (%nv-canonical t0 mapping counter-cell))
+    (type-arrow
+     (make-type-arrow-raw
+      :params (mapcar (lambda (p) (%nv-norm p mapping counter-cell)) (type-arrow-params t0))
+      :return (%nv-norm (type-arrow-return t0) mapping counter-cell)
+      :effects (when (type-arrow-effects t0) (%nv-norm (type-arrow-effects t0) mapping counter-cell))
+      :mult (type-arrow-mult t0)))
+    (type-product
+     (make-type-product :elems (mapcar (lambda (e) (%nv-norm e mapping counter-cell)) (type-product-elems t0))))
+    (t t0)))
+
 (defun normalize-type-variables (ty)
   "Rename type vars in TY to canonical names ?a, ?b, ... (for display)."
-  (let ((mapping (make-hash-table :test #'eql))
-        (counter 0))
-    (labels ((canonical (v)
-               (or (gethash (type-var-id v) mapping)
-                   (let* ((name (aref "abcdefghijklmnopqrstuvwxyz" (mod counter 26)))
-                          (nv   (fresh-type-var name)))
-                     (incf counter)
-                     (setf (gethash (type-var-id v) mapping) nv)
-                     nv)))
-             (norm (t0)
-               (typecase t0
-                 (type-var (canonical t0))
-                 (type-arrow
-                  (make-type-arrow-raw
-                   :params (mapcar #'norm (type-arrow-params t0))
-                   :return (norm (type-arrow-return t0))
-                   :effects (when (type-arrow-effects t0) (norm (type-arrow-effects t0)))
-                   :mult (type-arrow-mult t0)))
-                 (type-product
-                  (make-type-product :elems (mapcar #'norm (type-product-elems t0))))
-                 (t t0))))
-      (norm ty))))
+  (let ((mapping      (make-hash-table :test #'eql))
+        (counter-cell (list 0)))
+    (%nv-norm ty mapping counter-cell)))
 
 (defun apply-unification (ty subst)
   "Apply SUBST to TY — convenience wrapper."

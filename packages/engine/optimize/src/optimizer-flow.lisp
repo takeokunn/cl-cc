@@ -55,6 +55,21 @@
                 (t (return-from opt-thread-label label)))))
   label)
 
+(defun %opt-rewrite-block-terminator (block old-label new-label)
+  "Rewrite the jump terminator of BLOCK from OLD-LABEL to NEW-LABEL when it matches.
+Handles both vm-jump (unconditional) and vm-jump-zero (conditional)."
+  (let ((cell (last (bb-instructions block))))
+    (when cell
+      (let ((term (car cell)))
+        (when (equal (vm-label-name term) old-label)
+          (setf (car cell)
+                (typecase term
+                  (vm-jump
+                   (make-vm-jump :label new-label))
+                  (vm-jump-zero
+                   (make-vm-jump-zero :reg (vm-reg term) :label new-label))
+                  (t (return-from %opt-rewrite-block-terminator)))))))))
+
 (defun opt-falls-through-to-p (vec i target)
   "T if scanning forward from position I+1 we reach TARGET before any non-label."
   (loop for j from (1+ i) below (length vec)
@@ -63,6 +78,27 @@
         if (equal (vm-name inst) target) return t
         finally (return nil)))
 
+(defun %opt-thread-jump (inst vec i idx)
+  "Thread unconditional INST; return the (possibly relabeled) jump, or NIL if it falls through."
+  (let ((threaded (opt-thread-label (vm-label-name inst) idx vec)))
+    (unless (opt-falls-through-to-p vec i threaded)
+      (if (equal threaded (vm-label-name inst))
+          inst
+          (make-vm-jump :label threaded)))))
+
+(defun %opt-thread-jump-zero (inst vec i idx)
+  "Thread conditional INST; always return an instruction (never elide conditionals)."
+  (declare (ignore i))
+  (let ((threaded (opt-thread-label (vm-label-name inst) idx vec)))
+    (if (equal threaded (vm-label-name inst))
+        inst
+        (make-vm-jump-zero :reg (vm-reg inst) :label threaded))))
+
+(defparameter *opt-jump-thread-table*
+  (list (cons 'vm-jump      #'%opt-thread-jump)
+        (cons 'vm-jump-zero #'%opt-thread-jump-zero))
+  "Maps jump instruction types to their threading handlers.")
+
 (defun opt-pass-jump (instructions)
   "Thread jump chains and remove jumps to the immediately following label."
   (multiple-value-bind (vec idx) (opt-build-label-index instructions)
@@ -70,21 +106,12 @@
           (n (length vec)))
       (loop for i from 0 below n
             for inst = (aref vec i)
-            do (typecase inst
-                 (vm-jump
-                  (let ((threaded (opt-thread-label (vm-label-name inst) idx vec)))
-                    (unless (opt-falls-through-to-p vec i threaded)
-                      (push (if (equal threaded (vm-label-name inst))
-                                inst
-                                (make-vm-jump :label threaded))
-                            result))))
-                 (vm-jump-zero
-                  (let ((threaded (opt-thread-label (vm-label-name inst) idx vec)))
-                    (push (if (equal threaded (vm-label-name inst))
-                              inst
-                              (make-vm-jump-zero :reg (vm-reg inst) :label threaded))
-                          result)))
-                 (t (push inst result))))
+            do (let ((handler (loop for (type . fn) in *opt-jump-thread-table*
+                                    when (typep inst type) return fn)))
+                 (if handler
+                     (let ((new (funcall handler inst vec i idx)))
+                       (when new (push new result)))
+                     (push inst result))))
       (nreverse result))))
 
 ;;; ─── Pass 4: Unreachable Code Elimination ────────────────────────────────
@@ -113,10 +140,6 @@
    instructions are dropped when the CFG is flattened back to a linear list."
   (cfg-flatten (cfg-build instructions)))
 
-(defun %type-check-elim-copy-facts (facts)
-  "Return a shallow copy of the type-check fact list."
-  (copy-list facts))
-
 (defun %type-check-elim-forget-def (facts reg)
   "Remove all facts whose :src or :dst is REG (killed by a def of REG)."
   (remove-if (lambda (fact)
@@ -133,7 +156,7 @@
 
 (defun %type-check-elim-process-block (block facts)
   "Walk BLOCK under dominator FACTS; rewrite redundant type checks; recurse into dom-children."
-  (let ((local-facts (%type-check-elim-copy-facts facts))
+  (let ((local-facts (copy-list facts))
         (new-insts nil))
     (dolist (inst (bb-instructions block))
       (let ((dst (opt-inst-dst inst)))
@@ -167,6 +190,5 @@
       (%type-check-elim-process-block (cfg-entry cfg) nil))
     (cfg-flatten cfg)))
 
-;; opt-pass-nil-check-elim, %opt-branch-predicate-fact-for-block,
-;; opt-pass-branch-correlation, opt-pass-block-merge, and opt-pass-tail-merge
-;; are in optimizer-flow-passes.lisp (loaded next).
+;; %opt-branch-predicate-fact-for-block, opt-pass-branch-correlation,
+;; opt-pass-block-merge, and opt-pass-tail-merge are in optimizer-flow-passes.lisp (loaded next).

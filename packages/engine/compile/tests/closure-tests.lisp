@@ -221,3 +221,115 @@
     (assert-true (and (member 'a result) (member 'b result)))
     (assert-equal 2 (length result))))
 
+;;; ─── %escape-add-kind / %escape-merge-kinds (extracted pure helpers) ─────
+
+(deftest-each escape-add-kind-deduplicates
+  "%escape-add-kind adds a kind only when absent."
+  :cases (("fresh-add"     :return   nil              '(:return))
+          ("already-there" :return   '(:return)       '(:return))
+          ("second-kind"   :capture  '(:return)       '(:capture :return)))
+  (kind acc expected)
+  (assert-equal expected (cl-cc/compile::%escape-add-kind kind acc)))
+
+(deftest escape-merge-kinds-merges-multiple-lists
+  "%escape-merge-kinds deduplicates across multiple kind lists."
+  (assert-equal nil (cl-cc/compile::%escape-merge-kinds nil nil))
+  (let ((result (cl-cc/compile::%escape-merge-kinds '(:return) '(:return :capture))))
+    (assert-= 2 (length result))
+    (assert-true (member :return  result))
+    (assert-true (member :capture result))))
+
+;;; ─── %count-ast-calls (extracted recursive helper) ───────────────────────
+
+(deftest count-ast-calls-leaf-match
+  "%count-ast-calls returns 1 for a direct ast-call of BINDING-NAME."
+  (let ((node (cl-cc/ast::make-ast-call
+               :func 'my-fn
+               :args (list (cl-cc/ast::make-ast-int :value 1)))))
+    (assert-= 1 (cl-cc/compile::%count-ast-calls node 'my-fn))))
+
+(deftest count-ast-calls-no-match
+  "%count-ast-calls returns 0 when BINDING-NAME is not called."
+  (let ((node (cl-cc/ast::make-ast-call
+               :func 'other-fn
+               :args (list (cl-cc/ast::make-ast-int :value 1)))))
+    (assert-= 0 (cl-cc/compile::%count-ast-calls node 'my-fn))))
+
+(deftest count-ast-calls-nested
+  "%count-ast-calls counts across nested children."
+  (let* ((inner (cl-cc/ast::make-ast-call :func 'my-fn :args nil))
+         (outer (cl-cc/ast::make-ast-progn :forms (list inner inner))))
+    (assert-= 2 (cl-cc/compile::%count-ast-calls outer 'my-fn))))
+
+;;; ─── %escape-mentions-node-p / %escape-mentions-forms-p ─────────────────
+
+(deftest-each escape-mentions-node-p-cases
+  "%escape-mentions-node-p: T for matching ast-var; NIL for non-matching or integer."
+  :cases (("match"     (cl-cc/ast::make-ast-var :name 'x) 'x   t)
+          ("no-match"  (cl-cc/ast::make-ast-var :name 'y) 'x   nil)
+          ("literal"   (cl-cc/ast::make-ast-int :value 1) 'x   nil))
+  (node binding expected)
+  (if expected
+      (assert-true  (cl-cc/compile::%escape-mentions-node-p node binding))
+      (assert-false (cl-cc/compile::%escape-mentions-node-p node binding))))
+
+(deftest escape-mentions-forms-p-cases
+  "%escape-mentions-forms-p: T when any form in list mentions the name."
+  (assert-true (cl-cc/compile::%escape-mentions-forms-p
+                (list (cl-cc/ast::make-ast-var :name 'x)) 'x))
+  (assert-false (cl-cc/compile::%escape-mentions-forms-p
+                 (list (cl-cc/ast::make-ast-int :value 1)) 'x))
+  (assert-false (cl-cc/compile::%escape-mentions-forms-p nil 'x)))
+
+;;; ─── %escape-classify-children ──────────────────────────────────────────
+
+(deftest escape-classify-children-nil-for-int-child
+  "%escape-classify-children returns NIL when no child references the binding."
+  (let* ((child  (cl-cc/ast::make-ast-int :value 42))
+         (parent (cl-cc/ast::make-ast-progn :forms (list child))))
+    (assert-null (cl-cc/compile::%escape-classify-children parent 'x nil))))
+
+(deftest escape-classify-children-detects-return-from-var-child
+  "%escape-classify-children reports kinds when a child is an ast-var matching the binding."
+  (let* ((child  (cl-cc/ast::make-ast-var :name 'x))
+         (parent (cl-cc/ast::make-ast-progn :forms (list child))))
+    (let ((kinds (cl-cc/compile::%escape-classify-children parent 'x nil)))
+      (assert-true (member :return kinds)))))
+
+;;; ─── %escape-capture-kinds ───────────────────────────────────────────────
+
+(deftest escape-capture-kinds-nil-when-binding-absent
+  "%escape-capture-kinds returns NIL when body does not reference binding-name."
+  (let ((body (list (cl-cc/ast::make-ast-int :value 0))))
+    (assert-null (cl-cc/compile::%escape-capture-kinds body 'x nil))))
+
+(deftest escape-capture-kinds-capture-when-mentioned
+  "%escape-capture-kinds returns :capture when body directly references binding-name."
+  (let ((body (list (cl-cc/ast::make-ast-var :name 'x))))
+    (let ((kinds (cl-cc/compile::%escape-capture-kinds body 'x nil)))
+      (assert-true (member :capture kinds)))))
+
+;;; ─── %escape-classify / binding-escape-kinds-in-body ────────────────────
+
+(deftest escape-classify-var-returns-return-kind
+  "%escape-classify on an ast-var matching binding-name yields (:return)."
+  (let ((node (cl-cc/ast::make-ast-var :name 'x)))
+    (assert-equal '(:return) (cl-cc/compile::%escape-classify node 'x nil))))
+
+(deftest escape-classify-var-no-match-returns-nil
+  "%escape-classify on an ast-var not matching binding-name yields NIL."
+  (let ((node (cl-cc/ast::make-ast-var :name 'y)))
+    (assert-null (cl-cc/compile::%escape-classify node 'x nil))))
+
+(deftest binding-escape-kinds-capture-from-lambda
+  "binding-escape-kinds-in-body detects :capture when binding is referenced inside a lambda."
+  (let* ((body (list (cl-cc/ast::make-ast-lambda
+                      :params '(z)
+                      :body   (list (cl-cc/ast::make-ast-var :name 'x))))))
+    (let ((kinds (cl-cc/compile::binding-escape-kinds-in-body body 'x)))
+      (assert-true (member :capture kinds)))))
+
+(deftest binding-escape-kinds-empty-body
+  "binding-escape-kinds-in-body returns NIL for empty list body."
+  (assert-null (cl-cc/compile::binding-escape-kinds-in-body nil 'x)))
+

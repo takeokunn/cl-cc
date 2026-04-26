@@ -5,7 +5,7 @@
 
 ;;; Self-Hosting Eval Tests — verify macro expansion runs through our-eval
 
-(deftest selfhost-macro-eval-fn
+(deftest selfhost-macro-eval-fn-integration
   "*macro-eval-fn* is a function and is bound to our-eval at load time."
   (assert-true (functionp cl-cc:*macro-eval-fn*))
   (assert-false (eq cl-cc:*macro-eval-fn* #'eval))

@@ -200,3 +200,38 @@
   (setup verify)
   (multiple-value-bind (fn entry checks) (funcall setup)
     (funcall verify fn entry checks)))
+
+;;; ─── %ir-rpo-dfs (extracted helper) ──────────────────────────────────────────
+
+(deftest ir-rpo-dfs-visits-single-block
+  "%ir-rpo-dfs: single block with no successors appends itself to result-cell."
+  (let* ((fn    (make-test-fn))
+         (entry (cl-cc/ir:irf-entry fn))
+         (visited (make-hash-table :test #'eq))
+         (cell    (list nil)))
+    (cl-cc/ir::%ir-rpo-dfs entry visited cell)
+    (assert-equal (list entry) (car cell))
+    (assert-true  (gethash entry visited))))
+
+(deftest ir-rpo-dfs-does-not-revisit
+  "%ir-rpo-dfs: calling twice on same block only appends it once."
+  (let* ((fn    (make-test-fn))
+         (entry (cl-cc/ir:irf-entry fn))
+         (visited (make-hash-table :test #'eq))
+         (cell    (list nil)))
+    (cl-cc/ir::%ir-rpo-dfs entry visited cell)
+    (cl-cc/ir::%ir-rpo-dfs entry visited cell)
+    (assert-= 1 (length (car cell)))))
+
+(deftest ir-rpo-dfs-traverses-chain
+  "%ir-rpo-dfs on A→B→C gives post-order [C B A] (pre-reversed = RPO)."
+  (let* ((fn  (make-test-fn))
+         (a   (cl-cc/ir:irf-entry fn))
+         (b   (cl-cc/ir:ir-new-block fn :b))
+         (c   (cl-cc/ir:ir-new-block fn :c)))
+    (cl-cc/ir:ir-add-edge a b)
+    (cl-cc/ir:ir-add-edge b c)
+    (let ((visited (make-hash-table :test #'eq))
+          (cell    (list nil)))
+      (cl-cc/ir::%ir-rpo-dfs a visited cell)
+      (assert-equal (list c b a) (car cell)))))

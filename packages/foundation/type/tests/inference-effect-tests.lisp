@@ -223,3 +223,19 @@
     (if expected
         (assert-equal expected spec)
         (assert-null spec))))
+
+;;; ─── %infer-effects-union ────────────────────────────────────────────────
+
+(deftest infer-effects-union-empty-is-pure
+  "%infer-effects-union on empty list returns the pure effect row."
+  (reset-type-vars!)
+  (let ((result (cl-cc/type::%infer-effects-union nil nil)))
+    (assert-true (cl-cc/type::effect-row-subset-p result cl-cc/type::+pure-effect-row+))
+    (assert-true (cl-cc/type::effect-row-subset-p cl-cc/type::+pure-effect-row+ result))))
+
+(deftest infer-effects-union-pure-forms-stay-pure
+  "%infer-effects-union on a list of pure integer forms returns the pure effect row."
+  (reset-type-vars!)
+  (let* ((asts   (list (cl-cc:lower-sexp-to-ast '1) (cl-cc:lower-sexp-to-ast '2)))
+         (result (cl-cc/type::%infer-effects-union asts nil)))
+    (assert-true (cl-cc/type::effect-row-subset-p result cl-cc/type::+pure-effect-row+))))

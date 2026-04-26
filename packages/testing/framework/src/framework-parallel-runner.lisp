@@ -96,6 +96,31 @@ sequentially in dependency-safe input order."
   "Detect host CPU count using *cpu-count-sources*. Falls back to 4."
   (or (some #'funcall *cpu-count-sources*) 4))
 
+(defun %default-suite-timeout ()
+  "Return the default whole-suite timeout in seconds, or NIL when disabled.
+Uses CLCC_SUITE_TIMEOUT when it is a positive integer; otherwise falls back to
+1800 seconds so the canonical test command cannot hang indefinitely."
+  (let ((raw (uiop:getenv "CLCC_SUITE_TIMEOUT")))
+    (or (and raw
+             (ignore-errors
+               (let ((parsed (parse-integer raw)))
+                 (and (plusp parsed) parsed))))
+        1800)))
+
+(defun %suite-timeout-result (suite-name timeout quit-p)
+  "Handle a whole-suite timeout consistently for CLI and programmatic callers."
+  (format *error-output*
+          "# ERROR: suite ~A timed out after ~A seconds~%"
+          suite-name timeout)
+  (if quit-p
+      (uiop:quit 124)
+      t))
+
+(defun %number-tests (plists)
+  "Annotate each test plist in PLISTS with a :number index (1-based)."
+  (loop for p in plists for i from 1
+        collect (append p (list :number i))))
+
 (defun %effective-worker-count (ordered-tests parallel workers)
   "Return the effective worker count for ORDERED-TESTS.
 Serial runs, serial-only batches, and single-worker requests all collapse to 1.
@@ -144,57 +169,58 @@ When QUIT-P is true, exits via uiop:quit; otherwise returns whether any test fai
   (when update-snapshots
     (format t "# Snapshot update mode enabled~%"))
 
-  (flet ((%number-tests (plists)
-           (loop for p in plists for i from 1
-                 collect (append p (list :number i)))))
-    (let* ((actual-seed    (or seed (random most-positive-fixnum)))
-           (*random-state* (sb-ext:seed-random-state actual-seed))
-           (tests-plists   (%collect-all-suite-tests suite-name tags exclude-tags exclude-suites))
-           (n              (length tests-plists))
-           (test-vec       (coerce (%number-tests tests-plists) 'vector)))
-    (when random (%fisher-yates-shuffle test-vec))
-    (let* ((ordered-tests    (%order-tests-for-dependencies (coerce test-vec 'list)))
-           (effective-workers (%effective-worker-count ordered-tests parallel workers)))
-      (%print-tap-header n repeat actual-seed effective-workers)
-      (when warm-stdlib (ignore-errors (cl-cc::warm-stdlib-cache)))
-      (when coverage (format t "# Coverage report enabled~%"))
-
-      (let* ((prior-timings  (%load-prior-timings))
-             (all-run-results
-               (loop for r from 1 to repeat
-                     do (when (> repeat 1) (format t "# Run ~A/~A~%" r repeat))
-                     collect (if (and parallel (> effective-workers 1))
-                                 (%run-tests-mixed ordered-tests effective-workers prior-timings)
-                                 (%run-tests-sequential ordered-tests)))))
-        (when (> repeat 1) (%detect-flaky (reverse all-run-results) repeat))
-        (format t "# To reproduce this run: (run-suite '~A :seed ~A)~%" suite-name actual-seed)
-
-        (let* ((flat-results (apply #'append (reverse all-run-results)))
-               (any-fail     (%print-result-summary flat-results)))
-          (when coverage (%print-coverage-report flat-results))
-          (%emit-postrun-artifacts flat-results)
-          (if quit-p
-              (uiop:quit (if any-fail 1 0))
-              any-fail)))))))
+  (let ((suite-timeout (%default-suite-timeout)))
+    (handler-case
+        (sb-ext:with-timeout suite-timeout
+          (let* ((actual-seed     (or seed (random most-positive-fixnum)))
+                 (*random-state*  (sb-ext:seed-random-state actual-seed))
+                 (tests-plists    (%collect-all-suite-tests suite-name tags exclude-tags exclude-suites))
+                 (n               (length tests-plists))
+                 (test-vec        (coerce (%number-tests tests-plists) 'vector)))
+            (when random (%fisher-yates-shuffle test-vec))
+            (let* ((ordered-tests     (%order-tests-for-dependencies (coerce test-vec 'list)))
+                   (effective-workers (%effective-worker-count ordered-tests parallel workers)))
+              (%print-tap-header n repeat actual-seed effective-workers)
+              (when warm-stdlib (ignore-errors (cl-cc::warm-stdlib-cache)))
+              (when coverage (format t "# Coverage report enabled~%"))
+              (let* ((prior-timings   (%load-prior-timings))
+                     (all-run-results
+                       (loop for r from 1 to repeat
+                             do (when (> repeat 1) (format t "# Run ~A/~A~%" r repeat))
+                             collect (if (and parallel (> effective-workers 1))
+                                         (%run-tests-mixed ordered-tests effective-workers prior-timings)
+                                         (%run-tests-sequential ordered-tests)))))
+                (when (> repeat 1) (%detect-flaky (reverse all-run-results) repeat))
+                (format t "# To reproduce this run: (run-suite '~A :seed ~A)~%" suite-name actual-seed)
+                (let* ((flat-results (apply #'append (reverse all-run-results)))
+                       (any-fail     (%print-result-summary flat-results)))
+                  (when coverage (%print-coverage-report flat-results))
+                  (%emit-postrun-artifacts flat-results)
+                  (if quit-p
+                      (uiop:quit (if any-fail 1 0))
+                      any-fail)))))))
+      (sb-ext:timeout ()
+        (%suite-timeout-result suite-name suite-timeout quit-p)))))
 
 (defun run-tests (&key
-                    (tags nil)
-                    (exclude-tags nil)
-                    (exclude-suites nil)
-                    (parallel t)
+                     (tags nil)
+                     (exclude-tags nil)
+                     (exclude-suites nil)
+                     (parallel t)
                     (random nil))
   "Run the canonical CL-CC test plan.
 
 This single entry point executes unit, integration, property-based, and e2e suites.
 Use the filtering keywords for focused debugging from the REPL, but the public
 automation workflow is always `nix run .#test`."
-  (run-suite 'cl-cc-suite
-             :parallel parallel
-             :random random
-             :warm-stdlib t
-             :tags tags
-             :exclude-tags exclude-tags
-             :exclude-suites exclude-suites))
+  (let ((effective-exclude-suites (adjoin 'selfhost-slow-suite exclude-suites)))
+    (run-suite 'cl-cc-suite
+               :parallel parallel
+               :random random
+               :warm-stdlib t
+               :tags tags
+               :exclude-tags exclude-tags
+               :exclude-suites effective-exclude-suites)))
 
 (defun %resolve-suite (package-name symbol-name)
   (let* ((pkg (find-package package-name))

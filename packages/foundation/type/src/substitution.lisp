@@ -28,10 +28,6 @@ GENERATION: monotonically increasing stamp; incremented on each extend."
   "Return a fresh empty substitution."
   (%make-substitution))
 
-(defun empty-subst ()
-  "Alias — returns a fresh empty substitution."
-  (make-substitution))
-
 ;;; ─── Lookup ───────────────────────────────────────────────────────────────
 
 (defun subst-lookup (var subst)

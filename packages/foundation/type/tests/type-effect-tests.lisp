@@ -32,19 +32,19 @@
 
 (deftest substitution-cases
   "zonk: primitive unchanged; bound var replaced; unbound var identity."
-  (assert-eq type-int (zonk type-int (empty-subst)))
+  (assert-eq type-int (zonk type-int (make-substitution)))
   (let* ((v (fresh-type-var))
-         (result (zonk v (subst-extend v type-int (empty-subst)))))
+         (result (zonk v (subst-extend v type-int (make-substitution)))))
     (assert-type-equal result type-int))
   (let* ((v (fresh-type-var))
-         (result (zonk v (empty-subst))))
+         (result (zonk v (make-substitution))))
     (assert-true (type-var-equal-p result v))))
 
 (deftest substitution-through-function-type
   "Substitution distributes into function type params and return."
   (let* ((v      (fresh-type-var))
          (fn     (make-type-arrow-raw :params (list v) :return v))
-         (result (zonk fn (subst-extend v type-int (empty-subst)))))
+         (result (zonk fn (subst-extend v type-int (make-substitution)))))
     (assert-type type-arrow result)
     (assert-type-equal (first (type-arrow-params result)) type-int)
     (assert-type-equal (type-arrow-return result) type-int)))

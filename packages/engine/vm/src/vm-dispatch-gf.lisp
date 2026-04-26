@@ -109,14 +109,16 @@ Only single-argument eql specializers are indexed for fast lookup."
               (if (member t cpl) cpl (append cpl (list t)))))
           all-args))
 
+(defun %vm-dispatch-key-collect (remaining prefix)
+  "Generate all dispatch-key tuples from REMAINING CPL lists, prepending PREFIX."
+  (if (null remaining)
+      (list (nreverse prefix))
+      (loop for class in (car remaining)
+            nconc (%vm-dispatch-key-collect (cdr remaining) (cons class prefix)))))
+
 (defun %vm-dispatch-key-combinations (cpls)
-  "Return dispatch-key combinations from CPLs, most-specific first." 
-  (labels ((collect (remaining prefix)
-             (if (null remaining)
-                 (list (nreverse prefix))
-                 (loop for class in (car remaining)
-                       nconc (collect (cdr remaining) (cons class prefix))))))
-    (collect cpls nil)))
+  "Return dispatch-key combinations from CPLs, most-specific first."
+  (%vm-dispatch-key-collect cpls nil))
 
 (defun %vm-canonical-dispatch-key (combo)
   "Return the canonical dispatch-table key for COMBO." 

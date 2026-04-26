@@ -38,6 +38,26 @@ predicates to the fact-backed rule records."
                     :when (gethash name *egraph-rule-guards*))))
           (cl-cc/prolog:query-all '(egraph-rule ?name ?lhs ?rhs))))
 
+;;; ─── E-Graph Instruction Rewriter ────────────────────────────────────────
+
+(defun %egraph-rewrite-inst (inst eg reg-map class->regs)
+  "Lower INST using equality-class information from the saturated e-graph EG.
+   Constants proven equal are folded; registers in the same class are aliased."
+  (let ((dst (ignore-errors (vm-dst inst))))
+    (cond
+      ((null dst) inst)
+      ((egraph-class-has-op-p eg (gethash dst reg-map) 'const)
+       (make-vm-const :dst dst
+                      :value (egraph-class-const-value eg (gethash dst reg-map))))
+      (t
+       (let* ((class-id (gethash dst reg-map))
+              (canon    (and class-id (egraph-find eg class-id)))
+              (regs     (and canon (gethash canon class->regs)))
+              (src      (find-if (lambda (r) (not (eq r dst))) regs)))
+         (if src
+             (make-vm-move :dst dst :src src)
+             inst))))))
+
 ;;; ─── E-Graph Optimization Entry Point ────────────────────────────────────
 
 (defun optimize-with-egraph (instructions &key
@@ -68,20 +88,5 @@ predicates to the fact-backed rule records."
       (maphash (lambda (reg class-id)
                  (push reg (gethash (egraph-find eg class-id) class->regs)))
                reg-map)
-      (labels ((rewrite (inst)
-                 (let ((dst (ignore-errors (vm-dst inst))))
-                   (cond
-                     ((null dst)
-                      inst)
-                     ((egraph-class-has-op-p eg (gethash dst reg-map) 'const)
-                      (make-vm-const :dst dst
-                                     :value (egraph-class-const-value eg (gethash dst reg-map))))
-                     (t
-                      (let* ((class-id (gethash dst reg-map))
-                             (canon (and class-id (egraph-find eg class-id)))
-                             (regs (and canon (gethash canon class->regs)))
-                             (src (find-if (lambda (reg) (not (eq reg dst))) regs)))
-                        (if src
-                            (make-vm-move :dst dst :src src)
-                            inst)))))))
-        (mapcar #'rewrite instructions)))))
+      (mapcar (lambda (inst) (%egraph-rewrite-inst inst eg reg-map class->regs))
+              instructions))))

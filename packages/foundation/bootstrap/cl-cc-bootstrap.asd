@@ -2,7 +2,7 @@
 ;;;;
 ;;;; Placed in packages/foundation/bootstrap/ (co-located with its source) per the
 ;;;; package-by-feature monorepo design.  cl-cc.asd loads this via
-;;;; (asdf:load-asd (merge-pathnames "packages/foundation/bootstrap/cl-cc-bootstrap.asd" here))
+;;;; (load (merge-pathnames "packages/foundation/bootstrap/cl-cc-bootstrap.asd" here))
 ;;;; before any other subsystem so the 12 exported symbols exist in
 ;;;; :cl-cc/bootstrap before cl-cc/prolog or cl-cc/compile are defined.
 

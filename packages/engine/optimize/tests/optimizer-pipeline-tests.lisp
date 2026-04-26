@@ -9,6 +9,19 @@
 (in-package :cl-cc/test)
 (in-suite cl-cc-unit-suite)
 
+;;; ─── %opt-trim-whitespace ────────────────────────────────────────────────────
+
+(deftest-each opt-trim-whitespace-cases
+  "%opt-trim-whitespace strips leading/trailing spaces, tabs, and newlines."
+  :cases (("spaces"      "hello"      "  hello  ")
+          ("tabs"        "world"      "\tworld\t")
+          ("newlines"    "foo"        "\nfoo\n")
+          ("mixed"       "bar"        " \t\n bar \n\t ")
+          ("no-trim"     "bare"       "bare")
+          ("empty"       ""           ""))
+  (expected input)
+  (assert-equal expected (cl-cc/optimize::%opt-trim-whitespace input)))
+
 ;;; ─── opt-parse-pass-pipeline-string ─────────────────────────────────────────
 
 (deftest parse-pass-pipeline-string-cases
@@ -122,7 +135,7 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
   (assert-true (gethash :dce  cl-cc/optimize::*opt-pass-registry*))
   (assert-true (gethash :cse  cl-cc/optimize::*opt-pass-registry*))
   (assert-eq #'cl-cc/optimize::%maybe-apply-prolog-rewrite (first cl-cc/optimize::*opt-convergence-passes*))
-  (assert-false (member #'cl-cc/optimize::opt-pass-egraph cl-cc/optimize::*opt-convergence-passes*))
+  (assert-false (member #'cl-cc/optimize::optimize-with-egraph cl-cc/optimize::*opt-convergence-passes*))
   (assert-false (member #'cl-cc/optimize::opt-pass-fold cl-cc/optimize::*opt-convergence-passes*))
   (assert-false (member #'cl-cc/optimize::opt-pass-strength-reduce cl-cc/optimize::*opt-convergence-passes*))
   (assert-equal '(:prolog-rewrite :inline :sccp)

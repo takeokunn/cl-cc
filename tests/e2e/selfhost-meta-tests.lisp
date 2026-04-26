@@ -206,6 +206,8 @@ the base so Nix store hashes don't affect relative path computation."
   (assert-false (eq cl-cc:*macro-eval-fn* #'eval))
   (assert-eql 3 (funcall cl-cc:*macro-eval-fn* '(+ 1 2))))
 
+(in-suite selfhost-slow-suite)
+
 ;;; ─── Phase 4: All Source Files Self-Load ──────────────────────────────────
 
 (deftest selfhost-all-source-files

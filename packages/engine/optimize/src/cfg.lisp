@@ -70,15 +70,27 @@
           do (typecase inst
                (vm-label
                 (setf (aref leader i) 1))
-               ((or vm-jump vm-jump-zero vm-ret vm-halt)
-                (when (< (1+ i) n) (setf (aref leader (1+ i)) 1)))
-               (t nil))
-             ;; Also mark explicit jump targets in the same pass
-             (typecase inst
-               ((or vm-jump vm-jump-zero)
+               (vm-jump
+                (when (< (1+ i) n) (setf (aref leader (1+ i)) 1))
                 (let ((tgt (cfg-find-label-position vec n (vm-label-name inst))))
-                  (when tgt (setf (aref leader tgt) 1))))))
+                  (when tgt (setf (aref leader tgt) 1))))
+               (vm-jump-zero
+                (when (< (1+ i) n) (setf (aref leader (1+ i)) 1))
+                (let ((tgt (cfg-find-label-position vec n (vm-label-name inst))))
+                  (when tgt (setf (aref leader tgt) 1))))
+               ((or vm-ret vm-halt)
+                (when (< (1+ i) n) (setf (aref leader (1+ i)) 1)))))
     leader))
+
+(defun %cfg-fallthrough-edge (b next-start blocks-by-start)
+  "Add a fall-through edge from B to the block starting at NEXT-START, if any."
+  (let ((fall (and next-start (gethash next-start blocks-by-start))))
+    (when fall (cfg-add-edge b fall))))
+
+(defun %cfg-jump-target-edge (b inst g)
+  "Add an unconditional jump edge from B to the explicit target of INST."
+  (let ((tgt (cfg-get-block-by-label g (vm-label-name inst))))
+    (when tgt (cfg-add-edge b tgt))))
 
 (defun %cfg-connect-block (b insts g blocks-by-start next-start)
   "Wire outgoing edges for block B whose instructions are INSTS."
@@ -86,17 +98,13 @@
                        (reverse insts))))
     (typecase term
       (vm-jump
-       (let ((tgt (cfg-get-block-by-label g (vm-label-name term))))
-         (when tgt (cfg-add-edge b tgt))))
+       (%cfg-jump-target-edge b term g))
       (vm-jump-zero
-       (let ((tgt  (cfg-get-block-by-label g (vm-label-name term)))
-             (fall (and next-start (gethash next-start blocks-by-start))))
-         (when tgt  (cfg-add-edge b tgt))
-         (when fall (cfg-add-edge b fall))))
+       (%cfg-jump-target-edge b term g)
+       (%cfg-fallthrough-edge b next-start blocks-by-start))
       ((or vm-ret vm-halt) nil)
       (t
-       (let ((fall (and next-start (gethash next-start blocks-by-start))))
-         (when fall (cfg-add-edge b fall)))))))
+       (%cfg-fallthrough-edge b next-start blocks-by-start)))))
 
 (defun cfg-build (instructions)
   "Build a CFG from a flat list of VM INSTRUCTIONS.
@@ -160,25 +168,28 @@
 
 ;;; ─── Reverse Post-Order ──────────────────────────────────────────────────
 
+(defun %cfg-rpo-dfs (b visited post-order-cell)
+  "Post-order DFS from B; results are consed onto (car POST-ORDER-CELL)."
+  (unless (gethash b visited)
+    (setf (gethash b visited) t)
+    (dolist (s (bb-successors b))
+      (%cfg-rpo-dfs s visited post-order-cell))
+    (push b (car post-order-cell))))
+
 (defun cfg-compute-rpo (cfg)
   "Compute reverse post-order (RPO) for CFG blocks starting from entry.
    Sets bb-rpo-index for each reachable block.
    Returns a list of blocks in RPO order."
-  (let ((visited (make-hash-table :test #'eq))
-        (post-order nil))
-    (labels ((dfs (b)
-               (unless (gethash b visited)
-                 (setf (gethash b visited) t)
-                 (dolist (s (bb-successors b))
-                   (dfs s))
-                 (push b post-order))))
-      (when (cfg-entry cfg)
-        (dfs (cfg-entry cfg))))
+  (let ((visited        (make-hash-table :test #'eq))
+        (post-order-cell (list nil)))
+    (when (cfg-entry cfg)
+      (%cfg-rpo-dfs (cfg-entry cfg) visited post-order-cell))
     ;; `push` prepends, so the last-pushed node (entry) is at the front.
     ;; post-order already holds blocks in RPO order — no nreverse needed.
-    (loop for b in post-order for i from 0
-          do (setf (bb-rpo-index b) i))
-    post-order))
+    (let ((post-order (car post-order-cell)))
+      (loop for b in post-order for i from 0
+            do (setf (bb-rpo-index b) i))
+      post-order)))
 
 ;;; ─── Dominator Tree (Cooper et al. 2001) ─────────────────────────────────
 

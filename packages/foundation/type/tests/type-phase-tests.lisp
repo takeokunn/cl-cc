@@ -157,7 +157,7 @@
 (deftest phase-e-skolem-escape-absent
   "A freshly created skolem does not escape an empty substitution."
   (let* ((sk (cl-cc/type:fresh-rigid-var 'a))
-         (escaped (cl-cc/type:check-skolem-escape sk (empty-subst))))
+         (escaped (cl-cc/type:check-skolem-escape sk (make-substitution))))
     (assert-null escaped)))
 
 (deftest phase-e-check-lambda-against-forall

@@ -244,15 +244,17 @@ can live elsewhere (free vars, occurs check, zonking, printers, etc.)."
 
 ;;; ─── Free type variables ──────────────────────────────────────────────────
 
+(defun %type-free-vars-list (t0)
+  "Collect the (possibly-duplicated) list of free type-var nodes in T0."
+  (cond
+    ((type-var-p t0) (list t0))
+    (t
+     (let* ((bound-var  (type-bound-var t0))
+            (child-vars (mapcan #'%type-free-vars-list (type-children t0))))
+       (if bound-var
+           (remove-if (lambda (v) (type-var-equal-p v bound-var)) child-vars)
+           child-vars)))))
+
 (defun type-free-vars (ty)
-  "Return the list of free type-var nodes in TY (deduplicated by ID)."
-  (labels ((rec (t0)
-             (cond
-               ((type-var-p t0) (list t0))
-               (t
-                (let* ((bound-var (type-bound-var t0))
-                       (child-vars (mapcan #'rec (type-children t0))))
-                  (if bound-var
-                      (remove-if (lambda (v) (type-var-equal-p v bound-var)) child-vars)
-                      child-vars))))))
-    (remove-duplicates (rec ty) :test #'type-var-equal-p)))
+  "Return the deduplicated list of free type-var nodes in TY."
+  (remove-duplicates (%type-free-vars-list ty) :test #'type-var-equal-p))

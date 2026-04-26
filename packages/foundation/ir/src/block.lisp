@@ -40,22 +40,24 @@
 ;;;; Reverse Post-Order Traversal
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
+(defun %ir-rpo-dfs (blk visited result-cell)
+  "Post-order DFS: push BLK into (car RESULT-CELL) after visiting successors."
+  (unless (gethash blk visited)
+    (setf (gethash blk visited) t)
+    (dolist (succ (irb-successors blk))
+      (%ir-rpo-dfs succ visited result-cell))
+    (push blk (car result-cell))))
+
 (defun ir-rpo (fn)
   "Return all blocks of FN reachable from entry in reverse post-order.
    RPO guarantees each block appears before all successors (except back-edges
    in loops).  Uses the DFS + prepend trick: post-order DFS with (push blk result)
    gives RPO because push prepends, reversing the post-order in place."
-  (let ((visited (make-hash-table :test #'eq))
-        (result  nil))
-    (labels ((dfs (blk)
-               (unless (gethash blk visited)
-                 (setf (gethash blk visited) t)
-                 (dolist (succ (irb-successors blk))
-                   (dfs succ))
-                 (push blk result))))          ; prepend = implicit nreverse
-      (when (irf-entry fn)
-        (dfs (irf-entry fn))))
-    result))
+  (let ((visited     (make-hash-table :test #'eq))
+        (result-cell (list nil)))
+    (when (irf-entry fn)
+      (%ir-rpo-dfs (irf-entry fn) visited result-cell))
+    (car result-cell)))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Dominator Tree — Cooper et al. "A Simple, Fast Dominance Algorithm" (2001)

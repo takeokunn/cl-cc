@@ -4,12 +4,6 @@
 ;;;; All VM source files now live in :cl-cc/vm.
 ;;;; This system is independently loadable without :cl-cc.
 
-(eval-when (:load-toplevel :execute)
-  (unless (asdf:find-system :cl-cc-bootstrap nil)
-    (let ((here (make-pathname :defaults (or *load-pathname* *compile-file-pathname*)
-                               :name nil :type nil)))
-      (asdf:load-asd (merge-pathnames "../../foundation/bootstrap/cl-cc-bootstrap.asd" here)))))
-
 (asdf:defsystem :cl-cc-vm
   :description "VM instruction set, executor, I/O, CLOS, conditions, collections"
   :author "CL-CC"

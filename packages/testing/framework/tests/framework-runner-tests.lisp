@@ -76,6 +76,21 @@
   (assert-equal (%default-test-timeout)
                 (%effective-test-timeout (list :timeout nil))))
 
+(deftest default-suite-timeout-cases
+  "%default-suite-timeout normalizes invalid input and defaults to 1800 seconds."
+  (let ((old (uiop:getenv "CLCC_SUITE_TIMEOUT")))
+    (unwind-protect
+         (progn
+           #+sbcl (sb-posix:unsetenv "CLCC_SUITE_TIMEOUT")
+           (assert-= 1800 (%default-suite-timeout))
+           #+sbcl (sb-posix:setenv "CLCC_SUITE_TIMEOUT" "90" 1)
+           (assert-= 90 (%default-suite-timeout))
+           #+sbcl (sb-posix:setenv "CLCC_SUITE_TIMEOUT" "bogus" 1)
+           (assert-= 1800 (%default-suite-timeout)))
+      (if old
+          #+sbcl (sb-posix:setenv "CLCC_SUITE_TIMEOUT" old 1)
+          #+sbcl (sb-posix:unsetenv "CLCC_SUITE_TIMEOUT")))))
+
   (let* ((test-plist (list :name 'skip-demo
                            :fn (lambda () (error 'skip-condition :reason "not today"))
                            :suite 'cl-cc-unit-suite
@@ -143,6 +158,33 @@
     (assert-equal '(first second)
                   (mapcar (lambda (result) (getf result :name)) results))
     (assert-true (every (lambda (result) (eq :pass (getf result :status))) results))))
+
+(deftest duplicate-test-names-signal-an-error
+  "deftest rejects duplicate test names instead of silently overwriting registry entries."
+  (let ((*test-registry* (persist-empty))
+        (*current-suite* 'cl-cc-unit-suite)
+        (test-name (gensym "DUPLICATE-TEST-NAME-")))
+    (eval `(deftest ,test-name t))
+    (handler-case
+        (progn
+          (eval `(deftest ,test-name nil))
+          (assert-false t))
+      (error (e)
+        (assert-true (search "Duplicate TEST name"
+                             (string-upcase (princ-to-string e))))))))
+
+(deftest duplicate-suite-names-signal-an-error
+  "defsuite rejects duplicate suite names instead of silently overwriting registry entries."
+  (let ((*suite-registry* (persist-empty))
+        (suite-name (gensym "DUPLICATE-SUITE-NAME-")))
+    (eval `(defsuite ,suite-name :description "first"))
+    (handler-case
+        (progn
+          (eval `(defsuite ,suite-name :description "second"))
+          (assert-false t))
+      (error (e)
+        (assert-true (search "Duplicate SUITE name"
+                             (string-upcase (princ-to-string e))))))))
 
 (deftest resolve-suite-returns-symbol-and-signals-for-missing-suite
   "%resolve-suite returns existing suites and errors on missing ones."
@@ -215,6 +257,19 @@
       (declare (ignore tmp)))
     (let ((result (funcall env-source)))
       (assert-true (or (null result) (and (integerp result) (plusp result)))))))
+
+(deftest number-tests-annotates-with-index
+  "%number-tests adds a :number key (1-based) to each plist in the list."
+  (let* ((plists (list '(:name a) '(:name b) '(:name c)))
+         (result (%number-tests plists)))
+    (assert-= 3 (length result))
+    (assert-= 1 (getf (first  result) :number))
+    (assert-= 2 (getf (second result) :number))
+    (assert-= 3 (getf (third  result) :number))))
+
+(deftest number-tests-empty-returns-nil
+  "%number-tests on an empty list returns nil."
+  (assert-null (%number-tests nil)))
 
 (deftest cpu-count-command-timeout-yields-nil
   "%parse-command-cpu-count returns NIL when the command runner times out."

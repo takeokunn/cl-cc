@@ -43,7 +43,7 @@
    ;; DCG
    #:*dcg-sync-tokens* #:*dcg-counter*
    #:lexer-tokens-to-dcg-input #:dcg-token-to-cst
-   #:dcg-parse #:dcg-parse-all
+   #:dcg-parse
    #:dcg-fresh-var #:dcg-reset-counter
    #:dcg-transform-body-element #:dcg-transform-body
    #:def-dcg-rule

@@ -85,11 +85,11 @@
          (emitted-names '())
          (pending tests)
          (ordered '()))
-    (labels ((dependency-ready-p (test)
-               (let ((dep (getf test :depends-on)))
-                 (or (null dep)
-                     (member dep emitted-names :test #'eq)
-                     (not (member dep all-names :test #'eq))))))
+    (flet ((dependency-ready-p (test)
+             (let ((dep (getf test :depends-on)))
+               (or (null dep)
+                   (member dep emitted-names :test #'eq)
+                   (not (member dep all-names :test #'eq))))))
       (loop while pending
             for ready = (find-if #'dependency-ready-p pending)
             do (if ready

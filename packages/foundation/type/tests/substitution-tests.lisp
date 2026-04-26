@@ -229,3 +229,57 @@
          (bindings (cl-cc/type:type-env-bindings result)))
     (assert-eq 'fixnum (cl-cc/type:type-primitive-name (cdr (first bindings))))
     (assert-eq 'string (cl-cc/type:type-primitive-name (cdr (second bindings))))))
+
+;;; ─── %nv-canonical / %nv-norm (extracted helpers) ────────────────────────────
+
+(deftest nv-canonical-creates-fresh-var
+  "%nv-canonical: first call creates a fresh var, second call returns same var."
+  (let ((mapping      (make-hash-table :test #'eql))
+        (counter-cell (list 0))
+        (v            (cl-cc/type:fresh-type-var 'x)))
+    (let ((nv1 (cl-cc/type::%nv-canonical v mapping counter-cell)))
+      (assert-true (cl-cc/type:type-var-p nv1))
+      (assert-= 1 (car counter-cell))
+      (let ((nv2 (cl-cc/type::%nv-canonical v mapping counter-cell)))
+        (assert-eq nv1 nv2)
+        (assert-= 1 (car counter-cell))))))
+
+(deftest nv-norm-passes-through-non-var
+  "%nv-norm on a non-type-var primitive type returns it unchanged."
+  (let ((mapping      (make-hash-table :test #'eql))
+        (counter-cell (list 0)))
+    (assert-eq cl-cc/type:type-int
+               (cl-cc/type::%nv-norm cl-cc/type:type-int mapping counter-cell))
+    (assert-= 0 (car counter-cell))))
+
+(deftest nv-norm-renames-type-var
+  "%nv-norm replaces a type-var with its canonical rename."
+  (let ((mapping      (make-hash-table :test #'eql))
+        (counter-cell (list 0))
+        (v            (cl-cc/type:fresh-type-var 'z)))
+    (let ((result (cl-cc/type::%nv-norm v mapping counter-cell)))
+      (assert-true (cl-cc/type:type-var-p result))
+      (assert-false (eq result v)))))
+
+;;; ─── apply-unification ───────────────────────────────────────────────────────
+
+(deftest apply-unification-nil-subst-returns-nil
+  "apply-unification returns NIL when SUBST is NIL (nothing to apply)."
+  (let ((ty (cl-cc/type:parse-type-specifier 'fixnum)))
+    (assert-false (cl-cc/type:apply-unification ty nil))))
+
+(deftest apply-unification-empty-subst-returns-ty
+  "apply-unification with an empty (but non-nil) substitution returns TY unchanged."
+  (let ((ty    (cl-cc/type:parse-type-specifier 'fixnum))
+        (subst (make-hash-table :test #'eql)))
+    (assert-eq ty (cl-cc/type:apply-unification ty subst))))
+
+(deftest apply-unification-resolves-mapped-var
+  "apply-unification substitutes a mapped type variable with its concrete type."
+  (let* ((v     (cl-cc/type:fresh-type-var 'x))
+         (target (cl-cc/type:parse-type-specifier 'fixnum))
+         (subst  (make-hash-table :test #'eql)))
+    (setf (gethash v subst) target)
+    (let ((result (cl-cc/type:apply-unification v subst)))
+      (assert-true result)
+      (assert-false (cl-cc/type:type-var-p result)))))

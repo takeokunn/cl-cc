@@ -254,3 +254,38 @@
                 :phi :values :mv-bind :safepoint :nop))
     (assert-true (member op *mir-generic-ops*))))
 
+
+;;; ─── %mir-rpo-dfs (extracted helper) ────────────────────────────────────────
+
+(deftest mir-rpo-dfs-single-block
+  "%mir-rpo-dfs on a single block appends it to result-cell and marks visited."
+  (let* ((fn    (mir-make-function :f))
+         (entry (mirf-entry fn))
+         (visited (make-hash-table))
+         (cell    (list nil)))
+    (cl-cc/mir::%mir-rpo-dfs entry visited cell)
+    (assert-equal (list entry) (car cell))
+    (assert-true  (gethash (mirb-id entry) visited))))
+
+(deftest mir-rpo-dfs-no-revisit
+  "%mir-rpo-dfs: calling twice on same block only appends it once."
+  (let* ((fn    (mir-make-function :f))
+         (entry (mirf-entry fn))
+         (visited (make-hash-table))
+         (cell    (list nil)))
+    (cl-cc/mir::%mir-rpo-dfs entry visited cell)
+    (cl-cc/mir::%mir-rpo-dfs entry visited cell)
+    (assert-= 1 (length (car cell)))))
+
+(deftest mir-rpo-dfs-chain-post-order
+  "%mir-rpo-dfs on A→B→C post-order is [C B A]; ir-rpo returns it reversed."
+  (let* ((fn (mir-make-function :f))
+         (a  (mirf-entry fn))
+         (b  (mir-new-block fn :label :b))
+         (c  (mir-new-block fn :label :c)))
+    (mir-add-succ a b)
+    (mir-add-succ b c)
+    (let ((visited (make-hash-table))
+          (cell    (list nil)))
+      (cl-cc/mir::%mir-rpo-dfs a visited cell)
+      (assert-equal (list c b a) (car cell)))))

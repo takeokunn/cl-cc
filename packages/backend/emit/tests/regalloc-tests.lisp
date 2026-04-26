@@ -253,3 +253,70 @@ allocator priority (xmm0 may be reserved for calling convention)."
         (dolist (v (instruction-uses inst)) (when v (pushnew v all-vregs))))
       (dolist (vreg all-vregs)
         (assert-false (null (regalloc-lookup alloc vreg)))))))
+
+;;; ─── lsa-state struct + helpers (extracted from linear-scan-allocate) ─────────
+
+(deftest lsa-state-initial-values
+  "make-lsa-state: hash-tables empty, count zero, lists nil."
+  (let ((s (cl-cc/emit::make-lsa-state :free-regs '(:rax :rbx) :free-fp-regs '(:xmm0))))
+    (assert-= 0 (hash-table-count (cl-cc/emit::lsa-assignment s)))
+    (assert-= 0 (hash-table-count (cl-cc/emit::lsa-spill-map s)))
+    (assert-= 0 (cl-cc/emit::lsa-spill-count s))
+    (assert-null (cl-cc/emit::lsa-active s))
+    (assert-equal '(:rax :rbx) (cl-cc/emit::lsa-free-regs s))
+    (assert-equal '(:xmm0) (cl-cc/emit::lsa-free-fp-regs s))))
+
+(deftest lsa-interval-pool-selects-by-class
+  "%lsa-interval-pool returns free-fp-regs for FP intervals, free-regs otherwise."
+  (let ((s     (cl-cc/emit::make-lsa-state :free-regs '(:rax) :free-fp-regs '(:xmm0)))
+        (i-gpr (cl-cc/emit::make-live-interval :vreg :r0))
+        (i-fp  (cl-cc/emit::make-live-interval :vreg :r1 :fp-p t)))
+    (assert-equal '(:rax)  (cl-cc/emit::%lsa-interval-pool s i-gpr))
+    (assert-equal '(:xmm0) (cl-cc/emit::%lsa-interval-pool s i-fp))))
+
+(deftest lsa-set-interval-pool-updates-correct-field
+  "%lsa-set-interval-pool mutates only the matching pool slot."
+  (let ((s (cl-cc/emit::make-lsa-state :free-regs '(:rax) :free-fp-regs '(:xmm0)))
+        (i-gpr (cl-cc/emit::make-live-interval :vreg :r0))
+        (i-fp  (cl-cc/emit::make-live-interval :vreg :r1 :fp-p t)))
+    (cl-cc/emit::%lsa-set-interval-pool s i-gpr '(:rcx))
+    (assert-equal '(:rcx) (cl-cc/emit::lsa-free-regs s))
+    (assert-equal '(:xmm0) (cl-cc/emit::lsa-free-fp-regs s))
+    (cl-cc/emit::%lsa-set-interval-pool s i-fp '(:xmm1))
+    (assert-equal '(:xmm1) (cl-cc/emit::lsa-free-fp-regs s))))
+
+(deftest lsa-spill-current-increments-count
+  "%lsa-spill-current assigns next slot and records it in spill-map."
+  (let ((s   (cl-cc/emit::make-lsa-state))
+        (int (cl-cc/emit::make-live-interval :vreg :r5)))
+    (cl-cc/emit::%lsa-spill-current s int)
+    (assert-= 1 (cl-cc/emit::lsa-spill-count s))
+    (assert-= 1 (gethash :r5 (cl-cc/emit::lsa-spill-map s)))))
+
+(deftest lsa-expire-old-returns-regs-to-pool
+  "%lsa-expire-old removes ended intervals from active and returns physical regs."
+  (let ((s    (cl-cc/emit::make-lsa-state :free-regs '()))
+        (done (cl-cc/emit::make-live-interval :vreg :r0 :start 0 :end 2 :phys-reg :rax))
+        (live (cl-cc/emit::make-live-interval :vreg :r1 :start 0 :end 5 :phys-reg :rbx))
+        (cur  (cl-cc/emit::make-live-interval :vreg :r2 :start 3 :end 8)))
+    (setf (cl-cc/emit::lsa-active s) (list done live))
+    (cl-cc/emit::%lsa-expire-old s cur)
+    (assert-false (member done (cl-cc/emit::lsa-active s)))
+    (assert-true  (member live (cl-cc/emit::lsa-active s)))
+    (assert-equal '(:rax) (cl-cc/emit::lsa-free-regs s))))
+
+(deftest lsa-best-spill-candidate-returns-farthest-use
+  "%lsa-best-spill-candidate picks the active interval with the farthest next use."
+  (let* ((cur   (cl-cc/emit::make-live-interval :vreg :r2 :start 3 :end 10))
+         (near  (cl-cc/emit::make-live-interval :vreg :r0 :start 0 :end 8
+                                                :use-positions '(4) :phys-reg :rax))
+         (far   (cl-cc/emit::make-live-interval :vreg :r1 :start 0 :end 12
+                                                :use-positions '(9) :phys-reg :rbx))
+         (s     (cl-cc/emit::make-lsa-state :active (list near far))))
+    (assert-eq far (cl-cc/emit::%lsa-best-spill-candidate s cur))))
+
+(deftest lsa-best-spill-candidate-returns-current-when-no-active
+  "%lsa-best-spill-candidate returns INTERVAL itself when there are no active intervals."
+  (let* ((cur (cl-cc/emit::make-live-interval :vreg :r0 :start 5 :end 10))
+         (s   (cl-cc/emit::make-lsa-state :active nil)))
+    (assert-eq cur (cl-cc/emit::%lsa-best-spill-candidate s cur))))

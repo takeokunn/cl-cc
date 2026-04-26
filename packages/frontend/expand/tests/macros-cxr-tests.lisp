@@ -15,3 +15,15 @@
           ("cdddr" '(cdddr x) '(cdr (cdr (cdr x)))))
   (form expected)
   (assert-equal expected (our-macroexpand-1 form)))
+
+;;; ─── %expand-cxr (extracted helper) ──────────────────────────────────────
+
+(deftest-each expand-cxr-helper-cases
+  "%expand-cxr generates the correct nested car/cdr form for each accessor."
+  :cases (("caar"   'caar   'x '(car (car x)))
+          ("cadr"   'cadr   'x '(car (cdr x)))
+          ("caddr"  'caddr  'x '(car (cdr (cdr x))))
+          ("cadddr" 'cadddr 'x '(car (cdr (cdr (cdr x)))))
+          ("cddr"   'cddr   'x '(cdr (cdr x))))
+  (sym arg expected)
+  (assert-equal expected (cl-cc/expand::%expand-cxr sym arg)))

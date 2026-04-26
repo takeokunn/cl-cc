@@ -79,6 +79,32 @@ Returns a function that takes a continuation."
   (expected form)
   (assert-equal expected (cl-cc/compile::%eta-reducible-lambda-p form)))
 
+(deftest-each cps-simplify-walk-atom-passthrough
+  "%cps-simplify-walk returns atoms unchanged."
+  :cases (("number"  42      42)
+          ("symbol"  'foo    'foo)
+          ("nil"     nil     nil)
+          ("keyword" :hello  :hello))
+  (expected input)
+  (assert-equal expected (cl-cc/compile::%cps-simplify-walk input)))
+
+(deftest cps-simplify-walk-beta-reduces
+  "%cps-simplify-walk applies beta reduction to (funcall (lambda (x) x) 42) → 42."
+  (assert-equal 42
+                (cl-cc/compile::%cps-simplify-walk '(funcall (lambda (x) x) 42))))
+
+(deftest cps-simplify-walk-eta-reduces
+  "%cps-simplify-walk applies eta reduction to (lambda (k) (funcall f k)) → f."
+  (assert-equal 'f
+                (cl-cc/compile::%cps-simplify-walk '(lambda (k) (funcall f k)))))
+
+(deftest cps-simplify-walk-nested-reduction
+  "%cps-simplify-walk recurses and reduces nested redexes."
+  (let* ((inner '(funcall (lambda (x) x) 99))
+         (outer (list inner 1 2))
+         (result (cl-cc/compile::%cps-simplify-walk outer)))
+    (assert-equal 99 (first result))))
+
 (deftest-each cps-simplify-form-reductions
   "cps-simplify-form applies beta-reduction and eta-reduction."
   :cases (("beta-reduce" 42    '(funcall (lambda (x) x) 42))

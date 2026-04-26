@@ -2,10 +2,6 @@
 
 (in-suite cl-cc-integration-suite)
 
-(defsuite loop-macro-suite
-  :description "LOOP macro expansion and runtime behaviour"
-  :parent cl-cc-integration-suite)
-
 (in-suite loop-macro-suite)
 
 ;;;; Earlier runtime sections moved to loop-macro-tests.lisp to reduce this file.

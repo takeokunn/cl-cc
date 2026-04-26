@@ -5,13 +5,18 @@
   "Return T when INST produces a fresh heap-like object identity."
   (typep inst '(or vm-cons vm-make-array vm-closure vm-make-closure)))
 
+(defparameter *opt-heap-root-kind-table*
+  '((vm-cons . :cons)
+    (vm-make-array . :array)
+    (vm-closure . :closure)
+    (vm-make-closure . :closure))
+  "Maps heap-producing instruction types to symbolic heap kind keywords.")
+
 (defun opt-heap-root-kind (inst)
   "Return a symbolic heap kind for fresh heap-producing INST."
-  (typecase inst
-    (vm-cons :cons)
-    (vm-make-array :array)
-    ((or vm-closure vm-make-closure) :closure)
-    (t nil)))
+  (loop for (type . kind) in *opt-heap-root-kind-table*
+        when (typep inst type)
+        return kind))
 
 (defun %opt-build-root-map (instructions)
   "Build a conservative EQ hash-table mapping registers to their canonical heap root.
@@ -41,14 +46,6 @@ vm-move propagates the source root. Any other destination write kills the root f
 This is a small FR-115 style oracle intended for downstream passes."
   (%opt-build-root-map instructions))
 
-(defun opt-compute-points-to (instructions)
-  "Compute a conservative flow-sensitive points-to map for heap-like registers.
-The result is an EQ hash-table reg -> canonical root register."
-  (%opt-build-root-map instructions))
-
-(defun opt-points-to-root (reg points-to)
-  "Return the current root object for REG under POINTS-TO, or NIL."
-  (gethash reg points-to))
 
 (defun opt-make-interval (lo hi)
   "Construct a closed integer interval [LO, HI]."
@@ -79,6 +76,21 @@ The result is an EQ hash-table reg -> canonical root register."
     (opt-make-interval (min p1 p2 p3 p4)
                        (max p1 p2 p3 p4))))
 
+(defparameter *opt-interval-binop-table*
+  '((vm-add . opt-interval-add)
+    (vm-sub . opt-interval-sub)
+    (vm-mul . opt-interval-mul))
+  "Maps binary arithmetic instruction types to their interval combinator functions.")
+
+(defun %opt-update-interval-binop (inst intervals fn)
+  "Update INTERVALS for binary arithmetic INST using interval combinator FN.
+If either operand has no known interval, conservatively kills the destination."
+  (let ((lhs (gethash (vm-lhs inst) intervals))
+        (rhs (gethash (vm-rhs inst) intervals)))
+    (if (and lhs rhs)
+        (setf (gethash (vm-dst inst) intervals) (funcall fn lhs rhs))
+        (remhash (vm-dst inst) intervals))))
+
 (defun opt-compute-constant-intervals (instructions)
   "Compute a conservative interval map from straight-line constant arithmetic.
 
@@ -86,40 +98,23 @@ Handles vm-const and interval propagation through vm-add/vm-sub/vm-mul when
 both operands already have known intervals."
   (let ((intervals (make-hash-table :test #'eq)))
     (dolist (inst instructions intervals)
-      (typecase inst
-        (vm-const
+      (cond
+        ((typep inst 'vm-const)
          (when (integerp (vm-value inst))
            (setf (gethash (vm-dst inst) intervals)
                  (opt-make-interval (vm-value inst) (vm-value inst)))))
-        (vm-add
-         (let ((lhs (gethash (vm-lhs inst) intervals))
-               (rhs (gethash (vm-rhs inst) intervals)))
-           (if (and lhs rhs)
-               (setf (gethash (vm-dst inst) intervals)
-                     (opt-interval-add lhs rhs))
-               (remhash (vm-dst inst) intervals))))
-        (vm-sub
-         (let ((lhs (gethash (vm-lhs inst) intervals))
-               (rhs (gethash (vm-rhs inst) intervals)))
-           (if (and lhs rhs)
-               (setf (gethash (vm-dst inst) intervals)
-                     (opt-interval-sub lhs rhs))
-               (remhash (vm-dst inst) intervals))))
-        (vm-mul
-         (let ((lhs (gethash (vm-lhs inst) intervals))
-               (rhs (gethash (vm-rhs inst) intervals)))
-           (if (and lhs rhs)
-               (setf (gethash (vm-dst inst) intervals)
-                     (opt-interval-mul lhs rhs))
-               (remhash (vm-dst inst) intervals))))
         (t
-         (let ((dst (opt-inst-dst inst)))
-           (when dst
-             (remhash dst intervals))))))))
+         (let ((binop-entry (loop for (type . fn-sym) in *opt-interval-binop-table*
+                                  when (typep inst type)
+                                  return fn-sym)))
+           (if binop-entry
+               (%opt-update-interval-binop inst intervals (symbol-function binop-entry))
+               (let ((dst (opt-inst-dst inst)))
+                 (when dst (remhash dst intervals))))))))))
 
 (defun opt-compute-heap-kinds (instructions)
   "Compute a conservative root -> heap-kind table for TBAA-style checks."
-  (let ((points-to (opt-compute-points-to instructions))
+  (let ((points-to (opt-compute-heap-aliases instructions))
         (kinds (make-hash-table :test #'eq)))
     (dolist (inst instructions kinds)
       (let ((dst (opt-inst-dst inst)))
@@ -171,17 +166,15 @@ Unknown roots remain conservative and therefore return T."
    Uses sexp roundtrip: instruction->sexp rewrites all register-keyword leaves
    except the destination slot (position 1 for instructions with a dst), then
    reconstructs via sexp->instruction.  Falls back to INST unchanged on error."
-  (flet ((c (x) (if (opt-register-keyword-p x) (or (gethash x copies) x) x)))
+  (let ((c (lambda (x) (if (opt-register-keyword-p x) (or (gethash x copies) x) x))))
     (handler-case
-        (let* ((sexp      (instruction->sexp inst))
-               (has-dst   (not (null (opt-inst-dst inst))))
+        (let* ((sexp     (instruction->sexp inst))
+               (has-dst  (not (null (opt-inst-dst inst))))
                ;; Rewrite all leaves; for instructions with a dst, the dst sits at
                ;; position 1 (immediately after the opcode tag) — leave it intact.
-               (new-sexp  (if has-dst
-                              (list* (first sexp) (second sexp)
-                                     (opt-map-tree #'c (cddr sexp)))
-                              (cons  (first sexp)
-                                     (opt-map-tree #'c (cdr sexp))))))
+               (new-sexp (if has-dst
+                             (list* (first sexp) (second sexp) (opt-map-tree c (cddr sexp)))
+                             (cons  (first sexp) (opt-map-tree c (cdr sexp))))))
           (if (equal sexp new-sexp) inst (sexp->instruction new-sexp)))
       (error () inst))))
 

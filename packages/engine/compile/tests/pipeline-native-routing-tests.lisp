@@ -28,7 +28,7 @@
                    ,@body))
               `(progn ,@body))))))
 
-(deftest pipeline-native-cps-safe-ast-p-allowlist
+(deftest pipeline-native-cps-safe-ast-p-allowlist-routing
   "%cps-native-compile-safe-ast-p accepts call-bearing CPS-backed forms and rejects unsupported object forms."
   (let ((safe-ast (cl-cc:make-ast-let
                    :bindings (list (cons 'x (cl-cc:make-ast-int :value 1)))

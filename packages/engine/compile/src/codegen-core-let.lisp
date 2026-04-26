@@ -31,9 +31,8 @@ FN-NAME is compared case-insensitively via SYMBOL-NAME so both symbol and ast-va
   (and (typep node 'ast-call)
        (= (length (ast-call-args node)) nargs)
        (let ((func (ast-call-func node)))
-         (flet ((name= (sym) (string= (symbol-name sym) fn-name)))
-           (or (and (symbolp func)             (name= func))
-               (and (typep func 'ast-var) (name= (ast-var-name func))))))))
+         (or (and (symbolp func)        (string= (symbol-name func) fn-name))
+             (and (typep func 'ast-var) (string= (symbol-name (ast-var-name func)) fn-name))))))
 
 (defun %ast-cons-call-p (node)
   (%ast-call-named-p node "CONS" 2))

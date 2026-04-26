@@ -124,3 +124,27 @@
   (let ((obj (make-instance 'rt-clos-test-fixture :x 1)))
     (assert-eq 'rt-clos-test-fixture
                (class-name (cl-cc/runtime:rt-class-of obj)))))
+
+;;; ─── %rt-cpl-walk (extracted helper) ────────────────────────────────────────
+
+(deftest rt-cpl-walk-stops-at-already-seen
+  "%rt-cpl-walk: passing NAME already in SEEN returns SEEN unchanged."
+  (let ((cl-cc/runtime:*rt-class-registry* (make-hash-table :test #'eq)))
+    (assert-equal '(foo) (cl-cc/runtime::%rt-cpl-walk 'foo '(foo)))))
+
+(deftest rt-cpl-walk-single-class-no-supers
+  "%rt-cpl-walk on a class with no superclasses returns (name)."
+  (let ((cl-cc/runtime:*rt-class-registry* (make-hash-table :test #'eq)))
+    (cl-cc/runtime:rt-defclass 'cpl-base '() '())
+    (assert-equal '(cpl-base) (cl-cc/runtime::%rt-cpl-walk 'cpl-base '()))))
+
+(deftest rt-cpl-walk-inherits-parent
+  "%rt-cpl-walk on child→parent returns (child parent) in order."
+  (let ((cl-cc/runtime:*rt-class-registry* (make-hash-table :test #'eq)))
+    (cl-cc/runtime:rt-defclass 'cpl-parent '() '())
+    (cl-cc/runtime:rt-defclass 'cpl-child '(cpl-parent) '())
+    (let ((result (cl-cc/runtime::%rt-cpl-walk 'cpl-child '())))
+      (assert-true (member 'cpl-child result :test #'eq))
+      (assert-true (member 'cpl-parent result :test #'eq))
+      (assert-true (< (position 'cpl-child result)
+                      (position 'cpl-parent result))))))

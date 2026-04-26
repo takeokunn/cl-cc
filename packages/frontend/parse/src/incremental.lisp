@@ -132,18 +132,13 @@
 (defvar *parse-cache* (make-hash-table :test 'equal)
   "Cache mapping content hashes to parsed CST node lists.")
 
-(defun content-hash (source)
-  "Compute a simple hash for SOURCE string for cache lookup.
-   Uses SXHASH for portability."
-  (sxhash source))
-
 (defun cache-lookup (source)
   "Look up SOURCE in the parse cache. Returns cached CST nodes or NIL."
-  (gethash (content-hash source) *parse-cache*))
+  (gethash (sxhash source) *parse-cache*))
 
 (defun cache-store (source nodes)
   "Store NODES in the parse cache for SOURCE."
-  (setf (gethash (content-hash source) *parse-cache*) nodes))
+  (setf (gethash (sxhash source) *parse-cache*) nodes))
 
 (defun invalidate-parse-cache ()
   "Clear the entire parse cache."

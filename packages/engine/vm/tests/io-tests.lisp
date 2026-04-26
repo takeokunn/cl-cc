@@ -238,3 +238,58 @@
       (cl-cc/vm::vm-reg-set s :R2 handle)
       (io-exec (cl-cc::make-vm-read-line :dst :R3 :handle :R2) s)
       (assert-equal "first line" (cl-cc/vm::vm-reg-get s :R3)))))
+
+;;; ─── %resolve-integer-stream-handle (extracted helper) ──────────────────
+
+(deftest resolve-integer-stream-handle-stdin
+  "%resolve-integer-stream-handle returns standard-input for stdin handle."
+  (let ((s   (io-vm-full))
+        (h   cl-cc/vm::+stdin-handle+))
+    (assert-eq (cl-cc/vm::vm-standard-input s)
+               (cl-cc/vm::%resolve-integer-stream-handle h s))))
+
+(deftest resolve-integer-stream-handle-stdout
+  "%resolve-integer-stream-handle returns standard-output for stdout handle."
+  (let ((s (io-vm-full))
+        (h cl-cc/vm::+stdout-handle+))
+    (assert-eq (cl-cc/vm::vm-standard-output s)
+               (cl-cc/vm::%resolve-integer-stream-handle h s))))
+
+(deftest resolve-integer-stream-handle-unknown-returns-nil
+  "%resolve-integer-stream-handle returns nil for an unregistered handle."
+  (let ((s (io-vm-full)))
+    (assert-null (cl-cc/vm::%resolve-integer-stream-handle 9999 s))))
+
+;;; ─── %copy-ht-into ────────────────────────────────────────────────────────
+
+(deftest copy-ht-into-copies-all-entries
+  "%copy-ht-into copies all entries from src into dst, clearing dst first."
+  (let ((src (make-hash-table :test #'eq))
+        (dst (make-hash-table :test #'eq)))
+    (setf (gethash :a src) 1
+          (gethash :b src) 2
+          (gethash :old dst) 99)
+    (cl-cc/vm::%copy-ht-into src dst)
+    (assert-= 1  (gethash :a dst))
+    (assert-= 2  (gethash :b dst))
+    (assert-null (gethash :old dst))
+    (assert-= 2  (hash-table-count dst))))
+
+(deftest copy-ht-into-empty-src-clears-dst
+  "%copy-ht-into with empty src results in empty dst."
+  (let ((src (make-hash-table :test #'eq))
+        (dst (make-hash-table :test #'eq)))
+    (setf (gethash :x dst) 42)
+    (cl-cc/vm::%copy-ht-into src dst)
+    (assert-= 0 (hash-table-count dst))))
+
+;;; ─── clone-vm-state ───────────────────────────────────────────────────────
+
+(deftest clone-vm-state-copies-global-vars
+  "clone-vm-state copies global-vars from source to clone."
+  (let ((source (cl-cc/vm::make-vm-state)))
+    (setf (gethash "x" (cl-cc/vm::vm-global-vars source)) 42)
+    (let ((clone (cl-cc/vm::clone-vm-state source)))
+      (assert-= 42 (gethash "x" (cl-cc/vm::vm-global-vars clone)))
+      (assert-false (eq (cl-cc/vm::vm-global-vars source)
+                        (cl-cc/vm::vm-global-vars clone))))))

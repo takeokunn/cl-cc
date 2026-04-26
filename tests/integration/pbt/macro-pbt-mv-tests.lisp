@@ -18,7 +18,7 @@
 
 ;;; Property: PSETQ Macro Expansion
 
-(defproperty psetq-empty-is-nil
+(defproperty psetq-empty-is-nil-mv-pbt
     ()
   "Empty PSETQ returns NIL."
   (null (cl-cc:our-macroexpand-1 '(psetq))))

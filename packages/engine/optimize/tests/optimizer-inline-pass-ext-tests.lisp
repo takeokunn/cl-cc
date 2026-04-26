@@ -14,7 +14,7 @@
 
 ;;; ─── opt-inline-inst-cost ───────────────────────────────────────────────────
 
-(deftest opt-inline-inst-cost-returns-number
+(deftest opt-inline-inst-cost-returns-number-ext
   "opt-inline-inst-cost returns a non-negative number for common instructions."
   (dolist (inst (list (make-vm-const :dst :r0 :value 1)
                       (make-vm-move  :dst :r1 :src :r0)
@@ -36,7 +36,7 @@
 
 ;;; ─── opt-adaptive-inline-threshold ──────────────────────────────────────────
 
-(deftest opt-adaptive-threshold-cheap-body
+(deftest opt-adaptive-threshold-cheap-body-ext
   "opt-adaptive-inline-threshold returns higher threshold for all-cheap instructions."
   (let* ((ci   (make-vm-closure :dst :r9 :label "cheap" :params '(:r0) :captured nil))
          ;; vm-move has cost ≤ 1 — saturate cheap-ratio to 1.0
@@ -47,7 +47,7 @@
     ;; Should be > base (15) because cheap-ratio >= 0.75
     (assert-true (>= threshold 15))))
 
-(deftest opt-adaptive-threshold-has-floor
+(deftest opt-adaptive-threshold-has-floor-ext
   "opt-adaptive-inline-threshold returns at least 8 even for empty bodies."
   (let* ((ci  (make-vm-closure :dst :r9 :label "empty" :params '(:r0) :captured nil))
          (def (list :closure ci :params '(:r0) :body (list (make-vm-ret :reg :r0))))
@@ -63,13 +63,13 @@
           :params params
           :body (append body-insts (list (make-vm-ret :reg (first params)))))))
 
-(deftest opt-inline-eligible-simple-function
+(deftest opt-inline-eligible-simple-function-ext
   "opt-inline-eligible-p returns T for a simple captured-var-free function."
   (let* ((def (%make-eligible-def "add1" '(:r0)
                  (list (make-vm-const :dst :r1 :value 1)))))
     (assert-true (cl-cc/optimize::opt-inline-eligible-p def 50))))
 
-(deftest opt-inline-eligible-rejects-captured-vars
+(deftest opt-inline-eligible-rejects-captured-vars-ext
   "opt-inline-eligible-p returns NIL when the closure has captured variables."
   (let* ((ci  (make-vm-closure :dst :r9 :label "cap"
                                 :params '(:r0)
@@ -78,7 +78,7 @@
                     :body (list (make-vm-ret :reg :r0)))))
     (assert-null (cl-cc/optimize::opt-inline-eligible-p def 50))))
 
-(deftest opt-inline-eligible-rejects-over-threshold
+(deftest opt-inline-eligible-rejects-over-threshold-ext
   "opt-inline-eligible-p returns NIL when body cost exceeds THRESHOLD."
   (let* ((big-body (loop repeat 20
                          collect (make-vm-move :dst :r1 :src :r0)))
@@ -88,11 +88,11 @@
 
 ;;; ─── opt-pass-global-dce ────────────────────────────────────────────────────
 
-(deftest opt-pass-global-dce-empty-program
+(deftest opt-pass-global-dce-empty-program-ext
   "opt-pass-global-dce on an empty instruction list returns nil."
   (assert-null (cl-cc/optimize::opt-pass-global-dce nil)))
 
-(deftest opt-pass-global-dce-preserves-reachable-function
+(deftest opt-pass-global-dce-preserves-reachable-function-ext
   "opt-pass-global-dce keeps a function that is called from top-level code."
   (let* (;; Function "fn" takes :r1 as param (non-nil so it gets collected)
          (cl   (make-vm-closure :dst :r0 :label "fn" :params '(:r1) :captured nil))
@@ -106,7 +106,7 @@
     ;; All instructions should be preserved since "fn" is reachable
     (assert-= (length insts) (length result))))
 
-(deftest opt-pass-global-dce-removes-dead-function
+(deftest opt-pass-global-dce-removes-dead-function-ext
   "opt-pass-global-dce removes a function that is never called."
   (let* (;; Dead function: must have non-nil params so opt-collect-function-defs
          ;; picks it up. Without params, it's invisible to the DCE analysis.
@@ -125,11 +125,11 @@
 
 ;;; ─── opt-pass-inline ────────────────────────────────────────────────────────
 
-(deftest opt-pass-inline-empty-program
+(deftest opt-pass-inline-empty-program-ext
   "opt-pass-inline on nil returns nil."
   (assert-null (cl-cc/optimize::opt-pass-inline nil)))
 
-(deftest opt-pass-inline-inlines-eligible-call
+(deftest opt-pass-inline-inlines-eligible-call-ext
   "opt-pass-inline replaces a vm-call of a small function with inlined moves."
   (let* (;; Define a trivial function: (lambda (:r1) (const :r2 42) (ret :r1))
          (cl   (make-vm-closure :dst :r0 :label "const42" :params '(:r1) :captured nil))
@@ -145,7 +145,7 @@
     ;; A vm-move or vm-const should appear for argument/return
     (assert-true (some (lambda (i) (or (cl-cc::vm-move-p i) (cl-cc::vm-const-p i))) result))))
 
-(deftest opt-pass-inline-preserves-non-eligible-call
+(deftest opt-pass-inline-preserves-non-eligible-call-ext
   "opt-pass-inline keeps vm-call for a function with captured variables (never eligible)."
   ;; A closure with captured vars fails opt-inline-eligible-p regardless of threshold
   (let* ((cl   (make-vm-closure :dst :r0 :label "fn" :params '(:r1)

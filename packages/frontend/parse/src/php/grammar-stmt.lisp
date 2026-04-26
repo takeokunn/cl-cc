@@ -105,149 +105,152 @@
                                  (when extends (list extends))
                                  (nreverse members))))))
 
+;;; ─── Named keyword-statement parsers ───────────────────────────────────────
+
+(defun %parse-php-echo-stmt (ts)
+  (let ((kw-tok (php-ts-advance ts))
+        (expr (php-cst-parse-expr ts)))
+    (php-ts-skip-semis ts)
+    (%php-cst-interior :echo (list (%php-tok-to-cst kw-tok) expr))))
+
+(defun %parse-php-return-stmt (ts)
+  (let ((kw-tok (php-ts-advance ts)))
+    (if (eq (php-ts-peek-type ts) :T-SEMI)
+        (progn (php-ts-skip-semis ts)
+               (%php-cst-interior :return (list (%php-tok-to-cst kw-tok))))
+        (let ((expr (php-cst-parse-expr ts)))
+          (php-ts-skip-semis ts)
+          (%php-cst-interior :return (list (%php-tok-to-cst kw-tok) expr))))))
+
+(defun %parse-php-if-stmt (ts)
+  (let* ((kw-tok     (prog1 (php-ts-advance ts) (php-ts-expect ts :T-LPAREN nil "if condition")))
+         (cond-expr  (prog1 (php-cst-parse-expr ts) (php-ts-expect ts :T-RPAREN nil "if condition")))
+         (then-stmts (php-cst-parse-block ts))
+         (else-stmts (when (and (not (php-ts-at-end-p ts))
+                                (eq (php-ts-peek-type ts) :T-KEYWORD)
+                                (eq (php-ts-peek-value ts) :else))
+                       (php-ts-advance ts)
+                       (php-cst-parse-block ts))))
+    (%php-cst-interior :if
+                       (append (list (%php-tok-to-cst kw-tok) cond-expr)
+                               (list (%php-cst-interior :then then-stmts))
+                               (when else-stmts
+                                 (list (%php-cst-interior :else else-stmts)))))))
+
+(defun %parse-php-while-stmt (ts)
+  (let* ((kw-tok     (prog1 (php-ts-advance ts) (php-ts-expect ts :T-LPAREN nil "while condition")))
+         (cond-expr  (prog1 (php-cst-parse-expr ts) (php-ts-expect ts :T-RPAREN nil "while condition")))
+         (body-stmts (php-cst-parse-block ts)))
+    (%php-cst-interior :while (list (%php-tok-to-cst kw-tok) cond-expr
+                                    (%php-cst-interior :body body-stmts)))))
+
+(defun %parse-php-for-stmt (ts)
+  (let* ((kw-tok     (prog1 (php-ts-advance ts)     (php-ts-expect ts :T-LPAREN nil "for")))
+         (init       (prog1 (php-cst-parse-expr ts)  (php-ts-expect ts :T-SEMI   nil "for")))
+         (cond-expr  (prog1 (php-cst-parse-expr ts)  (php-ts-expect ts :T-SEMI   nil "for")))
+         (incr       (prog1 (php-cst-parse-expr ts)  (php-ts-expect ts :T-RPAREN nil "for")))
+         (body-stmts (php-cst-parse-block ts)))
+    (%php-cst-interior :for (list (%php-tok-to-cst kw-tok) init cond-expr incr
+                                  (%php-cst-interior :body body-stmts)))))
+
+(defun %parse-php-foreach-stmt (ts)
+  (let* ((kw-tok   (prog1 (php-ts-advance ts) (php-ts-expect ts :T-LPAREN nil "foreach")))
+         (arr-expr (prog1 (php-cst-parse-expr ts) (php-ts-expect ts :T-KEYWORD :as "foreach")))
+         (var-tok  (php-ts-expect ts :T-VAR nil "foreach")))
+    (when (and (eq (php-ts-peek-type ts) :T-OP)
+               (equal "=>" (php-ts-peek-value ts)))
+      (php-ts-advance ts)
+      (setf var-tok (php-ts-expect ts :T-VAR nil "foreach value")))
+    (php-ts-expect ts :T-RPAREN nil "foreach")
+    (let ((body-stmts (php-cst-parse-block ts)))
+      (%php-cst-interior :foreach
+                         (list (%php-tok-to-cst kw-tok) arr-expr
+                               (when var-tok (%php-tok-to-cst var-tok))
+                               (%php-cst-interior :body body-stmts))))))
+
+(defun %parse-php-function-def-stmt (ts)
+  (let* ((kw-tok   (php-ts-advance ts))
+         (name-tok (php-ts-expect ts :T-IDENT nil "function name"))
+         (params   (php-cst-parse-param-list ts)))
+    (when (eq (php-ts-peek-type ts) :T-COLON)
+      (php-ts-advance ts)
+      (when (member (php-ts-peek-type ts) '(:T-TYPE :T-IDENT :T-NULLABLE))
+        (php-ts-advance ts)
+        (when (member (php-ts-peek-type ts) '(:T-TYPE :T-IDENT))
+          (php-ts-advance ts))))
+    (let ((body-stmts (php-cst-parse-block ts)))
+      (%php-cst-interior :function-def
+                         (append (list (%php-tok-to-cst kw-tok))
+                                 (when name-tok (list (%php-tok-to-cst name-tok)))
+                                 (list (%php-cst-interior :params params))
+                                 (list (%php-cst-interior :body body-stmts)))))))
+
+(defun %parse-php-class-def-stmt (ts)
+  (%parse-php-class-def ts (php-ts-advance ts)))
+
+(defun %parse-php-break-stmt (ts)
+  (let ((tok (php-ts-advance ts)))
+    (php-ts-skip-semis ts)
+    (%php-cst-interior :break (list (%php-tok-to-cst tok)))))
+
+(defun %parse-php-continue-stmt (ts)
+  (let ((tok (php-ts-advance ts)))
+    (php-ts-skip-semis ts)
+    (%php-cst-interior :continue (list (%php-tok-to-cst tok)))))
+
+(defun %parse-php-try-catch-stmt (ts)
+  (let ((kw-tok (php-ts-advance ts)))
+    (let ((try-body (php-cst-parse-block ts))
+          (catches nil))
+      (loop while (and (not (php-ts-at-end-p ts))
+                       (eq (php-ts-peek-type ts) :T-KEYWORD)
+                       (eq (php-ts-peek-value ts) :catch))
+            do (php-ts-advance ts)
+               (php-ts-expect ts :T-LPAREN nil "catch")
+               (let ((type-tok (php-ts-expect ts :T-IDENT nil "catch type"))
+                     (var-tok  (php-ts-expect ts :T-VAR  nil "catch variable")))
+                 (php-ts-expect ts :T-RPAREN nil "catch")
+                 (let ((catch-body (php-cst-parse-block ts)))
+                   (push (%php-cst-interior :catch
+                           (append (when type-tok (list (%php-tok-to-cst type-tok)))
+                                   (when var-tok  (list (%php-tok-to-cst var-tok)))
+                                   catch-body))
+                         catches))))
+      (%php-cst-interior :try-catch
+                         (append (list (%php-tok-to-cst kw-tok))
+                                 (list (%php-cst-interior :try-body try-body))
+                                 (nreverse catches))))))
+
+(defun %parse-php-expr-stmt (ts)
+  (let ((expr (php-cst-parse-expr ts)))
+    (php-ts-skip-semis ts)
+    expr))
+
+;;; ─── Keyword → parser dispatch table ───────────────────────────────────────
+
+(defvar *php-keyword-statement-parsers*
+  '((:echo     . %parse-php-echo-stmt)
+    (:return   . %parse-php-return-stmt)
+    (:if       . %parse-php-if-stmt)
+    (:while    . %parse-php-while-stmt)
+    (:for      . %parse-php-for-stmt)
+    (:foreach  . %parse-php-foreach-stmt)
+    (:function . %parse-php-function-def-stmt)
+    (:class    . %parse-php-class-def-stmt)
+    (:break    . %parse-php-break-stmt)
+    (:continue . %parse-php-continue-stmt)
+    (:try      . %parse-php-try-catch-stmt))
+  "Keyword → parser function alist for PHP statement dispatch.")
+
 (defun php-cst-parse-statement (ts)
-  "Parse a single PHP statement."
-  (let ((type (php-ts-peek-type ts))
-        (value (php-ts-peek-value ts)))
-    (cond
-      ;; echo expr;
-      ((and (eq type :T-KEYWORD) (eq value :echo))
-       (let ((kw-tok (php-ts-advance ts))
-             (expr (php-cst-parse-expr ts)))
-         (php-ts-skip-semis ts)
-         (%php-cst-interior :echo (list (%php-tok-to-cst kw-tok) expr))))
-
-      ;; return [expr];
-      ((and (eq type :T-KEYWORD) (eq value :return))
-       (let ((kw-tok (php-ts-advance ts)))
-         (if (eq (php-ts-peek-type ts) :T-SEMI)
-             (progn (php-ts-skip-semis ts)
-                    (%php-cst-interior :return (list (%php-tok-to-cst kw-tok))))
-             (let ((expr (php-cst-parse-expr ts)))
-               (php-ts-skip-semis ts)
-               (%php-cst-interior :return (list (%php-tok-to-cst kw-tok) expr))))))
-
-      ;; if (cond) { } [else { }]
-      ((and (eq type :T-KEYWORD) (eq value :if))
-       (let ((kw-tok (php-ts-advance ts)))
-         (php-ts-expect ts :T-LPAREN nil "if condition")
-         (let ((cond-expr (php-cst-parse-expr ts)))
-           (php-ts-expect ts :T-RPAREN nil "if condition")
-           (let ((then-stmts (php-cst-parse-block ts))
-                 (else-stmts nil))
-             (when (and (not (php-ts-at-end-p ts))
-                        (eq (php-ts-peek-type ts) :T-KEYWORD)
-                        (eq (php-ts-peek-value ts) :else))
-               (php-ts-advance ts)
-               (setf else-stmts (php-cst-parse-block ts)))
-             (%php-cst-interior :if
-                                (append (list (%php-tok-to-cst kw-tok) cond-expr)
-                                        (list (%php-cst-interior :then then-stmts))
-                                        (when else-stmts
-                                          (list (%php-cst-interior :else else-stmts)))))))))
-
-      ;; while (cond) { }
-      ((and (eq type :T-KEYWORD) (eq value :while))
-       (let ((kw-tok (php-ts-advance ts)))
-         (php-ts-expect ts :T-LPAREN nil "while condition")
-         (let ((cond-expr (php-cst-parse-expr ts)))
-           (php-ts-expect ts :T-RPAREN nil "while condition")
-           (let ((body-stmts (php-cst-parse-block ts)))
-             (%php-cst-interior :while
-                                (list (%php-tok-to-cst kw-tok) cond-expr
-                                      (%php-cst-interior :body body-stmts)))))))
-
-      ;; for (init; cond; incr) { }
-      ((and (eq type :T-KEYWORD) (eq value :for))
-       (let ((kw-tok (php-ts-advance ts)))
-         (php-ts-expect ts :T-LPAREN nil "for")
-         (let ((init (php-cst-parse-expr ts)))
-           (php-ts-expect ts :T-SEMI nil "for")
-           (let ((cond-expr (php-cst-parse-expr ts)))
-             (php-ts-expect ts :T-SEMI nil "for")
-             (let ((incr (php-cst-parse-expr ts)))
-               (php-ts-expect ts :T-RPAREN nil "for")
-               (let ((body-stmts (php-cst-parse-block ts)))
-                 (%php-cst-interior :for
-                                    (list (%php-tok-to-cst kw-tok) init cond-expr incr
-                                          (%php-cst-interior :body body-stmts)))))))))
-
-      ;; foreach ($arr as [$k =>] $v) { }
-      ((and (eq type :T-KEYWORD) (eq value :foreach))
-       (let ((kw-tok (php-ts-advance ts)))
-         (php-ts-expect ts :T-LPAREN nil "foreach")
-         (let ((arr-expr (php-cst-parse-expr ts)))
-           (php-ts-expect ts :T-KEYWORD :as "foreach")
-           (let ((var-tok (php-ts-expect ts :T-VAR nil "foreach")))
-             (when (and (eq (php-ts-peek-type ts) :T-OP)
-                        (equal "=>" (php-ts-peek-value ts)))
-               (php-ts-advance ts)
-               (setf var-tok (php-ts-expect ts :T-VAR nil "foreach value")))
-             (php-ts-expect ts :T-RPAREN nil "foreach")
-             (let ((body-stmts (php-cst-parse-block ts)))
-               (%php-cst-interior :foreach
-                                  (list (%php-tok-to-cst kw-tok)
-                                        arr-expr
-                                        (when var-tok (%php-tok-to-cst var-tok))
-                                        (%php-cst-interior :body body-stmts))))))))
-
-      ;; function name(...) { }
-      ((and (eq type :T-KEYWORD) (eq value :function))
-       (let ((kw-tok (php-ts-advance ts))
-             (name-tok (php-ts-expect ts :T-IDENT nil "function name")))
-         (let ((params (php-cst-parse-param-list ts)))
-           (when (eq (php-ts-peek-type ts) :T-COLON)
-             (php-ts-advance ts)
-             (when (member (php-ts-peek-type ts) '(:T-TYPE :T-IDENT :T-NULLABLE))
-               (php-ts-advance ts)
-               (when (member (php-ts-peek-type ts) '(:T-TYPE :T-IDENT))
-                 (php-ts-advance ts))))
-           (let ((body-stmts (php-cst-parse-block ts)))
-             (%php-cst-interior :function-def
-                                (append (list (%php-tok-to-cst kw-tok))
-                                        (when name-tok (list (%php-tok-to-cst name-tok)))
-                                        (list (%php-cst-interior :params params))
-                                        (list (%php-cst-interior :body body-stmts))))))))
-
-      ;; class Name [extends Base] [implements ...] { }
-      ((and (eq type :T-KEYWORD) (eq value :class))
-       (%parse-php-class-def ts (php-ts-advance ts)))
-
-      ;; break; / continue;
-      ((and (eq type :T-KEYWORD) (member value '(:break :continue)))
-       (let ((tok (php-ts-advance ts)))
-         (php-ts-skip-semis ts)
-         (%php-cst-interior value (list (%php-tok-to-cst tok)))))
-
-      ;; try { } catch (Type $var) { }
-      ((and (eq type :T-KEYWORD) (eq value :try))
-       (let ((kw-tok (php-ts-advance ts)))
-         (let ((try-body (php-cst-parse-block ts))
-               (catches nil))
-           (loop while (and (not (php-ts-at-end-p ts))
-                            (eq (php-ts-peek-type ts) :T-KEYWORD)
-                            (eq (php-ts-peek-value ts) :catch))
-                 do (php-ts-advance ts)
-                    (php-ts-expect ts :T-LPAREN nil "catch")
-                    (let ((type-tok (php-ts-expect ts :T-IDENT nil "catch type"))
-                          (var-tok (php-ts-expect ts :T-VAR nil "catch variable")))
-                      (php-ts-expect ts :T-RPAREN nil "catch")
-                      (let ((catch-body (php-cst-parse-block ts)))
-                        (push (%php-cst-interior :catch
-                               (append (when type-tok (list (%php-tok-to-cst type-tok)))
-                                       (when var-tok (list (%php-tok-to-cst var-tok)))
-                                       catch-body))
-                              catches))))
-           (%php-cst-interior :try-catch
-                              (append (list (%php-tok-to-cst kw-tok))
-                                      (list (%php-cst-interior :try-body try-body))
-                                      (nreverse catches))))))
-
-      ;; Expression statement
-      (t
-       (let ((expr (php-cst-parse-expr ts)))
-         (php-ts-skip-semis ts)
-         expr)))))
+  "Parse a single PHP statement, dispatching on keyword via *php-keyword-statement-parsers*."
+  (if (eq (php-ts-peek-type ts) :T-KEYWORD)
+      (let* ((value  (php-ts-peek-value ts))
+             (parser (cdr (assoc value *php-keyword-statement-parsers*))))
+        (if parser
+            (funcall parser ts)
+            (%parse-php-expr-stmt ts)))
+      (%parse-php-expr-stmt ts)))
 
 ;;; ─── Top-Level Entry Point ──────────────────────────────────────────────────
 

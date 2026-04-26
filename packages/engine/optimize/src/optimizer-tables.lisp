@@ -205,6 +205,13 @@ both NIL and numeric zero are false."
   "Maps VM instruction type symbols to (lambda (inst) ...) read-reg extractors.
    Used by opt-inst-read-regs for types not covered by the bulk tables.")
 
+(defun %opt-collect-sexp-regs (x dst acc)
+  "Recursively collect register-shaped keywords from sexp X into ACC, excluding DST."
+  (cond
+    ((and (keywordp x) (opt-register-keyword-p x) (not (eq x dst))) (cons x acc))
+    ((consp x) (%opt-collect-sexp-regs (cdr x) dst (%opt-collect-sexp-regs (car x) dst acc)))
+    (t acc)))
+
 (defun opt-inst-read-regs (inst)
   "Return a list of all register names read by INST.
    Dispatch: zero-read types → nil, move → src, binop → lhs/rhs,
@@ -230,19 +237,14 @@ both NIL and numeric zero are false."
            (if handler
                (funcall handler inst)
                ;; Fallback: serialize to sexp and collect all register-shaped keywords
-               (let ((dst (opt-inst-dst inst))
-                     (regs nil))
-                 (labels ((collect (x)
-                            (cond ((and (keywordp x)
-                                        (opt-register-keyword-p x)
-                                        (not (eq x dst)))
-                                   (push x regs))
-                                  ((consp x)
-                                   (collect (car x))
-                                   (collect (cdr x))))))
-                   (handler-case (collect (instruction->sexp inst))
-                     (error () nil)))
-                 regs)))))))
+               (let ((dst (opt-inst-dst inst)))
+                 (handler-case
+                     (%opt-collect-sexp-regs (instruction->sexp inst) dst nil)
+                   (error () nil)))))))))
+
+(defun %opt-commutative-inst-p (inst)
+  "Return T if INST is a commutative binary instruction."
+  (member (type-of inst) *opt-commutative-inst-types* :test #'eq))
 
 ;;; *opt-algebraic-identity-rules*, classification predicates
 ;;; (opt-binary-lhs-rhs-p, opt-unary-src-p, opt-foldable-unary-arith-p,

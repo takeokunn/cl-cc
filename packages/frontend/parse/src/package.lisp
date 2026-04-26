@@ -48,7 +48,6 @@
    #:edit-operation #:make-edit-operation
    #:parse-incremental
    #:cache-lookup #:cache-store #:invalidate-parse-cache
-   #:content-hash
    ;; CST lowering
    #:lower-cst-to-ast #:lower-cst-list-to-ast
    #:parse-and-lower #:parse-and-lower-one

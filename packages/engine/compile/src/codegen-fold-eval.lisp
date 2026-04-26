@@ -97,7 +97,7 @@ Returns (values last-value t) on success, (values nil nil) on first failure."
      (%evaluate-ast-then
       (ast-if-cond node) depth
       (lambda (cond-value)
-        (%evaluate-ast (if (%compile-time-falsep cond-value)
+        (%evaluate-ast (if (opt-falsep cond-value)
                            (ast-if-else node)
                            (ast-if-then node))
                        (1- depth)))))
@@ -118,7 +118,7 @@ Returns (values last-value t) on success, (values nil nil) on first failure."
                                    (1- depth))))))
     (ast-return-from
      (multiple-value-bind (tag found-p)
-         (%compile-time-lookup-block (ast-return-from-name node) *compile-time-block-env*)
+         (%compile-time-lookup (ast-return-from-name node) *compile-time-block-env*)
        (if found-p
            (%evaluate-ast-then
             (ast-return-from-value node) depth

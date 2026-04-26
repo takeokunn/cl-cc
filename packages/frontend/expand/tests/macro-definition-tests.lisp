@@ -34,3 +34,48 @@
   (let ((expander (cl-cc/expand::make-compiler-macro-expander '(x) '((+ x 1)))))
     (assert-equal 3
                   (cl-cc/expand::invoke-registered-expander expander '(foo 2) nil))))
+
+;;; ─── %contains-uninterned-symbol-p ──────────────────────────────────────
+
+(deftest-each contains-uninterned-symbol-p-cases
+  "%contains-uninterned-symbol-p: T for gensyms/uninterned; nil for normal symbols and atoms."
+  :cases (("gensym"          t   (list (gensym "G")))
+          ("normal-symbol"   nil '(foo bar))
+          ("integer"         nil 42)
+          ("string"          nil "hello")
+          ("nested-gensym"   t   nil))
+  (expected form)
+  (let ((test-form (if (eq form nil)
+                       (list 'quote (list (gensym "NESTED")))
+                       form)))
+    (if expected
+        (assert-true  (cl-cc/expand::%contains-uninterned-symbol-p test-form))
+        (assert-false (cl-cc/expand::%contains-uninterned-symbol-p test-form)))))
+
+;;; ─── %cacheable-macroexpansion-p ─────────────────────────────────────────
+
+(deftest-each cacheable-macroexpansion-p-cases
+  "%cacheable-macroexpansion-p: NIL for forms with gensyms; T for fully interned forms."
+  :cases (("interned-form"   t   '(+ 1 2))
+          ("keyword-form"    t   '(:x :y))
+          ("gensym-form"     nil nil))
+  (expected form)
+  (let ((test-form (if (null form)
+                       (list (gensym "G") 1 2)
+                       form)))
+    (if expected
+        (assert-true  (cl-cc/expand::%cacheable-macroexpansion-p test-form))
+        (assert-false (cl-cc/expand::%cacheable-macroexpansion-p test-form)))))
+
+;;; ─── %expander-descriptor-p ──────────────────────────────────────────────
+
+(deftest-each expander-descriptor-p-cases
+  "%expander-descriptor-p: T for valid descriptor plists; NIL for functions and non-lists."
+  :cases (("macro-kind"      t   (list :kind :macro-expander :lambda-list '() :body '()))
+          ("compiler-kind"   t   (list :kind :compiler-macro-expander :lambda-list '() :body '()))
+          ("function"        nil #'identity)
+          ("bare-list"       nil '(foo bar)))
+  (expected object)
+  (if expected
+      (assert-true  (cl-cc/expand::%expander-descriptor-p object))
+      (assert-false (cl-cc/expand::%expander-descriptor-p object))))

@@ -33,6 +33,17 @@
       (when replacements
         (return replacements)))))
 
+(defun %peephole-walk (rest out)
+  "Scan REST left-to-right in pairs, accumulating rewritten instructions into OUT."
+  (cond
+    ((null rest)       (nreverse out))
+    ((null (cdr rest)) (nreverse (cons (car rest) out)))
+    (t
+     (let ((replacements (%maybe-peephole-rewrite (car rest) (cadr rest))))
+       (if replacements
+           (%peephole-walk (cddr rest) (revappend replacements out))
+           (%peephole-walk (cdr rest)  (cons (car rest) out)))))))
+
 (defun apply-prolog-peephole (instructions)
   "Apply Prolog-unification peephole rules over two-instruction windows.
 
@@ -40,13 +51,4 @@
      (CURRENT-PATTERN NEXT-PATTERN REPLACEMENT-LIST)
    On a match, both instructions are consumed and REPLACEMENT-LIST sexps emitted.
    Self-moves (:move :Rx :Rx) are removed in a pre-pass."
-  (labels ((walk (rest out)
-             (cond
-               ((null rest) (nreverse out))
-               ((null (cdr rest)) (nreverse (cons (car rest) out)))
-               (t
-                (let ((replacements (%maybe-peephole-rewrite (car rest) (cadr rest))))
-                  (if replacements
-                      (walk (cddr rest) (revappend replacements out))
-                      (walk (cdr rest) (cons (car rest) out))))))))
-    (walk (remove-if #'%remove-self-move-p instructions) nil)))
+  (%peephole-walk (remove-if #'%remove-self-move-p instructions) nil))

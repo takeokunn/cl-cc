@@ -222,3 +222,37 @@
       (setf (cl-cc/runtime:rt-heap-old-free heap) (+ old-base 6))
       (cl-cc/runtime:rt-gc-write-barrier heap obj1 1 obj2)
       (assert-false (cl-cc/runtime:rt-card-dirty-p heap obj1)))))
+
+;;; ------------------------------------------------------------
+;;; Section 4: GC minor helper unit tests
+;;; ------------------------------------------------------------
+
+(deftest gc-update-promoted-empty-list-is-noop
+  "%gc-update-promoted on an empty promoted list completes without error."
+  (let ((heap (%make-small-heap)))
+    (cl-cc/runtime::%gc-update-promoted heap '())
+    ;; No assertion needed — just verify no error is raised.
+    (assert-true t)))
+
+(deftest gc-cheney-scan-empty-to-space-terminates
+  "%gc-cheney-scan with evac-target equal to to-free does not iterate."
+  (let* ((heap         (%make-small-heap))
+         (base         (cl-cc/runtime:rt-heap-young-to-base heap))
+         (to-free-cell (cons base base))
+         (promoted     (list nil))
+         (in-source-p  (lambda (addr) (declare (ignore addr)) nil)))
+    ;; scan == (cdr to-free-cell) so the loop body never runs
+    (cl-cc/runtime::%gc-cheney-scan heap base to-free-cell promoted in-source-p)
+    (assert-= base (cdr to-free-cell))))
+
+(deftest gc-scan-dirty-cards-clean-heap-is-noop
+  "%gc-scan-dirty-cards on a fresh heap (all cards clean) makes no modifications."
+  (let* ((heap         (%make-small-heap))
+         (to-free-cell (cons (cl-cc/runtime:rt-heap-young-to-base heap)
+                             (cl-cc/runtime:rt-heap-young-to-base heap)))
+         (promoted     (list nil))
+         (in-source-p  (lambda (addr) (declare (ignore addr)) nil))
+         (initial-free (cdr to-free-cell)))
+    (cl-cc/runtime::%gc-scan-dirty-cards heap to-free-cell promoted in-source-p)
+    ;; No dirty cards → to-free not advanced
+    (assert-= initial-free (cdr to-free-cell))))

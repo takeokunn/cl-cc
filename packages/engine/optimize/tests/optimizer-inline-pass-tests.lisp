@@ -2,7 +2,7 @@
 ;;;; Unit tests for src/optimize/optimizer-inline-pass.lisp
 ;;;;
 ;;;; Covers:
-;;;;   Memo utilities  — opt-make-pure-function-memo-table, opt-pure-function-memo-key,
+;;;;   Memo utilities  — opt-make-pure-function-memo-table,
 ;;;;                     opt-pure-function-memo-get, opt-pure-function-memo-put
 ;;;;   Body analysis   — opt-function-body-instruction-tables (single-pass, returns values)
 ;;;;   Reachability    — opt-reachable-function-labels
@@ -35,15 +35,6 @@
   (let ((ht (cl-cc/optimize::opt-make-pure-function-memo-table)))
     (assert-true (hash-table-p ht))
     (assert-= 0 (hash-table-count ht))))
-
-;;; ─── opt-pure-function-memo-key ─────────────────────────────────────────────
-
-(deftest-each opt-memo-key-forms
-  "opt-pure-function-memo-key returns a (label args) list."
-  :cases (("with-args"    "fn" '(1 2) '("fn" (1 2)))
-          ("empty-args"   "f"  nil     '("f"  nil)))
-  (label args expected)
-  (assert-equal expected (cl-cc/optimize::opt-pure-function-memo-key label args)))
 
 ;;; ─── opt-pure-function-memo-get / opt-pure-function-memo-put ────────────────
 

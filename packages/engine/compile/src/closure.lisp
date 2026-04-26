@@ -80,72 +80,93 @@ Binding forms use ast-bound-names; others fall through to ast-children."
      ;; All other nodes: generic traversal via ast-children
      (t (free-vars-of-list (ast-children ast)))))
 
+(defun %escape-add-kind (kind acc)
+  "Return ACC with KIND added unless already present."
+  (if (member kind acc) acc (cons kind acc)))
+
+(defun %escape-merge-kinds (&rest kind-lists)
+  "Merge multiple escape-kind lists into one deduplicated list."
+  (reduce (lambda (acc ks)
+            (reduce (lambda (a k) (%escape-add-kind k a)) ks :initial-value acc))
+          kind-lists :initial-value nil))
+
+(defun %escape-mentions-node-p (node binding-name)
+  "Return T if NODE or any descendant references BINDING-NAME."
+  (typecase node
+    (ast-var (eq (ast-var-name node) binding-name))
+    (t (some (lambda (child) (%escape-mentions-node-p child binding-name))
+             (ast-children node)))))
+
+(defun %escape-mentions-forms-p (forms binding-name)
+  "Return T if any form in FORMS references BINDING-NAME."
+  (and (listp forms)
+       (some (lambda (f) (%escape-mentions-node-p f binding-name)) forms)))
+
+(defun %escape-classify-children (node binding-name safe-consumers)
+  "Merge escape kinds for all children of NODE."
+  (reduce #'%escape-merge-kinds
+          (mapcar (lambda (c) (%escape-classify c binding-name safe-consumers))
+                  (ast-children node))
+          :initial-value nil))
+
+(defun %escape-capture-kinds (body binding-name safe-consumers)
+  "Escape kinds when BODY is a closure boundary over BINDING-NAME."
+  (%escape-merge-kinds
+   (when (%escape-mentions-forms-p body binding-name) (list :capture))
+   (reduce #'%escape-merge-kinds
+           (mapcar (lambda (f) (%escape-classify f binding-name safe-consumers)) body)
+           :initial-value nil)))
+
+(defun %escape-classify (node binding-name safe-consumers)
+  "Classify how BINDING-NAME escapes through NODE."
+  (typecase node
+    (ast-var        (when (eq (ast-var-name node) binding-name) (list :return)))
+    (ast-lambda     (%escape-capture-kinds (ast-lambda-body node)    binding-name safe-consumers))
+    (ast-defun      (%escape-capture-kinds (ast-defun-body node)     binding-name safe-consumers))
+    (ast-defmethod  (%escape-capture-kinds (ast-defmethod-body node) binding-name safe-consumers))
+    (ast-local-fns  (%escape-capture-kinds (ast-local-fns-body node) binding-name safe-consumers))
+    (ast-apply
+     (%escape-add-kind :external-call
+                       (%escape-classify-children node binding-name safe-consumers)))
+    (ast-call
+     (let ((func (ast-call-func node))
+           (args (ast-call-args node)))
+       (cond
+         ((and (symbolp func) (member (symbol-name func) safe-consumers :test #'string=))
+          nil)
+         ((and (symbolp func) (member (symbol-name func) '("APPLY" "FUNCALL") :test #'string=))
+          (%escape-add-kind :external-call
+                            (reduce #'%escape-merge-kinds
+                                    (mapcar (lambda (a) (%escape-classify a binding-name safe-consumers)) args)
+                                    :initial-value nil)))
+         (t
+          (let ((arg-kinds (reduce #'%escape-merge-kinds
+                                   (mapcar (lambda (a) (%escape-classify a binding-name safe-consumers)) args)
+                                   :initial-value nil)))
+            (if arg-kinds
+                (%escape-add-kind :external-call
+                                  (%escape-merge-kinds
+                                   (when (typep func 'ast-node) (%escape-classify func binding-name safe-consumers))
+                                   arg-kinds))
+                (when (typep func 'ast-node) (%escape-classify func binding-name safe-consumers))))))))
+    (t (%escape-classify-children node binding-name safe-consumers))))
+
 (defun binding-escape-kinds-in-body (body-forms binding-name &key (safe-consumers nil))
   "Return a list of conservative escape kinds for BINDING-NAME in BODY-FORMS.
 
-Currently reports the documented escape modes that this compiler slice can
-reliably identify intra-procedurally:
-
+Escape modes:
 - :return         the binding flows out as a direct value/result
 - :capture        the binding is captured by an inner closure/local function
 - :external-call  the binding is passed to APPLY/FUNCALL or an unknown callee
 
 SAFE-CONSUMERS is a list of uppercase function names that may consume the
 binding without constituting an escape."
-  (labels ((add-kind (kind acc)
-             (if (member kind acc) acc (cons kind acc)))
-           (merge-kinds (&rest kind-lists)
-             (reduce (lambda (acc ks) (reduce (lambda (a k) (add-kind k a)) ks :initial-value acc))
-                     kind-lists :initial-value nil))
-           (mentions-node-p (node)
-             (typecase node
-               (ast-var (eq (ast-var-name node) binding-name))
-               (t (some #'mentions-node-p (ast-children node)))))
-           (mentions-forms-p (forms)
-             (and (listp forms) (some #'mentions-node-p forms)))
-           (classify-children (node)
-             (reduce #'merge-kinds (mapcar #'classify (ast-children node)) :initial-value nil))
-           (%capture-kinds (body)
-             ;; Returns (:capture) when binding appears in a closure body, plus
-             ;; any inner escapes found by recursing into the body forms.
-             (merge-kinds (when (mentions-forms-p body) (list :capture))
-                          (reduce #'merge-kinds (mapcar #'classify body) :initial-value nil)))
-           (classify (node)
-             (typecase node
-               ;; Leaf that triggers :return
-               (ast-var (when (eq (ast-var-name node) binding-name) (list :return)))
-               ;; Closures: add :capture when the binding appears in their specific body
-               (ast-lambda     (%capture-kinds (ast-lambda-body node)))
-               (ast-defun      (%capture-kinds (ast-defun-body node)))
-               (ast-defmethod  (%capture-kinds (ast-defmethod-body node)))
-               (ast-local-fns  (%capture-kinds (ast-local-fns-body node)))
-               ;; apply always escapes
-               (ast-apply
-                (add-kind :external-call (classify-children node)))
-               ;; call: safe-consumer, explicit apply/funcall, or unknown callee
-               (ast-call
-                (let ((func (ast-call-func node))
-                      (args (ast-call-args node)))
-                  (cond
-                    ((and (symbolp func)
-                          (member (symbol-name func) safe-consumers :test #'string=))
-                     nil)
-                    ((and (symbolp func)
-                          (member (symbol-name func) '("APPLY" "FUNCALL") :test #'string=))
-                     (add-kind :external-call
-                               (reduce #'merge-kinds (mapcar #'classify args) :initial-value nil)))
-                    (t
-                     (let ((arg-kinds (reduce #'merge-kinds (mapcar #'classify args) :initial-value nil)))
-                       (if arg-kinds
-                           (add-kind :external-call
-                                     (merge-kinds (when (typep func 'ast-node) (classify func))
-                                                  arg-kinds))
-                           (when (typep func 'ast-node) (classify func))))))))
-               ;; All other nodes: generic traversal via ast-children
-               (t (classify-children node)))))
-    (if (listp body-forms)
-        (reduce #'merge-kinds (mapcar #'classify body-forms) :initial-value nil)
-        nil)))
+  (if (listp body-forms)
+      (reduce #'%escape-merge-kinds
+              (mapcar (lambda (f) (%escape-classify f binding-name safe-consumers))
+                      body-forms)
+              :initial-value nil)
+      nil))
 
 (defun binding-escapes-in-body-p (body-forms binding-name &key (safe-consumers nil))
   "Return T when BINDING-NAME escapes from BODY-FORMS.
@@ -180,17 +201,25 @@ captured-var alists using that key. Singleton groups are omitted."
              all-groups)
     shared-only))
 
+(defun %count-ast-calls (node binding-name)
+  "Count direct AST-CALL occurrences of BINDING-NAME in NODE tree."
+  (typecase node
+    (ast-call
+     (+ (if (eq (ast-call-func node) binding-name) 1 0)
+        (reduce #'+ (mapcar (lambda (n) (%count-ast-calls n binding-name))
+                            (ast-call-args node))
+                :initial-value 0)))
+    (t
+     (reduce #'+ (mapcar (lambda (n) (%count-ast-calls n binding-name))
+                         (ast-children node))
+             :initial-value 0))))
+
 (defun binding-direct-call-count-in-body (body-forms binding-name)
-  "Count direct AST-CALL occurrences of BINDING-NAME in BODY-FORMS." 
-  (labels ((count-node (node)
-             (typecase node
-               (ast-call
-                (+ (if (eq (ast-call-func node) binding-name) 1 0)
-                   (reduce #'+ (mapcar #'count-node (ast-call-args node)) :initial-value 0)))
-               (t (reduce #'+ (mapcar #'count-node (ast-children node)) :initial-value 0)))))
-    (if (listp body-forms)
-        (reduce #'+ (mapcar #'count-node body-forms) :initial-value 0)
-        0)))
+  "Count direct AST-CALL occurrences of BINDING-NAME in BODY-FORMS."
+  (if (listp body-forms)
+      (reduce #'+ (mapcar (lambda (n) (%count-ast-calls n binding-name)) body-forms)
+              :initial-value 0)
+      0))
 
 (defun binding-one-shot-p (body-forms binding-name &key (safe-consumers nil))
   "Return T when BINDING-NAME is a non-escaping direct call used exactly once." 

@@ -85,21 +85,22 @@ Returns a CPS-transformed S-expression."))
                                    (list 'print v)
                                    (list 'funcall k v))))))
 
+(defun %cps-expand-let-bindings (bindings body k)
+  "Thread CPS through BINDINGS sequentially, then transform BODY with continuation K.
+Each binding (sym . val-ast) generates a fresh temp var and wraps the remainder in a lambda."
+  (if (null bindings)
+      (cps-transform-sequence body k)
+      (let* ((binding (car bindings))
+             (sym     (car binding))
+             (val     (cdr binding))
+             (tmp     (gensym (symbol-name sym))))
+        (cps-transform-ast val
+                           (list 'lambda (list tmp)
+                                 (list 'let (list (list sym tmp))
+                                       (%cps-expand-let-bindings (cdr bindings) body k)))))))
+
 (defmethod cps-transform-ast ((node ast-let) k)
-  (let ((bindings (ast-let-bindings node))
-        (body (ast-let-body node)))
-    (labels ((expand-bindings (rest env-k)
-               (if (null rest)
-                   (cps-transform-sequence body env-k)
-                   (let* ((binding (car rest))
-                          (sym (car binding))
-                          (val (cdr binding))
-                          (tmp (gensym (symbol-name sym))))
-                     (cps-transform-ast val
-                                        (list 'lambda (list tmp)
-                                              (list 'let (list (list sym tmp))
-                                                    (expand-bindings (cdr rest) env-k))))))))
-      (expand-bindings bindings k))))
+  (%cps-expand-let-bindings (ast-let-bindings node) (ast-let-body node) k))
 
 ;;; Lambda and Closures
 

@@ -121,6 +121,38 @@
   (assert-eq 'cl-cc-suite
              (getf (persist-lookup *suite-registry* 'cl-cc-e2e-suite) :parent)))
 
+(deftest run-tests-excludes-selfhost-slow-suite-by-default
+  "The canonical fast test path excludes the slow selfhost suite unless the caller overrides it."
+  (let ((captured nil))
+    (with-replaced-function (run-suite
+                             (lambda (suite-name &key parallel random warm-stdlib tags exclude-tags exclude-suites)
+                               (setf captured (list :suite-name suite-name
+                                                    :parallel parallel
+                                                    :random random
+                                                    :warm-stdlib warm-stdlib
+                                                    :tags tags
+                                                    :exclude-tags exclude-tags
+                                                    :exclude-suites exclude-suites))
+                               0))
+      (assert-equal 0 (run-tests :parallel nil :random nil))
+      (assert-eq 'cl-cc-suite (getf captured :suite-name))
+      (assert-false (getf captured :parallel))
+      (assert-false (getf captured :random))
+      (assert-true (member 'selfhost-slow-suite
+                           (getf captured :exclude-suites))))))
+
+(deftest run-tests-preserves-caller-supplied-suite-exclusions
+  "run-tests appends selfhost-slow-suite without discarding explicit caller exclusions."
+  (let ((captured nil))
+    (with-replaced-function (run-suite
+                             (lambda (suite-name &key parallel random warm-stdlib tags exclude-tags exclude-suites)
+                               (declare (ignore suite-name parallel random warm-stdlib tags exclude-tags))
+                               (setf captured exclude-suites)
+                               0))
+      (assert-equal 0 (run-tests :exclude-suites '(cl-cc-integration-serial-suite)))
+      (assert-true (member 'cl-cc-integration-serial-suite captured))
+      (assert-true (member 'selfhost-slow-suite captured)))))
+
 (deftest detect-flaky-reports-inconsistent-statuses
   "%detect-flaky prints a summary when a test passes in only some repeated runs."
   (let ((*standard-output* (make-string-output-stream)))

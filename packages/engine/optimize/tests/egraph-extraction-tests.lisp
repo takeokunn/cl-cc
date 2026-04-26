@@ -213,3 +213,46 @@
   (let ((entry (assoc threshold cl-cc/optimize::*opt-iteration-budget-thresholds*)))
     (assert-true entry)
     (assert-= delta (cdr entry))))
+
+;;; ─── %egraph-rewrite-inst ────────────────────────────────────────────────
+
+(deftest egraph-rewrite-inst-no-dst-returns-unchanged
+  "%egraph-rewrite-inst: instruction with no dst (e.g. vm-ret) is returned unchanged."
+  (let* ((eg         (make-test-egraph))
+         (reg-map    (make-hash-table :test #'eq))
+         (class->regs (make-hash-table :test #'equal))
+         (ret        (make-vm-ret :reg :r0)))
+    (let ((result (cl-cc/optimize::%egraph-rewrite-inst ret eg reg-map class->regs)))
+      (assert-eq ret result))))
+
+(deftest egraph-rewrite-inst-dst-in-const-class-becomes-vm-const
+  "%egraph-rewrite-inst rewrites to vm-const when the dst class is proven constant."
+  (let* ((eg         (make-test-egraph))
+         (class-id   (cl-cc/optimize::egraph-add eg 'const))
+         (class-ht   (gethash (cl-cc/optimize::egraph-find eg class-id) (cl-cc::eg-classes eg)))
+         (reg-map    (make-hash-table :test #'eq))
+         (class->regs (make-hash-table :test #'equal))
+         (move       (make-vm-move :dst :r1 :src :r0)))
+    (setf (cl-cc::ec-data class-ht) 42)
+    (setf (gethash :r1 reg-map) class-id)
+    (let ((result (cl-cc/optimize::%egraph-rewrite-inst move eg reg-map class->regs)))
+      (assert-true (cl-cc::vm-const-p result))
+      (assert-eq :r1 (cl-cc::vm-dst result))
+      (assert-equal 42 (cl-cc/vm::vm-value result)))))
+
+(deftest egraph-rewrite-inst-dst-with-alias-becomes-vm-move
+  "%egraph-rewrite-inst rewrites to vm-move when dst has an alias in the same e-class."
+  (let* ((eg         (make-test-egraph))
+         (class-id   (cl-cc/optimize::egraph-add eg 'add
+                       (cl-cc/optimize::egraph-add eg 'const)
+                       (cl-cc/optimize::egraph-add eg 'const)))
+         (reg-map    (make-hash-table :test #'eq))
+         (class->regs (make-hash-table :test #'equal))
+         (canon      (cl-cc/optimize::egraph-find eg class-id))
+         (add-inst   (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)))
+    (setf (gethash :r2 reg-map) class-id)
+    (setf (gethash canon class->regs) (list :r2 :r3))
+    (let ((result (cl-cc/optimize::%egraph-rewrite-inst add-inst eg reg-map class->regs)))
+      (assert-true (cl-cc::vm-move-p result))
+      (assert-eq :r2 (cl-cc::vm-dst result))
+      (assert-eq :r3 (cl-cc/vm::vm-src result)))))

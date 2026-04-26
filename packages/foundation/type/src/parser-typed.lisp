@@ -4,12 +4,12 @@
 ;;;   - parse-row-type (Record/Variant row-polymorphic types)
 ;;;   - parse-constraint-spec
 ;;;   - parse-lambda-list-with-types, parse-typed-parameter,
-;;;     parse-typed-optional-parameter, parse-typed-rest-parameter
-;;;   - extract-return-type, extract-return-type-from-body
+;;;     parse-typed-optional-parameter
+;;;   - extract-return-type
 ;;;   - ast-defun-typed defstruct + ast-lambda-typed defstruct
-;;;   - parse-typed-defun, parse-typed-lambda, parse-typed-lambda-list
-;;;   - parse-type-specifier-maybe, extract-return-type-maybe
-;;;   - *lambda-list-keywords*, make-type-function-from-spec
+;;;   - parse-typed-defun, parse-typed-lambda
+;;;   - parse-type-specifier-maybe
+;;;   - *lambda-list-keywords*
 ;;;
 ;;; Core type parsing (parse-type-specifier, parse-primitive-type,
 ;;; parse-compound-type, parse-arrow-type, parse-effect-row-spec)
@@ -78,10 +78,6 @@ Returns (values param-names param-types) where untyped params get type-any."
                 type-any))
       (cons item type-any)))
 
-(defun parse-typed-rest-parameter (item)
-  "Parse an &rest parameter: x or (x type). Returns (name . type)."
-  (parse-typed-parameter item))
-
 ;;; ─── Return type extraction ───────────────────────────────────────────────
 
 (defun extract-return-type (body)
@@ -94,10 +90,6 @@ Returns (values param-names param-types) where untyped params get type-any."
                  (and (symbolp (caar decl))
                       (string= (symbol-name (caar decl)) "RETURN-TYPE")))
         (parse-type-specifier (cadar decl))))))
-
-(defun extract-return-type-from-body (body)
-  "Extract return type from (declare (return-type ...)) forms in BODY."
-  (extract-return-type body))
 
 ;;; ─── Typed AST nodes ──────────────────────────────────────────────────────
 
@@ -127,7 +119,7 @@ Returns (values param-names param-types) where untyped params get type-any."
                               (not (consp (first rest)))
                               (not (eq (first rest) 'declare))
                               (parse-type-specifier-maybe (first rest))))
-            (body (if (and rest (not (null (extract-return-type-maybe rest))))
+            (body (if (and rest (not (null (extract-return-type rest))))
                       (cdr rest)
                       rest)))
         (make-ast-defun-typed
@@ -141,19 +133,11 @@ Returns (values param-names param-types) where untyped params get type-any."
       (make-ast-lambda-typed
        :params names :param-types types :return-type type-any :body body))))
 
-(defun parse-typed-lambda-list (lambda-list)
-  "Parse a typed lambda list. Returns (values names types)."
-  (parse-lambda-list-with-types lambda-list))
-
 (defun parse-type-specifier-maybe (x)
   "Return a type-node if X looks like a type specifier, else nil."
   (when (looks-like-type-specifier-p x)
     (handler-case (parse-type-specifier x)
       (type-parse-error () nil))))
-
-(defun extract-return-type-maybe (forms)
-  "Try to extract a return type from the front of FORMS list."
-  (extract-return-type forms))
 
 ;;; ─── Utility ──────────────────────────────────────────────────────────────
 
@@ -161,6 +145,3 @@ Returns (values param-names param-types) where untyped params get type-any."
   '(&optional &rest &key &allow-other-keys &aux)
   "Lambda list keywords to skip during typed parameter parsing.")
 
-(defun make-type-function-from-spec (param-types return-type)
-  "Create an arrow type from a list of param types and a return type."
-  (make-type-arrow param-types return-type))

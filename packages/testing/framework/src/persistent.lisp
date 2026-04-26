@@ -44,10 +44,6 @@
 ;;; Internal helpers
 ;;; ------------------------------------------------------------
 
-(declaim (inline %hash))
-(defun %hash (key)
-  "Map KEY to a fixnum hash for ordering within the BST."
-  (sxhash key))
 
 (defun %bucket-find (bucket key test)
   "Return the ((key . value)) cons in BUCKET matching KEY under TEST,

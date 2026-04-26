@@ -186,3 +186,45 @@
     ;; The result register is bound first, side effects follow, then funcall k result
     (assert-true (%form-contains-p result 'funcall))
     (assert-true (%form-contains-p result 'lambda))))
+
+;;; ─── %cps-thread-values-forms (extracted helper) ────────────────────────────
+
+(deftest cps-thread-values-forms-empty
+  "%cps-thread-values-forms with empty lists emits (multiple-value-call k (values))."
+  (let ((result (cl-cc/compile::%cps-thread-values-forms nil nil 'k nil)))
+    (assert-eq 'multiple-value-call (car result))
+    (assert-eq 'k (second result))))
+
+(deftest cps-thread-values-forms-single
+  "%cps-thread-values-forms with one form wraps it in a lambda."
+  (let* ((form (cl-cc/ast::make-ast-int :value 7))
+         (temps '(t0))
+         (result (format nil "~S"
+                         (cl-cc/compile::%cps-thread-values-forms (list form) temps 'k temps))))
+    (assert-true (search "LAMBDA" result))
+    (assert-true (search "MULTIPLE-VALUE-CALL" result))))
+
+;;; ─── %cps-thread-mvb-forms (extracted helper) ───────────────────────────────
+
+(deftest cps-thread-mvb-forms-empty
+  "%cps-thread-mvb-forms with empty forms emits (multiple-value-bind vars (values ...) ...)."
+  (let* ((body  (list (cl-cc/ast::make-ast-int :value 1)))
+         (result (cl-cc/compile::%cps-thread-mvb-forms nil nil '(a b) body 'k '(t0 t1))))
+    (assert-eq 'multiple-value-bind (car result))
+    (assert-equal '(a b) (second result))))
+
+;;; ─── %cps-collect-mv-call-args (extracted helper) ───────────────────────────
+
+(deftest cps-collect-mv-call-args-empty
+  "%cps-collect-mv-call-args with empty args calls (funcall k (apply f-v (nreverse acc)))."
+  (let ((result (cl-cc/compile::%cps-collect-mv-call-args nil 'acc 'f 'k)))
+    (assert-true (%form-contains-p result 'nreverse))
+    (assert-true (%form-contains-p result 'apply))))
+
+(deftest cps-collect-mv-call-args-one-arg-wraps-lambda
+  "%cps-collect-mv-call-args with one arg wraps in a lambda continuation."
+  (let* ((arg    (cl-cc/ast::make-ast-int :value 5))
+         (result (format nil "~S"
+                         (cl-cc/compile::%cps-collect-mv-call-args (list arg) 'acc 'f 'k))))
+    (assert-true (search "LAMBDA" result))
+    (assert-true (search "PUSH" result))))

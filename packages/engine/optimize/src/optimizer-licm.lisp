@@ -1,76 +1,67 @@
 (in-package :cl-cc/optimize)
 ;;; ─── Pass: Loop Invariant Code Motion (LICM) ──────────────────────────────
 
-(defun opt-pass-licm (instructions)
-  "Loop Invariant Code Motion: hoist loop-invariant instructions to preheaders.
+;;; ─── LICM helper: collect definition sites ────────────────────────────────
 
-   Algorithm:
-     1. Build CFG and compute loop depths via cfg-compute-loop-depths
-     2. Identify loop headers (blocks with back-edge predecessors)
-       3. For each loop, collect invariant instructions:
-         - Pure (opt-inst-pure-p)
-         - All operand registers defined outside the loop
-     4. Create preheader block before each loop header
-     5. Move invariant instructions to preheader
+(defun %licm-collect-def-sites (cfg)
+  "Return a register → list-of-blocks table for all registers defined in CFG."
+  (let ((def-sites (make-hash-table :test #'eq)))
+    (loop for b across (cfg-blocks cfg)
+          do (dolist (inst (bb-instructions b))
+               (let ((dst (opt-inst-dst inst)))
+                 (when dst
+                   (pushnew b (gethash dst def-sites) :test #'eq)))))
+    def-sites))
 
-   This pass activates the dormant bb-loop-depth field computed by cfg.lisp.
-   It is FR-003 from docs/optimize-passes.md."
-  (when (null instructions)
-    (return-from opt-pass-licm instructions))
+;;; ─── LICM helper: find loop headers ──────────────────────────────────────
 
-  (let ((cfg (cfg-build instructions)))
-    (cfg-compute-dominators cfg)
-    (cfg-compute-loop-depths cfg)
+(defun %licm-find-loop-headers (cfg)
+  "Return (values loop-headers header-to-tails-ht) for all natural loop headers in CFG."
+  (let ((header-to-tails (make-hash-table :test #'eq))
+        (headers nil))
+    (loop for b across (cfg-blocks cfg)
+          do (dolist (succ (bb-successors b))
+               (when (cfg-dominates-p succ b)
+                 (pushnew succ headers :test #'eq)
+                 (pushnew b (gethash succ header-to-tails) :test #'eq))))
+    (values headers header-to-tails)))
 
-       (let ((loop-blocks (remove-if (lambda (b) (= (bb-loop-depth b) 0))
-                                  (coerce (cfg-blocks cfg) 'list))))
-      (when (null loop-blocks)
-        (return-from opt-pass-licm instructions))
+;;; ─── LICM helper: collect loop member blocks ──────────────────────────────
 
-      (let ((def-sites (make-hash-table :test #'eq))
-            (header-to-members (make-hash-table :test #'eq))
-            (header-to-invariants (make-hash-table :test #'eq))
-            (header-to-tails (make-hash-table :test #'eq))
-            (loop-headers nil))
-        (loop for b across (cfg-blocks cfg)
-              do (dolist (inst (bb-instructions b))
-                   (let ((dst (opt-inst-dst inst)))
-                     (when dst
-                       (pushnew b (gethash dst def-sites) :test #'eq)))))
+(defun %licm-collect-members (header tails)
+  "Return hash-table block → t for the natural loop (HEADER, TAILS)."
+  (let ((members (make-hash-table :test #'eq)))
+    (dolist (tail tails)
+      (dolist (member (cfg-collect-natural-loop header tail))
+        (setf (gethash member members) t)))
+    members))
 
-        (loop for b across (cfg-blocks cfg)
-              do (dolist (succ (bb-successors b))
-                   (when (cfg-dominates-p succ b)
-                     (pushnew succ loop-headers :test #'eq)
-                     (pushnew b (gethash succ header-to-tails) :test #'eq))))
+;;; ─── LICM helper: collect registers defined inside the loop ──────────────
 
-        (dolist (header loop-headers)
-          (let ((members (make-hash-table :test #'eq)))
-            (dolist (tail (gethash header header-to-tails))
-              (dolist (member (cfg-collect-natural-loop header tail))
-                (setf (gethash member members) t)))
-            (setf (gethash header header-to-members) members)
+(defun %licm-loop-def-regs (members)
+  "Return set of registers defined inside MEMBERS (hash-table block → t)."
+  (let ((regs (make-hash-table :test #'eq)))
+    (maphash (lambda (member _)
+               (dolist (inst (bb-instructions member))
+                 (let ((dst (opt-inst-dst inst)))
+                   (when dst (setf (gethash dst regs) t)))))
+             members)
+    regs))
 
-            (let ((loop-def-regs (make-hash-table :test #'eq)))
-              (maphash (lambda (member _)
-                         (dolist (inst (bb-instructions member))
-                           (let ((dst (opt-inst-dst inst)))
-                             (when dst
-                               (setf (gethash dst loop-def-regs) t)))))
-                       members)
+;;; ─── LICM helper: collect invariant instructions ─────────────────────────
 
-                (maphash (lambda (member _)
-                           (dolist (inst (bb-instructions member))
-                             (when (opt-inst-loop-invariant-p inst loop-def-regs members def-sites)
-                               (pushnew inst (gethash header header-to-invariants) :test #'eq))))
-                        members))))
+(defun %licm-collect-invariants (members def-sites)
+  "Return list of loop-invariant instructions across all MEMBERS blocks."
+  (let ((loop-def-regs (%licm-loop-def-regs members))
+        (invariants nil))
+    (maphash (lambda (member _)
+               (dolist (inst (bb-instructions member))
+                 (when (opt-inst-loop-invariant-p inst loop-def-regs members def-sites)
+                   (pushnew inst invariants :test #'eq))))
+             members)
+    invariants))
 
-        (when (every (lambda (header)
-                       (null (gethash header header-to-invariants)))
-                     loop-headers)
-          (return-from opt-pass-licm instructions))
-
-        (opt-licm-emit-with-preheaders cfg header-to-members header-to-invariants)))))
+;;; ─── LICM: invariance predicate ───────────────────────────────────────────
 
 (defun opt-inst-loop-invariant-p (inst loop-def-regs loop-members def-sites)
   "Return T if INST is loop-invariant:
@@ -94,60 +85,98 @@
                           sites))
           (return-from opt-inst-loop-invariant-p nil))))))
 
+;;; ─── LICM: preheader insertion helpers ───────────────────────────────────
+
+(defun %licm-redirect-successor (block old new)
+  "Redirect BLOCK's successor edge from OLD to NEW."
+  (setf (bb-successors block)
+        (mapcar (lambda (succ) (if (eq succ old) new succ))
+                (bb-successors block)))
+  (setf (bb-predecessors old)
+        (remove block (bb-predecessors old) :test #'eq))
+  (pushnew block (bb-predecessors new) :test #'eq))
+
+(defun %licm-hoist-one-header (cfg header invariants members-ht counter)
+  "Insert a preheader block before HEADER, hoisting INVARIANTS into it.
+   Returns the new counter value."
+  (if (and invariants (bb-label header))
+      (let* ((header-label    (vm-name (bb-label header)))
+             (preheader-name  (format nil "LICM_PREHEADER_~A" counter))
+             (preheader-label (make-vm-label :name preheader-name))
+             (preheader       (cfg-new-block cfg :label preheader-label))
+             (outside-preds   (remove-if (lambda (pred) (gethash pred members-ht))
+                                         (copy-list (bb-predecessors header)))))
+        (setf (bb-instructions preheader)
+              (append (copy-list invariants)
+                      (list (make-vm-jump :label header-label)))
+              (bb-successors preheader) (list header))
+        (pushnew preheader (bb-predecessors header) :test #'eq)
+        (dolist (pred outside-preds)
+          (%licm-redirect-successor pred header preheader)
+          (%opt-rewrite-block-terminator pred header-label preheader-name))
+        (let ((all-members (loop for k being the hash-keys of members-ht collect k)))
+          (dolist (member all-members)
+            (setf (bb-instructions member)
+                  (remove-if (lambda (inst) (member inst invariants :test #'eq))
+                             (bb-instructions member)))))
+        (1+ counter))
+      counter))
+
+;;; ─── LICM: preheader emission ─────────────────────────────────────────────
+
 (defun opt-licm-emit-with-preheaders (cfg header-to-members header-to-invariants)
-  "Mutate CFG to insert preheaders, then flatten it back to instructions."
-  (let ((preheader-counter 0))
-    (labels ((header-member-p (header block)
-               (gethash block (gethash header header-to-members)))
-             (redirect-successor (block old new)
-               (setf (bb-successors block)
-                     (mapcar (lambda (succ) (if (eq succ old) new succ))
-                             (bb-successors block)))
-               (setf (bb-predecessors old)
-                     (remove block (bb-predecessors old) :test #'eq))
-               (pushnew block (bb-predecessors new) :test #'eq))
-             (rewrite-terminator (block old-label new-label)
-               (let ((cell (last (bb-instructions block))))
-                 (when cell
-                   (let ((term (car cell)))
-                     (typecase term
-                       (vm-jump
-                        (when (equal (vm-label-name term) old-label)
-                          (setf (car cell) (make-vm-jump :label new-label))))
-                       (vm-jump-zero
-                        (when (equal (vm-label-name term) old-label)
-                          (setf (car cell)
-                                (make-vm-jump-zero :reg (vm-reg term)
-                                                   :label new-label)))))))))
-             (hoist-header (header)
-               (let ((invariants (gethash header header-to-invariants)))
-                 (when (and invariants (bb-label header))
-                   (let* ((header-label (vm-name (bb-label header)))
-                          (preheader-label-name (format nil "LICM_PREHEADER_~A" preheader-counter))
-                          (preheader-label (make-vm-label :name preheader-label-name))
-                          (preheader (cfg-new-block cfg :label preheader-label))
-                          (outside-preds (remove-if (lambda (pred)
-                                                      (header-member-p header pred))
-                                                    (copy-list (bb-predecessors header)))))
-                     (incf preheader-counter)
-                     (setf (bb-instructions preheader)
-                           (append (copy-list invariants)
-                                   (list (make-vm-jump :label header-label))))
-                     (setf (bb-successors preheader) (list header))
-                     (pushnew preheader (bb-predecessors header) :test #'eq)
-                     (dolist (pred outside-preds)
-                       (redirect-successor pred header preheader)
-                       (rewrite-terminator pred header-label preheader-label-name))
-                     (dolist (member (loop for k being the hash-keys of (gethash header header-to-members)
-                                           collect k))
-                       (setf (bb-instructions member)
-                             (remove-if (lambda (inst)
-                                          (member inst invariants :test #'eq))
-                                        (bb-instructions member)))))))))
-      (maphash (lambda (header _)
-                 (hoist-header header))
-               header-to-invariants)
-      (cfg-flatten cfg))))
+  "Insert preheaders for all loops with invariants, then flatten CFG back to instructions."
+  (let ((counter 0))
+    (maphash (lambda (header invariants)
+               (setf counter
+                     (%licm-hoist-one-header cfg header invariants
+                                             (gethash header header-to-members)
+                                             counter)))
+             header-to-invariants)
+    (cfg-flatten cfg)))
+
+;;; ─── Pass entry point ─────────────────────────────────────────────────────
+
+(defun opt-pass-licm (instructions)
+  "Loop Invariant Code Motion: hoist loop-invariant instructions to preheaders.
+
+   Algorithm:
+     1. Build CFG and compute loop depths via cfg-compute-loop-depths
+     2. Identify loop headers (blocks with back-edge predecessors)
+       3. For each loop, collect invariant instructions:
+         - Pure (opt-inst-pure-p)
+         - All operand registers defined outside the loop
+     4. Create preheader block before each loop header
+     5. Move invariant instructions to preheader
+
+   This pass activates the dormant bb-loop-depth field computed by cfg.lisp.
+   It is FR-003 from docs/optimize-passes.md."
+  (when (null instructions)
+    (return-from opt-pass-licm instructions))
+  (let ((cfg (cfg-build instructions)))
+    (cfg-compute-dominators cfg)
+    (cfg-compute-loop-depths cfg)
+    (let ((loop-blocks (remove-if (lambda (b) (= (bb-loop-depth b) 0))
+                                  (coerce (cfg-blocks cfg) 'list))))
+      (when (null loop-blocks)
+        (return-from opt-pass-licm instructions))
+      (let* ((def-sites (%licm-collect-def-sites cfg))
+             (header-to-members (make-hash-table :test #'eq))
+             (header-to-invariants (make-hash-table :test #'eq)))
+        (multiple-value-bind (loop-headers header-to-tails)
+            (%licm-find-loop-headers cfg)
+          (dolist (header loop-headers)
+            (let ((members (%licm-collect-members header (gethash header header-to-tails))))
+              (setf (gethash header header-to-members) members
+                    (gethash header header-to-invariants)
+                    (%licm-collect-invariants members def-sites))))
+          (when (every (lambda (header)
+                         (null (gethash header header-to-invariants)))
+                       loop-headers)
+            (return-from opt-pass-licm instructions))
+          (opt-licm-emit-with-preheaders cfg header-to-members header-to-invariants))))))
+
+;;; ─── PRE support helpers ──────────────────────────────────────────────────
 
 (defun %opt-pre-expression-key (inst)
   "Return a structural key for a pure instruction INST, or NIL."
@@ -186,65 +215,56 @@
         (append (butlast insts) additions (list term))
         (append insts additions))))
 
+(defun %opt-pre-reconstruct-inst (inst)
+  "Round-trip INST through sexp form, returning INST unchanged on error."
+  (handler-case (sexp->instruction (instruction->sexp inst))
+    (error () inst)))
+
+(defun %opt-pre-available-in-any-p (key pred-envs)
+  "Return T if KEY is available in at least one predecessor environment."
+  (some (lambda (pair) (gethash key (cdr pair))) pred-envs))
+
+(defun %opt-pre-emit-compensating (pair key dst inst pred-inserts)
+  "Emit a compensating instruction into PAIR's predecessor block, updating its availability env."
+  (let* ((pred (car pair))
+         (env  (cdr pair))
+         (src  (gethash key env)))
+    (when (or (null src) (not (eq src dst)))
+      (push (if src
+                (make-vm-move :dst dst :src src)
+                (%opt-pre-reconstruct-inst inst))
+            (gethash pred pred-inserts)))
+    (setf (gethash key env) dst)))
+
 (defun %opt-pre-join-elim (cfg)
   "Do a small join-point PRE pass over CFG blocks."
   (let ((pred-inserts (make-hash-table :test #'eq))
         (changed nil))
-    (labels ((insert-for-pred (pred inst)
-               (push inst (gethash pred pred-inserts))))
-      (loop for block across (cfg-blocks cfg)
-            do (let ((preds (bb-predecessors block)))
-                 (when (> (length preds) 1)
-                   (let ((pred-envs (mapcar (lambda (pred)
-                                              (cons pred (%opt-pre-block-out-env pred)))
-                                            preds))
-                         (new-insts nil))
-                     (dolist (inst (bb-instructions block))
-                       (let* ((dst (opt-inst-dst inst))
-                              (key (%opt-pre-expression-key inst)))
-                         (when dst
+    (loop for block across (cfg-blocks cfg)
+          do (when (> (length (bb-predecessors block)) 1)
+               (let ((pred-envs (mapcar (lambda (pred)
+                                          (cons pred (%opt-pre-block-out-env pred)))
+                                        (bb-predecessors block)))
+                     (new-insts nil))
+                 (dolist (inst (bb-instructions block))
+                   (let* ((dst (opt-inst-dst inst))
+                          (key (%opt-pre-expression-key inst)))
+                     (when dst
+                       (dolist (pair pred-envs)
+                         (%opt-pre-env-evict-dst (cdr pair) dst)))
+                     (if (and dst key (%opt-pre-available-in-any-p key pred-envs))
+                         (progn
+                           (setf changed t)
                            (dolist (pair pred-envs)
-                             (%opt-pre-env-evict-dst (cdr pair) dst)))
-                         (if (and dst key)
-                             (let ((available nil))
-                               (dolist (pair pred-envs)
-                                 (when (gethash key (cdr pair))
-                                   (setf available t)))
-                               (if available
-                                   (progn
-                                     (setf changed t)
-                                     (dolist (pair pred-envs)
-                                       (let* ((pred (car pair))
-                                              (env (cdr pair))
-                                              (src (gethash key env)))
-                                         (if src
-                                             (unless (eq src dst)
-                                               (insert-for-pred pred
-                                                                (make-vm-move :dst dst :src src)))
-                                             (insert-for-pred pred
-                                                              (handler-case
-                                                                  (sexp->instruction (instruction->sexp inst))
-                                                                (error () inst))))
-                                         (setf (gethash key env) dst)))
-                                     nil)
-                                   (push inst new-insts)))
-                             (push inst new-insts))))
-                     (setf (bb-instructions block) (nreverse new-insts))))))
-      (maphash (lambda (pred insts)
-                 (setf (bb-instructions pred)
-                       (%opt-pre-splice-before-terminator (bb-instructions pred)
-                                                          (nreverse insts))))
-               pred-inserts)
-      changed)))
-
-(defun opt-pass-constant-hoist (instructions)
-  "Hoist loop-invariant constants into loop preheaders.
-
-   This is a narrow constant-only specialization of LICM that reuses the same
-   CFG/loop analysis and therefore stays within the existing optimizer model.
-   It exists to make FR-166 a named pass while preserving the same lowering
-   behavior for constant literals already covered by LICM."
-  (opt-pass-licm instructions))
+                             (%opt-pre-emit-compensating pair key dst inst pred-inserts)))
+                         (push inst new-insts))))
+                 (setf (bb-instructions block) (nreverse new-insts)))))
+    (maphash (lambda (pred insts)
+               (setf (bb-instructions pred)
+                     (%opt-pre-splice-before-terminator (bb-instructions pred)
+                                                        (nreverse insts))))
+             pred-inserts)
+    changed))
 
 (defun opt-pass-pre (instructions)
   "Partial Redundancy Elimination (PRE).
@@ -257,9 +277,3 @@
     (%opt-pre-join-elim cfg)
     (opt-pass-cse (opt-pass-licm (cfg-flatten cfg)))))
 
-(defun opt-pass-egraph (instructions)
-  "Run equality-saturation lowering over the current instruction list.
-
-   This is a thin wrapper around optimize-with-egraph so the pass can live in
-   the main optimizer pipeline without changing the standalone e-graph API."
-  (optimize-with-egraph instructions))

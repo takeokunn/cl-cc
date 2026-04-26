@@ -59,8 +59,8 @@
 (defmacro with-output-to-vector ((stream-var) &body body)
   "Execute BODY with STREAM-VAR bound to an output stream that collects bytes into a vector."
   `(let ((bytes '()))
-      (labels ((stream-write-byte (byte)
-                (push byte bytes)))
+      (flet ((stream-write-byte (byte)
+               (push byte bytes)))
         (let ((,stream-var #'stream-write-byte))
           ,@body
           (coerce (nreverse bytes) '(simple-array (unsigned-byte 8) (*)))))))

@@ -118,7 +118,7 @@
     (assert-equal 1 (count-if (lambda (i) (typep i 'cl-cc/vm::vm-jump-zero)) out))))
 
 (deftest constant-hoist-moves-loop-constant-to-preheader
-  "opt-pass-constant-hoist hoists a loop-invariant constant before the loop header."
+  "opt-pass-licm hoists a loop-invariant constant before the loop header."
   (let* ((start (make-vm-label :name "start"))
          (seed  (make-vm-const :dst :r0 :value 0))
          (jmp1  (make-vm-jump :label "loop"))
@@ -128,7 +128,7 @@
          (body  (make-vm-label :name "body"))
          (back  (make-vm-jump :label "loop"))
          (ret   (make-vm-ret :reg :r1))
-         (out   (cl-cc/optimize::opt-pass-constant-hoist
+         (out   (cl-cc/optimize::opt-pass-licm
                  (list start seed jmp1 loop hoist jmp2 body back ret))))
     (assert-true (member hoist out))
     (assert-true (member loop out))
@@ -137,7 +137,7 @@
 
 (deftest-each opt-convergence-pass-membership
   "All expected optimization passes are registered in *opt-convergence-passes*."
-  :cases (("constant-hoist" #'cl-cc/optimize::opt-pass-constant-hoist)
+  :cases (("constant-hoist" #'cl-cc/optimize::opt-pass-licm)
           ("global-dce"     #'cl-cc/optimize::opt-pass-global-dce)
           ("inline"         #'cl-cc/optimize::opt-pass-inline-iterative)
           ("pre"            #'cl-cc/optimize::opt-pass-pre)

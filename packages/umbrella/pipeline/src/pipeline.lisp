@@ -19,20 +19,18 @@
   "Rewrite safe top-level expression FORMS into CPS entry forms when possible.
 Definition and control-effect forms stay on the direct path; this only widens
 the existing CPS-primary-path behavior to multi-form top-level compilation."
-  (flet ((cps-safe-p (ast)
-           (case target
-             (:vm (%cps-vm-compile-safe-ast-p ast))
-             (:wasm nil)
-             (t (%cps-native-compile-safe-ast-p ast)))))
-    (mapcar (lambda (form)
-              (if (and (consp form) (eq (car form) 'in-package))
-                  form
-                  (let* ((ast (%prepare-ast form))
-                         (optimized (optimize-ast ast)))
-                    (if (cps-safe-p optimized)
-                        (%cps-identity-entry-form (cps-transform-ast* optimized))
-                        form))))
-            forms)))
+  (mapcar (lambda (form)
+            (if (and (consp form) (eq (car form) 'in-package))
+                form
+                (let* ((ast (%prepare-ast form))
+                       (optimized (optimize-ast ast)))
+                  (if (case target
+                        (:vm (%cps-vm-compile-safe-ast-p optimized))
+                        (:wasm nil)
+                        (t (%cps-native-compile-safe-ast-p optimized)))
+                      (%cps-identity-entry-form (cps-transform-ast* optimized))
+                      form))))
+          forms))
 
 (defun %maybe-compile-expression-via-cps (ast target type-check safety pass-pipeline print-pass-timings timing-stream print-pass-stats stats-stream trace-json-stream print-opt-remarks opt-remarks-stream opt-remarks-mode)
   "Return a CPS-backed compilation-result for AST when the target-specific CPS path is safe." 

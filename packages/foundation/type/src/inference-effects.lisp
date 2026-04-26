@@ -25,41 +25,43 @@
 
 ;;; Effect Inference
 
+(defun %infer-effects-union (forms env)
+  "Return the union of effect rows inferred for each form in FORMS."
+  (reduce #'effect-row-union
+          (mapcar (lambda (f) (infer-effects f env)) forms)
+          :initial-value +pure-effect-row+))
+
 (defun infer-effects (ast env)
   "Infer the effect row produced by evaluating AST in environment ENV.
    Returns a type-effect-row. Pure expressions return +pure-effect-row+."
-  (flet ((union-list (forms)
-           (reduce #'effect-row-union
-                   (mapcar (lambda (f) (infer-effects f env)) forms)
-                   :initial-value +pure-effect-row+)))
-    ;; Data-driven pure check: extensible via *pure-ast-effect-types*
-    (when (some (lambda (type) (typep ast type)) *pure-ast-effect-types*)
-      (return-from infer-effects +pure-effect-row+))
-    (typecase ast
-      (cl-cc/ast:ast-print +io-effect-row+)
-      (cl-cc/ast:ast-setq
-       (make-type-effect-row :effects (list (make-type-effect-op :name 'state :args nil))
-                             :row-var nil))
-      (cl-cc/ast:ast-if
-       (effect-row-union (infer-effects (cl-cc/ast:ast-if-cond ast) env)
-                         (effect-row-union
-                          (infer-effects (cl-cc/ast:ast-if-then ast) env)
-                          (infer-effects (cl-cc/ast:ast-if-else ast) env))))
-      (cl-cc/ast:ast-let
-       (effect-row-union
-        (union-list (mapcar #'cdr (cl-cc/ast:ast-let-bindings ast)))
-        (union-list (cl-cc/ast:ast-let-body ast))))
-      (cl-cc/ast:ast-progn (union-list (cl-cc/ast:ast-progn-forms ast)))
-      (cl-cc/ast:ast-block (union-list (cl-cc/ast:ast-block-body  ast)))
-      (cl-cc/ast:ast-call
-       (let* ((func         (cl-cc/ast:ast-call-func ast))
-              (base-effects (if (typep func 'cl-cc/ast:ast-var)
-                                (lookup-effect-signature (cl-cc/ast:ast-var-name func))
-                                +pure-effect-row+)))
-         (effect-row-union base-effects
-                           (union-list (cl-cc/ast:ast-call-args ast)))))
-      (t (make-type-effect-row :effects nil
-                               :row-var (fresh-type-var "eff"))))))
+  ;; Data-driven pure check: extensible via *pure-ast-effect-types*
+  (when (some (lambda (type) (typep ast type)) *pure-ast-effect-types*)
+    (return-from infer-effects +pure-effect-row+))
+  (typecase ast
+    (cl-cc/ast:ast-print +io-effect-row+)
+    (cl-cc/ast:ast-setq
+     (make-type-effect-row :effects (list (make-type-effect-op :name 'state :args nil))
+                           :row-var nil))
+    (cl-cc/ast:ast-if
+     (effect-row-union (infer-effects (cl-cc/ast:ast-if-cond ast) env)
+                       (effect-row-union
+                        (infer-effects (cl-cc/ast:ast-if-then ast) env)
+                        (infer-effects (cl-cc/ast:ast-if-else ast) env))))
+    (cl-cc/ast:ast-let
+     (effect-row-union
+      (%infer-effects-union (mapcar #'cdr (cl-cc/ast:ast-let-bindings ast)) env)
+      (%infer-effects-union (cl-cc/ast:ast-let-body ast) env)))
+    (cl-cc/ast:ast-progn (%infer-effects-union (cl-cc/ast:ast-progn-forms ast) env))
+    (cl-cc/ast:ast-block (%infer-effects-union (cl-cc/ast:ast-block-body  ast) env))
+    (cl-cc/ast:ast-call
+     (let* ((func         (cl-cc/ast:ast-call-func ast))
+            (base-effects (if (typep func 'cl-cc/ast:ast-var)
+                              (lookup-effect-signature (cl-cc/ast:ast-var-name func))
+                              +pure-effect-row+)))
+       (effect-row-union base-effects
+                         (%infer-effects-union (cl-cc/ast:ast-call-args ast) env))))
+    (t (make-type-effect-row :effects nil
+                             :row-var (fresh-type-var "eff")))))
 
 (defun infer-with-effects (ast env)
   "Infer type, substitution, AND effect row for AST.
@@ -71,10 +73,7 @@
 (defun check-body-effects (asts declared-effects env)
   "Check that the union of effects in ASTS is a subset of DECLARED-EFFECTS.
    Signals type-inference-error if the body has undeclared effects."
-  (let ((actual-effects
-         (reduce #'effect-row-union
-                 (mapcar (lambda (a) (infer-effects a env)) asts)
-                 :initial-value +pure-effect-row+)))
+  (let ((actual-effects (%infer-effects-union asts env)))
     (unless (effect-row-subset-p actual-effects declared-effects)
       (error 'type-inference-error
              :message (format nil "Function has undeclared effects: ~A (declared: ~A)"

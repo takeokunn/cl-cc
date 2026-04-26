@@ -153,21 +153,23 @@ Returns two values: result register and CPS form used for the AST."
   (and (consp form)
        (eq (car form) 'in-package)))
 
+(defun %best-effort-type-check (ast env)
+  "Return type of AST in ENV, or NIL when type-checking signals an error."
+  (ignore-errors (type-check-ast ast env)))
+
 (defun %process-toplevel-form (form ctx target type-env type-check safety opts compiled-asts)
   "Compile one top-level FORM and return updated compilation state.
 Values: last-reg, last-type, last-cps, updated-type-env."
-  (labels ((best-effort-type (ast env)
-             (ignore-errors (type-check-ast ast env))))
-    (let* ((ast (%lower-toplevel-form-to-ast form))
-           (last-reg nil) (last-type nil) (last-cps nil))
-      (%record-toplevel-defun-for-ct-env ast)
-      (push ast compiled-asts)
-      (multiple-value-setq (last-type type-env)
-        (%update-toplevel-type-state ast type-env type-check #'best-effort-type))
-      (%maybe-extend-ct-value-env ast)
-      (multiple-value-setq (last-reg last-cps)
-        (%compile-toplevel-ast-into-context ast ctx target type-check safety opts))
-      (values last-reg last-type last-cps type-env))))
+  (let* ((ast (%lower-toplevel-form-to-ast form))
+         (last-reg nil) (last-type nil) (last-cps nil))
+    (%record-toplevel-defun-for-ct-env ast)
+    (push ast compiled-asts)
+    (multiple-value-setq (last-type type-env)
+      (%update-toplevel-type-state ast type-env type-check #'%best-effort-type-check))
+    (%maybe-extend-ct-value-env ast)
+    (multiple-value-setq (last-reg last-cps)
+      (%compile-toplevel-ast-into-context ast ctx target type-check safety opts))
+    (values last-reg last-type last-cps type-env)))
 
 (defun %finalize-toplevel-compilation (ctx target last-reg last-type last-cps compiled-asts opts)
   "Finalize CTX after all top-level forms have been compiled."

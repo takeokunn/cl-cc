@@ -99,3 +99,28 @@
   "%resolve-combination-operator signals an error for unknown combinations."
   (assert-signals error
     (cl-cc/vm::%resolve-combination-operator 'unknown-combo)))
+
+;;; ─── %vm-dispatch-key-collect (extracted combination generator) ──────────
+
+(deftest vm-dispatch-key-collect-single-cpl
+  "%vm-dispatch-key-collect with one CPL returns one-element lists (reversed from prefix)."
+  (let ((result (cl-cc/vm::%vm-dispatch-key-collect '((a b c)) nil)))
+    (assert-equal 3 (length result))
+    (assert-true (member '(a) result :test #'equal))
+    (assert-true (member '(b) result :test #'equal))
+    (assert-true (member '(c) result :test #'equal))))
+
+(deftest vm-dispatch-key-collect-two-cpls
+  "%vm-dispatch-key-collect with two CPLs returns all four combinations."
+  (let ((result (cl-cc/vm::%vm-dispatch-key-collect '((x y) (1 2)) nil)))
+    (assert-= 4 (length result))
+    (assert-true (member '(x 1) result :test #'equal))
+    (assert-true (member '(x 2) result :test #'equal))
+    (assert-true (member '(y 1) result :test #'equal))
+    (assert-true (member '(y 2) result :test #'equal))))
+
+(deftest vm-dispatch-key-collect-empty-remaining
+  "%vm-dispatch-key-collect with empty REMAINING returns a list containing the reversed prefix."
+  (let ((result (cl-cc/vm::%vm-dispatch-key-collect nil '(b a))))
+    (assert-equal 1 (length result))
+    (assert-equal '(a b) (first result))))

@@ -205,22 +205,20 @@ Falls back to the generic binop-ctor when no specialization applies."
           (t base-env))
         base-env)))
 
+(defun %case-of-case-collapse-node (node outer-cond thenp)
+  "Recursively skip NODE when it is an ast-if whose condition equals OUTER-COND.
+Returns the matching branch (THEN or ELSE per THENP) until the condition differs."
+  (if (and (typep node 'ast-if)
+           (equal (ast-to-sexp (ast-if-cond node))
+                  (ast-to-sexp outer-cond)))
+      (%case-of-case-collapse-node (if thenp (ast-if-then node) (ast-if-else node))
+                                   outer-cond thenp)
+      node))
+
 (defun %case-of-case-collapse-branch (outer-cond branch thenp)
   "Collapse nested IF branches that repeat the same outer condition.
-
-When BRANCH is an IF whose condition is structurally identical to OUTER-COND,
-the inner test is redundant.  This is a conservative case-of-case style
-optimization: we only remove the inner test when the condition matches
-exactly, preserving semantics for overlapping or reordered tests."
-  (labels ((collapse (node)
-             (if (and (typep node 'ast-if)
-                      (equal (ast-to-sexp (ast-if-cond node))
-                             (ast-to-sexp outer-cond)))
-                 (collapse (if thenp
-                               (ast-if-then node)
-                               (ast-if-else node)))
-                 node)))
-    (collapse branch)))
+Only removes the inner test when the condition matches exactly."
+  (%case-of-case-collapse-node branch outer-cond thenp))
 
 (defun %compile-if-branch (ast ctx dst tail guard-var guard-type branch &optional jump-label)
   "Compile one branch of an IF into CTX with type-env narrowing.

@@ -2,7 +2,7 @@
 ;;;; Targeted coverage for uncovered branches in:
 ;;;;   src/type/types-extended.lisp — type-free-vars for capability/refinement/handler/gadt-con
 ;;;;   src/type/types-core.lisp — fresh-rigid-var, type-rigid-equal-p
-;;;;   src/type/types-env.lisp — type-env-to-alist
+;;;;   src/type/types-env.lisp — type-env-bindings
 
 (in-package :cl-cc/test)
 
@@ -82,15 +82,15 @@
         (v (cl-cc/type::fresh-type-var  "v")))
     (assert-false (cl-cc/type::type-rigid-equal-p r v))))
 
-;;; ─── type-env-to-alist (types-env.lisp) ─────────────────────────────────────
+;;; ─── type-env-bindings (types-env.lisp) ─────────────────────────────────────
 
-(deftest type-env-to-alist-cases
-  "type-env-to-alist: empty env→nil; extended env→alist with (name . scheme)."
-  (assert-null (cl-cc/type::type-env-to-alist (cl-cc/type::type-env-empty)))
+(deftest type-env-bindings-cases
+  "type-env-bindings: empty env→nil; extended env→alist with (name . scheme)."
+  (assert-null (cl-cc/type::type-env-bindings (cl-cc/type::type-env-empty)))
   (let* ((env  (cl-cc/type::type-env-empty))
          (sch  (cl-cc/type::type-to-scheme cl-cc/type::type-int))
          (env2 (cl-cc/type::type-env-extend 'x sch env))
-         (al   (cl-cc/type::type-env-to-alist env2)))
+         (al   (cl-cc/type::type-env-bindings env2)))
     (assert-= 1 (length al))
     (assert-eq 'x (caar al))))
 
@@ -123,3 +123,45 @@
       (assert-= 1 (cl-cc/type::type-var-id v)))
     ;; Restore approximately (counter may have advanced during fresh-type-var)
     (setf cl-cc/type::*type-var-counter* (max old cl-cc/type::*type-var-counter*))))
+
+;;; ─── %type-free-vars-list unit tests ─────────────────────────────────────────
+
+(deftest-each free-vars-list-base-cases
+  "%type-free-vars-list: var→singleton list; primitive→nil."
+  :cases (("type-var"       t   1)
+          ("type-primitive" nil 0))
+  (is-var expected-count)
+  (let* ((v   (cl-cc/type::fresh-type-var "fv"))
+         (ty  (if is-var v cl-cc/type::type-int))
+         (res (cl-cc/type::%type-free-vars-list ty)))
+    (assert-= expected-count (length res))
+    (when is-var
+      (assert-true (cl-cc/type::type-var-equal-p v (first res))))))
+
+(deftest free-vars-list-arrow-collects-all-with-duplicates
+  "%type-free-vars-list: arrow with repeated var yields duplicate entries (dedup is caller's job)."
+  (let* ((v  (cl-cc/type::fresh-type-var "shared"))
+         (ar (cl-cc/type::make-type-arrow-raw :params (list v) :return v :effects nil :mult nil))
+         (res (cl-cc/type::%type-free-vars-list ar)))
+    (assert-= 2 (length res))
+    (assert-true (cl-cc/type::type-var-equal-p v (first res)))
+    (assert-true (cl-cc/type::type-var-equal-p v (second res)))))
+
+(deftest free-vars-list-forall-filters-bound-var
+  "%type-free-vars-list: forall removes its bound variable from child free vars."
+  (let* ((v1 (cl-cc/type::fresh-type-var "bound"))
+         (v2 (cl-cc/type::fresh-type-var "free"))
+         (ar (cl-cc/type::make-type-arrow-raw :params (list v1) :return v2 :effects nil :mult nil))
+         (fa (cl-cc/type::make-type-forall :var v1 :body ar))
+         (res (cl-cc/type::%type-free-vars-list fa)))
+    (assert-= 1 (length res))
+    (assert-true (cl-cc/type::type-var-equal-p v2 (first res)))))
+
+(deftest free-vars-list-nested-product
+  "%type-free-vars-list: product with 3 distinct vars yields 3 entries."
+  (let* ((v1  (cl-cc/type::fresh-type-var "a"))
+         (v2  (cl-cc/type::fresh-type-var "b"))
+         (v3  (cl-cc/type::fresh-type-var "c"))
+         (prod (cl-cc/type::make-type-product :elems (list v1 v2 v3)))
+         (res  (cl-cc/type::%type-free-vars-list prod)))
+    (assert-= 3 (length res))))

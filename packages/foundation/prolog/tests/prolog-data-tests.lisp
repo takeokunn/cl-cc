@@ -153,3 +153,31 @@
          (fresh2 (cl-cc:rename-variables rule2)))
     (assert-eq (second (cl-cc:rule-head fresh2))
                (second (car (cl-cc:rule-body fresh2))))))
+
+;;; %rename-prolog-term unit tests
+
+(deftest-each prolog-rename-term-atoms-unchanged
+  "%rename-prolog-term: non-logic-var atoms and integers pass through unmodified."
+  :cases (("symbol"  'foo)
+          ("integer" 42)
+          ("keyword" :key)
+          ("nil"     nil))
+  (atom)
+  (let ((renaming (make-hash-table :test 'eq)))
+    (assert-equal atom (cl-cc/prolog::%rename-prolog-term atom renaming))))
+
+(deftest prolog-rename-term-logic-var-gets-fresh-sym
+  "%rename-prolog-term: a logic variable receives a fresh gensym; the same var reuses it."
+  (let ((renaming (make-hash-table :test 'eq)))
+    (let ((r1 (cl-cc/prolog::%rename-prolog-term '?x renaming)))
+      (assert-true  (symbolp r1))
+      (assert-false (eq '?x r1))
+      (assert-eq r1 (cl-cc/prolog::%rename-prolog-term '?x renaming)))))
+
+(deftest prolog-rename-term-cons-traversed
+  "%rename-prolog-term: cons cells are walked recursively; vars inside are renamed."
+  (let ((renaming (make-hash-table :test 'eq)))
+    (let ((result (cl-cc/prolog::%rename-prolog-term '(?x foo ?x) renaming)))
+      (assert-true (consp result))
+      (assert-false (eq '?x (car result)))
+      (assert-eq (car result) (caddr result)))))

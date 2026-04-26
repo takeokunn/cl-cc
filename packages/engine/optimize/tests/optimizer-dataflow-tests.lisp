@@ -3,6 +3,7 @@
 ;;;;
 ;;;; Covers: %sccp-env-copy, %sccp-env-equal-p, %sccp-env-merge,
 ;;;;   %sccp-fold-inst (const, move, jump-zero, binary, unary),
+;;;;   %sccp-redirect-successors, %sccp-process-block,
 ;;;;   opt-pass-sccp (empty, straight-line const fold).
 
 (in-package :cl-cc/test)
@@ -100,6 +101,40 @@
       (assert-true (typep result 'cl-cc/vm::vm-const))
       (assert-= 7 (cl-cc/vm::vm-value result)))))
 
+;;; ─── %sccp-redirect-successors ──────────────────────────────────────────
+
+(deftest sccp-redirect-successors-rewires-edges
+  "%sccp-redirect-successors removes old successor/predecessor links and adds new ones."
+  (let* ((cfg    (cl-cc/optimize::cfg-build
+                  (list (make-vm-const :dst :r0 :value 0)
+                        (make-vm-jump  :label "lbl")
+                        (make-vm-label :name "lbl")
+                        (make-vm-ret   :reg :r0))))
+         (entry  (cl-cc/optimize::cfg-entry cfg))
+         (succ   (first (cl-cc::bb-successors entry)))
+         (extra  (cl-cc/optimize::cfg-new-block cfg)))
+    (cl-cc/optimize::%sccp-redirect-successors entry (list extra))
+    (assert-true  (member extra (cl-cc::bb-successors entry) :test #'eq))
+    (assert-false (member succ  (cl-cc::bb-successors entry) :test #'eq))
+    (assert-true  (member entry (cl-cc::bb-predecessors extra) :test #'eq))
+    (assert-false (member entry (cl-cc::bb-predecessors succ)  :test #'eq))))
+
+;;; ─── %sccp-process-block ─────────────────────────────────────────────────
+
+(deftest sccp-process-block-folds-const-in-block
+  "%sccp-process-block folds vm-add to vm-const when env has both operands."
+  (let* ((env   (make-hash-table :test #'eq))
+         (cfg   (cl-cc/optimize::cfg-build
+                 (list (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
+                       (make-vm-ret :reg :r2))))
+         (entry (cl-cc/optimize::cfg-entry cfg)))
+    (setf (gethash :r0 env) 3 (gethash :r1 env) 4)
+    (let ((out-env (cl-cc/optimize::%sccp-process-block entry env)))
+      (let ((folded (first (cl-cc::bb-instructions entry))))
+        (assert-true (typep folded 'cl-cc/vm::vm-const))
+        (assert-= 7 (cl-cc/vm::vm-value folded)))
+      (assert-= 7 (gethash :r2 out-env)))))
+
 ;;; ─── opt-pass-sccp ───────────────────────────────────────────────────────
 
 (deftest sccp-pass-empty-returns-nil-or-list
@@ -120,3 +155,42 @@
                       (make-vm-ret  :reg :r2)))
          (result (cl-cc/optimize::opt-pass-sccp insts)))
     (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-add)) result))))
+
+;;; ─── %sccp-update-env-for-inst ───────────────────────────────────────────
+
+(deftest-each sccp-update-env-for-inst-cases
+  "%sccp-update-env-for-inst binds env for vm-const, kills env entry for other instructions."
+  :cases (("const-binds"  (make-vm-const :dst :r0 :value 42)  42)
+          ("non-const-kills" (make-vm-add :dst :r0 :lhs :r1 :rhs :r2) nil))
+  (inst expected-val)
+  (let ((env (make-hash-table :test #'eq)))
+    (setf (gethash :r0 env) 99)
+    (cl-cc/optimize::%sccp-update-env-for-inst inst env)
+    (if expected-val
+        (assert-= expected-val (gethash :r0 env))
+        (assert-false (nth-value 1 (gethash :r0 env))))))
+
+(deftest sccp-update-env-for-inst-no-dst-noop
+  "%sccp-update-env-for-inst leaves env unchanged when instruction has no destination."
+  (let ((env (make-hash-table :test #'eq)))
+    (setf (gethash :r0 env) 7)
+    (cl-cc/optimize::%sccp-update-env-for-inst (make-vm-ret :reg :r0) env)
+    (assert-= 7 (gethash :r0 env))))
+
+;;; ─── %sccp-fold-inst jump-zero cases ─────────────────────────────────────
+
+(deftest sccp-fold-inst-jump-zero-false-becomes-jump
+  "%sccp-fold-inst folds vm-jump-zero to vm-jump when condition register is known falsy (0)."
+  (let* ((inst (make-vm-jump-zero :reg :r0 :label "done"))
+         (env  (make-hash-table :test #'eq)))
+    (setf (gethash :r0 env) 0)
+    (let ((result (cl-cc/optimize::%sccp-fold-inst inst env)))
+      (assert-true (typep result 'cl-cc/vm::vm-jump))
+      (assert-equal "done" (cl-cc/vm::vm-label-name result)))))
+
+(deftest sccp-fold-inst-jump-zero-true-eliminates-branch
+  "%sccp-fold-inst returns NIL when condition register is known truthy (non-zero, non-nil)."
+  (let* ((inst (make-vm-jump-zero :reg :r0 :label "done"))
+         (env  (make-hash-table :test #'eq)))
+    (setf (gethash :r0 env) 1)
+    (assert-null (cl-cc/optimize::%sccp-fold-inst inst env))))

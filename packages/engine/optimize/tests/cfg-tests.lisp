@@ -242,3 +242,85 @@
     (let* ((entry (cl-cc/optimize::cfg-entry cfg))
            (result (cl-cc/optimize::cfg-idf (list entry))))
       (assert-true (listp result)))))
+
+;;; ─── %cfg-fallthrough-edge / %cfg-jump-target-edge ───────────────────────
+
+(deftest cfg-fallthrough-edge-adds-edge
+  "%cfg-fallthrough-edge adds a successor/predecessor edge when next-start block exists."
+  (let* ((g   (cl-cc/optimize::make-cfg))
+         (b1  (cl-cc/optimize::cfg-new-block g))
+         (b2  (cl-cc/optimize::cfg-new-block g))
+         (bbs (let ((ht (make-hash-table)))
+                (setf (gethash 1 ht) b2)
+                ht)))
+    (cl-cc/optimize::%cfg-fallthrough-edge b1 1 bbs)
+    (assert-true (member b2 (cl-cc::bb-successors b1) :test #'eq))
+    (assert-true (member b1 (cl-cc::bb-predecessors b2) :test #'eq))))
+
+(deftest cfg-fallthrough-edge-nil-next-is-noop
+  "%cfg-fallthrough-edge does nothing when next-start is nil."
+  (let* ((g  (cl-cc/optimize::make-cfg))
+         (b1 (cl-cc/optimize::cfg-new-block g))
+         (bbs (make-hash-table)))
+    (cl-cc/optimize::%cfg-fallthrough-edge b1 nil bbs)
+    (assert-null (cl-cc::bb-successors b1))))
+
+(deftest cfg-jump-target-edge-resolves-label
+  "%cfg-jump-target-edge wires an edge to the block named by the instruction's label."
+  (let* ((g    (cl-cc/optimize::make-cfg))
+         (src  (cl-cc/optimize::cfg-new-block g))
+         (dest (cl-cc/optimize::cfg-new-block g :label (make-vm-label :name "tgt"))))
+    (declare (ignore dest))
+    (let ((jump (make-vm-jump :label "tgt")))
+      (cl-cc/optimize::%cfg-jump-target-edge src jump g)
+      (let ((tgt (cl-cc/optimize::cfg-get-block-by-label g "tgt")))
+        (assert-true (member tgt (cl-cc::bb-successors src) :test #'eq))))))
+
+;;; ─── %cfg-replace-successor / %cfg-replace-predecessor / %cfg-replace-terminator
+
+(deftest cfg-replace-successor-swaps-block
+  "%cfg-replace-successor replaces one successor block with another."
+  (let* ((blk  (make-instance 'cl-cc/optimize::basic-block))
+         (old  (make-instance 'cl-cc/optimize::basic-block))
+         (new  (make-instance 'cl-cc/optimize::basic-block)))
+    (setf (cl-cc/optimize::bb-successors blk) (list old))
+    (cl-cc/optimize::%cfg-replace-successor blk old new)
+    (assert-false (member old (cl-cc/optimize::bb-successors blk) :test #'eq))
+    (assert-true  (member new (cl-cc/optimize::bb-successors blk) :test #'eq))))
+
+(deftest cfg-replace-predecessor-swaps-block
+  "%cfg-replace-predecessor replaces one predecessor block with another."
+  (let* ((blk  (make-instance 'cl-cc/optimize::basic-block))
+         (old  (make-instance 'cl-cc/optimize::basic-block))
+         (new  (make-instance 'cl-cc/optimize::basic-block)))
+    (setf (cl-cc/optimize::bb-predecessors blk) (list old))
+    (cl-cc/optimize::%cfg-replace-predecessor blk old new)
+    (assert-false (member old (cl-cc/optimize::bb-predecessors blk) :test #'eq))
+    (assert-true  (member new (cl-cc/optimize::bb-predecessors blk) :test #'eq))))
+
+(deftest cfg-replace-terminator-swaps-instruction
+  "%cfg-replace-terminator replaces OLD terminator instruction with NEW in bb-instructions."
+  (let* ((blk  (make-instance 'cl-cc/optimize::basic-block))
+         (old  (make-vm-jump :label "a"))
+         (new  (make-vm-jump :label "b")))
+    (setf (cl-cc/optimize::bb-instructions blk) (list old))
+    (cl-cc/optimize::%cfg-replace-terminator blk old new)
+    (assert-equal (list new) (cl-cc/optimize::bb-instructions blk))))
+
+;;; ─── %cfg-ensure-label ────────────────────────────────────────────────────
+
+(deftest cfg-ensure-label-creates-when-absent
+  "%cfg-ensure-label assigns a fresh label to a block that has none."
+  (let* ((g    (cl-cc/optimize::make-cfg))
+         (blk  (cl-cc/optimize::cfg-new-block g)))
+    (setf (cl-cc/optimize::bb-label blk) nil)
+    (let ((lbl (cl-cc/optimize::%cfg-ensure-label blk g "test")))
+      (assert-true (cl-cc/vm::vm-label-p lbl))
+      (assert-eq lbl (cl-cc/optimize::bb-label blk)))))
+
+(deftest cfg-ensure-label-returns-existing-when-present
+  "%cfg-ensure-label returns the existing label without creating a new one."
+  (let* ((g    (cl-cc/optimize::make-cfg))
+         (blk  (cl-cc/optimize::cfg-new-block g :label (make-vm-label :name "existing"))))
+    (let ((lbl (cl-cc/optimize::%cfg-ensure-label blk g "test")))
+      (assert-equal "existing" (cl-cc/vm::vm-name lbl)))))

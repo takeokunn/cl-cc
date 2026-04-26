@@ -187,10 +187,6 @@
     (assert-null (cl-cc/parse::cache-lookup "a"))
     (assert-null (cl-cc/parse::cache-lookup "b"))))
 
-(deftest incr-content-hash-deterministic
-  "content-hash returns same value for same string."
-  (assert-equal (cl-cc/parse::content-hash "hello")
-                (cl-cc/parse::content-hash "hello")))
 
 ;;; ─── CST Equality ──────────────────────────────────────────────────────────
 

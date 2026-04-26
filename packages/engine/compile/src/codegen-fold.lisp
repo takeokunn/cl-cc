@@ -5,7 +5,7 @@
 ;;;   - %fold-ast-binop           constant-fold a binop node with already-folded operands
 ;;;   - *compile-time-eval-fns*   data table: symbol → evaluator lambda
 ;;;   - *compile-time-value-env*  compile-time binding state vars
-;;;   - %compile-time-falsep, %ast-constant-node-p, %ast->compile-time-value, etc.
+;;;   - %ast-constant-node-p, %ast->compile-time-value, %compile-time-lookup, etc.
 ;;;
 ;;; Evaluation engine (%compile-time-eval-binop, %compile-time-eval-call,
 ;;;   %evaluate-ast-sequence, %evaluate-ast) moved to codegen-fold-eval.lisp.
@@ -129,9 +129,6 @@ filling those fields from NODE."
 
 ;;; ── Compile-time evaluation helpers ─────────────────────────────────────────
 
-(defun %compile-time-falsep (value)
-  (opt-falsep value))
-
 (defun %ast-constant-node-p (node)
   (or (typep node 'ast-int)
       (typep node 'ast-quote)))
@@ -148,16 +145,10 @@ filling those fields from NODE."
       (%clone-source node #'make-ast-quote :value value)))
 
 (defun %compile-time-lookup (name env)
-  "Look up NAME in ENV alist; return (values value t) when found, (values nil nil) otherwise.
-Block environments use the same structure, so %compile-time-lookup-block is an alias."
+  "Look up NAME in ENV alist; return (values value t) when found, (values nil nil) otherwise."
   (let ((entry (assoc name env)))
     (when entry
       (values (cdr entry) t))))
-
-;;; Block environments have the same alist structure as value environments.
-(defun %compile-time-lookup-block (name env)
-  "Look up block NAME in ENV using the same alist protocol as values."
-  (%compile-time-lookup name env))
 
 (defparameter *compile-time-simple-binops*
   '((+ . +) (- . -) (* . *))

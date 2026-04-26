@@ -2,7 +2,8 @@
 ;;;;
 ;;;; Tests for src/optimize/optimizer-copyprop.lisp:
 ;;;;   opt-map-tree, %opt-copy-prop-env-copy/equal-p/canonical/merge,
-;;;;   %opt-copy-prop-add/kill, %opt-value<, opt-pass-copy-prop.
+;;;;   %opt-copy-prop-add/kill, %opt-value<, copyprop-pass-state helpers,
+;;;;   opt-pass-copy-prop.
 
 (in-package :cl-cc/test)
 
@@ -147,6 +148,21 @@
     (assert-eq    :r0   (gethash :r1 result))
     (assert-false (gethash :r2 result))))
 
+;;; ── %opt-value-rank / *opt-type-rank-table* ─────────────────────────────────
+
+(deftest-each copyprop-value-rank-types
+  "%opt-value-rank assigns the correct rank from *opt-type-rank-table* for each type."
+  :cases (("null"      0 nil)
+          ("number"    1 42)
+          ("character" 2 #\a)
+          ("string"    3 "hello")
+          ("symbol"    4 'foo)
+          ("cons"      5 '(a b))
+          ("vector"    6 #(1 2 3))
+          ("unknown"   7 #'identity))
+  (expected value)
+  (assert-= expected (cl-cc/optimize::%opt-value-rank value)))
+
 ;;; ── %opt-value< ─────────────────────────────────────────────────────────────
 
 (deftest-each copyprop-value<-cross-type
@@ -248,3 +264,107 @@ Use `not null` semantics to match both numeric booleans and string indices."
                        when (typep i 'cl-cc/vm::vm-label)
                        collect (cl-cc::vm-lbl-name i))))
     (assert-true (member "start" labels :test #'equal))))
+
+;;; ── copyprop-pass-state helpers ─────────────────────────────────────────────
+
+(deftest copyprop-pass-state-enqueue-adds-to-worklist
+  "%copyprop-enqueue adds a block to the worklist only once."
+  (let ((state (cl-cc/optimize::make-copyprop-pass-state))
+        (block (cl-cc/optimize::cfg-new-block (cl-cc/optimize::make-cfg))))
+    (cl-cc/optimize::%copyprop-enqueue block state)
+    (assert-= 1 (length (cl-cc/optimize::cpps-worklist state)))
+    (cl-cc/optimize::%copyprop-enqueue block state)
+    (assert-= 1 (length (cl-cc/optimize::cpps-worklist state)))))
+
+(deftest copyprop-pass-state-enqueue-does-not-re-add-queued
+  "%copyprop-enqueue is idempotent: already-queued blocks are not added again."
+  (let ((state (cl-cc/optimize::make-copyprop-pass-state))
+        (b1 (cl-cc/optimize::cfg-new-block (cl-cc/optimize::make-cfg)))
+        (b2 (cl-cc/optimize::cfg-new-block (cl-cc/optimize::make-cfg))))
+    (cl-cc/optimize::%copyprop-enqueue b1 state)
+    (cl-cc/optimize::%copyprop-enqueue b2 state)
+    (assert-= 2 (length (cl-cc/optimize::cpps-worklist state)))
+    (cl-cc/optimize::%copyprop-enqueue b1 state)
+    (assert-= 2 (length (cl-cc/optimize::cpps-worklist state)))))
+
+(deftest copyprop-process-block-propagates-copy-to-successor
+  "%copyprop-process-block enqueues successors when out-env changes."
+  (let* ((cfg   (cl-cc/optimize::cfg-build
+                 (list (make-vm-const :dst :r0 :value 1)
+                       (make-vm-move  :dst :r1 :src :r0)
+                       (make-vm-jump  :label "end")
+                       (make-vm-label :name "end")
+                       (make-vm-ret   :reg :r1))))
+         (entry (cl-cc/optimize::cfg-entry cfg))
+         (state (cl-cc/optimize::make-copyprop-pass-state)))
+    (cl-cc/optimize::%copyprop-process-block entry state)
+    (let ((out (gethash entry (cl-cc/optimize::cpps-out-envs state))))
+      (assert-true (hash-table-p out)))))
+
+;;; ── %opt-copy-prop-build-reverse ─────────────────────────────────────────
+
+(deftest copy-prop-build-reverse-creates-inverse-mapping
+  "%opt-copy-prop-build-reverse builds a src→list-of-dsts table from copies."
+  (let ((copies (make-hash-table :test #'eq)))
+    (setf (gethash :r1 copies) :r0
+          (gethash :r2 copies) :r0)
+    (let ((rev (cl-cc/optimize::%opt-copy-prop-build-reverse copies)))
+      (assert-true (member :r1 (gethash :r0 rev) :test #'eq))
+      (assert-true (member :r2 (gethash :r0 rev) :test #'eq)))))
+
+(deftest copy-prop-build-reverse-empty-copies
+  "%opt-copy-prop-build-reverse on an empty copies table returns an empty table."
+  (let ((rev (cl-cc/optimize::%opt-copy-prop-build-reverse
+              (make-hash-table :test #'eq))))
+    (assert-= 0 (hash-table-count rev))))
+
+;;; ── %opt-copy-prop-transfer-block ────────────────────────────────────────
+
+(deftest copy-prop-transfer-block-adds-move-fact
+  "%opt-copy-prop-transfer-block records a vm-move copy fact in the output env."
+  (let* ((blk    (make-instance 'cl-cc/optimize::basic-block))
+         (in-env (make-hash-table :test #'eq)))
+    (setf (cl-cc/optimize::bb-instructions blk)
+          (list (make-vm-move :dst :r1 :src :r0)))
+    (let ((out (cl-cc/optimize::%opt-copy-prop-transfer-block blk in-env)))
+      (assert-eq :r0 (gethash :r1 out)))))
+
+(deftest copy-prop-transfer-block-kills-on-non-move
+  "%opt-copy-prop-transfer-block removes a copy fact when dst is overwritten."
+  (let* ((blk    (make-instance 'cl-cc/optimize::basic-block))
+         (in-env (make-hash-table :test #'eq)))
+    (setf (gethash :r1 in-env) :r0)
+    (setf (cl-cc/optimize::bb-instructions blk)
+          (list (make-vm-const :dst :r1 :value 99)))
+    (let ((out (cl-cc/optimize::%opt-copy-prop-transfer-block blk in-env)))
+      (assert-null (gethash :r1 out)))))
+
+;;; ── %opt-copy-prop-rewrite-inst ─────────────────────────────────────────
+
+(deftest copy-prop-rewrite-inst-substitutes-canonical
+  "%opt-copy-prop-rewrite-inst replaces a src register with its canonical copy."
+  (let ((copies (make-hash-table :test #'eq)))
+    (setf (gethash :r0 copies) :r5)
+    (let* ((inst   (make-vm-add :dst :r2 :lhs :r0 :rhs :r0))
+           (result (cl-cc/optimize::%opt-copy-prop-rewrite-inst inst copies)))
+      (assert-eq :r5 (cl-cc/vm::vm-lhs result))
+      (assert-eq :r5 (cl-cc/vm::vm-rhs result)))))
+
+(deftest copy-prop-rewrite-inst-identity-when-no-copy
+  "%opt-copy-prop-rewrite-inst returns INST unchanged when no copy applies."
+  (let ((copies (make-hash-table :test #'eq)))
+    (let* ((inst (make-vm-const :dst :r0 :value 1)))
+      (assert-eq inst (cl-cc/optimize::%opt-copy-prop-rewrite-inst inst copies)))))
+
+;;; ── %opt-copy-prop-rewrite-block ────────────────────────────────────────
+
+(deftest copy-prop-rewrite-block-rewrites-instructions
+  "%opt-copy-prop-rewrite-block rewrites instructions using in-env copies."
+  (let* ((blk    (make-instance 'cl-cc/optimize::basic-block))
+         (in-env (make-hash-table :test #'eq)))
+    (setf (gethash :r0 in-env) :r5)
+    (setf (cl-cc/optimize::bb-instructions blk)
+          (list (make-vm-add :dst :r2 :lhs :r0 :rhs :r0)))
+    (let ((result (cl-cc/optimize::%opt-copy-prop-rewrite-block blk in-env)))
+      (assert-= 1 (length result))
+      (assert-eq :r5 (cl-cc/vm::vm-lhs (first result))))))

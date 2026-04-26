@@ -2,7 +2,7 @@
 ;;;;
 ;;;; Provides a DCG parsing engine built on the Prolog infrastructure.
 ;;;; Builtins registered in *builtin-predicates* for integration with
-;;;; the Prolog solver. Entry points: dcg-parse, dcg-parse-all.
+;;;; the Prolog solver. Entry points: dcg-parse.
 
 (in-package :cl-cc/prolog)
 
@@ -32,96 +32,80 @@
                   :value (cdr tok-cons)
                   :start-byte start-byte))
 
+;;; ─── DCG Builtin Predicate Registration ─────────────────────────────────────
+
+(defmacro define-dcg-builtin (name (args env k) &body body)
+  "Register NAME as a DCG builtin in *builtin-predicates*."
+  `(setf (gethash ',name *builtin-predicates*)
+         (lambda (,args ,env ,k) ,@body)))
+
 ;;; ─── DCG Builtin Predicates ──────────────────────────────────────────────────
 
-;; dcg-alt: try alternatives
-;; Args: (alt1 alt2 ... s-in s-out)
-;; Each altN is a predicate to try; s-in/s-out are difference list vars.
-(setf (gethash 'dcg-alt *builtin-predicates*)
-      (lambda (args env k)
-        (let ((s-in (car (last args 2)))
-              (s-out (car (last args 1)))
-              (alts (butlast args 2)))
-          (dolist (alt alts)
-            (let ((goal (list alt s-in s-out)))
-              (solve-goal goal env k))))))
+(define-dcg-builtin dcg-alt (args env k)
+  "Try each alternative rule; Args: (alt1 alt2 ... s-in s-out)."
+  (let ((s-in (car (last args 2)))
+        (s-out (car (last args 1)))
+        (alts (butlast args 2)))
+    (dolist (alt alts)
+      (solve-goal (list alt s-in s-out) env k))))
 
-;; dcg-opt: optional (0 or 1 match)
-;; Args: (rule s-in s-out)
-;; Try rule first; if it fails, unify s-in = s-out (epsilon).
-(setf (gethash 'dcg-opt *builtin-predicates*)
-      (lambda (args env k)
-        (let ((rule (first args))
-              (s-in (second args))
-              (s-out (third args)))
-          ;; Try the rule
-          (solve-goal (list rule s-in s-out) env k)
-          ;; Epsilon: s-in = s-out
-          (let ((eps-env (unify s-in s-out env)))
-            (unless (unify-failed-p eps-env)
-              (funcall k eps-env))))))
+(define-dcg-builtin dcg-opt (args env k)
+  "Optional match (0 or 1); Args: (rule s-in s-out)."
+  (let ((rule (first args))
+        (s-in (second args))
+        (s-out (third args)))
+    (solve-goal (list rule s-in s-out) env k)
+    (let ((eps-env (unify s-in s-out env)))
+      (unless (unify-failed-p eps-env)
+        (funcall k eps-env)))))
 
-;; dcg-star: Kleene star (zero or more)
-;; Args: (rule s-in s-out)
-;; Uses a loop guard to prevent infinite loops on epsilon matches.
-(setf (gethash 'dcg-star *builtin-predicates*)
-      (lambda (args env k)
-        (let ((rule (first args))
-              (s-in (second args))
-              (s-out (third args)))
-          (labels ((star-loop (current-in current-env)
-                     ;; First try epsilon (base case)
-                     (let ((eps-env (unify current-in s-out current-env)))
-                       (unless (unify-failed-p eps-env)
-                         (funcall k eps-env)))
-                     ;; Then try one more match + recurse
-                     (let ((mid (gensym "?MID")))
-                       (solve-goal (list rule current-in mid) current-env
-                                   (lambda (new-env)
-                                     (let ((resolved-mid (logic-substitute mid new-env)))
-                                       ;; Guard: must have consumed input
-                                       (let ((resolved-in (logic-substitute current-in new-env)))
-                                         (unless (equal resolved-mid resolved-in)
-                                           (star-loop mid new-env)))))))))
-            (star-loop s-in env)))))
+(defun %dcg-star-loop (rule s-out k current-in current-env)
+  "Recursive helper for dcg-star: consume input with RULE until fixed point."
+  (let ((eps-env (unify current-in s-out current-env)))
+    (unless (unify-failed-p eps-env)
+      (funcall k eps-env)))
+  (let ((mid (gensym "?MID")))
+    (solve-goal (list rule current-in mid) current-env
+                (lambda (new-env)
+                  (let ((resolved-mid (logic-substitute mid new-env))
+                        (resolved-in  (logic-substitute current-in new-env)))
+                    (unless (equal resolved-mid resolved-in)
+                      (%dcg-star-loop rule s-out k mid new-env)))))))
 
-;; dcg-plus: one or more matches
-;; Args: (rule s-in s-out)
-;; Equivalent to: one match, then star.
-(setf (gethash 'dcg-plus *builtin-predicates*)
-      (lambda (args env k)
-        (let ((rule (first args))
-              (s-in (second args))
-              (s-out (third args)))
-          (let ((mid (gensym "?MID")))
-            ;; At least one match
-            (solve-goal (list rule s-in mid) env
-                        (lambda (env1)
-                          ;; Then zero or more
-                          (solve-goal (list 'dcg-star rule mid s-out) env1 k)))))))
+(define-dcg-builtin dcg-star (args env k)
+  "Kleene star (zero or more); Args: (rule s-in s-out)."
+  (let ((rule (first args))
+        (s-in (second args))
+        (s-out (third args)))
+    (%dcg-star-loop rule s-out k s-in env)))
 
-;; dcg-error-recovery: skip tokens until a sync point is found
-;; Args: (s-in s-out)
-;; Skips tokens in s-in until one of *dcg-sync-tokens* is encountered.
-(setf (gethash 'dcg-error-recovery *builtin-predicates*)
-      (lambda (args env k)
-        (let ((s-in (first args))
-              (s-out (second args)))
-          (let ((input (logic-substitute s-in env)))
-            (labels ((skip-loop (remaining)
-                       (cond
-                         ;; Empty input: unify with s-out
-                         ((null remaining)
-                          (let ((new-env (unify s-out nil env)))
-                            (unless (unify-failed-p new-env) (funcall k new-env))))
-                         ;; Sync token found: unify s-out with remaining
-                         ((and (consp (car remaining))
-                               (member (caar remaining) *dcg-sync-tokens*))
-                          (let ((new-env (unify s-out remaining env)))
-                            (unless (unify-failed-p new-env) (funcall k new-env))))
-                         ;; Skip and continue
-                         (t (skip-loop (cdr remaining))))))
-              (skip-loop input))))))
+(define-dcg-builtin dcg-plus (args env k)
+  "One or more matches; Args: (rule s-in s-out)."
+  (let ((rule (first args))
+        (s-in (second args))
+        (s-out (third args))
+        (mid  (gensym "?MID")))
+    (solve-goal (list rule s-in mid) env
+                (lambda (env1)
+                  (solve-goal (list 'dcg-star rule mid s-out) env1 k)))))
+
+(defun %dcg-skip-loop (s-out env k remaining)
+  "Recursive helper for dcg-error-recovery: skip until a sync token."
+  (cond
+    ((null remaining)
+     (let ((new-env (unify s-out nil env)))
+       (unless (unify-failed-p new-env) (funcall k new-env))))
+    ((and (consp (car remaining))
+          (member (caar remaining) *dcg-sync-tokens*))
+     (let ((new-env (unify s-out remaining env)))
+       (unless (unify-failed-p new-env) (funcall k new-env))))
+    (t (%dcg-skip-loop s-out env k (cdr remaining)))))
+
+(define-dcg-builtin dcg-error-recovery (args env k)
+  "Skip tokens until a sync point; Args: (s-in s-out)."
+  (let ((s-in  (first args))
+        (s-out (second args)))
+    (%dcg-skip-loop s-out env k (logic-substitute s-in env))))
 
 ;;; ─── DCG Parse Entry Points ──────────────────────────────────────────────────
 
@@ -130,11 +114,6 @@
    Returns the first successful parse result as remaining input, or NIL on failure.
    Uses Prolog query interface internally."
   (nth-value 1 (phrase-rest rule-name input)))
-
-(defun dcg-parse-all (rule-name input)
-  "Parse INPUT using DCG rule RULE-NAME, returning all possible parses.
-   Each result is the remaining input after a successful parse."
-  (phrase-all rule-name input))
 
 ;;; ─── DCG Rule Construction (moved from prolog.lisp) ─────────────────────────
 
@@ -200,34 +179,30 @@
 
 ;;; DCG token matching builtins
 
-(setf (gethash 'dcg-token-match *builtin-predicates*)
-      (lambda (args env k)
-        (let* ((expected-type (first args))
-               (s-in (second args))
-               (s-out (third args))
-               (input (logic-substitute s-in env)))
-          (when (and (consp input)
-                     (consp (car input))
-                     (eq (caar input) expected-type))
-            (let ((new-env (unify s-out (cdr input) env)))
-              (unless (unify-failed-p new-env)
-                (funcall k new-env)))))))
+(define-dcg-builtin dcg-token-match (args env k)
+  "Match a token by type; Args: (expected-type s-in s-out)."
+  (let* ((expected-type (first args))
+         (s-in  (second args))
+         (s-out (third args))
+         (input (logic-substitute s-in env)))
+    (when (and (consp input) (consp (car input)) (eq (caar input) expected-type))
+      (let ((new-env (unify s-out (cdr input) env)))
+        (unless (unify-failed-p new-env)
+          (funcall k new-env))))))
 
-(setf (gethash 'dcg-token-match-value *builtin-predicates*)
-      (lambda (args env k)
-        (let* ((expected-type (first args))
-               (value-var (second args))
-               (s-in (third args))
-               (s-out (fourth args))
-               (input (logic-substitute s-in env)))
-          (when (and (consp input)
-                     (consp (car input))
-                     (eq (caar input) expected-type))
-            (let ((val-env (unify value-var (cdar input) env)))
-              (unless (unify-failed-p val-env)
-                (let ((new-env (unify s-out (cdr input) val-env)))
-                  (unless (unify-failed-p new-env)
-                    (funcall k new-env)))))))))
+(define-dcg-builtin dcg-token-match-value (args env k)
+  "Match a token by type and bind its value; Args: (expected-type value-var s-in s-out)."
+  (let* ((expected-type (first args))
+         (value-var (second args))
+         (s-in  (third args))
+         (s-out (fourth args))
+         (input (logic-substitute s-in env)))
+    (when (and (consp input) (consp (car input)) (eq (caar input) expected-type))
+      (let ((val-env (unify value-var (cdar input) env)))
+        (unless (unify-failed-p val-env)
+          (let ((new-env (unify s-out (cdr input) val-env)))
+            (unless (unify-failed-p new-env)
+              (funcall k new-env))))))))
 
 ;;; DCG query interface
 

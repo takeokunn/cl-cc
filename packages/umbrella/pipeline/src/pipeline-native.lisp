@@ -42,7 +42,7 @@ without hanging forever on platform utility calls like chmod."
 
 (defun %compile-cache-key (source arch language)
   (format nil "~A-~A-~A"
-          (content-hash source)
+          (sxhash source)
           arch
           language))
 

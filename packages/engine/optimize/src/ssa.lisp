@@ -99,72 +99,46 @@
 
 ;;; ─── SSA Renaming (DFS over dominator tree) ──────────────────────────────
 
+(defun %ssa-rename-block (b state phi-map renamed)
+  "DFS rename pass for one block B, mutating STATE, PHI-MAP, and RENAMED."
+  (let ((pushed-regs nil))
+    (dolist (phi (gethash b phi-map))
+      (let ((new-dst (ssr-push-new-version state (phi-reg phi))))
+        (setf (phi-dst phi) new-dst)
+        (push (phi-reg phi) pushed-regs)))
+    (let ((new-insts nil))
+      (dolist (inst (bb-instructions b))
+        (let* ((reads (opt-inst-read-regs inst))
+               (renamed-inst
+                (if reads
+                    (let ((subst (make-hash-table :test #'eq)))
+                      (dolist (r reads)
+                        (setf (gethash r subst) (ssr-current-version state r)))
+                      (opt-rewrite-inst-regs inst subst))
+                    inst))
+               (dst (ignore-errors (vm-dst inst))))
+          (when dst
+            (let ((new-dst (ssr-push-new-version state dst)))
+              (push dst pushed-regs)
+              (setf renamed-inst (ssa-rewrite-dst renamed-inst dst new-dst))))
+          (push renamed-inst new-insts)))
+      (setf (gethash b renamed) (nreverse new-insts)))
+    (dolist (succ (bb-successors b))
+      (dolist (phi (gethash succ phi-map))
+        (push (cons b (ssr-current-version state (phi-reg phi))) (phi-args phi))))
+    (dolist (child (bb-dom-children b))
+      (%ssa-rename-block child state phi-map renamed))
+    (dolist (r pushed-regs)
+      (ssr-pop-version state r))))
+
 (defun ssa-rename (cfg phi-map)
   "Rename all register references in CFG to SSA form.
    Fills in phi-node DST registers and argument registers.
-   Returns (values renamed-instructions phi-map).
-
-   Works by DFS over the dominator tree rooted at the entry block.
-   For each block:
-     1. Assign new versions to phi-node destinations
-     2. Rename each instruction's src registers to current versions
-     3. Assign new version to each instruction's dst register
-     4. Fill in phi-node args in successor blocks
-     5. Recurse into dominated children
-     6. Pop the versions pushed in this block"
-  (let ((state     (make-ssa-rename-state))
-        ;; renamed-instructions: block → list of renamed instructions
-        (renamed   (make-hash-table :test #'eq)))
-
-    (labels ((rename-block (b)
-               ;; Collect registers pushed in this block (for later pop)
-               (let ((pushed-regs nil))
-
-                 ;; Step 1: rename phi-node destinations
-                 (dolist (phi (gethash b phi-map))
-                   (let ((new-dst (ssr-push-new-version state (phi-reg phi))))
-                     (setf (phi-dst phi) new-dst)
-                     (push (phi-reg phi) pushed-regs)))
-
-                 ;; Step 2 & 3: rename instructions
-                 (let ((new-insts nil))
-                   (dolist (inst (bb-instructions b))
-                     (let* ((reads  (opt-inst-read-regs inst))
-                            ;; Rewrite src registers to their current SSA versions
-                            (renamed-inst
-                             (if reads
-                                 (let ((subst (make-hash-table :test #'eq)))
-                                   (dolist (r reads)
-                                     (setf (gethash r subst) (ssr-current-version state r)))
-                                   (opt-rewrite-inst-regs inst subst))
-                                 inst))
-                            ;; Assign new version to the destination
-                            (dst (ignore-errors (vm-dst inst))))
-                       (when dst
-                         (let ((new-dst (ssr-push-new-version state dst)))
-                           (push dst pushed-regs)
-                           (setf renamed-inst
-                                 (ssa-rewrite-dst renamed-inst dst new-dst))))
-                       (push renamed-inst new-insts)))
-                   (setf (gethash b renamed) (nreverse new-insts)))
-
-                 ;; Step 4: fill phi-args in successors
-                 (dolist (succ (bb-successors b))
-                   (dolist (phi (gethash succ phi-map))
-                     (let ((cur (ssr-current-version state (phi-reg phi))))
-                       (push (cons b cur) (phi-args phi)))))
-
-                 ;; Step 5: recurse into dominated children
-                 (dolist (child (bb-dom-children b))
-                   (rename-block child))
-
-                 ;; Step 6: pop versions pushed in this block
-                 (dolist (r pushed-regs)
-                   (ssr-pop-version state r)))))
-
-      (when (cfg-entry cfg)
-        (rename-block (cfg-entry cfg))))
-
+   Returns (values renamed-instructions phi-map)."
+  (let ((state   (make-ssa-rename-state))
+        (renamed (make-hash-table :test #'eq)))
+    (when (cfg-entry cfg)
+      (%ssa-rename-block (cfg-entry cfg) state phi-map renamed))
     (values renamed phi-map)))
 
 ;;; Trivial phi elimination (ssa-eliminate-trivial-phis) and ssa-rewrite-dst are in ssa-phi-elim.lisp.

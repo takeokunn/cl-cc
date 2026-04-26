@@ -81,6 +81,13 @@ being loaded at compile time."
 (defvar *vm2-const-fusion-table* nil
   "Lazily initialized list of (binary-opcode . immediate-opcode) fusion rules.")
 
+(defun %vm2-emit4 (out op a b c)
+  "Append a 4-element instruction tuple (OP A B C) to the fill-pointer vector OUT."
+  (vector-push-extend op out)
+  (vector-push-extend a out)
+  (vector-push-extend b out)
+  (vector-push-extend c out))
+
 (defun vm2-fuse-immediate-superinstructions (code)
   "Fuse const+arith bytecode pairs into existing immediate opcodes.
 
@@ -93,58 +100,52 @@ This is a conservative VM2 superinstruction helper. It recognizes:
 The helper leaves all other instruction sequences unchanged."
   (unless *vm2-const-fusion-table*
     (setf *vm2-const-fusion-table* (%vm2-build-fusion-table)))
-  (let ((out (make-array 0 :adjustable t :fill-pointer 0))
-        (n (length code))
-        (pc 0)
-        (op2-const (symbol-value '+op2-const+))
-        (op2-halt2 (symbol-value '+op2-halt2+))
+  (let ((out           (make-array 0 :adjustable t :fill-pointer 0))
+        (n             (length code))
+        (pc            0)
+        (op2-const     (symbol-value '+op2-const+))
+        (op2-halt2     (symbol-value '+op2-halt2+))
         (op2-const-halt2 (symbol-value '+op2-const-halt2+)))
-    (labels ((emit4 (op a b c)
-               (vector-push-extend op out)
-               (vector-push-extend a out)
-               (vector-push-extend b out)
-               (vector-push-extend c out)))
-      (loop while (< pc n)
-            do (if (<= (+ pc 8) n)
-                   (let* ((op1 (aref code pc))
-                          (dst1 (aref code (+ pc 1)))
-                          (imm1 (aref code (+ pc 2)))
-                          (aux1 (aref code (+ pc 3)))
-                          (op2 (aref code (+ pc 4)))
-                          (dst2 (aref code (+ pc 5)))
-                          (src21 (aref code (+ pc 6)))
-                          (src22 (aref code (+ pc 7))))
-                     (let ((fused nil))
-                       ;; Try const-fusion rules
-                       (when (= op1 op2-const)
-                         (dolist (rule *vm2-const-fusion-table*)
-                           (when (= op2 (car rule))
-                             (cond
-                               ((= src22 dst1)
-                                (emit4 (cdr rule) dst2 src21 imm1)
-                                (incf pc 8)
-                                (setf fused t)
-                                (return))
-                               ((= src21 dst1)
-                                (emit4 (cdr rule) dst2 src22 imm1)
-                                (incf pc 8)
-                                (setf fused t)
-                                (return))))))
-                       ;; const+halt special case
-                       (unless fused
-                         (if (and (= op1 op2-const) (= op2 op2-halt2) (= dst1 dst2))
-                             (progn
-                               (emit4 op2-const-halt2 imm1 nil nil)
-                               (incf pc 8))
-                             (progn
-                               (emit4 op1 dst1 imm1 aux1)
-                               (incf pc 4))))))
-                   (progn
-                     (emit4 (aref code pc)
-                            (if (< (+ pc 1) n) (aref code (+ pc 1)) nil)
-                            (if (< (+ pc 2) n) (aref code (+ pc 2)) nil)
-                            (if (< (+ pc 3) n) (aref code (+ pc 3)) nil))
-                     (incf pc 4)))))
+    (loop while (< pc n)
+          do (if (<= (+ pc 8) n)
+                 (let* ((op1   (aref code pc))
+                        (dst1  (aref code (+ pc 1)))
+                        (imm1  (aref code (+ pc 2)))
+                        (aux1  (aref code (+ pc 3)))
+                        (op2   (aref code (+ pc 4)))
+                        (dst2  (aref code (+ pc 5)))
+                        (src21 (aref code (+ pc 6)))
+                        (src22 (aref code (+ pc 7))))
+                   (let ((fused nil))
+                     ;; Try const-fusion rules
+                     (when (= op1 op2-const)
+                       (dolist (rule *vm2-const-fusion-table*)
+                         (when (= op2 (car rule))
+                           (cond
+                             ((= src22 dst1)
+                              (%vm2-emit4 out (cdr rule) dst2 src21 imm1)
+                              (incf pc 8)
+                              (setf fused t)
+                              (return))
+                             ((= src21 dst1)
+                              (%vm2-emit4 out (cdr rule) dst2 src22 imm1)
+                              (incf pc 8)
+                              (setf fused t)
+                              (return))))))
+                     ;; const+halt special case
+                     (unless fused
+                       (if (and (= op1 op2-const) (= op2 op2-halt2) (= dst1 dst2))
+                           (progn (%vm2-emit4 out op2-const-halt2 imm1 nil nil)
+                                  (incf pc 8))
+                           (progn (%vm2-emit4 out op1 dst1 imm1 aux1)
+                                  (incf pc 4))))))
+                 (progn
+                   (%vm2-emit4 out
+                               (aref code pc)
+                               (if (< (+ pc 1) n) (aref code (+ pc 1)) nil)
+                               (if (< (+ pc 2) n) (aref code (+ pc 2)) nil)
+                               (if (< (+ pc 3) n) (aref code (+ pc 3)) nil))
+                   (incf pc 4))))
     (coerce out 'simple-vector)))
 
 ;;; Opcode counter (auto-incremented by defopcode)

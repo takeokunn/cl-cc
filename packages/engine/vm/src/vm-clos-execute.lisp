@@ -16,144 +16,138 @@
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
+(defun %vm-cdef-collect-slots (supers own-slots registry)
+  "Merge inherited and own slot names; inherited slots come first."
+  (let ((inherited (collect-inherited-slots supers registry)))
+    (append inherited (remove-if (lambda (s) (member s inherited)) own-slots))))
+
+(defun %vm-cdef-collect-initargs (supers own-initargs registry)
+  "Merge inherited and own initarg→slot alist; inherited entries come first."
+  (let ((inherited (collect-inherited-initargs supers registry)))
+    (append inherited
+            (remove-if (lambda (e) (assoc (car e) inherited)) own-initargs))))
+
+(defun %vm-cdef-collect-default-initargs (inst supers registry state)
+  "Collect default-initarg key→value pairs; own values take precedence over inherited."
+  (let ((own (loop for (key . reg) in (vm-default-initarg-regs inst)
+                   collect (cons key (vm-reg-get state reg))))
+        (inherited (loop for super in supers
+                         for super-ht = (gethash super registry)
+                         when super-ht
+                           append (gethash :__default-initargs__ super-ht))))
+    (append own (remove-if (lambda (e) (assoc (car e) own)) inherited))))
+
+(defun %vm-cdef-collect-class-slots (inst supers registry)
+  "Union of own class-allocated slots with all inherited class-allocated slots."
+  (let ((inherited (loop for super in supers
+                         for super-ht = (gethash super registry)
+                         when super-ht
+                           append (gethash :__class-slots__ super-ht))))
+    (union (vm-class-slots inst) inherited :test #'eq)))
+
+(defun %vm-cdef-init-class-slots (class-ht all-class-slots initform-values)
+  "Initialize class-allocated slots on CLASS-HT from INITFORM-VALUES (skip existing values)."
+  (dolist (slot-name all-class-slots)
+    (unless (gethash slot-name class-ht)
+      (let ((entry (assoc slot-name initform-values)))
+        (setf (gethash slot-name class-ht)
+              (if entry (cdr entry) nil))))))
+
+(defun %vm-obj-class-ht (obj-ht)
+  "Return the class hash-table for an instance OBJ-HT, or NIL."
+  (when (hash-table-p obj-ht) (gethash :__class__ obj-ht)))
+
+(defun %vm-class-slots-of (obj-ht)
+  "Return (values class-ht class-slots) for class-allocation routing."
+  (let ((class-ht (%vm-obj-class-ht obj-ht)))
+    (values class-ht (when class-ht (gethash :__class-slots__ class-ht)))))
+
+(defun %vm-apply-initarg (initarg-key value initarg-map class-slots class-ht obj-ht)
+  "Write VALUE to the slot for INITARG-KEY, routing class-allocated slots to CLASS-HT."
+  (let ((slot-entry (assoc initarg-key initarg-map)))
+    (when slot-entry
+      (let* ((slot-name (cdr slot-entry))
+             (target (if (member slot-name class-slots :test #'eq) class-ht obj-ht)))
+        (setf (gethash slot-name target) value)))))
+
 (defmethod execute-instruction ((inst vm-class-def) state pc labels)
   (declare (ignore labels))
-  (let* ((class-ht (make-hash-table :test #'eq))
-         (registry (vm-class-registry state))
-         (supers (vm-superclasses inst))
-         (inherited-slots (collect-inherited-slots supers registry))
-         (own-slots (vm-slot-names inst))
-         (all-slots (append inherited-slots
-                            (remove-if (lambda (s) (member s inherited-slots)) own-slots)))
-         (inherited-initargs (collect-inherited-initargs supers registry))
-         (own-initargs (vm-slot-initargs inst))
-         (all-initargs (append inherited-initargs
-                               (remove-if (lambda (e) (assoc (car e) inherited-initargs))
-                                          own-initargs)))
+  (let* ((class-ht  (make-hash-table :test #'eq))
+         (registry  (vm-class-registry state))
+         (supers    (vm-superclasses inst))
+         (all-slots (%vm-cdef-collect-slots supers (vm-slot-names inst) registry))
+         (all-initargs (%vm-cdef-collect-initargs supers (vm-slot-initargs inst) registry))
+         (all-default-initargs (%vm-cdef-collect-default-initargs inst supers registry state))
+         (all-class-slots (%vm-cdef-collect-class-slots inst supers registry))
          (initform-values (loop for (slot-name . reg) in (vm-slot-initform-regs inst)
                                 collect (cons slot-name (vm-reg-get state reg)))))
-    ;; Collect default-initargs: own + inherited (own takes precedence)
-    (let* ((own-default-initargs
-             (loop for (key . reg) in (vm-default-initarg-regs inst)
-                   collect (cons key (vm-reg-get state reg))))
-           (inherited-default-initargs
-             (loop for super in supers
-                   for super-ht = (gethash super registry)
-                   when super-ht
-                     append (gethash :__default-initargs__ super-ht)))
-           (all-default-initargs
-             (append own-default-initargs
-                     (remove-if (lambda (e) (assoc (car e) own-default-initargs))
-                                inherited-default-initargs))))
-      ;; Collect class-allocated slot names (own + inherited)
-      (let* ((own-class-slots (vm-class-slots inst))
-             (inherited-class-slots
-               (loop for super in supers
-                     for super-ht = (gethash super registry)
-                     when super-ht
-                       append (gethash :__class-slots__ super-ht)))
-             (all-class-slots (union own-class-slots inherited-class-slots :test #'eq)))
-        (setf (gethash :__name__ class-ht) (vm-class-name-sym inst))
-        (setf (gethash :__superclasses__ class-ht) supers)
-        (setf (gethash :__slots__ class-ht) all-slots)
-        (setf (gethash :__initargs__ class-ht) all-initargs)
-         (setf (gethash :__methods__ class-ht) (make-hash-table :test #'equal))
-         (setf (gethash :__eql-index__ class-ht) (make-hash-table :test #'equal))
-         (setf (gethash :__initforms__ class-ht) initform-values)
-        (setf (gethash :__default-initargs__ class-ht) all-default-initargs)
-        (setf (gethash :__class-slots__ class-ht) all-class-slots)
-        ;; Initialize class-allocated slot values on the class HT itself
-        (dolist (slot-name all-class-slots)
-          (unless (gethash slot-name class-ht)  ; don't overwrite inherited values
-            (let ((initform-entry (assoc slot-name initform-values)))
-              (setf (gethash slot-name class-ht)
-                    (if initform-entry (cdr initform-entry) nil)))))
-        (setf (gethash (vm-class-name-sym inst) registry) class-ht)))
-    (setf (gethash :__cpl__ class-ht)
+    (setf (gethash :__name__             class-ht) (vm-class-name-sym inst)
+          (gethash :__superclasses__     class-ht) supers
+          (gethash :__slots__            class-ht) all-slots
+          (gethash :__initargs__         class-ht) all-initargs
+          (gethash :__methods__          class-ht) (make-hash-table :test #'equal)
+          (gethash :__eql-index__        class-ht) (make-hash-table :test #'equal)
+          (gethash :__initforms__        class-ht) initform-values
+          (gethash :__default-initargs__ class-ht) all-default-initargs
+          (gethash :__class-slots__      class-ht) all-class-slots)
+    (%vm-cdef-init-class-slots class-ht all-class-slots initform-values)
+    (setf (gethash (vm-class-name-sym inst) registry) class-ht
+          (gethash :__cpl__ class-ht)
           (compute-class-precedence-list (vm-class-name-sym inst) registry))
     (vm-reg-set state (vm-dst inst) class-ht)
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-make-obj) state pc labels)
   (declare (ignore labels))
-  (let* ((class-ht (vm-reg-get state (vm-class-reg inst)))
-         (obj-ht (make-hash-table :test #'eq))
-         (slot-names (gethash :__slots__ class-ht))
-         (initarg-map (gethash :__initargs__ class-ht))
-         (initform-values (gethash :__initforms__ class-ht))
+  (let* ((class-ht        (vm-reg-get state (vm-class-reg inst)))
+         (obj-ht          (make-hash-table :test #'eq))
+         (slot-names      (gethash :__slots__            class-ht))
+         (initarg-map     (gethash :__initargs__         class-ht))
+         (initform-values (gethash :__initforms__        class-ht))
          (default-initargs (gethash :__default-initargs__ class-ht))
-         (class-slots (gethash :__class-slots__ class-ht))
-          ;; Collect explicitly provided initarg keys
-         (provided-keys (remove :allow-other-keys (mapcar #'car (vm-initarg-regs inst)) :test #'eq)))
+         (class-slots     (gethash :__class-slots__      class-ht))
+         (provided-keys   (remove :allow-other-keys (mapcar #'car (vm-initarg-regs inst)) :test #'eq)))
     (setf (gethash :__class__ obj-ht) class-ht)
     (%vm-validate-initargs (vm-initarg-regs inst) initarg-map state)
-    ;; Initialize instance-allocated slots from initforms (skip class-allocated)
     (dolist (slot-name slot-names)
       (unless (member slot-name class-slots :test #'eq)
         (let ((initform-entry (assoc slot-name initform-values)))
-          (setf (gethash slot-name obj-ht)
-                (if initform-entry (cdr initform-entry) nil)))))
-    ;; Apply :default-initargs for any initarg not explicitly provided
-    (when default-initargs
-      (loop for (initarg-key . default-value) in default-initargs
-            unless (member initarg-key provided-keys)
-              do (let ((slot-entry (assoc initarg-key initarg-map)))
-                   (when slot-entry
-                     (let ((slot-name (cdr slot-entry))
-                           (target (if (member (cdr slot-entry) class-slots :test #'eq)
-                                       class-ht obj-ht)))
-                       (setf (gethash slot-name target) default-value))))))
-    ;; Apply explicitly provided initargs (override defaults)
+          (setf (gethash slot-name obj-ht) (if initform-entry (cdr initform-entry) nil)))))
+    (loop for (initarg-key . default-value) in default-initargs
+          unless (member initarg-key provided-keys)
+            do (%vm-apply-initarg initarg-key default-value initarg-map class-slots class-ht obj-ht))
     (loop for (initarg-key . value-reg) in (vm-initarg-regs inst)
-          for value = (vm-reg-get state value-reg)
-          do (let ((slot-entry (assoc initarg-key initarg-map)))
-               (when slot-entry
-                 (let ((slot-name (cdr slot-entry))
-                       (target (if (member (cdr slot-entry) class-slots :test #'eq)
-                                   class-ht obj-ht)))
-                   (setf (gethash slot-name target) value)))))
+          do (%vm-apply-initarg initarg-key (vm-reg-get state value-reg) initarg-map class-slots class-ht obj-ht))
     (vm-reg-set state (vm-dst inst) obj-ht)
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-slot-read) state pc labels)
   (declare (ignore labels))
-  (let* ((obj-ht (vm-reg-get state (vm-obj-reg inst)))
-         (slot-name (vm-slot-name-sym inst))
-         (class-ht (when (hash-table-p obj-ht) (gethash :__class__ obj-ht)))
-         (class-slots (when class-ht (gethash :__class-slots__ class-ht))))
-    ;; For class-allocated slots, read from the class HT
-    (if (and class-slots (member slot-name class-slots :test #'eq))
-        (progn
+  (let* ((obj-ht    (vm-reg-get state (vm-obj-reg inst)))
+         (slot-name (vm-slot-name-sym inst)))
+    (multiple-value-bind (class-ht class-slots) (%vm-class-slots-of obj-ht)
+      (if (and class-slots (member slot-name class-slots :test #'eq))
           (vm-reg-set state (vm-dst inst) (gethash slot-name class-ht))
-          (values (1+ pc) nil nil))
-        (multiple-value-bind (value found-p) (gethash slot-name obj-ht)
-          (if found-p
-              (vm-reg-set state (vm-dst inst) value)
-              ;; Slot key absent: distinguish unbound (was slot-makunbound'd) vs missing
-              (let* ((class-ht (gethash :__class__ obj-ht))
-                     (class-name (when (hash-table-p class-ht) (gethash :__name__ class-ht)))
-                     (all-slots  (when (hash-table-p class-ht) (gethash :__slots__ class-ht))))
-                (if (and all-slots (member slot-name all-slots :test #'eq))
-                    ;; FR-384: slot exists in class but is unbound in instance — signal unbound-slot
-                    (error (make-condition 'unbound-slot
-                                           :name slot-name
-                                           :instance obj-ht))
-                    ;; Slot not in class definition — slot-missing protocol (FR-554)
-                    (error "The slot ~S is missing from the object~@[ of class ~S~]"
-                           slot-name class-name))))
-          (values (1+ pc) nil nil)))))
+          (multiple-value-bind (value found-p) (gethash slot-name obj-ht)
+            (if found-p
+                (vm-reg-set state (vm-dst inst) value)
+                (let ((all-slots  (when class-ht (gethash :__slots__ class-ht)))
+                      (class-name (when class-ht (gethash :__name__ class-ht))))
+                  (if (and all-slots (member slot-name all-slots :test #'eq))
+                      (error (make-condition 'unbound-slot :name slot-name :instance obj-ht)) ; FR-384
+                      (error "The slot ~S is missing from the object~@[ of class ~S~]" ; FR-554
+                             slot-name class-name)))))))
+    (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-slot-write) state pc labels)
   (declare (ignore labels))
-  (let* ((obj-ht (vm-reg-get state (vm-obj-reg inst)))
+  (let* ((obj-ht    (vm-reg-get state (vm-obj-reg inst)))
          (slot-name (vm-slot-name-sym inst))
-         (value (vm-reg-get state (vm-value-reg inst)))
-         (class-ht (when (hash-table-p obj-ht) (gethash :__class__ obj-ht)))
-         (class-slots (when class-ht (gethash :__class-slots__ class-ht))))
-    ;; For class-allocated slots, write to the class HT
-    (if (and class-slots (member slot-name class-slots :test #'eq))
-        (setf (gethash slot-name class-ht) value)
-        (setf (gethash slot-name obj-ht) value))
+         (value     (vm-reg-get state (vm-value-reg inst))))
+    (multiple-value-bind (class-ht class-slots) (%vm-class-slots-of obj-ht)
+      (if (and class-slots (member slot-name class-slots :test #'eq))
+          (setf (gethash slot-name class-ht) value)
+          (setf (gethash slot-name obj-ht) value)))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-slot-boundp) state pc labels)
@@ -175,12 +169,11 @@
 
 (defmethod execute-instruction ((inst vm-slot-exists-p) state pc labels)
   (declare (ignore labels))
-  (let* ((obj-ht (vm-reg-get state (vm-obj-reg inst)))
+  (let* ((obj-ht    (vm-reg-get state (vm-obj-reg inst)))
          (slot-name (vm-slot-name-sym inst))
-         (class-ht (when (hash-table-p obj-ht) (gethash :__class__ obj-ht)))
-         (slots (when class-ht (gethash :__slots__ class-ht))))
-    (vm-reg-set state (vm-dst inst)
-                (if (and slots (member slot-name slots)) t nil))
+         (class-ht  (%vm-obj-class-ht obj-ht))
+         (slots     (when class-ht (gethash :__slots__ class-ht))))
+    (vm-reg-set state (vm-dst inst) (if (and slots (member slot-name slots)) t nil))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-register-method) state pc labels)

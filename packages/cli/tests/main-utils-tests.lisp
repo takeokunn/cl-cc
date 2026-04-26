@@ -82,3 +82,26 @@
         (assert-true (search "top" svg))
         (assert-true (search "child" svg)))
       (ignore-errors (delete-file path)))))
+
+;;; ─── %flamegraph-depth-of (extracted helper) ────────────────────────────────
+
+(deftest flamegraph-depth-of-single-node
+  "%flamegraph-depth-of on a leaf node updates max-depth-cell to given depth."
+  (let ((node '(:name "root" :count 1 :children nil))
+        (cell (list 0)))
+    (cl-cc/cli::%flamegraph-depth-of node 3 cell)
+    (assert-= 3 (car cell))))
+
+(deftest flamegraph-depth-of-finds-max
+  "%flamegraph-depth-of traverses children and finds deepest nesting."
+  (let* ((child1 '(:name "c1" :count 1 :children nil))
+         (child2 '(:name "c2" :count 1 :children nil))
+         (children (let ((ht (make-hash-table :test #'equal)))
+                     (setf (gethash "c1" ht) child1
+                           (gethash "c2" ht) child2)
+                     ht))
+         (root (list :name "root" :count 2 :children children))
+         (cell (list 0)))
+    (cl-cc/cli::%flamegraph-depth-of root 0 cell)
+    (assert-= 1 (car cell))))
+

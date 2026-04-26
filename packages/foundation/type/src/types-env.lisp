@@ -53,9 +53,6 @@ DICT-BINDINGS: alist of ((class-name . type-key) . method-alist) for typeclass d
   (make-type-env :bindings      (append bindings (type-env-bindings env))
                  :dict-bindings (type-env-dict-bindings env)))
 
-(defun type-env-to-alist (env)
-  (type-env-bindings env))
-
 (defun type-env-free-vars (env)
   "All free type-vars in ENV's type schemes."
   (remove-duplicates

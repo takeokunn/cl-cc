@@ -13,19 +13,21 @@
 
 (in-package :cl-cc/mir)
 
+(defun %mir-rpo-dfs (blk visited result-cell)
+  "Post-order DFS: push BLK into (car RESULT-CELL) after visiting successors."
+  (unless (gethash (mirb-id blk) visited)
+    (setf (gethash (mirb-id blk) visited) t)
+    (dolist (succ (mirb-succs blk))
+      (%mir-rpo-dfs succ visited result-cell))
+    (push blk (car result-cell))))
+
 (defun mir-rpo (fn)
   "Return all blocks of FN in reverse post-order (standard IR traversal order)."
-  (let ((visited (make-hash-table))
-        (result  nil))
-    (labels ((dfs (blk)
-               (unless (gethash (mirb-id blk) visited)
-                 (setf (gethash (mirb-id blk) visited) t)
-                 (dolist (succ (mirb-succs blk))
-                   (dfs succ))
-                 (push blk result))))
-      (when (mirf-entry fn)
-        (dfs (mirf-entry fn))))
-    result))
+  (let ((visited     (make-hash-table))
+        (result-cell (list nil)))
+    (when (mirf-entry fn)
+      (%mir-rpo-dfs (mirf-entry fn) visited result-cell))
+    (car result-cell)))
 
 (defun mir-dominators (fn)
   "Compute immediate dominators for FN's blocks.

@@ -3,7 +3,7 @@
 ;;;; Continuation of parser-tests.lisp:
 ;;;; Row types (record/variant), type-app fallback, constraint spec parsing,
 ;;;; lambda-list parsing, typed parameters, typed AST nodes,
-;;;; looks-like-type-specifier-p, make-type-function-from-spec.
+;;;; looks-like-type-specifier-p.
 
 (in-package :cl-cc/test)
 
@@ -178,11 +178,11 @@
       (assert-true (type-equal-p type-int (cl-cc/type::parse-type-specifier-maybe form)))
       (assert-null (cl-cc/type::parse-type-specifier-maybe form))))
 
-;;; ─── make-type-function-from-spec ────────────────────────────────────────
+;;; ─── make-type-arrow ─────────────────────────────────────────────────────
 
-(deftest make-type-function-from-spec-basic
+(deftest make-type-arrow-basic
   "Creates arrow type from param-types and return-type."
-  (let ((ty (cl-cc/type::make-type-function-from-spec (list type-int) type-string)))
+  (let ((ty (cl-cc/type::make-type-arrow (list type-int) type-string)))
     (assert-true (type-arrow-p ty))
     (assert-equal 1 (length (type-arrow-params ty)))
     (assert-true (type-equal-p type-string (type-arrow-return ty)))))

@@ -109,3 +109,24 @@
     ;; Fused → 4 words, first word is the superinstruction opcode
     (assert-= 4 (length result))
     (assert-= op-fused (svref result 0))))
+
+;;; ─── %vm2-emit4 (extracted helper) ───────────────────────────────────────
+
+(deftest vm2-emit4-appends-four-elements
+  "%vm2-emit4 appends exactly 4 elements to the fill-pointer vector."
+  (let ((out (make-array 0 :adjustable t :fill-pointer 0)))
+    (cl-cc/vm::%vm2-emit4 out 10 20 30 40)
+    (assert-= 4 (length out))
+    (assert-= 10 (aref out 0))
+    (assert-= 20 (aref out 1))
+    (assert-= 30 (aref out 2))
+    (assert-= 40 (aref out 3))))
+
+(deftest vm2-emit4-multiple-calls-accumulate
+  "%vm2-emit4 called twice appends 8 elements total."
+  (let ((out (make-array 0 :adjustable t :fill-pointer 0)))
+    (cl-cc/vm::%vm2-emit4 out 1 2 3 4)
+    (cl-cc/vm::%vm2-emit4 out 5 6 7 8)
+    (assert-= 8 (length out))
+    (assert-= 5 (aref out 4))
+    (assert-= 8 (aref out 7))))

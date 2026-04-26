@@ -40,34 +40,38 @@
        (values (if (funcall cmp-fn lval rval) 1 0) t))
       (t (values nil nil)))))
 
+(defun %opt-known-constant-p (v)
+  "Return T if V is a known concrete constant (not the :unknown sentinel)."
+  (and (not (eq v :unknown)) (numberp v)))
+
+(defun %opt-apply-algebraic-action (action dst lhs-reg rhs-reg)
+  "Produce an instruction from an algebraic simplification ACTION.
+   Returns NIL if ACTION is unrecognized."
+  (case action
+    (:move-lhs (make-vm-move :dst dst :src lhs-reg))
+    (:move-rhs (make-vm-move :dst dst :src rhs-reg))
+    (otherwise
+     (when (consp action)
+       (case (car action)
+         (:const (make-vm-const :dst dst :value (cadr action)))
+         (:neg   (make-vm-neg  :dst dst
+                               :src (if (eq (cadr action) :lhs) lhs-reg rhs-reg))))))))
+
 (defun opt-simplify-binop (inst dst lhs-reg rhs-reg lval rval)
   "Algebraic simplification of binary INST via rule table lookup.
    LVAL/RVAL are known constant values or :unknown.
    Returns a simplified instruction, or NIL if no simplification applies."
-  (let ((rules (gethash (type-of inst) *opt-algebraic-identity-rules*)))
-    (flet ((const-p (v) (and (not (eq v :unknown)) (numberp v)))
-           (apply-action (action)
-             (case action
-               (:move-lhs (make-vm-move :dst dst :src lhs-reg))
-               (:move-rhs (make-vm-move :dst dst :src rhs-reg))
-               (otherwise
-                (if (consp action)
-                    (case (car action)
-                      (:const (make-vm-const :dst dst :value (cadr action)))
-                      (:neg   (if (eq (cadr action) :lhs)
-                                  (make-vm-neg :dst dst :src lhs-reg)
-                                  (make-vm-neg :dst dst :src rhs-reg))))
-                    nil)))))
-      (dolist (rule rules nil)
-        (let ((cond (car rule))
-              (action (cdr rule)))
-          (when (cond
-                  ((eq cond :same-reg) (eq lhs-reg rhs-reg))
-                  ((and (consp cond) (eq (car cond) :rconst))
-                   (and (const-p rval) (eql rval (cadr cond))))
-                  ((and (consp cond) (eq (car cond) :lconst))
-                   (and (const-p lval) (eql lval (cadr cond)))))
-            (return (apply-action action))))))))
+  (dolist (rule (gethash (type-of inst) *opt-algebraic-identity-rules*) nil)
+    (let ((cond   (car rule))
+          (action (cdr rule)))
+      (when (cond
+              ((eq cond :same-reg)
+               (eq lhs-reg rhs-reg))
+              ((and (consp cond) (eq (car cond) :rconst))
+               (and (%opt-known-constant-p rval) (eql rval (cadr cond))))
+              ((and (consp cond) (eq (car cond) :lconst))
+               (and (%opt-known-constant-p lval) (eql lval (cadr cond)))))
+        (return (%opt-apply-algebraic-action action dst lhs-reg rhs-reg))))))
 
 (defun %opt-branch-target-labels (instructions)
   "Return a hash table of labels that are explicit branch targets."

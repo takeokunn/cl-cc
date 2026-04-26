@@ -8,12 +8,18 @@ cl-cc compiles ANSI Common Lisp to a register-based bytecode VM, and from there 
 
 ```bash
 nix develop
-nix run .#test     # run the canonical unit / integration / e2e test plan
+nix run .#test     # run the canonical fast test plan (excludes selfhost-slow-suite)
 cl-cc repl         # interactive REPL
 cl-cc run file.lisp
 cl-cc eval "(+ 1 2)"
 cl-cc compile file.lisp -o out --arch x86-64
 ```
+
+The default `nix run .#test` path is optimized for feedback speed and excludes
+the heavyweight `selfhost-slow-suite`. Use the lower-level test runner when you
+need to exercise the full slow self-hosting regression path explicitly.
+Set `CLCC_SUITE_TIMEOUT` to override the whole-suite timeout in seconds when you
+need a stricter or looser upper bound for long-running local investigations.
 
 ## Language Support
 
@@ -361,8 +367,17 @@ $ cl-cc repl
 # Enter development environment
 nix develop
 
-# Run the canonical test plan (unit / integration / e2e)
+# Run the canonical fast test plan (excludes selfhost-slow-suite)
 nix run .#test
+
+# Run the heavyweight self-hosting regression suite explicitly
+nix develop -c sbcl --dynamic-space-size 4096 --non-interactive \
+  --eval '(require :asdf)' \
+  --load cl-cc.asd \
+  --load cl-cc-test.asd \
+  --eval '(asdf:disable-output-translations)' \
+  --eval '(asdf:load-system :cl-cc-test/slow)' \
+  --eval '(cl-cc/test:run-suite (quote cl-cc/test::selfhost-slow-suite) :parallel nil :random nil)'
 
 # Build the standalone binary → ./result/bin/cl-cc
 nix build
