@@ -123,6 +123,11 @@
           (target-register target (vm-reg inst)))
   (format stream "  ret~%"))
 
+(defmethod emit-instruction ((target x86-64-target) (inst vm-ret) stream)
+  (format stream "  mov rax, ~A~%"
+          (target-register target (vm-reg inst)))
+  (format stream "  ret~%"))
+
 (defmethod emit-instruction ((target x86-64-target) (inst vm-call) stream)
   (format stream "  call ~A~%"
           (target-register target (vm-func-reg inst)))

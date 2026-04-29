@@ -27,7 +27,7 @@
 ;;;      Those rules are registered correctly and tested for registration only.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-coverage-unstable-unit-suite)
 
 ;;; ─── Shared Helpers ───────────────────────────────────────────────────────
 
@@ -197,4 +197,3 @@
          (id (cl-cc/optimize::egraph-add eg op x x)))
     (eg-saturate eg)
     (assert-true (eg-class-contains-op-p eg id 'cl-cc/optimize::const))))
-

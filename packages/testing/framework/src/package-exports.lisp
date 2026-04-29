@@ -4,6 +4,7 @@
 ;;; Originally lines 623-678 of package.lisp.
 
 (export '(run-tests
+          run-fast-tests
           cl-cc-suite
           cl-cc-unit-suite
           cl-cc-integration-suite
@@ -37,12 +38,14 @@
           deftest-each
           ;; High-level test macros (requirement #7)
           deftest-compile
-          deftest-compile-each
           deftest-codegen
           deftest-vm
           testing
           defbefore
           defafter
+          set-test-timeouts!
+          set-test-timeouts-by-prefix!
+          set-suite-test-timeout!
           skip
           pending
           deftest-fuzz

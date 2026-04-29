@@ -111,12 +111,3 @@
           (if dep-result
               (eq (getf dep-result :status) :pass)
               t)))))
-
-(defun %default-test-timeout ()
-  "Return the default per-test timeout in seconds."
-  (let ((raw (uiop:getenv "timeout")))
-    (or (and raw
-             (ignore-errors
-               (let ((parsed (parse-integer raw)))
-                 (and (plusp parsed) parsed))))
-        10)))

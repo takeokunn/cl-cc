@@ -6,7 +6,7 @@
 
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-cli-serial-suite)
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Helpers

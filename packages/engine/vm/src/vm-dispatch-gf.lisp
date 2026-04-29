@@ -112,7 +112,7 @@ Only single-argument eql specializers are indexed for fast lookup."
 (defun %vm-dispatch-key-collect (remaining prefix)
   "Generate all dispatch-key tuples from REMAINING CPL lists, prepending PREFIX."
   (if (null remaining)
-      (list (nreverse prefix))
+      (list (reverse prefix))
       (loop for class in (car remaining)
             nconc (%vm-dispatch-key-collect (cdr remaining) (cons class prefix)))))
 

@@ -14,7 +14,8 @@
 
 (defsuite macro-pbt-suite
   :description "Property-Based Tests for Macro Expansion"
-  :parent cl-cc-pbt-suite)
+  :parent cl-cc-pbt-suite
+  :parallel nil)
 
 (in-suite macro-pbt-suite)
 

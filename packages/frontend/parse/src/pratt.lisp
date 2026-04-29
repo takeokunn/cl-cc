@@ -104,7 +104,7 @@
           (cons (or (pratt-tok-start ctx tok) 0)
                 (or (pratt-tok-end ctx tok) 0))))
       (return-from pratt-parse-expr
-        (make-cst-error-node :kind :error :message "unexpected token"
+        (make-cst-error :kind :error :message "unexpected token"
                              :start-byte (if tok (or (pratt-tok-start ctx tok) 0) 0)
                              :end-byte (if tok (or (pratt-tok-end ctx tok) 0) 0))))
     (let ((left (funcall nud ctx tok)))

@@ -83,8 +83,7 @@ detection format can run the test-level 30s timeout."
   (let ((result (cl-cc/expand::compiler-macroexpand-all '(setf (symbol-value my-sym) 42))))
     (assert-eq 'let (car result))
     (let ((str (format nil "~S" result)))
-      (assert-true (search "RT-SET-SYMBOL-VALUE" str))
-      (assert-true (search "FIND-SYMBOL" str))
+      (assert-true (search "*RUNTIME-SET-SYMBOL-VALUE-FN*" str))
       (assert-true (search "MY-SYM" str)))))
 
 (deftest-each expander-setf-simple-runtime-bridges

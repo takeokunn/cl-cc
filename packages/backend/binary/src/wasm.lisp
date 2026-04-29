@@ -2,10 +2,7 @@
 ;;;
 ;;; LEB128 encoding, byte buffer helpers, and IEEE754 double-float bit
 ;;; manipulation used by the WASM emit pipeline and tests.
-;;;
-;;; Note: The WASM binary section encoder (wasm-binary-builder, type encoding,
-;;; section serialization) was removed as dead code — the emit pipeline uses
-;;; WAT text format instead (see wasm-trampoline-emit.lisp).
+;;; The emit pipeline uses WAT text format (see wasm-trampoline-emit.lisp).
 ;;;
 ;;; Reference: https://webassembly.github.io/spec/core/binary/index.html
 
@@ -48,23 +45,14 @@
   "Create a fresh WASM byte buffer (adjustable byte array with fill pointer)."
   (make-binary-buffer 0))
 
-(defun wasm-buf-write-byte (buf byte)
-  "Append a single byte to BUF (an adjustable byte array with fill-pointer)."
-  (binary-buffer-write-u8 buf byte))
-
-(defun wasm-buf-write-bytes (buf bytes)
-  "Append a sequence of bytes (list or vector) to BUF."
-  (binary-buffer-write-bytes buf bytes))
-
 (defun wasm-buf-write-uleb128 (buf value)
   "Write VALUE as unsigned LEB128 into BUF."
-  (wasm-buf-write-bytes buf (encode-uleb128 value)))
+  (binary-buffer-write-bytes buf (encode-uleb128 value)))
 
 (defun wasm-buf-write-sleb128 (buf value)
   "Write VALUE as signed LEB128 into BUF."
-  (wasm-buf-write-bytes buf (encode-sleb128 value)))
+  (binary-buffer-write-bytes buf (encode-sleb128 value)))
 
-;; Note: wasm-buf-write-string-utf8 removed (dead code — never called from production or tests).
 
 (defun portable-double-float-bits (value)
   "Return VALUE as an IEEE754 double bit pattern using portable CL operations."
@@ -105,19 +93,7 @@
          (lo (logand bits #xffffffff))
          (hi (ash bits -32)))
     (loop for shift from 0 to 24 by 8
-          do (wasm-buf-write-byte buf (logand (ash lo (- shift)) #xff)))
+          do (binary-buffer-write-u8 buf (logand (ash lo (- shift)) #xff)))
     (loop for shift from 0 to 24 by 8
-          do (wasm-buf-write-byte buf (logand (ash hi (- shift)) #xff)))))
+          do (binary-buffer-write-u8 buf (logand (ash hi (- shift)) #xff)))))
 
-;; Note: wasm-buffer-to-array removed (dead code — never called from production or tests).
-
-;;; Note: The following WASM binary format sections were removed as dead code
-;;; (never called from production or tests). The WASM emit pipeline uses WAT
-;;; text format instead (see packages/backend/emit/src/wasm-trampoline-emit.lisp).
-;;;
-;;; Removed functions:
-;;;   wasm-write-section, encode-func-type, encode-struct-type,
-;;;   encode-locals, write-wasm-file
-;;;
-;;; Removed data:
-;;;   +wasm-magic-bytes+, +wasm-version-bytes+, wasm-binary-builder struct

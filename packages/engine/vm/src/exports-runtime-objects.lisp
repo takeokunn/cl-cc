@@ -1,7 +1,6 @@
 (in-package :cl-cc/vm)
 
-;;; Object-system, dispatch, bridge, and environment exports split out from the
-;;; main runtime export list to keep each file human-readable.
+;;; Object-system, dispatch, bridge, and environment exports.
 
 (export
  '(vm-class-def
@@ -102,6 +101,7 @@
    make-vm2-state
    vm2-state-p
    vm2-state-registers
+   vm2-state-values-buffer
    vm2-state-output-stream
    vm2-state-global-vars
    vm-output-stream

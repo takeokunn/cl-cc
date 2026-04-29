@@ -26,25 +26,25 @@
   (let ((sym-buf (elf-make-buffer))
         (symbols (reverse (elf64-symbols builder))))
     ;; Entry 0: STN_UNDEF (all zeros)
-    (elf-buf-pad sym-buf +elf64-sym-size+)
+    (binary-buffer-write-pad sym-buf +elf64-sym-size+)
     ;; Add each symbol
     (dolist (sym symbols)
       (destructuring-bind (name binding type section-idx value size) sym
         (let ((name-offset (strtab-add strtab name)))
           ;; st_name(4)
-          (elf-buf-u32le sym-buf name-offset)
+          (binary-buffer-write-u32le sym-buf name-offset)
           ;; st_info(1): (binding << 4) | type
           (elf-buf-u8 sym-buf (logior (ash binding 4) type))
           ;; st_other(1): 0
           (elf-buf-u8 sym-buf 0)
           ;; st_shndx(2): section index (0 = undefined)
-          (elf-buf-u16le sym-buf section-idx)
+          (binary-buffer-write-u16le sym-buf section-idx)
           ;; st_value(8)
-          (elf-buf-u64le sym-buf value)
+          (binary-buffer-write-u64le sym-buf value)
           ;; st_size(8)
-          (elf-buf-u64le sym-buf size))))
+          (binary-buffer-write-u64le sym-buf size))))
     ;; local count = 1 (only STN_UNDEF entry is "local")
-    (values (elf-buf-to-array sym-buf) 1)))
+    (values (binary-buffer-to-array sym-buf) 1)))
 
 (defun elf64-build-rela (builder sym-index-map)
   "Build .rela.text section bytes.
@@ -55,25 +55,25 @@
       (destructuring-bind (offset type sym-name addend) entry
         (let ((sym-idx (or (gethash sym-name sym-index-map) 0)))
           ;; r_offset(8): byte offset in .text
-          (elf-buf-u64le rela-buf offset)
+          (binary-buffer-write-u64le rela-buf offset)
           ;; r_info(8): (sym-idx << 32) | type
-          (elf-buf-u64le rela-buf (logior (ash sym-idx 32) type))
+          (binary-buffer-write-u64le rela-buf (logior (ash sym-idx 32) type))
           ;; r_addend(8): signed addend
-          (elf-buf-s64le rela-buf addend))))
-    (elf-buf-to-array rela-buf)))
+          (binary-buffer-write-s64le rela-buf addend))))
+    (binary-buffer-to-array rela-buf)))
 
 (defun elf64-write-shdr (buf name-off type flags offset size link info align entsize)
   "Write a 64-byte section header entry to BUF."
-  (elf-buf-u32le buf name-off)   ; sh_name
-  (elf-buf-u32le buf type)       ; sh_type
-  (elf-buf-u64le buf flags)      ; sh_flags
-  (elf-buf-u64le buf 0)          ; sh_addr (0 for .o files)
-  (elf-buf-u64le buf offset)     ; sh_offset
-  (elf-buf-u64le buf size)       ; sh_size
-  (elf-buf-u32le buf link)       ; sh_link
-  (elf-buf-u32le buf info)       ; sh_info
-  (elf-buf-u64le buf align)      ; sh_addralign
-  (elf-buf-u64le buf entsize))   ; sh_entsize
+  (binary-buffer-write-u32le buf name-off)   ; sh_name
+  (binary-buffer-write-u32le buf type)       ; sh_type
+  (binary-buffer-write-u64le buf flags)      ; sh_flags
+  (binary-buffer-write-u64le buf 0)          ; sh_addr (0 for .o files)
+  (binary-buffer-write-u64le buf offset)     ; sh_offset
+  (binary-buffer-write-u64le buf size)       ; sh_size
+  (binary-buffer-write-u32le buf link)       ; sh_link
+  (binary-buffer-write-u32le buf info)       ; sh_info
+  (binary-buffer-write-u64le buf align)      ; sh_addralign
+  (binary-buffer-write-u64le buf entsize))   ; sh_entsize
 
 (defun elf64-finalize (builder)
   "Assemble the complete ELF64 object file. Returns a (simple-array (unsigned-byte 8) (*))."
@@ -103,7 +103,7 @@
          (strtab-bytes   (strtab-bytes strtab))
          (shstrtab-bytes (strtab-bytes shstrtab))
          ;; .text bytes
-         (text-bytes (elf-buf-to-array (elf64-text-buf builder)))
+         (text-bytes (binary-buffer-to-array (elf64-text-buf builder)))
          (bss-size        (elf64-bss-size builder))
          ;; Layout: ELF header + sections + section headers
          ;; Section ordering: NULL, .text, .bss, .rela.text, .symtab, .strtab, .shstrtab
@@ -136,46 +136,46 @@
     (elf-buf-u8 out +elf-data-lsb+)     ; EI_DATA
     (elf-buf-u8 out +elf-version-cur+)  ; EI_VERSION
     (elf-buf-u8 out +elf-osabi-none+)   ; EI_OSABI
-    (elf-buf-pad out 8)                  ; EI_ABIVERSION + padding
+    (binary-buffer-write-pad out 8)                  ; EI_ABIVERSION + padding
     ;; e_type(2)
-    (elf-buf-u16le out +elf-type-rel+)
+    (binary-buffer-write-u16le out +elf-type-rel+)
      ;; e_machine(2)
-     (elf-buf-u16le out (elf64-machine builder))
+     (binary-buffer-write-u16le out (elf64-machine builder))
     ;; e_version(4)
-    (elf-buf-u32le out +elf-version-cur+)
+    (binary-buffer-write-u32le out +elf-version-cur+)
     ;; e_entry(8): 0 for .o
-    (elf-buf-u64le out 0)
+    (binary-buffer-write-u64le out 0)
     ;; e_phoff(8): 0 (no program headers)
-    (elf-buf-u64le out 0)
+    (binary-buffer-write-u64le out 0)
     ;; e_shoff(8): section header table offset
-    (elf-buf-u64le out shoff)
+    (binary-buffer-write-u64le out shoff)
     ;; e_flags(4): 0
-    (elf-buf-u32le out 0)
+    (binary-buffer-write-u32le out 0)
     ;; e_ehsize(2): 64
-    (elf-buf-u16le out +elf64-ehdr-size+)
+    (binary-buffer-write-u16le out +elf64-ehdr-size+)
     ;; e_phentsize(2): 0
-    (elf-buf-u16le out 0)
+    (binary-buffer-write-u16le out 0)
     ;; e_phnum(2): 0
-    (elf-buf-u16le out 0)
+    (binary-buffer-write-u16le out 0)
     ;; e_shentsize(2): 64
-    (elf-buf-u16le out +elf64-shdr-size+)
+    (binary-buffer-write-u16le out +elf64-shdr-size+)
     ;; e_shnum(2)
-    (elf-buf-u16le out n-sections)
+    (binary-buffer-write-u16le out n-sections)
     ;; e_shstrndx(2)
-    (elf-buf-u16le out shstrtab-idx)
+    (binary-buffer-write-u16le out shstrtab-idx)
 
      ;; ---- Section Data ----
-     (elf-buf-pad out (- text-offset (length out)))
-     (elf-buf-bytes out text-bytes)
-     (elf-buf-pad out (- rela-offset (length out)))
-     (elf-buf-bytes out rela-buf)
-     (elf-buf-pad out (- symtab-offset (length out)))
-     (elf-buf-bytes out sym-buf)
-     (elf-buf-pad out (- strtab-offset (length out)))
-     (elf-buf-bytes out strtab-bytes)
-     (elf-buf-pad out (- shstrtab-offset (length out)))
-     (elf-buf-bytes out shstrtab-bytes)
-     (elf-buf-pad out (- shoff (length out)))
+     (binary-buffer-write-pad out (- text-offset (length out)))
+     (binary-buffer-write-bytes out text-bytes)
+     (binary-buffer-write-pad out (- rela-offset (length out)))
+     (binary-buffer-write-bytes out rela-buf)
+     (binary-buffer-write-pad out (- symtab-offset (length out)))
+     (binary-buffer-write-bytes out sym-buf)
+     (binary-buffer-write-pad out (- strtab-offset (length out)))
+     (binary-buffer-write-bytes out strtab-bytes)
+     (binary-buffer-write-pad out (- shstrtab-offset (length out)))
+     (binary-buffer-write-bytes out shstrtab-bytes)
+     (binary-buffer-write-pad out (- shoff (length out)))
 
     ;; ---- Section Headers ----
     ;; SHN 0: NULL
@@ -215,7 +215,7 @@
                        shstrtab-offset shstrtab-size
                        0 0 1 0)
 
-    (elf-buf-to-array out)))
+    (binary-buffer-to-array out)))
 
 ;;; ------------------------------------------------------------
 ;;; Public API

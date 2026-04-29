@@ -24,7 +24,7 @@
 
 ;;; Multiple Top-Level Forms and Values Tests
 
-(deftest-compile-each compile-multiple-forms-and-values
+(deftest-compile compile-multiple-forms-and-values
   "Multiple top-level forms, values, and multiple-value-bind all return expected numeric results."
   :cases (("forms-simple"    6  "(defun foo (x) (+ x 1)) (foo 5)")
           ("forms-progn"     3  "1 2 3")
@@ -38,7 +38,7 @@
           ("mvb-single"      42 "(multiple-value-bind (x) (values 42) x)"))
   )
 
-(deftest-compile-each compile-values-nil
+(deftest-compile compile-values-nil
   "values and multiple-value-bind return nil in edge cases."
   :cases (("empty"        nil "(values)")
           ("mvb-missing"  nil "(multiple-value-bind (a b c) (values 1 2) c)")))
@@ -46,7 +46,7 @@
 
 ;;; Extended List and Macro Tests
 
-(deftest-compile-each compile-keywordp-and-list-macros
+(deftest-compile compile-keywordp-and-list-macros
   "keywordp, push/pop/incf/decf/nth/nthcdr/nreverse return the expected numeric values."
   :cases (("keyword"     1  "(keywordp :foo)")
           ("non-keyword" 0  "(keywordp 'foo)")
@@ -85,14 +85,14 @@
 ;;; Extended Lambda List Tests (&rest, &optional, &key)
 
 ;; &rest tests
-(deftest-compile-each compile-rest-params
+(deftest-compile compile-rest-params
   "&rest collects remaining arguments into a list."
   :cases (("basic"     '(1 2 3) "(defun my-list (&rest args) args) (my-list 1 2 3)")
           ("required"  '(1 2 3) "(defun fr (a &rest r) (cons a r)) (fr 1 2 3)")
           ("single"    '(42)    "(defun my-list1 (&rest args) args) (my-list1 42)"))
   )
 
-(deftest-compile-each compile-rest-extras
+(deftest-compile compile-rest-extras
   "&rest edge cases: empty produces nil; car and recursive length work on rest lists."
   :cases (("empty-nil"   nil "(defun my-list0 (&rest args) args) (my-list0)")
           ("car-rest"    10  "(defun first-rest (&rest args) (car args)) (first-rest 10 20 30)")
@@ -100,7 +100,7 @@
   )
 
 ;; &optional tests
-(deftest-compile-each compile-optional-params
+(deftest-compile compile-optional-params
   "&optional parameters use provided values, defaults, or nil."
   :cases (("provided"          15 "(defun opt-add (a &optional b) (if b (+ a b) a)) (opt-add 10 5)")
           ("missing"           10 "(defun opt-add2 (a &optional b) (if b (+ a b) a)) (opt-add2 10)")
@@ -111,7 +111,7 @@
   )
 
 ;; &key tests
-(deftest-compile-each compile-key-params
+(deftest-compile compile-key-params
   "&key parameters support defaults, reordering, and combination with required args."
   :cases (("basic"         7  "(defun key-add (&key x y) (+ x y)) (key-add :x 3 :y 4)")
           ("default"      10  "(defun key-def (&key (x 0) (y 0)) (+ x y)) (key-def :x 10)")
@@ -122,7 +122,7 @@
   )
 
 ;; lambda with extended params
-(deftest-compile-each compile-lambda-params
+(deftest-compile compile-lambda-params
   "lambda forms support &rest and &optional parameters."
   :cases (("rest"              '(10 20 30) "(funcall (lambda (&rest args) args) 10 20 30)")
           ("optional-default"  5           "(funcall (lambda (a &optional (b 0)) (+ a b)) 5)")
@@ -130,7 +130,7 @@
   )
 
 ;; combined features
-(deftest-compile-each compile-rest-combined
+(deftest-compile compile-rest-combined
   "&rest combined with &optional and closure capture."
   :cases (("with-optional" '(3 4 5)     " (defun opt-rest (a &optional (b 0) &rest r) r) (opt-rest 1 2 3 4 5)")
           ("closure"       '(10 20 30)  " (defun make-lister () (lambda (&rest args) args)) (funcall (make-lister) 10 20 30)"))
@@ -138,7 +138,7 @@
 
 ;;; Variadic Arithmetic and List Tests
 
-(deftest-compile-each compile-variadic-arith
+(deftest-compile compile-variadic-arith
   "Variadic +, *, - and car of list produce correct numeric results."
   :cases (("plus-3"    6  "(+ 1 2 3)")
           ("plus-5"   15  "(+ 1 2 3 4 5)")
@@ -150,9 +150,7 @@
           ("list-car"  1  "(car (list 1 2 3))"))
   )
 
-(deftest-compile-each compile-list-construction
+(deftest-compile compile-list-construction
   "list builds proper lists."
   :cases (("basic" '(1 2 3) "(list 1 2 3)")
           ("single" '(42)   "(list 42)")))
-
-;;; Stdlib / I/O / array/sort/coerce tests moved to compiler-tests-stdlib.lisp.

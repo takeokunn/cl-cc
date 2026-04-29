@@ -5,7 +5,7 @@
 ;;;; print, prin1, princ, write-to-string, close, unread-char, listen.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-codegen-unit-serial-suite)
 
 ;;; ── READ-CHAR / READ-LINE / READ ─────────────────────────────────────────
 

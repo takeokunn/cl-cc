@@ -4,7 +4,7 @@
 ;;; annotation, condition classes, value restriction, and polymorphic recursion helpers.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-type-serial-suite)
 
 ;;; ─── Effect Inference ─────────────────────────────────────────────────────
 

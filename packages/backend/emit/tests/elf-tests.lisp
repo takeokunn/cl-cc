@@ -52,10 +52,10 @@
     (assert-equal #xFF (aref buf 0))))
 
 (deftest-each elf-buf-little-endian-writes
-  "elf-buf-u16le/u32le/u64le write little-endian: low byte at index 0."
-  :cases (("u16le" #'cl-cc/binary::elf-buf-u16le #x1234             2 '((0 #x34) (1 #x12)))
-          ("u32le" #'cl-cc/binary::elf-buf-u32le #xDEADBEEF         4 '((0 #xEF) (1 #xBE) (2 #xAD) (3 #xDE)))
-          ("u64le" #'cl-cc/binary::elf-buf-u64le #x0102030405060708 8 '((0 #x08) (7 #x01))))
+  "binary-buffer-write-u16le/u32le/u64le write little-endian: low byte at index 0."
+  :cases (("u16le" #'cl-cc/binary::binary-buffer-write-u16le #x1234             2 '((0 #x34) (1 #x12)))
+          ("u32le" #'cl-cc/binary::binary-buffer-write-u32le #xDEADBEEF         4 '((0 #xEF) (1 #xBE) (2 #xAD) (3 #xDE)))
+          ("u64le" #'cl-cc/binary::binary-buffer-write-u64le #x0102030405060708 8 '((0 #x08) (7 #x01))))
   (writer value expected-len byte-checks)
   (let ((buf (cl-cc/binary::elf-make-buffer)))
     (funcall writer buf value)
@@ -63,29 +63,29 @@
     (loop for (idx expected) in byte-checks
           do (assert-equal expected (aref buf idx)))))
 
-(deftest elf-buf-pad-zeros
-  "elf-buf-pad writes N zero bytes."
+(deftest binary-buffer-write-pad-zeros
+  "binary-buffer-write-pad writes N zero bytes."
   (let ((buf (cl-cc/binary::elf-make-buffer)))
-    (cl-cc/binary::elf-buf-pad buf 4)
+    (cl-cc/binary::binary-buffer-write-pad buf 4)
     (assert-equal 4 (length buf))
     (assert-true (every #'zerop (coerce buf 'list)))))
 
-(deftest-each elf-buf-bytes-input-types
-  "elf-buf-bytes accepts both a byte vector and a plain list, writing 3 bytes."
+(deftest-each binary-buffer-write-bytes-input-types
+  "binary-buffer-write-bytes accepts both a byte vector and a plain list, writing 3 bytes."
   :cases (("vector" (make-array 3 :element-type '(unsigned-byte 8) :initial-contents '(1 2 3)))
           ("list"   '(#x10 #x20 #x30)))
   (input)
   (let ((buf (cl-cc/binary::elf-make-buffer)))
-    (cl-cc/binary::elf-buf-bytes buf input)
+    (cl-cc/binary::binary-buffer-write-bytes buf input)
     (assert-equal 3 (length buf))
     (assert-equal (elt input 0) (aref buf 0))
     (assert-equal (elt input 2) (aref buf 2))))
 
-(deftest elf-buf-to-array-returns-simple-array
-  "elf-buf-to-array returns a simple (unsigned-byte 8) array."
+(deftest binary-buffer-to-array-returns-simple-array
+  "binary-buffer-to-array returns a simple (unsigned-byte 8) array."
   (let ((buf (cl-cc/binary::elf-make-buffer)))
     (cl-cc/binary::elf-buf-u8 buf 42)
-    (let ((arr (cl-cc/binary::elf-buf-to-array buf)))
+    (let ((arr (cl-cc/binary::binary-buffer-to-array buf)))
       (assert-true (typep arr '(simple-array (unsigned-byte 8) (*))))
       (assert-equal 1 (length arr))
       (assert-equal 42 (aref arr 0)))))

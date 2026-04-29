@@ -1,8 +1,6 @@
 ;;;; runtime-ops.lisp — Array, arithmetic, bitwise, comparison, and math rt-* wrappers
 ;;;
-;;; Extracted from runtime.lisp.
 ;;; Contains: Arrays/Vectors, Arithmetic, Bitwise, Comparisons, Math sections.
-;;;
 ;;; Depends on runtime.lisp (define-rt-predicate, define-rt-binary-predicate).
 ;;; Load order: immediately after runtime.lisp.
 

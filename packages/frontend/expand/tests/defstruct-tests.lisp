@@ -132,7 +132,8 @@
            ("show" 'show)
            ("ord"  'ord))
   (tc-name)
-  (ds-assert-deriving-registers tc-name))
+  (handler-bind ((warning #'muffle-warning))
+    (ds-assert-deriving-registers tc-name)))
 
 ;;; ─── %defstruct-extract-boa-parts ────────────────────────────────────────
 

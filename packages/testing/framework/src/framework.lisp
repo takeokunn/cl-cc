@@ -18,6 +18,39 @@
     (format t "~A~%" line)
     (force-output)))
 
+(defun %verbose-tap-p ()
+  "Return T when CLCC_VERBOSE_TAP is set to a non-empty value."
+  (let ((v (uiop:getenv "CLCC_VERBOSE_TAP")))
+    (and v (not (zerop (length v))))))
+
+(defun %source-file-display (path)
+  "Return PATH as a relative string when under cwd, else its namestring."
+  (when (null path) (return-from %source-file-display nil))
+  (let* ((ns  (if (pathnamep path) (namestring path) (princ-to-string path)))
+         (cwd (ignore-errors (namestring (uiop:getcwd)))))
+    (if (and cwd (>= (length ns) (length cwd))
+             (string= ns cwd :end1 (length cwd)))
+        (subseq ns (length cwd))
+        ns)))
+
+(defun %detail-inject-context (detail suite source-file duration-ms)
+  "Build compact failure block: inject suite/file after YAML '---', then inject duration."
+  (let ((base (if detail
+                  (%detail-inject-duration detail duration-ms)
+                  (%format-minimal-yaml-duration duration-ms))))
+    (if (and (>= (length base) 6)
+             (string= base "  ---" :end1 5)
+             (char= (char base 5) #\Newline))
+        (with-output-to-string (s)
+          (format s "  ---~%")
+          (when suite
+            (format s "  suite:       ~A~%" suite))
+          (let ((file-str (and source-file (%source-file-display source-file))))
+            (when file-str
+              (format s "  file:        ~A~%" file-str)))
+          (write-string (subseq base 6) s))
+        base)))
+
 (defun %duration-ms-from-result (result)
   "Derive duration_ms (double-float) from :duration-ns. Returns 0.0d0 when
 the timing harness hasn't populated the field (e.g. legacy synthetic
@@ -51,29 +84,38 @@ so subseq/string= never see negative bounds."
   (format nil "  ---~%  duration_ms: ~,3F~%  ..." duration-ms))
 
 (defun %tap-print-result (result)
-  "Print a single TAP test result line plus a YAML diagnostic block."
-  (let* ((number (getf result :number))
-         (name   (getf result :name))
-         (status (getf result :status))
-         (detail (getf result :detail))
-         (duration-ms (%duration-ms-from-result result)))
+  "Print a single test result. Compact mode (default) emits only failures.
+CLCC_VERBOSE_TAP=1 restores full TAP v13 output."
+  (let* ((number      (getf result :number))
+         (name        (getf result :name))
+         (status      (getf result :status))
+         (detail      (getf result :detail))
+         (suite       (getf result :suite))
+         (source-file (getf result :source-file))
+         (duration-ms (%duration-ms-from-result result))
+         (verbose-p   (%verbose-tap-p)))
     (sb-thread:with-mutex (*tap-mutex*)
-      (ecase status
-        (:pass
-         (format t "ok ~A - ~A~%" number name)
-         (format t "~A~%" (%format-minimal-yaml-duration duration-ms)))
-        (:fail
-         (format t "not ok ~A - ~A~%" number name)
-         (if detail
-             (format t "~A~%" (%detail-inject-duration detail duration-ms))
+      (if verbose-p
+          (ecase status
+            (:pass
+             (format t "ok ~A - ~A~%" number name)
+             (format t "~A~%" (%format-minimal-yaml-duration duration-ms)))
+            (:fail
+             (format t "not ok ~A - ~A~%" number name)
+             (if detail
+                 (format t "~A~%" (%detail-inject-duration detail duration-ms))
+                 (format t "~A~%" (%format-minimal-yaml-duration duration-ms))))
+            (:skip
+             (format t "ok ~A - ~A # SKIP ~A~%" number name (or detail ""))
+             (format t "~A~%" (%format-minimal-yaml-duration duration-ms)))
+            (:pending
+             (format t "not ok ~A - ~A # TODO ~A~%" number name (or detail ""))
              (format t "~A~%" (%format-minimal-yaml-duration duration-ms))))
-        (:skip
-         (format t "ok ~A - ~A # SKIP ~A~%" number name (or detail ""))
-         (format t "~A~%" (%format-minimal-yaml-duration duration-ms)))
-        (:pending
-         (format t "not ok ~A - ~A # TODO ~A~%" number name (or detail ""))
-         (format t "~A~%" (%format-minimal-yaml-duration duration-ms))))
-       (force-output))))
+          (when (eq status :fail)
+            (format t "not ok - ~A~%" name)
+            (format t "~A~%~%"
+                    (%detail-inject-context detail suite source-file duration-ms))))
+      (force-output))))
 
 ;;; ------------------------------------------------------------
 ;;; Canonical Suite Definitions

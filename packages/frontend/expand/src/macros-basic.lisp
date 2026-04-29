@@ -1,6 +1,8 @@
 (in-package :cl-cc/expand)
 ;;; Built-in Macros for Bootstrap
 
+(defvar *setf-compound-place-handlers*)
+
 ;; CHECK-TYPE macro
 (defun %make-type-error (datum expected-type)
   "Construct a TYPE-ERROR condition with DATUM and EXPECTED-TYPE."
@@ -46,13 +48,21 @@
      ;; (setf (slot-value obj slot) value) — handled by parser, but macro fallback
      `(setf-slot-value ,(second place) ,(third place) ,value))
     ((and (consp place) (eq (car place) 'getf))
-     ;; (setf (getf plist indicator) value) — rebuild plist with new value
-     (let ((v (gensym "V")))
-       `(let ((,v ,value))
-          (setq ,(second place) (rt-plist-put ,(second place) ,(third place) ,v))
-          ,v)))
+      ;; (setf (getf plist indicator) value) — rebuild plist with new value
+      (let ((v (gensym "V")))
+        `(let ((,v ,value))
+           (setq ,(second place) (rt-plist-put ,(second place) ,(third place) ,v))
+           ,v)))
     (t
-     (error "SETF: Unsupported place ~S" place))))
+     (let ((handler (and (consp place)
+                         (symbolp (car place))
+                         (gethash (car place) *setf-compound-place-handlers*))))
+       (cond
+         (handler (funcall handler place value))
+         ((and (consp place) (symbolp (car place)) (= (length place) 2))
+          (expand-setf-accessor place value))
+         (t
+          (error "SETF: Unsupported place ~S" place)))))))
 
 ;; PSETQ macro (parallel setq)
 (register-macro 'psetq

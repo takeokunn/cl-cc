@@ -29,8 +29,8 @@
     vm-neg vm-abs vm-inc vm-dec
     vm-div vm-cl-div vm-mod vm-rem
     vm-concatenate
-    ;; (floor/ceiling/truncate/round moved to :write-global — they set the
-    ;; vm-values-list side-channel, which DCE must not eliminate)
+    ;; floor/ceiling/truncate/round are :write-global — they set the
+    ;; vm-values-list side-channel which DCE must not eliminate
     ;; Integer comparison
     vm-lt vm-gt vm-le vm-ge vm-num-eq vm-eq
     ;; Bitwise / shift

@@ -31,11 +31,9 @@
 (defun generalize (env ty)
   "Generalize TY by quantifying free vars not free in ENV.
 ENV may be a type-env struct or nil (empty env)."
-  (let* ((ty-fv  (type-free-vars ty))
-         (env-fv (cond
-                    ((null env)       nil)
-                    ((type-env-p env) (type-env-free-vars env))
-                    (t                (type-env-free-vars env))))
+  (let* ((env    (or env (type-env-empty)))
+         (ty-fv  (type-free-vars ty))
+         (env-fv (type-env-free-vars env))
          (to-q   (set-difference ty-fv env-fv :test #'type-var-equal-p)))
     (make-type-scheme to-q ty)))
 
@@ -79,4 +77,5 @@ ENV may be a type-env struct or nil (empty env)."
 
 (defun apply-unification (ty subst)
   "Apply SUBST to TY — convenience wrapper."
-  (when subst (zonk ty subst)))
+  (when subst
+    (zonk ty subst)))

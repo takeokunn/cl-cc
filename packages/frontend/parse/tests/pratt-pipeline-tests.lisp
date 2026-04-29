@@ -2,7 +2,7 @@
 ;;;;
 ;;;; Tests: CST node source positions, parse-cl-source multiple forms,
 ;;;; parse-all-forms s-expression output, parse-source single form,
-;;;; error recovery via cst-error-node, special form dispatch,
+;;;; error recovery via cst-error, special form dispatch,
 ;;;; parse-and-lower pipeline, pratt-parse-expr, pratt-add-diagnostic,
 ;;;; and pratt-parse-list-until.
 
@@ -72,7 +72,7 @@
   "parse-source signals an error on empty source"
   (assert-signals error (cl-cc:parse-source "")))
 
-;;; ─── Error Recovery via cst-error-node ──────────────────────────────────────
+;;; ─── Error Recovery via cst-error ───────────────────────────────────────────
 
 (deftest parse-unmatched-paren-adds-diagnostic
   "Unmatched open paren produces a diagnostic"
@@ -107,16 +107,16 @@
 ;;; ─── pratt-parse-expr: Direct Tests ──────────────────────────────────────────
 
 (deftest pratt-parse-expr-empty-nud-table-returns-error
-  "pratt-parse-expr with an empty NUD table returns cst-error-node for any non-empty input."
+  "pratt-parse-expr with an empty NUD table returns cst-error for any non-empty input."
   (let* ((ctx  (make-test-ctx "42"))
          (node (cl-cc/parse::pratt-parse-expr ctx)))
-    (assert-true (cl-cc/parse::cst-error-node-p node))))
+    (assert-true (cl-cc/parse::cst-error-p node))))
 
 (deftest pratt-parse-expr-eof-returns-error
-  "pratt-parse-expr on empty input returns cst-error-node even with empty NUD table."
+  "pratt-parse-expr on empty input returns cst-error even with empty NUD table."
   (let* ((ctx  (make-test-ctx ""))
          (node (cl-cc/parse::pratt-parse-expr ctx)))
-    (assert-true (cl-cc/parse::cst-error-node-p node))))
+    (assert-true (cl-cc/parse::cst-error-p node))))
 
 (deftest-each pratt-parse-expr-node-type
   "parse-cl-source returns the correct CST node type for each CL grammar input shape."

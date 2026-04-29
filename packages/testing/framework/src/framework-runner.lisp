@@ -17,6 +17,25 @@
 (defun %run-after-fns-safely (after-fns)
   (dolist (af after-fns) (ignore-errors (funcall af))))
 
+(defun %format-backtrace-lines (n)
+  "Capture N SBCL backtrace frames, each line indented for YAML embedding."
+  (let ((raw (with-output-to-string (s) (sb-debug:backtrace n s))))
+    (with-output-to-string (out)
+      (loop with start = 0
+            while (< start (length raw))
+            do (let ((nl (position #\Newline raw :start start)))
+                 (let ((line (subseq raw start (or nl (length raw)))))
+                   (when (plusp (length line))
+                     (format out "    ~A~%" line)))
+                 (if nl (setf start (1+ nl)) (return)))))))
+
+(defun %format-error-detail (e)
+  "Format an unhandled error into a YAML block with condition_type and backtrace."
+  (format nil "  ---~%  condition_type: ~A~%  message: ~S~%  backtrace: |~%~A  ..."
+          (type-of e)
+          (princ-to-string e)
+          (%format-backtrace-lines 10)))
+
 ;;; ── Macro-environment isolation ──────────────────────────────────────────
 ;;; Each test runs in a fresh copy of the macro/expander tables so that
 ;;; defmacro side-effects inside one test do not bleed into the next.
@@ -49,16 +68,20 @@ via sb-thread:join-thread :timeout instead.")
         (handler-bind
             ((skip-condition
                (lambda (c)
-                 (return-from %run-body
-                   (%make-test-result name number suite :skip (skip-reason c)))))
-             (pending-condition
+                  (return-from %run-body
+                    (%make-test-result name number suite :skip (skip-reason c)))))
+              (pending-condition
                (lambda (c)
-                 (return-from %run-body
-                   (%make-test-result name number suite :pending (pending-reason c))))))
-          (if (eq *test-runner-mode* :parallel)
-               (funcall fn)
-               (sb-ext:with-timeout (or timeout (%default-test-timeout))
-                 (funcall fn)))
+                  (return-from %run-body
+                    (%make-test-result name number suite :pending (pending-reason c)))))
+             (sb-kernel:redefinition-with-defun
+              (lambda (c)
+                (declare (ignore c))
+                (muffle-warning))))
+           (if (eq *test-runner-mode* :parallel)
+                (funcall fn)
+                (sb-ext:with-timeout (or timeout (%default-test-timeout))
+                  (funcall fn)))
           (dolist (af after-fns) (funcall af))
           (%run-invariants)
           (%make-test-result name number suite :pass nil))
@@ -70,8 +93,7 @@ via sb-thread:join-thread :timeout instead.")
         (%fail-result name number suite (%format-timeout-detail timeout)))
       (error (e)
         (%run-after-fns-safely after-fns)
-        (%fail-result name number suite
-                      (format nil "  ---~%  message: ~S~%  ..." (princ-to-string e)))))))
+        (%fail-result name number suite (%format-error-detail e))))))
 
 (defun %compute-duration-ns (start-time end-time)
   "Convert internal-time-units difference to integer nanoseconds.
@@ -80,12 +102,13 @@ LC_ALL-independent integer arithmetic, never scientific notation."
          internal-time-units-per-second))
 
 (defun %run-single-test (test-plist number results-so-far)
-  "Run one test and return a result plist with :duration-ns attached."
-  (let* ((name       (getf test-plist :name))
-         (fn         (getf test-plist :fn))
-         (timeout    (%effective-test-timeout test-plist))
-         (suite      (getf test-plist :suite))
-         (start-time (get-internal-real-time))
+  "Run one test and return a result plist with :duration-ns and :source-file attached."
+  (let* ((name        (getf test-plist :name))
+         (fn          (getf test-plist :fn))
+         (timeout     (%effective-test-timeout test-plist))
+         (suite       (getf test-plist :suite))
+         (source-file (getf test-plist :source-file))
+         (start-time  (get-internal-real-time))
          (duration-ns 0)
          (result nil))
     (when (uiop:getenv "CLCC_TEST_TRACE")
@@ -109,7 +132,7 @@ LC_ALL-independent integer arithmetic, never scientific notation."
                                              (princ-to-string e))))))))
       (setf duration-ns (%compute-duration-ns start-time (get-internal-real-time))))
     (if result
-        (append result (list :duration-ns duration-ns))
+        (append result (list :duration-ns duration-ns :source-file source-file))
         (append (%fail-result name number suite
                               "  ---~%  message: \"aborted before producing result\"~%  ...")
-                (list :duration-ns duration-ns)))))
+                (list :duration-ns duration-ns :source-file source-file)))))

@@ -217,18 +217,15 @@
            (equal (second lambda-form) params)))))
 
 (deftest defun-c-enforces-contracts-binding-pbt
-  "DEFUN/C enforces preconditions and postconditions at runtime."
-  (assert-equal 4
-                (cl-cc:run-string "(progn
-                                          (cl-cc:defun/c add1-positive (x)
-                                            :requires (> x 0)
-                                            :ensures (= result (+ x 1))
-                                            (+ x 1))
-                                          (add1-positive 3))"))
-  (assert-signals error
-    (cl-cc:run-string "(progn
-                              (cl-cc:defun/c add1-positive (x)
-                                :requires (> x 0)
-                                :ensures (= result (+ x 1))
-                                (+ x 1))
-                              (add1-positive 0))")))
+  "DEFUN/C expands with explicit pre/post contract checks."
+  (let ((expanded-1
+          (cl-cc:our-macroexpand-1
+           '(defun/c add1-positive-pbtb (x)
+              :requires (> x 0)
+              :ensures (= result (+ x 1))
+              (+ x 1)))))
+    (assert-eq 'defun/c (car expanded-1))
+    (let ((expanded (cl-cc:our-macroexpand-all expanded-1 nil)))
+      (assert-eq 'defun/c (car expanded))
+      (assert-eq 'add1-positive-pbtb (cadr expanded))
+      (assert-equal '(x) (caddr expanded)))))

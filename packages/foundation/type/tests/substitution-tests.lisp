@@ -4,7 +4,7 @@
 ;;; composition, occurs check, generalize/instantiate, and normalization.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-type-serial-suite)
 
 ;;; ─── Substitution Structure ─────────────────────────────────────────────
 
@@ -179,7 +179,9 @@
           ("in-env"      0 t))
   (expected-count var-in-env-p)
   (let* ((a (cl-cc/type:fresh-type-var 'a))
-         (env (if var-in-env-p (list (cons 'x a)) nil))
+         (env (if var-in-env-p
+                  (cl-cc/type:type-env-extend 'x (cl-cc/type:type-to-scheme a) (cl-cc/type:type-env-empty))
+                  nil))
          (ret (if var-in-env-p cl-cc/type:type-int a))
          (fn-ty (cl-cc/type:make-type-arrow-raw :params (list a) :return ret))
          (scheme (generalize env fn-ty)))
@@ -277,9 +279,8 @@
 (deftest apply-unification-resolves-mapped-var
   "apply-unification substitutes a mapped type variable with its concrete type."
   (let* ((v     (cl-cc/type:fresh-type-var 'x))
-         (target (cl-cc/type:parse-type-specifier 'fixnum))
-         (subst  (make-hash-table :test #'eql)))
-    (setf (gethash v subst) target)
+          (target (cl-cc/type:parse-type-specifier 'fixnum))
+         (subst  (cl-cc/type:subst-extend v target nil)))
     (let ((result (cl-cc/type:apply-unification v subst)))
       (assert-true result)
       (assert-false (cl-cc/type:type-var-p result)))))

@@ -18,16 +18,16 @@
   :cases (("type-error"
            (lambda (s) (cl-cc/vm::make-vm-type-error s 'fixnum "hello"))
            'cl-cc::vm-type-error
-           (lambda (c) (and (equal 'fixnum (cl-cc/vm::vm-expected-type c))
-                            (equal "hello" (cl-cc/vm::vm-datum c)))))
+           (lambda (c) (and (equal 'fixnum (type-error-expected-type c))
+                            (equal "hello" (type-error-datum c)))))
           ("unbound-variable"
            (lambda (s) (cl-cc/vm::make-vm-unbound-variable s 'x))
            'cl-cc::vm-unbound-variable
-           (lambda (c) (equal 'x (cl-cc/vm::vm-variable-name c))))
+           (lambda (c) (equal 'x (cell-error-name c))))
           ("undefined-function"
            (lambda (s) (cl-cc/vm::make-vm-undefined-function s 'foo))
            'cl-cc::vm-undefined-function
-           (lambda (c) (equal 'foo (cl-cc/vm::vm-function-name c))))
+           (lambda (c) (equal 'foo (cell-error-name c))))
           ("division-by-zero"
            (lambda (s) (cl-cc/vm::make-vm-division-by-zero s 42))
            'cl-cc::vm-division-by-zero

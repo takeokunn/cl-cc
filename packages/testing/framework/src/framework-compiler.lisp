@@ -8,7 +8,7 @@
 ;;; ------------------------------------------------------------
 ;;;
 ;;; These macros reduce boilerplate in the most common test patterns:
-;;;   1. deftest-compile / deftest-compile-each  — compile-and-run tests (~200+ tests)
+;;;   1. deftest-compile  — compile-and-run tests (~200+ tests)
 ;;;   2. deftest-codegen                         — AST codegen instruction checks
 ;;;   3. deftest-vm                              — VM instruction execute-and-check
 
@@ -26,20 +26,22 @@ Syntax:
 When :STDLIB is T, uses (run-string form :stdlib t) instead of assert-run=."
   (let ((expansions
           (loop for (label expected form) in cases
-                for test-name = (intern (format nil "~A [~A]" (symbol-name name) label))
+                for source-id = (pathname-name
+                                 (or *compile-file-pathname*
+                                     *load-pathname*
+                                     *default-pathname-defaults*))
+                for test-name = (intern
+                                 (format nil "~A/~A [~A]"
+                                         (string-upcase source-id)
+                                         (symbol-name name)
+                                         label))
                 collect
-                 `(deftest ,test-name
-                    ,docstring
+                  `(deftest ,test-name
+                     ,docstring
                     ,(if stdlib
                          `(assert-evaluates-to ,form ,expected :stdlib t)
                          `(assert-run= ,expected ,form))))))
     `(progn ,@expansions)))
-
-(defmacro deftest-compile-each (name docstring &key cases stdlib)
-  "Compatibility wrapper for parameterized compile-and-run tests.
-Keeps higher-level test declarations declarative while delegating expansion to
-DEFTEXT-COMPILE. CASES follow the same shape: (\"label\" expected form)."
-  `(deftest-compile ,name ,docstring :cases ,cases :stdlib ,stdlib))
 
 ;;; --- Codegen Instruction Check ---
 

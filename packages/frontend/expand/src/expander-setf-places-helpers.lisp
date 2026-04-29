@@ -1,6 +1,5 @@
 (in-package :cl-cc/expand)
 
-;;; Helper extracted from expander-helpers.lisp.
 ;;; Only setf-place cons-cell expansion uses this logic.
 
 (defun expand-setf-cons-place (place value)

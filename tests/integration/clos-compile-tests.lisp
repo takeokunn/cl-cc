@@ -213,5 +213,3 @@
               (slot-value p 'a))"))
   (expected form)
   (assert-= expected (run-string form)))
-
-;;; :default-initargs, :allocation :class, EQL, and qualifier tests moved to clos-dispatch-tests.lisp.

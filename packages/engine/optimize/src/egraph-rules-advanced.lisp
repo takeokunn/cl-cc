@@ -28,15 +28,25 @@
 The primary source of truth is the Prolog `egraph-rule` fact set emitted by
 `defrule`; the in-memory guard table is consulted only to attach existing `:when`
 predicates to the fact-backed rule records." 
-  (mapcar (lambda (fact)
-            (let ((name (second fact))
-                  (lhs  (third fact))
-                  (rhs  (fourth fact)))
-              (list :name name
-                    :lhs lhs
-                    :rhs rhs
-                    :when (gethash name *egraph-rule-guards*))))
-          (cl-cc/prolog:query-all '(egraph-rule ?name ?lhs ?rhs))))
+  (flet ((%unquote-once (x)
+           (if (and (consp x) (eq (car x) 'quote) (consp (cdr x)))
+               (cadr x)
+               x))
+         (%normalize-rule-name (name)
+           (if (symbolp name)
+               (multiple-value-bind (sym foundp)
+                   (find-symbol (symbol-name name) :cl-cc/optimize)
+                 (if foundp sym name))
+               name)))
+    (mapcar (lambda (fact)
+              (let ((name (%normalize-rule-name (%unquote-once (second fact))))
+                    (lhs  (%unquote-once (third fact)))
+                    (rhs  (%unquote-once (fourth fact))))
+                (list :name name
+                     :lhs lhs
+                     :rhs rhs
+                     :when (gethash name *egraph-rule-guards*))))
+            (cl-cc/prolog:query-all '(egraph-rule ?name ?lhs ?rhs)))))
 
 ;;; ─── E-Graph Instruction Rewriter ────────────────────────────────────────
 

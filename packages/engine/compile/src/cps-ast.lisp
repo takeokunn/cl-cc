@@ -128,4 +128,3 @@ Each binding (sym . val-ast) generates a fresh temp var and wraps the remainder 
   "Transform #'var to CPS (function reference)."
   (list 'funcall k (list 'function (ast-function-name node))))
 
-;;; Control-flow and non-local CPS transforms moved to cps-ast-control.lisp.

@@ -1,7 +1,7 @@
 ;;;; tests/unit/compile/codegen-string-kwargs-tests.lisp — String keyword-argument codegen tests
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-codegen-unit-serial-suite)
 
 (deftest codegen-string-comparison-keywords-use-subseq
   "Keyworded string comparisons compile substring slices before the comparison."

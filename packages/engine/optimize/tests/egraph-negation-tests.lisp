@@ -11,7 +11,7 @@
 ;;; first; both files share the :cl-cc/test package.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-coverage-unstable-unit-suite)
 
 ;;; ─── Negation: mul-neg1 ──────────────────────────────────────────────────
 ;;; mul-neg1-r: (mul ?x (const -1)) → (neg ?x)

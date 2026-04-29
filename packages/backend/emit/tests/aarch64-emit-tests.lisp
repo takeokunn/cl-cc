@@ -109,7 +109,7 @@
     (assert-true (search "ret" asm))))
 
 (deftest aarch64-emit-print-and-unsupported-cases
-  "vm-print emits rt-print call; unsupported instructions now signal errors."
+  "vm-print emits rt-print call; unsupported instructions signal errors."
   (let ((tgt (%make-aarch64-target)))
     (let ((asm (%aarch64-emit tgt (make-vm-print :reg :r0))))
       (assert-true (search "bl rt-print" asm))

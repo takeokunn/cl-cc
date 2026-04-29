@@ -81,6 +81,11 @@
     (integer (wasm-fixnum-box (format nil "(i64.const ~D)" val)))
     (null    "(ref.null eq)")
     ((eql t) "(ref.i31 (i32.const 1))")
+    ;; The trampoline backend currently has no first-class symbol object model.
+    ;; For compile-only WAT generation, treat symbol literals as opaque eqrefs so
+    ;; programs containing defvar/defparameter and similar symbol-designator flows
+    ;; can still emit valid WAT instead of aborting during extraction.
+    (symbol  "(ref.null eq)")
     (string  (error "Unsupported WASM trampoline string constant: ~S" val))
     (t       (error "Unsupported WASM trampoline constant: ~S" val))))
 

@@ -1,7 +1,7 @@
 ;;;; tests/unit/compile/codegen-clos-tests.lisp — Codegen CLOS Unit Tests
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-codegen-unit-serial-suite)
 
 (defun make-test-slot (name &key initarg)
   "Build a minimal ast-slot-def for use in codegen tests."

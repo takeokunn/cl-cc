@@ -46,4 +46,4 @@
 
 ---
 
-**Status: 820/1078 tracked FRs complete (76%) | Self-hosting: 8/8 | Tests: 6871 pass, 0 fail**
+**Status: 820/1078 tracked FRs complete (76%) | Self-hosting: 8/8 | Test counts vary by entrypoint and should be verified from the current run artifacts**

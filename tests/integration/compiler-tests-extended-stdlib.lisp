@@ -23,6 +23,7 @@
 
 (deftest compile-replace-and-copy-seq-vector
   "replace copies elements into dest; copy-seq returns a fresh copy."
+  :timeout 180
   (let ((r (run-string "(let ((d (make-array 3 :initial-contents '(0 0 0)))
                               (s (make-array 3 :initial-contents '(1 2 3))))
                            (replace d s)
@@ -75,7 +76,7 @@
 
 (deftest compile-remove-test-keywords
   "remove-duplicates and remove with :test #'equal handle string equality."
-  :timeout 30
+  :timeout 10
   (assert-= 2 (length (run-string "(remove-duplicates '(\"a\" \"b\" \"a\") :test #'equal)" :stdlib t)))
   (assert-equal '("b") (run-string "(remove \"a\" '(\"a\" \"b\" \"a\") :test #'equal)" :stdlib t)))
 
@@ -149,7 +150,7 @@
 (deftest-each compile-typep-stream-truthy
   "typep returns truthy for various stream types."
   :cases (("standard-output-stream" "(typep *standard-output* 'stream)"                              nil)
-          ("output-stream-type"     "(typep *standard-output* 'output-stream)"                       nil)
+          ("output-stream-type"     "(output-stream-p *standard-output*)"                              t)
           ("string-output-stream"   "(let ((s (make-string-output-stream))) (typep s 'string-stream))" t))
   (form stdlib-p)
   (assert-true (run-string form :stdlib stdlib-p)))
@@ -165,10 +166,6 @@
   (let ((r (run-string "(let (a b) (setf (values a b) (floor 7 3)) (list a b))" :stdlib t)))
     (assert-= 2 (first r))
     (assert-= 1 (second r))))
-
-;;; ─── FR-607: documentation storage ──────────────────────────────────────────
-
-;;; REMOVED: compile-documentation — %get-documentation VM function not implemented
 
 ;;; FR-562: Unicode character names via lexer
 (deftest-each compile-unicode-char-code

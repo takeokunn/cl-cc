@@ -143,8 +143,13 @@ CLOS descriptor hash tables → slot :__name__; primitives → *rt-primitive-typ
              (eql-index   (gethash :__eql-index__ gf))
              (first-arg   (first args))
              (class-name  (%rt-classify-arg first-arg))
-             (method      (or (and eql-index (first (gethash first-arg eql-index)))
-                              (%rt-lookup-method-by-class methods-ht class-name))))
+             (method      (or (and eql-index
+                                   (let ((bucket (gethash first-arg eql-index)))
+                                     (cond
+                                       ((null bucket) nil)
+                                       ((listp bucket) (first bucket))
+                                       (t bucket))))
+                               (%rt-lookup-method-by-class methods-ht class-name))))
         (unless method
           (error "No applicable runtime generic method for ~S on ~S"
                  (gethash :__name__ gf) class-name))

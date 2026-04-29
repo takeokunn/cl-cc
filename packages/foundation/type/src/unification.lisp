@@ -41,6 +41,10 @@ Examples:
   (macrolet ((succeed (s) `(values ,s t))
              (fail () `(values nil nil)))
     (cond
+      ;; The canonical unknown sentinel never unifies, even with itself.
+      ((or (type-unknown-p t1) (type-unknown-p t2))
+       (fail))
+
       ;; Same object - success
       ((eq t1 t2) (succeed subst))
 
@@ -151,9 +155,9 @@ Examples:
            (succeed subst)
            (fail)))
 
-      ;; type-error values are not unifiable placeholders.
+      ;; Generic type-error values act as permissive recovery placeholders.
       ((or (type-error-p t1) (type-error-p t2))
-       (fail))
+       (succeed subst))
 
       ;; Both are effect rows
       ((and (type-effect-row-p t1) (type-effect-row-p t2))

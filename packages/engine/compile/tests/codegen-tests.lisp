@@ -5,7 +5,13 @@
 ;;; going through the full pipeline (parser + macro expander).
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+
+(defsuite cl-cc-codegen-unit-serial-suite
+  :description "Serial codegen-heavy unit tests that share mutable compiler state"
+  :parent cl-cc-unit-suite
+  :parallel nil)
+
+(in-suite cl-cc-codegen-unit-serial-suite)
 
 ;;; ─── Helpers ────────────────────────────────────────────────────────────
 
@@ -223,4 +229,3 @@ stable, isolated context."
     (assert-null (cl-cc/compile::%let-noescape-array-size 'arr expr nil nil nil)))
   (let ((expr (make-ast-int :value 5)))
     (assert-null (cl-cc/compile::%let-noescape-cons-p 'c expr nil nil nil))))
-

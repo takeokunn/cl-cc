@@ -147,7 +147,19 @@
 
 (defmethod compile-ast ((node ast-apply) ctx)
   (setf (ctx-tail-position ctx) nil)
-  (let* ((func-reg   (compile-ast (ast-apply-func node) ctx))
+  (let* ((func-node  (ast-apply-func node))
+         (func-reg   (cond
+                        ((typep func-node 'ast-function)
+                         (compile-ast func-node ctx))
+                        ((typep func-node 'ast-var)
+                         (%resolve-func-sym-reg (ast-var-name func-node) ctx))
+                        ((and (typep func-node 'ast-quote)
+                              (symbolp (ast-quote-value func-node)))
+                         (%resolve-func-sym-reg (ast-quote-value func-node) ctx))
+                        ((symbolp func-node)
+                         (%resolve-func-sym-reg func-node ctx))
+                        (t
+                         (compile-ast func-node ctx))))
          (result-reg (make-register ctx))
          (args       (ast-apply-args node))
          (spread-arg (car (last args)))

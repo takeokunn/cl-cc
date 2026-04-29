@@ -2,7 +2,7 @@
 
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-cli-serial-suite)
 
 (deftest-each cli-string-suffix-p-basic-cases
   "string-suffix-p returns t when the suffix matches, nil otherwise."

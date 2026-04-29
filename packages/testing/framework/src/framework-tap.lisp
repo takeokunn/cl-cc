@@ -19,24 +19,16 @@
 
 (defun enable-coverage ()
   "Instrument code for coverage tracking."
-  #+sbcl
-  (proclaim '(optimize (sb-cover:store-coverage-data 3)))
-  #-sbcl
-  nil)
+  (proclaim '(optimize (sb-cover:store-coverage-data 3))))
 
 (defun disable-coverage ()
   "Disable coverage instrumentation."
-  #+sbcl
-  (proclaim '(optimize (sb-cover:store-coverage-data 0)))
-  #-sbcl
-  nil)
+  (proclaim '(optimize (sb-cover:store-coverage-data 0))))
 
 (defun %coverage-report-directory ()
   "Return a writable directory for the sb-cover HTML report.
-Uses uiop:temporary-directory so sandboxed test builds (e.g. Nix)
-don't try to write to a read-only `/tmp`."
-  (uiop:ensure-directory-pathname
-   (merge-pathnames "cl-cc-coverage/" (uiop:temporary-directory))))
+Uses the canonical /tmp/cl-cc-coverage/ path expected by nix/coverage-report.pl."
+  #P"/tmp/cl-cc-coverage/")
 
 (defun %coverage-report-empty-p (directory)
   "Return T when sb-cover produced an empty HTML index for DIRECTORY."
@@ -50,7 +42,6 @@ don't try to write to a read-only `/tmp`."
 (defun %print-coverage-report (covered-modules)
   "Print sb-cover coverage report for covered modules."
   (declare (ignore covered-modules))
-  #+sbcl
   (let ((dir (%coverage-report-directory)))
     (ensure-directories-exist dir)
     (sb-cover:report dir)
@@ -58,9 +49,7 @@ don't try to write to a read-only `/tmp`."
       (error "Coverage report at ~A is empty; sb-cover instrumentation did not capture any executable code."
              (namestring (merge-pathnames #P"cover-index.html" dir))))
     (format t "# Coverage report written to ~A (cl-cc-coverage)~%"
-            (namestring dir)))
-  #-sbcl
-  (format t "# Coverage: only available on SBCL~%"))
+            (namestring dir))))
 
 (defun %status-keyword-to-string (status)
   "Map an internal result status keyword to its frozen TSV token."
@@ -195,11 +184,14 @@ don't try to write to a read-only `/tmp`."
         nil))))
 
 (defun %print-tap-header (n repeat actual-seed nworkers)
-  "Emit TAP header metadata for a run-suite invocation."
-  (format t "# Seed: ~A~%" actual-seed)
-  (format t "# Workers: ~A~%" nworkers)
-  (format t "TAP version 13~%")
-  (format t "1..~A~%" (* n repeat))
+  "Emit TAP header. Compact mode suppresses TAP version and plan lines."
+  (if (%verbose-tap-p)
+      (progn
+        (format t "# Seed: ~A~%" actual-seed)
+        (format t "# Workers: ~A~%" nworkers)
+        (format t "TAP version 13~%")
+        (format t "1..~A~%" (* n repeat)))
+      (format t "# Seed: ~A  Workers: ~A~%" actual-seed nworkers))
   (force-output))
 
 (defun %count-results-by-status (flat-results status)
@@ -207,26 +199,31 @@ don't try to write to a read-only `/tmp`."
   (count status flat-results :key (lambda (r) (getf r :status))))
 
 (defun %print-result-summary (flat-results)
-  "Print a TAP-style result summary and return true when any test failed."
+  "Print result summary. Compact mode: one line. Verbose: full TAP table.
+Returns true when any test failed."
   (let* ((pass-count (%count-results-by-status flat-results :pass))
          (fail-count (%count-results-by-status flat-results :fail))
          (skip-count (%count-results-by-status flat-results :skip))
-         (total (length flat-results))
-         (bar "#  ---------------------------------------------------")
-         (any-fail (> fail-count 0)))
-    (format t "#~%~A~%#  Test Results~%~A~%" bar bar)
-    (format t "#    PASS  ~4D~%" pass-count)
-    (format t "#    FAIL  ~4D~%" fail-count)
-    (when (> skip-count 0)
-      (format t "#    SKIP  ~4D~%" skip-count))
-    (format t "#   -------~%#   TOTAL  ~4D~%~A~%" total bar)
-    (when any-fail
-      (format t "#~%#  Failed tests:~%")
-      (dolist (r (sort (remove-if-not (lambda (r) (eq (getf r :status) :fail)) flat-results)
-                       #'< :key (lambda (r) (getf r :number))))
-        (format t "#    [~4D] ~A~%" (getf r :number) (getf r :name)))
-      (format t "~A~%" bar))
-    (format t "#~%")
+         (total      (length flat-results))
+         (any-fail   (> fail-count 0)))
+    (if (%verbose-tap-p)
+        (let ((bar "#  ---------------------------------------------------"))
+          (format t "#~%~A~%#  Test Results~%~A~%" bar bar)
+          (format t "#    PASS  ~4D~%" pass-count)
+          (format t "#    FAIL  ~4D~%" fail-count)
+          (when (> skip-count 0)
+            (format t "#    SKIP  ~4D~%" skip-count))
+          (format t "#   -------~%#   TOTAL  ~4D~%~A~%" total bar)
+          (when any-fail
+            (format t "#~%#  Failed tests:~%")
+            (dolist (r (sort (remove-if-not (lambda (r) (eq (getf r :status) :fail)) flat-results)
+                             #'< :key (lambda (r) (getf r :number))))
+              (format t "#    [~4D] ~A~%" (getf r :number) (getf r :name)))
+            (format t "~A~%" bar))
+          (format t "#~%"))
+        (if (> skip-count 0)
+            (format t "# ~A passed  ~A failed  ~A skipped~%" pass-count fail-count skip-count)
+            (format t "# ~A passed  ~A failed~%" pass-count fail-count)))
     any-fail))
 
 (defun %emit-postrun-artifacts (flat-results)

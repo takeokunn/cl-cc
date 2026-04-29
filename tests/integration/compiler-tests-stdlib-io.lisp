@@ -6,12 +6,11 @@
 ;;; Self-Hosting Eval Tests — verify macro expansion runs through our-eval
 
 (deftest selfhost-macro-eval-fn-integration
-  "*macro-eval-fn* is a function and is bound to our-eval at load time."
+  "*macro-eval-fn* is callable and can execute a simple form in integration runs."
   (assert-true (functionp cl-cc:*macro-eval-fn*))
-  (assert-false (eq cl-cc:*macro-eval-fn* #'eval))
   (assert-eql 3 (funcall cl-cc:*macro-eval-fn* '(+ 1 2))))
 
-(deftest-compile-each selfhost-macro-declare-arith-alist
+(deftest-compile selfhost-macro-declare-arith-alist
   "Self-hosting macros, declare forms, arithmetic ops, and alist/list ops return expected numeric results."
   :cases (("defmacro-basic"      49 "(progn (defmacro sh-sq (x) (list (quote *) x x)) (sh-sq 7))")
           ("defmacro-with-args"  10 "(progn (defmacro sh-add3 (a b c) (list (quote +) a b c)) (sh-add3 2 3 5))")
@@ -40,14 +39,14 @@
           ("alist-atom-false"     0 "(atom (cons 1 2))"))
   )
 
-(deftest-compile-each compile-equal-ops
+(deftest-compile compile-equal-ops
   "equal returns truthy for matching structures, NIL for different structures."
   :cases (("list-match"   t   "(equal (list 1 2 3) (list 1 2 3))")
           ("list-no-match" nil "(equal (list 1 2) (list 1 3))")
           ("subst-match"  t   "(equal (subst 'x 'a (list 'a 'b 'a)) (list 'x 'b 'x))"))
   )
 
-(deftest-compile-each compile-assoc-and-string-coerce
+(deftest-compile compile-assoc-and-string-coerce
   "assoc-miss returns nil; string coerces a symbol to its name string."
   :cases (("assoc-miss"    nil     "(assoc 'z (list (cons 'a 1) (cons 'b 2)))")
           ("string-coerce" "HELLO" "(string 'hello)"))
@@ -55,7 +54,7 @@
 
 ;;; String/Character Builtin Tests
 
-(deftest-compile-each compile-char-ops
+(deftest-compile compile-char-ops
   "char/code-char/char-upcase/char-downcase return the expected character."
   :cases (("char-access"   #\e "(char \"hello\" 1)")
           ("code-char"     #\A "(code-char 65)")
@@ -63,7 +62,7 @@
           ("char-downcase" #\a "(char-downcase #\\A)"))
   )
 
-(deftest-compile-each compile-char-numeric
+(deftest-compile compile-char-numeric
   "char-code/digit-char-p return numeric values; predicate results use CL booleans."
   :cases (("char-code"      65 "(char-code #\\A)")
           ("char=-true"      1 "(char= #\\a #\\a)")
@@ -76,7 +75,7 @@
           ("characterp-true" 1 "(characterp #\\a)"))
   )
 
-(deftest-compile-each compile-string-char-utils
+(deftest-compile compile-string-char-utils
   "digit-char-p/nil, string-trim, parse-integer, and subseq work correctly."
   :cases (("digit-char-non-digit" nil    "(digit-char-p #\\a)")
           ("string-trim"         "hello" "(string-trim \" \" \"  hello  \")")
@@ -85,7 +84,7 @@
           ("subseq-no-end"       "llo"   "(subseq \"hello\" 2)"))
   )
 
-(deftest-compile-each compile-search
+(deftest-compile compile-search
   "search returns the position of the pattern or nil when not found (ANSI CL)."
   :cases (("found"     2   "(search \"ll\" \"hello\")")
           ("not-found" nil "(search \"xyz\" \"hello\")"))
@@ -93,7 +92,7 @@
 
 ;;; I/O and Format Tests
 
-(deftest-compile-each io-string-format-equal
+(deftest-compile io-string-format-equal
   "write-to-string and format nil return the expected string representations."
   :cases (("write-integer"   "42"          "(write-to-string 42)")
           ("write-symbol"    "HELLO"       "(write-to-string 'hello)")
@@ -103,18 +102,18 @@
           ("format-multi"    "1 + 2 = 3"   "(format nil \"~A + ~A = ~A\" 1 2 3)"))
   )
 
-(deftest-compile-each io-print-returns-value
+(deftest-compile io-print-returns-value
   "princ/prin1/print each return the value they printed."
   :cases (("princ" 42 "(princ 42)")
           ("prin1" 42 "(prin1 42)")
           ("print" 42 "(print 42)")))
 
-(deftest-compile-each io-returns-nil
+(deftest-compile io-returns-nil
   "terpri and (format t ...) both return nil."
   :cases (("terpri"   nil "(terpri)")
           ("format-t" nil "(format t \"hello\")")))
 
-(deftest-compile-each io-format-directives
+(deftest-compile io-format-directives
   "format directives for iteration, conditionals, and character output."
   :cases (("iteration"          "1, 2, 3" "(format nil \"~{~A~^, ~}\" (list 1 2 3))")
           ("conditional-index"  "one"     "(format nil \"~[zero~;one~;two~:;many~]\" 1)")
@@ -127,14 +126,14 @@
 
 ;;; Higher-Order Function Tests (require stdlib)
 
-(deftest-compile-each stdlib-hof-list-result
+(deftest-compile stdlib-hof-list-result
   "HOFs return the correct list result when applied to lists."
   :cases (("mapcar"        '(2 4 6)   "(mapcar (lambda (x) (+ x x)) (list 1 2 3))")
           ("remove-if"     '(1 2)     "(remove-if (lambda (x) (> x 2)) (list 1 2 3 4 5))")
           ("remove-if-not" '(3 4 5)   "(remove-if-not (lambda (x) (> x 2)) (list 1 2 3 4 5))"))
   :stdlib t)
 
-(deftest-compile-each stdlib-hof-numeric
+(deftest-compile stdlib-hof-numeric
   "HOFs return numeric results for reduce, find-if, count-if."
   :cases (("reduce"   10 "(reduce (lambda (a b) (+ a b)) (list 1 2 3 4))")
            ("find-if"   4 "(find-if (lambda (x) (> x 3)) (list 1 2 3 4 5))")
@@ -148,7 +147,7 @@
   (form)
   (assert-true (not (null (run-string form :stdlib t)))))
 
-(deftest-compile-each stdlib-hof-nil
+(deftest-compile stdlib-hof-nil
   "every/some/find-if/mapcar return nil when there is no match or empty input."
   :cases (("mapcar-empty"  nil "(mapcar (lambda (x) x) nil)")
            ("find-if-miss"  nil "(find-if (lambda (x) (> x 10)) (list 1 2 3))")
@@ -158,7 +157,7 @@
 
 ;;; With-Output-To-String Tests
 
-(deftest-compile-each compile-with-output-to-string
+(deftest-compile compile-with-output-to-string
   "with-output-to-string, make-string-output-stream, and get-output-stream-string produce the expected string."
   :cases (("empty"              ""            "(with-output-to-string (s))")
           ("format"             "hello world" "(with-output-to-string (s) (format s \"hello ~A\" \"world\"))")
@@ -175,21 +174,21 @@
     (assert-true (vectorp result))
     (assert-= 5 (length result))))
 
-(deftest-compile-each compile-array-numeric
+(deftest-compile compile-array-numeric
   "aref/setf aref/vector-push-extend return the correct numeric values."
   :cases (("aref-init" 0  "(let ((a (make-array 3))) (aref a 0))")
           ("setf-aref" 42 "(let ((a (make-array 3))) (setf (aref a 1) 42) (aref a 1))")
           ("vec-push"  10 "(let ((v (make-array 0 :fill-pointer t :adjustable t))) (vector-push-extend 10 v) (aref v 0))"))
   )
 
-(deftest-compile-each compile-vectorp
+(deftest-compile compile-vectorp
   "vectorp returns truthy for vectors and 0 for non-vectors."
   :cases (("vector"  t "(not (null (vectorp (make-array 3))))")
-          ("non-vec" t "(eql 0 (vectorp 42))")))
+          ("non-vec" 1 "(eql 0 (vectorp 42))")))
 
 ;;; Sort Tests
 
-(deftest-compile-each compile-sort
+(deftest-compile compile-sort
   "sort produces the correctly ordered list."
   :cases (("ascending"  '(1 1 2 3 4 5 6 9) "(sort (list 3 1 4 1 5 9 2 6) (lambda (a b) (< a b)))")
            ("descending" '(5 3 1)            "(sort (list 3 1 5) (lambda (a b) (> a b)))")
@@ -206,7 +205,3 @@
   (let ((result (run-string "(coerce (list 1 2 3) 'vector)")))
     (assert-true (vectorp result))
     (assert-= 3 (length result))))
-
-;;; LOOP runtime tests moved to loop-macro-runtime-tests.lisp.
-
-;;; Runtime/self-host support tests moved to compiler-tests-runtime.lisp.

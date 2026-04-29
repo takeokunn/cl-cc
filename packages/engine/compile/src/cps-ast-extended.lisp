@@ -108,30 +108,41 @@
                                   (cps-transform-sequence body k))))
                         (ast-handler-case-clauses node))))))
 
-(defun %cps-transform-make-instance-initargs (remaining init-pairs class-v k)
+(defun %cps-transform-make-instance-initargs (remaining init-pairs class-form k)
   "CPS-thread each value in REMAINING init-pair triples.
-When done, constructs the (make-instance class-v ...) call and delivers it to K."
+When done, constructs the (make-instance class-form ...) call and delivers it to K."
   (if (null remaining)
-      (let ((make-form (append (list 'make-instance class-v)
-                               (mapcan (lambda (triple) (list (first triple) (third triple)))
-                                       init-pairs))))
+      (let ((make-form (append (list 'make-instance class-form)
+                                (mapcan (lambda (triple) (list (first triple) (third triple)))
+                                        init-pairs))))
         (%cps-funcall k make-form))
       (destructuring-bind (_key value-form tmp) (car remaining)
         (declare (ignore _key))
         (cps-transform-ast value-form
                            (%cps-lambda (list tmp)
                                         (%cps-transform-make-instance-initargs
-                                         (cdr remaining) init-pairs class-v k))))))
+                                         (cdr remaining) init-pairs class-form k))))))
 
 (defmethod cps-transform-ast ((node ast-make-instance) k)
   "Transform make-instance conservatively through host MAKE-INSTANCE."
-  (let* ((class-v   (gensym "CLASS"))
-         (init-pairs (loop for (key value) on (ast-make-instance-initargs node) by #'cddr
-                           collect (list key value (gensym "INIT")))))
-    (cps-transform-ast (ast-make-instance-class node)
-                       (%cps-lambda (list class-v)
-                                    (%cps-transform-make-instance-initargs
-                                     init-pairs init-pairs class-v k)))))
+  (let* ((class-ast  (ast-make-instance-class node))
+         (raw-initargs (ast-make-instance-initargs node))
+         (init-pairs (cond
+                       ((null raw-initargs) nil)
+                       ((and (listp raw-initargs) (keywordp (first raw-initargs)))
+                        (loop for (key value) on raw-initargs by #'cddr
+                              collect (list key value (gensym "INIT"))))
+                       (t
+                        (loop for (key . value) in raw-initargs
+                              collect (list key value (gensym "INIT")))))))
+    (if (typep class-ast 'ast-quote)
+        (%cps-transform-make-instance-initargs
+         init-pairs init-pairs (list 'quote (ast-quote-value class-ast)) k)
+        (let ((class-v (gensym "CLASS")))
+          (cps-transform-ast class-ast
+                             (%cps-lambda (list class-v)
+                                          (%cps-transform-make-instance-initargs
+                                           init-pairs init-pairs class-v k)))))))
 
 (defmethod cps-transform-ast ((node ast-slot-value) k)
   "Transform slot-value conservatively through host SLOT-VALUE."
@@ -167,19 +178,37 @@ When done, constructs the (make-instance class-v ...) call and delivers it to K.
 
 (defmethod cps-transform-ast ((node ast-defgeneric) k)
   "Transform defgeneric conservatively through host DEFGENERIC."
-  (%cps-progn
-   (list 'defgeneric (ast-defgeneric-name node) (ast-defgeneric-params node))
-   (%cps-funcall k (list 'quote (ast-defgeneric-name node)))))
+  (let ((base-form (list 'defgeneric
+                         (ast-defgeneric-name node)
+                         (ast-defgeneric-params node)))
+        (combination (ast-defgeneric-combination node)))
+    (%cps-progn
+     (if combination
+         (append base-form (list (list :method-combination combination)))
+         base-form)
+     (%cps-funcall k (list 'quote (ast-defgeneric-name node))))))
 
 (defmethod cps-transform-ast ((node ast-defmethod) k)
   "Transform defmethod conservatively through host DEFMETHOD."
-  (%cps-progn
-   (append (list 'defmethod
-                 (ast-defmethod-name node)
-                 (mapcar #'list (ast-defmethod-params node)
-                         (ast-defmethod-specializers node)))
-           (ast-defmethod-body node))
-   (%cps-funcall k (list 'quote (ast-defmethod-name node)))))
+  (let ((params (loop for name in (ast-defmethod-params node)
+                      for spec in (ast-defmethod-specializers node)
+                      collect (cond
+                                ((null spec) name)
+                                ((consp spec) (list name (cdr spec)))
+                                (t (list name spec)))))
+        (qualifier (ast-defmethod-qualifier node)))
+    (%cps-progn
+     (if qualifier
+         (list* 'defmethod
+                (ast-defmethod-name node)
+                qualifier
+                params
+                (ast-defmethod-body node))
+         (list* 'defmethod
+                (ast-defmethod-name node)
+                params
+                (ast-defmethod-body node)))
+     (%cps-funcall k (list 'quote (ast-defmethod-name node))))))
 
 (defmethod cps-transform-ast ((node ast-set-gethash) k)
   "Transform setf/gethash conservatively through host GETHASH setf."

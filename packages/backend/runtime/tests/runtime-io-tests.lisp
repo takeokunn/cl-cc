@@ -20,7 +20,7 @@
 ;;; ─── String output stream helpers ──────────────────────────────────────────
 
 (deftest rt-string-output-stream-cases
-  "rt-make-string-output-stream: creates stream; get returns empty; get-after-write returns content; alias works."
+  "rt-make-string-output-stream: creates stream; get returns empty; get-after-write returns content."
   (let ((s (cl-cc/runtime:rt-make-string-output-stream)))
     (assert-true (streamp s))
     (assert-equal "" (cl-cc/runtime:rt-get-output-stream-string s)))
@@ -29,7 +29,7 @@
     (assert-equal "hello world" (cl-cc/runtime:rt-get-output-stream-string s)))
   (let ((s (make-string-output-stream)))
     (write-string "test" s)
-    (assert-equal "test" (cl-cc/runtime:rt-get-string-from-stream s))))
+    (assert-equal "test" (cl-cc/runtime:rt-get-output-stream-string s))))
 
 (deftest rt-stream-op-optional-stream-cases
   "Optional-stream wrappers honor explicit streams for both output and input operations."
@@ -123,7 +123,7 @@
     (assert-equal #\a (read-char in)))
   (let ((out (cl-cc/runtime:rt-make-string-stream "ignored" :direction :output)))
     (write-string "ok" out)
-    (assert-equal "ok" (cl-cc/runtime:rt-get-string-from-stream out))))
+    (assert-equal "ok" (cl-cc/runtime:rt-get-output-stream-string out))))
 
 ;;; ─── Stream predicates ──────────────────────────────────────────────────────
 

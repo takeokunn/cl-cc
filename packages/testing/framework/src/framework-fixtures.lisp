@@ -55,8 +55,7 @@
 ;;; ------------------------------------------------------------
 
 (defbefore :each (cl-cc-suite)
-  (when (fboundp 'cl-cc/vm::vm-clear-hash-cons-table)
-    (cl-cc/vm::vm-clear-hash-cons-table)))
+  (cl-cc/vm::vm-clear-hash-cons-table))
 
 (defbefore :each (cl-cc-suite)
   (when (boundp 'cl-cc/expand::*macroexpand-step-cache*)

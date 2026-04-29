@@ -1,6 +1,4 @@
 ;;;; tests/unit/vm/list-coerce-tests.lisp — VM List Coercion Instruction Tests
-;;;;
-;;;; Tests for coercion instructions extracted from src/vm/list-coerce.lisp.
 
 (in-package :cl-cc/test)
 (in-suite cl-cc-unit-suite)

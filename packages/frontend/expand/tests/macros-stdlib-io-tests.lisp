@@ -7,6 +7,10 @@
   :description "Tests for macros-stdlib.lisp: host bridges and file/IO helpers"
   :parent cl-cc-serial-suite)
 
+(defbefore :each (macros-stdlib-io-suite)
+  (clrhash cl-cc/expand::*load-time-value-cache*)
+  (setf cl-cc/expand::*macro-eval-fn* #'eval))
+
 (in-suite macros-stdlib-io-suite)
 
 (defparameter *load-time-value-hit* 0)

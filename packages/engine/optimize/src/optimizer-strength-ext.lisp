@@ -151,6 +151,3 @@
       (dolist (reg (opt-inst-read-regs inst))
         (incf (gethash reg use-counts 0))))
     (%opt-pack-chain instructions use-counts)))
-
-;;; CSE, GVN, dead-label elimination, and leaf-function detection have been
-;;; extracted to optimizer-cse-gvn.lisp (loads immediately after this file).

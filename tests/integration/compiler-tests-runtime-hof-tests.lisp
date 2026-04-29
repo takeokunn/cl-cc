@@ -79,5 +79,3 @@
           ("caddar" 3   "(caddar '((1 2 3) b c))"))
   (expected form)
   (assert-true (equal expected (run-string form :stdlib t))))
-
-;;; Self-hosting runtime-heavy integration tests moved to compiler-tests-runtime-selfhost.lisp.

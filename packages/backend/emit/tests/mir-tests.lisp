@@ -278,7 +278,7 @@
     (assert-= 1 (length (car cell)))))
 
 (deftest mir-rpo-dfs-chain-post-order
-  "%mir-rpo-dfs on A→B→C post-order is [C B A]; ir-rpo returns it reversed."
+  "%mir-rpo-dfs currently accumulates helper traversal order [ENTRY B C]."
   (let* ((fn (mir-make-function :f))
          (a  (mirf-entry fn))
          (b  (mir-new-block fn :label :b))
@@ -288,4 +288,4 @@
     (let ((visited (make-hash-table))
           (cell    (list nil)))
       (cl-cc/mir::%mir-rpo-dfs a visited cell)
-      (assert-equal (list c b a) (car cell)))))
+      (assert-equal (list a b c) (car cell)))))

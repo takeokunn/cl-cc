@@ -115,7 +115,7 @@
    #:rt-format #:rt-read-char #:rt-read-line #:rt-read-byte
    #:rt-peek-char #:rt-unread-char
    #:rt-open-file #:rt-close-file
-   #:rt-make-string-stream #:rt-get-string-from-stream
+   #:rt-make-string-stream
    #:rt-make-string-output-stream #:rt-get-output-stream-string #:rt-stream-write-string
     #:rt-finish-output #:rt-force-output #:rt-clear-output
     #:rt-input-stream-p #:rt-output-stream-p #:rt-open-stream-p #:rt-interactive-stream-p

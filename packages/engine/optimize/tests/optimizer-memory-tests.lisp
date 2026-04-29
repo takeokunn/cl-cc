@@ -40,14 +40,11 @@
   (inst expected-kind)
   (assert-eq expected-kind (cl-cc/optimize::opt-heap-root-kind inst)))
 
-(deftest heap-root-kind-nil-for-non-heap
-  "opt-heap-root-kind returns NIL for non-heap instructions."
-  (assert-null (cl-cc/optimize::opt-heap-root-kind (make-vm-const :dst :r0 :value 1))))
-
 ;;; ─── %opt-build-root-map / opt-compute-heap-aliases ────────────────────
 
-(deftest build-root-map-cases
-  "Heap alias map: cons sets own root; move propagates root; non-heap write kills root."
+(deftest heap-alias-cases
+  "Heap alias map: cons sets own root; move propagates root; non-heap write kills root;
+   unknown register returns NIL; known register returns canonical root."
   (let* ((inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (roots (cl-cc/optimize::opt-compute-heap-aliases (list inst))))
     (assert-eq :r0 (gethash :r0 roots)))
@@ -58,12 +55,7 @@
   (let* ((cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (add-inst  (make-vm-add  :dst :r0 :lhs :r1 :rhs :r2))
          (roots (cl-cc/optimize::opt-compute-heap-aliases (list cons-inst add-inst))))
-    (assert-false (nth-value 1 (gethash :r0 roots)))))
-
-;;; ─── opt-compute-heap-aliases points-to lookup ───────────────────────────
-
-(deftest points-to-root-behavior
-  "opt-compute-heap-aliases: unknown register returns NIL; known register returns canonical root."
+    (assert-false (nth-value 1 (gethash :r0 roots))))
   (let ((pt (make-hash-table :test #'eq)))
     (assert-null (gethash :r99 pt)))
   (let ((pt (make-hash-table :test #'eq)))
@@ -72,7 +64,7 @@
 
 ;;; ─── opt-interval-* arithmetic ───────────────────────────────────────────
 
-(deftest interval-make-lo-hi
+(deftest interval-infrastructure-cases
   "opt-make-interval sets lo and hi correctly."
   (let ((iv (cl-cc/optimize::opt-make-interval 3 7)))
     (assert-= 3 (cl-cc/optimize::opt-interval-lo iv))
@@ -93,8 +85,9 @@
 
 ;;; ─── opt-compute-constant-intervals ─────────────────────────────────────
 
-(deftest constant-intervals-vm-const-cases
-  "vm-const: integer produces singleton interval; float is ignored (no entry)."
+(deftest constant-intervals-cases
+  "opt-compute-constant-intervals: integer vm-const → singleton; float → no entry;
+   add two knowns → sum interval; unknown operand → dst killed."
   (let* ((insts (list (make-vm-const :dst :r0 :value 5)))
          (ivals (cl-cc/optimize::opt-compute-constant-intervals insts)))
     (let ((iv (gethash :r0 ivals)))
@@ -103,10 +96,7 @@
       (assert-= 5 (cl-cc/optimize::opt-interval-hi iv))))
   (let* ((insts (list (make-vm-const :dst :r0 :value 3.14)))
          (ivals (cl-cc/optimize::opt-compute-constant-intervals insts)))
-    (assert-false (nth-value 1 (gethash :r0 ivals)))))
-
-(deftest constant-intervals-add-cases
-  "vm-add: two known intervals → sum; unknown operand → dst killed."
+    (assert-false (nth-value 1 (gethash :r0 ivals))))
   (let* ((insts (list (make-vm-const :dst :r0 :value 2)
                       (make-vm-const :dst :r1 :value 3)
                       (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)))
@@ -145,20 +135,16 @@
         (assert-true  (cl-cc/optimize::opt-may-alias-p reg-a reg-b alias))
         (assert-false (cl-cc/optimize::opt-may-alias-p reg-a reg-b alias)))))
 
-;;; ─── opt-slot-alias-key ─────────────────────────────────────────────────
+;;; ─── opt-slot-alias-key / opt-rewrite-inst-regs ────────────────────────
 
-(deftest slot-alias-key-behavior
-  "opt-slot-alias-key uses canonical root when known; falls back to register when not."
+(deftest slot-rewrite-helpers-cases
+  "opt-slot-alias-key uses canonical root when known; falls back to register when not.
+   opt-rewrite-inst-regs substitutes source regs; never rewrites dst; no-op on empty copies."
   (let ((alias (make-hash-table :test #'eq)))
     (setf (gethash :r0 alias) :root0)
     (assert-equal '(:slot :root0 x) (cl-cc/optimize::opt-slot-alias-key :r0 'x alias)))
   (let ((alias (make-hash-table :test #'eq)))
-    (assert-equal '(:slot :r5 y) (cl-cc/optimize::opt-slot-alias-key :r5 'y alias))))
-
-;;; ─── opt-rewrite-inst-regs ───────────────────────────────────────────────
-
-(deftest rewrite-inst-regs-behavior
-  "opt-rewrite-inst-regs substitutes source regs; never rewrites dst; no-op on empty copies."
+    (assert-equal '(:slot :r5 y) (cl-cc/optimize::opt-slot-alias-key :r5 'y alias)))
   (let* ((copies (make-hash-table :test #'eq)))
     (setf (gethash :r0 copies) :r5)
     (let ((inst (cl-cc/optimize::opt-rewrite-inst-regs (make-vm-add :dst :r2 :lhs :r0 :rhs :r1) copies)))
@@ -175,9 +161,11 @@
 
 ;;; ─── opt-pass-dead-store-elim ────────────────────────────────────────────
 
-(deftest dead-store-elim-drops-overwritten-global-store
+(deftest dead-store-elim-cases
   "opt-pass-dead-store-elim removes an earlier vm-set-global that is overwritten
-   by a later store to the same global before any intervening read."
+   by a later store to the same global before any intervening read;
+   keeps vm-set-global that is read before overwrite;
+   preserves stores that reach vm-ret (flushed by terminator)."
   (let* ((insts (list (make-vm-const      :dst :r0 :value 1)
                       (make-vm-set-global :src :r0 :name 'g)
                       (make-vm-const      :dst :r1 :value 2)
@@ -185,20 +173,14 @@
                       (make-vm-ret        :reg :r1)))
          (result (cl-cc/optimize::opt-pass-dead-store-elim insts)))
     ;; Only one vm-set-global should remain
-    (assert-= 1 (count-if (lambda (i) (typep i 'cl-cc/vm::vm-set-global)) result))))
-
-(deftest dead-store-elim-preserves-store-before-read
-  "opt-pass-dead-store-elim keeps vm-set-global that is read before overwrite."
+    (assert-= 1 (count-if (lambda (i) (typep i 'cl-cc/vm::vm-set-global)) result)))
   (let* ((insts (list (make-vm-const      :dst :r0 :value 1)
                       (make-vm-set-global :src :r0 :name 'g)
                       (make-vm-get-global :dst :r1 :name 'g)
                       (make-vm-ret        :reg :r1)))
          (result (cl-cc/optimize::opt-pass-dead-store-elim insts)))
     (assert-= 1 (count-if (lambda (i) (typep i 'cl-cc/vm::vm-set-global)) result))
-    (assert-= 1 (count-if (lambda (i) (typep i 'cl-cc/vm::vm-get-global)) result))))
-
-(deftest dead-store-elim-preserves-store-before-ret
-  "opt-pass-dead-store-elim preserves stores that reach vm-ret (flushed by terminator)."
+    (assert-= 1 (count-if (lambda (i) (typep i 'cl-cc/vm::vm-get-global)) result)))
   (let* ((insts (list (make-vm-const      :dst :r0 :value 42)
                       (make-vm-set-global :src :r0 :name 'result)
                       (make-vm-ret        :reg :r0)))
@@ -207,9 +189,10 @@
 
 ;;; ─── opt-pass-store-to-load-forward ──────────────────────────────────────
 
-(deftest store-to-load-forward-replaces-get-global-with-move
+(deftest store-to-load-forward-cases
   "opt-pass-store-to-load-forward replaces vm-get-global with vm-move when
-   the preceding vm-set-global for the same name is pending."
+   the preceding vm-set-global for the same name is pending;
+   leaves vm-get-global alone when no prior store exists."
   (let* ((insts (list (make-vm-const      :dst :r0 :value 10)
                       (make-vm-set-global :src :r0 :name 'x)
                       (make-vm-get-global :dst :r1 :name 'x)
@@ -217,10 +200,7 @@
          (result (cl-cc/optimize::opt-pass-store-to-load-forward insts)))
     ;; The get-global should be replaced by a vm-move
     (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-move)) result))
-    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-get-global)) result))))
-
-(deftest store-to-load-forward-preserves-when-no-pending-store
-  "opt-pass-store-to-load-forward leaves vm-get-global alone when no prior store exists."
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-get-global)) result)))
   (let* ((insts (list (make-vm-get-global :dst :r0 :name 'unknown)
                       (make-vm-ret        :reg :r0)))
          (result (cl-cc/optimize::opt-pass-store-to-load-forward insts)))
@@ -228,26 +208,23 @@
 
 ;;; ─── mem-pass-state struct helpers ──────────────────────────────────────────
 
-(deftest mem-pass-state-emit-pushes-to-result
-  "%mps-emit pushes an instruction onto the state result list."
+(deftest mem-pass-state-cases
+  "%mps-emit pushes an instruction onto the state result list;
+   %mps-remember-store followed by %mps-flush-one emits the stored instruction;
+   %mps-flush-all emits all pending stores in order;
+   %mps-drop-pending removes the key from both pending-by-name and pending-order."
   (let ((state (cl-cc/optimize::make-mem-pass-state))
         (inst  (make-vm-const :dst :r0 :value 1)))
     (cl-cc/optimize::%mps-emit state inst)
     (assert-= 1 (length (cl-cc/optimize::mps-result state)))
-    (assert-eq inst (first (cl-cc/optimize::mps-result state)))))
-
-(deftest mem-pass-state-remember-then-flush-one
-  "%mps-remember-store followed by %mps-flush-one emits the stored instruction."
+    (assert-eq inst (first (cl-cc/optimize::mps-result state))))
   (let ((state (cl-cc/optimize::make-mem-pass-state))
         (inst  (make-vm-const :dst :r0 :value 7)))
     (cl-cc/optimize::%mps-remember-store state :some-key inst)
     (cl-cc/optimize::%mps-flush-one state :some-key)
     (assert-= 1 (length (cl-cc/optimize::mps-result state)))
     (assert-eq inst (first (cl-cc/optimize::mps-result state)))
-    (assert-null (cl-cc/optimize::%mps-pending-store state :some-key))))
-
-(deftest mem-pass-state-flush-all-emits-all-pending
-  "%mps-flush-all emits all pending stores in order."
+    (assert-null (cl-cc/optimize::%mps-pending-store state :some-key)))
   (let ((state (cl-cc/optimize::make-mem-pass-state))
         (i1    (make-vm-const :dst :r0 :value 1))
         (i2    (make-vm-const :dst :r1 :value 2)))
@@ -255,10 +232,7 @@
     (cl-cc/optimize::%mps-remember-store state :k2 i2)
     (cl-cc/optimize::%mps-flush-all state)
     (assert-= 2 (length (cl-cc/optimize::mps-result state)))
-    (assert-= 0 (hash-table-count (cl-cc/optimize::mps-pending-by-name state)))))
-
-(deftest mem-pass-state-drop-pending-removes-key
-  "%mps-drop-pending removes the key from both pending-by-name and pending-order."
+    (assert-= 0 (hash-table-count (cl-cc/optimize::mps-pending-by-name state))))
   (let ((state (cl-cc/optimize::make-mem-pass-state))
         (inst  (make-vm-const :dst :r0 :value 1)))
     (cl-cc/optimize::%mps-remember-store state :key inst)
@@ -268,16 +242,16 @@
 
 ;;; ─── *opt-heap-root-kind-table* data integrity ───────────────────────────
 
-(deftest heap-root-kind-table-coverage
-  "*opt-heap-root-kind-table* has 4 entries covering all heap-producing types."
+(deftest heap-root-kind-cases
+  "*opt-heap-root-kind-table* has 4 entries covering all heap-producing types;
+   opt-heap-root-kind returns :closure for vm-closure (not just vm-make-closure);
+   non-heap returns nil."
+  (assert-null (cl-cc/optimize::opt-heap-root-kind (make-vm-const :dst :r0 :value 1)))
   (assert-= 4 (length cl-cc/optimize::*opt-heap-root-kind-table*))
   (assert-eq :cons    (cdr (assoc 'vm-cons          cl-cc/optimize::*opt-heap-root-kind-table*)))
   (assert-eq :array   (cdr (assoc 'vm-make-array    cl-cc/optimize::*opt-heap-root-kind-table*)))
   (assert-eq :closure (cdr (assoc 'vm-closure       cl-cc/optimize::*opt-heap-root-kind-table*)))
-  (assert-eq :closure (cdr (assoc 'vm-make-closure  cl-cc/optimize::*opt-heap-root-kind-table*))))
-
-(deftest heap-root-kind-vm-closure-returns-closure
-  "opt-heap-root-kind returns :closure for vm-closure (not just vm-make-closure)."
+  (assert-eq :closure (cdr (assoc 'vm-make-closure  cl-cc/optimize::*opt-heap-root-kind-table*)))
   (let ((inst (make-vm-closure :dst :r0 :label "f" :params '(x) :captured nil)))
     (assert-eq :closure (cl-cc/optimize::opt-heap-root-kind inst))))
 
@@ -330,8 +304,9 @@
 
 ;;; ─── %mps-flush-if-src-overwritten ──────────────────────────────────────────
 
-(deftest mps-flush-if-src-overwritten-flushes-when-src-is-dst
-  "%mps-flush-if-src-overwritten emits pending stores whose src = DST."
+(deftest mps-flush-if-src-overwritten-cases
+  "%mps-flush-if-src-overwritten emits pending stores whose src = DST;
+   leaves pending stores intact when DST is unrelated."
   (let ((state (cl-cc/optimize::make-mem-pass-state))
         (sg    (make-vm-set-global :src :r0 :name 'g)))
     (cl-cc/optimize::%mps-remember-store state 'g sg)
@@ -339,10 +314,7 @@
     (cl-cc/optimize::%mps-flush-if-src-overwritten state :r0)
     ;; The store should have been emitted (appears in result)
     (assert-true (member sg (cl-cc/optimize::mps-result state)))
-    (assert-null (cl-cc/optimize::%mps-pending-store state 'g))))
-
-(deftest mps-flush-if-src-overwritten-noop-when-src-differs
-  "%mps-flush-if-src-overwritten leaves pending stores intact when DST is unrelated."
+    (assert-null (cl-cc/optimize::%mps-pending-store state 'g)))
   (let ((state (cl-cc/optimize::make-mem-pass-state))
         (sg    (make-vm-set-global :src :r0 :name 'g)))
     (cl-cc/optimize::%mps-remember-store state 'g sg)
@@ -353,8 +325,9 @@
 
 ;;; ─── %mps-flush-dependent-on-reg ────────────────────────────────────────────
 
-(deftest mps-flush-dependent-on-reg-flushes-dependent-stores
-  "%mps-flush-dependent-on-reg emits pending stores that reference the register."
+(deftest mps-flush-dependent-on-reg-cases
+  "%mps-flush-dependent-on-reg emits pending stores that reference the register;
+   skips the :exclude-key entry even when it uses the reg."
   (let ((state (cl-cc/optimize::make-mem-pass-state))
         (sg1   (make-vm-set-global :src :r0 :name 'g1))
         (sg2   (make-vm-set-global :src :r1 :name 'g2)))
@@ -365,10 +338,7 @@
     (assert-true  (member sg1 (cl-cc/optimize::mps-result state)))
     (assert-null  (cl-cc/optimize::%mps-pending-store state 'g1))
     ;; g2 was not dependent on :r0 → still pending
-    (assert-true  (cl-cc/optimize::%mps-pending-store state 'g2))))
-
-(deftest mps-flush-dependent-on-reg-respects-exclude-key
-  "%mps-flush-dependent-on-reg skips the :exclude-key entry even when it uses the reg."
+    (assert-true  (cl-cc/optimize::%mps-pending-store state 'g2)))
   (let ((state (cl-cc/optimize::make-mem-pass-state))
         (sg    (make-vm-set-global :src :r0 :name 'g)))
     (cl-cc/optimize::%mps-remember-store state 'g sg)

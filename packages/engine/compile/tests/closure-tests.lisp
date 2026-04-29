@@ -9,7 +9,6 @@
 (defsuite closure-suite :description "Free variable analysis unit tests"
   :parent cl-cc-unit-suite)
 
-
 (in-suite closure-suite)
 ;;; ─── Literals ─────────────────────────────────────────────────────────────
 
@@ -22,13 +21,10 @@
 
 ;;; ─── Simple references ────────────────────────────────────────────────────
 
-(deftest ast-free-vars-single-var
-  "A single variable reference is free in find-free-variables."
+(deftest free-vars-simple-reference-cases
+  "Simple references: single var is free; binop with two distinct vars → both free; same var twice → deduplicated."
   (assert-equal '(x)
-    (cl-cc/compile::find-free-variables (cl-cc/ast::make-ast-var :name 'x))))
-
-(deftest free-vars-binop-cases
-  "Binop free vars: two distinct vars → both free; same var twice → deduplicated to one."
+    (cl-cc/compile::find-free-variables (cl-cc/ast::make-ast-var :name 'x)))
   (let ((result (cl-cc/compile::find-free-variables
                  (cl-cc/ast::make-ast-binop
                   :op '+
@@ -68,8 +64,8 @@
 
 ;;; ─── Lambda params ────────────────────────────────────────────────────────
 
-(deftest free-vars-lambda-scope
-  "Lambda params are not free in body; outer variables referenced in body are free."
+(deftest free-vars-lambda-scope-cases
+  "Lambda params are not free in body; outer variables referenced in body are free; &rest and &optional params shadow their names."
   ;; params shadow body references — no free vars
   (let ((result (cl-cc/compile::find-free-variables
                  (cl-cc/ast::make-ast-lambda
@@ -87,10 +83,7 @@
                                :op '+
                                :lhs (cl-cc/ast::make-ast-var :name 'x)
                                :rhs (cl-cc/ast::make-ast-var :name 'z)))))))
-    (assert-equal '(z) result)))
-
-(deftest free-vars-lambda-extended-params-shadow
-  "Lambda &rest and &optional params shadow their names in the body."
+    (assert-equal '(z) result))
   ;; &rest param
   (assert-equal nil (cl-cc/compile::find-free-variables
                      (cl-cc/ast::make-ast-lambda
@@ -104,18 +97,15 @@
                       :optional-params (list (list 'a (cl-cc/ast::make-ast-int :value 0)))
                       :body (list (cl-cc/ast::make-ast-var :name 'a))))))
 
-(deftest free-vars-lambda-optional-default-free
-  "Free variables in optional param defaults are captured."
+(deftest free-vars-lambda-param-cases
+  "Free variables in optional param defaults are captured; keyword params are not free in body."
   (let ((result (cl-cc/compile::find-free-variables
                  (cl-cc/ast::make-ast-lambda
                   :params nil
                   :optional-params (list (list 'a (cl-cc/ast::make-ast-var :name 'z)))
                   :body (list (cl-cc/ast::make-ast-var :name 'a))))))
     ;; a is bound as optional, z is free from the default expression
-    (assert-equal '(z) result)))
-
-(deftest free-vars-lambda-key-param
-  "Lambda keyword params are not free in body."
+    (assert-equal '(z) result))
   (let ((result (cl-cc/compile::find-free-variables
                  (cl-cc/ast::make-ast-lambda
                   :params nil
@@ -241,22 +231,16 @@
 
 ;;; ─── %count-ast-calls (extracted recursive helper) ───────────────────────
 
-(deftest count-ast-calls-leaf-match
-  "%count-ast-calls returns 1 for a direct ast-call of BINDING-NAME."
+(deftest count-ast-calls-cases
+  "%count-ast-calls returns 1 for a direct match, 0 for no match, and counts across nested children."
   (let ((node (cl-cc/ast::make-ast-call
                :func 'my-fn
                :args (list (cl-cc/ast::make-ast-int :value 1)))))
-    (assert-= 1 (cl-cc/compile::%count-ast-calls node 'my-fn))))
-
-(deftest count-ast-calls-no-match
-  "%count-ast-calls returns 0 when BINDING-NAME is not called."
+    (assert-= 1 (cl-cc/compile::%count-ast-calls node 'my-fn)))
   (let ((node (cl-cc/ast::make-ast-call
                :func 'other-fn
                :args (list (cl-cc/ast::make-ast-int :value 1)))))
-    (assert-= 0 (cl-cc/compile::%count-ast-calls node 'my-fn))))
-
-(deftest count-ast-calls-nested
-  "%count-ast-calls counts across nested children."
+    (assert-= 0 (cl-cc/compile::%count-ast-calls node 'my-fn)))
   (let* ((inner (cl-cc/ast::make-ast-call :func 'my-fn :args nil))
          (outer (cl-cc/ast::make-ast-progn :forms (list inner inner))))
     (assert-= 2 (cl-cc/compile::%count-ast-calls outer 'my-fn))))
@@ -283,14 +267,11 @@
 
 ;;; ─── %escape-classify-children ──────────────────────────────────────────
 
-(deftest escape-classify-children-nil-for-int-child
-  "%escape-classify-children returns NIL when no child references the binding."
+(deftest escape-classify-children-cases
+  "%escape-classify-children returns NIL when no child references the binding; reports kinds when a child is an ast-var matching the binding."
   (let* ((child  (cl-cc/ast::make-ast-int :value 42))
          (parent (cl-cc/ast::make-ast-progn :forms (list child))))
-    (assert-null (cl-cc/compile::%escape-classify-children parent 'x nil))))
-
-(deftest escape-classify-children-detects-return-from-var-child
-  "%escape-classify-children reports kinds when a child is an ast-var matching the binding."
+    (assert-null (cl-cc/compile::%escape-classify-children parent 'x nil)))
   (let* ((child  (cl-cc/ast::make-ast-var :name 'x))
          (parent (cl-cc/ast::make-ast-progn :forms (list child))))
     (let ((kinds (cl-cc/compile::%escape-classify-children parent 'x nil)))
@@ -298,38 +279,28 @@
 
 ;;; ─── %escape-capture-kinds ───────────────────────────────────────────────
 
-(deftest escape-capture-kinds-nil-when-binding-absent
-  "%escape-capture-kinds returns NIL when body does not reference binding-name."
+(deftest escape-capture-kinds-cases
+  "%escape-capture-kinds returns NIL when body does not reference binding-name; returns :capture when body directly references binding-name."
   (let ((body (list (cl-cc/ast::make-ast-int :value 0))))
-    (assert-null (cl-cc/compile::%escape-capture-kinds body 'x nil))))
-
-(deftest escape-capture-kinds-capture-when-mentioned
-  "%escape-capture-kinds returns :capture when body directly references binding-name."
+    (assert-null (cl-cc/compile::%escape-capture-kinds body 'x nil)))
   (let ((body (list (cl-cc/ast::make-ast-var :name 'x))))
     (let ((kinds (cl-cc/compile::%escape-capture-kinds body 'x nil)))
       (assert-true (member :capture kinds)))))
 
 ;;; ─── %escape-classify / binding-escape-kinds-in-body ────────────────────
 
-(deftest escape-classify-var-returns-return-kind
-  "%escape-classify on an ast-var matching binding-name yields (:return)."
+(deftest escape-classify-var-cases
+  "%escape-classify on a matching ast-var yields (:return); on a non-matching var yields NIL."
   (let ((node (cl-cc/ast::make-ast-var :name 'x)))
-    (assert-equal '(:return) (cl-cc/compile::%escape-classify node 'x nil))))
-
-(deftest escape-classify-var-no-match-returns-nil
-  "%escape-classify on an ast-var not matching binding-name yields NIL."
+    (assert-equal '(:return) (cl-cc/compile::%escape-classify node 'x nil)))
   (let ((node (cl-cc/ast::make-ast-var :name 'y)))
     (assert-null (cl-cc/compile::%escape-classify node 'x nil))))
 
-(deftest binding-escape-kinds-capture-from-lambda
-  "binding-escape-kinds-in-body detects :capture when binding is referenced inside a lambda."
+(deftest binding-escape-kinds-cases
+  "binding-escape-kinds-in-body detects :capture when binding is referenced inside a lambda; returns NIL for empty body."
   (let* ((body (list (cl-cc/ast::make-ast-lambda
                       :params '(z)
                       :body   (list (cl-cc/ast::make-ast-var :name 'x))))))
     (let ((kinds (cl-cc/compile::binding-escape-kinds-in-body body 'x)))
-      (assert-true (member :capture kinds)))))
-
-(deftest binding-escape-kinds-empty-body
-  "binding-escape-kinds-in-body returns NIL for empty list body."
+      (assert-true (member :capture kinds))))
   (assert-null (cl-cc/compile::binding-escape-kinds-in-body nil 'x)))
-

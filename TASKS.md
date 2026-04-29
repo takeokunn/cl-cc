@@ -3,7 +3,7 @@
 Coding Agent 用逐次実装タスクリスト。
 **ルール**: 最初の `[ ]` タスクを1つ実装 → テスト通過確認 → `[x]` に変更 → 次へ。
 
-テスト実行: `nix develop --command make test` (0 failure が必須)
+テスト実行: `nix run .#test` (fast plan), `nix run .#test-full` (canonical full plan), `nix run .#coverage` (coverage gate)
 
 ---
 

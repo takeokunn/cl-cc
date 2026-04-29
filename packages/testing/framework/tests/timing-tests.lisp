@@ -38,17 +38,26 @@
     (assert-true (integerp ns))
     (assert-true (>= ns 0))))
 
-(deftest timing-tap-diagnostic-contains-duration-ms
-  "The TAP diagnostic block for a passing test contains `duration_ms:`."
-  (let* ((plist (%timing-test-plist 'timing-tap-pass (lambda () t)))
+(deftest timing-tap-diagnostic-compact-pass-emits-nothing
+  "In compact mode (default), passing tests emit no output."
+  (let* ((plist  (%timing-test-plist 'timing-tap-pass (lambda () t)))
          (result (%run-single-test plist 42 '()))
          (output (with-output-to-string (*standard-output*)
                    (%tap-print-result result))))
-    (assert-true (search "duration_ms:" output))
-    ;; %tap-print-result emits literal lowercase "ok" followed by the symbol
-    ;; name which prints upcased under the default readtable — don't upcase
-    ;; the whole output or "ok" itself becomes "OK" and the search fails.
-    (assert-true (search "ok 42 - TIMING-TAP-PASS" output))))
+    (assert-true (zerop (length output)))))
+
+(deftest timing-tap-diagnostic-verbose-pass-contains-duration-ms
+  "In verbose TAP mode, a passing test emits duration_ms: in its YAML diagnostic."
+  (unwind-protect
+       (progn
+         (sb-posix:setenv "CLCC_VERBOSE_TAP" "1" 1)
+         (let* ((plist  (%timing-test-plist 'timing-tap-pass (lambda () t)))
+                (result (%run-single-test plist 42 '()))
+                (output (with-output-to-string (*standard-output*)
+                          (%tap-print-result result))))
+           (assert-true (search "duration_ms:" output))
+           (assert-true (search "ok 42 - TIMING-TAP-PASS" output))))
+    (sb-posix:unsetenv "CLCC_VERBOSE_TAP")))
 
 (deftest timing-tap-diagnostic-fail-preserves-existing-yaml
   "Failure results still carry their failure YAML and gain duration_ms."
@@ -59,7 +68,7 @@
          (result (%run-single-test plist 7 '()))
          (output (with-output-to-string (*standard-output*)
                    (%tap-print-result result))))
-    (assert-true (search "not ok 7" output))
+    (assert-true (search "not ok - " output))
     (assert-true (search "message:" output))
     (assert-true (search "duration_ms:" output))))
 
@@ -193,9 +202,79 @@ the frozen order suite\\ttest-name\\tduration-ns\\tstatus\\tbatch-id."
              (format out "SUITE~CFOO~C25~Cpassed~C-~%" #\Tab #\Tab #\Tab #\Tab)
              (format out "SUITE~CBAR~C7~Cfailed~C-~%" #\Tab #\Tab #\Tab #\Tab))
            (let ((timings (%load-prior-timings tmp)))
-             (assert-= 25 (gethash "FOO" timings))
-             (assert-= 7 (gethash "BAR" timings))))
+              (assert-= 25 (gethash "FOO" timings))
+              (assert-= 7 (gethash "BAR" timings))))
       (ignore-errors (delete-file tmp)))))
+
+(deftest timing-set-test-timeouts-by-prefix-updates-only-matching-tests
+  "set-test-timeouts-by-prefix! only rewrites matching registered tests."
+  (let ((saved *test-registry*))
+    (unwind-protect
+         (progn
+           (setf *test-registry* (persist-empty))
+           (setf *test-registry*
+                 (persist-assoc *test-registry* 'foo-match
+                                (list :name 'foo-match :suite 'cl-cc-unit-suite :timeout nil)))
+           (setf *test-registry*
+                 (persist-assoc *test-registry* 'bar-miss
+                                (list :name 'bar-miss :suite 'cl-cc-unit-suite :timeout nil)))
+           (set-test-timeouts-by-prefix! "FOO-" 17)
+           (assert-= 17 (getf (persist-lookup *test-registry* 'foo-match) :timeout))
+           (assert-null (getf (persist-lookup *test-registry* 'bar-miss) :timeout)))
+      (setf *test-registry* saved))))
+
+(deftest timing-bulk-timeout-helpers-preserve-explicit-timeouts-by-default
+  "Bulk timeout helpers do not overwrite explicit per-test timeouts unless asked."
+  (let ((saved-tests *test-registry*)
+        (saved-suites *suite-registry*)
+        (suite 'timing-preserve-suite))
+    (unwind-protect
+         (progn
+           (setf *suite-registry* (persist-empty))
+           (setf *test-registry* (persist-empty))
+           (setf *suite-registry*
+                 (persist-assoc *suite-registry* suite
+                                (list :name suite :description "preserve" :parent nil :parallel t :before-each '() :after-each '())))
+           (setf *test-registry*
+                 (persist-assoc *test-registry* 'foo-keep
+                                (list :name 'foo-keep :suite suite :timeout 9)))
+           (setf *test-registry*
+                 (persist-assoc *test-registry* 'foo-fill
+                                (list :name 'foo-fill :suite suite :timeout nil)))
+           (set-test-timeouts-by-prefix! "FOO-" 17)
+           (set-suite-test-timeout! suite 23 :recursive t)
+           (assert-= 9 (getf (persist-lookup *test-registry* 'foo-keep) :timeout))
+           (assert-= 17 (getf (persist-lookup *test-registry* 'foo-fill) :timeout)))
+      (setf *test-registry* saved-tests
+            *suite-registry* saved-suites))))
+
+(deftest timing-set-suite-test-timeout-can-update-descendants
+  "set-suite-test-timeout! optionally updates descendant suite tests too."
+  (let ((saved-tests *test-registry*)
+        (saved-suites *suite-registry*)
+        (parent 'timing-timeout-parent)
+        (child 'timing-timeout-child))
+    (unwind-protect
+         (progn
+           (setf *suite-registry* (persist-empty))
+           (setf *test-registry* (persist-empty))
+           (setf *suite-registry*
+                 (persist-assoc *suite-registry* parent
+                                (list :name parent :description "parent" :parent nil :parallel t :before-each '() :after-each '())))
+           (setf *suite-registry*
+                 (persist-assoc *suite-registry* child
+                                (list :name child :description "child" :parent parent :parallel t :before-each '() :after-each '())))
+           (setf *test-registry*
+                 (persist-assoc *test-registry* 'parent-test
+                                (list :name 'parent-test :suite parent :timeout nil)))
+           (setf *test-registry*
+                 (persist-assoc *test-registry* 'child-test
+                                (list :name 'child-test :suite child :timeout nil)))
+           (set-suite-test-timeout! parent 23 :recursive t)
+           (assert-= 23 (getf (persist-lookup *test-registry* 'parent-test) :timeout))
+           (assert-= 23 (getf (persist-lookup *test-registry* 'child-test) :timeout)))
+      (setf *test-registry* saved-tests
+            *suite-registry* saved-suites))))
 
 (deftest timing-print-result-summary-reports-failures-and-skips
   "%print-result-summary prints aggregated counts and the failed test list."
@@ -203,8 +282,7 @@ the frozen order suite\\ttest-name\\tduration-ns\\tstatus\\tbatch-id."
                         (list :name 'beta :status :skip :number 2)
                         (list :name 'gamma :status :fail :number 3)))
          (output (with-output-to-string (*standard-output*)
-                   (assert-true (%print-result-summary results)))))
-    (assert-true (search "PASS" output))
-    (assert-true (search "FAIL" output))
-    (assert-true (search "SKIP" output))
-    (assert-true (search "[   3] GAMMA" output))))
+                    (assert-true (%print-result-summary results)))))
+    (assert-true (search "1 passed" output))
+    (assert-true (search "1 failed" output))
+    (assert-true (search "1 skipped" output))))

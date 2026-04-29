@@ -6,7 +6,7 @@
 
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-cli-serial-suite)
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Temp-file helper
@@ -164,7 +164,7 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
 (deftest cli-run-compiled-result-executes-program
   "%run-compiled-result compiles a simple expression and runs it without error."
   (let* ((result (cl-cc::compile-string "(+ 1 1)" :target :vm))
-         (vm-state (cl-cc::make-vm2-state))
+         (vm-state (cl-cc/vm::make-vm-state :output-stream *standard-output*))
          (opts (cl-cc/cli::make-compile-opts))
          (val (cl-cc/cli::%run-compiled-result result vm-state opts)))
     (assert-= 2 val)))

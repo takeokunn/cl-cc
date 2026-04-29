@@ -18,7 +18,7 @@
   (expected form)
   (assert-equal expected (not (null (run-string form)))))
 
-(deftest-compile-each compile-string-ops-and-type-predicates
+(deftest-compile compile-string-ops-and-type-predicates
   "String ops return numeric results and type predicates return CL booleans."
   :cases (("length-hello"  5 "(string-length \"hello\")")
           ("length-empty"  0 "(string-length \"\")")
@@ -33,7 +33,7 @@
 
 ;;; Macro Expansion in Compiler Tests
 
-(deftest-compile-each compile-control-macros-valued
+(deftest-compile compile-control-macros-valued
   "cond/when/unless/and/or macros return the expected values."
   :cases (("cond-match"    42  "(cond ((= 1 2) 10) ((= 1 1) 42) (t 0))")
           ("cond-default"   0  "(cond ((= 1 2) 10) ((= 2 3) 20) (t 0))")
@@ -52,7 +52,7 @@
   (form)
   (assert-run-false form))
 
-(deftest-compile-each compile-t-nil-constants
+(deftest-compile compile-t-nil-constants
   "t and nil are recognized as constants; not inverts truthiness."
   :cases (("t-is-true"    t   "t")
           ("not-nil"      t   "(not nil)")
@@ -62,7 +62,7 @@
 
 ;;; List Operation Builtin Tests
 
-(deftest-compile-each compile-list-ops
+(deftest-compile compile-list-ops
   "cons/car/cdr, list/length, first/rest, eq/eql return the expected numeric values."
   :cases (("car"         1 "(car (cons 1 2))")
           ("cdr"         2 "(cdr (cons 1 2))")
@@ -75,14 +75,14 @@
           ("eql-true"    1 "(eql 42 42)"))
   )
 
-(deftest-compile-each compile-list-builtins
+(deftest-compile compile-list-builtins
   "append/reverse builtins work on lists."
   :cases (("append-len" 4 "(length (append (list 1 2) (list 3 4)))")
           ("reverse-first" 3 "(first (reverse (list 1 2 3)))")))
 
 ;;; Handler-Case Tests
 
-(deftest-compile-each compile-handler-case-return-value
+(deftest-compile compile-handler-case-return-value
   "handler-case returns the correct numeric value in various scenarios."
   :cases (("no-error"      42 "(handler-case 42 (error (e) 0))")
           ("catches-error" 99 "(handler-case (error \"boom\") (error (e) 99))")
@@ -118,7 +118,7 @@
 
 ;;; Defmacro Compilation Tests
 
-(deftest-compile-each compile-defmacro-numeric
+(deftest-compile compile-defmacro-numeric
   "defmacro defines macros that expand and evaluate to the correct numeric result."
   :cases (("basic"      42  "(defmacro my-const () 42) (my-const)")
           ("with-args"  10  "(defmacro my-dbl (x) (list '+ x x)) (my-dbl 5)")
@@ -142,7 +142,7 @@
 
 ;;; Typep and Destructuring Tests
 
-(deftest-compile-each compile-typep-destructuring-iteration
+(deftest-compile compile-typep-destructuring-iteration
   "typep/destructuring-bind/iteration macros return the expected numeric result."
   :cases (("typep-integer"   1 "(typep 42 'integer)")
           ("typep-string"    1 "(typep \"hello\" 'string)")
@@ -160,7 +160,7 @@
 
 ;;; Runtime Eval and Setf Variable Tests
 
-(deftest-compile-each compile-eval-and-setf-variable
+(deftest-compile compile-eval-and-setf-variable
   "eval and setf on plain variables return the expected numeric results."
   :cases (("eval-constant"    42 "(eval 42)")
           ("eval-quoted"       3 "(eval '(+ 1 2))")
@@ -173,13 +173,13 @@
 
 ;;; FR-603: (setf (values ...)) assigns to multiple places
 
-(deftest-compile-each compile-setf-values
+(deftest-compile compile-setf-values
   "(setf (values ...)) assigns multiple values to individual places."
   :cases (("reads-a"    10 "(let ((a 0) (b 0)) (setf (values a b) (values 10 20)) a)")
           ("reads-b"    20 "(let ((a 0) (b 0)) (setf (values a b) (values 10 20)) b)")
           ("reads-both" 30 "(let ((x 0) (y 0)) (setf (values x y) (values 10 20)) (+ x y))")))
 
-(deftest-compile-each compile-obsolete-set
+(deftest-compile compile-obsolete-set
   "SET is available as a builtin and assigns through SYMBOL-VALUE without stdlib loading."
   :cases (("returns-value" 42 "(progn (defparameter fr586-set-var 0) (set 'fr586-set-var 42))")
           ("reads-binding" 42 "(progn (defparameter fr586-set-var 0) (set 'fr586-set-var 42) (symbol-value 'fr586-set-var))")

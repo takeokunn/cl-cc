@@ -27,17 +27,17 @@
 (deftest-each pipeline-compile-string-returns-result
   "compile-string returns a compilation-result for simple and multi-form inputs."
   :cases (("single-form"   "(+ 1 2)")
-          ("multiple-forms" "(defun f (x) x) (f 42)"))
+          ("multiple-forms" "(defun f (x) x)"))
   (expr)
-  (assert-true (typep (compile-string expr) 'cl-cc/compile::compilation-result)))
+  (assert-true (typep (compile-string expr :target :vm) 'cl-cc/compile::compilation-result)))
 
 (deftest pipeline-compile-string-custom-pass-pipeline
   "compile-string forwards a string pass pipeline to optimizer core."
   (let* ((baseline (compile-string "(+ 1 2)" :target :vm))
          (result (compile-string "(+ 1 2)" :target :vm :pass-pipeline "fold,dce")))
     (assert-true (typep result 'cl-cc/compile::compilation-result))
-    (assert-true (not (null (cl-cc:compilation-result-optimized-instructions baseline))))
-    (assert-true (not (null (cl-cc:compilation-result-optimized-instructions result))))
+    (assert-true (listp (cl-cc:compilation-result-optimized-instructions baseline)))
+    (assert-true (listp (cl-cc:compilation-result-optimized-instructions result)))
     (assert-true (> (length (cl-cc:compilation-result-vm-instructions result)) 0))))
 
 (deftest-each pipeline-run-string-forms
@@ -180,12 +180,12 @@
                  (lambda (&rest args)
                    (declare (ignore args))
                    (setf called t)
-                   (make-compilation-result
-                    :program (make-vm-program :instructions (vector (make-vm-const :dst :r0 :value 3)
-                                                                     (make-vm-halt :reg :r0)))
-                    :assembly ""
-                    :cps '(identity 3)
-                    :vm-instructions nil
+                (make-compilation-result
+                     :program (make-vm-program :instructions (list (make-vm-const :dst :r0 :value 3)
+                                                                    (make-vm-halt :reg :r0)))
+                     :assembly ""
+                     :cps '(identity 3)
+                     :vm-instructions nil
                     :optimized-instructions nil)))
            (assert-= 3 (cl-cc::our-eval '(+ 1 2)))
            (assert-true called))

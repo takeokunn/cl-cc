@@ -1,7 +1,7 @@
 ;;;; tests/unit/compile/codegen-control-tests.lisp — Codegen control-flow tests
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-codegen-unit-serial-suite)
 
 ;;; ─── compile-ast: ast-block / ast-tagbody / ast-go ───────────────────────────
 

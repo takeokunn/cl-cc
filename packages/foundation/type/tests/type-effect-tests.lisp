@@ -5,7 +5,16 @@
 
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-unit-suite)
+(defsuite cl-cc-type-serial-suite
+  :description "Serial type-system tests that share fresh-var and registry state"
+  :parent cl-cc-unit-suite
+  :parallel nil)
+
+(defbefore :each (cl-cc-type-serial-suite)
+  (cl-cc/type::reset-type-vars!)
+  (setf cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
+
+(in-suite cl-cc-type-serial-suite)
 
 ;;; Free Variables Tests
 
@@ -85,8 +94,6 @@
 
 ;;; Phase 4: Typeclass Tests
 
-;;; Legacy compatibility tests removed as part of public surface reduction.
-
 (deftest-each typeclass-instance-registration
   "register-typeclass-instance and has-typeclass-instance-p.
 Each case clears the registry first so sibling cases don't trip the
@@ -103,7 +110,6 @@ registration body per case."
 
 ;;; Phase 5: Effect Type Tests
 
-;;; Legacy effect compatibility tests removed as part of public surface reduction.
 
 (deftest-each effect-row-singleton-cases
   "Effect row singletons: pure has 0 effects; io has 1 IO effect; custom multi has N effects."
@@ -129,7 +135,6 @@ registration body per case."
         (assert-true (search expected (string-upcase s)))
         (assert-string= expected s))))
 
-;;; Legacy effect compatibility tests removed as part of public surface reduction.
 
 ;;; Phase 6: Rank-N Polymorphism Tests
 

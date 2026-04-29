@@ -114,7 +114,7 @@
       (assert-equal :R0 (cl-cc/vm::vm-lhs add-inst))
       (assert-equal :R0 (cl-cc/vm::vm-rhs add-inst)))))
 
-(deftest heap-alias-cases
+(deftest heap-alias-integration-cases
   "Must-alias propagates through move; distinct allocs not may-alias; unknown root conservatively may-alias."
   (let* ((alloc (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (copy  (make-vm-move :dst :r3 :src :r0))
@@ -132,17 +132,17 @@
   (let* ((alloc (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (copy  (make-vm-move :dst :r3 :src :r0))
          (kill  (make-vm-const :dst :r3 :value 9))
-         (pt1   (cl-cc/optimize::opt-compute-points-to (list alloc copy)))
-         (pt2   (cl-cc/optimize::opt-compute-points-to (list alloc copy kill))))
-    (assert-eq :r0 (cl-cc/optimize::opt-points-to-root :r0 pt1))
-    (assert-eq :r0 (cl-cc/optimize::opt-points-to-root :r3 pt1))
-    (assert-false (cl-cc/optimize::opt-points-to-root :r3 pt2))))
+         (pt1   (cl-cc/optimize::opt-compute-heap-aliases (list alloc copy)))
+         (pt2   (cl-cc/optimize::opt-compute-heap-aliases (list alloc copy kill))))
+    (assert-eq :r0 (gethash :r0 pt1))
+    (assert-eq :r0 (gethash :r3 pt1))
+    (assert-false (nth-value 1 (gethash :r3 pt2)))))
 
 (deftest heap-kind-helper-distinguishes-object-classes
   "TBAA helper can prove non-aliasing across different fresh heap object kinds."
   (let* ((alloc-cons  (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (alloc-array (make-vm-make-array :dst :r4 :size-reg :r5))
-         (points-to   (cl-cc/optimize::opt-compute-points-to (list alloc-cons alloc-array)))
+         (points-to   (cl-cc/optimize::opt-compute-heap-aliases (list alloc-cons alloc-array)))
          (heap-kinds  (cl-cc/optimize::opt-compute-heap-kinds (list alloc-cons alloc-array))))
     (assert-eq :cons (gethash :r0 heap-kinds))
     (assert-eq :array (gethash :r4 heap-kinds))
@@ -181,4 +181,3 @@
     (assert-equal (length expected-members) (length regs))
     (dolist (r expected-members)
       (assert-true (member r regs)))))
-

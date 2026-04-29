@@ -1,7 +1,6 @@
 ;;;; packages/foundation/type/src/inference.lisp - HM Inference Registries and Helpers
 ;;;
 ;;; Contains: class type and alias registries, %infer-fn-binding, %find-fn-type-declaration.
-;;; infer-* handlers and Algorithm W dispatcher moved to inference-handlers.lisp.
 ;;;
 ;;; Load order: before inference-handlers.lisp.
 

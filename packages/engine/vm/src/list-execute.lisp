@@ -239,4 +239,3 @@
 (define-simple-instruction vm-listp :pred1 listp)
 (define-simple-instruction vm-atom :pred1 atom)
 
-;;; (Array/Vector operations moved to packages/engine/vm/src/array.lisp)

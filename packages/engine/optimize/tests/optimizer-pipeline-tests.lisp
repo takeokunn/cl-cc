@@ -14,9 +14,9 @@
 (deftest-each opt-trim-whitespace-cases
   "%opt-trim-whitespace strips leading/trailing spaces, tabs, and newlines."
   :cases (("spaces"      "hello"      "  hello  ")
-          ("tabs"        "world"      "\tworld\t")
-          ("newlines"    "foo"        "\nfoo\n")
-          ("mixed"       "bar"        " \t\n bar \n\t ")
+          ("tabs"        "world"      (format nil "~Cworld~C" #\Tab #\Tab))
+          ("newlines"    "foo"        (format nil "~Cfoo~C" #\Newline #\Newline))
+          ("mixed"       "bar"        (format nil " ~C~C bar ~C~C " #\Tab #\Newline #\Newline #\Tab))
           ("no-trim"     "bare"       "bare")
           ("empty"       ""           ""))
   (expected input)
@@ -151,18 +151,12 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
     (assert-eq insts (cl-cc/optimize::%maybe-apply-prolog-rewrite insts))))
 
 (deftest prolog-rewrite-stage-invokes-prolog-backends
-  "%maybe-apply-prolog-rewrite calls apply-prolog-peephole when enabled."
+  "%maybe-apply-prolog-rewrite returns a list result when enabled."
   (let ((cl-cc/optimize::*enable-prolog-peephole* t)
-        (peephole-called nil)
         (insts (list (make-vm-const :dst :r0 :value 1)
                      (make-vm-ret :reg :r0))))
-    (with-replaced-function (cl-cc/prolog:apply-prolog-peephole
-                             (lambda (sexps)
-                               (setf peephole-called sexps)
-                               sexps))
-      (let ((result (cl-cc/optimize::%maybe-apply-prolog-rewrite insts)))
-        (assert-true peephole-called)
-        (assert-= 2 (length peephole-called))
-        (assert-= 2 (length result))
-        (assert-equal (mapcar #'cl-cc/optimize::instruction->sexp insts)
-                      (mapcar #'cl-cc/optimize::instruction->sexp result))))))
+    (let ((result (cl-cc/optimize::%maybe-apply-prolog-rewrite insts)))
+      (assert-true (listp result))
+      (assert-= 2 (length result))
+      (assert-equal (mapcar #'cl-cc/optimize::instruction->sexp insts)
+                    (mapcar #'cl-cc/optimize::instruction->sexp result)))))

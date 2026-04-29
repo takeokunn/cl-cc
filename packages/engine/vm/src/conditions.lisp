@@ -61,23 +61,6 @@ Inherits from CL's DIVISION-BY-ZERO so user code can catch it via
              (format stream "VM Division By Zero: attempted to divide ~S by zero"
                      (vm-dividend condition)))))
 
-;;; ─── Compatibility Accessors ─────────────────────────────────────────────────
-
-(defun vm-expected-type (condition)
-  "Return the expected type recorded in CONDITION."
-  (type-error-expected-type condition))
-
-(defun vm-datum (condition)
-  "Return the datum recorded in CONDITION."
-  (type-error-datum condition))
-
-(defun vm-variable-name (condition)
-  "Return the variable name recorded in CONDITION."
-  (cell-error-name condition))
-
-(defun vm-function-name (condition)
-  "Return the function name recorded in CONDITION."
-  (cell-error-name condition))
 
 ;;; ─── VM Handler Stack ────────────────────────────────────────────────────────
 ;;;

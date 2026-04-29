@@ -72,7 +72,7 @@
           #:generator #:generate #:gen-fn #:shrink-value #:make-generator
           #:gen-primitive-type #:gen-type-variable #:gen-simple-compound-type
           #:gen-values-type #:gen-fn-type-args #:gen-fn-type #:gen-array-type
-          #:gen-cons-type #:gen-type-expr #:gen-type-specifier
+          #:gen-cons-type #:gen-type-expr
           #:typed-ast #:make-typed-ast-raw #:typed-ast-node-type #:typed-ast-source-node
           #:typed-ast-int #:make-typed-ast-int-raw #:typed-ast-int-value
           #:typed-ast-float #:make-typed-ast-float-raw #:typed-ast-float-value

@@ -153,7 +153,9 @@ Returns :lisp or :php."
 
 (defun %flamegraph-children-list (node)
   (let (children)
-    (maphash (lambda (_ child) (declare (ignore _)) (push child children)) (getf node :children))
+    (let ((table (getf node :children)))
+      (when table
+        (maphash (lambda (_ child) (declare (ignore _)) (push child children)) table)))
     (sort children #'string< :key (lambda (c) (princ-to-string (getf c :name))))))
 
 (defun %flamegraph-depth-of (node depth max-depth-cell)

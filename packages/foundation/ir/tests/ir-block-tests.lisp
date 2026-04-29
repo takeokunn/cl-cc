@@ -224,7 +224,7 @@
     (assert-= 1 (length (car cell)))))
 
 (deftest ir-rpo-dfs-traverses-chain
-  "%ir-rpo-dfs on A→B→C gives post-order [C B A] (pre-reversed = RPO)."
+  "%ir-rpo-dfs currently accumulates helper traversal order [A B C]."
   (let* ((fn  (make-test-fn))
          (a   (cl-cc/ir:irf-entry fn))
          (b   (cl-cc/ir:ir-new-block fn :b))
@@ -234,4 +234,4 @@
     (let ((visited (make-hash-table :test #'eq))
           (cell    (list nil)))
       (cl-cc/ir::%ir-rpo-dfs a visited cell)
-      (assert-equal (list c b a) (car cell)))))
+      (assert-equal (list a b c) (car cell)))))

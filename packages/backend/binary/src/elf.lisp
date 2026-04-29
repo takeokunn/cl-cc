@@ -75,33 +75,6 @@
   "Write 1 byte to buffer."
   (binary-buffer-write-u8 buf (logand val #xff)))
 
-(defun elf-buf-u16le (buf val)
-  "Write 16-bit little-endian to buffer."
-  (binary-buffer-write-u16le buf val))
-
-(defun elf-buf-u32le (buf val)
-  "Write 32-bit little-endian to buffer."
-  (binary-buffer-write-u32le buf val))
-
-(defun elf-buf-u64le (buf val)
-  "Write 64-bit little-endian to buffer."
-  (binary-buffer-write-u64le buf val))
-
-(defun elf-buf-s64le (buf val)
-  "Write signed 64-bit little-endian to buffer."
-  (binary-buffer-write-s64le buf val))
-
-(defun elf-buf-bytes (buf bytes)
-  "Append sequence of bytes to buffer."
-  (binary-buffer-write-bytes buf bytes))
-
-(defun elf-buf-pad (buf n)
-  "Append N zero bytes."
-  (binary-buffer-write-pad buf n))
-
-(defun elf-buf-to-array (buf)
-  "Convert adjustable buffer to simple byte array."
-  (binary-buffer-to-array buf))
 
 ;;; ------------------------------------------------------------
 ;;; String Table Builder
@@ -134,7 +107,7 @@
 
 (defun strtab-bytes (st)
   "Return the strtab as a byte array."
-  (elf-buf-to-array (stb-buf st)))
+  (binary-buffer-to-array (stb-buf st)))
 
 ;;; ------------------------------------------------------------
 ;;; ELF64 Builder
@@ -162,7 +135,7 @@
 
 (defun elf64-add-text-bytes (builder bytes)
   "Append BYTES (vector or list of (unsigned-byte 8)) to .text section."
-  (elf-buf-bytes (elf64-text-buf builder) bytes))
+  (binary-buffer-write-bytes (elf64-text-buf builder) bytes))
 
 (defun elf64-text-size (builder)
   "Return current .text section size in bytes."

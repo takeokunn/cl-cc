@@ -252,6 +252,8 @@
 
    A program is a leaf function when it contains no call-like instructions."
   (let ((leaf-p (not (some (lambda (inst)
-                             (member (type-of inst) *opt-leaf-call-types* :test #'eq))
+                             (some (lambda (call-type)
+                                     (typep inst call-type))
+                                   *opt-leaf-call-types*))
                            instructions))))
     (values instructions leaf-p)))

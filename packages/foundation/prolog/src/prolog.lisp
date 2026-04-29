@@ -190,6 +190,4 @@ to one `def-rule` per operator, keeping rule data and rule expansion separate."
   ()
   (:documentation "Condition signaled when cut (!) is encountered."))
 
-;;; Built-in predicate dispatch moved to prolog-builtins.lisp.
-
 ;;; Backtracking Solver using Continuations

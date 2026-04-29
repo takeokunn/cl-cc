@@ -21,7 +21,7 @@
   :cases (("basic"    "(let ((x 1)) (setq x 42) x)"              42)
           ("multiple" "(let ((x 1) (y 2)) (setq x (+ x y)) x)"    3))
   (source expected)
-  (assert-true (is-compile-string source :target :x86_64))
+  (assert-true (is-compile-string source :target :vm))
   (assert-= expected (run-string source)))
 
 ;; ----------------------------------------------------------------------------
@@ -50,7 +50,7 @@
   :cases (("integer"       "(the integer 42)"       42)
           ("in-expression" "(the integer (+ 1 2))"   3))
   (source expected)
-  (assert-true (is-compile-string source :target :x86_64))
+  (assert-true (is-compile-string source :target :vm))
   (assert-= expected (run-string source)))
 
 (deftest-each boolean-predicate-branches

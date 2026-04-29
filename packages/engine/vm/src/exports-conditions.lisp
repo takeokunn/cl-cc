@@ -33,10 +33,6 @@
    vm-error
 
    ;; ─── Condition Slots ───────────────────────────────────────────────────────
-   vm-datum
-   vm-expected-type
-   vm-variable-name
-   vm-function-name
    vm-dividend
    vm-restart-name
    vm-handler-type

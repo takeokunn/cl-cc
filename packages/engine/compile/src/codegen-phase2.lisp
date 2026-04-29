@@ -112,3 +112,22 @@ Handler lambda-list: (args result-reg ctx) → result-reg-or-nil.")
                       list-reg))))
     (emit ctx (make-vm-call-next-method :dst result-reg :args-reg args-reg))
     result-reg))
+
+;; set-fdefinition: register a compiled closure under a symbol name and return the closure
+(define-phase2-handler "SET-FDEFINITION" (args result-reg ctx)
+  (when (= (length args) 2)
+    (let* ((fn-reg (compile-ast (first args) ctx))
+           (name-ast (second args))
+           (name (cond
+                   ((typep name-ast 'ast-quote)
+                    (ast-quote-value name-ast))
+                   ((typep name-ast 'ast-var)
+                    (ast-var-name name-ast))
+                   (t nil))))
+      (when (symbolp name)
+        (emit ctx (make-vm-register-function :name name :src fn-reg))
+        (if (eq result-reg fn-reg)
+            fn-reg
+            (progn
+              (emit ctx (make-vm-move :dst result-reg :src fn-reg))
+              result-reg))))))

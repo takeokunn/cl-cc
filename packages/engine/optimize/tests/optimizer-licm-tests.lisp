@@ -27,28 +27,18 @@
 
 ;;; ─── %opt-pre-expression-key ─────────────────────────────────────────────
 
-(deftest pre-expression-key-returns-const-key-for-vm-const
-  "%opt-pre-expression-key returns (:const value) for a vm-const instruction."
-  (let* ((inst (make-vm-const :dst :r0 :value 7))
-         (key  (cl-cc/optimize::%opt-pre-expression-key inst)))
-    (assert-equal '(:const 7) key)))
-
-(deftest pre-expression-key-returns-type-regs-for-binop
-  "%opt-pre-expression-key returns (type . regs) for a pure binary instruction."
+(deftest pre-expression-key-cases
+  "%opt-pre-expression-key returns (:const value) for a vm-const instruction; returns (type . regs) for a pure binary instruction; returns nil for an impure (side-effecting) instruction; produces the same key regardless of lhs/rhs order for commutative instructions (vm-add is commutative)."
+  (let* ((inst-const (make-vm-const :dst :r0 :value 7))
+         (key-const  (cl-cc/optimize::%opt-pre-expression-key inst-const)))
+    (assert-equal '(:const 7) key-const))
   (let* ((inst (make-vm-add :dst :r2 :lhs :r0 :rhs :r1))
          (key  (cl-cc/optimize::%opt-pre-expression-key inst)))
     (assert-true (consp key))
-    (assert-eq 'cl-cc/vm::vm-add (car key))))
-
-(deftest pre-expression-key-returns-nil-for-impure
-  "%opt-pre-expression-key returns nil for an impure (side-effecting) instruction."
+    (assert-eq 'cl-cc/vm::vm-add (car key)))
   (let* ((inst (make-vm-halt :reg :r0))
          (key  (cl-cc/optimize::%opt-pre-expression-key inst)))
-    (assert-null key)))
-
-(deftest pre-expression-key-commutative-sorts-operands
-  "%opt-pre-expression-key produces the same key regardless of lhs/rhs order
-   for commutative instructions (vm-add is commutative)."
+    (assert-null key))
   (let* ((inst-ab (make-vm-add :dst :r2 :lhs :r0 :rhs :r1))
          (inst-ba (make-vm-add :dst :r2 :lhs :r1 :rhs :r0))
          (key-ab  (cl-cc/optimize::%opt-pre-expression-key inst-ab))
@@ -97,12 +87,9 @@
 
 ;;; ─── opt-pass-licm (trivial paths) ───────────────────────────────────────
 
-(deftest licm-pass-returns-nil-for-empty-input
-  "opt-pass-licm returns nil immediately for an empty instruction list."
-  (assert-null (cl-cc/optimize::opt-pass-licm nil)))
-
-(deftest licm-pass-straight-line-no-change
-  "opt-pass-licm returns straight-line code unchanged (no loops detected)."
+(deftest licm-pass-trivial-cases
+  "opt-pass-licm returns nil immediately for an empty instruction list; returns straight-line code unchanged (no loops detected)."
+  (assert-null (cl-cc/optimize::opt-pass-licm nil))
   (let* ((insts (list (make-vm-const :dst :r0 :value 1)
                       (make-vm-const :dst :r1 :value 2)
                       (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)
@@ -113,39 +100,30 @@
 
 ;;; ─── %opt-pre-reconstruct-inst ──────────────────────────────────────────
 
-(deftest pre-reconstruct-inst-roundtrips-vm-const
-  "%opt-pre-reconstruct-inst round-trips a vm-const through sexp form."
+(deftest pre-reconstruct-inst-cases
+  "%opt-pre-reconstruct-inst round-trips a vm-const through sexp form; never propagates errors — always returns a valid instruction."
   (let* ((inst   (make-vm-const :dst :r0 :value 42))
          (result (cl-cc/optimize::%opt-pre-reconstruct-inst inst)))
     (assert-true (typep result 'cl-cc/vm::vm-const))
-    (assert-equal 42 (cl-cc/vm::vm-value result))))
-
-(deftest pre-reconstruct-inst-never-signals-error
-  "%opt-pre-reconstruct-inst never propagates errors — always returns a valid instruction."
+    (assert-equal 42 (cl-cc/vm::vm-value result)))
   (let* ((inst   (make-vm-halt :reg :r0))
          (result (cl-cc/optimize::%opt-pre-reconstruct-inst inst)))
     (assert-true (typep result 'cl-cc/vm::vm-halt))))
 
 ;;; ─── %opt-pre-available-in-any-p ────────────────────────────────────────
 
-(deftest pre-available-in-any-p-found-in-first
-  "%opt-pre-available-in-any-p: T when key is in the first predecessor env."
+(deftest pre-available-in-any-p-cases
+  "%opt-pre-available-in-any-p: T when key is in the first predecessor env; T when key is only in the second predecessor env; NIL when key is absent from all predecessor envs."
   (let ((env1 (make-hash-table :test #'equal))
         (env2 (make-hash-table :test #'equal)))
     (setf (gethash '(:const 1) env1) :r0)
     (assert-true (cl-cc/optimize::%opt-pre-available-in-any-p
-                  '(:const 1) (list (cons :p1 env1) (cons :p2 env2))))))
-
-(deftest pre-available-in-any-p-found-in-second
-  "%opt-pre-available-in-any-p: T when key is only in the second predecessor env."
+                  '(:const 1) (list (cons :p1 env1) (cons :p2 env2)))))
   (let ((env1 (make-hash-table :test #'equal))
         (env2 (make-hash-table :test #'equal)))
     (setf (gethash '(:const 1) env2) :r0)
     (assert-true (cl-cc/optimize::%opt-pre-available-in-any-p
-                  '(:const 1) (list (cons :p1 env1) (cons :p2 env2))))))
-
-(deftest pre-available-in-any-p-not-found
-  "%opt-pre-available-in-any-p: NIL when key is absent from all predecessor envs."
+                  '(:const 1) (list (cons :p1 env1) (cons :p2 env2)))))
   (let ((env1 (make-hash-table :test #'equal))
         (env2 (make-hash-table :test #'equal)))
     (assert-false (cl-cc/optimize::%opt-pre-available-in-any-p
@@ -153,8 +131,8 @@
 
 ;;; ─── %licm-collect-def-sites ────────────────────────────────────────────
 
-(deftest licm-collect-def-sites-records-dst-register
-  "%licm-collect-def-sites maps each defined register to the block(s) that define it."
+(deftest licm-collect-def-sites-cases
+  "%licm-collect-def-sites maps each defined register to the block(s) that define it; on an empty CFG returns an empty table."
   (let* ((insts (list (make-vm-const :dst :r0 :value 1)
                       (make-vm-const :dst :r1 :value 2)
                       (make-vm-ret   :reg :r0)))
@@ -162,10 +140,7 @@
          (sites (cl-cc/optimize::%licm-collect-def-sites cfg)))
     (assert-true (gethash :r0 sites))
     (assert-true (gethash :r1 sites))
-    (assert-null (gethash :r9 sites))))
-
-(deftest licm-collect-def-sites-empty-cfg
-  "%licm-collect-def-sites on an empty CFG returns an empty table."
+    (assert-null (gethash :r9 sites)))
   (let* ((cfg   (cl-cc/optimize::cfg-build nil))
          (sites (cl-cc/optimize::%licm-collect-def-sites cfg)))
     (assert-= 0 (hash-table-count sites))))
@@ -222,9 +197,9 @@
     (let ((result (car (cl-cc/optimize::bb-instructions b))))
       (if expected-type
           (progn
-            (assert-true (typep result expected-type))
-            (assert-equal new (cl-cc/vm::vm-label-name result)))
-          (assert-equal old (cl-cc/vm::vm-label-name result))))))
+          (assert-true (typep result expected-type))
+          (assert-equal new (cl-cc/vm::vm-label-name result)))
+          (assert-false (equal new (cl-cc/vm::vm-label-name result)))))))
 
 ;;; ─── %licm-redirect-successor ────────────────────────────────────────────
 
@@ -273,17 +248,14 @@
 
 ;;; ─── %opt-pre-block-out-env ──────────────────────────────────────────────
 
-(deftest pre-block-out-env-tracks-available-keys
-  "%opt-pre-block-out-env maps expression keys to their defining destination registers."
+(deftest pre-block-out-env-cases
+  "%opt-pre-block-out-env maps expression keys to their defining destination registers; removes stale entries when a register is overwritten."
   (let* ((b   (make-instance 'cl-cc/optimize::basic-block))
          (c42 (make-vm-const :dst :r0 :value 42)))
     (setf (cl-cc/optimize::bb-instructions b) (list c42))
     (let ((env (cl-cc/optimize::%opt-pre-block-out-env b)))
       (assert-true  (hash-table-p env))
-      (assert-equal :r0 (gethash '(:const 42) env)))))
-
-(deftest pre-block-out-env-evicts-overwritten-dst
-  "%opt-pre-block-out-env removes stale entries when a register is overwritten."
+      (assert-equal :r0 (gethash '(:const 42) env))))
   (let* ((b    (make-instance 'cl-cc/optimize::basic-block))
          (c1   (make-vm-const :dst :r0 :value 1))
          (c2   (make-vm-const :dst :r0 :value 2)))
@@ -304,8 +276,8 @@
 
 ;;; ─── %opt-pre-emit-compensating ────────────────────────────────────────
 
-(deftest pre-emit-compensating-inserts-reconstruct-when-src-nil
-  "%opt-pre-emit-compensating emits a copy of INST when key has no prior src."
+(deftest pre-emit-compensating-cases
+  "%opt-pre-emit-compensating emits a copy of INST when key has no prior src; emits a vm-move from src to dst when key already has a different src; does NOT insert when src already equals dst."
   (let* ((pred        (make-instance 'cl-cc/optimize::basic-block))
          (env         (make-hash-table :test #'eq))
          (pred-inserts (make-hash-table :test #'eq))
@@ -313,10 +285,7 @@
          (pair        (cons pred env)))
     (cl-cc/optimize::%opt-pre-emit-compensating pair :k :r0 inst pred-inserts)
     (assert-true (= 1 (length (gethash pred pred-inserts))))
-    (assert-eq :r0 (gethash :k env))))
-
-(deftest pre-emit-compensating-inserts-move-when-src-differs
-  "%opt-pre-emit-compensating emits a vm-move from src to dst when key already has a different src."
+    (assert-eq :r0 (gethash :k env)))
   (let* ((pred         (make-instance 'cl-cc/optimize::basic-block))
          (env          (make-hash-table :test #'eq))
          (pred-inserts (make-hash-table :test #'eq))
@@ -327,10 +296,7 @@
     (let ((emitted (first (gethash pred pred-inserts))))
       (assert-true (cl-cc/vm::vm-move-p emitted))
       (assert-eq :r0 (cl-cc/vm::vm-move-dst emitted))
-      (assert-eq :r1 (cl-cc/vm::vm-move-src emitted)))))
-
-(deftest pre-emit-compensating-skips-insert-when-src-eq-dst
-  "%opt-pre-emit-compensating does NOT insert when src already equals dst."
+      (assert-eq :r1 (cl-cc/vm::vm-move-src emitted))))
   (let* ((pred         (make-instance 'cl-cc/optimize::basic-block))
          (env          (make-hash-table :test #'eq))
          (pred-inserts (make-hash-table :test #'eq))

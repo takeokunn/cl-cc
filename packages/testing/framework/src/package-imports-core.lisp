@@ -58,6 +58,7 @@
           cl-cc:make-ast-setq
           cl-cc:make-ast-call
           cl-cc:make-ast-quote
+          cl-cc:make-ast-the
           cl-cc:make-ast-catch
           cl-cc:make-ast-throw
           cl-cc:make-ast-unwind-protect
@@ -141,6 +142,7 @@
           cl-cc:make-vm-concatenate cl-cc:make-vm-make-array
           cl-cc:make-vm-float-add cl-cc:make-vm-integer-add cl-cc:make-vm-integer-mul
           cl-cc:make-vm-register-function cl-cc:make-vm-select
+          cl-cc:make-vm-program cl-cc:make-vm-signal-error cl-cc:make-vm-slot-write
           ;; VM Heap operations
           cl-cc:vm-cons
           cl-cc:vm-car
@@ -231,3 +233,16 @@
           cl-cc:ast-binop-p
           ;; Prolog type-inference functor atoms
           cl-cc:integer-type cl-cc:boolean-type cl-cc:const cl-cc:binop cl-cc:cmp))
+
+(import '(cl-cc/type:type-var
+          cl-cc::vm2-state-values-buffer
+          cl-cc/optimize::opt-compute-heap-aliases
+          cl-cc/optimize::opt-interval-add
+          cl-cc/optimize::opt-interval-sub
+          cl-cc/optimize::opt-may-alias-by-type-p
+          cl-cc/optimize::opt-may-alias-p
+          cl-cc/optimize::opt-must-alias-p
+          cl-cc/optimize::opt-known-callee-labels
+          cl-cc/optimize::opt-pass-dominated-type-check-elim
+          cl-cc/optimize:optimize-with-egraph)
+        :cl-cc/test)

@@ -2,7 +2,7 @@
 ;;;; Read/print tests → codegen-io-read-tests.lisp.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-codegen-unit-serial-suite)
 
 ;;; ── WRITE-STRING ─────────────────────────────────────────────────────────
 

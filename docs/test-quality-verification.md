@@ -1,120 +1,53 @@
 # テスト品質検証メモ
 
-このメモは、2026-04-14 時点で実施したテスト基盤安定化の検証根拠をまとめたものです。
+この文書は historical memo です。現在の branch / session に対する完了宣言ではありません。
 
-## 完了条件
+## 位置づけ
 
-このセッションでは、次を実用上の完了条件として扱いました。
+- 過去にどのような instability / shared-state 問題が議論されたか
+- どの種類の focused regression が有効だったか
+- serial suite 化をどのような設計判断として扱ったか
 
-1. `nix run .#test` と `nix run .#build` が成功すること。
-2. 重い・不安定だった target を複数回再実行しても green を維持すること。
-3. shared state 起因で不安定だった suite については、serial 実行が意図された境界であることを明示すること。
-4. 高リスク修正には focused regression test を紐づけること。
+を残すための補助資料です。
 
-## 実測結果
+## 現在の扱い
 
-- `nix run .#test`: canonical plan が green
+この文書単体をもって「完了」「green」「CI 相当で十分」とは見なしません。
+現在の検証可否は、常に以下の実ラン結果で判断してください。
 
-さらに `nix run .#clean` 後に `nix run .#build`, `nix run .#test` を再実行し、clean state でも green を確認しました。
+1. `nix run .#test`（fast-feedback plan。unit + integration、`selfhost-slow-suite` は除外）
+2. `nix run .#test-full`（canonical full plan。旧 `test-all` はこのアプリに集約済み）
+3. `nix run .#coverage`（production-only coverage policy で HTML report と threshold check を実行）
+4. `nix build`
+5. 必要に応じて `nix flake check`
 
-## 旧 skip 4 件の扱い
+### gate の役割分担
 
-当初 property-based suites には 4 件の skip が残っていましたが、
-最終状態では skip を外し、property-based suite 側でも通常の test として実行されるように戻しました。
+- `nix flake check`
+  - CI 向けの軽量 gate。
+  - 現在は `checks.tests`（fast plan 相当）と `checks.build` を実行する。
+- `nix run .#test-full`
+  - selfhost-slow / e2e を含む canonical full gate。
+- `nix run .#coverage`
+  - production-only coverage gate。
+- `nix run .#perf-smoke`
+  - fast/full gate の runtime budget 検証。
+- `nix run .#stability-smoke`
+  - fast gate の repeat 実行による flake smoke。
 
-対象だった 4 件は以下です。
+## 歴史的に重要だった論点
 
-- `MACROEXPAND-IDEMPOTENT-AND`
-- `MACROEXPAND-IDEMPOTENT-UNLESS`
-- `MACROEXPAND-IDEMPOTENT-WHEN`
-- `DEFUN-C-ENFORCES-CONTRACTS`
+### serial suite 化の理由
 
-これらは引き続き `tests/unit/expand/macros-control-flow-tests.lisp` の deterministic test でもカバーされており、
-最終状態では「skip で残す」のではなく「deterministic / integration-pbt の両方で検証する」構成になっています。
+shared mutable state を持つ suite では、parallel 実行より deterministic boundary を優先する設計が採られてきました。
+これは flaky test の隠蔽ではなく、状態共有を明示化するための構造化です。
 
-## serial suite 化の理由
+### focused regression の価値
 
-以下の suite は、shared mutable state を持つため parallel 実行より deterministic 実行を優先しました。
+高リスク修正には focused regression を結びつける、という方針自体は現在も有効です。
+ただし、そのことは end-to-end green を代替しません。
 
-- `cl-cc-integration-serial-suite`
-  - stdlib-heavy な integration tests を収容
-  - 理由: stdlib expansion cache / compiler session state の worker 間干渉を防ぐため
-- `cl-cc-serial-suite`
-  - `dcg-suite`, `macros-stdlib-io-suite` を収容
-  - 理由:
-    - `dcg-suite`: Prolog/DCG の global rule DB や fresh counter を使うため
-    - `macros-stdlib-io-suite`: `*load-time-value-cache*` など expansion-time cache を使うため
+## 注意
 
-これは flaky test の隠蔽ではなく、状態を共有する仕様領域を deterministic boundary に分離したものです。
-
-## 高リスク修正と focused regression
-
-### 1. macroexpansion cache semantics 修正
-
-- 修正内容:
-  - no-op cache hit を expanded 扱いしていた不具合を修正
-- 回帰確認:
-  - `tests/unit/expand/macros-control-flow-tests.lisp`
-  - `tests/unit/expand/macros-stdlib-io-tests.lisp`
-  - canonical `nix run .#test` の repeated green
-
-### 2. stdlib cache の `copy-list` → `copy-tree`
-
-- 修正内容:
-  - nested list mutation が worker 間へ漏れないようにした
-- focused regression:
-  - `tests/integration/pipeline-tests.lisp`
-  - `pipeline-stdlib-forms-return-fresh-tree`
-
-### 3. `vm-cons` を fresh allocation に戻す
-
-- 修正内容:
-  - global hash-cons による alias/cycle 問題を除去
-- focused regression:
-  - `tests/unit/vm/list-tests.lisp`
-  - `vm-cons-returns-fresh-cells`
-
-### 4. `vm-func-ref` の host bridge 解決修正
-
-- 修正内容:
-  - `CL-CC` だけでなく `CL` package の function designator も解決
-  - runtime whitelist を拡張
-- focused regression:
-  - `tests/unit/vm/vm-execute-tests.lisp`
-  - `vm-execute-vm-func-ref-resolves-cl-host-function`
-
-### 5. noescape make-instance 最適化の安全化
-
-- 修正内容:
-  - slot access が static materialized slot に限定される場合だけ sink するよう tightening
-- 回帰確認:
-  - `tests/unit/compile/codegen-clos-tests.lisp`
-  - `tests/integration/compiler-tests.lisp`
-
-### 6. `merge` / `map-into` / `reduce :key` の sequence macro 修正
-
-- 修正内容:
-  - function designator と再帰構造の扱いを安全化
-- 回帰確認:
-  - `tests/unit/expand/macros-sequence-fold-tests.lisp`
-  - `tests/integration/compiler-tests.lisp`
-
-### 7. optimizer dead-store-elim の `vm-slot-write` 依存処理修正
-
-- 修正内容:
-  - `vm-slot-write` を `vm-src` 前提で読んでいた不具合を修正
-- focused regression:
-  - `tests/unit/optimize/optimizer-tests.lisp`
-  - `dead-store-elim-cases`
-
-## 補足
-
-「理想的なコードベース」は定量的に閉じた条件ではありません。
-このセッションでは、それを以下へ具体化して達成しました。
-
-- canonical `nix run .#test` の green
-- repeated run での安定性
-- shared-state suite の deterministic boundary 化
-- 高リスク修正への focused regression 追加
-
-したがって、少なくともローカル開発・CI 相当の実用基準では、テスト基盤は「高速かつ高品質」に到達したと判断できます。
+この文書に historical な成功記録が残っていても、現在の branch が同じ状態だとは限りません。
+完了判定や品質判定には、最新の run artifact と実行結果を使ってください。

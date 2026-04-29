@@ -127,7 +127,7 @@
   1)
 
 ;;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-;;;; Section 31: Additional coverage — previously untested code paths
+;;;; Section 31: Additional coverage
 ;;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ;;; 31a — FOR i FROM n BELOW m (exclusive upper bound, no BY)

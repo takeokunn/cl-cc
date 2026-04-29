@@ -21,16 +21,24 @@
 ;;; Phase 2 (*phase2-builtin-handlers*) is defined in codegen-phase2.lisp.
 
 (defun %resolve-func-sym-reg (sym ctx)
-  "Return the register holding the value of function symbol SYM.
-   Uses local env binding unless the symbol is a global function, in which
-   case it loads the symbol itself into a fresh register."
+  "Return the register holding the callable value for function symbol SYM.
+   Local function bindings come from CTX-ENV. Global generic functions must be
+   loaded from the persistent global store, while ordinary global functions are
+   represented by their symbol and resolved later by the VM."
   (let ((entry (assoc sym (ctx-env ctx)))
-        (is-global (gethash sym (ctx-global-functions ctx))))
-    (if (and entry (not is-global))
-        (cdr entry)
-        (let ((reg (make-register ctx)))
-          (emit ctx (make-vm-const :dst reg :value sym))
-          reg))))
+        (is-global-function (gethash sym (ctx-global-functions ctx)))
+        (is-global-generic (gethash sym (ctx-global-generics ctx))))
+    (cond
+      ((and entry (not is-global-function) (not is-global-generic))
+       (cdr entry))
+      (is-global-generic
+       (let ((reg (make-register ctx)))
+         (emit ctx (make-vm-get-global :dst reg :name sym))
+         reg))
+      (t
+       (let ((reg (make-register ctx)))
+         (emit ctx (make-vm-const :dst reg :value sym))
+         reg)))))
 
 (defun %compile-call-arg-registers (args ctx)
   "Compile ARGS left-to-right and return their result registers."
@@ -57,8 +65,17 @@
 (defun %try-compile-apply (func-sym args result-reg ctx)
   "Handle (apply FN ARG...) — emit vm-apply."
   (when (and func-sym (eq func-sym 'apply) args)
-    (let ((func-reg (compile-ast (first args) ctx))
-          (arg-regs (%compile-call-arg-registers (rest args) ctx)))
+    (let* ((func-arg (first args))
+           (func-reg (cond
+                       ((typep func-arg 'ast-function)
+                        (compile-ast func-arg ctx))
+                       ((typep func-arg 'ast-var)
+                        (%resolve-func-sym-reg (ast-var-name func-arg) ctx))
+                       ((symbolp func-arg)
+                        (%resolve-func-sym-reg func-arg ctx))
+                       (t
+                        (compile-ast func-arg ctx))))
+           (arg-regs (%compile-call-arg-registers (rest args) ctx)))
       (emit ctx (make-vm-apply :dst result-reg :func func-reg :args arg-regs))
       result-reg)))
 

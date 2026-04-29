@@ -115,7 +115,7 @@
    Uses Prolog query interface internally."
   (nth-value 1 (phrase-rest rule-name input)))
 
-;;; ─── DCG Rule Construction (moved from prolog.lisp) ─────────────────────────
+;;; ─── DCG Rule Construction ───────────────────────────────────────────────────
 
 (defvar *dcg-counter* 0
   "Counter for generating fresh DCG state variables.")
@@ -132,27 +132,31 @@
    - A list of terminals: match each token in sequence.
    - A symbol: call as a non-terminal with state threading.
    - A list starting with a symbol: call as a non-terminal with args + state."
-  (cond
-    ((and (consp element) (eq (car element) 'terminal))
-     (let ((terminals (cdr element)))
-       (if (null terminals)
-           (list `(= ,s-in ,s-out))
-           (let ((goals nil)
-                 (current s-in))
-             (dolist (term terminals)
-               (let ((next (dcg-fresh-var)))
-                 (push `(= ,current (cons ,term ,next)) goals)
-                 (setf current next)))
-             (push `(= ,current ,s-out) goals)
-             (nreverse goals)))))
-    ((symbolp element)
-     (list (list element s-in s-out)))
-    ((and (consp element) (symbolp (car element)))
-     (list (append element (list s-in s-out))))
-    ((and (consp element) (eq (car element) 'brace))
-     (let ((goal (cadr element)))
-       (list goal `(= ,s-in ,s-out))))
-    (t (error "DCG: unknown body element ~S" element))))
+  (flet ((tag-named-p (form name)
+           (and (consp form)
+                (symbolp (car form))
+                (string= (symbol-name (car form)) name))))
+    (cond
+      ((tag-named-p element "TERMINAL")
+       (let ((terminals (cdr element)))
+         (if (null terminals)
+             (list `(= ,s-in ,s-out))
+             (let ((goals nil)
+                   (current s-in))
+               (dolist (term terminals)
+                 (let ((next (dcg-fresh-var)))
+                   (push `(= ,current (cons ,term ,next)) goals)
+                   (setf current next)))
+               (push `(= ,current ,s-out) goals)
+               (nreverse goals)))))
+      ((symbolp element)
+       (list (list element s-in s-out)))
+      ((tag-named-p element "BRACE")
+       (let ((goal (cadr element)))
+         (list goal `(= ,s-in ,s-out))))
+      ((and (consp element) (symbolp (car element)))
+       (list (append element (list s-in s-out))))
+      (t (error "DCG: unknown body element ~S" element)))))
 
 (defun dcg-transform-body (body s-in s-out)
   "Transform a DCG body (list of elements) into a list of Prolog goals,

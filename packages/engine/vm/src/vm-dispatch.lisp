@@ -3,7 +3,7 @@
 ;;; VM — Dispatch Protocol and Call-frame Helpers
 ;;;
 ;;; Contains: execution-context state (*vm-exec-flat*, *vm-exec-labels*,
-;;; %vm-call-closure-sync), vm-resolve-function, vm-label-table-key/store/lookup,
+;;; %vm-call-closure-sync), vm-resolve-function, vm-label-table-store/lookup,
 ;;; vm-save/restore-registers, vm-push-call-frame, vm-bind-closure-args,
 ;;; vm-list-to-lisp-list.
 ;;;
@@ -94,20 +94,16 @@ check the host bridge whitelist."
            (%resolve-symbol-function-designator state value))
       (error "Invalid function designator: ~S" value)))
 
-(defun vm-label-table-key (label)
-  "Return the integer hash key used by VM label tables for LABEL."
-  (sxhash label))
-
 (defun vm-label-table-store (table label pc)
   "Store LABEL → PC in TABLE using an integer-keyed collision bucket."
-  (let* ((key (vm-label-table-key label))
+  (let* ((key (sxhash label))
          (bucket (gethash key table)))
     (setf (gethash key table)
           (acons label pc (remove label bucket :key #'car :test #'equal)))))
 
 (defun vm-label-table-lookup (table label)
   "Look up LABEL in integer-keyed VM label TABLE and return its PC or NIL."
-  (cdr (assoc label (gethash (vm-label-table-key label) table) :test #'equal)))
+  (cdr (assoc label (gethash (sxhash label) table) :test #'equal)))
 
 ;;; ── Call-frame helpers ───────────────────────────────────────────────────
 
@@ -225,6 +221,3 @@ Restores captured environment, then handles required, &optional, &rest, and &key
                  (vm-list-to-lisp-list state (vm-cons-cell-cdr obj)))
            (list value))))
     (t (list value))))
-
-;;; Generic function dispatch (vm-classify-arg and everything below) has been
-;;; extracted to vm-dispatch-gf.lisp (loads immediately after this file).

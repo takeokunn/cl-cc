@@ -70,7 +70,7 @@
     (assert-null (lookup-typeclass 'nonexistent))))
 
 (deftest typeclass-registry-rejects-noncanonical-input
-  "register-typeclass now rejects non-typeclass-def inputs instead of silently normalizing them."
+  "register-typeclass rejects non-typeclass-def inputs with type-inference-error."
   (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq)))
     (assert-signals type-inference-error
       (register-typeclass 'bad-input '(legacy payload)))))
@@ -239,4 +239,4 @@
   (let ((param (or param-val (fresh-type-var "TestVar"))))
     (assert-true (stringp (cl-cc/type::%typeclass-param-name param)))))
 
-;;; Legacy compatibility tests removed as part of public surface reduction.
+

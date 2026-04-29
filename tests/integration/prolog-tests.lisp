@@ -2,10 +2,25 @@
 
 (in-package :cl-cc/test)
 
-;; Moved to cl-cc-integration-serial-suite: these tests mutate the global Prolog DB
-;; via with-fresh-prolog / with-baseline-prolog and occasionally hang under
-;; randomized scheduling (see MEMORY.md PROLOG-TYPE-OF-CMP flake note).
-(in-suite cl-cc-integration-serial-suite)
+;; These tests mutate or depend on the global Prolog DB, so they run under the
+;; serial integration tree with explicit DB reset/restore around each example.
+(defsuite cl-cc-prolog-integration-suite
+  :description "Serial Prolog integration tests with isolated rule DB state"
+  :parent cl-cc-integration-serial-suite)
+
+(defparameter *prolog-integration-db-snapshot* nil)
+
+(defbefore :each (cl-cc-prolog-integration-suite)
+  (setf *prolog-integration-db-snapshot* (%snapshot-prolog-db))
+  (cl-cc:clear-prolog-database)
+  (%restore-prolog-db *prolog-integration-db-snapshot*))
+
+(defafter :each (cl-cc-prolog-integration-suite)
+  (cl-cc:clear-prolog-database)
+  (%restore-prolog-db *prolog-integration-db-snapshot*)
+  (setf *prolog-integration-db-snapshot* nil))
+
+(in-suite cl-cc-prolog-integration-suite)
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; solve-goal — built-in predicates
@@ -154,17 +169,3 @@
     (cl-cc:def-rule (ancestor ?a ?d) (parent ?a ?d))
     (cl-cc:def-rule (ancestor ?a ?d) (parent ?a ?m) (ancestor ?m ?d))
     (assert-prolog-query-count= '(ancestor tom ?d) 2)))
-
-;;; Repeated SBCL with-timeout wrappers over this file's PROLOG-* tests can leave
-;;; later queries in a bad state under full-suite execution. Keep the tests
-;;; enabled, but give this file's PROLOG-* cases a larger bounded timeout.
-(persist-each *test-registry*
-              (lambda (name plist)
-                (when (and (symbolp name)
-                           (let ((name-str (symbol-name name)))
-                             (and (<= 7 (length name-str))
-                                  (string= "PROLOG-" name-str :end2 7))))
-                  (let ((new-plist (copy-list plist)))
-                    (setf (getf new-plist :timeout) 30)
-                    (setf *test-registry*
-                          (persist-assoc *test-registry* name new-plist))))))

@@ -1,6 +1,12 @@
 ;;;; tests/unit/cli/main-tests.lisp — CLI main help tests
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+
+(defsuite cl-cc-cli-serial-suite
+  :description "Serial CLI unit tests that temporarily override process-wide quit hooks"
+  :parent cl-cc-unit-suite
+  :parallel nil)
+
+(in-suite cl-cc-cli-serial-suite)
 
 (defmacro %with-cli-function-overrides (bindings &body body)
   "Temporarily override global function bindings used by CLI unit tests."

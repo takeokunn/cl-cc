@@ -6,7 +6,7 @@
 ;;; Depends on helpers defined in inference-tests.lisp (same package, loads first).
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-type-serial-suite)
 
 ;;; ─── infer: ast-quote edge cases ──────────────────────────────────────────
 

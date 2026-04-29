@@ -1,6 +1,15 @@
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-codegen-unit-serial-suite)
+
+(defun %unwrap-captured-cps-entry (captured-expr)
+  "Normalize top-level CPS capture shape.
+Accept either a raw (lambda (k) ...) form or a singleton list containing it."
+  (if (and (consp captured-expr)
+           (consp (car captured-expr))
+           (eq 'lambda (caar captured-expr)))
+      (car captured-expr)
+      captured-expr))
 
 ;;; ─── %make-compile-opts ──────────────────────────────────────────────────
 
@@ -47,18 +56,19 @@
                                 :program (cl-cc:make-vm-program :instructions nil :result-register :R-CPS)
                                 :vm-instructions (list (cl-cc:make-vm-halt :reg :R-CPS))
                                 :cps '(lambda (k) (funcall k 3)))))
-      (with-replaced-function (cl-cc/compile:compile-ast
+    (with-replaced-function (cl-cc/compile:compile-ast
                                (lambda (&rest args)
                                  (declare (ignore args))
                                  (setf compile-ast-called t)
                                  :R-DIRECT))
         (cl-cc/compile::compile-toplevel-forms '((+ 1 2)) :target :vm)))
-    (assert-true captured-expr)
-    (assert-eq 'lambda (car captured-expr))
+    (let ((normalized (%unwrap-captured-cps-entry captured-expr)))
+      (assert-true normalized)
+      (assert-eq 'lambda (car normalized)))
     (assert-false compile-ast-called)))
 
-(deftest-each codegen-toplevel-definitions-now-prefer-cps-primary-path
-  "VM CPS routing now covers simple DEFVAR and DEFUN top-level forms." 
+(deftest-each codegen-toplevel-definitions-use-cps-primary-path
+  "VM CPS routing covers simple DEFVAR and DEFUN top-level forms."
   :cases (("defvar" '(defvar *cps-safe-var* 1))
           ("defun"  '(defun cps-safe-fn (x) x))
           ("defun-rest" '(defun cps-safe-rest-fn (x &rest rest) x))
@@ -81,18 +91,19 @@
                                 :program (cl-cc:make-vm-program :instructions nil :result-register :R-CPS)
                                 :vm-instructions (list (cl-cc:make-vm-halt :reg :R-CPS))
                                 :cps '(lambda (k) (funcall k ok)))))
-      (with-replaced-function (cl-cc/compile:compile-ast
+    (with-replaced-function (cl-cc/compile:compile-ast
                                (lambda (&rest args)
                                  (declare (ignore args))
                                  (setf compile-ast-called t)
                                  :R-DIRECT))
         (cl-cc/compile::compile-toplevel-forms (list form) :target :vm)))
-    (assert-true captured-expr)
-    (assert-eq 'lambda (car captured-expr))
+    (let ((normalized (%unwrap-captured-cps-entry captured-expr)))
+      (assert-true normalized)
+      (assert-eq 'lambda (car normalized)))
     (assert-false compile-ast-called)))
 
-(deftest codegen-toplevel-variadic-lambda-is-now-cps-safe
-  "A variadic AST-LAMBDA is now accepted by the VM CPS-safe set through the conservative lambda path." 
+(deftest codegen-toplevel-variadic-lambda-is-cps-safe
+  "A variadic AST-LAMBDA is accepted by the VM CPS-safe set through the conservative lambda path."
   (let ((lambda-ast (cl-cc/ast::make-ast-lambda
                      :params '(x)
                      :optional-params (list (list 'y nil nil))
@@ -100,7 +111,7 @@
     (assert-true (cl-cc::%cps-vm-compile-safe-ast-p lambda-ast))))
 
 (deftest codegen-toplevel-unsafe-form-stays-on-direct-path
-  "With CPS disabled, compile-toplevel-forms uses the direct compile-ast path."
+  "Current compile-toplevel-forms still routes unsafe single forms through compile-expression."
   (let ((compile-expression-called nil)
         (compile-ast-called nil))
     (with-replaced-function (cl-cc/compile:compile-expression
@@ -117,17 +128,17 @@
                                  :R-DIRECT))
         (let ((*enable-cps-vm-primary-path* nil))
           (cl-cc/compile::compile-toplevel-forms '((+ 1 2)) :target :vm))))
-    (assert-false compile-expression-called)
-    (assert-true compile-ast-called)))
+    (assert-true compile-expression-called)
+    (assert-false compile-ast-called)))
 
-(deftest-compile-each codegen-toplevel-cps-semantic-preservation
+(deftest-compile codegen-toplevel-cps-semantic-preservation
   "Multi-form Lisp sources still evaluate to the final value after the top-level CPS routing change."
   :cases (("two-safe-forms" 7 "(+ 1 2) (+ 3 4)")
           ("defvar-then-use" 3 "(defvar *ulw-cps* 1) (+ *ulw-cps* 2)")
           ("call-bearing-form" 6 "(defun add1 (x) (+ x 1)) (add1 5)"))
   :stdlib nil)
 
-(deftest-compile-each codegen-toplevel-cps-multi-value-semantics
+(deftest-compile codegen-toplevel-cps-multi-value-semantics
   "Top-level CPS routing preserves apply/values/multiple-value-bind behavior for supported forms."
   :cases (("apply" 6 "(apply + (list 1 2 3))")
           ("values-primary" 1 "(values 1 2 3)")

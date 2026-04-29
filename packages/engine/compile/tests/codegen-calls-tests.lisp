@@ -7,7 +7,7 @@
 ;;;;   and compile-ast(ast-call) dispatch — tail call and GF paths.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-codegen-unit-serial-suite)
 
 ;;; ─── helper functions extracted for readability ────────────────────────────
 
@@ -18,13 +18,13 @@
                 (list (make-ast-int :value 10)
                       (make-ast-int :value 20))
                 ctx))
-         (instructions (cl-cc/compile::ctx-instructions ctx)))
+         (instructions (codegen-instructions ctx)))
     (assert-= 2 (length regs))
     (assert-= 2 (length instructions))
     (let ((first (first instructions))
           (second (second instructions)))
-      (assert-type first 'cl-cc/vm::vm-const)
-      (assert-type second 'cl-cc/vm::vm-const)
+      (assert-type cl-cc/vm::vm-const first)
+      (assert-type cl-cc/vm::vm-const second)
       (assert-= 10 (cl-cc::vm-const-value first))
       (assert-= 20 (cl-cc::vm-const-value second))
       (assert-eq (cl-cc/vm::vm-dst first) (first regs))

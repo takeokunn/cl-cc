@@ -4,8 +4,6 @@
 
 (in-suite loop-macro-suite)
 
-;;;; Earlier runtime sections moved to loop-macro-tests.lisp to reduce this file.
-
 (check-loop-equal loop-if-collect
   "if (synonym for when) filters correctly"
   "(loop for x in '(1 2 3 4 5 6) if (evenp x) collect (* x x))"

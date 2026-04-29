@@ -86,5 +86,3 @@
     (let ((jz-out (find-if (lambda (i) (typep i 'cl-cc/vm::vm-jump-zero)) out)))
       (when jz-out
         (assert-equal (cl-cc/vm::vm-label-name jz-out) "end")))))
-
-;;; CFG reachability / label cleanup tests moved to optimizer-tests.lisp.

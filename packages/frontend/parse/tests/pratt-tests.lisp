@@ -2,7 +2,7 @@
 ;;;;
 ;;;; Tests: pratt-context stream ops, NUD dispatch, CL grammar round-trips,
 ;;;; parse-cl-source CST structure, parse-all-forms s-expression output,
-;;;; error recovery via cst-error-node, and parse-and-lower pipeline.
+;;;; error recovery via cst-error, and parse-and-lower pipeline.
 
 (in-package :cl-cc/test)
 

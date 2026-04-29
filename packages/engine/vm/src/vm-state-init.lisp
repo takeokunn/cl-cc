@@ -10,31 +10,52 @@
 
 ;;; ─── VM Profiling ────────────────────────────────────────────────────────────
 
+(defun %vm-profile-enabled-p (state)
+  (typecase state
+    (vm2-state (vm2-state-profile-enabled-p state))
+    (t (vm-profile-enabled-p state))))
+
+(defun %vm-profile-call-stack (state)
+  (typecase state
+    (vm2-state (vm2-state-profile-call-stack state))
+    (t (vm-profile-call-stack state))))
+
+(defun %set-vm-profile-call-stack (state value)
+  (typecase state
+    (vm2-state (setf (vm2-state-profile-call-stack state) value))
+    (t (setf (vm-profile-call-stack state) value))))
+
+(defun %vm-profile-samples (state)
+  (typecase state
+    (vm2-state (vm2-state-profile-samples state))
+    (t (vm-profile-samples state))))
+
 (defun vm-profile-enter-call (state label &key tail-p)
   "Record entry into LABEL for lightweight sampling.
 
 When TAIL-P is true, replace the current leaf frame instead of pushing a new one."
-  (when (and (vm-profile-enabled-p state) label)
+  (when (and (%vm-profile-enabled-p state) label)
     (if tail-p
-        (if (vm-profile-call-stack state)
-            (setf (first (vm-profile-call-stack state)) label)
-            (push label (vm-profile-call-stack state)))
-        (push label (vm-profile-call-stack state)))))
+        (if (%vm-profile-call-stack state)
+            (setf (first (%vm-profile-call-stack state)) label)
+            (%set-vm-profile-call-stack state (list label)))
+        (%set-vm-profile-call-stack state (cons label (%vm-profile-call-stack state))))))
 
 (defun vm-profile-return (state)
   "Record return from the current sampled function frame."
-  (when (and (vm-profile-enabled-p state)
-             (vm-profile-call-stack state)
-             (> (length (vm-profile-call-stack state)) 1))
-    (pop (vm-profile-call-stack state))))
+  (let ((stack (%vm-profile-call-stack state)))
+    (when (and (%vm-profile-enabled-p state)
+               stack
+               (> (length stack) 1))
+      (%set-vm-profile-call-stack state (rest stack)))))
 
 (defun vm-profile-sample (state)
   "Take one lightweight stack sample for STATE."
-  (when (vm-profile-enabled-p state)
-    (let* ((stack (or (reverse (vm-profile-call-stack state))
+  (when (%vm-profile-enabled-p state)
+    (let* ((stack (or (reverse (%vm-profile-call-stack state))
                       (list "<toplevel>")))
            (key (format nil "~{~A~^;~}" stack)))
-      (incf (gethash key (vm-profile-samples state) 0)))))
+      (incf (gethash key (%vm-profile-samples state) 0)))))
 
 ;;; ─── VM State Initialization ─────────────────────────────────────────────────
 

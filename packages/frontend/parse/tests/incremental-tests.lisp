@@ -104,7 +104,7 @@
 
 (deftest incr-shift-bytes-error-node
   "cst-shift-bytes on an error node adjusts start/end while preserving error kind."
-  (let* ((err (cl-cc/parse::make-cst-error-node :kind :error :start-byte 10 :end-byte 20
+  (let* ((err (cl-cc/parse::make-cst-error :kind :error :start-byte 10 :end-byte 20
                                            :message "bad token"))
          (shifted (cl-cc/parse::cst-shift-bytes err 5)))
     (assert-true (cl-cc/parse::cst-error-p shifted))
@@ -216,13 +216,13 @@
   (assert-false (cl-cc/parse::cst-equal-p nil (make-test-cst-token :T-INT 1 0 1)))
   (assert-false (cl-cc/parse::cst-equal-p (make-test-cst-token :T-INT 1 0 1) nil)))
 
-(deftest-each incr-cst-equal-error-node-cases
+(deftest-each incr-cst-equal-error-cases
   "cst-equal-p compares error nodes by message: equal messages → true, differing → false."
   ((msg-a msg-b expected)
    ("bad"  "bad"   t)
    ("bad"  "worse" nil))
-  (let ((a (cl-cc/parse::make-cst-error-node :kind :error :start-byte 0 :end-byte 5
+  (let ((a (cl-cc/parse::make-cst-error :kind :error :start-byte 0 :end-byte 5
                                         :message msg-a))
-        (b (cl-cc/parse::make-cst-error-node :kind :error :start-byte 0 :end-byte 5
+        (b (cl-cc/parse::make-cst-error :kind :error :start-byte 0 :end-byte 5
                                         :message msg-b)))
     (assert-equal expected (cl-cc/parse::cst-equal-p a b))))

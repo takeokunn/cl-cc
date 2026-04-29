@@ -99,9 +99,15 @@ value is the final result. call-next-method from an around triggers before/prima
 ;;; ── GF dispatch helpers ───────────────────────────────────────────────────
 
 (defun %vm-gf-uses-composite-keys-p (methods-ht)
-  "T when METHODS-HT contains at least one list key (multiple-dispatch table)."
+  "T when METHODS-HT contains a true multi-dispatch tuple key.
+Single-argument EQL specializers like (eql 42) are list-valued keys but should
+still use the single-dispatch path."
   (block check
-    (maphash (lambda (k v) (declare (ignore v)) (when (listp k) (return-from check t)))
+    (maphash (lambda (k v)
+               (declare (ignore v))
+               (when (and (listp k)
+                          (not (%eql-specializer-p k)))
+                 (return-from check t)))
              methods-ht)
     nil))
 
@@ -184,8 +190,10 @@ Uses class precedence lists for inheritance-based fallback."
         (rest-cpls (cdr cpls)))
     (dolist (class first-cpl)
       (if (= n 1)
-          (let ((m (gethash (list class) methods-ht)))
-            (when m (return-from vm-try-dispatch-combinations m)))
+          (let* ((m-list (gethash (list class) methods-ht))
+                  (m-symbol (gethash class methods-ht))
+                  (m (or m-list m-symbol)))
+             (when m (return-from vm-try-dispatch-combinations m)))
           (let ((sub-result (vm-try-dispatch-sub methods-ht rest-cpls (list class))))
             (when sub-result
               (return-from vm-try-dispatch-combinations sub-result))))))

@@ -1,7 +1,7 @@
 ;;;; tests/unit/compile/codegen-core-array-sink-tests.lisp — Codegen array non-escape/sink tests
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-codegen-unit-serial-suite)
 
 (deftest codegen-let-noescape-array-variable-aset-bypasses-vm-aset
   "A non-escaping fixed-size local array can update variable indices via bounded dispatch."

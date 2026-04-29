@@ -42,8 +42,6 @@
   (if (eq direction :input)
       (make-string-input-stream s)
       (make-string-output-stream)))
-(defun rt-get-string-from-stream (stream)
-  (get-output-stream-string stream))
 (defun rt-make-string-output-stream () (make-string-output-stream))
 (defun rt-get-output-stream-string (stream) (get-output-stream-string stream))
 (defun rt-stream-write-string (stream s) (write-string s stream))

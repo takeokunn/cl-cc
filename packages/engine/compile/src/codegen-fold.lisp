@@ -7,8 +7,6 @@
 ;;;   - *compile-time-value-env*  compile-time binding state vars
 ;;;   - %ast-constant-node-p, %ast->compile-time-value, %compile-time-lookup, etc.
 ;;;
-;;; Evaluation engine (%compile-time-eval-binop, %compile-time-eval-call,
-;;;   %evaluate-ast-sequence, %evaluate-ast) moved to codegen-fold-eval.lisp.
 ;;; %loc macro and optimize-ast pass are in codegen-fold-optimize.lisp.
 ;;;
 ;;; Load order: after codegen-core, before codegen-fold-eval.

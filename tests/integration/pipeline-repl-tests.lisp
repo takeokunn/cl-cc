@@ -67,8 +67,8 @@
                              nil))))
       (remhash macro-name table))))
 
-(deftest pipeline-repl-defun-is-no-longer-host-only-special-case
-  "The REPL host-load policy no longer treats plain DEFUN as a host-only form."
+(deftest pipeline-repl-defun-not-host-only
+  "Plain DEFUN is not treated as a host-only form by the REPL host-load policy."
   (multiple-value-bind (result handled-p)
       (cl-cc::%handle-host-only-top-level-form '(defun demo (x) x))
     (assert-false handled-p)
@@ -91,8 +91,8 @@
                              expander '(pipeline-repl-temp-register-macro 42) nil))))
       (remhash macro-name table))))
 
-(deftest pipeline-run-form-repl-register-macro-does-not-require-host-compile
-  "Top-level REGISTER-MACRO lambda registration no longer depends on host compile." 
+(deftest pipeline-run-form-repl-register-macro-without-host-compile
+  "Top-level REGISTER-MACRO lambda registration works without host compile."
   (let* ((*package* (find-package :cl-cc/compile))
          (macro-name (intern "PIPELINE-REPL-NO-COMPILE-REGISTER-MACRO" *package*))
          (form (first (cl-cc/parse:parse-all-forms
@@ -101,17 +101,19 @@
          (orig (symbol-function 'compile)))
     (unwind-protect
          (progn
-           (setf (symbol-function 'compile)
-                 (lambda (&rest args)
-                   (declare (ignore args))
-                   (error "host compile should not be called")))
-            (assert-eq macro-name (cl-cc::run-form-repl form))
-            (let ((expander (gethash macro-name table)))
-              (assert-true expander)
-              (assert-equal 42
-                            (cl-cc/expand::invoke-registered-expander
-                             expander '(pipeline-repl-no-compile-register-macro 42) nil))))
-       (setf (symbol-function 'compile) orig)
+            (sb-ext:without-package-locks
+              (setf (symbol-function 'compile)
+                    (lambda (&rest args)
+                      (declare (ignore args))
+                      (error "host compile should not be called"))))
+             (assert-eq macro-name (cl-cc::run-form-repl form))
+             (let ((expander (gethash macro-name table)))
+               (assert-true expander)
+               (assert-equal 42
+                             (cl-cc/expand::invoke-registered-expander
+                              expander '(pipeline-repl-no-compile-register-macro 42) nil))))
+       (sb-ext:without-package-locks
+         (setf (symbol-function 'compile) orig))
        (remhash macro-name table))))
 
 (deftest pipeline-run-form-repl-rejects-non-lambda-register-macro

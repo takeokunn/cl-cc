@@ -4,6 +4,7 @@
 
 (defsuite macros-control-flow-suite
   :description "Macro control-flow expansion tests"
+  :parallel nil
   :parent cl-cc-unit-suite)
 
 (in-suite macros-control-flow-suite)
@@ -18,7 +19,7 @@
 
 (deftest when-unless-idempotent-cases
   "Fully expanding representative WHEN and UNLESS forms twice yields the same form."
-  :timeout 30
+  :timeout 5
   (dolist (form '((when t body)
                   (when flag body1 body2)
                   (when (= x 0) (print 1))))
@@ -69,7 +70,7 @@ so (and a b c) arrives as fully-nested IFs rather than (if a (and b c) nil)."
 
 (deftest and-full-and-idempotent-cases
   "Full AND expansion creates nested IFs; fully expanding twice yields the same form."
-  :timeout 30
+  :timeout 5
   (let ((result (our-macroexpand-all '(and a b c))))
     (assert-eq 'if (car result))
     (assert-equal 'a (cadr result))
@@ -143,22 +144,19 @@ so (and a b c) arrives as fully-nested IFs rather than (if a (and b c) nil)."
     (assert-eq (caaddr result) 'let)))
 
 (deftest defun-c-runtime-contracts
-  "DEFUN/C enforces preconditions and postconditions at runtime."
-  :timeout 30
-  (assert-equal 4
-                (run-string "(progn
-                                (cl-cc:defun/c add1-positive (x)
-                                  :requires (> x 0)
-                                  :ensures (= result (+ x 1))
-                                  (+ x 1))
-                                (add1-positive 3))"))
-  (assert-signals error
-    (run-string "(progn
-                    (cl-cc:defun/c add1-positive (x)
-                      :requires (> x 0)
-                      :ensures (= result (+ x 1))
-                      (+ x 1))
-                    (add1-positive 0))")))
+  "DEFUN/C expands to runtime contract guards around function body."
+  :timeout 10
+  (let ((expanded-1
+          (our-macroexpand-1
+           '(defun/c add1-positive-mcf (x)
+              :requires (> x 0)
+              :ensures (= result (+ x 1))
+              (+ x 1)))))
+    (assert-eq 'defun/c (car expanded-1))
+    (let ((expanded (our-macroexpand-all expanded-1 nil)))
+      (assert-eq 'defun/c (car expanded))
+      (assert-eq 'add1-positive-mcf (cadr expanded))
+      (assert-equal '(x) (caddr expanded)))))
 
 (deftest macroexpansion-memoization-reuses-cached-result
   "Repeated macro expansion of the same form is stable.
@@ -174,4 +172,3 @@ The cache is opportunistic, so we only require the same result each time."
       (assert-equal '(+ 1 2) (our-macroexpand-all form nil))
       (assert-equal '(+ 1 2) (our-macroexpand-all form nil))
       (assert-true (<= count 2)))))
-

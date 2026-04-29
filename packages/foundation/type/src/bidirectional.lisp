@@ -12,9 +12,9 @@
 (in-package :cl-cc/type)
 
 (defun synthesize (ast env)
-  "Synthesize type of AST in ENV (bottom-up, alias for INFER).
+  "Synthesize type of AST in ENV (bottom-up mode).
    Returns (values type substitution).
-   Use when no expected type is known."
+   Use when no expected type is known at the call site."
   (infer ast env))
 
 ;;; Skolem escape checking helpers (Phase E)
@@ -56,6 +56,8 @@
   "Check that AST conforms to EXPECTED-TYPE in ENV (top-down).
    Returns substitution on success, signals type-mismatch-error on failure.
    Rank-N: forall in expected position introduces skolem constants."
+  (when (type-unknown-p expected-type)
+    (return-from check nil))
   (typecase expected-type
     ;; Rank-N: checking against (forall a T) introduces a skolem for a
     ;; and checks the body under that skolem

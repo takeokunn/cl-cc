@@ -103,7 +103,8 @@ Syntax:
     (var ...)
     body...)
 
-Generates tests named BASE-NAME [label] for each case."
+Generates tests named SOURCE/BASE-NAME [label] for each case so
+parameterized tests from different files do not silently collide in the global registry."
   ;; Extract :cases keyword and the trailing body (var-list + body forms).
   (let* ((cases-pos (position :cases args))
          (cases     (if cases-pos (nth (1+ cases-pos) args) nil))
@@ -113,14 +114,19 @@ Generates tests named BASE-NAME [label] for each case."
       (let ((expansions
               (loop for case-entry in cases
                     collect
-                    (let* ((case-label (first case-entry))
-                           (case-vals  (rest case-entry))
-                           (test-name  (intern
-                                        (format nil "~A [~A]"
-                                                (symbol-name base-name)
-                                                case-label)))
-                           (bindings   (mapcar #'list vars case-vals)))
-                      `(deftest ,test-name
+                     (let* ((case-label (first case-entry))
+                            (case-vals  (rest case-entry))
+                            (source-id  (pathname-name
+                                         (or *compile-file-pathname*
+                                             *load-pathname*
+                                             *default-pathname-defaults*)))
+                            (test-name  (intern
+                                         (format nil "~A/~A [~A]"
+                                                 (string-upcase source-id)
+                                                 (symbol-name base-name)
+                                                 case-label)))
+                            (bindings   (mapcar #'list vars case-vals)))
+                       `(deftest ,test-name
                          ,docstring
                          (let ,bindings
                            ,@body-forms))))))
@@ -150,6 +156,3 @@ Generates tests named BASE-NAME [label] for each case."
         (dolist (f flaky)
           (format t "#   ~A: passed ~A/~A runs~%"
                   (first f) (second f) (third f)))))))
-
-;;; Runner regression tests have been moved to:
-;;;   packages/testing/framework/tests/framework-runner-tests.lisp

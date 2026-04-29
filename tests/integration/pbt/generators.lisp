@@ -108,8 +108,4 @@
              (4 (gen-cons-type))
              (5 (gen-fn-type))))))))
 
-(defun gen-type-specifier ()
-  "Generate a full type specifier (alias for gen-type-expr)."
-  (gen-type-expr))
-
 ;;; Mach-O structure generators are in generators-macho.lisp.

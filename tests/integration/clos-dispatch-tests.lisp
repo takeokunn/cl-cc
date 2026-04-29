@@ -158,14 +158,15 @@
 (deftest clos-custom-method-combination-multi-dispatch
   "Custom method-combination dispatch respects multi-argument specializers in specificity order."
   :timeout 15
-  (assert-equal '(ii it ti tt)
-    (run-string
-     "(defgeneric combo-test (x y) (:method-combination list))
-      (defmethod combo-test list ((x integer) (y integer)) 'ii)
-      (defmethod combo-test list ((x integer) (y t)) 'it)
-      (defmethod combo-test list ((x t) (y integer)) 'ti)
-      (defmethod combo-test list ((x t) (y t)) 'tt)
-      (combo-test 1 2)")))
+  (let ((result (run-string
+                 "(defgeneric combo-test (x y) (:method-combination list))
+       (defmethod combo-test list ((x integer) (y integer)) 'ii)
+       (defmethod combo-test list ((x integer) (y t)) 'it)
+       (defmethod combo-test list ((x t) (y integer)) 'ti)
+       (defmethod combo-test list ((x t) (y t)) 'tt)
+       (combo-test 1 2)")))
+    (assert-equal '("II" "IT" "TI" "TT")
+                  (mapcar (lambda (s) (string-upcase (symbol-name s))) result))))
 
 (deftest-each clos-defmethod-qualifier-parse
   "defmethod with :before and :around qualifiers parse correctly."

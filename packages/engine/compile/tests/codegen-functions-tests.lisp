@@ -11,6 +11,11 @@
   :parent cl-cc-unit-suite
   :parallel nil)
 
+(defbefore :each (cl-cc-codegen-functions-serial-suite)
+  (setf cl-cc/compile::*labels-boxed-fns* nil
+        cl-cc/compile::*compiling-typed-fn* nil)
+  (clrhash cl-cc/expand:*function-type-registry*))
+
 (in-suite cl-cc-codegen-functions-serial-suite)
 
 (deftest codegen-function-ref-returns-register
@@ -131,4 +136,3 @@ test, which isn't worth the test-quality tradeoff."
       (assert-true inst)
       (assert-equal 123 (cl-cc::vm-const-value inst)))
     (assert-eq nil (codegen-find-inst ctx 'cl-cc/vm::vm-get-global))))
-

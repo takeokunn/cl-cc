@@ -7,8 +7,6 @@
 ;;; opt-top-level-function-roots, opt-reachable-function-labels,
 ;;; opt-pass-global-dce.
 ;;;
-;;; Cost model + main pass moved to optimizer-inline-cost.lisp.
-;;;
 ;;; Load order: after optimizer-purity.lisp, before optimizer-inline-cost.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

@@ -4,7 +4,8 @@
 ;;;; Covers the internal helpers:
 ;;;;   %ast-constant-number-value, %fold-ast-binop, *compile-time-eval-fns*,
 ;;;;   %compile-time-eval-binop, %compile-time-lookup, %ast-constant-node-p,
-;;;;   %ast->compile-time-value, %compile-time-value->ast, %evaluate-ast.
+;;;;   %ast->compile-time-value, %compile-time-value->ast, %evaluate-ast,
+;;;;   %evaluate-ast-sequence, %compile-time-eval-call.
 ;;;;
 ;;;; High-level optimize-ast is already covered in codegen-tests.lisp and
 ;;;; codegen-core-tests.lisp; this file targets the internal data+logic layer.
@@ -197,3 +198,175 @@
          10))
     (assert-true ok)
     (assert-= 7 value)))
+
+;;; ─── %evaluate-ast-sequence ───────────────────────────────────────────────
+
+(deftest evaluate-ast-sequence-cases
+  "%evaluate-ast-sequence: empty list returns nil+t; two constants returns last; unknown var returns nil+nil."
+  ;; 1. Empty forms list → (values nil t)
+  (let ((cl-cc/compile::*compile-time-value-env* nil)
+        (cl-cc/compile::*compile-time-function-env* nil))
+    (multiple-value-bind (value ok)
+        (cl-cc/compile::%evaluate-ast-sequence nil nil nil 10)
+      (assert-true ok)
+      (assert-null value)))
+  ;; 2. Two constants → last value returned (value=2)
+  (let ((cl-cc/compile::*compile-time-value-env* nil)
+        (cl-cc/compile::*compile-time-function-env* nil))
+    (multiple-value-bind (value ok)
+        (cl-cc/compile::%evaluate-ast-sequence
+         (list (cl-cc/ast::make-ast-int :value 1)
+               (cl-cc/ast::make-ast-int :value 2))
+         nil nil 10)
+      (assert-true ok)
+      (assert-= 2 value)))
+  ;; 3. Unknown variable → (values nil nil)
+  (let ((cl-cc/compile::*compile-time-value-env* nil)
+        (cl-cc/compile::*compile-time-function-env* nil))
+    (multiple-value-bind (value ok)
+        (cl-cc/compile::%evaluate-ast-sequence
+         (list (cl-cc/ast::make-ast-var :name 'unk-xyz))
+         nil nil 10)
+      (assert-null ok)
+      (assert-null value))))
+
+;;; ─── %evaluate-ast (extended) ─────────────────────────────────────────────
+
+(deftest evaluate-ast-ast-if-cases
+  "%evaluate-ast ast-if: truthy condition picks then-branch; falsy picks else-branch."
+  ;; 1. Truthy condition → then-branch (42)
+  (multiple-value-bind (value ok)
+      (let ((cl-cc/compile::*compile-time-value-env* nil)
+            (cl-cc/compile::*compile-time-function-env* nil))
+        (cl-cc/compile::%evaluate-ast
+         (cl-cc/ast::make-ast-if
+          :cond (cl-cc/ast::make-ast-int :value 1)
+          :then (cl-cc/ast::make-ast-int :value 42)
+          :else (cl-cc/ast::make-ast-int :value 0))
+         10))
+    (assert-true ok)
+    (assert-= 42 value))
+  ;; 2. Falsy condition (nil quote) → else-branch (0)
+  (multiple-value-bind (value ok)
+      (let ((cl-cc/compile::*compile-time-value-env* nil)
+            (cl-cc/compile::*compile-time-function-env* nil))
+        (cl-cc/compile::%evaluate-ast
+         (cl-cc/ast::make-ast-if
+          :cond (cl-cc/ast::make-ast-quote :value nil)
+          :then (cl-cc/ast::make-ast-int :value 42)
+          :else (cl-cc/ast::make-ast-int :value 0))
+         10))
+    (assert-true ok)
+    (assert-= 0 value)))
+
+(deftest evaluate-ast-progn-cases
+  "%evaluate-ast ast-progn: two-form progn returns last value; progn with unknown var fails."
+  ;; 1. Two-form progn → returns last value (2)
+  (multiple-value-bind (value ok)
+      (let ((cl-cc/compile::*compile-time-value-env* nil)
+            (cl-cc/compile::*compile-time-function-env* nil))
+        (cl-cc/compile::%evaluate-ast
+         (cl-cc/ast::make-ast-progn
+          :forms (list (cl-cc/ast::make-ast-int :value 1)
+                       (cl-cc/ast::make-ast-int :value 2)))
+         10))
+    (assert-true ok)
+    (assert-= 2 value))
+  ;; 2. Progn with unknown var → (values nil nil)
+  (multiple-value-bind (value ok)
+      (let ((cl-cc/compile::*compile-time-value-env* nil)
+            (cl-cc/compile::*compile-time-function-env* nil))
+        (cl-cc/compile::%evaluate-ast
+         (cl-cc/ast::make-ast-progn
+          :forms (list (cl-cc/ast::make-ast-var :name 'unk-xyz)))
+         10))
+    (assert-null ok)
+    (assert-null value)))
+
+(deftest evaluate-ast-let-cases
+  "%evaluate-ast ast-let: binding x=5 and returning x yields value=5."
+  (multiple-value-bind (value ok)
+      (let ((cl-cc/compile::*compile-time-value-env* nil)
+            (cl-cc/compile::*compile-time-function-env* nil))
+        (cl-cc/compile::%evaluate-ast
+         (cl-cc/ast::make-ast-let
+          :bindings (list (cons 'x (cl-cc/ast::make-ast-int :value 5)))
+          :body (list (cl-cc/ast::make-ast-var :name 'x)))
+         10))
+    (assert-true ok)
+    (assert-= 5 value)))
+
+(deftest evaluate-ast-the-cases
+  "%evaluate-ast ast-the: passes through to inner value."
+  (multiple-value-bind (value ok)
+      (let ((cl-cc/compile::*compile-time-value-env* nil)
+            (cl-cc/compile::*compile-time-function-env* nil))
+        (cl-cc/compile::%evaluate-ast
+         (cl-cc/ast::make-ast-the
+          :type 'fixnum
+          :value (cl-cc/ast::make-ast-int :value 99))
+         10))
+    (assert-true ok)
+    (assert-= 99 value)))
+
+(deftest evaluate-ast-unknown-node-returns-nil
+  "%evaluate-ast returns (values nil nil) for nodes whose op cannot be evaluated."
+  (multiple-value-bind (value ok)
+      (let ((cl-cc/compile::*compile-time-value-env* nil)
+            (cl-cc/compile::*compile-time-function-env* nil))
+        (cl-cc/compile::%evaluate-ast
+         (cl-cc/ast::make-ast-binop
+          :op 'unknown-op
+          :lhs (cl-cc/ast::make-ast-var :name 'x)
+          :rhs (cl-cc/ast::make-ast-var :name 'y))
+         10))
+    (assert-null ok)
+    (assert-null value)))
+
+;;; ─── %compile-time-eval-call ──────────────────────────────────────────────
+
+(deftest compile-time-eval-call-cases
+  "%compile-time-eval-call: STRING-LENGTH, known builtin not, lambda application, unknown function."
+  ;; 1. STRING-LENGTH of "hello" → value=5
+  (let ((cl-cc/compile::*compile-time-value-env* nil)
+        (cl-cc/compile::*compile-time-function-env* nil))
+    (multiple-value-bind (value ok)
+        (cl-cc/compile::%compile-time-eval-call
+         (cl-cc/ast::make-ast-var :name 'string-length)
+         (list "hello")
+         10)
+      (assert-true ok)
+      (assert-= 5 value)))
+  ;; 2. Known builtin not: (not nil) → t
+  (let ((cl-cc/compile::*compile-time-value-env* nil)
+        (cl-cc/compile::*compile-time-function-env* nil))
+    (multiple-value-bind (value ok)
+        (cl-cc/compile::%compile-time-eval-call
+         (cl-cc/ast::make-ast-var :name 'not)
+         (list nil)
+         10)
+      (assert-true ok)
+      (assert-true value)))
+  ;; 3. Lambda application: ((lambda (x) x) 7) → 7
+  (let ((cl-cc/compile::*compile-time-value-env* nil)
+        (cl-cc/compile::*compile-time-function-env* nil))
+    (multiple-value-bind (value ok)
+        (cl-cc/compile::%compile-time-eval-call
+         (cl-cc/ast::make-ast-lambda
+          :params '(x)
+          :body (list (cl-cc/ast::make-ast-var :name 'x))
+          :optional-params nil
+          :rest-param nil
+          :key-params nil)
+         (list 7)
+         10)
+      (assert-true ok)
+      (assert-= 7 value)))
+  ;; 4. Unknown function → nil (no second value truthy)
+  (let ((cl-cc/compile::*compile-time-value-env* nil)
+        (cl-cc/compile::*compile-time-function-env* nil))
+    (let ((result (cl-cc/compile::%compile-time-eval-call
+                   (cl-cc/ast::make-ast-var :name 'completely-unknown-fn-xyz)
+                   (list 1)
+                   10)))
+      (assert-null result))))

@@ -24,5 +24,3 @@ Definition forms, non-local exits, and condition handling must not short-circuit
 through the host CPS fast path.")
 
 
-;;; NOTE: CPS compile allowlists now live in pipeline-cps.lisp so the shared
-;;; VM/native policy surface stays in one place.

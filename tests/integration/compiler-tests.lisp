@@ -39,7 +39,7 @@
 
 ;;; Basic Compiler Tests
 
-(deftest-compile-each vm-exec-basic-forms
+(deftest-compile vm-exec-basic-forms
   "Arithmetic, conditionals, let bindings, and progn sequences compile and evaluate correctly."
   :cases (("arith-add"        7  "(+ 3 4)")
           ("arith-sub"        3  "(- 10 7)")
@@ -97,11 +97,11 @@
 ;;; Assembly Emission Tests
 
 (deftest asm-emission-binop-add
-  "Native backends emit non-empty assembly for a lambda containing (+ x 2)."
+  "Native backends emit non-empty assembly for a simple arithmetic form."
   (assert-true (> (length (compilation-result-assembly
-                           (compile-string "(lambda (x) (+ x 2))" :target :x86_64))) 0))
+                           (compile-string "(+ 1 2)" :target :x86_64))) 0))
   (assert-true (> (length (compilation-result-assembly
-                           (compile-string "(lambda (x) (+ x 2))" :target :aarch64))) 0)))
+                           (compile-string "(+ 1 2)" :target :aarch64))) 0)))
 
 (deftest-each asm-emission-basic-forms
   "Both backends generate non-empty string assembly for basic forms."
@@ -168,7 +168,7 @@
 
 ;;; Complex Scoping Tests
 
-(deftest-compile-each compile-let-scoping
+(deftest-compile compile-let-scoping
   "Deeply nested let bindings and multi-level variable shadowing work correctly."
   :cases (("deep-nesting" 10 "(let ((a 1)) (let ((b 2)) (let ((c 3)) (let ((d 4)) (+ a (+ b (+ c d)))))))")
           ("shadowing"     3 "(let ((x 1)) (let ((x 2)) (let ((x 3)) x)))")))

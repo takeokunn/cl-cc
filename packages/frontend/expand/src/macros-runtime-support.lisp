@@ -123,6 +123,8 @@
 (defvar *load-time-value-cache* (make-hash-table :test #'equal)
   "Memoizes LOAD-TIME-VALUE expansion results during compiler macroexpansion.")
 
+(defvar *macro-eval-fn*)
+
 ;; LOAD-TIME-VALUE — evaluate at compile time, splice in the quoted result.
 (register-macro 'load-time-value
   (lambda (call-form env)
@@ -132,10 +134,10 @@
       (declare (ignore read-only-p))
       (multiple-value-bind (cached present-p)
           (gethash form *load-time-value-cache*)
-     (unless present-p
-      (setf cached (our-eval form))
-      (setf (gethash form *load-time-value-cache*) cached))
-        (list 'quote cached)))))
+        (unless present-p
+          (setf cached (funcall *macro-eval-fn* form))
+          (setf (gethash form *load-time-value-cache*) cached))
+          (list 'quote cached)))))
 
 ;;; FR-1206: Module/feature system — *features*, *modules*, provide, require
 

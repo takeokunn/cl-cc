@@ -1,15 +1,11 @@
 ;;;; framework-parallel-runner.lisp — Parallel worker pool, CPU detection, run-suite, run-tests
 (in-package :cl-cc/test)
 
+(defvar *cpu-detect-command-timeout-seconds*)
+
 ;;; ------------------------------------------------------------
 ;;; Parallel Worker Pool
 ;;; ------------------------------------------------------------
-
-(defun %effective-test-timeout (test-plist)
-  (let ((tm (getf test-plist :timeout)))
-    (cond
-      ((and (integerp tm) (plusp tm)) tm)
-      (t (%default-test-timeout)))))
 
 (defun %copy-prolog-rules (src)
   "Return a shallow copy of the Prolog fact DB SRC (hash-table).
@@ -68,13 +64,24 @@ sequentially in dependency-safe input order."
       (flush-parallel-batch)
       results)))
 
+(defun %default-run-command-output (cmd)
+  "Run CMD and return its captured output as a string."
+  (with-output-to-string (stream)
+    (uiop:run-program cmd :output stream :ignore-error-status t)))
+
+(defparameter *run-command-output-fn* #'%default-run-command-output
+  "Function of one argument CMD used by `%run-command-output'.")
+
+(defun %run-command-output (cmd)
+  "Run CMD through `*run-command-output-fn*' and return its captured output."
+  (funcall *run-command-output-fn* cmd))
+
 (defun %parse-command-cpu-count (cmd)
-  "Run CMD via uiop:run-program and parse the output as a positive integer, or NIL."
+  "Run CMD and parse its output as a positive integer, or NIL."
   (ignore-errors
-    (let ((n (sb-ext:with-timeout *cpu-detect-command-timeout-seconds*
-               (parse-integer (with-output-to-string (s)
-                                (uiop:run-program cmd :output s :ignore-error-status t))
-                              :junk-allowed t))))
+    (let* ((output (sb-ext:with-timeout *cpu-detect-command-timeout-seconds*
+                     (%run-command-output cmd)))
+           (n (parse-integer output :junk-allowed t)))
       (and n (plusp n) n))))
 
 ;;; CPU detection sources tried left-to-right; first positive integer wins.
@@ -98,14 +105,16 @@ sequentially in dependency-safe input order."
 
 (defun %default-suite-timeout ()
   "Return the default whole-suite timeout in seconds, or NIL when disabled.
-Uses CLCC_SUITE_TIMEOUT when it is a positive integer; otherwise falls back to
-1800 seconds so the canonical test command cannot hang indefinitely."
+Uses CLCC_SUITE_TIMEOUT when it is a positive integer; otherwise falls back
+to 600 seconds. Sized to accommodate a cold-cache full recompile (which
+ASDF triggers at ~3-5 minutes when output translations bypass the Nix store
+FASLs); warm-cache runs complete in well under a minute."
   (let ((raw (uiop:getenv "CLCC_SUITE_TIMEOUT")))
     (or (and raw
              (ignore-errors
                (let ((parsed (parse-integer raw)))
                  (and (plusp parsed) parsed))))
-        1800)))
+        600)))
 
 (defun %suite-timeout-result (suite-name timeout quit-p)
   "Handle a whole-suite timeout consistently for CLI and programmatic callers."
@@ -156,12 +165,11 @@ When QUIT-P is true, exits via uiop:quit; otherwise returns whether any test fai
     (unless *coverage-reload-in-progress*
       (let ((*coverage-reload-in-progress* t))
         (enable-coverage)
-        (ignore-errors
-          (when (find-package :cl-cc/prolog)
-            (cl-cc/prolog:clear-prolog-database)))
-        ;; Force a fresh local-system reload after instrumentation is enabled so
-        ;; sb-cover observes compiled definitions instead of reusing stale fasls.
-        (asdf:load-system :cl-cc/test :force t)))
+        ;; Coverage app is responsible for loading the desired source systems
+        ;; after instrumentation is enabled. Avoid a second force-reload here,
+        ;; which otherwise recompiles overlapping test systems in-place and can
+        ;; perturb global registries during the coverage phases.
+        nil))
     (setf parallel nil)
     (format t "# Coverage mode: parallel disabled~%"))
   (when (or exclude-tags exclude-suites)
@@ -198,7 +206,7 @@ When QUIT-P is true, exits via uiop:quit; otherwise returns whether any test fai
                   (%emit-postrun-artifacts flat-results)
                   (if quit-p
                       (uiop:quit (if any-fail 1 0))
-                      any-fail)))))))
+                      any-fail))))))
       (sb-ext:timeout ()
         (%suite-timeout-result suite-name suite-timeout quit-p)))))
 
@@ -207,17 +215,37 @@ When QUIT-P is true, exits via uiop:quit; otherwise returns whether any test fai
                      (exclude-tags nil)
                      (exclude-suites nil)
                      (parallel t)
-                    (random nil))
-  "Run the canonical CL-CC test plan.
+                     (random nil))
+  "Run the full canonical CL-CC test plan, including slow self-hosting suites."
+  (unless (persist-lookup *suite-registry* 'selfhost-slow-suite)
+    (asdf:load-system :cl-cc-test/slow))
+  (run-suite 'cl-cc-suite
+             :parallel parallel
+             :random random
+             :warm-stdlib t
+             :tags tags
+             :exclude-tags exclude-tags
+             :exclude-suites exclude-suites))
 
-This single entry point executes unit, integration, property-based, and e2e suites.
-Use the filtering keywords for focused debugging from the REPL, but the public
-automation workflow is always `nix run .#test`."
+(defun run-fast-tests (&key
+                          (tags nil)
+                          (exclude-tags nil)
+                          (exclude-suites nil)
+                          (parallel t)
+                          (random nil)
+                          (warm-stdlib t))
+  "Run the feedback-optimized CL-CC test plan.
+
+This excludes the heavyweight self-hosting regression suite while preserving
+caller-supplied exclusions. The public `nix run .#test` app maps to this fast
+path; use `run-tests` for the full canonical suite. WARM-STDLIB defaults to T
+for warm-cache speed; pass NIL to skip the stdlib precomputation step (useful
+on cold cache or when the warmup is hanging)."
   (let ((effective-exclude-suites (adjoin 'selfhost-slow-suite exclude-suites)))
     (run-suite 'cl-cc-suite
                :parallel parallel
                :random random
-               :warm-stdlib t
+               :warm-stdlib warm-stdlib
                :tags tags
                :exclude-tags exclude-tags
                :exclude-suites effective-exclude-suites)))

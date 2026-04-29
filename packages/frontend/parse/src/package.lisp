@@ -22,8 +22,8 @@
    #:cst-token #:cst-token-p #:cst-token-value
    ;; NOTE: make-cst-token excluded (prolog pre-intern conflict)
    #:cst-interior #:cst-interior-p #:cst-interior-children #:make-cst-interior
-   #:cst-error-node #:cst-error-node-p #:cst-error-p
-   #:cst-error-node-message #:make-cst-error-node
+   #:cst-error #:cst-error-p
+   #:cst-error-message #:make-cst-error
    #:cst-child #:cst-children #:cst-walk #:cst-collect-errors
    #:cst-to-sexp #:sexp-to-cst #:sexp-head-to-kind
    #:cst-location-string

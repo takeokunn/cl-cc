@@ -2,7 +2,7 @@
 
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-cli-serial-suite)
 
 (deftest cli-dump-phase-label-lowercases-keywords
   (assert-string= "ast" (cl-cc/cli::%dump-phase-label :ast))
@@ -104,4 +104,3 @@
          (cell (list 0)))
     (cl-cc/cli::%flamegraph-depth-of root 0 cell)
     (assert-= 1 (car cell))))
-

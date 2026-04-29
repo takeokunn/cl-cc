@@ -130,7 +130,6 @@
 ;;; Double encode/decode round-trip
 ;;; ------------------------------------------------------------
 
-#+sbcl
 (deftest-each value-double-round-trip
   "encode-double / decode-double round-trips for representative float values."
   :cases (("zero"     0.0d0)
@@ -143,7 +142,6 @@
 ;;; val-double-p
 ;;; ------------------------------------------------------------
 
-#+sbcl
 (deftest value-double-p-true
   "val-double-p recognises an encoded double with non-zero mantissa low bits.
    NOTE: doubles like 1.5d0 whose low 13 mantissa bits are zero are
@@ -250,7 +248,6 @@
   (assert-= cl-cc/runtime:+val-t+ (cl-cc/runtime:cl-value->val t))
   (assert-equal t (cl-cc/runtime:val->cl-value cl-cc/runtime:+val-t+)))
 
-#+sbcl
 (deftest value-interop-double
   "cl-value->val double-float round-trips."
   (assert-equal 2.71828d0

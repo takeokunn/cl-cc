@@ -19,10 +19,9 @@
 
 ;;; ── List-form lowering dispatch table ───────────────────────────────────────
 ;;;
-;;; Each clause of the old 626-line CASE statement is now a named function
-;;; registered via DEFINE-LIST-LOWERER.  The dispatch engine is a hash table
-;;; lookup — same architecture as *expander-head-table* and
-;;; *phase2-builtin-handlers*.
+;;; Each special form has a named handler registered via DEFINE-LIST-LOWERER.
+;;; The dispatch engine is a hash table lookup — same architecture as
+;;; *expander-head-table* and *phase2-builtin-handlers*.
 
 (defvar *list-lowering-table* (make-hash-table :test 'eq)
   "Maps form head symbols to handler functions (node sf sl sc) → ast-node.

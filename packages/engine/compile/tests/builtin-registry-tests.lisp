@@ -1,6 +1,6 @@
 ;;;; tests/unit/compile/builtin-registry-tests.lisp — Builtin Registry tests
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-coverage-unstable-unit-suite)
 
 ;;; ─── Registry Lookup Tests ─────────────────────────────────────────────────
 

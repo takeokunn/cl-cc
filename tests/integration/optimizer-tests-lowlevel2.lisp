@@ -92,7 +92,3 @@
                           (and (typep i 'cl-cc/vm::vm-move)
                                (eq :R3 (cl-cc/vm::vm-dst i))))
                         out))))
-
-
-;;; CFG reachability, label cleanup, block merge, and inlining unit tests
-;;; moved to optimizer-cfg-inline-tests.lisp.

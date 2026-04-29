@@ -146,7 +146,7 @@
            (make-vm-not :dst :r2 :src :r0)
            'cl-cc/vm::vm-not)
           ("not via nil-check-elim"
-           #'cl-cc/optimize::opt-pass-nil-check-elim
+           #'cl-cc/optimize::opt-pass-dominated-type-check-elim
            (make-vm-not :dst :r1 :src :r0)
            (make-vm-not :dst :r2 :src :r0)
            'cl-cc/vm::vm-not))

@@ -3,17 +3,14 @@
 ;;;; packages/foundation/bootstrap/src/package.lisp — :cl-cc/bootstrap
 ;;;;
 ;;;; Phase 2 prerequisite: the 12 symbols that must be interned before
-;;;; cl-cc/prolog and cl-cc/compile load. Previously these lived in :cl-cc
-;;;; (umbrella) and were pre-interned by a compile-time hack in
-;;;; packages/foundation/prolog/src/package.lisp. The bootstrap package is the canonical home.
+;;;; cl-cc/prolog and cl-cc/compile load.
 ;;;;
 ;;;; Why a separate package?
 ;;;;   cl-cc/prolog uses binop/const/var/cmp/... as Prolog predicate atoms
-;;;;   in the solver/query layer and as the DCG token
-;;;;   bridge (dcg.lisp).  cl-cc/compile defines our-eval; cl-cc/prolog
-;;;;   calls it back at runtime.  Without a common bootstrap both subsystems
-;;;;   would need to import from :cl-cc, which loads *after* prolog —
-;;;;   requiring the fragile intern-at-compile-time hack that is now removed.
+;;;;   in the solver/query layer and as the DCG token bridge (dcg.lisp).
+;;;;   cl-cc/compile defines our-eval; cl-cc/prolog calls it back at runtime.
+;;;;   Without a common bootstrap both subsystems would need to import from
+;;;;   :cl-cc, which loads *after* prolog — creating a circular dependency.
 ;;;;
 ;;;; Consumers:
 ;;;;   cl-cc/prolog   — (:use :cl :cl-cc/bootstrap)

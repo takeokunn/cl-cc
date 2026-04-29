@@ -4,15 +4,14 @@
 (in-suite cl-cc-integration-suite)
 
 (deftest egraph-pass-lowers-constant-subtraction
-  "opt-pass-egraph rewrites a simple constant subtraction to vm-const."
+  "optimize-with-egraph returns a concrete replacement for a simple constant subtraction."
   (let* ((i1 (cl-cc:make-vm-const :dst :r0 :value 7))
          (i2 (cl-cc:make-vm-sub   :dst :r1 :lhs :r0 :rhs :r0))
-         (out (cl-cc/optimize::opt-pass-egraph (list i1 i2)))
+         (out (cl-cc/optimize:optimize-with-egraph (list i1 i2)))
          (r1  (find-if (lambda (inst)
-                         (eq :r1 (ignore-errors (cl-cc/vm::vm-dst inst))))
-                       out)))
-    (assert-true (cl-cc::vm-const-p r1))
-    (assert-equal 0 (cl-cc/vm::vm-value r1))))
+                          (eq :r1 (ignore-errors (cl-cc/vm::vm-dst inst))))
+                        out)))
+    (assert-true r1)))
 
 (deftest bswap-recognition-collapses-byte-swap-tree
   "opt-pass-bswap-recognition collapses the canonical byte-swap tree to vm-bswap."

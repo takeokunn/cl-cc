@@ -154,6 +154,8 @@
 
 (defun %make-lambda-param-env (params env)
   "Assign fresh type vars to PARAMS, extend ENV, return (values types body-env)."
+  (when (null params)
+    (return-from %make-lambda-param-env (values nil env)))
   (loop for p in params
         for tv = (fresh-type-var)
         collect tv into types

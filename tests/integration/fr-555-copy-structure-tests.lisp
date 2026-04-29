@@ -27,6 +27,7 @@
 
 (deftest fr-555-copy-structure-type-list
   "copy-structure also works for :type list defstructs."
+  :timeout 180
   (assert-= 10
             (run-string
              "(progn

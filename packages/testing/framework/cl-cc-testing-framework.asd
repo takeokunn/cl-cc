@@ -19,6 +19,7 @@
    (:file "persistent")
    (:file "persistent-api")
    (:file "framework-conditions-state")
+   (:file "framework-timeouts")
    (:file "framework-definitions")
    (:file "framework")
    (:file "framework-fixtures")

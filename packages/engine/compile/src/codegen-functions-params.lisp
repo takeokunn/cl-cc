@@ -112,9 +112,9 @@ Returns (values opt-closure-data rest-reg key-closure-data opt-bindings
 (defun rest-param-stack-alloc-p (body-forms rest-name)
   "Return T when REST-NAME is only used in stack-safe contexts within BODY-FORMS.
 This is a conservative heuristic used to mark &rest lists dynamic-extent."
-  (and (listp body-forms)
-       (not (binding-escapes-in-body-p body-forms rest-name
-                                       :safe-consumers *rest-stack-alloc-safe-consumers*))))
+  (and (consp body-forms)
+        (not (binding-escapes-in-body-p body-forms rest-name
+                                        :safe-consumers *rest-stack-alloc-safe-consumers*))))
 
 (defun dynamic-extent-declared-p (declarations name)
   "Return T when DECLARATIONS contain (dynamic-extent NAME)."

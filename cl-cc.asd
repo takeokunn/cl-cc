@@ -9,23 +9,27 @@
 ;;;; Test systems (:cl-cc-test, :cl-cc-test/clos) are in cl-cc-test.asd (loaded below).
 
 (eval-when (:load-toplevel :execute)
-  (let ((here (make-pathname :defaults (or *load-pathname* *compile-file-pathname*)
-                             :name nil :type nil)))
-    (load (merge-pathnames "packages/foundation/bootstrap/cl-cc-bootstrap.asd" here))
-    (load (merge-pathnames "packages/foundation/ast/cl-cc-ast.asd" here))
-    (load (merge-pathnames "packages/foundation/prolog/cl-cc-prolog.asd" here))
-    (load (merge-pathnames "packages/backend/binary/cl-cc-binary.asd" here))
-    (load (merge-pathnames "packages/backend/runtime/cl-cc-runtime.asd" here))
-    (load (merge-pathnames "packages/backend/bytecode/cl-cc-bytecode.asd" here))
-    (load (merge-pathnames "packages/foundation/ir/cl-cc-ir.asd" here))
-    (load (merge-pathnames "packages/foundation/mir/cl-cc-mir.asd" here))
-    (load (merge-pathnames "packages/foundation/type/cl-cc-type.asd" here))
-    (load (merge-pathnames "packages/engine/optimize/cl-cc-optimize.asd" here))
-    (load (merge-pathnames "packages/backend/emit/cl-cc-emit.asd" here))
-    (load (merge-pathnames "packages/frontend/parse/cl-cc-parse.asd" here))
-    (load (merge-pathnames "packages/frontend/expand/cl-cc-expand.asd" here))
-    (load (merge-pathnames "packages/engine/compile/cl-cc-compile.asd" here))
-    (load (merge-pathnames "packages/engine/vm/cl-cc-vm.asd" here))))
+  (require :asdf)
+  (flet ((ensure-system-asd (system-name relative-asd here)
+           (unless (asdf:find-system system-name nil)
+             (load (merge-pathnames relative-asd here)))))
+    (let ((here (make-pathname :defaults (or *load-pathname* *compile-file-pathname*)
+                               :name nil :type nil)))
+      (ensure-system-asd :cl-cc-bootstrap "packages/foundation/bootstrap/cl-cc-bootstrap.asd" here)
+      (ensure-system-asd :cl-cc-ast "packages/foundation/ast/cl-cc-ast.asd" here)
+      (ensure-system-asd :cl-cc-prolog "packages/foundation/prolog/cl-cc-prolog.asd" here)
+      (ensure-system-asd :cl-cc-binary "packages/backend/binary/cl-cc-binary.asd" here)
+      (ensure-system-asd :cl-cc-runtime "packages/backend/runtime/cl-cc-runtime.asd" here)
+      (ensure-system-asd :cl-cc-bytecode "packages/backend/bytecode/cl-cc-bytecode.asd" here)
+      (ensure-system-asd :cl-cc-ir "packages/foundation/ir/cl-cc-ir.asd" here)
+      (ensure-system-asd :cl-cc-mir "packages/foundation/mir/cl-cc-mir.asd" here)
+      (ensure-system-asd :cl-cc-type "packages/foundation/type/cl-cc-type.asd" here)
+      (ensure-system-asd :cl-cc-optimize "packages/engine/optimize/cl-cc-optimize.asd" here)
+      (ensure-system-asd :cl-cc-emit "packages/backend/emit/cl-cc-emit.asd" here)
+      (ensure-system-asd :cl-cc-parse "packages/frontend/parse/cl-cc-parse.asd" here)
+      (ensure-system-asd :cl-cc-expand "packages/frontend/expand/cl-cc-expand.asd" here)
+      (ensure-system-asd :cl-cc-compile "packages/engine/compile/cl-cc-compile.asd" here)
+      (ensure-system-asd :cl-cc-vm "packages/engine/vm/cl-cc-vm.asd" here))))
 
 (asdf:defsystem :cl-cc
   :description "CL-CC: Common Lisp Compiler Collection"
@@ -65,17 +69,20 @@
       (:file "pipeline-repl-ourload")))))
 
 (eval-when (:load-toplevel :execute)
-  (let ((here (make-pathname :defaults (or *load-pathname* *compile-file-pathname*)
-                             :name nil :type nil)))
-    ;; :cl-cc-cli and :cl-cc-testing-framework depend on :cl-cc, so register
-    ;; them only after :cl-cc itself has been defined in this file.
-    (load (merge-pathnames "packages/cli/cl-cc-cli.asd" here))
-    (load (merge-pathnames "packages/testing/framework/cl-cc-testing-framework.asd" here))
-    ;; cl-cc-test.asd is only bundled in the test/coverage derivations, not the
-    ;; default build — probe-file before loading so the default build succeeds.
-    (let ((test-asd (merge-pathnames "cl-cc-test.asd" here)))
-      (when (probe-file test-asd)
-        (load test-asd)))))
+  (require :asdf)
+  (flet ((maybe-load-asd (system-name relative-asd here)
+           (let ((asd-path (merge-pathnames relative-asd here)))
+             (when (and (probe-file asd-path)
+                        (not (asdf:find-system system-name nil)))
+               (load asd-path)))))
+    (let ((here (make-pathname :defaults (or *load-pathname* *compile-file-pathname*)
+                               :name nil :type nil)))
+      ;; :cl-cc-cli and :cl-cc-testing-framework depend on :cl-cc.
+      ;; These .asd files are only present in development/test builds; probe-file
+      ;; guards so the production Nix derivation succeeds without them.
+      (maybe-load-asd :cl-cc-cli "packages/cli/cl-cc-cli.asd" here)
+      (maybe-load-asd :cl-cc-testing-framework "packages/testing/framework/cl-cc-testing-framework.asd" here)
+      (maybe-load-asd :cl-cc-test "cl-cc-test.asd" here))))
 
 ;; :cl-cc-cli is defined in packages/cli/cl-cc-cli.asd.
 ;; :cl-cc/tests-framework is defined in packages/testing/framework/cl-cc-testing-framework.asd.

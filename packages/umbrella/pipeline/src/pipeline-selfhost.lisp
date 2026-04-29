@@ -10,25 +10,53 @@
 ;;; is in pipeline.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+(defparameter *warm-stdlib-trace*
+  (and (uiop:getenv "CLCC_WARM_STDLIB_TRACE") t)
+  "When non-NIL, warm-stdlib-cache and %build-stdlib-vm-snapshot emit step-by-step
+diagnostic prints to *error-output*. Set CLCC_WARM_STDLIB_TRACE=1 to enable.
+Useful for diagnosing where the cold-cache stdlib bootstrap hangs (empirical
+finding: hangs in compile-toplevel-forms when *macro-eval-fn* is our-eval).")
+
+(defmacro %warm-stdlib-trace (control-string &rest args)
+  `(when *warm-stdlib-trace*
+     (format *error-output* ,(concatenate 'string "# " control-string "~%") ,@args)
+     (finish-output *error-output*)))
+
 (defun %build-stdlib-vm-snapshot ()
+  (%warm-stdlib-trace "%build-stdlib-vm-snapshot: enter")
   (let* ((*accessor-slot-map*       (make-hash-table :test #'eq))
          (*defstruct-slot-registry* (make-hash-table :test #'eq))
          (*labels-boxed-fns*        nil)
-         (stdlib-result   (compile-toplevel-forms (get-stdlib-forms) :target :vm))
-         (stdlib-program  (compilation-result-program stdlib-result))
-         (snapshot-state  (make-instance 'cl-cc/vm:vm-io-state
-                                          :output-stream (make-broadcast-stream))))
+         (forms           (progn (%warm-stdlib-trace "%build-stdlib-vm-snapshot: getting forms")
+                                 (get-stdlib-forms)))
+         (stdlib-result   (progn (%warm-stdlib-trace "%build-stdlib-vm-snapshot: got ~A forms, compiling" (length forms))
+                                 (compile-toplevel-forms forms :target :vm)))
+         (stdlib-program  (progn (%warm-stdlib-trace "%build-stdlib-vm-snapshot: compiled, extracting program")
+                                 (compilation-result-program stdlib-result)))
+         (snapshot-state  (progn (%warm-stdlib-trace "%build-stdlib-vm-snapshot: program extracted, creating snapshot-state")
+                                 (make-instance 'cl-cc/vm:vm-io-state
+                                                :output-stream (make-broadcast-stream)))))
+    (%warm-stdlib-trace "%build-stdlib-vm-snapshot: running compiled stdlib in VM")
     (cl-cc/vm:run-compiled stdlib-program :state snapshot-state)
+    (%warm-stdlib-trace "%build-stdlib-vm-snapshot: VM run completed, copying snapshots")
     (setf *stdlib-accessor-slot-map*       (%copy-snapshot-ht *accessor-slot-map*)
           *stdlib-defstruct-slot-registry* (%copy-snapshot-ht *defstruct-slot-registry*))
+    (%warm-stdlib-trace "%build-stdlib-vm-snapshot: returning snapshot-state")
     snapshot-state))
 
 (defun warm-stdlib-cache ()
-  (get-stdlib-forms)
-  (unless (and *stdlib-vm-snapshot*
-               (eq *stdlib-expanded-cache-source*  *standard-library-source*)
-               (eq *stdlib-expanded-cache-eval-fn* *macro-eval-fn*))
-    (setf *stdlib-vm-snapshot* (%build-stdlib-vm-snapshot)))
+  (%warm-stdlib-trace "warm-stdlib-cache: enter")
+  (%warm-stdlib-trace "warm-stdlib-cache: get-stdlib-forms returned ~A forms"
+                      (length (get-stdlib-forms)))
+  (cond
+    ((and *stdlib-vm-snapshot*
+          (eq *stdlib-expanded-cache-source*  *standard-library-source*)
+          (eq *stdlib-expanded-cache-eval-fn* *macro-eval-fn*))
+     (%warm-stdlib-trace "warm-stdlib-cache: cache hit, skipping rebuild"))
+    (t
+     (%warm-stdlib-trace "warm-stdlib-cache: cache miss, calling %build-stdlib-vm-snapshot")
+     (setf *stdlib-vm-snapshot* (%build-stdlib-vm-snapshot))
+     (%warm-stdlib-trace "warm-stdlib-cache: %build-stdlib-vm-snapshot returned")))
   (values))
 
 (defvar *repl-vm-state*)
@@ -100,7 +128,7 @@ expansion during self-host loading)."
      (cl-cc/expand::rt-find-package . ,#'cl-cc/runtime:rt-find-package)
      (cl-cc/expand::rt-make-package . ,#'cl-cc/runtime:rt-make-package)
      (cl-cc/expand::rt-intern . ,#'cl-cc/runtime:rt-intern)
-     (cl-cc/expand::rt-export . ,#'cl-cc/runtime:rt-export))))
+      (cl-cc/expand::rt-export . ,#'cl-cc/runtime:rt-export))))
 
 (defun run-string-typed (source &key (mode :warn) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile and run SOURCE with type checking enabled.

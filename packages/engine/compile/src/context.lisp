@@ -163,7 +163,7 @@ Used by run-string-repl to persist the label counter across calls.")
 Definition forms and CLOS operations must run on the direct compile path.")
 
 (defparameter *cps-native-compile-unsupported-ast-types*
-  '(cl-cc/ast:ast-hole cl-cc/ast:ast-slot-def)
+  '(cl-cc/ast:ast-node)
   "AST node types excluded from native CPS compilation.
 Definition forms, control flow, and CLOS nodes require direct x86_64/aarch64 codegen.")
 

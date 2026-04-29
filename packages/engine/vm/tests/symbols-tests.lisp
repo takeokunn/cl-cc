@@ -1,6 +1,4 @@
 ;;;; tests/unit/vm/symbols-tests.lisp — VM Symbol Instruction Tests
-;;;;
-;;;; Tests for symbol instructions extracted from src/vm/symbols.lisp.
 
 (in-package :cl-cc/test)
 (in-suite cl-cc-unit-suite)

@@ -28,8 +28,8 @@
                    ,@body))
               `(progn ,@body))))))
 
-(deftest pipeline-native-cps-safe-ast-p-allowlist-routing
-  "%cps-native-compile-safe-ast-p accepts call-bearing CPS-backed forms and rejects unsupported object forms."
+(deftest pipeline-native-cps-safe-ast-p-is-disabled-until-native-closures-exist
+  "%cps-native-compile-safe-ast-p currently rejects all native forms until x86_64/aarch64 can lower closure IR."
   (let ((safe-ast (cl-cc:make-ast-let
                    :bindings (list (cons 'x (cl-cc:make-ast-int :value 1)))
                    :body (list (cl-cc:make-ast-binop
@@ -42,32 +42,26 @@
         (unsafe-ast (cl-cc/ast::make-ast-make-instance
                      :class (cl-cc:make-ast-quote :value 'point)
                      :initargs nil)))
-    (assert-true (cl-cc::%cps-native-compile-safe-ast-p safe-ast))
-    (assert-true (cl-cc::%cps-native-compile-safe-ast-p call-ast))
+    (assert-false (cl-cc::%cps-native-compile-safe-ast-p safe-ast))
+    (assert-false (cl-cc::%cps-native-compile-safe-ast-p call-ast))
     (assert-false (cl-cc::%cps-native-compile-safe-ast-p unsafe-ast))))
 
-(deftest pipeline-native-maybe-compile-via-cps-wraps-identity-continuation
-  "%maybe-compile-native-via-cps compiles the CPS wrapper form for safe expressions."
+(deftest pipeline-native-maybe-compile-via-cps-is-disabled
+  "%maybe-compile-native-via-cps returns NIL/NIL while native CPS lowering is disabled."
   (let ((compiled-form nil))
     (with-replaced-function (cl-cc:compile-expression
                              (lambda (form &rest args)
                                (declare (ignore args))
-                               (setf compiled-form form)
-                               (cl-cc/compile::make-compilation-result :program :dummy)))
+                                (setf compiled-form form)
+                                (cl-cc/compile::make-compilation-result :program :dummy)))
       (multiple-value-bind (result used-cps)
           (cl-cc::%maybe-compile-native-via-cps '(+ 1 2) :x86_64 nil)
-        (assert-true used-cps)
-        (assert-eq :dummy (cl-cc/compile:compilation-result-program result))
-        (assert-true (consp compiled-form))
-        (assert-true (consp (first compiled-form)))
-        (assert-eq 'lambda (car (first compiled-form)))
-        (assert-eq 'lambda (car (second compiled-form)))
-        (assert-true (= 1 (length (second (second compiled-form)))))
-        (assert-eq (first (second (second compiled-form)))
-                   (third (second compiled-form)))))))
+        (assert-false used-cps)
+        (assert-null result)
+        (assert-null compiled-form)))))
 
-(deftest pipeline-native-maybe-compile-via-cps-uses-cps-transform-ast*
-  "%maybe-compile-native-via-cps uses cps-transform-ast* directly once the AST is known to be safe."
+(deftest pipeline-native-maybe-compile-via-cps-skips-cps-transform
+  "%maybe-compile-native-via-cps does not invoke cps-transform-ast* while native CPS lowering is disabled."
   (let ((compiled-form nil))
     (with-replaced-function (cl-cc/compile::cps-transform-ast*
                              (lambda (ast)
@@ -77,40 +71,38 @@
       (with-replaced-function (cl-cc:compile-expression
                                (lambda (form &rest args)
                                  (declare (ignore args))
-                                 (setf compiled-form form)
-                                 (cl-cc/compile::make-compilation-result :program :dummy)))
-        (multiple-value-bind (result used-cps)
-            (cl-cc::%maybe-compile-native-via-cps '(+ 1 2) :x86_64 nil)
-          (assert-true used-cps)
-          (assert-eq :dummy (cl-cc/compile:compilation-result-program result))
-          (assert-equal '((lambda (f) (funcall f #'identity))
-                          (lambda (k) (funcall k 3)))
-                        compiled-form))))))
+                                  (setf compiled-form form)
+                                  (cl-cc/compile::make-compilation-result :program :dummy)))
+         (multiple-value-bind (result used-cps)
+             (cl-cc::%maybe-compile-native-via-cps '(+ 1 2) :x86_64 nil)
+          (assert-false used-cps)
+          (assert-null result)
+          (assert-null compiled-form))))))
 
-(deftest pipeline-native-compile-to-native-string-single-form-prefers-cps-path
-  "compile-to-native routes single safe Lisp strings through the CPS-native helper before native code emission."
+(deftest pipeline-native-compile-to-native-string-single-form-uses-direct-path
+  "compile-to-native routes single-form Lisp strings through the direct native compile path while native CPS is disabled."
   (let ((helper-called nil)
-        (compile-string-called nil))
+         (compile-toplevel-called nil))
     (with-replaced-function (cl-cc::%maybe-compile-native-via-cps
-                             (lambda (form &rest args)
-                               (declare (ignore form args))
-                               (setf helper-called t)
-                               (values (cl-cc/compile::make-compilation-result :program :dummy) t)))
-      (with-replaced-function (cl-cc:compile-string
-                               (lambda (&rest args)
-                                 (declare (ignore args))
-                                 (setf compile-string-called t)
-                                 (cl-cc/compile::make-compilation-result :program :fallback)))
-        (with-native-build-stubs ()
-          (assert-equal #P"out.bin"
-                        (cl-cc::compile-to-native "(+ 1 2)"
-                                                  :output-file #P"out.bin"
-                                                  :language :lisp))
+                              (lambda (form &rest args)
+                                (declare (ignore form args))
+                                (setf helper-called t)
+                                (values nil nil)))
+      (with-replaced-function (cl-cc/compile:compile-toplevel-forms
+                                (lambda (&rest args)
+                                  (declare (ignore args))
+                                  (setf compile-toplevel-called t)
+                                  (cl-cc/compile::make-compilation-result :program :fallback)))
+          (with-native-build-stubs ()
+            (assert-equal #P"out.bin"
+                          (cl-cc::compile-to-native "(+ 1 2)"
+                                                    :output-file #P"out.bin"
+                                                    :language :lisp))
           (assert-true helper-called)
-          (assert-false compile-string-called)))))
+          (assert-true compile-toplevel-called)))))
 
-(deftest pipeline-native-compile-file-single-safe-form-prefers-cps-path
-  "compile-file-to-native routes a single safe Lisp top-level form through the CPS-native helper, ignoring in-package forms."
+(deftest pipeline-native-compile-file-single-safe-form-uses-direct-path
+  "compile-file-to-native routes a single Lisp top-level form through the direct native top-level path while native CPS is disabled."
   (uiop:with-temporary-file (:pathname input :type "lisp" :keep t)
     (let ((helper-form nil)
           (compile-toplevel-called nil))
@@ -119,19 +111,19 @@
         (write-line "(+ 1 2)" stream))
       (with-replaced-function (cl-cc::%maybe-compile-native-via-cps
                                (lambda (form &rest args)
-                                 (declare (ignore args))
-                                 (setf helper-form form)
-                                 (values (cl-cc/compile::make-compilation-result :program :dummy) t)))
-        (with-replaced-function (cl-cc/compile:compile-toplevel-forms
-                                 (lambda (&rest args)
-                                   (declare (ignore args))
-                                   (setf compile-toplevel-called t)
-                                   (cl-cc/compile::make-compilation-result :program :fallback)))
-          (with-native-build-stubs (:cache-path #P"./tmp-native-cache.bin")
-            (assert-equal #P"out.bin"
-                          (cl-cc::compile-file-to-native input :output-file #P"out.bin" :language :lisp))
+                                  (declare (ignore args))
+                                  (setf helper-form form)
+                                  (values nil nil)))
+         (with-replaced-function (cl-cc/compile:compile-toplevel-forms
+                                  (lambda (&rest args)
+                                    (declare (ignore args))
+                                    (setf compile-toplevel-called t)
+                                    (cl-cc/compile::make-compilation-result :program :fallback)))
+           (with-native-build-stubs (:cache-path #P"./tmp-native-cache.bin")
+             (assert-equal #P"out.bin"
+                           (cl-cc::compile-file-to-native input :output-file #P"out.bin" :language :lisp))
             (assert-equal '(+ 1 2) helper-form)
-            (assert-false compile-toplevel-called)))))
+            (assert-true compile-toplevel-called)))))
        (ignore-errors (delete-file input)))))
 
 (deftest pipeline-native-compile-file-multi-form-uses-cps-aware-toplevel

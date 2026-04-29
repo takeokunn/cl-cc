@@ -74,9 +74,6 @@
 
 (deftest self-host-clos-compiler-full
   "Test self-hosting: CLOS-based compiler with generic dispatch (full pipeline)."
+  :timeout 180
   (assert-true (equal '((:CONST :R0 3) (:CONST :R1 4) (:MUL :R2 :R0 :R1) (:CONST :R3 5) (:ADD :R4 :R2 :R3))
     (run-string *self-host-clos-compiler-full-program* :stdlib t))))
-
-
-;;; Self-hosting and extended compiler integration tests moved to compiler-tests-selfhost.lisp.
-;;; Additional integration coverage moved to compiler-tests-extended.lisp.

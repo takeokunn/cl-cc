@@ -9,7 +9,7 @@
 (in-suite array-predicate-expansion-suite)
 
 (deftest-each array-predicate-remains-direct-call
-  "Array capability predicates are no longer expanded through compatibility stubs."
+  "Array capability predicates expand to themselves (no macro transformation)."
   :cases (("adjustable-array-p" '(adjustable-array-p arr))
           ("array-has-fill-pointer-p" '(array-has-fill-pointer-p arr)))
   (form)

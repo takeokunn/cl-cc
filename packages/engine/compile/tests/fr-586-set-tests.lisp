@@ -7,5 +7,5 @@
                 (cdr (assoc 'set cl-cc/compile::*builtin-binary-entries*))))
 
 (deftest fr-586-set-not-in-binary-custom-table
-  "FR-586 `set` no longer depends on the extended binary-custom table."
+  "FR-586 `set` is absent from the extended binary-custom table."
   (assert-false (assoc 'set cl-cc/compile::*builtin-binary-custom-entries*)))

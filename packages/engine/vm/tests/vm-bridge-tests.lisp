@@ -41,6 +41,12 @@
     (cl-cc/vm::vm-register-host-bridge sym (lambda () :ok))
     (assert-true (gethash sym cl-cc/vm::*vm-host-bridge-functions*))))
 
+(deftest vm-bridge-registers-compile-file-pathname
+  "compile-file-pathname is an intentional host bridge entry, not dead pathname surface."
+  (let ((callable (gethash 'compile-file-pathname cl-cc/vm::*vm-host-bridge-functions*)))
+    (assert-true (functionp callable))
+    (assert-true (pathnamep (funcall callable "/tmp/cl-cc-bridge-test.lisp")))))
+
 (deftest vm-register-runtime-callable-and-lookup
   "vm-register-runtime-callable stores and resolves callables by runtime helper name." 
   (let ((name "RT-UNIT-TEST-CALLABLE"))
@@ -115,8 +121,8 @@
       (setf cl-cc/bootstrap::*runtime-package-registry-provider* old-provider))))
 
 (deftest vm-bridge-does-not-keep-stale-pathname-entries
-  "Bridge entries without runtime implementations are pruned instead of lingering as dead surface." 
-  (dolist (sym '(ensure-directories-exist pathname-host pathname-device pathname-directory pathname-name pathname-type))
+  "Unused pathname bridge entries stay pruned instead of lingering as dead surface." 
+  (dolist (sym '(ensure-directories-exist pathname-host pathname-device pathname-directory))
     (assert-false (gethash sym cl-cc/vm::*vm-host-bridge-functions*))))
 
 ;;; ─── slot-definition-name ────────────────────────────────────────────────

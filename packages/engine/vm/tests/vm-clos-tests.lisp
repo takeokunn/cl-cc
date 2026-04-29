@@ -1,12 +1,4 @@
 ;;;; tests/unit/vm/vm-clos-tests.lisp — CLOS infrastructure + error dispatch unit tests
-;;;;
-;;;; Covers:
-;;;;   collect-inherited-slots          (4 tests)
-;;;;   collect-inherited-initargs       (3 tests)
-;;;;   compute-class-precedence-list    (4 tests)
-;;;;   vm-error-type-matches-p          (5 tests via deftest-each)
-;;;;   vm-classify-arg                  (3+2 tests: deftest-each + hash-table cases)
-;;;;   vm-generic-function-p            (2+1 tests: deftest-each + truthy case)
 
 (in-package :cl-cc/test)
 
@@ -16,9 +8,7 @@
 
 (in-suite vm-clos-suite)
 
-;;; ------------------------------------------------------------
 ;;; Helpers — build a minimal class-registry hash table
-;;; ------------------------------------------------------------
 
 (defun make-test-registry ()
   "Return a fresh empty registry (eq-keyed hash table)."
@@ -34,9 +24,7 @@
     (setf (gethash name registry) ht)
     ht))
 
-;;; ------------------------------------------------------------
 ;;; 1. collect-inherited-slots
-;;; ------------------------------------------------------------
 
 (deftest collect-inherited-slots
   "collect-inherited-slots: no-super, single-super, multiple-supers, no-duplicates."
@@ -64,9 +52,7 @@
       (assert-true (member 'id    result))
       (assert-true (member 'extra result)))))
 
-;;; ------------------------------------------------------------
 ;;; 2. collect-inherited-initargs
-;;; ------------------------------------------------------------
 
 (deftest collect-inherited-initargs
   "collect-inherited-initargs: no-super, single-super, multiple-supers."
@@ -87,30 +73,22 @@
       (assert-true (assoc :name result))
       (assert-true (assoc :tag  result)))))
 
-;;; ------------------------------------------------------------
 ;;; 3. compute-class-precedence-list
-;;; ------------------------------------------------------------
 
 (deftest compute-class-precedence-list
-  "compute-class-precedence-list: no-super, single-super, linear-chain, diamond."
+  "compute-class-precedence-list: no-super, single-super, linear-chain, diamond, C3-classic, branch."
   (let ((reg (make-test-registry)))
-    ;; no superclasses
     (registry-add-class reg 'root)
-    (assert-equal '(root)
-                  (cl-cc/vm::compute-class-precedence-list 'root reg)))
+    (assert-equal '(root) (cl-cc/vm::compute-class-precedence-list 'root reg)))
   (let ((reg (make-test-registry)))
-    ;; single superclass
     (registry-add-class reg 'animal)
     (registry-add-class reg 'dog :superclasses '(animal))
-    (assert-equal '(dog animal)
-                  (cl-cc/vm::compute-class-precedence-list 'dog reg)))
+    (assert-equal '(dog animal) (cl-cc/vm::compute-class-precedence-list 'dog reg)))
   (let ((reg (make-test-registry)))
-    ;; linear chain A -> B -> C
     (registry-add-class reg 'c)
     (registry-add-class reg 'b :superclasses '(c))
     (registry-add-class reg 'a :superclasses '(b))
-    (assert-equal '(a b c)
-                  (cl-cc/vm::compute-class-precedence-list 'a reg)))
+    (assert-equal '(a b c) (cl-cc/vm::compute-class-precedence-list 'a reg)))
   (let ((reg (make-test-registry)))
     ;; diamond: A -> B, A -> C, B -> D, C -> D
     (registry-add-class reg 'd)
@@ -122,39 +100,32 @@
       (assert-true (member 'b cpl))
       (assert-true (member 'c cpl))
       (assert-true (member 'd cpl))
-      ;; No duplicates
       (assert-= (length cpl) (length (remove-duplicates cpl)))
-      ;; C3 exact order: A B C D (B before C, both before D)
       (assert-equal '(a b c d) cpl)))
-  ;; C3 classic example: D(B,C), B(A), C(A) — no duplication of A
+  ;; C3 classic: D(B,C), B(A), C(A) — A appears once
   (let ((reg (make-test-registry)))
     (registry-add-class reg 'a)
     (registry-add-class reg 'b :superclasses '(a))
     (registry-add-class reg 'c :superclasses '(a))
     (registry-add-class reg 'd :superclasses '(b c))
-    (assert-equal '(d b c a)
-                  (cl-cc/vm::compute-class-precedence-list 'd reg)))
-  ;; C3 inconsistency detection: X(A,B), Y(B,A) — conflicting orders
+    (assert-equal '(d b c a) (cl-cc/vm::compute-class-precedence-list 'd reg)))
+  ;; independent X(A,B) and Y(B,A) — no conflict when queried alone
   (let ((reg (make-test-registry)))
     (registry-add-class reg 'a)
     (registry-add-class reg 'b)
     (registry-add-class reg 'x :superclasses '(a b))
     (registry-add-class reg 'y :superclasses '(b a))
-    ;; X and Y alone should work fine
     (assert-equal '(x a b) (cl-cc/vm::compute-class-precedence-list 'x reg))
     (assert-equal '(y b a) (cl-cc/vm::compute-class-precedence-list 'y reg)))
-  ;; 3-level chain with branch
+  ;; 3-level chain with branch: W(Y,X), Y(Z), X(Z)
   (let ((reg (make-test-registry)))
     (registry-add-class reg 'z)
     (registry-add-class reg 'y :superclasses '(z))
     (registry-add-class reg 'x :superclasses '(z))
     (registry-add-class reg 'w :superclasses '(y x))
-    (let ((cpl (cl-cc/vm::compute-class-precedence-list 'w reg)))
-      (assert-equal '(w y x z) cpl))))
+    (assert-equal '(w y x z) (cl-cc/vm::compute-class-precedence-list 'w reg))))
 
-;;; ------------------------------------------------------------
 ;;; 4. EQL specializer dispatch index
-;;; ------------------------------------------------------------
 
 (deftest eql-specializer-dispatch-index
   "vm-register-method populates the EQL dispatch index for fast lookup."
@@ -174,30 +145,25 @@
     (assert-equal (list method) (cl-cc/vm::%vm-gf-eql-methods gf :read))
     (assert-equal (list method) (gethash :read (gethash :__eql-index__ gf)))))
 
-;;; ------------------------------------------------------------
 ;;; 5. %cis-walk (extracted DFS helper for collect-inherited-slots)
-;;; ------------------------------------------------------------
 
-(deftest cis-walk-empty-class-names
-  "%cis-walk with empty class list leaves result-cell unchanged."
+(deftest cis-walk-cases
+  "%cis-walk: empty list, single class, deduplication via seen."
+  ;; empty class list leaves result-cell unchanged
   (let ((reg (make-test-registry))
         (seen (make-hash-table :test #'eq))
         (cell (list nil)))
     (cl-cc/vm::%cis-walk '() reg seen cell)
-    (assert-null (car cell))))
-
-(deftest cis-walk-single-class
-  "%cis-walk accumulates slots from a single class into result-cell."
+    (assert-null (car cell)))
+  ;; single class accumulates slots into result-cell
   (let ((reg (make-test-registry))
         (seen (make-hash-table :test #'eq))
         (cell (list nil)))
     (registry-add-class reg 'thing :slots '(x y))
     (cl-cc/vm::%cis-walk '(thing) reg seen cell)
     (assert-true (member 'x (car cell)))
-    (assert-true (member 'y (car cell)))))
-
-(deftest cis-walk-deduplicates-via-seen
-  "%cis-walk does not push a slot that is already in SEEN."
+    (assert-true (member 'y (car cell))))
+  ;; slot already in SEEN is not pushed again
   (let ((reg (make-test-registry))
         (seen (make-hash-table :test #'eq))
         (cell (list nil)))
@@ -207,74 +173,60 @@
     (assert-false (member 'id    (car cell)))
     (assert-true  (member 'extra (car cell)))))
 
-;;; ------------------------------------------------------------
 ;;; 6. %cia-walk (extracted DFS helper for collect-inherited-initargs)
-;;; ------------------------------------------------------------
 
-(deftest cia-walk-empty-class-names
-  "%cia-walk with empty class list leaves result-cell unchanged."
+(deftest cia-walk-cases
+  "%cia-walk: empty list, single class, no duplicate keys."
+  ;; empty class list leaves result-cell unchanged
   (let ((reg (make-test-registry))
         (cell (list nil)))
     (cl-cc/vm::%cia-walk '() reg cell)
-    (assert-null (car cell))))
-
-(deftest cia-walk-single-class
-  "%cia-walk accumulates initarg entries from a single class."
+    (assert-null (car cell)))
+  ;; single class accumulates initarg entries
   (let ((reg (make-test-registry))
         (cell (list nil)))
     (registry-add-class reg 'named :initargs '((:name . name)))
     (cl-cc/vm::%cia-walk '(named) reg cell)
-    (assert-true (assoc :name (car cell)))))
-
-(deftest cia-walk-no-duplicate-keys
-  "%cia-walk skips an initarg key that is already present in result-cell."
+    (assert-true (assoc :name (car cell))))
+  ;; key already present in result-cell is not duplicated
   (let ((reg (make-test-registry))
         (cell (list (list '(:name . name-old)))))
     (registry-add-class reg 'alt :initargs '((:name . name-new) (:extra . extra)))
     (cl-cc/vm::%cia-walk '(alt) reg cell)
-    ;; :name must not be duplicated
     (assert-= 1 (length (remove-if-not (lambda (e) (eq (car e) :name)) (car cell))))
     (assert-true (assoc :extra (car cell)))))
 
-;;; ------------------------------------------------------------
 ;;; 6b. %vm-allow-other-keys-p / %vm-validate-initargs
-;;; ------------------------------------------------------------
 
-(deftest vm-allow-other-keys-p-truthy-when-set
-  "%vm-allow-other-keys-p returns T when :allow-other-keys reg holds a truthy value."
+(deftest vm-allow-other-keys-p-cases
+  "%vm-allow-other-keys-p: truthy value, nil value, absent key."
+  ;; truthy register value → T
   (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
     (cl-cc:vm-reg-set s :r0 t)
-    (assert-true (cl-cc/vm::%vm-allow-other-keys-p '((:allow-other-keys . :r0)) s))))
-
-(deftest vm-allow-other-keys-p-nil-when-falsy
-  "%vm-allow-other-keys-p returns NIL when :allow-other-keys reg holds nil."
+    (assert-true (cl-cc/vm::%vm-allow-other-keys-p '((:allow-other-keys . :r0)) s)))
+  ;; nil register value → NIL
   (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
     (cl-cc:vm-reg-set s :r0 nil)
-    (assert-false (cl-cc/vm::%vm-allow-other-keys-p '((:allow-other-keys . :r0)) s))))
-
-(deftest vm-allow-other-keys-p-nil-when-absent
-  "%vm-allow-other-keys-p returns NIL when :allow-other-keys is not in the alist."
+    (assert-false (cl-cc/vm::%vm-allow-other-keys-p '((:allow-other-keys . :r0)) s)))
+  ;; key absent from alist → NIL
   (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
     (assert-false (cl-cc/vm::%vm-allow-other-keys-p '((:x . :r0)) s))))
 
-(deftest vm-validate-initargs-accepts-known-keys
-  "%vm-validate-initargs does not signal when all keys are in initarg-map."
+(deftest vm-validate-initargs-cases
+  "%vm-validate-initargs: accepts known keys, signals for unknown, bypassed by allow-other-keys."
+  ;; known key — no signal
   (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
     (cl-cc:vm-reg-set s :r0 42)
     (assert-true
      (progn
        (cl-cc/vm::%vm-validate-initargs '((:width . :r0)) '((:width . width)) s)
-       t))))
-
-(deftest vm-validate-initargs-signals-for-unknown-key
-  "%vm-validate-initargs signals an error for an unknown initarg key."
+       t)))
+  ;; unknown key — signals error
   (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
     (cl-cc:vm-reg-set s :r0 42)
     (assert-signals error
-      (cl-cc/vm::%vm-validate-initargs '((:unknown-key . :r0)) '((:width . width)) s))))
-
-(deftest vm-validate-initargs-allow-other-keys-bypasses-check
-  "%vm-validate-initargs skips unknown-key check when :allow-other-keys is truthy."
+      (cl-cc/vm::%vm-validate-initargs '((:unknown-key . :r0)) '((:width . width)) s)))
+  ;; :allow-other-keys truthy — bypasses check
   (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
     (cl-cc:vm-reg-set s :r0 42)
     (cl-cc:vm-reg-set s :r1 t)
@@ -287,26 +239,16 @@
        t))))
 
 ;;; 7. %cpl-linearize (extracted C3 linearization step)
-;;; ------------------------------------------------------------
 
-(deftest cpl-linearize-unknown-class
-  "%cpl-linearize on a class not in registry returns (name)."
+(deftest cpl-linearize-cases
+  "%cpl-linearize: unknown class, leaf class, linear A→B→C chain."
   (let ((reg (make-test-registry)))
-    (assert-equal '(unknown)
-                  (cl-cc/vm::%cpl-linearize 'unknown reg))))
-
-(deftest cpl-linearize-leaf-class
-  "%cpl-linearize on a leaf class (no superclasses) returns (name)."
+    (assert-equal '(unknown) (cl-cc/vm::%cpl-linearize 'unknown reg)))
   (let ((reg (make-test-registry)))
     (registry-add-class reg 'leaf)
-    (assert-equal '(leaf)
-                  (cl-cc/vm::%cpl-linearize 'leaf reg))))
-
-(deftest cpl-linearize-linear-chain
-  "%cpl-linearize with a linear A→B→C chain."
+    (assert-equal '(leaf) (cl-cc/vm::%cpl-linearize 'leaf reg)))
   (let ((reg (make-test-registry)))
     (registry-add-class reg 'c)
     (registry-add-class reg 'b :superclasses '(c))
     (registry-add-class reg 'a :superclasses '(b))
-    (assert-equal '(a b c)
-                  (cl-cc/vm::%cpl-linearize 'a reg))))
+    (assert-equal '(a b c) (cl-cc/vm::%cpl-linearize 'a reg))))

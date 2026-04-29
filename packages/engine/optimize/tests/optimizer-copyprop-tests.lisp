@@ -49,16 +49,13 @@
 
 ;;; ── %opt-copy-prop-env-copy / %opt-copy-prop-env-equal-p ───────────────────
 
-(deftest copyprop-env-copy-independence
-  "Mutating the copy does not affect the original."
+(deftest copyprop-env-copy-cases
+  "env-copy is independent (mutation does not affect original) and handles empty envs."
   (let* ((env  (%make-copy-env :r1 :r0 :r2 :r0))
          (copy (cl-cc/optimize::%opt-copy-prop-env-copy env)))
     (assert-true  (cl-cc/optimize::%opt-copy-prop-env-equal-p env copy))
     (remhash :r1 copy)
-    (assert-false (cl-cc/optimize::%opt-copy-prop-env-equal-p env copy))))
-
-(deftest copyprop-env-copy-empty
-  "Copying an empty environment yields an empty environment."
+    (assert-false (cl-cc/optimize::%opt-copy-prop-env-equal-p env copy)))
   (let* ((env  (%make-copy-env))
          (copy (cl-cc/optimize::%opt-copy-prop-env-copy env)))
     (assert-equal 0 (hash-table-count copy))))
@@ -196,12 +193,9 @@ Use `not null` semantics to match both numeric booleans and string indices."
   (let ((type (find-symbol (symbol-name type-name) :cl-cc)))
     (find-if (lambda (i) (typep i type)) instrs)))
 
-(deftest copyprop-pass-empty
-  "An empty instruction list passes through unchanged."
-  (assert-equal nil (cl-cc/optimize::opt-pass-copy-prop nil)))
-
-(deftest copyprop-pass-no-copies
-  "Instructions with no moves pass through with their registers unchanged."
+(deftest copyprop-pass-trivial-cases
+  "Empty list passes through unchanged; instructions with no moves keep their registers."
+  (assert-equal nil (cl-cc/optimize::opt-pass-copy-prop nil))
   (let* ((instrs (list (make-vm-label :name "entry")
                        (make-vm-const :dst :r0 :value 1)
                        (make-vm-const :dst :r1 :value 2)
@@ -213,8 +207,9 @@ Use `not null` semantics to match both numeric booleans and string indices."
     (assert-eq :r0 (vm-lhs add))
     (assert-eq :r1 (vm-rhs add))))
 
-(deftest copyprop-pass-basic-rewrite
-  "A copy move causes subsequent uses of the copy register to be rewritten."
+(deftest copyprop-pass-integration-cases
+  "Copy-prop integration: basic rewrite, chain rewrite, kill stops propagation, labels preserved."
+  ;; basic-rewrite: copy move causes subsequent uses of copy register to be rewritten
   (let* ((instrs (list (make-vm-label :name "entry")
                        (make-vm-const :dst :r0 :value 42)
                        (make-vm-move  :dst :r1 :src :r0)
@@ -224,10 +219,8 @@ Use `not null` semantics to match both numeric booleans and string indices."
          (add    (%copyprop-find result 'vm-add)))
     (assert-true add)
     (assert-eq :r0 (vm-lhs add))
-    (assert-eq :r0 (vm-rhs add))))
-
-(deftest copyprop-pass-chain-rewrite
-  "Chained moves r0→r1→r2 causes uses of r2 to be rewritten to r0."
+    (assert-eq :r0 (vm-rhs add)))
+  ;; chain-rewrite: chained moves r0→r1→r2 causes uses of r2 to be rewritten to r0
   (let* ((instrs (list (make-vm-label :name "entry")
                        (make-vm-const :dst :r0 :value 7)
                        (make-vm-move  :dst :r1 :src :r0)
@@ -237,10 +230,8 @@ Use `not null` semantics to match both numeric booleans and string indices."
          (result (cl-cc/optimize::opt-pass-copy-prop instrs))
          (add    (%copyprop-find result 'vm-add)))
     (assert-true add)
-    (assert-eq :r0 (vm-lhs add))))
-
-(deftest copyprop-pass-kill-stops-propagation
-  "A write to the copy register kills the copy fact; later uses are not rewritten."
+    (assert-eq :r0 (vm-lhs add)))
+  ;; kill-stops-propagation: write to copy register kills fact; later uses not rewritten
   (let* ((instrs (list (make-vm-label :name "entry")
                        (make-vm-const :dst :r0 :value 1)
                        (make-vm-move  :dst :r1 :src :r0)
@@ -252,10 +243,8 @@ Use `not null` semantics to match both numeric booleans and string indices."
     ;; After :r1 is overwritten, uses of :r1 must remain :r1, not :r0.
     (assert-true add)
     (assert-eq :r1 (vm-lhs add))
-    (assert-eq :r1 (vm-rhs add))))
-
-(deftest copyprop-pass-preserves-labels
-  "The pass preserves all labels in the output instruction list."
+    (assert-eq :r1 (vm-rhs add)))
+  ;; preserves-labels: all labels survive the pass
   (let* ((instrs (list (make-vm-label :name "start")
                        (make-vm-const :dst :r0 :value 0)
                        (make-vm-ret   :reg :r0)))
@@ -267,17 +256,14 @@ Use `not null` semantics to match both numeric booleans and string indices."
 
 ;;; ── copyprop-pass-state helpers ─────────────────────────────────────────────
 
-(deftest copyprop-pass-state-enqueue-adds-to-worklist
-  "%copyprop-enqueue adds a block to the worklist only once."
+(deftest copyprop-pass-state-enqueue-cases
+  "%copyprop-enqueue is idempotent: a block is added at most once; two distinct blocks count as 2."
   (let ((state (cl-cc/optimize::make-copyprop-pass-state))
         (block (cl-cc/optimize::cfg-new-block (cl-cc/optimize::make-cfg))))
     (cl-cc/optimize::%copyprop-enqueue block state)
     (assert-= 1 (length (cl-cc/optimize::cpps-worklist state)))
     (cl-cc/optimize::%copyprop-enqueue block state)
-    (assert-= 1 (length (cl-cc/optimize::cpps-worklist state)))))
-
-(deftest copyprop-pass-state-enqueue-does-not-re-add-queued
-  "%copyprop-enqueue is idempotent: already-queued blocks are not added again."
+    (assert-= 1 (length (cl-cc/optimize::cpps-worklist state))))
   (let ((state (cl-cc/optimize::make-copyprop-pass-state))
         (b1 (cl-cc/optimize::cfg-new-block (cl-cc/optimize::make-cfg)))
         (b2 (cl-cc/optimize::cfg-new-block (cl-cc/optimize::make-cfg))))
@@ -303,34 +289,28 @@ Use `not null` semantics to match both numeric booleans and string indices."
 
 ;;; ── %opt-copy-prop-build-reverse ─────────────────────────────────────────
 
-(deftest copy-prop-build-reverse-creates-inverse-mapping
-  "%opt-copy-prop-build-reverse builds a src→list-of-dsts table from copies."
+(deftest copy-prop-build-reverse-cases
+  "%opt-copy-prop-build-reverse builds a src→list-of-dsts table; empty input yields empty table."
   (let ((copies (make-hash-table :test #'eq)))
     (setf (gethash :r1 copies) :r0
           (gethash :r2 copies) :r0)
     (let ((rev (cl-cc/optimize::%opt-copy-prop-build-reverse copies)))
       (assert-true (member :r1 (gethash :r0 rev) :test #'eq))
-      (assert-true (member :r2 (gethash :r0 rev) :test #'eq)))))
-
-(deftest copy-prop-build-reverse-empty-copies
-  "%opt-copy-prop-build-reverse on an empty copies table returns an empty table."
+      (assert-true (member :r2 (gethash :r0 rev) :test #'eq))))
   (let ((rev (cl-cc/optimize::%opt-copy-prop-build-reverse
               (make-hash-table :test #'eq))))
     (assert-= 0 (hash-table-count rev))))
 
 ;;; ── %opt-copy-prop-transfer-block ────────────────────────────────────────
 
-(deftest copy-prop-transfer-block-adds-move-fact
-  "%opt-copy-prop-transfer-block records a vm-move copy fact in the output env."
+(deftest copy-prop-transfer-block-cases
+  "%opt-copy-prop-transfer-block records vm-move facts and kills overwritten copy facts."
   (let* ((blk    (make-instance 'cl-cc/optimize::basic-block))
          (in-env (make-hash-table :test #'eq)))
     (setf (cl-cc/optimize::bb-instructions blk)
           (list (make-vm-move :dst :r1 :src :r0)))
     (let ((out (cl-cc/optimize::%opt-copy-prop-transfer-block blk in-env)))
-      (assert-eq :r0 (gethash :r1 out)))))
-
-(deftest copy-prop-transfer-block-kills-on-non-move
-  "%opt-copy-prop-transfer-block removes a copy fact when dst is overwritten."
+      (assert-eq :r0 (gethash :r1 out))))
   (let* ((blk    (make-instance 'cl-cc/optimize::basic-block))
          (in-env (make-hash-table :test #'eq)))
     (setf (gethash :r1 in-env) :r0)
@@ -341,17 +321,14 @@ Use `not null` semantics to match both numeric booleans and string indices."
 
 ;;; ── %opt-copy-prop-rewrite-inst ─────────────────────────────────────────
 
-(deftest copy-prop-rewrite-inst-substitutes-canonical
-  "%opt-copy-prop-rewrite-inst replaces a src register with its canonical copy."
+(deftest copy-prop-rewrite-inst-cases
+  "%opt-copy-prop-rewrite-inst substitutes canonical copies and is identity when no copy applies."
   (let ((copies (make-hash-table :test #'eq)))
     (setf (gethash :r0 copies) :r5)
     (let* ((inst   (make-vm-add :dst :r2 :lhs :r0 :rhs :r0))
            (result (cl-cc/optimize::%opt-copy-prop-rewrite-inst inst copies)))
       (assert-eq :r5 (cl-cc/vm::vm-lhs result))
-      (assert-eq :r5 (cl-cc/vm::vm-rhs result)))))
-
-(deftest copy-prop-rewrite-inst-identity-when-no-copy
-  "%opt-copy-prop-rewrite-inst returns INST unchanged when no copy applies."
+      (assert-eq :r5 (cl-cc/vm::vm-rhs result))))
   (let ((copies (make-hash-table :test #'eq)))
     (let* ((inst (make-vm-const :dst :r0 :value 1)))
       (assert-eq inst (cl-cc/optimize::%opt-copy-prop-rewrite-inst inst copies)))))

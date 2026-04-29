@@ -13,7 +13,7 @@
   :serial t
   :components
   (;; Unit tests — each module now lives in its workspace's tests/ dir
-   (:module "framework-meta-tests"
+   (:module "testing-framework-tests"
     :pathname "packages/testing/framework/tests"
     :serial t
     :components
@@ -24,7 +24,8 @@
      (:file "persistent-tests")
      (:file "persistent-tests-2")
      (:file "framework-runner-tests")
-     (:file "framework-parallel-tests")))
+     (:file "framework-parallel-tests")
+     (:file "entrypoint-contract-tests")))
    (:module "cli-tests"
     :pathname "packages/cli/tests"
     :serial t
@@ -261,6 +262,7 @@
      (:file "codegen-fold-tests")
      (:file "codegen-phase2-helpers")
      (:file "codegen-core-tests")
+     (:file "codegen-core-helper-tests")
      (:file "codegen-core-array-sink-tests")
      (:file "codegen-type-predicate-tests")
      (:file "codegen-core-let-tests")
@@ -467,11 +469,15 @@
   :serial t
   :components
   ((:module "e2e"
-    :pathname "tests/e2e"
-    :serial t
-    :components
-    ((:file "selfhost-tests")
-     (:file "selfhost-meta-tests")))))
+     :pathname "tests/e2e"
+     :serial t
+     :components
+     ((:file "selfhost-test-support")
+      (:file "selfhost-tests")
+      (:file "selfhost-meta-tests"))))
+  :perform (asdf:test-op (op c)
+              (declare (ignore op c))
+              (uiop:symbol-call :cl-cc/test 'run-tests)))
 
 (asdf:defsystem :cl-cc-test/clos
   :description "CL-CC isolated CLOS integration tests"

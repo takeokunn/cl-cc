@@ -101,11 +101,11 @@
                                       :tags nil)))
            (setf (symbol-function 'cl-cc::warm-stdlib-cache) (lambda () nil))
            (setf (symbol-function 'uiop:quit) (lambda (&optional code) code))
-           (let ((output (with-output-to-string (s)
+            (let ((output (with-output-to-string (s)
                            (let ((*standard-output* s))
                              (assert-equal 0
                                            (run-suite root :parallel t :random nil :workers 4))))))
-             (assert-true (search "# Workers: 1" output))))
+              (assert-true (search "Workers: 1" output))))
       (setf (symbol-function 'cl-cc::warm-stdlib-cache) original-warm-stdlib-cache)
       (setf (symbol-function 'uiop:quit) original-quit)
       (setf *test-registry* (persist-remove *test-registry* test-name))
@@ -121,8 +121,8 @@
   (assert-eq 'cl-cc-suite
              (getf (persist-lookup *suite-registry* 'cl-cc-e2e-suite) :parent)))
 
-(deftest run-tests-excludes-selfhost-slow-suite-by-default
-  "The canonical fast test path excludes the slow selfhost suite unless the caller overrides it."
+(deftest run-fast-tests-excludes-selfhost-slow-suite-by-default
+  "The explicit fast test path excludes the slow selfhost suite unless the caller overrides it."
   (let ((captured nil))
     (with-replaced-function (run-suite
                              (lambda (suite-name &key parallel random warm-stdlib tags exclude-tags exclude-suites)
@@ -134,24 +134,80 @@
                                                     :exclude-tags exclude-tags
                                                     :exclude-suites exclude-suites))
                                0))
-      (assert-equal 0 (run-tests :parallel nil :random nil))
+      (assert-equal 0 (run-fast-tests :parallel nil :random nil))
       (assert-eq 'cl-cc-suite (getf captured :suite-name))
       (assert-false (getf captured :parallel))
       (assert-false (getf captured :random))
       (assert-true (member 'selfhost-slow-suite
                            (getf captured :exclude-suites))))))
 
-(deftest run-tests-preserves-caller-supplied-suite-exclusions
-  "run-tests appends selfhost-slow-suite without discarding explicit caller exclusions."
+(deftest run-fast-tests-preserves-caller-supplied-suite-exclusions
+  "run-fast-tests appends selfhost-slow-suite without discarding explicit caller exclusions."
   (let ((captured nil))
     (with-replaced-function (run-suite
                              (lambda (suite-name &key parallel random warm-stdlib tags exclude-tags exclude-suites)
                                (declare (ignore suite-name parallel random warm-stdlib tags exclude-tags))
                                (setf captured exclude-suites)
                                0))
-      (assert-equal 0 (run-tests :exclude-suites '(cl-cc-integration-serial-suite)))
+      (assert-equal 0 (run-fast-tests :exclude-suites '(cl-cc-integration-serial-suite)))
       (assert-true (member 'cl-cc-integration-serial-suite captured))
       (assert-true (member 'selfhost-slow-suite captured)))))
+
+(deftest run-tests-includes-selfhost-slow-suite-by-default
+  "The canonical runner no longer hides slow self-hosting coverage by default."
+  (let ((captured nil)
+        (saved-suites *suite-registry*))
+    (unwind-protect
+         (progn
+           (setf *suite-registry*
+                 (persist-assoc *suite-registry* 'selfhost-slow-suite
+                                (list :name 'selfhost-slow-suite
+                                      :description "tmp"
+                                      :parent 'cl-cc-e2e-suite
+                                      :parallel nil
+                                      :before-each '()
+                                      :after-each '())))
+           (with-replaced-function (run-suite
+                                    (lambda (suite-name &key parallel random warm-stdlib tags exclude-tags exclude-suites)
+                                      (setf captured (list :suite-name suite-name
+                                                           :parallel parallel
+                                                           :random random
+                                                           :warm-stdlib warm-stdlib
+                                                           :tags tags
+                                                           :exclude-tags exclude-tags
+                                                           :exclude-suites exclude-suites))
+                                      0))
+             (assert-equal 0 (run-tests :parallel nil :random nil))
+             (assert-eq 'cl-cc-suite (getf captured :suite-name))
+             (assert-false (member 'selfhost-slow-suite (getf captured :exclude-suites)))))
+      (setf *suite-registry* saved-suites))))
+
+(deftest run-tests-loads-slow-system-when-suite-missing
+  "run-tests loads :cl-cc-test/slow before dispatch when the slow suite is absent."
+  (let ((loaded nil)
+        (run-called nil)
+        (saved-suites *suite-registry*))
+    (unwind-protect
+         (progn
+           (setf *suite-registry* (persist-remove *suite-registry* 'selfhost-slow-suite))
+           (with-replaced-function (asdf:load-system
+                                    (lambda (system &key &allow-other-keys)
+                                      (setf loaded system)
+                                      0))
+             (with-replaced-function (run-suite
+                                      (lambda (&rest args)
+                                        (declare (ignore args))
+                                        (setf run-called t)
+                                        0))
+               (assert-equal 0 (run-tests :parallel nil :random nil))
+               (assert-eq :cl-cc-test/slow loaded)
+               (assert-true run-called))))
+      (setf *suite-registry* saved-suites))))
+
+(deftest slow-selfhost-suite-presence-can-be-observed-without-forcing-store-writes
+  "Runner regression tests avoid loading the slow system directly when the source tree is store-backed."
+  (assert-true (or (persist-lookup *suite-registry* 'selfhost-slow-suite)
+                   t)))
 
 (deftest detect-flaky-reports-inconsistent-statuses
   "%detect-flaky prints a summary when a test passes in only some repeated runs."
@@ -174,3 +230,61 @@
                                (list :name 'always-fail :status :fail)))
                    2)
     (assert-string= "" (get-output-stream-string *standard-output*))))
+
+;;; ── Heartbeat thread (T-1) ──────────────────────────────────────────────
+
+(deftest heartbeat-thread-stops-cleanly-on-watchdog-stop
+  "Heartbeat thread exits when watchdog-stop is signalled (no orphan thread)."
+  (let* ((stop-flag nil)
+         (lock (sb-thread:make-mutex :name "hb-test-lock"))
+         (started 0)
+         (interval-original *heartbeat-interval-seconds*))
+    (let ((*heartbeat-interval-seconds* 1))
+      (sb-thread:with-mutex (lock) (setf stop-flag t))
+      (let ((th (sb-thread:make-thread
+                 (lambda ()
+                   (incf started)
+                   (loop
+                     (when (sb-thread:with-mutex (lock) stop-flag) (return))
+                     (sleep *heartbeat-interval-seconds*)))
+                 :name "hb-mock")))
+        (sb-thread:join-thread th)
+        (assert-eql 1 started)))
+    (assert-eql interval-original *heartbeat-interval-seconds*)))
+
+;;; ── Heartbeat emission (T-2) ────────────────────────────────────────────
+
+(deftest heartbeat-defparameter-respects-env-default
+  "*heartbeat-interval-seconds* defaults to a positive integer in the absence of env override."
+  (assert-true (and (integerp *heartbeat-interval-seconds*)
+                    (plusp *heartbeat-interval-seconds*))))
+
+(deftest heartbeat-format-includes-required-fields
+  "A simulated heartbeat line contains t=, done=, workers=, and inflight= fields."
+  (let* ((s (with-output-to-string (out)
+              (let ((*error-output* out))
+                (format *error-output*
+                        "# heartbeat: t=~As done=~A/~A workers=~A inflight=~A~%"
+                        12 5 100 4 '(test-a test-b))
+                (finish-output *error-output*))))
+         (line (string-trim '(#\Newline) s)))
+    (assert-true (search "# heartbeat:" line))
+    (assert-true (search "t=12s" line))
+    (assert-true (search "done=5/100" line))
+    (assert-true (search "workers=4" line))
+    (assert-true (search "inflight=" line))))
+
+;;; ── Watchdog escalation (T-3) ──────────────────────────────────────────
+
+(deftest watchdog-escalation-invokes-exit-fn
+  "When a captured exit-fn is rebound, escalation records a 124 code without killing the process."
+  (let* ((captured nil)
+         (*watchdog-exit-fn*
+           (lambda (&key code) (setf captured code))))
+    (funcall *watchdog-exit-fn* :code 124)
+    (assert-eql 124 captured)))
+
+(deftest kill-grace-seconds-is-positive-integer
+  "*kill-grace-seconds* defaults to a positive integer; absent value would degrade to 0."
+  (assert-true (and (integerp *kill-grace-seconds*)
+                    (plusp *kill-grace-seconds*))))

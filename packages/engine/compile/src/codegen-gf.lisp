@@ -88,10 +88,12 @@ dispatch table, keyed by the composite specializer list for multiple dispatch."
          (specializers (ast-defmethod-specializers node))
          (params (ast-defmethod-params node))
          (body (ast-defmethod-body node))
-         ;; Look up or auto-create the generic function
-         (gf-reg (or (gethash name (ctx-global-generics ctx))
-                     (cdr (assoc name (ctx-env ctx)))
-                     (%ensure-generic-function ctx name)))
+         ;; Ensure the generic function exists at compile/runtime, then always
+         ;; reload the current runtime GF object before method registration.
+         (_ensure-gf (or (gethash name (ctx-global-generics ctx))
+                         (cdr (assoc name (ctx-env ctx)))
+                         (%ensure-generic-function ctx name)))
+         (gf-reg (make-register ctx))
          ;; Build the canonical dispatch key from ALL specializers.
          ;; Single-dispatch methods use a bare key; multi-dispatch methods use
          ;; the full class tuple. EQL specializers keep their explicit (eql v)
@@ -113,11 +115,13 @@ dispatch table, keyed by the composite specializer list for multiple dispatch."
                  keys)))
          (qual-str (if qualifier (format nil "_~A" qualifier) ""))
          (label-suffix (format nil "~{~A~^_~}" (if (listp dispatch-key) dispatch-key (list dispatch-key))))
-         (func-label (make-label ctx (format nil "METHOD_~A~A_~A" name qual-str label-suffix)))
-         (end-label (make-label ctx (format nil "METHOD_~A~A_~A_END" name qual-str label-suffix)))
-         (closure-reg (make-register ctx))
-         (param-regs (loop for i from 0 below (length params)
-                           collect (make-register ctx))))
+          (func-label (make-label ctx (format nil "METHOD_~A~A_~A" name qual-str label-suffix)))
+          (end-label (make-label ctx (format nil "METHOD_~A~A_~A_END" name qual-str label-suffix)))
+          (closure-reg (make-register ctx))
+          (param-regs (loop for i from 0 below (length params)
+                            collect (make-register ctx))))
+    (declare (ignore _ensure-gf))
+    (emit ctx (make-vm-get-global :dst gf-reg :name name))
     (emit ctx (make-vm-closure
                :dst closure-reg :label func-label
                :params param-regs :captured nil))

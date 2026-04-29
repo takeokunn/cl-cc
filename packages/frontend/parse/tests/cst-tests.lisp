@@ -25,10 +25,10 @@
     (assert-eq :list (cl-cc:cst-node-kind node))
     (assert-= 2 (length (cl-cc:cst-children node)))))
 
-(deftest cst-error-node-creation
-  "cst-error-node: create with message"
-  (let ((err (cl-cc:make-cst-error-node :message "bad syntax" :start-byte 5 :end-byte 10)))
-    (assert-string= "bad syntax" (cl-cc:cst-error-node-message err))
+(deftest cst-error-creation
+  "cst-error: create with message"
+  (let ((err (cl-cc:make-cst-error :message "bad syntax" :start-byte 5 :end-byte 10)))
+    (assert-string= "bad syntax" (cl-cc:cst-error-message err))
     (assert-= 5 (cl-cc:cst-node-start-byte err))))
 
 ;;; ─── Predicates ─────────────────────────────────────────────────────────────
@@ -38,7 +38,7 @@
   :cases (("token-p-true"    #'cl-cc:cst-token-p    (cl-cc:make-cst-token :kind :int :value 0)       t)
           ("token-p-false"   #'cl-cc:cst-token-p    (cl-cc:make-cst-interior :kind :list)             nil)
           ("interior-p-true" #'cl-cc:cst-interior-p (cl-cc:make-cst-interior :kind :list)             t)
-          ("error-p-true"    #'cl-cc:cst-error-p    (cl-cc:make-cst-error-node :message "err")        t))
+          ("error-p-true"    #'cl-cc:cst-error-p    (cl-cc:make-cst-error :message "err")        t))
   (pred node expected)
   (if expected
       (assert-true  (funcall pred node))
@@ -76,7 +76,7 @@
 (deftest cst-collect-errors-finds-errors
   "cst-collect-errors returns error nodes from a tree"
   (let* ((good (cl-cc:make-cst-token :kind :int :value 1))
-         (bad (cl-cc:make-cst-error-node :message "oops"))
+         (bad (cl-cc:make-cst-error :message "oops"))
          (tree (cl-cc:make-cst-interior :kind :list :children (list good bad))))
     (assert-= 1 (length (cl-cc:cst-collect-errors tree)))))
 

@@ -10,7 +10,12 @@
 
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-unit-suite)
+(defsuite cl-cc-wasm-serial-suite
+  :description "Serial WASM backend tests that rely on fresh compile-string state"
+  :parent cl-cc-unit-suite
+  :parallel nil)
+
+(in-suite cl-cc-wasm-serial-suite)
 
 ;;; ──────────────────────────────────────────────────────────────────────────
 ;;; Helper: compile a source string to WAT, returning the assembly string.

@@ -11,8 +11,6 @@
 ;;; compiler-macroexpand-all is the inference engine — ~15 lines.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-;;; Helper functions moved to expander-helpers.lisp.
-
 ;;; ── Registration macro ───────────────────────────────────────────────────
 
 (defmacro define-expander-for (head (form) &body body)
@@ -41,8 +39,6 @@ Contract: handler receives the full form and returns a fully-expanded form."
     (if has-qualifier
         (append (list 'defmethod name qualifier lambda-list) expanded-body)
         (append (list 'defmethod name lambda-list) expanded-body))))
-
-;; Control-flow special forms moved to expander-control.lisp.
 
 ;;; ── Main dispatcher ──────────────────────────────────────────────────────
 ;;;

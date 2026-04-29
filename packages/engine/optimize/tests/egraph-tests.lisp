@@ -4,7 +4,13 @@
 ;;; extraction, and rewrite rules.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+
+(defsuite cl-cc-coverage-unstable-unit-suite
+  :description "Unit tests that are known to be unstable under source instrumentation coverage runs"
+  :parent cl-cc-unit-suite
+  :parallel nil)
+
+(in-suite cl-cc-coverage-unstable-unit-suite)
 
 ;;; ─── Helpers ─────────────────────────────────────────────────────────────
 

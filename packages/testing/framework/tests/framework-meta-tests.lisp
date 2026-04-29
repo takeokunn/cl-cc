@@ -182,13 +182,11 @@
                                  'cl-cc-unit-suite))
   (enable-coverage)
   (disable-coverage)
-  (handler-case
-      (progn
-        (%print-coverage-report nil)
-        (assert-false t))
-    (error (e)
-      (declare (ignore e))
-      (assert-true t))))
+  (handler-bind ((warning #'muffle-warning))
+    (handler-case
+        (assert-equal nil (%print-coverage-report nil))
+      (error (e)
+        (assert-true (search "Coverage report" (princ-to-string e)))))))
 
 (deftest framework-meta-assert-evaluates-to-stdlib-path
   "assert-evaluates-to supports the stdlib execution path through a shared high-level assertion."

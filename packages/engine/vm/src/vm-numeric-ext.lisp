@@ -73,7 +73,7 @@
 ;;; FR-507: Environment query functions (nullary — return host CL values)
 
 (%define-nullary-env-query vm-lisp-implementation-type :lisp-implementation-type
-  (lisp-implementation-type) "Return the Lisp implementation type string.")
+  "cl-cc" "Return the guest Lisp implementation type string.")
 (%define-nullary-env-query vm-lisp-implementation-version :lisp-implementation-version
   (lisp-implementation-version) "Return the Lisp implementation version string.")
 (%define-nullary-env-query vm-machine-type    :machine-type    (machine-type)    "Return the machine type string.")

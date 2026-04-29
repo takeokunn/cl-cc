@@ -1,8 +1,8 @@
 ;;;; tests/unit/bytecode/decode-tests.lisp - Bytecode ISA v2 Decoder Tests
 ;;;
 ;;; Tests for field extraction, instruction-format classifier,
-;;; and disassemble-instruction.  Includes regression tests for
-;;; previously fixed bugs (tail-call :3op classification).
+;;; and disassemble-instruction.  Includes regression for
+;;; tail-call :3op classification.
 
 (in-package :cl-cc/test)
 

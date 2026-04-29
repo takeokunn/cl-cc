@@ -8,6 +8,9 @@
 ;;; Persistent REPL state and run-string-repl live in pipeline-repl-state.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+(defvar *macro-eval-fn* #'our-eval
+  "Current compile-time evaluator hook used by selfhost/REPL expansion.")
+
 (eval-when (:load-toplevel :execute)
   ;; Coverage/instrumented loads can revisit parts of the pipeline in a slightly
   ;; different order than the normal test path. Keep the steady-state contract
@@ -18,8 +21,8 @@
 (defun %normalize-register-macro-form (form)
   "Register a top-level REGISTER-MACRO lambda expander.
 Lambda bodies are normalized through COMPILER-MACROEXPAND-ALL before storing the
-descriptor in macro-env. Non-lambda register-macro forms are now rejected so
-the loader no longer host-evals arbitrary expander forms."
+descriptor in macro-env. Non-lambda register-macro forms are rejected — the
+loader never host-evals arbitrary expander forms."
   (destructuring-bind (_ name-form expander-form) form
     (declare (ignore _))
     (let ((name (if (and (consp name-form) (eq (car name-form) 'quote))
@@ -164,7 +167,9 @@ Returns two values: result and handled-p."
 
 (defun run-form-repl (form)
   "Like run-string-repl, but accepts an already-parsed S-expression FORM."
-  (when (and (consp form) (eq (car form) 'in-package))
+  (when (and (consp form)
+             (symbolp (car form))
+             (string= (symbol-name (car form)) "IN-PACKAGE"))
     (error "run-form-repl does not handle (in-package ...) forms; caller must dispatch before calling."))
   (%ensure-repl-state)
   (when (and (consp form)
@@ -192,9 +197,10 @@ Returns two values: result and handled-p."
     (when handled-p
       (return-from run-form-repl host-result)))
   (let* ((*package* *package*)
-         (*accessor-slot-map* *repl-accessor-map*)
-         (*defstruct-slot-registry* *repl-defstruct-registry*)
-         (*labels-boxed-fns* nil)
-         (*repl-global-variables* *repl-global-vars-persistent*)
-         (*repl-capture-label-counter* t))
+         (*macro-eval-fn* #'our-eval)
+          (*accessor-slot-map* *repl-accessor-map*)
+          (*defstruct-slot-registry* *repl-defstruct-registry*)
+          (*labels-boxed-fns* nil)
+          (*repl-global-variables* *repl-global-vars-persistent*)
+          (*repl-capture-label-counter* t))
     (%run-form-repl-impl (compile-expression form :target :vm))))

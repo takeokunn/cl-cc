@@ -1,7 +1,7 @@
 ;;;; tests/unit/compile/codegen-clos-slot-tests.lisp — Codegen CLOS Slot & Phase2 Tests
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-codegen-unit-serial-suite)
 
 ;;; ─── compile-ast: ast-slot-value ─────────────────────────────────────────────
 

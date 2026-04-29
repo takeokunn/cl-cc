@@ -7,7 +7,7 @@
 ;;; defined in codegen-tests.lisp (same suite, loaded before this file).
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-codegen-unit-serial-suite)
 
 ;;; ─── Section 9: MAKE-STRING-INPUT-STREAM ────────────────────────────────────
 

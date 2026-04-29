@@ -220,4 +220,3 @@ runtime while preserving the data-driven dispatch shape."
 The outer continuation parameter is always named K for inspection and tests."
   (cps-simplify-form (list 'lambda '(k) (%cps-sexp-node expr 'k))))
 
-;;; AST-based CPS implementation moved to cps-ast*.lisp.

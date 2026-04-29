@@ -114,10 +114,13 @@ literal constant for fixed-value loads."
                                      (setf (gethash '*standard-input* ht) *standard-input*)
                                      (setf (gethash '*error-output* ht) *error-output*)
                                      (setf (gethash '*trace-output* ht) *trace-output*)
-                                     (setf (gethash '*debug-io* ht) *debug-io*)
-                                     (setf (gethash '*query-io* ht) *query-io*)
-                                     ht))
-                      (values-buffer nil))))
+                                      (setf (gethash '*debug-io* ht) *debug-io*)
+                                      (setf (gethash '*query-io* ht) *query-io*)
+                                      ht))
+                      (values-buffer nil)
+                      (profile-enabled-p nil)
+                      (profile-call-stack nil)
+                      (profile-samples (make-hash-table :test #'equal)))))
   "VM2 state for the flat-vector run-vm interpreter.
 REGISTERS: simple-vector of 256 integer-indexed slots (fast svref access).
 GLOBAL-VARS: hash table for global variable bindings.
@@ -125,6 +128,9 @@ OUTPUT-STREAM: stream for I/O."
   (registers    nil :type simple-vector)
   (global-vars  nil :type hash-table)
   (values-buffer nil)
+  (profile-enabled-p nil)
+  (profile-call-stack nil)
+  (profile-samples nil :type hash-table)
   (output-stream *standard-output*))
 
 (defun vm2-reg-get (state reg)

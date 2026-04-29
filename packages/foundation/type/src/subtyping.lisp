@@ -108,6 +108,8 @@ Called as the fallback when no T1-driven rule matched."
    - Arrow: contravariant params, covariant return
    - Constructor: same name + covariant args (simplified)"
   (or (type-equal-p t1 t2)
+      (type-unknown-p t1)
+      (type-unknown-p t2)
       (and (typep t2 'type-primitive) (eq (type-primitive-name t2) 't))
       ;; T1-driven rules take priority; each terminal arm falls through to T2 rules.
       ;; T1 union/intersection/refinement recurse — their recursion handles T2 structure.
@@ -176,6 +178,8 @@ type specifiers."
      (type-join fixnum fixnum)   => fixnum"
   (cond
     ((type-equal-p t1 t2) t1)
+    ((type-unknown-p t1) t2)
+    ((type-unknown-p t2) t1)
     ((is-subtype-p t1 t2) t2)
     ((is-subtype-p t2 t1) t1)
     (t
@@ -204,6 +208,8 @@ type specifiers."
      (type-meet fixnum string)   => (and fixnum string)  ; uninhabited"
   (cond
     ((type-equal-p t1 t2) t1)
+    ((type-unknown-p t1) t1)
+    ((type-unknown-p t2) t2)
     ((is-subtype-p t1 t2) t1)
     ((is-subtype-p t2 t1) t2)
     (t

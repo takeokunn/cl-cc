@@ -165,8 +165,8 @@
 
 ;;; ─── CPS-safe AST allowlist ─────────────────────────────────────────────────
 
-(deftest pipeline-native-cps-safe-ast-p-allowlist
-  "%cps-native-compile-safe-ast-p accepts call and multiple-value CPS-backed forms and rejects unsupported object forms."
+(deftest pipeline-native-cps-safe-ast-p-rejects-io-and-mv-forms-until-native-cps-lowering-exists
+  "%cps-native-compile-safe-ast-p rejects call and multiple-value forms while native CPS lowering is disabled."
   (let ((safe-ast (cl-cc:make-ast-call :func 'f :args (list (cl-cc:make-ast-int :value 1))))
         (mv-ast (cl-cc::make-ast-multiple-value-prog1
                  :first (cl-cc:make-ast-int :value 1)
@@ -174,6 +174,6 @@
         (unsafe-ast (cl-cc/ast::make-ast-make-instance
                      :class (cl-cc:make-ast-quote :value 'point)
                      :initargs nil)))
-    (assert-true (cl-cc::%cps-native-compile-safe-ast-p safe-ast))
-    (assert-true (cl-cc::%cps-native-compile-safe-ast-p mv-ast))
+    (assert-false (cl-cc::%cps-native-compile-safe-ast-p safe-ast))
+    (assert-false (cl-cc::%cps-native-compile-safe-ast-p mv-ast))
     (assert-false (cl-cc::%cps-native-compile-safe-ast-p unsafe-ast))))

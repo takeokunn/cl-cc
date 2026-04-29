@@ -28,7 +28,7 @@
 
 ;;; Prog/With-Slots/Nth-Value Macro Tests
 
-(deftest-compile-each compile-prog-and-friends
+(deftest-compile compile-prog-and-friends
   "prog/prog*/with-slots/nth-value macros work in compiled code."
   :cases (("prog-loop"        10  "(prog ((x 0)) loop (setq x (+ x 1)) (when (= x 10) (return x)) (go loop))")
           ("prog*-sequential"  3  "(prog* ((x 1) (y (+ x 2))) (return y))")
@@ -41,7 +41,7 @@
 
 ;;; ANSI CL FR-400/FR-500 Tests (mismatch, make-string, float literals, string-not-equal)
 
-(deftest-compile-each stdlib-mismatch-make-string-float
+(deftest-compile stdlib-mismatch-make-string-float
   "mismatch, make-string, and float properties return the expected equal-comparable values."
   ;; float-precision and float-radix removed: VM functions not implemented
   :cases (("mismatch-index"     2      "(mismatch (list 1 2 3) (list 1 2 4))")
@@ -69,7 +69,7 @@
   (form)
   (assert-true (run-string form)))
 
-(deftest-compile-each compile-list-tree-mutators
+(deftest-compile compile-list-tree-mutators
   "ldiff, get-properties, nunion, nsubst, and nstring-upcase return expected values."
   :cases (("ldiff"          '(1 2)           "(let* ((x '(1 2 3 4)) (tail (cddr x))) (ldiff x tail))")
           ("get-properties"  :b              "(get-properties '(:a 1 :b 2 :c 3) '(:b :c))")
@@ -78,7 +78,7 @@
           ("nstring-upcase"  "HELLO"         "(nstring-upcase \"hello\")"))
   )
 
-(deftest-compile-each compile-array-predicates
+(deftest-compile compile-array-predicates
   "array-element-type returns T; array-in-bounds-p checks index validity."
   :cases (("element-type"      t   "(array-element-type (make-array 3))")
           ("in-bounds-valid"   t   "(array-in-bounds-p (make-array 5) 3)")
@@ -97,13 +97,13 @@
   "lisp-implementation-type returns cl-cc."
   (assert-equal "cl-cc" (run-string "(lisp-implementation-type)")))
 
-(deftest-compile-each compile-last-butlast-count
+(deftest-compile compile-last-butlast-count
   "last/butlast with count return the correct sublist."
   :cases (("last"    '(4 5)   "(last '(1 2 3 4 5) 2)")
           ("butlast" '(1 2 3) "(butlast '(1 2 3 4 5) 2)"))
   )
 
-(deftest-compile-each compile-array-integer-results
+(deftest-compile compile-array-integer-results
   "make-array, setf-bit, and search return integer results."
   :cases (("initial-contents" 20 "(let ((a (make-array 3 :initial-contents '(10 20 30)))) (aref a 1))")
           ("initial-element"   7 "(let ((a (make-array 4 :initial-element 7))) (aref a 3))")
@@ -140,7 +140,7 @@
 
 ;;; ─── FR-617/FR-608: stream read forms ────────────────────────────────────────
 
-(deftest-compile-each compile-stream-read-forms
+(deftest-compile compile-stream-read-forms
   "read-from-string returns (val pos); with-input-from-string :start skips prefix."
   :cases (("read-from-string-pos"
            '(42 3)
@@ -155,7 +155,7 @@
 
 ;;; ─── FR-637: string comparison with keyword bounds ───────────────────────────
 
-(deftest-compile-each compile-string-comparison-bounds
+(deftest-compile compile-string-comparison-bounds
   "String comparison functions accept :start/:end bounds."
   :cases (("equal-substring" t   "(string= \"hello world\" \"world\" :start1 6)")
           ("less-equal-nil"  nil "(string< \"ab\" \"abcde\" :start2 0 :end2 2)"))
@@ -163,13 +163,13 @@
 
 ;;; ─── FR-397: compilation local scope forms ───────────────────────────────────
 
-(deftest-compile-each compile-meta-forms
+(deftest-compile compile-meta-forms
   "locally evaluates its body and returns the numeric result."
   :cases (("locally" 30 "(locally (+ 10 20))")))
 
 ;;; ─── FR-566: pathname host bridges ───────────────────────────────────────────
 
-(deftest-compile-each compile-pathname-accessors
+(deftest-compile compile-pathname-accessors
   "pathname-name and pathname-type extract the basename and extension."
   :cases (("name-string"    "foo"  "(pathname-name \"/tmp/foo.lisp\")")
           ("type-string"    "lisp" "(pathname-type \"/tmp/foo.lisp\")")
@@ -217,10 +217,4 @@
                  (close s :abort t))")))
     (assert-true r)))
 
-;;; ─── FR-358: Readtable stubs ─────────────────────────────────────────────────
-
-;;; ─── FR-579: string-to-octets / octets-to-string ─────────────────────────────
-
-;;; REMOVED: compile-string-octets — string-to-octets/octets-to-string not implemented
-
-;;; Extended stdlib/keyword integration tests moved to compiler-tests-extended-stdlib.lisp.
+;;; Extended stdlib/keyword integration tests are in compiler-tests-extended-stdlib.lisp.

@@ -1,5 +1,9 @@
 (in-package :cl-cc/expand)
 
+;; Defined in expander-data.lisp, but declare it here too so compile-file sees
+;; the intended dynamic binding even when this file is compiled first.
+(defvar *macro-eval-fn*)
+
 ;;; CL-CC Macro System
 ;;; A complete macro system implementation with:
 ;;; - Full destructuring-bind for lambda lists
@@ -69,7 +73,7 @@ Gensym-hygienic expansions are never cached."
 
 (defun register-macro (name expander)
   "Register NAME as a macro with EXPANDER in the global environment.
-EXPANDER may be either a legacy host function or a descriptor consumed by
+EXPANDER may be either a host function or a descriptor consumed by
 `invoke-registered-expander'."
   (setf (gethash name (macro-env-table *macro-environment*)) expander)
   (%reset-macroexpansion-caches)
@@ -77,7 +81,7 @@ EXPANDER may be either a legacy host function or a descriptor consumed by
 
 (defun register-compiler-macro (name expander)
   "Register NAME as a compiler macro expander in the global environment.
-EXPANDER may be either a legacy host function or a descriptor consumed by
+EXPANDER may be either a host function or a descriptor consumed by
 `invoke-registered-expander'."
   (setf (gethash name *compiler-macro-table*) expander)
   (%reset-macroexpansion-caches)
@@ -129,20 +133,18 @@ EXPANDER may be either a legacy host function or a descriptor consumed by
 
 (defun invoke-registered-expander (expander form env)
   "Invoke EXPANDER on FORM and ENV.
-Supports both legacy host functions and descriptor-backed expanders."
+Supports both host functions and descriptor-backed expanders."
   (cond
     ((functionp expander) (funcall expander form env))
     ((%expander-descriptor-p expander) (%invoke-expander-descriptor expander form env))
     (t (error "Unsupported expander representation: ~S" expander))))
 
-(defun lookup-macro (name &optional env)
+(defun lookup-macro (name)
   "Look up macro NAME in the global macro environment."
-  (declare (ignore env))
   (gethash name (macro-env-table *macro-environment*)))
 
-(defun lookup-compiler-macro (name &optional env)
+(defun lookup-compiler-macro (name)
   "Look up compiler macro NAME in the global compiler-macro environment."
-  (declare (ignore env))
   (gethash name *compiler-macro-table*))
 
 ;;; Macro Expansion
@@ -163,7 +165,7 @@ Supports both legacy host functions and descriptor-backed expanders."
       (when hitp
         (return-from our-macroexpand-1 (values (cdr cached) (car cached))))))
   (if (and (consp form) (symbolp (car form)))
-      (let ((macro-fn (lookup-macro (car form) env)))
+      (let ((macro-fn (lookup-macro (car form))))
         (if macro-fn
             (let ((expanded (invoke-registered-expander macro-fn form env)))
               (if (equal expanded form)

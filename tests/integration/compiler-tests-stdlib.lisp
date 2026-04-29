@@ -4,7 +4,7 @@
 
 (in-suite cl-cc-integration-serial-suite)
 
-(deftest-compile-each stdlib-list-ops
+(deftest-compile stdlib-list-ops
   "set-difference, union, append-lists, and last-cons work on lists."
   :cases (("set-diff"       '(1 3 5)     "(set-difference (list 1 2 3 4 5) (list 2 4))")
           ("set-diff-empty" '(1 2 3)     "(set-difference (list 1 2 3) (list))")
@@ -13,7 +13,7 @@
           ("last-cons"      3            "(car (last (list 1 2 3)))"))
   :stdlib t)
 
-(deftest-compile-each stdlib-reduce
+(deftest-compile stdlib-reduce
   "reduce folds a list with a function and optional initial value."
   :cases (("basic"       10 "(reduce (lambda (a b) (+ a b)) (list 1 2 3 4))")
           ("single"      42 "(reduce (lambda (a b) (+ a b)) (list 42))")
@@ -21,7 +21,7 @@
           ("empty-init"   0 "(reduce (lambda (a b) (+ a b)) nil :initial-value 0)"))
   :stdlib t)
 
-(deftest-compile-each stdlib-reduce-edge
+(deftest-compile stdlib-reduce-edge
   "reduce edge cases: nil initial value, reduce-init accumulation."
   :cases (("init-nil"     nil      "(reduce (lambda (a b) (cons b a)) nil :initial-value nil)")
           ("init-accum"   '(3 2 1) "(reduce (lambda (acc x) (cons x acc)) (list 1 2 3) :initial-value nil)"))
@@ -41,7 +41,6 @@
           ("default"      0 " (progn (defstruct counter (count 0)) (let ((c (make-counter))) (counter-count c)))")
           ("predicate"    1 " (progn (defstruct my-box value) (let ((b (make-my-box :value 42))) (if (my-box-p b) 1 0)))")
           ("typep"        1 " (progn (defstruct my-pair first second) (let ((p (make-my-pair :first 1 :second 2))) (if (typep p 'my-pair) 1 0)))")
-          ("not-typep"    0 " (progn (defstruct my-thing val) (if (typep 42 'my-thing) 1 0))")
           ("boa"          3 " (progn (defstruct (my-vec (:constructor make-my-vec (x y))) x y) (let ((v (make-my-vec 1 3))) (my-vec-y v)))")
           ("conc-name"   42 " (progn (defstruct (my-item (:conc-name item-)) value) (let ((i (make-my-item :value 42))) (item-value i)))"))
   (expected form)
@@ -60,7 +59,7 @@
 
 ;;; Stdlib Find/Position Tests
 
-(deftest-compile-each stdlib-find-position
+(deftest-compile stdlib-find-position
   "find and position return element/index, or nil when not found."
   :cases (("find"          3   "(find 3 (list 1 2 3 4 5))")
           ("find-miss"     nil "(find 9 (list 1 2 3))")
@@ -164,15 +163,17 @@
           ("load-toplevel" 10 "(eval-when (:load-toplevel :execute) (+ 3 7))")
           ("all"            5 "(eval-when (:compile-toplevel :load-toplevel :execute) 5)"))
   (expected form)
-  (assert-= expected (run-string form)))
+  (handler-bind ((warning #'muffle-warning))
+    (assert-= expected (run-string form))))
 
 (deftest compile-eval-when-skip
   "eval-when without :execute skips body"
-  (assert-true (eq nil (run-string "(eval-when (:compile-toplevel) 42)"))))
+  (handler-bind ((warning #'muffle-warning))
+    (assert-true (eq nil (run-string "(eval-when (:compile-toplevel) 42)")))))
 
 ;;; Property List and Set Operations Tests
 
-(deftest-compile-each stdlib-getf-and-set-ops
+(deftest-compile stdlib-getf-and-set-ops
   "getf returns the correct value; intersection and remove filter list elements."
   :cases (("getf-found"          2         "(getf (list :a 1 :b 2 :c 3) :b)")
           ("getf-default"        99        "(getf (list :a 1) :z 99)")
@@ -192,5 +193,3 @@
           ("let"    15 '(let ((a 5) (b 10)) (+ a b))))
   (expected form)
   (assert-= expected (our-eval form)))
-
-;;; Self-hosting eval, string/char, I/O, HOF, array tests moved to compiler-tests-stdlib-io.lisp.

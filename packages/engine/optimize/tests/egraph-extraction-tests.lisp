@@ -7,7 +7,7 @@
 ;;; egraph-tests.lisp (loaded first).
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-coverage-unstable-unit-suite)
 
 ;;; ─── Saturation ──────────────────────────────────────────────────────────
 

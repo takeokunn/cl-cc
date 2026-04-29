@@ -121,7 +121,8 @@ representations may use hash tables with structured metadata."
   "Return the registered method objects for GF."
   (let ((methods-ht (and (hash-table-p gf) (gethash :__methods__ gf))))
     (when methods-ht
-      (hash-table-values methods-ht))))
+      (loop for value in (hash-table-values methods-ht)
+            append (%vm-method-value->list value)))))
 
 (defun generic-function-method-combination (gf)
   "Return the method-combination metadata for GF, defaulting to STANDARD."
@@ -199,6 +200,9 @@ representations may use hash tables with structured metadata."
 (dolist (entry `((%package-symbols . ,#'%package-symbols)
                  (%package-external-symbols . ,#'%package-external-symbols)
                  (%all-symbols . ,#'%all-symbols)
+                 (compile-file-pathname . ,#'compile-file-pathname)
+                 (pathname-name . ,#'pathname-name)
+                 (pathname-type . ,#'pathname-type)
                  (%class-slot-definitions . ,#'%class-slot-definitions)
                  (slot-definition-name . ,#'slot-definition-name)
                  (slot-definition-initform . ,#'slot-definition-initform)

@@ -213,6 +213,13 @@
 (defun slot-def-to-sexp (slot)
   "Convert an ast-slot-def back to a slot specification s-expression."
   (let ((opts nil))
+    (when (and (ast-slot-allocation slot)
+               (not (eq (ast-slot-allocation slot) :instance)))
+      (push (ast-slot-allocation slot) opts)
+      (push :allocation opts))
+    (when (ast-slot-type slot)
+      (push (ast-slot-type slot) opts)
+      (push :type opts))
     (when (ast-slot-accessor slot) (push (ast-slot-accessor slot) opts) (push :accessor opts))
     (when (ast-slot-writer slot) (push (ast-slot-writer slot) opts) (push :writer opts))
     (when (ast-slot-reader slot) (push (ast-slot-reader slot) opts) (push :reader opts))

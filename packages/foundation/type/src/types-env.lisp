@@ -147,4 +147,4 @@ DICT-BINDINGS: alist of ((class-name . type-key) . method-alist) for typeclass d
 (defmethod type-to-string ((ty type-error))
   (if (string= (type-error-message ty) "unknown")
       "?"
-      (type-error-message ty)))
+      (format nil "<error: ~A>" (type-error-message ty))))

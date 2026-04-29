@@ -90,7 +90,7 @@
          (tok (cl-cc/parse::ts-expect ts :T-INT)))
     (assert-true (not (null tok)))
     (assert-= 42 (cl-cc/parse::lexer-token-value tok))
-    ;; Stream is now empty
+    ;; Stream is empty after consuming the token
     (assert-null (cl-cc/parse::ts-peek ts)))
   ;; Mismatch adds a diagnostic and returns nil without consuming
   (let* ((ts (make-grammar-ts '(:T-INT 42)))

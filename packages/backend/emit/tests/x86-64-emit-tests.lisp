@@ -114,7 +114,7 @@
     (assert-true (search "else" asm))))
 
 (deftest x86-emit-terminal-instruction-cases
-  "vm-halt emits mov+ret; vm-print calls rt-print with rdi; unsupported emits nothing."
+  "vm-halt and vm-ret emit mov+ret; vm-print calls rt-print with rdi."
   (let* ((tgt (%make-x86-target))
          (asm (%x86-emit tgt (make-vm-halt :reg :r0))))
     (assert-true (search "mov rax" asm))
@@ -125,7 +125,8 @@
     (assert-true (search "rdi" asm)))
   (let* ((tgt (%make-x86-target))
          (asm (%x86-emit tgt (make-vm-ret :reg :r0))))
-    (assert-equal "" asm)))
+    (assert-true (search "mov rax" asm))
+    (assert-true (search "ret" asm))))
 
 ;;; ─── Spill code emission ──────────────────────────────────────────────────────
 

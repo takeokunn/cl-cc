@@ -145,15 +145,27 @@ the continuation form."
 
 (defmethod cps-transform-ast ((node ast-apply) k)
   "Transform apply: CPS-thread function and all args, then deliver via host APPLY."
-  (let ((f-v      (gensym "FUNC"))
-        (arg-vars (loop repeat (length (ast-apply-args node)) collect (gensym "ARG"))))
-    (cps-transform-ast
-     (ast-apply-func node)
-     (%cps-lambda
-      (list f-v)
-      (%cps-thread-args (ast-apply-args node) arg-vars
-                        (lambda ()
-                          (%cps-funcall k (cons 'apply (cons f-v arg-vars)))))))))
+  (let ((func-node (ast-apply-func node))
+        (arg-vars  (loop repeat (length (ast-apply-args node)) collect (gensym "ARG"))))
+    (labels ((emit-apply (func-form)
+               (%cps-thread-args (ast-apply-args node) arg-vars
+                                 (lambda ()
+                                   (%cps-funcall k (cons 'apply (cons func-form arg-vars)))))))
+      (cond
+        ((typep func-node 'ast-function)
+         (emit-apply (list 'function (ast-function-name func-node))))
+        ((typep func-node 'ast-var)
+         (emit-apply (list 'function (ast-var-name func-node))))
+        ((and (typep func-node 'ast-quote)
+              (symbolp (ast-quote-value func-node)))
+         (emit-apply (list 'function (ast-quote-value func-node))))
+        (t
+         (let ((f-v (gensym "FUNC")))
+           (cps-transform-ast
+            func-node
+            (%cps-lambda
+             (list f-v)
+             (emit-apply f-v)))))))))
 
 (defmethod cps-transform-ast ((node ast-call) k)
   "Transform a general function call: CPS-thread each argument in order,

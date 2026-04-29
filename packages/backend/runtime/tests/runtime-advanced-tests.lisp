@@ -97,11 +97,8 @@
 
 (deftest rt-signal-conditions
   "rt-signal signals a condition (not an error); rt-warn-fn issues a warning."
-  (let ((got nil))
-    (handler-bind ((simple-condition (lambda (c) (setf got c))))
-      (cl-cc/runtime:rt-signal
-        (make-condition 'simple-condition :format-control "test")))
-    (assert-true got))
+  (assert-signals simple-condition
+    (cl-cc/runtime:rt-signal (make-condition 'simple-condition :format-control "test")))
   (assert-signals warning (cl-cc/runtime:rt-warn-fn "a warning")))
 
 ;;; ─── Misc ──────────────────────────────────────────────────────────────────
@@ -170,7 +167,7 @@
     (assert-equal #\h (cl-cc/runtime:rt-read-char s)))
   (let ((s (cl-cc/runtime:rt-make-string-stream "" :direction :output)))
     (cl-cc/runtime:rt-write-string "world" s)
-    (assert-equal "world" (cl-cc/runtime:rt-get-string-from-stream s)))
+    (assert-equal "world" (cl-cc/runtime:rt-get-output-stream-string s)))
   (let ((s (cl-cc/runtime:rt-make-string-output-stream)))
     (cl-cc/runtime:rt-stream-write-string s "test")
     (assert-equal "test" (cl-cc/runtime:rt-get-output-stream-string s))))

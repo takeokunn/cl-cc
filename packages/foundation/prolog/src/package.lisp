@@ -10,8 +10,7 @@
 ;;;; Bootstrap symbols (binop, const, var, cmp, integer-type, boolean-type,
 ;;;; env-lookup, make-cst-token, lexer-token-p/type/value, our-eval) are
 ;;;; provided by :cl-cc/bootstrap (cl-cc-bootstrap.asd), which loads before
-;;;; this package. The previous compile-time intern-into-:cl-cc hack in this
-;;;; file has been removed.
+;;;; this package.
 
 (defpackage :cl-cc/prolog
   (:use :cl :cl-cc/bootstrap)

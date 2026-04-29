@@ -58,7 +58,7 @@
          (const   (make-vm-const :dst :r2 :value 'f))
          (move    (make-vm-move :dst :r3 :src :r2))
          (known   (cl-cc/optimize::opt-known-callee-labels (list closure regfun const move))))
-    (assert-string= "f" (cl-cc/optimize::opt-known-callee-label reg known))))
+    (assert-string= "f" (gethash reg known))))
 
 (deftest-each optimizer-pass-pipeline-forms
   "optimize-instructions folds (+ 1 2) to nothing for both keyword-list and string pipeline forms."
@@ -166,4 +166,3 @@
                                    (and (eq :r5 (cl-cc/vm::vm-dst i))
                                         (eq :r3 (cl-cc/vm::vm-src i))))))
                        out))))
-

@@ -66,9 +66,10 @@
     ;; Bind the target var so SBCL doesn't complain about an unbound special
     (let ((cl-cc-test-setq-var nil))
       (declare (special cl-cc-test-setq-var))
-      (let ((result (run-cps-ast setq-ast)))
-        (assert-= 55 result)
-        (assert-= 55 cl-cc-test-setq-var)))))
+      (handler-bind ((warning #'muffle-warning))
+        (let ((result (run-cps-ast setq-ast)))
+          (assert-= 55 result)
+          (assert-= 55 cl-cc-test-setq-var))))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; AST CPS — structural ("is it a CPS lambda?")
@@ -131,4 +132,3 @@
      :body (list (cl-cc:make-ast-int :value 1)))))
   (ast)
   (assert-true (is-cps-lambda (cl-cc:cps-transform-ast* ast))))
-

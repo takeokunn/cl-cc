@@ -4,16 +4,10 @@
 ;;; Suite Definition
 ;;; ------------------------------------------------------------
 
-(defun %ensure-registry-name-is-available (registry name kind)
-  "Signal an error when NAME is already registered in REGISTRY as KIND."
-  (when (persist-lookup registry name)
-    (error "Duplicate ~A name: ~S is already registered" kind name)))
-
 (defmacro defsuite (name &key description parent (parallel t))
   "Define a test suite. Stores metadata in *suite-registry*.
 Use :parallel NIL for suites that must always run sequentially."
   `(progn
-     (%ensure-registry-name-is-available *suite-registry* ',name :suite)
      (setf *suite-registry*
            (persist-assoc *suite-registry* ',name
                           (list :name ',name
@@ -63,7 +57,6 @@ Returns (values docstring timeout depends-on tags body-forms)."
   (multiple-value-bind (docstring timeout depends-on tags body-forms)
       (%parse-deftest-body body)
     `(progn
-       (%ensure-registry-name-is-available *test-registry* ',name :test)
        (setf *test-registry*
              (persist-assoc *test-registry* ',name
                             (list :name ',name
@@ -72,7 +65,8 @@ Returns (values docstring timeout depends-on tags body-forms)."
                                   :timeout ,timeout
                                   :depends-on ',depends-on
                                   :tags ,tags
-                                  :docstring ,docstring)))
+                                  :docstring ,docstring
+                                  :source-file (or *compile-file-pathname* *load-pathname*))))
        ',name)))
 
 ;;; ------------------------------------------------------------

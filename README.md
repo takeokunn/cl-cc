@@ -8,16 +8,32 @@ cl-cc compiles ANSI Common Lisp to a register-based bytecode VM, and from there 
 
 ```bash
 nix develop
-nix run .#test     # run the canonical fast test plan (excludes selfhost-slow-suite)
-cl-cc repl         # interactive REPL
+nix run .#test       # fast feedback plan (selfhost-slow excluded)
+nix run .#test-full  # canonical full plan (fast + slow selfhost + e2e)
+nix run .#coverage   # coverage run with sb-cover + HTML report
+cl-cc repl           # interactive REPL
 cl-cc run file.lisp
 cl-cc eval "(+ 1 2)"
 cl-cc compile file.lisp -o out --arch x86-64
 ```
 
-The default `nix run .#test` path is optimized for feedback speed and excludes
-the heavyweight `selfhost-slow-suite`. Use the lower-level test runner when you
-need to exercise the full slow self-hosting regression path explicitly.
+### Migration: `nix run .#test-all` → `nix run .#test-full`
+
+The former `nix run .#test-all` app has been removed and its full canonical
+plan (fast + slow selfhost + e2e) is now `nix run .#test-full`. If you
+scripted `nix run .#test-all` in CI or shell aliases, swap it for
+`nix run .#test-full`.
+
+`nix run .#test` maps to `cl-cc/test:run-fast-tests` and is optimized for
+feedback speed (it excludes `selfhost-slow-suite`).
+
+`nix run .#test-full` maps to `cl-cc/test:run-tests` and executes the full
+canonical plan, including `selfhost-slow-suite` (loaded on demand via
+`:cl-cc-test/slow`).
+
+`nix run .#coverage` runs a broad coverage plan with sb-cover instrumentation
+and generates HTML output.
+Set `CLCC_TEST_TIMEOUT` to override the default per-test timeout in seconds.
 Set `CLCC_SUITE_TIMEOUT` to override the whole-suite timeout in seconds when you
 need a stricter or looser upper bound for long-running local investigations.
 
@@ -388,8 +404,14 @@ nix run .#selfhost
 # Format the repo (nixfmt + deadnix + statix + prettier) via treefmt
 nix fmt
 
-# CI-equivalent check (includes flake evaluation + the test plan + selfhost)
+# CI-equivalent check (flake evaluation + build + fast test plan)
 nix flake check
+
+# Full canonical suite, including slow selfhost + e2e
+nix run .#test-full
+
+# Coverage gate (production-only metric with report generation)
+nix run .#coverage
 
 # Clear FASL cache if tests misbehave
 nix run .#clean

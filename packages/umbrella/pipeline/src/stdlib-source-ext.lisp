@@ -16,7 +16,7 @@
 ;;;;   - Sequence utilities: concatenate variants
 ;;;;
 ;;;; CLOS protocol, condition hierarchy, and reader/printer/pathname control
-;;;; variables were moved to stdlib-source-clos.lisp.
+;;;; variables are in stdlib-source-clos.lisp.
 ;;;;
 ;;;; Load order: after compile/stdlib-source.lisp.
 (in-package :cl-cc)
@@ -170,8 +170,6 @@
                  (values (list 'make-instance (list 'quote (gethash :__name__ class))) nil)
                  (values nil nil)))
            (values nil nil)))"
-
-    ;; FR-624: subtypep — removed stub; now delegated to host CL via vm-host-bridge
 
     ;; ── FR-427: make-condition ──────────────────────────────────────────────
     "(defun make-condition (type &rest initargs)

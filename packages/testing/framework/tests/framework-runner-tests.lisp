@@ -1,6 +1,5 @@
 (in-package :cl-cc/test)
 
-;;; Runner regression tests — extracted from framework-advanced.lisp.
 ;;; These test the orchestration layer (%run-single-test, %run-tests-sequential,
 ;;; %effective-worker-count, run-suite, %suite-parallel-p, %test-parallel-safe-p).
 
@@ -71,25 +70,40 @@
 
 (deftest effective-test-timeout-cases
   "%effective-test-timeout normalizes nil, invalid values, and positive integers."
-(assert-= (%default-test-timeout) (%effective-test-timeout (list :timeout :bogus)))
+  (assert-= (%default-test-timeout) (%effective-test-timeout (list :timeout :bogus)))
   (assert-equal 7 (%effective-test-timeout (list :timeout 7)))
   (assert-equal (%default-test-timeout)
                 (%effective-test-timeout (list :timeout nil))))
 
+(deftest default-test-timeout-cases
+  "%default-test-timeout honors CLCC_TEST_TIMEOUT and falls back to 10 seconds."
+  (let ((old (uiop:getenv "CLCC_TEST_TIMEOUT")))
+    (unwind-protect
+         (progn
+           (sb-posix:unsetenv "CLCC_TEST_TIMEOUT")
+           (assert-= 10 (%default-test-timeout))
+           (sb-posix:setenv "CLCC_TEST_TIMEOUT" "14" 1)
+           (assert-= 14 (%default-test-timeout))
+           (sb-posix:setenv "CLCC_TEST_TIMEOUT" "bogus" 1)
+           (assert-= 10 (%default-test-timeout)))
+      (if old
+          (sb-posix:setenv "CLCC_TEST_TIMEOUT" old 1)
+          (sb-posix:unsetenv "CLCC_TEST_TIMEOUT")))))
+
 (deftest default-suite-timeout-cases
-  "%default-suite-timeout normalizes invalid input and defaults to 1800 seconds."
+  "%default-suite-timeout normalizes invalid input and defaults to 600 seconds."
   (let ((old (uiop:getenv "CLCC_SUITE_TIMEOUT")))
     (unwind-protect
          (progn
-           #+sbcl (sb-posix:unsetenv "CLCC_SUITE_TIMEOUT")
-           (assert-= 1800 (%default-suite-timeout))
-           #+sbcl (sb-posix:setenv "CLCC_SUITE_TIMEOUT" "90" 1)
+           (sb-posix:unsetenv "CLCC_SUITE_TIMEOUT")
+           (assert-= 600 (%default-suite-timeout))
+           (sb-posix:setenv "CLCC_SUITE_TIMEOUT" "90" 1)
            (assert-= 90 (%default-suite-timeout))
-           #+sbcl (sb-posix:setenv "CLCC_SUITE_TIMEOUT" "bogus" 1)
-           (assert-= 1800 (%default-suite-timeout)))
+           (sb-posix:setenv "CLCC_SUITE_TIMEOUT" "bogus" 1)
+           (assert-= 600 (%default-suite-timeout)))
       (if old
-          #+sbcl (sb-posix:setenv "CLCC_SUITE_TIMEOUT" old 1)
-          #+sbcl (sb-posix:unsetenv "CLCC_SUITE_TIMEOUT")))))
+          (sb-posix:setenv "CLCC_SUITE_TIMEOUT" old 1)
+          (sb-posix:unsetenv "CLCC_SUITE_TIMEOUT")))))
 
   (let* ((test-plist (list :name 'skip-demo
                            :fn (lambda () (error 'skip-condition :reason "not today"))
@@ -159,32 +173,26 @@
                   (mapcar (lambda (result) (getf result :name)) results))
     (assert-true (every (lambda (result) (eq :pass (getf result :status))) results))))
 
-(deftest duplicate-test-names-signal-an-error
-  "deftest rejects duplicate test names instead of silently overwriting registry entries."
+(deftest duplicate-test-names-overwrite-registry-entry
+  "deftest overwrites an existing test registry entry when the same name is reloaded."
   (let ((*test-registry* (persist-empty))
         (*current-suite* 'cl-cc-unit-suite)
         (test-name (gensym "DUPLICATE-TEST-NAME-")))
     (eval `(deftest ,test-name t))
-    (handler-case
-        (progn
-          (eval `(deftest ,test-name nil))
-          (assert-false t))
-      (error (e)
-        (assert-true (search "Duplicate TEST name"
-                             (string-upcase (princ-to-string e))))))))
+    (eval `(deftest ,test-name nil))
+    (let ((entry (persist-lookup *test-registry* test-name)))
+      (assert-true entry)
+      (assert-eq test-name (getf entry :name)))))
 
-(deftest duplicate-suite-names-signal-an-error
-  "defsuite rejects duplicate suite names instead of silently overwriting registry entries."
+(deftest duplicate-suite-names-overwrite-registry-entry
+  "defsuite overwrites an existing suite registry entry when the same name is reloaded."
   (let ((*suite-registry* (persist-empty))
         (suite-name (gensym "DUPLICATE-SUITE-NAME-")))
     (eval `(defsuite ,suite-name :description "first"))
-    (handler-case
-        (progn
-          (eval `(defsuite ,suite-name :description "second"))
-          (assert-false t))
-      (error (e)
-        (assert-true (search "Duplicate SUITE name"
-                             (string-upcase (princ-to-string e))))))))
+    (eval `(defsuite ,suite-name :description "second"))
+    (let ((entry (persist-lookup *suite-registry* suite-name)))
+      (assert-true entry)
+      (assert-string= "second" (getf entry :description)))))
 
 (deftest resolve-suite-returns-symbol-and-signals-for-missing-suite
   "%resolve-suite returns existing suites and errors on missing ones."
@@ -271,10 +279,9 @@
   "%number-tests on an empty list returns nil."
   (assert-null (%number-tests nil)))
 
-(deftest cpu-count-command-timeout-yields-nil
-  "%parse-command-cpu-count returns NIL when the command runner times out."
-  (with-replaced-function (uiop:run-program
-                           (lambda (&rest args)
-                             (declare (ignore args))
-                             (error 'sb-ext:timeout)))
+(deftest cpu-count-command-failure-yields-nil
+  "%parse-command-cpu-count returns NIL when the command runner fails."
+  (let ((*run-command-output-fn* (lambda (&rest args)
+                                   (declare (ignore args))
+                                   (error "cpu-count failed"))))
     (assert-null (%parse-command-cpu-count '("fake-cpu-count")))))
