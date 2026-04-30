@@ -25,12 +25,15 @@
   (ty)
   (assert-null (type-free-vars ty)))
 
-(deftest free-vars-cases
-  "type-free-vars: single variable returns itself; function type returns both param and return vars."
+(deftest free-vars-single-var-returns-itself
+  "type-free-vars on a single type-var returns a singleton list containing that var."
   (let* ((v  (fresh-type-var))
          (fv (type-free-vars v)))
     (assert-= 1 (length fv))
-    (assert-true (type-var-equal-p (first fv) v)))
+    (assert-true (type-var-equal-p (first fv) v))))
+
+(deftest free-vars-function-type-returns-param-and-return-vars
+  "type-free-vars on a function type with distinct param and return vars returns 2 free vars."
   (let* ((v1 (fresh-type-var))
          (v2 (fresh-type-var))
          (fn (make-type-arrow-raw :params (list v1) :return v2))
@@ -39,12 +42,18 @@
 
 ;;; Substitution Tests
 
-(deftest substitution-cases
-  "zonk: primitive unchanged; bound var replaced; unbound var identity."
-  (assert-eq type-int (zonk type-int (make-substitution)))
+(deftest substitution-primitive-unchanged
+  "zonk leaves a primitive type unchanged under any substitution."
+  (assert-eq type-int (zonk type-int (make-substitution))))
+
+(deftest substitution-bound-var-replaced
+  "zonk replaces a type-var with its bound value in the substitution."
   (let* ((v (fresh-type-var))
          (result (zonk v (subst-extend v type-int (make-substitution)))))
-    (assert-type-equal result type-int))
+    (assert-type-equal result type-int)))
+
+(deftest substitution-unbound-var-is-identity
+  "zonk returns the original type-var when it has no binding in the substitution."
   (let* ((v (fresh-type-var))
          (result (zonk v (make-substitution))))
     (assert-true (type-var-equal-p result v))))
@@ -78,15 +87,18 @@
 
 ;;; Phase 3: Bidirectional Type Checking Tests
 
-(deftest bidirectional-checking-cases
-  "Bidirectional checking: synthesize infers type-int; check succeeds; check-body verifies last form."
+(deftest bidirectional-checking-synthesize-and-check-integer
+  "synthesize infers type-int for 42; check against type-int and +type-unknown+ both return nil subst."
   (let* ((env (type-env-empty))
          (ast (make-ast-int :value 42)))
     (multiple-value-bind (ty _subst) (synthesize ast env)
       (declare (ignore _subst))
       (assert-true (type-equal-p ty type-int)))
     (assert-true (null (check ast type-int env)))
-    (assert-true (null (check ast cl-cc/type::+type-unknown+ env))))
+    (assert-true (null (check ast cl-cc/type::+type-unknown+ env)))))
+
+(deftest bidirectional-checking-check-body-verifies-last-form
+  "check-body on [1, 2] against type-int returns nil (last form is int)."
   (let* ((env (type-env-empty))
          (ast1 (make-ast-int :value 1))
          (ast2 (make-ast-int :value 2)))

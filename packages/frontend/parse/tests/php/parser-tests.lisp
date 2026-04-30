@@ -21,23 +21,32 @@
 
 ;;; ─── :return handler → ast-return-from ───────────────────────────────────
 
-(deftest php-parser-return-cases
-  "return expr; and return; both lower to ast-return-from."
+(deftest php-parser-return-with-value-lowering
+  "return expr; lowers to ast-return-from with an ast-int value."
   (let ((ast (%php-first "<?php return 1;")))
     (assert-true (typep ast 'cl-cc:ast-return-from))
-    (assert-true (typep (cl-cc::ast-return-from-value ast) 'cl-cc:ast-int)))
+    (assert-true (typep (cl-cc::ast-return-from-value ast) 'cl-cc:ast-int))))
+
+(deftest php-parser-bare-return-has-nil-name
+  "return; (without value) lowers to ast-return-from with nil name slot."
   (let ((ast (%php-first "<?php return;")))
     (assert-true (typep ast 'cl-cc:ast-return-from))
     (assert-null (cl-cc::ast-return-from-name ast))))
 
 ;;; ─── :if handler → ast-if ────────────────────────────────────────────────
 
-(deftest php-parser-if-cases
-  "if/$cond generates ast-if; else branch is ast-progn or nil-quote."
-  (assert-true (typep (%php-first "<?php if ($x) { echo 1; }") 'cl-cc:ast-if))
+(deftest php-parser-if-produces-ast-if
+  "if ($cond) { ... } lowers to ast-if."
+  (assert-true (typep (%php-first "<?php if ($x) { echo 1; }") 'cl-cc:ast-if)))
+
+(deftest php-parser-if-else-branch-is-ast-progn
+  "if-else lowers to ast-if where the else slot is ast-progn."
   (let ((ast (%php-first "<?php if ($x) { echo 1; } else { echo 2; }")))
     (assert-true (ast-if-p ast))
-    (assert-true (typep (cl-cc::ast-if-else ast) 'cl-cc:ast-progn)))
+    (assert-true (typep (cl-cc::ast-if-else ast) 'cl-cc:ast-progn))))
+
+(deftest php-parser-if-no-else-branch-is-nil-quote
+  "if without else lowers to ast-if where the else slot is ast-quote (nil)."
   (let ((ast (%php-first "<?php if ($x) { echo 1; }")))
     (assert-true (ast-if-p ast))
     (assert-true (typep (cl-cc::ast-if-else ast) 'cl-cc:ast-quote))))
@@ -58,19 +67,28 @@
 
 ;;; ─── :foreach handler → ast-let ──────────────────────────────────────────
 
-(deftest php-parser-foreach-cases
-  "foreach and foreach key=>value both lower to let-based AST."
-  (assert-true (ast-let-p (%php-first "<?php foreach ($items as $item) { echo $item; }")))
+(deftest php-parser-foreach-simple-lowers-to-let
+  "foreach ($arr as $item) lowers to ast-let."
+  (assert-true (ast-let-p (%php-first "<?php foreach ($items as $item) { echo $item; }"))))
+
+(deftest php-parser-foreach-key-value-lowers-to-let
+  "foreach ($arr as $k => $v) lowers to ast-let."
   (assert-true (ast-let-p (%php-first "<?php foreach ($arr as $k => $v) { echo $v; }"))))
 
 ;;; ─── :function handler → ast-defun ───────────────────────────────────────
 
-(deftest php-parser-function-cases
-  "function declarations lower to ast-defun capturing name and params."
-  (assert-true (typep (%php-first "<?php function greet($name) { return $name; }") 'cl-cc:ast-defun))
+(deftest php-parser-function-produces-ast-defun
+  "function declaration lowers to ast-defun."
+  (assert-true (typep (%php-first "<?php function greet($name) { return $name; }") 'cl-cc:ast-defun)))
+
+(deftest php-parser-function-name-and-params-captured
+  "function add($a, $b) captures upcased name ADD and 2 params."
   (let ((ast (%php-first "<?php function add($a, $b) { return $a; }")))
     (assert-equal "ADD" (symbol-name (cl-cc::ast-defun-name ast)))
-    (assert-= 2 (length (cl-cc::ast-defun-params ast))))
+    (assert-= 2 (length (cl-cc::ast-defun-params ast)))))
+
+(deftest php-parser-function-no-params-is-nil
+  "function noop() with no params produces nil params slot."
   (let ((ast (%php-first "<?php function noop() { return 0; }")))
     (assert-true (typep ast 'cl-cc:ast-defun))
     (assert-null (cl-cc::ast-defun-params ast))))

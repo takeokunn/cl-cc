@@ -108,12 +108,16 @@
     (assert-true (search "mov x0" asm))
     (assert-true (search "ret" asm))))
 
-(deftest aarch64-emit-print-and-unsupported-cases
-  "vm-print emits rt-print call; unsupported instructions signal errors."
+(deftest aarch64-emit-print-calls-bl-rt-print
+  "vm-print emits bl rt-print with x0 as the argument register."
+  (let* ((tgt (%make-aarch64-target))
+         (asm (%aarch64-emit tgt (make-vm-print :reg :r0))))
+    (assert-true (search "bl rt-print" asm))
+    (assert-true (search "x0" asm))))
+
+(deftest aarch64-emit-unsupported-instruction-signals-error
+  "Unsupported instructions (vm-ret on AArch64) signal an error."
   (let ((tgt (%make-aarch64-target)))
-    (let ((asm (%aarch64-emit tgt (make-vm-print :reg :r0))))
-      (assert-true (search "bl rt-print" asm))
-      (assert-true (search "x0" asm)))
     (assert-signals error (%aarch64-emit tgt (make-vm-ret :reg :r0)))))
 
 (deftest aarch64-emit-spill-operations

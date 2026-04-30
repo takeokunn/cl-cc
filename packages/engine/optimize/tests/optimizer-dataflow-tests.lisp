@@ -26,28 +26,42 @@
 
 ;;; ─── %sccp-env-equal-p ───────────────────────────────────────────────────
 
-(deftest sccp-env-equal-p-cases
-  "%sccp-env-equal-p: T for empty/same-bindings; NIL for different values or different keys."
+(deftest sccp-env-equal-p-both-empty-returns-true
+  "%sccp-env-equal-p returns T for two empty tables."
   (let ((a (make-hash-table :test #'eq))
         (b (make-hash-table :test #'eq)))
-    (assert-true (cl-cc/optimize::%sccp-env-equal-p a b))  ; both empty
+    (assert-true (cl-cc/optimize::%sccp-env-equal-p a b))))
+
+(deftest sccp-env-equal-p-same-bindings-returns-true
+  "%sccp-env-equal-p returns T when both tables have identical bindings."
+  (let ((a (make-hash-table :test #'eq))
+        (b (make-hash-table :test #'eq)))
     (setf (gethash :r0 a) 5  (gethash :r0 b) 5)
-    (assert-true (cl-cc/optimize::%sccp-env-equal-p a b))) ; same bindings
+    (assert-true (cl-cc/optimize::%sccp-env-equal-p a b))))
+
+(deftest sccp-env-equal-p-different-values-returns-false
+  "%sccp-env-equal-p returns NIL when the same key has different values."
   (let ((a (make-hash-table :test #'eq))
         (b (make-hash-table :test #'eq)))
     (setf (gethash :r0 a) 5  (gethash :r0 b) 6)
-    (assert-false (cl-cc/optimize::%sccp-env-equal-p a b))) ; different values
+    (assert-false (cl-cc/optimize::%sccp-env-equal-p a b))))
+
+(deftest sccp-env-equal-p-different-keys-returns-false
+  "%sccp-env-equal-p returns NIL when the two tables have different keys."
   (let ((a (make-hash-table :test #'eq))
         (b (make-hash-table :test #'eq)))
     (setf (gethash :r0 a) 1)
     (setf (gethash :r1 b) 1)
-    (assert-false (cl-cc/optimize::%sccp-env-equal-p a b)))) ; different keys
+    (assert-false (cl-cc/optimize::%sccp-env-equal-p a b))))
 
 ;;; ─── %sccp-env-merge ─────────────────────────────────────────────────────
 
-(deftest sccp-env-merge-trivial-cases
-  "%sccp-env-merge: empty→empty table; singleton→copy of that env."
-  (assert-= 0 (hash-table-count (cl-cc/optimize::%sccp-env-merge nil)))
+(deftest sccp-env-merge-empty-list-returns-empty-table
+  "%sccp-env-merge on nil returns an empty hash table."
+  (assert-= 0 (hash-table-count (cl-cc/optimize::%sccp-env-merge nil))))
+
+(deftest sccp-env-merge-singleton-list-returns-distinct-copy
+  "%sccp-env-merge on a single-element list returns a copy with identical bindings."
   (let* ((env (make-hash-table :test #'eq)))
     (setf (gethash :r0 env) 7)
     (let ((merged (cl-cc/optimize::%sccp-env-merge (list env))))

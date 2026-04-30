@@ -10,32 +10,44 @@
 
 ;;; ─── Class Type Registry ──────────────────────────────────────────────────
 
-(deftest infer-class-type-registry-cases
-  "Class type registry: register+lookup returns slot list; lookup-slot finds slot type; unknowns return nil."
+(deftest infer-class-type-register-returns-slot-list
+  "register-class-type + lookup-class-type returns the registered slot list."
   (let ((slots (list (cons 'x cl-cc/type:type-int)
                      (cons 'y cl-cc/type:type-string))))
     (cl-cc/type:register-class-type 'test-class-7891 slots)
     (let ((result (cl-cc/type:lookup-class-type 'test-class-7891)))
       (assert-true result)
-      (assert-= 2 (length result))))
+      (assert-= 2 (length result)))))
+
+(deftest infer-class-type-lookup-slot-finds-slot-type
+  "lookup-slot-type finds the registered type for a known slot."
   (cl-cc/type:register-class-type 'test-class-7892
     (list (cons 'name cl-cc/type:type-string)
           (cons 'age cl-cc/type:type-int)))
   (let ((ty (cl-cc/type:lookup-slot-type 'test-class-7892 'age)))
     (assert-true (cl-cc/type:type-primitive-p ty))
-    (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty)))
+    (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty))))
+
+(deftest infer-class-type-lookup-nonexistent-slot-returns-nil
+  "lookup-slot-type returns nil for a slot not in the registered class."
   (cl-cc/type:register-class-type 'test-class-7893
     (list (cons 'x cl-cc/type:type-int)))
-  (assert-null (cl-cc/type:lookup-slot-type 'test-class-7893 'nonexistent))
+  (assert-null (cl-cc/type:lookup-slot-type 'test-class-7893 'nonexistent)))
+
+(deftest infer-class-type-lookup-unknown-class-returns-nil
+  "lookup-class-type returns nil for a class that was never registered."
   (assert-null (cl-cc/type:lookup-class-type 'completely-unknown-class-xyz)))
 
 ;;; ─── Type Alias Registry / Predicate Registry ────────────────────────────
 
-(deftest infer-registry-alias-and-pred-cases
-  "Alias registry roundtrip; custom predicate lookup; unknown predicate returns nil."
+(deftest infer-registry-alias-roundtrip
+  "register-type-alias + lookup returns the registered form; unknown alias returns nil."
   (cl-cc/type:register-type-alias 'test-alias-7891 '(or fixnum string))
   (assert-equal '(or fixnum string) (cl-cc/type:lookup-type-alias 'test-alias-7891))
-  (assert-null (cl-cc/type:lookup-type-alias 'no-such-alias-xyz))
+  (assert-null (cl-cc/type:lookup-type-alias 'no-such-alias-xyz)))
+
+(deftest infer-registry-predicate-roundtrip
+  "register-type-predicate + type-predicate-to-type returns the registered type; unknown returns nil."
   (cl-cc/type:register-type-predicate 'custom-pred-xyz-7891 cl-cc/type:type-int)
   (let ((ty (cl-cc/type::type-predicate-to-type 'custom-pred-xyz-7891)))
     (assert-true ty)

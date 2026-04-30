@@ -19,16 +19,22 @@
 ;;; Frame construction
 ;;; ------------------------------------------------------------
 
-(deftest frame-pool-acquire-cases
-  "Freshly acquired frame is vm-frame-p; all 256 registers are +val-nil+; sp and pc are 0."
+(deftest frame-pool-acquire-produces-vm-frame
+  "frame-pool-acquire returns a vm-frame-p object."
   (cl-cc/runtime:initialize-frame-pool)
   (let ((f (cl-cc/runtime:frame-pool-acquire)))
-    (assert-true (cl-cc/runtime:vm-frame-p f)))
+    (assert-true (cl-cc/runtime:vm-frame-p f))))
+
+(deftest frame-pool-acquire-all-registers-are-nil
+  "All 256 registers of a freshly acquired frame are initialized to +val-nil+."
   (cl-cc/runtime:initialize-frame-pool)
   (let ((f (cl-cc/runtime:frame-pool-acquire)))
     (dotimes (i 256)
       (assert-= cl-cc/runtime:+val-nil+
-                (cl-cc/runtime:frame-reg-get f i))))
+                (cl-cc/runtime:frame-reg-get f i)))))
+
+(deftest frame-pool-acquire-sp-and-pc-are-zero
+  "A freshly acquired frame has sp=0 and pc=0."
   (cl-cc/runtime:initialize-frame-pool)
   (let ((f (cl-cc/runtime:frame-pool-acquire)))
     (assert-= 0 (cl-cc/runtime:vm-frame-sp f))
@@ -54,18 +60,24 @@
     (dotimes (i 256)
       (assert-= i (cl-cc/runtime:decode-fixnum (cl-cc/runtime:frame-reg-get f i))))))
 
-(deftest frame-reg-edge-cases
-  "frame-reg-set returns value written; overwrites correctly; unwritten regs are +val-nil+."
+(deftest frame-reg-set-returns-value-written
+  "frame-reg-set returns the value it stored."
   (cl-cc/runtime:initialize-frame-pool)
   (let* ((f   (cl-cc/runtime:frame-pool-acquire))
          (val (cl-cc/runtime:encode-fixnum 7))
          (ret (cl-cc/runtime:frame-reg-set f 3 val)))
-    (assert-= val ret))
+    (assert-= val ret)))
+
+(deftest frame-reg-set-overwrites-correctly
+  "Writing the same register twice stores the second value."
   (cl-cc/runtime:initialize-frame-pool)
   (let ((f (cl-cc/runtime:frame-pool-acquire)))
     (cl-cc/runtime:frame-reg-set f 5 (cl-cc/runtime:encode-fixnum 100))
     (cl-cc/runtime:frame-reg-set f 5 (cl-cc/runtime:encode-fixnum 200))
-    (assert-= 200 (cl-cc/runtime:decode-fixnum (cl-cc/runtime:frame-reg-get f 5))))
+    (assert-= 200 (cl-cc/runtime:decode-fixnum (cl-cc/runtime:frame-reg-get f 5)))))
+
+(deftest frame-reg-get-unwritten-is-val-nil
+  "An unwritten register returns +val-nil+."
   (cl-cc/runtime:initialize-frame-pool)
   (let ((f (cl-cc/runtime:frame-pool-acquire)))
     (assert-= cl-cc/runtime:+val-nil+ (cl-cc/runtime:frame-reg-get f 255))))
@@ -119,11 +131,17 @@
 ;;; Frame register count constant
 ;;; ------------------------------------------------------------
 
-(deftest frame-register-range-cases
-  "Register count is 256; arg range within caller-save; spill region above callee-save."
-  (assert-= 256 cl-cc/runtime:+frame-register-count+)
+(deftest frame-register-count-is-256
+  "+frame-register-count+ is 256."
+  (assert-= 256 cl-cc/runtime:+frame-register-count+))
+
+(deftest frame-arg-range-within-caller-save
+  "The arg range [+frame-arg-start+, +frame-arg-end+] is entirely within caller-save."
   (assert-true (<= cl-cc/runtime:+frame-arg-start+
                    cl-cc/runtime:+frame-arg-end+
-                   cl-cc/runtime:+frame-caller-save-end+))
+                   cl-cc/runtime:+frame-caller-save-end+)))
+
+(deftest frame-spill-start-above-callee-save
+  "+frame-spill-start+ is above +frame-callee-save-end+."
   (assert-true (> cl-cc/runtime:+frame-spill-start+
                   cl-cc/runtime:+frame-callee-save-end+)))

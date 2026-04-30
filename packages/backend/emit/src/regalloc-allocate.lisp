@@ -68,32 +68,84 @@
             same-class
             :initial-value interval)))
 
-;;; Linear Scan Allocation
+;;; Linear Scan Allocation — named helpers
+
+(defun %lsa-assign (state interval phys)
+  "Assign PHYS to INTERVAL and insert it into the active set (sorted by end)."
+  (setf (interval-phys-reg interval) phys
+        (gethash (interval-vreg interval) (lsa-assignment state)) phys
+        (lsa-active state) (merge 'list (list interval) (lsa-active state) #'< :key #'interval-end)))
+
+(defun %lsa-try-coalesce (state interval)
+  "Attempt register coalescing for INTERVAL.  Returns T on success."
+  (let* ((src-vreg (interval-coalesce-with interval))
+         (src-int (and src-vreg (gethash src-vreg (lsa-interval-map state)))))
+    (when (and src-int
+               (eq (interval-fp-p src-int) (interval-fp-p interval))
+               (interval-phys-reg src-int)
+               (<= (interval-end src-int) (interval-start interval)))
+      (let ((phys (interval-phys-reg src-int)))
+        (setf (lsa-active state) (remove src-int (lsa-active state) :test #'eq))
+        (%lsa-assign state interval phys)
+        t))))
+
+(defun %lsa-allocate-from-pool (state interval cc pool)
+  "Pick a physical register from POOL (preferred first) and assign it."
+  (let* ((preferred (%preferred-register-for-interval interval cc pool))
+         (phys (or preferred (car pool))))
+    (%lsa-set-interval-pool state interval (remove phys pool :count 1 :test #'eq))
+    (%lsa-assign state interval phys)))
+
+(defun %lsa-evict-and-assign (state interval)
+  "Spill the worst active interval and reassign its register to INTERVAL."
+  (let ((spill-candidate (%lsa-best-spill-candidate state interval)))
+    (if (eq spill-candidate interval)
+        (%lsa-spill-current state interval)
+        (let ((freed-reg (interval-phys-reg spill-candidate)))
+          (%lsa-spill-current state spill-candidate)
+          (remhash (interval-vreg spill-candidate) (lsa-assignment state))
+          (setf (interval-phys-reg spill-candidate) nil
+                (lsa-active state) (remove spill-candidate (lsa-active state)))
+          (%lsa-assign state interval freed-reg)))))
 
 (defun %interval-next-use-after (interval position)
   "Return the next use position of INTERVAL after POSITION, or NIL."
   (find-if (lambda (use-pos) (> use-pos position))
            (interval-use-positions interval)))
 
+(defun %return-value-preferred-reg (interval cc free-regs)
+  "Strategy: prefer the ABI return register for return-value intervals."
+  (let ((preferred (and (interval-return-value-p interval)
+                        (if (interval-fp-p interval)
+                            (cc-fp-return-register cc)
+                            (cc-return-register cc)))))
+    (and preferred (member preferred free-regs) preferred)))
+
+(defun %call-crossing-preferred-reg (interval cc free-regs)
+  "Strategy: prefer a callee-saved register for intervals crossing a call."
+  (when (and (interval-crosses-call-p interval) (not (interval-fp-p interval)))
+    (find-if (lambda (reg) (member reg free-regs :test #'eq))
+             (cc-callee-saved cc))))
+
+(defun %param-preferred-reg (interval cc free-regs)
+  "Strategy: prefer the ABI argument register matching the parameter position."
+  (let* ((param-index (interval-parameter-index interval))
+         (arg-regs (if (interval-fp-p interval) (cc-fp-arg-registers cc) (cc-arg-registers cc)))
+         (preferred (and (integerp param-index)
+                         (< param-index (length arg-regs))
+                         (nth param-index arg-regs))))
+    (and preferred (member preferred free-regs) preferred)))
+
+(defparameter *preferred-register-strategies*
+  (list #'%return-value-preferred-reg
+        #'%call-crossing-preferred-reg
+        #'%param-preferred-reg)
+  "Ordered list of preferred-register strategies tried left-to-right; first truthy result wins.")
+
 (defun %preferred-register-for-interval (interval cc free-regs)
   "Return a preferred free physical register for INTERVAL, or NIL."
-  (or (let ((preferred (and (interval-return-value-p interval)
-                            (if (interval-fp-p interval)
-                                (cc-fp-return-register cc)
-                                (cc-return-register cc)))))
-        (and preferred (member preferred free-regs) preferred))
-      (when (and (interval-crosses-call-p interval)
-                 (not (interval-fp-p interval)))
-        (find-if (lambda (reg) (member reg free-regs :test #'eq))
-                 (cc-callee-saved cc)))
-      (let* ((param-index (interval-parameter-index interval))
-             (arg-regs (if (interval-fp-p interval)
-                           (cc-fp-arg-registers cc)
-                           (cc-arg-registers cc)))
-             (preferred (and (integerp param-index)
-                             (< param-index (length arg-regs))
-                             (nth param-index arg-regs))))
-        (and preferred (member preferred free-regs) preferred))))
+  (some (lambda (strategy) (funcall strategy interval cc free-regs))
+        *preferred-register-strategies*))
 
 (defun linear-scan-allocate (intervals cc)
   "Perform linear scan register allocation.
@@ -110,40 +162,11 @@
       (setf (gethash (interval-vreg int) (lsa-interval-map state)) int))
     (dolist (interval intervals)
       (%lsa-expire-old state interval)
-      (let ((coalesced nil))
-        (let* ((src-vreg (interval-coalesce-with interval))
-               (src-int (and src-vreg (gethash src-vreg (lsa-interval-map state)))))
-          (when (and src-int
-                     (eq (interval-fp-p src-int) (interval-fp-p interval))
-                     (interval-phys-reg src-int)
-                     (<= (interval-end src-int) (interval-start interval)))
-            (let ((phys (interval-phys-reg src-int)))
-              (setf (lsa-active state) (remove src-int (lsa-active state) :test #'eq))
-              (setf (interval-phys-reg interval) phys)
-              (setf (gethash (interval-vreg interval) (lsa-assignment state)) phys)
-              (setf (lsa-active state) (merge 'list (list interval) (lsa-active state) #'< :key #'interval-end))
-              (setf coalesced t))))
-        (unless coalesced
-          (let ((pool (%lsa-interval-pool state interval)))
-            (if pool
-                (let* ((preferred (%preferred-register-for-interval interval cc pool))
-                       (phys (if preferred preferred (car pool)))
-                       (new-pool (remove phys pool :count 1 :test #'eq)))
-                  (%lsa-set-interval-pool state interval new-pool)
-                  (setf (interval-phys-reg interval) phys)
-                  (setf (gethash (interval-vreg interval) (lsa-assignment state)) phys)
-                  (setf (lsa-active state) (merge 'list (list interval) (lsa-active state) #'< :key #'interval-end)))
-                (let ((spill-candidate (%lsa-best-spill-candidate state interval)))
-                  (if (eq spill-candidate interval)
-                      (%lsa-spill-current state interval)
-                      (let ((freed-reg (interval-phys-reg spill-candidate)))
-                        (%lsa-spill-current state spill-candidate)
-                        (remhash (interval-vreg spill-candidate) (lsa-assignment state))
-                        (setf (interval-phys-reg spill-candidate) nil)
-                        (setf (lsa-active state) (remove spill-candidate (lsa-active state)))
-                        (setf (interval-phys-reg interval) freed-reg)
-                        (setf (gethash (interval-vreg interval) (lsa-assignment state)) freed-reg)
-                        (setf (lsa-active state) (merge 'list (list interval) (lsa-active state) #'< :key #'interval-end))))))))))
+      (unless (%lsa-try-coalesce state interval)
+        (let ((pool (%lsa-interval-pool state interval)))
+          (if pool
+              (%lsa-allocate-from-pool state interval cc pool)
+              (%lsa-evict-and-assign state interval)))))
     (values (lsa-assignment state) (lsa-spill-map state) (lsa-spill-count state))))
 
 ;;; Spill Code Insertion

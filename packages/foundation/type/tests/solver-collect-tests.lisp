@@ -100,8 +100,8 @@
 
 ;;; ─── ast-lambda → type-arrow ─────────────────────────────────────────────────
 
-(deftest collect-lambda-cases
-  "ast-lambda: no params→arrow with nil params and int return; 1 param→arrow with 1 param; empty body→null return."
+(deftest collect-lambda-no-params-yields-arrow-with-int-return
+  "ast-lambda with no params yields arrow with nil params and int return."
   (multiple-value-bind (ty _cs)
       (collect
        (cl-cc/ast:make-ast-lambda
@@ -110,7 +110,10 @@
     (declare (ignore _cs))
     (assert-true (cl-cc/type::type-arrow-p ty))
     (assert-null (cl-cc/type::type-arrow-params ty))
-    (assert-true (type-equal-p type-int (cl-cc/type::type-arrow-return ty))))
+    (assert-true (type-equal-p type-int (cl-cc/type::type-arrow-return ty)))))
+
+(deftest collect-lambda-one-param-yields-arrow-with-one-param
+  "ast-lambda with 1 param yields arrow type with 1 param."
   (multiple-value-bind (ty _cs)
       (collect
        (cl-cc/ast:make-ast-lambda
@@ -118,7 +121,10 @@
         :body   (list (cl-cc/ast:make-ast-int :value 0))))
     (declare (ignore _cs))
     (assert-true (cl-cc/type::type-arrow-p ty))
-    (assert-= 1 (length (cl-cc/type::type-arrow-params ty))))
+    (assert-= 1 (length (cl-cc/type::type-arrow-params ty)))))
+
+(deftest collect-lambda-empty-body-yields-null-return-type
+  "ast-lambda with empty body yields arrow with null return type."
   (multiple-value-bind (ty _cs)
       (collect
        (cl-cc/ast:make-ast-lambda :params '() :body '()))

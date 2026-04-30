@@ -95,8 +95,8 @@
 
 ;;;; ─── mir-emit ──────────────────────────────────────────────────────────
 
-(deftest mir-emit-cases
-  "mir-emit: op/dst/srcs/block wired; def-inst pointer set; ret has nil dst; phi→phis-list; ordering preserved."
+(deftest mir-emit-wires-op-dst-srcs-and-block
+  "mir-emit: op, dst, srcs, block all correctly wired on the returned instruction."
   (let* ((fn   (mir-make-function :f))
          (blk  (mirf-entry fn))
          (dst  (mir-new-value fn :name :result :type :integer))
@@ -108,22 +108,34 @@
     (assert-eq   dst  (miri-dst inst))
     (assert-= 2 (length (miri-srcs inst)))
     (assert-= 1 (length (mirb-insts blk)))
-    (assert-eq blk (miri-block inst)))
+    (assert-eq blk (miri-block inst))))
+
+(deftest mir-emit-sets-def-inst-pointer
+  "mir-emit sets the mirv-def-inst pointer on the destination value."
   (let* ((fn   (mir-make-function :f))
          (blk  (mirf-entry fn))
          (dst  (mir-new-value fn))
          (inst (mir-emit blk :const :dst dst :srcs (list (make-mir-const :value 0)))))
-    (assert-eq inst (mirv-def-inst dst)))
+    (assert-eq inst (mirv-def-inst dst))))
+
+(deftest mir-emit-ret-has-nil-dst
+  "mir-emit :ret produces an instruction with nil dst."
   (let* ((fn  (mir-make-function :f))
          (blk (mirf-entry fn))
          (v   (mir-new-value fn)))
-    (assert-null (miri-dst (mir-emit blk :ret :srcs (list v)))))
+    (assert-null (miri-dst (mir-emit blk :ret :srcs (list v))))))
+
+(deftest mir-emit-phi-goes-to-phis-list-not-insts
+  "mir-emit :phi adds to mirb-phis (not mirb-insts)."
   (let* ((fn  (mir-make-function :f))
          (blk (mir-new-block fn :label :loop))
          (dst (mir-new-value fn :name :x))
          (phi (mir-emit blk :phi :dst dst)))
     (assert-true (member phi (mirb-phis blk) :test #'eq))
-    (assert-null (mirb-insts blk)))
+    (assert-null (mirb-insts blk))))
+
+(deftest mir-emit-preserves-instruction-ordering
+  "mir-emit preserves ordering: 3 emitted instructions appear first-to-last in mirb-insts."
   (let* ((fn  (mir-make-function :f))
          (blk (mirf-entry fn))
          (d0  (mir-new-value fn))
@@ -240,12 +252,15 @@
 
 ;;;; ─── mir-module ────────────────────────────────────────────────────────
 
-(deftest mir-module-and-ops-cases
-  "make-mir-module has empty fn/globals lists; all core ops are in *mir-generic-ops*."
+(deftest mir-module-has-empty-functions-and-globals
+  "make-mir-module creates a module with nil functions/globals and a non-nil string-table."
   (let ((m (make-mir-module)))
     (assert-null (mirm-functions m))
     (assert-null (mirm-globals m))
-    (assert-false (null (mirm-string-table m))))
+    (assert-false (null (mirm-string-table m)))))
+
+(deftest mir-generic-ops-contains-all-core-ops
+  "All core MIR ops (:add, :sub, ..., :nop) are members of *mir-generic-ops*."
   (dolist (op '(:add :sub :mul :div :mod :neg
                 :band :bor :bxor :bnot
                 :lt :le :gt :ge :eq :ne

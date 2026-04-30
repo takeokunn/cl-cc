@@ -70,11 +70,7 @@
           do (typecase inst
                (vm-label
                 (setf (aref leader i) 1))
-               (vm-jump
-                (when (< (1+ i) n) (setf (aref leader (1+ i)) 1))
-                (let ((tgt (cfg-find-label-position vec n (vm-label-name inst))))
-                  (when tgt (setf (aref leader tgt) 1))))
-               (vm-jump-zero
+               ((or vm-jump vm-jump-zero)
                 (when (< (1+ i) n) (setf (aref leader (1+ i)) 1))
                 (let ((tgt (cfg-find-label-position vec n (vm-label-name inst))))
                   (when tgt (setf (aref leader tgt) 1))))
@@ -106,53 +102,55 @@
       (t
        (%cfg-fallthrough-edge b next-start blocks-by-start)))))
 
+(defun %cfg-build-create-blocks (g vec n blocks-by-start leader)
+  "Pass 2: allocate a basic block for each leader position in VEC."
+  (loop for i from 0 below n
+        when (= (aref leader i) 1)
+        do (let ((cur-label (and (vm-label-p (aref vec i)) (aref vec i))))
+             (unless (gethash i blocks-by-start)
+               (setf (gethash i blocks-by-start) (cfg-new-block g :label cur-label))))))
+
+(defun %cfg-build-collect-instructions (vec s e)
+  "Collect instructions in VEC for the block spanning [S, E), skipping any opening label."
+  (loop for j from s below e
+        for inst = (aref vec j)
+        unless (and (= j s) (vm-label-p inst))
+        collect inst))
+
+(defun %cfg-build-connect-blocks (g vec n blocks-by-start)
+  "Pass 3: populate each block's instruction list and wire CFG edges."
+  (let ((starts (sort (loop for k being the hash-keys of blocks-by-start collect k) #'<)))
+    (loop for (s . rest) on starts
+          do (let* ((e     (or (car rest) n))
+                    (b     (gethash s blocks-by-start))
+                    (insts (%cfg-build-collect-instructions vec s e)))
+               (setf (bb-instructions b) insts)
+               (%cfg-connect-block b insts g blocks-by-start (car rest))))))
+
 (defun cfg-build (instructions)
   "Build a CFG from a flat list of VM INSTRUCTIONS.
-   Returns a cfg struct with all basic blocks, edges, entry, and exit set.
+Returns a cfg struct with all basic blocks, edges, entry, and exit set.
 
-   Algorithm:
-     1. Identify leaders: instruction[0], every jump target, every
-        fall-through instruction after a branch/jump.
-     2. Group instructions into blocks starting at each leader.
-     3. Connect blocks via fall-through and explicit jump edges."
+Algorithm:
+  1. Mark leaders: index 0, every jump target, fall-throughs after branches.
+  2. Allocate a basic block per leader.
+  3. Populate each block's instruction list and wire fall-through / jump edges."
   (when (null instructions)
-    (let* ((g     (make-cfg))
-           (entry (cfg-new-block g)))
+    (let* ((g (make-cfg)) (entry (cfg-new-block g)))
       (setf (cfg-entry g) entry (cfg-exit g) entry)
       (return-from cfg-build g)))
-
-  (let* ((vec            (coerce instructions 'simple-vector))
-         (n              (length vec))
-         (leader         (%cfg-mark-leaders vec n))
-         (g              (make-cfg))
+  (let* ((vec             (coerce instructions 'simple-vector))
+         (n               (length vec))
+         (leader          (%cfg-mark-leaders vec n))
+         (g               (make-cfg))
          (blocks-by-start (make-hash-table)))
-
-    ;; Pass 2: create basic blocks at each leader position
-    (loop for i from 0 below n
-          when (= (aref leader i) 1)
-          do (let ((cur-label (and (vm-label-p (aref vec i)) (aref vec i))))
-               (unless (gethash i blocks-by-start)
-                 (setf (gethash i blocks-by-start) (cfg-new-block g :label cur-label)))))
-
-    ;; Pass 3: populate block instructions and wire edges
-    (let ((starts (sort (loop for k being the hash-keys of blocks-by-start collect k) #'<)))
-      (loop for (s . rest) on starts
-            do (let* ((e     (or (car rest) n))
-                      (b     (gethash s blocks-by-start))
-                      (insts (loop for j from s below e
-                                   for inst = (aref vec j)
-                                   unless (and (= j s) (vm-label-p inst))
-                                   collect inst)))
-                 (setf (bb-instructions b) insts)
-                 (%cfg-connect-block b insts g blocks-by-start (car rest)))))
-
-    ;; Set entry and exit
-    (let* ((entry-b    (gethash 0 blocks-by-start))
-           (all-blocks (loop for b across (cfg-blocks g) collect b))
+    (%cfg-build-create-blocks  g vec n blocks-by-start leader)
+    (%cfg-build-connect-blocks g vec n blocks-by-start)
+    (let* ((all-blocks (loop for b across (cfg-blocks g) collect b))
+           (entry-b    (gethash 0 blocks-by-start))
            (exit-b     (or (find-if (lambda (b) (null (bb-successors b))) all-blocks)
                            (car (last all-blocks)))))
       (setf (cfg-entry g) entry-b (cfg-exit g) exit-b))
-
     g))
 
 (defun cfg-find-label-position (vec n label-name)
@@ -239,79 +237,20 @@
                    do (setf f2 (bb-idom f2))))
     f1))
 
-;;; ─── Public CFG analysis helpers (duplicated here to guarantee availability) ───
+;;; ─── Dominator-based analysis helpers ───────────────────────────────────────
+;;; cfg-post-dominates-p, %cfg-replace-*, %cfg-ensure-label, %cfg-split-edge,
+;;; and cfg-split-critical-edges live in cfg-analysis.lisp (loads after this file).
 
-(defun cfg-post-dominates-p (a b)
-  "T if block A post-dominates block B (A is an ancestor of B in the post-dominator tree)."
+(defun %cfg-tree-ancestor-p (a b idom-fn)
+  "Return T if A is an ancestor of B in the tree defined by IDOM-FN."
   (or (eq a b)
-      (and (bb-post-idom b)
-           (not (eq b (bb-post-idom b)))
-           (cfg-post-dominates-p a (bb-post-idom b)))))
-
-(defun %cfg-replace-successor (block old new)
-  "Rewrite BLOCK's successor list replacing OLD with NEW."
-  (setf (bb-successors block)
-        (mapcar (lambda (succ) (if (eq succ old) new succ))
-                (bb-successors block))))
-
-(defun %cfg-replace-predecessor (block old new)
-  "Rewrite BLOCK's predecessor list replacing OLD with NEW."
-  (setf (bb-predecessors block)
-        (mapcar (lambda (pred) (if (eq pred old) new pred))
-                (bb-predecessors block))))
-
-(defun %cfg-replace-terminator (block old new)
-  "Replace terminator OLD in BLOCK's instruction list with NEW."
-  (setf (bb-instructions block)
-        (mapcar (lambda (inst) (if (eq inst old) new inst))
-                (bb-instructions block))))
-
-(defun %cfg-ensure-label (block cfg prefix)
-  "Return BLOCK's label, creating and registering a fresh one if absent."
-  (or (bb-label block)
-      (let ((label (make-vm-label :name (format nil "~A~D" prefix (cfg-next-id cfg)))))
-        (setf (bb-label block) label
-              (gethash (vm-name label) (cfg-label->block cfg)) block)
-        label)))
-
-(defun %cfg-split-edge (cfg pred succ target-label)
-  "Insert a landing-pad block on the CFG edge PRED→SUCC, returning the new block."
-  (let* ((pad-label (make-vm-label
-                     :name (format nil "SPLIT_~D_~D_~D"
-                                   (bb-id pred) (bb-id succ) (cfg-next-id cfg))))
-         (pad (cfg-new-block cfg :label pad-label)))
-    (setf (bb-instructions pad) (list (make-vm-jump :label (vm-name target-label)))
-          (bb-successors pad)   (list succ)
-          (bb-predecessors pad) (list pred))
-    (%cfg-replace-successor pred succ pad)
-    (%cfg-replace-predecessor succ pred pad)
-    pad))
-
-(defun cfg-split-critical-edges (cfg)
-  "Split critical edges by inserting empty landing-pad blocks."
-  (dolist (pred (coerce (cfg-blocks cfg) 'list) cfg)
-    (when (> (length (bb-successors pred)) 1)
-      (let ((term (find-if (lambda (i) (typep i '(or vm-jump vm-jump-zero)))
-                           (reverse (bb-instructions pred)))))
-        (dolist (succ (copy-list (bb-successors pred)))
-          (when (> (length (bb-predecessors succ)) 1)
-            (let ((target-label (%cfg-ensure-label succ cfg "SPLIT_TARGET_")))
-              (cond
-                ((and (typep term 'vm-jump-zero)
-                      (equal (vm-label-name term) (vm-name (bb-label succ))))
-                 (let ((pad (%cfg-split-edge cfg pred succ target-label)))
-                    (%cfg-replace-terminator pred term
-                                             (make-vm-jump-zero :reg (vm-reg term)
-                                                                :label (vm-name (bb-label pad))))))
-                (t
-                 (%cfg-split-edge cfg pred succ target-label))))))))))
+      (let ((idom (funcall idom-fn b)))
+        (and idom (not (eq b idom))
+             (%cfg-tree-ancestor-p a idom idom-fn)))))
 
 (defun cfg-dominates-p (a b)
   "T if block A dominates block B (A is an ancestor of B in the dominator tree)."
-  (or (eq a b)
-      (and (bb-idom b)
-           (not (eq b (bb-idom b)))
-           (cfg-dominates-p a (bb-idom b)))))
+  (%cfg-tree-ancestor-p a b #'bb-idom))
 
 (defun cfg-collect-natural-loop (header tail)
   "Return the natural loop blocks for a backedge TAIL → HEADER."
@@ -339,4 +278,3 @@
                  (incf (bb-loop-depth member))))))
   cfg)
 
-;;; ─── Post-Dominator Tree ────────────────────────────────────────────────

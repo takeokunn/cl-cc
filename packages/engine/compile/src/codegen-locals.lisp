@@ -221,37 +221,44 @@ Returns (func-infos forward-env) where func-infos is (name label closure-reg box
 
 ;;; ── Assembly and type utilities ───────────────────────────────────────────
 
+(defparameter *target-class-table*
+  '((:x86_64  . x86-64-target)
+    (:aarch64 . aarch64-target))
+  "Maps backend keyword to the target class to instantiate for assembly emission.")
+
 (defun target-instance (target)
-  (ecase target
-    (:x86_64 (make-instance 'x86-64-target))
-    (:aarch64 (make-instance 'aarch64-target))
-    (:vm nil)))
+  "Return a fresh target object for TARGET, or NIL for :vm."
+  (let ((class (cdr (assoc target *target-class-table*))))
+    (and class (make-instance class))))
+
+(defun %emit-x86-64-regalloc (program target-object)
+  "Run register allocation for an x86-64 target, updating TARGET-OBJECT in place.
+Returns the regalloc-rewritten program."
+  (let* ((instructions (vm-program-instructions program))
+         (ra (allocate-registers instructions *x86-64-calling-convention*)))
+    (setf (target-regalloc target-object) ra
+          (target-spill-base-reg target-object)
+          (if (x86-64-red-zone-spill-p (vm-program-leaf-p program) (regalloc-spill-count ra))
+              :rsp
+              :rbp))
+    (make-vm-program :instructions       (regalloc-instructions ra)
+                     :result-register    (vm-program-result-register program)
+                     :leaf-p             (vm-program-leaf-p program))))
 
 (defun emit-assembly (program &key (target :x86_64))
-  (when (eq target :vm)
-    (return-from emit-assembly ""))
-  (when (eq target :wasm)
-    (return-from emit-assembly (compile-to-wasm-wat program)))
-  (let ((target-object (target-instance target)))
-    (when (and (typep target-object 'x86-64-target)
-               (vm-program-instructions program))
-      (let* ((instructions (vm-program-instructions program))
-             (ra (allocate-registers instructions *x86-64-calling-convention*)))
-        (setf (target-regalloc target-object) ra)
-        (setf (target-spill-base-reg target-object)
-              (if (x86-64-red-zone-spill-p (vm-program-leaf-p program)
-                                                 (regalloc-spill-count ra))
-                  :rsp
-                  :rbp))
-        (setf program (make-vm-program
-                       :instructions (regalloc-instructions ra)
-                       :result-register (vm-program-result-register program)
-                       :leaf-p (vm-program-leaf-p program)))))
-    (with-output-to-string (s)
-      (format s "; CL-CC bootstrap assembly (~A)~%" target)
-      (format s "clcc_entry:~%")
-      (dolist (inst (vm-program-instructions program))
-        (emit-instruction target-object inst s)))))
+  (cond
+    ((eq target :vm)   "")
+    ((eq target :wasm) (compile-to-wasm-wat program))
+    (t
+     (let ((target-object (target-instance target)))
+       (when (and (typep target-object 'x86-64-target)
+                  (vm-program-instructions program))
+         (setf program (%emit-x86-64-regalloc program target-object)))
+       (with-output-to-string (s)
+         (format s "; CL-CC bootstrap assembly (~A)~%" target)
+         (format s "clcc_entry:~%")
+         (dolist (inst (vm-program-instructions program))
+           (emit-instruction target-object inst s)))))))
 
 (defun type-check-ast (ast &optional (env (cl-cc/type:type-env-empty)))
   "Run type inference on AST. Returns inferred type or signals type error."

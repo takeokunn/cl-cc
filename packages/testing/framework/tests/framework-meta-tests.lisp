@@ -12,10 +12,13 @@
   (input expected)
   (assert-equal expected (%tree-map input (lambda (atom) (declare (ignore atom)) :MAPPED))))
 
-(deftest framework-meta-substitution-cases
-  "Symbol and constant substitution each rewrite nested occurrences without touching unrelated atoms."
+(deftest framework-meta-substitute-symbol-rewrites-occurrences
+  "%substitute-symbol rewrites all occurrences of a symbol without touching unrelated atoms."
   (assert-equal '(let ((y 1)) (+ y z))
-                (%substitute-symbol '(let ((x 1)) (+ x z)) 'x 'y))
+                (%substitute-symbol '(let ((x 1)) (+ x z)) 'x 'y)))
+
+(deftest framework-meta-substitute-constant-rewrites-occurrences
+  "%substitute-constant rewrites all occurrences of a constant without touching other atoms."
   (assert-equal '(if (= x 1) 1 2)
                 (%substitute-constant '(if (= x 0) 0 2) 0 1)))
 
@@ -45,26 +48,32 @@
   (form mutation-type)
   (assert-true (consp (%apply-mutation form mutation-type))))
 
-(deftest framework-meta-source-utils-cases
-  "Source reader collects top-level forms; %eval-form-safely returns T/NIL for success/error."
+(deftest framework-meta-read-all-forms-collects-top-level-forms
+  "%read-all-forms parses a string into multiple top-level form plists."
   (let ((forms (%read-all-forms "(defun foo () 1) (defun bar () 2)")))
     (assert-= 2 (length forms))
     (assert-eq 'defun (caar forms))
     (assert-string= "FOO" (symbol-name (cadar forms)))
     (assert-eq 'defun (caadr forms))
-    (assert-string= "BAR" (symbol-name (cadadr forms))))
+    (assert-string= "BAR" (symbol-name (cadadr forms)))))
+
+(deftest framework-meta-eval-form-safely-returns-t-or-nil
+  "%eval-form-safely returns T for successful evaluation and NIL for signaled errors."
   (assert-true  (%eval-form-safely '(+ 1 2)))
   (assert-false (%eval-form-safely '(error "boom"))))
 
-(deftest framework-meta-generated-binary-assertion-cases
-  "Binary assertions: payload includes assertion name/expected/actual; each operand evaluated once."
+(deftest framework-meta-binary-assertion-failure-message-has-name-expected-actual
+  "A failing assert-equal produces a message with the assertion name, expected, and actual values."
   (handler-case
       (progn (assert-equal 1 2) (assert-false t))
     (test-failure (c)
       (let ((message (test-failure-message c)))
         (assert-true (search "assert-equal failed" message))
         (assert-true (search "expected: 1" message))
-        (assert-true (search "actual: 2" message)))))
+        (assert-true (search "actual: 2" message))))))
+
+(deftest framework-meta-binary-assertion-evaluates-each-operand-once
+  "assert-equal evaluates both the expected and actual operands exactly once."
   (let ((calls 0))
     (handler-case
         (progn
@@ -74,28 +83,37 @@
       (test-failure ()
         (assert-= 2 calls)))))
 
-(deftest framework-meta-generated-unary-assertion-cases
-  "Unary assertions: payload includes name and actual; macroexpands through %assert-unary."
+(deftest framework-meta-unary-assertion-failure-message-has-name-and-actual
+  "A failing assert-null produces a message with the assertion name and actual value."
   (handler-case
       (progn (assert-null :not-nil) (assert-false t))
     (test-failure (c)
       (let ((message (test-failure-message c)))
         (assert-true (search "assert-null failed" message))
-        (assert-true (search "actual: :NOT-NIL" message)))))
+        (assert-true (search "actual: :NOT-NIL" message))))))
+
+(deftest framework-meta-unary-assertion-macroexpands-through-assert-unary
+  "assert-null macroexpands to %assert-unary with the null predicate."
   (let ((expanded (macroexpand-1 '(assert-null sample-form))))
     (assert-eq '%assert-unary (first expanded))
     (assert-eq 'null (second expanded))))
 
-(deftest framework-meta-assert-run=-cases
-  "assert-run=: readable failure; macroexpands through %with-run-string-assertion; reports host errors as readable TAP YAML."
+(deftest framework-meta-assert-run=-failure-message-is-readable
+  "assert-run= produces a readable failure message including the expected value and source form."
   (handler-case
       (progn (assert-run= 7 "(+ 1 2)") (assert-false t))
     (test-failure (c)
       (let ((message (test-failure-message c)))
         (assert-true (search "assert-run=: expected 7" message))
-        (assert-true (search "(+ 1 2)" message)))))
+        (assert-true (search "(+ 1 2)" message))))))
+
+(deftest framework-meta-assert-run=-macroexpands-through-with-run-string-assertion
+  "assert-run= macroexpands to %with-run-string-assertion."
   (let ((expanded (macroexpand-1 '(assert-run= 7 "(+ 1 2)"))))
-    (assert-eq '%with-run-string-assertion (first expanded)))
+    (assert-eq '%with-run-string-assertion (first expanded))))
+
+(deftest framework-meta-assert-run=-reports-host-errors-in-failure-message
+  "assert-run= reports host-signaled errors as a readable TAP YAML failure."
   (flet ((run-string (expr) (declare (ignore expr)) (error "synthetic host failure")))
     (handler-case
         (progn (assert-run= 1 "(boom)") (assert-false t))
@@ -128,14 +146,17 @@
         (assert-true (search "assert-evaluates-to" message))
         (assert-true (search "expected 99" message))))))
 
-(deftest framework-meta-assertion-mismatch-cases
-  "assert-run-string= fails on non-string result; assert-macro-expands-to reports form+mismatch."
+(deftest framework-meta-assert-run-string=-failure-on-non-string-result
+  "assert-run-string= fails with a readable message when the result is not a string."
   (handler-case
       (progn
         (assert-run-string= "3" "(+ 1 2)")
         (assert-false t))
     (test-failure (c)
-      (assert-true (search "assert-run-string=" (test-failure-message c)))))
+      (assert-true (search "assert-run-string=" (test-failure-message c))))))
+
+(deftest framework-meta-assert-macro-expands-to-reports-form-and-mismatch
+  "assert-macro-expands-to failure message includes the original form and mismatch detail."
   (handler-case
       (progn
         (assert-macro-expands-to '(when t 1) '(if nil 1 nil))
@@ -145,9 +166,12 @@
         (assert-true (search "assert-macro-expands-to" message))
         (assert-true (search "(WHEN T 1)" message))))))
 
-(deftest framework-meta-assert-infers-type-cases
-  "assert-infers-type: succeeds for fixnum; reports mismatch for wrong type."
-  (assert-infers-type "42" fixnum)
+(deftest framework-meta-assert-infers-type-succeeds-for-fixnum
+  "assert-infers-type passes when the inferred type matches fixnum."
+  (assert-infers-type "42" fixnum))
+
+(deftest framework-meta-assert-infers-type-failure-reports-mismatch
+  "assert-infers-type failure message includes the assertion name and the expected type."
   (handler-case
       (progn (assert-infers-type "42" string) (assert-false t))
     (test-failure (c)
@@ -169,17 +193,23 @@
         (assert-true (search name-fragment message))
         (when extra-fragment (assert-true (search extra-fragment message)))))))
 
-(deftest framework-meta-mutation-testing-infra-cases
-  "defmetamorphic registers relation; mutant-killed-p returns T for eval-failure; coverage helpers are callable."
+(deftest framework-meta-defmetamorphic-registers-relation
+  "defmetamorphic adds a relation entry to *metamorphic-relations* with the given name."
   (let ((*metamorphic-relations* nil))
     (defmetamorphic test-relation
       :transform (lambda (expr) expr)
       :relation #'equal
       :applicable-when (lambda (expr) (declare (ignore expr)) t))
     (assert-= 1 (length *metamorphic-relations*))
-    (assert-eq 'test-relation (getf (first *metamorphic-relations*) :name)))
+    (assert-eq 'test-relation (getf (first *metamorphic-relations*) :name))))
+
+(deftest framework-meta-mutant-killed-p-returns-true-for-eval-failure
+  "%mutant-killed-p returns T when the mutant form signals an error during evaluation."
   (assert-true (%mutant-killed-p '(error "synthetic eval failure")
-                                 'cl-cc-unit-suite))
+                                 'cl-cc-unit-suite)))
+
+(deftest framework-meta-coverage-helpers-are-callable
+  "enable-coverage and disable-coverage are callable; %print-coverage-report signals with readable message."
   (enable-coverage)
   (disable-coverage)
   (handler-bind ((warning #'muffle-warning))

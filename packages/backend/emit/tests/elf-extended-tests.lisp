@@ -6,17 +6,23 @@
 
 ;;; ─── Additional Buffer Tests ─────────────────────────────────────────────
 
-(deftest elf-buf-integer-encoding-cases
-  "s64le: -1 encodes as all #xFF; positive values match u64le; u64le writes 8 bytes little-endian."
+(deftest elf-s64le-negative-one-encodes-as-all-ff
+  "binary-buffer-write-s64le of -1 produces 8 bytes all equal to #xFF."
   (let ((buf (cl-cc/binary::elf-make-buffer)))
     (cl-cc/binary::binary-buffer-write-s64le buf -1)
     (assert-equal 8 (length buf))
-    (assert-true (every (lambda (b) (= b #xFF)) (coerce buf 'list))))
+    (assert-true (every (lambda (b) (= b #xFF)) (coerce buf 'list)))))
+
+(deftest elf-s64le-positive-value-matches-u64le
+  "binary-buffer-write-s64le on a positive value produces identical bytes to write-u64le."
   (let ((buf1 (cl-cc/binary::elf-make-buffer))
         (buf2 (cl-cc/binary::elf-make-buffer)))
     (cl-cc/binary::binary-buffer-write-s64le buf1 42)
     (cl-cc/binary::binary-buffer-write-u64le buf2 42)
-    (assert-equal (coerce buf1 'list) (coerce buf2 'list)))
+    (assert-equal (coerce buf1 'list) (coerce buf2 'list))))
+
+(deftest elf-u64le-writes-eight-bytes-little-endian
+  "binary-buffer-write-u64le on #xDEADBEEFCAFEBABE produces 8 bytes in little-endian order."
   (let ((buf (cl-cc/binary::elf-make-buffer)))
     (cl-cc/binary::binary-buffer-write-u64le buf #xDEADBEEFCAFEBABE)
     (assert-equal 8 (length buf))
@@ -46,18 +52,24 @@
 
 ;;; ─── Additional ELF64 Builder Tests ──────────────────────────────────────
 
-(deftest elf64-add-operations-cases
-  "Multiple add-text-bytes accumulate; multiple symbols all register; add-reloc defaults to PLT32."
+(deftest elf64-multiple-add-text-bytes-accumulate-total-size
+  "Multiple elf64-add-text-bytes calls accumulate the total text size."
   (let ((b (cl-cc/binary::make-elf64-object))
         (c1 (make-array 2 :element-type '(unsigned-byte 8) :initial-contents '(#x90 #x90)))
         (c2 (make-array 3 :element-type '(unsigned-byte 8) :initial-contents '(#xC3 #x00 #x00))))
     (cl-cc/binary::elf64-add-text-bytes b c1)
     (cl-cc/binary::elf64-add-text-bytes b c2)
-    (assert-equal 5 (cl-cc/binary::elf64-text-size b)))
+    (assert-equal 5 (cl-cc/binary::elf64-text-size b))))
+
+(deftest elf64-multiple-add-global-symbol-all-registered
+  "Multiple elf64-add-global-symbol calls all accumulate in the symbol table."
   (let ((b (cl-cc/binary::make-elf64-object)))
     (cl-cc/binary::elf64-add-global-symbol b "_start" :section-idx 1 :value 0 :size 4)
     (cl-cc/binary::elf64-add-global-symbol b "printf" :section-idx 0 :value 0 :size 0)
-    (assert-equal 2 (length (cl-cc/binary::elf64-symbols b))))
+    (assert-equal 2 (length (cl-cc/binary::elf64-symbols b)))))
+
+(deftest elf64-add-reloc-defaults-to-plt32
+  "elf64-add-reloc adds a reloc entry with PLT32 type and addend -4."
   (let ((b (cl-cc/binary::make-elf64-object)))
     (cl-cc/binary::elf64-add-reloc b 1 "puts")
     (let ((entry (first (cl-cc/binary::elf64-rela-entries b))))
@@ -66,8 +78,8 @@
       (assert-equal "puts" (third entry))
       (assert-equal -4 (fourth entry)))))
 
-(deftest elf64-finalize-basic-cases
-  "Finalized ELF: correct header fields (ET_REL, EM_X86_64, shnum=7, shstrndx=6); at least 64 bytes."
+(deftest elf64-finalize-header-has-correct-fields
+  "Finalized ELF header has ET_REL (1), EM_X86_64 (0x3E), shnum=7, shstrndx=6."
   (let* ((b (cl-cc/binary::make-elf64-object))
          (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
     (cl-cc/binary::elf64-add-text-bytes b code)
@@ -77,13 +89,16 @@
       (assert-equal #x3E (aref result 18))
       (assert-equal 0    (aref result 19))
       (assert-equal 7    (aref result 60))
-      (assert-equal 6    (aref result 62))))
+      (assert-equal 6    (aref result 62)))))
+
+(deftest elf64-finalize-empty-object-produces-at-least-64-bytes
+  "Finalizing an empty ELF64 object produces at least 64 bytes (minimum header size)."
   (let ((b (cl-cc/binary::make-elf64-object)))
     (let ((result (cl-cc/binary::elf64-finalize b)))
       (assert-true (>= (length result) 64)))))
 
-(deftest elf64-finalize-structure-cases
-  ".bss NOBITS section header has sh_type=8, reserved size; section offsets honor 16/8-byte alignments."
+(deftest elf64-finalize-bss-section-has-nobits-type-and-size
+  ".bss section header has sh_type=8 (NOBITS) and the reserved size in the correct field."
   (let* ((b (cl-cc/binary::make-elf64-object))
          (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3)))
          (result nil)
@@ -98,7 +113,10 @@
                    (ash (aref result 43) 24)))
     (setf bss-shoff (+ shoff (* 2 64)))
     (assert-equal 8 (aref result (+ bss-shoff 4)))
-    (assert-equal 32 (aref result (+ bss-shoff 32))))
+    (assert-equal 32 (aref result (+ bss-shoff 32)))))
+
+(deftest elf64-finalize-section-offsets-are-properly-aligned
+  "Text section offset is 16-byte aligned; section header table offset is 8-byte aligned."
   (let* ((b (cl-cc/binary::make-elf64-object))
          (code (make-array 3 :element-type '(unsigned-byte 8) :initial-contents '(#x90 #x90 #xC3)))
          (result nil)
@@ -117,12 +135,15 @@
     (assert-equal 0 (mod text-offset 16))
     (assert-equal 0 (mod shoff 8))))
 
-(deftest elf64-compile-api-cases
-  "compile-to-elf64: AArch64 machine value; .bss reservation; valid ELF from code+relocs."
+(deftest elf64-compile-api-aarch64-machine-value
+  "compile-to-elf64 with :arch :arm64 writes the AArch64 machine type value into the ELF header."
   (let* ((code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC0)))
          (result (cl-cc/binary::compile-to-elf64 code nil :arch :arm64)))
     (assert-equal #xB7 (aref result 18))
-    (assert-equal 0 (aref result 19)))
+    (assert-equal 0 (aref result 19))))
+
+(deftest elf64-compile-api-bss-reservation
+  "compile-to-elf64 with :bss-size reserves the correct .bss section size."
   (let* ((code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3)))
          (result (cl-cc/binary::compile-to-elf64 code nil :bss-size 64))
          (shoff (+ (aref result 40)
@@ -132,7 +153,10 @@
          (bss-shoff (+ shoff (* 2 64))))
     (assert-true (typep result '(simple-array (unsigned-byte 8) (*))))
     (assert-equal 8 (aref result (+ bss-shoff 4)))
-    (assert-equal 64 (aref result (+ bss-shoff 32))))
+    (assert-equal 64 (aref result (+ bss-shoff 32)))))
+
+(deftest elf64-compile-api-valid-elf-from-code-and-relocs
+  "compile-to-elf64 with code and relocations produces a valid ELF binary starting with the ELF magic."
   (let* ((code (make-array 5 :element-type '(unsigned-byte 8)
                             :initial-contents '(#xE8 0 0 0 0)))
          (relocs (list (cons 1 "printf")))

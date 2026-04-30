@@ -33,12 +33,18 @@
 
 ;;; ─── Symbol Operations ─────────────────────────────────────────────────────
 
-(deftest rt-symbol-operations
-  "rt-symbol-name, rt-make-symbol (uninterned), and rt-gensym (unique)."
-  (assert-equal "FOO" (cl-cc/runtime:rt-symbol-name 'foo))
+(deftest rt-symbol-name-returns-upcased-string
+  "rt-symbol-name returns the symbol name as a string."
+  (assert-equal "FOO" (cl-cc/runtime:rt-symbol-name 'foo)))
+
+(deftest rt-make-symbol-creates-uninterned
+  "rt-make-symbol creates an uninterned symbol with the given name."
   (let ((s (cl-cc/runtime:rt-make-symbol "TEST")))
     (assert-equal "TEST" (symbol-name s))
-    (assert-false (symbol-package s)))
+    (assert-false (symbol-package s))))
+
+(deftest rt-gensym-returns-unique-symbols
+  "rt-gensym returns a different symbol on each call."
   (assert-false (eq (cl-cc/runtime:rt-gensym) (cl-cc/runtime:rt-gensym))))
 
 (deftest rt-symbol-plist-roundtrip
@@ -60,15 +66,18 @@
 
 ;;; ─── Hash Table Operations ─────────────────────────────────────────────────
 
-(deftest rt-hash-table-ops
-  "rt-make-hash-table: set/get/rem/count/keys/values/clrhash all work correctly."
+(deftest rt-hash-table-set-get-rem-count
+  "rt-sethash/rt-gethash/rt-remhash/rt-hash-count operate correctly."
   (let ((ht (cl-cc/runtime:rt-make-hash-table)))
     (cl-cc/runtime:rt-sethash :a ht 1)
     (cl-cc/runtime:rt-sethash :b ht 2)
     (assert-= 1 (cl-cc/runtime:rt-gethash :a ht))
     (assert-= 2 (cl-cc/runtime:rt-hash-count ht))
     (cl-cc/runtime:rt-remhash :a ht)
-    (assert-= 1 (cl-cc/runtime:rt-hash-count ht)))
+    (assert-= 1 (cl-cc/runtime:rt-hash-count ht))))
+
+(deftest rt-hash-table-keys-values-clrhash
+  "rt-hash-keys/rt-hash-values enumerate entries; rt-clrhash empties the table."
   (let ((ht (cl-cc/runtime:rt-make-hash-table)))
     (cl-cc/runtime:rt-sethash :x ht 10)
     (cl-cc/runtime:rt-sethash :y ht 20)

@@ -29,13 +29,16 @@
       (setf *suite-registry* (persist-remove *suite-registry* child))
       (setf *suite-registry* (persist-remove *suite-registry* parent)))))
 
-(deftest dependency-ordering-cases
-  "Dependency ordering: reorders dependent behind prerequisite; fallback preserves confirmed prefix."
+(deftest dependency-ordering-moves-dependent-after-prerequisite
+  "%order-tests-for-dependencies places a dependent test after its prerequisite."
   (let* ((dependency (list :name 'ulw-dependency :depends-on nil))
-         (dependent (list :name 'ulw-dependent :depends-on 'ulw-dependency))
-         (ordered (%order-tests-for-dependencies (list dependent dependency))))
+         (dependent  (list :name 'ulw-dependent  :depends-on 'ulw-dependency))
+         (ordered    (%order-tests-for-dependencies (list dependent dependency))))
     (assert-equal '(ulw-dependency ulw-dependent)
-                  (mapcar (lambda (test) (getf test :name)) ordered)))
+                  (mapcar (lambda (test) (getf test :name)) ordered))))
+
+(deftest dependency-ordering-cycle-break-preserves-prefix
+  "%order-tests-for-dependencies falls back to preserving non-dependent tests first."
   (let* ((ordered (%order-tests-for-dependencies
                    (list (list :name 'ulw-a :depends-on 'ulw-b)
                          (list :name 'ulw-x :depends-on nil)
@@ -56,8 +59,8 @@
     (assert-false called)
     (assert-eq :skip (getf result :status))))
 
-(deftest run-single-test-skip-pending-cases
-  "%run-single-test: pending condition→:pending with reason; skip condition→:skip with reason."
+(deftest run-single-test-pending-condition-returns-pending-with-reason
+  "%run-single-test: a pending-condition signals :pending status with the reason in :detail."
   (let* ((test-plist (list :name 'pending-demo
                            :fn (lambda () (error 'pending-condition :reason "later"))
                            :suite 'cl-cc-unit-suite
@@ -68,15 +71,20 @@
     (assert-eq :pending (getf result :status))
     (assert-true (search "later" (getf result :detail))))
 
-(deftest effective-test-timeout-cases
-  "%effective-test-timeout normalizes nil, invalid values, and positive integers."
-  (assert-= (%default-test-timeout) (%effective-test-timeout (list :timeout :bogus)))
-  (assert-equal 7 (%effective-test-timeout (list :timeout 7)))
-  (assert-equal (%default-test-timeout)
-                (%effective-test-timeout (list :timeout nil))))
+(deftest effective-test-timeout-bogus-normalizes-to-default
+  "%effective-test-timeout returns the default when given a non-integer keyword."
+  (assert-= (%default-test-timeout) (%effective-test-timeout (list :timeout :bogus))))
 
-(deftest default-test-timeout-cases
-  "%default-test-timeout honors CLCC_TEST_TIMEOUT and falls back to 10 seconds."
+(deftest effective-test-timeout-preserves-valid-integer
+  "%effective-test-timeout returns the given positive integer unchanged."
+  (assert-equal 7 (%effective-test-timeout (list :timeout 7))))
+
+(deftest effective-test-timeout-nil-normalizes-to-default
+  "%effective-test-timeout returns the default when given nil."
+  (assert-= (%default-test-timeout) (%effective-test-timeout (list :timeout nil))))
+
+(deftest default-test-timeout-honors-env-var-and-falls-back-to-10
+  "%default-test-timeout: unset→10; set to 14→14; set to bogus→10."
   (let ((old (uiop:getenv "CLCC_TEST_TIMEOUT")))
     (unwind-protect
          (progn
@@ -90,8 +98,8 @@
           (sb-posix:setenv "CLCC_TEST_TIMEOUT" old 1)
           (sb-posix:unsetenv "CLCC_TEST_TIMEOUT")))))
 
-(deftest default-suite-timeout-cases
-  "%default-suite-timeout normalizes invalid input and defaults to 600 seconds."
+(deftest default-suite-timeout-honors-env-var-and-falls-back-to-600
+  "%default-suite-timeout: unset→600; set to 90→90; set to bogus→600."
   (let ((old (uiop:getenv "CLCC_SUITE_TIMEOUT")))
     (unwind-protect
          (progn
@@ -207,14 +215,17 @@
 
 ;;; ── New-helper coverage (added after %run-single-test decomposition) ─────
 
-(deftest make-test-result-plist-shape-cases
-  "%make-test-result: :pass has nil detail and all fields; :fail carries detail string."
+(deftest make-test-result-pass-shape
+  "%make-test-result: :pass result has all expected fields and nil detail."
   (let ((r (%make-test-result 'my-test 3 'my-suite :pass nil)))
     (assert-eq 'my-test  (getf r :name))
     (assert-eq :pass     (getf r :status))
     (assert-eq 'my-suite (getf r :suite))
     (assert-= 3          (getf r :number))
-    (assert-null         (getf r :detail)))
+    (assert-null         (getf r :detail))))
+
+(deftest make-test-result-fail-carries-detail
+  "%make-test-result: :fail result carries the detail string."
   (let ((r (%make-test-result 'my-test 1 'my-suite :fail "oops")))
     (assert-eq :fail      (getf r :status))
     (assert-string= "oops" (getf r :detail))))
@@ -228,12 +239,14 @@
                            (format nil "~A seconds" (%default-test-timeout)))
                        (%format-timeout-detail timeout))))
 
-(deftest count-results-by-status-counts-correctly
+(deftest-each count-results-by-status-counts-correctly
   "%count-results-by-status filters by exact status keyword."
+  :cases (("pass" :pass 2)
+          ("fail" :fail 1)
+          ("skip" :skip 0))
+  (status expected)
   (let ((results (list (list :status :pass) (list :status :fail) (list :status :pass))))
-    (assert-= 2 (%count-results-by-status results :pass))
-    (assert-= 1 (%count-results-by-status results :fail))
-    (assert-= 0 (%count-results-by-status results :skip))))
+    (assert-= expected (%count-results-by-status results status))))
 
 (deftest-each path-is-cwd-descendant-cases
   "%path-is-cwd-descendant-p correctly identifies descendant paths."
@@ -255,16 +268,17 @@
   (path-ns cwd-ns verify)
   (funcall verify path-ns cwd-ns))
 
-(deftest cpu-count-cases
-  "%detect-cpu-count returns positive integer; env source returns positive integer or nil."
+(deftest cpu-count-detect-returns-positive-integer
+  "%detect-cpu-count always returns a positive integer."
   (let ((n (%detect-cpu-count)))
     (assert-true (integerp n))
-    (assert-true (plusp n)))
-  (let ((env-source (first *cpu-count-sources*)))
-    (uiop:with-temporary-file (:pathname tmp :keep nil)
-      (declare (ignore tmp)))
-    (let ((result (funcall env-source)))
-      (assert-true (or (null result) (and (integerp result) (plusp result)))))))
+    (assert-true (plusp n))))
+
+(deftest cpu-count-env-source-returns-integer-or-nil
+  "The first *cpu-count-sources* thunk returns a positive integer or nil."
+  (let* ((env-source (first *cpu-count-sources*))
+         (result (funcall env-source)))
+    (assert-true (or (null result) (and (integerp result) (plusp result))))))
 
 (deftest number-tests-annotates-with-index
   "%number-tests adds a :number key (1-based) to each plist in the list."

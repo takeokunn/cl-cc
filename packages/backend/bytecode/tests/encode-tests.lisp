@@ -59,14 +59,17 @@
 ;;; encode-2op
 ;;; ------------------------------------------------------------
 
-(deftest bytecode-encode-2op-cases
-  "encode-2op packs opcode, dst, src into correct bit positions and leaves bits[7:0] as zero."
-  (let ((w1 (cl-cc/bytecode:encode-2op cl-cc/bytecode:+op-neg+ 4 5 0)))
-    (assert-= cl-cc/bytecode:+op-neg+ (ldb (byte 8 24) w1))
-    (assert-= 4 (ldb (byte 8 16) w1))
-    (assert-= 5 (ldb (byte 8  8) w1)))
-  (let ((w2 (cl-cc/bytecode:encode-2op cl-cc/bytecode:+op-move+ 10 20 0)))
-    (assert-= 0 (ldb (byte 8 0) w2))))
+(deftest bytecode-encode-2op-packs-bit-fields-correctly
+  "encode-2op places opcode in bits[31:24], dst in [23:16], src in [15:8]."
+  (let ((w (cl-cc/bytecode:encode-2op cl-cc/bytecode:+op-neg+ 4 5 0)))
+    (assert-= cl-cc/bytecode:+op-neg+ (ldb (byte 8 24) w))
+    (assert-= 4 (ldb (byte 8 16) w))
+    (assert-= 5 (ldb (byte 8  8) w))))
+
+(deftest bytecode-encode-2op-low-byte-is-zero
+  "encode-2op leaves bits[7:0] as zero."
+  (let ((w (cl-cc/bytecode:encode-2op cl-cc/bytecode:+op-move+ 10 20 0)))
+    (assert-= 0 (ldb (byte 8 0) w))))
 
 ;;; ------------------------------------------------------------
 ;;; encode-imm

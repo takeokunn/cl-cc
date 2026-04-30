@@ -112,8 +112,10 @@ Returns two values: the compilation result and whether the CPS-native path was u
 
 (defun %compile-native-toplevel-forms (forms target opts)
   "Compile FORMS through the generic native top-level entrypoint after optional CPS rewriting."
-  (apply #'compile-toplevel-forms (%maybe-cps-toplevel-forms forms :target target)
-         :target target opts))
+  (let ((native-opts (apply #'%make-pipeline-opts :target target opts)))
+    (apply #'compile-toplevel-forms
+           (%maybe-cps-toplevel-forms forms native-opts)
+           :target target opts)))
 
 (defun %compile-native-lisp-forms (forms target opts)
   "Compile Lisp FORMS for native emission, preferring the CPS route for a single safe form."

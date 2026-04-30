@@ -181,13 +181,17 @@ Round is excluded from the values-list check (nil means skip)."
 ;;; Section 7: Boolean Operations
 ;;; ═══════════════════════════════════════════════════════════════════════════
 
-(deftest prim-not-cases
-  "vm-not: falsy (nil, 0) → t; non-zero integers → nil.
-cl-cc's execution model treats 0 as false (see vm-falsep), so (vm-not 0) = t.
-This differs from standard CL where only NIL is false."
-  (assert-equal t (%run-unary-inst #'cl-cc::make-vm-not nil))
-  (assert-equal t (%run-unary-inst #'cl-cc::make-vm-not 0))
-  (assert-null    (%run-unary-inst #'cl-cc::make-vm-not 42)))
+(deftest prim-not-nil-returns-true
+  "vm-not of nil returns T (nil is falsy)."
+  (assert-equal t (%run-unary-inst #'cl-cc::make-vm-not nil)))
+
+(deftest prim-not-zero-returns-true
+  "vm-not of 0 returns T; cl-cc treats 0 as false (vm-falsep), unlike standard CL."
+  (assert-equal t (%run-unary-inst #'cl-cc::make-vm-not 0)))
+
+(deftest prim-not-integer-returns-nil
+  "vm-not of a non-zero integer returns NIL (non-zero is truthy)."
+  (assert-null (%run-unary-inst #'cl-cc::make-vm-not 42)))
 
 (deftest-each prim-and-cases
   "vm-and: both truthy → t; any nil → nil."

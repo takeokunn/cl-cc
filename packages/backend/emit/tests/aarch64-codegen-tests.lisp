@@ -87,8 +87,8 @@ Returns the byte vector, or NIL on error."
   (expected instr-type)
   (assert-= expected (gethash instr-type cl-cc/emit::*a64-instruction-sizes*)))
 
-(deftest aarch64-vm-move-self-elision-cases
-  "Self-move emits no bytes; a64-instruction-size also returns 0 for self-moves."
+(deftest aarch64-vm-move-self-elision-emits-no-bytes
+  "Self-move emits no bytes and a64-instruction-size returns 0."
   (let ((bytes (%a64-collect-bytes
                 (lambda (s)
                   (cl-cc/emit::emit-a64-vm-move
@@ -209,7 +209,7 @@ Returns the byte vector, or NIL on error."
     (assert-true (cl-cc/vm::vm-program-leaf-p program))
     (assert-true (< (length leaf-bytes) (length nonleaf-bytes)))))
 
-(deftest aarch64-empty-program-cases
+(deftest aarch64-empty-program-emits-32-bytes-with-shadow-call-stack
   "Empty AArch64 program emits exactly 32 bytes including shadow call stack prologue/epilogue."
   (let* ((program (cl-cc/vm::make-vm-program :instructions nil :result-register :R0))
          (bytes (compile-to-aarch64-bytes program)))

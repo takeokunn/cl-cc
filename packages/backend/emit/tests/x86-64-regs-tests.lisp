@@ -14,15 +14,24 @@
 
 ;;; ─── x86-64-red-zone-spill-p ─────────────────────────────────────────────
 
-(deftest x86-64-regs-red-zone-spill-cases
-  "x86-64-red-zone-spill-p: leaf≤16→T; non-leaf→NIL; leaf>16→NIL; zero→NIL."
-  (assert-true  (cl-cc/emit::x86-64-red-zone-spill-p t   1))
-  (assert-true  (cl-cc/emit::x86-64-red-zone-spill-p t   16))
+(deftest x86-64-regs-red-zone-spill-leaf-within-limit-returns-true
+  "x86-64-red-zone-spill-p: leaf=T with count≤16 returns T."
+  (assert-true (cl-cc/emit::x86-64-red-zone-spill-p t 1))
+  (assert-true (cl-cc/emit::x86-64-red-zone-spill-p t 16)))
+
+(deftest x86-64-regs-red-zone-spill-non-leaf-always-false
+  "x86-64-red-zone-spill-p: leaf=NIL always returns NIL regardless of count."
   (assert-false (cl-cc/emit::x86-64-red-zone-spill-p nil 1))
-  (assert-false (cl-cc/emit::x86-64-red-zone-spill-p nil 16))
-  (assert-false (cl-cc/emit::x86-64-red-zone-spill-p t   17))
-  (assert-false (cl-cc/emit::x86-64-red-zone-spill-p t   100))
-  (assert-false (cl-cc/emit::x86-64-red-zone-spill-p t   0)))
+  (assert-false (cl-cc/emit::x86-64-red-zone-spill-p nil 16)))
+
+(deftest x86-64-regs-red-zone-spill-leaf-exceeds-limit-returns-false
+  "x86-64-red-zone-spill-p: leaf=T with count>16 returns NIL."
+  (assert-false (cl-cc/emit::x86-64-red-zone-spill-p t 17))
+  (assert-false (cl-cc/emit::x86-64-red-zone-spill-p t 100)))
+
+(deftest x86-64-regs-red-zone-spill-zero-count-returns-false
+  "x86-64-red-zone-spill-p: leaf=T with count=0 returns NIL."
+  (assert-false (cl-cc/emit::x86-64-red-zone-spill-p t 0)))
 
 ;;; ─── vm-reg-to-x86 (no regalloc) ─────────────────────────────────────────
 
@@ -79,28 +88,40 @@ so R4→rsi=6 and R5→rdi=7 in the naive mapping."
 
 ;;; ─── x86-64-double-float-bits ────────────────────────────────────────────
 
-(deftest x86-64-regs-double-float-bits-cases
-  "x86-64-double-float-bits: 1.0 is valid 64-bit int; 0.0→0; 1.0→IEEE 754 #x3FF0...0."
+(deftest x86-64-regs-double-float-bits-valid-64-bit-range
+  "x86-64-double-float-bits: result for 1.0 is a non-negative 64-bit integer."
   (let ((bits (cl-cc/emit::x86-64-double-float-bits 1.0)))
     (assert-true (integerp bits))
     (assert-true (>= bits 0))
-    (assert-true (< bits (expt 2 64))))
+    (assert-true (< bits (expt 2 64)))))
+
+(deftest x86-64-regs-double-float-bits-ieee754-values
+  "x86-64-double-float-bits: 0.0→0; 1.0→IEEE 754 representation #x3FF0000000000000."
   (assert-= 0 (cl-cc/emit::x86-64-double-float-bits 0.0))
   (assert-= #x3FF0000000000000 (cl-cc/emit::x86-64-double-float-bits 1.0)))
 
 ;;; ─── x86-64-compute-float-vregs ──────────────────────────────────────────
 
-(deftest x86-64-regs-compute-float-vregs-cases
-  "x86-64-compute-float-vregs: empty→empty HT; float const marks reg; int const does not; propagates via move."
+(deftest x86-64-regs-compute-float-vregs-empty-returns-empty-table
+  "x86-64-compute-float-vregs on nil returns an empty hash table."
   (let ((result (cl-cc/emit::x86-64-compute-float-vregs nil)))
     (assert-true (hash-table-p result))
-    (assert-= 0 (hash-table-count result)))
+    (assert-= 0 (hash-table-count result))))
+
+(deftest x86-64-regs-compute-float-vregs-float-const-marks-register
+  "x86-64-compute-float-vregs marks a register as float when loaded from a float constant."
   (let* ((insts (list (cl-cc::make-vm-const :dst :R0 :value 3.14)))
          (result (cl-cc/emit::x86-64-compute-float-vregs insts)))
-    (assert-true (gethash :R0 result)))
+    (assert-true (gethash :R0 result))))
+
+(deftest x86-64-regs-compute-float-vregs-int-const-does-not-mark
+  "x86-64-compute-float-vregs does not mark a register loaded from an integer constant."
   (let* ((insts (list (cl-cc::make-vm-const :dst :R0 :value 42)))
          (result (cl-cc/emit::x86-64-compute-float-vregs insts)))
-    (assert-false (gethash :R0 result)))
+    (assert-false (gethash :R0 result))))
+
+(deftest x86-64-regs-compute-float-vregs-propagates-via-move
+  "x86-64-compute-float-vregs propagates float type through vm-move."
   (let* ((insts (list (cl-cc::make-vm-const :dst :R0 :value 1.0)
                       (cl-cc::make-vm-move :dst :R1 :src :R0)))
          (result (cl-cc/emit::x86-64-compute-float-vregs insts)))
@@ -109,7 +130,10 @@ so R4→rsi=6 and R5→rdi=7 in the naive mapping."
 
 ;;; ─── *vm-reg-map* and *phys-reg-to-x86-code* data checks ─────────────────
 
-(deftest x86-64-regs-data-table-cases
-  "*vm-reg-map* covers 8 vregs; *phys-reg-to-x86-code* covers 14 physical registers."
-  (assert-= 8  (length cl-cc/emit::*vm-reg-map*))
+(deftest x86-64-regs-vm-reg-map-covers-eight-vregs
+  "*vm-reg-map* covers exactly 8 virtual registers."
+  (assert-= 8 (length cl-cc/emit::*vm-reg-map*)))
+
+(deftest x86-64-regs-phys-reg-to-x86-code-covers-fourteen-registers
+  "*phys-reg-to-x86-code* covers exactly 14 physical registers."
   (assert-= 14 (length cl-cc/emit::*phys-reg-to-x86-code*)))

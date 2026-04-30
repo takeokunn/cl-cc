@@ -43,13 +43,12 @@ FUNCTIONAL-DEPS:  list of (from-params . to-params) — functional dependencies.
   "Maps typeclass name symbol -> typeclass-def.")
 
 (defun %normalize-typeclass-definition (name tc-def)
-  "Normalize TC-DEF to the canonical TYPECLASS-DEF representation.
-The active registry stores only canonical TYPECLASS-DEF values."
-  (cond
-    ((typeclass-def-p tc-def) tc-def)
-    (t (error 'type-inference-error
-              :message (format nil "register-typeclass expected TYPECLASS-DEF for ~A, got ~S"
-                               name tc-def)))))
+  "Guard: signal an error unless TC-DEF is a canonical TYPECLASS-DEF."
+  (unless (typeclass-def-p tc-def)
+    (error 'type-inference-error
+           :message (format nil "register-typeclass expected TYPECLASS-DEF for ~A, got ~S"
+                            name tc-def)))
+  tc-def)
 
 (defun register-typeclass (name tc-def)
   "Register TC-DEF under NAME in *typeclass-registry*.
@@ -59,22 +58,14 @@ The registry stores only normalized TYPECLASS-DEF values."
   name)
 
 (defun %typeclass-instance-overlaps-p (type-a type-b)
-  "Return T when TYPE-A and TYPE-B can unify, meaning the instances overlap.
-
-This is a conservative coherence check: if two instances for the same class
-could both match the same concrete type, we reject the later registration."
+  "Return T when TYPE-A and TYPE-B can unify (conservative coherence check)."
   (and (not (type-equal-p type-a type-b))
-       (multiple-value-bind (_subst ok)
-           (type-unify type-a type-b)
-         (declare (ignore _subst))
-         ok)))
+       (nth-value 1 (type-unify type-a type-b))))
 
 (defun %typeclass-default-methods (class-name)
   "Return the default method alist for CLASS-NAME, or NIL."
   (let ((tc-def (lookup-typeclass class-name)))
-    (cond
-      ((typeclass-def-p tc-def) (typeclass-def-defaults tc-def))
-      (t nil))))
+    (and (typeclass-def-p tc-def) (typeclass-def-defaults tc-def))))
 
 (defun %typeclass-name-string (name)
   "Normalize NAME for dependency comparison."
@@ -92,10 +83,8 @@ could both match the same concrete type, we reject the later registration."
 
 (defun %typeclass-param-name (param)
   "Return a stable identifier for PARAM, which may be a type-var or symbol."
-  (cond
-    ((type-var-p param) (%typeclass-name-string (type-var-name param)))
-    ((symbolp param)    (%typeclass-name-string param))
-    (t                  (%typeclass-name-string param))))
+  (%typeclass-name-string
+   (if (type-var-p param) (type-var-name param) param)))
 
 (defun %typeclass-instance-args (type)
   "Return the ordered instance arguments encoded by TYPE.
@@ -169,46 +158,38 @@ relative to EXISTING-TYPE. Uses positional matching over type params."
   "Build the hash key for (CLASS-NAME, TYPE)."
   (cons class-name (type-to-string type)))
 
+(defun %existing-class-instances (class-name)
+  "Return all registered instances for CLASS-NAME."
+  (loop for k being the hash-keys of *typeclass-instance-registry*
+        using (hash-value inst)
+        when (and (consp k) (eq (car k) class-name))
+        collect inst))
+
 (defun register-typeclass-instance (class-name type method-impls)
   "Register that TYPE implements CLASS-NAME with METHOD-IMPLS."
   (when (lookup-typeclass-instance class-name type)
     (error 'type-inference-error
            :message (format nil "Duplicate typeclass instance for ~A / ~A"
                             class-name (type-to-string type))))
-  (dolist (existing (loop for k being the hash-keys of *typeclass-instance-registry*
-                          using (hash-value inst)
-                          when (and (consp k) (eq (car k) class-name))
-                          collect inst))
-    (when (%typeclass-instance-overlaps-p (typeclass-instance-instance-type existing) type)
-      (error 'type-inference-error
-             :message (format nil
-                              "Overlapping typeclass instances for ~A: ~A and ~A"
-                              class-name
-                              (type-to-string (typeclass-instance-instance-type existing))
-                              (type-to-string type)))))
-  (let ((tc-def (lookup-typeclass class-name)))
-    (when (typeclass-def-p tc-def)
-      (dolist (existing (loop for k being the hash-keys of *typeclass-instance-registry*
-                              using (hash-value inst)
-                              when (and (consp k) (eq (car k) class-name))
-                              collect inst))
-        (when (%typeclass-fundep-violation-p tc-def
-                                             (typeclass-instance-instance-type existing)
-                                             type)
+  (let ((existing-instances (%existing-class-instances class-name))
+        (tc-def (lookup-typeclass class-name)))
+    (dolist (existing existing-instances)
+      (let ((existing-type (typeclass-instance-instance-type existing)))
+        (when (%typeclass-instance-overlaps-p existing-type type)
           (error 'type-inference-error
-                 :message (format nil
-                                  "Functional dependency violation for ~A: ~A vs ~A"
-                                  class-name
-                                  (type-to-string (typeclass-instance-instance-type existing))
-                                  (type-to-string type)))))))
+                 :message (format nil "Overlapping typeclass instances for ~A: ~A and ~A"
+                                  class-name (type-to-string existing-type) (type-to-string type))))
+        (when (and (typeclass-def-p tc-def)
+                   (%typeclass-fundep-violation-p tc-def existing-type type))
+          (error 'type-inference-error
+                 :message (format nil "Functional dependency violation for ~A: ~A vs ~A"
+                                  class-name (type-to-string existing-type) (type-to-string type)))))))
   (let ((inst (%make-typeclass-instance
                :class-name    class-name
                :instance-type type
                :constraints   nil
                :methods       (%merge-default-methods class-name method-impls))))
-    (setf (gethash (%type-instance-key class-name type)
-                   *typeclass-instance-registry*)
-          inst)
+    (setf (gethash (%type-instance-key class-name type) *typeclass-instance-registry*) inst)
     inst))
 
 (defun lookup-typeclass-instance (class-name type)
@@ -218,14 +199,11 @@ relative to EXISTING-TYPE. Uses positional matching over type params."
 
 (defun has-typeclass-instance-p (class-name type)
   "Return T if TYPE has a registered instance for CLASS-NAME."
-  (or (not (null (lookup-typeclass-instance class-name type)))
+  (or (lookup-typeclass-instance class-name type)
       (let ((tc-def (lookup-typeclass class-name)))
-        (when tc-def
-          (let ((supers (and (typeclass-def-p tc-def)
-                             (typeclass-def-superclasses tc-def))))
-            (some (lambda (super)
-                    (has-typeclass-instance-p super type))
-                  supers))))))
+        (and (typeclass-def-p tc-def)
+             (some (lambda (super) (has-typeclass-instance-p super type))
+                   (typeclass-def-superclasses tc-def))))))
 
 (defun default-numeric-typeclass-p (class-name)
   "Return T if CLASS-NAME should default unresolved numeric type variables."

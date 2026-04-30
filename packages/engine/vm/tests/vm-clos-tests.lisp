@@ -147,23 +147,26 @@
 
 ;;; 5. %cis-walk (extracted DFS helper for collect-inherited-slots)
 
-(deftest cis-walk-cases
-  "%cis-walk: empty list, single class, deduplication via seen."
-  ;; empty class list leaves result-cell unchanged
+(deftest cis-walk-empty-class-list-leaves-result-unchanged
+  "%cis-walk on an empty class list leaves the result cell unchanged."
   (let ((reg (make-test-registry))
         (seen (make-hash-table :test #'eq))
         (cell (list nil)))
     (cl-cc/vm::%cis-walk '() reg seen cell)
-    (assert-null (car cell)))
-  ;; single class accumulates slots into result-cell
+    (assert-null (car cell))))
+
+(deftest cis-walk-single-class-accumulates-slots
+  "%cis-walk on a single class accumulates all its slots into the result cell."
   (let ((reg (make-test-registry))
         (seen (make-hash-table :test #'eq))
         (cell (list nil)))
     (registry-add-class reg 'thing :slots '(x y))
     (cl-cc/vm::%cis-walk '(thing) reg seen cell)
     (assert-true (member 'x (car cell)))
-    (assert-true (member 'y (car cell))))
-  ;; slot already in SEEN is not pushed again
+    (assert-true (member 'y (car cell)))))
+
+(deftest cis-walk-deduplicates-slots-via-seen
+  "%cis-walk skips slots already present in the seen hash table."
   (let ((reg (make-test-registry))
         (seen (make-hash-table :test #'eq))
         (cell (list nil)))
@@ -175,20 +178,23 @@
 
 ;;; 6. %cia-walk (extracted DFS helper for collect-inherited-initargs)
 
-(deftest cia-walk-cases
-  "%cia-walk: empty list, single class, no duplicate keys."
-  ;; empty class list leaves result-cell unchanged
+(deftest cia-walk-empty-class-list-leaves-result-unchanged
+  "%cia-walk on an empty class list leaves the result cell unchanged."
   (let ((reg (make-test-registry))
         (cell (list nil)))
     (cl-cc/vm::%cia-walk '() reg cell)
-    (assert-null (car cell)))
-  ;; single class accumulates initarg entries
+    (assert-null (car cell))))
+
+(deftest cia-walk-single-class-accumulates-initargs
+  "%cia-walk on a single class accumulates its initarg entries into the result cell."
   (let ((reg (make-test-registry))
         (cell (list nil)))
     (registry-add-class reg 'named :initargs '((:name . name)))
     (cl-cc/vm::%cia-walk '(named) reg cell)
-    (assert-true (assoc :name (car cell))))
-  ;; key already present in result-cell is not duplicated
+    (assert-true (assoc :name (car cell)))))
+
+(deftest cia-walk-does-not-duplicate-existing-keys
+  "%cia-walk does not add a key already present in the result cell."
   (let ((reg (make-test-registry))
         (cell (list (list '(:name . name-old)))))
     (registry-add-class reg 'alt :initargs '((:name . name-new) (:extra . extra)))
@@ -198,35 +204,41 @@
 
 ;;; 6b. %vm-allow-other-keys-p / %vm-validate-initargs
 
-(deftest vm-allow-other-keys-p-cases
-  "%vm-allow-other-keys-p: truthy value, nil value, absent key."
-  ;; truthy register value → T
+(deftest vm-allow-other-keys-p-truthy-register-returns-true
+  "%vm-allow-other-keys-p returns T when the :allow-other-keys register holds a truthy value."
   (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
     (cl-cc:vm-reg-set s :r0 t)
-    (assert-true (cl-cc/vm::%vm-allow-other-keys-p '((:allow-other-keys . :r0)) s)))
-  ;; nil register value → NIL
+    (assert-true (cl-cc/vm::%vm-allow-other-keys-p '((:allow-other-keys . :r0)) s))))
+
+(deftest vm-allow-other-keys-p-nil-register-returns-false
+  "%vm-allow-other-keys-p returns NIL when the :allow-other-keys register holds nil."
   (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
     (cl-cc:vm-reg-set s :r0 nil)
-    (assert-false (cl-cc/vm::%vm-allow-other-keys-p '((:allow-other-keys . :r0)) s)))
-  ;; key absent from alist → NIL
+    (assert-false (cl-cc/vm::%vm-allow-other-keys-p '((:allow-other-keys . :r0)) s))))
+
+(deftest vm-allow-other-keys-p-absent-key-returns-false
+  "%vm-allow-other-keys-p returns NIL when :allow-other-keys is absent from the alist."
   (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
     (assert-false (cl-cc/vm::%vm-allow-other-keys-p '((:x . :r0)) s))))
 
-(deftest vm-validate-initargs-cases
-  "%vm-validate-initargs: accepts known keys, signals for unknown, bypassed by allow-other-keys."
-  ;; known key — no signal
+(deftest vm-validate-initargs-known-key-accepts-without-signal
+  "%vm-validate-initargs accepts a known initarg key without signaling."
   (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
     (cl-cc:vm-reg-set s :r0 42)
     (assert-true
      (progn
        (cl-cc/vm::%vm-validate-initargs '((:width . :r0)) '((:width . width)) s)
-       t)))
-  ;; unknown key — signals error
+       t))))
+
+(deftest vm-validate-initargs-unknown-key-signals-error
+  "%vm-validate-initargs signals an error for an unrecognized initarg key."
   (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
     (cl-cc:vm-reg-set s :r0 42)
     (assert-signals error
-      (cl-cc/vm::%vm-validate-initargs '((:unknown-key . :r0)) '((:width . width)) s)))
-  ;; :allow-other-keys truthy — bypasses check
+      (cl-cc/vm::%vm-validate-initargs '((:unknown-key . :r0)) '((:width . width)) s))))
+
+(deftest vm-validate-initargs-allow-other-keys-bypasses-check
+  "%vm-validate-initargs bypasses the unknown-key check when :allow-other-keys is truthy."
   (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
     (cl-cc:vm-reg-set s :r0 42)
     (cl-cc:vm-reg-set s :r1 t)
@@ -240,13 +252,19 @@
 
 ;;; 7. %cpl-linearize (extracted C3 linearization step)
 
-(deftest cpl-linearize-cases
-  "%cpl-linearize: unknown class, leaf class, linear A→B→C chain."
+(deftest cpl-linearize-unknown-class-returns-singleton
+  "%cpl-linearize on an unknown class returns a singleton list with that class name."
   (let ((reg (make-test-registry)))
-    (assert-equal '(unknown) (cl-cc/vm::%cpl-linearize 'unknown reg)))
+    (assert-equal '(unknown) (cl-cc/vm::%cpl-linearize 'unknown reg))))
+
+(deftest cpl-linearize-leaf-class-returns-singleton
+  "%cpl-linearize on a registered leaf class returns a singleton list."
   (let ((reg (make-test-registry)))
     (registry-add-class reg 'leaf)
-    (assert-equal '(leaf) (cl-cc/vm::%cpl-linearize 'leaf reg)))
+    (assert-equal '(leaf) (cl-cc/vm::%cpl-linearize 'leaf reg))))
+
+(deftest cpl-linearize-linear-inheritance-chain
+  "%cpl-linearize on a linear A→B→C chain returns the MRO in order."
   (let ((reg (make-test-registry)))
     (registry-add-class reg 'c)
     (registry-add-class reg 'b :superclasses '(c))

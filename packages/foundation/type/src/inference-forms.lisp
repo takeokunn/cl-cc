@@ -30,15 +30,19 @@
    Looks up *type-predicate-table*; returns nil if not registered."
   (gethash predicate-name *type-predicate-table*))
 
-;; Bootstrap built-in predicates at load time via declarative data table.
-(dolist (pair `((numberp    . ,type-int)
-                (integerp   . ,type-int)
-                (stringp    . ,type-string)
-                (symbolp    . ,type-symbol)
-                (consp      . ,type-cons)
-                (null       . ,type-null)
-                (characterp . ,(make-type-primitive :name 'character))
-                (functionp  . ,(make-type-primitive :name 'function))))
+;;; Built-in predicate→type pairs. This is the data; registration is the logic.
+(defparameter *builtin-type-predicates*
+  `((numberp    . ,type-int)
+    (integerp   . ,type-int)
+    (stringp    . ,type-string)
+    (symbolp    . ,type-symbol)
+    (consp      . ,type-cons)
+    (null       . ,type-null)
+    (characterp . ,(make-type-primitive :name 'character))
+    (functionp  . ,(make-type-primitive :name 'function)))
+  "Association list of (predicate-name . type-node) for built-in type predicates.")
+
+(dolist (pair *builtin-type-predicates*)
   (register-type-predicate (car pair) (cdr pair)))
 
 (defun extract-type-guard (cond-ast)
@@ -81,60 +85,70 @@
           (t (make-type-union remaining))))
       union-type))
 
+(defun %infer-if-condition (ast env)
+  "Infer the condition type of AST in ENV, returning the substitution.
+Returns NIL when the condition check fails (gradual typing: allow failure)."
+  (handler-case
+      (multiple-value-bind (ct s1) (infer (cl-cc/ast:ast-if-cond ast) env)
+        (declare (ignore ct))
+        s1)
+    (error () nil)))
+
+(defun %narrow-else-env (guard-var guard-type base-env)
+  "Return BASE-ENV with GUARD-VAR's union type narrowed to exclude GUARD-TYPE."
+  (multiple-value-bind (scheme found-p) (type-env-lookup guard-var base-env)
+    (let ((var-type (if found-p (instantiate scheme) nil)))
+      (if (and var-type (typep var-type 'type-union))
+          (type-env-extend guard-var
+                           (make-type-scheme nil (narrow-union-type var-type guard-type))
+                           base-env)
+          base-env))))
+
+(defun %build-if-branch-envs (ast env cond-subst)
+  "Return (values then-env else-env) with narrowed types for each branch of AST."
+  (multiple-value-bind (guard-var guard-type)
+      (extract-type-guard (cl-cc/ast:ast-if-cond ast))
+    (let ((base-env (zonk-env env cond-subst)))
+      (if guard-var
+          (values (type-env-extend guard-var (make-type-scheme nil guard-type) base-env)
+                  (%narrow-else-env guard-var guard-type base-env))
+          (values base-env base-env)))))
+
+(defun %unify-if-branches (ast then-env else-env)
+  "Infer both branches of AST and unify their types. Returns (values type subst)."
+  (multiple-value-bind (then-type subst2) (infer (cl-cc/ast:ast-if-then ast) then-env)
+    (multiple-value-bind (else-type subst3)
+        (infer (cl-cc/ast:ast-if-else ast) (zonk-env else-env subst2))
+      (multiple-value-bind (final-subst _) (type-unify then-type else-type subst3)
+        (values (zonk then-type final-subst) final-subst)))))
+
 (defun infer-if (ast env)
-  "Infer type for if expression.
-   Supports type narrowing: (if (numberp x) ...) narrows x in each branch."
-  (let ((subst1 nil))
-    ;; Infer condition type — allow failures for gradual typing
-    (handler-case
-        (multiple-value-bind (ct s1)
-            (infer (cl-cc/ast:ast-if-cond ast) env)
-          (declare (ignore ct))
-          (setf subst1 s1))
-      (error () nil))
-    ;; Extract type guard info for narrowing
-    (multiple-value-bind (guard-var guard-type)
-        (extract-type-guard (cl-cc/ast:ast-if-cond ast))
-      (let* ((base-env (zonk-env env subst1))
-             ;; Narrow environments for each branch
-             (then-env (if guard-var
-                           (type-env-extend guard-var
-                                            (make-type-scheme nil guard-type)
-                                            base-env)
-                           base-env))
-             (else-env (if guard-var
-                           (multiple-value-bind (scheme found-p) (type-env-lookup guard-var base-env)
-                             (let ((var-type (if found-p (instantiate scheme) nil)))
-                               (if (and var-type (typep var-type 'type-union))
-                                   (type-env-extend guard-var
-                                                    (make-type-scheme nil (narrow-union-type var-type guard-type))
-                                                    base-env)
-                                   base-env)))
-                           base-env)))
-        (multiple-value-bind (then-type subst2)
-            (infer (cl-cc/ast:ast-if-then ast) then-env)
-          (multiple-value-bind (else-type subst3)
-              (infer (cl-cc/ast:ast-if-else ast) (zonk-env else-env subst2))
-            (multiple-value-bind (final-subst final-ok) (type-unify then-type else-type subst3)
-              (declare (ignore final-ok))
-              (values (zonk then-type final-subst) final-subst))))))))
+  "Infer type for if expression with type-guard narrowing."
+  (let ((cond-subst (%infer-if-condition ast env)))
+    (multiple-value-bind (then-env else-env)
+        (%build-if-branch-envs ast env cond-subst)
+      (%unify-if-branches ast then-env else-env))))
 
 ;;; FR-1604: Value Restriction
 ;;; Only syntactic values (lambda, literal, variable, quote, #'fn) may be
 ;;; generalized.  Applications and other impure expressions are kept monomorphic
 ;;; to prevent unsound polymorphism with mutable state.
 
+;;; Value restriction (FR-1604): Only syntactic values may be generalized.
+;;; Applications and impure expressions stay monomorphic to prevent unsound
+;;; polymorphism with mutable state.
+(defparameter *syntactic-value-ast-types*
+  '(cl-cc/ast:ast-int
+    cl-cc/ast:ast-var
+    cl-cc/ast:ast-lambda
+    cl-cc/ast:ast-quote
+    cl-cc/ast:ast-function
+    cl-cc/ast:ast-hole)
+  "AST node types that qualify as syntactic values under the value restriction.")
+
 (defun syntactic-value-p (ast)
-  "Return T if AST is a syntactic value safe to generalize (value restriction).
-   Values: integer/string literals, variable references, lambdas, quoted data,
-   function references, and typed holes.
-   Non-values: function calls, binary operations, let/if/progn, etc."
-  (typep ast '(or cl-cc/ast:ast-int
-                  cl-cc/ast:ast-var
-                  cl-cc/ast:ast-lambda
-                  cl-cc/ast:ast-quote
-                  cl-cc/ast:ast-function
-                   cl-cc/ast:ast-hole)))
+  "Return T if AST is a syntactic value safe to generalize (value restriction)."
+  (some (lambda (type) (typep ast type)) *syntactic-value-ast-types*))
 
 (defun infer-let (ast env)
   "Infer type for let with polymorphism (value restriction applied).
@@ -199,23 +213,24 @@
                                   (type-to-string type-arg))))))))
 
 
+(defun %resolve-call-type (func-type arg-types result-type subst1 env)
+  "Unify FUNC-TYPE with the expected arrow type for ARG-TYPES → RESULT-TYPE.
+On success, checks typeclass constraints and returns (values type subst).
+On failure, signals type-mismatch-error."
+  (let ((expected-fn (make-type-arrow arg-types result-type)))
+    (multiple-value-bind (subst ok) (type-unify func-type expected-fn subst1)
+      (if ok
+          (progn
+            (check-qualified-constraints func-type subst env)
+            (values (zonk result-type subst) subst))
+          (error 'type-mismatch-error :expected expected-fn :actual func-type)))))
+
 (defun infer-call (ast env)
   "Infer type for function call with typeclass constraint checking."
-  (multiple-value-bind (func-type subst1)
-      (infer (cl-cc/ast:ast-call-func ast) env)
+  (multiple-value-bind (func-type subst1) (infer (cl-cc/ast:ast-call-func ast) env)
     (let* ((result-type (fresh-type-var))
-           (arg-types (infer-args (cl-cc/ast:ast-call-args ast)
-                                  (zonk-env env subst1)))
-           (expected-fn (make-type-arrow arg-types result-type)))
-      (multiple-value-bind (subst ok)
-          (type-unify func-type expected-fn subst1)
-        (if ok
-            (progn
-              ;; Check typeclass constraints if callee has a qualified type
-              (check-qualified-constraints func-type subst env)
-              (values (zonk result-type subst) subst))
-            (error 'type-mismatch-error
-                   :expected expected-fn :actual func-type))))))
+           (arg-types   (infer-args (cl-cc/ast:ast-call-args ast) (zonk-env env subst1))))
+      (%resolve-call-type func-type arg-types result-type subst1 env))))
 
 (defun infer-args (asts env)
   "Infer types for list of ASTs (function arguments), threading substitution."

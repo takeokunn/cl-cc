@@ -10,34 +10,46 @@
 
 ;;; ─── rt-format ──────────────────────────────────────────────────────────────
 
-(deftest rt-format-cases
-  "rt-format: nil stream returns string; explicit stream writes to it."
-  (assert-equal "42" (cl-cc/runtime:rt-format nil "~A" 42))
+(deftest rt-format-nil-stream-returns-string
+  "rt-format with nil stream returns the formatted string directly."
+  (assert-equal "42" (cl-cc/runtime:rt-format nil "~A" 42)))
+
+(deftest rt-format-explicit-stream-writes-to-it
+  "rt-format with an explicit stream writes the formatted output to that stream."
   (let ((s (make-string-output-stream)))
     (cl-cc/runtime:rt-format s "~A" "hello")
     (assert-equal "hello" (get-output-stream-string s))))
 
 ;;; ─── String output stream helpers ──────────────────────────────────────────
 
-(deftest rt-string-output-stream-cases
-  "rt-make-string-output-stream: creates stream; get returns empty; get-after-write returns content."
+(deftest rt-make-string-output-stream-creates-stream-and-get-empty
+  "rt-make-string-output-stream produces a stream; get-output-stream-string returns empty initially."
   (let ((s (cl-cc/runtime:rt-make-string-output-stream)))
     (assert-true (streamp s))
-    (assert-equal "" (cl-cc/runtime:rt-get-output-stream-string s)))
+    (assert-equal "" (cl-cc/runtime:rt-get-output-stream-string s))))
+
+(deftest rt-get-output-stream-string-after-write-returns-content
+  "rt-get-output-stream-string returns the written content after write-string."
   (let ((s (cl-cc/runtime:rt-make-string-output-stream)))
     (write-string "hello world" s)
-    (assert-equal "hello world" (cl-cc/runtime:rt-get-output-stream-string s)))
+    (assert-equal "hello world" (cl-cc/runtime:rt-get-output-stream-string s))))
+
+(deftest rt-get-output-stream-string-works-with-standard-stream
+  "rt-get-output-stream-string also works with a standard make-string-output-stream."
   (let ((s (make-string-output-stream)))
     (write-string "test" s)
     (assert-equal "test" (cl-cc/runtime:rt-get-output-stream-string s))))
 
-(deftest rt-stream-op-optional-stream-cases
-  "Optional-stream wrappers honor explicit streams for both output and input operations."
+(deftest rt-stream-op-output-wrappers-write-in-order
+  "rt-write-char, rt-write-string, rt-write-line all target an explicit output stream."
   (let ((s (make-string-output-stream)))
     (cl-cc/runtime:rt-write-char #\A s)
     (cl-cc/runtime:rt-write-string "BC" s)
     (cl-cc/runtime:rt-write-line "D" s)
-    (assert-equal (format nil "ABCD~%") (get-output-stream-string s)))
+    (assert-equal (format nil "ABCD~%") (get-output-stream-string s))))
+
+(deftest rt-stream-op-input-wrappers-read-and-peek
+  "rt-read-char consumes; rt-peek-char does not advance the stream."
   (let ((s (make-string-input-stream "xyz")))
     (assert-equal #\x (cl-cc/runtime:rt-read-char s))
     (assert-equal #\y (cl-cc/runtime:rt-peek-char s))
@@ -50,7 +62,7 @@
   (let ((s (make-string-input-stream "hello")))
     (assert-equal "hello" (cl-cc/runtime:rt-read-line s))))
 
-(deftest rt-read-byte-write-byte-cases
+(deftest rt-read-byte-write-byte-roundtrip-through-file
   "Binary byte helpers round-trip bytes through a temporary file stream."
   (let* ((path (merge-pathnames "cl-cc-runtime-io-bytes.bin" (uiop:temporary-directory)))
          (out (open path :direction :output :if-exists :supersede :element-type '(unsigned-byte 8))))
@@ -117,18 +129,24 @@
       (assert-equal #\a first-peek)
       (assert-equal #\a second-peek))))
 
-(deftest rt-make-string-stream-cases
-  "rt-make-string-stream supports both input and output directions."
+(deftest rt-make-string-stream-input-direction
+  "rt-make-string-stream :input creates a readable stream; first char is 'a'."
   (let ((in (cl-cc/runtime:rt-make-string-stream "abc" :direction :input)))
-    (assert-equal #\a (read-char in)))
+    (assert-equal #\a (read-char in))))
+
+(deftest rt-make-string-stream-output-direction
+  "rt-make-string-stream :output creates a writable stream; written content is retrievable."
   (let ((out (cl-cc/runtime:rt-make-string-stream "ignored" :direction :output)))
     (write-string "ok" out)
     (assert-equal "ok" (cl-cc/runtime:rt-get-output-stream-string out))))
 
 ;;; ─── Stream predicates ──────────────────────────────────────────────────────
 
-(deftest rt-stream-predicate-cases
-  "rt-stream-element-type → character; rt-interactive-stream-p → 0 for string stream."
-  (assert-equal 'character (cl-cc/runtime:rt-stream-element-type *standard-input*))
+(deftest rt-stream-element-type-is-character
+  "rt-stream-element-type returns 'character for standard-input."
+  (assert-equal 'character (cl-cc/runtime:rt-stream-element-type *standard-input*)))
+
+(deftest rt-interactive-stream-p-is-zero-for-string-stream
+  "rt-interactive-stream-p returns 0 for a non-interactive string input stream."
   (let ((s (make-string-input-stream "x")))
     (assert-= 0 (cl-cc/runtime:rt-interactive-stream-p s))))

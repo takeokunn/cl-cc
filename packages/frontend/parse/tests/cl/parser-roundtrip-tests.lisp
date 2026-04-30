@@ -109,17 +109,23 @@
 
 ;;; ─── Call sites ───────────────────────────────────────────────────────────
 
-(deftest ast-to-sexp-call-and-apply-cases
-  "ast-call with symbol func, ast-call with AST func, and ast-apply all roundtrip correctly."
+(deftest ast-to-sexp-call-with-symbol-func
+  "ast-to-sexp: ast-call with a bare symbol func produces (sym arg...)."
   (assert-equal '(foo 1 2)
                 (cl-cc::ast-to-sexp
                  (cl-cc::make-ast-call :func 'foo
                   :args (list (cl-cc::make-ast-int :value 1)
-                              (cl-cc::make-ast-int :value 2)))))
+                              (cl-cc::make-ast-int :value 2))))))
+
+(deftest ast-to-sexp-call-with-ast-func
+  "ast-to-sexp: ast-call with an AST node func resolves the name correctly."
   (assert-equal '(f 3)
                 (cl-cc::ast-to-sexp
                  (cl-cc::make-ast-call :func (cl-cc::make-ast-var :name 'f)
-                  :args (list (cl-cc::make-ast-int :value 3)))))
+                  :args (list (cl-cc::make-ast-int :value 3))))))
+
+(deftest ast-to-sexp-apply-produces-apply-form
+  "ast-to-sexp: ast-apply produces an (apply fn args) sexp."
   (assert-equal '(apply f args)
                 (cl-cc::ast-to-sexp
                  (cl-cc::make-ast-apply :func (cl-cc::make-ast-var :name 'f)
@@ -185,12 +191,15 @@
 
 ;;; ─── slot-def-to-sexp ────────────────────────────────────────────────────
 
-(deftest slot-def-to-sexp-cases
-  "slot-def-to-sexp: plain slot returns symbol; slot with :initarg includes it in plist."
+(deftest slot-def-to-sexp-plain-slot-returns-symbol
+  "slot-def-to-sexp: a slot with no options returns just the slot name symbol."
   (let ((slot (cl-cc::make-ast-slot-def
                :name 'value :initarg nil :initform nil
                :reader nil :writer nil :accessor nil)))
-    (assert-eq 'value (cl-cc::slot-def-to-sexp slot)))
+    (assert-eq 'value (cl-cc::slot-def-to-sexp slot))))
+
+(deftest slot-def-to-sexp-with-initarg-includes-plist
+  "slot-def-to-sexp: a slot with :initarg returns a plist including :initarg."
   (let* ((slot (cl-cc::make-ast-slot-def
                 :name 'count :initarg :count :initform nil
                 :reader nil :writer nil :accessor nil))

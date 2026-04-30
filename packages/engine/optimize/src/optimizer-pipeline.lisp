@@ -91,7 +91,26 @@ the e-graph engine.")
 (defparameter *opt-convergence-passes*
   (mapcar (lambda (k) (gethash k *opt-pass-registry*))
           *opt-default-convergence-pass-keys*)
-  "Ordered default pass functions derived from `*opt-default-convergence-pass-keys*`." )
+  "Ordered default pass functions derived from `*opt-default-convergence-pass-keys*`.")
+
+;;; ─── Reporting / Trace State ─────────────────────────────────────────────
+
+(defstruct (opt-reporting-options (:conc-name opt-report-))
+  "Read-only bundle of side-channel reporting flags for the optimizer pipeline."
+  (print-pass-timings nil)
+  (timing-stream      nil)
+  (print-pass-stats   nil)
+  (stats-stream       nil)
+  (print-opt-remarks  nil)
+  (opt-remarks-stream nil)
+  (opt-remarks-mode   :all))
+
+(defstruct (opt-trace-state (:conc-name opt-trace-))
+  "Mutable accumulator for Chrome-trace-compatible events."
+  (enabled     nil)
+  (json-stream nil)
+  (events      nil)
+  (ts-us        0))
 
 (defun %opt-trim-whitespace (s)
   (string-trim '(#\Space #\Tab #\Newline #\Return) s))
@@ -133,38 +152,43 @@ the e-graph engine.")
                    (getf event :dur-us)))
   (format stream "]}~%"))
 
-(defun opt-run-passes-once-with-reporting (prog passes &key print-pass-timings timing-stream print-pass-stats stats-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) trace-enabled trace-events initial-ts-us)
-  "Apply PASSES once while emitting any enabled reports."
-  (let ((current prog)
-        (events trace-events)
-        (ts-us initial-ts-us))
-    (dolist (f passes)
-      (let* ((before current)
+(defun %opt-remarks-applies-p (changed mode)
+  "T when a remarks entry should be emitted given CHANGED status and MODE."
+  (or (eq mode :all)
+      (and changed      (eq mode :changed))
+      (and (not changed)(eq mode :missed))))
+
+(defun %opt-run-passes-once (prog passes reporting trace)
+  "Apply PASSES once, mutating TRACE in place and emitting via REPORTING.
+Returns the final instruction list."
+  (let ((current prog))
+    (dolist (f passes current)
+      (let* ((before       current)
              (before-count (length before))
-             (start (get-internal-real-time))
-             (next (funcall f current))
-             (elapsed-seconds (/ (- (get-internal-real-time) start)
-                                 internal-time-units-per-second))
-             (dur-us (round (* elapsed-seconds 1000000)))
-             (after-count (length next))
-             (changed (not (opt-converged-p before next)))
-             (name (%opt-pass-name-string f)))
-        (when print-pass-timings
-          (format timing-stream "~A: ~,6Fs~%" f elapsed-seconds))
-        (when print-pass-stats
-          (format stats-stream "~A: before=~D after=~D delta=~D changed=~A~%"
+             (start        (get-internal-real-time))
+             (next         (funcall f current))
+             (elapsed-s    (/ (- (get-internal-real-time) start)
+                              internal-time-units-per-second))
+             (dur-us       (round (* elapsed-s 1000000)))
+             (after-count  (length next))
+             (changed      (not (opt-converged-p before next)))
+             (name         (%opt-pass-name-string f)))
+        (when (opt-report-print-pass-timings reporting)
+          (format (opt-report-timing-stream reporting) "~A: ~,6Fs~%" f elapsed-s))
+        (when (opt-report-print-pass-stats reporting)
+          (format (opt-report-stats-stream reporting)
+                  "~A: before=~D after=~D delta=~D changed=~A~%"
                   f before-count after-count (- after-count before-count)
                   (if changed "yes" "no")))
-        (when (and print-opt-remarks
-                   (or (eq opt-remarks-mode :all)
-                       (and changed (eq opt-remarks-mode :changed))
-                       (and (not changed) (eq opt-remarks-mode :missed))))
-          (format opt-remarks-stream "~A: ~A~%" f (if changed "changed" "missed")))
-        (when trace-enabled
-          (push (list :name name :ts-us ts-us :dur-us dur-us) events)
-          (incf ts-us dur-us))
-        (setf current next)))
-    (values current events ts-us)))
+        (when (and (opt-report-print-opt-remarks reporting)
+                   (%opt-remarks-applies-p changed (opt-report-opt-remarks-mode reporting)))
+          (format (opt-report-opt-remarks-stream reporting)
+                  "~A: ~A~%" f (if changed "changed" "missed")))
+        (when (opt-trace-enabled trace)
+          (push (list :name name :ts-us (opt-trace-ts-us trace) :dur-us dur-us)
+                (opt-trace-events trace))
+          (incf (opt-trace-ts-us trace) dur-us))
+        (setf current next)))))
 
 (defun opt-converged-p (prev next)
   "T if a pass-cycle produced no semantic change in the instruction stream."
@@ -219,39 +243,44 @@ the e-graph engine.")
 (defvar *skip-optimizer-passes* nil
   "When non-NIL, optimize-instructions returns its input unchanged.")
 
-(defun optimize-instructions (instructions &key (max-iterations 20) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
+(defvar *verify-optimizer-instructions* nil
+  "When non-NIL, run opt-verify-instructions after every convergence pass to
+catch ill-formed sequences (duplicate labels, unknown jump targets, use-before-define).")
+
+(defun optimize-instructions (instructions &key (max-iterations 20) pass-pipeline
+                                                print-pass-timings timing-stream
+                                                print-pass-stats   stats-stream
+                                                print-opt-remarks  opt-remarks-stream
+                                                (opt-remarks-mode :all)
+                                                trace-json-stream)
   "Run the full multi-pass optimization pipeline on a VM instruction sequence.
-Runs until no changes or MAX-ITERATIONS reached.
-When *skip-optimizer-passes* is non-NIL, returns (values instructions nil)
-immediately without running any passes."
+Iterates until convergence or MAX-ITERATIONS. Returns optimized instructions.
+When *skip-optimizer-passes* is non-NIL, returns instructions unchanged."
   (when *skip-optimizer-passes*
     (return-from optimize-instructions (values instructions nil)))
-  (let ((prog instructions)
-        (max-iterations (if (eq max-iterations :adaptive)
-                            (opt-adaptive-max-iterations instructions)
-                            max-iterations))
-        (passes (opt-resolve-pass-pipeline pass-pipeline))
-        (timing-stream       (or timing-stream *standard-output*))
-        (opt-remarks-stream  (or opt-remarks-stream *standard-output*))
-        (stats-stream        (or stats-stream *standard-output*))
-        (trace-events nil)
-        (trace-ts-us 0))
-    (loop repeat max-iterations
+  (let* ((reporting (make-opt-reporting-options
+                     :print-pass-timings print-pass-timings
+                     :timing-stream      (or timing-stream *standard-output*)
+                     :print-pass-stats   print-pass-stats
+                     :stats-stream       (or stats-stream *standard-output*)
+                     :print-opt-remarks  print-opt-remarks
+                     :opt-remarks-stream (or opt-remarks-stream *standard-output*)
+                     :opt-remarks-mode   opt-remarks-mode))
+         (trace     (make-opt-trace-state
+                     :enabled     (not (null trace-json-stream))
+                     :json-stream trace-json-stream))
+         (prog      instructions)
+         (max-iter  (if (eq max-iterations :adaptive)
+                        (opt-adaptive-max-iterations instructions)
+                        max-iterations))
+         (passes    (opt-resolve-pass-pipeline pass-pipeline)))
+    (loop repeat max-iter
           for prev = prog
-          do (multiple-value-setq (prog trace-events trace-ts-us)
-               (opt-run-passes-once-with-reporting prog passes
-                                                   :print-pass-timings print-pass-timings
-                                                   :timing-stream timing-stream
-                                                   :print-pass-stats print-pass-stats
-                                                   :stats-stream stats-stream
-                                                   :print-opt-remarks print-opt-remarks
-                                                   :opt-remarks-stream opt-remarks-stream
-                                                   :opt-remarks-mode opt-remarks-mode
-                                                   :trace-enabled (not (null trace-json-stream))
-                                                   :trace-events trace-events
-                                                   :initial-ts-us trace-ts-us))
+          do (setf prog (%opt-run-passes-once prog passes reporting trace))
+             (when *verify-optimizer-instructions*
+               (opt-verify-instructions prog))
           when (opt-converged-p prev prog)
           return prog)
     (when trace-json-stream
-      (%opt-write-trace-json trace-json-stream (nreverse trace-events)))
+      (%opt-write-trace-json trace-json-stream (nreverse (opt-trace-events trace))))
     (opt-pass-leaf-detect prog)))

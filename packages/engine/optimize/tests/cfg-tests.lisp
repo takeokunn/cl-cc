@@ -65,15 +65,21 @@
           (make-vm-ret      :reg :r1))))
 
 ;;; ─── Basic CFG Construction ──────────────────────────────────────────────
-(deftest cfg-basic-structure-cases
-  "CFG structure: linear→1 block with entry+instructions; empty→1 block; branch→≥2 blocks."
+(deftest cfg-linear-has-single-block
+  "A purely linear instruction sequence produces exactly one basic block with an entry and instructions."
   (let* ((cfg   (make-test-cfg-linear))
          (entry (cl-cc/optimize::cfg-entry cfg)))
     (assert-= 1 (cl-cc/optimize::cfg-block-count cfg))
     (assert-true entry)
-    (assert-true (cl-cc::bb-instructions entry)))
+    (assert-true (cl-cc::bb-instructions entry))))
+
+(deftest cfg-empty-has-entry-block
+  "An empty instruction list still produces a CFG with a valid entry block."
   (let ((cfg (cl-cc/optimize::cfg-build nil)))
-    (assert-true (cl-cc/optimize::cfg-entry cfg)))
+    (assert-true (cl-cc/optimize::cfg-entry cfg))))
+
+(deftest cfg-branch-has-multiple-blocks
+  "A conditional branch instruction produces at least 2 basic blocks."
   (let ((cfg (make-test-cfg-branch)))
     (assert-true (>= (cl-cc/optimize::cfg-block-count cfg) 2))))
 (deftest-each cfg-branch-labels-resolved
@@ -85,13 +91,16 @@
     (assert-true (cl-cc/optimize::cfg-get-block-by-label cfg label-name))))
 
 ;;; ─── Predecessor / Successor Edges ──────────────────────────────────────
-(deftest cfg-branch-edge-cases
-  "Branch CFG edges: entry has 2 successors; exit block has ≥1 predecessor."
+(deftest cfg-branch-entry-has-two-successors
+  "The entry block of a branch CFG has exactly 2 successors (then and else paths)."
   (let* ((cfg   (make-test-cfg-branch))
          (entry (cl-cc/optimize::cfg-entry cfg)))
-    (assert-= 2 (length (cl-cc::bb-successors entry))))
+    (assert-= 2 (length (cl-cc::bb-successors entry)))))
+
+(deftest cfg-branch-exit-has-predecessor
+  "The exit block of a branch CFG has at least one predecessor (the join point)."
   (let* ((cfg  (make-test-cfg-branch))
-         (exit  (cl-cc/optimize::cfg-get-block-by-label cfg "exit")))
+         (exit (cl-cc/optimize::cfg-get-block-by-label cfg "exit")))
     (when exit
       (assert-true (>= (length (cl-cc::bb-predecessors exit)) 1)))))
 
@@ -199,25 +208,31 @@
     (assert-true (>= (length flat) (length orig)))))
 
 ;;; ─── cfg-idf (Iterated Dominance Frontier) ──────────────────────────────────
-(deftest cfg-idf-cases
-  "cfg-idf: empty set→nil; linear CFG entry→empty list; branch entry→list (join in IDF)."
-  (assert-null (cl-cc/optimize::cfg-idf nil))
-  (let* ((cfg (make-test-cfg-linear)))
-    (cl-cc/optimize::cfg-compute-dominators cfg)
-    (cl-cc/optimize::cfg-compute-dominance-frontiers cfg)
-    (let* ((entry (cl-cc/optimize::cfg-entry cfg))
-           (result (cl-cc/optimize::cfg-idf (list entry))))
-      (assert-true (listp result))))
-  (let* ((cfg (make-test-cfg-branch)))
-    (cl-cc/optimize::cfg-compute-dominators cfg)
-    (cl-cc/optimize::cfg-compute-dominance-frontiers cfg)
-    (let* ((entry (cl-cc/optimize::cfg-entry cfg))
-           (result (cl-cc/optimize::cfg-idf (list entry))))
-      (assert-true (listp result)))))
+(deftest cfg-idf-empty-input-returns-nil
+  "cfg-idf on an empty block set returns nil."
+  (assert-null (cl-cc/optimize::cfg-idf nil)))
+
+(deftest cfg-idf-linear-entry-returns-list
+  "cfg-idf on the entry of a linear CFG returns a list (empty dominance frontier)."
+  (let* ((cfg   (make-test-cfg-linear))
+         (_     (cl-cc/optimize::cfg-compute-dominators cfg))
+         (_     (cl-cc/optimize::cfg-compute-dominance-frontiers cfg))
+         (entry (cl-cc/optimize::cfg-entry cfg)))
+    (declare (ignore _ _))
+    (assert-true (listp (cl-cc/optimize::cfg-idf (list entry))))))
+
+(deftest cfg-idf-branch-entry-returns-list
+  "cfg-idf on the entry of a branch CFG returns a list (join point is in frontier)."
+  (let* ((cfg   (make-test-cfg-branch))
+         (_     (cl-cc/optimize::cfg-compute-dominators cfg))
+         (_     (cl-cc/optimize::cfg-compute-dominance-frontiers cfg))
+         (entry (cl-cc/optimize::cfg-entry cfg)))
+    (declare (ignore _ _))
+    (assert-true (listp (cl-cc/optimize::cfg-idf (list entry))))))
 
 ;;; ─── %cfg-fallthrough-edge / %cfg-jump-target-edge ───────────────────────
-(deftest cfg-edge-construction-cases
-  "%cfg-fallthrough-edge: adds edge when next-start exists, no-op when nil. %cfg-jump-target-edge wires edge to label."
+(deftest cfg-fallthrough-edge-adds-when-next-start-exists
+  "%cfg-fallthrough-edge adds a successor/predecessor edge when a next-start block exists."
   (let* ((g   (cl-cc/optimize::make-cfg))
          (b1  (cl-cc/optimize::cfg-new-block g))
          (b2  (cl-cc/optimize::cfg-new-block g))
@@ -226,55 +241,69 @@
                 ht)))
     (cl-cc/optimize::%cfg-fallthrough-edge b1 1 bbs)
     (assert-true (member b2 (cl-cc::bb-successors b1) :test #'eq))
-    (assert-true (member b1 (cl-cc::bb-predecessors b2) :test #'eq)))
-  (let* ((g  (cl-cc/optimize::make-cfg))
-         (b1 (cl-cc/optimize::cfg-new-block g))
+    (assert-true (member b1 (cl-cc::bb-predecessors b2) :test #'eq))))
+
+(deftest cfg-fallthrough-edge-noop-when-nil
+  "%cfg-fallthrough-edge is a no-op when next-start is nil (block has no fall-through)."
+  (let* ((g   (cl-cc/optimize::make-cfg))
+         (b1  (cl-cc/optimize::cfg-new-block g))
          (bbs (make-hash-table)))
     (cl-cc/optimize::%cfg-fallthrough-edge b1 nil bbs)
-    (assert-null (cl-cc::bb-successors b1)))
+    (assert-null (cl-cc::bb-successors b1))))
+
+(deftest cfg-jump-target-edge-wires-to-label
+  "%cfg-jump-target-edge adds an edge from the source block to the named label's block."
   (let* ((g    (cl-cc/optimize::make-cfg))
          (src  (cl-cc/optimize::cfg-new-block g))
          (dest (cl-cc/optimize::cfg-new-block g :label (make-vm-label :name "tgt"))))
     (declare (ignore dest))
-    (let ((jump (make-vm-jump :label "tgt")))
-      (cl-cc/optimize::%cfg-jump-target-edge src jump g)
-      (let ((tgt (cl-cc/optimize::cfg-get-block-by-label g "tgt")))
-        (assert-true (member tgt (cl-cc::bb-successors src) :test #'eq))))))
+    (cl-cc/optimize::%cfg-jump-target-edge src (make-vm-jump :label "tgt") g)
+    (let ((tgt (cl-cc/optimize::cfg-get-block-by-label g "tgt")))
+      (assert-true (member tgt (cl-cc::bb-successors src) :test #'eq)))))
 
 ;;; ─── %cfg-replace-successor / %cfg-replace-predecessor / %cfg-replace-terminator
-(deftest cfg-replace-edge-cases
-  "%cfg-replace-successor/-predecessor swap one block; %cfg-replace-terminator swaps the terminator instruction."
-  (let* ((blk  (make-instance 'cl-cc/optimize::basic-block))
-         (old  (make-instance 'cl-cc/optimize::basic-block))
-         (new  (make-instance 'cl-cc/optimize::basic-block)))
+(deftest cfg-replace-successor-swaps-block
+  "%cfg-replace-successor replaces old with new in the successors list."
+  (let* ((blk (make-instance 'cl-cc/optimize::basic-block))
+         (old (make-instance 'cl-cc/optimize::basic-block))
+         (new (make-instance 'cl-cc/optimize::basic-block)))
     (setf (cl-cc/optimize::bb-successors blk) (list old))
     (cl-cc/optimize::%cfg-replace-successor blk old new)
     (assert-false (member old (cl-cc/optimize::bb-successors blk) :test #'eq))
-    (assert-true  (member new (cl-cc/optimize::bb-successors blk) :test #'eq)))
-  (let* ((blk  (make-instance 'cl-cc/optimize::basic-block))
-         (old  (make-instance 'cl-cc/optimize::basic-block))
-         (new  (make-instance 'cl-cc/optimize::basic-block)))
+    (assert-true  (member new (cl-cc/optimize::bb-successors blk) :test #'eq))))
+
+(deftest cfg-replace-predecessor-swaps-block
+  "%cfg-replace-predecessor replaces old with new in the predecessors list."
+  (let* ((blk (make-instance 'cl-cc/optimize::basic-block))
+         (old (make-instance 'cl-cc/optimize::basic-block))
+         (new (make-instance 'cl-cc/optimize::basic-block)))
     (setf (cl-cc/optimize::bb-predecessors blk) (list old))
     (cl-cc/optimize::%cfg-replace-predecessor blk old new)
     (assert-false (member old (cl-cc/optimize::bb-predecessors blk) :test #'eq))
-    (assert-true  (member new (cl-cc/optimize::bb-predecessors blk) :test #'eq)))
-  (let* ((blk  (make-instance 'cl-cc/optimize::basic-block))
-         (old  (make-vm-jump :label "a"))
-         (new  (make-vm-jump :label "b")))
+    (assert-true  (member new (cl-cc/optimize::bb-predecessors blk) :test #'eq))))
+
+(deftest cfg-replace-terminator-swaps-instruction
+  "%cfg-replace-terminator replaces the old terminator instruction with a new one."
+  (let* ((blk (make-instance 'cl-cc/optimize::basic-block))
+         (old (make-vm-jump :label "a"))
+         (new (make-vm-jump :label "b")))
     (setf (cl-cc/optimize::bb-instructions blk) (list old))
     (cl-cc/optimize::%cfg-replace-terminator blk old new)
     (assert-equal (list new) (cl-cc/optimize::bb-instructions blk))))
 
 ;;; ─── %cfg-ensure-label ────────────────────────────────────────────────────
-(deftest cfg-ensure-label-cases
-  "%cfg-ensure-label: assigns a fresh label when absent; returns the existing label when present."
-  (let* ((g    (cl-cc/optimize::make-cfg))
-         (blk  (cl-cc/optimize::cfg-new-block g)))
+(deftest cfg-ensure-label-creates-fresh-when-absent
+  "%cfg-ensure-label assigns a new vm-label when bb-label is nil."
+  (let* ((g   (cl-cc/optimize::make-cfg))
+         (blk (cl-cc/optimize::cfg-new-block g)))
     (setf (cl-cc/optimize::bb-label blk) nil)
     (let ((lbl (cl-cc/optimize::%cfg-ensure-label blk g "test")))
       (assert-true (cl-cc/vm::vm-label-p lbl))
-      (assert-eq lbl (cl-cc/optimize::bb-label blk))))
-  (let* ((g    (cl-cc/optimize::make-cfg))
-         (blk  (cl-cc/optimize::cfg-new-block g :label (make-vm-label :name "existing"))))
+      (assert-eq lbl (cl-cc/optimize::bb-label blk)))))
+
+(deftest cfg-ensure-label-returns-existing
+  "%cfg-ensure-label returns the pre-existing label unchanged when one is already set."
+  (let* ((g   (cl-cc/optimize::make-cfg))
+         (blk (cl-cc/optimize::cfg-new-block g :label (make-vm-label :name "existing"))))
     (let ((lbl (cl-cc/optimize::%cfg-ensure-label blk g "test")))
       (assert-equal "existing" (cl-cc/vm::vm-name lbl)))))

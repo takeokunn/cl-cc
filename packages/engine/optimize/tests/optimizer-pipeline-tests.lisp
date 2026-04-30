@@ -24,34 +24,52 @@
 
 ;;; ─── opt-parse-pass-pipeline-string ─────────────────────────────────────────
 
-(deftest parse-pass-pipeline-string-cases
-  "opt-parse-pass-pipeline-string: single pass; multi-pass; trims whitespace; empty → nil."
+(deftest parse-pass-pipeline-string-single-pass
+  "opt-parse-pass-pipeline-string parses a single pass name into a one-element list."
   (let ((result (cl-cc/optimize::opt-parse-pass-pipeline-string "sccp")))
     (assert-= 1 (length result))
-    (assert-eq :SCCP (first result)))
+    (assert-eq :SCCP (first result))))
+
+(deftest parse-pass-pipeline-string-multi-pass-comma-separated
+  "opt-parse-pass-pipeline-string parses a comma-separated multi-pass string into keywords."
   (let ((result (cl-cc/optimize::opt-parse-pass-pipeline-string "sccp,cse,dce")))
     (assert-= 3 (length result))
     (assert-eq :SCCP (first  result))
     (assert-eq :CSE  (second result))
-    (assert-eq :DCE  (third  result)))
+    (assert-eq :DCE  (third  result))))
+
+(deftest parse-pass-pipeline-string-trims-whitespace
+  "opt-parse-pass-pipeline-string trims whitespace around pass names."
   (let ((result (cl-cc/optimize::opt-parse-pass-pipeline-string " sccp , cse ")))
     (assert-= 2 (length result))
     (assert-eq :SCCP (first result))
-    (assert-eq :CSE  (second result)))
+    (assert-eq :CSE  (second result))))
+
+(deftest parse-pass-pipeline-string-empty-returns-nil
+  "opt-parse-pass-pipeline-string on an empty string returns nil."
   (assert-null (cl-cc/optimize::opt-parse-pass-pipeline-string "")))
 
 ;;; ─── opt-converged-p ─────────────────────────────────────────────────────────
 
-(deftest opt-converged-p-cases
-  "opt-converged-p: T for empty; T for same objects; T for structurally equal streams; NIL for different length."
-  (assert-true (cl-cc/optimize::opt-converged-p nil nil))
+(deftest opt-converged-p-both-nil-returns-true
+  "opt-converged-p returns T when both sequences are nil (empty)."
+  (assert-true (cl-cc/optimize::opt-converged-p nil nil)))
+
+(deftest opt-converged-p-same-object-returns-true
+  "opt-converged-p returns T when both sequences are the same list object."
   (let* ((i1 (make-vm-const :dst :r0 :value 1))
          (i2 (make-vm-ret  :reg :r0))
          (prog (list i1 i2)))
-    (assert-true (cl-cc/optimize::opt-converged-p prog prog)))
+    (assert-true (cl-cc/optimize::opt-converged-p prog prog))))
+
+(deftest opt-converged-p-structurally-equal-returns-true
+  "opt-converged-p returns T for structurally equal (but distinct) instruction lists."
   (let* ((a (make-vm-const :dst :r0 :value 1))
          (b (make-vm-const :dst :r0 :value 1)))
-    (assert-true (cl-cc/optimize::opt-converged-p (list a) (list b))))
+    (assert-true (cl-cc/optimize::opt-converged-p (list a) (list b)))))
+
+(deftest opt-converged-p-different-length-returns-false
+  "opt-converged-p returns NIL when the two sequences have different lengths."
   (let* ((i (make-vm-const :dst :r0 :value 1)))
     (assert-false (cl-cc/optimize::opt-converged-p (list i) (list i i)))))
 
@@ -82,10 +100,13 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
 
 ;;; ─── opt-verify-instructions ─────────────────────────────────────────────────
 
-(deftest verify-instructions-valid-cases
-  "opt-verify-instructions returns T for simple and jump-with-known-label sequences."
+(deftest verify-instructions-simple-sequence-passes
+  "opt-verify-instructions returns T for a simple const+ret sequence."
   (assert-true (cl-cc/optimize::opt-verify-instructions
-                (list (make-vm-const :dst :r0 :value 1) (make-vm-ret :reg :r0))))
+                (list (make-vm-const :dst :r0 :value 1) (make-vm-ret :reg :r0)))))
+
+(deftest verify-instructions-jump-with-known-label-passes
+  "opt-verify-instructions returns T when a jump target label is defined in the sequence."
   (assert-true (cl-cc/optimize::opt-verify-instructions
                 (list (make-vm-const :dst :r0 :value 1)
                       (make-vm-jump  :label "target")
@@ -106,19 +127,31 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
 
 ;;; ─── opt-resolve-pass-pipeline ───────────────────────────────────────────
 
-(deftest resolve-pass-pipeline-cases
-  "opt-resolve-pass-pipeline: nil→convergence passes; fns→identity; keywords→resolve; string→parse+resolve; unknown→error."
+(deftest resolve-pass-pipeline-nil-returns-convergence-passes
+  "opt-resolve-pass-pipeline on nil returns *opt-convergence-passes*."
   (assert-eq cl-cc/optimize::*opt-convergence-passes*
-             (cl-cc/optimize::opt-resolve-pass-pipeline nil))
+             (cl-cc/optimize::opt-resolve-pass-pipeline nil)))
+
+(deftest resolve-pass-pipeline-functions-pass-through-unchanged
+  "opt-resolve-pass-pipeline passes function objects through as-is."
   (let* ((fn (lambda (x) x))
          (pipeline (list fn)))
-    (assert-eq fn (first (cl-cc/optimize::opt-resolve-pass-pipeline pipeline))))
+    (assert-eq fn (first (cl-cc/optimize::opt-resolve-pass-pipeline pipeline)))))
+
+(deftest resolve-pass-pipeline-keywords-resolve-to-functions
+  "opt-resolve-pass-pipeline resolves keyword pass names to function objects."
   (let ((result (cl-cc/optimize::opt-resolve-pass-pipeline (list :fold :dce))))
     (assert-= 2 (length result))
-    (assert-true (every #'functionp result)))
+    (assert-true (every #'functionp result))))
+
+(deftest resolve-pass-pipeline-string-parses-and-resolves
+  "opt-resolve-pass-pipeline on a comma-separated string parses and resolves to functions."
   (let ((result (cl-cc/optimize::opt-resolve-pass-pipeline "fold,dce")))
     (assert-= 2 (length result))
-    (assert-true (every #'functionp result)))
+    (assert-true (every #'functionp result))))
+
+(deftest resolve-pass-pipeline-unknown-pass-signals-error
+  "opt-resolve-pass-pipeline signals an error for an unregistered pass keyword."
   (assert-signals error
     (cl-cc/optimize::opt-resolve-pass-pipeline (list :nonexistent-pass))))
 
@@ -140,6 +173,20 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
   (assert-false (member #'cl-cc/optimize::opt-pass-strength-reduce cl-cc/optimize::*opt-convergence-passes*))
   (assert-equal '(:prolog-rewrite :inline :sccp)
                 (subseq cl-cc/optimize::*opt-default-convergence-pass-keys* 0 3)))
+
+;;; ─── *verify-optimizer-instructions* integration ──────────────────────────
+
+(deftest verify-optimizer-flag-runs-verifier-on-valid-input
+  "*verify-optimizer-instructions* T causes opt-verify-instructions to run; valid input succeeds."
+  (let ((cl-cc/optimize::*verify-optimizer-instructions* t)
+        (insts (list (make-vm-const :dst :r0 :value 42) (make-vm-ret :reg :r0))))
+    (assert-true (listp (cl-cc/optimize::optimize-instructions insts)))))
+
+(deftest verify-optimizer-flag-nil-skips-verifier
+  "*verify-optimizer-instructions* NIL causes optimize-instructions to skip verification."
+  (let ((cl-cc/optimize::*verify-optimizer-instructions* nil)
+        (insts (list (make-vm-const :dst :r0 :value 1) (make-vm-ret :reg :r0))))
+    (assert-true (listp (cl-cc/optimize::optimize-instructions insts)))))
 
 ;;; ─── Prolog rewrite stage ──────────────────────────────────────────────────
 

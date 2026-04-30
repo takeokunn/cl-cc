@@ -161,9 +161,12 @@
 
 ;;; ─── opt-inst-dst ─────────────────────────────────────────────────────────
 
-(deftest opt-inst-dst-cases
-  "opt-inst-dst returns :dst register when present; nil for instructions without one."
-  (assert-eq :r3 (cl-cc/optimize::opt-inst-dst (make-vm-add :dst :r3 :lhs :r1 :rhs :r2)))
+(deftest opt-inst-dst-returns-dst-register
+  "opt-inst-dst returns the :dst register for instructions that have one."
+  (assert-eq :r3 (cl-cc/optimize::opt-inst-dst (make-vm-add :dst :r3 :lhs :r1 :rhs :r2))))
+
+(deftest opt-inst-dst-nil-for-no-dst-instruction
+  "opt-inst-dst returns nil for instructions (like vm-jump) that have no destination register."
   (assert-null (cl-cc/optimize::opt-inst-dst (make-vm-jump :label "end"))))
 
 ;;; ─── opt-inst-read-regs ───────────────────────────────────────────────────

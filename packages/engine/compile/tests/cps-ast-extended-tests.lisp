@@ -19,12 +19,15 @@
 
 ;;; ─── ast-quote ────────────────────────────────────────────────────────────
 
-(deftest cps-quote-cases
-  "CPS transform of ast-quote: produces (funcall k (quote val)); preserves list values."
+(deftest cps-quote-symbol-produces-funcall-k-form
+  "CPS transform of ast-quote with a symbol produces (funcall k (quote val))."
   (let ((result (cps-with-k (cl-cc/ast::make-ast-quote :value 'hello))))
     (assert-eq 'funcall (car result))
     (assert-eq 'k (second result))
-    (assert-equal '(quote hello) (third result)))
+    (assert-equal '(quote hello) (third result))))
+
+(deftest cps-quote-list-preserves-list-value
+  "CPS transform of ast-quote with a list preserves the quoted list in third position."
   (let ((result (cps-with-k (cl-cc/ast::make-ast-quote :value '(a b c)))))
     (assert-equal '(quote (a b c)) (third result))))
 
@@ -65,13 +68,16 @@
 
 ;;; ─── ast-values ──────────────────────────────────────────────────────────
 
-(deftest cps-values-cases
-  "CPS transform of ast-values: empty→(funcall k nil); single→multiple-value-call."
+(deftest cps-values-empty-forms-produces-funcall-k-nil
+  "CPS transform of ast-values with no forms produces (funcall k nil)."
   (let* ((node (cl-cc/ast::make-ast-values :forms nil))
          (result (cps-with-k node)))
     (assert-eq 'funcall (car result))
     (assert-eq 'k (second result))
-    (assert-null (third result)))
+    (assert-null (third result))))
+
+(deftest cps-values-single-form-produces-multiple-value-call
+  "CPS transform of ast-values with one form produces a form containing multiple-value-call."
   (let* ((node (cl-cc/ast::make-ast-values
                 :forms (list (cl-cc/ast::make-ast-int :value 42))))
          (result (cps-with-k node)))
@@ -187,9 +193,12 @@
 
 ;;; ─── cps-transform* ───────────────────────────────────────────────────────
 
-(deftest cps-transform-star-cases
-  "cps-transform*: sexp→cons; AST node→(lambda (k) ...) with 1 param."
-  (assert-true (consp (cl-cc/compile::cps-transform* '42)))
+(deftest cps-transform-star-sexp-returns-cons
+  "cps-transform* on a plain s-expression returns a cons."
+  (assert-true (consp (cl-cc/compile::cps-transform* '42))))
+
+(deftest cps-transform-star-ast-node-returns-lambda-with-one-param
+  "cps-transform* on an AST node returns a (lambda (k) ...) form with one parameter."
   (let* ((node (cl-cc/ast::make-ast-quote :value 'x))
          (result (cl-cc/compile::cps-transform* node)))
     (assert-eq 'lambda (car result))
@@ -239,8 +248,8 @@
 
 ;;; ─── cps-transform* shared entrypoint ──────────────────────────────────────
 
-(deftest cps-transform*-shared-entrypoint-cases
-  "cps-transform* remains the shared entrypoint for AST nodes and s-expressions."
+(deftest cps-transform*-handles-ast-node-and-sexp
+  "cps-transform* returns a truthy result for both AST nodes and plain s-expressions."
   (assert-true (cl-cc/compile::cps-transform* (cl-cc/ast::make-ast-int :value 1)))
   (assert-true (cl-cc/compile::cps-transform* '42)))
 
@@ -252,7 +261,10 @@ cps-transform-eval returns the raw CPS lambda; other callers depend on that
 shape, so we unwrap locally in these tests rather than changing the function."
   (if (functionp v) (funcall v #'identity) v))
 
-(deftest cps-transform-eval-cases
-  "cps-transform-eval: integer literal → 42; arithmetic (+ 3 4) → 7."
-  (assert-= 42 (%cps-unwrap (cl-cc/compile::cps-transform-eval '42)))
-  (assert-= 7  (%cps-unwrap (cl-cc/compile::cps-transform-eval '(+ 3 4)))))
+(deftest cps-transform-eval-integer-literal-returns-value
+  "cps-transform-eval on an integer literal evaluates to that integer."
+  (assert-= 42 (%cps-unwrap (cl-cc/compile::cps-transform-eval '42))))
+
+(deftest cps-transform-eval-arithmetic-expression-returns-result
+  "cps-transform-eval on (+ 3 4) evaluates to 7."
+  (assert-= 7 (%cps-unwrap (cl-cc/compile::cps-transform-eval '(+ 3 4)))))

@@ -1,7 +1,8 @@
 ;;;; framework-parallel-runner.lisp — Parallel worker pool, CPU detection, run-suite, run-tests
 (in-package :cl-cc/test)
 
-(defvar *cpu-detect-command-timeout-seconds*)
+(defparameter *cpu-detect-command-timeout-seconds* 2
+  "Timeout in seconds for external CPU-count detection commands.")
 
 ;;; ------------------------------------------------------------
 ;;; Parallel Worker Pool
@@ -65,9 +66,11 @@ sequentially in dependency-safe input order."
       results)))
 
 (defun %default-run-command-output (cmd)
-  "Run CMD and return its captured output as a string."
+  "Run CMD and return its captured output as a string, bounded by
+*cpu-detect-command-timeout-seconds* to prevent hung subprocesses."
   (with-output-to-string (stream)
-    (uiop:run-program cmd :output stream :ignore-error-status t)))
+    (sb-ext:with-timeout *cpu-detect-command-timeout-seconds*
+      (uiop:run-program cmd :output stream :ignore-error-status t))))
 
 (defparameter *run-command-output-fn* #'%default-run-command-output
   "Function of one argument CMD used by `%run-command-output'.")
@@ -257,5 +260,3 @@ on cold cache or when the warmup is hanging)."
       (error "Suite ~A::~A not found (package not loaded?)"
              package-name symbol-name))
     sym))
-(defparameter *cpu-detect-command-timeout-seconds* 2
-  "Timeout in seconds for external CPU-count detection commands.")

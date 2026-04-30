@@ -38,18 +38,23 @@
 ;;; Card Table: rt-card-index
 ;;; ------------------------------------------------------------
 
-(deftest heap-trace-card-index-cases
-  "rt-card-index returns 0 for old-base and for mid-card addresses (card-size=64)."
+(deftest heap-trace-card-index-at-old-base-is-zero
+  "rt-card-index at old-base address returns 0."
   (let* ((heap     (%make-trace-heap))
          (old-base (cl-cc/runtime:rt-heap-old-base heap)))
-    (assert-= 0 (cl-cc/runtime:rt-card-index heap old-base))
+    (assert-= 0 (cl-cc/runtime:rt-card-index heap old-base))))
+
+(deftest heap-trace-card-index-within-first-card-is-zero
+  "rt-card-index 10 bytes past old-base returns 0 (same card, card-size=64)."
+  (let* ((heap     (%make-trace-heap))
+         (old-base (cl-cc/runtime:rt-heap-old-base heap)))
     (assert-= 0 (cl-cc/runtime:rt-card-index heap (+ old-base 10)))))
 
 ;;; ------------------------------------------------------------
 ;;; Card Table: mark / clear / dirty-p
 ;;; ------------------------------------------------------------
 
-(deftest heap-trace-card-lifecycle-cases
+(deftest heap-trace-card-mark-clear-lifecycle
   "Card starts clean; mark-dirty makes dirty-p true; clear reverts it; clear-all clears all."
   (let* ((heap     (%make-trace-heap))
          (old-base (cl-cc/runtime:rt-heap-old-base heap)))
@@ -107,32 +112,50 @@
 ;;; rt-object-pointer-slots
 ;;; ------------------------------------------------------------
 
-(deftest heap-trace-pointer-slots-heap-types-cases
-  "Cons→(1 2); symbol→(1 2 3); closure-4→(2 3); closure-2→(); array-4→(2 3); other-3→(1 2)."
+(deftest heap-trace-pointer-slots-cons-tag
+  "Cons (size=3, tag=1): pointer slots are (1 2) — car and cdr."
   (let ((heap (%make-trace-heap)))
     (%write-obj-header heap 0 3 1)
-    (assert-equal '(1 2) (cl-cc/runtime:rt-object-pointer-slots heap 0)))
+    (assert-equal '(1 2) (cl-cc/runtime:rt-object-pointer-slots heap 0))))
+
+(deftest heap-trace-pointer-slots-symbol-tag
+  "Symbol (size=4, tag=2): pointer slots are (1 2 3) — name, pkg, value."
   (let ((heap (%make-trace-heap)))
     (%write-obj-header heap 0 4 2)
-    (assert-equal '(1 2 3) (cl-cc/runtime:rt-object-pointer-slots heap 0)))
+    (assert-equal '(1 2 3) (cl-cc/runtime:rt-object-pointer-slots heap 0))))
+
+(deftest heap-trace-pointer-slots-closure-4-tag
+  "Closure-4 (size=4, tag=3): pointer slots are (2 3) — env and code."
   (let ((heap (%make-trace-heap)))
     (%write-obj-header heap 0 4 3)
-    (assert-equal '(2 3) (cl-cc/runtime:rt-object-pointer-slots heap 0)))
+    (assert-equal '(2 3) (cl-cc/runtime:rt-object-pointer-slots heap 0))))
+
+(deftest heap-trace-pointer-slots-closure-2-tag
+  "Closure-2 (size=2, tag=3): pointer slots are () — no pointer fields."
   (let ((heap (%make-trace-heap)))
     (%write-obj-header heap 0 2 3)
-    (assert-equal '() (cl-cc/runtime:rt-object-pointer-slots heap 0)))
+    (assert-equal '() (cl-cc/runtime:rt-object-pointer-slots heap 0))))
+
+(deftest heap-trace-pointer-slots-array-4-tag
+  "Array-4 (size=4, tag=5): pointer slots are (2 3) — elements."
   (let ((heap (%make-trace-heap)))
     (%write-obj-header heap 0 4 5)
-    (assert-equal '(2 3) (cl-cc/runtime:rt-object-pointer-slots heap 0)))
+    (assert-equal '(2 3) (cl-cc/runtime:rt-object-pointer-slots heap 0))))
+
+(deftest heap-trace-pointer-slots-other-3-tag
+  "Other-3 (size=3, tag=7): pointer slots are (1 2)."
   (let ((heap (%make-trace-heap)))
     (%write-obj-header heap 0 3 7)
     (assert-equal '(1 2) (cl-cc/runtime:rt-object-pointer-slots heap 0))))
 
-(deftest heap-trace-pointer-slots-nil-tag-cases
-  "String (tag=6) and unknown (tag=0) return NIL — no pointer slots."
+(deftest heap-trace-pointer-slots-string-tag-returns-nil
+  "String (size=5, tag=6): rt-object-pointer-slots returns nil."
   (let ((heap (%make-trace-heap)))
     (%write-obj-header heap 0 5 6)
-    (assert-equal nil (cl-cc/runtime:rt-object-pointer-slots heap 0)))
+    (assert-equal nil (cl-cc/runtime:rt-object-pointer-slots heap 0))))
+
+(deftest heap-trace-pointer-slots-unknown-tag-returns-nil
+  "Unknown object (size=2, tag=0): rt-object-pointer-slots returns nil."
   (let ((heap (%make-trace-heap)))
     (%write-obj-header heap 0 2 0)
     (assert-equal nil (cl-cc/runtime:rt-object-pointer-slots heap 0))))

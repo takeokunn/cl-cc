@@ -58,18 +58,30 @@
 
 ;;; ─── read-from-string ─────────────────────────────────────────────────────
 
-(deftest io-read-from-string-cases
-  "vm-read-from-string reads numbers, symbols, lists, and returns nil for empty string."
-  (flet ((read-str (src vm)
-           (cl-cc/vm::vm-reg-set vm :R1 src)
-           (io-exec (cl-cc::make-vm-read-from-string-inst :dst :R0 :src :R1) vm)
-           (cl-cc/vm::vm-reg-get vm :R0)))
-    (assert-equal 42 (read-str "42" (io-vm)))
-    (assert-equal "HELLO" (symbol-name (read-str "hello" (io-vm))))
-    (let ((list-result (read-str "(1 2 3)" (io-vm))))
-      (assert-true (listp list-result))
-      (assert-equal 3 (length list-result)))
-    (assert-equal nil (read-str "" (io-vm)))))
+(defun %io-read-str (src)
+  "Execute vm-read-from-string on SRC in a fresh vm-state and return the result."
+  (let ((vm (io-vm)))
+    (cl-cc/vm::vm-reg-set vm :R1 src)
+    (io-exec (cl-cc::make-vm-read-from-string-inst :dst :R0 :src :R1) vm)
+    (cl-cc/vm::vm-reg-get vm :R0)))
+
+(deftest io-read-from-string-integer
+  "vm-read-from-string reads integer 42 from \"42\"."
+  (assert-equal 42 (%io-read-str "42")))
+
+(deftest io-read-from-string-symbol
+  "vm-read-from-string reads the symbol HELLO from \"hello\"."
+  (assert-equal "HELLO" (symbol-name (%io-read-str "hello"))))
+
+(deftest io-read-from-string-list
+  "vm-read-from-string reads a 3-element list from \"(1 2 3)\"."
+  (let ((result (%io-read-str "(1 2 3)")))
+    (assert-true (listp result))
+    (assert-equal 3 (length result))))
+
+(deftest io-read-from-string-empty
+  "vm-read-from-string returns nil for an empty string."
+  (assert-null (%io-read-str "")))
 
 ;;; ─── vm-allocate-file-handle ────────────────────────────────────────────────
 
@@ -125,10 +137,14 @@
   (let ((s (io-vm-full)))
     (assert-true (cl-cc/vm::vm-stream-open-p s handle))))
 
-(deftest io-stream-open-p-edge-cases
-  "vm-stream-open-p: nil for unknown handle; truthy for direct CL stream."
+(deftest io-stream-open-p-unknown-handle-returns-nil
+  "vm-stream-open-p returns NIL for a handle that was never opened."
   (let ((s (io-vm-full)))
-    (assert-equal nil (cl-cc/vm::vm-stream-open-p s 999))
+    (assert-equal nil (cl-cc/vm::vm-stream-open-p s 999))))
+
+(deftest io-stream-open-p-direct-cl-stream-returns-truthy
+  "vm-stream-open-p returns a truthy value when passed a direct CL stream object."
+  (let ((s (io-vm-full)))
     (assert-true (cl-cc/vm::vm-stream-open-p s (make-string-output-stream)))))
 
 ;;; ─── stream predicate instructions ─────────────────────────────────────────

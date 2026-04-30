@@ -21,26 +21,35 @@
   (expected rd)
   (assert-equal expected (cl-cc/emit::encode-movz rd 0)))
 
-(deftest a64-movz-field-cases
-  "MOVZ field encoding: imm16 at bits 20:5; hw at bits 22:21; max imm16 roundtrips."
+(deftest a64-movz-imm16-at-bits-20-5
+  "MOVZ imm16=42 encodes at bits[20:5]; rd field is zero at bits[4:0]."
   (let ((word (cl-cc/emit::encode-movz 0 42)))
     (assert-equal 42 (logand (ash word -5) #xFFFF))
-    (assert-equal 0 (logand word #x1F)))
+    (assert-equal 0 (logand word #x1F))))
+
+(deftest a64-movz-hw-field-at-bits-22-21
+  "MOVZ hw=1 places hw=1 at bits[22:21] and imm16=1 at bits[20:5]."
   (let ((word (cl-cc/emit::encode-movz 0 1 1)))
     (assert-equal 1 (logand (ash word -21) 3))
-    (assert-equal 1 (logand (ash word -5) #xFFFF)))
+    (assert-equal 1 (logand (ash word -5) #xFFFF))))
+
+(deftest a64-movz-max-imm16-roundtrips
+  "MOVZ max imm16 (#xFFFF) roundtrips correctly."
   (let ((word (cl-cc/emit::encode-movz 0 #xFFFF)))
     (assert-equal #xFFFF (logand (ash word -5) #xFFFF))))
 
 ;;; ─── encode-movk ─────────────────────────────────────────────────────────
 
-(deftest a64-mov-encoding-cases
-  "MOVK: base opcode correct; imm16/hw fields encode correctly. MOV Xd,Xs encodes Rd and Rm in correct bit positions (including self-copy)."
+(deftest a64-movk-encodes-base-opcode-and-imm16-hw-fields
+  "MOVK base opcode is correct; imm16 and hw fields encode at the right bit positions."
   (let ((base-word (cl-cc/emit::encode-movk 0 0))
         (imm-word  (cl-cc/emit::encode-movk 0 #x1234 2)))
     (assert-equal #xF2800000 (logand base-word #xFF800000))
     (assert-equal #x1234 (logand (ash imm-word -5) #xFFFF))
-    (assert-equal 2 (logand (ash imm-word -21) 3)))
+    (assert-equal 2 (logand (ash imm-word -21) 3))))
+
+(deftest a64-mov-rr-encodes-rd-and-rm-correctly
+  "encode-mov-rr places Rd at bits[4:0] and Rm at bits[20:16], including self-copy."
   (let ((w01 (cl-cc/emit::encode-mov-rr 0 1))
         (w55 (cl-cc/emit::encode-mov-rr 5 5)))
     (assert-equal 0 (logand w01 #x1F))
@@ -63,17 +72,23 @@
 
 ;;; ─── encode-sub ──────────────────────────────────────────────────────────
 
-(deftest a64-arithmetic-encoding-cases
-  "SUB encodes Rd/Rn/Rm + opcode #xCB000000; opcode differs from ADD; MUL encodes as MADD with XZR accumulator."
+(deftest a64-sub-encodes-rd-rn-rm-and-opcode
+  "SUB encodes Rd/Rn/Rm at correct bit positions and opcode #xCB000000."
   (let ((word (cl-cc/emit::encode-sub 0 1 2)))
     (assert-equal 0 (logand word #x1F))
     (assert-equal 1 (logand (ash word -5) #x1F))
     (assert-equal 2 (logand (ash word -16) #x1F))
-    (assert-equal #xCB000000 (logand word #xFFE00000)))
+    (assert-equal #xCB000000 (logand word #xFFE00000))))
+
+(deftest a64-sub-opcode-differs-from-add-but-registers-match
+  "ADD and SUB have different opcodes but identical register bit patterns."
   (let ((add (cl-cc/emit::encode-add 0 1 2))
         (sub (cl-cc/emit::encode-sub 0 1 2)))
     (assert-false (= add sub))
-    (assert-equal (logand add #x1FFFFF) (logand sub #x1FFFFF)))
+    (assert-equal (logand add #x1FFFFF) (logand sub #x1FFFFF))))
+
+(deftest a64-mul-encodes-as-madd-with-xzr-accumulator
+  "MUL encodes as MADD with XZR (31) at bits[14:10] as the accumulator."
   (let ((word (cl-cc/emit::encode-mul 0 1 2)))
     (assert-equal 0 (logand word #x1F))
     (assert-equal 1 (logand (ash word -5) #x1F))
@@ -82,19 +97,25 @@
 
 ;;; ─── encode-cbz ──────────────────────────────────────────────────────────
 
-(deftest a64-branch-encoding-cases
-  "CBZ encodes Rt/imm19/opcode; B encodes imm26/opcode; BLR encodes register at bits 9:5."
+(deftest a64-cbz-encodes-rt-imm19-and-opcode
+  "CBZ encodes Rt at bits[4:0], imm19 at bits[23:5], and opcode #xB4000000."
   (let ((w0 (cl-cc/emit::encode-cbz 0 1))
         (w5 (cl-cc/emit::encode-cbz 5 10)))
     (assert-equal 0 (logand w0 #x1F))
     (assert-equal 1 (logand (ash w0 -5) #x7FFFF))
     (assert-equal #xB4000000 (logand w0 #xFF000000))
     (assert-equal 5 (logand w5 #x1F))
-    (assert-equal 10 (logand (ash w5 -5) #x7FFFF)))
+    (assert-equal 10 (logand (ash w5 -5) #x7FFFF))))
+
+(deftest a64-b-encodes-imm26-and-opcode
+  "B encodes imm26 at bits[25:0] with opcode #x14000000."
   (let ((w2 (cl-cc/emit::encode-b 2)))
     (assert-equal 2 (logand w2 #x3FFFFFF))
     (assert-equal #x14000000 (logand w2 #xFC000000)))
-  (assert-equal #x14000000 (cl-cc/emit::encode-b 0))
+  (assert-equal #x14000000 (cl-cc/emit::encode-b 0)))
+
+(deftest a64-blr-encodes-register-at-bits-9-5
+  "BLR places the register number at bits[9:5] with opcode #xD63F0000."
   (let ((w0  (cl-cc/emit::encode-blr 0))
         (w30 (cl-cc/emit::encode-blr 30)))
     (assert-equal 0  (logand (ash w0  -5) #x1F))
@@ -105,8 +126,8 @@
 
 ;;; ─── encode-stur ─────────────────────────────────────────────────────────
 
-(deftest a64-memory-encoding-cases
-  "STUR encodes Rt/Rn/simm9; LDUR encodes correctly and differs from STUR only in opcode bits."
+(deftest a64-stur-encodes-rt-rn-and-simm9
+  "STUR encodes Rt at bits[4:0], Rn at bits[9:5], and simm9 at bits[20:12]."
   (let ((w8 (cl-cc/emit::encode-stur 0 29 8))
         (w0 (cl-cc/emit::encode-stur 1 31 0)))
     (assert-equal 0  (logand w8 #x1F))
@@ -114,12 +135,18 @@
     (assert-equal 8  (logand (ash w8 -12) #x1FF))
     (assert-equal 1  (logand w0 #x1F))
     (assert-equal 31 (logand (ash w0 -5) #x1F))
-    (assert-equal 0  (logand (ash w0 -12) #x1FF)))
+    (assert-equal 0  (logand (ash w0 -12) #x1FF))))
+
+(deftest a64-ldur-encodes-correctly-with-load-opcode
+  "LDUR encodes Rt/Rn/simm9 correctly and has opcode #xF8400000."
   (let ((word (cl-cc/emit::encode-ldur 0 29 8)))
     (assert-equal 0 (logand word #x1F))
     (assert-equal 29 (logand (ash word -5) #x1F))
     (assert-equal 8 (logand (ash word -12) #x1FF))
-    (assert-equal #xF8400000 (logand word #xFFE00000)))
+    (assert-equal #xF8400000 (logand word #xFFE00000))))
+
+(deftest a64-ldur-and-stur-differ-only-in-opcode
+  "LDUR and STUR encodings differ in opcode bits but share the same register/offset pattern."
   (let ((ld (cl-cc/emit::encode-ldur 0 1 8))
         (st (cl-cc/emit::encode-stur 0 1 8)))
     (assert-false (= ld st))
@@ -141,9 +168,12 @@
 
 ;;; ─── +a64-ret+ and emit-a64-instr ──────────────────────────────────────
 
-(deftest a64-ret-and-emit-cases
-  "RET has fixed encoding #xD65F03C0; emit-a64-instr writes 4 little-endian bytes."
-  (assert-equal #xD65F03C0 cl-cc/emit::+a64-ret+)
+(deftest a64-ret-constant-has-fixed-encoding
+  "+a64-ret+ has the fixed AArch64 RET encoding #xD65F03C0."
+  (assert-equal #xD65F03C0 cl-cc/emit::+a64-ret+))
+
+(deftest a64-emit-instr-writes-four-little-endian-bytes
+  "emit-a64-instr writes 4 bytes in little-endian order; zero word produces 4 zero bytes."
   (let ((bytes-ret nil)
         (bytes-zero nil))
     (cl-cc/emit::emit-a64-instr #xD65F03C0 (lambda (b) (push b bytes-ret)))

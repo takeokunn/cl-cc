@@ -50,8 +50,9 @@
 
 (deftest pipeline-maybe-cps-toplevel-forms-rewrites-safe-expression-forms
   "%maybe-cps-toplevel-forms leaves definition forms alone and rewrites safe expressions into CPS entry forms."
-  (let* ((forms '((defvar *top* 1) (setq *top* 2)))
-          (rewritten (cl-cc::%maybe-cps-toplevel-forms forms :target :vm)))
+  (let* ((forms     '((defvar *top* 1) (setq *top* 2)))
+         (opts      (cl-cc::%make-pipeline-opts :target :vm))
+         (rewritten (cl-cc::%maybe-cps-toplevel-forms forms opts)))
     (assert-false (equal (first forms) (first rewritten)))
     (assert-false (equal (second forms) (second rewritten)))
     (assert-true (consp (first rewritten)))

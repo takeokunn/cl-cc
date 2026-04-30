@@ -27,11 +27,14 @@
 
 ;;; ─── collect-entry-labels ─────────────────────────────────────────────────────
 
-(deftest extract-entry-labels-empty-cases
-  "collect-entry-labels returns empty hash table for empty list or instructions with no closure/func-ref."
+(deftest extract-entry-labels-nil-input-returns-empty-hash-table
+  "collect-entry-labels on nil returns an empty hash table."
   (let ((ht-nil (cl-cc/emit::collect-entry-labels nil)))
     (assert-true (hash-table-p ht-nil))
-    (assert-equal 0 (hash-table-count ht-nil)))
+    (assert-equal 0 (hash-table-count ht-nil))))
+
+(deftest extract-entry-labels-non-closure-instructions-return-empty
+  "collect-entry-labels on instructions with no vm-closure or vm-func-ref returns empty hash table."
   (let* ((instrs (list (make-vm-const :dst :r0 :value 42)
                        (make-vm-ret :reg :r0)))
          (ht (cl-cc/emit::collect-entry-labels instrs)))

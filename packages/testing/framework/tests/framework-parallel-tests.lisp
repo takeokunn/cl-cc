@@ -112,14 +112,14 @@
       (setf *suite-registry* (persist-remove *suite-registry* serial-suite))
       (setf *suite-registry* (persist-remove *suite-registry* root)))))
 
-(deftest canonical-suite-taxonomy-matches-runner-contract
+(deftest-each canonical-suite-taxonomy-matches-runner-contract
   "The canonical runner exposes unit, integration, and e2e suites under the root taxonomy."
+  :cases (("unit"        'cl-cc-unit-suite)
+          ("integration" 'cl-cc-integration-suite)
+          ("e2e"         'cl-cc-e2e-suite))
+  (suite-name)
   (assert-eq 'cl-cc-suite
-             (getf (persist-lookup *suite-registry* 'cl-cc-unit-suite) :parent))
-  (assert-eq 'cl-cc-suite
-             (getf (persist-lookup *suite-registry* 'cl-cc-integration-suite) :parent))
-  (assert-eq 'cl-cc-suite
-             (getf (persist-lookup *suite-registry* 'cl-cc-e2e-suite) :parent)))
+             (getf (persist-lookup *suite-registry* suite-name) :parent)))
 
 (deftest run-fast-tests-excludes-selfhost-slow-suite-by-default
   "The explicit fast test path excludes the slow selfhost suite unless the caller overrides it."
@@ -288,3 +288,116 @@
   "*kill-grace-seconds* defaults to a positive integer; absent value would degrade to 0."
   (assert-true (and (integerp *kill-grace-seconds*)
                     (plusp *kill-grace-seconds*))))
+
+;;; ── %collect-timed-out-workers (T-4) ─────────────────────────────────────
+
+(deftest collect-timed-out-workers-returns-empty-when-all-slots-nil
+  "%collect-timed-out-workers returns an empty list when all watchdog slots are nil."
+  (let* ((lock  (sb-thread:make-mutex :name "test-lock"))
+         (slots (make-array 2 :initial-element nil)))
+    (assert-null (cl-cc/test::%collect-timed-out-workers slots 2 (get-internal-real-time) lock))))
+
+(deftest collect-timed-out-workers-collects-expired-slot
+  "%collect-timed-out-workers returns one entry and clears the slot when elapsed > timeout."
+  (let* ((lock    (sb-thread:make-mutex :name "test-lock"))
+         (slots   (make-array 1 :initial-element nil))
+         (past    (- (get-internal-real-time) (* 999 internal-time-units-per-second)))
+         (thread  sb-thread:*current-thread*)
+         (slot    (make-watchdog-slot :thread thread :epoch 0
+                                      :start-time past :timeout-secs 1)))
+    (setf (aref slots 0) slot)
+    (let ((timed-out (cl-cc/test::%collect-timed-out-workers
+                      slots 1 (get-internal-real-time) lock)))
+      (assert-= 1 (length timed-out))
+      (assert-null (aref slots 0)))))
+
+(deftest collect-timed-out-workers-ignores-not-yet-expired-slot
+  "%collect-timed-out-workers leaves a slot in place when elapsed < timeout."
+  (let* ((lock   (sb-thread:make-mutex :name "test-lock"))
+         (slots  (make-array 1 :initial-element nil))
+         (future (get-internal-real-time))
+         (thread sb-thread:*current-thread*)
+         (slot   (make-watchdog-slot :thread thread :epoch 0
+                                     :start-time future :timeout-secs 9999)))
+    (setf (aref slots 0) slot)
+    (let ((timed-out (cl-cc/test::%collect-timed-out-workers
+                      slots 1 (get-internal-real-time) lock)))
+      (assert-null timed-out)
+      (assert-true (aref slots 0)))))
+
+;;; ── %check-escalations (T-5) ─────────────────────────────────────────────
+
+(defun %make-escalation-check-context (&key (epoch 7) (current-test 'running-test))
+  (let ((epochs (make-array 1 :initial-element epoch))
+        (current-tests (make-array 1 :initial-element current-test))
+        (lock (sb-thread:make-mutex :name "test-lock"))
+        (past (- (get-internal-real-time) internal-time-units-per-second)))
+    (values epochs
+            current-tests
+            lock
+            (make-escalation :worker-idx 0 :epoch 7 :deadline past))))
+
+(defun %make-parallel-timeout-demo-test ()
+  (list :name 'parallel-timeout-demo
+        :fn (lambda () (sleep 2))
+        :suite 'runner-regression-suite
+        :timeout 1
+        :depends-on nil
+        :tags nil
+        :number 1))
+
+(deftest check-escalations-triggers-exit-fn-when-epoch-matches-and-deadline-passed
+  "%check-escalations fires *watchdog-exit-fn* when deadline has passed and epoch still matches."
+  (multiple-value-bind (epochs current-tests lock esc)
+      (%make-escalation-check-context)
+    (let ((captured nil)
+          (*watchdog-exit-fn* (lambda (&key code) (setf captured code))))
+      (let ((*error-output* (make-string-output-stream)))
+        (cl-cc/test::%check-escalations (list esc) epochs current-tests lock (get-internal-real-time)))
+      (assert-eql 124 captured))))
+
+(deftest check-escalations-prunes-resolved-entry-when-epoch-advanced
+  "%check-escalations removes an escalation when the worker epoch has advanced past it."
+  (multiple-value-bind (epochs current-tests lock esc)
+      (%make-escalation-check-context :epoch 8)
+    (let ((captured nil)
+          (*watchdog-exit-fn* (lambda (&key code) (setf captured code))))
+      (let ((remaining (cl-cc/test::%check-escalations (list esc) epochs current-tests lock (get-internal-real-time))))
+        (assert-null remaining)
+        (assert-null captured)))))
+
+(deftest check-escalations-prunes-idle-worker-without-exit
+  "%check-escalations drops an escalation once the worker has no in-flight test, even if the deadline already passed."
+  (multiple-value-bind (epochs current-tests lock esc)
+      (%make-escalation-check-context :current-test nil)
+    (let ((captured nil)
+          (*watchdog-exit-fn* (lambda (&key code) (setf captured code))))
+      (let ((remaining (cl-cc/test::%check-escalations (list esc) epochs current-tests lock (get-internal-real-time))))
+        (assert-null remaining)
+        (assert-null captured)))))
+
+(deftest run-tests-parallel-timeout-does-not-escalate-after-worker-finishes
+  "%run-tests-parallel stops the watchdog cleanly once a timed-out worker has already returned a failure result."
+  (let ((captured nil)
+        (saved-exit-fn *watchdog-exit-fn*)
+        (saved-kill-grace *kill-grace-seconds*)
+        (saved-heartbeat *heartbeat-interval-seconds*))
+    (unwind-protect
+         (progn
+           (setf *watchdog-exit-fn* (lambda (&key code &allow-other-keys)
+                                      (setf captured code))
+                 *kill-grace-seconds* 1
+                 *heartbeat-interval-seconds* 0)
+           (with-replaced-function (%tap-print-result
+                                    (lambda (&rest args)
+                                      (declare (ignore args))
+                                      nil))
+             (let ((*error-output* (make-string-output-stream)))
+               (let ((results (%run-tests-parallel (list (%make-parallel-timeout-demo-test)) 1)))
+                 (assert-eq :fail (getf (first results) :status))
+                 (assert-true (search "timeout after 1 seconds"
+                                      (getf (first results) :detail)))
+                 (assert-null captured)))))
+      (setf *watchdog-exit-fn* saved-exit-fn
+            *kill-grace-seconds* saved-kill-grace
+            *heartbeat-interval-seconds* saved-heartbeat))))

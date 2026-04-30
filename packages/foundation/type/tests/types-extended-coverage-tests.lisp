@@ -14,41 +14,53 @@
 
 ;;; ─── type-free-vars: capability ─────────────────────────────────────────────
 
-(deftest free-vars-capability-cases
-  "type-free-vars on capability: var base yields 1 fv; primitive base yields nil."
+(deftest free-vars-capability-var-base-yields-one-fv
+  "type-free-vars on capability with var base yields 1 free variable."
   (let* ((v   (cl-cc/type::fresh-type-var "cap-base"))
          (cap (cl-cc/type::make-type-capability :base v :cap 'read))
          (fvs (cl-cc/type::type-free-vars cap)))
     (assert-= 1 (length fvs))
-    (assert-true (cl-cc/type::type-var-equal-p v (first fvs))))
+    (assert-true (cl-cc/type::type-var-equal-p v (first fvs)))))
+
+(deftest free-vars-capability-primitive-base-yields-nil
+  "type-free-vars on capability with primitive base yields nil."
   (assert-null (cl-cc/type::type-free-vars
                 (cl-cc/type::make-type-capability :base cl-cc/type::type-int :cap 'read))))
 
 ;;; ─── type-free-vars: refinement ─────────────────────────────────────────────
 
-(deftest free-vars-refinement-cases
-  "type-free-vars on refinement: var base yields 1 fv; primitive base yields nil."
+(deftest free-vars-refinement-var-base-yields-one-fv
+  "type-free-vars on refinement with var base yields 1 free variable."
   (let* ((v   (cl-cc/type::fresh-type-var "ref-base"))
          (ref (cl-cc/type::make-type-refinement :base v :predicate (lambda (x) (> x 0))))
          (fvs (cl-cc/type::type-free-vars ref)))
     (assert-= 1 (length fvs))
-    (assert-true (cl-cc/type::type-var-equal-p v (first fvs))))
+    (assert-true (cl-cc/type::type-var-equal-p v (first fvs)))))
+
+(deftest free-vars-refinement-primitive-base-yields-nil
+  "type-free-vars on refinement with primitive base yields nil."
   (assert-null (cl-cc/type::type-free-vars
                 (cl-cc/type::make-type-refinement
                  :base cl-cc/type::type-int :predicate (lambda (x) (> x 0))))))
 
 ;;; ─── type-free-vars: handler ─────────────────────────────────────────────────
 
-(deftest free-vars-handler-cases
-  "type-free-vars on handler: 3 distinct vars→3; shared var→1; all primitives→nil."
+(deftest free-vars-handler-three-distinct-vars
+  "type-free-vars on handler with 3 distinct vars yields 3 free variables."
   (let* ((ve (cl-cc/type::fresh-type-var "eff"))
          (vi (cl-cc/type::fresh-type-var "in"))
          (vo (cl-cc/type::fresh-type-var "out"))
          (h  (cl-cc/type::make-type-handler :effect ve :input vi :output vo)))
-    (assert-= 3 (length (cl-cc/type::type-free-vars h))))
+    (assert-= 3 (length (cl-cc/type::type-free-vars h)))))
+
+(deftest free-vars-handler-shared-var-deduped
+  "type-free-vars on handler where effect and input share the same var yields 1 free variable."
   (let* ((v (cl-cc/type::fresh-type-var "shared"))
          (h (cl-cc/type::make-type-handler :effect v :input v :output cl-cc/type::type-int)))
-    (assert-= 1 (length (cl-cc/type::type-free-vars h))))
+    (assert-= 1 (length (cl-cc/type::type-free-vars h)))))
+
+(deftest free-vars-handler-all-primitives-yields-nil
+  "type-free-vars on handler with all primitive slots yields nil."
   (assert-null (cl-cc/type::type-free-vars
                 (cl-cc/type::make-type-handler
                  :effect (cl-cc/type::make-type-effect-op :name 'io)
@@ -70,23 +82,32 @@
 
 ;;; ─── type-rigid-equal-p (types-core.lisp) ───────────────────────────────────
 
-(deftest rigid-var-equal-p-cases
-  "type-rigid-equal-p: same-id→T; different-ids→NIL; rigid-vs-var→NIL."
+(deftest rigid-var-equal-p-same-id-is-true
+  "type-rigid-equal-p: two rigid vars with the same id are equal."
   (let* ((r1 (cl-cc/type::fresh-rigid-var "r"))
          (r2 (cl-cc/type::%make-type-rigid :id (cl-cc/type::type-rigid-id r1) :name "r")))
-    (assert-true  (cl-cc/type::type-rigid-equal-p r1 r2)))
+    (assert-true (cl-cc/type::type-rigid-equal-p r1 r2))))
+
+(deftest rigid-var-equal-p-different-ids-is-false
+  "type-rigid-equal-p: two freshly created rigid vars with different ids are not equal."
   (let ((r1 (cl-cc/type::fresh-rigid-var "a"))
         (r2 (cl-cc/type::fresh-rigid-var "b")))
-    (assert-false (cl-cc/type::type-rigid-equal-p r1 r2)))
+    (assert-false (cl-cc/type::type-rigid-equal-p r1 r2))))
+
+(deftest rigid-var-equal-p-rigid-vs-var-is-false
+  "type-rigid-equal-p: a rigid var compared to a type-var is not equal."
   (let ((r (cl-cc/type::fresh-rigid-var "r"))
         (v (cl-cc/type::fresh-type-var  "v")))
     (assert-false (cl-cc/type::type-rigid-equal-p r v))))
 
 ;;; ─── type-env-bindings (types-env.lisp) ─────────────────────────────────────
 
-(deftest type-env-bindings-cases
-  "type-env-bindings: empty env→nil; extended env→alist with (name . scheme)."
-  (assert-null (cl-cc/type::type-env-bindings (cl-cc/type::type-env-empty)))
+(deftest type-env-bindings-empty-env-is-nil
+  "type-env-bindings on an empty environment returns nil."
+  (assert-null (cl-cc/type::type-env-bindings (cl-cc/type::type-env-empty))))
+
+(deftest type-env-bindings-extended-env-has-entry
+  "type-env-bindings on an extended environment returns a 1-element alist with the binding."
   (let* ((env  (cl-cc/type::type-env-empty))
          (sch  (cl-cc/type::type-to-scheme cl-cc/type::type-int))
          (env2 (cl-cc/type::type-env-extend 'x sch env))
@@ -96,10 +117,13 @@
 
 ;;; ─── type-equal-p: capability and error nodes ────────────────────────────────
 
-(deftest type-equal-p-capability-and-error-cases
-  "type-equal-p: capability self-identity is T; error nodes always return nil."
+(deftest type-equal-p-capability-self-identity
+  "type-equal-p: a capability node is equal to itself."
   (let ((c (cl-cc/type::make-type-capability :base cl-cc/type::type-int :cap 'read)))
-    (assert-true (cl-cc/type::type-equal-p c c)))
+    (assert-true (cl-cc/type::type-equal-p c c))))
+
+(deftest type-equal-p-error-node-always-false
+  "type-equal-p: error nodes never compare equal, even to themselves."
   (let ((e (cl-cc/type::make-type-error :message "test")))
     (assert-false (cl-cc/type::type-equal-p e e))))
 

@@ -15,15 +15,18 @@
     (assert-null (cadr result))
     (assert-null (car (last result)))))
 
-(deftest psetf-structure-cases
-  "PSETF with one pair has one temp binding; with two pairs captures both values before any assignment."
+(deftest psetf-one-pair-has-single-temp-binding
+  "PSETF with one pair generates exactly one temp binding then a setf assignment."
   (let ((result (our-macroexpand-1 '(psetf x 10))))
     (assert-eq (car result) 'let)
     (assert-= (length (cadr result)) 1)
     (assert-= (cadr (caadr result)) 10)
     (assert-eq (car (caddr result)) 'setf)
     (assert-eq (cadr (caddr result)) 'x)
-    (assert-null (car (last result))))
+    (assert-null (car (last result)))))
+
+(deftest psetf-two-pairs-captures-both-before-assigning
+  "PSETF with two pairs captures both values into temps before either setf runs."
   (let ((result (our-macroexpand-1 '(psetf a 1 b 2))))
     (assert-eq (car result) 'let)
     (assert-= (length (cadr result)) 2)

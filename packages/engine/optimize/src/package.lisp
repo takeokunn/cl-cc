@@ -82,4 +82,6 @@
 
    ;; ─── optimizer-pipeline.lisp — top-level entry point ───────────────
    #:optimize-instructions
-   #:*skip-optimizer-passes*))
+   #:*skip-optimizer-passes*
+   #:*verify-optimizer-instructions*
+   #:opt-verify-instructions))

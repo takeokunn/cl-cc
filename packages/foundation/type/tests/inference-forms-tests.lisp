@@ -23,13 +23,16 @@
 
 ;;; ─── infer: ast-the ───────────────────────────────────────────────────────
 
-(deftest infer-the-cases
-  "ast-the: matching type→fixnum; refinement base→fixnum; type mismatch signals error."
+(deftest infer-the-matching-type-is-fixnum
+  "(the fixnum 42): annotated type matches inferred type; result is fixnum."
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast '(the fixnum 42))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty))))
+      (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty)))))
+
+(deftest infer-the-refinement-base-is-fixnum
+  "(the (refine fixnum plusp) 42): refinement base resolves to fixnum."
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast '(the (refine fixnum plusp) 42))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
@@ -37,19 +40,25 @@
       (let ((prim (if (cl-cc/type::type-refinement-p ty)
                       (cl-cc/type::type-refinement-base ty)
                       ty)))
-        (assert-eq 'fixnum (cl-cc/type:type-primitive-name prim)))))
+        (assert-eq 'fixnum (cl-cc/type:type-primitive-name prim))))))
+
+(deftest infer-the-type-mismatch-signals-error
+  "(the string 42): annotation conflicts with inferred fixnum; signals type-mismatch-error."
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast '(the string 42))))
     (assert-signals cl-cc/type:type-mismatch-error
       (infer-with-env ast))))
 
-(deftest infer-typed-hole-cases
-  "Typed hole signals error; error message names in-scope variables."
+(deftest infer-typed-hole-signals-error
+  "Typed hole _ in expression signals typed-hole-error."
   (reset-type-vars!)
   (let* ((env (type-env-extend 'x (type-to-scheme cl-cc/type:type-int) (type-env-empty)))
          (ast (cl-cc:lower-sexp-to-ast '(+ x _))))
     (assert-signals cl-cc/type::typed-hole-error
-      (cl-cc/type:infer ast env)))
+      (cl-cc/type:infer ast env))))
+
+(deftest infer-typed-hole-message-names-in-scope-vars
+  "Typed hole error message includes 'Available: X ::' listing in-scope bindings."
   (reset-type-vars!)
   (let* ((env (type-env-extend 'x (type-to-scheme cl-cc/type:type-int) (type-env-empty)))
          (ast (cl-cc:lower-sexp-to-ast '(+ x _))))
@@ -123,14 +132,17 @@
 
 ;;; ─── %make-lambda-param-env ────────────────────────────────────────────────
 
-(deftest infer-make-lambda-param-env-cases
-  "%make-lambda-param-env: empty params → empty types, unextended env; two params → two type vars and extended env."
+(deftest infer-make-lambda-param-env-empty-params
+  "%make-lambda-param-env with nil params returns empty type list and the same unextended env."
   (reset-type-vars!)
   (let ((empty-env (cl-cc/type:type-env-empty)))
     (multiple-value-bind (types body-env)
         (cl-cc/type::%make-lambda-param-env nil empty-env)
       (assert-null types)
-      (assert-equal empty-env body-env)))
+      (assert-equal empty-env body-env))))
+
+(deftest infer-make-lambda-param-env-two-params
+  "%make-lambda-param-env with (x y) returns two distinct type vars and extended env with x bound."
   (reset-type-vars!)
   (multiple-value-bind (types body-env)
       (cl-cc/type::%make-lambda-param-env '(x y) (cl-cc/type:type-env-empty))

@@ -19,8 +19,8 @@
 
 ;;; Liveness Analysis Tests
 
-(deftest regalloc-liveness-cases
-  "Liveness: 3 overlapping intervals; disjoint intervals don't overlap; forward branch extends intervals."
+(deftest regalloc-liveness-three-overlapping-intervals
+  "Liveness analysis produces 3 intervals with correct start/end positions."
   (let* ((instructions (list (make-vm-const :dst :r0 :value 1)
                              (make-vm-const :dst :r1 :value 2)
                              (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
@@ -38,7 +38,10 @@
     (let ((r2-int (find :r2 intervals :key #'interval-vreg)))
       (assert-false (null r2-int))
       (assert-= 2 (interval-start r2-int))
-      (assert-= 3 (interval-end r2-int))))
+      (assert-= 3 (interval-end r2-int)))))
+
+(deftest regalloc-liveness-disjoint-intervals-do-not-overlap
+  "Disjoint live intervals: r0 ends before r1 begins."
   (let* ((instructions (list (make-vm-const :dst :r0 :value 1)
                              (make-vm-halt :reg :r0)
                              (make-vm-const :dst :r1 :value 2)
@@ -47,7 +50,10 @@
     (assert-= 2 (length intervals))
     (let ((r0-int (find :r0 intervals :key #'interval-vreg))
           (r1-int (find :r1 intervals :key #'interval-vreg)))
-      (assert-true (<= (interval-end r0-int) (interval-start r1-int)))))
+      (assert-true (<= (interval-end r0-int) (interval-start r1-int))))))
+
+(deftest regalloc-liveness-forward-branch-extends-interval
+  "Forward branch extends r0 interval to cover the jump target at index 4."
   (let* ((instructions (list (make-vm-const :dst :r0 :value 1)
                              (make-vm-jump-zero :reg :r1 :label "L1")
                              (make-vm-const :dst :r2 :value 2)
@@ -62,8 +68,8 @@
 
 ;;; Linear Scan Allocation Tests
 
-(deftest regalloc-allocate-cases
-  "Allocation: fits in physical regs; coalesces moves; zero spills for reuse and empty sequences."
+(deftest regalloc-allocate-fits-in-physical-regs-with-distinct-assignments
+  "3-vreg program fits in physical regs: 0 spills; all vregs assigned distinct physical regs."
   (let* ((instructions (list (make-vm-const :dst :r0 :value 1)
                              (make-vm-const :dst :r1 :value 2)
                              (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
@@ -74,25 +80,34 @@
     (assert-false (null (regalloc-lookup result :r1)))
     (assert-false (null (regalloc-lookup result :r2)))
     (assert-false (eq (regalloc-lookup result :r0)
-                      (regalloc-lookup result :r1))))
+                      (regalloc-lookup result :r1)))))
+
+(deftest regalloc-allocate-coalesces-move-to-same-physical-reg
+  "A vm-move is coalesced: source and destination share the same physical register."
   (let* ((instructions (list (make-vm-const :dst :r0 :value 1)
                              (make-vm-move :dst :r1 :src :r0)
                              (make-vm-halt :reg :r1)))
          (result (allocate-registers instructions *x86-64-calling-convention*)))
     (assert-eq (regalloc-lookup result :r0)
-               (regalloc-lookup result :r1)))
+               (regalloc-lookup result :r1))))
+
+(deftest regalloc-allocate-zero-spills-with-register-reuse
+  "4-vreg program with move+reuse produces 0 spills."
   (let* ((instructions (list (make-vm-const :dst :r0 :value 1)
                              (make-vm-move :dst :r1 :src :r0)
                              (make-vm-const :dst :r2 :value 2)
                              (make-vm-add :dst :r3 :lhs :r1 :rhs :r2)
                              (make-vm-halt :reg :r3)))
          (result (allocate-registers instructions *x86-64-calling-convention*)))
-    (assert-= 0 (regalloc-spill-count result)))
+    (assert-= 0 (regalloc-spill-count result))))
+
+(deftest regalloc-allocate-empty-sequence-has-zero-spills
+  "Allocating an empty instruction sequence produces 0 spills."
   (let ((result (allocate-registers nil *x86-64-calling-convention*)))
     (assert-= 0 (regalloc-spill-count result))))
 
-(deftest regalloc-calling-convention-cases
-  "Calling conventions are properly defined; float vregs allocate to distinct XMM registers."
+(deftest regalloc-x86-and-aarch64-convention-properties
+  "Both calling conventions are non-nil with correct GPR counts, return registers, and FP registers."
   (assert-false (null *x86-64-calling-convention*))
   (assert-false (null *aarch64-calling-convention*))
   (assert-= 13 (length (cc-gpr-pool *x86-64-calling-convention*)))
@@ -104,7 +119,10 @@
   (assert-eq :x0 (cc-return-register *aarch64-calling-convention*))
   (assert-equal '(:v0 :v1 :v2 :v3 :v4 :v5 :v6 :v7)
                 (cl-cc/emit::cc-fp-arg-registers *aarch64-calling-convention*))
-  (assert-eq :v0 (cl-cc/emit::cc-fp-return-register *aarch64-calling-convention*))
+  (assert-eq :v0 (cl-cc/emit::cc-fp-return-register *aarch64-calling-convention*)))
+
+(deftest regalloc-float-vregs-allocated-to-distinct-xmm-registers
+  "Float vregs all get XMM registers; all three are distinct."
   (let* ((instructions (list (make-vm-const :dst :r0 :value 1.0d0)
                              (make-vm-const :dst :r1 :value 2.0d0)
                              (make-vm-float-add :dst :r2 :lhs :r0 :rhs :r1)
@@ -128,17 +146,23 @@
         (assert-true (xmm-p p2))
         (assert-false (eq p0 p1))))))
 
-(deftest regalloc-abi-register-preference-cases
-  "ABI preferences: return→:rax; live-in params→:rdi/:rsi; dead arg register recycled."
+(deftest regalloc-abi-return-value-prefers-rax
+  "A vreg used only in vm-ret is assigned to the ABI return register :rax."
   (let* ((instructions (list (make-vm-const :dst :r0 :value 42)
                              (make-vm-ret :reg :r0)))
          (result (allocate-registers instructions *x86-64-calling-convention*)))
-    (assert-eq :rax (regalloc-lookup result :r0)))
+    (assert-eq :rax (regalloc-lookup result :r0))))
+
+(deftest regalloc-abi-live-in-params-use-arg-registers
+  "Live-in vregs with no definition are assigned to ABI arg registers :rdi and :rsi."
   (let* ((instructions (list (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
                              (make-vm-halt :reg :r2)))
          (result (allocate-registers instructions *x86-64-calling-convention*)))
     (assert-eq :rdi (regalloc-lookup result :r0))
-    (assert-eq :rsi (regalloc-lookup result :r1)))
+    (assert-eq :rsi (regalloc-lookup result :r1))))
+
+(deftest regalloc-abi-dead-arg-register-is-recycled
+  "An arg register (:rsi) released after its last use is reused for a later vreg."
   (let* ((instructions (list (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
                              (make-vm-const :dst :r3 :value 7)
                              (make-vm-halt :reg :r3)))
@@ -146,8 +170,8 @@
     (assert-eq :rsi (regalloc-lookup result :r1))
     (assert-eq :rsi (regalloc-lookup result :r3))))
 
-(deftest regalloc-spill-pressure-cases
-  "Live-across-call value prefers callee-saved; biased spill keeps nearest-use interval."
+(deftest regalloc-spill-live-across-call-prefers-callee-saved
+  "A value live across a vm-call is assigned to a callee-saved register."
   (let* ((instructions (list (make-vm-const :dst :r0 :value 1)
                              (make-vm-call :dst :r2 :func :r3 :args '(:r4))
                              (make-vm-add :dst :r5 :lhs :r0 :rhs :r2)
@@ -158,7 +182,10 @@
     (assert-true (cl-cc/emit::interval-crosses-call-p r0-int))
     (assert-true (member (regalloc-lookup result :r0)
                          (cl-cc::cc-callee-saved *x86-64-calling-convention*)
-                         :test #'eq)))
+                         :test #'eq))))
+
+(deftest regalloc-spill-pressure-exceeds-pool-causes-spills
+  "When more vregs than physical registers exist, at least some are spilled."
   (let* ((cc (cl-cc/emit::make-calling-convention
               :gpr-pool '(:rdi :rsi)
               :caller-saved '(:rdi :rsi)
@@ -180,8 +207,8 @@
     (assert-false (null (gethash :r1 (cl-cc::regalloc-spill-map result))))
     (assert-= 2 (cl-cc::regalloc-spill-count result))))
 
-(deftest regalloc-spill-rewrite-cases
-  "Spill rewrite: two spilled srcs use distinct scratch regs; spilled src/dst do not share scratch."
+(deftest regalloc-spill-rewrite-two-spilled-srcs-use-distinct-scratch-regs
+  "Two spilled srcs in vm-add get distinct scratch register loads."
   (let* ((assignment (make-hash-table :test #'eq))
          (spill-map (make-hash-table :test #'eq))
          (inst (make-vm-add :dst :r3 :lhs :r1 :rhs :r2)))
@@ -193,7 +220,10 @@
            (rewritten (find-if #'cl-cc::vm-add-p out)))
       (assert-equal 2 (length loads))
       (assert-false (eq (cl-cc/emit::vm-spill-dst (first loads)) (cl-cc/emit::vm-spill-dst (second loads))))
-      (assert-false (eq (vm-lhs rewritten) (vm-rhs rewritten)))))
+      (assert-false (eq (vm-lhs rewritten) (vm-rhs rewritten))))))
+
+(deftest regalloc-spill-rewrite-spilled-src-and-dst-use-separate-scratch
+  "In a spilled vm-move, load scratch and store scratch are different; rewritten src/dst wired correctly."
   (let* ((assignment (make-hash-table :test #'eq))
          (spill-map (make-hash-table :test #'eq))
          (inst (make-vm-move :dst :r2 :src :r1)))
@@ -209,8 +239,8 @@
       (assert-eq (vm-src rewritten) (cl-cc/emit::vm-spill-dst load))
       (assert-eq (vm-dst rewritten) (cl-cc/emit::vm-spill-src store)))))
 
-(deftest regalloc-integration-cases
-  "Rematerializes spilled constants as vm-const; compile+allocate produces zero spills."
+(deftest regalloc-integration-rematerializes-spilled-constant-as-vm-const
+  "A rematerializable spilled vreg gets a vm-const instead of a spill-load for that vreg."
   (let* ((assignment (make-hash-table :test #'eq))
          (spill-map (make-hash-table :test #'eq))
          (remat-map (make-hash-table :test #'eq))
@@ -225,7 +255,10 @@
       (assert-false (null const-inst))
       (assert-equal 42 (cl-cc:vm-value const-inst))
       (assert-false (null load-inst))
-      (assert-false (eq (cl-cc:vm-dst const-inst) (cl-cc/emit::vm-spill-dst load-inst)))))
+      (assert-false (eq (cl-cc:vm-dst const-inst) (cl-cc/emit::vm-spill-dst load-inst))))))
+
+(deftest regalloc-integration-compile-and-allocate-produces-zero-spills
+  "compile-expression + allocate-registers on (+ 1 2): 0 spills; all vregs assigned."
   (let* ((result (compile-expression '(+ 1 2) :target :vm))
          (program (compilation-result-program result))
          (instructions (vm-program-instructions program))
@@ -240,15 +273,18 @@
 
 ;;; ─── lsa-state struct + helpers ────────────────────────────────────────────────
 
-(deftest lsa-state-struct-cases
-  "lsa-state helpers: initial values, pool selection/mutation, spill-count, expire-old, best-spill-candidate."
+(deftest lsa-state-initial-values-are-empty
+  "Freshly created lsa-state has empty assignment/spill-map, zero spill-count, nil active, correct pools."
   (let ((s (cl-cc/emit::make-lsa-state :free-regs '(:rax :rbx) :free-fp-regs '(:xmm0))))
     (assert-= 0 (hash-table-count (cl-cc/emit::lsa-assignment s)))
     (assert-= 0 (hash-table-count (cl-cc/emit::lsa-spill-map s)))
     (assert-= 0 (cl-cc/emit::lsa-spill-count s))
     (assert-null (cl-cc/emit::lsa-active s))
     (assert-equal '(:rax :rbx) (cl-cc/emit::lsa-free-regs s))
-    (assert-equal '(:xmm0) (cl-cc/emit::lsa-free-fp-regs s)))
+    (assert-equal '(:xmm0) (cl-cc/emit::lsa-free-fp-regs s))))
+
+(deftest lsa-state-pool-selection-and-mutation
+  "%lsa-interval-pool selects gpr vs fp pool; %lsa-set-interval-pool mutates only the correct pool."
   (let ((s     (cl-cc/emit::make-lsa-state :free-regs '(:rax) :free-fp-regs '(:xmm0)))
         (i-gpr (cl-cc/emit::make-live-interval :vreg :r0))
         (i-fp  (cl-cc/emit::make-live-interval :vreg :r1 :fp-p t)))
@@ -258,12 +294,18 @@
     (assert-equal '(:rcx)  (cl-cc/emit::lsa-free-regs s))
     (assert-equal '(:xmm0) (cl-cc/emit::lsa-free-fp-regs s))
     (cl-cc/emit::%lsa-set-interval-pool s i-fp '(:xmm1))
-    (assert-equal '(:xmm1) (cl-cc/emit::lsa-free-fp-regs s)))
+    (assert-equal '(:xmm1) (cl-cc/emit::lsa-free-fp-regs s))))
+
+(deftest lsa-state-spill-current-increments-count-and-records-slot
+  "%lsa-spill-current increments spill-count and records the slot in the spill-map."
   (let ((s   (cl-cc/emit::make-lsa-state))
         (int (cl-cc/emit::make-live-interval :vreg :r5)))
     (cl-cc/emit::%lsa-spill-current s int)
     (assert-= 1 (cl-cc/emit::lsa-spill-count s))
-    (assert-= 1 (gethash :r5 (cl-cc/emit::lsa-spill-map s))))
+    (assert-= 1 (gethash :r5 (cl-cc/emit::lsa-spill-map s)))))
+
+(deftest lsa-state-expire-old-removes-finished-intervals
+  "%lsa-expire-old removes expired intervals from active and returns their physical regs."
   (let ((s    (cl-cc/emit::make-lsa-state :free-regs '()))
         (done (cl-cc/emit::make-live-interval :vreg :r0 :start 0 :end 2 :phys-reg :rax))
         (live (cl-cc/emit::make-live-interval :vreg :r1 :start 0 :end 5 :phys-reg :rbx))
@@ -272,7 +314,10 @@
     (cl-cc/emit::%lsa-expire-old s cur)
     (assert-false (member done (cl-cc/emit::lsa-active s)))
     (assert-true  (member live (cl-cc/emit::lsa-active s)))
-    (assert-equal '(:rax) (cl-cc/emit::lsa-free-regs s)))
+    (assert-equal '(:rax) (cl-cc/emit::lsa-free-regs s))))
+
+(deftest lsa-state-best-spill-candidate-returns-live-interval
+  "%lsa-best-spill-candidate returns a live-interval from the active set."
   (let* ((cur   (cl-cc/emit::make-live-interval :vreg :r2 :start 3 :end 10))
          (near  (cl-cc/emit::make-live-interval :vreg :r0 :start 0 :end 8
                                                 :use-positions '(4) :phys-reg :rax))
@@ -280,7 +325,10 @@
                                                 :use-positions '(9) :phys-reg :rbx))
          (s     (cl-cc/emit::make-lsa-state :active (list near far))))
     (assert-type cl-cc/emit::live-interval
-                 (cl-cc/emit::%lsa-best-spill-candidate s cur)))
+                 (cl-cc/emit::%lsa-best-spill-candidate s cur))))
+
+(deftest lsa-state-best-spill-candidate-returns-current-when-active-empty
+  "%lsa-best-spill-candidate returns the current interval when active list is empty."
   (let* ((cur (cl-cc/emit::make-live-interval :vreg :r0 :start 5 :end 10))
          (s   (cl-cc/emit::make-lsa-state :active nil)))
     (assert-eq cur (cl-cc/emit::%lsa-best-spill-candidate s cur))))

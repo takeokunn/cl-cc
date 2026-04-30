@@ -100,22 +100,19 @@
         (ast-setq-var node)
         (ast-to-sexp (ast-setq-value node))))
 
+(defun %ast-local-fn-binding-to-sexp (binding)
+  "Convert an flet/labels binding (name params . body-asts) to sexp form."
+  (list* (first binding) (second binding)
+         (mapcar #'ast-to-sexp (cddr binding))))
+
 (defmethod ast-to-sexp ((node ast-flet))
   (list* 'flet
-         (mapcar (lambda (binding)
-                   (list* (first binding)
-                          (second binding)
-                          (mapcar #'ast-to-sexp (cddr binding))))
-                 (ast-flet-bindings node))
+         (mapcar #'%ast-local-fn-binding-to-sexp (ast-flet-bindings node))
          (mapcar #'ast-to-sexp (ast-flet-body node))))
 
 (defmethod ast-to-sexp ((node ast-labels))
   (list* 'labels
-         (mapcar (lambda (binding)
-                   (list* (first binding)
-                          (second binding)
-                          (mapcar #'ast-to-sexp (cddr binding))))
-                 (ast-labels-bindings node))
+         (mapcar #'%ast-local-fn-binding-to-sexp (ast-labels-bindings node))
          (mapcar #'ast-to-sexp (ast-labels-body node))))
 
 (defmethod ast-to-sexp ((node ast-defun))
@@ -210,24 +207,25 @@
 
 ;;; CLOS AST to S-expression roundtrip
 
+(defparameter *slot-option-readers*
+  '((:initarg  ast-slot-initarg  nil)
+    (:initform ast-slot-initform t)    ; initform needs ast-to-sexp
+    (:reader   ast-slot-reader   nil)
+    (:writer   ast-slot-writer   nil)
+    (:accessor ast-slot-accessor nil)
+    (:type     ast-slot-type     nil))
+  "Slot option (keyword reader-fn sexp-p) specs for slot-def-to-sexp.")
+
 (defun slot-def-to-sexp (slot)
   "Convert an ast-slot-def back to a slot specification s-expression."
-  (let ((opts nil))
+  (let ((opts (loop for (keyword reader sexp-p) in *slot-option-readers*
+                    for value = (funcall reader slot)
+                    when value
+                    nconc (list keyword (if sexp-p (ast-to-sexp value) value)))))
     (when (and (ast-slot-allocation slot)
                (not (eq (ast-slot-allocation slot) :instance)))
-      (push (ast-slot-allocation slot) opts)
-      (push :allocation opts))
-    (when (ast-slot-type slot)
-      (push (ast-slot-type slot) opts)
-      (push :type opts))
-    (when (ast-slot-accessor slot) (push (ast-slot-accessor slot) opts) (push :accessor opts))
-    (when (ast-slot-writer slot) (push (ast-slot-writer slot) opts) (push :writer opts))
-    (when (ast-slot-reader slot) (push (ast-slot-reader slot) opts) (push :reader opts))
-    (when (ast-slot-initform slot) (push (ast-to-sexp (ast-slot-initform slot)) opts) (push :initform opts))
-    (when (ast-slot-initarg slot) (push (ast-slot-initarg slot) opts) (push :initarg opts))
-    (if opts
-        (cons (ast-slot-name slot) opts)
-        (ast-slot-name slot))))
+      (setf opts (append opts (list :allocation (ast-slot-allocation slot)))))
+    (if opts (cons (ast-slot-name slot) opts) (ast-slot-name slot))))
 
 (defmethod ast-to-sexp ((node ast-defclass))
   (list* 'defclass
@@ -243,24 +241,18 @@
 (defmethod ast-to-sexp ((node ast-defmethod))
   (let ((params (loop for name in (ast-defmethod-params node)
                       for spec in (ast-defmethod-specializers node)
-                      collect (if spec (list name (cdr spec)) name)))
-        (qualifier (ast-defmethod-qualifier node)))
-    (if qualifier
-        (list* 'defmethod
-               (ast-defmethod-name node)
-               qualifier
-               params
-               (mapcar #'ast-to-sexp (ast-defmethod-body node)))
-        (list* 'defmethod
-               (ast-defmethod-name node)
-               params
-               (mapcar #'ast-to-sexp (ast-defmethod-body node))))))
+                      collect (if spec (list name (cdr spec)) name))))
+    (list* 'defmethod (ast-defmethod-name node)
+           (append (when (ast-defmethod-qualifier node)
+                     (list (ast-defmethod-qualifier node)))
+                   (list params)
+                   (mapcar #'ast-to-sexp (ast-defmethod-body node))))))
 
 (defmethod ast-to-sexp ((node ast-make-instance))
-  (let ((args (list 'make-instance (ast-to-sexp (ast-make-instance-class node)))))
-    (dolist (pair (ast-make-instance-initargs node))
-      (setf args (append args (list (car pair) (ast-to-sexp (cdr pair))))))
-    args))
+  (list* 'make-instance
+         (ast-to-sexp (ast-make-instance-class node))
+         (loop for (key . val-ast) in (ast-make-instance-initargs node)
+               nconc (list key (ast-to-sexp val-ast)))))
 
 (defmethod ast-to-sexp ((node ast-slot-value))
   (list 'slot-value

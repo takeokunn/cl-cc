@@ -37,7 +37,7 @@
     (assert-eq (car (first user-clauses)) :foo)
     (assert-eq (car (second user-clauses)) :bar)))
 
-(deftest ecase-empty-cases-still-has-otherwise
+(deftest ecase-empty-input-still-has-otherwise-clause
   "ECASE with no user cases still has the error-signalling otherwise clause"
   (let* ((result (our-macroexpand-1 '(ecase x)))
          (case-form (caddr result))

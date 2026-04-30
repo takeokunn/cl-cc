@@ -37,17 +37,26 @@
   (let ((*features* '(:sbcl :common-lisp)))
     (assert-equal expected (if (cl-cc/parse::lex-feature-present-p feature) t nil))))
 
-(deftest lex-feature-present-p-combinator-cases
-  "lex-feature-present-p: :or any-present; :and all-present; :not negates; unknown → nil."
+(deftest lex-feature-present-p-or-any-present
+  "lex-feature-present-p: :or succeeds when any member is present; fails when none are."
   (let ((*features* '(:sbcl)))
     (assert-true (cl-cc/parse::lex-feature-present-p '(:or :sbcl :ccl)))
-    (assert-null (cl-cc/parse::lex-feature-present-p '(:or :ccl :ecl))))
+    (assert-null (cl-cc/parse::lex-feature-present-p '(:or :ccl :ecl)))))
+
+(deftest lex-feature-present-p-and-all-required
+  "lex-feature-present-p: :and succeeds when all members present; fails when any absent."
   (let ((*features* '(:sbcl :common-lisp)))
     (assert-true (cl-cc/parse::lex-feature-present-p '(:and :sbcl :common-lisp)))
-    (assert-null (cl-cc/parse::lex-feature-present-p '(:and :sbcl :ccl))))
+    (assert-null (cl-cc/parse::lex-feature-present-p '(:and :sbcl :ccl)))))
+
+(deftest lex-feature-present-p-not-negates
+  "lex-feature-present-p: :not returns nil for present features and t for absent."
   (let ((*features* '(:sbcl)))
     (assert-null (cl-cc/parse::lex-feature-present-p '(:not :sbcl)))
-    (assert-true (cl-cc/parse::lex-feature-present-p '(:not :ccl))))
+    (assert-true (cl-cc/parse::lex-feature-present-p '(:not :ccl)))))
+
+(deftest lex-feature-present-p-unknown-returns-nil
+  "lex-feature-present-p: non-list atoms and unknown combinators return nil."
   (assert-null (cl-cc/parse::lex-feature-present-p 42))
   (assert-null (cl-cc/parse::lex-feature-present-p '(:unknown :foo))))
 
@@ -91,37 +100,52 @@
 
 ;;; ─── Hash Dispatch: Bit Vector ───────────────────────────────────────────────
 
-(deftest lexer-dispatch-bit-vector-cases
-  "Lexer: #*101 → bit-vector with bits 1,0,1; #* → empty bit-vector."
+(deftest lexer-dispatch-bit-vector-with-bits
+  "Lexer: #*101 produces a 3-element bit-vector with values 1, 0, 1."
   (let ((val (lexer-dispatch-first-value "#*101")))
     (assert-true (bit-vector-p val))
     (assert-= 3 (length val))
     (assert-= 1 (sbit val 0))
     (assert-= 0 (sbit val 1))
-    (assert-= 1 (sbit val 2)))
+    (assert-= 1 (sbit val 2))))
+
+(deftest lexer-dispatch-bit-vector-empty
+  "Lexer: #* produces an empty bit-vector of length 0."
   (let ((val (lexer-dispatch-first-value "#*")))
     (assert-true (bit-vector-p val))
     (assert-= 0 (length val))))
 
 ;;; ─── Hash Dispatch: Block Comment ───────────────────────────────────────────
 
-(deftest lexer-dispatch-block-comment-cases
-  "Lexer skips #| ... |# block comments; token after comment is returned."
-  (assert-equal '(:t-int)   (lexer-dispatch-lex-types "#| this is a comment |# 42"))
+(deftest lexer-dispatch-block-comment-before-integer
+  "Lexer skips #| ... |# block comment; integer token after it is returned."
+  (assert-equal '(:t-int) (lexer-dispatch-lex-types "#| this is a comment |# 42")))
+
+(deftest lexer-dispatch-block-comment-before-ident
+  "Lexer skips #| ... |# block comment; identifier token after it is returned."
   (assert-equal '(:t-ident) (lexer-dispatch-lex-types "#| comment |# symbol")))
 
 ;;; ─── Hash Dispatch: Feature Conditionals #+/# ──────────────────────────────
 
-(deftest lexer-dispatch-feature-conditional-cases
-  "#+/-: include when present; skip when absent (#+); skip when present (#-); include when absent (#-)."
+(deftest lexer-dispatch-hash-plus-includes-when-feature-present
+  "#+feature includes the next form when the feature is present."
   (let ((*features* '(:sbcl)))
-    (assert-equal '(:t-int) (lexer-dispatch-lex-types "#+sbcl 42")))
+    (assert-equal '(:t-int) (lexer-dispatch-lex-types "#+sbcl 42"))))
+
+(deftest lexer-dispatch-hash-plus-skips-when-feature-absent
+  "#+feature skips the first form and includes the second when the feature is absent."
   (let ((*features* '()))
     (assert-equal '(:t-int) (lexer-dispatch-lex-types "#+no-such-feature 42 99"))
-    (assert-= 99 (lexer-dispatch-first-value "#+no-such-feature 42 99")))
+    (assert-= 99 (lexer-dispatch-first-value "#+no-such-feature 42 99"))))
+
+(deftest lexer-dispatch-hash-minus-skips-when-feature-present
+  "#-feature skips the first form and includes the second when the feature is present."
   (let ((*features* '(:sbcl)))
     (assert-equal '(:t-int) (lexer-dispatch-lex-types "#-sbcl 42 99"))
-    (assert-= 99 (lexer-dispatch-first-value "#-sbcl 42 99")))
+    (assert-= 99 (lexer-dispatch-first-value "#-sbcl 42 99"))))
+
+(deftest lexer-dispatch-hash-minus-includes-when-feature-absent
+  "#-feature includes the next form when the feature is absent."
   (let ((*features* '()))
     (assert-equal '(:t-int) (lexer-dispatch-lex-types "#-no-such-feature 42"))))
 

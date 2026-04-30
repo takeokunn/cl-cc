@@ -15,19 +15,25 @@
 
 ;;; Heap Allocation Tests
 
-(deftest vm-heap-allocation-cases
-  "Basic alloc returns addr 1; multiple allocs yield unique addrs; get/set roundtrip works."
+(deftest vm-heap-alloc-first-returns-addr-1
+  "First vm-heap-alloc returns address 1 and sets counter to 1."
   (let* ((state (make-instance 'vm-io-state))
          (addr (vm-heap-alloc state nil)))
     (assert-= addr 1)
-    (assert-= (vm-heap-counter state) 1))
+    (assert-= (vm-heap-counter state) 1)))
+
+(deftest vm-heap-alloc-multiple-yields-unique-addrs
+  "Three sequential vm-heap-alloc calls yield unique addresses."
   (let* ((state (make-instance 'vm-io-state))
          (addr1 (vm-heap-alloc state nil))
          (addr2 (vm-heap-alloc state nil))
          (addr3 (vm-heap-alloc state nil)))
     (assert-true (/= addr1 addr2))
     (assert-true (/= addr2 addr3))
-    (assert-= (vm-heap-counter state) 3))
+    (assert-= (vm-heap-counter state) 3)))
+
+(deftest vm-heap-get-set-roundtrip
+  "vm-heap-set stores a value; vm-heap-get retrieves it."
   (let* ((state (make-instance 'vm-io-state))
          (addr (incf (vm-heap-counter state))))
     (vm-heap-set state addr :test-value)
@@ -35,8 +41,8 @@
 
 ;;; Cons Cell Tests
 
-(deftest vm-cons-creation-cases
-  "vm-cons creates a cons cell with correct car/cdr; nil cdr works correctly."
+(deftest vm-cons-creation-with-non-nil-cdr
+  "vm-cons creates a cons cell with both car and cdr set to non-nil values."
   (let* ((state (make-instance 'vm-io-state))
          (inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2)))
     (vm-reg-set state 1 10)
@@ -45,7 +51,10 @@
     (let ((cell (vm-reg-get state 0)))
       (assert-true (consp cell))
       (assert-= (car cell) 10)
-      (assert-= (cdr cell) 20)))
+      (assert-= (cdr cell) 20))))
+
+(deftest vm-cons-creation-with-nil-cdr
+  "vm-cons creates a cons cell where cdr is nil."
   (let* ((state (make-instance 'vm-io-state))
          (inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2)))
     (vm-reg-set state 1 42)
@@ -77,8 +86,8 @@
 
 ;;; Car/Cdr Tests
 
-(deftest vm-car-cdr-cases
-  "vm-car/cdr extract correct half; car on nested cons traverses correctly."
+(deftest vm-car-extracts-car-of-cons
+  "vm-car extracts the car half of a cons cell."
   (let* ((state (make-instance 'vm-io-state))
          (cons-inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
          (car-inst (make-vm-car :dst 3 :src 0)))
@@ -86,7 +95,10 @@
     (vm-reg-set state 2 456)
     (execute-instruction cons-inst state 0 (make-hash-table))
     (execute-instruction car-inst state 1 (make-hash-table))
-    (assert-= (vm-reg-get state 3) 123))
+    (assert-= (vm-reg-get state 3) 123)))
+
+(deftest vm-cdr-extracts-cdr-of-cons
+  "vm-cdr extracts the cdr half of a cons cell."
   (let* ((state (make-instance 'vm-io-state))
          (cons-inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
          (cdr-inst (make-vm-cdr :dst 3 :src 0)))
@@ -94,7 +106,10 @@
     (vm-reg-set state 2 456)
     (execute-instruction cons-inst state 0 (make-hash-table))
     (execute-instruction cdr-inst state 1 (make-hash-table))
-    (assert-= (vm-reg-get state 3) 456))
+    (assert-= (vm-reg-get state 3) 456)))
+
+(deftest vm-car-traverses-nested-cons
+  "vm-car on a nested cons ((2.3).4) followed by car-of-car gives the inner car (2)."
   (let* ((state (make-instance 'vm-io-state))
          (inst1 (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
          (inst2 (make-vm-cons :dst 3 :car-src 0 :cdr-src 4))
@@ -111,9 +126,8 @@
 
 ;;; Rplaca/Rplacd Tests
 
-(deftest vm-rplaca-rplacd-cases
-  "rplaca/rplacd each mutate the correct half; both can be used on the same cons."
-  ;; Block 1: rplaca on (10 . 20) → (99 . 20)
+(deftest vm-rplaca-mutates-car
+  "vm-rplaca mutates the car of a cons cell; cdr is unchanged."
   (cl-cc/vm::vm-clear-hash-cons-table)
   (let* ((state (make-instance 'vm-io-state))
          (cons-inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
@@ -127,8 +141,10 @@
     (execute-instruction rplaca-inst state 1 (make-hash-table))
     (let ((cell (vm-reg-get state 0)))
       (assert-= 99 (car cell))
-      (assert-= 20 (cdr cell))))
-  ;; Block 2: rplacd on (11 . 21) → (11 . 88), uses different key to avoid cache collision
+      (assert-= 20 (cdr cell)))))
+
+(deftest vm-rplacd-mutates-cdr
+  "vm-rplacd mutates the cdr of a cons cell; car is unchanged."
   (cl-cc/vm::vm-clear-hash-cons-table)
   (let* ((state (make-instance 'vm-io-state))
          (cons-inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
@@ -142,7 +158,10 @@
     (execute-instruction rplacd-inst state 1 (make-hash-table))
     (let ((cell (vm-reg-get state 0)))
       (assert-= 11 (car cell))
-      (assert-= 88 (cdr cell))))
+      (assert-= 88 (cdr cell)))))
+
+(deftest vm-rplaca-and-rplacd-together
+  "Both vm-rplaca and vm-rplacd can be applied to the same cons cell independently."
   (let* ((state (make-instance 'vm-io-state))
          (cons-inst (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
          (rplaca-inst (make-vm-rplaca :cons 0 :val 3))

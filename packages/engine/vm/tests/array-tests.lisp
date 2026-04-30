@@ -7,14 +7,17 @@
 
 ;;; ─── Array operations ──────────────────────────────────────────────────────
 
-(deftest vm-array-make-cases
-  "vm-make-array: creates array of given size; with initial-element fills all slots."
+(deftest vm-array-make-creates-array-of-given-size
+  "vm-make-array creates an array with the length stored in the size register."
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 5)
     (exec1 (cl-cc::make-vm-make-array :dst 0 :size-reg 1) s)
     (let ((arr (cl-cc:vm-reg-get s 0)))
       (assert-true (arrayp arr))
-      (assert-= 5 (length arr))))
+      (assert-= 5 (length arr)))))
+
+(deftest vm-array-make-with-initial-element-fills-all-slots
+  "vm-make-array :initial-element fills every slot with the given value."
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 3)
     (cl-cc:vm-reg-set s 2 42)
@@ -226,14 +229,17 @@
 
 ;;; ─── adjust-array / array-displacement ──────────────────────────────────────
 
-(deftest vm-array-adjust-displacement-cases
-  "vm-adjust-array grows array; vm-array-displacement returns nil for non-displaced."
+(deftest vm-adjust-array-grows-array-to-new-size
+  "vm-adjust-array changes the length of an adjustable array to the value in the dims register."
   (let ((s (make-test-vm))
         (arr (make-array 3 :initial-element 0 :adjustable t)))
     (cl-cc:vm-reg-set s 1 arr)
     (cl-cc:vm-reg-set s 2 5)
     (exec1 (cl-cc::make-vm-adjust-array :dst 0 :arr 1 :dims 2) s)
-    (assert-= 5 (length (cl-cc:vm-reg-get s 0))))
+    (assert-= 5 (length (cl-cc:vm-reg-get s 0)))))
+
+(deftest vm-array-displacement-returns-nil-for-non-displaced
+  "vm-array-displacement returns NIL for a simple (non-displaced) array."
   (let ((s (make-test-vm))
         (arr (make-array 3)))
     (cl-cc:vm-reg-set s 1 arr)

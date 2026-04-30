@@ -161,13 +161,16 @@
 
 ;;; ─── has-typeclass-instance-p ──────────────────────────────────────────────
 
-(deftest has-typeclass-instance-p-cases
-  "has-typeclass-instance-p: true after registration/false before; finds instances via superclass chain."
+(deftest has-typeclass-instance-p-false-before-true-after-registration
+  "has-typeclass-instance-p returns nil before registering, T after."
   (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
         (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
     (assert-false (has-typeclass-instance-p 'eq type-int))
     (register-typeclass-instance 'eq type-int nil)
-    (assert-true  (has-typeclass-instance-p 'eq type-int)))
+    (assert-true  (has-typeclass-instance-p 'eq type-int))))
+
+(deftest has-typeclass-instance-p-via-superclass-chain
+  "has-typeclass-instance-p finds an instance through a superclass chain (ord ⊃ eq)."
   (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
         (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
     (register-typeclass-instance 'eq type-int nil)
@@ -206,22 +209,31 @@
 
 ;;; ─── %typeclass-instance-overlaps-p ─────────────────────────────────────────
 
-(deftest typeclass-instance-overlaps-p-cases
-  "%typeclass-instance-overlaps-p: type-var overlaps any concrete type; two different concretes don't."
-  (assert-true  (cl-cc/type::%typeclass-instance-overlaps-p
-                 (fresh-type-var "a") type-int))
+(deftest typeclass-instance-overlaps-p-var-overlaps-concrete
+  "%typeclass-instance-overlaps-p: a type-var overlaps any concrete type."
+  (assert-true (cl-cc/type::%typeclass-instance-overlaps-p
+                (fresh-type-var "a") type-int)))
+
+(deftest typeclass-instance-overlaps-p-different-concretes-do-not-overlap
+  "%typeclass-instance-overlaps-p: two different concrete types do not overlap."
   (assert-false (cl-cc/type::%typeclass-instance-overlaps-p
-                 type-int type-string))
+                 type-int type-string)))
+
+(deftest typeclass-instance-overlaps-p-same-concrete-does-not-overlap
+  "%typeclass-instance-overlaps-p: the same concrete type on both sides does not overlap."
   (assert-false (cl-cc/type::%typeclass-instance-overlaps-p
                  type-int type-int)))
 
 ;;; ─── %typeclass-instance-args ────────────────────────────────────────────────
 
-(deftest typeclass-instance-args-cases
-  "%typeclass-instance-args: wraps single type in list; unpacks type-product elems."
+(deftest typeclass-instance-args-single-type-wraps-in-list
+  "%typeclass-instance-args wraps a single type in a one-element list."
   (let ((args (cl-cc/type::%typeclass-instance-args type-int)))
     (assert-= 1 (length args))
-    (assert-eq type-int (first args)))
+    (assert-eq type-int (first args))))
+
+(deftest typeclass-instance-args-product-unpacks-elems
+  "%typeclass-instance-args unpacks type-product elems into a two-element list."
   (let* ((prod (make-type-product :elems (list type-int type-string)))
          (args (cl-cc/type::%typeclass-instance-args prod)))
     (assert-= 2 (length args))

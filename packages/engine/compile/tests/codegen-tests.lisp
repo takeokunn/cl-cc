@@ -38,16 +38,22 @@ stable, isolated context."
 
 ;;; ─── compile-ast: ast-int ───────────────────────────────────────────────
 
-(deftest codegen-basic-compilation-cases
-  "Integer literal returns a register; local var returns bound register; unbound signals error."
+(deftest codegen-integer-literal-returns-keyword-register
+  "compile-ast of an ast-int returns a keyword-named register."
   (let* ((ctx (make-codegen-ctx))
          (reg (compile-ast (make-ast-int :value 42) ctx)))
-    (assert-true (keywordp reg)))
+    (assert-true (keywordp reg))))
+
+(deftest codegen-local-var-returns-bound-register
+  "compile-ast of an ast-var with a bound name returns the associated register."
   (let* ((ctx (make-codegen-ctx))
          (reg :R99))
     (setf (cl-cc/compile::ctx-env ctx) (list (cons 'x reg)))
     (let ((result (compile-ast (make-ast-var :name 'x) ctx)))
-      (assert-eq reg result)))
+      (assert-eq reg result))))
+
+(deftest codegen-unbound-var-signals-error
+  "compile-ast of an ast-var for an unbound name signals an error."
   (let ((ctx (make-codegen-ctx)))
     (assert-signals error
       (compile-ast (make-ast-var :name 'nonexistent-var-xyz) ctx))))
@@ -116,17 +122,23 @@ stable, isolated context."
 
 ;;; ─── codegen helpers ─────────────────────────────────────────────────────
 
-(deftest codegen-context-helpers-cases
-  "make-register returns unique keywords; emit appends one instruction; make-label returns unique strings."
+(deftest codegen-make-register-returns-unique-keywords
+  "make-register returns unique keyword registers on each call."
   (let* ((ctx (make-codegen-ctx))
          (r1 (cl-cc/compile::make-register ctx))
          (r2 (cl-cc/compile::make-register ctx)))
     (assert-true (keywordp r1))
     (assert-true (keywordp r2))
-    (assert-false (eq r1 r2)))
+    (assert-false (eq r1 r2))))
+
+(deftest codegen-emit-appends-one-instruction
+  "emit appends exactly one instruction to the context's instruction list."
   (let ((ctx (make-codegen-ctx)))
     (cl-cc/compile::emit ctx (cl-cc::make-vm-const :dst :R0 :value 42))
-    (assert-= 1 (length (codegen-instructions ctx))))
+    (assert-= 1 (length (codegen-instructions ctx)))))
+
+(deftest codegen-make-label-returns-unique-strings
+  "make-label returns distinct strings even for the same prefix."
   (let* ((ctx (make-codegen-ctx))
          (l1 (cl-cc/compile::make-label ctx "TEST"))
          (l2 (cl-cc/compile::make-label ctx "TEST")))
@@ -167,8 +179,8 @@ stable, isolated context."
 
 ;;; ─── optimize-ast / %loc macro ───────────────────────────────────────────
 
-(deftest optimize-ast-cases
-  "optimize-ast preserves source location; recursively folds ast-progn forms."
+(deftest optimize-ast-preserves-source-location
+  "optimize-ast carries source-file, source-line, and source-column through to the result."
   (let* ((src (make-ast-if :cond (make-ast-int :value 1 :source-line 5)
                             :then (make-ast-int :value 1)
                             :else (make-ast-int :value 0)
@@ -178,7 +190,10 @@ stable, isolated context."
          (result (cl-cc/compile::optimize-ast src)))
     (assert-equal "test.lisp" (cl-cc::ast-source-file result))
     (assert-=     5           (cl-cc::ast-source-line result))
-    (assert-=     2           (cl-cc::ast-source-column result)))
+    (assert-=     2           (cl-cc::ast-source-column result))))
+
+(deftest optimize-ast-recursively-folds-ast-progn
+  "optimize-ast constant-folds a binop inside an ast-progn."
   (let* ((node (make-ast-progn :forms (list (make-ast-binop :op '+
                                                              :lhs (make-ast-int :value 2)
                                                              :rhs (make-ast-int :value 3)))))
@@ -202,8 +217,8 @@ stable, isolated context."
 
 ;;; ─── %let-noescape-closure ──────────────────────────────────────────────
 
-(deftest let-noescape-closure-cases
-  "Unmutated lambda is eligible for noescape; mutated binding returns nil."
+(deftest let-noescape-closure-unmutated-lambda-is-eligible
+  "%let-noescape-closure returns the lambda when the binding is not mutated."
   (let* ((lam  (make-ast-lambda :params '(x)
                                 :optional-params nil
                                 :rest-param nil
@@ -212,7 +227,10 @@ stable, isolated context."
          (body (list (make-ast-call :func (make-ast-var :name 'f)
                                     :args (list (make-ast-int :value 1)))))
          (result (cl-cc/compile::%let-noescape-closure 'f lam nil nil body)))
-    (assert-eq lam result))
+    (assert-eq lam result)))
+
+(deftest let-noescape-closure-mutated-binding-returns-nil
+  "%let-noescape-closure returns NIL when the binding appears in the mutated set."
   (let* ((lam (make-ast-lambda :params '(x)
                                :optional-params nil
                                :rest-param nil
@@ -223,9 +241,12 @@ stable, isolated context."
 
 ;;; ─── %let-noescape-array-size ───────────────────────────────────────────
 
-(deftest let-noescape-non-matching-cases
-  "Non-make-array expr returns nil from array-size; non-cons expr returns nil from cons-p."
+(deftest let-noescape-array-size-non-make-array-returns-nil
+  "%let-noescape-array-size returns NIL when the expression is not a make-array call."
   (let ((expr (make-ast-int :value 5)))
-    (assert-null (cl-cc/compile::%let-noescape-array-size 'arr expr nil nil nil)))
+    (assert-null (cl-cc/compile::%let-noescape-array-size 'arr expr nil nil nil))))
+
+(deftest let-noescape-cons-p-non-cons-expr-returns-nil
+  "%let-noescape-cons-p returns NIL when the expression is not a cons call."
   (let ((expr (make-ast-int :value 5)))
     (assert-null (cl-cc/compile::%let-noescape-cons-p 'c expr nil nil nil))))

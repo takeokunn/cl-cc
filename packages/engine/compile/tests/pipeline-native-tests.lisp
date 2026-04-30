@@ -91,20 +91,29 @@
 
 ;;; ─── %compile-cache-path ────────────────────────────────────────────────────
 
-(deftest pipeline-native-cache-path-cases
-  "%compile-cache-path: rooted under *compile-cache-root*; embeds key; different keys differ; preserves name."
+(deftest pipeline-native-cache-path-rooted-under-cache-root
+  "%compile-cache-path returns a pathname rooted under *compile-cache-root*."
   (let* ((path     (cl-cc::%compile-cache-path "mykey" #P"a.out"))
          (root-str (namestring cl-cc::*compile-cache-root*))
          (path-str (namestring path)))
     (assert-true (pathnamep path))
     (assert-true (and (> (length path-str) (length root-str))
-                      (string= root-str (subseq path-str 0 (length root-str))))))
+                      (string= root-str (subseq path-str 0 (length root-str)))))))
+
+(deftest pipeline-native-cache-path-embeds-key-in-path
+  "%compile-cache-path embeds the cache key string inside the returned path."
   (let* ((key "unique-cache-key-42")
          (path (cl-cc::%compile-cache-path key #P"a.out")))
-    (assert-true (search key (namestring path))))
+    (assert-true (search key (namestring path)))))
+
+(deftest pipeline-native-cache-path-different-keys-differ
+  "%compile-cache-path returns distinct paths for distinct keys."
   (let ((p1 (cl-cc::%compile-cache-path "key-one" #P"a.out"))
         (p2 (cl-cc::%compile-cache-path "key-two" #P"a.out")))
-    (assert-false (equal (namestring p1) (namestring p2))))
+    (assert-false (equal (namestring p1) (namestring p2)))))
+
+(deftest pipeline-native-cache-path-preserves-output-filename
+  "%compile-cache-path preserves the filename from the output-file argument."
   (let ((path (cl-cc::%compile-cache-path "k" #P"a.out")))
     (assert-true (pathnamep path))
     (assert-equal "a" (pathname-name path))))

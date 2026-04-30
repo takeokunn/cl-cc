@@ -8,9 +8,9 @@
 
 (in-package :cl-cc/test)
 
-;;; ------------------------------------------------------------
+;;; ─────────────────────────────────────────────────────────────────────────
 ;;; TAP Output
-;;; ------------------------------------------------------------
+;;; ─────────────────────────────────────────────────────────────────────────
 
 (defun %tap-print (line)
   "Print a TAP line with mutex protection."
@@ -53,9 +53,8 @@
 
 (defun %duration-ms-from-result (result)
   "Derive duration_ms (double-float) from :duration-ns. Returns 0.0d0 when
-the timing harness hasn't populated the field (e.g. legacy synthetic
-results). Integer division is deliberate — we want deterministic output
-regardless of LC_ALL."
+ the timing harness hasn't populated the field (for synthetic result records).
+ Integer division is deliberate — we want deterministic output regardless of LC_ALL."
   (let ((ns (getf result :duration-ns)))
     (if (and (integerp ns) (>= ns 0))
         (/ ns 1000000.0d0)
@@ -83,6 +82,24 @@ so subseq/string= never see negative bounds."
   "Return a minimal TAP v13 YAML block carrying only duration_ms."
   (format nil "  ---~%  duration_ms: ~,3F~%  ..." duration-ms))
 
+;;; TAP status table: status → (ok-prefix keyword-tag)
+;;; keyword-tag is nil for :pass/:fail, "SKIP"/"TODO" for annotated statuses.
+(defparameter *tap-verbose-status-table*
+  '((:pass    "ok"      nil)
+    (:fail    "not ok"  nil)
+    (:skip    "ok"      "SKIP")
+    (:pending "not ok"  "TODO"))
+  "Maps test status to TAP ok/not-ok prefix and optional # DIRECTIVE keyword.")
+
+(defun %tap-verbose-first-line (number name status detail)
+  "Build the TAP first-line string for verbose mode."
+  (let* ((row     (assoc status *tap-verbose-status-table*))
+         (prefix  (second row))
+         (keyword (third row)))
+    (if keyword
+        (format nil "~A ~A - ~A # ~A ~A" prefix number name keyword (or detail ""))
+        (format nil "~A ~A - ~A" prefix number name))))
+
 (defun %tap-print-result (result)
   "Print a single test result. Compact mode (default) emits only failures.
 CLCC_VERBOSE_TAP=1 restores full TAP v13 output."
@@ -96,30 +113,23 @@ CLCC_VERBOSE_TAP=1 restores full TAP v13 output."
          (verbose-p   (%verbose-tap-p)))
     (sb-thread:with-mutex (*tap-mutex*)
       (if verbose-p
-          (ecase status
-            (:pass
-             (format t "ok ~A - ~A~%" number name)
-             (format t "~A~%" (%format-minimal-yaml-duration duration-ms)))
-            (:fail
-             (format t "not ok ~A - ~A~%" number name)
-             (if detail
-                 (format t "~A~%" (%detail-inject-duration detail duration-ms))
-                 (format t "~A~%" (%format-minimal-yaml-duration duration-ms))))
-            (:skip
-             (format t "ok ~A - ~A # SKIP ~A~%" number name (or detail ""))
-             (format t "~A~%" (%format-minimal-yaml-duration duration-ms)))
-            (:pending
-             (format t "not ok ~A - ~A # TODO ~A~%" number name (or detail ""))
-             (format t "~A~%" (%format-minimal-yaml-duration duration-ms))))
+          (let ((first-line (%tap-verbose-first-line number name status detail))
+                (yaml-line  (if (eq status :fail)
+                                (if detail
+                                    (%detail-inject-duration detail duration-ms)
+                                    (%format-minimal-yaml-duration duration-ms))
+                                (%format-minimal-yaml-duration duration-ms))))
+            (format t "~A~%" first-line)
+            (format t "~A~%" yaml-line))
           (when (eq status :fail)
             (format t "not ok - ~A~%" name)
             (format t "~A~%~%"
                     (%detail-inject-context detail suite source-file duration-ms))))
       (force-output))))
 
-;;; ------------------------------------------------------------
+;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Canonical Suite Definitions
-;;; ------------------------------------------------------------
+;;; ─────────────────────────────────────────────────────────────────────────
 
 (defsuite cl-cc-suite :description "CL-CC test root suite")
 

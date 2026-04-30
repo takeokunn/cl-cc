@@ -72,6 +72,25 @@
     (assert-true (search "message:" output))
     (assert-true (search "duration_ms:" output))))
 
+;;; ── %tap-verbose-first-line (T-V) ──────────────────────────────────────────
+
+(deftest-each tap-verbose-first-line-all-statuses
+  "%tap-verbose-first-line builds the correct TAP first-line for each status."
+  :cases (("pass"    :pass    "ok"     nil   "ok 1 - MY-TEST")
+          ("fail"    :fail    "not ok" nil   "not ok 2 - MY-TEST")
+          ("skip"    :skip    "ok"     "why" "ok 3 - MY-TEST # SKIP why")
+          ("pending" :pending "not ok" "tbd" "not ok 4 - MY-TEST # TODO tbd"))
+  (status _prefix detail expected)
+  (declare (ignore _prefix))
+  (let ((num (ecase status (:pass 1) (:fail 2) (:skip 3) (:pending 4))))
+    (assert-string= expected
+                    (%tap-verbose-first-line num 'my-test status detail))))
+
+(deftest tap-verbose-first-line-skip-without-detail-falls-back-to-empty
+  "%tap-verbose-first-line with NIL detail for :skip uses empty string."
+  (assert-string= "ok 5 - TEST # SKIP "
+                  (%tap-verbose-first-line 5 'test :skip nil)))
+
 (deftest timing-tsv-row-has-five-tab-separated-columns
   "%write-timings-tsv produces rows with exactly 5 tab-separated columns in
 the frozen order suite\\ttest-name\\tduration-ns\\tstatus\\tbatch-id."
@@ -286,3 +305,44 @@ the frozen order suite\\ttest-name\\tduration-ns\\tstatus\\tbatch-id."
     (assert-true (search "1 passed" output))
     (assert-true (search "1 failed" output))
     (assert-true (search "1 skipped" output))))
+
+;;; ── %detail-ends-with-yaml-terminator-p (T-Y) ──────────────────────────────
+
+(deftest-each detail-ends-with-yaml-terminator-p-cases
+  "%detail-ends-with-yaml-terminator-p detects trailing '  ...' correctly."
+  :cases (("ends-with-terminator"    "  ---\n  message: x\n  ..."  t)
+          ("no-terminator"           "  ---\n  message: x"          nil)
+          ("too-short"               "..."                           nil)
+          ("nil-input"               nil                             nil)
+          ("exact-terminator-only"   "  ..."                        t))
+  (detail expected)
+  (assert-eq (and expected t)
+             (%detail-ends-with-yaml-terminator-p detail)))
+
+;;; ── %duration-ms-from-result (T-D) ─────────────────────────────────────────
+
+(deftest-each duration-ms-from-result-cases
+  "%duration-ms-from-result converts :duration-ns to ms or returns 0.0d0 for missing/invalid values."
+  :cases (("positive-ns"   1000000   1.0d0)
+          ("zero-ns"       0         0.0d0)
+          ("nil-ns"        nil       0.0d0))
+  (ns expected)
+  (let ((result (list :duration-ns ns)))
+    (assert-equal expected (%duration-ms-from-result result))))
+
+;;; ── %source-file-display (T-S) ──────────────────────────────────────────────
+
+(deftest source-file-display-nil-returns-nil
+  "%source-file-display returns NIL for a NIL path."
+  (assert-null (%source-file-display nil)))
+
+(deftest source-file-display-relative-path-stays-relative
+  "%source-file-display strips the cwd prefix when the path starts with cwd."
+  (let* ((cwd     (namestring (uiop:getcwd)))
+         (abs-path (concatenate 'string cwd "tests/foo.lisp")))
+    (assert-string= "tests/foo.lisp" (%source-file-display abs-path))))
+
+(deftest source-file-display-unrelated-path-returned-unchanged
+  "%source-file-display returns the original namestring for paths outside cwd."
+  (let ((path "/tmp/unrelated.lisp"))
+    (assert-string= path (%source-file-display path))))

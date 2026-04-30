@@ -35,9 +35,12 @@
     (assert-true (cl-cc::cst-token-p node))
     (assert-eq expected-kind (cl-cc::cst-node-kind node))))
 
-(deftest parse-cl-atom-value-cases
-  "parse-cl-source captures integer value; captures symbol as symbol type."
-  (assert-= 99 (cl-cc::cst-token-value (grammar-parse "99")))
+(deftest parse-cl-atom-integer-captures-value
+  "parse-cl-source: integer atom token carries the integer value."
+  (assert-= 99 (cl-cc::cst-token-value (grammar-parse "99"))))
+
+(deftest parse-cl-atom-symbol-has-symbol-value
+  "parse-cl-source: identifier atom token carries a symbol value."
   (let ((node (grammar-parse "some-var")))
     (assert-true (cl-cc::cst-token-p node))
     (assert-true (symbolp (cl-cc::cst-token-value node)))))
@@ -55,12 +58,15 @@
     (assert-true (cl-cc::cst-interior-p node))
     (assert-eq expected-kind (cl-cc::cst-node-kind node))))
 
-(deftest parse-cl-form-vector-cases
-  "parse-cl-form: #(1 2 3) → :vector with 3 children; #() → :vector with 0 children."
+(deftest parse-cl-form-vector-with-elements
+  "parse-cl-form: #(1 2 3) produces a :vector node with 3 children."
   (let ((node (grammar-parse "#(1 2 3)")))
     (assert-true (cl-cc::cst-interior-p node))
     (assert-eq :vector (cl-cc::cst-node-kind node))
-    (assert-= 3 (length (cl-cc::cst-interior-children node))))
+    (assert-= 3 (length (cl-cc::cst-interior-children node)))))
+
+(deftest parse-cl-form-empty-vector
+  "parse-cl-form: #() produces a :vector node with 0 children."
   (let ((node (grammar-parse "#()")))
     (assert-true (cl-cc::cst-interior-p node))
     (assert-eq :vector (cl-cc::cst-node-kind node))
@@ -68,12 +74,15 @@
 
 ;;; ─── parse-cl-list-form — list kinds ────────────────────────────────────────
 
-(deftest parse-cl-list-structure-cases
-  "parse-cl-list-form: () → :list empty; (foo 1 2) → :call with 3 children."
+(deftest parse-cl-list-empty-is-list-kind
+  "parse-cl-list-form: () produces a :list node with 0 children."
   (let ((node (grammar-parse "()")))
     (assert-true (cl-cc::cst-interior-p node))
     (assert-eq :list (cl-cc::cst-node-kind node))
-    (assert-= 0 (length (cl-cc::cst-interior-children node))))
+    (assert-= 0 (length (cl-cc::cst-interior-children node)))))
+
+(deftest parse-cl-list-call-has-correct-children
+  "parse-cl-list-form: (foo 1 2) produces a :call node with 3 children."
   (let ((node (grammar-parse "(foo 1 2)")))
     (assert-true (cl-cc::cst-interior-p node))
     (assert-eq :call (cl-cc::cst-node-kind node))
@@ -128,11 +137,14 @@
     (declare (ignore forms))
     (assert-true (listp diags))))
 
-(deftest parse-cl-source-byte-span-cases
-  "parse-cl-source records byte positions: atom [0,2]; list form [0,7]."
+(deftest parse-cl-source-atom-byte-span
+  "parse-cl-source records byte span [0,2] for the two-digit atom 42."
   (let ((node (grammar-parse "42")))
     (assert-= 0 (cl-cc::cst-node-start-byte node))
-    (assert-= 2 (cl-cc::cst-node-end-byte node)))
+    (assert-= 2 (cl-cc::cst-node-end-byte node))))
+
+(deftest parse-cl-source-list-byte-span
+  "parse-cl-source records byte span [0,7] for the 7-character list (+ 1 2)."
   (let ((node (grammar-parse "(+ 1 2)")))
     (assert-= 0 (cl-cc::cst-node-start-byte node))
     (assert-= 7 (cl-cc::cst-node-end-byte node))))

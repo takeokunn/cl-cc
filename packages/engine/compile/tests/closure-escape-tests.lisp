@@ -10,25 +10,31 @@
 
 ;;; ─── Conservative escape analysis helper ─────────────────────────────────
 
-(deftest binding-escape-analysis-cases
-  "binding-escapes-in-body-p: true for direct return; nil for safe consumer; true for inner lambda capture."
+(deftest binding-escapes-direct-return-returns-true
+  "binding-escapes-in-body-p returns true when the binding appears as a direct return value."
   (assert-true
    (cl-cc/compile::binding-escapes-in-body-p
     (list (cl-cc/ast::make-ast-var :name 'p))
-    'p))
+    'p)))
+
+(deftest binding-escapes-safe-consumer-returns-nil
+  "binding-escapes-in-body-p returns nil when the only use is via a declared safe consumer."
   (assert-null
    (cl-cc/compile::binding-escapes-in-body-p
     (list (cl-cc/ast::make-ast-call
            :func 'car
            :args (list (cl-cc/ast::make-ast-var :name 'p))))
     'p
-     :safe-consumers '("CAR")))
+    :safe-consumers '("CAR"))))
+
+(deftest binding-escapes-inner-lambda-capture-returns-true
+  "binding-escapes-in-body-p returns true when the binding is captured by an inner lambda."
   (assert-true
    (cl-cc/compile::binding-escapes-in-body-p
-     (list (cl-cc/ast::make-ast-lambda
-            :params '()
-            :body (list (cl-cc/ast::make-ast-var :name 'p))))
-     'p)))
+    (list (cl-cc/ast::make-ast-lambda
+           :params '()
+           :body (list (cl-cc/ast::make-ast-var :name 'p))))
+    'p)))
 
 (deftest-each binding-escape-kinds-reports
   "binding-escape-kinds-in-body classifies escapes as :return, :external-call, or :capture."
@@ -60,36 +66,48 @@
   (expected actual)
   (assert-equal expected actual))
 
-(deftest binding-one-shot-cases
-  "Direct call count ignores non-call refs; one-shot true for single non-escaping call; false for multi-use or capture."
+(deftest binding-direct-call-count-ignores-non-call-refs
+  "binding-direct-call-count-in-body counts calls but not bare variable references."
   (assert-equal 1
                 (cl-cc/compile::binding-direct-call-count-in-body
                  (list (cl-cc/ast::make-ast-call :func 'f :args nil)
                        (cl-cc/ast::make-ast-var :name 'f))
-                 'f))
+                 'f)))
+
+(deftest binding-one-shot-single-call-returns-true
+  "binding-one-shot-p returns true when the binding is called exactly once and does not escape."
   (assert-true
    (cl-cc/compile::binding-one-shot-p
     (list (cl-cc/ast::make-ast-call :func 'f :args (list (cl-cc/ast::make-ast-int :value 1))))
-    'f))
+    'f)))
+
+(deftest binding-one-shot-multi-call-returns-false
+  "binding-one-shot-p returns false when the binding is called more than once."
   (assert-false
    (cl-cc/compile::binding-one-shot-p
     (list (cl-cc/ast::make-ast-call :func 'f :args nil)
           (cl-cc/ast::make-ast-call :func 'f :args nil))
-    'f))
+    'f)))
+
+(deftest binding-one-shot-captured-in-lambda-returns-false
+  "binding-one-shot-p returns false when the binding is captured inside an inner lambda."
   (assert-false
    (cl-cc/compile::binding-one-shot-p
     (list (cl-cc/ast::make-ast-lambda :params '() :body (list (cl-cc/ast::make-ast-var :name 'f))))
     'f)))
 
-(deftest group-closures-cases
-  "group-shared-sibling-captures groups by capture set; group-shareable-closures groups by label+captures."
+(deftest group-shared-sibling-captures-groups-by-capture-set
+  "group-shared-sibling-captures groups closures sharing the same normalized capture set."
   (let ((groups (cl-cc/compile::group-shared-sibling-captures
                  '(((x . :r1) (y . :r2))
                    ((y . :r8) (x . :r7))
                    ((z . :r3))))))
     (assert-equal 1 (hash-table-count groups))
     (assert-equal 2 (length (gethash '(x y) groups)))
-    (assert-false (gethash '(z) groups)))
+    (assert-false (gethash '(z) groups))))
+
+(deftest group-shareable-closures-groups-by-label-and-captures
+  "group-shareable-closures groups closures with identical entry-label and capture set."
   (let ((groups (cl-cc/compile::group-shareable-closures
                  '((:entry-label "L0" :captured-vars ((x . :r1) (y . :r2)))
                    (:entry-label "L0" :captured-vars ((y . :r8) (x . :r7)))
@@ -97,8 +115,8 @@
     (assert-equal 1 (hash-table-count groups))
     (assert-equal 2 (length (gethash '("L0" (x y)) groups)))))
 
-(deftest binding-escape-capture-cases
-  "Captures in ast-defun, ast-apply (external-call), and ast-flet are classified correctly."
+(deftest binding-escape-defun-body-yields-capture
+  "A binding referenced inside an ast-defun body is classified as :capture."
   (assert-true
    (member :capture
            (cl-cc/compile::binding-escape-kinds-in-body
@@ -106,14 +124,20 @@
                    :name 'inner
                    :params '()
                    :body (list (cl-cc/ast::make-ast-var :name 'p))))
-            'p)))
+            'p))))
+
+(deftest binding-escape-apply-arg-yields-external-call
+  "A binding passed as an argument to ast-apply is classified as :external-call."
   (assert-true
    (member :external-call
            (cl-cc/compile::binding-escape-kinds-in-body
             (list (cl-cc/ast::make-ast-apply
                    :func (cl-cc/ast::make-ast-var :name 'f)
                    :args (list (cl-cc/ast::make-ast-var :name 'p))))
-            'p)))
+            'p))))
+
+(deftest binding-escape-flet-body-yields-capture
+  "A binding referenced inside an ast-flet body is classified as :capture."
   (assert-true
    (member :capture
            (cl-cc/compile::binding-escape-kinds-in-body
@@ -122,10 +146,13 @@
                    :body (list (cl-cc/ast::make-ast-var :name 'p))))
             'p))))
 
-(deftest binding-no-escape-cases
-  "Empty body and absent binding both yield no escape kinds."
+(deftest binding-no-escape-empty-body-returns-nil
+  "binding-escape-kinds-in-body returns nil for a nil or empty body."
   (assert-null (cl-cc/compile::binding-escape-kinds-in-body nil 'p))
-  (assert-null (cl-cc/compile::binding-escape-kinds-in-body '() 'p))
+  (assert-null (cl-cc/compile::binding-escape-kinds-in-body '() 'p)))
+
+(deftest binding-no-escape-absent-binding-returns-nil
+  "binding-escape-kinds-in-body returns nil when the binding does not appear in the body."
   (assert-null
    (cl-cc/compile::binding-escape-kinds-in-body
     (list (cl-cc/ast::make-ast-var :name 'q))

@@ -16,11 +16,14 @@
   (form)
   (assert-eq (car (our-macroexpand-1 form)) 'let))
 
-(deftest reduce-body-structure-cases
-  "REDUCE body structure: without initial-value has inner LET; with initial-value has TAGBODY loop."
+(deftest reduce-without-initial-value-has-inner-let
+  "REDUCE without :initial-value wraps the scan body in an inner LET."
   (let* ((result (our-macroexpand-1 '(reduce #'+ lst)))
          (inner  (caddr result)))
-    (assert-eq (car inner) 'let))
+    (assert-eq (car inner) 'let)))
+
+(deftest reduce-with-initial-value-has-tagbody-loop
+  "REDUCE with :initial-value expands to a TAGBODY accumulation loop."
   (let* ((result (our-macroexpand-1 '(reduce #'+ lst :initial-value 0)))
          (body   (cddr result)))
     (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'tagbody))) body))))
@@ -49,10 +52,13 @@
   (form expected)
   (assert-equal (our-macroexpand-1 form) expected))
 
-(deftest delete-delegation-cases
-  "DELETE delegates to REMOVE; delete-duplicates delegates to remove-duplicates."
+(deftest delete-delegates-to-remove
+  "DELETE expands to REMOVE (non-destructive delegation)."
   (let ((result (our-macroexpand-1 '(delete item seq))))
-    (assert-eq (car result) 'remove))
+    (assert-eq (car result) 'remove)))
+
+(deftest delete-duplicates-delegates-to-remove-duplicates
+  "delete-duplicates expands to remove-duplicates."
   (assert-equal (our-macroexpand-1 '(delete-duplicates seq))
                 '(remove-duplicates seq)))
 
@@ -76,14 +82,20 @@
     (assert-eq 'let   (car let-f))))
 
 
-(deftest last-butlast-cases
-  "LAST expands to LET*/NTHCDR; BUTLAST to LET*/WHEN; NBUTLAST delegates to BUTLAST."
+(deftest last-expands-to-let*-nthcdr
+  "LAST expands to LET* containing an NTHCDR call for tail access."
   (let ((result (our-macroexpand-1 '(last xs 2))))
     (assert-eq 'let* (car result))
-    (assert-eq 'nthcdr (car (caddr result))))
+    (assert-eq 'nthcdr (car (caddr result)))))
+
+(deftest butlast-expands-to-let*-when
+  "BUTLAST expands to LET* with a WHEN guard around the copy."
   (let ((result (our-macroexpand-1 '(butlast xs 2))))
     (assert-eq 'let* (car result))
-    (assert-eq 'when (car (caddr result))))
+    (assert-eq 'when (car (caddr result)))))
+
+(deftest nbutlast-delegates-to-butlast
+  "NBUTLAST is a direct alias for BUTLAST (non-destructive delegation)."
   (assert-equal (our-macroexpand-1 '(nbutlast xs 2)) '(butlast xs 2)))
 
 (deftest search-expansion

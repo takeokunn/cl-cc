@@ -49,13 +49,16 @@
 
 ;;; ─── ast-make-instance ───────────────────────────────────────────────────────
 
-(deftest cps-make-instance-cases
-  "ast-make-instance: no initargs → make-instance call; with initargs → also has nested lambda."
+(deftest cps-make-instance-no-initargs-contains-make-instance
+  "ast-make-instance without initargs CPS output contains make-instance."
   (let* ((node (cl-cc/ast::make-ast-make-instance
                 :class (cl-cc/ast::make-ast-quote :value 'dog)
                 :initargs nil))
          (result (%cps-k node)))
-    (assert-true (%form-contains-p result 'make-instance)))
+    (assert-true (%form-contains-p result 'make-instance))))
+
+(deftest cps-make-instance-with-initargs-contains-lambda
+  "ast-make-instance with initargs CPS output contains both make-instance and a nested lambda."
   (let* ((node (cl-cc/ast::make-ast-make-instance
                 :class (cl-cc/ast::make-ast-quote :value 'point)
                 :initargs (list :x (cl-cc/ast::make-ast-int :value 1)
@@ -66,13 +69,16 @@
 
 ;;; ─── ast-slot-value ──────────────────────────────────────────────────────────
 
-(deftest cps-slot-ops-cases
-  "Slot ops: slot-value → contains slot-value; set-slot-value → contains setf + slot-value."
+(deftest cps-slot-value-contains-slot-value
+  "ast-slot-value CPS output contains slot-value."
   (let* ((node (cl-cc/ast::make-ast-slot-value
                 :object (cl-cc/ast::make-ast-var :name 'obj)
                 :slot 'x))
          (result (%cps-k node)))
-    (assert-true (%form-contains-p result 'slot-value)))
+    (assert-true (%form-contains-p result 'slot-value))))
+
+(deftest cps-set-slot-value-contains-setf-and-slot-value
+  "ast-set-slot-value CPS output contains both setf and slot-value."
   (let* ((node (cl-cc/ast::make-ast-set-slot-value
                 :object (cl-cc/ast::make-ast-var :name 'obj)
                 :slot 'x
@@ -83,8 +89,8 @@
 
 ;;; ─── ast-defclass ────────────────────────────────────────────────────────────
 
-(deftest cps-defclass-cases
-  "ast-defclass: emits progn+defclass+(funcall k); superclasses appear in defclass form."
+(deftest cps-defclass-emits-progn-defclass-funcall-k
+  "ast-defclass CPS output is (progn (defclass ...) (funcall k ...))."
   (let* ((node (cl-cc/ast::make-ast-defclass
                 :name 'animal :superclasses nil :slots nil))
          (result (%cps-k node)))
@@ -92,7 +98,10 @@
     (assert-eq 'defclass (caadr result))
     (let ((last-form (car (last result))))
       (assert-eq 'funcall (car last-form))
-      (assert-eq 'k (second last-form))))
+      (assert-eq 'k (second last-form)))))
+
+(deftest cps-defclass-superclasses-appear-in-defclass-form
+  "ast-defclass superclasses are passed through to the emitted defclass form."
   (let* ((node (cl-cc/ast::make-ast-defclass
                 :name 'dog :superclasses '(animal) :slots nil))
          (result (%cps-k node)))
@@ -137,8 +146,8 @@
 
 ;;; ─── ast-multiple-value-bind ─────────────────────────────────────────────────
 
-(deftest cps-mvb-cases
-  "ast-mvb: ast-values producer → multiple-value-bind; non-ast-values → let with nil bindings."
+(deftest cps-mvb-ast-values-producer-emits-multiple-value-bind
+  "ast-mvb with an ast-values producer CPS output contains multiple-value-bind."
   (let* ((values-node (cl-cc/ast::make-ast-values
                         :forms (list (cl-cc/ast::make-ast-int :value 1)
                                      (cl-cc/ast::make-ast-int :value 2))))
@@ -147,7 +156,10 @@
                 :values-form values-node
                 :body (list (cl-cc/ast::make-ast-var :name 'a))))
          (result (%cps-k node)))
-    (assert-true (%form-contains-p result 'multiple-value-bind)))
+    (assert-true (%form-contains-p result 'multiple-value-bind))))
+
+(deftest cps-mvb-non-ast-values-emits-let-with-nil-bindings
+  "ast-mvb with a non-ast-values producer CPS output contains let with nil bindings."
   (let* ((call-node (cl-cc/ast::make-ast-call :func 'floor :args (list (cl-cc/ast::make-ast-int :value 7))))
          (node (cl-cc/ast::make-ast-multiple-value-bind
                 :vars '(q r)
@@ -159,13 +171,16 @@
 
 ;;; ─── ast-multiple-value-call ─────────────────────────────────────────────────
 
-(deftest cps-mvc-cases
-  "ast-multiple-value-call: spreads args via apply; multi-arg uses push+nreverse collect."
+(deftest cps-mvc-single-arg-spreads-via-apply
+  "ast-multiple-value-call with one arg CPS output contains apply."
   (let* ((node (cl-cc/ast::make-ast-multiple-value-call
                 :func (cl-cc/ast::make-ast-var :name 'f)
                 :args (list (cl-cc/ast::make-ast-int :value 1))))
          (result (%cps-k node)))
-    (assert-true (%form-contains-p result 'apply)))
+    (assert-true (%form-contains-p result 'apply))))
+
+(deftest cps-mvc-multi-arg-uses-collect-pattern
+  "ast-multiple-value-call with multiple args CPS output uses push or nreverse for collection."
   (let* ((node (cl-cc/ast::make-ast-multiple-value-call
                 :func (cl-cc/ast::make-ast-var :name 'list)
                 :args (list (cl-cc/ast::make-ast-int :value 1)

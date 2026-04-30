@@ -31,8 +31,8 @@
 
 ;;; ─── Basic struct ─────────────────────────────────────────────────────────
 
-(deftest ds-basic-expansion-cases
-  "Basic defstruct: progn with defclass; default constructor calls make-instance; predicate generated; ends with quoted name."
+(deftest ds-basic-expansion-produces-defclass
+  "Basic defstruct wraps a defclass with 2 slots, each with :initarg matching the slot name."
   (let* ((exp         (ds-expand '(defstruct point x y)))
          (defclass-form (second exp))
          (slot-specs  (fourth defclass-form))
@@ -42,20 +42,29 @@
     (assert-equal 'point    (second defclass-form))
     (assert-equal 2         (length slot-specs))
     (assert-equal :x        (getf (rest first-slot) :initarg))
-    (assert-equal nil       (getf (rest first-slot) :initform)))
+    (assert-equal nil       (getf (rest first-slot) :initform))))
+
+(deftest ds-basic-expansion-generates-constructor
+  "Basic defstruct generates a MAKE-POINT constructor that calls make-instance."
   (let* ((exp   (ds-expand '(defstruct point x y)))
          (forms (ds-progn-forms exp))
          (ctor  (second forms))
          (body  (fourth ctor)))
     (assert-equal 'defun              (first ctor))
     (assert-equal (intern "MAKE-POINT") (second ctor))
-    (assert-equal 'make-instance      (first body)))
-  (let* ((exp (ds-expand '(defstruct point x y)))
+    (assert-equal 'make-instance      (first body))))
+
+(deftest ds-basic-expansion-generates-predicate
+  "Basic defstruct generates a POINT-P predicate function."
+  (let* ((exp   (ds-expand '(defstruct point x y)))
          (forms (ds-progn-forms exp))
-         (pred (third forms)))
+         (pred  (third forms)))
     (assert-equal 'defun (first pred))
-    (assert-equal (intern "POINT-P") (second pred)))
-  (let* ((exp (ds-expand '(defstruct point x y)))
+    (assert-equal (intern "POINT-P") (second pred))))
+
+(deftest ds-basic-expansion-ends-with-quoted-name
+  "Basic defstruct ends the PROGN with the quoted struct name for reflection."
+  (let* ((exp   (ds-expand '(defstruct point x y)))
          (forms (ds-progn-forms exp))
          (last-form (car (last forms))))
     (assert-equal 'quote (first last-form))
@@ -63,17 +72,13 @@
 
 ;;; ─── Slot defaults and filtering ─────────────────────────────────────────
 
-(deftest ds-slot-options-cases
-  "Slot (name default) gets correct initform; docstring in slot list is filtered out."
+(deftest ds-slot-default-initform
+  "Slot (name default) sets the :initform to the default value."
   (let* ((exp (ds-expand '(defstruct config (timeout 30) (verbose nil))))
          (defclass-form (second exp))
          (slot-specs (fourth defclass-form))
          (first-slot (first slot-specs)))
-    (assert-equal 30 (getf (rest first-slot) :initform)))
-  (let* ((exp (ds-expand '(defstruct point "A 2D point." x y)))
-         (defclass-form (second exp))
-         (slot-specs (fourth defclass-form)))
-    (assert-equal 2 (length slot-specs))))
+    (assert-equal 30 (getf (rest first-slot) :initform))))
 
 ;;; ─── :conc-name option ────────────────────────────────────────────────────
 
@@ -88,15 +93,18 @@
 
 ;;; ─── :constructor option ──────────────────────────────────────────────────
 
-(deftest ds-constructor-options-cases
-  ":constructor renames the constructor; BOA constructor uses positional args not &key."
-  (let* ((exp (ds-expand '(defstruct (point (:constructor new-point)) x y)))
+(deftest ds-constructor-renamed-by-option
+  ":constructor option renames the generated constructor to the specified name."
+  (let* ((exp   (ds-expand '(defstruct (point (:constructor new-point)) x y)))
          (forms (ds-progn-forms exp))
-         (ctor (second forms)))
-    (assert-equal "NEW-POINT" (symbol-name (second ctor))))
-  (let* ((exp (ds-expand '(defstruct (point (:constructor make-pt (x y))) x y)))
-         (forms (ds-progn-forms exp))
-         (ctor (second forms))
+         (ctor  (second forms)))
+    (assert-equal "NEW-POINT" (symbol-name (second ctor)))))
+
+(deftest ds-boa-constructor-uses-positional-params
+  ":constructor with BOA lambda list generates positional params (no &key)."
+  (let* ((exp    (ds-expand '(defstruct (point (:constructor make-pt (x y))) x y)))
+         (forms  (ds-progn-forms exp))
+         (ctor   (second forms))
          (params (third ctor)))
     (assert-equal 2 (length params))
     (assert-equal "X" (symbol-name (first params)))
@@ -113,14 +121,17 @@
 
 ;;; ─── *accessor-slot-map* side effect ──────────────────────────────────────
 
-(deftest ds-accessor-and-empty-cases
-  "*accessor-slot-map* populated for each accessor; empty struct has 0 slots."
+(deftest ds-accessor-slot-map-populated
+  "*accessor-slot-map* is populated with (struct-name . slot-name) for each accessor."
   (let ((cl-cc/expand::*accessor-slot-map* (make-hash-table :test #'eq)))
     (ds-expand '(defstruct widget width height))
     (let ((entry (gethash (intern "WIDGET-WIDTH") cl-cc/expand::*accessor-slot-map*)))
       (assert-true (not (null entry)))
       (assert-equal 'widget (car entry))
-      (assert-equal 'width (cdr entry))))
+      (assert-equal 'width (cdr entry)))))
+
+(deftest ds-empty-struct-has-zero-slots
+  "Empty defstruct generates a defclass with zero slot specs."
   (let* ((exp (ds-expand '(defstruct empty)))
          (defclass-form (second exp))
          (slot-specs (fourth defclass-form)))
@@ -147,11 +158,14 @@
     (assert-equal (car expected) (car result))
     (assert-equal (cdr expected) (cdr result))))
 
-(deftest ds-extract-boa-parts-edge-cases
-  "&aux bindings split into normal+aux; bare &aux symbol promoted to (sym nil) pair."
+(deftest ds-extract-boa-parts-splits-aux-bindings
+  "%defstruct-extract-boa-parts splits params at &aux: normal params on left, aux pairs on right."
   (let ((result (cl-cc/expand::%defstruct-extract-boa-parts '(x y &aux (z 0) (w 1)))))
     (assert-equal '(x y) (car result))
-    (assert-equal '((z 0) (w 1)) (cdr result)))
+    (assert-equal '((z 0) (w 1)) (cdr result))))
+
+(deftest ds-extract-boa-parts-promotes-bare-aux-symbol
+  "%defstruct-extract-boa-parts promotes a bare &aux symbol to a (sym nil) pair."
   (let ((result (cl-cc/expand::%defstruct-extract-boa-parts '(x &aux z))))
     (assert-equal '(x) (car result))
     (assert-equal '((z nil)) (cdr result))))

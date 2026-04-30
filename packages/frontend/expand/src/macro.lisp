@@ -87,12 +87,16 @@ EXPANDER may be either a host function or a descriptor consumed by
   (%reset-macroexpansion-caches)
   name)
 
+(defparameter *expander-descriptor-kinds*
+  '(:macro-expander :compiler-macro-expander :register-macro-expander)
+  "Valid :kind values for data-backed macro expander descriptors.")
+
 (defun %expander-descriptor-p (object)
   "Return T when OBJECT is a data-backed macro expander descriptor."
   (and (listp object)
-       (member (getf object :kind)
-               '(:macro-expander :compiler-macro-expander :register-macro-expander)
-               :test #'eq)))
+       (not (null (member (getf object :kind)
+                          *expander-descriptor-kinds*
+                          :test #'eq)))))
 
 (defun %maybe-postprocess-expansion (result descriptor env)
   "Apply post-expansion processing to RESULT if the descriptor requests it."
@@ -212,31 +216,25 @@ Supports both host functions and descriptor-backed expanders."
   "Return T when FORM is a list headed by a symbol named NAME."
   (and (consp form) (symbolp (car form)) (string= (symbol-name (car form)) name)))
 
+(defun %expand-qq-element (elem)
+  "Expand a single element of a quasiquote list template."
+  (cond
+    ((%qq-head-p elem "UNQUOTE")          (list 'list (second elem)))
+    ((%qq-head-p elem "UNQUOTE-SPLICING") (second elem))
+    (t                                    (list 'list (%expand-quasiquote elem)))))
+
 (defun %expand-quasiquote (template)
   "Transform a quasiquote template into list/cons/append calls.
 Handles (unquote x) and (unquote-splicing x) within template.
 These symbols live in :cl-cc/bootstrap so both parse and expand share them."
   (cond
-    ;; (unquote x) at top level => just x
     ((%qq-head-p template "UNQUOTE")
      (second template))
-    ;; A list => process each element for unquote/splicing
     ((consp template)
-     (let ((parts nil))
-       (dolist (elem template)
-         (cond
-           ((%qq-head-p elem "UNQUOTE")
-            (push (list 'list (second elem)) parts))
-           ((%qq-head-p elem "UNQUOTE-SPLICING")
-            (push (second elem) parts))
-           (t
-            (push (list 'list (%expand-quasiquote elem)) parts))))
-       (let ((reversed (nreverse parts)))
-         (if (= (length reversed) 1)
-             (first reversed)
-             (cons 'append reversed)))))
-    ;; Atom => quote it
-    (t (list 'quote template))))
+     (let ((parts (mapcar #'%expand-qq-element template)))
+       (if (= (length parts) 1) (first parts) (cons 'append parts))))
+    (t
+     (list 'quote template))))
 
 (defun our-macroexpand-all (form &optional env)
   "Recursively expand all macros in FORM, including in subforms."
@@ -253,21 +251,17 @@ These symbols live in :cl-cc/bootstrap so both parse and expand share them."
   "Define NAME as a macro with LAMBDA-LIST and BODY.
    The macro expander function receives (FORM ENV) as arguments."
   (let* ((form-var (gensym "FORM"))
-         (env-var (gensym "ENV"))
-         (info (parse-lambda-list lambda-list))
-         (env-sym (lambda-list-info-environment info))
+         (env-var  (gensym "ENV"))
+         (info     (parse-lambda-list lambda-list))
+         (env-sym  (lambda-list-info-environment info))
          (bindings (generate-lambda-bindings lambda-list form-var))
          (expander-body
            (if env-sym
-               (list (list 'let (list (list env-sym env-var))
-                           (cons 'let* (cons bindings body))))
-               (list (list 'declare (list 'ignore env-var))
-                     (cons 'let* (cons bindings body))))))
-    (list 'register-macro
-          (list 'quote name)
-          (cons 'lambda
-                (cons (list form-var env-var)
-                      expander-body)))))
+               `((let ((,env-sym ,env-var))
+                   (let* ,bindings ,@body)))
+               `((declare (ignore ,env-var))
+                 (let* ,bindings ,@body)))))
+    `(register-macro ',name (lambda (,form-var ,env-var) ,@expander-body))))
 
 ;;; Wire expand functions into VM hooks for runtime macroexpand support
 (defun %vm-install-macroexpand-hooks-if-available ()

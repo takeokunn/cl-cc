@@ -36,8 +36,8 @@ constraint solver tests")
       (assert-true (type-equal-p type-int (zonk v1 new-subst)))
       (assert-true (type-equal-p type-int (zonk v2 new-subst))))))
 
-(deftest solver-equality-edge-cases
-  "Conflicting equalities (v~int, v~string) produce residual; trivial (int~int) has none."
+(deftest solver-conflicting-equalities-produce-residual
+  "Conflicting equalities (v~int and v~string) leave a non-empty residual."
   (let* ((v  (fresh-type-var "a"))
          (c1 (make-equal-constraint v type-int))
          (c2 (make-equal-constraint v type-string))
@@ -45,7 +45,10 @@ constraint solver tests")
     (multiple-value-bind (_subst residual)
         (cl-cc/type::solve-constraints (list c1 c2) s)
       (declare (ignore _subst))
-      (assert-true (> (length residual) 0))))
+      (assert-true (> (length residual) 0)))))
+
+(deftest solver-trivial-equality-has-no-residual
+  "Trivial equality (int~int) produces no residual."
   (let* ((c (make-equal-constraint type-int type-int))
          (s (make-substitution)))
     (multiple-value-bind (_subst residual)

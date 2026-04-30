@@ -13,19 +13,22 @@
 (in-suite ir-printer-suite)
 ;;; ─── ir-format-value ──────────────────────────────────────────────────────────
 
-(deftest ir-fmt-value-cases
-  "ir-format-value: sequential %N ids, string literals, and symbol case."
-  ;; sequential ids
+(deftest ir-format-value-assigns-sequential-percent-ids
+  "ir-format-value: ir-values allocated in order format as %0, %1, %2."
   (let* ((fn (cl-cc/ir:ir-make-function 'test))
          (v0 (cl-cc/ir:ir-new-value fn))
          (v1 (cl-cc/ir:ir-new-value fn))
          (v2 (cl-cc/ir:ir-new-value fn)))
     (assert-equal "%0" (cl-cc/ir:ir-format-value v0))
     (assert-equal "%1" (cl-cc/ir:ir-format-value v1))
-    (assert-equal "%2" (cl-cc/ir:ir-format-value v2)))
-  ;; string literal contains original text
-  (assert-true (search "hello" (cl-cc/ir:ir-format-value "hello")))
-  ;; symbol printed in uppercase
+    (assert-equal "%2" (cl-cc/ir:ir-format-value v2))))
+
+(deftest ir-format-value-string-contains-literal-text
+  "ir-format-value for a string literal embeds the original text."
+  (assert-true (search "hello" (cl-cc/ir:ir-format-value "hello"))))
+
+(deftest ir-format-value-symbol-is-uppercased
+  "ir-format-value for a symbol produces an uppercase representation."
   (assert-true (search "FOO" (cl-cc/ir:ir-format-value 'foo))))
 
 ;;; ─── ir-print-block ───────────────────────────────────────────────────────────
@@ -100,20 +103,23 @@
 
 ;;; ─── ir-print-module ──────────────────────────────────────────────────────────
 
-(deftest ir-print-module-cases
-  "ir-print-module: empty header, single function, multiple functions in order."
-  ;; empty module shows header with 0
+(deftest ir-print-module-empty-shows-zero-count
+  "ir-print-module with no functions shows 'IR Module' header and 0 in output."
   (let* ((mod (cl-cc/ir:make-ir-module :functions nil))
          (s   (with-output-to-string (out) (cl-cc/ir:ir-print-module mod out))))
     (assert-true (search "IR Module" s))
-    (assert-true (search "0" s)))
-  ;; single function included
+    (assert-true (search "0" s))))
+
+(deftest ir-print-module-single-function-included
+  "ir-print-module with one function shows '1 function' and the function's name."
   (let* ((fn  (cl-cc/ir:ir-make-function 'my-fn))
          (mod (cl-cc/ir:make-ir-module :functions (list fn)))
          (s   (with-output-to-string (out) (cl-cc/ir:ir-print-module mod out))))
     (assert-true (search "1 function" s))
-    (assert-true (search "my-fn" s)))
-  ;; multiple functions printed in order
+    (assert-true (search "my-fn" s))))
+
+(deftest ir-print-module-multiple-functions-in-order
+  "ir-print-module with two functions shows '2 functions' and alpha appears before beta."
   (let* ((f1  (cl-cc/ir:ir-make-function 'alpha))
          (f2  (cl-cc/ir:ir-make-function 'beta))
          (mod (cl-cc/ir:make-ir-module :functions (list f1 f2)))

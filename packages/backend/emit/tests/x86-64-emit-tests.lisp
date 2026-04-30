@@ -58,10 +58,13 @@
   (let ((tgt (%make-x86-target)))
     (assert-equal expected (cl-cc/emit::target-register tgt vreg))))
 
-(deftest x86-target-register-error-cases
-  "Fallback signals error for :R8+; regalloc uses assignment and signals for unallocated."
+(deftest x86-target-register-fallback-signals-error-for-r8-plus
+  "Fallback (no regalloc) signals error for :R8 and above."
   (let ((tgt (%make-x86-target)))
-    (assert-signals error (cl-cc/emit::target-register tgt :r8)))
+    (assert-signals error (cl-cc/emit::target-register tgt :r8))))
+
+(deftest x86-target-register-with-regalloc-uses-assignment
+  "With regalloc, known vreg returns mapped string; unknown vreg signals error."
   (let* ((ht (make-hash-table))
          (ra (cl-cc/emit::make-regalloc-result :assignment ht))
          (tgt (make-instance 'cl-cc/emit::x86-64-target :regalloc ra)))
@@ -71,18 +74,24 @@
 
 ;;; ─── emit-instruction methods ──────────────────────────────────────────────────
 
-(deftest x86-emit-basic-instruction-cases
-  "vm-const emits mov+value; vm-move emits mov+regs; vm-add emits mov+add."
+(deftest x86-emit-const-emits-mov-with-value
+  "vm-const emits mov to rax with the immediate value 42."
   (let* ((tgt (%make-x86-target))
          (asm (%x86-emit tgt (make-vm-const :dst :r0 :value 42))))
     (assert-true (search "mov" asm))
     (assert-true (search "rax" asm))
-    (assert-true (search "42" asm)))
+    (assert-true (search "42" asm))))
+
+(deftest x86-emit-move-emits-mov-between-regs
+  "vm-move emits mov from rbx (r1) to rax (r0)."
   (let* ((tgt (%make-x86-target))
          (asm (%x86-emit tgt (make-vm-move :dst :r0 :src :r1))))
     (assert-true (search "mov" asm))
     (assert-true (search "rax" asm))
-    (assert-true (search "rbx" asm)))
+    (assert-true (search "rbx" asm))))
+
+(deftest x86-emit-add-emits-mov-and-add-mnemonic
+  "vm-add emits mov followed by add mnemonic."
   (let* ((tgt (%make-x86-target))
          (asm (%x86-emit tgt (make-vm-add :dst :r0 :lhs :r1 :rhs :r2))))
     (assert-true (search "mov" asm))
@@ -97,32 +106,44 @@
          (asm (%x86-emit tgt inst)))
     (assert-true (search expected-mnemonic asm))))
 
-(deftest x86-emit-control-flow-cases
-  "vm-label emits align+name; vm-jump emits jmp; vm-jump-zero emits cmp+je."
+(deftest x86-emit-label-emits-align-and-colon-name
+  "vm-label emits .align 4 followed by the label name with colon."
   (let* ((tgt (%make-x86-target))
          (asm (%x86-emit tgt (make-vm-label :name "loop"))))
     (assert-true (search ".align 4" asm))
-    (assert-true (search "loop:" asm)))
+    (assert-true (search "loop:" asm))))
+
+(deftest x86-emit-jump-emits-jmp-mnemonic
+  "vm-jump emits jmp with the target label."
   (let* ((tgt (%make-x86-target))
          (asm (%x86-emit tgt (make-vm-jump :label "done"))))
     (assert-true (search "jmp" asm))
-    (assert-true (search "done" asm)))
+    (assert-true (search "done" asm))))
+
+(deftest x86-emit-jump-zero-emits-cmp-and-je
+  "vm-jump-zero emits cmp then je with the target label."
   (let* ((tgt (%make-x86-target))
          (asm (%x86-emit tgt (make-vm-jump-zero :reg :r0 :label "else"))))
     (assert-true (search "cmp" asm))
     (assert-true (search "je" asm))
     (assert-true (search "else" asm))))
 
-(deftest x86-emit-terminal-instruction-cases
-  "vm-halt and vm-ret emit mov+ret; vm-print calls rt-print with rdi."
+(deftest x86-emit-halt-emits-mov-rax-and-ret
+  "vm-halt emits mov rax and ret."
   (let* ((tgt (%make-x86-target))
          (asm (%x86-emit tgt (make-vm-halt :reg :r0))))
     (assert-true (search "mov rax" asm))
-    (assert-true (search "ret" asm)))
+    (assert-true (search "ret" asm))))
+
+(deftest x86-emit-print-calls-rt-print-with-rdi
+  "vm-print emits a call to rt-print with rdi as the argument."
   (let* ((tgt (%make-x86-target))
          (asm (%x86-emit tgt (make-vm-print :reg :r0))))
     (assert-true (search "call rt-print" asm))
-    (assert-true (search "rdi" asm)))
+    (assert-true (search "rdi" asm))))
+
+(deftest x86-emit-ret-emits-mov-rax-and-ret
+  "vm-ret emits mov rax and ret."
   (let* ((tgt (%make-x86-target))
          (asm (%x86-emit tgt (make-vm-ret :reg :r0))))
     (assert-true (search "mov rax" asm))

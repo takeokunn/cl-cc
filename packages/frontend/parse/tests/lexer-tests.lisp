@@ -38,11 +38,14 @@
 
 ;;; ─── Float Tokens ────────────────────────────────────────────────────────────
 
-(deftest lexer-float-cases
-  "Lexer: simple float token type and value; float with exponent token type."
+(deftest lexer-float-simple-type-and-value
+  "Lexer: 3.14 produces :T-FLOAT with value within double-float precision."
   (assert-eq :T-FLOAT (first-token-type "3.14"))
   (let ((val (first-token-value "3.14")))
-    (assert-true (< (abs (- val 3.14d0)) 0.001)))
+    (assert-true (< (abs (- val 3.14d0)) 0.001))))
+
+(deftest lexer-float-exponent-notation-is-float
+  "Lexer: exponent notation 1.0e5 is classified as :T-FLOAT."
   (assert-eq :T-FLOAT (first-token-type "1.0e5")))
 
 ;;; ─── Ratio Tokens ────────────────────────────────────────────────────────────
@@ -54,8 +57,8 @@
 
 ;;; ─── String Tokens ──────────────────────────────────────────────────────────
 
-(deftest lexer-string-cases
-  "Lexer strings: simple string type/value."
+(deftest lexer-string-type-and-value
+  "Lexer: a quoted string produces :T-STRING with the unquoted content."
   (assert-eq :T-STRING (first-token-type "\"hello\""))
   (assert-string= "hello" (first-token-value "\"hello\"")))
 
@@ -78,10 +81,13 @@
 
 ;;; ─── Symbol Tokens ──────────────────────────────────────────────────────────
 
-(deftest lexer-symbol-cases
-  "Lexer symbols: plain symbol uppercased; pipe-escaped symbol preserves case."
+(deftest lexer-symbol-plain-is-upcased
+  "Lexer: plain symbol 'foo' produces :T-IDENT with upcased name FOO."
   (assert-eq :T-IDENT (first-token-type "foo"))
-  (assert-string= "FOO" (symbol-name (first-token-value "foo")))
+  (assert-string= "FOO" (symbol-name (first-token-value "foo"))))
+
+(deftest lexer-symbol-pipe-quoted-preserves-case
+  "Lexer: pipe-quoted |MixedCase| preserves exact case in the symbol name."
   (let ((val (first-token-value "|MixedCase|")))
     (assert-string= "MixedCase" (symbol-name val))))
 
@@ -119,9 +125,12 @@
 
 ;;; ─── Hash Dispatch ──────────────────────────────────────────────────────────
 
-(deftest lexer-hash-misc-cases
-  "Lexer hash dispatch: #' → :T-FUNCTION; #( → :T-VECTOR-START."
-  (assert-eq :T-FUNCTION    (first-token-type "#'foo"))
+(deftest lexer-hash-function-shorthand
+  "Lexer: #' produces a :T-FUNCTION token."
+  (assert-eq :T-FUNCTION (first-token-type "#'foo")))
+
+(deftest lexer-hash-vector-start
+  "Lexer: #( produces a :T-VECTOR-START token."
   (assert-eq :T-VECTOR-START (first-token-type "#(1 2)")))
 
 (deftest-each lexer-hash-char-dispatch

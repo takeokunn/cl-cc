@@ -101,8 +101,8 @@ constraint language tests")
 
 ;;; ─── constraint-substitute ─────────────────────────────────────────────────
 
-(deftest constraint-substitute-typed-cases
-  "constraint-substitute applies to :equal, :subtype, and :typeclass (not class name)."
+(deftest constraint-substitute-equal-applies-binding
+  "constraint-substitute on :equal replaces bound var with its binding."
   (let* ((v (fresh-type-var "a"))
          (c (make-equal-constraint v type-int))
          (s (make-substitution)))
@@ -110,7 +110,10 @@ constraint language tests")
     (let ((c2 (cl-cc/type::constraint-substitute c s)))
       (assert-eq :equal (constraint-kind c2))
       (assert-true (type-equal-p type-string (first (constraint-args c2))))
-      (assert-true (type-equal-p type-int (second (constraint-args c2))))))
+      (assert-true (type-equal-p type-int (second (constraint-args c2)))))))
+
+(deftest constraint-substitute-subtype-applies-bindings
+  "constraint-substitute on :subtype replaces both bound vars."
   (let* ((v1 (fresh-type-var "a"))
          (v2 (fresh-type-var "b"))
          (c  (make-subtype-constraint v1 v2))
@@ -119,7 +122,10 @@ constraint language tests")
     (subst-extend! v2 type-any s)
     (let ((c2 (cl-cc/type::constraint-substitute c s)))
       (assert-true (type-equal-p type-int (first (constraint-args c2))))
-      (assert-true (type-equal-p type-any (second (constraint-args c2))))))
+      (assert-true (type-equal-p type-any (second (constraint-args c2)))))))
+
+(deftest constraint-substitute-typeclass-applies-binding
+  "constraint-substitute on :typeclass replaces the type arg; class name is unchanged."
   (let* ((v  (fresh-type-var "a"))
          (c  (make-typeclass-constraint 'show v))
          (s  (make-substitution)))

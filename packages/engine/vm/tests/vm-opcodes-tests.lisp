@@ -13,8 +13,8 @@
 
 ;;; ─── make-vm2-state ──────────────────────────────────────────────────────────
 
-(deftest vm2-state-creation-cases
-  "make-vm2-state: 256 nil registers; *features* in global-vars; output-stream is *standard-output*."
+(deftest vm2-state-creation-register-array-and-globals
+  "make-vm2-state produces a simple-vector register file of the correct size, all nil, with *features* pre-populated and output-stream defaulting to *standard-output*."
   (let ((s (cl-cc::make-vm2-state)))
     (assert-true (simple-vector-p (cl-cc::vm2-state-registers s)))
     (assert-= cl-cc/vm::+vm-register-count+ (length (cl-cc::vm2-state-registers s)))
@@ -26,21 +26,30 @@
 
 ;;; ─── vm2-reg-get / vm2-reg-set ───────────────────────────────────────────────
 
-(deftest vm2-reg-ops-cases
-  "vm2-reg: fresh nil; set returns value and stores it; adjacent independent; overwrite takes last."
+(deftest vm2-reg-get-fresh-registers-are-nil
+  "vm2-reg-get returns NIL for any unset register in a fresh vm2-state."
   (let ((s (cl-cc::make-vm2-state)))
     (assert-null (cl-cc/vm::vm2-reg-get s 0))
     (assert-null (cl-cc/vm::vm2-reg-get s 128))
-    (assert-null (cl-cc/vm::vm2-reg-get s 255)))
+    (assert-null (cl-cc/vm::vm2-reg-get s 255))))
+
+(deftest vm2-reg-set-returns-value-and-stores-it
+  "vm2-reg-set returns the value it stored and makes it visible via vm2-reg-get."
   (let ((s (cl-cc::make-vm2-state)))
     (let ((ret (cl-cc/vm::vm2-reg-set s 0 42)))
       (assert-= 42 ret)
-      (assert-= 42 (cl-cc/vm::vm2-reg-get s 0))))
+      (assert-= 42 (cl-cc/vm::vm2-reg-get s 0)))))
+
+(deftest vm2-reg-set-adjacent-registers-are-independent
+  "vm2-reg-set to adjacent slots are independent; each holds its own value."
   (let ((s (cl-cc::make-vm2-state)))
     (cl-cc/vm::vm2-reg-set s 5 :foo)
     (cl-cc/vm::vm2-reg-set s 6 :bar)
     (assert-eq :foo (cl-cc/vm::vm2-reg-get s 5))
-    (assert-eq :bar (cl-cc/vm::vm2-reg-get s 6)))
+    (assert-eq :bar (cl-cc/vm::vm2-reg-get s 6))))
+
+(deftest vm2-reg-set-overwrite-takes-last
+  "vm2-reg-set overwrites a previous write; only the last value is visible."
   (let ((s (cl-cc::make-vm2-state)))
     (cl-cc/vm::vm2-reg-set s 10 'first)
     (cl-cc/vm::vm2-reg-set s 10 'second)
@@ -48,11 +57,14 @@
 
 ;;; ─── vm2-collect-opcode-bigrams ──────────────────────────────────────────────
 
-(deftest vm2-collect-bigrams-edge-cases
-  "vm2-collect-opcode-bigrams: empty vector → empty HT; single 4-word instr → 0 pairs."
+(deftest vm2-collect-bigrams-empty-vector-returns-empty-table
+  "vm2-collect-opcode-bigrams on an empty vector returns an empty hash table."
   (let ((result (cl-cc/vm::vm2-collect-opcode-bigrams #())))
     (assert-true (hash-table-p result))
-    (assert-= 0 (hash-table-count result)))
+    (assert-= 0 (hash-table-count result))))
+
+(deftest vm2-collect-bigrams-single-instruction-yields-no-pairs
+  "vm2-collect-opcode-bigrams on a single 4-word instruction yields 0 bigram pairs."
   (let ((result (cl-cc/vm::vm2-collect-opcode-bigrams #(0 0 0 0))))
     (assert-= 0 (hash-table-count result))))
 
@@ -71,9 +83,12 @@
 
 ;;; ─── vm2-top-superoperator-candidates ────────────────────────────────────────
 
-(deftest vm2-top-candidates-cases
-  "vm2-top-superoperator-candidates: empty → nil; :limit 1 returns at most 1 entry."
-  (assert-null (cl-cc/vm::vm2-top-superoperator-candidates #()))
+(deftest vm2-top-candidates-empty-code-returns-nil
+  "vm2-top-superoperator-candidates on empty bytecode returns nil."
+  (assert-null (cl-cc/vm::vm2-top-superoperator-candidates #())))
+
+(deftest vm2-top-candidates-limit-trims-result
+  "vm2-top-superoperator-candidates with :limit 1 returns at most 1 entry."
   (let* ((op-a cl-cc::+op2-const+)
          (op-b cl-cc::+op2-halt2+)
          (code (vector op-a 0 0 0 op-b 0 0 0)))

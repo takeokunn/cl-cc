@@ -11,22 +11,23 @@
 
 ;;; ─── opt-pass-dce / opt-build-label-index / opt-thread-label ────────────
 
-(deftest dce-cases
-  "opt-pass-dce eliminates a vm-const whose destination is never read; keeps a vm-const that is read by a later instruction; eliminates a vm-move whose destination is never read; on empty input returns nil."
+(deftest dce-eliminates-unread-const
+  "opt-pass-dce removes a vm-const whose destination register is never subsequently read."
   (let* ((insts (list (make-vm-const :dst :r0 :value 42)
                       (make-vm-const :dst :r1 :value 1)
                       (make-vm-ret   :reg :r1)))
          (result (cl-cc/optimize::opt-pass-dce insts)))
-    ;; :r0 is never read → its vm-const should be removed
     (assert-false (some (lambda (i)
                           (and (typep i 'cl-cc/vm::vm-const)
                                (eq (cl-cc/vm::vm-dst i) :r0)))
                         result))
-    ;; :r1 is still there
     (assert-true (some (lambda (i)
                          (and (typep i 'cl-cc/vm::vm-const)
                               (eq (cl-cc/vm::vm-dst i) :r1)))
-                       result)))
+                       result))))
+
+(deftest dce-keeps-read-const
+  "opt-pass-dce preserves a vm-const whose destination is read by a later instruction."
   (let* ((insts (list (make-vm-const :dst :r0 :value 1)
                       (make-vm-const :dst :r1 :value 2)
                       (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)
@@ -39,22 +40,31 @@
     (assert-true (some (lambda (i)
                          (and (typep i 'cl-cc/vm::vm-const)
                               (eq (cl-cc/vm::vm-dst i) :r1)))
-                       result)))
+                       result))))
+
+(deftest dce-eliminates-unread-move
+  "opt-pass-dce removes a vm-move whose destination register is never subsequently read."
   (let* ((insts (list (make-vm-const :dst :r0 :value 1)
-                      (make-vm-move  :dst :r5 :src :r0)   ; :r5 never read
+                      (make-vm-move  :dst :r5 :src :r0)
                       (make-vm-ret   :reg :r0)))
          (result (cl-cc/optimize::opt-pass-dce insts)))
-    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-move)) result)))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-move)) result))))
+
+(deftest dce-nil-input-returns-nil
+  "opt-pass-dce on an empty instruction list returns nil."
   (assert-null (cl-cc/optimize::opt-pass-dce nil)))
 
-(deftest build-label-index-cases
-  "opt-build-label-index: maps label names to positions; returns empty vec+ht for empty input."
+(deftest build-label-index-maps-names-to-positions
+  "opt-build-label-index maps each label name to its 0-based position in the instruction vector."
   (let* ((lab (make-vm-label :name "loop"))
          (c   (make-vm-const :dst :r0 :value 1)))
     (multiple-value-bind (vec idx)
         (cl-cc/optimize::opt-build-label-index (list c lab))
       (assert-= 2 (length vec))
-      (assert-= 1 (gethash "loop" idx))))
+      (assert-= 1 (gethash "loop" idx)))))
+
+(deftest build-label-index-empty-input
+  "opt-build-label-index on an empty list returns an empty vector and an empty index."
   (multiple-value-bind (vec idx)
       (cl-cc/optimize::opt-build-label-index nil)
     (assert-= 0 (length vec))
@@ -71,34 +81,40 @@
 
 ;;; ─── opt-pass-jump / %opt-rewrite-block-terminator / opt-pass-unreachable ─
 
-(deftest jump-pass-cases
-  "opt-pass-jump removes a vm-jump that targets the immediately following label; keeps a vm-jump that does not fall through to its target; rewrites a jump to a jump-only block to point to the final target."
-  (let* ((insts (list (make-vm-jump  :label "next")
-                      (make-vm-label :name  "next")
-                      (make-vm-ret   :reg   :r0))))
-    (let ((result (cl-cc/optimize::opt-pass-jump insts)))
-      ;; The jump to "next" should be eliminated
-      (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-jump)) result))))
-  (let* ((insts (list (make-vm-jump  :label "far")
-                      (make-vm-const :dst :r0 :value 1)
-                      (make-vm-label :name "far")
-                      (make-vm-ret   :reg :r0))))
-    (let ((result (cl-cc/optimize::opt-pass-jump insts)))
-      (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-jump)) result))))
+(deftest-each jump-pass-fallthrough-and-non-fallthrough
+  "opt-pass-jump removes fallthrough jumps but preserves jumps over intervening instructions."
+  :cases (("removes-fallthrough"
+           (list (make-vm-jump  :label "next")
+                 (make-vm-label :name  "next")
+                 (make-vm-ret   :reg   :r0))
+           nil)
+          ("keeps-non-fallthrough"
+           (list (make-vm-jump  :label "far")
+                 (make-vm-const :dst :r0 :value 1)
+                 (make-vm-label :name "far")
+                 (make-vm-ret   :reg :r0))
+           t))
+  (insts expect-jump)
+  (let ((result (cl-cc/optimize::opt-pass-jump insts)))
+    (if expect-jump
+        (assert-true  (some (lambda (i) (typep i 'cl-cc/vm::vm-jump)) result))
+        (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-jump)) result)))))
+
+(deftest jump-pass-threads-through-jump-only-block
+  "opt-pass-jump rewrites a jump to a jump-only block to point directly to the final target."
   (let* ((insts (list (make-vm-const :dst :r0 :value 0)
                       (make-vm-jump  :label "middle")
                       (make-vm-label :name  "middle")
                       (make-vm-jump  :label "end")
                       (make-vm-label :name  "end")
-                      (make-vm-ret   :reg   :r0))))
-    (let ((result (cl-cc/optimize::opt-pass-jump insts)))
-      ;; Any remaining vm-jump should target "end" directly
-      (let ((jumps (remove-if-not (lambda (i) (typep i 'cl-cc/vm::vm-jump)) result)))
-        (when jumps
-          (assert-equal "end" (cl-cc/vm::vm-label-name (first jumps))))))))
+                      (make-vm-ret   :reg   :r0)))
+         (result (cl-cc/optimize::opt-pass-jump insts))
+         (jumps  (remove-if-not (lambda (i) (typep i 'cl-cc/vm::vm-jump)) result)))
+    (when jumps
+      (assert-equal "end" (cl-cc/vm::vm-label-name (first jumps))))))
 
-(deftest opt-rewrite-block-terminator-cases
-  "%opt-rewrite-block-terminator rewrites vm-jump to new label when it matches; rewrites vm-jump-zero to new label, preserving reg; leaves block unchanged when label doesn't match."
+(deftest opt-rewrite-terminator-vm-jump
+  "%opt-rewrite-block-terminator rewrites a vm-jump to the new label when the old label matches."
   (let ((b (make-instance 'cl-cc/optimize::basic-block)))
     (setf (cl-cc/optimize::bb-instructions b)
           (list (make-vm-const :dst :r0 :value 1)
@@ -106,7 +122,10 @@
     (cl-cc/optimize::%opt-rewrite-block-terminator b "old" "new")
     (let ((term (car (last (cl-cc/optimize::bb-instructions b)))))
       (assert-true (typep term 'cl-cc/vm::vm-jump))
-      (assert-equal "new" (cl-cc/vm::vm-label-name term))))
+      (assert-equal "new" (cl-cc/vm::vm-label-name term)))))
+
+(deftest opt-rewrite-terminator-vm-jump-zero
+  "%opt-rewrite-block-terminator rewrites a vm-jump-zero label while preserving the condition register."
   (let ((b (make-instance 'cl-cc/optimize::basic-block)))
     (setf (cl-cc/optimize::bb-instructions b)
           (list (make-vm-jump-zero :reg :r0 :label "old")))
@@ -114,24 +133,33 @@
     (let ((term (car (cl-cc/optimize::bb-instructions b))))
       (assert-true (typep term 'cl-cc/vm::vm-jump-zero))
       (assert-equal "new" (cl-cc/vm::vm-label-name term))
-      (assert-eq :r0 (cl-cc/vm::vm-reg term))))
-  (let ((b (make-instance 'cl-cc/optimize::basic-block))
+      (assert-eq :r0 (cl-cc/vm::vm-reg term)))))
+
+(deftest opt-rewrite-terminator-no-match-unchanged
+  "%opt-rewrite-block-terminator leaves the block unchanged when the label does not match."
+  (let ((b    (make-instance 'cl-cc/optimize::basic-block))
         (orig (make-vm-jump :label "other")))
     (setf (cl-cc/optimize::bb-instructions b) (list orig))
     (cl-cc/optimize::%opt-rewrite-block-terminator b "old" "new")
     (assert-eq orig (car (cl-cc/optimize::bb-instructions b)))))
 
-(deftest opt-thread-jump-cases
-  "*opt-jump-thread-table* covers vm-jump and vm-jump-zero handlers; %opt-thread-jump returns NIL when the target label immediately follows the jump; returns a relabeled instruction when the target threads to a new label; %opt-thread-jump-zero always returns an instruction (never eliminates conditionals)."
+(deftest opt-jump-thread-table-covers-both-jump-types
+  "*opt-jump-thread-table* contains exactly 2 entries: vm-jump and vm-jump-zero."
   (assert-= 2 (length cl-cc/optimize::*opt-jump-thread-table*))
   (assert-true (assoc 'vm-jump      cl-cc/optimize::*opt-jump-thread-table*))
-  (assert-true (assoc 'vm-jump-zero cl-cc/optimize::*opt-jump-thread-table*))
+  (assert-true (assoc 'vm-jump-zero cl-cc/optimize::*opt-jump-thread-table*)))
+
+(deftest opt-thread-jump-returns-nil-for-fallthrough
+  "%opt-thread-jump returns NIL when the target label immediately follows the jump (fallthrough)."
   (let* ((insts (list (make-vm-jump  :label "next")
                       (make-vm-label :name  "next")
                       (make-vm-ret   :reg   :r0))))
     (multiple-value-bind (vec idx) (cl-cc/optimize::opt-build-label-index insts)
       (assert-null (cl-cc/optimize::%opt-thread-jump
-                    (make-vm-jump :label "next") vec 0 idx))))
+                    (make-vm-jump :label "next") vec 0 idx)))))
+
+(deftest opt-thread-jump-returns-relabeled-when-threading
+  "%opt-thread-jump returns a new vm-jump pointing to the final target when the target threads."
   (let* ((insts (list (make-vm-jump  :label "middle")
                       (make-vm-label :name  "middle")
                       (make-vm-jump  :label "end")
@@ -141,7 +169,10 @@
       (let ((result (cl-cc/optimize::%opt-thread-jump
                      (make-vm-jump :label "middle") vec 0 idx)))
         (assert-true result)
-        (assert-equal "end" (cl-cc/vm::vm-label-name result)))))
+        (assert-equal "end" (cl-cc/vm::vm-label-name result))))))
+
+(deftest opt-thread-jump-zero-always-returns-instruction
+  "%opt-thread-jump-zero always returns an instruction — conditional jumps are never eliminated."
   (let* ((inst  (make-vm-jump-zero :reg :r0 :label "next"))
          (insts (list inst (make-vm-label :name "next") (make-vm-ret :reg :r0))))
     (multiple-value-bind (vec idx) (cl-cc/optimize::opt-build-label-index insts)
@@ -168,21 +199,27 @@
   (let ((result (cl-cc/optimize::opt-pass-unreachable insts)))
     (assert-false (some dead-pred result))))
 
-(deftest unreachable-preserves-cases
-  "opt-pass-unreachable keeps a vm-label that follows a vm-ret; leaves pure straight-line code untouched; %type-check-elim-forget-def removes facts mentioning the killed register."
+(deftest unreachable-preserves-label-after-ret
+  "opt-pass-unreachable keeps a vm-label that immediately follows a vm-ret."
   (let* ((insts (list (make-vm-ret   :reg :r0)
                       (make-vm-label :name "resume")
                       (make-vm-ret   :reg :r0)))
          (result (cl-cc/optimize::opt-pass-unreachable insts)))
-    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-label)) result)))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-label)) result))))
+
+(deftest unreachable-straight-line-code-unchanged
+  "opt-pass-unreachable leaves pure straight-line code (no dead instructions) untouched."
   (let* ((insts (list (make-vm-const :dst :r0 :value 1)
                       (make-vm-const :dst :r1 :value 2)
                       (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)
                       (make-vm-ret   :reg :r2)))
          (result (cl-cc/optimize::opt-pass-unreachable insts)))
-    (assert-= (length insts) (length result)))
-  (let* ((f1 (list :pred 'p :src :r0 :dst :r1))
-         (f2 (list :pred 'q :src :r2 :dst :r3))
+    (assert-= (length insts) (length result))))
+
+(deftest type-check-elim-forget-def-removes-matching-facts
+  "%type-check-elim-forget-def removes facts that mention the killed register as either src or dst."
+  (let* ((f1    (list :pred 'p :src :r0 :dst :r1))
+         (f2    (list :pred 'q :src :r2 :dst :r3))
          (facts (list f1 f2)))
     (let ((after (cl-cc/optimize::%type-check-elim-forget-def facts :r0)))
       (assert-false (member f1 after))
@@ -229,56 +266,61 @@
 
 ;;; ─── %block-mergeable-successor-p / %block-strip-merge-jump / cfg-block-temperature ──
 
-(deftest block-merge-helpers-cases
-  "%block-mergeable-successor-p returns T when successor has exactly one predecessor; returns NIL when the successor has >1 predecessor; returns NIL when block has >1 successor; %block-strip-merge-jump strips the terminal vm-jump when it targets the label; leaves instructions unchanged when label does not match; returns nil for an empty instruction list."
+(deftest block-mergeable-successor-single-predecessor
+  "%block-mergeable-successor-p returns T when the block's sole successor has exactly one predecessor."
   (let* ((blk  (make-instance 'cl-cc/optimize::basic-block))
          (succ (make-instance 'cl-cc/optimize::basic-block)))
     (setf (cl-cc/optimize::bb-successors blk)   (list succ)
           (cl-cc/optimize::bb-predecessors succ) (list blk))
-    (assert-true (cl-cc/optimize::%block-mergeable-successor-p blk)))
+    (assert-true (cl-cc/optimize::%block-mergeable-successor-p blk))))
+
+(deftest block-mergeable-successor-multiple-predecessors
+  "%block-mergeable-successor-p returns NIL when the successor has more than one predecessor."
   (let* ((blk   (make-instance 'cl-cc/optimize::basic-block))
          (other (make-instance 'cl-cc/optimize::basic-block))
          (succ  (make-instance 'cl-cc/optimize::basic-block)))
     (setf (cl-cc/optimize::bb-successors blk)   (list succ)
           (cl-cc/optimize::bb-predecessors succ) (list blk other))
-    (assert-false (cl-cc/optimize::%block-mergeable-successor-p blk)))
+    (assert-false (cl-cc/optimize::%block-mergeable-successor-p blk))))
+
+(deftest block-mergeable-multiple-successors
+  "%block-mergeable-successor-p returns NIL when the block itself has more than one successor."
   (let* ((blk   (make-instance 'cl-cc/optimize::basic-block))
          (succ1 (make-instance 'cl-cc/optimize::basic-block))
          (succ2 (make-instance 'cl-cc/optimize::basic-block)))
     (setf (cl-cc/optimize::bb-successors blk) (list succ1 succ2))
-    (assert-false (cl-cc/optimize::%block-mergeable-successor-p blk)))
-  (let* ((jmp   (make-vm-jump :label "next"))
-         (const (make-vm-const :dst :r0 :value 1))
-         (insts (list const jmp))
-         (result (cl-cc/optimize::%block-strip-merge-jump insts "next")))
-    (assert-= 1 (length result))
-    (assert-eq const (first result)))
-  (let* ((jmp   (make-vm-jump :label "other"))
-         (const (make-vm-const :dst :r0 :value 1))
-         (insts (list const jmp))
-         (result (cl-cc/optimize::%block-strip-merge-jump insts "next")))
-    (assert-= 2 (length result)))
-  (assert-null (cl-cc/optimize::%block-strip-merge-jump nil "next")))
+    (assert-false (cl-cc/optimize::%block-mergeable-successor-p blk))))
 
-(deftest cfg-block-temperature-cases
-  "%cfg-block-cold-p returns T when a block contains a vm-signal-error; returns NIL for ordinary blocks; %cfg-block-hotter-p returns NIL when A is cold and B is not cold; returns T when A has greater loop depth; uses RPO index as tie-breaker when loop depths are equal."
+(deftest-each block-strip-merge-jump-cases
+  "%block-strip-merge-jump: matching label removes trailing jump; non-matching leaves unchanged; nil returns nil."
+  :cases (("matching"     (list (make-vm-const :dst :r0 :value 1) (make-vm-jump :label "next"))  "next" 1)
+          ("non-matching" (list (make-vm-const :dst :r0 :value 1) (make-vm-jump :label "other")) "next" 2)
+          ("empty"        nil                                                                      "next" 0))
+  (insts target expected-len)
+  (assert-= expected-len (length (cl-cc/optimize::%block-strip-merge-jump insts target))))
+
+(deftest-each cfg-block-cold-p-signal-error-and-ordinary
+  "%cfg-block-cold-p returns T for error-signalling blocks and NIL for ordinary ones."
+  :cases (("signal-error" (list (make-vm-signal-error :error-reg :r0)) t)
+          ("ordinary"     (list (make-vm-const :dst :r0 :value 1) (make-vm-ret :reg :r0)) nil))
+  (instructions expect-cold)
   (let ((blk (make-instance 'cl-cc/optimize::basic-block)))
-    (setf (cl-cc/optimize::bb-instructions blk)
-          (list (make-vm-signal-error :error-reg :r0)))
-    (assert-true (cl-cc/optimize::%cfg-block-cold-p blk)))
-  (let ((blk (make-instance 'cl-cc/optimize::basic-block)))
-    (setf (cl-cc/optimize::bb-instructions blk)
-          (list (make-vm-const :dst :r0 :value 1)
-                (make-vm-ret   :reg :r0)))
-    (assert-false (cl-cc/optimize::%cfg-block-cold-p blk)))
+    (setf (cl-cc/optimize::bb-instructions blk) instructions)
+    (if expect-cold
+        (assert-true  (cl-cc/optimize::%cfg-block-cold-p blk))
+        (assert-false (cl-cc/optimize::%cfg-block-cold-p blk)))))
+
+(deftest cfg-block-hotter-p-cold-vs-warm
+  "%cfg-block-hotter-p returns NIL when A is cold; returns T when A is warm and B is cold."
   (let ((cold (make-instance 'cl-cc/optimize::basic-block))
         (warm (make-instance 'cl-cc/optimize::basic-block)))
-    (setf (cl-cc/optimize::bb-instructions cold)
-          (list (make-vm-signal-error :error-reg :r0)))
-    (setf (cl-cc/optimize::bb-instructions warm)
-          (list (make-vm-const :dst :r0 :value 1)))
+    (setf (cl-cc/optimize::bb-instructions cold) (list (make-vm-signal-error :error-reg :r0))
+          (cl-cc/optimize::bb-instructions warm) (list (make-vm-const :dst :r0 :value 1)))
     (assert-false (cl-cc/optimize::%cfg-block-hotter-p cold warm))
-    (assert-true  (cl-cc/optimize::%cfg-block-hotter-p warm cold)))
+    (assert-true  (cl-cc/optimize::%cfg-block-hotter-p warm cold))))
+
+(deftest cfg-block-hotter-p-loop-depth
+  "%cfg-block-hotter-p returns T when A has greater loop depth than B."
   (let ((deep    (make-instance 'cl-cc/optimize::basic-block))
         (shallow (make-instance 'cl-cc/optimize::basic-block)))
     (setf (cl-cc/optimize::bb-loop-depth  deep)    3
@@ -286,7 +328,10 @@
           (cl-cc/optimize::bb-instructions deep)    nil
           (cl-cc/optimize::bb-instructions shallow) nil)
     (assert-true  (cl-cc/optimize::%cfg-block-hotter-p deep shallow))
-    (assert-false (cl-cc/optimize::%cfg-block-hotter-p shallow deep)))
+    (assert-false (cl-cc/optimize::%cfg-block-hotter-p shallow deep))))
+
+(deftest cfg-block-hotter-p-rpo-index-tiebreaker
+  "%cfg-block-hotter-p uses RPO index as a tiebreaker when loop depths are equal."
   (let ((first  (make-instance 'cl-cc/optimize::basic-block))
         (second (make-instance 'cl-cc/optimize::basic-block)))
     (setf (cl-cc/optimize::bb-loop-depth first)   1

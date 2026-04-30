@@ -36,35 +36,50 @@
 
 ;;; ─── Intersection Type Unification ─────────────────────────────────────
 
-(deftest unify-intersection-cases
-  "Identical intersections unify; different-length intersections fail."
-  (let ((i    (cl-cc/type:make-type-intersection-raw :types (list cl-cc/type:type-int cl-cc/type:type-string)))
-        (i-s  (cl-cc/type:make-type-intersection-raw :types (list cl-cc/type:type-int)))
-        (i-l  (cl-cc/type:make-type-intersection-raw :types (list cl-cc/type:type-int cl-cc/type:type-string))))
+(deftest unify-intersection-identical-succeeds
+  "Identical intersection types unify successfully."
+  (let ((i (cl-cc/type:make-type-intersection-raw :types (list cl-cc/type:type-int cl-cc/type:type-string))))
     (multiple-value-bind (s ok) (type-unify i i)
       (assert-true ok)
-      (assert-true (cl-cc/type:substitution-p s)))
+      (assert-true (cl-cc/type:substitution-p s)))))
+
+(deftest unify-intersection-different-lengths-fail
+  "Intersection types with different lengths fail to unify."
+  (let ((i-s (cl-cc/type:make-type-intersection-raw :types (list cl-cc/type:type-int)))
+        (i-l (cl-cc/type:make-type-intersection-raw :types (list cl-cc/type:type-int cl-cc/type:type-string))))
     (multiple-value-bind (_ ok) (type-unify i-s i-l)
       (declare (ignore _))
       (assert-false ok))))
 
 ;;; ─── Union Type Unification ─────────────────────────────────────────────
 
-(deftest unify-union-cases
-  "Union unification: identical succeeds; member left/right succeeds; non-member fails."
+(deftest unify-union-identical-succeeds
+  "Identical union types unify successfully."
   (let ((u (cl-cc/type:make-type-union-raw :types (list cl-cc/type:type-int cl-cc/type:type-string))))
-    (multiple-value-bind (s1 ok1) (type-unify u u)
-      (assert-true ok1)
-      (assert-true (cl-cc/type:substitution-p s1)))
-    (multiple-value-bind (s2 ok2) (type-unify u cl-cc/type:type-int)
-      (assert-true ok2)
-      (assert-true (cl-cc/type:substitution-p s2)))
-    (multiple-value-bind (s3 ok3) (type-unify cl-cc/type:type-string u)
-      (assert-true ok3)
-      (assert-true (cl-cc/type:substitution-p s3)))
-    (multiple-value-bind (_ ok4) (type-unify u cl-cc/type:type-bool)
+    (multiple-value-bind (s ok) (type-unify u u)
+      (assert-true ok)
+      (assert-true (cl-cc/type:substitution-p s)))))
+
+(deftest unify-union-left-member-succeeds
+  "Union unifies with a type that is a member (union on left)."
+  (let ((u (cl-cc/type:make-type-union-raw :types (list cl-cc/type:type-int cl-cc/type:type-string))))
+    (multiple-value-bind (s ok) (type-unify u cl-cc/type:type-int)
+      (assert-true ok)
+      (assert-true (cl-cc/type:substitution-p s)))))
+
+(deftest unify-union-right-member-succeeds
+  "Union unifies with a type that is a member (union on right)."
+  (let ((u (cl-cc/type:make-type-union-raw :types (list cl-cc/type:type-int cl-cc/type:type-string))))
+    (multiple-value-bind (s ok) (type-unify cl-cc/type:type-string u)
+      (assert-true ok)
+      (assert-true (cl-cc/type:substitution-p s)))))
+
+(deftest unify-union-non-member-fails
+  "Union fails to unify with a type that is not a member."
+  (let ((u (cl-cc/type:make-type-union-raw :types (list cl-cc/type:type-int cl-cc/type:type-string))))
+    (multiple-value-bind (_ ok) (type-unify u cl-cc/type:type-bool)
       (declare (ignore _))
-      (assert-false ok4))))
+      (assert-false ok))))
 
 ;;; ─── Primitive Unification Edge Cases ───────────────────────────────────
 
@@ -163,23 +178,26 @@
 
 ;;; ─── Effect Row Unification ─────────────────────────────────────────────
 
-(deftest unify-effect-row-cases
-  "Effect row unification: empty rows succeed; same effects succeed; open row absorbs extra; closed row rejects extra."
-  ;; both-empty
+(deftest unify-effect-row-empty-rows-succeed
+  "Two empty effect rows unify successfully."
   (let* ((r1 (cl-cc/type:make-type-effect-row :effects nil :row-var nil))
          (r2 (cl-cc/type:make-type-effect-row :effects nil :row-var nil)))
     (multiple-value-bind (s ok) (type-unify r1 r2)
       (assert-true ok)
-      (assert-true (cl-cc/type:substitution-p s))))
-  ;; same-effects
+      (assert-true (cl-cc/type:substitution-p s)))))
+
+(deftest unify-effect-row-same-effects-succeed
+  "Effect rows with the same single effect unify successfully."
   (let* ((e1 (cl-cc/type:make-type-effect-op :name 'io :args nil))
          (e2 (cl-cc/type:make-type-effect-op :name 'io :args nil))
          (r1 (cl-cc/type:make-type-effect-row :effects (list e1) :row-var nil))
          (r2 (cl-cc/type:make-type-effect-row :effects (list e2) :row-var nil)))
     (multiple-value-bind (s ok) (type-unify r1 r2)
       (assert-true ok)
-      (assert-true (cl-cc/type:substitution-p s))))
-  ;; open-absorbs-extra
+      (assert-true (cl-cc/type:substitution-p s)))))
+
+(deftest unify-effect-row-open-absorbs-extra-effect
+  "An open effect row (with row-var) absorbs an extra effect by binding the row-var."
   (let* ((rv (cl-cc/type:fresh-type-var 'r))
          (e-io (cl-cc/type:make-type-effect-op :name 'io :args nil))
          (e-exn (cl-cc/type:make-type-effect-op :name 'exn :args nil))
@@ -187,10 +205,11 @@
          (r2 (cl-cc/type:make-type-effect-row :effects (list e-io e-exn) :row-var nil)))
     (multiple-value-bind (s ok) (type-unify r1 r2)
       (assert-true ok)
-      ;; rv should be bound to {exn}
       (let ((bound (zonk rv s)))
-        (assert-true (cl-cc/type:type-effect-row-p bound)))))
-  ;; closed-rejects-extra
+        (assert-true (cl-cc/type:type-effect-row-p bound))))))
+
+(deftest unify-effect-row-closed-rejects-extra-effect
+  "A closed effect row (no row-var) rejects extra effects; unification fails."
   (let* ((e-io (cl-cc/type:make-type-effect-op :name 'io :args nil))
          (e-exn (cl-cc/type:make-type-effect-op :name 'exn :args nil))
          (r1 (cl-cc/type:make-type-effect-row :effects (list e-io) :row-var nil))

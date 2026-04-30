@@ -48,9 +48,16 @@
   (assert-string= "&lt;tag attr=&quot;a&amp;b&quot;&gt;"
                   (cl-cc/cli::%svg-escape "<tag attr=\"a&b\">") ))
 
-(deftest cli-flamegraph-color-has-special-cases
-  (assert-string= "rgb(90,140,255)" (cl-cc/cli::%flamegraph-color "minor-gc"))
-  (assert-string= "rgb(255,165,0)" (cl-cc/cli::%flamegraph-color "jit-compile"))
+(deftest cli-flamegraph-color-minor-gc-is-blue
+  "minor-gc frames use the fixed blue RGB color."
+  (assert-string= "rgb(90,140,255)" (cl-cc/cli::%flamegraph-color "minor-gc")))
+
+(deftest cli-flamegraph-color-jit-compile-is-orange
+  "jit-compile frames use the fixed orange RGB color."
+  (assert-string= "rgb(255,165,0)" (cl-cc/cli::%flamegraph-color "jit-compile")))
+
+(deftest cli-flamegraph-color-ordinary-frame-uses-hsl
+  "Ordinary frames use hsl() color format."
   (assert-true (search "hsl(" (cl-cc/cli::%flamegraph-color "ordinary-frame"))))
 
 (deftest cli-flamegraph-build-tree-aggregates-counts

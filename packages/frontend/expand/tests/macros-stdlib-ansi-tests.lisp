@@ -34,14 +34,20 @@
 
 ;;; ─── assert ───────────────────────────────────────────────────────────────
 
-(deftest assert-expansion-cases
-  "ASSERT: unless-guard; CERROR in failure body; datum forwarded to CERROR."
+(deftest assert-expands-to-unless-guard
+  "ASSERT expands to UNLESS with the test condition as the guard."
   (let ((result (our-macroexpand-1 '(assert (= x 1)))))
     (assert-eq 'unless (car result))
-    (assert-equal '(= x 1) (second result)))
+    (assert-equal '(= x 1) (second result))))
+
+(deftest assert-failure-body-contains-cerror
+  "ASSERT failure body contains a CERROR call for interactive restart."
   (let* ((result (our-macroexpand-1 '(assert (zerop n))))
          (body   (cddr result)))
-    (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'cerror))) body)))
+    (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'cerror))) body))))
+
+(deftest assert-datum-forwarded-to-cerror
+  "ASSERT forwards datum and format args to CERROR in the failure branch."
   (let* ((result (our-macroexpand-1 '(assert test nil "msg ~A" x)))
          (body   (cddr result))
          (cerror (find 'cerror body :key #'car)))

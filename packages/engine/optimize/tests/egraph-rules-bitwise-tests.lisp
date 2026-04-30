@@ -69,12 +69,15 @@
   (rule-name)
   (assert-true (eg-rule-registered-p rule-name)))
 
-(deftest egraph-rule-mul-pow2-cases
-  "mul-pow2 has a :when guard; non-power-of-2 constant does not introduce ash."
+(deftest egraph-rule-mul-pow2-has-when-guard
+  "mul-pow2 rule has a :when guard clause."
   (let ((rule (find 'cl-cc/optimize::mul-pow2
                     (cl-cc/optimize::egraph-builtin-rules)
                     :key (lambda (r) (getf r :name)))))
-    (assert-true (not (null (getf rule :when)))))
+    (assert-true (not (null (getf rule :when))))))
+
+(deftest egraph-rule-mul-pow2-non-power-of-2-does-not-introduce-ash
+  "mul-pow2: multiplying by a non-power-of-2 constant does not introduce an ash node."
   (let* ((eg (cl-cc/optimize::make-e-graph))
          (x  (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
          (c7 (make-eg-const eg 7))
@@ -98,8 +101,8 @@
 ;;; mul-neg-neg: (mul (neg ?x) (neg ?y)) → (mul ?x ?y).
 ;;; Use var for x and a const for y so they're in different classes.
 
-(deftest egraph-rule-mul-neg-neg-cases
-  "mul-neg-neg: (mul (neg ?x) (neg ?y)) merges with (mul ?x ?y); same-var variant also fires."
+(deftest egraph-rule-mul-neg-neg-distinct-vars-merges-with-mul
+  "mul-neg-neg: (mul (neg ?x) (neg ?y)) merges with (mul ?x ?y) for distinct x and y."
   (let* ((eg   (cl-cc/optimize::make-e-graph))
          (x    (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
          (y    (make-eg-const eg 3))
@@ -108,7 +111,10 @@
          (mul1 (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::mul nx ny))
          (mul2 (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::mul x y)))
     (eg-saturate eg)
-    (assert-true (eg-merged-p eg mul1 mul2)))
+    (assert-true (eg-merged-p eg mul1 mul2))))
+
+(deftest egraph-rule-mul-neg-neg-same-var-also-fires
+  "mul-neg-neg: (mul (neg ?x) (neg ?x)) merges with (mul ?x ?x)."
   (let* ((eg   (cl-cc/optimize::make-e-graph))
          (x    (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
          (nx   (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::neg x))
@@ -120,8 +126,8 @@
 ;;; ─── Advanced: neg-sub ───────────────────────────────────────────────────
 ;;; neg-sub: (neg (sub ?x ?y)) → (sub ?y ?x).
 
-(deftest egraph-rule-neg-sub-cases
-  "neg-sub: (neg (sub ?x ?y)) merges with (sub ?y ?x); same-class reduces via sub-self first."
+(deftest egraph-rule-neg-sub-distinct-vars-merges-with-reversed-sub
+  "neg-sub: (neg (sub ?x ?y)) merges with (sub ?y ?x) for distinct x and y."
   (let* ((eg   (cl-cc/optimize::make-e-graph))
          (x    (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
          (y    (make-eg-const eg 11))
@@ -129,7 +135,10 @@
          (neg  (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::neg sub1))
          (sub2 (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::sub y x)))
     (eg-saturate eg)
-    (assert-true (eg-merged-p eg neg sub2)))
+    (assert-true (eg-merged-p eg neg sub2))))
+
+(deftest egraph-rule-neg-sub-same-var-reduces-to-const-via-sub-self
+  "neg-sub with same variable: (neg (sub ?x ?x)) reduces to a const class via sub-self."
   (let* ((eg   (cl-cc/optimize::make-e-graph))
          (x    (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
          (sub1 (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::sub x x))

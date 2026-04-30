@@ -26,7 +26,7 @@
 
 ;;; ─── %copy-file-bytes ───────────────────────────────────────────────────────
 
-(deftest pipeline-native-copy-file-bytes-basic-cases
+(deftest pipeline-native-copy-file-bytes-returns-dst-and-creates-file
   "%copy-file-bytes returns destination pathname and creates destination file."
   (uiop:with-temporary-file (:pathname src :type "bin")
     (uiop:with-temporary-file (:pathname dst :type "bin" :keep t)

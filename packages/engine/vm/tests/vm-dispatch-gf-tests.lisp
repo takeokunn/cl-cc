@@ -31,21 +31,36 @@
 
 ;;; ─── %eql-specializer-matches-p ──────────────────────────────────────────
 
-(deftest eql-specializer-matches-p-cases
-  "%eql-specializer-matches-p: true for matching value/symbol; false for different value or non-eql form."
-  (assert-true  (cl-cc/vm::%eql-specializer-matches-p '(eql 42) 42))
-  (assert-true  (cl-cc/vm::%eql-specializer-matches-p '(eql foo) 'foo))
-  (assert-false (cl-cc/vm::%eql-specializer-matches-p '(eql 42) 99))
+(deftest eql-specializer-matches-p-returns-true-for-exact-match
+  "%eql-specializer-matches-p returns T when the argument equals the specializer value."
+  (assert-true (cl-cc/vm::%eql-specializer-matches-p '(eql 42) 42))
+  (assert-true (cl-cc/vm::%eql-specializer-matches-p '(eql foo) 'foo)))
+
+(deftest eql-specializer-matches-p-returns-false-for-different-value
+  "%eql-specializer-matches-p returns NIL when the argument differs from the specializer value."
+  (assert-false (cl-cc/vm::%eql-specializer-matches-p '(eql 42) 99)))
+
+(deftest eql-specializer-matches-p-returns-false-for-non-eql-form
+  "%eql-specializer-matches-p returns NIL when given a plain symbol (not an eql form)."
   (assert-false (cl-cc/vm::%eql-specializer-matches-p 'integer 42)))
 
 ;;; ─── %vm-extract-eql-specializer-keys ───────────────────────────────────
 
-(deftest vm-extract-eql-specializer-keys-cases
-  "%vm-extract-eql-specializer-keys: (eql v)→(v); ((eql v))→(v); symbol→nil; multi-list→nil."
-  (assert-equal '(42)  (cl-cc/vm::%vm-extract-eql-specializer-keys '(eql 42)))
-  (assert-equal '(foo) (cl-cc/vm::%vm-extract-eql-specializer-keys '((eql foo))))
-  (assert-null         (cl-cc/vm::%vm-extract-eql-specializer-keys 'integer))
-  (assert-null         (cl-cc/vm::%vm-extract-eql-specializer-keys '(integer string))))
+(deftest vm-extract-eql-specializer-keys-bare-eql-form-returns-list
+  "%vm-extract-eql-specializer-keys extracts the value from a bare (eql v) form."
+  (assert-equal '(42) (cl-cc/vm::%vm-extract-eql-specializer-keys '(eql 42))))
+
+(deftest vm-extract-eql-specializer-keys-nested-eql-form-returns-list
+  "%vm-extract-eql-specializer-keys extracts the value from a nested ((eql v)) form."
+  (assert-equal '(foo) (cl-cc/vm::%vm-extract-eql-specializer-keys '((eql foo)))))
+
+(deftest vm-extract-eql-specializer-keys-symbol-returns-nil
+  "%vm-extract-eql-specializer-keys returns nil for a plain class-name symbol."
+  (assert-null (cl-cc/vm::%vm-extract-eql-specializer-keys 'integer)))
+
+(deftest vm-extract-eql-specializer-keys-multi-specializer-list-returns-nil
+  "%vm-extract-eql-specializer-keys returns nil for a multi-element specializer list."
+  (assert-null (cl-cc/vm::%vm-extract-eql-specializer-keys '(integer string))))
 
 ;;; ─── *method-combination-operators* data table ───────────────────────────
 
@@ -84,14 +99,20 @@
   (let ((op (cl-cc/vm::%resolve-combination-operator combo)))
     (assert-equal expected (apply op args))))
 
-(deftest resolve-combination-operator-logic-cases
-  "AND: truthy-all→t, nil-any→nil; OR: any-truthy→t, all-nil→nil; PROGN: returns last arg."
+(deftest resolve-combination-operator-and-short-circuits-on-nil
+  "%resolve-combination-operator 'and returns T for all-truthy and NIL when any arg is nil."
   (let ((and-op (cl-cc/vm::%resolve-combination-operator 'and)))
     (assert-true  (funcall and-op 1 2 3))
-    (assert-false (funcall and-op 1 nil 3)))
+    (assert-false (funcall and-op 1 nil 3))))
+
+(deftest resolve-combination-operator-or-stops-at-first-truthy
+  "%resolve-combination-operator 'or returns T for any-truthy and NIL for all-nil."
   (let ((or-op (cl-cc/vm::%resolve-combination-operator 'or)))
     (assert-true  (funcall or-op nil 2 nil))
-    (assert-false (funcall or-op nil nil nil)))
+    (assert-false (funcall or-op nil nil nil))))
+
+(deftest resolve-combination-operator-progn-returns-last-value
+  "%resolve-combination-operator 'progn returns the last argument."
   (let ((progn-op (cl-cc/vm::%resolve-combination-operator 'progn)))
     (assert-equal 99 (funcall progn-op 1 2 99))))
 

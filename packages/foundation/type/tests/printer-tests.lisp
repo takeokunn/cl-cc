@@ -28,11 +28,14 @@
   (type-node expected-sub)
   (assert-true (search expected-sub (type-to-string type-node))))
 
-(deftest printer-var-and-scheme-cases
-  "Linked type-var shows FIXNUM; type-scheme with quantifiers produces non-empty string."
+(deftest printer-linked-type-var-shows-resolved-type
+  "A type-var with a link set prints as the resolved type (FIXNUM for type-int)."
   (let ((v (fresh-type-var "a")))
     (setf (cl-cc/type::type-var-link v) type-int)
-    (assert-string= "FIXNUM" (type-to-string v)))
+    (assert-string= "FIXNUM" (type-to-string v))))
+
+(deftest printer-type-scheme-produces-non-empty-string
+  "type-scheme with a quantified variable produces a non-empty string."
   (let* ((v (fresh-type-var "a"))
          (scheme (make-type-scheme (list v) v))
          (s (type-to-string scheme)))
@@ -103,13 +106,16 @@
   (ty expected-fragment)
   (assert-true (search expected-fragment (type-to-string ty))))
 
-(deftest printer-handler-gadt-cases
-  "Handler type uses bracket notation; GADT constructor includes '::'."
+(deftest printer-handler-uses-bracket-notation
+  "Handler type-to-string includes '[' and '=>' delimiters."
   (let* ((eff (make-type-effect-op :name 'io :args nil))
          (h (cl-cc/type::make-type-handler :effect eff :input type-int :output type-string))
          (s (type-to-string h)))
     (assert-true (search "[" s))
-    (assert-true (search "=>" s)))
+    (assert-true (search "=>" s))))
+
+(deftest printer-gadt-constructor-includes-double-colon
+  "GADT constructor type-to-string includes '::' separator."
   (let* ((gc (cl-cc/type::make-type-gadt-con
               :name 'just :arg-types (list type-int) :index-type type-any))
          (s (type-to-string gc)))
