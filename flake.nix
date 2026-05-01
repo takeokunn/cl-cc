@@ -29,21 +29,37 @@
           sbclModule = import ./nix/sbcl.nix { inherit pkgs; };
           inherit (sbclModule) sbcl sbclBootstrap;
           asdf = import ./nix/asdf-systems.nix { inherit pkgs lib sbcl; };
-          inherit (asdf) productionAsdfSystems testAsdfSystems sbclWithCLCC sbclWithTests;
+          inherit (asdf)
+            productionAsdfSystems
+            testAsdfSystems
+            sbclWithCLCC
+            sbclWithTests
+            ;
           binaryModule = import ./nix/binary.nix { inherit pkgs lib sbclWithCLCC; };
           appsModule = import ./nix/apps.nix {
-            inherit pkgs lib sbclWithCLCC sbclWithTests sbclBootstrap dispatchSemFix;
+            inherit
+              pkgs
+              lib
+              sbclWithCLCC
+              sbclWithTests
+              sbclBootstrap
+              dispatchSemFix
+              ;
           };
           checksModule = import ./nix/checks.nix {
-            inherit pkgs lib sbclWithTests sbclBootstrap dispatchSemFix;
+            inherit pkgs lib sbclWithTests;
+            inherit (appsModule) apps;
             packagesDefault = binaryModule.default;
           };
           devshellModule = import ./nix/devshell.nix { inherit pkgs lib sbclWithCLCC; };
         in
         {
-          packages = productionAsdfSystems // testAsdfSystems // {
-            inherit (binaryModule) default;
-          };
+          packages =
+            productionAsdfSystems
+            // testAsdfSystems
+            // {
+              inherit (binaryModule) default;
+            };
           inherit (appsModule) apps;
           inherit (checksModule) checks;
           inherit (devshellModule) devShells treefmt;

@@ -70,49 +70,49 @@ long-lived CL-CC/TEST package during canonical full-suite runs."
   "All source files in dependency order for Phase 4 self-hosting verification.
 Computed at call time so the result is path-independent across compile/load contexts."
   (append
-   (%asdf-source-files :cl-cc-bootstrap  "packages/foundation/bootstrap/")
-   (%asdf-source-files :cl-cc-ast        "packages/foundation/ast/")
-   (%asdf-source-files :cl-cc-prolog     "packages/foundation/prolog/")
-   (%asdf-source-files :cl-cc-ir         "packages/foundation/ir/")
-   (%asdf-source-files :cl-cc-mir        "packages/foundation/mir/")
-   (%asdf-source-files :cl-cc-binary     "packages/backend/binary/")
-   (%asdf-source-files :cl-cc-runtime    "packages/backend/runtime/")
-   (%asdf-source-files :cl-cc-bytecode   "packages/backend/bytecode/")
-   (%asdf-source-files :cl-cc-parse      "packages/frontend/parse/")
-   (%asdf-source-files :cl-cc-type       "packages/foundation/type/")
-   (%asdf-source-files :cl-cc-vm         "packages/engine/vm/")
-   (%asdf-source-files :cl-cc-optimize   "packages/engine/optimize/")
-   (%asdf-source-files :cl-cc-emit       "packages/backend/emit/")
-   (%asdf-source-files :cl-cc-expand     "packages/frontend/expand/")
-   (%asdf-source-files :cl-cc-compile    "packages/engine/compile/")
-   (list "packages/umbrella/src/package.lisp"
-         "packages/umbrella/pipeline/src/stdlib-source.lisp"
-         "packages/umbrella/pipeline/src/stdlib-source-ext.lisp"
-         "packages/umbrella/pipeline/src/pipeline-stdlib.lisp"
-         "packages/umbrella/pipeline/src/pipeline.lisp"
-         "packages/umbrella/pipeline/src/pipeline-native.lisp"
-         "packages/umbrella/pipeline/src/pipeline-repl-load.lisp")))
+   (%asdf-source-files :cl-cc-bootstrap  "packages/bootstrap/")
+   (%asdf-source-files :cl-cc-ast        "packages/ast/")
+   (%asdf-source-files :cl-cc-prolog     "packages/prolog/")
+   (%asdf-source-files :cl-cc-ir         "packages/ir/")
+   (%asdf-source-files :cl-cc-mir        "packages/mir/")
+   (%asdf-source-files :cl-cc-binary     "packages/binary/")
+   (%asdf-source-files :cl-cc-runtime    "packages/runtime/")
+   (%asdf-source-files :cl-cc-bytecode   "packages/bytecode/")
+   (%asdf-source-files :cl-cc-parse      "packages/parse/")
+   (%asdf-source-files :cl-cc-type       "packages/type/")
+   (%asdf-source-files :cl-cc-vm         "packages/vm/")
+   (%asdf-source-files :cl-cc-optimize   "packages/optimize/")
+   (%asdf-source-files :cl-cc-emit       "packages/emit/")
+   (%asdf-source-files :cl-cc-expand     "packages/expand/")
+   (%asdf-source-files :cl-cc-compile    "packages/compile/")
+   (list "packages/umbrella-src/package.lisp"
+         "packages/pipeline/src/stdlib-source.lisp"
+         "packages/pipeline/src/stdlib-source-ext.lisp"
+         "packages/pipeline/src/pipeline-stdlib.lisp"
+         "packages/pipeline/src/pipeline.lisp"
+         "packages/pipeline/src/pipeline-native.lisp"
+         "packages/pipeline/src/pipeline-repl-load.lisp")))
 
 (defparameter *selfhost-representative-files*
-  '("packages/frontend/parse/src/cst.lisp"
-    "packages/foundation/prolog/src/prolog-data.lisp"
-    "packages/foundation/prolog/src/prolog.lisp"
-    "packages/frontend/parse/src/lexer.lisp"
-    "packages/engine/compile/src/cps.lisp"
-    "packages/engine/optimize/src/optimizer.lisp"
-    "packages/foundation/type/src/package.lisp"
-    "packages/foundation/type/src/kind.lisp"
-    "packages/foundation/type/src/multiplicity.lisp"
-    "packages/foundation/type/src/types-core.lisp"
-    "packages/foundation/type/src/types-extended.lisp"
-    "packages/foundation/type/src/types-env.lisp"
-    "packages/foundation/type/src/parser.lisp"
-    "packages/foundation/type/src/typeclass.lisp"
-    "packages/foundation/type/src/solver.lisp"
-    "packages/foundation/type/src/inference.lisp"
-    "packages/foundation/type/src/checker.lisp"
-    "packages/foundation/type/src/printer.lisp"
-    "packages/foundation/mir/src/mir.lisp"
-    "packages/engine/vm/src/vm.lisp"
-    "packages/backend/runtime/src/gc.lisp")
+  '("packages/parse/src/cst.lisp"
+    "packages/prolog/src/prolog-data.lisp"
+    "packages/prolog/src/prolog.lisp"
+    "packages/parse/src/lexer.lisp"
+    "packages/cps/src/cps.lisp"
+    "packages/optimize/src/optimizer.lisp"
+    "packages/type/src/package.lisp"
+    "packages/type/src/kind.lisp"
+    "packages/type/src/multiplicity.lisp"
+    "packages/type/src/types-core.lisp"
+    "packages/type/src/types-extended.lisp"
+    "packages/type/src/types-env.lisp"
+    "packages/type/src/parser.lisp"
+    "packages/type/src/typeclass.lisp"
+    "packages/type/src/solver.lisp"
+    "packages/type/src/inference.lisp"
+    "packages/type/src/checker.lisp"
+    "packages/type/src/printer.lisp"
+    "packages/mir/src/mir.lisp"
+    "packages/vm/src/vm.lisp"
+    "packages/runtime/src/gc.lisp")
   "Representative subset of source files covering all major modules.")

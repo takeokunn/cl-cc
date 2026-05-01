@@ -48,7 +48,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 #### FR-587: pushnew — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/macros-basic.lisp`
+- **対象**: `packages/expand/src/macros-basic.lisp`
 - **実装**: ユーザー向け `pushnew` マクロは `macros-stdlib.lisp` で実装済み。
 - **内容**: `(pushnew item place &key test key)` — `member` で重複チェック後に `push`
 - **根拠**: ANSI CL 14.2.3 — pushnew
@@ -190,7 +190,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 #### FR-565: equalp ハッシュテーブル — ✅ COMPLETE
 
-- **対象**: `packages/engine/vm/src/hash.lisp`
+- **対象**: `packages/vm/src/hash.lisp`
 - **実装**: `hash.lisp:116-123` の `resolve-hash-test` は `equalp` をハッシュテーブル test として受理し、`equalp` 関数自体も FR-582 で実装済み。
 - **内容**: `equalp` による構造的等価をキーとするハッシュテーブル。配列・構造体の内容比較
 - **根拠**: ANSI CL 18.1 — Hash Table Test
@@ -216,7 +216,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 #### FR-566: パス名 API 完全化
 
-- **対象**: `packages/backend/runtime/src/runtime.lisp`, `packages/engine/vm/src/io.lisp`
+- **対象**: `packages/runtime/src/runtime.lisp`, `packages/vm/src/io.lisp`
 - **内容**: ANSI CL 19.2 の pathname 関数群。`truename` (実際のファイルシステムパス解決)。`*default-pathname-defaults*` VM global 初期化
 - **根拠**: ANSI CL 19.2 — Pathname Functions
 - **難易度**: Medium
@@ -236,12 +236,12 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 | `file-write-date` / `file-author`                                                | ✅   | registered as host bridges in vm.lisp                                                                                                                                          |
 | `directory`                                                                      | ✅   | registered as host bridge in vm.lisp                                                                                                                                           |
 | `ensure-directories-exist`                                                       | ✅   | registered as host bridge in vm.lisp                                                                                                                                           |
-| `load` `:verbose`/`:print`/`:if-does-not-exist`/`:external-format`               | ✅   | `packages/umbrella/pipeline/pipeline.lisp: our-load` / `packages/engine/vm/src/io.lisp: load ブリッジ`; keyword-bearing 形は pipeline 側にのみあり、builtin path は unary-only |
+| `load` `:verbose`/`:print`/`:if-does-not-exist`/`:external-format`               | ✅   | `packages/pipeline/pipeline.lisp: our-load` / `packages/vm/src/io.lisp: load ブリッジ`; keyword-bearing 形は pipeline 側にのみあり、builtin path は unary-only |
 | `compile-file` 3値返却 (output-truename, warnings-p, failure-p)                  | ✅   | macros-stdlib.lisp: `(values (probe-file pathname) nil nil)`                                                                                                                   |
 
 #### FR-589: open/load/compile-file 完全キーワード引数
 
-- **対象**: `packages/engine/vm/src/io.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
+- **対象**: `packages/vm/src/io.lisp`, `packages/pipeline/pipeline.lisp`
 - **内容**: ANSI CL 21.2 の `open` 全キーワード実装。`load` / `compile-file` の制御変数対応。`compile-file` の3値返却
 - **根拠**: ANSI CL 21.2.1 / 24.1
 - **難易度**: Medium
@@ -272,7 +272,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 #### FR-567: 複合ストリームアクセサ
 
-- **対象**: `packages/engine/vm/src/io.lisp`
+- **対象**: `packages/vm/src/io.lisp`
 - **内容**: 各複合ストリームの構成ストリームを取得するアクセサ群
 - **根拠**: ANSI CL 21.1
 - **難易度**: Low (FR-393 後)
@@ -306,7 +306,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 #### FR-568: read-char-no-hang — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/macros-filesystem.lisp`, `packages/engine/vm/src/io.lisp`, `packages/engine/compile/src/builtin-registry.lisp`
+- **対象**: `packages/expand/src/macros-filesystem.lisp`, `packages/vm/src/io.lisp`, `packages/compile/src/builtin-registry.lisp`
 - **実装**: `macros-filesystem.lisp` で `read-char` 委譲スタブとして提供済み。
 - **内容**: `read-char-no-hang` — 文字が利用可能なら返却、なければ `nil` を返す。`listen` との連携
 - **根拠**: ANSI CL 21.2 — read-char-no-hang
@@ -323,7 +323,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 #### FR-591: file-string-length
 
-- **対象**: `packages/engine/vm/src/io.lisp`
+- **対象**: `packages/vm/src/io.lisp`
 - **内容**: `(file-string-length stream object)` — `object` (文字または文字列) を `stream` に書いた場合のファイルポジション移動量を返す
 - **根拠**: ANSI CL 21.2 — file-string-length
 - **難易度**: Easy
@@ -354,7 +354,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 #### FR-569: write 関数 (全キーワード形式) — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/macros-filesystem.lisp`, `packages/engine/vm/src/io.lisp`, `packages/engine/compile/src/builtin-registry.lisp`
+- **対象**: `packages/expand/src/macros-filesystem.lisp`, `packages/vm/src/io.lisp`, `packages/compile/src/builtin-registry.lisp`
 - **実装**: `macros-filesystem.lisp` で `write` マクロを実装済み。`write-to-string` と印字制御変数束縛に委譲し、`object` を返す。
 - **内容**: `(write object :stream s :escape t :radix nil :base 10 :circle nil :pretty nil :level nil :length nil :case :upcase :gensym t :array t :readably nil :right-margin nil :miser-width nil :lines nil :pprint-dispatch ...)` の実装
 - **根拠**: ANSI CL 22.3.1
@@ -379,7 +379,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 #### FR-570: _print-circle_ / _print-gensym_ / _print-case_ — ✅ COMPLETE
 
-- **対象**: `packages/engine/vm/src/vm.lisp`, `packages/engine/vm/src/io.lisp`
+- **対象**: `packages/vm/src/vm.lisp`, `packages/vm/src/io.lisp`
 - **実装**: これら3変数は VM global として定義済み。
 - **内容**: `*print-circle*` — 循環構造検出・`*print-gensym*` — `#:` プレフィックス制御。`*print-case*` — `:upcase`/`:downcase`/`:capitalize`/`:preserve` シンボル大文字小文字制御
 - **根拠**: ANSI CL 22.1 — print control variables
@@ -420,7 +420,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 #### FR-592: set-syntax-from-char / make-dispatch-macro-character — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/macros-filesystem.lisp` (FR-358 の一部)
+- **対象**: `packages/expand/src/macros-filesystem.lisp` (FR-358 の一部)
 - **実装**: `macros-filesystem.lisp` で readtable API 互換スタブを提供済み。
 - **内容**: `set-syntax-from-char to-char from-char &optional to-readtable from-readtable` — 構文クラスをコピー。`make-dispatch-macro-character char &optional non-terminating-p readtable` — 新しいディスパッチマクロ文字を登録
 - **根拠**: ANSI CL 23.1.2 — Readtable API
@@ -428,13 +428,13 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 #### FR-572: 追加リーダーマクロ (#nA / #\* / #P) — ✅ COMPLETE
 
-- **対象**: `packages/frontend/parse/src/cl/lexer.lisp`
+- **対象**: `packages/parse/src/cl/lexer.lisp`
 - **実装**: `#P` / `#nA` / `#*` は `lexer-dispatch.lisp` 経由で処理済み。
 - **内容**: `#nA(...)` — 多次元配列リテラル。`#*01101` — ビットベクタリテラル。`#P"..."` — パス名リテラル。
 - **根拠**: ANSI CL 2.4.8 — Standard Dispatching Macro Characters
 - **難易度**: Medium
 
-- **対象**: `packages/frontend/parse/src/lexer-dispatch.lisp`
+- **対象**: `packages/parse/src/lexer-dispatch.lisp`
 - **実装**: `*read-eval*` が `nil` のとき `#.` は通常の reader error をシグナルするよう修正済み。
 - **内容**: `*read-eval*` が `nil` のとき `#.` の read-time eval を拒否する。
 - **根拠**: ANSI CL 2.4.8.6 / セキュリティ
@@ -454,7 +454,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 #### FR-574: ロード・コンパイル制御変数
 
-- **対象**: `packages/umbrella/pipeline/pipeline.lisp`, `packages/engine/vm/src/vm.lisp`
+- **対象**: `packages/pipeline/pipeline.lisp`, `packages/vm/src/vm.lisp`
 - **根拠**: ANSI CL 23.1.1 / 24.1
 - **難易度**: Easy
 
@@ -497,7 +497,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 #### FR-575: dynamic-extent 宣言
 
-- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/engine/vm/src/vm.lisp`
+- **対象**: `packages/compile/src/codegen.lisp`, `packages/vm/src/vm.lisp`
 - **内容**: `(declare (dynamic-extent var))` — スコープを抜けた時点で回収可能とマーク。クロージャのスタック割り当て (escape analysis と連携)
 - **根拠**: ANSI CL 3.3.4 — dynamic-extent; GC 圧力削減
 - **難易度**: Very Hard
@@ -523,7 +523,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 #### FR-576: disassemble
 
-- **対象**: `packages/cli/src/main.lisp`, `packages/umbrella/pipeline/pipeline.lisp`
+- **対象**: `packages/cli/src/main.lisp`, `packages/pipeline/pipeline.lisp`
 - **内容**: `(disassemble fn)` — VM 命令列を人間可読形式で出力。デバッグ・最適化確認に不可欠
 - **根拠**: ANSI CL 25.1.4 — disassemble
 - **難易度**: Medium
@@ -551,7 +551,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 
 #### FR-578: y-or-n-p / yes-or-no-p
 
-- **対象**: `packages/engine/vm/src/io.lisp`, `packages/engine/compile/src/builtin-registry.lisp`
+- **対象**: `packages/vm/src/io.lisp`, `packages/compile/src/builtin-registry.lisp`
 - **内容**: `y-or-n-p` — "y" または "n" を受け付ける。`yes-or-no-p` — "yes" / "no" フルスペル要求。`*query-io*` ストリームを使用
 - **根拠**: ANSI CL 25.1.2
 - **難易度**: Easy
@@ -587,7 +587,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-579: バイト列・文字列変換
 
-- **対象**: `packages/engine/vm/src/strings.lisp`
+- **対象**: `packages/vm/src/strings.lisp`
 - **内容**: `string-to-octets string &key encoding` / `octets-to-string octets &key encoding` の非 ANSI 標準だが事実上必須な関数
 - **根拠**: 2026 年モダン CL — Babel ライブラリ相当
 - **難易度**: Medium
@@ -627,7 +627,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-593: (setf subseq) — ✅ COMPLETE
 
-- **対象**: `packages/engine/vm/src/list.lisp`, `packages/frontend/expand/src/expander.lisp`
+- **対象**: `packages/vm/src/list.lisp`, `packages/expand/src/expander.lisp`
 - **実装**: `(setf (subseq seq start end) new-seq)` は `replace` 系の setf ハンドラで処理済み。
 - **内容**: 部分列の破壊的更新を提供する。
 - **根拠**: ANSI CL 17.3 — setf of subseq
@@ -635,7 +635,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-594: #+/#- 複合フィーチャー式 — ✅ COMPLETE
 
-- **対象**: `packages/frontend/parse/src/cl/lexer.lisp`
+- **対象**: `packages/parse/src/cl/lexer.lisp`
 - **実装**: `lex-read-feature-expr` が `:and` / `:or` / `:not` を処理し、複合フィーチャー式を受理する。
 - **根拠**: ANSI CL 24.1.2 — Feature Expressions
 - **難易度**: Low
@@ -646,78 +646,78 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-596: last / butlast / nbutlast の count 引数 — ✅ COMPLETE
 
-- **対象**: `packages/engine/vm/src/list.lisp`, `packages/engine/compile/src/builtin-registry-data.lisp`
+- **対象**: `packages/vm/src/list.lisp`, `packages/compile/src/builtin-registry-data.lisp`
 - **実装**: `last` / `butlast` は count 引数を受け取り、`nbutlast` も利用可能。
 - **根拠**: ANSI CL 14.2.6
 - **難易度**: Easy
 
 #### FR-597: identity / constantly / complement ビルトイン登録 — ✅ COMPLETE
 
-- **対象**: `packages/engine/compile/src/builtin-registry-data.lisp`
+- **対象**: `packages/compile/src/builtin-registry-data.lisp`
 - **実装**: `builtin-registry-data.lisp` に unary ビルトイン登録済みで、`stdlib-source.lisp` 側にも定義がある。
 - **根拠**: ANSI CL 5.1 — function utilities
 - **難易度**: Low
 
 #### FR-598: ストリーム型指定子 (typep 対応) — ✅ COMPLETE
 
-- **対象**: `packages/engine/vm/src/primitives.lisp` の `vm-typep-check`
+- **対象**: `packages/vm/src/primitives.lisp` の `vm-typep-check`
 - **実装**: `stream`/`input-stream`/`output-stream`/`file-stream`/`string-stream`/`broadcast-stream`/`two-way-stream`/`echo-stream`/`concatenated-stream`/`synonym-stream` すべて `vm-typep-check` lines 85-95 に実装済み
 - **根拠**: ANSI CL 21.1 — Stream Types
 
 #### FR-600: defvar / defparameter / defconstant 完全セマンティクス — ✅ COMPLETE
 
-- **対象**: `packages/engine/compile/src/codegen-functions.lisp`
+- **対象**: `packages/compile/src/codegen-functions.lisp`
 - **実装**: `compile-ast ast-defvar` (lines 326-371) に `vm-boundp` チェック実装済み。`defparameter` — 常に設定; `defvar` — 未束縛時のみ設定 (`vm-jump-zero + vm-boundp`); `defconstant` — `defparameter` に変換 (不変性強制なし、許容制限)
 - **根拠**: ANSI CL 3.8.1
 
 #### FR-601: multiple-value-bind 値数不足時の挙動 — ✅ COMPLETE
 
-- **対象**: `packages/engine/vm/src/vm-execute.lisp`
+- **対象**: `packages/vm/src/vm-execute.lisp`
 - **実装**: `execute-instruction vm-mv-bind` (lines 527-536) — `(if (< i (length vals)) (nth i vals) nil)` で不足値を `nil` で補填; 余剰値は捨てる
 - **根拠**: ANSI CL 5.3 — multiple-value-bind semantics
 
 #### FR-602: (values) 0値返却の明示的サポート — ✅ COMPLETE
 
-- **対象**: `packages/engine/vm/src/vm-execute.lisp`
+- **対象**: `packages/vm/src/vm-execute.lisp`
 - **実装**: `execute-instruction vm-values` (line 524) — `(if all-values (first all-values) nil)` で 0値時は `nil` を返す; `vm-values-list` に空リストをセット。`vm-mv-bind` は空リストで全変数を `nil` に補填
 - **根拠**: ANSI CL 5.3 — values with no arguments
 
 #### FR-603: (setf (values a b ...) expr) — values を場所として使用 — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/expander.lisp` (`*setf-compound-place-handlers*`)
+- **対象**: `packages/expand/src/expander.lisp` (`*setf-compound-place-handlers*`)
 - **実装**: `(setf (gethash 'values *setf-compound-place-handlers*) ...)` lines 407-415 — `multiple-value-bind` + `setq` チェーンに展開
 - **根拠**: ANSI CL 5.1.2.3 — VALUES as a Place
 
 #### FR-604: float 2引数形式 (プロトタイプ指定) — ✅ COMPLETE
 
-- **対象**: `packages/engine/compile/src/codegen-phase2.lisp`
+- **対象**: `packages/compile/src/codegen-phase2.lisp`
 - **実装**: Phase 2 handler "FLOAT" で `(= (length args) 2)` の場合、prototype を評価・破棄し `vm-float-inst` を emit。NaN-boxing double-float 統一なので prototype は常に no-op
 - **根拠**: ANSI CL 12.1.3.3 — float (number &optional prototype)
 
 #### FR-605: bignum (多倍長整数)
 
-- **対象**: `packages/engine/vm/src/vm-numeric.lisp`, `packages/engine/vm/src/vm.lisp` (NaN-boxing 値表現)
+- **対象**: `packages/vm/src/vm-numeric.lisp`, `packages/vm/src/vm.lisp` (NaN-boxing 値表現)
 - **内容**: bignum タグを追加してホスト CL integer オブジェクトをヒープに保持。算術演算でオーバーフロー検出→bignum に昇格。`bignump` 述語。`integer-length` / `integer-decode-float` との統合
 - **根拠**: ANSI CL 12.1.1 — numeric tower; fixnum/bignum 区別
 - **難易度**: Very Hard (値表現の根幹変更)
 
 #### FR-606: assert の place-list (場所付きリスタート)
 
-- **対象**: `packages/frontend/expand/src/macros-stdlib.lisp`
+- **対象**: `packages/expand/src/macros-stdlib.lisp`
 - **内容**: `(assert test-form (place1 place2 ...) ...)` — 失敗時に `continue` リスタートで各 place の値を対話的に修正して再試行。`restart-case` と `store-value` リスタート (FR-421) に依存
 - **根拠**: ANSI CL 9.1.3 — assert with places
 - **難易度**: Medium (FR-421 後)
 
 #### FR-607: defun / defmacro ドキュメント文字列
 
-- **対象**: `packages/engine/compile/src/codegen.lisp`, `packages/frontend/expand/src/expander.lisp`, `packages/engine/vm/src/vm.lisp`
+- **対象**: `packages/compile/src/codegen.lisp`, `packages/expand/src/expander.lisp`, `packages/vm/src/vm.lisp`
 - **内容**: コンパイル時に docstring を検出し VM 関数オブジェクトのメタデータとして保存。`(documentation 'fn 'function)` / `(documentation 'mac 'macro)` で取得可能に。`define-condition` / `defclass` / `defmethod` / `defpackage` ドキュメント文字列も同様
 - **根拠**: ANSI CL 5.4.1 — Documentation Strings
 - **難易度**: Medium (FR-436 に先立つ基盤)
 
 #### FR-609: list\* ユーザー向けビルトイン登録 — ✅ COMPLETE
 
-- **対象**: `packages/engine/compile/src/builtin-registry-data.lisp`
+- **対象**: `packages/compile/src/builtin-registry-data.lisp`
 - **実装**: `list*` はユーザーコード向けにも登録済み。
 - **内容**: `(list* x1 x2 ... rest)` — 最後の引数にドットペアを生成する可変引数関数。
 - **根拠**: ANSI CL 14.2.1 — list\*
@@ -725,7 +725,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-610: -if-not 系シーケンス述語 — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/macros-sequence.lisp`, `packages/frontend/expand/src/macros-stdlib.lisp`
+- **対象**: `packages/expand/src/macros-sequence.lisp`, `packages/expand/src/macros-stdlib.lisp`
 - **実装**: `find-if-not` / `position-if-not` / `count-if-not` は実装済み。
 - **内容**: 各関数は述語の否定版として動作する。
 - **根拠**: ANSI CL 17.2 — sequence functions with -not variants
@@ -733,7 +733,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-611: sort / stable-sort :key 引数 — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/macros-stdlib.lisp`
+- **対象**: `packages/expand/src/macros-stdlib.lisp`
 - **実装**: `sort` / `stable-sort` は `:key` を受け取る。
 - **内容**: 各要素比較前に `(funcall key elem)` でキー抽出する。
 - **根拠**: ANSI CL 17.2 — sort :key argument
@@ -741,14 +741,14 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-612: read / read-char eof-error-p / eof-value 引数
 
-- **対象**: `packages/engine/vm/src/io.lisp`, `packages/engine/compile/src/builtin-registry-data.lisp`
+- **対象**: `packages/vm/src/io.lisp`, `packages/compile/src/builtin-registry-data.lisp`
 - **内容**: `(read stream eof-error-p eof-value recursive-p)` / `(read-char stream eof-error-p eof-value recursive-p)` — 4引数形式を完全サポート。eof-error-p = nil のとき EOF で eof-value を返す
 - **根拠**: ANSI CL 23.2 / 21.2 — read, read-char eof handling
 - **難易度**: Medium
 
 #### FR-613: with-output-to-string オプション文字列引数 — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/macros-stdlib.lisp`
+- **対象**: `packages/expand/src/macros-stdlib.lisp`
 - **実装**: `(with-output-to-string (var string) ...)` は fresh stream に `string` を先に書き込み、その後の出力を連結して返す。ANSI の supplied-string backing semantics まではモデル化していない。
 - **内容**: `string` が提供された場合、その内容を先頭プレフィックスとして保持する cl-cc 互換形を提供する。
 - **根拠**: ANSI CL 21.2 — with-output-to-string with string argument
@@ -762,7 +762,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-614: (setf char) — 文字列の破壊的文字置換 — ✅ COMPLETE
 
-- **対象**: `packages/engine/compile/src/builtin-registry-data.lisp`, `packages/engine/vm/src/strings.lisp`
+- **対象**: `packages/compile/src/builtin-registry-data.lisp`, `packages/vm/src/strings.lisp`
 - **実装**: `(setf char)` / `(setf schar)` は登録済み。
 - **内容**: 文字列の i 番目の文字を破壊的に置換する。
 - **根拠**: ANSI CL 16.2 — setf of char
@@ -795,11 +795,11 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 #### FR-619: (setf elt) — 実装済みと判明 (2026-03-27 修正)
 
 - **状態**: ✅ 実装済み (FR-619 は誤記)
-- **根拠**: `packages/frontend/parse/src/cl/parser.lisp:418-419` — `(setf (elt seq i) val)` をパーサーが `(aset seq i val)` に展開。`aset` は `builtin-registry-data.lisp:407` に登録済み
+- **根拠**: `packages/parse/src/cl/parser.lisp:418-419` — `(setf (elt seq i) val)` をパーサーが `(aset seq i val)` に展開。`aset` は `builtin-registry-data.lisp:407` に登録済み
 
 #### FR-620: (setf svref) / (setf row-major-aref) — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/expander-setf-places.lisp`
+- **対象**: `packages/expand/src/expander-setf-places.lisp`
 - **実装**: `*setf-compound-place-handlers*` に `svref` / `row-major-aref` ハンドラを登録済み。
 - **内容**: `(setf (svref vector i) val)` — simple-vector への書き込み。`(setf (row-major-aref array i) val)` — row-major インデックスへの書き込み
 - **根拠**: ANSI CL 15.2 — setf of svref, row-major-aref
@@ -807,7 +807,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-621: (setf nth) — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/expander.lisp` (`*setf-compound-place-handlers*`)
+- **対象**: `packages/expand/src/expander.lisp` (`*setf-compound-place-handlers*`)
 - **実装**: `expand-setf-cons-place` 経由で `(rplaca (nthcdr n list) val)` に展開済み。
 - **内容**: `(setf (nth n list) val)` → `(rplaca (nthcdr n list) val)` に展開
 - **根拠**: ANSI CL 14.2.1 — setf of nth
@@ -815,7 +815,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-622: (setf get) — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/expander-setf-places.lisp`
+- **対象**: `packages/expand/src/expander-setf-places.lisp`
 - **実装**: `*setf-compound-place-handlers*` に `get` ハンドラを追加し、`symbol-plist` + `rt-plist-put` + `%set-symbol-plist` で更新する。
 - **内容**: `(setf (get symbol key) value)` — シンボル property list を更新して格納値を返す
 - **根拠**: ANSI CL 10.2 — setf of get
@@ -823,35 +823,35 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-623: let / flet 空バインディング形式
 
-- **対象**: `packages/frontend/parse/src/cl/parser.lisp`
+- **対象**: `packages/parse/src/cl/parser.lisp`
 - **内容**: `(let () body)` / `(flet () body)` を ANSI CL 仕様通り空バインディングリストとして受け入れ、`progn` に等価展開
 - **根拠**: ANSI CL 3.1.2.1 — special operators with empty binding lists
 - **難易度**: Easy
 
 #### FR-624: subtypep
 
-- **対象**: `packages/engine/vm/src/primitives.lisp`, `packages/engine/compile/src/builtin-registry-data.lisp`
+- **対象**: `packages/vm/src/primitives.lisp`, `packages/compile/src/builtin-registry-data.lisp`
 - **内容**: `(subtypep type1 type2 &optional environment)` — 2つの型指定子の包含関係を `(values result certainty)` で返す
 - **根拠**: ANSI CL 4.2.2 — subtypep
 - **難易度**: Medium (合成型指定子サポートは Hard)
 
 #### FR-625: type-of — float / function 型返却
 
-- **対象**: `packages/engine/vm/src/primitives.lisp` (lines 414-428)
+- **対象**: `packages/vm/src/primitives.lisp` (lines 414-428)
 - **内容**: `float` → `single-float` または `double-float`。`vm-closure`/`vm-builtin-fn` オブジェクト → `function`。`nil` → `null`
 - **根拠**: ANSI CL 4.2.6 — type-of
 - **難易度**: Easy
 
 #### FR-626: error / warn — フォーマット制御形式
 
-- **対象**: `packages/engine/compile/src/builtin-registry-data.lisp`, `packages/engine/vm/src/conditions.lisp`
+- **対象**: `packages/compile/src/builtin-registry-data.lisp`, `packages/vm/src/conditions.lisp`
 - **内容**: コードジェネレータ (または展開器) で `(error string &rest args)` を `(error (format nil string args...))` にデシュガーして単一コンディションオブジェクトとして渡す。`warn` も同様
 - **根拠**: ANSI CL 9.1.2 — error function signature
 - **難易度**: Easy
 
 #### FR-627: string-upcase / string-downcase / string-capitalize — :start/:end キーワード
 
-- **対象**: `packages/engine/vm/src/strings.lisp` (lines 164-182), `packages/engine/compile/src/builtin-registry-data.lisp` (lines 16-18)
+- **対象**: `packages/vm/src/strings.lisp` (lines 164-182), `packages/compile/src/builtin-registry-data.lisp` (lines 16-18)
 - **内容**: `:start`/`:end` パラメータを受け取り部分文字列変換を実装。`nstring-upcase`/`nstring-downcase`/`nstring-capitalize` (FR-475) の破壊的版も同様
 - **根拠**: ANSI CL 16.2.1 — string-upcase
 - **難易度**: Easy
@@ -870,14 +870,14 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-630: coerce — 実行時型ディスパッチ
 
-- **対象**: `packages/frontend/expand/src/macros-sequence.lisp` (lines 375-390)
+- **対象**: `packages/expand/src/macros-sequence.lisp` (lines 375-390)
 - **内容**: 実行時型ディスパッチ関数を追加。または `coerce-to-*` 群を呼ぶランタイム関数 `rt-coerce` を `builtin-registry-data.lisp` に登録
 - **根拠**: ANSI CL 12.1 — coerce with computed type
 - **難易度**: Medium
 
 #### FR-631: macroexpand / macroexpand-1 — ✅ COMPLETE
 
-- **対象**: `packages/engine/compile/src/builtin-registry-data.lisp`, `packages/frontend/expand/src/macro.lisp`
+- **対象**: `packages/compile/src/builtin-registry-data.lisp`, `packages/expand/src/macro.lisp`
 - **実装**: `macroexpand` / `macroexpand-1` はビルトイン登録済みで、`our-macroexpand-1` / `our-macroexpand-all` に接続されている
 - **内容**: ユーザーコードから `(macroexpand '(when t :ok))` が呼べる
 - **根拠**: ANSI CL 3.1.2.1 — macroexpand
@@ -885,14 +885,14 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-632: with-standard-io-syntax — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/macros-stdlib.lisp` (line 285)
+- **対象**: `packages/expand/src/macros-stdlib.lisp` (line 285)
 - **内容**: ANSI CL が指定する `*print-base*`/`*print-escape*`/`*print-readably*`/`*print-*` 全変数を標準値にバインドして body を実行
 - **根拠**: ANSI CL 22.1.1 — with-standard-io-syntax
 - **難易度**: Medium (プリンタ変数の実装に依存)
 
 #### FR-633: clear-output — ✅ COMPLETE
 
-- **対象**: `packages/engine/compile/src/builtin-registry-data.lisp`, `packages/engine/vm/src/io.lisp`
+- **対象**: `packages/compile/src/builtin-registry-data.lisp`, `packages/vm/src/io.lisp`
 - **実装**: `vm-clear-output` 命令と `clear-output` ビルトイン登録が実装済み
 - **内容**: 出力バッファを破棄する
 - **根拠**: ANSI CL 21.2 — clear-output
@@ -900,14 +900,14 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-634: clrhash — ✅ COMPLETE
 
-- **対象**: `packages/engine/vm/src/hash.lisp` (line 73: `vm-clrhash`), `packages/engine/compile/src/builtin-registry-data.lisp`
+- **対象**: `packages/vm/src/hash.lisp` (line 73: `vm-clrhash`), `packages/compile/src/builtin-registry-data.lisp`
 - **内容**: `remhash` と同パターンで `clrhash` を実行
 - **根拠**: ANSI CL 18.1 — clrhash
 - **難易度**: Easy (登録のみ)
 
 #### FR-635: bit-nor / bit-nand / bit-eqv / bit-andc1 / bit-andc2 / bit-orc1 / bit-orc2 — ✅ COMPLETE
 
-- **対象**: `packages/engine/vm/src/primitives.lisp` または `packages/engine/vm/src/list.lisp`
+- **対象**: `packages/vm/src/primitives.lisp` または `packages/vm/src/list.lisp`
 - **実装**: `bit-nor` / `bit-nand` / `bit-eqv` / `bit-andc1` / `bit-andc2` / `bit-orc1` / `bit-orc2` は `macros-stdlib.lisp` で実装済み
 - **内容**: 各演算をビット配列要素ごとに適用する
 - **根拠**: ANSI CL 15.2 — bit logical operations
@@ -915,7 +915,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-636: (setf bit) / (setf sbit) — ✅ COMPLETE
 
-- **対象**: `packages/engine/compile/src/builtin-registry-data.lisp`
+- **対象**: `packages/compile/src/builtin-registry-data.lisp`
 - **実装**: `(setf (bit vec i) v)` / `(setf (sbit vec i) v)` は登録済み
 - **内容**: `bit`/`sbit` の place 展開を提供する
 - **根拠**: ANSI CL 15.2 — (setf bit)
@@ -923,7 +923,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-637: 文字列比較 — :start1/:end1/:start2/:end2 部分文字列キーワード — ✅ COMPLETE
 
-- **対象**: `packages/engine/vm/src/strings.lisp` (string comparison VM instructions)
+- **対象**: `packages/vm/src/strings.lisp` (string comparison VM instructions)
 - **実装**: 文字列比較は `:start1`/`:end1`/`:start2`/`:end2` を受け取る実装に接続済み
 - **内容**: 部分文字列比較をサポートする
 - **根拠**: ANSI CL 16.2.3 — string comparisons with keyword arguments
@@ -931,21 +931,21 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-638: loop named — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/loop-parser.lisp`, `packages/frontend/expand/src/loop-emitters.lisp`
+- **対象**: `packages/expand/src/loop-parser.lisp`, `packages/expand/src/loop-emitters.lisp`
 - **内容**: ループ名を `loop-state` に保存し、`return-from` に対応する `catch`/`throw` を生成
 - **根拠**: ANSI CL 6.1.1 — named loop
 - **難易度**: Medium
 
 #### FR-639: asinh / acosh / atanh — ✅ COMPLETE
 
-- **対象**: `packages/engine/vm/src/vm-transcendental.lisp`, `packages/engine/compile/src/builtin-registry-data.lisp`
+- **対象**: `packages/vm/src/vm-transcendental.lisp`, `packages/compile/src/builtin-registry-data.lisp`
 - **実装**: `vm-asinh-inst` / `vm-acosh-inst` / `vm-atanh-inst` は `define-vm-unary-instruction` + `define-simple-instruction` で定義済み。`builtin-registry-data.lisp:77-79` に登録済み。
 - **根拠**: ANSI CL 12.2.4 — asinh, acosh, atanh
 - **難易度**: Easy
 
 #### FR-640: nreconc — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/macros-stdlib.lisp:997`
+- **対象**: `packages/expand/src/macros-stdlib.lisp:997`
 - **実装**: `(nreconc list tail)` は `macros-stdlib.lisp` で実装済み。`(nconc (nreverse list) tail)` に展開。
 - **根拠**: ANSI CL 14.2.22 — nreconc
 - **難易度**: Easy
@@ -958,7 +958,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-642: _features_ — ✅ COMPLETE
 
-- **対象**: `packages/engine/vm/src/vm.lisp` (line ~381), `packages/engine/vm/src/vm-run.lisp` (line ~186)
+- **対象**: `packages/vm/src/vm.lisp` (line ~381), `packages/vm/src/vm-run.lisp` (line ~186)
 - **実装**: `vm-state` / `vm2-state` の両方で `*features*` は `(:common-lisp :cl-cc)` に統一済み
 - **内容**: 実行系差をなくす
 - **根拠**: ANSI CL 1.5.2 — _features_ must include :common-lisp
@@ -966,7 +966,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-643: #nR — 任意基数整数リテラル — ✅ COMPLETE
 
-- **対象**: `packages/frontend/parse/src/lexer-dispatch.lisp` (`lex-read-hash-dispatch`)
+- **対象**: `packages/parse/src/lexer-dispatch.lisp` (`lex-read-hash-dispatch`)
 - **実装**: `otherwise` ブランチで数字を読み、`R`/`r` を確認 → `(lex-read-radix-integer state radix)` で整数をパース。`lexer-dispatch.lisp:285-290`。radix 2-36 の範囲チェック付き。
 - **根拠**: ANSI CL 2.4.8 — #nR
 - **難易度**: Easy
@@ -979,7 +979,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-647: symbol-value — ✅ COMPLETE
 
-- **対象**: `packages/engine/compile/src/builtin-registry-data.lisp`, `packages/engine/vm/src/vm.lisp`
+- **対象**: `packages/compile/src/builtin-registry-data.lisp`, `packages/vm/src/vm.lisp`
 - **実装**: `symbol-value` はホストブリッジ登録済みで、ユーザーコードから利用できる
 - **内容**: `(symbol-value sym)` を標準 API として提供する
 - **根拠**: ANSI CL 10.1.1 — symbol-value
@@ -1035,42 +1035,42 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-661: / (除算) — ✅ COMPLETE
 
-- **対象**: `packages/frontend/parse/src/cl/parser.lisp`, `packages/engine/compile/src/builtin-registry-data.lisp`
+- **対象**: `packages/parse/src/cl/parser.lisp`, `packages/compile/src/builtin-registry-data.lisp`
 - **内容**: ANSI CL の `/` を VM 除算命令へ接続
 - **根拠**: ANSI CL 12.2 — /
 - **難易度**: Easy
 
 #### FR-660: assoc-if / assoc-if-not — ✅ COMPLETE
 
-- **対象**: `packages/engine/compile/src/builtin-registry-data.lisp`
+- **対象**: `packages/compile/src/builtin-registry-data.lisp`
 - **実装**: `assoc-if` / `assoc-if-not` は `macros-stdlib.lisp` にユーザー向けマクロとして実装済み。
 - **根拠**: ANSI CL 14.2.3 — assoc-if / assoc-if-not
 - **難易度**: Easy
 
 #### FR-697: assoc / rassoc / member — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/expander-data.lisp`, `packages/engine/vm/src/list.lisp`
+- **対象**: `packages/expand/src/expander-data.lisp`, `packages/vm/src/list.lisp`
 - **実装**: `assoc` / `rassoc` / `member` は `:test` / `:test-not` / `:key` を受け付ける。
 - **根拠**: ANSI CL 14.2.1 (member), 14.2.3 (assoc), 14.2.3 (rassoc)
 - **難易度**: Medium
 
 #### FR-658: read-preserving-whitespace — ✅ COMPLETE
 
-- **対象**: `packages/engine/compile/src/builtin-registry-data.lisp`
+- **対象**: `packages/compile/src/builtin-registry-data.lisp`
 - **実装**: `read-preserving-whitespace` は `read` に委譲して利用できる。
 - **根拠**: ANSI CL 23.2.1 — read-preserving-whitespace
 - **難易度**: Easy (ホスト CL に委譲可能)
 
 #### FR-659: read-delimited-list — ✅ COMPLETE
 
-- **対象**: `packages/engine/compile/src/builtin-registry-data.lisp`
+- **対象**: `packages/compile/src/builtin-registry-data.lisp`
 - **実装**: `read-delimited-list` は host bridge 経由で利用できる。
 - **根拠**: ANSI CL 23.2.1 — read-delimited-list
 - **難易度**: Medium (VM read ループ拡張が必要)
 
 #### FR-655: find-symbol — ✅ COMPLETE
 
-- **対象**: `packages/engine/compile/src/builtin-registry-data.lisp`, `packages/engine/vm/src/vm.lisp`
+- **対象**: `packages/compile/src/builtin-registry-data.lisp`, `packages/vm/src/vm.lisp`
 - **実装**: `find-symbol` はホストブリッジ経由で利用可能
 - **内容**: パッケージからシンボルを検索し、シンボルと状態の2値を返す
 - **根拠**: ANSI CL 11.2.4 — find-symbol
@@ -1084,28 +1084,28 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-657: subst-if / subst-if-not — ✅ COMPLETE
 
-- **対象**: `packages/engine/compile/src/builtin-registry-data.lisp`, `packages/engine/vm/src/list.lisp`
+- **対象**: `packages/compile/src/builtin-registry-data.lisp`, `packages/vm/src/list.lisp`
 - **実装**: `subst-if` / `subst-if-not` は `macros-stdlib.lisp` に実装済み。
 - **根拠**: ANSI CL 14.2.34/35 — subst-if / subst-if-not
 - **難易度**: Easy–Medium
 
 #### FR-682: `-` 単項否定バグ / 0引数エラー欠如 — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/expander.lisp`
+- **対象**: `packages/expand/src/expander.lisp`
 - **実装**: `expander.lisp:430-431` で0引数→エラー、1引数→ `(- 0 x)` に展開。`(- x)` → `-x`、`(-)` → `error` が動作。
 - **根拠**: ANSI CL 12.2 — `(- x)` → `-x`; `(-)` is an error
 - **難易度**: Easy
 
 #### FR-683: isqrt — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/macros-stdlib.lisp`
+- **対象**: `packages/expand/src/macros-stdlib.lisp`
 - **実装**: Newton 法による整数平方根。`(floor (sqrt (float n)))` + Newton 修正ループで浮動小数点精度喪失を回避。
 - **根拠**: ANSI CL 12.1.3 — isqrt returns the greatest integer ≤ exact positive square root
 - **難易度**: Medium
 
 #### FR-684: signum — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/macros-stdlib.lisp`
+- **対象**: `packages/expand/src/macros-stdlib.lisp`
 - **実装**: `macros-stdlib.lisp` で型保存実装。`(signum 2.5)` → `1.0`、`(signum -3)` → `-1`。入力型を保存した戻り値。
 - **根拠**: ANSI CL 12.1.3 — signum preserves type
 - **難易度**: Medium
@@ -1124,7 +1124,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-679: get-decoded-time — ✅ COMPLETE
 
-- **対象**: `packages/umbrella/pipeline/stdlib-source.lisp`
+- **対象**: `packages/pipeline/stdlib-source.lisp`
 - **実装**: `stdlib-source.lisp:358-359` で `(defun get-decoded-time () (decode-universal-time (get-universal-time)))` として定義済み。
 - **根拠**: ANSI CL 25.1.4 — get-decoded-time
 - **難易度**: Easy
@@ -1143,7 +1143,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-675: maphash — ✅ COMPLETE
 
-- **実装**: `our-defmacro maphash` が `hash-table-keys` を使ってキー/値を走査する (`packages/frontend/expand/src/macros-stdlib.lisp:1317-1325`)。`builtin-registry-data.lisp` にも `maphash` が登録済み (`packages/engine/compile/src/builtin-registry-data.lisp:180`)。
+- **実装**: `our-defmacro maphash` が `hash-table-keys` を使ってキー/値を走査する (`packages/expand/src/macros-stdlib.lisp:1317-1325`)。`builtin-registry-data.lisp` にも `maphash` が登録済み (`packages/compile/src/builtin-registry-data.lisp:180`)。
 - **根拠**: ANSI CL 18.1 — maphash
 - **難易度**: Low
 
@@ -1161,7 +1161,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-669: string comparators — 戻り値が boolean (0/1) で mismatch-index を返さない — ✅ COMPLETE
 
-- **対象**: `packages/engine/vm/src/strings.lisp` (lines 114-124), `packages/engine/compile/src/builtin-registry-data.lisp` (lines 212-227)
+- **対象**: `packages/vm/src/strings.lisp` (lines 114-124), `packages/compile/src/builtin-registry-data.lisp` (lines 212-227)
 - **実装**: 文字列比較は ANSI 仕様どおり mismatch-index / nil を返す。
 - **根拠**: ANSI CL 13.2.4 — string comparators return index or nil
 - **難易度**: Medium
@@ -1198,26 +1198,26 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-666: print / prin1 / princ — オプション stream 引数なし — ✅ COMPLETE
 
-- **対象**: `packages/engine/compile/src/builtin-registry-data.lisp` (lines 260-262)
+- **対象**: `packages/compile/src/builtin-registry-data.lisp` (lines 260-262)
 - **実装**: `print` / `prin1` / `princ` は optional stream 付きで利用できる。
 - **根拠**: ANSI CL 22.3.3 — print / prin1 / princ
 - **難易度**: Easy
 
 #### FR-689: catch / throw — ✅ COMPLETE
 
-- **実装**: `compile-ast` が `vm-establish-catch` / `vm-throw` を emit し、`catch` / `throw` の非局所脱出が動作する (`packages/engine/compile/src/codegen.lisp:54-84`)。
+- **実装**: `compile-ast` が `vm-establish-catch` / `vm-throw` を emit し、`catch` / `throw` の非局所脱出が動作する (`packages/compile/src/codegen.lisp:54-84`)。
 - **根拠**: ANSI CL 5.2 — catch/throw for non-local exits
 - **難易度**: Low
 
 #### FR-690: rotatef — ✅ COMPLETE
 
-- **実装**: `rotatef` は `&rest places` を受け取り、2個以上の place を順に回転する (`packages/frontend/expand/src/macros-stdlib.lisp:101-117`)。
+- **実装**: `rotatef` は `&rest places` を受け取り、2個以上の place を順に回転する (`packages/expand/src/macros-stdlib.lisp:101-117`)。
 - **根拠**: ANSI CL 5.1.2 — rotatef must accept N places using setf
 - **難易度**: Low
 
 #### FR-691: ignore-errors — ✅ COMPLETE
 
-- **実装**: エラー時に `(values nil condition)` を返す (`packages/frontend/expand/src/macros-stdlib.lisp:1115-1119`)。
+- **実装**: エラー時に `(values nil condition)` を返す (`packages/expand/src/macros-stdlib.lisp:1115-1119`)。
 - **根拠**: ANSI CL 9.1 — ignore-errors returns (values nil condition) on error
 - **難易度**: Low
 
@@ -1229,7 +1229,7 @@ ANSI CL 外だが 2026 年のモダンな CL 実装が提供する機能。
 
 #### FR-695: loop downfrom / downto / above — ✅ COMPLETE
 
-- **対象**: `packages/frontend/expand/src/loop-parser.lisp` (lines 118-130)
+- **対象**: `packages/expand/src/loop-parser.lisp` (lines 118-130)
 - **内容**: `(loop for x downfrom 10 to 1 collect x)` が `(10 9 8 7 6 5 4 3 2 1)` を返す
 - **根拠**: ANSI CL 6.1.1.3 — loop numeric stepping
 - **難易度**: Medium

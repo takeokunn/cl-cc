@@ -4,8 +4,8 @@ let
 
   # pkgSrc accepts either a `subdir` string (relative to project root) OR a
   # `filesets` list of paths. We use lib.fileset.toSource so each derivation's
-  # FASL cache stays independent — touching packages/engine/vm never
-  # invalidates packages/foundation/bootstrap.
+  # FASL cache stays independent — touching packages/vm never
+  # invalidates packages/bootstrap.
   pkgSrc =
     arg:
     let
@@ -18,7 +18,12 @@ let
 
   # Build an ASDF system via sbcl.buildASDFSystem with shared boilerplate.
   mkAsdfSystem =
-    { name, src, deps, allSystems }:
+    {
+      name,
+      src,
+      deps,
+      allSystems,
+    }:
     sbcl.buildASDFSystem {
       pname = name;
       version = "0.1.0";
@@ -30,70 +35,75 @@ let
   # 14 leaf systems — preserved verbatim from the original flake.nix.
   leafSpec = {
     cl-cc-bootstrap = {
-      src = "packages/foundation/bootstrap";
+      src = "packages/bootstrap";
       deps = [ ];
     };
     cl-cc-ast = {
-      src = "packages/foundation/ast";
+      src = "packages/ast";
       deps = [ ];
     };
     cl-cc-binary = {
-      src = "packages/backend/binary";
+      src = "packages/binary";
       deps = [ ];
     };
     cl-cc-runtime = {
-      src = "packages/backend/runtime";
+      src = "packages/runtime";
       deps = [ ];
     };
     cl-cc-bytecode = {
-      src = "packages/backend/bytecode";
+      src = "packages/bytecode";
       deps = [ ];
     };
     cl-cc-ir = {
-      src = "packages/foundation/ir";
+      src = "packages/ir";
       deps = [ ];
     };
     cl-cc-mir = {
-      src = "packages/foundation/mir";
-      deps = [ ];
+      src = "packages/mir";
+      deps = [ "cl-cc-target" ];
     };
     cl-cc-prolog = {
-      src = "packages/foundation/prolog";
+      src = "packages/prolog";
       deps = [ "cl-cc-bootstrap" ];
     };
     cl-cc-type = {
-      src = "packages/foundation/type";
+      src = "packages/type";
       deps = [ "cl-cc-ast" ];
     };
     cl-cc-parse = {
-      src = "packages/frontend/parse";
+      src = "packages/parse";
       deps = [
         "cl-cc-ast"
         "cl-cc-bootstrap"
       ];
     };
     cl-cc-vm = {
-      src = "packages/engine/vm";
+      src = "packages/vm";
       deps = [ "cl-cc-bootstrap" ];
     };
     cl-cc-optimize = {
-      src = "packages/engine/optimize";
+      src = "packages/optimize";
       deps = [
         "cl-cc-vm"
         "cl-cc-prolog"
         "cl-cc-type"
       ];
     };
-    cl-cc-emit = {
-      src = "packages/backend/emit";
+    cl-cc-target = {
+      src = "packages/target";
+      deps = [ ];
+    };
+    cl-cc-regalloc = {
+      src = "packages/regalloc";
       deps = [
         "cl-cc-vm"
         "cl-cc-mir"
+        "cl-cc-target"
         "cl-cc-optimize"
       ];
     };
     cl-cc-expand = {
-      src = "packages/frontend/expand";
+      src = "packages/expand";
       deps = [
         "cl-cc-bootstrap"
         "cl-cc-ast"
@@ -102,8 +112,42 @@ let
         "cl-cc-type"
       ];
     };
+    cl-cc-cps = {
+      src = "packages/cps";
+      deps = [
+        "cl-cc-bootstrap"
+        "cl-cc-ast"
+        "cl-cc-parse"
+      ];
+    };
+    cl-cc-codegen = {
+      src = "packages/codegen";
+      deps = [
+        "cl-cc-bootstrap"
+        "cl-cc-ast"
+        "cl-cc-prolog"
+        "cl-cc-parse"
+        "cl-cc-optimize"
+        "cl-cc-vm"
+        "cl-cc-mir"
+        "cl-cc-target"
+        "cl-cc-regalloc"
+        "cl-cc-expand"
+        "cl-cc-cps"
+      ];
+    };
+    cl-cc-emit = {
+      src = "packages/emit";
+      deps = [
+        "cl-cc-vm"
+        "cl-cc-mir"
+        "cl-cc-optimize"
+        "cl-cc-regalloc"
+        "cl-cc-codegen"
+      ];
+    };
     cl-cc-compile = {
-      src = "packages/engine/compile";
+      src = "packages/compile";
       deps = [
         "cl-cc-bootstrap"
         "cl-cc-ast"
@@ -114,6 +158,56 @@ let
         "cl-cc-vm"
         "cl-cc-emit"
         "cl-cc-expand"
+        "cl-cc-cps"
+        "cl-cc-codegen"
+      ];
+    };
+    cl-cc-stdlib = {
+      src = "packages/stdlib";
+      deps = [ "cl-cc-bootstrap" ];
+    };
+    cl-cc-pipeline = {
+      src = "packages/pipeline";
+      deps = [
+        "cl-cc-bootstrap"
+        "cl-cc-ast"
+        "cl-cc-prolog"
+        "cl-cc-parse"
+        "cl-cc-type"
+        "cl-cc-optimize"
+        "cl-cc-vm"
+        "cl-cc-expand"
+        "cl-cc-emit"
+        "cl-cc-cps"
+        "cl-cc-codegen"
+        "cl-cc-stdlib"
+        "cl-cc-target"
+        "cl-cc-mir"
+        "cl-cc-binary"
+        "cl-cc-compile"
+      ];
+    };
+    cl-cc-selfhost = {
+      src = "packages/selfhost";
+      deps = [
+        "cl-cc-bootstrap"
+        "cl-cc-pipeline"
+        "cl-cc-expand"
+        "cl-cc-vm"
+        "cl-cc-runtime"
+        "cl-cc-compile"
+      ];
+    };
+    cl-cc-repl = {
+      src = "packages/repl";
+      deps = [
+        "cl-cc-bootstrap"
+        "cl-cc-pipeline"
+        "cl-cc-selfhost"
+        "cl-cc-expand"
+        "cl-cc-vm"
+        "cl-cc-parse"
+        "cl-cc-compile"
       ];
     };
   };
@@ -136,7 +230,7 @@ let
       deps = [ "cl-cc" ];
     };
     cl-cc-testing-framework = {
-      src = "packages/testing/framework";
+      src = "packages/testing-framework";
       deps = [ "cl-cc" ];
     };
   };
@@ -179,17 +273,6 @@ let
       version = "0.1.0";
       src = pkgSrc testSrc;
       systems = [ "cl-cc-test" ];
-      lispLibs = with productionAsdfSystems; [
-        cl-cc
-        cl-cc-cli
-        cl-cc-testing-framework
-      ];
-    };
-    "cl-cc-test/clos" = sbcl.buildASDFSystem {
-      pname = "cl-cc-test-clos";
-      version = "0.1.0";
-      src = pkgSrc testSrc;
-      systems = [ "cl-cc-test/clos" ];
       lispLibs = with productionAsdfSystems; [
         cl-cc
         cl-cc-cli

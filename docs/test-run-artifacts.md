@@ -2,16 +2,13 @@
 
 ## canonical target と runner 対応
 
-公開されている主要 test entrypoint は次の 3 つです。
+公開されている test entrypoint は **`nix run .#test` 一本のみ**です。
 
-- `nix run .#test` -> `run-fast-tests`（fast feedback path、`selfhost-slow-suite` を除外）
-- `nix run .#test-full` -> `run-tests`（full canonical plan、`:cl-cc-test/slow` をロード）
-- `nix run .#coverage` -> 3 フェーズで `run-suite` を実行し、coverage HTML を生成
+- `nix run .#test` -> `cl-cc/test:run-tests`（unit + integration + selfhost-slow + e2e の full canonical plan）
+- `nix flake check` -> 同じ plan を `checks.tests` 経由で derivation として実行
 
 `run-tests` は `run-suite 'cl-cc-suite ...` を呼び、unit / integration / e2e / PBT /
-slow selfhost を含む full canonical test plan を実行します。
-
-`run-fast-tests` は day-to-day の速度優先 path で、`selfhost-slow-suite` を自動除外します。
+selfhost-slow を含む full canonical test plan を実行します。
 
 ## 検証チェックリスト
 
@@ -21,22 +18,11 @@ slow selfhost を含む full canonical test plan を実行します。
 ### 推奨確認項目
 
 - `nix run .#test`
-  - fast feedback plan（selfhost-slow 除外）が完走する
-- `nix run .#test-full`
-  - slow selfhost を含む full canonical plan が完走する
-- `nix run .#coverage`
-  - 同じ計画が sb-cover 付きで完走し、HTML coverage artifact が生成される
+  - canonical full plan が完走する
+- `nix flake check`
+  - sandbox derivation 内で同じ plan が完走する
 - `nix build`
   - standalone binary が生成される
-
-### clean-state
-
-`nix run .#clean` 後は少なくとも以下を再確認します。
-
-- `nix run .#test`
-- `nix run .#test-full`
-- `nix run .#coverage`
-- `nix build`
 
 ## 備考
 
@@ -51,12 +37,14 @@ Runner-observed environment variables:
 - `CLCC_TIMINGS_FILE` — TSV output path for per-test timings.
   Default `./test-timings.tsv`. Validated: `..` segments and paths outside
   `(uiop:getcwd)` are rejected with a warning and the default is used.
-  Source: `packages/testing/framework/src/framework-runner.lisp` (`%timings-output-path`).
+  Source: `packages/testing-framework/src/framework-runner.lisp` (`%timings-output-path`).
 - `CLCC_TEST_TRACE=1` — When set, every test prints
   `# [trace] running <name>` to `*error-output*` before dispatch (hang diagnosis).
-  Source: `packages/testing/framework/src/framework-runner.lisp:22-25`.
-- `CLCC_TEST_TIMEOUT` — Overrides the default per-test wall-clock timeout (seconds, default 10s).
-  Source: `packages/testing/framework/src/framework-timeouts.lisp` (`%default-test-timeout`).
+  Source: `packages/testing-framework/src/framework-runner.lisp:22-25`.
+- `CLCC_TEST_TIMEOUT` — Overrides the default per-test wall-clock timeout in seconds.
+  Framework default is `10` (`packages/testing-framework/src/framework-timeouts.lisp` `%default-test-timeout`),
+  but the canonical Nix entrypoints (`nix run .#test`, `checks.tests`) export `CLCC_TEST_TIMEOUT=180`
+  via `nix/apps.nix` and `nix/checks.nix` so individual long-running tests are not penalised.
 
 ## `test-timings.tsv`
 
@@ -77,7 +65,7 @@ Example row:
 CL-CC-UNIT-SUITE	TIMING-PASS-CASE	123456	passed	3
 ```
 
-Source: `packages/testing/framework/src/framework-runner.lisp` (`%write-timings-tsv`).
+Source: `packages/testing-framework/src/framework-runner.lisp` (`%write-timings-tsv`).
 
 ## TAP Extensions
 
@@ -86,4 +74,4 @@ diagnostic block that includes `duration_ms: N.NNN` (double-float
 milliseconds derived from `:duration-ns`). For failures, the pre-existing
 failure YAML (`message:`, etc.) is preserved and `duration_ms:` is spliced
 in just before the closing `  ...` sentinel.
-Source: `packages/testing/framework/src/framework.lisp:455-496`.
+Source: `packages/testing-framework/src/framework.lisp:455-496`.

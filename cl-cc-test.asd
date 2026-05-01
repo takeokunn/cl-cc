@@ -2,7 +2,7 @@
 ;;;; CL-CC test systems.
 ;;;;
 ;;;; Loaded by cl-cc.asd's eval-when block so that `--load cl-cc.asd`
-;;;; makes :cl-cc-test and :cl-cc-test/clos available.
+;;;; makes :cl-cc-test and :cl-cc-test/slow available.
 
 (asdf:defsystem :cl-cc-test
   :description "CL-CC tests"
@@ -14,7 +14,7 @@
   :components
   (;; Unit tests — each module now lives in its workspace's tests/ dir
    (:module "testing-framework-tests"
-    :pathname "packages/testing/framework/tests"
+    :pathname "packages/testing-framework/tests"
     :serial t
     :components
     ((:file "framework-meta-tests")
@@ -37,7 +37,7 @@
      (:file "main-dump-tests")
      (:file "main-utils-tests")))
    (:module "vm-tests"
-    :pathname "packages/engine/vm/tests"
+    :pathname "packages/vm/tests"
     :serial t
     :components
     ((:file "vm-instructions-tests")
@@ -74,13 +74,13 @@
      (:file "io-tests")
      (:file "io-runners-tests")))
    (:module "ast-tests"
-    :pathname "packages/foundation/ast/tests"
+    :pathname "packages/ast/tests"
     :serial t
     :components
     ((:file "ast-tests")
      (:file "ast-analysis-tests")))
    (:module "parse-tests"
-    :pathname "packages/frontend/parse/tests"
+    :pathname "packages/parse/tests"
     :serial t
     :components
     ((:file "cl-parser-tests")
@@ -117,14 +117,15 @@
      (:file "cst-to-ast-tests")
      (:file "diagnostics-tests")))
    (:module "prolog-tests"
-    :pathname "packages/foundation/prolog/tests"
+    :pathname "packages/prolog/tests"
     :serial t
     :components
     ((:file "prolog-data-tests")
      (:file "prolog-peephole-tests")
-     (:file "dcg-tests")))
+     (:file "dcg-tests")
+     (:file "prolog-tests")))
    (:module "expand-tests"
-    :pathname "packages/frontend/expand/tests"
+    :pathname "packages/expand/tests"
     :serial t
     :components
     ((:file "macro-tests")
@@ -196,9 +197,20 @@
      (:file "macros-sequence-helpers-tests")
      (:file "macros-hof-tests")
      (:file "macros-hof-search-tests")
-     (:file "macros-sequence-tests")))
+     (:file "macros-sequence-tests")
+     (:file "loop-macro-tests")
+     (:file "loop-macro-advanced-tests")
+     (:file "loop-macro-runtime-tests")
+     (:file "loop-macro-runtime-clauses-tests")
+     (:file "loop-macro-runtime-ext-tests")
+     (:file "loop-macro-runtime-edge-tests")
+     (:file "macros-basic-mvb-tests")
+     (:file "macros-mutation-tests")
+     (:file "macros-sequence-fold-tests")
+     (:file "macros-stdlib-list-set-tests")
+     (:file "fr-555-copy-structure-tests")))
    (:module "type-tests"
-    :pathname "packages/foundation/type/tests"
+    :pathname "packages/type/tests"
     :serial t
     :components
     ((:file "type-tests")
@@ -231,7 +243,7 @@
      (:file "inference-effect-tests")
      (:file "exhaustiveness-tests")))
    (:module "ir-tests"
-    :pathname "packages/foundation/ir/tests"
+    :pathname "packages/ir/tests"
     :serial t
     :components
     ((:file "ir-types-tests")
@@ -241,7 +253,7 @@
      (:file "ir-ssa-dominator-tests")
      (:file "ir-printer-tests")))
    (:module "compile-tests"
-    :pathname "packages/engine/compile/tests"
+    :pathname "packages/compile/tests"
     :serial t
     :components
     ((:file "cps-tests")
@@ -286,9 +298,61 @@
      (:file "stdlib-source-tests")
      (:file "pipeline-native-tests")
      (:file "pipeline-native-io-tests")
-     (:file "pipeline-native-routing-tests")))
+     (:file "pipeline-native-routing-tests")
+     (:file "compiler-selfhost-fixtures")
+     (:file "compiler-selfhost-fixtures-ext")
+     (:file "compiler-tests")
+     (:file "compiler-tests-pbt-tests")
+     (:file "compiler-tests-call-forms")
+     (:file "compiler-tests-stdlib")
+     (:file "compiler-tests-stdlib-io")
+     (:file "compiler-tests-extended")
+     (:file "compiler-tests-extended-stdlib")
+     (:file "compiler-tests-runtime")
+     (:file "compiler-tests-runtime-string-tests")
+     (:file "compiler-tests-runtime-hof-tests")
+     (:file "compiler-tests-runtime-selfhost")
+     (:file "compiler-tests-selfhost")
+     (:file "compiler-tests-selfhost-types")
+     (:file "call-conv-tests")
+     (:file "control-flow-tests")
+     (:file "clos-tests")
+     (:file "clos-compile-tests")
+     (:file "clos-dispatch-tests")
+     (:file "stream-tests")
+     (:file "predicate-tests")
+     (:file "codegen-runtime-tests")
+     (:file "pipeline-tests")
+     (:file "pipeline-eval-tests")
+     (:file "pipeline-repl-tests")
+     (:file "standalone-load-tests")
+     (:file "closure-pipeline-tests")
+     (:module "pbt"
+      :serial t
+      :components
+      ((:file "package")
+       (:file "framework")
+       (:file "framework-dsl")
+       (:file "framework-ast-generators")
+       (:file "generators")
+       (:file "package-macho")
+       (:file "generators-macho")
+       (:file "generators-typed-ast")
+       (:file "generators-typed-ast-utils")
+       (:file "vm-pbt-tests")
+       (:file "cps-pbt-tests")
+       (:file "ast-pbt-tests")
+       (:file "ast-pbt-extended-tests")
+       (:file "macro-pbt-tests")
+       (:file "macro-pbt-props-tests")
+       (:file "macro-pbt-mv-tests")
+       (:file "macro-pbt-hygiene-tests")
+       (:file "macro-pbt-binding-tests")
+       (:file "macro-pbt-advanced-tests")
+       (:file "prolog-pbt-tests")
+       (:file "vm-heap-pbt-tests")))))
    (:module "optimize-tests"
-    :pathname "packages/engine/optimize/tests"
+    :pathname "packages/optimize/tests"
     :serial t
     :components
     ((:file "optimizer-tables-tests")
@@ -313,9 +377,19 @@
      (:file "egraph-extraction-tests")
      (:file "egraph-rules-tests")
      (:file "egraph-negation-tests")
-     (:file "egraph-rules-bitwise-tests")))
+     (:file "egraph-rules-bitwise-tests")
+     (:file "optimizer-tests")
+     (:file "optimizer-e2e-tests")
+     (:file "optimizer-tests-lowlevel2")
+     (:file "optimizer-cfg-inline-tests")
+     (:file "optimizer-inlining-tests")
+     (:file "optimizer-lowlevel-tests")
+     (:file "optimizer-lowlevel-dce-tests")
+     (:file "optimizer-dataflow-passes-tests")
+     (:file "optimizer-store-analysis-tests")
+     (:file "optimizer-strength-inline-tests")))
    (:module "emit-tests"
-    :pathname "packages/backend/emit/tests"
+    :pathname "packages/emit/tests"
     :serial t
     :components
     ((:file "mir-tests")
@@ -346,10 +420,9 @@
      (:file "elf-tests")
      (:file "elf-extended-tests")
      (:file "macho-tests")
-     (:file "macho-builder-tests")
-     (:file "calling-convention-tests")))
+     (:file "macho-builder-tests")))
    (:module "runtime-tests"
-    :pathname "packages/backend/runtime/tests"
+    :pathname "packages/runtime/tests"
     :serial t
     :components
     ((:file "runtime-tests")
@@ -368,94 +441,16 @@
      (:file "value-tests")
      (:file "frame-tests")))
    (:module "bytecode-tests"
-    :pathname "packages/backend/bytecode/tests"
+    :pathname "packages/bytecode/tests"
     :serial t
     :components
     ((:file "encode-tests")
      (:file "encode-ops-objects-tests")
      (:file "decode-tests")))
    (:module "migration-safety"
-    :pathname "packages/umbrella/tests"
+    :pathname "packages/umbrella-tests"
     :components
-    ((:file "migration-safety-tests")))
-   (:module "integration"
-    :pathname "tests/integration"
-    :serial t
-    :components
-    ((:file "compiler-selfhost-fixtures")
-     (:file "compiler-selfhost-fixtures-ext")
-     (:file "compiler-tests")
-     (:file "compiler-tests-pbt-tests")
-     (:file "compiler-tests-call-forms")
-     (:file "compiler-tests-stdlib")
-     (:file "compiler-tests-stdlib-io")
-     (:file "compiler-tests-extended")
-     (:file "compiler-tests-extended-stdlib")
-     (:file "compiler-tests-runtime")
-     (:file "compiler-tests-runtime-string-tests")
-     (:file "compiler-tests-runtime-hof-tests")
-     (:file "compiler-tests-runtime-selfhost")
-     (:file "fr-555-copy-structure-tests")
-     (:file "compiler-tests-selfhost")
-     (:file "compiler-tests-selfhost-types")
-     (:file "closure-tests")
-     (:file "call-conv-tests")
-     (:file "control-flow-tests")
-     (:file "clos-tests")
-     (:file "clos-compile-tests")
-     (:file "clos-dispatch-tests")
-     (:file "stream-tests")
-     (:file "loop-macro-tests")
-     (:file "loop-macro-advanced-tests")
-     (:file "loop-macro-runtime-tests")
-     (:file "loop-macro-runtime-clauses-tests")
-     (:file "loop-macro-runtime-ext-tests")
-     (:file "loop-macro-runtime-edge-tests")
-     (:file "macros-basic-mvb-tests")
-     (:file "macros-mutation-tests")
-     (:file "macros-sequence-fold-tests")
-     (:file "macros-stdlib-list-set-tests")
-     (:file "predicate-tests")
-     (:file "codegen-runtime-tests")
-     (:file "optimizer-tests")
-     (:file "optimizer-e2e-tests")
-     (:file "optimizer-tests-lowlevel2")
-     (:file "optimizer-cfg-inline-tests")
-     (:file "optimizer-inlining-tests")
-     (:file "optimizer-lowlevel-tests")
-     (:file "optimizer-lowlevel-dce-tests")
-     (:file "optimizer-dataflow-passes-tests")
-     (:file "optimizer-store-analysis-tests")
-     (:file "optimizer-strength-inline-tests")
-     (:file "pipeline-tests")
-     (:file "pipeline-eval-tests")
-     (:file "pipeline-repl-tests")
-     (:file "prolog-tests")
-     (:file "standalone-load-tests")
-     (:module "pbt"
-      :serial t
-      :components
-      ((:file "package")
-       (:file "framework")
-       (:file "framework-dsl")
-       (:file "framework-ast-generators")
-       (:file "generators")
-       (:file "package-macho")
-       (:file "generators-macho")
-       (:file "generators-typed-ast")
-       (:file "generators-typed-ast-utils")
-       (:file "vm-pbt-tests")
-       (:file "cps-pbt-tests")
-       (:file "ast-pbt-tests")
-       (:file "ast-pbt-extended-tests")
-       (:file "macro-pbt-tests")
-       (:file "macro-pbt-props-tests")
-       (:file "macro-pbt-mv-tests")
-       (:file "macro-pbt-hygiene-tests")
-       (:file "macro-pbt-binding-tests")
-       (:file "macro-pbt-advanced-tests")
-       (:file "prolog-pbt-tests")
-       (:file "vm-heap-pbt-tests"))))))
+    ((:file "migration-safety-tests"))))
   :perform (asdf:test-op (op c)
               (declare (ignore op c))
               (uiop:symbol-call :cl-cc/test 'run-tests)))
@@ -479,18 +474,3 @@
               (declare (ignore op c))
               (uiop:symbol-call :cl-cc/test 'run-tests)))
 
-(asdf:defsystem :cl-cc-test/clos
-  :description "CL-CC isolated CLOS integration tests"
-  :author "CL-CC"
-  :license "MIT"
-  :version "0.1.0"
-  :depends-on (:cl-cc :cl-cc-cli :cl-cc-testing-framework)
-  :serial t
-  :components
-  ((:module "integration"
-    :pathname "tests/integration"
-    :serial t
-    :components
-    ((:file "clos-tests")
-     (:file "clos-compile-tests")
-     (:file "clos-dispatch-tests")))))

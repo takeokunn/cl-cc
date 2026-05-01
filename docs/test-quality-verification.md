@@ -15,25 +15,16 @@
 この文書単体をもって「完了」「green」「CI 相当で十分」とは見なしません。
 現在の検証可否は、常に以下の実ラン結果で判断してください。
 
-1. `nix run .#test`（fast-feedback plan。unit + integration、`selfhost-slow-suite` は除外）
-2. `nix run .#test-full`（canonical full plan。旧 `test-all` はこのアプリに集約済み）
-3. `nix run .#coverage`（production-only coverage policy で HTML report と threshold check を実行）
-4. `nix build`
-5. 必要に応じて `nix flake check`
+1. `nix run .#test`（canonical full plan。unit + integration + selfhost-slow + e2e）
+2. `nix build`
+3. 必要に応じて `nix flake check`（sandbox derivation で同じ plan を実行）
 
 ### gate の役割分担
 
+- `nix run .#test`
+  - 単一の canonical test gate。selfhost-slow / e2e を含む。
 - `nix flake check`
-  - CI 向けの軽量 gate。
-  - 現在は `checks.tests`（fast plan 相当）と `checks.build` を実行する。
-- `nix run .#test-full`
-  - selfhost-slow / e2e を含む canonical full gate。
-- `nix run .#coverage`
-  - production-only coverage gate。
-- `nix run .#perf-smoke`
-  - fast/full gate の runtime budget 検証。
-- `nix run .#stability-smoke`
-  - fast gate の repeat 実行による flake smoke。
+  - CI 向け gate。`checks.tests`（`run-tests` を sandbox 内で呼び出す）と `checks.build` を実行する。
 
 ## 歴史的に重要だった論点
 

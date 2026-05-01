@@ -26,7 +26,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 
 > Ch.15-34 は [type-advanced.md](type-advanced.md) に続く。
 
-> 注: `新ファイル` とある項目は、現時点では実装予定を示す。実在するモジュール名は `packages/foundation/type/src/` 配下の現行ファイルに合わせて読むこと。
+> 注: `新ファイル` とある項目は、現時点では実装予定を示す。実在するモジュール名は `packages/type/src/` 配下の現行ファイルに合わせて読むこと。
 > この文書は依存順に読むこと。第1-14章はコア型判断の基盤であり、第15-34章は `type-advanced.md` に続く。下の「続き」節は、後続文書の章立てを先読みするためのブリッジである。
 > 本シリーズにおける FR 番号は型システム文書ローカルの参照名であり、他の設計文書に現れる同番号の FR とは無関係である。
 
@@ -60,7 +60,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 
 ### FR-001: ✅ Hindley-Milner 型推論 (基盤)
 
-- **対象**: `packages/foundation/type/src/inference.lisp`
+- **対象**: `packages/type/src/inference.lisp`
 - **現状**: HM 型推論の基盤は存在する。ここでは `infer` をコア入口として定義し、S 式から型スキームを返せることを要件とする
 - **アルゴリズム**: Algorithm W (Damas & Milner 1982) + unification (Robinson 1965)
 - **スコープ**: let-polymorphism, 型変数の全称量化, unification による型変数束縛
@@ -68,7 +68,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 
 ### FR-002: ✅ 双方向型検査 (Bidirectional Type Checking)
 
-- **対象**: `packages/foundation/type/src/bidirectional.lisp` / `packages/foundation/type/src/checker.lisp`
+- **対象**: `packages/type/src/bidirectional.lisp` / `packages/type/src/checker.lisp`
   - **現状**: `synthesize` / `check` の入口は `bidirectional.lisp` と `checker.lisp` 側に整理されている。ここでは双方向検査をコア契約として固定し、文脈から期待型を伝播できることを要件とする
 - **内容**: Dunfield & Krishnaswami (2013) の双方向型検査
   - **synthesize モード**: 式から型を合成 (`e ⇒ A`)
@@ -80,7 +80,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 
 ### FR-003: ✅ 制約ベース型推論 HM(X)
 
-- **対象**: `packages/foundation/type/src/inference.lisp`
+- **対象**: `packages/type/src/inference.lisp`
 - **内容**: Sulzmann & Stuckey の HM(X) フレームワーク。型推論を制約生成と制約解消の 2 フェーズに分離
   - **制約生成フェーズ**: ASTを走査して型制約集合 `C` を生成
   - **制約解消フェーズ**: `C` を unification + 専用ソルバで解く
@@ -91,7 +91,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 
 ### FR-004: ✅ 多相再帰 (Polymorphic Recursion)
 
-- **対象**: `packages/foundation/type/src/inference.lisp`
+- **対象**: `packages/type/src/inference.lisp`
 - **内容**: Milner 制限を超えて再帰関数に異なる型でのモノモーフィック呼び出しを許可
   - `(defun length (x)` が `(length '(1 2))` → `integer` と `(length "str")` → `integer` を同時に型付け可能
   - HM は多相再帰を決定不可能とするため、**型アノテーション必須**（Haskell の `-XScopedTypeVariables` 相当）
@@ -102,7 +102,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 ### FR-005: 型アノテーション → Codegen 接続
 
 - **依存**: FR-002
-- **対象**: `packages/foundation/type/src/inference.lisp` + `packages/engine/compile/src/codegen.lisp`
+- **対象**: `packages/type/src/inference.lisp` + `packages/compile/src/codegen.lisp`
 - **内容**: `compiler-context` / `compilation-result` に型環境 `type-env` を保持し、`infer` の結果を codegen 境界へ伝達する。`compile-ast` は `ctx-type-env` を参照できる
 - **効果**: fixnum fast path（型チェック命令省略）、float unboxing 選択
 
@@ -116,7 +116,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 
 - **依存**: FR-005
 - **内容**: `(if (numberp x) ...)` の true ブランチ内で `x` を fixnum として扱う
-- **活用**: `packages/foundation/type/src/inference.lisp` の `extract-type-guard` が既に型絞り込みを実装済み → codegen 側で活用
+- **活用**: `packages/type/src/inference.lisp` の `extract-type-guard` が既に型絞り込みを実装済み → codegen 側で活用
 
 ---
 
@@ -135,14 +135,14 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 
 ### FR-201: ✅ 公称サブタイピング (Nominal Subtyping)
 
-- **対象**: `packages/engine/vm/src/primitives.lisp`, `packages/foundation/type/src/subtyping.lisp`
+- **対象**: `packages/vm/src/primitives.lisp`, `packages/type/src/subtyping.lisp`
 - **内容**: 名前で同一性を判定するサブタイピング（Java/C#/CLOS 方式）
   - CLOS の `:include` / `defclass` 継承で定義される型階層を型推論に反映
   - `subtypep` の完全実装（FR-801 参照）
 
 ### FR-202: 構造的サブタイピング (Structural Subtyping)
 
-- **対象**: `packages/foundation/type/src/inference.lisp`
+- **対象**: `packages/type/src/inference.lisp`
 - **内容**: 名前でなく構造（スロット・メソッドシグネチャ）で互換性を判定
   - Go のインターフェース、TypeScript の structural typing に相当
   - `(has-slots :x :y)` 型を満たすオブジェクトはすべて渡せる
@@ -151,7 +151,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 
 ### FR-203: ✅ 行多相 (Row Polymorphism)
 
-- **対象**: `packages/foundation/type/src/inference.lisp`
+- **対象**: `packages/type/src/inference.lisp`
 - **内容**: レコード（ハッシュテーブル / struct）の拡張可能なフィールド型
   - OCaml の多相レコード型: `{x: int; y: int | r}` — `r` は残りのフィールドを表す型変数
   - `(function ((row (:x integer) :r)) integer)` — `:x` フィールドを持つ任意のレコードを受け付ける
@@ -162,7 +162,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 
 ### FR-204: 交差型 (Intersection Types) と合併型 (Union Types)
 
-- **対象**: `packages/engine/vm/src/primitives.lisp`, `packages/foundation/type/src/inference.lisp`
+- **対象**: `packages/vm/src/primitives.lisp`, `packages/type/src/inference.lisp`
 - **内容**:
   - **交差型**: `(and integer string)` — 両方の型の性質を持つ（TypeScript の `A & B`）
   - **合併型**: `(or integer string)` — どちらかの型（TypeScript の `A | B`、Rust の enum）
@@ -173,7 +173,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 
 ### FR-205: 部分型多相 (Bounded Polymorphism / Constrained Polymorphism)
 
-- **対象**: `packages/foundation/type/src/inference.lisp`
+- **対象**: `packages/type/src/inference.lisp`
 - **内容**: 型変数に上限 (upper bound) / 下限 (lower bound) 制約を付与
   - Scala の `[A <: Comparable[A]]` — `A` は `Comparable` のサブタイプに限定
   - Java の `<T extends Number>` — ジェネリクスの bounded wildcard

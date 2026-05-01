@@ -1,4 +1,8 @@
-{ pkgs, lib, sbclWithCLCC }:
+{
+  pkgs,
+  lib,
+  sbclWithCLCC,
+}:
 {
   # Standalone cl-cc binary (./result/bin/cl-cc). Built from packages/ alone —
   # tests/ and cl-cc-test.asd are NOT bundled so the default build stays lean.

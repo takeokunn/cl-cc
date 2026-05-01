@@ -8,34 +8,23 @@ cl-cc compiles ANSI Common Lisp to a register-based bytecode VM, and from there 
 
 ```bash
 nix develop
-nix run .#test       # fast feedback plan (selfhost-slow excluded)
-nix run .#test-full  # canonical full plan (fast + slow selfhost + e2e)
-nix run .#coverage   # coverage run with sb-cover + HTML report
+nix run .#test       # canonical full plan (unit + integration + selfhost-slow + e2e)
 cl-cc repl           # interactive REPL
 cl-cc run file.lisp
 cl-cc eval "(+ 1 2)"
 cl-cc compile file.lisp -o out --arch x86-64
 ```
 
-### Migration: `nix run .#test-all` → `nix run .#test-full`
-
-The former `nix run .#test-all` app has been removed and its full canonical
-plan (fast + slow selfhost + e2e) is now `nix run .#test-full`. If you
-scripted `nix run .#test-all` in CI or shell aliases, swap it for
-`nix run .#test-full`.
-
-`nix run .#test` maps to `cl-cc/test:run-fast-tests` and is optimized for
-feedback speed (it excludes `selfhost-slow-suite`).
-
-`nix run .#test-full` maps to `cl-cc/test:run-tests` and executes the full
+`nix run .#test` maps to `cl-cc/test:run-tests` and executes the full
 canonical plan, including `selfhost-slow-suite` (loaded on demand via
-`:cl-cc-test/slow`).
+`:cl-cc-test/slow`). `nix flake check` invokes the same plan via
+`checks.tests`.
 
-`nix run .#coverage` runs a broad coverage plan with sb-cover instrumentation
-and generates HTML output.
-Set `CLCC_TEST_TIMEOUT` to override the default per-test timeout in seconds.
-Set `CLCC_SUITE_TIMEOUT` to override the whole-suite timeout in seconds when you
-need a stricter or looser upper bound for long-running local investigations.
+Set `CLCC_TEST_TIMEOUT` to override the default per-test timeout (seconds; default: 180).
+Set `CLCC_SUITE_TIMEOUT` to override the whole-suite timeout (seconds; default: 600).
+Stale FASLs (e.g. after switching between project paths) can be cleared with
+`rm -rf ~/.cache/common-lisp/ && mkdir -p ~/.cache/common-lisp/`. The runner
+otherwise keeps the warm cache to make repeat invocations fast.
 
 ## Language Support
 
@@ -261,7 +250,7 @@ cl-cc is self-hosting in the meta-circular sense:
 2. **Macro expansion via `our-eval`**: `defmacro` and `define-compiler-macro` expansion is handled by cl-cc compiling and running its own bytecode.
 3. **Compiler-in-the-compiler**: cl-cc can compile programs that themselves implement parsers, compilers, and evaluators — including CPS transformers and stack-machine compilers that mirror cl-cc's own internals.
 4. **REPL state persistence**: Function, class, and accessor definitions persist across `run-string-repl` calls, enabling incremental REPL-driven development.
-5. **Quasiquote in compiled code**: cl-cc correctly compiles `` ` `` and `,` in `defun` bodies, enabling it to run its own macro-generating functions — the same pattern used throughout `packages/engine/compile/src/cps.lisp`.
+5. **Quasiquote in compiled code**: cl-cc correctly compiles `` ` `` and `,` in `defun` bodies, enabling it to run its own macro-generating functions — the same pattern used throughout `packages/cps/src/cps.lisp`.
 
 **Mini AST compiler** (run with `cl-cc run`):
 
@@ -284,10 +273,10 @@ cl-cc is self-hosting in the meta-circular sense:
 (eval-ast (parse-expr '(+ 1 (+ 2 (+ 3 4)))))  ; => 10
 ```
 
-**CPS transformer with quasiquotes** — cl-cc compiles its own CPS transformation logic, using quasiquotes identical to `packages/engine/compile/src/cps.lisp`:
+**CPS transformer with quasiquotes** — cl-cc compiles its own CPS transformation logic, using quasiquotes identical to `packages/cps/src/cps.lisp`:
 
 ```lisp
-;; This is the actual code from packages/engine/compile/src/cps.lisp — compiled by cl-cc itself
+;; This is the actual code from packages/cps/src/cps.lisp — compiled by cl-cc itself
 (defun %cps-sexp-binop (op a b k)
   (let ((va (gensym "A")) (vb (gensym "B")))
     (%cps-sexp-node a
@@ -383,40 +372,20 @@ $ cl-cc repl
 # Enter development environment
 nix develop
 
-# Run the canonical fast test plan (excludes selfhost-slow-suite)
+# Run the canonical full test plan (unit + integration + selfhost-slow + e2e)
 nix run .#test
-
-# Run the heavyweight self-hosting regression suite explicitly
-nix develop -c sbcl --dynamic-space-size 4096 --non-interactive \
-  --eval '(require :asdf)' \
-  --load cl-cc.asd \
-  --load cl-cc-test.asd \
-  --eval '(asdf:disable-output-translations)' \
-  --eval '(asdf:load-system :cl-cc-test/slow)' \
-  --eval '(cl-cc/test:run-suite (quote cl-cc/test::selfhost-slow-suite) :parallel nil :random nil)'
 
 # Build the standalone binary → ./result/bin/cl-cc
 nix build
 
-# Verify self-hosting (builds the binary if needed, then runs `cl-cc selfhost`)
-nix run .#selfhost
-
 # Format the repo (nixfmt + deadnix + statix + prettier) via treefmt
 nix fmt
 
-# CI-equivalent check (flake evaluation + build + fast test plan)
+# CI-equivalent check (flake evaluation + build + canonical test plan)
 nix flake check
 
-# Full canonical suite, including slow selfhost + e2e
-nix run .#test-full
-
-# Coverage gate (production-only metric with report generation)
-nix run .#coverage
-
-# Clear FASL cache if tests misbehave
-nix run .#clean
-# or manually:
-find ~/.cache/common-lisp/ -name "*.fasl" -delete
+# Clear FASL cache if tests misbehave (rm + mkdir avoids macOS SBCL race)
+rm -rf ~/.cache/common-lisp/ && mkdir -p ~/.cache/common-lisp/
 ```
 
 ## CLI Reference
