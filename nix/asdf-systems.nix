@@ -246,7 +246,10 @@ let
     };
     cl-cc-testing-framework = {
       src = "packages/testing-framework";
-      deps = [ "cl-cc" "cl-cc-php" ];
+      deps = [
+        "cl-cc"
+        "cl-cc-php"
+      ];
     };
   };
 
