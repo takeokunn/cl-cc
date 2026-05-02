@@ -54,13 +54,11 @@
    #:parse-source #:parse-all-forms
    ;; Lambda-list / slot-spec parsing
    #:parse-compiler-lambda-list #:lambda-list-has-extended-p
-   #:parse-slot-spec #:slot-def-to-sexp
+   #:parse-slot-spec
    ;; Roundtrip
-   #:lower-sexp-to-ast #:ast-to-sexp
+   #:lower-sexp-to-ast
    ;; Grammar combinator engine
    #:*grammar-rules* #:def-grammar-rule #:query-grammar #:clear-grammar-rules
    #:parse-combinator #:parse-ok-p #:parse-with-grammar
-   ;; PHP frontend
-   #:tokenize-php-source #:parse-php-source
    ;; Multi-language dispatch
    #:parse-source-for-language))

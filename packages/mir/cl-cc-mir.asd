@@ -11,7 +11,7 @@
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc-target)
+  :depends-on ()
   :pathname "src"
   :serial t
   :components

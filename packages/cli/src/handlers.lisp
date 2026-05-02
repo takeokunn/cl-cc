@@ -31,7 +31,7 @@
   (prog1 (run-compiled (compilation-result-program result) :state vm-state)
     (when (compile-opts-flamegraph-path opts)
       (%write-flamegraph-svg (compile-opts-flamegraph-path opts)
-                             (cl-cc/vm::%vm-profile-samples vm-state)))))
+                             (cl-cc/vm:vm-get-profile-samples vm-state)))))
 
 (defun %do-run (parsed)
   (let* ((file (%required-file-arg parsed "run"))
@@ -135,7 +135,7 @@
                (%trace-emit-stages compiled *standard-output*))
              (when (compile-opts-flamegraph-path opts)
                (%write-flamegraph-svg (compile-opts-flamegraph-path opts)
-                                      (cl-cc/vm::vm-profile-samples vm-state)))
+                                      (cl-cc/vm:vm-get-profile-samples vm-state)))
              (format t "~S~%" result)
              (uiop:quit 0))))))))
 

@@ -181,12 +181,12 @@
          (result (allocate-registers instructions *x86-64-target*)))
     (assert-true (cl-cc/regalloc::interval-crosses-call-p r0-int))
     (assert-true (member (regalloc-lookup result :r0)
-                         (cl-cc/mir:target-callee-saved *x86-64-target*)
+                         (cl-cc/target:target-callee-saved *x86-64-target*)
                          :test #'eq))))
 
 (deftest regalloc-spill-pressure-exceeds-pool-causes-spills
   "When more vregs than physical registers exist, at least some are spilled."
-  (let* ((cc (cl-cc/mir:make-target-desc
+  (let* ((cc (cl-cc/target:make-target-desc
               :name :x86-64
               :gpr-names #(:rdi :rsi :r11)
               :arg-regs '(:rdi :rsi)

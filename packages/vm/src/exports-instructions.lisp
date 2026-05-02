@@ -167,4 +167,5 @@
    define-vm-binary-instruction
    define-vm-char-comparison
    rotate-right
-   bswap))
+   bswap
+   vm-intern-pkg))

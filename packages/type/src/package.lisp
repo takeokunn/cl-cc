@@ -104,6 +104,8 @@
 
    ;; ─── Error sentinel / unknown ────────────────────────────────────────
    #:type-error   #:type-error-p   #:make-type-error  #:type-error-message
+   #:type-unknown-p
+   #:+type-unknown+
 
    ;; ─── Type scheme ─────────────────────────────────────────────────────
    #:type-scheme   #:type-scheme-p
@@ -183,6 +185,7 @@
    #:collect-constraints  #:solve-constraints
 
    ;; ─── Inference engine ────────────────────────────────────────────────
+   #:narrow-union-type  #:extract-type-guard
    #:infer  #:infer-with-env
    #:infer-binop  #:infer-if  #:infer-let  #:infer-lambda
    #:infer-call   #:infer-progn  #:infer-args

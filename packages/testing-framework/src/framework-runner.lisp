@@ -41,13 +41,13 @@
 ;;; defmacro side-effects inside one test do not bleed into the next.
 
 (defmacro %with-isolated-macro-environment (&body body)
-  `(let ((cl-cc/expand::*macro-environment*      (%copy-macro-environment))
-         (cl-cc/expand::*symbol-macro-table*
-           (%copy-hash-table-shallow cl-cc/expand::*symbol-macro-table*))
-         (cl-cc/expand::*compiler-macro-table*
-           (%copy-hash-table-shallow cl-cc/expand::*compiler-macro-table*))
-         (cl-cc/expand::*macroexpand-step-cache*  (make-hash-table :test #'eq :weakness :key))
-         (cl-cc/expand::*macroexpand-all-cache*   (make-hash-table :test #'eq :weakness :key)))
+  `(let ((cl-cc/expand:*macro-environment*      (%copy-macro-environment))
+         (cl-cc/expand:*symbol-macro-table*
+           (%copy-hash-table-shallow cl-cc/expand:*symbol-macro-table*))
+         (cl-cc/expand:*compiler-macro-table*
+           (%copy-hash-table-shallow cl-cc/expand:*compiler-macro-table*))
+         (cl-cc/expand:*macroexpand-step-cache*  (make-hash-table :test #'eq :weakness :key))
+         (cl-cc/expand:*macroexpand-all-cache*   (make-hash-table :test #'eq :weakness :key)))
      ,@body))
 
 (defvar *test-runner-mode* :sequential

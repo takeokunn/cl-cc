@@ -16,7 +16,7 @@
   "emit-vm-bswap emits a MOV followed by BSWAP r32."
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
-                  (cl-cc/emit::emit-vm-bswap (cl-cc::make-vm-bswap :dst :R0 :src :R1) s)))))
+                  (cl-cc/codegen::emit-vm-bswap (cl-cc::make-vm-bswap :dst :R0 :src :R1) s)))))
     (assert-= 5 (length bytes))
     (assert-= #x48 (first bytes))
     (assert-= #x89 (second bytes))
@@ -28,7 +28,7 @@
   "emit-vm-add lowers to MOV dst,lhs before ADD dst,rhs to satisfy x86 two-address form."
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
-                  (cl-cc/emit::emit-vm-add
+                  (cl-cc/codegen::emit-vm-add
                    (cl-cc::make-vm-add :dst :R0 :lhs :R1 :rhs :R2) s)))))
     (assert-= 6 (length bytes))
     ;; MOV rax,rcx / ADD rax,rdx
@@ -43,7 +43,7 @@
   "emit-vm-select uses MOV + TEST + CMOVNE branchless lowering."
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
-                  (cl-cc/emit::emit-vm-select
+                  (cl-cc/codegen::emit-vm-select
                    (cl-cc::make-vm-select :dst :R0 :cond-reg :R1 :then-reg :R2 :else-reg :R3)
                    s)))))
     (assert-= 10 (length bytes))
@@ -59,7 +59,7 @@
   "emit-vm-jump-zero-inst emits TEST immediately followed by JE rel32."
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
-                  (cl-cc/emit::emit-vm-jump-zero-inst
+                  (cl-cc/codegen::emit-vm-jump-zero-inst
                    (cl-cc::make-vm-jump-zero :reg :R1 :label "L1")
                    s 0 (let ((ht (make-hash-table :test #'equal)))
                          (setf (gethash "L1" ht) 9)
@@ -74,7 +74,7 @@
   "emit-vm-logcount emits POPCNT with the expected opcode sequence."
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
-                  (cl-cc/emit::emit-vm-logcount
+                  (cl-cc/codegen::emit-vm-logcount
                    (cl-cc::make-vm-logcount :dst :R0 :src :R1) s)))))
     (assert-= 5 (length bytes))
     (assert-= #xF3 (nth 0 bytes))
@@ -86,7 +86,7 @@
   "emit-vm-integer-length emits xor/test/je/bsr/add sequence."
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
-                  (cl-cc/emit::emit-vm-integer-length
+                  (cl-cc/codegen::emit-vm-integer-length
                    (cl-cc::make-vm-integer-length :dst :R0 :src :R1) s)))))
     (assert-= 16 (length bytes))
     ;; xor rax,rax / test rcx,rcx / je rel8 / bsr rax,rcx / add rax,1
@@ -103,7 +103,7 @@
   "vm-call emits CALL r64 (#xFF /2) followed by MOV dst←rax: 6 bytes total."
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
-                  (cl-cc/emit::emit-vm-call-like-inst
+                  (cl-cc/codegen::emit-vm-call-like-inst
                    (cl-cc::make-vm-call :dst :R0 :func :R1 :args nil) s)))))
     (assert-= 6 (length bytes))
     (assert-= #x48 (nth 0 bytes))
@@ -117,7 +117,7 @@
   "vm-tail-call emits JMP r64 (#xFF /4) only: 3 bytes, no move-to-result register."
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
-                  (cl-cc/emit::emit-vm-tail-call-inst
+                  (cl-cc/codegen::emit-vm-tail-call-inst
                    (cl-cc::make-vm-tail-call :dst :R0 :func :R1 :args nil) s)))))
     (assert-= 3 (length bytes))
     (assert-= #x48 (nth 0 bytes))

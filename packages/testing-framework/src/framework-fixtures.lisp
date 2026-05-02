@@ -27,9 +27,9 @@
 
 (defun %copy-macro-environment ()
   "Return a fresh macro-env instance populated from the current global macro table."
-  (let* ((copy (make-instance 'cl-cc/expand::macro-env))
-         (src  (cl-cc/expand::macro-env-table cl-cc/expand::*macro-environment*))
-         (dst  (cl-cc/expand::macro-env-table copy)))
+  (let* ((copy (make-instance 'cl-cc/expand:macro-env))
+         (src  (cl-cc/expand:macro-env-table cl-cc/expand:*macro-environment*))
+         (dst  (cl-cc/expand:macro-env-table copy)))
     (maphash (lambda (k v) (setf (gethash k dst) v)) src)
     copy))
 
@@ -55,13 +55,13 @@
 ;;; ------------------------------------------------------------
 
 (defbefore :each (cl-cc-suite)
-  (cl-cc/vm::vm-clear-hash-cons-table))
+  (cl-cc/vm:vm-clear-hash-cons-table))
 
 (defbefore :each (cl-cc-suite)
-  (when (boundp 'cl-cc/expand::*macroexpand-step-cache*)
-    (clrhash cl-cc/expand::*macroexpand-step-cache*))
-  (when (boundp 'cl-cc/expand::*macroexpand-all-cache*)
-    (clrhash cl-cc/expand::*macroexpand-all-cache*)))
+  (when (boundp 'cl-cc/expand:*macroexpand-step-cache*)
+    (clrhash cl-cc/expand:*macroexpand-step-cache*))
+  (when (boundp 'cl-cc/expand:*macroexpand-all-cache*)
+    (clrhash cl-cc/expand:*macroexpand-all-cache*)))
 
 ;;; ------------------------------------------------------------
 ;;; Test fixtures
@@ -86,11 +86,11 @@ surface."
 
 (defun %snapshot-prolog-db (&key (copy-value #'identity))
   "Snapshot the Prolog rule database using COPY-VALUE for each rule bucket."
-  (%snapshot-hash-table cl-cc/prolog::*prolog-rules* :copy-value copy-value))
+  (%snapshot-hash-table cl-cc/prolog:*prolog-rules* :copy-value copy-value))
 
 (defun %restore-prolog-db (snapshot &key (copy-value #'identity))
   "Restore the Prolog rule database from SNAPSHOT using COPY-VALUE per bucket."
-  (%restore-hash-table cl-cc/prolog::*prolog-rules* snapshot :copy-value copy-value))
+  (%restore-hash-table cl-cc/prolog:*prolog-rules* snapshot :copy-value copy-value))
 
 (defmacro with-fresh-prolog (&body body)
   "Run BODY with an empty Prolog rule database and restore the prior state."

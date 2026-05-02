@@ -12,8 +12,8 @@
 
 (deftest-each target-instance-returns-correct-class
   "target-instance maps each target keyword to its backend class."
-  :cases (("x86-64"  :x86_64  'cl-cc/emit::x86-64-target)
-          ("aarch64" :aarch64 'cl-cc/emit::aarch64-target))
+  :cases (("x86-64"  :x86_64  'cl-cc/codegen::x86-64-target)
+          ("aarch64" :aarch64 'cl-cc/codegen::aarch64-target))
   (target expected-class)
   (assert-true (typep (cl-cc/compile::target-instance target) expected-class)))
 

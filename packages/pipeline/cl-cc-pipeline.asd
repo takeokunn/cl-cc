@@ -12,10 +12,9 @@
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc-bootstrap :cl-cc-ast :cl-cc-prolog :cl-cc-parse :cl-cc-type
+  :depends-on (:cl-cc-bootstrap :cl-cc-ast :cl-cc-prolog :cl-cc-parse :cl-cc-php :cl-cc-type
                :cl-cc-optimize :cl-cc-vm :cl-cc-expand :cl-cc-emit
-               :cl-cc-cps :cl-cc-codegen :cl-cc-stdlib :cl-cc-target
-               :cl-cc-mir :cl-cc-binary :cl-cc-compile)
+               :cl-cc-stdlib :cl-cc-binary :cl-cc-compile)
   :pathname "src"
   :serial t
   :components

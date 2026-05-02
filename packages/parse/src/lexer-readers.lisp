@@ -110,14 +110,14 @@
 (defun %lex-find-package (name)
   "Resolve package NAME through the runtime package layer when available.
 Returns NIL when the runtime package layer is unavailable."
-  (when cl-cc/bootstrap::*runtime-find-package-fn*
-    (funcall cl-cc/bootstrap::*runtime-find-package-fn* name)))
+  (when cl-cc/bootstrap:*runtime-find-package-fn*
+    (funcall cl-cc/bootstrap:*runtime-find-package-fn* name)))
 
 (defun %lex-runtime-intern (name package)
   "Intern NAME through the runtime package layer when available.
 Falls back to MAKE-SYMBOL semantics when runtime intern is unavailable." 
-  (if cl-cc/bootstrap::*runtime-intern-fn*
-      (funcall cl-cc/bootstrap::*runtime-intern-fn* name package)
+  (if cl-cc/bootstrap:*runtime-intern-fn*
+      (funcall cl-cc/bootstrap:*runtime-intern-fn* name package)
       (make-symbol (string name))))
 
 (defun lex-read-symbol-or-number (state)

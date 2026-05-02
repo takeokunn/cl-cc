@@ -15,11 +15,11 @@
 (defun %aarch64-emit (target inst)
   "Emit INST to a string using TARGET and return the result."
   (let ((s (make-string-output-stream)))
-    (cl-cc/emit::emit-instruction target inst s)
+    (cl-cc/codegen::emit-instruction target inst s)
     (get-output-stream-string s)))
 
 (defun %make-aarch64-target ()
-  (make-instance 'cl-cc/emit::aarch64-target))
+  (make-instance 'cl-cc/codegen::aarch64-target))
 
 ;;; ─── target-register ──────────────────────────────────────────────────────────
 
@@ -35,12 +35,12 @@
           ("r7" :r7 "x7"))
   (vreg expected)
   (let ((tgt (%make-aarch64-target)))
-    (assert-equal expected (cl-cc/emit::target-register tgt vreg))))
+    (assert-equal expected (cl-cc/codegen::target-register tgt vreg))))
 
 (deftest aarch64-target-register-overflow
   "AArch64 target-register signals error for :R8+ (pool exhausted)."
   (let ((tgt (%make-aarch64-target)))
-    (assert-signals error (cl-cc/emit::target-register tgt :r8))))
+    (assert-signals error (cl-cc/codegen::target-register tgt :r8))))
 
 ;;; ─── emit-instruction methods ──────────────────────────────────────────────────
 

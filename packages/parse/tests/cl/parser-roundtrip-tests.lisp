@@ -196,13 +196,13 @@
   (let ((slot (cl-cc::make-ast-slot-def
                :name 'value :initarg nil :initform nil
                :reader nil :writer nil :accessor nil)))
-    (assert-eq 'value (cl-cc::slot-def-to-sexp slot))))
+    (assert-eq 'value (cl-cc/ast:slot-def-to-sexp slot))))
 
 (deftest slot-def-to-sexp-with-initarg-includes-plist
   "slot-def-to-sexp: a slot with :initarg returns a plist including :initarg."
   (let* ((slot (cl-cc::make-ast-slot-def
                 :name 'count :initarg :count :initform nil
                 :reader nil :writer nil :accessor nil))
-         (result (cl-cc::slot-def-to-sexp slot)))
+         (result (cl-cc/ast:slot-def-to-sexp slot)))
     (assert-eq 'count (car result))
     (assert-true (member :initarg result))))

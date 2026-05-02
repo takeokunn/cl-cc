@@ -264,8 +264,8 @@ These symbols live in :cl-cc/bootstrap so both parse and expand share them."
 
 ;;; Wire expand functions into VM hooks for runtime macroexpand support
 (defun %vm-install-macroexpand-hooks-if-available ()
-  (when cl-cc/bootstrap::*vm-macroexpand-hook-installer*
-    (funcall cl-cc/bootstrap::*vm-macroexpand-hook-installer* #'our-macroexpand-1 #'our-macroexpand)))
+  (when cl-cc/bootstrap:*vm-macroexpand-hook-installer*
+    (funcall cl-cc/bootstrap:*vm-macroexpand-hook-installer* #'our-macroexpand-1 #'our-macroexpand)))
 
 #-cl-cc-self-hosting
 (eval-when (:load-toplevel :execute)

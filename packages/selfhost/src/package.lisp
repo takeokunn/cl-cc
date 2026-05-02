@@ -1,7 +1,6 @@
 ;;;; packages/selfhost/src/package.lisp — feature package for cl-cc/selfhost
 ;;;;
-;;;; Phase 4 strict-packaging: pipeline-selfhost.lisp moved here from
-;;;; packages/pipeline/src/.
+;;;; Self-hosting subsystem: our-eval meta-circular evaluator, stdlib cache warm-up.
 ;;;;
 ;;;; our-eval is pre-interned in :cl-cc/bootstrap so downstream packages
 ;;;; (:cl-cc/expand, :cl-cc/compile, etc.) can reference it without a
@@ -21,4 +20,8 @@
         :cl-cc/vm
         :cl-cc/stdlib
         :cl-cc/pipeline)
-  (:export))
+  (:export
+   ;; our-eval is pre-interned in :cl-cc/bootstrap; the defun here sets the function binding.
+   #:our-eval
+   ;; warm-stdlib-cache initializes the standard library VM snapshot.
+   #:warm-stdlib-cache))

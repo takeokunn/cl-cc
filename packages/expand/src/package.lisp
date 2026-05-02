@@ -4,7 +4,6 @@
 ;;;; macroexpansion (our-macroexpand-1/-all), lambda-list parsing and
 ;;;; destructuring, and the LOOP/DO/CASE/TYPECASE control-flow macros.
 ;;;;
-;;;; Phase 3c: Real ASDF system (owns all source files).
 ;;;; Uses cl-cc/bootstrap so source files can reference our-eval unqualified.
 ;;;; cl-cc/type is accessed qualified (cl-cc/type:...) so not in :use.
 
@@ -31,6 +30,10 @@
    #:lookup-macro
    #:*macro-environment*
    #:*macro-eval-fn*
+   #:*symbol-macro-table*
+   #:*compiler-macro-table*
+   #:*macroexpand-step-cache*
+   #:*macroexpand-all-cache*
 
    ;; --- macro-lambda-list.lisp --- lambda-list helpers ----------------
    #:parse-lambda-list
@@ -54,6 +57,7 @@
    #:register-function-type
    #:lambda-list-has-typed-p
    #:strip-typed-params
+   #:lambda-list-info-environment
 
    ;; --- macros used via run-string (need umbrella re-export) ---------
    #:defun/c

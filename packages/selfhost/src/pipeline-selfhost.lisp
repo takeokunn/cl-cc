@@ -70,7 +70,7 @@ access to all previously registered functions (essential for macro
 expansion during self-host loading)."
   (let* ((result (compile-expression form :target :vm))
          (program (compilation-result-program result)))
-    (run-compiled program :state cl-cc/compile::*repl-vm-state*)))
+    (run-compiled program :state cl-cc/compile:*repl-vm-state*)))
 
 ;;; ─── Self-Hosting Bootstrap ──────────────────────────────────────────────
 ;;;
@@ -86,17 +86,17 @@ expansion during self-host loading)."
 
 (eval-when (:load-toplevel :execute)
   (%register-host-bridge-entries
-   `((cl-cc/expand::parse-lambda-list . ,#'cl-cc/expand::parse-lambda-list)
-     (cl-cc/expand::destructure-lambda-list . ,#'cl-cc/expand::destructure-lambda-list)
-     (cl-cc/expand::generate-lambda-bindings . ,#'cl-cc/expand::generate-lambda-bindings)
-     (cl-cc/expand::lambda-list-info-environment . ,#'cl-cc/expand::lambda-list-info-environment))))
+   `((cl-cc/expand:parse-lambda-list . ,#'cl-cc/expand:parse-lambda-list)
+     (cl-cc/expand:destructure-lambda-list . ,#'cl-cc/expand:destructure-lambda-list)
+     (cl-cc/expand:generate-lambda-bindings . ,#'cl-cc/expand:generate-lambda-bindings)
+     (cl-cc/expand:lambda-list-info-environment . ,#'cl-cc/expand:lambda-list-info-environment))))
 
 (setf *macro-eval-fn* #'our-eval)
 
 ;;; Wire compile functions into VM hooks for runtime EVAL/compile support
 (defun %vm-install-eval-hooks-if-available ()
-  (when cl-cc/bootstrap::*vm-eval-hook-installer*
-    (funcall cl-cc/bootstrap::*vm-eval-hook-installer* #'our-eval #'compile-string)))
+  (when cl-cc/bootstrap:*vm-eval-hook-installer*
+    (funcall cl-cc/bootstrap:*vm-eval-hook-installer* #'our-eval #'compile-string)))
 
 (eval-when (:load-toplevel :execute)
   (%vm-install-eval-hooks-if-available))
@@ -114,15 +114,15 @@ expansion during self-host loading)."
   ;; NOTE: register-macro is intentionally excluded — it stores VM closures in
   ;; macro-env, causing TYPE-ERROR when host CL funcalls them. See vm-bridge.lisp.
   (%register-host-bridge-entries
-   `((cl-cc/compile::run-string . ,#'cl-cc/compile::run-string)
-     (cl-cc/compile::compile-expression . ,#'cl-cc/compile::compile-expression)
-     (cl-cc/compile::compile-string . ,#'cl-cc/compile::compile-string)
-     (cl-cc/bootstrap::our-eval . ,#'cl-cc/bootstrap::our-eval)
-     (cl-cc/parse::parse-all-forms . ,#'cl-cc/parse::parse-all-forms)
-     (cl-cc/expand::parse-lambda-list . ,#'cl-cc/expand::parse-lambda-list)
-     (cl-cc/expand::destructure-lambda-list . ,#'cl-cc/expand::destructure-lambda-list)
-     (cl-cc/expand::generate-lambda-bindings . ,#'cl-cc/expand::generate-lambda-bindings)
-     (cl-cc/expand::lambda-list-info-environment . ,#'cl-cc/expand::lambda-list-info-environment)
+   `((cl-cc/compile:run-string . ,#'cl-cc/compile:run-string)
+     (cl-cc/compile:compile-expression . ,#'cl-cc/compile:compile-expression)
+     (cl-cc/compile:compile-string . ,#'cl-cc/compile:compile-string)
+     (cl-cc/bootstrap:our-eval . ,#'cl-cc/bootstrap:our-eval)
+     (cl-cc/parse:parse-all-forms . ,#'cl-cc/parse:parse-all-forms)
+     (cl-cc/expand:parse-lambda-list . ,#'cl-cc/expand:parse-lambda-list)
+     (cl-cc/expand:destructure-lambda-list . ,#'cl-cc/expand:destructure-lambda-list)
+     (cl-cc/expand:generate-lambda-bindings . ,#'cl-cc/expand:generate-lambda-bindings)
+     (cl-cc/expand:lambda-list-info-environment . ,#'cl-cc/expand:lambda-list-info-environment)
      ;; macros-package-system.lisp interns rt-* symbols in :cl-cc/expand; register
      ;; them here (after :cl-cc/expand loads) so the VM bridge can resolve them.
      (cl-cc/expand::rt-find-package . ,#'cl-cc/runtime:rt-find-package)

@@ -24,10 +24,10 @@
 
 (import '(cl-cc:our-eval))
 
-(import '(cl-cc/parse:ast-to-sexp
+(import '(cl-cc/ast:ast-to-sexp
           cl-cc/parse:lower-sexp-to-ast
           cl-cc/parse:parse-slot-spec
-          cl-cc/parse:slot-def-to-sexp
+          cl-cc/ast:slot-def-to-sexp
           cl-cc/parse:*grammar-rules*
           cl-cc/parse:def-grammar-rule
           cl-cc/parse:query-grammar
@@ -35,5 +35,5 @@
           cl-cc/parse:parse-combinator
           cl-cc/parse:parse-ok-p
           cl-cc/parse:parse-with-grammar
-          cl-cc/parse:tokenize-php-source
-          cl-cc/parse:parse-php-source))
+          cl-cc/php:tokenize-php-source
+          cl-cc/php:parse-php-source))

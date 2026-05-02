@@ -199,7 +199,7 @@ both NIL and numeric zero are false."
           (lambda (inst) (remove nil (list (vm-src inst) (vm-char inst)))))
     (setf (gethash 'vm-intern-symbol ht)
           (lambda (inst)
-            (remove nil (list (vm-src inst) (cl-cc/vm::vm-intern-pkg inst)))))
+            (remove nil (list (vm-src inst) (cl-cc/vm:vm-intern-pkg inst)))))
     (setf (gethash 'vm-make-array ht)
           (lambda (inst) (remove nil (list (vm-size-reg inst) (vm-initial-element inst)
                                            (vm-fill-pointer inst) (vm-adjustable inst)))))

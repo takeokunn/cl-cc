@@ -1,11 +1,7 @@
 ;;;; packages/repl/src/package.lisp — feature package for cl-cc/repl
 ;;;;
-;;;; Phase 4 strict-packaging: pipeline-repl-*.lisp files moved here from
-;;;; packages/pipeline/src/.
-;;;;
-;;;; Symbols pre-interned upstream (run-string-repl, reset-repl-state,
-;;;; *repl-vm-state*, our-load in :cl-cc/compile) are shared via :use —
-;;;; defining them here updates the same symbol object.
+;;;; REPL subsystem: interactive evaluation loop, REPL state management,
+;;;; and host-definition bridging.
 
 (defpackage :cl-cc/repl
   (:use :cl

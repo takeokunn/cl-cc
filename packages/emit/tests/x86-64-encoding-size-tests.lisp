@@ -14,7 +14,7 @@
   :cases (("vm-label"   (cl-cc::make-vm-label :name "test"))
           ("unknown"    (list :not-a-real-inst)))
   (inst)
-  (assert-equal 0 (cl-cc/emit::instruction-size inst)))
+  (assert-equal 0 (cl-cc/codegen::instruction-size inst)))
 
 ;;; ─── build-label-offsets ────────────────────────────────────────────────
 
@@ -32,17 +32,17 @@
                  (cl-cc::make-vm-label :name "L"))
            0 "L" 6))
   (insts prologue label expected-offset)
-  (assert-equal expected-offset (gethash label (cl-cc/emit::build-label-offsets insts prologue))))
+  (assert-equal expected-offset (gethash label (cl-cc/codegen::build-label-offsets insts prologue))))
 
 (deftest x86-build-label-offsets-multi
   "Empty list → 0 table entries; multiple labels track correct byte positions."
-  (assert-equal 0 (hash-table-count (cl-cc/emit::build-label-offsets nil 6)))
+  (assert-equal 0 (hash-table-count (cl-cc/codegen::build-label-offsets nil 6)))
   (let* ((insts (list (cl-cc::make-vm-label :name "L0")
                       (cl-cc::make-vm-move :dst :R0 :src :R1)    ; 3 bytes
                       (cl-cc::make-vm-label :name "L1")
                       (cl-cc::make-vm-add :dst :R0 :lhs :R1 :rhs :R2) ; 6 bytes
                       (cl-cc::make-vm-label :name "L2")))
-         (offsets (cl-cc/emit::build-label-offsets insts 0)))
+         (offsets (cl-cc/codegen::build-label-offsets insts 0)))
     (assert-equal 0 (gethash "L0" offsets))
     (assert-equal 3 (gethash "L1" offsets))
     (assert-equal 9 (gethash "L2" offsets))))
@@ -51,41 +51,41 @@
 
 (deftest x86-emitter-table-integrity
   "Emitter table has >= 40 entries and every value is a function."
-  (assert-true (>= (hash-table-count cl-cc/emit::*x86-64-emitter-table*) 40))
+  (assert-true (>= (hash-table-count cl-cc/codegen::*x86-64-emitter-table*) 40))
   (let ((all-ok t))
     (maphash (lambda (key fn)
                (declare (ignore key))
                (unless (functionp fn)
                  (setf all-ok nil)))
-             cl-cc/emit::*x86-64-emitter-table*)
+             cl-cc/codegen::*x86-64-emitter-table*)
     (assert-true all-ok)))
 
 ;;; ─── High-register encoding (REX.R / REX.B) and memory displacement ────
 
 (deftest-each x86-mov-mem-displacement-sizes
   "Memory load/store displacement: zero-disp uses mod=00 (3 bytes); byte-disp uses mod=01 (4 bytes)."
-  :cases (("rm64-no-disp"   (lambda (s) (cl-cc/emit::emit-mov-rm64 cl-cc/emit::+rax+ cl-cc/emit::+rcx+  0 s)) 3)
-          ("rm64-disp8"     (lambda (s) (cl-cc/emit::emit-mov-rm64 cl-cc/emit::+rax+ cl-cc/emit::+rcx+  8 s)) 4)
-          ("mr64-disp8-16"  (lambda (s) (cl-cc/emit::emit-mov-mr64 cl-cc/emit::+rcx+ 16 cl-cc/emit::+rax+ s)) 4))
+  :cases (("rm64-no-disp"   (lambda (s) (cl-cc/codegen::emit-mov-rm64 cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+  0 s)) 3)
+          ("rm64-disp8"     (lambda (s) (cl-cc/codegen::emit-mov-rm64 cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+  8 s)) 4)
+          ("mr64-disp8-16"  (lambda (s) (cl-cc/codegen::emit-mov-mr64 cl-cc/codegen::+rcx+ 16 cl-cc/codegen::+rax+ s)) 4))
   (emit-fn expected-len)
   (assert-equal expected-len (length (%x86-collect-bytes emit-fn))))
 
 (deftest-each x86-mov-exact-bytes
   "MOV load/store instructions (indexed, RSP-based SIB) produce exact byte sequences."
   :cases (("rm64-indexed-disp8"
-           (lambda (s) (cl-cc/emit::emit-mov-rm64-indexed cl-cc/emit::+rax+ cl-cc/emit::+rbx+ cl-cc/emit::+rcx+ 8 16 s))
+           (lambda (s) (cl-cc/codegen::emit-mov-rm64-indexed cl-cc/codegen::+rax+ cl-cc/codegen::+rbx+ cl-cc/codegen::+rcx+ 8 16 s))
            '(#x48 #x8B #x44 #xCB #x10))
           ("mr64-indexed-disp8"
-           (lambda (s) (cl-cc/emit::emit-mov-mr64-indexed cl-cc/emit::+rbx+ cl-cc/emit::+rcx+ 4 8 cl-cc/emit::+rax+ s))
+           (lambda (s) (cl-cc/codegen::emit-mov-mr64-indexed cl-cc/codegen::+rbx+ cl-cc/codegen::+rcx+ 4 8 cl-cc/codegen::+rax+ s))
            '(#x48 #x89 #x44 #x8B #x08))
           ("rm64-indexed-scale1-zero"
-           (lambda (s) (cl-cc/emit::emit-mov-rm64-indexed cl-cc/emit::+rax+ cl-cc/emit::+rbx+ cl-cc/emit::+rcx+ 1 0 s))
+           (lambda (s) (cl-cc/codegen::emit-mov-rm64-indexed cl-cc/codegen::+rax+ cl-cc/codegen::+rbx+ cl-cc/codegen::+rcx+ 1 0 s))
            '(#x48 #x8B #x04 #x0B))
           ("load-rsp-disp8"
-           (lambda (s) (cl-cc/emit::emit-mov-rm64 cl-cc/emit::+rax+ cl-cc/emit::+rsp+ -8 s))
+           (lambda (s) (cl-cc/codegen::emit-mov-rm64 cl-cc/codegen::+rax+ cl-cc/codegen::+rsp+ -8 s))
            '(#x48 #x8B #x44 #x24 #xF8))
           ("store-rsp-disp8"
-           (lambda (s) (cl-cc/emit::emit-mov-mr64 cl-cc/emit::+rsp+ -16 cl-cc/emit::+rax+ s))
+           (lambda (s) (cl-cc/codegen::emit-mov-mr64 cl-cc/codegen::+rsp+ -16 cl-cc/codegen::+rax+ s))
            '(#x48 #x89 #x44 #x24 #xF0)))
   (emit-fn expected-bytes)
   (assert-equal expected-bytes (%x86-collect-bytes emit-fn)))
@@ -94,12 +94,12 @@
 
 (deftest-each x86-mov-rr64-modrm-encoding
   "emit-mov-rr64: REX.W=#x48, opcode=#x89, ModR/M byte varies by register pair."
-  :cases (("rax-rcx" cl-cc/emit::+rax+ cl-cc/emit::+rcx+ #xC8)
-          ("rax-rbx" cl-cc/emit::+rax+ cl-cc/emit::+rbx+ #xD8)
-          ("rax-rax" cl-cc/emit::+rax+ cl-cc/emit::+rax+ #xC0))
+  :cases (("rax-rcx" cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ #xC8)
+          ("rax-rbx" cl-cc/codegen::+rax+ cl-cc/codegen::+rbx+ #xD8)
+          ("rax-rax" cl-cc/codegen::+rax+ cl-cc/codegen::+rax+ #xC0))
   (dst src modrm)
   (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc/emit::emit-mov-rr64 dst src s)))))
+                (lambda (s) (cl-cc/codegen::emit-mov-rr64 dst src s)))))
     (assert-equal 3 (length bytes))
     (assert-equal #x48 (first bytes))
     (assert-equal #x89 (second bytes))
@@ -109,12 +109,12 @@
 
 (deftest-each x86-push-pop-single-byte-opcodes
   "PUSH/POP registers all emit single-byte opcodes."
-  :cases (("push-rax" cl-cc/emit::+rax+ #'cl-cc/emit::emit-push-r64 #x50)
-          ("push-rcx" cl-cc/emit::+rcx+ #'cl-cc/emit::emit-push-r64 #x51)
-          ("pop-rax"  cl-cc/emit::+rax+ #'cl-cc/emit::emit-pop-r64  #x58)
-          ("push-rbx" cl-cc/emit::+rbx+ #'cl-cc/emit::emit-push-r64 #x53)
-          ("pop-rcx"  cl-cc/emit::+rcx+ #'cl-cc/emit::emit-pop-r64  #x59)
-          ("pop-rdx"  cl-cc/emit::+rdx+ #'cl-cc/emit::emit-pop-r64  #x5A))
+  :cases (("push-rax" cl-cc/codegen::+rax+ #'cl-cc/codegen::emit-push-r64 #x50)
+          ("push-rcx" cl-cc/codegen::+rcx+ #'cl-cc/codegen::emit-push-r64 #x51)
+          ("pop-rax"  cl-cc/codegen::+rax+ #'cl-cc/codegen::emit-pop-r64  #x58)
+          ("push-rbx" cl-cc/codegen::+rbx+ #'cl-cc/codegen::emit-push-r64 #x53)
+          ("pop-rcx"  cl-cc/codegen::+rcx+ #'cl-cc/codegen::emit-pop-r64  #x59)
+          ("pop-rdx"  cl-cc/codegen::+rdx+ #'cl-cc/codegen::emit-pop-r64  #x5A))
   (reg emit-fn opcode)
   (let ((bytes (%x86-collect-bytes (lambda (s) (funcall emit-fn reg s)))))
     (assert-equal 1 (length bytes))
@@ -133,7 +133,7 @@
   (opcode2)
   ;; emit-setcc with RAX (reg 0, no REX needed): emits 0F <opcode2> ModRM
   (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc/emit::emit-setcc opcode2 cl-cc/emit::+rax+ s)))))
+                (lambda (s) (cl-cc/codegen::emit-setcc opcode2 cl-cc/codegen::+rax+ s)))))
     (assert-equal 3 (length bytes))
     (assert-equal #x0F (first bytes))
     (assert-equal opcode2 (second bytes))))
@@ -151,15 +151,15 @@
           ("R6" :R6 8)    ; R8
           ("R7" :R7 9))   ; R9
   (vm-reg expected-code)
-  (assert-equal expected-code (cl-cc/emit::vm-reg-to-x86 vm-reg)))
+  (assert-equal expected-code (cl-cc/codegen::vm-reg-to-x86 vm-reg)))
 
 ;;; ─── *phys-reg-to-x86-code* completeness ────────────────────────────────
 
 (deftest x86-phys-reg-map
   "Physical register alist: :rax=0, :r15=15, covers 14 registers."
-  (assert-equal 0  (cdr (assoc :rax cl-cc/emit::*phys-reg-to-x86-code*)))
-  (assert-equal 15 (cdr (assoc :r15 cl-cc/emit::*phys-reg-to-x86-code*)))
-  (assert-equal 14 (length cl-cc/emit::*phys-reg-to-x86-code*)))
+  (assert-equal 0  (cdr (assoc :rax cl-cc/codegen::*phys-reg-to-x86-code*)))
+  (assert-equal 15 (cdr (assoc :r15 cl-cc/codegen::*phys-reg-to-x86-code*)))
+  (assert-equal 14 (length cl-cc/codegen::*phys-reg-to-x86-code*)))
 
 ;;; ─── emit-vm-const and emit-vm-move sizes ───────────────────────────────
 
@@ -169,7 +169,7 @@
           ("t"   t   1))
   (val expected-byte)
   (let ((bytes (%x86-collect-bytes
-                (lambda (s) (cl-cc/emit::emit-vm-const
+                (lambda (s) (cl-cc/codegen::emit-vm-const
                              (cl-cc::make-vm-const :dst :R0 :value val) s)))))
     (assert-equal 10 (length bytes))
     (assert-equal expected-byte (third bytes))
@@ -177,13 +177,13 @@
 
 (deftest-each x86-vm-move-halt-elision
   "No-op moves (same src/dst or result already in RAX) emit 0 bytes; cross-register emit 3 bytes with opcode #x89."
-  :cases (("move-cross" (lambda (s) (cl-cc/emit::emit-vm-move
+  :cases (("move-cross" (lambda (s) (cl-cc/codegen::emit-vm-move
                                      (cl-cc::make-vm-move :dst :R0 :src :R1) s))
-                        (lambda (s) (cl-cc/emit::emit-vm-move
+                        (lambda (s) (cl-cc/codegen::emit-vm-move
                                      (cl-cc::make-vm-move :dst :R0 :src :R0) s)))
-          ("halt"       (lambda (s) (cl-cc/emit::emit-vm-halt-inst
+          ("halt"       (lambda (s) (cl-cc/codegen::emit-vm-halt-inst
                                      (cl-cc::make-vm-halt :reg :R1) s))
-                        (lambda (s) (cl-cc/emit::emit-vm-halt-inst
+                        (lambda (s) (cl-cc/codegen::emit-vm-halt-inst
                                      (cl-cc::make-vm-halt :reg :R0) s))))
   (cross-emitter zero-emitter)
   (let ((cross-bytes (%x86-collect-bytes cross-emitter))
@@ -201,7 +201,7 @@
   (remainder-p)
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
-                  (cl-cc/emit::emit-idiv-sequence cl-cc/emit::+rcx+ cl-cc/emit::+rdx+ remainder-p s)))))
+                  (cl-cc/codegen::emit-idiv-sequence cl-cc/codegen::+rcx+ cl-cc/codegen::+rdx+ remainder-p s)))))
     (assert-equal 18 (length bytes))))
 
 ;;; ─── emit-vm-program prologue/epilogue ───────────────────────────────────
@@ -215,9 +215,9 @@ to be bound, which fails with NIL under raw invocation."
   (let* ((non-empty-insts (list (cl-cc::make-vm-halt :reg :R0)
                                 (cl-cc::make-vm-ret :reg :R0)))
          (full-prog (cl-cc/vm::make-vm-program :instructions non-empty-insts :result-register :R0))
-         (full-bytes (cl-cc/emit::compile-to-x86-64-bytes full-prog))
+         (full-bytes (cl-cc/codegen::compile-to-x86-64-bytes full-prog))
          (empty-prog (cl-cc/vm::make-vm-program :instructions nil :result-register :R0))
-         (empty-bytes (cl-cc/emit::compile-to-x86-64-bytes empty-prog)))
+         (empty-bytes (cl-cc/codegen::compile-to-x86-64-bytes empty-prog)))
     (assert-true (> (length full-bytes) 0))
     (assert-true (> (length empty-bytes) 0))))
 
@@ -232,7 +232,7 @@ to be bound, which fails with NIL under raw invocation."
                                           :spill-count 1
                                           :instructions (cl-cc/vm::vm-program-instructions prog)))
          (bytes (let ((cl-cc/regalloc::*current-regalloc* ra))
-                  (%x86-collect-bytes (lambda (s) (cl-cc/emit::emit-vm-program prog s))))))
+                  (%x86-collect-bytes (lambda (s) (cl-cc/codegen::emit-vm-program prog s))))))
     (assert-false (= #x55 (first bytes)))
     (assert-equal '(#x48 #x89 #x44 #x24 #xF8) (subseq bytes 0 5))
     (assert-equal '(#x48 #x8B #x5C #x24 #xF8) (subseq bytes 5 10))
@@ -256,4 +256,4 @@ to be bound, which fails with NIL under raw invocation."
           ("vm-logtest"  (cl-cc::make-vm-logtest  :dst :R0 :lhs :R1 :rhs :R2) 14)
           ("vm-logbitp"  (cl-cc::make-vm-logbitp  :dst :R0 :lhs :R1 :rhs :R2) 15))
   (inst expected)
-  (assert-equal expected (cl-cc/emit::instruction-size inst)))
+  (assert-equal expected (cl-cc/codegen::instruction-size inst)))

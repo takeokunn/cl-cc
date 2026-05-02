@@ -235,14 +235,14 @@
           cl-cc:integer-type cl-cc:boolean-type cl-cc:const cl-cc:binop cl-cc:cmp))
 
 (import '(cl-cc/type:type-var
-          cl-cc::vm2-state-values-buffer
-          cl-cc/optimize::opt-compute-heap-aliases
-          cl-cc/optimize::opt-interval-add
-          cl-cc/optimize::opt-interval-sub
-          cl-cc/optimize::opt-may-alias-by-type-p
-          cl-cc/optimize::opt-may-alias-p
-          cl-cc/optimize::opt-must-alias-p
-          cl-cc/optimize::opt-known-callee-labels
-          cl-cc/optimize::opt-pass-dominated-type-check-elim
+          cl-cc:vm2-state-values-buffer
+          cl-cc/optimize:opt-compute-heap-aliases
+          cl-cc/optimize:opt-interval-add
+          cl-cc/optimize:opt-interval-sub
+          cl-cc/optimize:opt-may-alias-by-type-p
+          cl-cc/optimize:opt-may-alias-p
+          cl-cc/optimize:opt-must-alias-p
+          cl-cc/optimize:opt-known-callee-labels
+          cl-cc/optimize:opt-pass-dominated-type-check-elim
           cl-cc/optimize:optimize-with-egraph)
         :cl-cc/test)

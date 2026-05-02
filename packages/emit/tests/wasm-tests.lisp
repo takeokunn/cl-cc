@@ -33,9 +33,9 @@
 (defun %direct-wasm-emit (inst)
   "Emit INST through the non-trampoline wasm target methods directly." 
   (let ((s (make-string-output-stream))
-        (target (make-instance 'cl-cc/emit::wasm-target
-                               :reg-map (cl-cc/emit::make-wasm-reg-map-for-function 0))))
-    (cl-cc/emit::emit-instruction target inst s)
+        (target (make-instance 'cl-cc/codegen::wasm-target
+                               :reg-map (cl-cc/codegen::make-wasm-reg-map-for-function 0))))
+    (cl-cc/codegen::emit-instruction target inst s)
     (get-output-stream-string s)))
 
 ;;; ──────────────────────────────────────────────────────────────────────────

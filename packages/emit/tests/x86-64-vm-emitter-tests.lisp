@@ -12,67 +12,67 @@
 
 (deftest-each x86-vm-emitter-byte-size
   "VM instruction emitters produce the documented exact byte count."
-  :cases (("vm-neg"      (lambda (s) (cl-cc/emit::emit-vm-neg
+  :cases (("vm-neg"      (lambda (s) (cl-cc/codegen::emit-vm-neg
                            (cl-cc::make-vm-neg :dst :R0 :src :R1) s))      6)
-          ("vm-not"      (lambda (s) (cl-cc/emit::emit-vm-not
+          ("vm-not"      (lambda (s) (cl-cc/codegen::emit-vm-not
                            (cl-cc::make-vm-not :dst :R0 :src :R1) s))     10)
-          ("vm-lognot"   (lambda (s) (cl-cc/emit::emit-vm-lognot
+          ("vm-lognot"   (lambda (s) (cl-cc/codegen::emit-vm-lognot
                            (cl-cc::make-vm-lognot :dst :R0 :src :R1) s))   6)
-          ("vm-inc"      (lambda (s) (cl-cc/emit::emit-vm-inc
+          ("vm-inc"      (lambda (s) (cl-cc/codegen::emit-vm-inc
                            (cl-cc::make-vm-inc :dst :R0 :src :R1) s))      7)
-          ("vm-dec"      (lambda (s) (cl-cc/emit::emit-vm-dec
+          ("vm-dec"      (lambda (s) (cl-cc/codegen::emit-vm-dec
                            (cl-cc::make-vm-dec :dst :R0 :src :R1) s))      7)
-          ("vm-abs"      (lambda (s) (cl-cc/emit::emit-vm-abs
+          ("vm-abs"      (lambda (s) (cl-cc/codegen::emit-vm-abs
                            (make-vm-abs :dst :R0 :src :R1) s))            15)
-          ("vm-min"      (lambda (s) (cl-cc/emit::emit-vm-min
+          ("vm-min"      (lambda (s) (cl-cc/codegen::emit-vm-min
                            (make-vm-min :dst :R0 :lhs :R1 :rhs :R2) s))  10)
-          ("vm-max"      (lambda (s) (cl-cc/emit::emit-vm-max
+          ("vm-max"      (lambda (s) (cl-cc/codegen::emit-vm-max
                            (make-vm-max :dst :R0 :lhs :R1 :rhs :R2) s))  10)
-          ("vm-logand"   (lambda (s) (cl-cc/emit::emit-vm-logand
+          ("vm-logand"   (lambda (s) (cl-cc/codegen::emit-vm-logand
                            (make-vm-logand :dst :R0 :lhs :R1 :rhs :R2) s)) 6)
-          ("vm-logior"   (lambda (s) (cl-cc/emit::emit-vm-logior
+          ("vm-logior"   (lambda (s) (cl-cc/codegen::emit-vm-logior
                            (make-vm-logior :dst :R0 :lhs :R1 :rhs :R2) s)) 6)
-          ("vm-logxor"   (lambda (s) (cl-cc/emit::emit-vm-logxor
+          ("vm-logxor"   (lambda (s) (cl-cc/codegen::emit-vm-logxor
                            (make-vm-logxor :dst :R0 :lhs :R1 :rhs :R2) s)) 6)
-          ("vm-logeqv"   (lambda (s) (cl-cc/emit::emit-vm-logeqv
+          ("vm-logeqv"   (lambda (s) (cl-cc/codegen::emit-vm-logeqv
                            (cl-cc::make-vm-logeqv :dst :R0 :lhs :R1 :rhs :R2) s))  9)
-          ("vm-and"      (lambda (s) (cl-cc/emit::emit-vm-and
+          ("vm-and"      (lambda (s) (cl-cc/codegen::emit-vm-and
                            (cl-cc::make-vm-and :dst :R0 :lhs :R1 :rhs :R2) s))    17)
-          ("vm-or"       (lambda (s) (cl-cc/emit::emit-vm-or
+          ("vm-or"       (lambda (s) (cl-cc/codegen::emit-vm-or
                            (cl-cc::make-vm-or  :dst :R0 :lhs :R1 :rhs :R2) s))    17)
-          ("vm-true-pred"  (lambda (s) (cl-cc/emit::emit-vm-true-pred
+          ("vm-true-pred"  (lambda (s) (cl-cc/codegen::emit-vm-true-pred
                              (cl-cc::make-vm-number-p :dst :R0 :src :R1) s))       10)
-          ("vm-false-pred" (lambda (s) (cl-cc/emit::emit-vm-false-pred
+          ("vm-false-pred" (lambda (s) (cl-cc/codegen::emit-vm-false-pred
                              (cl-cc::make-vm-cons-p :dst :R0 :src :R1) s))         10)
-          ("vm-truncate" (lambda (s) (cl-cc/emit::emit-vm-truncate
+          ("vm-truncate" (lambda (s) (cl-cc/codegen::emit-vm-truncate
                            (make-vm-truncate :dst :R0 :lhs :R1 :rhs :R2) s))       21)
-          ("vm-rem"      (lambda (s) (cl-cc/emit::emit-vm-rem
+          ("vm-rem"      (lambda (s) (cl-cc/codegen::emit-vm-rem
                            (cl-cc::make-vm-rem :dst :R0 :lhs :R1 :rhs :R2) s))     21)
-          ("vm-ash"      (lambda (s) (cl-cc/emit::emit-vm-ash
+          ("vm-ash"      (lambda (s) (cl-cc/codegen::emit-vm-ash
                            (make-vm-ash :dst :R0 :lhs :R1 :rhs :R2) s))            24)
-          ("vm-mul"      (lambda (s) (cl-cc/emit::emit-vm-mul
+          ("vm-mul"      (lambda (s) (cl-cc/codegen::emit-vm-mul
                            (cl-cc::make-vm-mul :dst :R0 :lhs :R1 :rhs :R2) s))      7)
-          ("vm-div"      (lambda (s) (cl-cc/emit::emit-vm-div
+          ("vm-div"      (lambda (s) (cl-cc/codegen::emit-vm-div
                            (cl-cc::make-vm-div :dst :R0 :lhs :R1 :rhs :R2) s))     34)
-          ("vm-mod"      (lambda (s) (cl-cc/emit::emit-vm-mod
+          ("vm-mod"      (lambda (s) (cl-cc/codegen::emit-vm-mod
                            (cl-cc::make-vm-mod :dst :R0 :lhs :R1 :rhs :R2) s))     37)
-          ("vm-lt"       (lambda (s) (cl-cc/emit::emit-vm-lt
+          ("vm-lt"       (lambda (s) (cl-cc/codegen::emit-vm-lt
                            (cl-cc::make-vm-lt :dst :R0 :lhs :R1 :rhs :R2) s))      10)
-          ("vm-gt"       (lambda (s) (cl-cc/emit::emit-vm-gt
+          ("vm-gt"       (lambda (s) (cl-cc/codegen::emit-vm-gt
                            (cl-cc::make-vm-gt :dst :R0 :lhs :R1 :rhs :R2) s))      10)
-          ("vm-le"       (lambda (s) (cl-cc/emit::emit-vm-le
+          ("vm-le"       (lambda (s) (cl-cc/codegen::emit-vm-le
                            (cl-cc::make-vm-le :dst :R0 :lhs :R1 :rhs :R2) s))      10)
-          ("vm-ge"       (lambda (s) (cl-cc/emit::emit-vm-ge
+          ("vm-ge"       (lambda (s) (cl-cc/codegen::emit-vm-ge
                            (cl-cc::make-vm-ge :dst :R0 :lhs :R1 :rhs :R2) s))      10)
-          ("vm-num-eq"   (lambda (s) (cl-cc/emit::emit-vm-num-eq
+          ("vm-num-eq"   (lambda (s) (cl-cc/codegen::emit-vm-num-eq
                            (make-vm-num-eq :dst :R0 :lhs :R1 :rhs :R2) s))         10)
-          ("vm-eq"       (lambda (s) (cl-cc/emit::emit-vm-eq
+          ("vm-eq"       (lambda (s) (cl-cc/codegen::emit-vm-eq
                            (make-vm-eq :dst :R0 :lhs :R1 :rhs :R2) s))             10)
-          ("vm-null-p"   (lambda (s) (cl-cc/emit::emit-vm-null-p
+          ("vm-null-p"   (lambda (s) (cl-cc/codegen::emit-vm-null-p
                            (cl-cc::make-vm-null-p :dst :R0 :src :R1) s))           10)
-          ("vm-logtest"  (lambda (s) (cl-cc/emit::emit-vm-logtest
+          ("vm-logtest"  (lambda (s) (cl-cc/codegen::emit-vm-logtest
                            (cl-cc::make-vm-logtest :dst :R0 :lhs :R1 :rhs :R2) s)) 13)
-          ("vm-logbitp"  (lambda (s) (cl-cc/emit::emit-vm-logbitp
+          ("vm-logbitp"  (lambda (s) (cl-cc/codegen::emit-vm-logbitp
                            (cl-cc::make-vm-logbitp :dst :R0 :lhs :R1 :rhs :R2) s)) 15))
   (emit-fn expected-size)
   (assert-equal expected-size (length (%x86-encoding-collect-bytes emit-fn))))
@@ -91,5 +91,5 @@
                 cl-cc/vm::vm-logeqv cl-cc/vm::vm-logtest cl-cc/vm::vm-logbitp
                 cl-cc/vm::vm-null-p cl-cc/vm::vm-number-p cl-cc/vm::vm-integer-p
                 cl-cc/vm::vm-cons-p cl-cc/vm::vm-symbol-p cl-cc/vm::vm-function-p
-                cl-cc/emit::vm-spill-store cl-cc/emit::vm-spill-load))
-    (assert-true (gethash tp cl-cc/emit::*x86-64-instruction-sizes*))))
+                cl-cc/codegen::vm-spill-store cl-cc/codegen::vm-spill-load))
+    (assert-true (gethash tp cl-cc/codegen::*x86-64-instruction-sizes*))))

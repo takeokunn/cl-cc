@@ -25,7 +25,8 @@
     (vm2-state (setf (vm2-state-profile-call-stack state) value))
     (t (setf (vm-profile-call-stack state) value))))
 
-(defun %vm-profile-samples (state)
+(defun vm-get-profile-samples (state)
+  "Return the profile-samples hash table for STATE, handling both vm-state and vm2-state."
   (typecase state
     (vm2-state (vm2-state-profile-samples state))
     (t (vm-profile-samples state))))
@@ -55,7 +56,7 @@ When TAIL-P is true, replace the current leaf frame instead of pushing a new one
     (let* ((stack (or (reverse (%vm-profile-call-stack state))
                       (list "<toplevel>")))
            (key (format nil "~{~A~^;~}" stack)))
-      (incf (gethash key (%vm-profile-samples state) 0)))))
+      (incf (gethash key (vm-get-profile-samples state) 0)))))
 
 ;;; ─── VM State Initialization ─────────────────────────────────────────────────
 

@@ -7,7 +7,7 @@
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc)
+  :depends-on (:cl-cc :cl-cc-php)
   :pathname "src"
   :serial t
   :components

@@ -166,8 +166,8 @@ Handles both simple (name) and full ((name :initarg :name :reader name-reader)) 
 
 ;;; Wire parse-all-forms into VM hook for runtime READ support
 (defun %vm-install-parse-forms-hook-if-available ()
-  (when cl-cc/bootstrap::*vm-parse-forms-hook-installer*
-    (funcall cl-cc/bootstrap::*vm-parse-forms-hook-installer* #'parse-all-forms)))
+  (when cl-cc/bootstrap:*vm-parse-forms-hook-installer*
+    (funcall cl-cc/bootstrap:*vm-parse-forms-hook-installer* #'parse-all-forms)))
 
 #-cl-cc-self-hosting
 (eval-when (:load-toplevel :execute)

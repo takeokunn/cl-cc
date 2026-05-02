@@ -69,7 +69,7 @@ loader never host-evals arbitrary expander forms."
 (defun %top-level-project-macro-p (symbol)
   "Return T when SYMBOL names a registered project macro."
   (and (symbolp symbol)
-       (cl-cc/expand::lookup-macro symbol)))
+       (cl-cc/expand:lookup-macro symbol)))
 
 (defun %coerce-host-macro-head (form)
   "Replace FORM's head with the current package's symbol of the same name when available.
@@ -77,7 +77,7 @@ This keeps top-level project macro expansion on the runtime package layer rather
 probing host package/macro tables directly."
   (if (and (consp form) (symbolp (car form)))
       (let ((pkg-sym (cl-cc/runtime:rt-intern (symbol-name (car form)) *package*)))
-        (if (cl-cc/expand::lookup-macro pkg-sym)
+        (if (cl-cc/expand:lookup-macro pkg-sym)
             (cons pkg-sym (cdr form))
             form))
       form))
@@ -128,9 +128,9 @@ OUR-DEFMACRO macro itself."
     (declare (ignore _))
     (let* ((form-var (gensym "FORM"))
            (env-var (gensym "ENV"))
-           (info (cl-cc/expand::parse-lambda-list lambda-list))
-           (env-sym (cl-cc/expand::lambda-list-info-environment info))
-           (bindings (cl-cc/expand::generate-lambda-bindings lambda-list form-var))
+           (info (cl-cc/expand:parse-lambda-list lambda-list))
+           (env-sym (cl-cc/expand:lambda-list-info-environment info))
+           (bindings (cl-cc/expand:generate-lambda-bindings lambda-list form-var))
            (lambda-body
              (if env-sym
                  (list (list 'let (list (list env-sym env-var))
@@ -188,8 +188,8 @@ Returns two values: result and handled-p."
              (symbolp (car form))
              (%top-level-project-macro-p (car form)))
     (multiple-value-bind (expanded expanded-p)
-        (if (cl-cc/expand::lookup-macro (car form))
-            (cl-cc/expand::our-macroexpand-1 form)
+        (if (cl-cc/expand:lookup-macro (car form))
+            (cl-cc/expand:our-macroexpand-1 form)
             (macroexpand-1 form))
       (when expanded-p
         (return-from run-form-repl (run-form-repl expanded)))))

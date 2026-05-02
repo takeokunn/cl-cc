@@ -120,4 +120,7 @@
    #:binding-direct-call-count-in-body
    #:binding-one-shot-p
    #:closure-sharing-key
-   #:group-shareable-closures))
+   #:group-shareable-closures
+   ;; Roundtrip (ast-roundtrip.lisp)
+   #:ast-to-sexp
+   #:slot-def-to-sexp))

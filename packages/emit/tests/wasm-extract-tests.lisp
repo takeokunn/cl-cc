@@ -29,7 +29,7 @@
 
 (deftest extract-entry-labels-nil-input-returns-empty-hash-table
   "collect-entry-labels on nil returns an empty hash table."
-  (let ((ht-nil (cl-cc/emit::collect-entry-labels nil)))
+  (let ((ht-nil (cl-cc/codegen::collect-entry-labels nil)))
     (assert-true (hash-table-p ht-nil))
     (assert-equal 0 (hash-table-count ht-nil))))
 
@@ -37,7 +37,7 @@
   "collect-entry-labels on instructions with no vm-closure or vm-func-ref returns empty hash table."
   (let* ((instrs (list (make-vm-const :dst :r0 :value 42)
                        (make-vm-ret :reg :r0)))
-         (ht (cl-cc/emit::collect-entry-labels instrs)))
+         (ht (cl-cc/codegen::collect-entry-labels instrs)))
     (assert-equal 0 (hash-table-count ht))))
 
 (deftest-each extract-entry-labels-single-entry
@@ -48,7 +48,7 @@
           ("func-ref" (list (make-vm-func-ref :dst :r0 :label "fn2"))
                       "fn2"))
   (instrs label)
-  (let ((ht (cl-cc/emit::collect-entry-labels instrs)))
+  (let ((ht (cl-cc/codegen::collect-entry-labels instrs)))
     (assert-equal 1 (hash-table-count ht))
     (assert-true (gethash label ht))))
 
@@ -57,7 +57,7 @@
   (let* ((instrs (list (make-vm-closure :dst :r0 :label "fn-a"
                                         :params '(:r1) :captured nil)
                        (make-vm-func-ref :dst :r1 :label "fn-b")))
-         (ht (cl-cc/emit::collect-entry-labels instrs)))
+         (ht (cl-cc/codegen::collect-entry-labels instrs)))
     (assert-equal 2 (hash-table-count ht))
     (assert-true (gethash "fn-a" ht))
     (assert-true (gethash "fn-b" ht))))
@@ -67,13 +67,13 @@
   (let* ((instrs (list (make-vm-closure :dst :r0 :label "same"
                                         :params nil :captured nil)
                        (make-vm-func-ref :dst :r1 :label "same")))
-         (ht (cl-cc/emit::collect-entry-labels instrs)))
+         (ht (cl-cc/codegen::collect-entry-labels instrs)))
     (assert-equal 1 (hash-table-count ht))))
 
 (deftest extract-entry-labels-ignores-register-function
   "collect-entry-labels ignores vm-register-function (not a label)."
   (let* ((instrs (list (cl-cc::make-vm-register-function :name 'foo :src :r0)))
-         (ht (cl-cc/emit::collect-entry-labels instrs)))
+         (ht (cl-cc/codegen::collect-entry-labels instrs)))
     (assert-equal 0 (hash-table-count ht))))
 
 ;;; ─── segment-instructions ─────────────────────────────────────────────────────
@@ -81,14 +81,14 @@
 (deftest segment-empty-instructions
   "segment-instructions on empty list returns empty."
   (let ((entry-labels (make-entry-labels)))
-    (assert-null (cl-cc/emit::segment-instructions nil entry-labels))))
+    (assert-null (cl-cc/codegen::segment-instructions nil entry-labels))))
 
 (deftest segment-all-toplevel
   "Instructions with no function entries are all :toplevel."
   (let ((entry-labels (make-entry-labels))
         (instrs (list (make-vm-const :dst :r0 :value 1)
                       (make-vm-ret :reg :r0))))
-    (let ((segs (cl-cc/emit::segment-instructions instrs entry-labels)))
+    (let ((segs (cl-cc/codegen::segment-instructions instrs entry-labels)))
       (assert-equal 1 (length segs))
       (assert-segment (first segs) :toplevel)
       (assert-equal 2 (length (cdr (first segs)))))))
@@ -99,7 +99,7 @@
     (let* ((body-inst (make-vm-const :dst :r0 :value 99))
            (ret (make-vm-ret :reg :r0))
            (instrs (make-function-instructions "fn1" body-inst ret)))
-      (let ((segs (cl-cc/emit::segment-instructions instrs entry-labels)))
+      (let ((segs (cl-cc/codegen::segment-instructions instrs entry-labels)))
         (assert-equal 1 (length segs))
         (assert-segment (first segs) :function :label "fn1" :body-length 3)))))
 
@@ -113,7 +113,7 @@
            (lbl (make-vm-label :name "fn1"))
            (ret (make-vm-ret :reg :r0))
            (instrs (if toplevel-first (list top lbl ret) (list lbl ret top))))
-      (let ((segs (cl-cc/emit::segment-instructions instrs entry-labels)))
+      (let ((segs (cl-cc/codegen::segment-instructions instrs entry-labels)))
         (assert-equal 2 (length segs))
         (assert-segment (first segs) expected-car1)
         (assert-segment (second segs) expected-car2)))))
@@ -125,7 +125,7 @@
            (ret-b (make-vm-ret :reg :r1))
            (instrs (append (make-function-instructions "fn-a" ret-a)
                            (make-function-instructions "fn-b" ret-b))))
-      (let ((segs (cl-cc/emit::segment-instructions instrs entry-labels)))
+      (let ((segs (cl-cc/codegen::segment-instructions instrs entry-labels)))
         (assert-equal 2 (length segs))
         (assert-segment (first segs) :function :label "fn-a")
         (assert-segment (second segs) :function :label "fn-b")))))
@@ -137,6 +137,6 @@
     (let* ((lbl (make-vm-label :name "loop"))
            (inst (make-vm-const :dst :r0 :value 1))
            (instrs (list lbl inst)))
-      (let ((segs (cl-cc/emit::segment-instructions instrs entry-labels)))
+      (let ((segs (cl-cc/codegen::segment-instructions instrs entry-labels)))
         (assert-equal 1 (length segs))
         (assert-segment (first segs) :toplevel)))))

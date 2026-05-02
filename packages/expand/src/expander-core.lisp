@@ -73,9 +73,9 @@ specifier symbol, it is treated as the declared return type and wrapped in
                                      type-alist))
            (return-type      (if return-type-spec
                                  (cl-cc/type:parse-type-specifier return-type-spec)
-                                 cl-cc/type::+type-unknown+))
+                                 cl-cc/type:+type-unknown+))
            (typed-return-spec (and return-type-spec
-                                   (or (cl-cc/type::lookup-type-alias return-type-spec)
+                                   (or (cl-cc/type:lookup-type-alias return-type-spec)
                                        return-type-spec)))
            (typed-body       (if typed-return-spec
                                  `((the ,typed-return-spec (progn ,@body-forms)))

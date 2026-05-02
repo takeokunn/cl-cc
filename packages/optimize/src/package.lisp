@@ -83,6 +83,17 @@
    ;; ─── prolog-peephole.lisp — Prolog peephole rewriting ──────────────
    #:apply-prolog-peephole
 
+   ;; ─── optimizer-memory.lisp — alias analysis ────────────────────────
+   #:opt-compute-heap-aliases
+   #:opt-interval-add  #:opt-interval-sub
+   #:opt-may-alias-by-type-p  #:opt-may-alias-p  #:opt-must-alias-p
+
+   ;; ─── optimizer-inline.lisp ─────────────────────────────────────────
+   #:opt-known-callee-labels
+
+   ;; ─── optimizer-flow.lisp ───────────────────────────────────────────
+   #:opt-pass-dominated-type-check-elim
+
    ;; ─── optimizer-pipeline.lisp — top-level entry point ───────────────
    #:optimize-instructions
    #:*skip-optimizer-passes*

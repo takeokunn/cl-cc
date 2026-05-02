@@ -1,22 +1,7 @@
 ;;;; packages/pipeline/src/package.lisp — feature package for cl-cc/pipeline
 ;;;;
-;;;; Phase 4 strict-packaging: pipeline files moved from
-;;;; packages/pipeline/src/. Pipeline owns the public compilation
-;;;; API (compile-expression, compile-string, run-string, etc.).
-;;;;
-;;;; The umbrella :cl-cc package :uses :cl-cc/pipeline so downstream
-;;;; consumers can continue to reference cl-cc:compile-expression unqualified.
-;;;;
-;;;; Symbols already pre-interned/exported elsewhere (compile-expression,
-;;;; compile-string, run-string in :cl-cc/compile; compile-to-native in
-;;;; :cl-cc/emit) are shared via :use — defining them in pipeline files
-;;;; updates the same symbol object.
-;;;;
-;;;; %-prefixed helpers are exported so cl-cc/selfhost and cl-cc/repl
-;;;; (and tests via cl-cc::%foo inheritance) can reference them. The
-;;;; one exception is %top-level-in-package-form-p, which is also
-;;;; defined in cl-cc/compile (codegen.lisp); we keep both copies
-;;;; internal to avoid name-conflicts on use-package.
+;;;; Pipeline: public compilation API (compile-expression, compile-string,
+;;;; run-string, etc.) and stdlib cache management.
 
 (defpackage :cl-cc/pipeline
   (:use :cl
@@ -24,6 +9,7 @@
         :cl-cc/ast
         :cl-cc/prolog
         :cl-cc/parse
+        :cl-cc/php
         :cl-cc/optimize
         :cl-cc/emit
         :cl-cc/expand

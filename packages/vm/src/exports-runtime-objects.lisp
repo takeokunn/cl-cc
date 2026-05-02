@@ -109,6 +109,7 @@
    vm-profile-enabled-p
    vm-profile-call-stack
    vm-profile-samples
+   vm-get-profile-samples
    *instruction-constructors*
    vm-falsep
    vm-program-leaf-p

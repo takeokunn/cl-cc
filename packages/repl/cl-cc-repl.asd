@@ -10,7 +10,8 @@
   :license "MIT"
   :version "0.1.0"
   :depends-on (:cl-cc-bootstrap :cl-cc-pipeline :cl-cc-selfhost :cl-cc-expand
-               :cl-cc-vm :cl-cc-parse :cl-cc-compile)
+               :cl-cc-vm :cl-cc-parse :cl-cc-compile :cl-cc-runtime
+               :cl-cc-ast :cl-cc-optimize :cl-cc-emit :cl-cc-stdlib)
   :pathname "src"
   :serial t
   :components

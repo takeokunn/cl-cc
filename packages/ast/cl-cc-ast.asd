@@ -16,4 +16,5 @@
   ((:file "package")
    (:file "ast")
    (:file "ast-functions")
-   (:file "closure")))
+   (:file "closure")
+   (:file "ast-roundtrip")))

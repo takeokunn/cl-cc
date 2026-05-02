@@ -82,4 +82,8 @@
    #:align-up
    #:serialize-uint32-le
    #:serialize-uint64-le
-   #:with-output-to-vector))
+   #:with-output-to-vector
+
+   ;; ELF64 backend
+   #:compile-to-elf64
+   #:write-elf64-file))

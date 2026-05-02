@@ -147,8 +147,8 @@ representations may use hash tables with structured metadata."
 ;;; Package introspection helpers for do-symbols/do-external-symbols/do-all-symbols
 (defun %vm-runtime-package-registry ()
   "Return the runtime package registry when available, else NIL." 
-  (when cl-cc/bootstrap::*runtime-package-registry-provider*
-    (funcall cl-cc/bootstrap::*runtime-package-registry-provider*)))
+  (when cl-cc/bootstrap:*runtime-package-registry-provider*
+    (funcall cl-cc/bootstrap:*runtime-package-registry-provider*)))
 
 (defun %package-symbols (package)
   "Return a list of all symbols accessible in PACKAGE." 
@@ -190,12 +190,12 @@ representations may use hash tables with structured metadata."
   t)
 
 (eval-when (:load-toplevel :execute)
-  (setf cl-cc/bootstrap::*vm-runtime-callable-installer* #'vm-register-runtime-callable)
-  (setf cl-cc/bootstrap::*vm-eval-hook-installer* #'vm-install-eval-hooks)
-  (setf cl-cc/bootstrap::*vm-macroexpand-hook-installer* #'vm-install-macroexpand-hooks)
-  (setf cl-cc/bootstrap::*vm-parse-forms-hook-installer* #'vm-install-parse-forms-hook)
-  (when cl-cc/bootstrap::*runtime-vm-callable-register-hook*
-    (funcall cl-cc/bootstrap::*runtime-vm-callable-register-hook*)))
+  (setf cl-cc/bootstrap:*vm-runtime-callable-installer* #'vm-register-runtime-callable)
+  (setf cl-cc/bootstrap:*vm-eval-hook-installer* #'vm-install-eval-hooks)
+  (setf cl-cc/bootstrap:*vm-macroexpand-hook-installer* #'vm-install-macroexpand-hooks)
+  (setf cl-cc/bootstrap:*vm-parse-forms-hook-installer* #'vm-install-parse-forms-hook)
+  (when cl-cc/bootstrap:*runtime-vm-callable-register-hook*
+    (funcall cl-cc/bootstrap:*runtime-vm-callable-register-hook*)))
 
 ;;; FR-607: Documentation retrieval (CL-level, registered by defun expander)
 (defun %get-documentation (name doc-type)

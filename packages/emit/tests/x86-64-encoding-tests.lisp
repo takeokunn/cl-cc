@@ -30,7 +30,7 @@
           ("wrb"  '(:w 1 :r 1 :b 1)        #x4D)
           ("all"  '(:w 1 :r 1 :x 1 :b 1)   #x4F))
   (args expected)
-  (assert-equal expected (apply #'cl-cc/emit::rex-prefix args)))
+  (assert-equal expected (apply #'cl-cc/codegen::rex-prefix args)))
 
 ;;; ─── modrm ──────────────────────────────────────────────────────────────
 
@@ -41,7 +41,7 @@
           ("memory-indirect"  0 0 0 #x00)
           ("disp8"            1 3 5 #x5D))
   (mod reg rm expected)
-  (assert-equal expected (cl-cc/emit::modrm mod reg rm)))
+  (assert-equal expected (cl-cc/codegen::modrm mod reg rm)))
 
 ;;; ─── emit-byte / emit-dword / emit-qword ────────────────────────────────
 
@@ -50,15 +50,15 @@
   :cases (("normal-value" #xAB #xAB)
           ("mask-to-8bit" #x1FF #xFF))
   (input expected)
-  (let ((bytes (%x86-encoding-collect-bytes (lambda (s) (cl-cc/emit::emit-byte input s)))))
+  (let ((bytes (%x86-encoding-collect-bytes (lambda (s) (cl-cc/codegen::emit-byte input s)))))
     (assert-equal 1 (length bytes))
     (assert-equal expected (first bytes))))
 
 (deftest-each x86-emit-multi-byte-le
   "emit-dword/emit-qword write little-endian bytes."
-  :cases (("dword" (lambda (s) (cl-cc/emit::emit-dword #xDEADBEEF s))
+  :cases (("dword" (lambda (s) (cl-cc/codegen::emit-dword #xDEADBEEF s))
                    '(#xEF #xBE #xAD #xDE))
-          ("qword" (lambda (s) (cl-cc/emit::emit-qword #x0102030405060708 s))
+          ("qword" (lambda (s) (cl-cc/codegen::emit-qword #x0102030405060708 s))
                    '(#x08 #x07 #x06 #x05 #x04 #x03 #x02 #x01)))
   (emit-fn expected-bytes)
   (assert-equal expected-bytes (%x86-encoding-collect-bytes emit-fn)))
@@ -67,13 +67,13 @@
 
 (deftest-each x86-add-sub-rr64-encoding
   "ADD/SUB rr64 emit an exact 3-byte REX+opcode+ModRM sequence."
-  :cases (("add-rax-rcx" (lambda (s) (cl-cc/emit::emit-add-rr64 cl-cc/emit::+rax+ cl-cc/emit::+rcx+ s))
+  :cases (("add-rax-rcx" (lambda (s) (cl-cc/codegen::emit-add-rr64 cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ s))
            '(#x48 #x01 #xC8))
-          ("sub-rax-rcx" (lambda (s) (cl-cc/emit::emit-sub-rr64 cl-cc/emit::+rax+ cl-cc/emit::+rcx+ s))
+          ("sub-rax-rcx" (lambda (s) (cl-cc/codegen::emit-sub-rr64 cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ s))
            '(#x48 #x29 #xC8))
-          ("add-rcx-rdx" (lambda (s) (cl-cc/emit::emit-add-rr64 cl-cc/emit::+rcx+ cl-cc/emit::+rdx+ s))
+          ("add-rcx-rdx" (lambda (s) (cl-cc/codegen::emit-add-rr64 cl-cc/codegen::+rcx+ cl-cc/codegen::+rdx+ s))
            '(#x48 #x01 #xD1))
-          ("sub-rcx-rdx" (lambda (s) (cl-cc/emit::emit-sub-rr64 cl-cc/emit::+rcx+ cl-cc/emit::+rdx+ s))
+          ("sub-rcx-rdx" (lambda (s) (cl-cc/codegen::emit-sub-rr64 cl-cc/codegen::+rcx+ cl-cc/codegen::+rdx+ s))
            '(#x48 #x29 #xD1)))
   (emit-fn expected-bytes)
   (assert-equal expected-bytes (%x86-encoding-collect-bytes emit-fn)))
@@ -82,8 +82,8 @@
 
 (deftest-each x86-two-byte-opcode-instructions
   "REX+0F+opcode2+ModRM: 4 bytes, second=0F, third=opcode2."
-  :cases (("imul-rr64"    (lambda (s) (cl-cc/emit::emit-imul-rr64 cl-cc/emit::+rax+ cl-cc/emit::+rcx+ s)) #xAF)
-          ("movzx-r64-r8" (lambda (s) (cl-cc/emit::emit-movzx-r64-r8 cl-cc/emit::+rax+ cl-cc/emit::+rax+ s)) #xB6))
+  :cases (("imul-rr64"    (lambda (s) (cl-cc/codegen::emit-imul-rr64 cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ s)) #xAF)
+          ("movzx-r64-r8" (lambda (s) (cl-cc/codegen::emit-movzx-r64-r8 cl-cc/codegen::+rax+ cl-cc/codegen::+rax+ s)) #xB6))
   (emit-fn opcode2)
   (let ((bytes (%x86-encoding-collect-bytes emit-fn)))
     (assert-equal 4 (length bytes))
@@ -92,11 +92,11 @@
 
 (deftest-each x86-xmm-instruction-encoding
   "XMM/SSE instruction encodings produce exact byte sequences."
-  :cases (("movq-xmm0-r11" (lambda (s) (cl-cc/emit::emit-movq-xmm-r64 cl-cc/emit::+xmm0+ cl-cc/emit::+r11+ s))
+  :cases (("movq-xmm0-r11" (lambda (s) (cl-cc/codegen::emit-movq-xmm-r64 cl-cc/codegen::+xmm0+ cl-cc/codegen::+r11+ s))
            '(#x66 #x49 #x0F #x6E #xC3))
-          ("addsd-xmm0-xmm1" (lambda (s) (cl-cc/emit::emit-addsd-xx cl-cc/emit::+xmm0+ cl-cc/emit::+xmm1+ s))
+          ("addsd-xmm0-xmm1" (lambda (s) (cl-cc/codegen::emit-addsd-xx cl-cc/codegen::+xmm0+ cl-cc/codegen::+xmm1+ s))
            '(#xF2 #x0F #x58 #xC1))
-          ("movsd-xmm0-xmm1" (lambda (s) (cl-cc/emit::emit-movsd-xx cl-cc/emit::+xmm0+ cl-cc/emit::+xmm1+ s))
+          ("movsd-xmm0-xmm1" (lambda (s) (cl-cc/codegen::emit-movsd-xx cl-cc/codegen::+xmm0+ cl-cc/codegen::+xmm1+ s))
            '(#xF2 #x0F #x10 #xC1)))
   (emit-fn expected-bytes)
   (assert-equal expected-bytes (%x86-encoding-collect-bytes emit-fn)))
@@ -105,8 +105,8 @@
 
 (deftest-each x86-ret-encoding
   "Both emit-ret and emit-vm-ret-inst produce a single #xC3 byte."
-  :cases (("emit-ret"      (lambda (s) (cl-cc/emit::emit-ret s)))
-          ("vm-ret-inst"   (lambda (s) (cl-cc/emit::emit-vm-ret-inst (cl-cc::make-vm-ret) s))))
+  :cases (("emit-ret"      (lambda (s) (cl-cc/codegen::emit-ret s)))
+          ("vm-ret-inst"   (lambda (s) (cl-cc/codegen::emit-vm-ret-inst (cl-cc::make-vm-ret) s))))
   (emit-fn)
   (let ((bytes (%x86-encoding-collect-bytes emit-fn)))
     (assert-equal 1 (length bytes))
@@ -114,37 +114,37 @@
 
 (deftest x86-jmp-rel32-le-offset
   "JMP rel32 encodes offset 256 = #x100 as LE bytes [#x00 #x01 #x00 #x00] starting at byte 2."
-  (let ((bytes (%x86-encoding-collect-bytes (lambda (s) (cl-cc/emit::emit-jmp-rel32 256 s)))))
+  (let ((bytes (%x86-encoding-collect-bytes (lambda (s) (cl-cc/codegen::emit-jmp-rel32 256 s)))))
     (assert-equal #x00 (second bytes))
     (assert-equal #x01 (third bytes))))
 
 (deftest-each x86-fixed-encoding-spot-checks
   "Fixed-format instructions: length, first byte, second byte."
-  :cases (("jmp-zero"   (lambda (s) (cl-cc/emit::emit-jmp-rel32 0 s))              5 #xE9 #x00)
-          ("bswap-rax"  (lambda (s) (cl-cc/emit::emit-bswap-r32 cl-cc/emit::+rax+ s))  2 #x0F #xC8)
-          ("jge-short"  (lambda (s) (cl-cc/emit::emit-jge-short 3 s))              2 #x7D    3)
-          ("idiv-r11"   #'cl-cc/emit::emit-idiv-r11                                3 #x49 #xF7)
-          ("cqo"        #'cl-cc/emit::emit-cqo                                     2 #x48 #x99)
-          ("je-rel32"   (lambda (s) (cl-cc/emit::emit-je-rel32 0 s))               6 #x0F #x84)
-          ("jne-rel32"  (lambda (s) (cl-cc/emit::emit-byte #x0F s)
-                          (cl-cc/emit::emit-byte #x85 s)
-                          (cl-cc/emit::emit-dword 0 s))                            6 #x0F #x85)
-          ("cmp-rax-0"  (lambda (s) (cl-cc/emit::emit-cmp-ri64 cl-cc/emit::+rax+ 0 s)) 7 #x48 #x81)
-          ("mov-r8-r9"  (lambda (s) (cl-cc/emit::emit-mov-rr64 cl-cc/emit::+r8+ cl-cc/emit::+r9+ s))
+  :cases (("jmp-zero"   (lambda (s) (cl-cc/codegen::emit-jmp-rel32 0 s))              5 #xE9 #x00)
+          ("bswap-rax"  (lambda (s) (cl-cc/codegen::emit-bswap-r32 cl-cc/codegen::+rax+ s))  2 #x0F #xC8)
+          ("jge-short"  (lambda (s) (cl-cc/codegen::emit-jge-short 3 s))              2 #x7D    3)
+          ("idiv-r11"   #'cl-cc/codegen::emit-idiv-r11                                3 #x49 #xF7)
+          ("cqo"        #'cl-cc/codegen::emit-cqo                                     2 #x48 #x99)
+          ("je-rel32"   (lambda (s) (cl-cc/codegen::emit-je-rel32 0 s))               6 #x0F #x84)
+          ("jne-rel32"  (lambda (s) (cl-cc/codegen::emit-byte #x0F s)
+                          (cl-cc/codegen::emit-byte #x85 s)
+                          (cl-cc/codegen::emit-dword 0 s))                            6 #x0F #x85)
+          ("cmp-rax-0"  (lambda (s) (cl-cc/codegen::emit-cmp-ri64 cl-cc/codegen::+rax+ 0 s)) 7 #x48 #x81)
+          ("mov-r8-r9"  (lambda (s) (cl-cc/codegen::emit-mov-rr64 cl-cc/codegen::+r8+ cl-cc/codegen::+r9+ s))
                                                                               3 #x4D #x89)
-          ("not-rax"    (lambda (s) (cl-cc/emit::emit-not-r64    cl-cc/emit::+rax+ s)) 3 #x48 #xF7)
-          ("neg-rax"    (lambda (s) (cl-cc/emit::emit-neg-r64    cl-cc/emit::+rax+ s)) 3 #x48 #xF7)
-          ("dec-rax"    (lambda (s) (cl-cc/emit::emit-dec-r64    cl-cc/emit::+rax+ s)) 3 #x48 #xFF)
-          ("cmp-rr64"   (lambda (s) (cl-cc/emit::emit-cmp-rr64   cl-cc/emit::+rax+ cl-cc/emit::+rcx+ s)) 3 #x48 #x39)
-          ("test-rr64"  (lambda (s) (cl-cc/emit::emit-test-rr64  cl-cc/emit::+rax+ cl-cc/emit::+rax+ s)) 3 #x48 #x85)
-          ("and-rr64"   (lambda (s) (cl-cc/emit::emit-and-rr64   cl-cc/emit::+rax+ cl-cc/emit::+rcx+ s)) 3 #x48 #x21)
-          ("or-rr64"    (lambda (s) (cl-cc/emit::emit-or-rr64    cl-cc/emit::+rax+ cl-cc/emit::+rcx+ s)) 3 #x48 #x09)
-          ("xor-rr64"   (lambda (s) (cl-cc/emit::emit-xor-rr64   cl-cc/emit::+rax+ cl-cc/emit::+rcx+ s)) 3 #x48 #x31)
-          ("sal-cl"     (lambda (s) (cl-cc/emit::emit-sal-r64-cl cl-cc/emit::+rax+ s)) 3 #x48 #xD3)
-          ("sar-cl"     (lambda (s) (cl-cc/emit::emit-sar-r64-cl cl-cc/emit::+rax+ s)) 3 #x48 #xD3)
-          ("add-ri8"    (lambda (s) (cl-cc/emit::emit-add-ri8    cl-cc/emit::+rax+ 1 s)) 4 #x48 #x83)
-          ("sub-ri8"    (lambda (s) (cl-cc/emit::emit-sub-ri8    cl-cc/emit::+rax+ 1 s)) 4 #x48 #x83)
-          ("and-ri8"    (lambda (s) (cl-cc/emit::emit-and-ri8    cl-cc/emit::+rax+ 1 s)) 4 #x48 #x83))
+          ("not-rax"    (lambda (s) (cl-cc/codegen::emit-not-r64    cl-cc/codegen::+rax+ s)) 3 #x48 #xF7)
+          ("neg-rax"    (lambda (s) (cl-cc/codegen::emit-neg-r64    cl-cc/codegen::+rax+ s)) 3 #x48 #xF7)
+          ("dec-rax"    (lambda (s) (cl-cc/codegen::emit-dec-r64    cl-cc/codegen::+rax+ s)) 3 #x48 #xFF)
+          ("cmp-rr64"   (lambda (s) (cl-cc/codegen::emit-cmp-rr64   cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ s)) 3 #x48 #x39)
+          ("test-rr64"  (lambda (s) (cl-cc/codegen::emit-test-rr64  cl-cc/codegen::+rax+ cl-cc/codegen::+rax+ s)) 3 #x48 #x85)
+          ("and-rr64"   (lambda (s) (cl-cc/codegen::emit-and-rr64   cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ s)) 3 #x48 #x21)
+          ("or-rr64"    (lambda (s) (cl-cc/codegen::emit-or-rr64    cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ s)) 3 #x48 #x09)
+          ("xor-rr64"   (lambda (s) (cl-cc/codegen::emit-xor-rr64   cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ s)) 3 #x48 #x31)
+          ("sal-cl"     (lambda (s) (cl-cc/codegen::emit-sal-r64-cl cl-cc/codegen::+rax+ s)) 3 #x48 #xD3)
+          ("sar-cl"     (lambda (s) (cl-cc/codegen::emit-sar-r64-cl cl-cc/codegen::+rax+ s)) 3 #x48 #xD3)
+          ("add-ri8"    (lambda (s) (cl-cc/codegen::emit-add-ri8    cl-cc/codegen::+rax+ 1 s)) 4 #x48 #x83)
+          ("sub-ri8"    (lambda (s) (cl-cc/codegen::emit-sub-ri8    cl-cc/codegen::+rax+ 1 s)) 4 #x48 #x83)
+          ("and-ri8"    (lambda (s) (cl-cc/codegen::emit-and-ri8    cl-cc/codegen::+rax+ 1 s)) 4 #x48 #x83))
   (emit-fn expected-len byte0 byte1)
   (let ((bytes (%x86-encoding-collect-bytes emit-fn)))
     (assert-equal expected-len (length bytes))
@@ -155,20 +155,20 @@
 
 (deftest x86-vm-reg-map
   "VM register map has 8 entries; :r0→RAX, :r1→RCX spot checks pass."
-  (assert-equal 8 (length cl-cc/emit::*vm-reg-map*))
-  (assert-equal cl-cc/emit::+rax+ (cdr (assoc :r0 cl-cc/emit::*vm-reg-map*)))
-  (assert-equal cl-cc/emit::+rcx+ (cdr (assoc :r1 cl-cc/emit::*vm-reg-map*))))
+  (assert-equal 8 (length cl-cc/codegen::*vm-reg-map*))
+  (assert-equal cl-cc/codegen::+rax+ (cdr (assoc :r0 cl-cc/codegen::*vm-reg-map*)))
+  (assert-equal cl-cc/codegen::+rcx+ (cdr (assoc :r1 cl-cc/codegen::*vm-reg-map*))))
 
 ;;; ─── emit-mov-ri64 ──────────────────────────────────────────────────────
 
 (deftest-each x86-mov-ri64-encoding
   "emit-mov-ri64: always 10 bytes; REX byte, opcode, and immediate vary by register."
-  :cases (("rax-42" cl-cc/emit::+rax+ 42 #x48 #xB8 42)
-          ("rcx-0"  cl-cc/emit::+rcx+  0 #x48 #xB9  0)
-          ("r8-1"   cl-cc/emit::+r8+   1 #x49 #xB8  1))
+  :cases (("rax-42" cl-cc/codegen::+rax+ 42 #x48 #xB8 42)
+          ("rcx-0"  cl-cc/codegen::+rcx+  0 #x48 #xB9  0)
+          ("r8-1"   cl-cc/codegen::+r8+   1 #x49 #xB8  1))
   (reg imm rex opcode imm-byte)
   (let ((bytes (%x86-encoding-collect-bytes
-                (lambda (s) (cl-cc/emit::emit-mov-ri64 reg imm s)))))
+                (lambda (s) (cl-cc/codegen::emit-mov-ri64 reg imm s)))))
     (assert-equal 10 (length bytes))
     (assert-equal rex    (first bytes))
     (assert-equal opcode (second bytes))
@@ -187,21 +187,21 @@
           ("symbol-to-0" 'foo   0)
           ("list-to-0"   '(1 2) 0))
   (input expected)
-  (assert-equal expected (cl-cc/emit::vm-const-to-integer input)))
+  (assert-equal expected (cl-cc/codegen::vm-const-to-integer input)))
 
 (deftest-each x86-setcc-register-size
   "SETE on low register emits 3 bytes; high register (RSI=6) emits 4 bytes (REX added)."
-  :cases (("low-reg-rax"  cl-cc/emit::+rax+ 3)
-          ("high-reg-rsi" cl-cc/emit::+rsi+ 4))
+  :cases (("low-reg-rax"  cl-cc/codegen::+rax+ 3)
+          ("high-reg-rsi" cl-cc/codegen::+rsi+ 4))
   (reg expected-len)
   (let ((bytes (%x86-encoding-collect-bytes
-                (lambda (s) (cl-cc/emit::emit-setcc #x94 reg s)))))
+                (lambda (s) (cl-cc/codegen::emit-setcc #x94 reg s)))))
     (assert-equal expected-len (length bytes))))
 
 (deftest-each x86-cmov-encoding
   "CMOVL/CMOVG each emit 4 bytes; third byte is the distinguishing opcode."
-  :cases (("cmovl" (lambda (s) (cl-cc/emit::emit-cmovl-rr64 cl-cc/emit::+rax+ cl-cc/emit::+rcx+ s)) #x4C)
-          ("cmovg" (lambda (s) (cl-cc/emit::emit-cmovg-rr64 cl-cc/emit::+rax+ cl-cc/emit::+rcx+ s)) #x4F))
+  :cases (("cmovl" (lambda (s) (cl-cc/codegen::emit-cmovl-rr64 cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ s)) #x4C)
+          ("cmovg" (lambda (s) (cl-cc/codegen::emit-cmovg-rr64 cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ s)) #x4F))
   (emit-fn opcode3)
   (let ((bytes (%x86-encoding-collect-bytes emit-fn)))
     (assert-equal 4 (length bytes))

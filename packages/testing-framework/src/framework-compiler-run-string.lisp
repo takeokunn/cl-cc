@@ -128,8 +128,8 @@ can share the same high-level assertion for both plain and stdlib-backed cases."
        (unless (and ,inferred
                     (ignore-errors
                       (or (equal ,inferred ',expected-type)
-                          (and (typep ,inferred 'cl-cc/type::type-primitive)
-                               (equal (cl-cc/type::type-primitive-name ,inferred)
+                          (and (typep ,inferred 'cl-cc/type:type-primitive)
+                               (equal (cl-cc/type:type-primitive-name ,inferred)
                                       ',expected-type)))))
          (%fail-test (format nil "assert-infers-type: ~S inferred ~S, expected ~S"
                              ,expr ,inferred ',expected-type)

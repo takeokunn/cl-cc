@@ -28,17 +28,17 @@
 
 (deftest x86-seq-idiv-r11-emits-3-bytes
   "emit-idiv-r11 emits exactly 3 bytes: REX.W.B F7 /7."
-  (let ((bs (%collect-seq-bytes #'cl-cc/emit::emit-idiv-r11)))
+  (let ((bs (%collect-seq-bytes #'cl-cc/codegen::emit-idiv-r11)))
     (assert-= 3 (length bs))
     (assert-= #x49 (first bs))   ; REX.W=1, REX.B=1
     (assert-= #xF7 (second bs))  ; IDIV opcode
-    (assert-= (cl-cc/emit::modrm 3 7 3) (third bs)))) ; mod=11, reg=7, rm=3
+    (assert-= (cl-cc/codegen::modrm 3 7 3) (third bs)))) ; mod=11, reg=7, rm=3
 
 ;;; ─── emit-cqo ────────────────────────────────────────────────────────────
 
 (deftest x86-seq-cqo-emits-2-bytes
   "emit-cqo emits exactly 2 bytes: REX.W (48) and 99."
-  (let ((bs (%collect-seq-bytes #'cl-cc/emit::emit-cqo)))
+  (let ((bs (%collect-seq-bytes #'cl-cc/codegen::emit-cqo)))
     (assert-= 2 (length bs))
     (assert-= #x48 (first bs))
     (assert-= #x99 (second bs))))
@@ -51,15 +51,15 @@
           ("remainder" t))
   (remainder-p)
   (let ((bs (%collect-seq-bytes
-             (lambda (s) (cl-cc/emit::emit-idiv-sequence
-                          cl-cc/emit::+rax+ cl-cc/emit::+rcx+ remainder-p s)))))
+             (lambda (s) (cl-cc/codegen::emit-idiv-sequence
+                          cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ remainder-p s)))))
     (assert-= 18 (length bs))))
 
 (deftest x86-seq-idiv-sequence-contains-cqo
   "emit-idiv-sequence includes CQO bytes (48 99) in the output."
   (let ((bs (%collect-seq-bytes
-             (lambda (s) (cl-cc/emit::emit-idiv-sequence
-                          cl-cc/emit::+rax+ cl-cc/emit::+rcx+ nil s)))))
+             (lambda (s) (cl-cc/codegen::emit-idiv-sequence
+                          cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ nil s)))))
     ;; CQO = 48 99 somewhere in the sequence
     (let ((cqo-pos (loop for i from 0 below (1- (length bs))
                          when (and (= (nth i bs) #x48)
@@ -71,11 +71,11 @@
 
 (deftest-each x86-seq-shift-r64-cl-cases
   "emit-sal/sar/ror-r64-cl each emit 3 bytes with 0xD3 as the opcode byte."
-  :cases (("sal" #'cl-cc/emit::emit-sal-r64-cl)
-          ("sar" #'cl-cc/emit::emit-sar-r64-cl)
-          ("ror" #'cl-cc/emit::emit-ror-r64-cl))
+  :cases (("sal" #'cl-cc/codegen::emit-sal-r64-cl)
+          ("sar" #'cl-cc/codegen::emit-sar-r64-cl)
+          ("ror" #'cl-cc/codegen::emit-ror-r64-cl))
   (emitter)
-  (let ((bs (%collect-seq-bytes (lambda (s) (funcall emitter cl-cc/emit::+rax+ s)))))
+  (let ((bs (%collect-seq-bytes (lambda (s) (funcall emitter cl-cc/codegen::+rax+ s)))))
     (assert-= 3 (length bs))
     (assert-= #xD3 (second bs))))
 
@@ -83,11 +83,11 @@
 
 (deftest-each x86-seq-alu-ri8-cases
   "emit-add/sub/and-ri8 each emit 4 bytes: REX + 0x83 + ModRM + imm8."
-  :cases (("add" #'cl-cc/emit::emit-add-ri8  5)
-          ("sub" #'cl-cc/emit::emit-sub-ri8  8)
-          ("and" #'cl-cc/emit::emit-and-ri8 15))
+  :cases (("add" #'cl-cc/codegen::emit-add-ri8  5)
+          ("sub" #'cl-cc/codegen::emit-sub-ri8  8)
+          ("and" #'cl-cc/codegen::emit-and-ri8 15))
   (emitter imm8)
-  (let ((bs (%collect-seq-bytes (lambda (s) (funcall emitter cl-cc/emit::+rax+ imm8 s)))))
+  (let ((bs (%collect-seq-bytes (lambda (s) (funcall emitter cl-cc/codegen::+rax+ imm8 s)))))
     (assert-= 4 (length bs))
     (assert-= #x83 (second bs))
     (assert-= imm8 (fourth bs))))
@@ -96,7 +96,7 @@
 
 (deftest x86-seq-jge-short-emits-2-bytes
   "emit-jge-short emits 2 bytes: 7D + offset."
-  (let ((bs (%collect-seq-bytes (lambda (s) (cl-cc/emit::emit-jge-short 10 s)))))
+  (let ((bs (%collect-seq-bytes (lambda (s) (cl-cc/codegen::emit-jge-short 10 s)))))
     (assert-= 2 (length bs))
     (assert-= #x7D (first bs))
     (assert-= 10 (second bs))))
@@ -105,20 +105,20 @@
 
 (deftest x86-seq-cmovl-rr64-emits-correct-prefix
   "emit-cmovl-rr64 uses opcode 0F 4C."
-  (let ((bs (%collect-seq-bytes (lambda (s) (cl-cc/emit::emit-cmovl-rr64 cl-cc/emit::+rax+ cl-cc/emit::+rcx+ s)))))
+  (let ((bs (%collect-seq-bytes (lambda (s) (cl-cc/codegen::emit-cmovl-rr64 cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ s)))))
     (assert-true (> (length bs) 2))
     (assert-true (member #x0F bs))
     (assert-true (member #x4C bs))))
 
 (deftest x86-seq-cmovg-rr64-emits-correct-opcode
   "emit-cmovg-rr64 uses opcode 0F 4F."
-  (let ((bs (%collect-seq-bytes (lambda (s) (cl-cc/emit::emit-cmovg-rr64 cl-cc/emit::+rax+ cl-cc/emit::+rcx+ s)))))
+  (let ((bs (%collect-seq-bytes (lambda (s) (cl-cc/codegen::emit-cmovg-rr64 cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ s)))))
     (assert-true (member #x0F bs))
     (assert-true (member #x4F bs))))
 
 (deftest x86-seq-cmovne-rr64-emits-correct-opcode
   "emit-cmovne-rr64 uses opcode 0F 45."
-  (let ((bs (%collect-seq-bytes (lambda (s) (cl-cc/emit::emit-cmovne-rr64 cl-cc/emit::+rax+ cl-cc/emit::+rcx+ s)))))
+  (let ((bs (%collect-seq-bytes (lambda (s) (cl-cc/codegen::emit-cmovne-rr64 cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ s)))))
     (assert-true (member #x0F bs))
     (assert-true (member #x45 bs))))
 
@@ -126,32 +126,32 @@
 
 (deftest-each x86-seq-boolean-rr64-cases
   "emit-and/or/xor-rr64 each emit at least 3 bytes."
-  :cases (("and" #'cl-cc/emit::emit-and-rr64)
-          ("or"  #'cl-cc/emit::emit-or-rr64)
-          ("xor" #'cl-cc/emit::emit-xor-rr64))
+  :cases (("and" #'cl-cc/codegen::emit-and-rr64)
+          ("or"  #'cl-cc/codegen::emit-or-rr64)
+          ("xor" #'cl-cc/codegen::emit-xor-rr64))
   (emitter)
-  (let ((bs (%collect-seq-bytes (lambda (s) (funcall emitter cl-cc/emit::+rax+ cl-cc/emit::+rcx+ s)))))
+  (let ((bs (%collect-seq-bytes (lambda (s) (funcall emitter cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ s)))))
     (assert-true (>= (length bs) 3))))
 
 ;;; ─── Unary ops ───────────────────────────────────────────────────────────
 
 (deftest x86-seq-not-neg-r64-3-bytes
   "emit-not-r64 and emit-neg-r64 each emit 3 bytes with 0xF7 as opcode."
-  (let ((bs (%collect-seq-bytes (lambda (s) (cl-cc/emit::emit-not-r64 cl-cc/emit::+rax+ s)))))
+  (let ((bs (%collect-seq-bytes (lambda (s) (cl-cc/codegen::emit-not-r64 cl-cc/codegen::+rax+ s)))))
     (assert-= 3 (length bs))
     (assert-= #xF7 (second bs)))
-  (let ((bs (%collect-seq-bytes (lambda (s) (cl-cc/emit::emit-neg-r64 cl-cc/emit::+rax+ s)))))
+  (let ((bs (%collect-seq-bytes (lambda (s) (cl-cc/codegen::emit-neg-r64 cl-cc/codegen::+rax+ s)))))
     (assert-= 3 (length bs))
     (assert-= #xF7 (second bs))))
 
 (deftest x86-seq-dec-r64-emits-3-bytes
   "emit-dec-r64 emits 3 bytes: REX + FF /1 ModRM."
-  (let ((bs (%collect-seq-bytes (lambda (s) (cl-cc/emit::emit-dec-r64 cl-cc/emit::+rax+ s)))))
+  (let ((bs (%collect-seq-bytes (lambda (s) (cl-cc/codegen::emit-dec-r64 cl-cc/codegen::+rax+ s)))))
     (assert-= 3 (length bs))
     (assert-= #xFF (second bs))))
 
 (deftest x86-seq-bswap-r32-emits-correct-bytes
   "emit-bswap-r32 emits REX + 0F C8+reg for 64-bit bswap."
-  (let ((bs (%collect-seq-bytes (lambda (s) (cl-cc/emit::emit-bswap-r32 cl-cc/emit::+rax+ s)))))
+  (let ((bs (%collect-seq-bytes (lambda (s) (cl-cc/codegen::emit-bswap-r32 cl-cc/codegen::+rax+ s)))))
     (assert-true (>= (length bs) 2))
     (assert-true (member #x0F bs))))

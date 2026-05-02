@@ -16,18 +16,18 @@
 (defun %x86-emit (target inst)
   "Emit INST to a string using TARGET and return the result."
   (let ((s (make-string-output-stream)))
-    (cl-cc/emit::emit-instruction target inst s)
+    (cl-cc/codegen::emit-instruction target inst s)
     (get-output-stream-string s)))
 
 (defun %make-x86-target ()
   "Create a plain x86-64-target with no regalloc (fallback mapping)."
-  (make-instance 'cl-cc/emit::x86-64-target))
+  (make-instance 'cl-cc/codegen::x86-64-target))
 
 ;;; ─── *phys-reg-to-asm-string* table ─────────────────────────────────────────
 
 (deftest x86-phys-reg-table-has-14-entries
   "Physical register table maps all 14 x86-64 GP registers."
-  (assert-equal 14 (length cl-cc/emit::*phys-reg-to-asm-string*)))
+  (assert-equal 14 (length cl-cc/codegen::*phys-reg-to-asm-string*)))
 
 (deftest-each x86-phys-reg-table-entries
   "Physical register table contains correct mappings."
@@ -40,7 +40,7 @@
           ("r8"  :r8  "r8")
           ("r15" :r15 "r15"))
   (phys-key expected-str)
-  (assert-equal expected-str (cdr (assoc phys-key cl-cc/emit::*phys-reg-to-asm-string*))))
+  (assert-equal expected-str (cdr (assoc phys-key cl-cc/codegen::*phys-reg-to-asm-string*))))
 
 ;;; ─── target-register: fallback (no regalloc) ──────────────────────────────────
 
@@ -56,21 +56,21 @@
           ("r7" :r7 "r11"))
   (vreg expected)
   (let ((tgt (%make-x86-target)))
-    (assert-equal expected (cl-cc/emit::target-register tgt vreg))))
+    (assert-equal expected (cl-cc/codegen::target-register tgt vreg))))
 
 (deftest x86-target-register-fallback-signals-error-for-r8-plus
   "Fallback (no regalloc) signals error for :R8 and above."
   (let ((tgt (%make-x86-target)))
-    (assert-signals error (cl-cc/emit::target-register tgt :r8))))
+    (assert-signals error (cl-cc/codegen::target-register tgt :r8))))
 
 (deftest x86-target-register-with-regalloc-uses-assignment
   "With regalloc, known vreg returns mapped string; unknown vreg signals error."
   (let* ((ht (make-hash-table))
          (ra (cl-cc/regalloc::make-regalloc-result :assignment ht))
-         (tgt (make-instance 'cl-cc/emit::x86-64-target :regalloc ra)))
+         (tgt (make-instance 'cl-cc/codegen::x86-64-target :regalloc ra)))
     (setf (gethash :r0 ht) :rax)
-    (assert-equal "rax" (cl-cc/emit::target-register tgt :r0))
-    (assert-signals error (cl-cc/emit::target-register tgt :r99))))
+    (assert-equal "rax" (cl-cc/codegen::target-register tgt :r0))
+    (assert-signals error (cl-cc/codegen::target-register tgt :r99))))
 
 ;;; ─── emit-instruction methods ──────────────────────────────────────────────────
 
@@ -167,7 +167,7 @@
 
 (deftest x86-emit-spill-operations-rsp-red-zone
   "vm-spill-store/load use rsp in assembly when the target spill base is red-zone rsp."
-  (let ((tgt (make-instance 'cl-cc/emit::x86-64-target :spill-base-reg :rsp)))
+  (let ((tgt (make-instance 'cl-cc/codegen::x86-64-target :spill-base-reg :rsp)))
     (let ((asm (%x86-emit tgt (make-vm-spill-store :src-reg :rax :slot 1))))
       (assert-true (search "rsp" asm))
       (assert-false (search "rbp" asm))

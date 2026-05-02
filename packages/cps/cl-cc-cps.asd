@@ -10,7 +10,7 @@
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc-bootstrap :cl-cc-ast :cl-cc-parse)
+  :depends-on (:cl-cc-bootstrap :cl-cc-ast)
   :pathname "src"
   :serial t
   :components

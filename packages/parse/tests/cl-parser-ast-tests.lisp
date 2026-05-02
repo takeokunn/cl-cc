@@ -11,7 +11,7 @@
 
 (defun ast-roundtrip (sexp)
   "Lower sexp to AST then convert back to sexp."
-  (cl-cc/parse::ast-to-sexp (lower sexp)))
+  (cl-cc/ast:ast-to-sexp (lower sexp)))
 
 (deftest-each ast-roundtrip-atoms
   "ast-to-sexp roundtrip: atomic forms preserve integer and symbol identity."

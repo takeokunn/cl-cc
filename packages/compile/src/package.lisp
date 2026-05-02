@@ -1,21 +1,47 @@
 ;;;; packages/compile/src/package.lisp --- cl-cc/compile package definition
 ;;;;
-;;;; Phase 6 (post 2026-05-01): :cl-cc/compile is now a facade that
-;;;; bridges to :cl-cc/codegen. The actual codegen source files
-;;;; declare (in-package :cl-cc/codegen). Tests and downstream callers
-;;;; that use `cl-cc/compile::%foo` continue to work because the
-;;;; eval-when block below SHADOWING-IMPORTs all of cl-cc/codegen's
-;;;; internal symbols into cl-cc/compile, making them accessible via
-;;;; the reader's `pkg::name` form (which calls `intern`, which returns
-;;;; already-accessible symbols rather than creating new ones).
-;;;;
-;;;; Pipeline-level compilation entry points (compile-expression, run-string,
-;;;; ...) live in :cl-cc/pipeline; their symbols are pre-interned in
-;;;; :cl-cc/codegen so `cl-cc/compile:run-string` works through the bridge.
+;;;; Compilation engine: AST→VM instruction transformation.
+;;;; context, builtin-registry, codegen-core, codegen-functions, etc.
+;;;; Depends on :cl-cc/codegen for machine code emission primitives.
 
 (defpackage :cl-cc/compile
-  (:use :cl :cl-cc/bootstrap :cl-cc/ast :cl-cc/prolog :cl-cc/parse :cl-cc/vm
-        :cl-cc/optimize :cl-cc/codegen)
+  (:use :cl
+        :cl-cc/bootstrap
+        :cl-cc/ast
+        :cl-cc/prolog
+        :cl-cc/parse
+        :cl-cc/optimize
+        :cl-cc/vm
+        :cl-cc/expand
+        :cl-cc/cps
+        :cl-cc/codegen)
+  (:import-from :cl-cc/regalloc
+                #:live-interval
+                #:make-live-interval
+                #:interval-vreg
+                #:interval-start
+                #:interval-end
+                #:interval-phys-reg
+                #:interval-spill-slot
+                #:regalloc-result
+                #:regalloc-assignment
+                #:regalloc-spill-map
+                #:regalloc-spill-count
+                #:regalloc-instructions
+                #:regalloc-lookup
+                #:instruction-defs
+                #:instruction-uses
+                #:compute-live-intervals
+                #:linear-scan-allocate
+                #:allocate-registers
+                #:vm-spill-store
+                #:vm-spill-load
+                #:make-vm-spill-store
+                #:make-vm-spill-load
+                #:vm-spill-src
+                #:vm-spill-dst
+                #:vm-spill-slot
+                #:*current-regalloc*)
   (:import-from :cl-cc/cps
                 #:cps-transform
                 #:cps-transform*
@@ -24,7 +50,7 @@
                 #:cps-transform-sequence
                 #:cps-transform-eval)
   (:export
-   ;; Re-export of codegen symbols ---
+   ;; ── context.lisp ──
    #:compiler-context
    #:ctx-instructions #:ctx-next-register #:ctx-next-label
    #:ctx-env #:ctx-type-env #:ctx-safety
@@ -50,28 +76,17 @@
    #:%cps-native-compile-safe-ast-p
    #:%cps-identity-entry-form
 
+   ;; ── codegen-fold-optimize.lisp ──
    #:optimize-ast
+
+   ;; ── codegen-locals.lisp ──
    #:target-instance #:type-check-ast
+   #:emit-assembly
+
+   ;; ── codegen-core.lisp ──
    #:compile-ast
 
-   ;; CPS transformation re-exports ---
-   #:cps-transform
-   #:cps-transform*
-   #:cps-transform-ast
-   #:cps-transform-ast*
-   #:cps-transform-sequence
-   #:cps-transform-eval
-
-   ;; Pipeline entry points ---
-   #:compile-expression
-   #:compile-string
-   #:run-string
-   #:run-string-typed
-   #:run-string-repl
-   #:reset-repl-state
-   #:*repl-vm-state*
-   #:our-load
-   #:emit-assembly
+   ;; ── codegen.lisp ──
    #:compile-toplevel-forms
    #:compilation-result
    #:make-compilation-result
@@ -83,17 +98,22 @@
    #:compilation-result-cps
    #:compilation-result-ast
    #:compilation-result-vm-instructions
-   #:compilation-result-optimized-instructions))
+   #:compilation-result-optimized-instructions
 
-;;; Bridge: import all internal symbols of :cl-cc/codegen so legacy
-;;; `cl-cc/compile::%foo` references resolve to the codegen home symbol.
-(eval-when (:load-toplevel :execute)
-  (let ((codegen-pkg (find-package :cl-cc/codegen))
-        (compile-pkg (find-package :cl-cc/compile)))
-    (when codegen-pkg
-      (do-symbols (sym codegen-pkg)
-        (when (eq (symbol-package sym) codegen-pkg)
-          (handler-case
-              (unless (find-symbol (symbol-name sym) compile-pkg)
-                (import (list sym) compile-pkg))
-            (package-error () nil)))))))
+   ;; ── CPS transformation re-exports ──
+   #:cps-transform
+   #:cps-transform*
+   #:cps-transform-ast
+   #:cps-transform-ast*
+   #:cps-transform-sequence
+   #:cps-transform-eval
+
+   ;; ── pipeline entry points (pre-interned here for legacy compat) ──
+   #:compile-expression
+   #:compile-string
+   #:run-string
+   #:run-string-typed
+   #:run-string-repl
+   #:reset-repl-state
+   #:*repl-vm-state*
+   #:our-load))

@@ -196,7 +196,7 @@
     (cons 'eval-when
           (cons '(:load-toplevel :execute)
                 (mapcar (lambda (class)
-                          (list 'cl-cc/type::register-typeclass-instance
+                          (list 'cl-cc/type:register-typeclass-instance
                                  (list 'quote class) (list 'quote name) nil))
                         derived-classes)))))
 

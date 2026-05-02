@@ -1,26 +1,54 @@
-;;;; cl-cc-compile.asd --- independent ASDF system for the compilation engine
+;;;; cl-cc-compile.asd --- ASDF system for the compilation engine
 ;;;;
-;;;; Phase 3d extraction. Compile source files (context, closure, CPS,
-;;;; codegen, builtin registry) are now part of this system.
-;;;; Pipeline files (stdlib-source, pipeline, pipeline-repl etc.) remain
-;;;; in cl-cc.asd because they use (in-package :cl-cc) which requires
-;;;; the umbrella package to exist first.
+;;;; Compilation engine: AST→VM instruction transformation.
+;;;; Includes context, builtin registry, codegen-* files.
+;;;; Depends on :cl-cc-codegen for machine code emission primitives
+;;;; (x86-64-target, emit-instruction, etc.).
 ;;;;
-;;;; Files use (in-package :cl-cc/compile) and access VM/expand/ast symbols
-;;;; via the :use list below.
-;;;;
-;;;; Dependency order: bootstrap → ast → prolog → parse → type → optimize
-;;;;                   → vm → expand → compile
+;;;; Dependency order: bootstrap → ast → ... → vm → expand → codegen → compile
 
 (asdf:defsystem :cl-cc-compile
-  :description "Compilation engine: CPS, codegen, builtin registry"
+  :description "Compilation engine: AST→VM instruction transformation"
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
   :depends-on (:cl-cc-bootstrap :cl-cc-ast :cl-cc-prolog :cl-cc-parse :cl-cc-type
-               :cl-cc-optimize :cl-cc-vm :cl-cc-emit :cl-cc-expand :cl-cc-cps
-               :cl-cc-codegen)
+               :cl-cc-optimize :cl-cc-vm :cl-cc-expand :cl-cc-cps :cl-cc-codegen
+               :cl-cc-target :cl-cc-regalloc)
   :pathname "src"
   :serial t
   :components
-  ((:file "package")))
+  ((:file "package")
+   ;; Compiler context and primitive helpers
+   (:file "context")
+   ;; Builtin dispatch registry
+   (:file "builtin-registry-data")
+   (:file "builtin-registry-data-ext")
+   (:file "builtin-registry")
+   (:file "builtin-registry-emitters")
+   (:file "builtin-registry-dispatch")
+   ;; Core AST→VM compilation
+   (:file "codegen-core")
+   (:file "codegen-core-control")
+   (:file "codegen-core-let")
+   (:file "codegen-core-let-walkers")
+   (:file "codegen-core-let-emit")
+   (:file "codegen-clos")
+   (:file "codegen-gf")
+   (:file "codegen-functions")
+   (:file "codegen-functions-params")
+   (:file "codegen-functions-emit")
+   (:file "codegen-phase2")
+   (:file "codegen-control")
+   (:file "codegen-io")
+   (:file "codegen-io-ext")
+   (:file "codegen-hash-table")
+   (:file "codegen-slot-predicates")
+   (:file "codegen-string-kwargs")
+   (:file "codegen-fold")
+   (:file "codegen-fold-eval")
+   (:file "codegen-fold-optimize")
+   (:file "codegen")
+   (:file "codegen-calls")
+   ;; Local function bindings and assembly dispatch (uses machine code layer)
+   (:file "codegen-locals")))

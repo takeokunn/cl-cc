@@ -60,7 +60,7 @@ let
     };
     cl-cc-mir = {
       src = "packages/mir";
-      deps = [ "cl-cc-target" ];
+      deps = [ ];
     };
     cl-cc-prolog = {
       src = "packages/prolog";
@@ -80,6 +80,22 @@ let
     cl-cc-vm = {
       src = "packages/vm";
       deps = [ "cl-cc-bootstrap" ];
+    };
+    cl-cc-vm-interp = {
+      src = "packages/vm-interp";
+      deps = [ ];
+    };
+    cl-cc-vm-isa = {
+      src = "packages/vm-isa";
+      deps = [ ];
+    };
+    cl-cc-php = {
+      src = "packages/php";
+      deps = [
+        "cl-cc-ast"
+        "cl-cc-bootstrap"
+        "cl-cc-parse"
+      ];
     };
     cl-cc-optimize = {
       src = "packages/optimize";
@@ -106,9 +122,6 @@ let
       src = "packages/expand";
       deps = [
         "cl-cc-bootstrap"
-        "cl-cc-ast"
-        "cl-cc-prolog"
-        "cl-cc-parse"
         "cl-cc-type"
       ];
     };
@@ -117,23 +130,17 @@ let
       deps = [
         "cl-cc-bootstrap"
         "cl-cc-ast"
-        "cl-cc-parse"
       ];
     };
     cl-cc-codegen = {
       src = "packages/codegen";
       deps = [
         "cl-cc-bootstrap"
-        "cl-cc-ast"
-        "cl-cc-prolog"
-        "cl-cc-parse"
-        "cl-cc-optimize"
         "cl-cc-vm"
         "cl-cc-mir"
         "cl-cc-target"
+        "cl-cc-optimize"
         "cl-cc-regalloc"
-        "cl-cc-expand"
-        "cl-cc-cps"
       ];
     };
     cl-cc-emit = {
@@ -142,7 +149,6 @@ let
         "cl-cc-vm"
         "cl-cc-mir"
         "cl-cc-optimize"
-        "cl-cc-regalloc"
         "cl-cc-codegen"
       ];
     };
@@ -156,10 +162,11 @@ let
         "cl-cc-type"
         "cl-cc-optimize"
         "cl-cc-vm"
-        "cl-cc-emit"
         "cl-cc-expand"
         "cl-cc-cps"
         "cl-cc-codegen"
+        "cl-cc-target"
+        "cl-cc-regalloc"
       ];
     };
     cl-cc-stdlib = {
@@ -173,16 +180,13 @@ let
         "cl-cc-ast"
         "cl-cc-prolog"
         "cl-cc-parse"
+        "cl-cc-php"
         "cl-cc-type"
         "cl-cc-optimize"
         "cl-cc-vm"
         "cl-cc-expand"
         "cl-cc-emit"
-        "cl-cc-cps"
-        "cl-cc-codegen"
         "cl-cc-stdlib"
-        "cl-cc-target"
-        "cl-cc-mir"
         "cl-cc-binary"
         "cl-cc-compile"
       ];
@@ -208,6 +212,7 @@ let
         "cl-cc-vm"
         "cl-cc-parse"
         "cl-cc-compile"
+        "cl-cc-runtime"
       ];
     };
   };
@@ -231,7 +236,7 @@ let
     };
     cl-cc-testing-framework = {
       src = "packages/testing-framework";
-      deps = [ "cl-cc" ];
+      deps = [ "cl-cc" "cl-cc-php" ];
     };
   };
 

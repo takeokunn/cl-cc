@@ -5,7 +5,7 @@
 ;;;; The umbrella :cl-cc uses :cl-cc/parse and re-exports via do-external-symbols.
 
 (asdf:defsystem :cl-cc-parse
-  :description "CL-CC Parse subsystem: CST, lexer, parser, lowering, and PHP frontend"
+  :description "CL-CC Parse subsystem: CST, lexer, parser, and lowering"
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
@@ -37,15 +37,4 @@
       (:file "grammar-token-stream")
       (:file "grammar")
       (:file "grammar-entrypoints")))
-   (:module "php"
-    :serial t
-    :components
-    ((:file "lexer")
-     (:file "lexer-ops")
-     (:file "parser")
-     (:file "parser-expr")
-     (:file "parser-stmt")
-     (:file "parser-class")
-     (:file "grammar")
-     (:file "grammar-stmt")))
    (:file "cst-to-ast")))

@@ -1,12 +1,11 @@
 ;;;; packages/cps/src/package.lisp — feature package for cl-cc/cps
 ;;;;
-;;;; Phase 6 (post 2026-05-01): CPS transformation extracted into its own
-;;;; feature package. Files moved here from :cl-cc/compile.
-;;;; Uses cl-cc/bootstrap and cl-cc/ast so cps source files can reference
-;;;; AST node accessors (ast-int, ast-binop, etc.) unqualified.
+;;;; CPS transformation: continuation-passing style conversion for the
+;;;; compilation pipeline. Uses cl-cc/bootstrap and cl-cc/ast so cps
+;;;; source files can reference AST node accessors unqualified.
 
 (defpackage :cl-cc/cps
-  (:use :cl :cl-cc/bootstrap :cl-cc/ast :cl-cc/parse)
+  (:use :cl :cl-cc/bootstrap :cl-cc/ast)
   (:export
    ;; ─── cps.lisp / cps-ast.lisp — CPS transformation entry points ───
    #:cps-transform

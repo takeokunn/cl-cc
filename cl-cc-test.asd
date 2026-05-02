@@ -9,7 +9,7 @@
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc :cl-cc-cli :cl-cc-testing-framework)
+  :depends-on (:cl-cc :cl-cc-cli :cl-cc-testing-framework :cl-cc-php)
   :serial t
   :components
   (;; Unit tests — each module now lives in its workspace's tests/ dir
@@ -103,19 +103,20 @@
      (:file "grammar-special-form-tests")
      (:file "pratt-tests")
      (:file "pratt-pipeline-tests")
-     (:file "php-tests")
-     (:module "php"
-      :serial t
-      :components
-      ((:file "parser-tests")
-       (:file "grammar-tests")
-       (:file "grammar-stmt-tests")))
      (:file "combinator-tests")
      (:file "combinator-tests-2")
      (:file "parser-combinator-tests")
      (:file "incremental-tests")
      (:file "cst-to-ast-tests")
      (:file "diagnostics-tests")))
+   (:module "php-tests"
+    :pathname "packages/php/tests"
+    :serial t
+    :components
+    ((:file "php-tests")
+     (:file "php-parser-tests")
+     (:file "php-grammar-tests")
+     (:file "php-grammar-stmt-tests")))
    (:module "prolog-tests"
     :pathname "packages/prolog/tests"
     :serial t
