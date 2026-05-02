@@ -21,23 +21,23 @@
 
 (deftest cps-quote-symbol-produces-funcall-k-form
   "CPS transform of ast-quote with a symbol produces (funcall k (quote val))."
-  (let ((result (cps-with-k (cl-cc/ast::make-ast-quote :value 'hello))))
+  (let ((result (cps-with-k (cl-cc/ast:make-ast-quote :value 'hello))))
     (assert-eq 'funcall (car result))
     (assert-eq 'k (second result))
     (assert-equal '(quote hello) (third result))))
 
 (deftest cps-quote-list-preserves-list-value
   "CPS transform of ast-quote with a list preserves the quoted list in third position."
-  (let ((result (cps-with-k (cl-cc/ast::make-ast-quote :value '(a b c)))))
+  (let ((result (cps-with-k (cl-cc/ast:make-ast-quote :value '(a b c)))))
     (assert-equal '(quote (a b c)) (third result))))
 
 ;;; ─── ast-the ─────────────────────────────────────────────────────────────
 
 (deftest cps-the-wraps-value-with-the-declaration
   "CPS transform of ast-the wraps the inner value in (the type ...)."
-  (let* ((node (cl-cc/ast::make-ast-the
+  (let* ((node (cl-cc/ast:make-ast-the
                 :type 'integer
-                :value (cl-cc/ast::make-ast-int :value 5)))
+                :value (cl-cc/ast:make-ast-int :value 5)))
          (result (cps-with-k node)))
     ;; Result is a (cps-transform-ast (ast-int 5) (lambda (v) (funcall k (the integer v))))
     ;; The continuation arg is a lambda containing (the integer ...) and (funcall k ...)
@@ -54,9 +54,9 @@
 
 (deftest cps-setq-contains-setq-and-funcall-k
   "CPS transform of ast-setq produces a form with (setq var ...) and (funcall k ...)."
-  (let* ((node (cl-cc/ast::make-ast-setq
+  (let* ((node (cl-cc/ast:make-ast-setq
                 :var 'x
-                :value (cl-cc/ast::make-ast-int :value 0)))
+                :value (cl-cc/ast:make-ast-int :value 0)))
          (result (cps-with-k node)))
     (labels ((contains-sym-p (form sym)
                (if (consp form)
@@ -70,7 +70,7 @@
 
 (deftest cps-values-empty-forms-produces-funcall-k-nil
   "CPS transform of ast-values with no forms produces (funcall k nil)."
-  (let* ((node (cl-cc/ast::make-ast-values :forms nil))
+  (let* ((node (cl-cc/ast:make-ast-values :forms nil))
          (result (cps-with-k node)))
     (assert-eq 'funcall (car result))
     (assert-eq 'k (second result))
@@ -78,8 +78,8 @@
 
 (deftest cps-values-single-form-produces-multiple-value-call
   "CPS transform of ast-values with one form produces a form containing multiple-value-call."
-  (let* ((node (cl-cc/ast::make-ast-values
-                :forms (list (cl-cc/ast::make-ast-int :value 42))))
+  (let* ((node (cl-cc/ast:make-ast-values
+                :forms (list (cl-cc/ast:make-ast-int :value 42))))
          (result (cps-with-k node)))
     (labels ((contains-p (form sym)
                (if (consp form)
@@ -92,9 +92,9 @@
 
 (deftest cps-apply-contains-apply-call
   "CPS transform of ast-apply produces a form containing (apply func ...)."
-  (let* ((node (cl-cc/ast::make-ast-apply
-                :func (cl-cc/ast::make-ast-var :name 'f)
-                :args (list (cl-cc/ast::make-ast-var :name 'args))))
+  (let* ((node (cl-cc/ast:make-ast-apply
+                :func (cl-cc/ast:make-ast-var :name 'f)
+                :args (list (cl-cc/ast:make-ast-var :name 'args))))
          (result (cps-with-k node)))
     (labels ((contains-apply-p (form)
                (if (consp form)
@@ -107,7 +107,7 @@
 
 (deftest cps-call-no-args-produces-funcall-k-form
   "CPS transform of a zero-arg call produces (funcall k (func))."
-  (let* ((node (cl-cc/ast::make-ast-call :func 'compute :args nil))
+  (let* ((node (cl-cc/ast:make-ast-call :func 'compute :args nil))
          (result (cps-with-k node)))
     (assert-eq 'funcall (car result))
     (assert-eq 'k (second result))
@@ -115,10 +115,10 @@
 
 (deftest cps-call-with-args-threads-args-into-call
   "CPS transform of a 2-arg call threads both arg symbols into the final (add G1 G2) form."
-  (let* ((node (cl-cc/ast::make-ast-call
+  (let* ((node (cl-cc/ast:make-ast-call
                 :func 'add
-                :args (list (cl-cc/ast::make-ast-int :value 1)
-                            (cl-cc/ast::make-ast-int :value 2))))
+                :args (list (cl-cc/ast:make-ast-int :value 1)
+                            (cl-cc/ast:make-ast-int :value 2))))
          (result (cps-with-k node)))
     ;; Walk the CPS tree to find the innermost (funcall k <call-form>)
     (labels ((find-funcall-k (form)
@@ -144,13 +144,13 @@
 
 (deftest cps-defun-produces-progn-defun-funcall-k
   "CPS transform of ast-defun produces (progn (defun ...) (funcall k 'name))."
-  (let* ((node (cl-cc/ast::make-ast-defun
+  (let* ((node (cl-cc/ast:make-ast-defun
                 :name 'square
                 :params '(x)
-                :body (list (cl-cc/ast::make-ast-binop
+                :body (list (cl-cc/ast:make-ast-binop
                              :op '*
-                             :lhs (cl-cc/ast::make-ast-var :name 'x)
-                             :rhs (cl-cc/ast::make-ast-var :name 'x)))))
+                             :lhs (cl-cc/ast:make-ast-var :name 'x)
+                             :rhs (cl-cc/ast:make-ast-var :name 'x)))))
          (result (cps-with-k node)))
     (assert-eq 'progn (car result))
     (assert-eq 'defun (caadr result))
@@ -160,7 +160,7 @@
 
 (deftest cps-defmacro-produces-progn-defmacro-funcall-k
   "CPS transform of ast-defmacro produces (progn (defmacro ...) (funcall k 'name))."
-  (let* ((node (cl-cc/ast::make-ast-defmacro
+  (let* ((node (cl-cc/ast:make-ast-defmacro
                 :name 'when1
                 :lambda-list '(test &body body)
                 :body '((list 'if test (cons 'progn body) nil))))
@@ -173,7 +173,7 @@
 
 (deftest cps-defgeneric-produces-progn-defgeneric-funcall-k
   "CPS transform of ast-defgeneric produces (progn (defgeneric ...) (funcall k 'name))."
-  (let* ((node (cl-cc/ast::make-ast-defgeneric :name 'area :params '(shape)))
+  (let* ((node (cl-cc/ast:make-ast-defgeneric :name 'area :params '(shape)))
          (result (cps-with-k node)))
     (assert-eq 'progn (car result))
     (assert-eq 'defgeneric (caadr result))
@@ -185,7 +185,7 @@
 
 (deftest cps-transform-ast-star-returns-lambda-form
   "cps-transform-ast* wraps the transformed node in (lambda (k) ...)."
-  (let* ((node (cl-cc/ast::make-ast-int :value 7))
+  (let* ((node (cl-cc/ast:make-ast-int :value 7))
          (result (cl-cc/cps::cps-transform-ast* node)))
     (assert-eq 'lambda (car result))
     (assert-= 1 (length (second result)))   ; single param
@@ -199,7 +199,7 @@
 
 (deftest cps-transform-star-ast-node-returns-lambda-with-one-param
   "cps-transform* on an AST node returns a (lambda (k) ...) form with one parameter."
-  (let* ((node (cl-cc/ast::make-ast-quote :value 'x))
+  (let* ((node (cl-cc/ast:make-ast-quote :value 'x))
          (result (cl-cc/cps::cps-transform* node)))
     (assert-eq 'lambda (car result))
     (assert-= 1 (length (second result)))))
@@ -210,9 +210,9 @@
   "%cps-lower-lambda-param: no-default → symbol; default-only → (name default); both → (name default svar)."
   (("no-default"       (list 'x nil nil)
     'x)
-   ("default-only"     (list 'y (cl-cc/ast::make-ast-int :value 42) nil)
+   ("default-only"     (list 'y (cl-cc/ast:make-ast-int :value 42) nil)
     '(y 42))
-   ("default-and-svar" (list 'z (cl-cc/ast::make-ast-int :value 0) 'z-p)
+   ("default-and-svar" (list 'z (cl-cc/ast:make-ast-int :value 0) 'z-p)
     '(z 0 z-p)))
   (slot expected)
   (assert-equal expected (cl-cc/cps::%cps-lower-lambda-param slot)))
@@ -231,7 +231,7 @@
     '(x) (list (list 'y nil nil)) nil nil
     '(x &optional y))
    ("with-optional-default"
-    '(x) (list (list 'y (cl-cc/ast::make-ast-int :value 0) nil)) nil nil
+    '(x) (list (list 'y (cl-cc/ast:make-ast-int :value 0) nil)) nil nil
     '(x &optional (y 0)))
    ("with-rest"
     '(x) nil 'rest nil
@@ -250,7 +250,7 @@
 
 (deftest cps-transform*-handles-ast-node-and-sexp
   "cps-transform* returns a truthy result for both AST nodes and plain s-expressions."
-  (assert-true (cl-cc/cps::cps-transform* (cl-cc/ast::make-ast-int :value 1)))
+  (assert-true (cl-cc/cps::cps-transform* (cl-cc/ast:make-ast-int :value 1)))
   (assert-true (cl-cc/cps::cps-transform* '42)))
 
 ;;; ─── cps-transform-eval ───────────────────────────────────────────────────

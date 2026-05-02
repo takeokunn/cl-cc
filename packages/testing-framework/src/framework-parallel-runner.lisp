@@ -192,7 +192,7 @@ When QUIT-P is true, exits via uiop:quit; otherwise returns whether any test fai
             (let* ((ordered-tests     (%order-tests-for-dependencies (coerce test-vec 'list)))
                    (effective-workers (%effective-worker-count ordered-tests parallel workers)))
               (%print-tap-header n repeat actual-seed effective-workers)
-              (when warm-stdlib (ignore-errors (cl-cc::warm-stdlib-cache)))
+              (when warm-stdlib (ignore-errors (cl-cc:warm-stdlib-cache)))
               (when coverage (format t "# Coverage report enabled~%"))
               (let* ((prior-timings   (%load-prior-timings))
                      (all-run-results

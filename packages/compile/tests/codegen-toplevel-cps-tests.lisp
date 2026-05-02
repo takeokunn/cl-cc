@@ -94,7 +94,7 @@ Accept either a raw (lambda (k) ...) form or a singleton list containing it."
 
 (deftest codegen-toplevel-variadic-lambda-stays-unsafe
   "A variadic AST-LAMBDA stays on the direct path until the CPS lambda path preserves optional/rest/key metadata."
-  (let ((lambda-ast (cl-cc/ast::make-ast-lambda
+  (let ((lambda-ast (cl-cc/ast:make-ast-lambda
                      :params '(x)
                      :optional-params (list (list 'y nil nil))
                      :body (list (cl-cc:make-ast-var :name 'x)))))

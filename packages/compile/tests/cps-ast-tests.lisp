@@ -44,56 +44,56 @@
 (deftest-each cps-ast-conservative-coverage
   "Representative extended AST nodes lower to CPS forms with the expected keyword markers."
   :cases (("values"
-           (cl-cc/ast::make-ast-values
+           (cl-cc/ast:make-ast-values
              :forms (list (cl-cc:make-ast-int :value 1) (cl-cc:make-ast-int :value 2)))
            "MULTIPLE-VALUE-CALL")
           ("mvb"
-           (cl-cc/ast::make-ast-multiple-value-bind
+           (cl-cc/ast:make-ast-multiple-value-bind
              :vars '(a b)
-             :values-form (cl-cc/ast::make-ast-values
+             :values-form (cl-cc/ast:make-ast-values
                             :forms (list (cl-cc:make-ast-int :value 1)
                                          (cl-cc:make-ast-int :value 2)))
              :body (list (cl-cc:make-ast-var :name 'a)))
            "MULTIPLE-VALUE-BIND")
           ("apply"
-           (cl-cc/ast::make-ast-apply
+           (cl-cc/ast:make-ast-apply
              :func (cl-cc:make-ast-function :name 'list)
              :args (list (cl-cc:make-ast-quote :value '(1 2))))
            "APPLY")
           ("defvar"
-           (cl-cc/ast::make-ast-defvar :name '*x :kind 'defparameter
+           (cl-cc/ast:make-ast-defvar :name '*x :kind 'defparameter
                                    :value (cl-cc:make-ast-int :value 1))
            "DEFPARAMETER")
           ("handler-case"
-           (cl-cc/ast::make-ast-handler-case
+           (cl-cc/ast:make-ast-handler-case
              :form (cl-cc:make-ast-int :value 1)
              :clauses (list (list 'error 'e (cl-cc:make-ast-int :value 0))))
            "HANDLER-CASE")
           ("make-instance"
-           (cl-cc/ast::make-ast-make-instance
+           (cl-cc/ast:make-ast-make-instance
              :class (cl-cc:make-ast-quote :value 'foo)
              :initargs (list :x (cl-cc:make-ast-int :value 1)))
            "MAKE-INSTANCE")
           ("slot-value"
-           (cl-cc/ast::make-ast-slot-value :object (cl-cc:make-ast-var :name 'obj) :slot 'bar)
+           (cl-cc/ast:make-ast-slot-value :object (cl-cc:make-ast-var :name 'obj) :slot 'bar)
            "SLOT-VALUE")
           ("set-slot-value"
-           (cl-cc/ast::make-ast-set-slot-value
+           (cl-cc/ast:make-ast-set-slot-value
              :object (cl-cc:make-ast-var :name 'obj) :slot 'bar
              :value (cl-cc:make-ast-int :value 2))
            "SETF")
           ("defclass"
-           (cl-cc/ast::make-ast-defclass :name 'foo :superclasses nil :slots nil)
+           (cl-cc/ast:make-ast-defclass :name 'foo :superclasses nil :slots nil)
            "DEFCLASS")
           ("defgeneric"
-           (cl-cc/ast::make-ast-defgeneric :name 'gf :params '(x) :combination nil)
+           (cl-cc/ast:make-ast-defgeneric :name 'gf :params '(x) :combination nil)
            "DEFGENERIC")
           ("defmethod"
-           (cl-cc/ast::make-ast-defmethod :name 'gf :qualifier nil :specializers '(t)
+           (cl-cc/ast:make-ast-defmethod :name 'gf :qualifier nil :specializers '(t)
                                       :params '(x) :body (list (cl-cc:make-ast-var :name 'x)))
            "DEFMETHOD")
           ("set-gethash"
-           (cl-cc/ast::make-ast-set-gethash
+           (cl-cc/ast:make-ast-set-gethash
              :key (cl-cc:make-ast-quote :value 'a)
              :table (cl-cc:make-ast-var :name 'tbl)
              :value (cl-cc:make-ast-int :value 1))

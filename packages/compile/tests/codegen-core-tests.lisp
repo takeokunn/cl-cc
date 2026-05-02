@@ -38,8 +38,8 @@ sink/fold paths."
           ("string-length" 5 '(string-length "hello")))
   (expected form)
   (let ((result (cl-cc/compile::optimize-ast (cl-cc/parse::lower-sexp-to-ast form))))
-    (assert-true (cl-cc/ast::ast-int-p result))
-    (assert-= expected (cl-cc/ast::ast-int-value result))))
+    (assert-true (cl-cc/ast:ast-int-p result))
+    (assert-= expected (cl-cc/ast:ast-int-value result))))
 
 (deftest ast-partial-eval-known-defun-call
   "compile-toplevel-forms preserves non-empty AST output for a known top-level defun call."

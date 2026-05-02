@@ -52,7 +52,7 @@
                 (kwargs (%compile-opts-kwargs opts stream)))
            (cond
              ((and stdlib (eq language :lisp))
-              (%run-compiled-result (apply #'cl-cc::compile-string-with-stdlib source :target :vm kwargs)
+              (%run-compiled-result (apply #'cl-cc:compile-string-with-stdlib source :target :vm kwargs)
                                     vm-state opts))
              ((eq language :php)
               (%run-compiled-result (apply #'compile-string source :target :vm :language :php kwargs)
@@ -128,7 +128,7 @@
            (let* ((vm-state (%maybe-make-profiled-vm-state opts))
                   (kwargs (%compile-opts-kwargs opts stream))
                   (compiled (if stdlib
-                                (apply #'cl-cc::compile-string-with-stdlib expr :target :vm kwargs)
+                                (apply #'cl-cc:compile-string-with-stdlib expr :target :vm kwargs)
                                 (apply #'compile-string expr :target :vm kwargs)))
                   (result (run-compiled (compilation-result-program compiled) :state vm-state)))
              (when (compile-opts-trace-emit opts)
@@ -160,7 +160,7 @@
   (let ((stdlib (flag parsed "--stdlib")))
     (cl-cc:reset-repl-state)
     (when stdlib
-      (handler-case (cl-cc:run-string-repl cl-cc::*standard-library-source*)
+      (handler-case (cl-cc:run-string-repl cl-cc:*standard-library-source*)
         (error () nil)))
     (format t "CL-CC ~A  —  ANSI Common Lisp~%" *version*)
     (format t "Type a CL form and press Return. (exit) or Ctrl+D to quit.~%~%")

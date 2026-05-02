@@ -21,7 +21,6 @@
   ((:file "package")
    (:file "pipeline-stdlib")
    (:file "pipeline-data")
-   (:file "pipeline-cps")
    (:file "pipeline")
    (:file "pipeline-runtime")
    (:file "pipeline-native")

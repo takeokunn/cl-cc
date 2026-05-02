@@ -80,8 +80,8 @@
   "parse-slot-spec: :initform is parsed as an AST integer node."
   (let ((slot (cl-cc/parse::parse-slot-spec '(count :initform 0))))
     (assert-eq 'count (cl-cc::ast-slot-name slot))
-    (assert-true (cl-cc/ast::ast-int-p (cl-cc::ast-slot-initform slot)))
-    (assert-= 0 (cl-cc/ast::ast-int-value (cl-cc::ast-slot-initform slot)))))
+    (assert-true (cl-cc/ast:ast-int-p (cl-cc::ast-slot-initform slot)))
+    (assert-= 0 (cl-cc/ast:ast-int-value (cl-cc::ast-slot-initform slot)))))
 
 ;;; ─── NEW: parse-compiler-lambda-list edge cases ────────────────────────────
 
@@ -127,21 +127,21 @@
 
 (deftest-each parse-lower-pipeline
   "parse-source then lower-sexp-to-ast: end-to-end for various forms"
-  :cases (("integer"     "42"                    #'cl-cc/ast::ast-int-p)
-          ("string"      "\"hi\""                #'cl-cc/ast::ast-quote-p)
-          ("nil"         "nil"                    #'cl-cc/ast::ast-quote-p)
-          ("t"           "t"                      #'cl-cc/ast::ast-quote-p)
-          ("symbol"      "foo"                    #'cl-cc/ast::ast-var-p)
-          ("hole"        "_"                      #'cl-cc/ast::ast-hole-p)
-          ("if"          "(if x 1 2)"             #'cl-cc/ast::ast-if-p)
-          ("let"         "(let ((x 1)) x)"        #'cl-cc/ast::ast-let-p)
-          ("lambda"      "(lambda (x) x)"         #'cl-cc/ast::ast-lambda-p)
-          ("defun"       "(defun f (x) x)"        #'cl-cc/ast::ast-defun-p)
-          ("quote"       "'hello"                  #'cl-cc/ast::ast-quote-p)
-          ("progn"       "(progn 1 2)"             #'cl-cc/ast::ast-progn-p)
-          ("setq"        "(setq x 1)"              #'cl-cc/ast::ast-setq-p)
-          ("block"       "(block b 1)"             #'cl-cc/ast::ast-block-p)
-          ("call"        "(foo 1 2)"               #'cl-cc/ast::ast-call-p))
+  :cases (("integer"     "42"                    #'cl-cc/ast:ast-int-p)
+          ("string"      "\"hi\""                #'cl-cc/ast:ast-quote-p)
+          ("nil"         "nil"                    #'cl-cc/ast:ast-quote-p)
+          ("t"           "t"                      #'cl-cc/ast:ast-quote-p)
+          ("symbol"      "foo"                    #'cl-cc/ast:ast-var-p)
+          ("hole"        "_"                      #'cl-cc/ast:ast-hole-p)
+          ("if"          "(if x 1 2)"             #'cl-cc/ast:ast-if-p)
+          ("let"         "(let ((x 1)) x)"        #'cl-cc/ast:ast-let-p)
+          ("lambda"      "(lambda (x) x)"         #'cl-cc/ast:ast-lambda-p)
+          ("defun"       "(defun f (x) x)"        #'cl-cc/ast:ast-defun-p)
+          ("quote"       "'hello"                  #'cl-cc/ast:ast-quote-p)
+          ("progn"       "(progn 1 2)"             #'cl-cc/ast:ast-progn-p)
+          ("setq"        "(setq x 1)"              #'cl-cc/ast:ast-setq-p)
+          ("block"       "(block b 1)"             #'cl-cc/ast:ast-block-p)
+          ("call"        "(foo 1 2)"               #'cl-cc/ast:ast-call-p))
   (source pred)
   (let* ((sexp (parse-one source))
          (node (lower sexp)))

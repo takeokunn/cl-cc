@@ -32,7 +32,7 @@
 
 (deftest pipeline-policy-data-tables-are-populated
   "Pipeline policy data tables expose the expected bridge and CPS metadata."
-  (assert-true (member 'cl-cc/ast::ast-defun cl-cc::*cps-host-eval-unsafe-ast-types*))
+  (assert-true (member 'cl-cc/ast:ast-defun cl-cc::*cps-host-eval-unsafe-ast-types*))
   (assert-true (member 'cl-cc/ast:ast-node cl-cc/compile::*cps-native-compile-unsupported-ast-types*))
   (assert-false (member 'cl-cc/ast:ast-setq cl-cc/compile::*cps-compile-unsupported-ast-types*))
   (assert-false (member 'cl-cc/ast:ast-setq cl-cc/compile::*cps-native-compile-unsupported-ast-types*))
@@ -44,8 +44,8 @@
 
 (deftest pipeline-policy-data-host-eval-unsafe-forms-cover-control-and-definitions
   "The host-eval unsafe policy keeps definition and non-local-control AST nodes out of the fast CPS host path."
-  (assert-true (member 'cl-cc/ast::ast-defgeneric cl-cc::*cps-host-eval-unsafe-ast-types*))
-  (assert-true (member 'cl-cc/ast::ast-unwind-protect cl-cc::*cps-host-eval-unsafe-ast-types*))
+  (assert-true (member 'cl-cc/ast:ast-defgeneric cl-cc::*cps-host-eval-unsafe-ast-types*))
+  (assert-true (member 'cl-cc/ast:ast-unwind-protect cl-cc::*cps-host-eval-unsafe-ast-types*))
   (assert-false (member 'cl-cc/ast:ast-setq cl-cc::*cps-host-eval-unsafe-ast-types*)))
 
 (deftest pipeline-maybe-cps-toplevel-forms-rewrites-safe-expression-forms

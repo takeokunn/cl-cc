@@ -94,23 +94,23 @@
 
 (deftest-each ast-constructor-basic
   "AST node constructors create correct struct types"
-  :cases (("ast-int"       (cl-cc/ast::make-ast-int :value 5)              #'cl-cc/ast::ast-int-p)
-          ("ast-var"       (cl-cc/ast::make-ast-var :name 'x)              #'cl-cc/ast::ast-var-p)
-          ("ast-quote"     (cl-cc/ast::make-ast-quote :value 'hello)       #'cl-cc/ast::ast-quote-p)
-          ("ast-progn"     (cl-cc/ast::make-ast-progn :forms nil)          #'cl-cc/ast::ast-progn-p)
-          ("ast-print"     (cl-cc/ast::make-ast-print :expr nil)           #'cl-cc/ast::ast-print-p)
-          ("ast-block"     (cl-cc/ast::make-ast-block :name 'b :body nil)  #'cl-cc/ast::ast-block-p)
-          ("ast-go"        (cl-cc/ast::make-ast-go :tag 'done)             #'cl-cc/ast::ast-go-p)
-          ("ast-setq"      (cl-cc/ast::make-ast-setq :var 'x :value nil)   #'cl-cc/ast::ast-setq-p)
-          ("ast-function"  (cl-cc/ast::make-ast-function :name 'foo)       #'cl-cc/ast::ast-function-p)
-          ("ast-the"       (cl-cc/ast::make-ast-the :type 'fixnum :value nil) #'cl-cc/ast::ast-the-p)
-          ("ast-values"    (cl-cc/ast::make-ast-values :forms nil)         #'cl-cc/ast::ast-values-p))
+  :cases (("ast-int"       (cl-cc/ast:make-ast-int :value 5)              #'cl-cc/ast:ast-int-p)
+          ("ast-var"       (cl-cc/ast:make-ast-var :name 'x)              #'cl-cc/ast:ast-var-p)
+          ("ast-quote"     (cl-cc/ast:make-ast-quote :value 'hello)       #'cl-cc/ast:ast-quote-p)
+          ("ast-progn"     (cl-cc/ast:make-ast-progn :forms nil)          #'cl-cc/ast:ast-progn-p)
+          ("ast-print"     (cl-cc/ast:make-ast-print :expr nil)           #'cl-cc/ast:ast-print-p)
+          ("ast-block"     (cl-cc/ast:make-ast-block :name 'b :body nil)  #'cl-cc/ast:ast-block-p)
+          ("ast-go"        (cl-cc/ast:make-ast-go :tag 'done)             #'cl-cc/ast:ast-go-p)
+          ("ast-setq"      (cl-cc/ast:make-ast-setq :var 'x :value nil)   #'cl-cc/ast:ast-setq-p)
+          ("ast-function"  (cl-cc/ast:make-ast-function :name 'foo)       #'cl-cc/ast:ast-function-p)
+          ("ast-the"       (cl-cc/ast:make-ast-the :type 'fixnum :value nil) #'cl-cc/ast:ast-the-p)
+          ("ast-values"    (cl-cc/ast:make-ast-values :forms nil)         #'cl-cc/ast:ast-values-p))
   (node pred)
   (assert-true (funcall pred node)))
 
 (deftest ast-source-location-fields-stored
   "AST nodes store source-file, source-line, and source-column from constructor."
-  (let ((node (cl-cc/ast::make-ast-int :value 42
+  (let ((node (cl-cc/ast:make-ast-int :value 42
                                        :source-file "test.lisp"
                                        :source-line 10
                                        :source-column 5)))
@@ -120,7 +120,7 @@
 
 (deftest ast-lambda-callable-slots
   "ast-lambda stores params, optional-params, rest-param, and key-params correctly."
-  (let ((node (cl-cc/ast::make-ast-lambda :params '(x)
+  (let ((node (cl-cc/ast:make-ast-lambda :params '(x)
                                           :optional-params '((y nil))
                                           :rest-param 'args
                                           :key-params '((z nil))
@@ -132,7 +132,7 @@
 
 (deftest ast-slot-def-full-options
   "ast-slot-def stores name, initarg, reader, writer, accessor, and type."
-  (let ((slot (cl-cc/ast::make-ast-slot-def :name 'x
+  (let ((slot (cl-cc/ast:make-ast-slot-def :name 'x
                                             :initarg :x
                                             :reader 'get-x
                                             :writer 'set-x
@@ -147,13 +147,13 @@
 
 (deftest-each ast-location-string-formats
   "ast-location-string formats file:line:col when present; falls back to <unknown location>."
-  :cases (("with-location"    (cl-cc/ast::make-ast-int :value 1
+  :cases (("with-location"    (cl-cc/ast:make-ast-int :value 1
                                 :source-file "foo.lisp" :source-line 3 :source-column 7)
            "foo.lisp:3:7")
-          ("unknown-location" (cl-cc/ast::make-ast-int :value 1)
+          ("unknown-location" (cl-cc/ast:make-ast-int :value 1)
            "<unknown location>"))
   (node expected)
-  (assert-string= expected (cl-cc/ast::ast-location-string node)))
+  (assert-string= expected (cl-cc/ast:ast-location-string node)))
 
 ;;; ─── NEW: lower-sexp-to-ast additional forms ──────────────────────────────
 
@@ -161,29 +161,29 @@
   "lower-sexp-to-ast maps all standard binary operators to ast-binop with the correct op."
   (dolist (op '(+ - * = < > <= >=))
     (let ((node (lower (list op 1 2))))
-      (assert-true (cl-cc/ast::ast-binop-p node))
-      (assert-eq op (cl-cc/ast::ast-binop-op node)))))
+      (assert-true (cl-cc/ast:ast-binop-p node))
+      (assert-eq op (cl-cc/ast:ast-binop-op node)))))
 
 (deftest lower-print-produces-ast-print-with-int-expr
   "lower-sexp-to-ast: (print 42) produces ast-print whose expr is ast-int."
   (let ((node (lower '(print 42))))
-    (assert-true (cl-cc/ast::ast-print-p node))
-    (assert-true (cl-cc/ast::ast-int-p (cl-cc/ast::ast-print-expr node)))))
+    (assert-true (cl-cc/ast:ast-print-p node))
+    (assert-true (cl-cc/ast:ast-int-p (cl-cc/ast:ast-print-expr node)))))
 
 (deftest lower-defparameter-produces-ast-defvar
   "lower-sexp-to-ast: defparameter produces ast-defvar with the correct name."
   (let ((node (lower '(defparameter *x* 99))))
-    (assert-true (cl-cc/ast::ast-defvar-p node))
-    (assert-eq '*x* (cl-cc/ast::ast-defvar-name node))))
+    (assert-true (cl-cc/ast:ast-defvar-p node))
+    (assert-eq '*x* (cl-cc/ast:ast-defvar-name node))))
 
 (deftest-each lower-extended-lambda-list-params
   "lower-sexp-to-ast: &optional, &rest, &key all populate the correct extended-params slot."
   :cases (("optional" '(lambda (x &optional (y 0)) (+ x y))
-           #'cl-cc/ast::ast-lambda-p #'cl-cc::ast-lambda-optional-params 1)
+           #'cl-cc/ast:ast-lambda-p #'cl-cc::ast-lambda-optional-params 1)
           ("rest"     '(lambda (x &rest args) args)
-           #'cl-cc/ast::ast-lambda-p #'cl-cc::ast-lambda-rest-param :rest)
+           #'cl-cc/ast:ast-lambda-p #'cl-cc::ast-lambda-rest-param :rest)
           ("key"      '(defun f (x &key (size 10)) x)
-           #'cl-cc/ast::ast-defun-p #'cl-cc::ast-defun-key-params 1))
+           #'cl-cc/ast:ast-defun-p #'cl-cc::ast-defun-key-params 1))
   (form pred-p get-slot expected)
   (let ((node (lower form)))
     (assert-true (funcall pred-p node))
@@ -199,20 +199,20 @@
 (deftest lower-multiple-value-call-produces-ast-mvc
   "lower-sexp-to-ast: multiple-value-call produces ast-multiple-value-call with 2 arg forms."
   (let ((node (lower '(multiple-value-call #'list (values 1 2) (values 3 4)))))
-    (assert-true (cl-cc/ast::ast-multiple-value-call-p node))
+    (assert-true (cl-cc/ast:ast-multiple-value-call-p node))
     (assert-= 2 (length (cl-cc::ast-mv-call-args node)))))
 
 (deftest lower-setf-slot-value-produces-ast-set-slot-value
   "lower-sexp-to-ast: (setf (slot-value obj 'x) 10) produces ast-set-slot-value."
   (let ((node (lower '(setf (slot-value obj 'x) 10))))
-    (assert-true (cl-cc/ast::ast-set-slot-value-p node))
-    (assert-eq 'x (cl-cc/ast::ast-set-slot-value-slot node))))
+    (assert-true (cl-cc/ast:ast-set-slot-value-p node))
+    (assert-eq 'x (cl-cc/ast:ast-set-slot-value-slot node))))
 
 (deftest lower-setf-simple-variable-produces-ast-setq
   "lower-sexp-to-ast: (setf x 10) for a plain variable produces ast-setq."
   (let ((node (lower '(setf x 10))))
-    (assert-true (cl-cc/ast::ast-setq-p node))
-    (assert-eq 'x (cl-cc/ast::ast-setq-var node))))
+    (assert-true (cl-cc/ast:ast-setq-p node))
+    (assert-eq 'x (cl-cc/ast:ast-setq-var node))))
 
 ;;; ─── NEW: lower-sexp-to-ast error cases ───────────────────────────────────
 

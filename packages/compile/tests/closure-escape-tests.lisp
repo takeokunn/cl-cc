@@ -14,16 +14,16 @@
   "binding-escapes-in-body-p returns true when the binding appears as a direct return value."
   (assert-true
    (cl-cc/compile::binding-escapes-in-body-p
-    (list (cl-cc/ast::make-ast-var :name 'p))
+    (list (cl-cc/ast:make-ast-var :name 'p))
     'p)))
 
 (deftest binding-escapes-safe-consumer-returns-nil
   "binding-escapes-in-body-p returns nil when the only use is via a declared safe consumer."
   (assert-null
    (cl-cc/compile::binding-escapes-in-body-p
-    (list (cl-cc/ast::make-ast-call
+    (list (cl-cc/ast:make-ast-call
            :func 'car
-           :args (list (cl-cc/ast::make-ast-var :name 'p))))
+           :args (list (cl-cc/ast:make-ast-var :name 'p))))
     'p
     :safe-consumers '("CAR"))))
 
@@ -31,26 +31,26 @@
   "binding-escapes-in-body-p returns true when the binding is captured by an inner lambda."
   (assert-true
    (cl-cc/compile::binding-escapes-in-body-p
-    (list (cl-cc/ast::make-ast-lambda
+    (list (cl-cc/ast:make-ast-lambda
            :params '()
-           :body (list (cl-cc/ast::make-ast-var :name 'p))))
+           :body (list (cl-cc/ast:make-ast-var :name 'p))))
     'p)))
 
 (deftest-each binding-escape-kinds-reports
   "binding-escape-kinds-in-body classifies escapes as :return, :external-call, or :capture."
   :cases (("direct-return"
            :return
-           (list (cl-cc/ast::make-ast-var :name 'p))
+           (list (cl-cc/ast:make-ast-var :name 'p))
            'p)
           ("external-call"
            :external-call
-           (list (cl-cc/ast::make-ast-call :func 'list
-                                       :args (list (cl-cc/ast::make-ast-var :name 'p))))
+           (list (cl-cc/ast:make-ast-call :func 'list
+                                       :args (list (cl-cc/ast:make-ast-var :name 'p))))
            'p)
           ("inner-capture"
            :capture
-           (list (cl-cc/ast::make-ast-lambda :params '()
-                                         :body (list (cl-cc/ast::make-ast-var :name 'p))))
+           (list (cl-cc/ast:make-ast-lambda :params '()
+                                         :body (list (cl-cc/ast:make-ast-var :name 'p))))
            'p))
   (expected-kind forms binding)
   (assert-true (member expected-kind (cl-cc/compile::binding-escape-kinds-in-body forms binding))))
@@ -70,30 +70,30 @@
   "binding-direct-call-count-in-body counts calls but not bare variable references."
   (assert-equal 1
                 (cl-cc/compile::binding-direct-call-count-in-body
-                 (list (cl-cc/ast::make-ast-call :func 'f :args nil)
-                       (cl-cc/ast::make-ast-var :name 'f))
+                 (list (cl-cc/ast:make-ast-call :func 'f :args nil)
+                       (cl-cc/ast:make-ast-var :name 'f))
                  'f)))
 
 (deftest binding-one-shot-single-call-returns-true
   "binding-one-shot-p returns true when the binding is called exactly once and does not escape."
   (assert-true
    (cl-cc/compile::binding-one-shot-p
-    (list (cl-cc/ast::make-ast-call :func 'f :args (list (cl-cc/ast::make-ast-int :value 1))))
+    (list (cl-cc/ast:make-ast-call :func 'f :args (list (cl-cc/ast:make-ast-int :value 1))))
     'f)))
 
 (deftest binding-one-shot-multi-call-returns-false
   "binding-one-shot-p returns false when the binding is called more than once."
   (assert-false
    (cl-cc/compile::binding-one-shot-p
-    (list (cl-cc/ast::make-ast-call :func 'f :args nil)
-          (cl-cc/ast::make-ast-call :func 'f :args nil))
+    (list (cl-cc/ast:make-ast-call :func 'f :args nil)
+          (cl-cc/ast:make-ast-call :func 'f :args nil))
     'f)))
 
 (deftest binding-one-shot-captured-in-lambda-returns-false
   "binding-one-shot-p returns false when the binding is captured inside an inner lambda."
   (assert-false
    (cl-cc/compile::binding-one-shot-p
-    (list (cl-cc/ast::make-ast-lambda :params '() :body (list (cl-cc/ast::make-ast-var :name 'f))))
+    (list (cl-cc/ast:make-ast-lambda :params '() :body (list (cl-cc/ast:make-ast-var :name 'f))))
     'f)))
 
 (deftest group-shared-sibling-captures-groups-by-capture-set
@@ -120,10 +120,10 @@
   (assert-true
    (member :capture
            (cl-cc/compile::binding-escape-kinds-in-body
-            (list (cl-cc/ast::make-ast-defun
+            (list (cl-cc/ast:make-ast-defun
                    :name 'inner
                    :params '()
-                   :body (list (cl-cc/ast::make-ast-var :name 'p))))
+                   :body (list (cl-cc/ast:make-ast-var :name 'p))))
             'p))))
 
 (deftest binding-escape-apply-arg-yields-external-call
@@ -131,9 +131,9 @@
   (assert-true
    (member :external-call
            (cl-cc/compile::binding-escape-kinds-in-body
-            (list (cl-cc/ast::make-ast-apply
-                   :func (cl-cc/ast::make-ast-var :name 'f)
-                   :args (list (cl-cc/ast::make-ast-var :name 'p))))
+            (list (cl-cc/ast:make-ast-apply
+                   :func (cl-cc/ast:make-ast-var :name 'f)
+                   :args (list (cl-cc/ast:make-ast-var :name 'p))))
             'p))))
 
 (deftest binding-escape-flet-body-yields-capture
@@ -141,9 +141,9 @@
   (assert-true
    (member :capture
            (cl-cc/compile::binding-escape-kinds-in-body
-            (list (cl-cc/ast::make-ast-flet
+            (list (cl-cc/ast:make-ast-flet
                    :bindings nil
-                   :body (list (cl-cc/ast::make-ast-var :name 'p))))
+                   :body (list (cl-cc/ast:make-ast-var :name 'p))))
             'p))))
 
 (deftest binding-no-escape-empty-body-returns-nil
@@ -155,5 +155,5 @@
   "binding-escape-kinds-in-body returns nil when the binding does not appear in the body."
   (assert-null
    (cl-cc/compile::binding-escape-kinds-in-body
-    (list (cl-cc/ast::make-ast-var :name 'q))
+    (list (cl-cc/ast:make-ast-var :name 'q))
     'p)))

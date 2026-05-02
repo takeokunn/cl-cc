@@ -39,7 +39,7 @@
         (call-ast (cl-cc:make-ast-call
                    :func 'f
                    :args (list (cl-cc:make-ast-int :value 1))))
-        (unsafe-ast (cl-cc/ast::make-ast-make-instance
+        (unsafe-ast (cl-cc/ast:make-ast-make-instance
                      :class (cl-cc:make-ast-quote :value 'point)
                      :initargs nil)))
     (assert-false (cl-cc::%cps-native-compile-safe-ast-p safe-ast))

@@ -200,6 +200,12 @@ let
         "cl-cc-vm"
         "cl-cc-runtime"
         "cl-cc-compile"
+        "cl-cc-ast"
+        "cl-cc-prolog"
+        "cl-cc-parse"
+        "cl-cc-optimize"
+        "cl-cc-emit"
+        "cl-cc-stdlib"
       ];
     };
     cl-cc-repl = {
@@ -213,6 +219,10 @@ let
         "cl-cc-parse"
         "cl-cc-compile"
         "cl-cc-runtime"
+        "cl-cc-ast"
+        "cl-cc-optimize"
+        "cl-cc-emit"
+        "cl-cc-stdlib"
       ];
     };
   };

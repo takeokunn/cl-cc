@@ -39,5 +39,5 @@
      (:file "optimizer-licm")
      (:file "optimizer-pre")
       (:file "optimizer")
-      (:file "prolog-peephole")
+      (:file "optimizer-prolog-peephole")
       (:file "optimizer-pipeline")))

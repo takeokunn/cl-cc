@@ -32,13 +32,13 @@ escape analysis treats (function f) as a direct reference to the known
 in-scope binding rather than a true escape. Forcing vm-closure emission
 from flet would require disabling the optimization specifically for this
 test, which isn't worth the test-quality tradeoff."
-  :cases (("defun"  (cl-cc/ast::make-ast-defun
+  :cases (("defun"  (cl-cc/ast:make-ast-defun
                       :name 'my-fn :params '(x)
                       :body (list (make-ast-var :name 'x))))
           ("lambda" (make-ast-lambda
                       :params '(x)
                       :body (list (make-ast-var :name 'x))))
-          ("labels" (cl-cc/ast::make-ast-labels
+          ("labels" (cl-cc/ast:make-ast-labels
                       :bindings (list (list 'g '(x) (make-ast-var :name 'x)))
                       :body (list (make-ast-call :func 'g
                                                   :args (list (make-ast-int :value 2)))))))
@@ -50,7 +50,7 @@ test, which isn't worth the test-quality tradeoff."
 (deftest codegen-defun-registers-global
   "Compiling defun registers the function name in global-functions."
   (let ((ctx (make-codegen-ctx)))
-    (compile-ast (cl-cc/ast::make-ast-defun :name 'my-fn
+    (compile-ast (cl-cc/ast:make-ast-defun :name 'my-fn
                                    :params '(x)
                                    :body (list (make-ast-var :name 'x)))
                  ctx)
@@ -60,7 +60,7 @@ test, which isn't worth the test-quality tradeoff."
   "A simple self-tail call in defun compiles to a jump back to the entry label."
   (let ((ctx (make-codegen-ctx)))
     (compile-ast
-     (cl-cc/ast::make-ast-defun
+     (cl-cc/ast:make-ast-defun
       :name 'loop-fn
       :params '(x)
       :body (list (make-ast-if
@@ -88,7 +88,7 @@ test, which isn't worth the test-quality tradeoff."
   "Self-tail loop lowering snapshots argument registers before rewriting params."
   (let ((ctx (make-codegen-ctx)))
     (compile-ast
-     (cl-cc/ast::make-ast-defun
+     (cl-cc/ast:make-ast-defun
       :name 'swap-loop
       :params '(x y)
       :body (list (make-ast-if
@@ -121,7 +121,7 @@ test, which isn't worth the test-quality tradeoff."
 (deftest codegen-defvar-compilation
   "Compiling defvar registers in global-variables and emits vm-const for the value."
   (let ((ctx (make-codegen-ctx)))
-    (compile-ast (cl-cc/ast::make-ast-defvar :name 'test-codegen-var
+    (compile-ast (cl-cc/ast:make-ast-defvar :name 'test-codegen-var
                                    :value (make-ast-int :value 99))
                  ctx)
     (assert-true (gethash 'test-codegen-var (cl-cc/compile::ctx-global-variables ctx)))

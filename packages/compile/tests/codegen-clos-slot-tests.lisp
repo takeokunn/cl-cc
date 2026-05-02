@@ -9,8 +9,8 @@
   "slot-value emits vm-slot-read with correct slot name and returns a register."
   (let* ((ctx (make-codegen-ctx)))
     (setf (cl-cc/compile::ctx-env ctx) (list (cons 'obj :R42)))
-    (let* ((reg  (compile-ast (cl-cc/ast::make-ast-slot-value
-                                :object (cl-cc/ast::make-ast-var :name 'obj)
+    (let* ((reg  (compile-ast (cl-cc/ast:make-ast-slot-value
+                                :object (cl-cc/ast:make-ast-var :name 'obj)
                                 :slot 'radius)
                                ctx))
            (inst (codegen-find-inst ctx 'cl-cc/vm::vm-slot-read)))
@@ -22,12 +22,12 @@
   "A non-escaping local make-instance binding can serve slot-value from split slot registers."
   (let ((ctx (make-codegen-ctx)))
     (let ((reg (compile-ast
-                (cl-cc/ast::make-ast-let
-                 :bindings (list (cons 'obj (cl-cc/ast::make-ast-make-instance
-                                            :class (cl-cc/ast::make-ast-quote :value 'my-dog)
-                                            :initargs (list (cons :name (cl-cc/ast::make-ast-quote :value 'rex))))))
-                 :body (list (cl-cc/ast::make-ast-slot-value
-                              :object (cl-cc/ast::make-ast-var :name 'obj)
+                (cl-cc/ast:make-ast-let
+                 :bindings (list (cons 'obj (cl-cc/ast:make-ast-make-instance
+                                            :class (cl-cc/ast:make-ast-quote :value 'my-dog)
+                                            :initargs (list (cons :name (cl-cc/ast:make-ast-quote :value 'rex))))))
+                 :body (list (cl-cc/ast:make-ast-slot-value
+                              :object (cl-cc/ast:make-ast-var :name 'obj)
                               :slot 'name)))
                 ctx)))
       (assert-true (keywordp reg))
@@ -39,13 +39,13 @@
   "Captured make-instance bindings keep the normal heap-backed slot path."
   (let ((ctx (make-codegen-ctx)))
     (let ((reg (compile-ast
-                (cl-cc/ast::make-ast-let
-                 :bindings (list (cons 'obj (cl-cc/ast::make-ast-make-instance
-                                            :class (cl-cc/ast::make-ast-quote :value 'my-dog)
-                                            :initargs (list (cons :name (cl-cc/ast::make-ast-quote :value 'rex))))))
-                 :body (list (cl-cc/ast::make-ast-lambda :params '() :body (list (cl-cc/ast::make-ast-var :name 'obj)))
-                             (cl-cc/ast::make-ast-slot-value
-                              :object (cl-cc/ast::make-ast-var :name 'obj)
+                (cl-cc/ast:make-ast-let
+                 :bindings (list (cons 'obj (cl-cc/ast:make-ast-make-instance
+                                            :class (cl-cc/ast:make-ast-quote :value 'my-dog)
+                                            :initargs (list (cons :name (cl-cc/ast:make-ast-quote :value 'rex))))))
+                 :body (list (cl-cc/ast:make-ast-lambda :params '() :body (list (cl-cc/ast:make-ast-var :name 'obj)))
+                             (cl-cc/ast:make-ast-slot-value
+                              :object (cl-cc/ast:make-ast-var :name 'obj)
                               :slot 'name)))
                 ctx)))
        (assert-true (keywordp reg))
@@ -62,24 +62,24 @@
          (cons-pos nil))
     (setf (cl-cc/compile::ctx-env ctx) (list (cons 'flag :R10)))
     (setf ast
-          (cl-cc/ast::make-ast-let
+          (cl-cc/ast:make-ast-let
            :bindings
            (list (cons 'obj
-                       (cl-cc/ast::make-ast-make-instance
-                        :class (cl-cc/ast::make-ast-quote :value 'my-dog)
+                       (cl-cc/ast:make-ast-make-instance
+                        :class (cl-cc/ast:make-ast-quote :value 'my-dog)
                         :initargs
                         (list (cons :name
-                                    (cl-cc/ast::make-ast-call
+                                    (cl-cc/ast:make-ast-call
                                      :func 'cons
-                                     :args (list (cl-cc/ast::make-ast-int :value 1)
-                                                 (cl-cc/ast::make-ast-int :value 2))))))))
+                                     :args (list (cl-cc/ast:make-ast-int :value 1)
+                                                 (cl-cc/ast:make-ast-int :value 2))))))))
            :body
-           (list (cl-cc/ast::make-ast-if
-                  :cond (cl-cc/ast::make-ast-var :name 'flag)
-                   :then (cl-cc/ast::make-ast-slot-value
-                          :object (cl-cc/ast::make-ast-var :name 'obj)
+           (list (cl-cc/ast:make-ast-if
+                  :cond (cl-cc/ast:make-ast-var :name 'flag)
+                   :then (cl-cc/ast:make-ast-slot-value
+                          :object (cl-cc/ast:make-ast-var :name 'obj)
                           :slot 'name)
-                   :else (cl-cc/ast::make-ast-int :value 0)))))
+                   :else (cl-cc/ast:make-ast-int :value 0)))))
 
     (setf reg (compile-ast ast ctx))
     (setf insts (codegen-instructions ctx)
@@ -95,22 +95,22 @@
 (deftest codegen-multibinding-branch-local-make-instance-sinks-initarg-evaluation
   "The generalized branch sink handles a non-escaping make-instance binding with sibling let bindings."
   (let* ((ctx (make-codegen-ctx))
-         (ast (cl-cc/ast::make-ast-let
+         (ast (cl-cc/ast:make-ast-let
                :bindings (list (cons 'obj
-                                     (cl-cc/ast::make-ast-make-instance
-                                      :class (cl-cc/ast::make-ast-quote :value 'my-dog)
+                                     (cl-cc/ast:make-ast-make-instance
+                                      :class (cl-cc/ast:make-ast-quote :value 'my-dog)
                                       :initargs (list (cons :name
-                                                            (cl-cc/ast::make-ast-call
+                                                            (cl-cc/ast:make-ast-call
                                                              :func 'cons
-                                                             :args (list (cl-cc/ast::make-ast-int :value 1)
-                                                                         (cl-cc/ast::make-ast-int :value 2)))))))
-                               (cons 'flag (cl-cc/ast::make-ast-int :value 1)))
-               :body (list (cl-cc/ast::make-ast-if
-                            :cond (cl-cc/ast::make-ast-var :name 'flag)
-                            :then (cl-cc/ast::make-ast-slot-value
-                                   :object (cl-cc/ast::make-ast-var :name 'obj)
+                                                             :args (list (cl-cc/ast:make-ast-int :value 1)
+                                                                         (cl-cc/ast:make-ast-int :value 2)))))))
+                               (cons 'flag (cl-cc/ast:make-ast-int :value 1)))
+               :body (list (cl-cc/ast:make-ast-if
+                            :cond (cl-cc/ast:make-ast-var :name 'flag)
+                            :then (cl-cc/ast:make-ast-slot-value
+                                   :object (cl-cc/ast:make-ast-var :name 'obj)
                                    :slot 'name)
-                            :else (cl-cc/ast::make-ast-int :value 0)))))
+                            :else (cl-cc/ast:make-ast-int :value 0)))))
          (reg (compile-ast ast ctx))
          (insts (codegen-instructions ctx))
          (jump-pos (position-if (lambda (inst) (typep inst 'cl-cc/vm::vm-jump-zero)) insts))
@@ -132,29 +132,29 @@
          (cons-pos nil))
     (setf (cl-cc/compile::ctx-env ctx) (list (cons 'flag :R10)))
     (setf ast
-          (cl-cc/ast::make-ast-let
+          (cl-cc/ast:make-ast-let
            :bindings
            (list (cons 'obj
-                       (cl-cc/ast::make-ast-make-instance
-                        :class (cl-cc/ast::make-ast-quote :value 'my-dog)
+                       (cl-cc/ast:make-ast-make-instance
+                        :class (cl-cc/ast:make-ast-quote :value 'my-dog)
                         :initargs
                         (list (cons :name
-                                    (cl-cc/ast::make-ast-call
+                                    (cl-cc/ast:make-ast-call
                                      :func 'cons
-                                     :args (list (cl-cc/ast::make-ast-int :value 1)
-                                                 (cl-cc/ast::make-ast-int :value 2))))))))
+                                     :args (list (cl-cc/ast:make-ast-int :value 1)
+                                                 (cl-cc/ast:make-ast-int :value 2))))))))
            :body
-           (list (cl-cc/ast::make-ast-if
-                  :cond (cl-cc/ast::make-ast-var :name 'flag)
-                  :then (cl-cc/ast::make-ast-let
+           (list (cl-cc/ast:make-ast-if
+                  :cond (cl-cc/ast:make-ast-var :name 'flag)
+                  :then (cl-cc/ast:make-ast-let
                          :bindings (list (cons 'obj
-                                                (cl-cc/ast::make-ast-make-instance
-                                                 :class (cl-cc/ast::make-ast-quote :value 'my-dog)
-                                                 :initargs (list (cons :name (cl-cc/ast::make-ast-quote :value "shadow"))))))
-                          :body (list (cl-cc/ast::make-ast-slot-value
-                                       :object (cl-cc/ast::make-ast-var :name 'obj)
+                                                (cl-cc/ast:make-ast-make-instance
+                                                 :class (cl-cc/ast:make-ast-quote :value 'my-dog)
+                                                 :initargs (list (cons :name (cl-cc/ast:make-ast-quote :value "shadow"))))))
+                          :body (list (cl-cc/ast:make-ast-slot-value
+                                       :object (cl-cc/ast:make-ast-var :name 'obj)
                                        :slot 'name)))
-                   :else (cl-cc/ast::make-ast-int :value 0)))))
+                   :else (cl-cc/ast:make-ast-int :value 0)))))
 
     (setf reg (compile-ast ast ctx))
     (setf insts (codegen-instructions ctx)
@@ -173,10 +173,10 @@
   "set-slot-value emits vm-slot-write with correct slot name and returns a register."
   (let* ((ctx (make-codegen-ctx)))
     (setf (cl-cc/compile::ctx-env ctx) (list (cons 'obj :R60)))
-    (let* ((reg  (compile-ast (cl-cc/ast::make-ast-set-slot-value
-                                :object (cl-cc/ast::make-ast-var :name 'obj)
+    (let* ((reg  (compile-ast (cl-cc/ast:make-ast-set-slot-value
+                                :object (cl-cc/ast:make-ast-var :name 'obj)
                                 :slot 'weight
-                                :value (cl-cc/ast::make-ast-int :value 42))
+                                :value (cl-cc/ast:make-ast-int :value 42))
                                ctx))
            (inst (codegen-find-inst ctx 'cl-cc/vm::vm-slot-write)))
       (assert-true inst)
@@ -187,16 +187,16 @@
   "A non-escaping local make-instance binding updates split slot registers directly."
   (let ((ctx (make-codegen-ctx)))
     (let ((reg (compile-ast
-                (cl-cc/ast::make-ast-let
-                 :bindings (list (cons 'obj (cl-cc/ast::make-ast-make-instance
-                                            :class (cl-cc/ast::make-ast-quote :value 'my-dog)
-                                            :initargs (list (cons :weight (cl-cc/ast::make-ast-int :value 1))))))
-                 :body (list (cl-cc/ast::make-ast-set-slot-value
-                              :object (cl-cc/ast::make-ast-var :name 'obj)
+                (cl-cc/ast:make-ast-let
+                 :bindings (list (cons 'obj (cl-cc/ast:make-ast-make-instance
+                                            :class (cl-cc/ast:make-ast-quote :value 'my-dog)
+                                            :initargs (list (cons :weight (cl-cc/ast:make-ast-int :value 1))))))
+                 :body (list (cl-cc/ast:make-ast-set-slot-value
+                              :object (cl-cc/ast:make-ast-var :name 'obj)
                               :slot 'weight
-                              :value (cl-cc/ast::make-ast-int :value 42))
-                             (cl-cc/ast::make-ast-slot-value
-                              :object (cl-cc/ast::make-ast-var :name 'obj)
+                              :value (cl-cc/ast:make-ast-int :value 42))
+                             (cl-cc/ast:make-ast-slot-value
+                              :object (cl-cc/ast:make-ast-var :name 'obj)
                               :slot 'weight)))
                 ctx)))
       (assert-true (keywordp reg))

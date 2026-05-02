@@ -6,7 +6,7 @@
 (deftest codegen-values-compilation
   "Compiling ast-values emits vm-values and returns a register."
   (let* ((ctx (make-codegen-ctx))
-         (reg (compile-ast (cl-cc/ast::make-ast-values
+         (reg (compile-ast (cl-cc/ast:make-ast-values
                              :forms (list (make-ast-int :value 1)
                                           (make-ast-int :value 2)
                                           (make-ast-int :value 3)))
@@ -24,9 +24,9 @@
 (deftest codegen-mvb-compilation-cases
   "ast-values mvb skips vm-values/vm-mv-bind; non-ast-values mvb uses generic vm-mv-bind path."
   (let* ((ctx (make-codegen-ctx))
-         (reg (compile-ast (cl-cc/ast::make-ast-multiple-value-bind
+         (reg (compile-ast (cl-cc/ast:make-ast-multiple-value-bind
                               :vars '(a b)
-                              :values-form (cl-cc/ast::make-ast-values
+                              :values-form (cl-cc/ast:make-ast-values
                                             :forms (list (make-ast-int :value 1)
                                                          (make-ast-int :value 2)))
                               :body (list (make-ast-var :name 'a)))
@@ -35,7 +35,7 @@
     (assert-false (codegen-find-inst ctx 'cl-cc/vm::vm-mv-bind))
     (assert-true (keywordp reg)))
   (let* ((ctx (make-codegen-ctx))
-         (reg (compile-ast (cl-cc/ast::make-ast-multiple-value-bind
+         (reg (compile-ast (cl-cc/ast:make-ast-multiple-value-bind
                              :vars '(a b)
                              :values-form (make-ast-call :func 'floor
                                                          :args (list (make-ast-int :value 17)
@@ -55,13 +55,13 @@
 (deftest-each codegen-mv-call-direct-path
   "multiple-value-call uses vm-call directly for explicit ast-values and zero-arg cases."
   :cases (("explicit-values"
-           (cl-cc/ast::make-ast-multiple-value-call
+           (cl-cc/ast:make-ast-multiple-value-call
              :func (make-ast-function :name '+)
-             :args (list (cl-cc/ast::make-ast-values
+             :args (list (cl-cc/ast:make-ast-values
                           :forms (list (make-ast-int :value 1)
                                        (make-ast-int :value 2))))))
           ("no-args"
-           (cl-cc/ast::make-ast-multiple-value-call
+           (cl-cc/ast:make-ast-multiple-value-call
              :func (make-ast-function :name 'list)
              :args nil)))
   (ast)
@@ -75,9 +75,9 @@
 (deftest codegen-mv-call-mixed-args-still-uses-apply-path
   "Non-ast-values arguments keep the generic multiple-value-call path."
   (let* ((ctx (make-codegen-ctx))
-         (reg (compile-ast (cl-cc/ast::make-ast-multiple-value-call
+         (reg (compile-ast (cl-cc/ast:make-ast-multiple-value-call
                              :func (make-ast-function :name '+)
-                             :args (list (cl-cc/ast::make-ast-values
+                             :args (list (cl-cc/ast:make-ast-values
                                           :forms (list (make-ast-int :value 1)
                                                        (make-ast-int :value 2)))
                                          (make-ast-call :func 'floor
@@ -117,10 +117,10 @@
 
 (deftest-each codegen-exception-form-emits-establish-handler
   "Both unwind-protect and handler-case emit vm-establish-handler."
-  :cases (("unwind-protect" (cl-cc/ast::make-ast-unwind-protect
+  :cases (("unwind-protect" (cl-cc/ast:make-ast-unwind-protect
                               :protected (make-ast-int :value 42)
                               :cleanup (list (make-ast-int :value 0))))
-          ("handler-case"   (cl-cc/ast::make-ast-handler-case
+          ("handler-case"   (cl-cc/ast:make-ast-handler-case
                               :form (make-ast-int :value 42)
                               :clauses (list (list 'error 'e (make-ast-int :value 0))))))
   (ast)
@@ -131,11 +131,11 @@
 (deftest-each codegen-exception-form-returns-register
   "Both unwind-protect and handler-case compilation return a register keyword."
   :cases (("unwind-protect"
-           (cl-cc/ast::make-ast-unwind-protect
+           (cl-cc/ast:make-ast-unwind-protect
              :protected (make-ast-int :value 7)
              :cleanup (list (make-ast-int :value 0))))
           ("handler-case"
-           (cl-cc/ast::make-ast-handler-case
+           (cl-cc/ast:make-ast-handler-case
              :form (make-ast-int :value 10)
              :clauses (list (list 'error nil (make-ast-int :value 0))))))
   (ast)

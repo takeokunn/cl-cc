@@ -99,7 +99,7 @@
 (deftest-each parse-and-lower-cases
   "parse-and-lower: returns list, produces ast-int for integers, handles multiple forms."
   :cases (("returns-list"      "(+ 1 2)" (lambda (asts) (and (listp asts) (not (null asts)))))
-          ("integer-ast-int"   "42"      (lambda (asts) (cl-cc/ast::ast-int-p (first asts))))
+          ("integer-ast-int"   "42"      (lambda (asts) (cl-cc/ast:ast-int-p (first asts))))
           ("multiple-3-forms"  "1 2 3"   (lambda (asts) (= 3 (length asts)))))
   (source pred)
   (assert-true (funcall pred (cl-cc:parse-and-lower source))))

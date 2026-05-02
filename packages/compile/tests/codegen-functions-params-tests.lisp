@@ -14,13 +14,13 @@
 
 (deftest-each extract-constant-value-constants
   "extract-constant-value returns the constant and T for compile-time literals."
-  :cases (("int-42"       (cl-cc/ast::make-ast-int   :value 42)    42  t)
-          ("int-0"        (cl-cc/ast::make-ast-int   :value 0)      0  t)
-          ("int-neg"      (cl-cc/ast::make-ast-int   :value -7)    -7  t)
-          ("quote-symbol" (cl-cc/ast::make-ast-quote :value 'hello) 'hello t)
-          ("quote-list"   (cl-cc/ast::make-ast-quote :value '(1 2)) '(1 2) t)
-          ("var-t"        (cl-cc/ast::make-ast-var   :name 't)      t  t)
-          ("var-nil"      (cl-cc/ast::make-ast-var   :name 'nil)    nil t))
+  :cases (("int-42"       (cl-cc/ast:make-ast-int   :value 42)    42  t)
+          ("int-0"        (cl-cc/ast:make-ast-int   :value 0)      0  t)
+          ("int-neg"      (cl-cc/ast:make-ast-int   :value -7)    -7  t)
+          ("quote-symbol" (cl-cc/ast:make-ast-quote :value 'hello) 'hello t)
+          ("quote-list"   (cl-cc/ast:make-ast-quote :value '(1 2)) '(1 2) t)
+          ("var-t"        (cl-cc/ast:make-ast-var   :name 't)      t  t)
+          ("var-nil"      (cl-cc/ast:make-ast-var   :name 'nil)    nil t))
   (ast expected-val expected-const)
   (multiple-value-bind (val is-const)
       (cl-cc/compile::extract-constant-value ast)
@@ -29,11 +29,11 @@
 
 (deftest-each extract-constant-value-non-constants
   "extract-constant-value returns (nil nil) for non-constant AST nodes."
-  :cases (("var-x"    (cl-cc/ast::make-ast-var  :name 'x))
-          ("call"     (cl-cc/ast::make-ast-call  :func 'f :args nil))
-          ("binop"    (cl-cc/ast::make-ast-binop :op '+ :lhs (cl-cc/ast::make-ast-int :value 1)
-                                                         :rhs (cl-cc/ast::make-ast-int :value 2)))
-          ("lambda"   (cl-cc/ast::make-ast-lambda :params '(x) :body nil)))
+  :cases (("var-x"    (cl-cc/ast:make-ast-var  :name 'x))
+          ("call"     (cl-cc/ast:make-ast-call  :func 'f :args nil))
+          ("binop"    (cl-cc/ast:make-ast-binop :op '+ :lhs (cl-cc/ast:make-ast-int :value 1)
+                                                         :rhs (cl-cc/ast:make-ast-int :value 2)))
+          ("lambda"   (cl-cc/ast:make-ast-lambda :params '(x) :body nil)))
   (ast)
   (multiple-value-bind (val is-const)
       (cl-cc/compile::extract-constant-value ast)

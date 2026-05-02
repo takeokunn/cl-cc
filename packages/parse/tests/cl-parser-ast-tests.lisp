@@ -113,9 +113,9 @@
 (deftest lower-defmacro-form
   "lower-sexp-to-ast: defmacro form -> ast-defmacro"
   (let ((node (lower '(defmacro my-mac (x) `(list ,x)))))
-    (assert-true (cl-cc/ast::ast-defmacro-p node))
-    (assert-eq 'my-mac (cl-cc/ast::ast-defmacro-name node))
-    (assert-equal '(x) (cl-cc/ast::ast-defmacro-lambda-list node))))
+    (assert-true (cl-cc/ast:ast-defmacro-p node))
+    (assert-eq 'my-mac (cl-cc/ast:ast-defmacro-name node))
+    (assert-equal '(x) (cl-cc/ast:ast-defmacro-lambda-list node))))
 
 ;;; ─── defclass lowering ───────────────────────────────────────────────────────
 
@@ -125,20 +125,20 @@
           ("with-superclass" '(defclass colored-point (point) (color)) 'colored-point '(point) 1))
   (form expected-name expected-supers expected-slots)
   (let ((node (lower form)))
-    (assert-true (cl-cc/ast::ast-defclass-p node))
-    (assert-eq expected-name (cl-cc/ast::ast-defclass-name node))
-    (assert-equal expected-supers (cl-cc/ast::ast-defclass-superclasses node))
-    (assert-= expected-slots (length (cl-cc/ast::ast-defclass-slots node)))))
+    (assert-true (cl-cc/ast:ast-defclass-p node))
+    (assert-eq expected-name (cl-cc/ast:ast-defclass-name node))
+    (assert-equal expected-supers (cl-cc/ast:ast-defclass-superclasses node))
+    (assert-= expected-slots (length (cl-cc/ast:ast-defclass-slots node)))))
 
 ;;; ─── defgeneric / defmethod lowering ────────────────────────────────────────
 
 (deftest-each lower-generic-dispatch-forms
   "lower-sexp-to-ast: defgeneric and defmethod produce correct AST nodes."
   :cases (("defgeneric" '(defgeneric area (shape))
-           #'cl-cc/ast::ast-defgeneric-p #'cl-cc/ast::ast-defgeneric-name #'cl-cc/ast::ast-defgeneric-params
+           #'cl-cc/ast:ast-defgeneric-p #'cl-cc/ast:ast-defgeneric-name #'cl-cc/ast:ast-defgeneric-params
            'area '(shape))
           ("defmethod"  '(defmethod area ((s circle)) (* pi (expt (slot-value s 'radius) 2)))
-           #'cl-cc/ast::ast-defmethod-p #'cl-cc/ast::ast-defmethod-name #'cl-cc/ast::ast-defmethod-params
+           #'cl-cc/ast:ast-defmethod-p #'cl-cc/ast:ast-defmethod-name #'cl-cc/ast:ast-defmethod-params
            'area '(s)))
   (form pred-p get-name get-params expected-name expected-params)
   (let ((node (lower form)))
@@ -150,8 +150,8 @@
 
 (deftest-each lower-clos-access-forms
   "lower-sexp-to-ast: make-instance and slot-value produce correct node types."
-  :cases (("make-instance" '(make-instance 'point :x 1 :y 2) #'cl-cc/ast::ast-make-instance-p)
-          ("slot-value"    '(slot-value obj 'name)            #'cl-cc/ast::ast-slot-value-p))
+  :cases (("make-instance" '(make-instance 'point :x 1 :y 2) #'cl-cc/ast:ast-make-instance-p)
+          ("slot-value"    '(slot-value obj 'name)            #'cl-cc/ast:ast-slot-value-p))
   (form pred)
   (let ((node (lower form)))
     (assert-true (funcall pred node))))

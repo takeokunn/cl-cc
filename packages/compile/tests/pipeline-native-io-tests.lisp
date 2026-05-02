@@ -171,7 +171,7 @@
         (mv-ast (cl-cc::make-ast-multiple-value-prog1
                  :first (cl-cc:make-ast-int :value 1)
                  :forms (list (cl-cc:make-ast-int :value 2))))
-        (unsafe-ast (cl-cc/ast::make-ast-make-instance
+        (unsafe-ast (cl-cc/ast:make-ast-make-instance
                      :class (cl-cc:make-ast-quote :value 'point)
                      :initargs nil)))
     (assert-false (cl-cc::%cps-native-compile-safe-ast-p safe-ast))

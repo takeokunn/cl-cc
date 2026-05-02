@@ -11,7 +11,7 @@
                                     ((x :initarg :x :initform 0))
                                     (:default-initargs :x 42)))))
     (assert-type ast-defclass ast)
-    (let ((di (cl-cc/ast::ast-defclass-default-initargs ast)))
+    (let ((di (cl-cc/ast:ast-defclass-default-initargs ast)))
       (assert-= 1 (length di))
       (assert-eq :x (car (first di))))))
 
@@ -175,7 +175,7 @@
   (form expected-qualifier)
   (let ((ast (lower-sexp-to-ast form)))
     (assert-type ast-defmethod ast)
-    (assert-eq expected-qualifier (cl-cc/ast::ast-defmethod-qualifier ast))))
+    (assert-eq expected-qualifier (cl-cc/ast:ast-defmethod-qualifier ast))))
 
 (deftest clos-defmethod-around-without-cnm
   "defmethod :around without call-next-method returns around's value.

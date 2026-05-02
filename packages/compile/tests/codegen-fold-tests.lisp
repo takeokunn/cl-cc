@@ -23,58 +23,58 @@
 
 (deftest-each ast-constant-number-value-extracts-integer
   "%ast-constant-number-value returns the integer for ast-int and integer ast-quote."
-  :cases (("ast-int"           42   (cl-cc/ast::make-ast-int   :value 42))
-          ("ast-quote-integer" 7    (cl-cc/ast::make-ast-quote :value 7)))
+  :cases (("ast-int"           42   (cl-cc/ast:make-ast-int   :value 42))
+          ("ast-quote-integer" 7    (cl-cc/ast:make-ast-quote :value 7)))
   (expected node)
   (assert-= expected (cl-cc/compile::%ast-constant-number-value node)))
 
 (deftest ast-constant-number-value-nil-for-non-integer-quote
   "%ast-constant-number-value returns NIL for an ast-quote wrapping a non-integer."
-  (assert-null (cl-cc/compile::%ast-constant-number-value (cl-cc/ast::make-ast-quote :value "hello"))))
+  (assert-null (cl-cc/compile::%ast-constant-number-value (cl-cc/ast:make-ast-quote :value "hello"))))
 
 (deftest ast-constant-number-value-nil-for-variable-node
   "%ast-constant-number-value returns NIL for a variable node."
-  (assert-null (cl-cc/compile::%ast-constant-number-value (cl-cc/ast::make-ast-var :name 'x))))
+  (assert-null (cl-cc/compile::%ast-constant-number-value (cl-cc/ast:make-ast-var :name 'x))))
 
 ;;; ─── %ast-constant-node-p ─────────────────────────────────────────────────
 
 (deftest-each ast-constant-node-p-true-for-constants
   "%ast-constant-node-p is true for ast-int and ast-quote."
-  :cases (("int"   (cl-cc/ast::make-ast-int   :value 1))
-          ("quote" (cl-cc/ast::make-ast-quote :value 'x)))
+  :cases (("int"   (cl-cc/ast:make-ast-int   :value 1))
+          ("quote" (cl-cc/ast:make-ast-quote :value 'x)))
   (node)
   (assert-true (cl-cc/compile::%ast-constant-node-p node)))
 
 (deftest ast-constant-node-p-false-for-var
   "%ast-constant-node-p is false for a variable node."
   (assert-null
-   (cl-cc/compile::%ast-constant-node-p (cl-cc/ast::make-ast-var :name 'x))))
+   (cl-cc/compile::%ast-constant-node-p (cl-cc/ast:make-ast-var :name 'x))))
 
 ;;; ─── %ast->compile-time-value ─────────────────────────────────────────────
 
 (deftest ast->compile-time-value-extracts-integer-from-ast-int
   "%ast->compile-time-value returns the integer value from an ast-int node."
-  (assert-= 99 (cl-cc/compile::%ast->compile-time-value (cl-cc/ast::make-ast-int :value 99))))
+  (assert-= 99 (cl-cc/compile::%ast->compile-time-value (cl-cc/ast:make-ast-int :value 99))))
 
 (deftest ast->compile-time-value-extracts-list-from-ast-quote
   "%ast->compile-time-value returns the quoted value from an ast-quote node."
-  (assert-equal '(a b) (cl-cc/compile::%ast->compile-time-value (cl-cc/ast::make-ast-quote :value '(a b)))))
+  (assert-equal '(a b) (cl-cc/compile::%ast->compile-time-value (cl-cc/ast:make-ast-quote :value '(a b)))))
 
 (deftest ast->compile-time-value-returns-nil-for-variable
   "%ast->compile-time-value returns NIL for a non-constant variable node."
-  (assert-null (cl-cc/compile::%ast->compile-time-value (cl-cc/ast::make-ast-var :name 'x))))
+  (assert-null (cl-cc/compile::%ast->compile-time-value (cl-cc/ast:make-ast-var :name 'x))))
 
 ;;; ─── %compile-time-value->ast ─────────────────────────────────────────────
 
 (deftest compile-time-value->ast-wraps-integers-and-symbols
   "%compile-time-value->ast wraps integers as ast-int and other values as ast-quote."
-  (let* ((proto     (cl-cc/ast::make-ast-int :value 0))
+  (let* ((proto     (cl-cc/ast:make-ast-int :value 0))
          (int-node  (cl-cc/compile::%compile-time-value->ast 5     proto))
          (sym-node  (cl-cc/compile::%compile-time-value->ast 'hello proto)))
     (assert-true (typep int-node 'cl-cc::ast-int))
-    (assert-= 5 (cl-cc/ast::ast-int-value int-node))
+    (assert-= 5 (cl-cc/ast:ast-int-value int-node))
     (assert-true (typep sym-node 'cl-cc::ast-quote))
-    (assert-eq 'hello (cl-cc/ast::ast-quote-value sym-node))))
+    (assert-eq 'hello (cl-cc/ast:ast-quote-value sym-node))))
 
 ;;; ─── %compile-time-eval-binop ─────────────────────────────────────────────
 
@@ -141,24 +141,24 @@
 
 (deftest fold-ast-binop-folds-integer-literals
   "%fold-ast-binop returns an ast-int when both operands are integer literals."
-  (let* ((node (cl-cc/ast::make-ast-binop
+  (let* ((node (cl-cc/ast:make-ast-binop
                 :op '+
-                :lhs (cl-cc/ast::make-ast-int :value 0)
-                :rhs (cl-cc/ast::make-ast-int :value 0)))
-         (lhs  (cl-cc/ast::make-ast-int :value 10))
-         (rhs  (cl-cc/ast::make-ast-int :value 32))
+                :lhs (cl-cc/ast:make-ast-int :value 0)
+                :rhs (cl-cc/ast:make-ast-int :value 0)))
+         (lhs  (cl-cc/ast:make-ast-int :value 10))
+         (rhs  (cl-cc/ast:make-ast-int :value 32))
          (result (cl-cc/compile::%fold-ast-binop node lhs rhs)))
     (assert-true (typep result 'cl-cc::ast-int))
-    (assert-= 42 (cl-cc/ast::ast-int-value result))))
+    (assert-= 42 (cl-cc/ast:ast-int-value result))))
 
 (deftest fold-ast-binop-does-not-fold-non-constants
   "%fold-ast-binop returns a binop unchanged when either operand is not a constant."
-  (let* ((node (cl-cc/ast::make-ast-binop
+  (let* ((node (cl-cc/ast:make-ast-binop
                 :op '+
-                :lhs (cl-cc/ast::make-ast-int :value 0)
-                :rhs (cl-cc/ast::make-ast-int :value 0)))
-         (lhs  (cl-cc/ast::make-ast-var :name 'x))
-         (rhs  (cl-cc/ast::make-ast-int :value 5))
+                :lhs (cl-cc/ast:make-ast-int :value 0)
+                :rhs (cl-cc/ast:make-ast-int :value 0)))
+         (lhs  (cl-cc/ast:make-ast-var :name 'x))
+         (rhs  (cl-cc/ast:make-ast-int :value 5))
          (result (cl-cc/compile::%fold-ast-binop node lhs rhs)))
     (assert-true (typep result 'cl-cc::ast-binop))))
 
@@ -168,11 +168,11 @@
   "%evaluate-ast evaluates ast-int and ast-quote to their values."
   (%with-clean-ct-env
     (multiple-value-bind (value ok)
-        (cl-cc/compile::%evaluate-ast (cl-cc/ast::make-ast-int :value 17) 10)
+        (cl-cc/compile::%evaluate-ast (cl-cc/ast:make-ast-int :value 17) 10)
       (assert-true ok)
       (assert-= 17 value))
     (multiple-value-bind (value ok)
-        (cl-cc/compile::%evaluate-ast (cl-cc/ast::make-ast-quote :value 'hello) 10)
+        (cl-cc/compile::%evaluate-ast (cl-cc/ast:make-ast-quote :value 'hello) 10)
       (assert-true ok)
       (assert-eq 'hello value))))
 
@@ -181,7 +181,7 @@
   (multiple-value-bind (value ok)
       (let ((cl-cc/compile::*compile-time-value-env* '((n . 42)))
             (cl-cc/compile::*compile-time-function-env* nil))
-        (cl-cc/compile::%evaluate-ast (cl-cc/ast::make-ast-var :name 'n) 10))
+        (cl-cc/compile::%evaluate-ast (cl-cc/ast:make-ast-var :name 'n) 10))
     (assert-true ok)
     (assert-= 42 value)))
 
@@ -189,7 +189,7 @@
   "%evaluate-ast returns (values nil nil) for an unbound variable."
   (%with-clean-ct-env
     (multiple-value-bind (value ok)
-        (cl-cc/compile::%evaluate-ast (cl-cc/ast::make-ast-var :name 'x) 10)
+        (cl-cc/compile::%evaluate-ast (cl-cc/ast:make-ast-var :name 'x) 10)
       (assert-null value)
       (assert-null ok))))
 
@@ -197,7 +197,7 @@
   "%evaluate-ast returns (values nil nil) when the depth counter is negative."
   (%with-clean-ct-env
     (multiple-value-bind (value ok)
-        (cl-cc/compile::%evaluate-ast (cl-cc/ast::make-ast-int :value 5) -1)
+        (cl-cc/compile::%evaluate-ast (cl-cc/ast:make-ast-int :value 5) -1)
       (assert-null value)
       (assert-null ok))))
 
@@ -206,8 +206,8 @@
   (multiple-value-bind (value ok)
       (%with-clean-ct-env
         (cl-cc/compile::%evaluate-ast
-         (cl-cc/ast::make-ast-binop :op '+ :lhs (cl-cc/ast::make-ast-int :value 3)
-                                    :rhs (cl-cc/ast::make-ast-int :value 4))
+         (cl-cc/ast:make-ast-binop :op '+ :lhs (cl-cc/ast:make-ast-int :value 3)
+                                    :rhs (cl-cc/ast:make-ast-int :value 4))
          10))
     (assert-true ok)
     (assert-= 7 value)))
@@ -227,7 +227,7 @@
   (%with-clean-ct-env
     (multiple-value-bind (value ok)
         (cl-cc/compile::%evaluate-ast-sequence
-         (list (cl-cc/ast::make-ast-int :value 1) (cl-cc/ast::make-ast-int :value 2))
+         (list (cl-cc/ast:make-ast-int :value 1) (cl-cc/ast:make-ast-int :value 2))
          nil nil 10)
       (assert-true ok)
       (assert-= 2 value))))
@@ -237,7 +237,7 @@
   (%with-clean-ct-env
     (multiple-value-bind (value ok)
         (cl-cc/compile::%evaluate-ast-sequence
-         (list (cl-cc/ast::make-ast-var :name 'unk-xyz))
+         (list (cl-cc/ast:make-ast-var :name 'unk-xyz))
          nil nil 10)
       (assert-null ok)
       (assert-null value))))
@@ -246,15 +246,15 @@
 
 (deftest-each evaluate-ast-ast-if-cases
   "%evaluate-ast ast-if: truthy condition picks then-branch; falsy picks else-branch."
-  :cases (("truthy" (cl-cc/ast::make-ast-int   :value 1)   42)
-          ("falsy"  (cl-cc/ast::make-ast-quote :value nil)  0))
+  :cases (("truthy" (cl-cc/ast:make-ast-int   :value 1)   42)
+          ("falsy"  (cl-cc/ast:make-ast-quote :value nil)  0))
   (cond-node expected)
   (multiple-value-bind (value ok)
       (%with-clean-ct-env
         (cl-cc/compile::%evaluate-ast
-         (cl-cc/ast::make-ast-if :cond cond-node
-                                 :then (cl-cc/ast::make-ast-int :value 42)
-                                 :else (cl-cc/ast::make-ast-int :value 0))
+         (cl-cc/ast:make-ast-if :cond cond-node
+                                 :then (cl-cc/ast:make-ast-int :value 42)
+                                 :else (cl-cc/ast:make-ast-int :value 0))
          10))
     (assert-true ok)
     (assert-= expected value)))
@@ -264,8 +264,8 @@
   (%with-clean-ct-env
     (multiple-value-bind (value ok)
         (cl-cc/compile::%evaluate-ast
-         (cl-cc/ast::make-ast-progn :forms (list (cl-cc/ast::make-ast-int :value 1)
-                                                  (cl-cc/ast::make-ast-int :value 2)))
+         (cl-cc/ast:make-ast-progn :forms (list (cl-cc/ast:make-ast-int :value 1)
+                                                  (cl-cc/ast:make-ast-int :value 2)))
          10)
       (assert-true ok)
       (assert-= 2 value))))
@@ -275,7 +275,7 @@
   (%with-clean-ct-env
     (multiple-value-bind (value ok)
         (cl-cc/compile::%evaluate-ast
-         (cl-cc/ast::make-ast-progn :forms (list (cl-cc/ast::make-ast-var :name 'unk-xyz)))
+         (cl-cc/ast:make-ast-progn :forms (list (cl-cc/ast:make-ast-var :name 'unk-xyz)))
          10)
       (assert-null ok)
       (assert-null value))))
@@ -285,8 +285,8 @@
   (multiple-value-bind (value ok)
       (%with-clean-ct-env
         (cl-cc/compile::%evaluate-ast
-         (cl-cc/ast::make-ast-let :bindings (list (cons 'x (cl-cc/ast::make-ast-int :value 5)))
-                                  :body (list (cl-cc/ast::make-ast-var :name 'x)))
+         (cl-cc/ast:make-ast-let :bindings (list (cons 'x (cl-cc/ast:make-ast-int :value 5)))
+                                  :body (list (cl-cc/ast:make-ast-var :name 'x)))
          10))
     (assert-true ok)
     (assert-= 5 value)))
@@ -296,7 +296,7 @@
   (multiple-value-bind (value ok)
       (%with-clean-ct-env
         (cl-cc/compile::%evaluate-ast
-         (cl-cc/ast::make-ast-the :type 'fixnum :value (cl-cc/ast::make-ast-int :value 99))
+         (cl-cc/ast:make-ast-the :type 'fixnum :value (cl-cc/ast:make-ast-int :value 99))
          10))
     (assert-true ok)
     (assert-= 99 value)))
@@ -306,8 +306,8 @@
   (multiple-value-bind (value ok)
       (%with-clean-ct-env
         (cl-cc/compile::%evaluate-ast
-         (cl-cc/ast::make-ast-binop :op 'unknown-op :lhs (cl-cc/ast::make-ast-var :name 'x)
-                                    :rhs (cl-cc/ast::make-ast-var :name 'y))
+         (cl-cc/ast:make-ast-binop :op 'unknown-op :lhs (cl-cc/ast:make-ast-var :name 'x)
+                                    :rhs (cl-cc/ast:make-ast-var :name 'y))
          10))
     (assert-null ok)
     (assert-null value)))
@@ -319,7 +319,7 @@
   (%with-clean-ct-env
     (multiple-value-bind (value ok)
         (cl-cc/compile::%compile-time-eval-call
-         (cl-cc/ast::make-ast-var :name 'string-length) (list "hello") 10)
+         (cl-cc/ast:make-ast-var :name 'string-length) (list "hello") 10)
       (assert-true ok)
       (assert-= 5 value))))
 
@@ -328,7 +328,7 @@
   (%with-clean-ct-env
     (multiple-value-bind (value ok)
         (cl-cc/compile::%compile-time-eval-call
-         (cl-cc/ast::make-ast-var :name 'not) (list nil) 10)
+         (cl-cc/ast:make-ast-var :name 'not) (list nil) 10)
       (assert-true ok)
       (assert-true value))))
 
@@ -337,8 +337,8 @@
   (%with-clean-ct-env
     (multiple-value-bind (value ok)
         (cl-cc/compile::%compile-time-eval-call
-         (cl-cc/ast::make-ast-lambda :params '(x)
-                                     :body (list (cl-cc/ast::make-ast-var :name 'x))
+         (cl-cc/ast:make-ast-lambda :params '(x)
+                                     :body (list (cl-cc/ast:make-ast-var :name 'x))
                                      :optional-params nil :rest-param nil :key-params nil)
          (list 7) 10)
       (assert-true ok)
@@ -348,5 +348,5 @@
   "%compile-time-eval-call returns NIL for an unknown function symbol."
   (%with-clean-ct-env
     (assert-null (cl-cc/compile::%compile-time-eval-call
-                  (cl-cc/ast::make-ast-var :name 'completely-unknown-fn-xyz)
+                  (cl-cc/ast:make-ast-var :name 'completely-unknown-fn-xyz)
                   (list 1) 10))))

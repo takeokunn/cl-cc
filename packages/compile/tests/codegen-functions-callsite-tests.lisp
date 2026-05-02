@@ -12,7 +12,7 @@
 (deftest codegen-apply-compilation
   "Compiling ast-apply with a constant spread list emits vm-call and returns a register."
   (let* ((ctx (make-codegen-ctx))
-         (reg (compile-ast (cl-cc/ast::make-ast-apply
+         (reg (compile-ast (cl-cc/ast:make-ast-apply
                                :func (make-ast-function :name '+)
                                :args (list (make-ast-quote :value '(1 2 3))))
                              ctx)))

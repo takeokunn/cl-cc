@@ -190,12 +190,12 @@
   :cases (("symbol"
            'x
            (lambda (node)
-             (assert-true (cl-cc/ast::ast-var-p node))
-             (assert-eq 'x (cl-cc/ast::ast-var-name node))))
+             (assert-true (cl-cc/ast:ast-var-p node))
+             (assert-eq 'x (cl-cc/ast:ast-var-name node))))
           ("underscore"
            '_
            (lambda (node)
-             (assert-true (cl-cc/ast::ast-hole-p node)))))
+             (assert-true (cl-cc/ast:ast-hole-p node)))))
   (input verify)
   (let ((node (lower input)))
     (funcall verify node)))
@@ -205,17 +205,17 @@
   :cases (("nary-left-fold"
            '(+ 1 2 3)
            (lambda (node)
-             (assert-true (cl-cc/ast::ast-binop-p node))
-             (assert-eq '+ (cl-cc/ast::ast-binop-op node))
-             (assert-true (cl-cc/ast::ast-binop-p (cl-cc/ast::ast-binop-lhs node)))
-             (assert-= 3 (cl-cc/ast::ast-int-value (cl-cc/ast::ast-binop-rhs node)))))
+             (assert-true (cl-cc/ast:ast-binop-p node))
+             (assert-eq '+ (cl-cc/ast:ast-binop-op node))
+             (assert-true (cl-cc/ast:ast-binop-p (cl-cc/ast:ast-binop-lhs node)))
+             (assert-= 3 (cl-cc/ast:ast-int-value (cl-cc/ast:ast-binop-rhs node)))))
           ("unary-minus"
            '(- 7)
            (lambda (node)
-             (assert-true (cl-cc/ast::ast-binop-p node))
-             (assert-eq '- (cl-cc/ast::ast-binop-op node))
-             (assert-= 0 (cl-cc/ast::ast-int-value (cl-cc/ast::ast-binop-lhs node)))
-             (assert-= 7 (cl-cc/ast::ast-int-value (cl-cc/ast::ast-binop-rhs node))))))
+             (assert-true (cl-cc/ast:ast-binop-p node))
+             (assert-eq '- (cl-cc/ast:ast-binop-op node))
+             (assert-= 0 (cl-cc/ast:ast-int-value (cl-cc/ast:ast-binop-lhs node)))
+             (assert-= 7 (cl-cc/ast:ast-int-value (cl-cc/ast:ast-binop-rhs node))))))
   (form verify)
   (funcall verify (lower form)))
 
@@ -225,7 +225,7 @@
           ("t"     t)
           ("float" 3.14))
   (input)
-  (assert-true (cl-cc/ast::ast-quote-p (lower input))))
+  (assert-true (cl-cc/ast:ast-quote-p (lower input))))
 
 (deftest-each lower-literal-values-in-ast-quote
   "lower-sexp-to-ast: string and character literals produce ast-quote preserving their value."
@@ -233,6 +233,6 @@
           ("character" #\a))
   (input)
   (let ((node (lower input)))
-    (assert-true (cl-cc/ast::ast-quote-p node))
-    (assert-equal input (cl-cc/ast::ast-quote-value node))))
+    (assert-true (cl-cc/ast:ast-quote-p node))
+    (assert-equal input (cl-cc/ast:ast-quote-value node))))
 

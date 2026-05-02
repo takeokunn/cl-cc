@@ -93,25 +93,25 @@
 
 (deftest-each infer-syntactic-value-p-truthy
   "Syntactic values: int, var, lambda, quote, function-ref, typed-hole are generalizable."
-  :cases (("int"       (cl-cc/ast::make-ast-int      :value 42))
-          ("var"       (cl-cc/ast::make-ast-var       :name 'x))
-          ("lambda"    (cl-cc/ast::make-ast-lambda    :params '(x) :body nil))
-          ("quote"     (cl-cc/ast::make-ast-quote     :value 'foo))
-          ("function"  (cl-cc/ast::make-ast-function  :name 'f))
-          ("hole"      (cl-cc/ast::make-ast-hole)))
+  :cases (("int"       (cl-cc/ast:make-ast-int      :value 42))
+          ("var"       (cl-cc/ast:make-ast-var       :name 'x))
+          ("lambda"    (cl-cc/ast:make-ast-lambda    :params '(x) :body nil))
+          ("quote"     (cl-cc/ast:make-ast-quote     :value 'foo))
+          ("function"  (cl-cc/ast:make-ast-function  :name 'f))
+          ("hole"      (cl-cc/ast:make-ast-hole)))
   (ast)
   (assert-true (cl-cc/type::syntactic-value-p ast)))
 
 (deftest-each infer-syntactic-value-p-falsy
   "Non-syntactic values: call, binop, if, let, progn are not generalizable (value restriction)."
-  :cases (("call"   (cl-cc/ast::make-ast-call   :func 'f :args nil))
-          ("binop"  (cl-cc/ast::make-ast-binop  :op '+ :lhs (cl-cc/ast::make-ast-int :value 1)
-                                                        :rhs (cl-cc/ast::make-ast-int :value 2)))
-          ("if"     (cl-cc/ast::make-ast-if     :cond (cl-cc/ast::make-ast-var :name 'c)
-                                                 :then (cl-cc/ast::make-ast-int :value 1)
-                                                 :else (cl-cc/ast::make-ast-int :value 2)))
-          ("let"    (cl-cc/ast::make-ast-let    :bindings nil :body nil))
-          ("progn"  (cl-cc/ast::make-ast-progn  :forms nil)))
+  :cases (("call"   (cl-cc/ast:make-ast-call   :func 'f :args nil))
+          ("binop"  (cl-cc/ast:make-ast-binop  :op '+ :lhs (cl-cc/ast:make-ast-int :value 1)
+                                                        :rhs (cl-cc/ast:make-ast-int :value 2)))
+          ("if"     (cl-cc/ast:make-ast-if     :cond (cl-cc/ast:make-ast-var :name 'c)
+                                                 :then (cl-cc/ast:make-ast-int :value 1)
+                                                 :else (cl-cc/ast:make-ast-int :value 2)))
+          ("let"    (cl-cc/ast:make-ast-let    :bindings nil :body nil))
+          ("progn"  (cl-cc/ast:make-ast-progn  :forms nil)))
   (ast)
   (assert-false (cl-cc/type::syntactic-value-p ast)))
 

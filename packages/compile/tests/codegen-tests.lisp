@@ -199,8 +199,8 @@ stable, isolated context."
                                                              :rhs (make-ast-int :value 3)))))
          (result (cl-cc/compile::optimize-ast node)))
     (assert-true (typep result 'cl-cc::ast-progn))
-    (assert-true (typep (first (cl-cc/ast::ast-progn-forms result)) 'cl-cc::ast-int))
-    (assert-= 5 (cl-cc/ast::ast-int-value (first (cl-cc/ast::ast-progn-forms result))))))
+    (assert-true (typep (first (cl-cc/ast:ast-progn-forms result)) 'cl-cc::ast-int))
+    (assert-= 5 (cl-cc/ast:ast-int-value (first (cl-cc/ast:ast-progn-forms result))))))
 
 ;;; ─── %let-binding-special-p ─────────────────────────────────────────────
 
