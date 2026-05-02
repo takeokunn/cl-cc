@@ -68,7 +68,7 @@ Returns the byte vector, or NIL on error."
   "emit-a64-vm-bswap emits a single REV Wd, Wn instruction."
   (let ((bytes (%a64-collect-bytes
                 (lambda (s)
-                  (cl-cc/codegen::emit-a64-vm-bswap (cl-cc::make-vm-bswap :dst :R0 :src :R1) s)))))
+                  (cl-cc/codegen::emit-a64-vm-bswap (cl-cc:make-vm-bswap :dst :R0 :src :R1) s)))))
     (assert-= 4 (length bytes))
     (assert-= #x20 (nth 0 bytes))
     (assert-= #x08 (nth 1 bytes))
@@ -92,9 +92,9 @@ Returns the byte vector, or NIL on error."
   (let ((bytes (%a64-collect-bytes
                 (lambda (s)
                   (cl-cc/codegen::emit-a64-vm-move
-                   (cl-cc::make-vm-move :dst :R0 :src :R0) s)))))
+                   (cl-cc:make-vm-move :dst :R0 :src :R0) s)))))
     (assert-= 0 (length bytes)))
-  (assert-= 0 (cl-cc/codegen::a64-instruction-size (cl-cc::make-vm-move :dst :R0 :src :R0))))
+  (assert-= 0 (cl-cc/codegen::a64-instruction-size (cl-cc:make-vm-move :dst :R0 :src :R0))))
 
 (deftest aarch64-scs-single-register-encodings
   "Shadow call stack helper encodings for STR-post, LDR-pre, B.cond, and BRK are stable."
@@ -122,7 +122,7 @@ Returns the byte vector, or NIL on error."
   (let ((bytes (%a64-collect-bytes
                 (lambda (s)
                   (cl-cc/codegen::emit-a64-instruction
-                   (cl-cc::make-vm-tail-call :dst :R0 :func :R1 :args nil)
+                   (cl-cc:make-vm-tail-call :dst :R0 :func :R1 :args nil)
                    s 0 (make-hash-table :test #'eq))))))
     (assert-= 4 (length bytes))
     (assert-= #x20 (nth 0 bytes))
@@ -132,9 +132,9 @@ Returns the byte vector, or NIL on error."
 
 (deftest aarch64-build-label-offsets-account-for-elided-self-move
   "build-a64-label-offsets does not advance offsets for self-moves elided at emit time."
-  (let* ((insts (list (cl-cc::make-vm-move :dst :R0 :src :R0)
-                      (cl-cc::make-vm-label :name "after-self-move")
-                      (cl-cc::make-vm-halt :reg :R0)))
+  (let* ((insts (list (cl-cc:make-vm-move :dst :R0 :src :R0)
+                      (cl-cc:make-vm-label :name "after-self-move")
+                      (cl-cc:make-vm-halt :reg :R0)))
          (offsets (cl-cc/codegen::build-a64-label-offsets insts 0)))
     (assert-= 0 (gethash "after-self-move" offsets))))
 
@@ -143,11 +143,11 @@ Returns the byte vector, or NIL on error."
   (let ((min-bytes (%a64-collect-bytes
                     (lambda (s)
                       (cl-cc/codegen::emit-a64-vm-min
-                       (cl-cc::make-vm-min :dst :R0 :lhs :R1 :rhs :R2) s))))
+                       (cl-cc:make-vm-min :dst :R0 :lhs :R1 :rhs :R2) s))))
         (max-bytes (%a64-collect-bytes
                     (lambda (s)
                       (cl-cc/codegen::emit-a64-vm-max
-                       (cl-cc::make-vm-max :dst :R0 :lhs :R1 :rhs :R2) s)))))
+                       (cl-cc:make-vm-max :dst :R0 :lhs :R1 :rhs :R2) s)))))
     (assert-= 8 (length min-bytes))
     (assert-= 8 (length max-bytes))
     ;; CMP X1, X2 => 3F 00 02 EB; CSEL X0, X1, X2, LT => 20 B0 82 9A
@@ -174,7 +174,7 @@ Returns the byte vector, or NIL on error."
   (let ((bytes (%a64-collect-bytes
                 (lambda (s)
                   (cl-cc/codegen::emit-a64-vm-select
-                   (cl-cc::make-vm-select :dst :R0 :cond-reg :R1 :then-reg :R2 :else-reg :R3)
+                   (cl-cc:make-vm-select :dst :R0 :cond-reg :R1 :then-reg :R2 :else-reg :R3)
                    s)))))
     (assert-= 12 (length bytes))
     ;; First instruction is MOV X0, X3; second is CMP X1, XZR; third is CSEL
@@ -188,7 +188,7 @@ Returns the byte vector, or NIL on error."
   (let ((bytes (%a64-collect-bytes
                 (lambda (s)
                   (cl-cc/codegen::emit-a64-vm-jump-zero
-                   (cl-cc::make-vm-jump-zero :reg :R1 :label "L1")
+                   (cl-cc:make-vm-jump-zero :reg :R1 :label "L1")
                    s 0 (let ((ht (make-hash-table :test #'equal)))
                          (setf (gethash "L1" ht) 4)
                          ht))))))

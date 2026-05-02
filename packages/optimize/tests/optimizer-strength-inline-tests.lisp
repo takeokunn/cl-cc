@@ -30,22 +30,22 @@
              (assert-true (member op out))
              (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-ash)) out))))
           ("div-rhs-pow2"
-           8 (cl-cc::make-vm-div :dst :r2 :lhs :r0 :rhs :r1)
+           8 (cl-cc:make-vm-div :dst :r2 :lhs :r0 :rhs :r1)
            (lambda (out op)
              (assert-false (member op out))
              (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-ash)) out))))
           ("div-non-power-of-2"
-           7 (cl-cc::make-vm-div :dst :r2 :lhs :r0 :rhs :r1)
+           7 (cl-cc:make-vm-div :dst :r2 :lhs :r0 :rhs :r1)
            (lambda (out op)
              (assert-true (member op out))
              (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-ash)) out))))
           ("mod-pow2"
-           8 (cl-cc::make-vm-mod :dst :r2 :lhs :r0 :rhs :r1)
+           8 (cl-cc:make-vm-mod :dst :r2 :lhs :r0 :rhs :r1)
            (lambda (out op)
              (assert-false (member op out))
              (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-logand)) out))))
           ("mod-non-power-of-2"
-           7 (cl-cc::make-vm-mod :dst :r2 :lhs :r0 :rhs :r1)
+           7 (cl-cc:make-vm-mod :dst :r2 :lhs :r0 :rhs :r1)
            (lambda (out op)
              (assert-true (member op out))
              (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-logand)) out)))))

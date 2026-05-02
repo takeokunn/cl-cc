@@ -36,7 +36,7 @@
 (deftest wasm-tb-collect-regs-vm-const-touches-dst
   "collect-registers-from-instructions allocates a local for vm-const dst."
   (let ((reg-map (make-test-wasm-reg-map))
-        (insts (list (cl-cc::make-vm-const :dst :R0 :value 42))))
+        (insts (list (cl-cc:make-vm-const :dst :R0 :value 42))))
     (cl-cc/codegen::collect-registers-from-instructions insts reg-map)
     ;; :R0 should now be in the table
     (assert-true (gethash :R0 (cl-cc/codegen::wasm-reg-map-table reg-map)))))
@@ -44,7 +44,7 @@
 (deftest wasm-tb-collect-regs-vm-move-touches-src-and-dst
   "collect-registers-from-instructions allocates locals for both src and dst of vm-move."
   (let ((reg-map (make-test-wasm-reg-map))
-        (insts (list (cl-cc::make-vm-move :dst :R1 :src :R2))))
+        (insts (list (cl-cc:make-vm-move :dst :R1 :src :R2))))
     (cl-cc/codegen::collect-registers-from-instructions insts reg-map)
     (assert-true (gethash :R1 (cl-cc/codegen::wasm-reg-map-table reg-map)))
     (assert-true (gethash :R2 (cl-cc/codegen::wasm-reg-map-table reg-map)))))
@@ -52,8 +52,8 @@
 (deftest wasm-tb-collect-regs-assigns-unique-indices
   "collect-registers-from-instructions gives each register a unique local index."
   (let ((reg-map (make-test-wasm-reg-map))
-        (insts (list (cl-cc::make-vm-move :dst :R0 :src :R1)
-                     (cl-cc::make-vm-move :dst :R2 :src :R3))))
+        (insts (list (cl-cc:make-vm-move :dst :R0 :src :R1)
+                     (cl-cc:make-vm-move :dst :R2 :src :R3))))
     (cl-cc/codegen::collect-registers-from-instructions insts reg-map)
     (let ((tbl (cl-cc/codegen::wasm-reg-map-table reg-map)))
       (let ((indices (mapcar (lambda (k) (gethash k tbl)) '(:R0 :R1 :R2 :R3))))
@@ -62,8 +62,8 @@
 (deftest wasm-tb-collect-regs-idempotent-for-same-register
   "collect-registers-from-instructions reuses the same index for repeated register."
   (let ((reg-map (make-test-wasm-reg-map))
-        (insts (list (cl-cc::make-vm-const :dst :R0 :value 1)
-                     (cl-cc::make-vm-const :dst :R0 :value 2))))
+        (insts (list (cl-cc:make-vm-const :dst :R0 :value 1)
+                     (cl-cc:make-vm-const :dst :R0 :value 2))))
     (cl-cc/codegen::collect-registers-from-instructions insts reg-map)
     ;; :R0 appears twice but should have exactly one entry
     (assert-= 1 (hash-table-count (cl-cc/codegen::wasm-reg-map-table reg-map)))))

@@ -61,12 +61,12 @@
 (deftest optimizer-lognot-constant
   "(lognot 0) folds at compile time: value is -1 and no vm-lognot remains."
   (assert-equal -1 (run-string "(lognot 0)"))
-  (let* ((instrs (list (cl-cc::make-vm-const :dst :r1 :value 0)
-                       (cl-cc::make-vm-lognot :dst :r0 :src :r1)))
+  (let* ((instrs (list (cl-cc:make-vm-const :dst :r1 :value 0)
+                       (cl-cc:make-vm-lognot :dst :r0 :src :r1)))
          (out (cl-cc/optimize::opt-pass-fold instrs)))
     (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-lognot)) out))
     (assert-true (some (lambda (i)
-                         (and (cl-cc::vm-const-p i)
+                         (and (cl-cc:vm-const-p i)
                               (eq :r0 (cl-cc/vm::vm-dst i))
                               (eql -1 (cl-cc/vm::vm-value i))))
                        out))))

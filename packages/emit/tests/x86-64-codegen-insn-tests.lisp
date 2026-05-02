@@ -16,7 +16,7 @@
   "emit-vm-bswap emits a MOV followed by BSWAP r32."
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
-                  (cl-cc/codegen::emit-vm-bswap (cl-cc::make-vm-bswap :dst :R0 :src :R1) s)))))
+                  (cl-cc/codegen::emit-vm-bswap (cl-cc:make-vm-bswap :dst :R0 :src :R1) s)))))
     (assert-= 5 (length bytes))
     (assert-= #x48 (first bytes))
     (assert-= #x89 (second bytes))
@@ -29,7 +29,7 @@
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
                   (cl-cc/codegen::emit-vm-add
-                   (cl-cc::make-vm-add :dst :R0 :lhs :R1 :rhs :R2) s)))))
+                   (cl-cc:make-vm-add :dst :R0 :lhs :R1 :rhs :R2) s)))))
     (assert-= 6 (length bytes))
     ;; MOV rax,rcx / ADD rax,rdx
     (assert-= #x48 (nth 0 bytes))
@@ -44,7 +44,7 @@
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
                   (cl-cc/codegen::emit-vm-select
-                   (cl-cc::make-vm-select :dst :R0 :cond-reg :R1 :then-reg :R2 :else-reg :R3)
+                   (cl-cc:make-vm-select :dst :R0 :cond-reg :R1 :then-reg :R2 :else-reg :R3)
                    s)))))
     (assert-= 10 (length bytes))
     (assert-= #x48 (nth 0 bytes))
@@ -60,7 +60,7 @@
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
                   (cl-cc/codegen::emit-vm-jump-zero-inst
-                   (cl-cc::make-vm-jump-zero :reg :R1 :label "L1")
+                   (cl-cc:make-vm-jump-zero :reg :R1 :label "L1")
                    s 0 (let ((ht (make-hash-table :test #'equal)))
                          (setf (gethash "L1" ht) 9)
                          ht))))))
@@ -75,7 +75,7 @@
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
                   (cl-cc/codegen::emit-vm-logcount
-                   (cl-cc::make-vm-logcount :dst :R0 :src :R1) s)))))
+                   (cl-cc:make-vm-logcount :dst :R0 :src :R1) s)))))
     (assert-= 5 (length bytes))
     (assert-= #xF3 (nth 0 bytes))
     (assert-= #x48 (nth 1 bytes))
@@ -87,7 +87,7 @@
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
                   (cl-cc/codegen::emit-vm-integer-length
-                   (cl-cc::make-vm-integer-length :dst :R0 :src :R1) s)))))
+                   (cl-cc:make-vm-integer-length :dst :R0 :src :R1) s)))))
     (assert-= 16 (length bytes))
     ;; xor rax,rax / test rcx,rcx / je rel8 / bsr rax,rcx / add rax,1
     (assert-= #x48 (nth 0 bytes))
@@ -104,7 +104,7 @@
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
                   (cl-cc/codegen::emit-vm-call-like-inst
-                   (cl-cc::make-vm-call :dst :R0 :func :R1 :args nil) s)))))
+                   (cl-cc:make-vm-call :dst :R0 :func :R1 :args nil) s)))))
     (assert-= 6 (length bytes))
     (assert-= #x48 (nth 0 bytes))
     (assert-= #xFF (nth 1 bytes))
@@ -118,7 +118,7 @@
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
                   (cl-cc/codegen::emit-vm-tail-call-inst
-                   (cl-cc::make-vm-tail-call :dst :R0 :func :R1 :args nil) s)))))
+                   (cl-cc:make-vm-tail-call :dst :R0 :func :R1 :args nil) s)))))
     (assert-= 3 (length bytes))
     (assert-= #x48 (nth 0 bytes))
     (assert-= #xFF (nth 1 bytes))

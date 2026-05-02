@@ -10,7 +10,7 @@
   "Run vm-typep against VALUE and TYPE-NAME, returning the destination register."
   (%run-unary-inst-with
    (lambda (src)
-     (cl-cc::make-vm-typep :dst 0 :src src :type-name type-name))
+     (cl-cc:make-vm-typep :dst 0 :src src :type-name type-name))
    value))
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
@@ -33,8 +33,8 @@
           ;; Compound: refine (base + predicate). 'refine' is cl-cc-specific; other
           ;; compound heads (or/and/not/member/eql/values/function/satisfies) are
           ;; CL symbols imported into :cl-cc/test, so they just work unqualified.
-          ("refine-true"     42         '(cl-cc::refine fixnum plusp) 1)
-          ("refine-false"    -1         '(cl-cc::refine fixnum plusp) 0)
+          ("refine-true"     42         '(cl-cc:refine fixnum plusp) 1)
+          ("refine-false"    -1         '(cl-cc:refine fixnum plusp) 0)
           ;; Compound: or
           ("or-first"        42         '(or integer string)  1)
           ("or-second"       "hi"       '(or integer string)  1)

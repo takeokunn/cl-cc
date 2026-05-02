@@ -11,18 +11,18 @@
 (deftest vm-list-make-list
   "vm-make-list: N nils for size N; empty list for size 0."
   (with-test-vm (s (1 3))
-    (exec1 (cl-cc::make-vm-make-list :dst 0 :size 1) s)
+    (exec1 (cl-cc:make-vm-make-list :dst 0 :size 1) s)
     (assert-equal '(nil nil nil) (cl-cc:vm-reg-get s 0)))
   (with-test-vm (s (1 0))
-    (exec1 (cl-cc::make-vm-make-list :dst 0 :size 1) s)
+    (exec1 (cl-cc:make-vm-make-list :dst 0 :size 1) s)
     (assert-null (cl-cc:vm-reg-get s 0))))
 
 ;;; ─── length / reverse / append ──────────────────────────────────────────────
 
 (deftest-each vm-list-unary-src-dst-ops
   "Unary list operations: src-in-reg-1 → dst-in-reg-0."
-  :cases (("length"  #'cl-cc::make-vm-length  '(a b c d)  4)
-          ("reverse" #'cl-cc::make-vm-reverse '(1 2 3)    '(3 2 1)))
+  :cases (("length"  #'cl-cc:make-vm-length  '(a b c d)  4)
+          ("reverse" #'cl-cc:make-vm-reverse '(1 2 3)    '(3 2 1)))
   (constructor input expected)
   (with-test-vm (s (1 input))
     (exec1 (funcall constructor :dst 0 :src 1) s)
@@ -31,7 +31,7 @@
 (deftest vm-list-append-two
   "vm-append concatenates two lists."
   (with-test-vm (s (1 '(a b)) (2 '(c d)))
-    (exec1 (cl-cc::make-vm-append :dst 0 :src1 1 :src2 2) s)
+    (exec1 (cl-cc:make-vm-append :dst 0 :src1 1 :src2 2) s)
     (assert-equal '(a b c d) (cl-cc:vm-reg-get s 0))))
 
 ;;; ─── member / nth / nthcdr ─────────────────────────────────────────────────
@@ -42,14 +42,14 @@
           ("miss" 'z '(a b c) nil))
   (item lst expected)
   (with-test-vm (s (1 item) (2 lst))
-    (exec1 (cl-cc::make-vm-member :dst 0 :item 1 :list 2) s)
+    (exec1 (cl-cc:make-vm-member :dst 0 :item 1 :list 2) s)
     (assert-equal expected (cl-cc:vm-reg-get s 0))))
 
 (deftest-each vm-list-indexed-access-ops
   "vm-nth and vm-nthcdr fetch element and tail at index respectively."
-  :cases (("nth"    #'cl-cc::make-vm-nth    'c
+  :cases (("nth"    #'cl-cc:make-vm-nth    'c
            (lambda (expected actual) (assert-eq expected actual)))
-          ("nthcdr" #'cl-cc::make-vm-nthcdr '(c d)
+          ("nthcdr" #'cl-cc:make-vm-nthcdr '(c d)
            (lambda (expected actual) (assert-equal expected actual))))
   (constructor expected assert-fn)
   (with-test-vm (s (1 2) (2 '(a b c d)))
@@ -60,14 +60,14 @@
 
 (deftest-each vm-list-named-accessors
   "Named accessor instructions (first–fifth, rest, last, butlast) extract the correct element."
-  :cases (("first"   #'cl-cc::make-vm-first   '(10 20 30 40 50) 10)
-          ("second"  #'cl-cc::make-vm-second  '(10 20 30 40 50) 20)
-          ("third"   #'cl-cc::make-vm-third   '(10 20 30 40 50) 30)
-          ("fourth"  #'cl-cc::make-vm-fourth  '(10 20 30 40 50) 40)
-          ("fifth"   #'cl-cc::make-vm-fifth   '(10 20 30 40 50) 50)
-          ("rest"    #'cl-cc::make-vm-rest    '(a b c)          '(b c))
-          ("last"    #'cl-cc::make-vm-last    '(a b c)          '(c))
-          ("butlast" #'cl-cc::make-vm-butlast '(a b c)          '(a b)))
+  :cases (("first"   #'cl-cc:make-vm-first   '(10 20 30 40 50) 10)
+          ("second"  #'cl-cc:make-vm-second  '(10 20 30 40 50) 20)
+          ("third"   #'cl-cc:make-vm-third   '(10 20 30 40 50) 30)
+          ("fourth"  #'cl-cc:make-vm-fourth  '(10 20 30 40 50) 40)
+          ("fifth"   #'cl-cc:make-vm-fifth   '(10 20 30 40 50) 50)
+          ("rest"    #'cl-cc:make-vm-rest    '(a b c)          '(b c))
+          ("last"    #'cl-cc:make-vm-last    '(a b c)          '(c))
+          ("butlast" #'cl-cc:make-vm-butlast '(a b c)          '(a b)))
   (constructor input expected)
   (with-test-vm (s (1 input))
     (exec1 (funcall constructor :dst 0 :src 1) s)
@@ -77,9 +77,9 @@
 
 (deftest-each vm-list-extended-unary-ops
   "Destructive and extended unary list operations: src-in-reg-1 → dst-in-reg-0."
-  :cases (("nreverse"    #'cl-cc::make-vm-nreverse    (list 1 2 3) '(3 2 1)
+  :cases (("nreverse"    #'cl-cc:make-vm-nreverse    (list 1 2 3) '(3 2 1)
            (lambda (expected actual) (assert-equal expected actual)))
-          ("list-length" #'cl-cc::make-vm-list-length '(x y z)     3
+          ("list-length" #'cl-cc:make-vm-list-length '(x y z)     3
            (lambda (expected actual) (assert-= expected actual))))
   (constructor input expected assert-fn)
   (with-test-vm (s (1 input))
@@ -88,10 +88,10 @@
 
 (deftest-each vm-list-empty-predicates
   "vm-endp and vm-null both detect the empty list."
-  :cases (("endp/nil"       #'cl-cc::make-vm-endp nil  1)
-          ("endp/non-empty" #'cl-cc::make-vm-endp '(a) 0)
-          ("null/nil"       #'cl-cc::make-vm-null nil  1)
-          ("null/non-nil"   #'cl-cc::make-vm-null 42   0))
+  :cases (("endp/nil"       #'cl-cc:make-vm-endp nil  1)
+          ("endp/non-empty" #'cl-cc:make-vm-endp '(a) 0)
+          ("null/nil"       #'cl-cc:make-vm-null nil  1)
+          ("null/non-nil"   #'cl-cc:make-vm-null 42   0))
   (constructor value expected)
   (with-test-vm (s (1 value))
     (exec1 (funcall constructor :dst 0 :src 1) s)
@@ -100,10 +100,10 @@
 (deftest vm-list-push-and-pop
   "vm-push conses item onto list; vm-pop extracts car."
   (with-test-vm (s (1 'x) (2 '(a b)))
-    (exec1 (cl-cc::make-vm-push :dst 0 :item 1 :list 2) s)
+    (exec1 (cl-cc:make-vm-push :dst 0 :item 1 :list 2) s)
     (assert-equal '(x a b) (cl-cc:vm-reg-get s 0)))
   (with-test-vm (s (1 '(first second third)))
-    (exec1 (cl-cc::make-vm-pop :dst 0 :list 1) s)
+    (exec1 (cl-cc:make-vm-pop :dst 0 :list 1) s)
     (assert-eq 'first (cl-cc:vm-reg-get s 0))))
 
 (deftest vm-cons-returns-fresh-cells
@@ -112,8 +112,8 @@
     (cl-cc/vm::vm-clear-hash-cons-table)
     (cl-cc:vm-reg-set s 1 'a)
     (cl-cc:vm-reg-set s 2 'b)
-    (exec1 (cl-cc::make-vm-cons :dst 0 :car-src 1 :cdr-src 2) s)
-    (exec1 (cl-cc::make-vm-cons :dst 3 :car-src 1 :cdr-src 2) s)
+    (exec1 (cl-cc:make-vm-cons :dst 0 :car-src 1 :cdr-src 2) s)
+    (exec1 (cl-cc:make-vm-cons :dst 3 :car-src 1 :cdr-src 2) s)
     (assert-false (eq (cl-cc:vm-reg-get s 0)
                       (cl-cc:vm-reg-get s 3)))
     (assert-equal (cl-cc:vm-reg-get s 0)
@@ -169,8 +169,8 @@
         (seq (make-instance 'test-sequence :payload #(10 20 30))))
     (cl-cc:vm-reg-set s 1 seq)
     (cl-cc:vm-reg-set s 2 1)
-    (exec1 (cl-cc::make-vm-length :dst 0 :src 1) s)
-    (exec1 (cl-cc::make-vm-nth :dst 3 :index 2 :list 1) s)
+    (exec1 (cl-cc:make-vm-length :dst 0 :src 1) s)
+    (exec1 (cl-cc:make-vm-nth :dst 3 :index 2 :list 1) s)
     (assert-= 3 (cl-cc:vm-reg-get s 0))
     (assert-= 20 (cl-cc:vm-reg-get s 3))))
 

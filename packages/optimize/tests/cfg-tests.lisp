@@ -48,7 +48,7 @@
    (list (make-vm-const     :dst :r0 :value 0)
          (make-vm-jump-zero :reg :r0 :label "hot")
          (make-vm-label    :name "cold")
-          (cl-cc::make-vm-signal-error :error-reg :r0)
+          (cl-cc:make-vm-signal-error :error-reg :r0)
           (make-vm-ret      :reg :r0)
           (make-vm-label    :name "hot")
           (make-vm-ret      :reg :r0))))
@@ -71,7 +71,7 @@
          (entry (cl-cc/optimize::cfg-entry cfg)))
     (assert-= 1 (cl-cc/optimize::cfg-block-count cfg))
     (assert-true entry)
-    (assert-true (cl-cc::bb-instructions entry))))
+    (assert-true (cl-cc:bb-instructions entry))))
 
 (deftest cfg-empty-has-entry-block
   "An empty instruction list still produces a CFG with a valid entry block."
@@ -95,14 +95,14 @@
   "The entry block of a branch CFG has exactly 2 successors (then and else paths)."
   (let* ((cfg   (make-test-cfg-branch))
          (entry (cl-cc/optimize::cfg-entry cfg)))
-    (assert-= 2 (length (cl-cc::bb-successors entry)))))
+    (assert-= 2 (length (cl-cc:bb-successors entry)))))
 
 (deftest cfg-branch-exit-has-predecessor
   "The exit block of a branch CFG has at least one predecessor (the join point)."
   (let* ((cfg  (make-test-cfg-branch))
          (exit (cl-cc/optimize::cfg-get-block-by-label cfg "exit")))
     (when exit
-      (assert-true (>= (length (cl-cc::bb-predecessors exit)) 1)))))
+      (assert-true (>= (length (cl-cc:bb-predecessors exit)) 1)))))
 
 ;;; ─── RPO ─────────────────────────────────────────────────────────────────
 (deftest cfg-rpo-ordering
@@ -119,7 +119,7 @@
   (let* ((cfg   (make-test-cfg-branch))
          (entry (cl-cc/optimize::cfg-entry cfg)))
     (cl-cc/optimize::cfg-compute-dominators cfg)
-    (assert-eq entry (cl-cc::bb-idom entry))
+    (assert-eq entry (cl-cc:bb-idom entry))
     (let ((exit (cl-cc/optimize::cfg-get-block-by-label cfg "exit")))
       (when exit
         (assert-true (cl-cc/optimize::cfg-dominates-p entry exit))))))
@@ -152,15 +152,15 @@
                           (some (lambda (i)
                                   (and (typep i 'cl-cc/vm::vm-jump)
                                        (equal (cl-cc/vm::vm-label-name i) "head")))
-                                (cl-cc::bb-instructions b)))
+                                (cl-cc:bb-instructions b)))
                         (coerce (cl-cc/optimize::cfg-blocks cfg) 'list))))
     (cl-cc/optimize::cfg-compute-dominators cfg)
     (cl-cc/optimize::cfg-compute-loop-depths cfg)
     (assert-true head)
     (assert-true body)
-    (assert-= 1 (cl-cc::bb-loop-depth head))
-    (assert-= 1 (cl-cc::bb-loop-depth body))
-    (assert-= 0 (cl-cc::bb-loop-depth exit))))
+    (assert-= 1 (cl-cc:bb-loop-depth head))
+    (assert-= 1 (cl-cc:bb-loop-depth body))
+    (assert-= 0 (cl-cc:bb-loop-depth exit))))
 (deftest-each cfg-hot-cold-flatten-cold-after-hot
   "Hot/cold flattening places cold blocks (loop-exit or signal-error) after hot loop blocks."
   :cases (("loop-vs-exit"     (make-test-cfg-hot-cold))
@@ -184,19 +184,19 @@
          (then  (cl-cc/optimize::cfg-get-block-by-label cfg "then")))
     (cl-cc/optimize::cfg-split-critical-edges cfg)
     (assert-= (1+ before) (cl-cc/optimize::cfg-block-count cfg))
-    (assert-true (not (member then (cl-cc::bb-successors entry) :test #'eq)))
-    (assert-true (not (member entry (cl-cc::bb-predecessors then) :test #'eq)))
+    (assert-true (not (member then (cl-cc:bb-successors entry) :test #'eq)))
+    (assert-true (not (member entry (cl-cc:bb-predecessors then) :test #'eq)))
     (let ((pad (find-if (lambda (b)
-                          (and (= 1 (length (cl-cc::bb-successors b)))
-                               (eq then (first (cl-cc::bb-successors b)))
+                          (and (= 1 (length (cl-cc:bb-successors b)))
+                               (eq then (first (cl-cc:bb-successors b)))
                                (some (lambda (i)
                                        (and (typep i 'cl-cc/vm::vm-jump)
                                             (equal (cl-cc/vm::vm-label-name i)
-                                                   (cl-cc/vm::vm-name (cl-cc::bb-label then)))))
-                                     (cl-cc::bb-instructions b))))
+                                                   (cl-cc/vm::vm-name (cl-cc:bb-label then)))))
+                                     (cl-cc:bb-instructions b))))
                         (coerce (cl-cc/optimize::cfg-blocks cfg) 'list))))
       (assert-true pad)
-      (assert-true (member pad (cl-cc::bb-successors entry) :test #'eq)))))
+      (assert-true (member pad (cl-cc:bb-successors entry) :test #'eq)))))
 
 ;;; ─── Flatten Round-Trip ──────────────────────────────────────────────────
 (deftest cfg-flatten-preserves-instruction-count
@@ -240,8 +240,8 @@
                 (setf (gethash 1 ht) b2)
                 ht)))
     (cl-cc/optimize::%cfg-fallthrough-edge b1 1 bbs)
-    (assert-true (member b2 (cl-cc::bb-successors b1) :test #'eq))
-    (assert-true (member b1 (cl-cc::bb-predecessors b2) :test #'eq))))
+    (assert-true (member b2 (cl-cc:bb-successors b1) :test #'eq))
+    (assert-true (member b1 (cl-cc:bb-predecessors b2) :test #'eq))))
 
 (deftest cfg-fallthrough-edge-noop-when-nil
   "%cfg-fallthrough-edge is a no-op when next-start is nil (block has no fall-through)."
@@ -249,7 +249,7 @@
          (b1  (cl-cc/optimize::cfg-new-block g))
          (bbs (make-hash-table)))
     (cl-cc/optimize::%cfg-fallthrough-edge b1 nil bbs)
-    (assert-null (cl-cc::bb-successors b1))))
+    (assert-null (cl-cc:bb-successors b1))))
 
 (deftest cfg-jump-target-edge-wires-to-label
   "%cfg-jump-target-edge adds an edge from the source block to the named label's block."
@@ -259,7 +259,7 @@
     (declare (ignore dest))
     (cl-cc/optimize::%cfg-jump-target-edge src (make-vm-jump :label "tgt") g)
     (let ((tgt (cl-cc/optimize::cfg-get-block-by-label g "tgt")))
-      (assert-true (member tgt (cl-cc::bb-successors src) :test #'eq)))))
+      (assert-true (member tgt (cl-cc:bb-successors src) :test #'eq)))))
 
 ;;; ─── %cfg-replace-successor / %cfg-replace-predecessor / %cfg-replace-terminator
 (deftest cfg-replace-successor-swaps-block

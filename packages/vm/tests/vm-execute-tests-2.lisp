@@ -15,7 +15,7 @@
     (cl-cc:vm-reg-set s :R2 20)
     (cl-cc:vm-reg-set s :R3 30)
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-values :dst :R0 :src-regs (list :R1 :R2 :R3)) s 0 (make-hash-table :test #'equal))
+     (cl-cc:make-vm-values :dst :R0 :src-regs (list :R1 :R2 :R3)) s 0 (make-hash-table :test #'equal))
     (assert-= 10 (cl-cc:vm-reg-get s :R0))
     (assert-equal '(10 20 30) (cl-cc/vm::vm-values-list s))))
 
@@ -24,7 +24,7 @@
   (let ((s (make-test-vm)))
     (setf (cl-cc/vm::vm-values-list s) '(1 2 3))
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-mv-bind :dst-regs (list :R0 :R1 :R2)) s 0 (make-hash-table :test #'equal))
+     (cl-cc:make-vm-mv-bind :dst-regs (list :R0 :R1 :R2)) s 0 (make-hash-table :test #'equal))
     (assert-= 1 (cl-cc:vm-reg-get s :R0))
     (assert-= 2 (cl-cc:vm-reg-get s :R1))
     (assert-= 3 (cl-cc:vm-reg-get s :R2))))
@@ -34,7 +34,7 @@
   (let ((s (make-test-vm)))
     (setf (cl-cc/vm::vm-values-list s) '(7 8 9))
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-values-to-list :dst :R0) s 0 (make-hash-table :test #'equal))
+     (cl-cc:make-vm-values-to-list :dst :R0) s 0 (make-hash-table :test #'equal))
     (assert-equal '(7 8 9) (cl-cc:vm-reg-get s :R0))))
 
 (deftest vm-execute-spread-values-roundtrip
@@ -42,7 +42,7 @@
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s :R1 '(100 200 300))
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-spread-values :dst :R0 :src :R1) s 0 (make-hash-table :test #'equal))
+     (cl-cc:make-vm-spread-values :dst :R0 :src :R1) s 0 (make-hash-table :test #'equal))
     (assert-= 100 (cl-cc:vm-reg-get s :R0))
     (assert-equal '(100 200 300) (cl-cc/vm::vm-values-list s))))
 
@@ -55,7 +55,7 @@
     (cl-cc:vm-reg-set s :R4 '(30 40))
     (multiple-value-bind (next-pc halted result)
         (cl-cc/vm::execute-instruction
-         (cl-cc::make-vm-apply :dst :R0 :func :R1 :args '(:R2 :R3 :R4))
+         (cl-cc:make-vm-apply :dst :R0 :func :R1 :args '(:R2 :R3 :R4))
          s 5 (make-hash-table :test #'equal))
       (declare (ignore result))
       (assert-= 6 next-pc)
@@ -67,13 +67,13 @@
   (let ((s (make-test-vm)))
     (setf (cl-cc/vm::vm-values-list s) '(1 2 3))
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-clear-values) s 0 (make-hash-table :test #'equal))
+     (cl-cc:make-vm-clear-values) s 0 (make-hash-table :test #'equal))
     (assert-null (cl-cc/vm::vm-values-list s)))
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s :R0 55)
     (setf (cl-cc/vm::vm-values-list s) nil)
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-ensure-values :src :R0) s 0 (make-hash-table :test #'equal))
+     (cl-cc:make-vm-ensure-values :src :R0) s 0 (make-hash-table :test #'equal))
     (assert-equal '(55) (cl-cc/vm::vm-values-list s))))
 
 (deftest vm-execute-set-global-stores-value
@@ -81,7 +81,7 @@
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s :R0 42)
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-set-global :name 'myvar :src :R0) s 0 (make-hash-table :test #'equal))
+     (cl-cc:make-vm-set-global :name 'myvar :src :R0) s 0 (make-hash-table :test #'equal))
     (assert-= 42 (gethash 'myvar (cl-cc/vm::vm-global-vars s)))))
 
 (deftest vm-execute-get-global-loads-value
@@ -89,7 +89,7 @@
   (let ((s (make-test-vm)))
     (setf (gethash 'myvar2 (cl-cc/vm::vm-global-vars s)) 99)
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-get-global :dst :R0 :name 'myvar2) s 0 (make-hash-table :test #'equal))
+     (cl-cc:make-vm-get-global :dst :R0 :name 'myvar2) s 0 (make-hash-table :test #'equal))
     (assert-= 99 (cl-cc:vm-reg-get s :R0))))
 
 (deftest vm-execute-print-writes-to-stream
@@ -98,7 +98,7 @@
          (s   (make-instance 'cl-cc/vm::vm-io-state :output-stream str)))
     (cl-cc:vm-reg-set s :R0 42)
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-print :reg :R0) s 0 (make-hash-table :test #'equal))
+     (cl-cc:make-vm-print :reg :R0) s 0 (make-hash-table :test #'equal))
     (assert-string= (format nil "42~%") (get-output-stream-string str))))
 
 (deftest vm-execute-register-function-stores-in-registry
@@ -110,7 +110,7 @@
                                   :captured-values nil)))
       (cl-cc:vm-reg-set s :R0 closure)
       (cl-cc/vm::execute-instruction
-       (cl-cc::make-vm-register-function :name 'myfn :src :R0) s 0 (make-hash-table :test #'equal))
+       (cl-cc:make-vm-register-function :name 'myfn :src :R0) s 0 (make-hash-table :test #'equal))
       (assert-true (not (null (gethash 'myfn (cl-cc/vm::vm-function-registry s))))))))
 
 (deftest vm-execute-make-closure-stores-vector-captures
@@ -119,7 +119,7 @@
     (cl-cc:vm-reg-set s :R1 10)
     (cl-cc:vm-reg-set s :R2 20)
     (cl-cc:execute-instruction
-     (cl-cc::make-vm-make-closure :dst :R0 :label "L" :params nil :env-regs '(:R1 :R2))
+     (cl-cc:make-vm-make-closure :dst :R0 :label "L" :params nil :env-regs '(:R1 :R2))
      s 0 (%labels))
     (let* ((addr (cl-cc:vm-reg-get s :R0))
            (closure (cl-cc:vm-heap-get s addr)))
@@ -127,6 +127,6 @@
       (assert-= 2 (length (cl-cc/vm::vm-closure-captured-values closure)))
       (cl-cc:vm-reg-set s :R3 addr)
       (cl-cc:execute-instruction
-       (cl-cc::make-vm-closure-ref-idx :dst :R4 :closure :R3 :index 1)
+       (cl-cc:make-vm-closure-ref-idx :dst :R4 :closure :R3 :index 1)
        s 0 (%labels))
       (assert-= 20 (cl-cc:vm-reg-get s :R4)))))

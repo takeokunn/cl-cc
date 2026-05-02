@@ -190,9 +190,9 @@
          (id (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::add x c0)))
     (declare (ignore id))
     (eg-saturate eg)
-    (let ((n1 (hash-table-count (cl-cc::eg-classes eg))))
+    (let ((n1 (hash-table-count (cl-cc:eg-classes eg))))
       (eg-saturate eg)
-      (assert-true (<= (hash-table-count (cl-cc::eg-classes eg)) n1)))))
+      (assert-true (<= (hash-table-count (cl-cc:eg-classes eg)) n1)))))
 
 ;;; ─── Composition ─────────────────────────────────────────────────────────
 

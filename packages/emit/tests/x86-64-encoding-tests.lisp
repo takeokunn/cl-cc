@@ -106,7 +106,7 @@
 (deftest-each x86-ret-encoding
   "Both emit-ret and emit-vm-ret-inst produce a single #xC3 byte."
   :cases (("emit-ret"      (lambda (s) (cl-cc/codegen::emit-ret s)))
-          ("vm-ret-inst"   (lambda (s) (cl-cc/codegen::emit-vm-ret-inst (cl-cc::make-vm-ret) s))))
+          ("vm-ret-inst"   (lambda (s) (cl-cc/codegen::emit-vm-ret-inst (cl-cc:make-vm-ret) s))))
   (emit-fn)
   (let ((bytes (%x86-encoding-collect-bytes emit-fn)))
     (assert-equal 1 (length bytes))

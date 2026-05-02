@@ -35,7 +35,7 @@
 
    ("hole"
     (cl-cc/ast::make-ast-hole)
-    (lambda (ast2) (assert-type cl-cc::ast-hole ast2)))
+    (lambda (ast2) (assert-type cl-cc:ast-hole ast2)))
 
    ("quote-atom"
     (cl-cc:make-ast-quote :value 'hello)

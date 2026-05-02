@@ -132,7 +132,7 @@
   (let* ((state (make-instance 'cl-cc/vm::vm-io-state))
          (gf (make-hash-table :test #'equal))
          (method 'read-method)
-         (inst (cl-cc::make-vm-register-method
+         (inst (cl-cc:make-vm-register-method
                 :gf-reg :r0
                 :specializer '(eql :read)
                 :qualifier nil

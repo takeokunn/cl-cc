@@ -98,29 +98,29 @@
 
 (deftest vm-opcodes-defs-make-vm2-state-returns-vm2-state
   "make-vm2-state returns an object satisfying vm2-state-p."
-  (let ((s (cl-cc::make-vm2-state)))
-    (assert-true (cl-cc::vm2-state-p s))))
+  (let ((s (cl-cc:make-vm2-state)))
+    (assert-true (cl-cc:vm2-state-p s))))
 
 (deftest vm-opcodes-defs-make-vm2-state-accepts-custom-output-stream
   "make-vm2-state :output-stream stores the supplied stream in vm2-state-output-stream."
   (let* ((str (make-string-output-stream))
-         (s   (cl-cc::make-vm2-state :output-stream str)))
-    (assert-eq str (cl-cc::vm2-state-output-stream s))))
+         (s   (cl-cc:make-vm2-state :output-stream str)))
+    (assert-eq str (cl-cc:vm2-state-output-stream s))))
 
 ;;; ─── run-vm-with-opcode-bigrams ─────────────────────────────────────────────
 
 (deftest vm-opcodes-defs-run-vm-bigrams-returns-halted-value
   "run-vm-with-opcode-bigrams primary return value is the halted register value."
-  (let* ((code (make-bytecode2 cl-cc::+op2-const+ 0 99 nil
-                                cl-cc::+op2-halt2+ 0 nil nil))
-         (s    (cl-cc::make-vm2-state)))
+  (let* ((code (make-bytecode2 cl-cc:+op2-const+ 0 99 nil
+                                cl-cc:+op2-halt2+ 0 nil nil))
+         (s    (cl-cc:make-vm2-state)))
     (assert-= 99 (cl-cc/vm::run-vm-with-opcode-bigrams code s))))
 
 (deftest vm-opcodes-defs-run-vm-bigrams-second-value-is-hash-table
   "run-vm-with-opcode-bigrams second return value is a bigram count hash table."
-  (let* ((code (make-bytecode2 cl-cc::+op2-const+ 0 1 nil
-                                cl-cc::+op2-halt2+ 0 nil nil))
-         (s    (cl-cc::make-vm2-state)))
+  (let* ((code (make-bytecode2 cl-cc:+op2-const+ 0 1 nil
+                                cl-cc:+op2-halt2+ 0 nil nil))
+         (s    (cl-cc:make-vm2-state)))
     (multiple-value-bind (result counts)
         (cl-cc/vm::run-vm-with-opcode-bigrams code s)
       (declare (ignore result))

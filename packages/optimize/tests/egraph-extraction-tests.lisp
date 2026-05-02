@@ -34,8 +34,8 @@
   "Extracting from an e-class containing a nullary const node returns a non-nil result."
   (let* ((eg (make-test-egraph))
          (id (cl-cc/optimize::egraph-add eg 'const)))
-    (let ((cls (gethash (cl-cc/optimize::egraph-find eg id) (cl-cc::eg-classes eg))))
-      (when cls (setf (cl-cc::ec-data cls) 42)))
+    (let ((cls (gethash (cl-cc/optimize::egraph-find eg id) (cl-cc:eg-classes eg))))
+      (when cls (setf (cl-cc:ec-data cls) 42)))
     (assert-true (cl-cc/optimize::egraph-extract eg id))))
 
 (deftest egraph-extract-binary-add-returns-compound
@@ -66,7 +66,7 @@
                       (cl-cc:make-vm-ret   :reg :r1)))
          (out (cl-cc/optimize::optimize-with-egraph insts))
          (r1  (egraph-find-dst-inst out :r1)))
-    (assert-true (cl-cc::vm-const-p r1))
+    (assert-true (cl-cc:vm-const-p r1))
     (assert-equal 0 (cl-cc/vm::vm-value r1))))
 
 (deftest optimize-with-egraph-lowers-alias
@@ -78,7 +78,7 @@
                       (cl-cc:make-vm-ret   :reg :r3)))
          (out (cl-cc/optimize::optimize-with-egraph insts))
          (r3  (egraph-find-dst-inst out :r3)))
-    (assert-true (cl-cc::vm-move-p r3))
+    (assert-true (cl-cc:vm-move-p r3))
     (assert-equal :r2 (cl-cc/vm::vm-src r3))))
 
 ;;; ─── Cost Model ──────────────────────────────────────────────────────────
@@ -112,8 +112,8 @@
          (canon (cl-cc/optimize::egraph-merge eg id0 id1))
          (node  (cl-cc/optimize::make-e-node :op 'add :children (list id1))))
     (let ((cnode (cl-cc/optimize::egraph-canonical-enode eg node)))
-      (assert-eq 'add (cl-cc::en-op cnode))
-      (assert-= canon (first (cl-cc::en-children cnode))))))
+      (assert-eq 'add (cl-cc:en-op cnode))
+      (assert-= canon (first (cl-cc:en-children cnode))))))
 
 ;;; ─── egraph-build-rhs ────────────────────────────────────────────────────
 
@@ -166,8 +166,8 @@
   (let* ((eg (make-test-egraph))
          (id (cl-cc/optimize::egraph-add eg op)))
     (when set-data-p
-      (let ((cls (gethash (cl-cc/optimize::egraph-find eg id) (cl-cc::eg-classes eg))))
-        (setf (cl-cc::ec-data cls) 99)))
+      (let ((cls (gethash (cl-cc/optimize::egraph-find eg id) (cl-cc:eg-classes eg))))
+        (setf (cl-cc:ec-data cls) 99)))
     (if expected
         (assert-= expected (cl-cc/optimize::egraph-class-const-value eg id))
         (assert-null (cl-cc/optimize::egraph-class-const-value eg id)))))
@@ -253,15 +253,15 @@
   "%egraph-rewrite-inst rewrites to vm-const when the dst class is proven constant."
   (let* ((eg         (make-test-egraph))
          (class-id   (cl-cc/optimize::egraph-add eg 'const))
-         (class-ht   (gethash (cl-cc/optimize::egraph-find eg class-id) (cl-cc::eg-classes eg)))
+         (class-ht   (gethash (cl-cc/optimize::egraph-find eg class-id) (cl-cc:eg-classes eg)))
          (reg-map    (make-hash-table :test #'eq))
          (class->regs (make-hash-table :test #'equal))
          (move       (make-vm-move :dst :r1 :src :r0)))
-    (setf (cl-cc::ec-data class-ht) 42)
+    (setf (cl-cc:ec-data class-ht) 42)
     (setf (gethash :r1 reg-map) class-id)
     (let ((result (cl-cc/optimize::%egraph-rewrite-inst move eg reg-map class->regs)))
-      (assert-true (cl-cc::vm-const-p result))
-      (assert-eq :r1 (cl-cc::vm-dst result))
+      (assert-true (cl-cc:vm-const-p result))
+      (assert-eq :r1 (cl-cc:vm-dst result))
       (assert-equal 42 (cl-cc/vm::vm-value result)))))
 
 (deftest egraph-rewrite-inst-dst-with-alias-becomes-vm-move
@@ -277,6 +277,6 @@
     (setf (gethash :r2 reg-map) class-id)
     (setf (gethash canon class->regs) (list :r2 :r3))
     (let ((result (cl-cc/optimize::%egraph-rewrite-inst add-inst eg reg-map class->regs)))
-      (assert-true (cl-cc::vm-move-p result))
-      (assert-eq :r2 (cl-cc::vm-dst result))
+      (assert-true (cl-cc:vm-move-p result))
+      (assert-eq :r2 (cl-cc:vm-dst result))
       (assert-eq :r3 (cl-cc/vm::vm-src result)))))

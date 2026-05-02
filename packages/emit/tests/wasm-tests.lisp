@@ -161,11 +161,11 @@
 
 (deftest-each wasm-direct-bitcount-and-arith-emitters
   "Direct WASM emitter lowers bit-count and integer-specialized arithmetic to correct i64 ops."
-  :cases (("logcount"       "i64.popcnt" (cl-cc::make-vm-logcount :dst :r0 :src :r1))
-          ("integer-length" "i64.clz"    (cl-cc::make-vm-integer-length :dst :r0 :src :r1))
-          ("integer-add"    "i64.add"    (cl-cc::make-vm-integer-add :dst :r0 :lhs :r1 :rhs :r2))
-          ("integer-sub"    "i64.sub"    (cl-cc::make-vm-integer-sub :dst :r0 :lhs :r1 :rhs :r2))
-          ("integer-mul"    "i64.mul"    (cl-cc::make-vm-integer-mul :dst :r0 :lhs :r1 :rhs :r2)))
+  :cases (("logcount"       "i64.popcnt" (cl-cc:make-vm-logcount :dst :r0 :src :r1))
+          ("integer-length" "i64.clz"    (cl-cc:make-vm-integer-length :dst :r0 :src :r1))
+          ("integer-add"    "i64.add"    (cl-cc:make-vm-integer-add :dst :r0 :lhs :r1 :rhs :r2))
+          ("integer-sub"    "i64.sub"    (cl-cc:make-vm-integer-sub :dst :r0 :lhs :r1 :rhs :r2))
+          ("integer-mul"    "i64.mul"    (cl-cc:make-vm-integer-mul :dst :r0 :lhs :r1 :rhs :r2)))
   (expected-op inst)
   (assert-output-contains (%direct-wasm-emit inst) expected-op))
 

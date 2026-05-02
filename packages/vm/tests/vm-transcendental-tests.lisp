@@ -23,18 +23,18 @@
 
 (deftest-each vm-transcendental-unary
   "Unary transcendental functions produce correct results at known points."
-  :cases (("sqrt-4"   #'cl-cc::make-vm-sqrt     4.0  2.0)
-          ("exp-0"    #'cl-cc::make-vm-exp-inst  0.0  1.0)
-          ("log-1"    #'cl-cc::make-vm-log-inst  1.0  0.0)
-          ("sin-0"    #'cl-cc::make-vm-sin-inst  0.0  0.0)
-          ("cos-0"    #'cl-cc::make-vm-cos-inst  0.0  1.0)
-          ("tan-0"    #'cl-cc::make-vm-tan-inst  0.0  0.0)
-          ("sinh-0"   #'cl-cc::make-vm-sinh-inst 0.0  0.0)
-          ("cosh-0"   #'cl-cc::make-vm-cosh-inst 0.0  1.0)
-          ("tanh-0"   #'cl-cc::make-vm-tanh-inst 0.0  0.0))
+  :cases (("sqrt-4"   #'cl-cc:make-vm-sqrt     4.0  2.0)
+          ("exp-0"    #'cl-cc:make-vm-exp-inst  0.0  1.0)
+          ("log-1"    #'cl-cc:make-vm-log-inst  1.0  0.0)
+          ("sin-0"    #'cl-cc:make-vm-sin-inst  0.0  0.0)
+          ("cos-0"    #'cl-cc:make-vm-cos-inst  0.0  1.0)
+          ("tan-0"    #'cl-cc:make-vm-tan-inst  0.0  0.0)
+          ("sinh-0"   #'cl-cc:make-vm-sinh-inst 0.0  0.0)
+          ("cosh-0"   #'cl-cc:make-vm-cosh-inst 0.0  1.0)
+          ("tanh-0"   #'cl-cc:make-vm-tanh-inst 0.0  0.0))
   (ctor input expected)
   (assert-= expected (%vm-trans-unary ctor input)))
 
 (deftest vm-atan2
   "vm-atan2-inst computes atan(0, 1) = 0."
-  (assert-= 0.0 (%vm-trans-binary #'cl-cc::make-vm-atan2-inst 0.0 1.0)))
+  (assert-= 0.0 (%vm-trans-binary #'cl-cc:make-vm-atan2-inst 0.0 1.0)))

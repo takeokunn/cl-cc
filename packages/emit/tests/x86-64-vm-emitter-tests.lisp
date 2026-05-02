@@ -13,15 +13,15 @@
 (deftest-each x86-vm-emitter-byte-size
   "VM instruction emitters produce the documented exact byte count."
   :cases (("vm-neg"      (lambda (s) (cl-cc/codegen::emit-vm-neg
-                           (cl-cc::make-vm-neg :dst :R0 :src :R1) s))      6)
+                           (cl-cc:make-vm-neg :dst :R0 :src :R1) s))      6)
           ("vm-not"      (lambda (s) (cl-cc/codegen::emit-vm-not
-                           (cl-cc::make-vm-not :dst :R0 :src :R1) s))     10)
+                           (cl-cc:make-vm-not :dst :R0 :src :R1) s))     10)
           ("vm-lognot"   (lambda (s) (cl-cc/codegen::emit-vm-lognot
-                           (cl-cc::make-vm-lognot :dst :R0 :src :R1) s))   6)
+                           (cl-cc:make-vm-lognot :dst :R0 :src :R1) s))   6)
           ("vm-inc"      (lambda (s) (cl-cc/codegen::emit-vm-inc
-                           (cl-cc::make-vm-inc :dst :R0 :src :R1) s))      7)
+                           (cl-cc:make-vm-inc :dst :R0 :src :R1) s))      7)
           ("vm-dec"      (lambda (s) (cl-cc/codegen::emit-vm-dec
-                           (cl-cc::make-vm-dec :dst :R0 :src :R1) s))      7)
+                           (cl-cc:make-vm-dec :dst :R0 :src :R1) s))      7)
           ("vm-abs"      (lambda (s) (cl-cc/codegen::emit-vm-abs
                            (make-vm-abs :dst :R0 :src :R1) s))            15)
           ("vm-min"      (lambda (s) (cl-cc/codegen::emit-vm-min
@@ -35,45 +35,45 @@
           ("vm-logxor"   (lambda (s) (cl-cc/codegen::emit-vm-logxor
                            (make-vm-logxor :dst :R0 :lhs :R1 :rhs :R2) s)) 6)
           ("vm-logeqv"   (lambda (s) (cl-cc/codegen::emit-vm-logeqv
-                           (cl-cc::make-vm-logeqv :dst :R0 :lhs :R1 :rhs :R2) s))  9)
+                           (cl-cc:make-vm-logeqv :dst :R0 :lhs :R1 :rhs :R2) s))  9)
           ("vm-and"      (lambda (s) (cl-cc/codegen::emit-vm-and
-                           (cl-cc::make-vm-and :dst :R0 :lhs :R1 :rhs :R2) s))    17)
+                           (cl-cc:make-vm-and :dst :R0 :lhs :R1 :rhs :R2) s))    17)
           ("vm-or"       (lambda (s) (cl-cc/codegen::emit-vm-or
-                           (cl-cc::make-vm-or  :dst :R0 :lhs :R1 :rhs :R2) s))    17)
+                           (cl-cc:make-vm-or  :dst :R0 :lhs :R1 :rhs :R2) s))    17)
           ("vm-true-pred"  (lambda (s) (cl-cc/codegen::emit-vm-true-pred
-                             (cl-cc::make-vm-number-p :dst :R0 :src :R1) s))       10)
+                             (cl-cc:make-vm-number-p :dst :R0 :src :R1) s))       10)
           ("vm-false-pred" (lambda (s) (cl-cc/codegen::emit-vm-false-pred
-                             (cl-cc::make-vm-cons-p :dst :R0 :src :R1) s))         10)
+                             (cl-cc:make-vm-cons-p :dst :R0 :src :R1) s))         10)
           ("vm-truncate" (lambda (s) (cl-cc/codegen::emit-vm-truncate
                            (make-vm-truncate :dst :R0 :lhs :R1 :rhs :R2) s))       21)
           ("vm-rem"      (lambda (s) (cl-cc/codegen::emit-vm-rem
-                           (cl-cc::make-vm-rem :dst :R0 :lhs :R1 :rhs :R2) s))     21)
+                           (cl-cc:make-vm-rem :dst :R0 :lhs :R1 :rhs :R2) s))     21)
           ("vm-ash"      (lambda (s) (cl-cc/codegen::emit-vm-ash
                            (make-vm-ash :dst :R0 :lhs :R1 :rhs :R2) s))            24)
           ("vm-mul"      (lambda (s) (cl-cc/codegen::emit-vm-mul
-                           (cl-cc::make-vm-mul :dst :R0 :lhs :R1 :rhs :R2) s))      7)
+                           (cl-cc:make-vm-mul :dst :R0 :lhs :R1 :rhs :R2) s))      7)
           ("vm-div"      (lambda (s) (cl-cc/codegen::emit-vm-div
-                           (cl-cc::make-vm-div :dst :R0 :lhs :R1 :rhs :R2) s))     34)
+                           (cl-cc:make-vm-div :dst :R0 :lhs :R1 :rhs :R2) s))     34)
           ("vm-mod"      (lambda (s) (cl-cc/codegen::emit-vm-mod
-                           (cl-cc::make-vm-mod :dst :R0 :lhs :R1 :rhs :R2) s))     37)
+                           (cl-cc:make-vm-mod :dst :R0 :lhs :R1 :rhs :R2) s))     37)
           ("vm-lt"       (lambda (s) (cl-cc/codegen::emit-vm-lt
-                           (cl-cc::make-vm-lt :dst :R0 :lhs :R1 :rhs :R2) s))      10)
+                           (cl-cc:make-vm-lt :dst :R0 :lhs :R1 :rhs :R2) s))      10)
           ("vm-gt"       (lambda (s) (cl-cc/codegen::emit-vm-gt
-                           (cl-cc::make-vm-gt :dst :R0 :lhs :R1 :rhs :R2) s))      10)
+                           (cl-cc:make-vm-gt :dst :R0 :lhs :R1 :rhs :R2) s))      10)
           ("vm-le"       (lambda (s) (cl-cc/codegen::emit-vm-le
-                           (cl-cc::make-vm-le :dst :R0 :lhs :R1 :rhs :R2) s))      10)
+                           (cl-cc:make-vm-le :dst :R0 :lhs :R1 :rhs :R2) s))      10)
           ("vm-ge"       (lambda (s) (cl-cc/codegen::emit-vm-ge
-                           (cl-cc::make-vm-ge :dst :R0 :lhs :R1 :rhs :R2) s))      10)
+                           (cl-cc:make-vm-ge :dst :R0 :lhs :R1 :rhs :R2) s))      10)
           ("vm-num-eq"   (lambda (s) (cl-cc/codegen::emit-vm-num-eq
                            (make-vm-num-eq :dst :R0 :lhs :R1 :rhs :R2) s))         10)
           ("vm-eq"       (lambda (s) (cl-cc/codegen::emit-vm-eq
                            (make-vm-eq :dst :R0 :lhs :R1 :rhs :R2) s))             10)
           ("vm-null-p"   (lambda (s) (cl-cc/codegen::emit-vm-null-p
-                           (cl-cc::make-vm-null-p :dst :R0 :src :R1) s))           10)
+                           (cl-cc:make-vm-null-p :dst :R0 :src :R1) s))           10)
           ("vm-logtest"  (lambda (s) (cl-cc/codegen::emit-vm-logtest
-                           (cl-cc::make-vm-logtest :dst :R0 :lhs :R1 :rhs :R2) s)) 13)
+                           (cl-cc:make-vm-logtest :dst :R0 :lhs :R1 :rhs :R2) s)) 13)
           ("vm-logbitp"  (lambda (s) (cl-cc/codegen::emit-vm-logbitp
-                           (cl-cc::make-vm-logbitp :dst :R0 :lhs :R1 :rhs :R2) s)) 15))
+                           (cl-cc:make-vm-logbitp :dst :R0 :lhs :R1 :rhs :R2) s)) 15))
   (emit-fn expected-size)
   (assert-equal expected-size (length (%x86-encoding-collect-bytes emit-fn))))
 

@@ -96,7 +96,7 @@
   ;; vm-register-function registers 'my-fn from :r0
   (let* ((closure  (make-vm-closure :dst :r0 :label "my-label"
                                     :params nil :captured nil))
-         (regfn    (cl-cc::make-vm-register-function :src :r0 :name 'my-fn))
+         (regfn    (cl-cc:make-vm-register-function :src :r0 :name 'my-fn))
          (insts    (list closure regfn))
          (ht       (cl-cc/optimize::opt-build-function-name-map insts)))
     (assert-equal "my-label" (gethash 'my-fn ht))))
@@ -180,13 +180,13 @@
          (renaming (let ((ht (make-hash-table :test #'eq)))
                      (setf (gethash :R0 ht) :R10 (gethash :R1 ht) :R11) ht))
          (renamed  (cl-cc/optimize::opt-rename-regs-in-inst inst renaming)))
-    (assert-eq :R10 (cl-cc::vm-dst renamed))
-    (assert-eq :R11 (cl-cc::vm-src renamed)))
+    (assert-eq :R10 (cl-cc:vm-dst renamed))
+    (assert-eq :R11 (cl-cc:vm-src renamed)))
   (let* ((renamed (cl-cc/optimize::opt-rename-regs-in-inst
                    (make-vm-move :dst :R0 :src :R1)
                    (make-hash-table :test #'eq))))
-    (assert-eq :R0 (cl-cc::vm-dst renamed))
-    (assert-eq :R1 (cl-cc::vm-src renamed))))
+    (assert-eq :R0 (cl-cc:vm-dst renamed))
+    (assert-eq :R1 (cl-cc:vm-src renamed))))
 
 ;;; ─── %opt-collect-sexp-regs-into-cell ───────────────────────────────────────
 

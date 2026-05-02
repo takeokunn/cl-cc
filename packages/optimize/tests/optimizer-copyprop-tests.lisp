@@ -261,7 +261,7 @@ Use `not null` semantics to match both numeric booleans and string indices."
          (result (cl-cc/optimize::opt-pass-copy-prop instrs))
          (labels (loop for i in result
                        when (typep i 'cl-cc/vm::vm-label)
-                       collect (cl-cc::vm-lbl-name i))))
+                       collect (cl-cc:vm-lbl-name i))))
     (assert-true (member "start" labels :test #'equal))))
 
 ;;; ── copyprop-pass-state helpers ─────────────────────────────────────────────

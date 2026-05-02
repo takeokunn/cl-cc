@@ -248,7 +248,7 @@
           ("error"        (make-effect-row 'error)   :control)
           ("unknown-tag"  (make-effect-row 'network) :unknown))
   (row expected)
-  (assert-eq expected (cl-cc::effect-row->effect-kind row)))
+  (assert-eq expected (cl-cc:effect-row->effect-kind row)))
 
 (deftest effect-kind-vm-label-is-control
   "vm-label instruction is classified as :control by the typecase fast-path."

@@ -57,7 +57,7 @@
          (lbl2 (make-vm-label :name "end"))
          (ret  (make-vm-ret   :reg :r0))
          (out  (cl-cc/optimize::opt-pass-jump (list j1 lbl1 j2 lbl2 ret))))
-    (let ((j1-out (find-if #'cl-cc::vm-jump-p out)))
+    (let ((j1-out (find-if #'cl-cc:vm-jump-p out)))
       (when j1-out
         (assert-equal (cl-cc/vm::vm-label-name j1-out) "end")))))
 
@@ -69,7 +69,7 @@
       (push (make-vm-label :name (format nil "L~D" (1+ i))) instructions))
     (push (make-vm-ret :reg :r0) instructions)
     (let* ((out (cl-cc/optimize::opt-pass-jump (nreverse instructions)))
-           (j0  (find-if #'cl-cc::vm-jump-p out)))
+           (j0  (find-if #'cl-cc:vm-jump-p out)))
       (assert-true j0)
       (assert-equal (cl-cc/vm::vm-label-name j0) "L25"))))
 

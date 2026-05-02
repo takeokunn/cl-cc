@@ -88,7 +88,7 @@
   (assert-= expected (cl-cc/codegen::vm-const-to-integer input)))
 
 ;;; ─── *x86-64-instruction-sizes* ─────────────────────────────────────────────
-;;; Note: hash keys are symbols in the cl-cc package; use cl-cc:: prefix.
+;;; Note: hash keys are symbols in the cl-cc package; use cl-cc: prefix.
 
 (deftest-each x86-64-instruction-sizes-spot-checks
   "Known VM instruction types have correct byte sizes in the size table."
@@ -127,7 +127,7 @@
                 cl-cc/vm::vm-symbol-p cl-cc/vm::vm-function-p))
     (assert-= 10 (gethash tp cl-cc/codegen::*x86-64-instruction-sizes*)))
   (let ((cl-cc/codegen::*current-regalloc* nil))
-    (assert-= 0 (cl-cc/codegen::instruction-size (cl-cc::make-vm-move :dst :R0 :src :R0)))))
+    (assert-= 0 (cl-cc/codegen::instruction-size (cl-cc:make-vm-move :dst :R0 :src :R0)))))
 
 ;;; ─── *x86-64-emitter-entries* / *x86-64-emitter-table* ─────────────────────
 
@@ -177,10 +177,10 @@
 (deftest x86-64-float-const-add-program-uses-xmm-path
   "Float const/add/halt emits MOVQ+scalar SSE opcodes instead of integer ALU bytes."
   (let* ((prog (cl-cc/vm::make-vm-program
-                :instructions (list (cl-cc::make-vm-const :dst :R0 :value 1.0d0)
-                                    (cl-cc::make-vm-const :dst :R1 :value 2.0d0)
-                                    (cl-cc::make-vm-float-add :dst :R2 :lhs :R0 :rhs :R1)
-                                    (cl-cc::make-vm-halt :reg :R2))
+                :instructions (list (cl-cc:make-vm-const :dst :R0 :value 1.0d0)
+                                    (cl-cc:make-vm-const :dst :R1 :value 2.0d0)
+                                    (cl-cc:make-vm-float-add :dst :R2 :lhs :R0 :rhs :R1)
+                                    (cl-cc:make-vm-halt :reg :R2))
                 :result-register :R2))
          (bytes (coerce (cl-cc/codegen::compile-to-x86-64-bytes prog) 'list)))
     (assert-true (search '(#x66 #x49 #x0F #x6E) bytes :test #'eql))

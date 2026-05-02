@@ -21,7 +21,7 @@
 
 (deftest expand-quasiquote-unquote-extracts
   "Top-level unquote returns its argument directly."
-  (assert-equal 'x (cl-cc/expand::%expand-quasiquote '(cl-cc::unquote x))))
+  (assert-equal 'x (cl-cc/expand::%expand-quasiquote '(cl-cc:unquote x))))
 
 (deftest expand-quasiquote-list-wraps-in-list
   "Plain list elements are wrapped in (list ...) and appended."
@@ -32,7 +32,7 @@
 (deftest expand-quasiquote-unquote-in-list
   "Unquote inside list is spliced as a (list val) part."
   ;; Use explicit quote to avoid CL's own unquote processing.
-  (let* ((result (cl-cc/expand::%expand-quasiquote '(a (cl-cc::unquote x))))
+  (let* ((result (cl-cc/expand::%expand-quasiquote '(a (cl-cc:unquote x))))
          (str (format nil "~S" result)))
     (assert-true (search "X" str))))
 

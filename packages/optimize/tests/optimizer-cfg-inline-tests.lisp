@@ -57,7 +57,7 @@
            (make-vm-closure :dst :r0 :label "fn" :params nil :captured nil
                             :optional-params nil :rest-param nil :key-params nil) "fn")
           ("handler-label"
-           (cl-cc::make-vm-establish-handler :handler-label "err-handler"
+           (cl-cc:make-vm-establish-handler :handler-label "err-handler"
                                               :result-reg :r0 :error-type 'error)
            "err-handler"))
   (ref-inst lbl-name)
@@ -148,11 +148,11 @@
 
 (deftest optimizer-batch-concatenate
   "Adjacent vm-concatenate instructions are packed into one parts-list form."
-  (let* ((i1 (cl-cc::make-vm-const :dst :R0 :value "a"))
-         (i2 (cl-cc::make-vm-const :dst :R1 :value "b"))
-         (i3 (cl-cc::make-vm-const :dst :R2 :value "c"))
-         (c1 (cl-cc::make-vm-concatenate :dst :R3 :str1 :R0 :str2 :R1))
-         (c2 (cl-cc::make-vm-concatenate :dst :R4 :str1 :R3 :str2 :R2))
+  (let* ((i1 (cl-cc:make-vm-const :dst :R0 :value "a"))
+         (i2 (cl-cc:make-vm-const :dst :R1 :value "b"))
+         (i3 (cl-cc:make-vm-const :dst :R2 :value "c"))
+         (c1 (cl-cc:make-vm-concatenate :dst :R3 :str1 :R0 :str2 :R1))
+         (c2 (cl-cc:make-vm-concatenate :dst :R4 :str1 :R3 :str2 :R2))
          (out (cl-cc/optimize::opt-pass-batch-concatenate (list i1 i2 i3 c1 c2)))
          (inst (find-if (lambda (i) (typep i 'cl-cc/vm::vm-concatenate)) out)))
     (assert-equal 1 (count-if (lambda (i) (typep i 'cl-cc/vm::vm-concatenate)) out))

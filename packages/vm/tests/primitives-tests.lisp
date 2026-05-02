@@ -56,20 +56,20 @@ INSTRUCTION-THUNK receives the source register index and must build the VM instr
 
 (deftest-each prim-type-pred
   "Type predicates return 1 for matching types, 0 otherwise."
-  :cases (("cons-p-true"     #'cl-cc::make-vm-cons-p     '(a . b)   1)
-          ("cons-p-false"    #'cl-cc::make-vm-cons-p     42         0)
-          ("null-p-true"     #'cl-cc::make-vm-null-p     nil         1)
-          ("null-p-false"    #'cl-cc::make-vm-null-p     'x          0)
-          ("symbol-p-true"   #'cl-cc::make-vm-symbol-p   'hello      1)
-          ("symbol-p-false"  #'cl-cc::make-vm-symbol-p   42          0)
-          ("number-p-true"   #'cl-cc::make-vm-number-p   42          1)
-          ("number-p-false"  #'cl-cc::make-vm-number-p   "hello"     0)
-          ("integer-p-true"  #'cl-cc::make-vm-integer-p  42          1)
-          ("integer-p-false" #'cl-cc::make-vm-integer-p  3.14        0)
-          ("evenp-true"      #'cl-cc::make-vm-evenp      4           1)
-          ("evenp-false"     #'cl-cc::make-vm-evenp      3           0)
-          ("oddp-true"       #'cl-cc::make-vm-oddp       3           1)
-          ("oddp-false"      #'cl-cc::make-vm-oddp       4           0))
+  :cases (("cons-p-true"     #'cl-cc:make-vm-cons-p     '(a . b)   1)
+          ("cons-p-false"    #'cl-cc:make-vm-cons-p     42         0)
+          ("null-p-true"     #'cl-cc:make-vm-null-p     nil         1)
+          ("null-p-false"    #'cl-cc:make-vm-null-p     'x          0)
+          ("symbol-p-true"   #'cl-cc:make-vm-symbol-p   'hello      1)
+          ("symbol-p-false"  #'cl-cc:make-vm-symbol-p   42          0)
+          ("number-p-true"   #'cl-cc:make-vm-number-p   42          1)
+          ("number-p-false"  #'cl-cc:make-vm-number-p   "hello"     0)
+          ("integer-p-true"  #'cl-cc:make-vm-integer-p  42          1)
+          ("integer-p-false" #'cl-cc:make-vm-integer-p  3.14        0)
+          ("evenp-true"      #'cl-cc:make-vm-evenp      4           1)
+          ("evenp-false"     #'cl-cc:make-vm-evenp      3           0)
+          ("oddp-true"       #'cl-cc:make-vm-oddp       3           1)
+          ("oddp-false"      #'cl-cc:make-vm-oddp       4           0))
   (ctor src-val expected)
   (assert-= expected (%run-unary-inst ctor src-val)))
 
@@ -82,7 +82,7 @@ INSTRUCTION-THUNK receives the source register index and must build the VM instr
   :cases (("equal"     42 42 1)
           ("not-equal" 42 99 0))
   (lhs rhs expected)
-  (assert-= expected (%run-binary-inst #'cl-cc::make-vm-eq lhs rhs)))
+  (assert-= expected (%run-binary-inst #'cl-cc:make-vm-eq lhs rhs)))
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
 ;;; Section 3: Numeric Comparisons (pred2 — return 1/0)
@@ -90,19 +90,19 @@ INSTRUCTION-THUNK receives the source register index and must build the VM instr
 
 (deftest-each prim-comparison
   "Numeric comparison instructions return 1/0."
-  :cases (("lt-true"      #'cl-cc::make-vm-lt     3 5  1)
-          ("lt-false"     #'cl-cc::make-vm-lt     5 3  0)
-          ("lt-equal"     #'cl-cc::make-vm-lt     3 3  0)
-          ("gt-true"      #'cl-cc::make-vm-gt     5 3  1)
-          ("gt-false"     #'cl-cc::make-vm-gt     3 5  0)
-          ("le-true-lt"   #'cl-cc::make-vm-le     3 5  1)
-          ("le-true-eq"   #'cl-cc::make-vm-le     3 3  1)
-          ("le-false"     #'cl-cc::make-vm-le     5 3  0)
-          ("ge-true-gt"   #'cl-cc::make-vm-ge     5 3  1)
-          ("ge-true-eq"   #'cl-cc::make-vm-ge     3 3  1)
-          ("ge-false"     #'cl-cc::make-vm-ge     3 5  0)
-          ("num-eq-true"  #'cl-cc::make-vm-num-eq 7 7  1)
-          ("num-eq-false" #'cl-cc::make-vm-num-eq 7 8  0))
+  :cases (("lt-true"      #'cl-cc:make-vm-lt     3 5  1)
+          ("lt-false"     #'cl-cc:make-vm-lt     5 3  0)
+          ("lt-equal"     #'cl-cc:make-vm-lt     3 3  0)
+          ("gt-true"      #'cl-cc:make-vm-gt     5 3  1)
+          ("gt-false"     #'cl-cc:make-vm-gt     3 5  0)
+          ("le-true-lt"   #'cl-cc:make-vm-le     3 5  1)
+          ("le-true-eq"   #'cl-cc:make-vm-le     3 3  1)
+          ("le-false"     #'cl-cc:make-vm-le     5 3  0)
+          ("ge-true-gt"   #'cl-cc:make-vm-ge     5 3  1)
+          ("ge-true-eq"   #'cl-cc:make-vm-ge     3 3  1)
+          ("ge-false"     #'cl-cc:make-vm-ge     3 5  0)
+          ("num-eq-true"  #'cl-cc:make-vm-num-eq 7 7  1)
+          ("num-eq-false" #'cl-cc:make-vm-num-eq 7 8  0))
   (ctor lhs rhs expected)
   (assert-= expected (%run-binary-inst ctor lhs rhs)))
 
@@ -112,16 +112,16 @@ INSTRUCTION-THUNK receives the source register index and must build the VM instr
 
 (deftest-each prim-unary-arith
   "Unary arithmetic instructions compute correct results."
-  :cases (("neg-pos"   #'cl-cc::make-vm-neg  5    -5)
-          ("neg-neg"   #'cl-cc::make-vm-neg  -3   3)
-          ("neg-zero"  #'cl-cc::make-vm-neg  0    0)
-          ("abs-pos"   #'cl-cc::make-vm-abs  5    5)
-          ("abs-neg"   #'cl-cc::make-vm-abs  -7   7)
-          ("abs-zero"  #'cl-cc::make-vm-abs  0    0)
-          ("inc-pos"   #'cl-cc::make-vm-inc  5    6)
-          ("inc-neg"   #'cl-cc::make-vm-inc  -1   0)
-          ("dec-pos"   #'cl-cc::make-vm-dec  5    4)
-          ("dec-zero"  #'cl-cc::make-vm-dec  0    -1))
+  :cases (("neg-pos"   #'cl-cc:make-vm-neg  5    -5)
+          ("neg-neg"   #'cl-cc:make-vm-neg  -3   3)
+          ("neg-zero"  #'cl-cc:make-vm-neg  0    0)
+          ("abs-pos"   #'cl-cc:make-vm-abs  5    5)
+          ("abs-neg"   #'cl-cc:make-vm-abs  -7   7)
+          ("abs-zero"  #'cl-cc:make-vm-abs  0    0)
+          ("inc-pos"   #'cl-cc:make-vm-inc  5    6)
+          ("inc-neg"   #'cl-cc:make-vm-inc  -1   0)
+          ("dec-pos"   #'cl-cc:make-vm-dec  5    4)
+          ("dec-zero"  #'cl-cc:make-vm-dec  0    -1))
   (ctor src expected)
   (assert-= expected (%run-unary-inst ctor src)))
 
@@ -131,16 +131,16 @@ INSTRUCTION-THUNK receives the source register index and must build the VM instr
 
 (deftest-each prim-binary-arith
   "Binary arithmetic instructions compute correct results."
-  :cases (("div-10/3"  #'cl-cc::make-vm-div  10 3  3)
-          ("div-neg"   #'cl-cc::make-vm-div  -7 2  -4)
-          ("mod-10/3"  #'cl-cc::make-vm-mod  10 3  1)
-          ("mod-neg"   #'cl-cc::make-vm-mod  -7 2  1)
-          ("min-lhs"   #'cl-cc::make-vm-min  3  5  3)
-          ("min-rhs"   #'cl-cc::make-vm-min  5  3  3)
-          ("max-lhs"   #'cl-cc::make-vm-max  5  3  5)
-          ("max-rhs"   #'cl-cc::make-vm-max  3  5  5)
-          ("rem-10/3"  #'cl-cc::make-vm-rem  10 3  1)
-          ("rem-neg"   #'cl-cc::make-vm-rem  -7 2  -1))
+  :cases (("div-10/3"  #'cl-cc:make-vm-div  10 3  3)
+          ("div-neg"   #'cl-cc:make-vm-div  -7 2  -4)
+          ("mod-10/3"  #'cl-cc:make-vm-mod  10 3  1)
+          ("mod-neg"   #'cl-cc:make-vm-mod  -7 2  1)
+          ("min-lhs"   #'cl-cc:make-vm-min  3  5  3)
+          ("min-rhs"   #'cl-cc:make-vm-min  5  3  3)
+          ("max-lhs"   #'cl-cc:make-vm-max  5  3  5)
+          ("max-rhs"   #'cl-cc:make-vm-max  3  5  5)
+          ("rem-10/3"  #'cl-cc:make-vm-rem  10 3  1)
+          ("rem-neg"   #'cl-cc:make-vm-rem  -7 2  -1))
   (ctor lhs rhs expected)
   (assert-= expected (%run-binary-inst ctor lhs rhs)))
 
@@ -148,8 +148,8 @@ INSTRUCTION-THUNK receives the source register index and must build the VM instr
 
 (deftest-each prim-div-by-zero
   "vm-div and vm-mod both signal error on division by zero."
-  :cases (("div" #'cl-cc::make-vm-div)
-          ("mod" #'cl-cc::make-vm-mod))
+  :cases (("div" #'cl-cc:make-vm-div)
+          ("mod" #'cl-cc:make-vm-mod))
   (make-inst)
   (%with-binary-vm-state
    10 0
@@ -164,10 +164,10 @@ INSTRUCTION-THUNK receives the source register index and must build the VM instr
 (deftest-each prim-rounding-behavior
   "Rounding instructions (7 / 2): quotient in dst and (quotient remainder) in vm-values-list.
 Round is excluded from the values-list check (nil means skip)."
-  :cases (("truncate" #'cl-cc::make-vm-truncate     3 '(3  1))
-          ("floor"    #'cl-cc::make-vm-floor-inst   3 '(3  1))
-          ("ceiling"  #'cl-cc::make-vm-ceiling-inst 4 '(4 -1))
-          ("round"    #'cl-cc::make-vm-round-inst   4 nil))
+  :cases (("truncate" #'cl-cc:make-vm-truncate     3 '(3  1))
+          ("floor"    #'cl-cc:make-vm-floor-inst   3 '(3  1))
+          ("ceiling"  #'cl-cc:make-vm-ceiling-inst 4 '(4 -1))
+          ("round"    #'cl-cc:make-vm-round-inst   4 nil))
   (make-inst expected-q expected-vals)
   (%with-binary-vm-state
    7 2
@@ -183,27 +183,27 @@ Round is excluded from the values-list check (nil means skip)."
 
 (deftest prim-not-nil-returns-true
   "vm-not of nil returns T (nil is falsy)."
-  (assert-equal t (%run-unary-inst #'cl-cc::make-vm-not nil)))
+  (assert-equal t (%run-unary-inst #'cl-cc:make-vm-not nil)))
 
 (deftest prim-not-zero-returns-true
   "vm-not of 0 returns T; cl-cc treats 0 as false (vm-falsep), unlike standard CL."
-  (assert-equal t (%run-unary-inst #'cl-cc::make-vm-not 0)))
+  (assert-equal t (%run-unary-inst #'cl-cc:make-vm-not 0)))
 
 (deftest prim-not-integer-returns-nil
   "vm-not of a non-zero integer returns NIL (non-zero is truthy)."
-  (assert-null (%run-unary-inst #'cl-cc::make-vm-not 42)))
+  (assert-null (%run-unary-inst #'cl-cc:make-vm-not 42)))
 
 (deftest-each prim-and-cases
   "vm-and: both truthy → t; any nil → nil."
   :cases (("both-true"  1   2   t)
           ("one-false"  1   nil nil))
   (lhs rhs expected)
-  (assert-equal expected (%run-binary-inst #'cl-cc::make-vm-and lhs rhs)))
+  (assert-equal expected (%run-binary-inst #'cl-cc:make-vm-and lhs rhs)))
 
 (deftest-each prim-or-cases
   "vm-or: both nil → nil; any truthy → t."
   :cases (("both-false"  nil nil nil)
           ("one-true"    nil 42  t))
   (lhs rhs expected)
-  (assert-equal expected (%run-binary-inst #'cl-cc::make-vm-or lhs rhs)))
+  (assert-equal expected (%run-binary-inst #'cl-cc:make-vm-or lhs rhs)))
 

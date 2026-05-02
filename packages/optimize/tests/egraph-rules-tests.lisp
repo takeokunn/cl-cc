@@ -6,8 +6,8 @@
 ;;;
 ;;; IMPORTANT implementation notes about the e-graph:
 ;;;
-;;;   1. Op symbols MUST use cl-cc:: prefix (e.g., 'cl-cc/optimize::add).  Unqualified
-;;;      symbols in this package do not match the cl-cc:: symbols registered by
+;;;   1. Op symbols MUST use cl-cc: prefix (e.g., 'cl-cc/optimize::add).  Unqualified
+;;;      symbols in this package do not match the cl-cc: symbols registered by
 ;;;      defrule and cause silent pattern-match failures.
 ;;;
 ;;;   2. All (egraph-add eg 'cl-cc/optimize::const) calls with the same e-graph return
@@ -32,11 +32,11 @@
 ;;; ─── Shared Helpers ───────────────────────────────────────────────────────
 
 (defun make-eg-const (eg value)
-  "Add a cl-cc::const node and store VALUE as its ec-data.  Returns the class ID.
+  "Add a cl-cc:const node and store VALUE as its ec-data.  Returns the class ID.
    NOTE: all consts in the same e-graph share one class (memoized)."
   (let ((id (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::const)))
-    (let ((cls (gethash (cl-cc/optimize::egraph-find eg id) (cl-cc::eg-classes eg))))
-      (when cls (setf (cl-cc::ec-data cls) value)))
+    (let ((cls (gethash (cl-cc/optimize::egraph-find eg id) (cl-cc:eg-classes eg))))
+      (when cls (setf (cl-cc:ec-data cls) value)))
     id))
 
 (defun eg-merged-p (eg id1 id2)
@@ -51,13 +51,13 @@
         (nodes nil))
     (maphash (lambda (k cls)
                (when (= (cl-cc/optimize::egraph-find eg k) canon)
-                 (setf nodes (append nodes (cl-cc::ec-nodes cls)))))
-             (cl-cc::eg-classes eg))
+                 (setf nodes (append nodes (cl-cc:ec-nodes cls)))))
+             (cl-cc:eg-classes eg))
     nodes))
 
 (defun eg-class-contains-op-p (eg id op)
   "Return true if the equivalence class of ID contains any node with OP."
-  (some (lambda (n) (eq (cl-cc::en-op n) op))
+  (some (lambda (n) (eq (cl-cc:en-op n) op))
         (eg-all-nodes eg id)))
 
 (defun eg-any-class-data-eql-p (eg value)
@@ -65,9 +65,9 @@
   (let ((found nil))
     (maphash (lambda (_id cls)
                (declare (ignore _id))
-               (when (eql (cl-cc::ec-data cls) value)
+               (when (eql (cl-cc:ec-data cls) value)
                  (setf found t)))
-             (cl-cc::eg-classes eg))
+             (cl-cc:eg-classes eg))
     found))
 
 (defun eg-any-class-has-op-p (eg op)
@@ -75,10 +75,10 @@
   (let ((found nil))
     (maphash (lambda (_id cls)
                (declare (ignore _id))
-               (when (some (lambda (n) (eq (cl-cc::en-op n) op))
-                           (cl-cc::ec-nodes cls))
+               (when (some (lambda (n) (eq (cl-cc:en-op n) op))
+                           (cl-cc:ec-nodes cls))
                  (setf found t)))
-             (cl-cc::eg-classes eg))
+             (cl-cc:eg-classes eg))
     found))
 
 (defun eg-saturate (eg)

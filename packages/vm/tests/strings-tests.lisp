@@ -25,11 +25,11 @@
 
 (deftest-each str-comparison-truthy
   "Binary string comparison instructions return truthy (T or mismatch index) on their respective true condition."
-  :cases (("equal"         #'cl-cc::make-vm-string=  "hello" "hello")
-          ("less-than"     #'cl-cc::make-vm-string<  "abc"   "abd")
-          ("greater-than"  #'cl-cc::make-vm-string>  "xyz"   "abc")
-          ("less-equal"    #'cl-cc::make-vm-string<= "abc"   "abc")
-          ("greater-equal" #'cl-cc::make-vm-string>= "xyz"   "abc"))
+  :cases (("equal"         #'cl-cc:make-vm-string=  "hello" "hello")
+          ("less-than"     #'cl-cc:make-vm-string<  "abc"   "abd")
+          ("greater-than"  #'cl-cc:make-vm-string>  "xyz"   "abc")
+          ("less-equal"    #'cl-cc:make-vm-string<= "abc"   "abc")
+          ("greater-equal" #'cl-cc:make-vm-string>= "xyz"   "abc"))
   (ctor str1 str2)
   (let ((s (str-vm)))
     (cl-cc/vm::vm-reg-set s :R1 str1)
@@ -42,17 +42,17 @@
   (let ((s (str-vm)))
     (cl-cc/vm::vm-reg-set s :R1 "hello")
     (cl-cc/vm::vm-reg-set s :R2 "world")
-    (str-exec (cl-cc::make-vm-string= :dst :R0 :str1 :R1 :str2 :R2) s)
+    (str-exec (cl-cc:make-vm-string= :dst :R0 :str1 :R1 :str2 :R2) s)
     (assert-true (null (cl-cc/vm::vm-reg-get s :R0)))))
 
 ;;; ─── String Comparisons (case-insensitive) ────────────────────────────────
 
 (deftest-each str-insensitive-comparison-truthy
   "Case-insensitive string comparison instructions return truthy on their respective true condition."
-  :cases (("equal"     #'cl-cc::make-vm-string-equal     "Hello" "hello")
-          ("lessp"     #'cl-cc::make-vm-string-lessp     "ABC"   "abd")
-          ("greaterp"  #'cl-cc::make-vm-string-greaterp  "XYZ"   "abc")
-          ("not-equal" #'cl-cc::make-vm-string-not-equal "abc"   "xyz"))
+  :cases (("equal"     #'cl-cc:make-vm-string-equal     "Hello" "hello")
+          ("lessp"     #'cl-cc:make-vm-string-lessp     "ABC"   "abd")
+          ("greaterp"  #'cl-cc:make-vm-string-greaterp  "XYZ"   "abc")
+          ("not-equal" #'cl-cc:make-vm-string-not-equal "abc"   "xyz"))
   (ctor str1 str2)
   (let ((s (str-vm)))
     (cl-cc/vm::vm-reg-set s :R1 str1)
@@ -69,7 +69,7 @@
   (input expected)
   (let ((s (str-vm)))
     (cl-cc/vm::vm-reg-set s :R1 input)
-    (str-exec (cl-cc::make-vm-string-length :dst :R0 :src :R1) s)
+    (str-exec (cl-cc:make-vm-string-length :dst :R0 :src :R1) s)
     (assert-equal expected (cl-cc/vm::vm-reg-get s :R0))))
 
 ;;; ─── Character Access ─────────────────────────────────────────────────────
@@ -79,13 +79,13 @@
   (let ((s (str-vm)))
     (cl-cc/vm::vm-reg-set s :R1 "hello")
     (cl-cc/vm::vm-reg-set s :R2 0)
-    (str-exec (cl-cc::make-vm-char :dst :R0 :string :R1 :index :R2) s)
+    (str-exec (cl-cc:make-vm-char :dst :R0 :string :R1 :index :R2) s)
     (assert-equal #\h (cl-cc/vm::vm-reg-get s :R0))))
 
 (deftest-each str-char-encoding
   "vm-char-code and vm-code-char convert between characters and ASCII codes."
-  :cases (("char-code" #'cl-cc::make-vm-char-code #\A 65)
-          ("code-char" #'cl-cc::make-vm-code-char 65  #\A))
+  :cases (("char-code" #'cl-cc:make-vm-char-code #\A 65)
+          ("code-char" #'cl-cc:make-vm-code-char 65  #\A))
   (ctor input expected)
   (let ((s (str-vm)))
     (cl-cc/vm::vm-reg-set s :R1 input)
@@ -96,13 +96,13 @@
 
 (deftest-each char-comparison-returns-1
   "Binary character comparison instructions return 1 on their respective true condition."
-  :cases (("equal"     #'cl-cc::make-vm-char=    #\a #\a)
-          ("less-than" #'cl-cc::make-vm-char<    #\a #\b)
-          ("greater"   #'cl-cc::make-vm-char>    #\z #\a)
-          ("le-equal"  #'cl-cc::make-vm-char<=   #\a #\a)
-          ("ge-greater" #'cl-cc::make-vm-char>=  #\z #\a)
-          ("not-equal" #'cl-cc::make-vm-char/=   #\a #\b)
-          ("ci-equal"  #'cl-cc::make-vm-char-equal #\A #\a))
+  :cases (("equal"     #'cl-cc:make-vm-char=    #\a #\a)
+          ("less-than" #'cl-cc:make-vm-char<    #\a #\b)
+          ("greater"   #'cl-cc:make-vm-char>    #\z #\a)
+          ("le-equal"  #'cl-cc:make-vm-char<=   #\a #\a)
+          ("ge-greater" #'cl-cc:make-vm-char>=  #\z #\a)
+          ("not-equal" #'cl-cc:make-vm-char/=   #\a #\b)
+          ("ci-equal"  #'cl-cc:make-vm-char-equal #\A #\a))
   (ctor char1 char2)
   (let ((s (str-vm)))
     (cl-cc/vm::vm-reg-set s :R1 char1)
@@ -114,8 +114,8 @@
 
 (deftest-each str-case-conversion
   "vm-string-upcase/downcase convert string case."
-  :cases (("upcase"   #'cl-cc::make-vm-string-upcase   "hello" "HELLO")
-          ("downcase" #'cl-cc::make-vm-string-downcase "HELLO" "hello"))
+  :cases (("upcase"   #'cl-cc:make-vm-string-upcase   "hello" "HELLO")
+          ("downcase" #'cl-cc:make-vm-string-downcase "HELLO" "hello"))
   (ctor input expected)
   (let ((s (str-vm)))
     (cl-cc/vm::vm-reg-set s :R1 input)
@@ -126,7 +126,7 @@
   "vm-string-capitalize capitalizes first letter of each word."
   (let ((s (str-vm)))
     (cl-cc/vm::vm-reg-set s :R1 "hello world")
-    (str-exec (cl-cc::make-vm-string-capitalize :dst :R0 :src :R1) s)
+    (str-exec (cl-cc:make-vm-string-capitalize :dst :R0 :src :R1) s)
     (assert-equal "Hello World" (cl-cc/vm::vm-reg-get s :R0))))
 
 (deftest str-concatenate
@@ -134,7 +134,7 @@
   (let ((s (str-vm)))
     (cl-cc/vm::vm-reg-set s :R1 "hello")
     (cl-cc/vm::vm-reg-set s :R2 " world")
-    (str-exec (cl-cc::make-vm-concatenate :dst :R0 :str1 :R1 :str2 :R2) s)
+    (str-exec (cl-cc:make-vm-concatenate :dst :R0 :str1 :R1 :str2 :R2) s)
     (assert-equal "hello world" (cl-cc/vm::vm-reg-get s :R0))))
 
 (deftest str-subseq
@@ -143,16 +143,16 @@
     (cl-cc/vm::vm-reg-set s :R1 "hello world")
     (cl-cc/vm::vm-reg-set s :R2 6)
     (cl-cc/vm::vm-reg-set s :R3 11)
-    (str-exec (cl-cc::make-vm-subseq :dst :R0 :string :R1 :start :R2 :end :R3) s)
+    (str-exec (cl-cc:make-vm-subseq :dst :R0 :string :R1 :start :R2 :end :R3) s)
     (assert-equal "world" (cl-cc/vm::vm-reg-get s :R0))))
 
 ;;; ─── String Trim ──────────────────────────────────────────────────────────
 
 (deftest-each str-trim-directions
   "vm-string-trim/left-trim/right-trim remove chars from the specified end(s)."
-  :cases (("both"  #'cl-cc::make-vm-string-trim       "  hello  " "hello")
-          ("left"  #'cl-cc::make-vm-string-left-trim  "  hello  " "hello  ")
-          ("right" #'cl-cc::make-vm-string-right-trim "  hello  " "  hello"))
+  :cases (("both"  #'cl-cc:make-vm-string-trim       "  hello  " "hello")
+          ("left"  #'cl-cc:make-vm-string-left-trim  "  hello  " "hello  ")
+          ("right" #'cl-cc:make-vm-string-right-trim "  hello  " "  hello"))
   (ctor input expected)
   (let ((s (str-vm)))
     (cl-cc/vm::vm-reg-set s :R1 " ")
@@ -171,7 +171,7 @@
     (cl-cc/vm::vm-reg-set s :R1 pattern)
     (cl-cc/vm::vm-reg-set s :R2 string)
     (cl-cc/vm::vm-reg-set s :R3 0)
-    (str-exec (cl-cc::make-vm-search-string :dst :R0 :pattern :R1 :string :R2 :start :R3) s)
+    (str-exec (cl-cc:make-vm-search-string :dst :R0 :pattern :R1 :string :R2 :start :R3) s)
     (assert-equal expected (cl-cc/vm::vm-reg-get s :R0))))
 
 ;;; ─── Make String ──────────────────────────────────────────────────────────
@@ -185,17 +185,17 @@
     (cl-cc/vm::vm-reg-set s :R1 len)
     (when init-char
       (cl-cc/vm::vm-reg-set s :R2 init-char))
-    (str-exec (cl-cc::make-vm-make-string :dst :R0 :src :R1 :char (if init-char :R2 nil)) s)
+    (str-exec (cl-cc:make-vm-make-string :dst :R0 :src :R1 :char (if init-char :R2 nil)) s)
     (assert-equal expected (cl-cc/vm::vm-reg-get s :R0))))
 
 ;;; ─── Character Predicates ─────────────────────────────────────────────────
 
 (deftest-each char-predicates-true
   "Character predicate instructions return expected value for matching inputs."
-  :cases (("digit"      #'cl-cc::make-vm-digit-char-p #\5 5)
-          ("alpha"      #'cl-cc::make-vm-alpha-char-p #\a 1)
-          ("upper-case" #'cl-cc::make-vm-upper-case-p #\A 1)
-          ("lower-case" #'cl-cc::make-vm-lower-case-p #\a 1))
+  :cases (("digit"      #'cl-cc:make-vm-digit-char-p #\5 5)
+          ("alpha"      #'cl-cc:make-vm-alpha-char-p #\a 1)
+          ("upper-case" #'cl-cc:make-vm-upper-case-p #\A 1)
+          ("lower-case" #'cl-cc:make-vm-lower-case-p #\a 1))
   (ctor input expected)
   (let ((s (str-vm)))
     (cl-cc/vm::vm-reg-set s :R1 input)
@@ -204,8 +204,8 @@
 
 (deftest-each char-case-conversion
   "vm-char-upcase/downcase convert character case."
-  :cases (("upcase"   #'cl-cc::make-vm-char-upcase   #\a #\A)
-          ("downcase" #'cl-cc::make-vm-char-downcase #\A #\a))
+  :cases (("upcase"   #'cl-cc:make-vm-char-upcase   #\a #\A)
+          ("downcase" #'cl-cc:make-vm-char-downcase #\A #\a))
   (ctor input expected)
   (let ((s (str-vm)))
     (cl-cc/vm::vm-reg-set s :R1 input)
@@ -219,7 +219,7 @@
   (ch expected)
   (let ((s (str-vm)))
     (cl-cc/vm::vm-reg-set s :R1 ch)
-    (str-exec (cl-cc::make-vm-alphanumericp :dst :R0 :src :R1) s)
+    (str-exec (cl-cc:make-vm-alphanumericp :dst :R0 :src :R1) s)
     (assert-equal expected (cl-cc/vm::vm-reg-get s :R0))))
 
 ;;; ─── Stringp / Characterp Predicates ──────────────────────────────────────
@@ -231,7 +231,7 @@
   (value expected)
   (let ((s (str-vm)))
     (cl-cc/vm::vm-reg-set s :R1 value)
-    (str-exec (cl-cc::make-vm-stringp :dst :R0 :src :R1) s)
+    (str-exec (cl-cc:make-vm-stringp :dst :R0 :src :R1) s)
     (assert-equal expected (cl-cc/vm::vm-reg-get s :R0))))
 
 (deftest-each characterp
@@ -241,7 +241,7 @@
   (value expected)
   (let ((s (str-vm)))
     (cl-cc/vm::vm-reg-set s :R1 value)
-    (str-exec (cl-cc::make-vm-characterp :dst :R0 :src :R1) s)
+    (str-exec (cl-cc:make-vm-characterp :dst :R0 :src :R1) s)
     (assert-equal expected (cl-cc/vm::vm-reg-get s :R0))))
 
 ;;; ─── Parse Integer ────────────────────────────────────────────────────────
@@ -250,5 +250,5 @@
   "vm-parse-integer parses decimal string to integer."
   (let ((s (str-vm)))
     (cl-cc/vm::vm-reg-set s :R1 "42")
-    (str-exec (cl-cc::make-vm-parse-integer :dst :R0 :src :R1) s)
+    (str-exec (cl-cc:make-vm-parse-integer :dst :R0 :src :R1) s)
     (assert-equal 42 (cl-cc/vm::vm-reg-get s :R0))))

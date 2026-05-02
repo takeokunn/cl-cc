@@ -7,9 +7,9 @@
 
 (deftest-each vm-list-coerce-simple
   "Simple coercion instructions round-trip a single value correctly."
-  :cases (("chars-to-string" #'cl-cc::make-vm-coerce-to-string  '(#\h #\i)  "hi")
-          ("vector-to-list"  #'cl-cc::make-vm-coerce-to-list    #(1 2 3)    '(1 2 3))
-          ("symbol-to-name"  #'cl-cc::make-vm-string-coerce     'hello      "HELLO"))
+  :cases (("chars-to-string" #'cl-cc:make-vm-coerce-to-string  '(#\h #\i)  "hi")
+          ("vector-to-list"  #'cl-cc:make-vm-coerce-to-list    #(1 2 3)    '(1 2 3))
+          ("symbol-to-name"  #'cl-cc:make-vm-string-coerce     'hello      "HELLO"))
   (ctor input expected)
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 input)
@@ -20,7 +20,7 @@
   "vm-coerce-to-vector coerces a list to a proper vector."
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 '(a b c))
-    (exec1 (cl-cc::make-vm-coerce-to-vector :dst 0 :src 1) s)
+    (exec1 (cl-cc:make-vm-coerce-to-vector :dst 0 :src 1) s)
     (let ((v (cl-cc:vm-reg-get s 0)))
       (assert-true (vectorp v))
       (assert-= 3 (length v))

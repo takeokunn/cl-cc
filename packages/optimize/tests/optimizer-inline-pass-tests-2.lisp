@@ -118,7 +118,7 @@
          (result (cl-cc/optimize::opt-pass-global-dce insts)))
     ;; Only top-const should survive — 4 dead-function instructions removed
     (assert-= 1 (length result))
-    (assert-true (cl-cc::vm-const-p (first result)))))
+    (assert-true (cl-cc:vm-const-p (first result)))))
 
 ;;; ─── opt-pass-inline ────────────────────────────────────────────────────────
 
@@ -138,9 +138,9 @@
          (insts (list cl lbl body ret call))
          (result (cl-cc/optimize::opt-pass-inline insts :threshold 50)))
     ;; vm-call should be gone; result should contain vm-move for arg passing
-    (assert-null (find-if #'cl-cc::vm-call-p result))
+    (assert-null (find-if #'cl-cc:vm-call-p result))
     ;; A vm-move or vm-const should appear for argument/return
-    (assert-true (some (lambda (i) (or (cl-cc::vm-move-p i) (cl-cc::vm-const-p i))) result))))
+    (assert-true (some (lambda (i) (or (cl-cc:vm-move-p i) (cl-cc:vm-const-p i))) result))))
 
 (deftest opt-pass-inline-preserves-non-eligible-call
   "opt-pass-inline keeps vm-call for a function with captured variables (never eligible)."
@@ -154,4 +154,4 @@
          (insts (list cl lbl body ret call))
          (result (cl-cc/optimize::opt-pass-inline insts :threshold 50)))
     ;; Captured vars → not eligible → vm-call must remain in output
-    (assert-true (find-if #'cl-cc::vm-call-p result))))
+    (assert-true (find-if #'cl-cc:vm-call-p result))))

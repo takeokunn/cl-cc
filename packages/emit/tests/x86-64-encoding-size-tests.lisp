@@ -11,7 +11,7 @@
 
 (deftest-each x86-instruction-size-zero-cases
   "vm-label and unknown types both report instruction-size = 0."
-  :cases (("vm-label"   (cl-cc::make-vm-label :name "test"))
+  :cases (("vm-label"   (cl-cc:make-vm-label :name "test"))
           ("unknown"    (list :not-a-real-inst)))
   (inst)
   (assert-equal 0 (cl-cc/codegen::instruction-size inst)))
@@ -21,15 +21,15 @@
 (deftest-each x86-build-label-offsets-simple
   "build-label-offsets: label offset equals prologue-size plus preceding instruction bytes."
   :cases (("single-at-start"
-           (list (cl-cc::make-vm-label :name "L"))
+           (list (cl-cc:make-vm-label :name "L"))
            6 "L" 6)
           ("after-vm-const"
-           (list (cl-cc::make-vm-const :dst :R0 :value 42)
-                 (cl-cc::make-vm-label :name "L"))
+           (list (cl-cc:make-vm-const :dst :R0 :value 42)
+                 (cl-cc:make-vm-label :name "L"))
            6 "L" 16)
           ("after-vm-add"
-           (list (cl-cc::make-vm-add :dst :R0 :lhs :R1 :rhs :R2)
-                 (cl-cc::make-vm-label :name "L"))
+           (list (cl-cc:make-vm-add :dst :R0 :lhs :R1 :rhs :R2)
+                 (cl-cc:make-vm-label :name "L"))
            0 "L" 6))
   (insts prologue label expected-offset)
   (assert-equal expected-offset (gethash label (cl-cc/codegen::build-label-offsets insts prologue))))
@@ -37,11 +37,11 @@
 (deftest x86-build-label-offsets-multi
   "Empty list → 0 table entries; multiple labels track correct byte positions."
   (assert-equal 0 (hash-table-count (cl-cc/codegen::build-label-offsets nil 6)))
-  (let* ((insts (list (cl-cc::make-vm-label :name "L0")
-                      (cl-cc::make-vm-move :dst :R0 :src :R1)    ; 3 bytes
-                      (cl-cc::make-vm-label :name "L1")
-                      (cl-cc::make-vm-add :dst :R0 :lhs :R1 :rhs :R2) ; 6 bytes
-                      (cl-cc::make-vm-label :name "L2")))
+  (let* ((insts (list (cl-cc:make-vm-label :name "L0")
+                      (cl-cc:make-vm-move :dst :R0 :src :R1)    ; 3 bytes
+                      (cl-cc:make-vm-label :name "L1")
+                      (cl-cc:make-vm-add :dst :R0 :lhs :R1 :rhs :R2) ; 6 bytes
+                      (cl-cc:make-vm-label :name "L2")))
          (offsets (cl-cc/codegen::build-label-offsets insts 0)))
     (assert-equal 0 (gethash "L0" offsets))
     (assert-equal 3 (gethash "L1" offsets))
@@ -170,7 +170,7 @@
   (val expected-byte)
   (let ((bytes (%x86-collect-bytes
                 (lambda (s) (cl-cc/codegen::emit-vm-const
-                             (cl-cc::make-vm-const :dst :R0 :value val) s)))))
+                             (cl-cc:make-vm-const :dst :R0 :value val) s)))))
     (assert-equal 10 (length bytes))
     (assert-equal expected-byte (third bytes))
     (assert-equal 0 (fourth bytes))))
@@ -178,13 +178,13 @@
 (deftest-each x86-vm-move-halt-elision
   "No-op moves (same src/dst or result already in RAX) emit 0 bytes; cross-register emit 3 bytes with opcode #x89."
   :cases (("move-cross" (lambda (s) (cl-cc/codegen::emit-vm-move
-                                     (cl-cc::make-vm-move :dst :R0 :src :R1) s))
+                                     (cl-cc:make-vm-move :dst :R0 :src :R1) s))
                         (lambda (s) (cl-cc/codegen::emit-vm-move
-                                     (cl-cc::make-vm-move :dst :R0 :src :R0) s)))
+                                     (cl-cc:make-vm-move :dst :R0 :src :R0) s)))
           ("halt"       (lambda (s) (cl-cc/codegen::emit-vm-halt-inst
-                                     (cl-cc::make-vm-halt :reg :R1) s))
+                                     (cl-cc:make-vm-halt :reg :R1) s))
                         (lambda (s) (cl-cc/codegen::emit-vm-halt-inst
-                                     (cl-cc::make-vm-halt :reg :R0) s))))
+                                     (cl-cc:make-vm-halt :reg :R0) s))))
   (cross-emitter zero-emitter)
   (let ((cross-bytes (%x86-collect-bytes cross-emitter))
         (zero-bytes  (%x86-collect-bytes zero-emitter)))
@@ -212,8 +212,8 @@ and emits a short prologue+return sequence for empty programs.
 Use compile-to-x86-64-bytes (which sets up the regalloc context internally)
 rather than emit-vm-program directly — the latter expects *current-regalloc*
 to be bound, which fails with NIL under raw invocation."
-  (let* ((non-empty-insts (list (cl-cc::make-vm-halt :reg :R0)
-                                (cl-cc::make-vm-ret :reg :R0)))
+  (let* ((non-empty-insts (list (cl-cc:make-vm-halt :reg :R0)
+                                (cl-cc:make-vm-ret :reg :R0)))
          (full-prog (cl-cc/vm::make-vm-program :instructions non-empty-insts :result-register :R0))
          (full-bytes (cl-cc/codegen::compile-to-x86-64-bytes full-prog))
          (empty-prog (cl-cc/vm::make-vm-program :instructions nil :result-register :R0))
@@ -224,8 +224,8 @@ to be bound, which fails with NIL under raw invocation."
 (deftest x86-vm-program-leaf-red-zone-spills-skip-rbp-frame
   "Leaf programs with small spill counts use RSP-based red-zone spill slots and skip PUSH/POP RBP."
   (let* ((prog (cl-cc/vm::make-vm-program
-                :instructions (list (cl-cc::make-vm-spill-store :src-reg :rax :slot 1)
-                                    (cl-cc::make-vm-spill-load :dst-reg :rbx :slot 1))
+                :instructions (list (cl-cc:make-vm-spill-store :src-reg :rax :slot 1)
+                                    (cl-cc:make-vm-spill-load :dst-reg :rbx :slot 1))
                 :result-register :R0
                 :leaf-p t))
          (ra (cl-cc/regalloc::make-regalloc-result :assignment (make-hash-table :test #'eq)
@@ -242,18 +242,18 @@ to be bound, which fails with NIL under raw invocation."
 
 (deftest-each x86-instruction-size-values
   "instruction-size returns the documented byte count for each instruction type."
-  :cases (("vm-const"    (cl-cc::make-vm-const    :dst :R0 :value 0)           10)
-          ("vm-move"     (cl-cc::make-vm-move     :dst :R0 :src :R1)            3)
-          ("vm-add"      (cl-cc::make-vm-add      :dst :R0 :lhs :R1 :rhs :R2)  6)
-          ("vm-sub"      (cl-cc::make-vm-sub      :dst :R0 :lhs :R1 :rhs :R2)  6)
-          ("vm-mul"      (cl-cc::make-vm-mul      :dst :R0 :lhs :R1 :rhs :R2)  7)
-          ("vm-jump"     (cl-cc::make-vm-jump     :label "L")                    5)
-          ("vm-ret"      (cl-cc::make-vm-ret)                                   1)
+  :cases (("vm-const"    (cl-cc:make-vm-const    :dst :R0 :value 0)           10)
+          ("vm-move"     (cl-cc:make-vm-move     :dst :R0 :src :R1)            3)
+          ("vm-add"      (cl-cc:make-vm-add      :dst :R0 :lhs :R1 :rhs :R2)  6)
+          ("vm-sub"      (cl-cc:make-vm-sub      :dst :R0 :lhs :R1 :rhs :R2)  6)
+          ("vm-mul"      (cl-cc:make-vm-mul      :dst :R0 :lhs :R1 :rhs :R2)  7)
+          ("vm-jump"     (cl-cc:make-vm-jump     :label "L")                    5)
+          ("vm-ret"      (cl-cc:make-vm-ret)                                   1)
           ("vm-abs"      (make-vm-abs             :dst :R0 :src :R1)           15)
           ("vm-ash"      (make-vm-ash             :dst :R0 :lhs :R1 :rhs :R2) 24)
-          ("vm-div"      (cl-cc::make-vm-div      :dst :R0 :lhs :R1 :rhs :R2) 34)
-          ("vm-mod"      (cl-cc::make-vm-mod      :dst :R0 :lhs :R1 :rhs :R2) 37)
-          ("vm-logtest"  (cl-cc::make-vm-logtest  :dst :R0 :lhs :R1 :rhs :R2) 14)
-          ("vm-logbitp"  (cl-cc::make-vm-logbitp  :dst :R0 :lhs :R1 :rhs :R2) 15))
+          ("vm-div"      (cl-cc:make-vm-div      :dst :R0 :lhs :R1 :rhs :R2) 34)
+          ("vm-mod"      (cl-cc:make-vm-mod      :dst :R0 :lhs :R1 :rhs :R2) 37)
+          ("vm-logtest"  (cl-cc:make-vm-logtest  :dst :R0 :lhs :R1 :rhs :R2) 14)
+          ("vm-logbitp"  (cl-cc:make-vm-logbitp  :dst :R0 :lhs :R1 :rhs :R2) 15))
   (inst expected)
   (assert-equal expected (cl-cc/codegen::instruction-size inst)))

@@ -7,7 +7,7 @@
   "opt-pass-global-dce removes a registered function when nothing at top level reaches it."
   (let* ((closure (make-vm-closure :dst :r0 :label "dead" :params '(:r1)
                                    :captured nil :optional-params nil :rest-param nil :key-params nil))
-         (register (cl-cc::make-vm-register-function :name 'dead :src :r0))
+         (register (cl-cc:make-vm-register-function :name 'dead :src :r0))
          (label (make-vm-label :name "dead"))
          (body (make-vm-const :dst :r2 :value 7))
          (ret (make-vm-ret :reg :r2))
@@ -22,7 +22,7 @@
   "opt-pass-global-dce keeps functions reachable from top-level known calls."
   (let* ((f-closure (make-vm-closure :dst :r0 :label "f" :params '(:r1)
                                      :captured nil :optional-params nil :rest-param nil :key-params nil))
-         (f-register (cl-cc::make-vm-register-function :name 'f :src :r0))
+         (f-register (cl-cc:make-vm-register-function :name 'f :src :r0))
          (f-label (make-vm-label :name "f"))
          (f-ref (make-vm-func-ref :dst :r2 :label "g"))
          (f-call (make-vm-call :dst :r3 :func :r2 :args '(:r1)))

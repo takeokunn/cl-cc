@@ -85,7 +85,7 @@
           ("neg"     :R3 -7  -7))
   (dst val expected)
   (let ((s (make-test-vm)))
-    (exec1 (cl-cc::make-vm-const :dst dst :value val) s)
+    (exec1 (cl-cc:make-vm-const :dst dst :value val) s)
     (assert-equal expected (cl-cc:vm-reg-get s dst))))
 
 ;;; ─── execute-instruction: vm-halt ───────────────────────────────────────────
@@ -94,11 +94,11 @@
   "vm-const and vm-move advance pc by 1 and load/copy values correctly."
   (let ((s (make-test-vm)))
     (multiple-value-bind (next-pc halt-p)
-        (exec1 (cl-cc::make-vm-const :dst :R0 :value 0) s)
+        (exec1 (cl-cc:make-vm-const :dst :R0 :value 0) s)
       (assert-= 1 next-pc)
       (assert-false halt-p))
     (cl-cc:vm-reg-set s :R1 'hello)
-    (exec1 (cl-cc::make-vm-move :dst :R0 :src :R1) s)
+    (exec1 (cl-cc:make-vm-move :dst :R0 :src :R1) s)
     (assert-eq 'hello (cl-cc:vm-reg-get s :R0))))
 
 (deftest vm-execute-halt-signal
@@ -106,7 +106,7 @@
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s :R0 'done)
     (multiple-value-bind (next-pc halt-p result)
-        (exec1 (cl-cc::make-vm-halt :reg :R0) s)
+        (exec1 (cl-cc:make-vm-halt :reg :R0) s)
       (assert-null next-pc)
       (assert-true halt-p)
       (assert-eq 'done result))))
@@ -125,7 +125,7 @@
     (cl-cc:vm-reg-set s :R0 reg-val)
     (multiple-value-bind (next-pc halt-p)
         (cl-cc:execute-instruction
-         (cl-cc::make-vm-jump-zero :reg :R0 :label label) s current-pc lbls)
+         (cl-cc:make-vm-jump-zero :reg :R0 :label label) s current-pc lbls)
       (declare (ignore halt-p))
       (assert-= expected-pc next-pc))))
 
@@ -134,7 +134,7 @@
   (let ((s (make-test-vm)))
     (multiple-value-bind (next-pc halt-p result)
         (cl-cc/vm::execute-instruction
-         (cl-cc::make-vm-label :name "entry") s 4 (make-hash-table :test #'equal))
+         (cl-cc:make-vm-label :name "entry") s 4 (make-hash-table :test #'equal))
       (declare (ignore result))
       (assert-= 5 next-pc)
       (assert-false halt-p))))
@@ -148,7 +148,7 @@ rather than raw gethash to produce a lookupable entry."
     (cl-cc/vm::vm-label-table-store lbls "entry" 11)
     (multiple-value-bind (next-pc halt-p result)
         (cl-cc/vm::execute-instruction
-         (cl-cc::make-vm-jump :label "entry") s 2 lbls)
+         (cl-cc:make-vm-jump :label "entry") s 2 lbls)
       (declare (ignore result))
       (assert-= 11 next-pc)
       (assert-false halt-p))))
@@ -162,7 +162,7 @@ expansions, which previously fell back to bogus local closures."
         (labels (make-hash-table :test #'equal)))
     (multiple-value-bind (next-pc halt-p result)
         (cl-cc/vm::execute-instruction
-         (cl-cc::make-vm-func-ref :dst :R0 :label "1+") s 7 labels)
+         (cl-cc:make-vm-func-ref :dst :R0 :label "1+") s 7 labels)
       (declare (ignore result))
       (assert-= 8 next-pc)
       (assert-false halt-p))

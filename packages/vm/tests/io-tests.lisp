@@ -32,28 +32,28 @@
   "Create string output stream, write to it, get result."
   (let ((s (io-vm)))
     ;; Create string output stream
-    (io-exec (cl-cc::make-vm-make-string-output-stream-inst :dst :R0) s)
+    (io-exec (cl-cc:make-vm-make-string-output-stream-inst :dst :R0) s)
     (let ((stream (cl-cc/vm::vm-reg-get s :R0)))
       (assert-true (streamp stream))
       ;; Write string to it
       (cl-cc/vm::vm-reg-set s :R1 stream)
       (cl-cc/vm::vm-reg-set s :R2 "hello")
-      (io-exec (cl-cc::make-vm-stream-write-string-inst :stream-reg :R1 :src :R2) s)
+      (io-exec (cl-cc:make-vm-stream-write-string-inst :stream-reg :R1 :src :R2) s)
       ;; Get accumulated string
-      (io-exec (cl-cc::make-vm-get-output-stream-string-inst :dst :R3 :src :R1) s)
+      (io-exec (cl-cc:make-vm-get-output-stream-string-inst :dst :R3 :src :R1) s)
       (assert-equal "hello" (cl-cc/vm::vm-reg-get s :R3)))))
 
 (deftest io-string-output-stream-multiple-writes
   "Multiple writes accumulate in string output stream."
   (let ((s (io-vm)))
-    (io-exec (cl-cc::make-vm-make-string-output-stream-inst :dst :R0) s)
+    (io-exec (cl-cc:make-vm-make-string-output-stream-inst :dst :R0) s)
     (let ((stream (cl-cc/vm::vm-reg-get s :R0)))
       (cl-cc/vm::vm-reg-set s :R1 stream)
       (cl-cc/vm::vm-reg-set s :R2 "hello")
-      (io-exec (cl-cc::make-vm-stream-write-string-inst :stream-reg :R1 :src :R2) s)
+      (io-exec (cl-cc:make-vm-stream-write-string-inst :stream-reg :R1 :src :R2) s)
       (cl-cc/vm::vm-reg-set s :R2 " world")
-      (io-exec (cl-cc::make-vm-stream-write-string-inst :stream-reg :R1 :src :R2) s)
-      (io-exec (cl-cc::make-vm-get-output-stream-string-inst :dst :R3 :src :R1) s)
+      (io-exec (cl-cc:make-vm-stream-write-string-inst :stream-reg :R1 :src :R2) s)
+      (io-exec (cl-cc:make-vm-get-output-stream-string-inst :dst :R3 :src :R1) s)
       (assert-equal "hello world" (cl-cc/vm::vm-reg-get s :R3)))))
 
 ;;; ─── read-from-string ─────────────────────────────────────────────────────
@@ -62,7 +62,7 @@
   "Execute vm-read-from-string on SRC in a fresh vm-state and return the result."
   (let ((vm (io-vm)))
     (cl-cc/vm::vm-reg-set vm :R1 src)
-    (io-exec (cl-cc::make-vm-read-from-string-inst :dst :R0 :src :R1) vm)
+    (io-exec (cl-cc:make-vm-read-from-string-inst :dst :R0 :src :R1) vm)
     (cl-cc/vm::vm-reg-get vm :R0)))
 
 (deftest io-read-from-string-integer
@@ -156,14 +156,14 @@
   (value expected)
   (let ((s (io-vm-full)))
     (cl-cc/vm::vm-reg-set s :R1 value)
-    (io-exec (cl-cc::make-vm-streamp :dst :R0 :src :R1) s)
+    (io-exec (cl-cc:make-vm-streamp :dst :R0 :src :R1) s)
     (assert-equal expected (cl-cc/vm::vm-reg-get s :R0))))
 
 (deftest io-streamp-handle-resolved
   "vm-streamp resolves integer handle to stream via vm-io-state."
   (let ((s (io-vm-full)))
     (cl-cc/vm::vm-reg-set s :R1 cl-cc/vm::+stdin-handle+)
-    (io-exec (cl-cc::make-vm-streamp :dst :R0 :src :R1) s)
+    (io-exec (cl-cc:make-vm-streamp :dst :R0 :src :R1) s)
     (assert-equal t (cl-cc/vm::vm-reg-get s :R0))))
 
 (deftest-each io-input-stream-p
@@ -173,7 +173,7 @@
   (stream-val expected)
   (let ((s (io-vm-full)))
     (cl-cc/vm::vm-reg-set s :R1 stream-val)
-    (io-exec (cl-cc::make-vm-input-stream-p :dst :R0 :src :R1) s)
+    (io-exec (cl-cc:make-vm-input-stream-p :dst :R0 :src :R1) s)
     (assert-equal expected (cl-cc/vm::vm-reg-get s :R0))))
 
 (deftest-each io-output-stream-p
@@ -183,14 +183,14 @@
   (stream-val expected)
   (let ((s (io-vm-full)))
     (cl-cc/vm::vm-reg-set s :R1 stream-val)
-    (io-exec (cl-cc::make-vm-output-stream-p :dst :R0 :src :R1) s)
+    (io-exec (cl-cc:make-vm-output-stream-p :dst :R0 :src :R1) s)
     (assert-equal expected (cl-cc/vm::vm-reg-get s :R0))))
 
 (deftest io-open-stream-p-true
   "vm-open-stream-p returns t for open stream."
   (let ((s (io-vm-full)))
     (cl-cc/vm::vm-reg-set s :R1 (make-string-output-stream))
-    (io-exec (cl-cc::make-vm-open-stream-p :dst :R0 :src :R1) s)
+    (io-exec (cl-cc:make-vm-open-stream-p :dst :R0 :src :R1) s)
     (assert-equal t (cl-cc/vm::vm-reg-get s :R0))))
 
 ;;; ─── handle-based string streams (vm-make-string-stream) ───────────────────
@@ -198,7 +198,7 @@
 (deftest io-make-string-stream-output
   "vm-make-string-stream creates an output string stream with handle."
   (let ((s (io-vm-full)))
-    (io-exec (cl-cc::make-vm-make-string-stream :dst :R0 :direction :output) s)
+    (io-exec (cl-cc:make-vm-make-string-stream :dst :R0 :direction :output) s)
     (let ((handle (cl-cc/vm::vm-reg-get s :R0)))
       (assert-true (integerp handle))
       (assert-true (>= handle 2)))))
@@ -207,27 +207,27 @@
   "vm-make-string-stream creates an input string stream with initial string."
   (let ((s (io-vm-full)))
     (cl-cc/vm::vm-reg-set s :R1 "hello")
-    (io-exec (cl-cc::make-vm-make-string-stream :dst :R0 :direction :input
+    (io-exec (cl-cc:make-vm-make-string-stream :dst :R0 :direction :input
                                                  :initial-string :R1) s)
     (let ((handle (cl-cc/vm::vm-reg-get s :R0)))
       (assert-true (integerp handle))
       ;; Read a char from it to verify content
       (cl-cc/vm::vm-reg-set s :R2 handle)
-      (io-exec (cl-cc::make-vm-read-char :dst :R3 :handle :R2) s)
+      (io-exec (cl-cc:make-vm-read-char :dst :R3 :handle :R2) s)
       (assert-equal #\h (cl-cc/vm::vm-reg-get s :R3)))))
 
 (deftest io-make-string-stream-get-string
   "vm-get-string-from-stream extracts accumulated string from handle."
   (let ((s (io-vm-full)))
     ;; Create output string stream (handle-based)
-    (io-exec (cl-cc::make-vm-make-string-stream :dst :R0 :direction :output) s)
+    (io-exec (cl-cc:make-vm-make-string-stream :dst :R0 :direction :output) s)
     (let ((handle (cl-cc/vm::vm-reg-get s :R0)))
       ;; Write to it via handle
       (cl-cc/vm::vm-reg-set s :R1 handle)
       (cl-cc/vm::vm-reg-set s :R2 "test output")
-      (io-exec (cl-cc::make-vm-write-string :handle :R1 :str :R2) s)
+      (io-exec (cl-cc:make-vm-write-string :handle :R1 :str :R2) s)
       ;; Get string from handle
-      (io-exec (cl-cc::make-vm-get-string-from-stream :dst :R3 :handle :R1) s)
+      (io-exec (cl-cc:make-vm-get-string-from-stream :dst :R3 :handle :R1) s)
       (assert-equal "test output" (cl-cc/vm::vm-reg-get s :R3)))))
 
 ;;; ─── eof-p ──────────────────────────────────────────────────────────────────
@@ -239,7 +239,7 @@
   (value expected)
   (let ((s (io-vm-full)))
     (cl-cc/vm::vm-reg-set s :R1 value)
-    (io-exec (cl-cc::make-vm-eof-p :dst :R0 :value :R1) s)
+    (io-exec (cl-cc:make-vm-eof-p :dst :R0 :value :R1) s)
     (assert-equal expected (cl-cc/vm::vm-reg-get s :R0))))
 
 ;;; ─── read-char / read-line via handle ──────────────────────────────────────
@@ -248,11 +248,11 @@
   "vm-read-line reads a line from handle-based input string stream."
   (let ((s (io-vm-full)))
     (cl-cc/vm::vm-reg-set s :R1 "first line")
-    (io-exec (cl-cc::make-vm-make-string-stream :dst :R0 :direction :input
+    (io-exec (cl-cc:make-vm-make-string-stream :dst :R0 :direction :input
                                                  :initial-string :R1) s)
     (let ((handle (cl-cc/vm::vm-reg-get s :R0)))
       (cl-cc/vm::vm-reg-set s :R2 handle)
-      (io-exec (cl-cc::make-vm-read-line :dst :R3 :handle :R2) s)
+      (io-exec (cl-cc:make-vm-read-line :dst :R3 :handle :R2) s)
       (assert-equal "first line" (cl-cc/vm::vm-reg-get s :R3)))))
 
 ;;; ─── %resolve-integer-stream-handle (extracted helper) ──────────────────

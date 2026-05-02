@@ -125,13 +125,13 @@
                         (make-vm-label :name "lbl")
                         (make-vm-ret   :reg :r0))))
          (entry  (cl-cc/optimize::cfg-entry cfg))
-         (succ   (first (cl-cc::bb-successors entry)))
+         (succ   (first (cl-cc:bb-successors entry)))
          (extra  (cl-cc/optimize::cfg-new-block cfg)))
     (cl-cc/optimize::%sccp-redirect-successors entry (list extra))
-    (assert-true  (member extra (cl-cc::bb-successors entry) :test #'eq))
-    (assert-false (member succ  (cl-cc::bb-successors entry) :test #'eq))
-    (assert-true  (member entry (cl-cc::bb-predecessors extra) :test #'eq))
-    (assert-false (member entry (cl-cc::bb-predecessors succ)  :test #'eq))))
+    (assert-true  (member extra (cl-cc:bb-successors entry) :test #'eq))
+    (assert-false (member succ  (cl-cc:bb-successors entry) :test #'eq))
+    (assert-true  (member entry (cl-cc:bb-predecessors extra) :test #'eq))
+    (assert-false (member entry (cl-cc:bb-predecessors succ)  :test #'eq))))
 
 ;;; ─── %sccp-process-block ─────────────────────────────────────────────────
 
@@ -144,7 +144,7 @@
          (entry (cl-cc/optimize::cfg-entry cfg)))
     (setf (gethash :r0 env) 3 (gethash :r1 env) 4)
     (let ((out-env (cl-cc/optimize::%sccp-process-block entry env)))
-      (let ((folded (first (cl-cc::bb-instructions entry))))
+      (let ((folded (first (cl-cc:bb-instructions entry))))
         (assert-true (typep folded 'cl-cc/vm::vm-const))
         (assert-= 7 (cl-cc/vm::vm-value folded)))
       (assert-= 7 (gethash :r2 out-env)))))

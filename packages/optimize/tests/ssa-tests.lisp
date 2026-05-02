@@ -113,7 +113,7 @@
                   :reg :r1))
          (phi-map (make-hash-table :test #'eq))
          (renamed (make-hash-table :test #'eq))
-         (inst    (make-vm-add :dst :r3 :lhs (cl-cc::phi-dst phi) :rhs :r4)))
+         (inst    (make-vm-add :dst :r3 :lhs (cl-cc:phi-dst phi) :rhs :r4)))
     (setf (gethash join phi-map) (list phi)
           (gethash join renamed) (list inst))
     (multiple-value-bind (new-phi-map new-renamed-map)

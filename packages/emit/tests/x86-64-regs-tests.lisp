@@ -110,20 +110,20 @@ so R4→rsi=6 and R5→rdi=7 in the naive mapping."
 
 (deftest x86-64-regs-compute-float-vregs-float-const-marks-register
   "x86-64-compute-float-vregs marks a register as float when loaded from a float constant."
-  (let* ((insts (list (cl-cc::make-vm-const :dst :R0 :value 3.14)))
+  (let* ((insts (list (cl-cc:make-vm-const :dst :R0 :value 3.14)))
          (result (cl-cc/codegen::x86-64-compute-float-vregs insts)))
     (assert-true (gethash :R0 result))))
 
 (deftest x86-64-regs-compute-float-vregs-int-const-does-not-mark
   "x86-64-compute-float-vregs does not mark a register loaded from an integer constant."
-  (let* ((insts (list (cl-cc::make-vm-const :dst :R0 :value 42)))
+  (let* ((insts (list (cl-cc:make-vm-const :dst :R0 :value 42)))
          (result (cl-cc/codegen::x86-64-compute-float-vregs insts)))
     (assert-false (gethash :R0 result))))
 
 (deftest x86-64-regs-compute-float-vregs-propagates-via-move
   "x86-64-compute-float-vregs propagates float type through vm-move."
-  (let* ((insts (list (cl-cc::make-vm-const :dst :R0 :value 1.0)
-                      (cl-cc::make-vm-move :dst :R1 :src :R0)))
+  (let* ((insts (list (cl-cc:make-vm-const :dst :R0 :value 1.0)
+                      (cl-cc:make-vm-move :dst :R1 :src :R0)))
          (result (cl-cc/codegen::x86-64-compute-float-vregs insts)))
     (assert-true (gethash :R0 result))
     (assert-true (gethash :R1 result))))

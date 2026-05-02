@@ -95,7 +95,7 @@
 
 (deftest-each mop-class-accessors-expand-to-let
   "Class MOP accessor macros all expand to a LET guarded by HASH-TABLE-P.
-Uses cl-cc:: qualified symbols because our-defmacro registers macros under the
+Uses cl-cc: qualified symbols because our-defmacro registers macros under the
 package where they were defined (src is (in-package :cl-cc)), and the test
 package would otherwise intern fresh uninterned lookup keys."
   :cases (("class-direct-superclasses"    '(cl-cc/expand::class-direct-superclasses cls))

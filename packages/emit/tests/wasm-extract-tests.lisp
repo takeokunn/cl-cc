@@ -72,7 +72,7 @@
 
 (deftest extract-entry-labels-ignores-register-function
   "collect-entry-labels ignores vm-register-function (not a label)."
-  (let* ((instrs (list (cl-cc::make-vm-register-function :name 'foo :src :r0)))
+  (let* ((instrs (list (cl-cc:make-vm-register-function :name 'foo :src :r0)))
          (ht (cl-cc/codegen::collect-entry-labels instrs)))
     (assert-equal 0 (hash-table-count ht))))
 

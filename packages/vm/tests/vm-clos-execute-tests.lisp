@@ -17,7 +17,7 @@
   (make-instance 'cl-cc/vm::vm-io-state))
 (defun class-def-inst (dst name &key (supers '()) (slots '()) (initargs '()))
   "Build a vm-class-def instruction for simple class registration."
-  (cl-cc::make-vm-class-def
+  (cl-cc:make-vm-class-def
    :dst dst
    :class-name name
    :superclasses supers
@@ -34,7 +34,7 @@
            s 0 nil)))
 (defun make-cdef-for-test (name &key (supers '()) (default-initarg-regs nil) (class-slots nil))
   "Build a vm-class-def with empty slot/initarg lists and explicit defaults for testing."
-  (cl-cc::make-vm-class-def
+  (cl-cc:make-vm-class-def
    :dst :R0 :class-name name :superclasses supers
    :slot-names '() :slot-initargs '() :slot-initform-regs nil
    :default-initarg-regs default-initarg-regs :class-slots class-slots))
@@ -89,7 +89,7 @@
     (exec-class-def s :R0 'animal :slots '(name))
     (let ((class-ht (cl-cc:vm-reg-get s :R0)))
       (cl-cc/vm::execute-instruction
-       (cl-cc::make-vm-make-obj :dst :R1 :class-reg :R0 :initarg-regs nil)
+       (cl-cc:make-vm-make-obj :dst :R1 :class-reg :R0 :initarg-regs nil)
        s 0 nil)
       (let ((obj-ht (cl-cc:vm-reg-get s :R1)))
         (assert-true (hash-table-p obj-ht))
@@ -100,7 +100,7 @@
   (let ((s (make-clos-vm)))
     (exec-class-def s :R0 'pt :slots '(x y))
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-make-obj :dst :R1 :class-reg :R0 :initarg-regs nil)
+     (cl-cc:make-vm-make-obj :dst :R1 :class-reg :R0 :initarg-regs nil)
      s 0 nil)
     (let ((obj-ht (cl-cc:vm-reg-get s :R1)))
       (assert-null (gethash 'x obj-ht))
@@ -112,7 +112,7 @@
   "Register CLASS-NAME with SLOTS and create an instance, storing in OBJ-REG."
   (exec-class-def s class-reg class-name :slots slots)
   (cl-cc/vm::execute-instruction
-   (cl-cc::make-vm-make-obj :dst obj-reg :class-reg class-reg :initarg-regs nil)
+   (cl-cc:make-vm-make-obj :dst obj-reg :class-reg class-reg :initarg-regs nil)
    s 0 nil))
 
 (deftest vm-slot-write-read-roundtrip
@@ -121,10 +121,10 @@
     (make-test-instance s :R0 :R1 'box '(width))
     (cl-cc:vm-reg-set s :R2 42)
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-slot-write :obj-reg :R1 :slot-name 'width :value-reg :R2)
+     (cl-cc:make-vm-slot-write :obj-reg :R1 :slot-name 'width :value-reg :R2)
      s 0 nil)
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-slot-read :dst :R3 :obj-reg :R1 :slot-name 'width)
+     (cl-cc:make-vm-slot-read :dst :R3 :obj-reg :R1 :slot-name 'width)
      s 0 nil)
     (assert-= 42 (cl-cc:vm-reg-get s :R3))))
 
@@ -135,7 +135,7 @@
     (remhash 'val (cl-cc:vm-reg-get s :R1))
     (assert-signals error
       (cl-cc/vm::execute-instruction
-       (cl-cc::make-vm-slot-read :dst :R2 :obj-reg :R1 :slot-name 'val)
+       (cl-cc:make-vm-slot-read :dst :R2 :obj-reg :R1 :slot-name 'val)
        s 0 nil))))
 
 (deftest vm-slot-write-advances-pc
@@ -145,7 +145,7 @@
     (cl-cc:vm-reg-set s :R2 0)
     (let ((new-pc (first (multiple-value-list
                           (cl-cc/vm::execute-instruction
-                           (cl-cc::make-vm-slot-write :obj-reg :R1 :slot-name 'v :value-reg :R2)
+                           (cl-cc:make-vm-slot-write :obj-reg :R1 :slot-name 'v :value-reg :R2)
                            s 7 nil)))))
       (assert-= 8 new-pc))))
 
@@ -158,7 +158,7 @@
     (make-test-instance s :R0 :R1 'car '(model))
     (when remove-p (remhash 'model (cl-cc:vm-reg-get s :R1)))
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-slot-boundp :dst :R2 :obj-reg :R1 :slot-name-sym 'model)
+     (cl-cc:make-vm-slot-boundp :dst :R2 :obj-reg :R1 :slot-name-sym 'model)
      s 0 nil)
     (if remove-p
         (assert-false (cl-cc:vm-reg-get s :R2))
@@ -169,7 +169,7 @@
   (let ((s (make-clos-vm)))
     (make-test-instance s :R0 :R1 'node '(data))
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-slot-makunbound :dst :R2 :obj-reg :R1 :slot-name-sym 'data)
+     (cl-cc:make-vm-slot-makunbound :dst :R2 :obj-reg :R1 :slot-name-sym 'data)
      s 0 nil)
     (assert-false (nth-value 1 (gethash 'data (cl-cc:vm-reg-get s :R1))))
     (assert-eq (cl-cc:vm-reg-get s :R1)
@@ -319,7 +319,7 @@
   (let ((s (make-clos-vm)))
     (make-test-instance s :R0 :R1 'rect '(width height))
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-slot-exists-p :dst :R2 :obj-reg :R1 :slot-name-sym slot-sym)
+     (cl-cc:make-vm-slot-exists-p :dst :R2 :obj-reg :R1 :slot-name-sym slot-sym)
      s 0 nil)
     (if expected-p
         (assert-true  (cl-cc:vm-reg-get s :R2))
@@ -331,7 +331,7 @@
     (exec-class-def s :R0 'my-class)
     (cl-cc:vm-reg-set s :R1 (cl-cc:vm-reg-get s :R0))
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-class-name-fn :dst :R2 :src :R1)
+     (cl-cc:make-vm-class-name-fn :dst :R2 :src :R1)
      s 0 nil)
     (assert-eq 'my-class (cl-cc:vm-reg-get s :R2))))
 
@@ -342,7 +342,7 @@
     (cl-cc:vm-reg-set s :R1 (cl-cc:vm-reg-get s :R0))
     (let ((new-pc (first (multiple-value-list
                           (cl-cc/vm::execute-instruction
-                           (cl-cc::make-vm-class-name-fn :dst :R2 :src :R1)
+                           (cl-cc:make-vm-class-name-fn :dst :R2 :src :R1)
                            s 3 nil)))))
       (assert-= 4 new-pc))))
 
@@ -351,7 +351,7 @@
   (let ((s (make-clos-vm)))
     (make-test-instance s :R0 :R1 'dog '(name breed))
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-class-of-fn :dst :R2 :src :R1)
+     (cl-cc:make-vm-class-of-fn :dst :R2 :src :R1)
      s 0 nil)
     (assert-eq (cl-cc:vm-reg-get s :R0)
                (cl-cc:vm-reg-get s :R2))))
@@ -365,7 +365,7 @@
     (when register-p (exec-class-def s :R0 class-sym))
     (cl-cc:vm-reg-set s :R1 class-sym)
     (cl-cc/vm::execute-instruction
-     (cl-cc::make-vm-find-class :dst :R2 :src :R1)
+     (cl-cc:make-vm-find-class :dst :R2 :src :R1)
      s 0 nil)
     (let ((found (cl-cc:vm-reg-get s :R2)))
       (if register-p

@@ -29,10 +29,10 @@
 
 (deftest build-label-table-uses-integer-keyed-buckets
   "build-label-table keeps string labels working while using integer outer keys."
-  (let* ((instructions (list (cl-cc::make-vm-label :name "entry")
-                             (cl-cc::make-vm-const :dst :r0 :value 1)
-                             (cl-cc::make-vm-label :name :done)
-                             (cl-cc::make-vm-halt :reg :r0)))
+  (let* ((instructions (list (cl-cc:make-vm-label :name "entry")
+                             (cl-cc:make-vm-const :dst :r0 :value 1)
+                             (cl-cc:make-vm-label :name :done)
+                             (cl-cc:make-vm-halt :reg :r0)))
          (labels (cl-cc/vm::build-label-table instructions)))
     ;; SBCL's HASH-TABLE-TEST returns the symbol 'EQL, not the function object.
     (assert-eq 'eql (hash-table-test labels))
@@ -41,9 +41,9 @@
 
 (deftest vm-jump-uses-label-table-lookup
   "vm-jump resolves labels through the integer-keyed table produced by build-label-table."
-  (let* ((instructions (list (cl-cc::make-vm-jump :label "target")
-                             (cl-cc::make-vm-label :name "target")
-                             (cl-cc::make-vm-halt :reg :r0)))
+  (let* ((instructions (list (cl-cc:make-vm-jump :label "target")
+                             (cl-cc:make-vm-label :name "target")
+                             (cl-cc:make-vm-halt :reg :r0)))
          (labels (cl-cc/vm::build-label-table instructions))
          (state (make-test-vm)))
     (multiple-value-bind (next-pc halt-p result)
@@ -60,50 +60,50 @@
 
 (deftest vm2-opcode-registration
   "defopcode: each opcode has a numeric id, dispatch handler, name entry, and encoder mapping."
-  (assert-true (numberp cl-cc::+op2-const+))
-  (assert-true (not (null (aref cl-cc/vm::*opcode-dispatch-table* cl-cc::+op2-const+))))
-  (assert-true (not (null (aref cl-cc/vm::*opcode-dispatch-table* cl-cc::+op2-add2+))))
-  (assert-equal 'cl-cc::add2 (aref cl-cc/vm::*opcode-name-table* cl-cc::+op2-add2+))
-  (assert-= cl-cc::+op2-const+ (gethash 'cl-cc::const cl-cc/vm::*opcode-encoder-table*))
-  (assert-= cl-cc::+op2-move+  (gethash 'cl-cc::move  cl-cc/vm::*opcode-encoder-table*))
-  (assert-= cl-cc::+op2-add2+  (gethash 'cl-cc::add2  cl-cc/vm::*opcode-encoder-table*))
-  (assert-= cl-cc::+op2-add-imm2+ (gethash 'cl-cc::add-imm2 cl-cc/vm::*opcode-encoder-table*)))
+  (assert-true (numberp cl-cc:+op2-const+))
+  (assert-true (not (null (aref cl-cc/vm::*opcode-dispatch-table* cl-cc:+op2-const+))))
+  (assert-true (not (null (aref cl-cc/vm::*opcode-dispatch-table* cl-cc:+op2-add2+))))
+  (assert-equal 'cl-cc:add2 (aref cl-cc/vm::*opcode-name-table* cl-cc:+op2-add2+))
+  (assert-= cl-cc:+op2-const+ (gethash 'cl-cc:const cl-cc/vm::*opcode-encoder-table*))
+  (assert-= cl-cc:+op2-move+  (gethash 'cl-cc:move  cl-cc/vm::*opcode-encoder-table*))
+  (assert-= cl-cc:+op2-add2+  (gethash 'cl-cc:add2  cl-cc/vm::*opcode-encoder-table*))
+  (assert-= cl-cc:+op2-add-imm2+ (gethash 'cl-cc:add-imm2 cl-cc/vm::*opcode-encoder-table*)))
 
 (deftest vm2-opcode-distinct-values
   "Each defopcode gets a unique opcode number."
-  (let ((ops (list cl-cc::+op2-const+
-                   cl-cc::+op2-move+
-                   cl-cc::+op2-add2+
-                   cl-cc::+op2-add-imm2+
-                   cl-cc::+op2-sub2+
-                   cl-cc::+op2-sub-imm2+
-                   cl-cc::+op2-mul2+
-                   cl-cc::+op2-mul-imm2+
-                   cl-cc::+op2-num-eq-imm2+
-                   cl-cc::+op2-num-lt-imm2+
-                   cl-cc::+op2-num-gt-imm2+
-                   cl-cc::+op2-num-le-imm2+
-                   cl-cc::+op2-num-ge-imm2+
-                   cl-cc::+op2-halt2+)))
+  (let ((ops (list cl-cc:+op2-const+
+                   cl-cc:+op2-move+
+                   cl-cc:+op2-add2+
+                   cl-cc:+op2-add-imm2+
+                   cl-cc:+op2-sub2+
+                   cl-cc:+op2-sub-imm2+
+                   cl-cc:+op2-mul2+
+                   cl-cc:+op2-mul-imm2+
+                   cl-cc:+op2-num-eq-imm2+
+                   cl-cc:+op2-num-lt-imm2+
+                   cl-cc:+op2-num-gt-imm2+
+                   cl-cc:+op2-num-le-imm2+
+                   cl-cc:+op2-num-ge-imm2+
+                   cl-cc:+op2-halt2+)))
     (assert-= (length ops) (length (remove-duplicates ops)))))
 
 (deftest vm2-state-structure
   "make-vm2-state: struct predicate, 256-register vector (all nil), :output-stream kwarg, *features* populated."
-  (let ((s (cl-cc::make-vm2-state)))
-    (assert-true (cl-cc::vm2-state-p s))
-    (assert-true (simple-vector-p (cl-cc::vm2-state-registers s)))
-    (assert-= 256 (length (cl-cc::vm2-state-registers s)))
+  (let ((s (cl-cc:make-vm2-state)))
+    (assert-true (cl-cc:vm2-state-p s))
+    (assert-true (simple-vector-p (cl-cc:vm2-state-registers s)))
+    (assert-= 256 (length (cl-cc:vm2-state-registers s)))
     (dotimes (i 256)
       (assert-true (null (cl-cc/vm::vm2-reg-get s i))))
-    (assert-null (cl-cc::vm2-state-values-buffer s))
-    (assert-true (not (null (gethash '*features* (cl-cc::vm2-state-global-vars s))))))
+    (assert-null (cl-cc:vm2-state-values-buffer s))
+    (assert-true (not (null (gethash '*features* (cl-cc:vm2-state-global-vars s))))))
   (let* ((str (make-string-output-stream))
-         (s   (cl-cc::make-vm2-state :output-stream str)))
-    (assert-equal str (cl-cc::vm2-state-output-stream s))))
+         (s   (cl-cc:make-vm2-state :output-stream str)))
+    (assert-equal str (cl-cc:vm2-state-output-stream s))))
 
 (deftest vm2-reg-operations
   "vm2-reg-set/get: stores, retrieves, returns value, overwrites; all 256 slots independent."
-  (let ((s (cl-cc::make-vm2-state)))
+  (let ((s (cl-cc:make-vm2-state)))
     (cl-cc/vm::vm2-reg-set s 0 42)
     (assert-= 42 (cl-cc/vm::vm2-reg-get s 0))
     ;; set returns the written value
