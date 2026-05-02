@@ -46,7 +46,7 @@ Evaluation/compilation, lambda lists, types/classes, data/control flow, iteratio
 | `*macroexpand-hook*`                                         | ✅   | FR-429: `stdlib-source.lisp` で defvar 定義                                                                   |
 | `with-compilation-unit`                                      | ✅   | FR-363: `macros-stdlib.lisp` でスタブ実装                                                                     |
 | `compile` (関数)                                             | ✅   | FR-512: ホストブリッジ経由で委譲                                                                              |
-| `compile-file`                                               | ✅   | `packages/expand/src/macros-stdlib.lisp: compile-file` shim; `our-load` を呼び、3値を返す            |
+| `compile-file`                                               | ✅   | `packages/expand/src/macros-stdlib.lisp: compile-file` shim; `our-load` を呼び、3値を返す                     |
 | `constantp` / `special-operator-p`                           | ✅   | FR-538: `stdlib-source.lisp` で実装                                                                           |
 | `fdefinition` / `(setf fdefinition)`                         | ✅   | FR-548: `fdefinition` (読み取り) + `set-fdefinition` (書き込み) 両方 `stdlib-source.lisp` で実装              |
 | `function-lambda-expression`                                 | ✅   | FR-549: `stdlib-source.lisp` で実装 (常に nil 返却)                                                           |
