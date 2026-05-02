@@ -179,7 +179,7 @@ so (and a b c) arrives as fully-nested IFs rather than (if a (and b c) nil)."
 The cache is opportunistic, so we only require the same result each time."
   (let ((count 0)
         (name (gensym "CACHE-TEST-")))
-    (cl-cc/expand::register-macro name
+    (cl-cc/expand:register-macro name
                            (lambda (form env)
                              (declare (ignore form env))
                              (incf count)

@@ -8,7 +8,7 @@
 (deftest codegen-slot-value
   "slot-value emits vm-slot-read with correct slot name and returns a register."
   (let* ((ctx (make-codegen-ctx)))
-    (setf (cl-cc/compile::ctx-env ctx) (list (cons 'obj :R42)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'obj :R42)))
     (let* ((reg  (compile-ast (cl-cc/ast:make-ast-slot-value
                                 :object (cl-cc/ast:make-ast-var :name 'obj)
                                 :slot 'radius)
@@ -60,7 +60,7 @@
          (insts nil)
          (jump-pos nil)
          (cons-pos nil))
-    (setf (cl-cc/compile::ctx-env ctx) (list (cons 'flag :R10)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'flag :R10)))
     (setf ast
           (cl-cc/ast:make-ast-let
            :bindings
@@ -130,7 +130,7 @@
          (insts nil)
          (jump-pos nil)
          (cons-pos nil))
-    (setf (cl-cc/compile::ctx-env ctx) (list (cons 'flag :R10)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'flag :R10)))
     (setf ast
           (cl-cc/ast:make-ast-let
            :bindings
@@ -172,7 +172,7 @@
 (deftest codegen-set-slot-value
   "set-slot-value emits vm-slot-write with correct slot name and returns a register."
   (let* ((ctx (make-codegen-ctx)))
-    (setf (cl-cc/compile::ctx-env ctx) (list (cons 'obj :R60)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'obj :R60)))
     (let* ((reg  (compile-ast (cl-cc/ast:make-ast-set-slot-value
                                 :object (cl-cc/ast:make-ast-var :name 'obj)
                                 :slot 'weight

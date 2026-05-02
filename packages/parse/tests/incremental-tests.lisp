@@ -20,12 +20,12 @@
 
 (defun make-test-interior (kind start end children)
   "Create a CST interior node with given byte range and children."
-  (cl-cc/parse::make-cst-interior :kind kind :start-byte start :end-byte end
+  (cl-cc/parse:make-cst-interior :kind kind :start-byte start :end-byte end
                              :children children))
 
 (defun make-test-edit (start old-end new-end)
   "Create an edit operation."
-  (cl-cc/parse::make-edit-operation :start-byte start
+  (cl-cc/parse:make-edit-operation :start-byte start
                                :old-end-byte old-end
                                :new-end-byte new-end))
 
@@ -85,38 +85,38 @@
   "cst-shift-bytes on a token adjusts start/end by delta and preserves value."
   (let* ((tok (make-test-cst-token :T-INT 42 10 15))
          (shifted (cl-cc/parse::cst-shift-bytes tok 5)))
-    (assert-true (cl-cc/parse::cst-token-p shifted))
-    (assert-equal 15 (cl-cc/parse::cst-node-start-byte shifted))
-    (assert-equal 20 (cl-cc/parse::cst-node-end-byte shifted))
-    (assert-equal 42 (cl-cc/parse::cst-token-value shifted))))
+    (assert-true (cl-cc/parse:cst-token-p shifted))
+    (assert-equal 15 (cl-cc/parse:cst-node-start-byte shifted))
+    (assert-equal 20 (cl-cc/parse:cst-node-end-byte shifted))
+    (assert-equal 42 (cl-cc/parse:cst-token-value shifted))))
 
 (deftest incr-shift-bytes-interior
   "cst-shift-bytes on an interior node shifts the node and all its children."
   (let* ((child (make-test-cst-token :T-INT 1 5 10))
          (parent (make-test-interior :list 0 20 (list child)))
          (shifted (cl-cc/parse::cst-shift-bytes parent 10)))
-    (assert-true (cl-cc/parse::cst-interior-p shifted))
-    (assert-equal 10 (cl-cc/parse::cst-node-start-byte shifted))
-    (assert-equal 30 (cl-cc/parse::cst-node-end-byte shifted))
-    (let ((shifted-child (first (cl-cc/parse::cst-interior-children shifted))))
-      (assert-equal 15 (cl-cc/parse::cst-node-start-byte shifted-child))
-      (assert-equal 20 (cl-cc/parse::cst-node-end-byte shifted-child)))))
+    (assert-true (cl-cc/parse:cst-interior-p shifted))
+    (assert-equal 10 (cl-cc/parse:cst-node-start-byte shifted))
+    (assert-equal 30 (cl-cc/parse:cst-node-end-byte shifted))
+    (let ((shifted-child (first (cl-cc/parse:cst-interior-children shifted))))
+      (assert-equal 15 (cl-cc/parse:cst-node-start-byte shifted-child))
+      (assert-equal 20 (cl-cc/parse:cst-node-end-byte shifted-child)))))
 
 (deftest incr-shift-bytes-error-node
   "cst-shift-bytes on an error node adjusts start/end while preserving error kind."
-  (let* ((err (cl-cc/parse::make-cst-error :kind :error :start-byte 10 :end-byte 20
+  (let* ((err (cl-cc/parse:make-cst-error :kind :error :start-byte 10 :end-byte 20
                                            :message "bad token"))
          (shifted (cl-cc/parse::cst-shift-bytes err 5)))
-    (assert-true (cl-cc/parse::cst-error-p shifted))
-    (assert-equal 15 (cl-cc/parse::cst-node-start-byte shifted))
-    (assert-equal 25 (cl-cc/parse::cst-node-end-byte shifted))))
+    (assert-true (cl-cc/parse:cst-error-p shifted))
+    (assert-equal 15 (cl-cc/parse:cst-node-start-byte shifted))
+    (assert-equal 25 (cl-cc/parse:cst-node-end-byte shifted))))
 
 (deftest incr-shift-bytes-negative-delta
   "cst-shift-bytes with a negative delta moves byte positions backwards."
   (let* ((tok (make-test-cst-token :T-INT 1 20 30))
          (shifted (cl-cc/parse::cst-shift-bytes tok -5)))
-    (assert-equal 15 (cl-cc/parse::cst-node-start-byte shifted))
-    (assert-equal 25 (cl-cc/parse::cst-node-end-byte shifted))))
+    (assert-equal 15 (cl-cc/parse:cst-node-start-byte shifted))
+    (assert-equal 25 (cl-cc/parse:cst-node-end-byte shifted))))
 
 ;;; ─── Minimal Reparse Detection ──────────────────────────────────────────────
 
@@ -163,12 +163,12 @@
     ;; before + new + shifted-after
     (assert-equal 3 (length result))
     ;; First: before node unchanged
-    (assert-equal 0 (cl-cc/parse::cst-node-start-byte (first result)))
+    (assert-equal 0 (cl-cc/parse:cst-node-start-byte (first result)))
     ;; Second: new node
-    (assert-equal 99 (cl-cc/parse::cst-token-value (second result)))
+    (assert-equal 99 (cl-cc/parse:cst-token-value (second result)))
     ;; Third: after node shifted by +5
-    (assert-equal 20 (cl-cc/parse::cst-node-start-byte (third result)))
-    (assert-equal 25 (cl-cc/parse::cst-node-end-byte (third result)))))
+    (assert-equal 20 (cl-cc/parse:cst-node-start-byte (third result)))
+    (assert-equal 25 (cl-cc/parse:cst-node-end-byte (third result)))))
 
 ;;; ─── Parse Cache ───────────────────────────────────────────────────────────
 
@@ -176,16 +176,16 @@
   "cache-store, cache-lookup, and invalidate-parse-cache work correctly."
   (let ((cl-cc/parse::*parse-cache* (make-hash-table :test 'equal)))
     (let ((nodes (list (make-test-cst-token :T-INT 42 0 2))))
-      (cl-cc/parse::cache-store "42" nodes)
-      (assert-equal nodes (cl-cc/parse::cache-lookup "42"))))
+      (cl-cc/parse:cache-store "42" nodes)
+      (assert-equal nodes (cl-cc/parse:cache-lookup "42"))))
   (let ((cl-cc/parse::*parse-cache* (make-hash-table :test 'equal)))
-    (assert-null (cl-cc/parse::cache-lookup "unknown")))
+    (assert-null (cl-cc/parse:cache-lookup "unknown")))
   (let ((cl-cc/parse::*parse-cache* (make-hash-table :test 'equal)))
-    (cl-cc/parse::cache-store "a" '(1))
-    (cl-cc/parse::cache-store "b" '(2))
-    (cl-cc/parse::invalidate-parse-cache)
-    (assert-null (cl-cc/parse::cache-lookup "a"))
-    (assert-null (cl-cc/parse::cache-lookup "b"))))
+    (cl-cc/parse:cache-store "a" '(1))
+    (cl-cc/parse:cache-store "b" '(2))
+    (cl-cc/parse:invalidate-parse-cache)
+    (assert-null (cl-cc/parse:cache-lookup "a"))
+    (assert-null (cl-cc/parse:cache-lookup "b"))))
 
 
 ;;; ─── CST Equality ──────────────────────────────────────────────────────────
@@ -198,7 +198,7 @@
    (:T-INT    1 :T-IDENT  1 nil))
   (let ((a (make-test-cst-token a-kind a-val 0 2))
         (b (make-test-cst-token b-kind b-val 0 2)))
-    (assert-equal expected (cl-cc/parse::cst-equal-p a b))))
+    (assert-equal expected (cl-cc/parse:cst-equal-p a b))))
 
 (deftest incr-cst-equal-interior
   "cst-equal-p returns true for structurally equal interior nodes."
@@ -208,21 +208,21 @@
         (b (make-test-interior :list 0 10
              (list (make-test-cst-token :T-INT 1 0 5)
                    (make-test-cst-token :T-INT 2 5 10)))))
-    (assert-true (cl-cc/parse::cst-equal-p a b))))
+    (assert-true (cl-cc/parse:cst-equal-p a b))))
 
 (deftest incr-cst-equal-nil
   "cst-equal-p returns true for nil/nil, false for nil/non-nil."
-  (assert-true (cl-cc/parse::cst-equal-p nil nil))
-  (assert-false (cl-cc/parse::cst-equal-p nil (make-test-cst-token :T-INT 1 0 1)))
-  (assert-false (cl-cc/parse::cst-equal-p (make-test-cst-token :T-INT 1 0 1) nil)))
+  (assert-true (cl-cc/parse:cst-equal-p nil nil))
+  (assert-false (cl-cc/parse:cst-equal-p nil (make-test-cst-token :T-INT 1 0 1)))
+  (assert-false (cl-cc/parse:cst-equal-p (make-test-cst-token :T-INT 1 0 1) nil)))
 
 (deftest-each incr-cst-equal-error-cases
   "cst-equal-p compares error nodes by message: equal messages → true, differing → false."
   ((msg-a msg-b expected)
    ("bad"  "bad"   t)
    ("bad"  "worse" nil))
-  (let ((a (cl-cc/parse::make-cst-error :kind :error :start-byte 0 :end-byte 5
+  (let ((a (cl-cc/parse:make-cst-error :kind :error :start-byte 0 :end-byte 5
                                         :message msg-a))
-        (b (cl-cc/parse::make-cst-error :kind :error :start-byte 0 :end-byte 5
+        (b (cl-cc/parse:make-cst-error :kind :error :start-byte 0 :end-byte 5
                                         :message msg-b)))
-    (assert-equal expected (cl-cc/parse::cst-equal-p a b))))
+    (assert-equal expected (cl-cc/parse:cst-equal-p a b))))

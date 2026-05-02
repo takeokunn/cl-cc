@@ -14,4 +14,4 @@
           ("every"  '(every #'evenp '(1 2 3)))
           ("some"   '(some #'oddp '(1 2 3))))
   (form)
-  (assert-eq 'let (car (cl-cc/expand::compiler-macroexpand-all form))))
+  (assert-eq 'let (car (cl-cc/expand:compiler-macroexpand-all form))))

@@ -49,7 +49,7 @@
                                   (make-ast-var :name 'handle))))
   (reg args)
   (let ((ctx (make-codegen-ctx)))
-    (setf (cl-cc/compile::ctx-env ctx) (list (cons 'handle reg)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'handle reg)))
     (compile-ast (make-ast-call :func 'peek-char :args args) ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-peek-char))))
 
@@ -69,6 +69,6 @@
   (env args inst-type)
   (let ((ctx (make-codegen-ctx)))
     (when env
-      (setf (cl-cc/compile::ctx-env ctx) env))
+      (setf (cl-cc/compile:ctx-env ctx) env))
     (compile-ast (make-ast-call :func 'write-string :args args) ctx)
     (assert-true (codegen-find-inst ctx inst-type))))

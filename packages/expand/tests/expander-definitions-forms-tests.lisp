@@ -10,23 +10,23 @@
 
 (deftest expander-defun-expands-body
   "defun expansion keeps the definition head and expands the body."
-  (let ((result (cl-cc/expand::compiler-macroexpand-all '(defun foo (x) (1+ x)))))
+  (let ((result (cl-cc/expand:compiler-macroexpand-all '(defun foo (x) (1+ x)))))
     (assert-eq 'defun (car result))
     (assert-eq 'foo (second result))))
 
 (deftest expander-lambda-expands-typed-params
   "lambda expansion dispatches through the typed/untyped helper path."
   (let ((result (format nil "~S"
-                        (cl-cc/expand::compiler-macroexpand-all
+                        (cl-cc/expand:compiler-macroexpand-all
                          '(lambda ((x integer)) (1+ x))))))
     (assert-true (search "LAMBDA" result))
     (assert-true (search "TYPEP" result))))
 
 (deftest expander-defclass-and-deftype-expands
   "defclass registers slots and deftype returns the quoted type name."
-  (let ((class-result (cl-cc/expand::compiler-macroexpand-all
+  (let ((class-result (cl-cc/expand:compiler-macroexpand-all
                        '(defclass sample () ((slot :initform (1+ 2))))))
-        (type-result (cl-cc/expand::compiler-macroexpand-all
+        (type-result (cl-cc/expand:compiler-macroexpand-all
                       '(deftype sample-type () 'integer))))
     (assert-eq 'defclass (car class-result))
     (assert-eq 'quote (car type-result))

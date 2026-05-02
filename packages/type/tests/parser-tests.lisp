@@ -19,11 +19,11 @@
   :cases (("question-mark" '?)
           ("underscore"    '_))
   (spec)
-  (assert-true (cl-cc/type::type-error-p (cl-cc/type::parse-type-specifier spec))))
+  (assert-true (cl-cc/type:type-error-p (cl-cc/type:parse-type-specifier spec))))
 
 (deftest parse-option-type
   "(option T) parses to (or null T)."
-  (let ((ty (cl-cc/type::parse-type-specifier '(option string))))
+  (let ((ty (cl-cc/type:parse-type-specifier '(option string))))
     (assert-true (type-union-p ty))
     (assert-equal 2 (length (type-union-types ty)))
     (assert-true (some (lambda (x) (type-equal-p x type-null)) (type-union-types ty)))
@@ -31,7 +31,7 @@
 
 (deftest looks-like-type-specifier-option
   "looks-like-type-specifier-p recognizes option sugar forms."
-  (assert-true (cl-cc/type::looks-like-type-specifier-p '(option fixnum))))
+  (assert-true (cl-cc/type:looks-like-type-specifier-p '(option fixnum))))
 
 (deftest-each parse-primitive-symbols
   "Primitive type symbols (and nil) parse to their expected type nodes."
@@ -48,11 +48,11 @@
           ("top"       'top       type-any)
           ("cons"      'cons      type-cons))
   (sym expected)
-  (assert-true (type-equal-p expected (cl-cc/type::parse-type-specifier sym))))
+  (assert-true (type-equal-p expected (cl-cc/type:parse-type-specifier sym))))
 
 (deftest parse-unknown-symbol
   "Unknown symbol becomes type-primitive with that name."
-  (let ((ty (cl-cc/type::parse-type-specifier 'my-custom-type)))
+  (let ((ty (cl-cc/type:parse-type-specifier 'my-custom-type)))
     (assert-true (type-primitive-p ty))
     (assert-eq 'my-custom-type (type-primitive-name ty))))
 
@@ -66,9 +66,9 @@
           ("and-empty-error" '(and)               nil                   nil                       t))
   (form pred accessor error-p)
   (if error-p
-      (assert-signals cl-cc/type::type-parse-error
-        (cl-cc/type::parse-type-specifier form))
-      (let ((ty (cl-cc/type::parse-type-specifier form)))
+      (assert-signals cl-cc/type:type-parse-error
+        (cl-cc/type:parse-type-specifier form))
+      (let ((ty (cl-cc/type:parse-type-specifier form)))
         (assert-true (funcall pred ty))
         (assert-equal 2 (length (funcall accessor ty))))))
 
@@ -79,7 +79,7 @@
   :cases (("one-param"    '(-> fixnum string)          1 type-string)
           ("multi-param"  '(-> fixnum string boolean)  2 type-bool))
   (form expected-nparams expected-ret)
-  (let ((ty (cl-cc/type::parse-type-specifier form)))
+  (let ((ty (cl-cc/type:parse-type-specifier form)))
     (assert-true (type-arrow-p ty))
     (assert-equal expected-nparams (length (type-arrow-params ty)))
     (assert-true (type-equal-p expected-ret (type-arrow-return ty)))))
@@ -89,12 +89,12 @@
   :cases (("arrow-no-param-list" '(-> fixnum))
           ("list-two-args"          '(list fixnum string)))
   (form)
-  (assert-signals cl-cc/type::type-parse-error
-    (cl-cc/type::parse-type-specifier form)))
+  (assert-signals cl-cc/type:type-parse-error
+    (cl-cc/type:parse-type-specifier form)))
 
 (deftest parse-product-type-forms
   "(values T1 T2) produces a 2-element type-product."
-  (let ((ty (cl-cc/type::parse-type-specifier '(values fixnum string))))
+  (let ((ty (cl-cc/type:parse-type-specifier '(values fixnum string))))
     (assert-true (type-product-p ty))
     (assert-equal 2 (length (type-product-elems ty)))))
 
@@ -108,7 +108,7 @@
           ("array"         '(array string)          'array  type-string)
           ("simple-array"  '(simple-array string)   'array  type-string))
   (form expected-fun-name expected-arg)
-  (let ((ty (cl-cc/type::parse-type-specifier form)))
+  (let ((ty (cl-cc/type:parse-type-specifier form)))
     (assert-true (type-app-p ty))
     (assert-eq expected-fun-name (type-primitive-name (type-app-fun ty)))
     (assert-true (type-equal-p expected-arg (type-app-arg ty)))))
@@ -195,4 +195,4 @@
     (assert-true (type-equal-p type-int (type-refinement-base result)))
     (if (eq expected-pred t)
         (assert-true (type-refinement-predicate result))
-        (assert-eq expected-pred (cl-cc/type::type-refinement-predicate result)))))
+        (assert-eq expected-pred (cl-cc/type:type-refinement-predicate result)))))

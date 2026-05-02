@@ -34,23 +34,23 @@
 (defun make-eg-const (eg value)
   "Add a cl-cc:const node and store VALUE as its ec-data.  Returns the class ID.
    NOTE: all consts in the same e-graph share one class (memoized)."
-  (let ((id (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::const)))
-    (let ((cls (gethash (cl-cc/optimize::egraph-find eg id) (cl-cc:eg-classes eg))))
+  (let ((id (cl-cc/optimize:egraph-add eg 'cl-cc/optimize::const)))
+    (let ((cls (gethash (cl-cc/optimize:egraph-find eg id) (cl-cc:eg-classes eg))))
       (when cls (setf (cl-cc:ec-data cls) value)))
     id))
 
 (defun eg-merged-p (eg id1 id2)
   "Return true iff ID1 and ID2 are in the same equivalence class."
-  (= (cl-cc/optimize::egraph-find eg id1) (cl-cc/optimize::egraph-find eg id2)))
+  (= (cl-cc/optimize:egraph-find eg id1) (cl-cc/optimize:egraph-find eg id2)))
 
 (defun eg-all-nodes (eg id)
   "Return ALL e-nodes logically in the equivalence class of ID.
    Collects nodes from both the canonical class and any zombie classes whose
    egraph-find returns the same canonical ID (due to deferred class consolidation)."
-  (let ((canon (cl-cc/optimize::egraph-find eg id))
+  (let ((canon (cl-cc/optimize:egraph-find eg id))
         (nodes nil))
     (maphash (lambda (k cls)
-               (when (= (cl-cc/optimize::egraph-find eg k) canon)
+               (when (= (cl-cc/optimize:egraph-find eg k) canon)
                  (setf nodes (append nodes (cl-cc:ec-nodes cls)))))
              (cl-cc:eg-classes eg))
     nodes))
@@ -83,12 +83,12 @@
 
 (defun eg-saturate (eg)
   "Run all built-in rules to saturation, then rebuild congruence."
-  (cl-cc/optimize::egraph-saturate eg (cl-cc/optimize::egraph-builtin-rules) :limit 10 :fuel 1000)
-  (cl-cc/optimize::egraph-rebuild eg))
+  (cl-cc/optimize:egraph-saturate eg (cl-cc/optimize:egraph-builtin-rules) :limit 10 :fuel 1000)
+  (cl-cc/optimize:egraph-rebuild eg))
 
 (defun eg-rule-registered-p (name)
   "Return true if NAME is a registered built-in rule name."
-  (let ((rules (cl-cc/optimize::egraph-builtin-rules)))
+  (let ((rules (cl-cc/optimize:egraph-builtin-rules)))
     (not (null (find name rules :key (lambda (r) (getf r :name)))))))
 
 ;;; ─── Constant Folding Rules — Registration Tests ─────────────────────────
@@ -122,17 +122,17 @@
           ("logand-neg1" 'cl-cc/optimize::logand -1))
   (op identity-val)
   ;; Right-identity: (op x const) → x
-  (let* ((eg (cl-cc/optimize::make-e-graph))
-         (x  (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
+  (let* ((eg (cl-cc/optimize:make-e-graph))
+         (x  (cl-cc/optimize:egraph-add eg 'cl-cc/optimize::var))
          (c  (make-eg-const eg identity-val))
-         (id (cl-cc/optimize::egraph-add eg op x c)))
+         (id (cl-cc/optimize:egraph-add eg op x c)))
     (eg-saturate eg)
     (assert-true (eg-merged-p eg id x)))
   ;; Left-identity: (op const x) → x
-  (let* ((eg (cl-cc/optimize::make-e-graph))
-         (x  (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
+  (let* ((eg (cl-cc/optimize:make-e-graph))
+         (x  (cl-cc/optimize:egraph-add eg 'cl-cc/optimize::var))
          (c  (make-eg-const eg identity-val))
-         (id (cl-cc/optimize::egraph-add eg op c x)))
+         (id (cl-cc/optimize:egraph-add eg op c x)))
     (eg-saturate eg)
     (assert-true (eg-merged-p eg id x))))
 
@@ -149,17 +149,17 @@
           ("logand-zero" 'cl-cc/optimize::logand 0))
   (op annihilator-val)
   ;; Right-annihilator: (op x const) → const class
-  (let* ((eg (cl-cc/optimize::make-e-graph))
-         (x  (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
+  (let* ((eg (cl-cc/optimize:make-e-graph))
+         (x  (cl-cc/optimize:egraph-add eg 'cl-cc/optimize::var))
          (c  (make-eg-const eg annihilator-val))
-         (id (cl-cc/optimize::egraph-add eg op x c)))
+         (id (cl-cc/optimize:egraph-add eg op x c)))
     (eg-saturate eg)
     (assert-true (eg-class-contains-op-p eg id 'cl-cc/optimize::const)))
   ;; Left-annihilator: (op const x) → const class
-  (let* ((eg (cl-cc/optimize::make-e-graph))
-         (x  (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
+  (let* ((eg (cl-cc/optimize:make-e-graph))
+         (x  (cl-cc/optimize:egraph-add eg 'cl-cc/optimize::var))
          (c  (make-eg-const eg annihilator-val))
-         (id (cl-cc/optimize::egraph-add eg op c x)))
+         (id (cl-cc/optimize:egraph-add eg op c x)))
     (eg-saturate eg)
     (assert-true (eg-class-contains-op-p eg id 'cl-cc/optimize::const))))
 
@@ -171,10 +171,10 @@
           ("div-one"  'cl-cc/optimize::div 1)
           ("ash-zero" 'cl-cc/optimize::ash 0))
   (op const-val)
-  (let* ((eg (cl-cc/optimize::make-e-graph))
-         (x  (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
+  (let* ((eg (cl-cc/optimize:make-e-graph))
+         (x  (cl-cc/optimize:egraph-add eg 'cl-cc/optimize::var))
          (c  (make-eg-const eg const-val))
-         (id (cl-cc/optimize::egraph-add eg op x c)))
+         (id (cl-cc/optimize:egraph-add eg op x c)))
     (eg-saturate eg)
     (assert-true (eg-merged-p eg id x))))
 
@@ -192,8 +192,8 @@
           ("le-self"  'cl-cc/optimize::le)
           ("ge-self"  'cl-cc/optimize::ge))
   (op)
-  (let* ((eg (cl-cc/optimize::make-e-graph))
-         (x  (cl-cc/optimize::egraph-add eg 'cl-cc/optimize::var))
-         (id (cl-cc/optimize::egraph-add eg op x x)))
+  (let* ((eg (cl-cc/optimize:make-e-graph))
+         (x  (cl-cc/optimize:egraph-add eg 'cl-cc/optimize::var))
+         (id (cl-cc/optimize:egraph-add eg op x x)))
     (eg-saturate eg)
     (assert-true (eg-class-contains-op-p eg id 'cl-cc/optimize::const))))

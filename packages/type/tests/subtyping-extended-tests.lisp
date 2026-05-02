@@ -44,7 +44,7 @@
 
 (deftest is-subtype-unknown-gradual
   "type-unknown is consistent with everything (gradual typing escape hatch)."
-  (let ((unk cl-cc/type::+type-unknown+))
+  (let ((unk cl-cc/type:+type-unknown+))
     (assert-true (cl-cc/type:is-subtype-p unk  type-int))
     (assert-true (cl-cc/type:is-subtype-p type-int unk))))
 
@@ -98,7 +98,7 @@
 
 (deftest type-join-with-unknown-is-other
   "join(??, T) = T (gradual: unknown absorbs into concrete side)."
-  (let* ((unk cl-cc/type::+type-unknown+)
+  (let* ((unk cl-cc/type:+type-unknown+)
          (result (cl-cc/type:type-join unk type-int)))
     (assert-true (type-equal-p type-int result))))
 

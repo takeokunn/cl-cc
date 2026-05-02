@@ -16,8 +16,8 @@
   "Each kind singleton constant is recognized by its own predicate."
   :cases (("type"         #'kind-type-p              +kind-type+)
           ("effect"       #'kind-effect-p             +kind-effect+)
-          ("constraint"   #'cl-cc/type::kind-constraint-p   +kind-constraint+)
-          ("multiplicity" #'cl-cc/type::kind-multiplicity-p +kind-multiplicity+))
+          ("constraint"   #'cl-cc/type:kind-constraint-p   +kind-constraint+)
+          ("multiplicity" #'cl-cc/type:kind-multiplicity-p +kind-multiplicity+))
   (pred-fn kind)
   (assert-true (funcall pred-fn kind)))
 
@@ -57,7 +57,7 @@
     (assert-false (kind-var-equal-p kv1 kv2))
     (assert-true  (kind-var-equal-p kv kv))
     (assert-true  (kind-var-p kvn))
-    (assert-equal "test" (cl-cc/type::kind-var-name kvn))))
+    (assert-equal "test" (cl-cc/type:kind-var-name kvn))))
 
 ;;; ─── kind-equal-p ───────────────────────────────────────────────────────────
 

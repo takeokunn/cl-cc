@@ -92,11 +92,11 @@
   "%tok-to-cst converts a lexer token to a cst-token preserving kind, value, and byte span."
   (let* ((tok (make-test-token :T-INT 7 0 3))
          (cst (cl-cc/parse::%tok-to-cst tok)))
-    (assert-true (cl-cc/parse::cst-token-p cst))
+    (assert-true (cl-cc/parse:cst-token-p cst))
     (assert-eq :T-INT (cl-cc/parse::cst-node-kind cst))
-    (assert-= 7 (cl-cc/parse::cst-token-value cst))
-    (assert-= 0 (cl-cc/parse::cst-node-start-byte cst))
-    (assert-= 3 (cl-cc/parse::cst-node-end-byte cst))))
+    (assert-= 7 (cl-cc/parse:cst-token-value cst))
+    (assert-= 0 (cl-cc/parse:cst-node-start-byte cst))
+    (assert-= 3 (cl-cc/parse:cst-node-end-byte cst))))
 
 (deftest tok-to-cst-returns-nil-for-nil-input
   "%tok-to-cst returns nil when given nil (no token)."
@@ -107,27 +107,27 @@
 (deftest make-list-cst-creates-interior-with-kind-and-span
   "%make-list-cst creates a cst-interior node with the given kind and byte span."
   (let ((node (cl-cc/parse::%make-list-cst :defun '() 0 10)))
-    (assert-true (cl-cc/parse::cst-interior-p node))
+    (assert-true (cl-cc/parse:cst-interior-p node))
     (assert-eq :defun (cl-cc/parse::cst-node-kind node))
-    (assert-= 0  (cl-cc/parse::cst-node-start-byte node))
-    (assert-= 10 (cl-cc/parse::cst-node-end-byte node))))
+    (assert-= 0  (cl-cc/parse:cst-node-start-byte node))
+    (assert-= 10 (cl-cc/parse:cst-node-end-byte node))))
 
 (deftest make-list-cst-stores-children
   "%make-list-cst stores and retrieves child nodes by identity."
   (let* ((child (cl-cc/parse::%tok-to-cst (make-test-token :T-INT 1)))
          (node  (cl-cc/parse::%make-list-cst :call (list child) 0 5)))
-    (assert-= 1 (length (cl-cc/parse::cst-interior-children node)))
-    (assert-eq child (first (cl-cc/parse::cst-interior-children node)))))
+    (assert-= 1 (length (cl-cc/parse:cst-interior-children node)))
+    (assert-eq child (first (cl-cc/parse:cst-interior-children node)))))
 
 ;;; ─── parse-cl-source ─────────────────────────────────────────────────────
 
 (deftest parse-cl-source-non-empty-for-valid-forms
   "parse-cl-source: integer, symbol, and list all produce non-empty result lists."
   (dolist (src '("42" "foo" "(+ 1 2)"))
-    (let ((result (cl-cc/parse::parse-cl-source src)))
+    (let ((result (cl-cc/parse:parse-cl-source src)))
       (assert-true (listp result))
       (assert-true (> (length result) 0)))))
 
 (deftest parse-cl-source-empty-string-returns-list
   "parse-cl-source: empty string returns a list (possibly empty, not an error)."
-  (assert-true (listp (cl-cc/parse::parse-cl-source ""))))
+  (assert-true (listp (cl-cc/parse:parse-cl-source ""))))

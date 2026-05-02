@@ -103,7 +103,7 @@
   (form expected-var expected-type-name)
   (let ((ast (cl-cc:lower-sexp-to-ast form)))
     (multiple-value-bind (var-name guard-type)
-        (cl-cc/type::extract-type-guard ast)
+        (cl-cc/type:extract-type-guard ast)
       (assert-eq expected-var var-name)
       (assert-eq expected-type-name (cl-cc/type:type-primitive-name guard-type)))))
 
@@ -113,7 +113,7 @@
           ("non-call-integer"   '42))
   (form)
   (let ((ast (cl-cc:lower-sexp-to-ast form)))
-    (multiple-value-bind (v g) (cl-cc/type::extract-type-guard ast)
+    (multiple-value-bind (v g) (cl-cc/type:extract-type-guard ast)
       (assert-null v)
       (assert-null g))))
 
@@ -135,5 +135,5 @@
                                    cl-cc/type:type-string
                                    (lambda (r) (eq 'fixnum (cl-cc/type:type-primitive-name r)))))
   (union-type keep-type pred)
-  (let ((result (cl-cc/type::narrow-union-type union-type keep-type)))
+  (let ((result (cl-cc/type:narrow-union-type union-type keep-type)))
     (assert-true (funcall pred result))))

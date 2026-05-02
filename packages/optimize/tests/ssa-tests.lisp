@@ -14,7 +14,7 @@
             insts))
 
 (defun make-ssa-test-block (id)
-  (cl-cc/optimize::make-basic-block :id id))
+  (cl-cc/optimize:make-basic-block :id id))
 
 ;;; ─── SSA Value Naming ────────────────────────────────────────────────────
 
@@ -23,24 +23,24 @@
   :cases (("version-3" :r5 3 "R5.3")
           ("version-0" :r0 0 "R0.0"))
   (reg ver expected)
-  (assert-equal expected (symbol-name (cl-cc/optimize::ssa-versioned-reg reg ver))))
+  (assert-equal expected (symbol-name (cl-cc/optimize:ssa-versioned-reg reg ver))))
 
 ;;; ─── SSA Rename State ────────────────────────────────────────────────────
 
 (deftest ssa-rename-state-push-pop
   "ssr-push-new-version and ssr-pop-version maintain a stack correctly."
-  (let ((s (cl-cc/optimize::make-ssa-rename-state)))
-    (let ((v0 (cl-cc/optimize::ssr-push-new-version s :r0)))
-      (assert-eq v0 (cl-cc/optimize::ssr-current-version s :r0))
-      (let ((v1 (cl-cc/optimize::ssr-push-new-version s :r0)))
-        (assert-eq v1 (cl-cc/optimize::ssr-current-version s :r0))
-        (cl-cc/optimize::ssr-pop-version s :r0)
-        (assert-eq v0 (cl-cc/optimize::ssr-current-version s :r0))))))
+  (let ((s (cl-cc/optimize:make-ssa-rename-state)))
+    (let ((v0 (cl-cc/optimize:ssr-push-new-version s :r0)))
+      (assert-eq v0 (cl-cc/optimize:ssr-current-version s :r0))
+      (let ((v1 (cl-cc/optimize:ssr-push-new-version s :r0)))
+        (assert-eq v1 (cl-cc/optimize:ssr-current-version s :r0))
+        (cl-cc/optimize:ssr-pop-version s :r0)
+        (assert-eq v0 (cl-cc/optimize:ssr-current-version s :r0))))))
 
 (deftest ssa-rename-state-unversioned
   "Unknown register returns itself before any version is assigned."
-  (let ((s (cl-cc/optimize::make-ssa-rename-state)))
-    (assert-eq :r99 (cl-cc/optimize::ssr-current-version s :r99))))
+  (let ((s (cl-cc/optimize:make-ssa-rename-state)))
+    (assert-eq :r99 (cl-cc/optimize:ssr-current-version s :r99))))
 
 ;;; ─── SSA Round-Trip ──────────────────────────────────────────────────────
 
@@ -69,7 +69,7 @@
            (lambda (result)
              (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-label)) result)))))
   (insts assert-fn)
-  (let ((result (cl-cc/optimize::ssa-round-trip insts)))
+  (let ((result (cl-cc/optimize:ssa-round-trip insts)))
     (funcall assert-fn result)))
 
 ;;; ─── Phi Placement ───────────────────────────────────────────────────────
@@ -81,7 +81,7 @@
                       (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)
                       (make-vm-ret   :reg :r2))))
     (multiple-value-bind (cfg phi-map _renamed)
-        (cl-cc/optimize::ssa-construct insts)
+        (cl-cc/optimize:ssa-construct insts)
       (declare (ignore cfg _renamed))
       ;; No phi-nodes needed for linear code
       (let ((total-phis 0))
@@ -97,17 +97,17 @@
                       (make-vm-ret      :reg :r1))))
     ;; Just verify construction succeeds without error
     (multiple-value-bind (cfg _phi _renamed)
-        (cl-cc/optimize::ssa-construct insts)
+        (cl-cc/optimize:ssa-construct insts)
       (declare (ignore _phi _renamed))
-      (assert-true (cl-cc/optimize::cfg-entry cfg)))))
+      (assert-true (cl-cc/optimize:cfg-entry cfg)))))
 
 (deftest ssa-trivial-phi-elimination-rewrites-uses
   "Trivial phi elimination removes dead phis and rewrites downstream uses."
   (let* ((pred-a (make-ssa-test-block 1))
          (pred-b (make-ssa-test-block 2))
          (join   (make-ssa-test-block 3))
-         (phi    (cl-cc/optimize::make-ssa-phi
-                  :dst (cl-cc/optimize::ssa-versioned-reg :r1 0)
+         (phi    (cl-cc/optimize:make-ssa-phi
+                  :dst (cl-cc/optimize:ssa-versioned-reg :r1 0)
                   :args (list (cons pred-a :r2)
                               (cons pred-b :r2))
                   :reg :r1))
@@ -117,7 +117,7 @@
     (setf (gethash join phi-map) (list phi)
           (gethash join renamed) (list inst))
     (multiple-value-bind (new-phi-map new-renamed-map)
-        (cl-cc/optimize::ssa-eliminate-trivial-phis phi-map renamed)
+        (cl-cc/optimize:ssa-eliminate-trivial-phis phi-map renamed)
       (declare (ignore new-phi-map))
       (let ((rewritten (first (gethash join new-renamed-map))))
         (assert-eq :r2 (cl-cc/vm::vm-lhs rewritten))
@@ -128,13 +128,13 @@
 (deftest ssa-seq-copies-behavior
   "ssa-sequentialize-copies: empty→nil; simple→N vm-move; swap→≥2 vm-move."
   ;; empty parallel copies
-  (assert-null (cl-cc/optimize::ssa-sequentialize-copies nil))
+  (assert-null (cl-cc/optimize:ssa-sequentialize-copies nil))
   ;; simple non-conflicting: 2 copies → 2 moves
-  (let* ((result (cl-cc/optimize::ssa-sequentialize-copies '((:r0 . :r1) (:r2 . :r3)))))
+  (let* ((result (cl-cc/optimize:ssa-sequentialize-copies '((:r0 . :r1) (:r2 . :r3)))))
     (assert-= 2 (length result))
     (assert-true (every (lambda (i) (typep i 'cl-cc/vm::vm-move)) result)))
   ;; swap: needs ≥2 moves, all vm-move
-  (let* ((result (cl-cc/optimize::ssa-sequentialize-copies '((:r0 . :r1) (:r1 . :r0)))))
+  (let* ((result (cl-cc/optimize:ssa-sequentialize-copies '((:r0 . :r1) (:r1 . :r0)))))
     (assert-true (>= (length result) 2))
     (assert-true (every (lambda (i) (typep i 'cl-cc/vm::vm-move)) result))))
 

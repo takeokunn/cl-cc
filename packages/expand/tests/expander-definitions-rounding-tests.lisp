@@ -14,14 +14,14 @@
                  (truncate . (truncate n))
                  (round . (round n)))))
     (dolist (case cases)
-      (let ((result (cl-cc/expand::compiler-macroexpand-all (cdr case))))
+      (let ((result (cl-cc/expand:compiler-macroexpand-all (cdr case))))
         (assert-eq (car case) (car result))
         (assert-eq 'n (second result))
         (assert-equal 1 (third result))))))
 
 (deftest expander-floor-two-arg-unchanged
   "compiler-macroexpand-all: (floor x d) with explicit divisor passes through."
-  (let ((result (cl-cc/expand::compiler-macroexpand-all '(floor n 3))))
+  (let ((result (cl-cc/expand:compiler-macroexpand-all '(floor n 3))))
     (assert-eq 'floor (car result))
     (assert-eq 'n (second result))
     (assert-equal 3 (third result))))

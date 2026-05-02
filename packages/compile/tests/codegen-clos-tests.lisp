@@ -21,7 +21,7 @@
          (inst (codegen-find-inst ctx 'cl-cc/vm::vm-class-def)))
     (assert-true inst)
     (assert-equal '(w h) (cl-cc/vm::vm-slot-names inst))
-    (assert-true (gethash 'my-rect (cl-cc/compile::ctx-global-classes ctx)))
+    (assert-true (gethash 'my-rect (cl-cc/compile:ctx-global-classes ctx)))
     (assert-true (keywordp reg))))
 
 ;;; ─── compile-ast: ast-defgeneric ─────────────────────────────────────────────
@@ -32,7 +32,7 @@
     (compile-ast (cl-cc/ast:make-ast-defgeneric :name 'my-speak :params '(animal))
                  ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-class-def))
-    (assert-true (gethash 'my-speak (cl-cc/compile::ctx-global-generics ctx)))))
+    (assert-true (gethash 'my-speak (cl-cc/compile:ctx-global-generics ctx)))))
 
 (deftest codegen-defgeneric-idempotent
   "Compiling the same defgeneric twice reuses the existing dispatch register."
@@ -72,7 +72,7 @@
                      (list (cons 'cls :R50))))
   (ast env-setup)
   (let ((ctx (make-codegen-ctx)))
-    (when env-setup (setf (cl-cc/compile::ctx-env ctx) env-setup))
+    (when env-setup (setf (cl-cc/compile:ctx-env ctx) env-setup))
     (compile-ast ast ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-make-obj))))
 

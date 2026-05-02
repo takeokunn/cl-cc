@@ -59,17 +59,17 @@
 
 (deftest comb-grammar-rule-lifecycle
   "Grammar rule database: store-and-query, missing returns nil, clear empties DB."
-  (let ((cl-cc/parse::*grammar-rules* (make-hash-table)))
-    (setf (gethash :test-rule cl-cc/parse::*grammar-rules*) '(token :T-INT))
-    (let ((rule (cl-cc/parse::query-grammar :test-rule)))
+  (let ((cl-cc/parse:*grammar-rules* (make-hash-table)))
+    (setf (gethash :test-rule cl-cc/parse:*grammar-rules*) '(token :T-INT))
+    (let ((rule (cl-cc/parse:query-grammar :test-rule)))
       (assert-true (consp rule))
       (assert-equal 'token (first rule))))
-  (let ((cl-cc/parse::*grammar-rules* (make-hash-table)))
-    (assert-null (cl-cc/parse::query-grammar :nonexistent)))
-  (let ((cl-cc/parse::*grammar-rules* (make-hash-table)))
-    (setf (gethash :foo cl-cc/parse::*grammar-rules*) '(token :T-INT))
-    (cl-cc/parse::clear-grammar-rules)
-    (assert-null (cl-cc/parse::query-grammar :foo))))
+  (let ((cl-cc/parse:*grammar-rules* (make-hash-table)))
+    (assert-null (cl-cc/parse:query-grammar :nonexistent)))
+  (let ((cl-cc/parse:*grammar-rules* (make-hash-table)))
+    (setf (gethash :foo cl-cc/parse:*grammar-rules*) '(token :T-INT))
+    (cl-cc/parse:clear-grammar-rules)
+    (assert-null (cl-cc/parse:query-grammar :foo))))
 
 ;;; ─── parse-ok-p ─────────────────────────────────────────────────────────────
 
@@ -81,8 +81,8 @@
           ("fail"    :fail    nil))
   (value expected)
   (if expected
-      (assert-true  (cl-cc/parse::parse-ok-p value))
-      (assert-false (cl-cc/parse::parse-ok-p value))))
+      (assert-true  (cl-cc/parse:parse-ok-p value))
+      (assert-false (cl-cc/parse:parse-ok-p value))))
 
 ;;; ─── parse-token* ───────────────────────────────────────────────────────────
 

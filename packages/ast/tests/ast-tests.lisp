@@ -34,7 +34,7 @@
     (lambda (ast2) (assert-eq 'x (cl-cc:ast-var-name ast2))))
 
    ("hole"
-    (cl-cc/ast::make-ast-hole)
+    (cl-cc/ast:make-ast-hole)
     (lambda (ast2) (assert-type cl-cc:ast-hole ast2)))
 
    ("quote-atom"

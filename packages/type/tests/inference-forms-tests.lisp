@@ -37,8 +37,8 @@
   (let ((ast (cl-cc:lower-sexp-to-ast '(the (refine fixnum plusp) 42))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
       (declare (ignore subst))
-      (let ((prim (if (cl-cc/type::type-refinement-p ty)
-                      (cl-cc/type::type-refinement-base ty)
+      (let ((prim (if (cl-cc/type:type-refinement-p ty)
+                      (cl-cc/type:type-refinement-base ty)
                       ty)))
         (assert-eq 'fixnum (cl-cc/type:type-primitive-name prim))))))
 
@@ -128,7 +128,7 @@
       (let ((ast (cl-cc:lower-sexp-to-ast '(function unknown-fn-xyz))))
         (multiple-value-bind (ty subst) (infer-with-env ast)
           (declare (ignore subst))
-          (assert-true (cl-cc/type::type-unknown-p ty))))))
+          (assert-true (cl-cc/type:type-unknown-p ty))))))
 
 ;;; ─── %make-lambda-param-env ────────────────────────────────────────────────
 
@@ -147,8 +147,8 @@
   (multiple-value-bind (types body-env)
       (cl-cc/type::%make-lambda-param-env '(x y) (cl-cc/type:type-env-empty))
     (assert-= 2 (length types))
-    (assert-true (cl-cc/type::type-var-p (first types)))
-    (assert-true (cl-cc/type::type-var-p (second types)))
+    (assert-true (cl-cc/type:type-var-p (first types)))
+    (assert-true (cl-cc/type:type-var-p (second types)))
     (assert-false (eq (first types) (second types)))
     (assert-true (cl-cc/type:type-env-p body-env))
     (multiple-value-bind (scheme-x found-x) (cl-cc/type:type-env-lookup 'x body-env)

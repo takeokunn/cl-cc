@@ -70,7 +70,7 @@
           ("defclass" 'defclass               :defclass)
           ("unknown" 'completely-unknown-symbol :call))
   (sym expected)
-  (assert-eq expected (cl-cc/parse::sexp-head-to-kind sym)))
+  (assert-eq expected (cl-cc/parse:sexp-head-to-kind sym)))
 
 ;;; ─── Grammar specialized parsers ────────────────────────────────────────────
 

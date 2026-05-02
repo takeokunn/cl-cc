@@ -12,13 +12,13 @@
   :cases (("defun"  '(defun triple (x) (* 3 x)) 'defun  2 '(x))
           ("lambda" '(lambda (x y) (+ x y))     'lambda 1 '(x y)))
   (form expected-head params-pos expected-params)
-  (let ((result (cl-cc/expand::compiler-macroexpand-all form)))
+  (let ((result (cl-cc/expand:compiler-macroexpand-all form)))
     (assert-eq    expected-head   (car result))
     (assert-equal expected-params (nth params-pos result))))
 
 (deftest expander-lambda-optional-default-expanded
   "compiler-macroexpand-all: lambda &optional default value is expanded."
-  (let ((result (cl-cc/expand::compiler-macroexpand-all
+  (let ((result (cl-cc/expand:compiler-macroexpand-all
                  '(lambda (x &optional (y (+ 1 1))) (+ x y)))))
     (assert-eq 'lambda (car result))
     (let* ((params (second result))

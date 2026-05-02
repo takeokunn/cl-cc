@@ -9,7 +9,7 @@
 
 (defbefore :each (macros-stdlib-io-suite)
   (clrhash cl-cc/expand::*load-time-value-cache*)
-  (setf cl-cc/expand::*macro-eval-fn* #'eval))
+  (setf cl-cc/expand:*macro-eval-fn* #'eval))
 
 (in-suite macros-stdlib-io-suite)
 
@@ -31,7 +31,7 @@
 
 (deftest copy-hash-table-expansion
   "COPY-HASH-TABLE: outer LET, inner LET body calls MAPHASH."
-  (let* ((result       (our-macroexpand-1 '(cl-cc/expand::copy-hash-table ht)))
+  (let* ((result       (our-macroexpand-1 '(cl-cc/expand:copy-hash-table ht)))
          (inner-let    (caddr result))
          (maphash-call (caddr inner-let)))
     (assert-eq 'let (car result))

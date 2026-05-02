@@ -109,7 +109,7 @@
 (deftest type-children-lambda-and-mu
   "Type lambda and mu return only the body (1 child)."
   (let ((a (fresh-type-var "a")))
-    (let ((ch (cl-cc/type:type-children (cl-cc/type::make-type-lambda :var a :body type-int))))
+    (let ((ch (cl-cc/type:type-children (cl-cc/type:make-type-lambda :var a :body type-int))))
       (assert-equal 1 (length ch))
       (assert-true (type-equal-p type-int (first ch))))
     (let ((ch (cl-cc/type:type-children (make-type-mu :var a :body type-int))))
@@ -117,9 +117,9 @@
 
 (deftest-each type-children-wrapper-types
   "Refinement, linear, and capability all return only the base type (1 child)."
-  :cases (("refinement"  (cl-cc/type::make-type-refinement :base type-int :predicate #'numberp))
+  :cases (("refinement"  (cl-cc/type:make-type-refinement :base type-int :predicate #'numberp))
           ("linear"      (make-type-linear :base type-int :grade :one))
-          ("capability"  (cl-cc/type::make-type-capability :base type-int :cap 'read)))
+          ("capability"  (cl-cc/type:make-type-capability :base type-int :cap 'read)))
   (ty)
   (let ((ch (cl-cc/type:type-children ty)))
     (assert-equal 1 (length ch))
@@ -135,7 +135,7 @@
          (row (make-type-effect-row :effects (list eff) :row-var rv))
          (ch  (cl-cc/type:type-children row)))
     (assert-equal expected-count (length ch))
-    (assert-true (cl-cc/type::type-effect-op-p (first ch)))
+    (assert-true (cl-cc/type:type-effect-op-p (first ch)))
     (when open-p (assert-true (type-var-p (second ch))))))
 
 (deftest-each type-children-effect-op-cases
@@ -153,20 +153,20 @@
 (deftest type-children-handler-has-three-children
   "Handler type has 3 children: effect, input, output."
   (let* ((eff (make-type-effect-op :name 'io :args nil))
-         (h   (cl-cc/type::make-type-handler :effect eff :input type-int :output type-string))
+         (h   (cl-cc/type:make-type-handler :effect eff :input type-int :output type-string))
          (ch  (cl-cc/type:type-children h)))
     (assert-equal 3 (length ch))))
 
 (deftest type-children-constraint-has-one-child
   "Constraint type has 1 child: the type-arg."
-  (let* ((c  (cl-cc/type::make-type-constraint :class-name 'eq :type-arg type-int))
+  (let* ((c  (cl-cc/type:make-type-constraint :class-name 'eq :type-arg type-int))
          (ch (cl-cc/type:type-children c)))
     (assert-equal 1 (length ch))
     (assert-true (type-equal-p type-int (first ch)))))
 
 (deftest type-children-qualified-has-two-children
   "Qualified type has 2 children: constraints and body."
-  (let* ((c  (cl-cc/type::make-type-constraint :class-name 'eq :type-arg type-int))
+  (let* ((c  (cl-cc/type:make-type-constraint :class-name 'eq :type-arg type-int))
          (q  (make-type-qualified :constraints (list c) :body type-string))
          (ch (cl-cc/type:type-children q)))
     (assert-equal 2 (length ch))
@@ -178,7 +178,7 @@
   "Forall, exists, type-lambda, and mu all bind a type variable."
   :cases (("forall" (let ((a (fresh-type-var "a"))) (make-type-forall :var a :body type-int)))
           ("exists" (let ((a (fresh-type-var "a"))) (make-type-exists :var a :body type-int)))
-          ("lambda" (let ((a (fresh-type-var "a"))) (cl-cc/type::make-type-lambda :var a :body type-int)))
+          ("lambda" (let ((a (fresh-type-var "a"))) (cl-cc/type:make-type-lambda :var a :body type-int)))
           ("mu"     (let ((a (fresh-type-var "a"))) (make-type-mu :var a :body type-int))))
   (ty)
   (assert-true (type-var-p (cl-cc/type:type-bound-var ty))))

@@ -189,9 +189,9 @@ integer bindings aren't candidates."
           ("earmuff-unregistered" '*x* nil   nil)   ; earmuffs but not registered → false
           ("single-star"         '*    '*    nil))  ; * alone fails earmuff check → false
   (sym register-sym expected)
-  (let ((ctx (make-instance 'cl-cc/compile::compiler-context)))
+  (let ((ctx (make-instance 'cl-cc/compile:compiler-context)))
     (when register-sym
-      (setf (gethash register-sym (cl-cc/compile::ctx-global-variables ctx)) t))
+      (setf (gethash register-sym (cl-cc/compile:ctx-global-variables ctx)) t))
     (if expected
         (assert-true  (cl-cc/compile::%let-binding-special-p sym ctx))
         (assert-false (cl-cc/compile::%let-binding-special-p sym ctx)))))

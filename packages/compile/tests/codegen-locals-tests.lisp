@@ -15,16 +15,16 @@
   :cases (("x86-64"  :x86_64  'cl-cc/codegen::x86-64-target)
           ("aarch64" :aarch64 'cl-cc/codegen::aarch64-target))
   (target expected-class)
-  (assert-true (typep (cl-cc/compile::target-instance target) expected-class)))
+  (assert-true (typep (cl-cc/compile:target-instance target) expected-class)))
 
 (deftest target-instance-vm-returns-nil
   "target-instance :vm returns nil (no native backend for VM)."
-  (assert-null (cl-cc/compile::target-instance :vm)))
+  (assert-null (cl-cc/compile:target-instance :vm)))
 
 (deftest target-instance-invalid-target-signals-error
   "target-instance signals an error for an unrecognised target keyword."
   (assert-signals error
-    (cl-cc/compile::target-instance :invalid-target)))
+    (cl-cc/compile:target-instance :invalid-target)))
 
 ;;; ─── %compile-body-with-tail ─────────────────────────────────────────────────
 
@@ -78,12 +78,12 @@
 (deftest type-check-ast-integer-literal-returns-integer-type
   "type-check-ast on an integer literal returns a type related to integer."
   (let* ((ast  (make-ast-int :value 42))
-         (type (cl-cc/compile::type-check-ast ast)))
+         (type (cl-cc/compile:type-check-ast ast)))
     ;; The inferred type should be something (not nil)
     (assert-true (not (null type)))))
 
 (deftest type-check-ast-quoted-nil-returns-type
   "type-check-ast on a quoted nil literal returns a type."
   (let* ((ast  (make-ast-quote :value nil))
-         (type (cl-cc/compile::type-check-ast ast)))
+         (type (cl-cc/compile:type-check-ast ast)))
     (assert-true (not (null type)))))

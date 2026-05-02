@@ -38,7 +38,7 @@ Accept either a raw (lambda (k) ...) form or a singleton list containing it."
   "%result-vm-instructions-without-halt removes only the final vm-halt instruction."
   (let* ((move (cl-cc:make-vm-move :dst :R1 :src :R0))
          (halt (cl-cc:make-vm-halt :reg :R1))
-         (result (cl-cc/compile::make-compilation-result
+         (result (cl-cc/compile:make-compilation-result
                   :program (cl-cc:make-vm-program :instructions (list move halt) :result-register :R1)
                   :vm-instructions (list move halt))))
     (assert-equal (list move)
@@ -52,7 +52,7 @@ Accept either a raw (lambda (k) ...) form or a singleton list containing it."
                              (lambda (expr &rest args)
                                (declare (ignore args))
                                (setf captured-expr expr)
-                               (cl-cc/compile::make-compilation-result
+                               (cl-cc/compile:make-compilation-result
                                 :program (cl-cc:make-vm-program :instructions nil :result-register :R-CPS)
                                 :vm-instructions (list (cl-cc:make-vm-halt :reg :R-CPS))
                                 :cps '(lambda (k) (funcall k 3)))))
@@ -61,7 +61,7 @@ Accept either a raw (lambda (k) ...) form or a singleton list containing it."
                                  (declare (ignore args))
                                  (setf compile-ast-called t)
                                  :R-DIRECT))
-        (cl-cc/compile::compile-toplevel-forms '(42) :target :vm)))
+        (cl-cc/compile:compile-toplevel-forms '(42) :target :vm)))
     (let ((normalized (%unwrap-captured-cps-entry captured-expr)))
       (assert-true normalized)
       (assert-eq 'lambda (car normalized)))
@@ -78,7 +78,7 @@ Accept either a raw (lambda (k) ...) form or a singleton list containing it."
   (form)
   (let* ((expanded (cl-cc/expand:compiler-macroexpand-all form))
          (ast (cl-cc/compile::%lower-toplevel-form-to-ast expanded)))
-    (assert-false (cl-cc/compile::%cps-vm-compile-safe-ast-p ast))))
+    (assert-false (cl-cc/compile:%cps-vm-compile-safe-ast-p ast))))
 
 (deftest-each codegen-toplevel-safe-subset-still-allows-simple-definition-and-clos-forms
   "Simple top-level defvar/CLOS helper forms remain inside the current VM CPS-safe subset."
@@ -90,7 +90,7 @@ Accept either a raw (lambda (k) ...) form or a singleton list containing it."
   (form)
   (let* ((expanded (cl-cc/expand:compiler-macroexpand-all form))
          (ast (cl-cc/compile::%lower-toplevel-form-to-ast expanded)))
-    (assert-true (cl-cc/compile::%cps-vm-compile-safe-ast-p ast))))
+    (assert-true (cl-cc/compile:%cps-vm-compile-safe-ast-p ast))))
 
 (deftest codegen-toplevel-variadic-lambda-stays-unsafe
   "A variadic AST-LAMBDA stays on the direct path until the CPS lambda path preserves optional/rest/key metadata."
@@ -108,7 +108,7 @@ Accept either a raw (lambda (k) ...) form or a singleton list containing it."
                              (lambda (&rest args)
                                (declare (ignore args))
                                (setf compile-expression-called t)
-                               (cl-cc/compile::make-compilation-result
+                               (cl-cc/compile:make-compilation-result
                                 :program (cl-cc:make-vm-program :instructions nil :result-register :R-CPS)
                                 :vm-instructions (list (cl-cc:make-vm-halt :reg :R-CPS)))))
       (with-replaced-function (cl-cc/compile:compile-ast
@@ -117,7 +117,7 @@ Accept either a raw (lambda (k) ...) form or a singleton list containing it."
                                  (setf compile-ast-called t)
                                  :R-DIRECT))
         (let ((*enable-cps-vm-primary-path* nil))
-          (cl-cc/compile::compile-toplevel-forms '((+ 1 2)) :target :vm))))
+          (cl-cc/compile:compile-toplevel-forms '((+ 1 2)) :target :vm))))
     (assert-true compile-expression-called)
     (assert-false compile-ast-called)))
 

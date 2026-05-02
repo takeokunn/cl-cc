@@ -16,7 +16,7 @@
 
 (defun make-test-egraph ()
   "Create a fresh empty e-graph."
-  (cl-cc/optimize::make-e-graph))
+  (cl-cc/optimize:make-e-graph))
 
 (defun egraph-find-dst-inst (instructions dst)
   "Return the first instruction in INSTRUCTIONS whose :dst register equals DST."
@@ -27,8 +27,8 @@
 (deftest egraph-find-self
   "A newly added e-class is its own canonical representative."
   (let* ((eg  (make-test-egraph))
-         (id  (cl-cc/optimize::egraph-add eg 'const)))
-    (assert-= id (cl-cc/optimize::egraph-find eg id))))
+         (id  (cl-cc/optimize:egraph-add eg 'const)))
+    (assert-= id (cl-cc/optimize:egraph-find eg id))))
 
 (deftest-each egraph-add-id-identity
   "egraph-add: same node → same class ID (memo); different nodes → distinct IDs."
@@ -36,8 +36,8 @@
           ("different"    'const 'var   nil))
   (op1 op2 expect-equal)
   (let* ((eg  (make-test-egraph))
-         (id0 (cl-cc/optimize::egraph-add eg op1))
-         (id1 (cl-cc/optimize::egraph-add eg op2)))
+         (id0 (cl-cc/optimize:egraph-add eg op1))
+         (id1 (cl-cc/optimize:egraph-add eg op2)))
     (if expect-equal
         (assert-= id0 id1)
         (assert-true (/= id0 id1)))))
@@ -47,18 +47,18 @@
 (deftest egraph-merge-same-class
   "Merging a class with itself is a no-op."
   (let* ((eg (make-test-egraph))
-         (id (cl-cc/optimize::egraph-add eg 'const)))
-    (cl-cc/optimize::egraph-merge eg id id)
-    (assert-= id (cl-cc/optimize::egraph-find eg id))))
+         (id (cl-cc/optimize:egraph-add eg 'const)))
+    (cl-cc/optimize:egraph-merge eg id id)
+    (assert-= id (cl-cc/optimize:egraph-find eg id))))
 
 (deftest egraph-merge-two-classes
   "After merging two classes, egraph-find returns the same canonical ID for both."
   (let* ((eg  (make-test-egraph))
-         (id0 (cl-cc/optimize::egraph-add eg 'const))
-         (id1 (cl-cc/optimize::egraph-add eg 'var)))
-    (cl-cc/optimize::egraph-merge eg id0 id1)
-    (cl-cc/optimize::egraph-rebuild eg)
-    (assert-= (cl-cc/optimize::egraph-find eg id0) (cl-cc/optimize::egraph-find eg id1))))
+         (id0 (cl-cc/optimize:egraph-add eg 'const))
+         (id1 (cl-cc/optimize:egraph-add eg 'var)))
+    (cl-cc/optimize:egraph-merge eg id0 id1)
+    (cl-cc/optimize:egraph-rebuild eg)
+    (assert-= (cl-cc/optimize:egraph-find eg id0) (cl-cc/optimize:egraph-find eg id1))))
 
 ;;; ─── E-Graph Statistics ──────────────────────────────────────────────────
 
@@ -68,8 +68,8 @@
           ("one-node" 'const 1))
   (node-op expected-classes)
   (let ((eg (make-test-egraph)))
-    (when node-op (cl-cc/optimize::egraph-add eg node-op))
-    (assert-= expected-classes (getf (cl-cc/optimize::egraph-stats eg) :classes))))
+    (when node-op (cl-cc/optimize:egraph-add eg node-op))
+    (assert-= expected-classes (getf (cl-cc/optimize:egraph-stats eg) :classes))))
 
 ;;; ─── Pattern Matching ────────────────────────────────────────────────────
 
@@ -81,25 +81,25 @@
           ("number"    nil 42))
   (expected sym)
   (if expected
-      (assert-true  (cl-cc/optimize::egraph-pattern-var-p sym))
-      (assert-false (cl-cc/optimize::egraph-pattern-var-p sym))))
+      (assert-true  (cl-cc/optimize:egraph-pattern-var-p sym))
+      (assert-false (cl-cc/optimize:egraph-pattern-var-p sym))))
 
 (deftest egraph-match-pattern-variable
   "A pattern variable matches any e-class."
   (let* ((eg  (make-test-egraph))
-         (id  (cl-cc/optimize::egraph-add eg 'const))
-         (matches (cl-cc/optimize::egraph-match-pattern eg '?x id)))
+         (id  (cl-cc/optimize:egraph-add eg 'const))
+         (matches (cl-cc/optimize:egraph-match-pattern eg '?x id)))
     (assert-true (= 1 (length matches)))
     (assert-= id (cdr (assoc '?x (car matches))))))
 
 (deftest egraph-match-pattern-consistent-binding
   "Same pattern variable must bind to same e-class."
   (let* ((eg  (make-test-egraph))
-         (id0 (cl-cc/optimize::egraph-add eg 'const))
-         (id1 (cl-cc/optimize::egraph-add eg 'var))
+         (id0 (cl-cc/optimize:egraph-add eg 'const))
+         (id1 (cl-cc/optimize:egraph-add eg 'var))
          ;; Bind ?x to id0, then try to match ?x against id1 (inconsistent)
          (bindings (list (cons '?x id0)))
-         (matches (cl-cc/optimize::egraph-match-pattern eg '?x id1 bindings)))
+         (matches (cl-cc/optimize:egraph-match-pattern eg '?x id1 bindings)))
     ;; Should fail — ?x is already bound to id0, not id1
     (assert-null matches)))
 
@@ -111,7 +111,7 @@
           ("fold-add"    'cl-cc/optimize::fold-add)
           ("mul-pow2"    'cl-cc/optimize::mul-pow2))
   (rule-name)
-  (let ((rules (cl-cc/optimize::egraph-builtin-rules)))
+  (let ((rules (cl-cc/optimize:egraph-builtin-rules)))
     (assert-true (find rule-name rules
                         :key (lambda (r) (getf r :name))))))
 
@@ -122,7 +122,7 @@
                              (lambda (goal)
                                (setf called goal)
                                '((egraph-rule fold-add (add (const ?a) (const ?b)) (const)))))
-      (let ((rules (cl-cc/optimize::egraph-builtin-rules)))
+      (let ((rules (cl-cc/optimize:egraph-builtin-rules)))
         (assert-true called)
         (let ((rule (find 'cl-cc/optimize::fold-add rules
                           :key (lambda (r) (getf r :name)))))

@@ -131,7 +131,7 @@
   "The runtime package registry is seeded from an explicit package list, not the full host universe." 
   (assert-true (find :cl-cc/runtime cl-cc/runtime::*rt-bootstrap-package-names*))
   (assert-true (find :cl cl-cc/runtime::*rt-bootstrap-package-names*))
-  (assert-true (gethash "CL-CC/RUNTIME" cl-cc/runtime::*rt-package-registry*)))
+  (assert-true (gethash "CL-CC/RUNTIME" cl-cc/runtime:*rt-package-registry*)))
 
 (deftest rt-runtime-callable-registration-publishes-bootstrap-hook
   "runtime-io publishes its VM callable registration hook through cl-cc/bootstrap." 

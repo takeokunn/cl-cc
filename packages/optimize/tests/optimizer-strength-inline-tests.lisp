@@ -181,7 +181,7 @@
 
 (deftest optimize-instructions-accepts-adaptive-max-iterations
   "optimize-instructions accepts :adaptive as the iteration budget selector."
-  (let ((out (cl-cc/optimize::optimize-instructions
+  (let ((out (cl-cc/optimize:optimize-instructions
               (list (make-vm-const :dst :r0 :value 1)
                     (make-vm-ret :reg :r0))
               :max-iterations :adaptive
@@ -197,7 +197,7 @@
           ("t"        t   nil)
           ("positive" 1   nil))
   (value expected)
-  (assert-equal expected (cl-cc/optimize::opt-falsep value)))
+  (assert-equal expected (cl-cc/optimize:opt-falsep value)))
 
 ;;; ─── opt-register-keyword-p ──────────────────────────────────────────────
 

@@ -98,9 +98,9 @@
   (emits-const sym local-reg is-global expected-val)
   (let* ((ctx (make-codegen-ctx)))
     (when local-reg
-      (push (cons sym local-reg) (cl-cc/compile::ctx-env ctx)))
+      (push (cons sym local-reg) (cl-cc/compile:ctx-env ctx)))
     (when is-global
-      (setf (gethash sym (cl-cc/compile::ctx-global-functions ctx)) t))
+      (setf (gethash sym (cl-cc/compile:ctx-global-functions ctx)) t))
     (let ((result (cl-cc/compile::%resolve-func-sym-reg sym ctx))
           (inst   (codegen-find-inst ctx 'cl-cc/vm::vm-const)))
       (if emits-const
@@ -113,12 +113,12 @@
   "%compile-closure-body emits vm-ret and binds params in ctx-env."
   (let* ((ctx       (make-codegen-ctx))
          (base-env  (list (cons 'outer :r0)))
-         (param-reg (cl-cc/compile::make-register ctx)))
-    (setf (cl-cc/compile::ctx-env ctx) base-env)
+         (param-reg (cl-cc/compile:make-register ctx)))
+    (setf (cl-cc/compile:ctx-env ctx) base-env)
     (cl-cc/compile::%compile-closure-body ctx '(p) (list param-reg)
                                   (list (make-ast-int :value 1)) base-env)
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-ret))
-    (assert-true (assoc 'p (cl-cc/compile::ctx-env ctx)))))
+    (assert-true (assoc 'p (cl-cc/compile:ctx-env ctx)))))
 
 ;;; ─── flet ─────────────────────────────────────────────────────────────────
 

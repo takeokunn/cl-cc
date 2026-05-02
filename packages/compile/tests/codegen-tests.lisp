@@ -23,14 +23,14 @@ labels become order-dependent if a prior REPL-oriented test leaked
 `*repl-label-counter*` or related REPL globals into `compiler-context`
 initialization. Bind the REPL state hooks to NIL here so unit tests always get a
 stable, isolated context."
-  (let ((cl-cc/compile::*repl-label-counter* nil)
-        (cl-cc/compile::*repl-global-variables* nil)
-        (cl-cc/compile::*repl-capture-label-counter* nil))
-    (make-instance 'cl-cc/compile::compiler-context)))
+  (let ((cl-cc/compile:*repl-label-counter* nil)
+        (cl-cc/compile:*repl-global-variables* nil)
+        (cl-cc/compile:*repl-capture-label-counter* nil))
+    (make-instance 'cl-cc/compile:compiler-context)))
 
 (defun codegen-instructions (ctx)
   "Return the emitted instructions from CTX (in order)."
-  (nreverse (copy-list (cl-cc/compile::ctx-instructions ctx))))
+  (nreverse (copy-list (cl-cc/compile:ctx-instructions ctx))))
 
 (defun codegen-find-inst (ctx type)
   "Find the first instruction of TYPE in CTX's emitted instructions."
@@ -48,7 +48,7 @@ stable, isolated context."
   "compile-ast of an ast-var with a bound name returns the associated register."
   (let* ((ctx (make-codegen-ctx))
          (reg :R99))
-    (setf (cl-cc/compile::ctx-env ctx) (list (cons 'x reg)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'x reg)))
     (let ((result (compile-ast (make-ast-var :name 'x) ctx)))
       (assert-eq reg result))))
 
@@ -125,8 +125,8 @@ stable, isolated context."
 (deftest codegen-make-register-returns-unique-keywords
   "make-register returns unique keyword registers on each call."
   (let* ((ctx (make-codegen-ctx))
-         (r1 (cl-cc/compile::make-register ctx))
-         (r2 (cl-cc/compile::make-register ctx)))
+         (r1 (cl-cc/compile:make-register ctx))
+         (r2 (cl-cc/compile:make-register ctx)))
     (assert-true (keywordp r1))
     (assert-true (keywordp r2))
     (assert-false (eq r1 r2))))
@@ -134,14 +134,14 @@ stable, isolated context."
 (deftest codegen-emit-appends-one-instruction
   "emit appends exactly one instruction to the context's instruction list."
   (let ((ctx (make-codegen-ctx)))
-    (cl-cc/compile::emit ctx (cl-cc::make-vm-const :dst :R0 :value 42))
+    (cl-cc/compile:emit ctx (cl-cc::make-vm-const :dst :R0 :value 42))
     (assert-= 1 (length (codegen-instructions ctx)))))
 
 (deftest codegen-make-label-returns-unique-strings
   "make-label returns distinct strings even for the same prefix."
   (let* ((ctx (make-codegen-ctx))
-         (l1 (cl-cc/compile::make-label ctx "TEST"))
-         (l2 (cl-cc/compile::make-label ctx "TEST")))
+         (l1 (cl-cc/compile:make-label ctx "TEST"))
+         (l2 (cl-cc/compile:make-label ctx "TEST")))
     (assert-false (string= l1 l2))))
 
 ;;; ─── compile-ast: ast-call fast paths ────────────────────────────────────
@@ -152,8 +152,8 @@ stable, isolated context."
           ("apply"   'apply   'cl-cc/vm::vm-apply))
   (fn-sym inst-type)
   (let* ((ctx (make-codegen-ctx))
-         (fn-reg (cl-cc/compile::make-register ctx)))
-    (setf (cl-cc/compile::ctx-env ctx) (list (cons 'fn fn-reg)))
+         (fn-reg (cl-cc/compile:make-register ctx)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'fn fn-reg)))
     (compile-ast (make-ast-call :func fn-sym
                                 :args (list (make-ast-var :name 'fn)
                                             (make-ast-int :value 1)))
@@ -165,9 +165,9 @@ stable, isolated context."
   "(array-length arr) on noescape array emits vm-const with the size, not vm-call."
   (let* ((ctx (make-codegen-ctx))
          ;; Register a noescape array binding of size 3
-         (arr-reg (cl-cc/compile::make-register ctx))
-         (z-reg   (cl-cc/compile::make-register ctx)))
-    (setf (cl-cc/compile::ctx-noescape-array-bindings ctx)
+         (arr-reg (cl-cc/compile:make-register ctx))
+         (z-reg   (cl-cc/compile:make-register ctx)))
+    (setf (cl-cc/compile:ctx-noescape-array-bindings ctx)
           (list (cons 'arr (list 3 z-reg z-reg z-reg))))
     (compile-ast (make-ast-call :func 'array-length
                                 :args (list (make-ast-var :name 'arr)))
@@ -187,7 +187,7 @@ stable, isolated context."
                             :source-file "test.lisp"
                             :source-line 5
                             :source-column 2))
-         (result (cl-cc/compile::optimize-ast src)))
+         (result (cl-cc/compile:optimize-ast src)))
     (assert-equal "test.lisp" (cl-cc::ast-source-file result))
     (assert-=     5           (cl-cc::ast-source-line result))
     (assert-=     2           (cl-cc::ast-source-column result))))
@@ -197,7 +197,7 @@ stable, isolated context."
   (let* ((node (make-ast-progn :forms (list (make-ast-binop :op '+
                                                              :lhs (make-ast-int :value 2)
                                                              :rhs (make-ast-int :value 3)))))
-         (result (cl-cc/compile::optimize-ast node)))
+         (result (cl-cc/compile:optimize-ast node)))
     (assert-true (typep result 'cl-cc::ast-progn))
     (assert-true (typep (first (cl-cc/ast:ast-progn-forms result)) 'cl-cc::ast-int))
     (assert-= 5 (cl-cc/ast:ast-int-value (first (cl-cc/ast:ast-progn-forms result))))))
@@ -212,7 +212,7 @@ stable, isolated context."
   (sym register-p expected)
   (let ((ctx (make-codegen-ctx)))
     (when register-p
-      (setf (gethash sym (cl-cc/compile::ctx-global-variables ctx)) t))
+      (setf (gethash sym (cl-cc/compile:ctx-global-variables ctx)) t))
     (assert-equal expected (cl-cc/compile::%let-binding-special-p sym ctx))))
 
 ;;; ─── %let-noescape-closure ──────────────────────────────────────────────

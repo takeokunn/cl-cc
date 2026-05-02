@@ -8,15 +8,15 @@
      result))
 
 (defmacro assert-expansion-equal (form expected)
-  `(assert-equal ,expected (cl-cc/expand::compiler-macroexpand-all ,form)))
+  `(assert-equal ,expected (cl-cc/expand:compiler-macroexpand-all ,form)))
 
 (defmacro assert-expansion-head (form expected-head)
-  `(let ((result (cl-cc/expand::compiler-macroexpand-all ,form)))
+  `(let ((result (cl-cc/expand:compiler-macroexpand-all ,form)))
      (assert-eq ,expected-head (car result))
      result))
 
 (defmacro assert-expansion-contains (form needle)
-  `(let ((result (cl-cc/expand::compiler-macroexpand-all ,form)))
+  `(let ((result (cl-cc/expand:compiler-macroexpand-all ,form)))
      (assert-true (search ,needle (format nil "~S" result)))
      result))
 

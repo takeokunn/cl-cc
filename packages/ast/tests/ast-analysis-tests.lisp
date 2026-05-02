@@ -17,7 +17,7 @@
   "Leaf AST nodes have no children."
   :cases (("int"      (cl-cc:make-ast-int :value 42))
           ("var"      (cl-cc:make-ast-var :name 'x))
-          ("hole"     (cl-cc/ast::make-ast-hole))
+          ("hole"     (cl-cc/ast:make-ast-hole))
           ("quote"    (cl-cc:make-ast-quote :value 'hello))
           ("function" (cl-cc:make-ast-function :name 'foo))
           ("go"       (cl-cc:make-ast-go :tag 'start)))
@@ -96,10 +96,10 @@
     (assert-eq val (first (cl-cc:ast-children node))))
   ;; defvar with value: one child
   (let* ((val (cl-cc:make-ast-int :value 0))
-         (node (cl-cc/ast::make-ast-defvar :name '*x* :value val)))
+         (node (cl-cc/ast:make-ast-defvar :name '*x* :value val)))
     (assert-equal 1 (length (cl-cc:ast-children node))))
   ;; defvar without value: no children
-  (let ((node (cl-cc/ast::make-ast-defvar :name '*x*)))
+  (let ((node (cl-cc/ast:make-ast-defvar :name '*x*)))
     (assert-null (cl-cc:ast-children node))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
@@ -128,7 +128,7 @@
                            :body (list (cl-cc:make-ast-var :name 'a)))
     '(a rest))
    ("defun"
-    (cl-cc/ast::make-ast-defun :name 'foo :params '(x y)
+    (cl-cc/ast:make-ast-defun :name 'foo :params '(x y)
                            :body (list (cl-cc:make-ast-var :name 'x)))
     '(x y))
    ("flet"

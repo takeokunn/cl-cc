@@ -28,6 +28,6 @@ Each name maps to its own unique register so compile-ast on ast-var
 nodes referring to these names succeeds without signaling 'unbound variable'."
   (let ((ctx (make-codegen-ctx)))
     (dolist (name names)
-      (let ((reg (cl-cc/compile::make-register ctx)))
-        (push (cons name reg) (cl-cc/compile::ctx-env ctx))))
+      (let ((reg (cl-cc/compile:make-register ctx)))
+        (push (cons name reg) (cl-cc/compile:ctx-env ctx))))
     ctx))

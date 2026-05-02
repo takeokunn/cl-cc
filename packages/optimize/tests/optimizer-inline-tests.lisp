@@ -160,7 +160,7 @@
                  (make-vm-const :dst :r0 :value 99))
            :r0 nil))
   (insts reg expected)
-  (let ((table (cl-cc/optimize::opt-known-callee-labels insts)))
+  (let ((table (cl-cc/optimize:opt-known-callee-labels insts)))
     (assert-equal expected (gethash reg table))))
 
 ;;; ─── opt-can-safely-rename-p ─────────────────────────────────────────────────

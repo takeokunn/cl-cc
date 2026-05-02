@@ -31,7 +31,7 @@
 (deftest printer-linked-type-var-shows-resolved-type
   "A type-var with a link set prints as the resolved type (FIXNUM for type-int)."
   (let ((v (fresh-type-var "a")))
-    (setf (cl-cc/type::type-var-link v) type-int)
+    (setf (cl-cc/type:type-var-link v) type-int)
     (assert-string= "FIXNUM" (type-to-string v))))
 
 (deftest printer-type-scheme-produces-non-empty-string
@@ -95,28 +95,28 @@
 (deftest printer-binder-types
   "Type-lambda and mu (recursive) types each produce non-empty strings."
   (let ((v (fresh-type-var "a")))
-    (assert-true (> (length (type-to-string (cl-cc/type::make-type-lambda :var v :knd nil :body type-int))) 0))
+    (assert-true (> (length (type-to-string (cl-cc/type:make-type-lambda :var v :knd nil :body type-int))) 0))
     (assert-true (> (length (type-to-string (make-type-mu :var v :body v))) 0))))
 
 (deftest-each printer-wrapper-type-annotations
   "Refinement shows <pred>; linear shows grade; capability shows cap name."
-  :cases (("refinement"  (cl-cc/type::make-type-refinement :base type-int :predicate nil) "<pred>")
+  :cases (("refinement"  (cl-cc/type:make-type-refinement :base type-int :predicate nil) "<pred>")
           ("linear"      (make-type-linear :base type-int :grade :one)                    "1")
-          ("capability"  (cl-cc/type::make-type-capability :base type-int :cap 'read)     "READ"))
+          ("capability"  (cl-cc/type:make-type-capability :base type-int :cap 'read)     "READ"))
   (ty expected-fragment)
   (assert-true (search expected-fragment (type-to-string ty))))
 
 (deftest printer-handler-uses-bracket-notation
   "Handler type-to-string includes '[' and '=>' delimiters."
   (let* ((eff (make-type-effect-op :name 'io :args nil))
-         (h (cl-cc/type::make-type-handler :effect eff :input type-int :output type-string))
+         (h (cl-cc/type:make-type-handler :effect eff :input type-int :output type-string))
          (s (type-to-string h)))
     (assert-true (search "[" s))
     (assert-true (search "=>" s))))
 
 (deftest printer-gadt-constructor-includes-double-colon
   "GADT constructor type-to-string includes '::' separator."
-  (let* ((gc (cl-cc/type::make-type-gadt-con
+  (let* ((gc (cl-cc/type:make-type-gadt-con
               :name 'just :arg-types (list type-int) :index-type type-any))
          (s (type-to-string gc)))
     (assert-true (search "::" s))))
@@ -146,7 +146,7 @@
 
 (deftest printer-constraint-and-qualified
   "Constraint prints class name; qualified with constraints includes =>; qualified with no constraints prints just body."
-  (let ((tc (cl-cc/type::make-type-constraint :class-name 'eq :type-arg type-int)))
+  (let ((tc (cl-cc/type:make-type-constraint :class-name 'eq :type-arg type-int)))
     (assert-true (search "EQ" (type-to-string tc)))
     (let ((s (type-to-string (make-type-qualified :constraints (list tc) :body type-int))))
       (assert-true (search "=>" s)))
@@ -157,17 +157,17 @@
 
 (deftest unparse-type-forms
   "unparse-type: primitive→symbol; arrow→(->...); union→(or...); product→(values...)."
-  (assert-eq 'fixnum (cl-cc/type::unparse-type type-int))
-  (assert-eq 'cl-cc/type::-> (first (cl-cc/type::unparse-type (make-type-arrow (list type-int) type-string))))
-  (assert-eq 'or     (first (cl-cc/type::unparse-type (make-type-union (list type-int type-string)))))
-  (assert-eq 'values (first (cl-cc/type::unparse-type (make-type-product :elems (list type-int))))))
+  (assert-eq 'fixnum (cl-cc/type:unparse-type type-int))
+  (assert-eq 'cl-cc/type::-> (first (cl-cc/type:unparse-type (make-type-arrow (list type-int) type-string))))
+  (assert-eq 'or     (first (cl-cc/type:unparse-type (make-type-union (list type-int type-string)))))
+  (assert-eq 'values (first (cl-cc/type:unparse-type (make-type-product :elems (list type-int))))))
 
 ;;; ─── type-to-string: edge cases not covered above ────────────────────────
 
 (deftest-each printer-atomic-sentinel-strings
   "nil prints as NIL; the unknown sentinel prints exactly as '?'."
   :cases (("nil-val"  "NIL" nil)
-          ("unknown"  "?"   cl-cc/type::+type-unknown+))
+          ("unknown"  "?"   cl-cc/type:+type-unknown+))
   (expected node)
   (assert-string= expected (type-to-string node)))
 
@@ -197,8 +197,8 @@
           ("frobnitz-list"  nil '(frobnitz fixnum)))
   (expected form)
   (if expected
-      (assert-true  (cl-cc/type::looks-like-type-specifier-p form))
-      (assert-false (cl-cc/type::looks-like-type-specifier-p form))))
+      (assert-true  (cl-cc/type:looks-like-type-specifier-p form))
+      (assert-false (cl-cc/type:looks-like-type-specifier-p form))))
 
 (deftest-each printer-arrow-mult-table
   "Each *arrow-mult-strings* entry maps to the expected arrow string."
@@ -215,7 +215,7 @@
         (e2 (make-type-error :message "unknown")))
     (assert-string= "<error: unbound x>" (type-to-string e1))
     (assert-string= "?"                  (type-to-string e2))
-    (assert-string= "?"                  (type-to-string cl-cc/type::+type-unknown+))))
+    (assert-string= "?"                  (type-to-string cl-cc/type:+type-unknown+))))
 
 (deftest printer-compound-types
   "type-to-string formats product, record, and linear types correctly."

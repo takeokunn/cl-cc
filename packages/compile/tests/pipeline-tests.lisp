@@ -16,7 +16,7 @@
          (instrs (vm-program-instructions prog))
          (asm    (compilation-result-assembly result))
          (cps    (compilation-result-cps result)))
-    (assert-true (typep result 'cl-cc/compile::compilation-result))
+    (assert-true (typep result 'cl-cc/compile:compilation-result))
     (assert-true (typep prog 'cl-cc/vm::vm-program))
     (assert-true (> (length instrs) 0))
     (assert-true (stringp asm))
@@ -33,9 +33,9 @@
 (deftest pipeline-policy-data-tables-are-populated
   "Pipeline policy data tables expose the expected bridge and CPS metadata."
   (assert-true (member 'cl-cc/ast:ast-defun cl-cc::*cps-host-eval-unsafe-ast-types*))
-  (assert-true (member 'cl-cc/ast:ast-node cl-cc/compile::*cps-native-compile-unsupported-ast-types*))
-  (assert-false (member 'cl-cc/ast:ast-setq cl-cc/compile::*cps-compile-unsupported-ast-types*))
-  (assert-false (member 'cl-cc/ast:ast-setq cl-cc/compile::*cps-native-compile-unsupported-ast-types*))
+  (assert-true (member 'cl-cc/ast:ast-node cl-cc/compile:*cps-native-compile-unsupported-ast-types*))
+  (assert-false (member 'cl-cc/ast:ast-setq cl-cc/compile:*cps-compile-unsupported-ast-types*))
+  (assert-false (member 'cl-cc/ast:ast-setq cl-cc/compile:*cps-native-compile-unsupported-ast-types*))
   (assert-true (equal '("PARSE-LAMBDA-LIST" . :cl-cc/expand)
                       (first '(("PARSE-LAMBDA-LIST"            . :cl-cc/expand)
                                ("DESTRUCTURE-LAMBDA-LIST"      . :cl-cc/expand)
@@ -79,28 +79,28 @@
            '*typed-top-level-no-check*
            nil))
   (forms lookup-sym type-check)
-  (let ((result (cl-cc/compile::compile-toplevel-forms forms :target :vm :type-check type-check)))
-    (assert-true (typep (cl-cc/compile::compilation-result-type-env result)
+  (let ((result (cl-cc/compile:compile-toplevel-forms forms :target :vm :type-check type-check)))
+    (assert-true (typep (cl-cc/compile:compilation-result-type-env result)
                         'cl-cc/type:type-env))
     (multiple-value-bind (scheme found-p)
         (cl-cc/type::type-env-lookup lookup-sym
-                                     (cl-cc/compile::compilation-result-type-env result))
+                                     (cl-cc/compile:compilation-result-type-env result))
       (assert-true found-p)
       (assert-eq 'fixnum (cl-cc/type:type-primitive-name
                           (cl-cc/type::type-scheme-type scheme))))))
 
 (deftest pipeline-compile-toplevel-forms-captures-cps
   "compile-toplevel-forms may store CPS metadata for top-level input."
-  (let ((result (cl-cc/compile::compile-toplevel-forms '((+ 1 2) (- 4 1)))))
-    (assert-true (or (null (cl-cc/compile::compilation-result-cps result))
-                     (consp (cl-cc/compile::compilation-result-cps result))))))
+  (let ((result (cl-cc/compile:compile-toplevel-forms '((+ 1 2) (- 4 1)))))
+    (assert-true (or (null (cl-cc/compile:compilation-result-cps result))
+                     (consp (cl-cc/compile:compilation-result-cps result))))))
 
 (deftest pipeline-compile-toplevel-forms-program-uses-raw-stream-for-vm
   "compile-toplevel-forms keeps raw VM instructions in the program for :vm execution while still recording optimizer output."
-  (let* ((result (cl-cc/compile::compile-toplevel-forms '((+ 1 2) (- 4 1)) :target :vm))
-          (program-instrs (vm-program-instructions (cl-cc/compile::compilation-result-program result)))
-          (raw-instrs (cl-cc/compile::compilation-result-vm-instructions result))
-          (optimized-instrs (cl-cc/compile::compilation-result-optimized-instructions result)))
+  (let* ((result (cl-cc/compile:compile-toplevel-forms '((+ 1 2) (- 4 1)) :target :vm))
+          (program-instrs (vm-program-instructions (cl-cc/compile:compilation-result-program result)))
+          (raw-instrs (cl-cc/compile:compilation-result-vm-instructions result))
+          (optimized-instrs (cl-cc/compile:compilation-result-optimized-instructions result)))
     (assert-true (equal program-instrs raw-instrs))
     (assert-true (> (length raw-instrs) 0))
     (assert-true (listp optimized-instrs))))
@@ -116,10 +116,10 @@
            'typed-id-no-check
            nil))
   (forms lookup-sym type-check)
-  (let ((result (cl-cc/compile::compile-toplevel-forms forms :target :vm :type-check type-check)))
+  (let ((result (cl-cc/compile:compile-toplevel-forms forms :target :vm :type-check type-check)))
     (multiple-value-bind (scheme found-p)
         (cl-cc/type::type-env-lookup lookup-sym
-                                     (cl-cc/compile::compilation-result-type-env result))
+                                     (cl-cc/compile:compilation-result-type-env result))
       (assert-true found-p)
       (assert-true (cl-cc/type:type-arrow-p
                     (cl-cc/type::type-scheme-type scheme))))))

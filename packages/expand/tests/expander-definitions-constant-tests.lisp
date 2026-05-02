@@ -9,8 +9,8 @@
 (in-suite expander-definitions-constant-suite)
 (deftest expander-defconstant-to-defparameter
   "defconstant (with or without docstring) expands to defparameter."
-  (let ((basic   (cl-cc/expand::compiler-macroexpand-all '(defconstant +my-const+ 42)))
-        (with-doc (cl-cc/expand::compiler-macroexpand-all '(defconstant +pi+ 3.14159 "Pi constant"))))
+  (let ((basic   (cl-cc/expand:compiler-macroexpand-all '(defconstant +my-const+ 42)))
+        (with-doc (cl-cc/expand:compiler-macroexpand-all '(defconstant +pi+ 3.14159 "Pi constant"))))
     (assert-eq    'defparameter (car basic))
     (assert-equal 42            (third basic))
     (assert-eq    'defparameter (car with-doc))

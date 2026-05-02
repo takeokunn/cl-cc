@@ -240,6 +240,6 @@
   "emit-registered-builtin returns nil when arg count is outside convention bounds."
   (let* ((entry (gethash "CAR" cl-cc/compile::*builtin-registry*))  ; :unary, needs exactly 1 arg
          (ctx   (make-codegen-ctx))
-         (reg   (cl-cc/compile::make-register ctx)))
+         (reg   (cl-cc/compile:make-register ctx)))
     ;; Pass 0 args for a :unary convention (min=1, max=1) → should return nil
     (assert-null (cl-cc/compile::emit-registered-builtin entry nil reg ctx))))

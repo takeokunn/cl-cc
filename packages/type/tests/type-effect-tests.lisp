@@ -11,8 +11,8 @@
   :parallel nil)
 
 (defbefore :each (cl-cc-type-serial-suite)
-  (cl-cc/type::reset-type-vars!)
-  (setf cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
+  (cl-cc/type:reset-type-vars!)
+  (setf cl-cc/type:*typeclass-instance-registry* (make-hash-table :test #'equal)))
 
 (in-suite cl-cc-type-serial-suite)
 
@@ -95,7 +95,7 @@
       (declare (ignore _subst))
       (assert-true (type-equal-p ty type-int)))
     (assert-true (null (check ast type-int env)))
-    (assert-true (null (check ast cl-cc/type::+type-unknown+ env)))))
+    (assert-true (null (check ast cl-cc/type:+type-unknown+ env)))))
 
 (deftest bidirectional-checking-check-body-verifies-last-form
   "check-body on [1, 2] against type-int returns nil (last form is int)."
@@ -114,7 +114,7 @@ registration body per case."
   :cases (("int-registered"     type-int    t)
           ("string-not-present" type-string nil))
   (query-type expected-p)
-  (let ((cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
+  (let ((cl-cc/type:*typeclass-instance-registry* (make-hash-table :test #'equal)))
     (register-typeclass-instance 'num-test type-int (list (cons 'plus #'+)))
     (if expected-p
         (assert-true  (has-typeclass-instance-p 'num-test query-type))
@@ -127,15 +127,15 @@ registration body per case."
   "Effect row singletons: pure has 0 effects; io has 1 IO effect; custom multi has N effects."
   :cases (("pure"   +pure-effect-row+  0 nil)
            ("io"     +io-effect-row+    1 "IO")
-           ("custom" (make-type-effect-row :effects (list (cl-cc/type::make-type-effect-op :name 'state :args nil)
-                                                          (cl-cc/type::make-type-effect-op :name 'error :args nil))
+           ("custom" (make-type-effect-row :effects (list (cl-cc/type:make-type-effect-op :name 'state :args nil)
+                                                          (cl-cc/type:make-type-effect-op :name 'error :args nil))
                                            :row-var nil) 2 nil))
   (row expected-count expected-name)
   (assert-true (type-effect-row-p row))
     (assert-= expected-count (length (type-effect-row-effects row)))
     (when expected-name
       (assert-true (string= expected-name
-                            (symbol-name (cl-cc/type::type-effect-op-name (first (type-effect-row-effects row))))))))
+                            (symbol-name (cl-cc/type:type-effect-op-name (first (type-effect-row-effects row))))))))
 
 (deftest-each effect-row-to-string
   "type-to-string formats effect rows: pure → '{}'; io-row contains 'IO'."

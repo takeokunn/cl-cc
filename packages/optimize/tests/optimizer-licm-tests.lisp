@@ -143,7 +143,7 @@
   (let* ((insts (list (make-vm-const :dst :r0 :value 1)
                       (make-vm-const :dst :r1 :value 2)
                       (make-vm-ret   :reg :r0)))
-         (cfg   (cl-cc/optimize::cfg-build insts))
+         (cfg   (cl-cc/optimize:cfg-build insts))
          (sites (cl-cc/optimize::%licm-collect-def-sites cfg)))
     (assert-true (gethash :r0 sites))
     (assert-true (gethash :r1 sites))
@@ -151,7 +151,7 @@
 
 (deftest licm-collect-def-sites-empty-cfg-returns-empty-table
   "%licm-collect-def-sites returns an empty hash table for an empty CFG."
-  (let* ((cfg   (cl-cc/optimize::cfg-build nil))
+  (let* ((cfg   (cl-cc/optimize:cfg-build nil))
          (sites (cl-cc/optimize::%licm-collect-def-sites cfg)))
     (assert-= 0 (hash-table-count sites))))
 
@@ -159,9 +159,9 @@
 
 (deftest licm-loop-def-regs-collects-from-members
   "%licm-loop-def-regs returns all registers defined in member blocks."
-  (let* ((b (make-instance 'cl-cc/optimize::basic-block))
+  (let* ((b (make-instance 'cl-cc/optimize:basic-block))
          (members (make-hash-table :test #'eq)))
-    (setf (cl-cc/optimize::bb-instructions b)
+    (setf (cl-cc/optimize:bb-instructions b)
           (list (make-vm-const :dst :r5 :value 99)
                 (make-vm-add   :dst :r6 :lhs :r5 :rhs :r5)))
     (setf (gethash b members) t)
@@ -185,9 +185,9 @@
          (exit  (make-vm-label :name "exit"))
          (ret   (make-vm-ret   :reg :r1))
          (insts (list start seed jmp1 loop hoist jmp2 body back exit ret))
-         (cfg   (cl-cc/optimize::cfg-build insts)))
-    (cl-cc/optimize::cfg-compute-dominators cfg)
-    (cl-cc/optimize::cfg-compute-loop-depths cfg)
+         (cfg   (cl-cc/optimize:cfg-build insts)))
+    (cl-cc/optimize:cfg-compute-dominators cfg)
+    (cl-cc/optimize:cfg-compute-loop-depths cfg)
     (multiple-value-bind (headers _)
         (cl-cc/optimize::%licm-find-loop-headers cfg)
       (declare (ignore _))
@@ -201,10 +201,10 @@
           ("jump-zero-match" (make-vm-jump-zero :reg :r0 :label "old") "old" "new" 'cl-cc/vm::vm-jump-zero)
           ("no-match"        (make-vm-jump      :label "other") "old" "new" nil))
   (term-inst old new expected-type)
-  (let ((b (make-instance 'cl-cc/optimize::basic-block)))
-    (setf (cl-cc/optimize::bb-instructions b) (list term-inst))
+  (let ((b (make-instance 'cl-cc/optimize:basic-block)))
+    (setf (cl-cc/optimize:bb-instructions b) (list term-inst))
     (cl-cc/optimize::%opt-rewrite-block-terminator b old new)
-    (let ((result (car (cl-cc/optimize::bb-instructions b))))
+    (let ((result (car (cl-cc/optimize:bb-instructions b))))
       (if expected-type
           (progn
           (assert-true (typep result expected-type))
@@ -215,28 +215,28 @@
 
 (deftest licm-redirect-successor-updates-edges
   "%licm-redirect-successor swaps old→new in block's successors and updates predecessors."
-  (let ((block (make-instance 'cl-cc/optimize::basic-block))
-        (old   (make-instance 'cl-cc/optimize::basic-block))
-        (new   (make-instance 'cl-cc/optimize::basic-block)))
-    (setf (cl-cc/optimize::bb-successors   block) (list old)
-          (cl-cc/optimize::bb-predecessors old)   (list block)
-          (cl-cc/optimize::bb-predecessors new)   nil)
+  (let ((block (make-instance 'cl-cc/optimize:basic-block))
+        (old   (make-instance 'cl-cc/optimize:basic-block))
+        (new   (make-instance 'cl-cc/optimize:basic-block)))
+    (setf (cl-cc/optimize:bb-successors   block) (list old)
+          (cl-cc/optimize:bb-predecessors old)   (list block)
+          (cl-cc/optimize:bb-predecessors new)   nil)
     (cl-cc/optimize::%licm-redirect-successor block old new)
-    (assert-true  (member new (cl-cc/optimize::bb-successors   block) :test #'eq))
-    (assert-false (member old (cl-cc/optimize::bb-successors   block) :test #'eq))
-    (assert-false (member block (cl-cc/optimize::bb-predecessors old)  :test #'eq))
-    (assert-true  (member block (cl-cc/optimize::bb-predecessors new)  :test #'eq))))
+    (assert-true  (member new (cl-cc/optimize:bb-successors   block) :test #'eq))
+    (assert-false (member old (cl-cc/optimize:bb-successors   block) :test #'eq))
+    (assert-false (member block (cl-cc/optimize:bb-predecessors old)  :test #'eq))
+    (assert-true  (member block (cl-cc/optimize:bb-predecessors new)  :test #'eq))))
 
 ;;; ─── %licm-collect-members ──────────────────────────────────────────────
 
 (deftest licm-collect-members-returns-loop-blocks
   "%licm-collect-members returns a hash-table containing all blocks in the natural loop."
-  (let* ((header (make-instance 'cl-cc/optimize::basic-block))
-         (tail   (make-instance 'cl-cc/optimize::basic-block)))
-    (setf (cl-cc/optimize::bb-predecessors header) (list tail)
-          (cl-cc/optimize::bb-successors   header) (list tail)
-          (cl-cc/optimize::bb-predecessors tail)   (list header)
-          (cl-cc/optimize::bb-successors   tail)   (list header))
+  (let* ((header (make-instance 'cl-cc/optimize:basic-block))
+         (tail   (make-instance 'cl-cc/optimize:basic-block)))
+    (setf (cl-cc/optimize:bb-predecessors header) (list tail)
+          (cl-cc/optimize:bb-successors   header) (list tail)
+          (cl-cc/optimize:bb-predecessors tail)   (list header)
+          (cl-cc/optimize:bb-successors   tail)   (list header))
     (let ((members (cl-cc/optimize::%licm-collect-members header (list tail))))
       (assert-true  (hash-table-p members))
       (assert-true  (gethash header members))
@@ -246,11 +246,11 @@
 
 (deftest licm-collect-invariants-finds-pure-const
   "%licm-collect-invariants returns pure instructions not reading loop-defined registers."
-  (let* ((b        (make-instance 'cl-cc/optimize::basic-block))
+  (let* ((b        (make-instance 'cl-cc/optimize:basic-block))
          (members  (make-hash-table :test #'eq))
          (def-sites (make-hash-table :test #'eq))
          (c42      (make-vm-const :dst :r0 :value 42)))
-    (setf (cl-cc/optimize::bb-instructions b) (list c42))
+    (setf (cl-cc/optimize:bb-instructions b) (list c42))
     (setf (gethash b members) t)
     (setf (gethash :r0 def-sites) (list b))
     (let ((invs (cl-cc/optimize::%licm-collect-invariants members def-sites)))
@@ -260,19 +260,19 @@
 
 (deftest pre-block-out-env-maps-key-to-defining-register
   "%opt-pre-block-out-env maps the expression key (:const 42) to its destination register :r0."
-  (let* ((b   (make-instance 'cl-cc/optimize::basic-block))
+  (let* ((b   (make-instance 'cl-cc/optimize:basic-block))
          (c42 (make-vm-const :dst :r0 :value 42)))
-    (setf (cl-cc/optimize::bb-instructions b) (list c42))
+    (setf (cl-cc/optimize:bb-instructions b) (list c42))
     (let ((env (cl-cc/optimize::%opt-pre-block-out-env b)))
       (assert-true  (hash-table-p env))
       (assert-equal :r0 (gethash '(:const 42) env)))))
 
 (deftest pre-block-out-env-removes-stale-entries-on-overwrite
   "%opt-pre-block-out-env evicts the first definition when :r0 is redefined; only (:const 2) survives."
-  (let* ((b  (make-instance 'cl-cc/optimize::basic-block))
+  (let* ((b  (make-instance 'cl-cc/optimize:basic-block))
          (c1 (make-vm-const :dst :r0 :value 1))
          (c2 (make-vm-const :dst :r0 :value 2)))
-    (setf (cl-cc/optimize::bb-instructions b) (list c1 c2))
+    (setf (cl-cc/optimize:bb-instructions b) (list c1 c2))
     (let ((env (cl-cc/optimize::%opt-pre-block-out-env b)))
       (assert-null  (gethash '(:const 1) env))
       (assert-equal :r0 (gethash '(:const 2) env)))))
@@ -283,7 +283,7 @@
   "%opt-pre-join-elim returns NIL (no changes) for straight-line code without join points."
   (let* ((insts (list (make-vm-const :dst :r0 :value 1)
                       (make-vm-ret   :reg :r0)))
-         (cfg (cl-cc/optimize::cfg-build insts)))
+         (cfg (cl-cc/optimize:cfg-build insts)))
     (assert-false (cl-cc/optimize::%opt-pre-join-elim cfg))))
 
 ;;; ─── %opt-pre-emit-compensating ────────────────────────────────────────
@@ -291,7 +291,7 @@
 (defun %make-pre-compensate-state (&optional (prior-src nil))
   "Build (pair inst pred-inserts) for %opt-pre-emit-compensating tests.
    When PRIOR-SRC is non-nil, pre-seed key :k with that register in the env."
-  (let* ((pred  (make-instance 'cl-cc/optimize::basic-block))
+  (let* ((pred  (make-instance 'cl-cc/optimize:basic-block))
          (env   (make-hash-table :test #'eq))
          (table (make-hash-table :test #'eq))
          (inst  (make-vm-const :dst :r0 :value 7))
@@ -337,5 +337,5 @@
 
 (deftest egraph-pass-returns-list-for-empty-input
   "optimize-with-egraph on empty instruction list returns a list (possibly empty)."
-  (let ((result (cl-cc/optimize::optimize-with-egraph nil)))
+  (let ((result (cl-cc/optimize:optimize-with-egraph nil)))
     (assert-true (listp result))))

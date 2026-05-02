@@ -45,21 +45,21 @@
 (deftest heap-alias-cons-sets-own-root
   "opt-compute-heap-aliases: a vm-cons instruction sets its dst register as its own canonical root."
   (let* ((inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
-         (roots (cl-cc/optimize::opt-compute-heap-aliases (list inst))))
+         (roots (cl-cc/optimize:opt-compute-heap-aliases (list inst))))
     (assert-eq :r0 (gethash :r0 roots))))
 
 (deftest heap-alias-move-propagates-root
   "opt-compute-heap-aliases: a vm-move propagates the cons root to the destination register."
   (let* ((cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (move-inst (make-vm-move :dst :r3 :src :r0))
-         (roots (cl-cc/optimize::opt-compute-heap-aliases (list cons-inst move-inst))))
+         (roots (cl-cc/optimize:opt-compute-heap-aliases (list cons-inst move-inst))))
     (assert-eq :r0 (gethash :r3 roots))))
 
 (deftest heap-alias-non-heap-write-kills-root
   "opt-compute-heap-aliases: overwriting a heap root with a non-heap instruction removes the root entry."
   (let* ((cons-inst (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (add-inst  (make-vm-add  :dst :r0 :lhs :r1 :rhs :r2))
-         (roots (cl-cc/optimize::opt-compute-heap-aliases (list cons-inst add-inst))))
+         (roots (cl-cc/optimize:opt-compute-heap-aliases (list cons-inst add-inst))))
     (assert-false (nth-value 1 (gethash :r0 roots)))))
 
 (deftest heap-alias-unknown-register-returns-nil
@@ -83,8 +83,8 @@
 
 (deftest-each interval-arithmetic-cases
   "Interval arithmetic produces expected [lo, hi] bounds for add, sub, and mul."
-  :cases (("add"       #'cl-cc/optimize::opt-interval-add  1  2  3  4   4  6)
-          ("sub"       #'cl-cc/optimize::opt-interval-sub  5  8  1  3   2  7)
+  :cases (("add"       #'cl-cc/optimize:opt-interval-add  1  2  3  4   4  6)
+          ("sub"       #'cl-cc/optimize:opt-interval-sub  5  8  1  3   2  7)
           ("mul-pos"   #'cl-cc/optimize::opt-interval-mul  2  3  4  5   8 15)
           ("mul-mixed" #'cl-cc/optimize::opt-interval-mul -1  2  3  4  -4  8))
   (op a-lo a-hi b-lo b-hi expected-lo expected-hi)
@@ -139,8 +139,8 @@
   (let ((alias (make-hash-table :test #'eq)))
     (loop for (k v) on entries by #'cddr do (setf (gethash k alias) v))
     (if expected
-        (assert-true  (cl-cc/optimize::opt-must-alias-p reg-a reg-b alias))
-        (assert-false (cl-cc/optimize::opt-must-alias-p reg-a reg-b alias)))))
+        (assert-true  (cl-cc/optimize:opt-must-alias-p reg-a reg-b alias))
+        (assert-false (cl-cc/optimize:opt-must-alias-p reg-a reg-b alias)))))
 
 (deftest-each may-alias-cases
   "opt-may-alias-p: conservatively true when a register is unknown or shares root."
@@ -151,8 +151,8 @@
   (let ((alias (make-hash-table :test #'eq)))
     (loop for (k v) on entries by #'cddr do (setf (gethash k alias) v))
     (if expected
-        (assert-true  (cl-cc/optimize::opt-may-alias-p reg-a reg-b alias))
-        (assert-false (cl-cc/optimize::opt-may-alias-p reg-a reg-b alias)))))
+        (assert-true  (cl-cc/optimize:opt-may-alias-p reg-a reg-b alias))
+        (assert-false (cl-cc/optimize:opt-may-alias-p reg-a reg-b alias)))))
 
 ;;; ─── opt-slot-alias-key / opt-rewrite-inst-regs ────────────────────────
 

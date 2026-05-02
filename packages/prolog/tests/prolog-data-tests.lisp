@@ -4,31 +4,31 @@
 
 (deftest prolog-data-built-in-handler-specs
   "The built-in predicate table stays data-only and exposes the expected handlers."
-  (assert-equal `((cl-cc/prolog::! cl-cc/prolog::prolog-cut-handler)
-                  (,(find-symbol "AND" :cl) cl-cc/prolog::prolog-and-handler)
-                  (,(find-symbol "OR" :cl) cl-cc/prolog::prolog-or-handler)
-                  (,(find-symbol "=" :cl) cl-cc/prolog::prolog-unify-handler)
-                  (,(find-symbol "/=" :cl) cl-cc/prolog::prolog-not-unify-handler)
-                  (:when cl-cc/prolog::prolog-when-handler)
-                  (,(find-symbol "WHEN" :cl) cl-cc/prolog::prolog-when-handler))
-                cl-cc/prolog::*builtin-predicate-specs*))
+  (assert-equal `((cl-cc/prolog::! cl-cc/prolog:prolog-cut-handler)
+                  (,(find-symbol "AND" :cl) cl-cc/prolog:prolog-and-handler)
+                  (,(find-symbol "OR" :cl) cl-cc/prolog:prolog-or-handler)
+                  (,(find-symbol "=" :cl) cl-cc/prolog:prolog-unify-handler)
+                  (,(find-symbol "/=" :cl) cl-cc/prolog:prolog-not-unify-handler)
+                  (:when cl-cc/prolog:prolog-when-handler)
+                  (,(find-symbol "WHEN" :cl) cl-cc/prolog:prolog-when-handler))
+                cl-cc/prolog:*builtin-predicate-specs*))
 
 (deftest prolog-builtins-builds-dispatch-table-from-specs
   "The symbol dispatch helper resolves handler symbols into callable functions."
   (let* ((table (cl-cc/prolog::%make-symbol-dispatch-table
-                  '((foo cl-cc/prolog::prolog-cut-handler))))
+                  '((foo cl-cc/prolog:prolog-cut-handler))))
          (handler (gethash 'foo table)))
     (assert-true handler)
-    (assert-eq (symbol-function 'cl-cc/prolog::prolog-cut-handler) handler)))
+    (assert-eq (symbol-function 'cl-cc/prolog:prolog-cut-handler) handler)))
 
 (deftest prolog-data-peephole-rules-present
   "The peephole rule data remains available after the data/logic split."
-  (assert-true (listp cl-cc/prolog::*peephole-rules*))
-  (assert-true (>= (length cl-cc/prolog::*peephole-rules*) 30))
+  (assert-true (listp cl-cc/prolog:*peephole-rules*))
+  (assert-true (>= (length cl-cc/prolog:*peephole-rules*) 30))
   (assert-equal '((:const cl-cc/prolog::?src cl-cc/prolog::?val)
                   (:move cl-cc/prolog::?dst cl-cc/prolog::?src)
                   ((:const cl-cc/prolog::?dst cl-cc/prolog::?val)))
-                (first cl-cc/prolog::*peephole-rules*)))
+                (first cl-cc/prolog:*peephole-rules*)))
 
 ;;; P5: %atomic-cut-goal-p
 
@@ -36,7 +36,7 @@
   "%atomic-cut-goal-p: true only for the bare symbol !."
   :cases (("cut-symbol"  '!                                                         t)
           ("non-cut-sym" 'foo                                                       nil)
-          ("goal-struct" (cl-cc/prolog::make-prolog-goal :predicate '! :args nil)   nil)
+          ("goal-struct" (cl-cc/prolog:make-prolog-goal :predicate '! :args nil)   nil)
           ("integer"     42                                                          nil)
           ("list"        '(list)                                                     nil)
           ("nil"         nil                                                         nil))
@@ -56,7 +56,7 @@
 
 (deftest prolog-builtin-goal-predicate-and-args-struct
   "For a prolog-goal struct, returns (goal-predicate . goal-args)."
-  (let ((goal (cl-cc/prolog::make-prolog-goal :predicate 'foo :args '(1 2))))
+  (let ((goal (cl-cc/prolog:make-prolog-goal :predicate 'foo :args '(1 2))))
     (multiple-value-bind (pred args)
         (cl-cc/prolog::%goal-predicate-and-args goal)
       (assert-eq 'foo pred)

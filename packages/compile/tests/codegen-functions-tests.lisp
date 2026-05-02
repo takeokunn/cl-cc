@@ -12,8 +12,8 @@
   :parallel nil)
 
 (defbefore :each (cl-cc-codegen-functions-serial-suite)
-  (setf cl-cc/compile::*labels-boxed-fns* nil
-        cl-cc/compile::*compiling-typed-fn* nil)
+  (setf cl-cc/compile:*labels-boxed-fns* nil
+        cl-cc/compile:*compiling-typed-fn* nil)
   (clrhash cl-cc/expand:*function-type-registry*))
 
 (in-suite cl-cc-codegen-functions-serial-suite)
@@ -54,7 +54,7 @@ test, which isn't worth the test-quality tradeoff."
                                    :params '(x)
                                    :body (list (make-ast-var :name 'x)))
                  ctx)
-    (assert-true (gethash 'my-fn (cl-cc/compile::ctx-global-functions ctx)))))
+    (assert-true (gethash 'my-fn (cl-cc/compile:ctx-global-functions ctx)))))
 
 (deftest codegen-defun-self-tail-call-loops
   "A simple self-tail call in defun compiles to a jump back to the entry label."
@@ -124,7 +124,7 @@ test, which isn't worth the test-quality tradeoff."
     (compile-ast (cl-cc/ast:make-ast-defvar :name 'test-codegen-var
                                    :value (make-ast-int :value 99))
                  ctx)
-    (assert-true (gethash 'test-codegen-var (cl-cc/compile::ctx-global-variables ctx)))
+    (assert-true (gethash 'test-codegen-var (cl-cc/compile:ctx-global-variables ctx)))
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-const))))
 
 (deftest codegen-defconstant-inlines-symbol-reference

@@ -102,12 +102,12 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
 
 (deftest verify-instructions-simple-sequence-passes
   "opt-verify-instructions returns T for a simple const+ret sequence."
-  (assert-true (cl-cc/optimize::opt-verify-instructions
+  (assert-true (cl-cc/optimize:opt-verify-instructions
                 (list (make-vm-const :dst :r0 :value 1) (make-vm-ret :reg :r0)))))
 
 (deftest verify-instructions-jump-with-known-label-passes
   "opt-verify-instructions returns T when a jump target label is defined in the sequence."
-  (assert-true (cl-cc/optimize::opt-verify-instructions
+  (assert-true (cl-cc/optimize:opt-verify-instructions
                 (list (make-vm-const :dst :r0 :value 1)
                       (make-vm-jump  :label "target")
                       (make-vm-label :name "target")
@@ -123,7 +123,7 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
                                      (make-vm-ret  :reg :r0))))
   (insts)
   (assert-signals error
-    (cl-cc/optimize::opt-verify-instructions insts)))
+    (cl-cc/optimize:opt-verify-instructions insts)))
 
 ;;; ─── opt-resolve-pass-pipeline ───────────────────────────────────────────
 
@@ -168,7 +168,7 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
   (assert-true (gethash :dce  cl-cc/optimize::*opt-pass-registry*))
   (assert-true (gethash :cse  cl-cc/optimize::*opt-pass-registry*))
   (assert-eq #'cl-cc/optimize::%maybe-apply-prolog-rewrite (first cl-cc/optimize::*opt-convergence-passes*))
-  (assert-false (member #'cl-cc/optimize::optimize-with-egraph cl-cc/optimize::*opt-convergence-passes*))
+  (assert-false (member #'cl-cc/optimize:optimize-with-egraph cl-cc/optimize::*opt-convergence-passes*))
   (assert-false (member #'cl-cc/optimize::opt-pass-fold cl-cc/optimize::*opt-convergence-passes*))
   (assert-false (member #'cl-cc/optimize::opt-pass-strength-reduce cl-cc/optimize::*opt-convergence-passes*))
   (assert-equal '(:prolog-rewrite :inline :sccp)
@@ -178,15 +178,15 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
 
 (deftest verify-optimizer-flag-runs-verifier-on-valid-input
   "*verify-optimizer-instructions* T causes opt-verify-instructions to run; valid input succeeds."
-  (let ((cl-cc/optimize::*verify-optimizer-instructions* t)
+  (let ((cl-cc/optimize:*verify-optimizer-instructions* t)
         (insts (list (make-vm-const :dst :r0 :value 42) (make-vm-ret :reg :r0))))
-    (assert-true (listp (cl-cc/optimize::optimize-instructions insts)))))
+    (assert-true (listp (cl-cc/optimize:optimize-instructions insts)))))
 
 (deftest verify-optimizer-flag-nil-skips-verifier
   "*verify-optimizer-instructions* NIL causes optimize-instructions to skip verification."
-  (let ((cl-cc/optimize::*verify-optimizer-instructions* nil)
+  (let ((cl-cc/optimize:*verify-optimizer-instructions* nil)
         (insts (list (make-vm-const :dst :r0 :value 1) (make-vm-ret :reg :r0))))
-    (assert-true (listp (cl-cc/optimize::optimize-instructions insts)))))
+    (assert-true (listp (cl-cc/optimize:optimize-instructions insts)))))
 
 ;;; ─── Prolog rewrite stage ──────────────────────────────────────────────────
 

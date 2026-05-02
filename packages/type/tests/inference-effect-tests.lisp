@@ -109,8 +109,8 @@
                     :params (list sk) :return cl-cc/type:type-int))
          (fn-without (cl-cc/type:make-type-arrow-raw
                       :params (list cl-cc/type:type-int) :return cl-cc/type:type-int)))
-    (assert-true  (cl-cc/type::skolem-appears-in-type-p sk fn-with))
-    (assert-false (cl-cc/type::skolem-appears-in-type-p sk fn-without))))
+    (assert-true  (cl-cc/type:skolem-appears-in-type-p sk fn-with))
+    (assert-false (cl-cc/type:skolem-appears-in-type-p sk fn-without))))
 
 (deftest infer-skolem-appears-in-subst-p
   "skolem-appears-in-subst-p returns T when skolem is a value in the substitution, NIL otherwise."
@@ -146,7 +146,7 @@
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast '42))
         (env (type-env-empty)))
-    (let ((subst (cl-cc/type:check ast cl-cc/type::+type-unknown+ env)))
+    (let ((subst (cl-cc/type:check ast cl-cc/type:+type-unknown+ env)))
       (assert-null subst))))
 
 ;;; ─── annotate-type / defun-without-annotation ───────────────────────────
@@ -254,12 +254,12 @@
   "%infer-effects-union on empty list returns the pure effect row."
   (reset-type-vars!)
   (let ((result (cl-cc/type::%infer-effects-union nil nil)))
-    (assert-true (cl-cc/type::effect-row-subset-p result cl-cc/type::+pure-effect-row+))
-    (assert-true (cl-cc/type::effect-row-subset-p cl-cc/type::+pure-effect-row+ result))))
+    (assert-true (cl-cc/type:effect-row-subset-p result cl-cc/type:+pure-effect-row+))
+    (assert-true (cl-cc/type:effect-row-subset-p cl-cc/type:+pure-effect-row+ result))))
 
 (deftest infer-effects-union-pure-forms-stay-pure
   "%infer-effects-union on a list of pure integer forms returns the pure effect row."
   (reset-type-vars!)
   (let* ((asts   (list (cl-cc:lower-sexp-to-ast '1) (cl-cc:lower-sexp-to-ast '2)))
          (result (cl-cc/type::%infer-effects-union asts nil)))
-    (assert-true (cl-cc/type::effect-row-subset-p result cl-cc/type::+pure-effect-row+))))
+    (assert-true (cl-cc/type:effect-row-subset-p result cl-cc/type:+pure-effect-row+))))

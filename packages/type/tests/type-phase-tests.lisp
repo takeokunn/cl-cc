@@ -69,7 +69,7 @@
       (multiple-value-bind (ty subst) (infer-with-env ast)
         (declare (ignore subst))
         (assert-true (or (type-equal-p ty type-null)
-                         (cl-cc/type::type-unknown-p ty)
+                         (cl-cc/type:type-unknown-p ty)
                          (not (null ty))))))
     (error () (assert-true t))))
 

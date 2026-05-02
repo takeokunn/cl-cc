@@ -60,14 +60,14 @@
 
 (deftest parse-slot-spec-bare-symbol
   "parse-slot-spec: bare symbol produces slot with nil initarg and reader."
-  (let ((slot (cl-cc/parse::parse-slot-spec 'x)))
+  (let ((slot (cl-cc/parse:parse-slot-spec 'x)))
     (assert-eq 'x (cl-cc::ast-slot-name slot))
     (assert-null (cl-cc::ast-slot-initarg slot))
     (assert-null (cl-cc::ast-slot-reader slot))))
 
 (deftest parse-slot-spec-full-options
   "parse-slot-spec: list form with all options stores each slot attribute."
-  (let ((slot (cl-cc/parse::parse-slot-spec
+  (let ((slot (cl-cc/parse:parse-slot-spec
                '(x :initarg :x :reader get-x :writer set-x :accessor x-acc :type integer))))
     (assert-eq 'x       (cl-cc::ast-slot-name     slot))
     (assert-eq :x       (cl-cc::ast-slot-initarg   slot))
@@ -78,7 +78,7 @@
 
 (deftest parse-slot-spec-initform
   "parse-slot-spec: :initform is parsed as an AST integer node."
-  (let ((slot (cl-cc/parse::parse-slot-spec '(count :initform 0))))
+  (let ((slot (cl-cc/parse:parse-slot-spec '(count :initform 0))))
     (assert-eq 'count (cl-cc::ast-slot-name slot))
     (assert-true (cl-cc/ast:ast-int-p (cl-cc::ast-slot-initform slot)))
     (assert-= 0 (cl-cc/ast:ast-int-value (cl-cc::ast-slot-initform slot)))))
@@ -88,7 +88,7 @@
 (deftest parser-lambda-list-rest-and-key
   "parse-compiler-lambda-list: &rest followed by &key stores both rest-param and key-params."
   (multiple-value-bind (required optional rest-param key-params)
-      (cl-cc/parse::parse-compiler-lambda-list '(x &rest args &key verbose))
+      (cl-cc/parse:parse-compiler-lambda-list '(x &rest args &key verbose))
     (assert-equal '(x) required)
     (assert-null optional)
     (assert-eq 'args rest-param)
@@ -98,7 +98,7 @@
 (deftest parser-lambda-list-allow-other-keys
   "parse-compiler-lambda-list: &allow-other-keys is accepted without error."
   (multiple-value-bind (required optional rest-param key-params)
-      (cl-cc/parse::parse-compiler-lambda-list '(&key x &allow-other-keys))
+      (cl-cc/parse:parse-compiler-lambda-list '(&key x &allow-other-keys))
     (assert-null required)
     (assert-null optional)
     (assert-null rest-param)
@@ -107,7 +107,7 @@
 (deftest parser-lambda-list-body-treated-as-rest
   "parse-compiler-lambda-list: &body stores its parameter as rest-param."
   (multiple-value-bind (required optional rest-param key-params)
-      (cl-cc/parse::parse-compiler-lambda-list '(x &body forms))
+      (cl-cc/parse:parse-compiler-lambda-list '(x &body forms))
     (declare (ignore optional))
     (assert-equal '(x) required)
     (assert-eq 'forms rest-param)
@@ -116,7 +116,7 @@
 (deftest parser-lambda-list-bare-optional
   "parse-compiler-lambda-list: bare &optional symbol stores a (name nil) pair."
   (multiple-value-bind (required optional rest-param key-params)
-      (cl-cc/parse::parse-compiler-lambda-list '(&optional x))
+      (cl-cc/parse:parse-compiler-lambda-list '(&optional x))
     (declare (ignore rest-param key-params))
     (assert-null required)
     (assert-= 1 (length optional))

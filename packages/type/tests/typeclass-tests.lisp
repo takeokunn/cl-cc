@@ -32,7 +32,7 @@
              :type-params (list (fresh-type-var "a"))
              :superclasses '(eq)
              :methods '((%compare . nil)))))
-    (assert-equal '(eq) (cl-cc/type::typeclass-def-superclasses td)))
+    (assert-equal '(eq) (cl-cc/type:typeclass-def-superclasses td)))
   (let* ((a  (fresh-type-var 'a))
          (tc (make-typeclass-def
               :name 'functor-test
@@ -63,7 +63,7 @@
 
 (deftest typeclass-registry-operations
   "Typeclass registry: round-trip register+lookup; absent name returns nil."
-  (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq)))
+  (let ((cl-cc/type:*typeclass-registry* (make-hash-table :test #'eq)))
     (let ((td (make-typeclass-def :name 'test-tc :type-params nil :methods nil)))
       (register-typeclass 'test-tc td)
       (assert-eq td (lookup-typeclass 'test-tc)))
@@ -71,14 +71,14 @@
 
 (deftest typeclass-registry-rejects-noncanonical-input
   "register-typeclass rejects non-typeclass-def inputs with type-inference-error."
-  (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq)))
+  (let ((cl-cc/type:*typeclass-registry* (make-hash-table :test #'eq)))
     (assert-signals type-inference-error
       (register-typeclass 'bad-input '(legacy payload)))))
 
 (deftest typeclass-default-methods-merge-into-instance
   "Instance registration fills missing methods from class defaults."
-  (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
-        (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
+  (let ((cl-cc/type:*typeclass-registry* (make-hash-table :test #'eq))
+        (cl-cc/type:*typeclass-instance-registry* (make-hash-table :test #'equal)))
     (register-typeclass 'pretty-test
                         (make-typeclass-def
                          :name 'pretty-test
@@ -106,10 +106,10 @@
 
 (deftest typeclass-instance-registry-operations
   "Instance registry: register+lookup round-trips; unregistered type returns nil."
-  (let ((cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
+  (let ((cl-cc/type:*typeclass-instance-registry* (make-hash-table :test #'equal)))
     (let ((inst (register-typeclass-instance 'eq type-int '((%equal . t)))))
       (assert-true (typeclass-instance-p inst))
-      (assert-eq 'eq (cl-cc/type::typeclass-instance-class-name inst))
+      (assert-eq 'eq (cl-cc/type:typeclass-instance-class-name inst))
       (assert-eq inst (lookup-typeclass-instance 'eq type-int)))
     (assert-null (lookup-typeclass-instance 'eq type-string))))
 
@@ -118,15 +118,15 @@
   :cases (("duplicate" type-int)
           ("overlap"   (fresh-type-var "a")))
   (second-type)
-  (let ((cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
+  (let ((cl-cc/type:*typeclass-instance-registry* (make-hash-table :test #'equal)))
     (register-typeclass-instance 'eq type-int nil)
     (assert-signals type-inference-error
       (register-typeclass-instance 'eq second-type nil))))
 
 (deftest typeclass-instance-registry-enforces-functional-dependencies
   "Functional dependencies reject conflicting instance families."
-  (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
-        (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
+  (let ((cl-cc/type:*typeclass-registry* (make-hash-table :test #'eq))
+        (cl-cc/type:*typeclass-instance-registry* (make-hash-table :test #'equal)))
     (register-typeclass 'collection-test
                        (make-typeclass-def
                         :name 'collection-test
@@ -163,16 +163,16 @@
 
 (deftest has-typeclass-instance-p-false-before-true-after-registration
   "has-typeclass-instance-p returns nil before registering, T after."
-  (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
-        (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
+  (let ((cl-cc/type:*typeclass-registry* (make-hash-table :test #'eq))
+        (cl-cc/type:*typeclass-instance-registry* (make-hash-table :test #'equal)))
     (assert-false (has-typeclass-instance-p 'eq type-int))
     (register-typeclass-instance 'eq type-int nil)
     (assert-true  (has-typeclass-instance-p 'eq type-int))))
 
 (deftest has-typeclass-instance-p-via-superclass-chain
   "has-typeclass-instance-p finds an instance through a superclass chain (ord ⊃ eq)."
-  (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
-        (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
+  (let ((cl-cc/type:*typeclass-registry* (make-hash-table :test #'eq))
+        (cl-cc/type:*typeclass-instance-registry* (make-hash-table :test #'equal)))
     (register-typeclass-instance 'eq type-int nil)
     (register-typeclass 'ord (make-typeclass-def
                               :name 'ord
@@ -185,17 +185,17 @@
 
 (deftest check-typeclass-constraint-behavior
   "check-typeclass-constraint: accepts known instance, unknown, and free var; signals error for missing instance."
-  (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
-        (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
+  (let ((cl-cc/type:*typeclass-registry* (make-hash-table :test #'eq))
+        (cl-cc/type:*typeclass-instance-registry* (make-hash-table :test #'equal)))
     (register-typeclass-instance 'eq type-int nil)
-    (cl-cc/type::check-typeclass-constraint 'eq type-int       (type-env-empty))
-    (cl-cc/type::check-typeclass-constraint 'eq cl-cc/type::+type-unknown+ (type-env-empty))
-    (cl-cc/type::check-typeclass-constraint 'eq (fresh-type-var "a") (type-env-empty))
+    (cl-cc/type:check-typeclass-constraint 'eq type-int       (type-env-empty))
+    (cl-cc/type:check-typeclass-constraint 'eq cl-cc/type:+type-unknown+ (type-env-empty))
+    (cl-cc/type:check-typeclass-constraint 'eq (fresh-type-var "a") (type-env-empty))
     (assert-true t))
-  (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
-        (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal)))
+  (let ((cl-cc/type:*typeclass-registry* (make-hash-table :test #'eq))
+        (cl-cc/type:*typeclass-instance-registry* (make-hash-table :test #'equal)))
     (assert-signals type-inference-error
-      (cl-cc/type::check-typeclass-constraint 'eq type-int (type-env-empty)))))
+      (cl-cc/type:check-typeclass-constraint 'eq type-int (type-env-empty)))))
 
 ;;; ─── dict-env operations ───────────────────────────────────────────────────
 
@@ -203,9 +203,9 @@
   "dict-env: extend+lookup round-trips; lookup in empty env returns nil."
   (let* ((env     (type-env-empty))
          (methods '((method-a . :impl-a)))
-         (env2    (cl-cc/type::dict-env-extend 'eq type-int methods env)))
-    (assert-equal methods (cl-cc/type::dict-env-lookup 'eq type-int env2))
-    (assert-null          (cl-cc/type::dict-env-lookup 'eq type-int env))))
+         (env2    (cl-cc/type:dict-env-extend 'eq type-int methods env)))
+    (assert-equal methods (cl-cc/type:dict-env-lookup 'eq type-int env2))
+    (assert-null          (cl-cc/type:dict-env-lookup 'eq type-int env))))
 
 ;;; ─── %typeclass-instance-overlaps-p ─────────────────────────────────────────
 

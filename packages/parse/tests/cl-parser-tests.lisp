@@ -20,7 +20,7 @@
 
 (defun lower (sexp)
   "Lower an s-expression to an AST node."
-  (cl-cc/parse::lower-sexp-to-ast sexp))
+  (cl-cc/parse:lower-sexp-to-ast sexp))
 
 ;;; ─── parse-source ───────────────────────────────────────────────────────────
 
@@ -74,26 +74,26 @@
   :cases (("single-form-cst"
            (lambda ()
              (multiple-value-bind (cst-list diagnostics)
-                 (cl-cc/parse::parse-cl-source "(+ 1 2)")
+                 (cl-cc/parse:parse-cl-source "(+ 1 2)")
                (declare (ignore diagnostics))
                (assert-= 1 (length cst-list))
                (assert-true (cl-cc:cst-interior-p (first cst-list))))))
           ("empty-yields-nil"
            (lambda ()
              (multiple-value-bind (cst-list diagnostics)
-                 (cl-cc/parse::parse-cl-source "")
+                 (cl-cc/parse:parse-cl-source "")
                (declare (ignore diagnostics))
                (assert-null cst-list))))
           ("diagnostics-list"
            (lambda ()
              (multiple-value-bind (cst-list diagnostics)
-                 (cl-cc/parse::parse-cl-source "(+ 1 2)")
+                 (cl-cc/parse:parse-cl-source "(+ 1 2)")
                (declare (ignore cst-list))
                (assert-true (listp diagnostics)))))
           ("multi-form-count"
            (lambda ()
              (multiple-value-bind (cst-list diagnostics)
-                 (cl-cc/parse::parse-cl-source "1 2 3")
+                 (cl-cc/parse:parse-cl-source "1 2 3")
                (declare (ignore diagnostics))
                (assert-= 3 (length cst-list))))))
   (verify)
@@ -128,7 +128,7 @@
   :cases (("required-only"
            (lambda ()
              (multiple-value-bind (required optional rest-param key-params)
-                 (cl-cc/parse::parse-compiler-lambda-list '(x y z))
+                 (cl-cc/parse:parse-compiler-lambda-list '(x y z))
                (assert-equal '(x y z) required)
                (assert-null optional)
                (assert-null rest-param)
@@ -136,7 +136,7 @@
           ("optional"
            (lambda ()
              (multiple-value-bind (required optional rest-param key-params)
-                 (cl-cc/parse::parse-compiler-lambda-list '(x &optional (y 10)))
+                 (cl-cc/parse:parse-compiler-lambda-list '(x &optional (y 10)))
                (assert-equal '(x) required)
                (assert-= 1 (length optional))
                (assert-eq 'y (first (first optional)))
@@ -146,7 +146,7 @@
           ("rest"
            (lambda ()
              (multiple-value-bind (required optional rest-param key-params)
-                 (cl-cc/parse::parse-compiler-lambda-list '(x &rest args))
+                 (cl-cc/parse:parse-compiler-lambda-list '(x &rest args))
                (assert-equal '(x) required)
                (assert-null optional)
                (assert-eq 'args rest-param)
@@ -154,7 +154,7 @@
           ("key"
            (lambda ()
              (multiple-value-bind (required optional rest-param key-params)
-                 (cl-cc/parse::parse-compiler-lambda-list '(x &key (size 0)))
+                 (cl-cc/parse:parse-compiler-lambda-list '(x &key (size 0)))
                (assert-equal '(x) required)
                (assert-null optional)
                (assert-null rest-param)
@@ -163,7 +163,7 @@
           ("empty"
            (lambda ()
              (multiple-value-bind (required optional rest-param key-params)
-                 (cl-cc/parse::parse-compiler-lambda-list '())
+                 (cl-cc/parse:parse-compiler-lambda-list '())
                (assert-null required)
                (assert-null optional)
                (assert-null rest-param)
@@ -181,7 +181,7 @@
           ("simple"   '(x y z)         nil)
           ("empty"    '()              nil))
   (lambda-list expected)
-  (assert-equal expected (if (cl-cc/parse::lambda-list-has-extended-p lambda-list) t nil)))
+  (assert-equal expected (if (cl-cc/parse:lambda-list-has-extended-p lambda-list) t nil)))
 
 ;;; ─── lower-sexp-to-ast: atoms ────────────────────────────────────────────────
 

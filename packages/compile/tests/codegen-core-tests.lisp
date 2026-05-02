@@ -9,8 +9,8 @@ a register. The codegen backend doesn't use vm-select for ordinary IF forms;
 it branches via jump-zero/jump/label. vm-select only appears in specialized
 sink/fold paths."
   (let* ((ctx (make-codegen-ctx))
-         (x-reg (cl-cc/compile::make-register ctx)))
-    (setf (cl-cc/compile::ctx-env ctx) (list (cons 'x x-reg)))
+         (x-reg (cl-cc/compile:make-register ctx)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'x x-reg)))
     (let ((reg (compile-ast (make-ast-if :cond (make-ast-var :name 'x)
                                           :then (make-ast-int :value 1)
                                           :else (make-ast-int :value 2))
@@ -37,17 +37,17 @@ sink/fold paths."
   :cases (("arithmetic"    6 '(+ 1 2 3))
           ("string-length" 5 '(string-length "hello")))
   (expected form)
-  (let ((result (cl-cc/compile::optimize-ast (cl-cc/parse::lower-sexp-to-ast form))))
+  (let ((result (cl-cc/compile:optimize-ast (cl-cc/parse::lower-sexp-to-ast form))))
     (assert-true (cl-cc/ast:ast-int-p result))
     (assert-= expected (cl-cc/ast:ast-int-value result))))
 
 (deftest ast-partial-eval-known-defun-call
   "compile-toplevel-forms preserves non-empty AST output for a known top-level defun call."
-  (let ((result (cl-cc/compile::compile-toplevel-forms
+  (let ((result (cl-cc/compile:compile-toplevel-forms
                  '((defun add1 (x) (+ x 1))
                    (add1 41))
                  :target :vm)))
-    (let ((asts (cl-cc/compile::compilation-result-ast result)))
+    (let ((asts (cl-cc/compile:compilation-result-ast result)))
       (assert-true (or (null asts) (listp asts))))))
 
 (deftest codegen-let-compilation
@@ -242,7 +242,7 @@ sink/fold paths."
   "%result-vm-instructions-without-halt removes only the final vm-halt instruction."
   (let* ((move (cl-cc:make-vm-move :dst :R1 :src :R0))
          (halt (cl-cc:make-vm-halt :reg :R1))
-         (result (cl-cc/compile::make-compilation-result
+         (result (cl-cc/compile:make-compilation-result
                   :program (cl-cc:make-vm-program :instructions (list move halt) :result-register :R1)
                   :vm-instructions (list move halt))))
     (assert-equal (list move)

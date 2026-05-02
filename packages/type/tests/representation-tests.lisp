@@ -100,11 +100,11 @@
 
 (deftest type-equal-constraint-and-qualified
   "type-equal-p on type-constraint (same/different class) and qualified types."
-  (assert-true  (type-equal-p (cl-cc/type::make-type-constraint :class-name 'eq  :type-arg type-int)
-                               (cl-cc/type::make-type-constraint :class-name 'eq  :type-arg type-int)))
-  (assert-false (type-equal-p (cl-cc/type::make-type-constraint :class-name 'eq  :type-arg type-int)
-                               (cl-cc/type::make-type-constraint :class-name 'ord :type-arg type-int)))
-  (let* ((tc (cl-cc/type::make-type-constraint :class-name 'eq :type-arg type-int))
+  (assert-true  (type-equal-p (cl-cc/type:make-type-constraint :class-name 'eq  :type-arg type-int)
+                               (cl-cc/type:make-type-constraint :class-name 'eq  :type-arg type-int)))
+  (assert-false (type-equal-p (cl-cc/type:make-type-constraint :class-name 'eq  :type-arg type-int)
+                               (cl-cc/type:make-type-constraint :class-name 'ord :type-arg type-int)))
+  (let* ((tc (cl-cc/type:make-type-constraint :class-name 'eq :type-arg type-int))
          (q1 (make-type-qualified :constraints (list tc) :body type-int))
          (q2 (make-type-qualified :constraints (list tc) :body type-int)))
     (assert-true (type-equal-p q1 q2))))
@@ -177,7 +177,7 @@
            1)
           ("qualified"  (lambda ()
                           (let* ((v (fresh-type-var "a"))
-                                 (tc (cl-cc/type::make-type-constraint :class-name 'eq :type-arg v)))
+                                 (tc (cl-cc/type:make-type-constraint :class-name 'eq :type-arg v)))
                             (make-type-qualified :constraints (list tc) :body v)))
            1))
   (make-ty expected-count)
@@ -189,56 +189,56 @@
   "type-env-lookup in empty env returns nil scheme and found-p=nil."
   (let ((env (type-env-empty)))
     (multiple-value-bind (scheme found-p)
-        (cl-cc/type::type-env-lookup 'x env)
+        (cl-cc/type:type-env-lookup 'x env)
       (assert-null scheme)
       (assert-false found-p))))
 
 (deftest type-env-extend-and-lookup-finds-scheme
   "type-env-extend + type-env-lookup round-trips the bound scheme."
   (let* ((env  (type-env-empty))
-         (env2 (cl-cc/type::type-env-extend 'x (type-to-scheme type-int) env)))
+         (env2 (cl-cc/type:type-env-extend 'x (type-to-scheme type-int) env)))
     (multiple-value-bind (result found-p)
-        (cl-cc/type::type-env-lookup 'x env2)
+        (cl-cc/type:type-env-lookup 'x env2)
       (assert-true found-p)
-      (assert-true (type-equal-p type-int (cl-cc/type::type-scheme-type result))))))
+      (assert-true (type-equal-p type-int (cl-cc/type:type-scheme-type result))))))
 
 (deftest type-env-extend*-adds-multiple-bindings
   "type-env-extend* adds all bindings from an alist; both x and y are findable."
   (let* ((env (type-env-empty))
          (bindings (list (cons 'x (type-to-scheme type-int))
                          (cons 'y (type-to-scheme type-string))))
-         (env2 (cl-cc/type::type-env-extend* bindings env)))
-    (assert-true (nth-value 1 (cl-cc/type::type-env-lookup 'x env2)))
-    (assert-true (nth-value 1 (cl-cc/type::type-env-lookup 'y env2)))))
+         (env2 (cl-cc/type:type-env-extend* bindings env)))
+    (assert-true (nth-value 1 (cl-cc/type:type-env-lookup 'x env2)))
+    (assert-true (nth-value 1 (cl-cc/type:type-env-lookup 'y env2)))))
 
 (deftest type-env-free-vars-collects-from-bindings
   "type-env-free-vars returns the free vars from all bound schemes."
   (let* ((v (fresh-type-var "a"))
-         (env (cl-cc/type::type-env-extend 'x (type-to-scheme v) (type-env-empty)))
-         (fvs (cl-cc/type::type-env-free-vars env)))
+         (env (cl-cc/type:type-env-extend 'x (type-to-scheme v) (type-env-empty)))
+         (fvs (cl-cc/type:type-env-free-vars env)))
     (assert-equal 1 (length fvs))))
 
 ;;; ─── Constructor and printing cases ────────────────────────────────────────
 
 (deftest type-var-constructor-name-is-preserved
   "fresh-type-var preserves the name symbol and returns a type-var-p."
-  (let ((v (cl-cc/type::fresh-type-var 'x)))
+  (let ((v (cl-cc/type:fresh-type-var 'x)))
     (assert-true (type-var-p v))
     (assert-eq 'x (type-var-name v))))
 
 (deftest type-constructor-name-and-args
   "make-type-constructor stores name and args accessible via their readers."
-  (let ((tc (cl-cc/type::make-type-constructor 'list (list type-int))))
-    (assert-true (cl-cc/type::type-constructor-p tc))
-    (assert-eq 'list (cl-cc/type::type-constructor-name tc))
-    (assert-equal 1 (length (cl-cc/type::type-constructor-args tc)))))
+  (let ((tc (cl-cc/type:make-type-constructor 'list (list type-int))))
+    (assert-true (cl-cc/type:type-constructor-p tc))
+    (assert-eq 'list (cl-cc/type:type-constructor-name tc))
+    (assert-equal 1 (length (cl-cc/type:type-constructor-args tc)))))
 
 (deftest type-specifier-parse-unparse-roundtrip
   "parse-type-specifier + unparse-type round-trips (Option string) faithfully."
-  (let* ((ty (cl-cc/type::parse-type-specifier '(Option string)))
-         (spec (cl-cc/type::unparse-type ty)))
+  (let* ((ty (cl-cc/type:parse-type-specifier '(Option string)))
+         (spec (cl-cc/type:unparse-type ty)))
     (assert-eq 'Option (first spec))
-    (assert-true (type-equal-p ty (cl-cc/type::parse-type-specifier spec)))))
+    (assert-true (type-equal-p ty (cl-cc/type:parse-type-specifier spec)))))
 
 (deftest type-arrow-default-mult-is-omega
   "make-type-arrow without explicit mult defaults to :omega."
@@ -249,6 +249,6 @@
 (deftest type-to-string-returns-string-for-all-forms
   "type-to-string returns a string for primitives, +type-unknown+, nil, and arrows."
   (assert-true (stringp (type-to-string type-int)))
-  (assert-true (stringp (type-to-string cl-cc/type::+type-unknown+)))
+  (assert-true (stringp (type-to-string cl-cc/type:+type-unknown+)))
   (assert-true (stringp (type-to-string nil)))
   (assert-true (search "->" (type-to-string (make-type-arrow (list type-int) type-string)))))

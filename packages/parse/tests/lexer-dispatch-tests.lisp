@@ -24,7 +24,7 @@
 
 (defun lexer-dispatch-read-form-text (source)
   "Use internal lex-read-form-text to extract the raw form text from SOURCE."
-  (let ((state (cl-cc/parse::make-lexer source)))
+  (let ((state (cl-cc/parse:make-lexer source)))
     (cl-cc/parse::lex-read-form-text state)))
 
 ;;; ─── lex-feature-present-p ───────────────────────────────────────────────────

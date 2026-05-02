@@ -41,7 +41,7 @@
                              (lambda (form &rest args)
                                (declare (ignore form))
                                (setf captured-args args)
-                               (cl-cc/compile::make-compilation-result :program nil)))
+                               (cl-cc/compile:make-compilation-result :program nil)))
       (let ((opts (cl-cc::%make-native-opts :pass-pipeline '(:fold))))
         (apply #'cl-cc:compile-expression '(+ 1 2) :target :x86_64 opts)
         (assert-equal '(:fold) (getf captured-args :pass-pipeline))))))

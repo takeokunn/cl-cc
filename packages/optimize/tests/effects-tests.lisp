@@ -16,18 +16,18 @@
           ("vm-sub"     (make-vm-sub   :dst :r0 :lhs :r1 :rhs :r2))
           ("vm-mul"     (make-vm-mul   :dst :r0 :lhs :r1 :rhs :r2)))
   (inst)
-  (assert-eq :pure (cl-cc/optimize::vm-inst-effect-kind inst)))
+  (assert-eq :pure (cl-cc/optimize:vm-inst-effect-kind inst)))
 
 (deftest-each effect-kind-control
   "Control flow instructions are classified as :control."
   :cases (("vm-ret"  (make-vm-ret  :reg :r0))
           ("vm-jump" (make-vm-jump :label "L0")))
   (inst)
-  (assert-eq :control (cl-cc/optimize::vm-inst-effect-kind inst)))
+  (assert-eq :control (cl-cc/optimize:vm-inst-effect-kind inst)))
 
 (deftest effect-kind-call-unknown
   "vm-call is classified as :unknown (conservative)."
-  (assert-eq :unknown (cl-cc/optimize::vm-inst-effect-kind
+  (assert-eq :unknown (cl-cc/optimize:vm-inst-effect-kind
                         (make-vm-call :dst :r0 :func :r1 :args nil))))
 
 (deftest opt-infer-transitive-function-purity-acyclic
@@ -99,7 +99,7 @@
           ("inc" (make-vm-inc :dst :r0 :src :r1))
           ("dec" (make-vm-dec :dst :r0 :src :r1)))
   (inst)
-  (assert-true (cl-cc/optimize::opt-inst-pure-p inst)))
+  (assert-true (cl-cc/optimize:opt-inst-pure-p inst)))
 
 (deftest-each opt-pure-comparison
   "Comparison instructions are pure."
@@ -108,7 +108,7 @@
           ("le" (make-vm-le :dst :r0 :lhs :r1 :rhs :r2))
           ("ge" (make-vm-ge :dst :r0 :lhs :r1 :rhs :r2)))
   (inst)
-  (assert-true (cl-cc/optimize::opt-inst-pure-p inst)))
+  (assert-true (cl-cc/optimize:opt-inst-pure-p inst)))
 
 (deftest-each opt-pure-type-predicates
   "Type predicate instructions are pure."
@@ -116,14 +116,14 @@
           ("cons-p"   (make-vm-cons-p   :dst :r0 :src :r1))
           ("number-p" (make-vm-number-p :dst :r0 :src :r1)))
   (inst)
-  (assert-true (cl-cc/optimize::opt-inst-pure-p inst)))
+  (assert-true (cl-cc/optimize:opt-inst-pure-p inst)))
 
 (deftest-each opt-not-pure-io
   "I/O and call instructions are not pure."
   :cases (("print" (make-vm-print :reg :r0))
           ("call"  (make-vm-call  :dst :r0 :func :r1 :args nil)))
   (inst)
-  (assert-false (cl-cc/optimize::opt-inst-pure-p inst)))
+  (assert-false (cl-cc/optimize:opt-inst-pure-p inst)))
 
 ;;; ─── opt-inst-dce-eligible-p ─────────────────────────────────────────────
 
@@ -132,22 +132,22 @@
   :cases (("pure-add"   (make-vm-add  :dst :r0 :lhs :r1 :rhs :r2))
           ("alloc-cons" (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2)))
   (inst)
-  (assert-true (cl-cc/optimize::opt-inst-dce-eligible-p inst)))
+  (assert-true (cl-cc/optimize:opt-inst-dce-eligible-p inst)))
 
 (deftest-each dce-not-eligible-simple
   "I/O and global-write instructions are NOT DCE-eligible."
   :cases (("io-print"       (make-vm-print      :reg :r0))
           ("set-global"     (make-vm-set-global :src :r0 :name 'x)))
   (inst)
-  (assert-false (cl-cc/optimize::opt-inst-dce-eligible-p inst)))
+  (assert-false (cl-cc/optimize:opt-inst-dce-eligible-p inst)))
 
 ;;; ─── opt-inst-cse-eligible-p ─────────────────────────────────────────────
 
 (deftest cse-eligibility
   "Pure instructions are CSE-eligible; allocation instructions are not."
-  (assert-true  (cl-cc/optimize::opt-inst-cse-eligible-p
+  (assert-true  (cl-cc/optimize:opt-inst-cse-eligible-p
                   (make-vm-add  :dst :r0 :lhs :r1 :rhs :r2)))
-  (assert-false (cl-cc/optimize::opt-inst-cse-eligible-p
+  (assert-false (cl-cc/optimize:opt-inst-cse-eligible-p
                   (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))))
 
 ;;; ─── Effect Kind: IO / Alloc / Read-Only / Write-Global ─────────────────
@@ -157,14 +157,14 @@
   :cases (("vm-print"  (make-vm-print      :reg :r0))
           ("vm-format" (make-vm-format-inst :dst :r0 :fmt "" :arg-regs nil)))
   (inst)
-  (assert-eq :io (cl-cc/optimize::vm-inst-effect-kind inst)))
+  (assert-eq :io (cl-cc/optimize:vm-inst-effect-kind inst)))
 
 (deftest-each effect-kind-alloc
   "Allocation instructions are classified as :alloc."
   :cases (("vm-cons"        (make-vm-cons        :dst :r0 :car-src :r1 :cdr-src :r2))
           ("vm-make-string" (make-vm-make-string  :dst :r0 :src :r1 :char nil)))
   (inst)
-  (assert-eq :alloc (cl-cc/optimize::vm-inst-effect-kind inst)))
+  (assert-eq :alloc (cl-cc/optimize:vm-inst-effect-kind inst)))
 
 (deftest-each effect-kind-read-only
   "Read-only heap/global instructions are classified as :read-only."
@@ -172,7 +172,7 @@
           ("vm-cdr"        (make-vm-cdr        :dst :r0 :src :r1))
           ("vm-get-global" (make-vm-get-global  :dst :r0 :name 'x)))
   (inst)
-  (assert-eq :read-only (cl-cc/optimize::vm-inst-effect-kind inst)))
+  (assert-eq :read-only (cl-cc/optimize:vm-inst-effect-kind inst)))
 
 (deftest-each effect-kind-write-global
   "Global/heap mutation instructions are classified as :write-global."
@@ -180,7 +180,7 @@
           ("vm-rplaca"     (make-vm-rplaca     :cons :r0 :val :r1))
           ("vm-rplacd"     (make-vm-rplacd     :cons :r0 :val :r1)))
   (inst)
-  (assert-eq :write-global (cl-cc/optimize::vm-inst-effect-kind inst)))
+  (assert-eq :write-global (cl-cc/optimize:vm-inst-effect-kind inst)))
 
 (deftest-each effect-kind-bitwise-pure
   "Bitwise / boolean unary instructions are classified as :pure."
@@ -188,7 +188,7 @@
           ("vm-lognot" (make-vm-lognot :dst :r0 :src :r1))
           ("vm-bswap"  (make-vm-bswap  :dst :r0 :src :r1)))
   (inst)
-  (assert-eq :pure (cl-cc/optimize::vm-inst-effect-kind inst)))
+  (assert-eq :pure (cl-cc/optimize:vm-inst-effect-kind inst)))
 
 ;;; ─── CSE / DCE Properties of New Kinds ──────────────────────────────────
 
@@ -197,7 +197,7 @@
   :cases (("pure-add"   (make-vm-add  :dst :r0 :lhs :r1 :rhs :r2))
           ("alloc-cons" (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2)))
   (inst)
-  (assert-true (cl-cc/optimize::opt-inst-dce-eligible-p inst)))
+  (assert-true (cl-cc/optimize:opt-inst-dce-eligible-p inst)))
 
 (deftest-each dce-not-eligible-kinds
   "IO, write-global, and read-only instructions are NOT DCE-eligible."
@@ -205,7 +205,7 @@
           ("write-set-global" (make-vm-set-global :src :r0 :name 'x))
           ("read-get-global"  (make-vm-get-global :dst :r0 :name 'x)))
   (inst)
-  (assert-false (cl-cc/optimize::opt-inst-dce-eligible-p inst)))
+  (assert-false (cl-cc/optimize:opt-inst-dce-eligible-p inst)))
 
 (deftest-each cse-not-eligible-non-pure
   "Non-pure instructions are not CSE-eligible."
@@ -213,7 +213,7 @@
           ("io-print"        (make-vm-print       :reg :r0))
           ("read-get-global" (make-vm-get-global  :dst :r0 :name 'x)))
   (inst)
-  (assert-false (cl-cc/optimize::opt-inst-cse-eligible-p inst)))
+  (assert-false (cl-cc/optimize:opt-inst-cse-eligible-p inst)))
 
 ;;; ─── DCE Extended Coverage ───────────────────────────────────────────────
 
@@ -253,4 +253,4 @@
 (deftest effect-kind-vm-label-is-control
   "vm-label instruction is classified as :control by the typecase fast-path."
   (assert-eq :control
-             (cl-cc/optimize::vm-inst-effect-kind (make-vm-label :name "L0"))))
+             (cl-cc/optimize:vm-inst-effect-kind (make-vm-label :name "L0"))))

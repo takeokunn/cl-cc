@@ -269,7 +269,7 @@ Use `not null` semantics to match both numeric booleans and string indices."
 (deftest copyprop-enqueue-is-idempotent
   "%copyprop-enqueue adds a block at most once; re-enqueueing the same block is a no-op."
   (let ((state (cl-cc/optimize::make-copyprop-pass-state))
-        (blk   (cl-cc/optimize::cfg-new-block (cl-cc/optimize::make-cfg))))
+        (blk   (cl-cc/optimize::cfg-new-block (cl-cc/optimize:make-cfg))))
     (cl-cc/optimize::%copyprop-enqueue blk state)
     (assert-= 1 (length (cl-cc/optimize::cpps-worklist state)))
     (cl-cc/optimize::%copyprop-enqueue blk state)
@@ -278,8 +278,8 @@ Use `not null` semantics to match both numeric booleans and string indices."
 (deftest copyprop-enqueue-two-distinct-blocks
   "Enqueueing two distinct blocks results in a worklist of length 2; re-enqueueing one is still idempotent."
   (let ((state (cl-cc/optimize::make-copyprop-pass-state))
-        (b1    (cl-cc/optimize::cfg-new-block (cl-cc/optimize::make-cfg)))
-        (b2    (cl-cc/optimize::cfg-new-block (cl-cc/optimize::make-cfg))))
+        (b1    (cl-cc/optimize::cfg-new-block (cl-cc/optimize:make-cfg)))
+        (b2    (cl-cc/optimize::cfg-new-block (cl-cc/optimize:make-cfg))))
     (cl-cc/optimize::%copyprop-enqueue b1 state)
     (cl-cc/optimize::%copyprop-enqueue b2 state)
     (assert-= 2 (length (cl-cc/optimize::cpps-worklist state)))
@@ -288,13 +288,13 @@ Use `not null` semantics to match both numeric booleans and string indices."
 
 (deftest copyprop-process-block-propagates-copy-to-successor
   "%copyprop-process-block enqueues successors when out-env changes."
-  (let* ((cfg   (cl-cc/optimize::cfg-build
+  (let* ((cfg   (cl-cc/optimize:cfg-build
                  (list (make-vm-const :dst :r0 :value 1)
                        (make-vm-move  :dst :r1 :src :r0)
                        (make-vm-jump  :label "end")
                        (make-vm-label :name "end")
                        (make-vm-ret   :reg :r1))))
-         (entry (cl-cc/optimize::cfg-entry cfg))
+         (entry (cl-cc/optimize:cfg-entry cfg))
          (state (cl-cc/optimize::make-copyprop-pass-state)))
     (cl-cc/optimize::%copyprop-process-block entry state)
     (let ((out (gethash entry (cl-cc/optimize::cpps-out-envs state))))
@@ -321,19 +321,19 @@ Use `not null` semantics to match both numeric booleans and string indices."
 
 (deftest copyprop-transfer-block-records-move
   "%opt-copy-prop-transfer-block records a vm-move as a copy fact in the out-env."
-  (let* ((blk    (make-instance 'cl-cc/optimize::basic-block))
+  (let* ((blk    (make-instance 'cl-cc/optimize:basic-block))
          (in-env (make-hash-table :test #'eq)))
-    (setf (cl-cc/optimize::bb-instructions blk)
+    (setf (cl-cc/optimize:bb-instructions blk)
           (list (make-vm-move :dst :r1 :src :r0)))
     (let ((out (cl-cc/optimize::%opt-copy-prop-transfer-block blk in-env)))
       (assert-eq :r0 (gethash :r1 out)))))
 
 (deftest copyprop-transfer-block-kills-overwritten
   "%opt-copy-prop-transfer-block kills the copy fact when the destination register is overwritten."
-  (let* ((blk    (make-instance 'cl-cc/optimize::basic-block))
+  (let* ((blk    (make-instance 'cl-cc/optimize:basic-block))
          (in-env (make-hash-table :test #'eq)))
     (setf (gethash :r1 in-env) :r0)
-    (setf (cl-cc/optimize::bb-instructions blk)
+    (setf (cl-cc/optimize:bb-instructions blk)
           (list (make-vm-const :dst :r1 :value 99)))
     (let ((out (cl-cc/optimize::%opt-copy-prop-transfer-block blk in-env)))
       (assert-null (gethash :r1 out)))))
@@ -359,10 +359,10 @@ Use `not null` semantics to match both numeric booleans and string indices."
 
 (deftest copy-prop-rewrite-block-rewrites-instructions
   "%opt-copy-prop-rewrite-block rewrites instructions using in-env copies."
-  (let* ((blk    (make-instance 'cl-cc/optimize::basic-block))
+  (let* ((blk    (make-instance 'cl-cc/optimize:basic-block))
          (in-env (make-hash-table :test #'eq)))
     (setf (gethash :r0 in-env) :r5)
-    (setf (cl-cc/optimize::bb-instructions blk)
+    (setf (cl-cc/optimize:bb-instructions blk)
           (list (make-vm-add :dst :r2 :lhs :r0 :rhs :r0)))
     (let ((result (cl-cc/optimize::%opt-copy-prop-rewrite-block blk in-env)))
       (assert-= 1 (length result))

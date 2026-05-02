@@ -53,7 +53,7 @@
                              (lambda (form &rest args)
                                (declare (ignore args))
                                 (setf compiled-form form)
-                                (cl-cc/compile::make-compilation-result :program :dummy)))
+                                (cl-cc/compile:make-compilation-result :program :dummy)))
       (multiple-value-bind (result used-cps)
           (cl-cc::%maybe-compile-native-via-cps '(+ 1 2) :x86_64 nil)
         (assert-false used-cps)
@@ -63,7 +63,7 @@
 (deftest pipeline-native-maybe-compile-via-cps-skips-cps-transform
   "%maybe-compile-native-via-cps does not invoke cps-transform-ast* while native CPS lowering is disabled."
   (let ((compiled-form nil))
-    (with-replaced-function (cl-cc/compile::cps-transform-ast*
+    (with-replaced-function (cl-cc/compile:cps-transform-ast*
                              (lambda (ast)
                                (declare (ignore ast))
                                '((lambda (f) (funcall f #'identity))
@@ -72,7 +72,7 @@
                                (lambda (form &rest args)
                                  (declare (ignore args))
                                   (setf compiled-form form)
-                                  (cl-cc/compile::make-compilation-result :program :dummy)))
+                                  (cl-cc/compile:make-compilation-result :program :dummy)))
          (multiple-value-bind (result used-cps)
              (cl-cc::%maybe-compile-native-via-cps '(+ 1 2) :x86_64 nil)
           (assert-false used-cps)
@@ -92,7 +92,7 @@
                                 (lambda (&rest args)
                                   (declare (ignore args))
                                   (setf compile-toplevel-called t)
-                                  (cl-cc/compile::make-compilation-result :program :fallback)))
+                                  (cl-cc/compile:make-compilation-result :program :fallback)))
           (with-native-build-stubs ()
             (assert-equal #P"out.bin"
                           (cl-cc::compile-to-native "(+ 1 2)"
@@ -118,7 +118,7 @@
                                   (lambda (&rest args)
                                     (declare (ignore args))
                                     (setf compile-toplevel-called t)
-                                    (cl-cc/compile::make-compilation-result :program :fallback)))
+                                    (cl-cc/compile:make-compilation-result :program :fallback)))
            (with-native-build-stubs (:cache-path #P"./tmp-native-cache.bin")
              (assert-equal #P"out.bin"
                            (cl-cc::compile-file-to-native input :output-file #P"out.bin" :language :lisp))
@@ -138,12 +138,12 @@
                                (lambda (&rest args)
                                  (declare (ignore args))
                                  (setf helper-called t)
-                                 (values (cl-cc/compile::make-compilation-result :program :dummy) t)))
+                                 (values (cl-cc/compile:make-compilation-result :program :dummy) t)))
         (with-replaced-function (cl-cc/compile:compile-toplevel-forms
                                  (lambda (&rest args)
                                    (declare (ignore args))
                                    (setf compile-toplevel-called t)
-                                   (cl-cc/compile::make-compilation-result :program :fallback)))
+                                   (cl-cc/compile:make-compilation-result :program :fallback)))
           (with-native-build-stubs (:cache-path #P"./tmp-native-cache.bin")
             (assert-equal #P"out.bin"
                           (cl-cc::compile-file-to-native input :output-file #P"out.bin" :language :lisp))

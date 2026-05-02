@@ -86,15 +86,15 @@
   :cases (("int"     "FIXNUM"           type-int)
           ("string"  "STRING"           type-string)
           ("bool"    "BOOLEAN"          type-bool)
-          ("unknown" "?"                cl-cc/type::+type-unknown+))
+          ("unknown" "?"                cl-cc/type:+type-unknown+))
   (expected type)
   (assert-string= expected (type-to-string type)))
 
 
 (deftest type-repr-unknown-type
   "type-unknown remains an error marker, not a structural type alias."
-  (assert-false (type-equal-p cl-cc/type::+type-unknown+ cl-cc/type::+type-unknown+))
-  (assert-true (type-error-p cl-cc/type::+type-unknown+)))
+  (assert-false (type-equal-p cl-cc/type:+type-unknown+ cl-cc/type:+type-unknown+))
+  (assert-true (type-error-p cl-cc/type:+type-unknown+)))
 
 ;;; Unification Tests
 
@@ -167,8 +167,8 @@
 
 (deftest-each unify-type-error-fails
   "type-error sentinels do not unify with concrete or unknown types."
-  :cases (("unknown-int"     cl-cc/type::+type-unknown+ type-int)
-          ("string-unknown"  type-string    cl-cc/type::+type-unknown+)
-          ("unknown-unknown" cl-cc/type::+type-unknown+ cl-cc/type::+type-unknown+))
+  :cases (("unknown-int"     cl-cc/type:+type-unknown+ type-int)
+          ("string-unknown"  type-string    cl-cc/type:+type-unknown+)
+          ("unknown-unknown" cl-cc/type:+type-unknown+ cl-cc/type:+type-unknown+))
   (a b)
   (assert-not-unifies a b))

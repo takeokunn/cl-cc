@@ -8,8 +8,8 @@
 
 
 (defbefore :each (macro-definition-suite)
-  (clrhash cl-cc/expand::*compiler-macro-table*)
-  (setf cl-cc/expand::*macro-eval-fn* #'eval))
+  (clrhash cl-cc/expand:*compiler-macro-table*)
+  (setf cl-cc/expand:*macro-eval-fn* #'eval))
 
 
 (in-suite macro-definition-suite)
@@ -32,12 +32,12 @@
   "DEFINE-COMPILER-MACRO registers a compiler macro used by compiler-macroexpand-all."
   (let ((name (gensym "CM-FOO-")))
     (our-macroexpand-1 `(define-compiler-macro ,name (x) (+ x 1)))
-    (let ((result (cl-cc/expand::compiler-macroexpand-all `(,name 2))))
+    (let ((result (cl-cc/expand:compiler-macroexpand-all `(,name 2))))
       (assert-equal 3 result))))
 
 (deftest invoke-registered-expander-supports-descriptor-backed-compiler-macros
   "Descriptor-backed compiler macro expanders still execute through invoke-registered-expander."
-  (let ((cl-cc/expand::*macro-eval-fn* #'eval)
+  (let ((cl-cc/expand:*macro-eval-fn* #'eval)
         (expander (cl-cc/expand::make-compiler-macro-expander '(x) '((+ x 1)))))
     (assert-equal 3
                   (cl-cc/expand::invoke-registered-expander expander '(foo 2) nil))))

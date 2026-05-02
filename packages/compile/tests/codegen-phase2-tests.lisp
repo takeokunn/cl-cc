@@ -105,7 +105,7 @@
 (deftest codegen-phase2-typep-unquoted-falls-through
   "Compiling (typep x integer) with unquoted type does not emit vm-typep."
   (let ((ctx (make-codegen-ctx)))
-    (setf (cl-cc/compile::ctx-env ctx) (list (cons 'integer :R99)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'integer :R99)))
     (compile-ast (make-ast-call :func 'typep
                                 :args (list (make-ast-int :value 1)
                                             (make-ast-var :name 'integer)))
@@ -197,6 +197,6 @@
   (extra-env args)
   (let ((ctx (make-codegen-ctx)))
     (when extra-env
-      (setf (cl-cc/compile::ctx-env ctx) extra-env))
+      (setf (cl-cc/compile:ctx-env ctx) extra-env))
     (compile-ast (make-ast-call :func 'concatenate :args args) ctx)
     (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-concatenate)))))

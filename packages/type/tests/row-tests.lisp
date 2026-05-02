@@ -99,26 +99,26 @@
 
 (deftest effect-row-extend-adds-op
   "effect-row-extend prepends an effect-op."
-  (let* ((op (cl-cc/type::make-type-effect-op :name :io :args nil))
+  (let* ((op (cl-cc/type:make-type-effect-op :name :io :args nil))
          (row (make-type-effect-row :effects nil :row-var nil))
-         (row2 (cl-cc/type::effect-row-extend op row)))
+         (row2 (cl-cc/type:effect-row-extend op row)))
     (assert-equal 1 (length (type-effect-row-effects row2)))))
 
 (deftest effect-row-restrict-removes
   "effect-row-restrict removes by name."
-  (let* ((op1 (cl-cc/type::make-type-effect-op :name :io :args nil))
-         (op2 (cl-cc/type::make-type-effect-op :name :state :args nil))
+  (let* ((op1 (cl-cc/type:make-type-effect-op :name :io :args nil))
+         (op2 (cl-cc/type:make-type-effect-op :name :state :args nil))
          (row (make-type-effect-row :effects (list op1 op2) :row-var nil))
-         (row2 (cl-cc/type::effect-row-restrict :io row)))
+         (row2 (cl-cc/type:effect-row-restrict :io row)))
     (assert-equal 1 (length (type-effect-row-effects row2)))))
 
 (deftest effect-row-member-p-behavior
   "effect-row-member-p: true for present effect; false for absent."
-  (let ((row-with-io (make-type-effect-row :effects (list (cl-cc/type::make-type-effect-op :name :io :args nil))
+  (let ((row-with-io (make-type-effect-row :effects (list (cl-cc/type:make-type-effect-op :name :io :args nil))
                                              :row-var nil))
         (empty-row   (make-type-effect-row :effects nil :row-var nil)))
-    (assert-true  (cl-cc/type::effect-row-member-p :io row-with-io))
-    (assert-false (cl-cc/type::effect-row-member-p :io empty-row))))
+    (assert-true  (cl-cc/type:effect-row-member-p :io row-with-io))
+    (assert-false (cl-cc/type:effect-row-member-p :io empty-row))))
 
 (deftest row-extend-basic
   "row-extend adds a label to an existing row."

@@ -100,7 +100,7 @@
           ("function"  (cl-cc/ast:make-ast-function  :name 'f))
           ("hole"      (cl-cc/ast:make-ast-hole)))
   (ast)
-  (assert-true (cl-cc/type::syntactic-value-p ast)))
+  (assert-true (cl-cc/type:syntactic-value-p ast)))
 
 (deftest-each infer-syntactic-value-p-falsy
   "Non-syntactic values: call, binop, if, let, progn are not generalizable (value restriction)."
@@ -113,7 +113,7 @@
           ("let"    (cl-cc/ast:make-ast-let    :bindings nil :body nil))
           ("progn"  (cl-cc/ast:make-ast-progn  :forms nil)))
   (ast)
-  (assert-false (cl-cc/type::syntactic-value-p ast)))
+  (assert-false (cl-cc/type:syntactic-value-p ast)))
 
 ;;; ─── infer-if type narrowing ──────────────────────────────────────────────────
 

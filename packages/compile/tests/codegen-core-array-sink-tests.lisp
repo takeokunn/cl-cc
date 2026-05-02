@@ -113,7 +113,7 @@
   (let ((ctx (make-codegen-ctx)))
     (ecase scenario
       (:setq
-       (setf (cl-cc/compile::ctx-env ctx) (list (cons 'x :R0)))
+       (setf (cl-cc/compile:ctx-env ctx) (list (cons 'x :R0)))
        (compile-ast (make-ast-setq :var 'x :value (make-ast-int :value 99)) ctx))
       (:print
        (compile-ast (make-ast-print :expr (make-ast-int :value 42)) ctx)))
@@ -143,7 +143,7 @@
   (let* ((ctx (make-codegen-ctx))
          (ast (cl-cc/parse::lower-sexp-to-ast
                 '(if (numberp x) (the fixnum x) 0))))
-    (setf (cl-cc/compile::ctx-env ctx) (list (cons 'x :R0)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'x :R0)))
     (compile-ast ast ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-typep))
     (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-signal-error))))
@@ -155,7 +155,7 @@
                '(if (numberp x)
                     (if (numberp x) 1 2)
                     3))))
-    (setf (cl-cc/compile::ctx-env ctx) (list (cons 'x :R0)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'x :R0)))
     (compile-ast ast ctx)
     (assert-= 1 (count-if (lambda (inst)
                             (typep inst 'cl-cc/vm::vm-jump-zero))

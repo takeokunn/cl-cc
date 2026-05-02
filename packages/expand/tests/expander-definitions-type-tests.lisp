@@ -9,6 +9,6 @@
 (in-suite expander-definitions-type-suite)
 (deftest expander-deftype-registers-alias
   "compiler-macroexpand-all: (deftype foo fixnum) registers the alias and returns (quote foo)."
-  (let ((result (cl-cc/expand::compiler-macroexpand-all '(deftype my-index-type fixnum))))
+  (let ((result (cl-cc/expand:compiler-macroexpand-all '(deftype my-index-type fixnum))))
     (assert-eq 'quote (car result))
     (assert-eq 'my-index-type (second result))))

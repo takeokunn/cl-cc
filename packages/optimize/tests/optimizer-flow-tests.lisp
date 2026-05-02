@@ -115,33 +115,33 @@
 
 (deftest opt-rewrite-terminator-vm-jump
   "%opt-rewrite-block-terminator rewrites a vm-jump to the new label when the old label matches."
-  (let ((b (make-instance 'cl-cc/optimize::basic-block)))
-    (setf (cl-cc/optimize::bb-instructions b)
+  (let ((b (make-instance 'cl-cc/optimize:basic-block)))
+    (setf (cl-cc/optimize:bb-instructions b)
           (list (make-vm-const :dst :r0 :value 1)
                 (make-vm-jump :label "old")))
     (cl-cc/optimize::%opt-rewrite-block-terminator b "old" "new")
-    (let ((term (car (last (cl-cc/optimize::bb-instructions b)))))
+    (let ((term (car (last (cl-cc/optimize:bb-instructions b)))))
       (assert-true (typep term 'cl-cc/vm::vm-jump))
       (assert-equal "new" (cl-cc/vm::vm-label-name term)))))
 
 (deftest opt-rewrite-terminator-vm-jump-zero
   "%opt-rewrite-block-terminator rewrites a vm-jump-zero label while preserving the condition register."
-  (let ((b (make-instance 'cl-cc/optimize::basic-block)))
-    (setf (cl-cc/optimize::bb-instructions b)
+  (let ((b (make-instance 'cl-cc/optimize:basic-block)))
+    (setf (cl-cc/optimize:bb-instructions b)
           (list (make-vm-jump-zero :reg :r0 :label "old")))
     (cl-cc/optimize::%opt-rewrite-block-terminator b "old" "new")
-    (let ((term (car (cl-cc/optimize::bb-instructions b))))
+    (let ((term (car (cl-cc/optimize:bb-instructions b))))
       (assert-true (typep term 'cl-cc/vm::vm-jump-zero))
       (assert-equal "new" (cl-cc/vm::vm-label-name term))
       (assert-eq :r0 (cl-cc/vm::vm-reg term)))))
 
 (deftest opt-rewrite-terminator-no-match-unchanged
   "%opt-rewrite-block-terminator leaves the block unchanged when the label does not match."
-  (let ((b    (make-instance 'cl-cc/optimize::basic-block))
+  (let ((b    (make-instance 'cl-cc/optimize:basic-block))
         (orig (make-vm-jump :label "other")))
-    (setf (cl-cc/optimize::bb-instructions b) (list orig))
+    (setf (cl-cc/optimize:bb-instructions b) (list orig))
     (cl-cc/optimize::%opt-rewrite-block-terminator b "old" "new")
-    (assert-eq orig (car (cl-cc/optimize::bb-instructions b)))))
+    (assert-eq orig (car (cl-cc/optimize:bb-instructions b)))))
 
 (deftest opt-jump-thread-table-covers-both-jump-types
   "*opt-jump-thread-table* contains exactly 2 entries: vm-jump and vm-jump-zero."
@@ -233,7 +233,7 @@
 (deftest-each opt-passes-preserve-straight-line
   "dead-basic-blocks/nil-check-elim/block-merge/tail-merge all preserve straight-line code."
   :cases (("dead-basic-blocks" #'cl-cc/optimize::opt-pass-dead-basic-blocks)
-          ("nil-check-elim"    #'cl-cc/optimize::opt-pass-dominated-type-check-elim)
+          ("nil-check-elim"    #'cl-cc/optimize:opt-pass-dominated-type-check-elim)
           ("block-merge"       #'cl-cc/optimize::opt-pass-block-merge)
           ("tail-merge"        #'cl-cc/optimize::opt-pass-tail-merge))
   (pass-fn)
@@ -268,27 +268,27 @@
 
 (deftest block-mergeable-successor-single-predecessor
   "%block-mergeable-successor-p returns T when the block's sole successor has exactly one predecessor."
-  (let* ((blk  (make-instance 'cl-cc/optimize::basic-block))
-         (succ (make-instance 'cl-cc/optimize::basic-block)))
-    (setf (cl-cc/optimize::bb-successors blk)   (list succ)
-          (cl-cc/optimize::bb-predecessors succ) (list blk))
+  (let* ((blk  (make-instance 'cl-cc/optimize:basic-block))
+         (succ (make-instance 'cl-cc/optimize:basic-block)))
+    (setf (cl-cc/optimize:bb-successors blk)   (list succ)
+          (cl-cc/optimize:bb-predecessors succ) (list blk))
     (assert-true (cl-cc/optimize::%block-mergeable-successor-p blk))))
 
 (deftest block-mergeable-successor-multiple-predecessors
   "%block-mergeable-successor-p returns NIL when the successor has more than one predecessor."
-  (let* ((blk   (make-instance 'cl-cc/optimize::basic-block))
-         (other (make-instance 'cl-cc/optimize::basic-block))
-         (succ  (make-instance 'cl-cc/optimize::basic-block)))
-    (setf (cl-cc/optimize::bb-successors blk)   (list succ)
-          (cl-cc/optimize::bb-predecessors succ) (list blk other))
+  (let* ((blk   (make-instance 'cl-cc/optimize:basic-block))
+         (other (make-instance 'cl-cc/optimize:basic-block))
+         (succ  (make-instance 'cl-cc/optimize:basic-block)))
+    (setf (cl-cc/optimize:bb-successors blk)   (list succ)
+          (cl-cc/optimize:bb-predecessors succ) (list blk other))
     (assert-false (cl-cc/optimize::%block-mergeable-successor-p blk))))
 
 (deftest block-mergeable-multiple-successors
   "%block-mergeable-successor-p returns NIL when the block itself has more than one successor."
-  (let* ((blk   (make-instance 'cl-cc/optimize::basic-block))
-         (succ1 (make-instance 'cl-cc/optimize::basic-block))
-         (succ2 (make-instance 'cl-cc/optimize::basic-block)))
-    (setf (cl-cc/optimize::bb-successors blk) (list succ1 succ2))
+  (let* ((blk   (make-instance 'cl-cc/optimize:basic-block))
+         (succ1 (make-instance 'cl-cc/optimize:basic-block))
+         (succ2 (make-instance 'cl-cc/optimize:basic-block)))
+    (setf (cl-cc/optimize:bb-successors blk) (list succ1 succ2))
     (assert-false (cl-cc/optimize::%block-mergeable-successor-p blk))))
 
 (deftest-each block-strip-merge-jump-cases
@@ -304,41 +304,41 @@
   :cases (("signal-error" (list (make-vm-signal-error :error-reg :r0)) t)
           ("ordinary"     (list (make-vm-const :dst :r0 :value 1) (make-vm-ret :reg :r0)) nil))
   (instructions expect-cold)
-  (let ((blk (make-instance 'cl-cc/optimize::basic-block)))
-    (setf (cl-cc/optimize::bb-instructions blk) instructions)
+  (let ((blk (make-instance 'cl-cc/optimize:basic-block)))
+    (setf (cl-cc/optimize:bb-instructions blk) instructions)
     (if expect-cold
         (assert-true  (cl-cc/optimize::%cfg-block-cold-p blk))
         (assert-false (cl-cc/optimize::%cfg-block-cold-p blk)))))
 
 (deftest cfg-block-hotter-p-cold-vs-warm
   "%cfg-block-hotter-p returns NIL when A is cold; returns T when A is warm and B is cold."
-  (let ((cold (make-instance 'cl-cc/optimize::basic-block))
-        (warm (make-instance 'cl-cc/optimize::basic-block)))
-    (setf (cl-cc/optimize::bb-instructions cold) (list (make-vm-signal-error :error-reg :r0))
-          (cl-cc/optimize::bb-instructions warm) (list (make-vm-const :dst :r0 :value 1)))
+  (let ((cold (make-instance 'cl-cc/optimize:basic-block))
+        (warm (make-instance 'cl-cc/optimize:basic-block)))
+    (setf (cl-cc/optimize:bb-instructions cold) (list (make-vm-signal-error :error-reg :r0))
+          (cl-cc/optimize:bb-instructions warm) (list (make-vm-const :dst :r0 :value 1)))
     (assert-false (cl-cc/optimize::%cfg-block-hotter-p cold warm))
     (assert-true  (cl-cc/optimize::%cfg-block-hotter-p warm cold))))
 
 (deftest cfg-block-hotter-p-loop-depth
   "%cfg-block-hotter-p returns T when A has greater loop depth than B."
-  (let ((deep    (make-instance 'cl-cc/optimize::basic-block))
-        (shallow (make-instance 'cl-cc/optimize::basic-block)))
-    (setf (cl-cc/optimize::bb-loop-depth  deep)    3
-          (cl-cc/optimize::bb-loop-depth  shallow) 1
-          (cl-cc/optimize::bb-instructions deep)    nil
-          (cl-cc/optimize::bb-instructions shallow) nil)
+  (let ((deep    (make-instance 'cl-cc/optimize:basic-block))
+        (shallow (make-instance 'cl-cc/optimize:basic-block)))
+    (setf (cl-cc/optimize:bb-loop-depth  deep)    3
+          (cl-cc/optimize:bb-loop-depth  shallow) 1
+          (cl-cc/optimize:bb-instructions deep)    nil
+          (cl-cc/optimize:bb-instructions shallow) nil)
     (assert-true  (cl-cc/optimize::%cfg-block-hotter-p deep shallow))
     (assert-false (cl-cc/optimize::%cfg-block-hotter-p shallow deep))))
 
 (deftest cfg-block-hotter-p-rpo-index-tiebreaker
   "%cfg-block-hotter-p uses RPO index as a tiebreaker when loop depths are equal."
-  (let ((first  (make-instance 'cl-cc/optimize::basic-block))
-        (second (make-instance 'cl-cc/optimize::basic-block)))
-    (setf (cl-cc/optimize::bb-loop-depth first)   1
-          (cl-cc/optimize::bb-loop-depth second)  1
-          (cl-cc/optimize::bb-rpo-index  first)   0
-          (cl-cc/optimize::bb-rpo-index  second)  1
-          (cl-cc/optimize::bb-instructions first)  nil
-          (cl-cc/optimize::bb-instructions second) nil)
+  (let ((first  (make-instance 'cl-cc/optimize:basic-block))
+        (second (make-instance 'cl-cc/optimize:basic-block)))
+    (setf (cl-cc/optimize:bb-loop-depth first)   1
+          (cl-cc/optimize:bb-loop-depth second)  1
+          (cl-cc/optimize:bb-rpo-index  first)   0
+          (cl-cc/optimize:bb-rpo-index  second)  1
+          (cl-cc/optimize:bb-instructions first)  nil
+          (cl-cc/optimize:bb-instructions second) nil)
     (assert-true  (cl-cc/optimize::%cfg-block-hotter-p first second))
     (assert-false (cl-cc/optimize::%cfg-block-hotter-p second first))))

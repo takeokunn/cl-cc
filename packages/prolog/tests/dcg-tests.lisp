@@ -25,11 +25,11 @@
   "Run GOAL through solve-goal and collect the substituted OUTPUT-VAR values."
   (let ((results nil))
     (handler-case
-        (cl-cc/prolog::solve-goal goal nil
+        (cl-cc/prolog:solve-goal goal nil
                            (lambda (env)
-                             (push (cl-cc/prolog::logic-substitute output-var env)
+                             (push (cl-cc/prolog:logic-substitute output-var env)
                                    results)))
-      (cl-cc/prolog::prolog-cut ()))
+      (cl-cc/prolog:prolog-cut ()))
     (nreverse results)))
 
 ;;; ─── lexer-tokens-to-dcg-input ─────────────────────────────────────────────
@@ -38,7 +38,7 @@
   "lexer-tokens-to-dcg-input converts plist tokens to (type . value) cons pairs."
   (let* ((tokens (list (list :type :T-INT :value 42)
                        (list :type :T-IDENT :value "x")))
-         (result (cl-cc/prolog::lexer-tokens-to-dcg-input tokens)))
+         (result (cl-cc/prolog:lexer-tokens-to-dcg-input tokens)))
     (assert-equal 2 (length result))
     (assert-equal :T-INT  (caar  result))
     (assert-equal 42      (cdar  result))
@@ -48,7 +48,7 @@
 (deftest dcg-token-conversion-struct-tokens
   "lexer-tokens-to-dcg-input converts lexer-token structs to (type . value) cons pairs."
   (let* ((tokens (list (cl-cc/parse::make-lexer-token :type :T-INT :value 99)))
-         (result (cl-cc/prolog::lexer-tokens-to-dcg-input tokens)))
+         (result (cl-cc/prolog:lexer-tokens-to-dcg-input tokens)))
     (assert-equal 1 (length result))
     (assert-equal :T-INT (caar result))
     (assert-equal 99     (cdar result))))
@@ -56,14 +56,14 @@
 (deftest dcg-token-conversion-other-tokens-passthrough
   "lexer-tokens-to-dcg-input passes through non-plist, non-struct tokens unchanged."
   (let* ((tokens (list 42))
-         (result (cl-cc/prolog::lexer-tokens-to-dcg-input tokens)))
+         (result (cl-cc/prolog:lexer-tokens-to-dcg-input tokens)))
     (assert-equal 1 (length result))
     (assert-equal 42 (first result))))
 
 (deftest dcg-token-to-cst-creates-cst-token
   "dcg-token-to-cst builds a cst-token with correct kind, value, and byte offset."
   (let* ((tok (cons :T-INT 42))
-         (cst (cl-cc/prolog::dcg-token-to-cst tok 10)))
+         (cst (cl-cc/prolog:dcg-token-to-cst tok 10)))
     (assert-true  (cl-cc/parse::cst-token-p cst))
     (assert-equal :T-INT (cl-cc:cst-node-kind cst))
     (assert-equal 42     (cl-cc:cst-token-value cst))
@@ -74,9 +74,9 @@
 (deftest dcg-parse-returns-remaining-input-after-match
   "dcg-parse returns the remaining token list after a successful rule match."
   (with-fresh-prolog
-    (cl-cc/prolog::def-fact (consume-one (?h . ?rest) ?rest))
+    (cl-cc/prolog:def-fact (consume-one (?h . ?rest) ?rest))
     (let* ((input  (dcg-input :T-INT 1 :T-INT 2))
-           (result (cl-cc/prolog::dcg-parse 'consume-one input)))
+           (result (cl-cc/prolog:dcg-parse 'consume-one input)))
       (assert-equal 1 (length result))
       (assert-equal :T-INT (caar result))
       (assert-equal 2     (cdar result)))))
@@ -84,17 +84,17 @@
 (deftest dcg-parse-returns-nil-when-no-rule-matches
   "dcg-parse returns nil when no rule in the database matches the input."
   (with-fresh-prolog
-    (cl-cc/prolog::def-fact (never-match impossible-sentinel ?rest))
-    (assert-null (cl-cc/prolog::dcg-parse 'never-match (dcg-input :T-INT 1)))))
+    (cl-cc/prolog:def-fact (never-match impossible-sentinel ?rest))
+    (assert-null (cl-cc/prolog:dcg-parse 'never-match (dcg-input :T-INT 1)))))
 
 (deftest phrase-all-multiple
   "phrase-all returns all possible parse results."
   (with-fresh-prolog
     ;; Two overlapping rules
-    (cl-cc/prolog::def-fact (flexible (?h . ?rest) ?rest))       ;; consume 1
-    (cl-cc/prolog::def-fact (flexible (?a ?b . ?rest) ?rest))    ;; consume 2
+    (cl-cc/prolog:def-fact (flexible (?h . ?rest) ?rest))       ;; consume 1
+    (cl-cc/prolog:def-fact (flexible (?a ?b . ?rest) ?rest))    ;; consume 2
    (let* ((input (dcg-input :T-INT 1 :T-INT 2 :T-INT 3))
-           (results (cl-cc/prolog::phrase-all 'flexible input)))
+           (results (cl-cc/prolog:phrase-all 'flexible input)))
       ;; Should get at least 2 results (consume-1 and consume-2)
       (assert-true (>= (length results) 2)))))
 
@@ -125,8 +125,8 @@
 (deftest dcg-alt-matches-first-rule
   "dcg-alt succeeds via the first rule when input matches it; remaining stream is nil."
   (with-fresh-prolog
-    (cl-cc/prolog::def-fact (rule-a ((:T-INT . ?v) . ?rest) ?rest))
-    (cl-cc/prolog::def-fact (rule-b ((:T-IDENT . ?v) . ?rest) ?rest))
+    (cl-cc/prolog:def-fact (rule-a ((:T-INT . ?v) . ?rest) ?rest))
+    (cl-cc/prolog:def-fact (rule-b ((:T-IDENT . ?v) . ?rest) ?rest))
     (let ((results (collect-dcg-outcomes
                     (list 'cl-cc/prolog::dcg-alt 'rule-a 'rule-b (dcg-input :T-INT 42) '?out))))
       (assert-true (>= (length results) 1))
@@ -135,8 +135,8 @@
 (deftest dcg-alt-matches-second-rule
   "dcg-alt succeeds via the second rule when only that rule matches the input."
   (with-fresh-prolog
-    (cl-cc/prolog::def-fact (rule-a ((:T-INT . ?v) . ?rest) ?rest))
-    (cl-cc/prolog::def-fact (rule-b ((:T-IDENT . ?v) . ?rest) ?rest))
+    (cl-cc/prolog:def-fact (rule-a ((:T-INT . ?v) . ?rest) ?rest))
+    (cl-cc/prolog:def-fact (rule-b ((:T-IDENT . ?v) . ?rest) ?rest))
     (let ((results (collect-dcg-outcomes
                     (list 'cl-cc/prolog::dcg-alt 'rule-a 'rule-b (dcg-input :T-IDENT "x") '?out))))
       (assert-true (>= (length results) 1)))))
@@ -144,7 +144,7 @@
 (deftest dcg-opt-succeeds-with-match
   "dcg-opt includes nil (empty remaining) in results when the sub-rule matches."
   (with-fresh-prolog
-    (cl-cc/prolog::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
+    (cl-cc/prolog:def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
     (let ((results (collect-dcg-outcomes
                     (list 'cl-cc/prolog::dcg-opt 'tok-int (dcg-input :T-INT 1) '?out))))
       (assert-true (member nil results :test #'equal)))))
@@ -152,7 +152,7 @@
 (deftest dcg-opt-provides-epsilon-on-mismatch
   "dcg-opt succeeds with epsilon (unchanged stream) when the sub-rule does not match."
   (with-fresh-prolog
-    (cl-cc/prolog::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
+    (cl-cc/prolog:def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
     (let ((results (collect-dcg-outcomes
                     (list 'cl-cc/prolog::dcg-opt 'tok-int (dcg-input :T-IDENT "x") '?out))))
       (assert-true (>= (length results) 1)))))
@@ -160,7 +160,7 @@
 (deftest dcg-star-succeeds-with-zero-matches
   "dcg-star (zero-or-more) succeeds even when the sub-rule does not match at all."
   (with-fresh-prolog
-    (cl-cc/prolog::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
+    (cl-cc/prolog:def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
     (let ((results (collect-dcg-outcomes
                     (list 'cl-cc/prolog::dcg-star 'tok-int (dcg-input :T-IDENT "x") '?out))))
       (assert-true (>= (length results) 1)))))
@@ -168,7 +168,7 @@
 (deftest dcg-star-collects-multiple-matches
   "dcg-star collects all consecutive matches; nil (empty stream) appears in results."
   (with-fresh-prolog
-    (cl-cc/prolog::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
+    (cl-cc/prolog:def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
     (let ((results (collect-dcg-outcomes
                     (list 'cl-cc/prolog::dcg-star 'tok-int
                           (dcg-input :T-INT 1 :T-INT 2 :T-INT 3) '?out))))
@@ -177,7 +177,7 @@
 (deftest dcg-plus-succeeds-with-one-match
   "dcg-plus (one-or-more) succeeds when there is at least one matching token."
   (with-fresh-prolog
-    (cl-cc/prolog::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
+    (cl-cc/prolog:def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
     (let ((results (collect-dcg-outcomes
                     (list 'cl-cc/prolog::dcg-plus 'tok-int (dcg-input :T-INT 42) '?out))))
       (assert-true (>= (length results) 1)))))
@@ -185,7 +185,7 @@
 (deftest dcg-plus-fails-on-zero-matches
   "dcg-plus returns no solutions when the sub-rule does not match at all."
   (with-fresh-prolog
-    (cl-cc/prolog::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
+    (cl-cc/prolog:def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
     (let ((results (collect-dcg-outcomes
                     (list 'cl-cc/prolog::dcg-plus 'tok-int (dcg-input :T-IDENT "x") '?out))))
       (assert-null results))))
@@ -198,11 +198,11 @@
     (let ((results nil)
           (input (dcg-input :T-INT 1 :T-IDENT "x" :T-RPAREN ")")))
       (handler-case
-          (cl-cc/prolog::solve-goal (list 'cl-cc/prolog::dcg-error-recovery input '?out)
+          (cl-cc/prolog:solve-goal (list 'cl-cc/prolog::dcg-error-recovery input '?out)
                             nil
                             (lambda (env)
-                              (push (cl-cc/prolog::logic-substitute '?out env) results)))
-        (cl-cc/prolog::prolog-cut ()))
+                              (push (cl-cc/prolog:logic-substitute '?out env) results)))
+        (cl-cc/prolog:prolog-cut ()))
       (assert-true (>= (length results) 1))
       (let ((remaining (first results)))
         (assert-true (consp remaining))
@@ -213,11 +213,11 @@
   (with-fresh-prolog
     (let ((results nil))
       (handler-case
-          (cl-cc/prolog::solve-goal (list 'cl-cc/prolog::dcg-error-recovery nil '?out)
+          (cl-cc/prolog:solve-goal (list 'cl-cc/prolog::dcg-error-recovery nil '?out)
                             nil
                             (lambda (env)
-                              (push (cl-cc/prolog::logic-substitute '?out env) results)))
-        (cl-cc/prolog::prolog-cut ()))
+                              (push (cl-cc/prolog:logic-substitute '?out env) results)))
+        (cl-cc/prolog:prolog-cut ()))
       (assert-true (member nil results :test #'equal)))))
 
 ;;; ─── *dcg-sync-tokens* ─────────────────────────────────────────────────────
@@ -228,7 +228,7 @@
           ("semi"   :T-SEMI)
           ("eof"    :T-EOF))
   (tok)
-  (assert-true (member tok cl-cc/prolog::*dcg-sync-tokens*)))
+  (assert-true (member tok cl-cc/prolog:*dcg-sync-tokens*)))
 
 ;;; ─── %dcg-skip-loop unit tests ──────────────────────────────────────────────
 
@@ -241,7 +241,7 @@
   (let ((collected nil))
     (cl-cc/prolog::%dcg-skip-loop '?out nil
                                    (lambda (env)
-                                     (push (cl-cc/prolog::logic-substitute '?out env) collected))
+                                     (push (cl-cc/prolog:logic-substitute '?out env) collected))
                                    remaining)
     (assert-equal expected (first (last collected)))))
 
@@ -251,7 +251,7 @@
          (collected nil))
     (cl-cc/prolog::%dcg-skip-loop '?out nil
                                    (lambda (env)
-                                     (push (cl-cc/prolog::logic-substitute '?out env) collected))
+                                     (push (cl-cc/prolog:logic-substitute '?out env) collected))
                                    input)
     (assert-= 1 (length collected))
     (assert-equal (list (cons :T-EOF nil)) (first collected))))
@@ -261,23 +261,23 @@
 (deftest dcg-star-loop-epsilon-offered-immediately
   "%dcg-star-loop: offers epsilon (s-out = s-in) before any consumption."
   (with-fresh-prolog
-    (cl-cc/prolog::def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
+    (cl-cc/prolog:def-fact (tok-int ((:T-INT . ?v) . ?rest) ?rest))
     (let* ((input (dcg-input :T-INT 1 :T-INT 2))
            (solutions nil))
       (cl-cc/prolog::%dcg-star-loop 'tok-int '?s-out
                                     (lambda (env)
-                                      (push (cl-cc/prolog::logic-substitute '?s-out env) solutions))
+                                      (push (cl-cc/prolog:logic-substitute '?s-out env) solutions))
                                     input nil)
       (assert-true (member input solutions :test #'equal)))))
 
 (deftest dcg-star-loop-terminates-on-no-progress
   "%dcg-star-loop: does not loop infinitely when rule makes no progress."
   (with-fresh-prolog
-    (cl-cc/prolog::def-fact (always-nil () ()))
+    (cl-cc/prolog:def-fact (always-nil () ()))
     (let ((solutions nil))
       (cl-cc/prolog::%dcg-star-loop 'always-nil '?s-out
                                     (lambda (env)
-                                      (push (cl-cc/prolog::logic-substitute '?s-out env) solutions))
+                                      (push (cl-cc/prolog:logic-substitute '?s-out env) solutions))
                                     '((:T-INT . 1)) nil)
       (assert-true (>= (length solutions) 1)))))
 
@@ -290,15 +290,15 @@
           ("empty-terminal" '(terminal)   "s0" "s1" 1)
           ("one-terminal"  '(terminal :A) "s0" "s1" 2))
   (element s-in s-out expected-goal-count)
-  (cl-cc/prolog::dcg-reset-counter)
-  (let ((goals (cl-cc/prolog::dcg-transform-body-element element s-in s-out)))
+  (cl-cc/prolog:dcg-reset-counter)
+  (let ((goals (cl-cc/prolog:dcg-transform-body-element element s-in s-out)))
     (assert-true (listp goals))
     (assert-= expected-goal-count (length goals))))
 
 (deftest dcg-transform-body-element-brace
   "dcg-transform-body-element brace case: emits goal + (= s-in s-out)."
-  (cl-cc/prolog::dcg-reset-counter)
-  (let ((goals (cl-cc/prolog::dcg-transform-body-element '(brace (integer-p ?x)) "s0" "s1")))
+  (cl-cc/prolog:dcg-reset-counter)
+  (let ((goals (cl-cc/prolog:dcg-transform-body-element '(brace (integer-p ?x)) "s0" "s1")))
     (assert-= 2 (length goals))
     (assert-equal '(integer-p ?x) (first goals))
     (assert-equal '= (first (second goals)))))
@@ -307,22 +307,22 @@
 
 (deftest dcg-transform-body-empty-body
   "dcg-transform-body: empty body unifies s-in and s-out."
-  (cl-cc/prolog::dcg-reset-counter)
-  (let ((goals (cl-cc/prolog::dcg-transform-body nil "s0" "s1")))
+  (cl-cc/prolog:dcg-reset-counter)
+  (let ((goals (cl-cc/prolog:dcg-transform-body nil "s0" "s1")))
     (assert-= 1 (length goals))
     (assert-equal '= (first (first goals)))))
 
 (deftest dcg-transform-body-single-element
   "dcg-transform-body: single symbol element produces exactly one call goal."
-  (cl-cc/prolog::dcg-reset-counter)
-  (let ((goals (cl-cc/prolog::dcg-transform-body '(expr) "s0" "s1")))
+  (cl-cc/prolog:dcg-reset-counter)
+  (let ((goals (cl-cc/prolog:dcg-transform-body '(expr) "s0" "s1")))
     (assert-= 1 (length goals))
     (assert-equal 'expr (first (first goals)))))
 
 (deftest dcg-transform-body-two-elements-chains-states
   "dcg-transform-body: two elements share a fresh intermediate state variable."
-  (cl-cc/prolog::dcg-reset-counter)
-  (let ((goals (cl-cc/prolog::dcg-transform-body '(expr term) "s0" "s1")))
+  (cl-cc/prolog:dcg-reset-counter)
+  (let ((goals (cl-cc/prolog:dcg-transform-body '(expr term) "s0" "s1")))
     (assert-= 2 (length goals))
     ;; intermediate state: third arg of first goal = second arg of second goal
     (let ((mid1 (third (first goals)))

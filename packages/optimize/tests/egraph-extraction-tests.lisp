@@ -14,18 +14,18 @@
 (deftest egraph-saturate-empty-graph-terminates-at-iter-0
   "Saturating an empty e-graph with builtin rules terminates immediately at iteration 0."
   (let* ((eg (make-test-egraph))
-         (rules (cl-cc/optimize::egraph-builtin-rules)))
+         (rules (cl-cc/optimize:egraph-builtin-rules)))
     (multiple-value-bind (saturated iter _fuel)
-        (cl-cc/optimize::egraph-saturate eg rules :limit 10 :fuel 1000)
+        (cl-cc/optimize:egraph-saturate eg rules :limit 10 :fuel 1000)
       (assert-true saturated)
       (assert-= 0 iter))))
 
 (deftest egraph-saturate-with-empty-rules-terminates
   "Saturating a non-empty e-graph with an empty rule set terminates as saturated."
   (let* ((eg (make-test-egraph)))
-    (cl-cc/optimize::egraph-add eg 'const)
+    (cl-cc/optimize:egraph-add eg 'const)
     (multiple-value-bind (saturated _iter _fuel)
-        (cl-cc/optimize::egraph-saturate eg nil :limit 5 :fuel 1000)
+        (cl-cc/optimize:egraph-saturate eg nil :limit 5 :fuel 1000)
       (assert-true saturated))))
 
 ;;; ─── Extraction ──────────────────────────────────────────────────────────
@@ -33,18 +33,18 @@
 (deftest egraph-extract-nullary-node-returns-non-nil
   "Extracting from an e-class containing a nullary const node returns a non-nil result."
   (let* ((eg (make-test-egraph))
-         (id (cl-cc/optimize::egraph-add eg 'const)))
-    (let ((cls (gethash (cl-cc/optimize::egraph-find eg id) (cl-cc:eg-classes eg))))
+         (id (cl-cc/optimize:egraph-add eg 'const)))
+    (let ((cls (gethash (cl-cc/optimize:egraph-find eg id) (cl-cc:eg-classes eg))))
       (when cls (setf (cl-cc:ec-data cls) 42)))
-    (assert-true (cl-cc/optimize::egraph-extract eg id))))
+    (assert-true (cl-cc/optimize:egraph-extract eg id))))
 
 (deftest egraph-extract-binary-add-returns-compound
   "Extracting from a binary (add c1 c2) e-class returns a compound expression."
   (let* ((eg  (make-test-egraph))
-         (c1  (cl-cc/optimize::egraph-add eg 'const))
-         (c2  (cl-cc/optimize::egraph-add eg 'const))
-         (add (cl-cc/optimize::egraph-add eg 'add c1 c2)))
-    (assert-true (cl-cc/optimize::egraph-extract eg add))))
+         (c1  (cl-cc/optimize:egraph-add eg 'const))
+         (c2  (cl-cc/optimize:egraph-add eg 'const))
+         (add (cl-cc/optimize:egraph-add eg 'add c1 c2)))
+    (assert-true (cl-cc/optimize:egraph-extract eg add))))
 
 ;;; ─── Optimize-With-Egraph ────────────────────────────────────────────────
 
@@ -52,19 +52,19 @@
   "optimize-with-egraph on a simple const+ret sequence returns at least one instruction."
   (let* ((insts (list (make-vm-const :dst :r0 :value 42)
                       (make-vm-ret   :reg :r0)))
-         (result (cl-cc/optimize::optimize-with-egraph insts)))
+         (result (cl-cc/optimize:optimize-with-egraph insts)))
     (assert-true (>= (length result) 1))))
 
 (deftest optimize-with-egraph-empty-input-returns-nil
   "optimize-with-egraph on nil input returns nil."
-  (assert-null (cl-cc/optimize::optimize-with-egraph nil)))
+  (assert-null (cl-cc/optimize:optimize-with-egraph nil)))
 
 (deftest optimize-with-egraph-lowers-const
   "A class proven equal to a constant is rewritten as vm-const."
   (let* ((insts (list (cl-cc:make-vm-const :dst :r0 :value 7)
                       (cl-cc:make-vm-sub   :dst :r1 :lhs :r0 :rhs :r0)
                       (cl-cc:make-vm-ret   :reg :r1)))
-         (out (cl-cc/optimize::optimize-with-egraph insts))
+         (out (cl-cc/optimize:optimize-with-egraph insts))
          (r1  (egraph-find-dst-inst out :r1)))
     (assert-true (cl-cc:vm-const-p r1))
     (assert-equal 0 (cl-cc/vm::vm-value r1))))
@@ -76,7 +76,7 @@
                       (cl-cc:make-vm-cons  :dst :r2 :car-src :r1 :cdr-src :r0)
                       (cl-cc:make-vm-cons  :dst :r3 :car-src :r1 :cdr-src :r0)
                       (cl-cc:make-vm-ret   :reg :r3)))
-         (out (cl-cc/optimize::optimize-with-egraph insts))
+         (out (cl-cc/optimize:optimize-with-egraph insts))
          (r3  (egraph-find-dst-inst out :r3)))
     (assert-true (cl-cc:vm-move-p r3))
     (assert-equal :r2 (cl-cc/vm::vm-src r3))))
@@ -89,7 +89,7 @@
           ("add"    'add   '(1 1) 3)
           ("call"   'call  nil   10))
   (op children expected)
-  (assert-= expected (cl-cc/optimize::egraph-default-cost op children)))
+  (assert-= expected (cl-cc/optimize:egraph-default-cost op children)))
 
 ;;; ─── enode-memo-key ──────────────────────────────────────────────────────
 
@@ -98,7 +98,7 @@
   :cases (("nullary" 'const nil    '(const))
           ("binary"  'add   '(0 1) '(add 0 1)))
   (op children expected)
-  (let ((node (cl-cc/optimize::make-e-node :op op :children children)))
+  (let ((node (cl-cc/optimize:make-e-node :op op :children children)))
     (assert-equal expected (cl-cc/optimize::enode-memo-key node))))
 
 ;;; ─── egraph-canonical-enode ──────────────────────────────────────────────
@@ -106,11 +106,11 @@
 (deftest egraph-canonical-enode-updates-children
   "egraph-canonical-enode returns a new e-node with children resolved via union-find."
   (let* ((eg  (make-test-egraph))
-         (id0 (cl-cc/optimize::egraph-add eg 'const))
-         (id1 (cl-cc/optimize::egraph-add eg 'var))
+         (id0 (cl-cc/optimize:egraph-add eg 'const))
+         (id1 (cl-cc/optimize:egraph-add eg 'var))
          ;; Force id1 -> id0 in union-find
-         (canon (cl-cc/optimize::egraph-merge eg id0 id1))
-         (node  (cl-cc/optimize::make-e-node :op 'add :children (list id1))))
+         (canon (cl-cc/optimize:egraph-merge eg id0 id1))
+         (node  (cl-cc/optimize:make-e-node :op 'add :children (list id1))))
     (let ((cnode (cl-cc/optimize::egraph-canonical-enode eg node)))
       (assert-eq 'add (cl-cc:en-op cnode))
       (assert-= canon (first (cl-cc:en-children cnode))))))
@@ -120,7 +120,7 @@
 (deftest egraph-build-rhs-pattern-var-looks-up-binding
   "egraph-build-rhs: a pattern variable (?x) returns the bound e-class ID."
   (let* ((eg      (make-test-egraph))
-         (id      (cl-cc/optimize::egraph-add eg 'const))
+         (id      (cl-cc/optimize:egraph-add eg 'const))
          (bindings (list (cons '?x id))))
     (assert-= id (cl-cc/optimize::egraph-build-rhs eg '?x bindings))))
 
@@ -132,7 +132,7 @@
 (deftest egraph-build-rhs-compound-builds-tree-with-op
   "egraph-build-rhs: a compound form (neg ?x) adds a neg node and returns its class."
   (let* ((eg      (make-test-egraph))
-         (id0     (cl-cc/optimize::egraph-add eg 'const))
+         (id0     (cl-cc/optimize:egraph-add eg 'const))
          (bindings (list (cons '?x id0)))
          (result  (cl-cc/optimize::egraph-build-rhs eg '(neg ?x) bindings)))
     (assert-true (integerp result))
@@ -153,7 +153,7 @@
           ("different-op" 'add   nil))
   (query-op expected)
   (let* ((eg (make-test-egraph))
-         (id (cl-cc/optimize::egraph-add eg 'const)))
+         (id (cl-cc/optimize:egraph-add eg 'const)))
     (if expected
         (assert-true  (cl-cc/optimize::egraph-class-has-op-p eg id query-op))
         (assert-false (cl-cc/optimize::egraph-class-has-op-p eg id query-op)))))
@@ -164,9 +164,9 @@
           ("non-const-nil"      'add   nil nil))
   (op set-data-p expected)
   (let* ((eg (make-test-egraph))
-         (id (cl-cc/optimize::egraph-add eg op)))
+         (id (cl-cc/optimize:egraph-add eg op)))
     (when set-data-p
-      (let ((cls (gethash (cl-cc/optimize::egraph-find eg id) (cl-cc:eg-classes eg))))
+      (let ((cls (gethash (cl-cc/optimize:egraph-find eg id) (cl-cc:eg-classes eg))))
         (setf (cl-cc:ec-data cls) 99)))
     (if expected
         (assert-= expected (cl-cc/optimize::egraph-class-const-value eg id))
@@ -209,10 +209,10 @@
 (deftest egraph-match-pattern-compound-binds-pattern-vars
   "egraph-match-pattern on (add ?x ?y) returns matches with both ?x and ?y bound."
   (let* ((eg  (make-test-egraph))
-         (c1  (cl-cc/optimize::egraph-add eg 'const))
-         (c2  (cl-cc/optimize::egraph-add eg 'var))
-         (add (cl-cc/optimize::egraph-add eg 'add c1 c2))
-         (matches (cl-cc/optimize::egraph-match-pattern eg '(add ?x ?y) add)))
+         (c1  (cl-cc/optimize:egraph-add eg 'const))
+         (c2  (cl-cc/optimize:egraph-add eg 'var))
+         (add (cl-cc/optimize:egraph-add eg 'add c1 c2))
+         (matches (cl-cc/optimize:egraph-match-pattern eg '(add ?x ?y) add)))
     (assert-true (>= (length matches) 1))
     (let ((b (car matches)))
       (assert-true (assoc '?x b))
@@ -221,8 +221,8 @@
 (deftest egraph-match-pattern-literal-symbol-matches-nullary-node
   "egraph-match-pattern on a literal symbol produces exactly one match for a nullary node."
   (let* ((eg  (make-test-egraph))
-         (id  (cl-cc/optimize::egraph-add eg 'zero))
-         (matches (cl-cc/optimize::egraph-match-pattern eg 'zero id)))
+         (id  (cl-cc/optimize:egraph-add eg 'zero))
+         (matches (cl-cc/optimize:egraph-match-pattern eg 'zero id)))
     (assert-= 1 (length matches))))
 
 ;;; ─── *opt-iteration-budget-thresholds* data coverage ────────────────────
@@ -252,8 +252,8 @@
 (deftest egraph-rewrite-inst-dst-in-const-class-becomes-vm-const
   "%egraph-rewrite-inst rewrites to vm-const when the dst class is proven constant."
   (let* ((eg         (make-test-egraph))
-         (class-id   (cl-cc/optimize::egraph-add eg 'const))
-         (class-ht   (gethash (cl-cc/optimize::egraph-find eg class-id) (cl-cc:eg-classes eg)))
+         (class-id   (cl-cc/optimize:egraph-add eg 'const))
+         (class-ht   (gethash (cl-cc/optimize:egraph-find eg class-id) (cl-cc:eg-classes eg)))
          (reg-map    (make-hash-table :test #'eq))
          (class->regs (make-hash-table :test #'equal))
          (move       (make-vm-move :dst :r1 :src :r0)))
@@ -267,12 +267,12 @@
 (deftest egraph-rewrite-inst-dst-with-alias-becomes-vm-move
   "%egraph-rewrite-inst rewrites to vm-move when dst has an alias in the same e-class."
   (let* ((eg         (make-test-egraph))
-         (class-id   (cl-cc/optimize::egraph-add eg 'add
-                       (cl-cc/optimize::egraph-add eg 'const)
-                       (cl-cc/optimize::egraph-add eg 'const)))
+         (class-id   (cl-cc/optimize:egraph-add eg 'add
+                       (cl-cc/optimize:egraph-add eg 'const)
+                       (cl-cc/optimize:egraph-add eg 'const)))
          (reg-map    (make-hash-table :test #'eq))
          (class->regs (make-hash-table :test #'equal))
-         (canon      (cl-cc/optimize::egraph-find eg class-id))
+         (canon      (cl-cc/optimize:egraph-find eg class-id))
          (add-inst   (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)))
     (setf (gethash :r2 reg-map) class-id)
     (setf (gethash canon class->regs) (list :r2 :r3))

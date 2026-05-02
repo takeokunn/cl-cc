@@ -57,7 +57,7 @@
          (regfun  (make-vm-register-function :name 'f :src :r0))
          (const   (make-vm-const :dst :r2 :value 'f))
          (move    (make-vm-move :dst :r3 :src :r2))
-         (known   (cl-cc/optimize::opt-known-callee-labels (list closure regfun const move))))
+         (known   (cl-cc/optimize:opt-known-callee-labels (list closure regfun const move))))
     (assert-string= "f" (gethash reg known))))
 
 (deftest-each optimizer-pass-pipeline-forms
@@ -68,7 +68,7 @@
   (let* ((instrs (list (make-vm-const :dst :r0 :value 1)
                        (make-vm-const :dst :r1 :value 2)
                        (make-vm-add   :dst :r2 :lhs :r0 :rhs :r1)))
-         (out (cl-cc/optimize::optimize-instructions instrs :pass-pipeline pipeline)))
+         (out (cl-cc/optimize:optimize-instructions instrs :pass-pipeline pipeline)))
     (assert-equal 0 (length out))))
 
 (deftest optimizer-ir-verify-valid
@@ -77,7 +77,7 @@
                       (make-vm-const :dst :r1 :value 2)
                       (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
                       (make-vm-ret :reg :r2))))
-    (assert-true (cl-cc/optimize::opt-verify-instructions instrs :pass-name "test"))))
+    (assert-true (cl-cc/optimize:opt-verify-instructions instrs :pass-name "test"))))
 
 (deftest-each optimizer-ir-verify-rejects-invalid
   "opt-verify-instructions raises an error for invalid IR programs."
@@ -90,7 +90,7 @@
            (list (make-vm-add :dst :r0 :lhs :r1 :rhs :r2))))
   (instrs)
   (assert-true
-   (handler-case (progn (cl-cc/optimize::opt-verify-instructions instrs :pass-name "test") nil)
+   (handler-case (progn (cl-cc/optimize:opt-verify-instructions instrs :pass-name "test") nil)
      (error () t))))
 
 (deftest-each optimizer-pass-pipeline-output-modes
@@ -121,7 +121,7 @@
   (let* ((stream (make-string-output-stream))
          (patched-opts (loop for (k v) on extra-opts by #'cddr
                              nconc (if (null v) (list k stream) (list k v)))))
-    (apply #'cl-cc/optimize::optimize-instructions instrs
+    (apply #'cl-cc/optimize:optimize-instructions instrs
            :pass-pipeline '(:fold)
            patched-opts)
     (let ((text (string-upcase (get-output-stream-string stream))))

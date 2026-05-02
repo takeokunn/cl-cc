@@ -33,17 +33,17 @@
 (deftest emit-call-like-instruction-selects-call-variant
   "%emit-call-like-instruction emits vm-call normally and vm-tail-call in tail position."
   (let* ((ctx (make-codegen-ctx))
-         (func-reg (cl-cc/compile::make-register ctx))
-         (arg-reg (cl-cc/compile::make-register ctx))
-         (result-reg (cl-cc/compile::make-register ctx)))
+         (func-reg (cl-cc/compile:make-register ctx))
+         (arg-reg (cl-cc/compile:make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx)))
     (assert-eq result-reg
                (cl-cc/compile::%emit-call-like-instruction nil result-reg func-reg (list arg-reg) ctx))
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-call))
     (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-tail-call)))
   (let* ((ctx (make-codegen-ctx))
-         (func-reg (cl-cc/compile::make-register ctx))
-         (arg-reg (cl-cc/compile::make-register ctx))
-         (result-reg (cl-cc/compile::make-register ctx)))
+         (func-reg (cl-cc/compile:make-register ctx))
+         (arg-reg (cl-cc/compile:make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx)))
     (assert-eq result-reg
                (cl-cc/compile::%emit-call-like-instruction t result-reg func-reg (list arg-reg) ctx))
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-tail-call))
@@ -58,23 +58,23 @@
           ("nil"    nil))
   (sym)
   (let* ((ctx (make-codegen-ctx))
-         (result-reg (cl-cc/compile::make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx))
          (ret (cl-cc/compile::%try-compile-funcall sym (list (make-ast-int :value 1)) result-reg nil ctx)))
     (assert-null ret)))
 
 (deftest try-compile-funcall-nil-args-returns-nil
   "%try-compile-funcall returns NIL when args is empty."
   (let* ((ctx (make-codegen-ctx))
-         (result-reg (cl-cc/compile::make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx))
          (ret (cl-cc/compile::%try-compile-funcall 'funcall nil result-reg nil ctx)))
     (assert-null ret)))
 
 (deftest try-compile-funcall-success-emits-vm-call-and-returns-result-reg
   "%try-compile-funcall returns result-reg and emits vm-call on success."
   (let* ((ctx (make-codegen-ctx))
-         (fn-reg (cl-cc/compile::make-register ctx))
-         (result-reg (cl-cc/compile::make-register ctx)))
-    (setf (cl-cc/compile::ctx-env ctx) (list (cons 'fn fn-reg)))
+         (fn-reg (cl-cc/compile:make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'fn fn-reg)))
     (let ((ret (cl-cc/compile::%try-compile-funcall
                 'funcall
                 (list (make-ast-var :name 'fn) (make-ast-int :value 1))
@@ -85,9 +85,9 @@
 (deftest try-compile-funcall-tail-position-emits-tail-call
   "%try-compile-funcall emits vm-tail-call (not vm-call) when tail is T."
   (let* ((ctx (make-codegen-ctx))
-         (fn-reg (cl-cc/compile::make-register ctx))
-         (result-reg (cl-cc/compile::make-register ctx)))
-    (setf (cl-cc/compile::ctx-env ctx) (list (cons 'fn fn-reg)))
+         (fn-reg (cl-cc/compile:make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'fn fn-reg)))
     (cl-cc/compile::%try-compile-funcall
      'funcall
      (list (make-ast-var :name 'fn) (make-ast-int :value 99))
@@ -104,16 +104,16 @@
           ("nil"     nil))
   (sym)
   (let* ((ctx (make-codegen-ctx))
-         (result-reg (cl-cc/compile::make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx))
          (ret (cl-cc/compile::%try-compile-apply sym (list (make-ast-int :value 1)) result-reg ctx)))
     (assert-null ret)))
 
 (deftest try-compile-apply-emits-vm-apply-and-returns-result-reg
   "%try-compile-apply emits vm-apply and returns result-reg on success."
   (let* ((ctx (make-codegen-ctx))
-         (fn-reg (cl-cc/compile::make-register ctx))
-         (result-reg (cl-cc/compile::make-register ctx)))
-    (setf (cl-cc/compile::ctx-env ctx) (list (cons 'f fn-reg)))
+         (fn-reg (cl-cc/compile:make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'f fn-reg)))
     (let ((ret (cl-cc/compile::%try-compile-apply
                 'apply
                 (list (make-ast-var :name 'f) (make-ast-int :value 1))
@@ -126,10 +126,10 @@
 (deftest try-compile-noescape-cons-car-emits-vm-move-from-car-reg
   "%try-compile-noescape-cons 'car emits vm-move sourced from the car register."
   (let* ((ctx (make-codegen-ctx))
-         (car-reg    (cl-cc/compile::make-register ctx))
-         (cdr-reg    (cl-cc/compile::make-register ctx))
-         (result-reg (cl-cc/compile::make-register ctx)))
-    (setf (cl-cc/compile::ctx-noescape-cons-bindings ctx)
+         (car-reg    (cl-cc/compile:make-register ctx))
+         (cdr-reg    (cl-cc/compile:make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx)))
+    (setf (cl-cc/compile:ctx-noescape-cons-bindings ctx)
           (list (cons 'p (cons car-reg cdr-reg))))
     (let ((ret (cl-cc/compile::%try-compile-noescape-cons
                 'car
@@ -143,10 +143,10 @@
 (deftest try-compile-noescape-cons-cdr-emits-vm-move-from-cdr-reg
   "%try-compile-noescape-cons 'cdr emits vm-move sourced from the cdr register."
   (let* ((ctx (make-codegen-ctx))
-         (car-reg    (cl-cc/compile::make-register ctx))
-         (cdr-reg    (cl-cc/compile::make-register ctx))
-         (result-reg (cl-cc/compile::make-register ctx)))
-    (setf (cl-cc/compile::ctx-noescape-cons-bindings ctx)
+         (car-reg    (cl-cc/compile:make-register ctx))
+         (cdr-reg    (cl-cc/compile:make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx)))
+    (setf (cl-cc/compile:ctx-noescape-cons-bindings ctx)
           (list (cons 'p (cons car-reg cdr-reg))))
     (cl-cc/compile::%try-compile-noescape-cons
      'cdr (list (make-ast-var :name 'p)) result-reg ctx)
@@ -157,7 +157,7 @@
 (deftest try-compile-noescape-cons-unregistered-binding-returns-nil
   "%try-compile-noescape-cons returns NIL when no noescape binding is registered for the argument."
   (let* ((ctx (make-codegen-ctx))
-         (result-reg (cl-cc/compile::make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx))
          (ret (cl-cc/compile::%try-compile-noescape-cons
                'car (list (make-ast-var :name 'unregistered)) result-reg ctx)))
     (assert-null ret)))
@@ -165,10 +165,10 @@
 (deftest try-compile-noescape-cons-non-car-cdr-sym-returns-nil
   "%try-compile-noescape-cons returns NIL when the function symbol is not car or cdr."
   (let* ((ctx (make-codegen-ctx))
-         (car-reg    (cl-cc/compile::make-register ctx))
-         (cdr-reg    (cl-cc/compile::make-register ctx))
-         (result-reg (cl-cc/compile::make-register ctx)))
-    (setf (cl-cc/compile::ctx-noescape-cons-bindings ctx)
+         (car-reg    (cl-cc/compile:make-register ctx))
+         (cdr-reg    (cl-cc/compile:make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx)))
+    (setf (cl-cc/compile:ctx-noescape-cons-bindings ctx)
           (list (cons 'p (cons car-reg cdr-reg))))
     (let ((ret (cl-cc/compile::%try-compile-noescape-cons
                 'first (list (make-ast-var :name 'p)) result-reg ctx)))
@@ -179,10 +179,10 @@
 (deftest try-compile-noescape-array-length-emits-vm-const-with-size
   "%try-compile-noescape-array array-length emits vm-const with the static array size."
   (let* ((ctx (make-codegen-ctx))
-         (r0 (cl-cc/compile::make-register ctx))
-         (r1 (cl-cc/compile::make-register ctx))
-         (result-reg (cl-cc/compile::make-register ctx)))
-    (setf (cl-cc/compile::ctx-noescape-array-bindings ctx)
+         (r0 (cl-cc/compile:make-register ctx))
+         (r1 (cl-cc/compile:make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx)))
+    (setf (cl-cc/compile:ctx-noescape-array-bindings ctx)
           (list (cons 'arr (list 2 r0 r1))))
     (let ((ret (cl-cc/compile::%try-compile-noescape-array
                 'array-length
@@ -196,11 +196,11 @@
 (deftest try-compile-noescape-array-aref-emits-vm-move-to-element-reg
   "%try-compile-noescape-array aref with static index emits vm-move from the element register."
   (let* ((ctx (make-codegen-ctx))
-         (r0 (cl-cc/compile::make-register ctx))
-         (r1 (cl-cc/compile::make-register ctx))
-         (r2 (cl-cc/compile::make-register ctx))
-         (result-reg (cl-cc/compile::make-register ctx)))
-    (setf (cl-cc/compile::ctx-noescape-array-bindings ctx)
+         (r0 (cl-cc/compile:make-register ctx))
+         (r1 (cl-cc/compile:make-register ctx))
+         (r2 (cl-cc/compile:make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx)))
+    (setf (cl-cc/compile:ctx-noescape-array-bindings ctx)
           (list (cons 'arr (list 3 r0 r1 r2))))
     (let ((ret (cl-cc/compile::%try-compile-noescape-array
                 'aref
@@ -216,9 +216,9 @@
 (deftest compile-normal-call-gf-emits-generic-call-not-call
   "%compile-normal-call for a generic function emits vm-generic-call, not vm-call."
   (let* ((ctx (make-codegen-ctx))
-         (gf-reg     (cl-cc/compile::make-register ctx))
-         (result-reg (cl-cc/compile::make-register ctx)))
-    (setf (gethash 'my-gf (cl-cc/compile::ctx-global-generics ctx)) gf-reg)
+         (gf-reg     (cl-cc/compile:make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx)))
+    (setf (gethash 'my-gf (cl-cc/compile:ctx-global-generics ctx)) gf-reg)
     (cl-cc/compile::%compile-normal-call
      'my-gf 'my-gf (list (make-ast-int :value 1)) result-reg nil ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-generic-call))
@@ -227,7 +227,7 @@
 (deftest compile-normal-call-ordinary-fn-emits-vm-call
   "%compile-normal-call for an ordinary function emits vm-call."
   (let* ((ctx (make-codegen-ctx))
-         (result-reg (cl-cc/compile::make-register ctx)))
+         (result-reg (cl-cc/compile:make-register ctx)))
     (cl-cc/compile::%compile-normal-call
      'ordinary-fn 'ordinary-fn (list (make-ast-int :value 1)) result-reg nil ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-call))))
@@ -237,9 +237,9 @@
 (deftest codegen-call-dispatch-funcall-tail-emits-tail-call
   "compile-ast: funcall in tail position emits vm-tail-call, not vm-call."
   (let* ((ctx (make-codegen-ctx))
-         (fn-reg (cl-cc/compile::make-register ctx)))
-    (setf (cl-cc/compile::ctx-env ctx) (list (cons 'fn fn-reg)))
-    (setf (cl-cc/compile::ctx-tail-position ctx) t)
+         (fn-reg (cl-cc/compile:make-register ctx)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'fn fn-reg)))
+    (setf (cl-cc/compile:ctx-tail-position ctx) t)
     (compile-ast (make-ast-call :func 'funcall
                                 :args (list (make-ast-var :name 'fn)
                                             (make-ast-int :value 1)))
@@ -250,8 +250,8 @@
 (deftest codegen-call-dispatch-gf-emits-generic-call
   "compile-ast: a call to a known generic function emits vm-generic-call."
   (let* ((ctx (make-codegen-ctx))
-         (gf-reg (cl-cc/compile::make-register ctx)))
-    (setf (gethash 'my-speak (cl-cc/compile::ctx-global-generics ctx)) gf-reg)
+         (gf-reg (cl-cc/compile:make-register ctx)))
+    (setf (gethash 'my-speak (cl-cc/compile:ctx-global-generics ctx)) gf-reg)
     (compile-ast (make-ast-call :func 'my-speak
                                 :args (list (make-ast-int :value 1)))
                  ctx)

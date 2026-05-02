@@ -42,14 +42,14 @@
 
 (deftest expander-data-registry-sanity
   "Core data registries and query helpers in expander-data.lisp are wired and readable."
-  (assert-true (hash-table-p cl-cc/expand::*accessor-slot-map*))
-  (assert-true (hash-table-p cl-cc/expand::*defstruct-slot-registry*))
-  (assert-true (hash-table-p cl-cc/expand::*defstruct-type-registry*))
-  (assert-true (hash-table-p cl-cc/expand::*symbol-macro-table*))
-  (assert-true (hash-table-p cl-cc/expand::*constant-table*))
-  (assert-true (hash-table-p cl-cc/expand::*compiler-macro-table*))
+  (assert-true (hash-table-p cl-cc/expand:*accessor-slot-map*))
+  (assert-true (hash-table-p cl-cc/expand:*defstruct-slot-registry*))
+  (assert-true (hash-table-p cl-cc/expand:*defstruct-type-registry*))
+  (assert-true (hash-table-p cl-cc/expand:*symbol-macro-table*))
+  (assert-true (hash-table-p cl-cc/expand:*constant-table*))
+  (assert-true (hash-table-p cl-cc/expand:*compiler-macro-table*))
   (assert-true (hash-table-p cl-cc/expand::*setf-compound-place-handlers*))
-  (assert-true (functionp cl-cc/expand::*macro-eval-fn*))
+  (assert-true (functionp cl-cc/expand:*macro-eval-fn*))
   (assert-true (cl-cc/expand::compiler-special-form-p 'if))
   (assert-false (cl-cc/expand::compiler-special-form-p 'not-a-special-form))
   (assert-true (cl-cc/expand::builtin-name-p 'append))

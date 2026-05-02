@@ -29,13 +29,13 @@
   :cases (("single-form"   "(+ 1 2)")
           ("multiple-forms" "(defun f (x) x)"))
   (expr)
-  (assert-true (typep (compile-string expr :target :vm) 'cl-cc/compile::compilation-result)))
+  (assert-true (typep (compile-string expr :target :vm) 'cl-cc/compile:compilation-result)))
 
 (deftest pipeline-compile-string-custom-pass-pipeline
   "compile-string forwards a string pass pipeline to optimizer core."
   (let* ((baseline (compile-string "(+ 1 2)" :target :vm))
          (result (compile-string "(+ 1 2)" :target :vm :pass-pipeline "fold,dce")))
-    (assert-true (typep result 'cl-cc/compile::compilation-result))
+    (assert-true (typep result 'cl-cc/compile:compilation-result))
     (assert-true (listp (cl-cc:compilation-result-optimized-instructions baseline)))
     (assert-true (listp (cl-cc:compilation-result-optimized-instructions result)))
     (assert-true (> (length (cl-cc:compilation-result-vm-instructions result)) 0))))

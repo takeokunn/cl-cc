@@ -148,7 +148,7 @@
 (deftest pipeline-compile-with-stdlib
   "compile-string-with-stdlib includes stdlib definitions."
   (let ((result (cl-cc::compile-string-with-stdlib "(+ 1 2)" :target :vm)))
-    (assert-true (typep result 'cl-cc/compile::compilation-result))))
+    (assert-true (typep result 'cl-cc/compile:compilation-result))))
 
 ;;; ─── run-string with :stdlib ────────────────────────────────────────────
 

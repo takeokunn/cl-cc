@@ -11,7 +11,7 @@
 
 (deftest expander-setf-multi-var-progn
   "compiler-macroexpand-all: (setf x 1 y 2) expands to progn of setq."
-  (let ((result (cl-cc/expand::compiler-macroexpand-all '(setf x 1 y 2))))
+  (let ((result (cl-cc/expand:compiler-macroexpand-all '(setf x 1 y 2))))
     (assert-eq 'progn (car result))
     (assert-eq 'setq (car (second result)))
     (assert-eq 'setq (car (third result)))))

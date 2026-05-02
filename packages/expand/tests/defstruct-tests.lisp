@@ -123,9 +123,9 @@
 
 (deftest ds-accessor-slot-map-populated
   "*accessor-slot-map* is populated with (struct-name . slot-name) for each accessor."
-  (let ((cl-cc/expand::*accessor-slot-map* (make-hash-table :test #'eq)))
+  (let ((cl-cc/expand:*accessor-slot-map* (make-hash-table :test #'eq)))
     (ds-expand '(defstruct widget width height))
-    (let ((entry (gethash (intern "WIDGET-WIDTH") cl-cc/expand::*accessor-slot-map*)))
+    (let ((entry (gethash (intern "WIDGET-WIDTH") cl-cc/expand:*accessor-slot-map*)))
       (assert-true (not (null entry)))
       (assert-equal 'widget (car entry))
       (assert-equal 'width (cdr entry)))))

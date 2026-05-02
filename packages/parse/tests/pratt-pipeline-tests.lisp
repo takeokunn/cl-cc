@@ -110,13 +110,13 @@
   "pratt-parse-expr with an empty NUD table returns cst-error for any non-empty input."
   (let* ((ctx  (make-test-ctx "42"))
          (node (cl-cc/parse::pratt-parse-expr ctx)))
-    (assert-true (cl-cc/parse::cst-error-p node))))
+    (assert-true (cl-cc/parse:cst-error-p node))))
 
 (deftest pratt-parse-expr-eof-returns-error
   "pratt-parse-expr on empty input returns cst-error even with empty NUD table."
   (let* ((ctx  (make-test-ctx ""))
          (node (cl-cc/parse::pratt-parse-expr ctx)))
-    (assert-true (cl-cc/parse::cst-error-p node))))
+    (assert-true (cl-cc/parse:cst-error-p node))))
 
 (deftest-each pratt-parse-expr-node-type
   "parse-cl-source returns the correct CST node type for each CL grammar input shape."

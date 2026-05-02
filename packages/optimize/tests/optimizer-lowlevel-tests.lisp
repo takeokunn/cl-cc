@@ -118,22 +118,22 @@
   "Must-alias propagates through move; distinct allocs not may-alias; unknown root conservatively may-alias."
   (let* ((alloc (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (copy  (make-vm-move :dst :r3 :src :r0))
-         (roots (cl-cc/optimize::opt-compute-heap-aliases (list alloc copy))))
-    (assert-true  (cl-cc/optimize::opt-must-alias-p :r0 :r3 roots))
-    (assert-false (cl-cc/optimize::opt-must-alias-p :r0 :r9 roots)))
+         (roots (cl-cc/optimize:opt-compute-heap-aliases (list alloc copy))))
+    (assert-true  (cl-cc/optimize:opt-must-alias-p :r0 :r3 roots))
+    (assert-false (cl-cc/optimize:opt-must-alias-p :r0 :r9 roots)))
   (let* ((alloc-a (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (alloc-b (make-vm-make-array :dst :r4 :size-reg :r5))
-         (roots   (cl-cc/optimize::opt-compute-heap-aliases (list alloc-a alloc-b))))
-    (assert-false (cl-cc/optimize::opt-may-alias-p :r0 :r4 roots))
-    (assert-true  (cl-cc/optimize::opt-may-alias-p :r0 :r9 roots))))
+         (roots   (cl-cc/optimize:opt-compute-heap-aliases (list alloc-a alloc-b))))
+    (assert-false (cl-cc/optimize:opt-may-alias-p :r0 :r4 roots))
+    (assert-true  (cl-cc/optimize:opt-may-alias-p :r0 :r9 roots))))
 
 (deftest points-to-helper-tracks-moves-and-kills
   "Flow-sensitive points-to propagates through vm-move and is killed by overwrite."
   (let* ((alloc (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (copy  (make-vm-move :dst :r3 :src :r0))
          (kill  (make-vm-const :dst :r3 :value 9))
-         (pt1   (cl-cc/optimize::opt-compute-heap-aliases (list alloc copy)))
-         (pt2   (cl-cc/optimize::opt-compute-heap-aliases (list alloc copy kill))))
+         (pt1   (cl-cc/optimize:opt-compute-heap-aliases (list alloc copy)))
+         (pt2   (cl-cc/optimize:opt-compute-heap-aliases (list alloc copy kill))))
     (assert-eq :r0 (gethash :r0 pt1))
     (assert-eq :r0 (gethash :r3 pt1))
     (assert-false (nth-value 1 (gethash :r3 pt2)))))
@@ -142,12 +142,12 @@
   "TBAA helper can prove non-aliasing across different fresh heap object kinds."
   (let* ((alloc-cons  (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2))
          (alloc-array (make-vm-make-array :dst :r4 :size-reg :r5))
-         (points-to   (cl-cc/optimize::opt-compute-heap-aliases (list alloc-cons alloc-array)))
+         (points-to   (cl-cc/optimize:opt-compute-heap-aliases (list alloc-cons alloc-array)))
          (heap-kinds  (cl-cc/optimize::opt-compute-heap-kinds (list alloc-cons alloc-array))))
     (assert-eq :cons (gethash :r0 heap-kinds))
     (assert-eq :array (gethash :r4 heap-kinds))
-    (assert-false (cl-cc/optimize::opt-may-alias-by-type-p :r0 :r4 points-to heap-kinds))
-    (assert-true  (cl-cc/optimize::opt-may-alias-by-type-p :r0 :r9 points-to heap-kinds))))
+    (assert-false (cl-cc/optimize:opt-may-alias-by-type-p :r0 :r4 points-to heap-kinds))
+    (assert-true  (cl-cc/optimize:opt-may-alias-by-type-p :r0 :r9 points-to heap-kinds))))
 
 (deftest constant-interval-helper-propagates-basic-arithmetic
   "Constant interval propagation handles add/sub/mul in straight-line code."
@@ -177,7 +177,7 @@
           ("lt"         (make-vm-lt         :dst :r0 :lhs :r1 :rhs :r2)    '(:r1 :r2))
           ("call"       (make-vm-call       :dst :r0 :func :r1 :args '(:r2 :r3)) '(:r1 :r2 :r3)))
   (inst expected-members)
-  (let ((regs (cl-cc/optimize::opt-inst-read-regs inst)))
+  (let ((regs (cl-cc/optimize:opt-inst-read-regs inst)))
     (assert-equal (length expected-members) (length regs))
     (dolist (r expected-members)
       (assert-true (member r regs)))))

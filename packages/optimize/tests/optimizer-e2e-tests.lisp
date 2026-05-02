@@ -113,6 +113,6 @@
 
 (deftest prolog-peephole-collapses-const-followed-by-move
   "The Prolog peephole rule set folds a const+move pair to a direct const."
-  (let ((out (cl-cc/optimize::apply-prolog-peephole
+  (let ((out (cl-cc/optimize:apply-prolog-peephole
               '((:const :r1 42) (:move :r2 :r1)))))
     (assert-equal '((:const :r2 42)) out)))

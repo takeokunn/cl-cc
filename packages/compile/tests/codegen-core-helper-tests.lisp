@@ -148,7 +148,7 @@
 (deftest branch-type-env-no-guard-var-returns-base
   "%branch-type-env returns the base type-env unchanged when guard-var is NIL."
   (let* ((ctx (make-codegen-ctx))
-         (env (cl-cc/compile::ctx-type-env ctx))
+         (env (cl-cc/compile:ctx-type-env ctx))
          (result (cl-cc/compile::%branch-type-env ctx nil nil :then)))
     (assert-eq env result)))
 
@@ -165,7 +165,7 @@
 (deftest branch-type-env-else-no-prior-binding-returns-base
   "%branch-type-env :else returns base env when guard-var has no prior union binding."
   (let* ((ctx      (make-codegen-ctx))
-         (base     (cl-cc/compile::ctx-type-env ctx))
+         (base     (cl-cc/compile:ctx-type-env ctx))
          (guard-ty (cl-cc/type:parse-type-specifier 'fixnum))
          (result   (cl-cc/compile::%branch-type-env ctx 'z guard-ty :else)))
     (assert-eq base result)))
@@ -173,7 +173,7 @@
 (deftest branch-type-env-unknown-branch-returns-base
   "%branch-type-env returns the base type-env for an unknown branch keyword."
   (let* ((ctx        (make-codegen-ctx))
-         (base       (cl-cc/compile::ctx-type-env ctx))
+         (base       (cl-cc/compile:ctx-type-env ctx))
          (guard-type (cl-cc/type:parse-type-specifier 'fixnum))
          (result     (cl-cc/compile::%branch-type-env ctx 'x guard-type :bogus)))
     (assert-eq base result)))
@@ -192,7 +192,7 @@
 (deftest compile-if-branch-emits-move-to-dst
   "%compile-if-branch compiles the AST into CTX and emits a vm-move from result to DST."
   (let* ((ctx  (make-codegen-ctx))
-         (dst  (cl-cc/compile::make-register ctx)))
+         (dst  (cl-cc/compile:make-register ctx)))
     (cl-cc/compile::%compile-if-branch
      (make-ast-int :value 99) ctx dst nil nil nil :then)
     (let ((insts (codegen-instructions ctx)))
@@ -203,7 +203,7 @@
 (deftest compile-if-branch-emits-jump-when-label-supplied
   "%compile-if-branch emits a vm-jump to JUMP-LABEL when the optional argument is provided."
   (let* ((ctx  (make-codegen-ctx))
-         (dst  (cl-cc/compile::make-register ctx)))
+         (dst  (cl-cc/compile:make-register ctx)))
     (cl-cc/compile::%compile-if-branch
      (make-ast-int :value 7) ctx dst nil nil nil :then "end_label_0")
     (let ((insts (codegen-instructions ctx)))
@@ -212,7 +212,7 @@
 (deftest compile-if-branch-no-jump-without-label
   "%compile-if-branch does not emit a vm-jump when JUMP-LABEL is absent."
   (let* ((ctx  (make-codegen-ctx))
-         (dst  (cl-cc/compile::make-register ctx)))
+         (dst  (cl-cc/compile:make-register ctx)))
     (cl-cc/compile::%compile-if-branch
      (make-ast-int :value 5) ctx dst nil nil nil :else)
     (let ((insts (codegen-instructions ctx)))

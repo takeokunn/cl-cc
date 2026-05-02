@@ -163,11 +163,11 @@
 
 (deftest opt-inst-dst-returns-dst-register
   "opt-inst-dst returns the :dst register for instructions that have one."
-  (assert-eq :r3 (cl-cc/optimize::opt-inst-dst (make-vm-add :dst :r3 :lhs :r1 :rhs :r2))))
+  (assert-eq :r3 (cl-cc/optimize:opt-inst-dst (make-vm-add :dst :r3 :lhs :r1 :rhs :r2))))
 
 (deftest opt-inst-dst-nil-for-no-dst-instruction
   "opt-inst-dst returns nil for instructions (like vm-jump) that have no destination register."
-  (assert-null (cl-cc/optimize::opt-inst-dst (make-vm-jump :label "end"))))
+  (assert-null (cl-cc/optimize:opt-inst-dst (make-vm-jump :label "end"))))
 
 ;;; ─── opt-inst-read-regs ───────────────────────────────────────────────────
 
@@ -177,14 +177,14 @@
           ("vm-move"  (make-vm-move  :dst :r1 :src :r0)  '(:r0))
           ("vm-neg"   (make-vm-neg   :dst :r1 :src :r0)  '(:r0)))
   (inst expected)
-  (assert-equal expected (cl-cc/optimize::opt-inst-read-regs inst)))
+  (assert-equal expected (cl-cc/optimize:opt-inst-read-regs inst)))
 
 (deftest-each opt-inst-read-regs-lhs-rhs-cases
   "opt-inst-read-regs returns (lhs rhs) for both vm-binop and non-binop binary instructions."
   :cases (("vm-add" (make-vm-add :dst :r2 :lhs :r0 :rhs :r1))
           ("vm-lt"  (make-vm-lt  :dst :r2 :lhs :r0 :rhs :r1)))
   (inst)
-  (let ((regs (cl-cc/optimize::opt-inst-read-regs inst)))
+  (let ((regs (cl-cc/optimize:opt-inst-read-regs inst)))
     (assert-true (member :r0 regs))
     (assert-true (member :r1 regs))))
 

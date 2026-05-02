@@ -106,10 +106,10 @@
          (sig   (cl-cc:make-vm-signal-error :error-reg :r1))
          (end   (make-vm-label :name "end"))
          (ret   (make-vm-ret :reg :r1))
-         (cfg   (cl-cc/optimize::cfg-build (list hot jump work toend cold sig end ret)))
-         (_idom (cl-cc/optimize::cfg-compute-dominators cfg))
-         (_loop (cl-cc/optimize::cfg-compute-loop-depths cfg))
-         (out   (cl-cc/optimize::cfg-flatten-hot-cold cfg))
+         (cfg   (cl-cc/optimize:cfg-build (list hot jump work toend cold sig end ret)))
+         (_idom (cl-cc/optimize:cfg-compute-dominators cfg))
+         (_loop (cl-cc/optimize:cfg-compute-loop-depths cfg))
+         (out   (cl-cc/optimize:cfg-flatten-hot-cold cfg))
          (labels (loop for inst in out
                         when (typep inst 'cl-cc/vm::vm-label)
                         collect (cl-cc/vm::vm-name inst))))
@@ -136,17 +136,17 @@
 (deftest-each optimizer-dominated-check-elim
   "Redundant dominated predicates are rewritten to vm-move by the relevant elimination pass."
   :cases (("null-p via dominated-type-check-elim"
-           #'cl-cc/optimize::opt-pass-dominated-type-check-elim
+           #'cl-cc/optimize:opt-pass-dominated-type-check-elim
            (make-vm-null-p :dst :r1 :src :r0)
            (make-vm-null-p :dst :r2 :src :r0)
            'cl-cc/vm::vm-null-p)
           ("not via dominated-type-check-elim"
-           #'cl-cc/optimize::opt-pass-dominated-type-check-elim
+           #'cl-cc/optimize:opt-pass-dominated-type-check-elim
            (make-vm-not :dst :r1 :src :r0)
            (make-vm-not :dst :r2 :src :r0)
            'cl-cc/vm::vm-not)
           ("not via nil-check-elim"
-           #'cl-cc/optimize::opt-pass-dominated-type-check-elim
+           #'cl-cc/optimize:opt-pass-dominated-type-check-elim
            (make-vm-not :dst :r1 :src :r0)
            (make-vm-not :dst :r2 :src :r0)
            'cl-cc/vm::vm-not))

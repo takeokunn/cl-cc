@@ -119,12 +119,12 @@
 
 (deftest sccp-redirect-successors-rewires-edges
   "%sccp-redirect-successors removes old successor/predecessor links and adds new ones."
-  (let* ((cfg    (cl-cc/optimize::cfg-build
+  (let* ((cfg    (cl-cc/optimize:cfg-build
                   (list (make-vm-const :dst :r0 :value 0)
                         (make-vm-jump  :label "lbl")
                         (make-vm-label :name "lbl")
                         (make-vm-ret   :reg :r0))))
-         (entry  (cl-cc/optimize::cfg-entry cfg))
+         (entry  (cl-cc/optimize:cfg-entry cfg))
          (succ   (first (cl-cc:bb-successors entry)))
          (extra  (cl-cc/optimize::cfg-new-block cfg)))
     (cl-cc/optimize::%sccp-redirect-successors entry (list extra))
@@ -138,10 +138,10 @@
 (deftest sccp-process-block-folds-const-in-block
   "%sccp-process-block folds vm-add to vm-const when env has both operands."
   (let* ((env   (make-hash-table :test #'eq))
-         (cfg   (cl-cc/optimize::cfg-build
+         (cfg   (cl-cc/optimize:cfg-build
                  (list (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
                        (make-vm-ret :reg :r2))))
-         (entry (cl-cc/optimize::cfg-entry cfg)))
+         (entry (cl-cc/optimize:cfg-entry cfg)))
     (setf (gethash :r0 env) 3 (gethash :r1 env) 4)
     (let ((out-env (cl-cc/optimize::%sccp-process-block entry env)))
       (let ((folded (first (cl-cc:bb-instructions entry))))
