@@ -20,14 +20,13 @@
 ;;; ------------------------------------------------------------
 
 (deftest-each bytecode-opcode-constants
-  "Opcode constants have the expected integer values."
-  ((label constant expected)
-   ("nop"        cl-cc/bytecode:+op-nop+        #x00)
-   ("load-const" cl-cc/bytecode:+op-load-const+ #x01)
-   ("add"        cl-cc/bytecode:+op-add+        #x10)
-   ("return"     cl-cc/bytecode:+op-return+     #x35)
-   ("wide"       cl-cc/bytecode:+op-wide+       #xFE))
-  (declare (ignore label))
+  "Opcode constants have to expected integer values."
+  :cases (("nop"        cl-cc/bytecode:+op-nop+        #x00)
+          ("load-const" cl-cc/bytecode:+op-load-const+ #x01)
+          ("add"        cl-cc/bytecode:+op-add+        #x10)
+          ("return"     cl-cc/bytecode:+op-return+     #x35)
+          ("wide"       cl-cc/bytecode:+op-wide+       #xFE))
+  (constant expected)
   (assert-= expected constant))
 
 ;;; ------------------------------------------------------------
@@ -44,11 +43,10 @@
 
 (deftest-each bytecode-encode-3op-cases
   "encode-3op packs opcode, dst, src1, src2 into correct bit positions."
-  ((label op dst src1 src2)
-   ("basic"         cl-cc/bytecode:+op-add+ 1   2   3)
-   ("max-registers" cl-cc/bytecode:+op-add+ 255 255 255)
-   ("zero-registers" cl-cc/bytecode:+op-mul+ 0  0   0))
-  (declare (ignore label))
+  :cases (("basic"          cl-cc/bytecode:+op-add+ 1   2   3)
+          ("max-registers"  cl-cc/bytecode:+op-add+ 255 255 255)
+          ("zero-registers" cl-cc/bytecode:+op-mul+ 0   0   0))
+  (op dst src1 src2)
   (let ((w (cl-cc/bytecode:encode-3op op dst src1 src2)))
     (assert-= op   (ldb (byte 8 24) w))
     (assert-= dst  (ldb (byte 8 16) w))
@@ -77,12 +75,11 @@
 
 (deftest-each bytecode-encode-imm-cases
   "encode-imm encodes opcode, register, and immediate into the correct bit fields."
-  ((label reg imm expected-low16)
-   ("positive" 3 100     100)
-   ("zero"     0 0       0)
-   ("negative" 1 -1      #xFFFF)
-   ("min"      0 -32768  #x8000))
-  (declare (ignore label))
+  :cases (("positive" 3 100     100)
+          ("zero"     0 0       0)
+          ("negative" 1 -1      #xFFFF)
+          ("min"      0 -32768 #x8000))
+  (reg imm expected-low16)
   (let ((w (cl-cc/bytecode:encode-imm cl-cc/bytecode:+op-load-fixnum+ reg imm)))
     (assert-= cl-cc/bytecode:+op-load-fixnum+ (ldb (byte 8 24) w))
     (assert-= reg (ldb (byte 8 16) w))
@@ -94,11 +91,10 @@
 
 (deftest-each bytecode-encode-branch-cases
   "encode-branch encodes the opcode and offset into the correct bit fields."
-  ((label offset expected-low24)
-   ("zero"     0   0)
-   ("positive" 50  50)
-   ("negative" -1  #xFFFFFF))
-  (declare (ignore label))
+  :cases (("zero"     0   0)
+          ("positive" 50 50)
+          ("negative" -1 #xFFFFFF))
+  (offset expected-low24)
   (let ((w (cl-cc/bytecode:encode-branch cl-cc/bytecode:+op-jump+ offset)))
     (assert-= cl-cc/bytecode:+op-jump+ (ldb (byte 8 24) w))
     (assert-= expected-low24 (ldb (byte 24 0) w))))

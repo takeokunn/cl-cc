@@ -16,26 +16,26 @@
 
 (deftest-each diag-byte-offset-to-line-col-cases
   "byte-offset-to-line-col returns correct (line col) for each case."
-  ((src offset expected-line expected-col)
-   ("hello"                      0   1 1)
-   ("hello world"                5   1 6)
-   ((format nil "abc~%def")      4   2 1)
-   ((format nil "a~%b~%cde")     4   3 1)
-   ("hi"                       100   1 3)
-   (""                            0   1 1))
+  :cases (("simple" "hello"                      0   1 1)
+          ("with-space" "hello world"                5   1 6)
+          ("with-format-1" (format nil "abc~%def")      4   2 1)
+          ("with-format-2" (format nil "a~%b~%cde")     4   3 1)
+          ("late" "hi"                       100   1 3)
+          ("empty" ""                            0   1 1))
+  (src offset expected-line expected-col)
   (multiple-value-bind (line col)
-      (cl-cc/parse:byte-offset-to-line-col src offset)
-    (assert-equal expected-line line)
-    (assert-equal expected-col col)))
+       (cl-cc/parse:byte-offset-to-line-col src offset)
+     (assert-equal expected-line line)
+     (assert-equal expected-col col)))
 
 ;;; ─── source-line-at ───────────────────────────────────────────────────────────
 
 (deftest-each diag-source-line-at-cases
   "source-line-at returns correct line for each offset."
-  ((src offset expected)
-   ((format nil "hello~%world") 0 "hello")
-   ((format nil "hello~%world") 6 "world")
-   ("foobar"                    3 "foobar"))
+  :cases (("offset-zero" (format nil "hello~%world") 0 "hello")
+          ("offset-middle" (format nil "hello~%world") 6 "world")
+          ("no-format" "foobar"                    3 "foobar"))
+  (src offset expected)
   (assert-equal expected (cl-cc/parse:source-line-at src offset)))
 
 ;;; ─── diagnostic struct ────────────────────────────────────────────────────────

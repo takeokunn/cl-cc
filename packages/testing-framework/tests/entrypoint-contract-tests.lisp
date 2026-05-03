@@ -18,11 +18,19 @@
     (assert-true (search "run-tests" text))
     (assert-true (search "starting unified test plan" text))))
 
-(deftest flake-deprecated-apps-removed
-  "test-full / coverage / perf-smoke / stability-smoke entrypoints must be removed."
+(deftest flake-coverage-app-runs-instrumented-suite
+  "The coverage app enables sb-cover before force-loading local test systems."
+  (let ((text (%flake-text)))
+    (assert-true (search "coverage = mkSbclScript" text))
+    (assert-true (search "sb-cover:store-coverage-data" text))
+    (assert-true (search "initialize-source-registry" text))
+    (assert-true (search "initialize-output-translations" text))
+    (assert-true (search ":coverage t" text))))
+
+(deftest flake-deprecated-smoke-apps-removed
+  "test-full / perf-smoke / stability-smoke entrypoints must be removed."
   (let ((text (%flake-text)))
     (assert-false (search "test-full = mkSbclScript" text))
-    (assert-false (search "coverage = mkSbclScript" text))
     (assert-false (search "perf-smoke =" text))
     (assert-false (search "stability-smoke =" text))
     (assert-false (search "run-fast-tests" text))))

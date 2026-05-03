@@ -13,43 +13,49 @@
 (in-package :cl-cc/test)
 
 (defsuite phase2-handler-suite
-  :description "Phase 2 builtin handler dispatch (AST-introspecting builtins)
-(in-suite phase2-handler-suite)
-"
+  :description "Phase 2 builtin handler dispatch (AST-introspecting builtins)"
   :parent cl-cc-codegen-unit-serial-suite)
+
+(in-suite phase2-handler-suite)
 
 ;;; ── MAKE-HASH-TABLE ───────────────────────────────────────────────────────
 
 (deftest-each phase2-make-hash-table-variants
   "make-hash-table emits vm-make-hash-table across all :test forms"
-  ((no-test
-    (let ((ctx (make-codegen-ctx)))
-      (compile-ast (make-call 'make-hash-table) ctx)
-      (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-make-hash-table))))
-   (quoted-test
-    (let ((ctx (make-codegen-ctx)))
-      (compile-ast (make-call 'make-hash-table
-                              (make-var :test)
-                              (make-quoted 'equal))
-                   ctx)
-      (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-make-hash-table)))
-        (assert-true inst)
-        ;; test-reg should be non-nil — a register was allocated for the test sym
-        (assert-true (cl-cc::vm-make-hash-table-test inst)))))
-   (var-test
-    (let ((ctx (make-codegen-ctx)))
-      (compile-ast (make-call 'make-hash-table
-                              (make-var :test)
-                              (make-var 'equal))
-                   ctx)
-      (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-make-hash-table))))
-   (function-test
-    (let ((ctx (make-codegen-ctx)))
-      (compile-ast (make-call 'make-hash-table
-                              (make-var :test)
-                              (make-fn 'equal))
-                   ctx)
-      (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-make-hash-table))))))
+  :cases (("no-test"
+           (lambda ()
+             (let ((ctx (make-codegen-ctx)))
+               (compile-ast (make-call 'make-hash-table) ctx)
+               (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-make-hash-table)))))
+         ("quoted-test"
+           (lambda ()
+             (let ((ctx (make-codegen-ctx)))
+               (compile-ast (make-call 'make-hash-table
+                                       (make-var :test)
+                                       (make-quoted 'equal))
+                            ctx)
+               (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-make-hash-table)))
+                 (assert-true inst)
+                 ;; test-reg should be non-nil — a register was allocated for the test sym
+                 (assert-true (cl-cc::vm-make-hash-table-test inst))))))
+         ("var-test"
+           (lambda ()
+             (let ((ctx (make-codegen-ctx)))
+               (compile-ast (make-call 'make-hash-table
+                                       (make-var :test)
+                                       (make-var 'equal))
+                            ctx)
+               (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-make-hash-table)))))
+         ("function-test"
+           (lambda ()
+             (let ((ctx (make-codegen-ctx)))
+               (compile-ast (make-call 'make-hash-table
+                                       (make-var :test)
+                                       (make-fn 'equal))
+                            ctx)
+               (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-make-hash-table))))))
+  (scenario)
+  (funcall scenario))
 
 ;;; ── GETHASH ───────────────────────────────────────────────────────────────
 
@@ -85,26 +91,32 @@
 
 (deftest-each phase2-make-array-variants
   "make-array and make-adjustable-vector emit vm-make-array with correct flags"
-  ((fixed-array-emits-inst
-    (let ((ctx (make-codegen-ctx)))
-      (compile-ast (make-call 'make-array (make-int 10)) ctx)
-      (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-make-array))))
-   (fixed-array-not-adjustable
-    (let ((ctx (make-codegen-ctx)))
-      (compile-ast (make-call 'make-array (make-int 10)) ctx)
-      (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-make-array)))
-        (assert-true (null (cl-cc::vm-make-array-fill-pointer inst)))
-        (assert-true (null (cl-cc::vm-make-array-adjustable inst))))))
-   (adjustable-vector-emits-inst
-    (let ((ctx (make-codegen-ctx)))
-      (compile-ast (make-call 'make-adjustable-vector (make-int 10)) ctx)
-      (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-make-array))))
-   (adjustable-vector-is-adjustable
-    (let ((ctx (make-codegen-ctx)))
-      (compile-ast (make-call 'make-adjustable-vector (make-int 10)) ctx)
-      (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-make-array)))
-        (assert-true (cl-cc::vm-make-array-fill-pointer inst))
-        (assert-true (cl-cc::vm-make-array-adjustable inst)))))))
+  :cases (("fixed-array-emits-inst"
+           (lambda ()
+             (let ((ctx (make-codegen-ctx)))
+               (compile-ast (make-call 'make-array (make-int 10)) ctx)
+               (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-make-array)))))
+         ("fixed-array-not-adjustable"
+           (lambda ()
+             (let ((ctx (make-codegen-ctx)))
+               (compile-ast (make-call 'make-array (make-int 10)) ctx)
+               (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-make-array)))
+                 (assert-true (null (cl-cc::vm-make-array-fill-pointer inst)))
+                 (assert-true (null (cl-cc::vm-make-array-adjustable inst)))))))
+         ("adjustable-vector-emits-inst"
+           (lambda ()
+             (let ((ctx (make-codegen-ctx)))
+               (compile-ast (make-call 'make-adjustable-vector (make-int 10)) ctx)
+               (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-make-array)))))
+         ("adjustable-vector-is-adjustable"
+           (lambda ()
+             (let ((ctx (make-codegen-ctx)))
+               (compile-ast (make-call 'make-adjustable-vector (make-int 10)) ctx)
+               (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-make-array)))
+                 (assert-true (cl-cc::vm-make-array-fill-pointer inst))
+                 (assert-true (cl-cc::vm-make-array-adjustable inst)))))))
+  (scenario)
+  (funcall scenario))
 
 ;;; ── ARRAY-ROW-MAJOR-INDEX ────────────────────────────────────────────────
 

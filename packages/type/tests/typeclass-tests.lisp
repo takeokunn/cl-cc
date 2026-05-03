@@ -73,7 +73,7 @@
   "register-typeclass rejects non-typeclass-def inputs with type-inference-error."
   (let ((cl-cc/type:*typeclass-registry* (make-hash-table :test #'eq)))
     (assert-signals type-inference-error
-      (register-typeclass 'bad-input '(legacy payload)))))
+      (register-typeclass 'bad-input '(:invalid payload)))))
 
 (deftest typeclass-default-methods-merge-into-instance
   "Instance registration fills missing methods from class defaults."
@@ -92,7 +92,7 @@
 
 
 (deftest typeclass-instance-registration-new
-  "register-typeclass-instance and lookup-typeclass-instance work with new API."
+  "register-typeclass-instance and lookup-typeclass-instance work with canonical API."
   (register-typeclass-instance 'show-int-test type-int
                                (list (cons 'show (lambda (x) (format nil "~A" x)))))
   (let ((inst (lookup-typeclass-instance 'show-int-test type-int)))

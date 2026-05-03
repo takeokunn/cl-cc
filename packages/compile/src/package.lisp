@@ -134,7 +134,7 @@
    #:cps-transform-sequence
    #:cps-transform-eval
 
-   ;; ── pipeline entry points (pre-interned here for legacy compat) ──
+   ;; ── pipeline entry points (canonical public API symbols) ──
    #:compile-expression
    #:compile-string
    #:run-string

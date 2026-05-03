@@ -49,7 +49,11 @@
    (:file "macros-mop-support")   ; MOP introspection macros + parse-float + reinitialize-instance
     (:file "expander-data")       ; expander: grammar tables + dispatch table declarations
     (:file "expander-helpers")    ; expander: shared helper functions extracted from expander.lisp
-    (:file "expander-defstruct")  ; expander: defstruct expansion helpers
+    (:file "expander-defstruct-copy") ; expander: COPY-STRUCTURE expansion
+     (:file "expander-defstruct-boa")  ; expander: BOA constructors for defstruct
+     (:file "expander-defstruct-typed") ; expander: :TYPE list/vector defstruct forms
+     (:file "expander-defstruct-clos")  ; expander: CLOS-backed defstruct forms
+     (:file "expander-defstruct")       ; expander: defstruct dispatcher
     (:file "expander-typed-params") ; typed lambda-list helpers + *function-type-registry*
     (:file "expander-core")
     (:file "expander-definitions-helpers") ; expander: lambda-list default expansion helper

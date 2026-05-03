@@ -39,15 +39,14 @@
 
 (deftest-each sign-extend-cases
   "%%sign-extend converts unsigned raw values to signed integers for any bit width."
-  ((label raw bits expected)
-   ("8-bit-positive"  127   8   127)
-   ("8-bit-negative"  128   8  -128)
-   ("8-bit-max"       255   8    -1)
-   ("16-bit-positive" 32767 16  32767)
-   ("16-bit-negative" 32768 16 -32768)
-   ("16-bit-max"      65535 16     -1)
-   ("24-bit-zero"     0     24      0))
-  (declare (ignore label))
+  :cases (("8-bit-positive" 127   8   127)
+          ("8-bit-negative" 128   8  -128)
+          ("8-bit-max"       255   8    -1)
+          ("16-bit-positive" 32767 16 32767)
+          ("16-bit-negative" 32768 16 -32768)
+          ("16-bit-max"      65535 16     -1)
+          ("24-bit-zero"     0     24      0))
+  (raw bits expected)
   (assert-= expected (cl-cc/bytecode::%sign-extend raw bits)))
 
 ;;; ------------------------------------------------------------
@@ -56,13 +55,12 @@
 
 (deftest-each decode-imm16-cases
   "decode-imm16 sign-extends 16-bit two's complement values correctly."
-  ((label encoded-imm expected-value)
-   ("positive"     100     100)
-   ("zero"         0       0)
-   ("negative-one" -1      -1)
-   ("min"          -32768  -32768)
-   ("max"          32767   32767))
-  (declare (ignore label))
+  :cases (("positive"     100     100)
+          ("zero"         0       0)
+          ("negative-one" -1      -1)
+          ("min"          -32768  -32768)
+          ("max"          32767   32767))
+  (encoded-imm expected-value)
   (let ((w (cl-cc/bytecode:encode-imm cl-cc/bytecode:+op-load-fixnum+ 0 encoded-imm)))
     (assert-= expected-value (cl-cc/bytecode:decode-imm16 w))))
 
@@ -72,11 +70,10 @@
 
 (deftest-each decode-offset24-cases
   "decode-offset24 sign-extends 24-bit branch offsets correctly."
-  ((label offset)
-   ("positive" 200)
-   ("zero"     0)
-   ("negative" -10))
-  (declare (ignore label))
+  :cases (("positive" 200)
+          ("zero"     0)
+          ("negative" -10))
+  (offset)
   (let ((w (cl-cc/bytecode:encode-branch cl-cc/bytecode:+op-jump+ offset)))
     (assert-= offset (cl-cc/bytecode:decode-offset24 w))))
 
@@ -88,17 +85,16 @@
 ;;; causing nargs to be silently dropped during disassembly.
 (deftest-each decode-format-classification
   "instruction-format classifies each opcode into the correct format keyword."
-  ((label opcode expected-format)
-   ("add"             cl-cc/bytecode:+op-add+          :3op)
-   ("call"            cl-cc/bytecode:+op-call+         :3op)
-   ("tail-call"       cl-cc/bytecode:+op-tail-call+    :3op)
-   ("move"            cl-cc/bytecode:+op-move+         :2op)
-   ("neg"             cl-cc/bytecode:+op-neg+          :2op)
-   ("load-fixnum"     cl-cc/bytecode:+op-load-fixnum+  :imm)
-   ("jump"            cl-cc/bytecode:+op-jump+         :branch)
-   ("nop"             cl-cc/bytecode:+op-nop+          :special)
-   ("return-nil"      cl-cc/bytecode:+op-return-nil+   :special))
-  (declare (ignore label))
+  :cases (("add"         cl-cc/bytecode:+op-add+         :3op)
+          ("call"        cl-cc/bytecode:+op-call+        :3op)
+          ("tail-call"   cl-cc/bytecode:+op-tail-call+   :3op)
+          ("move"        cl-cc/bytecode:+op-move+        :2op)
+          ("neg"         cl-cc/bytecode:+op-neg+         :2op)
+          ("load-fixnum" cl-cc/bytecode:+op-load-fixnum+ :imm)
+          ("jump"        cl-cc/bytecode:+op-jump+        :branch)
+          ("nop"         cl-cc/bytecode:+op-nop+         :special)
+          ("return-nil"  cl-cc/bytecode:+op-return-nil+  :special))
+  (opcode expected-format)
   (assert-equal expected-format (cl-cc/bytecode:instruction-format opcode)))
 
 ;;; ------------------------------------------------------------
@@ -171,11 +167,10 @@
 
 (deftest-each decode-opcode-name-cases
   "Each opcode maps to its expected name string in *opcode-names*."
-  ((label opcode expected-name)
-   ("add"       cl-cc/bytecode:+op-add+       "ADD")
-   ("tail-call" cl-cc/bytecode:+op-tail-call+ "TAIL_CALL")
-   ("nop"       cl-cc/bytecode:+op-nop+       "NOP"))
-  (declare (ignore label))
+  :cases (("add"       cl-cc/bytecode:+op-add+       "ADD")
+          ("tail-call" cl-cc/bytecode:+op-tail-call+ "TAIL_CALL")
+          ("nop"       cl-cc/bytecode:+op-nop+       "NOP"))
+  (opcode expected-name)
   (assert-equal expected-name
                 (gethash opcode cl-cc/bytecode:*opcode-names*)))
 

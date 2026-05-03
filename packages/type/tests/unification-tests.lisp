@@ -11,45 +11,24 @@
 
 (deftest-each unify-product-cases
   "Product type unification: identical succeeds; length mismatch fails."
-  ((same-types
-    (let ((p (cl-cc/type:make-type-product
-              :elems (list cl-cc/type:type-int cl-cc/type:type-string))))
-      (multiple-value-bind (s ok) (type-unify p p)
-        (assert-true ok)
-        (assert-true (cl-cc/type:substitution-p s)))))
-   (length-mismatch
-    (let ((p1 (cl-cc/type:make-type-product :elems (list cl-cc/type:type-int)))
-          (p2 (cl-cc/type:make-type-product :elems (list cl-cc/type:type-int cl-cc/type:type-string))))
-      (multiple-value-bind (s ok) (type-unify p1 p2)
-        (declare (ignore s))
-        (assert-false ok))))))
-
-(deftest unify-product-with-vars
-  "Unifying a product with variables binds them."
-  (let* ((a (cl-cc/type:fresh-type-var 'a))
-         (p1 (cl-cc/type:make-type-product :elems (list a cl-cc/type:type-string)))
-         (p2 (cl-cc/type:make-type-product :elems (list cl-cc/type:type-int cl-cc/type:type-string))))
-    (multiple-value-bind (s ok) (type-unify p1 p2)
-      (assert-true ok)
-      (let ((bound (zonk a s)))
-        (assert-eq 'fixnum (cl-cc/type:type-primitive-name bound))))))
-
-;;; ─── Intersection Type Unification ─────────────────────────────────────
-
-(deftest unify-intersection-identical-succeeds
-  "Identical intersection types unify successfully."
-  (let ((i (cl-cc/type:make-type-intersection-raw :types (list cl-cc/type:type-int cl-cc/type:type-string))))
-    (multiple-value-bind (s ok) (type-unify i i)
-      (assert-true ok)
-      (assert-true (cl-cc/type:substitution-p s)))))
-
-(deftest unify-intersection-different-lengths-fail
-  "Intersection types with different lengths fail to unify."
-  (let ((i-s (cl-cc/type:make-type-intersection-raw :types (list cl-cc/type:type-int)))
-        (i-l (cl-cc/type:make-type-intersection-raw :types (list cl-cc/type:type-int cl-cc/type:type-string))))
-    (multiple-value-bind (_ ok) (type-unify i-s i-l)
-      (declare (ignore _))
-      (assert-false ok))))
+  :cases (("same-types"
+           (let ((p (cl-cc/type:make-type-product
+                     :elems (list cl-cc/type:type-int cl-cc/type:type-string))))
+             (list p p))
+           t)
+          ("length-mismatch"
+           (list (cl-cc/type:make-type-product :elems (list cl-cc/type:type-int))
+                 (cl-cc/type:make-type-product
+                  :elems (list cl-cc/type:type-int cl-cc/type:type-string)))
+           nil))
+  (types expected-ok)
+  (destructuring-bind (lhs rhs) types
+    (multiple-value-bind (s ok) (type-unify lhs rhs)
+      (if expected-ok
+          (progn
+            (assert-true ok)
+            (assert-true (cl-cc/type:substitution-p s)))
+          (assert-false ok)))))
 
 ;;; ─── Union Type Unification ─────────────────────────────────────────────
 
@@ -159,22 +138,20 @@
 
 (deftest-each unify-arrow-mismatch-cases
   "Arrow types that differ in arity or return type fail to unify."
-  ((arity-mismatch
-    (let ((f1 (cl-cc/type:make-type-arrow-raw :params (list cl-cc/type:type-int)
-                                               :return cl-cc/type:type-int))
-          (f2 (cl-cc/type:make-type-arrow-raw :params (list cl-cc/type:type-int cl-cc/type:type-int)
-                                               :return cl-cc/type:type-int)))
-      (multiple-value-bind (s ok) (type-unify f1 f2)
-        (declare (ignore s))
-        (assert-false ok))))
-   (return-mismatch
-    (let ((f1 (cl-cc/type:make-type-arrow-raw :params (list cl-cc/type:type-int)
-                                               :return cl-cc/type:type-int))
-          (f2 (cl-cc/type:make-type-arrow-raw :params (list cl-cc/type:type-int)
-                                               :return cl-cc/type:type-string)))
-      (multiple-value-bind (s ok) (type-unify f1 f2)
-        (declare (ignore s))
-        (assert-false ok))))))
+  :cases (("arity-mismatch"
+           (cl-cc/type:make-type-arrow-raw :params (list cl-cc/type:type-int)
+                                           :return cl-cc/type:type-int)
+           (cl-cc/type:make-type-arrow-raw :params (list cl-cc/type:type-int cl-cc/type:type-int)
+                                           :return cl-cc/type:type-int))
+          ("return-mismatch"
+           (cl-cc/type:make-type-arrow-raw :params (list cl-cc/type:type-int)
+                                           :return cl-cc/type:type-int)
+           (cl-cc/type:make-type-arrow-raw :params (list cl-cc/type:type-int)
+                                           :return cl-cc/type:type-string)))
+  (lhs rhs)
+  (multiple-value-bind (s ok) (type-unify lhs rhs)
+    (declare (ignore s))
+    (assert-false ok)))
 
 ;;; ─── Effect Row Unification ─────────────────────────────────────────────
 

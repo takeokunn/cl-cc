@@ -60,7 +60,27 @@ first-class function values here."
 
 (defun %compile-call-arg-registers (args ctx)
   "Compile ARGS left-to-right and return their result registers."
-  (mapcar (lambda (arg) (compile-ast arg ctx)) args))
+  (let ((tail args)
+        (regs-rev nil)
+        (arg-regs nil))
+    (tagbody
+     compile-call-args
+       (when (null tail)
+         (go compile-call-args-done))
+       (setf regs-rev (cons (compile-ast (car tail) ctx) regs-rev))
+       (setf tail (cdr tail))
+       (go compile-call-args)
+     compile-call-args-done)
+    (let ((reverse-tail regs-rev))
+      (tagbody
+       reverse-call-args
+         (when (null reverse-tail)
+           (go reverse-call-args-done))
+         (setf arg-regs (cons (car reverse-tail) arg-regs))
+         (setf reverse-tail (cdr reverse-tail))
+         (go reverse-call-args)
+       reverse-call-args-done))
+    arg-regs))
 
 (defun %emit-call-like-instruction (tail result-reg func-reg arg-regs ctx)
   "Emit either a normal call or a tail call and return RESULT-REG."
@@ -211,20 +231,47 @@ first-class function values here."
     (let ((arg-regs (%compile-call-arg-registers args ctx)))
      (cond
       ;; Self-recursive simple tail call → update params + jump (loop lowering)
-      ((and tail
-            (ctx-current-function-simple-p ctx)
-            func-sym
-            (symbolp func-expr)
-            (eq func-sym (ctx-current-function-name ctx))
-            (= (length args) (length (ctx-current-function-params ctx))))
-       (let ((temps (mapcar (lambda (r)
-                              (let ((t-reg (make-register ctx)))
-                                (emit ctx (make-vm-move :dst t-reg :src r))
-                                t-reg))
-                            arg-regs)))
-         (dolist (param (ctx-current-function-params ctx))
-           (emit ctx (make-vm-move :dst (lookup-var ctx param) :src (pop temps)))))
-       (emit ctx (make-vm-jump :label (ctx-current-function-label ctx))))
+       ((and tail
+             (ctx-current-function-simple-p ctx)
+             func-sym
+             (symbolp func-expr)
+             (eq func-sym (ctx-current-function-name ctx))
+             (= (length args) (length (ctx-current-function-params ctx))))
+        (let ((regs-tail arg-regs)
+              (temps-rev nil)
+              (temps nil))
+          (tagbody
+           copy-tail-arg-regs
+             (when (null regs-tail)
+               (go copy-tail-arg-regs-done))
+             (let ((t-reg (make-register ctx)))
+               (emit ctx (make-vm-move :dst t-reg :src (car regs-tail)))
+               (setf temps-rev (cons t-reg temps-rev)))
+             (setf regs-tail (cdr regs-tail))
+             (go copy-tail-arg-regs)
+           copy-tail-arg-regs-done)
+          (let ((reverse-tail temps-rev))
+            (tagbody
+             reverse-tail-temps
+               (when (null reverse-tail)
+                 (go reverse-tail-temps-done))
+               (setf temps (cons (car reverse-tail) temps))
+               (setf reverse-tail (cdr reverse-tail))
+               (go reverse-tail-temps)
+             reverse-tail-temps-done))
+          (let ((params-tail (ctx-current-function-params ctx))
+                (temps-tail temps))
+            (tagbody
+             install-tail-temps
+               (when (null params-tail)
+                 (go install-tail-temps-done))
+               (emit ctx (make-vm-move :dst (lookup-var ctx (car params-tail))
+                                       :src (car temps-tail)))
+               (setf params-tail (cdr params-tail))
+               (setf temps-tail (cdr temps-tail))
+               (go install-tail-temps)
+             install-tail-temps-done)))
+        (emit ctx (make-vm-jump :label (ctx-current-function-label ctx))))
       ;; Generic function dispatch
       ((and func-sym (gethash func-sym (ctx-global-generics ctx)))
        (emit ctx (make-vm-generic-call :dst result-reg :gf-reg func-reg :args arg-regs)))
@@ -235,6 +282,22 @@ first-class function values here."
        (t
         (emit ctx (make-vm-call :dst result-reg :func func-reg :args arg-regs))))
       result-reg)))
+
+(defmacro %define-call-fast-path-dispatcher (name lambda-list &body handler-forms)
+  "Define a call fast-path dispatcher from ordered HANDLER-FORMS.
+Each handler form must return RESULT-REG on success or NIL to continue."
+  `(defun ,name ,lambda-list
+     "Try ordered call fast paths. Returns RESULT-REG on success, NIL otherwise."
+     (or ,@handler-forms)))
+
+(%define-call-fast-path-dispatcher %try-compile-call-fast-paths
+    (func-expr func-sym args result-reg tail ctx)
+  (%try-compile-funcall          func-sym  args result-reg tail ctx)
+  (%try-compile-apply            func-sym  args result-reg      ctx)
+  (%try-compile-noescape-closure func-expr args             tail ctx)
+  (%try-compile-noescape-cons    func-sym  args result-reg      ctx)
+  (%try-compile-noescape-array   func-sym  args result-reg      ctx)
+  (%try-compile-builtin          func-sym  args result-reg      ctx))
 
 (defmethod compile-ast ((node ast-call) ctx)
   "Compile a function call via priority-ordered fast-path dispatch.
@@ -248,10 +311,5 @@ first-class function values here."
                           (t nil)))
          (args       (ast-call-args node))
          (result-reg (make-register ctx)))
-    (or (%try-compile-funcall          func-sym  args result-reg tail ctx)
-        (%try-compile-apply            func-sym  args result-reg      ctx)
-        (%try-compile-noescape-closure func-expr args             tail ctx)
-        (%try-compile-noescape-cons    func-sym  args result-reg      ctx)
-        (%try-compile-noescape-array   func-sym  args result-reg      ctx)
-        (%try-compile-builtin          func-sym  args result-reg      ctx)
+    (or (%try-compile-call-fast-paths func-expr func-sym args result-reg tail ctx)
         (%compile-normal-call          func-expr func-sym args result-reg tail ctx))))

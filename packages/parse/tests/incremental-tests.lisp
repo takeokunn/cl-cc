@@ -42,44 +42,44 @@
 
 (deftest-each incr-overlaps-edit-cases
   "cst-overlaps-edit-p returns correct result for each node position."
-  ((node-start node-end expected)
-   (5  15 t)
-   (0  5  nil)
-   (25 30 nil))
+  :cases (("overlapping" 5 15 t)
+          ("non-overlap-1" 0 5 nil)
+          ("non-overlap-2" 25 30 nil))
+  (node-start node-end expected)
   (let ((node (make-test-cst-token :T-INT 1 node-start node-end))
-        (edit (make-test-edit 10 20 25)))
-    (assert-equal expected (cl-cc/parse::cst-overlaps-edit-p node edit))))
+         (edit (make-test-edit 10 20 25)))
+     (assert-equal expected (cl-cc/parse::cst-overlaps-edit-p node edit))))
 
 (deftest-each incr-before-after-edit-cases
   "cst-before-edit-p and cst-after-edit-p return correct results for each node position."
-  ((predicate node-start node-end expected)
-   (cl-cc/parse::cst-before-edit-p  0  10 t)
-   (cl-cc/parse::cst-before-edit-p  0  15 nil)
-   (cl-cc/parse::cst-after-edit-p  20  30 t)
-   (cl-cc/parse::cst-after-edit-p  15  25 nil))
+  :cases (("before-true" #'cl-cc/parse::cst-before-edit-p 0 10 t)
+          ("before-false" #'cl-cc/parse::cst-before-edit-p 0 15 nil)
+          ("after-true" #'cl-cc/parse::cst-after-edit-p 20 30 t)
+          ("after-false" #'cl-cc/parse::cst-after-edit-p 15 25 nil))
+  (predicate node-start node-end expected)
   (let ((node (make-test-cst-token :T-INT 1 node-start node-end))
-        (edit (make-test-edit 10 20 25)))
-    (assert-equal expected (funcall predicate node edit))))
+         (edit (make-test-edit 10 20 25)))
+     (assert-equal expected (funcall predicate node edit))))
 
 (deftest-each incr-reuse-p-cases
   "cst-reuse-p returns correct result for node before vs overlapping edit."
-  ((node-start node-end expected)
-   (0  5 t)
-   (5 15 nil))
+  :cases (("reuse-true" 0 5 t)
+          ("reuse-false" 5 15 nil))
+  (node-start node-end expected)
   (let ((node (make-test-cst-token :T-INT 1 node-start node-end))
-        (edit (make-test-edit 10 20 25)))
-    (assert-equal expected (cl-cc/parse::cst-reuse-p node edit))))
+         (edit (make-test-edit 10 20 25)))
+     (assert-equal expected (cl-cc/parse::cst-reuse-p node edit))))
 
 ;;; ─── Byte Shifting ──────────────────────────────────────────────────────────
 
 (deftest-each incr-edit-byte-delta-cases
   "edit-byte-delta returns correct signed delta for insertion, deletion, and replacement."
-  ((old-end new-end expected)
-   (10 15   5)
-   (20 15  -5)
-   (20 20   0))
+  :cases (("insertion" 10 15 5)
+          ("deletion" 20 15 -5)
+          ("replacement" 20 20 0))
+  (old-end new-end expected)
   (let ((edit (make-test-edit 10 old-end new-end)))
-    (assert-equal expected (cl-cc/parse::edit-byte-delta edit))))
+     (assert-equal expected (cl-cc/parse::edit-byte-delta edit))))
 
 (deftest incr-shift-bytes-token
   "cst-shift-bytes on a token adjusts start/end by delta and preserves value."
@@ -192,13 +192,13 @@
 
 (deftest-each incr-cst-equal-token-cases
   "cst-equal-p returns correct result for identical vs differing tokens."
-  ((a-kind a-val b-kind b-val expected)
-   (:T-INT   42 :T-INT   42 t)
-   (:T-INT   42 :T-INT   99 nil)
-   (:T-INT    1 :T-IDENT  1 nil))
+  :cases (("same-kind-value" :T-INT   42 :T-INT   42 t)
+          ("diff-value" :T-INT   42 :T-INT   99 nil)
+          ("diff-kind" :T-INT    1 :T-IDENT  1 nil))
+  (a-kind a-val b-kind b-val expected)
   (let ((a (make-test-cst-token a-kind a-val 0 2))
-        (b (make-test-cst-token b-kind b-val 0 2)))
-    (assert-equal expected (cl-cc/parse:cst-equal-p a b))))
+         (b (make-test-cst-token b-kind b-val 0 2)))
+     (assert-equal expected (cl-cc/parse:cst-equal-p a b))))
 
 (deftest incr-cst-equal-interior
   "cst-equal-p returns true for structurally equal interior nodes."
@@ -218,11 +218,11 @@
 
 (deftest-each incr-cst-equal-error-cases
   "cst-equal-p compares error nodes by message: equal messages → true, differing → false."
-  ((msg-a msg-b expected)
-   ("bad"  "bad"   t)
-   ("bad"  "worse" nil))
+  :cases (("same" "bad"  "bad"   t)
+          ("different" "bad"  "worse" nil))
+  (msg-a msg-b expected)
   (let ((a (cl-cc/parse:make-cst-error :kind :error :start-byte 0 :end-byte 5
-                                        :message msg-a))
-        (b (cl-cc/parse:make-cst-error :kind :error :start-byte 0 :end-byte 5
-                                        :message msg-b)))
-    (assert-equal expected (cl-cc/parse:cst-equal-p a b))))
+                                         :message msg-a))
+         (b (cl-cc/parse:make-cst-error :kind :error :start-byte 0 :end-byte 5
+                                         :message msg-b)))
+     (assert-equal expected (cl-cc/parse:cst-equal-p a b))))

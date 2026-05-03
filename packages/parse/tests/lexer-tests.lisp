@@ -116,11 +116,11 @@
 
 (deftest-each lexer-quote-macros
   "Lexer: quote macro characters produce correct token types"
-  ((input expected-token-type)
-   ("'x"  :T-QUOTE)
-   ("`x"  :T-BACKQUOTE)
-   (",x"  :T-UNQUOTE)
-   (",@x" :T-UNQUOTE-SPLICING))
+  :cases (("quote" "'x"  :T-QUOTE)
+          ("backquote" "`x"  :T-BACKQUOTE)
+          ("unquote" ",x"  :T-UNQUOTE)
+          ("splice" ",@x"  :T-UNQUOTE-SPLICING))
+  (input expected-token-type)
   (assert-eq expected-token-type (first-token-type input)))
 
 ;;; ─── Hash Dispatch ──────────────────────────────────────────────────────────
@@ -146,10 +146,10 @@
 
 (deftest-each lexer-radix-dispatch
   "Lexer: radix dispatch produces correct integer values"
-  ((input expected-value)
-   ("#b101" 5)
-   ("#o10"  8)
-   ("#xFF"  255))
+  :cases (("binary" "#b101" 5)
+          ("octal" "#o10" 8)
+          ("hex" "#xFF" 255))
+  (input expected-value)
   (assert-= expected-value (first-token-value input)))
 
 ;;; ─── Comments ───────────────────────────────────────────────────────────────

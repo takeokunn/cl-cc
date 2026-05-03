@@ -112,6 +112,19 @@
   (let ((expanded (macroexpand-1 '(assert-run= 7 "(+ 1 2)"))))
     (assert-eq '%with-run-string-assertion (first expanded))))
 
+(deftest-each framework-meta-deftest-each-rejects-malformed-input
+  "deftest-each rejects missing binding lists and mismatched case arity during macro expansion."
+  :cases (("missing-binding-list"
+           '(deftest-each malformed "doc" :cases (("case" 1))
+              (assert-true t)))
+          ("mismatched-case-arity"
+           '(deftest-each malformed "doc" :cases (("case" 1 2))
+              (x)
+              (assert-true x))))
+  (form)
+  (assert-signals error
+    (macroexpand-1 form)))
+
 (deftest framework-meta-assert-run=-reports-host-errors-in-failure-message
   "assert-run= reports host-signaled errors as a readable TAP YAML failure."
   (flet ((run-string (expr) (declare (ignore expr)) (error "synthetic host failure")))

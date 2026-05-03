@@ -167,10 +167,10 @@
 
 (deftest-each pipeline-run-string-stdlib-forms
   "run-string with :stdlib enables stdlib functions."
-  :cases ((mapcar-inc  '(2 3 4)
-           "(mapcar (lambda (x) (+ x 1)) '(1 2 3))")
-          (reduce-sum  10
-           "(reduce (lambda (a b) (+ a b)) '(1 2 3 4) 0 t)"))
+  :cases (("mapcar-inc"  '(2 3 4)
+            "(mapcar (lambda (x) (+ x 1)) '(1 2 3))")
+          ("reduce-sum"  10
+            "(reduce (lambda (a b) (+ a b)) '(1 2 3 4) 0 t)"))
   (expected expr)
   (assert-equal expected (run-string expr :stdlib t)))
 

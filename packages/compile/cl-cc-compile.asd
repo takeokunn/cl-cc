@@ -40,6 +40,8 @@
    (:file "codegen-functions-emit")
    (:file "codegen-phase2")
    (:file "codegen-control")
+   (:file "codegen-values-helpers")
+   (:file "codegen-values")
    (:file "codegen-io")
    (:file "codegen-io-ext")
    (:file "codegen-hash-table")

@@ -208,12 +208,12 @@
 
 (deftest-each cps-lower-lambda-param-cases
   "%cps-lower-lambda-param: no-default → symbol; default-only → (name default); both → (name default svar)."
-  (("no-default"       (list 'x nil nil)
-    'x)
-   ("default-only"     (list 'y (cl-cc/ast:make-ast-int :value 42) nil)
-    '(y 42))
-   ("default-and-svar" (list 'z (cl-cc/ast:make-ast-int :value 0) 'z-p)
-    '(z 0 z-p)))
+  :cases (("no-default"       (list 'x nil nil)
+     'x)
+    ("default-only"     (list 'y (cl-cc/ast:make-ast-int :value 42) nil)
+     '(y 42))
+    ("default-and-svar" (list 'z (cl-cc/ast:make-ast-int :value 0) 'z-p)
+     '(z 0 z-p)))
   (slot expected)
   (assert-equal expected (cl-cc/cps::%cps-lower-lambda-param slot)))
 
@@ -224,22 +224,22 @@
 
 (deftest-each cps-extended-lambda-list-cases
   "Lambda-list reconstruction preserves &optional, &rest, and &key markers."
-  (("required-only"
+  :cases (("required-only"
     '(a b) nil nil nil
     '(a b))
-   ("with-optional"
+         ("with-optional"
     '(x) (list (list 'y nil nil)) nil nil
     '(x &optional y))
-   ("with-optional-default"
+         ("with-optional-default"
     '(x) (list (list 'y (cl-cc/ast:make-ast-int :value 0) nil)) nil nil
     '(x &optional (y 0)))
-   ("with-rest"
+         ("with-rest"
     '(x) nil 'rest nil
     '(x &rest rest))
-   ("with-key"
+         ("with-key"
     '() nil nil (list (list 'k nil nil))
     '(&key k))
-   ("combined"
+         ("combined"
     '(a) (list (list 'b nil nil)) 'r (list (list 'c nil nil))
     '(a &optional b &rest r &key c)))
   (required optional rest key expected)

@@ -131,6 +131,34 @@ let
       ];
     };
 
+    coverage = mkSbclScript {
+      name = "coverage";
+      description = "Run the canonical test plan with sb-cover instrumentation";
+      sbclVariant = "tests";
+      enableDispatchSemFix = true;
+      enablePbtSanitize = true;
+      enableFaslCacheCleaner = true;
+      forceReload = true;
+      extraTimeoutSeconds = 600;
+      lispPreLoadEvalForms = [
+        "(require :sb-cover)"
+        "(declaim (optimize sb-cover:store-coverage-data))"
+        "(require :asdf)"
+        "(asdf:initialize-source-registry `(:source-registry (:tree ,(uiop:getcwd)) :ignore-inherited-configuration))"
+        ''(asdf:initialize-output-translations (quote (:output-translations (t (:home ".cache" "common-lisp" :implementation)) :ignore-inherited-configuration)))''
+      ];
+      lispPostLoadEvalForms = [
+        ''(load (merge-pathnames "cl-cc-test.asd" *default-pathname-defaults*))''
+        "(asdf:load-system :cl-cc-test :force t)"
+        "(asdf:load-system :cl-cc-test/slow :force t)"
+        ''(load (merge-pathnames "tests/e2e/selfhost-test-support.lisp" *default-pathname-defaults*))''
+        ''(load (merge-pathnames "tests/e2e/selfhost-meta-tests.lisp" *default-pathname-defaults*))''
+        ''(load (merge-pathnames "tests/e2e/selfhost-tests.lisp" *default-pathname-defaults*))''
+        ''(format t "# starting coverage test plan (sb-cover + unit + integration + selfhost-slow + e2e)~%")''
+        ''(handler-case (let ((failed (cl-cc/test:run-suite (quote cl-cc/test:cl-cc-suite) :parallel nil :random nil :coverage t :quit-p nil))) (declaim (optimize (sb-cover:store-coverage-data 0))) (uiop:quit (if failed 1 0))) (error (e) (format t "~&not ok - coverage fatal error: ~A~%" e) (format *error-output* "~&FATAL: ~A~%" e) (uiop:quit 1)))''
+      ];
+    };
+
     load = mkSbclScript {
       name = "load";
       sbclVariant = "production";

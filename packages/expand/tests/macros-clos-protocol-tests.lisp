@@ -79,7 +79,7 @@
     (assert-eq 'quote (car result))
     (assert-eq 'append (second result))))
 
-(deftest-each instance-init-compat-macros-use-shared-helper
+(deftest-each instance-init-macros-use-shared-helper
   "REINITIALIZE-INSTANCE and SHARED-INITIALIZE both delegate to %APPLY-INSTANCE-INITARGS."
   :cases (("reinitialize-instance"
            '(cl-cc::reinitialize-instance inst :slot 1))

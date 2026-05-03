@@ -42,13 +42,13 @@
 
 (deftest-each pipeline-run-string-forms
   "run-string evaluates various expression forms."
-  :cases ((arithmetic  3  "(+ 1 2)")
-          (literal    42  "42")
-          (nested     12  "(+ (* 2 3) (- 7 1))")
-          (let-form    5  "(let ((x 2) (y 3)) (+ x y))")
-          (if-true     1  "(if t 1 2)")
-          (if-false    2  "(if nil 1 2)")
-          (lambda      9  "((lambda (x) (* x x)) 3)"))
+  :cases (("arithmetic"  3  "(+ 1 2)")
+          ("literal"    42  "42")
+          ("nested"     12  "(+ (* 2 3) (- 7 1))")
+          ("let-form"    5  "(let ((x 2) (y 3)) (+ x y))")
+          ("if-true"     1  "(if t 1 2)")
+          ("if-false"    2  "(if nil 1 2)")
+          ("lambda"      9  "((lambda (x) (* x x)) 3)"))
   (expected expr)
   (assert-= expected (run-string expr)))
 
@@ -179,9 +179,9 @@
 
 (deftest-each pipeline-our-eval-forms
   "our-eval evaluates arithmetic, quoted data, and conditionals."
-  :cases ((arithmetic  6          '(* 2 3))
-          (quote-data  '(a b c)   '(quote (a b c)))
-          (if-form     10         '(if t 10 20)))
+  :cases (("arithmetic"  6          '(* 2 3))
+          ("quote-data"  '(a b c)   '(quote (a b c)))
+          ("if-form"     10         '(if t 10 20)))
   (expected expr)
   (assert-equal expected (cl-cc::our-eval expr)))
 
