@@ -42,11 +42,12 @@
           (cons (car lst) (remove-if-not pred (cdr lst)))
           (remove-if-not pred (cdr lst)))))"
 
-    "(defun find-if (pred lst)
+    "(defun find-if (pred lst &key key)
    (if (null lst) nil
-      (if (%stdlib-truthy-p (funcall pred (car lst)))
-          (car lst)
-          (find-if pred (cdr lst)))))"
+      (let ((val (if key (funcall key (car lst)) (car lst))))
+        (if (%stdlib-truthy-p (funcall pred val))
+            (car lst)
+            (find-if pred (cdr lst) :key key)))))"
 
     "(defun every (pred lst)
    (if (null lst) t
@@ -127,11 +128,20 @@
          (cons (car lst1) (intersection (cdr lst1) lst2))
          (intersection (cdr lst1) lst2))))"
 
-    "(defun remove (item lst)
-   (remove-if (lambda (x) (eql x item)) lst))"
+    "(defun remove (item lst &key test key test-not)
+   (let ((test-fn (cond (test-not (complement test-not))
+                        (test test)
+                        (t #'eql)))
+         (key-fn (if key key #'identity)))
+     (if (null lst) nil
+       (if (funcall test-fn item (funcall key-fn (car lst)))
+           (remove item (cdr lst) :test test-fn :key key-fn)
+           (cons (car lst) (remove item (cdr lst) :test test-fn :key key-fn))))))"
 
-    "(defun find (item lst &key key test)
-   (let ((test-fn (if test test (lambda (a b) (eql a b)))))
+    "(defun find (item lst &key key test test-not)
+   (let ((test-fn (cond (test-not (complement test-not))
+                        (test test)
+                        (t #'eql))))
      (dolist (x lst nil)
        (let ((val (if key (funcall key x) x)))
          (when (funcall test-fn item val)

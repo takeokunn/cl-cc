@@ -130,8 +130,16 @@
 (deftest rt-package-registry-is-seeded-conservatively
   "The runtime package registry is seeded from an explicit package list, not the full host universe." 
   (assert-true (find :cl-cc/runtime cl-cc/runtime::*rt-bootstrap-package-names*))
+  (assert-true (find :cl-cc/bootstrap cl-cc/runtime::*rt-bootstrap-package-names*))
   (assert-true (find :cl cl-cc/runtime::*rt-bootstrap-package-names*))
   (assert-true (gethash "CL-CC/RUNTIME" cl-cc/runtime:*rt-package-registry*)))
+
+(deftest rt-intern-preserves-seeded-host-package-symbols
+  "rt-intern returns the real symbol for explicitly seeded host packages."
+  (cl-cc/runtime::%rt-bootstrap-package-registry)
+  (let* ((pkg (cl-cc/runtime:rt-find-package :cl-cc/bootstrap))
+         (sym (cl-cc/runtime:rt-intern "*VM-PARSE-FORMS-HOOK-INSTALLER*" pkg)))
+    (assert-eq 'cl-cc/bootstrap:*vm-parse-forms-hook-installer* sym)))
 
 (deftest rt-runtime-callable-registration-publishes-bootstrap-hook
   "runtime-io publishes its VM callable registration hook through cl-cc/bootstrap." 

@@ -40,7 +40,7 @@
       (sixth entry)
       (fifth entry)))
 
-(defun (setf vm-handler-entry-saved-regs) (snapshot entry)
+(defun %set-vm-handler-entry-saved-regs (entry snapshot)
   "Replace the saved register snapshot stored in handler stack ENTRY."
   (if (and (consp entry) (eq (first entry) :catch))
       (setf (sixth entry) snapshot)
@@ -74,7 +74,7 @@
                              (vm-state-registers state))
                     copy)))
     (dolist (entry (vm-handler-stack state))
-      (setf (vm-handler-entry-saved-regs entry) snapshot)))
+      (%set-vm-handler-entry-saved-regs entry snapshot)))
   (values (1+ pc) nil nil))
 
 (defun vm-error-type-matches-p (error-value handler-type)

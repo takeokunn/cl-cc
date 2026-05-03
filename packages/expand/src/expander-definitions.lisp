@@ -13,6 +13,17 @@
       (car body)
       nil))
 
+(defun %build-setf-progn-forms (args)
+  "Build one SETF form per place/value pair in ARGS."
+  (let ((xs args)
+        (forms nil))
+    (tagbody
+     scan
+       (if (null xs) (return-from %build-setf-progn-forms (nreverse forms)))
+       (setq forms (cons (list 'setf (car xs) (cadr xs)) forms))
+       (setq xs (cddr xs))
+       (go scan))))
+
 ;; defsetf — register a setf expander for an accessor (FR-355)
 ;; Short form: (defsetf accessor updater) → (updater args... value)
 ;; Long form: (defsetf accessor lambda-list (store-var) body...) — partial support
@@ -76,31 +87,27 @@
 
 ;; setf — unified place dispatcher
 (define-expander-for setf (form)
-  (let ((len (length form))
-        (expand-args (lambda () (cons 'setf (mapcar #'compiler-macroexpand-all (cdr form))))))
-    (cond
-      ;; (setf a 1 b 2 ...) → (progn (setf a 1) (setf b 2) ...)
-      ((and (> len 3) (evenp (1- len)))
-       (compiler-macroexpand-all
-        (cons 'progn
-              (loop for (place val) on (cdr form) by #'cddr
-                    collect (list 'setf place val)))))
-      ;; (setf var val) → (setq var val)
-      ((and (= len 3) (symbolp (second form)))
-       (compiler-macroexpand-all (list 'setq (second form) (third form))))
-      ;; compound place — table lookup first, then generic accessor, then passthrough
-      ((and (= len 3) (consp (second form)))
-       (let* ((place   (second form))
-              (value   (third form))
-              (handler (gethash (car place) *setf-compound-place-handlers*)))
-         (cond
-           (handler (funcall handler place value))
-           ((and (symbolp (car place)) (= (length place) 2))
-            (expand-setf-accessor place value))
-           (t (funcall expand-args)))))
-      (t (funcall expand-args)))))
+  (let ((len (length form)))
+    (if (and (> len 3) (evenp (1- len)))
+        ;; (setf a 1 b 2 ...) → (progn (setf a 1) (setf b 2) ...)
+        (compiler-macroexpand-all
+         (cons 'progn (%build-setf-progn-forms (cdr form))))
+        (if (and (= len 3) (symbolp (second form)))
+            ;; (setf var val) → (setq var val)
+            (compiler-macroexpand-all (list 'setq (second form) (third form)))
+            (if (and (= len 3) (consp (second form)))
+                ;; compound place — table lookup first, then generic accessor, then passthrough
+                (let* ((place   (second form))
+                       (value   (third form))
+                       (handler (gethash (car place) *setf-compound-place-handlers*)))
+                  (if handler
+                      (funcall handler place value)
+                      (if (and (symbolp (car place)) (= (length place) 2))
+                          (expand-setf-accessor place value)
+                          (cons 'setf (mapcar #'compiler-macroexpand-all (cdr form))))))
+                (cons 'setf (mapcar #'compiler-macroexpand-all (cdr form))))))))
 
-;; make-array — promote to make-adjustable-vector when :fill-pointer/:adjustable given
+;; make-array — preserve keyword calls for backend lowering
 (define-expander-for make-array (form)
   (if (>= (length form) 4)
       (expand-make-array-form (second form) (cddr form))

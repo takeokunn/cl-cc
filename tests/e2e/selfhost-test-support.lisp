@@ -84,14 +84,10 @@ Computed at call time so the result is path-independent across compile/load cont
    (%asdf-source-files :cl-cc-optimize   "packages/optimize/")
    (%asdf-source-files :cl-cc-emit       "packages/emit/")
    (%asdf-source-files :cl-cc-expand     "packages/expand/")
-   (%asdf-source-files :cl-cc-compile    "packages/compile/")
-   (list "packages/umbrella-src/package.lisp"
-         "packages/pipeline/src/stdlib-source.lisp"
-         "packages/pipeline/src/stdlib-source-ext.lisp"
-         "packages/pipeline/src/pipeline-stdlib.lisp"
-         "packages/pipeline/src/pipeline.lisp"
-         "packages/pipeline/src/pipeline-native.lisp"
-         "packages/pipeline/src/pipeline-repl-load.lisp")))
+    (%asdf-source-files :cl-cc-compile    "packages/compile/")
+    (%asdf-source-files :cl-cc-stdlib    "packages/stdlib/")
+    (list "packages/umbrella-src/package.lisp")
+    (%asdf-source-files :cl-cc-pipeline   "packages/pipeline/")))
 
 (defparameter *selfhost-representative-files*
   '("packages/parse/src/cst.lisp"

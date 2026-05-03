@@ -31,12 +31,14 @@
 
 (defun %ast-constant-number-value (node)
   "Return NODE's integer value when NODE is a constant AST integer."
-  (typecase node
-    (ast-int (ast-int-value node))
-    (ast-quote (let ((value (ast-quote-value node)))
-                 (when (integerp value)
-                   value)))
-    (t nil)))
+  (if (typep node 'ast-int)
+      (ast-int-value node)
+      (if (typep node 'ast-quote)
+          (let ((value (ast-quote-value node)))
+            (if (integerp value)
+                value
+                nil))
+          nil)))
 
 (defun %clone-source (node &rest make-args)
   "Apply MAKE-ARGS to a constructor that accepts :source-file/:source-line/:source-column,
@@ -116,12 +118,19 @@ filling those fields from NODE."
       (reg '> (lambda (args) (values (if (apply #'> args) t nil) t)))
       (reg '>= (lambda (args) (values (if (apply #'>= args) t nil) t)))
       ;; Unary predicates
-      (dolist (pair '((not . not) (zerop . zerop) (plusp . plusp) (minusp . minusp)
-                      (oddp . oddp) (evenp . evenp) (numberp . numberp)
-                      (integerp . integerp) (consp . consp) (null . null)
-                      (symbolp . symbolp) (stringp . stringp) (functionp . functionp)))
-        (let ((fn (symbol-function (cdr pair))))
-          (reg (car pair) (lambda (args) (values (funcall fn (first args)) t))))))
+      (reg 'not (lambda (args) (values (not (car args)) t)))
+      (reg 'zerop (lambda (args) (values (zerop (car args)) t)))
+      (reg 'plusp (lambda (args) (values (plusp (car args)) t)))
+      (reg 'minusp (lambda (args) (values (minusp (car args)) t)))
+      (reg 'oddp (lambda (args) (values (oddp (car args)) t)))
+      (reg 'evenp (lambda (args) (values (evenp (car args)) t)))
+      (reg 'numberp (lambda (args) (values (numberp (car args)) t)))
+      (reg 'integerp (lambda (args) (values (integerp (car args)) t)))
+      (reg 'consp (lambda (args) (values (consp (car args)) t)))
+      (reg 'null (lambda (args) (values (null (car args)) t)))
+      (reg 'symbolp (lambda (args) (values (symbolp (car args)) t)))
+      (reg 'stringp (lambda (args) (values (stringp (car args)) t)))
+      (reg 'functionp (lambda (args) (values (functionp (car args)) t))))
     ht)
   "Hash table mapping compile-time evaluable symbols to (args) -> (values result t) lambdas.")
 
@@ -132,10 +141,11 @@ filling those fields from NODE."
       (typep node 'ast-quote)))
 
 (defun %ast->compile-time-value (node)
-  (typecase node
-    (ast-int (ast-int-value node))
-    (ast-quote (ast-quote-value node))
-    (t nil)))
+  (if (typep node 'ast-int)
+      (ast-int-value node)
+      (if (typep node 'ast-quote)
+          (ast-quote-value node)
+          nil)))
 
 (defun %compile-time-value->ast (value node)
   (if (integerp value)
@@ -144,9 +154,14 @@ filling those fields from NODE."
 
 (defun %compile-time-lookup (name env)
   "Look up NAME in ENV alist; return (values value t) when found, (values nil nil) otherwise."
-  (let ((entry (assoc name env)))
-    (when entry
-      (values (cdr entry) t))))
+  (labels ((scan (remaining)
+             (if (consp remaining)
+                 (let ((entry (car remaining)))
+                   (if (eq (car entry) name)
+                       (values (cdr entry) t)
+                       (scan (cdr remaining))))
+                 (values nil nil))))
+    (scan env)))
 
 (defparameter *compile-time-simple-binops*
   '((+ . +) (- . -) (* . *))

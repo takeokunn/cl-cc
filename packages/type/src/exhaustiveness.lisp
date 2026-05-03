@@ -92,10 +92,3 @@
         (push arm useful)
         (push arm covered)))
     (nreverse useful)))
-
-;;; ─── Exports ──────────────────────────────────────────────────────────────
-
-(export '(check-typecase-exhaustiveness
-          check-etypecase-completeness
-          useful-typecase-arms
-          typecase-arm-subsumed-p))

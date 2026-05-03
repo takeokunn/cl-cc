@@ -67,7 +67,7 @@ This avoids scanning every host package while still covering the small guest-fac
 surface that currently relies on `rt-fboundp` during bootstrapping and tests.")
 
 (defparameter *rt-bootstrap-package-names*
-  '(:cl :cl-user :keyword :cl-cc/runtime :cl-cc :cl-cc/vm :cl-cc/compile :cl-cc/expand
+  '(:cl :cl-user :keyword :cl-cc/bootstrap :cl-cc/runtime :cl-cc :cl-cc/vm :cl-cc/compile :cl-cc/expand
     :cl-cc/parse :cl-cc/type :cl-cc/prolog :cl-cc/optimize :cl-cc/emit :cl-cc/ast)
   "Conservative bootstrap package seed for the runtime package registry.
 This avoids importing the full host package universe while preserving the packages
@@ -105,6 +105,7 @@ the compiler/runtime currently names directly during selfhost and test flows.")
         (or (gethash key *rt-package-registry*)
             (let ((descriptor (make-hash-table :test #'eq)))
               (setf (gethash :name descriptor) key)
+              (setf (gethash :host-package descriptor) (find-package key))
               (setf (gethash :exports descriptor) nil)
               (setf (gethash :symbols descriptor) (make-hash-table :test #'equal))
               (setf (gethash key *rt-package-registry*) descriptor)
@@ -181,11 +182,15 @@ host package universe."
 
 (defun rt-intern (name &optional package)
   (let* ((pkg (or (and package (%rt-package-metadata package))
-                  (and *package* (%rt-package-metadata *package*))))
-         (table (gethash :symbols pkg))
-         (key (string name)))
-    (or (gethash key table)
-        (setf (gethash key table) (make-symbol key)))))
+                   (and *package* (%rt-package-metadata *package*))))
+          (table (gethash :symbols pkg))
+          (key (string name))
+          (host-package (gethash :host-package pkg)))
+     (or (gethash key table)
+         (setf (gethash key table)
+               (if host-package
+                   (intern key host-package)
+                   (make-symbol key))))))
 
 (defun rt-make-package (name &key use)
   (let ((pkg (or (rt-find-package name)
@@ -202,18 +207,21 @@ host package universe."
           (union syms (gethash :exports pkg) :test #'eq))
     syms))
 
+(defun %rt-install-bootstrap-hook (key value)
+  "Install VALUE into the bootstrap hook symbol named by KEY when available."
+  (let ((sym (%rt-bootstrap-hook-symbol key)))
+    (when (and sym value)
+      (set sym value))))
+
 (eval-when (:load-toplevel :execute)
   (%rt-bootstrap-package-registry)
-  (%rt-bootstrap-function-registry)
-  (loop for (key . _) in *rt-bootstrap-hook-names*
-        for sym = (%rt-bootstrap-hook-symbol key)
-        for value = (case key
-                      (:register-hook       #'%rt-register-vm-runtime-callables)
-                      (:registry-provider   (lambda () *rt-package-registry*))
-                      (:find-package-fn     #'rt-find-package)
-                      (:intern-fn           #'rt-intern)
-                      (:set-symbol-value-fn #'rt-set-symbol-value)
-                      (t nil))
-        when (and sym value)
-          do (setf (symbol-value sym) value))
+  (%rt-bootstrap-function-registry))
+
+#-cl-cc-self-hosting
+(eval-when (:load-toplevel :execute)
+  (%rt-install-bootstrap-hook :register-hook #'%rt-register-vm-runtime-callables)
+  (%rt-install-bootstrap-hook :registry-provider (lambda () *rt-package-registry*))
+  (%rt-install-bootstrap-hook :find-package-fn #'rt-find-package)
+  (%rt-install-bootstrap-hook :intern-fn #'rt-intern)
+  (%rt-install-bootstrap-hook :set-symbol-value-fn #'rt-set-symbol-value)
   (%rt-register-vm-runtime-callables))

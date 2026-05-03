@@ -32,6 +32,21 @@
   (:sexp-tag :intern)
   (:sexp-slots dst src pkg))
 
+(define-vm-instruction vm-find-package (vm-instruction)
+  "Find a package by designator through the runtime package registry."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (:sexp-tag :find-package)
+  (:sexp-slots dst src))
+
+(define-vm-instruction vm-find-symbol (vm-instruction)
+  "Find a symbol by name in a package designator."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (pkg nil :reader vm-find-symbol-pkg)
+  (:sexp-tag :find-symbol)
+  (:sexp-slots dst src pkg))
+
 (define-vm-instruction vm-gensym-inst (vm-instruction)
   "Generate a unique uninterned symbol."
   (dst nil :reader vm-dst)
@@ -58,6 +73,43 @@
                      (intern name))))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-find-package) state pc labels)
+  (declare (ignore labels))
+  (let* ((name (vm-reg-get state (vm-src inst)))
+         (result (or (and cl-cc/bootstrap:*runtime-find-package-fn*
+                          (funcall cl-cc/bootstrap:*runtime-find-package-fn* name))
+                     (find-package name))))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-find-symbol) state pc labels)
+  (declare (ignore labels))
+  (let* ((name (string (vm-reg-get state (vm-src inst))))
+         (pkg-designator (when (vm-find-symbol-pkg inst)
+                           (vm-reg-get state (vm-find-symbol-pkg inst))))
+         (runtime-pkg (if (hash-table-p pkg-designator)
+                          pkg-designator
+                          (and cl-cc/bootstrap:*runtime-find-package-fn*
+                               pkg-designator
+                               (funcall cl-cc/bootstrap:*runtime-find-package-fn* pkg-designator))))
+         (host-pkg-designator (if (hash-table-p pkg-designator)
+                                  (gethash :name pkg-designator)
+                                  pkg-designator)))
+    (multiple-value-bind (sym status)
+        (if (hash-table-p runtime-pkg)
+            (let* ((table (gethash :symbols runtime-pkg))
+                   (exports (gethash :exports runtime-pkg))
+                   (found (and table (gethash name table))))
+              (if found
+                  (values found (if (member found exports :test #'eq) :external :internal))
+                  (find-symbol name host-pkg-designator)))
+            (if host-pkg-designator
+                (find-symbol name host-pkg-designator)
+                (find-symbol name)))
+      (vm-reg-set state (vm-dst inst) sym)
+      (setf (vm-values-list state) (list sym status))
+      (values (1+ pc) nil nil))))
 
 (defmethod execute-instruction ((inst vm-gensym-inst) state pc labels)
   (declare (ignore labels))

@@ -55,37 +55,43 @@
 ;; STABLE-SORT: same as sort (merge sort is inherently stable)
 (our-defmacro stable-sort (list predicate &key key)
   (if key
-      `(sort ,list ,predicate :key ,key)
-      `(sort ,list ,predicate)))
+      (list (quote sort) list predicate :key key)
+      (list (quote sort) list predicate)))
 
 ;; MAP: map fn over seq, coerce result to result-type
 (our-defmacro map (result-type fn seq)
-  `(coerce (mapcar ,fn (coerce ,seq 'list)) ,result-type))
+  (list (quote coerce)
+        (list (quote mapcar) fn (list (quote coerce) seq (list (quote quote) (quote list))))
+        result-type))
 
 ;; IGNORE-ERRORS: catch all errors, return nil on error
 (our-defmacro ignore-errors (&body forms)
   (let ((e-var (gensym "E")))
-    `(handler-case (progn ,@forms)
-       (error (,e-var) (values nil ,e-var)))))
+    (list (quote handler-case)
+          (cons (quote progn) forms)
+          (list (quote error) (list e-var) (list (quote values) nil e-var)))))
 
 ;; CONCATENATE: type-dispatching sequence concatenation (FR-615)
 (our-defmacro concatenate (result-type &rest sequences)
-  (let ((rtype (if (and (consp result-type) (eq (car result-type) 'quote))
+  (let ((rtype (if (and (consp result-type) (eq (car result-type) (quote quote)))
                    (cadr result-type)
                    result-type)))
     (cond
       ((null sequences)
-       (if (eq rtype 'string) "" nil))
-      ((eq rtype 'list)
-       `(append ,@sequences))
-      ((member rtype '(vector simple-vector))
-       `(coerce-to-vector (append ,@sequences)))
+       (if (eq rtype (quote string)) "" nil))
+      ((eq rtype (quote list))
+       (cons (quote append) sequences))
+      ((or (eq rtype (quote vector)) (eq rtype (quote simple-vector)))
+       (list (quote coerce-to-vector) (cons (quote append) sequences)))
       (t
-       (if (null (cdr sequences))
-           (car sequences)
-           (reduce (lambda (acc s) `(string-concat ,acc ,s))
-                   (cdr sequences)
-                   :initial-value (car sequences)))))))
+       (labels ((build (remaining acc)
+                  (if (null remaining)
+                      acc
+                      (build (cdr remaining)
+                             (list (quote string-concat) acc (car remaining))))))
+         (if (null (cdr sequences))
+             (car sequences)
+             (build (cdr sequences) (car sequences))))))))
 
 ;;; ─── LIST* (FR-609) ─────────────────────────────────────────────────────────
 ;;; (list* a) = a
@@ -96,31 +102,36 @@
   (cond
     ((null args) (error "list* requires at least one argument"))
     ((null (cdr args)) (car args))
-    (t (reduce (lambda (x acc) `(cons ,x ,acc))
-               args
-               :from-end t))))
+    (t (labels ((build (items)
+                  (if (null (cdr items))
+                      (car items)
+                      (list (quote cons) (car items) (build (cdr items))))))
+         (build args)))))
 
 ;;; ─── List accessors sixth–tenth (FR-563) ───────────────────────────────────
 
-(our-defmacro sixth   (list) `(nth 5 ,list))
-(our-defmacro seventh (list) `(nth 6 ,list))
-(our-defmacro eighth  (list) `(nth 7 ,list))
-(our-defmacro ninth   (list) `(nth 8 ,list))
-(our-defmacro tenth   (list) `(nth 9 ,list))
+(our-defmacro sixth   (list) (list (quote nth) 5 list))
+(our-defmacro seventh (list) (list (quote nth) 6 list))
+(our-defmacro eighth  (list) (list (quote nth) 7 list))
+(our-defmacro ninth   (list) (list (quote nth) 8 list))
+(our-defmacro tenth   (list) (list (quote nth) 9 list))
 
 ;;; ─── PUSHNEW (FR-587) ───────────────────────────────────────────────────────
 
-(our-defmacro pushnew (item place &key (test '#'eql))
+(our-defmacro pushnew (item place &key (test (function eql)))
   (let ((item-var (gensym "ITEM")))
-    (if (equal test '#'eql)
-        `(let ((,item-var ,item))
-           (unless (member ,item-var ,place)
-             (setf ,place (cons ,item-var ,place))))
-        `(let ((,item-var ,item))
-           (unless (member ,item-var ,place :test ,test)
-             (setf ,place (cons ,item-var ,place)))))))
+    (let ((member-form
+            (if (or (equal test (function eql))
+                    (equal test (list (quote quote) (function eql))))
+                (list (quote member) item-var place)
+                (list (quote member) item-var place :test test))))
+      (list (quote let)
+            (list (list item-var item))
+            (list (quote unless)
+                  member-form
+                  (list (quote setf) place (list (quote cons) item-var place)))))))
 
 ;;; ─── NRECONC (FR-640) ───────────────────────────────────────────────────────
 
 (our-defmacro nreconc (list tail)
-  `(nconc (nreverse ,list) ,tail))
+  (list (quote nconc) (list (quote nreverse) list) tail))

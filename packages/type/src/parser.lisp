@@ -106,15 +106,51 @@ Value is the base type name passed to make-type-primitive.")
   "Build a type-app node for a registered single-arg HEAD."
   (let ((base (cdr (assoc head *parse-compound-type-app-table*))))
     (when base
-      (unless (= (length args) 1) (type-parse-error "~A requires exactly 1 type" head))
+      (unless (case head
+                ((list) (= (length args) 1))
+                ((vector simple-vector array simple-array)
+                 (<= 1 (length args) 2))
+                (otherwise (= (length args) 1)))
+        (type-parse-error "~A requires an element type and optional dimensions" head))
       (make-type-app :fun (make-type-primitive :name base)
-                     :arg (parse-type-specifier (first args))))))
+                      :arg (parse-type-specifier (first args))))))
+
+(defun %type-bound-designator-p (value)
+  "Return T when VALUE is a CL numeric type bound designator."
+  (or (integerp value)
+      (and (symbolp value)
+           (string= (symbol-name value) "*"))))
+
+(defun %parse-cl-integer-range-type (head args)
+  "Parse CL integer range types whose trailing operands are bounds, not types."
+  (let ((name (and (symbolp head) (symbol-name head))))
+    (cond
+      ((and name (member name '("UNSIGNED-BYTE" "SIGNED-BYTE") :test #'string=))
+       (unless (<= (length args) 1)
+         (type-parse-error "~A accepts at most one size bound" head))
+       (when (and args (not (%type-bound-designator-p (first args))))
+         (type-parse-error "~A size must be an integer or *: ~S" head (first args)))
+       type-int)
+      ((and name (string= name "MOD"))
+       (unless (= (length args) 1)
+         (type-parse-error "mod requires exactly one upper bound"))
+       (unless (%type-bound-designator-p (first args))
+         (type-parse-error "mod bound must be an integer or *: ~S" (first args)))
+       type-int)
+      ((and name (string= name "INTEGER"))
+       (unless (<= (length args) 2)
+         (type-parse-error "integer accepts at most lower and upper bounds"))
+       (dolist (bound args)
+         (unless (%type-bound-designator-p bound)
+           (type-parse-error "integer bound must be an integer or *: ~S" bound)))
+       type-int))))
 
 (defun parse-compound-type (spec)
   (let ((head (car spec))
         (args (cdr spec)))
     (or (%parse-compound-multi-arg head args)
         (%parse-compound-type-app head args)
+        (%parse-cl-integer-range-type head args)
         (case head
           ;; (values T1 T2 ...) — product/tuple; variadic, distinct from multi-arg table
           ((values)

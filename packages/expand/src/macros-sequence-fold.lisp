@@ -80,18 +80,25 @@
               (when test-not (list :test-not test-not))))))
 
 ;;; nsubstitute-if / nsubstitute-if-not differ only in the target delegate name.
-(dolist (spec '((nsubstitute-if     . substitute-if)
-                (nsubstitute-if-not . substitute-if-not)))
-  (let ((target (cdr spec)))
-    (register-macro (car spec)
-      (lambda (form env)
-        (declare (ignore env))
-        (let ((new (second form))
-              (pred (third form))
-              (seq (fourth form))
-              (key (getf (cddddr form) :key)))
-          (append (list target new pred seq)
-                  (when key (list :key key))))))))
+(register-macro 'nsubstitute-if
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((new (second form))
+          (pred (third form))
+          (seq (fourth form))
+          (key (getf (cddddr form) :key)))
+      (append (list 'substitute-if new pred seq)
+              (when key (list :key key))))))
+
+(register-macro 'nsubstitute-if-not
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((new (second form))
+          (pred (third form))
+          (seq (fourth form))
+          (key (getf (cddddr form) :key)))
+      (append (list 'substitute-if-not new pred seq)
+              (when key (list :key key))))))
 
 ;;; MAP-INTO (FR-503): fill sequence with mapped results
 
@@ -114,7 +121,7 @@
                   (list 'labels
                         (list (list loop-fn (list dp sp)
                                     (list 'when (list 'and dp sp)
-                                          (list 'setf (list 'car dp) (list 'funcall fn-var (list 'car sp)))
+                                           (list 'rplaca dp (list 'funcall fn-var (list 'car sp)))
                                           (list loop-fn (list 'cdr dp) (list 'cdr sp)))))
                         (list loop-fn d src))
                   d))

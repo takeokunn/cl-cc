@@ -1,7 +1,7 @@
 (in-package :cl-cc/expand)
 ;;; Built-in Macros for Bootstrap
 
-(defvar *setf-compound-place-handlers*)
+(defvar *setf-compound-place-handlers* (make-hash-table :test 'eq))
 
 ;; CHECK-TYPE macro
 (defun %make-type-error (datum expected-type)
@@ -36,23 +36,33 @@
        `(let ((,v ,value))
           (rplaca (nthcdr ,(second place) ,(third place)) ,v)
           ,v)))
-    ((and (consp place) (member (car place) '(aref elt)))
-     (let ((v (gensym "V")))
-       `(let ((,v ,value))
-          (aset ,(second place) ,(third place) ,v)
-          ,v)))
-    ((and (consp place) (eq (car place) 'gethash))
-     ;; (setf (gethash key table) value) — handled by parser, but macro fallback
-     `(setf-gethash ,(second place) ,(third place) ,value))
-    ((and (consp place) (eq (car place) 'slot-value))
-     ;; (setf (slot-value obj slot) value) — handled by parser, but macro fallback
-     `(setf-slot-value ,(second place) ,(third place) ,value))
-    ((and (consp place) (eq (car place) 'getf))
-      ;; (setf (getf plist indicator) value) — rebuild plist with new value
+     ((and (consp place) (member (car place) '(aref elt)))
       (let ((v (gensym "V")))
         `(let ((,v ,value))
-           (setq ,(second place) (rt-plist-put ,(second place) ,(third place) ,v))
+           (aset ,(second place) ,(third place) ,v)
            ,v)))
+     ((and (consp place) (eq (car place) 'fill-pointer))
+      (let ((v (gensym "V")))
+        `(let ((,v ,value))
+           (%set-fill-pointer ,(second place) ,v))))
+     ((and (consp place) (member (car place) '(symbol-function fdefinition)))
+       `(set-fdefinition ,value ,(second place)))
+     ((and (consp place) (eq (car place) 'gethash))
+      ;; (setf (gethash key table) value) — handled by parser, but macro fallback
+      `(setf-gethash ,(second place) ,(third place) ,value))
+    ((and (consp place) (eq (car place) 'slot-value))
+      ;; (setf (slot-value obj slot) value) — handled by parser, but macro fallback
+      `(rt-slot-set ,(second place) ,(third place) ,value))
+     ((and (consp place) (eq (car place) 'getf))
+       ;; (setf (getf plist indicator) value) — rebuild plist with new value
+       (let ((plist-place (second place))
+             (indicator (third place))
+             (v (gensym "V")))
+         `(let ((,v ,value))
+            ,(if (symbolp plist-place)
+                 `(setq ,plist-place (rt-plist-put ,plist-place ,indicator ,v))
+                 `(setf ,plist-place (rt-plist-put ,plist-place ,indicator ,v)))
+            ,v)))
     (t
      (let ((handler (and (consp place)
                          (symbolp (car place))
@@ -88,13 +98,13 @@
           (form (third call-form))
           (body (cdddr call-form))
           (temp (gensym "MVB")))
-      (list 'let (list (list temp (list 'multiple-value-list form)))
-            (cons 'let*
-                  (cons (mapcar (lambda (var i)
-                                  (list var (list 'nth i temp)))
-                                vars
-                                (loop for i below (length vars) collect i))
-                        body))))))
+      (labels ((%nth-bindings (remaining index)
+                 (if (null remaining)
+                     nil
+                     (cons (list (car remaining) (list 'nth index temp))
+                           (%nth-bindings (cdr remaining) (+ index 1))))))
+        (list 'let (list (list temp (list 'multiple-value-list form)))
+              (cons 'let* (cons (%nth-bindings vars 0) body)))))))
 
 ;; MULTIPLE-VALUE-SETQ macro
 (register-macro 'multiple-value-setq
@@ -103,13 +113,15 @@
     (let ((vars (second call-form))
           (form (third call-form))
           (temp (gensym "MVS")))
-      (cons 'let
-            (cons (list (list temp (list 'multiple-value-list form)))
-                  (append (mapcar (lambda (var i)
-                                    (list 'setq var (list 'nth i temp)))
-                                  vars
-                                  (loop for i below (length vars) collect i))
-                          (list (list 'car temp))))))))
+      (labels ((%setq-forms (remaining index)
+                 (if (null remaining)
+                     nil
+                     (cons (list 'setq (car remaining) (list 'nth index temp))
+                           (%setq-forms (cdr remaining) (+ index 1))))))
+        (cons 'let
+              (cons (list (list temp (list 'multiple-value-list form)))
+                    (append (%setq-forms vars 0)
+                            (list (list 'car temp)))))))))
 
 ;; MULTIPLE-VALUE-LIST macro
 ;; Evaluates FORM (capturing its values side-effect), then drains the internal
@@ -131,8 +143,10 @@
 (register-macro 'list
   (lambda (call-form env)
     (declare (ignore env))
-    (let ((args (cdr call-form)))
-      (if (null args)
-          nil
-          (reduce (lambda (x acc) (list 'cons x acc))
-                  args :from-end t :initial-value nil)))))
+    (labels ((%expand-list-args (args)
+               (if (null args)
+                   nil
+                   (cons 'cons
+                         (cons (car args)
+                               (cons (%expand-list-args (cdr args)) nil))))))
+      (%expand-list-args (cdr call-form)))))

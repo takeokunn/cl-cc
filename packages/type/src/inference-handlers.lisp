@@ -179,9 +179,14 @@ Returns (values type substitution) or signals a type-error condition."
   (let ((bindings (and (type-env-p env) (type-env-bindings env))))
     (if bindings
         (format nil "Typed hole '_' cannot be inferred; fill the hole with an expression. Available: ~{~A :: ~A~^, ~}."
-                (loop for (name . scheme) in bindings
-                      for ty = (if (type-scheme-p scheme) (type-scheme-type scheme) scheme)
-                      nconc (list name (type-to-string ty))))
+                (mapcan (lambda (binding)
+                          (let ((name (car binding))
+                                (scheme (cdr binding)))
+                            (let ((ty (if (type-scheme-p scheme)
+                                          (type-scheme-type scheme)
+                                          scheme)))
+                              (list name (type-to-string ty)))))
+                        bindings))
         "Typed hole '_' cannot be inferred; fill the hole with an expression. Available: none.")))
 
 (defun infer-binop (ast env)

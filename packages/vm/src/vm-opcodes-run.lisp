@@ -71,11 +71,12 @@
   "Build the numeric opcode → fast handler lookup table for `%run-vm-core`."
   (let ((table (make-hash-table :test #'eql)))
     (dolist (entry *vm2-fast-opcode-handler-symbols* table)
-      (setf (gethash (symbol-value (car entry)) table)
-            (symbol-function (cdr entry))))))
+      (when (and (boundp (car entry))
+                 (fboundp (cdr entry)))
+        (setf (gethash (symbol-value (car entry)) table)
+              (symbol-function (cdr entry)))))))
 
-(defparameter *vm2-fast-opcode-handler-table*
-  (%make-vm2-fast-opcode-handler-table)
+(defvar *vm2-fast-opcode-handler-table* nil
   "Numeric opcode → fast handler function for the hot-path VM2 interpreter.")
 
 ;;; ── Canonical VM state access surface ─────────────────────────────────────
@@ -123,6 +124,8 @@ name symbol pairs."
          (len  (length code))
          (pc   0)
          (prev-op nil))
+    (unless *vm2-fast-opcode-handler-table*
+      (setf *vm2-fast-opcode-handler-table* (%make-vm2-fast-opcode-handler-table)))
     (catch 'vm-halt
       (loop while (< pc len)
             do (let ((op (svref code pc)))

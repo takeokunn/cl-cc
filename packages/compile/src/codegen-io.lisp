@@ -180,9 +180,14 @@ Returns register holding the printed object (ANSI: print returns its argument)."
                                   raw-str-reg))))
           (emit ctx (make-vm-stream-write-string-inst :stream-reg stream-reg :src out-str-reg))
           obj-reg)   ; ANSI: print/prin1/princ return the object
-        ;; 1-arg form: table-driven constructor dispatch
-        (let ((ctor (cdr (assoc mode *print-mode-stdout-constructors*))))
-          (emit ctx (funcall ctor :src obj-reg))
+        ;; 1-arg form: direct constructor dispatch; avoid funcall+keyword plist
+        ;; during bootstrap self-compilation.
+        (progn
+          (if (eq mode :print)
+              (emit ctx (make-vm-print-inst :src obj-reg))
+              (if (eq mode :prin1)
+                  (emit ctx (make-vm-prin1 :src obj-reg))
+                  (emit ctx (make-vm-princ :src obj-reg))))
           obj-reg))))
 
 (define-phase2-handler "PRINT" (args result-reg ctx)

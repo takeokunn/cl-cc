@@ -3,6 +3,7 @@
 ;;; Constructor exports: core arithmetic, collection, character, and dispatch
 ;;; instruction builders.
 
+#-cl-cc-self-hosting
 (export
  '(make-vm-instruction
    make-vm-abs

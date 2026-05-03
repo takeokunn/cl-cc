@@ -107,20 +107,23 @@
 (our-defmacro nstring-upcase (string &key start end)
   "Destructively uppercase STRING (returns uppercased string in cl-cc)."
   (if (or start end)
-      `(string-upcase ,string :start ,(or start 0) ,@(when end `(:end ,end)))
-      `(string-upcase ,string)))
+      (append (list 'string-upcase string :start (or start 0))
+              (when end (list :end end)))
+      (list 'string-upcase string)))
 
 (our-defmacro nstring-downcase (string &key start end)
   "Destructively lowercase STRING."
   (if (or start end)
-      `(string-downcase ,string :start ,(or start 0) ,@(when end `(:end ,end)))
-      `(string-downcase ,string)))
+      (append (list 'string-downcase string :start (or start 0))
+              (when end (list :end end)))
+      (list 'string-downcase string)))
 
 (our-defmacro nstring-capitalize (string &key start end)
   "Destructively capitalize STRING."
   (if (or start end)
-      `(string-capitalize ,string :start ,(or start 0) ,@(when end `(:end ,end)))
-      `(string-capitalize ,string)))
+      (append (list 'string-capitalize string :start (or start 0))
+              (when end (list :end end)))
+      (list 'string-capitalize string)))
 
 ;;; ─── bounded string transforms / comparisons ──────────────────────────────
 

@@ -85,40 +85,36 @@
       (let ((pred (intern (format nil "BUILTIN-~A" (symbol-name convention)))))
         (add-rule pred (make-prolog-rule :head (list* pred cl-sym ctor slots)))))))
 
-;; Populate at load time — each spec is (variable-name . convention-keyword).
-;; symbol-value resolves the defparameter at load time (safe: defparameters
-;; are defined in builtin-registry-data*.lisp, which loads before this file).
-;;
-;; Simple (sym . ctor) alist entries — no per-entry slots
-(dolist (spec '((*builtin-unary-entries*            . :unary)
-                (*builtin-binary-entries*           . :binary)
-                (*builtin-string-cmp-entries*       . :string-cmp)
-                (*builtin-char-cmp-entries*         . :char-cmp)
-                (*builtin-table-query-entries*      . :table-query)
-                (*builtin-handle-input-entries*     . :handle-input)
-                (*builtin-side-effect-entries*      . :side-effect)
-                (*builtin-void-side-effect-entries* . :void-side-eff)
-                (*builtin-nullary-entries*          . :nullary)
-                (*builtin-string-trim-entries*      . :string-trim)
-                (*builtin-handle-effect-entries*    . :handle-effect)
-                (*builtin-unary-opt-nil-entries*    . :unary-opt-nil)
-                (*builtin-binary-opt-one-entries*   . :binary-opt-one)
-                (*builtin-zero-compare-entries*     . :zero-compare)))
-  (%register-builtins (symbol-value (car spec)) (cdr spec)))
-;; Parametric (sym ctor . slots) entries — slots stored in be-slots
-(dolist (spec '((*builtin-binary-custom-entries*          . :binary-custom)
-                (*builtin-binary-move-first-entries*      . :binary-move-first)
-                (*builtin-binary-void-entries*            . :binary-void)
-                (*builtin-unary-custom-void-entries*      . :unary-custom-void)
-                (*builtin-binary-opt-nil-slot-entries*    . :binary-opt-nil-slot)
-                (*builtin-binary-synth-zero-entries*      . :binary-synth-zero)
-                (*builtin-ternary-opt-nil-custom-entries* . :ternary-opt-nil-custom)
-                (*builtin-unary-custom-entries*           . :unary-custom)
-                (*builtin-stream-input-opt-entries*       . :stream-input-opt)
-                (*builtin-stream-void-opt-entries*        . :stream-void-opt)
-                (*builtin-stream-write-val-entries*       . :stream-write-val)
-                (*builtin-ternary-custom-entries*         . :ternary-custom)))
-  (%register-slots-builtins (symbol-value (car spec)) (cdr spec)))
+;; Populate at load time with direct table references.
+;; Avoid SYMBOL-VALUE here: during strict selfhost bootstrap, quoted-symbol
+;; runtime lookup is weaker than ordinary global variable references.
+(%register-builtins *builtin-unary-entries* :unary)
+(%register-builtins *builtin-binary-entries* :binary)
+(%register-builtins *builtin-string-cmp-entries* :string-cmp)
+(%register-builtins *builtin-char-cmp-entries* :char-cmp)
+(%register-builtins *builtin-table-query-entries* :table-query)
+(%register-builtins *builtin-handle-input-entries* :handle-input)
+(%register-builtins *builtin-side-effect-entries* :side-effect)
+(%register-builtins *builtin-void-side-effect-entries* :void-side-eff)
+(%register-builtins *builtin-nullary-entries* :nullary)
+(%register-builtins *builtin-string-trim-entries* :string-trim)
+(%register-builtins *builtin-handle-effect-entries* :handle-effect)
+(%register-builtins *builtin-unary-opt-nil-entries* :unary-opt-nil)
+(%register-builtins *builtin-binary-opt-one-entries* :binary-opt-one)
+(%register-builtins *builtin-zero-compare-entries* :zero-compare)
+
+(%register-slots-builtins *builtin-binary-custom-entries* :binary-custom)
+(%register-slots-builtins *builtin-binary-move-first-entries* :binary-move-first)
+(%register-slots-builtins *builtin-binary-void-entries* :binary-void)
+(%register-slots-builtins *builtin-unary-custom-void-entries* :unary-custom-void)
+(%register-slots-builtins *builtin-binary-opt-nil-slot-entries* :binary-opt-nil-slot)
+(%register-slots-builtins *builtin-binary-synth-zero-entries* :binary-synth-zero)
+(%register-slots-builtins *builtin-ternary-opt-nil-custom-entries* :ternary-opt-nil-custom)
+(%register-slots-builtins *builtin-unary-custom-entries* :unary-custom)
+(%register-slots-builtins *builtin-stream-input-opt-entries* :stream-input-opt)
+(%register-slots-builtins *builtin-stream-void-opt-entries* :stream-void-opt)
+(%register-slots-builtins *builtin-stream-write-val-entries* :stream-write-val)
+(%register-slots-builtins *builtin-ternary-custom-entries* :ternary-custom)
 
 
 ;;; (Emitter functions, *builtin-emitter-table*, *convention-arity*,

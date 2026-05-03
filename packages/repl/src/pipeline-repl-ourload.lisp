@@ -58,8 +58,40 @@
                     (whitespace-symbol-p (%whitespace-symbol-p form))
                     (unsupported-p (and (consp form)
                                         (symbolp (car form))
-                                       (member (symbol-name (car form)) '("DEFTYPE" "DEFOPCODE")
-                                               :test #'string=))))
+                                        (let ((host-only-names
+                                                '("DEFTYPE"
+                                                  "DEFOPCODE"
+                                                  "DEFOPCODE-LOAD-LITERAL"
+                                                  "DEFOPCODE-UNARY-FN"
+                                                  "DEFOPCODE-UNARY-TYPE-PRED"
+                                                  "DEFOPCODE-UNARY-PRED"
+                                                  "DEFOPCODE-BINARY-FN"
+                                                  "DEFOPCODE-BINARY-PRED"
+                                                  "DEFOPCODE-BINARY-FN-IMM"
+                                                  "DEFOPCODE-BINARY-PRED-IMM"
+                                                  "DEFINE-VM-INSTRUCTION"
+                                                  "DEFINE-VM-UNARY-INSTRUCTION"
+                                                  "DEFINE-VM-BINARY-INSTRUCTION"
+                                                  "DEFINE-VM-CHAR-COMPARISON"
+                                                  "DEFINE-SIMPLE-INSTRUCTION"
+                                                  "DEFINE-VM-DIVISION-EXECUTORS"
+                                                  "DEFINE-VM-FLOAT-ROUNDING-EXECUTORS"
+                                                  "DEFINE-VM-HASH-PROPERTY-EXECUTORS"
+                                                  "DEFINE-VM-STRING-COMPARISON"
+                                                  "DEFINE-VM-STRING-TRIM-INSTRUCTION"
+                                                  "DEFINE-VM-STRING-TRIM-EXECUTOR"
+                                                  "DEFINE-STREAM-PREDICATE-INSTRUCTION"
+                                                  "DEFINE-STREAM-CONTROL-INSTRUCTION"
+                                                  "%DEFINE-GENERIC-BINOP-TABLE"
+                                                  "%DEFINE-NULLARY-ENV-QUERY")))
+                                          (or (member (symbol-name (car form))
+                                                      host-only-names
+                                                      :test #'string=)
+                                              (and (string= (symbol-name (car form)) "DEFMACRO")
+                                                   (symbolp (second form))
+                                                   (member (symbol-name (second form))
+                                                           host-only-names
+                                                           :test #'string=)))))))
               (cond
                 (package-form-p
                  (let ((pkg (find-package (second form))))
@@ -67,17 +99,12 @@
                        (error "Unknown package: ~S" (second form)))
                    (setf *package* pkg)
                    (setf last-result (second form))))
-                ((or whitespace-symbol-p unsupported-p)
-                 nil)
-                (t
-                 (setf last-result
-                       (handler-case (run-form-repl form)
-                         (error (e)
-                           (format *error-output* "; Error loading ~A: ~A~%  Form: ~S~%"
-                                   path e form)
-                           nil)))
-                 (when print
-                   (format *standard-output* "~S~%" last-result)))))))))))
+                 ((or whitespace-symbol-p unsupported-p)
+                  nil)
+                 (t
+                  (setf last-result (run-form-repl form))
+                  (when print
+                    (format *standard-output* "~S~%" last-result)))))))))))
 
 (eval-when (:load-toplevel :execute)
   (vm-register-host-bridge 'run-string-repl #'run-string-repl)

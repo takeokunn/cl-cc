@@ -32,28 +32,49 @@
        (null (ast-lambda-optional-params expr))
        (null (ast-lambda-rest-param expr))
        (null (ast-lambda-key-params expr))
-       (not (member name mutated))
-       (not (member name captured))
+       (not (%member-eq-p name mutated))
+       (not (%member-eq-p name captured))
        (%closure-binding-direct-call-only-p body-forms name
                                             (length (ast-lambda-params expr)))
        expr))
 
 (defun %let-noescape-instance-slots (name expr mutated captured body-forms ctx)
   "Return compiled slot alist when the binding can skip heap allocation, else NIL."
-  (and (typep expr 'ast-make-instance)
-       (not (member name mutated))
-       (not (member name captured))
-       (let ((slot-names (loop for (key . _value-ast) in (ast-make-instance-initargs expr)
-                               collect (symbol-name key))))
-         (and (%instance-binding-static-slot-only-p body-forms name slot-names)
-              (loop for (key . value-ast) in (ast-make-instance-initargs expr)
-                    collect (cons (symbol-name key) (compile-ast value-ast ctx)))))))
+  (if (and (typep expr 'ast-make-instance)
+           (not (%member-eq-p name mutated))
+           (not (%member-eq-p name captured)))
+      (let ((slot-names nil)
+            (xs (ast-make-instance-initargs expr)))
+        (tagbody
+         scan-names
+           (if (null xs) (go done-names))
+           (setq slot-names (cons (symbol-name (car (car xs))) slot-names))
+           (setq xs (cdr xs))
+           (go scan-names)
+         done-names)
+        (setq slot-names (nreverse slot-names))
+        (if (%instance-binding-static-slot-only-p body-forms name slot-names)
+            (let ((compiled-slots nil)
+                  (ys (ast-make-instance-initargs expr)))
+              (tagbody
+               scan-values
+                 (if (null ys) (return-from %let-noescape-instance-slots
+                                (nreverse compiled-slots)))
+                 (let ((entry (car ys)))
+                   (setq compiled-slots
+                         (cons (cons (symbol-name (car entry))
+                                     (compile-ast (cdr entry) ctx))
+                               compiled-slots)))
+                 (setq ys (cdr ys))
+                 (go scan-values)))
+            nil))
+      nil))
 
 (defun %let-noescape-array-size (name expr mutated captured body-forms)
   "Return the array size integer when the binding can skip heap allocation, else NIL."
   (and (%ast-make-array-int-call-p expr)
-       (not (member name mutated))
-       (not (member name captured))
+       (not (%member-eq-p name mutated))
+       (not (%member-eq-p name captured))
        (let ((size (ast-int-value (first (ast-call-args expr)))))
          (and (%array-binding-static-access-p body-forms name size)
               size))))
@@ -61,8 +82,8 @@
 (defun %let-noescape-cons-p (name expr mutated captured body-forms)
   "T when the cons binding never escapes (only CAR/CDR consumers)."
   (and (%ast-cons-call-p expr)
-       (not (member name mutated))
-       (not (member name captured))
+       (not (%member-eq-p name mutated))
+       (not (%member-eq-p name captured))
        (not (binding-escapes-in-body-p body-forms name
                                        :safe-consumers '("CAR" "CDR")))))
 
@@ -137,8 +158,8 @@
 
 (defmethod compile-ast ((node ast-let) ctx)
   (let ((sunk (%ast-let-sink-if-candidate node)))
-    (when sunk
-      (return-from compile-ast (compile-ast sunk ctx))))
+    (if sunk
+        (return-from compile-ast (compile-ast sunk ctx))))
   (let ((old-env (ctx-env ctx))
         (old-boxed (ctx-boxed-vars ctx))
         (old-noescape-cons (ctx-noescape-cons-bindings ctx))
@@ -147,65 +168,144 @@
         (old-noescape-closures (ctx-noescape-closure-bindings ctx))
         (old-type-env (ctx-type-env ctx)))
     (unwind-protect
-         (let* ((binding-names (mapcar #'car (ast-let-bindings node)))
-                (declarations (ast-let-declarations node))
-                (body-forms (ast-let-body node))
-                (mutated (reduce #'union (mapcar #'find-mutated-variables body-forms)
-                                 :initial-value nil))
-                (captured (find-captured-in-children body-forms binding-names))
-                (needs-boxing (intersection mutated captured))
-                (new-bindings nil)
-                (special-restores nil))
-           (dolist (binding (ast-let-bindings node))
-             (let* ((name (car binding))
-                    (expr (cdr binding))
+         (let ((bindings (ast-let-bindings node))
+               (binding-names nil)
+               (declarations (ast-let-declarations node))
+               (body-forms (ast-let-body node))
+               (mutated nil)
+               (captured nil)
+               (needs-boxing nil)
+               (new-bindings nil)
+               (special-restores nil))
+           (let ((xs bindings))
+             (tagbody
+              scan-binding-names
+                (if (null xs) (go done-binding-names))
+                (setq binding-names (cons (car (car xs)) binding-names))
+                (setq xs (cdr xs))
+                (go scan-binding-names)
+              done-binding-names))
+           (setq binding-names (nreverse binding-names))
+           (let ((xs body-forms))
+             (tagbody
+              scan-mutated
+                (if (null xs) (go done-mutated))
+                (setq mutated (%list-union-eq (find-mutated-variables (car xs)) mutated))
+                (setq xs (cdr xs))
+                (go scan-mutated)
+              done-mutated))
+           (setq captured (find-captured-in-children body-forms binding-names))
+           (setq needs-boxing (%list-intersection-eq mutated captured))
+           (let ((xs bindings))
+             (tagbody
+              scan-bindings
+                (if (null xs) (go done-bindings))
+                (let* ((binding (car xs))
+                       (name (car binding))
+                       (expr (cdr binding))
+                       (noescape-closure
+                        (%let-noescape-closure name expr mutated captured body-forms))
+                       (noescape-instance-slots
+                        (if noescape-closure
+                            nil
+                            (%let-noescape-instance-slots name expr mutated
+                                                          captured body-forms
+                                                          ctx)))
+                       (noescape-array-size
+                        (if (or noescape-closure noescape-instance-slots)
+                            nil
+                            (%let-noescape-array-size name expr mutated
+                                                      captured body-forms)))
+                       (noescape-cons-p
+                        (if (or noescape-closure noescape-instance-slots
+                                noescape-array-size)
+                            nil
+                            (%let-noescape-cons-p name expr mutated captured
+                                                  body-forms))))
+                  (cond
                     (noescape-closure
-                      (%let-noescape-closure name expr mutated captured body-forms))
+                     (setf (ctx-noescape-closure-bindings ctx)
+                           (cons (cons name noescape-closure)
+                                 (ctx-noescape-closure-bindings ctx))))
                     (noescape-instance-slots
-                      (unless noescape-closure
-                        (%let-noescape-instance-slots name expr mutated captured body-forms ctx)))
+                     (setf (ctx-noescape-instance-bindings ctx)
+                           (cons (cons name noescape-instance-slots)
+                                 (ctx-noescape-instance-bindings ctx))))
                     (noescape-array-size
-                      (unless (or noescape-closure noescape-instance-slots)
-                        (%let-noescape-array-size name expr mutated captured body-forms)))
+                     (%emit-let-noescape-array ctx name noescape-array-size))
                     (noescape-cons-p
-                      (unless (or noescape-closure noescape-instance-slots noescape-array-size)
-                        (%let-noescape-cons-p name expr mutated captured body-forms))))
-               (cond
-                 (noescape-closure
-                  (push (cons name noescape-closure) (ctx-noescape-closure-bindings ctx)))
-                 (noescape-instance-slots
-                  (push (cons name noescape-instance-slots) (ctx-noescape-instance-bindings ctx)))
-                 (noescape-array-size
-                  (%emit-let-noescape-array ctx name noescape-array-size))
-                 (noescape-cons-p
-                  (%emit-let-noescape-cons ctx name expr))
-                 ((%let-binding-special-p name ctx)
-                  (%emit-let-special ctx name expr special-restores))
-                 ((member name needs-boxing)
-                  (%emit-let-boxed ctx name expr new-bindings))
-                 ((%ast-let-binding-ignored-p name declarations)
-                  (push (cons name (compile-ast expr ctx)) new-bindings))
-                 (t
-                  (%emit-let-normal ctx name expr new-bindings)))))
+                     (%emit-let-noescape-cons ctx name expr))
+                    ((%let-binding-special-p name ctx)
+                     (let ((old-reg (make-register ctx))
+                           (new-reg (compile-ast expr ctx)))
+                       (emit ctx (make-vm-get-global :dst old-reg :name name))
+                       (emit ctx (make-vm-set-global :name name :src new-reg))
+                       (setq special-restores
+                             (cons (cons name old-reg) special-restores))))
+                    ((%member-eq-p name needs-boxing)
+                     (let ((val-reg (compile-ast expr ctx))
+                           (own-reg (make-register ctx))
+                           (box-reg (make-register ctx))
+                           (nil-reg (make-register ctx)))
+                       (emit ctx (make-vm-move :dst own-reg :src val-reg))
+                       (emit ctx (make-vm-const :dst nil-reg :value nil))
+                       (emit ctx (make-vm-cons :dst box-reg
+                                               :car-src own-reg
+                                               :cdr-src nil-reg))
+                       (setq new-bindings
+                             (cons (cons name box-reg) new-bindings))))
+                    ((%ast-let-binding-ignored-p name declarations)
+                     (setq new-bindings
+                           (cons (cons name (compile-ast expr ctx))
+                                 new-bindings)))
+                    (t
+                     (let ((val-reg (compile-ast expr ctx))
+                           (own-reg (make-register ctx)))
+                       (emit ctx (make-vm-move :dst own-reg :src val-reg))
+                       (setq new-bindings
+                             (cons (cons name own-reg) new-bindings))))))
+                (setq xs (cdr xs))
+                (go scan-bindings)
+              done-bindings))
            (setf (ctx-env ctx) (append (nreverse new-bindings) (ctx-env ctx)))
-           (setf (ctx-boxed-vars ctx) (union needs-boxing (ctx-boxed-vars ctx)))
-           (dolist (binding (ast-let-bindings node))
-             (let ((binding-type (%ast-proven-type ctx (cdr binding))))
-               (when binding-type
-                 (setf (ctx-type-env ctx)
-                       (cl-cc/type:type-env-extend
-                        (car binding)
-                        (cl-cc/type:type-to-scheme binding-type)
-                        (ctx-type-env ctx))))))
+           (setf (ctx-boxed-vars ctx)
+                 (%list-union-eq needs-boxing (ctx-boxed-vars ctx)))
+           (let ((xs bindings))
+             (tagbody
+              scan-types
+                (if (null xs) (go done-types))
+                (let* ((binding (car xs))
+                       (binding-type (%ast-proven-type ctx (cdr binding))))
+                  (if binding-type
+                      (setf (ctx-type-env ctx)
+                            (type-env-extend (car binding)
+                                             (type-to-scheme binding-type)
+                                             (ctx-type-env ctx)))))
+                (setq xs (cdr xs))
+                (go scan-types)
+              done-types))
            (let ((last nil)
-                 (tail (ctx-tail-position ctx)))
-             (dolist (form body-forms)
-               (setf (ctx-tail-position ctx)
-                     (if (eq form (car (last body-forms))) tail nil))
-               (setf last (compile-ast form ctx)))
-             (dolist (restore (nreverse special-restores))
-               (emit ctx (make-vm-set-global :name (car restore) :src (cdr restore))))
-             last))
+                 (tail (ctx-tail-position ctx))
+                 (xs body-forms))
+             (tagbody
+              scan-body
+                (if (null xs) (go done-body))
+                (let ((form (car xs)))
+                  (setf (ctx-tail-position ctx)
+                        (if (null (cdr xs)) tail nil))
+                  (setq last (compile-ast form ctx)))
+                (setq xs (cdr xs))
+                (go scan-body)
+              done-body)
+             (let ((rs (nreverse special-restores)))
+               (tagbody
+                scan-restores
+                  (if (null rs) (return-from compile-ast last))
+                  (let ((restore (car rs)))
+                    (emit ctx (make-vm-set-global :name (car restore)
+                                                  :src (cdr restore))))
+                  (setq rs (cdr rs))
+                  (go scan-restores)))))
       (setf (ctx-env ctx) old-env)
       (setf (ctx-boxed-vars ctx) old-boxed)
       (setf (ctx-noescape-cons-bindings ctx) old-noescape-cons)

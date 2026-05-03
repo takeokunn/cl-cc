@@ -47,9 +47,10 @@
    ;; Quasiquote reader symbols — produced by cst.lisp, consumed by macro.lisp
    ;; Both cl-cc/parse and cl-cc use bootstrap, so they share the same symbol objects.
    #:backquote #:unquote #:unquote-splicing
-   ;; Runtime plist helper — used by cl-cc/parse (lower.lisp) and cl-cc/vm (vm-bridge.lisp)
-   ;; Must live in bootstrap so both packages share the same symbol without conflict.
-   #:rt-plist-put))
+    ;; Runtime helpers — used by early parser/expander code before runtime is loaded.
+    ;; Must live in bootstrap so packages share the same symbols without conflict.
+    #:rt-plist-put
+    #:rt-slot-set))
 
 (in-package :cl-cc/bootstrap)
 
@@ -75,3 +76,7 @@
     (unless found
       (push indicator result) (push value result))
     (nreverse result)))
+
+(defun rt-slot-set (obj slot-name value)
+  "Set SLOT-NAME of OBJ to VALUE and return VALUE."
+  (setf (slot-value obj slot-name) value))

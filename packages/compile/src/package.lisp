@@ -15,6 +15,32 @@
         :cl-cc/expand
         :cl-cc/cps
         :cl-cc/codegen)
+  (:import-from :cl-cc/type
+                 #:parse-type-specifier
+                 #:type-env-empty
+                 #:type-env-lookup
+                 #:type-env-extend
+                 #:type-env-extend*
+                 #:type-to-scheme
+                 #:instantiate
+                 #:is-subtype-p
+                 #:narrow-union-type
+                 #:extract-type-guard
+                 #:type-union
+                 #:type-to-string
+                 #:type-mismatch-error
+                 #:type-mismatch-error-expected
+                 #:type-mismatch-error-actual
+                 #:type-inference-error
+                 #:type-unknown-p
+                 #:type-equal-p
+                 #:check
+                 #:reset-type-vars!
+                 #:infer
+                 #:zonk)
+
+  (:import-from :cl-cc/target
+                #:find-target)
   (:import-from :cl-cc/regalloc
                 #:live-interval
                 #:make-live-interval

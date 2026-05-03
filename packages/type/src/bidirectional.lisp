@@ -104,10 +104,3 @@
             (setf current-env (zonk-env current-env subst))))
         ;; Check the last form against expected type
         (check (car (last asts)) expected-type current-env))))
-
-;;; Exports
-
-(export '(;; Bidirectional type checking (Phase 3)
-          synthesize
-          check
-          check-body))

@@ -162,7 +162,8 @@ read-char and read-line have optional stream args, so they use :stream-input-opt
    Standard :dst :lhs :rhs slots.  (cl-sym . vm-ctor).")
 
 (defparameter *builtin-binary-opt-nil-slot-entries*
-  '((intern make-vm-intern-symbol :src :pkg))
+  '((intern make-vm-intern-symbol :src :pkg)
+     (find-symbol make-vm-find-symbol :src :pkg))
   "Binary builtins with :dst + 2 custom slots. 2nd arg optional, nil slot when absent.
    (cl-sym vm-ctor slot1 slot2).")
 
@@ -227,6 +228,7 @@ read-char and read-line have optional stream args, so they use :stream-input-opt
     (%svset            make-vm-svset      :array-reg :index-reg :val-reg   :dst)
     ;; no :dst — return third arg via move
     (aset              make-vm-aset       :array-reg :index-reg :val-reg   :move-third)
+    (setf-gethash      make-vm-sethash    :key       :table     :value     :move-third)
     ;; string/bit array mutation — return new value via :dst
   (rt-string-set     make-vm-string-set :str       :idx       :val       :dst)
     (rt-bit-set        make-vm-bit-set    :arr       :idx       :val       :dst))

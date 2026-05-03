@@ -132,8 +132,9 @@
 
    ;; ─── Unification ─────────────────────────────────────────────────────
    #:type-unify  #:type-unify-lists
-   #:type-inference-error  #:type-inference-error-message
-   #:type-mismatch-error  #:type-mismatch-error-expected  #:type-mismatch-error-actual
+    #:type-inference-error  #:type-inference-error-message
+    #:typed-hole-error
+    #:type-mismatch-error  #:type-mismatch-error-expected  #:type-mismatch-error-actual
    #:unbound-variable-error  #:unbound-variable-name  #:unbound-variable-error-name
    #:check-qualified-constraints
 

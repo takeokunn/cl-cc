@@ -118,15 +118,3 @@
     (setf (gethash node-type *constant-effect-table*) +pure-effect-row+))
   (setf (gethash 'cl-cc/ast:ast-print *constant-effect-table*) io-row)
   (setf (gethash 'cl-cc/ast:ast-setq  *constant-effect-table*) state-row))
-
-;;; Exports
-
-(export '(;; Phase 5 effect type inference
-          *pure-ast-effect-types*
-          *constant-effect-table*
-          infer-effects
-          infer-with-effects
-          check-body-effects
-          register-effect-signature
-          lookup-effect-signature
-          *effect-signature-table*))

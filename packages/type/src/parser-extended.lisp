@@ -97,6 +97,10 @@
       ((and hn (string= hn "VARIANT"))
        (parse-row-type args :variant))
 
+      ;; ─── ANSI CL function type: (function (A B ...) R) ───────────────
+      ((and hn (string= hn "FUNCTION"))
+       (parse-cl-function-type args))
+
       ;; ─── Type application fallback: (F A) ────────────────────────────
       ((symbolp head)
        (let ((fun (parse-type-specifier head)))
@@ -130,7 +134,18 @@
            (effects     (if eff-specs
                             (parse-effect-row-spec eff-specs)
                             +pure-effect-row+)))
-      (make-type-arrow params ret :effects effects :mult mult))))
+       (make-type-arrow params ret :effects effects :mult mult))))
+
+(defun parse-cl-function-type (args)
+  "Parse ANSI CL (function (PARAM...) RETURN) into the internal arrow type."
+  (unless (= (length args) 2)
+    (type-parse-error "function type requires parameter list and return type"))
+  (let ((param-specs (first args))
+        (return-spec (second args)))
+    (unless (listp param-specs)
+      (type-parse-error "function parameter spec must be a list: ~S" param-specs))
+    (make-type-arrow (mapcar #'parse-type-specifier param-specs)
+                     (parse-type-specifier return-spec))))
 
 (defun %parse-effect-names-and-row-var (elts)
   "Split ELTS at '|' into (effects . row-var-or-nil) and build a type-effect-row."

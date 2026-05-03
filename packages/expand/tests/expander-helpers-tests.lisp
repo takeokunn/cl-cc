@@ -9,23 +9,19 @@
 (in-suite expander-helpers-suite)
 
 (deftest expand-make-array-form-initial-element
-  "expand-make-array-form turns :initial-element into a filling loop."
+  "expand-make-array-form preserves :initial-element for backend lowering."
   (let ((result (cl-cc/expand::expand-make-array-form 3 '(:initial-element 9))))
-    (assert-eq 'let (car result))
-    (assert-true (search "TAGBODY" (format nil "~S" result)))))
+    (assert-eq 'make-array (car result))
+    (assert-true (search "INITIAL-ELEMENT" (format nil "~S" result)))))
 
 (deftest expand-make-array-form-fill-pointer
-  "expand-make-array-form promotes adjustable arrays.
-The :fill-pointer t case triggers a recursive compiler-macroexpand-all
-that enters an infinite loop in the full test context (but not in isolation)
-— a cache-independent bug in the expander's recursive path. Exercising only
-the :adjustable t case here; the :fill-pointer path is tracked as a known
-issue in the expander visited-set logic."
-  (assert-eq 'cl-cc/expand::make-adjustable-vector
-             (car (cl-cc/expand::expand-make-array-form 3 '(:adjustable t)))))
+  "expand-make-array-form leaves adjustable keywords for codegen-phase2."
+  (let ((result (cl-cc/expand::expand-make-array-form 3 '(:adjustable t))))
+    (assert-eq 'make-array (car result))
+    (assert-true (search "ADJUSTABLE" (format nil "~S" result)))))
 
 (deftest expand-setf-accessor-falls-back-to-slot-value
-  "expand-setf-accessor falls back to slot-value when no accessor mapping exists."
+  "expand-setf-accessor falls back to the runtime slot writer when no accessor mapping exists."
   (let ((result (cl-cc/expand::expand-setf-accessor '(foo obj) 'value)))
-    (assert-eq 'setf (car result))
-    (assert-eq 'slot-value (caadr result))))
+    (assert-eq 'cl-cc/bootstrap:rt-slot-set (car result))
+    (assert-eq 'obj (second result))))

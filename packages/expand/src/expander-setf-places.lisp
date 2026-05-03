@@ -26,13 +26,24 @@
 
 (%register-setf-place-handler
  'getf
+  (lambda (place value)
+    (let ((plist-place (second place))
+          (indicator (third place))
+          (v (gensym "V")))
+      (compiler-macroexpand-all
+       (list 'let (list (list v value))
+             (if (symbolp plist-place)
+                 (list 'setq plist-place
+                       (list 'rt-plist-put plist-place indicator v))
+                 (list 'setf plist-place
+                       (list 'rt-plist-put plist-place indicator v)))
+             v)))))
+
+(%register-setf-place-handler
+ 'fill-pointer
  (lambda (place value)
-   (let ((v (gensym "V")))
-     (compiler-macroexpand-all
-      (list 'let (list (list v value))
-            (list 'setq (second place)
-                  (list 'rt-plist-put (second place) (third place) v))
-            v)))))
+   (compiler-macroexpand-all
+    (list '%set-fill-pointer (second place) value))))
 
 (%register-setf-place-handler
  'get
@@ -50,9 +61,13 @@
 
 ;; All cons-cell accessors share the same expansion logic — hoist the closure once
 (%register-shared-setf-place-handler
- '(car first cdr rest nth cadr cddr)
- (lambda (place value)
-   (compiler-macroexpand-all (expand-setf-cons-place place value))))
+ '(car first cdr rest nth
+   caar cadr cdar cddr
+   caaar cdaar cadar cddar caadr cdadr caddr cdddr
+   caaaar cadaar caadar caddar cdaaar cddaar cdadar cdddar
+   caaadr cadadr caaddr cadddr cdaadr cddadr cdaddr cddddr)
+  (lambda (place value)
+    (compiler-macroexpand-all (expand-setf-cons-place place value))))
 
 ;;; FR-593: (setf (subseq seq start end) new-seq) → (replace seq new-seq :start1 start :end1 end)
 (%register-setf-place-handler
@@ -116,13 +131,13 @@
  'symbol-value
  (lambda (place value)
    (let ((sym (gensym "SYM"))
-         (v (gensym "V")))
+         (v (gensym "V"))
+         (fn (gensym "SET-SYMBOL-VALUE-FN")))
      (compiler-macroexpand-all
       (list 'let (list (list sym (second place))
-                       (list v value))
-            (list 'funcall
-                  'cl-cc/bootstrap:*runtime-set-symbol-value-fn*
-                  sym v)
+                       (list v value)
+                       (list fn 'cl-cc/bootstrap:*runtime-set-symbol-value-fn*))
+            (list 'funcall fn sym v)
             v)))))
 
 ;;; FR-428: (setf (macro-function name) fn) → host bridge
@@ -135,14 +150,24 @@
 ;;; FR-603: (setf (values a b ...) expr) → capture values list + setq chain
 (%register-setf-place-handler
  'values
-  (lambda (place value)
-    (let* ((vars (cdr place))
-           (temp (gensym "MVS")))
-      (compiler-macroexpand-all
-       (cons 'let
-             (cons (list (list temp (list 'multiple-value-list value)))
-                   (append (mapcar (lambda (var i)
-                                     (list 'setq var (list 'nth i temp)))
-                                   vars
-                                   (loop for i below (length vars) collect i))
-                           (list (list 'car temp)))))))))
+   (lambda (place value)
+     (let* ((vars (cdr place))
+            (temp (gensym "MVS"))
+            (assignments nil)
+            (i 0)
+            (xs vars))
+       (tagbody
+        build
+          (if (null xs) (go done))
+          (setf assignments
+                (cons (list 'setq (car xs) (list 'nth i temp))
+                      assignments))
+          (setf xs (cdr xs))
+          (setf i (+ i 1))
+          (go build)
+        done)
+       (compiler-macroexpand-all
+        (cons 'let
+              (cons (list (list temp (list 'multiple-value-list value)))
+                    (append (nreverse assignments)
+                            (list (list 'car temp)))))))))

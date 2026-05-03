@@ -21,19 +21,19 @@
             (,i ,(or start 0))
             (,lim (or ,(or end nil) (length ,s))))
        (if (vectorp ,s)
-           ;; vector path: indexed fill with aref
-           (tagbody ,lbl
-             (when (< ,i ,lim)
-               (setf (aref ,s ,i) ,it)
-               (setq ,i (+ ,i 1))
-               (go ,lbl)))
+            ;; vector path: indexed fill with aref
+            (tagbody ,lbl
+              (when (< ,i ,lim)
+                (aset ,s ,i ,it)
+                (setq ,i (+ ,i 1))
+                (go ,lbl)))
            ;; list path: advance to start, then fill (lim-i) elements
            (let ((,ptr (nthcdr ,i ,s)) (,cnt 0) (,lim (- ,lim ,i)))
-             (tagbody ,lbl
-               (when (and ,ptr (< ,cnt ,lim))
-                 (setf (car ,ptr) ,it)
-                 (setq ,ptr (cdr ,ptr))
-                 (setq ,cnt (+ ,cnt 1))
+              (tagbody ,lbl
+                (when (and ,ptr (< ,cnt ,lim))
+                  (rplaca ,ptr ,it)
+                  (setq ,ptr (cdr ,ptr))
+                  (setq ,cnt (+ ,cnt 1))
                  (go ,lbl)))))
        ,s)))
 
@@ -48,14 +48,14 @@
     `(let* ((,d ,dest) (,s ,source))
        (if (and (vectorp ,d) (vectorp ,s))
            ;; vector path: indexed copy with aref
-           (let ((,di ,(or start1 0)) (,si ,(or start2 0))
-                 (,dlim (or ,(or end1 nil) (length ,d)))
-                 (,slim (or ,(or end2 nil) (length ,s))))
-             (tagbody ,lbl
-               (when (and (< ,di ,dlim) (< ,si ,slim))
-                 (setf (aref ,d ,di) (aref ,s ,si))
-                 (setq ,di (+ ,di 1))
-                 (setq ,si (+ ,si 1))
+            (let ((,di ,(or start1 0)) (,si ,(or start2 0))
+                  (,dlim (or ,(or end1 nil) (length ,d)))
+                  (,slim (or ,(or end2 nil) (length ,s))))
+              (tagbody ,lbl
+                (when (and (< ,di ,dlim) (< ,si ,slim))
+                  (aset ,d ,di (aref ,s ,si))
+                  (setq ,di (+ ,di 1))
+                  (setq ,si (+ ,si 1))
                  (go ,lbl))))
            ;; list path: pointer walk from start positions
            (let ((,dp (nthcdr ,(or start1 0) ,d))
@@ -63,11 +63,11 @@
                  (,dcnt (- (or ,(or end1 nil) (length ,d)) ,(or start1 0)))
                  (,scnt (- (or ,(or end2 nil) (length ,s)) ,(or start2 0)))
                  (,di 0) (,si 0))
-             (tagbody ,lbl
-               (when (and ,dp ,sp (< ,di ,dcnt) (< ,si ,scnt))
-                 (setf (car ,dp) (car ,sp))
-                 (setq ,dp (cdr ,dp))
-                 (setq ,sp (cdr ,sp))
+              (tagbody ,lbl
+                (when (and ,dp ,sp (< ,di ,dcnt) (< ,si ,scnt))
+                  (rplaca ,dp (car ,sp))
+                  (setq ,dp (cdr ,dp))
+                  (setq ,sp (cdr ,sp))
                  (setq ,di (+ ,di 1))
                  (setq ,si (+ ,si 1))
                  (go ,lbl)))))
@@ -116,11 +116,11 @@ Supports :test (default #'eql), :key, :from-end."
 (our-defmacro delete (item seq &key test key test-not)
   "Remove all elements matching ITEM from SEQ (delegates to remove)."
   (if (or test key test-not)
-      `(remove ,item ,seq
-               ,@(when test `(:test ,test))
-               ,@(when key `(:key ,key))
-               ,@(when test-not `(:test-not ,test-not)))
-      `(remove ,item ,seq)))
+      (append (list 'remove item seq)
+              (when test (list :test test))
+              (when key (list :key key))
+              (when test-not (list :test-not test-not)))
+      (list 'remove item seq)))
 
 (defun %delete-if-key-expand (pred seq key keep-when-true-p)
   (let ((fn-var (gensym "FN"))
@@ -151,11 +151,11 @@ Supports :test (default #'eql), :key, :from-end."
 (our-defmacro delete-duplicates (seq &key test key test-not)
   "Remove duplicate elements (keeps first occurrence)."
   (if (or test key test-not)
-      `(remove-duplicates ,seq
-                          ,@(when test `(:test ,test))
-                          ,@(when key `(:key ,key))
-                          ,@(when test-not `(:test-not ,test-not)))
-      `(remove-duplicates ,seq)))
+      (append (list 'remove-duplicates seq)
+              (when test (list :test test))
+              (when key (list :key key))
+              (when test-not (list :test-not test-not)))
+      (list 'remove-duplicates seq)))
 
 ;; SUBSTITUTE (FR-505): replace occurrences of old with new (with optional :test/:key)
 (our-defmacro substitute (new old seq &key test key test-not)
@@ -223,4 +223,3 @@ Supports :test (default #'eql), :key, :from-end."
 
 ;;; (reduce, nsubstitute, map-into, merge, last/butlast/search
 ;;;  are in macros-sequence-fold.lisp which loads after this file.)
-

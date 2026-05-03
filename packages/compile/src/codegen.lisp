@@ -44,8 +44,8 @@ Returns the inferred type, or NIL on failure (warning printed unless :strict)."
   (if (and (typep ast 'ast-defvar) (ast-defvar-value ast))
       (let ((value-type (funcall best-effort-type (ast-defvar-value ast) type-env)))
         (if value-type
-            (cl-cc/type:type-env-extend (ast-defvar-name ast)
-                                        (cl-cc/type:type-to-scheme value-type)
+            (type-env-extend (ast-defvar-name ast)
+                                        (type-to-scheme value-type)
                                         type-env)
             type-env))
       type-env))
@@ -55,8 +55,8 @@ Returns the inferred type, or NIL on failure (warning printed unless :strict)."
   (if (typep ast 'ast-defun)
       (let ((fn-type (funcall best-effort-type ast type-env)))
         (if fn-type
-            (cl-cc/type:type-env-extend (ast-defun-name ast)
-                                        (cl-cc/type:type-to-scheme fn-type)
+            (type-env-extend (ast-defun-name ast)
+                                        (type-to-scheme fn-type)
                                         type-env)
             type-env))
       type-env))
@@ -98,11 +98,15 @@ Returns a compilation-result or NIL when AST should stay on the direct path."
 
 (defun %result-vm-instructions-without-halt (result)
   "Return RESULT's VM instructions without its terminal halt instruction."
-  (let ((instructions (copy-list (compilation-result-vm-instructions result))))
-    (if (and instructions
-             (typep (car (last instructions)) 'vm-halt))
-        (butlast instructions)
-        instructions)))
+  (labels ((scan (instructions)
+             (if (consp instructions)
+                 (if (consp (cdr instructions))
+                     (cons (car instructions) (scan (cdr instructions)))
+                     (if (typep (car instructions) 'vm-halt)
+                         nil
+                         (cons (car instructions) nil)))
+                 nil)))
+    (scan (compilation-result-vm-instructions result))))
 
 (defun %lower-toplevel-form-to-ast (form)
   "Expand FORM and lower it into an optimized AST node."
@@ -183,7 +187,7 @@ Values: last-reg, last-type, last-cps, updated-type-env."
          (program   nil))
     (multiple-value-setq (optimized leaf-p)
       (apply #'optimize-instructions instructions opts))
-    (setf program (make-vm-program :instructions (if (member target '(:vm :wasm))
+    (setf program (make-vm-program :instructions (if (or (eq target :vm) (eq target :wasm))
                                                      instructions
                                                      (or optimized instructions))
                                    :result-register last-reg
@@ -211,7 +215,7 @@ Returns a compilation-result struct with program, assembly, and globals."
         (last-type     nil)
         (last-cps      nil)
         (compiled-asts nil)
-        (type-env      (cl-cc/type:type-env-empty))
+        (type-env      (type-env-empty))
         (opts          (%make-compile-opts :pass-pipeline pass-pipeline
                                           :print-pass-timings print-pass-timings
                                           :timing-stream timing-stream

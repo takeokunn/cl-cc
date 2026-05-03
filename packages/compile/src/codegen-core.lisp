@@ -33,11 +33,28 @@
     (>= :generic make-vm-ge     :fixnum make-vm-ge))
   "(operator keyword constructor ...) specs for generic/fixnum/float binop codegen.")
 
+(defun %plist-keyword-value-eq (plist key)
+  (let ((xs plist))
+    (tagbody
+     scan
+       (if (null xs) (return-from %plist-keyword-value-eq nil))
+       (if (eq (car xs) key)
+           (return-from %plist-keyword-value-eq (car (cdr xs))))
+       (setq xs (cdr (cdr xs)))
+       (go scan))))
+
 (defun %lookup-numeric-binop-ctor-symbol (op kind)
   "Return the constructor symbol for OP/KIND, or NIL when no specialization exists."
-  (let ((entry (assoc op *numeric-binop-ctor-specs*)))
-    (when entry
-      (getf (cdr entry) kind))))
+  (let ((xs *numeric-binop-ctor-specs*))
+    (tagbody
+     scan
+       (if (null xs) (return-from %lookup-numeric-binop-ctor-symbol nil))
+       (let ((entry (car xs)))
+         (if (eq op (car entry))
+             (return-from %lookup-numeric-binop-ctor-symbol
+               (%plist-keyword-value-eq (cdr entry) kind))))
+       (setq xs (cdr xs))
+       (go scan))))
 
 (defun %numeric-binop-ctor-function (op kind)
   "Return the constructor function for OP/KIND or NIL when absent."
@@ -51,36 +68,35 @@
       (error "Unknown binary operator: ~S" op)))
 
 (defparameter +codegen-fixnum-type+
-  (cl-cc/type:parse-type-specifier 'fixnum))
+  (parse-type-specifier 'fixnum))
 
 (defparameter +codegen-float-type+
-  (cl-cc/type:parse-type-specifier 'float))
+  (parse-type-specifier 'float))
 
 (defun %ast-proven-type (ctx ast)
   "Return the currently proven type for AST, if any."
-  (typecase ast
-    (ast-int
-     (when (typep (ast-int-value ast) 'fixnum)
-       +codegen-fixnum-type+))
-    (ast-the
+  (cond
+    ((typep ast 'ast-int)
+     (if (typep (ast-int-value ast) 'fixnum)
+         +codegen-fixnum-type+
+         nil))
+    ((typep ast 'ast-the)
      (or (let ((declared (ast-the-type ast)))
-           (when declared
-             (cl-cc/type:parse-type-specifier declared)))
+           (if declared (parse-type-specifier declared) nil))
          (%ast-proven-type ctx (ast-the-value ast))))
-    (ast-var
+    ((typep ast 'ast-var)
      (multiple-value-bind (scheme found-p)
-         (cl-cc/type:type-env-lookup (ast-var-name ast) (ctx-type-env ctx))
-       (when found-p
-         (cl-cc/type:instantiate scheme))))
-     (t nil)))
+         (type-env-lookup (ast-var-name ast) (ctx-type-env ctx))
+       (if found-p (instantiate scheme) nil)))
+    (t nil)))
 
 (defun %proven-fixnum-type-p (ty)
   "Return T if TY is a proven subtype of fixnum (or nil when type is unknown)."
-  (and ty (cl-cc/type:is-subtype-p ty +codegen-fixnum-type+)))
+  (and ty (is-subtype-p ty +codegen-fixnum-type+)))
 
 (defun %proven-float-type-p (ty)
   "Return T if TY is a proven subtype of float."
-  (and ty (cl-cc/type:is-subtype-p ty +codegen-float-type+)))
+  (and ty (is-subtype-p ty +codegen-float-type+)))
 
 (defun %float-literal-node-p (node)
   "Return T if NODE is a quoted float literal."
@@ -116,15 +132,15 @@ Falls back to the generic binop-ctor when no specialization applies."
       (let ((dst (make-register ctx)))
         (emit ctx (make-vm-const :dst dst :value name))
         (return-from compile-ast dst)))
-    (let ((local-entry (assoc name (ctx-env ctx))))
-      (when (and local-entry (member name (ctx-boxed-vars ctx)))
+    (let ((local-entry (%assoc-eq name (ctx-env ctx))))
+      (when (and local-entry (%member-eq-p name (ctx-boxed-vars ctx)))
         (let ((dst (make-register ctx)))
           (emit ctx (make-vm-car :dst dst :src (cdr local-entry)))
           (return-from compile-ast dst)))
       (when local-entry
         (return-from compile-ast (cdr local-entry))))
     (multiple-value-bind (constant-value constant-present-p)
-        (gethash name cl-cc/expand:*constant-table*)
+        (gethash name *constant-table*)
       (when constant-present-p
         (let ((dst (make-register ctx)))
           (emit ctx (make-vm-const :dst dst :value constant-value))
@@ -152,11 +168,16 @@ Falls back to the generic binop-ctor when no specialization applies."
   (let ((forms (ast-progn-forms node))
         (last nil)
         (tail (ctx-tail-position ctx)))
-    (dolist (form forms)
-      (setf (ctx-tail-position ctx)
-            (if (eq form (car (last forms))) tail nil))
-      (setf last (compile-ast form ctx)))
-    last))
+    (let ((xs forms))
+      (tagbody
+       scan
+         (if (null xs) (return-from compile-ast last))
+         (let ((form (car xs)))
+           (setf (ctx-tail-position ctx)
+                 (if (null (cdr xs)) tail nil))
+           (setf last (compile-ast form ctx)))
+         (setq xs (cdr xs))
+         (go scan)))))
 
 (defmethod compile-ast ((node ast-print) ctx)
   (setf (ctx-tail-position ctx) nil)
@@ -168,25 +189,19 @@ Falls back to the generic binop-ctor when no specialization applies."
   "Return a branch-specialized type environment for GUARD-VAR/GUARD-TYPE."
   (let ((base-env (ctx-type-env ctx)))
     (if guard-var
-        (case branch
-          (:then
-           (cl-cc/type:type-env-extend guard-var
-                                       (cl-cc/type:type-to-scheme guard-type)
-                                       base-env))
-          (:else
-           (multiple-value-bind (scheme found-p)
-               (cl-cc/type:type-env-lookup guard-var base-env)
-             (let ((current-type (and found-p
-                                      (cl-cc/type:instantiate scheme))))
-               (if (and current-type
-                        (typep current-type 'cl-cc/type:type-union))
-                   (cl-cc/type:type-env-extend guard-var
-                                               (cl-cc/type:type-to-scheme
-                                                (cl-cc/type:narrow-union-type
-                                                 current-type guard-type))
-                                               base-env)
-                   base-env))))
-          (t base-env))
+        (if (eq branch :then)
+            (type-env-extend guard-var (type-to-scheme guard-type) base-env)
+            (if (eq branch :else)
+                (multiple-value-bind (scheme found-p)
+                    (type-env-lookup guard-var base-env)
+                  (let ((current-type (if found-p (instantiate scheme) nil)))
+                    (if (and current-type (typep current-type 'type-union))
+                        (type-env-extend guard-var
+                                         (type-to-scheme
+                                          (narrow-union-type current-type guard-type))
+                                         base-env)
+                        base-env)))
+                base-env))
         base-env)))
 
 (defun %case-of-case-collapse-node (node outer-cond thenp)
@@ -224,7 +239,7 @@ Emits a move from the branch result into DST; optionally emits a jump to JUMP-LA
          (cond-ast   (ast-if-cond node))
          (then-ast   (%case-of-case-collapse-branch cond-ast (ast-if-then node) t))
          (else-ast   (%case-of-case-collapse-branch cond-ast (ast-if-else node) nil))
-         (guard-info (multiple-value-list (cl-cc/type:extract-type-guard cond-ast)))
+         (guard-info (multiple-value-list (extract-type-guard cond-ast)))
          (guard-var  (first guard-info))
          (guard-type (second guard-info))
          (cond-reg   (progn (setf (ctx-tail-position ctx) nil)

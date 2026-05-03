@@ -94,15 +94,17 @@
         (table    (cadr spec))
         (keys-var (gensym "KEYS"))
         (tbl-var  (gensym "TBL")))
-    `(let* ((,tbl-var  ,table)
-            (,keys-var (hash-table-keys ,tbl-var)))
-       (flet ((,name ()
-                (if ,keys-var
-                    (let ((k (car ,keys-var)))
-                      (setf ,keys-var (cdr ,keys-var))
-                      (values t k (gethash k ,tbl-var)))
-                    (values nil nil nil))))
-         ,@body))))
+    (list 'let*
+          (list (list tbl-var table)
+                (list keys-var (list 'hash-table-keys tbl-var)))
+          (list* 'flet
+                 (list (list name nil
+                             (list 'if keys-var
+                                   (list 'let (list (list 'k (list 'car keys-var)))
+                                         (list 'setq keys-var (list 'cdr keys-var))
+                                         (list 'values t 'k (list 'gethash 'k tbl-var)))
+                                   (list 'values nil nil nil))))
+                 body))))
 
 ;;; ─── read-preserving-whitespace (FR-658) ────────────────────────────────────
 
@@ -136,15 +138,16 @@
         (i   (gensym "I"))
         (ev  (gensym "E"))
         (ch  (gensym "CH")))
-    `(let* ((,seq ,sequence)
-            (,str ,stream)
-            (,ev  ,(or end `(length ,seq))))
-       (do ((,i ,start (+ ,i 1)))
-           ((>= ,i ,ev) ,i)
-         (let ((,ch (read-char ,str nil nil)))
-           (if (null ,ch)
-               (return ,i)
-               (setf (elt ,seq ,i) ,ch)))))))
+    (list 'let*
+          (list (list seq sequence)
+                (list str stream)
+                (list ev (or end (list 'length seq))))
+          (list 'do (list (list i start (list '+ i 1)))
+                (list (list '>= i ev) i)
+                (list 'let (list (list ch (list 'read-char str nil nil)))
+                      (list 'if (list 'null ch)
+                            (list 'return i)
+                            (list 'setf (list 'elt seq i) ch)))))))
 
 ;;; ─── read-delimited-list (FR-659) ───────────────────────────────────────────
 

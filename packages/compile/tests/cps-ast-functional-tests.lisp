@@ -24,6 +24,13 @@
                           (%form-contains-p (cdr form) sym)))
         (t nil)))
 
+(defun %form-contains-equal-p (form target)
+  "Return T if TARGET appears anywhere in FORM using EQUAL comparison."
+  (cond ((equal form target) t)
+        ((consp form) (or (%form-contains-equal-p (car form) target)
+                          (%form-contains-equal-p (cdr form) target)))
+        (t nil)))
+
 ;;; ─── ast-defvar ──────────────────────────────────────────────────────────────
 
 (deftest-each cps-defvar-emits-defvar-and-funcall
@@ -35,6 +42,14 @@
   (let ((result (%cps-k node)))
     (assert-true (%form-contains-p result 'defvar))
     (assert-true (%form-contains-p result 'funcall))))
+
+(deftest-each cps-defvar-returns-quoted-name
+  "ast-defvar CPS returns the defined symbol, not the variable's runtime value."
+  :cases (("with-value" '*x* (cl-cc/ast:make-ast-defvar :name '*x* :kind 'defvar
+                                :value (cl-cc/ast:make-ast-int :value 0)))
+          ("without-value" '*y* (cl-cc/ast:make-ast-defvar :name '*y* :kind 'defvar :value nil)))
+  (name node)
+  (assert-true (%form-contains-equal-p (%cps-k node) (list 'quote name))))
 
 ;;; ─── ast-handler-case ────────────────────────────────────────────────────────
 

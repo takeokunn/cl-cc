@@ -49,6 +49,15 @@
       (assert-= expected (%vm-num-binary ctor src 3))
       (assert-= expected (%vm-num-unary ctor src))))
 
+(deftest-each vm-float-introspection
+  "Float inspection constructors execute and return the host Common Lisp results."
+  :cases (("float-precision" #'cl-cc:make-vm-float-precision 1.0 (float-precision 1.0))
+          ("float-radix" #'cl-cc:make-vm-float-radix 1.0 (float-radix 1.0))
+          ("float-sign" #'cl-cc:make-vm-float-sign -2.5 (float-sign -2.5))
+          ("float-digits" #'cl-cc:make-vm-float-digits 1.0 (float-digits 1.0)))
+  (ctor src expected)
+  (assert-equal expected (%vm-num-unary ctor src)))
+
 (deftest-each vm-float-decode-values
   "vm-decode-float and vm-integer-decode-float both store exactly 3 multiple values."
   :cases (("decode-float"         #'cl-cc:make-vm-decode-float)
@@ -105,4 +114,3 @@
 (deftest vm-conjugate
   "vm-conjugate of #C(3 4) is #C(3 -4)."
   (assert-equal #C(3 -4) (%vm-num-unary #'cl-cc:make-vm-conjugate #C(3 4))))
-

@@ -159,13 +159,15 @@ The helper leaves all other instruction sequences unchanged."
 Assigns it the next available opcode number, registers it in all three
 dispatch tables, and defines a constant +OP2-NAME+ for the opcode number.
 BODY must be a single (lambda (state code pc regs) ...) returning next PC."
+  (when (or (eq name 'const)
+            (not (boundp '*next-opcode*)))
+    (setf (symbol-value '*next-opcode*) 0))
   (let ((op-sym (intern (format nil "+OP2-~A+" (symbol-name name))))
-         (op-num *next-opcode*))
-    (incf *next-opcode*)
+         (op-num (symbol-value '*next-opcode*)))
+    (setf (symbol-value '*next-opcode*) (1+ op-num))
     (list 'progn
           (list 'defconstant op-sym op-num)
           (list 'setf (list 'aref '*opcode-dispatch-table* op-sym) (first body))
           (list 'setf (list 'aref '*opcode-name-table* op-sym) (list 'quote name))
           (list 'setf (list 'gethash (list 'quote name) '*opcode-encoder-table*) op-sym)
           (list 'quote name))))
-

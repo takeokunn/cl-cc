@@ -66,9 +66,20 @@ loader never host-evals arbitrary expander forms."
        (second form)
        (cl-cc/runtime:rt-find-package (second form))))
 
+(defparameter *compiler-owned-top-level-form-names*
+  '("BLOCK" "RETURN-FROM" "LAMBDA" "DEFUN" "DEFMETHOD" "DEFGENERIC"
+    "DEFVAR" "DEFPARAMETER" "DEFCONSTANT" "DEFMACRO" "OUR-DEFMACRO")
+  "Top-level forms whose semantics are owned by parser/lowerer or explicit REPL handlers.")
+
+(defun %compiler-owned-top-level-form-p (symbol)
+  "Return T when SYMBOL names a form that must not be eagerly project-macroexpanded."
+  (and (symbolp symbol)
+       (member (symbol-name symbol) *compiler-owned-top-level-form-names* :test #'string=)))
+
 (defun %top-level-project-macro-p (symbol)
   "Return T when SYMBOL names a registered project macro."
   (and (symbolp symbol)
+       (not (%compiler-owned-top-level-form-p symbol))
        (cl-cc/expand:lookup-macro symbol)))
 
 (defun %coerce-host-macro-head (form)
@@ -83,7 +94,7 @@ probing host package/macro tables directly."
       form))
 
 (defun %remember-host-global-definition (form)
-  "Record host-evaluated global variable definitions in the REPL global registry."
+  "Record top-level global variable definitions in the REPL global registry."
   (when (and *repl-global-vars-persistent*
              (consp form)
              (symbolp (car form))
@@ -108,16 +119,15 @@ probing host package/macro tables directly."
 
 (defun %make-top-level-host-macro-expander (form)
   "Build the expander for a top-level DEFMACRO/OUR-DEFMACRO form.
-MAKE-MACRO-EXPANDER already normalizes bootstrap quasiquote markers for the
-returned expansion. Re-expanding that result with COMPILER-MACROEXPAND-ALL is
-too aggressive and can macroexpand inside quasiquoted templates, breaking forms
-such as PUSH over an UNQUOTE place during selfhost loading.
+MAKE-MACRO-EXPANDER already normalizes bootstrap quasiquote markers.
+Do not force an additional post-expansion pass here; caller-side expansion
+paths (e.g. RUN-FORM-REPL / COMPILER-MACROEXPAND-ALL) handle the necessary
+normalization without triggering duplicate recursive expansion.
 
 Build a descriptor so top-level macro definitions stay on the selfhost path
 instead of forcing host-closure execution."
   (let ((*macro-eval-fn* #'our-eval))
-    (append (make-macro-expander (third form) (cdddr form))
-            (list :post-expand :our-macroexpand-all))))
+    (make-macro-expander (third form) (cdddr form))))
 
 (defun %our-defmacro->register-macro-form (form)
   "Translate a top-level OUR-DEFMACRO form into the equivalent REGISTER-MACRO form.
@@ -196,6 +206,7 @@ Returns two values: result and handled-p."
   (multiple-value-bind (host-result handled-p) (%handle-host-only-top-level-form form)
     (when handled-p
       (return-from run-form-repl host-result)))
+  (%remember-host-global-definition form)
   (let* ((*package* *package*)
          (*macro-eval-fn* #'our-eval)
           (*accessor-slot-map* *repl-accessor-map*)

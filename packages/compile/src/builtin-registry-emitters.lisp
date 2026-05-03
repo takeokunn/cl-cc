@@ -138,15 +138,17 @@
          (a-reg (compile-ast (first args) ctx))
          (b-reg (compile-ast (second args) ctx))
          (c-reg (compile-ast (third args) ctx)))
-    (ecase ret
-      (:dst
-       (emit ctx (funcall (be-ctor entry) :dst result-reg
-                          s1 a-reg s2 b-reg s3 c-reg))
-       result-reg)
-      (:move-third
-       (emit ctx (funcall (be-ctor entry) s1 a-reg s2 b-reg s3 c-reg))
-       (emit ctx (make-vm-move :dst result-reg :src c-reg))
-       result-reg))))
+    (if (eq ret :dst)
+        (progn
+          (emit ctx (funcall (be-ctor entry) :dst result-reg
+                             s1 a-reg s2 b-reg s3 c-reg))
+          result-reg)
+        (if (eq ret :move-third)
+            (progn
+              (emit ctx (funcall (be-ctor entry) s1 a-reg s2 b-reg s3 c-reg))
+              (emit ctx (make-vm-move :dst result-reg :src c-reg))
+              result-reg)
+            (error "Unknown ternary builtin return style")))))
 
 (defun emit-builtin-binary-custom (entry args result-reg ctx)
   "Parametric binary emitter: reads slot names from (be-slots entry)."

@@ -11,6 +11,7 @@
 
 (in-package :cl-cc/vm)
 
+#-cl-cc-self-hosting
 (export
  '(;; ─── Condition System Operations ───────────────────────────────────────────
    vm-signal-condition
@@ -49,14 +50,21 @@
    make-vm-sinh-inst
    make-vm-cosh-inst
    make-vm-tanh-inst
+   make-vm-asinh-inst
+   make-vm-acosh-inst
+   make-vm-atanh-inst
    make-vm-exp-inst
    make-vm-log-inst
-   make-vm-sqrt
-   make-vm-expt
-   make-vm-float-inst
-   make-vm-decode-float
-   make-vm-integer-decode-float
-   make-vm-scale-float
+    make-vm-sqrt
+    make-vm-expt
+    make-vm-float-inst
+    make-vm-float-precision
+    make-vm-float-radix
+    make-vm-float-sign
+    make-vm-float-digits
+    make-vm-decode-float
+    make-vm-integer-decode-float
+    make-vm-scale-float
 
    ;; ─── Numeric Constructors ──────────────────────────────────────────────────
    make-vm-round-inst

@@ -145,4 +145,6 @@ Example:
             (error "Unknown package: ~S" (second (first forms))))
           (setf *package* pkg)
           (return-from run-string-repl (second (first forms)))))
+      (dolist (form forms)
+        (%remember-host-global-definition form))
       (%run-form-repl-impl (compile-string source :target :vm)))))

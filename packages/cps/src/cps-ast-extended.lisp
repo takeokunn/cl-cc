@@ -67,11 +67,11 @@
         (cps-transform-ast value
                            (%cps-lambda (list v)
                                         (%cps-progn
-                                         (list kind name v)
-                                         (%cps-funcall k name))))
+                                          (list kind name v)
+                                          (%cps-funcall k (list 'quote name)))))
         (%cps-progn
          (list kind name)
-         (%cps-funcall k name)))))
+         (%cps-funcall k (list 'quote name))))))
 
 (defmethod cps-transform-ast ((node ast-defun) k)
   "Transform defun conservatively through host DEFUN."

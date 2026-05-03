@@ -80,20 +80,24 @@
         (assert-eql 2003
           (run-string-repl "(sh-combined 1 2)"))))))
 
+(deftest selfhost-load-defun-implicit-block-return-from
+  "our-load preserves DEFUN's implicit named block for RETURN-FROM in loaded files."
+  (%with-tmpfile (tmpfile "sh-return-from"
+      "(defun sh-return-from (x)
+  (return-from sh-return-from (+ x 1))
+  0)")
+    (assert-eql 42
+      (run-load-and-eval tmpfile "(sh-return-from 41)"))))
+
 ;;; ─── Self-Hosting: Source File Loading ────────────────────────────────────
 
 (in-suite selfhost-slow-suite)
 
 (deftest selfhost-load-own-source
   "cl-cc can load a representative subset of its own source files."
-  (let ((ok 0))
-    (cl-cc:with-fresh-repl-state
-      (dolist (f *selfhost-representative-files*)
-        (handler-case
-          (progn (cl-cc::our-load f) (incf ok))
-          (error (e)
-            (declare (ignore e))))))
-    (assert-eql (length *selfhost-representative-files*) ok)))
+  (cl-cc:with-fresh-repl-state
+    (dolist (f *selfhost-representative-files*)
+      (cl-cc::our-load f))))
 
 (in-suite selfhost-suite)
 
@@ -114,18 +118,16 @@
   :timeout 300
   (handler-bind ((warning #'muffle-warning))
     (let* ((files (selfhost-all-source-files))
-           (n (length files))
            (ok 0))
       (pushnew :cl-cc-self-hosting cl:*features*)
       (unwind-protect
            (cl-cc:with-fresh-repl-state
              (let ((cl-cc:*skip-optimizer-passes* t))
                (dolist (f files)
-                 (handler-case (progn (cl-cc::our-load f) (incf ok))
-                   (condition (e) (declare (ignore e)))))))
+                  (cl-cc::our-load f)
+                  (incf ok))))
         (setf cl:*features* (remove :cl-cc-self-hosting cl:*features*)))
-      (assert-true (> ok 0))
-      (assert-true (>= ok (floor n 2))))))
+      (assert-eql (length files) ok))))
 
 
 (set-suite-test-timeout! 'selfhost-suite 30)

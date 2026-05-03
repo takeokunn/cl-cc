@@ -24,18 +24,20 @@
    (psetf p1 v1 p2 v2 ...) — all vi are evaluated, then all pi are set."
   (when (oddp (length pairs))
     (error "PSETF requires an even number of arguments"))
-  (let (places vals)
+  (let ((places nil)
+        (vals nil))
     (do ((rest pairs (cddr rest)))
         ((null rest))
       (push (first rest) places)
       (push (second rest) vals))
-    (setf places (nreverse places)
-          vals   (nreverse vals))
-    (let ((temps (mapcar (lambda (v) (declare (ignore v)) (gensym "PSETF")) vals)))
-      `(let ,(mapcar #'list temps vals)
-         ,@(mapcar (lambda (place temp) `(setf ,place ,temp))
-                   places temps)
-         nil))))
+    (let* ((ordered-places (nreverse places))
+           (ordered-vals (nreverse vals))
+           (temps (mapcar (lambda (val) (declare (ignore val)) (gensym "PSETF"))
+                           ordered-vals)))
+      (append (list 'let (mapcar #'list temps ordered-vals))
+              (mapcar (lambda (place temp) (list 'setf place temp))
+                      ordered-places temps)
+              (list nil)))))
 
 ;; SHIFTF (FR-206) — shift values through a series of places
 (our-defmacro shiftf (&rest args)
@@ -47,12 +49,11 @@
   (let* ((places (butlast args))
          (newval (car (last args)))
          (temps  (mapcar (lambda (p) (declare (ignore p)) (gensym "SHIFT")) places)))
-    `(let ,(mapcar #'list temps places)
-       ,@(mapcar (lambda (place val)
-                   `(setf ,place ,val))
-                 places
-                 (append (cdr temps) (list newval)))
-       ,(car temps))))
+    (append (list 'let (mapcar #'list temps places))
+            (mapcar (lambda (place val) (list 'setf place val))
+                    places
+                    (append (cdr temps) (list newval)))
+            (list (car temps)))))
 
 ;; WITH-ACCESSORS (FR-205) — bind local vars to accessor function results
 (our-defmacro with-accessors (slot-entries instance &body body)
@@ -68,18 +69,59 @@
          ,@body))))
 
 ;; DEFINE-MODIFY-MACRO (FR-208) — define a read-modify-write macro
+(defun %define-modify-macro-param-name (spec)
+  "Return the variable name introduced by a DEFINE-MODIFY-MACRO parameter SPEC."
+  (cond
+    ((symbolp spec) spec)
+    ((and (consp spec) (consp (car spec))) (second (car spec)))
+    ((consp spec) (car spec))
+    (t spec)))
+
+(defun %define-modify-macro-args-form (lambda-list)
+  "Return a form that evaluates to the modifying function's extra arguments."
+  (let ((tail lambda-list)
+        (args nil)
+        (rest-var nil))
+    (tagbody
+     scan
+       (if (null tail) (go done))
+       (let ((entry (car tail)))
+         (cond
+            ((or (eq entry '&optional) (eq entry '&key) (eq entry '&allow-other-keys)) nil)
+            ((or (eq entry '&rest) (eq entry '&body))
+            (setq tail (cdr tail))
+            (setq rest-var (car tail))
+            (go done))
+           ((eq entry '&aux)
+            (go done))
+           (t
+            (setq args (cons (%define-modify-macro-param-name entry) args)))))
+       (setq tail (cdr tail))
+       (go scan)
+     done)
+    (setq args (nreverse args))
+    (if rest-var
+        (if args
+            (list 'append (cons 'list args) rest-var)
+            rest-var)
+        (cons 'list args))))
+
 (our-defmacro define-modify-macro (name lambda-list function &optional doc)
-  (declare (ignore doc))   ; before docstring — declare after string is invalid in our-defmacro
   "Define a macro NAME that reads PLACE, applies FUNCTION (with extra args),
    and stores the result back into PLACE."
   (let* ((place-var (gensym "PLACE"))
-         (param-names
-           (mapcar (lambda (p) (if (listp p) (first p) p))
-                   (remove-if (lambda (p)
-                                (member p '(&optional &rest &key &aux &allow-other-keys)))
-                              lambda-list))))
-    `(our-defmacro ,name (,place-var ,@lambda-list)
-       `(setf ,,place-var (,',function ,,place-var ,,@param-names)))))
+        (args-form (%define-modify-macro-args-form lambda-list))
+        (params (cons 'place lambda-list))
+        (body (list 'let (list (list place-var 'place))
+                    (list 'list
+                          (list 'quote 'setf)
+                          place-var
+                          (list 'cons
+                                (list 'quote function)
+                                (list 'cons place-var args-form))))))
+    (if doc
+        (list 'our-defmacro name params doc body)
+        (list 'our-defmacro name params body))))
 
 ;; ASSERT (FR-203) — signal a continuable error if a test fails
 (our-defmacro assert (test &optional places datum &rest args)
@@ -116,6 +158,17 @@
         `(progn ,defclass-form ,report-form (quote ,name))
         defclass-form)))
 
+(defun %ansi-plist-value (plist key)
+  "Return KEY's value in PLIST without relying on GETF during bootstrap."
+  (tagbody
+   scan
+     (if (or (null plist) (null (cdr plist)))
+         (return-from %ansi-plist-value nil))
+     (if (eq (car plist) key)
+         (return-from %ansi-plist-value (cadr plist)))
+     (setq plist (cddr plist))
+     (go scan)))
+
 ;; WITH-INPUT-FROM-STRING (FR-209)
 (our-defmacro with-input-from-string (binding &body body)
   "Execute BODY with (first binding) bound to a string input stream.
@@ -123,16 +176,19 @@ Supports :start, :end, and :index keyword arguments."
   (let* ((var    (first binding))
          (string (second binding))
          (rest   (cddr binding))
-         (start  (getf rest :start))
-         (end    (getf rest :end))
-         (index  (getf rest :index))
+         (start  (%ansi-plist-value rest :start))
+         (end    (%ansi-plist-value rest :end))
+         (index  (%ansi-plist-value rest :index))
          (str-var (gensym "STR")))
-    `(let* ((,str-var ,(if (or start end)
-                           `(subseq ,string ,(or start 0) ,end)
+    (list* 'let*
+           (list (list str-var
+                       (if (or start end)
+                           (list 'subseq string (or start 0) end)
                            string))
-            (,var (make-string-input-stream ,str-var)))
-       ,@(when index `((setf ,index (length ,str-var))))
-       ,@body)))
+                 (list var (list 'make-string-input-stream str-var)))
+           (append (when index
+                     (list (list 'setf index (list 'length str-var))))
+                   body))))
 
 ;; WITH-OUTPUT-TO-STRING (FR-613: optional string argument ignored in cl-cc)
 (our-defmacro with-output-to-string (binding &body body)

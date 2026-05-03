@@ -16,11 +16,19 @@
 (deftest-each setf-passthrough-expansions
   "(setf (accessor ...)) expands without gensym: (accessor* args val)"
   :cases (("gethash"    '(setf (gethash k ht) v)      "SETF-GETHASH"    '(k ht v))
-          ("slot-value" '(setf (slot-value obj 'slot) v) "SETF-SLOT-VALUE" '(obj 'slot v)))
+          ("slot-value" '(setf (slot-value obj 'slot) v) "RT-SLOT-SET" '(obj 'slot v)))
   (form expected-name expected-args)
   (let ((result (our-macroexpand-1 form)))
     (assert-equal (symbol-name (car result)) expected-name)
     (assert-equal (cdr result) expected-args)))
+
+(deftest setf-fill-pointer-expands-to-vm-builtin
+  "(setf (fill-pointer vector) value) expands to the VM fill-pointer setter, not slot-value."
+  (let* ((result (our-macroexpand-1 '(setf (fill-pointer v) n)))
+         (setter-form (third result)))
+    (assert-eq 'let (car result))
+    (assert-string= "%SET-FILL-POINTER" (symbol-name (car setter-form)))
+    (assert-eq 'v (second setter-form))))
 
 (deftest-each place-macro-outer-is-let
   "Compound-place macros (setf car/nth/getf, case, typecase) wrap in LET."
@@ -53,6 +61,14 @@
 (deftest setf-getf-body-uses-rt-plist-put
   "(setf (getf plist :k) v) body uses rt-plist-put (CL-CC-specific symbol)"
   (let* ((result    (our-macroexpand-1 '(setf (getf plist :k) v)))
-         (setq-form (caddr result)))
+          (setq-form (caddr result)))
     (assert-eq (car setq-form) 'setq)
     (assert-equal (symbol-name (car (caddr setq-form))) "RT-PLIST-PUT")))
+
+(deftest setf-getf-compound-place-uses-recursive-setf
+  "(setf (getf compound-place :k) v) never emits SETQ with a non-symbol variable."
+  (let* ((result (our-macroexpand-1 '(setf (getf (cdddr method-entry) :phase) v)))
+         (setter-form (caddr result)))
+    (assert-eq 'setf (car setter-form))
+    (assert-equal '(cdddr method-entry) (second setter-form))
+    (assert-equal (symbol-name (car (third setter-form))) "RT-PLIST-PUT")))

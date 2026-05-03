@@ -2,8 +2,11 @@
 
 ;;; Constructor exports: runtime, I/O, string, symbol, and stream builders.
 
+#-cl-cc-self-hosting
 (export
- '(make-vm-intern-symbol
+ '(make-vm-find-package
+   make-vm-find-symbol
+   make-vm-intern-symbol
    make-vm-jump
    make-vm-jump-zero
    make-vm-keywordp
@@ -96,7 +99,9 @@
    make-vm-second
    make-vm-set-global
    make-vm-sethash
+   make-vm-signal
    make-vm-signal-error
+   make-vm-sleep-inst
    make-vm-slot-read
    make-vm-slot-write
    make-vm-stream-write-string-inst
@@ -109,6 +114,8 @@
    make-vm-string-length
    make-vm-string-lessp
    make-vm-string-not-equal
+   make-vm-string-not-greaterp
+   make-vm-string-not-lessp
    make-vm-string-right-trim
    make-vm-string-trim
    make-vm-string-upcase
@@ -182,6 +189,9 @@
    make-vm-clear-input
    make-vm-clear-output
    make-vm-load-file
+   make-vm-char-not-equal
+   make-vm-char-lessp
+   make-vm-char-greaterp
    make-vm-char>
    make-vm-char<=
    make-vm-char>=

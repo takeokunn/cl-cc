@@ -50,6 +50,11 @@
   (table)
   (assert-true (> (length table) 0)))
 
+(deftest builtin-binary-opt-nil-slot-find-symbol-entry
+  "find-symbol uses the binary optional package convention and VM constructor."
+  (let ((entry (assoc 'find-symbol cl-cc/compile::*builtin-binary-opt-nil-slot-entries*)))
+    (assert-equal '(find-symbol cl-cc::make-vm-find-symbol :src :pkg) entry)))
+
 (deftest-each builtin-table-minimum-sizes
   "Key tables have minimum entry counts for their respective calling conventions."
   :cases (("nullary"        cl-cc/compile::*builtin-nullary-entries*        10)
@@ -57,6 +62,19 @@
           ("ternary-custom" cl-cc/compile::*builtin-ternary-custom-entries*  5))
   (table min-size)
   (assert-true (>= (length table) min-size)))
+
+;;; ─── *builtin-string-cmp-entries* (extended case-insensitive family) ──────
+
+(deftest-each builtin-string-cmp-extended-representative-entries
+  "Extended string comparison builtins stay wired to the expected VM constructors."
+  :cases (("string-equal" 'string-equal 'cl-cc::make-vm-string-equal)
+          ("string-lessp" 'string-lessp 'cl-cc::make-vm-string-lessp)
+          ("string-greaterp" 'string-greaterp 'cl-cc::make-vm-string-greaterp)
+          ("string-not-equal" 'string-not-equal 'cl-cc::make-vm-string-not-equal)
+          ("string-not-greaterp" 'string-not-greaterp 'cl-cc::make-vm-string-not-greaterp)
+          ("string-not-lessp" 'string-not-lessp 'cl-cc::make-vm-string-not-lessp))
+  (sym expected-ctor)
+  (assert-equal expected-ctor (cdr (assoc sym cl-cc/compile::*builtin-string-cmp-entries*))))
 
 ;;; ─── *builtin-table-query-entries* ──────────────────────────────────────
 
@@ -198,4 +216,3 @@
     (assert-eq slot1 (third entry))
     (assert-eq slot2 (fourth entry))
     (assert-eq slot3 (fifth entry))))
-

@@ -33,13 +33,18 @@ Special folding nodes like ast-binop and ast-call stay in optimize-ast directly.
 
 (defun %optimize-ast-list (nodes)
   "Optimize every AST node in NODES, preserving list order."
-  (mapcar #'optimize-ast nodes))
+  (if (consp nodes)
+      (cons (optimize-ast (car nodes))
+            (%optimize-ast-list (cdr nodes)))
+      nil))
 
 (defun %optimize-ast-binding-alist (bindings)
   "Optimize the value side of an alist of lexical BINDINGS."
-  (mapcar (lambda (binding)
-            (cons (car binding) (optimize-ast (cdr binding))))
-          bindings))
+  (if (consp bindings)
+      (let ((binding (car bindings)))
+        (cons (cons (car binding) (optimize-ast (cdr binding)))
+              (%optimize-ast-binding-alist (cdr bindings))))
+      nil))
 
 (defun %optimize-ast-progn-node (node)
   (%clone-source node #'make-ast-progn
@@ -104,27 +109,43 @@ Special folding nodes like ast-binop and ast-call stay in optimize-ast directly.
     :value (optimize-ast (ast-the-value node))))
 
 (defun %optimize-ast-rebuild-node (node)
-  "Rebuild NODE via the declarative rebuilder table when it is a simple recursive case." 
-  (let ((rebuilder (cdr (assoc (type-of node) *optimize-ast-rebuilder-table*))))
-    (when rebuilder
-      (funcall rebuilder node))))
+  "Rebuild NODE when it is a simple recursive case."
+  (if (typep node 'ast-progn)
+      (%optimize-ast-progn-node node)
+      (if (typep node 'ast-let)
+          (%optimize-ast-let-node node)
+          (if (typep node 'ast-if)
+              (%optimize-ast-if-node node)
+              (if (typep node 'ast-lambda)
+                  (%optimize-ast-lambda-node node)
+                  (if (typep node 'ast-defun)
+                      (%optimize-ast-defun-node node)
+                      (if (typep node 'ast-defvar)
+                          (%optimize-ast-defvar-node node)
+                          (if (typep node 'ast-block)
+                              (%optimize-ast-block-node node)
+                              (if (typep node 'ast-return-from)
+                                  (%optimize-ast-return-from-node node)
+                                  (if (typep node 'ast-setq)
+                                      (%optimize-ast-setq-node node)
+                                      (if (typep node 'ast-the)
+                                          (%optimize-ast-the-node node)
+                                          nil)))))))))))
 
 (defun optimize-ast (node)
   "Fold small pure constant expressions before VM lowering."
-  (typecase node
-    (ast-binop
-     (%fold-ast-binop node
-                      (optimize-ast (ast-binop-lhs node))
-                      (optimize-ast (ast-binop-rhs node))))
-    (ast-call
-     (let* ((func      (optimize-ast (ast-call-func node)))
-            (args      (%optimize-ast-list (ast-call-args node)))
-            (call-node (%clone-source node #'make-ast-call :func func :args args)))
-        (multiple-value-bind (value ok)
-            (let ((*compile-time-value-env*    *compile-time-value-env*)
-                 (*compile-time-function-env* *compile-time-function-env*))
-             (%evaluate-ast call-node *compile-time-eval-depth-limit*))
-         (if ok (%compile-time-value->ast value node) call-node))))
-    (t
-     (or (%optimize-ast-rebuild-node node)
-         node))))
+  (if (typep node 'ast-binop)
+      (%fold-ast-binop node
+                       (optimize-ast (ast-binop-lhs node))
+                       (optimize-ast (ast-binop-rhs node)))
+      (if (typep node 'ast-call)
+          (let* ((func (optimize-ast (ast-call-func node)))
+                 (args (%optimize-ast-list (ast-call-args node)))
+                 (call-node (%clone-source node #'make-ast-call :func func :args args)))
+            (multiple-value-bind (value ok)
+                (let ((*compile-time-value-env* *compile-time-value-env*)
+                      (*compile-time-function-env* *compile-time-function-env*))
+                  (%evaluate-ast call-node *compile-time-eval-depth-limit*))
+              (if ok (%compile-time-value->ast value node) call-node)))
+          (let ((rebuilt (%optimize-ast-rebuild-node node)))
+            (if rebuilt rebuilt node)))))

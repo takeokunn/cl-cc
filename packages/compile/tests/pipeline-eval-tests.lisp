@@ -72,6 +72,20 @@
   (expected expr)
   (assert-true (equal expected (run-string expr :stdlib t))))
 
+(deftest-each pipeline-run-string-function-cell-regressions
+  "run-string resolves function-cell helpers needed by selfhost source loading."
+  :cases (("symbol-function"
+           42
+           "(progn (defun sf-regression (x) (+ x 1)) (funcall (symbol-function 'sf-regression) 41))")
+          ("setf-gethash-fallback"
+           9
+           "(let ((h (make-hash-table))) (setf-gethash 'k h 9) (gethash 'k h))")
+          ("make-array-numeric-fill-pointer"
+           1
+           "(let ((v (make-array 8 :fill-pointer 1))) (fill-pointer v))"))
+  (expected expr)
+  (assert-= expected (run-string expr)))
+
 (deftest-each pipeline-run-string-output-options
   "run-string forwards timing/stats/trace-json output without altering the evaluation result."
   :cases (("timings"
@@ -201,7 +215,7 @@
                  (lambda (&rest args)
                    (setf called t)
                    (apply orig args)))
-            (assert-eq 7
+            (assert-eq '*pipeline-cps-fallback*
                        (cl-cc::our-eval '(defvar *pipeline-cps-fallback* 7)))
             (assert-true called))
       (ignore-errors (makunbound '*pipeline-cps-fallback*))

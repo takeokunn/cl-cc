@@ -13,6 +13,10 @@
 
 ;;; ── Opcode definitions ───────────────────────────────────────────────────
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defvar *next-opcode* 0
+    "Macro-time opcode counter used by defopcode."))
+
 (defopcode-load-literal const (svref code (+ pc 2)))
 
 (defopcode nop

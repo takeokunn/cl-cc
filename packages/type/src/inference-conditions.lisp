@@ -1,6 +1,6 @@
 (in-package :cl-cc/type)
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-;;; Type Inference — Condition Classes and Exports
+;;; Type Inference — Condition Classes
 ;;;
 ;;; Extracted from inference-forms.lisp.
 ;;; Depends on inference-forms.lisp (type-to-string).
@@ -31,43 +31,3 @@
              (format stream "Type mismatch: expected ~A, got ~A"
                      (type-to-string (type-mismatch-error-expected condition))
                      (type-to-string (type-mismatch-error-actual condition))))))
-
-;;; Exports
-
-(export '(infer
-          infer-binop
-          infer-if
-          infer-let
-          infer-lambda
-          infer-call
-          infer-progn
-          infer-args
-          infer-with-env
-          annotate-type
-          syntactic-value-p
-          *type-predicate-table*
-          register-type-predicate
-
-          type-inference-error
-          type-inference-error-message
-          unbound-variable-error
-          unbound-variable-error-name
-          type-mismatch-error
-          type-mismatch-error-expected
-          type-mismatch-error-actual
-
-          ;; Type class registries (Phase 4) — defined in typeclass.lisp, re-exported here
-          *typeclass-registry*
-          register-typeclass
-          lookup-typeclass
-          *typeclass-instance-registry*
-          register-typeclass-instance
-          lookup-typeclass-instance
-          has-typeclass-instance-p
-          check-typeclass-constraint
-          dict-env-extend
-          dict-env-lookup
-          check-qualified-constraints
-
-          ;; Phase 6 rank-N: check mode required for forall
-          ))

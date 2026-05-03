@@ -61,8 +61,27 @@
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-ast-call :func 'make-array
                                 :args (list (make-ast-int :value 0)))
-                 ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-make-array))))
+                  ctx)
+     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-make-array))))
+
+(deftest-each codegen-phase2-make-array-dynamic-keywords-fall-through
+  "MAKE-ARRAY only lowers keyword metadata that is statically known."
+  :cases (("dynamic-fill-pointer"
+           (list (make-ast-int :value 5)
+                 (make-ast-var :name :fill-pointer)
+                 (make-ast-var :name 'fp)))
+          ("dynamic-adjustable"
+           (list (make-ast-int :value 5)
+                 (make-ast-var :name :adjustable)
+                 (make-ast-var :name 'adj)))
+          ("dynamic-initial-contents"
+           (list (make-ast-int :value 5)
+                 (make-ast-var :name :initial-contents)
+                 (make-ast-var :name 'contents))))
+  (args)
+  (let ((ctx (make-ctx-with-vars 'fp 'adj 'contents)))
+    (compile-ast (make-ast-call :func 'make-array :args args) ctx)
+    (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-make-array)))))
 
 ;;; ─── Section 4: MAKE-ADJUSTABLE-VECTOR ─────────────────────────────────────
 

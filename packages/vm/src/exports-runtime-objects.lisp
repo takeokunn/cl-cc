@@ -2,6 +2,7 @@
 
 ;;; Object-system, dispatch, bridge, and environment exports.
 
+#-cl-cc-self-hosting
 (export
  '(vm-class-def
    vm-class-name-sym

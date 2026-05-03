@@ -8,16 +8,17 @@
 
 (in-suite expander-setf-places-suite)
 (deftest expander-setf-slot-value-passthrough
-  "compiler-macroexpand-all: (setf (slot-value obj 'slot) v) is a special form and recurses."
+  "compiler-macroexpand-all: (setf (slot-value obj 'slot) v) stays parseable and never emits SETF-SLOT-VALUE."
   (let ((result (cl-cc/expand:compiler-macroexpand-all
-                 '(setf (slot-value obj 'field) new-val))))
-    (assert-true (consp result))))
+                  '(setf (slot-value obj 'field) new-val))))
+    (assert-eq 'setf (first result))
+    (assert-false (search "SETF-SLOT-VALUE" (format nil "~S" result)))))
 
 (deftest expand-setf-accessor-unknown-falls-back-to-slot-value
-  "expand-setf-accessor for an unknown accessor generates (setf (slot-value ...))."
+  "expand-setf-accessor for an unknown accessor lowers through RT-SLOT-SET."
   (let* ((result (cl-cc/expand::expand-setf-accessor '(some-unknown-accessor obj) 'val))
-         (result-str (format nil "~S" result)))
-    (assert-true (search "SLOT-VALUE" result-str))))
+          (result-str (format nil "~S" result)))
+    (assert-true (search "RT-SLOT-SET" result-str))))
 
 (deftest expand-setf-accessor-known-maps-to-slot-name
   "expand-setf-accessor for a registered accessor uses the mapped slot name."
@@ -38,10 +39,10 @@
     (assert-true (search expected-fn str))))
 
 (deftest expander-setf-accessor-slot-value-fallback
-  "compiler-macroexpand-all: (setf (foo obj) v) with unknown accessor falls back to slot-value."
+  "compiler-macroexpand-all: (setf (foo obj) v) with unknown accessor lowers through RT-SLOT-SET."
   (let ((result (cl-cc/expand:compiler-macroexpand-all '(setf (my-unknown-accessor-xyz obj) v))))
     (let ((str (format nil "~S" result)))
-      (assert-true (search "SLOT-VALUE" str)))))
+      (assert-true (search "RT-SLOT-SET" str)))))
 
 (deftest expander-setf-nth-place
   "(setf (nth i x) v) expands via rplaca + nthcdr."
@@ -68,6 +69,23 @@ detection format can run the test-level 30s timeout."
   (let ((result (cl-cc/expand:compiler-macroexpand-all '(setf (getf my-plist :foo) 42))))
     (assert-eq 'let (car result))
     (assert-true (search "RT-PLIST-PUT" (format nil "~S" result)))))
+
+(deftest expander-setf-getf-compound-cxr-place
+  "(setf (getf (cdddr entry) key) v) writes the rebuilt plist back through the CXR place."
+  (let* ((result (cl-cc/expand:compiler-macroexpand-all
+                  '(setf (getf (cdddr method-entry) :phase) :primary)))
+         (text (format nil "~S" result)))
+    (assert-eq 'let (car result))
+    (assert-true (search "RT-PLIST-PUT" text))
+    (assert-true (search "RPLACD" text))
+    (assert-false (search "SETQ (CDDDR" text))))
+
+(deftest expander-setf-fill-pointer-place
+  "(setf (fill-pointer vector) value) expands through the VM fill-pointer setter."
+  (let ((result (cl-cc/expand:compiler-macroexpand-all '(setf (fill-pointer vec) 3))))
+    (assert-string= "%SET-FILL-POINTER" (symbol-name (car result)))
+    (assert-eq 'vec (second result))
+    (assert-= 3 (third result))))
 
 (deftest expander-setf-get-place
   "(setf (get sym indicator) v) expands via symbol-plist update and returns the value."

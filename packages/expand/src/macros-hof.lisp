@@ -120,19 +120,6 @@
            (when (funcall ,test-var ,item-var (funcall ,key-var ,x))
              (return ,x)))))))
 
-(our-defmacro find (item list &rest keys)
-  (if keys
-      ;; keyword args present — key/test-aware loop
-      (%find-key-expand item list
-                        (or (getf keys :key)  '#'identity)
-                        (or (getf keys :test) '#'eql))
-      ;; no keyword args — fast eql check
-      (let ((item-var (gensym "ITEM")) (x (gensym "X")))
-        `(let ((,item-var ,item))
-           (block nil
-             (dolist (,x ,list nil)
-               (when (eql ,item-var ,x) (return ,x))))))))
-
 (defun %find-if-key-expand (pred list key)
   (let ((fn-var (gensym "FN"))
         (kfn (gensym "KEY"))
@@ -140,9 +127,25 @@
     `(let ((,fn-var ,pred)
            (,kfn ,key))
        (block nil
-         (dolist (,x ,list nil)
-           (when (funcall ,fn-var (funcall ,kfn ,x))
-             (return ,x)))))))
+          (dolist (,x ,list nil)
+            (when (funcall ,fn-var (funcall ,kfn ,x))
+              (return ,x)))))))
+
+;; FIND: first element matching ITEM, or NIL (with optional :test/:key/:test-not)
+(our-defmacro find (item list &key test key test-not)
+  (let ((item-var (gensym "ITEM"))
+        (x (gensym "X")))
+    (if (or test key test-not)
+        (%find-key-expand item list
+                          (or key '#'identity)
+                          (cond (test-not `(complement ,test-not))
+                                (test test)
+                                (t '#'eql)))
+        `(let ((,item-var ,item))
+           (block nil
+             (dolist (,x ,list nil)
+               (when (eql ,item-var ,x)
+                 (return ,x))))))))
 
 ;; FIND-IF: first element for which pred is true, or nil (with optional :key)
 (our-defmacro find-if (pred list &key key)

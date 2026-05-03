@@ -7,6 +7,39 @@
 ;;; functions are available.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+(defun %plist-value-or-default (plist indicator default)
+  "Return plist value for INDICATOR, or DEFAULT when absent."
+  (let ((xs plist))
+    (tagbody
+     scan
+       (if (null xs) (return-from %plist-value-or-default default))
+       (if (eq (car xs) indicator)
+           (return-from %plist-value-or-default (cadr xs)))
+       (setf xs (cddr xs))
+       (go scan))))
+
+(defun %apply-args-to-cons-chain (args)
+  "Build nested CONS forms from APPLY argument tail ARGS."
+  (if (null (cdr args))
+      (car args)
+      (list 'cons (car args) (%apply-args-to-cons-chain (cdr args)))))
+
+(defun %build-multiple-value-let-bindings (vars values-form tmp direct-values-p)
+  "Build LET* bindings for MULTIPLE-VALUE-BIND without LOOP/MAPCAR."
+  (let ((xs vars)
+        (i 0)
+        (bindings nil))
+    (tagbody
+     scan
+       (if (null xs) (return-from %build-multiple-value-let-bindings (nreverse bindings)))
+       (let ((value (if direct-values-p
+                        (or (nth (+ i 1) values-form) nil)
+                        (list 'nth i tmp))))
+         (setf bindings (cons (list (car xs) value) bindings)))
+       (setf xs (cdr xs))
+       (setf i (+ i 1))
+       (go scan))))
+
 ;; quote — never recurse into quoted forms
 (define-expander-for quote (form) form)
 
@@ -25,23 +58,21 @@
 
 ;; apply — spread-args normalisation + variadic builtin fold
 (define-expander-for apply (form)
-  (cond
-    ;; (apply fn a1 a2 ... list) with spread args → cons-fold
-    ((> (length form) 3)
-     (let* ((fn         (second form))
-             (spread-args (butlast (cddr form)))
-             (last-arg    (car (last form)))
-             (combined    (reduce (lambda (a rest) (list 'cons a rest))
-                                  spread-args :from-end t :initial-value last-arg)))
-       (compiler-macroexpand-all (list 'apply fn combined))))
-    ;; (apply 'name list) or (apply #'name list)
-    ((and (= (length form) 3)
-          (consp (second form))
-          (or (and (eq (car (second form)) 'quote)    (symbolp (second (second form))))
-              (and (eq (car (second form)) 'function) (symbolp (second (second form))))))
-     (expand-apply-named-fn (second (second form)) (third form)))
-    ;; default: expand args
-    (t (cons 'apply (mapcar #'compiler-macroexpand-all (cdr form))))))
+  (if (cdddr form)
+      ;; (apply fn a1 a2 ... list) with spread args → cons-fold
+      (let* ((fn         (second form))
+             (combined   (%apply-args-to-cons-chain (cddr form))))
+        (compiler-macroexpand-all (list 'apply fn combined)))
+      ;; (apply 'name list) or (apply #'name list)
+      (if (and (cdr form)
+               (cddr form)
+               (null (cdddr form))
+               (consp (second form))
+               (or (and (eq (car (second form)) 'quote)    (symbolp (second (second form))))
+                   (and (eq (car (second form)) 'function) (symbolp (second (second form))))))
+          (expand-apply-named-fn (second (second form)) (third form))
+          ;; default: expand args
+          (cons 'apply (mapcar #'compiler-macroexpand-all (cdr form))))))
 
 ;; make-hash-table — :test #'fn → :test 'fn normalisation
 (define-expander-for make-hash-table (form)
@@ -68,7 +99,7 @@
 ;; function — wrap builtins in first-class lambda
 (define-expander-for function (form)
   (let ((name (second form)))
-    (if (and (symbolp name) (member name *all-builtin-names*))
+    (if (and (symbolp name) (%list-contains-eq name *all-builtin-names*))
         (expand-function-builtin name)
         form)))
 
@@ -93,17 +124,11 @@
         (tmp (gensym "MVB")))
     (if (and (consp values-form) (eq (car values-form) 'values))
         (compiler-macroexpand-all
-         `(let* ,(mapcar (lambda (var i)
-                           `(,var ,(or (nth (1+ i) values-form) nil)))
-                         vars
-                         (loop for i below (length vars) collect i))
+         `(let* ,(%build-multiple-value-let-bindings vars values-form nil t)
             ,@body))
         (compiler-macroexpand-all
          `(let ((,tmp (multiple-value-list ,values-form)))
-            (let* ,(mapcar (lambda (var i)
-                             `(,var (nth ,i ,tmp)))
-                           vars
-                           (loop for i below (length vars) collect i))
+            (let* ,(%build-multiple-value-let-bindings vars values-form tmp nil)
               ,@body))))))
 
 ;; multiple-value-call — canonicalize through multiple-value-list + apply so we
@@ -143,8 +168,8 @@
   (let* ((args (cdr form))
          (size (first args))
          (plist (rest args))
-         (initial (getf plist :initial-element :__none__))
-         (has-element-type (not (eq (getf plist :element-type :__none__) :__none__))))
+         (initial (%plist-value-or-default plist :initial-element :__none__))
+         (has-element-type (not (eq (%plist-value-or-default plist :element-type :__none__) :__none__))))
     (cond
       ((and (eq initial :__none__) (not has-element-type))
        form)

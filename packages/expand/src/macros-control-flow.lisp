@@ -61,8 +61,15 @@
 
 ;; DEFUN macro
 (our-defmacro defun (name params &body body)
-  `(setf (fdefinition ',name)
-         (lambda ,params ,@body)))
+  (let ((docstring (when (stringp (first body)) (pop body)))
+        (declarations nil))
+    (loop while (and (consp (first body)) (eq (caar body) 'declare))
+          do (push (pop body) declarations))
+    `(setf (fdefinition ',name)
+           (lambda ,params
+             ,@(when docstring (list docstring))
+             ,@(nreverse declarations)
+             (block ,name ,@body)))))
 
 ;; DEFUN/C macro
 ;; Minimal design-by-contract support: :requires, :ensures, :invariant.
@@ -197,7 +204,12 @@ MAKE-STEP-FORMS is (vars steps) -> list of step forms to splice into tagbody."
    VAR-CLAUSES: ((var init step) ...)  END-CLAUSE: (test result ...)
    Evaluates BODY, then updates all vars simultaneously (psetq), then tests."
   (expand-do-form var-clauses end-clause body 'let
-                  (lambda (vars steps) `((psetq ,@(mapcan #'list vars steps))))))
+                  (lambda (vars steps)
+                    (cons (cons 'psetq
+                                (mapcan (lambda (var step)
+                                          (cons var (cons step nil)))
+                                        vars steps))
+                          nil))))
 
 ;; DO* macro (sequential steps)
 (our-defmacro do* (var-clauses end-clause &body body)
@@ -206,6 +218,8 @@ MAKE-STEP-FORMS is (vars steps) -> list of step forms to splice into tagbody."
    Like DO but bindings and steps are sequential (LET*/SETQ)."
   (expand-do-form var-clauses end-clause body 'let*
                   (lambda (vars steps)
-                    (mapcar (lambda (var step) `(setq ,var ,step)) vars steps))))
+                    (mapcar (lambda (var step)
+                              (cons 'setq (cons var (cons step nil))))
+                            vars steps))))
 
 ;; CASE and TYPECASE macros are in macros-control-flow-case.lisp (loaded next).

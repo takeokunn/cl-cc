@@ -15,6 +15,19 @@
 (deftest-each builtin-registry-data-representative-mappings
   "Representative raw mappings stay wired to the expected constructors."
   :cases (("set"    'set    cl-cc/compile::*builtin-binary-entries*     'cl-cc::make-vm-set-symbol-value)
-          ("string=" 'string= cl-cc/compile::*builtin-string-cmp-entries* 'cl-cc::make-vm-string=))
+          ("string=" 'string= cl-cc/compile::*builtin-string-cmp-entries* 'cl-cc::make-vm-string=)
+          ("find-package" 'find-package cl-cc/compile::*builtin-unary-entries* 'cl-cc::make-vm-find-package))
   (sym table expected-ctor)
   (assert-equal expected-ctor (cdr (assoc sym table))))
+
+(deftest-each builtin-registry-data-float-mappings
+  "Float builtin raw mappings resolve to the VM constructors exported for compile-time lookup."
+  :cases (("float" 'float 'cl-cc::make-vm-float-inst)
+          ("float-precision" 'float-precision 'cl-cc::make-vm-float-precision)
+          ("float-radix" 'float-radix 'cl-cc::make-vm-float-radix)
+          ("float-sign" 'float-sign 'cl-cc::make-vm-float-sign)
+          ("float-digits" 'float-digits 'cl-cc::make-vm-float-digits)
+          ("decode-float" 'decode-float 'cl-cc::make-vm-decode-float)
+          ("integer-decode-float" 'integer-decode-float 'cl-cc::make-vm-integer-decode-float))
+  (sym expected-ctor)
+  (assert-eq expected-ctor (cdr (assoc sym cl-cc/compile::*builtin-unary-entries*))))

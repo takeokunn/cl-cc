@@ -20,12 +20,21 @@
 ;;; ── Function call compilation ────────────────────────────────────────────
 ;;; Phase 2 (*phase2-builtin-handlers*) is defined in codegen-phase2.lisp.
 
+
+(defun %codegen-call-assoc (key alist)
+  (if (consp alist)
+      (let ((entry (car alist)))
+        (if (eq (car entry) key)
+            entry
+            (%codegen-call-assoc key (cdr alist))))
+      nil))
+
 (defun %resolve-func-sym-reg (sym ctx)
   "Return the register holding the callable value for function symbol SYM.
    Local function bindings come from CTX-ENV. Global generic functions must be
    loaded from the persistent global store, while ordinary global functions are
    represented by their symbol and resolved later by the VM."
-  (let ((entry (assoc sym (ctx-env ctx)))
+  (let ((entry (%codegen-call-assoc sym (ctx-env ctx)))
         (is-global-function (gethash sym (ctx-global-functions ctx)))
         (is-global-generic (gethash sym (ctx-global-generics ctx))))
     (cond
@@ -44,7 +53,7 @@
   "Return T when NAME in function position should be treated as a variable value.
 Global functions/generics stay symbolic; only local lexical bindings count as
 first-class function values here." 
-  (let ((entry (assoc name (ctx-env ctx)))
+  (let ((entry (%codegen-call-assoc name (ctx-env ctx)))
         (is-global-function (gethash name (ctx-global-functions ctx)))
         (is-global-generic (gethash name (ctx-global-generics ctx))))
     (and entry (not is-global-function) (not is-global-generic))))
@@ -70,7 +79,7 @@ first-class function values here."
     (let* ((func-arg (first args))
            (local-func-name (and (typep func-arg 'ast-var) (ast-var-name func-arg)))
            (raw-func-reg (compile-ast func-arg ctx))
-           (func-reg0 (if (and local-func-name (assoc local-func-name *labels-boxed-fns*))
+           (func-reg0 (if (and local-func-name (%codegen-call-assoc local-func-name *labels-boxed-fns*))
                           (let ((unboxed (make-register ctx)))
                             (emit ctx (make-vm-car :dst unboxed :src raw-func-reg))
                             unboxed)
@@ -94,7 +103,7 @@ first-class function values here."
                             (%resolve-func-sym-reg func-arg ctx))
                            (t
                             (compile-ast func-arg ctx))))
-           (func-reg0 (if (and local-func-name (assoc local-func-name *labels-boxed-fns*))
+           (func-reg0 (if (and local-func-name (%codegen-call-assoc local-func-name *labels-boxed-fns*))
                           (let ((unboxed (make-register ctx)))
                             (emit ctx (make-vm-car :dst unboxed :src raw-func-reg))
                             unboxed)
@@ -108,7 +117,7 @@ first-class function values here."
 (defun %try-compile-noescape-closure (func-expr args tail ctx)
   "Inline a noescape lambda closure — no vm-closure emitted."
   (when (typep func-expr 'ast-var)
-    (let ((entry (assoc (ast-var-name func-expr) (ctx-noescape-closure-bindings ctx))))
+    (let ((entry (%codegen-call-assoc (ast-var-name func-expr) (ctx-noescape-closure-bindings ctx))))
       (when entry
         (%compile-inline-lambda-call (cdr entry) args tail ctx)))))
 
@@ -117,9 +126,9 @@ first-class function values here."
   (when (and func-sym
              (= (length args) 1)
              (typep (first args) 'ast-var)
-             (member func-sym '(car cdr) :test #'eq))
+             (or (eq func-sym 'car) (eq func-sym 'cdr)))
     (let* ((arg-name (ast-var-name (first args)))
-           (entry    (assoc arg-name (ctx-noescape-cons-bindings ctx))))
+           (entry    (%codegen-call-assoc arg-name (ctx-noescape-cons-bindings ctx))))
       (when entry
         (emit ctx (make-vm-move :dst result-reg
                                 :src (if (eq func-sym 'car) (cadr entry) (cddr entry))))
@@ -134,7 +143,7 @@ first-class function values here."
               (= (length args) 1)
               (typep (first args) 'ast-var))
          (let* ((arg-name (ast-var-name (first args)))
-                (entry    (assoc arg-name (ctx-noescape-array-bindings ctx))))
+                (entry    (%codegen-call-assoc arg-name (ctx-noescape-array-bindings ctx))))
            (when entry
              (emit ctx (make-vm-const :dst result-reg :value (cadr entry)))
              result-reg)))
@@ -142,7 +151,7 @@ first-class function values here."
               (= (length args) 2)
               (typep (first args) 'ast-var))
          (let* ((arg-name (ast-var-name (first args)))
-                (entry    (assoc arg-name (ctx-noescape-array-bindings ctx))))
+                (entry    (%codegen-call-assoc arg-name (ctx-noescape-array-bindings ctx))))
            (when entry
              (if (typep (second args) 'ast-int)
                  (let ((index (ast-int-value (second args))))
@@ -155,7 +164,7 @@ first-class function values here."
               (= (length args) 3)
               (typep (first args) 'ast-var))
          (let* ((arg-name (ast-var-name (first args)))
-                (entry    (assoc arg-name (ctx-noescape-array-bindings ctx))))
+                (entry    (%codegen-call-assoc arg-name (ctx-noescape-array-bindings ctx))))
            (when entry
              (if (typep (second args) 'ast-int)
                  (let ((index (ast-int-value (second args))))
@@ -192,7 +201,7 @@ first-class function values here."
                   (t                           (compile-ast func-expr ctx))))
           ;; Unbox labels-boxed functions: extract closure from cons-cell box
           (func-reg0 (if (let ((name (or func-sym local-func-name)))
-                           (and name (assoc name *labels-boxed-fns*)))
+                           (and name (%codegen-call-assoc name *labels-boxed-fns*)))
                          (let ((unboxed (make-register ctx)))
                            (emit ctx (make-vm-car :dst unboxed :src raw-func-reg))
                            unboxed)

@@ -32,24 +32,44 @@
 
 (defmethod compile-ast ((node ast-lambda) ctx)
   (setf (ctx-tail-position ctx) nil)
-  (let* ((params (ast-lambda-params node))
-         (body (ast-lambda-body node))
-         (func-label (make-label ctx "lambda"))
-         (end-label (make-label ctx "lambda_end"))
-         (closure-reg (make-register ctx))
-         (free-vars (find-free-variables node))
-         (captured-vars (mapcar (lambda (v) (cons v (lookup-var ctx v)))
-                                 (remove-if-not (lambda (v) (assoc v (ctx-env ctx)))
-                                                free-vars)))
-         (param-regs (loop for i from 0 below (length params)
-                           collect (make-register ctx)))
-          (rest-stack-alloc-p (and (ast-lambda-rest-param node)
-                                   (or (rest-param-stack-alloc-p body (ast-lambda-rest-param node))
-                                       (dynamic-extent-declared-p (ast-lambda-declarations node)
-                                                                  (ast-lambda-rest-param node))))))
+  (let ((params (ast-lambda-params node))
+        (body (ast-lambda-body node))
+        (func-label (make-label ctx "lambda"))
+        (end-label (make-label ctx "lambda_end"))
+        (closure-reg (make-register ctx))
+        (free-vars (find-free-variables node))
+        (captured-vars nil)
+        (param-regs nil)
+        (rest-stack-alloc-p nil))
+    (let ((xs free-vars))
+      (tagbody
+       scan-free-vars
+         (if (null xs) (go done-free-vars))
+         (let ((v (car xs)))
+           (if (%assoc-eq v (ctx-env ctx))
+               (setq captured-vars
+                     (cons (cons v (lookup-var ctx v)) captured-vars))))
+         (setq xs (cdr xs))
+         (go scan-free-vars)
+       done-free-vars))
+    (setq captured-vars (nreverse captured-vars))
+    (let ((xs params))
+      (tagbody
+       scan-param-regs
+         (if (null xs) (go done-param-regs))
+         (setq param-regs (cons (make-register ctx) param-regs))
+         (setq xs (cdr xs))
+         (go scan-param-regs)
+       done-param-regs))
+    (setq param-regs (nreverse param-regs))
+    (setq rest-stack-alloc-p
+          (and (ast-lambda-rest-param node)
+               (or (rest-param-stack-alloc-p body (ast-lambda-rest-param node))
+                   (dynamic-extent-declared-p (ast-lambda-declarations node)
+                                              (ast-lambda-rest-param node)))))
     (multiple-value-bind (opt-closure-data rest-reg key-closure-data
-                           opt-bindings rest-binding key-bindings
-                           non-constant-defaults supplied-p-entries)
+                          opt-bindings rest-binding key-bindings
+                          non-constant-defaults supplied-p-entries)
         (allocate-extended-params ctx
                                   (ast-lambda-optional-params node)
                                   (ast-lambda-rest-param node)
@@ -57,7 +77,8 @@
       (emit ctx (make-vm-closure
                  :dst closure-reg :label func-label :params param-regs
                  :optional-params opt-closure-data :rest-param rest-reg
-                 :key-params key-closure-data :rest-stack-alloc-p rest-stack-alloc-p
+                 :key-params key-closure-data
+                 :rest-stack-alloc-p rest-stack-alloc-p
                  :captured captured-vars))
       (%emit-closure-body ctx func-label end-label params param-regs
                           opt-bindings rest-binding key-bindings
@@ -65,33 +86,51 @@
       closure-reg)))
 
 (defmethod compile-ast ((node ast-defun) ctx)
-  "Compile a top-level function definition.
-Generates a closure at the function's label and registers it globally."
+  "Compile a top-level function definition."
   (setf (ctx-tail-position ctx) nil)
   (let* ((name (ast-defun-name node))
          (params (ast-defun-params node))
          (body (ast-defun-body node))
          (type-bindings (function-param-type-bindings name params))
-         ;; Pre-make the label before emitting so recursive calls can find it
          (func-label (make-label ctx (format nil "DEFUN_~A" name)))
          (end-label (make-label ctx (format nil "DEFUN_~A_END" name)))
          (closure-reg (make-register ctx))
-          (free-vars (let ((temp-ast (make-ast-lambda :params params :body body)))
-                       (find-free-variables temp-ast)))
-          (captured-vars (mapcar (lambda (v) (cons v (lookup-var ctx v)))
-                                 (remove-if-not (lambda (v) (assoc v (ctx-env ctx)))
-                                                free-vars)))
-          (param-regs (loop for i from 0 below (length params)
-                            collect (make-register ctx)))
-           (rest-stack-alloc-p (and (ast-defun-rest-param node)
-                                    (or (rest-param-stack-alloc-p body (ast-defun-rest-param node))
-                                        (dynamic-extent-declared-p (ast-defun-declarations node)
-                                                                   (ast-defun-rest-param node))))))
-    ;; Pre-register for recursion support
-      (setf (gethash name (ctx-global-functions ctx)) func-label)
-      (multiple-value-bind (opt-closure-data rest-reg key-closure-data
-                           opt-bindings rest-binding key-bindings
-                           non-constant-defaults supplied-p-entries)
+         (free-vars (let ((temp-ast (make-ast-lambda :params params
+                                                     :body body)))
+                      (find-free-variables temp-ast)))
+         (captured-vars nil)
+         (param-regs nil)
+         (rest-stack-alloc-p nil))
+    (let ((xs free-vars))
+      (tagbody
+       scan-free-vars
+         (if (null xs) (go done-free-vars))
+         (let ((v (car xs)))
+           (if (%assoc-eq v (ctx-env ctx))
+               (setq captured-vars
+                     (cons (cons v (lookup-var ctx v)) captured-vars))))
+         (setq xs (cdr xs))
+         (go scan-free-vars)
+       done-free-vars))
+    (setq captured-vars (nreverse captured-vars))
+    (let ((xs params))
+      (tagbody
+       scan-param-regs
+         (if (null xs) (go done-param-regs))
+         (setq param-regs (cons (make-register ctx) param-regs))
+         (setq xs (cdr xs))
+         (go scan-param-regs)
+       done-param-regs))
+    (setq param-regs (nreverse param-regs))
+    (setq rest-stack-alloc-p
+          (and (ast-defun-rest-param node)
+               (or (rest-param-stack-alloc-p body (ast-defun-rest-param node))
+                   (dynamic-extent-declared-p (ast-defun-declarations node)
+                                              (ast-defun-rest-param node)))))
+    (setf (gethash name (ctx-global-functions ctx)) func-label)
+    (multiple-value-bind (opt-closure-data rest-reg key-closure-data
+                          opt-bindings rest-binding key-bindings
+                          non-constant-defaults supplied-p-entries)
         (allocate-extended-params ctx
                                   (ast-defun-optional-params node)
                                   (ast-defun-rest-param node)
@@ -99,17 +138,17 @@ Generates a closure at the function's label and registers it globally."
       (emit ctx (make-vm-closure
                  :dst closure-reg :label func-label :params param-regs
                  :optional-params opt-closure-data :rest-param rest-reg
-                 :key-params key-closure-data :rest-stack-alloc-p rest-stack-alloc-p
+                 :key-params key-closure-data
+                 :rest-stack-alloc-p rest-stack-alloc-p
                  :captured captured-vars))
-      (push (cons name closure-reg) (ctx-env ctx))
+      (setf (ctx-env ctx) (cons (cons name closure-reg) (ctx-env ctx)))
       (emit ctx (make-vm-register-function :name name :src closure-reg))
-       (let ((*compiling-typed-fn* (or name t)))
-          (%emit-closure-body ctx func-label end-label params param-regs
-                              opt-bindings rest-binding key-bindings
-                              non-constant-defaults body supplied-p-entries
-                              type-bindings
-                              name func-label))
-        closure-reg)))
+      (let ((*compiling-typed-fn* (or name t)))
+        (%emit-closure-body ctx func-label end-label params param-regs
+                            opt-bindings rest-binding key-bindings
+                            non-constant-defaults body supplied-p-entries
+                            type-bindings name func-label))
+      closure-reg)))
 
 ;;; ── defvar / defparameter ────────────────────────────────────────────────
 

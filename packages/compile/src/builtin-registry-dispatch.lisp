@@ -59,11 +59,22 @@
     (:stream-input-opt 0 . 1) (:stream-void-opt 0 . 1) (:stream-write-val 1 . 2))
   "Alist of (convention min-args . max-args) for argument count validation.")
 
+(defun %lookup-convention-arity (conv)
+  (let ((xs *convention-arity*))
+    (tagbody
+     scan
+       (if (null xs) (return-from %lookup-convention-arity nil))
+       (let ((entry (car xs)))
+         (if (eq conv (car entry))
+             (return-from %lookup-convention-arity (cdr entry))))
+       (setq xs (cdr xs))
+       (go scan))))
+
 (defun emit-registered-builtin (entry args result-reg ctx)
   "Dispatch to the correct emitter for ENTRY's calling convention.
    Returns result-reg on success, or NIL if arg count is out of range."
   (let* ((conv (be-convention entry))
-         (arity (cdr (assoc conv *convention-arity* :test #'eq)))
+         (arity (%lookup-convention-arity conv))
          (nargs (length args)))
     (when (and arity (or (< nargs (car arity)) (> nargs (cdr arity))))
       (return-from emit-registered-builtin nil))

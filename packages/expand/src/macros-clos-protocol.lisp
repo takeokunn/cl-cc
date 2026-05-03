@@ -1,12 +1,5 @@
 (in-package :cl-cc/expand)
 
-;;; Shared gensym helper used by CLOS protocol macros below.
-(defmacro with-gensyms (names &body body)
-  "Bind each NAME in NAMES to a fresh gensym named after the symbol, then evaluate BODY."
-  (cons 'let
-        (cons (mapcar (lambda (n) (list n (list 'gensym (symbol-name n)))) names)
-              body)))
-
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;; CLOS Protocol, object printing, and method-combination macros
 ;;;
@@ -63,37 +56,43 @@
   (lambda (form env)
     (declare (ignore env))
     (let ((object (second form))
-          (stream (third form)))
-      (with-gensyms (obj-v str-v cls-v mth-v)
-        (list 'let*
-              (list (list obj-v object)
-                    (list str-v stream)
-                    (list cls-v (list 'when (list 'hash-table-p obj-v)
-                                      (list 'gethash :__class__ obj-v)))
-                    (list mth-v (list 'when (list 'hash-table-p cls-v)
-                                      (list 'gethash :print-object
-                                            (list 'gethash :__methods__ cls-v (list 'make-hash-table))))))
-              (list 'if mth-v
-                    (list 'funcall mth-v obj-v str-v)
-                    (list 'prin1 obj-v str-v)))))))
+          (stream (third form))
+          (obj-v (gensym "OBJ-V"))
+          (str-v (gensym "STR-V"))
+          (cls-v (gensym "CLS-V"))
+          (mth-v (gensym "MTH-V")))
+      (list 'let*
+            (list (list obj-v object)
+                  (list str-v stream)
+                  (list cls-v (list 'when (list 'hash-table-p obj-v)
+                                    (list 'gethash :__class__ obj-v)))
+                  (list mth-v (list 'when (list 'hash-table-p cls-v)
+                                    (list 'gethash :print-object
+                                          (list 'gethash :__methods__ cls-v (list 'make-hash-table))))))
+            (list 'if mth-v
+                  (list 'funcall mth-v obj-v str-v)
+                  (list 'prin1 obj-v str-v))))))
 
 (register-macro 'describe-object
   (lambda (form env)
     (declare (ignore env))
     (let ((object (second form))
-          (stream (third form)))
-      (with-gensyms (obj-v str-v cls-v slots-v)
-        (list 'let*
-              (list (list obj-v object)
-                    (list str-v stream)
-                    (list cls-v (list 'when (list 'hash-table-p obj-v)
-                                      (list 'gethash :__class__ obj-v))))
-              (list 'if (list 'hash-table-p cls-v)
-                    (list 'let (list (list slots-v (list 'gethash :__slots__ cls-v)))
-                          (list 'format str-v "~A is an instance of ~A~%" obj-v (list 'gethash :__name__ cls-v))
-                          (list 'dolist (list 'slot slots-v)
-                                (list 'format str-v "  ~S = ~S~%" 'slot (list 'gethash 'slot obj-v))))
-                    (list 'format str-v "~S~%" obj-v)))))))
+          (stream (third form))
+          (obj-v (gensym "OBJ-V"))
+          (str-v (gensym "STR-V"))
+          (cls-v (gensym "CLS-V"))
+          (slots-v (gensym "SLOTS-V")))
+      (list 'let*
+            (list (list obj-v object)
+                  (list str-v stream)
+                  (list cls-v (list 'when (list 'hash-table-p obj-v)
+                                    (list 'gethash :__class__ obj-v))))
+            (list 'if (list 'hash-table-p cls-v)
+                  (list 'let (list (list slots-v (list 'gethash :__slots__ cls-v)))
+                        (list 'format str-v "~A is an instance of ~A~%" obj-v (list 'gethash :__name__ cls-v))
+                        (list 'dolist (list 'slot slots-v)
+                              (list 'format str-v "  ~S = ~S~%" 'slot (list 'gethash 'slot obj-v))))
+                  (list 'format str-v "~S~%" obj-v))))))
 
 (register-macro 'describe
   (lambda (form env)
@@ -123,29 +122,33 @@
     (declare (ignore env))
     (let ((instance (second form))
           (new-class (third form))
-          (initargs (cdddr form)))
-      (with-gensyms (inst-var new-class-var old-slots-var new-slots-var s-var)
-        (cons 'let*
-              (cons (list (list inst-var instance)
-                          (list new-class-var new-class)
-                          (list old-slots-var (list 'when (list 'hash-table-p (list 'gethash :__class__ inst-var))
-                                                    (list 'gethash :__slots__ (list 'gethash :__class__ inst-var))))
-                          (list new-slots-var (list 'when (list 'hash-table-p new-class-var)
-                                                    (list 'gethash :__slots__ new-class-var))) )
-                    (append
-                     (list (list 'unless (list 'hash-table-p new-class-var)
-                                 (list 'error "change-class: new-class must be a class descriptor hash table"))
-                           (list 'dolist (list s-var old-slots-var)
-                                 (list 'unless (list 'member s-var new-slots-var :test '(function equal))
-                                       (list 'remhash s-var inst-var)))
-                           (list 'dolist (list s-var new-slots-var)
-                                 (list 'unless (list 'member s-var old-slots-var :test '(function equal))
-                                       (list 'setf (list 'gethash s-var inst-var) nil)))
-                           (list 'setf (list 'gethash :__class__ inst-var) new-class-var))
-                      (when initargs
-                        (list (cons 'reinitialize-instance
-                                    (cons inst-var initargs))))
-                     (list inst-var))))))))
+          (initargs (cdddr form))
+          (inst-var (gensym "INST-VAR"))
+          (new-class-var (gensym "NEW-CLASS-VAR"))
+          (old-slots-var (gensym "OLD-SLOTS-VAR"))
+          (new-slots-var (gensym "NEW-SLOTS-VAR"))
+          (s-var (gensym "S-VAR")))
+      (cons 'let*
+            (cons (list (list inst-var instance)
+                        (list new-class-var new-class)
+                        (list old-slots-var (list 'when (list 'hash-table-p (list 'gethash :__class__ inst-var))
+                                                  (list 'gethash :__slots__ (list 'gethash :__class__ inst-var))))
+                        (list new-slots-var (list 'when (list 'hash-table-p new-class-var)
+                                                  (list 'gethash :__slots__ new-class-var))) )
+                  (append
+                   (list (list 'unless (list 'hash-table-p new-class-var)
+                               (list 'error "change-class: new-class must be a class descriptor hash table"))
+                         (list 'dolist (list s-var old-slots-var)
+                               (list 'unless (list 'member s-var new-slots-var :test '(function equal))
+                                     (list 'remhash s-var inst-var)))
+                         (list 'dolist (list s-var new-slots-var)
+                               (list 'unless (list 'member s-var old-slots-var :test '(function equal))
+                                     (list 'setf (list 'gethash s-var inst-var) nil)))
+                         (list 'setf (list 'gethash :__class__ inst-var) new-class-var))
+                    (when initargs
+                      (list (cons 'reinitialize-instance
+                                  (cons inst-var initargs))))
+                   (list inst-var)))))))
 
 ;;; FR-376: define-method-combination (short form)
 ;;; Registers the combination name so defgeneric can reference it.

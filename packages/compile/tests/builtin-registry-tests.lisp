@@ -33,10 +33,28 @@
   :cases (("car"   "CAR"   'cl-cc::make-vm-car)
           ("bswap" "BSWAP" 'cl-cc::make-vm-bswap)
           ("mod"   "MOD"   'cl-cc::make-vm-mod)
-          ("princ" "PRINC" 'cl-cc::make-vm-princ))
+          ("princ" "PRINC" 'cl-cc::make-vm-princ)
+          ("float" "FLOAT" 'cl-cc::make-vm-float-inst)
+          ("float-precision" "FLOAT-PRECISION" 'cl-cc::make-vm-float-precision)
+          ("float-radix" "FLOAT-RADIX" 'cl-cc::make-vm-float-radix)
+          ("float-sign" "FLOAT-SIGN" 'cl-cc::make-vm-float-sign)
+          ("float-digits" "FLOAT-DIGITS" 'cl-cc::make-vm-float-digits)
+          ("decode-float" "DECODE-FLOAT" 'cl-cc::make-vm-decode-float)
+          ("integer-decode-float" "INTEGER-DECODE-FLOAT" 'cl-cc::make-vm-integer-decode-float))
   (name-str expected-ctor)
   (let ((entry (gethash name-str cl-cc/compile::*builtin-registry*)))
     (assert-true (eq expected-ctor (cl-cc/compile::be-ctor entry)))))
+
+(deftest builtin-registry-constructors-are-fbound
+  "Every registered builtin constructor symbol resolves to a callable function."
+  (let (missing)
+    (maphash (lambda (_key entry)
+               (declare (ignore _key))
+               (let ((ctor (cl-cc/compile::be-ctor entry)))
+                 (unless (fboundp ctor)
+                   (push ctor missing))))
+             cl-cc/compile::*builtin-registry*)
+    (assert-null (nreverse missing))))
 
 (deftest-each builtin-registry-missing-returns-nil
   "Looking up a non-builtin name returns NIL."

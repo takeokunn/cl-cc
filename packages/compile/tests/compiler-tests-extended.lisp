@@ -43,7 +43,6 @@
 
 (deftest-compile stdlib-mismatch-make-string-float
   "mismatch, make-string, and float properties return the expected equal-comparable values."
-  ;; float-precision and float-radix removed: VM functions not implemented
   :cases (("mismatch-index"     2      "(mismatch (list 1 2 3) (list 1 2 4))")
           ("mismatch-equal"     nil    "(mismatch (list 1 2 3) (list 1 2 3))")
           ("mismatch-prefix"    0      "(mismatch nil (list 1 2))")
@@ -51,6 +50,35 @@
           ("make-string-len"    3      "(length (make-string 3))")
           ("float-literal"      4.0    "(+ 1.5 2.5)"))
   :stdlib t)
+
+(deftest compile-find-package-builtin
+  "find-package compiles through the registry and returns a non-NIL package descriptor."
+  (assert-true (run-string "(find-package :cl-user)" :stdlib t)))
+
+(deftest compile-find-symbol-builtin
+  "find-symbol compiles through the registry and preserves symbol status as multiple values."
+  (assert-equal '("CAR" :external)
+                (run-string "(multiple-value-bind (sym status) (find-symbol \"CAR\" :cl) (list (symbol-name sym) status))" :stdlib t)))
+
+(deftest-each compile-float-inspection-builtins
+  "Unary float inspection builtins compile through the registry and return the host results."
+  :cases (("float-precision" "(float-precision 1.0)" (float-precision 1.0))
+          ("float-radix" "(float-radix 1.0)" (float-radix 1.0))
+          ("float-sign" "(float-sign -2.5)" (float-sign -2.5))
+          ("float-digits" "(float-digits 1.0)" (float-digits 1.0)))
+  (form expected)
+  (assert-equal expected (run-string form :stdlib t)))
+
+(deftest-each compile-float-decode-builtins
+  "Float decode builtins compile through the registry and preserve all multiple values."
+  :cases (("decode-float"
+           "(multiple-value-list (decode-float 1.0))"
+           (multiple-value-list (decode-float 1.0)))
+          ("integer-decode-float"
+           "(multiple-value-list (integer-decode-float 1.0))"
+           (multiple-value-list (integer-decode-float 1.0))))
+  (form expected)
+  (assert-equal expected (run-string form :stdlib t)))
 
 (deftest-each compile-string-not-equal
   "string-not-equal returns truthy for different strings and falsy for case-insensitively equal strings."

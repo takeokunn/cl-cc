@@ -124,10 +124,14 @@
     "(defun stable-sort (sequence predicate &key key)
    (sort-impl sequence predicate key))"
 
-    "(defun remove-duplicates (lst)
-   (let ((result nil))
+    "(defun remove-duplicates (lst &key test key test-not)
+   (let ((result nil)
+         (test-fn (cond (test-not (complement test-not))
+                        (test test)
+                        (t #'eql)))
+         (key-fn (if key key #'identity)))
      (dolist (x lst)
-       (unless (member-eql x result)
+       (unless (find (funcall key-fn x) result :test test-fn :key key-fn)
          (push x result)))
      (nreverse result)))"
 

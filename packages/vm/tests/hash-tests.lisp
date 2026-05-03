@@ -14,14 +14,14 @@
 ;;; ─── resolve-hash-test ────────────────────────────────────────────────────
 
 (deftest-each resolve-hash-test-cases
-  "resolve-hash-test maps symbols to correct test functions."
-  :cases (("eq"     'eq     #'eq)
-          ("eql"    'eql    #'eql)
-          ("equal"  'equal  #'equal)
-          ("equalp" 'equalp #'equalp)
-          ("nil-defaults-eql" nil #'eql))
-  (test-sym expected-fn)
-  (assert-equal expected-fn (cl-cc/vm::resolve-hash-test test-sym)))
+  "resolve-hash-test maps symbols to canonical test designators."
+  :cases (("eq"     'eq     'eq)
+          ("eql"    'eql    'eql)
+          ("equal"  'equal  'equal)
+          ("equalp" 'equalp 'equalp)
+          ("nil-defaults-eql" nil 'eql))
+  (test-sym expected-designator)
+  (assert-equal expected-designator (cl-cc/vm::resolve-hash-test test-sym)))
 
 (deftest resolve-hash-test-unknown-errors
   "resolve-hash-test signals error for unknown test."

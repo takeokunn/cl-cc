@@ -65,7 +65,33 @@
     ("CL-CC/VM"      . "*INSTRUCTION-CONSTRUCTORS*")
     ("CL-CC/VM"      . "*OPCODE-DISPATCH-TABLE*")
     ("CL-CC/VM"      . "*OPCODE-NAME-TABLE*")
-    ("CL-CC/VM"      . "*OPCODE-ENCODER-TABLE*"))
+    ("CL-CC/VM"      . "*OPCODE-ENCODER-TABLE*")
+    ("CL-CC/COMPILE" . "*BUILTIN-UNARY-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-BINARY-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-STRING-CMP-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-CHAR-CMP-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-TABLE-QUERY-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-HANDLE-INPUT-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-SIDE-EFFECT-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-VOID-SIDE-EFFECT-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-NULLARY-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-STRING-TRIM-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-HANDLE-EFFECT-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-BINARY-CUSTOM-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-BINARY-MOVE-FIRST-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-BINARY-VOID-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-UNARY-CUSTOM-VOID-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-UNARY-OPT-NIL-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-BINARY-OPT-ONE-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-BINARY-OPT-NIL-SLOT-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-TERNARY-OPT-NIL-CUSTOM-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-BINARY-SYNTH-ZERO-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-UNARY-CUSTOM-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-ZERO-COMPARE-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-STREAM-INPUT-OPT-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-STREAM-VOID-OPT-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-STREAM-WRITE-VAL-ENTRIES*")
+    ("CL-CC/COMPILE" . "*BUILTIN-TERNARY-CUSTOM-ENTRIES*"))
   "Package-symbol pairs for variables that must exist in the VM global environment.
 Used both to build *builtin-special-variables* and to populate new compiler contexts.")
 
@@ -77,10 +103,19 @@ Returns NIL when the runtime package layer is unavailable."
 
 (defun %resolve-package-symbol-specs (specs)
   "Resolve (PACKAGE . NAME) pairs to live symbols, skipping missing packages/symbols."
-  (loop for (pkg-name . sym-name) in specs
-        for pkg = (find-package pkg-name)
-        for sym = (when pkg (find-symbol sym-name pkg))
-        when sym collect sym))
+  (let ((xs specs)
+        (result nil))
+    (tagbody
+     scan
+       (if (null xs) (return-from %resolve-package-symbol-specs (nreverse result)))
+       (let* ((entry (car xs))
+              (pkg-name (car entry))
+              (sym-name (cdr entry))
+              (pkg (find-package pkg-name))
+              (sym (if pkg (intern sym-name pkg-name) nil)))
+         (if sym (setq result (cons sym result))))
+       (setq xs (cdr xs))
+       (go scan))))
 
 (defparameter *builtin-special-variables*
   (append '(*features* *modules* *active-restarts*
@@ -125,7 +160,7 @@ Used by run-string-repl to persist the label counter across calls.")
   (when *repl-label-counter*
     (setf (ctx-next-label ctx) *repl-label-counter*))
   (unless (ctx-type-env ctx)
-    (setf (ctx-type-env ctx) (cl-cc/type:type-env-empty)))
+    (setf (ctx-type-env ctx) (type-env-empty)))
   )
 
 (defvar *labels-boxed-fns* nil
@@ -137,23 +172,71 @@ Used by run-string-repl to persist the label counter across calls.")
 
 (defun make-register (ctx)
   (let ((reg (intern (format nil "R~D" (ctx-next-register ctx)) :keyword)))
-    (incf (ctx-next-register ctx))
+    (setf (ctx-next-register ctx) (+ (ctx-next-register ctx) 1))
     reg))
 
 (defun make-label (ctx prefix)
   (let ((name (format nil "~A_~D" prefix (ctx-next-label ctx))))
-    (incf (ctx-next-label ctx))
+    (setf (ctx-next-label ctx) (+ (ctx-next-label ctx) 1))
     name))
 
 (defun emit (ctx instruction)
   (push instruction (ctx-instructions ctx))
   instruction)
 
+(defun %assoc-eq (key alist)
+  (let ((xs alist))
+    (tagbody
+     scan
+       (if (null xs) (return-from %assoc-eq nil))
+       (let ((entry (car xs)))
+         (if (eq key (car entry))
+             (return-from %assoc-eq entry)))
+       (setq xs (cdr xs))
+       (go scan))))
+
+(defun %member-eq-p (item list)
+  (let ((xs list))
+    (tagbody
+     scan
+       (if (null xs) (return-from %member-eq-p nil))
+       (if (eq item (car xs))
+           (return-from %member-eq-p t))
+       (setq xs (cdr xs))
+       (go scan))))
+
+(defun %list-union-eq (left right)
+  (let ((result right)
+        (xs left))
+    (tagbody
+     scan
+       (if (null xs) (return-from %list-union-eq result))
+       (if (not (%member-eq-p (car xs) result))
+           (setq result (cons (car xs) result)))
+       (setq xs (cdr xs))
+       (go scan))))
+
+(defun %list-intersection-eq (left right)
+  (let ((result nil)
+        (xs left))
+    (tagbody
+     scan
+       (if (null xs) (return-from %list-intersection-eq (nreverse result)))
+       (if (%member-eq-p (car xs) right)
+           (setq result (cons (car xs) result)))
+       (setq xs (cdr xs))
+       (go scan))))
+
 (defun lookup-var (ctx sym)
-  (let ((entry (assoc sym (ctx-env ctx))))
-    (unless entry
-      (error "Unbound variable: ~S" sym))
-    (cdr entry)))
+  (let ((xs (ctx-env ctx)))
+    (tagbody
+     scan
+       (if (null xs) (return-from lookup-var (error "Unbound variable")))
+       (let ((entry (car xs)))
+         (if (eq sym (car entry))
+             (return-from lookup-var (cdr entry))))
+       (setq xs (cdr xs))
+       (go scan))))
 
 ;;; ─── CPS Safety Guards ───────────────────────────────────────────────────────
 

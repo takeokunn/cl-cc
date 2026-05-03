@@ -83,8 +83,8 @@
 ;; FIND-IF-NOT: first element for which pred is false (FR-610), with optional :key
 (our-defmacro find-if-not (pred list &key key)
   (if key
-      `(find-if (complement ,pred) ,list :key ,key)
-      `(find-if (complement ,pred) ,list)))
+      (list 'find-if (list 'complement pred) list :key key)
+      (list 'find-if (list 'complement pred) list)))
 
 ;; POSITION-IF: index of first element satisfying pred (FR-610), with optional :key
 (defun %position-if-key-expand (pred list key)
@@ -117,14 +117,14 @@
 ;; POSITION-IF-NOT: index of first element not satisfying pred (FR-610), with optional :key
 (our-defmacro position-if-not (pred list &key key)
   (if key
-      `(position-if (complement ,pred) ,list :key ,key)
-      `(position-if (complement ,pred) ,list)))
+      (list 'position-if (list 'complement pred) list :key key)
+      (list 'position-if (list 'complement pred) list)))
 
 ;; COUNT-IF-NOT: count elements for which pred is false (FR-610), with optional :key
 (our-defmacro count-if-not (pred list &key key)
   (if key
-      `(count-if (complement ,pred) ,list :key ,key)
-      `(count-if (complement ,pred) ,list)))
+      (list 'count-if (list 'complement pred) list :key key)
+      (list 'count-if (list 'complement pred) list)))
 
 ;; ASSOC-IF: return the first alist entry whose CAR satisfies PRED.
 (our-defmacro assoc-if (pred alist)
@@ -162,7 +162,7 @@
 
 ;; ASSOC-IF-NOT: negate the predicate and reuse ASSOC-IF.
 (our-defmacro assoc-if-not (pred alist)
-  `(assoc-if (complement ,pred) ,alist))
+  (list 'assoc-if (list 'complement pred) alist))
 
 ;; RASSOC-IF: return the first alist entry whose CDR satisfies PRED.
 (our-defmacro rassoc-if (pred alist)
@@ -175,4 +175,4 @@
 
 ;; RASSOC-IF-NOT: negate the predicate and reuse RASSOC-IF.
 (our-defmacro rassoc-if-not (pred alist)
-  `(rassoc-if (complement ,pred) ,alist))
+  (list 'rassoc-if (list 'complement pred) alist))

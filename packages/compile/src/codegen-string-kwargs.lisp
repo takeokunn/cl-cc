@@ -30,13 +30,27 @@
 (defun %parse-string-cmp-kwargs (args)
   "Return (values str1 str2 start1 end1 start2 end2) from an args list with keywords."
   (let (start1 end1 start2 end2)
-    (loop for (key val) on (cddr args) by #'cddr
-          when (and (typep key 'ast-var) (keywordp (ast-var-name key)))
-            do (case (ast-var-name key)
-                 (:start1 (setf start1 val))
-                 (:end1   (setf end1   val))
-                 (:start2 (setf start2 val))
-                 (:end2   (setf end2   val))))
+    (let ((tail (cddr args)))
+      (tagbody
+       scan-string-cmp-kwargs
+         (when (or (null tail) (null (cdr tail)))
+           (go scan-string-cmp-kwargs-done))
+         (let ((key (car tail))
+               (val (cadr tail)))
+           (when (and (typep key 'ast-var) (keywordp (ast-var-name key)))
+             (let ((name (ast-var-name key)))
+               (if (eq name :start1)
+                   (setf start1 val)
+                   (if (eq name :end1)
+                       (setf end1 val)
+                       (if (eq name :start2)
+                           (setf start2 val)
+                           (if (eq name :end2)
+                               (setf end2 val)
+                               nil)))))))
+         (setf tail (cddr tail))
+         (go scan-string-cmp-kwargs)
+       scan-string-cmp-kwargs-done))
     (values (first args) (second args) start1 end1 start2 end2)))
 
 (defun %register-string-cmp-handler (upper-name ctor)
@@ -67,11 +81,23 @@
 (defun %parse-string-case-kwargs (args)
   "Return (values str-ast start-ast end-ast) from args with keywords."
   (let (start end)
-    (loop for (key val) on (cdr args) by #'cddr
-          when (and (typep key 'ast-var) (keywordp (ast-var-name key)))
-            do (case (ast-var-name key)
-                 (:start (setf start val))
-                 (:end   (setf end   val))))
+    (let ((tail (cdr args)))
+      (tagbody
+       scan-string-case-kwargs
+         (when (or (null tail) (null (cdr tail)))
+           (go scan-string-case-kwargs-done))
+         (let ((key (car tail))
+               (val (cadr tail)))
+           (when (and (typep key 'ast-var) (keywordp (ast-var-name key)))
+             (let ((name (ast-var-name key)))
+               (if (eq name :start)
+                   (setf start val)
+                   (if (eq name :end)
+                       (setf end val)
+                       nil)))))
+         (setf tail (cddr tail))
+         (go scan-string-case-kwargs)
+       scan-string-case-kwargs-done))
     (values (first args) start end)))
 
 (defun %register-string-case-handler (upper-name ctor)

@@ -29,15 +29,18 @@
 When the VM sees this as the default, the actual default is computed inline.")
 
 (defun extract-constant-value (ast-node)
-  "Extract a constant value from an AST node for use as a default parameter value.
-Returns (values value is-constant-p).  IS-CONSTANT-P is true for compile-time constants."
-  (typecase ast-node
-    (ast-int (values (ast-int-value ast-node) t))
-    (ast-quote (values (ast-quote-value ast-node) t))
-    (ast-var (let ((name (ast-var-name ast-node)))
-               (cond ((eq name 't) (values t t))
-                     ((eq name 'nil) (values nil t))
-                     (t (values nil nil)))))
+  "Extract a constant value from an AST node for use as a default parameter value."
+  (cond
+    ((typep ast-node (quote ast-int))
+     (values (ast-int-value ast-node) t))
+    ((typep ast-node (quote ast-quote))
+     (values (ast-quote-value ast-node) t))
+    ((typep ast-node (quote ast-var))
+     (let ((name (ast-var-name ast-node)))
+       (cond
+         ((eq name (quote t)) (values t t))
+         ((eq name (quote nil)) (values nil t))
+         (t (values nil nil)))))
     (t (values nil nil))))
 
 (defun allocate-defaulting-params (ctx params make-entry)
@@ -118,11 +121,17 @@ This is a conservative heuristic used to mark &rest lists dynamic-extent."
 
 (defun dynamic-extent-declared-p (declarations name)
   "Return T when DECLARATIONS contain (dynamic-extent NAME)."
-  (some (lambda (decl)
-          (and (consp decl)
-               (eq (car decl) 'dynamic-extent)
-               (member name (cdr decl) :test #'eq)))
-        declarations))
+  (let ((xs declarations))
+    (tagbody
+     scan-declarations
+       (if (null xs) (return-from dynamic-extent-declared-p nil))
+       (let ((decl (car xs)))
+         (if (and (consp decl)
+                  (eq (car decl) (quote dynamic-extent))
+                  (%member-eq-p name (cdr decl)))
+             (return-from dynamic-extent-declared-p t)))
+       (setq xs (cdr xs))
+       (go scan-declarations))))
 
 (defun emit-supplied-p-checks (ctx supplied-p-entries)
   "Emit code to set supplied-p registers based on sentinel comparison.
@@ -166,32 +175,62 @@ For each (register . ast-node), emits: if register eq sentinel, register = compi
 
 (defun build-all-param-bindings (params param-regs opt-bindings rest-binding key-bindings)
   "Build the combined alist of (name . register) for all lambda list parameters."
-  (let ((bindings nil))
-    (loop for param in params
-          for param-reg in param-regs
-          do (push (cons param param-reg) bindings))
-    (dolist (b opt-bindings) (push b bindings))
-    (when rest-binding (push rest-binding bindings))
-    (dolist (b key-bindings) (push b bindings))
-    (nreverse bindings)))
+  (let ((bindings nil)
+        (ps params)
+        (rs param-regs))
+    (tagbody
+     scan-required
+       (if (or (null ps) (null rs)) (go done-required))
+       (setq bindings (cons (cons (car ps) (car rs)) bindings))
+       (setq ps (cdr ps))
+       (setq rs (cdr rs))
+       (go scan-required)
+     done-required)
+    (let ((xs opt-bindings))
+      (tagbody
+       scan-opt
+         (if (null xs) (go done-opt))
+         (setq bindings (cons (car xs) bindings))
+         (setq xs (cdr xs))
+         (go scan-opt)
+       done-opt))
+    (if rest-binding
+        (setq bindings (cons rest-binding bindings)))
+    (let ((xs key-bindings))
+      (tagbody
+       scan-key
+         (if (null xs) (return-from build-all-param-bindings
+                        (nreverse bindings)))
+         (setq bindings (cons (car xs) bindings))
+         (setq xs (cdr xs))
+         (go scan-key)))))
 
 (defun function-param-type-bindings (name params)
-  "Return an alist of (param . type-scheme) for NAME's typed parameters.
-Falls back to NIL when NAME was not registered with a typed signature."
+  "Return an alist of (param . type-scheme) for NAMEs typed parameters."
   (multiple-value-bind (signature found-p)
-      (gethash name cl-cc/expand:*function-type-registry*)
-    (when found-p
-      (let ((param-types (car signature)))
-        (loop for param in params
-              for param-type in param-types
-              collect (cons param (cl-cc/type:type-to-scheme param-type)))))))
+      (gethash name *function-type-registry*)
+    (if found-p
+        (let ((param-types (car signature))
+              (result nil)
+              (ps params)
+              (ts nil))
+          (setq ts param-types)
+          (tagbody
+           scan-types
+             (if (or (null ps) (null ts))
+                 (return-from function-param-type-bindings
+                   (nreverse result)))
+             (setq result
+                   (cons (cons (car ps) (type-to-scheme (car ts))) result))
+             (setq ps (cdr ps))
+             (setq ts (cdr ts))
+             (go scan-types))))))
 
 (defun compile-function-body (ctx params param-regs opt-bindings rest-binding
                               key-bindings non-constant-defaults body
                               &optional supplied-p-entries type-bindings
                               current-function-name current-function-label)
-  "Bind parameters, emit supplied-p checks, non-constant defaults, compile BODY, emit vm-ret.
-Saves and restores the compiler environment around the body via unwind-protect."
+  "Bind parameters, emit defaults, compile BODY, emit vm-ret, and restore environment."
   (let ((old-env (ctx-env ctx))
         (old-type-env (ctx-type-env ctx))
         (old-tail (ctx-tail-position ctx))
@@ -203,34 +242,42 @@ Saves and restores the compiler environment around the body via unwind-protect."
          (progn
            (setf (ctx-env ctx)
                  (append (build-all-param-bindings params param-regs
-                                                    opt-bindings rest-binding key-bindings)
+                                                   opt-bindings rest-binding
+                                                   key-bindings)
                          (ctx-env ctx)))
-           (setf (ctx-current-function-name ctx) current-function-name
-                 (ctx-current-function-label ctx) current-function-label
-                 (ctx-current-function-params ctx) params
-                 (ctx-current-function-simple-p ctx)
+           (setf (ctx-current-function-name ctx) current-function-name)
+           (setf (ctx-current-function-label ctx) current-function-label)
+           (setf (ctx-current-function-params ctx) params)
+           (setf (ctx-current-function-simple-p ctx)
                  (and current-function-name
                       (null opt-bindings)
                       (null rest-binding)
                       (null key-bindings)))
-           (when type-bindings
-             (setf (ctx-type-env ctx)
-                   (cl-cc/type:type-env-extend* type-bindings (ctx-type-env ctx))))
-           (when supplied-p-entries
-             (emit-supplied-p-checks ctx supplied-p-entries))
-           (when non-constant-defaults
-             (emit-non-constant-defaults ctx non-constant-defaults))
-           (let ((last-reg nil))
-             (dolist (form body)
-               (setf (ctx-tail-position ctx)
-                     (if (eq form (car (last body))) t nil))
-               (setf last-reg (compile-ast form ctx)))
+           (if type-bindings
+               (setf (ctx-type-env ctx)
+                     (type-env-extend* type-bindings (ctx-type-env ctx))))
+           (if supplied-p-entries
+               (emit-supplied-p-checks ctx supplied-p-entries))
+           (if non-constant-defaults
+               (emit-non-constant-defaults ctx non-constant-defaults))
+           (let ((last-reg nil)
+                 (xs body))
+             (tagbody
+              scan-body
+                (if (null xs) (go done-body))
+                (let ((form (car xs)))
+                  (setf (ctx-tail-position ctx)
+                        (if (null (cdr xs)) t nil))
+                  (setq last-reg (compile-ast form ctx)))
+                (setq xs (cdr xs))
+                (go scan-body)
+              done-body)
              (setf (ctx-tail-position ctx) nil)
              (emit ctx (make-vm-ret :reg last-reg))))
-        (setf (ctx-env ctx) old-env)
-        (setf (ctx-type-env ctx) old-type-env)
-        (setf (ctx-tail-position ctx) old-tail)
-        (setf (ctx-current-function-name ctx) old-current-function-name
-              (ctx-current-function-label ctx) old-current-function-label
-              (ctx-current-function-params ctx) old-current-function-params
-              (ctx-current-function-simple-p ctx) old-current-function-simple-p))))
+      (setf (ctx-env ctx) old-env)
+      (setf (ctx-type-env ctx) old-type-env)
+      (setf (ctx-tail-position ctx) old-tail)
+      (setf (ctx-current-function-name ctx) old-current-function-name)
+      (setf (ctx-current-function-label ctx) old-current-function-label)
+      (setf (ctx-current-function-params ctx) old-current-function-params)
+      (setf (ctx-current-function-simple-p ctx) old-current-function-simple-p))))

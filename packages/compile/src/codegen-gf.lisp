@@ -79,48 +79,68 @@ existing generic function in the same compilation unit."
           dst))))
 
 (defmethod compile-ast ((node ast-defmethod) ctx)
-  "Compile a method definition.
-Compiles the method body as a closure and registers it on the generic function's
-dispatch table, keyed by the composite specializer list for multiple dispatch."
+  "Compile a method definition."
   (setf (ctx-tail-position ctx) nil)
-  (let* ((name (ast-defmethod-name node))
-         (qualifier (ast-defmethod-qualifier node))
-         (specializers (ast-defmethod-specializers node))
-         (params (ast-defmethod-params node))
-         (body (ast-defmethod-body node))
-         ;; Ensure the generic function exists at compile/runtime, then always
-         ;; reload the current runtime GF object before method registration.
-         (_ensure-gf (or (gethash name (ctx-global-generics ctx))
-                         (cdr (assoc name (ctx-env ctx)))
-                         (%ensure-generic-function ctx name)))
-         (gf-reg (make-register ctx))
-         ;; Build the canonical dispatch key from ALL specializers.
-         ;; Single-dispatch methods use a bare key; multi-dispatch methods use
-         ;; the full class tuple. EQL specializers keep their explicit (eql v)
-         ;; representation, with quote unwrapped from the source AST payload.
-         (dispatch-key
-           (let ((keys (mapcar (lambda (spec)
-                                 (if (and spec (consp spec))
-                                     (let ((raw (cdr spec)))
-                                       (if (and (consp raw) (eq (car raw) 'eql))
-                                           (let ((val (second raw)))
-                                             (list 'eql (if (and (consp val) (eq (car val) 'quote))
-                                                            (second val)
-                                                            val)))
-                                           raw))
-                                     (or spec t)))
-                               specializers)))
-             (if (= (length keys) 1)
-                 (first keys)
-                 keys)))
-         (qual-str (if qualifier (format nil "_~A" qualifier) ""))
-         (label-suffix (format nil "~{~A~^_~}" (if (listp dispatch-key) dispatch-key (list dispatch-key))))
-          (func-label (make-label ctx (format nil "METHOD_~A~A_~A" name qual-str label-suffix)))
-          (end-label (make-label ctx (format nil "METHOD_~A~A_~A_END" name qual-str label-suffix)))
-          (closure-reg (make-register ctx))
-          (param-regs (loop for i from 0 below (length params)
-                            collect (make-register ctx))))
-    (declare (ignore _ensure-gf))
+  (let ((name (ast-defmethod-name node))
+        (qualifier (ast-defmethod-qualifier node))
+        (specializers (ast-defmethod-specializers node))
+        (params (ast-defmethod-params node))
+        (body (ast-defmethod-body node))
+        (gf-reg (make-register ctx))
+        (dispatch-key nil)
+        (qual-str nil)
+        (label-suffix nil)
+        (func-label nil)
+        (end-label nil)
+        (closure-reg (make-register ctx))
+        (param-regs nil))
+    (or (gethash name (ctx-global-generics ctx))
+        (cdr (%assoc-eq name (ctx-env ctx)))
+        (%ensure-generic-function ctx name))
+    (let ((keys nil)
+          (xs specializers))
+      (tagbody
+       scan-specializers
+         (if (null xs) (go done-specializers))
+         (let* ((spec (car xs))
+                (key (if (and spec (consp spec))
+                         (let ((raw (cdr spec)))
+                           (if (and (consp raw) (eq (car raw) (quote eql)))
+                               (let ((val (second raw)))
+                                 (list (quote eql)
+                                       (if (and (consp val)
+                                                (eq (car val) (quote quote)))
+                                           (second val)
+                                           val)))
+                               raw))
+                         (or spec t))))
+           (setq keys (cons key keys)))
+         (setq xs (cdr xs))
+         (go scan-specializers)
+       done-specializers)
+      (setq keys (nreverse keys))
+      (setq dispatch-key (if (= (length keys) 1) (first keys) keys)))
+    (setq qual-str (if qualifier (format nil "_~A" qualifier) ""))
+    (setq label-suffix
+          (format nil "~{~A~^_~}"
+                  (if (listp dispatch-key) dispatch-key (list dispatch-key))))
+    (setq func-label
+          (make-label ctx
+                      (format nil "METHOD_~A~A_~A" name qual-str
+                              label-suffix)))
+    (setq end-label
+          (make-label ctx
+                      (format nil "METHOD_~A~A_~A_END" name qual-str
+                              label-suffix)))
+    (let ((xs params))
+      (tagbody
+       scan-param-regs
+         (if (null xs) (go done-param-regs))
+         (setq param-regs (cons (make-register ctx) param-regs))
+         (setq xs (cdr xs))
+         (go scan-param-regs)
+       done-param-regs))
+    (setq param-regs (nreverse param-regs))
     (emit ctx (make-vm-get-global :dst gf-reg :name name))
     (emit ctx (make-vm-closure
                :dst closure-reg :label func-label
@@ -133,16 +153,31 @@ dispatch table, keyed by the composite specializer list for multiple dispatch."
     (let ((old-env (ctx-env ctx)))
       (unwind-protect
            (progn
-             (setf (ctx-env ctx)
-                   (append (nreverse (loop for param in params
-                                           for reg in param-regs
-                                           collect (cons param reg)))
-                           (ctx-env ctx)))
-             (let ((last-reg nil))
-               (dolist (form body)
-                 (setf (ctx-tail-position ctx)
-                       (if (eq form (car (last body))) t nil))
-                 (setf last-reg (compile-ast form ctx)))
+             (let ((pairs nil)
+                   (ps params)
+                   (rs param-regs))
+               (tagbody
+                scan-env
+                  (if (or (null ps) (null rs)) (go done-env))
+                  (setq pairs (cons (cons (car ps) (car rs)) pairs))
+                  (setq ps (cdr ps))
+                  (setq rs (cdr rs))
+                  (go scan-env)
+                done-env)
+               (setf (ctx-env ctx)
+                     (append (nreverse pairs) (ctx-env ctx))))
+             (let ((last-reg nil)
+                   (xs body))
+               (tagbody
+                scan-body
+                  (if (null xs) (go done-body))
+                  (let ((form (car xs)))
+                    (setf (ctx-tail-position ctx)
+                          (if (null (cdr xs)) t nil))
+                    (setq last-reg (compile-ast form ctx)))
+                  (setq xs (cdr xs))
+                  (go scan-body)
+                done-body)
                (setf (ctx-tail-position ctx) nil)
                (emit ctx (make-vm-ret :reg last-reg))))
         (setf (ctx-env ctx) old-env)))
@@ -152,42 +187,67 @@ dispatch table, keyed by the composite specializer list for multiple dispatch."
 ;;; ── Object instantiation and slot access ─────────────────────────────────
 
 (defmethod compile-ast ((node ast-make-instance) ctx)
-  "Compile make-instance.
-Handles both dynamic class names (ast-var) and static names (ast-quote/symbol)."
+  "Compile make-instance."
   (setf (ctx-tail-position ctx) nil)
-  (let* ((class-ast (ast-make-instance-class node))
-         (initargs (ast-make-instance-initargs node))
-         (dst (make-register ctx)))
-    (if (typep class-ast 'ast-var)
-        (let* ((class-reg (compile-ast class-ast ctx))
-               (initarg-regs (loop for (key . value-ast) in initargs
-                                   collect (cons key (compile-ast value-ast ctx)))))
-          (emit ctx (make-vm-make-obj :dst dst :class-reg class-reg :initarg-regs initarg-regs))
+  (let ((class-ast (ast-make-instance-class node))
+        (initargs (ast-make-instance-initargs node))
+        (dst (make-register ctx))
+        (initarg-regs nil))
+    (let ((xs initargs))
+      (tagbody
+       scan-initargs
+         (if (null xs) (go done-initargs))
+         (let ((entry (car xs)))
+           (setq initarg-regs
+                 (cons (cons (car entry) (compile-ast (cdr entry) ctx))
+                       initarg-regs)))
+         (setq xs (cdr xs))
+         (go scan-initargs)
+       done-initargs))
+    (setq initarg-regs (nreverse initarg-regs))
+    (if (typep class-ast (quote ast-var))
+        (let ((class-reg (compile-ast class-ast ctx)))
+          (emit ctx (make-vm-make-obj :dst dst :class-reg class-reg
+                                      :initarg-regs initarg-regs))
           dst)
-        (let* ((class-name (etypecase class-ast
-                             (ast-quote (ast-quote-value class-ast))
-                             (symbol class-ast)))
+        (let* ((class-name (cond
+                             ((typep class-ast (quote ast-quote))
+                              (ast-quote-value class-ast))
+                             ((symbolp class-ast) class-ast)))
                (class-reg (let ((r (make-register ctx)))
-                            (emit ctx (make-vm-get-global :dst r :name class-name))
-                            r))
-               (initarg-regs (loop for (key . value-ast) in initargs
-                                   collect (cons key (compile-ast value-ast ctx)))))
-          (emit ctx (make-vm-make-obj :dst dst :class-reg class-reg :initarg-regs initarg-regs))
+                            (emit ctx (make-vm-get-global :dst r
+                                                          :name class-name))
+                            r)))
+          (emit ctx (make-vm-make-obj :dst dst :class-reg class-reg
+                                      :initarg-regs initarg-regs))
           dst))))
 
 (defmethod compile-ast ((node ast-slot-value) ctx)
   "Compile slot-value access."
   (setf (ctx-tail-position ctx) nil)
-  (let* ((obj-ast (ast-slot-value-object node))
-         (slot-name (ast-slot-value-slot node))
-         (dst (make-register ctx)))
-    (when (typep obj-ast 'ast-var)
-      (let* ((entry (assoc (ast-var-name obj-ast) (ctx-noescape-instance-bindings ctx)))
-             (slot-entry (and entry
-                              (assoc (symbol-name slot-name) (cdr entry) :test #'string=))))
-        (when slot-entry
-          (emit ctx (make-vm-move :dst dst :src (cdr slot-entry)))
-          (return-from compile-ast dst))))
+  (let ((obj-ast (ast-slot-value-object node))
+        (slot-name (ast-slot-value-slot node))
+        (dst (make-register ctx)))
+    (if (typep obj-ast (quote ast-var))
+        (let* ((entry (%assoc-eq (ast-var-name obj-ast)
+                                 (ctx-noescape-instance-bindings ctx)))
+               (slot-entry nil))
+          (if entry
+              (let ((xs (cdr entry)))
+                (tagbody
+                 scan-slots
+                   (if (null xs) (go done-slots))
+                   (if (equal (symbol-name slot-name) (car (car xs)))
+                       (progn
+                         (setq slot-entry (car xs))
+                         (go done-slots)))
+                   (setq xs (cdr xs))
+                   (go scan-slots)
+                 done-slots)))
+          (if slot-entry
+              (progn
+                (emit ctx (make-vm-move :dst dst :src (cdr slot-entry)))
+                (return-from compile-ast dst)))))
     (let ((obj-reg (compile-ast obj-ast ctx)))
       (emit ctx (make-vm-slot-read
                  :dst dst :obj-reg obj-reg :slot-name slot-name))
@@ -196,16 +256,29 @@ Handles both dynamic class names (ast-var) and static names (ast-quote/symbol)."
 (defmethod compile-ast ((node ast-set-slot-value) ctx)
   "Compile (setf (slot-value obj 'slot) value)."
   (setf (ctx-tail-position ctx) nil)
-  (let* ((obj-ast (ast-set-slot-value-object node))
-         (slot-name (ast-set-slot-value-slot node))
-         (val-reg (compile-ast (ast-set-slot-value-value node) ctx)))
-    (when (typep obj-ast 'ast-var)
-      (let* ((entry (assoc (ast-var-name obj-ast) (ctx-noescape-instance-bindings ctx)))
-             (slot-entry (and entry
-                              (assoc (symbol-name slot-name) (cdr entry) :test #'string=))))
-        (when slot-entry
-          (setf (cdr slot-entry) val-reg)
-          (return-from compile-ast val-reg))))
+  (let ((obj-ast (ast-set-slot-value-object node))
+        (slot-name (ast-set-slot-value-slot node))
+        (val-reg (compile-ast (ast-set-slot-value-value node) ctx)))
+    (if (typep obj-ast (quote ast-var))
+        (let* ((entry (%assoc-eq (ast-var-name obj-ast)
+                                 (ctx-noescape-instance-bindings ctx)))
+               (slot-entry nil))
+          (if entry
+              (let ((xs (cdr entry)))
+                (tagbody
+                 scan-slots
+                   (if (null xs) (go done-slots))
+                   (if (equal (symbol-name slot-name) (car (car xs)))
+                       (progn
+                         (setq slot-entry (car xs))
+                         (go done-slots)))
+                   (setq xs (cdr xs))
+                   (go scan-slots)
+                 done-slots)))
+          (if slot-entry
+              (progn
+                (setf (cdr slot-entry) val-reg)
+                (return-from compile-ast val-reg)))))
     (let ((obj-reg (compile-ast obj-ast ctx)))
       (emit ctx (make-vm-slot-write
                  :obj-reg obj-reg

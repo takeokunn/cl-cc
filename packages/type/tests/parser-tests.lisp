@@ -113,6 +113,33 @@
     (assert-eq expected-fun-name (type-primitive-name (type-app-fun ty)))
     (assert-true (type-equal-p expected-arg (type-app-arg ty)))))
 
+(deftest-each parse-cl-numeric-range-type-specifiers
+  "CL numeric range type specifiers treat bounds as values, not nested type specs."
+  :cases (("unsigned-byte" '(unsigned-byte 64))
+          ("signed-byte"   '(signed-byte 32))
+          ("integer-range" '(integer 0 *))
+          ("mod"           '(mod 256)))
+  (form)
+  (assert-true (type-equal-p type-int (cl-cc/type:parse-type-specifier form))))
+
+(deftest-each parse-collection-type-apps-with-dimensions
+  "Vector/array type specifiers accept CL's optional size/dimension operand."
+  :cases (("vector-size"  '(vector (unsigned-byte 8) 4)        'vector)
+          ("array-dims"   '(array (unsigned-byte 8) (*))       'array)
+          ("simple-array" '(simple-array (unsigned-byte 8) (*)) 'array))
+  (form expected-fun-name)
+  (let ((ty (cl-cc/type:parse-type-specifier form)))
+    (assert-true (type-app-p ty))
+    (assert-eq expected-fun-name (type-primitive-name (type-app-fun ty)))
+    (assert-true (type-equal-p type-int (type-app-arg ty)))))
+
+(deftest parse-ansi-function-type-specifier
+  "ANSI CL (function (A B ...) R) parses to the internal arrow type."
+  (let ((ty (cl-cc/type:parse-type-specifier '(function (fixnum string) boolean))))
+    (assert-true (type-arrow-p ty))
+    (assert-equal 2 (length (type-arrow-params ty)))
+    (assert-true (type-equal-p type-bool (type-arrow-return ty)))))
+
 (deftest parse-compound-type-app-table-covers-five-aliases
   "*parse-compound-type-app-table* has exactly 5 entries: list + 2 vector forms + 2 array forms."
   (let ((table cl-cc/type::*parse-compound-type-app-table*))

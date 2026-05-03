@@ -58,10 +58,30 @@ CALLABLE must be an explicit function object."
   "Return TABLE values as a list preserving host iteration order."
   (let ((result nil))
     (maphash (lambda (k v)
-               (declare (ignore k))
-               (push v result))
-             table)
+                (declare (ignore k))
+                (push v result))
+              table)
     (nreverse result)))
+
+(defparameter *hash-test-function-alist*
+  '((eq     . eq)
+    (eql    . eql)
+    (equal  . equal)
+    (equalp . equalp))
+  "(designator-symbol . canonical-designator) pairs for VM hash-table tests.")
+
+(defun hash-test-symbol (test-val)
+  "Convert TEST-VAL to a canonical hash-test symbol without probing function cells."
+  (if (assoc test-val *hash-test-function-alist* :test #'eq)
+      test-val
+      'eql))
+
+(defun resolve-hash-test (test-symbol)
+  "Convert TEST-SYMBOL to a canonical hash-test designator."
+  (or (and (null test-symbol) 'eql)
+      (let ((entry (assoc test-symbol *hash-test-function-alist* :test #'eq)))
+        (and entry (cdr entry)))
+      (error "Unknown hash table test: ~S" test-symbol)))
 
 (defun %make-hash-table-with-test (test-designator)
   "Construct a native CL hash table honoring TEST-DESIGNATOR when supported.
@@ -70,8 +90,8 @@ Accepts symbols/functions for EQ/EQL/EQUAL/EQUALP and falls back to EQL."
                     ((functionp test-designator)
                      (or (hash-test-symbol test-designator) 'eql))
                     (t 'eql)))
-         (fn (resolve-hash-test sym)))
-    (make-hash-table :test fn)))
+         (test (resolve-hash-test sym)))
+    (make-hash-table :test test)))
 
 (defun %class-slot-initargs-for-slot (class slot-name)
   "Return all initargs in CLASS that initialize SLOT-NAME."

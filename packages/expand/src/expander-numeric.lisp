@@ -6,6 +6,49 @@
 ;;; Pure handler-registration cluster split from expander.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+(defun %make-indexed-gensyms (count prefix)
+  "Return COUNT gensyms named from PREFIX and the zero-based index."
+  (let ((i 0)
+        (result nil))
+    (tagbody
+     scan
+       (if (>= i count) (return-from %make-indexed-gensyms (nreverse result)))
+       (setq result (cons (gensym (format nil "~A~D-" prefix i)) result))
+       (setq i (+ i 1))
+       (go scan))))
+
+(defun %pair-list-bindings (vars values)
+  "Pair VARS and VALUES into LET bindings."
+  (let ((vs vars)
+        (xs values)
+        (bindings nil))
+    (tagbody
+     scan
+       (if (or (null vs) (null xs)) (return-from %pair-list-bindings (nreverse bindings)))
+       (setq bindings (cons (list (car vs) (car xs)) bindings))
+       (setq vs (cdr vs))
+       (setq xs (cdr xs))
+       (go scan))))
+
+(defun %all-not-equal-pairs (temps)
+  "Return pairwise (not (= A B)) forms for TEMPS."
+  (let ((outer temps)
+        (pairs nil))
+    (tagbody
+     outer-loop
+       (if (null outer) (return-from %all-not-equal-pairs (nreverse pairs)))
+       (let ((a (car outer))
+             (inner (cdr outer)))
+         (tagbody
+          inner-loop
+            (if (null inner) (go inner-done))
+            (setq pairs (cons (list 'not (list '= a (car inner))) pairs))
+            (setq inner (cdr inner))
+            (go inner-loop)
+          inner-done))
+       (setq outer (cdr outer))
+       (go outer-loop))))
+
 ;; + (FR-661): 0-arg → 0, 1-arg → identity, N-arg → left fold
 (define-expander-for + (form)
   (reduce-variadic-op '+ (mapcar #'compiler-macroexpand-all (cdr form)) 0))
@@ -93,29 +136,33 @@
   "Declarative dispatch table for N-ary operator expanders (FR-661–FR-667, FR-645).")
 
 (defun %register-variadic-expander (spec)
-  (destructuring-bind (op &key zero one identity n-reducer) spec
+  (let* ((op (car spec))
+         (options (cdr spec))
+         (zero (%plist-value-or-default options :zero nil))
+         (one (%plist-value-or-default options :one nil))
+         (identity (%plist-value-or-default options :identity nil))
+         (n-reducer (%plist-value-or-default options :n-reducer nil)))
     (setf (gethash op *expander-head-table*)
           (lambda (form)
             (let ((nargs (length (cdr form))))
-              (cond
-                ((= nargs 0)
-                 (ecase zero
-                   (:error    (error "~A requires at least one argument" op))
-                   (:identity identity)))
-                ((= nargs 1)
-                 (ecase one
-                   (:expand (compiler-macroexpand-all (second form)))
-                   (:abs    (list 'abs (compiler-macroexpand-all (second form))))
-                   (:true   t)))
-                ((= nargs 2)
-                 (list op
-                       (compiler-macroexpand-all (second form))
-                       (compiler-macroexpand-all (third form))))
-                (t
-                 (compiler-macroexpand-all
-                  (ecase n-reducer
-                    (reduce-variadic-op  (reduce-variadic-op op (cdr form) identity))
-                    (chain-comparison-op (chain-comparison-op op (cdr form))))))))))))
+              (if (= nargs 0)
+                  (if (eq zero :error)
+                      (error "~A requires at least one argument" op)
+                      identity)
+                  (if (= nargs 1)
+                      (if (eq one :expand)
+                          (compiler-macroexpand-all (second form))
+                          (if (eq one :abs)
+                              (list 'abs (compiler-macroexpand-all (second form)))
+                              t))
+                      (if (= nargs 2)
+                          (list op
+                                (compiler-macroexpand-all (second form))
+                                (compiler-macroexpand-all (third form)))
+                          (compiler-macroexpand-all
+                           (if (eq n-reducer 'reduce-variadic-op)
+                               (reduce-variadic-op op (cdr form) identity)
+                               (chain-comparison-op op (cdr form))))))))))))
 
 (dolist (spec *variadic-expander-specs*)
   (%register-variadic-expander spec))
@@ -123,17 +170,16 @@
 ;; /= (not-equal): 1-arg → T, 2-arg → (not (= a b)), N-arg → all-pairs distinct
 (define-expander-for /= (form)
   (let ((nargs (length (cdr form))))
-    (cond
-      ((= nargs 0) (error "/= requires at least one argument"))
-      ((= nargs 1) t)
-      ((= nargs 2) (compiler-macroexpand-all
-                     (list 'not (list '= (second form) (third form)))))
-      (t (let* ((args (cdr form))
-                (temps (loop for i from 0 below nargs
-                             collect (gensym (format nil "NE~D-" i))))
-                (bindings (mapcar #'list temps args))
-                (pairs (loop for (a . rest) on temps
-                              nconc (loop for b in rest
-                                          collect (list 'not (list '= a b))))))
-           (compiler-macroexpand-all
-            (list 'let bindings (cons 'and pairs))))))))
+    (if (= nargs 0)
+        (error "/= requires at least one argument")
+        (if (= nargs 1)
+            t
+            (if (= nargs 2)
+                (compiler-macroexpand-all
+                 (list 'not (list '= (second form) (third form))))
+                (let* ((args (cdr form))
+                       (temps (%make-indexed-gensyms nargs "NE"))
+                       (bindings (%pair-list-bindings temps args))
+                       (pairs (%all-not-equal-pairs temps)))
+                  (compiler-macroexpand-all
+                   (list 'let bindings (cons 'and pairs)))))))))

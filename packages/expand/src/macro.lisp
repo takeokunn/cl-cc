@@ -103,25 +103,34 @@ EXPANDER may be either a host function or a descriptor consumed by
     (:our-macroexpand-all (our-macroexpand-all result env))
     (otherwise result)))
 
+(defun %nest-let-bindings (bindings body)
+  "Build nested LET forms from BINDINGS ending in BODY forms."
+  (if (null bindings)
+      (cons 'progn body)
+      (list 'let (list (first bindings))
+            (%nest-let-bindings (rest bindings) body))))
+
 (defun %invoke-expander-descriptor (descriptor form env)
   "Evaluate DESCRIPTOR against FORM and ENV through `*macro-eval-fn*'."
   (case (getf descriptor :kind)
     (:macro-expander
-     (let* ((lambda-list (getf descriptor :lambda-list))
-            (body        (getf descriptor :body))
-            (form-var    (gensym "FORM"))
-            (eval-form   `(let ((,form-var ',form))
-                            (let* ,(generate-lambda-bindings lambda-list form-var)
-                              ,@body))))
-       (%maybe-postprocess-expansion (funcall *macro-eval-fn* eval-form) descriptor env)))
+      (let* ((lambda-list (getf descriptor :lambda-list))
+             (body        (getf descriptor :body))
+             (form-var    (gensym "FORM"))
+             (eval-form   `(let ((,form-var ',form))
+                             ,(%nest-let-bindings
+                               (generate-lambda-bindings lambda-list form-var)
+                               body))))
+        (%maybe-postprocess-expansion (funcall *macro-eval-fn* eval-form) descriptor env)))
     (:compiler-macro-expander
-     (let* ((lambda-list (getf descriptor :lambda-list))
-            (body        (getf descriptor :body))
-            (form-var    (gensym "FORM"))
-            (eval-form   `(let ((,form-var ',form))
-                            (let* ,(destructure-lambda-list lambda-list `(cdr ,form-var))
-                              ,@body))))
-       (funcall *macro-eval-fn* eval-form)))
+      (let* ((lambda-list (getf descriptor :lambda-list))
+             (body        (getf descriptor :body))
+             (form-var    (gensym "FORM"))
+             (eval-form   `(let ((,form-var ',form))
+                             ,(%nest-let-bindings
+                               (destructure-lambda-list lambda-list `(cdr ,form-var))
+                               body))))
+        (funcall *macro-eval-fn* eval-form)))
     (:register-macro-expander
      (let* ((parameters (getf descriptor :parameters))
             (body       (getf descriptor :body))
@@ -130,7 +139,7 @@ EXPANDER may be either a host function or a descriptor consumed by
             (bindings   (append (when form-var `((,form-var ',form)))
                                 (when env-var  `((,env-var  ',env)))))
             (eval-form  `(let ,bindings ,@body)))
-       (%maybe-postprocess-expansion (funcall *macro-eval-fn* eval-form) descriptor env)))
+        (funcall *macro-eval-fn* eval-form)))
     (otherwise
      (error "Unknown expander descriptor kind: ~S" descriptor))))
 

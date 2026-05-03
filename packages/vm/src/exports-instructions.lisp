@@ -6,6 +6,7 @@
 ;;; export surface keeps the high-signal symbols (instruction names, predicates,
 ;;; accessors, and defining macros) easy to scan.
 
+#-cl-cc-self-hosting
 (export
  '(vm-cons-cell-car
    vm-cons-cell-cdr

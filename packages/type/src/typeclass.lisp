@@ -154,9 +154,20 @@ relative to EXISTING-TYPE. Uses positional matching over type params."
 (defparameter *default-numeric-class-names* '("NUM" "NUMERIC")
   "Typeclass names eligible for numeric defaulting.")
 
+(defun %typeclass-type-string (type)
+  "Return a stable registry string for TYPE without depending on printer load order."
+  (cond
+    ((fboundp 'type-to-string) (type-to-string type))
+    ((type-primitive-p type) (symbol-name (type-primitive-name type)))
+    ((type-var-p type) (symbol-name (type-var-name type)))
+    ((type-error-p type) "<error>")
+    ((null type) "NIL")
+    ((symbolp type) (symbol-name type))
+    (t (princ-to-string type))))
+
 (defun %type-instance-key (class-name type)
   "Build the hash key for (CLASS-NAME, TYPE)."
-  (cons class-name (type-to-string type)))
+  (cons class-name (%typeclass-type-string type)))
 
 (defun %existing-class-instances (class-name)
   "Return all registered instances for CLASS-NAME."
@@ -170,7 +181,7 @@ relative to EXISTING-TYPE. Uses positional matching over type params."
   (when (lookup-typeclass-instance class-name type)
     (error 'type-inference-error
            :message (format nil "Duplicate typeclass instance for ~A / ~A"
-                            class-name (type-to-string type))))
+                            class-name (%typeclass-type-string type))))
   (let ((existing-instances (%existing-class-instances class-name))
         (tc-def (lookup-typeclass class-name)))
     (dolist (existing existing-instances)
@@ -178,12 +189,14 @@ relative to EXISTING-TYPE. Uses positional matching over type params."
         (when (%typeclass-instance-overlaps-p existing-type type)
           (error 'type-inference-error
                  :message (format nil "Overlapping typeclass instances for ~A: ~A and ~A"
-                                  class-name (type-to-string existing-type) (type-to-string type))))
+                                   class-name (%typeclass-type-string existing-type)
+                                   (%typeclass-type-string type))))
         (when (and (typeclass-def-p tc-def)
                    (%typeclass-fundep-violation-p tc-def existing-type type))
           (error 'type-inference-error
                  :message (format nil "Functional dependency violation for ~A: ~A vs ~A"
-                                  class-name (type-to-string existing-type) (type-to-string type)))))))
+                                   class-name (%typeclass-type-string existing-type)
+                                   (%typeclass-type-string type)))))))
   (let ((inst (%make-typeclass-instance
                :class-name    class-name
                :instance-type type
@@ -220,36 +233,26 @@ relative to EXISTING-TYPE. Uses positional matching over type params."
               (has-typeclass-instance-p class-name type))
     (error 'type-inference-error
            :message (format nil "No instance of ~A for ~A"
-                            class-name (type-to-string type)))))
+                            class-name (%typeclass-type-string type)))))
 
 (defun dict-env-extend (class-name type methods env)
   "Return a new type-env that extends ENV with a method dictionary for (CLASS-NAME, TYPE)."
-  (let ((key (cons class-name (type-to-string type))))
+  (let ((key (cons class-name (%typeclass-type-string type))))
     (make-type-env
      :bindings      (type-env-bindings env)
      :dict-bindings (acons key methods (type-env-dict-bindings env)))))
 
 (defun dict-env-lookup (class-name type env)
   "Look up the method alist for (CLASS-NAME, TYPE) in ENV's dict-bindings."
-  (let ((key (cons class-name (type-to-string type))))
+  (let ((key (cons class-name (%typeclass-type-string type))))
     (let ((entry (assoc key (type-env-dict-bindings env) :test #'equal)))
       (when entry (cdr entry)))))
 
-;; Guard the load-time registration: `type-to-string` is a defgeneric defined in
-;; printer.lisp / types-env.lisp and is reachable in host SBCL runs but not in
-;; the self-hosted `our-load` path (its host-bridge whitelist excludes it).
-;; Fail-loud via `warn`: silent skip would mask a real load-order regression
-;; in host SBCL where the printer protocol is expected before this file.
 (eval-when (:load-toplevel :execute)
-  (if (fboundp 'type-to-string)
-      (progn
-        (unless (lookup-typeclass 'num)
-          (register-typeclass 'num (make-typeclass-def
-                                    :name 'num
-                                    :type-params nil
-                                    :methods nil)))
-        (unless (lookup-typeclass-instance 'num type-int)
-          (register-typeclass-instance 'num type-int nil)))
-      (warn "type-to-string unavailable when loading typeclass.lisp; ~
-typeclass NUM and instance for type-int will not be registered ~
-(expected on the self-hosted our-load path; investigate if seen in host SBCL).")))
+  (unless (lookup-typeclass 'num)
+    (register-typeclass 'num (make-typeclass-def
+                              :name 'num
+                              :type-params nil
+                              :methods nil)))
+  (unless (lookup-typeclass-instance 'num type-int)
+    (register-typeclass-instance 'num type-int nil)))

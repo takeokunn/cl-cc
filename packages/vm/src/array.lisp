@@ -78,22 +78,27 @@
 (defmethod execute-instruction ((inst vm-make-array) state pc labels)
   (declare (ignore labels))
   (let* ((size (vm-reg-get state (vm-size-reg inst)))
-         (init-elem (when (vm-initial-element inst)
-                      (vm-reg-get state (vm-initial-element inst))))
+         (init-present-p (vm-initial-element inst))
+         (init-elem (if init-present-p
+                        (vm-reg-get state (vm-initial-element inst))
+                        0))
          (fp (vm-fill-pointer inst))
          (adj (vm-adjustable inst))
          (arr (cond
-                ((and fp adj)
-                 (make-array size :initial-element (or init-elem 0)
-                                  :fill-pointer (if (eq fp t) 0 fp)
-                                  :adjustable t))
-                (fp
-                 (make-array size :initial-element (or init-elem 0)
-                                  :fill-pointer (if (eq fp t) 0 fp)))
-                (init-elem
-                 (make-array size :initial-element init-elem))
-                (t
-                 (make-array size :initial-element 0)))))
+                 ((and fp adj)
+                  (make-array size :initial-element init-elem
+                              :fill-pointer (if (eq fp t) 0 fp)
+                              :adjustable t))
+                 (fp
+                  (make-array size :initial-element init-elem
+                              :fill-pointer (if (eq fp t) 0 fp)))
+                 (adj
+                  (make-array size :initial-element init-elem
+                              :adjustable t))
+                 (init-present-p
+                  (make-array size :initial-element init-elem))
+                 (t
+                  (make-array size :initial-element 0)))))
     (vm-reg-set state (vm-dst inst) arr)
     (values (1+ pc) nil nil)))
 

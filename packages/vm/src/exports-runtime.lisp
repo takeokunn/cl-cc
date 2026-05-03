@@ -6,6 +6,7 @@
 
 (in-package :cl-cc/vm)
 
+#-cl-cc-self-hosting
 (export
  '(vm-cons
    vm-car

@@ -10,6 +10,7 @@
 
 (in-package :cl-cc/vm)
 
+#-cl-cc-self-hosting
 (export
  '(;; ─── Opcode Name Symbols ───────────────────────────────────────────────────
    const

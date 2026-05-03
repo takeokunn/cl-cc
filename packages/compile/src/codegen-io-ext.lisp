@@ -22,10 +22,19 @@
   (when args
     (let ((obj-reg (compile-ast (first args) ctx)))
       ;; Evaluate keyword values for side effects, but ignore them.
-      (loop for (key val) on (cdr args) by #'cddr
-            when (and (typep key 'ast-var)
-                      (keywordp (ast-var-name key)))
-              do (compile-ast val ctx))
+      (let ((tail (cdr args)))
+        (tagbody
+         compile-write-to-string-options
+           (when (or (null tail) (null (cdr tail)))
+             (go compile-write-to-string-options-done))
+           (let ((key (car tail))
+                 (val (cadr tail)))
+             (when (and (typep key 'ast-var)
+                        (keywordp (ast-var-name key)))
+               (compile-ast val ctx)))
+           (setf tail (cddr tail))
+           (go compile-write-to-string-options)
+         compile-write-to-string-options-done))
       (emit ctx (make-vm-write-to-string-inst :dst result-reg :src obj-reg))
       result-reg)))
 
@@ -71,13 +80,33 @@ Emits instructions and returns RESULT-REG."
   (when (>= (length args) 2)
     (let* ((dest-arg        (first args))
            (fmt-arg         (second args))
-           (format-arg-regs (mapcar (lambda (a) (compile-ast a ctx)) (cddr args)))
-           (dest-sym        (cond ((and (typep dest-arg 'ast-var)
-                                        (member (ast-var-name dest-arg) '(nil t)))
-                                   (ast-var-name dest-arg))
-                                  ((typep dest-arg 'ast-quote)
-                                   (ast-quote-value dest-arg))
-                                  (t :stream))))
+           (format-arg-regs nil)
+           (dest-sym        :stream))
+      (let ((tail (cddr args))
+            (regs-rev nil))
+        (tagbody
+         compile-format-args
+           (when (null tail)
+             (go compile-format-args-done))
+           (setf regs-rev (cons (compile-ast (car tail) ctx) regs-rev))
+           (setf tail (cdr tail))
+           (go compile-format-args)
+         compile-format-args-done)
+        (let ((reverse-tail regs-rev))
+          (tagbody
+           reverse-format-args
+             (when (null reverse-tail)
+               (go reverse-format-args-done))
+             (setf format-arg-regs (cons (car reverse-tail) format-arg-regs))
+             (setf reverse-tail (cdr reverse-tail))
+             (go reverse-format-args)
+           reverse-format-args-done)))
+      (if (typep dest-arg 'ast-var)
+          (let ((name (ast-var-name dest-arg)))
+            (when (or (null name) (eq name t))
+              (setf dest-sym name)))
+          (when (typep dest-arg 'ast-quote)
+            (setf dest-sym (ast-quote-value dest-arg))))
       (if (and (null format-arg-regs)
                (typep fmt-arg 'ast-quote)
                (stringp (ast-quote-value fmt-arg)))
@@ -105,29 +134,36 @@ Emits instructions and returns RESULT-REG."
   ;; Parse :direction, :if-exists, :if-does-not-exist from keyword args.
   ;; Other keyword args (:element-type, :external-format) are compiled but ignored at runtime.
   (flet ((keyword-ast-value (ast)
-           (cond
-             ((and (typep ast 'ast-var) (keywordp (ast-var-name ast)))
-              (ast-var-name ast))
-             ((and (typep ast 'ast-quote) (keywordp (ast-quote-value ast)))
-              (ast-quote-value ast))
-             (t nil))))
+           (if (and (typep ast 'ast-var) (keywordp (ast-var-name ast)))
+               (ast-var-name ast)
+               (if (and (typep ast 'ast-quote) (keywordp (ast-quote-value ast)))
+                   (ast-quote-value ast)
+                   nil))))
     (let* ((path-reg  (compile-ast (first args) ctx))
            (direction :input)
            (if-exists :supersede)
            (if-not-exists nil))
-      (loop for (key val) on (cdr args) by #'cddr
-            for k = (keyword-ast-value key)
-            when k
-              do (let ((v (keyword-ast-value val)))
-                   (cond
-                     ((eq k :direction)
-                      (setf direction (or v :input)))
-                     ((eq k :if-exists)
-                      (setf if-exists (or v :supersede)))
-                     ((eq k :if-does-not-exist)
-                      (setf if-not-exists v))
-                     ;; Compile but discard :element-type, :external-format args
-                     (t (compile-ast val ctx)))))
+      (let ((tail (cdr args)))
+        (tagbody
+         scan-open-options
+           (when (or (null tail) (null (cdr tail)))
+             (go scan-open-options-done))
+           (let* ((key (car tail))
+                  (val (cadr tail))
+                  (k (keyword-ast-value key)))
+             (when k
+               (let ((v (keyword-ast-value val)))
+                 (if (eq k :direction)
+                     (setf direction (or v :input))
+                     (if (eq k :if-exists)
+                         (setf if-exists (or v :supersede))
+                         (if (eq k :if-does-not-exist)
+                             (setf if-not-exists v)
+                             ;; Compile but discard :element-type, :external-format args
+                             (compile-ast val ctx)))))))
+           (setf tail (cddr tail))
+           (go scan-open-options)
+         scan-open-options-done))
     ;; if-not-exists default: :create for output, :error for input (computed in execute-instruction)
       (emit ctx (make-vm-open-file :dst result-reg :path path-reg :direction direction
                                    :if-exists if-exists :if-not-exists if-not-exists))
@@ -138,37 +174,64 @@ Emits instructions and returns RESULT-REG."
   (when args
     (let ((handle-reg (compile-ast (first args) ctx)))
       ;; Compile and discard :abort keyword arg value
-      (loop for (key val) on (cdr args) by #'cddr
-            when (and (typep key 'ast-var) (keywordp (ast-var-name key)))
-              do (compile-ast val ctx))
+      (let ((tail (cdr args)))
+        (tagbody
+         compile-close-options
+           (when (or (null tail) (null (cdr tail)))
+             (go compile-close-options-done))
+           (let ((key (car tail))
+                 (val (cadr tail)))
+             (when (and (typep key 'ast-var) (keywordp (ast-var-name key)))
+               (compile-ast val ctx)))
+           (setf tail (cddr tail))
+           (go compile-close-options)
+         compile-close-options-done))
       (emit ctx (make-vm-close-file :handle handle-reg))
       ;; close returns t per ANSI CL
       (emit ctx (make-vm-const :dst result-reg :value t))
       result-reg)))
 
-;; concatenate: batch-fold constant strings; otherwise lower to vm-concatenate
+(defun %quoted-string-ast-list-p (args)
+  (if (consp args)
+      (let ((arg (car args)))
+        (if (typep arg 'ast-quote)
+            (if (stringp (ast-quote-value arg))
+                (%quoted-string-ast-list-p (cdr args))
+                nil)
+            nil))
+      t))
+
+(defun %concatenate-quoted-string-asts (args acc)
+  (if (consp args)
+      (%concatenate-quoted-string-asts
+       (cdr args)
+       (concatenate 'string acc (ast-quote-value (car args))))
+      acc))
+
+;; concatenate: fold literal string chains; otherwise lower to vm-concatenate
 (define-phase2-handler "CONCATENATE" (args result-reg ctx)
-  (when (and (>= (length args) 3)
-             (typep (first args) 'ast-quote)
-             (string= (symbol-name (ast-quote-value (first args))) "STRING"))
-    (let ((string-args (rest args)))
-      (if (every (lambda (arg)
-                   (and (typep arg 'ast-quote)
-                        (stringp (ast-quote-value arg))))
-                 string-args)
-          (progn
-            (emit ctx (make-vm-const :dst result-reg
-                                     :value (apply #'concatenate 'string
-                                                   (mapcar #'ast-quote-value string-args))))
-            result-reg)
-          (let ((current-reg (compile-ast (second args) ctx))
-                (tail (cddr args)))
-            (loop while tail
-                  for next-arg = (first tail)
-                  for more = (rest tail)
-                  do (let* ((next-reg (compile-ast next-arg ctx))
-                            (dst-reg (if more (make-register ctx) result-reg)))
-                       (emit ctx (make-vm-concatenate :dst dst-reg :str1 current-reg :str2 next-reg))
-                       (setf current-reg dst-reg
-                             tail more)))
-            result-reg)))))
+  (if (and (>= (length args) 3)
+           (typep (first args) 'ast-quote)
+           (equal (symbol-name (ast-quote-value (first args))) "STRING"))
+      (let ((string-args (cdr args)))
+        (if (%quoted-string-ast-list-p string-args)
+            (progn
+              (emit ctx (make-vm-const :dst result-reg
+                                        :value (%concatenate-quoted-string-asts string-args "")))
+              result-reg)
+            (let ((current-reg (compile-ast (second args) ctx))
+                  (tail (cddr args)))
+              (tagbody
+               emit-concatenate-chain
+                 (when (null tail)
+                   (go emit-concatenate-done))
+                 (let* ((next-reg (compile-ast (car tail) ctx))
+                        (more (cdr tail))
+                        (dst-reg (if more (make-register ctx) result-reg)))
+                   (emit ctx (make-vm-concatenate :dst dst-reg :str1 current-reg :str2 next-reg))
+                   (setf current-reg dst-reg)
+                   (setf tail more))
+                 (go emit-concatenate-chain)
+               emit-concatenate-done)
+              result-reg)))
+      nil))

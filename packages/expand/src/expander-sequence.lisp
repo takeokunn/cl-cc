@@ -27,38 +27,54 @@
 
 (defun %sequence-build-single-map-form (mode fn-arg list-arg)
   (let ((fn-var (gensym "FN"))
-        (x (gensym "X"))
-        (acc (gensym "ACC"))
-        (lst (gensym "LST")))
-    (ecase mode
-      (:collect
-       (list 'let (list (list fn-var fn-arg) (list acc nil))
-             (list 'dolist (list x list-arg (list 'nreverse acc))
-                   (list 'setq acc (list 'cons (list 'funcall fn-var x) acc)))))
-      (:side-effect
-       (list 'let (list (list fn-var fn-arg) (list lst list-arg))
-             (list 'dolist (list x lst lst)
-                   (list 'funcall fn-var x))))
-      (:nconc
-       (list 'let (list (list fn-var fn-arg) (list acc nil))
-             (list 'dolist (list x list-arg acc)
-                   (list 'setq acc (list 'nconc acc (list 'funcall fn-var x)))))))))
+        (lst (gensym "LST"))
+        (helper (gensym "MAP1")))
+    (if (eq mode :collect)
+        (list 'let (list (list fn-var fn-arg))
+              (list 'labels
+                    (list (list helper (list lst)
+                                (list 'if (list 'null lst)
+                                      nil
+                                      (list 'cons
+                                            (list 'funcall fn-var (list 'car lst))
+                                            (list helper (list 'cdr lst))))))
+                    (list helper list-arg)))
+        (if (eq mode :side-effect)
+            (let ((input (gensym "INPUT")))
+              (list 'let (list (list fn-var fn-arg) (list input list-arg))
+                    (list 'labels
+                          (list (list helper (list lst)
+                                      (list 'if (list 'null lst)
+                                            input
+                                            (list 'progn
+                                                  (list 'funcall fn-var (list 'car lst))
+                                                  (list helper (list 'cdr lst))))))
+                          (list helper input))))
+            (list 'let (list (list fn-var fn-arg))
+                  (list 'labels
+                        (list (list helper (list lst)
+                                    (list 'if (list 'null lst)
+                                          nil
+                                          (list 'nconc
+                                                (list 'funcall fn-var (list 'car lst))
+                                                (list helper (list 'cdr lst))))))
+                        (list helper list-arg)))))))
 
 (defun %sequence-build-multi-map-form (mode fn-arg list-args)
   (let* ((nlists (length list-args))
          (fn-var (gensym "FN"))
-         (list-vars (loop for i from 0 below nlists
-                          collect (gensym (format nil "L~D-" i))))
+         (list-vars (%make-indexed-gensyms nlists "L"))
          (helper (gensym "MAP"))
          (null-test (%sequence-build-null-test list-vars))
          (car-args (%sequence-build-car-args list-vars))
          (cdr-args (%sequence-build-cdr-args list-vars))
          (call (cons 'funcall (cons fn-var car-args)))
          (recurse (cons helper cdr-args))
-         (body (ecase mode
-                 (:collect (list 'if null-test nil (list 'cons call recurse)))
-                 (:side-effect (list 'if null-test nil (list 'progn call recurse)))
-                 (:nconc (list 'if null-test nil (list 'nconc call recurse))))))
+         (body (if (eq mode :collect)
+                   (list 'if null-test nil (list 'cons call recurse))
+                   (if (eq mode :side-effect)
+                       (list 'if null-test nil (list 'progn call recurse))
+                       (list 'if null-test nil (list 'nconc call recurse))))))
     (list 'let (list (list fn-var fn-arg))
           (list 'labels (list (list helper list-vars body))
                 (cons helper list-args)))))
@@ -67,38 +83,34 @@
   (let ((fn-var (gensym "FN"))
         (x (gensym "X"))
         (result (gensym "R")))
-    (ecase mode
-      (:every
-       (list 'let (list (list fn-var pred-arg))
-             (list 'block nil
-                   (list 'dolist (list x list-arg t)
-                         (list 'unless (list 'funcall fn-var x)
-                               '(return nil))))))
-      (:some
-       (list 'let (list (list fn-var pred-arg))
-             (list 'block nil
-                   (list 'dolist (list x list-arg nil)
-                         (list 'let (list (list result (list 'funcall fn-var x)))
-                               (list 'when result (list 'return result))))))))))
+    (if (eq mode :every)
+        (list 'let (list (list fn-var pred-arg))
+              (list 'block nil
+                    (list 'dolist (list x list-arg t)
+                          (list 'unless (list 'funcall fn-var x)
+                                '(return nil)))))
+        (list 'let (list (list fn-var pred-arg))
+              (list 'block nil
+                    (list 'dolist (list x list-arg nil)
+                          (list 'let (list (list result (list 'funcall fn-var x)))
+                                (list 'when result (list 'return result)))))))))
 
 (defun %sequence-build-multi-quantifier-form (mode fn-arg list-args)
   (let* ((nlists (length list-args))
          (fn-var (gensym "FN"))
-         (list-vars (loop for i from 0 below nlists
-                          collect (gensym (format nil "L~D-" i))))
+         (list-vars (%make-indexed-gensyms nlists "L"))
          (helper (gensym "QNT"))
          (null-test (%sequence-build-null-test list-vars))
          (car-args (%sequence-build-car-args list-vars))
          (cdr-args (%sequence-build-cdr-args list-vars))
          (call (cons 'funcall (cons fn-var car-args)))
          (recurse (cons helper cdr-args))
-         (body (ecase mode
-                 (:every (list 'if null-test t (list 'if call recurse nil)))
-                 (:some (list 'if null-test nil
-                              (list 'let '((r PLACEHOLDER))
-                                    (list 'if 'r 'r recurse)))))))
-    (when (eq mode :some)
-      (setf body (subst call 'PLACEHOLDER body)))
+         (body (if (eq mode :every)
+                   (list 'if null-test t (list 'if call recurse nil))
+                   (let ((result (gensym "R")))
+                     (list 'if null-test nil
+                           (list 'let (list (list result call))
+                                 (list 'if result result recurse)))))))
     (list 'let (list (list fn-var fn-arg))
           (list 'labels (list (list helper list-vars body))
                 (cons helper list-args)))))

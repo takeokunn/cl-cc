@@ -106,8 +106,10 @@ Handles both vm-jump (unconditional) and vm-jump-zero (conditional)."
           (n (length vec)))
       (loop for i from 0 below n
             for inst = (aref vec i)
-            do (let ((handler (loop for (type . fn) in *opt-jump-thread-table*
-                                    when (typep inst type) return fn)))
+             do (let ((handler (loop for entry in *opt-jump-thread-table*
+                                     for type = (car entry)
+                                     for fn = (cdr entry)
+                                     when (typep inst type) return fn)))
                  (if handler
                      (let ((new (funcall handler inst vec i idx)))
                        (when new (push new result)))

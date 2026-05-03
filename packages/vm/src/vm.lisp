@@ -66,6 +66,25 @@ closures, and reader states."))
         (funcall constructor sexp)
         (error "Unknown instruction sexp: ~S" sexp))))
 
+(defun %vm-instruction-sexp-position-form (position)
+  "Return the SEXP accessor form for the 1-based instruction operand POSITION."
+  (case position
+    (1 '(second sexp))
+    (2 '(third sexp))
+    (3 '(fourth sexp))
+    (4 '(fifth sexp))
+    (5 '(sixth sexp))
+    (6 '(seventh sexp))
+    (t `(nth ,position sexp))))
+
+(defun %vm-instruction-constructor-args (slot-names &optional (position 1))
+  "Build keyword/value constructor arguments for SLOT-NAMES from an instruction SEXP."
+  (if (null slot-names)
+      nil
+      (append (list (intern (symbol-name (car slot-names)) :keyword)
+                    (%vm-instruction-sexp-position-form position))
+              (%vm-instruction-constructor-args (cdr slot-names) (+ position 1)))))
+
 (defmacro define-vm-instruction (name (parent) &body body)
   "Define a VM instruction as a defstruct with auto-generated sexp serialization.
 NAME is the struct name. PARENT is the parent struct to :include.
@@ -96,12 +115,7 @@ Options:
        (flet ((struct-acc (slot)
                 (intern (format nil "~A~A" prefix (symbol-name slot))))
               (ctor ()
-                (intern (format nil "MAKE-~A" (symbol-name name))))
-              (pos-form (n)
-                (case n
-                  (1 '(second sexp)) (2 '(third sexp)) (3 '(fourth sexp))
-                  (4 '(fifth sexp)) (5 '(sixth sexp)) (6 '(seventh sexp))
-                  (t `(nth ,n sexp)))))
+                (intern (format nil "MAKE-~A" (symbol-name name)))))
          (let* ((struct-options (append (list name (list :include parent))
                                         (when conc-name-override
                                           (list (list :conc-name conc-name-override)))))
@@ -134,10 +148,7 @@ Options:
                 (sexp-forms
                   (when sexp-tag
                     (let ((ctor-args
-                            (loop for s in sexp-slots
-                                  for i from 1
-                                  append (list (intern (symbol-name s) :keyword)
-                                               (pos-form i)))))
+                            (%vm-instruction-constructor-args sexp-slots)))
                       (list
                         (list 'defmethod 'instruction->sexp
                               (list (list 'inst name))

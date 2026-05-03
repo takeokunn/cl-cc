@@ -90,6 +90,7 @@
     (fboundp          . make-vm-fboundp)
     (makunbound       . make-vm-makunbound)
     (fdefinition      . make-vm-fdefinition)
+    (symbol-function  . make-vm-fdefinition)
     ;; Random
     (random           . make-vm-random)
     ;; Rational
@@ -128,6 +129,7 @@
     ;; Symbol
     (symbol-name      . make-vm-symbol-name)
     (make-symbol      . make-vm-make-symbol)
+    (find-package     . make-vm-find-package)
     (keywordp         . make-vm-keywordp)
     (symbol-plist     . make-vm-symbol-plist)
     ;; Time / system

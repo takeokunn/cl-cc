@@ -120,11 +120,11 @@ This is a conservative decision-tree simplification: if a later clause is a
 subtype of any earlier clause, it can never be reached and can be dropped."
   (let ((seen nil)
         (result nil))
-    (dolist (case cases (nreverse result))
-      (let ((type (car case)))
+    (dolist (clause cases (nreverse result))
+      (let ((type (car clause)))
         (cond
           ((or (eq type 'otherwise) (eq type 't))
-           (push case result)
+           (push clause result)
            (return (nreverse result)))
           ((some (lambda (prev)
                    (multiple-value-bind (subp surep)
@@ -134,7 +134,7 @@ subtype of any earlier clause, it can never be reached and can be dropped."
            nil)
           (t
            (push type seen)
-           (push case result)))))))
+           (push clause result)))))))
 
 (defun %typecase-subtypep (type1 type2)
   "Call the type system subtype predicate if it is available."

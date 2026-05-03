@@ -38,6 +38,24 @@
       (assert-true (symbolp result))
       (assert-equal "INTERN-TEST-SYM-12345" (symbol-name result)))))
 
+(deftest sym-find-package
+  "vm-find-package resolves a package designator through the runtime/host package layer."
+  (let ((s (str-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 :cl-user)
+    (str-exec (cl-cc:make-vm-find-package :dst :R0 :src :R1) s)
+    (assert-true (cl-cc/vm::vm-reg-get s :R0))))
+
+(deftest sym-find-symbol
+  "vm-find-symbol returns the symbol and status as multiple values."
+  (let ((s (str-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "CAR")
+    (cl-cc/vm::vm-reg-set s :R2 :cl)
+    (str-exec (cl-cc:make-vm-find-symbol :dst :R0 :src :R1 :pkg :R2) s)
+    (let ((result (cl-cc/vm::vm-reg-get s :R0)))
+      (assert-true (symbolp result))
+      (assert-equal "CAR" (symbol-name result))
+      (assert-equal :external (second (cl-cc/vm::vm-values-list s))))))
+
 (deftest sym-gensym
   "vm-gensym-inst creates unique uninterned symbol."
   (let ((s (str-vm)))

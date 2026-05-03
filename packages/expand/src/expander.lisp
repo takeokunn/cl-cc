@@ -55,11 +55,11 @@ Dispatch order: (1) atoms — symbol macros expanded, others pass through;
      (if (and (symbolp form)
               (not (keywordp form))
               (gethash form *symbol-macro-table*))
-         (compiler-macroexpand-all (gethash form *symbol-macro-table*))
-         form))
+          (compiler-macroexpand-all (gethash form *symbol-macro-table*))
+          form))
     ((and (symbolp (car form))
-          (string= (symbol-name (car form)) "BACKQUOTE"))
-     (compiler-macroexpand-all (%expand-quasiquote (second form))))
+          (string= (symbol-name (car form)) "QUOTE"))
+     form)
     (t
      (let ((handler (or (gethash (car form) *expander-head-table*)
                          (and (symbolp (car form))
@@ -79,8 +79,8 @@ Dispatch order: (1) atoms — symbol macros expanded, others pass through;
              (if (equal expanded form)
                  form
                  (compiler-macroexpand-all expanded))))
-         ((member (car form) *compiler-special-forms*)
-          (cons (car form) (mapcar #'compiler-macroexpand-all (cdr form))))
+          ((%list-contains-eq (car form) *compiler-special-forms*)
+           (cons (car form) (mapcar #'compiler-macroexpand-all (cdr form))))
          (t
           (multiple-value-bind (exp expanded-p) (our-macroexpand-1 form)
             (if expanded-p

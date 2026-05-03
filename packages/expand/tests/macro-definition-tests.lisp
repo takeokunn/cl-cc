@@ -14,14 +14,24 @@
 
 (in-suite macro-definition-suite)
 (deftest-each defun-macro-structure
-  "DEFUN expands to (setf (fdefinition ...) (lambda ...)) regardless of docstring"
-  :cases (("basic"          '(defun foo (x y) body1 body2))
-          ("with-docstring" '(defun foo (x y) "Docstring" body)))
-  (form)
-  (let ((result (our-macroexpand-1 form)))
+  "DEFUN expands to fdefinition assignment and preserves its implicit named block."
+  :cases (("basic"          '(defun foo (x y) body1 body2) '(block foo body1 body2))
+           ("with-docstring" '(defun foo (x y) "Docstring" body) '(block foo body)))
+  (form expected-block)
+  (let* ((result (our-macroexpand-1 form))
+         (lambda-form (third result)))
     (assert-eq (car result) 'setf)
     (assert-equal (cadr result) '(fdefinition 'foo))
-    (assert-eq (caaddr result) 'lambda)))
+    (assert-eq (car lambda-form) 'lambda)
+    (assert-true (member expected-block (cddr lambda-form) :test #'equal))))
+
+(deftest defun-macro-block-follows-docstring-and-declarations
+  "DEFUN macro keeps docstring/declarations in lambda body and wraps executable forms in BLOCK."
+  (let* ((result (our-macroexpand-1 '(defun foo (x) "Doc" (declare (ignore x)) (return-from foo 1))))
+         (lambda-form (third result)))
+    (assert-equal "Doc" (third lambda-form))
+    (assert-equal '(declare (ignore x)) (fourth lambda-form))
+    (assert-equal '(block foo (return-from foo 1)) (fifth lambda-form))))
 
 (deftest define-compiler-macro-returns-name
   "DEFINE-COMPILER-MACRO returns the macro name (no compile-time expansion)."

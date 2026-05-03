@@ -37,7 +37,7 @@ without hanging forever on platform utility calls like chmod."
   output-path)
 
 (defparameter *compile-cache-root*
-  (merge-pathnames #P".cache/cl-cc/native/" (truename #P"./"))
+  #P".cache/cl-cc/native/"
   "Directory for cached native build outputs.")
 
 (defun %compile-cache-key (source arch language)
@@ -53,25 +53,35 @@ without hanging forever on platform utility calls like chmod."
                   :type (pathname-type output-file))
    *compile-cache-root*))
 
+(defun %copy-file-bytes-loop (in out)
+  (let ((byte (read-byte in nil nil)))
+    (if byte
+        (progn
+          (write-byte byte out)
+          (%copy-file-bytes-loop in out))
+        nil)))
+
 (defun %copy-file-bytes (from to)
   (with-open-file (in from :direction :input :element-type '(unsigned-byte 8))
     (with-open-file (out to :direction :output :if-exists :supersede
                             :if-does-not-exist :create
                             :element-type '(unsigned-byte 8))
-      (let ((buffer (make-array 4096 :element-type '(unsigned-byte 8))))
-        (loop for count = (read-sequence buffer in)
-              while (plusp count) do
-                (write-sequence buffer out :end count)))))
+      (%copy-file-bytes-loop in out)))
   to)
 
 (defun %top-level-in-package-form-p (form)
-  "Return T when FORM is an in-package declaration ignored by top-level compilation." 
-  (and (consp form)
-       (eq (car form) 'in-package)))
+  "Return T when FORM is an in-package declaration ignored by top-level compilation."
+  (if (consp form)
+      (eq (car form) 'in-package)
+      nil))
 
 (defun %non-package-top-level-forms (forms)
-  "Return FORMS with in-package declarations removed, mirroring compile-toplevel-forms." 
-  (remove-if #'%top-level-in-package-form-p forms))
+  "Return FORMS with in-package declarations removed, mirroring compile-toplevel-forms."
+  (if (consp forms)
+      (if (%top-level-in-package-form-p (car forms))
+          (%non-package-top-level-forms (cdr forms))
+          (cons (car forms) (%non-package-top-level-forms (cdr forms))))
+      nil))
 
 ;;; Native compilation options — bundle 9 recurring keyword params into a plist.
 ;;; Internal functions accept (target opts) and apply opts directly as &key args.
@@ -140,10 +150,24 @@ Returns two values: the compilation result and whether the CPS-native path was u
             cps-result
             (%compile-native-expression source target opts)))))
 
+(defun %native-target-for-arch (arch)
+  (if (eq arch :x86-64)
+      :x86_64
+      (if (eq arch :arm64)
+          :arm64
+          (error "Unknown native architecture: ~S" arch))))
+
+(defun %native-code-bytes-for-arch (arch program)
+  (if (eq arch :x86-64)
+      (compile-to-x86-64-bytes program)
+      (if (eq arch :arm64)
+          (compile-to-aarch64-bytes program)
+          (error "Unknown native architecture: ~S" arch))))
+
 (defun compile-to-native (source &key (arch :x86-64) (output-file "a.out") (language :lisp)
-                                 pass-pipeline print-pass-timings timing-stream
-                                 print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
-                                 print-pass-stats stats-stream trace-json-stream)
+                                  pass-pipeline print-pass-timings timing-stream
+                                  print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
+                                  print-pass-stats stats-stream trace-json-stream)
   "Compile SOURCE to a native Mach-O executable.
 SOURCE can be a string (single expression) or a list of forms.
 ARCH is :X86-64 or :ARM64.
@@ -151,7 +175,7 @@ OUTPUT-FILE is the path for the executable.
 LANGUAGE is :LISP (default) or :PHP.
 
 Returns the output file path on success."
-  (let* ((native-target (ecase arch (:x86-64 :x86_64) (:arm64 :arm64)))
+  (let* ((native-target (%native-target-for-arch arch))
          (opts (%make-native-opts :pass-pipeline pass-pipeline
                                   :print-pass-timings print-pass-timings
                                   :timing-stream timing-stream
@@ -162,12 +186,70 @@ Returns the output file path on success."
                                   :stats-stream stats-stream
                                   :trace-json-stream trace-json-stream))
          (result (%compile-native-source source native-target language opts))
-         (program    (compilation-result-program result))
-         (code-bytes (ecase arch
-                       (:x86-64 (compile-to-x86-64-bytes program))
-                       (:arm64  (compile-to-aarch64-bytes program))))
+         (program (compilation-result-program result))
+         (code-bytes (%native-code-bytes-for-arch arch program))
          (builder (cl-cc/binary:make-mach-o-builder arch)))
     (%write-native-binary builder code-bytes output-file)))
+
+(defun %native-file-language (input-file language)
+  (if language
+      language
+      (let ((file-type (pathname-type input-file)))
+        (if file-type
+            (if (string= file-type "php")
+                :php
+                :lisp)
+            :lisp))))
+
+(defun %native-output-file (input-file output-file)
+  (if output-file
+      output-file
+      (make-pathname :type nil :defaults input-file)))
+
+(defun %native-read-lisp-forms-loop (stream eof-marker forms)
+  (let ((form (read stream nil eof-marker)))
+    (if (eq form eof-marker)
+        (%native-reverse-list forms nil)
+        (%native-read-lisp-forms-loop stream eof-marker (cons form forms)))))
+
+(defun %native-reverse-list (items acc)
+  (if (consp items)
+      (%native-reverse-list (cdr items) (cons (car items) acc))
+      acc))
+
+(defun %native-read-character-stream-loop (in buf index limit)
+  (if (< index limit)
+      (let ((ch (read-char in nil nil)))
+        (if ch
+            (progn
+              (setf (aref buf index) ch)
+              (%native-read-character-stream-loop in buf (+ index 1) limit))
+            buf))
+      buf))
+
+(defun %native-read-character-file (input-file)
+  (let ((in (open input-file :direction :input :element-type 'character)))
+    (unwind-protect
+        (let ((buf (make-string (file-length in))))
+          (%native-read-character-stream-loop in buf 0 (length buf)))
+      (close in))))
+
+(defun %native-read-lisp-file (input-file)
+  (let ((in (open input-file :direction :input)))
+    (unwind-protect
+        (let ((*read-eval* nil))
+          (%native-read-lisp-forms-loop in (list :eof) nil))
+      (close in))))
+
+(defun %native-read-file-source (input-file language)
+  (if (eq language :php)
+      (%native-read-character-file input-file)
+      (%native-read-lisp-file input-file)))
+
+(defun %compile-native-file-source (source target language opts)
+  (if (eq language :php)
+      (%compile-native-string source target :php opts)
+      (%compile-native-lisp-forms source target opts)))
 
 (defun compile-file-to-native (input-file &key (arch :x86-64) (output-file nil) (language nil)
                                           pass-pipeline print-pass-timings timing-stream
@@ -177,20 +259,9 @@ Returns the output file path on success."
 INPUT-FILE is the path to the source file.
 OUTPUT-FILE defaults to INPUT-FILE with no extension.
 LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
-  (let* ((effective-language (or language
-                                 (cond ((string= (pathname-type input-file) "php") :php)
-                                       (t :lisp))))
-         (output (or output-file (make-pathname :type nil :defaults input-file)))
-         (source (if (eq effective-language :php)
-                     (with-open-file (in input-file :direction :input :element-type 'character)
-                       (let ((buf (make-string (file-length in))))
-                         (read-sequence buf in)
-                         buf))
-                     (with-open-file (in input-file :direction :input)
-                       (let ((forms nil) (*read-eval* nil))
-                         (handler-case (loop (push (read in) forms))
-                           (end-of-file () nil))
-                         (nreverse forms)))))
+  (let* ((effective-language (%native-file-language input-file language))
+         (output (%native-output-file input-file output-file))
+         (source (%native-read-file-source input-file effective-language))
          (opts (%make-native-opts :pass-pipeline pass-pipeline
                                   :print-pass-timings print-pass-timings
                                   :timing-stream timing-stream
@@ -202,14 +273,10 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
                                   :trace-json-stream trace-json-stream))
          (cache-key (%compile-cache-key source arch effective-language))
          (cache-path (%compile-cache-path cache-key output))
-         (native-target (ecase arch (:x86-64 :x86_64) (:arm64 :arm64)))
-         (result (if (eq effective-language :php)
-                     (%compile-native-string source native-target :php opts)
-                     (%compile-native-lisp-forms source native-target opts)))
-         (program    (compilation-result-program result))
-         (code-bytes (ecase arch
-                       (:x86-64 (compile-to-x86-64-bytes program))
-                       (:arm64  (compile-to-aarch64-bytes program))))
+         (native-target (%native-target-for-arch arch))
+         (result (%compile-native-file-source source native-target effective-language opts))
+         (program (compilation-result-program result))
+         (code-bytes (%native-code-bytes-for-arch arch program))
          (builder (cl-cc/binary:make-mach-o-builder arch)))
     (ensure-directories-exist cache-path)
     (if (probe-file cache-path)

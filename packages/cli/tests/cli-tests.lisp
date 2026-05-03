@@ -177,11 +177,12 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
           ("check"   "check"   'cl-cc/cli::%do-check))
   (command fn-sym)
   (let ((help-command nil))
-    (with-fake-quit
-      (with-replaced-function (cl-cc/cli::%print-help
-                               (lambda (cmd) (setf help-command cmd)))
-        (assert-= 2 (%capture-fake-quit-code
-                      (lambda ()
-                        (funcall (symbol-function fn-sym)
-                                 (make-cli-parsed :command command)))))))
+    (with-output-to-string (*error-output*)
+      (with-fake-quit
+        (with-replaced-function (cl-cc/cli::%print-help
+                                 (lambda (cmd) (setf help-command cmd)))
+          (assert-= 2 (%capture-fake-quit-code
+                        (lambda ()
+                          (funcall (symbol-function fn-sym)
+                                   (make-cli-parsed :command command))))))))
     (assert-string= command help-command)))

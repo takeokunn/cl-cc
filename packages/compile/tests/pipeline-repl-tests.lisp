@@ -29,6 +29,21 @@
     (run-string-repl setup)
     (assert-= expected (run-string-repl check))))
 
+(deftest pipeline-repl-defvar-without-init-persists-as-global
+  "A top-level DEFVAR without an init form is visible to later REPL SETF forms."
+  (with-reset-repl-state
+    (run-string-repl "(defvar *repl-no-init*)")
+    (run-string-repl "(setf *repl-no-init* 3)")
+    (assert-= 3 (run-string-repl "*repl-no-init*"))))
+
+(deftest pipeline-run-form-repl-defvar-without-init-persists-as-global
+  "run-form-repl records DEFVAR without init in the persistent global registry."
+  (with-reset-repl-state
+    (let ((form (first (cl-cc/parse:parse-all-forms "(defvar *run-form-no-init*)"))))
+      (cl-cc::run-form-repl form)
+      (run-string-repl "(setf *run-form-no-init* 7)")
+      (assert-= 7 (run-string-repl "*run-form-no-init*")))))
+
 (deftest pipeline-run-form-repl-registers-top-level-defmacro
   "run-form-repl handles a top-level defmacro by registering an expander immediately." 
   (let* ((*package* (find-package :cl-cc/compile))
@@ -58,9 +73,7 @@
            (assert-eq macro-name (cl-cc::run-form-repl form))
              (let ((expander (gethash macro-name table)))
                (assert-true expander)
-               (assert-equal '(cons 'foo
-                                    (cons 'bar
-                                          (cons '(baz quux) nil)))
+                (assert-equal '(list 'foo 'bar '(baz quux))
                             (cl-cc/expand::invoke-registered-expander
                              expander
                              '(pipeline-repl-temp-destructuring-defmacro foo (bar) baz quux)

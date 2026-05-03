@@ -48,21 +48,24 @@
 
 ;; ROTATEF macro
 (our-defmacro rotatef (&rest places)
-  (cond
-    ((< (length places) 2) nil)
-    ((= (length places) 2)
-     (let ((tmp (gensym "TMP")))
-       `(let ((,tmp ,(first places)))
-          (setq ,(first places) ,(second places))
-          (setq ,(second places) ,tmp)
-          nil)))
-    (t (let ((tmp (gensym "TMP")))
-         `(let ((,tmp ,(first places)))
-            ,@(loop for (a b) on places
-                    while b
-                    collect `(setf ,a ,b))
-            (setf ,(car (last places)) ,tmp)
-            nil)))))
+  (labels ((shift-forms (remaining acc)
+             (if (or (null remaining) (null (cdr remaining)))
+                 (nreverse acc)
+                 (shift-forms (cdr remaining)
+                              (cons (list (quote setq) (car remaining) (cadr remaining))
+                                    acc))))
+           (last-place (remaining)
+             (if (null (cdr remaining))
+                 (car remaining)
+                 (last-place (cdr remaining)))))
+    (if (< (length places) 2)
+        nil
+        (let ((tmp (gensym "TMP")))
+          (cons (quote let)
+                (cons (list (list tmp (first places)))
+                      (append (shift-forms places nil)
+                              (list (list (quote setq) (last-place places) tmp)
+                                    nil))))))))
 
 ;; DESTRUCTURING-BIND macro
 (our-defmacro destructuring-bind (pattern expr &body body)

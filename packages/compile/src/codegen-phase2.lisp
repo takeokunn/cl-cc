@@ -23,14 +23,96 @@ Handler lambda-list: (args result-reg ctx) → result-reg-or-nil.")
         (list 'gethash name '*phase2-builtin-handlers*)
         (cons 'lambda (cons (list args result-reg ctx) body))))
 
+(defun %phase2-keyword-name (node)
+  "Return NODE's keyword value when NODE is a keyword AST, otherwise NIL."
+  (cond
+    ((and (typep node 'ast-var) (keywordp (ast-var-name node)))
+     (ast-var-name node))
+    ((and (typep node 'ast-quote) (keywordp (ast-quote-value node)))
+     (ast-quote-value node))
+    (t nil)))
+
+(defun %phase2-static-value (node)
+  "Return NODE's literal value and whether it is statically known."
+  (cond
+    ((typep node 'ast-int)
+     (values (ast-int-value node) t))
+    ((typep node 'ast-quote)
+     (values (ast-quote-value node) t))
+    ((typep node 'ast-var)
+     (let ((name (ast-var-name node)))
+       (cond
+         ((eq name t) (values t t))
+         ((eq name nil) (values nil t))
+         ((keywordp name) (values name t))
+         (t (values nil nil)))))
+    (t (values nil nil))))
+
+(defun %phase2-find-keyword-arg (tail key)
+  "Return the value AST following KEY in keyword argument TAIL."
+  (tagbody
+   scan
+     (if (or (null tail) (null (cdr tail)))
+         (return-from %phase2-find-keyword-arg nil))
+     (if (eq (%phase2-keyword-name (car tail)) key)
+         (return-from %phase2-find-keyword-arg (cadr tail)))
+     (setq tail (cddr tail))
+     (go scan)))
+
+(defun %phase2-static-keyword-value (tail key default)
+  "Return KEY's static value from TAIL and whether it is known.
+An absent keyword is known and yields DEFAULT; a present non-static value is
+unknown so callers can fall through instead of silently changing semantics."
+  (let ((node (%phase2-find-keyword-arg tail key)))
+    (if node
+        (multiple-value-bind (value known-p) (%phase2-static-value node)
+          (values (if known-p value default) known-p))
+        (values default t))))
+
+(defun %phase2-emit-initial-contents (ctx array-reg contents)
+  "Emit ASET instructions that copy literal CONTENTS into ARRAY-REG."
+  (let ((index 0)
+        (tail contents))
+    (tagbody
+     scan
+       (if (null tail) (go done))
+       (let ((idx-reg (make-register ctx))
+             (val-reg (make-register ctx)))
+         (emit ctx (make-vm-const :dst idx-reg :value index))
+         (emit ctx (make-vm-const :dst val-reg :value (car tail)))
+         (emit ctx (make-vm-aset :array-reg array-reg
+                                 :index-reg idx-reg
+                                 :val-reg val-reg)))
+       (setq index (+ index 1))
+       (setq tail (cdr tail))
+       (go scan)
+     done))
+  array-reg)
+
 ;;; ── Handler registrations ──────────────────────────────────────────────────
 
 ;; make-array: fixed-size array
 (define-phase2-handler "MAKE-ARRAY" (args result-reg ctx)
-  (let ((size-reg (compile-ast (first args) ctx)))
-    (emit ctx (make-vm-make-array :dst result-reg :size-reg size-reg
-                                  :fill-pointer nil :adjustable nil))
-    result-reg))
+  (let* ((tail (rest args))
+          (init-ast (%phase2-find-keyword-arg tail :initial-element))
+          (contents-ast (%phase2-find-keyword-arg tail :initial-contents)))
+    (multiple-value-bind (fill-pointer fill-pointer-known-p)
+        (%phase2-static-keyword-value tail :fill-pointer nil)
+      (multiple-value-bind (adjustable adjustable-known-p)
+          (%phase2-static-keyword-value tail :adjustable nil)
+        (when (and fill-pointer-known-p adjustable-known-p
+                   (or (null contents-ast) (typep contents-ast 'ast-quote)))
+          (let ((contents (and contents-ast (ast-quote-value contents-ast))))
+            (when (or (null contents-ast) (listp contents))
+              (let ((size-reg (compile-ast (first args) ctx))
+                    (init-reg (and init-ast (compile-ast init-ast ctx))))
+                (emit ctx (make-vm-make-array :dst result-reg :size-reg size-reg
+                                              :initial-element init-reg
+                                              :fill-pointer fill-pointer
+                                              :adjustable adjustable))
+                (when contents-ast
+                  (%phase2-emit-initial-contents ctx result-reg contents))
+                result-reg))))))))
 
 ;; make-adjustable-vector: array with fill-pointer
 (define-phase2-handler "MAKE-ADJUSTABLE-VECTOR" (args result-reg ctx)
@@ -38,6 +120,21 @@ Handler lambda-list: (args result-reg ctx) → result-reg-or-nil.")
     (emit ctx (make-vm-make-array :dst result-reg :size-reg size-reg
                                   :fill-pointer t :adjustable t))
     result-reg))
+
+;; rt-slot-set: bootstrap/runtime helper lowered directly to slot-write.
+(define-phase2-handler "RT-SLOT-SET" (args result-reg ctx)
+  (when (and (= (length args) 3) (typep (second args) 'ast-quote))
+    (let ((obj-reg (compile-ast (first args) ctx))
+          (value-reg (compile-ast (third args) ctx))
+          (slot-name (ast-quote-value (second args))))
+      (emit ctx (make-vm-slot-write :obj-reg obj-reg
+                                    :slot-name slot-name
+                                    :value-reg value-reg))
+      (if (eq result-reg value-reg)
+          value-reg
+          (progn
+            (emit ctx (make-vm-move :dst result-reg :src value-reg))
+            result-reg)))))
 
 ;; array-row-major-index: variadic subscripts → cons-chain
 (define-phase2-handler "ARRAY-ROW-MAJOR-INDEX" (args result-reg ctx)
@@ -79,13 +176,22 @@ Handler lambda-list: (args result-reg ctx) → result-reg-or-nil.")
 ;; make-string: optional :initial-element and/or :element-type keywords
 ;; :element-type is accepted but ignored (we only support character strings)
 (define-phase2-handler "MAKE-STRING" (args result-reg ctx)
-  (let* ((size-reg (compile-ast (first args) ctx))
-         ;; Scan keyword args for :initial-element; skip :element-type value
-         (init-char-ast
-          (loop for (k v) on (rest args) by #'cddr
-                when (and (typep k 'ast-var)
-                          (eq (ast-var-name k) :initial-element))
-                return v)))
+  (let ((size-reg (compile-ast (first args) ctx))
+        (init-char-ast nil)
+        (tail (rest args)))
+    (tagbody
+     scan-keywords
+       (when (or (null tail) (null (cdr tail)))
+         (go scan-done))
+       (let ((k (car tail))
+             (v (cadr tail)))
+         (when (and (typep k 'ast-var)
+                    (eq (ast-var-name k) :initial-element))
+           (setf init-char-ast v)
+           (go scan-done)))
+       (setf tail (cddr tail))
+       (go scan-keywords)
+     scan-done)
     (if init-char-ast
         (let ((char-reg (compile-ast init-char-ast ctx)))
           (emit ctx (make-vm-make-string :dst result-reg :src size-reg :char char-reg)))
