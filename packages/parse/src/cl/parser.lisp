@@ -96,7 +96,7 @@ Returns (values required optional rest key) where:
   required = list of symbols
   optional = list of (name default-sexp) pairs
   rest = symbol or nil
-  key = list of (name default-sexp) pairs"
+  key = list of (name default-sexp supplied-p explicit-keyword) entries"
   (let ((required nil) (optional nil) (rest-param nil) (key-params nil)
         (state :required))
     (dolist (p params)
@@ -119,11 +119,17 @@ Returns (values required optional rest key) where:
                         (setf state :post-rest))
               (:post-rest (error "Unexpected parameter after &rest: ~S" p))
               (:key      (if (listp p)
-                             (let ((name (if (listp (first p)) (second (first p)) (first p)))
-                                   (default (second p))
-                                  (supplied-p (third p)))
-                              (push (list name default supplied-p) key-params))
-                            (push (list p nil nil) key-params)))))))
+                             (let* ((head (first p))
+                                    (explicit-keyword (and (listp head) (first head)))
+                                    (name (if (listp head) (second head) head))
+                                    (default (second p))
+                                    (supplied-p (third p)))
+                               (unless (symbolp name)
+                                 (error "Invalid &key parameter variable: ~S" p))
+                               (when (and explicit-keyword (not (symbolp explicit-keyword)))
+                                 (error "Invalid &key parameter keyword: ~S" p))
+                               (push (list name default supplied-p explicit-keyword) key-params))
+                             (push (list p nil nil nil) key-params)))))))
     (values (nreverse required) (nreverse optional) rest-param (nreverse key-params))))
 
 (defun lambda-list-has-extended-p (params)

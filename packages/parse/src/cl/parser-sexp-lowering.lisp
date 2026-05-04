@@ -76,7 +76,8 @@ Returns (values required lowered-optional rest-param lowered-key)."
              (mapcar (lambda (kp)
                        (list (first kp)
                              (when (second kp) (lower-sexp-to-ast (second kp)))
-                             (third kp)))  ; FR-696: preserve supplied-p name
+                             (third kp)   ; FR-696: preserve supplied-p name
+                             (fourth kp))) ; ANSI &key: preserve explicit keyword name
                      key-params))))
 
 (defun %extract-leading-type-declarations (forms)
