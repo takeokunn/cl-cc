@@ -19,17 +19,29 @@
 
 ;;; ─── Atomic / Type Forms ─────────────────────────────────────────────────────
 
+(defun %cps-values-type-specifier-p (type)
+  "Return T when TYPE is a VALUES type specifier."
+  (and (consp type)
+       (eq (car type) 'values)))
+
 (defmethod cps-transform-ast ((node ast-quote) k)
   "Transform quoted literal — immediately calls continuation with the value."
   (%cps-funcall k (list 'quote (ast-quote-value node))))
 
 (defmethod cps-transform-ast ((node ast-the) k)
-  "Transform type declaration; the type annotation wraps the continuation result."
-  (let ((type (ast-the-type node))
-        (v    (gensym "THE")))
-    (cps-transform-ast (ast-the-value node)
-                       (%cps-lambda (list v)
-                                    (%cps-funcall k (list 'the type v))))))
+  "Transform type declaration, preserving multiple values for VALUES types."
+  (let ((type (ast-the-type node)))
+    (if (%cps-values-type-specifier-p type)
+        (let ((vals (gensym "THE-VALUES")))
+          (cps-transform-ast
+           (ast-the-value node)
+           (%cps-lambda (list '&rest vals)
+                        (list 'multiple-value-call k
+                              (list 'the type (list 'values-list vals))))))
+        (let ((v (gensym "THE")))
+          (cps-transform-ast (ast-the-value node)
+                             (%cps-lambda (list v)
+                                          (%cps-funcall k (list 'the type v))))))))
 
 ;;; ─── Multiple-Value Forms ────────────────────────────────────────────────────
 

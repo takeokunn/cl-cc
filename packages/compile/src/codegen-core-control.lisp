@@ -153,6 +153,10 @@
           (type-to-string (type-mismatch-error-expected e))
           (type-to-string (type-mismatch-error-actual e))))
 
+(defun %values-type-specifier-p (declared-spec)
+  (and (consp declared-spec)
+       (eq (car declared-spec) 'values)))
+
 (defun %emit-the-runtime-assertion (ctx value-reg declared-spec &key (emit-failure-p t))
   "Emit a runtime assertion for (the DECLARED-TYPE VALUE-REG).
 When EMIT-FAILURE-P is NIL, keep the lightweight type check but omit failure handling."
@@ -160,8 +164,11 @@ When EMIT-FAILURE-P is NIL, keep the lightweight type check but omit failure han
               (eq declared-spec 't)
               (type-unknown-p declared-spec))
     (when (> (ctx-safety ctx) 0)
-      (let ((check-reg (make-register ctx)))
-        (emit ctx (make-vm-typep :dst check-reg :src value-reg :type-name declared-spec))
+      (let ((check-reg (make-register ctx))
+            (values-type-p (%values-type-specifier-p declared-spec)))
+        (if values-type-p
+            (emit ctx (make-vm-values-typep :dst check-reg :src value-reg :type-name declared-spec))
+            (emit ctx (make-vm-typep :dst check-reg :src value-reg :type-name declared-spec)))
         (when emit-failure-p
           (let ((fail-label (make-label ctx "the_fail"))
                 (done-label (make-label ctx "the_done"))
@@ -169,9 +176,11 @@ When EMIT-FAILURE-P is NIL, keep the lightweight type check but omit failure han
             (emit ctx (make-vm-jump-zero :reg check-reg :label fail-label))
             (emit ctx (make-vm-jump :label done-label))
             (emit ctx (make-vm-label :name fail-label))
-            (emit ctx (make-vm-const :dst error-reg
-                                     :value (format nil "Type assertion failed: expected ~A"
-                                                    declared-spec)))
+            (emit ctx (make-vm-type-error-condition
+                       :dst error-reg
+                       :expected-type declared-spec
+                       :datum-reg value-reg
+                       :values-p values-type-p))
             (emit ctx (make-vm-signal-error :error-reg error-reg))
             (emit ctx (make-vm-label :name done-label)))))))
   value-reg)

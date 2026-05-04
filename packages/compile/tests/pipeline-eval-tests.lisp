@@ -6,12 +6,25 @@
 (deftest-each pipeline-the-type-assertions
   "run-string evaluates (the ...) assertions: accepts matching values, signals on mismatch."
   :cases (("fixnum"
-           "(the fixnum 42)"              42  "(the fixnum \"oops\")")
-          ("refinement"
-           "(the (refine fixnum plusp) 42)" 42 "(the (refine fixnum plusp) -1)"))
+            "(the fixnum 42)"              42  "(the fixnum \"oops\")")
+           ("refinement"
+            "(the (refine fixnum plusp) 42)" 42 "(the (refine fixnum plusp) -1)")
+           ("values"
+            "(the (values fixnum string) (values 1 \"ok\"))" 1
+            "(the (values fixnum string) (values 1 2))"))
   (ok-form expected err-form)
   (assert-= expected (run-string ok-form))
-  (assert-signals error (run-string err-form)))
+  (assert-signals type-error (run-string err-form)))
+
+(deftest pipeline-the-values-type-error-is-catchable
+  "handler-case can catch (the (values ...)) mismatches as type-error."
+  (assert-eq :ok
+              (run-string "(handler-case (the (values fixnum string) (values 1 2)) (type-error (c) (declare (ignore c)) :ok))")))
+
+(deftest pipeline-the-values-preserves-secondary-values
+  "(the (values ...)) preserves secondary values after the runtime check."
+  (assert-equal '(1 "ok")
+                (run-string "(multiple-value-bind (a b) (the (values fixnum string) (values 1 \"ok\")) (list a b))")))
 
 (deftest-each pipeline-typed-fixnum-instruction-types
   "Typed fixnum operations compile to the specialized VM instruction types."

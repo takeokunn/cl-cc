@@ -194,14 +194,16 @@
          (value-reg (cl-cc/compile:make-register ctx)))
     (cl-cc/compile::%emit-the-runtime-assertion ctx value-reg 'string :emit-failure-p nil)
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-typep))
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-type-error-condition))
     (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-signal-error))))
 
-(deftest emit-the-runtime-assertion-failure-p-emits-typep-and-signal-error
-  "%emit-the-runtime-assertion with :emit-failure-p t emits both vm-typep and vm-signal-error."
+(deftest emit-the-runtime-assertion-failure-p-emits-type-error-condition-and-signal-error
+  "%emit-the-runtime-assertion with :emit-failure-p t emits vm-typep, vm-type-error-condition, and vm-signal-error."
   (let* ((ctx (make-codegen-ctx))
          (value-reg (cl-cc/compile:make-register ctx)))
     (cl-cc/compile::%emit-the-runtime-assertion ctx value-reg 'integer :emit-failure-p t)
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-typep))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-type-error-condition))
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-signal-error))))
 
 ;;; ─── compile-ast: ast-the ────────────────────────────────────────────────────
