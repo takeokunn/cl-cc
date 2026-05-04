@@ -146,6 +146,14 @@
   (src-regs nil :reader vm-src-regs)
   (:sexp-tag :values))
 
+(define-vm-instruction vm-values-typep (vm-instruction)
+  "Check current multiple values against a VALUES type specifier."
+  (dst nil :reader vm-dst)
+  (src nil :reader vm-src)
+  (type-name nil :reader vm-type-name)
+  (:sexp-tag :values-typep)
+  (:sexp-slots dst src type-name))
+
 (define-vm-instruction vm-mv-bind (vm-instruction)
   "Bind multiple values from values-list to registers."
   (dst-regs nil :reader vm-dst-regs)

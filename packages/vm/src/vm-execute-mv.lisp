@@ -42,6 +42,73 @@
     (vm-reg-set state (vm-dst inst) (if all-values (first all-values) nil))
     (values (1+ pc) nil nil)))
 
+(defun %vm-values-type-parts (type-spec)
+  "Split a VALUES type specifier into required, optional, and rest parts."
+  (let ((required nil)
+        (optional nil)
+        (rest-type nil)
+        (state :required)
+        (xs (cdr type-spec)))
+    (tagbody
+     scan
+       (if (null xs) (go done))
+       (let ((entry (car xs)))
+         (cond
+           ((eq entry '&optional) (setf state :optional))
+           ((eq entry '&rest)
+            (setf state :rest)
+            (when (cdr xs)
+              (setf rest-type (cadr xs))
+              (setf xs (cdr xs))))
+           ((eq entry '&allow-other-keys) nil)
+           ((eq state :optional) (push entry optional))
+           ((eq state :rest) nil)
+           (t (push entry required))))
+       (setf xs (cdr xs))
+       (go scan)
+     done)
+    (values (nreverse required) (nreverse optional) rest-type)))
+
+(defun vm-values-typep-check (values-list type-spec)
+  "Return T when VALUES-LIST satisfies a VALUES type specifier."
+  (if (and (consp type-spec) (eq (car type-spec) 'values))
+      (multiple-value-bind (required optional rest-type)
+          (%vm-values-type-parts type-spec)
+        (let ((vals values-list))
+          (tagbody
+           required
+             (if (null required) (go optional))
+             (if (null vals) (return-from vm-values-typep-check nil))
+             (if (not (vm-typep-check (car vals) (car required)))
+                 (return-from vm-values-typep-check nil))
+             (setf required (cdr required))
+             (setf vals (cdr vals))
+             (go required)
+           optional
+             (if (or (null optional) (null vals)) (go rest))
+             (if (not (vm-typep-check (car vals) (car optional)))
+                 (return-from vm-values-typep-check nil))
+             (setf optional (cdr optional))
+             (setf vals (cdr vals))
+             (go optional)
+           rest
+             (if rest-type
+                 (progn
+                   (dolist (value vals)
+                     (unless (vm-typep-check value rest-type)
+                       (return-from vm-values-typep-check nil)))
+                   (return-from vm-values-typep-check t))
+                 (return-from vm-values-typep-check (null vals))))))
+      t))
+
+(defmethod execute-instruction ((inst vm-values-typep) state pc labels)
+  (declare (ignore labels))
+  (let* ((values-list (or (vm-values-list state)
+                          (list (vm-reg-get state (vm-src inst)))))
+         (result (if (vm-values-typep-check values-list (vm-type-name inst)) 1 0)))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
 (defmethod execute-instruction ((inst vm-mv-bind) state pc labels)
   (declare (ignore labels))
   (let ((vals (vm-values-list state))

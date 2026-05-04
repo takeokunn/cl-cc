@@ -218,6 +218,10 @@
   (list (vm-handler-result-reg inst)))
 (defmethod instruction-uses ((inst vm-signal-error))
   (list (vm-error-reg inst)))
+(defmethod instruction-defs ((inst vm-type-error-condition))
+  (list (vm-dst inst)))
+(defmethod instruction-uses ((inst vm-type-error-condition))
+  (list (vm-datum-reg inst)))
 ;; Catch/throw instructions
 (defmethod instruction-defs ((inst vm-establish-catch))
   (list (vm-catch-result-reg inst)))
