@@ -82,10 +82,10 @@
    #:ast-slot-def #:make-ast-slot-def #:ast-slot-def-p
    #:ast-slot-name #:ast-slot-initarg #:ast-slot-initform
    #:ast-slot-reader #:ast-slot-writer #:ast-slot-accessor
-   #:ast-slot-type #:ast-slot-allocation
-   #:ast-defclass #:make-ast-defclass #:ast-defclass-p
-   #:ast-defclass-name #:ast-defclass-superclasses
-   #:ast-defclass-slots #:ast-defclass-default-initargs
+    #:ast-slot-type #:ast-slot-allocation
+    #:ast-defclass #:make-ast-defclass #:ast-defclass-p
+    #:ast-defclass-name #:ast-defclass-superclasses
+    #:ast-defclass-slots #:ast-defclass-default-initargs #:ast-defclass-metaclass
    #:ast-defgeneric #:make-ast-defgeneric #:ast-defgeneric-p
    #:ast-defgeneric-name #:ast-defgeneric-params #:ast-defgeneric-combination
    #:ast-defmethod #:make-ast-defmethod #:ast-defmethod-p

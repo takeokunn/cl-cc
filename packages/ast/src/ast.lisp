@@ -212,7 +212,8 @@
   (name nil)
   (superclasses nil :type list)
   (slots nil :type list)
-  (default-initargs nil :type list))
+  (default-initargs nil :type list)
+  (metaclass nil))
 
 (defstruct (ast-defgeneric (:include ast-node))
   "Generic function definition AST node (defgeneric)."
