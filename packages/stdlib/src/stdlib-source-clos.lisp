@@ -52,12 +52,39 @@
        (declare (ignore previous))
        (apply #'reinitialize-instance current initargs))"
 
-    "(defgeneric update-instance-for-changed-class (instance added-slots discarded-slots plist &rest initargs))"
-    "(defmethod update-instance-for-changed-class ((instance t) added-slots discarded-slots plist &rest initargs)
-       (declare (ignore added-slots discarded-slots plist))
-       (apply #'reinitialize-instance instance initargs))"
+     "(defgeneric update-instance-for-changed-class (instance added-slots discarded-slots plist &rest initargs))"
+     "(defmethod update-instance-for-changed-class ((instance t) added-slots discarded-slots plist &rest initargs)
+        (declare (ignore added-slots discarded-slots plist))
+        (apply #'reinitialize-instance instance initargs))"
 
-    "(defgeneric compute-applicable-methods (gf args))"
+    "(defun update-instance-for-redefined-class (instance added-slots discarded-slots plist &rest initargs)
+       (declare (ignore discarded-slots plist))
+       (let ((class (gethash :__class__ instance))
+             (pairs initargs)
+             (key nil)
+             (value nil)
+             (binding nil)
+             (slot nil))
+         (tagbody
+          start
+            (if (null pairs) (go done))
+            (if (null (cdr pairs)) (go done))
+            (setq key (car pairs))
+            (setq value (cadr pairs))
+            (setq binding (assoc key (gethash :__initargs__ class)))
+            (if (null binding) (go next))
+            (setq slot (cdr binding))
+            (if (or (null added-slots)
+                    (eq added-slots t)
+                    (member slot added-slots))
+                (setf (gethash slot instance) value))
+          next
+            (setq pairs (cddr pairs))
+            (go start)
+          done)
+         instance))"
+
+     "(defgeneric compute-applicable-methods (gf args))"
     "(defmethod compute-applicable-methods ((gf t) args)
        (declare (ignore args))
        nil)"

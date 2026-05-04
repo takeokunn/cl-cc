@@ -20,8 +20,10 @@
   (slot-names nil :reader vm-slot-names)
   (slot-initargs nil :reader vm-slot-initargs)
   (slot-initform-regs nil :reader vm-slot-initform-regs)
+  (slot-types nil :reader vm-slot-types)
   (default-initarg-regs nil :reader vm-default-initarg-regs)
   (class-slots nil :reader vm-class-slots)
+  (metaclass-reg nil :reader vm-metaclass-reg)
   (:sexp-tag :class-def))
 
 (define-vm-instruction vm-make-obj (vm-instruction)

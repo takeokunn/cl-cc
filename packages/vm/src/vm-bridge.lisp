@@ -106,23 +106,33 @@ Accepts symbols/functions for EQ/EQL/EQUAL/EQUALP and falls back to EQL."
   "Build a lightweight slot-definition object for SLOT-NAME in CLASS."
   (let ((slot (make-hash-table :test #'eq))
         (initforms (and (hash-table-p class) (gethash :__initforms__ class)))
+        (slot-types (and (hash-table-p class) (gethash :__slot-types__ class)))
         (class-slots (and (hash-table-p class) (gethash :__class-slots__ class))))
     (setf (gethash :name slot) slot-name)
     (let ((entry (assoc slot-name initforms)))
       (when entry
         (setf (gethash :initform slot) (cdr entry))))
     (setf (gethash :initargs slot) (%class-slot-initargs-for-slot class slot-name))
+    (setf (gethash :type slot) (or (cdr (assoc slot-name slot-types)) t))
     (setf (gethash :allocation slot)
           (if (member slot-name class-slots :test #'eq) :class :instance))
     slot))
 
-(defun %class-slot-definitions (class)
-  "Return public slot-definition objects for CLASS."
-  (let ((slots (and (hash-table-p class) (gethash :__slots__ class))))
+(defun %class-slot-definitions-from-key (class key)
+  "Return public slot-definition objects for slot-name list stored at KEY."
+  (let ((slots (and (hash-table-p class) (gethash key class))))
     (when slots
       (mapcar (lambda (slot-name)
-                (%class-slot-metadata class slot-name))
+                 (%class-slot-metadata class slot-name))
               slots))))
+
+(defun %class-slot-definitions (class &optional (key :__slots__))
+  "Return public slot-definition objects for CLASS using metadata list KEY."
+  (%class-slot-definitions-from-key class key))
+
+(defun %class-direct-slot-definitions (class)
+  "Return public direct slot-definition objects for CLASS."
+  (%class-slot-definitions-from-key class :__direct-slots__))
 
 (defun slot-definition-name (slot)
   "Return the slot-definition name for SLOT.
@@ -145,11 +155,42 @@ representations may use hash tables with structured metadata."
       (gethash :initargs slot)
       nil))
 
+(defun slot-definition-type (slot)
+  "Return the declared slot type for SLOT, defaulting to T."
+  (if (hash-table-p slot)
+      (or (gethash :type slot) t)
+      t))
+
 (defun slot-definition-allocation (slot)
   "Return the allocation mode for SLOT, defaulting to :INSTANCE."
   (if (hash-table-p slot)
       (or (gethash :allocation slot) :instance)
       :instance))
+
+(defun slot-definition-initfunction (slot)
+  "Return a zero-argument function yielding SLOT's initform value."
+  (let ((initform (slot-definition-initform slot)))
+    (lambda () initform)))
+
+(defun class-metaclass (class)
+  "Return CLASS metaclass metadata, defaulting to STANDARD-CLASS."
+  (if (hash-table-p class)
+      (or (gethash :__metaclass__ class) 'standard-class)
+      'standard-class))
+
+(defun compute-effective-slot-definition (class slot-name &optional direct-slots)
+  "Return a lightweight effective slot-definition for SLOT-NAME in CLASS."
+  (or (and (hash-table-p class)
+           (member slot-name (gethash :__slots__ class) :test #'eq)
+           (%class-slot-metadata class slot-name))
+      (find slot-name direct-slots :key #'slot-definition-name :test #'eq)))
+
+(defun %make-instances-obsolete (class)
+  "Mark CLASS metadata obsolete. Existing VM instances migrate when possible."
+  (let ((class-ht (if (symbolp class) (find-class class nil) class)))
+    (when (hash-table-p class-ht)
+      (setf (gethash :__obsolete__ class-ht) t))
+    class-ht))
 
 (defun generic-function-methods (gf)
   "Return the registered method objects for GF."
@@ -238,13 +279,18 @@ representations may use hash tables with structured metadata."
                  (%all-symbols . ,#'%all-symbols)
                  (compile-file-pathname . ,#'compile-file-pathname)
                  (pathname-name . ,#'pathname-name)
-                 (pathname-type . ,#'pathname-type)
-                 (%class-slot-definitions . ,#'%class-slot-definitions)
-                 (slot-definition-name . ,#'slot-definition-name)
-                 (slot-definition-initform . ,#'slot-definition-initform)
-                 (slot-definition-initargs . ,#'slot-definition-initargs)
-                 (slot-definition-allocation . ,#'slot-definition-allocation)
-                 (generic-function-methods . ,#'generic-function-methods)
+                  (pathname-type . ,#'pathname-type)
+                  (%class-slot-definitions . ,#'%class-slot-definitions)
+                  (slot-definition-name . ,#'slot-definition-name)
+                  (slot-definition-initform . ,#'slot-definition-initform)
+                  (slot-definition-initfunction . ,#'slot-definition-initfunction)
+                  (slot-definition-initargs . ,#'slot-definition-initargs)
+                  (slot-definition-type . ,#'slot-definition-type)
+                  (slot-definition-allocation . ,#'slot-definition-allocation)
+                  (class-metaclass . ,#'class-metaclass)
+                  (compute-effective-slot-definition . ,#'compute-effective-slot-definition)
+                  (make-instances-obsolete . ,#'%make-instances-obsolete)
+                  (generic-function-methods . ,#'generic-function-methods)
                  (generic-function-method-combination . ,#'generic-function-method-combination)
                  (rt-plist-put . ,#'rt-plist-put)
                  (%get-documentation . ,#'%get-documentation)))
