@@ -10,12 +10,13 @@
 (in-suite macros-basic-check-type-suite)
 
 (deftest check-type-expansion
-  "CHECK-TYPE: UNLESS with typep test, body signals type-error via make-condition."
+  "CHECK-TYPE: TYPEP guard signals TYPE-ERROR inside a STORE-VALUE restart."
   (let* ((result (our-macroexpand-1 '(check-type x integer)))
-         (error-form (caddr result))
-         (make-cond (cadr error-form)))
-    (assert-eq 'unless (car result))
-    (assert-equal '(typep x 'integer) (cadr result))
-    (assert-eq 'error (car error-form))
-    (assert-eq 'cl-cc/expand::%make-type-error (car make-cond))
-    (assert-equal '(quote integer) (third make-cond))))
+         (guard-form (third result))
+         (restart-form (third guard-form))
+         (restart-clause (third restart-form)))
+    (assert-eq 'tagbody (car result))
+    (assert-eq 'unless (car guard-form))
+    (assert-equal '(typep x 'integer) (second guard-form))
+    (assert-eq 'restart-case (car restart-form))
+    (assert-eq 'store-value (car restart-clause))))

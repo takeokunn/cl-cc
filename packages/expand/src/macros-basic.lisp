@@ -8,13 +8,27 @@
   "Construct a TYPE-ERROR condition with DATUM and EXPECTED-TYPE."
   (make-condition 'type-error :datum datum :expected-type expected-type))
 
+(defun %type-error-form (datum-form expected-type-form)
+  "Return target code for a lightweight TYPE-ERROR condition object."
+  `(list 'type-error :datum ,datum-form :expected-type ,expected-type-form))
+
 (register-macro 'check-type
   (lambda (form env)
     (declare (ignore env))
     (let ((place (second form))
-          (type (third form)))
-      (list 'unless (list 'typep place (list 'quote type))
-            (list 'error (list '%make-type-error place (list 'quote type)))))))
+          (type (third form))
+          (retry-tag (gensym "CHECK-TYPE-RETRY"))
+          (condition-var (gensym "CONDITION")))
+      `(tagbody
+         ,retry-tag
+         (unless (typep ,place ',type)
+           (restart-case
+               (let ((,condition-var ,(%type-error-form place `',type)))
+                 (signal ,condition-var)
+                 (error ,condition-var))
+             (store-value (new-value)
+               (setf ,place new-value)
+               (go ,retry-tag))))))))
 
 ;; SETF macro (simplified)
 (our-defmacro setf (place value)

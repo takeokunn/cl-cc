@@ -97,6 +97,16 @@ When TAIL-P is true, replace the current leaf frame instead of pushing a new one
    '(*documentation-table* nil))
   "Initial bindings for standard ANSI CL global variables in each vm-state.")
 
+(defparameter *vm-package-initial-globals*
+  '(("CL-CC/EXPAND" . "*%CONDITION-HANDLERS*")
+    ("CL-CC/EXPAND" . "*%ACTIVE-RESTARTS*"))
+  "Package-qualified globals emitted by expander macros and initialized per VM state.")
+
+(defun %vm-initialize-package-global (globals package-name symbol-name value)
+  (let ((pkg (find-package package-name)))
+    (when pkg
+      (setf (gethash (intern symbol-name pkg) globals) value))))
+
 ;;; CL-level declaration so (boundp '*documentation-table*) is T in the compiler
 ;;; Initialized as a real hash-table so the defun expander can gethash/setf into it
 (defvar *documentation-table* (make-hash-table :test #'equal))
@@ -110,7 +120,9 @@ When TAIL-P is true, replace the current leaf frame instead of pushing a new one
               (cond
                 ((functionp value) (funcall value))
                 ((and (symbolp value) (boundp value)) (symbol-value value))
-                (t value)))))))
+                (t value)))))
+    (dolist (entry *vm-package-initial-globals*)
+      (%vm-initialize-package-global gv (car entry) (cdr entry) nil))))
 
 ;;; ─── VM Heap Operations ──────────────────────────────────────────────────────
 
