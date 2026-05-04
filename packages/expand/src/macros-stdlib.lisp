@@ -121,7 +121,7 @@ ANSI: uses symbol-macrolet so setf on slot names writes back to the object."
        (case ,key-var
          ,@cases
          (otherwise
-           (error (%make-type-error ,key-var '(member ,@keys))))))))
+           (error ,(%type-error-form key-var `'(member ,@keys))))))))
 
 ;; ETYPECASE — signal type-error when no clause matches
 (our-defmacro etypecase (keyform &body cases)
@@ -132,29 +132,52 @@ ANSI: uses symbol-macrolet so setf on slot names writes back to the object."
        (typecase ,key-var
          ,@cases
          (otherwise
-           (error (%make-type-error ,key-var '(or ,@types))))))))
+           (error ,(%type-error-form key-var `'(or ,@types))))))))
 
-;; CCASE — correctable case: like ecase but signals continuable type-error (FR-354)
-;; Without full restart system, behaves like ecase (signals type-error).
+;; CCASE — correctable case with STORE-VALUE restart (FR-354)
 (our-defmacro ccase (keyform &body cases)
   "Like CASE but signals a correctable TYPE-ERROR if no case matches."
   (let ((key-var (gensym "KEY"))
+        (condition-var (gensym "CONDITION"))
+        (retry-tag (gensym "CCASE-RETRY"))
         (keys (mapcan (lambda (c) (let ((k (car c)))
-                                    (if (listp k) (copy-list k) (list k))))
+                                     (if (listp k) (copy-list k) (list k))))
                       cases)))
-    `(let ((,key-var ,keyform))
-       (case ,key-var
-         ,@cases
-         (otherwise
-           (error (%make-type-error ,key-var '(member ,@keys))))))))
+    `(block nil
+       (tagbody
+         ,retry-tag
+         (let ((,key-var ,keyform))
+           (return
+             (case ,key-var
+               ,@cases
+               (otherwise
+                 (restart-case
+                    (let ((,condition-var ,(%type-error-form key-var `'(member ,@keys))))
+                       (signal ,condition-var)
+                       (error ,condition-var))
+                   (store-value (new-value)
+                     (setf ,keyform new-value)
+                     (go ,retry-tag)))))))))))
 
-;; CTYPECASE — correctable typecase: like etypecase but signals continuable type-error (FR-354)
+;; CTYPECASE — correctable typecase with STORE-VALUE restart (FR-354)
 (our-defmacro ctypecase (keyform &body cases)
   "Like TYPECASE but signals a correctable TYPE-ERROR if no case matches."
   (let ((key-var (gensym "KEY"))
+        (condition-var (gensym "CONDITION"))
+        (retry-tag (gensym "CTYPECASE-RETRY"))
         (types (mapcar #'car cases)))
-    `(let ((,key-var ,keyform))
-       (typecase ,key-var
-         ,@cases
-         (otherwise
-           (error (%make-type-error ,key-var '(or ,@types))))))))
+    `(block nil
+       (tagbody
+         ,retry-tag
+         (let ((,key-var ,keyform))
+           (return
+             (typecase ,key-var
+               ,@cases
+               (otherwise
+                 (restart-case
+                    (let ((,condition-var ,(%type-error-form key-var `'(or ,@types))))
+                       (signal ,condition-var)
+                       (error ,condition-var))
+                   (store-value (new-value)
+                     (setf ,keyform new-value)
+                     (go ,retry-tag)))))))))))

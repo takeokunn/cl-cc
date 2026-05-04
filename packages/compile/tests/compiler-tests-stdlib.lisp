@@ -33,6 +33,59 @@
   "hash-table-keys returns list of keys"
   (assert-= 2 (run-string " (let ((ht (make-hash-table))) (setf (gethash :x ht) 10) (setf (gethash :y ht) 20) (length (hash-table-keys ht)))")))
 
+(deftest-each compile-clos-mop-introspection
+  "CLOS MOP helpers expose direct/effective slots, slot metadata, metaclass, and redefinition migration."
+  :tags '(:ansi-gap :mop)
+  :cases (("direct-vs-effective-slots"
+           '((b) (a b))
+           "(progn
+              (defclass mop-base () ((a :initarg :a)))
+              (defclass mop-child (mop-base) ((b :initarg :b)))
+              (list (mapcar #'slot-definition-name (class-direct-slots (find-class 'mop-child)))
+                    (mapcar #'slot-definition-name (class-slots (find-class 'mop-child)))))")
+          ("slot-type-initfunction-metaclass"
+           '(x integer 7 standard-class)
+           "(progn
+              (defclass typed-mop () ((x :initarg :x :initform 7 :type integer)) (:metaclass standard-class))
+              (let ((slot (car (class-slots (find-class 'typed-mop)))))
+                (list (slot-definition-name slot)
+                      (slot-definition-type slot)
+                      (funcall (slot-definition-initfunction slot))
+                      (class-metaclass (find-class 'typed-mop)))))")
+          ("compute-effective-slot-definition"
+           'integer
+           "(progn
+              (defclass effective-mop () ((x :initarg :x :type integer)))
+              (slot-definition-type
+               (compute-effective-slot-definition
+                (find-class 'effective-mop)
+                'x
+                (class-direct-slots (find-class 'effective-mop)))))")
+          ("redefined-class-lazy-migration"
+           nil
+           "(let ((obj nil))
+              (defclass redef-mop () ((x :initarg :x)))
+              (setq obj (make-instance 'redef-mop :x 1))
+              (defclass redef-mop () ((y :initarg :y)))
+              (slot-value obj 'y))")
+          ("redefined-class-slot-boundp-migration"
+           t
+           "(let ((obj nil))
+              (defclass boundp-redef-mop () ((x :initarg :x)))
+              (setq obj (make-instance 'boundp-redef-mop :x 1))
+              (defclass boundp-redef-mop () ((y :initarg :y)))
+              (slot-boundp obj 'y))")
+          ("redefined-class-slot-makunbound-migration"
+           nil
+           "(let ((obj nil))
+              (defclass makun-redef-mop () ((x :initarg :x)))
+              (setq obj (make-instance 'makun-redef-mop :x 1))
+              (defclass makun-redef-mop () ((y :initarg :y)))
+              (slot-makunbound obj 'y)
+              (slot-boundp obj 'y))"))
+  (expected form)
+  (assert-true (equal expected (run-string form :stdlib t))))
+
 ;;; Defstruct Tests
 
 (deftest-each compile-defstruct
@@ -154,6 +207,20 @@
              (assert-signals error (run-string form)))))
   (form verify)
   (funcall verify form))
+
+(deftest-each compile-correctable-type-restarts
+  "check-type, ccase, and ctypecase honor STORE-VALUE restarts."
+  :cases (("check-type-store-value"
+           7
+           "(let ((x \"bad\")) (handler-bind ((type-error (lambda (c) (declare (ignore c)) (store-value 7)))) (check-type x integer) x))")
+          ("ccase-store-value"
+           11
+           "(let ((x 'bad)) (handler-bind ((type-error (lambda (c) (declare (ignore c)) (store-value 'ok)))) (ccase x (ok 11))))")
+          ("ctypecase-store-value"
+           42
+           "(let ((x \"bad\")) (handler-bind ((type-error (lambda (c) (declare (ignore c)) (store-value 42)))) (ctypecase x (integer x))))"))
+  (expected form)
+  (assert-= expected (run-string form :stdlib t)))
 
 ;;; Eval-When Tests
 
