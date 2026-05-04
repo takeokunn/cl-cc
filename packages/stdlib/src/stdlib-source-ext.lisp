@@ -217,7 +217,11 @@
 
 ;;; ── ANSI Base Classes (FR-528) ──────────────────────────────────────
     "(defclass standard-object () ())"
+    "(defclass standard-class (standard-object) ())"
     "(defclass structure-object () ())"
+    "(defclass method-combination (standard-object)
+       ((name :initarg :name :reader method-combination-name)))"
+    "(defclass funcallable-standard-class (standard-class) ())"
 
 ;;; ── Setf Expansion (FR-355) ────────────────────────────────────────
 

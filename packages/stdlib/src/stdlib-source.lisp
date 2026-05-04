@@ -33,13 +33,40 @@
 
     ;; ── FR-523〜528: MOP introspection ──────────────────────────────────────
     ;; Class hash tables store :__superclasses__, :__slots__, :__name__, etc.
+    "(defun %class-slot-initargs-for-slot (class slot-name)
+  (let ((result nil)
+        (imap (and (hash-table-p class) (gethash :__initargs__ class))))
+    (dolist (entry imap (nreverse result))
+      (when (eq (cdr entry) slot-name)
+        (push (car entry) result)))))"
+
+    "(defun %class-slot-metadata (class slot-name)
+  (let ((slot (make-hash-table))
+        (initforms (and (hash-table-p class) (gethash :__initforms__ class)))
+        (slot-types (and (hash-table-p class) (gethash :__slot-types__ class)))
+        (class-slots (and (hash-table-p class) (gethash :__class-slots__ class))))
+    (setf (gethash :name slot) slot-name)
+    (let ((entry (assoc slot-name initforms)))
+      (when entry
+        (setf (gethash :initform slot) (cdr entry))))
+    (setf (gethash :initargs slot) (%class-slot-initargs-for-slot class slot-name))
+    (setf (gethash :type slot) (or (cdr (assoc slot-name slot-types)) t))
+    (setf (gethash :allocation slot)
+          (if (member slot-name class-slots) :class :instance))
+    slot))"
+
+    "(defun %class-slot-definitions (class &optional (key :__slots__))
+  (let ((slots (and (hash-table-p class) (gethash key class))))
+    (when slots
+      (mapcar (lambda (slot-name) (%class-slot-metadata class slot-name)) slots))))"
+
     "(defun class-direct-superclasses (class)
   (when (hash-table-p class)
     (gethash :__superclasses__ class)))"
 
     "(defun class-direct-slots (class)
   (when (hash-table-p class)
-    (%class-slot-definitions class)))"
+    (%class-slot-definitions class :__direct-slots__)))"
 
     "(defun class-slots (class)
   (when (hash-table-p class)
@@ -52,7 +79,7 @@
     "(defun generic-function-methods (gf)
   (let ((methods-ht (and (hash-table-p gf) (gethash :__methods__ gf))))
     (when methods-ht
-      (hash-table-values methods-ht)))"
+      (hash-table-values methods-ht))))"
 
     "(defun generic-function-method-combination (gf)
   (if (and (hash-table-p gf) (gethash :__method-combination__ gf))
@@ -75,10 +102,38 @@
       (gethash :initargs slot)
       nil))"
 
+    "(defun slot-definition-type (slot)
+  (if (hash-table-p slot)
+      (or (gethash :type slot) t)
+      t))"
+
+    "(defun slot-definition-initfunction (slot)
+  (let ((initform (slot-definition-initform slot)))
+    (lambda () initform)))"
+
     "(defun slot-definition-allocation (slot)
   (if (hash-table-p slot)
       (or (gethash :allocation slot) :instance)
       :instance))"
+
+    "(defun class-metaclass (class)
+  (if (hash-table-p class)
+      (or (gethash :__metaclass__ class) 'standard-class)
+      'standard-class))"
+
+    "(defun compute-effective-slot-definition (class slot-name &optional direct-slots)
+  (or (and (hash-table-p class)
+           (member slot-name (gethash :__slots__ class))
+           (first (remove-if-not
+                   (lambda (slot) (eq (slot-definition-name slot) slot-name))
+                   (class-slots class))))
+      (find slot-name direct-slots :key #'slot-definition-name)))"
+
+    "(defun make-instances-obsolete (class)
+  (let ((class-object (if (symbolp class) (find-class class) class)))
+    (when (hash-table-p class-object)
+      (setf (gethash :__obsolete__ class-object) t))
+    class-object))"
 
     "(defun class-precedence-list (class)
   (when (hash-table-p class)

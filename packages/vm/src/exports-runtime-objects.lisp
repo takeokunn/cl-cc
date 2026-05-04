@@ -7,9 +7,10 @@
  '(vm-class-def
    vm-class-name-sym
    vm-superclasses
-   vm-slot-names
-   vm-slot-initargs
-   vm-class-slots
+    vm-slot-names
+    vm-slot-initargs
+    vm-slot-types
+    vm-class-slots
    vm-make-obj
    vm-class-reg
    vm-initarg-regs
@@ -59,15 +60,20 @@
    vm-closure-key-params
    vm-closure-rest-param
    resolve-hash-test
-   hash-table-values
-   %class-slot-initargs-for-slot
-   %class-slot-metadata
-   %class-slot-definitions
-   slot-definition-name
-   slot-definition-initform
-   slot-definition-initargs
-   slot-definition-allocation
-   generic-function-methods
+    hash-table-values
+    %class-slot-initargs-for-slot
+    %class-slot-metadata
+    %class-slot-definitions
+    slot-definition-name
+    slot-definition-initform
+    slot-definition-initfunction
+    slot-definition-initargs
+    slot-definition-type
+    slot-definition-allocation
+    class-metaclass
+    compute-effective-slot-definition
+    %make-instances-obsolete
+    generic-function-methods
    generic-function-method-combination
    %package-symbols
    %package-external-symbols
