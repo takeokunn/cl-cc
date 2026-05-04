@@ -118,7 +118,11 @@
           ("reorder"       7  "(defun key-ord (&key x y) (+ x y)) (key-ord :y 4 :x 3)")
           ("four-keys"   '(1 2 3 4) "(defun key-many (&key a b c d) (list a b c d)) (key-many :d 4 :b 2 :a 1 :c 3)")
           ("four-defaults" '(1 20 3 4) "(defun key-many-def (&key (a 1) (b 2) (c 3) (d 4)) (list a b c d)) (key-many-def :b 20 :d 4)")
-          ("with-required" 30 "(defun rk (a &key (b 0)) (+ a b)) (rk 10 :b 20)"))
+          ("with-required" 30 "(defun rk (a &key (b 0)) (+ a b)) (rk 10 :b 20)")
+          ("explicit-keyword" '(42 t)
+           "(defun key-explicit (&key ((:external internal) 10 supplied)) (list internal supplied)) (key-explicit :external 42)")
+          ("explicit-keyword-default" '(10 nil)
+           "(defun key-explicit-default (&key ((:external internal) 10 supplied)) (list internal supplied)) (key-explicit-default)"))
   )
 
 ;; lambda with extended params

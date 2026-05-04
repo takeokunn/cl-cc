@@ -45,7 +45,7 @@ When the VM sees this as the default, the actual default is computed inline.")
 
 (defun allocate-defaulting-params (ctx params make-entry)
   "Allocate registers for PARAMS with optional defaults.
-MAKE-ENTRY is called as (name reg default-val) and returns the closure-data entry.
+MAKE-ENTRY is called as (param name reg default-val) and returns the closure-data entry.
 Returns (values closure-data bindings non-constant-defaults supplied-p-entries)."
   (let ((closure-data nil) (bindings nil) (non-constant-defaults nil)
         (supplied-p-entries nil))
@@ -58,9 +58,9 @@ Returns (values closure-data bindings non-constant-defaults supplied-p-entries).
             (if default-ast (extract-constant-value default-ast) (values nil t))
           (if (and default-ast (not is-constant))
               (progn
-                (push (funcall make-entry name reg *non-constant-default-sentinel*) closure-data)
+                (push (funcall make-entry param name reg *non-constant-default-sentinel*) closure-data)
                 (push (cons reg default-ast) non-constant-defaults))
-              (push (funcall make-entry name reg default-val) closure-data)))
+              (push (funcall make-entry param name reg default-val) closure-data)))
         (push (cons name reg) bindings)
         ;; FR-696: allocate register for supplied-p variable
         (when supplied-p-name
@@ -81,7 +81,8 @@ Returns (values opt-closure-data rest-reg key-closure-data opt-bindings
     (when optional-params
       (multiple-value-bind (cd binds ncds sp-entries)
           (allocate-defaulting-params ctx optional-params
-                                      (lambda (name reg val)
+                                      (lambda (param name reg val)
+                                        (declare (ignore param))
                                         (declare (ignore name)) (list reg val)))
         (setf opt-closure-data cd  opt-bindings binds)
         (setf non-constant-defaults (nconc non-constant-defaults ncds))
@@ -92,8 +93,10 @@ Returns (values opt-closure-data rest-reg key-closure-data opt-bindings
     (when key-params
       (multiple-value-bind (cd binds ncds sp-entries)
           (allocate-defaulting-params ctx key-params
-                                      (lambda (name reg val)
-                                        (list (intern (symbol-name name) "KEYWORD") reg val)))
+                                      (lambda (param name reg val)
+                                        (let ((keyword (or (fourth param)
+                                                           (intern (symbol-name name) "KEYWORD"))))
+                                          (list keyword reg val))))
         (setf key-closure-data cd  key-bindings binds)
         (setf non-constant-defaults (nconc non-constant-defaults ncds))
         (setf supplied-p-entries (nconc supplied-p-entries sp-entries))))
