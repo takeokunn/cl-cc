@@ -37,11 +37,12 @@
    vm-call
    vm-tail-call
    vm-ret
-   vm-func-ref
-   vm-push
-   vm-pop
-   vm-values
-   vm-spread-values
+    vm-func-ref
+    vm-push
+    vm-pop
+    vm-values
+    vm-values-typep
+    vm-spread-values
    vm-mv-bind
    vm-dst-regs
    vm-lcm
@@ -104,16 +105,20 @@
    vm-global-name
    vm-global-vars
    vm-values-list
-   vm-establish-handler
-   vm-remove-handler
-   vm-signal-error
-   vm-sync-handler-regs
-   vm-handler-label
-   vm-handler-result-reg
-   vm-error-type
-   vm-error-reg
-   vm-establish-catch
-   vm-throw
+    vm-establish-handler
+    vm-remove-handler
+    vm-signal-error
+    vm-type-error-condition
+    vm-sync-handler-regs
+    vm-handler-label
+    vm-handler-result-reg
+    vm-error-type
+    vm-error-reg
+    vm-expected-type
+    vm-datum-reg
+    vm-type-error-values-p
+    vm-establish-catch
+    vm-throw
    vm-catch-tag-reg
    vm-catch-handler-label
    vm-catch-result-reg
@@ -148,10 +153,10 @@
    vm-move-dst
    vm-move-src
    vm-lbl-name
-   vm-gethash-default
-   vm-make-array-fill-pointer
-   vm-make-hash-table-test
-   vm-typep-type-name
+    vm-gethash-default
+    vm-make-array-fill-pointer
+    vm-make-hash-table-test
+    vm-typep-type-name
    vm-call-next-method-args-reg
    vm-make-string-char
    vm-closure-rest-stack-alloc-p

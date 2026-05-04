@@ -39,6 +39,16 @@ unless a handler explicitly handles them."
   (:sexp-tag :warn)
   (:sexp-slots condition-reg))
 
+
+(define-vm-instruction vm-type-error-condition (vm-instruction)
+  "Construct a vm-type-error condition in DST."
+  (dst nil :reader vm-dst)
+  (expected-type nil :reader vm-expected-type)
+  (datum-reg nil :reader vm-datum-reg)
+  (values-p nil :reader vm-type-error-values-p)
+  (:sexp-tag :type-error-condition)
+  (:sexp-slots dst expected-type datum-reg values-p))
+
 ;;; ─── VM Handler Management Instructions ─────────────────────────────────────
 
 (define-vm-instruction vm-push-handler (vm-instruction)
@@ -139,6 +149,17 @@ Returns (values handler-found-p handler-info) or signals error."
     (vm-signal-condition condition state)
     ;; Output warning message if no handler handled it
     (format (vm-output-stream state) "; VM Warning: ~A~%" condition)
+    (values (1+ pc) nil nil)))
+
+
+(defmethod execute-instruction ((inst vm-type-error-condition) state pc labels)
+  (declare (ignore labels))
+  (let* ((datum (if (vm-type-error-values-p inst)
+                    (or (vm-values-list state)
+                        (list (vm-reg-get state (vm-datum-reg inst))))
+                    (vm-reg-get state (vm-datum-reg inst))))
+         (condition (make-vm-type-error state (vm-expected-type inst) datum)))
+    (vm-reg-set state (vm-dst inst) condition)
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-push-handler) state pc labels)

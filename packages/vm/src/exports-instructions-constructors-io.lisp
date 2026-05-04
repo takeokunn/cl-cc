@@ -100,9 +100,10 @@
    make-vm-set-global
    make-vm-sethash
    make-vm-signal
-   make-vm-signal-error
-   make-vm-sleep-inst
-   make-vm-slot-read
+    make-vm-signal-error
+    make-vm-type-error-condition
+    make-vm-sleep-inst
+    make-vm-slot-read
    make-vm-slot-write
    make-vm-stream-write-string-inst
    make-vm-string-capitalize
@@ -155,11 +156,12 @@
    make-vm-truncate
    make-vm-type-of
    vm-typep
-   make-vm-typep
-   make-vm-unread-char
-   make-vm-upper-case-p
-   make-vm-values
-   make-vm-spread-values
+    make-vm-typep
+    make-vm-unread-char
+    make-vm-upper-case-p
+    make-vm-values
+    make-vm-values-typep
+    make-vm-spread-values
    make-vm-values-to-list
    make-vm-vector-pop
    make-vm-vector-push

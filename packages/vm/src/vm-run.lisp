@@ -116,7 +116,9 @@ Used by both vm-signal-error and vm-throw."
             (%vm-unwind-to-handler state labels handler-label result-reg
                                    saved-call-stack saved-regs saved-method-call-stack
                                    error-value)))
-        (error "Unhandled error in VM: ~S" error-value))))
+        (if (typep error-value 'condition)
+            (error error-value)
+            (error "Unhandled error in VM: ~S" error-value)))))
 
 ;;; ── Catch/Throw VM Instructions ────────────────────────────────────────
 
