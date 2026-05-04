@@ -46,11 +46,14 @@
          (mapcar #'ast-to-sexp (ast-let-body node))))
 
 (defun %ast-param-slot-to-sexp (slot)
-  "Convert an optional/key param slot (name default-ast supplied-p) to lambda-list form."
-  (destructuring-bind (name default supplied-p) slot
-    (cond ((and default supplied-p) (list name (ast-to-sexp default) supplied-p))
-          (default                  (list name (ast-to-sexp default)))
-          (t                        name))))
+  "Convert an optional/key param slot to lambda-list form.
+KEY slots may include a fourth explicit keyword-name element."
+  (destructuring-bind (name default supplied-p &optional explicit-keyword) slot
+    (let ((param-name (if explicit-keyword (list explicit-keyword name) name)))
+      (cond ((and default supplied-p) (list param-name (ast-to-sexp default) supplied-p))
+            (default                  (list param-name (ast-to-sexp default)))
+            (explicit-keyword         (list param-name))
+            (t                        name)))))
 
 (defun %ast-callable-lambda-list (params optional-params rest-param key-params)
   "Reconstruct a full lambda list from AST callable slot fields."
@@ -227,11 +230,26 @@
       (setf opts (append opts (list :allocation (ast-slot-allocation slot)))))
     (if opts (cons (ast-slot-name slot) opts) (ast-slot-name slot))))
 
+(defun %ast-defclass-option-value-to-sexp (value)
+  "Return the source-level value for a DEFCLASS option AST VALUE."
+  (if (and value (ast-quote-p value))
+      (ast-quote-value value)
+      (ast-to-sexp value)))
+
 (defmethod ast-to-sexp ((node ast-defclass))
-  (list* 'defclass
-         (ast-defclass-name node)
-         (ast-defclass-superclasses node)
-         (list (mapcar #'slot-def-to-sexp (ast-defclass-slots node)))))
+  (let ((form (list 'defclass
+                    (ast-defclass-name node)
+                    (ast-defclass-superclasses node)
+                    (mapcar #'slot-def-to-sexp (ast-defclass-slots node)))))
+    (append form
+            (when (ast-defclass-default-initargs node)
+              (list (cons :default-initargs
+                          (loop for (key . value) in (ast-defclass-default-initargs node)
+                                append (list key (ast-to-sexp value))))))
+            (when (ast-defclass-metaclass node)
+              (list (list :metaclass
+                          (%ast-defclass-option-value-to-sexp
+                           (ast-defclass-metaclass node))))))))
 
 (defmethod ast-to-sexp ((node ast-defgeneric))
   (list 'defgeneric

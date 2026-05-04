@@ -74,7 +74,9 @@ All structural knowledge about AST shapes lives here."
     (ast-defvar (when (ast-defvar-value node) (list (ast-defvar-value node))))
     ;; CLOS
     (ast-defclass (append (remove nil (mapcar #'ast-slot-initform (ast-defclass-slots node)))
-                         (mapcar #'cdr (ast-defclass-default-initargs node))))
+                          (mapcar #'cdr (ast-defclass-default-initargs node))
+                          (when (ast-defclass-metaclass node)
+                            (list (ast-defclass-metaclass node)))))
     (ast-defgeneric nil)
     (ast-make-instance (loop for (k v) on (ast-make-instance-initargs node) by #'cddr collect v))
     (ast-slot-value (list (ast-slot-value-object node)))
