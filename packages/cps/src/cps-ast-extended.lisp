@@ -29,12 +29,15 @@
   (cons 'progn forms))
 
 (defun %cps-lower-lambda-param (slot)
-  "Lower a single optional/key parameter slot (name default supplied-p) to lambda-list form."
-  (destructuring-bind (name default supplied-p) slot
-    (cond
-      ((and default supplied-p) (list name (ast-to-sexp default) supplied-p))
-      (default                  (list name (ast-to-sexp default)))
-      (t                        name))))
+  "Lower a single optional/key parameter slot to lambda-list form.
+KEY slots may include a fourth explicit keyword-name element."
+  (destructuring-bind (name default supplied-p &optional explicit-keyword) slot
+    (let ((param-name (if explicit-keyword (list explicit-keyword name) name)))
+      (cond
+        ((and default supplied-p) (list param-name (ast-to-sexp default) supplied-p))
+        (default                  (list param-name (ast-to-sexp default)))
+        (explicit-keyword         (list param-name))
+        (t                        name)))))
 
 (defun %cps-extended-lambda-list (required optional rest-param key-params)
   "Rebuild a defun-style lambda list from lowered parameter slots."
@@ -170,11 +173,23 @@ When done, constructs the (make-instance class-form ...) call and delivers it to
 
 (defmethod cps-transform-ast ((node ast-defclass) k)
   "Transform defclass conservatively through host DEFCLASS."
-  (%cps-progn
-   (list 'defclass (ast-defclass-name node)
-         (ast-defclass-superclasses node)
-         (mapcar #'slot-def-to-sexp (ast-defclass-slots node)))
-   (%cps-funcall k (list 'quote (ast-defclass-name node)))))
+  (let ((form (list 'defclass (ast-defclass-name node)
+                    (ast-defclass-superclasses node)
+                    (mapcar #'slot-def-to-sexp (ast-defclass-slots node)))))
+    (setf form
+          (append form
+                  (when (ast-defclass-default-initargs node)
+                    (list (cons :default-initargs
+                                (loop for (key . value) in (ast-defclass-default-initargs node)
+                                      append (list key (ast-to-sexp value))))))
+                  (when (ast-defclass-metaclass node)
+                    (list (list :metaclass
+                                (if (ast-quote-p (ast-defclass-metaclass node))
+                                    (ast-quote-value (ast-defclass-metaclass node))
+                                    (ast-to-sexp (ast-defclass-metaclass node))))))))
+    (%cps-progn
+     form
+     (%cps-funcall k (list 'quote (ast-defclass-name node))))))
 
 (defmethod cps-transform-ast ((node ast-defgeneric) k)
   "Transform defgeneric conservatively through host DEFGENERIC."

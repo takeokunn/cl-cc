@@ -22,7 +22,7 @@
           (c (gensym "C")))
       (list 'let (list (list c class))
             (list 'when (list 'hash-table-p c)
-                  (list '%class-slot-definitions c))))))
+                  (list '%class-slot-definitions c :__direct-slots__))))))
 
 (register-macro 'class-slots
   (lambda (form env)

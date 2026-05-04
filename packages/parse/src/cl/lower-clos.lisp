@@ -22,20 +22,28 @@
     (error "defclass requires name, superclasses, and slot definitions"))
   (let* ((name (second node)) (superclasses (third node)) (slot-specs (fourth node))
          ;; Parse class options (5th+ elements): (:default-initargs key val ...)
-         (class-options (nthcdr 4 node))
-         (default-initargs-opt (find :default-initargs class-options
-                                     :key (lambda (o) (when (listp o) (first o)))))
-         (default-initargs (when default-initargs-opt
-                             (loop for (k v) on (rest default-initargs-opt) by #'cddr
-                                   collect (cons k (lower-sexp-to-ast v))))))
+          (class-options (nthcdr 4 node))
+          (default-initargs-opt (find :default-initargs class-options
+                                      :key (lambda (o) (when (listp o) (first o)))))
+          (metaclass-opt (find :metaclass class-options
+                               :key (lambda (o) (when (listp o) (first o)))))
+          (default-initargs (when default-initargs-opt
+                              (loop for (k v) on (rest default-initargs-opt) by #'cddr
+                                    collect (cons k (lower-sexp-to-ast v)))))
+          (metaclass (when metaclass-opt
+                       (let ((value (second metaclass-opt)))
+                         (if (symbolp value)
+                             (make-ast-quote :value value)
+                             (lower-sexp-to-ast value))))))
     (unless (symbolp name)      (error "defclass name must be a symbol"))
     (unless (listp superclasses) (error "defclass superclasses must be a list"))
     (unless (listp slot-specs)   (error "defclass slots must be a list"))
     (make-ast-defclass :name name
-                       :superclasses superclasses
-                       :slots (mapcar #'parse-slot-spec slot-specs)
-                       :default-initargs default-initargs
-                       :source-file sf :source-line sl :source-column sc)))
+                        :superclasses superclasses
+                        :slots (mapcar #'parse-slot-spec slot-specs)
+                        :default-initargs default-initargs
+                        :metaclass metaclass
+                        :source-file sf :source-line sl :source-column sc)))
 
 ;;; ── Defgeneric ───────────────────────────────────────────────────────────────
 

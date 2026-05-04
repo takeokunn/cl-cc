@@ -21,8 +21,10 @@
         (slot-names nil)
         (initarg-map nil)
         (initform-regs nil)
+        (slot-types nil)
         (default-initarg-regs nil)
-        (class-slot-names nil))
+        (class-slot-names nil)
+        (metaclass-reg nil))
     (let ((xs slots))
       (tagbody
        scan-slots
@@ -34,14 +36,19 @@
                      (cons (cons (ast-slot-initarg slot)
                                  (ast-slot-name slot))
                            initarg-map)))
-           (if (ast-slot-initform slot)
-               (setq initform-regs
-                     (cons (cons (ast-slot-name slot)
-                                 (compile-ast (ast-slot-initform slot) ctx))
-                           initform-regs)))
-           (if (eq :class (ast-slot-allocation slot))
-               (setq class-slot-names
-                     (cons (ast-slot-name slot) class-slot-names))))
+            (if (ast-slot-initform slot)
+                (setq initform-regs
+                      (cons (cons (ast-slot-name slot)
+                                  (compile-ast (ast-slot-initform slot) ctx))
+                            initform-regs)))
+            (if (ast-slot-type slot)
+                (setq slot-types
+                      (cons (cons (ast-slot-name slot)
+                                  (ast-slot-type slot))
+                            slot-types)))
+            (if (eq :class (ast-slot-allocation slot))
+                (setq class-slot-names
+                      (cons (ast-slot-name slot) class-slot-names))))
          (setq xs (cdr xs))
          (go scan-slots)
        done-slots))
@@ -59,8 +66,11 @@
     (setq slot-names (nreverse slot-names))
     (setq initarg-map (nreverse initarg-map))
     (setq initform-regs (nreverse initform-regs))
+    (setq slot-types (nreverse slot-types))
     (setq default-initarg-regs (nreverse default-initarg-regs))
     (setq class-slot-names (nreverse class-slot-names))
+    (when (ast-defclass-metaclass node)
+      (setq metaclass-reg (compile-ast (ast-defclass-metaclass node) ctx)))
     (emit ctx (make-vm-class-def
                :dst dst
                :class-name name
@@ -68,8 +78,10 @@
                :slot-names slot-names
                :slot-initargs initarg-map
                :slot-initform-regs initform-regs
+               :slot-types slot-types
                :default-initarg-regs default-initarg-regs
-               :class-slots class-slot-names))
+               :class-slots class-slot-names
+               :metaclass-reg metaclass-reg))
     (setf (gethash name (ctx-global-classes ctx)) dst)
     (setf (ctx-env ctx) (cons (cons name dst) (ctx-env ctx)))
     (emit ctx (make-vm-set-global :name name :src dst))
@@ -151,4 +163,3 @@
 ;;; Generic function and method compilation (%ensure-generic-function,
 ;;; compile-ast for ast-defgeneric/defmethod/make-instance/slot-value/
 ;;; set-slot-value/set-gethash) is in codegen-gf.lisp (loads next).
-
