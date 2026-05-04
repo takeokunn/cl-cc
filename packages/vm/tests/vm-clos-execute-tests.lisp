@@ -15,7 +15,7 @@
 (defun make-clos-vm ()
   "Fresh vm-state for CLOS instruction tests."
   (make-instance 'cl-cc/vm::vm-io-state))
-(defun class-def-inst (dst name &key (supers '()) (slots '()) (initargs '()))
+(defun class-def-inst (dst name &key (supers '()) (slots '()) (initargs '()) (class-slots '()))
   "Build a vm-class-def instruction for simple class registration."
   (cl-cc:make-vm-class-def
    :dst dst
@@ -25,12 +25,12 @@
    :slot-initargs initargs
    :slot-initform-regs nil
    :default-initarg-regs nil
-   :class-slots nil))
+   :class-slots class-slots))
 
-(defun exec-class-def (s dst name &key (supers '()) (slots '()) (initargs '()))
+(defun exec-class-def (s dst name &key (supers '()) (slots '()) (initargs '()) (class-slots '()))
   "Execute a vm-class-def and return the new PC."
   (values (cl-cc/vm::execute-instruction
-           (class-def-inst dst name :supers supers :slots slots :initargs initargs)
+           (class-def-inst dst name :supers supers :slots slots :initargs initargs :class-slots class-slots)
            s 0 nil)))
 (defun make-cdef-for-test (name &key (supers '()) (default-initarg-regs nil) (class-slots nil))
   "Build a vm-class-def with empty slot/initarg lists and explicit defaults for testing."
@@ -164,6 +164,40 @@
         (assert-false (cl-cc:vm-reg-get s :R2))
         (assert-true  (cl-cc:vm-reg-get s :R2)))))
 
+(deftest vm-slot-boundp-uses-class-slot-storage
+  "vm-slot-boundp checks the class HT for class-allocated slots."
+  (let ((s (make-clos-vm)))
+    (exec-class-def s :R0 'shared-box :slots '(shared) :class-slots '(shared))
+    (cl-cc/vm::execute-instruction
+     (cl-cc:make-vm-make-obj :dst :R1 :class-reg :R0 :initarg-regs nil)
+     s 0 nil)
+    (cl-cc/vm::execute-instruction
+     (cl-cc:make-vm-slot-boundp :dst :R2 :obj-reg :R1 :slot-name-sym 'shared)
+     s 0 nil)
+    (assert-true (cl-cc:vm-reg-get s :R2))
+    (remhash 'shared (cl-cc:vm-reg-get s :R0))
+    (cl-cc/vm::execute-instruction
+     (cl-cc:make-vm-slot-boundp :dst :R2 :obj-reg :R1 :slot-name-sym 'shared)
+     s 0 nil)
+    (assert-false (cl-cc:vm-reg-get s :R2))))
+
+(deftest vm-slot-boundp-migrates-obsolete-instance
+  "vm-slot-boundp triggers lazy migration before checking redefined-class slots."
+  (let ((s (make-clos-vm)))
+    (exec-class-def s :R0 'redef :slots '(x))
+    (cl-cc/vm::execute-instruction
+     (cl-cc:make-vm-make-obj :dst :R1 :class-reg :R0 :initarg-regs nil)
+     s 0 nil)
+    (exec-class-def s :R3 'redef :slots '(y))
+    (cl-cc/vm::execute-instruction
+     (cl-cc:make-vm-slot-boundp :dst :R2 :obj-reg :R1 :slot-name-sym 'y)
+     s 0 nil)
+    (assert-true (cl-cc:vm-reg-get s :R2))
+    (cl-cc/vm::execute-instruction
+     (cl-cc:make-vm-slot-boundp :dst :R2 :obj-reg :R1 :slot-name-sym 'x)
+     s 0 nil)
+    (assert-false (cl-cc:vm-reg-get s :R2))))
+
 (deftest vm-slot-makunbound-removes-key-and-stores-obj
   "vm-slot-makunbound removes the slot key from the instance HT and writes the object to DST."
   (let ((s (make-clos-vm)))
@@ -174,6 +208,36 @@
     (assert-false (nth-value 1 (gethash 'data (cl-cc:vm-reg-get s :R1))))
     (assert-eq (cl-cc:vm-reg-get s :R1)
                (cl-cc:vm-reg-get s :R2))))
+
+(deftest vm-slot-makunbound-removes-class-slot-storage
+  "vm-slot-makunbound removes class-allocated slots from the class HT."
+  (let ((s (make-clos-vm)))
+    (exec-class-def s :R0 'shared-node :slots '(shared) :class-slots '(shared))
+    (cl-cc/vm::execute-instruction
+     (cl-cc:make-vm-make-obj :dst :R1 :class-reg :R0 :initarg-regs nil)
+     s 0 nil)
+    (cl-cc/vm::execute-instruction
+     (cl-cc:make-vm-slot-makunbound :dst :R2 :obj-reg :R1 :slot-name-sym 'shared)
+     s 0 nil)
+    (assert-false (nth-value 1 (gethash 'shared (cl-cc:vm-reg-get s :R0))))
+    (assert-false (nth-value 1 (gethash 'shared (cl-cc:vm-reg-get s :R1))))
+    (assert-eq (cl-cc:vm-reg-get s :R1)
+               (cl-cc:vm-reg-get s :R2))))
+
+(deftest vm-slot-makunbound-migrates-obsolete-instance
+  "vm-slot-makunbound triggers lazy migration before unbinding a redefined-class slot."
+  (let ((s (make-clos-vm)))
+    (exec-class-def s :R0 'makun-redef :slots '(x))
+    (cl-cc/vm::execute-instruction
+     (cl-cc:make-vm-make-obj :dst :R1 :class-reg :R0 :initarg-regs nil)
+     s 0 nil)
+    (exec-class-def s :R3 'makun-redef :slots '(y))
+    (cl-cc/vm::execute-instruction
+     (cl-cc:make-vm-slot-makunbound :dst :R2 :obj-reg :R1 :slot-name-sym 'y)
+     s 0 nil)
+    (assert-eq (cl-cc:vm-reg-get s :R3)
+               (gethash :__class__ (cl-cc:vm-reg-get s :R1)))
+    (assert-false (nth-value 1 (gethash 'y (cl-cc:vm-reg-get s :R1))))))
 
 ;;; ─── vm-class-def helper functions ──────────────────────────────────────
 

@@ -37,6 +37,15 @@
                            append (gethash :__default-initargs__ super-ht))))
     (append own (remove-if (lambda (e) (assoc (car e) own)) inherited))))
 
+(defun %vm-cdef-collect-slot-types (inst supers registry)
+  "Collect slot-name→type pairs; own slot type declarations take precedence."
+  (let ((own (vm-slot-types inst))
+        (inherited (loop for super in supers
+                         for super-ht = (gethash super registry)
+                         when super-ht
+                           append (gethash :__slot-types__ super-ht))))
+    (append own (remove-if (lambda (e) (assoc (car e) own)) inherited))))
+
 (defun %vm-cdef-collect-class-slots (inst supers registry)
   "Union of own class-allocated slots with all inherited class-allocated slots."
   (let ((inherited (loop for super in supers
@@ -51,11 +60,40 @@
     (unless (gethash slot-name class-ht)
       (let ((entry (assoc slot-name initform-values)))
         (setf (gethash slot-name class-ht)
-              (if entry (cdr entry) nil))))))
+               (if entry (cdr entry) nil))))))
+
+(defun %vm-mark-class-obsolete (old-class replacement-class)
+  "Record that OLD-CLASS should lazily migrate instances to REPLACEMENT-CLASS."
+  (when (hash-table-p old-class)
+    (setf (gethash :__obsolete__ old-class) t
+          (gethash :__replacement-class__ old-class) replacement-class))
+  old-class)
+
+(defun %vm-update-obsolete-instance (obj-ht)
+  "Migrate OBJ-HT from an obsolete class descriptor to its replacement, if any."
+  (let* ((old-class (and (hash-table-p obj-ht) (gethash :__class__ obj-ht)))
+         (new-class (and (hash-table-p old-class)
+                         (gethash :__obsolete__ old-class)
+                         (gethash :__replacement-class__ old-class))))
+    (when (hash-table-p new-class)
+      (let ((old-slots (gethash :__slots__ old-class))
+            (new-slots (gethash :__slots__ new-class)))
+        (dolist (slot old-slots)
+          (unless (member slot new-slots :test #'eq)
+            (remhash slot obj-ht)))
+        (dolist (slot new-slots)
+          (multiple-value-bind (value found-p) (gethash slot obj-ht)
+            (declare (ignore value))
+            (unless found-p
+              (setf (gethash slot obj-ht) nil))))
+        (setf (gethash :__class__ obj-ht) new-class)))
+    obj-ht))
 
 (defun %vm-obj-class-ht (obj-ht)
   "Return the class hash-table for an instance OBJ-HT, or NIL."
-  (when (hash-table-p obj-ht) (gethash :__class__ obj-ht)))
+  (when (hash-table-p obj-ht)
+    (%vm-update-obsolete-instance obj-ht)
+    (gethash :__class__ obj-ht)))
 
 (defun %vm-class-slots-of (obj-ht)
   "Return (values class-ht class-slots) for class-allocation routing."
@@ -78,18 +116,28 @@
          (all-slots (%vm-cdef-collect-slots supers (vm-slot-names inst) registry))
          (all-initargs (%vm-cdef-collect-initargs supers (vm-slot-initargs inst) registry))
          (all-default-initargs (%vm-cdef-collect-default-initargs inst supers registry state))
+         (all-slot-types (%vm-cdef-collect-slot-types inst supers registry))
          (all-class-slots (%vm-cdef-collect-class-slots inst supers registry))
+         (previous-class (gethash (vm-class-name-sym inst) registry))
          (initform-values (loop for (slot-name . reg) in (vm-slot-initform-regs inst)
-                                collect (cons slot-name (vm-reg-get state reg)))))
+                                 collect (cons slot-name (vm-reg-get state reg)))))
     (setf (gethash :__name__             class-ht) (vm-class-name-sym inst)
           (gethash :__superclasses__     class-ht) supers
+          (gethash :__direct-slots__     class-ht) (vm-slot-names inst)
           (gethash :__slots__            class-ht) all-slots
           (gethash :__initargs__         class-ht) all-initargs
           (gethash :__methods__          class-ht) (make-hash-table :test #'equal)
           (gethash :__eql-index__        class-ht) (make-hash-table :test #'equal)
           (gethash :__initforms__        class-ht) initform-values
           (gethash :__default-initargs__ class-ht) all-default-initargs
-          (gethash :__class-slots__      class-ht) all-class-slots)
+          (gethash :__slot-types__       class-ht) all-slot-types
+          (gethash :__class-slots__      class-ht) all-class-slots
+          (gethash :__previous-class__   class-ht) previous-class
+          (gethash :__metaclass__        class-ht)
+          (if (vm-metaclass-reg inst)
+              (vm-reg-get state (vm-metaclass-reg inst))
+              'standard-class))
+    (%vm-mark-class-obsolete previous-class class-ht)
     (%vm-cdef-init-class-slots class-ht all-class-slots initform-values)
     (setf (gethash (vm-class-name-sym inst) registry) class-ht
           (gethash :__cpl__ class-ht)
@@ -154,16 +202,29 @@
   (declare (ignore labels))
   (let* ((obj-ht (vm-reg-get state (vm-obj-reg inst)))
          (slot-name (vm-slot-name-sym inst)))
-    (multiple-value-bind (value found-p) (gethash slot-name obj-ht)
-      (declare (ignore value))
-      (vm-reg-set state (vm-dst inst) (if found-p t nil))
-      (values (1+ pc) nil nil))))
+    (multiple-value-bind (class-ht class-slots) (%vm-class-slots-of obj-ht)
+      (let ((all-slots (when class-ht (gethash :__slots__ class-ht))))
+        (cond
+          ((and all-slots (not (member slot-name all-slots :test #'eq)))
+           (vm-reg-set state (vm-dst inst) nil))
+          ((and class-slots (member slot-name class-slots :test #'eq))
+           (multiple-value-bind (value found-p) (gethash slot-name class-ht)
+             (declare (ignore value))
+             (vm-reg-set state (vm-dst inst) (if found-p t nil))))
+          (t
+           (multiple-value-bind (value found-p) (gethash slot-name obj-ht)
+             (declare (ignore value))
+             (vm-reg-set state (vm-dst inst) (if found-p t nil)))))))
+    (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-slot-makunbound) state pc labels)
   (declare (ignore labels))
   (let* ((obj-ht (vm-reg-get state (vm-obj-reg inst)))
          (slot-name (vm-slot-name-sym inst)))
-    (remhash slot-name obj-ht)
+    (multiple-value-bind (class-ht class-slots) (%vm-class-slots-of obj-ht)
+      (if (and class-slots (member slot-name class-slots :test #'eq))
+          (remhash slot-name class-ht)
+          (remhash slot-name obj-ht)))
     (vm-reg-set state (vm-dst inst) (vm-reg-get state (vm-obj-reg inst)))
     (values (1+ pc) nil nil)))
 
