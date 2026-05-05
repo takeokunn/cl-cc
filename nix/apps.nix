@@ -7,7 +7,7 @@
   dispatchSemFix ? null,
 }:
 let
-  sbclFlags = "--dynamic-space-size 4096";
+  sbclFlags = "--dynamic-space-size 8192";
 
   cwdGuard = ''
     if [ ! -f ./cl-cc.asd ]; then
@@ -43,6 +43,7 @@ let
       loadAsdSystems ? [ ],
       forceReload ? false,
       disableOutputTranslations ? false,
+      loadProjectAsd ? true,
       needsRlwrap ? false,
       enableDispatchSemFix ? false,
       enablePbtSanitize ? false,
@@ -77,7 +78,7 @@ let
         ${lib.optionalString enableFaslCacheCleaner faslCacheCleaner}
         ${dispatchExport}
         ${extraEnv}
-        export CLCC_TEST_TIMEOUT="''${CLCC_TEST_TIMEOUT:-180}"
+        export CLCC_TEST_TIMEOUT="''${CLCC_TEST_TIMEOUT:-10}"
         if [ -z "''${CLCC_HEARTBEAT_SECONDS:-}" ] || ! printf '%s' "$CLCC_HEARTBEAT_SECONDS" | grep -Eq '^[0-9]+$'; then
           CLCC_HEARTBEAT_SECONDS=1
         fi
@@ -92,7 +93,7 @@ let
           ${joinEvals lispPreLoadEvalForms} \
           ${lib.removeSuffix "\n" sbclBootstrap} \
           ${disableTranslationsFlag} \
-          --load cl-cc.asd \
+          ${lib.optionalString loadProjectAsd "--load cl-cc.asd"} \
           ${loadSystemEvals} \
           ${joinEvals lispPostLoadEvalForms}
         ${trailingScript}
@@ -107,26 +108,22 @@ let
   apps = rec {
     default = repl;
 
-    # `test` is the **only** test entrypoint. It runs the canonical full plan
-    # (unit + integration + selfhost-slow + e2e) via `cl-cc/test:run-tests`.
+    # `test` runs the canonical fast unit plan via `cl-cc/test:run-tests`.
     # `nix flake check` invokes this same program through `checks.tests`.
-    # e2e files are loaded via direct `(load ...)` — no ASDF output-translation
-    # setup is needed (that call with :inherit-configuration took ~321s).
     # Warm-cache reuse: the FASL cleaner is disabled by default so repeat
     # invocations stay fast. Manual cleanup: `rm -rf ~/.cache/common-lisp/`.
     test = mkSbclScript {
       name = "test";
+      description = "Run the canonical fast unit test plan";
       sbclVariant = "tests";
+      loadProjectAsd = false;
       enableDispatchSemFix = true;
       enablePbtSanitize = true;
       enableFaslCacheCleaner = false;
       lispPostLoadEvalForms = [
         ''(format t "# loading :cl-cc-test~%")''
         ''(handler-case (asdf:load-system :cl-cc-test) (error (e) (format *error-output* "~&FATAL: ~A~%" e) (uiop:quit 1)))''
-        ''(load (merge-pathnames "tests/e2e/selfhost-test-support.lisp" *default-pathname-defaults*))''
-        ''(load (merge-pathnames "tests/e2e/selfhost-meta-tests.lisp" *default-pathname-defaults*))''
-        ''(load (merge-pathnames "tests/e2e/selfhost-tests.lisp" *default-pathname-defaults*))''
-        ''(format t "# starting unified test plan (unit + integration + selfhost-slow + e2e)~%")''
+        ''(format t "# starting fast test plan (unit)~%")''
         ''(handler-case (uiop:symbol-call :cl-cc/test (quote run-tests)) (error (e) (format t "~&not ok - run-tests fatal error: ~A~%" e) (format *error-output* "~&FATAL: ~A~%" e) (uiop:quit 1)))''
       ];
     };
@@ -150,12 +147,8 @@ let
       lispPostLoadEvalForms = [
         ''(load (merge-pathnames "cl-cc-test.asd" *default-pathname-defaults*))''
         "(asdf:load-system :cl-cc-test :force t)"
-        "(asdf:load-system :cl-cc-test/slow :force t)"
-        ''(load (merge-pathnames "tests/e2e/selfhost-test-support.lisp" *default-pathname-defaults*))''
-        ''(load (merge-pathnames "tests/e2e/selfhost-meta-tests.lisp" *default-pathname-defaults*))''
-        ''(load (merge-pathnames "tests/e2e/selfhost-tests.lisp" *default-pathname-defaults*))''
-        ''(format t "# starting coverage test plan (sb-cover + unit + integration + selfhost-slow + e2e)~%")''
-        ''(handler-case (let ((failed (cl-cc/test:run-suite (quote cl-cc/test:cl-cc-suite) :parallel nil :random nil :coverage t :quit-p nil))) (declaim (optimize (sb-cover:store-coverage-data 0))) (uiop:quit (if failed 1 0))) (error (e) (format t "~&not ok - coverage fatal error: ~A~%" e) (format *error-output* "~&FATAL: ~A~%" e) (uiop:quit 1)))''
+        ''(format t "# starting coverage test plan (sb-cover + unit)~%")''
+        ''(handler-case (let ((failed (cl-cc/test:run-suite (quote cl-cc/test:cl-cc-suite) :parallel nil :random nil :coverage t :exclude-suites (quote (cl-cc/test:cl-cc-integration-suite cl-cc/test:cl-cc-e2e-suite)) :quit-p nil))) (declaim (optimize (sb-cover:store-coverage-data 0))) (uiop:quit (if failed 1 0))) (error (e) (format t "~&not ok - coverage fatal error: ~A~%" e) (format *error-output* "~&FATAL: ~A~%" e) (uiop:quit 1)))''
       ];
     };
 

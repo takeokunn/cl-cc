@@ -80,6 +80,7 @@ Special folding nodes like ast-binop and ast-call stay in optimize-ast directly.
     :rest-param      (ast-defun-rest-param node)
     :key-params      (ast-defun-key-params node)
     :declarations    (ast-defun-declarations node)
+    :documentation   (ast-defun-documentation node)
     :body            (%optimize-ast-list (ast-defun-body node))))
 
 (defun %optimize-ast-defvar-node (node)

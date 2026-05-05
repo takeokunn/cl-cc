@@ -2,7 +2,7 @@
 ;;;; CL-CC test systems.
 ;;;;
 ;;;; Loaded by cl-cc.asd's eval-when block so that `--load cl-cc.asd`
-;;;; makes :cl-cc-test and :cl-cc-test/slow available.
+;;;; makes :cl-cc-test and :cl-cc-test/e2e available.
 
 (asdf:defsystem :cl-cc-test
   :description "CL-CC tests"
@@ -456,8 +456,8 @@
               (declare (ignore op c))
               (uiop:symbol-call :cl-cc/test 'run-tests)))
 
-(asdf:defsystem :cl-cc-test/slow
-  :description "CL-CC heavy self-hosting end-to-end regression tests"
+(asdf:defsystem :cl-cc-test/e2e
+  :description "CL-CC self-hosting end-to-end regression tests"
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
@@ -473,5 +473,7 @@
       (:file "selfhost-meta-tests"))))
   :perform (asdf:test-op (op c)
               (declare (ignore op c))
-              (uiop:symbol-call :cl-cc/test 'run-tests)))
-
+              (uiop:symbol-call :cl-cc/test 'run-suite
+                                (uiop:find-symbol* '#:selfhost-suite :cl-cc/test)
+                                :parallel nil
+                                :random nil)))

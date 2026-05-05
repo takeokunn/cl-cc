@@ -166,10 +166,13 @@ Returns two values: result register and CPS form used for the AST."
 Values: last-reg, last-type, last-cps, updated-type-env."
   (let* ((ast (%lower-toplevel-form-to-ast form))
          (last-reg nil) (last-type nil) (last-cps nil))
+    (when (typep ast 'ast-defvar)
+      (setf (gethash (ast-defvar-name ast) (ctx-global-variables ctx)) t))
     (%record-toplevel-defun-for-ct-env ast)
     (push ast compiled-asts)
     (multiple-value-setq (last-type type-env)
       (%update-toplevel-type-state ast type-env type-check #'%best-effort-type-check))
+    (setf (ctx-type-env ctx) type-env)
     (%maybe-extend-ct-value-env ast)
     (multiple-value-setq (last-reg last-cps)
       (%compile-toplevel-ast-into-context ast ctx target type-check safety opts))

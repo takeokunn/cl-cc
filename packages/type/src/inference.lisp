@@ -27,6 +27,29 @@
     (when slots
       (cdr (assoc slot-name slots :test #'eq)))))
 
+(defvar *class-method-type-registry* (make-hash-table :test #'eq)
+  "Maps class names to protocol-visible method signatures.
+Each entry is an alist of (method-name . type-node) pairs.")
+
+(defun register-class-method-type (class-name method-name &optional (method-type type-any))
+  "Register METHOD-NAME as structurally available on CLASS-NAME."
+  (let* ((methods (gethash class-name *class-method-type-registry*))
+         (entry (assoc method-name methods :test #'eq)))
+    (if entry
+        (setf (cdr entry) method-type)
+        (push (cons method-name method-type) methods))
+    (setf (gethash class-name *class-method-type-registry*) methods)))
+
+(defun lookup-class-method-types (class-name)
+  "Return protocol-visible method types for CLASS-NAME."
+  (gethash class-name *class-method-type-registry*))
+
+(defun lookup-class-method-type (class-name method-name)
+  "Look up METHOD-NAME in CLASS-NAME as a structural protocol member."
+  (let ((methods (lookup-class-method-types class-name)))
+    (when methods
+      (cdr (assoc method-name methods :test #'eq)))))
+
 (defvar *type-alias-registry* (make-hash-table :test #'eq)
   "Maps type alias names to their expanded type specifiers.
    E.g., integer-or-string → (or fixnum string)")

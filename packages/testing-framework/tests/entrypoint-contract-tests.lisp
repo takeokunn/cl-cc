@@ -10,13 +10,13 @@
   (uiop:read-file-string (merge-pathnames #P"nix/checks.nix" (uiop:getcwd))))
 
 (deftest flake-test-app-runs-canonical-suite
-  "The single test app dispatches run-tests (canonical full plan) and exports CLCC timeout vars."
+  "The single test app dispatches run-tests (canonical fast plan) and exports CLCC timeout vars."
   (let ((text (%flake-text)))
     (assert-true (search "test = mkSbclScript {" text))
     (assert-true (search "CLCC_TEST_TIMEOUT" text))
     (assert-true (search "CLCC_SUITE_TIMEOUT" text))
     (assert-true (search "run-tests" text))
-    (assert-true (search "starting unified test plan" text))))
+    (assert-true (search "starting fast test plan" text))))
 
 (deftest flake-coverage-app-runs-instrumented-suite
   "The coverage app enables sb-cover before force-loading local test systems."

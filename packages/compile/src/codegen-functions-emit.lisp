@@ -126,7 +126,14 @@
           (and (ast-defun-rest-param node)
                (or (rest-param-stack-alloc-p body (ast-defun-rest-param node))
                    (dynamic-extent-declared-p (ast-defun-declarations node)
-                                              (ast-defun-rest-param node)))))
+                                               (ast-defun-rest-param node)))))
+    (when (ast-defun-documentation node)
+      (compile-ast
+       (make-ast-call :func 'cl-cc/vm::%register-documentation
+                      :args (list (make-ast-quote :value name)
+                                  (make-ast-quote :value 'function)
+                                  (make-ast-quote :value (ast-defun-documentation node))))
+       ctx))
     (setf (gethash name (ctx-global-functions ctx)) func-label)
     (multiple-value-bind (opt-closure-data rest-reg key-closure-data
                           opt-bindings rest-binding key-bindings

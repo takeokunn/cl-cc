@@ -22,6 +22,19 @@
 
     "(defun identity (x) x)"
 
+    ;; FR-589: minimal compile-file shim for the VM interpreter.
+    "(defun compile-file (input-file &key output-file verbose print external-format)
+   (declare (ignore output-file external-format))
+   (our-load input-file :verbose verbose :print print)
+   (values (probe-file input-file) nil nil))"
+
+    ;; FR-580: CFFI-compatible host-backed FFI shim.
+    "(defun foreign-funcall (name &rest arguments)
+   (apply #'cl-cc/vm::%foreign-funcall name arguments))"
+
+    "(defun cffi:foreign-funcall (name &rest arguments)
+   (apply #'cl-cc/vm::%foreign-funcall name arguments))"
+
     ;; FR-586: set (obsolete but ANSI) — dynamic symbol-value assignment
     "(defun set (sym val) (setf (symbol-value sym) val) val)"
 

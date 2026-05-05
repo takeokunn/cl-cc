@@ -224,8 +224,12 @@
               :requires (> x 0)
               :ensures (= result (+ x 1))
               (+ x 1)))))
-    (assert-eq 'defun/c (car expanded-1))
-    (let ((expanded (cl-cc:our-macroexpand-all expanded-1 nil)))
-      (assert-eq 'defun/c (car expanded))
-      (assert-eq 'add1-positive-pbtb (cadr expanded))
-      (assert-equal '(x) (caddr expanded)))))
+    (assert-eq 'defun (car expanded-1))
+    (assert-eq 'add1-positive-pbtb (cadr expanded-1))
+    (assert-equal '(x) (caddr expanded-1))
+    (assert-true
+     (some (lambda (form) (and (consp form) (eq (car form) 'unless)))
+           (cdddr expanded-1)))
+    (assert-true
+     (some (lambda (form) (and (consp form) (eq (car form) 'let)))
+           (cdddr expanded-1)))))

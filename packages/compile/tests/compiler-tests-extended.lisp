@@ -198,12 +198,96 @@
 ;;; ─── FR-566: pathname host bridges ───────────────────────────────────────────
 
 (deftest-compile compile-pathname-accessors
-  "pathname-name and pathname-type extract the basename and extension."
-  :cases (("name-string"    "foo"  "(pathname-name \"/tmp/foo.lisp\")")
-          ("type-string"    "lisp" "(pathname-type \"/tmp/foo.lisp\")")
-          ("name-hash-p"    "foo"  "(pathname-name #P\"/tmp/foo.lisp\")")
-          ("type-hash-p"    "txt"  "(pathname-type #P\"/tmp/bar.txt\")"))
+  "Pathname constructor/accessor bridges compile and agree with host CL results."
+  :cases (("make-pathname"
+           (namestring (make-pathname :directory '(:absolute "tmp") :name "foo" :type "lisp"))
+           "(namestring (make-pathname :directory '(:absolute \"tmp\") :name \"foo\" :type \"lisp\"))")
+          ("pathname"
+           (namestring (pathname "/tmp/foo.lisp"))
+           "(namestring (pathname \"/tmp/foo.lisp\"))")
+          ("namestring"
+           "/tmp/foo.lisp"
+           "(namestring #P\"/tmp/foo.lisp\")")
+          ("file-namestring"
+           "foo.lisp"
+           "(file-namestring #P\"/tmp/foo.lisp\")")
+          ("pathname-name-string"
+           "foo"
+           "(pathname-name \"/tmp/foo.lisp\")")
+          ("pathname-type-string"
+           "lisp"
+           "(pathname-type \"/tmp/foo.lisp\")")
+          ("pathname-name-pathname"
+           "foo"
+           "(pathname-name #P\"/tmp/foo.lisp\")")
+          ("pathname-type-pathname"
+           "txt"
+           "(pathname-type #P\"/tmp/bar.txt\")")
+          ("pathname-host"
+           (pathname-host #P"/tmp/foo.lisp")
+           "(pathname-host #P\"/tmp/foo.lisp\")")
+          ("pathname-device"
+           (pathname-device #P"/tmp/foo.lisp")
+           "(pathname-device #P\"/tmp/foo.lisp\")")
+          ("pathname-directory"
+           (pathname-directory #P"/tmp/foo.lisp")
+           "(pathname-directory #P\"/tmp/foo.lisp\")")
+          ("pathname-version"
+           (pathname-version #P"/tmp/foo.lisp")
+           "(pathname-version #P\"/tmp/foo.lisp\")")
+          ("merge-pathnames"
+           (namestring (merge-pathnames "foo.lisp" "/tmp/"))
+           "(namestring (merge-pathnames \"foo.lisp\" \"/tmp/\"))")
+          ("parse-namestring"
+           (namestring (parse-namestring "/tmp/foo.lisp"))
+           "(namestring (parse-namestring \"/tmp/foo.lisp\"))")
+          ("wild-pathname-p"
+           t
+           "(wild-pathname-p #P\"/tmp/*.lisp\")")
+          ("pathname-match-p"
+           t
+           "(pathname-match-p #P\"/tmp/foo.lisp\" #P\"/tmp/*.lisp\")")
+          ("translate-pathname"
+           (namestring (translate-pathname #P"/tmp/src/foo.lisp"
+                                           #P"/tmp/src/*.lisp"
+                                           #P"/tmp/out/*.fasl"))
+           "(namestring (translate-pathname #P\"/tmp/src/foo.lisp\" #P\"/tmp/src/*.lisp\" #P\"/tmp/out/*.fasl\"))"))
   )
+
+(deftest compile-pathname-file-host-bridges
+  "File-oriented pathname bridges compile and operate on real filesystem paths."
+  (let* ((root (uiop:ensure-directory-pathname
+                (merge-pathnames (format nil "cl-cc-path-bridge-~A/" (get-universal-time))
+                                 (uiop:temporary-directory))))
+         (nested-file (merge-pathnames #P"nested/a/b/output.txt" root))
+         (nested-dir (uiop:ensure-directory-pathname (merge-pathnames #P"nested/a/b/" root)))
+         (source-file (merge-pathnames #P"source.txt" root))
+         (renamed-file (merge-pathnames #P"renamed.txt" root))
+         (pattern (merge-pathnames #P"*.txt" root)))
+    (unwind-protect
+         (progn
+           (run-string (format nil "(ensure-directories-exist ~S)" (namestring nested-file)))
+           (assert-true (probe-file nested-dir))
+           (with-open-file (out source-file :direction :output :if-exists :supersede :if-does-not-exist :create)
+             (write-string "bridge" out))
+           (assert-true (run-string (format nil "(probe-file ~S)" (namestring source-file))))
+           (assert-= (length (directory pattern))
+                     (run-string (format nil "(length (directory ~S))" pattern)))
+           (assert-equal (namestring (truename source-file))
+                         (run-string (format nil "(namestring (truename ~S))" (namestring source-file))))
+           (let ((write-date (run-string (format nil "(file-write-date ~S)" (namestring source-file)))))
+             (assert-true (integerp write-date)))
+           (let ((author (run-string (format nil "(file-author ~S)" (namestring source-file)))))
+             (assert-true (or (null author) (stringp author))))
+           (run-string (format nil "(rename-file ~S ~S)"
+                               (namestring source-file)
+                               (namestring renamed-file)))
+           (assert-false (probe-file source-file))
+           (assert-true (probe-file renamed-file))
+           (run-string (format nil "(delete-file ~S)" (namestring renamed-file)))
+           (assert-false (probe-file renamed-file)))
+      (ignore-errors (delete-file renamed-file))
+      (ignore-errors (delete-file source-file)))))
 
 ;;; ─── FR-572: #nA multi-dimensional array literal ─────────────────────────────
 

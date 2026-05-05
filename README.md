@@ -1,6 +1,6 @@
 # cl-cc
 
-A self-hosting Common Lisp compiler and runtime implemented in pure Common Lisp — no C, no FFI.
+A self-hosting Common Lisp compiler and runtime implemented in pure Common Lisp — no project C source; the VM interpreter includes a minimal SBCL host-backed CFFI-compatible FFI shim.
 
 cl-cc compiles ANSI Common Lisp to a register-based bytecode VM, and from there to native x86-64, AArch64, and WebAssembly. The compiler is itself written in Common Lisp, and its core design — CLOS dispatch, Prolog-based optimization, CPS transformation, Hindley–Milner type inference — is implemented using the same language features it compiles.
 
@@ -8,19 +8,19 @@ cl-cc compiles ANSI Common Lisp to a register-based bytecode VM, and from there 
 
 ```bash
 nix develop
-nix run .#test       # canonical full plan (unit + integration + selfhost-slow + e2e)
+nix run .#test       # canonical fast unit plan
 cl-cc repl           # interactive REPL
 cl-cc run file.lisp
 cl-cc eval "(+ 1 2)"
 cl-cc compile file.lisp -o out --arch x86-64
 ```
 
-`nix run .#test` maps to `cl-cc/test:run-tests` and executes the full
-canonical plan, including `selfhost-slow-suite` (loaded on demand via
-`:cl-cc-test/slow`). `nix flake check` invokes the same plan via
-`checks.tests`.
+`nix run .#test` maps to `cl-cc/test:run-tests` and executes the canonical
+fast unit plan. Integration and self-hosting E2E suites are selected by suite
+taxonomy and run explicitly; they no longer depend on `slow` names.
+`nix flake check` invokes the same fast plan via `checks.tests`.
 
-Set `CLCC_TEST_TIMEOUT` to override the default per-test timeout (seconds; default: 180).
+Set `CLCC_TEST_TIMEOUT` to override the default per-test timeout (seconds; default: 10).
 Set `CLCC_SUITE_TIMEOUT` to override the whole-suite timeout (seconds; default: 600).
 Stale FASLs (e.g. after switching between project paths) can be cleared with
 `rm -rf ~/.cache/common-lisp/ && mkdir -p ~/.cache/common-lisp/`. The runner
@@ -364,7 +364,7 @@ $ cl-cc repl
 - **`format` directives**: Delegated to the host SBCL in the VM interpreter. Not available in native binaries.
 - **Number tower**: `bignum`, `ratio`, `complex` work in the VM interpreter (host SBCL handles the arithmetic). Not represented in the native x86-64 backend (fixnum only).
 - **Streams**: File handles are integers; first-class stream objects and stream predicates (`streamp`, `stream-element-type`) are not implemented.
-- **`load`**: Not yet implemented. Use `cl-cc run <file>` to execute files.
+- **Native backend parity**: Some VM-interpreter facilities (`load`, host-backed FFI, host-backed `format`, and host stream bridges) are not yet available in native binaries.
 
 ## Building & Testing
 
@@ -372,7 +372,7 @@ $ cl-cc repl
 # Enter development environment
 nix develop
 
-# Run the canonical full test plan (unit + integration + selfhost-slow + e2e)
+# Run the canonical fast unit test plan
 nix run .#test
 
 # Build the standalone binary → ./result/bin/cl-cc
@@ -381,7 +381,7 @@ nix build
 # Format the repo (nixfmt + deadnix + statix + prettier) via treefmt
 nix fmt
 
-# CI-equivalent check (flake evaluation + build + canonical test plan)
+# CI-equivalent check (flake evaluation + build + fast unit test plan)
 nix flake check
 
 # Clear FASL cache if tests misbehave (rm + mkdir avoids macOS SBCL race)

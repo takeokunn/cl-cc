@@ -26,7 +26,7 @@
         ${apps.test.program}
       '';
       installPhase = "mkdir -p $out && touch $out/passed";
-      meta.description = "cl-cc canonical test suite (unit + integration + selfhost-slow + e2e)";
+      meta.description = "cl-cc canonical fast unit test suite";
     };
 
     build = packagesDefault;

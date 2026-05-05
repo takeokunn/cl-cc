@@ -38,12 +38,21 @@ ENV may be a type-env struct or nil (empty env)."
     (make-type-scheme to-q ty)))
 
 (defun instantiate (scheme)
-  "Instantiate SCHEME with fresh type vars."
+  "Instantiate SCHEME with fresh type vars, preserving quantified bounds."
   (let* ((qvars (type-scheme-quantified-vars scheme))
          (body  (type-scheme-type scheme))
          (subst (make-substitution)))
     (dolist (v qvars)
       (subst-extend! v (fresh-type-var (type-var-name v)) subst))
+    (dolist (v qvars)
+      (let ((fresh (zonk v subst)))
+        (when (type-var-p fresh)
+          (setf (type-var-upper-bound fresh)
+                (and (type-var-upper-bound v)
+                     (zonk (type-var-upper-bound v) subst))
+                (type-var-lower-bound fresh)
+                (and (type-var-lower-bound v)
+                     (zonk (type-var-lower-bound v) subst))))))
     (zonk body subst)))
 
 (defun %nv-canonical (v mapping counter-cell)

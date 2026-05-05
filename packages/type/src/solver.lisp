@@ -86,8 +86,12 @@ Returns (values new-subst residual-constraints).
                   (wanted (third args)))
              ;; Extend subst with fresh vars for qvars (local scope)
              (let ((local-subst (make-substitution)))
-               (dolist (v qvars)
-                 (subst-extend! v (fresh-type-var (type-var-name v)) local-subst))
+                (dolist (v qvars)
+                  (subst-extend! v
+                                 (fresh-type-var (type-var-name v)
+                                                 :upper-bound (type-var-upper-bound v)
+                                                 :lower-bound (type-var-lower-bound v))
+                                 local-subst))
                ;; Solve given locally
                (multiple-value-bind (s2 _r)
                    (solve-constraints (mapcar (lambda (g)

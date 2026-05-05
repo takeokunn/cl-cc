@@ -74,6 +74,7 @@ When TAIL-P is true, replace the current leaf frame instead of pushing a new one
    ;; Standard I/O streams — bound to host streams at init
    '(*standard-output* *standard-output*)
    '(*standard-input* *standard-input*)
+   '(*terminal-io* *terminal-io*)
    '(*error-output* *error-output*)
    '(*trace-output* *trace-output*)
    '(*debug-io* *debug-io*)

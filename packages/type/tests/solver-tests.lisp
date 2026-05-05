@@ -5,10 +5,11 @@
 
 (in-package :cl-cc/test)
 
-(defsuite solver-suite :description "OutsideIn(X
-  :parent cl-cc-unit-suite) 
+(defsuite solver-suite
+  :description "OutsideIn(X) constraint solver tests"
+  :parent cl-cc-unit-suite)
+
 (in-suite solver-suite)
-constraint solver tests")
 
 ;;; ─── solve-constraints: equality ───────────────────────────────────────────
 
@@ -35,6 +36,72 @@ constraint solver tests")
       (assert-null residual)
       (assert-true (type-equal-p type-int (zonk v1 new-subst)))
       (assert-true (type-equal-p type-int (zonk v2 new-subst))))))
+
+(deftest solver-bounded-type-var-equality
+  "Bounded type variables accept bindings inside bounds and reject violations."
+  (let* ((number-type (make-type-primitive :name 'number))
+         (upper-ok (fresh-type-var "a" :upper-bound number-type))
+         (upper-bad (fresh-type-var "b" :upper-bound number-type))
+         (lower-ok (fresh-type-var "c" :lower-bound type-int))
+         (lower-bad (fresh-type-var "d" :lower-bound type-int)))
+    (multiple-value-bind (_subst residual)
+        (cl-cc/type:solve-constraints
+         (list (make-equal-constraint upper-ok type-int))
+         (make-substitution))
+      (declare (ignore _subst))
+      (assert-null residual))
+    (multiple-value-bind (_subst residual)
+        (cl-cc/type:solve-constraints
+         (list (make-equal-constraint upper-bad type-string))
+         (make-substitution))
+      (declare (ignore _subst))
+      (assert-equal 1 (length residual)))
+    (multiple-value-bind (_subst residual)
+        (cl-cc/type:solve-constraints
+         (list (make-equal-constraint lower-ok type-any))
+         (make-substitution))
+      (declare (ignore _subst))
+      (assert-null residual))
+    (multiple-value-bind (_subst residual)
+        (cl-cc/type:solve-constraints
+         (list (make-equal-constraint lower-bad type-string))
+         (make-substitution))
+      (declare (ignore _subst))
+      (assert-equal 1 (length residual)))))
+
+
+(deftest solver-bounded-type-var-propagates-through-var
+  "Variable-to-variable unification preserves bounds on the surviving variable."
+  (let* ((number-type (make-type-primitive :name 'number))
+         (bounded (fresh-type-var "a" :upper-bound number-type))
+         (survivor (fresh-type-var "b")))
+    (multiple-value-bind (subst ok)
+        (cl-cc/type:type-unify bounded survivor (make-substitution))
+      (assert-true ok)
+      (assert-true (type-equal-p number-type (cl-cc/type:type-var-upper-bound survivor)))
+      (multiple-value-bind (_bad bad-ok)
+          (cl-cc/type:type-unify survivor type-string subst)
+        (declare (ignore _bad))
+        (assert-false bad-ok))
+      (multiple-value-bind (_good good-ok)
+          (cl-cc/type:type-unify survivor type-int subst)
+        (declare (ignore _good))
+        (assert-true good-ok)))))
+
+(deftest solver-instantiate-preserves-bounded-quantifier
+  "Instantiating a type scheme copies upper/lower bounds onto fresh variables."
+  (let* ((number-type (make-type-primitive :name 'number))
+         (qvar (fresh-type-var "a"
+                               :upper-bound number-type
+                               :lower-bound type-int))
+         (scheme (make-type-scheme (list qvar) qvar))
+         (instantiated (instantiate scheme)))
+    (assert-true (type-var-p instantiated))
+    (assert-false (type-var-equal-p qvar instantiated))
+    (assert-true (type-equal-p number-type
+                               (cl-cc/type:type-var-upper-bound instantiated)))
+    (assert-true (type-equal-p type-int
+                               (cl-cc/type:type-var-lower-bound instantiated)))))
 
 (deftest solver-conflicting-equalities-produce-residual
   "Conflicting equalities (v~int and v~string) leave a non-empty residual."

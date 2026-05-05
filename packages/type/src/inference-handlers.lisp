@@ -124,6 +124,17 @@ Pass 2: infer each binding in the fully-seeded mutual environment."
     (register-class-type (cl-cc/ast:ast-defclass-name ast) slot-types)
     (values type-symbol nil)))
 
+(defun infer-defmethod (ast)
+  "Register defmethod specializers as structural protocol method members."
+  (dolist (spec (cl-cc/ast:ast-defmethod-specializers ast))
+    (let ((class-name (and (consp spec) (cdr spec))))
+      (when (and (symbolp class-name)
+                 (not (member class-name '(t) :test #'eq)))
+        (register-class-method-type class-name
+                                    (cl-cc/ast:ast-defmethod-name ast)
+                                    type-any))))
+  (values type-symbol nil))
+
 (defun infer-make-instance (ast)
   "Infer type of a make-instance call; uses the class name as a primitive type."
   (let ((class-expr (cl-cc/ast:ast-make-instance-class ast)))
@@ -170,6 +181,7 @@ Returns (values type substitution) or signals a type-error condition."
     (cl-cc/ast:ast-block         (infer-body (cl-cc/ast:ast-block-body ast) env))
     (cl-cc/ast:ast-return-from   (infer (cl-cc/ast:ast-return-from-value ast) env))
     (cl-cc/ast:ast-defclass      (infer-defclass      ast))
+    (cl-cc/ast:ast-defmethod     (infer-defmethod     ast))
     (cl-cc/ast:ast-make-instance (infer-make-instance ast))
     (cl-cc/ast:ast-slot-value    (infer-slot-value    ast env))
     (t (values +type-unknown+ nil))))

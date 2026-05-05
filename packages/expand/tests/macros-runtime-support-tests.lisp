@@ -51,3 +51,9 @@
          (result-str (format nil "~S" result)))
     (assert-true (search "RT-FIND-PACKAGE" result-str))
     (assert-false (search "(FIND-PACKAGE :CL-USER)" result-str))))
+
+(deftest foreign-funcall-expands-to-vm-bridge
+  "FOREIGN-FUNCALL expands directly to the VM bridge implementation."
+  (let ((result (our-macroexpand-1 '(foreign-funcall "strlen" :string "abcd" :int))))
+    (assert-string= "%FOREIGN-FUNCALL" (symbol-name (car result)))
+    (assert-string= "CL-CC/VM" (package-name (symbol-package (car result))))))

@@ -35,10 +35,10 @@
    #:ast-flet-bindings #:ast-flet-body
    #:ast-labels #:make-ast-labels #:ast-labels-p
    #:ast-labels-bindings #:ast-labels-body
-   #:ast-defun #:make-ast-defun #:ast-defun-p
-   #:ast-defun-name #:ast-defun-params #:ast-defun-optional-params
-   #:ast-defun-rest-param #:ast-defun-key-params
-   #:ast-defun-declarations #:ast-defun-body
+    #:ast-defun #:make-ast-defun #:ast-defun-p
+    #:ast-defun-name #:ast-defun-params #:ast-defun-optional-params
+    #:ast-defun-rest-param #:ast-defun-key-params
+    #:ast-defun-declarations #:ast-defun-body #:ast-defun-documentation
    #:ast-defvar #:make-ast-defvar #:ast-defvar-p
    #:ast-defvar-name #:ast-defvar-value #:ast-defvar-kind
    #:ast-defmacro #:make-ast-defmacro #:ast-defmacro-p

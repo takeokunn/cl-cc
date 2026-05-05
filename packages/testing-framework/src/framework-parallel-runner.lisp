@@ -214,21 +214,24 @@ When QUIT-P is true, exits via uiop:quit; otherwise returns whether any test fai
         (%suite-timeout-result suite-name suite-timeout quit-p)))))
 
 (defun run-tests (&key
-                     (tags nil)
-                     (exclude-tags nil)
-                     (exclude-suites nil)
-                     (parallel t)
-                     (random nil))
-  "Run the full canonical CL-CC test plan, including slow self-hosting suites."
-  (unless (persist-lookup *suite-registry* 'selfhost-slow-suite)
-    (asdf:load-system :cl-cc-test/slow))
+                      (tags nil)
+                      (exclude-tags nil)
+                      (exclude-suites nil)
+                      (parallel t)
+                      (random nil))
+  "Run the canonical fast CL-CC test plan.
+Integration and end-to-end tests are run explicitly by suite taxonomy, not by
+naming anything slow or auto-loading an auxiliary system."
   (run-suite 'cl-cc-suite
              :parallel parallel
              :random random
              :warm-stdlib t
              :tags tags
              :exclude-tags exclude-tags
-             :exclude-suites exclude-suites))
+             :exclude-suites (remove-duplicates
+                              (append exclude-suites
+                                      '(cl-cc-integration-suite cl-cc-e2e-suite))
+                              :test #'eq)))
 
 (defun %resolve-suite (package-name symbol-name)
   (let* ((pkg (find-package package-name))

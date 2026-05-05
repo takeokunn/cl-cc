@@ -71,9 +71,9 @@
                        :test (lambda (s names) (member s names :test #'string=)))))
     (if entry
         (cdr entry)
-        (let ((alias (and (boundp '*type-alias-registry*)
-                          (gethash name *type-alias-registry*))))
-          (if alias
+         (let ((alias (and (boundp '*type-alias-registry*)
+                           (gethash name *type-alias-registry*))))
+           (if alias
               (parse-type-specifier alias)
               (make-type-primitive :name name))))))
 
@@ -100,7 +100,24 @@ Value is the base type name passed to make-type-primitive.")
   (let ((ctor (cdr (assoc head *parse-compound-multi-arg-table*))))
     (when ctor
       (unless args (type-parse-error "~A requires at least one type" head))
-      (funcall (symbol-function ctor) (mapcar #'parse-type-specifier args)))))
+      (let ((types (mapcar #'parse-type-specifier args)))
+        (when (and (eq head 'and)
+                   (%intersection-definitely-uninhabited-p types))
+          (type-parse-error "Uninhabited intersection type: ~S" (cons head args)))
+        (funcall (symbol-function ctor) types)))))
+
+(defun %primitive-types-disjoint-p (t1 t2)
+  "Return T for primitive types with no obvious common inhabitant."
+  (and (type-primitive-p t1)
+       (type-primitive-p t2)
+       (not (type-name-subtype-p (type-primitive-name t1) (type-primitive-name t2)))
+       (not (type-name-subtype-p (type-primitive-name t2) (type-primitive-name t1)))))
+
+(defun %intersection-definitely-uninhabited-p (types)
+  "Conservatively detect impossible intersections such as (and integer string)."
+  (loop for rest on types
+        thereis (loop for other in (cdr rest)
+                      thereis (%primitive-types-disjoint-p (car rest) other))))
 
 (defun %parse-compound-type-app (head args)
   "Build a type-app node for a registered single-arg HEAD."

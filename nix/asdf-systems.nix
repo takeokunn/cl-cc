@@ -275,16 +275,8 @@ let
     (projectRoot + "/cl-cc-test.asd")
   ];
 
-  # cl-cc-test/slow is precompiled here so that the canonical `nix run .#test`
-  # does not pay a cold-FASL compile cost on first invocation. Path-baking is
-  # avoided because selfhost-test-support.lisp now exposes selfhost-all-source-files
-  # as a function (resolved at call time against the live ASDF state) rather
-  # than a load-time defparameter.
-  # cl-cc-test/slow is intentionally NOT precompiled here. Loading the
-  # precompiled FASL hangs in unsymbolicated SBCL JIT code (root cause not
-  # tracked down). The runtime auto-load path through `(asdf:load-system
-  # :cl-cc-test/slow)` from inside `run-tests` works correctly with on-the-fly
-  # compilation into ~/.cache/common-lisp/.
+  # Keep self-hosting E2E tests available as an explicit system; the canonical
+  # fast test app does not auto-load it.
   testAsdfSystems = {
     "cl-cc-test" = sbcl.buildASDFSystem {
       pname = "cl-cc-test";
@@ -297,10 +289,23 @@ let
         cl-cc-testing-framework
       ];
     };
+    "cl-cc-test/e2e" = sbcl.buildASDFSystem {
+      pname = "cl-cc-test-e2e";
+      version = "0.1.0";
+      src = pkgSrc testSrc;
+      systems = [ "cl-cc-test/e2e" ];
+      lispLibs = with productionAsdfSystems; [
+        cl-cc
+        cl-cc-cli
+        cl-cc-testing-framework
+      ];
+    };
   };
 in
 {
   inherit productionAsdfSystems testAsdfSystems;
   sbclWithCLCC = sbcl.withPackages (_: lib.attrValues productionAsdfSystems);
-  sbclWithTests = sbcl.withPackages (_: lib.attrValues (productionAsdfSystems // testAsdfSystems));
+  sbclWithTests = sbcl.withPackages (
+    _: (lib.attrValues productionAsdfSystems) ++ [ testAsdfSystems."cl-cc-test" ]
+  );
 }

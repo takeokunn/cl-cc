@@ -14,7 +14,8 @@
   :cases (("to-string"        '(coerce v 'string)        "COERCE-TO-STRING")
           ("to-simple-string" '(coerce v 'simple-string) "COERCE-TO-STRING")
           ("to-list"          '(coerce v 'list)          "COERCE-TO-LIST")
-          ("to-vector"        '(coerce v 'vector)        "COERCE-TO-VECTOR"))
+          ("to-vector"        '(coerce v 'vector)        "COERCE-TO-VECTOR")
+          ("to-character"     '(coerce v 'character)     "CHARACTER"))
   (form expected-name)
   (let ((result (our-macroexpand-1 form)))
     (assert-equal (symbol-name (car result)) expected-name)
@@ -24,6 +25,7 @@
   "COERCE with a non-literal type dispatches to %coerce-runtime"
   (let ((result (our-macroexpand-1 '(coerce v type-var))))
     (assert-equal (symbol-name (car result)) "%COERCE-RUNTIME")
+    (assert-eq (symbol-package (car result)) (symbol-package 'type-var))
     (assert-equal (cadr result) 'v)))
 
 (deftest map-delegates-to-mapcar-coerce

@@ -18,10 +18,12 @@
              (symbolp fn-name)
              (listp (third form))
              (lambda-list-has-typed-p (third form)))
-        (expand-typed-defun-or-lambda 'defun fn-name (third form) body)
+        (expand-typed-defun-or-lambda 'defun fn-name (third form)
+                                      (if docstring (cons docstring body) body))
         (list* 'defun fn-name
                (expand-lambda-list-defaults (third form))
-               (mapcar #'compiler-macroexpand-all body)))))
+               (append (when docstring (list docstring))
+                       (mapcar #'compiler-macroexpand-all body))))))
 
 ;; lambda — typed params get check-type assertions; untyped: expand defaults + body
 (define-expander-for lambda (form)

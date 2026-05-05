@@ -87,7 +87,8 @@
 
 (defstruct (ast-defun (:include ast-callable))
   "Top-level function definition AST node."
-  (name nil :type symbol))
+  (name nil :type symbol)
+  (documentation nil :type (or null string)))
 
 (defstruct (ast-defvar (:include ast-node))
   "Top-level variable definition AST node (defvar/defparameter)."

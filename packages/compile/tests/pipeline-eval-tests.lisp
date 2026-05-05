@@ -28,8 +28,12 @@
 
 (deftest-each pipeline-typed-fixnum-instruction-types
   "Typed fixnum operations compile to the specialized VM instruction types."
-  :cases (("add" "(defun typed-add ((x fixnum) (y fixnum)) fixnum (+ x y))" 'cl-cc/vm::vm-add)
-          ("lt"  "(defun typed-lt  ((x fixnum) (y fixnum)) fixnum (< x y))"  'cl-cc/vm::vm-lt))
+  :cases (("add" "(defun typed-add ((x fixnum) (y fixnum)) fixnum (+ x y))" 'cl-cc/vm::vm-integer-add)
+          ("sub" "(defun typed-sub ((x fixnum) (y fixnum)) fixnum (- x y))" 'cl-cc/vm::vm-integer-sub)
+          ("mul" "(defun typed-mul ((x fixnum) (y fixnum)) fixnum (* x y))" 'cl-cc/vm::vm-integer-mul)
+          ("lt"  "(defun typed-lt  ((x fixnum) (y fixnum)) fixnum (< x y))" 'cl-cc/vm::vm-lt)
+          ("gt"  "(defun typed-gt  ((x fixnum) (y fixnum)) fixnum (> x y))" 'cl-cc/vm::vm-gt)
+          ("eq"  "(defun typed-eq  ((x fixnum) (y fixnum)) fixnum (= x y))" 'cl-cc/vm::vm-num-eq))
   (code expected-type)
   (let ((instrs (vm-program-instructions
                  (compilation-result-program (compile-string code :target :vm)))))

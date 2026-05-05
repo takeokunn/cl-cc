@@ -30,15 +30,23 @@ KIND: the kind of this type (a kind-node); nil means not yet inferred."
 (defstruct (type-var (:include type-node) (:constructor %make-type-var))
   "A unification variable — the mutable cell of constraint solving.
 ID uniquely identifies this variable. NAME is a debug hint.
-LINK: when non-nil, this variable has been unified with LINK (path compression)."
-  (id   0   :type fixnum)
-  (name nil)
-  (link nil))
+LINK: when non-nil, this variable has been unified with LINK (path compression).
+UPPER-BOUND / LOWER-BOUND carry bounded-polymorphism constraints for the
+variable itself: LOWER-BOUND <: this-var <: UPPER-BOUND."
+  (id          0   :type fixnum)
+  (name        nil)
+  (link        nil)
+  (upper-bound nil)
+  (lower-bound nil))
 
-(defun fresh-type-var (&optional name)
-  "Return a fresh unification variable with a unique ID."
+(defun fresh-type-var (&optional name &key upper-bound lower-bound)
+  "Return a fresh unification variable with a unique ID.
+UPPER-BOUND and LOWER-BOUND are optional type-node bounds used by bounded
+polymorphism."
   (incf *type-var-counter*)
-  (%make-type-var :id *type-var-counter* :name name))
+  (%make-type-var :id *type-var-counter* :name name
+                  :upper-bound upper-bound
+                  :lower-bound lower-bound))
 
 (defun reset-type-vars! ()
   "Reset the type variable counter — use only in tests."

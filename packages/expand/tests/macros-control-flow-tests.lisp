@@ -160,7 +160,7 @@ so (and a b c) arrives as fully-nested IFs rather than (if a (and b c) nil)."
     (assert-eq (caaddr result) 'let)))
 
 (deftest defun-c-runtime-contracts
-  "DEFUN/C expands to runtime contract guards around function body."
+  "DEFUN/C expands to DEFUN with runtime pre/postcondition guards."
   :timeout 10
   (let ((expanded-1
           (our-macroexpand-1
@@ -168,11 +168,15 @@ so (and a b c) arrives as fully-nested IFs rather than (if a (and b c) nil)."
               :requires (> x 0)
               :ensures (= result (+ x 1))
               (+ x 1)))))
-    (assert-eq 'defun/c (car expanded-1))
-    (let ((expanded (our-macroexpand-all expanded-1 nil)))
-      (assert-eq 'defun/c (car expanded))
-      (assert-eq 'add1-positive-mcf (cadr expanded))
-      (assert-equal '(x) (caddr expanded)))))
+    (assert-eq 'defun (car expanded-1))
+    (assert-eq 'add1-positive-mcf (cadr expanded-1))
+    (assert-equal '(x) (caddr expanded-1))
+    (assert-true
+     (some (lambda (form) (and (consp form) (eq (car form) 'unless)))
+           (cdddr expanded-1)))
+    (assert-true
+     (some (lambda (form) (and (consp form) (eq (car form) 'let)))
+           (cdddr expanded-1)))))
 
 (deftest macroexpansion-memoization-reuses-cached-result
   "Repeated macro expansion of the same form is stable.

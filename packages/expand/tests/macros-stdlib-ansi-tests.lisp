@@ -54,6 +54,20 @@
     (assert-true cerror)
     (assert-equal "msg ~A" (third cerror))))
 
+(deftest assert-with-places-wraps-store-value-restart
+  "ASSERT with PLACES establishes a STORE-VALUE restart around the failure branch."
+  (let* ((result (our-macroexpand-1 '(assert ok (x y))))
+         (tagbody-form (third result))
+         (unless-form (third tagbody-form))
+         (if-form (third unless-form))
+         (restart-form (third if-form))
+         (store-value-clause (third restart-form)))
+    (assert-eq 'let (car result))
+    (assert-eq 'tagbody (car tagbody-form))
+    (assert-eq 'unless (car unless-form))
+    (assert-eq 'restart-case (car restart-form))
+    (assert-eq 'store-value (car store-value-clause))))
+
 ;;; ─── define-condition ─────────────────────────────────────────────────────
 
 (deftest define-condition-basic-structure

@@ -93,4 +93,94 @@ or any handle allocated by vm-allocate-file-handle."
       (gethash handle (vm-open-files state))
       (gethash handle (vm-string-streams state))))
 
+(defun %vm-bridge-stream-arg (value)
+  "Resolve a VM stream handle passed through a host bridge callable."
+  (if *vm-current-state*
+      (vm-get-stream *vm-current-state* value)
+      value))
+
+(defun %vm-stream-handle-for-stream (state stream)
+  "Return the VM handle for STREAM in STATE, or NIL when STREAM is direct."
+  (let ((found nil))
+    (maphash (lambda (handle candidate)
+               (when (eq candidate stream)
+                 (setf found handle)))
+             (vm-open-files state))
+    (unless found
+      (maphash (lambda (handle candidate)
+                 (when (eq candidate stream)
+                   (setf found handle)))
+               (vm-string-streams state)))
+    found))
+
+(defun %vm-bridge-stream-result (stream)
+  "Convert host STREAM back to its VM handle when one exists."
+  (if *vm-current-state*
+      (or (%vm-stream-handle-for-stream *vm-current-state* stream) stream)
+      stream))
+
+(defun %vm-bridge-symbol-stream-value (symbol)
+  "Return SYMBOL's current stream value, preferring the active VM global store."
+  (if *vm-current-state*
+      (multiple-value-bind (value found-p)
+          (gethash symbol (vm-global-vars *vm-current-state*))
+        (if found-p
+            (%vm-bridge-stream-arg value)
+            (symbol-value symbol)))
+      (symbol-value symbol)))
+
+(defun %vm-bridge-make-synonym-stream (symbol)
+  "Construct a usable stream for VM synonym-stream calls.
+
+Host synonym streams follow host dynamic bindings, not VM global bindings, so
+the VM bridge resolves the current VM symbol value to its underlying stream."
+  (if *vm-current-state*
+      (%vm-bridge-symbol-stream-value symbol)
+      (make-synonym-stream symbol)))
+
+(defun %vm-bridge-make-broadcast-stream (&rest streams)
+  (apply #'make-broadcast-stream (mapcar #'%vm-bridge-stream-arg streams)))
+
+(defun %vm-bridge-make-two-way-stream (input-stream output-stream)
+  (make-two-way-stream (%vm-bridge-stream-arg input-stream)
+                       (%vm-bridge-stream-arg output-stream)))
+
+(defun %vm-bridge-make-echo-stream (input-stream output-stream)
+  (make-echo-stream (%vm-bridge-stream-arg input-stream)
+                    (%vm-bridge-stream-arg output-stream)))
+
+(defun %vm-bridge-make-concatenated-stream (&rest streams)
+  (apply #'make-concatenated-stream (mapcar #'%vm-bridge-stream-arg streams)))
+
+(defun %vm-bridge-broadcast-stream-streams (stream)
+  (mapcar #'%vm-bridge-stream-result (broadcast-stream-streams stream)))
+
+(defun %vm-bridge-two-way-stream-input-stream (stream)
+  (%vm-bridge-stream-result (two-way-stream-input-stream stream)))
+
+(defun %vm-bridge-two-way-stream-output-stream (stream)
+  (%vm-bridge-stream-result (two-way-stream-output-stream stream)))
+
+(defun %vm-bridge-echo-stream-input-stream (stream)
+  (%vm-bridge-stream-result (echo-stream-input-stream stream)))
+
+(defun %vm-bridge-echo-stream-output-stream (stream)
+  (%vm-bridge-stream-result (echo-stream-output-stream stream)))
+
+(defun %vm-bridge-concatenated-stream-streams (stream)
+  (mapcar #'%vm-bridge-stream-result (concatenated-stream-streams stream)))
+
+(eval-when (:load-toplevel :execute)
+  (vm-register-host-bridge 'make-synonym-stream #'%vm-bridge-make-synonym-stream)
+  (vm-register-host-bridge 'make-broadcast-stream #'%vm-bridge-make-broadcast-stream)
+  (vm-register-host-bridge 'make-two-way-stream #'%vm-bridge-make-two-way-stream)
+  (vm-register-host-bridge 'make-echo-stream #'%vm-bridge-make-echo-stream)
+  (vm-register-host-bridge 'make-concatenated-stream #'%vm-bridge-make-concatenated-stream)
+  (vm-register-host-bridge 'broadcast-stream-streams #'%vm-bridge-broadcast-stream-streams)
+  (vm-register-host-bridge 'two-way-stream-input-stream #'%vm-bridge-two-way-stream-input-stream)
+  (vm-register-host-bridge 'two-way-stream-output-stream #'%vm-bridge-two-way-stream-output-stream)
+  (vm-register-host-bridge 'echo-stream-input-stream #'%vm-bridge-echo-stream-input-stream)
+  (vm-register-host-bridge 'echo-stream-output-stream #'%vm-bridge-echo-stream-output-stream)
+  (vm-register-host-bridge 'concatenated-stream-streams #'%vm-bridge-concatenated-stream-streams))
+
 ;;; I/O instruction class declarations are in io-instructions.lisp (loads next).

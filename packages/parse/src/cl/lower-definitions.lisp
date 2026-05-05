@@ -42,24 +42,30 @@
         (%extract-leading-type-declarations (cdddr node))
       (multiple-value-bind (declarations body-forms)
           (%extract-leading-declarations body-forms)
-        (let ((block-body (list (lower-sexp-to-ast (list* 'block name body-forms)))))
+        (let* ((docstring (and (stringp (first body-forms))
+                               (rest body-forms)
+                               (first body-forms)))
+               (executable-forms (if docstring (rest body-forms) body-forms))
+               (block-body (list (lower-sexp-to-ast (list* 'block name executable-forms)))))
           (if (lambda-list-has-extended-p raw-params)
               (multiple-value-bind (required optional rest-param key-params)
                   (%lower-extended-params raw-params)
                 (make-ast-defun :name name
-                                :params (%apply-type-bindings-to-params required type-bindings)
-                                :optional-params optional :rest-param rest-param
-                                :key-params key-params   :body block-body
-                                :declarations declarations
-                                :source-file sf :source-line sl :source-column sc))
+                                 :params (%apply-type-bindings-to-params required type-bindings)
+                                 :optional-params optional :rest-param rest-param
+                                 :key-params key-params   :body block-body
+                                 :declarations declarations
+                                 :documentation docstring
+                                 :source-file sf :source-line sl :source-column sc))
               (progn
                 (unless (every #'symbolp raw-params)
                   (error "defun parameters must be symbols"))
                 (make-ast-defun :name name
-                                :params (%apply-type-bindings-to-params raw-params type-bindings)
-                                :declarations declarations
-                                :body block-body
-                                :source-file sf :source-line sl :source-column sc))))))))
+                                 :params (%apply-type-bindings-to-params raw-params type-bindings)
+                                 :declarations declarations
+                                 :documentation docstring
+                                 :body block-body
+                                 :source-file sf :source-line sl :source-column sc))))))))
 
 ;;; ── Defvar / Defparameter ────────────────────────────────────────────────────
 

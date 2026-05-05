@@ -192,12 +192,14 @@
    vm-hash-table-values
    vm-hash-table-test
    vm-hash-table-size
-   vm-hash-table-rehash-size
-   vm-hash-table-rehash-threshold
-   vm-hash-test
-   vm-found-dst
-   vm-hash-key
-   vm-hash-value
-   vm-hash-table-reg
-   vm-hash-default
-   vm-hash-fn))
+    vm-hash-table-rehash-size
+    vm-hash-table-rehash-threshold
+    vm-hash-test
+    vm-found-dst
+    vm-hash-key
+    vm-hash-value
+    vm-hash-table-reg
+    vm-hash-default
+    vm-hash-fn
+    string-to-octets
+    octets-to-string))

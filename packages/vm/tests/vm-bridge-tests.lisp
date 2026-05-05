@@ -50,6 +50,14 @@
     (cl-cc/vm::vm-register-host-bridge sym (lambda () :ok))
     (assert-true (gethash sym cl-cc/vm::*vm-host-bridge-functions*))))
 
+(deftest vm-bridge-callable-resolves-same-name-aliases
+  "vm-bridge-callable resolves registered bridge functions across package aliases."
+  (let ((callable (cl-cc/vm::vm-bridge-callable (make-symbol "STRING-TO-OCTETS"))))
+    (assert-true (functionp callable))
+    (let ((octets (funcall callable "é" :external-format :latin-1)))
+      (assert-= 1 (length octets))
+      (assert-= 233 (aref octets 0)))))
+
 (deftest vm-bridge-registers-compile-file-pathname
   "compile-file-pathname is an intentional host bridge entry, not dead pathname surface."
   (let ((callable (gethash 'compile-file-pathname cl-cc/vm::*vm-host-bridge-functions*)))
@@ -129,10 +137,22 @@
            (assert-eq registry (cl-cc/vm::%vm-runtime-package-registry)))
       (setf cl-cc/bootstrap::*runtime-package-registry-provider* old-provider))))
 
-(deftest vm-bridge-does-not-keep-stale-pathname-entries
-  "Unused pathname bridge entries stay pruned instead of lingering as dead surface." 
-  (dolist (sym '(ensure-directories-exist pathname-host pathname-device pathname-directory))
-    (assert-false (gethash sym cl-cc/vm::*vm-host-bridge-functions*))))
+(deftest vm-bridge-registers-confirmed-stdlib-bridge-entries
+  "Confirmed pathname/file/stream/debug/query bridges stay registered for compiled user code."
+  (dolist (sym '(make-pathname pathname namestring file-namestring
+                 pathname-name pathname-type pathname-host pathname-device
+                 pathname-directory pathname-version merge-pathnames truename
+                 parse-namestring wild-pathname-p pathname-match-p
+                 translate-pathname compile-file-pathname probe-file
+                 rename-file delete-file file-write-date file-author
+                 directory ensure-directories-exist make-synonym-stream
+                 make-broadcast-stream make-two-way-stream make-echo-stream
+                 make-concatenated-stream broadcast-stream-streams
+                 two-way-stream-input-stream two-way-stream-output-stream
+                 echo-stream-input-stream echo-stream-output-stream
+                 concatenated-stream-streams file-string-length disassemble
+                 inspect y-or-n-p yes-or-no-p string-to-octets octets-to-string))
+    (assert-true (functionp (cl-cc/vm::vm-bridge-callable sym)))))
 
 ;;; ─── slot-definition-name ────────────────────────────────────────────────
 

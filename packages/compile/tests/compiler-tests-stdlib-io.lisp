@@ -202,6 +202,10 @@
   "coerce converts between chars/lists/strings/vectors."
   (assert-string= "abc" (run-string "(coerce (list #\\a #\\b #\\c) 'string)"))
   (assert-true (equal '(#\h #\i) (run-string "(coerce \"hi\" 'list)")))
+  (assert-= 65 (run-string "(char-code (character \"A\"))"))
+  (assert-= 66 (run-string "(char-code (coerce \"B\" 'character))"))
+  (assert-= 90 (run-string "(let ((ty 'character)) (char-code (coerce \"Z\" ty)))" :stdlib t))
+  (assert-= 90 (run-string "(char-code (character 'z))"))
   (let ((result (run-string "(coerce (list 1 2 3) 'vector)")))
     (assert-true (vectorp result))
     (assert-= 3 (length result))))

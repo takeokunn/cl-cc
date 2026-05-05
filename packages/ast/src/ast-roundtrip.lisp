@@ -122,10 +122,12 @@ KEY slots may include a fourth explicit keyword-name element."
   (list* 'defun
          (ast-defun-name node)
          (%ast-callable-lambda-list (ast-defun-params node)
-                                    (ast-defun-optional-params node)
-                                    (ast-defun-rest-param node)
-                                    (ast-defun-key-params node))
-         (append (ast-defun-declarations node)
+                                     (ast-defun-optional-params node)
+                                     (ast-defun-rest-param node)
+                                     (ast-defun-key-params node))
+         (append (when (ast-defun-documentation node)
+                   (list (ast-defun-documentation node)))
+                 (ast-defun-declarations node)
                  (mapcar #'ast-to-sexp (ast-defun-body node)))))
 
 (defmethod ast-to-sexp ((node ast-defvar))

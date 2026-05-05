@@ -115,6 +115,8 @@
         (%extract-leading-type-declarations (cddr node))
       (multiple-value-bind (declarations body-forms)
           (%extract-leading-declarations body-forms)
+        (when (and (stringp (first body-forms)) (rest body-forms))
+          (setf body-forms (rest body-forms)))
         (if (lambda-list-has-extended-p raw-params)
             (multiple-value-bind (required optional rest-param key-params)
                 (%lower-extended-params raw-params)

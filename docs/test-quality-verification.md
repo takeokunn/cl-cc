@@ -15,14 +15,14 @@
 この文書単体をもって「完了」「green」「CI 相当で十分」とは見なしません。
 現在の検証可否は、常に以下の実ラン結果で判断してください。
 
-1. `nix run .#test`（canonical full plan。unit + integration + selfhost-slow + e2e）
+1. `nix run .#test`（canonical fast unit plan）
 2. `nix build`
-3. 必要に応じて `nix flake check`（sandbox derivation で同じ plan を実行）
+3. 必要に応じて `nix flake check`（sandbox derivation で同じ fast unit plan を実行）
 
 ### gate の役割分担
 
 - `nix run .#test`
-  - 単一の canonical test gate。selfhost-slow / e2e を含む。
+  - canonical fast unit gate。integration / e2e は suite taxonomy で明示実行する。
 - `nix flake check`
   - CI 向け gate。`checks.tests`（`run-tests` を sandbox 内で呼び出す）と `checks.build` を実行する。
 

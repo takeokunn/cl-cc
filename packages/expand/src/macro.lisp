@@ -153,7 +153,10 @@ Supports both host functions and descriptor-backed expanders."
 
 (defun lookup-macro (name)
   "Look up macro NAME in the global macro environment."
-  (gethash name (macro-env-table *macro-environment*)))
+  (or (gethash name (macro-env-table *macro-environment*))
+      (and (symbolp name)
+           (let ((local (intern (symbol-name name) :cl-cc/expand)))
+             (gethash local (macro-env-table *macro-environment*))))))
 
 (defun lookup-compiler-macro (name)
   "Look up compiler macro NAME in the global compiler-macro environment."

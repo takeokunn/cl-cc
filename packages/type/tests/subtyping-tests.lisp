@@ -126,12 +126,45 @@
 (deftest subtype-record-width-and-field-types
   "Records use width subtyping and compare shared fields pointwise."
   (let ((wide   (make-type-record :fields (list (cons 'x type-int)
-                                                (cons 'y type-string))
+                                                 (cons 'y type-string))
                                   :row-var nil))
         (narrow (make-type-record :fields (list (cons 'x type-int))
                                   :row-var nil)))
     (assert-true (cl-cc/type:is-subtype-p wide narrow))
     (assert-false (cl-cc/type:is-subtype-p narrow wide))))
+
+(deftest subtype-class-shape-satisfies-has-slots
+  "Registered class slot shapes satisfy (has-slots ...) structurally."
+  (let ((cl-cc/type:*class-type-registry* (make-hash-table :test #'eq)))
+    (cl-cc/type:register-class-type
+     'point
+     (list (cons 'x type-int)
+           (cons 'y type-int)
+           (cons 'label type-string)))
+    (assert-true
+     (cl-cc/type:is-subtype-p (make-type-primitive :name 'point)
+                              (cl-cc/type:parse-type-specifier '(has-slots :x :y))))
+    (assert-false
+     (cl-cc/type:is-subtype-p (make-type-primitive :name 'point)
+                              (cl-cc/type:parse-type-specifier '(has-slots :z))))))
+
+(deftest subtype-class-shape-satisfies-registered-protocol
+  "A registered class satisfies a protocol when it has the required method shape."
+  (let ((cl-cc/type:*class-type-registry* (make-hash-table :test #'eq))
+        (cl-cc/type:*class-method-type-registry* (make-hash-table :test #'eq))
+        (cl-cc/type:*protocol-type-registry* (make-hash-table :test #'eq)))
+    (cl-cc/type:register-protocol-type 'drawable '(draw))
+    (cl-cc/type:register-class-type
+     'sprite
+     (list (cons 'x type-int)))
+    (cl-cc/type:register-class-method-type
+     'sprite 'draw (make-type-primitive :name 'function))
+    (assert-true
+     (cl-cc/type:is-subtype-p (make-type-primitive :name 'sprite)
+                              (cl-cc/type:parse-type-specifier '(protocol drawable))))
+    (assert-false
+     (cl-cc/type:is-subtype-p (make-type-primitive :name 'point)
+                              (cl-cc/type:parse-type-specifier '(protocol drawable))))))
 
 (deftest subtype-variant-width-and-case-types
   "Variants use width subtyping and compare shared cases pointwise."

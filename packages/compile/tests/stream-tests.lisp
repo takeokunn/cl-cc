@@ -56,6 +56,78 @@
            "(let ((s (make-string-input-stream \"xyz\"))) (read-char s))" #\x))
   (expr expected)
   (with-reset-repl-state
+     (assert-equal expected (run-string-repl expr))))
+
+(deftest-each compound-stream-constructors
+  "Compound stream constructors compile and preserve their underlying stream behavior."
+  :cases (("make-synonym-stream"
+           "(let ((*terminal-io* (make-string-output-stream)))
+               (write-char #\\A (make-synonym-stream '*terminal-io*))
+               (get-output-stream-string *terminal-io*))"
+           "A")
+          ("make-broadcast-stream"
+           "(let ((a (make-string-output-stream))
+                  (b (make-string-output-stream)))
+              (let ((s (make-broadcast-stream a b)))
+                (write-string \"hi\" s)
+                (list (get-output-stream-string a)
+                      (get-output-stream-string b))))"
+           '("hi" "hi"))
+          ("make-two-way-stream"
+           "(let* ((in (make-string-input-stream \"abc\"))
+                   (out (make-string-output-stream))
+                   (s (make-two-way-stream in out)))
+              (write-char #\\Z s)
+              (list (read-char s) (get-output-stream-string out)))"
+           '(#\a "Z"))
+          ("make-echo-stream"
+           "(let* ((in (make-string-input-stream \"Q\"))
+                   (out (make-string-output-stream))
+                   (s (make-echo-stream in out)))
+              (list (read-char s) (get-output-stream-string out)))"
+           '(#\Q "Q"))
+          ("make-concatenated-stream"
+           "(let ((s (make-concatenated-stream
+                      (make-string-input-stream \"ab\")
+                      (make-string-input-stream \"cd\"))))
+              (list (read-char s) (read-char s) (read-char s) (read-char s)))"
+           '(#\a #\b #\c #\d)))
+  (expr expected)
+  (with-reset-repl-state
+    (assert-equal expected (run-string-repl expr))))
+
+(deftest-each compound-stream-accessors
+  "Compound stream accessor bridges expose the original component streams."
+  :cases (("broadcast-stream-streams"
+           "(let ((a (make-string-output-stream))
+                  (b (make-string-output-stream)))
+              (let ((s (make-broadcast-stream a b)))
+                (list (eq a (first (broadcast-stream-streams s)))
+                      (eq b (second (broadcast-stream-streams s))))))"
+           '(t t))
+          ("two-way-stream-accessors"
+           "(let ((in (make-string-input-stream \"a\"))
+                  (out (make-string-output-stream)))
+              (let ((s (make-two-way-stream in out)))
+                (list (eq in (two-way-stream-input-stream s))
+                      (eq out (two-way-stream-output-stream s)))))"
+           '(t t))
+          ("echo-stream-accessors"
+           "(let ((in (make-string-input-stream \"a\"))
+                  (out (make-string-output-stream)))
+              (let ((s (make-echo-stream in out)))
+                (list (eq in (echo-stream-input-stream s))
+                      (eq out (echo-stream-output-stream s)))))"
+           '(t t))
+          ("concatenated-stream-streams"
+           "(let ((a (make-string-input-stream \"ab\"))
+                  (b (make-string-input-stream \"cd\")))
+              (let ((s (make-concatenated-stream a b)))
+                (list (eq a (first (concatenated-stream-streams s)))
+                      (eq b (second (concatenated-stream-streams s))))))"
+           '(t t)))
+  (expr expected)
+  (with-reset-repl-state
     (assert-equal expected (run-string-repl expr))))
 
 ;;; ─── write-line ─────────────────────────────────────────────────────────
@@ -186,6 +258,57 @@
            "(streamp *error-output*)" t))
   (expr expected)
   (assert-run= expected expr))
+
+(deftest-each query-io-prompt-bridges
+  "y-or-n-p and yes-or-no-p read from *query-io* without blocking tests."
+  :cases (("y-or-n-p-accepts-y"
+           "(let* ((in (make-string-input-stream (format nil \"Y~%\")))
+                   (out (make-string-output-stream))
+                   (*query-io* (make-two-way-stream in out)))
+              (list (y-or-n-p \"Proceed? \") (get-output-stream-string out)))"
+           '(t "Proceed? "))
+          ("y-or-n-p-accepts-yes"
+           "(let* ((in (make-string-input-stream (format nil \"YES~%\")))
+                   (out (make-string-output-stream))
+                   (*query-io* (make-two-way-stream in out)))
+              (list (y-or-n-p \"Proceed? \") (get-output-stream-string out)))"
+           '(t "Proceed? "))
+          ("yes-or-no-p-rejects-short-answer"
+           "(let* ((in (make-string-input-stream (format nil \"y~%no~%\")))
+                   (out (make-string-output-stream))
+                   (*query-io* (make-two-way-stream in out)))
+              (list (yes-or-no-p \"Continue? \")
+                    (> (length (get-output-stream-string out)) 0)))"
+           '(nil t)))
+  (expr expected)
+  (with-reset-repl-state
+    (assert-equal expected (run-string-repl expr))))
+
+(deftest-each file-string-length-uses-utf-8-byte-count
+  "file-string-length uses UTF-8 byte counts for characters and strings on streams."
+  :cases (("character-on-stream"
+           "(let ((s (make-string-output-stream)))
+              (file-string-length s (code-char 233)))"
+           2)
+          ("string-on-stream"
+           "(let ((s (make-string-output-stream)))
+              (file-string-length s \"hé\"))"
+           3))
+  (expr expected)
+  (assert-run= expected expr))
+
+(deftest file-string-length-supports-vm-file-handles
+  "file-string-length also works when the stream designator is a VM file handle integer."
+  (let ((tmpfile (format nil "/tmp/cl-cc-file-string-length-~A.txt" (get-universal-time))))
+    (unwind-protect
+         (assert-=
+          3
+          (run-string
+           (format nil "(let ((h (open ~S :direction :output :if-exists :supersede :if-does-not-exist :create)))
+  (prog1 (file-string-length h \"hé\")
+    (close h)))"
+                   tmpfile)))
+      (ignore-errors (delete-file tmpfile)))))
 
 ;;; ─── Peek-char ──────────────────────────────────────────────────────────
 

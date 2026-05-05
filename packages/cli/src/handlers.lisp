@@ -110,6 +110,23 @@
                (format t "~A~%" result)
                (uiop:quit 0))))))))
 
+(defun %compile-and-run-eval-form (expr stdlib kwargs vm-state)
+  "Compile and run EXPR for the eval command.
+When --stdlib is requested, try the ordinary fast path first so core CL forms
+do not pay the full stdlib cold-compile cost. Fall back to the full stdlib path
+only when the fast path cannot compile or run the form."
+  (labels ((compile-and-run (compile-fn)
+             (let* ((compiled (apply compile-fn expr :target :vm kwargs))
+                    (result (run-compiled (compilation-result-program compiled)
+                                          :state vm-state)))
+               (values result compiled))))
+    (if stdlib
+        (handler-case
+            (compile-and-run #'compile-string)
+          (error ()
+            (compile-and-run #'cl-cc:compile-string-with-stdlib)))
+        (compile-and-run #'compile-string))))
+
 (defun %do-eval (parsed)
   (let ((expr (car (parsed-args-positional parsed))))
     (unless expr
@@ -125,19 +142,19 @@
         (%call-with-optional-output-file
          (compile-opts-trace-json-path opts)
          (lambda (stream)
-           (let* ((vm-state (%maybe-make-profiled-vm-state opts))
-                  (kwargs (%compile-opts-kwargs opts stream))
-                  (compiled (if stdlib
-                                (apply #'cl-cc:compile-string-with-stdlib expr :target :vm kwargs)
-                                (apply #'compile-string expr :target :vm kwargs)))
-                  (result (run-compiled (compilation-result-program compiled) :state vm-state)))
-             (when (compile-opts-trace-emit opts)
-               (%trace-emit-stages compiled *standard-output*))
-             (when (compile-opts-flamegraph-path opts)
-               (%write-flamegraph-svg (compile-opts-flamegraph-path opts)
-                                      (cl-cc/vm:vm-get-profile-samples vm-state)))
-             (format t "~S~%" result)
-             (uiop:quit 0))))))))
+            (let* ((vm-state (%maybe-make-profiled-vm-state opts))
+                   (kwargs (%compile-opts-kwargs opts stream))
+                   (result nil)
+                   (compiled nil))
+              (multiple-value-setq (result compiled)
+                (%compile-and-run-eval-form expr stdlib kwargs vm-state))
+              (when (compile-opts-trace-emit opts)
+                (%trace-emit-stages compiled *standard-output*))
+              (when (compile-opts-flamegraph-path opts)
+                (%write-flamegraph-svg (compile-opts-flamegraph-path opts)
+                                       (cl-cc/vm:vm-get-profile-samples vm-state)))
+              (format t "~S~%" result)
+              (uiop:quit 0))))))))
 
 (defun %count-parens (str)
   "Return (values open close) paren counts in STR."

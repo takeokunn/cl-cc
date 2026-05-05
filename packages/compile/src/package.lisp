@@ -21,6 +21,8 @@
                  #:type-env-lookup
                  #:type-env-extend
                  #:type-env-extend*
+                  #:type-any
+                  #:register-class-method-type
                  #:type-to-scheme
                  #:instantiate
                  #:is-subtype-p

@@ -34,9 +34,11 @@
    #:type-int #:type-float #:type-string #:type-bool
    #:type-symbol #:type-cons #:type-null #:type-any  #:type-char #:type-unit
 
-   ;; ─── Type variable ────────────────────────────────────────────────────
-   #:type-var    #:type-var-p    #:fresh-type-var
-   #:type-var-id #:type-var-name #:type-var-link  #:type-var-equal-p
+    ;; ─── Type variable ────────────────────────────────────────────────────
+    #:type-var    #:type-var-p    #:fresh-type-var
+    #:type-var-id #:type-var-name #:type-var-link
+    #:type-var-upper-bound #:type-var-lower-bound
+    #:type-var-equal-p
    #:reset-type-vars!
 
     ;; ─── Rigid variables ──────────────────────────────────────────────────
@@ -165,10 +167,11 @@
    #:type-constructor-def  #:type-constructor-def-p
    #:*type-constructor-registry*
    #:register-type-constructor  #:lookup-type-constructor
-   #:subtypep  #:is-subtype-p
-    #:type-join  #:type-meet
-    #:*subtype-table*  #:type-name-subtype-p  #:find-common-supertype
-    #:upgraded-array-element-type  #:upgraded-complex-part-type
+    #:subtypep  #:is-subtype-p
+     #:type-join  #:type-meet
+     #:*subtype-table*  #:type-name-subtype-p  #:find-common-supertype
+     #:*protocol-type-registry* #:register-protocol-type #:lookup-protocol-type
+     #:upgraded-array-element-type  #:upgraded-complex-part-type
 
     ;; ─── Typeclass system ────────────────────────────────────────────────
     #:typeclass-def  #:typeclass-def-p  #:make-typeclass-def
@@ -193,6 +196,8 @@
    #:annotate-type
    #:*class-type-registry*  #:register-class-type
    #:lookup-class-type  #:lookup-slot-type
+   #:*class-method-type-registry* #:register-class-method-type
+   #:lookup-class-method-types #:lookup-class-method-type
    #:*type-alias-registry*  #:register-type-alias  #:lookup-type-alias
    #:*type-predicate-table*  #:register-type-predicate
    #:syntactic-value-p

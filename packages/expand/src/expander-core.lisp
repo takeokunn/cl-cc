@@ -107,14 +107,18 @@ Side effects:
 
 Handles return-type annotation: if the first element of REST-FORMS is a type
 specifier symbol, it is treated as the declared return type and wrapped in
-(the RETURN-TYPE (progn ...)) in the output body."
+  (the RETURN-TYPE (progn ...)) in the output body."
   (multiple-value-bind (plain-params type-alist)
       (strip-typed-params params)
-    (let* ((has-return-type  (and rest-forms
-                                  (symbolp (first rest-forms))
-                                  (cl-cc/type:looks-like-type-specifier-p (first rest-forms))))
-           (return-type-spec (when has-return-type (first rest-forms)))
-           (body-forms       (if has-return-type (cdr rest-forms) rest-forms))
+    (let* ((docstring        (and (stringp (first rest-forms))
+                                  (rest rest-forms)
+                                  (first rest-forms)))
+           (typed-rest-forms (if docstring (rest rest-forms) rest-forms))
+           (has-return-type  (and typed-rest-forms
+                                  (symbolp (first typed-rest-forms))
+                                  (cl-cc/type:looks-like-type-specifier-p (first typed-rest-forms))))
+           (return-type-spec (when has-return-type (first typed-rest-forms)))
+           (body-forms       (if has-return-type (cdr typed-rest-forms) typed-rest-forms))
            (param-types      (mapcar (lambda (e)
                                        (cl-cc/type:parse-type-specifier (cdr e)))
                                      type-alist))
@@ -130,7 +134,7 @@ specifier symbol, it is treated as the declared return type and wrapped in
            (checks           (mapcar (lambda (entry)
                                        `(check-type ,(car entry) ,(cdr entry)))
                                      type-alist))
-           (full-body        (append checks typed-body)))
+            (full-body        (append (when docstring (list docstring)) checks typed-body)))
       (when (eq head 'defun)
         (register-function-type name param-types return-type))
       (compiler-macroexpand-all

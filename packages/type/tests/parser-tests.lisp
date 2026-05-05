@@ -60,10 +60,11 @@
 
 (deftest-each parse-set-type-ops
   "(or ...) and (and ...) produce union/intersection nodes; empty args signal an error."
-  :cases (("or-two"          '(or fixnum string)  #'type-union-p        #'type-union-types        nil)
-          ("and-two"         '(and fixnum string) #'type-intersection-p #'type-intersection-types nil)
-          ("or-empty-error"  '(or)                nil                   nil                       t)
-          ("and-empty-error" '(and)               nil                   nil                       t))
+  :cases (("or-two"                 '(or fixnum string)   #'type-union-p        #'type-union-types        nil)
+          ("and-compatible"         '(and fixnum integer) #'type-intersection-p #'type-intersection-types nil)
+          ("or-empty-error"         '(or)                 nil                   nil                       t)
+          ("and-empty-error"        '(and)                nil                   nil                       t)
+          ("and-uninhabited-error"  '(and fixnum string)  nil                   nil                       t))
   (form pred accessor error-p)
   (if error-p
       (assert-signals cl-cc/type:type-parse-error
@@ -172,6 +173,17 @@
     (assert-true (type-forall-p result))
     (assert-eq 'a (type-var-name (type-forall-var result)))
     (assert-true (type-arrow-p (type-forall-body result)))))
+
+(deftest parser-bounded-forall-variable
+  "(forall (a extends number supertype-of fixnum) T) records both bounded-polymorphism edges."
+  (let* ((result (cl-cc/type:parse-type-specifier
+                  '(forall (a extends number supertype-of fixnum) a)))
+         (var (type-forall-var result)))
+    (assert-true (type-forall-p result))
+    (assert-eq 'a (type-var-name var))
+    (assert-true (type-equal-p (make-type-primitive :name 'number)
+                               (cl-cc/type:type-var-upper-bound var)))
+    (assert-true (type-equal-p type-int (cl-cc/type:type-var-lower-bound var)))))
 
 (deftest-each parser-quantified-types
   "exists and mu binders parse to their respective node types with correct var-name and body kind."

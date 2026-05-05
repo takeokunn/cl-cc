@@ -49,7 +49,7 @@
     (assert-equal '("hello" "world")
       (run-load-and-eval tmpfile "(sh-greet \"world\")"))))
 
-(in-suite selfhost-slow-suite)
+(in-suite selfhost-suite)
 
 (deftest selfhost-load-and-use-recursion
   "Load a file with recursive functions through our-load, then call them."
@@ -91,7 +91,7 @@
 
 ;;; ─── Self-Hosting: Source File Loading ────────────────────────────────────
 
-(in-suite selfhost-slow-suite)
+(in-suite selfhost-suite)
 
 (deftest selfhost-load-own-source
   "cl-cc can load a representative subset of its own source files."
@@ -109,7 +109,7 @@
   (assert-true (functionp cl-cc:*macro-eval-fn*))
   (assert-eql 3 (funcall cl-cc:*macro-eval-fn* '(+ 1 2))))
 
-(in-suite selfhost-slow-suite)
+(in-suite selfhost-suite)
 
 ;;; ─── Phase 4: All Source Files Self-Load ──────────────────────────────────
 
@@ -131,4 +131,3 @@
 
 
 (set-suite-test-timeout! 'selfhost-suite 30)
-(set-suite-test-timeout! 'selfhost-slow-suite 30)

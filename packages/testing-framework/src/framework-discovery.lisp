@@ -28,19 +28,23 @@
                         (push plist result)))))
     result))
 
-(defun %collect-all-suite-tests (suite-name tags &optional exclude-tags exclude-suites)
+(defun %collect-all-suite-tests (suite-name tags &optional exclude-tags exclude-suites seen-suites)
   "Collect tests from SUITE-NAME and all descendant suites."
-  (if (member suite-name exclude-suites)
-      '()
-      (let ((result (%collect-suite-tests suite-name tags exclude-tags)))
-        (persist-each *suite-registry*
-                      (lambda (child-name child-plist)
-                        (when (eq (getf child-plist :parent) suite-name)
-                          (setf result
-                                (append result
-                                        (%collect-all-suite-tests
-                                         child-name tags exclude-tags exclude-suites))))))
-        result)))
+  (cond
+    ((or (member suite-name exclude-suites :test #'eq)
+         (member suite-name seen-suites :test #'eq))
+     '())
+    (t
+     (let ((result (%collect-suite-tests suite-name tags exclude-tags))
+           (seen (cons suite-name seen-suites)))
+       (persist-each *suite-registry*
+                     (lambda (child-name child-plist)
+                       (when (eq (getf child-plist :parent) suite-name)
+                         (setf result
+                               (append result
+                                       (%collect-all-suite-tests
+                                        child-name tags exclude-tags exclude-suites seen))))))
+       result))))
 
 (defun %fisher-yates-shuffle (vec)
   "In-place Fisher-Yates shuffle of a vector."

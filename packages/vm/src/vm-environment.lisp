@@ -39,7 +39,8 @@
 (defmethod execute-instruction ((inst vm-fboundp) state pc labels)
   (declare (ignore labels))
   (let* ((sym (vm-reg-get state (vm-src inst)))
-         (result (gethash sym (vm-function-registry state))))
+         (result (or (gethash sym (vm-function-registry state))
+                     (vm-bridge-callable sym))))
     (vm-reg-set state (vm-dst inst) (if result t nil))
     (values (1+ pc) nil nil)))
 

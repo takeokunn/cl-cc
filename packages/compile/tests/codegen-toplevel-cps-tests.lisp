@@ -70,6 +70,7 @@ Accept either a raw (lambda (k) ...) form or a singleton list containing it."
 (deftest-each codegen-toplevel-direct-path-safe-subset-exclusions
   "The VM CPS-safe subset excludes definition/control forms that still require the direct path."
   :cases (("defun" '(defun cps-safe-fn (x) x))
+           ("defvar" '(defvar *cps-safe-var* 1))
            ("defun-rest" '(defun cps-safe-rest-fn (x &rest rest) x))
            ("defun-optional" '(defun cps-safe-opt-fn (x &optional y) x))
            ("defun-key" '(defun cps-safe-key-fn (&key x) x))
@@ -82,8 +83,7 @@ Accept either a raw (lambda (k) ...) form or a singleton list containing it."
 
 (deftest-each codegen-toplevel-safe-subset-still-allows-simple-definition-and-clos-forms
   "Simple top-level defvar/CLOS helper forms remain inside the current VM CPS-safe subset."
-  :cases (("defvar" '(defvar *cps-safe-var* 1))
-           ("defgeneric" '(defgeneric cps-safe-generic (x)))
+  :cases (("defgeneric" '(defgeneric cps-safe-generic (x)))
            ("make-instance" '(make-instance 'cps-safe-class))
            ("slot-value" '(slot-value obj 'slot))
            ("set-slot-value" '(setf (slot-value obj 'slot) 1)))

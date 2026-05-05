@@ -77,8 +77,8 @@ These recurse into subforms but their head is not macro-expanded.")
     string= string< string> string<= string>= string-equal
     string-lessp string-greaterp string/=
     string-not-equal string-not-greaterp string-not-lessp string-concat
-    char min max floor ceiling truncate round ffloor fceiling ftruncate fround
-    typep
+     char min max floor ceiling truncate round ffloor fceiling ftruncate fround
+     typep subtypep
     ash logand logior logxor logeqv logtest logbitp
     bswap
     expt scale-float gcd lcm complex
@@ -93,7 +93,7 @@ These recurse into subforms but their head is not macro-expanded.")
     nreverse butlast nbutlast endp reverse length copy-list copy-tree
     symbol-name make-symbol intern gensym keywordp
     string-length string-upcase string-downcase nstring-upcase nstring-downcase nstring-capitalize
-    char-code code-char
+     char-code code-char character
     hash-table-p hash-table-count simple-vector-p
     hash-table-test hash-table-keys hash-table-values
     zerop plusp minusp evenp oddp abs lognot logcount integer-length

@@ -2,13 +2,13 @@
 
 ## canonical target と runner 対応
 
-公開されている test entrypoint は **`nix run .#test` 一本のみ**です。
+高速な通常 test entrypoint は **`nix run .#test`** です。
 
-- `nix run .#test` -> `cl-cc/test:run-tests`（unit + integration + selfhost-slow + e2e の full canonical plan）
-- `nix flake check` -> 同じ plan を `checks.tests` 経由で derivation として実行
+- `nix run .#test` -> `cl-cc/test:run-tests`（canonical fast unit plan）
+- `nix flake check` -> 同じ fast unit plan を `checks.tests` 経由で derivation として実行
 
-`run-tests` は `run-suite 'cl-cc-suite ...` を呼び、unit / integration / e2e / PBT /
-selfhost-slow を含む full canonical test plan を実行します。
+`run-tests` は `run-suite 'cl-cc-suite ...` を呼び、integration / e2e suites を suite taxonomy で除外した fast unit plan を実行します。
+Long-running suites は `slow` という名前に依存せず、suite taxonomy で明示実行します。
 
 ## 検証チェックリスト
 
@@ -18,9 +18,9 @@ selfhost-slow を含む full canonical test plan を実行します。
 ### 推奨確認項目
 
 - `nix run .#test`
-  - canonical full plan が完走する
+  - canonical fast unit plan が完走する
 - `nix flake check`
-  - sandbox derivation 内で同じ plan が完走する
+  - sandbox derivation 内で同じ fast unit plan が完走する
 - `nix build`
   - standalone binary が生成される
 
@@ -43,8 +43,8 @@ Runner-observed environment variables:
   Source: `packages/testing-framework/src/framework-runner.lisp:22-25`.
 - `CLCC_TEST_TIMEOUT` — Overrides the default per-test wall-clock timeout in seconds.
   Framework default is `10` (`packages/testing-framework/src/framework-timeouts.lisp` `%default-test-timeout`),
-  but the canonical Nix entrypoints (`nix run .#test`, `checks.tests`) export `CLCC_TEST_TIMEOUT=180`
-  via `nix/apps.nix` and `nix/checks.nix` so individual long-running tests are not penalised.
+  and the canonical Nix entrypoints (`nix run .#test`, `checks.tests`) export `CLCC_TEST_TIMEOUT=10`
+  via `nix/apps.nix` so hung unit tests fail fast. Long-running integration and E2E tests run explicitly by suite taxonomy.
 
 ## `test-timings.tsv`
 

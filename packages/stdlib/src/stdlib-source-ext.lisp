@@ -4,7 +4,7 @@
 ;;;; stdlib-source.lisp (loads first). Kept separate to keep each file manageable.
 ;;;;
 ;;;; Contains (appended to *standard-library-source*):
-;;;;   - Type predicates (FR-386): rationalp, complexp, realp, floatp
+;;;;   - Type predicates (FR-386/605): rationalp, complexp, realp, floatp, bignump
 ;;;;   - Boole constants + boole-* (FR-493)
 ;;;;   - Byte manipulation: byte, ldb, dpb, etc. (FR-492/532/494)
 ;;;;   - digit-char (FR-477)
@@ -28,6 +28,7 @@
     "(defun rationalp (x) (or (integerp x) (typep x 'ratio)))"
     "(defun complexp (x) (typep x 'complex))"
     "(defun realp (x) (or (integerp x) (typep x 'ratio) (numberp x)))"
+    "(defun bignump (x) (typep x 'bignum))"
     "(defun floatp (x) (and (numberp x) (not (integerp x)) (not (typep x 'ratio))))"
 
     ;; ── FR-493: boole + boole-* constants ────────────────────────────────────

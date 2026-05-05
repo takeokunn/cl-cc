@@ -3,7 +3,7 @@
 Coding Agent 用逐次実装タスクリスト。
 **ルール**: 最初の `[ ]` タスクを1つ実装 → テスト通過確認 → `[x]` に変更 → 次へ。
 
-テスト実行: `nix run .#test` (canonical full plan: unit + integration + selfhost-slow + e2e)
+テスト実行: `nix run .#test` (canonical fast unit plan。integration / e2e は suite taxonomy で明示実行)
 
 ---
 
@@ -39,22 +39,22 @@ Coding Agent 用逐次実装タスクリスト。
   - 対象: `packages/expand/src/expander-defstruct.lisp`
   - 内容: `:include` 継承時に子スロットアクセサが正しく生成されるよう修正 (ANSI CL 8.1.5.5)
 
-- [ ] **FR-623** `let`/`flet` 空バインディング形式
+- [x] **FR-623** `let`/`flet` 空バインディング形式
   - 詳細: `docs/ansi-cl-stdlib.md` の FR-623 セクションを参照
   - 対象: `packages/parse/src/cl/parser.lisp`
   - 内容: `(let () body)` / `(flet () body)` を `progn` に等価展開
 
-- [ ] **FR-625** `type-of` — float/function 型返却
+- [x] **FR-625** `type-of` — float/function 型返却
   - 詳細: `docs/ansi-cl-stdlib.md` の FR-625 セクションを参照
   - 対象: `packages/vm/src/primitives.lisp`
   - 内容: `float` → `single-float`、`vm-closure`/`vm-builtin-fn` → `function`、`nil` → `null`
 
-- [ ] **FR-626** `error`/`warn` フォーマット制御形式
+- [x] **FR-626** `error`/`warn` フォーマット制御形式
   - 詳細: `docs/ansi-cl-stdlib.md` の FR-626 セクションを参照
   - 対象: `packages/compile/src/builtin-registry-data.lisp`, `packages/vm/src/conditions.lisp`
   - 内容: `(error string &rest args)` を `(error (format nil string args...))` にデシュガー
 
-- [ ] **FR-627** `string-upcase`/`string-downcase` `:start/:end`
+- [x] **FR-627** `string-upcase`/`string-downcase` `:start/:end`
   - 詳細: `docs/ansi-cl-stdlib.md` の FR-627 セクションを参照
   - 対象: `packages/vm/src/strings.lisp`
   - 内容: `:start`/`:end` パラメータを受け取り部分文字列変換。`nstring-upcase`/`nstring-downcase` も同様
@@ -147,35 +147,35 @@ Coding Agent 用逐次実装タスクリスト。
   - 対象: `packages/expand/src/expander-defstruct.lisp`
   - 内容: `:type list`/`:type vector`、`:conc-name`、スロット `:type`/`:read-only`
 
-- [ ] **FR-607** `defun`/`defmacro` ドキュメント文字列
+- [x] **FR-607** `defun`/`defmacro` ドキュメント文字列
   - 詳細: `docs/ansi-cl-stdlib.md` の FR-607 セクションを参照
   - 対象: `packages/compile/src/codegen.lisp`, `packages/expand/src/expander.lisp`
   - 内容: コンパイル時に docstring を VM 関数オブジェクトのメタデータとして保存。`(documentation 'fn 'function)` で取得可能に
 
-- [ ] **FR-612** `read`/`read-char` `eof-error-p`/`eof-value`
+- [x] **FR-612** `read`/`read-char` `eof-error-p`/`eof-value`
   - 詳細: `docs/ansi-cl-stdlib.md` の FR-612 セクションを参照
   - 対象: `packages/vm/src/io.lisp`, `packages/compile/src/builtin-registry-data.lisp`
   - 内容: 4引数形式 `(read stream eof-error-p eof-value recursive-p)` を完全サポート
 
-- [ ] **FR-606** `assert` place-list (場所付きリスタート)
+- [x] **FR-606** `assert` place-list (場所付きリスタート)
   - 詳細: `docs/ansi-cl-stdlib.md` の FR-606 セクションを参照
   - 対象: `packages/expand/src/macros-stdlib.lisp`
   - 内容: `(assert test-form (place1 place2 ...) ...)` — 失敗時に `continue` リスタートで各 place を対話修正
 
-- [ ] **FR-579** バイト列・文字列変換
+- [x] **FR-579** バイト列・文字列変換
   - 詳細: `docs/ansi-cl-stdlib.md` の FR-579 セクションを参照
   - 対象: `packages/vm/src/strings.lisp`
   - 内容: `string-to-octets string &key encoding` / `octets-to-string octets &key encoding`
 
-- [ ] **FR-624** `subtypep`
+- [x] **FR-624** `subtypep`
   - 詳細: `docs/ansi-cl-stdlib.md` の FR-624 セクションを参照
   - 対象: `packages/vm/src/primitives.lisp`, `packages/compile/src/builtin-registry-data.lisp`
   - 内容: `(subtypep type1 type2 &optional environment)` — 型指定子の包含関係を `(values result certainty)` で返す
 
-- [ ] **FR-630** `coerce` 実行時型ディスパッチ
+- [x] **FR-630** `coerce` 実行時型ディスパッチ
   - 詳細: `docs/ansi-cl-stdlib.md` の FR-630 セクションを参照
-  - 対象: `packages/expand/src/macros-sequence.lisp`
-  - 内容: 実行時型ディスパッチ関数の追加。`coerce-to-*` 群を呼ぶランタイム関数 `rt-coerce` を `builtin-registry-data.lisp` に登録
+  - 対象: `packages/expand/src/macros-runtime-support.lisp`, `packages/stdlib/src/stdlib-source.lisp`
+  - 内容: literal 型は `coerce-to-*` へ直接展開し、動的型は caller package の `%coerce-runtime` へ展開して実行時分岐する
 
 ---
 
@@ -320,8 +320,8 @@ Coding Agent 用逐次実装タスクリスト。
 
 以下は根幹変更が必要なため、上記フェーズ完了後に別途検討。
 
-- [ ] **FR-605** bignum 多倍長整数 — 値表現の根幹変更が必要
-- [ ] **FR-580** FFI / CFFI 互換層 — 外部システム統合
+- [ ] Native backend bignum 値表現 — ANSI stdlib VM 実装は FR-605 で完了。x86-64 native backend の自前 bignum タグ/桁配列表現は別トラックで検討
+- [x] **FR-580** FFI / CFFI 互換層 — VM interpreter の host-backed 最小 CFFI 互換 shim は完了。portable/native libffi backend は別トラックで検討
 - [ ] **FR-800** 完全第一級継続 — CPS 変換全体の再設計
 
 ---

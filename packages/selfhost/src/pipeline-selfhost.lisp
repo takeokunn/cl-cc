@@ -54,9 +54,9 @@ finding: hangs in compile-toplevel-forms when *macro-eval-fn* is our-eval).")
           (eq *stdlib-expanded-cache-eval-fn* *macro-eval-fn*))
      (%warm-stdlib-trace "warm-stdlib-cache: cache hit, skipping rebuild"))
     (t
-     (%warm-stdlib-trace "warm-stdlib-cache: cache miss, calling %build-stdlib-vm-snapshot")
-     (setf *stdlib-vm-snapshot* (%build-stdlib-vm-snapshot))
-     (%warm-stdlib-trace "warm-stdlib-cache: %build-stdlib-vm-snapshot returned")))
+      (%warm-stdlib-trace "warm-stdlib-cache: cache miss, calling %build-stdlib-vm-snapshot")
+      (setf *stdlib-vm-snapshot* (%build-stdlib-vm-snapshot))
+      (%warm-stdlib-trace "warm-stdlib-cache: %build-stdlib-vm-snapshot returned")))
   (values))
 
 (defvar *repl-vm-state*)

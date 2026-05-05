@@ -78,6 +78,14 @@ existing generic function in the same compilation unit."
           (push (cons name dst) (ctx-env ctx))
           dst))))
 
+(defun %register-defmethod-structural-methods (method-name specializers)
+  "Expose DEFMethod specializers as structural protocol method members."
+  (dolist (spec specializers)
+    (let ((class-name (and (consp spec) (cdr spec))))
+      (when (and (symbolp class-name)
+                 (not (member class-name '(t) :test #'eq)))
+        (register-class-method-type class-name method-name type-any)))))
+
 (defmethod compile-ast ((node ast-defmethod) ctx)
   "Compile a method definition."
   (setf (ctx-tail-position ctx) nil)
@@ -94,6 +102,7 @@ existing generic function in the same compilation unit."
         (end-label nil)
         (closure-reg (make-register ctx))
         (param-regs nil))
+    (%register-defmethod-structural-methods name specializers)
     (or (gethash name (ctx-global-generics ctx))
         (cdr (%assoc-eq name (ctx-env ctx)))
         (%ensure-generic-function ctx name))

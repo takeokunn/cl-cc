@@ -99,14 +99,14 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 - **参考**: Haskell (`-XPolymorphicComponents`), Ocaml の明示的多相アノテーション
 - **難易度**: Hard
 
-### FR-005: 型アノテーション → Codegen 接続
+### FR-005: ✅ 型アノテーション → Codegen 接続
 
 - **依存**: FR-002
 - **対象**: `packages/type/src/inference.lisp` + `packages/compile/src/codegen.lisp`
 - **内容**: `compiler-context` / `compilation-result` に型環境 `type-env` を保持し、`infer` の結果を codegen 境界へ伝達する。`compile-ast` は `ctx-type-env` を参照できる
 - **効果**: fixnum fast path（型チェック命令省略）、float unboxing 選択
 
-### FR-006: Fixnum Fast Path (型特化算術)
+### FR-006: ✅ Fixnum Fast Path (型特化算術)
 
 - **依存**: FR-005
 - **内容**: `+`/`-`/`*`/`<`/`>`/`=` で両オペランドが fixnum と判明している場合、型チェック命令を生成しない
@@ -140,13 +140,13 @@ Core type system contract for the compiler: inference, bidirectional checking, c
   - CLOS の `:include` / `defclass` 継承で定義される型階層を型推論に反映
   - `subtypep` の完全実装（FR-801 参照）
 
-### FR-202: 構造的サブタイピング (Structural Subtyping)
+### FR-202: ✅ 構造的サブタイピング (Structural Subtyping)
 
-- **対象**: `packages/type/src/inference.lisp`
+- **対象**: `packages/type/src/subtyping.lisp`, `packages/type/src/parser-extended.lisp`, `packages/type/src/inference.lisp`
 - **内容**: 名前でなく構造（スロット・メソッドシグネチャ）で互換性を判定
   - Go のインターフェース、TypeScript の structural typing に相当
   - `(has-slots :x :y)` 型を満たすオブジェクトはすべて渡せる
-  - CLOS との橋渡し: `(protocol drawable)` — `draw` メソッドを持つクラスはすべて準拠
+  - CLOS との橋渡し: `(protocol drawable)` — `draw` メソッド登録を持つクラスは準拠
 - **難易度**: Hard
 
 ### FR-203: ✅ 行多相 (Row Polymorphism)
@@ -160,20 +160,20 @@ Core type system contract for the compiler: inference, bidirectional checking, c
   - CL-CC 応用: `defstruct` や `make-hash-table` を使ったレコード型への適用
 - **難易度**: Hard
 
-### FR-204: 交差型 (Intersection Types) と合併型 (Union Types)
+### FR-204: ✅ 交差型 (Intersection Types) と合併型 (Union Types)
 
-- **対象**: `packages/vm/src/primitives.lisp`, `packages/type/src/inference.lisp`
+- **対象**: `packages/type/src/parser.lisp`, `packages/type/src/inference.lisp`
 - **内容**:
   - **交差型**: `(and integer string)` — 両方の型の性質を持つ（TypeScript の `A & B`）
   - **合併型**: `(or integer string)` — どちらかの型（TypeScript の `A | B`、Rust の enum）
-  - **非合法な型**: `(and integer string)` が inhabitant を持たない場合をコンパイル時検出
+  - **非合法な型**: `(and integer string)` のような明らかに inhabitant を持たない primitive 交差をコンパイル時検出
   - **occurrence typing との連携**: `(or integer string)` 型の値に対する `(integerp x)` チェック後の自動絞り込み
 - **ANSI CL**: `and`/`or`/`not` 型指定子として既存。型推論への統合を定義
 - **難易度**: Medium
 
-### FR-205: 部分型多相 (Bounded Polymorphism / Constrained Polymorphism)
+### FR-205: ✅ 部分型多相 (Bounded Polymorphism / Constrained Polymorphism)
 
-- **対象**: `packages/type/src/inference.lisp`
+- **対象**: `packages/type/src/types-core.lisp`, `packages/type/src/unification.lisp`, `packages/type/src/parser-extended.lisp`, `packages/type/src/solver.lisp`
 - **内容**: 型変数に上限 (upper bound) / 下限 (lower bound) 制約を付与
   - Scala の `[A <: Comparable[A]]` — `A` は `Comparable` のサブタイプに限定
   - Java の `<T extends Number>` — ジェネリクスの bounded wildcard

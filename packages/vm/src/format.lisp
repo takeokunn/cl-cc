@@ -179,6 +179,37 @@
 
 ;;; ─── Reader Instructions (use cl-cc's own lexer/parser) ─────────────────
 
+(defun %vm-global-value-by-symbol-name (state name &optional default)
+  "Return the first VM global whose symbol-name is NAME."
+  (let ((value default)
+        (foundp nil))
+    (maphash (lambda (key candidate)
+               (when (and (not foundp)
+                          (symbolp key)
+                          (string= (symbol-name key) name))
+                 (setf value candidate
+                       foundp t)))
+             (vm-global-vars state))
+    (values value foundp)))
+
+(defun %vm-read-eval-enabled-p (state)
+  (multiple-value-bind (flag foundp)
+      (%vm-global-value-by-symbol-name state "*READ-EVAL*" t)
+    (if foundp flag t)))
+
+(defun %vm-host-readtable-for-state (state)
+  "Build a host readtable reflecting supported VM readtable controls."
+  (multiple-value-bind (readtable foundp)
+      (%vm-global-value-by-symbol-name state "*READTABLE*" nil)
+    (when (and foundp
+               (hash-table-p readtable)
+               (gethash :readtable readtable))
+      (let ((host-readtable (copy-readtable nil))
+            (case (gethash :case readtable)))
+        (when (member case '(:upcase :downcase :preserve :invert))
+          (setf (readtable-case host-readtable) case))
+        host-readtable))))
+
 (define-vm-instruction vm-read-from-string-inst (vm-instruction)
   "Read an S-expression from a string using cl-cc's own parser."
   (dst nil :reader vm-dst)
@@ -199,9 +230,9 @@
     ;; Use CL's read-from-string to get both the value and the end position (FR-617)
     (multiple-value-bind (value end-pos)
         (if (stringp str)
-            (let ((*read-eval* (multiple-value-bind (flag foundp)
-                                   (gethash '*read-eval* (vm-global-vars state))
-                                 (if foundp flag t))))
+            (let ((*read-eval* (%vm-read-eval-enabled-p state))
+                  (*readtable* (or (%vm-host-readtable-for-state state)
+                                   *readtable*)))
               (cl:read-from-string str nil nil))
             (values nil 0))
       (vm-reg-set state (vm-dst inst) value)
@@ -215,8 +246,11 @@
          (stream (vm-get-stream state handle))
          (line (read-line stream nil nil))
          (value (when line
-                  (if *vm-parse-forms-hook*
-                      (first (funcall *vm-parse-forms-hook* line))
-                      (cl:read-from-string line nil nil)))))
+                  (let ((*read-eval* (%vm-read-eval-enabled-p state))
+                        (*readtable* (or (%vm-host-readtable-for-state state)
+                                         *readtable*)))
+                    (if *vm-parse-forms-hook*
+                        (first (funcall *vm-parse-forms-hook* line))
+                        (cl:read-from-string line nil nil))))))
     (vm-reg-set state (vm-dst inst) value)
     (values (1+ pc) nil nil)))

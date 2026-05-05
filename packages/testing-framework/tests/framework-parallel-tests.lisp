@@ -121,18 +121,18 @@
   (assert-eq 'cl-cc-suite
              (getf (persist-lookup *suite-registry* suite-name) :parent)))
 
-(deftest run-tests-includes-selfhost-slow-suite-by-default
-  "The canonical runner no longer hides slow self-hosting coverage by default."
+(deftest run-tests-excludes-non-unit-suites-by-default
+  "The canonical runner keeps integration and E2E tests outside the fast default plan."
   (let ((captured nil)
         (saved-suites *suite-registry*))
     (unwind-protect
          (progn
-           (setf *suite-registry*
-                 (persist-assoc *suite-registry* 'selfhost-slow-suite
-                                (list :name 'selfhost-slow-suite
-                                      :description "tmp"
-                                      :parent 'cl-cc-e2e-suite
-                                      :parallel nil
+            (setf *suite-registry*
+                  (persist-assoc *suite-registry* 'cl-cc-e2e-suite
+                                 (list :name 'cl-cc-e2e-suite
+                                       :description "tmp"
+                                       :parent 'cl-cc-suite
+                                       :parallel nil
                                       :before-each '()
                                       :after-each '())))
            (with-replaced-function (run-suite
@@ -145,37 +145,45 @@
                                                            :exclude-tags exclude-tags
                                                            :exclude-suites exclude-suites))
                                       0))
-             (assert-equal 0 (run-tests :parallel nil :random nil))
-             (assert-eq 'cl-cc-suite (getf captured :suite-name))
-             (assert-false (member 'selfhost-slow-suite (getf captured :exclude-suites)))))
+              (assert-equal 0 (run-tests :parallel nil :random nil))
+              (assert-eq 'cl-cc-suite (getf captured :suite-name))
+              (assert-true (member 'cl-cc-integration-suite (getf captured :exclude-suites)))
+              (assert-true (member 'cl-cc-e2e-suite (getf captured :exclude-suites)))))
       (setf *suite-registry* saved-suites))))
 
-(deftest run-tests-loads-slow-system-when-suite-missing
-  "run-tests loads :cl-cc-test/slow before dispatch when the slow suite is absent."
+(deftest run-tests-does-not-load-e2e-system-implicitly
+  "run-tests only dispatches the already-loaded fast suite taxonomy."
   (let ((loaded nil)
         (run-called nil)
         (saved-suites *suite-registry*))
     (unwind-protect
          (progn
-           (setf *suite-registry* (persist-remove *suite-registry* 'selfhost-slow-suite))
-           (with-replaced-function (asdf:load-system
-                                    (lambda (system &key &allow-other-keys)
-                                      (setf loaded system)
+            (setf *suite-registry* (persist-remove *suite-registry* 'cl-cc-e2e-suite))
+            (with-replaced-function (asdf:load-system
+                                     (lambda (system &key &allow-other-keys)
+                                       (setf loaded system)
                                       0))
              (with-replaced-function (run-suite
                                       (lambda (&rest args)
                                         (declare (ignore args))
-                                        (setf run-called t)
-                                        0))
-               (assert-equal 0 (run-tests :parallel nil :random nil))
-               (assert-eq :cl-cc-test/slow loaded)
-               (assert-true run-called))))
+                                         (setf run-called t)
+                                         0))
+                (assert-equal 0 (run-tests :parallel nil :random nil))
+                (assert-null loaded)
+                (assert-true run-called))))
       (setf *suite-registry* saved-suites))))
 
-(deftest slow-selfhost-suite-presence-can-be-observed-without-forcing-store-writes
-  "Runner regression tests avoid loading the slow system directly when the source tree is store-backed."
-  (assert-true (or (persist-lookup *suite-registry* 'selfhost-slow-suite)
-                   t)))
+(deftest fast-plan-filter-is-name-independent
+  "Fast-plan selection is based on suite taxonomy, not a slow-name convention."
+  (let ((captured nil))
+    (with-replaced-function (run-suite
+                             (lambda (suite-name &key exclude-suites &allow-other-keys)
+                               (setf captured (list suite-name exclude-suites))
+                               0))
+      (assert-equal 0 (run-tests :parallel nil :random nil))
+      (assert-eq 'cl-cc-suite (first captured))
+      (assert-true (member 'cl-cc-integration-suite (second captured)))
+      (assert-true (member 'cl-cc-e2e-suite (second captured))))))
 
 (deftest detect-flaky-reports-inconsistent-statuses
   "%detect-flaky prints a summary when a test passes in only some repeated runs."

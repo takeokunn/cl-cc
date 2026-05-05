@@ -2,8 +2,8 @@
 
 ## ANSI CL Compliance
 
-- [ansi-cl-lang.md](ansi-cl-lang.md) — Language Core: eval, lambda, types, CLOS, conditions, symbols, packages, numbers (720 FR) — ongoing
-- [ansi-cl-stdlib.md](ansi-cl-stdlib.md) — Standard Library: cons, arrays, strings, sequences, hash, I/O, printer, reader (352 FR) — ✅ 297 / 🔶 25 / ❌ 6
+- [ansi-cl-lang.md](ansi-cl-lang.md) — Language Core: eval, lambda, types, CLOS, conditions, symbols, packages, numbers (720 FR) — ✅ 698 / — 22 (MOP/SBCL-ext)
+- [ansi-cl-stdlib.md](ansi-cl-stdlib.md) — Standard Library: cons, arrays, strings, sequences, hash, I/O, printer, reader (352 FR) — ✅ COMPLETE (352 / 🔶 0 / ❌ 0)
 
 ## Type System
 
@@ -46,4 +46,4 @@
 
 ---
 
-**Status: 820/1078 tracked FRs complete (76%) | Self-hosting verified by `selfhost-suite` / `selfhost-slow-suite` (in `nix run .#test`) | Test counts vary by entrypoint and should be verified from the current run artifacts**
+**Status: 1573/1798 tracked FRs complete (87%) | Self-hosting verified explicitly by `selfhost-suite` via `:cl-cc-test/e2e` | Test counts vary by entrypoint and should be verified from the current run artifacts**

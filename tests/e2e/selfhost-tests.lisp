@@ -13,15 +13,7 @@
   :parent cl-cc-e2e-suite
   :parallel nil)
 
-(defsuite selfhost-slow-suite
-  :description "Heavy self-hosting end-to-end regression tests"
-  :parent cl-cc-e2e-suite
-  :parallel nil)
-
 (defbefore :each (selfhost-suite)
-  (setf cl-cc:*macro-eval-fn* #'cl-cc::our-eval))
-
-(defbefore :each (selfhost-slow-suite)
   (setf cl-cc:*macro-eval-fn* #'cl-cc::our-eval))
 
 (in-suite selfhost-suite)
@@ -48,7 +40,7 @@
 
 ;;; ─── Self-Hosting: CPS Transformer ─────────────────────────────────────────
 
-(in-suite selfhost-slow-suite)
+(in-suite selfhost-suite)
 
 (deftest-each selfhost-quasiquote
   "quasiquote works in self-hosted helper definitions and produces the expected result."

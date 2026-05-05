@@ -125,12 +125,42 @@
 
 ;; ASSERT (FR-203) — signal a continuable error if a test fails
 (our-defmacro assert (test &optional places datum &rest args)
-  (declare (ignore places))   ; PLACES not supported in this impl; declare before docstring
   "Signal a continuable error if TEST is false."
-  `(unless ,test
-     ,(if datum
-          `(cerror "Continue." ,datum ,@args)
-          `(cerror "Continue." "Assertion failed: ~S" ',test))))
+  (labels ((failure-form ()
+             (if datum
+                 `(cerror "Continue." ,datum ,@args)
+                 `(cerror "Continue." "Assertion failed: ~S" ',test))))
+    (if (null places)
+        `(unless ,test
+           ,(failure-form))
+        (let* ((place-list (if (listp places) places (list places)))
+               (retry-tag (gensym "ASSERT-RETRY"))
+               (retry-p (gensym "ASSERT-STORE-VALUE-USED-P"))
+               (new-value (gensym "ASSERT-NEW-VALUE"))
+               (values-var (gensym "ASSERT-VALUES"))
+               (set-places-form
+                 (if (null (cdr place-list))
+                     `(setf ,(car place-list) ,new-value)
+                     `(let ((,values-var
+                              (if (listp ,new-value)
+                                  ,new-value
+                                  (list ,@(make-list (length place-list)
+                                                     :initial-element new-value)))))
+                        ,@(loop for place in place-list
+                                for index from 0
+                                collect `(setf ,place (nth ,index ,values-var)))))))
+          `(let ((,retry-p t))
+             (tagbody
+                ,retry-tag
+                (unless ,test
+                  (if ,retry-p
+                      (restart-case
+                          ,(failure-form)
+                        (store-value (,new-value)
+                          (setq ,retry-p nil)
+                          ,set-places-form
+                          (go ,retry-tag)))
+                      ,(failure-form)))))))))
 
 ;; DEFINE-CONDITION (FR-204) — define a condition type (expands to defclass)
 ;; FR-417: now handles :report option → defmethod print-object

@@ -222,6 +222,17 @@
   (expected form)
   (assert-= expected (run-string form :stdlib t)))
 
+(deftest compile-assert-place-restarts
+  "assert uses STORE-VALUE restarts to update listed places and re-check the test."
+  (let ((result
+          (run-string
+           "(let ((x 1) (y 2))
+  (handler-bind ((error (lambda (c) (declare (ignore c)) (store-value '(5 6)))))
+    (assert (= (+ x y) 11) (x y))
+    (list x y)))"
+           :stdlib t)))
+    (assert-equal '(5 6) result)))
+
 ;;; Eval-When Tests
 
 (deftest-each compile-eval-when-numeric

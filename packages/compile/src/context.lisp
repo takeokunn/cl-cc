@@ -120,7 +120,7 @@ Returns NIL when the runtime package layer is unavailable."
 
 (defparameter *builtin-special-variables*
   (append '(*features* *modules* *active-restarts*
-            *standard-output* *standard-input* *error-output*
+            *standard-output* *standard-input* *terminal-io* *error-output*
             *trace-output* *debug-io* *query-io*
             *print-base* *print-radix* *print-circle* *print-pretty*
             *print-level* *print-length* *print-escape* *print-readably*
@@ -248,6 +248,7 @@ Used by run-string-repl to persist the label counter across calls.")
     cl-cc/ast:ast-return-from
     cl-cc/ast:ast-tagbody
     cl-cc/ast:ast-go
+    cl-cc/ast:ast-defvar
     cl-cc/ast:ast-defclass
     cl-cc/ast:ast-call
     cl-cc/ast:ast-lambda

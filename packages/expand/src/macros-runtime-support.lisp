@@ -64,6 +64,15 @@
 
 ;;; Warning Output
 
+(register-macro 'error
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((datum (second form))
+          (args (cddr form)))
+      (if (and args (stringp datum))
+          (list 'error (cons 'format (cons nil (cons datum args))))
+          form))))
+
 (register-macro 'warn
   (lambda (form env)
     (declare (ignore env))
@@ -96,6 +105,48 @@
 
 ;;; Type Coercion
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (let ((package (or (find-package :cffi)
+                     (make-package :cffi :use '(:cl)))))
+    (export (intern "FOREIGN-FUNCALL" package) package)))
+
+(defun %foreign-funcall-bridge-symbol ()
+  "Return the VM bridge symbol used by the FOREIGN-FUNCALL macro."
+  (let ((package (or (find-package :cl-cc/vm)
+                     (error "CL-CC/VM package is unavailable for FOREIGN-FUNCALL expansion"))))
+    (intern "%FOREIGN-FUNCALL" package)))
+
+(defun %expand-foreign-funcall (form)
+  "Expand CFFI-compatible FOREIGN-FUNCALL to the VM host bridge."
+  (cons (%foreign-funcall-bridge-symbol) (cdr form)))
+
+(register-macro 'foreign-funcall
+  (lambda (form env)
+    (declare (ignore env))
+    (%expand-foreign-funcall form)))
+
+(register-macro (intern "FOREIGN-FUNCALL" (find-package :cffi))
+  (lambda (form env)
+    (declare (ignore env))
+    (%expand-foreign-funcall form)))
+
+(dolist (name '("CFFI:FOREIGN-FUNCALL" "CFFI::FOREIGN-FUNCALL"))
+  (register-macro (intern name :cl-cc/expand)
+    (lambda (form env)
+      (declare (ignore env))
+      (%expand-foreign-funcall form))))
+
+(defun %coerce-runtime-symbol-for-form (value type-form)
+  "Return the runtime helper symbol in the caller's package when possible."
+  (let ((package (or (and (symbolp type-form) (symbol-package type-form))
+                     (and (symbolp value) (symbol-package value))
+                     (and (consp type-form)
+                          (eq (car type-form) 'quote)
+                          (symbolp (second type-form))
+                          (symbol-package (second type-form)))
+                     *package*)))
+    (intern "%COERCE-RUNTIME" package)))
+
 (register-macro 'coerce
   (lambda (form env)
     (declare (ignore env))
@@ -115,8 +166,10 @@
           ((eq type 'character) (list 'character value))
           ((member type '(float single-float double-float short-float long-float))
            (list 'float value))
-          (t (list '%coerce-runtime value type-form))))
-      (list '%coerce-runtime value type-form)))))
+          (t (list (%coerce-runtime-symbol-for-form value type-form)
+                   value type-form))))
+      (list (%coerce-runtime-symbol-for-form value type-form)
+            value type-form)))))
 
 ;;; Compile-time Evaluation
 

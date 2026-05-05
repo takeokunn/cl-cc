@@ -89,6 +89,40 @@
   (expected form)
   (assert-string= expected (run-string form)))
 
+(deftest compile-empty-let-and-flet
+  "let/flet accept empty binding lists."
+  (assert-= 42 (run-string "(let () 42)"))
+  (assert-= 7 (run-string "(flet () 7)")))
+
+(deftest compile-top-level-defvar-visible-to-following-defun
+  "Top-level defvars stay on the direct path so later definitions are not skipped by CPS labels."
+  (assert-= 43
+            (run-string
+             "(progn
+                (defvar *defvar-cps-visibility-probe-a* 41)
+                (defvar *defvar-cps-visibility-probe-b* 2)
+                (defun defvar-cps-visibility-probe ()
+                  (+ *defvar-cps-visibility-probe-a* *defvar-cps-visibility-probe-b*))
+                (defvar-cps-visibility-probe))")))
+
+(deftest compile-type-of-float-and-function
+  "type-of returns float and function type names for runtime values."
+  (assert-eq 'single-float (run-string "(type-of 1.0)"))
+  (assert-eq 'function (run-string "(type-of (lambda (x) x))")))
+
+(deftest compile-error-format-control
+  "error accepts string format control plus arguments."
+  (assert-true
+   (run-string
+    "(handler-case
+         (progn (error \"bad ~A\" 42) nil)
+       (error (e)
+         (not (null (search \"42\" (format nil \"~A\" e))))))")))
+
+(deftest compile-warn-format-control
+  "warn accepts string format control plus arguments and returns nil."
+  (assert-= 42 (run-string "(progn (warn \"warn ~A\" 7) 42)")))
+
 ;;; ─── FR-599: #n= / #n# label and reference reader macros ────────────────────
 
 (deftest compile-hash-n-eq
@@ -97,6 +131,43 @@
     (assert-equal '(1 2 3) (first r))
     (assert-equal '(1 2 3) (second r)))
   (assert-string= "hello" (run-string "#0=\"hello\"")))
+
+;;; ─── FR-592: readtable API compatibility ────────────────────────────────────
+
+(deftest compile-readtable-compatibility-api
+  "Readtable API calls are available and preserve registered macro metadata."
+  (assert-true (run-string "(readtablep *readtable*)" :stdlib t))
+  (assert-eq :downcase
+             (run-string "(let ((rt (copy-readtable)))
+                             (setf (readtable-case rt) :downcase)
+                             (readtable-case rt))"
+                          :stdlib t))
+  (assert-string= "abc"
+                 (run-string "(progn
+                                (setf (readtable-case *readtable*) :downcase)
+                                (symbol-name (read-from-string \"ABC\")))"
+                             :stdlib t))
+  (assert-equal '(t t)
+                (run-string "(let ((rt (copy-readtable)))
+                               (set-macro-character #\! (lambda (stream char)
+                                                          (declare (ignore stream char))
+                                                          :ok)
+                                                    t rt)
+                               (set-syntax-from-char #\? #\! rt rt)
+                               (multiple-value-bind (fn non-terminating-p)
+                                   (get-macro-character #\? rt)
+                                 (list (functionp fn) non-terminating-p)))"
+                            :stdlib t))
+  (assert-true
+   (run-string "(let ((rt (copy-readtable)))
+                  (make-dispatch-macro-character #\# nil rt)
+                  (set-dispatch-macro-character #\# #\q
+                                                (lambda (stream char arg)
+                                                  (declare (ignore stream char arg))
+                                                  :q)
+                                                rt)
+                  (functionp (get-dispatch-macro-character #\# #\q rt)))"
+               :stdlib t)))
 
 ;;; ─── FR-641: union/intersection/set-difference with :test ────────────────────
 
@@ -129,12 +200,65 @@
   (let ((r (run-string "(compile-file-pathname \"/tmp/foo.lisp\")")))
     (assert-true (pathnamep r))))
 
+(deftest compile-compile-file-is-fbound
+  "compile-file is available as a stdlib function."
+  (assert-true (run-string "(fboundp 'compile-file)" :stdlib t)))
+
+(deftest compile-safe-debug-bridges
+  "disassemble is non-blocking and inspect uses describe while returning the object."
+  (assert-null (run-string "(disassemble 42)"))
+  (assert-= 42 (run-string "(inspect 42)")))
+
+(deftest compile-foreign-funcall-strlen
+  "foreign-funcall provides a minimal CFFI-compatible host-backed FFI path."
+  (assert-= 4 (run-string "(foreign-funcall \"strlen\" :string \"abcd\" :int)" :stdlib t))
+  (assert-= 5 (run-string "(cffi:foreign-funcall \"strlen\" :string \"abcde\" :int)" :stdlib t)))
+
+(deftest compile-documentation-defun-docstring
+  "documentation returns docstrings captured by the defun expander."
+  (assert-string=
+   "doc text"
+   (run-string
+    "(progn (defun documented-probe () \"doc text\" 42)
+       (documentation 'documented-probe 'function))"
+    :stdlib t))
+  (assert-null (run-string "(documentation 'missing-doc-probe 'function)" :stdlib t)))
+
+(deftest compile-subtypep-basic-two-values
+  "subtypep is available at runtime and preserves ANSI two-value results."
+  (assert-equal '(t t)
+                (run-string "(multiple-value-list (subtypep 'integer 'number))" :stdlib t))
+  (assert-equal '(nil t)
+                (run-string "(multiple-value-list (subtypep 'string 'integer))" :stdlib t)))
+
+(deftest compile-string-octets-bridges
+  "string-to-octets / octets-to-string round-trip UTF-8 data and honor encoding keywords."
+  (let ((octets (run-string "(string-to-octets \"hé\" :encoding :utf-8)")))
+    (assert-true (vectorp octets))
+    (assert-= 3 (length octets))
+    (assert-= 104 (aref octets 0))
+    (assert-= 195 (aref octets 1))
+    (assert-= 169 (aref octets 2)))
+  (let ((octets (run-string "(string-to-octets \"é\" :external-format :latin-1)")))
+    (assert-= 1 (length octets))
+    (assert-= 233 (aref octets 0)))
+  (assert-string=
+   "hé"
+   (run-string "(octets-to-string (string-to-octets \"hé\" :external-format :utf-8) :encoding :utf-8)")))
+
 ;;; ─── FR-604: float 2-arg prototype form ──────────────────────────────────────
 
 (deftest compile-float-2arg
   "float with prototype argument converts to float ignoring prototype."
   (assert-true (floatp (run-string "(float 3 1.0d0)")))
   (assert-= (float 3) (run-string "(float 3 1.0d0)")))
+
+;;; ─── FR-605: bignum predicate helper ────────────────────────────────────────
+
+(deftest compile-bignump
+  "bignump recognizes integers outside the fixnum range via the VM numeric tower."
+  (assert-true (run-string "(bignump (expt 2 100))" :stdlib t))
+  (assert-false (run-string "(bignump 42)" :stdlib t)))
 
 ;;; ─── FR-396: declaim macro stub ─────────────────────────────────────────────
 

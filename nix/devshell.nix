@@ -12,7 +12,7 @@
         ------------------------
 
         Apps:
-          nix run .#test      Run the canonical test plan (unit + integration + selfhost-slow + e2e)
+          nix run .#test      Run the canonical fast unit test plan
           nix run .#load      Load :cl-cc non-interactively
           nix run .#repl      rlwrap'd SBCL with :cl-cc loaded  (nix run default)
 

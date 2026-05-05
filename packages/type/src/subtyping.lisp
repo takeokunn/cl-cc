@@ -62,9 +62,73 @@
 subtyping.  QUERY-FN is called as (QUERY-FN val-from-1 val-from-2).
 Used for both record (width: t2 fields ⊆ t1) and arrow subtype checks."
   (every (lambda (p2)
-           (let ((p1 (assoc (car p2) pairs1 :test #'eq)))
+           (let ((p1 (assoc (car p2) pairs1 :test #'%row-label-equal-p)))
              (and p1 (funcall query-fn (cdr p1) (cdr p2)))))
-         pairs2))
+          pairs2))
+
+(defun %row-label-equal-p (a b)
+  "Compare row labels package-independently for structural slot checks."
+  (or (eq a b)
+      (and (symbolp a) (symbolp b)
+           (string= (symbol-name a) (symbol-name b)))))
+
+(defvar *protocol-type-registry* (make-hash-table :test #'eq)
+  "Maps protocol names to required structural fields.
+Each entry is an alist of (slot-or-method-name . type-node).")
+
+(defun %coerce-structural-field-spec (spec)
+  "Normalize a has-slots/protocol requirement SPEC into (label . type-node)."
+  (cond
+    ((symbolp spec)
+     (cons spec type-any))
+    ((and (consp spec) (= (length spec) 2) (symbolp (first spec)))
+     (cons (first spec)
+           (if (typep (second spec) 'type-node)
+               (second spec)
+               (parse-type-specifier (second spec)))))
+    (t
+     (error "Invalid structural field spec: ~S" spec))))
+
+(defun %coerce-structural-field-specs (specs)
+  (mapcar #'%coerce-structural-field-spec specs))
+
+(defun register-protocol-type (name field-specs)
+  "Register protocol NAME with required structural FIELD-SPECS.
+FIELD-SPECS accepts symbols (slot/method name with type T) or (name type) pairs."
+  (setf (gethash name *protocol-type-registry*)
+        (%coerce-structural-field-specs field-specs)))
+
+(defun lookup-protocol-type (name)
+  "Return the structural field requirements for protocol NAME, or NIL."
+  (gethash name *protocol-type-registry*))
+
+(defun %primitive-class-record-type (ty)
+  "Return TY's registered structural class shape as a record type, when available."
+  (when (type-primitive-p ty)
+    (let* ((class-name (type-primitive-name ty))
+           (slots (and (fboundp 'lookup-class-type)
+                       (funcall (symbol-function 'lookup-class-type)
+                                class-name)))
+           (methods (and (fboundp 'lookup-class-method-types)
+                         (funcall (symbol-function 'lookup-class-method-types)
+                                  class-name)))
+           (fields (append slots methods)))
+      (when fields
+        (make-type-record :fields fields :row-var nil)))))
+
+(defun %protocol-type-p (ty)
+  (and (type-constructor-p ty)
+       (eq (type-constructor-name ty) 'protocol)
+       (= (length (type-constructor-args ty)) 1)
+       (type-primitive-p (first (type-constructor-args ty)))))
+
+(defun %protocol-required-record-type (ty)
+  "Return protocol TY's structural requirements as a record type."
+  (when (%protocol-type-p ty)
+    (let* ((protocol-name (type-primitive-name (first (type-constructor-args ty))))
+           (fields (lookup-protocol-type protocol-name)))
+      (when fields
+        (make-type-record :fields fields :row-var nil)))))
 
 (defun %subtype-arrow-p (t1 t2)
   "True iff arrow T1 is a subtype of arrow T2.
@@ -90,6 +154,9 @@ the subtype relation when they are structurally equal or both absent."
   "Structural subtype rules keyed on T2's type.
 Called as the fallback when no T1-driven rule matched."
   (typecase t2
+    (type-constructor
+     (let ((required (%protocol-required-record-type t2)))
+       (and required (is-subtype-p t1 required))))
     (type-union       (some  (lambda (m) (is-subtype-p t1 m)) (type-union-types t2)))
     (type-intersection (every (lambda (c) (is-subtype-p t1 c)) (type-intersection-types t2)))
     (t nil)))
@@ -121,9 +188,11 @@ Called as the fallback when no T1-driven rule matched."
         (type-refinement
          (is-subtype-p (type-refinement-base t1) t2))
         (type-primitive
-         (or (and (typep t2 'type-primitive)
-                  (type-name-subtype-p (type-primitive-name t1) (type-primitive-name t2)))
-             (%is-subtype-p-by-t2 t1 t2)))
+          (or (and (typep t2 'type-primitive)
+                   (type-name-subtype-p (type-primitive-name t1) (type-primitive-name t2)))
+              (let ((record (%primitive-class-record-type t1)))
+                (and record (is-subtype-p record t2)))
+              (%is-subtype-p-by-t2 t1 t2)))
         (type-record
          (or (and (typep t2 'type-record)
                   (%subtype-row-p (type-record-fields t1) (type-record-fields t2) #'is-subtype-p))

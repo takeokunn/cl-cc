@@ -108,12 +108,13 @@ Returns (values next-pc halt-p result) like execute-instruction."
     ((vm-generic-function-p func)
      (vm-dispatch-generic-call func state pc arg-regs dst-reg labels))
     ;; Host CL function (whitelist bridge) — apply directly, no frame ops needed
-    ((functionp func)
-      (let ((all-values (multiple-value-list
-                         (apply func (mapcar (lambda (r) (vm-reg-get state r)) arg-regs)))))
-        (setf (vm-values-list state) all-values)
-        (vm-reg-set state dst-reg (if all-values (first all-values) nil)))
-      (values (1+ pc) nil nil))
+     ((functionp func)
+       (let* ((*vm-current-state* state)
+              (all-values (multiple-value-list
+                           (apply func (mapcar (lambda (r) (vm-reg-get state r)) arg-regs)))))
+         (setf (vm-values-list state) all-values)
+         (vm-reg-set state dst-reg (if all-values (first all-values) nil)))
+       (values (1+ pc) nil nil))
     ;; Normal closure — optionally push frame (skipped for TCO), bind args, jump
     (t
       (let ((arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs)))

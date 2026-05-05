@@ -137,8 +137,17 @@
       (list 'let (list (list sym (second place))
                        (list v value)
                        (list fn 'cl-cc/bootstrap:*runtime-set-symbol-value-fn*))
-            (list 'funcall fn sym v)
-            v)))))
+             (list 'funcall fn sym v)
+             v)))))
+
+;;; FR-592: (setf (readtable-case readtable) case) → stdlib compatibility setter
+(%register-setf-place-handler
+ 'readtable-case
+ (lambda (place value)
+   (let ((setter (or (find-symbol "SET-READTABLE-CASE" :cl-cc)
+                     (intern "SET-READTABLE-CASE" :cl-cc))))
+     (compiler-macroexpand-all
+      (list setter (second place) value)))))
 
 ;;; FR-428: (setf (macro-function name) fn) → host bridge
 (%register-setf-place-handler

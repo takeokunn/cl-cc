@@ -6,7 +6,7 @@
 ;;;;   :cl-cc: umbrella package (src/package.lisp) + compile-pipeline
 ;;;;   :cl-cc-cli: CLI tool
 ;;;;
-;;;; Test systems (:cl-cc-test, :cl-cc-test/slow) are in cl-cc-test.asd (loaded below).
+;;;; Test systems (:cl-cc-test, :cl-cc-test/e2e) are in cl-cc-test.asd (loaded below).
 
 (eval-when (:load-toplevel :execute)
   (require :asdf)

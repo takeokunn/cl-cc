@@ -161,17 +161,120 @@
     "(define-condition reader-error (parse-error stream-error) ())"
 
     ;; ── FR-535: Reader control variables ─────────────────────────────────────
+    "(defun %make-readtable ()
+       (let ((readtable (make-hash-table :test 'equal)))
+         (setf (gethash :readtable readtable) t)
+         (setf (gethash :case readtable) :upcase)
+         readtable))"
+    "(defun readtablep (object)
+       (and (hash-table-p object) (gethash :readtable object)))"
+    "(defun %normalize-readtable (readtable)
+       (if readtable readtable *readtable*))"
+    "(defvar *readtable* (%make-readtable))"
     "(defvar *read-base* 10)"
     "(defvar *read-default-float-format* 'single-float)"
     "(defvar *read-suppress* nil)"
     "(defvar *standard-input* *standard-input*)"
     "(defvar *standard-output* *standard-output*)"
+    "(defvar *terminal-io* *terminal-io*)"
     "(defvar *error-output* *error-output*)"
     "(defvar *trace-output* *trace-output*)"
     "(defvar *debug-io* *debug-io*)"
     "(defvar *query-io* *query-io*)"
+
+    ;; ── FR-578: Interactive yes/no query helpers ────────────────────────────
+    "(defun %query-answer-normalize (answer)
+       (and answer
+            (string-downcase
+              (string-trim '(#\\Space #\\Tab #\\Newline #\\Return) answer))))"
+    "(defun %query-answer-in-list-p (answer choices)
+       (if (null choices)
+           nil
+           (if (string= answer (car choices))
+               t
+               (%query-answer-in-list-p answer (cdr choices)))))"
+    "(defun %query-write-prompt (format-string args)
+       (cond
+         ((null args) (format *query-io* format-string))
+         ((null (cdr args)) (format *query-io* format-string (car args)))
+         ((null (cddr args)) (format *query-io* format-string (car args) (cadr args)))
+         ((null (cdddr args)) (format *query-io* format-string (car args) (cadr args) (caddr args)))
+         (t (write-string format-string *query-io*))))"
+    "(defun %query-answer-loop (yes-answers no-answers invalid-help format-string args)
+       (block done
+         (tagbody
+          retry
+             (when format-string
+               (%query-write-prompt format-string args)
+               (finish-output *query-io*))
+            (let ((answer (%query-answer-normalize (read-line *query-io* nil nil))))
+              (cond
+                ((null answer) (return-from done nil))
+                ((%query-answer-in-list-p answer yes-answers) (return-from done t))
+                ((%query-answer-in-list-p answer no-answers) (return-from done nil))
+                (t
+                 (format *query-io* \"~&Please answer ~A.~%\" invalid-help)
+                 (finish-output *query-io*)
+                 (go retry)))))))"
+    "(defun y-or-n-p (&optional format-string &rest args)
+       (%query-answer-loop '(\"y\" \"yes\") '(\"n\" \"no\") \"y or n\" format-string args))"
+    "(defun yes-or-no-p (&optional format-string &rest args)
+       (%query-answer-loop '(\"yes\") '(\"no\") \"yes or no\" format-string args))"
+
     ;; ── FR-573: *read-eval* ───────────────────────────────────────────────────
     "(defvar *read-eval* t)"
+    ;; ── FR-592: Readtable API compatibility layer ─────────────────────────────
+    "(defun copy-readtable (&optional from-readtable to-readtable)
+       (let ((source (%normalize-readtable from-readtable))
+             (target (if to-readtable to-readtable (%make-readtable))))
+         (when (and (readtablep source) (readtablep target))
+           (maphash (lambda (key value) (setf (gethash key target) value))
+                    source))
+         target))"
+    "(defun readtable-case (readtable)
+       (gethash :case (%normalize-readtable readtable)))"
+    "(defun set-readtable-case (readtable case)
+       (let ((target (%normalize-readtable readtable)))
+         (unless (member case '(:upcase :downcase :preserve :invert))
+           (error \"Invalid readtable case\"))
+         (setf (gethash :case target) case)
+         case))"
+    "(defun get-macro-character (char &optional readtable)
+       (let ((entry (gethash (list :macro char) (%normalize-readtable readtable))))
+         (if entry
+             (values (car entry) (cdr entry))
+             (values nil nil))))"
+    "(defun set-macro-character (char new-function &optional non-terminating-p readtable)
+       (setf (gethash (list :macro char) (%normalize-readtable readtable))
+             (cons new-function non-terminating-p))
+       t)"
+    "(defun make-dispatch-macro-character (char &optional non-terminating-p readtable)
+       (let ((target (%normalize-readtable readtable)))
+         (setf (gethash (list :dispatch char) target) t)
+         (set-macro-character char (lambda (&rest args) (declare (ignore args)) nil)
+                              non-terminating-p target))
+       t)"
+    "(defun get-dispatch-macro-character (disp-char sub-char &optional readtable)
+       (gethash (list :dispatch disp-char sub-char)
+                (%normalize-readtable readtable)))"
+    "(defun set-dispatch-macro-character (disp-char sub-char new-function &optional readtable)
+       (setf (gethash (list :dispatch disp-char sub-char)
+                      (%normalize-readtable readtable))
+             new-function)
+       t)"
+    "(defun set-syntax-from-char (to-char from-char &optional to-readtable from-readtable)
+       (let ((target (%normalize-readtable to-readtable))
+             (source (%normalize-readtable from-readtable)))
+         (multiple-value-bind (macro-function non-terminating-p)
+             (get-macro-character from-char source)
+           (if macro-function
+               (set-macro-character to-char macro-function non-terminating-p target)
+               (remhash (list :macro to-char) target))
+           (let ((dispatchp (gethash (list :dispatch from-char) source)))
+             (if dispatchp
+                 (setf (gethash (list :dispatch to-char) target) dispatchp)
+                 (remhash (list :dispatch to-char) target)))
+           t)))"
     ;; ── FR-570: Printer control variables ────────────────────────────────────
     "(defvar *print-circle* nil)"
     "(defvar *print-gensym* t)"

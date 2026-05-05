@@ -33,6 +33,44 @@
   (cdr (assoc hn *binding-quantifier-table*
               :test (lambda (h names) (member h names :test #'string=)))))
 
+(defun %bound-operator-kind (op)
+  "Map a bounded-polymorphism operator symbol to :UPPER or :LOWER."
+  (when (symbolp op)
+    (let ((name (symbol-name op)))
+      (cond
+        ((member name '("<:" "EXTENDS" "SUBTYPE-OF") :test #'string=) :upper)
+        ((member name '(">:" "SUPERTYPE-OF") :test #'string=) :lower)
+        (t nil)))))
+
+(defun %parse-bounded-quantifier-var (spec)
+  "Parse quantifier variable SPEC, including bounds like (a <: number).
+Supported bound operators are <:/extends/subtype-of and >:/supertype-of."
+  (cond
+    ((symbolp spec)
+     (fresh-type-var spec))
+    ((and (consp spec) (symbolp (first spec)))
+     (let ((name (first spec))
+           (upper nil)
+           (lower nil)
+           (bounds (rest spec)))
+       (loop while bounds
+             do (let ((kind (%bound-operator-kind (first bounds))))
+                  (unless (and kind (consp (rest bounds)))
+                    (type-parse-error "Invalid bounded type variable: ~S" spec))
+                  (case kind
+                    (:upper (setf upper (parse-type-specifier (second bounds))))
+                    (:lower (setf lower (parse-type-specifier (second bounds)))))
+                  (setf bounds (cddr bounds))))
+       (fresh-type-var name :upper-bound upper :lower-bound lower)))
+    (t
+     (type-parse-error "Quantifier variable must be a symbol or bounded spec: ~S" spec))))
+
+(defun %parse-protocol-name-type (spec)
+  "Parse a protocol designator into a primitive name wrapper."
+  (unless (symbolp spec)
+    (type-parse-error "protocol name must be a symbol, got ~S" spec))
+  (make-type-primitive :name spec))
+
 (defun parse-compound-type-extended (head args)
   "Handle all symbol-named compound forms using string comparison for package-independence."
   (let ((hn (and (symbolp head) (symbol-name head))))
@@ -52,12 +90,26 @@
       ((and hn (%binding-quantifier-ctor hn))
        (unless (= (length args) 2)
          (type-parse-error "~A requires (~A var body)" hn (string-downcase hn)))
-       (let* ((ctor (%binding-quantifier-ctor hn))
-              (var  (fresh-type-var (first args)))
-              (body (parse-type-specifier (second args))))
-         (funcall ctor :var var :body body)))
+        (let* ((ctor (%binding-quantifier-ctor hn))
+               (var  (%parse-bounded-quantifier-var (first args)))
+               (body (parse-type-specifier (second args))))
+          (funcall ctor :var var :body body)))
 
-       ;; ─── Qualified: (=> (C1 a) ... T) ────────────────────────────────
+       ;; ─── Structural shape: (has-slots :x (:y fixnum)) ───────────────
+       ((and hn (string= hn "HAS-SLOTS"))
+        (unless args
+          (type-parse-error "has-slots requires at least one slot requirement"))
+        (make-type-record :fields (%coerce-structural-field-specs args)
+                          :row-var nil))
+
+       ;; ─── Protocol reference: (protocol drawable) ─────────────────────
+       ((and hn (string= hn "PROTOCOL"))
+        (unless (= (length args) 1)
+          (type-parse-error "protocol requires exactly one protocol name"))
+        (make-type-constructor 'protocol
+                               (list (%parse-protocol-name-type (first args)))))
+
+        ;; ─── Qualified: (=> (C1 a) ... T) ────────────────────────────────
        ((and hn (string= hn "=>"))
         (unless (>= (length args) 2)
           (type-parse-error "=> requires (=> constraint... body)"))
