@@ -121,6 +121,58 @@
       (assert-true iv)
       (assert-= 5 (cl-cc/optimize::opt-interval-lo iv)))))
 
+(deftest value-ranges-propagate-move-and-arithmetic
+  "opt-compute-value-ranges propagates intervals through moves and arithmetic."
+  (let* ((insts (list (make-vm-const :dst :r0 :value 4)
+                      (make-vm-move  :dst :r1 :src :r0)
+                      (make-vm-const :dst :r2 :value 6)
+                      (make-vm-add   :dst :r3 :lhs :r1 :rhs :r2)))
+         (ivals (cl-cc/optimize::opt-compute-value-ranges insts))
+         (iv (gethash :r3 ivals)))
+    (assert-true iv)
+    (assert-= 10 (cl-cc/optimize::opt-interval-lo iv))
+    (assert-= 10 (cl-cc/optimize::opt-interval-hi iv))))
+
+(deftest value-ranges-prove-array-index-in-bounds
+  "opt-array-bounds-check-eliminable-p proves simple non-negative index ranges."
+  (let* ((insts (list (make-vm-const :dst :idx :value 2)
+                      (make-vm-const :dst :len :value 5)))
+         (ivals (cl-cc/optimize::opt-compute-value-ranges insts)))
+    (assert-true (cl-cc/optimize::opt-array-bounds-check-eliminable-p :idx :len ivals))))
+
+(deftest value-ranges-reject-out-of-bounds-index
+  "opt-array-bounds-check-eliminable-p stays conservative for invalid index ranges."
+  (let* ((insts (list (make-vm-const :dst :idx :value 5)
+                      (make-vm-const :dst :len :value 5)))
+         (ivals (cl-cc/optimize::opt-compute-value-ranges insts)))
+    (assert-false (cl-cc/optimize::opt-array-bounds-check-eliminable-p :idx :len ivals))))
+
+(deftest simple-induction-detects-affine-update
+  "opt-compute-simple-inductions records init and step for affine self updates."
+  (let* ((insts (list (make-vm-const :dst :i :value 0)
+                      (make-vm-const :dst :one :value 1)
+                      (make-vm-add   :dst :i :lhs :i :rhs :one)))
+         (ivs (cl-cc/optimize::opt-compute-simple-inductions insts))
+         (iv (gethash :i ivs)))
+    (assert-true iv)
+    (assert-= 0 (cl-cc/optimize::opt-iv-init iv))
+    (assert-= 1 (cl-cc/optimize::opt-iv-step iv))))
+
+(deftest simple-induction-kills-stale-fact-after-overwrite
+  "opt-compute-simple-inductions removes an induction fact after a later write."
+  (let* ((insts (list (make-vm-const :dst :i :value 0)
+                      (make-vm-const :dst :one :value 1)
+                      (make-vm-add   :dst :i :lhs :i :rhs :one)
+                      (make-vm-const :dst :i :value 42)))
+         (ivs (cl-cc/optimize::opt-compute-simple-inductions insts)))
+    (assert-false (nth-value 1 (gethash :i ivs)))))
+
+(deftest induction-trip-count-cases
+  "opt-induction-trip-count handles positive, inclusive, and negative steps."
+  (assert-= 5 (cl-cc/optimize::opt-induction-trip-count 0 10 2))
+  (assert-= 6 (cl-cc/optimize::opt-induction-trip-count 0 10 2 :inclusive-p t))
+  (assert-= 4 (cl-cc/optimize::opt-induction-trip-count 10 0 -3)))
+
 (deftest constant-intervals-unknown-operand-kills-dst
   "opt-compute-constant-intervals: an unknown operand in a binary op removes the dst interval."
   (let* ((insts (list (make-vm-const :dst :r0 :value 2)

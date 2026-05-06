@@ -24,6 +24,10 @@
              (format stream "Unbound variable: ~A"
                      (unbound-variable-error-name condition)))))
 
+(defun unbound-variable-name (condition)
+  "Compatibility reader for UNBOUND-VARIABLE-ERROR variable names."
+  (unbound-variable-error-name condition))
+
 (define-condition type-mismatch-error (type-inference-error)
   ((expected :initarg :expected :initform nil :reader type-mismatch-error-expected)
    (actual :initarg :actual :initform nil :reader type-mismatch-error-actual))

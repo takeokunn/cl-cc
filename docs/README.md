@@ -7,8 +7,8 @@
 
 ## Type System
 
-- [type-core.md](type-core.md) — Core: inference, subtyping (Ch.1-3) — boundary refs: polymorphism, gradual typing, effects, and advanced type theory (Ch.2,4-14)
-- [type-advanced.md](type-advanced.md) — Advanced: safety types, type-level programming, proofs, concurrency types (Ch.15-34)
+- [type-core.md](type-core.md) — Core: inference, subtyping (Ch.1-3) — ✅ COMPLETE (12 / 12 direct FR; Ch.2,4-14 are bridge refs)
+- [type-advanced.md](type-advanced.md) — Advanced: safety types, type-level programming, proofs, concurrency types (Ch.15-34) — 🔶 IN PROGRESS (5 / 109 FR marked ✅; remaining FRs require per-FR completion marking)
 
 ## Optimization
 

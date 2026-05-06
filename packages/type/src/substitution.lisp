@@ -180,7 +180,21 @@ Nil is treated as the empty substitution (identity element)."
     (type-effect-op
      (make-type-effect-op :name (type-effect-op-name ty)
                           :args (mapcar (lambda (a) (zonk a subst))
-                                        (type-effect-op-args ty))))
+                                         (type-effect-op-args ty))))
+    (type-advanced
+     (make-type-advanced
+      :feature-id (type-advanced-feature-id ty)
+      :name (type-advanced-name ty)
+      :args (mapcar (lambda (value)
+                      (type-advanced-payload-map (lambda (node) (zonk node subst)) value))
+                    (type-advanced-args ty))
+      :properties (mapcar (lambda (entry)
+                            (cons (car entry)
+                                  (type-advanced-payload-map (lambda (node) (zonk node subst))
+                                                             (cdr entry))))
+                          (type-advanced-properties ty))
+      :evidence (type-advanced-payload-map (lambda (node) (zonk node subst))
+                                           (type-advanced-evidence ty))))
     (type-handler
      (make-type-handler :effect (zonk (type-handler-effect ty) subst)
                         :input  (zonk (type-handler-input  ty) subst)

@@ -78,6 +78,14 @@
 (defun %format-binder (fmt var body)
   (format nil fmt (type-to-string var) (type-to-string body)))
 
+(defun %advanced-display-value (value)
+  "Render nested advanced payload values using type printers where applicable."
+  (cond
+    ((typep value 'type-node) (type-to-string value))
+    ((consp value)
+     (format nil "(~{~A~^ ~})" (mapcar #'%advanced-display-value value)))
+    (t (prin1-to-string value))))
+
 (defmethod type-to-string ((ty type-forall))
   (%format-binder "(∀~A. ~A)"
                   (type-forall-var ty)
@@ -97,6 +105,28 @@
   (%format-binder "(μ~A. ~A)"
                   (type-mu-var ty)
                   (type-mu-body ty)))
+
+(defmethod type-to-string ((ty type-advanced))
+  (let* ((surface-head (type-advanced-name ty))
+         (head (if (and (symbolp surface-head)
+                        (not (string= (symbol-name surface-head) "ADVANCED")))
+                   surface-head
+                    'advanced))
+         (feature-id (type-advanced-feature-id ty)))
+    (with-output-to-string (out)
+      (format out "(~A" (symbol-name head))
+      (when (eq head 'advanced)
+        (format out " ~A" feature-id))
+      (dolist (arg (type-advanced-args ty))
+        (format out " ~A" (%advanced-display-value arg)))
+      (dolist (entry (type-advanced-properties ty))
+        (format out " ~A ~A"
+                (symbol-name (car entry))
+                (%advanced-display-value (cdr entry))))
+      (when (type-advanced-evidence ty)
+        (format out " :EVIDENCE ~A"
+                (%advanced-display-value (type-advanced-evidence ty))))
+      (write-char #\) out))))
 
 (defmethod type-to-string ((ty type-app))
   (format nil "(~A ~A)"

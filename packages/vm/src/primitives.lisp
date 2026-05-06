@@ -178,20 +178,93 @@ Each SPEC is (instruction-type host-function)."
 
 (defvar *vm-type-of-dispatch*)
 
+;;; FR-2501 / FR-2502: Dynamic / TypeRep runtime values
+
+(defstruct (vm-type-rep (:constructor %make-vm-type-rep))
+  "Runtime representation of a VM-visible type designator."
+  (specifier 't))
+
+(defun make-vm-type-rep (specifier)
+  "Construct a runtime type representation for SPECIFIER."
+  (%make-vm-type-rep :specifier specifier))
+
+(defun vm-type-rep (specifier)
+  "Coerce SPECIFIER into a vm-type-rep object."
+  (if (vm-type-rep-p specifier)
+      specifier
+      (make-vm-type-rep specifier)))
+
+(defun vm-type-rep-equal (left right)
+  "Return T when LEFT and RIGHT represent the same runtime type."
+  (equal (vm-type-rep-specifier (vm-type-rep left))
+         (vm-type-rep-specifier (vm-type-rep right))))
+
+(defun %vm-type-rep-value-compatible-p (value expected-type)
+  "Return T when VALUE satisfies EXPECTED-TYPE's runtime type specifier."
+  (vm-typep-check value (vm-type-rep-specifier (vm-type-rep expected-type))))
+
+(defun %vm-type-rep-compatible-p (stored-type value expected-type)
+  "Return T when STORED-TYPE exactly matches EXPECTED-TYPE or VALUE satisfies it."
+  (or (vm-type-rep-equal stored-type expected-type)
+      (%vm-type-rep-value-compatible-p value expected-type)))
+
+(defstruct (vm-dynamic (:constructor %make-vm-dynamic))
+  "A runtime value paired with its TypeRep."
+  (type-rep (make-vm-type-rep 't) :type vm-type-rep)
+  (value nil))
+
+(defun make-vm-dynamic (type-rep value)
+  "Construct a typed runtime Dynamic wrapper."
+  (%make-vm-dynamic :type-rep (vm-type-rep type-rep) :value value))
+
+(defun vm-runtime-type-of (value)
+  "Return the VM-visible runtime type designator for VALUE."
+  (or (cdr (assoc-if (lambda (pred) (funcall pred value))
+                     *vm-type-of-dispatch*))
+      (and (hash-table-p value)
+           (gethash :__class__ value)
+           (let ((class-ht (gethash :__class__ value)))
+             (and (hash-table-p class-ht)
+                  (or (gethash :__name__ class-ht) 't))))
+      't))
+
+(defun vm-type-rep-of (value)
+  "Return the runtime TypeRep of VALUE."
+  (make-vm-type-rep (vm-runtime-type-of value)))
+
+(defun vm-wrap-dynamic (value &optional type-specifier)
+  "Wrap VALUE in a Dynamic with TYPE-SPECIFIER or the inferred runtime type."
+  (make-vm-dynamic (or type-specifier (vm-type-rep-of value)) value))
+
+(defun vm-unwrap-dynamic (dynamic expected-type)
+  "Return (values value t) when DYNAMIC matches EXPECTED-TYPE, else (values nil nil)."
+  (let ((dynamic-value (if (vm-dynamic-p dynamic)
+                            dynamic
+                            (vm-wrap-dynamic dynamic))))
+    (let ((payload (vm-dynamic-value dynamic-value)))
+      (if (%vm-type-rep-compatible-p (vm-dynamic-type-rep dynamic-value)
+                                     payload
+                                     expected-type)
+          (values payload t)
+          (values nil nil)))))
+
+(defun vm-cast-with-type-rep (value expected-type)
+  "Attempt to cast VALUE to EXPECTED-TYPE using runtime TypeRep compatibility."
+  (if (vm-dynamic-p value)
+      (vm-unwrap-dynamic value expected-type)
+      (let ((expected-rep (vm-type-rep expected-type)))
+        (if (%vm-type-rep-compatible-p (vm-type-rep-of value)
+                                       value
+                                       expected-rep)
+            (values value t)
+            (values nil nil)))))
+
 (define-vm-unary-instruction vm-type-of :type-of "Get the type of an object.")
 
 (defmethod execute-instruction ((inst vm-type-of) state pc labels)
   (declare (ignore labels))
   (let* ((value  (vm-reg-get state (vm-src inst)))
-         (result (or (cdr (assoc-if (lambda (pred) (funcall pred value))
-                                    *vm-type-of-dispatch*))
-                     ;; VM CLOS instances — return class name
-                     (and (hash-table-p value)
-                          (gethash :__class__ value)
-                          (let ((class-ht (gethash :__class__ value)))
-                            (and (hash-table-p class-ht)
-                                 (or (gethash :__name__ class-ht) 't))))
-                     't)))
+         (result (vm-runtime-type-of value)))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 

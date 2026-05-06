@@ -20,7 +20,11 @@
   (multiple-value-bind (scheme found-p) (type-env-lookup (cl-cc/ast:ast-var-name ast) env)
     (if found-p
         (values (instantiate scheme) nil)
-        (error 'unbound-variable-error :name (cl-cc/ast:ast-var-name ast)))))
+        (multiple-value-bind (interface-scheme interface-found-p)
+            (lookup-type-interface-export (cl-cc/ast:ast-var-name ast))
+          (if interface-found-p
+              (values (instantiate interface-scheme) nil)
+              (error 'unbound-variable-error :name (cl-cc/ast:ast-var-name ast)))))))
 
 (defun infer-quote (ast)
   "Infer type of a quoted literal from its CL type."

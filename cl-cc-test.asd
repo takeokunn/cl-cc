@@ -214,12 +214,12 @@
     :pathname "packages/type/tests"
     :serial t
     :components
-    ((:file "type-tests")
-     (:file "type-inference-tests")
-     (:file "type-effect-tests")
-     (:file "type-phase-tests")
-     (:file "type-2026-nodes-tests")
-     (:file "kind-tests")
+     ((:file "type-tests")
+      (:file "type-inference-tests")
+      (:file "type-effect-tests")
+      (:file "type-phase-tests")
+       (:file "type-2026-nodes-tests")
+      (:file "kind-tests")
      (:file "multiplicity-tests")
      (:file "row-tests")
      (:file "subtyping-tests")

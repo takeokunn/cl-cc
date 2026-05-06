@@ -143,10 +143,41 @@ the subtype relation when they are structurally equal or both absent."
                 (type-arrow-params t2)
                 (type-arrow-params t1))
          (is-subtype-p (type-arrow-return t1) (type-arrow-return t2))
-         (or (and (null effects1) (null effects2))
-             (and effects1 effects2 (type-equal-p effects1 effects2)))
-         (eql (or (type-arrow-mult t1) :omega)
-              (or (type-arrow-mult t2) :omega)))))
+          (or (and (null effects1) (null effects2))
+              (and effects1 effects2 (type-equal-p effects1 effects2)))
+          (eql (or (type-arrow-mult t1) :omega)
+               (or (type-arrow-mult t2) :omega)))))
+
+(defun %advanced-security-base-type (payload)
+  "Return the base type encoded by a FR-1503 security-label payload."
+  (and (consp payload)
+       (consp (rest payload))
+       (typep (second payload) 'type-node)
+       (second payload)))
+
+(defun %subtype-advanced-information-flow-p (t1 t2)
+  "Return T when FR-1503 information-flow subtyping permits T1 <: T2."
+  (let* ((payload1 (first (type-advanced-args t1)))
+         (payload2 (first (type-advanced-args t2)))
+         (label1 (%type-advanced-payload-security-label payload1))
+         (label2 (%type-advanced-payload-security-label payload2))
+         (base1 (%advanced-security-base-type payload1))
+         (base2 (%advanced-security-base-type payload2)))
+    (and label1 label2
+         (type-advanced-security-label<= label1 label2)
+         (if (and base1 base2)
+             (is-subtype-p base1 base2)
+             (type-advanced-payload-equal-p payload1 payload2)))))
+
+(defun %subtype-advanced-p (t1 t2)
+  "Feature-specific advanced-node subtype semantics."
+  (and (type-advanced-p t2)
+       (string= (type-advanced-feature-id t1) (type-advanced-feature-id t2))
+       (cond
+         ((string= (type-advanced-feature-id t1) "FR-1503")
+          (%subtype-advanced-information-flow-p t1 t2))
+         (t
+          (type-equal-p t1 t2)))))
 
 ;;; Main Subtyping Predicate
 
@@ -210,10 +241,13 @@ Called as the fallback when no T1-driven rule matched."
         (type-arrow
          (or (and (type-arrow-p t2) (%subtype-arrow-p t1 t2))
              (%is-subtype-p-by-t2 t1 t2)))
-        (type-effect-row
-         (or (and (typep t2 'type-effect-row) (effect-row-subset-p t1 t2))
-             (%is-subtype-p-by-t2 t1 t2)))
-        (t (%is-subtype-p-by-t2 t1 t2)))))
+         (type-effect-row
+          (or (and (typep t2 'type-effect-row) (effect-row-subset-p t1 t2))
+              (%is-subtype-p-by-t2 t1 t2)))
+         (type-advanced
+          (or (%subtype-advanced-p t1 t2)
+              (%is-subtype-p-by-t2 t1 t2)))
+         (t (%is-subtype-p-by-t2 t1 t2)))))
 
 (defun subtypep (type1 type2)
   "Subtype predicate for cl-cc/type.

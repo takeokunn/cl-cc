@@ -34,6 +34,10 @@ the e-graph rewrite engine whose builtin rule set is also sourced from Prolog fa
     (:batch-concatenate         . ,#'opt-pass-batch-concatenate)
     (:cse                       . ,#'opt-pass-cse)
     (:jump                      . ,#'opt-pass-jump)
+    (:loop-unrolling            . ,#'opt-pass-loop-unrolling)
+    (:loop-rotation             . ,#'opt-pass-loop-rotation)
+    (:loop-peeling              . ,#'opt-pass-loop-peeling)
+    (:code-sinking              . ,#'opt-pass-code-sinking)
     (:unreachable               . ,#'opt-pass-unreachable)
     (:dead-basic-blocks         . ,#'opt-pass-dead-basic-blocks)
     (:store-to-load-forward     . ,#'opt-pass-store-to-load-forward)
@@ -41,6 +45,7 @@ the e-graph rewrite engine whose builtin rule set is also sourced from Prolog fa
     (:nil-check-elim            . ,#'opt-pass-dominated-type-check-elim)
     (:dominated-type-check-elim . ,#'opt-pass-dominated-type-check-elim)
     (:branch-correlation        . ,#'opt-pass-branch-correlation)
+    (:tail-duplication          . ,#'opt-pass-tail-duplication)
     (:block-merge               . ,#'opt-pass-block-merge)
     (:tail-merge                . ,#'opt-pass-tail-merge)
     (:pre                       . ,#'opt-pass-pre)
@@ -69,6 +74,10 @@ the e-graph rewrite engine whose builtin rule set is also sourced from Prolog fa
     :batch-concatenate
     :cse
     :jump
+    :loop-unrolling
+    :loop-rotation
+    :loop-peeling
+    :code-sinking
     :unreachable
     :dead-basic-blocks
     :store-to-load-forward
@@ -76,6 +85,7 @@ the e-graph rewrite engine whose builtin rule set is also sourced from Prolog fa
     :nil-check-elim
     :dominated-type-check-elim
     :branch-correlation
+    :tail-duplication
     :block-merge
     :tail-merge
     :pre

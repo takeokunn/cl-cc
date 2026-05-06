@@ -26,8 +26,145 @@
    #:multiplicity  #:+mult-zero+ #:+mult-one+ #:+mult-omega+
    #:multiplicity-p  #:mult-add #:mult-mul #:mult-leq  #:mult-to-string
 
-   ;; ─── Type node base ───────────────────────────────────────────────────
-   #:type-node  #:type-node-source-location  #:type-node-kind
+   ;; ─── Concrete advanced semantics ──────────────────────────────────────
+   #:concurrency-traits #:concurrency-traits-p #:make-concurrency-traits
+   #:concurrency-traits-type #:concurrency-traits-send #:concurrency-traits-sync
+   #:concurrency-traits-note #:*concurrency-trait-registry*
+   #:register-concurrency-traits #:lookup-concurrency-traits
+   #:sendable-type-p #:shareable-type-p #:validate-send #:validate-sync
+   #:validate-spawn-argument #:validate-shared-reference
+
+   #:+security-label-order+ #:normalize-security-label #:security-label-rank
+   #:security-label-p #:security-label<= #:join-security-labels #:meet-security-labels
+   #:labeled-value #:labeled-value-p #:labeled-value-value #:labeled-value-label
+   #:labeled-value-tainted-p #:labeled-value-audit-trail
+   #:make-labeled-value #:labeled-value-flow-allowed-p
+   #:sanitize-labeled-value #:declassify-labeled-value
+
+   #:region-lifetime-error #:region-token #:region-token-p #:region-token-id
+   #:region-token-generation #:region-token-active-p #:make-region-token #:close-region
+   #:region-active-p #:region-ref #:region-ref-p #:region-ref-token
+   #:region-ref-generation #:region-ref-value #:region-alloc #:region-ref-valid-p
+   #:region-deref #:with-region
+
+   #:capability #:capability-p #:capability-permissions #:make-capability
+   #:capability-allows-p #:capability-implies-p #:restrict-capability
+   #:delegate-capability #:capability-effects
+
+   #:unit-mismatch-error #:unit-definition #:unit-definition-p #:unit-definition-name
+   #:unit-definition-dimension #:unit-definition-scale #:*unit-registry*
+   #:define-unit #:find-unit #:unit-designator-p #:unit-dimension= #:unit-compatible-p
+   #:measure #:measure-p #:measure-value #:measure-unit #:make-measure
+   #:convert-unit #:convert-measure #:measure+ #:measure- #:measure* #:measure/
+
+   #:route-validation-error #:route #:route-p #:route-method #:route-path
+   #:route-parameters #:route-request-type #:route-response-type #:make-route
+   #:route-valid-p #:route-template-parameters #:build-route-path #:match-route-path
+   #:api-spec #:api-spec-p #:api-spec-routes #:api-spec-valid-p #:route-form-valid-p
+
+   #:ffi-validation-error #:+ffi-scalar-kinds+
+   #:ffi-scalar-type #:ffi-scalar-type-p #:ffi-scalar-type-kind #:make-ffi-scalar-type
+   #:ffi-pointer-type #:ffi-pointer-type-p #:ffi-pointer-type-pointee
+   #:ffi-pointer-type-borrowed-p #:ffi-pointer-type-nullable-p #:make-ffi-pointer-type
+   #:ffi-callback-type #:ffi-callback-type-p #:ffi-callback-type-argument-types
+   #:ffi-callback-type-return-type #:make-ffi-callback-type
+   #:ffi-function-descriptor #:ffi-function-descriptor-p #:ffi-function-descriptor-name
+   #:ffi-function-descriptor-argument-types #:ffi-function-descriptor-return-type
+   #:ffi-function-descriptor-abi #:make-ffi-function-descriptor
+   #:ffi-type-valid-p #:ffi-lisp-type-compatible-p #:ffi-descriptor-form-valid-p
+
+   #:qtt-binding #:qtt-binding-p #:qtt-binding-name #:qtt-binding-type
+   #:qtt-binding-multiplicity #:make-qtt-binding #:normalize-multiplicity
+   #:valid-multiplicity-p #:multiplicity<= #:multiplicity+ #:multiplicity*
+   #:multiplicity-zero-p #:multiplicity-one-p #:multiplicity-unrestricted-p
+   #:usage-satisfies-multiplicity-p #:qtt-erased-p
+
+   #:finite-semiring #:finite-semiring-p #:finite-semiring-name #:finite-semiring-elements
+   #:finite-semiring-zero #:finite-semiring-one #:finite-semiring-add
+   #:finite-semiring-multiply #:finite-semiring-preorder #:make-finite-semiring
+   #:grade-designator-p #:finite-semiring-valid-p #:graded-value #:graded-value-p
+   #:graded-value-grade #:graded-value-payload #:graded-value-semiring
+   #:make-graded-value #:grade<= #:graded-add #:graded-compose #:make-qtt-semiring
+
+   #:universe-sort #:universe-sort-p #:universe-sort-kind #:universe-sort-level
+   #:make-universe-sort #:valid-universe-sort-p #:universe<= #:max-universe
+   #:cic-proposition #:cic-proposition-p #:cic-proposition-name
+   #:cic-proposition-universe #:cic-proposition-payload #:make-cic-proposition
+   #:cic-proof #:cic-proof-p #:cic-proof-proposition #:cic-proof-witness
+   #:cic-proof-premises #:make-cic-proof #:cic-proof-valid-p #:proof-erasable-p
+   #:cic-inductive #:cic-inductive-p #:cic-inductive-name #:cic-inductive-universe
+   #:cic-inductive-constructors #:make-cic-inductive #:cic-inductive-valid-p
+   #:cic-large-elimination-allowed-p
+
+   #:termination-evidence #:termination-evidence-p #:termination-evidence-strategy
+   #:termination-evidence-measures #:termination-evidence-partial-p
+   #:make-termination-evidence #:structural-decrease-p #:lexicographic-decrease-p
+   #:termination-evidence-valid-p #:termination-evidence-form-valid-p
+
+   #:proof-obligation #:proof-obligation-p #:proof-obligation-name
+   #:proof-obligation-checker #:proof-obligation-description #:make-proof-obligation
+   #:proof-evidence #:proof-evidence-p #:proof-evidence-obligation-name
+   #:proof-evidence-payload #:make-proof-evidence
+    #:proof-carrying-code #:proof-carrying-code-p #:proof-carrying-code-artifact
+    #:proof-carrying-code-obligations #:proof-carrying-code-evidence
+    #:make-proof-carrying-code #:make-nonzero-obligation #:make-type-obligation
+    #:verify-proof-obligation #:verify-proof-evidence #:verify-proof-carrying-code
+    #:proof-evidence-form-valid-p
+
+    ;; ─── Datatype generic programming (FR-1602) ───────────────────────────
+    #:generic-u1 #:generic-u1-p #:make-generic-u1
+    #:generic-k1 #:generic-k1-p #:make-generic-k1 #:generic-k1-value #:generic-k1-type
+    #:generic-m1 #:generic-m1-p #:make-generic-m1 #:generic-m1-meta #:generic-m1-representation
+    #:generic-product #:generic-product-p #:make-generic-product #:generic-product-left #:generic-product-right
+    #:generic-sum #:generic-sum-p #:make-generic-sum #:generic-sum-tag #:generic-sum-value
+    #:generic-instance #:generic-instance-p #:make-generic-instance
+    #:generic-instance-type #:generic-instance-representation #:generic-instance-show #:generic-instance-traverse
+    #:*generic-instance-registry*
+    #:register-generic-instance #:lookup-generic-instance
+    #:generic-representation-of #:generic-show #:generic-transform #:generic-query
+    #:generic-representation-valid-p
+
+    ;; ─── Typed channels / actors / STM / coroutines / SIMD ────────────────
+    #:typed-channel #:typed-channel-p
+    #:send-channel #:send-channel-p #:send-channel-channel
+    #:recv-channel #:recv-channel-p #:recv-channel-channel
+    #:make-typed-channel #:make-buffered-channel
+    #:channel-payload-type #:channel-send #:channel-recv #:close-typed-channel #:make-channel-type
+
+    #:typed-actor-ref #:typed-actor-ref-p #:typed-actor-ref-message-type #:typed-actor-ref-state
+    #:typed-actor-ref-remote-p #:typed-actor-ref-mailbox
+    #:make-actor-ref #:actor-ref-type #:actor-message-accepted-p #:actor-send #:actor-stop
+
+    #:tvar #:tvar-p #:tvar-type #:tvar-value
+    #:stm-action #:stm-action-p #:stm-action-result-type #:stm-action-thunk #:stm-action-effects
+    #:*stm-transaction-active*
+    #:make-tvar #:stm-return #:stm-read #:stm-write #:stm-bind #:atomically #:make-stm-type
+
+    #:typed-generator #:typed-generator-p #:typed-generator-yield-type #:typed-generator-return-type
+    #:typed-coroutine #:typed-coroutine-p #:typed-coroutine-send-type #:typed-coroutine-receive-type
+    #:typed-coroutine-return-type #:typed-coroutine-done-p
+    #:make-generator #:generator-next #:make-coroutine #:coroutine-resume
+    #:make-generator-type #:make-coroutine-type
+
+    #:simd-vector #:simd-vector-p #:simd-vector-element-type #:simd-vector-lanes #:simd-vector-values
+    #:make-simd-vector #:simd-map #:simd-add #:make-simd-type
+
+    ;; ─── Type-level utility API (FR-1701/1702/1803/1804/3303/3304/3305) ──
+    #:make-api-type #:api-route-lookup #:route-response-type-for
+
+    #:frozen-value #:frozen-value-p #:make-frozen-value #:frozen-value-value #:frozen-value-type
+    #:make-type-level-natural #:type-level-natural-p #:type-level-natural-value #:known-nat-value
+    #:type-plus #:type-mul
+    #:make-length-indexed-vector-type #:make-matrix-type #:matrix-mul-type
+    #:make-type-level-string #:type-level-string-p #:type-level-string-value
+    #:has-field-type #:get-field-type #:template-literal-type
+    #:make-hlist-type #:hlist-head-type #:hlist-tail-type #:format-type
+    #:readonly-type #:writable-type #:deep-readonly-type #:freeze
+    #:partial-type #:required-type #:pick-type #:omit-type
+    #:exclude-type #:extract-type #:non-nullable-type #:return-type-of
+
+    ;; ─── Type node base ───────────────────────────────────────────────────
+    #:type-node  #:type-node-source-location  #:type-node-kind
 
    ;; ─── Primitive ───────────────────────────────────────────────────────
    #:type-primitive   #:type-primitive-p   #:make-type-primitive  #:type-primitive-name
@@ -82,12 +219,48 @@
    #:type-refinement-base #:type-refinement-predicate
    #:type-linear   #:type-linear-p   #:make-type-linear
    #:type-linear-base #:type-linear-grade
-   #:type-capability   #:type-capability-p   #:make-type-capability
-   #:type-capability-base #:type-capability-cap
+    #:type-capability   #:type-capability-p   #:make-type-capability
+    #:type-capability-base #:type-capability-cap
 
-    ;; ─── Effect types ────────────────────────────────────────────────────
-     #:type-effect-row   #:type-effect-row-p   #:make-type-effect-row
-     #:type-effect-row-effects #:type-effect-row-row-var
+    ;; ─── Advanced feature metadata / nodes ───────────────────────────────
+    #:type-advanced-feature #:type-advanced-feature-p #:make-type-advanced-feature
+    #:type-advanced-feature-fr-id #:type-advanced-feature-title #:type-advanced-feature-heads
+    #:+type-advanced-feature-specs+
+    #:*type-advanced-feature-registry*
+    #:register-type-advanced-feature #:lookup-type-advanced-feature
+    #:list-type-advanced-features #:list-type-advanced-feature-ids
+    #:canonicalize-type-advanced-feature-id
+     #:type-advanced-head-p #:type-advanced-feature-id-for-head
+     #:type-advanced #:type-advanced-p #:make-type-advanced
+     #:type-advanced-feature-id #:type-advanced-name #:type-advanced-args
+     #:type-advanced-properties #:type-advanced-evidence
+     #:type-advanced-property #:type-advanced-property-present-p
+      #:type-advanced-security-label<= #:type-advanced-route-p
+      #:type-advanced-semantic-domain #:type-advanced-semantics-implemented-p
+      #:validate-type-advanced #:type-advanced-valid-p
+      #:make-type-dynamic #:make-type-type-rep
+       #:advanced-call-policy #:advanced-call-policy-p
+       #:advanced-call-policy-function-name #:advanced-call-policy-summary
+       #:advanced-call-policy-exact-args #:advanced-call-policy-min-args
+       #:advanced-call-policy-validator #:advanced-call-policy-return-type
+       #:*advanced-call-policy-registry* #:register-advanced-call-policy
+       #:lookup-advanced-call-policy #:validate-advanced-call #:infer-advanced-call
+       #:ffi-descriptor-from-form #:ffi-descriptor-lisp-type
+       #:type-interface-module #:type-interface-module-p
+       #:type-interface-module-name #:type-interface-module-exports
+       #:type-interface-module-fingerprint #:type-interface-module-exported-types
+       #:*type-interface-registry* #:register-type-interface
+       #:lookup-type-interface #:lookup-type-interface-export
+       #:*smt-solver-registry* #:register-smt-solver #:lookup-smt-solver
+       #:solve-smt-constraint
+       #:*type-checker-plugin-registry* #:register-type-checker-plugin
+       #:lookup-type-checker-plugin #:run-type-checker-plugin
+       #:*type-synthesis-strategy-registry* #:register-type-synthesis-strategy
+       #:lookup-type-synthesis-strategy #:run-type-synthesis
+
+       ;; ─── Effect types ────────────────────────────────────────────────────
+      #:type-effect-row   #:type-effect-row-p   #:make-type-effect-row
+      #:type-effect-row-effects #:type-effect-row-row-var
      #:+pure-effect-row+ #:+io-effect-row+
      #:type-effect-op   #:type-effect-op-p   #:make-type-effect-op
      #:type-effect-op-name #:type-effect-op-args

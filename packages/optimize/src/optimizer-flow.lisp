@@ -136,6 +136,304 @@ Handles both vm-jump (unconditional) and vm-jump-zero (conditional)."
             (setf dead t)))))
     (nreverse result)))
 
+;;; ─── Conservative loop rotation (FR-169 subset) ─────────────────────────
+
+(defun %opt-loop-rotation-fresh-label (base used)
+  "Return a fresh label name derived from BASE not present in USED hash-table." 
+  (let ((i 0)
+        (name nil))
+    (loop
+      do (setf name (if (= i 0)
+                        base
+                        (format nil "~A_~D" base i)))
+         (if (gethash name used)
+             (incf i)
+             (return name)))))
+
+(defun opt-pass-loop-rotation (instructions)
+  "Rotate simple while-shaped loops into guard+do-while form.
+
+Conservative subset only. Matches this linear shape:
+  Lh: <cond-inst> (vm-jump-zero reg Lexit) <body...> (vm-jump Lh) Lexit:
+and rewrites to:
+  (vm-jump Lguard) Lbody: <body...> Lguard: <cond-inst>
+  (vm-jump-zero reg Lexit) (vm-jump Lbody) Lexit:
+
+The transform is skipped unless all structural checks pass."
+  (let* ((vec (coerce instructions 'vector))
+         (n (length vec))
+         (used-labels (make-hash-table :test #'equal)))
+    (loop for i from 0 below n
+          for inst = (aref vec i)
+          when (vm-label-p inst)
+          do (setf (gethash (vm-name inst) used-labels) t))
+    (let ((result nil)
+          (i 0))
+      (loop while (< i n)
+            do (let ((cur (aref vec i)))
+                 (if (and (vm-label-p cur)
+                          (<= (+ i 4) (1- n)))
+                     (let* ((header       cur)
+                            (cond-inst    (aref vec (+ i 1)))
+                            (jz-inst      (aref vec (+ i 2)))
+                            (header-name  (vm-name header)))
+                       (if (and (typep jz-inst 'vm-jump-zero)
+                                (not (vm-label-p cond-inst)))
+                           (let* ((exit-name (vm-label-name jz-inst))
+                                  (exit-pos  (cfg-find-label-position vec n exit-name))
+                                  (back-pos  (and exit-pos (1- exit-pos)))
+                                  (back-inst (and back-pos (>= back-pos 0) (aref vec back-pos))))
+                             (if (and exit-pos
+                                      (> exit-pos (+ i 3))
+                                      (typep back-inst 'vm-jump)
+                                      (equal (vm-label-name back-inst) header-name))
+                                 (let* ((body-insts (loop for j from (+ i 3) below back-pos
+                                                          collect (aref vec j)))
+                                        (body-label-name  (%opt-loop-rotation-fresh-label
+                                                           (format nil "~A_body" header-name)
+                                                           used-labels))
+                                        (guard-label-name (%opt-loop-rotation-fresh-label
+                                                           (format nil "~A_guard" header-name)
+                                                           used-labels))
+                                        (body-label  (make-vm-label :name body-label-name))
+                                        (guard-label (make-vm-label :name guard-label-name)))
+                                   (setf (gethash body-label-name used-labels) t
+                                         (gethash guard-label-name used-labels) t)
+                                   (push (make-vm-jump :label guard-label-name) result)
+                                   (push body-label result)
+                                   (dolist (b body-insts) (push b result))
+                                   (push guard-label result)
+                                   (push cond-inst result)
+                                   (push jz-inst result)
+                                   (push (make-vm-jump :label body-label-name) result)
+                                   (setf i exit-pos)
+                                   (push (aref vec i) result)
+                                   (incf i))
+                                 (progn
+                                   (push cur result)
+                                   (incf i))))
+                           (progn
+                             (push cur result)
+                             (incf i))))
+                     (progn
+                       (push cur result)
+                       (incf i)))))
+      (nreverse result))))
+
+;;; ─── Conservative loop peeling (FR-170 subset) ──────────────────────────
+
+(defun opt-pass-loop-peeling (instructions)
+  "Peel the first iteration of a simple while-shaped loop.
+
+Conservative subset only. Matches this linear shape:
+  Lh: <cond-inst> (vm-jump-zero reg Lexit) <body...> (vm-jump Lh) Lexit:
+and rewrites to:
+  <cond-inst> (vm-jump-zero reg Lexit) <body...>
+  Lh: <cond-inst> (vm-jump-zero reg Lexit) <body...> (vm-jump Lh) Lexit:
+
+This duplicates only one first-iteration body before the original loop header."
+  (let* ((vec (coerce instructions 'vector))
+         (n (length vec))
+         (result nil)
+         (i 0)
+         (peeled nil))
+    (loop while (< i n)
+          do (let ((cur (aref vec i)))
+               (if (and (not peeled)
+                        (vm-label-p cur)
+                        (<= (+ i 4) (1- n)))
+                   (let* ((header      cur)
+                          (cond-inst   (aref vec (+ i 1)))
+                          (jz-inst     (aref vec (+ i 2)))
+                          (header-name (vm-name header)))
+                     (if (and (typep jz-inst 'vm-jump-zero)
+                              (not (vm-label-p cond-inst)))
+                         (let* ((exit-name (vm-label-name jz-inst))
+                                (exit-pos  (cfg-find-label-position vec n exit-name))
+                                (back-pos  (and exit-pos (1- exit-pos)))
+                                (back-inst (and back-pos (>= back-pos 0) (aref vec back-pos))))
+                           (if (and exit-pos
+                                    (> exit-pos (+ i 3))
+                                    (typep back-inst 'vm-jump)
+                                    (equal (vm-label-name back-inst) header-name))
+                               (let ((body-insts (loop for j from (+ i 3) below back-pos
+                                                       collect (aref vec j))))
+                                 ;; peeled first iteration (without header label)
+                                 (push cond-inst result)
+                                 (push jz-inst result)
+                                 (dolist (b body-insts) (push b result))
+                                 ;; then keep original loop unchanged
+                                 (loop for j from i below (1+ exit-pos)
+                                       do (push (aref vec j) result))
+                                 (setf i (1+ exit-pos)
+                                       peeled t))
+                               (progn
+                                 (push cur result)
+                                 (incf i))))
+                         (progn
+                           (push cur result)
+                           (incf i))))
+                   (progn
+                     (push cur result)
+                     (incf i)))))
+    (nreverse result)))
+
+;;; ─── Conservative loop unrolling (FR-021 subset) ────────────────────────
+
+(defparameter *opt-loop-unroll-max-trip* 4
+  "Maximum compile-time trip count for conservative full unrolling.")
+
+(defun %opt-build-const-env-up-to (vec end)
+  "Return reg->integer constant env from VEC[0,END)."
+  (let ((env (make-hash-table :test #'eq)))
+    (loop for i from 0 below end
+          for inst = (aref vec i)
+          do (cond
+               ((typep inst 'vm-const)
+                (if (integerp (vm-value inst))
+                    (setf (gethash (vm-dst inst) env) (vm-value inst))
+                    (remhash (vm-dst inst) env)))
+               (t
+                (let ((dst (opt-inst-dst inst)))
+                  (when dst (remhash dst env))))))
+    env))
+
+(defun %opt-has-external-jump-to-label-p (vec label-name start end)
+  "Return T when any jump outside [START,END] targets LABEL-NAME."
+  (loop for i from 0 below (length vec)
+        thereis (and (not (and (<= start i) (<= i end)))
+                     (let ((inst (aref vec i)))
+                       (and (typep inst '(or vm-jump vm-jump-zero))
+                            (equal (vm-label-name inst) label-name))))))
+
+(defun opt-pass-loop-unrolling (instructions)
+  "Fully unroll tiny counted loops with compile-time trip count.
+
+Conservative subset. Matches this linear shape:
+  Lh: (vm-lt rcond riv rlim) (vm-jump-zero rcond Lexit) body... step (vm-jump Lh) Lexit:
+where STEP is (vm-add riv riv rstep) and riv/rlim/rstep are integer constants
+known at compile time before Lh. Only applies when 0 < trip <=
+*opt-loop-unroll-max-trip* and no external jumps target Lh."
+  (let* ((vec (coerce instructions 'vector))
+         (n (length vec))
+         (result nil)
+         (i 0))
+    (loop while (< i n)
+          do (let ((cur (aref vec i)))
+               (if (and (vm-label-p cur)
+                        (<= (+ i 5) (1- n)))
+                   (let* ((header cur)
+                          (cmp-inst (aref vec (+ i 1)))
+                          (jz-inst  (aref vec (+ i 2)))
+                          (header-name (vm-name header)))
+                     (if (and (typep cmp-inst 'vm-lt)
+                              (typep jz-inst 'vm-jump-zero)
+                              (eq (vm-reg jz-inst) (vm-dst cmp-inst)))
+                         (let* ((exit-name (vm-label-name jz-inst))
+                                (exit-pos  (cfg-find-label-position vec n exit-name))
+                                (back-pos  (and exit-pos (1- exit-pos)))
+                                (back-inst (and back-pos (>= back-pos 0) (aref vec back-pos))))
+                           (if (and exit-pos
+                                    (> exit-pos (+ i 4))
+                                    (typep back-inst 'vm-jump)
+                                    (equal (vm-label-name back-inst) header-name)
+                                    (not (%opt-has-external-jump-to-label-p vec header-name i exit-pos)))
+                               (let* ((body-insts (loop for j from (+ i 3) below back-pos
+                                                        collect (aref vec j)))
+                                      (step-inst (car (last body-insts)))
+                                      (const-env (%opt-build-const-env-up-to vec i)))
+                                 (if (and (typep step-inst 'vm-add)
+                                          (eq (vm-dst step-inst) (vm-lhs step-inst))
+                                          (eq (vm-dst step-inst) (vm-lhs cmp-inst)))
+                                     (let* ((iv-reg   (vm-lhs cmp-inst))
+                                            (lim-reg  (vm-rhs cmp-inst))
+                                            (step-reg (vm-rhs step-inst))
+                                            (init     (gethash iv-reg const-env))
+                                            (limit    (gethash lim-reg const-env))
+                                            (step     (gethash step-reg const-env))
+                                            (trip     (and init limit step
+                                                           (opt-induction-trip-count init limit step))))
+                                       (if (and trip (> trip 0) (<= trip *opt-loop-unroll-max-trip*))
+                                           (progn
+                                             (dotimes (_ trip)
+                                               (dolist (b body-insts)
+                                                 (push b result)))
+                                             ;; keep exit label and continue
+                                             (setf i exit-pos)
+                                             (push (aref vec i) result)
+                                             (incf i))
+                                           (progn
+                                             (push cur result)
+                                             (incf i))))
+                                     (progn
+                                       (push cur result)
+                                       (incf i))))
+                               (progn
+                                 (push cur result)
+                                 (incf i))))
+                         (progn
+                           (push cur result)
+                           (incf i))))
+                   (progn
+                     (push cur result)
+                     (incf i)))))
+    (nreverse result)))
+
+;;; ─── Conservative code sinking (FR-163 subset) ──────────────────────────
+
+(defun %opt-reg-read-count (instructions reg)
+  "Count reads of REG in INSTRUCTIONS." 
+  (let ((count 0))
+    (dolist (inst instructions count)
+      (dolist (r (opt-inst-read-regs inst))
+        (when (eq r reg)
+          (incf count))))))
+
+(defun %opt-first-inst-after-label-index (vec label-index)
+  "Return first index after LABEL-INDEX that is not a vm-label, or NIL." 
+  (loop for i from (1+ label-index) below (length vec)
+        for inst = (aref vec i)
+        unless (vm-label-p inst)
+        do (return i)))
+
+(defun opt-pass-code-sinking (instructions)
+  "Sink selected constants into the unique use block.
+
+Conservative subset:
+- source shape: (vm-const dst v) followed by (vm-jump label)
+- dst has exactly one read in whole function
+- target label exists and target block reads dst
+
+Transform moves vm-const from source block to target block entry.
+No duplication, no control-dependent sinking, no side-effect motion." 
+  (let* ((vec (coerce instructions 'vector))
+         (n (length vec))
+         (remove-at (make-hash-table :test #'eql))
+         (insertions (make-hash-table :test #'eql)))
+    (loop for i from 0 below (- n 1)
+          for inst = (aref vec i)
+          for nxt = (aref vec (1+ i))
+          do (when (and (typep inst 'vm-const)
+                        (typep nxt 'vm-jump))
+               (let* ((dst (vm-dst inst))
+                      (reads (%opt-reg-read-count instructions dst))
+                      (label-name (vm-label-name nxt))
+                      (label-pos (cfg-find-label-position vec n label-name)))
+                 (when (and (= reads 1) label-pos)
+                   (let ((target-inst-pos (%opt-first-inst-after-label-index vec label-pos)))
+                     (when (and target-inst-pos
+                                (member dst (opt-inst-read-regs (aref vec target-inst-pos)) :test #'eq))
+                       (setf (gethash i remove-at) t)
+                       (push inst (gethash label-pos insertions))))))))
+    (let ((out nil))
+      (loop for i from 0 below n
+            for inst = (aref vec i)
+            do (unless (gethash i remove-at)
+                 (push inst out))
+               (dolist (ins (nreverse (gethash i insertions)))
+                 (push ins out)))
+      (nreverse out))))
+
 (defun opt-pass-dead-basic-blocks (instructions)
   "Eliminate unreachable basic blocks by round-tripping through the CFG.
    Reachability is computed from the entry block; unreachable blocks and their

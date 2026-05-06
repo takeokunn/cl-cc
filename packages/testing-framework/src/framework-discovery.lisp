@@ -58,24 +58,34 @@
   "Return inherited before/after fixture chains for SUITE-NAME."
   (let ((before-chain '())
         (after-chain '())
-        (current suite-name))
+        (current suite-name)
+        (seen '()))
     (loop while current
-          for entry = (persist-lookup *suite-registry* current)
-          while entry
-          do (setf before-chain (append (getf entry :before-each) before-chain))
-             (setf after-chain  (append after-chain (getf entry :after-each)))
-             (setf current (getf entry :parent)))
+          do (when (member current seen :test #'eq)
+               (return))
+             (push current seen)
+             (let ((entry (persist-lookup *suite-registry* current)))
+               (unless entry
+                 (return))
+               (setf before-chain (append (getf entry :before-each) before-chain))
+               (setf after-chain  (append after-chain (getf entry :after-each)))
+               (setf current (getf entry :parent))))
     (values before-chain after-chain)))
 
 (defun %suite-parallel-p (suite-name)
   "Return T when SUITE-NAME and all of its ancestors allow parallel execution."
   (loop with current = suite-name
+        with seen = '()
         while current
-        for entry = (persist-lookup *suite-registry* current)
-        while entry
-        do (when (null (getf entry :parallel))
+        do (when (member current seen :test #'eq)
              (return-from %suite-parallel-p nil))
-           (setf current (getf entry :parent))
+           (push current seen)
+           (let ((entry (persist-lookup *suite-registry* current)))
+             (unless entry
+               (return-from %suite-parallel-p t))
+             (when (null (getf entry :parallel))
+               (return-from %suite-parallel-p nil))
+             (setf current (getf entry :parent)))
         finally (return t)))
 
 (defun %test-parallel-safe-p (test-plist)

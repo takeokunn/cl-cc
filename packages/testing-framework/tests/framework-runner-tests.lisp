@@ -29,6 +29,41 @@
       (setf *suite-registry* (persist-remove *suite-registry* child))
       (setf *suite-registry* (persist-remove *suite-registry* parent)))))
 
+(deftest suite-parent-cycle-does-not-hang-discovery-helpers
+  "Suite parent cycles terminate in collection, fixture lookup, and parallel checks."
+  (let* ((*suite-registry* (persist-empty))
+         (*test-registry* (persist-empty))
+         (suite-a (gensym "ULW-CYCLE-A-"))
+         (suite-b (gensym "ULW-CYCLE-B-"))
+         (before-a (lambda () :before-a))
+         (before-b (lambda () :before-b))
+         (after-a (lambda () :after-a))
+         (after-b (lambda () :after-b)))
+    (setf *suite-registry*
+          (persist-assoc *suite-registry* suite-a
+                         (list :name suite-a :description "tmp" :parent suite-b :parallel t
+                               :before-each (list before-a) :after-each (list after-a))))
+    (setf *suite-registry*
+          (persist-assoc *suite-registry* suite-b
+                         (list :name suite-b :description "tmp" :parent suite-a :parallel t
+                               :before-each (list before-b) :after-each (list after-b))))
+    (setf *test-registry*
+          (persist-assoc *test-registry* 'ulw-cycle-test-a
+                         (list :name 'ulw-cycle-test-a :suite suite-a :tags nil)))
+    (setf *test-registry*
+          (persist-assoc *test-registry* 'ulw-cycle-test-b
+                         (list :name 'ulw-cycle-test-b :suite suite-b :tags nil)))
+    (assert-= 2 (length (%collect-all-suite-tests suite-a nil)))
+    (multiple-value-bind (before-chain after-chain) (%get-suite-fixtures suite-a)
+      (assert-= 2 (length before-chain))
+      (assert-= 2 (length after-chain))
+      (assert-true (member before-a before-chain :test #'eq))
+      (assert-true (member before-b before-chain :test #'eq))
+      (assert-true (member after-a after-chain :test #'eq))
+      (assert-true (member after-b after-chain :test #'eq)))
+    (assert-false (%suite-parallel-p suite-a))
+    (assert-false (%test-parallel-safe-p (list :suite suite-a :depends-on nil)))))
+
 (deftest dependency-ordering-moves-dependent-after-prerequisite
   "%order-tests-for-dependencies places a dependent test after its prerequisite."
   (let* ((dependency (list :name 'ulw-dependency :depends-on nil))

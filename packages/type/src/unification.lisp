@@ -23,6 +23,44 @@ with ROW-VAR as the tail."
    :effects (mapcar (lambda (n) (make-type-effect-op :name n :args nil)) names)
    :row-var row-var))
 
+(defun %type-advanced-payload-unify (left right subst)
+  "Unify nested advanced payload values, recursing only through matching structure."
+  (cond
+    ((and (typep left 'type-node) (typep right 'type-node))
+     (type-unify left right subst))
+    ((or (typep left 'type-node) (typep right 'type-node))
+     (values nil nil))
+    ((and (consp left) (consp right))
+     (multiple-value-bind (subst1 ok1)
+         (%type-advanced-payload-unify (car left) (car right) subst)
+       (if ok1
+           (%type-advanced-payload-unify (cdr left) (cdr right) subst1)
+           (values nil nil))))
+    ((equal left right)
+     (values subst t))
+    (t
+     (values nil nil))))
+
+(defun %type-advanced-unify (left right subst)
+  "Unify two advanced feature nodes when they share the same FR id and shape."
+  (if (string/= (type-advanced-feature-id left) (type-advanced-feature-id right))
+      (values nil nil)
+      (multiple-value-bind (subst1 ok1)
+          (%type-advanced-payload-unify (type-advanced-args left)
+                                        (type-advanced-args right)
+                                        subst)
+        (if ok1
+            (multiple-value-bind (subst2 ok2)
+                (%type-advanced-payload-unify (type-advanced-properties left)
+                                              (type-advanced-properties right)
+                                              subst1)
+              (if ok2
+                  (%type-advanced-payload-unify (type-advanced-evidence left)
+                                                (type-advanced-evidence right)
+                                                subst2)
+                  (values nil nil)))
+            (values nil nil)))))
+
 ;;; ─── Type Unification ─────────────────────────────────────────────────────
 
 (defun %combine-upper-bound (left right subst)
@@ -234,6 +272,10 @@ Examples:
       ;; Both are effect rows
       ((and (type-effect-row-p t1) (type-effect-row-p t2))
        (unify-effect-rows t1 t2 subst))
+
+      ;; Advanced feature nodes unify only within the same FR family.
+      ((and (type-advanced-p t1) (type-advanced-p t2))
+       (%type-advanced-unify t1 t2 subst))
 
       ;; Refinement types unify through their base type.
       ((type-refinement-p t1)

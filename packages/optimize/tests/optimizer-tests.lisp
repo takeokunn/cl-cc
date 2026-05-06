@@ -186,9 +186,25 @@
                     (else (make-vm-label :name "else"))
                     (p2   (cl-cc:make-vm-integer-p :dst :r2 :src :r0))
                     (ret0 (make-vm-ret :reg :r2)))
+                (cl-cc/optimize::opt-pass-branch-correlation
+                 (list c p1 br then ret1 else p2 ret0))))
+            :r2 0)
+          ("branch-correlation-join-agrees"
+           (lambda ()
+             (let* ((pred-a (make-vm-label :name "pred-a"))
+                    (p1     (cl-cc:make-vm-integer-p :dst :r1 :src :r0))
+                    (br-a   (make-vm-jump-zero :reg :r1 :label "join"))
+                    (pred-b (make-vm-label :name "pred-b"))
+                    (p2     (cl-cc:make-vm-integer-p :dst :r2 :src :r0))
+                    (br-b   (make-vm-jump-zero :reg :r2 :label "join"))
+                    (then   (make-vm-label :name "then"))
+                    (ret2   (make-vm-ret :reg :r2))
+                    (join   (make-vm-label :name "join"))
+                    (p3     (cl-cc:make-vm-integer-p :dst :r3 :src :r0))
+                    (ret3   (make-vm-ret :reg :r3)))
                (cl-cc/optimize::opt-pass-branch-correlation
-                (list c p1 br then ret1 else p2 ret0))))
-           :r2 0)
+                (list pred-a p1 br-a pred-b p2 br-b then ret2 join p3 ret3))))
+           :r3 0)
           ("fold-rational-unary"
            (lambda ()
              (let* ((c1  (make-vm-const :dst :r0 :value 3/4))
@@ -211,6 +227,26 @@
                               (eq expected-dst (cl-cc/vm::vm-dst i))
                               (eql expected-value (cl-cc/vm::vm-value i))))
                        out))))
+
+(deftest optimizer-branch-correlation-join-disagrees
+  "Branch correlation leaves a join unchanged when incoming facts differ."
+  (let* ((pred-a (make-vm-label :name "pred-a"))
+         (p1     (cl-cc:make-vm-integer-p :dst :r1 :src :r0))
+         (br-a   (make-vm-jump-zero :reg :r1 :label "join"))
+         (pred-b (make-vm-label :name "pred-b"))
+         (p2     (cl-cc:make-vm-integer-p :dst :r2 :src :r4))
+         (br-b   (make-vm-jump-zero :reg :r2 :label "other"))
+         (join   (make-vm-label :name "join"))
+         (p3     (cl-cc:make-vm-integer-p :dst :r3 :src :r0))
+         (ret3   (make-vm-ret :reg :r3))
+         (other  (make-vm-label :name "other"))
+         (ret2   (make-vm-ret :reg :r2))
+         (out    (cl-cc/optimize::opt-pass-branch-correlation
+                  (list pred-a p1 br-a pred-b p2 br-b join p3 ret3 other ret2))))
+    (assert-false (some (lambda (i)
+                          (and (typep i 'cl-cc/vm::vm-const)
+                               (eq :r3 (cl-cc/vm::vm-dst i))))
+                        out))))
 
 ;;; End-to-end, bitwise, unary folding, inlining, and prolog peephole tests are in
 ;;; optimizer-e2e-tests.lisp. Low-level pass tests are in optimizer-tests-lowlevel2.lisp.

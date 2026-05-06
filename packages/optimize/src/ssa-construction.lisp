@@ -23,6 +23,7 @@
     (cfg-compute-dominators cfg)
     (cfg-compute-dominance-frontiers cfg)
     (let ((phi-map (ssa-place-phis cfg)))
+      (setf phi-map (ssa-place-lcssa-phis cfg phi-map))
       (multiple-value-bind (renamed phi-map)
           (ssa-rename cfg phi-map)
         (multiple-value-bind (phi-map renamed)
@@ -42,40 +43,97 @@
   "Destroy SSA form: replace phi-nodes with parallel copies in predecessors.
    Returns a flat instruction list in RPO order.
    Uses the same-RPO ordering for deterministic output."
-  (let ((copies-to-insert (make-hash-table :test #'eq))) ; block → list of (dst . src) pairs
+  (let ((copies-to-insert (make-hash-table :test #'eq)) ; pred → succ → list of (dst . src)
+        (edge-pads nil))
+
+    (labels ((edge-copies-table (pred)
+               (or (gethash pred copies-to-insert)
+                   (setf (gethash pred copies-to-insert)
+                         (make-hash-table :test #'eq))))
+             (add-edge-copy (pred succ dst src)
+               (push (cons dst src) (gethash succ (edge-copies-table pred))))
+             (edge-copies (pred succ)
+               (let ((succ-table (gethash pred copies-to-insert)))
+                 (and succ-table (gethash succ succ-table))))
+             (final-terminator (block-insts)
+               (and block-insts
+                    (let ((last-inst (car (last block-insts))))
+                      (and (typep last-inst '(or vm-jump vm-jump-zero vm-ret vm-halt))
+                           last-inst))))
+             (branch-target-block (term)
+               (and (typep term 'vm-jump-zero)
+                    (cfg-get-block-by-label cfg (vm-label-name term))))
+             (fallthrough-block (block target)
+               (find-if (lambda (succ) (not (eq succ target)))
+                        (bb-successors block)))
+             (fresh-edge-label-name (pred succ)
+               (format nil "SSA_EDGE_~D_~D_~D"
+                       (bb-id pred) (bb-id succ) (length edge-pads)))
+             (emit-copies (copies result)
+               (dolist (copy (ssa-sequentialize-copies copies) result)
+                 (push copy result)))
+             (make-target-pad (pred succ copies)
+               (let ((pad-name (fresh-edge-label-name pred succ))
+                     (target-label (bb-label succ)))
+                 (push (list pad-name copies (vm-name target-label)) edge-pads)
+                 pad-name)))
 
     ;; Step 1: for each phi-node, schedule copies in predecessor blocks
-    (loop for b across (cfg-blocks cfg)
-          do (dolist (phi (gethash b phi-map))
-               (dolist (arg (phi-args phi))
-                 (let ((pred (car arg))
-                       (src  (cdr arg))
-                       (dst  (phi-dst phi)))
-                   (push (cons dst src) (gethash pred copies-to-insert))))))
+      (loop for b across (cfg-blocks cfg)
+            do (dolist (phi (gethash b phi-map))
+                 (dolist (arg (phi-args phi))
+                   (let ((pred (car arg))
+                         (src  (cdr arg))
+                         (dst  (phi-dst phi)))
+                     (add-edge-copy pred b dst src)))))
 
     ;; Step 2: emit flat instruction list in RPO order
-    (let ((rpo (cfg-compute-rpo cfg))
-          (result nil))
-      (dolist (b rpo)
-        ;; Emit block label
-        (when (bb-label b)
-          (push (bb-label b) result))
-        ;; Emit renamed instructions
-        (dolist (inst (gethash b renamed-map))
-          (push inst result))
-        ;; Insert sequentialized parallel copies at end of block
-        ;; (before the block terminator — we insert them before the last
-        ;;  branch/jump instruction to preserve control flow)
-        (let* ((block-insts (gethash b renamed-map))
-               (terminator  (and block-insts
-                                 (find-if (lambda (i) (typep i '(or vm-jump vm-jump-zero vm-ret vm-halt)))
-                                          (reverse block-insts))))
-               (copies      (gethash b copies-to-insert)))
-          (declare (ignore terminator))
-          (when copies
-            (dolist (copy (ssa-sequentialize-copies copies))
-              (push copy result)))))
-      (nreverse result))))
+      (let ((rpo (cfg-compute-rpo cfg))
+            (result nil))
+        (dolist (b rpo)
+          ;; Emit block label
+          (when (bb-label b)
+            (push (bb-label b) result))
+          (let* ((block-insts (gethash b renamed-map))
+                 (terminator  (final-terminator block-insts))
+                 (prefix      (if terminator (butlast block-insts) block-insts)))
+            (dolist (inst prefix)
+              (push inst result))
+            (cond
+              ((typep terminator 'vm-jump)
+               (let* ((target (cfg-get-block-by-label cfg (vm-label-name terminator)))
+                      (copies (and target (edge-copies b target))))
+                 (when copies
+                   (setf result (emit-copies copies result)))
+                 (push terminator result)))
+              ((typep terminator 'vm-jump-zero)
+               (let* ((target (branch-target-block terminator))
+                      (fallthrough (fallthrough-block b target))
+                      (target-copies (and target (edge-copies b target)))
+                      (fallthrough-copies (and fallthrough (edge-copies b fallthrough)))
+                      (branch-inst terminator))
+                 (when target-copies
+                   (setf branch-inst
+                         (make-vm-jump-zero
+                          :reg (vm-reg terminator)
+                          :label (make-target-pad b target target-copies))))
+                 (push branch-inst result)
+                 (when fallthrough-copies
+                   (setf result (emit-copies fallthrough-copies result)))))
+              ((typep terminator '(or vm-ret vm-halt))
+               (push terminator result))
+              (t
+               (let ((successor (first (bb-successors b))))
+                 (when successor
+                   (let ((copies (edge-copies b successor)))
+                     (when copies
+                       (setf result (emit-copies copies result))))))))))
+        (dolist (pad (nreverse edge-pads))
+          (destructuring-bind (pad-name copies target-name) pad
+            (push (make-vm-label :name pad-name) result)
+            (setf result (emit-copies copies result))
+            (push (make-vm-jump :label target-name) result)))
+        (nreverse result)))))
 
 (defun ssa-sequentialize-copies (parallel-copies)
   "Convert a list of parallel copies (dst . src) to a sequential list of

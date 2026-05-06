@@ -203,7 +203,61 @@ Round is excluded from the values-list check (nil means skip)."
 (deftest-each prim-or-cases
   "vm-or: both nil → nil; any truthy → t."
   :cases (("both-false"  nil nil nil)
-          ("one-true"    nil 42  t))
+           ("one-true"    nil 42  t))
   (lhs rhs expected)
   (assert-equal expected (%run-binary-inst #'cl-cc:make-vm-or lhs rhs)))
 
+;;; ═══════════════════════════════════════════════════════════════════════════
+;;; Section 8: Dynamic / TypeRep Runtime API
+;;; ═══════════════════════════════════════════════════════════════════════════
+
+(deftest vm-type-rep-equality-and-inference
+  "TypeRep values compare structurally and vm-type-rep-of infers runtime primitives."
+  (let ((integer-rep (cl-cc/vm:vm-type-rep 'integer))
+        (string-rep (cl-cc/vm:vm-type-rep 'string)))
+    (assert-true (cl-cc/vm:vm-type-rep-equal integer-rep (cl-cc/vm:make-vm-type-rep 'integer)))
+    (assert-false (cl-cc/vm:vm-type-rep-equal integer-rep string-rep))
+    (assert-equal 'fixnum
+                  (cl-cc/vm:vm-type-rep-specifier (cl-cc/vm:vm-type-rep-of 42)))
+    (assert-equal 'string
+                  (cl-cc/vm:vm-type-rep-specifier (cl-cc/vm:vm-type-rep-of "hello")))))
+
+(deftest vm-wrap-and-unwrap-dynamic-success
+  "Dynamic wrappers preserve their payload and unwrap when the TypeRep matches."
+  (let ((dynamic-value (cl-cc/vm:vm-wrap-dynamic 42 'integer)))
+    (assert-true (cl-cc/vm:vm-dynamic-p dynamic-value))
+    (multiple-value-bind (value ok)
+        (cl-cc/vm:vm-unwrap-dynamic dynamic-value 'integer)
+      (assert-true ok)
+      (assert-= 42 value)))
+  (let ((dynamic-value (cl-cc/vm:vm-wrap-dynamic 42)))
+    (multiple-value-bind (value ok)
+        (cl-cc/vm:vm-unwrap-dynamic dynamic-value 'integer)
+      (assert-true ok)
+      (assert-= 42 value))))
+
+(deftest vm-unwrap-dynamic-mismatch-fails-safely
+  "Dynamic unwrap returns NIL/NIL when the requested TypeRep does not match."
+  (multiple-value-bind (value ok)
+      (cl-cc/vm:vm-unwrap-dynamic (cl-cc/vm:vm-wrap-dynamic 42 'integer) 'string)
+    (assert-null value)
+    (assert-false ok)))
+
+(deftest vm-cast-with-type-rep-works-for-plain-and-dynamic-values
+  "TypeRep casts succeed for compatible runtime types, even across Dynamic wrappers."
+  (multiple-value-bind (value ok)
+      (cl-cc/vm:vm-cast-with-type-rep 42 'integer)
+    (assert-true ok)
+    (assert-= 42 value))
+  (multiple-value-bind (value ok)
+      (cl-cc/vm:vm-cast-with-type-rep 42 'fixnum)
+    (assert-true ok)
+    (assert-= 42 value))
+  (multiple-value-bind (value ok)
+      (cl-cc/vm:vm-cast-with-type-rep (cl-cc/vm:vm-wrap-dynamic "hello" 'string) 'string)
+    (assert-true ok)
+    (assert-string= "hello" value))
+  (multiple-value-bind (value ok)
+      (cl-cc/vm:vm-cast-with-type-rep 42 'string)
+    (assert-null value)
+    (assert-false ok)))

@@ -75,26 +75,67 @@
        defsites(v) = blocks where v is defined (has a dst write)
        Insert phi(v) at each block in IDF(defsites(v))
        if v is not already live-in there"
-  ;; Step 1: collect all registers and their definition blocks
-  (let ((def-sites (make-hash-table :test #'eq))  ; reg → list of blocks
-        (phi-map   (make-hash-table :test #'eq)))  ; block → list of ssa-phi
+  ;; Step 1: collect all registers, their definition blocks, and read-uses.
+  ;; Semi-pruned SSA: if a variable is never read, skip phi placement.
+  (let ((def-sites  (make-hash-table :test #'eq))  ; reg → list of blocks
+        (used-regs  (make-hash-table :test #'eq))  ; reg → t when read anywhere
+        (phi-map    (make-hash-table :test #'eq))) ; block → list of ssa-phi
 
     (loop for b across (cfg-blocks cfg)
           do (dolist (inst (bb-instructions b))
+               (dolist (r (opt-inst-read-regs inst))
+                 (when r
+                   (setf (gethash r used-regs) t)))
                (let ((dst (ignore-errors (vm-dst inst))))
-                 (when dst
-                   (pushnew b (gethash dst def-sites) :test #'eq)))))
+                  (when dst
+                    (pushnew b (gethash dst def-sites) :test #'eq)))))
 
     ;; Step 2: for each register, place phis at IDF(def-sites)
     (maphash
      (lambda (reg blocks)
-       (let ((idf (cfg-idf blocks)))
-         (dolist (f idf)
-           (unless (find-if (lambda (p) (eq (phi-reg p) reg))
-                            (gethash f phi-map))
-             (push (make-ssa-phi :reg reg) (gethash f phi-map))))))
+       (when (gethash reg used-regs)
+         (let ((idf (cfg-idf blocks)))
+           (dolist (f idf)
+             (unless (find-if (lambda (p) (eq (phi-reg p) reg))
+                              (gethash f phi-map))
+               (push (make-ssa-phi :reg reg) (gethash f phi-map)))))))
      def-sites)
 
+    phi-map))
+
+(defun ssa-place-lcssa-phis (cfg phi-map)
+  "Insert conservative LCSSA phi stubs at loop exits.
+
+Subset policy:
+- compute loop depths once
+- if a block outside loops reads a register that is defined in any loop block,
+  insert a phi stub for that register at that block unless one already exists.
+
+This is conservative and may insert extra phis, which are later cleaned by
+trivial-phi elimination." 
+  (cfg-compute-loop-depths cfg)
+  (let ((loop-defined-regs (make-hash-table :test #'eq)))
+    (loop for b across (cfg-blocks cfg)
+          do (when (> (bb-loop-depth b) 0)
+               (dolist (inst (bb-instructions b))
+                 (let ((dst (ignore-errors (vm-dst inst))))
+                   (when dst
+                     (setf (gethash dst loop-defined-regs) t))))))
+    (loop for b across (cfg-blocks cfg)
+          do (when (= (bb-loop-depth b) 0)
+               (let ((reads (make-hash-table :test #'eq)))
+                 (dolist (inst (bb-instructions b))
+                   (dolist (r (opt-inst-read-regs inst))
+                     (when r
+                       (setf (gethash r reads) t))))
+                 (maphash
+                  (lambda (reg _)
+                    (declare (ignore _))
+                    (when (and (gethash reg loop-defined-regs)
+                               (not (find-if (lambda (p) (eq (phi-reg p) reg))
+                                             (gethash b phi-map))))
+                      (push (make-ssa-phi :reg reg) (gethash b phi-map))))
+                  reads))))
     phi-map))
 
 ;;; ─── SSA Renaming (DFS over dominator tree) ──────────────────────────────

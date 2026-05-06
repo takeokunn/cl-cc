@@ -132,12 +132,27 @@
    vm-get-output-stream-string-inst
    vm-stream-write-string-inst
    vm-read-from-string-inst
-   vm-read-sexp-inst
-   vm-eval
-   vm-type-of
-   vm-make-list
-   vm-alphanumericp
-   vm-reader-read
+    vm-read-sexp-inst
+    vm-eval
+    vm-type-of
+    vm-type-rep
+    vm-type-rep-p
+    make-vm-type-rep
+    vm-type-rep-specifier
+    vm-type-rep-equal
+    vm-type-rep-of
+    vm-runtime-type-of
+    vm-dynamic
+    vm-dynamic-p
+    make-vm-dynamic
+    vm-dynamic-type-rep
+    vm-dynamic-value
+    vm-wrap-dynamic
+    vm-unwrap-dynamic
+    vm-cast-with-type-rep
+    vm-make-list
+    vm-alphanumericp
+    vm-reader-read
    vm-open-file-direction
    vm-make-string-stream-direction
    vm-list-to-lisp-list

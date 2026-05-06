@@ -6,6 +6,13 @@ Safety-oriented types, development support, type-level programming, advanced typ
 > 本シリーズにおける FR 番号は型システム文書ローカルの参照名であり、他の設計文書に現れる同番号の FR とは無関係である。
 > Tier 表の `dep ref` は、この巻で定義していない前提 FR への参照を表す。この巻で本文定義を持つ FR には `dep ref` を付けない。
 
+## 完了ステータス
+
+- 🔶 **進行中**: この文書で追跡している advanced FR は 109 件中 5 件のみ `✅` で完了表記されています。
+- `packages/type/src/` と `packages/type/tests/` には advanced 型機能の実装・テスト基盤がありますが、本文内の個別 FR 完了マーキングはまだ完了していません。
+- `新ファイル` とある対象欄は初期設計時の配置案を含みます。現行実装では `types-extended.lisp` や `generics.lisp`、`channels.lisp`、`actors.lisp`、`stm.lisp`、`coroutines.lisp`、`simd.lisp`、`routing.lisp`、`utils.lisp` などへ統合されている項目があります。
+- `docs/README.md` では、この文書を `IN PROGRESS` として集計します。全 FR を完了扱いにするには、各 FR の実装・テスト根拠を確認し、見出しの `✅` を更新してください。
+
 ---
 
 ## 目次

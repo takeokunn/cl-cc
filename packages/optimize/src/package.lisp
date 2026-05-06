@@ -29,6 +29,7 @@
    #:bb-id #:bb-label #:bb-instructions
    #:bb-predecessors #:bb-successors
    #:bb-idom #:bb-dom-children #:bb-dom-frontier
+   #:bb-post-idom #:bb-post-children
    #:bb-loop-depth #:bb-rpo-index
    #:cfg #:make-cfg #:cfg-p
    #:cfg-blocks #:cfg-entry #:cfg-exit
@@ -36,8 +37,9 @@
    #:cfg-build #:cfg-block-count
    #:cfg-get-block-by-label
    #:cfg-compute-rpo #:cfg-compute-dominators
+   #:cfg-compute-post-dominators
    #:cfg-compute-dominance-frontiers
-   #:cfg-dominates-p #:cfg-idf
+   #:cfg-dominates-p #:cfg-post-dominates-p #:cfg-idf
    #:cfg-flatten
    #:cfg-split-critical-edges
 
@@ -84,9 +86,14 @@
    #:apply-prolog-peephole
 
    ;; ─── optimizer-memory.lisp — alias analysis ────────────────────────
-   #:opt-compute-heap-aliases
+    #:opt-compute-heap-aliases
+   #:opt-compute-simple-inductions
+   #:opt-induction-trip-count
+   #:opt-iv-reg #:opt-iv-init #:opt-iv-step #:opt-iv-update-inst
+   #:opt-compute-value-ranges
+   #:opt-array-bounds-check-eliminable-p
    #:opt-interval-add  #:opt-interval-sub
-   #:opt-may-alias-by-type-p  #:opt-may-alias-p  #:opt-must-alias-p
+    #:opt-may-alias-by-type-p  #:opt-may-alias-p  #:opt-must-alias-p
 
    ;; ─── optimizer-inline.lisp ─────────────────────────────────────────
    #:opt-known-callee-labels

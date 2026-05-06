@@ -71,6 +71,112 @@ Supported bound operators are <:/extends/subtype-of and >:/supertype-of."
     (type-parse-error "protocol name must be a symbol, got ~S" spec))
   (make-type-primitive :name spec))
 
+(defun %parser-head-name-member-p (head table)
+  "Return T when HEAD's symbol-name matches a symbol key in TABLE."
+  (and (symbolp head)
+       (assoc (symbol-name head)
+              table
+              :test (lambda (name key) (string= name (symbol-name key))))))
+
+(defun %known-advanced-type-atom-p (value)
+  "Return T when VALUE is an atomic form that should parse as a type node."
+  (and (symbolp value)
+       (or (member (symbol-name value) '("?" "_") :test #'string=)
+           (assoc (symbol-name value)
+                  *primitive-type-name-table*
+                  :test (lambda (name names) (member name names :test #'string=)))
+           (and (boundp '*type-alias-registry*)
+                (gethash value *type-alias-registry*)))))
+
+(defun %advanced-type-form-head-p (head)
+  "Return T when HEAD introduces a parseable type form inside advanced payloads."
+  (let ((hn (and (symbolp head) (symbol-name head))))
+    (or (%parser-head-name-member-p head *parse-compound-multi-arg-table*)
+        (%parser-head-name-member-p head *parse-compound-type-app-table*)
+        (and hn (assoc hn *arrow-mult-table* :test #'string=))
+        (and hn (%binding-quantifier-ctor hn))
+        (and hn (member hn '("VALUES" "OPTION" "REFINE" "RECORD" "VARIANT"
+                             "FUNCTION" "HAS-SLOTS" "PROTOCOL"
+                             "UNSIGNED-BYTE" "SIGNED-BYTE" "INTEGER" "MOD")
+                         :test #'string=))
+        (and (symbolp head)
+             hn
+             (> (length hn) 0)
+             (char= (char hn 0) #\!))
+        (type-advanced-head-p head))))
+
+(defun %parse-advanced-value (value)
+  "Parse VALUE into a type node when it clearly denotes a type; otherwise preserve shape."
+  (cond
+    ((typep value 'type-node) value)
+    ((or (null value) (numberp value) (stringp value) (characterp value) (keywordp value))
+     value)
+    ((%known-advanced-type-atom-p value)
+     (parse-type-specifier value))
+    ((consp value)
+     (cond
+       ((%advanced-type-form-head-p (car value))
+        (parse-type-specifier value))
+       ((listp value)
+        (mapcar #'%parse-advanced-value value))
+       (t
+        (cons (%parse-advanced-value (car value))
+              (%parse-advanced-value (cdr value))))))
+    (t value)))
+
+(defun %parse-advanced-items (items)
+  "Split ITEMS into positional args, keyword properties, and optional evidence."
+  (let ((args nil)
+        (properties nil)
+        (evidence nil))
+    (loop while items
+          do (let ((item (first items)))
+               (cond
+                 ((eq item :evidence)
+                  (unless (consp (rest items))
+                    (type-parse-error "advanced :evidence requires a value"))
+                  (setf evidence (%parse-advanced-value (second items))
+                        items (cddr items)))
+                 ((keywordp item)
+                  (unless (consp (rest items))
+                    (type-parse-error "advanced property ~S requires a value" item))
+                  (push (cons item (%parse-advanced-value (second items))) properties)
+                  (setf items (cddr items)))
+                 (t
+                  (push (%parse-advanced-value item) args)
+                  (setf items (rest items))))))
+    (values (nreverse args) (nreverse properties) evidence)))
+
+(defun %parse-advanced-feature-form (head args)
+  "Parse either (advanced FR-xxxx ...) or a registered representative advanced head."
+  (let* ((head-name (and (symbolp head) (symbol-name head)))
+         (general-p (and head-name (string= head-name "ADVANCED"))))
+    (cond
+      (general-p
+       (unless args
+         (type-parse-error "advanced requires a feature id"))
+       (let ((feature-id (canonicalize-type-advanced-feature-id (first args))))
+         (unless (lookup-type-advanced-feature feature-id)
+           (type-parse-error "Unknown advanced feature id: ~S" (first args)))
+         (multiple-value-bind (positional properties evidence)
+             (%parse-advanced-items (rest args))
+           (make-type-advanced :feature-id feature-id
+                               :name head
+                               :args positional
+                               :properties properties
+                               :evidence evidence))))
+      (t
+       (let ((feature-id (type-advanced-feature-id-for-head head)))
+         (unless feature-id
+           (type-parse-error "Unknown advanced surface head: ~S" head))
+         (multiple-value-bind (positional properties evidence)
+             (%parse-advanced-items args)
+           (make-type-advanced :feature-id feature-id
+                               :name head
+                               :args positional
+                               :properties properties
+                               :evidence evidence)))))))
+
 (defun parse-compound-type-extended (head args)
   "Handle all symbol-named compound forms using string comparison for package-independence."
   (let ((hn (and (symbolp head) (symbol-name head))))
@@ -82,9 +188,13 @@ Supported bound operators are <:/extends/subtype-of and >:/supertype-of."
         (make-type-union (list type-null (parse-type-specifier (first args)))
                          :constructor-name head))
 
-      ;; ─── Arrow forms (-> :omega, ->1 :one, ->0 :zero) ────────────────
-      ((and hn (assoc hn *arrow-mult-table* :test #'string=))
-       (parse-arrow-type args (cdr (assoc hn *arrow-mult-table* :test #'string=))))
+       ;; ─── Registered advanced feature families ────────────────────────
+       ((and (symbolp head) (type-advanced-head-p head))
+        (%parse-advanced-feature-form head args))
+
+       ;; ─── Arrow forms (-> :omega, ->1 :one, ->0 :zero) ────────────────
+       ((and hn (assoc hn *arrow-mult-table* :test #'string=))
+        (parse-arrow-type args (cdr (assoc hn *arrow-mult-table* :test #'string=))))
 
       ;; ─── Binding quantifiers (forall/∀, exists/∃, mu/μ, type-lambda) ──
       ((and hn (%binding-quantifier-ctor hn))
